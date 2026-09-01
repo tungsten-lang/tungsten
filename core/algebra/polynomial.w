@@ -885,6 +885,7 @@
     at_element(@ring.field.normalize_element(value))
 
   -> at_element(x)
+    return @ring.field.zero if zero?
     # Canonical univariate terms are strictly descending by exponent. Walk
     # those terms directly and bridge absent coefficients with exponent gaps;
     # the old degree loop called coeff(i), a linear term scan, at every degree.

@@ -210,7 +210,7 @@ WValue w_blas_unary_view(WValue dtype_wval, WValue a_wval,
         double *p = (double *)a->slots + a->start + offset, *o = (double *)out->slots + out->start;
         for (int64_t i = 0; i < n; i++) {
             switch (kind) {
-            case 0: o[i] = -p[i]; break;
+            case 0: o[i] = 0.0 - p[i]; break;
             case 1: o[i] = p[i] < 0.0 ? 0.0 : p[i]; break;
             case 2: o[i] = fabs(p[i]); break;
             case 3: o[i] = sqrt(p[i]); break;
@@ -222,7 +222,7 @@ WValue w_blas_unary_view(WValue dtype_wval, WValue a_wval,
         float *p = (float *)a->slots + a->start + offset, *o = (float *)out->slots + out->start;
         for (int64_t i = 0; i < n; i++) {
             switch (kind) {
-            case 0: o[i] = -p[i]; break;
+            case 0: o[i] = 0.0f - p[i]; break;
             case 1: o[i] = p[i] < 0.0f ? 0.0f : p[i]; break;
             case 2: o[i] = fabsf(p[i]); break;
             case 3: o[i] = sqrtf(p[i]); break;

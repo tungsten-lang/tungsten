@@ -49,6 +49,13 @@ while i < n
 
 pattern = SparsePattern.new(n, n, upper_ri, upper_ci)
 check_named("pattern.nnz", pattern.nnz == upper_ri.size)
+row_snapshot = pattern.row_indices
+col_snapshot = pattern.col_indices
+row_snapshot[0] = n - 1
+col_snapshot[0] = n - 1
+check_named("pattern.index inspection is owned",
+            pattern.row_indices[0] == upper_ri[0] &&
+            pattern.col_indices[0] == upper_ci[0])
 
 # Dense twin for ground truth.
 dense = []
@@ -182,6 +189,10 @@ while i < n
   comp_ok = false if ids[i] != 0 || ids[i + n] != 1
   i += 1
 check_named("components.ids", comp_ok)
+ids[0] = 99
+check_named("components inspection is owned",
+            two_analysis.components[0] == 0 &&
+            two_analysis.component_count == 2)
 
 two_b = []
 i = 0
@@ -230,8 +241,18 @@ while i < 9
   path_ci.push(i + 1)
   i += 1
 path_pattern = SparsePattern.new(10, 10, path_ri, path_ci)
-peel = SparseAnalysis.new(path_pattern).peel_order
+path_analysis = SparseAnalysis.new(path_pattern)
+peel = path_analysis.peel_order
 check_named("peel.path_fully_peels", peel[0].size == 10 && peel[1].size == 0)
+
+# Inspection must not expose the shared immutable analysis cache. Mutating a
+# returned row previously changed later minimum-degree results.
+path_order = path_analysis.min_degree_ordering_scan
+adjacency_copy = path_analysis.symmetric_adjacency
+adjacency_copy[0].push(9)
+check_named("analysis.adjacency inspection is owned",
+            path_analysis.min_degree_ordering_scan == path_order &&
+            !path_analysis.symmetric_adjacency[0].include?(9))
 
 # Min-degree ordering improves predicted fill on the grid vs natural order.
 grid_analysis = SparseAnalysis.new(pattern)

@@ -117,7 +117,8 @@ use core/combinatorics/support
 
   -> values_at(assignments, output = nil)
     target = require_output(output)
-    tape = evaluation_tape(target)
+    ensure_evaluation_tape(target)
+    tape = @evaluation_tape
     node_indices = tape[0]
     opcodes = tape[1]
     left_inputs = tape[2]
@@ -156,9 +157,9 @@ use core/combinatorics/support
 
   # Flat, cached instruction columns. Opcodes are constant=0, variable=1,
   # add=2, subtract=3, multiply=4, divide=5, negate=6.
-  -> evaluation_tape(target)
+  -> ensure_evaluation_tape(target)
     if @evaluation_tape != nil && @evaluation_tape_target == target
-      return @evaluation_tape
+      return nil
     reachable = reachable_mask(target)
     node_indices = []
     opcodes = []
@@ -199,7 +200,17 @@ use core/combinatorics/support
     # cache when callers probe many different output nodes.
     @evaluation_tape_target = target
     @evaluation_tape = tape
-    tape
+    nil
+
+  # Inspection returns owned columns. The evaluator consumes @evaluation_tape
+  # directly so repeated execution remains allocation-free, while callers
+  # cannot mutate the cached opcode/input columns and alter later results.
+  -> evaluation_tape(target)
+    ensure_evaluation_tape(require_node(target))
+    out = []
+    @evaluation_tape.each -> (column)
+      out.push(column.dup)
+    out
 
   -> evaluate(assignments)
     index = require_output(nil)

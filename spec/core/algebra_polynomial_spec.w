@@ -45,6 +45,8 @@ half = Rational.new(1, 2)
 three_quarters = Rational.new(3, 4)
 p = t**2 * half - three_quarters
 
+check("zero.at_element", qring.zero.at_element(field.zero), field.zero)
+
 check("term.coeff", p.coeff(2), half)
 check("term.missing_coeff", p.coeff(1), 0)
 check("term.exponents.first", p.exponents[0][0], 2)

@@ -101,3 +101,26 @@ expect("tensor.cpu.unary strided fallback", close?(unary_whole.transpose.abs.at(
 
 f32_exp = f32_values.exp
 expect("tensor.cpu.f32 unary", close?(f32_exp.at([0, 0]), Math.exp(~1.0)) && close?(f32_exp.at([1, 1]), Math.exp(~4.0)))
+
+# Native paths preserve the scalar reference's exact IEEE order/sign contract.
+zero_storage = f64_array(1)
+zero_storage[0] = ~0.0
+zero_tensor = Tensor.wrap_cpu(zero_storage, Tensor.f64, [1], [1], 0)
+expect("tensor.cpu.neg preserves positive zero",
+       ccall("w_float_to_u64_bits", zero_tensor.neg.at([0])) == 0)
+
+cancellation_storage = f64_array(8)
+cancellation_storage[0] = ~1.0e16
+cancellation_storage[1] = ~1.0
+cancellation_storage[2] = ~-1.0e16
+cancellation_storage[3] = ~1.0
+cancellation_storage[4] = ~1.0e16
+cancellation_storage[5] = ~1.0
+cancellation_storage[6] = ~-1.0e16
+cancellation_storage[7] = ~1.0
+cancellation = Tensor.wrap_cpu(
+  cancellation_storage, Tensor.f64, [2, 4], [4, 1], 0)
+cancellation_rows = cancellation.sum_axis(1)
+expect("tensor.cpu.sum preserves left-fold order", cancellation.sum == ~1.0)
+expect("tensor.cpu.sum_axis preserves left-fold order",
+       cancellation_rows.at([0]) == ~1.0 && cancellation_rows.at([1]) == ~1.0)

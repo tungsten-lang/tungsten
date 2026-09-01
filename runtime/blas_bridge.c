@@ -351,7 +351,7 @@ WValue w_blas_reduce_view(WValue dtype_wval, WValue a_wval,
         double *p = (double *)a->slots + a->start + offset;
         double result = 0.0;
         if (kind == 0)
-            vDSP_sveD(p, 1, &result, (vDSP_Length)n);
+            for (int64_t i = 0; i < n; i++) result += p[i];
         else if (n > 0) {
             result = p[0];
             for (int64_t i = 1; i < n; i++) if (p[i] > result) result = p[i];
@@ -396,8 +396,10 @@ WValue w_blas_reduce_last(WValue dtype_wval, WValue a_wval, WValue out_wval,
         double *o = (double *)out->slots + out->start;
         for (int64_t row = 0; row < rows; row++) {
             double result = 0.0;
-            if (kind == 0)
-                vDSP_sveD(p + row * cols, 1, &result, (vDSP_Length)cols);
+            if (kind == 0) {
+                double *rp = p + row * cols;
+                for (int64_t col = 0; col < cols; col++) result += rp[col];
+            }
             else if (cols > 0) {
                 double *rp = p + row * cols;
                 result = rp[0];
@@ -531,7 +533,9 @@ WValue w_blas_unary_view(WValue dtype_wval, WValue a_wval,
         double *p = (double *)a->slots + a->start + offset;
         double *o = (double *)out->slots + out->start;
         switch (kind) {
-        case 0: vDSP_vnegD(p, 1, o, 1, (vDSP_Length)n); break;
+        case 0:
+            for (int i = 0; i < n; i++) o[i] = 0.0 - p[i];
+            break;
         case 1:
             for (int i = 0; i < n; i++) o[i] = p[i] < 0.0 ? 0.0 : p[i];
             break;
@@ -546,7 +550,9 @@ WValue w_blas_unary_view(WValue dtype_wval, WValue a_wval,
         float *p = (float *)a->slots + a->start + offset;
         float *o = (float *)out->slots + out->start;
         switch (kind) {
-        case 0: vDSP_vneg(p, 1, o, 1, (vDSP_Length)n); break;
+        case 0:
+            for (int i = 0; i < n; i++) o[i] = 0.0f - p[i];
+            break;
         case 1:
             for (int i = 0; i < n; i++) o[i] = p[i] < 0.0f ? 0.0f : p[i];
             break;

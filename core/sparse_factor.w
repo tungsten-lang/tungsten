@@ -44,9 +44,17 @@
     SparsePattern.new(m.rows, m.cols, trip[0], trip[1])
 
   -> row_indices
-    @ri
+    @ri.dup
 
   -> col_indices
+    @ci.dup
+
+  # Internal read-only bridge access. The public accessors above return owned
+  # snapshots so callers cannot mutate this immutable pattern's storage.
+  -> row_indices_raw
+    @ri
+
+  -> col_indices_raw
     @ci
 
   # Typed f64 value buffer aligned with this pattern's entry order.
@@ -73,8 +81,8 @@
     while i < n
       adj.push([])
       i += 1
-    ri = pattern.row_indices
-    ci = pattern.col_indices
+    ri = pattern.row_indices_raw
+    ci = pattern.col_indices_raw
     k = 0
     while k < pattern.nnz
       r = ri[k]
@@ -174,16 +182,16 @@
   # Connected components of the symmetric pattern (union-find, path
   # halving, deterministic canonical ids by first appearance). Returns the
   # per-vertex component id array; component_count is set alongside.
-  -> components
-    return @component_ids if @component_ids != nil
+  -> ensure_components
+    return nil if @component_ids != nil
     n = @pattern.rows
     root = []
     i = 0
     while i < n
       root.push(i)
       i += 1
-    ri = @pattern.row_indices
-    ci = @pattern.col_indices
+    ri = @pattern.row_indices_raw
+    ci = @pattern.col_indices_raw
     k = 0
     while k < @pattern.nnz
       a = ri[k]
@@ -216,10 +224,14 @@
       i += 1
     @component_ids = ids
     @component_count = count
-    ids
+    nil
+
+  -> components
+    ensure_components
+    @component_ids.dup
 
   -> component_count
-    components if @component_ids == nil
+    ensure_components
     @component_count
 
   # Low-degree peeling: vertices of current degree <= 1 eliminate with no
@@ -227,7 +239,8 @@
   # deterministic peel order) and the remaining vertices in index order.
   -> peel_order
     n = @pattern.rows
-    adj = symmetric_adjacency
+    ensure_symmetric_adjacency
+    adj = @symmetric_adj
     degree = []
     removed = []
     i = 0
@@ -266,8 +279,8 @@
     while i < n
       adj.push([])
       i += 1
-    ri = pattern.row_indices
-    ci = pattern.col_indices
+    ri = pattern.row_indices_raw
+    ci = pattern.col_indices_raw
     k = 0
     while k < pattern.nnz
       r = ri[k]
@@ -282,13 +295,23 @@
       i += 1
     adj
 
-  # Canonical symmetric adjacency is immutable analysis state.  Peeling,
-  # minimum degree, and any later symbolic pass share this one construction
-  # instead of rebuilding and sorting the COO rows independently.
-  -> symmetric_adjacency
+  # Canonical symmetric adjacency is immutable analysis state. Peeling,
+  # minimum degree, and any later symbolic pass share this one construction.
+  # Keep the cached object private: Arrays are mutable, so returning it would
+  # let an observer silently corrupt every later analysis operation.
+  -> ensure_symmetric_adjacency
     if @symmetric_adj == nil
       @symmetric_adj = SparseAnalysis.symmetric_adjacency(@pattern)
-    @symmetric_adj
+    nil
+
+  # Public inspection retains the pre-cache value semantics: a caller owns
+  # the returned nested Arrays and cannot mutate the analysis cache.
+  -> symmetric_adjacency
+    ensure_symmetric_adjacency
+    out = []
+    @symmetric_adj.each -> (row)
+      out.push(row.dup)
+    out
 
   -> .md_heap_less?(ad, av, bd, bv)
     ad < bd || (ad == bd && av < bv)
@@ -319,7 +342,8 @@
   -> min_degree_ordering_scan
     n = @pattern.rows
     adj = []
-    symmetric_adjacency.each -> (row)
+    ensure_symmetric_adjacency
+    @symmetric_adj.each -> (row)
       set = {}
       row.each -> (u)
         set[u] = true
@@ -364,7 +388,8 @@
   -> min_degree_ordering_heap
     n = @pattern.rows
     adj = []
-    symmetric_adjacency.each -> (row)
+    ensure_symmetric_adjacency
+    @symmetric_adj.each -> (row)
       set = {}
       row.each -> (u)
         set[u] = true
@@ -484,7 +509,7 @@
   -> new(@pattern, values, @kind)
     vv = @pattern.values_from(values)
     @handle = ccall("w_sparse_factor_new_f64", @kind, @pattern.rows, @pattern.cols,
-                    @pattern.row_indices, @pattern.col_indices, vv)
+                    @pattern.row_indices_raw, @pattern.col_indices_raw, vv)
     @released = false
 
   ro :pattern, :kind
@@ -524,8 +549,8 @@
   -> refactor(values)
     raise "SparseFactor: released" if @released
     vv = @pattern.values_from(values)
-    ccall("w_sparse_factor_refactor_f64", @handle, @pattern.row_indices,
-          @pattern.col_indices, vv)
+    ccall("w_sparse_factor_refactor_f64", @handle, @pattern.row_indices_raw,
+          @pattern.col_indices_raw, vv)
     self
 
   -> release
@@ -567,8 +592,8 @@
       comp_ci.push([])
       comp_vv.push([])
       c += 1
-    ri = @pattern.row_indices
-    ci = @pattern.col_indices
+    ri = @pattern.row_indices_raw
+    ci = @pattern.col_indices_raw
     k = 0
     while k < @pattern.nnz
       r = ri[k]

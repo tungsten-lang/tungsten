@@ -38,6 +38,13 @@ circuit_check("evaluation_certificate.replay",
               evaluation.replay_value == Rational.new(14))
 circuit_check("evaluation_certificate", evaluation.verified?)
 
+# The cached tape is observable for inspection, but callers must receive
+# owned columns rather than a handle that can rewrite later evaluations.
+tape_copy = circuit.evaluation_tape(output)
+tape_copy[1][tape_copy[1].size - 1] = 0
+circuit_check("evaluation_tape inspection is owned", circuit.evaluate(
+  {:x => Rational.new(3), :y => Rational.new(4)}) == Rational.new(14))
+
 shared = ArithmeticCircuit.new([:x, :y])
 shared_x = shared.variable(:x)
 shared_y = shared.variable(:y)

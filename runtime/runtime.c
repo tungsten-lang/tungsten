@@ -65924,6 +65924,18 @@ __attribute__((weak)) WValue w_blas_saxpy(WValue a, WValue x, WValue y, WValue n
 __attribute__((weak)) WValue w_blas_sgemv_n(WValue a, WValue x, WValue y, WValue m, WValue n) {
     (void)a; (void)x; (void)y; (void)m; (void)n; w_raise(w_string("sgemv: BLAS bridge not linked")); return W_NIL;
 }
+__attribute__((weak)) WValue w_blas_dot_f64(WValue a, WValue b, WValue n) {
+    (void)a; (void)b; (void)n; w_raise(w_string("ddot: BLAS bridge not linked")); return W_NIL;
+}
+__attribute__((weak)) WValue w_blas_norm_f64(WValue a, WValue n) {
+    (void)a; (void)n; w_raise(w_string("dnrm2: BLAS bridge not linked")); return W_NIL;
+}
+__attribute__((weak)) WValue w_blas_daxpy(WValue alpha, WValue x, WValue y, WValue n) {
+    (void)alpha; (void)x; (void)y; (void)n; w_raise(w_string("daxpy: BLAS bridge not linked")); return W_NIL;
+}
+__attribute__((weak)) WValue w_blas_dgemv_n(WValue a, WValue x, WValue y, WValue m, WValue n) {
+    (void)a; (void)x; (void)y; (void)m; (void)n; w_raise(w_string("dgemv: BLAS bridge not linked")); return W_NIL;
+}
 __attribute__((weak)) WValue w_blas_vadd_f32(WValue a, WValue b, WValue o, WValue n) {
     (void)a; (void)b; (void)o; (void)n; w_raise(w_string("vadd: BLAS bridge not linked")); return W_NIL;
 }

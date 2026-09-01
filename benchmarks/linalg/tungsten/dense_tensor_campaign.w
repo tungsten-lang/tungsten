@@ -8,6 +8,10 @@
 #   dense_tensor_campaign unary [iterations]
 #   dense_tensor_campaign reductions [iterations]
 #   dense_tensor_campaign axis-reductions [iterations]
+#   dense_tensor_campaign blas1-scalar [iterations]
+#   dense_tensor_campaign blas1-native [iterations]
+#   dense_tensor_campaign blas2-scalar [iterations]
+#   dense_tensor_campaign blas2-native [iterations]
 
 use core/blas
 use core/tensor
@@ -24,6 +28,26 @@ use core/tensor
     data[i] = ((i % 97) + 1).to_f / ~97.0
     i += 1
   Tensor.wrap_cpu(data, dtype, [rows, cols], [cols, 1], 0)
+
+-> scalar_dot_f64(a, b, n)
+  total = ~0.0
+  i = 0
+  while i < n
+    total += a[i] * b[i]
+    i += 1
+  total
+
+-> scalar_gemv_f64(a, x, y, rows, cols)
+  i = 0
+  while i < rows
+    total = ~0.0
+    j = 0
+    while j < cols
+      total += a[i * cols + j] * x[j]
+      j += 1
+    y[i] = total
+    i += 1
+  y
 
 mode = ARGV[0]
 raise "mode required" if mode == nil
@@ -137,5 +161,85 @@ elsif mode == "axis-reductions"
   assert_close(sums.at([0]), ~118.13402061855675, "axis sum")
   assert_close(maxima.at([0]), ~1.0, "axis max")
   << "AXIS_REDUCTIONS ms/pair=" + (elapsed * ~1000.0 / iterations).round(3).to_s
+elsif mode == "blas1-scalar"
+  iterations = ARGV[1] == nil ? 100 : ARGV[1].to_i
+  n = 65536
+  a = f64_array(n)
+  b = f64_array(n)
+  i = 0
+  while i < n
+    a[i] = ((i % 97) + 1).to_f / ~97.0
+    b[i] = ((i % 89) + 1).to_f / ~89.0
+    i += 1
+  answer = ~0.0
+  t0 = clock()
+  i = 0
+  while i < iterations
+    answer = scalar_dot_f64(a, b, n)
+    i += 1
+  elapsed = clock() - t0
+  << "BLAS1_SCALAR ms/op=" + (elapsed * ~1000.0 / iterations).round(3).to_s + " checksum=" + answer.round(6).to_s
+elsif mode == "blas1-native"
+  iterations = ARGV[1] == nil ? 100 : ARGV[1].to_i
+  n = 65536
+  a = f64_array(n)
+  b = f64_array(n)
+  i = 0
+  while i < n
+    a[i] = ((i % 97) + 1).to_f / ~97.0
+    b[i] = ((i % 89) + 1).to_f / ~89.0
+    i += 1
+  answer = ~0.0
+  t0 = clock()
+  i = 0
+  while i < iterations
+    answer = ddot(a, b, n)
+    i += 1
+  elapsed = clock() - t0
+  << "BLAS1_NATIVE ms/op=" + (elapsed * ~1000.0 / iterations).round(3).to_s + " checksum=" + answer.round(6).to_s + " norm=" + dnrm2(a, n).round(6).to_s
+elsif mode == "blas2-scalar"
+  iterations = ARGV[1] == nil ? 100 : ARGV[1].to_i
+  rows = 512
+  cols = 512
+  a = f64_array(rows * cols)
+  x = f64_array(cols)
+  y = f64_array(rows)
+  i = 0
+  while i < rows * cols
+    a[i] = ((i % 97) + 1).to_f / ~97.0
+    i += 1
+  i = 0
+  while i < cols
+    x[i] = ((i % 89) + 1).to_f / ~89.0
+    i += 1
+  t0 = clock()
+  i = 0
+  while i < iterations
+    scalar_gemv_f64(a, x, y, rows, cols)
+    i += 1
+  elapsed = clock() - t0
+  << "BLAS2_SCALAR ms/op=" + (elapsed * ~1000.0 / iterations).round(3).to_s + " checksum=" + y[0].round(6).to_s
+elsif mode == "blas2-native"
+  iterations = ARGV[1] == nil ? 100 : ARGV[1].to_i
+  rows = 512
+  cols = 512
+  a = f64_array(rows * cols)
+  x = f64_array(cols)
+  y = f64_array(rows)
+  i = 0
+  while i < rows * cols
+    a[i] = ((i % 97) + 1).to_f / ~97.0
+    i += 1
+  i = 0
+  while i < cols
+    x[i] = ((i % 89) + 1).to_f / ~89.0
+    i += 1
+  t0 = clock()
+  i = 0
+  while i < iterations
+    dgemv(a, x, y, rows, cols)
+    i += 1
+  elapsed = clock() - t0
+  << "BLAS2_NATIVE ms/op=" + (elapsed * ~1000.0 / iterations).round(3).to_s + " checksum=" + y[0].round(6).to_s
 else
   raise "unknown mode: " + mode

@@ -154,3 +154,31 @@ vForce/vDSP provide the vector kernels on macOS and portable scalar loops back
 the same API elsewhere. ReLU remains an ordered scalar comparison to preserve
 NaN and signed-zero behavior. General strided tensors retain the reference
 implementation.
+
+## Item 4 — double-precision BLAS level 1/2
+
+Source finding: Core exposed f32 `dot`/`axpy`/`gemv`, while the scientific
+stack and Tensor CPU storage are predominantly f64. Flat f64 callers either
+wrote Tungsten scalar loops or escalated matrix-vector products to GEMM.
+
+Correctness: new focused `spec/core/blas_f64_spec.w` passes 4/4 for `ddot`,
+`dnrm2`, in-place `daxpy`, and row-major `dgemv`; the spec-lane manifest
+classifies it. Checksums from scalar and native campaign modes agree.
+
+Alternating whole-process samples:
+
+| workload | scalar parent `201c2a43` | native candidate |
+| --- | ---: | ---: |
+| 200 dot products, sample 1 | 0.28 s | 0.05 s |
+| samples 2-5 | 0.23-0.24 s | <0.01 s |
+| 100 512x512 matrix-vector products, sample 1 | 0.50 s | 0.01 s |
+| samples 2-5 | 0.47-0.48 s | 0.01 s |
+
+Long native runs take 0.02 s for 10,000 length-65,536 dots (at most 2 us/op)
+and 0.06 s for 10,000 512x512 GEMVs (6 us/op). Parent medians are 1.2 ms/dot
+and 4.7 ms/GEMV.
+
+Retained as flat typed-storage APIs in `core/blas.w`, backed by CBLAS on both
+Accelerate and OpenBLAS. This intentionally does not add another nested-list
+staging route to `LinAlg`; boundary conversion policy is a separate active
+campaign item.

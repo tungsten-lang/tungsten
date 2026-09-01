@@ -236,6 +236,44 @@ WValue w_blas_unary_view(WValue dtype_wval, WValue a_wval,
     return out_wval;
 }
 
+static double *oblas_f64_ptr(WValue v, int64_t *len_out);
+
+WValue w_blas_dot_f64(WValue a_wval, WValue b_wval, WValue n_wval) {
+    int64_t la, lb;
+    double *a = oblas_f64_ptr(a_wval, &la), *b = oblas_f64_ptr(b_wval, &lb);
+    int64_t n = w_as_int(n_wval), limit = la < lb ? la : lb;
+    if (n <= 0 || n > limit) n = limit;
+    return w_float(cblas_ddot((int)n, a, 1, b, 1));
+}
+
+WValue w_blas_norm_f64(WValue a_wval, WValue n_wval) {
+    int64_t len; double *a = oblas_f64_ptr(a_wval, &len);
+    int64_t n = w_as_int(n_wval); if (n <= 0 || n > len) n = len;
+    return w_float(cblas_dnrm2((int)n, a, 1));
+}
+
+WValue w_blas_daxpy(WValue alpha_wval, WValue x_wval, WValue y_wval, WValue n_wval) {
+    int64_t lx, ly;
+    double *x = oblas_f64_ptr(x_wval, &lx), *y = oblas_f64_ptr(y_wval, &ly);
+    int64_t n = w_as_int(n_wval), limit = lx < ly ? lx : ly;
+    if (n <= 0 || n > limit) n = limit;
+    cblas_daxpy((int)n, w_as_double(alpha_wval), x, 1, y, 1);
+    return y_wval;
+}
+
+WValue w_blas_dgemv_n(WValue a_wval, WValue x_wval, WValue y_wval,
+                      WValue m_wval, WValue n_wval) {
+    int64_t la, lx, ly;
+    double *a = oblas_f64_ptr(a_wval, &la), *x = oblas_f64_ptr(x_wval, &lx);
+    double *y = oblas_f64_ptr(y_wval, &ly);
+    int m = (int)w_as_int(m_wval), n = (int)w_as_int(n_wval);
+    if (m < 0 || n < 0 || la < (int64_t)m * n || lx < n || ly < m) {
+        w_raise(w_string("dgemv: bad dimensions")); return W_NIL;
+    }
+    cblas_dgemv(CblasRowMajor, CblasNoTrans, m, n, 1.0, a, n, x, 1, 0.0, y, 1);
+    return y_wval;
+}
+
 /* dgeev via OpenBLAS's bundled LAPACK — same manual-prototype contract
  * as the Accelerate bridge (see blas_bridge.c). */
 static double *oblas_f64_ptr(WValue v, int64_t *len_out) {

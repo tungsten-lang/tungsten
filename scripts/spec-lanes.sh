@@ -238,6 +238,7 @@ compiled_specs=(
   spec/compiler/fused_destination_reuse_spec.w
   spec/core/sparse_factor_spec.w
   spec/core/tensor_cpu_ops_spec.w
+  spec/core/blas_f64_spec.w
   spec/core/poly_fast_spec.w
   spec/core/prime_sieve_spec.w
   spec/core/pipeline_typed_array_spec.w

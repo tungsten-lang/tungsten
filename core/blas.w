@@ -131,6 +131,19 @@ fn saxpy(a, x, y, n)
 fn sgemv(a, x, y, m, n)
   ccall("w_blas_sgemv_n", a, x, y, m, n)
 
+# Double-precision BLAS 1/2 over flat f64 storage.
+fn ddot(a, b, n)
+  ccall("w_blas_dot_f64", a, b, n)
+
+fn dnrm2(a, n)
+  ccall("w_blas_norm_f64", a, n)
+
+-> daxpy(a, x, y, n)
+  ccall("w_blas_daxpy", a, x, y, n)
+
+-> dgemv(a, x, y, m, n)
+  ccall("w_blas_dgemv_n", a, x, y, m, n)
+
 # ---- vDSP vector arithmetic ----
 fn vadd(a, b, out, n)
   ccall("w_blas_vadd_f32", a, b, out, n)

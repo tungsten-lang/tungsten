@@ -178,7 +178,8 @@ TENSOR_EW = {}
     rw strides
     rw offset
     rw unit
-    rw metal_tensor_cache
+    # Internal coherence state, never part of Tensor's mutable public surface.
+    metal_tensor_cache array
 
   # dtype accessors — mirror METAL_DTYPE_* in core/metal.w (values validated by
   # the m4_matmul_bench MTLTensor path). Class-side so `Tensor.f32` reads well

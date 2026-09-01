@@ -820,11 +820,22 @@
     at_element(@ring.field.normalize_element(value))
 
   -> at_element(x)
-    result = @ring.field.zero
-    i = degree
-    while i >= 0
-      result = field_add(field_mul(result, x), coeff(i))
-      i -= 1
+    # Canonical univariate terms are strictly descending by exponent. Walk
+    # those terms directly and bridge absent coefficients with exponent gaps;
+    # the old degree loop called coeff(i), a linear term scan, at every degree.
+    result = @terms[0][0]
+    previous_exponent = @terms[0][1][0]
+    i = 1
+    while i < @terms.size
+      exponent = @terms[i][1][0]
+      gap = previous_exponent - exponent
+      factor = gap == 1 ? x : field_pow(x, gap)
+      result = field_add(field_mul(result, factor), @terms[i][0])
+      previous_exponent = exponent
+      i += 1
+    if previous_exponent > 0
+      factor = previous_exponent == 1 ? x : field_pow(x, previous_exponent)
+      result = field_mul(result, factor)
     result
 
   -> homogenize(variable = nil)

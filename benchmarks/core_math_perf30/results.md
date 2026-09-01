@@ -9,6 +9,7 @@ Correctness is checked by the benchmark checksum and the focused Core spec.
 | Item | Workload | Before | After | Result | Correctness |
 |---|---|---:|---:|---|---|
 | 13. Differential add accessor hoist | 120 additions, dimension 20, full Hessian | 262 ms | 5 ms | retained, 52.4x | checksum `844`; compiled `spec/core/calculus_spec.w` passed |
+| 14. Sparse gap-Horner | 12 evaluations, degree 5000, 1001 terms over F_1000003 | 1701 ms | 1 ms | retained, >850x | checksum `575521`; compiled `spec/core/algebra_polynomial_spec.w` passed |
 
 Rejected or deferred experiments are recorded below with their reason; they
 are not left in production source.

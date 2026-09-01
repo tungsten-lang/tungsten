@@ -876,8 +876,9 @@ kernel void moe_gemm_m8(
   device const uchar *sq = base + (ulong)(uint)s0 + (ulong)(uint)slot * (ulong)(uint)s_stride;
   const float ws2 = load_f32_le(base + (ulong)(uint)g0 + (ulong)(uint)slot * (ulong)(uint)g_stride);
 
-  threadgroup float tile[4 * 128];
+  threadgroup float tile[4 * 128 + 3 * 512 + 512];
   threadgroup float stage[4 * 64];
+  // ping-pong pair per simdgroup: [simd][2][128] with the second half at +512
   threadgroup float *bt = tile + int(simd_id) * 128;
   threadgroup float *st = stage + int(simd_id) * 64;
 
@@ -893,22 +894,30 @@ kernel void moe_gemm_m8(
     const int mtiles = min((c - mt0 + 7) / 8, 4);
     simdgroup_matrix<float, 8, 8> C[4];
     for (int i2 = 0; i2 < 4; i2++) C[i2] = simdgroup_matrix<float, 8, 8>(0.0f);
+    // Ping-pong tile buffers: ONE barrier per K-group; the decode of group
+    // g+1 overlaps the MMAs of group g (different buffer halves).
+#define GEMM_DECODE(GIDX, BUF)                                              \
+    {                                                                       \
+      const uint w = wrow[(GIDX) * 2 + (qq >> 1)];                          \
+      const uint b0 = (w >> ((qq & 1) * 16)) & 0xff;                        \
+      const uint b1 = (w >> ((qq & 1) * 16 + 8)) & 0xff;                    \
+      const float sc = float(e4m3_decode_half(uint(srow[(GIDX)])));         \
+      threadgroup float *dst = (BUF);                                       \
+      const int kb = qq * 4;                                                \
+      dst[(kb + 0) * 8 + r] = float(nvfp4_decode_half(b0 & 0xf)) * sc;      \
+      dst[(kb + 1) * 8 + r] = float(nvfp4_decode_half(b0 >> 4)) * sc;       \
+      dst[(kb + 2) * 8 + r] = float(nvfp4_decode_half(b1 & 0xf)) * sc;      \
+      dst[(kb + 3) * 8 + r] = float(nvfp4_decode_half(b1 >> 4)) * sc;       \
+    }
+    GEMM_DECODE(0, bt)
     for (int g = 0; g < n_groups; g++) {
-      const uint w = wrow[g * 2 + (qq >> 1)];
-      const uint b0 = (w >> ((qq & 1) * 16)) & 0xff;
-      const uint b1 = (w >> ((qq & 1) * 16 + 8)) & 0xff;
-      const float sc = float(e4m3_decode_half(uint(srow[g])));
-      // write the tile K-MAJOR so the B loads skip the transposed-load path
-      threadgroup float *dst = bt;
-      const int kb = qq * 4;
-      dst[(kb + 0) * 8 + r] = float(nvfp4_decode_half(b0 & 0xf)) * sc;
-      dst[(kb + 1) * 8 + r] = float(nvfp4_decode_half(b0 >> 4)) * sc;
-      dst[(kb + 2) * 8 + r] = float(nvfp4_decode_half(b1 & 0xf)) * sc;
-      dst[(kb + 3) * 8 + r] = float(nvfp4_decode_half(b1 >> 4)) * sc;
       simdgroup_barrier(mem_flags::mem_threadgroup);
+      threadgroup float *cur = (g & 1) ? (bt + 512) : bt;
+      threadgroup float *nxt = (g & 1) ? bt : (bt + 512);
+      if (g + 1 < n_groups) GEMM_DECODE(g + 1, nxt)
       simdgroup_matrix<float, 8, 8> B0, B1, A0, A1;
-      simdgroup_load(B0, bt, 8);
-      simdgroup_load(B1, bt + 64, 8);
+      simdgroup_load(B0, cur, 8);
+      simdgroup_load(B1, cur + 64, 8);
       const int k0 = g * 16;
       for (int i2 = 0; i2 < mtiles; i2++) {
         simdgroup_load(A0, xg + (ulong)(seg_lo + mt0 + i2 * 8) * (ulong)k_dim + k0, (ulong)k_dim);
@@ -916,8 +925,9 @@ kernel void moe_gemm_m8(
         simdgroup_multiply_accumulate(C[i2], A0, B0, C[i2]);
         simdgroup_multiply_accumulate(C[i2], A1, B1, C[i2]);
       }
-      simdgroup_barrier(mem_flags::mem_threadgroup);
     }
+    simdgroup_barrier(mem_flags::mem_threadgroup);
+#undef GEMM_DECODE
     for (int i2 = 0; i2 < mtiles; i2++) {
       const int mt = mt0 + i2 * 8;
       const int m_rows = min(c - mt, 8);

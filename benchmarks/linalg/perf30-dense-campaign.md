@@ -559,3 +559,41 @@ maximum absolute error was at most 2.65e-8 and row-sum error at most 1.45e-7;
 serial/cooperative disagreement was at most 2.98e-8. The new focused GPU spec
 passes 4/4 at both sides of the selector, and the CPU Tensor spec remains
 36/36. Retained.
+
+## Original item 9 closeout — full symmetric-spectrum LAPACK driver
+
+The retained `eigh_values` API requests every eigenvalue and no eigenvectors.
+This closeout compares Accelerate's `dsyev`, divide-and-conquer `dsyevd`, and
+MRRR `dsyevr` under that exact contract. The C campaign includes the identical
+matrix copy, workspace query, and workspace allocation in every timed call,
+rotates driver order within each run, and validates all returned spectra. Five
+fresh processes were measured on the Apple M5 Max host.
+
+Paired ratios are reported because absolute timings shifted with host state;
+less than 1.0 means the alternative beat the current `dsyev` in that process.
+
+| n | paired-median `dsyevr/dsyev` | `dsyevr` wins | paired-median `dsyevd/dsyev` |
+| ---: | ---: | ---: | ---: |
+| 128 | 0.9814 | 4/5 | 1.3777 |
+| 192 | 0.9747 | 3/5 | 1.5264 |
+| 256 | 0.9746 | 4/5 | 1.5479 |
+| 384 | 0.9575 | 4/5 | 1.8082 |
+| 512 | 0.9674 | 4/5 | 2.0758 |
+| 768 | 1.0093 | 2/5 | 1.9342 |
+| 1024 | 0.9983 | 3/5 | 2.6063 |
+
+`dsyevd` loses decisively at every large shape. `dsyevr` is close enough to
+change sign at every tested size: even its apparently favorable n=256 point
+has a 2.54% paired-median gain but a 1.09% regression in one fresh process.
+Additional 192/224/240/256/272/288/320/384 focus probes likewise changed sign
+around the putative crossover. An exact-size or narrow-band route would be a
+benchmark overfit, while an n>=256 route would regress the 768/1024 lane.
+
+Both alternatives are numerically acceptable: their maximum absolute spectral
+difference from `dsyev` is 1.16e-11 across n=128..1024, about 1e-14 relative to
+the O(n) spectral scale. `spec/core/linalg_spectral_spec.w` remains 5/5.
+
+Evidence-only closeout: retain `dsyev` for the existing full-spectrum values
+API and reject both production substitutions. `dsyevr` remains relevant to a
+future partial-spectrum API, where requesting a subset could change the work
+comparison; that is a different contract and is not claimed here.

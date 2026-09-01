@@ -69,7 +69,22 @@ ATTN_SCALE = ~1.0 / Math.sqrt(~0.0 + HEAD_DIM)
 ROT_DIM = 64
 ROT_HALF = ROT_DIM / 2
 ROPE_BASE = ~10000000.0
-MAX_POS = 640
+# Dense-exact boundary is 2051 (QSA budget 2048 + max tail 3). FN_CTX raises
+# the context (kv/index caches sized accordingly, cap 262144 = config
+# max_position_embeddings); positions beyond 2051 attend through the QSA
+# lightning indexer. FN_QSA=1 forces the indexer from position 0 (the
+# equivalence gate: below the boundary selection covers everything and the
+# selected-order SDPA is arithmetically identical to dense).
+MAX_POS = 2051
+fn_ctx_env = ccall("__w_env", "FN_CTX")
+if fn_ctx_env != nil && fn_ctx_env != ""
+  MAX_POS = fn_ctx_env.to_i()
+  if MAX_POS > 262144 then MAX_POS = 262144
+  if MAX_POS < 64 then MAX_POS = 64
+qsa_on = MAX_POS > 2051 || ccall("__w_env", "FN_QSA") == "1"
+QSA_MAXB = MAX_POS / 4 + 1
+QSA_SEL_STRIDE = 512 * 4 + 3
+IDX_DIM = 640
 
 # MoE.
 N_EXPERTS = 512
@@ -110,6 +125,21 @@ multi_n = 0
 if ARGV.size() > 5 && ARGV[5].size() > 6 && ARGV[5].slice(0, 6) == "multi:"
   multi_n = ARGV[5].slice(6, ARGV[5].size() - 6).to_i()
 if multi_n > 8 then raise "multi width must be <= 8"
+# "mtp:<D>": speculative decode — draft D tokens with the MTP head each
+# round, verify the block width-(D+1) via forward_multi, accept the longest
+# matching prefix, tape-replay the recurrent states for partial accepts.
+mtp_spec = 0
+mtp_adaptive = 0
+if ARGV.size() > 5 && ARGV[5] == "mtp:adaptive"
+  # depth self-tunes on acceptance: full accept raises it (cap 7), a miss
+  # drops it to what actually stuck
+  mtp_adaptive = 1
+  mtp_spec = 3
+elsif ARGV.size() > 5 && ARGV[5].size() > 4 && ARGV[5].slice(0, 4) == "mtp:"
+  mtp_spec = ARGV[5].slice(4, ARGV[5].size() - 4).to_i()
+if mtp_spec > 7 then raise "mtp draft depth must be <= 7"
+mtp_d_cur = [mtp_spec]
+mtp_streak = [0]
 naive_mv = multi_n > 0
 concurrent = mode == "concurrent"
 if mode != "concurrent" && mode != "baseline"
@@ -142,6 +172,23 @@ if skip_spec != "" then << "ABLATION: skipping " + skip_spec + " — output is g
 # path (the concurrent encoder already overlaps those stages) — kept only
 # so the negative result stays reproducible.
 hc_fused = ccall("__w_env", "FN_HCFUSED") == "1"
+# FN_CPROG=0: run prebuilt programs through the .w dispatch loop instead of
+# the C-side executor (w_metal_program_run) — A/B escape; commands identical.
+cprog = ccall("__w_env", "FN_CPROG") != "0"
+# FN_MTP=1: load the MTP head and measure draft acceptance during decode
+# (each round drafts the NEXT-next token; the following round scores it).
+mtp_depth = 0
+if ccall("__w_env", "FN_MTP") != nil && ccall("__w_env", "FN_MTP") != ""
+  mtp_depth = ccall("__w_env", "FN_MTP").to_i()
+if mtp_spec > 0 then mtp_depth = mtp_spec
+if qsa_on && (mode != "concurrent" || golden_prefix != "" || expert_hist || skip_spec != "" || hc_fused)
+  raise "QSA (FN_CTX > 2051 or FN_QSA=1) requires the concurrent fast path"
+if MAX_POS > 2051 && (multi_n > 0 || mtp_spec > 0)
+  raise "multi/mtp modes beyond ctx 2051 need the QSA multi path (not yet wired)"
+
+mtp_pending = [0 - 1]
+mtp_hits = [0]
+mtp_total = [0]
 # Pipelined encode: commit the token's command buffer in thirds so encoding
 # layers 17-48 overlaps GPU execution of layers 1-16 (the flame profile
 # priced host encode at ~6.5ms/token, fully serial with the GPU when the
@@ -206,6 +253,15 @@ g_beta_pipe = metal_pipeline(gdn_fused_lib, "gdn_g_beta")
 moe_output_pipe = metal_pipeline(gdn_fused_lib, "moe_output")
 ple_gpu_lib = metal_compile_source(device, read_file(FN_DIR + "ple_gather_gpu.metal"))
 rope_tab_pipe = metal_pipeline(ple_gpu_lib, "build_rope_tab")
+# f64 copy of log(rope base) — the Decimal log_rope can't autobox into a
+# kernel argument
+qsa_logb = Math.log(~0.0 + ROPE_BASE)
+qsa_lib = metal_compile_source(device, read_file(FN_DIR + "qsa.metal"))
+qsa_kw_pipe = metal_pipeline(qsa_lib, "qsa_k_write")
+qsa_build_pipe = metal_pipeline(qsa_lib, "qsa_build_blocks")
+qsa_scores_pipe = metal_pipeline(qsa_lib, "qsa_scores")
+qsa_select_pipe = metal_pipeline(qsa_lib, "qsa_select")
+qsa_sdpa_pipe = metal_pipeline(qsa_lib, "qsa_sdpa_selected")
 ple_gather_pipe = metal_pipeline(ple_gpu_lib, "ple_table_gather")
 ple_lib = metal_compile_source(device, read_file(FN_DIR + "ple_ops.metal"))
 ple_gate_pipe = metal_pipeline(ple_lib, "ple_gate")
@@ -224,7 +280,9 @@ ple_conv_pipe = metal_pipeline(ple_lib, "ple_conv_dilated_step")
 # tensor, else the raw bf16 mmap. Consumed by enqueue_mv.
 -> mv_tensor(name)
   if selfquant && sq.has?(name)
-    [sq_tensor(name), sq_tensor(name + ".scale"), sq_tensor(name + ".global_scale")]
+    # h[3] = the ORIGINAL bf16 weight: chunked prefill GEMMs read it instead
+    # of the sidecar (no nibble decode; 2x bytes amortize across the chunk)
+    [sq_tensor(name), sq_tensor(name + ".scale"), sq_tensor(name + ".global_scale"), raw_tensor(name)]
   else
     [raw_tensor(name)]
 
@@ -448,6 +506,16 @@ while li < N_LAYERS
     base[:kn] = kn
     base[:k_cache] = metal_buffer(device, MAX_POS * KV_DIM * 4)
     base[:v_cache] = metal_buffer(device, MAX_POS * KV_DIM * 4)
+    if qsa_on
+      iqn = metal_buffer(device, 128 * 4)
+      ikn = metal_buffer(device, 128 * 4)
+      load_shifted_norm([prefix + "self_attn.indexer.q_layernorm.weight", 128, iqn])
+      load_shifted_norm([prefix + "self_attn.indexer.k_layernorm.weight", 128, ikn])
+      base[:idx_qk] = mv_tensor(prefix + "self_attn.indexer.index_qk_proj.weight")
+      base[:idx_qn] = iqn
+      base[:idx_kn] = ikn
+      base[:idx_kc] = metal_buffer(device, MAX_POS * 128 * 4)
+      base[:idx_blk] = metal_buffer(device, QSA_MAXB * 128 * 4)
   if li == PLE_LAYER
     pp = prefix + "ple."
     nk = metal_buffer(device, HC_HIDDEN * 4)
@@ -616,6 +684,15 @@ ple_nc_tmp = metal_buffer(device, HC_HIDDEN * 4)
 # Per-token scalar slots as real buffers: their CONTENTS are rewritten each
 # token, so recorded programs (and ICBs, whose args freeze at record time)
 # never need re-encoding.
+pending_cbs = []
+idx_qk_tmp = metal_buffer(device, IDX_DIM * 4)
+idx_q_tmp = metal_buffer(device, 512 * 4)
+qsa_scores_buf = metal_buffer(device, QSA_MAXB * 4)
+qsa_sel_buf = metal_buffer(device, QSA_SEL_STRIDE * 4)
+qsa_ns_buf = metal_buffer(device, 4)
+qsa_nb_buf = metal_buffer(device, 4)
+qsa_vis_buf = metal_buffer(device, 4)
+qsa_range_buf = metal_buffer(device, 8)
 pos_buf = metal_buffer(device, 4)
 pos1_buf = metal_buffer(device, 4)
 tok_buf = metal_buffer(device, 4)
@@ -648,7 +725,7 @@ argmax_partial_indices = metal_buffer(device, ARGMAX_CHUNKS * 4)
   output = spec[3]
   kdim = spec[4]
   rows = spec[5]
-  if h.size() == 3
+  if h.size() >= 3
     if use_b1 && rows <= 640
       prog.push([0, nvfp4_b1r1_pipe, [h[0], h[1], input, output, kdim, rows, h[2]], (rows + 1) / 2, 64])
     elsif use_16r && rows == 2560 && kdim >= 6144
@@ -698,7 +775,7 @@ argmax_partial_indices = metal_buffer(device, ARGMAX_CHUNKS * 4)
   prog.push([0, phn_pipe, [mk_tmp, k_norm_scale, DK, ~1.0 / DK, EPS / DK], HK, 32])
   prog.push([2, g_beta_pipe, [a_tmp, b_tmp, lyr[:alog], lyr[:dtb], g_tmp, beta_tmp, HV], HV, 0])
   prog.push([1, nil, [mq_tmp, mk_tmp, g_tmp, beta_tmp], 0, 0])
-  prog.push([3, delta_pipe, [mq_tmp, mk_tmp, mv_tmp, g_tmp, beta_tmp, ss_in, delta_tmp, ss_out, HK, HV, DK, DV], 0, 0])
+  prog.push([3, delta_pipe, [mq_tmp, mk_tmp, mv_tmp, g_tmp, beta_tmp, ss_in, delta_tmp, ss_out, HK, HV, DK, DV], [1, DV / 4, HV, 32, 4, 1], 0])
   prog.push([1, nil, [delta_tmp, z_tmp], 0, 0])
   prog.push([0, rng_sig_pipe, [delta_tmp, z_tmp, lyr[:linear_norm], mamba_norm_tmp, DV, EPS], HV, 32])
   prog.push([1, nil, [mamba_norm_tmp], 0, 0])
@@ -711,6 +788,24 @@ argmax_partial_indices = metal_buffer(device, ARGMAX_CHUNKS * 4)
   kv_k = [k_tmp, lyr[:k_cache], pos_buf, KV_DIM]
   kv_v = [v_tmp, lyr[:v_cache], pos_buf, KV_DIM]
   sdpa = [queries_tmp, lyr[:k_cache], lyr[:v_cache], attn_tmp, GQA, pos1_buf, HEAD_DIM, KV_DIM, ATTN_SCALE]
+  if qsa_on
+    # lightning indexer: proj -> split -> q norm+rope / raw-k cache -> pooled
+    # block build -> relu-sum scores -> top-512 blocks + tail -> selected SDPA.
+    # All grids fixed; bounds (nb/vis/range) are host-written buffers.
+    prog_mv([prog, lyr[:idx_qk], xn, idx_qk_tmp, HIDDEN, IDX_DIM])
+    prog.push([1, nil, [idx_qk_tmp], 0, 0])
+    prog.push([2, copy_at_pipe, [idx_qk_tmp, idx_q_tmp, 0, 0, 512], 512, 0])
+    prog.push([2, qsa_kw_pipe, [idx_qk_tmp, lyr[:idx_kc], pos_buf, 1], 128, 0])
+    prog.push([1, nil, [idx_q_tmp, lyr[:idx_kc]], 0, 0])
+    prog.push([0, phn_pipe, [idx_q_tmp, lyr[:idx_qn], 128, ~1.0 / 128, EPS], 4, 32])
+    prog.push([0, qsa_build_pipe, [lyr[:idx_kc], lyr[:idx_kn], lyr[:idx_blk], qsa_range_buf, EPS, qsa_logb], 1, 128])
+    prog.push([1, nil, [idx_q_tmp], 0, 0])
+    prog.push([2, rope_pipe, [idx_q_tmp, cos_tmp, sin_tmp, 128, ROT_HALF, 4], 4 * ROT_HALF, 0])
+    prog.push([1, nil, [idx_q_tmp, lyr[:idx_blk]], 0, 0])
+    prog.push([0, qsa_scores_pipe, [idx_q_tmp, lyr[:idx_blk], qsa_scores_buf, qsa_nb_buf, QSA_MAXB, 1], (QSA_MAXB + 255) / 256, 256])
+    prog.push([1, nil, [qsa_scores_buf], 0, 0])
+    prog.push([0, qsa_select_pipe, [qsa_scores_buf, qsa_nb_buf, qsa_vis_buf, qsa_sel_buf, qsa_ns_buf, QSA_MAXB, 512], 1, 512])
+    prog.push([1, nil, [qsa_sel_buf, qsa_ns_buf], 0, 0])
   prog_mv([prog, lyr[:q], xn, qfull_tmp, HIDDEN, QFULL_DIM])
   prog_mv([prog, lyr[:k], xn, k_tmp, HIDDEN, KV_DIM])
   prog_mv([prog, lyr[:v], xn, v_tmp, HIDDEN, KV_DIM])
@@ -726,7 +821,10 @@ argmax_partial_indices = metal_buffer(device, ARGMAX_CHUNKS * 4)
   prog.push([2, kv_write_pipe, kv_k, KV_DIM, 0])
   prog.push([2, kv_write_pipe, kv_v, KV_DIM, 0])
   prog.push([1, nil, [lyr[:k_cache], lyr[:v_cache]], 0, 0])
-  prog.push([0, sdpa_pipe, sdpa, N_HEADS, 256])
+  if qsa_on
+    prog.push([0, qsa_sdpa_pipe, [queries_tmp, lyr[:k_cache], lyr[:v_cache], attn_tmp, qsa_sel_buf, qsa_ns_buf, GQA, N_HEADS, KV_DIM, ATTN_SCALE, QSA_SEL_STRIDE, 1], N_HEADS, 256])
+  else
+    prog.push([0, sdpa_pipe, sdpa, N_HEADS, 256])
   prog.push([1, nil, [attn_tmp, attn_gate_tmp], 0, 0])
   prog.push([2, gate_pipe, [attn_tmp, attn_gate_tmp, ATTN_DIM], ATTN_DIM, 0])
   prog.push([1, nil, [attn_tmp], 0, 0])
@@ -781,6 +879,11 @@ argmax_partial_indices = metal_buffer(device, ARGMAX_CHUNKS * 4)
   prog.push([1, nil, [H], 0, 0])
 
 -> run_prog(prog)
+  if cprog
+    # C-side executor: one bridge crossing for the whole program; emits
+    # byte-identical encoder commands to the per-call loop below.
+    ccall("w_metal_program_run", queue, prog, concurrent ? 1 : 0)
+    return
   i = 0
   n = prog.size()
   while i < n
@@ -793,7 +896,8 @@ argmax_partial_indices = metal_buffer(device, ARGMAX_CHUNKS * 4)
     elsif k == 1
       if concurrent then metal_batch_barrier_resources(queue, st[2])
     else
-      metal_dispatch_3d(queue, st[1], st[2], 1, DV / 4, HV, 32, 4, 1)
+      d3 = st[3]
+      metal_dispatch_3d(queue, st[1], st[2], d3[0], d3[1], d3[2], d3[3], d3[4], d3[5])
     i = i + 1
 
 # Build the per-layer programs (after every scratch buffer exists).
@@ -916,7 +1020,8 @@ use_icb = ccall("__w_env", "FN_ICB") == "1"
     tg = icb_tg_for(n)
     metal_icb_add(bstate[0], st[1], icb_args(st[2]), n / tg, tg)
   elsif k == 3
-    metal_icb_add_3d(bstate[0], st[1], icb_args(st[2]), 1, DV / 4, HV, 32, 4, 1)
+    d3 = st[3]
+    metal_icb_add_3d(bstate[0], st[1], icb_args(st[2]), d3[0], d3[1], d3[2], d3[3], d3[4], d3[5])
   bstate[1] = bstate[1] + 1
 
 -> icb_emit_prog(spec)
@@ -1013,6 +1118,15 @@ if probe_k > 0
   metal_buffer_write_i32(tok_buf, 0, token_id)
   metal_buffer_write_i32(pos_buf, 0, pos)
   metal_buffer_write_i32(pos1_buf, 0, pos + 1)
+  if qsa_on
+    metal_buffer_write_i32(qsa_nb_buf, 0, (pos + 1) / 4)
+    metal_buffer_write_i32(qsa_vis_buf, 0, pos + 1)
+    if (pos + 1) % 4 == 0
+      metal_buffer_write_i32(qsa_range_buf, 0, (pos + 1) / 4 - 1)
+      metal_buffer_write_i32(qsa_range_buf, 1, (pos + 1) / 4)
+    else
+      metal_buffer_write_i32(qsa_range_buf, 0, 0)
+      metal_buffer_write_i32(qsa_range_buf, 1, 0)
   ft1 = fn_time ? ccall("__w_clock_ms") : ~0.0
   metal_batch_begin(queue)
   parts = icb_parity[0] == 0 ? icb_even : icb_odd
@@ -1073,7 +1187,7 @@ scoped_barriers = ccall("__w_env", "FN_FULLBAR") != "1"
 -> enqueue_bf16(spec)
   h = spec[0]
   rows = spec[4]
-  if h.size() == 3
+  if h.size() >= 3
     # same rung selection as prog_mv — keep the two paths ids-identical
     if use_b1 && rows <= 640
       metal_dispatch_groups(queue, nvfp4_b1r1_pipe, [h[0], h[1], spec[1], spec[2], spec[3], rows, h[2]], (rows + 1) / 2, 64)
@@ -1090,7 +1204,7 @@ scoped_barriers = ccall("__w_env", "FN_FULLBAR") != "1"
 # and precomputes inj_tmp for the paired combine.
 -> hc_mix(hc)
   if skip_hc then return
-  if hc_fused && hc[:down].size() == 3 && hc[:up].size() == 3 && hc[:inject] != nil
+  if hc_fused && hc[:down].size() >= 3 && hc[:up].size() >= 3 && hc[:inject] != nil
     # Deep-fused NVFP4 path: 2 serial stages instead of 5 (hc_fused.metal).
     metal_dispatch_groups(queue, hc_mix_a_pipe,
       [H, hc[:norm], hc[:down][0], hc[:down][1], hc[:down][2], hc[:inject],
@@ -1268,6 +1382,15 @@ fast_path = golden_prefix == "" && !expert_hist && skip_spec == "" && !hc_fused 
   metal_buffer_write_i32(tok_buf, 0, token_id)
   metal_buffer_write_i32(pos_buf, 0, pos)
   metal_buffer_write_i32(pos1_buf, 0, pos + 1)
+  if qsa_on
+    metal_buffer_write_i32(qsa_nb_buf, 0, (pos + 1) / 4)
+    metal_buffer_write_i32(qsa_vis_buf, 0, pos + 1)
+    if (pos + 1) % 4 == 0
+      metal_buffer_write_i32(qsa_range_buf, 0, (pos + 1) / 4 - 1)
+      metal_buffer_write_i32(qsa_range_buf, 1, (pos + 1) / 4)
+    else
+      metal_buffer_write_i32(qsa_range_buf, 0, 0)
+      metal_buffer_write_i32(qsa_range_buf, 1, 0)
   ft1 = fn_time ? ccall("__w_clock_ms") : ~0.0
   metal_batch_begin_concurrent(queue)
   metal_dispatch_groups(queue, rope_tab_pipe, [pos_buf, cos_tmp, sin_tmp, log_rope, ROT_HALF], 1, 32)
@@ -1287,12 +1410,18 @@ fast_path = golden_prefix == "" && !expert_hist && skip_spec == "" && !hc_fused 
     run_prog(lyr[:ping] == 0 || lyr[:kind] == "full" ? lyr[:prog_a] : lyr[:prog_b])
     if lyr[:kind] == "mamba" then lyr[:ping] = 1 - lyr[:ping]
     if li == 15 || li == 31
-      metal_batch_commit(queue)
+      # commit WITHOUT waiting: the chunk executes while later layers encode.
+      # Buffers on one queue execute in commit order, so the final commit's
+      # wait transitively covers these; the deferred waits are then instant
+      # and only release the handles.
+      pending_cbs.push(metal_batch_commit_async(queue))
       metal_batch_begin_concurrent(queue)
     li = li + 1
   run_prog(head_prog)
   ft2 = fn_time ? ccall("__w_clock_ms") : ~0.0
   metal_batch_commit(queue)
+  while pending_cbs.size() > 0
+    metal_command_buffer_wait(pending_cbs.pop())
   ple_advance(token_id)
   result = metal_buffer_read_i32(argmax_out, 0)
   if fn_time
@@ -1390,14 +1519,20 @@ if golden_prefix != ""
 # decode_multi family matches our serial kernels except per-head norm, which
 # fn_phn_rope_multi re-clones with 1/sqrt and (x*rrms)*w). GDN conv/delta
 # advance their recurrent state by n tokens with ONE ping flip per block.
-MULTI_MAX = 8
-if multi_n > 0
+# 64 = the prefill chunk width; spec/multi verify widths stay <= 8 (rung
+# kernels), widths 9..64 route to the nvfp4_gemm_f32 m-tiles.
+MULTI_MAX = 64
+PREFILL_CHUNK = 64
+# only the final chunk needs logits; cap it so logits_m stays 64-wide
+PREFILL_LAST_MAX = 64
+if multi_n > 0 || mtp_depth > 0 || prompt_tokens > 8 || prompt_ids_file != ""
   fnm_lib = metal_compile_source(device, read_file(FN_DIR + "fn_multi.metal"))
   grms_m_pipe = metal_pipeline(fnm_lib, "grouped_rms_norm_multi")
   hc_mix_reduce_m_pipe = metal_pipeline(fnm_lib, "hc_mix_reduce_multi")
   hc_combine_m_pipe = metal_pipeline(fnm_lib, "hc_combine_multi")
   router_m_pipe = metal_pipeline(fnm_lib, "router_softmax_topk10_multi")
   gather_m_pipe = metal_pipeline(fnm_lib, "moe_gather_matvec_multi")
+  moe_sort_pipe = metal_pipeline(fnm_lib, "moe_sort_pairs")
   moe_out_m_pipe = metal_pipeline(fnm_lib, "moe_output_multi")
   ple_gate_m_pipe = metal_pipeline(fnm_lib, "ple_gate_multi")
   ple_conv_m_pipe = metal_pipeline(fnm_lib, "ple_conv_dilated_multi")
@@ -1408,15 +1543,23 @@ if multi_n > 0
   embed_m_pipe = metal_pipeline(dm_lib, "bf16_embedding_lookup_multi")
   bf16_m_pipe = metal_pipeline(dm_lib, "bf16_matvec_multi")
   split_m_pipe = metal_pipeline(dm_lib, "split_q_gate_multi")
+  slice_m_pipe = metal_pipeline(dm_lib, "copy_f32_slice_multi")
   kv_write_m_pipe = metal_pipeline(dm_lib, "kv_write_multi")
   sdpa_m_pipe = metal_pipeline(dm_lib, "sdpa_decode_multi_hd256")
   delta_m_pipe = metal_pipeline(dm_lib, "gated_delta_multi")
   fill_zero_pipe = metal_pipeline(metal_compile_source(device, read_file(FN_DIR + "fill_zero.metal")), "fill_zero")
   wide_grid_lib = metal_compile_source(device, read_file(NVFP4_DIR + "nvfp4_matvec_mlx_scaled_wide.metal"))
+  bf16_gemm_lib = metal_compile_source(device, read_file(FN_DIR + "bf16_gemm_f32.metal"))
+  bgemm_m16_pipe = metal_pipeline(bf16_gemm_lib, "bf16_gemm_f32_m16")
+  bgemm_m32_pipe = metal_pipeline(bf16_gemm_lib, "bf16_gemm_f32_m32")
+  bgemm_m64_pipe = metal_pipeline(bf16_gemm_lib, "bf16_gemm_f32_m64")
+  bgemm_m128_pipe = metal_pipeline(bf16_gemm_lib, "bf16_gemm_f32_m128")
   nv_multi_pipes = []
+  nv_multi_pipes_r2 = []
   bw = 1
-  while bw <= MULTI_MAX
+  while bw <= 8
     nv_multi_pipes.push(metal_pipeline(wide_grid_lib, "nvfp4_wide_b" + bw.to_s + "_r1"))
+    nv_multi_pipes_r2.push(metal_pipeline(wide_grid_lib, "nvfp4_wide_b" + bw.to_s + "_r2"))
     bw = bw + 1
 
   h_embed_m = metal_buffer(device, MULTI_MAX * HIDDEN * 4)
@@ -1465,61 +1608,171 @@ if multi_n > 0
   plv_m = metal_buffer(device, MULTI_MAX * HIDDEN * 4)
   plgv_m = metal_buffer(device, MULTI_MAX * HC_HIDDEN * 4)
   plnc_m = metal_buffer(device, MULTI_MAX * HC_HIDDEN * 4)
-  logits_m = metal_buffer(device, MULTI_MAX * N_VOCAB * 4)
+  # Per-layer stashes of the state-advancing inputs (conv input, normed k,
+  # v, g, beta; PLE conv input) so a partial accept can tape-replay the
+  # recurrent states for just the accepted prefix (~22 MB total).
+  li = 0
+  while li < N_LAYERS
+    lyr = layers[li]
+    if lyr[:kind] == "mamba"
+      lyr[:qkv_v] = metal_buffer(device, MULTI_MAX * QKV_DIM * 4)
+      lyr[:mk_v] = metal_buffer(device, MULTI_MAX * K_DIM * 4)
+      lyr[:mv_v] = metal_buffer(device, MULTI_MAX * V_DIM * 4)
+      lyr[:g_v] = metal_buffer(device, MULTI_MAX * HV * 4)
+      lyr[:beta_v] = metal_buffer(device, MULTI_MAX * HV * 4)
+    if lyr[:ple] != nil
+      lyr[:ple][:nc_v] = metal_buffer(device, MULTI_MAX * HC_HIDDEN * 4)
+    li = li + 1
+  flip_defer = [0]
+  logits_m = metal_buffer(device, PREFILL_LAST_MAX * N_VOCAB * 4)
   am_pv_m = metal_buffer(device, MULTI_MAX * ARGMAX_CHUNKS * 4)
   am_pi_m = metal_buffer(device, MULTI_MAX * ARGMAX_CHUNKS * 4)
   am_out_m = metal_buffer(device, MULTI_MAX * 4)
   tok_ids_m = metal_buffer(device, MULTI_MAX * 4)
+  mpos_buf = metal_buffer(device, 4)
+  order_m = metal_buffer(device, MULTI_MAX * TOP_K * 4)
+  if qsa_on
+    idx_qk_m = metal_buffer(device, MULTI_MAX * IDX_DIM * 4)
+    idx_q_m = metal_buffer(device, MULTI_MAX * 512 * 4)
+    qsa_scores_m = metal_buffer(device, MULTI_MAX * QSA_MAXB * 4)
+    qsa_sel_m = metal_buffer(device, MULTI_MAX * QSA_SEL_STRIDE * 4)
+    qsa_ns_m = metal_buffer(device, MULTI_MAX * 4)
+    qsa_nb_m = metal_buffer(device, MULTI_MAX * 4)
+    qsa_vis_m = metal_buffer(device, MULTI_MAX * 4)
 
--> mv_multi(h, x_in, y_out, kdim, rows, n)
-  if h.size() == 3
-    metal_dispatch_groups(queue, nv_multi_pipes[n - 1], [h[0], h[1], x_in, y_out, kdim, rows, h[2]], (rows + 1) / 2, 64)
+# Record-or-dispatch wrappers: with mrec set, the multi helpers append
+# program steps instead of encoding, so a width's whole verify pass can be
+# recorded once and replayed via w_metal_program_run (one bridge call).
+mprog = []
+mrec = [0]
+
+-> mdg(pipe, args, g, tgs)
+  if mrec[0] == 1
+    mprog.push([0, pipe, args, g, tgs])
   else
-    metal_dispatch_groups(queue, bf16_m_pipe, [h[0], x_in, y_out, kdim, rows, n], rows, 32)
+    metal_dispatch_groups(queue, pipe, args, g, tgs)
+
+-> mdn(pipe, args, nthreads)
+  if mrec[0] == 1
+    mprog.push([2, pipe, args, nthreads, 0])
+  else
+    metal_dispatch_n(queue, pipe, args, nthreads)
+
+-> mbar(bufs)
+  if mrec[0] == 1
+    mprog.push([1, nil, bufs, 0, 0])
+
+-> md3(pipe, args, dims)
+  if mrec[0] == 1
+    mprog.push([3, pipe, args, dims, 0])
+  else
+    metal_dispatch_3d(queue, pipe, args, dims[0], dims[1], dims[2], dims[3], dims[4], dims[5])
+
+# Rung selection from autotune_qwen38fn.w wide: r1 collapses at n>=3 on
+# big-row shapes (register pressure); r2 wins there; r1 stays best at
+# rows<=640 (occupancy) and at width 1.
+-> mv_multi(h, x_in, y_out, kdim, rows, n)
+  if n > 8
+    wraw = h.size() >= 3 ? h[3] : h[0]
+    if n > 32
+      mdg(bgemm_m64_pipe, [wraw, x_in, y_out, kdim, rows, n], (rows + 31) / 32, 128)
+    elsif n > 16
+      mdg(bgemm_m32_pipe, [wraw, x_in, y_out, kdim, rows, n], (rows + 31) / 32, 128)
+    else
+      mdg(bgemm_m16_pipe, [wraw, x_in, y_out, kdim, rows, n], (rows + 31) / 32, 128)
+  elsif h.size() >= 3
+    if n >= 2 && rows > 640
+      mdg(nv_multi_pipes_r2[n - 1], [h[0], h[1], x_in, y_out, kdim, rows, h[2]], (rows + 3) / 4, 64)
+    else
+      mdg(nv_multi_pipes[n - 1], [h[0], h[1], x_in, y_out, kdim, rows, h[2]], (rows + 1) / 2, 64)
+  else
+    mdg(bf16_m_pipe, [h[0], x_in, y_out, kdim, rows, n], rows, 32)
 
 -> hc_mix_multi(hc, n)
-  metal_dispatch_groups(queue, grms_m_pipe, [h_m, hc[:norm], n_tmp_m, HIDDEN, HC_COUNT, EPS], n * HC_COUNT, 256)
+  if skip_hc then return
+  mdg(grms_m_pipe, [h_m, hc[:norm], n_tmp_m, HIDDEN, HC_COUNT, EPS], n * HC_COUNT, 256)
+  mbar([n_tmp_m])
   mv_multi(hc[:down], n_tmp_m, lowrank_m, HC_HIDDEN, HC_LOWRANK, n)
-  metal_dispatch_groups(queue, bf16_m_pipe, [hc[:inject], n_tmp_m, inj_m, HC_HIDDEN, HC_COUNT, n], HC_COUNT, 32)
-  metal_dispatch_n(queue, silu_div_pipe, [lowrank_m, lowrank_m, ~0.0 + HC_COUNT, n * HC_LOWRANK], n * HC_LOWRANK)
+  mdg(bf16_m_pipe, [hc[:inject], n_tmp_m, inj_m, HC_HIDDEN, HC_COUNT, n], HC_COUNT, 32)
+  mbar([lowrank_m])
+  mdn(silu_div_pipe, [lowrank_m, lowrank_m, ~0.0 + HC_COUNT, n * HC_LOWRANK], n * HC_LOWRANK)
+  mbar([lowrank_m])
   mv_multi(hc[:up], lowrank_m, upraw_m, HC_LOWRANK, HC_HIDDEN, n)
-  metal_dispatch_n(queue, hc_mix_reduce_m_pipe, [upraw_m, n_tmp_m, xn_m, HC_COUNT, HIDDEN, n], n * HIDDEN)
+  mbar([upraw_m])
+  mdn(hc_mix_reduce_m_pipe, [upraw_m, n_tmp_m, xn_m, HC_COUNT, HIDDEN, n], n * HIDDEN)
+  mbar([xn_m, inj_m])
 
 -> hc_combine_multi_step(n)
-  metal_dispatch_n(queue, hc_combine_m_pipe, [h_m, y_m, inj_m, HC_COUNT, HIDDEN, n], n * HC_COUNT * HIDDEN)
+  if skip_hc then return
+  mdn(hc_combine_m_pipe, [h_m, y_m, inj_m, HC_COUNT, HIDDEN, n], n * HC_COUNT * HIDDEN)
+  mbar([h_m])
 
 -> mamba_multi(lyr, n)
+  if skip_gdn then return
   ping = lyr[:ping]
   cs_in = ping == 0 ? lyr[:cs_a] : lyr[:cs_b]
   cs_out = ping == 0 ? lyr[:cs_b] : lyr[:cs_a]
   ss_in = ping == 0 ? lyr[:ss_a] : lyr[:ss_b]
   ss_out = ping == 0 ? lyr[:ss_b] : lyr[:ss_a]
-  mv_multi(lyr[:qkv], xn_m, qkv_m, HIDDEN, QKV_DIM, n)
+  mv_multi(lyr[:qkv], xn_m, lyr[:qkv_v], HIDDEN, QKV_DIM, n)
   mv_multi(lyr[:z], xn_m, z_m, HIDDEN, V_DIM, n)
-  metal_dispatch_groups(queue, bf16_m_pipe, [lyr[:a], xn_m, a_m, HIDDEN, HV, n], HV, 32)
-  metal_dispatch_groups(queue, bf16_m_pipe, [lyr[:b], xn_m, b_m, HIDDEN, HV, n], HV, 32)
-  metal_dispatch_n(queue, conv_split_m_pipe, [lyr[:conv], cs_in, qkv_m, mq_m, mk_m, mv_m, cs_out, QKV_DIM, Q_DIM, K_DIM, n], QKV_DIM)
-  metal_dispatch_groups(queue, phn_rope_m_pipe, [mq_m, q_norm_scale, cos_m, sin_m, DK, 0, HK, ~1.0 / DK, EPS / DK, n], n * HK, 32)
-  metal_dispatch_groups(queue, phn_rope_m_pipe, [mk_m, k_norm_scale, cos_m, sin_m, DK, 0, HK, ~1.0 / DK, EPS / DK, n], n * HK, 32)
-  metal_dispatch_n(queue, g_beta_m_pipe, [a_m, b_m, lyr[:alog], lyr[:dtb], g_m, beta_m, HV, n], n * HV)
-  metal_dispatch_3d(queue, delta_m_pipe, [mq_m, mk_m, mv_m, g_m, beta_m, ss_in, delta_m_buf, ss_out, HK, HV, DK, DV, n], 1, DV / 4, HV, 32, 4, 1)
-  metal_dispatch_groups(queue, rng_sig_pipe, [delta_m_buf, z_m, lyr[:linear_norm], mnorm_m, DV, EPS], n * HV, 32)
+  mdg(bf16_m_pipe, [lyr[:a], xn_m, a_m, HIDDEN, HV, n], HV, 32)
+  mdg(bf16_m_pipe, [lyr[:b], xn_m, b_m, HIDDEN, HV, n], HV, 32)
+  mbar([lyr[:qkv_v]])
+  mdn(conv_split_m_pipe, [lyr[:conv], cs_in, lyr[:qkv_v], mq_m, lyr[:mk_v], lyr[:mv_v], cs_out, QKV_DIM, Q_DIM, K_DIM, n], QKV_DIM)
+  mbar([mq_m, lyr[:mk_v], lyr[:mv_v], a_m, b_m])
+  mdg(phn_rope_m_pipe, [mq_m, q_norm_scale, cos_m, sin_m, DK, 0, HK, ~1.0 / DK, EPS / DK, n], n * HK, 32)
+  mdg(phn_rope_m_pipe, [lyr[:mk_v], k_norm_scale, cos_m, sin_m, DK, 0, HK, ~1.0 / DK, EPS / DK, n], n * HK, 32)
+  mdn(g_beta_m_pipe, [a_m, b_m, lyr[:alog], lyr[:dtb], lyr[:g_v], lyr[:beta_v], HV, n], n * HV)
+  mbar([mq_m, lyr[:mk_v], lyr[:g_v], lyr[:beta_v]])
+  md3(delta_m_pipe, [mq_m, lyr[:mk_v], lyr[:mv_v], lyr[:g_v], lyr[:beta_v], ss_in, delta_m_buf, ss_out, HK, HV, DK, DV, n], [1, DV / 4, HV, 32, 4, 1])
+  mbar([delta_m_buf, z_m])
+  mdg(rng_sig_pipe, [delta_m_buf, z_m, lyr[:linear_norm], mnorm_m, DV, EPS], n * HV, 32)
+  mbar([mnorm_m])
   mv_multi(lyr[:out], mnorm_m, y_m, V_DIM, HIDDEN, n)
-  lyr[:ping] = 1 - ping
+  mbar([y_m])
+  if flip_defer[0] == 0 then lyr[:ping] = 1 - ping
 
--> full_multi(lyr, pos0, n)
+# pos_start for kv_write/sdpa is read from mpos_buf (contents rewritten per
+# round) so recorded programs replay at any position.
+-> full_multi(lyr, n)
+  if skip_attn then return
+  if qsa_on
+    mv_multi(lyr[:idx_qk], xn_m, idx_qk_m, HIDDEN, IDX_DIM, n)
+    mbar([idx_qk_m])
+    mdn(slice_m_pipe, [idx_qk_m, idx_q_m, IDX_DIM, 512, 0, 512, n], n * 512)
+    mdn(qsa_kw_pipe, [idx_qk_m, lyr[:idx_kc], mpos_buf, n], n * 128)
+    mbar([idx_q_m, lyr[:idx_kc]])
+    mdg(phn_rope_m_pipe, [idx_q_m, lyr[:idx_qn], cos_m, sin_m, 128, ROT_HALF, 4, ~1.0 / 128, EPS, n], n * 4, 32)
+    mdg(qsa_build_pipe, [lyr[:idx_kc], lyr[:idx_kn], lyr[:idx_blk], qsa_range_buf, EPS, qsa_logb], MULTI_MAX / 4 + 1, 128)
+    mbar([idx_q_m, lyr[:idx_blk]])
+    mdg(qsa_scores_pipe, [idx_q_m, lyr[:idx_blk], qsa_scores_m, qsa_nb_m, QSA_MAXB, n], (n * QSA_MAXB + 255) / 256, 256)
+    mbar([qsa_scores_m])
+    mdg(qsa_select_pipe, [qsa_scores_m, qsa_nb_m, qsa_vis_m, qsa_sel_m, qsa_ns_m, QSA_MAXB, 512], n, 512)
+    mbar([qsa_sel_m, qsa_ns_m])
   mv_multi(lyr[:q], xn_m, qfull_m, HIDDEN, QFULL_DIM, n)
   mv_multi(lyr[:k], xn_m, k_m, HIDDEN, KV_DIM, n)
   mv_multi(lyr[:v], xn_m, v_m, HIDDEN, KV_DIM, n)
-  metal_dispatch_n(queue, split_m_pipe, [qfull_m, queries_m, agate_m, N_HEADS, HEAD_DIM, n], n * ATTN_DIM)
-  metal_dispatch_groups(queue, phn_rope_m_pipe, [queries_m, lyr[:qn], cos_m, sin_m, HEAD_DIM, ROT_HALF, N_HEADS, ~1.0 / HEAD_DIM, EPS, n], n * N_HEADS, 32)
-  metal_dispatch_groups(queue, phn_rope_m_pipe, [k_m, lyr[:kn], cos_m, sin_m, HEAD_DIM, ROT_HALF, N_KV_HEADS, ~1.0 / HEAD_DIM, EPS, n], n * N_KV_HEADS, 32)
-  metal_dispatch_n(queue, kv_write_m_pipe, [k_m, v_m, lyr[:k_cache], lyr[:v_cache], pos0, KV_DIM, n], n * KV_DIM)
-  metal_dispatch_groups(queue, sdpa_m_pipe, [queries_m, lyr[:k_cache], lyr[:v_cache], attn_m, GQA, pos0, N_HEADS, KV_DIM, ATTN_SCALE, n], n * N_HEADS, 256)
-  metal_dispatch_n(queue, gate_pipe, [attn_m, agate_m, n * ATTN_DIM], n * ATTN_DIM)
+  mbar([qfull_m])
+  mdn(split_m_pipe, [qfull_m, queries_m, agate_m, N_HEADS, HEAD_DIM, n], n * ATTN_DIM)
+  mbar([queries_m, k_m])
+  mdg(phn_rope_m_pipe, [queries_m, lyr[:qn], cos_m, sin_m, HEAD_DIM, ROT_HALF, N_HEADS, ~1.0 / HEAD_DIM, EPS, n], n * N_HEADS, 32)
+  mdg(phn_rope_m_pipe, [k_m, lyr[:kn], cos_m, sin_m, HEAD_DIM, ROT_HALF, N_KV_HEADS, ~1.0 / HEAD_DIM, EPS, n], n * N_KV_HEADS, 32)
+  mbar([queries_m, k_m, v_m])
+  mdn(kv_write_m_pipe, [k_m, v_m, lyr[:k_cache], lyr[:v_cache], mpos_buf, KV_DIM, n], n * KV_DIM)
+  mbar([lyr[:k_cache], lyr[:v_cache]])
+  if qsa_on
+    mdg(qsa_sdpa_pipe, [queries_m, lyr[:k_cache], lyr[:v_cache], attn_m, qsa_sel_m, qsa_ns_m, GQA, N_HEADS, KV_DIM, ATTN_SCALE, QSA_SEL_STRIDE, n], n * N_HEADS, 256)
+  else
+    mdg(sdpa_m_pipe, [queries_m, lyr[:k_cache], lyr[:v_cache], attn_m, GQA, mpos_buf, N_HEADS, KV_DIM, ATTN_SCALE, n], n * N_HEADS, 256)
+  mbar([attn_m, agate_m])
+  mdn(gate_pipe, [attn_m, agate_m, n * ATTN_DIM], n * ATTN_DIM)
+  mbar([attn_m])
   mv_multi(lyr[:out], attn_m, y_m, ATTN_DIM, HIDDEN, n)
+  mbar([y_m])
 
 -> moe_multi(lyr, n)
+  if skip_moe then return
   ex = lyr[:experts]
   og = ex[:offs]["gate_proj"]
   ou = ex[:offs]["up_proj"]
@@ -1528,39 +1781,112 @@ if multi_n > 0
   mv_multi(lyr[:router], xn_m, rlog_m, HIDDEN, N_EXPERTS, n)
   mv_multi(lyr[:sh_gate], xn_m, sg_m, HIDDEN, SHARED_FFN, n)
   mv_multi(lyr[:sh_up], xn_m, su_m, HIDDEN, SHARED_FFN, n)
-  metal_dispatch_groups(queue, bf16_m_pipe, [lyr[:sh_seg], xn_m, seg_m, HIDDEN, 1, n], 1, 32)
-  metal_dispatch_groups(queue, router_m_pipe, [rlog_m, tidx_m, tw_m], n, 512)
-  metal_dispatch_n(queue, silu_pipe, [sg_m, su_m, sh_m, n * SHARED_FFN], n * SHARED_FFN)
-  metal_dispatch_groups(queue, gather_m_pipe, [q[0], q[1], q[2], q[3], tidx_m, ex[:slot_map], xn_m, eg_m, HIDDEN, MOE_FFN, og[0], og[1], og[2], og[3], og[4], og[5], TOP_K, 0, ex[:hot], og[6], og[7], og[8]], n * TOP_K * (MOE_FFN / 8), 64)
-  metal_dispatch_groups(queue, gather_m_pipe, [q[0], q[1], q[2], q[3], tidx_m, ex[:slot_map], xn_m, eu_m, HIDDEN, MOE_FFN, ou[0], ou[1], ou[2], ou[3], ou[4], ou[5], TOP_K, 0, ex[:hot], ou[6], ou[7], ou[8]], n * TOP_K * (MOE_FFN / 8), 64)
+  mdg(bf16_m_pipe, [lyr[:sh_seg], xn_m, seg_m, HIDDEN, 1, n], 1, 32)
+  mbar([rlog_m, sg_m, su_m])
+  mdg(router_m_pipe, [rlog_m, tidx_m, tw_m], n, 512)
+  mdn(silu_pipe, [sg_m, su_m, sh_m, n * SHARED_FFN], n * SHARED_FFN)
+  mbar([tidx_m, sh_m])
+  mdg(moe_sort_pipe, [tidx_m, order_m, n * TOP_K], 1, 512)
+  mbar([order_m])
+  mdg(gather_m_pipe, [q[0], q[1], q[2], q[3], tidx_m, ex[:slot_map], xn_m, eg_m, HIDDEN, MOE_FFN, og[0], og[1], og[2], og[3], og[4], og[5], TOP_K, 0, ex[:hot], og[6], og[7], og[8], order_m], n * TOP_K * (MOE_FFN / 8), 64)
+  mdg(gather_m_pipe, [q[0], q[1], q[2], q[3], tidx_m, ex[:slot_map], xn_m, eu_m, HIDDEN, MOE_FFN, ou[0], ou[1], ou[2], ou[3], ou[4], ou[5], TOP_K, 0, ex[:hot], ou[6], ou[7], ou[8], order_m], n * TOP_K * (MOE_FFN / 8), 64)
   mv_multi(lyr[:sh_down], sh_m, shared_m, SHARED_FFN, HIDDEN, n)
-  metal_dispatch_n(queue, silu_pipe, [eg_m, eu_m, eh_m, n * TOP_K * MOE_FFN], n * TOP_K * MOE_FFN)
-  metal_dispatch_groups(queue, gather_m_pipe, [q[0], q[1], q[2], q[3], tidx_m, ex[:slot_map], eh_m, ed_m, MOE_FFN, HIDDEN, od[0], od[1], od[2], od[3], od[4], od[5], TOP_K, 1, ex[:hot], od[6], od[7], od[8]], n * TOP_K * (HIDDEN / 8), 64)
-  metal_dispatch_n(queue, moe_out_m_pipe, [ed_m, tw_m, shared_m, seg_m, y_m, TOP_K, HIDDEN, n], n * HIDDEN)
+  mbar([eg_m, eu_m])
+  mdn(silu_pipe, [eg_m, eu_m, eh_m, n * TOP_K * MOE_FFN], n * TOP_K * MOE_FFN)
+  mbar([eh_m])
+  mdg(gather_m_pipe, [q[0], q[1], q[2], q[3], tidx_m, ex[:slot_map], eh_m, ed_m, MOE_FFN, HIDDEN, od[0], od[1], od[2], od[3], od[4], od[5], TOP_K, 1, ex[:hot], od[6], od[7], od[8], order_m], n * TOP_K * (HIDDEN / 8), 64)
+  mbar([ed_m, tw_m, shared_m, seg_m])
+  mdn(moe_out_m_pipe, [ed_m, tw_m, shared_m, seg_m, y_m, TOP_K, HIDDEN, n], n * HIDDEN)
+  mbar([y_m])
 
 -> ple_multi(lyr, n)
+  if skip_ple then return
   pp = lyr[:ple]
   ping = pp[:ping]
   cs_in = ping == 0 ? pp[:cs_a] : pp[:cs_b]
   cs_out = ping == 0 ? pp[:cs_b] : pp[:cs_a]
   mv_multi(pp[:key], e_m, plk_m, HIDDEN, HC_HIDDEN, n)
   mv_multi(pp[:value], e_m, plv_m, HIDDEN, HIDDEN, n)
-  metal_dispatch_groups(queue, grms_m_pipe, [h_m, pp[:norm_query], plqn_m, HIDDEN, HC_COUNT, EPS], n * HC_COUNT, 256)
-  metal_dispatch_groups(queue, grms_m_pipe, [plk_m, pp[:norm_key], plkn_m, HIDDEN, HC_COUNT, EPS], n * HC_COUNT, 256)
-  metal_dispatch_groups(queue, ple_gate_m_pipe, [plkn_m, plqn_m, plv_m, plgv_m, HIDDEN, HC_COUNT], n * HC_COUNT, 256)
-  metal_dispatch_groups(queue, grms_m_pipe, [plgv_m, pp[:norm_conv], plnc_m, HIDDEN, HC_COUNT, EPS], n * HC_COUNT, 256)
-  metal_dispatch_n(queue, ple_conv_m_pipe, [pp[:conv], cs_in, plnc_m, plgv_m, h_m, cs_out, HC_HIDDEN, n], n * HC_HIDDEN)
-  pp[:ping] = 1 - ping
+  mdg(grms_m_pipe, [h_m, pp[:norm_query], plqn_m, HIDDEN, HC_COUNT, EPS], n * HC_COUNT, 256)
+  mbar([plk_m, plqn_m])
+  mdg(grms_m_pipe, [plk_m, pp[:norm_key], plkn_m, HIDDEN, HC_COUNT, EPS], n * HC_COUNT, 256)
+  mbar([plkn_m, plv_m])
+  mdg(ple_gate_m_pipe, [plkn_m, plqn_m, plv_m, plgv_m, HIDDEN, HC_COUNT], n * HC_COUNT, 256)
+  mbar([plgv_m])
+  mdg(grms_m_pipe, [plgv_m, pp[:norm_conv], pp[:nc_v], HIDDEN, HC_COUNT, EPS], n * HC_COUNT, 256)
+  mbar([pp[:nc_v]])
+  mdn(ple_conv_m_pipe, [pp[:conv], cs_in, pp[:nc_v], plgv_m, h_m, cs_out, HC_HIDDEN, n], n * HC_HIDDEN)
+  mbar([h_m])
+  if flip_defer[0] == 0 then pp[:ping] = 1 - ping
 
 -> head_multi(n)
-  metal_dispatch_groups(queue, grms_m_pipe, [h_m, mixer[:norm], n_tmp_m, HIDDEN, HC_COUNT, EPS], n * HC_COUNT, 256)
+  mdg(grms_m_pipe, [h_m, mixer[:norm], n_tmp_m, HIDDEN, HC_COUNT, EPS], n * HC_COUNT, 256)
+  mbar([n_tmp_m])
   mv_multi(mixer[:down], n_tmp_m, lowrank_m, HC_HIDDEN, HC_LOWRANK, n)
-  metal_dispatch_n(queue, silu_div_pipe, [lowrank_m, lowrank_m, ~0.0 + HC_COUNT, n * HC_LOWRANK], n * HC_LOWRANK)
+  mbar([lowrank_m])
+  mdn(silu_div_pipe, [lowrank_m, lowrank_m, ~0.0 + HC_COUNT, n * HC_LOWRANK], n * HC_LOWRANK)
+  mbar([lowrank_m])
   mv_multi(mixer[:up], lowrank_m, upraw_m, HC_LOWRANK, HC_HIDDEN, n)
-  metal_dispatch_n(queue, hc_mix_reduce_m_pipe, [upraw_m, n_tmp_m, xn_m, HC_COUNT, HIDDEN, n], n * HIDDEN)
+  mbar([upraw_m])
+  mdn(hc_mix_reduce_m_pipe, [upraw_m, n_tmp_m, xn_m, HC_COUNT, HIDDEN, n], n * HIDDEN)
+  mbar([xn_m])
   mv_multi(lm_head, xn_m, logits_m, HIDDEN, N_VOCAB, n)
-  metal_dispatch_groups(queue, argmax_stage1_pipe, [logits_m, am_pv_m, am_pi_m, N_VOCAB, ARGMAX_CHUNKS, n], n * ARGMAX_CHUNKS, 256)
-  metal_dispatch_groups(queue, argmax_stage2_pipe, [am_pv_m, am_pi_m, am_out_m, ARGMAX_CHUNKS, n], n, 256)
+  mbar([logits_m])
+  mdg(argmax_stage1_pipe, [logits_m, am_pv_m, am_pi_m, N_VOCAB, ARGMAX_CHUNKS, n], n * ARGMAX_CHUNKS, 256)
+  mbar([am_pv_m, am_pi_m])
+  mdg(argmax_stage2_pipe, [am_pv_m, am_pi_m, am_out_m, ARGMAX_CHUNKS, n], n, 256)
+
+# Emit the whole width-n pass through the wrappers (record or dispatch).
+-> multi_body(n)
+  mdn(embed_m_pipe, [embed_w, h_embed_m, tok_ids_m, HIDDEN, n], n * HIDDEN)
+  mbar([h_embed_m])
+  t = 0
+  while t < n
+    s = 0
+    while s < HC_COUNT
+      mdn(copy_at_pipe, [h_embed_m, h_m, t * HIDDEN, t * HC_HIDDEN + s * HIDDEN, HIDDEN], HIDDEN)
+      s = s + 1
+    t = t + 1
+  mbar([h_m])
+  li = 0
+  while li < N_LAYERS
+    lyr = layers[li]
+    if lyr[:ple] != nil then ple_multi(lyr, n)
+    hc_mix_multi(lyr[:attn_hc], n)
+    if lyr[:kind] == "mamba"
+      mamba_multi(lyr, n)
+    else
+      full_multi(lyr, n)
+    hc_combine_multi_step(n)
+    hc_mix_multi(lyr[:mlp_hc], n)
+    moe_multi(lyr, n)
+    hc_combine_multi_step(n)
+    li = li + 1
+  if multi_head_on[0] == 1 then head_multi(n)
+
+# Recorded programs per (width, mamba ping parity): the ping choice is baked
+# into the recorded args, and every mamba/PLE layer flips exactly once per
+# verify round, so parity is global.
+multi_progs = {}
+# 0 during interior prefill chunks: skip the mixer + lm_head + argmax (only
+# the last chunk needs logits) — saves ~360 MB of lm_head stream per chunk.
+multi_head_on = [1]
+
+-> record_multi_prog(n)
+  while mprog.size() > 0
+    mprog.pop()
+  mrec[0] = 1
+  fd = flip_defer[0]
+  flip_defer[0] = 1
+  multi_body(n)
+  flip_defer[0] = fd
+  mrec[0] = 0
+  out = []
+  i2 = 0
+  while i2 < mprog.size()
+    out.push(mprog[i2])
+    i2 = i2 + 1
+  out
 
 -> forward_multi(toks, pos0, n)
   t = 0
@@ -1576,31 +1902,32 @@ if multi_n > 0
       metal_buffer_write_f32(sin_m, t * ROT_HALF + ri, Math.sin(angle))
       ri = ri + 1
     t = t + 1
-  metal_batch_begin(queue)
-  metal_dispatch_n(queue, embed_m_pipe, [embed_w, h_embed_m, tok_ids_m, HIDDEN, n], n * HIDDEN)
-  t = 0
-  while t < n
-    s = 0
-    while s < HC_COUNT
-      metal_dispatch_n(queue, copy_at_pipe, [h_embed_m, h_m, t * HIDDEN, t * HC_HIDDEN + s * HIDDEN, HIDDEN], HIDDEN)
-      s = s + 1
-    t = t + 1
-  li = 0
-  while li < N_LAYERS
-    lyr = layers[li]
-    if lyr[:ple] != nil then ple_multi(lyr, n)
-    hc_mix_multi(lyr[:attn_hc], n)
-    if lyr[:kind] == "mamba"
-      mamba_multi(lyr, n)
-    else
-      full_multi(lyr, pos0, n)
-    hc_combine_multi_step(n)
-    hc_mix_multi(lyr[:mlp_hc], n)
-    moe_multi(lyr, n)
-    hc_combine_multi_step(n)
-    li = li + 1
-  head_multi(n)
+  metal_buffer_write_i32(mpos_buf, 0, pos0)
+  if qsa_on
+    t = 0
+    while t < n
+      metal_buffer_write_i32(qsa_nb_m, t, (pos0 + t + 1) / 4)
+      metal_buffer_write_i32(qsa_vis_m, t, pos0 + t + 1)
+      t = t + 1
+    metal_buffer_write_i32(qsa_range_buf, 0, pos0 / 4)
+    metal_buffer_write_i32(qsa_range_buf, 1, (pos0 + n) / 4)
+  prog_key = (n * 2 + layers[0][:ping]) * 2 + multi_head_on[0]
+  if multi_progs[prog_key] == nil
+    multi_progs[prog_key] = record_multi_prog(n)
+  metal_batch_begin_concurrent(queue)
+  # ccall int LITERALS miscompile (see memory) — pass the flag via a variable
+  with_barriers = 2 - 1
+  ccall("w_metal_program_run", queue, multi_progs[prog_key], with_barriers)
   metal_batch_commit(queue)
+  # replayed programs can't flip pings as a side effect — do it here unless
+  # the caller (spec loop) defers flips to its rollback
+  if flip_defer[0] == 0
+    li = 0
+    while li < N_LAYERS
+      lyr = layers[li]
+      if lyr[:kind] == "mamba" then lyr[:ping] = 1 - lyr[:ping]
+      if lyr[:ple] != nil then lyr[:ple][:ping] = 1 - lyr[:ple][:ping]
+      li = li + 1
   preds = []
   t = 0
   while t < n
@@ -1631,6 +1958,220 @@ if multi_n > 0
   ple_ctx[0] = EOS_TOKEN
   ple_ctx[1] = EOS_TOKEN
 
+# ---- MTP head (FN_MTP=1: draft-acceptance harness) ------------------------
+# Semantics per vLLM qwen4_exp mtp.py: the head consumes the PRE-mixer 10240
+# hyper-connection stream h_p plus emb(t_{p+1}); RMS-norm each (the hidden
+# norm runs over the FULL flattened 10240), project through fc_hidden (per
+# branch) / fc_embedding, broadcast-add the embedding into all 4 branches,
+# run ONE full-attention+MoE layer (own HCs; kv slot = position-1 since MTP
+# position 0 never exists; rope at the REAL position), collapse through its
+# own mixer, share lm_head. The MTP MoE is bf16 with FUSED gate|up experts.
+if mtp_depth > 0
+  mtp_ops_lib = metal_compile_source(device, read_file(FN_DIR + "mtp_ops.metal"))
+  mtp_fuse_pipe = metal_pipeline(mtp_ops_lib, "mtp_fuse_add")
+  mtp_gather_pipe = metal_pipeline(mtp_ops_lib, "bf16_moe_gather_multi")
+  mtp_gu_silu_pipe = metal_pipeline(mtp_ops_lib, "mtp_gu_silu")
+  mtp_pre_norm_e = metal_buffer(device, HIDDEN * 4)
+  mtp_pre_norm_h = metal_buffer(device, HC_HIDDEN * 4)
+  load_shifted_norm(["mtp.pre_fc_norm_embedding.weight", HIDDEN, mtp_pre_norm_e])
+  load_shifted_norm(["mtp.pre_fc_norm_hidden.weight", HC_HIDDEN, mtp_pre_norm_h])
+  mtp_qn = metal_buffer(device, HEAD_DIM * 4)
+  mtp_kn = metal_buffer(device, HEAD_DIM * 4)
+  load_shifted_norm(["mtp.layers.0.self_attn.q_norm.weight", HEAD_DIM, mtp_qn])
+  load_shifted_norm(["mtp.layers.0.self_attn.k_norm.weight", HEAD_DIM, mtp_kn])
+  mtp_lyr = {
+    kind: "full",
+    q: mv_tensor("mtp.layers.0.self_attn.q_proj.weight"),
+    k: mv_tensor("mtp.layers.0.self_attn.k_proj.weight"),
+    v: mv_tensor("mtp.layers.0.self_attn.v_proj.weight"),
+    out: mv_tensor("mtp.layers.0.self_attn.o_proj.weight"),
+    qn: mtp_qn,
+    kn: mtp_kn,
+    k_cache: metal_buffer(device, MAX_POS * KV_DIM * 4),
+    v_cache: metal_buffer(device, MAX_POS * KV_DIM * 4)
+  }
+  mtp_attn_hc = load_hc("mtp.layers.0.attn_hyper_connection.")
+  mtp_mlp_hc = load_hc("mtp.layers.0.mlp_hyper_connection.")
+  mtp_mixer = load_hc("mtp.hyper_connection_mixer.")
+  mtp_router = mv_tensor("mtp.layers.0.mlp.gate.weight")
+  mtp_sh_gate = mv_tensor("mtp.layers.0.mlp.shared_expert.gate_proj.weight")
+  mtp_sh_up = mv_tensor("mtp.layers.0.mlp.shared_expert.up_proj.weight")
+  mtp_sh_down = mv_tensor("mtp.layers.0.mlp.shared_expert.down_proj.weight")
+  mtp_seg = raw_tensor("mtp.layers.0.mlp.shared_expert_gate.weight")
+  mtp_experts_gu = raw_tensor("mtp.layers.0.mlp.experts.gate_up_proj")
+  mtp_experts_dn = raw_tensor("mtp.layers.0.mlp.experts.down_proj")
+  mtp_fc_e = raw_tensor("mtp.fc_embedding.weight")
+  mtp_fc_h = raw_tensor("mtp.fc_hidden.weight")
+  mtp_en_m = metal_buffer(device, MULTI_MAX * HIDDEN * 4)
+  mtp_ef_m = metal_buffer(device, MULTI_MAX * HIDDEN * 4)
+  mtp_hn_m = metal_buffer(device, MULTI_MAX * HC_HIDDEN * 4)
+  mtp_hf_m = metal_buffer(device, MULTI_MAX * HC_HIDDEN * 4)
+  egu_m = metal_buffer(device, MULTI_MAX * TOP_K * 2 * MOE_FFN * 4)
+
+-> mtp_moe_multi(n)
+  mv_multi(mtp_router, xn_m, rlog_m, HIDDEN, N_EXPERTS, n)
+  mv_multi(mtp_sh_gate, xn_m, sg_m, HIDDEN, SHARED_FFN, n)
+  mv_multi(mtp_sh_up, xn_m, su_m, HIDDEN, SHARED_FFN, n)
+  mdg(bf16_m_pipe, [mtp_seg, xn_m, seg_m, HIDDEN, 1, n], 1, 32)
+  mbar([rlog_m, sg_m, su_m])
+  mdg(router_m_pipe, [rlog_m, tidx_m, tw_m], n, 512)
+  mdn(silu_pipe, [sg_m, su_m, sh_m, n * SHARED_FFN], n * SHARED_FFN)
+  mbar([tidx_m, sh_m])
+  mdg(mtp_gather_pipe, [mtp_experts_gu, tidx_m, xn_m, egu_m, HIDDEN, 2 * MOE_FFN, 2 * MOE_FFN * HIDDEN, 0, TOP_K, 0], n * TOP_K * (2 * MOE_FFN / 8), 64)
+  mv_multi(mtp_sh_down, sh_m, shared_m, SHARED_FFN, HIDDEN, n)
+  mbar([egu_m])
+  mdn(mtp_gu_silu_pipe, [egu_m, eh_m, MOE_FFN, n * TOP_K * MOE_FFN], n * TOP_K * MOE_FFN)
+  mbar([eh_m])
+  mdg(mtp_gather_pipe, [mtp_experts_dn, tidx_m, eh_m, ed_m, MOE_FFN, HIDDEN, HIDDEN * MOE_FFN, 0, TOP_K, 1], n * TOP_K * (HIDDEN / 8), 64)
+  mbar([ed_m, tw_m, shared_m, seg_m])
+  mdn(moe_out_m_pipe, [ed_m, tw_m, shared_m, seg_m, y_m, TOP_K, HIDDEN, n], n * HIDDEN)
+  mbar([y_m])
+
+-> mtp_fuse_gpu(hsrc, n)
+  mdn(embed_m_pipe, [embed_w, e_m, tok_ids_m, HIDDEN, n], n * HIDDEN)
+  mdg(grms_m_pipe, [hsrc, mtp_pre_norm_h, mtp_hn_m, HC_HIDDEN, 1, EPS], n, 256)
+  mbar([e_m, mtp_hn_m])
+  mdg(grms_m_pipe, [e_m, mtp_pre_norm_e, mtp_en_m, HIDDEN, 1, EPS], n, 256)
+  mdg(bf16_m_pipe, [mtp_fc_h, mtp_hn_m, mtp_hf_m, HIDDEN, HIDDEN, n * HC_COUNT], HIDDEN, 32)
+  mbar([mtp_en_m])
+  mdg(bf16_m_pipe, [mtp_fc_e, mtp_en_m, mtp_ef_m, HIDDEN, HIDDEN, n], HIDDEN, 32)
+  mbar([mtp_ef_m, mtp_hf_m])
+  mdn(mtp_fuse_pipe, [mtp_hf_m, mtp_ef_m, h_m, HC_COUNT, HIDDEN, n], n * HC_HIDDEN)
+  mbar([h_m])
+
+-> mtp_rope(pos0, n)
+  t = 0
+  while t < n
+    ri = 0
+    while ri < ROT_HALF
+      theta = Math.exp(log_rope * (~0.0 - ri * rope_power))
+      angle = (pos0 + t) * theta
+      metal_buffer_write_f32(cos_m, t * ROT_HALF + ri, Math.cos(angle))
+      metal_buffer_write_f32(sin_m, t * ROT_HALF + ri, Math.sin(angle))
+      ri = ri + 1
+    t = t + 1
+
+-> mtp_head_multi(n)
+  mdg(grms_m_pipe, [h_m, mtp_mixer[:norm], n_tmp_m, HIDDEN, HC_COUNT, EPS], n * HC_COUNT, 256)
+  mbar([n_tmp_m])
+  mv_multi(mtp_mixer[:down], n_tmp_m, lowrank_m, HC_HIDDEN, HC_LOWRANK, n)
+  mbar([lowrank_m])
+  mdn(silu_div_pipe, [lowrank_m, lowrank_m, ~0.0 + HC_COUNT, n * HC_LOWRANK], n * HC_LOWRANK)
+  mbar([lowrank_m])
+  mv_multi(mtp_mixer[:up], lowrank_m, upraw_m, HC_LOWRANK, HC_HIDDEN, n)
+  mbar([upraw_m])
+  mdn(hc_mix_reduce_m_pipe, [upraw_m, n_tmp_m, xn_m, HC_COUNT, HIDDEN, n], n * HIDDEN)
+  mbar([xn_m])
+  mv_multi(lm_head, xn_m, logits_m, HIDDEN, N_VOCAB, n)
+  mbar([logits_m])
+  mdg(argmax_stage1_pipe, [logits_m, am_pv_m, am_pi_m, N_VOCAB, ARGMAX_CHUNKS, n], n * ARGMAX_CHUNKS, 256)
+  mbar([am_pv_m, am_pi_m])
+  mdg(argmax_stage2_pipe, [am_pv_m, am_pi_m, am_out_m, ARGMAX_CHUNKS, n], n, 256)
+
+# One MTP draft: fuse (H, emb(next_tok)) at real position pos_real (kv slot
+# pos_real-1), run the head layer, return the drafted token id.
+-> mtp_body(hsrc, n)
+  mtp_fuse_gpu(hsrc, n)
+  hc_mix_multi(mtp_attn_hc, n)
+  full_multi(mtp_lyr, n)
+  hc_combine_multi_step(n)
+  hc_mix_multi(mtp_mlp_hc, n)
+  mtp_moe_multi(n)
+  hc_combine_multi_step(n)
+  if multi_head_on[0] == 1 then mtp_head_multi(n)
+
+# Recorded draft programs: variant 0 fuses from the main H, variant 1 from
+# the MTP layer's own h_m (chained drafts). Everything token-dependent flows
+# through tok_ids_m / cos_m / mpos_buf.
+mtp_progs = [nil, nil]
+
+-> mtp_step(next_tok, pos_real, variant)
+  mtp_rope(pos_real, 1)
+  metal_buffer_write_i32(mpos_buf, 0, pos_real - 1)
+  metal_buffer_write_i32(tok_ids_m, 0, next_tok)
+  hsrc = variant == 0 ? H : h_m
+  if mtp_progs[variant] == nil
+    while mprog.size() > 0
+      mprog.pop()
+    mrec[0] = 1
+    mtp_body(hsrc, 1)
+    mrec[0] = 0
+    rec_out = []
+    ri2 = 0
+    while ri2 < mprog.size()
+      rec_out.push(mprog[ri2])
+      ri2 = ri2 + 1
+    mtp_progs[variant] = rec_out
+  metal_batch_begin_concurrent(queue)
+  with_barriers2 = 2 - 1
+  ccall("w_metal_program_run", queue, mtp_progs[variant], with_barriers2)
+  metal_batch_commit(queue)
+  metal_buffer_read_i32(am_out_m, 0)
+
+# Width-n MTP prefill: populate the MTP kv cache for a whole chunk in one
+# recorded pass (fuses h_m[t] with emb(next_toks[t]); head skipped — only kv
+# writes matter during prefill).
+mtp_pf_progs = {}
+
+-> mtp_prefill_chunk(next_toks, pos0, n)
+  t = 0
+  while t < n
+    metal_buffer_write_i32(tok_ids_m, t, next_toks[t])
+    t = t + 1
+  mtp_rope(pos0, n)
+  metal_buffer_write_i32(mpos_buf, 0, pos0 - 1)
+  pf_key = n
+  if mtp_pf_progs[pf_key] == nil
+    while mprog.size() > 0
+      mprog.pop()
+    mrec[0] = 1
+    hd_save = multi_head_on[0]
+    multi_head_on[0] = 0
+    mtp_body(h_m, n)
+    multi_head_on[0] = hd_save
+    mrec[0] = 0
+    rec2 = []
+    ci = 0
+    while ci < mprog.size()
+      rec2.push(mprog[ci])
+      ci = ci + 1
+    mtp_pf_progs[pf_key] = rec2
+  metal_batch_begin_concurrent(queue)
+  wb2 = 2 - 1
+  ccall("w_metal_program_run", queue, mtp_pf_progs[pf_key], wb2)
+  metal_batch_commit(queue)
+
+# Recompute the recurrent states for the accepted prefix (tape replay from
+# the per-layer stashes) and flip all deferred pings. On a full accept the
+# verify's own final states are already right — only the flips remain.
+# Also refreshes H (width-1 stream) from the last accepted verify position.
+-> spec_rollback(spec)
+  n_keep = spec[0]
+  full = spec[1]
+  metal_batch_begin(queue)
+  li = 0
+  while li < N_LAYERS
+    lyr = layers[li]
+    if lyr[:ple] != nil
+      pp = lyr[:ple]
+      pping = pp[:ping]
+      if n_keep < full
+        metal_dispatch_n(queue, ple_conv_m_pipe, [pp[:conv], pping == 0 ? pp[:cs_a] : pp[:cs_b], pp[:nc_v], plgv_m, plk_m, pping == 0 ? pp[:cs_b] : pp[:cs_a], HC_HIDDEN, n_keep], n_keep * HC_HIDDEN)
+      pp[:ping] = 1 - pping
+    if lyr[:kind] == "mamba"
+      ping = lyr[:ping]
+      if n_keep < full
+        cs_in = ping == 0 ? lyr[:cs_a] : lyr[:cs_b]
+        cs_out = ping == 0 ? lyr[:cs_b] : lyr[:cs_a]
+        ss_in = ping == 0 ? lyr[:ss_a] : lyr[:ss_b]
+        ss_out = ping == 0 ? lyr[:ss_b] : lyr[:ss_a]
+        metal_dispatch_n(queue, conv_split_m_pipe, [lyr[:conv], cs_in, lyr[:qkv_v], mq_m, mk_m, mv_m, cs_out, QKV_DIM, Q_DIM, K_DIM, n_keep], QKV_DIM)
+        metal_dispatch_3d(queue, delta_m_pipe, [lyr[:mk_v], lyr[:mk_v], lyr[:mv_v], lyr[:g_v], lyr[:beta_v], ss_in, delta_m_buf, ss_out, HK, HV, DK, DV, n_keep], 1, DV / 4, HV, 32, 4, 1)
+      lyr[:ping] = 1 - ping
+    li = li + 1
+  metal_dispatch_n(queue, copy_at_pipe, [h_m, H, (n_keep - 1) * HC_HIDDEN, 0, HC_HIDDEN], HC_HIDDEN)
+  metal_batch_commit(queue)
+
 # ---- prompt ----
 prompt_seed = [760, 6511, 314, 9338, 369]
 prompt = []
@@ -1651,9 +2192,54 @@ setup_elapsed = ccall("__w_clock_ms") - setup_t0
 prefill_t0 = ccall("__w_clock_ms")
 pred = -1
 i = 0
-while i < prompt.size()
-  pred = forward(prompt[i], i, i == prompt.size() - 1)
-  i = i + 1
+# Chunked prefill: PREFILL_CHUNK-token blocks through the recorded multi
+# path (quant projections on nvfp4_gemm_f32 m-tiles). Interior chunks skip
+# the head. FN_CHUNK=0 forces the serial token-by-token prefill (A/B and
+# ids gate). GEMM MMA summation is NOT bit-identical to the matvec family —
+# gate chunked-vs-serial on ids, like the 27B did.
+prefill_chunked = prompt.size() > 8 && ccall("__w_env", "FN_CHUNK") != "0"
+if prefill_chunked
+  while i < prompt.size()
+    remaining = prompt.size() - i
+    cw = remaining
+    if cw > PREFILL_CHUNK then cw = PREFILL_CHUNK
+    # the head-bearing final chunk must fit logits_m: shave this chunk so the
+    # tail lands in (0, PREFILL_LAST_MAX]
+    if remaining > cw && remaining - cw > 0 && remaining - cw < 1
+      cw = cw
+    if cw == remaining && cw > PREFILL_LAST_MAX
+      cw = remaining - PREFILL_LAST_MAX
+    chunk = prompt.slice(i, cw)
+    is_last = i + cw >= prompt.size()
+    multi_head_on[0] = is_last ? 1 : 0
+    ct0 = ccall("__w_clock_ms")
+    pf_preds = forward_multi(chunk, i, cw)
+    if fn_time then << "  chunk @" + i.to_s + " w" + cw.to_s + ": " + (ccall("__w_clock_ms") - ct0).to_s + " ms"
+    if is_last then pred = pf_preds[cw - 1]
+    if mtp_depth > 0
+      nxt = []
+      ti = 0
+      while ti < cw
+        nxt.push(i + ti + 1 < prompt.size() ? prompt[i + ti + 1] : pred)
+        ti = ti + 1
+      mtp_prefill_chunk(nxt, i + 1, cw)
+    if is_last
+      # the spec loop and FN_MTP harness fuse drafts from H (width-1 stream);
+      # forward_multi only fills h_m — publish the final position's stream
+      metal_batch_begin(queue)
+      metal_dispatch_n(queue, copy_at_pipe, [h_m, H, (cw - 1) * HC_HIDDEN, 0, HC_HIDDEN], HC_HIDDEN)
+      metal_batch_commit(queue)
+    i = i + cw
+  multi_head_on[0] = 1
+else
+  while i < prompt.size()
+    pred = forward(prompt[i], i, i == prompt.size() - 1)
+    if mtp_depth > 0
+      mtp_step(i + 1 < prompt.size() ? prompt[i + 1] : pred, i + 1, 0)
+    i = i + 1
+if mtp_depth > 0 && ccall("__w_env", "FN_DUMP_MTPKV") != nil && ccall("__w_env", "FN_DUMP_MTPKV") != ""
+  File.write_bytes(ccall("__w_env", "FN_DUMP_MTPKV") + ".k", metal_buffer_view(mtp_lyr[:k_cache], 8, MAX_POS * KV_DIM * 4))
+  File.write_bytes(ccall("__w_env", "FN_DUMP_MTPKV") + ".v", metal_buffer_view(mtp_lyr[:v_cache], 8, MAX_POS * KV_DIM * 4))
 if ccall("__w_env", "FN_DUMP_H") != nil && ccall("__w_env", "FN_DUMP_H") != ""
   File.write_bytes(ccall("__w_env", "FN_DUMP_H"), metal_buffer_view(H, 8, HC_HIDDEN * 4))
   File.write_bytes(ccall("__w_env", "FN_DUMP_H") + ".logits", metal_buffer_view(logits, 8, N_VOCAB * 4))
@@ -1682,12 +2268,82 @@ ids.push(pred)
 pos = prompt.size()
 t0 = ccall("__w_clock_ms")
 round_ms = []
-while ids.size() < n_generate
-  rt0 = ccall("__w_clock_ms")
-  pred = forward(pred, pos, true)
-  ids.push(pred)
-  pos = pos + 1
-  round_ms.push(ccall("__w_clock_ms") - rt0)
+spec_rounds = 0
+accept_hist = [0, 0, 0, 0, 0, 0, 0, 0]
+if mtp_spec > 0
+  cur = pred
+  while ids.size() < n_generate
+    rt0 = ccall("__w_clock_ms")
+    d = mtp_adaptive == 1 ? mtp_d_cur[0] : mtp_spec
+    if pos + d + 1 > MAX_POS then d = MAX_POS - pos - 1
+    if d < 0 then d = 0
+    st0 = fn_time ? ccall("__w_clock_ms") : ~0.0
+    drafts = []
+    di = 0
+    while di < d
+      drafts.push(mtp_step(di == 0 ? cur : drafts[di - 1], pos + 1 + di, di == 0 ? 0 : 1))
+      di = di + 1
+    st1 = fn_time ? ccall("__w_clock_ms") : ~0.0
+    block = [cur]
+    di = 0
+    while di < d
+      block.push(drafts[di])
+      di = di + 1
+    sctx0 = ple_ctx[0]
+    sctx1 = ple_ctx[1]
+    flip_defer[0] = 1
+    preds = forward_multi(block, pos, d + 1)
+    flip_defer[0] = 0
+    st2 = fn_time ? ccall("__w_clock_ms") : ~0.0
+    a = 0
+    while a < d && drafts[a] == preds[a]
+      a = a + 1
+    ei = 0
+    while ei <= a
+      ids.push(preds[ei])
+      ei = ei + 1
+    n_keep = a + 1
+    if n_keep < d + 1
+      ple_ctx[0] = sctx0
+      ple_ctx[1] = sctx1
+      ki = 0
+      while ki < n_keep
+        ple_advance(block[ki])
+        ki = ki + 1
+    spec_rollback([n_keep, d + 1])
+    if fn_time
+      encode_ms[0] = encode_ms[0] + (st1 - st0)
+      encode_ms[1] = encode_ms[1] + (st2 - st1)
+      encode_ms[2] = encode_ms[2] + (ccall("__w_clock_ms") - st2)
+      encode_ms[3] = encode_ms[3] + 1
+    spec_rounds = spec_rounds + 1
+    accept_hist[a] = accept_hist[a] + 1
+    if mtp_adaptive == 1
+      # climb only after two consecutive full accepts, cap 4: chain
+      # acceptance ~0.79^k can't pay for wider verifies past that
+      if a == d
+        mtp_streak[0] = mtp_streak[0] + 1
+        if mtp_streak[0] >= 2 && d < 4
+          mtp_d_cur[0] = d + 1
+          mtp_streak[0] = 0
+      else
+        mtp_streak[0] = 0
+        mtp_d_cur[0] = a > 1 ? a : 1
+    cur = preds[a]
+    pos = pos + n_keep
+    round_ms.push(ccall("__w_clock_ms") - rt0)
+else
+  while ids.size() < n_generate
+    rt0 = ccall("__w_clock_ms")
+    pred = forward(pred, pos, true)
+    if mtp_depth > 0
+      if mtp_pending[0] >= 0
+        mtp_total[0] = mtp_total[0] + 1
+        if mtp_pending[0] == pred then mtp_hits[0] = mtp_hits[0] + 1
+      mtp_pending[0] = mtp_step(pred, pos + 1, 0)
+    ids.push(pred)
+    pos = pos + 1
+    round_ms.push(ccall("__w_clock_ms") - rt0)
 elapsed = ccall("__w_clock_ms") - t0
 decoded = ids.size() - 1
 sorted_ms = round_ms.sort()
@@ -1703,6 +2359,15 @@ if fn_time && encode_ms[3] > 0
   << "host phases/round: rope+ple " + (encode_ms[0] / n).to_s + " ms, encode " + (encode_ms[1] / n).to_s + " ms, commit+wait+read " + (encode_ms[2] / n).to_s + " ms"
 if decoded > 0
   << "decode: " + decoded.to_s + " tokens in " + elapsed.to_s + " ms = " + (1000.0 * decoded / elapsed).to_s + " tok/s (median round " + median_ms.to_s + " ms)"
+if mtp_spec > 0 && spec_rounds > 0
+  line = "mtp spec depth " + (mtp_adaptive == 1 ? "adaptive" : mtp_spec.to_s) + ": " + spec_rounds.to_s + " rounds, accepted-drafts histogram "
+  ai = 0
+  while ai <= 7
+    line = line + ai.to_s + ":" + accept_hist[ai].to_s + " "
+    ai = ai + 1
+  << line
+if mtp_depth > 0 && mtp_total[0] > 0
+  << "mtp draft acceptance: " + mtp_hits[0].to_s + "/" + mtp_total[0].to_s + " = " + (100.0 * mtp_hits[0] / mtp_total[0]).to_s + "% (harness adds a draft to every round; tok/s above is NOT representative)"
 
 if multi_n > 0
   << "---- width-" + multi_n.to_s + " multi verify: serial ids are the oracle ----"

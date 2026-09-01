@@ -219,6 +219,7 @@ kernel void moe_gather_matvec_multi(
   constant int &hw0 [[buffer(19)]],
   constant int &hs0 [[buffer(20)]],
   constant int &hg0 [[buffer(21)]],
+  device const int *__restrict__ order [[buffer(22)]],  // [n*K] pair ids, expert-sorted
   uint __tg_id     [[threadgroup_position_in_grid]],
   uint __simd_id   [[simdgroup_index_in_threadgroup]],
   uint __simd_lane [[thread_index_in_simdgroup]]
@@ -228,7 +229,9 @@ kernel void moe_gather_matvec_multi(
   const int tgs_per_k    = n_rows / 8;
 
   int tg      = int(__tg_id);
-  int tk      = tg / tgs_per_k;      // t*K + k
+  // Expert-sorted iteration: adjacent TGs hit the same expert's weights, so
+  // repeats come from L2 instead of a fresh DRAM stream per (token, k).
+  int tk      = order[tg / tgs_per_k];   // t*K + k
   int m_block = tg % tgs_per_k;
   int expert  = indices[tk];
   int t       = tk / K;
@@ -525,5 +528,44 @@ kernel void fn_phn_rope_multi(
     float s = sin_t[token * rot_half + p];
     x[lo] = a * c - b * s;
     x[hi] = a * s + b * c;
+  }
+}
+
+
+// Stable counting sort of the (token, expert-slot) pairs by expert id.
+// One TG of 512 threads; nK <= 512*... pairs (64 tokens x 10). Thread e owns
+// expert e: counts its pairs, takes a prefix sum, then emits its pairs in
+// token order — deterministic. Dispatch: 1 TG x 512.
+[[max_total_threads_per_threadgroup(512)]]
+kernel void moe_sort_pairs(
+  device const int *__restrict__ indices [[buffer(0)]],   // [n, K]
+  device       int *__restrict__ order   [[buffer(1)]],   // [n*K]
+  constant int &nk [[buffer(2)]],
+  uint __tid [[thread_position_in_threadgroup]]
+) {
+  threadgroup int counts[512];
+  int e = int(__tid);
+  int c = 0;
+  for (int p = 0; p < nk; p++) {
+    if (indices[p] == e) c++;
+  }
+  counts[e] = c;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  // exclusive prefix sum (single thread — 512 adds, negligible)
+  threadgroup int offsets[512];
+  if (e == 0) {
+    int acc = 0;
+    for (int i = 0; i < 512; i++) {
+      offsets[i] = acc;
+      acc += counts[i];
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  int at = offsets[e];
+  for (int p = 0; p < nk; p++) {
+    if (indices[p] == e) {
+      order[at] = p;
+      at++;
+    }
   }
 }

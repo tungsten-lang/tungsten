@@ -105,23 +105,54 @@ self-quantization must re-run the parity + smoke gates.
    (thesis proven) but 1191 executeCommandsInBuffer segments cost ~10 us
    each GPU-side (21 -> 34 ms). Gated FN_ICB=1. Landmine found: the
    compiler CSEs ccall wrappers with constant args (see memory).
-2. MTP width-n verify — **VERIFY PATH LANDED, EXACT**: `forward_multi`
-   (engine mode `multi:N`, N<=8) re-decodes the serial oracle in width-N
-   blocks and matches its ids EXACTLY (0 mismatches at widths 2/4/8, 119
-   tokens). Kernels: `qwen4_fn/fn_multi.metal` (flash-next ops, token-major
-   [n, W]) + the 27B decode_multi family + `nvfp4_wide_bN_r1` matvecs.
-   Bit-identity rules that made it exact: every multi kernel is an
-   EXPRESSION-level clone of its serial twin — fn_phn_rope_multi re-clones
-   per_head_norm because the 27B multi kernel's rsqrt / x*(rrms*w) differ
-   in ULPs from our 1/sqrt / (x*rrms)*w; gdn_conv_split_multi keeps
-   z*sigmoid(z) (not z/(1+e^-z)); verify mode forces naive bf16 matvecs +
-   host rope on BOTH arms so summation orders agree. Measured (per-call
-   multi path, naive bf16, serial encoder — i.e. un-optimized): blocks of
-   2/4/8 cost 45/67/110 ms → 44/60/73 tok/s-equivalent vs 25 tok/s serial
-   per-call; marginal in-block token ~9-11 ms. Remaining for real MTP:
-   drafter (MTP head port), acceptance walk + state rollback
-   (conv_state_replay pattern), and the fast-path treatment (prebuilt
-   programs / concurrent encoder) for the multi rounds.
+2. MTP width-n verify + speculative decode — **LANDED, WORKING END TO END**:
+   - `multi:N` gate: `forward_multi` re-decodes the serial oracle in
+     width-N blocks, ids EXACT (0 mismatches at widths 1-8, 119 tokens),
+     still green after every optimization below. Bit-identity rules:
+     every multi kernel is an EXPRESSION-level clone of its serial twin
+     (fn_phn_rope_multi re-clones per_head_norm — the 27B multi kernel's
+     rsqrt / x*(rrms*w) differ in ULPs from our 1/sqrt / (x*rrms)*w;
+     gdn_conv_split_multi keeps z*sigmoid(z)); the gate forces naive bf16
+     matvecs + host rope on BOTH arms so summation orders agree.
+   - MTP head (`FN_MTP=1` harness): native qwen4_exp head — pre-mixer
+     10240 stream + emb(next), single 10240-wide RMS + per-branch
+     fc_hidden + broadcast fc_embedding, one attn+MoE layer (own HCs,
+     kv slot = pos-1, bf16 FUSED gate|up experts), own mixer, shared
+     lm_head. **79.3% greedy draft acceptance** on fixture prose.
+   - `mtp:D` speculative loop: draft D (chained: variant-1 fuses from the
+     MTP layer's own h_m), verify width-(D+1), accept longest matching
+     prefix + bonus token, tape-replay rollback of GDN conv/delta + PLE
+     conv states from per-layer stashed inputs (~22 MB; kv self-heals),
+     PLE host ctx snapshot/re-advance. Deterministic histograms.
+   - Perf treatment: verify + drafts run as RECORDED programs through
+     w_metal_program_run (one ccall) on a CONCURRENT encoder with scoped
+     barriers mirroring the serial progs; pos scalars live in mpos_buf so
+     recordings replay at any position; per-(width,ping-parity) cache.
+     NVFP4 wide-rung table from the `wide` sweep: r1 at rows<=640 or n=1,
+     r2 otherwise (r1 collapses at n>=3 on big rows — register pressure).
+   - **QUIET-BOX RANKING (9/1, load ~4, 2 reps)**: fixture prose — plain
+     41.9/43.8, FN_RUNG=1 43.5/43.4 (tie; rungs stay opt-in), mtp:2
+     48.1/44.7, mtp:3 45.3/46.9, mtp:4 40.9/46.5. **Compiler-source
+     prompt (500-tok prefill, the realistic case): plain 35.6 -> mtp:3
+     49.4 tok/s (+39%)** — 23/35 rounds full-accept; code drafts accept
+     far better than prose. Depth 3 is the default recommendation.
+     Width-1 verify 30 ms vs 24 serial; marginal in-block token ~8.5 ms
+     (inherent GDN serial recurrence + per-token expert stream).
+   - Costs remaining: draft ~2.3 ms each (GPU+sync latency), verify fixed
+     ~30 ms. Next levers: w2-multi bf16 kernel (closes the width-1 gap),
+     3-way async commit split for the verify program.
+   - **Acceptance is TRAJECTORY-dependent** (9/1 pm, 4-cell test on the
+     compiler prompt): quant+serial-prefill fell into repetitive usage-text
+     (89-94% draft-1 accept, the 49.4 tok/s run); bf16-prefill and/or
+     bf16-decode trajectories generate novel content at ~60-70% accept and
+     proportionally less spec gain. Both texts fully coherent — do NOT
+     read an acceptance drop as a bug before diffing the generated text
+     (chunked-vs-serial prefill changes the trajectory: bf16 GEMM states).
+   - `mtp:adaptive` (depth self-tunes: climb after 2 full-accept rounds,
+     cap 4, drop to what stuck): measured NEGATIVE so far (22.7 vs fixed-3
+     41.9 same-conditions; per-width program recordings + deep-verify cost
+     outrun the ~3.2-token/round ceiling of 0.79^k chain acceptance).
+     Kept as a mode; revisit with cheap recordings + mixed content.
 3. Device-chained decode — OPEN (GPU rope landed as its enabler).
 4. **GPU rope + PLE gather** — HALF: rope on GPU (neutral, ids-identical,
    enabler for #3); table gather on GPU REVERTED — binding the 51 GB table
@@ -142,9 +173,35 @@ self-quantization must re-run the parity + smoke gates.
    CPU-pinned workload (encode floor is host-side); re-bench on a quiet
    box before flipping the default.
 9. Cross-token encode overlap — OPEN (needs #3).
-10. QSA indexer + long context — OPEN.
+10. QSA indexer + long context — **DECODE PATH LANDED (C1)**:
+    qwen4_fn/qsa.metal ports Qwen4ExpTextQSAIndexer verbatim: raw index
+    keys cached un-normed; complete 4-blocks mean-pooled -> k_layernorm ->
+    roped at the BLOCK-START position (static once complete, incremental
+    build); q layernorm+rope at the query position (first 64 dims, pairs
+    (i,i+32)); relu-sum scores over 4 heads / sqrt(128); top-512 blocks
+    (histogram threshold select, cut-bin ties by block order) + the
+    incomplete tail; SDPA over the selected list (identical arithmetic to
+    dense when the budget covers everything). Fixed grids + buffer-driven
+    bounds keep every step inside the recorded programs. FN_CTX=<n> sizes
+    kv/index caches (cap 262144); FN_QSA=1 forces the indexer from pos 0.
+    GATES: QSA==dense ids BIT-EXACT (fixture + 500-token compiler prompt);
+    FN_CTX=4096 decode from pos 500 to ~2300 crosses the boundary with
+    fully coherent code (1799 tokens, 24.6 tok/s avg). C2 LANDED same
+    day: indexer steps in the chunked-prefill/multi path (the qsa.metal
+    kernels were written width-ready: per-token nb/vis arrays, per-query
+    select TGs; the per-chunk block build covers the whole chunk while
+    nb[t] preserves causality). Gates: chunked QSA == chunked dense ids
+    EXACT at 500 tokens. 32k DEMO: 32,000-token compiler-source prompt
+    prefilled in 7.3 min (72.9 tok/s pp), decode at pos 32k = 16.1 tok/s,
+    fully coherent code continuation. 100k DEMO: 100,000-token prompt
+    prefilled in 19.2 min (86.9 tok/s pp, 11.5 ms/tok), decode at pos
+    100k = 12.2 tok/s (75 ms rounds, encode still 2.2 ms) — the
+    continuation mimics deep-compiler idiom from 100k tokens back. Known trims: the select kernel's
+    single-threaded min/max + emit passes (~2 x nb serial per layer per
+    token dominate long-ctx rounds); spec decode beyond 2051 still open
+    (reuse the anchor's selection across draft steps).
 
-Standing: 42.3 tok/s short / ~37 prose (FN_QUANT=1), all gates green.
+Standing: plain 43 short / 35.6 code-context; **mtp:3 46-49 short / 49.4 code-context (+39%)**. All gates green.
 
 ## Next (ranked by research + measurement)
 

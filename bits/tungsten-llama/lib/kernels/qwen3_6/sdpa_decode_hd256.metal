@@ -8,7 +8,7 @@
 #include <metal_simdgroup>
 using namespace metal;
 
-constant int MAX_DECODE_POS = 640;
+constant int MAX_DECODE_POS = 2051;
 
 [[max_total_threads_per_threadgroup(256)]]
 kernel void sdpa_decode_hd256(

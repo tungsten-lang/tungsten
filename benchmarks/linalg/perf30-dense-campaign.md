@@ -394,3 +394,31 @@ The internal repeated-allocation probe reports 393-420 us/allocation before and
 the public zeros contract remains true because anonymous mmap pages are
 demand-zero. Full-overwrite kernels simply stop paying for an earlier redundant
 page touch.
+
+## Item 7 follow-up — remaining f64 structured BLAS
+
+Source finding: the flat f64 API had `ddot`, `dnrm2`, `daxpy`, and `dgemv`, but
+still forced scalar Tungsten loops or a general GEMM for scaling, symmetric
+matrix-vector/rank-k operations, and triangular solves. The retained additions
+are `dscal`, upper-triangle `dsymv`/`dsyrk`, and left/lower/non-unit `dtrsm`,
+with matching Accelerate and OpenBLAS bridges.
+
+Correctness: `spec/core/blas_f64_spec.w` passes 8/8, including full known-value
+oracles for every new operation. The Accelerate bridge passes focused C syntax.
+`dsyrk` deliberately follows the BLAS structured-storage contract: it writes
+only the upper triangle. An initial full-result prototype mirrored upper to
+lower and measured 114 us versus 92 us for general GEMM, so that convenience
+contract was rejected before retention.
+
+Five matched release samples (microseconds per operation; medians):
+
+| operation and shape | previous route | new structured route | change |
+| --- | ---: | ---: | ---: |
+| `dscal`, 65,536 values | scalar 1,185 | 2.44 | 486x |
+| `dsymv`, 512x512 | scalar 4,801 | 16.99 | 283x |
+| `dsyrk`, 256x256 by 256 | `dgemm` 132.83 | 94.24 | 1.41x |
+| `dtrsm`, lower 256x256, 32 RHS | scalar 28,776 | 160.90 | 179x |
+
+Retained. Scalar-route ratios include Tungsten loop/index overhead and are not
+presented as CBLAS-vs-C kernel ratios; the `dsyrk` comparison is the stricter
+same-bridge control and still wins while doing roughly half the multiply work.

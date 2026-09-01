@@ -65944,8 +65944,22 @@ __attribute__((weak)) WValue w_blas_norm_f64(WValue a, WValue n) {
 __attribute__((weak)) WValue w_blas_daxpy(WValue alpha, WValue x, WValue y, WValue n) {
     (void)alpha; (void)x; (void)y; (void)n; w_raise(w_string("daxpy: BLAS bridge not linked")); return W_NIL;
 }
+__attribute__((weak)) WValue w_blas_dscal(WValue alpha, WValue x, WValue n) {
+    (void)alpha; (void)x; (void)n; w_raise(w_string("dscal: BLAS bridge not linked")); return W_NIL;
+}
 __attribute__((weak)) WValue w_blas_dgemv_n(WValue a, WValue x, WValue y, WValue m, WValue n) {
     (void)a; (void)x; (void)y; (void)m; (void)n; w_raise(w_string("dgemv: BLAS bridge not linked")); return W_NIL;
+}
+__attribute__((weak)) WValue w_blas_dsymv_upper(WValue a, WValue x, WValue y, WValue n) {
+    (void)a; (void)x; (void)y; (void)n; w_raise(w_string("dsymv: BLAS bridge not linked")); return W_NIL;
+}
+__attribute__((weak)) WValue w_blas_dsyrk_upper(WValue a, WValue c, WValue n, WValue k, WValue alpha, WValue beta) {
+    (void)a; (void)c; (void)n; (void)k; (void)alpha; (void)beta;
+    w_raise(w_string("dsyrk: BLAS bridge not linked")); return W_NIL;
+}
+__attribute__((weak)) WValue w_blas_dtrsm_left_lower(WValue a, WValue b, WValue m, WValue n, WValue alpha) {
+    (void)a; (void)b; (void)m; (void)n; (void)alpha;
+    w_raise(w_string("dtrsm: BLAS bridge not linked")); return W_NIL;
 }
 __attribute__((weak)) WValue w_blas_dgeqrf_qr(WValue a, WValue q, WValue r, WValue m, WValue n) {
     (void)a; (void)q; (void)r; (void)m; (void)n;

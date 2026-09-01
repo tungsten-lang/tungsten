@@ -764,6 +764,15 @@ WValue w_blas_daxpy(WValue alpha_wval, WValue x_wval, WValue y_wval,
     return y_wval;
 }
 
+WValue w_blas_dscal(WValue alpha_wval, WValue x_wval, WValue n_wval) {
+    int64_t len;
+    double *x = blas_f64_ptr(x_wval, &len);
+    int64_t n = w_as_int(n_wval);
+    if (n <= 0 || n > len) n = len;
+    cblas_dscal((int)n, w_as_double(alpha_wval), x, 1);
+    return x_wval;
+}
+
 WValue w_blas_dgemv_n(WValue a_wval, WValue x_wval, WValue y_wval,
                       WValue m_wval, WValue n_wval) {
     int64_t la, lx, ly;
@@ -778,6 +787,54 @@ WValue w_blas_dgemv_n(WValue a_wval, WValue x_wval, WValue y_wval,
     cblas_dgemv(CblasRowMajor, CblasNoTrans, m, n, 1.0, a, n,
                 x, 1, 0.0, y, 1);
     return y_wval;
+}
+
+WValue w_blas_dsymv_upper(WValue a_wval, WValue x_wval, WValue y_wval,
+                          WValue n_wval) {
+    int64_t la, lx, ly;
+    double *a = blas_f64_ptr(a_wval, &la);
+    double *x = blas_f64_ptr(x_wval, &lx);
+    double *y = blas_f64_ptr(y_wval, &ly);
+    int n = (int)w_as_int(n_wval);
+    if (n < 0 || la < (int64_t)n * n || lx < n || ly < n) {
+        w_raise(w_string("dsymv: bad dimensions"));
+        return W_NIL;
+    }
+    cblas_dsymv(CblasRowMajor, CblasUpper, n, 1.0, a, n,
+                x, 1, 0.0, y, 1);
+    return y_wval;
+}
+
+WValue w_blas_dsyrk_upper(WValue a_wval, WValue c_wval,
+                          WValue n_wval, WValue k_wval,
+                          WValue alpha_wval, WValue beta_wval) {
+    int64_t la, lc;
+    double *a = blas_f64_ptr(a_wval, &la);
+    double *c = blas_f64_ptr(c_wval, &lc);
+    int n = (int)w_as_int(n_wval), k = (int)w_as_int(k_wval);
+    if (n < 0 || k < 0 || la < (int64_t)n * k || lc < (int64_t)n * n) {
+        w_raise(w_string("dsyrk: bad dimensions"));
+        return W_NIL;
+    }
+    cblas_dsyrk(CblasRowMajor, CblasUpper, CblasNoTrans, n, k,
+                w_as_double(alpha_wval), a, k, w_as_double(beta_wval), c, n);
+    return c_wval;
+}
+
+WValue w_blas_dtrsm_left_lower(WValue a_wval, WValue b_wval,
+                               WValue m_wval, WValue n_wval,
+                               WValue alpha_wval) {
+    int64_t la, lb;
+    double *a = blas_f64_ptr(a_wval, &la);
+    double *b = blas_f64_ptr(b_wval, &lb);
+    int m = (int)w_as_int(m_wval), n = (int)w_as_int(n_wval);
+    if (m < 0 || n < 0 || la < (int64_t)m * m || lb < (int64_t)m * n) {
+        w_raise(w_string("dtrsm: bad dimensions"));
+        return W_NIL;
+    }
+    cblas_dtrsm(CblasRowMajor, CblasLeft, CblasLower, CblasNoTrans,
+                CblasNonUnit, m, n, w_as_double(alpha_wval), a, m, b, n);
+    return b_wval;
 }
 
 /* dgesv: GE with partial pivoting. A is n×n row-major f64, b length n.

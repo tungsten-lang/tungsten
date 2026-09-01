@@ -141,8 +141,26 @@ fn dnrm2(a, n)
 -> daxpy(a, x, y, n)
   ccall("w_blas_daxpy", a, x, y, n)
 
+-> dscal(a, x, n)
+  ccall("w_blas_dscal", a, x, n)
+
 -> dgemv(a, x, y, m, n)
   ccall("w_blas_dgemv_n", a, x, y, m, n)
+
+# y := A*x for a symmetric n×n row-major matrix. Only A's upper triangle is
+# read, matching BLAS's structured-storage contract.
+-> dsymv(a, x, y, n)
+  ccall("w_blas_dsymv_upper", a, x, y, n)
+
+# Upper(C) := alpha*A*A^T + beta*Upper(C) for row-major A[n,k]. The lower
+# triangle is untouched, matching BLAS's structured-storage contract.
+-> dsyrk(a, c, n, k, alpha, beta)
+  ccall("w_blas_dsyrk_upper", a, c, n, k, alpha, beta)
+
+# Solve A*X = alpha*B in place for row-major lower-triangular A[m,m] and
+# B[m,n]. The diagonal is non-unit.
+-> dtrsm(a, b, m, n, alpha)
+  ccall("w_blas_dtrsm_left_lower", a, b, m, n, alpha)
 
 -> lapack_qr(a, q, r, m, n)
   ccall("w_blas_dgeqrf_qr", a, q, r, m, n)

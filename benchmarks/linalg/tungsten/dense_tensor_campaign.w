@@ -15,6 +15,7 @@
 #   dense_tensor_campaign zeros-cold [side]
 #   dense_tensor_campaign zeros-warm [iterations]
 #   dense_tensor_campaign matmul-output [iterations]
+#   dense_tensor_campaign blas-structured [iterations]
 
 use core/blas
 use core/tensor
@@ -51,6 +52,40 @@ use core/tensor
     y[i] = total
     i += 1
   y
+
+-> scalar_scal_f64(alpha, x, n)
+  i = 0
+  while i < n
+    x[i] = alpha * x[i]
+    i += 1
+  x
+
+-> scalar_symv_f64(a, x, y, n)
+  i = 0
+  while i < n
+    total = ~0.0
+    j = 0
+    while j < n
+      total += a[i * n + j] * x[j]
+      j += 1
+    y[i] = total
+    i += 1
+  y
+
+-> scalar_trsm_lower_f64(a, b, m, n)
+  col = 0
+  while col < n
+    row = 0
+    while row < m
+      total = b[row * n + col]
+      k = 0
+      while k < row
+        total -= a[row * m + k] * b[k * n + col]
+        k += 1
+      b[row * n + col] = total / a[row * m + row]
+      row += 1
+    col += 1
+  b
 
 mode = ARGV[0]
 raise "mode required" if mode == nil
@@ -277,5 +312,126 @@ elsif mode == "matmul-output"
   elapsed = clock() - t0
   assert_close(product.at([0, 0]), ~60.19290041449671, "matmul output")
   << "MATMUL_OUTPUT ms/op=" + (elapsed * ~1000.0 / iterations).round(3).to_s
+elsif mode == "blas-structured"
+  iterations = ARGV[1] == nil ? 100 : ARGV[1].to_i
+  vec_n = 65536
+  scale_ref = f64_array(vec_n)
+  scale_native = f64_array(vec_n)
+  i = 0
+  while i < vec_n
+    value = ((i % 97) + 1).to_f / ~97.0
+    scale_ref[i] = value
+    scale_native[i] = value
+    i += 1
+  t0 = clock()
+  i = 0
+  while i < iterations * 10
+    scalar_scal_f64(~0.999999, scale_ref, vec_n)
+    i += 1
+  scale_ref_elapsed = clock() - t0
+  t0 = clock()
+  i = 0
+  while i < iterations * 10
+    dscal(~0.999999, scale_native, vec_n)
+    i += 1
+  scale_native_elapsed = clock() - t0
+  assert_close(scale_ref[1234], scale_native[1234], "dscal structured")
+
+  sym_n = 512
+  sym = f64_array(sym_n * sym_n)
+  sym_x = f64_array(sym_n)
+  sym_ref = f64_array(sym_n)
+  sym_native = f64_array(sym_n)
+  i = 0
+  while i < sym_n
+    sym_x[i] = ((i % 31) + 1).to_f / ~31.0
+    j = i
+    while j < sym_n
+      value = ((i + j) % 67 + 1).to_f / ~67.0
+      sym[i * sym_n + j] = value
+      sym[j * sym_n + i] = value
+      j += 1
+    i += 1
+  t0 = clock()
+  i = 0
+  while i < iterations
+    scalar_symv_f64(sym, sym_x, sym_ref, sym_n)
+    i += 1
+  sym_ref_elapsed = clock() - t0
+  t0 = clock()
+  i = 0
+  while i < iterations
+    dsymv(sym, sym_x, sym_native, sym_n)
+    i += 1
+  sym_native_elapsed = clock() - t0
+  assert_close(sym_ref[77], sym_native[77], "dsymv structured")
+
+  rank_n = 256
+  rank_k = 256
+  rank_a = f64_array(rank_n * rank_k)
+  rank_at = f64_array(rank_k * rank_n)
+  rank_general = f64_array(rank_n * rank_n)
+  rank_structured = f64_array(rank_n * rank_n)
+  i = 0
+  while i < rank_n
+    j = 0
+    while j < rank_k
+      value = ((i * 7 + j * 11) % 97 + 1).to_f / ~97.0
+      rank_a[i * rank_k + j] = value
+      rank_at[j * rank_n + i] = value
+      j += 1
+    i += 1
+  t0 = clock()
+  i = 0
+  while i < iterations
+    dgemm(rank_a, rank_at, rank_general, rank_n, rank_n, rank_k)
+    i += 1
+  syrk_general_elapsed = clock() - t0
+  t0 = clock()
+  i = 0
+  while i < iterations
+    dsyrk(rank_a, rank_structured, rank_n, rank_k, ~1.0, ~0.0)
+    i += 1
+  syrk_structured_elapsed = clock() - t0
+  assert_close(rank_general[123], rank_structured[123], "dsyrk structured")
+
+  tri_m = 256
+  tri_n = 32
+  tri = f64_array(tri_m * tri_m)
+  tri_ref = f64_array(tri_m * tri_n)
+  tri_native = f64_array(tri_m * tri_n)
+  i = 0
+  while i < tri_m
+    j = 0
+    while j <= i
+      tri[i * tri_m + j] = i == j ? ~2.0 : (((i + j) % 13) + 1).to_f / ~10000.0
+      j += 1
+    i += 1
+  t0 = clock()
+  i = 0
+  while i < iterations
+    j = 0
+    while j < tri_m * tri_n
+      tri_ref[j] = ((j % 43) + 1).to_f / ~43.0
+      j += 1
+    scalar_trsm_lower_f64(tri, tri_ref, tri_m, tri_n)
+    i += 1
+  trsm_ref_elapsed = clock() - t0
+  t0 = clock()
+  i = 0
+  while i < iterations
+    j = 0
+    while j < tri_m * tri_n
+      tri_native[j] = ((j % 43) + 1).to_f / ~43.0
+      j += 1
+    dtrsm(tri, tri_native, tri_m, tri_n, ~1.0)
+    i += 1
+  trsm_native_elapsed = clock() - t0
+  assert_close(tri_ref[4000], tri_native[4000], "dtrsm structured")
+
+  << "DSCAL scalar_us=" + (scale_ref_elapsed * ~1000000.0 / (iterations * 10)).to_s + " native_us=" + (scale_native_elapsed * ~1000000.0 / (iterations * 10)).to_s
+  << "DSYMV scalar_us=" + (sym_ref_elapsed * ~1000000.0 / iterations).to_s + " native_us=" + (sym_native_elapsed * ~1000000.0 / iterations).to_s
+  << "DSYRK dgemm_us=" + (syrk_general_elapsed * ~1000000.0 / iterations).to_s + " native_us=" + (syrk_structured_elapsed * ~1000000.0 / iterations).to_s
+  << "DTRSM scalar_us=" + (trsm_ref_elapsed * ~1000000.0 / iterations).to_s + " native_us=" + (trsm_native_elapsed * ~1000000.0 / iterations).to_s
 else
   raise "unknown mode: " + mode

@@ -52,14 +52,19 @@
 
   -> +(other)
     rhs = self.coerce(other)
+    # The public accessors return defensive copies. Hoist each one once:
+    # calling rhs.hessian inside the cell loop copied the full d-by-d matrix
+    # for every output cell, turning addition into O(d^4) work.
+    rhs_gradient = rhs.gradient
+    rhs_hessian = rhs.hessian
     gradient = []
     hessian = Calculus.zero_matrix(self.dimension)
     i = 0
     while i < self.dimension
-      gradient.push(@gradient[i] + rhs.gradient[i])
+      gradient.push(@gradient[i] + rhs_gradient[i])
       j = 0
       while j < self.dimension
-        hessian[i][j] = @hessian[i][j] + rhs.hessian[i][j]
+        hessian[i][j] = @hessian[i][j] + rhs_hessian[i][j]
         j += 1
       i += 1
     Differential.new(@value + rhs.value, gradient, hessian)

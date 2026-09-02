@@ -304,3 +304,75 @@ kernel void qsa_sdpa_selected(
   }
   out[q_off + int(tid)] = result;
 }
+
+// Parallel form of qsa_sdpa_selected: the exact structure of
+// sdpa_prefill_multi_hd256 (fn_multi.metal) — positions assigned to threads
+// for the score phase (each thread runs its own serial 256-wide dot from a
+// threadgroup copy of q), simd + threadgroup softmax reductions, weighted
+// sum by thread-per-dim with the 1/denominator applied once at the end —
+// over the selected position list instead of the dense prefix. Replaces
+// the per-position pair of barriers + single-thread softmax above, which
+// cost ~0.8 ms/token in QSA-mode prefill even below the budget.
+// Dispatch: n_tok * n_heads TGs of 256.
+kernel void qsa_sdpa_selected_par(
+  device const float *__restrict__ q       [[buffer(0)]],   // [n, heads, 256]
+  device const float *__restrict__ k_cache [[buffer(1)]],
+  device const float *__restrict__ v_cache [[buffer(2)]],
+  device       float *__restrict__ out     [[buffer(3)]],
+  device const int   *__restrict__ sel     [[buffer(4)]],   // [n, budget+3]
+  device const int   *__restrict__ ns      [[buffer(5)]],   // [n]
+  constant int &gqa_factor [[buffer(6)]],
+  constant int &n_heads    [[buffer(7)]],
+  constant int &kv_dim     [[buffer(8)]],
+  constant float &scale    [[buffer(9)]],
+  constant int &sel_stride [[buffer(10)]],                  // budget+3
+  constant int &n_tok      [[buffer(11)]],
+  uint tg  [[threadgroup_position_in_grid]],
+  uint tid [[thread_position_in_threadgroup]]
+) {
+  threadgroup float scores[2051];
+  threadgroup float qs[256];
+  const int token = int(tg) / n_heads;
+  const int q_head = int(tg) - token * n_heads;
+  if (token >= n_tok) return;
+  const int kv_head = q_head / gqa_factor;
+  const int q_off = (token * n_heads + q_head) * 256;
+  const int kv_base = kv_head * 256;
+  device const int *ts = sel + token * sel_stride;
+  const int usable = min(ns[token], 2051);
+  qs[tid] = q[q_off + int(tid)];
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  for (int p = int(tid); p < usable; p += 256) {
+    device const float *kr = k_cache + kv_base + ts[p] * kv_dim;
+    float dp = 0.0f;
+    for (int i = 0; i < 256; i++) dp += qs[i] * kr[i];
+    scores[p] = dp * scale;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  threadgroup float red[8];
+  float lmx = -INFINITY;
+  for (int p = int(tid); p < usable; p += 256) lmx = max(lmx, scores[p]);
+  float smx = simd_max(lmx);
+  if ((tid & 31) == 0) red[tid >> 5] = smx;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  float mx = max(max(max(red[0], red[1]), max(red[2], red[3])),
+                 max(max(red[4], red[5]), max(red[6], red[7])));
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  float lsum = 0.0f;
+  for (int p = int(tid); p < usable; p += 256) {
+    const float e = fast::exp(scores[p] - mx);
+    scores[p] = e;
+    lsum += e;
+  }
+  float ssum = simd_sum(lsum);
+  if ((tid & 31) == 0) red[tid >> 5] = ssum;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  float denom = red[0] + red[1] + red[2] + red[3] + red[4] + red[5] + red[6] + red[7];
+  const float inv = denom == 0.0f ? 0.0f : 1.0f / denom;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  float result = 0.0f;
+  for (int p = 0; p < usable; ++p) {
+    result += scores[p] * v_cache[kv_base + ts[p] * kv_dim + int(tid)];
+  }
+  out[q_off + int(tid)] = result * inv;
+}

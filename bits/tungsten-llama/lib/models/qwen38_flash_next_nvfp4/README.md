@@ -230,6 +230,48 @@ Remaining to 10x, in leverage order:
 4. MTL4-native chunk orchestration (whole-layer command streams on the
    NA queue) — the only route that makes matmul2d pay in prefill.
 
+## 9/2 — Neural-Accelerator prefill (classic-encoder matmul2d) — LANDED, opt-in
+
+The unlock: `mpp::tensor_ops::matmul2d` (the M5 GPU Neural Accelerators)
+runs from a CLASSIC compute encoder with plain pointer args and in-shader
+tensor views (`bits/tungsten-llama/docs/na-classic-encoder-2026-09-02.md`,
+kernels in `bits/tungsten-llama/lib/kernels/na/`). The NA GEMMs sit inside
+the recorded chunk program next to every other kernel — no Metal-4 command
+buffers, argument tables, residency sets or commit segmentation, which
+retires both the reason the FN_M4 point integration lost and the
+FN_M4EXEC path that panicked the driver.
+
+- `FN_NA=1` — every bf16 backbone GEMM at >= 33 rows (HC mixers, GDN
+  qkv/z/out, attention q/k/v/o, router, shared expert, PLE, indexer)
+  through `bf16_matmul_na_k64` (`na_gemm` in `mv_multi`): activations
+  staged once per source as RNE-rounded bf16, native bf16 weights, f32 out.
+- `FN_NA_MOE=1` (+ `FN_NA_MIN`, default 24) — hybrid expert GEMM
+  (`kernels/na/moe_gemm_na.metal`): experts with >= FN_NA_MIN staged rows
+  run in 64-row NA blocks (half activations, masked per-pair scatter), the
+  tails stay on `moe_gemm_m8`; `moe_na_plan` builds the block list per chunk
+  inside the fixed-grid recorded program.
+- `FN_CHUNK_W=<n>` — prefill chunk width 512..4096 (amortizes the ~68 GB
+  per-chunk expert stream; scratch scales ~1.2 GB per 512 rows).
+- `FN_QSA_PAR=0` — restores the per-position-barrier selected SDPA; the
+  default is its parallel clone (`qsa_sdpa_selected_par`).
+
+Measured 9/2 on a LOADED box (load ~5, two other agents on the GPU — the
+absolute numbers are ~1.7x the quiet-box ones, the ratios held across
+back-to-back runs). 2000-token compiler-source prompt, per 512-token
+steady chunk: f32 1937/2046 ms -> FN_NA 934/1021 -> + FN_NA_MOE 738/788 ms
+(2.6x; 3.9 -> 1.5 ms/token). 6000-token prompt (FN_CTX=8192, QSA mode):
+width 512 33.3 s vs width 2048 27.2 s total; at positions 2k-4k 3.23 ->
+2.33 ms/token (1.39x). The 64-wide last chunk 717 -> ~570 ms with the m64
+tile. FN_NA_MIN 8/24/32 tie within noise. Quality: first prediction
+preserved on every prompt; 256-token continuations are fully coherent
+compiler code in both arms (ids diverge at token 16, as expected from a
+different numeric path); deterministic run to run.
+
+Defaults stay OFF until the quiet-box re-measure; then FN_NA/FN_NA_MOE
+flip on. Remaining levers, in order: the cold first chunk (15-19 s of
+expert page-in — prefetch), GDN chunkwise WY, NA flash-attention /
+position tiling, the QSA select emit passes.
+
 ## Next (ranked by research + measurement)
 
 1. **MTP speculative decode** — community-measured 1.4-1.7x on Apple

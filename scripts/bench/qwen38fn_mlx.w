@@ -315,7 +315,9 @@ qsa_kw_pipe = metal_pipeline(qsa_lib, "qsa_k_write")
 qsa_build_pipe = metal_pipeline(qsa_lib, "qsa_build_blocks")
 qsa_scores_pipe = metal_pipeline(qsa_lib, "qsa_scores")
 qsa_select_pipe = metal_pipeline(qsa_lib, "qsa_select")
-qsa_sdpa_pipe = metal_pipeline(qsa_lib, "qsa_sdpa_selected")
+# FN_QSA_PAR=0 restores the per-position-barrier selected SDPA (ids A/B arm);
+# the default is the parallel clone of sdpa_prefill_multi_hd256.
+qsa_sdpa_pipe = metal_pipeline(qsa_lib, ccall("__w_env", "FN_QSA_PAR") == "0" ? "qsa_sdpa_selected" : "qsa_sdpa_selected_par")
 ple_gather_pipe = metal_pipeline(ple_gpu_lib, "ple_table_gather")
 ple_lib = metal_compile_source(device, read_file(FN_DIR + "ple_ops.metal"))
 ple_gate_pipe = metal_pipeline(ple_lib, "ple_gate")
@@ -1730,6 +1732,7 @@ if multi_n > 0 || mtp_depth > 0 || prompt_tokens > 8 || prompt_ids_file != ""
   if na_on
     na_lib = metal_compile_source(device, read_file("bits/tungsten-llama/lib/kernels/na/dense_matmul_na.metal"))
     na_bf16_k64_pipe = metal_pipeline(na_lib, "bf16_matmul_na_k64")
+    na_bf16_m64_k64_pipe = metal_pipeline(na_lib, "bf16_matmul_na_m64_k64")
     na_stage = metal_buffer(device, MULTI_MAX * HC_HIDDEN * 2)
     f32_to_bf16_rne_pipe = metal_pipeline(fnm_lib, "f32_to_bf16_rne")
   na_last_conv = [nil, 0, -1]
@@ -1937,20 +1940,25 @@ mrec = [0]
 # only while nothing else was recorded in between: any rewrite of the
 # source buffer arrives through other steps, which invalidates the reuse.
 -> na_gemm(wraw, x_in, y_out, kdim, rows, n)
-  m_pad = ((n + 127) / 128) * 128
+  m_pad = ((n + 63) / 64) * 64
   reuse = mrec[0] == 1 && na_last_conv[0] == x_in && na_last_conv[1] == n * kdim && na_last_conv[2] == mprog.size()
   if !reuse
     mdn(f32_to_bf16_rne_pipe, [x_in, na_stage, n * kdim], n * kdim)
     mbar([na_stage])
     na_last_conv[0] = x_in
     na_last_conv[1] = n * kdim
-  md3(na_bf16_k64_pipe, [na_stage, wraw, y_out, kdim, m_pad, rows], [m_pad / 128, rows / 64, 1, 128, 1, 1])
+  if m_pad % 128 == 0
+    md3(na_bf16_k64_pipe, [na_stage, wraw, y_out, kdim, m_pad, rows], [m_pad / 128, rows / 64, 1, 128, 1, 1])
+  else
+    md3(na_bf16_m64_k64_pipe, [na_stage, wraw, y_out, kdim, m_pad, rows], [m_pad / 64, rows / 64, 1, 128, 1, 1])
   na_last_conv[2] = mprog.size()
 
 -> mv_multi(h, x_in, y_out, kdim, rows, n)
   if n > 8
     wraw = h.size() >= 3 ? h[3] : h[0]
-    if na_on && n > 64 && rows % 64 == 0 && kdim % 64 == 0
+    # NA from 33 rows up (64-row tile), except the latency-bound small-row
+    # shapes at n <= 64, which keep the token-block-parallel matvec below
+    if na_on && n > 32 && (rows > 640 || n > 64) && rows % 64 == 0 && kdim % 64 == 0
       na_gemm(wraw, x_in, y_out, kdim, rows, n)
       return
     if m4_on && mrec[0] == 1 && n > 64 && rows >= 2560

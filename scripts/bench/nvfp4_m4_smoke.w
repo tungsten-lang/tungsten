@@ -40,6 +40,8 @@ while i_shape < shapes.size()
   c_buf       = metal_buffer(device, M * N * 4)               # float
   k_const_buf = metal_buffer(device, 4)
   metal_buffer_write_i32(k_const_buf, 0, K)
+  gscale_buf = metal_buffer(device, 4)
+  metal_buffer_write_f32(gscale_buf, 0, ~1.0)
 
   # Fill A = ones (half(1.0) = 0x3C00). 2 halfs per i32.
   total_a_words = (M * K) / 2
@@ -67,26 +69,27 @@ while i_shape < shapes.size()
   a_tensor = metal_tensor_2d(a_buf, METAL_DTYPE_FLOAT16, M, K, 0, 0)
   c_tensor = metal_tensor_2d(c_buf, METAL_DTYPE_FLOAT32, M, N, 0, 0)
 
-  argtable = metal4_argtable(device, 5)
+  argtable = metal4_argtable(device, 6)
   metal4_argtable_set_tensor(argtable, 0, a_tensor)
   metal4_argtable_set_buffer(argtable, 1, w_packed)
   metal4_argtable_set_buffer(argtable, 2, w_scales)
   metal4_argtable_set_tensor(argtable, 3, c_tensor)
   metal4_argtable_set_buffer(argtable, 4, k_const_buf)
+  metal4_argtable_set_buffer(argtable, 5, gscale_buf)
 
-  resources = [a_buf, w_packed, w_scales, c_buf, k_const_buf]
+  resources = [a_buf, w_packed, w_scales, c_buf, k_const_buf, gscale_buf]
 
-  n_tg_x = (M + 63) / 64
-  n_tg_y = (N + 31) / 32
+  n_tg_x = (M + 127) / 128
+  n_tg_y = (N + 63) / 64
 
   # Warmup.
   i = 0
   while i < 3
-    metal4_dispatch_groups_3d(m4_queue, m4_alloc, pipe, argtable, resources, 4096, n_tg_x, n_tg_y, 1, 128, 1, 1)
+    metal4_dispatch_groups_3d(m4_queue, m4_alloc, pipe, argtable, resources, 16384, n_tg_x, n_tg_y, 1, 128, 1, 1)
     i = i + 1
 
   # Verify a few cells.
-  metal4_dispatch_groups_3d(m4_queue, m4_alloc, pipe, argtable, resources, 4096, n_tg_x, n_tg_y, 1, 128, 1, 1)
+  metal4_dispatch_groups_3d(m4_queue, m4_alloc, pipe, argtable, resources, 16384, n_tg_x, n_tg_y, 1, 128, 1, 1)
   expected = K.to_f
   c0    = metal_buffer_read_f32(c_buf, 0)
   c_mid = metal_buffer_read_f32(c_buf, (M * N) / 2)
@@ -117,7 +120,7 @@ while i_shape < shapes.size()
     t0 = clock
     i = 0
     while i < iters
-      metal4_dispatch_groups_3d(m4_queue, m4_alloc, pipe, argtable, resources, 4096, n_tg_x, n_tg_y, 1, 128, 1, 1)
+      metal4_dispatch_groups_3d(m4_queue, m4_alloc, pipe, argtable, resources, 16384, n_tg_x, n_tg_y, 1, 128, 1, 1)
       i = i + 1
     elapsed = clock - t0
     ms = elapsed * ~1000.0 / iters

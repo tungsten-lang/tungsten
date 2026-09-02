@@ -243,6 +243,7 @@ na_pipe = metal_pipeline(na_lib, "nvfp4_matmul_na")
 na_m64_pipe = metal_pipeline(na_lib, "nvfp4_matmul_na_m64")
 f32_to_f16_pipe = metal_pipeline(metal_compile_source(device, read_file(NVFP4_DIR + "f32_to_f16.metal")), "f32_to_f16")
 g_na_ffn = false
+g_na_attn = false
 argmax_pipe = metal_pipeline(metal_compile_source(device, read_file(SHARED_DIR + "argmax.metal")), "argmax")
 argmax_parallel_lib = metal_compile_source(device, read_file(SHARED_DIR + "argmax_two_stage.metal"))
 argmax_stage1_pipe = metal_pipeline(argmax_parallel_lib, "argmax_stage1")
@@ -1941,9 +1942,7 @@ rope_power = ~2.0 / ROT_DIM
 # sides: the leading barrier is the WAR against the previous projection's
 # still-reading GEMM, the trailing one the RAW for this one.
 -> na_scaled_multi(w, input, output, kdim, ndim, n, residual)
-  dep_barrier_on([na_in_h16])
-  metal_dispatch_n(queue, f32_to_f16_pipe, [input, na_in_h16, n * kdim], n * kdim)
-  dep_barrier_on([na_in_h16])
+  na_stage(input, na_in_h16, n, kdim)
   if !residual
     na_proj(w, na_in_h16, output, kdim, ndim, n)
     return
@@ -1961,7 +1960,7 @@ rope_power = ~2.0 / ROT_DIM
   kdim = spec[3]
   rows = spec[4]
   n = spec[5]
-  if n > MULTI_LADDER_MAX
+  if n > MULTI_LADDER_MAX || g_na_attn
     na_scaled_multi(w, input, output, kdim, rows, n, false)
     return
   key = multi_pipe_key(n, kdim, false)
@@ -1981,7 +1980,7 @@ rope_power = ~2.0 / ROT_DIM
   kdim = spec[3]
   rows = spec[4]
   n = spec[5]
-  if n > MULTI_LADDER_MAX
+  if n > MULTI_LADDER_MAX || g_na_attn
     na_scaled_multi(w, input, residual, kdim, rows, n, true)
     return
   key = multi_pipe_key(n, kdim, true)
@@ -2005,8 +2004,16 @@ rope_power = ~2.0 / ROT_DIM
     ss_out = lyr[:ss_a]
   enqueue_rms([x_multi, lyr[:in_norm], xn_multi, n])
   dependency_barrier()
-  enqueue_scaled_multi([lyr[:qkv], xn_multi, lyr[:qkv_m], HIDDEN, QKV_DIM, n])
-  enqueue_scaled_multi([lyr[:z], xn_multi, z_multi_tmp, HIDDEN, V_DIM, n])
+  # qkv and z read the SAME normalized activations, so the f16 staging is
+  # hoisted out of both: one conversion, then two NA GEMMs that run
+  # concurrently instead of being serialized by a shared staging buffer.
+  if g_na_attn
+    na_stage(xn_multi, xn_h16, n, HIDDEN)
+    na_proj(lyr[:qkv], xn_h16, lyr[:qkv_m], HIDDEN, QKV_DIM, n)
+    na_proj(lyr[:z], xn_h16, z_multi_tmp, HIDDEN, V_DIM, n)
+  else
+    enqueue_scaled_multi([lyr[:qkv], xn_multi, lyr[:qkv_m], HIDDEN, QKV_DIM, n])
+    enqueue_scaled_multi([lyr[:z], xn_multi, z_multi_tmp, HIDDEN, V_DIM, n])
   metal_dispatch_groups(queue, multi_bf16_pipe,
     [lyr[:a], xn_multi, a_multi_tmp, HIDDEN, HV, n], HV, 32)
   metal_dispatch_groups(queue, multi_bf16_pipe,
@@ -2051,9 +2058,17 @@ rope_power = ~2.0 / ROT_DIM
   n = spec[2]
   enqueue_rms([x_multi, lyr[:in_norm], xn_multi, n])
   dependency_barrier()
-  enqueue_scaled_multi([lyr[:q], xn_multi, qfull_multi_tmp, HIDDEN, QFULL_DIM, n])
-  enqueue_scaled_multi([lyr[:k], xn_multi, k_multi_tmp, HIDDEN, KV_DIM, n])
-  enqueue_scaled_multi([lyr[:v], xn_multi, v_multi_tmp, HIDDEN, KV_DIM, n])
+  # q, k and v read the SAME normalized activations: stage to f16 once, then
+  # let the three NA GEMMs run concurrently.
+  if g_na_attn
+    na_stage(xn_multi, xn_h16, n, HIDDEN)
+    na_proj(lyr[:q], xn_h16, qfull_multi_tmp, HIDDEN, QFULL_DIM, n)
+    na_proj(lyr[:k], xn_h16, k_multi_tmp, HIDDEN, KV_DIM, n)
+    na_proj(lyr[:v], xn_h16, v_multi_tmp, HIDDEN, KV_DIM, n)
+  else
+    enqueue_scaled_multi([lyr[:q], xn_multi, qfull_multi_tmp, HIDDEN, QFULL_DIM, n])
+    enqueue_scaled_multi([lyr[:k], xn_multi, k_multi_tmp, HIDDEN, KV_DIM, n])
+    enqueue_scaled_multi([lyr[:v], xn_multi, v_multi_tmp, HIDDEN, KV_DIM, n])
   dependency_barrier()
   metal_dispatch_n(queue, split_multi_pipe,
     [qfull_multi_tmp, queries_multi_tmp, attn_gate_multi_tmp,
@@ -2102,21 +2117,28 @@ rope_power = ~2.0 / ROT_DIM
     [in_buf, w[0], w[1], out_buf, kdim, w[2], mrows, ndim],
     mrows / NA_MT, ndim / 64, 1, 128, 1, 1)
 
+# Stage n rows of an f32 activation block as f16 for the NA GEMMs (matmul2d
+# takes fp16 operands). Fenced on BOTH sides: the leading barrier is the WAR
+# against whatever GEMM last read this staging buffer, the trailing one the
+# RAW for the GEMMs about to read it.
+-> na_stage(src, dst, n, dim)
+  dep_barrier_on([dst])
+  metal_dispatch_n(queue, f32_to_f16_pipe, [src, dst, n * dim], n * dim)
+  dep_barrier_on([dst])
+
 # Neural-Accelerator FFN (gemm-prefill). Every dispatch -- the two f32->f16
 # activation stagings, the three NA GEMMs, silu and the residual add -- lands
 # in the SAME concurrent command buffer, ordered by scoped resource barriers.
 # Numerically parity-safe (f16 acts preserve argmax; see the tuning doc).
 -> ffn_na(lyr, n)
-  metal_dispatch_n(queue, f32_to_f16_pipe, [xn_multi, xn_h16, n * HIDDEN], n * HIDDEN)
-  dep_barrier_on([xn_h16])
+  na_stage(xn_multi, xn_h16, n, HIDDEN)
   na_proj(lyr[:gate], xn_h16, gate_multi_tmp, HIDDEN, FFN, n)
   na_proj(lyr[:up], xn_h16, up_multi_tmp, HIDDEN, FFN, n)
   dep_barrier_on([gate_multi_tmp, up_multi_tmp])
   metal_dispatch_n(queue, silu_pipe,
     [gate_multi_tmp, up_multi_tmp, hidden_multi_tmp, n * FFN], n * FFN)
   dep_barrier_on([hidden_multi_tmp])
-  metal_dispatch_n(queue, f32_to_f16_pipe, [hidden_multi_tmp, h_h16, n * FFN], n * FFN)
-  dep_barrier_on([h_h16])
+  na_stage(hidden_multi_tmp, h_h16, n, FFN)
   na_proj(lyr[:down], h_h16, down_na_tmp, FFN, HIDDEN, n)
   dep_barrier_on([down_na_tmp])
   metal_dispatch_n(queue, add_pipe, [x_multi, down_na_tmp, n * HIDDEN], n * HIDDEN)
@@ -2633,6 +2655,11 @@ setup_elapsed = ccall("__w_clock_ms") - setup_t0
 prefill_t0 = ccall("__w_clock_ms")
 profile_stats[0] = 1
 g_na_ffn = prefill_gemm && ccall("__w_env", "M4_FFN") != "0"
+# The attention/GDN projections (q, k, v, o and qkv, z, out) on the Neural
+# Accelerators. Chunks wider than the 64-row simdgroup ladder go there
+# regardless -- this toggle is what makes the FFN-only arm measurable at
+# chunk 64.
+g_na_attn = prefill_gemm && ccall("__w_env", "NA_ATTN") != "0"
 i = 0
 pred = -1
 prefill_last_batched = false
@@ -2683,6 +2710,7 @@ while i < prompt.size()
 if prefill_last_batched && mtp_enabled
   copy_hidden_triplet_row(2)
 g_na_ffn = false
+g_na_attn = false
 profile_stats[0] = 0
 prefill_elapsed = ccall("__w_clock_ms") - prefill_t0
 if prompt.size() == 5 && pred != 11751

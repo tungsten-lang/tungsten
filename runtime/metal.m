@@ -2466,6 +2466,97 @@ WValue w_metal4_allocator_reset(WValue allocator_v) {
     }
 }
 
+/* Execute a BAKED program on the MTL4 stream: one command buffer, plain
+ * compute pipelines + prebuilt argument tables, intra-encoder barriers for
+ * the kind-1 steps. Baked items:
+ *   [kind, pipeline, argtable, a, b, dims_or_nil, tg_mem]
+ *   kind 0: dispatchThreads(a*b, b)   kind 2: dispatchThreads(a, min(max,a))
+ *   kind 3: dispatchThreadgroups(dims[0..2], dims[3..5])   kind 1: barrier
+ * Synchronous: commits and waits via a shared event. */
+WValue w_metal4_program_exec(WValue queue_v, WValue allocator_v, WValue items_v) {
+    if (@available(macOS 26.0, *)) {
+        WMetal4Queue *q     = as_metal4_queue(queue_v);
+        WMetal4Allocator *a = as_metal4_allocator(allocator_v);
+        if (!q || !a) w_raise(w_string("metal4_program_exec: queue / allocator required"));
+        if (!w_is_array(items_v)) w_raise(w_string("metal4_program_exec: items must be an array"));
+        WArray *items = w_as_array(items_v);
+        if (items->size == 0) return W_NIL;
+        id<MTL4CommandQueue>     q_ = (id<MTL4CommandQueue>)q->handle;
+        id<MTL4CommandAllocator> a_ = (id<MTL4CommandAllocator>)a->handle;
+        id<MTLDevice> dev = NULL;
+        id<MTL4CommandBuffer> cmdbuf = NULL;
+        id<MTL4ComputeCommandEncoder> enc = NULL;
+        for (int32_t si = 0; si < items->size; si++) {
+            WValue it_v = w_array_get(items_v, w_int(si));
+            if (!w_is_array(it_v)) w_raise(w_string("metal4_program_exec: item must be an array"));
+            int64_t kind = w_to_i64(w_array_get(it_v, w_int(0)));
+            if (kind == 1) {
+                if (enc) {
+                    [enc barrierAfterEncoderStages:MTLStageDispatch
+                               beforeEncoderStages:MTLStageDispatch
+                                 visibilityOptions:MTL4VisibilityOptionDevice];
+                }
+                continue;
+            }
+            WMetalPipeline *p  = as_metal_pipeline(w_array_get(it_v, w_int(1)));
+            WMetal4ArgTable *t = as_metal4_argtable(w_array_get(it_v, w_int(2)));
+            if (!p || !t) w_raise(w_string("metal4_program_exec: bad item pipeline/argtable"));
+            id<MTLComputePipelineState> p_ = (id<MTLComputePipelineState>)p->handle;
+            if (!dev) {
+                dev = [p_ device];
+                cmdbuf = [dev newCommandBuffer];
+                if (!cmdbuf) w_raise(w_string("metal4_program_exec: newCommandBuffer failed"));
+                [cmdbuf beginCommandBufferWithAllocator:a_];
+                enc = [cmdbuf computeCommandEncoder];
+                if (!enc) w_raise(w_string("metal4_program_exec: encoder failed"));
+            }
+            [enc setComputePipelineState:p_];
+            [enc setArgumentTable:(id<MTL4ArgumentTable>)t->handle];
+            int64_t tg_mem = w_to_i64(w_array_get(it_v, w_int(6)));
+            if (tg_mem > 0) [enc setThreadgroupMemoryLength:(NSUInteger)tg_mem atIndex:0];
+            if (kind == 0) {
+                int64_t g = w_to_i64(w_array_get(it_v, w_int(3)));
+                int64_t tgs = w_to_i64(w_array_get(it_v, w_int(4)));
+                [enc dispatchThreads:MTLSizeMake((NSUInteger)(g * tgs), 1, 1)
+               threadsPerThreadgroup:MTLSizeMake((NSUInteger)tgs, 1, 1)];
+            } else if (kind == 2) {
+                int64_t threads = w_to_i64(w_array_get(it_v, w_int(3)));
+                NSUInteger tgw = [p_ maxTotalThreadsPerThreadgroup];
+                if (tgw > (NSUInteger)threads) tgw = (NSUInteger)threads;
+                if (tgw == 0) tgw = 1;
+                [enc dispatchThreads:MTLSizeMake((NSUInteger)threads, 1, 1)
+               threadsPerThreadgroup:MTLSizeMake(tgw, 1, 1)];
+            } else if (kind == 3) {
+                WValue dims_v = w_array_get(it_v, w_int(5));
+                if (!w_is_array(dims_v)) w_raise(w_string("metal4_program_exec: 3d item needs dims"));
+                NSUInteger dvv[6];
+                for (int32_t i = 0; i < 6; i++) dvv[i] = (NSUInteger)w_to_i64(w_array_get(dims_v, w_int(i)));
+                [enc dispatchThreadgroups:MTLSizeMake(dvv[0], dvv[1], dvv[2])
+                    threadsPerThreadgroup:MTLSizeMake(dvv[3], dvv[4], dvv[5])];
+            } else {
+                w_raise(w_string("metal4_program_exec: unknown item kind"));
+            }
+        }
+        if (!enc) return W_NIL;
+        [enc endEncoding];
+        [cmdbuf endCommandBuffer];
+        id<MTLSharedEvent> ev = [dev newSharedEvent];
+        if (!ev) { [a_ reset]; w_raise(w_string("metal4_program_exec: newSharedEvent failed")); }
+        id<MTL4CommandBuffer> arr[1] = { cmdbuf };
+        [q_ commit:arr count:1];
+        [q_ signalEvent:ev value:1];
+        if (![ev waitUntilSignaledValue:1 timeoutMS:60000]) {
+            [a_ reset];
+            w_raise(w_string("metal4_program_exec: timeout"));
+        }
+        [a_ reset];
+        return W_NIL;
+    } else {
+        w_raise(w_string("metal4_program_exec: requires macOS 26+"));
+        return W_NIL;
+    }
+}
+
 WValue w_metal4_dispatch_groups_3d(WValue queue_v, WValue allocator_v,
                                    WValue pipeline_v, WValue argtable_v,
                                    WValue resources_v,
@@ -2605,6 +2696,11 @@ WValue w_metal4_batch_run_chained(WValue queue_v, WValue allocator_v, WValue ite
 
 WValue w_metal4_allocator_reset(WValue allocator_v) {
     w_raise(w_string("metal4_allocator_reset: requires the macOS 26 SDK (Metal 4)"));
+    return W_NIL;
+}
+
+WValue w_metal4_program_exec(WValue queue_v, WValue allocator_v, WValue items_v) {
+    w_raise(w_string("metal4_program_exec: requires the macOS 26 SDK (Metal 4)"));
     return W_NIL;
 }
 

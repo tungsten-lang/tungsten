@@ -194,6 +194,26 @@ cprog = ccall("__w_env", "FN_CPROG") != "0"
 # needs the ENTIRE chunk resident on the MTL4 stream (all ops ported) or a
 # persistent-kernel design — out of scope for point integration.
 m4_on = ccall("__w_env", "FN_M4") == "1"
+# FN_M4EXEC=1: run the WHOLE recorded chunk program on the MTL4 stream
+# (plain PSOs + prebuilt argtables + intra-encoder barriers) — the spike
+# for the all-MTL4 prefill; matmul2d steps join the same stream next.
+m4exec_env = ccall("__w_env", "FN_M4EXEC")
+if m4exec_env == nil then m4exec_env = ""
+m4exec_on = m4exec_env == "1" || m4exec_env == "2"
+# !!! KERNEL PANIC GUARD (2026-09-01): two macOS panics — kernel data aborts
+# in IOGPUFamily/AGXG17X (far 0xc8) with THIS engine as the panicked task
+# (21:36 and 22:16) — coincided with the experimental paths that submit
+# thousands of dispatches per command buffer over ~75 GB of no-copy mmap'd
+# weights: dual-chunk pipelining (FN_DUAL) and the all-MTL4 executor
+# (FN_M4EXEC) / chained M4 (FN_M4). The default single-chunk legacy path
+# ran hundreds of times the same day without incident. These paths stay
+# disabled unless FN_UNSAFE_GPU=1 explicitly acknowledges the risk.
+unsafe_gpu_ok = ccall("__w_env", "FN_UNSAFE_GPU") == "1"
+if (m4_on || m4exec_on) && !unsafe_gpu_ok
+  raise "FN_M4/FN_M4EXEC panicked the GPU kernel driver on 2026-09-01; set FN_UNSAFE_GPU=1 to run them anyway"
+# FN_M4EXEC=2: debug bake — full barrier after EVERY dispatch (serializes
+# the stream; splits concurrency-semantics bugs from binding bugs)
+m4exec_serial = m4exec_env == "2"
 # FN_MTP=1: load the MTP head and measure draft acceptance during decode
 # (each round drafts the NEXT-next token; the following round scores it).
 mtp_depth = 0
@@ -1585,7 +1605,7 @@ if multi_n > 0 || mtp_depth > 0 || prompt_tokens > 8 || prompt_ids_file != ""
   delta_m_pipe = metal_pipeline(dm_lib, "gated_delta_multi")
   fill_zero_pipe = metal_pipeline(metal_compile_source(device, read_file(FN_DIR + "fill_zero.metal")), "fill_zero")
   wide_grid_lib = metal_compile_source(device, read_file(NVFP4_DIR + "nvfp4_matvec_mlx_scaled_wide.metal"))
-  if m4_on
+  if m4_on || m4exec_on
     m4_comp = metal4_compiler(device)
     m4_queue = metal4_queue(device)
     m4_alloc = metal4_allocator(device)
@@ -2195,6 +2215,42 @@ multi_head_on = [1]
 
 dual_progs = {}
 
+# Bake a recorded step program for the MTL4 stream: one argument table per
+# dispatch (scalars autoboxed via icb_scalar), buffers collected into the
+# persistent residency set. Steps keep their dispatch geometry.
+m4_baked = {}
+
+-> m4_bake(prog)
+  items = []
+  i2 = 0
+  while i2 < prog.size()
+    st = prog[i2]
+    k2 = st[0]
+    if k2 == 1
+      items.push([1, nil, nil, 0, 0, nil, 0])
+    else
+      args2 = st[2]
+      tab = metal4_argtable(device, args2.size())
+      j2 = 0
+      while j2 < args2.size()
+        a2 = args2[j2]
+        t2 = type(a2)
+        if t2 == "Int" || t2 == "Float"
+          sb = icb_scalar(a2)
+          metal4_argtable_set_buffer(tab, j2, sb)
+          m4_res.push(sb)
+        else
+          metal4_argtable_set_buffer(tab, j2, a2)
+          m4_res.push(a2)
+        j2 = j2 + 1
+      if k2 == 3
+        items.push([3, st[1], tab, 0, 0, st[3], 0])
+      else
+        items.push([k2, st[1], tab, st[3], st[4], nil, 0])
+      if m4exec_serial then items.push([1, nil, nil, 0, 0, nil, 0])
+    i2 = i2 + 1
+  items
+
 -> record_dual_prog(n)
   while mprog.size() > 0
     mprog.pop()
@@ -2247,6 +2303,23 @@ dual_progs = {}
   prog_key = (n * 2 + layers[0][:ping]) * 2 + multi_head_on[0]
   if multi_progs[prog_key] == nil
     multi_progs[prog_key] = record_multi_prog(n)
+  if m4exec_on
+    if m4_baked[prog_key] == nil
+      m4_baked[prog_key] = m4_bake(multi_progs[prog_key][0][1])
+      metal4_residency_attach(m4_queue, m4_res)
+      m4_res_attached[0] = m4_res.size()
+    metal4_program_exec(m4_queue, m4_alloc, m4_baked[prog_key])
+    if flip_defer[0] == 0
+      li2 = 0
+      while li2 < N_LAYERS
+        multi_flip_layer(layers[li2])
+        li2 = li2 + 1
+    preds2 = []
+    t2 = 0
+    while t2 < n
+      preds2.push(metal_buffer_read_i32(am_out_m, t2))
+      t2 = t2 + 1
+    return preds2
   if m4_on && m4_res.size() > m4_res_attached[0]
     # later recordings (new widths/parities) add weights — re-attach the
     # grown set (residency sets are additive on the queue)
@@ -2575,6 +2648,8 @@ prefill_chunked = prompt.size() > 8 && ccall("__w_env", "FN_CHUNK") != "0"
 # occupancy-bound. Kept as an arm; QSA prefill unsupported (bounds
 # buffers not banked).
 prefill_dual = prefill_chunked && ccall("__w_env", "FN_DUAL") == "1" && !qsa_on
+if prefill_dual && !unsafe_gpu_ok
+  raise "FN_DUAL is a suspect in the 2026-09-01 GPU-driver kernel panics; set FN_UNSAFE_GPU=1 to run it anyway"
 if prefill_chunked
   while i < prompt.size()
     remaining = prompt.size() - i

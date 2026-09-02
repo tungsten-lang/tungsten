@@ -450,3 +450,8 @@ fn metal4_batch_run_chained(queue, allocator, items, event, wait_val, signal_val
 
 fn metal4_allocator_reset(allocator)
   ccall("w_metal4_allocator_reset", allocator)
+
+# Execute a baked step program on the MTL4 stream (one command buffer,
+# prebuilt argument tables, intra-encoder barriers). Synchronous.
+fn metal4_program_exec(queue, allocator, items)
+  ccall("w_metal4_program_exec", queue, allocator, items)

@@ -762,6 +762,8 @@ exclude_specs=(
   spec/compiler/bigint_mul1_16_source_c_differential_spec.w
   spec/compiler/bigint_core_receiver_locked_direct_spec.w
   spec/compiler/bigint_release_reassign_spec.w
+  spec/compiler/bigint_reassign_dest_spec.w
+  spec/compiler/core_value_receiver_locked_direct_spec.w
   spec/compiler/bigint_mul1_1_locked_direct_spec.w
   spec/compiler/bigint_mul1_1_reopen_source_seam_spec.w
   spec/compiler/bigint_mul1_24_reopen_source_seam_spec.w
@@ -902,6 +904,10 @@ exclude_specs=(
   spec/core/algebra_old_new_spec.w
   spec/core/algebra_orders_spec.w
   spec/core/algebra_p_adic_geometry_spec.w
+  spec/core/algebra_p_adic_series_spec.w
+  # Chabauty--Coleman on the shell quartic: eight disks of 226 series each;
+  # ~90 s native and tens of GB of BigInt arena at K = 40.  Run by hand.
+  spec/core/algebra_coleman_spec.w
   spec/core/algebra_p_adic_spec.w
   spec/core/algebra_parity_lattice_spec.w
   spec/core/algebra_permutation_groups_spec.w

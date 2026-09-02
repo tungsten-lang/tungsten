@@ -47,6 +47,7 @@ use core/algebra/algebraic_real
 use core/algebra/expression
 use core/algebra/number_field
 use core/algebra/p_adic
+use core/algebra/p_adic_series
 use core/algebra/prime_ideals
 use core/algebra/ideal_arithmetic
 use core/algebra/archimedean
@@ -97,6 +98,7 @@ use core/algebra/point_search
 use core/algebra/quartic_invariants
 use core/algebra/automorphisms
 use core/algebra/zeta
+use core/algebra/coleman
 use core/algebra/regular_models
 use core/algebra/galois
 

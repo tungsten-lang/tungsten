@@ -12,6 +12,33 @@ failures = 0
     << "FAIL " + name
     failures += 1
 
+# Heap's permutation enumeration: exact small-n oracle for the symbolic
+# ordering objective.  This is deliberately test-only and allocation-heavy.
+-> exhaustive_min_flops(analysis, n)
+  order = []
+  i = 0
+  while i < n
+    order.push(i)
+    i += 1
+  counters = u32[n]
+  best = analysis.predictions_for_order(order)[1]
+  i = 0
+  while i < n
+    if counters[i] < i
+      j = 0
+      j = counters[i] if (i & 1) != 0
+      t = order[j]
+      order[j] = order[i]
+      order[i] = t
+      score = analysis.predictions_for_order(order)[1]
+      best = score if score < best
+      counters[i] = counters[i] + 1
+      i = 0
+    else
+      counters[i] = 0
+      i += 1
+  best
+
 # 5-point Laplacian on a g x g grid (SPD, no exact cancellation).
 g = 6
 n = g * g
@@ -271,6 +298,70 @@ check_named("mindeg.is_permutation", md_order.sort.uniq.size == n)
 check_named("mindeg.heap_matches_scan", grid_analysis.min_degree_ordering_heap == grid_analysis.min_degree_ordering_scan)
 check_named("mindeg.fill_not_worse", md_pred[0] <= nat_pred[0])
 check_named("mindeg.natural_matches_analysis", nat_pred[0] == grid_analysis.predicted_fill)
+
+# AMD policy variants remain deterministic bijections.  The default call is
+# pinned to the historical alpha-10/aggressive/LIFO policy.
+gri = grid_analysis.typed_ri
+gci = grid_analysis.typed_ci
+gm = pattern.nnz
+check_named("amd.default_policy_stable",
+            grid_analysis.amd_core(n, gri, gci, gm) == md_order)
+amd_fifo = grid_analysis.amd_core(n, gri, gci, gm, 10, 1, 1)
+amd_nonagg = grid_analysis.amd_core(n, gri, gci, gm, 10, 0)
+amd_nodense = grid_analysis.amd_core(n, gri, gci, gm, 0 - 1)
+check_named("amd.fifo_bijection",
+            amd_fifo.size == n && amd_fifo.sort.uniq.size == n)
+check_named("amd.nonagg_bijection",
+            amd_nonagg.size == n && amd_nonagg.sort.uniq.size == n)
+check_named("amd.nodense_bijection",
+            amd_nodense.size == n && amd_nodense.sort.uniq.size == n)
+check_named("amd.fifo_deterministic",
+            grid_analysis.amd_core(n, gri, gci, gm, 10, 1, 1) == amd_fifo)
+check_named("amd.nonagg_deterministic",
+            grid_analysis.amd_core(n, gri, gci, gm, 10, 0) == amd_nonagg)
+
+# Profile/bandwidth candidates: deterministic bijections on connected and
+# disconnected graphs.  A naturally labelled path has the canonical RCM
+# order 0..n-1 (CM starts at the opposite pseudo-peripheral endpoint, then the
+# final reversal restores natural order).
+path_rcm = path_analysis.rcm_ordering
+path_natural = []
+i = 0
+while i < 10
+  path_natural.push(i)
+  i += 1
+check_named("rcm.path_canonical", path_rcm == path_natural)
+check_named("rcm.deterministic", path_analysis.rcm_ordering == path_rcm)
+
+two_rcm = two_analysis.rcm_ordering
+check_named("rcm.disconnected_bijection",
+            two_rcm.size == n * 2 && two_rcm.sort.uniq.size == n * 2)
+
+sloan21 = two_analysis.sloan_ordering(2, 1)
+sloan12 = two_analysis.sloan_ordering(1, 2)
+check_named("sloan21.disconnected_bijection",
+            sloan21.size == n * 2 && sloan21.sort.uniq.size == n * 2)
+check_named("sloan12.disconnected_bijection",
+            sloan12.size == n * 2 && sloan12.sort.uniq.size == n * 2)
+check_named("sloan21.deterministic",
+            two_analysis.sloan_ordering(2, 1) == sloan21)
+check_named("sloan12.deterministic",
+            two_analysis.sloan_ordering(1, 2) == sloan12)
+
+# The K=8 window lane is an exact subset DP, not merely an exact final
+# acceptance gate: on a whole eight-vertex graph it must equal exhaustive
+# enumeration of all 8! orders.
+oracle_ri = [0, 1, 2, 3, 4, 5, 6, 7, 0, 2, 1, 3, 0, 4]
+oracle_ci = [1, 2, 3, 4, 5, 6, 7, 0, 3, 5, 6, 7, 5, 7]
+oracle_analysis = SparseAnalysis.new(SparsePattern.new(8, 8, oracle_ri, oracle_ci))
+oracle_seed = [0, 1, 2, 3, 4, 5, 6, 7]
+oracle_seed_flops = oracle_analysis.predictions_for_order(oracle_seed)[1]
+oracle_exact = exhaustive_min_flops(oracle_analysis, 8)
+oracle_dp = oracle_analysis.window_dp(oracle_seed, oracle_seed_flops, 8, 10000000)
+oracle_dp2 = oracle_analysis.window_dp(oracle_seed, oracle_seed_flops, 8, 10000000)
+check_named("window_dp.exhaustive_exact", oracle_dp[1] == oracle_exact)
+check_named("window_dp.is_permutation", oracle_dp[0].sort.uniq.size == 8)
+check_named("window_dp.deterministic", oracle_dp == oracle_dp2)
 
 # slogdet agrees with det on a well-scaled matrix.
 sd = LinAlg.slogdet(dense)

@@ -1691,6 +1691,14 @@ WValue w_metal_buffer_for_mmap(WValue device, WValue mmap, WValue byte_offset,
  * page boundary, enabling the noCopy MTLBuffer path. ccall-callable:
  * args arrive as NaN-boxed WValues. */
 WValue w_array_new_aligned(WValue element_bits, WValue size);
+/* Fused typed-u32 bitset rows used by sparse symbolic ordering. */
+WValue __w_u32_merge_count(WValue dst, WValue dst_offset,
+                           WValue src, WValue src_offset, WValue words);
+WValue __w_u32_and_store_count(WValue dst, WValue dst_offset,
+                               WValue a, WValue a_offset,
+                               WValue b, WValue b_offset, WValue words);
+WValue __w_u32_andnot_count(WValue a, WValue a_offset,
+                            WValue b, WValue b_offset, WValue words);
 /* Typed-array parameter guard emitted by lowering at native-fn call sites
  * whose argument element width could not be resolved statically. Raises when
  * the incoming array's element storage width does not match the callee's
@@ -1751,6 +1759,8 @@ typedef struct WMetalTensor {
 typedef struct WMetal4Queue {
     uint8_t type;       /* W_TYPE_METAL4_QUEUE */
     void *handle;       /* id<MTL4CommandQueue> */
+    void *residency;    /* id<MTLResidencySet> or NULL: the queue's one persistent
+                         * residency set, grown in place by metal4_residency_attach */
 } WMetal4Queue;
 
 typedef struct WMetal4Allocator {
@@ -2268,6 +2278,7 @@ WValue __w_elapsed_seconds_since_ns(int64_t start_ns);
 WValue __w_elapsed_seconds_since_ticks(int64_t start_ticks);
 WValue __w_read_file(WValue path_val);
 WValue __w_read_file_bytes(WValue path_val);
+WValue __w_read_file_prefix(WValue path_val, WValue limit_val);
 WValue __w_write_file(WValue path_val, WValue content_val);
 WValue __w_write_file_n(WValue path_val, WValue bytes_val, WValue n_val);
 WValue __w_file_rm(WValue path_val);

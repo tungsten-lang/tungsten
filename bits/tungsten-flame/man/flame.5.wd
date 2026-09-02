@@ -15,6 +15,7 @@ tungsten-flame(1) -- Make flame graphs
     --rate N           Sample frequency in Hz (auto if omitted)
     --top N            Print the top N most expensive methods
     --counters [SET]   PMC counter profile: SET = rates (default), cache, stalls
+    --alloc            Runtime allocation profile: per-kind counts and bytes
 
     --lex              Only lexing
     --ruby             Profile the Ruby interpreter path
@@ -61,3 +62,5 @@ If the top function is over 40% automatically include the caller/callee breakdow
 Use `--pid PID` to attach to an existing process, or pass a command after `--` to launch and sample a non-Tungsten process for the requested duration.
 
 `--counters` (macOS) records hardware PMC events instead of the default sample set, attributing per-thread counter deltas to sampled call stacks. The `rates` set pairs instructions and cycles with the dominant miss families (L1D load/store misses, L2 load misses, memory-system-sourced loads, TLB misses) and closes with a per-function IPC / misses-per-kilo-instruction table. `cache` and `stalls` select the other bundled event templates. Tungsten frames symbolize through the compiler sidemap exactly like the default mode.
+
+`--alloc` instruments the Tungsten runtime's allocation choke points (typed and aligned arrays, array growth, BigInt arena takes, hash creation): the profiled child runs with `TUNGSTEN_ALLOC_PROFILE=1`, counts every allocation with relaxed atomics (one predicted branch when off), and dumps a per-kind count/bytes table at exit, which flame folds into the report. Pair it with `--counters` to correlate allocation pressure with miss rates.

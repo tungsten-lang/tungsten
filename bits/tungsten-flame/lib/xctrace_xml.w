@@ -344,6 +344,11 @@ in Tungsten:Flame
   # system, so rows are filtered to threads whose inline name contains
   # `proc_marker` ("(<binary basename>, pid:").
   -> .collapse_counter_profile(xml_text, binary_path, load_addr, metric_names, proc_marker)
+    # The tagged-backtrace fmt attribute embeds a multi-byte arrow;
+    # under the Ruby interpreter String#index and slice then disagree
+    # on offsets (chars vs bytes) past it. Fold to ASCII so every
+    # offset below is unit-consistent.
+    xml_text = xml_text.split("←").join("-")
     n_metrics = metric_names.size()
 
     folded_by_metric = {}
@@ -643,12 +648,60 @@ in Tungsten:Flame
     # row (kernel comes first, user second).
     bts = self.all_kperf_refs(row)
     if bts.size() == 0
-      return nil
+      # counters-profile rows don't carry kperf-bt at all: their stack is
+      # <tagged-backtrace><backtrace><frame addr="0x..."/> (leaf first),
+      # with later rows referencing the tagged wrapper by ref.
+      return self.row_tagged_stack(row, addrs_by_id)
     last = bts[bts.size() - 1]
     if addrs_by_id.has_key?(last)
       addrs_by_id[last]
     else
       nil
+
+  # Parse a counters-profile row's <tagged-backtrace> stack. Frames are
+  # <frame ... addr="0x..."/> in leaf-first order; the whole wrapper is
+  # memoized into addrs_by_id under its id (the export's id space is
+  # document-unique, so sharing the dict with kperf ids is safe) and
+  # later rows resolve through <tagged-backtrace ref="N"/>.
+  -> .row_tagged_stack(row, addrs_by_id)
+    tp = row.index("<tagged-backtrace ref=\"")
+    if tp != nil
+      r_s = tp + 23
+      r_e = self.find_from(row, "\"", r_s)
+      if r_e == nil
+        return nil
+      rid = row.slice(r_s, r_e - r_s)
+      if addrs_by_id.has_key?(rid)
+        return addrs_by_id[rid]
+      return nil
+    tp = row.index("<tagged-backtrace id=\"")
+    if tp == nil
+      return nil
+    id_s = tp + 22
+    id_e = self.find_from(row, "\"", id_s)
+    if id_e == nil
+      return nil
+    tid2 = row.slice(id_s, id_e - id_s)
+    bend = self.find_from(row, "</tagged-backtrace>", tp)
+    if bend == nil
+      return nil
+    seg = row.slice(tp, bend - tp)
+    addrs = []
+    cur = 0
+    while true
+      ap = self.find_from(seg, "addr=\"", cur)
+      if ap == nil
+        break
+      v_s = ap + 6
+      v_e = self.find_from(seg, "\"", v_s)
+      if v_e == nil
+        break
+      addrs.push(seg.slice(v_s, v_e - v_s))
+      cur = v_e
+    if addrs.size() == 0
+      return nil
+    addrs_by_id[tid2] = addrs
+    addrs
 
   # Return the list of every kperf-bt id or ref string in `row`.
   -> .all_kperf_refs(row)

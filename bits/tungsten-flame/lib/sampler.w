@@ -227,8 +227,24 @@ in Tungsten:Flame
     log_path = tmpdir + "/xctrace.log"
     log_q = Tungsten:Flame:Builder.shell_quote(log_path)
     tgt_q = Tungsten:Flame:Builder.shell_quote(tmpdir + "/target.out")
-    rec_cmd = "xctrace record --template " + tpl_q + " --time-limit " + duration.to_s() + "s --output " + trace_q + " --env DYLD_PRINT_SEGMENTS=1 --target-stdout " + tgt_q + " --launch -- " + bin_q + " > " + log_q + " 2>&1"
+    alloc_env = ""
+    alloc_env = " --env TUNGSTEN_ALLOC_PROFILE=1" if env("TUNGSTEN_FLAME_ALLOC") != nil
+    rec_cmd = "xctrace record --template " + tpl_q + " --time-limit " + duration.to_s() + "s --output " + trace_q + " --env DYLD_PRINT_SEGMENTS=1" + alloc_env + " --target-stdout " + tgt_q + " --launch -- " + bin_q + " > " + log_q + " 2>&1"
     system(rec_cmd)
+    if alloc_env != ""
+      tgt_text = read_file(tmpdir + "/target.out")
+      if tgt_text != nil
+        << ""
+        << "  Allocations (runtime, whole run)"
+        shown = 0
+        tgt_text.split("\n").each -> (ln)
+          if ln.starts_with?("TALLOC ")
+            parts = ln.split(" ")
+            if parts.size >= 4
+              << "    " + parts[1] + "  count=" + parts[2] + "  bytes=" + parts[3]
+              shown += 1
+        if shown == 0
+          << "    (no TALLOC lines — child exited abnormally or runtime predates --alloc)"
     if !file?(trace_path + "/form.template")
       << "sampler: xctrace record failed (" + template.split("/").last + ")"
       log_text = read_file(log_path)

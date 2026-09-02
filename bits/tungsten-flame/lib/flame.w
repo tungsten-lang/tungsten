@@ -107,6 +107,7 @@ fl_keeper      = opts.get("keeper")
 # selects "rates" (instructions + cycles + miss families -> the per-
 # function IPC/MPKI table); --counters cache / stalls pick the other
 # bundled templates. Argon stores `true` for the bare form.
+fl_alloc = opts.flag?("alloc")
 fl_counters_raw = opts.get("counters")
 fl_counters = ""
 if fl_counters_raw != nil

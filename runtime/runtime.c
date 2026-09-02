@@ -699,6 +699,92 @@ _Static_assert(BN_BIGINT_HYBRID_QUANTUM2 >= BN_BIGINT_HYBRID_QUANTUM,
 #define BN_BIGINT_SRC_MALLOC 0u
 #define BN_BIGINT_SRC_ARENA  1u
 
+/* ---- Fused u32-bitset row kernels ----
+ * One call per row instead of a boxed op per word: clang auto-vectorizes
+ * these to NEON (cnt.16b), and the callers' word loops collapse.
+ * Layout: ebits-32 arrays store packed uint32_t at slots+start. */
+static inline uint32_t *w_u32_data(WValue v, int64_t off) {
+    WArray *a = w_as_array(v);
+    return (uint32_t *)a->slots + a->start + off;
+}
+/* dst |= src over w words; returns popcount of newly-set bits. */
+WValue __w_u32_merge_count(WValue dstv, WValue doffv, WValue srcv, WValue soffv, WValue wv) {
+    uint32_t *dp = w_u32_data(dstv, w_as_int(doffv));
+    const uint32_t *sp = w_u32_data(srcv, w_as_int(soffv));
+    int64_t w = w_as_int(wv);
+    uint64_t total = 0;
+    for (int64_t i = 0; i < w; i++) {
+        uint32_t neu = sp[i] & ~dp[i];
+        dp[i] |= neu;
+        total += (uint64_t)__builtin_popcount(neu);
+    }
+    return w_int((int64_t)total);
+}
+/* dst = a & b over w words; returns popcount of the result. */
+WValue __w_u32_and_store_count(WValue dstv, WValue doffv, WValue av, WValue aoffv, WValue bv, WValue boffv, WValue wv) {
+    uint32_t *dp = w_u32_data(dstv, w_as_int(doffv));
+    const uint32_t *ap = w_u32_data(av, w_as_int(aoffv));
+    const uint32_t *bp = w_u32_data(bv, w_as_int(boffv));
+    int64_t w = w_as_int(wv);
+    uint64_t total = 0;
+    for (int64_t i = 0; i < w; i++) {
+        uint32_t x = ap[i] & bp[i];
+        dp[i] = x;
+        total += (uint64_t)__builtin_popcount(x);
+    }
+    return w_int((int64_t)total);
+}
+/* popcount of a & ~b over w words (no store). */
+WValue __w_u32_andnot_count(WValue av, WValue aoffv, WValue bv, WValue boffv, WValue wv) {
+    const uint32_t *ap = w_u32_data(av, w_as_int(aoffv));
+    const uint32_t *bp = w_u32_data(bv, w_as_int(boffv));
+    int64_t w = w_as_int(wv);
+    uint64_t total = 0;
+    for (int64_t i = 0; i < w; i++) {
+        total += (uint64_t)__builtin_popcount(ap[i] & ~bp[i]);
+    }
+    return w_int((int64_t)total);
+}
+
+/* ---- Allocation profile (TUNGSTEN_ALLOC_PROFILE=1) ----
+ * Relaxed atomic per-kind counters at the runtime's allocation choke
+ * points, dumped atexit as both a human table and machine-readable
+ * `TALLOC <kind> <count> <bytes>` lines (consumed by `tungsten flame
+ * --alloc`). Zero cost when off: one predicted branch per site. */
+#define W_ALLOCPROF_BIGINT   0
+#define W_ALLOCPROF_ARR      1
+#define W_ALLOCPROF_ALIGNED  2
+#define W_ALLOCPROF_GROW     3
+#define W_ALLOCPROF_HASH     4
+#define W_ALLOCPROF_COUNT    5
+
+static int g_allocprof_on = -1;
+static long long g_allocprof_n[W_ALLOCPROF_COUNT];
+static long long g_allocprof_b[W_ALLOCPROF_COUNT];
+
+static void w_allocprof_dump(void) {
+    static const char *names[W_ALLOCPROF_COUNT] = {
+        "bigint_arena", "array_new", "array_aligned", "array_grow", "hash_new"
+    };
+    fprintf(stderr, "\n== tungsten alloc profile ==\n");
+    for (int i = 0; i < W_ALLOCPROF_COUNT; i++) {
+        fprintf(stderr, "TALLOC %-13s %12lld %14lld\n", names[i],
+                (long long)g_allocprof_n[i], (long long)g_allocprof_b[i]);
+    }
+}
+
+static inline void w_allocprof(int kind, long long bytes) {
+    if (g_allocprof_on < 0) {
+        const char *e = getenv("TUNGSTEN_ALLOC_PROFILE");
+        g_allocprof_on = (e && e[0] == '1') ? 1 : 0;
+        if (g_allocprof_on) atexit(w_allocprof_dump);
+    }
+    if (g_allocprof_on) {
+        __atomic_fetch_add(&g_allocprof_n[kind], 1, __ATOMIC_RELAXED);
+        __atomic_fetch_add(&g_allocprof_b[kind], bytes, __ATOMIC_RELAXED);
+    }
+}
+
 #if BN_BIGINT_ARENA_ACTIVE
 static WBigint *bigint_arena_take(uint32_t alloc_cap, int zero_limbs);
 static void bigint_arena_free(WBigint *b);
@@ -1571,6 +1657,7 @@ static WBigint *bn_arena_bump(WBigintArena *a, uint32_t alloc_cap) {
 }
 
 static WBigint *bigint_arena_take(uint32_t alloc_cap, int zero_limbs) {
+    w_allocprof(W_ALLOCPROF_BIGINT, (long long)alloc_cap * 8);
     WBigintArena *a = &bigint_arena_state;
     WBigint *b = bn_arena_freelist_pop(a, alloc_cap);
     if (!b) {
@@ -47087,6 +47174,7 @@ static void w_hash_prepare_set(WHash *hash) {
 }
 
 WValue w_hash_new(void) {
+    w_allocprof(W_ALLOCPROF_HASH, (long long)sizeof(WHash));
     WHash *hash = calloc(1, sizeof(WHash));
     w_hash_allocate_storage(hash, 8);
     return w_box_ptr(hash, W_SUBTAG_HASH);
@@ -48647,6 +48735,46 @@ WValue __w_read_file(WValue path_val) {
     WValue result = w_string_n(data, (size_t)a->size);
     w_value_free(bytes);
     return result;
+}
+
+/* Read at most `limit` bytes from the start of a file.  Format sniffers must
+ * not turn a tiny magic-byte probe into an allocation and read proportional
+ * to the entire dataset. */
+WValue __w_read_file_prefix(WValue path_val, WValue limit_val) {
+    const char *path = as_str(path_val);
+    int64_t limit = w_as_int(limit_val);
+    if (limit < 0) {
+        w_raise(w_string("File.read_prefix: byte count must be nonnegative"));
+    }
+    if (limit > INT32_MAX) {
+        w_raise(w_string("File.read_prefix: byte count exceeds string capacity"));
+    }
+    w_sandbox_gate("read_file", path);
+    if (limit == 0) return w_string("");
+
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) return W_NIL;
+    size_t cap = (size_t)limit;
+    char *buf = (char *)malloc(cap + 1);
+    if (!buf) {
+        close(fd);
+        w_raise(w_string("File.read_prefix: allocation failed"));
+    }
+    size_t off = 0;
+    while (off < cap) {
+        ssize_t n = read(fd, buf + off, cap - off);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            close(fd);
+            free(buf);
+            return W_NIL;
+        }
+        if (n == 0) break;
+        off += (size_t)n;
+    }
+    close(fd);
+    buf[off] = '\0';
+    return w_string_take(buf, off);
 }
 
 /* ---- File.mmap ----
@@ -62686,6 +62814,7 @@ WValue w_array_new(int64_t element_bits, int64_t cap) {
     if (cap > INT32_MAX) {
         w_raise(w_string("typed array: cap exceeds INT32_MAX — use BigArray for >2^31 elements"));
     }
+    w_allocprof(W_ALLOCPROF_ARR, (long long)(cap > 0 ? cap : 8) * 8);
     WArray *a = calloc(1, sizeof(WArray));
     a->flags = W_FLAG_OWNED;
     a->ebits = (int8_t)element_bits;
@@ -62853,6 +62982,7 @@ WValue w_array_new_aligned(WValue element_bits_v, WValue size_v) {
     long page = sysconf(_SC_PAGESIZE);
     if (page <= 0) page = 4096;
     int64_t alloc_size = (byte_size + page - 1) & ~(page - 1);
+    w_allocprof(W_ALLOCPROF_ALIGNED, alloc_size);
     void *base = mmap(NULL, (size_t)alloc_size,
                       PROT_READ | PROT_WRITE,
                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -62948,6 +63078,7 @@ WValue w_array_push(WValue arr, WValue val) {
             uint8_t *new_data;
 
             if (!has_views && !(old_flags & (W_FLAG_INLINE | W_FLAG_PAGE_ALIGNED))) {
+                w_allocprof(W_ALLOCPROF_GROW, new_bytes);
                 new_data = realloc(old_slots, new_bytes);
                 if (!new_data) die("typed array realloc failed");
             } else {

@@ -80,6 +80,11 @@ use core/mmap
   -> .read(path)
     read_file(path)
 
+  # Read no more than `length` bytes from the beginning of a file.  Unlike
+  # `read`, the allocation and I/O are bounded by the caller's request.
+  -> .read_prefix(path, length)
+    ccall("__w_read_file_prefix", path, length)
+
   -> .read_bytes(path)
     read_file_bytes(path)
 

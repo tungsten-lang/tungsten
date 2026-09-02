@@ -1419,6 +1419,10 @@ use target
       if args.size() != 2
         raise "__w_file_read_dir expects one path"
       return ccall("__w_file_read_dir", args[1])
+    when "__w_read_file_prefix"
+      if args.size() != 3
+        raise "__w_read_file_prefix expects a path and byte limit"
+      return ccall("__w_read_file_prefix", args[1], args[2])
     when "w_chan_new"
       if args.size() != 2
         raise "w_chan_new expects one capacity"
@@ -1544,6 +1548,22 @@ use target
         z = ccall("w_array_set", args[1], args[2], current)
         return current
       return 0
+    when "__w_u32_merge_count"
+      if args.size() != 6
+        raise "__w_u32_merge_count expects two arrays, two offsets, and a word count"
+      return ccall("__w_u32_merge_count", args[1], args[2], args[3], args[4], args[5])
+    when "__w_u32_andnot_count"
+      if args.size() != 6
+        raise "__w_u32_andnot_count expects two arrays, two offsets, and a word count"
+      return ccall("__w_u32_andnot_count", args[1], args[2], args[3], args[4], args[5])
+    when "__w_u32_fill_flops"
+      if args.size() != 2
+        raise "__w_u32_fill_flops expects one counts array"
+      return ccall("__w_u32_fill_flops", args[1])
+    when "__w_u32_flops"
+      if args.size() != 2
+        raise "__w_u32_flops expects one counts array"
+      return ccall("__w_u32_flops", args[1])
     when "w_int"
       # A compiled source method uses w_int only to turn a raw signed i64 into
       # its canonical immediate/BigInt WValue. Integers are already arbitrary
@@ -2126,6 +2146,16 @@ use target
         x = x & (x - 1)
         count += 1
       return count
+    when "__w_u32_merge_count_raw"
+      if args.size() != 6
+        raise "__w_u32_merge_count_raw expects two arrays, two offsets, and a word count"
+      # Eval mode has no raw-int local tier. Reuse the boxed semantic twin;
+      # compiled code alone selects the raw-return ABI.
+      return ccall("__w_u32_merge_count", args[1], args[2], args[3], args[4], args[5])
+    when "__w_u32_andnot_count_raw"
+      if args.size() != 6
+        raise "__w_u32_andnot_count_raw expects two arrays, two offsets, and a word count"
+      return ccall("__w_u32_andnot_count", args[1], args[2], args[3], args[4], args[5])
     when "__w_bit_ctpop_u64"
       if args.size() != 2
         raise "__w_bit_ctpop_u64 expects one argument"

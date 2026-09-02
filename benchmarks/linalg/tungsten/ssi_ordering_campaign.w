@@ -17,6 +17,7 @@
 #   arrow SIZE      path with two dense hub vertices
 #   blocks SIZE     four disconnected SIZE x SIZE grids
 #   bridge SIZE     two SIZE x SIZE grids joined by one bridge edge
+#   articulation SIZE  chain of SIZE 8 x 8 grids sharing cut vertices
 #   twins SIZE      chain of SIZE eight-vertex cliques (supervariables)
 #   shell SIZE      32-vertex core with SIZE live-degree-three shell vertices
 #   random SIZE     deterministic sparse graph, about six edges/vertex
@@ -24,9 +25,9 @@
 # Modes:
 #   natural scan heap amd amd_alpha1 amd_alpha5 amd_alpha16 amd_nodense
 #   amd_nonagg amd_nonagg_nodense amd_fifo amf amf_nodense game nd levelset rcm
-#   sloan21 sloan12 predcorr
-#   supervar rgreedy minl minl_alt window8 window10 telos rgsub
-#   pair descent anneal best0 best best_diverse best0_alpha best_alpha
+#   sloan21 sloan12 biconn predcorr
+#   supervar rgreedy minl minl_watch minl_watch_deg minl_alt window8 window10 telos rgsub rgsub_boundary1 rgsub_boundary
+#   pair descent anneal best0 best best_watch best_diverse best0_alpha best_alpha
 
 use core/sparse
 
@@ -87,6 +88,35 @@ use core/sparse
   ri = data[1]
   ci = data[2]
   edge(ri, ci, g * g - 1, g * g)
+  [n, ri, ci]
+
+# A chain of individually biconnected grid blocks.  Consecutive blocks share
+# exactly one corner vertex, producing a deep block-cut tree without bridges.
+-> articulation_pattern(blocks)
+  g = 8
+  one = g * g
+  n = 1 + blocks * (one - 1)
+  ri = []
+  ci = []
+  shared = 0
+  next_vertex = 1
+  b = 0
+  while b < blocks
+    ids = [shared]
+    i = 1
+    while i < one
+      ids.push(next_vertex)
+      next_vertex += 1
+      i += 1
+    i = 0
+    while i < one
+      row = i / g
+      col = i % g
+      edge(ri, ci, ids[i], ids[i + 1]) if col + 1 < g
+      edge(ri, ci, ids[i], ids[i + g]) if row + 1 < g
+      i += 1
+    shared = ids[one - 1]
+    b += 1
   [n, ri, ci]
 
 -> twins_pattern(groups)
@@ -168,6 +198,8 @@ use core/sparse
     grid_pattern(size, 4)
   elsif family == "bridge"
     bridge_pattern(size)
+  elsif family == "articulation"
+    articulation_pattern(size)
   elsif family == "twins"
     twins_pattern(size)
   elsif family == "shell"
@@ -175,7 +207,7 @@ use core/sparse
   elsif family == "random"
     random_pattern(size)
   else
-    raise "family must be grid, band, arrow, blocks, bridge, twins, shell, or random"
+    raise "family must be grid, band, arrow, blocks, bridge, articulation, twins, shell, or random"
 
 -> natural_order(n)
   out = []
@@ -211,6 +243,7 @@ use core/sparse
   return analysis.rcm_ordering if mode == "rcm"
   return analysis.sloan_ordering(2, 1) if mode == "sloan21"
   return analysis.sloan_ordering(1, 2) if mode == "sloan12"
+  return analysis.biconn_ordering if mode == "biconn"
   seed = analysis.min_degree_ordering
   sp = analysis.predictions_for_order(seed)
   if mode == "natural"
@@ -253,6 +286,10 @@ use core/sparse
     analysis.rgreedy_refine(n, ri, ci, m, seed, sp[1], budget, stream)[0]
   elsif mode == "minl"
     analysis.minl_descent(seed, sp[1], budget)[0]
+  elsif mode == "minl_watch"
+    analysis.minl_descent(seed, sp[1], budget, 0, 1)[0]
+  elsif mode == "minl_watch_deg"
+    analysis.minl_descent(seed, sp[1], budget, 0, 2)[0]
   elsif mode == "minl_alt"
     analysis.minl_descent(seed, sp[1], budget, 1)[0]
   elsif mode == "window8"
@@ -263,6 +300,10 @@ use core/sparse
     analysis.telos_descent(seed, sp[1], 6)[0]
   elsif mode == "rgsub"
     analysis.rgsub_refine(seed, budget, stream)[0]
+  elsif mode == "rgsub_boundary1"
+    analysis.rgsub_refine(seed, budget, stream, 1, nil, 1, 1)[0]
+  elsif mode == "rgsub_boundary"
+    analysis.rgsub_refine(seed, budget, stream, 1, nil, 1)[0]
   elsif mode == "descent"
     analysis.order_descent(seed, sp[1], budget, stream)[0]
   elsif mode == "pair"
@@ -273,6 +314,8 @@ use core/sparse
     analysis.best_ordering(12, 0, stream)
   elsif mode == "best"
     analysis.best_ordering(12, budget, stream)
+  elsif mode == "best_watch"
+    analysis.best_ordering(12, budget, stream, nil, 0, 0, 1)
   elsif mode == "best_diverse"
     analysis.best_ordering(12, budget, stream, nil, 1)
   elsif mode == "best0_alpha"

@@ -185,3 +185,53 @@ line and revalidated: compiler stage-1/stage-2 LLVM identity, fast/canonical
 parser parity, acid, 351/714 C-call contracts, all 581 spec classifications,
 tokenizer round trips, exhaustive FP8 decoding, and the 119-token width-2 mixed
 PLE path all passed with zero token mismatches.
+
+## 2026-09-02 SSI sparse-ordering transfer
+
+The SSI transfer campaign added allocation-free symbolic rescoring, immutable
+typed COO reuse, exact small-window search, optional deterministic ordering
+families, and boundary-aware elimination-tree subtree refinement. The strongest
+algorithmic result came from keeping a subtree's active separator vertices as
+read-only terminals: exact flops fell 3.23-5.19% on the tested grid, bridge,
+and disconnected-block shapes. The lane is still globally rescored before
+acceptance and has a hard cap on its per-worker dense bitsets.
+
+The lower-level changes also moved end-to-end search: reusable score buffers
+removed more than 99% of allocations in annealing, the exact native u32 reducer
+was 4.5-5.5x faster than the Tungsten reduction at 100k counts, and typed COO
+reuse improved individual ordering lanes by 0.5-9.5%. A 64 MiB core-lift guard
+saved 69.02 MiB peak RSS on a 24k-vertex band without changing the order or
+score.
+
+Follow-on profiling found that RGSUB's coordinator spent 97.2% of sampled
+ticks waiting for useful worker computation, but four-job waves launched more
+than 105 short-lived workers per second. Phase-wide immutable job sharing plus
+a CPU-scaled, 128 MiB scratch-capped executor reduced structured-shape RGSUB
+time by 24-30% across 2.5M-20M word budgets. Raw-i64 bitset count returns
+removed boxed call results (2.54-4.59x in the kernel benchmark and 0.55-2.24%
+end to end across RGSUB shapes), while etree-postorder relabeling removed a
+duplicate symbolic traversal and cut isolated setup by 8-15% on the principal
+shapes. The ordinary portfolio now uses one concentrated RGSUB round; the
+quality-focused direct lane keeps the independently useful macro round. Exact
+proposal acceptance also mutates the coordinator-owned order in place with a
+reusable undo segment; this removed 1-8% of allocation bytes and improved the
+copy-heavy tested shapes by up to 3.61% without changing any exact result.
+Directly allocating proposal-local identity seeds as typed u32 buffers removed
+another 61-64 allocations on grid-55/blocks-22 and improved the principal
+structured cases by 2.31-3.57%; 15-run neutral-shape checks stayed within
+0.11%, and 44 shape/stream comparisons retained identical exact results.
+The reusable scoring workspace is protected by a per-analysis mutex for
+shared callers; nine-run RGSUB deltas stayed between -0.41% and +0.69%, while
+an eight-thread interleaving regression verified owned and scalar score views.
+
+An exact watcher-MINL lane is also available as `best_watch`. Its fill-edge
+witness queue found small additional flop wins on bridge-30 and random-750,
+but remains opt-in because matched time was neutral. The watcher candidate is
+merged at the end of the historical pipeline, preventing its alternate basin
+from perturbing later descents unless the final exact score is better.
+
+RCM, Sloan, structural-pool diversity, broad threaded relabeling, and an
+in-core native bitset-call substitution did not pass their matched gates and
+remain opt-in or reverted. Full commands, shape-by-shape measurements, exact
+fixtures, and the keep/reject ledger are in the
+[`SSI ordering transfer results`](../benchmarks/linalg/tungsten/ssi_ordering_results_2026-09-02.md).

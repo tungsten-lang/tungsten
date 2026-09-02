@@ -720,6 +720,20 @@ WValue __w_u32_merge_count(WValue dstv, WValue doffv, WValue srcv, WValue soffv,
     }
     return w_int((int64_t)total);
 }
+/* Raw-return companion for typed hot loops. The inputs retain the ordinary
+ * WValue C-call ABI; only the bounded popcount result skips Int boxing. */
+int64_t __w_u32_merge_count_raw(WValue dstv, WValue doffv, WValue srcv, WValue soffv, WValue wv) {
+    uint32_t *dp = w_u32_data(dstv, w_as_int(doffv));
+    const uint32_t *sp = w_u32_data(srcv, w_as_int(soffv));
+    int64_t w = w_as_int(wv);
+    uint64_t total = 0;
+    for (int64_t i = 0; i < w; i++) {
+        uint32_t neu = sp[i] & ~dp[i];
+        dp[i] |= neu;
+        total += (uint64_t)__builtin_popcount(neu);
+    }
+    return (int64_t)total;
+}
 /* dst = a & b over w words; returns popcount of the result. */
 WValue __w_u32_and_store_count(WValue dstv, WValue doffv, WValue av, WValue aoffv, WValue bv, WValue boffv, WValue wv) {
     uint32_t *dp = w_u32_data(dstv, w_as_int(doffv));
@@ -744,6 +758,58 @@ WValue __w_u32_andnot_count(WValue av, WValue aoffv, WValue bv, WValue boffv, WV
         total += (uint64_t)__builtin_popcount(ap[i] & ~bp[i]);
     }
     return w_int((int64_t)total);
+}
+/* Raw-return companion: counts are bounded by 32 * words. */
+int64_t __w_u32_andnot_count_raw(WValue av, WValue aoffv, WValue bv, WValue boffv, WValue wv) {
+    const uint32_t *ap = w_u32_data(av, w_as_int(aoffv));
+    const uint32_t *bp = w_u32_data(bv, w_as_int(boffv));
+    int64_t w = w_as_int(wv);
+    uint64_t total = 0;
+    for (int64_t i = 0; i < w; i++) {
+        total += (uint64_t)__builtin_popcount(ap[i] & ~bp[i]);
+    }
+    return (int64_t)total;
+}
+
+/* Exact symbolic score reduction for u32 column counts.  Use a 128-bit flop
+ * accumulator so dense worst cases preserve Tungsten's arbitrary-precision
+ * integer semantics instead of silently wrapping u64.  fill_out is either a
+ * known non-null pointer or NULL at every caller; forced inlining lets clang
+ * delete the fill reduction entirely for the scalar-flops entry. */
+static inline __attribute__((always_inline))
+unsigned __int128 w_u32_score_reduce(const uint32_t *counts, int64_t size,
+                                     uint64_t *fill_out) {
+    /* WArray::size is int32 and each element is u32, so the largest possible
+     * fill sum is below INT64_MAX.  Keep this accumulator at 64 bits: making
+     * it u128 adds a needless carry chain to clang's four-way unrolled loop. */
+    uint64_t fill = 0;
+    unsigned __int128 flops = 0;
+    for (int64_t i = 0; i < size; i++) {
+        unsigned __int128 c = counts[i];
+        fill += c;
+        flops += c * c;
+    }
+    if (fill_out != NULL) *fill_out = fill;
+    return flops;
+}
+
+WValue __w_u32_fill_flops(WValue countsv) {
+    WArray *a = w_as_array(countsv);
+    const uint32_t *counts = (const uint32_t *)a->slots + a->start;
+    uint64_t fill;
+    unsigned __int128 flops = w_u32_score_reduce(counts, a->size, &fill);
+    WValue out = w_array_new_empty();
+    w_array_push(out, w_u128(fill));
+    w_array_push(out, w_u128(flops));
+    return out;
+}
+
+/* Flop-only companion for callers that do not need fill.  Returning the
+ * exact Int directly avoids allocating and indexing a two-element array. */
+WValue __w_u32_flops(WValue countsv) {
+    WArray *a = w_as_array(countsv);
+    const uint32_t *counts = (const uint32_t *)a->slots + a->start;
+    return w_u128(w_u32_score_reduce(counts, a->size, NULL));
 }
 
 /* ---- Allocation profile (TUNGSTEN_ALLOC_PROFILE=1) ----
@@ -48750,10 +48816,22 @@ WValue __w_read_file_prefix(WValue path_val, WValue limit_val) {
         w_raise(w_string("File.read_prefix: byte count exceeds string capacity"));
     }
     w_sandbox_gate("read_file", path);
-    if (limit == 0) return w_string("");
 
     int fd = open(path, O_RDONLY);
     if (fd < 0) return W_NIL;
+    if (limit == 0) {
+        /* Validate the path even when no payload was requested. open(2)
+         * succeeds for directories on POSIX, whereas a positive read fails;
+         * preserve that observable read-prefix contract without adding an
+         * fstat to normal format probes. */
+        struct stat st;
+        if (fstat(fd, &st) < 0 || S_ISDIR(st.st_mode)) {
+            close(fd);
+            return W_NIL;
+        }
+        close(fd);
+        return w_string("");
+    }
     size_t cap = (size_t)limit;
     char *buf = (char *)malloc(cap + 1);
     if (!buf) {

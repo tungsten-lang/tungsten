@@ -18,6 +18,8 @@
 #     values on the SAME pattern (numeric-only — Apple's SparseRefactor
 #     reuses the symbolic analysis), `release` explicitly.
 
+use core/mutex
+
 + SparsePattern
   # Structure-only, square-or-rectangular, from parallel COO index lists.
   # The i32 buffers are built here and never mutated afterwards.
@@ -146,10 +148,11 @@
   # under an optional relabeling (perm[old] = new, nil = identity) in CSC
   # form on u32 arrays, then Liu's elimination tree with path compression
   # and row-subtree column counts. Duplicate entries are harmless (the
-  # row-subtree mark dedupes) and rows need no sorting, so no per-row
-  # sort/uniq and no boxed arrays anywhere on the hot path.
-  # Returns [parent, counts] as u32 arrays (parent: 4294967295 = root).
-  -> counts_under(perm)
+  # row-subtree mark dedupes) and rows need no sorting. All work and result
+  # buffers are analysis-owned and overwritten in full. The public wrapper
+  # below copies the result when a caller needs to retain it; exact scoring
+  # reads these buffers directly and therefore allocates nothing here.
+  -> counts_under_cached(perm)
     n = @pattern.rows
     none = 4294967295
     ri = @fri
@@ -163,6 +166,8 @@
       @cu_idx = u32[m + 1]
       @cu_anc = u32[n]
       @cu_mark = u32[n]
+      @cu_parent = u32[n]
+      @cu_counts = u32[n]
     rows = @cu_rows
     i = 0
     while i < n
@@ -204,7 +209,7 @@
         idx[ptr[b] + rows[b]] = a
         rows[b] = rows[b] + 1
       k += 1
-    parent = u32[n]
+    parent = @cu_parent
     ancestor = @cu_anc
     i = 0
     while i < n
@@ -224,7 +229,7 @@
           r = nxt
         p += 1
       i += 1
-    counts = u32[n]
+    counts = @cu_counts
     mark = @cu_mark
     i = 0
     while i < n
@@ -244,7 +249,23 @@
           r = parent[r]
         p += 1
       i += 1
-    [parent, counts]
+    nil
+
+  # Public owned-result API. Each call returns fresh parent/count buffers, so
+  # a later score or counts query cannot mutate a result retained by a caller.
+  # parent uses 4294967295 for an elimination-tree root.
+  -> counts_under(perm)
+    n = @pattern.rows
+    @score_lock.synchronize ->
+      counts_under_cached(perm)
+      parent = u32[n]
+      counts = u32[n]
+      i = 0
+      while i < n
+        parent[i] = @cu_parent[i]
+        counts[i] = @cu_counts[i]
+        i += 1
+      [parent, counts]
 
   # Symmetric-structure analysis: elimination tree + column counts of the
   # Cholesky factor for the pattern (entries interpreted as the union of
@@ -252,6 +273,10 @@
   # work, no factor. Deterministic.
   -> new(@pattern)
     raise "SparseAnalysis: square pattern required" if @pattern.rows != @pattern.cols
+    # Exact scoring reuses large typed workspaces. Serialize access on a
+    # shared analysis so public read-like queries remain deterministic; RGSUB
+    # workers still use private analyses and therefore never contend here.
+    @score_lock = Mutex.new()
     n = @pattern.rows
     # typed copies of the pattern's index arrays: the ccall-backed
     # originals pay a dynamic dispatch per read, and the scoring and
@@ -265,9 +290,9 @@
       @fri[k] = ri0[k]
       @fci[k] = ci0[k]
       k += 1
-    data = counts_under(nil)
-    tparent = data[0]
-    tcounts = data[1]
+    counts_under_cached(nil)
+    tparent = @cu_parent
+    tcounts = @cu_counts
     @parent = []
     @counts = []
     i = 0
@@ -298,6 +323,18 @@
       total += c * c
     total
 
+  # Exact identity-order prefix objective. Sparse block refiners always seed
+  # with [0...n), whose counts were already computed by the constructor; do
+  # not rebuild the etree merely to score that same prefix again.
+  -> predicted_prefix_flops(limit)
+    total = 0
+    i = 0
+    while i < limit
+      c = @counts[i]
+      total += c * c
+      i += 1
+    total
+
   # Cap-aware gate: raise BEFORE factorization when the predicted factor
   # would exceed `budget_elements` stored nonzeros.
   -> check_budget(budget_elements)
@@ -317,8 +354,10 @@
     while i < n
       root.push(i)
       i += 1
-    ri = @pattern.row_indices
-    ci = @pattern.col_indices
+    # Analysis owns immutable typed structural buffers for its lifetime.
+    # Reusing them avoids materializing two fresh inspection snapshots.
+    ri = @fri
+    ci = @fci
     k = 0
     while k < @pattern.nnz
       a = ri[k]
@@ -399,17 +438,14 @@
       i += 1
     [prefix, rest]
 
-  -> .symmetric_adjacency(pattern)
-    n = pattern.rows
+  -> .symmetric_adjacency_of(n, m, ri, ci)
     adj = []
     i = 0
     while i < n
       adj.push([])
       i += 1
-    ri = pattern.row_indices
-    ci = pattern.col_indices
     k = 0
-    while k < pattern.nnz
+    while k < m
       r = ri[k]
       c = ci[k]
       if r != c
@@ -422,13 +458,21 @@
       i += 1
     adj
 
+  # Pattern-based public helper preserves its owned-inspection semantics.
+  -> .symmetric_adjacency(pattern)
+    ri = pattern.row_indices
+    ci = pattern.col_indices
+    SparseAnalysis.symmetric_adjacency_of(
+      pattern.rows, pattern.nnz, ri, ci)
+
   # Canonical symmetric adjacency is immutable analysis state. Peeling,
   # minimum degree, and any later symbolic pass share this one construction.
   # Keep the cached object private: Arrays are mutable, so returning it would
   # let an observer silently corrupt every later analysis operation.
   -> ensure_symmetric_adjacency
     if @symmetric_adj == nil
-      @symmetric_adj = SparseAnalysis.symmetric_adjacency(@pattern)
+      @symmetric_adj = SparseAnalysis.symmetric_adjacency_of(
+        @pattern.rows, @pattern.nnz, @fri, @fci)
     nil
 
   # Public inspection retains the pre-cache value semantics: a caller owns
@@ -525,7 +569,7 @@
   # eliminated supervariable blocks expanded lowest index first.
   -> min_degree_ordering
     return [] if @pattern.rows == 0
-    amd_ordering_of(@pattern.row_indices, @pattern.col_indices, @pattern.nnz)
+    amd_ordering_of(@fri, @fci, @pattern.nnz)
 
   # The quotient-graph AMD core over explicit COO index arrays (same
   # vertex count as the pattern). Split out so relabelled copies of the
@@ -2479,7 +2523,7 @@
         while nw != 0
           u = (wi << 5) + ccall_nobox("__w_bit_cttz_u32", nw)
           ubase = u * words
-          miss += ccall("__w_u32_andnot_count", nb, 0, adj, ubase, words)
+          miss += ccall_nobox("__w_u32_andnot_count_raw", nb, 0, adj, ubase, words)
           ops += words
           miss -= 1
           nw = nw & (nw - 1)
@@ -2635,7 +2679,7 @@
             while nw != 0
               u = (wi << 5) + ccall_nobox("__w_bit_cttz_u32", nw)
               ubase = u * words
-              addu = ccall("__w_u32_andnot_count", nb, 0, adj, ubase, words) - 1
+              addu = ccall_nobox("__w_u32_andnot_count_raw", nb, 0, adj, ubase, words) - 1
               ops += words
               du = deg[u]
               cor += (du + addu) * (du + addu) - (du + 1) * (du + 1)
@@ -2737,7 +2781,7 @@
           while nw != 0
             u2 = (wi << 5) + ccall_nobox("__w_bit_cttz_u32", nw)
             u2base = u2 * words
-            miss += ccall("__w_u32_andnot_count", nb, 0, adj, u2base, words)
+            miss += ccall_nobox("__w_u32_andnot_count_raw", nb, 0, adj, u2base, words)
             ops += words
             miss -= 1
             # second ring: optimistic lower key
@@ -2947,12 +2991,20 @@
   # accumulates during play and a run aborts the moment it can no
   # longer beat the incumbent. Sideways moves (equal cost) are accepted
   # to walk plateaus; the strict best is tracked separately. `budget`
-  # caps total bitset word-operations. Returns [best_order, best_flops].
+  # caps total bitset word-operations. `nelim` optionally freezes vertices
+  # nelim...nn-1 as read-only boundary terminals: they participate in degree
+  # and fill updates but can never be chosen as pivots. This lets subtree
+  # search model its active separator without moving outside vertices.
+  # Returns [best_order, best_flops].
   -> rgreedy_refine(nn, ri, ci, m, seed_order, seed_flops, budget, stream = 0)
     # stream packs the schedule id in its high bits: sched = stream >> 10
     sched = stream >> 10
     stream = stream & 1023
     n = nn
+    target = @rgreedy_nelim
+    target = 0 if target == nil
+    target = n if target <= 0 || target > n
+    partial = target < n
     words = (n + 31) >> 5
     full = 4294967295
     none = 4294967295
@@ -3044,7 +3096,7 @@
         # incumbent verbatim, snapshot
         state = (state * 48271) % 2147483647
         prefix = 0
-        prefix = (state % n) if iter % 18 >= 6
+        prefix = (state % target) if iter % 18 >= 6
         i = 0
         while i < n * words
           adj[i] = adj0[i]
@@ -3059,11 +3111,12 @@
         while i < n
           d = deg0[i]
           deg[i] = d
-          cnt[d] = cnt[d] + 1
-          dnext[i] = head[d]
-          dlast[i] = none
-          dlast[head[d]] = i if head[d] != none
-          head[d] = i
+          if i < target
+            cnt[d] = cnt[d] + 1
+            dnext[i] = head[d]
+            dlast[i] = none
+            dlast[head[d]] = i if head[d] != none
+            head[d] = i
           i += 1
         i = 0
         while i < words
@@ -3111,7 +3164,7 @@
               newdeg = old_d - 1
             else
               ubase = u * words
-              added = ccall("__w_u32_merge_count", adj, ubase, nb, 0, words)
+              added = ccall_nobox("__w_u32_merge_count_raw", adj, ubase, nb, 0, words)
               ops += words
               uw = ubase + (u >> 5)
               ubit = 1 << (u & 31)
@@ -3120,20 +3173,21 @@
                 added -= 1
               newdeg = old_d - 1 + added
               addsum += added
-            dn = dnext[u]
-            dl = dlast[u]
-            if dl == none
-              head[old_d] = dn
-            else
-              dnext[dl] = dn
-            dlast[dn] = dl if dn != none
-            cnt[old_d] = cnt[old_d] - 1
             deg[u] = newdeg
-            cnt[newdeg] = cnt[newdeg] + 1
-            dnext[u] = head[newdeg]
-            dlast[u] = none
-            dlast[head[newdeg]] = u if head[newdeg] != none
-            head[newdeg] = u
+            if u < target
+              dn = dnext[u]
+              dl = dlast[u]
+              if dl == none
+                head[old_d] = dn
+              else
+                dnext[dl] = dn
+              dlast[dn] = dl if dn != none
+              cnt[old_d] = cnt[old_d] - 1
+              cnt[newdeg] = cnt[newdeg] + 1
+              dnext[u] = head[newdeg]
+              dlast[u] = none
+              dlast[head[newdeg]] = u if head[newdeg] != none
+              head[newdeg] = u
             t += 1
           ecur += addsum >> 1
           kstep += 1
@@ -3189,11 +3243,11 @@
       # randomized suffix
       mindeg = 0
       dead = 0 == 1
-      while kstep < n
+      while kstep < target
         while cnt[mindeg] == 0
           mindeg += 1
         rem = n - kstep
-        if mindeg == rem - 1
+        if !partial && mindeg == rem - 1
           # the alive graph is a clique: any completion costs exactly
           # Σ k² for k = 1..rem — finish in closed form
           f += rem * (rem + 1) * (2 * rem + 1) / 6
@@ -3258,7 +3312,7 @@
               while nw != 0
                 u = (wi << 5) + ccall_nobox("__w_bit_cttz_u32", nw)
                 ubase = u * words
-                miss += ccall("__w_u32_andnot_count", nb, 0, adj, ubase, words)
+                miss += ccall_nobox("__w_u32_andnot_count_raw", nb, 0, adj, ubase, words)
                 ops += words
                 miss -= 1
                 nw = nw & (nw - 1)
@@ -3270,11 +3324,11 @@
           v = bestv
         c = deg[v] + 1
         f += c * c
-        r2 = n - kstep - 1
+        r2 = target - kstep - 1
         if f + r2 > cur_f
           dead = 0 == 0
           break
-        if r2 > 0
+        if r2 > 0 && !partial
           # every surviving edge lands in L: Σc ≥ r + E, so Σc² ≥ (r+E)²/r;
           # floor((q/r)·q) is a weaker but integer-only lower bound
           q = r2 + ecur - deg[v]
@@ -3317,7 +3371,7 @@
             newdeg = old_d - 1
           else
             ubase = u * words
-            added = ccall("__w_u32_merge_count", adj, ubase, nb, 0, words)
+            added = ccall_nobox("__w_u32_merge_count_raw", adj, ubase, nb, 0, words)
             ops += words
             uw = ubase + (u >> 5)
             sbit = (adj[uw] >> (u & 31)) & 1
@@ -3325,21 +3379,22 @@
             added -= sbit
             newdeg = old_d - 1 + added
             addsum += added
-          dn = dnext[u]
-          dl = dlast[u]
-          if dl == none
-            head[old_d] = dn
-          else
-            dnext[dl] = dn
-          dlast[dn] = dl if dn != none
-          cnt[old_d] = cnt[old_d] - 1
           deg[u] = newdeg
-          cnt[newdeg] = cnt[newdeg] + 1
-          dnext[u] = head[newdeg]
-          dlast[u] = none
-          dlast[head[newdeg]] = u if head[newdeg] != none
-          head[newdeg] = u
-          mindeg = newdeg if newdeg < mindeg
+          if u < target
+            dn = dnext[u]
+            dl = dlast[u]
+            if dl == none
+              head[old_d] = dn
+            else
+              dnext[dl] = dn
+            dlast[dn] = dl if dn != none
+            cnt[old_d] = cnt[old_d] - 1
+            cnt[newdeg] = cnt[newdeg] + 1
+            dnext[u] = head[newdeg]
+            dlast[u] = none
+            dlast[head[newdeg]] = u if head[newdeg] != none
+            head[newdeg] = u
+            mindeg = newdeg if newdeg < mindeg
           t += 1
         ecur += addsum >> 1
         kstep += 1
@@ -3347,10 +3402,11 @@
         # (deficiency 0 — its live neighborhood is a clique) is a forced
         # move; eliminate it now, and let the deduction cascade
         qi2 = 0
-        while qi2 < nbcnt && kstep < n
+        while qi2 < nbcnt && kstep < target
           u = nbrs[qi2]
           qi2 += 1
           next if (alive[u >> 5] & (1 << (u & 31))) == 0
+          next if u >= target
           du = deg[u]
           next if du + 1 >= n - kstep && n - kstep > 1
           # deficiency test: every pair of u's live neighbors adjacent?
@@ -3382,9 +3438,9 @@
           if simp
             c = du + 1
             f += c * c
-            if f + (n - kstep - 1) > cur_f
+            if f + (target - kstep - 1) > cur_f
               dead = 0 == 0
-              kstep = n
+              kstep = target
             else
               cand[kstep] = u
               ecur -= du
@@ -3405,32 +3461,33 @@
                 while nw != 0
                   u3 = (wi << 5) + ccall_nobox("__w_bit_cttz_u32", nw)
                   od3 = deg[u3]
-                  dn = dnext[u3]
-                  dl = dlast[u3]
-                  if dl == none
-                    head[od3] = dn
-                  else
-                    dnext[dl] = dn
-                  dlast[dn] = dl if dn != none
-                  cnt[od3] = cnt[od3] - 1
                   deg[u3] = od3 - 1
-                  cnt[od3 - 1] = cnt[od3 - 1] + 1
-                  dnext[u3] = head[od3 - 1]
-                  dlast[u3] = none
-                  dlast[head[od3 - 1]] = u3 if head[od3 - 1] != none
-                  head[od3 - 1] = u3
-                  mindeg = od3 - 1 if od3 - 1 < mindeg
+                  if u3 < target
+                    dn = dnext[u3]
+                    dl = dlast[u3]
+                    if dl == none
+                      head[od3] = dn
+                    else
+                      dnext[dl] = dn
+                    dlast[dn] = dl if dn != none
+                    cnt[od3] = cnt[od3] - 1
+                    cnt[od3 - 1] = cnt[od3 - 1] + 1
+                    dnext[u3] = head[od3 - 1]
+                    dlast[u3] = none
+                    dlast[head[od3 - 1]] = u3 if head[od3 - 1] != none
+                    head[od3 - 1] = u3
+                    mindeg = od3 - 1 if od3 - 1 < mindeg
                   nw = nw & (nw - 1)
                 wi += 1
       if !dead && f <= cur_f
         i = 0
-        while i < n
+        while i < target
           cur[i] = cand[i]
           i += 1
         if f < best_f
           best_f = f
           i = 0
-          while i < n
+          while i < target
             bestb[i] = cand[i]
             i += 1
         cur_f = f
@@ -3442,6 +3499,22 @@
       out.push(bestb[i])
       i += 1
     [out, best_f]
+
+  # Eight-argument dynamic-dispatch wrapper (the runtime method ABI caps
+  # calls at eight arguments). The private worker analysis is thread-local,
+  # so the temporary terminal count cannot race another search.
+  -> rgreedy_prefix_refine(nn, ri, ci, m, seed_order, seed_flops, budget, control)
+    old_target = @rgreedy_nelim
+    @rgreedy_nelim = control[1]
+    result = rgreedy_refine(
+      nn, ri, ci, m, seed_order, seed_flops, budget, control[0])
+    @rgreedy_nelim = old_target
+    prefix = []
+    i = 0
+    while i < control[1]
+      prefix.push(result[0][i])
+      i += 1
+    [prefix, result[1]]
 
   # Level-set nested dissection: the George–Liu variant — separator =
   # the thinnest balanced BFS level of a pseudo-peripheral root. Its
@@ -3973,6 +4046,281 @@
       seed += 1
     order
 
+  # Tarjan biconnected components as parallel edge lists.  The traversal is
+  # iterative: sparse patterns can contain path-like components hundreds of
+  # thousands of vertices deep, so using the language call stack here would
+  # turn an otherwise linear preprocessing pass into a stack-overflow risk.
+  # Sorted canonical adjacency and ascending DFS roots make component ids
+  # deterministic.
+  -> .biconnected_edge_components(adj)
+    n = adj.size
+    none = 4294967295
+    disc = u32[n]
+    low = u32[n]
+    parent = u32[n]
+    i = 0
+    while i < n
+      parent[i] = none
+      i += 1
+    edge_u = []
+    edge_v = []
+    comp_u = []
+    comp_v = []
+    stack_v = []
+    stack_next = []
+    time = 0
+    start = 0
+    while start < n
+      if disc[start] == 0
+        time += 1
+        disc[start] = time
+        low[start] = time
+        stack_v.push(start)
+        stack_next.push(0)
+        while stack_v.size > 0
+          top = stack_v.size - 1
+          u = stack_v[top]
+          slot = stack_next[top]
+          row = adj[u]
+          if slot < row.size
+            v = row[slot]
+            stack_next[top] = slot + 1
+            if disc[v] == 0
+              edge_u.push(u)
+              edge_v.push(v)
+              parent[v] = u
+              time += 1
+              disc[v] = time
+              low[v] = time
+              stack_v.push(v)
+              stack_next.push(0)
+            elsif v != parent[u] && disc[v] < disc[u]
+              # Back edges are pushed only from descendant to ancestor, so
+              # every undirected edge appears once on the edge stack.
+              edge_u.push(u)
+              edge_v.push(v)
+              low[u] = disc[v] if disc[v] < low[u]
+          else
+            stack_v.pop
+            stack_next.pop
+            p = parent[u]
+            if p != none
+              low[p] = low[u] if low[u] < low[p]
+              if low[u] >= disc[p]
+                cu = []
+                cv = []
+                done = 0 == 1
+                while edge_u.size > 0 && !done
+                  eu = edge_u.pop
+                  ev = edge_v.pop
+                  cu.push(eu)
+                  cv.push(ev)
+                  done = eu == p && ev == u
+                comp_u.push(cu)
+                comp_v.push(cv)
+        # Normally every root child closes its own component.  Keep the
+        # residual drain as a defensive guard for unusual disconnected input.
+        if edge_u.size > 0
+          cu = []
+          cv = []
+          while edge_u.size > 0
+            cu.push(edge_u.pop)
+            cv.push(edge_v.pop)
+          comp_u.push(cu)
+          comp_v.push(cv)
+      start += 1
+    [comp_u, comp_v]
+
+  # One-dissection ordering over the block-cut forest.  Each biconnected
+  # block is ordered independently with quotient-graph AMD; the articulation
+  # that connects a child block to its parent is withheld from the child and
+  # emitted with the parent.  Deepest blocks therefore eliminate first and
+  # fill cannot cross an articulation.  This is an isolated portfolio
+  # candidate: exact downstream scoring decides whether it beats whole-graph
+  # AMD, and it is deliberately not part of best_ordering yet.
+  -> biconn_ordering
+    n = @pattern.rows
+    return [] if n == 0
+    ensure_symmetric_adjacency
+    adj = @symmetric_adj
+    edge_comps = SparseAnalysis.biconnected_edge_components(adj)
+    comps_u = edge_comps[0]
+    comps_v = edge_comps[1]
+    nc = comps_u.size
+    none = 4294967295
+
+    # Vertex sets per block plus the inverse block membership relation.
+    comp_of = []
+    i = 0
+    while i < n
+      comp_of.push([])
+      i += 1
+    mark = u32[n]
+    i = 0
+    while i < n
+      mark[i] = none
+      i += 1
+    comp_verts = []
+    c = 0
+    while c < nc
+      verts = []
+      k = 0
+      while k < comps_u[c].size
+        u = comps_u[c][k]
+        v = comps_v[c][k]
+        if mark[u] != c
+          mark[u] = c
+          verts.push(u)
+          comp_of[u].push(c)
+        if mark[v] != c
+          mark[v] = c
+          verts.push(v)
+          comp_of[v].push(c)
+        k += 1
+      comp_verts.push(verts)
+      c += 1
+
+    # Preserve the anchor exactly for a genuinely biconnected graph.
+    return min_degree_ordering if nc == 1 && comp_verts[0].size == n
+
+    # Root every block-cut tree at its largest block.  Dense cores then stay
+    # late, while pendant blocks are emitted from the leaves inward.
+    parent_ap = u32[nc]
+    depth = u32[nc]
+    visited = u32[nc]
+    c = 0
+    while c < nc
+      parent_ap[c] = none
+      c += 1
+    start = 0
+    while start < nc
+      if visited[start] == 0
+        tree = []
+        queue = []
+        visited[start] = 1
+        queue.push(start)
+        qh = 0
+        while qh < queue.size
+          b = queue[qh]
+          qh += 1
+          tree.push(b)
+          vi = 0
+          while vi < comp_verts[b].size
+            v = comp_verts[b][vi]
+            if comp_of[v].size > 1
+              bi = 0
+              while bi < comp_of[v].size
+                cb = comp_of[v][bi]
+                if visited[cb] == 0
+                  visited[cb] = 1
+                  queue.push(cb)
+                bi += 1
+            vi += 1
+
+        root = tree[0]
+        ti = 1
+        while ti < tree.size
+          b = tree[ti]
+          if (comp_verts[b].size > comp_verts[root].size ||
+              (comp_verts[b].size == comp_verts[root].size && b < root))
+            root = b
+          ti += 1
+        ti = 0
+        while ti < tree.size
+          depth[tree[ti]] = none
+          ti += 1
+        depth[root] = 0
+        parent_ap[root] = none
+        queue = [root]
+        qh = 0
+        while qh < queue.size
+          b = queue[qh]
+          qh += 1
+          vi = 0
+          while vi < comp_verts[b].size
+            v = comp_verts[b][vi]
+            if comp_of[v].size > 1
+              bi = 0
+              while bi < comp_of[v].size
+                cb = comp_of[v][bi]
+                if depth[cb] == none
+                  depth[cb] = depth[b] + 1
+                  parent_ap[cb] = v
+                  queue.push(cb)
+                bi += 1
+            vi += 1
+      start += 1
+
+    block_order = []
+    c = 0
+    while c < nc
+      block_order.push(c)
+      c += 1
+    block_order = block_order.sort_by -> (b)
+      (nc - depth[b]) * (nc + 1) + b
+
+    order = []
+    # Isolates belong to no edge block and are fill-free.
+    i = 0
+    while i < n
+      order.push(i) if comp_of[i].size == 0
+      i += 1
+
+    token = u32[n]
+    local = u32[n]
+    generation = 0
+    oi = 0
+    while oi < block_order.size
+      b = block_order[oi]
+      pa = parent_ap[b]
+      owned = []
+      vi = 0
+      while vi < comp_verts[b].size
+        v = comp_verts[b][vi]
+        owned.push(v) if v != pa
+        vi += 1
+      owned = owned.sort
+      if owned.size == 1
+        order.push(owned[0])
+      elsif owned.size > 1
+        generation += 1
+        vi = 0
+        while vi < owned.size
+          v = owned[vi]
+          token[v] = generation
+          local[v] = vi
+          vi += 1
+        lri = []
+        lci = []
+        k = 0
+        while k < comps_u[b].size
+          u = comps_u[b][k]
+          v = comps_v[b][k]
+          if token[u] == generation && token[v] == generation
+            lri.push(local[u])
+            lci.push(local[v])
+          k += 1
+        sub = amd_core(owned.size, lri, lci, lri.size)
+        k = 0
+        while k < sub.size
+          order.push(owned[sub[k]])
+          k += 1
+      oi += 1
+
+    # Fail closed to a bijection even if a malformed pattern exposes an
+    # unexpected component edge case.  Normal Tarjan output never needs this.
+    if order.size < n
+      seen = u32[n]
+      i = 0
+      while i < order.size
+        seen[order[i]] = 1
+        i += 1
+      i = 0
+      while i < n
+        order.push(i) if seen[i] == 0
+        i += 1
+    order
+
   # MINL: completion-lattice minimalization. Build the incumbent's
   # filled graph G+, then greedily delete a FILL edge uv whenever
   # N(u) ∩ N(v) is a clique in the current completion (the exact local
@@ -3980,12 +4328,20 @@
   # completion with a maximum-cardinality-search perfect elimination
   # order. The completion's count multiset is order-invariant across its
   # PEOs, so any strict shrink is a real candidate; the exact oracle
-  # still gates acceptance. Returns [order, flops].
-  -> minl_descent(order_in, flops_in, budget, alt = 0)
+  # still gates acceptance. `watcher=1` uses an event-driven sibling in the
+  # historical lexicographic order; `watcher=2` seeds the same queue in stable
+  # ascending endpoint-degree-sum order. In either mode, a
+  # blocked fill edge watches the removable supports of one explicit
+  # unique-chord four-cycle witness and is retried only when a support is
+  # deleted. The default remains the historical four-round scan because
+  # deletion schedule selects a different minimal-completion basin.
+  # Optional watch_stats receives [removed, tests, complete, final_fill].
+  # Returns [order, flops].
+  -> minl_descent(order_in, flops_in, budget, alt = 0, watcher = 0, watch_stats = nil)
     n = @pattern.rows
     m = @pattern.nnz
-    ri = @pattern.row_indices
-    ci = @pattern.col_indices
+    ri = @fri
+    ci = @fci
     words = (n + 31) >> 5
     full = 4294967295
     # G+ = pattern + fill from replaying the incumbent on bitsets
@@ -4049,15 +4405,98 @@
           nw = nw & (nw - 1)
         wi += 1
       i += 1
-    # greedy deletion of fill edges whose common neighborhood is a clique
+    # Greedy deletion of fill edges whose common neighborhood is a clique.
+    # The scan remains the default. The watcher sibling uses the same bitset
+    # predicate and initial lexicographic edge order, but records a concrete
+    # nonedge x-y in the common neighborhood when an edge is blocked.
     deleted = 0
-    rounds = 0
-    changed = 0 == 0
     inter = u32[words]
-    while changed && rounds < 4 && ops < budget
-      changed = 0 == 1
+    if watcher == 0
+      rounds = 0
+      changed = 0 == 0
+      while changed && rounds < 4 && ops < budget
+        changed = 0 == 1
+        v = 0
+        while v < n && ops < budget
+          vbase = v * words
+          wi = 0
+          while wi < words
+            nw = gp[vbase + wi] & (orig[vbase + wi] ^ full)
+            while nw != 0
+              u = (wi << 5) + ccall_nobox("__w_bit_cttz_u32", nw)
+              if u > v
+                # fill edge (v,u): test N(v) ∩ N(u) clique
+                ubase = u * words
+                wj = 0
+                while wj < words
+                  inter[wj] = gp[vbase + wj] & gp[ubase + wj]
+                  wj += 1
+                ops += words
+                isclq = 0 == 0
+                wj = 0
+                while wj < words && isclq
+                  iw2 = inter[wj]
+                  while iw2 != 0
+                    x = (wj << 5) + ccall_nobox("__w_bit_cttz_u32", iw2)
+                    xb = x * words
+                    wk = 0
+                    while wk < words
+                      aw = inter[wk] & (gp[xb + wk] ^ full)
+                      aw = aw & (full ^ (1 << (x & 31))) if wk == (x >> 5)
+                      if aw != 0
+                        isclq = 0 == 1
+                      wk += 1
+                    ops += words
+                    break if !isclq
+                    iw2 = iw2 & (iw2 - 1)
+                  wj += 1
+                if isclq
+                  gp[vbase + (u >> 5)] = gp[vbase + (u >> 5)] & (full ^ (1 << (u & 31)))
+                  gp[ubase + (v >> 5)] = gp[ubase + (v >> 5)] & (full ^ (1 << (v & 31)))
+                  deleted += 1
+                  changed = 0 == 0
+              nw = nw & (nw - 1)
+            wi += 1
+          v += 1
+        rounds += 1
+    else
+      # Materialize stable lexicographic ids for the starting fill edges.
+      # Count the symmetric bitset first so the hot path uses flat u32 arrays
+      # instead of boxed pairs or a second dense n-by-n id matrix.
+      fill_count2 = 0
       v = 0
-      while v < n && ops < budget
+      while v < n
+        vbase = v * words
+        wi = 0
+        while wi < words
+          fill_count2 += ccall_nobox(
+            "__w_bit_ctpop_u32", gp[vbase + wi] & (orig[vbase + wi] ^ full))
+          wi += 1
+        v += 1
+      fill_count2 = fill_count2 >> 1
+      watch_complete = 0 == 0
+      # Four intrusive nodes plus state and endpoints cost about 72 bytes per
+      # fill edge. These gates bound both that memory and bitset-test work.
+      if n > 30000 || fill_count2 > 145000
+        watch_complete = 0 == 1
+        if watch_stats != nil
+          watch_stats.push(0)
+          watch_stats.push(0)
+          watch_stats.push(0)
+          watch_stats.push(fill_count2)
+        return [order_in, flops_in]
+      if fill_count2 == 0
+        if watch_stats != nil
+          watch_stats.push(0)
+          watch_stats.push(0)
+          watch_stats.push(1)
+          watch_stats.push(0)
+        return [order_in, flops_in]
+      fill_u = u32[fill_count2]
+      fill_v = u32[fill_count2]
+      fi2 = 0
+      v = 0
+      while v < n
         vbase = v * words
         wi = 0
         while wi < words
@@ -4065,40 +4504,209 @@
           while nw != 0
             u = (wi << 5) + ccall_nobox("__w_bit_cttz_u32", nw)
             if u > v
-              # fill edge (v,u): test N(v) ∩ N(u) clique
-              ubase = u * words
-              wj = 0
-              while wj < words
-                inter[wj] = gp[vbase + wj] & gp[ubase + wj]
-                wj += 1
-              ops += words
-              isclq = 0 == 0
-              wj = 0
-              while wj < words && isclq
-                iw2 = inter[wj]
-                while iw2 != 0
-                  x = (wj << 5) + ccall_nobox("__w_bit_cttz_u32", iw2)
-                  xb = x * words
-                  wk = 0
-                  while wk < words
-                    aw = inter[wk] & (gp[xb + wk] ^ full)
-                    aw = aw & (full ^ (1 << (x & 31))) if wk == (x >> 5)
-                    if aw != 0
-                      isclq = 0 == 1
-                    wk += 1
-                  ops += words
-                  break if !isclq
-                  iw2 = iw2 & (iw2 - 1)
-                wj += 1
-              if isclq
-                gp[vbase + (u >> 5)] = gp[vbase + (u >> 5)] & (full ^ (1 << (u & 31)))
-                gp[ubase + (v >> 5)] = gp[ubase + (v >> 5)] & (full ^ (1 << (v & 31)))
-                deleted += 1
-                changed = 0 == 0
+              fill_u[fi2] = v
+              fill_v[fi2] = u
+              fi2 += 1
             nw = nw & (nw - 1)
           wi += 1
         v += 1
-      rounds += 1
+      # Candidate e owns watcher nodes 4e..4e+3. Each support edge owns a
+      # reverse intrusive list of the candidates whose current witness uses it.
+      nonew = 4294967295
+      alivew = u32[fill_count2]
+      queuedw = u32[fill_count2]
+      queuew = u32[fill_count2]
+      watch_head = u32[fill_count2]
+      node_count = fill_count2 << 2
+      watch_prev = u32[node_count]
+      watch_next = u32[node_count]
+      watch_support = u32[node_count]
+      fi2 = 0
+      while fi2 < fill_count2
+        alivew[fi2] = 1
+        queuedw[fi2] = 1
+        queuew[fi2] = fi2
+        watch_head[fi2] = nonew
+        fi2 += 1
+      if watcher == 2
+        # Stable counting sort by initial deg(u)+deg(v): spend a finite budget
+        # on the cheapest predicates first while retaining edge-id tie order.
+        degreew = u32[n]
+        v = 0
+        while v < n
+          vbase = v * words
+          wi = 0
+          while wi < words
+            degreew[v] += ccall_nobox("__w_bit_ctpop_u32", gp[vbase + wi])
+            wi += 1
+          v += 1
+        bucket_len = n * 2 + 2
+        bucketw = u32[bucket_len]
+        fi2 = 0
+        while fi2 < fill_count2
+          key2 = degreew[fill_u[fi2]] + degreew[fill_v[fi2]]
+          bucketw[key2 + 1] += 1
+          fi2 += 1
+        i = 1
+        while i < bucket_len
+          bucketw[i] += bucketw[i - 1]
+          i += 1
+        fi2 = 0
+        while fi2 < fill_count2
+          key2 = degreew[fill_u[fi2]] + degreew[fill_v[fi2]]
+          queuew[bucketw[key2]] = fi2
+          bucketw[key2] += 1
+          fi2 += 1
+      ni2 = 0
+      while ni2 < node_count
+        watch_prev[ni2] = nonew
+        watch_next[ni2] = nonew
+        watch_support[ni2] = nonew
+        ni2 += 1
+      # Ring capacity F is sufficient: queuedw suppresses duplicates, so no
+      # more than F candidate ids can be resident at once.
+      qhead = 0
+      qtail = 0
+      qcount = fill_count2
+      watch_tests = 0
+      watch_exhausted = 0 == 1
+      su = u32[4]
+      sv = u32[4]
+      while qcount > 0 && ops < budget && !watch_exhausted
+        edge2 = queuew[qhead]
+        qhead += 1
+        qhead = 0 if qhead == fill_count2
+        qcount -= 1
+        queuedw[edge2] = 0
+        next if alivew[edge2] == 0
+        # Remove all old dependencies before recomputing the witness.
+        slot2 = 0
+        while slot2 < 4
+          node2 = (edge2 << 2) + slot2
+          support2 = watch_support[node2]
+          if support2 != nonew
+            prev2 = watch_prev[node2]
+            next2 = watch_next[node2]
+            if prev2 == nonew
+              watch_head[support2] = next2
+            else
+              watch_next[prev2] = next2
+            watch_prev[next2] = prev2 if next2 != nonew
+            watch_prev[node2] = nonew
+            watch_next[node2] = nonew
+            watch_support[node2] = nonew
+          slot2 += 1
+        watch_tests += 1
+        v = fill_u[edge2]
+        u = fill_v[edge2]
+        vbase = v * words
+        ubase = u * words
+        wj = 0
+        while wj < words
+          inter[wj] = gp[vbase + wj] & gp[ubase + wj]
+          wj += 1
+        ops += words
+        watch_exhausted = 0 == 0 if ops > budget
+        isclq = 0 == 0
+        witness_x = nonew
+        witness_y = nonew
+        wj = 0
+        while wj < words && isclq && !watch_exhausted
+          iw2 = inter[wj]
+          while iw2 != 0 && !watch_exhausted
+            x = (wj << 5) + ccall_nobox("__w_bit_cttz_u32", iw2)
+            xb = x * words
+            wk = 0
+            while wk < words
+              aw = inter[wk] & (gp[xb + wk] ^ full)
+              aw = aw & (full ^ (1 << (x & 31))) if wk == (x >> 5)
+              if aw != 0 && isclq
+                isclq = 0 == 1
+                witness_x = x
+                witness_y = (wk << 5) + ccall_nobox("__w_bit_cttz_u32", aw)
+              wk += 1
+            ops += words
+            watch_exhausted = 0 == 0 if ops > budget
+            break if !isclq
+            iw2 = iw2 & (iw2 - 1)
+          wj += 1
+        # A partially evaluated predicate is never allowed to mutate gp.
+        break if watch_exhausted
+        if isclq
+          # Mutate only after the complete predicate, and clear both directions.
+          gp[vbase + (u >> 5)] = gp[vbase + (u >> 5)] & (full ^ (1 << (u & 31)))
+          gp[ubase + (v >> 5)] = gp[ubase + (v >> 5)] & (full ^ (1 << (v & 31)))
+          alivew[edge2] = 0
+          deleted += 1
+          # Deleting edge2 invalidates every witness that watches it.
+          while watch_head[edge2] != nonew
+            node2 = watch_head[edge2]
+            candidate2 = node2 >> 2
+            prev2 = watch_prev[node2]
+            next2 = watch_next[node2]
+            if prev2 == nonew
+              watch_head[edge2] = next2
+            else
+              watch_next[prev2] = next2
+            watch_prev[next2] = prev2 if next2 != nonew
+            watch_prev[node2] = nonew
+            watch_next[node2] = nonew
+            watch_support[node2] = nonew
+            if alivew[candidate2] != 0 && queuedw[candidate2] == 0
+              queuew[qtail] = candidate2
+              qtail += 1
+              qtail = 0 if qtail == fill_count2
+              qcount += 1
+              queuedw[candidate2] = 1
+        else
+          # Watch only removable supports. A present support absent from the
+          # starting fill list is original and therefore permanent.
+          su[0] = v
+          sv[0] = witness_x
+          su[1] = u
+          sv[1] = witness_x
+          su[2] = v
+          sv[2] = witness_y
+          su[3] = u
+          sv[3] = witness_y
+          si2 = 0
+          slot2 = 0
+          while si2 < 4
+            lo2 = su[si2]
+            hi2 = sv[si2]
+            if lo2 > hi2
+              tmp2 = lo2
+              lo2 = hi2
+              hi2 = tmp2
+            left2 = 0
+            right2 = fill_count2
+            while left2 < right2
+              mid2 = (left2 + right2) >> 1
+              mu2 = fill_u[mid2]
+              mv2 = fill_v[mid2]
+              if mu2 < lo2 || (mu2 == lo2 && mv2 < hi2)
+                left2 = mid2 + 1
+              else
+                right2 = mid2
+            if left2 < fill_count2 && fill_u[left2] == lo2 && fill_v[left2] == hi2 && alivew[left2] != 0
+              node2 = (edge2 << 2) + slot2
+              old2 = watch_head[left2]
+              watch_support[node2] = left2
+              watch_prev[node2] = nonew
+              watch_next[node2] = old2
+              watch_prev[old2] = node2 if old2 != nonew
+              watch_head[left2] = node2
+              slot2 += 1
+            si2 += 1
+      watch_complete = qcount == 0 && !watch_exhausted
+      if watch_stats != nil
+        watch_stats.push(deleted)
+        watch_stats.push(watch_tests)
+        watch_stats.push(watch_complete ? 1 : 0)
+        watch_stats.push(fill_count2 - deleted)
+      # As a sibling, an unchanged completion would only repeat the scan arm's
+      # three realizer passes. Keep this lane focused on watcher-derived graphs.
+      return [order_in, flops_in] if deleted == 0
     # realize by maximum cardinality search (max label, tie lowest id),
     # output REVERSED (MCS gives a reverse PEO)
     lab = u32[n]
@@ -4158,11 +4766,11 @@
     while t > 0
       t -= 1
       cand.push(mcso[t])
-    pred = predictions_for_order(cand)
+    cand_flops = flops_for_order(cand)
     best_o = order_in
     best_f2 = flops_in
-    if pred[1] < best_f2
-      best_f2 = pred[1]
+    if cand_flops < best_f2
+      best_f2 = cand_flops
       best_o = cand
     # realization diversity: the completion choice and its PEO
     # realization are separable optimizations — different realizers
@@ -4241,9 +4849,9 @@
     while t > 0
       t -= 1
       cand.push(mcso[t])
-    pred = predictions_for_order(cand)
-    if pred[1] < best_f2
-      best_f2 = pred[1]
+    cand_flops = flops_for_order(cand)
+    if cand_flops < best_f2
+      best_f2 = cand_flops
       best_o = cand
     # (2) AMF on the completion itself (dense deferral off)
     if n <= 25000
@@ -4268,9 +4876,9 @@
       ralpha = 0 - 1
       ralpha = 25 if alt == 1
       cand = amf_core(n, cri2, cci2, cri2.size, ralpha)
-      pred = predictions_for_order(cand)
-      if pred[1] < best_f2
-        best_f2 = pred[1]
+      cand_flops = flops_for_order(cand)
+      if cand_flops < best_f2
+        best_f2 = cand_flops
         best_o = cand
     [best_o, best_f2]
 
@@ -4349,8 +4957,8 @@
   -> window_dp(order_in, flops_in, kwin, budget)
     n = @pattern.rows
     m = @pattern.nnz
-    ri = @pattern.row_indices
-    ci = @pattern.col_indices
+    ri = @fri
+    ci = @fci
     words = (n + 31) >> 5
     full = 4294967295
     adj0 = u32[n * words]
@@ -4453,10 +5061,10 @@
           while t < kwin
             cand[pos + t] = wl[picks[picks.size - 1 - t]]
             t += 1
-          pred = predictions_for_order(cand)
-          if pred[1] < cur_f
+          cand_flops = flops_for_order(cand)
+          if cand_flops < cur_f
             cur = cand
-            cur_f = pred[1]
+            cur_f = cand_flops
             changed = 0 == 0
         # advance the replay by ONE position (eliminate cur[pos])
         v = cur[pos]
@@ -4535,8 +5143,8 @@
   -> telos_descent(order_in, flops_in, rounds)
     n = @pattern.rows
     m = @pattern.nnz
-    ri = @pattern.row_indices
-    ci = @pattern.col_indices
+    ri = @fri
+    ci = @fci
     cur = []
     i = 0
     while i < n
@@ -4550,6 +5158,8 @@
       while i < n
         perm[cur[i]] = i
         i += 1
+      # Keep a stable owned count snapshot while later candidate scores reuse
+      # the analysis workspace.
       counts = counts_under(perm)[1]
       # vertex ranking arrays: by count (desc), and by position (desc)
       idxs = []
@@ -4581,9 +5191,9 @@
           while i < n
             cand.push(cur[i]) if markm[perm[cur[i]]] == 1
             i += 1
-          pred = predictions_for_order(cand)
-          if pred[1] < best_f
-            best_f = pred[1]
+          cand_flops = flops_for_order(cand)
+          if cand_flops < best_f
+            best_f = cand_flops
             best_cand = cand
           kk = kk * 2
         mode += 1
@@ -4614,9 +5224,9 @@
         while t < n
           cand.push(cur[relinv[sub2[t]]])
           t += 1
-        pred = predictions_for_order(cand)
-        if pred[1] < best_f
-          best_f = pred[1]
+        cand_flops = flops_for_order(cand)
+        if cand_flops < best_f
+          best_f = cand_flops
           best_cand = cand
       # STRIP: remove top-k by count, AMD the remainder, append removed
       sk = 0
@@ -4667,9 +5277,9 @@
           while i < moved.size
             cand.push(moved[i])
             i += 1
-          pred = predictions_for_order(cand)
-          if pred[1] < best_f
-            best_f = pred[1]
+          cand_flops = flops_for_order(cand)
+          if cand_flops < best_f
+            best_f = cand_flops
             best_cand = cand
           i = 0
           while i < keep.size
@@ -4689,32 +5299,72 @@
   # window are ranked by exact Σc² contribution ÷ size^(3/4) and each
   # block's induced subgraph is refined independently with the ILS. Every
   # splice is certified by the exact global scorer. Returns [order, flops].
-  # Refine up to 4 queued disjoint blocks in native threads, then accept
-  # each sequentially on the exact global rescore. Returns [cur, cur_flops].
+  # Refine queued disjoint blocks across a CPU/memory-capped native worker set,
+  # then accept each sequentially on the exact global rescore. A worker
+  # consumes a strided slice of the immutable jobs, avoiding repeated
+  # launch/join waves.
+  # Returns [cur, cur_flops].
   -> flush_blocks(pend, kind, ils_words, stream, cur, cur_flops)
-    n = @pattern.rows
     outs2 = []
     th2 = []
     pi = 0
     while pi < pend.size
-      slot2 = []
-      outs2.push(slot2)
-      job = pend[pi]
-      jbn = job[2]
-      jbri = job[3]
-      jbci = job[4]
-      jseed = job[5]
+      outs2.push([])
+      pi += 1
+    # The coordinator sleeps while workers run, so use every online CPU up to
+    # a modest portability cap. Bound aggregate dense-game scratch to 128 MiB:
+    # each rgreedy worker owns three n-by-ceil(n/32) u32 bit matrices plus
+    # linear state. Small blocks can occupy the machine; 6k-terminal macro
+    # blocks automatically fall back to fewer concurrent workers.
+    workers = pend.size
+    worker_cap = ccall("w_cpu_count")
+    worker_cap = 32 if worker_cap > 32
+    worker_cap = 1 if worker_cap < 1
+    max_local = 1
+    max_movable = 1
+    pi = 0
+    while pi < pend.size
+      jsz = pend[pi][5].size
+      max_local = jsz if jsz > max_local
+      jsz = pend[pi][2]
+      max_movable = jsz if jsz > max_movable
+      pi += 1
+    per_worker_bytes = 12 * max_local * ((max_local + 31) >> 5) + 96 * max_local
+    memory_cap = 134217728 / per_worker_bytes
+    memory_cap = 1 if memory_cap < 1
+    worker_cap = memory_cap if memory_cap < worker_cap
+    workers = worker_cap if workers > worker_cap
+    pi = 0
+    while pi < workers
+      worker_id = pi
+      worker_count = workers
+      jobs = pend
+      worker_outs = outs2
       jkind = kind
       jils = ils_words
       jstream = stream
       th = Thread.new ->
-        SparseAnalysis.refine_block(jkind, jbn, jbri, jbci, jseed, jils, jstream, slot2)
+        ji = worker_id
+        while ji < jobs.size
+          job = jobs[ji]
+          jnelim = job[2]
+          jbri = job[3]
+          jbci = job[4]
+          jseed = job[5]
+          SparseAnalysis.refine_block(
+            jkind, jseed.size, jnelim, jbri, jbci, jseed,
+            jils, jstream, worker_outs[ji])
+          ji += worker_count
       th2.push(th)
       pi += 1
     pi = 0
     while pi < th2.size
       th2[pi].join
       pi += 1
+    # Workers are joined and `cur` is an rgsub-owned order. Mutate one block
+    # in place, score it, and restore from this reusable typed segment on
+    # rejection instead of allocating/copying an n-element candidate per job.
+    old_segment = u32[max_movable]
     pi = 0
     while pi < pend.size
       job = pend[pi]
@@ -4723,46 +5373,57 @@
       res2 = outs2[pi]
       if res2.size > 0 && res2[0][1] < res2[0][2]
         ref = res2[0]
-        cand2 = []
         k = 0
-        while k < n
-          cand2.push(cur[k])
+        while k < bn2
+          old_segment[k] = cur[lo2 + k]
           k += 1
         k = 0
         while k < bn2
-          cand2[lo2 + k] = cur[lo2 + ref[0][k]]
+          cur[lo2 + k] = old_segment[ref[0][k]]
           k += 1
-        cpred = predictions_for_order(cand2)
-        if cpred[1] < cur_flops
-          cur = cand2
-          cur_flops = cpred[1]
+        cand_flops = flops_for_order(cur)
+        if cand_flops < cur_flops
+          cur_flops = cand_flops
+        else
+          k = 0
+          while k < bn2
+            cur[lo2 + k] = old_segment[k]
+            k += 1
       pi += 1
     [cur, cur_flops]
 
-  -> rgsub_refine(order_in, ils_words, stream, kmask = 1, others = nil)
+  -> rgsub_refine(order_in, ils_words, stream, kmask = 1, others = nil, with_boundary = 0, rgreedy_rounds = 2)
     n = @pattern.rows
     m = @pattern.nnz
-    ri = @pattern.row_indices
-    ci = @pattern.col_indices
     none = 4294967295
-    # CSR adjacency once per call (typed): block extraction then costs the
-    # block's own edges instead of a full m-edge scan per block
+    # Symmetric CSR adjacency once per call (typed): sparse patterns may store
+    # only one triangle, while every subtree refiner needs the undirected
+    # graph. Block extraction then costs the block's incident edges instead of
+    # a full m-edge scan per block.
     xadj = u32[n + 1]
     k = 0
     while k < m
-      xadj[@fri[k] + 1] += 1
+      a9 = @fri[k]
+      b9 = @fci[k]
+      if a9 != b9
+        xadj[a9 + 1] += 1
+        xadj[b9 + 1] += 1
       k += 1
     i = 0
     while i < n
       xadj[i + 1] += xadj[i]
       i += 1
     afill = u32[n]
-    adjl = u32[m]
+    adjl = u32[xadj[n]]
     k = 0
     while k < m
       a9 = @fri[k]
-      adjl[xadj[a9] + afill[a9]] = @fci[k]
-      afill[a9] += 1
+      b9 = @fci[k]
+      if a9 != b9
+        adjl[xadj[a9] + afill[a9]] = b9
+        afill[a9] += 1
+        adjl[xadj[b9] + afill[b9]] = a9
+        afill[b9] += 1
       k += 1
     perm = u32[n]
     i = 0
@@ -4771,6 +5432,7 @@
       i += 1
     data = counts_under(perm)
     parent = data[0]
+    counts1 = data[1]
     # postorder the etree (children in ascending order via bucket lists)
     kid_head = u32[n]
     kid_next = u32[n]
@@ -4820,17 +5482,26 @@
     while k < n
       order2.push(inv[post[k]])
       k += 1
-    base_pred = predictions_for_order(order2)
-    base_flops = base_pred[1]
-    # counts and subtree sizes in postordered labels
-    perm2 = u32[n]
-    i = 0
-    while i < n
-      perm2[order2[i]] = i
-      i += 1
-    data2 = counts_under(perm2)
-    parent2 = data2[0]
-    counts2 = data2[1]
+    # An etree postorder preserves the filled graph and merely relabels its
+    # columns. Derive the postordered parent/count arrays in O(n) instead of
+    # rebuilding lower CSC + etree + counts for the same chordal completion.
+    # Reuse dead work buffers: state2 becomes old-label -> post-position,
+    # inv becomes parent2, and perm becomes counts2.
+    postpos = state2
+    k = 0
+    while k < n
+      postpos[post[k]] = k
+      k += 1
+    parent2 = inv
+    counts2 = perm
+    k = 0
+    while k < n
+      old_label = post[k]
+      p = parent[old_label]
+      parent2[k] = p == none ? none : postpos[p]
+      counts2[k] = counts1[old_label]
+      k += 1
+    base_flops = ccall("__w_u32_flops", counts2)
     tsize = u32[n]
     i = 0
     while i < n
@@ -4875,6 +5546,7 @@
     hi_sz = 2400 if hi_sz > 2400
     mac_lo = hi_sz / 3
     pos_o = u32[n]
+    cur_pos = u32[n]
     # fused phases over one shared setup (CSR, etree, postorder, subtree
     # sizes, contributions): phase 0/1 = rgreedy rounds, 2/3 = anneal
     # rounds, 4+ = one crossover pass per pool runner-up
@@ -4899,6 +5571,12 @@
       next if kind == 0 && (kmask & 1) == 0
       next if kind == 1 && (kmask & 2) == 0
       next if kind == 2 && (kmask & 4) == 0
+      next if kind == 0 && round3 >= rgreedy_rounds
+      if with_boundary != 0 && kind == 0
+        i = 0
+        while i < n
+          cur_pos[cur[i]] = i
+          i += 1
       cands = []
       i = 0
       while i < n
@@ -4949,17 +5627,58 @@
           while k <= hi - lo
             cand2[lo + k] = seg[k][1]
             k += 1
-          cpred = predictions_for_order(cand2)
-          if cpred[1] < cur_flops
+          cand_flops = flops_for_order(cand2)
+          if cand_flops < cur_flops
             cur = cand2
-            cur_flops = cpred[1]
+            cur_flops = cand_flops
           next
-        # induced subgraph of the block's original vertices
+        # Local IDs put movable subtree vertices first. In the boundary-aware
+        # lane, append every still-live original neighbor as a passive
+        # terminal. The worker sees those separator degrees and fill effects,
+        # but rgreedy may eliminate only IDs 0...bn.
         bn = hi - lo + 1
         k = lo
         while k <= hi
           lid[cur[k]] = k - lo + 1
           k += 1
+        bverts = []
+        bad_boundary = 0 == 1
+        if with_boundary != 0 && kind == 0
+          k = lo
+          while k <= hi
+            a = cur[k]
+            e9 = xadj[a]
+            e9e = xadj[a + 1]
+            while e9 < e9e
+              b = adjl[e9]
+              if lid[b] == 0
+                if cur_pos[b] < lo
+                  bad_boundary = 0 == 0
+                elsif cur_pos[b] > hi
+                  lid[b] = none
+                  bverts.push(b)
+              e9 += 1
+            k += 1
+          bverts = bverts.sort_by -> (v2) cur_pos[v2]
+          k = 0
+          while k < bverts.size
+            lid[bverts[k]] = bn + k + 1
+            k += 1
+          # Three dense n-by-n bitsets live in each worker. Bound the passive
+          # separator expansion before launching the phase worker set.
+          local_cap = 3500
+          local_cap = 6000 if round3 == 1
+          bad_boundary = 0 == 0 if bn + bverts.size > local_cap
+        if bad_boundary
+          k = lo
+          while k <= hi
+            lid[cur[k]] = 0
+            k += 1
+          k = 0
+          while k < bverts.size
+            lid[bverts[k]] = 0
+            k += 1
+          next
         bri = []
         bci = []
         k = lo
@@ -4969,21 +5688,39 @@
           e9e = xadj[a + 1]
           while e9 < e9e
             b = adjl[e9]
-            if a != b && lid[b] != 0
+            if lid[b] != 0 && lid[a] < lid[b]
               bri.push(lid[a] - 1)
               bci.push(lid[b] - 1)
             e9 += 1
           k += 1
-        bseed = []
-        k = lo
-        while k <= hi
-          bseed.push(lid[cur[k]] - 1)
+        k = 0
+        while k < bverts.size
+          a = bverts[k]
+          e9 = xadj[a]
+          e9e = xadj[a + 1]
+          while e9 < e9e
+            b = adjl[e9]
+            if lid[b] != 0 && lid[a] < lid[b]
+              bri.push(lid[a] - 1)
+              bci.push(lid[b] - 1)
+            e9 += 1
+          k += 1
+        # Identity seeds have a known final size and fit in u32. Allocate once
+        # without boxed push growth; workers treat the buffer as read-only.
+        bseed = u32[bn + bverts.size]
+        k = 0
+        while k < bn + bverts.size
+          bseed[k] = k
           k += 1
         if bri.size == 0
-          # edgeless block (all internal adjacency is fill): nothing to refine
+          # No original local structure can guide a proposal.
           k = lo
           while k <= hi
             lid[cur[k]] = 0
+            k += 1
+          k = 0
+          while k < bverts.size
+            lid[bverts[k]] = 0
             k += 1
           next
         # local exact seed cost via a fresh sub-analysis is implicit: give
@@ -4993,15 +5730,16 @@
         while k <= hi
           lid[cur[k]] = 0
           k += 1
-        # queue the block; refine in batches of 4 native threads, accept
+        k = 0
+        while k < bverts.size
+          lid[bverts[k]] = 0
+          k += 1
+        # Queue the block. The phase flush partitions all immutable jobs over
+        # its CPU/memory-capped native worker set and accepts results
         # sequentially on the exact global rescore (blocks are disjoint
-        # position ranges, so their refinements never interact)
+        # position ranges, so their local proposals do not depend on earlier
+        # splices in the same phase).
         pend.push([lo, hi, bn, bri, bci, bseed])
-        if pend.size >= 4
-          fb = flush_blocks(pend, kind, ils_words, stream, cur, cur_flops)
-          cur = fb[0]
-          cur_flops = fb[1]
-          pend = []
       if pend.size > 0
         fb = flush_blocks(pend, kind, ils_words, stream, cur, cur_flops)
         cur = fb[0]
@@ -5036,7 +5774,7 @@
         t = cur[i]
         cur[i] = cur[i + 1]
         cur[i + 1] = t
-        f = predictions_for_order(cur)[1]
+        f = flops_for_order(cur)
         scores += 1
         if f < cur_f
           cur_f = f
@@ -5073,7 +5811,7 @@
           cur[b] = t
           a += 1
           b -= 1
-        cur_f = predictions_for_order(cur)[1]
+        cur_f = flops_for_order(cur)
         scores += 1
     [best, best_f]
 
@@ -5155,7 +5893,7 @@
           cur[hi] = t
           lo += 1
           hi -= 1
-      f = predictions_for_order(cur)[1]
+      f = flops_for_order(cur)
       scores += 1
       if f <= cur_f + tt
         cur_f = f
@@ -5365,19 +6103,27 @@
 
   # One subtree-block refinement on a private sub-analysis (thread worker).
   # Pushes [order, flops, seed_flops] into out.
-  -> .refine_block(kind, bn, bri, bci, bseed, ils_words, stream, out)
+  -> .refine_block(kind, bn, nelim, bri, bci, bseed, ils_words, stream, out)
     sub = SparseAnalysis.new(SparsePattern.new(bn, bn, bri, bci))
-    spred = sub.predictions_for_order(bseed)
-    ref = [bseed, spred[1]]
+    seed_flops = sub.predicted_flops
+    seed_flops = sub.predicted_prefix_flops(nelim) if nelim < bn
+    ref = [bseed, seed_flops]
     if kind == 1
       bnz = bri.size
       bnz = 1000 if bnz < 1000
       ev = ils_words / (bnz * 4)
       ev = 50000 if ev > 50000
-      ref = sub.anneal_refine(bseed, spred[1], ev, stream) if ev > 200
+      ref = sub.anneal_refine(bseed, seed_flops, ev, stream) if ev > 200
     else
-      ref = sub.rgreedy_refine(bn, sub.pattern.row_indices, sub.pattern.col_indices, sub.pattern.nnz, bseed, spred[1], ils_words, stream)
-    out.push([ref[0], ref[1], spred[1]])
+      if nelim < bn
+        ref = sub.rgreedy_prefix_refine(
+          bn, sub.typed_ri, sub.typed_ci, sub.pattern.nnz,
+          bseed, seed_flops, ils_words, [stream, nelim])
+      else
+        ref = sub.rgreedy_refine(
+          bn, sub.typed_ri, sub.typed_ci, sub.pattern.nnz,
+          bseed, seed_flops, ils_words, stream)
+    out.push([ref[0], ref[1], seed_flops])
     0
 
   -> typed_ri
@@ -5471,9 +6217,20 @@
       r += gt
     0
 
-  -> best_ordering(restarts = 8, ils_words = 0, stream = 0, warm = nil, diverse_pool = 0, alpha_diverse = 0)
+  # Dense bitset used by degree-3 core lifting.  Cap this single n-by-n
+  # bitmap at 64 MiB (16,777,216 u32 words); the later whole-graph rgreedy
+  # fallback has its own admission policy and remains available through
+  # n=45,000.  Keeping the calculation here makes the allocation boundary
+  # explicit and independently testable before any quadratic buffer exists.
+  -> .core_lift_fits?(n)
+    words = (n + 31) >> 5
+    n * words <= 16777216
+
+  -> best_ordering(restarts = 8, ils_words = 0, stream = 0, warm = nil, diverse_pool = 0, alpha_diverse = 0, watcher_minl = 0)
     n = @pattern.rows
     return [] if n == 0
+    watch_o = nil
+    watch_f = nil
     restarts = 12 if restarts < 12 && @pattern.nnz <= 400000
     best = min_degree_ordering
     pred = predictions_for_order(best)
@@ -5653,7 +6410,8 @@
           best = cand
           best_fill = pred[0]
           best_flops = pred[1]
-    if ils_words > 0 && n <= 150000
+    core_lift_ok = SparseAnalysis.core_lift_fits?(n)
+    if ils_words > 0 && n <= 150000 && core_lift_ok
       # CORE-LIFT: exactly eliminate every vertex whose live degree stays
       # <= 3 (ascending degree, then index) as one fixed prefix on the
       # bitset fill graph. The residual core is the exact fill graph after
@@ -5853,6 +6611,17 @@
             best = ref[0]
             best_fill = pred[0]
             best_flops = pred[1]
+    # Above the core-lift bitmap ceiling, avoid allocating its extra dense
+    # matrix.  Preserve the pre-existing whole-graph ILS fallback for the
+    # shapes admitted by its n<=45,000 policy.
+    if ils_words > 0 && n <= 45000 && !core_lift_ok
+      ref = rgreedy_refine(n, ri, ci, m, best, best_flops, ils_words, stream)
+      if ref[1] < best_flops
+        pred = predictions_for_order(ref[0])
+        if pred[1] < best_flops
+          best = ref[0]
+          best_fill = pred[0]
+          best_flops = pred[1]
     if ils_words > 0 && n > 1500 && n <= 150000
       # fused subtree refinement: rgreedy rounds + (n>9000) anneal rounds +
       # pool crossover passes on one shared etree/postorder setup
@@ -5865,7 +6634,11 @@
           others.push(@cand_pool[px][1]) if @cand_pool[px][1].size == n
           px += 1
       kmask += 4 if others.size > 0
-      ref = rgsub_refine(best, ils_words / 8, stream, kmask, others)
+      # The default portfolio spends one phase on subtree RGSUB. The macro
+      # phase remains available to direct quality-focused callers: at the
+      # smaller per-block portfolio budget it did not change the final winner
+      # in the matched corpus, while adding 34-93% to this candidate lane.
+      ref = rgsub_refine(best, ils_words / 8, stream, kmask, others, 1, 1)
       if ref[1] < best_flops
         pred = predictions_for_order(ref[0])
         if pred[1] < best_flops
@@ -5888,13 +6661,27 @@
             best_flops = pred[1]
         pi3 += 1
     if ils_words > 0 && n <= 45000
+      # The optional watcher lane is a sibling descent from this identical
+      # completion. Its deletion schedule can select a different basin, so
+      # exact-score it independently and merge serially. It remains opt-in
+      # until corpus benchmarks justify the second completion construction.
+      watch_seed = best
+      watch_seed_flops = best_flops
       ref = minl_descent(best, best_flops, ils_words / 4)
       if ref[1] < best_flops
         best = ref[0]
         pred = predictions_for_order(best)
         best_fill = pred[0]
         best_flops = pred[1]
-      # runner-up completion descent: the pool's #2 order lives in a
+      # Match the watcher's admission cap before paying for a duplicate dense
+      # completion build. Its internal fill cap remains the second guard.
+      if watcher_minl != 0 && n <= 30000
+        ref = minl_descent(
+          watch_seed, watch_seed_flops, ils_words / 4, 0, 2)
+        if ref[1] < watch_seed_flops
+          watch_o = ref[0]
+          watch_f = ref[1]
+      # Runner-up completion descent: the pool's #2 order lives in a
       # different chordal-completion basin; descending it reaches minima
       # the incumbent's lattice cannot (frontier catalog item)
       if @cand_pool != nil && @cand_pool.size > 1
@@ -5951,29 +6738,61 @@
             best = ref[0]
             best_fill = pred[0]
             best_flops = pred[1]
+    # Merge the watcher sibling only after the historical pipeline has run to
+    # completion. An earlier merge can steer later nonlinear descents into a
+    # worse basin even though the watcher itself was a strict local win.
+    if watch_o != nil && watch_f < best_flops
+      pred = predictions_for_order(watch_o)
+      if pred[1] < best_flops
+        best = watch_o
+        best_fill = pred[0]
+        best_flops = pred[1]
     best
 
-  # Predicted fill/flops of the pattern under an elimination ORDER (array
-  # of old indices, first eliminated first). Returns [fill, flops].
-  -> predictions_for_order(order)
+  # Populate the shared exact-score counts for an elimination ORDER.
+  -> score_order_cached(order)
     n = @pattern.rows
-    return [0, 0] if n == 0
     @pf_perm = u32[n] if @pf_perm == nil
     perm = @pf_perm
     i = 0
     while i < n
       perm[order[i]] = i
       i += 1
-    counts = counts_under(perm)[1]
-    fill = 0
-    flops = 0
-    i = 0
-    while i < n
-      c = counts[i]
-      fill += c
-      flops += c * c
-      i += 1
-    [fill, flops]
+    counts_under_cached(perm)
+    nil
+
+  # Exact flop-only lane for search loops. Avoids allocating and indexing the
+  # public two-element [fill, flops] result when only the objective is used.
+  -> flops_for_order(order)
+    return 0 if @pattern.rows == 0
+    @score_lock.synchronize ->
+      score_order_cached(order)
+      ccall("__w_u32_flops", @cu_counts)
+
+  # Exact cost of an order prefix while the suffix remains live. Used by
+  # boundary-aware subtree search, whose passive separator vertices affect
+  # every pivot degree but are deliberately never eliminated by the worker.
+  -> prefix_flops_for_order(order, nelim)
+    return 0 if nelim <= 0 || @pattern.rows == 0
+    @score_lock.synchronize ->
+      score_order_cached(order)
+      stop = nelim
+      stop = @pattern.rows if stop > @pattern.rows
+      f = 0
+      i = 0
+      while i < stop
+        c = @cu_counts[i]
+        f += c * c
+        i += 1
+      f
+
+  # Predicted fill/flops of the pattern under an elimination ORDER (array
+  # of old indices, first eliminated first). Returns [fill, flops].
+  -> predictions_for_order(order)
+    return [0, 0] if @pattern.rows == 0
+    @score_lock.synchronize ->
+      score_order_cached(order)
+      ccall("__w_u32_fill_flops", @cu_counts)
 
   -> to_s
     "SparseAnalysis(n=" + @pattern.rows.to_s + " fill=" + predicted_fill.to_s + ")"

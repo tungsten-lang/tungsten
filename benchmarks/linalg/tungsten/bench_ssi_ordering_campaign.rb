@@ -3,9 +3,11 @@
 
 # Matched fresh-process runner for ssi_ordering_campaign.w.
 #
-# Each candidate is alternated with AMD so thermal/order drift is shared.  The
-# Tungsten allocation profiler is enabled for every child; results are emitted
-# as TSV so individual mechanisms can be retained or rejected from evidence.
+# Candidate order reverses on alternating rounds so thermal/order drift is
+# shared. Include `amd` explicitly when a baseline row is wanted. Timed children
+# run without allocation instrumentation; one separate profiled child per
+# case/mode records deterministic allocation counts. Results are emitted as TSV
+# so individual mechanisms can be retained or rejected from evidence.
 #
 # Usage:
 #   ruby benchmarks/linalg/tungsten/bench_ssi_ordering_campaign.rb \
@@ -87,7 +89,7 @@ options[:cases].each do |spec|
 
   size = size_text.to_i
   rows = Hash.new { |hash, key| hash[key] = [] }
-  # ABBA by round: each non-AMD candidate is bracketed by the common floor.
+  # Reverse candidate order each round to share thermal/order drift.
   options[:rounds].times do |round|
     order = round.even? ? modes : modes.reverse
     order.each do |mode|

@@ -60,21 +60,11 @@
     raise "SciIO.open: unsupported or unknown format for " + path
 
   -> .read_prefix(path, n)
-    # Best-effort: full File.read then slice (fine for sniffs).
     if File.exists?(path) == false
       return nil
     if File.directory?(path)
       return nil
-    text = File.read(path)
-    if text.size() <= n
-      return text
-    # byte-ish string prefix
-    out = ""
-    i = 0
-    while i < n
-      out = out + text[i]
-      i = i + 1
-    out
+    File.read_prefix(path, n)
 
   -> .starts_with?(s, prefix)
     if s == nil
@@ -292,14 +282,14 @@
     ccall("w_sci_zarr_read_f32_1d", dir)
 
   -> .read_netcdf(path)
-    raw = File.read(path)
-    if SciIO.starts_with?(raw, "CDF\x01")
+    prefix = File.read_prefix(path, 8)
+    if SciIO.starts_with?(prefix, "CDF\x01")
       data = ccall("w_sci_netcdf_read_f32_1d", path)
       return {:format => :netcdf_classic, :path => path, :data => data}
-    if SciIO.starts_with?(raw, "CDF\x02")
+    if SciIO.starts_with?(prefix, "CDF\x02")
       return {:format => :netcdf_classic, :path => path, :version => 2,
               :note => "CDF\\x02 not yet parsed"}
-    if SciIO.starts_with?(raw, "\x89HDF")
+    if SciIO.starts_with?(prefix, "\x89HDF")
       return SciIO.read_hdf5(path)
     raise "SciIO.read_netcdf: unrecognized"
 
@@ -310,17 +300,17 @@
     ccall("w_sci_netcdf_read_f32_1d", path)
 
   -> .read_parquet(path)
-    raw = File.read(path)
-    if SciIO.starts_with?(raw, "PAR1") == false
+    prefix = File.read_prefix(path, 4)
+    if SciIO.starts_with?(prefix, "PAR1") == false
       raise "SciIO.read_parquet: missing PAR1 magic"
     {:format => :parquet, :path => path,
      :note => "use read_parquet_f32(path, col) for TPAR PLAIN f32 columns"}
 
   -> .read_mat(path)
-    raw = File.read(path)
-    if SciIO.starts_with?(raw, "MATLAB")
+    prefix = File.read_prefix(path, 128)
+    if SciIO.starts_with?(prefix, "MATLAB")
       return {:format => :mat, :level => 5, :path => path,
-              :description => SciIO.mat_desc(raw),
+              :description => SciIO.mat_desc(prefix),
               :note => "miMATRIX body: pure Tungsten/C Level-5 reader"}
     raise "SciIO.read_mat: not Level-5 MATLAB"
 

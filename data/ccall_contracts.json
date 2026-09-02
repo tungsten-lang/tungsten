@@ -14529,6 +14529,31 @@
       ]
     },
     {
+      "symbol": "__w_read_file_prefix",
+      "native": {
+        "symbol": "__w_read_file_prefix",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 2,
+        "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
       "symbol": "__w_rename",
       "native": {
         "symbol": "__w_rename",
@@ -14676,6 +14701,196 @@
       },
       "call_modes": [
         "ccall"
+      ]
+    },
+    {
+      "symbol": "__w_u32_andnot_count",
+      "native": {
+        "symbol": "__w_u32_andnot_count",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 5,
+        "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
+      "symbol": "__w_u32_andnot_count_raw",
+      "native": {
+        "symbol": "__w_u32_andnot_count_raw",
+        "return": {
+          "llvm": "i64",
+          "abi": "raw"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 5,
+        "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall_nobox"
+      ]
+    },
+    {
+      "symbol": "__w_u32_fill_flops",
+      "native": {
+        "symbol": "__w_u32_fill_flops",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 1,
+        "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
+      "symbol": "__w_u32_flops",
+      "native": {
+        "symbol": "__w_u32_flops",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 1,
+        "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
+      "symbol": "__w_u32_merge_count",
+      "native": {
+        "symbol": "__w_u32_merge_count",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 5,
+        "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
+      "symbol": "__w_u32_merge_count_raw",
+      "native": {
+        "symbol": "__w_u32_merge_count_raw",
+        "return": {
+          "llvm": "i64",
+          "abi": "raw"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 5,
+        "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall_nobox"
       ]
     },
     {

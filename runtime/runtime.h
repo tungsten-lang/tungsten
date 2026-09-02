@@ -1694,11 +1694,17 @@ WValue w_array_new_aligned(WValue element_bits, WValue size);
 /* Fused typed-u32 bitset rows used by sparse symbolic ordering. */
 WValue __w_u32_merge_count(WValue dst, WValue dst_offset,
                            WValue src, WValue src_offset, WValue words);
+int64_t __w_u32_merge_count_raw(WValue dst, WValue dst_offset,
+                                WValue src, WValue src_offset, WValue words);
 WValue __w_u32_and_store_count(WValue dst, WValue dst_offset,
                                WValue a, WValue a_offset,
                                WValue b, WValue b_offset, WValue words);
 WValue __w_u32_andnot_count(WValue a, WValue a_offset,
                             WValue b, WValue b_offset, WValue words);
+int64_t __w_u32_andnot_count_raw(WValue a, WValue a_offset,
+                                 WValue b, WValue b_offset, WValue words);
+WValue __w_u32_fill_flops(WValue counts);
+WValue __w_u32_flops(WValue counts);
 /* Typed-array parameter guard emitted by lowering at native-fn call sites
  * whose argument element width could not be resolved statically. Raises when
  * the incoming array's element storage width does not match the callee's

@@ -419,7 +419,12 @@ fn metal4_dispatch_groups_3d(queue, allocator, pipeline, argtable, resources, tg
   ccall("w_metal4_dispatch_groups_3d", queue, allocator, pipeline, argtable, resources, tg_mem_bytes, n_tg_x, n_tg_y, n_tg_z, threads_x, threads_y, threads_z)
 
 # Attach a persistent residency set (Metal 4): all buffers/tensors that
-# batched MTL4 dispatches will touch. Call once after loading weights.
+# batched MTL4 dispatches will touch. Call after loading weights; calling
+# again with a grown list adds only the new allocations to the queue's one
+# set (deduped, never stacks duplicate sets). Raises, leaving the queue
+# untouched, if the set would exceed the GPU residency budget (90% of the
+# device's recommendedMaxWorkingSetSize, or TUNGSTEN_METAL4_RESIDENCY_BUDGET_MB):
+# over-committing residency panicked the AGX kernel driver on 2026-09-01.
 fn metal4_residency_attach(queue, resources)
   ccall("w_metal4_residency_attach", queue, resources)
 

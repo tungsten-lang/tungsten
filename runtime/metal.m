@@ -2284,9 +2284,66 @@ WValue w_metal4_argtable_set_tensor(WValue argtable_v, WValue index_v, WValue te
     }
 }
 
-/* Attach a PERSISTENT residency set to an MTL4 queue covering the given
- * buffers/tensors. Call once at load; afterwards batch dispatches skip
- * per-dispatch residency work entirely. */
+/* ---- Metal 4 residency budget --------------------------------------------
+ * An MTL4 queue wires EVERY allocation in an attached residency set at once.
+ * 2026-09-01, macOS 26.6.2 on a 128 GB M5 Max: two kernel panics (IOGPUFamily
+ * / AGXG17X data abort at NULL+0xc8, x0 = kIOReturnNoMemory, panicked task =
+ * the flash-next bench on its com.Metal4.SubmissionQueue thread) when the
+ * all-MTL4 executor attached a set spanning ~135 GB of no-copy mmap'd weights
+ * (67.9 GB expert shards + 67.2 GB backbone). The driver's wire-down fails
+ * and its error path dereferences NULL. The kernel bug is Apple's; ours is to
+ * never hand it a set it cannot wire: budget = 90% of the device's
+ * recommendedMaxWorkingSetSize (115.4 GB there), override with
+ * TUNGSTEN_METAL4_RESIDENCY_BUDGET_MB. Checked BEFORE a set is attached or
+ * grown, so a refusal leaves the queue untouched. */
+API_AVAILABLE(macos(26.0))
+static uint64_t metal4_residency_budget_bytes(id<MTLDevice> dev) {
+    const char *env = getenv("TUNGSTEN_METAL4_RESIDENCY_BUDGET_MB");
+    if (env && *env) {
+        long long mb = atoll(env);
+        if (mb > 0) return (uint64_t)mb << 20;
+    }
+    uint64_t rec = (uint64_t)[dev recommendedMaxWorkingSetSize];
+    if (rec == 0) rec = (uint64_t)[dev maxBufferLength];
+    return rec - rec / 10;
+}
+
+API_AVAILABLE(macos(26.0))
+static void metal4_residency_check(id<MTLDevice> dev, const char *who, uint64_t resident_bytes) {
+    uint64_t budget = metal4_residency_budget_bytes(dev);
+    if (resident_bytes <= budget) return;
+    char msg[400];
+    snprintf(msg, sizeof(msg),
+             "%s: residency would wire %.1f GB of GPU memory, over the %.1f GB budget "
+             "(device recommendedMaxWorkingSetSize %.1f GB; override with "
+             "TUNGSTEN_METAL4_RESIDENCY_BUDGET_MB) - refused: over-committing residency "
+             "panics the AGX kernel driver (IOGPUFamily NULL deref on kIOReturnNoMemory, 2026-09-01)",
+             who, resident_bytes / 1e9, budget / 1e9,
+             (double)[dev recommendedMaxWorkingSetSize] / 1e9);
+    w_raise(w_string(msg));
+}
+
+/* The MTLBuffer behind a residency resource: a buffer, or the backing buffer
+ * of a buffer-backed tensor (nil for tensors without one). Raises on other
+ * values. */
+API_AVAILABLE(macos(26.0))
+static id<MTLBuffer> metal4_resource_buffer(WValue rv, const char *who, int32_t idx) {
+    WMetalBuffer *mb = as_metal_buffer(rv);
+    if (mb) return (id<MTLBuffer>)mb->handle;
+    WMetalTensor *mt = as_metal_tensor(rv);
+    if (mt) return [(id<MTLTensor>)mt->handle buffer];
+    char msg[128];
+    snprintf(msg, sizeof(msg), "%s: resources[%d] is neither MTLBuffer nor MTLTensor", who, idx);
+    w_raise(w_string(msg));
+    return nil;
+}
+
+/* Attach (or grow) the PERSISTENT residency set of an MTL4 queue covering
+ * the given buffers/tensors. Additive and idempotent: one set per queue,
+ * resources already in it are skipped, so re-attaching a grown list adds
+ * only the new allocations instead of stacking whole duplicate sets on the
+ * queue. Refuses - raises with the set untouched - when the set would exceed
+ * the GPU residency budget (metal4_residency_budget_bytes). */
 WValue w_metal4_residency_attach(WValue queue_v, WValue resources_v) {
     if (@available(macOS 26.0, *)) {
         WMetal4Queue *q = as_metal4_queue(queue_v);
@@ -2296,34 +2353,48 @@ WValue w_metal4_residency_attach(WValue queue_v, WValue resources_v) {
         id<MTL4CommandQueue> q_ = (id<MTL4CommandQueue>)q->handle;
         id<MTLDevice> dev = NULL;
         for (int32_t i = 0; i < res_arr->size && !dev; i++) {
-            WMetalBuffer *mb = as_metal_buffer(w_array_get(resources_v, w_int(i)));
-            if (mb) dev = [(id<MTLBuffer>)mb->handle device];
+            id<MTLBuffer> b = metal4_resource_buffer(w_array_get(resources_v, w_int(i)), "metal4_residency_attach", i);
+            if (b) dev = [b device];
         }
         if (!dev) w_raise(w_string("metal4_residency_attach: no buffer resource found"));
-        MTLResidencySetDescriptor *rs_desc = [[[MTLResidencySetDescriptor alloc] init] autorelease];
-        rs_desc.label = @"tungsten.mtl4.persistent";
-        rs_desc.initialCapacity = (NSUInteger)res_arr->size;
-        NSError *rs_err = nil;
-        id<MTLResidencySet> res_set = [dev newResidencySetWithDescriptor:rs_desc error:&rs_err];
-        if (!res_set) w_raise(w_string("metal4_residency_attach: newResidencySet failed"));
-        for (int32_t i = 0; i < res_arr->size; i++) {
-            WValue rv = w_array_get(resources_v, w_int(i));
-            WMetalBuffer *mb = as_metal_buffer(rv);
-            WMetalTensor *mt = mb ? NULL : as_metal_tensor(rv);
-            if (mb) {
-                [res_set addAllocation:(id<MTLAllocation>)(id<MTLBuffer>)mb->handle];
-            } else if (mt) {
-                id<MTLTensor> tt = (id<MTLTensor>)mt->handle;
-                id<MTLBuffer> backing = [tt buffer];
-                if (backing) [res_set addAllocation:(id<MTLAllocation>)backing];
-            } else {
-                w_raise(w_string("metal4_residency_attach: resource is neither buffer nor tensor"));
-            }
+
+        id<MTLResidencySet> res_set = (id<MTLResidencySet>)q->residency;
+        BOOL fresh = (res_set == nil);
+        if (fresh) {
+            MTLResidencySetDescriptor *rs_desc = [[[MTLResidencySetDescriptor alloc] init] autorelease];
+            rs_desc.label = @"tungsten.mtl4.persistent";
+            rs_desc.initialCapacity = (NSUInteger)res_arr->size;
+            NSError *rs_err = nil;
+            res_set = [dev newResidencySetWithDescriptor:rs_desc error:&rs_err];
+            if (!res_set) w_raise(w_string("metal4_residency_attach: newResidencySet failed"));
         }
+
+        /* Pass 1: the allocations not yet in the set, deduped, and their
+         * total size - so the budget check runs before anything changes. */
+        NSMutableArray<id<MTLBuffer>> *pending = [NSMutableArray array];
+        NSMutableSet<NSValue *> *seen = [NSMutableSet set];
+        uint64_t pending_bytes = 0;
+        for (int32_t i = 0; i < res_arr->size; i++) {
+            id<MTLBuffer> b = metal4_resource_buffer(w_array_get(resources_v, w_int(i)), "metal4_residency_attach", i);
+            if (!b) continue;
+            NSValue *key = [NSValue valueWithPointer:(const void *)b];
+            if ([seen containsObject:key]) continue;
+            [seen addObject:key];
+            if (!fresh && [res_set containsAllocation:(id<MTLAllocation>)b]) continue;
+            [pending addObject:b];
+            pending_bytes += (uint64_t)[b allocatedSize];
+        }
+        uint64_t resident_bytes = (fresh ? 0 : (uint64_t)[res_set allocatedSize]) + pending_bytes;
+        metal4_residency_check(dev, "metal4_residency_attach", resident_bytes);
+
+        /* Pass 2: grow the set. */
+        for (id<MTLBuffer> b in pending) [res_set addAllocation:(id<MTLAllocation>)b];
         [res_set commit];
-        [q_ addResidencySet:res_set];
-        /* retain forever: the set must outlive the run */
-        (void)CFBridgingRetain(res_set);
+        if (fresh) {
+            [q_ addResidencySet:res_set];
+            /* owned by the queue for the life of the process (queues are never freed) */
+            q->residency = (void *)CFBridgingRetain(res_set);
+        }
         return W_NIL;
     } else {
         w_raise(w_string("metal4_residency_attach: requires macOS 26+"));
@@ -2622,6 +2693,12 @@ WValue w_metal4_dispatch_groups_3d(WValue queue_v, WValue allocator_v,
             }
         }
         [res_set commit];
+        {
+            /* the queue wires the persistent set AND this transient one */
+            uint64_t persistent = q->residency
+                ? (uint64_t)[(id<MTLResidencySet>)q->residency allocatedSize] : 0;
+            metal4_residency_check(dev, "metal4_dispatch", persistent + (uint64_t)[res_set allocatedSize]);
+        }
         [q_ addResidencySet:res_set];
 
         id<MTL4CommandBuffer> cmdbuf = [dev newCommandBuffer];

@@ -203,10 +203,15 @@ self-quantization must re-run the parity + smoke gates.
 
 Standing: plain 43 short / 35.6 code-context; **mtp:3 46-49 short / 49.4 code-context (+39%)**. All gates green.
 
-## Prefill 10x campaign (9/1 evening) — standing ~4x, roadmap below
+## Prefill 10x campaign (9/1 evening) — QUIET-BOX CONFIRMED ~3.8x
 
-From 8.9 ms/token (112 tok/s pp) to ~2.2 ms/token at chunk 512 (quiet-box
-confirmation pending). The wins, each ids-gated: token-block-parallel thin
+From 8.9 ms/token (112 tok/s pp) to 2.27-2.40 ms/token at chunk 512
+(2k-ctx steady chunks, 2 reps, load ~2) = ~430 tok/s pp; 32k-context
+prefill 439 s -> 160.4 s (13.7 -> 5.0 ms/token at depth, 2.7x) — 32k now
+prefills in 2.7 min. Vs the pre-campaign SERIAL prefill (~24-30 ms/token)
+the cumulative speedup is 10-13x; vs the chunked baseline the campaign
+delivered 3.8x with the remaining ~2.5x mapped below. Ping-pong K-tiles
+measured ~neutral (the MoE GEMM sits at the simdgroup-MMA ceiling). The wins, each ids-gated: token-block-parallel thin
 matvecs (killed ~480 ms/chunk of exposed single-TG latency in the HC
 chain), thread-per-position + parallel-softmax prefill SDPA, staged
 per-expert MMA GEMM for the MoE (sort -> stage -> simdgroup MMA; chunk

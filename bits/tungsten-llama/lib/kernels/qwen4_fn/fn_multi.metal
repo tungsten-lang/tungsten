@@ -856,6 +856,7 @@ kernel void moe_gemm_m8(
   constant int &s_stride [[buffer(14)]],
   constant int &g0       [[buffer(15)]],
   constant int &g_stride [[buffer(16)]],
+  constant int &na_min   [[buffer(17)]],   // experts with >= na_min rows belong to moe_gemm_na (FN_NA_MOE); pass INT_MAX-ish otherwise
   uint tg_id  [[threadgroup_position_in_grid]],
   uint simd_id [[simdgroup_index_in_threadgroup]],
   uint lane   [[thread_index_in_simdgroup]]
@@ -864,7 +865,7 @@ kernel void moe_gemm_m8(
   const int expert = int(tg_id) / tgs_per_e;
   const int seg_lo = offs[expert];
   const int c = offs[expert + 1] - seg_lo;
-  if (c <= 0) return;
+  if (c <= 0 || c >= na_min) return;
   const int n0 = (int(tg_id) % tgs_per_e) * 32 + int(simd_id) * 8;
   const int n_groups = k_dim / 16;
   const int u32s_per_row = k_dim / 8;

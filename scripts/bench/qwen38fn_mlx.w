@@ -201,6 +201,14 @@ m4_on = ccall("__w_env", "FN_M4") == "1"
 # x native bf16 weights -> f32. Not bit-identical to the f32 GEMM, so it is
 # gated on fixture + ids agreement + coherence, not on the ids oracle.
 na_on = ccall("__w_env", "FN_NA") == "1"
+# FN_NA_MOE=1: routed-expert GEMMs on the Neural Accelerators — experts with
+# >= FN_NA_MIN staged rows (default 24) run in 64-row NA blocks (half
+# activations, masked per-pair scatter; kernels/na/moe_gemm_na.metal), the
+# rest stay on the simdgroup-MMA moe_gemm_m8, which skips those experts.
+na_moe_on = ccall("__w_env", "FN_NA_MOE") == "1"
+na_min_env = ccall("__w_env", "FN_NA_MIN")
+na_min = 24
+if na_min_env != nil && na_min_env != "" then na_min = na_min_env.to_i()
 # FN_M4EXEC=1: run the WHOLE recorded chunk program on the MTL4 stream
 # (plain PSOs + prebuilt argtables + intra-encoder barriers) — the spike
 # for the all-MTL4 prefill; matmul2d steps join the same stream next.
@@ -1568,7 +1576,17 @@ if golden_prefix != ""
 # 64 = the prefill chunk width; spec/multi verify widths stay <= 8 (rung
 # kernels), widths 9..64 route to the nvfp4_gemm_f32 m-tiles.
 MULTI_MAX = 512
-PREFILL_CHUNK = 512
+# FN_CHUNK_W=<n>: prefill chunk width (multiple of 128, 512..4096). Bigger
+# chunks amortize the per-chunk expert-weight stream (~68 GB) and give the
+# NA expert GEMM fuller 64-row blocks; scratch scales linearly (~1.2 GB per
+# 512 rows of width across the banked buffers).
+fn_chunk_w_env = ccall("__w_env", "FN_CHUNK_W")
+if fn_chunk_w_env != nil && fn_chunk_w_env != ""
+  MULTI_MAX = fn_chunk_w_env.to_i()
+  if MULTI_MAX < 512 then MULTI_MAX = 512
+  if MULTI_MAX > 4096 then MULTI_MAX = 4096
+  MULTI_MAX = (MULTI_MAX / 128) * 128
+PREFILL_CHUNK = MULTI_MAX
 # only the final chunk needs logits; cap it so logits_m stays 64-wide
 PREFILL_LAST_MAX = 64
 if multi_n > 0 || mtp_depth > 0 || prompt_tokens > 8 || prompt_ids_file != ""
@@ -1715,6 +1733,23 @@ if multi_n > 0 || mtp_depth > 0 || prompt_tokens > 8 || prompt_ids_file != ""
     na_stage = metal_buffer(device, MULTI_MAX * HC_HIDDEN * 2)
     f32_to_bf16_rne_pipe = metal_pipeline(fnm_lib, "f32_to_bf16_rne")
   na_last_conv = [nil, 0, -1]
+  # FN_NA_MOE: half-staged activations (+64 rows of slack: NA blocks read a
+  # full 64-row window from row0), the per-chunk block list and its count.
+  # NA_MAX_ITEMS bounds sum ceil(c_e/64) over every routing.
+  na_moe_pipe = nil
+  na_plan_pipe = nil
+  NA_MAX_ITEMS = MULTI_MAX * TOP_K / 64 + 512
+  xgh_m_bank = [nil, nil]
+  na_items_bank = [nil, nil]
+  na_count_bank = [nil, nil]
+  if na_moe_on
+    if moe_half || ccall("__w_env", "FN_MOEV1") == "1" then raise "FN_NA_MOE needs the default moe_gemm_m8 kernel (not FN_MOEH / FN_MOEV1)"
+    moe_na_lib = metal_compile_source(device, read_file("bits/tungsten-llama/lib/kernels/na/moe_gemm_na.metal"))
+    na_plan_pipe = metal_pipeline(moe_na_lib, "moe_na_plan")
+    na_moe_pipe = metal_pipeline(moe_na_lib, "moe_gemm_na")
+    xgh_m_bank = [metal_buffer(device, (MULTI_MAX * TOP_K + 64) * HIDDEN * 2), metal_buffer(device, (MULTI_MAX * TOP_K + 64) * HIDDEN * 2)]
+    na_items_bank = [metal_buffer(device, NA_MAX_ITEMS * 8), metal_buffer(device, NA_MAX_ITEMS * 8)]
+    na_count_bank = [metal_buffer(device, 4), metal_buffer(device, 4)]
   f32_to_bf16_pipe = metal_pipeline(fnm_lib, "f32_to_bf16")
   f32_to_f16_pipe = metal_pipeline(metal_compile_source(device, read_file(NVFP4_DIR + "f32_to_f16.metal")), "f32_to_f16")
   bf16_to_f16_pipe = metal_pipeline(fnm_lib, "bf16_to_f16")
@@ -1838,6 +1873,12 @@ mbank = [0]
   moe_offs_buf_bank[mbank[0]]
 -> xg_m
   xg_m_bank[mbank[0]]
+-> xgh_m
+  xgh_m_bank[mbank[0]]
+-> na_items
+  na_items_bank[mbank[0]]
+-> na_count
+  na_count_bank[mbank[0]]
 
 # Record-or-dispatch wrappers: with mrec set, the multi helpers append
 # program steps instead of encoding, so a width's whole verify pass can be
@@ -2065,6 +2106,13 @@ mrec = [0]
   mbar([tidx_m, sh_m])
   mdg(moe_sort_pipe, [tidx_m, order_m, n * TOP_K, moe_offs_buf], 1, 512)
   mbar([order_m, moe_offs_buf])
+  # experts with >= na_min staged rows go to the NA blocks; the m8 kernel
+  # skips them (an unreachable threshold when FN_NA_MOE is off)
+  na_hybrid = n > 8 && na_moe_on
+  m8_min = na_hybrid ? na_min : 1073741824
+  if na_hybrid
+    mdg(na_plan_pipe, [moe_offs_buf, na_min, na_items, na_count, NA_MAX_ITEMS], 1, 512)
+    mbar([na_items, na_count])
   if n > 8
     # prefill: stage activations expert-contiguous, then per-expert MMA GEMM
     # (one nibble decode per weight per 8-token m-tile, matrix-unit math)
@@ -2072,10 +2120,17 @@ mrec = [0]
     gp = moe_half ? moe_gemm_h_pipe : moe_gemm_pipe
     if !skip_moestage
       mdn(sp, [xn_m, xg_m, order_m, HIDDEN, TOP_K, 0, n * TOP_K], n * TOP_K * HIDDEN)
-      mbar([xg_m])
+      if na_hybrid
+        mdn(moe_stage_h_pipe, [xn_m, xgh_m, order_m, HIDDEN, TOP_K, 0, n * TOP_K], n * TOP_K * HIDDEN)
+        mbar([xg_m, xgh_m])
+      else
+        mbar([xg_m])
     if !skip_moegemm
-      mdg(gp, [q[0], q[1], q[2], q[3], order_m, moe_offs_buf, ex[:slot_map], xg_m, eg_m, HIDDEN, MOE_FFN, og[0], og[1], og[2], og[3], og[4], og[5]], 512 * (MOE_FFN / 32), 128)
-      mdg(gp, [q[0], q[1], q[2], q[3], order_m, moe_offs_buf, ex[:slot_map], xg_m, eu_m, HIDDEN, MOE_FFN, ou[0], ou[1], ou[2], ou[3], ou[4], ou[5]], 512 * (MOE_FFN / 32), 128)
+      mdg(gp, [q[0], q[1], q[2], q[3], order_m, moe_offs_buf, ex[:slot_map], xg_m, eg_m, HIDDEN, MOE_FFN, og[0], og[1], og[2], og[3], og[4], og[5], m8_min], 512 * (MOE_FFN / 32), 128)
+      mdg(gp, [q[0], q[1], q[2], q[3], order_m, moe_offs_buf, ex[:slot_map], xg_m, eu_m, HIDDEN, MOE_FFN, ou[0], ou[1], ou[2], ou[3], ou[4], ou[5], m8_min], 512 * (MOE_FFN / 32), 128)
+      if na_hybrid
+        md3(na_moe_pipe, [q[0], q[1], q[2], q[3], order_m, moe_offs_buf, ex[:slot_map], xgh_m, eg_m, HIDDEN, MOE_FFN, og[0], og[1], og[2], og[3], og[4], og[5], na_items, na_count, MULTI_MAX * TOP_K + 64], [NA_MAX_ITEMS, MOE_FFN / 64, 1, 128, 1, 1])
+        md3(na_moe_pipe, [q[0], q[1], q[2], q[3], order_m, moe_offs_buf, ex[:slot_map], xgh_m, eu_m, HIDDEN, MOE_FFN, ou[0], ou[1], ou[2], ou[3], ou[4], ou[5], na_items, na_count, MULTI_MAX * TOP_K + 64], [NA_MAX_ITEMS, MOE_FFN / 64, 1, 128, 1, 1])
   else
     mdg(gather_m_pipe, [q[0], q[1], q[2], q[3], tidx_m, ex[:slot_map], xn_m, eg_m, HIDDEN, MOE_FFN, og[0], og[1], og[2], og[3], og[4], og[5], TOP_K, 0, ex[:hot], og[6], og[7], og[8], order_m], n * TOP_K * (MOE_FFN / 8), 64)
     mdg(gather_m_pipe, [q[0], q[1], q[2], q[3], tidx_m, ex[:slot_map], xn_m, eu_m, HIDDEN, MOE_FFN, ou[0], ou[1], ou[2], ou[3], ou[4], ou[5], TOP_K, 0, ex[:hot], ou[6], ou[7], ou[8], order_m], n * TOP_K * (MOE_FFN / 8), 64)
@@ -2088,9 +2143,15 @@ mrec = [0]
     gp2 = moe_half ? moe_gemm_h_pipe : moe_gemm_pipe
     if !skip_moestage
       mdn(sp2, [eh_m, xg_m, order_m, MOE_FFN, TOP_K, 1, n * TOP_K], n * TOP_K * MOE_FFN)
-      mbar([xg_m])
+      if na_hybrid
+        mdn(moe_stage_h_pipe, [eh_m, xgh_m, order_m, MOE_FFN, TOP_K, 1, n * TOP_K], n * TOP_K * MOE_FFN)
+        mbar([xg_m, xgh_m])
+      else
+        mbar([xg_m])
     if !skip_moegemm
-      mdg(gp2, [q[0], q[1], q[2], q[3], order_m, moe_offs_buf, ex[:slot_map], xg_m, ed_m, MOE_FFN, HIDDEN, od[0], od[1], od[2], od[3], od[4], od[5]], 512 * (HIDDEN / 32), 128)
+      mdg(gp2, [q[0], q[1], q[2], q[3], order_m, moe_offs_buf, ex[:slot_map], xg_m, ed_m, MOE_FFN, HIDDEN, od[0], od[1], od[2], od[3], od[4], od[5], m8_min], 512 * (HIDDEN / 32), 128)
+      if na_hybrid
+        md3(na_moe_pipe, [q[0], q[1], q[2], q[3], order_m, moe_offs_buf, ex[:slot_map], xgh_m, ed_m, MOE_FFN, HIDDEN, od[0], od[1], od[2], od[3], od[4], od[5], na_items, na_count, MULTI_MAX * TOP_K + 64], [NA_MAX_ITEMS, HIDDEN / 64, 1, 128, 1, 1])
   else
     mdg(gather_m_pipe, [q[0], q[1], q[2], q[3], tidx_m, ex[:slot_map], eh_m, ed_m, MOE_FFN, HIDDEN, od[0], od[1], od[2], od[3], od[4], od[5], TOP_K, 1, ex[:hot], od[6], od[7], od[8], order_m], n * TOP_K * (HIDDEN / 8), 64)
   mbar([ed_m, tw_m, shared_m, seg_m])

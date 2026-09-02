@@ -103,4 +103,24 @@ series_check("kernel.valuation.digits", primitive[1], 10)
 full_rank = PadicKernel.new([[1, 0], [0, 1]], 2, ring)
 series_check("kernel.full_rank.dimension", full_rank.dimension, 0)
 
+# BigInt lane: the same identities at a modulus above 2^62
+big_ring = PadicSeriesRing.new(5, 45, 16)
+big_modulus = 5 ** 45
+series_check("big.lane", big_ring.machine?, false)
+series_check("machine.lane", ring.machine?, true)
+big_one_plus_t = big_ring.series([1, 1])
+big_product = big_one_plus_t * big_one_plus_t.inverse
+series_check("big.inverse", (big_product - big_ring.one).zero?, true)
+big_phi = big_ring.series([big_modulus - 5, 1]) * big_ring.series([big_modulus - 10, 1]) * big_one_plus_t
+big_factor = big_phi.weierstrass_factor(2)
+series_check("big.weierstrass.c0", big_factor[0], 50)
+series_check("big.weierstrass.c1", big_factor[1], big_modulus - 15)
+series_check("big.strassmann", big_phi.disk_zero_count(1, 100)[0], 2)
+series_check("big.evaluate", big_ring.series([4, 3, 7, 11]).evaluate(2), 4 + 6 + 28 + 88)
+big_kernel = PadicKernel.new([[5, 1, 0], [0, 5, 1]], 3, big_ring)
+series_check("big.kernel.dimension", big_kernel.dimension, 1)
+big_primitive = big_kernel.primitive_vector(0)
+series_check("big.kernel.vector", big_primitive[0].to_s, "\[1, " + (5 ** 43 - 5).to_s + ", 25\]")
+series_check("big.kernel.digits", big_primitive[1], 43)
+
 << "algebra_p_adic_series_spec: all checks passed"

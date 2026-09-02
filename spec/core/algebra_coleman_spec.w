@@ -1,6 +1,7 @@
 # Independent Chabauty--Coleman run for the shell-width quartic at p = 5.
-# Native lane only: the interpolation columns are 226 series of length ~500
-# on each of eight residue disks.
+# Native lane: at the default precision 26 every residue fits a machine word
+# and the run takes about two seconds and 1.4 GB; TUNGSTEN_COLEMAN_PRECISION=40
+# exercises the BigInt lane instead (about 90 s and ~100 GB of BigInt arena).
 #
 #   bin/tungsten compile spec/core/algebra_coleman_spec.w \
 #     --out /tmp/algebra-coleman-spec --release
@@ -15,7 +16,7 @@ use algebra
 
 C ⊂ ℙ²_ℚ (B, S, Z) : 16B³Z + 48BS²Z − 3S⁴ + 8S³Z + 162S²Z² + 729Z⁴ = 0
 
-precision = 40
+precision = 26
 requested = env("TUNGSTEN_COLEMAN_PRECISION")
 if requested != nil && requested != ""
   precision = requested.to_i

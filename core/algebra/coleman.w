@@ -483,19 +483,39 @@ use core/algebra/zeta
   # auxiliary points.  Returns [coefficients, known_digits].
   -> interpolate(disk, auxiliary)
     raise "interpolation center must be affine" if disk.infinity?
-    rows = []
     width = @basis.size
-    m = 0
-    while m < @n
-      row = []
-      disk.columns.each -> row.push(item.coefficient(m))
-      rows.push(row)
-      m += 1
-    auxiliary.each -> (point)
-      row = []
-      @basis.each -> row.push(monomial_value(item, point[0], point[1]))
-      rows.push(row)
-    kernel = PadicKernel.new(rows, width, @ring)
+    row_count = @n + auxiliary.size
+    kernel = nil
+    if @ring.machine?
+      # rows 0..N-1: Taylor coefficients of the basis columns (already in
+      # Montgomery form inside the series buffers); then the auxiliary rows
+      flat = i64[row_count * width]
+      k = 0
+      while k < width
+        padic_lane_scatter(flat, width, k, disk.columns[k].raw_coefficients, @n)
+        k += 1
+      a = 0
+      while a < auxiliary.size
+        point = auxiliary[a]
+        k = 0
+        while k < width
+          flat[(@n + a) * width + k] = @ring.to_mont(monomial_value(@basis[k], point[0], point[1]))
+          k += 1
+        a += 1
+      kernel = PadicKernel.new(nil, width, @ring, flat, row_count)
+    else
+      rows = []
+      m = 0
+      while m < @n
+        row = []
+        disk.columns.each -> row.push(item.coefficient(m))
+        rows.push(row)
+        m += 1
+      auxiliary.each -> (point)
+        row = []
+        @basis.each -> row.push(monomial_value(item, point[0], point[1]))
+        rows.push(row)
+      kernel = PadicKernel.new(rows, width, @ring)
     if kernel.dimension != 1
       raise "interpolation kernel has dimension " + kernel.dimension.to_s + ", expected 1"
     kernel.primitive_vector(0)

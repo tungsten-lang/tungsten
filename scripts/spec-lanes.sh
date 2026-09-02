@@ -906,7 +906,8 @@ exclude_specs=(
   spec/core/algebra_p_adic_geometry_spec.w
   spec/core/algebra_p_adic_series_spec.w
   # Chabauty--Coleman on the shell quartic: eight disks of 226 series each;
-  # ~90 s native and tens of GB of BigInt arena at K = 40.  Run by hand.
+  # about 2 s and 1.4 GB natively on the machine lane (K = 26).  Run by hand
+  # until it has been timed across the default suite.
   spec/core/algebra_coleman_spec.w
   spec/core/algebra_p_adic_spec.w
   spec/core/algebra_parity_lattice_spec.w

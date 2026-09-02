@@ -1692,6 +1692,8 @@ WValue w_metal_buffer_for_mmap(WValue device, WValue mmap, WValue byte_offset,
  * args arrive as NaN-boxed WValues. */
 WValue w_array_new_aligned(WValue element_bits, WValue size);
 /* Fused typed-u32 bitset rows used by sparse symbolic ordering. */
+int64_t __w_u32_copy_raw(WValue dst, int64_t dst_offset,
+                         WValue src, int64_t src_offset, int64_t words);
 WValue __w_u32_merge_count(WValue dst, WValue dst_offset,
                            WValue src, WValue src_offset, WValue words);
 int64_t __w_u32_merge_count_raw(WValue dst, WValue dst_offset,
@@ -1703,6 +1705,12 @@ WValue __w_u32_andnot_count(WValue a, WValue a_offset,
                             WValue b, WValue b_offset, WValue words);
 int64_t __w_u32_andnot_count_raw(WValue a, WValue a_offset,
                                  WValue b, WValue b_offset, WValue words);
+int64_t __w_u32_subset_except_raw(WValue a, int64_t a_offset,
+                                  WValue b, int64_t b_offset, int64_t words,
+                                  int64_t except_bit);
+int64_t __w_u32_subset_except_trusted_raw(WValue a, int64_t a_offset,
+                                          WValue b, int64_t b_offset,
+                                          int64_t words, int64_t except_bit);
 WValue __w_u32_fill_flops(WValue counts);
 WValue __w_u32_flops(WValue counts);
 /* Typed-array parameter guard emitted by lowering at native-fn call sites

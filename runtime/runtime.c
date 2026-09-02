@@ -707,6 +707,48 @@ static inline uint32_t *w_u32_data(WValue v, int64_t off) {
     WArray *a = w_as_array(v);
     return (uint32_t *)a->slots + a->start + off;
 }
+/* Copy packed u32 elements between typed arrays. Scalar arguments use the
+ * raw-i64 foreign-call ABI; their ranges and the two array handles/storage
+ * widths are checked here. The rgreedy checkpoint
+ * path copies tens of millions of elements at a time; keeping that work in
+ * one native call lets libc select its wide, cache-aware copy routine instead
+ * of running a Tungsten bounds/store loop.  Validate the low-level contract
+ * here because this helper deliberately bypasses ordinary Array#[]= checks.
+ * Overlapping views retain copy semantics through the memmove fallback. */
+int64_t __w_u32_copy_raw(WValue dstv, int64_t doff, WValue srcv,
+                         int64_t soff, int64_t words) {
+    if (!w_is_array(dstv) || !w_is_array(srcv)) {
+        w_raise(w_string("u32 copy: expected two u32 arrays"));
+        return 0;
+    }
+    WArray *dst = w_as_array(dstv);
+    WArray *src = w_as_array(srcv);
+    if (dst->ebits != 32 || src->ebits != 32) {
+        w_raise(w_string("u32 copy: expected two u32 arrays"));
+        return 0;
+    }
+    if (doff < 0 || soff < 0 || words < 0 ||
+        doff > dst->size || words > (int64_t)dst->size - doff ||
+        soff > src->size || words > (int64_t)src->size - soff) {
+        w_raise(w_string("u32 copy: offset/count out of range"));
+        return 0;
+    }
+    if (words == 0) return 0;
+
+    uint32_t *dp = w_u32_data(dstv, doff);
+    const uint32_t *sp = w_u32_data(srcv, soff);
+    size_t bytes = (size_t)words * sizeof(uint32_t);
+    uintptr_t da = (uintptr_t)dp;
+    uintptr_t sa = (uintptr_t)sp;
+    if (dp == sp)
+        return words;
+    if ((da < sa && bytes <= sa - da) ||
+        (sa < da && bytes <= da - sa))
+        memcpy(dp, sp, bytes);
+    else
+        memmove(dp, sp, bytes);
+    return words;
+}
 /* dst |= src over w words; returns popcount of newly-set bits. */
 WValue __w_u32_merge_count(WValue dstv, WValue doffv, WValue srcv, WValue soffv, WValue wv) {
     uint32_t *dp = w_u32_data(dstv, w_as_int(doffv));
@@ -769,6 +811,63 @@ int64_t __w_u32_andnot_count_raw(WValue av, WValue aoffv, WValue bv, WValue boff
         total += (uint64_t)__builtin_popcount(ap[i] & ~bp[i]);
     }
     return (int64_t)total;
+}
+
+/* Inner predicate shared by the checked public entry and the statically proven
+ * rgreedy hot path. */
+static inline __attribute__((always_inline))
+int64_t w_u32_subset_except_loop(const uint32_t *ap, const uint32_t *bp,
+                                 int64_t w, int64_t except) {
+    int64_t except_word = except >> 5;
+    uint32_t except_mask = UINT32_C(1) << (except & 31);
+    for (int64_t i = 0; i < w; i++) {
+        uint32_t missing = ap[i] & ~bp[i];
+        if (i == except_word) missing &= ~except_mask;
+        if (missing != 0) return 0;
+    }
+    return 1;
+}
+
+/* True when a is a subset of b after ignoring one bit of a. Scalar arguments
+ * use the raw-i64 foreign-call ABI; their ranges and the two array handles /
+ * storage widths are checked here. The checked entry is the safe contract for
+ * external callers and interpreter fallback. */
+int64_t __w_u32_subset_except_raw(WValue av, int64_t aoff,
+                                  WValue bv, int64_t boff, int64_t w,
+                                  int64_t except) {
+    if (!w_is_array(av) || !w_is_array(bv)) {
+        w_raise(w_string("u32 subset-except: expected two u32 arrays"));
+        return 0;
+    }
+    WArray *a = w_as_array(av);
+    WArray *b = w_as_array(bv);
+    if (a->ebits != 32 || b->ebits != 32) {
+        w_raise(w_string("u32 subset-except: expected two u32 arrays"));
+        return 0;
+    }
+    /* Bounds are structured to avoid offset+count overflow. Array sizes are
+     * int32, so the validated w*32 except bound is safe in int64. */
+    if (aoff < 0 || boff < 0 || w < 0 ||
+        aoff > a->size || w > (int64_t)a->size - aoff ||
+        boff > b->size || w > (int64_t)b->size - boff ||
+        except < 0 || except >= w * INT64_C(32)) {
+        w_raise(w_string("u32 subset-except: offset/count/except bit out of range"));
+        return 0;
+    }
+    const uint32_t *ap = w_u32_data(av, aoff);
+    const uint32_t *bp = w_u32_data(bv, boff);
+    return w_u32_subset_except_loop(ap, bp, w, except);
+}
+
+/* Trusted subset predicate for rgreedy's proved bitset layout only. Callers
+ * must establish that av/bv are u32 arrays, both [offset, offset+w) ranges are
+ * valid, and 0 <= except < 32*w. No validation is performed here. */
+__attribute__((always_inline))
+int64_t __w_u32_subset_except_trusted_raw(WValue av, int64_t aoff,
+                                          WValue bv, int64_t boff, int64_t w,
+                                          int64_t except) {
+    return w_u32_subset_except_loop(w_u32_data(av, aoff),
+                                    w_u32_data(bv, boff), w, except);
 }
 
 /* Exact symbolic score reduction for u32 column counts.  Use a 128-bit flop

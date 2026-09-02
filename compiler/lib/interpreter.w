@@ -2152,10 +2152,43 @@ use target
       # Eval mode has no raw-int local tier. Reuse the boxed semantic twin;
       # compiled code alone selects the raw-return ABI.
       return ccall("__w_u32_merge_count", args[1], args[2], args[3], args[4], args[5])
+    when "__w_u32_copy_raw"
+      if args.size() != 6
+        raise "__w_u32_copy_raw expects two arrays, two offsets, and a word count"
+      # Eval mode carries interpreted Integers as WValues. The native helper
+      # performs the same array/range/overlap checks; rebox its raw
+      # element-count return for the tree walker.
+      doff = ccall_nobox("w_numeric_to_i64", args[2]) ## i64
+      soff = ccall_nobox("w_numeric_to_i64", args[4]) ## i64
+      words = ccall_nobox("w_numeric_to_i64", args[5]) ## i64
+      return ccall("w_int", ccall_nobox(
+        "__w_u32_copy_raw", args[1], doff, args[3], soff, words))
     when "__w_u32_andnot_count_raw"
       if args.size() != 6
         raise "__w_u32_andnot_count_raw expects two arrays, two offsets, and a word count"
       return ccall("__w_u32_andnot_count", args[1], args[2], args[3], args[4], args[5])
+    when "__w_u32_subset_except_raw"
+      if args.size() != 7
+        raise "__w_u32_subset_except_raw expects two arrays, two offsets, a word count, and an ignored bit"
+      aoff = ccall_nobox("w_numeric_to_i64", args[2]) ## i64
+      boff = ccall_nobox("w_numeric_to_i64", args[4]) ## i64
+      words = ccall_nobox("w_numeric_to_i64", args[5]) ## i64
+      except = ccall_nobox("w_numeric_to_i64", args[6]) ## i64
+      return ccall("w_int", ccall_nobox(
+        "__w_u32_subset_except_raw", args[1], aoff, args[3], boff,
+        words, except))
+    when "__w_u32_subset_except_trusted_raw"
+      if args.size() != 7
+        raise "__w_u32_subset_except_trusted_raw expects two arrays, two offsets, a word count, and an ignored bit"
+      # Eval mode does not rely on the native caller's layout proof: preserve
+      # checked semantics while exposing the trusted symbol to compiled code.
+      aoff = ccall_nobox("w_numeric_to_i64", args[2]) ## i64
+      boff = ccall_nobox("w_numeric_to_i64", args[4]) ## i64
+      words = ccall_nobox("w_numeric_to_i64", args[5]) ## i64
+      except = ccall_nobox("w_numeric_to_i64", args[6]) ## i64
+      return ccall("w_int", ccall_nobox(
+        "__w_u32_subset_except_raw", args[1], aoff, args[3], boff,
+        words, except))
     when "__w_bit_ctpop_u64"
       if args.size() != 2
         raise "__w_bit_ctpop_u64 expects one argument"

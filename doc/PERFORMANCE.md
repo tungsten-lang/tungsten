@@ -235,3 +235,29 @@ in-core native bitset-call substitution did not pass their matched gates and
 remain opt-in or reverted. Full commands, shape-by-shape measurements, exact
 fixtures, and the keep/reject ledger are in the
 [`SSI ordering transfer results`](../benchmarks/linalg/tungsten/ssi_ordering_results_2026-09-02.md).
+
+### Generalized policy for matrices above 10k
+
+The large-matrix follow-up was explicitly cleaned of choices learned from the
+45 public SSI rows. An exploratory version won 17 rows and tied 28, with a
+1.3747% geometric-mean flop reduction, but it included a corpus-derived AMF
+metric, absolute size/core bands, and a fixed `+257` stream offset. Those
+choices were rejected as policy evidence even though the AMF arm alone gave a
+25.48% in-sample win on `pooling_sppc3pq`.
+
+The retained policy uses only structural invariants, work budgets, exact
+rescoring, and explicit 128 MiB workspace models. It adds sparse degree-three
+core lifting, flat-CSR iterative block decomposition, bounded AMD workspaces,
+and relative dyadic search streams. No matrix name, exact corpus dimension,
+score signature, fixed permutation, or absolute lucky stream enters the
+algorithm. Every proposal must remain a permutation and strictly improve the
+whole-pattern exact score before it replaces the incumbent.
+
+At stream 7 and a 150M word-operation budget, the generalized policy beat the
+historical baseline on 34 of the 45 public rows above 10k vertices, tied 11,
+and regressed none. The geometric-mean exact-flop reduction was 1.2459%.
+This is in-sample engineering evidence, not an untouched holdout result.
+Generated cases on both sides of 10k produced 4 wins, 26 ties, and no
+regressions; five independently chosen random graph seeds produced four wins
+and one tie. A seven-stream check also showed that stream 257 was not
+universally favorable.

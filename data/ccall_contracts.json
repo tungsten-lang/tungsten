@@ -14778,6 +14778,43 @@
       ]
     },
     {
+      "symbol": "__w_u32_copy_raw",
+      "native": {
+        "symbol": "__w_u32_copy_raw",
+        "return": {
+          "llvm": "i64",
+          "abi": "raw"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "raw"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "raw"
+          },
+          {
+            "llvm": "i64",
+            "abi": "raw"
+          }
+        ],
+        "arity": 5,
+        "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall_nobox"
+      ]
+    },
+    {
       "symbol": "__w_u32_fill_flops",
       "native": {
         "symbol": "__w_u32_fill_flops",
@@ -14887,6 +14924,88 @@
           }
         ],
         "arity": 5,
+        "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall_nobox"
+      ]
+    },
+    {
+      "symbol": "__w_u32_subset_except_raw",
+      "native": {
+        "symbol": "__w_u32_subset_except_raw",
+        "return": {
+          "llvm": "i64",
+          "abi": "raw"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "raw"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "raw"
+          },
+          {
+            "llvm": "i64",
+            "abi": "raw"
+          },
+          {
+            "llvm": "i64",
+            "abi": "raw"
+          }
+        ],
+        "arity": 6,
+        "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall_nobox"
+      ]
+    },
+    {
+      "symbol": "__w_u32_subset_except_trusted_raw",
+      "native": {
+        "symbol": "__w_u32_subset_except_trusted_raw",
+        "return": {
+          "llvm": "i64",
+          "abi": "raw"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "raw"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "raw"
+          },
+          {
+            "llvm": "i64",
+            "abi": "raw"
+          },
+          {
+            "llvm": "i64",
+            "abi": "raw"
+          }
+        ],
+        "arity": 6,
         "source": "runtime/runtime.h"
       },
       "call_modes": [

@@ -198,3 +198,60 @@ unchanged within 0.5% (11.65 -> 11.69 us and 11.72 -> 11.78 us).
 
 All reported candidates preserve exact fill/flop recomputation and permutation
 checks.  Candidate-local scores are never treated as authoritative acceptance.
+
+## Large sparse policy cleanup
+
+The follow-up campaign evaluated all 45 public rows with more than 10,000
+vertices at stream 7 and a 150,000,000 word-operation budget. The first
+exploratory policy improved 17 rows, tied 28, and reduced geometric-mean exact
+flops by 1.3747%, but it was not retained: it contained a public-corpus-derived
+AMF metric (`SqLooseDivHalfWF`), absolute 700k-1.2M entry and 8k-20k core
+bands, an `n > 10k` admission gate, and a fixed `+257` search-stream offset.
+Those choices were removed rather than rationalized after the fact. This
+forfeited the exploratory policy's 25.48% in-sample flop win on
+`pooling_sppc3pq`.
+
+The final automatic policy is admitted only by algorithmic resource and work
+models:
+
+- sparse core lifting eliminates exact degree-three vertices and bounds the
+  reducer, retained core, and one-shot AMD pool inside a 128 MiB envelope;
+- iterative flat-CSR biconnected decomposition similarly gives each local AMD
+  a precomputed, fail-closed pool;
+- the terminal-RGSUB coordinator and the aggregate worker set have separate
+  128 MiB estimates, including boxed sorting state, edge copies, and three
+  dense worker bitmaps;
+- secondary search streams are relative XOR splits of the caller's stream, so
+  each is a bijection rather than a selected absolute seed; and
+- all candidates are complete permutations and are accepted only after exact
+  whole-pattern rescoring.
+
+The generalized result was 34 wins, 11 ties, and zero regressions versus the
+historical baseline. Its geometric-mean exact-flop reduction was 1.2459%.
+The largest exact changes were:
+
+| Row | Baseline flops | Generalized flops | Delta |
+|---|---:|---:|---:|
+| crudeoil_pooling_dt3 | 44,330,840 | 37,580,702 | -15.2267% |
+| cont6-qq | 802,438,606 | 736,167,350 | -8.2587% |
+| methanol400 | 2,047,001 | 1,884,991 | -7.9145% |
+| crudeoil_lee4_06 | 39,680,611 | 38,146,369 | -3.8665% |
+| gabriel10 | 1,385,204,968 | 1,337,109,769 | -3.4721% |
+| glider400 | 345,070 | 334,627 | -3.0263% |
+| pooling_sppc1pq | 156,089,848 | 153,393,644 | -1.7273% |
+| mpbp_35 | 1,504,061 | 1,481,326 | -1.5116% |
+
+The corpus is public and influenced the implementation campaign, so the table
+is not presented as held-out generalization. Counterchecks used generated
+families and independent graph seeds: 30 cases straddling 10k vertices yielded
+4 wins, 26 ties, and no regressions; five random seeds yielded 4 wins and 1
+tie; and shell cases at 23,167/23,168/23,169 vertices all tied, with no quality
+cliff at the dense-bitmap boundary. Across seven streams, the former absolute
+257 choice was best for one generated grid but not for a generated bridge.
+
+Reproduce the public-corpus sweep with
+`bench_ssi_corpus_ordering.rb --gt-10k --stream 7 --budget 150000000` after
+compiling `ssi_corpus_ordering.w`. The runner checks the row dimensions,
+permutation, exact fill/flops, checksum, and repeat determinism. Wall-clock
+numbers from the parallel census are intentionally omitted; only matched
+fresh-process runs should be used for timing claims.

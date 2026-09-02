@@ -160,6 +160,163 @@ raw_andnot = ccall_nobox(
   "__w_u32_andnot_count_raw", bit_src, 0, bit_dst_raw, 0, 4)
 check_named("bitset_raw.andnot_matches_boxed", raw_andnot == boxed_andnot)
 
+subset = u32[2]
+superset = u32[2]
+subset[0] = 0x00000121
+subset[1] = 0x80000000
+superset[0] = 0x00000021
+superset[1] = 0x80000000
+check_named("bitset_raw.subset_ignores_requested_bit",
+            ccall_nobox("__w_u32_subset_except_raw",
+                        subset, 0, superset, 0, 2, 8) == 1)
+check_named("bitset_raw.subset_rejects_other_missing_bit",
+            ccall_nobox("__w_u32_subset_except_raw",
+                        subset, 0, superset, 0, 2, 5) == 0)
+checked_subset_true = ccall_nobox(
+  "__w_u32_subset_except_raw", subset, 0, superset, 0, 2, 8)
+trusted_subset_true = ccall_nobox(
+  "__w_u32_subset_except_trusted_raw", subset, 0, superset, 0, 2, 8)
+checked_subset_false = ccall_nobox(
+  "__w_u32_subset_except_raw", subset, 0, superset, 0, 2, 5)
+trusted_subset_false = ccall_nobox(
+  "__w_u32_subset_except_trusted_raw", subset, 0, superset, 0, 2, 5)
+check_named("bitset_raw.subset_trusted_matches_checked",
+            trusted_subset_true == checked_subset_true &&
+            trusted_subset_false == checked_subset_false)
+
+subset_bad_a_raised = false
+begin
+  ccall_nobox("__w_u32_subset_except_raw", nil, 0, superset, 0, 2, 8)
+rescue error
+  subset_bad_a_raised = true
+end
+subset_bad_b_raised = false
+begin
+  ccall_nobox("__w_u32_subset_except_raw", subset, 0, nil, 0, 2, 8)
+rescue error
+  subset_bad_b_raised = true
+end
+subset_bad_a_ebits_raised = false
+begin
+  ccall_nobox("__w_u32_subset_except_raw", u64[2], 0, superset, 0, 2, 8)
+rescue error
+  subset_bad_a_ebits_raised = true
+end
+subset_bad_b_ebits_raised = false
+begin
+  ccall_nobox("__w_u32_subset_except_raw", subset, 0, u64[2], 0, 2, 8)
+rescue error
+  subset_bad_b_ebits_raised = true
+end
+check_named("bitset_raw.subset_checks_arrays",
+            subset_bad_a_raised && subset_bad_b_raised &&
+            subset_bad_a_ebits_raised && subset_bad_b_ebits_raised)
+
+subset_neg_aoff_raised = false
+begin
+  ccall_nobox("__w_u32_subset_except_raw", subset, -1, superset, 0, 2, 8)
+rescue error
+  subset_neg_aoff_raised = true
+end
+subset_a_range_raised = false
+begin
+  ccall_nobox("__w_u32_subset_except_raw", subset, 1, superset, 0, 2, 8)
+rescue error
+  subset_a_range_raised = true
+end
+subset_neg_boff_raised = false
+begin
+  ccall_nobox("__w_u32_subset_except_raw", subset, 0, superset, -1, 2, 8)
+rescue error
+  subset_neg_boff_raised = true
+end
+subset_b_range_raised = false
+begin
+  ccall_nobox("__w_u32_subset_except_raw", subset, 0, superset, 1, 2, 8)
+rescue error
+  subset_b_range_raised = true
+end
+subset_neg_words_raised = false
+begin
+  ccall_nobox("__w_u32_subset_except_raw", subset, 0, superset, 0, -1, 0)
+rescue error
+  subset_neg_words_raised = true
+end
+subset_zero_words_raised = false
+begin
+  ccall_nobox("__w_u32_subset_except_raw", subset, 0, superset, 0, 0, 0)
+rescue error
+  subset_zero_words_raised = true
+end
+subset_neg_except_raised = false
+begin
+  ccall_nobox("__w_u32_subset_except_raw", subset, 0, superset, 0, 2, -1)
+rescue error
+  subset_neg_except_raised = true
+end
+subset_high_except_raised = false
+begin
+  ccall_nobox("__w_u32_subset_except_raw", subset, 0, superset, 0, 2, 64)
+rescue error
+  subset_high_except_raised = true
+end
+check_named("bitset_raw.subset_checks_ranges_and_except",
+            subset_neg_aoff_raised && subset_a_range_raised &&
+            subset_neg_boff_raised && subset_b_range_raised &&
+            subset_neg_words_raised && subset_zero_words_raised &&
+            subset_neg_except_raised && subset_high_except_raised)
+
+# Whole-state checkpoint copies use one checked native bulk operation. Cover
+# offsets and overlap so eval/native agree on the helper's memmove semantics.
+bit_copy_src = u32[6]
+i = 0
+while i < bit_copy_src.size()
+  bit_copy_src[i] = i * 17 + 3
+  i += 1
+bit_copy_dst = u32[6]
+copied = ccall_nobox(
+  "__w_u32_copy_raw", bit_copy_dst, 1, bit_copy_src, 2, 3)
+check_named("bitset_raw.copy_offsets",
+            copied == 3 && bit_copy_dst[0] == 0 &&
+            bit_copy_dst[1] == 37 && bit_copy_dst[2] == 54 &&
+            bit_copy_dst[3] == 71 && bit_copy_dst[4] == 0)
+copied = ccall_nobox(
+  "__w_u32_copy_raw", bit_copy_src, 1, bit_copy_src, 0, 5)
+check_named("bitset_raw.copy_overlap",
+            copied == 5 && bit_copy_src[0] == 3 &&
+            bit_copy_src[1] == 3 && bit_copy_src[2] == 20 &&
+            bit_copy_src[3] == 37 && bit_copy_src[4] == 54 &&
+            bit_copy_src[5] == 71)
+copy_range_raised = false
+begin
+  ccall_nobox("__w_u32_copy_raw", bit_copy_dst, 4, bit_copy_src, 0, 3)
+rescue error
+  copy_range_raised = error.to_s.include?("range")
+end
+check_named("bitset_raw.copy_checks_range", copy_range_raised)
+copy_type_raised = false
+begin
+  ccall_nobox("__w_u32_copy_raw", u64[6], 0, bit_copy_src, 0, 3)
+rescue error
+  copy_type_raised = true
+end
+check_named("bitset_raw.copy_checks_type", copy_type_raised)
+
+# Slice views are writable fixed-range aliases (only growth is forbidden), so
+# the bulk helper follows ordinary element-write semantics and updates the
+# parent storage.
+copy_view_parent = u32[5]
+copy_view = copy_view_parent.slice_view(1, 3)
+copy_view_src = u32[3]
+copy_view_src[0] = 101
+copy_view_src[1] = 202
+copy_view_src[2] = 303
+ccall_nobox("__w_u32_copy_raw", copy_view, 0, copy_view_src, 0, 3)
+check_named("bitset_raw.copy_writes_mutable_view",
+            copy_view_parent[0] == 0 && copy_view_parent[1] == 101 &&
+            copy_view_parent[2] == 202 && copy_view_parent[3] == 303 &&
+            copy_view_parent[4] == 0)
+
 # 5-point Laplacian on a g x g grid (SPD, no exact cancellation).
 g = 6
 n = g * g
@@ -536,6 +693,101 @@ check_named("core_lift.memory_cap_boundary",
             SparseAnalysis.core_lift_fits?(23168) &&
             !SparseAnalysis.core_lift_fits?(23169))
 
+# The sparse core lift performs the same exact elimination without an n-by-n
+# bitmap.  Vertex 0 has the three missing K6 triangle vertices as neighbors;
+# eliminating it closes that triangle and leaves an exact K6 residual.
+scl_ri = []
+scl_ci = []
+a = 0
+while a < 7
+  b = a + 1
+  while b < 7
+    keep = !(a == 0 && b >= 4)
+    keep = false if (
+      (a == 1 && b == 2) || (a == 1 && b == 3) ||
+      (a == 2 && b == 3))
+    if keep
+      scl_ri.push(a)
+      scl_ci.push(b)
+    b += 1
+  a += 1
+scl_analysis = SparseAnalysis.new(
+  SparsePattern.new(7, 7, scl_ri, scl_ci))
+scl = SparseAnalysis.sparse_core_lift_reduce(
+  7, scl_analysis.typed_ri, scl_analysis.typed_ci, scl_ri.size,
+  3, 7, scl_ri.size)
+check_named("sparse_core_lift.degree3_prefix",
+            scl != nil && scl[1] == 1 && scl[0][0] == 0 &&
+            scl[3] == 6 && scl[6] == 15 && scl[7] == 16)
+core_ri = []
+core_ci = []
+i = 0
+while i < scl[6]
+  core_ri.push(scl[4][i])
+  core_ci.push(scl[5][i])
+  i += 1
+core_analysis = SparseAnalysis.new(
+  SparsePattern.new(scl[3], scl[3], core_ri, core_ci))
+core_order = [5, 4, 3, 2, 1, 0]
+whole_order = [scl[0][0]]
+i = 0
+while i < core_order.size
+  whole_order.push(scl[2][core_order[i]])
+  i += 1
+check_named("sparse_core_lift.exact_score_split",
+            scl_analysis.flops_for_order(whole_order) ==
+            scl[7] + core_analysis.flops_for_order(core_order))
+scl2 = SparseAnalysis.sparse_core_lift_reduce(
+  7, scl_analysis.typed_ri, scl_analysis.typed_ci, scl_ri.size,
+  3, 7, scl_ri.size)
+check_named("sparse_core_lift.deterministic",
+            scl2 != nil && scl2[0] == scl[0] && scl2[1] == scl[1] &&
+            scl2[2] == scl[2] && scl2[3] == scl[3] &&
+            scl2[4] == scl[4] && scl2[5] == scl[5] &&
+            scl2[6] == scl[6] && scl2[7] == scl[7])
+check_named("sparse_core_lift.caps_fail_closed",
+            SparseAnalysis.sparse_core_lift_reduce(
+              7, scl_analysis.typed_ri, scl_analysis.typed_ci,
+              scl_ri.size, 3, 5, scl_ri.size) == nil &&
+            SparseAnalysis.sparse_core_lift_reduce(
+              7, scl_analysis.typed_ri, scl_analysis.typed_ci,
+              scl_ri.size, 4, 7, scl_ri.size) == nil)
+check_named("sparse_core_lift.input_lengths_fail_closed",
+            SparseAnalysis.sparse_core_lift_reduce(
+              7, u32[0], scl_analysis.typed_ci, 1,
+              3, 7, 1) == nil &&
+            SparseAnalysis.sparse_core_lift_reduce(
+              7, scl_analysis.typed_ri, u32[0], 1,
+              3, 7, 1) == nil)
+policy_n = 32768
+policy_m = 196608
+policy_core_n = 16384
+policy_core_edges = 65536
+check_named("sparse_core_lift.workspace_model_exact",
+            SparseAnalysis.sparse_core_lift_workspace_bytes(
+              policy_n, policy_m) == 17469696)
+check_named("sparse_core_lift.synthetic_resource_admitted",
+            SparseAnalysis.sparse_core_lift_workspace_fits?(
+              policy_n, policy_m) &&
+            SparseAnalysis.sparse_core_lift_workspace_fits?(400001, 1) &&
+            SparseAnalysis.sparse_core_lift_candidate_fits?(
+              policy_n, policy_m, policy_core_n, policy_core_edges))
+check_named("sparse_core_lift.policy_caps_fail_closed",
+            !SparseAnalysis.sparse_core_lift_workspace_fits?(1000000, 1) &&
+            !SparseAnalysis.sparse_core_lift_candidate_fits?(
+              policy_n, policy_m, policy_n, policy_core_edges) &&
+            !SparseAnalysis.sparse_core_lift_candidate_fits?(
+              policy_n, policy_m, policy_core_n, policy_m + 1))
+check_named("sparse_core_lift.amd_pool_is_bounded",
+            SparseAnalysis.sparse_core_lift_amd_iw_words(
+              policy_n, policy_m, policy_core_n,
+              policy_core_edges) > 4 * policy_core_edges + policy_core_n &&
+            SparseAnalysis.sparse_core_lift_candidate_fits?(
+              policy_n, policy_m, policy_core_n,
+              8 * policy_core_n + 1) &&
+            SparseAnalysis.sparse_core_lift_amd_iw_words(
+              1000000, 1, 500000, 1) < 0)
+
 # AMD policy variants remain deterministic bijections.  The default call is
 # pinned to the historical alpha-10/aggressive/LIFO policy.
 gri = grid_analysis.typed_ri
@@ -556,6 +808,9 @@ check_named("amd.fifo_deterministic",
             grid_analysis.amd_core(n, gri, gci, gm, 10, 1, 1) == amd_fifo)
 check_named("amd.nonagg_deterministic",
             grid_analysis.amd_core(n, gri, gci, gm, 10, 0) == amd_nonagg)
+check_named("amd.bounded_pool_fails_closed",
+            grid_analysis.amd_core(
+              n, gri, gci, gm, 10, 1, 0, 1).size == 0)
 
 # Profile/bandwidth candidates: deterministic bijections on connected and
 # disconnected graphs.  A naturally labelled path has the canonical RCM
@@ -629,6 +884,72 @@ check_named("biconn.two_cliques_defers_articulation",
 check_named("biconn.two_cliques_deterministic",
             cut_analysis.biconn_ordering == cut_order)
 
+# Flat-CSR biconn construction canonicalizes duplicate entries, opposite
+# triangle copies, and structural self entries before Tarjan. It must preserve
+# the exact block-cut order of the corresponding simple graph.
+dup_cut_ri = cut_ri + cut_ci + [0, 2, 4]
+dup_cut_ci = cut_ci + cut_ri + [1, 2, 4]
+dup_cut_analysis = SparseAnalysis.new(
+  SparsePattern.new(5, 5, dup_cut_ri, dup_cut_ci))
+check_named("biconn.duplicate_opposite_self_canonical",
+            dup_cut_analysis.biconn_ordering == cut_order)
+
+# A disconnected block forest includes every component and leaves isolates as
+# a deterministic zero-fill prefix.
+forest_ri = [0, 1, 3, 4, 3]
+forest_ci = [1, 2, 4, 5, 5]
+forest_analysis = SparseAnalysis.new(
+  SparsePattern.new(7, 7, forest_ri, forest_ci))
+forest_order = forest_analysis.biconn_ordering
+check_named("biconn.disconnected_isolate_bijection",
+            forest_order.size == 7 && forest_order.sort.uniq.size == 7)
+check_named("biconn.disconnected_isolate_first", forest_order[0] == 6)
+check_named("biconn.disconnected_deterministic",
+            forest_analysis.biconn_ordering == forest_order)
+
+# The production route is bounded by an explicit raw-workspace estimate.
+# Raw m is deliberately representation-sensitive because the canonical CSR
+# allocates its key array before duplicate/opposite entries are collapsed.
+biconn_n = 262144
+check_named("biconn.policy_admits_synthetic_sparse_boundary",
+            SparseAnalysis.biconn_candidate_fits?(
+              biconn_n, 6 * biconn_n))
+max_biconn_isolates = (134217728 - 1048832) / 196
+check_named("biconn.policy_caps_isolate_heavy_n",
+            SparseAnalysis.biconn_candidate_fits?(max_biconn_isolates, 0) &&
+            !SparseAnalysis.biconn_candidate_fits?(
+              max_biconn_isolates + 1, 0))
+check_named("biconn.policy_caps_raw_m",
+            SparseAnalysis.biconn_candidate_fits?(biconn_n, 6 * biconn_n) &&
+            !SparseAnalysis.biconn_candidate_fits?(
+              biconn_n, 7 * biconn_n))
+
+# Portfolio gates are resource/structure predicates, not matrix identities.
+# Exercise both sides with generated dimensions that do not correspond to
+# challenge rows.
+policy_budget = 150000000
+check_named("portfolio_policy.rgsub_workspace_models",
+            SparseAnalysis.rgsub_coordinator_workspace_bytes(
+              12000, 72000) == 5848576 &&
+            SparseAnalysis.rgsub_worker_workspace_bytes(
+              6000, 10000) <= 134217728 &&
+            SparseAnalysis.rgsub_worker_workspace_bytes(
+              6000, 5000000) > 134217728 &&
+            SparseAnalysis.rgsub_queued_job_workspace_bytes(
+              6000, 5000000) == 40124096)
+check_named("portfolio_policy.rgsub_resource_and_budget",
+            SparseAnalysis.terminal_rgsub_portfolio_fits?(
+              12000, 72000, policy_budget) &&
+            !SparseAnalysis.terminal_rgsub_portfolio_fits?(
+              600000, 600000, policy_budget) &&
+            SparseAnalysis.terminal_rgsub_portfolio_fits?(
+              150001, 72000, policy_budget))
+check_named("portfolio_policy.biconn_workspace_and_budget",
+            SparseAnalysis.biconn_portfolio_fits?(
+              biconn_n, 6 * biconn_n, 200000000) &&
+            !SparseAnalysis.biconn_portfolio_fits?(
+              biconn_n, 6 * biconn_n, 100000000))
+
 # Passive boundary terminals change the correct local objective.  On this
 # five-vertex counterexample the S-only graph prefers identity (cost 9), while
 # keeping B={3,4} live makes [2,0,1] strictly better: prefix 41 -> 34 and full
@@ -687,13 +1008,40 @@ watch_ref2 = watch_analysis.minl_descent(
   watch_seed, watch_seed_flops, 1000000, 0, 1, watch_stats2)
 check_named("minl_watch.wake_chain_deterministic",
             watch_stats2 == watch_stats && watch_ref2 == watch_ref)
+# Sequential portfolio passes share one dense workspace split into mutable G+
+# and immutable reset halves. The ready pass must reproduce a fresh call
+# exactly, including watcher statistics.
+watch_words = 5 * ((5 + 31) >> 5)
+watch_workspace = u32[watch_words * 2]
+watch_ws_stats1 = []
+watch_ws_ref1 = watch_analysis.minl_descent_workspace(
+  watch_seed, watch_seed_flops, 1000000, 0, 1, watch_ws_stats1,
+  watch_workspace, 0)
+watch_ws_stats2 = []
+watch_ws_ref2 = watch_analysis.minl_descent_workspace(
+  watch_seed, watch_seed_flops, 1000000, 0, 1, watch_ws_stats2,
+  watch_workspace, 1)
+check_named("minl_workspace.fresh_equivalent",
+            watch_ws_ref1 == watch_ref && watch_ws_stats1 == watch_stats)
+check_named("minl_workspace.reset_equivalent",
+            watch_ws_ref2 == watch_ref && watch_ws_stats2 == watch_stats)
+minl_short_workspace_raised = false
+begin
+  watch_analysis.minl_descent_workspace(
+    watch_seed, watch_seed_flops, 1000000, 0, 1, nil,
+    u32[watch_words * 2 - 1], 0)
+rescue error
+  minl_short_workspace_raised = error.to_s.include?("undersized")
+end
+check_named("minl_workspace.rejects_undersized_buffer",
+            minl_short_workspace_raised)
 watch_deg_stats = []
 watch_deg_ref = watch_analysis.minl_descent(
   watch_seed, watch_seed_flops, 1000000, 0, 2, watch_deg_stats)
 check_named("minl_watch.degree_schedule_deterministic",
             watch_deg_stats == [2, 3, 1, 0] && watch_deg_ref == watch_ref)
 # Completion replay consumes six word-ops here. A budget of seven exhausts
-# during the first clique row; the incomplete predicate must not mutate gp.
+# during the first clique row; the incomplete predicate must not mutate G+.
 watch_budget_stats = []
 watch_budget_ref = watch_analysis.minl_descent(
   watch_seed, watch_seed_flops, 7, 0, 1, watch_budget_stats)

@@ -20,7 +20,7 @@
 #   articulation SIZE  chain of SIZE 8 x 8 grids sharing cut vertices
 #   twins SIZE      chain of SIZE eight-vertex cliques (supervariables)
 #   shell SIZE      32-vertex core with SIZE live-degree-three shell vertices
-#   random SIZE     deterministic sparse graph, about six edges/vertex
+#   random SIZE     seeded sparse graph, about six edges/vertex
 #
 # Modes:
 #   natural scan heap amd amd_alpha1 amd_alpha5 amd_alpha16 amd_nodense
@@ -168,10 +168,10 @@ use core/sparse
     i += 1
   [n, ri, ci]
 
--> random_pattern(n)
+-> random_pattern(n, graph_seed)
   ri = []
   ci = []
-  state = 104729
+  state = graph_seed
   i = 0
   while i < n
     d = 0
@@ -187,7 +187,7 @@ use core/sparse
     i += 1
   [n, ri, ci]
 
--> build_pattern(family, size)
+-> build_pattern(family, size, graph_seed)
   if family == "grid"
     grid_pattern(size)
   elsif family == "band"
@@ -205,7 +205,7 @@ use core/sparse
   elsif family == "shell"
     shell_pattern(size)
   elsif family == "random"
-    random_pattern(size)
+    random_pattern(size, graph_seed)
   else
     raise "family must be grid, band, arrow, blocks, bridge, articulation, twins, shell, or random"
 
@@ -342,8 +342,10 @@ size = ARGV[2] == nil ? 30 : ARGV[2].to_i
 reps = ARGV[3] == nil ? 1 : ARGV[3].to_i
 budget = ARGV[4] == nil ? 20000000 : ARGV[4].to_i
 stream = ARGV[5] == nil ? 0 : ARGV[5].to_i
+graph_seed = ARGV[6] == nil ? 104729 : ARGV[6].to_i
+raise "graph seed must be in 1..2147483646" if graph_seed <= 0 || graph_seed >= 2147483647
 
-data = build_pattern(family, size)
+data = build_pattern(family, size, graph_seed)
 n = data[0]
 pattern = SparsePattern.new(n, n, data[1], data[2])
 analysis = SparseAnalysis.new(pattern)
@@ -381,4 +383,5 @@ line += " amd_flops=" + amd_pred[1].to_s
 line += " flop_ratio=" + ratio.to_s
 line += " flop_ppm=" + ratio_ppm.to_s
 line += " checksum=" + checksum.to_s
+line += " graph_seed=" + graph_seed.to_s if family == "random"
 << line

@@ -19,6 +19,7 @@
 #     reuses the symbolic analysis), `release` explicitly.
 
 use core/mutex
+use core/sparse_core_lift
 
 + SparsePattern
   # Structure-only, square-or-rectangular, from parallel COO index lists.
@@ -579,7 +580,7 @@ use core/mutex
 
   # Same core over an arbitrary vertex count — nested dissection uses it
   # to order induced subgraphs and separators.
-  -> amd_core(nn, ri, ci, m, dense_alpha = 10, aggressive = 1, tie_mode = 0)
+  -> amd_core(nn, ri, ci, m, dense_alpha = 10, aggressive = 1, tie_mode = 0, max_iw_words = 0)
     n = nn
     none = 4294967295
     # --- symmetric, deduped, diagonal-free adjacency in one u32 pool ---
@@ -601,6 +602,13 @@ use core/mutex
       len[i] = 0
       i += 1
     iwlen = total * 2 + n + 64
+    # Optional bounded lane for speculative portfolio candidates.  Allocate
+    # the complete cap once so a grow cannot leave both old and new buffers
+    # live.  The ordinary public AMD path passes zero and retains its existing
+    # geometric growth behavior.
+    return [] if max_iw_words < 0
+    return [] if max_iw_words > 0 && iwlen > max_iw_words
+    iwlen = max_iw_words if max_iw_words > 0
     iw = u32[iwlen]
     k = 0
     while k < m
@@ -712,6 +720,7 @@ use core/mutex
       # --- assemble Lme: still-alive union of me's variables and of the
       # variables of me's elements; members leave the degree lists ---
       if pfree + n + 1 > iwlen
+        return [] if max_iw_words > 0
         nlen = iwlen * 2
         nlen = pfree + n + n + 64 if nlen < pfree + n + n + 64
         niw = u32[nlen]
@@ -3006,9 +3015,10 @@ use core/mutex
     target = n if target <= 0 || target > n
     partial = target < n
     words = (n + 31) >> 5
+    bitmap_words = n * words
     full = 4294967295
     none = 4294967295
-    adj0 = u32[n * words]
+    adj0 = u32[bitmap_words]
     k = 0
     while k < m
       r = ri[k]
@@ -3031,7 +3041,7 @@ use core/mutex
       e0 += d
       i += 1
     e0 = e0 >> 1
-    adj = u32[n * words]
+    adj = u32[bitmap_words]
     deg = u32[n]
     cnt = u32[n + 1]
     head = u32[n + 1]
@@ -3045,7 +3055,7 @@ use core/mutex
     bestb = u32[n]
     # checkpoint of the whole game state at the frozen-prefix position,
     # so several randomized suffixes share one prefix replay
-    kadj = u32[n * words]
+    kadj = u32[bitmap_words]
     kdeg = u32[n]
     kcnt = u32[n + 1]
     khead = u32[n + 1]
@@ -3097,11 +3107,9 @@ use core/mutex
         state = (state * 48271) % 2147483647
         prefix = 0
         prefix = (state % target) if iter % 18 >= 6
-        i = 0
-        while i < n * words
-          adj[i] = adj0[i]
-          i += 1
-        ops += n * words
+        ccall_nobox(
+          "__w_u32_copy_raw", adj, 0, adj0, 0, bitmap_words ## i64)
+        ops += bitmap_words
         i = 0
         while i < n + 1
           cnt[i] = 0
@@ -3192,11 +3200,9 @@ use core/mutex
           ecur += addsum >> 1
           kstep += 1
         # snapshot
-        i = 0
-        while i < n * words
-          kadj[i] = adj[i]
-          i += 1
-        ops += n * words
+        ccall_nobox(
+          "__w_u32_copy_raw", kadj, 0, adj, 0, bitmap_words ## i64)
+        ops += bitmap_words
         i = 0
         while i < n
           kdeg[i] = deg[i]
@@ -3217,11 +3223,9 @@ use core/mutex
         ckpt_e = ecur
       else
         # restore the shared checkpoint — no replay work
-        i = 0
-        while i < n * words
-          adj[i] = kadj[i]
-          i += 1
-        ops += n * words
+        ccall_nobox(
+          "__w_u32_copy_raw", adj, 0, kadj, 0, bitmap_words ## i64)
+        ops += bitmap_words
         i = 0
         while i < n
           deg[i] = kdeg[i]
@@ -3422,15 +3426,11 @@ use core/mutex
             while nw != 0
               u2 = (wi << 5) + ccall_nobox("__w_bit_cttz_u32", nw)
               u2b = u2 * words
-              wj = 0
-              while wj < words
-                if (nb[wj] & (adj[u2b + wj] ^ full) & (full ^ (1 << (u2 & 31)) * 0)) != 0
-                  aw2 = nb[wj] & (adj[u2b + wj] ^ full)
-                  aw2 = aw2 & (full ^ (1 << (u2 & 31))) if wj == (u2 >> 5)
-                  if aw2 != 0
-                    simp = 0 == 1
-                wj += 1
-                break if !simp
+              # nb is one complete u32 row, u2b addresses a complete adj row,
+              # and live u2 < n <= words*32, proving the trusted ABI contract.
+              simp = ccall_nobox(
+                "__w_u32_subset_except_trusted_raw", nb, 0, adj,
+                u2b ## i64, words ## i64, u2 ## i64) != 0
               ops += words
               break if !simp
               nw = nw & (nw - 1)
@@ -4131,195 +4131,403 @@ use core/mutex
       start += 1
     [comp_u, comp_v]
 
-  # One-dissection ordering over the block-cut forest.  Each biconnected
-  # block is ordered independently with quotient-graph AMD; the articulation
-  # that connects a child block to its parent is withheld from the child and
-  # emitted with the parent.  Deepest blocks therefore eliminate first and
-  # fill cannot cross an articulation.  This is an isolated portfolio
-  # candidate: exact downstream scoring decides whether it beats whole-graph
-  # AMD, and it is deliberately not part of best_ordering yet.
-  -> biconn_ordering
+  # Canonical simple undirected CSR for structural graph traversals. Packing
+  # each edge into one u64 makes the global sort deduplicate both repeated COO
+  # entries and opposite-triangle copies without allocating n nested Arrays.
+  # Inserting the sorted unique edges into both endpoints also leaves every
+  # CSR row in ascending vertex order, preserving deterministic DFS ties.
+  -> .symmetric_csr_of(n, m, ri, ci)
+    slots = 0
+    k = 0
+    while k < m
+      slots += 1 if ri[k] != ci[k]
+      k += 1
+    ptr = u32[n + 1]
+    return [ptr, u32[0]] if slots == 0
+    keys = u64[slots]
+    n64 = n ## u64
+    kp = 0
+    k = 0
+    while k < m
+      a = ri[k]
+      b = ci[k]
+      if a != b
+        if b < a
+          t = a
+          a = b
+          b = t
+        keys[kp] = (a ## u64) * n64 + (b ## u64)
+        kp += 1
+      k += 1
+    keys = keys.sort
+
+    unique = 0
+    k = 0
+    while k < slots
+      key = keys[k] ## u64
+      if k == 0 || key != (keys[k - 1] ## u64)
+        a = (key / n64) ## u32
+        b = (key % n64) ## u32
+        ptr[a + 1] += 1
+        ptr[b + 1] += 1
+        unique += 1
+      k += 1
+    i = 0
+    while i < n
+      ptr[i + 1] += ptr[i]
+      i += 1
+    idx = u32[unique * 2]
+    cursor = u32[n]
+    i = 0
+    while i < n
+      cursor[i] = ptr[i]
+      i += 1
+    k = 0
+    while k < slots
+      key = keys[k] ## u64
+      if k == 0 || key != (keys[k - 1] ## u64)
+        a = (key / n64) ## u32
+        b = (key % n64) ## u32
+        idx[cursor[a]] = b
+        cursor[a] += 1
+        idx[cursor[b]] = a
+        cursor[b] += 1
+      k += 1
+    [ptr, idx]
+
+  # Iterative Tarjan over flat CSR. This is a trusted internal helper: callers
+  # must provide ptr.size>=n+1, monotone row bounds ending at idx.size, and
+  # in-range symmetric vertex ids. `symmetric_csr_of` establishes that
+  # invariant; deliberately avoid another O(m) validation pass here. Edges
+  # are retained in their DFS orientation and pop order, matching
+  # biconnected_edge_components, but in two contiguous typed buffers:
+  # comp_ptr delimits packed u64 edge slices.
+  -> .biconnected_edge_components_csr(n, ptr, idx)
+    none = 4294967295
+    ne = idx.size / 2
+    disc = u32[n]
+    low = u32[n]
+    parent = u32[n]
+    dfs_v = u32[n]
+    dfs_next = u32[n]
+    edge_stack = u64[ne]
+    comp_edges = u64[ne]
+    comp_ptr = u32[ne + 1]
+    n64 = n ## u64
+    i = 0
+    while i < n
+      parent[i] = none
+      i += 1
+    time = 0
+    dfs_top = 0
+    edge_top = 0
+    edge_out = 0
+    nc = 0
+    start = 0
+    while start < n
+      if disc[start] == 0
+        time += 1
+        disc[start] = time
+        low[start] = time
+        dfs_v[0] = start
+        dfs_next[0] = ptr[start]
+        dfs_top = 1
+        while dfs_top > 0
+          top = dfs_top - 1
+          u = dfs_v[top]
+          slot = dfs_next[top]
+          if slot < ptr[u + 1]
+            v = idx[slot]
+            dfs_next[top] = slot + 1
+            if disc[v] == 0
+              edge_stack[edge_top] = (u ## u64) * n64 + (v ## u64)
+              edge_top += 1
+              parent[v] = u
+              time += 1
+              disc[v] = time
+              low[v] = time
+              dfs_v[dfs_top] = v
+              dfs_next[dfs_top] = ptr[v]
+              dfs_top += 1
+            elsif v != parent[u] && disc[v] < disc[u]
+              edge_stack[edge_top] = (u ## u64) * n64 + (v ## u64)
+              edge_top += 1
+              low[u] = disc[v] if disc[v] < low[u]
+          else
+            dfs_top -= 1
+            p = parent[u]
+            if p != none
+              low[p] = low[u] if low[u] < low[p]
+              if low[u] >= disc[p]
+                done = 0 == 1
+                while edge_top > 0 && !done
+                  edge_top -= 1
+                  edge = edge_stack[edge_top] ## u64
+                  comp_edges[edge_out] = edge
+                  edge_out += 1
+                  eu = (edge / n64) ## u32
+                  ev = (edge % n64) ## u32
+                  done = eu == p && ev == u
+                nc += 1
+                comp_ptr[nc] = edge_out
+        # A well-formed undirected DFS closes every root-child block above.
+        # Retain the historical defensive drain for unusual input.
+        if edge_top > 0
+          while edge_top > 0
+            edge_top -= 1
+            comp_edges[edge_out] = edge_stack[edge_top]
+            edge_out += 1
+          nc += 1
+          comp_ptr[nc] = edge_out
+      start += 1
+    [comp_ptr, comp_edges, nc]
+
+  # One-dissection ordering over the block-cut forest, using only flat typed
+  # storage. Returns [] for a single genuinely biconnected block so portfolio
+  # callers can skip the duplicate whole-graph AMD and exact-score pass.
+  -> biconn_split_ordering(amd_iw_cap = 0)
     n = @pattern.rows
     return [] if n == 0
-    ensure_symmetric_adjacency
-    adj = @symmetric_adj
-    edge_comps = SparseAnalysis.biconnected_edge_components(adj)
-    comps_u = edge_comps[0]
-    comps_v = edge_comps[1]
-    nc = comps_u.size
+    csr = SparseAnalysis.symmetric_csr_of(n, @pattern.nnz, @fri, @fci)
+    ptr = csr[0]
+    idx = csr[1]
+    packed = SparseAnalysis.biconnected_edge_components_csr(n, ptr, idx)
+    comp_ptr = packed[0]
+    comp_edges = packed[1]
+    nc = packed[2]
+    return [] if nc == 0
     none = 4294967295
+    n64 = n ## u64
 
-    # Vertex sets per block plus the inverse block membership relation.
-    comp_of = []
-    i = 0
-    while i < n
-      comp_of.push([])
-      i += 1
+    # Flat block -> vertex and vertex -> block incidence. The first pass
+    # computes exact capacities; the second preserves the old edge-pop first
+    # appearance order without one growable Array per block or per vertex.
+    member_count = u32[n]
     mark = u32[n]
-    i = 0
-    while i < n
-      mark[i] = none
-      i += 1
-    comp_verts = []
+    block_ptr = u32[nc + 1]
     c = 0
     while c < nc
-      verts = []
-      k = 0
-      while k < comps_u[c].size
-        u = comps_u[c][k]
-        v = comps_v[c][k]
-        if mark[u] != c
-          mark[u] = c
-          verts.push(u)
-          comp_of[u].push(c)
-        if mark[v] != c
-          mark[v] = c
-          verts.push(v)
-          comp_of[v].push(c)
+      token = c + 1
+      count = 0
+      k = comp_ptr[c]
+      while k < comp_ptr[c + 1]
+        edge = comp_edges[k] ## u64
+        u = (edge / n64) ## u32
+        v = (edge % n64) ## u32
+        if mark[u] != token
+          mark[u] = token
+          member_count[u] += 1
+          count += 1
+        if mark[v] != token
+          mark[v] = token
+          member_count[v] += 1
+          count += 1
         k += 1
-      comp_verts.push(verts)
+      block_ptr[c + 1] = block_ptr[c] + count
+      c += 1
+    return [] if nc == 1 && block_ptr[1] == n
+
+    total_members = block_ptr[nc]
+    block_vertices = u32[total_members]
+    i = 0
+    while i < n
+      mark[i] = 0
+      i += 1
+    c = 0
+    while c < nc
+      token = c + 1
+      out = block_ptr[c]
+      k = comp_ptr[c]
+      while k < comp_ptr[c + 1]
+        edge = comp_edges[k] ## u64
+        u = (edge / n64) ## u32
+        v = (edge % n64) ## u32
+        if mark[u] != token
+          mark[u] = token
+          block_vertices[out] = u
+          out += 1
+        if mark[v] != token
+          mark[v] = token
+          block_vertices[out] = v
+          out += 1
+        k += 1
       c += 1
 
-    # Preserve the anchor exactly for a genuinely biconnected graph.
-    return min_degree_ordering if nc == 1 && comp_verts[0].size == n
+    vertex_ptr = u32[n + 1]
+    i = 0
+    while i < n
+      vertex_ptr[i + 1] = vertex_ptr[i] + member_count[i]
+      member_count[i] = vertex_ptr[i]
+      i += 1
+    vertex_blocks = u32[total_members]
+    c = 0
+    while c < nc
+      p = block_ptr[c]
+      while p < block_ptr[c + 1]
+        v = block_vertices[p]
+        vertex_blocks[member_count[v]] = c
+        member_count[v] += 1
+        p += 1
+      c += 1
 
-    # Root every block-cut tree at its largest block.  Dense cores then stay
-    # late, while pendant blocks are emitted from the leaves inward.
+    # Root every block-cut tree at its largest block. Dense cores stay late,
+    # while pendant blocks are emitted from leaves inward. Typed queues and a
+    # packed u64 sort key avoid O(number-of-blocks) boxed objects here too.
     parent_ap = u32[nc]
     depth = u32[nc]
-    visited = u32[nc]
+    seen = u32[nc]
+    queue = u32[nc]
     c = 0
     while c < nc
       parent_ap[c] = none
+      depth[c] = none
       c += 1
     start = 0
     while start < nc
-      if visited[start] == 0
-        tree = []
-        queue = []
-        visited[start] = 1
-        queue.push(start)
+      if seen[start] == 0
         qh = 0
-        while qh < queue.size
+        qt = 1
+        queue[0] = start
+        seen[start] = 1
+        root = start
+        while qh < qt
           b = queue[qh]
           qh += 1
-          tree.push(b)
-          vi = 0
-          while vi < comp_verts[b].size
-            v = comp_verts[b][vi]
-            if comp_of[v].size > 1
-              bi = 0
-              while bi < comp_of[v].size
-                cb = comp_of[v][bi]
-                if visited[cb] == 0
-                  visited[cb] = 1
-                  queue.push(cb)
+          bsize = block_ptr[b + 1] - block_ptr[b]
+          rsize = block_ptr[root + 1] - block_ptr[root]
+          root = b if bsize > rsize || (bsize == rsize && b < root)
+          vi = block_ptr[b]
+          while vi < block_ptr[b + 1]
+            v = block_vertices[vi]
+            if vertex_ptr[v + 1] - vertex_ptr[v] > 1
+              bi = vertex_ptr[v]
+              while bi < vertex_ptr[v + 1]
+                cb = vertex_blocks[bi]
+                if seen[cb] == 0
+                  seen[cb] = 1
+                  queue[qt] = cb
+                  qt += 1
                 bi += 1
             vi += 1
 
-        root = tree[0]
-        ti = 1
-        while ti < tree.size
-          b = tree[ti]
-          if (comp_verts[b].size > comp_verts[root].size ||
-              (comp_verts[b].size == comp_verts[root].size && b < root))
-            root = b
-          ti += 1
-        ti = 0
-        while ti < tree.size
-          depth[tree[ti]] = none
-          ti += 1
+        qh = 0
+        qt = 1
+        queue[0] = root
         depth[root] = 0
         parent_ap[root] = none
-        queue = [root]
-        qh = 0
-        while qh < queue.size
+        while qh < qt
           b = queue[qh]
           qh += 1
-          vi = 0
-          while vi < comp_verts[b].size
-            v = comp_verts[b][vi]
-            if comp_of[v].size > 1
-              bi = 0
-              while bi < comp_of[v].size
-                cb = comp_of[v][bi]
+          vi = block_ptr[b]
+          while vi < block_ptr[b + 1]
+            v = block_vertices[vi]
+            if vertex_ptr[v + 1] - vertex_ptr[v] > 1
+              bi = vertex_ptr[v]
+              while bi < vertex_ptr[v + 1]
+                cb = vertex_blocks[bi]
                 if depth[cb] == none
                   depth[cb] = depth[b] + 1
                   parent_ap[cb] = v
-                  queue.push(cb)
+                  queue[qt] = cb
+                  qt += 1
                 bi += 1
             vi += 1
       start += 1
 
-    block_order = []
+    stride = (nc + 1) ## u64
+    block_order = u64[nc]
     c = 0
     while c < nc
-      block_order.push(c)
+      block_order[c] = ((nc - depth[c]) ## u64) * stride + (c ## u64)
       c += 1
-    block_order = block_order.sort_by -> (b)
-      (nc - depth[b]) * (nc + 1) + b
+    block_order = block_order.sort
 
-    order = []
+    order = u32[n]
+    op = 0
     # Isolates belong to no edge block and are fill-free.
     i = 0
     while i < n
-      order.push(i) if comp_of[i].size == 0
+      if vertex_ptr[i] == vertex_ptr[i + 1]
+        order[op] = i
+        op += 1
       i += 1
 
-    token = u32[n]
+    local_token = u32[n]
     local = u32[n]
     generation = 0
     oi = 0
-    while oi < block_order.size
-      b = block_order[oi]
+    while oi < nc
+      b = ((block_order[oi] ## u64) % stride) ## u32
       pa = parent_ap[b]
-      owned = []
-      vi = 0
-      while vi < comp_verts[b].size
-        v = comp_verts[b][vi]
-        owned.push(v) if v != pa
-        vi += 1
-      owned = owned.sort
-      if owned.size == 1
-        order.push(owned[0])
-      elsif owned.size > 1
+      owned_n = block_ptr[b + 1] - block_ptr[b]
+      owned_n -= 1 if pa != none
+      if owned_n == 1
+        vi = block_ptr[b]
+        vi += 1 while block_vertices[vi] == pa
+        order[op] = block_vertices[vi]
+        op += 1
+      elsif owned_n > 1
+        owned = u32[owned_n]
+        vi = block_ptr[b]
+        out = 0
+        while vi < block_ptr[b + 1]
+          v = block_vertices[vi]
+          if v != pa
+            owned[out] = v
+            out += 1
+          vi += 1
+        owned = owned.sort
         generation += 1
         vi = 0
-        while vi < owned.size
+        while vi < owned_n
           v = owned[vi]
-          token[v] = generation
+          local_token[v] = generation
           local[v] = vi
           vi += 1
-        lri = []
-        lci = []
-        k = 0
-        while k < comps_u[b].size
-          u = comps_u[b][k]
-          v = comps_v[b][k]
-          if token[u] == generation && token[v] == generation
-            lri.push(local[u])
-            lci.push(local[v])
+        lm = 0
+        k = comp_ptr[b]
+        while k < comp_ptr[b + 1]
+          edge = comp_edges[k] ## u64
+          u = (edge / n64) ## u32
+          v = (edge % n64) ## u32
+          lm += 1 if local_token[u] == generation && local_token[v] == generation
           k += 1
-        sub = amd_core(owned.size, lri, lci, lri.size)
+        lri = u32[lm]
+        lci = u32[lm]
+        lp = 0
+        k = comp_ptr[b]
+        while k < comp_ptr[b + 1]
+          edge = comp_edges[k] ## u64
+          u = (edge / n64) ## u32
+          v = (edge % n64) ## u32
+          if local_token[u] == generation && local_token[v] == generation
+            lri[lp] = local[u]
+            lci[lp] = local[v]
+            lp += 1
+          k += 1
+        local_iw_cap = 0
+        if amd_iw_cap > 0
+          local_initial = 4 * lm + owned_n + 64
+          local_iw_cap = 2 * local_initial
+          local_iw_cap = amd_iw_cap if local_iw_cap > amd_iw_cap
+          return [] if local_iw_cap < local_initial
+        sub = amd_core(owned_n, lri, lci, lm, 10, 1, 0, local_iw_cap)
+        return [] if sub.size != owned_n
         k = 0
-        while k < sub.size
-          order.push(owned[sub[k]])
+        while k < owned_n
+          order[op] = owned[sub[k]]
+          op += 1
           k += 1
       oi += 1
-
-    # Fail closed to a bijection even if a malformed pattern exposes an
-    # unexpected component edge case.  Normal Tarjan output never needs this.
-    if order.size < n
-      seen = u32[n]
-      i = 0
-      while i < order.size
-        seen[order[i]] = 1
-        i += 1
-      i = 0
-      while i < n
-        order.push(i) if seen[i] == 0
-        i += 1
+    return [] if op != n
     order
+
+  # Public candidate preserves the old full-order contract: a graph with one
+  # biconnected block falls back to the exact whole-graph AMD anchor.
+  -> biconn_ordering
+    split = biconn_split_ordering
+    return split if split.size == @pattern.rows
+    min_degree_ordering
 
   # MINL: completion-lattice minimalization. Build the incumbent's
   # filled graph G+, then greedily delete a FILL edge uv whenever
@@ -4339,24 +4547,43 @@ use core/mutex
   # Returns [order, flops].
   -> minl_descent(order_in, flops_in, budget, alt = 0, watcher = 0, watch_stats = nil)
     n = @pattern.rows
+    words = (n + 31) >> 5
+    workspace = u32[2 * n * words]
+    minl_descent_workspace(
+      order_in, flops_in, budget, alt, watcher, watch_stats, workspace, 0)
+
+  # Workspace form used by best_ordering's sequential MINL passes. The
+  # pattern bitmap is immutable after the first pass; reset the mutable
+  # completion from it so all passes share one caller-owned allocation. The
+  # first bitmap_words elements are mutable G+; the second bitmap_words are
+  # its immutable reset source. Keeping both halves in one checked buffer
+  # makes overlap impossible by construction and avoids view allocations.
+  -> minl_descent_workspace(order_in, flops_in, budget, alt, watcher, watch_stats, workspace, workspace_ready) (w64[] w64 w64 w64 w64 w64 u32[] w64) w64[]
+    n = @pattern.rows
     m = @pattern.nnz
     ri = @fri
     ci = @fci
     words = (n + 31) >> 5
     full = 4294967295
     # G+ = pattern + fill from replaying the incumbent on bitsets
-    gp = u32[n * words]
-    orig = u32[n * words]
-    k = 0
-    while k < m
-      r = ri[k]
-      c = ci[k]
-      if r != c
-        gp[r * words + (c >> 5)] = gp[r * words + (c >> 5)] | (1 << (c & 31))
-        gp[c * words + (r >> 5)] = gp[c * words + (r >> 5)] | (1 << (r & 31))
-        orig[r * words + (c >> 5)] = orig[r * words + (c >> 5)] | (1 << (c & 31))
-        orig[c * words + (r >> 5)] = orig[c * words + (r >> 5)] | (1 << (r & 31))
-      k += 1
+    bitmap_words = n * words
+    if workspace.size < bitmap_words * 2
+      raise "minl workspace: buffer is undersized"
+    if workspace_ready == 0
+      k = 0
+      while k < m
+        r = ri[k]
+        c = ci[k]
+        if r != c
+          workspace[r * words + (c >> 5)] = workspace[r * words + (c >> 5)] | (1 << (c & 31))
+          workspace[c * words + (r >> 5)] = workspace[c * words + (r >> 5)] | (1 << (r & 31))
+          workspace[bitmap_words + r * words + (c >> 5)] = workspace[bitmap_words + r * words + (c >> 5)] | (1 << (c & 31))
+          workspace[bitmap_words + c * words + (r >> 5)] = workspace[bitmap_words + c * words + (r >> 5)] | (1 << (r & 31))
+        k += 1
+    else
+      ccall_nobox(
+        "__w_u32_copy_raw", workspace, 0, workspace,
+        bitmap_words ## i64, bitmap_words ## i64)
     alive = u32[words]
     i = 0
     while i < words
@@ -4373,7 +4600,7 @@ use core/mutex
       vbase = v * words
       wi = 0
       while wi < words
-        nb[wi] = gp[vbase + wi] & alive[wi]
+        nb[wi] = workspace[vbase + wi] & alive[wi]
         wi += 1
       wi = 0
       while wi < words
@@ -4383,25 +4610,25 @@ use core/mutex
           ubase = u * words
           wj = 0
           while wj < words
-            gp[ubase + wj] = gp[ubase + wj] | nb[wj]
+            workspace[ubase + wj] = workspace[ubase + wj] | nb[wj]
             wj += 1
-          gp[ubase + (u >> 5)] = gp[ubase + (u >> 5)] & (full ^ (1 << (u & 31)))
+          workspace[ubase + (u >> 5)] = workspace[ubase + (u >> 5)] & (full ^ (1 << (u & 31)))
           ops += words
           nw = nw & (nw - 1)
         wi += 1
       kstep += 1
       return [order_in, flops_in] if ops > budget
     # symmetrize the completion (fill was added asymmetrically above:
-    # ensure gp is the union of both directions)
+    # ensure the mutable half is the union of both directions)
     i = 0
     while i < n
       vbase = i * words
       wi = 0
       while wi < words
-        nw = gp[vbase + wi]
+        nw = workspace[vbase + wi]
         while nw != 0
           u = (wi << 5) + ccall_nobox("__w_bit_cttz_u32", nw)
-          gp[u * words + (i >> 5)] = gp[u * words + (i >> 5)] | (1 << (i & 31))
+          workspace[u * words + (i >> 5)] = workspace[u * words + (i >> 5)] | (1 << (i & 31))
           nw = nw & (nw - 1)
         wi += 1
       i += 1
@@ -4421,7 +4648,7 @@ use core/mutex
           vbase = v * words
           wi = 0
           while wi < words
-            nw = gp[vbase + wi] & (orig[vbase + wi] ^ full)
+            nw = workspace[vbase + wi] & (workspace[bitmap_words + vbase + wi] ^ full)
             while nw != 0
               u = (wi << 5) + ccall_nobox("__w_bit_cttz_u32", nw)
               if u > v
@@ -4429,7 +4656,7 @@ use core/mutex
                 ubase = u * words
                 wj = 0
                 while wj < words
-                  inter[wj] = gp[vbase + wj] & gp[ubase + wj]
+                  inter[wj] = workspace[vbase + wj] & workspace[ubase + wj]
                   wj += 1
                 ops += words
                 isclq = 0 == 0
@@ -4441,7 +4668,7 @@ use core/mutex
                     xb = x * words
                     wk = 0
                     while wk < words
-                      aw = inter[wk] & (gp[xb + wk] ^ full)
+                      aw = inter[wk] & (workspace[xb + wk] ^ full)
                       aw = aw & (full ^ (1 << (x & 31))) if wk == (x >> 5)
                       if aw != 0
                         isclq = 0 == 1
@@ -4451,8 +4678,8 @@ use core/mutex
                     iw2 = iw2 & (iw2 - 1)
                   wj += 1
                 if isclq
-                  gp[vbase + (u >> 5)] = gp[vbase + (u >> 5)] & (full ^ (1 << (u & 31)))
-                  gp[ubase + (v >> 5)] = gp[ubase + (v >> 5)] & (full ^ (1 << (v & 31)))
+                  workspace[vbase + (u >> 5)] = workspace[vbase + (u >> 5)] & (full ^ (1 << (u & 31)))
+                  workspace[ubase + (v >> 5)] = workspace[ubase + (v >> 5)] & (full ^ (1 << (v & 31)))
                   deleted += 1
                   changed = 0 == 0
               nw = nw & (nw - 1)
@@ -4470,7 +4697,8 @@ use core/mutex
         wi = 0
         while wi < words
           fill_count2 += ccall_nobox(
-            "__w_bit_ctpop_u32", gp[vbase + wi] & (orig[vbase + wi] ^ full))
+            "__w_bit_ctpop_u32", workspace[vbase + wi] &
+            (workspace[bitmap_words + vbase + wi] ^ full))
           wi += 1
         v += 1
       fill_count2 = fill_count2 >> 1
@@ -4500,7 +4728,7 @@ use core/mutex
         vbase = v * words
         wi = 0
         while wi < words
-          nw = gp[vbase + wi] & (orig[vbase + wi] ^ full)
+          nw = workspace[vbase + wi] & (workspace[bitmap_words + vbase + wi] ^ full)
           while nw != 0
             u = (wi << 5) + ccall_nobox("__w_bit_cttz_u32", nw)
             if u > v
@@ -4537,7 +4765,7 @@ use core/mutex
           vbase = v * words
           wi = 0
           while wi < words
-            degreew[v] += ccall_nobox("__w_bit_ctpop_u32", gp[vbase + wi])
+            degreew[v] += ccall_nobox("__w_bit_ctpop_u32", workspace[vbase + wi])
             wi += 1
           v += 1
         bucket_len = n * 2 + 2
@@ -4603,7 +4831,7 @@ use core/mutex
         ubase = u * words
         wj = 0
         while wj < words
-          inter[wj] = gp[vbase + wj] & gp[ubase + wj]
+          inter[wj] = workspace[vbase + wj] & workspace[ubase + wj]
           wj += 1
         ops += words
         watch_exhausted = 0 == 0 if ops > budget
@@ -4618,7 +4846,7 @@ use core/mutex
             xb = x * words
             wk = 0
             while wk < words
-              aw = inter[wk] & (gp[xb + wk] ^ full)
+              aw = inter[wk] & (workspace[xb + wk] ^ full)
               aw = aw & (full ^ (1 << (x & 31))) if wk == (x >> 5)
               if aw != 0 && isclq
                 isclq = 0 == 1
@@ -4630,12 +4858,12 @@ use core/mutex
             break if !isclq
             iw2 = iw2 & (iw2 - 1)
           wj += 1
-        # A partially evaluated predicate is never allowed to mutate gp.
+        # A partially evaluated predicate is never allowed to mutate G+.
         break if watch_exhausted
         if isclq
           # Mutate only after the complete predicate, and clear both directions.
-          gp[vbase + (u >> 5)] = gp[vbase + (u >> 5)] & (full ^ (1 << (u & 31)))
-          gp[ubase + (v >> 5)] = gp[ubase + (v >> 5)] & (full ^ (1 << (v & 31)))
+          workspace[vbase + (u >> 5)] = workspace[vbase + (u >> 5)] & (full ^ (1 << (u & 31)))
+          workspace[ubase + (v >> 5)] = workspace[ubase + (v >> 5)] & (full ^ (1 << (v & 31)))
           alivew[edge2] = 0
           deleted += 1
           # Deleting edge2 invalidates every witness that watches it.
@@ -4740,7 +4968,7 @@ use core/mutex
       vbase = bestv * words
       wi = 0
       while wi < words
-        nw = gp[vbase + wi]
+        nw = workspace[vbase + wi]
         while nw != 0
           u = (wi << 5) + ccall_nobox("__w_bit_cttz_u32", nw)
           if done3[u] == 0
@@ -4783,7 +5011,7 @@ use core/mutex
       vb4 = i * words
       wi = 0
       while wi < words
-        d4 += ccall_nobox("__w_bit_ctpop_u32", gp[vb4 + wi])
+        d4 += ccall_nobox("__w_bit_ctpop_u32", workspace[vb4 + wi])
         wi += 1
       gdeg[i] = d4
       i += 1
@@ -4823,7 +5051,7 @@ use core/mutex
       vbase = bestv * words
       wi = 0
       while wi < words
-        nw = gp[vbase + wi]
+        nw = workspace[vbase + wi]
         while nw != 0
           u = (wi << 5) + ccall_nobox("__w_bit_cttz_u32", nw)
           if done3[u] == 0
@@ -4862,7 +5090,7 @@ use core/mutex
         vb4 = i * words
         wi = 0
         while wi < words
-          nw4 = gp[vb4 + wi]
+          nw4 = workspace[vb4 + wi]
           while nw4 != 0
             u4 = (wi << 5) + ccall_nobox("__w_bit_cttz_u32", nw4)
             if u4 < i
@@ -5322,16 +5550,24 @@ use core/mutex
     worker_cap = 1 if worker_cap < 1
     max_local = 1
     max_movable = 1
+    max_local_edges = 1
     pi = 0
     while pi < pend.size
       jsz = pend[pi][5].size
       max_local = jsz if jsz > max_local
       jsz = pend[pi][2]
       max_movable = jsz if jsz > max_movable
+      jsz = pend[pi][3].size
+      max_local_edges = jsz if jsz > max_local_edges
       pi += 1
-    per_worker_bytes = 12 * max_local * ((max_local + 31) >> 5) + 96 * max_local
+    # Include the private SparsePattern/SparseAnalysis COO copies and linear
+    # state as well as the three dense game bitmaps. The edge term uses the
+    # largest immutable queued job, so aggregate live worker scratch remains
+    # within the cap even when every worker receives that shape.
+    per_worker_bytes = SparseAnalysis.rgsub_worker_workspace_bytes(
+      max_local, max_local_edges)
+    return [cur, cur_flops] if per_worker_bytes > 134217728
     memory_cap = 134217728 / per_worker_bytes
-    memory_cap = 1 if memory_cap < 1
     worker_cap = memory_cap if memory_cap < worker_cap
     workers = worker_cap if workers > worker_cap
     pi = 0
@@ -5590,6 +5826,10 @@ use core/mutex
       taken = u32[n]
       blocks = 0
       pend = []
+      pend_bytes = 0
+      queue_cap = 134217728 - SparseAnalysis.rgsub_coordinator_workspace_bytes(
+        n, m)
+      queue_cap = 0 if queue_cap < 0
       bcap = 64
       bcap = 16 if kind == 1
       bcap = 8 if round3 == 1
@@ -5679,8 +5919,10 @@ use core/mutex
             lid[bverts[k]] = 0
             k += 1
           next
-        bri = []
-        bci = []
+        # Count local edges before allocating their buffers. Boundary vertices
+        # may repeat the same passive-separator edges in several disjoint jobs,
+        # so neither one job nor the queued phase is bounded by global m.
+        local_edges = 0
         k = lo
         while k <= hi
           a = cur[k]
@@ -5689,8 +5931,7 @@ use core/mutex
           while e9 < e9e
             b = adjl[e9]
             if lid[b] != 0 && lid[a] < lid[b]
-              bri.push(lid[a] - 1)
-              bci.push(lid[b] - 1)
+              local_edges += 1
             e9 += 1
           k += 1
         k = 0
@@ -5701,19 +5942,16 @@ use core/mutex
           while e9 < e9e
             b = adjl[e9]
             if lid[b] != 0 && lid[a] < lid[b]
-              bri.push(lid[a] - 1)
-              bci.push(lid[b] - 1)
+              local_edges += 1
             e9 += 1
           k += 1
-        # Identity seeds have a known final size and fit in u32. Allocate once
-        # without boxed push growth; workers treat the buffer as read-only.
-        bseed = u32[bn + bverts.size]
-        k = 0
-        while k < bn + bverts.size
-          bseed[k] = k
-          k += 1
-        if bri.size == 0
-          # No original local structure can guide a proposal.
+        local_n = bn + bverts.size
+        worker_bytes = SparseAnalysis.rgsub_worker_workspace_bytes(
+          local_n, local_edges)
+        job_bytes = SparseAnalysis.rgsub_queued_job_workspace_bytes(
+          local_n, local_edges)
+        admissible = local_edges > 0 && worker_bytes <= 134217728 && job_bytes <= queue_cap
+        if !admissible
           k = lo
           while k <= hi
             lid[cur[k]] = 0
@@ -5723,6 +5961,53 @@ use core/mutex
             lid[bverts[k]] = 0
             k += 1
           next
+        # Flush before allocating when retaining this job would exceed the
+        # coordinator's remaining 128 MiB envelope. This keeps useful batches
+        # parallel while bounding duplicated passive-separator edge storage.
+        if pend.size > 0 && pend_bytes + job_bytes > queue_cap
+          fb = flush_blocks(pend, kind, ils_words, stream, cur, cur_flops)
+          cur = fb[0]
+          cur_flops = fb[1]
+          pend = []
+          pend_bytes = 0
+        # Exact-size typed buffers avoid the old boxed push growth and make
+        # the queue accounting match the live representation.
+        bri = u32[local_edges]
+        bci = u32[local_edges]
+        edge_pos = 0
+        k = lo
+        while k <= hi
+          a = cur[k]
+          e9 = xadj[a]
+          e9e = xadj[a + 1]
+          while e9 < e9e
+            b = adjl[e9]
+            if lid[b] != 0 && lid[a] < lid[b]
+              bri[edge_pos] = lid[a] - 1
+              bci[edge_pos] = lid[b] - 1
+              edge_pos += 1
+            e9 += 1
+          k += 1
+        k = 0
+        while k < bverts.size
+          a = bverts[k]
+          e9 = xadj[a]
+          e9e = xadj[a + 1]
+          while e9 < e9e
+            b = adjl[e9]
+            if lid[b] != 0 && lid[a] < lid[b]
+              bri[edge_pos] = lid[a] - 1
+              bci[edge_pos] = lid[b] - 1
+              edge_pos += 1
+            e9 += 1
+          k += 1
+        # Identity seeds have a known final size and fit in u32. Allocate once
+        # without boxed push growth; workers treat the buffer as read-only.
+        bseed = u32[local_n]
+        k = 0
+        while k < local_n
+          bseed[k] = k
+          k += 1
         # local exact seed cost via a fresh sub-analysis is implicit: give
         # the ILS a generous incumbent (it re-derives the running sum)
         # clear lid for reuse (the block's edge lists are extracted)
@@ -5734,12 +6019,13 @@ use core/mutex
         while k < bverts.size
           lid[bverts[k]] = 0
           k += 1
-        # Queue the block. The phase flush partitions all immutable jobs over
-        # its CPU/memory-capped native worker set and accepts results
+        # Queue the block. The phase flush partitions bounded immutable jobs
+        # over its CPU/memory-capped native worker set and accepts results
         # sequentially on the exact global rescore (blocks are disjoint
         # position ranges, so their local proposals do not depend on earlier
         # splices in the same phase).
         pend.push([lo, hi, bn, bri, bci, bseed])
+        pend_bytes += job_bytes
       if pend.size > 0
         fb = flush_blocks(pend, kind, ils_words, stream, cur, cur_flops)
         cur = fb[0]
@@ -6226,6 +6512,159 @@ use core/mutex
     words = (n + 31) >> 5
     n * words <= 16777216
 
+  # Worst-case bytes allocated by sparse_core_lift_reduce.  The live-edge hash
+  # has capacity next_pow2(2*(m+3n+16)); every pivot of degree at most three
+  # can append at most three fill edges.  The remaining terms cover the two
+  # directed-edge pools, vertex/heap/output arrays, and conservative headers.
+  # This is a resource model only: it contains no quality-derived shape band.
+  -> .sparse_core_lift_workspace_bytes(n, m)
+    return 0 - 1 if n <= 0 || m < 0
+    max_edges = m + 3 * n + 16
+    hash_cap = 16
+    while hash_cap < 2 * max_edges
+      hash_cap = hash_cap << 1
+    return 0 - 1 if hash_cap > 16777216
+    # 85*n includes the kernel-local core-id buffer; fixed slack covers all
+    # typed-array headers and the four-word live-neighbor scratch.
+    8 * hash_cap + 16 * max_edges + 85 * n + 8 * m + 4096
+
+  -> .sparse_core_lift_workspace_fits?(n, m)
+    bytes = SparseAnalysis.sparse_core_lift_workspace_bytes(n, m)
+    bytes >= 0 && bytes <= 134217728
+
+  # Capacity for the residual AMD's single preallocated quotient-graph pool.
+  # The reducer's arrays may remain live until the candidate is rescored, so
+  # count its full peak plus AMD's linear arrays.  Start with the exact initial
+  # AMD pool and permit at most its ordinary first doubling when it fits.
+  -> .sparse_core_lift_amd_iw_words(n, m, core_n, core_edges)
+    reduce_bytes = SparseAnalysis.sparse_core_lift_workspace_bytes(n, m)
+    return 0 - 1 if reduce_bytes < 0
+    return 0 - 1 if core_n <= 0 || core_n >= n
+    return 0 - 1 if core_edges < 0 || core_edges > m
+    base_bytes = reduce_bytes + 116 * core_n + 4096
+    initial_words = 4 * core_edges + core_n + 64
+    available_words = (134217728 - base_bytes) / 4
+    return 0 - 1 if available_words < initial_words
+    target_words = 2 * initial_words
+    return available_words if available_words < target_words
+    target_words
+
+  -> .sparse_core_lift_candidate_fits?(n, m, core_n, core_edges)
+    SparseAnalysis.sparse_core_lift_amd_iw_words(
+      n, m, core_n, core_edges) >= 0
+
+  # Fail-closed admission for the large sparse block-cut sibling. The estimate
+  # covers its simultaneously live flat CSR, Tarjan stacks/components, block
+  # incidence, traversal, ordering, and largest local-AMD buffers. The
+  # conservative base is 192*n + 32*m plus one MiB of headers/boxed records;
+  # the separately computed AMD pool fills the remaining 128 MiB envelope.
+  # `m` is intentionally the stored (pre-deduplication) count: duplicates,
+  # opposite entries, and self entries only make the estimate conservative.
+  # Local AMD gets a single bounded pool, so its
+  # otherwise growable quotient graph cannot exceed this admission model.
+  -> .biconn_amd_iw_words(n, m)
+    return 0 - 1 if n <= 1 || m < 0
+    base_bytes = 192 * n + 32 * m + 1048576
+    initial_words = 4 * m + n + 64
+    available_words = (134217728 - base_bytes) / 4
+    return 0 - 1 if available_words < initial_words
+    target_words = 2 * initial_words
+    return available_words if available_words < target_words
+    target_words
+
+  -> .biconn_candidate_fits?(n, m)
+    SparseAnalysis.biconn_amd_iw_words(n, m) >= 0
+
+  # Portfolio admission helpers are deliberately functions of algorithmic
+  # work/resource models only.  Keeping them explicit makes boundary tests
+  # independent of any benchmark corpus.
+  -> .rgsub_coordinator_workspace_bytes(n, m)
+    return 0 - 1 if n <= 0 || m < 0
+    # Include the boxed candidate array and sort_by's decorated copy at their
+    # simultaneous peak, not just the flat CSR and score vectors.
+    256 * n + 24 * m + 1048576
+
+  -> .rgsub_worker_workspace_bytes(n, m)
+    return 0 - 1 if n <= 0 || m < 0
+    12 * n * ((n + 31) >> 5) + 144 * n + 32 * m + 4096
+
+  -> .rgsub_queued_job_workspace_bytes(n, m)
+    return 0 - 1 if n <= 0 || m < 0
+    # Two exact-size u32 edge arrays, one u32 identity seed, the growable
+    # result order retained until every worker joins, and conservative
+    # typed-array/job/result headers. A polymorphic result can approach 2*n
+    # slots, hence the additional 16*n bytes beyond the typed seed.
+    8 * m + 20 * n + 4096
+
+  -> .terminal_rgsub_portfolio_fits?(n, m, budget)
+    return false if n <= 0 || m < 0 || budget <= 0
+    # Coordinator CSR, etree/postorder, candidate records, and score buffers.
+    # Worker-local dense bitmaps have their own aggregate cap in flush_blocks.
+    return false if SparseAnalysis.rgsub_coordinator_workspace_bytes(
+      n, m) > 134217728
+    8 * (n + m) <= budget / 16
+
+  -> .biconn_portfolio_fits?(n, m, budget)
+    return false if budget <= 0
+    return false if !SparseAnalysis.biconn_candidate_fits?(n, m)
+    8 * n + 4 * m <= budget / 16
+
+  # Exact sparse edge set for the large-matrix core lift.  Keys are
+  # `lo * n + hi + 2`; zero is an empty slot and one a tombstone.  The 128 MiB
+  # workspace check bounds n tightly enough that every key and hash operation
+  # stays in signed i64. Open addressing is bounded by the table size so every
+  # corruption/capacity failure closes the candidate lane without affecting
+  # the incumbent.
+  # Sparse degree-bounded exact elimination.  Unlike the dense n-by-n
+  # bitmap lane, memory is O(nnz+n): adjacency is an append-only linked pool
+  # and a live-edge hash set supplies exact fill membership.  Degree<=3 is a
+  # useful invariant here: each pivot inserts at most three clique edges and
+  # removes its degree edges, so the live edge count never increases.  The
+  # append/hash capacities include all three possible *new* keys per pivot,
+  # even though most are already present.
+  #
+  # Result layout:
+  #   [prefix_u32, prefix_n, core_vertices_u32, core_n,
+  #    core_ri_u32, core_ci_u32, core_edges, prefix_flops]
+  # `core_ri/core_ci` contain one COO entry per undirected residual edge.
+  -> .sparse_core_lift_reduce(n, ri, ci, m, max_row_degree = 3, max_core_n = nil, max_core_edges = nil)
+    return nil if !SparseAnalysis.sparse_core_lift_workspace_fits?(n, m)
+    return nil if ri.size < m || ci.size < m
+    return nil if max_row_degree < 0 || max_row_degree > 3
+    max_core_n = n if max_core_n == nil
+    max_core_edges = m if max_core_edges == nil
+    return nil if max_core_n <= 0 || max_core_n > n
+    return nil if max_core_edges < 0 || max_core_edges > m
+
+    max_edges_seen = m + 3 * n + 16
+    hash_cap = 16
+    while hash_cap < 2 * max_edges_seen
+      hash_cap = hash_cap << 1
+    return nil if hash_cap > 16777216
+    directed_cap = 2 * max_edges_seen
+    heap_cap = 4 * n + 16
+    edge_keys = i64[hash_cap]
+    to = u32[directed_cap]
+    next_edge = u32[directed_cap]
+    head = u32[n]
+    degree = u32[n]
+    alive = u8[n]
+    heap_d = i64[heap_cap]
+    heap_v = i64[heap_cap]
+    prefix = u32[n]
+    core_vertices = u32[n]
+    core_ri = u32[m]
+    core_ci = u32[m]
+    stats = i64[4]
+    ok = sparse_core_lift_kernel_unsafe(
+      n, ri, ci, m, max_row_degree, max_core_n, max_core_edges,
+      edge_keys, hash_cap - 1, to, next_edge, head, degree, alive,
+      directed_cap, heap_d, heap_v, heap_cap, prefix, core_vertices,
+      core_ri, core_ci, stats)
+    return nil if ok == 0
+    return [prefix, stats[0], core_vertices, stats[1],
+            core_ri, core_ci, stats[2], stats[3]]
+
   -> best_ordering(restarts = 8, ils_words = 0, stream = 0, warm = nil, diverse_pool = 0, alpha_diverse = 0, watcher_minl = 0)
     n = @pattern.rows
     return [] if n == 0
@@ -6667,7 +7106,11 @@ use core/mutex
       # until corpus benchmarks justify the second completion construction.
       watch_seed = best
       watch_seed_flops = best_flops
-      ref = minl_descent(best, best_flops, ils_words / 4)
+      minl_words = n * ((n + 31) >> 5)
+      minl_workspace = u32[minl_words * 2]
+      ref = minl_descent_workspace(
+        best, best_flops, ils_words / 4, 0, 0, nil,
+        minl_workspace, 0)
       if ref[1] < best_flops
         best = ref[0]
         pred = predictions_for_order(best)
@@ -6676,8 +7119,9 @@ use core/mutex
       # Match the watcher's admission cap before paying for a duplicate dense
       # completion build. Its internal fill cap remains the second guard.
       if watcher_minl != 0 && n <= 30000
-        ref = minl_descent(
-          watch_seed, watch_seed_flops, ils_words / 4, 0, 2)
+        ref = minl_descent_workspace(
+          watch_seed, watch_seed_flops, ils_words / 4, 0, 2, nil,
+          minl_workspace, 1)
         if ref[1] < watch_seed_flops
           watch_o = ref[0]
           watch_f = ref[1]
@@ -6689,7 +7133,9 @@ use core/mutex
         use_runner = ru[0] != best_flops
         use_runner = ru[1] != best if @pool_structural != 0
         if use_runner
-          ref = minl_descent(ru[1], ru[0], ils_words / 8)
+          ref = minl_descent_workspace(
+            ru[1], ru[0], ils_words / 8, 0, 0, nil,
+            minl_workspace, 1)
           if ref[1] < best_flops
             pred = predictions_for_order(ref[0])
             if pred[1] < best_flops
@@ -6699,7 +7145,9 @@ use core/mutex
       # #8 terminal repass with realizer rotation (upstream #48/#49: a
       # second completion pass with a different realizer wins on cells
       # the first pass left)
-      ref = minl_descent(best, best_flops, ils_words / 8, 1)
+      ref = minl_descent_workspace(
+        best, best_flops, ils_words / 8, 1, 0, nil,
+        minl_workspace, 1)
       if ref[1] < best_flops
         pred = predictions_for_order(ref[0])
         if pred[1] < best_flops
@@ -6747,6 +7195,89 @@ use core/mutex
         best = watch_o
         best_fill = pred[0]
         best_flops = pred[1]
+    # Additional sparse RGSUB rounds are terminal siblings. Running them in
+    # the middle of the portfolio can steer the later nonlinear MINL/Telos
+    # descents into a worse basin even when the local RGSUB splice is better.
+    # Starting from the completed historical incumbent and exact-rescoring
+    # every accepted round makes this lane globally monotone. Rebuild the
+    # etree/postorder after each strict win and stop at the first fixed point.
+    # Admit them only when the graph is sparse and one round's budget covers
+    # eight full vertex/entry passes.  Dyadic stream splitting flips a distinct
+    # high bit for each round; it is an a-priori partition of the 1024 streams,
+    # not a seed selected from observed basins.
+    if SparseAnalysis.terminal_rgsub_portfolio_fits?(n, m, ils_words)
+      rgsub_outer = 1
+      while rgsub_outer < 3
+        lane = (stream & 1023) ^ (1 << (10 - rgsub_outer))
+        rstream = (stream >> 10) * 1024 + lane
+        ref = rgsub_refine(
+          best, ils_words / 16, rstream, 1, nil, 1, 1)
+        improved = 0 == 1
+        if ref[1] < best_flops
+          pred = predictions_for_order(ref[0])
+          if pred[1] < best_flops
+            best = ref[0]
+            best_fill = pred[0]
+            best_flops = pred[1]
+            improved = 0 == 0
+        break if !improved
+        rgsub_outer += 1
+    # Above the dense bitmap's resource-derived ceiling, try the O(nnz+n)
+    # degree-3 reducer only when its exact worst-case workspace and a linear
+    # work estimate fit the caller's budget.  Residual AMD has a second live-
+    # workspace/work check below.  No matrix-size or benchmark-bucket band is
+    # involved, and any failure leaves the incumbent untouched.
+    core_lift_budget = ils_words / 16
+    if core_lift_budget > 0 && !core_lift_ok && (
+        SparseAnalysis.sparse_core_lift_workspace_fits?(n, m)) && (
+        8 * (n + m) <= core_lift_budget)
+      scl = SparseAnalysis.sparse_core_lift_reduce(n, ri, ci, m, 3)
+      if scl != nil && scl[1] > 0 && (
+          SparseAnalysis.sparse_core_lift_candidate_fits?(
+            n, m, scl[3], scl[6])) && (
+          8 * (n + m + scl[3] + scl[6]) <= core_lift_budget)
+        prefix = scl[0]
+        prefix_n = scl[1]
+        core_vertices = scl[2]
+        core_n = scl[3]
+        core_ri = scl[4]
+        core_ci = scl[5]
+        core_m = scl[6]
+        core_iw_cap = SparseAnalysis.sparse_core_lift_amd_iw_words(
+          n, m, core_n, core_m)
+        core_order = amd_core(
+          core_n, core_ri, core_ci, core_m, 10, 1, 0, core_iw_cap)
+        if core_order.size == core_n
+          candidate = []
+          i = 0
+          while i < prefix_n
+            candidate.push(prefix[i])
+            i += 1
+          i = 0
+          while i < core_n
+            candidate.push(core_vertices[core_order[i]])
+            i += 1
+          if candidate.size == n
+            pred = predictions_for_order(candidate)
+            if pred[1] < best_flops || (
+              pred[1] == best_flops && pred[0] < best_fill)
+              best = candidate
+              best_fill = pred[0]
+              best_flops = pred[1]
+    # Large sparse one-dissection arm. Run this split-only structural pass
+    # after the nonlinear portfolio: feeding a different seed into later
+    # descents changes both their basin and allocation volume. Exact scoring
+    # admits the result only as a final improvement, so no biconn workspace or
+    # losing candidate is retained by the downstream pool.
+    if SparseAnalysis.biconn_portfolio_fits?(n, m, ils_words)
+      biconn_iw_cap = SparseAnalysis.biconn_amd_iw_words(n, m)
+      cand = biconn_split_ordering(biconn_iw_cap)
+      if cand.size == n
+        pred = predictions_for_order(cand)
+        if pred[1] < best_flops || (pred[1] == best_flops && pred[0] < best_fill)
+          best = cand
+          best_fill = pred[0]
+          best_flops = pred[1]
     best
 
   # Populate the shared exact-score counts for an elimination ORDER.

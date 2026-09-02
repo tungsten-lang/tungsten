@@ -61,7 +61,6 @@ ATTN_SCALE = ~1.0 / Math.sqrt(~0.0 + HEAD_DIM)
 ROT_DIM = 64
 ROT_HALF = ROT_DIM / 2
 ROPE_BASE = ~10000000.0
-MAX_POS = 640
 MTP_DRAFT_PREFIX = 98304
 MTP_DRAFT_CONTROL_START = 248044
 MTP_DRAFT_CONTROL_COUNT = 26
@@ -121,6 +120,16 @@ if dflash2_block < 2 || dflash2_block > 8 then raise "dflash2 block width must b
 # the serial lm_head path.
 prefill_gemm = ARGV.size() > 6 && ARGV[6] == "gemm-prefill"
 if prefill_gemm then triplet_variant = "auto"
+# K/V cache capacity in positions. gemm-prefill exists to run long prompts, so
+# it gets 2048; every other mode keeps the 640 that the decode-path
+# pair/triplet/quad SDPA kernels are compiled for (their score arrays are
+# threadgroup-static at 640 and truncate silently past it).
+MAX_POS = prefill_gemm ? 2048 : 640
+# decode_multi.metal's block-verify SDPA holds its scores in a threadgroup
+# array of MULTI_MAX_DECODE_POS floats and clamps `usable` to it -- past that
+# the attention SILENTLY drops the oldest positions and every reported number
+# stays plausible. It is a hard ceiling on prompt + generate.
+SDPA_MULTI_MAX_POS = 2051
 if prefill_gemm && devchain then raise "gemm-prefill replaces the devchain triplet prefill; drop devchain"
 multi_verify = dflash2_enabled || prefill_gemm || (ARGV.size() > 7 && (ARGV[7] == "multi" || ARGV[7] == "row-scan-multi"))
 multi_variant = (multi_verify && ARGV.size() > 8) ? ARGV[8] : "auto"
@@ -168,6 +177,8 @@ if profile_prompt_tokens < 1 then raise "profile prompt length must be positive"
 # instead: a benchmark that lies quietly is worse than one that stops.
 if profile_prompt_tokens + n_generate > MAX_POS
   raise "prompt " + profile_prompt_tokens.to_s + " + generate " + n_generate.to_s + " exceeds MAX_POS " + MAX_POS.to_s + "; the K/V cache would wrap and the run would report plausible numbers for garbage output"
+if prefill_gemm && profile_prompt_tokens + n_generate > SDPA_MULTI_MAX_POS
+  raise "prompt " + profile_prompt_tokens.to_s + " + generate " + n_generate.to_s + " exceeds the block-verify SDPA ceiling " + SDPA_MULTI_MAX_POS.to_s + " (decode_multi.metal MULTI_MAX_DECODE_POS); attention would silently truncate"
 setup_t0 = ccall("__w_clock_ms")
 # Mutable profiling state (closure-local assignment would shadow scalars):
 # phase, decode target ms/count, prefill target ms/count, verify ms/count,
@@ -348,8 +359,26 @@ argmax_quad_pipe = metal_pipeline_with_int_constants(argmax_pair_lib, "argmax_ba
 argmax_triplet_pipe = metal_pipeline_with_int_constants(argmax_pair_lib, "argmax_batch_fc", [N_VOCAB, 3])
 
 # ---- runtime-width block verify (n <= MULTI_MAX rows in one causal pass) ----
-MULTI_MAX = prefill_gemm ? 64 : 8
+# The gemm-prefill chunk width IS the M of every prefill GEMM. The Neural
+# Accelerators need M >= 512 to reach their ~53 TFLOPS plateau (crossover vs
+# the simdgroup ladder is M ~= 48-64), so the chunk is 512 by default.
+# PREFILL_CHUNK overrides it, which is what keeps the pre-NA 64-row arm
+# runnable for A/Bs. It must be 64 or a multiple of the 128-row NA tile: the
+# cooperative-tensor store does not clip, so a chunk that is not tile-aligned
+# would let na_proj round a width up past the scratch buffers' row count.
+prefill_chunk_env = ccall("__w_env", "PREFILL_CHUNK")
+PREFILL_CHUNK = prefill_chunk_env == nil ? 512 : prefill_chunk_env.to_i()
+if PREFILL_CHUNK != 64 && (PREFILL_CHUNK < 128 || PREFILL_CHUNK % 128 != 0)
+  raise "PREFILL_CHUNK must be 64 or a multiple of 128, got " + PREFILL_CHUNK.to_s
+MULTI_MAX = prefill_gemm ? PREFILL_CHUNK : 8
 MULTI_WIDE_MAX = 8
+# Only the VERIFY reads whole logit rows, and it is never wider than the
+# speculative block. Sizing the logits scratch by MULTI_MAX would cost 508 MB
+# at chunk 512 for eight rows of use.
+LOGITS_MULTI_MAX = 8
+# The simdgroup-matrix GEMM ladder tops out at 64 rows (nvfp4_gemm_f32's
+# widest tile is MT=8 x 8 rows). Wider chunks go to the Neural Accelerators.
+MULTI_LADDER_MAX = 64
 multi_pipes = {}
 multi_rows = {}
 if multi_verify
@@ -762,6 +791,12 @@ if multi_verify
   xn_h16 = metal_buffer(device, MULTI_MAX * HIDDEN * 2)
   h_h16 = metal_buffer(device, MULTI_MAX * FFN * 2)
   down_na_tmp = metal_buffer(device, MULTI_MAX * HIDDEN * 4)
+  # Staging for projections routed to the Neural Accelerators outside the FFN:
+  # f16 activations (widest kdim is FFN) and, because the NA kernel has no
+  # accumulate-into-C mode, a destination for the residual projections (whose
+  # ndim is always HIDDEN) that a residual_add then folds into x_multi.
+  na_in_h16 = metal_buffer(device, MULTI_MAX * FFN * 2)
+  na_out_tmp = metal_buffer(device, MULTI_MAX * HIDDEN * 4)
   hidden_multi_tmp = metal_buffer(device, MULTI_MAX * FFN * 4)
   z_multi_tmp = metal_buffer(device, MULTI_MAX * V_DIM * 4)
   a_multi_tmp = metal_buffer(device, MULTI_MAX * HV * 4)
@@ -777,7 +812,7 @@ if multi_verify
   attn_multi_tmp = metal_buffer(device, MULTI_MAX * ATTN_DIM * 4)
   cos_multi_tmp = metal_buffer(device, MULTI_MAX * ROT_HALF * 4)
   sin_multi_tmp = metal_buffer(device, MULTI_MAX * ROT_HALF * 4)
-  logits_multi = metal_buffer(device, MULTI_MAX * N_VOCAB * 4)
+  logits_multi = metal_buffer(device, LOGITS_MULTI_MAX * N_VOCAB * 4)
   argmax_multi_out = metal_buffer(device, MULTI_MAX * 4)
   token_multi_buf = metal_buffer(device, MULTI_MAX * 4)
   # DFlash2 conditioning taps [MAX_POS, 5, HIDDEN] (65 MB), filled by the
@@ -1897,6 +1932,28 @@ rope_power = ~2.0 / ROT_DIM
   if multi_pipes[key] == nil then return auto_key
   key
 
+# One projection on the Neural Accelerators for a width the simdgroup ladder
+# cannot serve. Stages the f32 activations to f16 (matmul2d takes fp16
+# operands), then runs the NA GEMM. `residual` folds the result into `output`
+# with a separate add, since the kernel has no accumulate-into-C mode.
+#
+# The scratch is shared across projections, so each write is fenced on BOTH
+# sides: the leading barrier is the WAR against the previous projection's
+# still-reading GEMM, the trailing one the RAW for this one.
+-> na_scaled_multi(w, input, output, kdim, ndim, n, residual)
+  dep_barrier_on([na_in_h16])
+  metal_dispatch_n(queue, f32_to_f16_pipe, [input, na_in_h16, n * kdim], n * kdim)
+  dep_barrier_on([na_in_h16])
+  if !residual
+    na_proj(w, na_in_h16, output, kdim, ndim, n)
+    return
+  if ndim > HIDDEN
+    raise "na residual projection ndim " + ndim.to_s + " exceeds na_out_tmp width " + HIDDEN.to_s
+  dep_barrier_on([na_out_tmp])
+  na_proj(w, na_in_h16, na_out_tmp, kdim, ndim, n)
+  dep_barrier_on([na_out_tmp])
+  metal_dispatch_n(queue, add_pipe, [output, na_out_tmp, n * ndim], n * ndim)
+
 -> enqueue_scaled_multi(spec)
   w = spec[0]
   input = spec[1]
@@ -1904,6 +1961,9 @@ rope_power = ~2.0 / ROT_DIM
   kdim = spec[3]
   rows = spec[4]
   n = spec[5]
+  if n > MULTI_LADDER_MAX
+    na_scaled_multi(w, input, output, kdim, rows, n, false)
+    return
   key = multi_pipe_key(n, kdim, false)
   if multi_rows[key] == 0
     # simdgroup-matrix GEMM rung: 32 output rows per 128-thread group.
@@ -1921,6 +1981,9 @@ rope_power = ~2.0 / ROT_DIM
   kdim = spec[3]
   rows = spec[4]
   n = spec[5]
+  if n > MULTI_LADDER_MAX
+    na_scaled_multi(w, input, residual, kdim, rows, n, true)
+    return
   key = multi_pipe_key(n, kdim, true)
   if multi_rows[key] == 0
     metal_dispatch_groups(queue, multi_pipes[key],
@@ -2090,6 +2153,8 @@ rope_power = ~2.0 / ROT_DIM
   # the prompt's end). Default: every row's argmax (verify).
   logits_mode = spec.size() > 4 ? spec[4] : "all"
   if n < 1 || n > MULTI_MAX then raise "forward_multi width " + n.to_s + " out of range"
+  if logits_mode == "all" && n > LOGITS_MULTI_MAX
+    raise "forward_multi asked for " + n.to_s + " rows of logits but the scratch holds " + LOGITS_MULTI_MAX.to_s
   if tokens != nil
     i = 0
     while i < n
@@ -2561,6 +2626,8 @@ if prompt_ids_file != ""
   prompt = JSON.parse(read_file(prompt_ids_file))
   if prompt.size() + n_generate > MAX_POS
     raise "prompt file " + prompt.size().to_s + " + generate " + n_generate.to_s + " exceeds MAX_POS " + MAX_POS.to_s
+  if prefill_gemm && prompt.size() + n_generate > SDPA_MULTI_MAX_POS
+    raise "prompt file " + prompt.size().to_s + " + generate " + n_generate.to_s + " exceeds the block-verify SDPA ceiling " + SDPA_MULTI_MAX_POS.to_s + "; attention would silently truncate"
 setup_elapsed = ccall("__w_clock_ms") - setup_t0
 << "prefill " + prompt.size().to_s + " tokens"
 prefill_t0 = ccall("__w_clock_ms")
@@ -2981,7 +3048,7 @@ if row_scan
   while r < scan_reps
     if multi_verify
       mw = 1
-      while mw <= MULTI_MAX
+      while mw <= MULTI_WIDE_MAX
         mtoks = []
         j = 0
         while j < mw
@@ -3060,7 +3127,7 @@ if row_scan
   if multi_verify
     prev = ~0.0
     mw = 1
-    while mw <= MULTI_MAX
+    while mw <= MULTI_WIDE_MAX
       mm = scan_multi[mw].sort()[scan_reps / 2]
       << "rowscan multi " + mw.to_s + "row median " + mm.to_s + " ms  (marginal " + (mm - prev).to_s + ", variant " + multi_variant + ")"
       prev = mm

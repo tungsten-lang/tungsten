@@ -2554,7 +2554,7 @@ WValue bigint_addsub_word(
 
 static WValue bigint_from_i64(int64_t v) {
     if (v == 0) return w_box_int(0);
-    WBigint *b = bigint_alloc(1);
+    WBigint *b = bigint_alloc_raw_hot(1);
     /* Magnitude via two's-complement negation of the bit pattern, not `-v`:
      * `-v` is undefined for INT64_MIN (signed overflow). `(~u)+1` yields the
      * correct unsigned magnitude for every negative value, INT64_MIN (2^63)
@@ -4726,6 +4726,314 @@ static inline uint64_t bn_addmul_1_f21(uint64_t *rp, const uint64_t *up, uint64_
 #endif
 #endif
 
+/* ---- addmul_2: rp[0..n) += up[0..n)·(v0 + v1·B); writes rp[n], returns
+ * the column-(n+1) limb.  Two schoolbook rows per pass.  A one-row kernel
+ * loads and stores the whole accumulator once per source limb; consuming
+ * the source limbs in pairs (GMP's arm64 mul_basecase shape) halves that
+ * traffic — a 16x16 product moves its accumulator 8 times, not 16 — and
+ * runs four short independent flag chains per 4-limb block (row-0
+ * products, row-1 products, accumulate, fold) instead of addmul_1's two,
+ * so the chain latency that bounds addmul_1 at ~1.6 c/l is amortized
+ * over two products per limb.  The rolling window is three limbs: (c0, c1)
+ * carry the pending column values into the next limb; every intermediate
+ * sum is exact because the window plus rp[i] plus u·(v0 + v1·B) is below
+ * B^3 (B^6 per block), so the top column never overflows.  `seed` enters
+ * the window at column 0 (the square's corner term).
+ *
+ * Contract: reads rp[0..n), writes rp[0..n] (rp[n] is WRITTEN, not
+ * accumulated), returns the limb for rp[n+1].  rp and up must not overlap.
+ * The portable body is the reference oracle and the non-arm64 path. */
+#ifndef BN_ADDMUL_2
+#define BN_ADDMUL_2 1
+#endif
+#ifndef BN_ADDMUL_2_ASM
+#define BN_ADDMUL_2_ASM 1
+#endif
+/* Per-use A/B knobs (the fixed schoolbook leaves and the square's
+ * cross-product rows); each follows BN_ADDMUL_2 unless set explicitly. */
+#ifndef BN_MUL_EQ12_ADDMUL2
+#define BN_MUL_EQ12_ADDMUL2 BN_ADDMUL_2
+#endif
+#ifndef BN_MUL_EQ16_ADDMUL2
+#define BN_MUL_EQ16_ADDMUL2 BN_ADDMUL_2
+#endif
+#ifndef BN_MUL_EQ24_ADDMUL2
+#define BN_MUL_EQ24_ADDMUL2 BN_ADDMUL_2
+#endif
+#ifndef BN_SQR_SCHOOL_ADDMUL2
+#define BN_SQR_SCHOOL_ADDMUL2 BN_ADDMUL_2
+#endif
+#if BN_ADDMUL_2
+static inline __attribute__((always_inline)) uint64_t
+bn_addmul_2_body(uint64_t *rp, const uint64_t *up, int32_t n,
+                 uint64_t v0, uint64_t v1, uint64_t c0, int accumulate) {
+    uint64_t c1 = 0;
+    for (int32_t i = 0; i < n; i++) {
+        uint64_t u = up[i];
+        __uint128_t p0 = (__uint128_t)u * v0;
+        __uint128_t p1 = (__uint128_t)u * v1;
+        __uint128_t s = (__uint128_t)c0 + (uint64_t)p0;
+        if (accumulate) s += rp[i];
+        rp[i] = (uint64_t)s;
+        /* Column i+1: c1 + hi(p0) + lo(p1) + carry, at most 3B - 1. */
+        __uint128_t t = (__uint128_t)c1 + (uint64_t)(p0 >> 64) +
+                        (uint64_t)p1 + (uint64_t)(s >> 64);
+        c0 = (uint64_t)t;
+        c1 = (uint64_t)(p1 >> 64) + (uint64_t)(t >> 64);
+    }
+    rp[n] = c0;
+    return c1;
+}
+static inline uint64_t bn_addmul_2_ref(uint64_t *rp, const uint64_t *up,
+                                       int32_t n, uint64_t v0, uint64_t v1,
+                                       uint64_t seed) {
+    return bn_addmul_2_body(rp, up, n, v0, v1, seed, 1);
+}
+static inline uint64_t bn_mul_2_ref(uint64_t *rp, const uint64_t *up,
+                                    int32_t n, uint64_t v0, uint64_t v1) {
+    return bn_addmul_2_body(rp, up, n, v0, v1, 0, 0);
+}
+#if defined(__aarch64__) && BN_ADDMUL_2_ASM
+/* Block schedule (4 source limbs, 8 products).  v0 in x2, v1 in x3, the
+ * window enters as x16 = c0, x17 = c1 and leaves the same way; x7 is never
+ * touched so the generic kernel can keep its block counter there.
+ *   PROD: chain A  t_k = lo0_k + hi0_{k-1} (+c0)      -> x8..x11, a4 in x15
+ *         chain B  s_k = lo1_{k-1} + hi1_{k-2} (+c1)  -> x12,x14,x5,x6, b5 in x13
+ *   ACC:  chain C  t_k += rp[k]                       (carry folds into a4)
+ *   FOLD: chain D  t_{k+1} += s_{k+1}; c0' = s4 + a4 + C; c1' = b5 + C
+ * Loads and stores are macro arguments so the fixed kernels use immediate
+ * offsets and the generic loop uses post-increment addressing. */
+#define BN_AM2_PROD(ld01, ld23)                                           \
+    ld01 "\n\t"                                                           \
+    "mul x8, x4, x2\n\t"                                                  \
+    "umulh x12, x4, x2\n\t"                                               \
+    "mul x9, x5, x2\n\t"                                                  \
+    "umulh x13, x5, x2\n\t"                                               \
+    "adds x8, x8, x16\n\t"                                                \
+    ld23 "\n\t"                                                           \
+    "mul x10, x6, x2\n\t"                                                 \
+    "umulh x14, x6, x2\n\t"                                               \
+    "adcs x9, x9, x12\n\t"                                                \
+    "mul x11, x16, x2\n\t"                                                \
+    "umulh x15, x16, x2\n\t"                                              \
+    "adcs x10, x10, x13\n\t"                                              \
+    "adcs x11, x11, x14\n\t"                                              \
+    "adc x15, x15, xzr\n\t"                                               \
+    "mul x12, x4, x3\n\t"                                                 \
+    "umulh x13, x4, x3\n\t"                                               \
+    "mul x14, x5, x3\n\t"                                                 \
+    "umulh x4, x5, x3\n\t"                                                \
+    "adds x12, x12, x17\n\t"                                              \
+    "mul x5, x6, x3\n\t"                                                  \
+    "umulh x17, x6, x3\n\t"                                               \
+    "adcs x14, x14, x13\n\t"                                              \
+    "mul x6, x16, x3\n\t"                                                 \
+    "umulh x13, x16, x3\n\t"                                              \
+    "adcs x5, x5, x4\n\t"                                                 \
+    "adcs x6, x6, x17\n\t"                                                \
+    "adc x13, x13, xzr\n\t"
+
+#define BN_AM2_ACC(ld01, ld23)                                            \
+    ld01 "\n\t"                                                           \
+    "adds x8, x8, x4\n\t"                                                 \
+    "adcs x9, x9, x16\n\t"                                                \
+    ld23 "\n\t"                                                           \
+    "adcs x10, x10, x4\n\t"                                               \
+    "adcs x11, x11, x16\n\t"                                              \
+    "adc x15, x15, xzr\n\t"
+
+#define BN_AM2_FOLD(st01, st23)                                           \
+    "adds x9, x9, x12\n\t"                                                \
+    "adcs x10, x10, x14\n\t"                                              \
+    "adcs x11, x11, x5\n\t"                                               \
+    "adcs x16, x6, x15\n\t"                                               \
+    "adc x17, x13, xzr\n\t"                                               \
+    st01 "\n\t"                                                           \
+    st23 "\n\t"
+
+/* One source limb (the generic kernel's 1..3-limb prefix). */
+#define BN_AM2_STEP1                                                      \
+    "ldr x4, [x1], #8\n\t"                                                \
+    "mul x8, x4, x2\n\t"                                                  \
+    "umulh x9, x4, x2\n\t"                                                \
+    "mul x10, x4, x3\n\t"                                                 \
+    "umulh x11, x4, x3\n\t"                                               \
+    "ldr x5, [x0]\n\t"                                                    \
+    "adds x8, x8, x16\n\t"                                                \
+    "adcs x9, x9, x17\n\t"                                                \
+    "adc x11, x11, xzr\n\t"                                               \
+    "adds x8, x8, x5\n\t"                                                 \
+    "adcs x16, x9, x10\n\t"                                               \
+    "adc x17, x11, xzr\n\t"                                               \
+    "str x8, [x0], #8\n\t"
+
+#define BN_AM2F_BLOCK(o)                                                  \
+    BN_AM2_PROD("ldp x4, x5, [x1, #" #o "]",                              \
+                "ldp x6, x16, [x1, #" #o "+16]")                          \
+    BN_AM2_ACC("ldp x4, x16, [x0, #" #o "]",                              \
+               "ldp x4, x16, [x0, #" #o "+16]")                           \
+    BN_AM2_FOLD("stp x8, x9, [x0, #" #o "]",                              \
+                "stp x10, x11, [x0, #" #o "+16]")
+#define BN_M2F_BLOCK(o)                                                   \
+    BN_AM2_PROD("ldp x4, x5, [x1, #" #o "]",                              \
+                "ldp x6, x16, [x1, #" #o "+16]")                          \
+    BN_AM2_FOLD("stp x8, x9, [x0, #" #o "]",                              \
+                "stp x10, x11, [x0, #" #o "+16]")
+#define BN_AM2F_HEAD "mov x16, xzr\n\tmov x17, xzr\n\t"
+#define BN_AM2F_TAIL(nbytes)                                              \
+    "str x16, [x0, #" #nbytes "]\n\t"                                     \
+    "mov x0, x17\n\t"                                                     \
+    "ret\n\t"
+
+/* Generic length with a seeded window: rp[0..n) += up[0..n)·(v0 + v1·B)
+ * + seed.  1..3-limb prefixes run the scalar step, then 4-limb blocks. */
+__attribute__((naked, noinline, aligned(64), BN_HOT_SECTION))
+static uint64_t bn_addmul_2s(uint64_t *rp, const uint64_t *up, int32_t n,
+                             uint64_t v0, uint64_t v1, uint64_t seed) {
+    __asm__(
+        "mov w7, w2\n\t"
+        "mov x2, x3\n\t"
+        "mov x3, x4\n\t"
+        "mov x16, x5\n\t"
+        "mov x17, xzr\n\t"
+        "tbz w7, #0, 1f\n\t"
+        BN_AM2_STEP1
+        "1:\n\t"
+        "tbz w7, #1, 2f\n\t"
+        BN_AM2_STEP1
+        BN_AM2_STEP1
+        "2:\n\t"
+        "lsr x7, x7, #2\n\t"
+        "cbz x7, 4f\n\t"
+        "3:\n\t"
+        BN_AM2_PROD("ldp x4, x5, [x1], #32", "ldp x6, x16, [x1, #-16]")
+        BN_AM2_ACC("ldp x4, x16, [x0]", "ldp x4, x16, [x0, #16]")
+        BN_AM2_FOLD("stp x8, x9, [x0], #32", "stp x10, x11, [x0, #-16]")
+        "sub x7, x7, #1\n\t"
+        "cbnz x7, 3b\n\t"
+        "4:\n\t"
+        "str x16, [x0]\n\t"
+        "mov x0, x17\n\t"
+        "ret\n\t"
+    );
+}
+
+/* Straight-line fixed rows for the 12/16/24-limb schoolbook leaves; the
+ * mul_2 twins write the first row pair without pre-zeroing. */
+#if BN_MUL_EQ12_ADDMUL2
+__attribute__((naked, noinline, aligned(64), BN_HOT_SECTION))
+static uint64_t bn_addmul_2_f12(uint64_t *rp, const uint64_t *up,
+                                uint64_t v0, uint64_t v1) {
+    __asm__(
+        BN_AM2F_HEAD
+        BN_AM2F_BLOCK(0)
+        BN_AM2F_BLOCK(32)
+        BN_AM2F_BLOCK(64)
+        BN_AM2F_TAIL(96)
+    );
+}
+__attribute__((naked, noinline, aligned(64), BN_HOT_SECTION))
+static uint64_t bn_mul_2_f12(uint64_t *rp, const uint64_t *up,
+                             uint64_t v0, uint64_t v1) {
+    __asm__(
+        BN_AM2F_HEAD
+        BN_M2F_BLOCK(0)
+        BN_M2F_BLOCK(32)
+        BN_M2F_BLOCK(64)
+        BN_AM2F_TAIL(96)
+    );
+}
+#endif
+#if BN_MUL_EQ16_ADDMUL2
+__attribute__((naked, noinline, aligned(64), BN_HOT_SECTION))
+static uint64_t bn_addmul_2_f16(uint64_t *rp, const uint64_t *up,
+                                uint64_t v0, uint64_t v1) {
+    __asm__(
+        BN_AM2F_HEAD
+        BN_AM2F_BLOCK(0)
+        BN_AM2F_BLOCK(32)
+        BN_AM2F_BLOCK(64)
+        BN_AM2F_BLOCK(96)
+        BN_AM2F_TAIL(128)
+    );
+}
+__attribute__((naked, noinline, aligned(64), BN_HOT_SECTION))
+static uint64_t bn_mul_2_f16(uint64_t *rp, const uint64_t *up,
+                             uint64_t v0, uint64_t v1) {
+    __asm__(
+        BN_AM2F_HEAD
+        BN_M2F_BLOCK(0)
+        BN_M2F_BLOCK(32)
+        BN_M2F_BLOCK(64)
+        BN_M2F_BLOCK(96)
+        BN_AM2F_TAIL(128)
+    );
+}
+#endif
+#if BN_MUL_EQ24_ADDMUL2
+__attribute__((naked, noinline, aligned(64), BN_HOT_SECTION))
+static uint64_t bn_addmul_2_f24(uint64_t *rp, const uint64_t *up,
+                                uint64_t v0, uint64_t v1) {
+    __asm__(
+        BN_AM2F_HEAD
+        BN_AM2F_BLOCK(0)
+        BN_AM2F_BLOCK(32)
+        BN_AM2F_BLOCK(64)
+        BN_AM2F_BLOCK(96)
+        BN_AM2F_BLOCK(128)
+        BN_AM2F_BLOCK(160)
+        BN_AM2F_TAIL(192)
+    );
+}
+__attribute__((naked, noinline, aligned(64), BN_HOT_SECTION))
+static uint64_t bn_mul_2_f24(uint64_t *rp, const uint64_t *up,
+                             uint64_t v0, uint64_t v1) {
+    __asm__(
+        BN_AM2F_HEAD
+        BN_M2F_BLOCK(0)
+        BN_M2F_BLOCK(32)
+        BN_M2F_BLOCK(64)
+        BN_M2F_BLOCK(96)
+        BN_M2F_BLOCK(128)
+        BN_M2F_BLOCK(160)
+        BN_AM2F_TAIL(192)
+    );
+}
+#endif
+#undef BN_AM2_PROD
+#undef BN_AM2_ACC
+#undef BN_AM2_FOLD
+#undef BN_AM2_STEP1
+#undef BN_AM2F_BLOCK
+#undef BN_M2F_BLOCK
+#undef BN_AM2F_HEAD
+#undef BN_AM2F_TAIL
+#else
+static inline uint64_t bn_addmul_2s(uint64_t *rp, const uint64_t *up,
+                                    int32_t n, uint64_t v0, uint64_t v1,
+                                    uint64_t seed) {
+    return bn_addmul_2_ref(rp, up, n, v0, v1, seed);
+}
+#define BN_ADDMUL_2_FIXED_PORTABLE(N)                                     \
+static inline uint64_t bn_addmul_2_f##N(uint64_t *rp, const uint64_t *up, \
+                                        uint64_t v0, uint64_t v1) {       \
+    return bn_addmul_2_ref(rp, up, N, v0, v1, 0);                         \
+}                                                                         \
+static inline uint64_t bn_mul_2_f##N(uint64_t *rp, const uint64_t *up,    \
+                                     uint64_t v0, uint64_t v1) {          \
+    return bn_mul_2_ref(rp, up, N, v0, v1);                               \
+}
+BN_ADDMUL_2_FIXED_PORTABLE(12)
+BN_ADDMUL_2_FIXED_PORTABLE(16)
+BN_ADDMUL_2_FIXED_PORTABLE(24)
+#undef BN_ADDMUL_2_FIXED_PORTABLE
+#endif
+static inline uint64_t bn_addmul_2(uint64_t *rp, const uint64_t *up,
+                                   int32_t n, uint64_t v0, uint64_t v1) {
+    return bn_addmul_2s(rp, up, n, v0, v1, 0);
+}
+#endif /* BN_ADDMUL_2 */
+
 /* submul_1: rp[0..n) -= up[0..n)·v; returns the borrow word (∈ [0, v]) to
  * subtract from rp[n]. Knuth's multiply-subtract inner loop (and therefore
  * every Burnikel–Ziegler base case). Same two-chain structure as addmul_1:
@@ -4943,6 +5251,12 @@ static uint64_t bn_mul_1_ref(uint64_t *rp, const uint64_t *up, int32_t n, uint64
 #endif
 #ifndef BN_MUL1_CSEL128X32
 #define BN_MUL1_CSEL128X32 1
+#endif
+/* Exactly 64 limbs as two independent 32-limb chains: the same
+ * carry-select shape as the exact-128 four-by-32 leaf, one boundary
+ * correction instead of three.  A/B knob for the boxed mul1@64 rung. */
+#ifndef BN_MUL1_CSEL64
+#define BN_MUL1_CSEL64 0
 #endif
 #ifndef BN_BENCH_RUNTIME_MUL1_CSEL128X32_KNOB
 #define BN_BENCH_RUNTIME_MUL1_CSEL128X32_KNOB 0
@@ -5215,7 +5529,7 @@ static BnMul1SplitCarry bn_mul_1_f16_seed(
     );
 }
 
-#if BN_MUL1_CSEL128X32
+#if BN_MUL1_CSEL128X32 || BN_MUL1_CSEL64
 __attribute__((naked, noinline, aligned(64), BN_HOT_SECTION))
 static BnMul1SplitCarry bn_mul_1_f32_seed(
     uint64_t *rp, const uint64_t *up, uint64_t v, uint64_t seed) {
@@ -5298,6 +5612,25 @@ bn_mul_1_csel128x32(uint64_t *rp, const uint64_t *up, uint64_t v) {
     return d3.high + d3.carry_bit;
 }
 #undef BN_MUL1_SPLIT32_CHUNK
+#endif
+
+#if BN_MUL1_CSEL64
+/* Exactly 64 limbs: two independent 32-limb chains.  The upper chain is
+ * seeded with the boundary product's high word (recomputed here, off the
+ * lower chain's critical path); the lower chain's one-bit carry is applied
+ * to rp[32] afterwards, and the rare wrap replays the exact serial pass. */
+static __attribute__((noinline, BN_HOT_SECTION, aligned(64))) uint64_t
+bn_mul_1_csel64x32(uint64_t *rp, const uint64_t *up, uint64_t v) {
+    BnMul1SplitCarry d0 = bn_mul_1_f32_seed(rp, up, v, 0);
+    BnMul1SplitCarry d1 = bn_mul_1_f32_seed(
+        rp + 32, up + 32, v,
+        (uint64_t)(((__uint128_t)up[31] * v) >> 64));
+    uint64_t adjusted = rp[32] + d0.carry_bit;
+    rp[32] = adjusted;
+    if (__builtin_expect((adjusted == 0) & d0.carry_bit, 0))
+        return bn_mul_1_seeded_serial(rp, up, v, 0, 64);
+    return d1.high + d1.carry_bit;
+}
 #endif
 
 #if BN_MUL1_CSEL448
@@ -5811,6 +6144,17 @@ void bn_mul_eq8_inline(uint64_t *out, const uint64_t *a, const uint64_t *b) {
 __attribute__((noinline))
 __attribute__((BN_HOT_SECTION, aligned(64)))
 static void bn_mul_eq12(uint64_t *out, const uint64_t *a, const uint64_t *b) {
+#if BN_MUL_EQ12_ADDMUL2
+    out[13] = bn_mul_2_f12(out, b, a[0], a[1]);
+#define BN_MUL12_PAIR(i) \
+    out[13 + (i)] = bn_addmul_2_f12(out + (i), b, a[(i)], a[(i) + 1])
+    BN_MUL12_PAIR(2);
+    BN_MUL12_PAIR(4);
+    BN_MUL12_PAIR(6);
+    BN_MUL12_PAIR(8);
+    BN_MUL12_PAIR(10);
+#undef BN_MUL12_PAIR
+#else
     out[12] = bn_mul_1_f12(out, b, a[0]);
 #define BN_MUL12_ROW(i) \
     out[12 + (i)] = bn_addmul_1_f12(out + (i), b, a[(i)])
@@ -5826,6 +6170,7 @@ static void bn_mul_eq12(uint64_t *out, const uint64_t *a, const uint64_t *b) {
     BN_MUL12_ROW(10);
     BN_MUL12_ROW(11);
 #undef BN_MUL12_ROW
+#endif
 }
 
 #if BN_MUL_EQ17
@@ -5859,6 +6204,21 @@ static void bn_mul_eq17(uint64_t *out, const uint64_t *a, const uint64_t *b) {
 __attribute__((noinline))
 __attribute__((BN_HOT_SECTION, aligned(64)))
 static void bn_mul_eq16(uint64_t *out, const uint64_t *a, const uint64_t *b) {
+#if BN_MUL_EQ16_ADDMUL2
+    /* Eight two-row passes: one mul_2 then seven addmul_2, each writing
+     * out[i+16] itself and returning out[i+17]. */
+    out[17] = bn_mul_2_f16(out, b, a[0], a[1]);
+#define BN_MUL16_PAIR(i) \
+    out[17 + (i)] = bn_addmul_2_f16(out + (i), b, a[(i)], a[(i) + 1])
+    BN_MUL16_PAIR(2);
+    BN_MUL16_PAIR(4);
+    BN_MUL16_PAIR(6);
+    BN_MUL16_PAIR(8);
+    BN_MUL16_PAIR(10);
+    BN_MUL16_PAIR(12);
+    BN_MUL16_PAIR(14);
+#undef BN_MUL16_PAIR
+#else
     out[16] = bn_mul_1_f16(out, b, a[0]);
 #define BN_MUL16_ROW(i) \
     out[16 + (i)] = bn_addmul_1_f16(out + (i), b, a[(i)])
@@ -5878,6 +6238,7 @@ static void bn_mul_eq16(uint64_t *out, const uint64_t *a, const uint64_t *b) {
     BN_MUL16_ROW(14);
     BN_MUL16_ROW(15);
 #undef BN_MUL16_ROW
+#endif
 }
 #endif
 
@@ -5938,6 +6299,23 @@ static void bn_mul_eq20(uint64_t *out, const uint64_t *a, const uint64_t *b) {
 __attribute__((noinline))
 __attribute__((BN_HOT_SECTION, aligned(64)))
 static void bn_mul_eq24(uint64_t *out, const uint64_t *a, const uint64_t *b) {
+#if BN_MUL_EQ24_ADDMUL2
+    out[25] = bn_mul_2_f24(out, b, a[0], a[1]);
+#define BN_MUL24_PAIR(i) \
+    out[25 + (i)] = bn_addmul_2_f24(out + (i), b, a[(i)], a[(i) + 1])
+    BN_MUL24_PAIR(2);
+    BN_MUL24_PAIR(4);
+    BN_MUL24_PAIR(6);
+    BN_MUL24_PAIR(8);
+    BN_MUL24_PAIR(10);
+    BN_MUL24_PAIR(12);
+    BN_MUL24_PAIR(14);
+    BN_MUL24_PAIR(16);
+    BN_MUL24_PAIR(18);
+    BN_MUL24_PAIR(20);
+    BN_MUL24_PAIR(22);
+#undef BN_MUL24_PAIR
+#else
     out[24] = bn_mul_1_f24(out, b, a[0]);
 #define BN_MUL24_ROW(i) \
     out[24 + (i)] = bn_addmul_1_f24(out + (i), b, a[(i)])
@@ -5965,6 +6343,7 @@ static void bn_mul_eq24(uint64_t *out, const uint64_t *a, const uint64_t *b) {
     BN_MUL24_ROW(22);
     BN_MUL24_ROW(23);
 #undef BN_MUL24_ROW
+#endif
 }
 
 static inline __attribute__((always_inline))
@@ -10111,8 +10490,25 @@ static void bn_sqr_school(uint64_t *out, const uint64_t *a, int32_t n) {
         return;
     }
     out[n] = bn_mul_1(out + 1, a + 1, n - 1, a[0]);
+#if BN_SQR_SCHOOL_ADDMUL2
+    /* Rows i and i+1 share the source tail a[i+2..n): one addmul_2 pass
+     * over it, with the corner product a[i]·a[i+1] added at out[2i+1] and
+     * its high word seeding the pass's window at out[2i+2]. */
+    int32_t i = 1;
+    for (; i + 1 < n - 1; i += 2) {
+        __uint128_t corner = (__uint128_t)a[i] * a[i + 1];
+        __uint128_t s = (__uint128_t)out[2 * i + 1] + (uint64_t)corner;
+        out[2 * i + 1] = (uint64_t)s;
+        out[n + i + 1] = bn_addmul_2s(
+            out + 2 * i + 2, a + i + 2, n - i - 2, a[i], a[i + 1],
+            (uint64_t)(corner >> 64) + (uint64_t)(s >> 64));
+    }
+    if (i < n - 1)
+        out[n + i] = bn_addmul_1(out + 2 * i + 1, a + i + 1, n - i - 1, a[i]);
+#else
     for (int32_t i = 1; i < n - 1; i++)        /* a_i·a_j lands at i+j (j>i) */
         out[n + i] = bn_addmul_1(out + 2 * i + 1, a + i + 1, n - i - 1, a[i]);
+#endif
     out[0] = 0;
     out[2 * n - 1] = 0;
     uint64_t double_carry = 0, carry = 0;
@@ -10457,10 +10853,12 @@ static __thread int bn_div_recip_cache_mru;
 static __thread uint64_t *bn_rect_ws[BN_RECT_WS_DEPTH];
 static __thread size_t bn_rect_ws_cap[BN_RECT_WS_DEPTH];
 static __thread int bn_rect_depth;
+static void w_dec_ws_release_thread(void);   /* decimal-conversion scratch */
 static void bn_ws_release_thread(void) {
     free(bn_ws);
     bn_ws = NULL;
     bn_ws_cap = 0;
+    w_dec_ws_release_thread();
     free(bn_linear_word_ws);
     bn_linear_word_ws = NULL;
     bn_linear_word_ws_cap = 0;
@@ -11434,7 +11832,11 @@ BN_DEFINE_BOXED_MUL_N1_FIXED(24, 32U, bn_mul_1_f24)
 BN_DEFINE_BOXED_MUL_N1_FIXED(32, 64U, bn_mul_1_f32)
 BN_DEFINE_BOXED_MUL_N1_FIXED(40, 64U, bn_mul_1_f40)
 BN_DEFINE_BOXED_MUL_N1_FIXED(48, 64U, bn_mul_1_f48)
+#if BN_MUL1_CSEL128 && BN_MUL1_CSEL64
+BN_DEFINE_BOXED_MUL_N1_FIXED(64, 128U, bn_mul_1_csel64x32)
+#else
 BN_DEFINE_BOXED_MUL_N1_FIXED(64, 128U, bn_mul_1_f64)
+#endif
 #undef BN_DEFINE_BOXED_MUL_N1_FIXED
 #endif
 
@@ -11462,6 +11864,11 @@ static WValue bigint_mul_n1(const uint64_t *al, int32_t n, uint64_t w,
 #endif
         )
         r->limbs[n] = bn_mul_1_csel128x32(r->limbs, al, w);
+    else
+#endif
+#if BN_MUL1_CSEL64
+    if (n == 64)
+        r->limbs[n] = bn_mul_1_csel64x32(r->limbs, al, w);
     else
 #endif
     if (n >= 256 && ((n & 127) == 0
@@ -12512,6 +12919,14 @@ WValue bigint_mul_any_routed(WValue a, WValue b, int route_mul1_1) {
         WBigint *bb = w_as_bigint(b);
         int32_t na = ba->size;
         int32_t nb = bb->size;
+        /* A one-limb operand is the most common asymmetric shape (`x * w`
+         * with a boxed word): decide it before the equal-length seam
+         * ladder below spends a compare per rung on it. */
+        if ((na == 1 || nb == 1) && na >= 1 && nb >= 1 &&
+            (a & W_BIGINT_SIGN_BIT) == 0 && (b & W_BIGINT_SIGN_BIT) == 0) {
+            if (nb == 1) return bigint_mul_ui_any(a, bb->limbs[0]);
+            return bigint_mul_ui_any(b, ba->limbs[0]);
+        }
 #if BN_BIGINT_MUL2_SRC_DIRECT
         if (na == 2 && nb == 2 &&
             __builtin_expect(route_mul1_1 != 0, 1) &&
@@ -15227,7 +15642,7 @@ static void mag_divmod_bz(const uint64_t *u, int32_t ulen,
 }
 
 #ifndef BN_DIV_RECIP_Q_MIN
-#define BN_DIV_RECIP_Q_MIN 256
+#define BN_DIV_RECIP_Q_MIN 16
 #endif
 /* Upper divisor width for the cached-reciprocal division path.  This is an
  * int32/uint-headroom guard, not a tuning point: wherever the path applies
@@ -16599,10 +17014,16 @@ static uint64_t bn_dc_sqrtrem(uint64_t *np, uint64_t *sp, int32_t n) {
         /* q-hat = B^l exactly: q-hat^2 = B^2l. */
         if (2 * l == n) cc -= 1;
         else cc -= (int64_t)bn_sqrt_sub_1(np + 2 * l, n - 2 * l, 1);
-        /* The candidate root B^n always overshoots (a < B^2n): step down to
-         * B^n - 1 now, r += 2(B^n - 1) + 1. */
-        for (int32_t i = 0; i < n; i++) sp[i] = UINT64_MAX;
-        cc += 2;
+        /* The candidate root (s'+1) B^l always overshoots: Q reaches 2 B^l
+         * only for r' = 2 s', i.e. the high 2h limbs are (s'+1)^2 - 1, and
+         * the low limbs keep the operand below (s'+1)^2 B^2l.  Step down to
+         * s' B^l + (B^l - 1) -- the high h limbs of the root stay s' -- with
+         * r += 2 (s'+1) B^l - 1, which is nonnegative (2 s' B^l >= B^2l) and
+         * below 2 root + 1, so no further correction follows. */
+        for (int32_t i = 0; i < l; i++) sp[i] = UINT64_MAX;
+        cc += (int64_t)bn_add_n(np + l, np + l, sp + l, h);
+        cc += (int64_t)bn_add_n(np + l, np + l, sp + l, h);
+        cc += (int64_t)bn_sqrt_add_1(np + l, h, 2);
         cc -= (int64_t)bn_sqrt_sub_1(np, n, 1);
     } else {
         uint64_t *sq = np + n;                  /* dead upper half */
@@ -16925,6 +17346,133 @@ static int bn_dc_sqrt_only(uint64_t *np, uint64_t *sp, uint64_t *qp,
     return 0;
 }
 
+/* ---- Fixed 3..4-limb integer square root (two-limb root) --------------
+ *
+ * For a 3- or 4-limb operand the divide-and-conquer path above spends more
+ * on bookkeeping than on the root: a normalization copy into the TLS
+ * workspace, one recursion level, the guard-limb quotient buffer and the
+ * certification arithmetic.  This leaf performs Zimmermann's digit
+ * doubling once, entirely in registers:
+ *
+ *   n  = a << shift             even shift, n3 >= 2^62, so the root of n
+ *                               has bit 127 set and isqrt(a) = isqrt(n) >>
+ *                               (shift / 2) exactly
+ *   s1, r = sqrtrem(n3:n2)      bn_sqrtrem2 (hardware sqrt seed, one udiv,
+ *                               exact 128-bit fixup); r <= 2 s1
+ *   q  = floor((r B + n1) / (2 s1))
+ *                               r contributes at most two quotient units of
+ *                               B, then one 2-by-1 reciprocal step against
+ *                               s1 and a halving give the exact floor
+ *   s  = s1 B + q               the root, or one too large: n < (s + 1)^2
+ *                               always, and (s - 1)^2 <= n since q <= B
+ *   n - s^2 in [0, 2 s]         exact 256-bit square and floor correction
+ *
+ * q == B is possible (r = 2 s1 with a large n1); the true root's top limb
+ * is s1 exactly (floor(sqrt(floor(n / B^2))) == floor(sqrt(n) / B)), so
+ * the saturated low limb B - 1 is then the root itself.  The downward
+ * correction runs at most once; the upward loop is defensive.  No
+ * workspace, no recursion, no certification: the remainder is exact. */
+#ifndef BN_ISQRT4_DIRECT
+#define BN_ISQRT4_DIRECT 0
+#endif
+#if BN_ISQRT4_DIRECT
+static __attribute__((noinline))
+WValue bigint_isqrt_34(const uint64_t *al, int32_t alen) {
+    uint64_t n0 = al[0], n1 = al[1], n2 = al[2];
+    uint64_t n3 = alen == 4 ? al[3] : 0;
+    int lz = n3 ? __builtin_clzll(n3) : 64 + __builtin_clzll(n2);
+    int shift = lz & ~1;                        /* even, 0..126 */
+    int back = shift >> 1;                      /* 0..63 */
+    if (shift >= 64) {
+        n3 = n2; n2 = n1; n1 = n0; n0 = 0;
+        shift -= 64;
+    }
+    if (shift) {
+        n3 = (n3 << shift) | (n2 >> (64 - shift));
+        n2 = (n2 << shift) | (n1 >> (64 - shift));
+        n1 = (n1 << shift) | (n0 >> (64 - shift));
+        n0 <<= shift;
+    }
+    uint64_t top[2] = { n2, n3 };
+    uint64_t s1;
+    uint64_t rh = bn_sqrtrem2(&s1, top);        /* s1 >= 2^63 */
+    unsigned __int128 rem = ((unsigned __int128)rh << 64) | top[0];
+    /* q' = floor((rem B + n1) / s1): rem <= 2 s1 yields the high quotient
+     * units by at most two subtractions, then one reciprocal step. */
+    uint64_t qh = 0;
+    if (rem >= s1) {
+        rem -= s1;
+        qh = 1;
+        if (rem >= s1) {
+            rem -= s1;
+            qh = 2;
+        }
+    }
+    uint64_t dinv = bn_invert_limb(s1);
+    uint64_t rr;
+    uint64_t ql = bn_div_qr_preinv((uint64_t)rem, n1, s1, dinv, &rr);
+    /* q = q' >> 1 with q' = qh B + ql <= 2B + 1; q' >= 2B saturates. */
+    uint64_t q = qh >= 2 ? UINT64_MAX : (qh << 63) | (ql >> 1);
+
+    /* s^2 = s1^2 B^2 + 2 s1 q B + q^2; only the low three limbs of n - s^2
+     * are needed: |n - s^2| < 2^130, so limb 2 already carries the sign. */
+    unsigned __int128 pll = (unsigned __int128)q * q;
+    unsigned __int128 pm = (unsigned __int128)s1 * q;
+    unsigned __int128 phh = (unsigned __int128)s1 * s1;
+    uint64_t m0 = (uint64_t)pm << 1;
+    uint64_t m1 = (uint64_t)(pm >> 63);
+    uint64_t sq0 = (uint64_t)pll;
+    unsigned __int128 t = (unsigned __int128)(uint64_t)(pll >> 64) + m0;
+    uint64_t sq1 = (uint64_t)t;
+    uint64_t sq2 = (uint64_t)phh + m1 + (uint64_t)(t >> 64);
+    uint64_t r0 = n0 - sq0;
+    uint64_t bw = n0 < sq0;
+    uint64_t d1 = n1 - sq1;
+    uint64_t r1 = d1 - bw;
+    bw = (n1 < sq1) | (d1 < bw);
+    uint64_t r2 = n2 - sq2 - bw;                /* sign-carrying limb */
+
+    /* n - s^2 < 0: s -= 1, remainder += 2 s + 1 (with the new s). */
+    while ((int64_t)r2 < 0) {
+        s1 -= q == 0;
+        q -= 1;
+        uint64_t t0 = (q << 1) | 1, t1 = (s1 << 1) | (q >> 63);
+        uint64_t t2 = s1 >> 63;
+        uint64_t a0 = r0 + t0, c = a0 < r0;
+        uint64_t a1 = r1 + t1, c1 = a1 < r1;
+        a1 += c; c1 |= a1 < c;
+        r2 += t2 + c1;
+        r0 = a0; r1 = a1;
+    }
+    /* n - s^2 > 2 s: s += 1, remainder -= 2 s + 1 (with the old s). */
+    for (;;) {
+        uint64_t t0 = (q << 1) | 1, t1 = (s1 << 1) | (q >> 63);
+        uint64_t t2 = s1 >> 63;
+        uint64_t e0 = t0 & ~UINT64_C(1);        /* 2 s */
+        if (r2 < t2 || (r2 == t2 && (r1 < t1 || (r1 == t1 && r0 <= e0))))
+            break;
+        uint64_t d0 = r0 - t0, b0 = r0 < t0;
+        uint64_t e1 = r1 - t1, b1 = r1 < t1;
+        uint64_t f1 = e1 - b0; b1 |= e1 < b0;
+        r2 -= t2 + b1;
+        r0 = d0; r1 = f1;
+        q += 1;
+        s1 += q == 0;
+    }
+
+    /* Undo the even normalization shift.  The root of the normalized value
+     * has bit 127 set, so the top limb survives the back shift (>= 1 for a
+     * 3-limb operand, >= 2^32 for four): always two limbs, never int48. */
+    uint64_t lo = back ? (q >> back) | (s1 << (64 - back)) : q;
+    uint64_t hi = s1 >> back;
+    WBigint *r = bigint_alloc_raw_hot(2);
+    r->limbs[0] = lo;
+    r->limbs[1] = hi;
+    r->size = 2;
+    return bigint_box(r);
+}
+#endif
+
 static __thread uint64_t *bn_sqrt_ws = NULL;
 static __thread size_t bn_sqrt_ws_cap = 0;
 
@@ -16947,6 +17495,9 @@ WValue bigint_isqrt_any(WValue a) {
         r->size = 1;
         return bigint_box(r);
     }
+#if BN_ISQRT4_DIRECT
+    if (alen <= 4) return bigint_isqrt_34(al, alen);
+#endif
     /* Sub-2048-limb roots: the recursion's interior products (half and
      * quarter width) fall right at the parallel thresholds, and dispatch
      * churn inside the serial spine measured isqrt@512 at 1.49x GMP with
@@ -17793,6 +18344,153 @@ static inline int lehmer_simulate_magnitudes(
     mag_top_digits(x, xlen, y, ylen, &xh, &yh);
     return yh ? lehmer_simulate(xh, yh, pa, pb, pc, pd, NULL) : 0;
 }
+
+/* ---- hgcd2: two-limb quotient batching with Jebelean-exact steps -----
+ *
+ * Moller's hgcd2 shape (Schonhage/HGCD base case): run the Euclid quotient
+ * sequence on the leading 128 bits of both operands, aligned to x's top
+ * bit, and accumulate the nonnegative cofactor matrix
+ *
+ *   (a; b) = M (alpha; beta),  M = [u00 u01; u10 u11],  det M = +1,
+ *
+ * without ever swapping the pair: the roles of a and b alternate between
+ * half-steps (a -= q b then b -= q a), so M is updated by right
+ * multiplication with [1 q; 0 1] / [1 0; q 1], and the reduced pair is
+ * always alpha = u11 a - u01 b, beta = u00 b - u10 a.  The full operands
+ * receive the same rows through mag_linear_comb_pair with the unsigned
+ * magnitudes directly, so cofactors use every bit below 2^63 instead of
+ * the 2^61 limit the signed Algorithm-L bounds tables impose.
+ *
+ * Exactness (Jebelean's condition, derived for X = a T + a', Y = b T + b',
+ * 0 <= a', b' < T).  Let r be the value produced by a half-step and c the
+ * other value.  The quotient is the true quotient of the full operands for
+ * every possible low part when
+ *
+ *   (C1)  r >= |negative cofactor of r|          (full r stays >= 0)
+ *   (C2)  c - r >= |c's negative cofactor| + |r's matching cofactor|
+ *                                               (full r stays below full c)
+ *
+ * With alpha = u11 a - u01 b and beta = u00 b - u10 a the cofactors are
+ * read straight off M: after a -= q b the new alpha has b-cofactor u01' =
+ * q u00 + u01 (its negative one) while beta keeps a-cofactor u10 and the
+ * new alpha's a-cofactor is u11' = q u10 + u11, so the tests are
+ * alpha' >= u01' and beta - alpha' >= u10 + u11'.  After b -= q a the rows
+ * swap roles: beta' >= u10' and alpha - beta' >= u01 + u00'.  A step that
+ * fails either test is not applied, so every quotient the matrix encodes
+ * is exact and the full-width pass can only produce the true Euclid
+ * remainders (the caller still validates).
+ *
+ * Quotient: q = 1 is a compare (41% of Euclid steps), q = 2 one more;
+ * otherwise q0 = ah / bh from the high limbs, which is the true q or one
+ * too large whenever q0 <= bh, resolved by one 128x64 multiply-subtract
+ * and a compare.  q0 > bh (a quotient beyond the high limb's precision,
+ * only possible with tiny bh, i.e. at the very end of a batch or for an
+ * unbalanced first step) stops the batch and leaves the step to the
+ * existing simulators.  Row 0 dominates row 1 entrywise after the first
+ * step, so a single < 2^63 test on the new row-0 entry bounds the whole
+ * matrix for the signed-carry pair kernel. */
+#ifndef BN_GCD_HGCD2
+#define BN_GCD_HGCD2 1
+#endif
+#ifndef BN_GCD_HGCD2_MIN_LIMBS
+#define BN_GCD_HGCD2_MIN_LIMBS 3
+#endif
+#ifndef BN_GCD_HGCD2_FAST_Q2
+#define BN_GCD_HGCD2_FAST_Q2 1
+#endif
+#if BN_GCD_HGCD2
+/* Half-step: `big` -= q * `small`, and the matrix column belonging to
+ * `big` (entries c0 in row 0, c1 in row 1) gains q times the other column
+ * (o0, o1).  Row 0 holds b-cofactors, row 1 a-cofactors, so the two
+ * half-steps are not index mirrors: after a -= q b the new alpha's negative
+ * cofactor is its b-cofactor (row 0) and the difference test pairs the
+ * a-cofactors (row 1); after b -= q a the roles swap.  `neg0` names the
+ * row of the new value's negative cofactor.  Breaks out of the enclosing
+ * loop when the step cannot be certified. */
+#define GCD_HGCD2_HALF_STEP(big, small, c0, c1, o0, o1, neg0)               \
+    do {                                                                    \
+        __uint128_t g_ = (big) - (small);                                   \
+        uint64_t q_;                                                        \
+        if (g_ < (small)) {                                                 \
+            q_ = 1;                                                         \
+        } else if (BN_GCD_HGCD2_FAST_Q2 && g_ - (small) < (small)) {        \
+            q_ = 2;                                                         \
+            g_ -= (small);                                                  \
+        } else {                                                            \
+            uint64_t bh_ = (uint64_t)((small) >> 64);                       \
+            if (!bh_) goto done;                                            \
+            q_ = (uint64_t)((big) >> 64) / bh_;                             \
+            if (q_ > bh_) goto done;                                        \
+            /* (q_ - 1) * small <= q * small <= big: no wrap. */            \
+            __uint128_t p_ = (__uint128_t)(uint64_t)(small) * (q_ - 1);     \
+            p_ += (__uint128_t)(bh_ * (q_ - 1)) << 64;                      \
+            g_ = (big) - p_;                                                \
+            if (g_ >= (small)) g_ -= (small);                               \
+            else q_--;                                                      \
+        }                                                                   \
+        __uint128_t n0_ = (__uint128_t)q_ * (o0) + (c0);                    \
+        if (n0_ >> 63) goto done;                                           \
+        uint64_t c0n_ = (uint64_t)n0_;                                      \
+        uint64_t c1n_ = q_ * (o1) + (c1);        /* <= c0n_ */              \
+        uint64_t neg_ = (neg0) ? c0n_ : c1n_;                               \
+        uint64_t sum_ = (neg0) ? (o1) + c1n_ : (o0) + c0n_;                 \
+        if (!(uint64_t)(g_ >> 64) && (uint64_t)g_ < neg_) goto done;        \
+        __uint128_t d_ = (small) - g_;                                      \
+        if (!(uint64_t)(d_ >> 64) && (uint64_t)d_ < sum_) goto done;        \
+        (big) = g_;                                                         \
+        (c0) = c0n_;                                                        \
+        (c1) = c1n_;                                                        \
+        steps++;                                                            \
+    } while (0)
+
+/* a >= b, a normalized (bit 127 set).  Returns the number of exact Euclid
+ * steps encoded in m = {u00, u01, u10, u11}; zero means the leading window
+ * could not certify even one step (equal tops, b below 2^64, or a first
+ * quotient beyond one limb) and the caller falls back. */
+static BN_GCD_PROFILE_ATTR int gcd_hgcd2_simulate(
+    uint64_t ah, uint64_t al, uint64_t bh, uint64_t bl, uint64_t m[4]) {
+    __uint128_t a = ((__uint128_t)ah << 64) | al;
+    __uint128_t b = ((__uint128_t)bh << 64) | bl;
+    uint64_t u00 = 1, u01 = 0, u10 = 0, u11 = 1;
+    int steps = 0;
+    for (;;) {
+        /* a -= q b: column 1 += q * column 0; alpha' = u11' a - u01' b. */
+        GCD_HGCD2_HALF_STEP(a, b, u01, u11, u00, u10, 1);
+        /* b -= q a: column 0 += q * column 1; beta' = u00' b - u10' a. */
+        GCD_HGCD2_HALF_STEP(b, a, u00, u10, u01, u11, 0);
+    }
+done:
+    m[0] = u00;
+    m[1] = u01;
+    m[2] = u10;
+    m[3] = u11;
+#ifdef BN_GCD_PROFILE_COUNTS
+    gcd_profile_sim_calls++;
+    gcd_profile_sim_steps += (uint64_t)steps;
+#endif
+    return steps;
+}
+#undef GCD_HGCD2_HALF_STEP
+
+/* Leading 128 bits of x (normalized) and the bits of y at the same
+ * positions; y may be shorter (zero-extended). */
+static inline int gcd_hgcd2_magnitudes(
+    const uint64_t *x, int32_t xlen,
+    const uint64_t *y, int32_t ylen, uint64_t m[4]) {
+    int32_t top = xlen - 1;
+    int lz = __builtin_clzll(x[top]);
+    uint64_t x1 = x[top], x0 = x[top - 1];
+    uint64_t xm = top > 1 ? x[top - 2] : 0;
+    uint64_t y1 = top < ylen ? y[top] : 0;
+    uint64_t y0 = top - 1 < ylen ? y[top - 1] : 0;
+    uint64_t ym = top > 1 && top - 2 < ylen ? y[top - 2] : 0;
+    uint64_t ah = (x1 << lz) | (lz ? x0 >> (64 - lz) : 0);
+    uint64_t al = (x0 << lz) | (lz ? xm >> (64 - lz) : 0);
+    uint64_t bh = (y1 << lz) | (lz ? y0 >> (64 - lz) : 0);
+    uint64_t bl = (y0 << lz) | (lz ? ym >> (64 - lz) : 0);
+    return gcd_hgcd2_simulate(ah, al, bh, bl, m);
+}
+#endif
 
 /* Apply both rows of a Lehmer matrix in one pass:
  *
@@ -18873,6 +19571,28 @@ WValue bigint_gcd_mag(const uint64_t *al, int32_t an,
         }
         int64_t A, B, C, D;
         int steps;
+#if BN_GCD_HGCD2
+        if (xlen >= BN_GCD_HGCD2_MIN_LIMBS && xlen < BN_GCD_HGCD_THRESHOLD) {
+            uint64_t m[4];
+            int32_t nxl, nyl;
+            /* alpha = u11 x - u01 y, beta = u00 y - u10 x. */
+            if (gcd_hgcd2_magnitudes(x, xlen, y, ylen, m) > 0 &&
+                mag_linear_comb_pair(nx, ny, xlen, x, y,
+                                     m[3], m[1], m[0], m[2], &nxl, &nyl)) {
+                uint64_t *t;
+                int32_t tl;
+                t = x; x = nx; nx = t;
+                t = y; y = ny; ny = t;
+                xlen = nxl;
+                ylen = nyl;
+                if (mag_cmp(x, xlen, y, ylen) < 0) {
+                    t = x; x = y; y = t;
+                    tl = xlen; xlen = ylen; ylen = tl;
+                }
+                continue;
+            }
+        }
+#endif
 #if BN_GCD_SMALL_FAST_QUOTIENT_TWO
         if (xlen == 2)
             steps = lehmer_simulate_2_magnitudes(
@@ -19560,26 +20280,149 @@ static int w_p10c_mu_build(int j) {
     return mu != NULL;
 }
 
+/* ---- Decimal-conversion scratch (shared by the D&C writer and parser) ----
+ *
+ * Both divide-and-conquer conversions need per-level temporaries: the
+ * writer's Barrett quotient and remainder (live across its two recursive
+ * writes) plus a transient q̂·mu product; the parser's high-part parse and
+ * high·5^p product.  Those were a malloc/free per level (parser, and the
+ * writer's product) or a bigint_alloc_raw/bigint_backing_free pair (the
+ * writer's q/r: the buffers went back to the ARENA freelist, never to the
+ * pool, so every level of every call re-took from the arena — eight
+ * bigint_arena_take calls per 64-limb tostr, capacity classes 8..64).
+ *
+ * They now carve LIFO from one thread-local block, like bn_ws / bz_ws /
+ * gcd_ws.  Nested levels hold pointers into the block, so it can only be
+ * (re)grown while nothing is carved: the outermost call reserves a bound
+ * for its whole recursion up front (w_dec_ws_reserve is a no-op unless the
+ * carve stack is empty), and a carve that does not fit — bound exceeded,
+ * reservation declined or failed — falls back to malloc for that level
+ * (`owned`), so correctness never depends on the bound.  Retention is
+ * capped at W_DEC_WS_MAX_LIMBS; larger conversions keep per-level malloc.
+ * Freed with the other bignum workspaces (bn_ws_release_thread).
+ *
+ * W_TO_S_TLS_WS / W_FROM_S_TLS_WS = 0 restore the per-level allocations of
+ * their side (A/B knobs). */
+#ifndef W_TO_S_TLS_WS
+#define W_TO_S_TLS_WS 1
+#endif
+#ifndef W_FROM_S_TLS_WS
+#define W_FROM_S_TLS_WS 1
+#endif
+#ifndef W_DEC_WS_MAX_LIMBS
+#define W_DEC_WS_MAX_LIMBS (1u << 20)   /* 8 MiB per thread */
+#endif
+static __thread uint64_t *w_dec_ws = NULL;
+static __thread size_t w_dec_ws_cap = 0;   /* limbs */
+static __thread size_t w_dec_ws_top = 0;   /* limbs carved (LIFO stack) */
+static void w_dec_ws_release_thread(void) {
+    free(w_dec_ws);
+    w_dec_ws = NULL;
+    w_dec_ws_cap = 0;
+    w_dec_ws_top = 0;
+}
+/* Grow the block for a recursion needing `limbs`; only legal (and only
+ * attempted) while nothing is carved. */
+static void w_dec_ws_reserve(size_t limbs) {
+    if (w_dec_ws_top != 0 || limbs <= w_dec_ws_cap ||
+        limbs > (size_t)W_DEC_WS_MAX_LIMBS)
+        return;
+    free(w_dec_ws);
+    size_t ncap = limbs + limbs / 2 + 64;      /* 1.5x headroom, like bn_ws */
+    w_dec_ws = (uint64_t *)malloc(ncap * sizeof(uint64_t));
+    w_dec_ws_cap = w_dec_ws ? ncap : 0;
+}
+static inline uint64_t *w_dec_ws_take(size_t limbs, int *owned) {
+    if (w_dec_ws_top + limbs <= w_dec_ws_cap) {
+        uint64_t *p = w_dec_ws + w_dec_ws_top;
+        w_dec_ws_top += limbs;
+        *owned = 0;
+        return p;
+    }
+    *owned = 1;
+    return (uint64_t *)malloc(limbs * sizeof(uint64_t));
+}
+static inline void w_dec_ws_drop(uint64_t *p, size_t limbs, int owned) {
+    if (owned) {
+        free(p);
+        return;
+    }
+    assert(w_dec_ws_top >= limbs && p == w_dec_ws + w_dec_ws_top - limbs);
+    w_dec_ws_top -= limbs;
+}
+/* Transient scratch: the workspace when the side's knob is on, else malloc.
+ * `use_ws` is a compile-time constant at every call site. */
+static inline uint64_t *w_dec_scratch_take(size_t limbs, int use_ws,
+                                           int *owned) {
+    if (use_ws) return w_dec_ws_take(limbs, owned);
+    *owned = 1;
+    return (uint64_t *)malloc(limbs * sizeof(uint64_t));
+}
+
+/* One D&C writer level's quotient or remainder: a workspace carve (or its
+ * malloc fallback) under W_TO_S_TLS_WS, else the pooled BigInt buffer the
+ * writer historically used. */
+typedef struct {
+    uint64_t *limbs;
+    size_t cap;
+    int owned;
+    WBigint *big;
+} WDecPart;
+static inline uint64_t *w_dec_part_take(WDecPart *p, size_t limbs) {
+    p->cap = limbs;
+    p->owned = 0;
+    p->big = NULL;
+#if W_TO_S_TLS_WS
+    p->limbs = w_dec_ws_take(limbs, &p->owned);
+#else
+    p->big = bigint_alloc_raw((int32_t)limbs);
+    p->limbs = p->big->limbs;
+#endif
+    return p->limbs;
+}
+static inline void w_dec_part_drop(WDecPart *p) {
+    if (!p->limbs) return;
+#if W_TO_S_TLS_WS
+    w_dec_ws_drop(p->limbs, p->cap, p->owned);
+#else
+    bigint_backing_free(p->big);
+#endif
+    p->limbs = NULL;
+}
+/* Workspace for one whole D&C write of `xlen` limbs: a level dividing u
+ * (ulen ≤ 2n) carves q̂ (m+1) and r (n+1) — ulen + 3 limbs, live across
+ * both recursive writes — plus a transient Barrett product of at most
+ * 2·ulen + 3.  Along any root-to-leaf chain ulen halves per level after at
+ * most one non-shrinking step (x just above P_j: r keeps ~all the limbs,
+ * but its padded split then halves), so the persisted sum is ≤ 3·xlen +
+ * 3·depth and the deepest live total ≤ 5·xlen + 3·depth + 3. */
+static inline size_t w_dec_write_ws_bound(int32_t xlen) {
+    return 6 * (size_t)xlen + 256;
+}
+
 /* Barrett split division u / P_j for ulen ≤ 2n_j:
  * q̂ = floor(floor(u/B^(n-1))·mu_j / B^(n+1)) ∈ {q-2, q-1, q}; the remainder
  * is recovered mod B^(n+1) (exact — r < 3·P_j < B^(n+1)) and corrected by at
- * most two subtractions of P_j (HAC 14.42/14.43).  Returns 0 to have the
- * caller fall back to mag_divmod. */
+ * most two subtractions of P_j (HAC 14.42/14.43).  On success the trimmed
+ * quotient (*qn limbs) and remainder (*rn limbs) sit in qp/rp, which the
+ * caller drops (r first, then q — LIFO) after its recursive writes.
+ * Returns 0 to have the caller fall back to mag_divmod. */
 static int w_dec_divmod_pj(const uint64_t *u, int32_t ulen, int j,
-                           WBigint **q_out, WBigint **r_out) {
+                           WDecPart *qp, int32_t *qn_out,
+                           WDecPart *rp, int32_t *rn_out) {
     int32_t n = w_p10c_len[j];
     const uint64_t *d = w_p10c_limbs[j];
     while (ulen > 0 && u[ulen - 1] == 0) ulen--;
     if (ulen > 2 * n) return 0;
     if (ulen < n || mag_cmp(u, ulen, d, n) < 0) {      /* q = 0, r = u */
-        WBigint *qb = bigint_alloc_raw(1);
-        qb->limbs[0] = 0;
-        qb->size = 0;
-        WBigint *rb = bigint_alloc_raw(ulen > 0 ? ulen : 1);
-        memcpy(rb->limbs, u, (size_t)ulen * sizeof(uint64_t));
-        rb->size = ulen;
-        *q_out = qb;
-        *r_out = rb;
+        uint64_t *q = w_dec_part_take(qp, 1);
+        if (!q) return 0;
+        uint64_t *r = w_dec_part_take(rp, (size_t)(ulen > 0 ? ulen : 1));
+        if (!r) { w_dec_part_drop(qp); return 0; }
+        q[0] = 0;
+        memcpy(r, u, (size_t)ulen * sizeof(uint64_t));
+        *qn_out = 0;
+        *rn_out = ulen;
         return 1;
     }
     if (!w_p10c_mu[j] && !w_p10c_mu_build(j)) return 0;
@@ -19592,16 +20435,22 @@ static int w_dec_divmod_pj(const uint64_t *u, int32_t ulen, int j,
     int32_t T = m + 1 > n + 1 ? n + 1 : m + 1;
     const uint64_t *muh = mu + (n + 1 - T);
     int32_t tlen = m + T;
-    uint64_t *t = (uint64_t *)malloc((size_t)(tlen + m + n) * sizeof(uint64_t));
-    if (!t) return 0;
+    /* Persistent q̂ (m limbs; +1 for the correction carry) and r (n+1) first,
+     * then the transient product region on top of them. */
+    uint64_t *q = w_dec_part_take(qp, (size_t)m + 1);
+    if (!q) return 0;
+    uint64_t *r = w_dec_part_take(rp, (size_t)n + 1);
+    if (!r) { w_dec_part_drop(qp); return 0; }
+    size_t tneed = (size_t)(tlen + m + n);
+    int towned;
+    uint64_t *t = w_dec_scratch_take(tneed, W_TO_S_TLS_WS, &towned);
+    if (!t) { w_dec_part_drop(rp); w_dec_part_drop(qp); return 0; }
     uint64_t *prod = t + tlen;                         /* q̂·(P_j or 5^p) */
     bigint_mul_dispatch(t, u + (n - 1), m, muh, T);    /* q1·mu_hi */
     const uint64_t *qh = t + T;                        /* q̂ = (q1·mu_hi)/B^T */
     int32_t qlen = m;
     while (qlen > 0 && qh[qlen - 1] == 0) qlen--;
-    WBigint *qb = bigint_alloc_raw(m);
-    memcpy(qb->limbs, qh, (size_t)qlen * sizeof(uint64_t));
-    WBigint *rb = bigint_alloc_raw(n + 1);
+    memcpy(q, qh, (size_t)qlen * sizeof(uint64_t));
     /* Remainder product q̂·P_j: multiply by the odd part 5^p and account for
      * the 2^p factor as a bit offset inside the subtraction below. */
     int32_t prodlen = 0, sh = 0;
@@ -19616,11 +20465,11 @@ static int w_dec_divmod_pj(const uint64_t *u, int32_t ulen, int j,
              * product's. */
             int32_t L = n + 1 - sh;
             int32_t qc = qlen < L ? qlen : L;
-            bigint_mul_dispatch(prod, qb->limbs, qc, w_p10c_five[j],
+            bigint_mul_dispatch(prod, q, qc, w_p10c_five[j],
                                 w_p10c_five_len[j]);
             prodlen = qc + w_p10c_five_len[j];
         } else {
-            bigint_mul_dispatch(prod, qb->limbs, qlen, d, n);
+            bigint_mul_dispatch(prod, q, qlen, d, n);
             prodlen = qlen + n;
         }
     }
@@ -19643,26 +20492,28 @@ static int w_dec_divmod_pj(const uint64_t *u, int32_t ulen, int j,
         uint64_t b1 = d1 > uv;
         uint64_t d2 = d1 - borrow;
         borrow = b1 | (d2 > d1);
-        rb->limbs[k] = d2;
+        r[k] = d2;
     }
-    free(t);
+    w_dec_ws_drop(t, tneed, towned);
     /* while r ≥ P_j: r -= P_j, q̂ += 1  (at most three times) */
     int32_t rl = n + 1;
-    while (rl > 0 && rb->limbs[rl - 1] == 0) rl--;
+    while (rl > 0 && r[rl - 1] == 0) rl--;
     int guard = 0;
-    while (mag_cmp(rb->limbs, rl, d, n) >= 0) {
-        if (++guard > 5) { bigint_backing_free(qb); bigint_backing_free(rb); return 0; }  /* can't happen */
-        uint64_t bw = bn_sub_n(rb->limbs, rb->limbs, d, n);
-        if (rl > n) rb->limbs[n] -= bw;
-        while (rl > 0 && rb->limbs[rl - 1] == 0) rl--;
+    while (mag_cmp(r, rl, d, n) >= 0) {
+        if (++guard > 5) {                             /* can't happen */
+            w_dec_part_drop(rp);
+            w_dec_part_drop(qp);
+            return 0;
+        }
+        uint64_t bw = bn_sub_n(r, r, d, n);
+        if (rl > n) r[n] -= bw;
+        while (rl > 0 && r[rl - 1] == 0) rl--;
         int32_t k = 0;
-        while (k < qlen && ++qb->limbs[k] == 0) k++;
-        if (k == qlen) qb->limbs[qlen++] = 1;
+        while (k < qlen && ++q[k] == 0) k++;
+        if (k == qlen) q[qlen++] = 1;
     }
-    qb->size = qlen;
-    rb->size = rl;
-    *q_out = qb;
-    *r_out = rb;
+    *qn_out = qlen;
+    *rn_out = rl;
     return 1;
 }
 
@@ -19676,6 +20527,9 @@ static int w_dec_divmod_pj(const uint64_t *u, int32_t ulen, int j,
 static int32_t w_dec_write(const uint64_t *xl, int32_t xlen, char *dst, int32_t pad_width) {
     while (xlen > 0 && xl[xlen - 1] == 0) xlen--;
     if (xlen <= W_TO_S_DC_LIMBS) return w_dec_chunks_write(xl, xlen, dst, pad_width);
+#if W_TO_S_TLS_WS
+    w_dec_ws_reserve(w_dec_write_ws_bound(xlen));   /* outermost level only */
+#endif
     int j;
     if (pad_width > 0) {
         /* largest j with 18·2^j < pad_width ≤ 18·2^(j+1): balanced split
@@ -19699,19 +20553,32 @@ static int32_t w_dec_write(const uint64_t *xl, int32_t xlen, char *dst, int32_t 
                          (w_p10c_len[j] == xlen &&
                           mag_cmp(w_p10c_limbs[j], w_p10c_len[j], xl, xlen) > 0))) j--;
     }
-    WBigint *q = NULL, *r = NULL;
-    if (!w_dec_divmod_pj(xl, xlen, j, &q, &r))
-        mag_divmod(xl, xlen, w_p10c_limbs[j], w_p10c_len[j], &q, &r);
+    WDecPart qp = {NULL, 0, 0, NULL}, rp = {NULL, 0, 0, NULL};
+    WBigint *qb = NULL, *rb = NULL;
+    const uint64_t *ql, *rl;
+    int32_t qn, rn;
+    if (w_dec_divmod_pj(xl, xlen, j, &qp, &qn, &rp, &rn)) {
+        ql = qp.limbs;
+        rl = rp.limbs;
+    } else {
+        mag_divmod(xl, xlen, w_p10c_limbs[j], w_p10c_len[j], &qb, &rb);
+        ql = qb->limbs; qn = qb->size;
+        rl = rb->limbs; rn = rb->size;
+    }
     int32_t D = 18 << j;
     int32_t hd;
     if (pad_width > 0) {
         hd = pad_width - D;
-        w_dec_write(q->limbs, q->size, dst, hd);
+        w_dec_write(ql, qn, dst, hd);
     } else {
-        hd = w_dec_write(q->limbs, q->size, dst, 0);
+        hd = w_dec_write(ql, qn, dst, 0);
     }
-    w_dec_write(r->limbs, r->size, dst + hd, D);
-    bigint_backing_free(q); bigint_backing_free(r);
+    w_dec_write(rl, rn, dst + hd, D);
+    if (qb) {
+        bigint_backing_free(qb); bigint_backing_free(rb);
+    } else {
+        w_dec_part_drop(&rp); w_dec_part_drop(&qp);
+    }
     return hd + D;
 }
 
@@ -40579,10 +41446,23 @@ static inline int32_t w_dec_limb_cap(size_t len) {
      * +3 covers that, the combine's untrimmed hn+pl product, and its carry. */
     return (int32_t)(len * 3322 / 64000) + 3;
 }
+/* Workspace for one whole D&C parse of `len` digits.  A level splitting
+ * len_i digits carves 2·w_dec_limb_cap(high) + limbs(5^p) + 1 with
+ * high ≤ ⅔·len_i (every split policy below keeps the high part under two
+ * thirds: plain ≤ ½, halving < ⅔, three-quarter < ½, midpoint ≤ ⅝ + 14)
+ * and p ≤ len_i, i.e. ≤ len_i·6752/64000 + 8 limbs.  The chain of live
+ * levels shrinks geometrically (Σ len_i ≤ 3·len), so 20256/64000 of len
+ * plus 8 per level (≤ 64 levels) bounds the whole recursion. */
+static inline size_t w_dec_parse_ws_bound(size_t len) {
+    return len * 20256 / 64000 + 8 * 64 + 32;
+}
 static int w_p10c_grow(void);
 static int32_t w_dec_parse_raw(const char *digits, size_t len, uint64_t *out) {
     if (len <= W_FROM_S_DC_DIGITS)
         return w_dec_parse_raw_base(digits, len, out);
+#if W_FROM_S_TLS_WS
+    w_dec_ws_reserve(w_dec_parse_ws_bound(len));   /* outermost level only */
+#endif
     /* Start with the largest cached-power width p = 18·2^j below len. */
     int j = 0;
     size_t p = 18;
@@ -40645,25 +41525,28 @@ static int32_t w_dec_parse_raw(const char *digits, size_t len, uint64_t *out) {
     }
     int32_t hcap = w_dec_limb_cap(len - p);
     uint64_t *tmp = NULL;
+    size_t tmp_limbs = 0;
+    int tmp_owned = 0;
     if (five || (!use_3q && !use_mid && w_p10c_five_build(j))) {
         if (!five) {
             five = w_p10c_five[j];
             n5 = w_p10c_five_len[j];
         }
         /* tmp: high parse | prod5: high·5^p */
-        tmp = (uint64_t *)malloc(
-            (2 * (size_t)hcap + (size_t)n5 + 1) * sizeof(uint64_t));
+        tmp_limbs = 2 * (size_t)hcap + (size_t)n5 + 1;
+        tmp = w_dec_scratch_take(tmp_limbs, W_FROM_S_TLS_WS, &tmp_owned);
     }
     if (!tmp) {
         if (use_3q || use_mid)
             return w_dec_parse_raw_base(digits, len, out);
         /* No odd-part cache: fall back to the plain P_j multiply + add. */
-        tmp = (uint64_t *)malloc((size_t)hcap * sizeof(uint64_t));
+        tmp_limbs = (size_t)hcap;
+        tmp = w_dec_scratch_take(tmp_limbs, W_FROM_S_TLS_WS, &tmp_owned);
         if (!tmp)
             return w_dec_parse_raw_base(digits, len, out);
         int32_t hn = w_dec_parse_raw(digits, len - p, tmp);
         if (hn == 0) {                   /* all-zero high digits: low only */
-            free(tmp);
+            w_dec_ws_drop(tmp, tmp_limbs, tmp_owned);
             return w_dec_parse_raw(digits + (len - p), p, out);
         }
         int32_t pl = w_p10c_len[j];
@@ -40675,7 +41558,7 @@ static int32_t w_dec_parse_raw(const char *digits, size_t len, uint64_t *out) {
         for (int32_t k = ln; carry && k < rn; k++)
             carry = (++out[k] == 0);
         if (carry) out[rn++] = 1;
-        free(tmp);
+        w_dec_ws_drop(tmp, tmp_limbs, tmp_owned);
         return rn;
     }
     /* low → out, high → tmp, prod5 = high·5^p → tmp+cap; then one fused
@@ -40684,7 +41567,7 @@ static int32_t w_dec_parse_raw(const char *digits, size_t len, uint64_t *out) {
     int32_t ln = w_dec_parse_raw(digits + (len - p), p, out);
     int32_t hn = w_dec_parse_raw(digits, len - p, tmp);
     if (hn == 0) {                       /* all-zero high digits: low only */
-        free(tmp);
+        w_dec_ws_drop(tmp, tmp_limbs, tmp_owned);
         return ln;
     }
     uint64_t *prod5 = tmp + hcap;
@@ -40710,12 +41593,29 @@ static int32_t w_dec_parse_raw(const char *digits, size_t len, uint64_t *out) {
         carry = (uint64_t)(sum >> 64);
     }
     while (rn > 0 && out[rn - 1] == 0) rn--;
-    free(tmp);
+    w_dec_ws_drop(tmp, tmp_limbs, tmp_owned);
     return rn;
 }
 
-static WValue w_bigint_from_dec_cstr(const char *s) {
-    if (!s) return w_box_int(0);
+/* Result buffer for the multi-limb parse.  The recycler hands the previous
+ * result back through the packed hot word (bigint_release_if_live parks it,
+ * and both w_value_free and the benchmark lanes release through it), and
+ * the requested class is the same every call for a given digit count, so
+ * the steady state is an exact-class hot hit: take it inline
+ * (bigint_alloc_raw_hot — one load, compare and store) instead of calling
+ * the out-of-line bigint_alloc_raw -> bigint_pool_take bucket search.  A
+ * miss takes the identical general path. */
+#ifndef W_FROM_S_HOT_ALLOC
+#define W_FROM_S_HOT_ALLOC 1
+#endif
+
+/* Parse the decimal text s[0..len): optional sign, digits with optional
+ * `_` separators, stopping at the first other byte.  The byte length bounds
+ * every load, so callers holding a WValue pass its known length instead of
+ * paying a strlen (w_bigint_from_dec_str); the C-string entry below is the
+ * strlen wrapper. */
+static WValue w_bigint_from_dec_cstr_n(const char *s, size_t len) {
+    if (!s || len == 0) return w_box_int(0);
     size_t i = 0;
     int neg = 0;
     if (s[0] == '-') { neg = 1; i = 1; }
@@ -40723,16 +41623,16 @@ static WValue w_bigint_from_dec_cstr(const char *s) {
     /* One scan finds the digit run (stop at the first non-digit) and whether
      * it contains underscores; a clean run is parsed straight from the
      * source with no copy.  The run is scanned a word at a time while clean
-     * (strlen bounds the loads), dropping to per-char handling at the first
-     * word that isn't all digits. */
+     * (the length bounds the loads), dropping to per-char handling at the
+     * first word that isn't all digits. */
     size_t start = i;
     size_t count = 0;
     int has_sep = 0;
     size_t k = start;
-    size_t limit = start + (strlen(s + start) & ~(size_t)7);
+    size_t limit = start + ((len - start) & ~(size_t)7);
     while (k < limit && w_dec_digits8(w_dec_load8(s + k))) k += 8;
     count = k - start;
-    for (; s[k]; k++) {
+    for (; k < len; k++) {
         char c = s[k];
         if (c == '_') { has_sep = 1; continue; }
         if (c < '0' || c > '9') break;
@@ -40742,7 +41642,7 @@ static WValue w_bigint_from_dec_cstr(const char *s) {
     if (count <= 18) {
         /* Fits a u64 (10^18 < 2^63): stream it, skipping separators. */
         uint64_t v = 0;
-        for (size_t k = start; s[k]; k++) {
+        for (size_t k = start; k < len; k++) {
             char c = s[k];
             if (c == '_') continue;
             if (c < '0' || c > '9') break;
@@ -40786,7 +41686,7 @@ static WValue w_bigint_from_dec_cstr(const char *s) {
         scratch = (char *)malloc(count);
         if (!scratch) return w_box_int(0);
         size_t d = 0;
-        for (size_t k = start; s[k] && d < count; k++) {
+        for (size_t k = start; k < len && d < count; k++) {
             char c = s[k];
             if (c == '_') continue;
             if (c < '0' || c > '9') break;
@@ -40794,15 +41694,32 @@ static WValue w_bigint_from_dec_cstr(const char *s) {
         }
         digits = scratch;
     }
+#if W_FROM_S_HOT_ALLOC
+    WBigint *r = bigint_alloc_raw_hot(w_dec_limb_cap(count));
+#else
     WBigint *r = bigint_alloc_raw(w_dec_limb_cap(count));
+#endif
     int32_t n = w_dec_parse_raw(digits, count, r->limbs);
     free(scratch);
     r->size = neg ? -n : n;
     return bigint_normalize(r);
 }
 
+static WValue w_bigint_from_dec_cstr(const char *s) {
+    if (!s) return w_box_int(0);
+    return w_bigint_from_dec_cstr_n(s, strlen(s));
+}
+
 WValue w_bigint_from_dec_str(WValue str) {
-    return w_bigint_from_dec_cstr(as_str(str));
+    /* as_str's contract (ropes flattened, anything else dies) with the
+     * byte length it already had in hand. */
+    char inline_buf[6];
+    const char *s;
+    size_t len;
+    if (w_is_rope(str)) str = w_rope_flatten(str);
+    if (!w_is_stringy(str)) die("expected string or symbol");
+    w_str_data(str, inline_buf, &s, &len);
+    return w_bigint_from_dec_cstr_n(s, len);
 }
 
 static inline WValue w_bigint_literal_clone(WValue template) {
@@ -53771,23 +54688,30 @@ static WValue w_ic_string_ord(WValue r, WValue *a, int c) {
 static WValue w_ic_string_to_i(WValue r, WValue *a, int c) {
     int base = 10;
     if (c >= 1 && w_is_int(a[0])) base = (int)w_as_int(a[0]);
-    const char *s = as_str(r);
+    char sbuf[6];
+    const char *s;
+    size_t slen;
+    if (w_is_rope(r)) r = w_rope_flatten(r);
+    if (!w_is_stringy(r)) die("expected string or symbol");
+    w_str_data(r, sbuf, &s, &slen);
     if (base == 10) {
         /* strtoll's contract without the libc round trip (which every
          * >18-digit string used to pay twice: strtoll to ERANGE, then the
          * bignum parser): skip leading whitespace, one optional sign, then
          * the longest digit run. A run that does not fit i64 goes to the
          * bignum parser exactly as the former ERANGE fallback did, so
-         * default Int stays arbitrary-precision. */
+         * default Int stays arbitrary-precision.  The known byte length
+         * bounds the scan and reaches the bignum parser (no strlen). */
         const char *p = s;
-        while (*p == ' ' || (*p >= '\t' && *p <= '\r')) p++;
+        const char *end = s + slen;
+        while (p < end && (*p == ' ' || (*p >= '\t' && *p <= '\r'))) p++;
         const char *signed_start = p;
         int neg = 0;
-        if (*p == '-') { neg = 1; p++; }
-        else if (*p == '+') p++;
+        if (p < end && *p == '-') { neg = 1; p++; }
+        else if (p < end && *p == '+') p++;
         uint64_t v = 0;
         int nd = 0;
-        for (; *p >= '0' && *p <= '9'; p++) {
+        for (; p < end && *p >= '0' && *p <= '9'; p++) {
             if (nd < 19) v = v * 10ULL + (uint64_t)(*p - '0');
             /* Twenty digits already overflow i64; the bignum parser rescans
              * the run itself, so stop counting here. */
@@ -53796,7 +54720,8 @@ static WValue w_ic_string_to_i(WValue r, WValue *a, int c) {
         if (nd == 0) return w_int(0);
         if (nd < 19 || (nd == 19 && v <= (uint64_t)INT64_MAX + (uint64_t)neg))
             return w_int(neg ? (int64_t)(0ULL - v) : (int64_t)v);
-        return w_bigint_from_dec_cstr(signed_start);
+        return w_bigint_from_dec_cstr_n(signed_start,
+                                        (size_t)(end - signed_start));
     }
     errno = 0;
     long long v = strtoll(s, NULL, base);
@@ -58051,6 +58976,18 @@ WValue w_bigint_release_dead_distinct(WValue old, WValue now) {
     bigint_release_if_live(w_as_bigint(old));
     return W_NIL;
 }
+
+/* Typed-lowering entries (compiler-emitted behind tag guards). */
+WValue w_bigint_negate_alias(WValue v) {
+    w_bigint_mark_shared(w_as_bigint(v));
+    return v ^ W_BIGINT_SIGN_BIT;
+}
+WValue w_bigint_abs_alias(WValue v) {
+    return bigint_abs_alias(v);
+}
+WValue w_string_to_i_direct(WValue r) { return w_ic_string_to_i(r, NULL, 0); }
+WValue w_string_to_f_direct(WValue r) { return w_ic_string_to_f(r, NULL, 0); }
+WValue w_string_to_d_direct(WValue r) { return w_ic_string_to_d(r, NULL, 0); }
 
 WValue w_bigint_alloc_hot(int64_t cap) {
     int64_t c = cap;

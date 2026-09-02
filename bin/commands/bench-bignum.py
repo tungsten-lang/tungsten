@@ -155,6 +155,26 @@ EXTERNAL_UNSUPPORTED = {
     "node": frozenset({"gcd", "lcm", "isqrt", "powmod"}),
 }
 DEFAULT_EXTERNAL_CELL_TIMEOUT_SECONDS = 30.0
+# Paired Tungsten-native measurement.  The native lane is its own binary, so
+# it cannot join the C harness's in-process Tungsten/GMP quartets; instead the
+# driver interleaves single-block processes of the two Tungsten binaries in
+# the same ABBA shape (native,C,C,native on even reps, C,native,native,C on
+# odd) and takes the median quartet log-ratio, anchoring the native time to
+# the C lane's paired ns exactly as the C harness anchors tw to gm.  Every
+# block is a separate process (~12 ms spawn + 0.5 ms warm-up), so a block
+# carries at least NATIVE_PAIR_MIN_BLOCK_MS of timed work and the cell total
+# is otherwise capped near what the C lane spends on the same cell.
+NATIVE_PAIR_MIN_BLOCK_MS = 20.0
+NATIVE_PAIR_MAX_ITERATIONS = 40_000_000      # native_lane.w MAX_ITERATIONS
+NATIVE_PAIR_REPS = 5
+NATIVE_PAIR_ACCURATE_REPS = 9
+# One native pilot block per cell, sized to this much C-lane-equivalent work,
+# bounds the block count: both lanes share one count, derived from the faster
+# lane so both reach the window, but the slower lane's block is capped at
+# NATIVE_PAIR_SLOW_LANE_WINDOWS windows.  Without the cap a lane that is
+# orders of magnitude slower on some cell turns a 20 ms block into seconds.
+NATIVE_PAIR_PILOT_MS = 0.5
+NATIVE_PAIR_SLOW_LANE_WINDOWS = 4.0
 
 
 def ratio_label(lane: str) -> str:
@@ -559,12 +579,174 @@ def external_sweep(
     return rows
 
 
+def timed_block(
+    language: str,
+    operation: str,
+    limbs: int,
+    iterations: int,
+    timeout: float | None,
+) -> float:
+    """One warmed timed block of exactly `iterations` operations in a fresh
+    process; returns ns per operation.
+
+    "tungsten" runs the C harness's --bench-boxed-block, "tungsten_native"
+    the native lane's --block.  Both check the cell against the C oracle,
+    warm for 500us, time once, and print the same six-field row.
+    """
+    if language == "tungsten":
+        command = [str(NATIVE), "--bench-boxed-block"]
+    else:
+        command = [str(TUNGSTEN_NATIVE_BINARY), "--block"]
+    command += [operation, str(limbs), str(iterations)]
+    output = run_checked(command, timeout=timeout)
+    fields = output.strip().split("\t")
+    if (
+        len(fields) != 6
+        or fields[0] != "block"
+        or fields[1] != language
+        or fields[2] != operation
+        or int(fields[3]) != limbs
+        or int(fields[4]) != iterations
+    ):
+        raise RuntimeError(
+            f"unexpected {language} block output for {operation}/{limbs}: "
+            f"{output.strip()!r}"
+        )
+    return float(fields[5])
+
+
+def c_lane_cell_budget_ms(limbs: int, runs: int, target_ms: float) -> float:
+    """Timed work the C harness spends on one cell: two lanes x reps x
+    window, including its own small-cell floors (>= 8 ms and >= 5 reps
+    through 8 limbs; see the --bench-boxed-sweep cell setup)."""
+    cell_target_ms = max(target_ms, 8.0) if limbs <= 8 else target_ms
+    cell_runs = max(runs, 5) if limbs <= 8 else runs
+    return 2.0 * cell_runs * cell_target_ms
+
+
+def paired_native_cell(
+    row: dict[str, Any],
+    reps: int,
+    runs: int,
+    target_ms: float,
+    cell_timeout_seconds: float,
+) -> None:
+    """Time the native lane paired against the C lane in ABBA quartets.
+
+    Each rep is one quartet of single-block processes -- native,C,C,native
+    on even reps, C,native,native,C on odd -- and yields one ratio
+    (N1+N2)/(C1+C2).  A quartet is four block-lengths wide, so drift cancels
+    to first order inside it and a host-load burst inflates blocks of the
+    SAME quartet together; the cell verdict is the MEDIAN quartet
+    log-ratio.  The native representative is then tungsten_ns *
+    exp(median), the quartet-consistent time, so tungsten_over_tungsten_native
+    IS the robust paired ratio -- the same construction the C harness uses
+    for tw = gm * exp(median) against GMP.
+
+    Block length: at least NATIVE_PAIR_MIN_BLOCK_MS of timed work (each block
+    pays ~12 ms of process spawn), or the C lane's own per-cell budget spread
+    over the 4*reps blocks when that is longer, so the paired cell costs
+    about what the C lane spent.  Both lanes run one shared iteration count
+    per block, calibrated once: the C lane's paired ns is already known, and
+    one short native pilot block (NATIVE_PAIR_PILOT_MS of C-equivalent work)
+    supplies the native side, so the count follows the faster lane while the
+    slower lane's block stays within NATIVE_PAIR_SLOW_LANE_WINDOWS windows.
+    """
+    operation, limbs = row["operation"], row["limbs"]
+    timeout = cell_timeout_seconds if cell_timeout_seconds > 0 else None
+    budget_ms = c_lane_cell_budget_ms(limbs, runs, target_ms)
+    block_ms = max(NATIVE_PAIR_MIN_BLOCK_MS, budget_ms / (4 * reps))
+    c_ns = row["tungsten_ns"]
+
+    def clamp_iterations(want: float) -> int:
+        return int(min(NATIVE_PAIR_MAX_ITERATIONS, max(1, round(want))))
+
+    def native(iterations: int) -> float:
+        return timed_block(
+            "tungsten_native", operation, limbs, iterations, timeout
+        )
+
+    def c_lane(iterations: int) -> float:
+        return timed_block("tungsten", operation, limbs, iterations, timeout)
+
+    log_ratios: list[float] = []
+    native_blocks: list[float] = []
+    c_blocks: list[float] = []
+    try:
+        pilot_ns = native(clamp_iterations(NATIVE_PAIR_PILOT_MS * 1e6 / c_ns))
+        fast_ns = max(0.001, min(c_ns, pilot_ns))
+        slow_ns = max(c_ns, pilot_ns)
+        block_iterations = clamp_iterations(
+            min(
+                block_ms * 1e6 / fast_ns,
+                NATIVE_PAIR_SLOW_LANE_WINDOWS * block_ms * 1e6 / slow_ns,
+            )
+        )
+        for rep in range(reps):
+            if rep & 1:                        # C,N,N,C
+                c1 = c_lane(block_iterations)
+                n1 = native(block_iterations)
+                n2 = native(block_iterations)
+                c2 = c_lane(block_iterations)
+            else:                              # N,C,C,N
+                n1 = native(block_iterations)
+                c1 = c_lane(block_iterations)
+                c2 = c_lane(block_iterations)
+                n2 = native(block_iterations)
+            native_blocks += [n1, n2]
+            c_blocks += [c1, c2]
+            if n1 + n2 > 0.0 and c1 + c2 > 0.0:
+                log_ratios.append(math.log((n1 + n2) / (c1 + c2)))
+    except subprocess.TimeoutExpired:
+        row["tungsten_native_status"] = "timeout"
+        row["tungsten_native_timeout_seconds"] = cell_timeout_seconds
+        print(
+            f"tungsten bench bignum: tungsten_native/{operation}/{limbs} "
+            f"timed out after {cell_timeout_seconds:g}s; continuing",
+            file=sys.stderr,
+            flush=True,
+        )
+        return
+    if not log_ratios:
+        raise RuntimeError(
+            f"paired native lane produced no quartets for {operation}/{limbs}"
+        )
+    log_ratios.sort()
+    native_blocks.sort()
+    c_blocks.sort()
+    count = len(log_ratios)
+    ratio_med = math.exp(log_ratios[count // 2])
+    ratio_lo = math.exp(log_ratios[count // 4])
+    ratio_hi = math.exp(log_ratios[(3 * count) // 4])
+    tungsten_ns = row["tungsten_ns"]
+    row["tungsten_native_status"] = "ok"
+    row["tungsten_native_method"] = "paired_quartets"
+    # Operations timed per rep per lane, the C row's `iterations` convention.
+    row["tungsten_native_iterations"] = 2 * block_iterations
+    row["tungsten_native_ns"] = tungsten_ns * ratio_med
+    row["tungsten_over_tungsten_native"] = 1.0 / ratio_med
+    # Quartet log-ratio IQR mapped onto ns exactly like tungsten_iqr_ns:
+    # the spread of the quartet-implied native time.
+    row["native_pair_iqr"] = tungsten_ns * (ratio_hi - ratio_lo)
+    row["native_pair_quartets"] = count
+    row["native_pair_block_iterations"] = block_iterations
+    row["native_pair_pilot_ns"] = pilot_ns
+    # Raw per-block medians (fresh-process, not quartet-anchored) so a
+    # calibration or spawn anomaly is visible next to the paired verdict.
+    row["native_pair_native_block_ns"] = native_blocks[len(native_blocks) // 2]
+    row["native_pair_c_block_ns"] = c_blocks[len(c_blocks) // 2]
+    row.setdefault("samples", {})["native_pair_log_ratios"] = log_ratios
+
+
 def add_external_lanes(
     rows: list[dict[str, Any]],
     languages: list[str],
     runs: int,
     target_ms: float,
     cell_timeout_seconds: float,
+    *,
+    native_paired: bool = True,
+    native_reps: int = NATIVE_PAIR_REPS,
 ) -> None:
     if not rows:
         return
@@ -578,6 +760,12 @@ def add_external_lanes(
             for row in rows:
                 row[f"{language}_status"] = "unsupported"
             continue
+        if language == "tungsten_native" and native_paired:
+            for row in rows:
+                paired_native_cell(
+                    row, native_reps, runs, target_ms, cell_timeout_seconds
+                )
+            continue
         external = external_sweep(
             language, operation, sizes, runs, target_ms,
             cell_timeout_seconds,
@@ -585,6 +773,8 @@ def add_external_lanes(
         for limbs, measurement in external.items():
             row = by_size[limbs]
             row[f"{language}_status"] = measurement["status"]
+            if language == "tungsten_native":
+                row["tungsten_native_method"] = "min_of_runs"
             if measurement["status"] == "timeout":
                 row[f"{language}_timeout_seconds"] = measurement[
                     "timeout_seconds"
@@ -1278,6 +1468,13 @@ def print_results_header(metadata: dict[str, Any]) -> None:
         "Immutable lanes keep the previous result live while computing the "
         f"next; {mutable} alternate two mutable destinations."
     )
+    if metadata.get("tungsten_native_pairing") == "paired_quartets":
+        print(
+            "Tungsten-native is paired against Tungsten C in "
+            f"{metadata['native_pair_reps']} ABBA quartets of single-block "
+            f"processes (>= {metadata['native_pair_min_block_ms']:g} ms "
+            "each); W/native is exp(median quartet log-ratio)."
+        )
     if metadata.get("external_cell_timeout_seconds", 0) > 0:
         print(
             "Tungsten-native and optional external-lane cells have a "
@@ -1552,6 +1749,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--native-unpaired",
+        action="store_true",
+        help=(
+            "time the Tungsten native lane with its own min-of-runs --sweep "
+            "in one process per cell (the pre-pairing method) instead of the "
+            "default ABBA quartets paired against the Tungsten C lane"
+        ),
+    )
+    parser.add_argument(
         "--all",
         action="store_true",
         help="enable the Python, Rust, Odin, Go, Node, and Boost lanes",
@@ -1667,6 +1873,10 @@ def main() -> int:
         args.no_capacity = True
     if args.runs is None:
         args.runs = 9 if args.accurate else 3
+    native_paired = not args.native_unpaired and not args.worker_sweep
+    native_reps = (
+        NATIVE_PAIR_ACCURATE_REPS if args.accurate else NATIVE_PAIR_REPS
+    )
     if args.all:
         args.python = True
         args.rust = True
@@ -1901,6 +2111,11 @@ def main() -> int:
         "runs": args.runs,
         "python_lane": bool(args.python),
         "tungsten_native_lane": "tungsten_native" in lanes,
+        "tungsten_native_pairing": (
+            "paired_quartets" if native_paired else "min_of_runs"
+        ),
+        "native_pair_reps": native_reps if native_paired else 0,
+        "native_pair_min_block_ms": NATIVE_PAIR_MIN_BLOCK_MS,
         "rust_lane": bool(args.rust),
         "odin_lane": bool(args.odin),
         "go_lane": bool(args.go),
@@ -2011,6 +2226,23 @@ def main() -> int:
             "native_lane_order": (
                 "alternate Tungsten-first and GMP-first samples"
             ),
+            "tungsten_native_pairing": (
+                "each cell runs reps quartets of single-block processes "
+                "interleaving the native-lane binary (--block) and the C "
+                "harness (--bench-boxed-block) as native,C,C,native / "
+                "C,native,native,C with one shared iteration count "
+                "calibrated from the C lane's paired ns and one native pilot "
+                "block (the faster lane fills the window, the slower lane's "
+                "block is capped at 4 windows); tungsten_native_ns "
+                "= tungsten_ns * exp(median quartet log-ratio), "
+                "native_pair_iqr = tungsten_ns * (exp(q3) - exp(q1)); "
+                "blocks carry >= native_pair_min_block_ms of timed work "
+                "(each is a ~12 ms process spawn) or the C lane's per-cell "
+                "budget / (4 * reps), whichever is longer"
+                if native_paired
+                else "one --sweep process per cell, min of runs, "
+                "independently calibrated (--native-unpaired)"
+            ),
             "calibration": (
                 "the shared native iteration count is derived from the "
                 "faster Tungsten/GMP pilot so both lanes reach the requested "
@@ -2106,6 +2338,8 @@ def main() -> int:
                     args.runs,
                     target_ms,
                     args.external_cell_timeout,
+                    native_paired=native_paired,
+                    native_reps=native_reps,
                 )
                 for row in operation_rows:
                     update_fastest(row, lanes)

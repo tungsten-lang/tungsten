@@ -61,6 +61,11 @@
     key = current + suffix
     method_ast = mod[:class_method_asts][key]
     if method_ast != nil
+      # A bodyless declaration (`-> ord` on Char, `Number#<=>`) is
+      # implemented by a runtime intrinsic or a subclass the walk has
+      # already passed; its compiled stub is not the runtime's selection.
+      if !is_ast_node?(method_ast) || method_ast.body == nil || method_ast.body.size() == 0
+        return nil
       return mod[:class_method_fn_names][key]
     # Runtime lookup probes this class's own table before walking to the
     # superclass, and a method registered with a default-parameter range
@@ -103,13 +108,31 @@
   cname = nil
   if recv_type == :BigInt || recv_type == :bigint
     cname = "BigInt"
-  if cname == nil
+  entry = nil
+  if cname != nil
+    entry = overload_exact_tag_entry(cname)
+  elsif env("TUNGSTEN_CORE_TAGGED_DEVIRT_ALL") != "0"
+    # Other Core value classes whose dispatch key has no inline-cache
+    # table resolve purely through the type-class walk as well. Tag/mask
+    # spellings follow w_dispatch_key: Instant is the bare 0xFFF8 top tag;
+    # Char carries subtype 3 in bits 46-47 of the 0xFFFC family; Rational
+    # and Date are packed (0xFFFE) subtypes 2 and 4 in bits 45-47.
+    if recv_type == :Instant
+      cname = "Instant"
+      entry = {shape: :top_tag, tag: "-2251799813685248", mask: "-281474976710656"}
+    elsif recv_type == :Char
+      cname = "Char"
+      entry = {shape: :top_tag, tag: "-914793674309632", mask: "-70368744177664"}
+    elsif recv_type == :Rational
+      cname = "Rational"
+      entry = {shape: :top_tag, tag: "-492581209243648", mask: "-35184372088832"}
+    elsif recv_type == :Date
+      cname = "Date"
+      entry = {shape: :top_tag, tag: "-422212465065984", mask: "-35184372088832"}
+  if cname == nil || entry == nil
     return nil
   class_node = ctx[:mod][:known_classes][cname]
   if class_node == nil || !is_ast_node?(class_node) || ast_kind(class_node) != :class_def
-    return nil
-  entry = overload_exact_tag_entry(cname)
-  if entry == nil
     return nil
   {class_name: cname, entry: entry}
 
@@ -162,7 +185,27 @@
     site_id = next_call_site_id(ctx[:mod])
   fast = next_temp(wfn)
   if intrinsic
-    emit_wire_call_direct_i64(wfn, nil, args, nil, site_id, "w_spaceship", node.col, node.line, fast)
+    # Both operands are guard-proven heap BigInts: one magnitude compare,
+    # then the sign boxed inline (int tag | sign & 2^48-1).
+    cmp_raw = next_temp(wfn)
+    emit_wire_call_direct_i64(wfn, nil, args, nil, site_id, "__w_bigint_compare_src", node.col, node.line, cmp_raw)
+    cmp_zero = next_temp(wfn)
+    emit_wire_and_i64(wfn, cmp_raw, "0", cmp_zero)
+    cmp_gt = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cmp_raw, "sgt", "0", cmp_gt)
+    cmp_lt = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cmp_raw, "slt", "0", cmp_lt)
+    cmp_pos = next_temp(wfn)
+    emit_wire_select_i64(wfn, cmp_gt, cmp_zero, cmp_pos, "1")
+    cmp_neg = next_temp(wfn)
+    emit_wire_select_i64(wfn, cmp_lt, cmp_zero, cmp_neg, "-1")
+    cmp_sgn = next_temp(wfn)
+    emit_wire_add_i64(wfn, cmp_pos, cmp_neg, cmp_sgn)
+    cmp_masked = next_temp(wfn)
+    emit_wire_and_i64(wfn, cmp_sgn, "281474976710655", cmp_masked)
+    emit_wire_xor_i64(wfn, cmp_masked, "-1688849860263936", fast)
+  elsif core_fn == "w_bigint_abs_alias"
+    emit_wire_call_direct_i64(wfn, nil, [receiver_reg], nil, site_id, core_fn, node.col, node.line, fast)
   else
     emit_wire_call_direct_i64(wfn, nil, args, nil, site_id, core_fn, node.col, node.line, fast)
   emit_wire_store_i64(wfn, slot, fast)
@@ -1279,6 +1322,13 @@
   # consuming machine op (`chk ^ s.size()`) never boxes. The emitted helper
   # extracts SSO-5 length with a memory(none) leaf; its read-only fallback
   # reads slab/heap/rope lengths without flattening ropes.
+  if recv_node != nil && node.block == nil && (node.args == nil || node.args.size() == 0) && recv_type == :string && method_name in ("to_i" "to_f" "to_d") && env("TUNGSTEN_STRING_TYPED_CONVERT") != "0"
+    receiver_val = lower_expression(ctx, recv_node)
+    receiver_reg = ensure_i64_value(wfn, receiver_val)
+    temp = next_temp(wfn)
+    emit_wire_call_direct_i64(wfn, nil, [receiver_reg], nil, nil, "w_string_" + method_name + "_direct", nil, nil, temp)
+    return typed_value(:i64, temp)
+
   if recv_node != nil && node.block == nil && (node.args == nil || node.args.size() == 0) && method_name == "size" && recv_type == :string
     receiver_val = lower_expression(ctx, recv_node)
     receiver_reg = ensure_i64_value(wfn, receiver_val)
@@ -2249,6 +2299,10 @@
       core_fn = locked_direct_method_fn(ctx[:mod], core_fact[:class_name], method_name, node.args.size())
       if core_fn != nil
         core_intrinsic = core_tagged_spaceship_intrinsic?(ctx, node, method_name, core_fn)
+        # BigInt#abs from Core is an O(1) alias flip; call the runtime alias
+        # entry instead of the compiled source worker.
+        if core_fact[:class_name] == "BigInt" && method_name == "abs" && node.args.size() == 0 && env("TUNGSTEN_BIGINT_TYPED_ABS") != "0" && core_operator_untouched?(ctx[:mod], "BigInt", "abs")
+          core_fn = "w_bigint_abs_alias"
         core_guard = emit_core_tag_guard_fast_arm(ctx, node, receiver_reg, arg_regs, core_fn, core_fact[:entry], core_intrinsic)
   if core_guard == nil && ctx[:mod][:method_tables_locked] == true && node.block == nil
     locked_fact = receiver_flow_class_fact(ctx, node)

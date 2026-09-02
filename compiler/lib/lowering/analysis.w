@@ -2465,6 +2465,37 @@
 # only ever come from runtime arithmetic entries. Callers require the ROOT to
 # be an operator: a bare `r = y` is a slot copy that mints an unmarked alias
 # and must keep taking the kill arm.
+# Core readers that neither retain their receiver nor hand back an
+# unmarked alias of it (abs/negation aliases are shared-marked by the
+# runtime). Only admitted for the LAST top-level statement of a body.
+-> mut_tail_reader_call?(node)
+  if node == nil || !is_ast_node?(node) || ast_kind(node) != :call
+    return false
+  if node.block != nil || node.receiver == nil || !is_ast_node?(node.receiver)
+    return false
+  if !(node.name in ("to_s" "to_f" "bit_length" "abs" "zero?" "even?" "odd?" "negative?" "positive?" "hash" "inspect"))
+    return false
+  if !mut_pure_arith_rhs?(node.receiver)
+    return false
+  if node.args != nil
+    j = 0
+    while j < node.args.size()
+      if !mut_pure_arith_rhs?(node.args[j])
+        return false
+      j += 1
+  true
+
+-> mut_tail_reader?(st)
+  k = ast_kind(st)
+  if k == :call
+    return mut_tail_reader_call?(st)
+  if k in (:print :puts :return)
+    v = st.value
+    if v == nil || !is_ast_node?(v)
+      return false
+    return mut_pure_arith_rhs?(v) || mut_tail_reader_call?(v)
+  false
+
 -> mut_pure_arith_rhs?(node)
   if node == nil || !is_ast_node?(node)
     return false
@@ -2518,6 +2549,13 @@
         i += 1
         next
       if k == :return && st.value != nil && is_ast_node?(st.value) && ast_kind(st.value) == :var
+        i += 1
+        next
+      # A final read-only use of the candidate — a non-retaining Core
+      # reader (`acc.to_s`, `acc.bit_length`), a print, or a return of such
+      # a call — is also an ownership transfer at scope end: no statement
+      # follows that could release or mutate the buffer it observes.
+      if mut_tail_reader?(st)
         i += 1
         next
     if k == :assign && st.target != nil && is_ast_node?(st.target) && ast_kind(st.target) == :var

@@ -607,6 +607,7 @@
   # Top-level bindings also live in globals other functions may read, so
   # main is excluded.
   release_old = nil
+  release_dest = nil
   if ast_kind(target) == :var && !mut_target_set && node.type_hint == nil && wfn[:name] != "main" && ctx[:mut_accumulators] != nil && ctx[:mut_accumulators][target.name] == true && env("TUNGSTEN_BIGINT_RELEASE_REASSIGN") != "0"
     v = node.value
     rel_ty = ctx[:var_types][target.name]
@@ -618,6 +619,19 @@
         if release_ptr != nil
           release_old = next_temp(wfn)
           emit_wire_load_i64(wfn, release_ptr, release_old)
+      # Register-carried handoff (E4 stage 5): `r = a + b` / `r = a - b`
+      # with two BigInt-typed operand vars other than r writes the sum into
+      # r's dying buffer through the dest entries the rotation shape uses;
+      # a refusal falls back to the allocating op and the release below
+      # (pointer-equal skip) then recycles the old buffer as before.
+      if release_old != nil && ast_kind(v) == :binary_op && v.op in (:PLUS :MINUS) && env("TUNGSTEN_BIGINT_RELEASE_DEST") != "0"
+        dl = v.left
+        dr = v.right
+        if dl != nil && dr != nil && is_ast_node?(dl) && is_ast_node?(dr) && ast_kind(dl) == :var && ast_kind(dr) == :var && dl.name != target.name && dr.name != target.name
+          lty = ctx[:var_types][dl.name]
+          rty = ctx[:var_types][dr.name]
+          if (lty == :BigInt || is_bigint_type(lty)) && (rty == :BigInt || is_bigint_type(rty))
+            release_dest = v.op == :MINUS ? "w_bigint_sub_dest" : "w_bigint_add_dest"
 
   # Ivar assignment: @name = value
   if ast_kind(target) == :ivar
@@ -929,7 +943,14 @@
       ctx[:fused_reuse_value] = old_value
       auto_reuse_set = true
 
-  val = lower_expression(ctx, node.value)
+  if release_dest != nil
+    rd_a = ensure_i64_value(wfn, lower_expression(ctx, node.value.left))
+    rd_b = ensure_i64_value(wfn, lower_expression(ctx, node.value.right))
+    rd_tmp = next_temp(wfn)
+    emit_wire_call_direct_i64(wfn, nil, [release_old, rd_a, rd_b], nil, nil, release_dest, nil, nil, rd_tmp)
+    val = typed_value(:i64, rd_tmp)
+  else
+    val = lower_expression(ctx, node.value)
   if auto_reuse_set
     ctx[:fused_reuse_value] = nil
   if hint_array_etype == "f64" || hint_array_etype == "f32"
@@ -1038,8 +1059,21 @@
 
   val_reg = ensure_i64_value(wfn, val)
   if release_old != nil
+    # Inline tag guard: inline ints (the seed, demoted values) skip the
+    # call entirely; the runtime entry keeps the pointer-identity test.
+    rl_entry = overload_exact_tag_entry("BigInt")
+    rl_m = next_temp(wfn)
+    emit_wire_and_i64(wfn, release_old, rl_entry[:mask], rl_m)
+    rl_c = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, rl_m, "eq", rl_entry[:tag], rl_c)
+    rl_call_label = next_label(wfn, "rrel.call")
+    rl_done_label = next_label(wfn, "rrel.done")
+    emit_wire_cond_br(wfn, rl_c, rl_done_label, nil, rl_call_label)
+    start_block(wfn, rl_call_label)
     release_tmp = next_temp(wfn)
     emit_wire_call_direct_i64(wfn, nil, [release_old, val_reg], nil, nil, "w_bigint_release_dead_distinct", nil, nil, release_tmp)
+    emit_wire_br(wfn, rl_done_label, nil, nil)
+    start_block(wfn, rl_done_label)
 
   # Track type for optimization — explicit hint takes priority over inference
   if node.type_hint != nil

@@ -1733,7 +1733,8 @@ static inline WValue bench_mod84_divisor_toggle(WValue a, WValue b) {
 static uint64_t bench_div_recip_reuse_counter;
 static inline WValue bench_div_recip_reuse(WValue a, WValue b, int mod) {
     if (bench_div_recip_reuse_counter++ % BENCH_DIV_RECIP_REUSE == 0)
-        bn_div_recip_cache.state = 0;
+        for (int ri = 0; ri < BN_DIV_RECIP_CACHE_ENTRIES; ri++)
+            bn_div_recip_caches[ri].state = 0;
     return mod ? bigint_mod_any(a, b) : bigint_div_any(a, b);
 }
 DEFINE_BENCH_LANE(div, bench_div_recip_reuse(a, b, 0))
@@ -6943,6 +6944,35 @@ int main(int argc, char **argv) {
             fflush(stdout);
         }
         printf("tag-sign differential: CLEAN\n");
+        return 0;
+    }
+    /*
+     * One warmed Tungsten block of exactly ITERS operations in a fresh
+     * process, printed in the row shape the native lane's `--block` mode
+     * uses.  The driver interleaves this binary with the native-lane binary
+     * as N,C,C,N / C,N,N,C quartets and takes the median quartet log-ratio,
+     * the same statistic the in-process T/G quartets below use.
+     * --bench-boxed-compare is the wrong primitive for that: its GMP half
+     * doubles the process's timed work and puts a GMP block, not a Tungsten
+     * one, next to the neighbouring native block.
+     */
+    if (argc == 5 && strcmp(argv[1], "--bench-boxed-block") == 0) {
+        int op = bench_boxed_op_parse(argv[2]);
+        int32_t limbs = (int32_t)atoi(argv[3]);
+        int iters = atoi(argv[4]);
+        if (op < 0)
+            die("boxed block op must be add/sub/mul/sqr/div/mod/gcd/"
+                "and/or/xor/shl/shr/cmp/neg/abs/pow/powmod/lcm/isqrt/"
+                "tostr/fromstr");
+        if (limbs <= 0 || iters <= 0)
+            die("boxed block expects positive limbs and iterations");
+#ifdef HAVE_GMP
+        check_boxed_op_against_gmp(op, limbs);
+#endif
+        bench_warm_seconds = 0.0005;   /* the native lane's WARM_NS */
+        double tw = bench_boxed_result_churn(op, limbs, iters, 1);
+        printf("block\ttungsten\t%s\t%d\t%d\t%.3f\n",
+               argv[2], limbs, iters, tw);
         return 0;
     }
     if ((argc == 5 || argc == 6) &&

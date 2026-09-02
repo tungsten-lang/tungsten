@@ -1498,6 +1498,55 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   want = node.op == :EQ ? eq_val : !eq_val
   want ? :true_const : :false_const
 
+# Operator selector spelling for the class-method registry keys.
+-> binary_op_selector_name(op)
+  if op == :PLUS
+    return "+"
+  if op == :MINUS
+    return "-"
+  if op == :STAR
+    return "*"
+  if op == :SLASH
+    return "/"
+  if op == :PERCENT
+    return "%"
+  if op == :AMPERSAND
+    return "&"
+  if op == :PIPE
+    return "|"
+  if op == :CARET
+    return "^"
+  if op == :LSHIFT
+    return "<<"
+  if op == :RSHIFT
+    return ">>"
+  nil
+
+# True when every registered definition of `Class#selector` comes from Core:
+# a program reopen or overload would be reachable only through the source
+# seam, so a direct C entry may replace the seam only when none exists.
+-> core_operator_untouched?(mod, class_name, selector)
+  if selector == nil
+    return false
+  cache = mod[:core_operator_untouched_cache]
+  if cache == nil
+    cache = {}
+    mod[:core_operator_untouched_cache] = cache
+  key = class_name + "#" + selector
+  cached = cache[key]
+  if cached != nil
+    return cached
+  prefix = class_name + "." + selector + "/"
+  untouched = true
+  asts = mod[:class_method_asts]
+  if asts != nil
+    asts.keys().each -> (k)
+      if k.starts_with?(prefix)
+        if !definition_from_core?(asts[k])
+          untouched = false
+  cache[key] = untouched
+  untouched
+
 -> lower_binary_op(ctx, node)
   wfn = ctx[:func]
   op = node.op
@@ -2275,7 +2324,14 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # their own specialization arms migrate.
   # `/` and `%` join: their seams route the whole positive 2n/n and 1-limb
   # divisor shapes natively and have no one-limb C-favored arm to protect.
-  declared_bigint_add = op in (:PLUS :SLASH :PERCENT) && lt == :BigInt && rt == :BigInt
+  declared_bigint_op = op in (:PLUS :SLASH :PERCENT)
+  # `-` default OFF: the guarded route helps sub@1 but loses sub@2..64
+  # (r2 isolation). Opt in with TUNGSTEN_BIGINT_DECLARED_MINUS=1.
+  if !declared_bigint_op && op == :MINUS && env("TUNGSTEN_BIGINT_DECLARED_MINUS") == "1"
+    declared_bigint_op = true
+  if !declared_bigint_op && op in (:AMPERSAND :PIPE :CARET) && env("TUNGSTEN_BIGINT_DECLARED_BITWISE") != "0"
+    declared_bigint_op = true
+  declared_bigint_add = declared_bigint_op && lt == :BigInt && rt == :BigInt
   closed_mul1_square = node.left != nil && node.right != nil && is_ast_node?(node.left) && is_ast_node?(node.right) && ast_kind(node.left) == :var && ast_kind(node.right) == :var && node.left.name == node.right.name
   # Once Core provenance and both method tables are locked, an exact
   # `(BigInt BigInt)` multiplication can enter the exact built-in BigInt
@@ -2643,6 +2699,44 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     emit_wire_load_i64(wfn, cm_slot, cm_result)
     return typed_value(:i64, cm_result)
 
+  # Typed shift route: a BigInt-typed left operand with an integer count.
+  # The polymorphic entry tests strbuf, string, rope and array before its
+  # integer arm; w_bigint_shl/shr take the decoded count straight to the
+  # limb kernels. Both operands are guarded (the slot may hold a demoted
+  # int; the count may have promoted), and the slow arm is the ordinary
+  # helper. Skipped when the program reopened BigInt#<< / #>>.
+  if op in (:LSHIFT :RSHIFT) && !bidir_mut && (lt == :BigInt || is_bigint_type(lt)) && env("TUNGSTEN_BIGINT_TYPED_SHIFT") == "1" && core_operator_untouched?(ctx[:mod], "BigInt", op == :LSHIFT ? "<<" : ">>")
+    sh_entry = overload_exact_tag_entry("BigInt")
+    sh_m1 = next_temp(wfn)
+    emit_wire_and_i64(wfn, lhs_reg, sh_entry[:mask], sh_m1)
+    sh_c1 = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, sh_m1, "eq", sh_entry[:tag], sh_c1)
+    sh_m2 = next_temp(wfn)
+    emit_wire_and_i64(wfn, rhs_reg, sh_entry[:mask], sh_m2)
+    sh_c2 = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, sh_m2, "eq", "-1688849860263936", sh_c2)
+    sh_both = next_temp(wfn)
+    emit_wire_and_i1(wfn, sh_c1, sh_c2, sh_both)
+    sh_fast_label = next_label(wfn, "tshift.fast")
+    sh_slow_label = next_label(wfn, "tshift.slow")
+    sh_done_label = next_label(wfn, "tshift.done")
+    sh_slot = ensure_var_slot(wfn, "__tshift." + sh_done_label)
+    emit_wire_cond_br(wfn, sh_both, sh_slow_label, nil, sh_fast_label)
+    start_block(wfn, sh_fast_label)
+    sh_fast = next_temp(wfn)
+    emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, op == :LSHIFT ? "w_bigint_shl" : "w_bigint_shr", nil, nil, sh_fast)
+    emit_wire_store_i64(wfn, sh_slot, sh_fast)
+    emit_wire_br(wfn, sh_done_label, nil, nil)
+    start_block(wfn, sh_slow_label)
+    sh_slow = next_temp(wfn)
+    emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, op == :LSHIFT ? "__w_shl_fast" : "__w_shr_fast", nil, nil, sh_slow)
+    emit_wire_store_i64(wfn, sh_slot, sh_slow)
+    emit_wire_br(wfn, sh_done_label, nil, nil)
+    start_block(wfn, sh_done_label)
+    sh_res = next_temp(wfn)
+    emit_wire_load_i64(wfn, sh_slot, sh_res)
+    return typed_value(:i64, sh_res)
+
   if op in (:PLUS :MINUS :STAR :AMPERSAND :PIPE :CARET :SLASH :PERCENT) && !bidir_mut && ((is_bigint_type(lt) && is_bigint_type(rt)) || declared_bigint_add)
     # Seam symbol per op (strong = the compiled typed worker, weak = the C
     # kernel) and the polymorphic entry for the guard's slow arm. The
@@ -2673,6 +2767,32 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     elsif op == :PERCENT
       bidir_fast = "__w_bigint_mod_src"
       bidir_slow = "w_mod"
+    # Declared (BigInt BigInt) pairs: the guard already proves two heap
+    # BigInts, and every source worker's equal-length arm is a ccall back
+    # into the same C boxed entry after a sign/shape prologue of its own.
+    # When the program has not reopened the operator on BigInt (a reopen
+    # would only be reachable through the seam), enter the C entry directly.
+    # The one-limb-operand shapes the workers handle natively stay on the
+    # seam for `*` (its locked route is separate) and are measured for the
+    # rest by the TUNGSTEN_BIGINT_DECLARED_C_DIRECT A/B knob.
+    if lt == :BigInt && rt == :BigInt && env("TUNGSTEN_BIGINT_DECLARED_C_DIRECT") == "1"
+      c_direct = nil
+      if op == :PLUS
+        c_direct = "w_bigint_add"
+      elsif op == :MINUS
+        c_direct = "w_bigint_sub"
+      elsif op == :SLASH
+        c_direct = "w_bigint_div"
+      elsif op == :PERCENT
+        c_direct = "w_bigint_mod"
+      elsif op == :AMPERSAND
+        c_direct = "w_bigint_and_c"
+      elsif op == :PIPE
+        c_direct = "w_bigint_or_c"
+      elsif op == :CARET
+        c_direct = "w_bigint_xor_c"
+      if c_direct != nil && core_operator_untouched?(ctx[:mod], "BigInt", binary_op_selector_name(op))
+        bidir_fast = c_direct
     # Tag/mask spellings come from the generated B3 table — the same
     # single source the typed-overload gate emission uses.
     bidir_entry = overload_exact_tag_entry("BigInt")
@@ -2950,6 +3070,34 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
 
   if node.op == :MINUS
     temp = next_temp(wfn)
+    # A BigInt-typed operand: the negation is an O(1) shared-mark + sign
+    # flip alias. Guard on the tag (the slot may hold a demoted int) and
+    # skip the polymorphic entry's kind ladder.
+    if ut != nil && (ut == :BigInt || is_bigint_type(ut)) && env("TUNGSTEN_BIGINT_TYPED_NEG") != "0"
+      ng_entry = overload_exact_tag_entry("BigInt")
+      ng_m = next_temp(wfn)
+      emit_wire_and_i64(wfn, operand_reg, ng_entry[:mask], ng_m)
+      ng_c = next_temp(wfn)
+      emit_wire_icmp_i64(wfn, ng_m, "eq", ng_entry[:tag], ng_c)
+      ng_fast_label = next_label(wfn, "tneg.fast")
+      ng_slow_label = next_label(wfn, "tneg.slow")
+      ng_done_label = next_label(wfn, "tneg.done")
+      ng_slot = ensure_var_slot(wfn, "__tneg." + ng_done_label)
+      emit_wire_cond_br(wfn, ng_c, ng_slow_label, nil, ng_fast_label)
+      start_block(wfn, ng_fast_label)
+      ng_fast = next_temp(wfn)
+      emit_wire_call_direct_i64(wfn, nil, [operand_reg], nil, nil, "w_bigint_negate_alias", nil, nil, ng_fast)
+      emit_wire_store_i64(wfn, ng_slot, ng_fast)
+      emit_wire_br(wfn, ng_done_label, nil, nil)
+      start_block(wfn, ng_slow_label)
+      ng_slow = next_temp(wfn)
+      emit_wire_call_direct_i64(wfn, nil, [operand_reg], nil, nil, "w_neg", nil, nil, ng_slow)
+      emit_wire_store_i64(wfn, ng_slot, ng_slow)
+      emit_wire_br(wfn, ng_done_label, nil, nil)
+      start_block(wfn, ng_done_label)
+      ng_res = next_temp(wfn)
+      emit_wire_load_i64(wfn, ng_slot, ng_res)
+      return typed_value(:i64, ng_res)
     emit_wire_call_direct_i64(wfn, nil, [operand_reg], nil, nil, "w_neg", nil, nil, temp)
     return typed_value(:i64, temp)
 

@@ -204,13 +204,27 @@ POW_EXPONENT = 5
     i += 1
   finish_sample(started, iterations, result, checksum)
 
+# Compare is pure: the compiled `<=>` route is a magnitude compare the
+# optimizer would hoist out of the timing loop (it did, once the route no
+# longer went through an opaque call). Launder both operands through an
+# empty asm barrier every iteration, exactly as the C lane does, so each
+# iteration performs one compare.
+fn __bench_launder(x) (i64) i64
+  ll <<~IR
+    entry:
+      %r = call i64 asm sideeffect "", "=r,0"(i64 %x)
+      ret i64 %r
+  IR
+
 -> time_cmp(a, b, iterations)(BigInt BigInt i64)
   result = nil
   checksum = 0 ## i64
   i = 0 ## i64
   started = thread_cpu_ns()
   while i < iterations
-    next_result = a <=> b
+    la = wvalue_from_bits(__bench_launder(wvalue_bits(a))) ## big
+    lb = wvalue_from_bits(__bench_launder(wvalue_bits(b))) ## big
+    next_result = la <=> lb
     checksum += (wvalue_bits(next_result) & 255) + i
     result = next_result
     i += 1
@@ -467,19 +481,27 @@ POW_EXPONENT = 5
     i += 1
   << "Tungsten native bignum lane: self-test passed"
 
+# Operands for one timed cell, checked once against the C oracle before any
+# timing so a wrong answer can never be reported as a fast one.
+-> build_checked_operands(operation, limbs)
+  values = build_operands(operation, limbs)
+  got = apply_once(operation, values[0], values[1], values[2], values[3])
+  expected = native_reference(
+    operation, values[0], values[1], values[2], values[3]
+  )
+  assert_native_equal(operation, got, expected)
+  release_value(got)
+  release_value(expected)
+  values
+
 -> run_sweep(operation, limbs, runs, target_ms)
   if limbs < 1 || limbs > 1_048_576 || runs < 1 || target_ms <= 0
     raise "invalid --sweep arguments"
-  values = build_operands(operation, limbs)
+  values = build_checked_operands(operation, limbs)
   a = values[0]
   b = values[1]
   modulus = values[2]
   decimal = values[3]
-  got = apply_once(operation, a, b, modulus, decimal)
-  expected = native_reference(operation, a, b, modulus, decimal)
-  assert_native_equal(operation, got, expected)
-  release_value(got)
-  release_value(expected)
 
   target_ns = target_ms * 1_000_000.0
   iterations = calibrate(
@@ -496,6 +518,19 @@ POW_EXPONENT = 5
     run += 1
   << "external\ttungsten_native\t" + operation + "\t" + limbs.to_s() + "\t" + iterations.to_s() + "\t" + best.to_s()
 
+# One warmed timed block of exactly ITERATIONS operations, run once.  The
+# driver pairs these single-block processes against the C harness's
+# `--bench-boxed-block` in ABBA quartets, so the process is calibrated by
+# its caller and reports the one sample it took: no pilot, no min-of-runs.
+-> run_block(operation, limbs, iterations)
+  if limbs < 1 || limbs > 1_048_576 || iterations < 1 || iterations > MAX_ITERATIONS
+    raise "invalid --block arguments"
+  values = build_checked_operands(operation, limbs)
+  sample = warmed_sample(
+    operation, values[0], values[1], values[2], values[3], limbs, iterations
+  )
+  << "block\ttungsten_native\t" + operation + "\t" + limbs.to_s() + "\t" + iterations.to_s() + "\t" + sample.to_s()
+
 Tungsten.PROTECT_THE_CORE!
 Tungsten.LOCK_THE_DOORS!
 
@@ -503,7 +538,10 @@ args = argv()
 if args.size == 1 && args[0] == "--self-test"
   run_self_test()
   exit(0)
+if args.size == 4 && args[0] == "--block"
+  run_block(args[1], args[2].to_i, args[3].to_i)
+  exit(0)
 if args.size != 5 || args[0] != "--sweep"
-  << "usage: bench_big_math_tungsten_native --self-test | --sweep OP LIMBS RUNS TARGET_MS"
+  << "usage: bench_big_math_tungsten_native --self-test | --sweep OP LIMBS RUNS TARGET_MS | --block OP LIMBS ITERATIONS"
   exit(2)
 run_sweep(args[1], args[2].to_i, args[3].to_i, args[4].to_f)

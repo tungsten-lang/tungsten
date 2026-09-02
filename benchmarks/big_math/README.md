@@ -36,6 +36,37 @@ The gcd, lcm, and integer-square-root timed bodies call their retained runtime
 kernel boundaries explicitly with `ccall`; the arithmetic, bitwise, shift,
 comparison, sign, power, and conversion rows use their ordinary source forms.
 
+The native lane is measured *paired* against the Tungsten C lane, with the
+same statistical shape the C harness uses for its in-process Tungsten/GMP
+quartets. Because the native lane is a separate binary it cannot share the C
+harness's process, so the driver interleaves single-block processes of the
+two binaries -- `bench_big_math_tungsten_native --block OP LIMBS ITERS` and
+`bench_big_math --bench-boxed-block OP LIMBS ITERS`, each of which checks the
+cell against the C oracle, warms for 500 us, and times exactly ITERS
+operations once -- as ABBA quartets: native,C,C,native on even reps and
+C,native,native,C on odd reps (5 reps by default, 9 under `--accurate`).
+Every quartet yields one ratio (N1+N2)/(C1+C2); the cell verdict is the
+median quartet log-ratio, so a host-load burst must corrupt half of all
+quartets, not any single block, to move it. The reported native time is
+`tungsten_ns * exp(median)` -- anchored to the C lane's paired ns exactly as
+the C harness anchors its Tungsten time to GMP's -- and `native_pair_iqr`
+maps the quartet log-ratio IQR onto ns (`tungsten_ns * (exp(q3) - exp(q1))`).
+Both lanes run one shared iteration count per block, calibrated once per
+cell from the C lane's paired ns plus one short native pilot block: the
+count follows the faster lane so both blocks fill the window, and the slower
+lane's block is capped at four windows so a lopsided cell cannot turn a
+20 ms block into seconds. Cost: each block is a separate process (~12 ms
+spawn plus the 0.5 ms warm-up), so a block carries at least 20 ms of timed
+work, or the C lane's own per-cell budget (two lanes x its reps x its
+window) spread over the 4 x reps blocks when that is longer; a
+default-matrix cell therefore costs about 21 processes x ~33 ms (~0.7 s), an
+`--accurate` cell ~2.4 s, roughly the C lane's own spend.
+`--native-unpaired` restores the previous method -- one `--sweep` process
+per cell, independently calibrated, min of runs -- whose absolute timing
+swung +-30% with host load between runs while the paired W/GMP ratio stayed
+within ~10%; JSON rows record which method produced them in
+`tungsten_native_method`.
+
 `--python`, `--rust`, `--odin`, `--go`, `--node`, and `--boost` additionally
 enable CPython `int`, Rust `num-bigint` 0.5.1, Odin `core:math/big`, Go
 `math/big`, JavaScript `BigInt` under Node's V8, and Boost.Multiprecision

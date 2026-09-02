@@ -2273,7 +2273,9 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # treating :BigInt as :bigint also redirected typed `-`, `*`, and untouched
   # add shapes and regressed their controls, so those remain polymorphic until
   # their own specialization arms migrate.
-  declared_bigint_add = op == :PLUS && lt == :BigInt && rt == :BigInt
+  # `/` and `%` join: their seams route the whole positive 2n/n and 1-limb
+  # divisor shapes natively and have no one-limb C-favored arm to protect.
+  declared_bigint_add = op in (:PLUS :SLASH :PERCENT) && lt == :BigInt && rt == :BigInt
   closed_mul1_square = node.left != nil && node.right != nil && is_ast_node?(node.left) && is_ast_node?(node.right) && ast_kind(node.left) == :var && ast_kind(node.right) == :var && node.left.name == node.right.name
   # Once Core provenance and both method tables are locked, an exact
   # `(BigInt BigInt)` multiplication can enter the exact built-in BigInt

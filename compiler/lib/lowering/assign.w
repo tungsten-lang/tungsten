@@ -598,6 +598,27 @@
       ctx[:mut_accum_target] = target.name
       mut_target_set = true
 
+  # Loop-carried overwrite release (E4 stage 4): the walker admitted this
+  # candidate over a dominating literal seed and this RHS is a pure
+  # arithmetic tree that the mutate-if-unique / word-dest / rotation / sum-
+  # chunk paths above did not claim. Capture r's current value before the
+  # RHS runs (the RHS may read r) and release it after the new value exists;
+  # the runtime entry skips inline ints and an alias the op handed back.
+  # Top-level bindings also live in globals other functions may read, so
+  # main is excluded.
+  release_old = nil
+  if ast_kind(target) == :var && !mut_target_set && node.type_hint == nil && wfn[:name] != "main" && ctx[:mut_accumulators] != nil && ctx[:mut_accumulators][target.name] == true && env("TUNGSTEN_BIGINT_RELEASE_REASSIGN") != "0"
+    v = node.value
+    rel_ty = ctx[:var_types][target.name]
+    rel_boxed = !(is_machine_int_type(rel_ty) || rel_ty in (:raw_int :raw_i64 :raw_u64) || is_machine_float_type(rel_ty) || (ctx[:unboxed_vars] != nil && ctx[:unboxed_vars][target.name] != nil))
+    if rel_boxed && v != nil && is_ast_node?(v) && ast_kind(v) in (:binary_op :unary_op) && mut_pure_arith_rhs?(v)
+      release_old = ctx[:bindings][target.name]
+      if release_old == nil
+        release_ptr = wfn[:var_slots][target.name]
+        if release_ptr != nil
+          release_old = next_temp(wfn)
+          emit_wire_load_i64(wfn, release_ptr, release_old)
+
   # Ivar assignment: @name = value
   if ast_kind(target) == :ivar
     val = lower_expression(ctx, node.value)
@@ -1016,6 +1037,9 @@
       return typed_value(:raw_f64, raw_val)
 
   val_reg = ensure_i64_value(wfn, val)
+  if release_old != nil
+    release_tmp = next_temp(wfn)
+    emit_wire_call_direct_i64(wfn, nil, [release_old, val_reg], nil, nil, "w_bigint_release_dead_distinct", nil, nil, release_tmp)
 
   # Track type for optimization — explicit hint takes priority over inference
   if node.type_hint != nil

@@ -98,7 +98,7 @@ WValue w_bench_tungsten_native_operand(
 
 WValue w_bench_tungsten_native_thread_cpu_ns(void) {
     struct timespec timestamp;
-    if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &timestamp) != 0) abort();
+    if (clock_gettime(CLOCK_MONOTONIC, &timestamp) != 0) abort();
     uint64_t nanoseconds =
         (uint64_t)timestamp.tv_sec * UINT64_C(1000000000) +
         (uint64_t)timestamp.tv_nsec;

@@ -1709,8 +1709,18 @@ typedef struct {
     uint8_t ring[BN_BIGINT_ARENA_RING]; /* phases of the last 7 handouts */
     uint8_t ring_pos;
     uint8_t ring_count;
+    uint64_t remote_seen_epoch;   /* g_bn_arena_remote_epoch at the last drain */
 } WBigintArena;
 static __thread WBigintArena bigint_arena_state;
+/* Cross-thread releases are rare, but the owner's freelist-miss path used to
+ * walk every chunk header (each on its own page) to discover that nothing was
+ * pending: a loop that allocates without releasing paid O(chunks) cache
+ * misses per allocation. Remote pushers bump this process-wide epoch after
+ * publishing a slot -- never the owner's TLS state, which may already be
+ * torn down -- and the owner walks only when the epoch moved since its last
+ * drain. A push that lands between the owner's load and the pusher's bump is
+ * simply drained one miss later; nothing waits on remote slots. */
+static _Atomic uint64_t g_bn_arena_remote_epoch;
 
 _Static_assert(sizeof(BnArenaChunk) <= BN_BIGINT_ARENA_GRID,
                "chunk header must fit below the first slot grid point");
@@ -1784,7 +1794,11 @@ static WBigint *bn_arena_freelist_pop(WBigintArena *a, uint32_t alloc_cap) {
     return b;
 }
 
-static void bn_arena_drain_remote(WBigintArena *a) {
+static void bn_arena_drain_remote(WBigintArena *a, int force) {
+    uint64_t epoch = atomic_load_explicit(&g_bn_arena_remote_epoch,
+                                          memory_order_acquire);
+    if (!force && epoch == a->remote_seen_epoch) return;
+    a->remote_seen_epoch = epoch;
     for (BnArenaChunk *c = a->chunks; c; c = c->next) {
         if (!atomic_load_explicit(&c->remote_free, memory_order_relaxed))
             continue;
@@ -1826,7 +1840,7 @@ static WBigint *bigint_arena_take(uint32_t alloc_cap, int zero_limbs) {
     WBigintArena *a = &bigint_arena_state;
     WBigint *b = bn_arena_freelist_pop(a, alloc_cap);
     if (!b) {
-        bn_arena_drain_remote(a);
+        bn_arena_drain_remote(a, 0);
         b = bn_arena_freelist_pop(a, alloc_cap);
     }
     if (b) {
@@ -1870,6 +1884,8 @@ static void bigint_arena_free(WBigint *b) {
     } while (!atomic_compare_exchange_weak_explicit(
         &c->remote_free, &head, (uintptr_t)b,
         memory_order_release, memory_order_relaxed));
+    atomic_fetch_add_explicit(&g_bn_arena_remote_epoch, 1u,
+                              memory_order_release);
     if (atomic_fetch_sub(&c->outstanding, 1u) == 1u) {
         /* Possibly the last slot of an orphaned chunk (seq_cst, see the
          * owner-handshake comment on BnArenaChunk). */
@@ -1881,7 +1897,7 @@ static void bigint_arena_free(WBigint *b) {
 
 static void bigint_arena_release_thread(void) {
     WBigintArena *a = &bigint_arena_state;
-    bn_arena_drain_remote(a);
+    bn_arena_drain_remote(a, 1);
     memset(a->free_head, 0, sizeof(a->free_head));
     a->ring_pos = 0;
     a->ring_count = 0;
@@ -2551,7 +2567,7 @@ static WValue bigint_from_i64(int64_t v) {
 static WValue bigint_from_u64(uint64_t v) {
     if (v == 0) return w_box_int(0);
     if (v <= (uint64_t)W_INT48_MAX) return w_box_int((int64_t)v);
-    WBigint *b = bigint_alloc(1);
+    WBigint *b = bigint_alloc_raw_hot(1);
     b->limbs[0] = v;
     b->size = 1;
     return bigint_box(b);
@@ -13955,8 +13971,13 @@ static int bn_bench_runtime_mod84_direct;
 #else
 #define BN_MOD_84_DIRECT_ENABLED() BN_MOD_84_DIRECT
 #endif
+/* Fixed 8-by-4-limb quotient (below): the remainder kernel's recurrence
+ * keeping the digits it discards.  Shares the reciprocal cache. */
+#ifndef BN_DIV_84_DIRECT
+#define BN_DIV_84_DIRECT 1
+#endif
 
-#if BN_MOD_84_DIRECT || BN_BENCH_RUNTIME_MOD84_KNOB
+#if BN_MOD_84_DIRECT || BN_BENCH_RUNTIME_MOD84_KNOB || BN_DIV_84_DIRECT
 #ifndef BN_MOD84_PREINV_CACHE
 #define BN_MOD84_PREINV_CACHE 1
 #endif
@@ -14023,6 +14044,29 @@ uint64_t bn_submul_2_inline(uint64_t *rp, const uint64_t *up, uint64_t v) {
     return (uint64_t)(product1 >> 64) + carry1 + (old1 < sub1);
 }
 
+/* The 8/4 remainder and quotient kernels normalize one divisor to the same
+ * (d1, d0), so one cached 3-by-2 reciprocal serves both. */
+static inline __attribute__((always_inline))
+uint64_t bn_mod84_preinv(uint64_t d1, uint64_t d0) {
+#if BN_MOD84_PREINV_CACHE
+    if (bn_mod84_preinv_d1[0] == d1 && bn_mod84_preinv_d0[0] == d0)
+        return bn_mod84_preinv_value[0];
+    if (BN_MOD84_PREINV_CACHE_ENTRIES_ENABLED() > 1 &&
+        bn_mod84_preinv_d1[1] == d1 && bn_mod84_preinv_d0[1] == d0)
+        return bn_mod84_preinv_value[1];
+    uint64_t dinv = bn_invert_pi1(d1, d0);
+    int slot = BN_MOD84_PREINV_CACHE_ENTRIES_ENABLED() > 1
+        ? (bn_mod84_preinv_next++ & 1) : 0;
+    bn_mod84_preinv_d1[slot] = d1;
+    bn_mod84_preinv_d0[slot] = d0;
+    bn_mod84_preinv_value[slot] = dinv;
+    return dinv;
+#else
+    return bn_invert_pi1(d1, d0);
+#endif
+}
+
+#if BN_MOD_84_DIRECT || BN_BENCH_RUNTIME_MOD84_KNOB
 static __attribute__((no_stack_protector))
 WBigint *mag_mod_84(const uint64_t *u, const uint64_t *v) {
     uint64_t un[8], vn_work[4];
@@ -14048,25 +14092,7 @@ WBigint *mag_mod_84(const uint64_t *u, const uint64_t *v) {
     }
 
     uint64_t d1 = vn[3], d0 = vn[2];
-#if BN_MOD84_PREINV_CACHE
-    uint64_t dinv;
-    if (bn_mod84_preinv_d1[0] == d1 && bn_mod84_preinv_d0[0] == d0) {
-        dinv = bn_mod84_preinv_value[0];
-    } else if (BN_MOD84_PREINV_CACHE_ENTRIES_ENABLED() > 1 &&
-               bn_mod84_preinv_d1[1] == d1 &&
-               bn_mod84_preinv_d0[1] == d0) {
-        dinv = bn_mod84_preinv_value[1];
-    } else {
-        dinv = bn_invert_pi1(d1, d0);
-        int slot = BN_MOD84_PREINV_CACHE_ENTRIES_ENABLED() > 1
-            ? (bn_mod84_preinv_next++ & 1) : 0;
-        bn_mod84_preinv_d1[slot] = d1;
-        bn_mod84_preinv_d0[slot] = d0;
-        bn_mod84_preinv_value[slot] = dinv;
-    }
-#else
-    uint64_t dinv = bn_invert_pi1(d1, d0);
-#endif
+    uint64_t dinv = bn_mod84_preinv(d1, d0);
     for (int32_t j = 4; j >= 0; j--) {
         uint64_t qhat;
         if (__builtin_expect(r1 >= d1 && (r1 > d1 || r0 >= d0), 0)) {
@@ -14128,6 +14154,152 @@ WBigint *mag_mod_84(const uint64_t *u, const uint64_t *v) {
     while (r->size > 0 && r->limbs[r->size - 1] == 0) r->size--;
     return r;
 }
+#endif
+
+#if BN_DIV_84_DIRECT
+/*
+ * Fixed 8-by-4-limb quotient, with the remainder on request.  The 8/4
+ * quotient used to take the generic quotient-only triangular certificate
+ * (variable-width digit entry, arena-sized frame, certificate scan, and a
+ * second full division when it is inconclusive) while its remainder twin
+ * above is straight-line.  This is mag_mod_84's recurrence keeping the
+ * digits it discards: the normalized remainder's top two limbs travel in
+ * registers, each digit is one 3-by-2 reciprocal step followed by the
+ * two-limb multiply-subtract below that window and the rare add-back.  The
+ * remainder is exact, so no certificate is needed.  With no normalization
+ * shift (the common boxed shape) the leading digit is 0 or 1 and is decided
+ * by a compare instead of a reciprocal step.
+ */
+static __attribute__((no_stack_protector))
+WBigint *mag_div_84(const uint64_t *u, const uint64_t *v,
+                    WBigint **r_out) {
+    uint64_t un[8], vn_work[4];
+    const uint64_t *vn;
+    int shift = __builtin_clzll(v[3]);
+    uint64_t r1, r0;
+    if (shift) {
+        vn_work[0] = v[0] << shift;
+        for (int32_t i = 1; i < 4; i++)
+            vn_work[i] = (v[i] << shift) | (v[i - 1] >> (64 - shift));
+        vn = vn_work;
+        for (int32_t i = 0; i < 8; i++) {
+            uint64_t lower = i ? u[i - 1] : 0;
+            un[i] = (u[i] << shift) | (lower >> (64 - shift));
+        }
+        r1 = u[7] >> (64 - shift);
+        r0 = un[7];
+    } else {
+        vn = v;
+        memcpy(un, u, sizeof(un));
+        r1 = 0;
+        r0 = un[7];
+    }
+
+    uint64_t d1 = vn[3], d0 = vn[2];
+    uint64_t dinv = bn_mod84_preinv(d1, d0);
+    /* Five digits at most; the churn hands back the 5-limb quotient's own
+     * capacity class, so ask for it exactly. */
+    WBigint *q = bigint_alloc_raw_hot_exact(bigint_alloc_capacity(5U));
+    int32_t j = 4;
+    if (r1 == 0) {
+        /* Unshifted top: the leading digit is 0 or 1.  Compare the 2-limb
+         * prefix, subtract the two low divisor limbs, and let their borrow
+         * settle a prefix tie. */
+        uint64_t n0 = un[6];
+        uint64_t qtop = 0;
+        if (r0 > d1 || (r0 == d1 && n0 >= d0)) {
+            uint64_t old0 = un[4];
+            uint64_t b0 = old0 < vn[0];
+            uint64_t old1 = un[5];
+            uint64_t sub1 = vn[1] + b0;
+            uint64_t b1 = (sub1 < vn[1]) | (old1 < sub1);
+            __uint128_t lhs = ((__uint128_t)r0 << 64) | n0;
+            __uint128_t rhs = (((__uint128_t)d1 << 64) | d0) + b1;
+            if (__builtin_expect(lhs >= rhs, 1)) {
+                lhs -= rhs;
+                un[4] = old0 - vn[0];
+                un[5] = old1 - sub1;
+                r1 = (uint64_t)(lhs >> 64);
+                r0 = (uint64_t)lhs;
+                qtop = 1;
+            } else {
+                /* prefix tied the divisor, low limbs fell short: 0 */
+                r1 = r0;
+                r0 = n0;
+            }
+        } else {
+            r1 = r0;
+            r0 = n0;
+        }
+        q->limbs[4] = qtop;
+        j = 3;
+    }
+    for (; j >= 0; j--) {
+        uint64_t qhat;
+        if (__builtin_expect(r1 >= d1 && (r1 > d1 || r0 >= d0), 0)) {
+            /* Saturated digit: full-row multiply-subtract with the classic
+             * top-borrow add-back; see mag_mod_84 for the window layout. */
+            uint64_t window[5] = {
+                un[j], un[j + 1], un[j + 2], r0, r1
+            };
+            qhat = UINT64_MAX;
+            uint64_t borrow = bn_submul_1(window, vn, 4, qhat);
+            uint64_t top = window[4];
+            window[4] = top - borrow;
+            if (top < borrow) {
+                qhat--;
+                uint64_t carry = bn_add_n(window, window, vn, 4);
+                window[4] += carry;
+            }
+            un[j] = window[0];
+            un[j + 1] = window[1];
+            r0 = window[2];
+            r1 = window[3];
+        } else {
+            qhat = bn_udiv_qr_3by2(
+                r1, r0, un[j + 2], d1, d0, dinv, &r1, &r0);
+            uint64_t carry =
+                bn_submul_2_inline(un + j, vn, qhat);
+            uint64_t carry1 = r0 < carry;
+            r0 -= carry;
+            uint64_t carry2 = r1 < carry1;
+            r1 -= carry1;
+            if (__builtin_expect(carry2 != 0, 0)) {
+                qhat--;
+                uint64_t low_carry = bn_add_n(un + j, un + j, vn, 2);
+                __uint128_t sum = (__uint128_t)r0 + d0 + low_carry;
+                r0 = (uint64_t)sum;
+                r1 += d1 + (uint64_t)(sum >> 64);
+            }
+        }
+        q->limbs[j] = qhat;
+    }
+    q->size = q->limbs[4] ? 5 :
+              q->limbs[3] ? 4 :
+              q->limbs[2] ? 3 :
+              q->limbs[1] ? 2 :
+              q->limbs[0] ? 1 : 0;
+
+    if (r_out) {
+        WBigint *r = bigint_alloc_raw_hot(4);
+        if (shift) {
+            r->limbs[0] = (un[0] >> shift) | (un[1] << (64 - shift));
+            r->limbs[1] = (un[1] >> shift) | (r0 << (64 - shift));
+            r->limbs[2] = (r0 >> shift) | (r1 << (64 - shift));
+            r->limbs[3] = r1 >> shift;
+        } else {
+            r->limbs[0] = un[0];
+            r->limbs[1] = un[1];
+            r->limbs[2] = r0;
+            r->limbs[3] = r1;
+        }
+        r->size = 4;
+        while (r->size > 0 && r->limbs[r->size - 1] == 0) r->size--;
+        *r_out = r;
+    }
+    return q;
+}
+#endif
 #endif
 
 /*
@@ -15736,6 +15908,12 @@ static void mag_divmod(const uint64_t *u, int32_t ulen,
         return;
     }
 #endif
+#if BN_DIV_84_DIRECT
+    if (ulen == 8 && vlen == 4 && q_out) {
+        *q_out = mag_div_84(u, v, r_out);
+        return;
+    }
+#endif
 #if BN_DIVMOD_42
     if (ulen == 4 && vlen == 2) {
         mag_divmod_42(u, v, q_out, r_out);
@@ -15954,7 +16132,8 @@ static inline __attribute__((always_inline))
 WValue bigint_div_any(WValue a, WValue b) {
 #if BN_DIV_BY_LIMB_BOXED_FAST || (BN_DIVMOD_42 && BN_DIVMOD_42_BOXED_FAST) || \
     (BN_DIV_TRIANGULAR_Q_CERTIFIED && BN_DIV_63_DIRECT && \
-     BN_DIV_63_BOXED_FAST) || BN_DIV_POSITIVE_2N_N_BOXED_FAST
+     BN_DIV_63_BOXED_FAST) || BN_DIV_84_DIRECT || \
+    BN_DIV_POSITIVE_2N_N_BOXED_FAST
     if (w_is_bigint(a) && w_is_bigint(b)) {
         int32_t as, bs;
         WBigint *aa = w_bigint_view(a, &as);
@@ -15999,6 +16178,14 @@ WValue bigint_div_any(WValue a, WValue b) {
                 mag_div_q_63_certified(aa->limbs, bb->limbs);
             if (q) return bigint_finish_mag_sub(q);
         }
+#endif
+#if BN_DIV_84_DIRECT
+        /* Positive 8/4: the straight-line kernel ahead of the balanced
+         * arm's triangular certificate (whose rare inconclusive result
+         * would re-divide from scratch). */
+        if (as == 8 && bs == 4)
+            return bigint_finish_mag_sub(
+                mag_div_84(aa->limbs, bb->limbs, NULL));
 #endif
 #if BN_DIV_POSITIVE_2N_N_BOXED_FAST
         /*
@@ -18837,10 +19024,11 @@ WValue bigint_gcd_any_inline(WValue a, WValue b) {
                 bn ? bb->limbs[0] : 0);
             if (g <= (uint64_t)W_INT48_MAX)
                 return w_box_int((int64_t)g);
-            WBigint *r = bigint_alloc_raw(1);
+            /* g > i48 with one limb: already canonical, no rescan/demotion. */
+            WBigint *r = bigint_alloc_raw_hot(1);
             r->limbs[0] = g;
             r->size = 1;
-            return bigint_normalize(r);
+            return bigint_box(r);
         }
 #if defined(__aarch64__) && BN_GCD_22_ASM
         if (an == 2 && bn == 2) {
@@ -18850,11 +19038,12 @@ WValue bigint_gcd_any_inline(WValue a, WValue b) {
                     bb->limbs[1], bb->limbs[0]);
             uint64_t hi = (uint64_t)(g >> 64);
             if (!hi) return bigint_from_u64((uint64_t)g);
-            WBigint *r = bigint_alloc_raw(2);
+            /* hi != 0: two canonical limbs, no rescan/demotion. */
+            WBigint *r = bigint_alloc_raw_hot(2);
             r->limbs[0] = (uint64_t)g;
             r->limbs[1] = hi;
             r->size = 2;
-            return bigint_normalize(r);
+            return bigint_box(r);
         }
 #endif
     }
@@ -19617,13 +19806,22 @@ static WValue bigint_to_s_impl(WBigint *b, int32_t signed_size) {
     }
     /* digits ≤ limbs·64·log10(2) + 1 < limbs·20 */
     size_t cap = (size_t)abs_len * 20 + 4;
-    char *buf = (char *)malloc(cap);
+    /* Write the digits once, straight into a heap string's payload. Once the
+     * slab is frozen (every compiled program after startup) a run longer than
+     * W_SLAB_SSO2_MAX would be copied by w_string_n into exactly this WString,
+     * so the temporary buffer, its strlen and the copy were pure overhead.
+     * Shorter runs keep w_string_n's interning semantics. */
+    WString *ws = (WString *)malloc(sizeof(WString) + cap + 1);
     int32_t pos = 0;
-    if (neg) buf[pos++] = '-';
-    pos += w_dec_write(b->limbs, abs_len, buf + pos, 0);
-    buf[pos] = '\0';
-    WValue result = w_string(buf);
-    free(buf);
+    if (neg) ws->data[pos++] = '-';
+    pos += w_dec_write(b->limbs, abs_len, ws->data + pos, 0);
+    ws->data[pos] = '\0';
+    if (g_string_slab.frozen && (size_t)pos > W_SLAB_SSO2_MAX) {
+        w_heap_string_set_meta(ws, (uint32_t)pos, 1);
+        return w_box_heap_str(ws);
+    }
+    WValue result = w_string_n(ws->data, (size_t)pos);
+    free(ws);
     return result;
 }
 
@@ -40557,6 +40755,31 @@ static WValue w_bigint_from_dec_cstr(const char *s) {
         r->size = neg ? -1 : 1;
         return bigint_box(r);
     }
+    if (!has_sep && count <= 38) {
+        /* hi·10^19 + lo < 10^38 < 2^127: two register chunks publish a
+         * canonical one- or two-limb value directly, skipping the limb
+         * buffer, the parser and the normalize rescan. */
+        const char *d = s + start;
+        size_t split = count - 19;
+        uint64_t hi = 0;
+        if (split == 19) {
+            hi = w_dec_parse19(d);
+        } else {
+            for (size_t k = 0; k < split; k++) hi = hi * 10ULL + (uint64_t)(d[k] - '0');
+        }
+        /* The low chunk is always exactly 19 clean digits: SWAR parse. */
+        uint64_t lo = w_dec_parse19(d + split);
+        unsigned __int128 v = (unsigned __int128)hi * 10000000000000000000ULL + lo;
+        uint64_t lo64 = (uint64_t)v, hi64 = (uint64_t)(v >> 64);
+        if (hi64 == 0 && lo64 <= (uint64_t)W_INT48_MAX)
+            return w_box_int(neg ? -(int64_t)lo64 : (int64_t)lo64);
+        int32_t n = hi64 ? 2 : 1;
+        WBigint *r = bigint_alloc_raw_hot(n);
+        r->limbs[0] = lo64;
+        if (hi64) r->limbs[1] = hi64;
+        r->size = neg ? -n : n;
+        return bigint_box(r);
+    }
     const char *digits = s + start;
     char *scratch = NULL;
     if (has_sep) {
@@ -53548,13 +53771,35 @@ static WValue w_ic_string_ord(WValue r, WValue *a, int c) {
 static WValue w_ic_string_to_i(WValue r, WValue *a, int c) {
     int base = 10;
     if (c >= 1 && w_is_int(a[0])) base = (int)w_as_int(a[0]);
-    /* Default Int is arbitrary-precision: a decimal that overflows i64 must
-     * promote to bignum instead of saturating at strtoll's LLONG_MAX/MIN.
-     * (Non-decimal bases keep the fixed-width parse.) */
+    const char *s = as_str(r);
+    if (base == 10) {
+        /* strtoll's contract without the libc round trip (which every
+         * >18-digit string used to pay twice: strtoll to ERANGE, then the
+         * bignum parser): skip leading whitespace, one optional sign, then
+         * the longest digit run. A run that does not fit i64 goes to the
+         * bignum parser exactly as the former ERANGE fallback did, so
+         * default Int stays arbitrary-precision. */
+        const char *p = s;
+        while (*p == ' ' || (*p >= '\t' && *p <= '\r')) p++;
+        const char *signed_start = p;
+        int neg = 0;
+        if (*p == '-') { neg = 1; p++; }
+        else if (*p == '+') p++;
+        uint64_t v = 0;
+        int nd = 0;
+        for (; *p >= '0' && *p <= '9'; p++) {
+            if (nd < 19) v = v * 10ULL + (uint64_t)(*p - '0');
+            /* Twenty digits already overflow i64; the bignum parser rescans
+             * the run itself, so stop counting here. */
+            if (++nd >= 20) break;
+        }
+        if (nd == 0) return w_int(0);
+        if (nd < 19 || (nd == 19 && v <= (uint64_t)INT64_MAX + (uint64_t)neg))
+            return w_int(neg ? (int64_t)(0ULL - v) : (int64_t)v);
+        return w_bigint_from_dec_cstr(signed_start);
+    }
     errno = 0;
-    long long v = strtoll(as_str(r), NULL, base);
-    if (base == 10 && errno == ERANGE)
-        return w_bigint_from_dec_str(r);
+    long long v = strtoll(s, NULL, base);
     return w_int((int64_t)v);
 }
 static WValue w_ic_string_to_f(WValue r, WValue *a, int c) {
@@ -53833,11 +54078,13 @@ static inline uint64_t w_mont_ninv(uint64_t n) {
 }
 static inline uint64_t w_mont_mul(uint64_t a, uint64_t b, uint64_t n, uint64_t np) {
     __uint128_t x  = (__uint128_t)a * b;
-    uint64_t    m  = (uint64_t)x * np;                  /* x·(−n⁻¹) mod 2^64 */
-    __uint128_t mn = (__uint128_t)m * n;
     uint64_t x_hi = (uint64_t)(x >> 64),  x_lo  = (uint64_t)x;
-    uint64_t mn_hi = (uint64_t)(mn >> 64), mn_lo = (uint64_t)mn;
-    uint64_t carry = (x_lo + mn_lo) < x_lo;             /* low limbs sum to 0 or 2^64 */
+    uint64_t    m  = x_lo * np;                         /* x·(−n⁻¹) mod 2^64 */
+    uint64_t mn_hi = (uint64_t)(((__uint128_t)m * n) >> 64);
+    /* m·n ≡ −x_lo (mod 2^64) by construction, so the low halves sum to
+     * exactly 0 or 2^64: the carry is (x_lo != 0) and the low product is
+     * never needed. */
+    uint64_t carry = x_lo != 0;
     uint64_t res = x_hi + mn_hi + carry;                /* high limb of (x + m·n) >> 64 */
     int of = (res < x_hi) || (carry && res == x_hi);    /* 65th-bit carry-out */
     if (of || res >= n) res -= n;                       /* pre-reduce value < 2n ⇒ 1 subtract */
@@ -56841,6 +57088,54 @@ static WValue w_powmod_u64_odd(uint64_t b0, const uint64_t *el, int32_t elen,
     return bigint_from_u64(res);
 }
 
+/* Same ladder for a one-limb exponent held in a register: the window scans
+ * are plain shifts instead of bounds-checked limb reads. */
+static WValue w_powmod_u64_odd_e1(uint64_t b0, uint64_t e, int eb, uint64_t n) {
+    if (b0 == 0) return w_box_int(0);
+    uint64_t np = 0ULL - w_mont_ninv(n);
+    uint64_t one_m = (0ULL - n) % n;
+    uint64_t r2 = (n <= 0xFFFFFFFFULL)
+                    ? (one_m * one_m) % n
+                    : (uint64_t)(((__uint128_t)one_m * one_m) % n);
+    uint64_t bm = w_mont_mul(b0, r2, n, np);
+    int wbits = w_powm_window_bits(eb);
+    if (wbits > 6) wbits = 6;
+    int tcount = 1 << (wbits - 1);
+    uint64_t tbl[32];
+    tbl[0] = bm;
+    if (tcount > 1) {
+        uint64_t b2 = w_mont_mul(bm, bm, n, np);
+        for (int t = 1; t < tcount; t++) tbl[t] = w_mont_mul(tbl[t - 1], b2, n, np);
+    }
+    int i = eb - 1;
+    uint64_t x;
+    {
+        int l = i - wbits + 1;
+        if (l < 0) l = 0;
+        while (!((e >> l) & 1ULL)) l++;
+        int cnt = i - l + 1;
+        x = tbl[((e >> l) & ((1ULL << cnt) - 1ULL)) >> 1];
+        i = l - 1;
+    }
+    while (i >= 0) {
+        if (!((e >> i) & 1ULL)) {
+            x = w_mont_mul(x, x, n, np);
+            i--;
+        } else {
+            int l = i - wbits + 1;
+            if (l < 0) l = 0;
+            while (!((e >> l) & 1ULL)) l++;
+            int cnt = i - l + 1;
+            for (int s = cnt; s > 0; s--) x = w_mont_mul(x, x, n, np);
+            x = w_mont_mul(x, tbl[((e >> l) & ((1ULL << cnt) - 1ULL)) >> 1], n, np);
+            i = l - 1;
+        }
+    }
+    uint64_t res = w_mont_mul(x, 1ULL, n, np);
+    if (res <= (uint64_t)W_INT48_MAX) return w_box_int((int64_t)res);
+    return bigint_from_u64(res);
+}
+
 WValue bigint_powmod_any(WValue base, WValue expv, WValue modv) {
     if (!w_is_integer_any(base) || !w_is_integer_any(expv) ||
         !w_is_integer_any(modv))
@@ -56893,7 +57188,11 @@ WValue bigint_powmod_any(WValue base, WValue expv, WValue modv) {
                     : babs      ? mag_mod_single(bl, babs, n)
                                 : 0;
         if (bneg && b0) b0 = n - b0;
-        if (n & 1ULL) return w_powmod_u64_odd(b0, el, le < 0 ? -le : le, eb, n);
+        if (n & 1ULL) {
+            int32_t elen = le < 0 ? -le : le;
+            if (elen == 1) return w_powmod_u64_odd_e1(b0, el[0], eb, n);
+            return w_powmod_u64_odd(b0, el, elen, eb, n);
+        }
         /* even single-limb modulus: rare — fall through to the Barrett ctx */
     }
 
@@ -57739,6 +58038,20 @@ WValue w_bigint_alloc_boxed(WValue cap) {
  *     leading zeros.
  * Callers own the same contracts the C kernels do: every published limb
  * written, and `signed_size` already carrying the result's sign. */
+/* Compiler-emitted after `r = <arithmetic>` on a loop-carried BigInt local
+ * the mutate-if-unique walker proved this scope owns (dominating literal
+ * seed; no alias, capture, store or return of r anywhere in the body). The
+ * value r held before the assignment is dead here unless the entry handed
+ * it back as an alias, which every immutable entry shared-marks, so the
+ * pointer test only avoids relying on that mark. Inline ints, nil and
+ * non-BigInt heap kinds are no-ops. */
+WValue w_bigint_release_dead_distinct(WValue old, WValue now) {
+    if (!w_is_bigint(old)) return W_NIL;
+    if (w_is_bigint(now) && w_as_bigint(now) == w_as_bigint(old)) return W_NIL;
+    bigint_release_if_live(w_as_bigint(old));
+    return W_NIL;
+}
+
 WValue w_bigint_alloc_hot(int64_t cap) {
     int64_t c = cap;
     if (c < 1) c = 1;

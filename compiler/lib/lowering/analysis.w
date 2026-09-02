@@ -2440,6 +2440,23 @@
     return nil
   node
 
+# A binary/unary arithmetic tree whose leaves are ints or plain var reads:
+# exactly the shapes mut_walk_expr treats as read positions, and whose values
+# only ever come from runtime arithmetic entries. Callers require the ROOT to
+# be an operator: a bare `r = y` is a slot copy that mints an unmarked alias
+# and must keep taking the kill arm.
+-> mut_pure_arith_rhs?(node)
+  if node == nil || !is_ast_node?(node)
+    return false
+  k = ast_kind(node)
+  if k in (:var :int)
+    return true
+  if k == :binary_op
+    return mut_pure_arith_rhs?(node.left) && mut_pure_arith_rhs?(node.right)
+  if k == :unary_op
+    return mut_pure_arith_rhs?(node.operand)
+  false
+
 -> mut_walk_expr(node, assigned, dead)
   # expression position: operands of arithmetic/comparisons are plain reads
   if node == nil || !is_ast_node?(node)
@@ -2471,6 +2488,18 @@
       i += 1
       next
     k = ast_kind(st)
+    # The LAST top-level statement of a body handing the var itself back
+    # (implicit `r` or `return r`) is the ownership transfer that ends the
+    # scope: nothing follows that could mutate or release the buffer the
+    # caller now holds, so it does not disqualify r. Any earlier return, or
+    # one nested in control flow, still kills (fail closed).
+    if depth == 0 && i == body.size() - 1
+      if k == :var
+        i += 1
+        next
+      if k == :return && st.value != nil && is_ast_node?(st.value) && ast_kind(st.value) == :var
+        i += 1
+        next
     if k == :assign && st.target != nil && is_ast_node?(st.target) && ast_kind(st.target) == :var
       name = st.target.name
       if mut_self_compound_rhs?(st.value, name)
@@ -2500,6 +2529,15 @@
         # (leaves exclude the target itself).
         if seeds[name] != true
           dead[name] = true
+        mut_walk_expr(st.value, assigned, dead)
+      elsif seeds[name] == true && ast_kind(st.value) in (:binary_op :unary_op) && mut_pure_arith_rhs?(st.value)
+        # Loop-carried overwrite (E4 stage 4): `r = <arithmetic>` where every
+        # leaf is a literal or a plain var read. The dominating literal seed
+        # proves this scope owns whatever r held, and a pure arithmetic RHS
+        # only reaches BigInt runtime entries, which shared-mark any operand
+        # alias they hand back. r's OLD value is therefore dead once the RHS
+        # has been computed and lowering releases it (assign.w). Reads of r
+        # inside the RHS are ordinary operand positions.
         mut_walk_expr(st.value, assigned, dead)
       else
         dead[name] = true

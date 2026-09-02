@@ -1,0 +1,448 @@
+diff --git a/runtime/runtime.c b/runtime/runtime.c
+index 76f79054..2bc55a72 100644
+--- a/runtime/runtime.c
++++ b/runtime/runtime.c
+@@ -10441,6 +10441,8 @@ static __thread int bn_div_recip_cache_mru;
+ static __thread uint64_t *bn_rect_ws[BN_RECT_WS_DEPTH];
+ static __thread size_t bn_rect_ws_cap[BN_RECT_WS_DEPTH];
+ static __thread int bn_rect_depth;
++/* powmod's Montgomery-context cache (defined beside the ladder). */
++static void bn_powm_ctx_cache_release_thread(void);
+ static void bn_ws_release_thread(void) {
+     free(bn_ws);
+     bn_ws = NULL;
+@@ -10467,6 +10469,7 @@ static void bn_ws_release_thread(void) {
+         memset(&bn_div_recip_caches[i], 0, sizeof(bn_div_recip_caches[i]));
+     }
+     bn_div_recip_cache_mru = 0;
++    bn_powm_ctx_cache_release_thread();
+ }
+ static uint64_t *bn_ws_get(size_t limbs) {
+     if (limbs > bn_ws_cap) {
+@@ -56841,6 +56844,171 @@ static WValue w_powmod_u64_odd(uint64_t b0, const uint64_t *el, int32_t elen,
+     return bigint_from_u64(res);
+ }
+ 
++/* ---- powmod Montgomery-context cache ----------------------------------
++ * Repeated modexp against one modulus (RSA/DH ladders, Miller–Rabin
++ * batteries, the powmod bench cells) re-derived R² mod n, μ, n' and the
++ * k-limb Newton inverse on EVERY call, malloc'd a fresh window arena and
++ * reduced the base through the boxed remainder.  Two MRU entries per
++ * thread retain the finished context and a grow-only ladder arena, keyed
++ * by the modulus VALUE (limb count + FNV-1a, confirmed by a limb compare).
++ *
++ * Admission is on first sight: building the context IS the setup the
++ * uncached call already paid, so retaining it costs only the O(k) key
++ * hash and modulus copy — unlike the division reciprocal cache, whose
++ * reciprocal is extra work on top of one division and so warms over
++ * BN_DIV_RECIP_WARMUP_SIGHTINGS.  Widths above BN_POWM_CTX_CACHE_MAX_LIMBS
++ * stay uncached (bounding retained memory to well under 1 MB per entry);
++ * their ladders dwarf the setup anyway.  BN_POWM_CTX_CACHE=0 restores the
++ * per-call build, boxed base reduction and malloc'd arena for A/B builds. */
++#ifndef BN_POWM_CTX_CACHE
++#define BN_POWM_CTX_CACHE 1
++#endif
++#ifndef BN_POWM_CTX_CACHE_MAX_LIMBS
++#define BN_POWM_CTX_CACHE_MAX_LIMBS 2048
++#endif
++typedef struct {
++    WPrimeModCtx ctx;        /* ctx.modulus boxes modb */
++    WBigint *modb;           /* owned |m| copy: the key and the ctx modulus */
++    uint64_t hash;           /* FNV-1a of the modulus limbs */
++    int32_t k;               /* modulus limbs; 0 = empty entry */
++    uint64_t np1;            /* high limb of −n⁻¹ mod B² (k ≥ 3 Montgomery) */
++    uint64_t *mip;           /* Newton k-limb inverse (mullo REDC widths) */
++    uint64_t *arena;         /* ladder arena: window table, x, pinned copies */
++    size_t arena_cap;        /* limbs; grows to the largest window seen */
++} WPowmCtxCache;
++
++/* High limb of −n⁻¹ mod B² by one Newton lift of the B-inverse (n odd). */
++static inline uint64_t w_powm_np1(const uint64_t *nl) {
++    uint64_t i0 = w_mont_ninv(nl[0]);
++    __uint128_t ni = (__uint128_t)nl[0] * i0;
++    uint64_t e2 = (uint64_t)(ni >> 64) + nl[1] * i0;
++    return ~(0ULL - i0 * e2);
++}
++
++#if BN_POWM_CTX_CACHE
++static __thread WPowmCtxCache bn_powm_ctx_caches[2];
++static __thread int bn_powm_ctx_cache_mru;
++
++static void bn_powm_ctx_cache_drop(WPowmCtxCache *c) {
++    if (!c->k) return;
++    w_prime_modctx_fini(&c->ctx);
++    bigint_backing_free(c->modb);
++    free(c->mip);
++    c->modb = NULL;
++    c->mip = NULL;
++    c->k = 0;
++}
++
++static void bn_powm_ctx_cache_release_thread(void) {
++    for (int i = 0; i < 2; i++) {
++        bn_powm_ctx_cache_drop(&bn_powm_ctx_caches[i]);
++        free(bn_powm_ctx_caches[i].arena);
++        memset(&bn_powm_ctx_caches[i], 0, sizeof(bn_powm_ctx_caches[i]));
++    }
++    bn_powm_ctx_cache_mru = 0;
++}
++
++/* The context for the modulus magnitude ml[0..k): the MRU entry on a hit
++ * (probed first, then the other), else the other entry rebuilt — empty
++ * first, otherwise LRU eviction, never the most recent modulus.  NULL
++ * above the retained-width cap. */
++static WPowmCtxCache *bn_powm_ctx_cache_get(const uint64_t *ml, int32_t k,
++                                            int32_t mont_cap) {
++    if (k > BN_POWM_CTX_CACHE_MAX_LIMBS) return NULL;
++    uint64_t h = 0xcbf29ce484222325ULL;
++    for (int32_t i = 0; i < k; i++) {
++        h ^= ml[i];
++        h *= 0x100000001b3ULL;
++    }
++    WPowmCtxCache *c = &bn_powm_ctx_caches[bn_powm_ctx_cache_mru];
++    if (c->k == k && c->hash == h &&
++        memcmp(c->modb->limbs, ml, (size_t)k * sizeof(uint64_t)) == 0)
++        return c;
++    WPowmCtxCache *o = &bn_powm_ctx_caches[bn_powm_ctx_cache_mru ^ 1];
++    if (o->k == k && o->hash == h &&
++        memcmp(o->modb->limbs, ml, (size_t)k * sizeof(uint64_t)) == 0) {
++        bn_powm_ctx_cache_mru ^= 1;
++        return o;
++    }
++    if (c->k) {                        /* MRU occupied: fill/evict the other */
++        c = o;
++        bn_powm_ctx_cache_mru ^= 1;
++    }
++    bn_powm_ctx_cache_drop(c);         /* the arena survives: grow-only */
++    c->modb = bigint_alloc(k);
++    memcpy(c->modb->limbs, ml, (size_t)k * sizeof(uint64_t));
++    c->modb->size = k;
++    w_prime_modctx_init_cap(&c->ctx, bigint_box(c->modb), mont_cap);
++    c->hash = h;
++    c->k = k;
++    c->np1 = 0;
++    if (c->ctx.mont && k >= 3) {
++        c->np1 = w_powm_np1(c->modb->limbs);
++        if (k >= W_POWM_REDC_MULLO_MIN && (k & 1) == 0) {
++            c->mip = (uint64_t *)malloc((size_t)k * sizeof(uint64_t));
++            /* 3k limbs of scratch out of the ctx's 12k+16 work limbs */
++            w_mont_ninv_k(c->mip, c->modb->limbs, k, c->ctx.nprime,
++                          c->ctx.work);
++        }
++    }
++    return c;
++}
++
++/* x[0..k) = base mod |m| as a zero-padded plain row, folded to [0, |m|)
++ * for negative bases; returns the trimmed length (0: base ≡ 0).  Bases
++ * below B^(2k) reduce in place through the ctx's Barrett μ — no boxed
++ * remainder minted, boxed and released per call; wider ones take the
++ * general remainder through one pooled buffer. */
++static int32_t w_powm_reduce_base_into(uint64_t *x, WPrimeModCtx *ctx,
++                                       const uint64_t *bl, int32_t babs,
++                                       int bneg) {
++    int32_t k = ctx->limbs;
++    uint64_t sm; int32_t lmod;
++    const uint64_t *nl = integer_limbs(ctx->modulus, &sm, &lmod);
++    int32_t rl;
++    if (k == 1) {
++        uint64_t n = nl[0];
++        x[0] = babs == 1 ? (bl[0] < n ? bl[0] : bl[0] % n)
++             : babs      ? mag_mod_single(bl, babs, n)
++                         : 0;
++        rl = x[0] != 0;
++    } else if (babs < k || (babs == k && mag_cmp(bl, k, nl, k) < 0)) {
++        for (int32_t j = 0; j < babs; j++) x[j] = bl[j];
++        rl = babs;
++        while (rl > 0 && x[rl - 1] == 0) rl--;
++    } else if (babs <= 2 * k) {
++        rl = w_prime_modctx_reduce_into(x, ctx, bl, babs);
++    } else {
++        WBigint *r;
++        mag_divmod(bl, babs, nl, k, NULL, &r);
++        rl = r->size;
++        for (int32_t j = 0; j < rl; j++) x[j] = r->limbs[j];
++        bigint_release(r);
++    }
++    for (int32_t j = rl; j < k; j++) x[j] = 0;
++    if (rl == 0 || !bneg) return rl;
++    uint64_t borrow = 0;                          /* |m| − r, r ∈ (0, |m|) */
++    for (int32_t j = 0; j < k; j++) {
++        uint64_t nv = nl[j], rv = x[j];
++        uint64_t t = nv - rv, b1 = nv < rv;
++        uint64_t d = t - borrow, b2 = t < borrow;
++        x[j] = d;
++        borrow = b1 | b2;
++    }
++    rl = k;
++    while (rl > 0 && x[rl - 1] == 0) rl--;
++    return rl;
++}
++#else
++static void bn_powm_ctx_cache_release_thread(void) {}
++#endif
++
++/* Per-call context teardown (uncached builds and widths above the cache cap). */
++static void w_powm_ctx_discard(WPrimeModCtx *ctx, WBigint *mposb) {
++    w_prime_modctx_fini(ctx);
++    if (mposb) bigint_backing_free(mposb);
++}
++
+ WValue bigint_powmod_any(WValue base, WValue expv, WValue modv) {
+     if (!w_is_integer_any(base) || !w_is_integer_any(expv) ||
+         !w_is_integer_any(modv))
+@@ -56897,6 +57065,7 @@ WValue bigint_powmod_any(WValue base, WValue expv, WValue modv) {
+         /* even single-limb modulus: rare — fall through to the Barrett ctx */
+     }
+ 
++#if !BN_POWM_CTX_CACHE
+     /* Reduce the base into [0, |m|): truncated remainder (sign of the
+      * dividend), then one magnitude fold for negative bases. The general
+      * division keeps oversized bases out of Barrett's x < b^(2k) window. */
+@@ -56907,43 +57076,49 @@ WValue bigint_powmod_any(WValue base, WValue expv, WValue modv) {
+     int rneg = lr < 0;
+     int32_t rabs = rneg ? -lr : lr;
+     if (rabs == 0) return w_box_int(0);                    /* base ≡ 0, e ≥ 1 */
++#endif
+ 
+-    /* The ctx wants a positive modulus value; |m| drives everything else. */
++    /* Montgomery for odd |m| up to the ladder cap, Barrett otherwise (even
++     * moduli have no inverse mod 2^64). */
++    int32_t mont_cap = (ml[0] & 1ULL) ? W_POWM_MONT_MAX_LIMBS : 0;
++    WPowmCtxCache *cc = NULL;
++#if BN_POWM_CTX_CACHE
++    cc = bn_powm_ctx_cache_get(ml, mabs, mont_cap);
++#endif
++    WPrimeModCtx ctx_local, *ctx;
+     WBigint *mposb = NULL;
+-    WValue modmag = modv;
+-    if (lm < 0) {
+-        if (mabs == 1 && ml[0] <= (uint64_t)W_INT48_MAX) {
+-            modmag = w_box_int((int64_t)ml[0]);
+-        } else {
+-            mposb = bigint_alloc(mabs);
+-            for (int32_t i = 0; i < mabs; i++) mposb->limbs[i] = ml[i];
+-            mposb->size = mabs;
+-            modmag = bigint_box(mposb);
++    if (cc) {
++        ctx = &cc->ctx;
++    } else {
++        /* The ctx wants a positive modulus value; |m| drives everything else. */
++        WValue modmag = modv;
++        if (lm < 0) {
++            if (mabs == 1 && ml[0] <= (uint64_t)W_INT48_MAX) {
++                modmag = w_box_int((int64_t)ml[0]);
++            } else {
++                mposb = bigint_alloc(mabs);
++                for (int32_t i = 0; i < mabs; i++) mposb->limbs[i] = ml[i];
++                mposb->size = mabs;
++                modmag = bigint_box(mposb);
++            }
+         }
++        w_prime_modctx_init_cap(&ctx_local, modmag, mont_cap);
++        ctx = &ctx_local;
+     }
+-
+-    WPrimeModCtx ctx;
+-    w_prime_modctx_init_cap(&ctx, modmag,
+-                            (ml[0] & 1ULL) ? W_POWM_MONT_MAX_LIMBS : 0);
+-    int32_t k = ctx.limbs, cap = k + 2;
++    int32_t k = ctx->limbs, cap = k + 2;
+     int wbits = w_powm_window_bits(eb);
+     int32_t tcount = 1 << (wbits - 1);
+     int32_t elen = le < 0 ? -le : le;
+ 
+-    if (ctx.mont && k >= 3) {
++    if (ctx->mont && k >= 3) {
+         /* Fast Montgomery ladder on raw k-limb rows: direct dispatcher +
+          * REDC calls, no per-op WValue plumbing, dual-row REDC on aarch64,
+          * and a multiply-free REDC domain exit. */
+         uint64_t smod2; int32_t lmod2;
+-        const uint64_t *nl = integer_limbs(ctx.modulus, &smod2, &lmod2);
+-        uint64_t np0 = ctx.nprime, np1;
+-        {   /* high limb of −n⁻¹ mod B² by one Newton lift of the B-inverse */
+-            uint64_t i0 = w_mont_ninv(nl[0]);
+-            __uint128_t ni = (__uint128_t)nl[0] * i0;
+-            uint64_t e2 = (uint64_t)(ni >> 64) + nl[1] * i0;
+-            np1 = ~(0ULL - i0 * e2);
+-        }
+-        uint64_t *T = ctx.work;                     /* 12k+16 ≥ 6k+4 limbs */
++        const uint64_t *nl = integer_limbs(ctx->modulus, &smod2, &lmod2);
++        uint64_t np0 = ctx->nprime;
++        uint64_t np1 = cc ? cc->np1 : w_powm_np1(nl);
++        uint64_t *T = ctx->work;                    /* 12k+16 ≥ 6k+4 limbs */
+         /* The cyclic high product needs an even split.  Odd widths stay on
+          * pairs REDC instead of paying mullo plus a fallback full product. */
+         int use_mullo = k >= W_POWM_REDC_MULLO_MIN && (k & 1) == 0;
+@@ -56961,7 +57136,8 @@ WValue bigint_powmod_any(WValue base, WValue expv, WValue modv) {
+          * placement is categorically safe.  The pairs REDC touches
+          * T[0..2k+1] only; mullo widths (>= 48 limbs) never fit the page
+          * and stay on ctx->work with its full 6k+4 window. */
+-        size_t lad_limbs = ((size_t)tcount + 1 + (use_mullo ? 1 : 0)) *
++        int mip_in_arena = use_mullo && !cc;        /* cached: the entry holds it */
++        size_t lad_limbs = ((size_t)tcount + 1 + (mip_in_arena ? 1 : 0)) *
+                            (size_t)k;
+         size_t t_off = 0, nl_off = 0, el_off = 0;
+         if (!use_mullo) {
+@@ -56979,8 +57155,17 @@ WValue bigint_powmod_any(WValue base, WValue expv, WValue modv) {
+                 t_off = 0;
+             }
+         }
+-        uint64_t *arena =
+-            (uint64_t *)malloc(lad_limbs * sizeof(uint64_t));
++        uint64_t *arena;
++        if (cc) {                                   /* retained, grow-only */
++            if (lad_limbs > cc->arena_cap) {
++                free(cc->arena);
++                cc->arena = (uint64_t *)malloc(lad_limbs * sizeof(uint64_t));
++                cc->arena_cap = lad_limbs;
++            }
++            arena = cc->arena;
++        } else {
++            arena = (uint64_t *)malloc(lad_limbs * sizeof(uint64_t));
++        }
+         uint64_t *x = arena + (size_t)tcount * (size_t)k;
+         if (nl_off) {
+             T = arena + t_off;
+@@ -56995,12 +57180,25 @@ WValue bigint_powmod_any(WValue base, WValue expv, WValue modv) {
+             el = el_copy;
+         }
+         const uint64_t *mip = NULL;
+-        if (use_mullo) {                            /* Newton k-limb inverse */
+-            uint64_t *mipw = arena + ((size_t)tcount + 1) * (size_t)k;
+-            w_mont_ninv_k(mipw, nl, k, np0, T);     /* T free until ladder */
+-            mip = mipw;
++        if (use_mullo) {
++            if (cc) {
++                mip = cc->mip;
++            } else {                                /* Newton k-limb inverse */
++                uint64_t *mipw = arena + ((size_t)tcount + 1) * (size_t)k;
++                w_mont_ninv_k(mipw, nl, k, np0, T);     /* T free until ladder */
++                mip = mipw;
++            }
+         }
+ #define W_POWM_ROW(t) (arena + (size_t)(t) * (size_t)k)
++#if BN_POWM_CTX_CACHE
++        if (!w_powm_reduce_base_into(x, ctx, bl, babs, bneg)) {
++            if (!cc) {
++                free(arena);
++                w_powm_ctx_discard(ctx, mposb);
++            }
++            return w_box_int(0);                    /* base ≡ 0, e ≥ 1 */
++        }
++#else
+         if (rneg) {                                 /* plain base = |m| − |r| */
+             for (int32_t j = 0; j < k; j++) x[j] = ml[j];
+             (void)w_prime_sub_mag_inplace(x, k, rl0, rabs);
+@@ -57013,8 +57211,9 @@ WValue bigint_powmod_any(WValue base, WValue expv, WValue modv) {
+          * per call). */
+         if (r0v != base && w_is_bigint(r0v))
+             bigint_release_if_live(w_as_bigint(r0v));
++#endif
+         {   /* domain entry: tbl[0] = MontMul(base, R²) = base·R */
+-            WBigint *r2 = ctx.r2b;
++            WBigint *r2 = ctx->r2b;
+             int32_t r2l = r2->size < 0 ? -r2->size : r2->size;
+             w_powm_mont_mul(W_POWM_ROW(0), x, r2->limbs, r2l, k, nl, np0, np1, mip, T);
+         }
+@@ -57065,9 +57264,10 @@ WValue bigint_powmod_any(WValue base, WValue expv, WValue modv) {
+             r->size = rl2;
+             result = bigint_normalize(r);
+         }
+-        free(arena);
+-        w_prime_modctx_fini(&ctx);
+-        if (mposb) bigint_backing_free(mposb);
++        if (!cc) {
++            free(arena);
++            w_powm_ctx_discard(ctx, mposb);
++        }
+         return result;
+     }
+ 
+@@ -57075,10 +57275,14 @@ WValue bigint_powmod_any(WValue base, WValue expv, WValue modv) {
+      * 1 for domain exit), and the odd-power window table b^1, b^3, …, all in
+      * the ctx's domain. */
+     WBigint *xbuf = bigint_alloc(cap);
+-    WBigint *gg = bigint_alloc(cap);
+-    WBigint *tbl[128];                                     /* wbits ≤ 8 */
+-    for (int32_t t = 0; t < tcount; t++) tbl[t] = bigint_alloc(cap);
+-
++#if BN_POWM_CTX_CACHE
++    xbuf->size = w_powm_reduce_base_into(xbuf->limbs, ctx, bl, babs, bneg);
++    if (xbuf->size == 0) {
++        bigint_backing_free(xbuf);
++        if (!cc) w_powm_ctx_discard(ctx, mposb);
++        return w_box_int(0);                               /* base ≡ 0, e ≥ 1 */
++    }
++#else
+     if (rneg) {                                            /* |m| − |r| */
+         for (int32_t i = 0; i < k; i++) xbuf->limbs[i] = ml[i];
+         xbuf->size = w_prime_sub_mag_inplace(xbuf->limbs, k, rl0, rabs);
+@@ -57089,19 +57293,23 @@ WValue bigint_powmod_any(WValue base, WValue expv, WValue modv) {
+     /* Same leak as the ladder branch: release the minted remainder. */
+     if (r0v != base && w_is_bigint(r0v))
+         bigint_release_if_live(w_as_bigint(r0v));
++#endif
++    WBigint *gg = bigint_alloc(cap);
++    WBigint *tbl[128];                                     /* wbits ≤ 8 */
++    for (int32_t t = 0; t < tcount; t++) tbl[t] = bigint_alloc(cap);
+ 
+     /* Domain entry: tbl[0] = base·R (Montgomery) or the plain base (Barrett). */
+-    if (ctx.mont) {
+-        tbl[0]->size = w_prime_modctx_mul_bigint_into(tbl[0], &ctx, xbuf, ctx.r2b);
++    if (ctx->mont) {
++        tbl[0]->size = w_prime_modctx_mul_bigint_into(tbl[0], ctx, xbuf, ctx->r2b);
+     } else {
+         int32_t bs = xbuf->size;
+         for (int32_t i = 0; i < bs; i++) tbl[0]->limbs[i] = xbuf->limbs[i];
+         tbl[0]->size = bs;
+     }
+     if (tcount > 1) {
+-        gg->size = w_prime_modctx_sqr_bigint_into(gg, &ctx, tbl[0]);
++        gg->size = w_prime_modctx_sqr_bigint_into(gg, ctx, tbl[0]);
+         for (int32_t t = 1; t < tcount; t++)
+-            tbl[t]->size = w_prime_modctx_mul_bigint_into(tbl[t], &ctx, tbl[t - 1], gg);
++            tbl[t]->size = w_prime_modctx_mul_bigint_into(tbl[t], ctx, tbl[t - 1], gg);
+     }
+ 
+     /* Left-to-right sliding window over e's bits. The leading window seeds the
+@@ -57119,24 +57327,24 @@ WValue bigint_powmod_any(WValue base, WValue expv, WValue modv) {
+     }
+     while (i >= 0) {
+         if (!w_powm_bit(el, elen, i)) {
+-            xbuf->size = w_prime_modctx_sqr_bigint_into(xbuf, &ctx, xbuf);
++            xbuf->size = w_prime_modctx_sqr_bigint_into(xbuf, ctx, xbuf);
+             i--;
+         } else {
+             int l = i - wbits + 1;
+             if (l < 0) l = 0;
+             while (!w_powm_bit(el, elen, l)) l++;
+             for (int s = i - l + 1; s > 0; s--)
+-                xbuf->size = w_prime_modctx_sqr_bigint_into(xbuf, &ctx, xbuf);
++                xbuf->size = w_prime_modctx_sqr_bigint_into(xbuf, ctx, xbuf);
+             xbuf->size = w_prime_modctx_mul_bigint_into(
+-                xbuf, &ctx, xbuf, tbl[w_powm_bits(el, elen, l, i - l + 1) >> 1]);
++                xbuf, ctx, xbuf, tbl[w_powm_bits(el, elen, l, i - l + 1) >> 1]);
+             i = l - 1;
+         }
+     }
+ 
+-    if (ctx.mont) {                                        /* exit: MontMul(x, 1) = x·R⁻¹ */
++    if (ctx->mont) {                                       /* exit: MontMul(x, 1) = x·R⁻¹ */
+         gg->limbs[0] = 1ULL;
+         gg->size = 1;
+-        xbuf->size = w_prime_modctx_mul_bigint_into(xbuf, &ctx, xbuf, gg);
++        xbuf->size = w_prime_modctx_mul_bigint_into(xbuf, ctx, xbuf, gg);
+     }
+ 
+     int32_t rl2 = xbuf->size;
+@@ -57155,8 +57363,7 @@ WValue bigint_powmod_any(WValue base, WValue expv, WValue modv) {
+     bigint_backing_free(xbuf);
+     bigint_backing_free(gg);
+     for (int32_t t = 0; t < tcount; t++) bigint_backing_free(tbl[t]);
+-    w_prime_modctx_fini(&ctx);
+-    if (mposb) bigint_backing_free(mposb);
++    if (!cc) w_powm_ctx_discard(ctx, mposb);
+     return result;
+ }
+ 

@@ -688,6 +688,8 @@ exclude_specs=(
   spec/compiler/bigint_mul17_source_c_differential_spec.w
   spec/compiler/bigint_mul1_16_reopen_source_seam_spec.w
   spec/compiler/bigint_mul1_16_source_c_differential_spec.w
+  spec/compiler/bigint_core_receiver_locked_direct_spec.w
+  spec/compiler/bigint_release_reassign_spec.w
   spec/compiler/bigint_mul1_1_locked_direct_spec.w
   spec/compiler/bigint_mul1_1_reopen_source_seam_spec.w
   spec/compiler/bigint_mul1_24_reopen_source_seam_spec.w

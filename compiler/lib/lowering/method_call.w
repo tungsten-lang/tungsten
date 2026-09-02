@@ -62,9 +62,125 @@
     method_ast = mod[:class_method_asts][key]
     if method_ast != nil
       return mod[:class_method_fn_names][key]
+    # Runtime lookup probes this class's own table before walking to the
+    # superclass, and a method registered with a default-parameter range
+    # (or a splat) accepts every call arity it covers. class_method_asts is
+    # keyed by parameter count, so a plain superclass entry keyed by the
+    # call arity would otherwise be resolved past the range entry the
+    # runtime selects first. Fail closed on that shape.
+    if locked_range_entry_covers?(mod, current, method_name, arg_count)
+      return nil
     current = mod[:class_super_names][current]
     guard += 1
   nil
+
+-> locked_range_entry_covers?(mod, class_name, method_name, arg_count)
+  prefix = class_name + "." + method_name + "/"
+  params = 0
+  while params <= arg_count + 8
+    if params != arg_count
+      method_ast = mod[:class_method_asts][prefix + params.to_s()]
+      if method_ast != nil && is_ast_node?(method_ast)
+        if method_splat_index(method_ast) >= 0 || params > arg_count
+          if method_min_runtime_arity(method_ast) <= arg_count + 1
+            return true
+    params += 1
+  false
+
+# Declared Core value receivers. A `(BigInt ...)` signature or `## big` hint
+# gives the receiver the class symbol :BigInt / :bigint, which the
+# source-class devirtualizer rejects because BigInt carries a runtime
+# dispatch tag. That tag is exactly what makes the receiver devirtualizable:
+# a heap BigInt has no IC table, so the runtime resolves it through
+# g_type_class to the compiled Core method the superclass walk selects,
+# which locked_direct_method_fn reproduces. The slot may still hold a
+# demoted inline int (or nil), so the direct call is guarded by the tag test
+# with the ordinary IC send as the slow arm; a program subclass of BigInt is
+# a WObject without the tag and takes the slow arm too.
+-> receiver_core_tagged_class_fact(ctx, recv_type)
+  if recv_type == nil
+    return nil
+  cname = nil
+  if recv_type == :BigInt || recv_type == :bigint
+    cname = "BigInt"
+  if cname == nil
+    return nil
+  class_node = ctx[:mod][:known_classes][cname]
+  if class_node == nil || !is_ast_node?(class_node) || ast_kind(class_node) != :class_def
+    return nil
+  entry = overload_exact_tag_entry(cname)
+  if entry == nil
+    return nil
+  {class_name: cname, entry: entry}
+
+# `a <=> b` on two heap BigInts resolves to Core's Real#<=>, whose body is
+# two polymorphic comparisons. When both operands are guard-proven BigInts
+# and the target is that unmodified Core method, w_spaceship (one
+# bigint_compare) is the same function.
+-> core_tagged_spaceship_intrinsic?(ctx, node, method_name, core_fn)
+  if method_name != "<=>" || node.args == nil || node.args.size() != 1
+    return false
+  real_key = "Real.<=>/1"
+  real_ast = ctx[:mod][:class_method_asts][real_key]
+  if real_ast == nil || !definition_from_core?(real_ast)
+    return false
+  if ctx[:mod][:class_method_fn_names][real_key] != core_fn
+    return false
+  arg_type = receiver_static_type(ctx, node.args[0])
+  arg_type == :BigInt || arg_type == :bigint
+
+# Emit the tag test and the fast arm; leave the current block positioned at
+# the start of the slow arm so the ordinary IC lowering that follows lands
+# there. Returns the join record core_guard_finish consumes.
+-> emit_core_tag_guard_fast_arm(ctx, node, receiver_reg, arg_regs, core_fn, entry, intrinsic)
+  wfn = ctx[:func]
+  gm = next_temp(wfn)
+  emit_wire_and_i64(wfn, receiver_reg, entry[:mask], gm)
+  cond = next_temp(wfn)
+  emit_wire_icmp_i64(wfn, gm, "eq", entry[:tag], cond)
+  if intrinsic
+    am = next_temp(wfn)
+    emit_wire_and_i64(wfn, arg_regs[0], entry[:mask], am)
+    ac = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, am, "eq", entry[:tag], ac)
+    both = next_temp(wfn)
+    emit_wire_and_i1(wfn, cond, ac, both)
+    cond = both
+  fast_label = next_label(wfn, "coretag.fast")
+  slow_label = next_label(wfn, "coretag.slow")
+  done_label = next_label(wfn, "coretag.done")
+  slot = ensure_var_slot(wfn, "__coretag." + done_label)
+  emit_wire_cond_br(wfn, cond, slow_label, nil, fast_label)
+  start_block(wfn, fast_label)
+  args = [receiver_reg]
+  i = 0
+  while i < arg_regs.size()
+    args.push(arg_regs[i])
+    i += 1
+  site_id = nil
+  if node.line != nil
+    site_id = next_call_site_id(ctx[:mod])
+  fast = next_temp(wfn)
+  if intrinsic
+    emit_wire_call_direct_i64(wfn, nil, args, nil, site_id, "w_spaceship", node.col, node.line, fast)
+  else
+    emit_wire_call_direct_i64(wfn, nil, args, nil, site_id, core_fn, node.col, node.line, fast)
+  emit_wire_store_i64(wfn, slot, fast)
+  emit_wire_br(wfn, done_label, nil, nil)
+  start_block(wfn, slow_label)
+  {slot: slot, done_label: done_label}
+
+-> core_guard_finish(ctx, guard, result)
+  if guard == nil
+    return result
+  wfn = ctx[:func]
+  slow = ensure_i64_value(wfn, result)
+  emit_wire_store_i64(wfn, guard[:slot], slow)
+  emit_wire_br(wfn, guard[:done_label], nil, nil)
+  start_block(wfn, guard[:done_label])
+  joined = next_temp(wfn)
+  emit_wire_load_i64(wfn, guard[:slot], joined)
+  typed_value(:i64, joined)
 
 # A locked table makes `self` devirtualizable without pretending its runtime
 # class is exact. New subclasses created after the barrier cannot install an
@@ -2126,7 +2242,15 @@
   # targets become an exhaustive class decision with direct-call arms. Stable
   # compatible `self` facts retain the hierarchy-wide same-target proof.
   # Unknown/widened incompatible facts keep ordinary IC dispatch.
+  core_guard = nil
   if ctx[:mod][:method_tables_locked] == true && node.block == nil
+    core_fact = receiver_core_tagged_class_fact(ctx, recv_type)
+    if core_fact != nil
+      core_fn = locked_direct_method_fn(ctx[:mod], core_fact[:class_name], method_name, node.args.size())
+      if core_fn != nil
+        core_intrinsic = core_tagged_spaceship_intrinsic?(ctx, node, method_name, core_fn)
+        core_guard = emit_core_tag_guard_fast_arm(ctx, node, receiver_reg, arg_regs, core_fn, core_fact[:entry], core_intrinsic)
+  if core_guard == nil && ctx[:mod][:method_tables_locked] == true && node.block == nil
     locked_fact = receiver_flow_class_fact(ctx, node)
     if locked_fact == nil
       locked_fact = receiver_source_class_fact(ctx, recv_node)
@@ -2261,5 +2385,5 @@
         recv_array_etype = array_hint_element_type(recv_field[:type])
         if recv_array_etype == "f32" || recv_array_etype == "f64"
           checked = guard_typed_array_arg(ctx, temp, recv_field[:type], nil, recv_type.to_s() + "#" + method_name, 0)
-          return typed_value(typed_array_etype_to_sym(recv_array_etype), checked)
-  typed_value(:i64, temp)
+          return core_guard_finish(ctx, core_guard, typed_value(typed_array_etype_to_sym(recv_array_etype), checked))
+  core_guard_finish(ctx, core_guard, typed_value(:i64, temp))

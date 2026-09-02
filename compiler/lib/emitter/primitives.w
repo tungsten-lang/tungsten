@@ -344,6 +344,8 @@
   out << declare_fn("w_neq", wv, wv2)
   out << declare_fn("w_lt", wv, wv2)
   out << declare_fn("w_gt", wv, wv2)
+  out << declare_fn("w_spaceship", wv, wv2)
+  out << declare_fn("w_bigint_release_dead_distinct", wv, wv2)
   out << declare_fn("w_lte", wv, wv2)
   out << declare_fn("w_gte", wv, wv2)
 

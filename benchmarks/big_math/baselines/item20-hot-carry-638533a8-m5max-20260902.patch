@@ -1,0 +1,495 @@
+diff --git i/benchmarks/big_math/bench_big_math.c w/benchmarks/big_math/bench_big_math.c
+index 2869d2b0..f98fb361 100644
+--- i/benchmarks/big_math/bench_big_math.c
++++ w/benchmarks/big_math/bench_big_math.c
+@@ -1779,6 +1779,81 @@ DEFINE_BENCH_LANE(add1, bigint_add_any(a, b))
+ DEFINE_BENCH_LANE(sub1, bigint_sub_any(a, b))
+ DEFINE_BENCH_LANE(mul1, bigint_mul_any(a, b))
+ #endif
++/* Register-carried add1/sub1 lanes (candidate for the add1@2..4 / sub1@2..4
++ * gap to GMP).  Compile-time knob BENCH_ADDSUB_WORD_CARRY=1 builds the
++ * variant lanes alongside the standard ones; the environment toggle
++ * BENCH_ADDSUB_WORD_CARRY=1 (read once in main) selects them at run time,
++ * so one binary A/Bs both arms. */
++#ifndef BENCH_ADDSUB_WORD_CARRY
++#define BENCH_ADDSUB_WORD_CARRY 0
++#endif
++#if BENCH_ADDSUB_WORD_CARRY
++#if !BENCH_TUNGSTEN_WORD_API
++#error "BENCH_ADDSUB_WORD_CARRY needs the word-entry lanes (BENCH_TUNGSTEN_WORD_API)"
++#endif
++static int bench_addsub_word_carry;
++/* DEFINE_BENCH_LANE with the hot-slot round trip replaced by a register:
++ * the release of r_{i-1} at the END of iteration i yields the packed hot
++ * word (bigint_release_if_live_carry) and op i+1 consumes it
++ * (bigint_*_ui_any_carry -> bigint_alloc_raw_hot_from).  The lifecycle is
++ * otherwise identical — r_{i-1} is live while op i runs — and the word
++ * still carried when the lane ends is parked, so teardown sees exactly the
++ * pool state the standard lane leaves. */
++#define DEFINE_BENCH_LANE_CARRY(NAME, APPLY)                               \
++static double __attribute__((noinline, aligned(128)))                      \
++bench_lane_##NAME##_carry(BenchLaneCtx *cx) {                              \
++    WValue a = cx->a, b = cx->b;                                           \
++    uint64_t word = w_as_bigint(b)->limbs[0];                              \
++    WValue previous = cx->previous;                                        \
++    int recycle = cx->recycle;                                             \
++    uint64_t carried = 0;                                                  \
++    if (cx->warm_chunk > 0) {                                              \
++        double warm_start = bench_now();                                   \
++        do {                                                               \
++            for (int warm_i = 0; warm_i < cx->warm_chunk; warm_i++) {      \
++                WValue result = (APPLY);                                   \
++                bench_sink ^= bench_observe_low(result);                   \
++                if (recycle)                                               \
++                    carried = w_is_bigint(previous)                        \
++                        ? bigint_release_if_live_carry(                    \
++                              w_as_bigint(previous))                       \
++                        : 0;                                               \
++                else {                                                     \
++                    if (w_is_bigint(previous))                             \
++                        bench_direct_free(w_as_bigint(previous));          \
++                    carried = 0;                                           \
++                }                                                          \
++                previous = result;                                         \
++                BENCH_MAYBE_RELEASE_ARITH_WS();                            \
++            }                                                              \
++        } while (bench_now() - warm_start < bench_warm_seconds);           \
++    }                                                                      \
++    int iters = cx->iters;                                                 \
++    double timed_start = bench_now();                                      \
++    for (int timed_i = 0; timed_i < iters; timed_i++) {                    \
++        WValue result = (APPLY);                                           \
++        bench_sink ^= bench_observe_low(result) ^                          \
++                      (uint64_t)timed_i;                                   \
++        if (recycle)                                                       \
++            carried = w_is_bigint(previous)                                \
++                ? bigint_release_if_live_carry(w_as_bigint(previous))      \
++                : 0;                                                       \
++        else {                                                             \
++            if (w_is_bigint(previous))                                     \
++                bench_direct_free(w_as_bigint(previous));                  \
++            carried = 0;                                                   \
++        }                                                                  \
++        previous = result;                                                 \
++        BENCH_MAYBE_RELEASE_ARITH_WS();                                    \
++    }                                                                      \
++    double elapsed = bench_now() - timed_start;                            \
++    cx->previous = previous;                                               \
++    bigint_hot_park_carried(carried);                                      \
++    return elapsed;                                                        \
++}
++DEFINE_BENCH_LANE_CARRY(add1, bigint_add_ui_any_carry(a, word, carried))
++DEFINE_BENCH_LANE_CARRY(sub1, bigint_sub_ui_any_carry(a, word, carried))
++#endif
+ #ifndef BENCH_DIV1_THRASH
+ #define BENCH_DIV1_THRASH 0
+ #endif
+@@ -1960,8 +2035,17 @@ static double bench_boxed_lane_run(int op, BenchLaneCtx *cx) {
+     case BENCH_BOXED_CMP:    return bench_lane_cmp(cx);
+     case BENCH_BOXED_NEG:    return bench_lane_neg(cx);
+     case BENCH_BOXED_ABS:    return bench_lane_abs(cx);
++#if BENCH_ADDSUB_WORD_CARRY
++    case BENCH_BOXED_ADD1:
++        return bench_addsub_word_carry ? bench_lane_add1_carry(cx)
++                                      : bench_lane_add1(cx);
++    case BENCH_BOXED_SUB1:
++        return bench_addsub_word_carry ? bench_lane_sub1_carry(cx)
++                                      : bench_lane_sub1(cx);
++#else
+     case BENCH_BOXED_ADD1:   return bench_lane_add1(cx);
+     case BENCH_BOXED_SUB1:   return bench_lane_sub1(cx);
++#endif
+     case BENCH_BOXED_MUL1:   return bench_lane_mul1(cx);
+     case BENCH_BOXED_DIV1:   return bench_lane_div1(cx);
+     case BENCH_BOXED_NEG_BANG: return bench_lane_negbang(cx);
+@@ -4186,6 +4270,12 @@ static void fuzz_word_ui_against_gmp(int cases, int32_t max_limbs) {
+     uint64_t state = UINT64_C(0x510e527fade682d1);
+     mpz_t za, zw, expected;
+     mpz_inits(za, zw, expected, NULL);
++#if BENCH_ADDSUB_WORD_CARRY
++    /* Under the toggle the add/sub results flow through the lanes'
++     * register-carried protocol instead of a plain free: each consumed
++     * result becomes the carried word the next add/sub call takes. */
++    uint64_t carried = 0;
++#endif
+     for (int t = 0; t < cases; t++) {
+         WValue base;
+         if ((t % 19) == 0) {
+@@ -4211,18 +4301,42 @@ static void fuzz_word_ui_against_gmp(int cases, int32_t max_limbs) {
+         gmp_import_value(za, a);
+         mpz_set_ui(zw, (unsigned long)word);
+ 
++#if BENCH_ADDSUB_WORD_CARRY
++        WValue got = bench_addsub_word_carry
++            ? bigint_add_ui_any_carry(a, word, carried)
++            : bigint_add_ui_any(a, word);
++#else
+         WValue got = bigint_add_ui_any(a, word);
++#endif
+         mpz_add(expected, za, zw);
+         if (!value_matches_mpz(got, expected))
+             dief("word-ui add mismatch case=%d word=%llu", t,
+                  (unsigned long long)word);
++#if BENCH_ADDSUB_WORD_CARRY
++        if (bench_addsub_word_carry)
++            carried = w_is_bigint(got)
++                ? bigint_release_if_live_carry(w_as_bigint(got)) : 0;
++        else
++#endif
+         bench_free_value(got);
+ 
++#if BENCH_ADDSUB_WORD_CARRY
++        got = bench_addsub_word_carry
++            ? bigint_sub_ui_any_carry(a, word, carried)
++            : bigint_sub_ui_any(a, word);
++#else
+         got = bigint_sub_ui_any(a, word);
++#endif
+         mpz_sub(expected, za, zw);
+         if (!value_matches_mpz(got, expected))
+             dief("word-ui sub mismatch case=%d word=%llu", t,
+                  (unsigned long long)word);
++#if BENCH_ADDSUB_WORD_CARRY
++        if (bench_addsub_word_carry)
++            carried = w_is_bigint(got)
++                ? bigint_release_if_live_carry(w_as_bigint(got)) : 0;
++        else
++#endif
+         bench_free_value(got);
+ 
+         got = bigint_mul_ui_any(a, word);
+@@ -4244,6 +4358,9 @@ static void fuzz_word_ui_against_gmp(int cases, int32_t max_limbs) {
+         if (a != base) bench_free_value(a);
+         bench_free_value(base);
+     }
++#if BENCH_ADDSUB_WORD_CARRY
++    bigint_hot_park_carried(carried);
++#endif
+     mpz_clears(za, zw, expected, NULL);
+     bigint_pool_release_thread();
+     printf("unsigned-word add/sub/mul/div fuzz vs GMP: %d/%d match"
+@@ -4639,6 +4756,31 @@ static void bench_gmp_boxed_apply(
+     }
+ }
+ 
++#if BENCH_ADDSUB_WORD_CARRY
++/* Mirror of the carry lanes' protocol for the GMP self-check: a short churn
++ * where r_{i-1} stays live while op i runs, its buffer is carried in a
++ * register, and op i+1 takes it — so the buffer that is actually reused
++ * across iterations is the register-carried one, checked every iteration. */
++static void check_addsub_word_carry_against_gmp(
++    int op, WValue a, uint64_t word, const mpz_t expected) {
++    WValue previous = W_NIL;
++    uint64_t carried = 0;
++    for (int i = 0; i < 64; i++) {
++        WValue got = op == BENCH_BOXED_ADD1
++            ? bigint_add_ui_any_carry(a, word, carried)
++            : bigint_sub_ui_any_carry(a, word, carried);
++        if (!value_matches_mpz(got, expected))
++            die("boxed word-carry operation mismatch vs GMP");
++        carried = w_is_bigint(previous)
++            ? bigint_release_if_live_carry(w_as_bigint(previous))
++            : 0;
++        previous = got;
++    }
++    bigint_hot_park_carried(carried);
++    if (previous != a) bench_free_value(previous);
++}
++#endif
++
+ static void check_boxed_op_against_gmp(int op, int32_t limbs) {
+     WValue a, b, m;
+     bench_boxed_operands(op, limbs, &a, &b, &m);
+@@ -4750,6 +4892,12 @@ static void check_boxed_op_against_gmp(int op, int32_t limbs) {
+         if (!value_matches_mpz(got, zg))
+             die("boxed operation mismatch vs GMP");
+         if (got != a && got != b) bench_free_value(got);
++#if BENCH_ADDSUB_WORD_CARRY
++        if (bench_addsub_word_carry &&
++            (op == BENCH_BOXED_ADD1 || op == BENCH_BOXED_SUB1))
++            check_addsub_word_carry_against_gmp(
++                op, a, w_as_bigint(b)->limbs[0], zg);
++#endif
+         break;
+     }
+     }
+@@ -5638,6 +5786,11 @@ int main(int argc, char **argv) {
+     bench_release_arith_ws_each_iteration =
+         release_arith_ws && strcmp(release_arith_ws, "0") != 0;
+ #endif
++#if BENCH_ADDSUB_WORD_CARRY
++    const char *addsub_word_carry = getenv("BENCH_ADDSUB_WORD_CARRY");
++    bench_addsub_word_carry =
++        addsub_word_carry && strcmp(addsub_word_carry, "0") != 0;
++#endif
+ #ifdef HAVE_GMP
+     if (argc == 4 && strcmp(argv[1], "--bench-prime-prefilter") == 0) {
+         int iters = atoi(argv[3]);
+diff --git i/runtime/runtime.c w/runtime/runtime.c
+index b26e22d7..6cc8a686 100644
+--- i/runtime/runtime.c
++++ w/runtime/runtime.c
+@@ -1293,6 +1293,122 @@ void bigint_release_if_live(WBigint *b) {
+     bigint_release(b);
+ }
+ 
++/*
++ * ---- Register-carried hot handoff (immutable-churn lane protocol) ----
++ *
++ * The one-previous-result-live churn (result r_i is computed while r_{i-1}
++ * is still live; r_{i-1} is released at the END of iteration i; op i+1
++ * takes that buffer) round-trips every buffer through the thread-local hot
++ * slot: the release stores the packed word into bigint_pool_state.hot_word
++ * and the very next take loads it back — two TLS loads, two stores and a
++ * store->load forward per op that GMP's twin lane (two alternating
++ * destinations in registers) never pays.  The *_carry entries below let a
++ * caller that owns the whole protocol keep that packed word in a REGISTER
++ * instead: bigint_release_if_live_carry RETURNS the word the hot slot would
++ * have received, and bigint_alloc_raw_hot_from consumes it.  The pool is
++ * only touched when the carried buffer cannot serve the next request, and
++ * then exactly as the displace arm of bigint_release_if_live would have
++ * (bigint_hot_park_carried), so the recycler's state after the protocol
++ * ends equals what the slot round trip would have left.
++ *
++ * Contract: a carried word is an owned, live-header (BN_BIGINT_HOT_LIVE_
++ * HEADER) buffer that is NOT in the pool.  The owner must either hand it to
++ * a *_from take or park it — never drop it (leak) or release it twice (the
++ * hot slot's pointer guard cannot see a register).  Same-thread only, like
++ * the pool itself.
++ */
++#if BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
++/* Park a carried word into the hot slot exactly as the swap-form displace
++ * arm of bigint_release_if_live does: unconditional store, displaced
++ * occupant rescued to its size-class bucket, self-displacement swallowed. */
++static inline __attribute__((always_inline))
++void bigint_hot_park_carried(uint64_t carried) {
++    if (carried == 0) return;
++    WBigintPool *pool = &bigint_pool_state;
++    uint64_t displaced = pool->hot_word;
++    pool->hot_word = carried;
++    if (__builtin_expect(displaced != 0, 0)) {
++        WBigint *prev = bigint_hot_ptr(displaced);
++        if (__builtin_expect(prev != bigint_hot_ptr(carried), 1))
++            bigint_release_cold(prev);
++    }
++}
++#else
++static inline void bigint_hot_park_carried(uint64_t carried) {
++    (void)carried;
++}
++#endif
++
++/* bigint_release_if_live with the hot-slot store replaced by a return: the
++ * live/alias checks, the fused header read and the cap <= pool-max rule
++ * are the same instruction shape as the original (kept as a verbatim copy
++ * rather than a shared helper so the tuned original's codegen is
++ * untouched).  Returns the packed word the buffer WOULD have been parked
++ * under, or 0 when the release took any other arm (not live, alias
++ * swallowed, over-cap backing free, cold bucket) — those arms behave
++ * exactly as today. */
++static inline __attribute__((always_inline))
++uint64_t bigint_release_if_live_carry(WBigint *b) {
++#if BN_BIGINT_RELEASE_INLINE_HANDOFF && BN_BIGINT_HOT_SLOT && \
++    BN_BIGINT_POWER2_CAP
++#if BN_BIGINT_RELEASE_FUSED_HEADER
++    uint64_t head01[2];
++    memcpy(head01, b, sizeof head01);   /* one ldp; no aliasing violation */
++    __asm__("" : "+r"(head01[0]));      /* keep the wide load (see original) */
++    if (__builtin_expect((uint16_t)head01[0] != (uint16_t)W_TYPE_BIGINT, 0)) {
++        if ((uint8_t)head01[0] != W_TYPE_BIGINT) return 0;
++        uint8_t sh = *(volatile uint8_t *)&b->shared;
++        if (sh != 255) b->shared = (uint8_t)(sh - 1);
++        return 0;
++    }
++    uint32_t cap = (uint32_t)head01[1];  /* fused from the header read */
++#elif defined(__LITTLE_ENDIAN__) || (defined(__BYTE_ORDER__) && \
++    __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
++    uint16_t head;
++    memcpy(&head, b, sizeof head);      /* one ldrh; no aliasing violation */
++    if (__builtin_expect(head != (uint16_t)W_TYPE_BIGINT, 0)) {
++        if (b->type != W_TYPE_BIGINT) return 0;
++        if (b->shared != 255) b->shared--;
++        return 0;
++    }
++    uint32_t cap = b->cap;
++#else
++    if (__builtin_expect(b->type != W_TYPE_BIGINT, 0)) return 0;
++    if (__builtin_expect(b->shared != 0, 0)) {
++        if (b->shared != 255) b->shared--;
++        return 0;
++    }
++    uint32_t cap = b->cap;
++#endif
++#if BN_BIGINT_RELEASE_DISPLACE
++    /* The displace arm parks unconditionally; here that park IS the return
++     * value, and there is nothing to displace because the caller owns the
++     * word until it hands it to a *_from take or bigint_hot_park_carried. */
++    if (__builtin_expect(cap <= BN_BIGINT_POOL_MAX_CAP, 1)) {
++#if !BN_BIGINT_HOT_LIVE_HEADER
++        b->type = 0;
++#endif
++        return bigint_hot_encode(b, cap);
++    }
++#else
++    if (__builtin_expect(cap <= BN_BIGINT_POOL_MAX_CAP, 1)) {
++        WBigintPool *pool = &bigint_pool_state;
++        if (__builtin_expect(pool->hot_word == 0, 1)) {
++#if !BN_BIGINT_HOT_LIVE_HEADER
++            b->type = 0;
++#endif
++            return bigint_hot_encode(b, cap);
++        }
++    }
++#endif
++    bigint_release(b);
++    return 0;
++#else
++    bigint_release_if_live(b);
++    return 0;
++#endif
++}
++
+ static void bigint_pool_release_thread(void) {
+     WBigintPool *pool = &bigint_pool_state;
+ #if BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
+@@ -1323,6 +1439,13 @@ static inline void bigint_release_if_live(WBigint *b) {
+     }
+     free(b);
+ }
++static inline void bigint_hot_park_carried(uint64_t carried) {
++    (void)carried;
++}
++static inline uint64_t bigint_release_if_live_carry(WBigint *b) {
++    bigint_release_if_live(b);
++    return 0;
++}
+ static inline void bigint_pool_release_thread(void) {}
+ static __thread BnDivPreinvCache bn_div_preinv_cache;
+ #endif
+@@ -1492,6 +1615,37 @@ WBigint *bigint_alloc_raw_hot(int32_t cap) {
+     return bigint_alloc_raw(cap);
+ }
+ 
++/*
++ * bigint_alloc_raw_hot for a caller carrying the hot word in a register
++ * (see bigint_release_if_live_carry).  The fit test is the same single
++ * unsigned compare on the decoded capacity as bigint_alloc_raw_hot (an
++ * empty word decodes as capacity 0 and rejects everything).  On a hit the
++ * carried buffer is returned with the header treatment of a hot-slot hit
++ * and the pool is not touched at all; on a miss the carried word is parked
++ * exactly as the displace arm would have parked it and the ordinary
++ * hot-slot take runs, so the miss path sees the same pool state it sees
++ * today.
++ */
++static inline __attribute__((always_inline))
++WBigint *bigint_alloc_raw_hot_from(uint64_t carried, int32_t cap) {
++#if BN_BIGINT_RECYCLE && BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
++    uint64_t requested = (uint64_t)(uint32_t)cap;
++    uint64_t hot_cap = bigint_hot_capacity(carried);
++    if (__builtin_expect(hot_cap - requested < requested, 1)) {
++        WBigint *hot = bigint_hot_ptr(carried);
++#if !BN_BIGINT_HOT_LIVE_HEADER
++        hot->type = W_TYPE_BIGINT;
++#endif
++        /* Raw callers publish their final signed size after filling limbs. */
++        return hot;
++    }
++    bigint_hot_park_carried(carried);
++#else
++    (void)carried;
++#endif
++    return bigint_alloc_raw_hot(cap);
++}
++
+ /*
+  * A few fixed-width kernels already know the allocator's exact power-of-two
+  * capacity class.  On their hot-slot hit, avoid recomputing the smallest-fit
+@@ -2592,6 +2746,88 @@ WValue bigint_sub_ui_any(WValue a, uint64_t word) {
+     return bigint_addsub_word(al, n, negative, word, 1);
+ }
+ 
++/* Register-carried variants of the two word entries above for a caller
++ * running the one-previous-result-live churn protocol (see the comment on
++ * bigint_release_if_live_carry).  Identical shape and decode order to
++ * bigint_add_ui_any / bigint_sub_ui_any — word == 0 identity, the
++ * positive-bigint tag test, n = size, n >= 2 streamed kernel — with the
++ * allocation step swapped for bigint_alloc_raw_hot_from(carried, n).
++ * Every path that does not consume `carried` parks it first, exactly as
++ * the displace arm would, so the leaf/generic paths run against the same
++ * pool state they see today and no buffer can leak. */
++static inline __attribute__((always_inline))
++WValue bigint_add_ui_any_carry(WValue a, uint64_t word, uint64_t carried) {
++    if (word == 0) {
++        bigint_hot_park_carried(carried);
++        if (w_is_bigint(a)) w_bigint_mark_shared(w_as_bigint(a));
++        return a;
++    }
++#if BN_WORD_UI_POSITIVE_FAST
++    if ((a >> 47) == (W_TAG_BIGINT >> 47)) {
++        WBigint *ba = w_as_bigint(a);
++        int32_t n = ba->size;
++        if (n >= 2) {
++            WBigint *r = bigint_alloc_raw_hot_from(carried, n);
++            return bigint_add_word_into(ba->limbs, n, 0, word, r);
++        }
++#if BN_ADD_UI_POSITIVE_11_AFTER
++        if (n == 1) {
++            bigint_hot_park_carried(carried);
++            return bigint_add_one_limb_magnitudes(
++                ba->limbs[0], 0, word, 0);
++        }
++#endif
++    }
++#endif
++    bigint_hot_park_carried(carried);
++    uint64_t scratch;
++    int32_t alen;
++    const uint64_t *al = integer_limbs(a, &scratch, &alen);
++    int negative = alen < 0;
++    int32_t n = negative ? -alen : alen;
++    if (n == 0) return bigint_from_u64(word);
++    if (n == 1)
++        return bigint_add_one_limb_magnitudes(
++            al[0], negative, word, 0);
++    return bigint_addsub_word(al, n, negative, word, 0);
++}
++
++static inline __attribute__((always_inline))
++WValue bigint_sub_ui_any_carry(WValue a, uint64_t word, uint64_t carried) {
++    if (word == 0) {
++        bigint_hot_park_carried(carried);
++        if (w_is_bigint(a)) w_bigint_mark_shared(w_as_bigint(a));
++        return a;
++    }
++#if BN_WORD_UI_POSITIVE_FAST
++    if ((a >> 47) == (W_TAG_BIGINT >> 47)) {
++        WBigint *ba = w_as_bigint(a);
++        int32_t n = ba->size;
++        if (n >= 2) {
++            WBigint *r = bigint_alloc_raw_hot_from(carried, n);
++            return bigint_sub_word_into(r, ba->limbs, n, 0, word);
++        }
++#if BN_ADD_UI_POSITIVE_11_AFTER
++        if (n == 1) {
++            bigint_hot_park_carried(carried);
++            return bigint_sub1_positive_one_limb(ba->limbs[0], word);
++        }
++#endif
++    }
++#endif
++    bigint_hot_park_carried(carried);
++    uint64_t scratch;
++    int32_t alen;
++    const uint64_t *al = integer_limbs(a, &scratch, &alen);
++    int negative = alen < 0;
++    int32_t n = negative ? -alen : alen;
++    if (n == 0) return bigint_finish_one_limb(word, 1);
++    if (n == 1)
++        return bigint_add_one_limb_magnitudes(
++            al[0], negative, word, 1);
++    return bigint_addsub_word(al, n, negative, word, 1);
++}
++
+ /* ---- Magnitude operations (unsigned) ---- */
+ 
+ static uint64_t bn_add_n(uint64_t *r, const uint64_t *a,

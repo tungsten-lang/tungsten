@@ -194,6 +194,13 @@ cprog = ccall("__w_env", "FN_CPROG") != "0"
 # needs the ENTIRE chunk resident on the MTL4 stream (all ops ported) or a
 # persistent-kernel design — out of scope for point integration.
 m4_on = ccall("__w_env", "FN_M4") == "1"
+# FN_NA=1: Neural-Accelerator (matmul2d) GEMMs for the bf16 backbone in the
+# chunked prefill, dispatched from the CLASSIC encoder inside the recorded
+# chunk program — no Metal-4 objects, no segmentation, no residency sets
+# (docs/na-classic-encoder-2026-09-02.md). bf16 activations (RNE-rounded)
+# x native bf16 weights -> f32. Not bit-identical to the f32 GEMM, so it is
+# gated on fixture + ids agreement + coherence, not on the ids oracle.
+na_on = ccall("__w_env", "FN_NA") == "1"
 # FN_M4EXEC=1: run the WHOLE recorded chunk program on the MTL4 stream
 # (plain PSOs + prebuilt argtables + intra-encoder barriers) — the spike
 # for the all-MTL4 prefill; matmul2d steps join the same stream next.
@@ -1697,6 +1704,17 @@ if multi_n > 0 || mtp_depth > 0 || prompt_tokens > 8 || prompt_ids_file != ""
   moe_offs_buf_bank = [metal_buffer(device, 513 * 4), metal_buffer(device, 513 * 4)]
   xg_m_bank = [metal_buffer(device, (MULTI_MAX * TOP_K + 8) * HIDDEN * 4), metal_buffer(device, (MULTI_MAX * TOP_K + 8) * HIDDEN * 4)]
   xb_stage = metal_buffer(device, MULTI_MAX * V_DIM * 2)
+  # FN_NA: bf16 activation staging (widest backbone K = HC_HIDDEN) + the
+  # classic-encoder NA GEMM (K tile 64 covers the 320-wide mixers).
+  na_stage = nil
+  na_bf16_k64_pipe = nil
+  f32_to_bf16_rne_pipe = nil
+  if na_on
+    na_lib = metal_compile_source(device, read_file("bits/tungsten-llama/lib/kernels/na/dense_matmul_na.metal"))
+    na_bf16_k64_pipe = metal_pipeline(na_lib, "bf16_matmul_na_k64")
+    na_stage = metal_buffer(device, MULTI_MAX * HC_HIDDEN * 2)
+    f32_to_bf16_rne_pipe = metal_pipeline(fnm_lib, "f32_to_bf16_rne")
+  na_last_conv = [nil, 0, -1]
   f32_to_bf16_pipe = metal_pipeline(fnm_lib, "f32_to_bf16")
   f32_to_f16_pipe = metal_pipeline(metal_compile_source(device, read_file(NVFP4_DIR + "f32_to_f16.metal")), "f32_to_f16")
   bf16_to_f16_pipe = metal_pipeline(fnm_lib, "bf16_to_f16")
@@ -1870,9 +1888,30 @@ mrec = [0]
 # Rung selection from autotune_qwen38fn.w wide: r1 collapses at n>=3 on
 # big-row shapes (register pressure); r2 wins there; r1 stays best at
 # rows<=640 (occupancy) and at width 1.
+# Neural-Accelerator GEMM site (FN_NA=1): y_out[n x rows] f32 = x_in[n x kdim]
+# (f32 -> bf16 RNE, staged once per source) x wraw (bf16 [rows x kdim]).
+# Tile 128x64x64: m is padded to 128 (scratch rows >= n come out garbage
+# and are never read), rows/kdim must be multiples of 64 (every backbone
+# shape is). Consecutive GEMMs on one source share the staging conversion
+# only while nothing else was recorded in between: any rewrite of the
+# source buffer arrives through other steps, which invalidates the reuse.
+-> na_gemm(wraw, x_in, y_out, kdim, rows, n)
+  m_pad = ((n + 127) / 128) * 128
+  reuse = mrec[0] == 1 && na_last_conv[0] == x_in && na_last_conv[1] == n * kdim && na_last_conv[2] == mprog.size()
+  if !reuse
+    mdn(f32_to_bf16_rne_pipe, [x_in, na_stage, n * kdim], n * kdim)
+    mbar([na_stage])
+    na_last_conv[0] = x_in
+    na_last_conv[1] = n * kdim
+  md3(na_bf16_k64_pipe, [na_stage, wraw, y_out, kdim, m_pad, rows], [m_pad / 128, rows / 64, 1, 128, 1, 1])
+  na_last_conv[2] = mprog.size()
+
 -> mv_multi(h, x_in, y_out, kdim, rows, n)
   if n > 8
     wraw = h.size() >= 3 ? h[3] : h[0]
+    if na_on && n > 64 && rows % 64 == 0 && kdim % 64 == 0
+      na_gemm(wraw, x_in, y_out, kdim, rows, n)
+      return
     if m4_on && mrec[0] == 1 && n > 64 && rows >= 2560
       # Neural-Accelerator site: convert activations once per x source, then
       # emit a segmentation marker carrying the prebuilt dispatch item.

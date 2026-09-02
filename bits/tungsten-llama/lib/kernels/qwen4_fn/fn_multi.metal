@@ -1131,6 +1131,22 @@ kernel void f32_to_bf16(
   dst[__tid] = ushort(as_type<uint>(src[__tid]) >> 16);
 }
 
+// Round-to-nearest-even f32 -> bf16 (the truncating twin above keeps its
+// bit-exact role in the ids-gated paths). Activation staging for the
+// Neural-Accelerator GEMMs (FN_NA): halves the staging error of truncation.
+kernel void f32_to_bf16_rne(
+  device const float  *__restrict__ src [[buffer(0)]],
+  device       ushort *__restrict__ dst [[buffer(1)]],
+  constant int &n [[buffer(2)]],
+  uint __tid [[thread_position_in_grid]]
+) {
+  if (int(__tid) >= n) return;
+  uint u = as_type<uint>(src[__tid]);
+  if ((u & 0x7f800000u) == 0x7f800000u) { dst[__tid] = ushort(u >> 16); return; }  // inf/nan: truncate
+  uint lsb = (u >> 16) & 1u;
+  dst[__tid] = ushort((u + 0x7fffu + lsb) >> 16);
+}
+
 
 
 [[max_total_threads_per_threadgroup(128)]]

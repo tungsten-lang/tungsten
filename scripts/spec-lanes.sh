@@ -40,6 +40,7 @@ spec_emit_classified_paths() {
     "${core_specs[@]+"${core_specs[@]}"}" \
     "${metal_specs[@]+"${metal_specs[@]}"}" \
     "${api_specs[@]+"${api_specs[@]}"}" \
+    "${parity_specs[@]+"${parity_specs[@]}"}" \
     "${exclude_specs[@]+"${exclude_specs[@]}"}"
   do
     printf '%s\n' "$path"
@@ -87,6 +88,8 @@ spec_print_lane() {
       printf '%s\n' "${metal_specs[@]+"${metal_specs[@]}"}" ;;
     api)
       printf '%s\n' "${api_specs[@]+"${api_specs[@]}"}" ;;
+    parity)
+      printf '%s\n' "${parity_specs[@]+"${parity_specs[@]}"}" ;;
     wassat)
       printf '%s\n' "${wassat_specs[@]+"${wassat_specs[@]}"}" ;;
     wrat)
@@ -169,6 +172,7 @@ spec_lanes_main() {
 }
 
 compiled_specs=(
+  spec/sci/io_prefix_spec.w
   compiler/test/regex_features.w
   spec/core/date_calendar_surface_spec.w
   spec/compiler/date_dynamic_receiver_spec.w
@@ -220,6 +224,7 @@ compiled_specs=(
   spec/compiler/parser_packed_token_access_spec.w
   spec/compiler/lexer_lexchar_storage_spec.w
   spec/compiler/raw_int_candidate_map_spec.w
+  spec/compiler/raw_int_candidate_ascription_spec.w
   spec/compiler/raw_machine_expression_context_spec.w
   spec/compiler/raw_machine_helper_control_flow_spec.w
   spec/compiler/raw_static_machine_return_spec.w
@@ -674,6 +679,73 @@ spec/numeric/bigint_seam_disjoint_spec.w
 spec/numeric/bigint_bang_spec.w
 spec/numeric/bigint_tag_sign_spec.w
 spec/numeric/rational_spec.w
+)
+# Cross-engine parity specs (spec/parity/*_spec.w). This lane runs by
+# default, but through scripts/parity.sh (the parity stage of
+# test-specs.sh) rather than as compiled/interpreter specs: each file is
+# run through BOTH engines and the transcripts are diffed, so a single run
+# in either lane would prove nothing. It is therefore deliberately absent
+# from spec_emit_default_spec_w. Add every new spec/parity file here.
+parity_specs=(
+  spec/parity/arity_extra_args_named_spec.w
+  spec/parity/arity_missing_args_spec.w
+  spec/parity/arity_mixed_call_sites_spec.w
+  spec/parity/arity_slash_form_spec.w
+  spec/parity/array_basics_spec.w
+  spec/parity/array_enumerable_spec.w
+  spec/parity/array_equality_sort_spec.w
+  spec/parity/block_passthrough_spec.w
+  spec/parity/block_yield_spec.w
+  spec/parity/case_range_when_spec.w
+  spec/parity/cidr_ipv4_spec.w
+  spec/parity/class_constructors_spec.w
+  spec/parity/class_generics_spec.w
+  spec/parity/class_inheritance_traits_spec.w
+  spec/parity/closures_lambdas_spec.w
+  spec/parity/container_string_quoting_spec.w
+  spec/parity/control_begin_rescue_spec.w
+  spec/parity/control_case_recase_spec.w
+  spec/parity/control_early_return_spec.w
+  spec/parity/currency_spec.w
+  spec/parity/date_arithmetic_spec.w
+  spec/parity/datetime_timezone_spec.w
+  spec/parity/decimal_arithmetic_spec.w
+  spec/parity/decimal_printing_spec.w
+  spec/parity/duration_display_spec.w
+  spec/parity/env_unset_spec.w
+  spec/parity/error_uncaught_format_spec.w
+  spec/parity/float_decimal_equality_spec.w
+  spec/parity/float_division_by_zero_spec.w
+  spec/parity/float_literal_no_decimal_point_spec.w
+  spec/parity/float_negative_zero_spec.w
+  spec/parity/float_printing_spec.w
+  spec/parity/hash_count_spec.w
+  spec/parity/hash_insertion_order_spec.w
+  spec/parity/integer_boundaries_spec.w
+  spec/parity/integer_i64_wrap_spec.w
+  spec/parity/integer_int_hint_spec.w
+  spec/parity/integer_literal_i64_overflow_spec.w
+  spec/parity/integer_ops_spec.w
+  spec/parity/iteration_blocks_spec.w
+  spec/parity/nil_display_spec.w
+  spec/parity/nonlocal_return_from_block_spec.w
+  spec/parity/object_equality_default_spec.w
+  spec/parity/percent_spec.w
+  spec/parity/range_basics_spec.w
+  spec/parity/range_closed_form_sums_spec.w
+  spec/parity/range_type_name_spec.w
+  spec/parity/string_esc_bracket_spec.w
+  spec/parity/string_interpolation_spec.w
+  spec/parity/string_methods_spec.w
+  spec/parity/string_padding_spec.w
+  spec/parity/string_range_index_spec.w
+  spec/parity/string_unicode_spec.w
+  spec/parity/super_constructor_spec.w
+  spec/parity/units_arithmetic_spec.w
+  spec/parity/units_conversion_spec.w
+  spec/parity/units_derived_spec.w
+  spec/parity/units_printing_spec.w
+  spec/parity/units_unary_minus_spec.w
 )
 exclude_specs=(
   spec/compiler/bigint_addmul_fusion_spec.w

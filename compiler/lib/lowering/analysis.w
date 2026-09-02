@@ -661,6 +661,13 @@
     return node.name == "$value"
   when :unary_op
     return int_shaped_node?(node.operand, declared_types, mod)
+  # `expr ## i64` / `## u64` names a machine-int representation for the whole
+  # expression, so a chain containing it (`x ^ ((r >> s) & (255 ## u64))`) is
+  # int-shaped whatever the inner literal or var would be on its own.  Without
+  # this arm the ascription fell to the `else` branch, the enclosing assign
+  # was classed non-int, and a u64 hash accumulator dropped to a boxed slot.
+  when :type_ascription
+    return assign_int_hint_type(node.type_hint) != nil
   when :call
     if resolved_raw_machine_call_return_type(node, mod) != nil
       return true
@@ -1104,6 +1111,19 @@
 
   when :not
     visit_promote_node(node.operand, records, declared_types, mod)
+    return nil
+
+  # `expr ## T` is a conversion boundary, not storage.  The ascribed value
+  # is consumed by the enclosing context exactly like the bare expression
+  # would be (a machine-int ascription hands over raw bits), so the vars
+  # under it are value uses, not escapes.  Letting this fall into the
+  # else-branch bulk escape un-promoted every local whose only "escape" was
+  # an argument spelled `f(x ## u64)`: once the raw-typed assign arm began
+  # honoring the candidate gate (typed-target assignment commit), such a
+  # local became a boxed slot, and a 63-bit word boxes into a heap BigInt,
+  # so `x & (x - 1)` bit walks paid a BigInt allocation per step.
+  when :type_ascription
+    visit_promote_node(node.expression, records, declared_types, mod)
     return nil
 
   # Safe leaves — known to never carry a var that flows to a non-int sink.

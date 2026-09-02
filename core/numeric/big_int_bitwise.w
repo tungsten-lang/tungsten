@@ -515,6 +515,13 @@ fn __bigint_bw_xor2(rp, ap, bp) (i64 i64 i64) i64
 
 # x & x = x, x & -1 = x, and x & 0 = 0 are allocation-free.  Returning a
 # heap operand marks the shared buffer before publishing the alias.
+# The one- and two-limb fast paths below read limbs through heap pointers,
+# so they apply only when BOTH operands are heap BigInts.  __bigint_bw_signed_size
+# also answers 1 for an inline (nanboxed) positive integer, and a mixed
+# BigInt/inline pair used to take the pointer path and dereference the
+# inline word (SIGSEGV in __bigint_xor_raw from a boxed u64 hash fold).  The
+# general __bigint_bw_kernel selects a stack copy for inline operands and is
+# the correct route for every mixed case.
 fn __bigint_and_raw(a, b) (i64 i64) i64
   zero = -1688849860263936 ## i64
   negative_one = -1407374883553281 ## i64
@@ -534,14 +541,14 @@ fn __bigint_and_raw(a, b) (i64 i64) i64
 
   as = __bigint_bw_signed_size(a) ## i64
   bs = __bigint_bw_signed_size(b) ## i64
-  if as == 1 && bs == 1
+  if as == 1 && bs == 1 && aisbig && bisbig
     result1 = ccall_nobox("w_bigint_alloc_hot", 1) ## i64
     rp1 = (result1 & 140737488355327) + 16 ## i64
     ap1 = (a & 140737488355327) + 16 ## i64
     bp1 = (b & 140737488355327) + 16 ## i64
     __bigint_bw_and1(rp1, ap1, bp1)
     return ccall_nobox("w_bigint_seal_raw", result1, 1)
-  if as == 2 && bs == 2
+  if as == 2 && bs == 2 && aisbig && bisbig
     result2 = ccall_nobox("w_bigint_alloc_hot", 2) ## i64
     rp2 = (result2 & 140737488355327) + 16 ## i64
     ap2 = (a & 140737488355327) + 16 ## i64
@@ -600,14 +607,14 @@ fn __bigint_or_raw(a, b) (i64 i64) i64
 
   as = __bigint_bw_signed_size(a) ## i64
   bs = __bigint_bw_signed_size(b) ## i64
-  if as == 1 && bs == 1
+  if as == 1 && bs == 1 && aisbig && bisbig
     result1 = ccall_nobox("w_bigint_alloc_hot", 1) ## i64
     rp1 = (result1 & 140737488355327) + 16 ## i64
     ap1 = (a & 140737488355327) + 16 ## i64
     bp1 = (b & 140737488355327) + 16 ## i64
     __bigint_bw_or1(rp1, ap1, bp1)
     return ccall_nobox("w_bigint_finish_add_raw", result1, 1)
-  if as == 2 && bs == 2
+  if as == 2 && bs == 2 && aisbig && bisbig
     result2 = ccall_nobox("w_bigint_alloc_hot", 2) ## i64
     rp2 = (result2 & 140737488355327) + 16 ## i64
     ap2 = (a & 140737488355327) + 16 ## i64
@@ -652,14 +659,14 @@ fn __bigint_xor_raw(a, b) (i64 i64) i64
 
   as = __bigint_bw_signed_size(a) ## i64
   bs = __bigint_bw_signed_size(b) ## i64
-  if as == 1 && bs == 1
+  if as == 1 && bs == 1 && aisbig && bisbig
     result1 = ccall_nobox("w_bigint_alloc_hot", 1) ## i64
     rp1 = (result1 & 140737488355327) + 16 ## i64
     ap1 = (a & 140737488355327) + 16 ## i64
     bp1 = (b & 140737488355327) + 16 ## i64
     __bigint_bw_xor1(rp1, ap1, bp1)
     return ccall_nobox("w_bigint_seal_raw", result1, 1)
-  if as == 2 && bs == 2
+  if as == 2 && bs == 2 && aisbig && bisbig
     result2 = ccall_nobox("w_bigint_alloc_hot", 2) ## i64
     rp2 = (result2 & 140737488355327) + 16 ## i64
     ap2 = (a & 140737488355327) + 16 ## i64

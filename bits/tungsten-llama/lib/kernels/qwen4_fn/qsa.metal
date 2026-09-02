@@ -112,7 +112,7 @@ kernel void qsa_scores(
 // Emits sel[t, 0..ns) = chosen block positions (4 each, ascending block
 // order) followed by the tail positions; ns_out[t] = count.
 [[max_total_threads_per_threadgroup(512)]]
-kernel void qsa_select(
+kernel void qsa_select_v1(
   device const float *__restrict__ scores [[buffer(0)]],   // [n, max_blocks]
   device const int   *__restrict__ nb     [[buffer(1)]],   // [n]
   device const int   *__restrict__ vis    [[buffer(2)]],   // [n] visible positions (pos+1)
@@ -237,6 +237,176 @@ kernel void qsa_select(
       ns++;
     }
     ns_out[t] = ns;
+  }
+}
+
+kernel void qsa_select(
+  device const float *__restrict__ scores [[buffer(0)]],   // [n, max_blocks]
+  device const int   *__restrict__ nb     [[buffer(1)]],   // [n]
+  device const int   *__restrict__ vis    [[buffer(2)]],   // [n] visible positions (pos+1)
+  device       int   *__restrict__ sel    [[buffer(3)]],   // [n, budget+3]
+  device       int   *__restrict__ ns_out [[buffer(4)]],   // [n]
+  constant int &max_blocks [[buffer(5)]],
+  constant int &budget_blocks [[buffer(6)]],               // 512
+  uint __tg_id [[threadgroup_position_in_grid]],
+  uint __tid   [[thread_position_in_threadgroup]]
+) {
+  int t = int(__tg_id);
+  int tid = int(__tid);
+  int blocks = nb[t];
+  int visible = vis[t];
+  device const float *sc = scores + t * max_blocks;
+  device int *out = sel + t * (budget_blocks * 4 + 3);
+
+  threadgroup atomic_int hist[256];
+  threadgroup float lo_hi[2];
+  threadgroup int cut_info[3];   // [cut_bin, n_above, take_in_bin]
+
+  if (blocks <= budget_blocks) {
+    // budget covers everything: all blocks + tail (== dense visibility)
+    for (int b = tid; b < blocks; b += 512) {
+      out[b * 4 + 0] = b * 4;
+      out[b * 4 + 1] = b * 4 + 1;
+      out[b * 4 + 2] = b * 4 + 2;
+      out[b * 4 + 3] = b * 4 + 3;
+    }
+    if (tid == 0) {
+      int ns = blocks * 4;
+      for (int p = blocks * 4; p < visible; p++) {
+        out[ns] = p;
+        ns++;
+      }
+      ns_out[t] = ns;
+    }
+    return;
+  }
+
+  // pass 0: parallel min/max (512-thread strided + simd/TG reduction)
+  threadgroup float red_mn[16];
+  threadgroup float red_mx[16];
+  float lmn = sc[0];
+  float lmx = sc[0];
+  for (int b = tid; b < blocks; b += 512) {
+    lmn = min(lmn, sc[b]);
+    lmx = max(lmx, sc[b]);
+  }
+  float smn = simd_min(lmn);
+  float smx2 = simd_max(lmx);
+  if ((tid & 31) == 0) {
+    red_mn[tid >> 5] = smn;
+    red_mx[tid >> 5] = smx2;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  if (tid == 0) {
+    float mn = red_mn[0];
+    float mx = red_mx[0];
+    for (int i = 1; i < 16; i++) {
+      mn = min(mn, red_mn[i]);
+      mx = max(mx, red_mx[i]);
+    }
+    lo_hi[0] = mn;
+    lo_hi[1] = mx > mn ? mx : mn + 1.0f;
+  }
+  for (int i = tid; i < 256; i += 512) atomic_store_explicit(&hist[i], 0, memory_order_relaxed);
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  float mn = lo_hi[0];
+  float inv_span = 255.0f / (lo_hi[1] - mn);
+  // pass 1: histogram
+  for (int b = tid; b < blocks; b += 512) {
+    int bin = clamp(int((sc[b] - mn) * inv_span), 0, 255);
+    atomic_fetch_add_explicit(&hist[bin], 1, memory_order_relaxed);
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  // find the threshold bin scanning from the top
+  if (tid == 0) {
+    int acc = 0;
+    int cut = 0;
+    for (int bin = 255; bin >= 0; bin--) {
+      int c = atomic_load_explicit(&hist[bin], memory_order_relaxed);
+      if (acc + c >= budget_blocks) {
+        cut = bin;
+        cut_info[0] = bin;
+        cut_info[1] = acc;                       // strictly above the bin
+        cut_info[2] = budget_blocks - acc;       // take this many from the bin
+        break;
+      }
+      acc += c;
+    }
+    (void)cut;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  int cut_bin = cut_info[0];
+  int take_in_bin = cut_info[2];
+  // pass 2 (parallel, deterministic, same list as the serial emit): each
+  // thread owns a contiguous block segment; exclusive scans over the
+  // per-thread counts of above-bin and cut-bin blocks (simd prefix + a
+  // 16-entry threadgroup scan) give every block its block-order output slot:
+  // slot = (#above before b) + min(#cut-bin before b, take_in_bin).
+  {
+    const int seg = (blocks + 511) / 512;
+    const int b0 = tid * seg;
+    const int b1 = min(b0 + seg, blocks);
+    int a_cnt = 0;
+    int c_cnt = 0;
+    for (int b = b0; b < b1; b++) {
+      int bin = clamp(int((sc[b] - mn) * inv_span), 0, 255);
+      if (bin > cut_bin) a_cnt++;
+      else if (bin == cut_bin) c_cnt++;
+    }
+    int a_ex = simd_prefix_exclusive_sum(a_cnt);
+    int c_ex = simd_prefix_exclusive_sum(c_cnt);
+    threadgroup int simd_a[16];
+    threadgroup int simd_c[16];
+    if ((tid & 31) == 31) {
+      simd_a[tid >> 5] = a_ex + a_cnt;
+      simd_c[tid >> 5] = c_ex + c_cnt;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    if (tid == 0) {
+      int ra = 0;
+      int rc = 0;
+      for (int i = 0; i < 16; i++) {
+        int ta = simd_a[i];
+        int tc = simd_c[i];
+        simd_a[i] = ra;
+        simd_c[i] = rc;
+        ra += ta;
+        rc += tc;
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    int A = simd_a[tid >> 5] + a_ex;
+    int C = simd_c[tid >> 5] + c_ex;
+    for (int b = b0; b < b1; b++) {
+      int bin = clamp(int((sc[b] - mn) * inv_span), 0, 255);
+      bool take = false;
+      int slot = 0;
+      if (bin > cut_bin) {
+        slot = A + min(C, take_in_bin);
+        A++;
+        take = true;
+      } else if (bin == cut_bin) {
+        if (C < take_in_bin) {
+          slot = A + C;
+          take = true;
+        }
+        C++;
+      }
+      if (take) {
+        out[slot * 4 + 0] = b * 4;
+        out[slot * 4 + 1] = b * 4 + 1;
+        out[slot * 4 + 2] = b * 4 + 2;
+        out[slot * 4 + 3] = b * 4 + 3;
+      }
+    }
+    if (tid == 0) {
+      int ns = budget_blocks * 4;
+      for (int p = blocks * 4; p < visible; p++) {
+        out[ns] = p;
+        ns++;
+      }
+      ns_out[t] = ns;
+    }
   }
 }
 

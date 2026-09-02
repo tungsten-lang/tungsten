@@ -268,9 +268,12 @@ compiler code in both arms (ids diverge at token 16, as expected from a
 different numeric path); deterministic run to run.
 
 Defaults stay OFF until the quiet-box re-measure; then FN_NA/FN_NA_MOE
-flip on. Remaining levers, in order: the cold first chunk (15-19 s of
-expert page-in — prefetch), GDN chunkwise WY, NA flash-attention /
-position tiling, the QSA select emit passes.
+flip on. The cold first chunk (15-19 s) is disk page-in: `vm_stat` shows
+5.3 M page-ins (84.5 GB) per bench process, i.e. macOS does not keep the
+no-copy mmap'd weights in the file cache across processes — inherent to
+one-process-per-prompt benchmarking; the `serve` mode keeps them resident.
+Remaining levers, in order: GDN chunkwise WY, NA flash-attention /
+position tiling, the QSA select emit passes (parallel emit landed 9/2).
 
 ## Next (ranked by research + measurement)
 

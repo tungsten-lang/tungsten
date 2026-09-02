@@ -314,7 +314,7 @@ qsa_lib = metal_compile_source(device, read_file(FN_DIR + "qsa.metal"))
 qsa_kw_pipe = metal_pipeline(qsa_lib, "qsa_k_write")
 qsa_build_pipe = metal_pipeline(qsa_lib, "qsa_build_blocks")
 qsa_scores_pipe = metal_pipeline(qsa_lib, "qsa_scores")
-qsa_select_pipe = metal_pipeline(qsa_lib, "qsa_select")
+qsa_select_pipe = metal_pipeline(qsa_lib, ccall("__w_env", "FN_QSA_PAR") == "0" ? "qsa_select_v1" : "qsa_select")
 # FN_QSA_PAR=0 restores the per-position-barrier selected SDPA (ids A/B arm);
 # the default is the parallel clone of sdpa_prefill_multi_hd256.
 qsa_sdpa_pipe = metal_pipeline(qsa_lib, ccall("__w_env", "FN_QSA_PAR") == "0" ? "qsa_sdpa_selected" : "qsa_sdpa_selected_par")

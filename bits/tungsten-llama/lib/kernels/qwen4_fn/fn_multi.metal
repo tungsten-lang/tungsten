@@ -877,9 +877,11 @@ kernel void moe_gemm_m8(
   const float ws2 = load_f32_le(base + (ulong)(uint)g0 + (ulong)(uint)slot * (ulong)(uint)g_stride);
 
   threadgroup float tile[4 * 128 + 3 * 512 + 512];
+  threadgroup float a_tile[2 * 512];
   threadgroup float stage[4 * 64];
   // ping-pong pair per simdgroup: [simd][2][128] with the second half at +512
   threadgroup float *bt = tile + int(simd_id) * 128;
+  threadgroup float *at_buf = a_tile;
   threadgroup float *st = stage + int(simd_id) * 64;
 
   const int r = int(lane) >> 2;
@@ -910,23 +912,45 @@ kernel void moe_gemm_m8(
       dst[(kb + 3) * 8 + r] = float(nvfp4_decode_half(b1 >> 4)) * sc;       \
     }
     GEMM_DECODE(0, bt)
+    // cooperative A staging: the 32 staged rows x 16-k slice is IDENTICAL for
+    // all 4 simdgroups (they differ only in output rows) — load it once per
+    // K-step with the whole TG instead of 4x2 device simdgroup_loads each.
+    {
+      const int tg_lane = int(simd_id) * 32 + int(lane);
+      const int ar = tg_lane >> 2;          // 0..31 staged row
+      const int ac = (tg_lane & 3) * 4;     // 0,4,8,12
+      const int arow = seg_lo + mt0 + min(ar, c - mt0 - 1);
+      device const float *asrc0 = xg + (ulong)arow * (ulong)k_dim;
+      for (int i3 = 0; i3 < 4; i3++)
+        at_buf[ar * 16 + ac + i3] = asrc0[ac + i3];
+    }
     for (int g = 0; g < n_groups; g++) {
-      simdgroup_barrier(mem_flags::mem_threadgroup);
+      threadgroup_barrier(mem_flags::mem_threadgroup);
       threadgroup float *cur = (g & 1) ? (bt + 512) : bt;
       threadgroup float *nxt = (g & 1) ? bt : (bt + 512);
-      if (g + 1 < n_groups) GEMM_DECODE(g + 1, nxt)
+      threadgroup float *acur = (g & 1) ? (at_buf + 512) : at_buf;
+      threadgroup float *anxt = (g & 1) ? at_buf : (at_buf + 512);
+      if (g + 1 < n_groups) {
+        GEMM_DECODE(g + 1, nxt)
+        const int tg_lane = int(simd_id) * 32 + int(lane);
+        const int ar = tg_lane >> 2;
+        const int ac = (tg_lane & 3) * 4;
+        const int arow = seg_lo + mt0 + min(ar, c - mt0 - 1);
+        device const float *asrc = xg + (ulong)arow * (ulong)k_dim + (ulong)((g + 1) * 16);
+        for (int i3 = 0; i3 < 4; i3++)
+          anxt[ar * 16 + ac + i3] = asrc[ac + i3];
+      }
       simdgroup_matrix<float, 8, 8> B0, B1, A0, A1;
       simdgroup_load(B0, cur, 8);
       simdgroup_load(B1, cur + 64, 8);
-      const int k0 = g * 16;
       for (int i2 = 0; i2 < mtiles; i2++) {
-        simdgroup_load(A0, xg + (ulong)(seg_lo + mt0 + i2 * 8) * (ulong)k_dim + k0, (ulong)k_dim);
-        simdgroup_load(A1, xg + (ulong)(seg_lo + mt0 + i2 * 8) * (ulong)k_dim + k0 + 8, (ulong)k_dim);
+        simdgroup_load(A0, acur + i2 * 8 * 16, 16);
+        simdgroup_load(A1, acur + i2 * 8 * 16 + 8, 16);
         simdgroup_multiply_accumulate(C[i2], A0, B0, C[i2]);
         simdgroup_multiply_accumulate(C[i2], A1, B1, C[i2]);
       }
     }
-    simdgroup_barrier(mem_flags::mem_threadgroup);
+    threadgroup_barrier(mem_flags::mem_threadgroup);
 #undef GEMM_DECODE
     for (int i2 = 0; i2 < mtiles; i2++) {
       const int mt = mt0 + i2 * 8;
@@ -1106,3 +1130,178 @@ kernel void f32_to_bf16(
   if (int(__tid) >= n) return;
   dst[__tid] = ushort(as_type<uint>(src[__tid]) >> 16);
 }
+
+
+
+[[max_total_threads_per_threadgroup(128)]]
+kernel void moe_gemm_m8_v1(
+  device const uchar *__restrict__ q0 [[buffer(0)]],
+  device const uchar *__restrict__ q1 [[buffer(1)]],
+  device const uchar *__restrict__ q2 [[buffer(2)]],
+  device const uchar *__restrict__ q3 [[buffer(3)]],
+  device const int   *__restrict__ order    [[buffer(4)]],
+  device const int   *__restrict__ offs     [[buffer(5)]],   // [513]
+  device const int   *__restrict__ slot_map [[buffer(6)]],
+  device const float *__restrict__ xg       [[buffer(7)]],   // [nk, k_dim] staged
+  device float       *__restrict__ y        [[buffer(8)]],   // [n*K, n_rows] per pair
+  constant int &k_dim    [[buffer(9)]],
+  constant int &n_rows   [[buffer(10)]],
+  constant int &w0       [[buffer(11)]],
+  constant int &w_stride [[buffer(12)]],
+  constant int &s0       [[buffer(13)]],
+  constant int &s_stride [[buffer(14)]],
+  constant int &g0       [[buffer(15)]],
+  constant int &g_stride [[buffer(16)]],
+  uint tg_id  [[threadgroup_position_in_grid]],
+  uint simd_id [[simdgroup_index_in_threadgroup]],
+  uint lane   [[thread_index_in_simdgroup]]
+) {
+  const int tgs_per_e = n_rows / 32;
+  const int expert = int(tg_id) / tgs_per_e;
+  const int seg_lo = offs[expert];
+  const int c = offs[expert + 1] - seg_lo;
+  if (c <= 0) return;
+  const int n0 = (int(tg_id) % tgs_per_e) * 32 + int(simd_id) * 8;
+  const int n_groups = k_dim / 16;
+  const int u32s_per_row = k_dim / 8;
+  const int slot = slot_map[expert] & 0xFFFF;
+  device const uchar *base = (expert < 128) ? q0
+                           : (expert < 256) ? q1
+                           : (expert < 384) ? q2 : q3;
+  device const uint  *wq = (device const uint *)(base + (ulong)(uint)w0 + (ulong)(uint)slot * (ulong)(uint)w_stride);
+  device const uchar *sq = base + (ulong)(uint)s0 + (ulong)(uint)slot * (ulong)(uint)s_stride;
+  const float ws2 = load_f32_le(base + (ulong)(uint)g0 + (ulong)(uint)slot * (ulong)(uint)g_stride);
+
+  threadgroup float tile[4 * 128 + 3 * 512 + 512];
+  threadgroup float stage[4 * 64];
+  // ping-pong pair per simdgroup: [simd][2][128] with the second half at +512
+  threadgroup float *bt = tile + int(simd_id) * 128;
+  threadgroup float *st = stage + int(simd_id) * 64;
+
+  const int r = int(lane) >> 2;
+  const int qq = int(lane) & 3;
+  const int row = min(n0 + r, n_rows - 1);
+  device const uint  *wrow = wq + row * u32s_per_row;
+  device const uchar *srow = sq + row * n_groups;
+
+  // Up to 4 live C tiles (32 staged rows) per outer pass: ONE nibble decode
+  // serves them all. C[4] = 8 floats/lane — no spill.
+  for (int mt0 = 0; mt0 < c; mt0 += 32) {
+    const int mtiles = min((c - mt0 + 7) / 8, 4);
+    simdgroup_matrix<float, 8, 8> C[4];
+    for (int i2 = 0; i2 < 4; i2++) C[i2] = simdgroup_matrix<float, 8, 8>(0.0f);
+    // Ping-pong tile buffers: ONE barrier per K-group; the decode of group
+    // g+1 overlaps the MMAs of group g (different buffer halves).
+#define GEMM_DECODE_V1(GIDX, BUF)                                              \
+    {                                                                       \
+      const uint w = wrow[(GIDX) * 2 + (qq >> 1)];                          \
+      const uint b0 = (w >> ((qq & 1) * 16)) & 0xff;                        \
+      const uint b1 = (w >> ((qq & 1) * 16 + 8)) & 0xff;                    \
+      const float sc = float(e4m3_decode_half(uint(srow[(GIDX)])));         \
+      threadgroup float *dst = (BUF);                                       \
+      const int kb = qq * 4;                                                \
+      dst[(kb + 0) * 8 + r] = float(nvfp4_decode_half(b0 & 0xf)) * sc;      \
+      dst[(kb + 1) * 8 + r] = float(nvfp4_decode_half(b0 >> 4)) * sc;       \
+      dst[(kb + 2) * 8 + r] = float(nvfp4_decode_half(b1 & 0xf)) * sc;      \
+      dst[(kb + 3) * 8 + r] = float(nvfp4_decode_half(b1 >> 4)) * sc;       \
+    }
+    GEMM_DECODE_V1(0, bt)
+    for (int g = 0; g < n_groups; g++) {
+      simdgroup_barrier(mem_flags::mem_threadgroup);
+      threadgroup float *cur = (g & 1) ? (bt + 512) : bt;
+      threadgroup float *nxt = (g & 1) ? bt : (bt + 512);
+      if (g + 1 < n_groups) GEMM_DECODE_V1(g + 1, nxt)
+      simdgroup_matrix<float, 8, 8> B0, B1, A0, A1;
+      simdgroup_load(B0, cur, 8);
+      simdgroup_load(B1, cur + 64, 8);
+      const int k0 = g * 16;
+      for (int i2 = 0; i2 < mtiles; i2++) {
+        simdgroup_load(A0, xg + (ulong)(seg_lo + mt0 + i2 * 8) * (ulong)k_dim + k0, (ulong)k_dim);
+        simdgroup_load(A1, xg + (ulong)(seg_lo + mt0 + i2 * 8) * (ulong)k_dim + k0 + 8, (ulong)k_dim);
+        simdgroup_multiply_accumulate(C[i2], A0, B0, C[i2]);
+        simdgroup_multiply_accumulate(C[i2], A1, B1, C[i2]);
+      }
+    }
+    simdgroup_barrier(mem_flags::mem_threadgroup);
+#undef GEMM_DECODE_V1
+    for (int i2 = 0; i2 < mtiles; i2++) {
+      const int mt = mt0 + i2 * 8;
+      const int m_rows = min(c - mt, 8);
+      simdgroup_store(C[i2], st, 8);
+      simdgroup_barrier(mem_flags::mem_threadgroup);
+      for (int e2 = int(lane); e2 < 64; e2 += 32) {
+        const int m = e2 >> 3;
+        const int n = n0 + (e2 & 7);
+        if (m < m_rows && n < n_rows) {
+          const int pair = order[seg_lo + mt + m];
+          y[pair * n_rows + n] = st[e2] * ws2;
+        }
+      }
+      simdgroup_barrier(mem_flags::mem_threadgroup);
+    }
+  }
+}
+
+
+// Half-stored scores: 4.1 KB TG memory instead of 8.2 -> 2x occupancy.
+kernel void sdpa_prefill_multi_hd256_hs(
+  device const float *__restrict__ q       [[buffer(0)]],
+  device const float *__restrict__ k_cache [[buffer(1)]],
+  device const float *__restrict__ v_cache [[buffer(2)]],
+  device       float *__restrict__ out     [[buffer(3)]],
+  constant int &gqa_factor [[buffer(4)]],
+  device const int *__restrict__ pos_start [[buffer(5)]],
+  constant int &n_heads [[buffer(6)]],
+  constant int &kv_dim  [[buffer(7)]],
+  constant float &scale [[buffer(8)]],
+  constant int &n_tok   [[buffer(9)]],
+  uint tg  [[threadgroup_position_in_grid]],
+  uint tid [[thread_position_in_threadgroup]]
+) {
+  threadgroup half scores[2051];
+  threadgroup float qs[256];
+  const int token = int(tg) / n_heads;
+  const int q_head = int(tg) - token * n_heads;
+  if (token >= n_tok) return;
+  const int kv_head = q_head / gqa_factor;
+  const int q_off = (token * n_heads + q_head) * 256;
+  const int kv_base = kv_head * 256;
+  const int usable = min(pos_start[0] + token + 1, 2051);
+  qs[tid] = q[q_off + int(tid)];
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  for (int p = int(tid); p < usable; p += 256) {
+    device const float *kr = k_cache + kv_base + p * kv_dim;
+    float dp = 0.0f;
+    for (int i = 0; i < 256; i++) dp += qs[i] * kr[i];
+    scores[p] = half(dp * scale);
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  // parallel softmax: 256-thread strided max/sum with simd + TG reduction
+  threadgroup float red[8];
+  float lmx = -INFINITY;
+  for (int p = int(tid); p < usable; p += 256) lmx = max(lmx, float(scores[p]));
+  float smx = simd_max(lmx);
+  if ((tid & 31) == 0) red[tid >> 5] = smx;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  float mx = max(max(max(red[0], red[1]), max(red[2], red[3])),
+                 max(max(red[4], red[5]), max(red[6], red[7])));
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  float lsum = 0.0f;
+  for (int p = int(tid); p < usable; p += 256) {
+    const float e = fast::exp(float(scores[p]) - mx);
+    scores[p] = half(e);
+    lsum += e;
+  }
+  float ssum = simd_sum(lsum);
+  if ((tid & 31) == 0) red[tid >> 5] = ssum;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  float denom = red[0] + red[1] + red[2] + red[3] + red[4] + red[5] + red[6] + red[7];
+  const float inv = denom == 0.0f ? 0.0f : 1.0f / denom;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  float result = 0.0f;
+  for (int p = 0; p < usable; ++p) {
+    result += float(scores[p]) * v_cache[kv_base + p * kv_dim + int(tid)];
+  }
+  out[q_off + int(tid)] = result * inv;
+}
+

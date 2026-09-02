@@ -1549,11 +1549,16 @@ if multi_n > 0 || mtp_depth > 0 || prompt_tokens > 8 || prompt_ids_file != ""
   gather_m_pipe = metal_pipeline(fnm_lib, "moe_gather_matvec_multi")
   bf16_mp_pipe = metal_pipeline(fnm_lib, "bf16_matvec_multi_p")
   sdpa_pf_pipe = metal_pipeline(fnm_lib, "sdpa_prefill_multi_hd256")
+  # FN_SDPAHS=1: half-stored score arrays (2x TG occupancy; ids-gated arm)
+  if ccall("__w_env", "FN_SDPAHS") == "1" then sdpa_pf_pipe = metal_pipeline(fnm_lib, "sdpa_prefill_multi_hd256_hs")
   grouped_m_pipe = metal_pipeline(fnm_lib, "moe_grouped_matvec")
   moe_stage_pipe = metal_pipeline(fnm_lib, "moe_stage_x")
   moe_gemm_pipe = metal_pipeline(fnm_lib, "moe_gemm_m8")
   moe_stage_h_pipe = metal_pipeline(fnm_lib, "moe_stage_x_h")
   moe_gemm_h_pipe = metal_pipeline(fnm_lib, "moe_gemm_m8_h")
+  moe_gemm_v1_pipe = metal_pipeline(fnm_lib, "moe_gemm_m8_v1")
+  # FN_MOEV1=1: pre-A-staging expert GEMM (ABBA arm)
+  if ccall("__w_env", "FN_MOEV1") == "1" then moe_gemm_pipe = moe_gemm_v1_pipe
   # FN_MOEH=1 uses the half-MMA expert GEMM — measured SLOWER on M5
   # (2050 vs 1133 ms/chunk) AND ids diverge (half accumulation over
   # K=2560). Default stays f32 MMA; kept for re-testing on other silicon.

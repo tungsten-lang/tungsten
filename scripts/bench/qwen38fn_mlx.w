@@ -173,6 +173,8 @@ skip_moestage = skip_spec.include?("moestage")
 skip_moeshared = skip_spec.include?("moeshared")
 skip_delta = skip_spec.include?("delta")
 skip_gdnmv = skip_spec.include?("gdnmv")
+skip_sdpa = skip_spec.include?("sdpa")
+skip_attnmv = skip_spec.include?("attnmv")
 skip_hcbar = skip_spec.include?("hcbar")
 if skip_spec != "" then << "ABLATION: skipping " + skip_spec + " — output is garbage, timing only"
 # FN_HCFUSED=1: 2-stage fused HC mix. Measured 2ms SLOWER than the 5-stage
@@ -1603,52 +1605,52 @@ if multi_n > 0 || mtp_depth > 0 || prompt_tokens > 8 || prompt_ids_file != ""
     nv_multi_pipes_r2.push(metal_pipeline(wide_grid_lib, "nvfp4_wide_b" + bw.to_s + "_r2"))
     bw = bw + 1
 
-  h_embed_m = metal_buffer(device, MULTI_MAX * HIDDEN * 4)
-  h_m = metal_buffer(device, MULTI_MAX * HC_HIDDEN * 4)
-  n_tmp_m = metal_buffer(device, MULTI_MAX * HC_HIDDEN * 4)
-  lowrank_m = metal_buffer(device, MULTI_MAX * HC_LOWRANK * 4)
-  upraw_m = metal_buffer(device, MULTI_MAX * HC_HIDDEN * 4)
-  inj_m = metal_buffer(device, MULTI_MAX * HC_COUNT * 4)
-  xn_m = metal_buffer(device, MULTI_MAX * HIDDEN * 4)
-  y_m = metal_buffer(device, MULTI_MAX * HIDDEN * 4)
-  qkv_m = metal_buffer(device, MULTI_MAX * QKV_DIM * 4)
-  z_m = metal_buffer(device, MULTI_MAX * V_DIM * 4)
-  a_m = metal_buffer(device, MULTI_MAX * HV * 4)
-  b_m = metal_buffer(device, MULTI_MAX * HV * 4)
-  mq_m = metal_buffer(device, MULTI_MAX * Q_DIM * 4)
-  mk_m = metal_buffer(device, MULTI_MAX * K_DIM * 4)
-  mv_m = metal_buffer(device, MULTI_MAX * V_DIM * 4)
-  g_m = metal_buffer(device, MULTI_MAX * HV * 4)
-  beta_m = metal_buffer(device, MULTI_MAX * HV * 4)
-  delta_m_buf = metal_buffer(device, MULTI_MAX * V_DIM * 4)
-  mnorm_m = metal_buffer(device, MULTI_MAX * V_DIM * 4)
-  qfull_m = metal_buffer(device, MULTI_MAX * QFULL_DIM * 4)
-  queries_m = metal_buffer(device, MULTI_MAX * ATTN_DIM * 4)
-  agate_m = metal_buffer(device, MULTI_MAX * ATTN_DIM * 4)
-  k_m = metal_buffer(device, MULTI_MAX * KV_DIM * 4)
-  v_m = metal_buffer(device, MULTI_MAX * KV_DIM * 4)
-  attn_m = metal_buffer(device, MULTI_MAX * ATTN_DIM * 4)
-  cos_m = metal_buffer(device, MULTI_MAX * ROT_HALF * 4)
-  sin_m = metal_buffer(device, MULTI_MAX * ROT_HALF * 4)
-  rlog_m = metal_buffer(device, MULTI_MAX * N_EXPERTS * 4)
-  tidx_m = metal_buffer(device, MULTI_MAX * TOP_K * 4)
-  tw_m = metal_buffer(device, MULTI_MAX * TOP_K * 4)
-  eg_m = metal_buffer(device, MULTI_MAX * TOP_K * MOE_FFN * 4)
-  eu_m = metal_buffer(device, MULTI_MAX * TOP_K * MOE_FFN * 4)
-  eh_m = metal_buffer(device, MULTI_MAX * TOP_K * MOE_FFN * 4)
-  ed_m = metal_buffer(device, MULTI_MAX * TOP_K * HIDDEN * 4)
-  sg_m = metal_buffer(device, MULTI_MAX * SHARED_FFN * 4)
-  su_m = metal_buffer(device, MULTI_MAX * SHARED_FFN * 4)
-  sh_m = metal_buffer(device, MULTI_MAX * SHARED_FFN * 4)
-  shared_m = metal_buffer(device, MULTI_MAX * HIDDEN * 4)
-  seg_m = metal_buffer(device, MULTI_MAX * 4)
-  e_m = metal_buffer(device, MULTI_MAX * HIDDEN * 4)
-  plk_m = metal_buffer(device, MULTI_MAX * HC_HIDDEN * 4)
-  plkn_m = metal_buffer(device, MULTI_MAX * HC_HIDDEN * 4)
-  plqn_m = metal_buffer(device, MULTI_MAX * HC_HIDDEN * 4)
-  plv_m = metal_buffer(device, MULTI_MAX * HIDDEN * 4)
-  plgv_m = metal_buffer(device, MULTI_MAX * HC_HIDDEN * 4)
-  plnc_m = metal_buffer(device, MULTI_MAX * HC_HIDDEN * 4)
+  h_embed_m_bank = [metal_buffer(device, MULTI_MAX * HIDDEN * 4), metal_buffer(device, MULTI_MAX * HIDDEN * 4)]
+  h_m_bank = [metal_buffer(device, MULTI_MAX * HC_HIDDEN * 4), metal_buffer(device, MULTI_MAX * HC_HIDDEN * 4)]
+  n_tmp_m_bank = [metal_buffer(device, MULTI_MAX * HC_HIDDEN * 4), metal_buffer(device, MULTI_MAX * HC_HIDDEN * 4)]
+  lowrank_m_bank = [metal_buffer(device, MULTI_MAX * HC_LOWRANK * 4), metal_buffer(device, MULTI_MAX * HC_LOWRANK * 4)]
+  upraw_m_bank = [metal_buffer(device, MULTI_MAX * HC_HIDDEN * 4), metal_buffer(device, MULTI_MAX * HC_HIDDEN * 4)]
+  inj_m_bank = [metal_buffer(device, MULTI_MAX * HC_COUNT * 4), metal_buffer(device, MULTI_MAX * HC_COUNT * 4)]
+  xn_m_bank = [metal_buffer(device, MULTI_MAX * HIDDEN * 4), metal_buffer(device, MULTI_MAX * HIDDEN * 4)]
+  y_m_bank = [metal_buffer(device, MULTI_MAX * HIDDEN * 4), metal_buffer(device, MULTI_MAX * HIDDEN * 4)]
+  qkv_m_bank = [metal_buffer(device, MULTI_MAX * QKV_DIM * 4), metal_buffer(device, MULTI_MAX * QKV_DIM * 4)]
+  z_m_bank = [metal_buffer(device, MULTI_MAX * V_DIM * 4), metal_buffer(device, MULTI_MAX * V_DIM * 4)]
+  a_m_bank = [metal_buffer(device, MULTI_MAX * HV * 4), metal_buffer(device, MULTI_MAX * HV * 4)]
+  b_m_bank = [metal_buffer(device, MULTI_MAX * HV * 4), metal_buffer(device, MULTI_MAX * HV * 4)]
+  mq_m_bank = [metal_buffer(device, MULTI_MAX * Q_DIM * 4), metal_buffer(device, MULTI_MAX * Q_DIM * 4)]
+  mk_m_bank = [metal_buffer(device, MULTI_MAX * K_DIM * 4), metal_buffer(device, MULTI_MAX * K_DIM * 4)]
+  mv_m_bank = [metal_buffer(device, MULTI_MAX * V_DIM * 4), metal_buffer(device, MULTI_MAX * V_DIM * 4)]
+  g_m_bank = [metal_buffer(device, MULTI_MAX * HV * 4), metal_buffer(device, MULTI_MAX * HV * 4)]
+  beta_m_bank = [metal_buffer(device, MULTI_MAX * HV * 4), metal_buffer(device, MULTI_MAX * HV * 4)]
+  delta_m_buf_bank = [metal_buffer(device, MULTI_MAX * V_DIM * 4), metal_buffer(device, MULTI_MAX * V_DIM * 4)]
+  mnorm_m_bank = [metal_buffer(device, MULTI_MAX * V_DIM * 4), metal_buffer(device, MULTI_MAX * V_DIM * 4)]
+  qfull_m_bank = [metal_buffer(device, MULTI_MAX * QFULL_DIM * 4), metal_buffer(device, MULTI_MAX * QFULL_DIM * 4)]
+  queries_m_bank = [metal_buffer(device, MULTI_MAX * ATTN_DIM * 4), metal_buffer(device, MULTI_MAX * ATTN_DIM * 4)]
+  agate_m_bank = [metal_buffer(device, MULTI_MAX * ATTN_DIM * 4), metal_buffer(device, MULTI_MAX * ATTN_DIM * 4)]
+  k_m_bank = [metal_buffer(device, MULTI_MAX * KV_DIM * 4), metal_buffer(device, MULTI_MAX * KV_DIM * 4)]
+  v_m_bank = [metal_buffer(device, MULTI_MAX * KV_DIM * 4), metal_buffer(device, MULTI_MAX * KV_DIM * 4)]
+  attn_m_bank = [metal_buffer(device, MULTI_MAX * ATTN_DIM * 4), metal_buffer(device, MULTI_MAX * ATTN_DIM * 4)]
+  cos_m_bank = [metal_buffer(device, MULTI_MAX * ROT_HALF * 4), metal_buffer(device, MULTI_MAX * ROT_HALF * 4)]
+  sin_m_bank = [metal_buffer(device, MULTI_MAX * ROT_HALF * 4), metal_buffer(device, MULTI_MAX * ROT_HALF * 4)]
+  rlog_m_bank = [metal_buffer(device, MULTI_MAX * N_EXPERTS * 4), metal_buffer(device, MULTI_MAX * N_EXPERTS * 4)]
+  tidx_m_bank = [metal_buffer(device, MULTI_MAX * TOP_K * 4), metal_buffer(device, MULTI_MAX * TOP_K * 4)]
+  tw_m_bank = [metal_buffer(device, MULTI_MAX * TOP_K * 4), metal_buffer(device, MULTI_MAX * TOP_K * 4)]
+  eg_m_bank = [metal_buffer(device, MULTI_MAX * TOP_K * MOE_FFN * 4), metal_buffer(device, MULTI_MAX * TOP_K * MOE_FFN * 4)]
+  eu_m_bank = [metal_buffer(device, MULTI_MAX * TOP_K * MOE_FFN * 4), metal_buffer(device, MULTI_MAX * TOP_K * MOE_FFN * 4)]
+  eh_m_bank = [metal_buffer(device, MULTI_MAX * TOP_K * MOE_FFN * 4), metal_buffer(device, MULTI_MAX * TOP_K * MOE_FFN * 4)]
+  ed_m_bank = [metal_buffer(device, MULTI_MAX * TOP_K * HIDDEN * 4), metal_buffer(device, MULTI_MAX * TOP_K * HIDDEN * 4)]
+  sg_m_bank = [metal_buffer(device, MULTI_MAX * SHARED_FFN * 4), metal_buffer(device, MULTI_MAX * SHARED_FFN * 4)]
+  su_m_bank = [metal_buffer(device, MULTI_MAX * SHARED_FFN * 4), metal_buffer(device, MULTI_MAX * SHARED_FFN * 4)]
+  sh_m_bank = [metal_buffer(device, MULTI_MAX * SHARED_FFN * 4), metal_buffer(device, MULTI_MAX * SHARED_FFN * 4)]
+  shared_m_bank = [metal_buffer(device, MULTI_MAX * HIDDEN * 4), metal_buffer(device, MULTI_MAX * HIDDEN * 4)]
+  seg_m_bank = [metal_buffer(device, MULTI_MAX * 4), metal_buffer(device, MULTI_MAX * 4)]
+  e_m_bank = [metal_buffer(device, MULTI_MAX * HIDDEN * 4), metal_buffer(device, MULTI_MAX * HIDDEN * 4)]
+  plk_m_bank = [metal_buffer(device, MULTI_MAX * HC_HIDDEN * 4), metal_buffer(device, MULTI_MAX * HC_HIDDEN * 4)]
+  plkn_m_bank = [metal_buffer(device, MULTI_MAX * HC_HIDDEN * 4), metal_buffer(device, MULTI_MAX * HC_HIDDEN * 4)]
+  plqn_m_bank = [metal_buffer(device, MULTI_MAX * HC_HIDDEN * 4), metal_buffer(device, MULTI_MAX * HC_HIDDEN * 4)]
+  plv_m_bank = [metal_buffer(device, MULTI_MAX * HIDDEN * 4), metal_buffer(device, MULTI_MAX * HIDDEN * 4)]
+  plgv_m_bank = [metal_buffer(device, MULTI_MAX * HC_HIDDEN * 4), metal_buffer(device, MULTI_MAX * HC_HIDDEN * 4)]
+  plnc_m_bank = [metal_buffer(device, MULTI_MAX * HC_HIDDEN * 4), metal_buffer(device, MULTI_MAX * HC_HIDDEN * 4)]
   # Per-layer stashes of the state-advancing inputs (conv input, normed k,
   # v, g, beta; PLE conv input) so a partial accept can tape-replay the
   # recurrent states for just the accepted prefix (~22 MB total).
@@ -1669,11 +1671,11 @@ if multi_n > 0 || mtp_depth > 0 || prompt_tokens > 8 || prompt_ids_file != ""
   am_pv_m = metal_buffer(device, MULTI_MAX * ARGMAX_CHUNKS * 4)
   am_pi_m = metal_buffer(device, MULTI_MAX * ARGMAX_CHUNKS * 4)
   am_out_m = metal_buffer(device, MULTI_MAX * 4)
-  tok_ids_m = metal_buffer(device, MULTI_MAX * 4)
-  mpos_buf = metal_buffer(device, 4)
-  order_m = metal_buffer(device, MULTI_MAX * TOP_K * 4)
-  moe_offs_buf = metal_buffer(device, 513 * 4)
-  xg_m = metal_buffer(device, (MULTI_MAX * TOP_K + 8) * HIDDEN * 4)
+  tok_ids_m_bank = [metal_buffer(device, MULTI_MAX * 4), metal_buffer(device, MULTI_MAX * 4)]
+  mpos_buf_bank = [metal_buffer(device, 4), metal_buffer(device, 4)]
+  order_m_bank = [metal_buffer(device, MULTI_MAX * TOP_K * 4), metal_buffer(device, MULTI_MAX * TOP_K * 4)]
+  moe_offs_buf_bank = [metal_buffer(device, 513 * 4), metal_buffer(device, 513 * 4)]
+  xg_m_bank = [metal_buffer(device, (MULTI_MAX * TOP_K + 8) * HIDDEN * 4), metal_buffer(device, (MULTI_MAX * TOP_K + 8) * HIDDEN * 4)]
   xb_stage = metal_buffer(device, MULTI_MAX * V_DIM * 2)
   f32_to_bf16_pipe = metal_pipeline(fnm_lib, "f32_to_bf16")
   f32_to_f16_pipe = metal_pipeline(metal_compile_source(device, read_file(NVFP4_DIR + "f32_to_f16.metal")), "f32_to_f16")
@@ -1691,6 +1693,113 @@ if multi_n > 0 || mtp_depth > 0 || prompt_tokens > 8 || prompt_ids_file != ""
     qsa_ns_m = metal_buffer(device, MULTI_MAX * 4)
     qsa_nb_m = metal_buffer(device, MULTI_MAX * 4)
     qsa_vis_m = metal_buffer(device, MULTI_MAX * 4)
+
+
+# Dual-chunk pipelining: scratch is banked per in-flight chunk; the bank
+# is selected at RECORD time (buffers bake into the program steps).
+mbank = [0]
+-> h_embed_m
+  h_embed_m_bank[mbank[0]]
+-> h_m
+  h_m_bank[mbank[0]]
+-> n_tmp_m
+  n_tmp_m_bank[mbank[0]]
+-> lowrank_m
+  lowrank_m_bank[mbank[0]]
+-> upraw_m
+  upraw_m_bank[mbank[0]]
+-> inj_m
+  inj_m_bank[mbank[0]]
+-> xn_m
+  xn_m_bank[mbank[0]]
+-> y_m
+  y_m_bank[mbank[0]]
+-> qkv_m
+  qkv_m_bank[mbank[0]]
+-> z_m
+  z_m_bank[mbank[0]]
+-> a_m
+  a_m_bank[mbank[0]]
+-> b_m
+  b_m_bank[mbank[0]]
+-> mq_m
+  mq_m_bank[mbank[0]]
+-> mk_m
+  mk_m_bank[mbank[0]]
+-> mv_m
+  mv_m_bank[mbank[0]]
+-> g_m
+  g_m_bank[mbank[0]]
+-> beta_m
+  beta_m_bank[mbank[0]]
+-> delta_m_buf
+  delta_m_buf_bank[mbank[0]]
+-> mnorm_m
+  mnorm_m_bank[mbank[0]]
+-> qfull_m
+  qfull_m_bank[mbank[0]]
+-> queries_m
+  queries_m_bank[mbank[0]]
+-> agate_m
+  agate_m_bank[mbank[0]]
+-> k_m
+  k_m_bank[mbank[0]]
+-> v_m
+  v_m_bank[mbank[0]]
+-> attn_m
+  attn_m_bank[mbank[0]]
+-> cos_m
+  cos_m_bank[mbank[0]]
+-> sin_m
+  sin_m_bank[mbank[0]]
+-> rlog_m
+  rlog_m_bank[mbank[0]]
+-> tidx_m
+  tidx_m_bank[mbank[0]]
+-> tw_m
+  tw_m_bank[mbank[0]]
+-> eg_m
+  eg_m_bank[mbank[0]]
+-> eu_m
+  eu_m_bank[mbank[0]]
+-> eh_m
+  eh_m_bank[mbank[0]]
+-> ed_m
+  ed_m_bank[mbank[0]]
+-> sg_m
+  sg_m_bank[mbank[0]]
+-> su_m
+  su_m_bank[mbank[0]]
+-> sh_m
+  sh_m_bank[mbank[0]]
+-> shared_m
+  shared_m_bank[mbank[0]]
+-> seg_m
+  seg_m_bank[mbank[0]]
+-> e_m
+  e_m_bank[mbank[0]]
+-> plk_m
+  plk_m_bank[mbank[0]]
+-> plkn_m
+  plkn_m_bank[mbank[0]]
+-> plqn_m
+  plqn_m_bank[mbank[0]]
+-> plv_m
+  plv_m_bank[mbank[0]]
+-> plgv_m
+  plgv_m_bank[mbank[0]]
+-> plnc_m
+  plnc_m_bank[mbank[0]]
+-> tok_ids_m
+  tok_ids_m_bank[mbank[0]]
+-> mpos_buf
+  mpos_buf_bank[mbank[0]]
+-> order_m
+  order_m_bank[mbank[0]]
+-> moe_offs_buf
+  moe_offs_buf_bank[mbank[0]]
+-> xg_m
+  xg_m_bank[mbank[0]]
 
 # Record-or-dispatch wrappers: with mrec set, the multi helpers append
 # program steps instead of encoding, so a width's whole verify pass can be
@@ -1821,13 +1930,13 @@ mrec = [0]
     mdn(conv_par_pipe, [lyr[:conv], cs_in, qkv_d, mq_m, mk_d, mv_d, cs_out, QKV_DIM, Q_DIM, K_DIM, n], n * QKV_DIM)
   else
     mdn(conv_split_m_pipe, [lyr[:conv], cs_in, qkv_d, mq_m, mk_d, mv_d, cs_out, QKV_DIM, Q_DIM, K_DIM, n], QKV_DIM)
-  mbar([mq_m, mk_d, mv_d, a_m, b_m])
+  mbar([mq_m, mk_d, mv_d, a_m, b_m, cs_out])
   mdg(phn_rope_m_pipe, [mq_m, q_norm_scale, cos_m, sin_m, DK, 0, HK, ~1.0 / DK, EPS / DK, n], n * HK, 32)
   mdg(phn_rope_m_pipe, [mk_d, k_norm_scale, cos_m, sin_m, DK, 0, HK, ~1.0 / DK, EPS / DK, n], n * HK, 32)
   mdn(g_beta_m_pipe, [a_m, b_m, lyr[:alog], lyr[:dtb], g_d, beta_d, HV, n], n * HV)
   mbar([mq_m, mk_d, g_d, beta_d])
   if !skip_delta then md3(delta_m_pipe, [mq_m, mk_d, mv_d, g_d, beta_d, ss_in, delta_m_buf, ss_out, HK, HV, DK, DV, n], [1, DV / 4, HV, 32, 4, 1])
-  mbar([delta_m_buf, z_m])
+  mbar([delta_m_buf, z_m, ss_out])
   mdg(rng_sig_pipe, [delta_m_buf, z_m, lyr[:linear_norm], mnorm_m, DV, EPS], n * HV, 32)
   mbar([mnorm_m])
   mv_multi(lyr[:out], mnorm_m, y_m, V_DIM, HIDDEN, n)
@@ -1851,9 +1960,10 @@ mrec = [0]
     mbar([qsa_scores_m])
     mdg(qsa_select_pipe, [qsa_scores_m, qsa_nb_m, qsa_vis_m, qsa_sel_m, qsa_ns_m, QSA_MAXB, 512], n, 512)
     mbar([qsa_sel_m, qsa_ns_m])
-  mv_multi(lyr[:q], xn_m, qfull_m, HIDDEN, QFULL_DIM, n)
-  mv_multi(lyr[:k], xn_m, k_m, HIDDEN, KV_DIM, n)
-  mv_multi(lyr[:v], xn_m, v_m, HIDDEN, KV_DIM, n)
+  if !skip_attnmv
+    mv_multi(lyr[:q], xn_m, qfull_m, HIDDEN, QFULL_DIM, n)
+    mv_multi(lyr[:k], xn_m, k_m, HIDDEN, KV_DIM, n)
+    mv_multi(lyr[:v], xn_m, v_m, HIDDEN, KV_DIM, n)
   mbar([qfull_m])
   mdn(split_m_pipe, [qfull_m, queries_m, agate_m, N_HEADS, HEAD_DIM, n], n * ATTN_DIM)
   mbar([queries_m, k_m])
@@ -1869,7 +1979,7 @@ mrec = [0]
     # NOT bit-identical to the decode sdpa (different dot order) — the
     # chunked prefill is ids-gated, and verify widths (n<=8) keep the
     # bit-exact kernel.
-    mdg(sdpa_pf_pipe, [queries_m, lyr[:k_cache], lyr[:v_cache], attn_m, GQA, mpos_buf, N_HEADS, KV_DIM, ATTN_SCALE, n], n * N_HEADS, 256)
+    if !skip_sdpa then mdg(sdpa_pf_pipe, [queries_m, lyr[:k_cache], lyr[:v_cache], attn_m, GQA, mpos_buf, N_HEADS, KV_DIM, ATTN_SCALE, n], n * N_HEADS, 256)
   else
     mdg(sdpa_m_pipe, [queries_m, lyr[:k_cache], lyr[:v_cache], attn_m, GQA, mpos_buf, N_HEADS, KV_DIM, ATTN_SCALE, n], n * N_HEADS, 256)
   mbar([attn_m, agate_m])
@@ -1946,7 +2056,7 @@ mrec = [0]
   mdg(grms_m_pipe, [plgv_m, pp[:norm_conv], nc_d, HIDDEN, HC_COUNT, EPS], n * HC_COUNT, 256)
   mbar([nc_d])
   mdn(ple_conv_m_pipe, [pp[:conv], cs_in, nc_d, plgv_m, h_m, cs_out, HC_HIDDEN, n], n * HC_HIDDEN)
-  mbar([h_m])
+  mbar([h_m, cs_out])
   if flip_defer[0] == 0 then pp[:ping] = 1 - ping
 
 -> head_multi(n)
@@ -1967,7 +2077,7 @@ mrec = [0]
   mdg(argmax_stage2_pipe, [am_pv_m, am_pi_m, am_out_m, ARGMAX_CHUNKS, n], n, 256)
 
 # Emit the whole width-n pass through the wrappers (record or dispatch).
--> multi_body(n)
+-> multi_embed_init(n)
   mdn(embed_m_pipe, [embed_w, h_embed_m, tok_ids_m, HIDDEN, n], n * HIDDEN)
   mbar([h_embed_m])
   t = 0
@@ -1978,21 +2088,51 @@ mrec = [0]
       s = s + 1
     t = t + 1
   mbar([h_m])
+
+-> multi_layer_emit(lyr, n)
+  if lyr[:ple] != nil then ple_multi(lyr, n)
+  hc_mix_multi(lyr[:attn_hc], n)
+  if lyr[:kind] == "mamba"
+    mamba_multi(lyr, n)
+  else
+    full_multi(lyr, n)
+  hc_combine_multi_step(n)
+  hc_mix_multi(lyr[:mlp_hc], n)
+  moe_multi(lyr, n)
+  hc_combine_multi_step(n)
+
+-> multi_flip_layer(lyr)
+  if lyr[:kind] == "mamba" then lyr[:ping] = 1 - lyr[:ping]
+  if lyr[:ple] != nil then lyr[:ple][:ping] = 1 - lyr[:ple][:ping]
+
+-> multi_body(n)
+  multi_embed_init(n)
+  li = 0
+  while li < N_LAYERS
+    multi_layer_emit(layers[li], n)
+    li = li + 1
+  if multi_head_on[0] == 1 then head_multi(n)
+
+# Dual-chunk pipeline body: chunk B's layer j is emitted right after chunk
+# A's (state barriers make A(j)->B(j) an ordered edge) while B(j) overlaps
+# A(j+1) on the concurrent encoder — two chunks in flight per program.
+# A pair flips every ping twice, so pings are IDENTITY after the program.
+-> multi_body_dual(n)
+  mbank[0] = 0
+  multi_embed_init(n)
+  mbank[0] = 1
+  multi_embed_init(n)
   li = 0
   while li < N_LAYERS
     lyr = layers[li]
-    if lyr[:ple] != nil then ple_multi(lyr, n)
-    hc_mix_multi(lyr[:attn_hc], n)
-    if lyr[:kind] == "mamba"
-      mamba_multi(lyr, n)
-    else
-      full_multi(lyr, n)
-    hc_combine_multi_step(n)
-    hc_mix_multi(lyr[:mlp_hc], n)
-    moe_multi(lyr, n)
-    hc_combine_multi_step(n)
+    mbank[0] = 0
+    multi_layer_emit(lyr, n)
+    multi_flip_layer(lyr)
+    mbank[0] = 1
+    multi_layer_emit(lyr, n)
+    multi_flip_layer(lyr)
     li = li + 1
-  if multi_head_on[0] == 1 then head_multi(n)
+  mbank[0] = 0
 
 # Recorded programs per (width, mamba ping parity): the ping choice is baked
 # into the recorded args, and every mamba/PLE layer flips exactly once per
@@ -2037,7 +2177,7 @@ multi_head_on = [1]
   if seg.size() > 0 then plan.push([0, seg])
   plan
 
--> forward_multi(toks, pos0, n)
+-> prep_chunk(toks, pos0, n)
   t = 0
   while t < n
     ple_gather([toks[t], e_m, t * HIDDEN])
@@ -2052,6 +2192,50 @@ multi_head_on = [1]
       ri = ri + 1
     t = t + 1
   metal_buffer_write_i32(mpos_buf, 0, pos0)
+
+dual_progs = {}
+
+-> record_dual_prog(n)
+  while mprog.size() > 0
+    mprog.pop()
+  mrec[0] = 1
+  m4_last_conv[0] = nil
+  m4_last_conv[1] = 0
+  fd2 = flip_defer[0]
+  flip_defer[0] = 1
+  hd2 = multi_head_on[0]
+  multi_head_on[0] = 0
+  multi_body_dual(n)
+  multi_head_on[0] = hd2
+  flip_defer[0] = fd2
+  mrec[0] = 0
+  outp = []
+  i2 = 0
+  while i2 < mprog.size()
+    outp.push(mprog[i2])
+    i2 = i2 + 1
+  outp
+
+# Run TWO consecutive chunks through one dual-pipelined program. Pings are
+# identity after the pair; H publish is the caller's concern (last pair
+# never carries the head — the final chunk runs single).
+-> forward_dual(toks_a, toks_b, pos0, n)
+  mbank[0] = 0
+  prep_chunk(toks_a, pos0, n)
+  mbank[0] = 1
+  prep_chunk(toks_b, pos0 + n, n)
+  mbank[0] = 0
+  dkey = layers[0][:ping]
+  if dual_progs[dkey] == nil
+    dual_progs[dkey] = record_dual_prog(n)
+  metal_batch_begin_concurrent(queue)
+  wb3 = 2 - 1
+  ccall("w_metal_program_run", queue, dual_progs[dkey], wb3)
+  metal_batch_commit(queue)
+
+-> forward_multi(toks, pos0, n)
+  mbank[0] = 0
+  prep_chunk(toks, pos0, n)
   if qsa_on
     t = 0
     while t < n
@@ -2384,38 +2568,47 @@ i = 0
 # ids gate). GEMM MMA summation is NOT bit-identical to the matvec family —
 # gate chunked-vs-serial on ids, like the 27B did.
 prefill_chunked = prompt.size() > 8 && ccall("__w_env", "FN_CHUNK") != "0"
+# FN_DUAL=1 pipelines TWO chunks per recorded program (layer-interleaved,
+# banked scratch). Measured NEUTRAL (~1854 vs ~1830 ms per 512 tokens,
+# ABBA at chunk 256): the concurrent encoder already overlaps across
+# layers within one chunk — the prefill is bandwidth/MMA-bound, not
+# occupancy-bound. Kept as an arm; QSA prefill unsupported (bounds
+# buffers not banked).
+prefill_dual = prefill_chunked && ccall("__w_env", "FN_DUAL") == "1" && !qsa_on
 if prefill_chunked
   while i < prompt.size()
     remaining = prompt.size() - i
-    cw = remaining
-    if cw > PREFILL_CHUNK then cw = PREFILL_CHUNK
-    # the head-bearing final chunk must fit logits_m: shave this chunk so the
-    # tail lands in (0, PREFILL_LAST_MAX]
-    if remaining > cw && remaining - cw > 0 && remaining - cw < 1
-      cw = cw
-    if cw == remaining && cw > PREFILL_LAST_MAX
-      cw = remaining - PREFILL_LAST_MAX
-    chunk = prompt.slice(i, cw)
-    is_last = i + cw >= prompt.size()
-    multi_head_on[0] = is_last ? 1 : 0
-    ct0 = ccall("__w_clock_ms")
-    pf_preds = forward_multi(chunk, i, cw)
-    if fn_time then << "  chunk @" + i.to_s + " w" + cw.to_s + ": " + (ccall("__w_clock_ms") - ct0).to_s + " ms"
-    if is_last then pred = pf_preds[cw - 1]
-    if mtp_depth > 0
-      nxt = []
-      ti = 0
-      while ti < cw
-        nxt.push(i + ti + 1 < prompt.size() ? prompt[i + ti + 1] : pred)
-        ti = ti + 1
-      mtp_prefill_chunk(nxt, i + 1, cw)
-    if is_last
-      # the spec loop and FN_MTP harness fuse drafts from H (width-1 stream);
-      # forward_multi only fills h_m — publish the final position's stream
-      metal_batch_begin(queue)
-      metal_dispatch_n(queue, copy_at_pipe, [h_m, H, (cw - 1) * HC_HIDDEN, 0, HC_HIDDEN], HC_HIDDEN)
-      metal_batch_commit(queue)
-    i = i + cw
+    if prefill_dual && remaining > 2 * PREFILL_CHUNK
+      ct0 = ccall("__w_clock_ms")
+      forward_dual(prompt.slice(i, PREFILL_CHUNK), prompt.slice(i + PREFILL_CHUNK, PREFILL_CHUNK), i, PREFILL_CHUNK)
+      if fn_time then << "  dual @" + i.to_s + " 2x" + PREFILL_CHUNK.to_s + ": " + (ccall("__w_clock_ms") - ct0).to_s + " ms"
+      i = i + 2 * PREFILL_CHUNK
+    else
+      cw = remaining
+      if cw > PREFILL_CHUNK then cw = PREFILL_CHUNK
+      if cw == remaining && cw > PREFILL_LAST_MAX
+        cw = remaining - PREFILL_LAST_MAX
+      chunk = prompt.slice(i, cw)
+      is_last = i + cw >= prompt.size()
+      multi_head_on[0] = is_last ? 1 : 0
+      ct0 = ccall("__w_clock_ms")
+      pf_preds = forward_multi(chunk, i, cw)
+      if fn_time then << "  chunk @" + i.to_s + " w" + cw.to_s + ": " + (ccall("__w_clock_ms") - ct0).to_s + " ms"
+      if is_last then pred = pf_preds[cw - 1]
+      if mtp_depth > 0
+        nxt = []
+        ti = 0
+        while ti < cw
+          nxt.push(i + ti + 1 < prompt.size() ? prompt[i + ti + 1] : pred)
+          ti = ti + 1
+        mtp_prefill_chunk(nxt, i + 1, cw)
+      if is_last
+        # the spec loop and FN_MTP harness fuse drafts from H (width-1
+        # stream); forward_multi only fills h_m — publish the final stream
+        metal_batch_begin(queue)
+        metal_dispatch_n(queue, copy_at_pipe, [h_m, H, (cw - 1) * HC_HIDDEN, 0, HC_HIDDEN], HC_HIDDEN)
+        metal_batch_commit(queue)
+      i = i + cw
   multi_head_on[0] = 1
 else
   while i < prompt.size()

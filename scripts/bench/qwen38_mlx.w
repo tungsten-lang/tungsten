@@ -217,17 +217,21 @@ kv_write_pipe = metal_pipeline(metal_compile_source(device, read_file(SHARED_DIR
 add_pipe = metal_pipeline(metal_compile_source(device, read_file(SHARED_DIR + "residual_add.metal")), "residual_add")
 silu_pipe = metal_pipeline(metal_compile_source(device, read_file(SHARED_DIR + "silu_mul.metal")), "silu_mul")
 
-# --- Neural-Accelerator (matmul2d) FFN prefill path (gemm-prefill only) ---
-m4_comp = metal4_compiler(device)
-m4_queue = metal4_queue(device)
-m4_alloc = metal4_allocator(device)
-m4_ffn_pipe = metal4_pipeline(m4_comp, metal_compile_source(device, read_file("bits/tungsten-llama/lib/kernels/nvfp4_matmul_m4.metal")), "nvfp4_matmul_m4_m64", 128, 1, 1)
+# --- Neural-Accelerator (matmul2d) prefill path (gemm-prefill only) ---
+# The "na" kernels take plain device pointers and build their tensor views
+# in-shader, so they dispatch from the CLASSIC compute encoder straight into
+# forward_multi's single concurrent command buffer: no Metal-4 argument table,
+# command buffer, allocator or residency set, and -- the point -- no commit
+# segmentation. The MTL4 predecessor cost five blocking GPU round-trips per
+# layer. See docs/na-classic-encoder-2026-09-02.md.
+NA_DIR = "bits/tungsten-llama/lib/kernels/na/"
+NA_MT = 128
+NA_MT64 = 64
+na_lib = metal_compile_source(device, read_file(NA_DIR + "nvfp4_matmul_na.metal"))
+na_pipe = metal_pipeline(na_lib, "nvfp4_matmul_na")
+na_m64_pipe = metal_pipeline(na_lib, "nvfp4_matmul_na_m64")
 f32_to_f16_pipe = metal_pipeline(metal_compile_source(device, read_file(NVFP4_DIR + "f32_to_f16.metal")), "f32_to_f16")
-k_hidden_buf = metal_buffer(device, 4)
-metal_buffer_write_i32(k_hidden_buf, 0, HIDDEN)
-k_ffn_buf = metal_buffer(device, 4)
-metal_buffer_write_i32(k_ffn_buf, 0, FFN)
-g_m4_ffn = false
+g_na_ffn = false
 argmax_pipe = metal_pipeline(metal_compile_source(device, read_file(SHARED_DIR + "argmax.metal")), "argmax")
 argmax_parallel_lib = metal_compile_source(device, read_file(SHARED_DIR + "argmax_two_stage.metal"))
 argmax_stage1_pipe = metal_pipeline(argmax_parallel_lib, "argmax_stage1")
@@ -757,7 +761,7 @@ if multi_verify
   up_multi_tmp = metal_buffer(device, MULTI_MAX * FFN * 4)
   xn_h16 = metal_buffer(device, MULTI_MAX * HIDDEN * 2)
   h_h16 = metal_buffer(device, MULTI_MAX * FFN * 2)
-  down_m4_tmp = metal_buffer(device, MULTI_MAX * HIDDEN * 4)
+  down_na_tmp = metal_buffer(device, MULTI_MAX * HIDDEN * 4)
   hidden_multi_tmp = metal_buffer(device, MULTI_MAX * FFN * 4)
   z_multi_tmp = metal_buffer(device, MULTI_MAX * V_DIM * 4)
   a_multi_tmp = metal_buffer(device, MULTI_MAX * HV * 4)
@@ -2014,44 +2018,52 @@ rope_power = ~2.0 / ROT_DIM
     [lyr[:out], attn_multi_tmp, x_multi, ATTN_DIM, HIDDEN, n])
   dependency_barrier()
 
-# One FFN/attn projection on the Neural Accelerators (matmul2d, m64 tile).
-# in_buf: f16 activation (MULTI_MAX x kdim). out_buf: f32 (MULTI_MAX x ndim).
-# Tensors span MULTI_MAX rows (the tile is 64); rows >= n are computed but unused.
--> m4_proj(w, in_buf, out_buf, kdim, kbuf, ndim)
-  tab = metal4_argtable(device, 6)
-  metal4_argtable_set_tensor(tab, 0, metal_tensor_2d(in_buf, METAL_DTYPE_FLOAT16, MULTI_MAX, kdim, 0, 0))
-  metal4_argtable_set_buffer(tab, 1, w[0])
-  metal4_argtable_set_buffer(tab, 2, w[1])
-  metal4_argtable_set_tensor(tab, 3, metal_tensor_2d(out_buf, METAL_DTYPE_FLOAT32, MULTI_MAX, ndim, 0, 0))
-  metal4_argtable_set_buffer(tab, 4, kbuf)
-  metal4_argtable_set_buffer(tab, 5, w[2])
-  rr = [in_buf, w[0], w[1], out_buf, kbuf, w[2]]
-  metal4_dispatch_groups_3d(m4_queue, m4_alloc, m4_ffn_pipe, tab, rr, 16384, 1, (ndim + 63) / 64, 1, 128, 1, 1)
+# One projection on the M5 Neural Accelerators (mpp::tensor_ops::matmul2d),
+# dispatched from the CLASSIC compute encoder into the batch already open.
+#
+# in_buf: f16 activations [MULTI_MAX][kdim]; out_buf: f32 [MULTI_MAX][ndim].
+# The cooperative-tensor store does NOT clip to the extents, so the row count
+# handed to the kernel is rounded UP to the M tile and the dispatch covers
+# exactly those rows: the scratch buffers carry MULTI_MAX rows, so rows in
+# [n, mrows) are computed and unused, and mrows <= MULTI_MAX always because
+# MULTI_MAX is itself tile-aligned. Every projection in this model satisfies
+# the other two alignment rules already (kdim % 128 == 0, ndim % 64 == 0).
+-> na_proj(w, in_buf, out_buf, kdim, ndim, n)
+  if n <= NA_MT64
+    metal_dispatch_3d(queue, na_m64_pipe,
+      [in_buf, w[0], w[1], out_buf, kdim, w[2], NA_MT64, ndim],
+      1, ndim / 64, 1, 128, 1, 1)
+    return
+  mrows = ((n + NA_MT - 1) / NA_MT) * NA_MT
+  metal_dispatch_3d(queue, na_pipe,
+    [in_buf, w[0], w[1], out_buf, kdim, w[2], mrows, ndim],
+    mrows / NA_MT, ndim / 64, 1, 128, 1, 1)
 
-# matmul2d FFN (gemm-prefill). Commit-segments the batch around the MTL4 stream:
-# convert->commit, gate/up on m4_queue, silu+convert->commit, down on m4_queue,
-# residual add. Numerically parity-safe (f16 acts preserve argmax; see the doc).
--> ffn_m4(lyr, n)
+# Neural-Accelerator FFN (gemm-prefill). Every dispatch -- the two f32->f16
+# activation stagings, the three NA GEMMs, silu and the residual add -- lands
+# in the SAME concurrent command buffer, ordered by scoped resource barriers.
+# Numerically parity-safe (f16 acts preserve argmax; see the tuning doc).
+-> ffn_na(lyr, n)
   metal_dispatch_n(queue, f32_to_f16_pipe, [xn_multi, xn_h16, n * HIDDEN], n * HIDDEN)
-  metal_batch_commit(queue)
-  m4_proj(lyr[:gate], xn_h16, gate_multi_tmp, HIDDEN, k_hidden_buf, FFN)
-  m4_proj(lyr[:up], xn_h16, up_multi_tmp, HIDDEN, k_hidden_buf, FFN)
-  metal_batch_begin_concurrent(queue)
+  dep_barrier_on([xn_h16])
+  na_proj(lyr[:gate], xn_h16, gate_multi_tmp, HIDDEN, FFN, n)
+  na_proj(lyr[:up], xn_h16, up_multi_tmp, HIDDEN, FFN, n)
+  dep_barrier_on([gate_multi_tmp, up_multi_tmp])
   metal_dispatch_n(queue, silu_pipe,
     [gate_multi_tmp, up_multi_tmp, hidden_multi_tmp, n * FFN], n * FFN)
   dep_barrier_on([hidden_multi_tmp])
   metal_dispatch_n(queue, f32_to_f16_pipe, [hidden_multi_tmp, h_h16, n * FFN], n * FFN)
-  metal_batch_commit(queue)
-  m4_proj(lyr[:down], h_h16, down_m4_tmp, FFN, k_ffn_buf, HIDDEN)
-  metal_batch_begin_concurrent(queue)
-  metal_dispatch_n(queue, add_pipe, [x_multi, down_m4_tmp, n * HIDDEN], n * HIDDEN)
+  dep_barrier_on([h_h16])
+  na_proj(lyr[:down], h_h16, down_na_tmp, FFN, HIDDEN, n)
+  dep_barrier_on([down_na_tmp])
+  metal_dispatch_n(queue, add_pipe, [x_multi, down_na_tmp, n * HIDDEN], n * HIDDEN)
   dep_barrier_on([x_multi])
 
 -> enqueue_ffn_multi(lyr, n)
   enqueue_rms([x_multi, lyr[:post_norm], xn_multi, n])
   dep_barrier_on([xn_multi])
-  if g_m4_ffn
-    ffn_m4(lyr, n)
+  if g_na_ffn
+    ffn_na(lyr, n)
   else
     enqueue_scaled_multi([lyr[:gate], xn_multi, gate_multi_tmp, HIDDEN, FFN, n])
     enqueue_scaled_multi([lyr[:up], xn_multi, up_multi_tmp, HIDDEN, FFN, n])
@@ -2553,7 +2565,7 @@ setup_elapsed = ccall("__w_clock_ms") - setup_t0
 << "prefill " + prompt.size().to_s + " tokens"
 prefill_t0 = ccall("__w_clock_ms")
 profile_stats[0] = 1
-g_m4_ffn = prefill_gemm && ccall("__w_env", "M4_FFN") != "0"
+g_na_ffn = prefill_gemm && ccall("__w_env", "M4_FFN") != "0"
 i = 0
 pred = -1
 prefill_last_batched = false
@@ -2603,7 +2615,7 @@ while i < prompt.size()
 # the last prompt token's hidden for the first decode draft.
 if prefill_last_batched && mtp_enabled
   copy_hidden_triplet_row(2)
-g_m4_ffn = false
+g_na_ffn = false
 profile_stats[0] = 0
 prefill_elapsed = ccall("__w_clock_ms") - prefill_t0
 if prompt.size() == 5 && pred != 11751

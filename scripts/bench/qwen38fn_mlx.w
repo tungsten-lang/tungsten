@@ -183,12 +183,14 @@ hc_fused = ccall("__w_env", "FN_HCFUSED") == "1"
 # the C-side executor (w_metal_program_run) — A/B escape; commands identical.
 cprog = ccall("__w_env", "FN_CPROG") != "0"
 # FN_M4=1 routes big prefill GEMMs through the Metal-4 Neural Accelerators.
-# MEASURED NEGATIVE as integrated (9/1): the kernel alone is 2.6x the
-# simdgroup tiles at M=512, but segmenting the recorded program at ~150
-# marker points serializes what the concurrent encoder overlapped
-# (2742 vs 1133 ms/chunk) AND bf16-truncated activations drift ids (the
-# 27B used f16 activations for exactly this reason). A win here needs
-# MTL4-native orchestration of the whole chunk, not point integration.
+# MEASURED NEGATIVE TWICE (9/1): (a) host-synced point integration: 2742 vs
+# 1133 ms/chunk; (b) GPU-event-chained dual stream (shared-event edges,
+# one host wait): ~6032 vs ~1204 ms/chunk AND degenerate output (bf16->f16
+# weight conversion likely overflows f16 range on outliers). The kernel is
+# 2.6x standalone at M=512, but ANY per-projection stream switch forfeits
+# the whole-chunk concurrency of the legacy encoder, which dominates. A win
+# needs the ENTIRE chunk resident on the MTL4 stream (all ops ported) or a
+# persistent-kernel design — out of scope for point integration.
 m4_on = ccall("__w_env", "FN_M4") == "1"
 # FN_MTP=1: load the MTP head and measure draft acceptance during decode
 # (each round drafts the NEXT-next token; the following round scores it).
@@ -1585,7 +1587,9 @@ if multi_n > 0 || mtp_depth > 0 || prompt_tokens > 8 || prompt_ids_file != ""
     m4_comp = metal4_compiler(device)
     m4_queue = metal4_queue(device)
     m4_alloc = metal4_allocator(device)
-    bf16_m4_pipe = metal4_pipeline(m4_comp, metal_compile_source(device, read_file(FN_DIR + "bf16_matmul_m4.metal")), "bf16_matmul_m4", 128, 1, 1)
+    f16_m4_pipe = metal4_pipeline(m4_comp, metal_compile_source(device, read_file("bits/tungsten-llama/lib/kernels/f16_matmul_m4.metal")), "f16_matmul_m4", 128, 1, 1)
+    m4_ev = metal_event_new(device)
+    m4_ev_val = [0]
   bf16_gemm_lib = metal_compile_source(device, read_file(FN_DIR + "bf16_gemm_f32.metal"))
   bgemm_m16_pipe = metal_pipeline(bf16_gemm_lib, "bf16_gemm_f32_m16")
   bgemm_m32_pipe = metal_pipeline(bf16_gemm_lib, "bf16_gemm_f32_m32")
@@ -1672,6 +1676,9 @@ if multi_n > 0 || mtp_depth > 0 || prompt_tokens > 8 || prompt_ids_file != ""
   xg_m = metal_buffer(device, (MULTI_MAX * TOP_K + 8) * HIDDEN * 4)
   xb_stage = metal_buffer(device, MULTI_MAX * V_DIM * 2)
   f32_to_bf16_pipe = metal_pipeline(fnm_lib, "f32_to_bf16")
+  f32_to_f16_pipe = metal_pipeline(metal_compile_source(device, read_file(NVFP4_DIR + "f32_to_f16.metal")), "f32_to_f16")
+  bf16_to_f16_pipe = metal_pipeline(fnm_lib, "bf16_to_f16")
+  m4_pending_cbs = []
   m4_items = []
   m4_res = [xb_stage]
   m4_res_attached = [0]
@@ -1716,12 +1723,18 @@ mrec = [0]
 # Register one M4 GEMM site: prebuilt argtable over (weights bf16, staged
 # activations, f32 output); returns the item index the marker step carries.
 -> m4_register(wraw, x_src, y_out, kdim, rows, n)
+  # one-time f16 copy of the bf16 weight (f16 activations + f16 weights =
+  # the 27B's argmax-safe matmul2d recipe; bf16 acts drift ids)
+  wf16 = metal_buffer(device, rows * kdim * 2)
+  metal_batch_begin(queue)
+  metal_dispatch_n(queue, bf16_to_f16_pipe, [wraw, wf16, rows * kdim], rows * kdim)
+  metal_batch_commit(queue)
   tab = metal4_argtable(device, 3)
-  metal4_argtable_set_tensor(tab, 0, metal_tensor_2d(xb_stage, METAL_DTYPE_BFLOAT16, MULTI_MAX, kdim, 0, 0))
-  metal4_argtable_set_tensor(tab, 1, metal_tensor_2d(wraw, METAL_DTYPE_BFLOAT16, rows, kdim, 0, 0))
+  metal4_argtable_set_tensor(tab, 0, metal_tensor_2d(xb_stage, METAL_DTYPE_FLOAT16, MULTI_MAX, kdim, 0, 0))
+  metal4_argtable_set_tensor(tab, 1, metal_tensor_2d(wf16, METAL_DTYPE_FLOAT16, rows, kdim, 0, 0))
   metal4_argtable_set_tensor(tab, 2, metal_tensor_2d(y_out, METAL_DTYPE_FLOAT32, MULTI_MAX, rows, 0, 0))
-  m4_items.push([bf16_m4_pipe, tab, 16384, (MULTI_MAX + 63) / 64, (rows + 31) / 32, 1, 128, 1, 1])
-  m4_res.push(wraw)
+  m4_items.push([f16_m4_pipe, tab, 16384, (MULTI_MAX + 63) / 64, (rows + 31) / 32, 1, 128, 1, 1])
+  m4_res.push(wf16)
   m4_res.push(y_out)
   m4_items.size() - 1
 
@@ -1735,7 +1748,7 @@ mrec = [0]
       # Neural-Accelerator site: convert activations once per x source, then
       # emit a segmentation marker carrying the prebuilt dispatch item.
       if !(m4_last_conv[0] == x_in && m4_last_conv[1] == n * kdim)
-        mdn(f32_to_bf16_pipe, [x_in, xb_stage, n * kdim], n * kdim)
+        mdn(f32_to_f16_pipe, [x_in, xb_stage, n * kdim], n * kdim)
         mbar([xb_stage])
         m4_last_conv[0] = x_in
         m4_last_conv[1] = n * kdim
@@ -2057,21 +2070,41 @@ multi_head_on = [1]
     m4_res_attached[0] = m4_res.size()
   with_barriers = 2 - 1
   plan = multi_progs[prog_key]
-  pi2 = 0
-  while pi2 < plan.size()
-    entry = plan[pi2]
-    if entry[0] == 0
-      metal_batch_begin_concurrent(queue)
-      ccall("w_metal_program_run", queue, entry[1], with_barriers)
-      metal_batch_commit(queue)
-    else
-      items2 = []
-      bi2 = 0
-      while bi2 < entry[1].size()
-        items2.push(m4_items[entry[1][bi2]])
-        bi2 = bi2 + 1
-      metal4_batch_run(m4_queue, m4_alloc, items2)
-    pi2 = pi2 + 1
+  if plan.size() == 1
+    # pure-legacy plan: single batch, single commit (the fast common case)
+    metal_batch_begin_concurrent(queue)
+    ccall("w_metal_program_run", queue, plan[0][1], with_barriers)
+    metal_batch_commit(queue)
+  else
+    # dual-stream: every hop legacy<->NA is a GPU-side shared-event edge;
+    # the host waits ONCE at the end of the chunk
+    v0 = m4_ev_val[0]
+    v = v0
+    pi2 = 0
+    while pi2 < plan.size()
+      entry = plan[pi2]
+      if entry[0] == 0
+        if v == v0
+          metal_batch_begin_concurrent(queue)
+        else
+          metal_batch_begin_concurrent_wait(queue, m4_ev, v)
+        ccall("w_metal_program_run", queue, entry[1], with_barriers)
+        m4_pending_cbs.push(metal_batch_commit_async_signal(queue, m4_ev, v + 1))
+        v = v + 1
+      else
+        items2 = []
+        bi2 = 0
+        while bi2 < entry[1].size()
+          items2.push(m4_items[entry[1][bi2]])
+          bi2 = bi2 + 1
+        metal4_batch_run_chained(m4_queue, m4_alloc, items2, m4_ev, v, v + 1)
+        v = v + 1
+      pi2 = pi2 + 1
+    metal_event_wait(m4_ev, v, 60000)
+    m4_ev_val[0] = v
+    metal4_allocator_reset(m4_alloc)
+    while m4_pending_cbs.size() > 0
+      metal_command_buffer_wait(m4_pending_cbs.pop())
   # replayed programs can't flip pings as a side effect — do it here unless
   # the caller (spec loop) defers flips to its rollback
   if flip_defer[0] == 0

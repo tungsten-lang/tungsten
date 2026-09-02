@@ -427,3 +427,26 @@ fn metal4_residency_attach(queue, resources)
 # items: array of [pipeline, argtable, tg_mem_bytes, gx, gy, gz, tx, ty, tz].
 fn metal4_batch_run(queue, allocator, items)
   ccall("w_metal4_batch_run", queue, allocator, items)
+
+# Shared events for GPU-side cross-queue sequencing (legacy <-> Metal 4).
+fn metal_event_new(device)
+  ccall("w_metal_event_new", device)
+
+fn metal_event_wait(event, value, timeout_ms)
+  ccall("w_metal_event_wait", event, value, timeout_ms)
+
+# Open a concurrent batch that first waits (GPU-side) for event >= value.
+fn metal_batch_begin_concurrent_wait(queue, event, value)
+  ccall("w_metal_batch_begin_concurrent_wait", queue, event, value)
+
+# Commit without host wait; the GPU signals event = value on completion.
+# Returns a command-buffer handle for a later metal_command_buffer_wait.
+fn metal_batch_commit_async_signal(queue, event, value)
+  ccall("w_metal_batch_commit_async_signal", queue, event, value)
+
+# Chained MTL4 batch: GPU waits event>=wait_val, runs, signals signal_val.
+fn metal4_batch_run_chained(queue, allocator, items, event, wait_val, signal_val)
+  ccall("w_metal4_batch_run_chained", queue, allocator, items, event, wait_val, signal_val)
+
+fn metal4_allocator_reset(allocator)
+  ccall("w_metal4_allocator_reset", allocator)

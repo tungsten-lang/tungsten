@@ -1091,6 +1091,86 @@ WValue w_metal_batch_barrier(WValue queue_v) {
  * documents this as cheaper than memoryBarrierWithScope when only a
  * few resources have RAW deps. Caller passes an array of WMetalBuffers
  * that the upcoming dispatches will read after preceding writes. */
+/* ---- Shared-event chaining: lets legacy MTLCommandQueue work and MTL4
+ * Neural-Accelerator batches self-sequence on the GPU with ONE host wait
+ * per chunk instead of a host round-trip per stream switch. ---- */
+
+/* Internal type tag for an in-flight command buffer handle. We piggy-back
+ * on the W_TYPE_METAL_BUFFER struct shape since we just need a void* handle. */
+typedef struct WMetalCmdBuf {
+    uint8_t type;     /* W_TYPE_METAL_BUFFER (reusing existing tag) */
+    void *handle;     /* id<MTLCommandBuffer> */
+    int64_t size;     /* unused — set to 0 (renamed from length, parallels WMetalBuffer) */
+} WMetalCmdBuf;
+
+WValue w_metal_event_new(WValue device_v) {
+    WMetalDevice *d = as_metal_device(device_v);
+    if (!d) w_raise(w_string("Metal.event_new: bad device"));
+    id<MTLSharedEvent> ev = [(id<MTLDevice>)d->handle newSharedEvent];
+    if (!ev) w_raise(w_string("Metal.event_new: newSharedEvent failed"));
+    WMetalBuffer *w = (WMetalBuffer *)calloc(1, sizeof(WMetalBuffer));
+    w->type = W_TYPE_METAL_BUFFER;   /* reuse the boxed-ptr shell */
+    w->handle = (void *)ev;          /* retained by new */
+    w->size = 0;
+    return w_box_ptr(w, W_SUBTAG_GENERIC);
+}
+
+WValue w_metal_event_wait(WValue event_v, WValue value_v, WValue timeout_ms_v) {
+    WMetalBuffer *w = (WMetalBuffer *)w_as_ptr(event_v);
+    if (!w || !w->handle) w_raise(w_string("Metal.event_wait: bad event"));
+    id<MTLSharedEvent> ev = (id<MTLSharedEvent>)w->handle;
+    uint64_t val = (uint64_t)w_to_i64(value_v);
+    int64_t timeout = w_to_i64(timeout_ms_v);
+    if (![ev waitUntilSignaledValue:val timeoutMS:(uint64_t)timeout]) {
+        w_raise(w_string("Metal.event_wait: timeout"));
+    }
+    return W_NIL;
+}
+
+/* Open a concurrent batch whose command buffer first WAITS for the shared
+ * event to reach `value` (encoded before the compute encoder opens). */
+WValue w_metal_batch_begin_concurrent_wait(WValue queue_v, WValue event_v, WValue value_v) {
+    WMetalQueue *q = as_metal_queue(queue_v);
+    if (!q) w_raise(w_string("Metal.batch_begin_concurrent_wait: bad queue"));
+    if (q->batch_cmd) w_raise(w_string("Metal.batch_begin_concurrent_wait: batch already open"));
+    WMetalBuffer *w = (WMetalBuffer *)w_as_ptr(event_v);
+    if (!w || !w->handle) w_raise(w_string("Metal.batch_begin_concurrent_wait: bad event"));
+    id<MTLCommandQueue> queue = (id<MTLCommandQueue>)q->handle;
+    id<MTLCommandBuffer> cmd = [[queue commandBuffer] retain];
+    [cmd encodeWaitForEvent:(id<MTLSharedEvent>)w->handle value:(uint64_t)w_to_i64(value_v)];
+    id<MTLComputeCommandEncoder> enc =
+        [[cmd computeCommandEncoderWithDispatchType:MTLDispatchTypeConcurrent] retain];
+    q->batch_cmd = (void *)cmd;
+    q->batch_encoder = (void *)enc;
+    q->batch_pipeline = NULL;
+    return W_NIL;
+}
+
+/* Commit the open batch WITHOUT waiting, signaling the shared event to
+ * `value` when the GPU finishes it. Returns the command-buffer handle
+ * (release later via w_metal_command_buffer_wait). */
+WValue w_metal_batch_commit_async_signal(WValue queue_v, WValue event_v, WValue value_v) {
+    WMetalQueue *q = as_metal_queue(queue_v);
+    if (!q) w_raise(w_string("Metal.batch_commit_async_signal: bad queue"));
+    if (!q->batch_cmd) w_raise(w_string("Metal.batch_commit_async_signal: no batch open"));
+    WMetalBuffer *w = (WMetalBuffer *)w_as_ptr(event_v);
+    if (!w || !w->handle) w_raise(w_string("Metal.batch_commit_async_signal: bad event"));
+    id<MTLCommandBuffer> cmd = (id<MTLCommandBuffer>)q->batch_cmd;
+    id<MTLComputeCommandEncoder> enc = (id<MTLComputeCommandEncoder>)q->batch_encoder;
+    [enc endEncoding];
+    [cmd encodeSignalEvent:(id<MTLSharedEvent>)w->handle value:(uint64_t)w_to_i64(value_v)];
+    [cmd commit];
+    [enc release];
+    q->batch_cmd = NULL;
+    q->batch_encoder = NULL;
+    q->batch_pipeline = NULL;
+    WMetalCmdBuf *h = (WMetalCmdBuf *)calloc(1, sizeof(WMetalCmdBuf));
+    h->type = W_TYPE_METAL_BUFFER;
+    h->handle = (void *)cmd;
+    h->size = 0;
+    return w_box_ptr(h, W_SUBTAG_GENERIC);
+}
+
 WValue w_metal_batch_barrier_resources(WValue queue_v, WValue bufs_v) {
     WMetalQueue *q = as_metal_queue(queue_v);
     if (!q) w_raise(w_string("Metal.batch_barrier_resources: bad queue"));
@@ -1248,14 +1328,6 @@ WValue w_metal_batch_commit(WValue queue_v) {
  * on the handle (which blocks until completion and frees the cmd buffer).
  * Lets the host overlap encoding the next batch while the GPU runs this one. */
 WValue w_metal_command_buffer_wait(WValue cb_v);
-
-/* Internal type tag for an in-flight command buffer handle. We piggy-back
- * on the W_TYPE_METAL_BUFFER struct shape since we just need a void* handle. */
-typedef struct WMetalCmdBuf {
-    uint8_t type;     /* W_TYPE_METAL_BUFFER (reusing existing tag) */
-    void *handle;     /* id<MTLCommandBuffer> */
-    int64_t size;     /* unused — set to 0 (renamed from length, parallels WMetalBuffer) */
-} WMetalCmdBuf;
 
 WValue w_metal_batch_commit_async(WValue queue_v) {
     WMetalQueue *q = as_metal_queue(queue_v);
@@ -2323,6 +2395,77 @@ WValue w_metal4_batch_run(WValue queue_v, WValue allocator_v, WValue items_v) {
     }
 }
 
+/* Chained variant: GPU-side event wait before, signal after, NO host wait
+ * and NO allocator reset (reset after the chunk's final host wait via
+ * w_metal4_allocator_reset). Event objects come from w_metal_event_new. */
+WValue w_metal4_batch_run_chained(WValue queue_v, WValue allocator_v, WValue items_v,
+                                  WValue event_v, WValue wait_val_v, WValue signal_val_v) {
+    if (@available(macOS 26.0, *)) {
+        WMetal4Queue *q     = as_metal4_queue(queue_v);
+        WMetal4Allocator *a = as_metal4_allocator(allocator_v);
+        if (!q || !a) w_raise(w_string("metal4_batch_run_chained: queue / allocator required"));
+        if (!w_is_array(items_v)) w_raise(w_string("metal4_batch_run_chained: items must be an array"));
+        WMetalBuffer *evb = (WMetalBuffer *)w_as_ptr(event_v);
+        if (!evb || !evb->handle) w_raise(w_string("metal4_batch_run_chained: bad event"));
+        id<MTLSharedEvent> ev = (id<MTLSharedEvent>)evb->handle;
+        WArray *items = w_as_array(items_v);
+        if (items->size == 0) return W_NIL;
+        id<MTL4CommandQueue>     q_ = (id<MTL4CommandQueue>)q->handle;
+        id<MTL4CommandAllocator> a_ = (id<MTL4CommandAllocator>)a->handle;
+        id<MTLDevice> dev = NULL;
+        id<MTL4CommandBuffer> cmdbuf = NULL;
+        id<MTL4ComputeCommandEncoder> enc = NULL;
+        for (int32_t si = 0; si < items->size; si++) {
+            WValue it_v = w_array_get(items_v, w_int(si));
+            WMetalPipeline *p  = as_metal_pipeline(w_array_get(it_v, w_int(0)));
+            WMetal4ArgTable *t = as_metal4_argtable(w_array_get(it_v, w_int(1)));
+            if (!p || !t) w_raise(w_string("metal4_batch_run_chained: bad item"));
+            id<MTLComputePipelineState> p_ = (id<MTLComputePipelineState>)p->handle;
+            if (!dev) {
+                dev = [p_ device];
+                cmdbuf = [dev newCommandBuffer];
+                if (!cmdbuf) w_raise(w_string("metal4_batch_run_chained: newCommandBuffer failed"));
+                [cmdbuf beginCommandBufferWithAllocator:a_];
+                enc = [cmdbuf computeCommandEncoder];
+                if (!enc) w_raise(w_string("metal4_batch_run_chained: encoder failed"));
+            }
+            [enc setComputePipelineState:p_];
+            [enc setArgumentTable:(id<MTL4ArgumentTable>)t->handle];
+            int64_t tg_mem = w_to_i64(w_array_get(it_v, w_int(2)));
+            if (tg_mem > 0) [enc setThreadgroupMemoryLength:(NSUInteger)tg_mem atIndex:0];
+            MTLSize tgs = MTLSizeMake((NSUInteger)w_to_i64(w_array_get(it_v, w_int(3))),
+                                      (NSUInteger)w_to_i64(w_array_get(it_v, w_int(4))),
+                                      (NSUInteger)w_to_i64(w_array_get(it_v, w_int(5))));
+            MTLSize ths = MTLSizeMake((NSUInteger)w_to_i64(w_array_get(it_v, w_int(6))),
+                                      (NSUInteger)w_to_i64(w_array_get(it_v, w_int(7))),
+                                      (NSUInteger)w_to_i64(w_array_get(it_v, w_int(8))));
+            [enc dispatchThreadgroups:tgs threadsPerThreadgroup:ths];
+        }
+        [enc endEncoding];
+        [cmdbuf endCommandBuffer];
+        [q_ waitForEvent:ev value:(uint64_t)w_to_i64(wait_val_v)];
+        id<MTL4CommandBuffer> arr[1] = { cmdbuf };
+        [q_ commit:arr count:1];
+        [q_ signalEvent:ev value:(uint64_t)w_to_i64(signal_val_v)];
+        return W_NIL;
+    } else {
+        w_raise(w_string("metal4_batch_run_chained: requires macOS 26+"));
+        return W_NIL;
+    }
+}
+
+WValue w_metal4_allocator_reset(WValue allocator_v) {
+    if (@available(macOS 26.0, *)) {
+        WMetal4Allocator *a = as_metal4_allocator(allocator_v);
+        if (!a) w_raise(w_string("metal4_allocator_reset: bad allocator"));
+        [(id<MTL4CommandAllocator>)a->handle reset];
+        return W_NIL;
+    } else {
+        w_raise(w_string("metal4_allocator_reset: requires macOS 26+"));
+        return W_NIL;
+    }
+}
+
 WValue w_metal4_dispatch_groups_3d(WValue queue_v, WValue allocator_v,
                                    WValue pipeline_v, WValue argtable_v,
                                    WValue resources_v,
@@ -2451,6 +2594,17 @@ WValue w_metal4_residency_attach(WValue queue_v, WValue resources_v) {
 
 WValue w_metal4_batch_run(WValue queue_v, WValue allocator_v, WValue items_v) {
     w_raise(w_string("metal4_batch_run: requires the macOS 26 SDK (Metal 4)"));
+    return W_NIL;
+}
+
+WValue w_metal4_batch_run_chained(WValue queue_v, WValue allocator_v, WValue items_v,
+                                  WValue event_v, WValue wait_val_v, WValue signal_val_v) {
+    w_raise(w_string("metal4_batch_run_chained: requires the macOS 26 SDK (Metal 4)"));
+    return W_NIL;
+}
+
+WValue w_metal4_allocator_reset(WValue allocator_v) {
+    w_raise(w_string("metal4_allocator_reset: requires the macOS 26 SDK (Metal 4)"));
     return W_NIL;
 }
 

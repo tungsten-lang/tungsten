@@ -1305,3 +1305,15 @@ kernel void sdpa_prefill_multi_hd256_hs(
   out[q_off + int(tid)] = result * inv;
 }
 
+
+
+// bf16 -> f16 one-time weight conversion for the Neural-Accelerator path.
+kernel void bf16_to_f16(
+  device const ushort *__restrict__ src [[buffer(0)]],
+  device       half   *__restrict__ dst [[buffer(1)]],
+  constant int &n [[buffer(2)]],
+  uint __tid [[thread_position_in_grid]]
+) {
+  if (int(__tid) >= n) return;
+  dst[__tid] = half(as_type<float>(uint(src[__tid]) << 16));
+}

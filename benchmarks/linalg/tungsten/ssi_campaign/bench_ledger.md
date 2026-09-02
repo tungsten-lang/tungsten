@@ -32,3 +32,18 @@
 | FULL CORPUS final (md_order84, ILS x1.0, cold) | md_order84 | 0.8301 [lt 0.8939 mid 0.8566 big 0.7624] (-0.0049 vs baseline; 82 better/36 worse) | 7783s (+36%) | — |
 | FULL CORPUS final (md_order84, ILS x1.5, cold) | md_order84 | 0.8284 [lt 0.8926 mid 0.8551 big 0.7601] (-0.0067; 94 better/34 worse) | 8638s (+51%) | — |
 | Leader (same corpus, same scorer) | — | 0.8109 | — | not reached standalone (no memoization) |
+
+## Cleanup pass (2026-09-02, --release --native, identical flops throughout)
+| change | evidence | effect |
+|---|---|---|
+| window_dp w64 DP sentinel 2^62 -> 2^46 | TUNGSTEN_ALLOC_PROFILE on slay06m: bigint_arena takes 712,356 -> 0 | tiny-row wall -32% |
+| exact scorer body -> module-level typed kernel `ssi_counts_kernel` (u32[] ... signature) | ivar-loaded arrays dispatch every read: microbench 41 ms -> 2 ms (20x); `## u32[]` annotation no effect | per-row wall 2.2-3.8x faster (slay06m 3.9 s -> 1.0 s, langford 9.9 -> 3.0, chimera 9.1 -> 4.2) |
+| window_state_degree -> typed kernel; window list u32 | same mechanism | included above |
+| anneal_refine / order_descent orders typed u32; `flops_for_typed_order` lane (typed perm build) | | slay06m -9%, graphpart-20 -4% |
+| whole-suite profile (300 rows @25% budget, macOS sample x3, symbolized via sidemap) | before: counts_under_cached 24.4, rgreedy_refine 23.8, array_slot_load_decoded 14.8, w_method_call_cached 11.0, w_array_get 5.0, w_dispatch_key 3.3, amd_core 3.3, __ulock_wait 2.5, window_state_degree 1.8, nd_ordering_of 1.6 (%) | after: rgreedy_refine 52.0, ssi_counts_kernel 19.2, nd_levelset_of 3.8, array_slot_load_decoded 3.4, amd_core 3.1, __ulock_wait 2.8, w_method_call_cached 2.4, nd_ordering_of 2.0, amf_core 1.6, window_state_degree 1.5 (%) — boxed access + dispatch 34% -> ~7% |
+| `.each ->` vs indexed `while` (loop_bench.w) | plain arrays: while 110 ms, each-> 48 ms; typed: while 53/32 ms, times-> 55/44 ms; map-> 36 vs while-push 35 | typed arrays + while stay the hot idiom; each-> only for plain lists |
+| rejected: typed copy of the crossover block order | typed read -> boxed pair -> typed store SEGVs (compiler hazard, reproduced twice) | kept plain |
+| 300-row allocation census (TUNGSTEN_ALLOC_PROFILE, 25% budget, single process) | bigint_arena 0 / 0 B; array_new 7,776,507 / 119.4 GB; array_aligned 15,964 / 613 MB; array_grow 3,183,192 / 28.0 GB; hash_new 0 | array_new callers (sampled): amd_core 54%, amf_core 15%, nd_ordering_of 7%, telos 5%, counts_under copies 5%, rgreedy 5%; array_grow callers: telos_descent 52%, rgsub 11%, amd_core 6%; aligned: SparsePattern#new 95% (sub-analyses) |
+| `## recycle` on the 60 top-scope typed workspaces of amd/amf/window/anneal/descent | build crashed (SIGBUS): recycled typed arrays are not zero-filled and AMD state assumes u32[n] zero-init (probe confirmed) | reverted; recipe = annotate only fully-written buffers or add zero loops |
+| clean-build identity | scorer + etree checksums identical between pre-kernel and final sources on 3 orders; per-row flops identical on 4 rows; earlier 16-row divergence was the second session's concurrent uncommitted edits, not the compiler cache |
+| b40 clean before/after (pre-kernel vs final, --release --native, 16 workers) | wall lt 837s -> 218s (3.84x), mid 1045s -> 508s (2.06x), big 2243s -> 1425s (1.57x); total -48% | 18/40 rows differ in flops only because the working tree also carries the other session's later arm edits (arm-by-arm trace identical through the last shared arm; final has one extra improving arm) |

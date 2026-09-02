@@ -110,7 +110,8 @@ fl_keeper      = opts.get("keeper")
 fl_alloc = opts.flag?("alloc")
 fl_counters_raw = opts.get("counters")
 fl_counters = ""
-if fl_counters_raw != nil
+# Argon yields `false` for an absent optional-arg flag; only a present flag selects a set
+if fl_counters_raw != nil && fl_counters_raw != false && fl_counters_raw.to_s() != "" && fl_counters_raw.to_s() != "false"
   if fl_counters_raw == true
     fl_counters = "rates"
   else

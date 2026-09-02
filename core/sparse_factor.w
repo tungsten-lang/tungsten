@@ -21,6 +21,160 @@
 use core/mutex
 use core/sparse_core_lift
 
+# Exact Gilbert–Ng–Peyton column counts under an optional relabeling, on
+# caller-owned typed buffers. Typed signature: the compiler types every
+# array access as an inline u32 load/store (a 20x difference versus the
+# same loop over ivar-loaded arrays, whose type is unknown at the read).
+# has_perm = 0 means identity (perm is then a 1-element dummy).
+-> ssi_counts_kernel(perm, has_perm, ri, ci, rows, ptr, idx, parent, ancestor, counts, mark, n, m) (u32[] i64 u32[] u32[] u32[] u32[] u32[] u32[] u32[] u32[] u32[] i64 i64) i64
+  none = 4294967295
+  i = 0
+  while i < n
+    rows[i] = 0
+    i += 1
+  k = 0
+  while k < m
+    a = ri[k]
+    b = ci[k]
+    if has_perm != 0
+      a = perm[a]
+      b = perm[b]
+    if a > b
+      rows[a] = rows[a] + 1
+    elsif b > a
+      rows[b] = rows[b] + 1
+    k += 1
+  run = 0
+  i = 0
+  while i < n
+    ptr[i] = run
+    run += rows[i]
+    rows[i] = 0
+    i += 1
+  ptr[n] = run
+  k = 0
+  while k < m
+    a = ri[k]
+    b = ci[k]
+    if has_perm != 0
+      a = perm[a]
+      b = perm[b]
+    if a > b
+      idx[ptr[a] + rows[a]] = b
+      rows[a] = rows[a] + 1
+    elsif b > a
+      idx[ptr[b] + rows[b]] = a
+      rows[b] = rows[b] + 1
+    k += 1
+  i = 0
+  while i < n
+    parent[i] = none
+    ancestor[i] = none
+    i += 1
+  i = 0
+  while i < n
+    p = ptr[i]
+    stop = ptr[i + 1]
+    while p < stop
+      r = idx[p]
+      while r != none && r != i
+        nxt = ancestor[r]
+        ancestor[r] = i
+        parent[r] = i if parent[r] == none
+        r = nxt
+      p += 1
+    i += 1
+  i = 0
+  while i < n
+    counts[i] = 1
+    mark[i] = 0
+    i += 1
+  i = 0
+  while i < n
+    mark[i] = i + 1
+    p = ptr[i]
+    stop = ptr[i + 1]
+    while p < stop
+      r = idx[p]
+      while r != none && mark[r] != i + 1
+        counts[r] = counts[r] + 1
+        mark[r] = i + 1
+        r = parent[r]
+      p += 1
+    i += 1
+  0
+
+# perm[order[i]] = i for a typed order — the per-score prologue that the
+# generic scorer must run through boxed dispatch because `order` may be a
+# plain list there. Typed refiners (anneal, descent, subtree) use this lane.
+-> ssi_build_perm(order, perm, n) (u32[] u32[] i64) i64
+  i = 0
+  while i < n
+    perm[order[i]] = i
+    i += 1
+  0
+
+# Window-DP transition: degree of window vertex wl[pick] after eliminating
+# the `subset` of window vertices (fill closure inside the window), on
+# bitset rows. Typed kernel for the same reason as ssi_counts_kernel.
+-> ssi_window_state_degree(adj, alive, scratch, words, wl, kwin, subset, pick) (u32[] u32[] u32[] i64 u32[] i64 i64 i64) i64
+  full = 4294967295
+  v = wl[pick]
+  vbase = v * words
+  wi = 0
+  while wi < words
+    scratch[wi] = adj[vbase + wi] & alive[wi]
+    wi += 1
+  reach = 0
+  t = 0
+  while t < kwin
+    bit = 1 << t
+    if (subset & bit) != 0
+      u = wl[t]
+      if (scratch[u >> 5] & (1 << (u & 31))) != 0
+        reach = reach | bit
+    t += 1
+  old_reach = 0 - 1
+  while old_reach != reach
+    old_reach = reach
+    t = 0
+    while t < kwin
+      if (reach & (1 << t)) != 0
+        u = wl[t]
+        ubase = u * words
+        t2 = 0
+        while t2 < kwin
+          bit2 = 1 << t2
+          if (subset & bit2) != 0 && (reach & bit2) == 0
+            x = wl[t2]
+            if (adj[ubase + (x >> 5)] & (1 << (x & 31))) != 0
+              reach = reach | bit2
+          t2 += 1
+      t += 1
+  t = 0
+  while t < kwin
+    if (reach & (1 << t)) != 0
+      u = wl[t]
+      ubase = u * words
+      wi = 0
+      while wi < words
+        scratch[wi] = scratch[wi] | (adj[ubase + wi] & alive[wi])
+        wi += 1
+    t += 1
+  t = 0
+  while t < kwin
+    if (subset & (1 << t)) != 0
+      u = wl[t]
+      scratch[u >> 5] = scratch[u >> 5] & (full ^ (1 << (u & 31)))
+    t += 1
+  scratch[v >> 5] = scratch[v >> 5] & (full ^ (1 << (v & 31)))
+  degree = 0
+  wi = 0
+  while wi < words
+    degree += ccall_nobox("__w_bit_ctpop_u32", scratch[wi])
+    wi += 1
+  degree
+
 + SparsePattern
   # Structure-only, square-or-rectangular, from parallel COO index lists.
   # The i32 buffers are built here and never mutated afterwards.
@@ -155,9 +309,6 @@ use core/sparse_core_lift
   # reads these buffers directly and therefore allocates nothing here.
   -> counts_under_cached(perm)
     n = @pattern.rows
-    none = 4294967295
-    ri = @fri
-    ci = @fci
     m = @pattern.nnz
     # scratch reused across calls (counts_under runs once per candidate
     # score — the anneal/descent arms call it 10^5 times per matrix)
@@ -169,87 +320,13 @@ use core/sparse_core_lift
       @cu_mark = u32[n]
       @cu_parent = u32[n]
       @cu_counts = u32[n]
-    rows = @cu_rows
-    i = 0
-    while i < n
-      rows[i] = 0
-      i += 1
-    k = 0
-    while k < m
-      a = ri[k]
-      b = ci[k]
-      if perm != nil
-        a = perm[a]
-        b = perm[b]
-      if a > b
-        rows[a] = rows[a] + 1
-      elsif b > a
-        rows[b] = rows[b] + 1
-      k += 1
-    ptr = @cu_ptr
-    run = 0
-    i = 0
-    while i < n
-      ptr[i] = run
-      run += rows[i]
-      rows[i] = 0
-      i += 1
-    ptr[n] = run
-    idx = @cu_idx
-    k = 0
-    while k < m
-      a = ri[k]
-      b = ci[k]
-      if perm != nil
-        a = perm[a]
-        b = perm[b]
-      if a > b
-        idx[ptr[a] + rows[a]] = b
-        rows[a] = rows[a] + 1
-      elsif b > a
-        idx[ptr[b] + rows[b]] = a
-        rows[b] = rows[b] + 1
-      k += 1
-    parent = @cu_parent
-    ancestor = @cu_anc
-    i = 0
-    while i < n
-      parent[i] = none
-      ancestor[i] = none
-      i += 1
-    i = 0
-    while i < n
-      p = ptr[i]
-      stop = ptr[i + 1]
-      while p < stop
-        r = idx[p]
-        while r != none && r != i
-          nxt = ancestor[r]
-          ancestor[r] = i
-          parent[r] = i if parent[r] == none
-          r = nxt
-        p += 1
-      i += 1
-    counts = @cu_counts
-    mark = @cu_mark
-    i = 0
-    while i < n
-      counts[i] = 1
-      mark[i] = 0
-      i += 1
-    i = 0
-    while i < n
-      mark[i] = i + 1
-      p = ptr[i]
-      stop = ptr[i + 1]
-      while p < stop
-        r = idx[p]
-        while r != none && mark[r] != i + 1
-          counts[r] = counts[r] + 1
-          mark[r] = i + 1
-          r = parent[r]
-        p += 1
-      i += 1
+      @cu_noperm = u32[1]
+    # the whole kernel runs in a typed-signature function: arrays loaded
+    # from ivars have no static type here, and every read would dispatch
+    if perm == nil
+      ssi_counts_kernel(@cu_noperm, 0, @fri, @fci, @cu_rows, @cu_ptr, @cu_idx, @cu_parent, @cu_anc, @cu_counts, @cu_mark, n, m)
+    else
+      ssi_counts_kernel(perm, 1, @fri, @fci, @cu_rows, @cu_ptr, @cu_idx, @cu_parent, @cu_anc, @cu_counts, @cu_mark, n, m)
     nil
 
   # Public owned-result API. Each call returns fresh parent/count buffers, so
@@ -5116,64 +5193,6 @@ use core/sparse_core_lift
   # internal vertices are in S.  Starting from N(pick), close through the
   # eliminated window vertices, union their rows, then remove S and pick.
   # `scratch` is caller-owned and overwritten completely.
-  -> .window_state_degree(adj, alive, scratch, words, wl, kwin, subset, pick)
-    full = 4294967295
-    v = wl[pick]
-    vbase = v * words
-    wi = 0
-    while wi < words
-      scratch[wi] = adj[vbase + wi] & alive[wi]
-      wi += 1
-    reach = 0
-    t = 0
-    while t < kwin
-      bit = 1 << t
-      if (subset & bit) != 0
-        u = wl[t]
-        if (scratch[u >> 5] & (1 << (u & 31))) != 0
-          reach = reach | bit
-      t += 1
-    old_reach = 0 - 1
-    while old_reach != reach
-      old_reach = reach
-      t = 0
-      while t < kwin
-        if (reach & (1 << t)) != 0
-          u = wl[t]
-          ubase = u * words
-          t2 = 0
-          while t2 < kwin
-            bit2 = 1 << t2
-            if (subset & bit2) != 0 && (reach & bit2) == 0
-              x = wl[t2]
-              if (adj[ubase + (x >> 5)] & (1 << (x & 31))) != 0
-                reach = reach | bit2
-            t2 += 1
-        t += 1
-    t = 0
-    while t < kwin
-      if (reach & (1 << t)) != 0
-        u = wl[t]
-        ubase = u * words
-        wi = 0
-        while wi < words
-          scratch[wi] = scratch[wi] | (adj[ubase + wi] & alive[wi])
-          wi += 1
-      t += 1
-    t = 0
-    while t < kwin
-      if (subset & (1 << t)) != 0
-        u = wl[t]
-        scratch[u >> 5] = scratch[u >> 5] & (full ^ (1 << (u & 31)))
-      t += 1
-    scratch[v >> 5] = scratch[v >> 5] & (full ^ (1 << (v & 31)))
-    degree = 0
-    wi = 0
-    while wi < words
-      degree += ccall_nobox("__w_bit_ctpop_u32", scratch[wi])
-      wi += 1
-    degree
-
   # WINDOW-DP: exact minimum-Σc² over sliding windows of K consecutive
   # positions of the incumbent. The elimination state before the window
   # is replayed once on bitset rows; a subset DP over the K window
@@ -5232,25 +5251,25 @@ use core/sparse_core_lift
       while pos + kwin <= n && ops < budget
         # DP over the kwin vertices at positions pos..pos+kwin-1
         # snapshot rows of the window vertices
-        wl = []
+        wl = u32[kwin]
         t = 0
         while t < kwin
-          wl.push(cur[pos + t])
+          wl[t] = cur[pos + t]
           t += 1
         s2 = 1
         dpc[0] = 0
         while s2 < nstates
-          dpc[s2] = 4611686018427387903
+          dpc[s2] = 70368744177664
           s2 += 1
         s2 = 0
         while s2 < nstates
-          if dpc[s2] < 4611686018427387903
+          if dpc[s2] < 70368744177664
             t = 0
             while t < kwin
               bit = 1 << t
               if (s2 & bit) == 0
                 v = wl[t]
-                d = SparseAnalysis.window_state_degree(
+                d = ssi_window_state_degree(
                   adj, alive, nb, words, wl, kwin, s2, t)
                 ops += words * (kwin + 1) + kwin * kwin
                 cc = d + 1
@@ -5266,7 +5285,7 @@ use core/sparse_core_lift
         s2 = 0
         t = 0
         while t < kwin
-          d = SparseAnalysis.window_state_degree(
+          d = ssi_window_state_degree(
             adj, alive, nb, words, wl, kwin, s2, t)
           cc = d + 1
           inc_cost += cc * cc
@@ -6042,13 +6061,17 @@ use core/sparse_core_lift
   # (seed_order, stream). Returns [best_order, best_flops].
   -> order_descent(order_in, flops_in, budget_scores, stream, perturb = 1)
     n = @pattern.rows
-    cur = []
+    cur = u32[n]
     i = 0
     while i < n
-      cur.push(order_in[i])
+      cur[i] = order_in[i]
       i += 1
     cur_f = flops_in
-    best = cur
+    best = u32[n]
+    i = 0
+    while i < n
+      best[i] = cur[i]
+      i += 1
     best_f = cur_f
     scores = 0
     state = (48271 + stream * 8191) % 2147483646 + 1
@@ -6060,7 +6083,7 @@ use core/sparse_core_lift
         t = cur[i]
         cur[i] = cur[i + 1]
         cur[i + 1] = t
-        f = flops_for_order(cur)
+        f = flops_for_typed_order(cur)
         scores += 1
         if f < cur_f
           cur_f = f
@@ -6072,18 +6095,16 @@ use core/sparse_core_lift
         i += 1
       if cur_f < best_f
         best_f = cur_f
-        best = []
         i = 0
         while i < n
-          best.push(cur[i])
+          best[i] = cur[i]
           i += 1
       if !improved
         break if perturb == 0
         # perturb: reverse a random segment, restart the sweep from best
-        cur = []
         i = 0
         while i < n
-          cur.push(best[i])
+          cur[i] = best[i]
           i += 1
         state = (state * 48271) % 2147483647
         a = state % n
@@ -6097,7 +6118,7 @@ use core/sparse_core_lift
           cur[b] = t
           a += 1
           b -= 1
-        cur_f = flops_for_order(cur)
+        cur_f = flops_for_typed_order(cur)
         scores += 1
     [best, best_f]
 
@@ -6126,13 +6147,17 @@ use core/sparse_core_lift
 
   -> anneal_refine(order_in, flops_in, budget_scores, stream)
     n = @pattern.rows
-    cur = []
+    cur = u32[n]
     i = 0
     while i < n
-      cur.push(order_in[i])
+      cur[i] = order_in[i]
       i += 1
     cur_f = flops_in
-    best = order_in
+    best = u32[n]
+    i = 0
+    while i < n
+      best[i] = order_in[i]
+      i += 1
     best_f = flops_in
     t0i = flops_in / 40
     state = (77551 + stream * 12289) % 2147483646 + 1
@@ -6179,16 +6204,15 @@ use core/sparse_core_lift
           cur[hi] = t
           lo += 1
           hi -= 1
-      f = flops_for_order(cur)
+      f = flops_for_typed_order(cur)
       scores += 1
       if f <= cur_f + tt
         cur_f = f
         if f < best_f
           best_f = f
-          best = []
           i = 0
           while i < n
-            best.push(cur[i])
+            best[i] = cur[i]
             i += 1
       else
         # revert: inverse relocate (b -> a) or re-reverse the segment
@@ -7298,6 +7322,18 @@ use core/sparse_core_lift
     return 0 if @pattern.rows == 0
     @score_lock.synchronize ->
       score_order_cached(order)
+      ccall("__w_u32_flops", @cu_counts)
+
+  # Same objective for a u32-typed order: the perm build runs in a typed
+  # kernel instead of n dynamic dispatches (anneal/descent call this 10^5
+  # times per matrix).
+  -> flops_for_typed_order(order)
+    n = @pattern.rows
+    return 0 if n == 0
+    @pf_perm = u32[n] if @pf_perm == nil
+    @score_lock.synchronize ->
+      ssi_build_perm(order, @pf_perm, n)
+      counts_under_cached(@pf_perm)
       ccall("__w_u32_flops", @cu_counts)
 
   # Exact cost of an order prefix while the suffix remains live. Used by

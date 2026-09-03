@@ -117,8 +117,20 @@
       pos += 1
     pos
 
+  # `view` is a BORROWED u8[] over the input: indexing at or past n reads
+  # unrelated heap memory, so every structural read below is bounds-checked
+  # and malformed input raises instead of walking off the end. (Truncated
+  # documents used to spin in the object/array loops or return garbage,
+  # depending on what happened to follow the string in memory.)
+  -> .lit_check_b(s, view, n, pos, word)
+    if pos + word.size() > n || s.slice(pos, word.size()) != word
+      raise "JSON.parse: invalid literal at byte " + pos.to_s
+    true
+
   -> .parse_value_b(s, view, n, pos)
     pos = skip_ws_b(view, n, pos)
+    if pos >= n
+      raise "JSON.parse: unexpected end of input"
     b = view[pos]
 
     if b == 34
@@ -128,10 +140,13 @@
     if b == 91
       return parse_array_b(s, view, n, pos)
     if b == 116
+      lit_check_b(s, view, n, pos, "true")
       return [true, pos + 4]
     if b == 102
+      lit_check_b(s, view, n, pos, "false")
       return [false, pos + 5]
     if b == 110
+      lit_check_b(s, view, n, pos, "null")
       return [nil, pos + 4]
 
     # Number
@@ -164,6 +179,8 @@
         if p > run_start
           out << s.slice(run_start, p - run_start)
         p += 1
+        if p >= n
+          raise "JSON.parse: unterminated string escape"
         esc = view[p]
         if esc == 110
           out << "\n"
@@ -183,20 +200,38 @@
         run_start = p
       else
         p += 1
-    if p > run_start
-      out << s.slice(run_start, p - run_start)
-    [out.to_s, p]
+    raise "JSON.parse: unterminated string"
 
+  # Always consumes at least one digit, so a caller's element loop cannot
+  # spin on a byte that is not a number at all.
   -> .parse_number_b(s, view, n, pos)
     start = pos
-    if view[pos] == 45
+    if pos < n && view[pos] == 45
       pos += 1
+    first_digit = pos
     while pos < n && view[pos] >= 48 && view[pos] <= 57
       pos += 1
+    if pos == first_digit
+      raise "JSON.parse: unexpected byte at " + start.to_s
+    is_float = false
     if pos < n && view[pos] == 46
+      is_float = true
       pos += 1
       while pos < n && view[pos] >= 48 && view[pos] <= 57
         pos += 1
+    # Exponent (1e5 / 2.5E-3): without this the digits after `e` were parsed
+    # as separate array/object elements, silently corrupting the value.
+    if pos < n && (view[pos] == 101 || view[pos] == 69)
+      is_float = true
+      pos += 1
+      if pos < n && (view[pos] == 43 || view[pos] == 45)
+        pos += 1
+      exp_digit = pos
+      while pos < n && view[pos] >= 48 && view[pos] <= 57
+        pos += 1
+      if pos == exp_digit
+        raise "JSON.parse: malformed exponent at byte " + start.to_s
+    if is_float
       return [s.slice(start, pos - start).to_f, pos]
     [s.slice(start, pos - start).to_i, pos]
 
@@ -204,21 +239,31 @@
     pos += 1  # skip {
     result = {}
     pos = skip_ws_b(view, n, pos)
+    if pos >= n
+      raise "JSON.parse: unterminated object"
     if view[pos] == 125
       return [result, pos + 1]
     while true
       pos = skip_ws_b(view, n, pos)
+      if pos >= n || view[pos] != 34
+        raise "JSON.parse: expected a string key in object at byte " + pos.to_s
       key_result = parse_string_b(s, view, n, pos)
       key = key_result[0]
       pos = key_result[1]
       pos = skip_ws_b(view, n, pos)
+      if pos >= n || view[pos] != 58
+        raise "JSON.parse: expected ':' in object at byte " + pos.to_s
       pos += 1  # skip :
       val_result = parse_value_b(s, view, n, pos)
       result[key] = val_result[0]
       pos = val_result[1]
       pos = skip_ws_b(view, n, pos)
+      if pos >= n
+        raise "JSON.parse: unterminated object"
       if view[pos] == 125
         return [result, pos + 1]
+      if view[pos] != 44
+        raise "JSON.parse: expected ',' or '}' in object at byte " + pos.to_s
       pos += 1  # skip ,
     [result, pos]
 
@@ -226,6 +271,8 @@
     pos += 1  # skip [
     result = []
     pos = skip_ws_b(view, n, pos)
+    if pos >= n
+      raise "JSON.parse: unterminated array"
     if view[pos] == 93
       return [result, pos + 1]
     while true
@@ -233,7 +280,11 @@
       result.push(val_result[0])
       pos = val_result[1]
       pos = skip_ws_b(view, n, pos)
+      if pos >= n
+        raise "JSON.parse: unterminated array"
       if view[pos] == 93
         return [result, pos + 1]
+      if view[pos] != 44
+        raise "JSON.parse: expected ',' or ']' in array at byte " + pos.to_s
       pos += 1  # skip ,
     [result, pos]

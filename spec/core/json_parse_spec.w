@@ -63,3 +63,45 @@ check("escape.embedded_quote", esc["k"] == "a\"b")
 # --- round trip --------------------------------------------------------------
 rt = JSON.parse(JSON.encode({x: 1}))
 check("roundtrip.object", rt["x"] == 1)
+
+# --- malformed input must RAISE, never read past the end ---------------------
+# Regression: `view` is a BORROWED u8[] over the input, and every structural
+# read (`view[pos]` after skip_ws_b, the `while true` element loops, the
+# true/false/null literals, the escape byte) indexed it without a bounds
+# check. Truncated JSON walked off the end into unrelated heap memory: it
+# hung in the element loop or "parsed" garbage, depending on what happened to
+# follow the string. A malformed HTTP request body could hang or kill any
+# server built on this parser. parse_number_b also consumed zero bytes on a
+# non-numeric byte, so the enclosing loop could never terminate.
+-> raises?(body)
+  ok = 1
+  begin
+    JSON.parse(body)
+  rescue e
+    ok = 0
+  ok == 0
+
+check("bad.truncated_nested", raises?("{\"messages\": \[broken"))
+check("bad.truncated_object", raises?("{\"a\":"))
+check("bad.truncated_array", raises?("\[1,2"))
+check("bad.garbage", raises?("not json"))
+check("bad.unterminated_string", raises?("{\"a\": \"abc"))
+check("bad.trailing_backslash", raises?("{\"a\": \"abc\\"))
+check("bad.bare_open_brace", raises?("{"))
+check("bad.bare_open_bracket", raises?("\["))
+check("bad.missing_colon", raises?("{\"a\" 1}"))
+check("bad.missing_comma", raises?("{\"a\":1 \"b\":2}"))
+check("bad.non_string_key", raises?("{1:2}"))
+check("bad.short_literal", raises?("\[tru\]"))
+check("bad.empty_input", raises?(""))
+check("bad.whitespace_only", raises?("   "))
+check("bad.lone_minus", raises?("\[-\]"))
+
+# --- exponents ---------------------------------------------------------------
+# Were parsed as separate elements ("1e5" -> 1, then 5), silently corrupting
+# the document. Now consumed as one number.
+ex = JSON.parse("\[1e5,2.5E-3,-4e+2\]")
+check("num.exp.size", ex.size() == 3)
+check("num.exp.plain", ex[0] == ~100000.0)
+check("num.exp.negative", ex[1] > ~0.0024 && ex[1] < ~0.0026)
+check("num.exp.signed", ex[2] == ~-400.0)

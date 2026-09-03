@@ -24942,6 +24942,27 @@
       ]
     },
     {
+      "symbol": "w_metal4_allocator_reset",
+      "native": {
+        "symbol": "w_metal4_allocator_reset",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 1,
+        "source": "runtime/metal.m"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
       "symbol": "w_metal4_argtable_new",
       "native": {
         "symbol": "w_metal4_argtable_new",
@@ -25052,6 +25073,76 @@
         ],
         "arity": 3,
         "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
+      "symbol": "w_metal4_batch_run",
+      "native": {
+        "symbol": "w_metal4_batch_run",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 3,
+        "source": "runtime/metal.m"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
+      "symbol": "w_metal4_batch_run_chained",
+      "native": {
+        "symbol": "w_metal4_batch_run_chained",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 6,
+        "source": "runtime/metal.m"
       },
       "call_modes": [
         "ccall"
@@ -25185,6 +25276,35 @@
       ]
     },
     {
+      "symbol": "w_metal4_program_exec",
+      "native": {
+        "symbol": "w_metal4_program_exec",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 3,
+        "source": "runtime/metal.m"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
       "symbol": "w_metal4_queue_new",
       "native": {
         "symbol": "w_metal4_queue_new",
@@ -25200,6 +25320,31 @@
         ],
         "arity": 1,
         "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
+      "symbol": "w_metal4_residency_attach",
+      "native": {
+        "symbol": "w_metal4_residency_attach",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 2,
+        "source": "runtime/metal.m"
       },
       "call_modes": [
         "ccall"
@@ -25294,6 +25439,35 @@
       ]
     },
     {
+      "symbol": "w_metal_batch_begin_concurrent_wait",
+      "native": {
+        "symbol": "w_metal_batch_begin_concurrent_wait",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 3,
+        "source": "runtime/metal.m"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
       "symbol": "w_metal_batch_commit",
       "native": {
         "symbol": "w_metal_batch_commit",
@@ -25329,6 +25503,35 @@
           }
         ],
         "arity": 1,
+        "source": "runtime/metal.m"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
+      "symbol": "w_metal_batch_commit_async_signal",
+      "native": {
+        "symbol": "w_metal_batch_commit_async_signal",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 3,
         "source": "runtime/metal.m"
       },
       "call_modes": [
@@ -26115,6 +26318,56 @@
           }
         ],
         "arity": 4,
+        "source": "runtime/metal.m"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
+      "symbol": "w_metal_event_new",
+      "native": {
+        "symbol": "w_metal_event_new",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 1,
+        "source": "runtime/metal.m"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
+      "symbol": "w_metal_event_wait",
+      "native": {
+        "symbol": "w_metal_event_wait",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 3,
         "source": "runtime/metal.m"
       },
       "call_modes": [

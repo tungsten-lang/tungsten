@@ -63409,6 +63409,12 @@ static int w_fd_set_nonblocking(int fd) {
 
 WValue w_socket_tcp_listen(const char *host, int port, int backlog) {
     w_sandbox_gate("socket_listen", host);
+    /* A server must never be killed by a client hanging up. SO_NOSIGPIPE on
+     * the accepted fd covers Darwin/BSD; it does not exist on Linux, where
+     * write(2) has no MSG_NOSIGNAL equivalent, so a process that listens also
+     * ignores SIGPIPE outright. w_socket_write already treats EPIPE as a short
+     * write, which is what callers then see. */
+    signal(SIGPIPE, SIG_IGN);
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) {
         w_raise(w_string("socket: creation failed"));
@@ -63482,6 +63488,17 @@ WValue w_socket_accept(WValue listener) {
             }
             int nodelay = 1;
             setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
+            /* Writing to a peer that has hung up must return EPIPE, not kill
+             * the process with SIGPIPE. w_socket_connect already sets this on
+             * outbound sockets; without it here, any hand-rolled accept loop
+             * (Socket.listen/accept/write — the only way to stream a response,
+             * since serve_http hands handlers just the path) dies the first
+             * time a client disconnects mid-response. serve_http's own path
+             * papered over this with a process-wide signal(SIGPIPE, SIG_IGN)
+             * that a plain accept loop never reaches. */
+#ifdef SO_NOSIGPIPE
+            setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &nodelay, sizeof(nodelay));
+#endif
 
             WSocket *conn = calloc(1, sizeof(WSocket));
             conn->type = W_TYPE_SOCKET;

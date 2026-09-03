@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(579 total), grouped by area, with its declaration, a one-line
+(597 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -124,6 +124,16 @@ summary from the source header, and a link to the source.
 | `PlaneSymmetry` | `+ PlaneSymmetry` | The symmetry types a repeating plane pattern can have. | [`core/geometry/plane_symmetry.w`](../core/geometry/plane_symmetry.w) |
 | `WallpaperGroup` | `+ WallpaperGroup` | The wallpaper groups as actual groups, not just names. | [`core/geometry/wallpaper_group.w`](../core/geometry/wallpaper_group.w) |
 | `PolyominoPacking` | `+ PolyominoPacking` | Minimum-area rectangle packing of polyominoes, solved exactly. | [`core/geometry/polyomino_packing.w`](../core/geometry/polyomino_packing.w) |
+| `TilingGrid` | `+ TilingGrid` | Polyform grids for tiling theory: the square, hexagonal and triangular | [`core/geometry/tiling/grid.w`](../core/geometry/tiling/grid.w) |
+| `Polyform` | `+ Polyform` | A polyform: a finite, edge-connected set of cells of one of the tiling | [`core/geometry/tiling/polyform.w`](../core/geometry/tiling/polyform.w) |
+| `Corona` | `+ Corona` | Coronas and Heesch numbers. | [`core/geometry/tiling/corona.w`](../core/geometry/tiling/corona.w) |
+| `HoleFreeCoverSearch` | `+ HoleFreeCoverSearch` | The hole-pruned corona search behind `Corona.each_hole_free_cover`. | [`core/geometry/tiling/corona.w`](../core/geometry/tiling/corona.w) |
+| `HeeschNumber` | `+ HeeschNumber` | Heesch numbers by depth-first search over hole-free patches. Each node | [`core/geometry/tiling/corona.w`](../core/geometry/tiling/corona.w) |
+| `CoronaWitness` | `+ CoronaWitness` | Witness patches in heesch-sat's text format: | [`core/geometry/tiling/corona.w`](../core/geometry/tiling/corona.w) |
+| `BoundaryWord` | `+ BoundaryWord` | Boundary words and the classical sufficient conditions for tiling. | [`core/geometry/tiling/criteria.w`](../core/geometry/tiling/criteria.w) |
+| `TilingCriteria` | `+ TilingCriteria` | The factorization criteria on a cyclic direction word: `translation?` is | [`core/geometry/tiling/criteria.w`](../core/geometry/tiling/criteria.w) |
+| `PeriodicTiling` | `+ PeriodicTiling` | Periodic tilings, found constructively on a torus. | [`core/geometry/tiling/periodic.w`](../core/geometry/tiling/periodic.w) |
+| `CoronaCnf` | `+ CoronaCnf` | CNF encodings of corona questions, for an external SAT solver. | [`core/geometry/tiling/cnf.w`](../core/geometry/tiling/cnf.w) |
 | `Chart` | — | — | [`core/geometry.w`](../core/geometry.w) |
 | `TensorIndex` | — | — | [`core/geometry.w`](../core/geometry.w) |
 | `TensorField` | — | — | [`core/geometry.w`](../core/geometry.w) |
@@ -180,7 +190,7 @@ summary from the source header, and a link to the source.
 | `ProofArtifactBundle` | `+ ProofArtifactBundle` | — | [`core/proof_artifact.w`](../core/proof_artifact.w) |
 | `Sparse` | `+ Sparse` | Module-level alias so `Sparse.eye` still works as a short name. | [`core/sparse.w`](../core/sparse.w) |
 | `SparseMatrix` | `+ SparseMatrix` | — | [`core/sparse.w`](../core/sparse.w) |
-| `SparsePattern` | `+ SparsePattern` | Sparse pattern / analysis / factor separation. | [`core/sparse_factor.w`](../core/sparse_factor.w) |
+| `SparsePattern` | `+ SparsePattern` | — | [`core/sparse_factor.w`](../core/sparse_factor.w) |
 | `SparseAnalysis` | `+ SparseAnalysis` | — | [`core/sparse_factor.w`](../core/sparse_factor.w) |
 | `SparseFactor` | `+ SparseFactor` | — | [`core/sparse_factor.w`](../core/sparse_factor.w) |
 | `SparseBlockFactor` | `+ SparseBlockFactor` | — | [`core/sparse_factor.w`](../core/sparse_factor.w) |
@@ -215,6 +225,7 @@ summary from the source header, and a link to the source.
 | `StringLines` | `+ StringLines` | — | [`core/string_enumerators.w`](../core/string_enumerators.w) |
 | `Symbol` | `+ Symbol` | — | [`core/symbol.w`](../core/symbol.w) |
 | `System` | `+ System` | — | [`core/system.w`](../core/system.w) |
+| `Table` | `+ Table` | — | [`core/table.w`](../core/table.w) |
 | `Thread` | `+ Thread` | Thread — a native OS thread (pthread). | [`core/thread.w`](../core/thread.w) |
 | `Timer` | `+ Timer` | Timer — monotonic one-shot and fixed-rate timers. | [`core/timer.w`](../core/timer.w) |
 | `TLS` | `+ TLS` | TLS — verified client and configured-server transport facade. | [`core/tls.w`](../core/tls.w) |
@@ -395,6 +406,11 @@ summary from the source header, and a link to the source.
 | `AffineChart` | — | — | [`core/algebra.w`](../core/algebra.w) |
 | `Curve` | — | — | [`core/algebra.w`](../core/algebra.w) |
 | `CAbCurveModel` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PadicSeriesRing` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PadicSeries` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PadicKernel` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `ColemanDisk` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `ColemanChabauty` | — | — | [`core/algebra.w`](../core/algebra.w) |
 | `CAbCurveModelCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
 | `CAbRiemannRochSpace` | — | — | [`core/algebra.w`](../core/algebra.w) |
 | `CAbRiemannRochSpaceCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
@@ -600,6 +616,8 @@ summary from the source header, and a link to the source.
 | Class | Defined as | Summary | Source |
 |-------|-----------|---------|--------|
 | `Comparable` | `trait Comparable` | Include in classes that implement <=> to get <, <=, >, >=, == | [`core/traits/comparable.w`](../core/traits/comparable.w) |
+| `BitOrdered` | `trait BitOrdered` | Include in classes whose values fit in a single i64 wvalue AND where the | [`core/traits/bit_ordered.w`](../core/traits/bit_ordered.w) |
+| `BitEqual` | `trait BitEqual` | Include in classes whose values fit in a single i64 wvalue (e.g. Date, | [`core/traits/bit_equal.w`](../core/traits/bit_equal.w) |
 | `Enumerable` | `trait Enumerable` | Include in classes that implement each(block) to get map, select, reduce, etc. | [`core/traits/enumerable.w`](../core/traits/enumerable.w) |
 | `Printable` | `trait Printable` | Include in classes that render a user-facing string via to_s. | [`core/traits/printable.w`](../core/traits/printable.w) |
 | `Inspectable` | `trait Inspectable` | Include in classes that render a developer-facing representation via | [`core/traits/inspectable.w`](../core/traits/inspectable.w) |

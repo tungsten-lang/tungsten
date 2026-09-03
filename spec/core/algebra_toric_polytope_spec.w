@@ -56,6 +56,8 @@ toric_check("triangle.facets", triangle.facet_count == 3)
 toric_check("triangle.count.3", triangle.lattice_point_count(3) == 10)
 toric_check("triangle.h_star", toric_same_vector?(triangle.h_star_coefficients, [1, 0, 0]))
 toric_check("triangle.normalized_volume", triangle.normalized_volume == 1)
+toric_check("triangle.ambient_normalized_volume",
+            triangle.ambient_normalized_volume == 1)
 
 horizontal = LatticePolytope.new([[0, 0], [1, 0]])
 vertical = LatticePolytope.new([[0, 0], [0, 1]])
@@ -65,6 +67,33 @@ toric_check("square.facets", square.facet_count == 4)
 toric_check("square.count.2", square.lattice_point_count(2) == 9)
 toric_check("square.h_star", toric_same_vector?(square.h_star_coefficients, [1, 1, 0]))
 toric_check("square.normalized_volume", square.normalized_volume == 2)
+toric_check("segment.ambient_volume.zero", horizontal.ambient_normalized_volume == 0)
+toric_check("square.ambient_normalized_volume",
+            square.ambient_normalized_volume == 2)
+toric_check("square.mixed_segments",
+            horizontal.normalized_mixed_volume(vertical) == 1)
+
+# Hull triangulation avoids Ehrhart box enumeration for large-coordinate
+# three-polytopes, and polarization retains lower-dimensional summands.
+large_tetrahedron = LatticePolytope.new([
+  [0, 0, 0], [1000000, 0, 0], [0, 2, 0], [0, 0, 3]])
+toric_check("large_tetrahedron.ambient_normalized_volume",
+            large_tetrahedron.ambient_normalized_volume == 6000000)
+unit_cube = LatticePolytope.new([
+  [0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0],
+  [0, 0, 1], [1, 0, 1], [0, 1, 1], [1, 1, 1]])
+toric_check("unit_cube.ambient_normalized_volume",
+            unit_cube.ambient_normalized_volume == 6)
+scaled_cube_with_face_point = LatticePolytope.new([
+  [0, 0, 0], [2, 0, 0], [0, 2, 0], [2, 2, 0], [1, 1, 0],
+  [0, 0, 2], [2, 0, 2], [0, 2, 2], [2, 2, 2]])
+toric_check("scaled_cube.coplanar_support_volume",
+            scaled_cube_with_face_point.ambient_normalized_volume == 48)
+x_segment = LatticePolytope.new([[0, 0, 0], [1, 0, 0]])
+y_segment = LatticePolytope.new([[0, 0, 0], [0, 1, 0]])
+z_segment = LatticePolytope.new([[0, 0, 0], [0, 0, 1]])
+toric_check("cube.mixed_coordinate_segments",
+            x_segment.normalized_mixed_volume(y_segment, z_segment) == 1)
 
 # Homogeneous supports live in a proper affine hyperplane of the ambient
 # lattice.  The exact affine dimension and Ehrhart data must be intrinsic.

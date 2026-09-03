@@ -209,6 +209,8 @@ use core/algebra/polynomial
     @vertices = []
     hull[1].each -> @vertices.push(
       LatticeCombinatorics.copy_vector(@support_points[item]))
+    @triangulated_facets = hull[2]
+    @intrinsic_interior = hull[3]
     @h_star = nil
     @lattice_points_cache = {}
     @codegree_cache = {}
@@ -343,7 +345,7 @@ use core/algebra/polynomial
   # public facet list below merges coplanar simplices by primitive equation.
   -> incremental_hull
     if @affine_dimension == 0
-      return [[], [0]]
+      return [[], [0], [], []]
     simplex = initial_simplex_indices
     interior = []
     coordinate = 0
@@ -423,7 +425,7 @@ use core/algebra/polynomial
         facets.push([facet[1], facet[2]])
       facet[0].each -> vertex_seen[item.to_s] = item
     vertex_indices = vertex_seen.values.sort
-    [facets, vertex_indices]
+    [facets, vertex_indices, triangulated, interior]
 
   -> primitive_facets
     out = []
@@ -667,6 +669,69 @@ use core/algebra/polynomial
     total = 0
     h_star_coefficients(box_limit).each -> total += item
     total
+
+  # Exact full-dimensional normalized volume from the triangulated boundary
+  # already produced by the beneath--beyond hull.  Unlike the Ehrhart path
+  # above, this does not enumerate a coordinate box, so it remains practical
+  # for sparse polytopes with very large coordinates.  Lower-dimensional
+  # polytopes have zero volume in their ambient lattice, as required by mixed
+  # volume polarization.
+  -> ambient_normalized_volume
+    return 0 if @affine_dimension < @ambient_dimension
+    return 1 if @ambient_dimension == 0
+    if !@saturated_projection
+      raise "ambient normalized volume needs a saturated lattice chart"
+    total = Rational.new(0)
+    @triangulated_facets.each -> (facet)
+      matrix = []
+      facet[0].each -> (point_index)
+        row = []
+        coordinate = 0
+        while coordinate < @affine_dimension
+          row.push(Rational.new(@projected_points[point_index][coordinate]) -
+                   @intrinsic_interior[coordinate])
+          coordinate += 1
+        matrix.push(row)
+      total += Algebra.determinant(matrix).abs
+    if total.denominator != 1
+      raise "triangulated normalized volume was not integral"
+    total.numerator
+
+  # The normalized mixed volume of exactly d lattice polytopes in a common
+  # d-dimensional ambient lattice.  Polarization uses ambient volumes, so
+  # segments and other lower-dimensional summands are handled correctly.
+  -> normalized_mixed_volume(*others)
+    polytopes = [self] + others
+    dimension = @ambient_dimension
+    if polytopes.size != dimension
+      raise "normalized mixed volume needs one summand per ambient dimension"
+    polytopes.each -> (polytope)
+      compatible = polytope.respond_to?("ambient_dimension")
+      compatible = false if compatible && polytope.ambient_dimension != dimension
+      if !compatible
+        raise "mixed-volume summands have different ambient dimensions"
+    total = 0 ## BigInt
+    subset = 1
+    limit = 1 << dimension
+    while subset < limit
+      sum = nil
+      count = 0
+      index = 0
+      while index < dimension
+        if (subset & (1 << index)) != 0
+          count += 1
+          sum = sum == nil ? polytopes[index] : sum.minkowski_sum(polytopes[index])
+        index += 1
+      value = sum.ambient_normalized_volume
+      if (dimension - count) % 2 == 0
+        total += value
+      else
+        total -= value
+      subset += 1
+    divisor = dimension.factorial
+    if total % divisor != 0
+      raise "normalized mixed-volume polarization was not integral"
+    total / divisor
 
   -> volume(box_limit = 5_000_000)
     Rational.new(normalized_volume(box_limit), @affine_dimension.factorial)

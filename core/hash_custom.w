@@ -37,7 +37,9 @@
       i += 1
 
   -> hash(key) (string) i64
-    v = key
+    # Mix the key's WValue BITS (splitmix64), never the string value: the
+    # arithmetic below is machine-int, so start from the raw bits.
+    v = wvalue_bits(key)
     v = v ^ (v >> 30)
     v = v * 0xbf58476d1ce4e5b9
     v = v ^ (v >> 27)

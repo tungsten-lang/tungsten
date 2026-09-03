@@ -65,14 +65,14 @@
 
   -> .validate(cells)
     if cells.class_name != "Array" || cells.size == 0
-      raise "a polyomino needs a nonempty array of [x, y] cells"
+      raise "a polyomino needs a nonempty array of \[x, y] cells"
     seen = {}
     out = []
     i = 0
     while i < cells.size
       cell = cells[i]
       if cell.class_name != "Array" || cell.size != 2
-        raise "polyomino cell [i] must be a two-element [x, y] array"
+        raise "polyomino cell [i] must be a two-element \[x, y] array"
       x = cell[0]
       y = cell[1]
       if !Polyomino.integer?(x) || !Polyomino.integer?(y)

@@ -274,3 +274,62 @@
       out = out + ch
     i += 1
   out
+
+# ── Compile-time arity contracts ─────────────────────────────────────────
+# A call never pads or drops arguments silently: where lowering resolves the
+# callee statically (source functions, constructors, class statics, exact
+# receiver classes) the argument count is checked HERE, at compile time, so
+# dynamic dispatch pays nothing at runtime. Leading params with no default
+# that are not keyword/splat/block params are required; a splat, keyword,
+# or block param makes the maximum open-ended (nil) and such calls are not
+# max-checked. `-> name/N` arity-form defs carry N plain `__argN` params.
+# TUNGSTEN_ARITY=off is the triage kill switch (like TUNGSTEN_FREE=0).
+-> def_required_arg_count(node)
+  params = node.params
+  if params == nil
+    return 0
+  required = 0
+  i = 0
+  while i < params.size()
+    p = params[i]
+    if !is_ast_node?(p)
+      return required
+    if p.splat == true || p.keyword == true || p.block_param == true || p.default != nil
+      return required
+    required += 1
+    i += 1
+  required
+
+-> def_max_arg_count(node)
+  params = node.params
+  if params == nil
+    return 0
+  i = 0
+  while i < params.size()
+    p = params[i]
+    if is_ast_node?(p) && (p.splat == true || p.keyword == true || p.block_param == true)
+      return nil
+    i += 1
+  params.size()
+
+-> def_accepts_arg_count?(node, argc)
+  if argc < def_required_arg_count(node)
+    return false
+  maxc = def_max_arg_count(node)
+  maxc == nil || argc <= maxc
+
+-> arity_expected_display(required, maxc)
+  if maxc == nil
+    return "at least " + required.to_s() + " argument" + (required == 1 ? "" : "s")
+  if maxc == required
+    return required.to_s() + " argument" + (required == 1 ? "" : "s")
+  required.to_s() + ".." + maxc.to_s() + " arguments"
+
+-> check_static_call_arity(ctx, node, def_node, display_name, argc)
+  if env("TUNGSTEN_ARITY") == "off"
+    return nil
+  if def_accepts_arg_count?(def_node, argc)
+    return nil
+  required = def_required_arg_count(def_node)
+  maxc = def_max_arg_count(def_node)
+  raise compile_error_for_node(:E_LOWER_ARITY, display_name + " takes " + arity_expected_display(required, maxc) + ", got " + argc.to_s() + " — arguments are never silently dropped or padded; fix the call, or give the definition a default or `*rest` parameter", ctx[:source_path], node)

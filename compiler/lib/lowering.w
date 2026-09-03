@@ -16,12 +16,15 @@ use error_formatter
 use hashing
 # Cross-tower dependencies the workers reference through the flat
 # namespace: unit superscripts (ops.w's quantity desugar) live in the
-# lexer's unit registry, and the return-type fixed point calls
-# infer_return_type. In the full compiler both are loaded long before
+# lexer's unit registry, the return-type fixed point calls
+# infer_return_type, and core_cache.w's finalize step records its
+# function renames and hashes through content_hash's rename_map_* /
+# fn_hash_* tables. In the full compiler all three are loaded long before
 # this file (dedup no-ops); declared here so `use lib/lowering`
 # STANDALONE (compiler unit specs) is a complete program.
 use ../../languages/tungsten/lexers/known_units
 use return_inference
+use content_hash
 use lowering/pass_registry
 use lowering/signatures
 use lowering/types
@@ -307,6 +310,7 @@ use lowering/definitions
         mod[:block_method_names][expr.name] = true
       mod[:known_calls][call_key] = fn_name
       mod[:known_fn_param_counts][call_key] = param_count
+      mod[:known_fn_defs][call_key] = expr
       splat_index = method_splat_index(expr)
       if splat_index >= 0
         mod[:known_fn_splat_info][call_key] = {
@@ -721,9 +725,14 @@ use lowering/definitions
                   # feeds exact-ivar write analysis), but record the same
                   # plain ABI symbol in the independent devirtualization
                   # index so exact-class call sites can guard and call it.
-                  register_class_method(main_fn, mod, cname, vfname, 1)
-                  vgetter = Tungsten:AST:MethodDef.new(vfname, [], [])
-                  mod[:class_method_fn_names][cname + "." + vfname + "/0"] = class_method_function_name(cname, vgetter)
+                  # Fields that synthesize NO accessor (see
+                  # data_field_getter_body — a native class's pointer and
+                  # fixed-array fields) must be skipped here for the same
+                  # reason BigInt is: the symbol would never be emitted.
+                  if data_field_getter_body(cname, vfname, vd_layout[:fields][vdf][:type]) != nil
+                    register_class_method(main_fn, mod, cname, vfname, 1)
+                    vgetter = Tungsten:AST:MethodDef.new(vfname, [], [])
+                    mod[:class_method_fn_names][cname + "." + vfname + "/0"] = class_method_function_name(cname, vgetter)
                   vdf += 1
           mi2 += 1
     ci += 1

@@ -814,6 +814,7 @@
   # Register as known call with param count for nil-padding at call sites
   mod[:known_calls][call_key] = fn_name
   mod[:known_fn_param_counts][call_key] = param_names.size()
+  mod[:known_fn_defs][call_key] = node
   if node.param_types != nil
     mod[:known_fn_overloads][name] = true
 
@@ -1559,9 +1560,10 @@
           # Mirrors the interpreter suppression in
           # register_data_field_accessors.
           if class_name != "BigInt"
-            ivar = "@" + fname
-            getter = Tungsten:AST:MethodDef.new(fname, [], [Tungsten:AST:Ivar.new(ivar)])
-            lower_class_method(ctx, class_name, getter)
+            getter_body = data_field_getter_body(class_name, fname, vd_layout[:fields][df][:type])
+            if getter_body != nil
+              getter = Tungsten:AST:MethodDef.new(fname, [], [getter_body])
+              lower_class_method(ctx, class_name, getter)
           df += 1
     elsif ast_kind(expr) == :assign && expr.target != nil && ast_kind(expr.target) == :cvar
       # Class variable initialization (@@all = []) — runs at class definition time

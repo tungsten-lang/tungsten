@@ -693,8 +693,14 @@
   if ctx[:local_class_facts] == nil
     ctx[:local_class_facts] = {}
   fact = nil
+  ctor_cls = nil
   if node.value != nil && is_ast_node?(node.value) && ast_kind(node.value) == :call && node.value.name == "new" && node.value.receiver != nil && is_ast_node?(node.value.receiver)
     ctor_cls = ast_get(node.value.receiver, :name)
+  elsif node.value != nil && is_ast_node?(node.value) && ast_kind(node.value) == :call && node.value.receiver == nil && node.value.block == nil && ctx[:mod][:known_classes][node.value.name] != nil && ctx[:mod][:known_fn_param_counts][node.value.name] == nil
+    # Constructor sugar: `Point(3, 4)` ≡ `Point.new(3, 4)` (lower_call
+    # rewrites it the same way), so it proves the same exact class.
+    ctor_cls = node.value.name
+  if ctor_cls != nil
     if normal_source_instance_class?(ctx[:mod], ctor_cls)
       stable = false
       if ctx[:local_assignment_counts] != nil && ctx[:local_assignment_counts][name] == 1 && ctx[:straight_line_local_assignments] != nil && ctx[:straight_line_local_assignments][name] == true && source_constructor_returns_exact_class?(ctx[:mod], ctor_cls)

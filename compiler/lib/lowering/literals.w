@@ -26,8 +26,13 @@
   # i64: parse_*_int kept `val` as a correct BigInt, but the :raw_i64 path
   # below would truncate it to an i64 immediate (0xFFFFFFFFFFFFFFFF → -1).
   # Emit it from val's exact decimal text instead. Over-i64 *decimal* literals
-  # are handled by int_literal_exceeds_i64? above (their `val` wrapped).
-  if val > 9223372036854775807
+  # are handled by int_literal_exceeds_i64? above (their `val` wrapped), so
+  # this arm must stay off them: `-9223372036854775808` reaches lower_int
+  # through lower_unary_op's negate-the-literal fold, where `val` is the
+  # PROMOTED magnitude 0 - (-2^63) = +2^63 (boxed :int arithmetic promotes)
+  # while `raw` still spells the exact i64 minimum. Taking val's text there
+  # printed the literal positive; the decimal raw-text path below is exact.
+  if val > 9223372036854775807 && !decimal_int_literal?(node.raw)
     return lower_int_bigint_from_text(ctx, "" + val.to_s())
   if val > 140737488355327 || val < -140737488355328
     # Beyond i48: flow as :raw_i64 (checked box → BigInt). Prefer the
@@ -204,19 +209,40 @@
       expr_tv = lower_expression(ctx, part[1])
       expr_reg = ensure_i64_value(wfn, expr_tv)
       part_reg = next_temp(wfn)
-      emit_wire_call_direct_i64(wfn, nil, [expr_reg], nil, nil, "w_to_s", nil, nil, part_reg)
+      # An integer part stringifies through w_int_to_s, which mints an
+      # independent heap string per call (w_to_s may hand back its argument
+      # or a rope's cached flat, so its result can never be owned). That
+      # makes the part a fresh anonymous producer the concat below may
+      # release — `"[i]"` in a loop leaked one heap string per 6+ digit
+      # integer.
+      part_fresh = false
+      part_type = infer_type(part[1], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+      if is_integer_like_type(part_type)
+        emit_wire_call_direct_i64(wfn, nil, [expr_reg], nil, nil, "w_int_to_s", nil, nil, part_reg)
+        part_fresh = true
+      else
+        emit_wire_call_direct_i64(wfn, nil, [expr_reg], nil, nil, "w_to_s", nil, nil, part_reg)
     if result == nil
       result = part_reg
     else
       concat = next_temp(wfn)
-      # Chain links after the first concat: `result` is the PREVIOUS
-      # concat's temp — anonymous by construction (interpolation builds
-      # it; no user name exists) and consumed only here, so the freeing
-      # variant reclaims each intermediate of an N-part interpolation
-      # instead of leaking N-2 strings per evaluation.
+      # Owned operands: a chain link's `result` is the PREVIOUS concat's
+      # temp — anonymous by construction (interpolation builds it; no user
+      # name exists) and consumed only here — and a fresh integer part is
+      # likewise consumed only here. w_str_concat_own releases each owned
+      # heap operand after copying it out (flattening instead of building a
+      # rope past 61 bytes), so an N-part interpolation leaks nothing.
       # env gate: TUNGSTEN_FREE=0 must silence every compiler-inserted free.
-      cn = i >= 2 && result_is_chain && env("TUNGSTEN_FREE") != "0" ? "w_str_concat_free_lhs" : "w_str_concat"
-      emit_wire_call_direct_i64(wfn, nil, [result, part_reg], nil, nil, cn, nil, nil, concat)
+      own_mask = 0
+      if env("TUNGSTEN_FREE") != "0"
+        if i >= 2 && result_is_chain
+          own_mask += 1
+        if part_fresh
+          own_mask += 2
+      if own_mask != 0
+        emit_wire_call_direct_i64(wfn, nil, [result, part_reg, own_mask.to_s()], nil, nil, "w_str_concat_own", nil, nil, concat)
+      else
+        emit_wire_call_direct_i64(wfn, nil, [result, part_reg], nil, nil, "w_str_concat", nil, nil, concat)
       result = concat
       result_is_chain = true
     i += 1
@@ -504,8 +530,43 @@
 
 # -- Deep literal lowerings (domain types) --
 
+# A `~` literal keeps its SOURCE TEXT in the AST, and that text becomes the
+# LLVM operand of every `double` instruction it feeds. LLVM's assembler only
+# reads a token as floating point when the mantissa carries a decimal point:
+# `~5`, `~1e10` and `~1_000.5` would emit `bitcast double 5 to i64` (and
+# `1e10` / `1_000.5`), which clang rejects with "integer/byte constant must
+# have integer/byte type". Normalize the text here — the single place a float
+# literal enters WIRE — by dropping digit separators and giving the mantissa
+# an explicit fractional part, keeping any exponent. Texts that already have
+# one (`2.5`, `9.9999999999999995e-08`) pass through byte-for-byte.
+-> llvm_double_literal_text(src)
+  s = ""
+  i = 0
+  while i < src.size()
+    c = src[i]
+    if c != "_"
+      s = s + c
+    i += 1
+  mant = s
+  expo = ""
+  e_idx = s.index("e")
+  if e_idx == nil
+    e_idx = s.index("E")
+  if e_idx != nil
+    mant = s.slice(0, e_idx)
+    expo = s.slice(e_idx, s.size() - e_idx)
+  if mant.index(".") == nil
+    mant = mant + ".0"
+  elsif mant.slice(mant.size() - 1, 1) == "."
+    mant = mant + "0"
+  if mant.slice(0, 1) == "."
+    mant = "0" + mant
+  elsif mant.slice(0, 2) == "-."
+    mant = "-0" + mant.slice(1, mant.size() - 1)
+  mant + expo
+
 -> lower_float(ctx, node)
-  typed_value(:raw_f64, node.value.to_s())
+  typed_value(:raw_f64, llvm_double_literal_text(node.value.to_s()))
 
 -> lower_decimal(ctx, node)
   wfn = ctx[:func]

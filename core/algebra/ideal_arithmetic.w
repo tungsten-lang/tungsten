@@ -1350,7 +1350,7 @@
       if !invalid_factor
         invalid_factor = true if factor.size != 2
       if invalid_factor
-        raise "fractional ideal factor must be [prime, exponent]"
+        raise "fractional ideal factor must be \[prime, exponent]"
       prime_ideal = factor[0]
       exponent = factor[1]
       if prime_ideal.class_name != "AlgebraPrimeIdeal"

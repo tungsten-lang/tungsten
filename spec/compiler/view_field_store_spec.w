@@ -48,22 +48,22 @@ check("explicit receiver mutation preserves object", number == 1_000_000_000_000
 # Pin the LLVM shape for signed/unsigned 32-bit and signed/unsigned 64-bit
 # fields. Narrow stores return the post-truncation value with the declaration's
 # extension rule; 64-bit stores preserve all bits directly.
-i32_inst = {
+i32_inst = wire_instruction({
   op: :view_store_field, temp: "%signed", ptr: "%self", value: "%next",
   offset: 4, size: 4, field_type: "i32"
-}
-u32_inst = {
+})
+u32_inst = wire_instruction({
   op: :view_store_field, temp: "%unsigned", ptr: "%self", value: "%next",
   offset: 8, size: 4, field_type: "u32"
-}
-i64_inst = {
+})
+i64_inst = wire_instruction({
   op: :view_store_field, temp: "%wide.s", ptr: "%self", value: "%next",
   offset: 16, size: 8, field_type: "i64"
-}
-u64_inst = {
+})
+u64_inst = wire_instruction({
   op: :view_store_field, temp: "%wide.u", ptr: "%self", value: "%next",
   offset: 24, size: 8, field_type: "u64"
-}
+})
 
 i32_ir = render_instruction(i32_inst, nil, {}, nil, "")
 u32_ir = render_instruction(u32_inst, nil, {}, nil, "")
@@ -87,10 +87,10 @@ check("view store needs no runtime symbols", runtime_fns_for_inst(i32_inst).empt
 check("i128 is outside one-word store width", type_size("i128") > 8)
 i128_rejected = false
 begin
-  render_instruction({
+  render_instruction(wire_instruction({
     op: :view_store_field, temp: "%too.wide", ptr: "%self", value: "%next",
     offset: 32, size: 16, field_type: "i128"
-  }, nil, {}, nil, "")
+  }), nil, {}, nil, "")
 rescue error
   i128_rejected = error.to_s.include?("wider than 64 bits")
 check("emitter rejects i128 whole-field store", i128_rejected)

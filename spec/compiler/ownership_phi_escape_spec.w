@@ -18,81 +18,81 @@ func = {
     {
       label: "entry",
       instructions: [
-        {op: :const_float, temp: "%owned", value: "1.5"},
-        {op: :cond_br, cond: "%cond", then_label: "left", else_label: "right"}
+        wire_instruction({op: :const_float, temp: "%owned", value: "1.5"}),
+        wire_instruction({op: :cond_br, cond: "%cond", then_label: "left", else_label: "right"})
       ]
     },
     {
       label: "left",
       instructions: [
-        {op: :add_i64, temp: "%left", lhs: "1", rhs: "2"},
-        {op: :br, label: "join"}
+        wire_instruction({op: :add_i64, temp: "%left", lhs: "1", rhs: "2"}),
+        wire_instruction({op: :br, label: "join"})
       ]
     },
     {
       label: "right",
       instructions: [
-        {op: :add_i64, temp: "%right", lhs: "3", rhs: "4"},
-        {op: :br, label: "join"}
+        wire_instruction({op: :add_i64, temp: "%right", lhs: "3", rhs: "4"}),
+        wire_instruction({op: :br, label: "join"})
       ]
     },
     {
       label: "join",
       instructions: [
-        {
+        wire_instruction({
           op: :phi_ssa,
           temp: "%joined",
           incoming: ["%left", "left", "%right", "right"]
-        },
-        {op: :cond_br, cond: "%cond", then_label: "chain_left", else_label: "chain_right"}
+        }),
+        wire_instruction({op: :cond_br, cond: "%cond", then_label: "chain_left", else_label: "chain_right"})
       ]
     },
     {
       label: "chain_left",
       instructions: [
-        {op: :br, label: "chain_join"}
+        wire_instruction({op: :br, label: "chain_join"})
       ]
     },
     {
       label: "chain_right",
       instructions: [
-        {op: :add_i64, temp: "%late", lhs: "5", rhs: "6"},
-        {op: :br, label: "chain_join"}
+        wire_instruction({op: :add_i64, temp: "%late", lhs: "5", rhs: "6"}),
+        wire_instruction({op: :br, label: "chain_join"})
       ]
     },
     {
       label: "chain_join",
       instructions: [
-        {
+        wire_instruction({
           op: :phi_ssa,
           temp: "%chained",
           incoming: ["%joined", "chain_left", "%late", "chain_right"]
-        },
-        {op: :br, label: "loop_header"}
+        }),
+        wire_instruction({op: :br, label: "loop_header"})
       ]
     },
     {
       label: "loop_header",
       instructions: [
-        {
+        wire_instruction({
           op: :phi_ssa,
           temp: "%loop_value",
           incoming: ["%chained", "chain_join", "%loop_next", "loop_body"]
-        },
-        {op: :cond_br, cond: "%cond", then_label: "loop_body", else_label: "exit"}
+        }),
+        wire_instruction({op: :cond_br, cond: "%cond", then_label: "loop_body", else_label: "exit"})
       ]
     },
     {
       label: "loop_body",
       instructions: [
-        {op: :add_i64, temp: "%loop_next", lhs: "%loop_value", rhs: "1"},
-        {op: :br, label: "loop_header"}
+        wire_instruction({op: :add_i64, temp: "%loop_next", lhs: "%loop_value", rhs: "1"}),
+        wire_instruction({op: :br, label: "loop_header"})
       ]
     },
     {
       label: "exit",
       instructions: [
-        {op: :ret_i64, value: w_nil.to_s()}
+        wire_instruction({op: :ret_i64, value: w_nil.to_s()})
       ]
     }
   ]
@@ -126,21 +126,21 @@ func2 = {
     {
       label: "entry",
       instructions: [
-        {op: :call_direct_i64, temp: "%owned2", name: "w_hash_new", args: []},
-        {op: :phi_i64, temp: "%merged", a_value: "%pa", a_label: "left", b_value: "%pb", b_label: "right"},
-        {op: :store_cvar, cvar_key: "@@cache", value: "%cv"},
-        {op: :view_store_field, temp: "%vs", ptr: "%self", value: "%vf"},
-        {op: :store_memo_ptr, value: "%memo", global: "g"},
-        {op: :class_store, value: "%cls", class_name: "C"},
-        {op: :small_array_set_inline, temp: "%s1", arr: "%arr", idx: "0", value: "%sav"},
-        {op: :typed_array_set_inline, temp: "%s2", arr: "%arr", idx: "0", value: "%tav"},
-        {op: :typed_array_compound_op_inline, temp: "%s3", arr: "%arr", idx: "0", value: "%tcv"},
-        {op: :bool_array_set_inline, temp: "%s4", arr: "%arr", idx: "0", val: "%bav"},
-        {op: :bool_array_set_byte_inline, temp: "%s5", arr: "%arr", idx: "0", val: "%bbv"},
-        {op: :cleanup_push_hash, value: "%cph"},
-        {op: :call_recycle_hash, value: "%crh"},
-        {op: :call_direct_ptr, temp: "%p1", name: "w_x", args: ["%parg"]},
-        {op: :ret_i64, value: w_nil.to_s()}
+        wire_instruction({op: :call_direct_i64, temp: "%owned2", name: "w_hash_new", args: []}),
+        wire_instruction({op: :phi_i64, temp: "%merged", a_value: "%pa", a_label: "left", b_value: "%pb", b_label: "right"}),
+        wire_instruction({op: :store_cvar, cvar_key: "@@cache", value: "%cv"}),
+        wire_instruction({op: :view_store_field, temp: "%vs", ptr: "%self", value: "%vf"}),
+        wire_instruction({op: :store_memo_ptr, value: "%memo", global: "g"}),
+        wire_instruction({op: :class_store, value: "%cls", class_name: "C"}),
+        wire_instruction({op: :small_array_set_inline, temp: "%s1", arr: "%arr", idx: "0", value: "%sav"}),
+        wire_instruction({op: :typed_array_set_inline, temp: "%s2", arr: "%arr", idx: "0", value: "%tav"}),
+        wire_instruction({op: :typed_array_compound_op_inline, temp: "%s3", arr: "%arr", idx: "0", value: "%tcv"}),
+        wire_instruction({op: :bool_array_set_inline, temp: "%s4", arr: "%arr", idx: "0", val: "%bav"}),
+        wire_instruction({op: :bool_array_set_byte_inline, temp: "%s5", arr: "%arr", idx: "0", val: "%bbv"}),
+        wire_instruction({op: :cleanup_push_hash, value: "%cph"}),
+        wire_instruction({op: :call_recycle_hash, value: "%crh"}),
+        wire_instruction({op: :call_direct_ptr, temp: "%p1", name: "w_x", args: ["%parg"]}),
+        wire_instruction({op: :ret_i64, value: w_nil.to_s()})
       ]
     }
   ]

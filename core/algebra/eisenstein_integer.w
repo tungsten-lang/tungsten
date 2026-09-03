@@ -117,7 +117,7 @@
     EisensteinInteger.floor_div(2 * x + y, 2 * y)
 
   -> divmod(other)
-    raise "division by zero in Z[omega]" if other.zero?
+    raise "division by zero in Z\[omega]" if other.zero?
     scaled = self * other.conjugate
     denominator = other.norm
     quotient = EisensteinInteger.new(

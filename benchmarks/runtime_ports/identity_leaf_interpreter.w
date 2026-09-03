@@ -5,6 +5,15 @@
   << "FAIL interpreter [name] got=[got] expected=[expected]"
   exit(1)
 
+# Surplus arguments are an error on both engines (E_LOWER_ARITY at compile
+# time where the callee is known; the interpreter raises at the call).
+-> surplus_rejected?(f)
+  begin
+    f.call
+    false
+  rescue surplus_error
+    true
+
 -> check_bits(name, got, expected)
   got_bits = wvalue_bits(got)
   expected_bits = wvalue_bits(expected)
@@ -13,11 +22,11 @@
 
 float_value = ~1.5
 check_bits("Float plain", float_value.to_f, float_value)
-check_bits("Float surplus", float_value.to_f(1, 2, 3), float_value)
+check_bits("Float surplus rejected", surplus_rejected?(->() float_value.to_f(1, 2, 3)), true)
 
 bigint_value = 18_446_744_073_709_551_617
 check_bits("BigInt plain", bigint_value.to_i, bigint_value)
-check_bits("BigInt surplus", bigint_value.to_i(1, 2, 3), bigint_value)
+check_bits("BigInt surplus rejected", surplus_rejected?(->() bigint_value.to_i(1, 2, 3)), true)
 
 # The tree walker passes a trailing block to the callee (native lowering uses
 # its separate implicit-result-each rewrite). These identity bodies declare no

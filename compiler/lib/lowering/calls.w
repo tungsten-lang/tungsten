@@ -118,6 +118,11 @@
   receiver = node.receiver
   args = node.args
 
+  # `f(1, _)` — explicit partial application (see placeholder_lambda_for_call).
+  placeholder_lambda = placeholder_lambda_for_call(ctx, node)
+  if placeholder_lambda != nil
+    return lower_expression(ctx, placeholder_lambda)
+
   # Parenthesized block-presence query. The paren-less form is a :var and is
   # handled in lower_var; keeping both routes on one helper pins AST parity.
   if receiver == nil && name in ("block?" "block_given?") && args != nil && args.size() == 0 && node.block == nil
@@ -1403,6 +1408,13 @@
     closure_reg = ensure_i64_value(wfn, closure_tv)
     arg_regs.push(closure_reg)
 
+  # Compile-time arity contract of a statically known source function.
+  # Without it a short call was nil-padded below and a long call died at
+  # emit time with an internal WIRE contract mismatch.
+  fn_def = ctx[:mod][:known_fn_defs][name]
+  if fn_def != nil
+    check_static_call_arity(ctx, node, fn_def, "'" + name + "'", args.size())
+
   # Pad with nil for missing keyword/default params
   expected = ctx[:mod][:known_fn_param_counts][name]
   if expected != nil
@@ -1903,3 +1915,35 @@
   if is_ast_node?(param)
     return param.name
   param
+
+# ── Explicit partial application ─────────────────────────────────────────
+# A bare `_` argument is a placeholder: `add(1, _)` is the lambda
+# `->(x) add(1, x)`, one parameter per placeholder in argument order. This
+# is a pure desugar, so it costs nothing when unused and it never changes
+# what a call means (arity checking still applies to the inner call). A
+# name `_` that is assigned in the enclosing function is an ordinary
+# variable and disables the desugar for that function.
+-> placeholder_lambda_for_call(ctx, node)
+  args = node.args
+  if args == nil || args.size() == 0
+    return nil
+  if ctx[:var_types] != nil && ctx[:var_types]["_"] != nil
+    return nil
+  if ctx[:local_assignment_counts] != nil && ctx[:local_assignment_counts]["_"] != nil
+    return nil
+  names = []
+  new_args = []
+  i = 0
+  while i < args.size()
+    a = args[i]
+    if is_ast_node?(a) && ast_kind(a) == :var && a.name == "_"
+      pname = "__pa" + (names.size() + 1).to_s()
+      names.push(pname)
+      new_args.push(Tungsten:AST:Var.new(pname))
+    else
+      new_args.push(a)
+    i += 1
+  if names.size() == 0
+    return nil
+  inner = Tungsten:AST:Call.new(node.receiver, node.name, new_args, node.block)
+  Tungsten:AST:Block.new(names, [inner])

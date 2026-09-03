@@ -1,6 +1,19 @@
 # Emitter numeric instructions — memory, arithmetic, vectors, and conversions.
 
--> render_numeric_instruction(inst, string_wvs, used_ptr_ids, phi_label_redirects = nil, fp_flags = "", arm64_target = true, windows_target = false)
+# `volatile` marker for one var-slot access inside a function a longjmp can
+# re-enter (see cfg.w#has_setjmp). LLVM's mem2reg/SROA refuse to promote an
+# alloca with any volatile access, so writes made in a begin/rescue try body
+# are still in memory when the landing pad resumes — the IR form of C's rule
+# that a local modified across `setjmp` must be `volatile`. Only var slots
+# (`%vs.N`, minted by wire.w#ensure_var_slot) carry the marker; heap and
+# element traffic through the same opcodes is unaffected.
+
+-> slot_volatile_marker(volatile_slots, ptr)
+  if volatile_slots != true || ptr == nil || !ptr.starts_with?("%vs.")
+    return ""
+  "volatile "
+
+-> render_numeric_instruction(inst, string_wvs, used_ptr_ids, phi_label_redirects = nil, fp_flags = "", arm64_target = true, windows_target = false, volatile_slots = false)
   op = wire_kind(inst)
 
   case op
@@ -10,19 +23,19 @@
   when :alloca_i128
     wire_get(inst, :ptr) + " = alloca i128, align 16"
   when :store_i64
-    "store i64 " + wire_get(inst, :value) + ", ptr " + wire_get(inst, :ptr) + ", align 8"
+    "store " + slot_volatile_marker(volatile_slots, wire_get(inst, :ptr)) + "i64 " + wire_get(inst, :value) + ", ptr " + wire_get(inst, :ptr) + ", align 8"
   when :store_i128
-    "store i128 " + wire_get(inst, :value) + ", ptr " + wire_get(inst, :ptr) + ", align 16"
+    "store " + slot_volatile_marker(volatile_slots, wire_get(inst, :ptr)) + "i128 " + wire_get(inst, :value) + ", ptr " + wire_get(inst, :ptr) + ", align 16"
   when :store_float
-    "store float " + wire_get(inst, :value) + ", ptr " + wire_get(inst, :ptr) + ", align 4"
+    "store " + slot_volatile_marker(volatile_slots, wire_get(inst, :ptr)) + "float " + wire_get(inst, :value) + ", ptr " + wire_get(inst, :ptr) + ", align 4"
   when :store_double
-    "store double " + wire_get(inst, :value) + ", ptr " + wire_get(inst, :ptr) + ", align 8"
+    "store " + slot_volatile_marker(volatile_slots, wire_get(inst, :ptr)) + "double " + wire_get(inst, :value) + ", ptr " + wire_get(inst, :ptr) + ", align 8"
   when :load_i64
-    wire_get(inst, :temp) + " = load i64, ptr " + wire_get(inst, :ptr) + ", align 8" + range_metadata_suffix(inst, "i64")
+    wire_get(inst, :temp) + " = load " + slot_volatile_marker(volatile_slots, wire_get(inst, :ptr)) + "i64, ptr " + wire_get(inst, :ptr) + ", align 8" + range_metadata_suffix(inst, "i64")
   when :load_float
-    wire_get(inst, :temp) + " = load float, ptr " + wire_get(inst, :ptr) + ", align 4"
+    wire_get(inst, :temp) + " = load " + slot_volatile_marker(volatile_slots, wire_get(inst, :ptr)) + "float, ptr " + wire_get(inst, :ptr) + ", align 4"
   when :load_double
-    wire_get(inst, :temp) + " = load double, ptr " + wire_get(inst, :ptr) + ", align 8"
+    wire_get(inst, :temp) + " = load " + slot_volatile_marker(volatile_slots, wire_get(inst, :ptr)) + "double, ptr " + wire_get(inst, :ptr) + ", align 8"
   when :load_u8_ptr
     p = wire_get(inst, :temp) + ".p"
     ep = wire_get(inst, :temp) + ".ep"
@@ -108,7 +121,7 @@
     else
       p + " = inttoptr i64 " + wire_get(inst, :ptr) + " to ptr\n  " + ep + " = getelementptr i64, ptr " + p + ", i64 " + wire_get(inst, :index) + "\n  " + wire_get(inst, :temp) + " = load i64, ptr " + ep + ", align 8"
   when :load_i128
-    wire_get(inst, :temp) + " = load i128, ptr " + wire_get(inst, :ptr) + ", align 16" + range_metadata_suffix(inst, "i128")
+    wire_get(inst, :temp) + " = load " + slot_volatile_marker(volatile_slots, wire_get(inst, :ptr)) + "i128, ptr " + wire_get(inst, :ptr) + ", align 16" + range_metadata_suffix(inst, "i128")
 
   # Integer arithmetic
   when :add_i64
@@ -829,9 +842,9 @@
   # mem2reg promotion of the operand loads stays correct (see :fmuladd_f64).
   when :call_libm_f64
     if wire_get(inst, :value) != nil
-      wire_get(inst, :temp) + " = call double @" + wire_get(inst, :name) + "(double " + wire_get(inst, :value) + ")"
+      wire_get(inst, :temp) + " = call double @" + libm_intrinsic_symbol(wire_get(inst, :name)) + "(double " + wire_get(inst, :value) + ")"
     else
-      wire_get(inst, :temp) + " = call double @" + wire_get(inst, :name) + "(double " + wire_get(inst, :lhs) + ", double " + wire_get(inst, :rhs) + ")"
+      wire_get(inst, :temp) + " = call double @" + libm_intrinsic_symbol(wire_get(inst, :name)) + "(double " + wire_get(inst, :lhs) + ", double " + wire_get(inst, :rhs) + ")"
 
   # Numeric->raw-double coercion of a boxed WValue (ensure_raw_f64 fallback):
   # takes an i64 WValue (boxed double / Decimal / Int), returns a raw double.

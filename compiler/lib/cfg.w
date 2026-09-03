@@ -22,6 +22,27 @@ use wire
     bi += 1
   false
 
+# Skip SSA conversion for functions that can be re-entered by a longjmp.
+# A begin/rescue landing pad (and a block's non-local-return trampoline) is
+# reached from ANY point of the guarded region, but the WIRE CFG shows it
+# reachable only from the setjmp site. Promoting a slot written inside that
+# region therefore drops those writes on the resume path — exactly why C
+# requires such locals to be `volatile`. Leave every slot of such a function
+# in memory; the emitter additionally marks their traffic volatile so LLVM's
+# own mem2reg/SROA makes the same concession.
+
+-> has_setjmp(func)
+  bi = 0
+  while bi < func[:blocks].size()
+    instrs = func[:blocks][bi][:instructions]
+    ii = 0
+    while ii < instrs.size()
+      if wire_kind(instrs[ii]) == :setjmp
+        return true
+      ii += 1
+    bi += 1
+  false
+
 # Build CFG for a single function: label→index map, successor/predecessor lists.
 
 -> build_cfg(func)
@@ -310,6 +331,11 @@ use wire
     return {}
   # Don't promote vars in the top-level function (they have global stores)
   if func[:is_toplevel] == true
+    return {}
+  # A longjmp resumes inside this function at a landing pad the CFG believes
+  # is reachable only from the setjmp; promoted slots would lose every write
+  # made in the guarded region. See has_setjmp above.
+  if has_setjmp(func)
     return {}
   # Start assuming all are promotable
   promotable = {}

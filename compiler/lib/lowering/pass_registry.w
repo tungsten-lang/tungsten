@@ -403,6 +403,8 @@
   # Kept near the bottom so it doesn't slow down the hot path.
   when :self_ref
     return lower_var(ctx, Tungsten:AST:Var.new("__self"))
+  when :super
+    return lower_super(ctx, node)
   else
     # Unsupported node
     unsupported_node(ctx, node)

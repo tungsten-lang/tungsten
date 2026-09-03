@@ -7,6 +7,15 @@ use core/big_array
   << "FAIL [name]: got=[got] ([type(got)]) expected=[expected] ([type(expected)])"
   exit(1)
 
+# Surplus arguments are an error on both engines (E_LOWER_ARITY at compile
+# time where the callee is known; the interpreter raises at the call).
+-> surplus_rejected?(f)
+  begin
+    f.call
+    false
+  rescue surplus_error
+    true
+
 -> check(name, got, expected)
   if got != expected || type(got) != type(expected)
     fail_check(name, got, expected)
@@ -14,9 +23,9 @@ use core/big_array
 -> check_view(value, expected, empty)
   recv = ccall("w_big_array_view", 0, 65, value)
   check("cap.[expected]", recv.cap, expected)
-  check("cap.[expected].extra", recv.cap(1, 2, 3), expected)
+  check("cap.[expected].extra rejected", surplus_rejected?(->() recv.cap(1, 2, 3)), true)
   check("empty.[expected]", recv.empty?, empty)
-  check("empty.[expected].extra", recv.empty?(1, 2, 3), empty)
+  check("empty.[expected].extra rejected", surplus_rejected?(->() recv.empty?(1, 2, 3)), true)
 
 check_view(0, 0, true)
 check_view(1, 1, false)

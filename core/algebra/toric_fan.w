@@ -18,7 +18,7 @@
     @rays = []
     rays.each ->(v)
       if v.class_name != "Array" || v.size != 2
-        raise "a fan ray is an [x, y] integer vector"
+        raise "a fan ray is an \[x, y] integer vector"
       @rays.push([v[0], v[1]])
     validate!
 
@@ -195,7 +195,7 @@
     @star = []
     star.each ->(v)
       if v.class_name != "Array" || v.size != 2
-        raise "a star direction is an [x, y] integer vector"
+        raise "a star direction is an \[x, y] integer vector"
       @star.push([v[0], v[1]])
     validate!
     @fan = ToricFan2D.new(@star)

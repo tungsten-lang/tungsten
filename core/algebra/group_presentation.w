@@ -7,7 +7,7 @@
 # computable content of most van Kampen arguments — the group itself may be
 # undecidable, its abelianisation never is.
 #
-# Words are arrays of [generator, exponent] pairs, generators numbered from 0.
+# Words are arrays of \[generator, exponent] pairs, generators numbered from 0.
 
 + FinitelyPresentedGroup
   -> new(generator_count, relators)
@@ -19,11 +19,11 @@
     @abelianization_cache = nil
 
   -> .validate_word(generator_count, word)
-    raise "a relator must be an array of [generator, exponent] pairs" if word.class_name != "Array"
+    raise "a relator must be an array of \[generator, exponent] pairs" if word.class_name != "Array"
     out = []
     word.each ->(letter)
       if letter.class_name != "Array" || letter.size != 2
-        raise "a relator letter is a [generator, exponent] pair"
+        raise "a relator letter is a \[generator, exponent] pair"
       g = letter[0]
       e = letter[1]
       raise "generator index out of range" if g < 0 || g >= generator_count
@@ -131,7 +131,7 @@
     @invariants = []
     invariants.each ->(pair)
       if pair.class_name != "Array" || pair.size != 2
-        raise "a Seifert invariant is an [a, b] pair"
+        raise "a Seifert invariant is an \[a, b] pair"
       raise "Seifert multiplicities must be positive" if pair[0] < 1
       @invariants.push([pair[0], pair[1]])
     @group_cache = nil

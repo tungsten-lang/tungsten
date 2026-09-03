@@ -335,7 +335,7 @@ run_interpreter_reject_spec() {
   local needle
 
   case "$name" in
-    date_invalid_constructor) needle='Date.new expects one to seven arguments' ;;
+    date_invalid_constructor) needle="'new' takes 1..7 arguments, got 0" ;;
     decimal_invalid_constructor|decimal_invalid_zero_constructor) needle='Decimal.new is not a supported scalar constructor' ;;
     *) record_failure_note "$name" "missing expected interpreted rejection diagnostic"; return ;;
   esac
@@ -816,6 +816,22 @@ run_parallel cuda-reject "${cuda_reject_specs[@]}"
 
 run_parallel interp "${interpreter_specs[@]}"
 run_parallel interp-reject "${interpreter_reject_specs[@]}"
+
+# ── Cross-engine parity (scripts/parity.sh) ───────────────────────────────
+# Every spec/parity/*_spec.w runs through the interpreter and the compiled
+# path; the transcripts must agree byte-for-byte (see doc/PARITY.md).
+# RUN_PARITY_SPECS=0 skips the stage.
+if [[ "${RUN_PARITY_SPECS:-1}" != "0" ]]; then
+  echo "parity scripts/parity.sh (spec/parity, interp vs compiled)"
+  set +e
+  output="$("$ROOT/scripts/parity.sh" --jobs "$JOBS" 2>&1)"
+  status=$?
+  set -e
+  record_result "parity" "$output" "$status"
+else
+  echo "skip parity specs (set RUN_PARITY_SPECS=1 to run)"
+fi
+# ── end parity ────────────────────────────────────────────────────────────
 
 if [[ "${RUN_CORE_SPECS:-0}" == "1" ]]; then
   # High-bit words pin the SIGNED view encodings (as_i32/as_i64 vs as_u32):

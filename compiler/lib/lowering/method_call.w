@@ -259,6 +259,90 @@
 # means at least one class has no direct-call-safe implementation and the site
 # must retain normal dispatch. Multiple classes may intentionally name the
 # same worker through inheritance; callers collapse that case to one call.
+# ── Compile-time arity checks for resolved receivers ─────────────────────
+# Both helpers only ever RAISE; a miss they cannot prove to be an arity error
+# returns nil and the call keeps ordinary dispatch. Class statics are
+# arity-indexed in known_static_methods (`Cls.name/N`, is_static entries);
+# instance methods in class_method_asts (`Cls.name/N` plus a base key). Both
+# walk the superclass chain, and any accepting definition anywhere on the
+# chain keeps the call legal (conservative: never a false error).
+-> static_method_arities(mod, recv_name, method_name)
+  arities = []
+  cur = recv_name
+  guard = 0
+  while cur != nil && guard < 64
+    k = 0
+    while k <= 16
+      info = mod[:known_static_methods][cur + "." + method_name + "/" + k.to_s()]
+      if info != nil && info[:is_static] == true
+        # The registry only indexes the FIXED arities of a def; a `*rest`
+        # splat or a block parameter makes the real maximum open-ended, so
+        # such a static is never checked here (nil = no contract known).
+        if (info[:splat_index] != nil && info[:splat_index] >= 0) || (info[:block_param_index] != nil && info[:block_param_index] >= 0) || info[:accepts_block] == true
+          return nil
+        arities.push(k)
+      k += 1
+    if arities.size() > 0
+      return arities
+    cur = mod[:class_super_names][cur]
+    guard += 1
+  arities
+
+-> check_static_method_arity_miss(ctx, node, recv_name, method_name, argc)
+  if env("TUNGSTEN_ARITY") == "off" || recv_name.include?("$")
+    return nil
+  arities = static_method_arities(ctx[:mod], recv_name, method_name)
+  if arities == nil || arities.size() == 0
+    return nil
+  i = 0
+  while i < arities.size()
+    if arities[i] == argc
+      return nil
+    i += 1
+  accepted = arities[0].to_s()
+  if arities.size() > 1
+    accepted = arities[0].to_s() + ".." + arities[arities.size() - 1].to_s()
+  raise compile_error_for_node(:E_LOWER_ARITY, recv_name + "." + method_name + " takes " + accepted + " argument" + (accepted == "1" ? "" : "s") + ", got " + argc.to_s() + " — arguments are never silently dropped or padded", ctx[:source_path], node)
+
+-> check_instance_method_arity(ctx, node, fact, method_name, argc)
+  if env("TUNGSTEN_ARITY") == "off"
+    return nil
+  classes = class_set_fact_classes(fact)
+  if classes == nil || classes.size() == 0
+    return nil
+  # Monomorphized generic instances (`Complex$f64`) keep their method ASTs
+  # under the template name; their registry shape is not the plain one this
+  # walk understands, so they are not checked here.
+  ci = 0
+  while ci < classes.size()
+    if classes[ci].include?("$")
+      return nil
+    ci += 1
+  mod = ctx[:mod]
+  found_any = false
+  ci = 0
+  while ci < classes.size()
+    cur = classes[ci]
+    guard = 0
+    while cur != nil && guard < 64
+      base = mod[:class_method_asts][cur + "." + method_name]
+      if base != nil
+        found_any = true
+        if def_accepts_arg_count?(base, argc)
+          return nil
+        k = 0
+        while k <= 16
+          alt = mod[:class_method_asts][cur + "." + method_name + "/" + k.to_s()]
+          if alt != nil && def_accepts_arg_count?(alt, argc)
+            return nil
+          k += 1
+      cur = mod[:class_super_names][cur]
+      guard += 1
+    ci += 1
+  if !found_any
+    return nil
+  raise compile_error_for_node(:E_LOWER_ARITY, classes[0] + "#" + method_name + " does not accept " + argc.to_s() + " argument" + (argc == 1 ? "" : "s") + " — no definition of '" + method_name + "' on " + classes[0] + " or its ancestors has that arity; arguments are never silently dropped or padded", ctx[:source_path], node)
+
 -> locked_class_set_targets(mod, fact, method_name, arg_count)
   if fact == nil
     return nil
@@ -304,6 +388,71 @@
     site_id = next_call_site_id(ctx[:mod])
   temp = next_temp(ctx[:func])
   emit_wire_call_direct_i64(ctx[:func], nil, args, nil, site_id, fn_name, node.col, node.line, temp)
+  typed_value(:i64, temp)
+
+# -- super --
+#
+# Resolve the worker `super` / `super(...)` names: the same-named method,
+# looked up from the SUPERCLASS of the class that defines the method being
+# lowered (doc/specification 5.8), so an override never re-enters itself.
+# Initializers live in their own registry (class_constructor_fn_names) —
+# `super(name)` inside `-> new(...)` must run the parent's initializer against
+# the already-allocated receiver, which is exactly what that worker's
+# (self, args…) ABI does; the registry is separate only so that a guarded
+# `Klass.new(...)` site allocates before invoking it.
+#
+# Returns nil when the super target is not a plain-ABI SOURCE method — no
+# superclass, a runtime/builtin parent, a static method of the same name, or a
+# signature (defaults/keywords/splat/block/yield) outside the direct-call ABI.
+-> super_target_fn(mod, class_name, method_name, argc)
+  if class_name == nil || method_name == nil
+    return nil
+  current = mod[:class_super_names][class_name]
+  key_suffix = "." + method_name + "/" + argc.to_s()
+  guard = 0
+  while current != nil && guard < 64
+    hit = nil
+    if method_name == "new"
+      hit = mod[:class_constructor_fn_names][current + ".new/" + argc.to_s()]
+    else
+      hit = mod[:class_method_fn_names][current + key_suffix]
+    if hit != nil
+      # class_method_fn_names is keyed by name+arity only, so a static method
+      # of the same name would collide with the instance selector `super`
+      # means. Confirm the owner is an instance method before calling it.
+      owner_ast = mod[:class_method_asts][current + key_suffix]
+      if owner_ast == nil || owner_ast.is_class_method != true
+        return hit
+      return nil
+    current = mod[:class_super_names][current]
+    guard += 1
+  nil
+
+# `super` had no lowering arm at all: it fell through lower_expression's
+# `else` to unsupported_node, which silently produced nil — so a subclass
+# constructor's `super(name)` never ran the parent's `-> new(@name)` binding
+# and the field stayed empty with no diagnostic. Emit the direct call to the
+# resolved parent worker on the CURRENT receiver. An unresolvable super keeps
+# the historical nil so the synthesized overload dispatcher's fall-through
+# arm (definitions.w, build_overload_dispatcher) is unchanged where the
+# parent has no matching source method.
+-> lower_super(ctx, node)
+  wfn = ctx[:func]
+  args = node.args
+  if args == nil
+    args = []
+  fn_name = nil
+  if ctx[:is_class_method] != true
+    fn_name = super_target_fn(ctx[:mod], ctx[:class_name], ctx[:method_name], args.size())
+  if fn_name == nil
+    return typed_value(:i64, w_nil.to_s())
+  call_args = [ensure_i64_value(wfn, lower_var(ctx, Tungsten:AST:Var.new("__self")))]
+  i = 0
+  while i < args.size()
+    call_args.push(ensure_i64_value(wfn, lower_expression(ctx, args[i])))
+    i += 1
+  temp = next_temp(wfn)
+  emit_wire_call_direct_i64(wfn, nil, call_args, nil, nil, fn_name, nil, nil, temp)
   typed_value(:i64, temp)
 
 # Emit an exhaustive closed-world class decision with direct-call arms. The
@@ -368,6 +517,21 @@
   method_name = node.name
 
   recv_node = node.receiver
+
+  # `obj.m(_, 2)` — explicit partial application (see calls.w).
+  placeholder_lambda = placeholder_lambda_for_call(ctx, node)
+  if placeholder_lambda != nil
+    return lower_expression(ctx, placeholder_lambda)
+
+  # Compile-time arity contract for a receiver whose class is exactly
+  # known (a local bound from a constructor, an exactly typed ivar, a
+  # `Cls.new(...)` receiver). Only ever raises on a proven mismatch.
+  if recv_node != nil && is_ast_node?(recv_node) && node.args != nil && env("TUNGSTEN_ARITY") != "off"
+    arity_fact = receiver_flow_class_fact(ctx, node)
+    if arity_fact == nil
+      arity_fact = receiver_source_class_fact(ctx, recv_node)
+    if arity_fact != nil && arity_fact[:certainty] == :exact
+      check_instance_method_arity(ctx, node, arity_fact, method_name, node.args.size())
 
   # Closed-world declarations are compile-time contracts, not dispatchable
   # Core methods. Loader/lower_ast already validated and recorded them; their
@@ -461,7 +625,15 @@
   # count). The interpreter does this via apply_iteratee; mirroring it here
   # keeps -o in agreement with -e/--wit. Single symbol arg, no block, and a
   # collection-shaped receiver (literal ints/strings can't be a pipeline base).
-  if recv_node != nil && node.block == nil && node.args != nil && node.args.size() == 1 && is_ast_node?(node.args[0]) && ast_kind(node.args[0]) == :symbol && ast_kind(recv_node) in (:range :array :var :call :map :calc) && method_name in ("map" "select" "reject" "count")
+  # A user class that defines its own `select`/`map`/... taking an ordinary
+  # argument must receive the symbol as a value: skip the rewrite when the
+  # receiver is a proven source-class instance (`p = Picker.new; p.select(:age)`).
+  symbol_arg_receiver_is_object = false
+  if recv_node != nil && is_ast_node?(recv_node) && ast_kind(recv_node) in (:var :call)
+    symbol_arg_fact = receiver_source_class_fact(ctx, recv_node)
+    if symbol_arg_fact != nil && symbol_arg_fact[:class_name] != nil
+      symbol_arg_receiver_is_object = true
+  if !symbol_arg_receiver_is_object && recv_node != nil && node.block == nil && node.args != nil && node.args.size() == 1 && is_ast_node?(node.args[0]) && ast_kind(node.args[0]) == :symbol && ast_kind(recv_node) in (:range :array :var :call :map :calc) && method_name in ("map" "select" "reject" "count")
     per_elem = Tungsten:AST:Call.new(nil, "" + ast_get(node.args[0], :value), [], nil)
     if method_name == "map"
       return lower_expression(ctx, Tungsten:AST:Map.new(recv_node, per_elem, :map))
@@ -881,6 +1053,11 @@
           if node.block == nil || (candidate[:accepts_block] == true && candidate[:raw_abi] != true && node.args.size() < candidate[:arity] - 1)
             static_info = candidate
         guard += 1
+    # An exact-arity registry miss on a class that declares this static at
+    # some other arity is an arity error, not a reason to fall back to
+    # dynamic dispatch (which would drop or nil-pad the arguments).
+    if static_info == nil && method_name != "new" && ctx[:mod][:known_classes][recv_name] != nil
+      check_static_method_arity_miss(ctx, node, recv_name, method_name, node.args.size())
     math_intrinsic_runtime = nil
     if recv_name == "Math"
       math_intrinsic_runtime = math_intrinsic_runtime_name(method_name, node.args.size())
@@ -928,6 +1105,12 @@
           pi += 1
         if !variadic && node.args.size() < required
           raise compile_error_for_node(:E_LOWER_CTOR_ARITY, recv_name + ".new requires " + required.to_s() + " argument" + (required == 1 ? "" : "s") + ", got " + node.args.size().to_s() + " — a missing constructor argument is padded with nil, leaving the field unset", ctx[:source_path], node)
+        # Too MANY arguments is an error as well (the dispatcher would drop
+        # the extras). The fallback base-key AST above may be just ONE of
+        # several arity overloads of `new`, so decide against every `new`
+        # definition on the chain (same helper as instance methods).
+        if !variadic
+          check_instance_method_arity(ctx, node, {class_name: recv_name, certainty: :exact}, "new", node.args.size())
 
     # File module methods → direct runtime calls
     if recv_name == "File"
@@ -2310,6 +2493,8 @@
       locked_fact = receiver_source_class_fact(ctx, recv_node)
     if locked_fact != nil && locked_fact[:stable] == true
       targets = locked_class_set_targets(ctx[:mod], locked_fact, method_name, node.args.size())
+      if targets == nil && locked_fact[:certainty] == :exact
+        check_instance_method_arity(ctx, node, locked_fact, method_name, node.args.size())
       if targets != nil && targets.size() > 0
         if targets.size() == 1 || locked_targets_share_fn?(targets)
           return emit_locked_direct_method_call(ctx, node, receiver_reg, arg_regs, targets[0][:fn_name])

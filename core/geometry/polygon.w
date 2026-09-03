@@ -48,7 +48,7 @@
     while i < vertices.size
       v = vertices[i]
       if v.class_name != "Array" || v.size != 2
-        raise "polygon vertex [i] must be a two-element [x, y] array"
+        raise "polygon vertex [i] must be a two-element \[x, y] array"
       i += 1
     vertices.size
 

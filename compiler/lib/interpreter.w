@@ -2755,6 +2755,25 @@ use target
     # sensitive. w_switch_canonical repacks ≤5-byte content to SSO bits so
     # every comparison below is a deterministic bit match.
     node_op = ccall("w_switch_canonical", ast_get(node, :op))
+    # `add/2` — a method reference (mirrors lowering/ops.w): a bare source
+    # function name that is not a variable, over an integer literal, is
+    # the closure `->(a, b) add(a, b)`. `x/2` on a variable stays division.
+    if node_op == :SLASH
+      mr_left = ast_get(node, :left)
+      mr_right = ast_get(node, :right)
+      if is_ast_node?(mr_left) && ast_kind(mr_left) == :var && is_ast_node?(mr_right) && ast_kind(mr_right) == :int
+        mr_name = ast_get(mr_left, :name)
+        if !env.defined?(mr_name) && callable?(mr_name)
+          mr_arity = ast_get(mr_right, :value)
+          mr_params = []
+          mr_args = []
+          mi = 0
+          while mi < mr_arity
+            mr_params.push("__mr" + (mi + 1).to_s())
+            mr_args.push(Tungsten:AST:Var.new("__mr" + (mi + 1).to_s()))
+            mi += 1
+          mr_call = Tungsten:AST:Call.new(nil, mr_name, mr_args, nil)
+          return evaluate(Tungsten:AST:Block.new(mr_params, [mr_call]), env)
     if node_op == :PIPE
       pu = interp_pipe_unit_target(node, env)
       if pu != nil
@@ -3246,6 +3265,26 @@ use target
         @type_tables_locked = true
         @method_tables_locked = true
       return nil
+    # `f(1, _)` — explicit partial application: a bare `_` argument that is
+    # not a bound variable is a placeholder, and the call denotes the lambda
+    # over the placeholders (mirrors lowering/calls.w placeholder_lambda_for_call).
+    if !env.defined?("_")
+      ph_names = []
+      ph_args = []
+      raw_args = ast_get(node, :args)
+      pi = 0
+      while pi < raw_args.size()
+        pa = raw_args[pi]
+        if is_ast_node?(pa) && ast_kind(pa) == :var && ast_get(pa, :name) == "_"
+          ph_name = "__pa" + (ph_names.size() + 1).to_s()
+          ph_names.push(ph_name)
+          ph_args.push(Tungsten:AST:Var.new(ph_name))
+        else
+          ph_args.push(pa)
+        pi += 1
+      if ph_names.size() > 0
+        ph_call = Tungsten:AST:Call.new(ast_get(node, :receiver), ast_get(node, :name), ph_args, ast_get(node, :block))
+        return evaluate(Tungsten:AST:Block.new(ph_names, [ph_call]), env)
     block = nil
     if ast_get(node, :block) != nil
       block = evaluate(ast_get(node, :block), env)
@@ -3586,6 +3625,32 @@ use target
     # invoking the block. Mirrors the compiled method-dispatch-on-closure path
     # (runtime.c w_closure_call_N) and the bare-call closure dispatch in
     # dispatch_bare_call, so `f.call(x)` and `f(x)` behave the same.
+    if name in ("arity" "curry") && type(recv) == "Array" && recv.size() == 2 && is_ast_node?(recv[1]) && ast_kind(recv[1]) == :block
+      closure_arity = ast_get(recv[1], :params).size()
+      if name == "arity"
+        return closure_arity
+      curry_n = closure_arity
+      if args.size() > 0 && args[0] != nil
+        curry_n = args[0]
+      if curry_n <= 1
+        return recv
+      if curry_n > 4
+        raise "curry supports closures of arity 1..4, got " + curry_n.to_s()
+      # ->(__ca1) ->(__ca2) ... __cf.call(__ca1, ..., __caN), evaluated with
+      # __cf bound to the receiver — the same shape core/closure.w builds.
+      curry_env = Environment.new(env, true)
+      curry_env.define("__cf", recv)
+      call_args = []
+      ci = 0
+      while ci < curry_n
+        call_args.push(Tungsten:AST:Var.new("__ca" + (ci + 1).to_s()))
+        ci += 1
+      inner = Tungsten:AST:Call.new(Tungsten:AST:Var.new("__cf"), "call", call_args, nil)
+      ci = curry_n
+      while ci >= 1
+        inner = Tungsten:AST:Block.new(["__ca" + ci.to_s()], [inner])
+        ci -= 1
+      return evaluate(inner, curry_env)
     if name == "call" && type(recv) == "Array" && recv.size() == 2 && is_ast_node?(recv[1]) && ast_kind(recv[1]) == :block
       return call_block(recv, args)
 
@@ -4025,6 +4090,13 @@ use target
           nidx = idx + recv.size()
           return nil if nidx < 0
           return recv[nidx]
+      # `s[a..b]` on a String is a code-point substring. The compiled path
+      # reaches w_string_slice_range through w_array_view_range's polymorphic
+      # dispatch; call the same helper here so the engines cannot drift.
+      if type(recv) == "String" && args.size() == 1
+        sidx = args[0]
+        if type(sidx) == "Hash" && sidx.has_key?(:rt) && sidx[:rt] == :range
+          return ccall("w_string_slice_range", recv, sidx[:from], sidx[:to], sidx[:exclusive] == true)
       return recv[args[0]]
     if name == "\[]="
       recv[args[0]] = args[1]
@@ -4660,6 +4732,33 @@ use target
           splat_index = i
           break
         i += 1
+      # Arity contract, mirroring the compiled engine's compile-time check:
+      # more args than params, or fewer than the leading plain params, is
+      # an error — never silently dropped or nil-padded. A splat, keyword,
+      # or block param makes the maximum open-ended. TUNGSTEN_ARITY=off
+      # disables it (triage kill switch).
+      if env("TUNGSTEN_ARITY") != "off"
+        arity_required = 0
+        arity_max = nparams
+        arity_counting = true
+        pi = 0
+        while pi < nparams
+          ap = params[pi]
+          if ast_get(ap, :splat) == true || ast_get(ap, :keyword) == true || ast_get(ap, :block_param) == true
+            arity_max = nil
+            arity_counting = false
+          elsif arity_counting && ast_get(ap, :default) == nil
+            arity_required += 1
+          else
+            arity_counting = false
+          pi += 1
+        if args.size() < arity_required || (arity_max != nil && args.size() > arity_max)
+          arity_expected = arity_required.to_s()
+          if arity_max == nil
+            arity_expected = "at least " + arity_required.to_s()
+          elsif arity_max != arity_required
+            arity_expected = arity_required.to_s() + ".." + arity_max.to_s()
+          raise "'" + ast_get(method, :name).to_s() + "' takes " + arity_expected + " argument" + (arity_expected == "1" ? "" : "s") + ", got " + args.size().to_s() + " — arguments are never silently dropped or padded"
       i = 0
       while i < params.size()
         param = params[i]

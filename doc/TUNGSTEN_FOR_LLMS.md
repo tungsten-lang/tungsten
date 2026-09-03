@@ -38,6 +38,20 @@ x = 42
 double = ->(x) x * 2
 << double.call(21)
 
+# Partial application: a bare `_` argument is a placeholder
+inc = add(1, _)              # ->(x) add(1, x)
+<< inc.call(41)              # 42
+<< [1, 2, 3].map(add(10, _)) # [11, 12, 13]
+
+# Method reference: `name/N` is the function as a closure of arity N
+ref = add/2
+<< ref.call(20, 22)          # 42
+<< ref.arity                 # 2
+<< (add/2).curry.call(1).call(2)   # 3  (parenthesize: `/` binds looser than `.`)
+
+# Arity is checked at compile time where the callee is known:
+# add(1) or add(1, 2, 3) is E_LOWER_ARITY, never nil-padded or truncated.
+
 # Pure function, auto-memoized (compiled)
 fn fib(n)
   if n <= 1

@@ -72,7 +72,7 @@ reopened = ZeroArgDispatchReopened.new()
 check("reopened class final definition", dynamic_marker(reopened), "new")
 check("reopened class cached hit", dynamic_marker(reopened), "new")
 
-zero_inst = {
+zero_inst = wire_instruction({
   op: :call_method_i64,
   temp: "%zero",
   temp_args_val: "%zero.args",
@@ -82,12 +82,12 @@ zero_inst = {
   ic_id: 2,
   src_line: nil,
   src_col: nil
-}
+})
 zero_ir = render_instruction(zero_inst, nil, {}, nil, "")
 check("zero call emitter helper", zero_ir.include?("@w_method_call_cached_0("), true)
 check("zero call omits generic ABI", zero_ir.include?("@w_method_call_cached("), false)
 
-one_inst = {
+one_inst = wire_instruction({
   op: :call_method_i64,
   temp: "%one",
   temp_args_val: "%one.args",
@@ -97,7 +97,7 @@ one_inst = {
   ic_id: 3,
   src_line: nil,
   src_col: nil
-}
+})
 one_ir = render_instruction(one_inst, nil, {}, nil, "")
 check("nonzero call keeps generic ABI", one_ir.include?("@w_method_call_cached("), true)
 check("nonzero call omits zero helper", one_ir.include?("@w_method_call_cached_0("), false)

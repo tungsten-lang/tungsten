@@ -1197,6 +1197,14 @@ loader_parse_cache_state = {
     if t == :range
       consider_autoload_name("Number", defined, registry, seen, pending)
       consider_autoload_name("Range", defined, registry, seen, pending)
+    # Closure values arrive from lambda/block literals, from `f(1, _)`
+    # placeholders and `f/2` method references (both synthesized at
+    # lowering, after this walk), and their source methods (`arity`,
+    # `curry`) live in core/closure.w. Register the class whenever a
+    # program can produce or interrogate a closure, so dispatch on a
+    # closure receiver finds them without an explicit `use core/closure`.
+    if t == :block || (t == :call && node.name in ("arity" "curry" "call"))
+      consider_autoload_name("Closure", defined, registry, seen, pending)
     # `<< a, b` stores a list of value nodes in Puts#value. The generic
     # single-value walk below intentionally ignores non-AST containers, so
     # recurse the print list here or class refs inside `<< Digest.sha1(...)`

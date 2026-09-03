@@ -1126,6 +1126,15 @@
     visit_promote_node(node.expression, records, declared_types, mod)
     return nil
 
+  # `T[n]` typed-array constructor: the size is consumed as a raw machine
+  # int (lower_typed_array_new boxes-then-unboxes it at the site), so a
+  # candidate used as the size does NOT escape. Without this, `n = 1000000;
+  # a = i64[n]; while i < n` pinned `n` boxed and every loop-exit test paid
+  # a w_int box + tagged compare — which also kept the loop unvectorizable.
+  when :typed_array
+    visit_promote_node(ast_get(node, :size), records, declared_types, mod)
+    return nil
+
   # Safe leaves — known to never carry a var that flows to a non-int sink.
   when :int, :var, :symbol, :nil, :boolean, :float, :string
     return nil

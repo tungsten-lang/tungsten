@@ -45667,6 +45667,48 @@ WValue w_str_concat_free_rhs(WValue a, WValue b) {
     return r;
 }
 
+/* Concatenation whose operands the compiler PROVED dead after this call
+ * (own_mask bit 0 = a, bit 1 = b: each is an anonymous fresh producer whose
+ * only consumer is this concat). Past the canonical 61-byte range plain
+ * w_str_concat builds a rope node that RETAINS both leaves, which the
+ * ownership pass can never free (a leaf may be shared elsewhere in general)
+ * — so `s = a + b` in a loop leaked both operands every iteration. Here the
+ * result is a fresh flat string instead, and each owned heap operand is
+ * released once it has been copied out. Short results take the canonical
+ * w_str_concat path (inline / slab / heap by length) and release the owned
+ * operands the same way, guarded like w_str_concat_free_lhs against a
+ * concat that returned one of its operands. Owned rope operands stay put:
+ * the rope-node free is not modelled (a leak, never a double free). */
+WValue w_str_concat_own(WValue a, WValue b, WValue own_mask) {
+    int own_a = (own_mask & 1) != 0;
+    int own_b = (own_mask & 2) != 0;
+    char abuf[6], bbuf[6];
+    const char *ad, *bd;
+    size_t al, bl;
+    WValue fa = w_is_rope(a) ? w_rope_flatten(a) : a;
+    WValue fb = w_is_rope(b) ? w_rope_flatten(b) : b;
+    w_str_data(fa, abuf, &ad, &al);
+    w_str_data(fb, bbuf, &bd, &bl);
+    size_t total = al + bl;
+    WValue r;
+    if (total <= W_SLAB_SSO2_MAX) {
+        r = w_str_concat(a, b);
+    } else {
+        if (al > W_STRING_LEN_MASK || bl > W_STRING_LEN_MASK - al)
+            die("string exceeds 31-bit byte length limit");
+        WString *ws = malloc(sizeof(WString) + total + 1);
+        w_heap_string_set_meta(ws, (uint32_t)total,
+                               w_string_ascii_p(fa) && w_string_ascii_p(fb));
+        memcpy(ws->data, ad, al);
+        memcpy(ws->data + al, bd, bl);
+        ws->data[total] = '\0';
+        r = w_box_heap_str(ws);
+    }
+    if (own_a && r != a && w_is_heap_str(a)) free(w_as_heap_str(a));
+    if (own_b && r != b && w_is_heap_str(b)) free(w_as_heap_str(b));
+    return r;
+}
+
 WValue w_str_concat_free_lhs(WValue a, WValue b) {
     WValue r = w_str_concat(a, b);
     if (r != a && !w_is_rope(r) && w_is_heap_str(a))
@@ -60461,9 +60503,44 @@ static WValue w_ic_decimal_ceil(WValue r, WValue *a, int c) {
     (void)a; (void)c;
     return w_int((int64_t)ceil(cmp_numeric_double(r)));
 }
+/* Decimal#round(digits = 0). With no digits the result is an Int (half
+ * away from zero, as before). With digits > 0 the rounding is EXACT on the
+ * significand — value = sig * 10^scale, so dropping the fraction digits past
+ * `digits` is an integer division by 10^(−scale − digits) with the half
+ * rounded away from zero — and the result is a Decimal of that scale.
+ * (2.345).round(2) is therefore 2.35, not the 2.34 a binary double gives.
+ * A digits argument used to be silently ignored on this row. */
 static WValue w_ic_decimal_round(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    return w_int((int64_t)round(cmp_numeric_double(r)));
+    int64_t digits = 0;
+    if (c >= 1 && w_is_int(a[0])) digits = w_as_int(a[0]);
+    if (digits <= 0)
+        return w_int((int64_t)round(cmp_numeric_double(r)));
+    if (decimal_is_bigsig(r)) {
+        WValue bsig; int64_t bscale;
+        decimal_extract_boxed(r, &bsig, &bscale);
+        if (-bscale <= digits) return r;
+        WValue div = decimal_pow10_boxed(-bscale - digits);
+        WValue q = w_div(bsig, div);                    /* truncates toward zero */
+        WValue rem = w_sub(bsig, w_mul(q, div));
+        int neg = w_lt(bsig, w_box_int(0)) == W_TRUE;
+        if (neg) rem = w_neg(rem);
+        if (w_lt(w_mul(rem, w_box_int(2)), div) != W_TRUE)
+            q = neg ? w_sub(q, w_box_int(1)) : w_add(q, w_box_int(1));
+        return w_decimal_big(q, -digits);
+    }
+    int64_t sig;
+    int scale;
+    decimal_extract(r, &sig, &scale);
+    if (-(int64_t)scale <= digits) return r;
+    int64_t drop = -(int64_t)scale - digits;
+    if (drop > 18) return w_decimal(0, (int)-digits);   /* every kept digit is zero */
+    int64_t div = 1;
+    for (int64_t i = 0; i < drop; i++) div *= 10;
+    int64_t q = sig / div;
+    int64_t rem = sig % div;
+    if (rem < 0) rem = -rem;
+    if (rem * 2 >= div) q += (sig < 0) ? -1 : 1;
+    return w_decimal(q, (int)-digits);
 }
 
 /* The packed-network inspect aliases remain native until a tiny, sound
@@ -65222,12 +65299,94 @@ WValue w_array_shr_elem(WValue lhs, WValue rhs)  { return array_elementwise(lhs,
  * the polymorphic w_array_view_range can route into the BigArray path. */
 WValue w_big_array_view_range(WValue arr, WValue from_v, WValue to_v, WValue exclusive_v);
 
+/* `str[from..to]` / `str[from...to]` — the String arm of the same sugar.
+ * Indexing is by CODE POINT so it agrees with the scalar subscript
+ * (w_string_idx_raw) rather than with the byte-exact `slice(start, len)`.
+ * Bound resolution mirrors the Array rule above: negative indices wrap from
+ * the end, out-of-range bounds clamp to the live window, and an empty or
+ * inverted range yields "". Strings are immutable, so this is a copy, not a
+ * view. The interpreter ccalls this same helper, so both engines agree. */
+WValue w_string_slice_range(WValue str, WValue from_v, WValue to_v,
+                            WValue exclusive_v) {
+    if (w_is_rope(str)) str = w_rope_flatten(str);
+    char sbuf[6];
+    const char *s;
+    size_t blen;
+    w_str_data(str, sbuf, &s, &blen);
+
+    /* ASCII content (each representation's ASCII bit): byte == code point,
+     * so the bounds arithmetic below needs no walk at all. */
+    int ascii = w_string_ascii_p(str);
+    int64_t n;
+    if (ascii) {
+        n = (int64_t)blen;
+    } else {
+        n = 0;
+        for (size_t p = 0; p < blen; ) {
+            p += w_utf8_index_width(s + p, blen - p);
+            n++;
+        }
+    }
+
+    int64_t from = w_as_int(from_v);
+    int     excl = w_truthy(exclusive_v);
+    int64_t to;
+    if (w_is_nil(to_v)) {
+        /* Right-unbounded (`str[n..]`): run through the end. The exclusive
+         * bound skips the inclusive adjustment below. */
+        to   = n;
+        excl = 1;
+    } else {
+        to = w_as_int(to_v);
+        if (to < 0) to += n;
+    }
+    if (from < 0) from += n;
+    if (from < 0) from = 0;
+    if (!excl) to += 1;          /* inclusive → exclusive end */
+    if (to > n) to = n;
+    if (to < from) to = from;
+    if (to == from) return w_string("");
+
+    size_t bstart, bend;
+    if (ascii) {
+        bstart = (size_t)from;
+        bend   = (size_t)to;
+    } else {
+        size_t p = 0;
+        int64_t k = 0;
+        while (p < blen && k < from) { p += w_utf8_index_width(s + p, blen - p); k++; }
+        bstart = p;
+        while (p < blen && k < to)   { p += w_utf8_index_width(s + p, blen - p); k++; }
+        bend = p;
+    }
+    size_t len = bend - bstart;
+    char *result = malloc(len + 1);
+    memcpy(result, s + bstart, len);
+    result[len] = '\0';
+    return w_string_take(result, len);
+}
+
 WValue w_array_view_range(WValue arr, WValue from_v, WValue to_v, WValue exclusive_v) {
-    /* Polymorphic dispatch — Array and BigArray both lower `arr[a..b]`
-     * to this entry point. Route on dispatch_key so the BigArray path
-     * doesn't reinterpret the wider header as a WArray. */
+    /* Polymorphic dispatch — Array, BigArray and String all lower
+     * `recv[a..b]` to this entry point. Route on the tag so neither the
+     * BigArray header nor a String/Symbol WValue is reinterpreted as a
+     * WArray. Anything else (a packed Range, a Hash, an object) would be a
+     * wild pointer dereference, so it raises instead. */
     if (w_is_big_array(arr)) {
         return w_big_array_view_range(arr, from_v, to_v, exclusive_v);
+    }
+    if (w_is_stringy(arr) || w_is_rope(arr)) {
+        /* Symbols share the string tag but not the byte-view layout; slice
+         * their printed name, as w_ic_string_size does. */
+        WValue sv = w_is_symbol(arr) ? w_to_s(arr) : arr;
+        return w_string_slice_range(sv, from_v, to_v, exclusive_v);
+    }
+    if (!w_is_array(arr)) {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "[]: cannot slice a %s with a range",
+                 as_str(__w_type(arr)));
+        w_raise(w_string(msg));
+        return W_NIL;
     }
     WArray *src = w_as_array(arr);
     int64_t from = w_as_int(from_v);
@@ -65660,6 +65819,19 @@ WValue w_array_get(WValue arr, WValue index) {
         if (i < 0 || (uint32_t)i >= len) return W_NIL;
         return w_body_arena_get(w_unbox_body_offset(arr), (uint32_t)i);
     }
+    /* Immediate Range (Location mode 11). The fused pipeline loop reads a
+     * base WITHOUT a proven static type (a captured var, a parameter, a
+     * call result) through this kind-dispatching helper, and since
+     * lower_range mints the packed Range instead of an eager boxed-int
+     * Array, such a base can be a Range. Same semantics as core/range.w's
+     * Range#[]: negative index counts from the end, nil out of bounds. */
+    if (w_is_range_imm(arr)) {
+        int64_t n = w_range_imm_size(arr);
+        int64_t i = w_as_int(index);
+        if (i < 0) i += n;
+        if (i < 0 || i >= n) return W_NIL;
+        return w_int(w_range_imm_start(arr) + i);
+    }
     WArray *a = w_as_array(arr);
     int64_t i = w_as_int(index);
     if (i < 0) i += a->size;
@@ -65935,6 +66107,9 @@ WValue w_array_size(WValue arr) {
      * ever changes, matching w_array_get's defensive symmetry. */
     if (w_is_wire_sequence(arr)) return w_int(w_wire_sequence_size(arr));
     if (w_is_body(arr)) return w_int(w_unbox_body_length(arr));
+    /* Immediate Range: the fused pipeline's untyped-base path sizes its
+     * source here before indexing it through w_array_get (see there). */
+    if (w_is_range_imm(arr)) return w_int(w_range_imm_size(arr));
     WArray *a = w_as_array(arr);
     return w_int(a->size);
 }

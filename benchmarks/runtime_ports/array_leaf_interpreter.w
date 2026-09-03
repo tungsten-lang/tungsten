@@ -7,6 +7,15 @@ use core/array
   << "FAIL [name]: got=[got] expected=[expected]"
   exit(1)
 
+# Surplus arguments are an error on both engines (E_LOWER_ARITY at compile
+# time where the callee is known; the interpreter raises at the call).
+-> surplus_rejected?(f)
+  begin
+    f.call
+    false
+  rescue surplus_error
+    true
+
 -> check(name, got, expected)
   if got != expected || type(got) != type(expected)
     fail_check(name, got, expected)
@@ -23,8 +32,8 @@ check("plain.cap", plain.cap, 8)
 check("plain.empty", plain.empty?, false)
 check("plain.first", plain.first, 10)
 check("plain.last", plain.last, 40)
-check("plain.first-extra", plain.first(1, 2, 3), 10)
-check("plain.last-extra", plain.last(1, 2, 3), 40)
+check("plain.first-extra rejected", surplus_rejected?(->() plain.first(1, 2, 3)), true)
+check("plain.last-extra rejected", surplus_rejected?(->() plain.last(1, 2, 3)), true)
 
 typed = u8[4]
 typed[0] = 3
@@ -35,7 +44,7 @@ check("typed.size", typed.size, 4)
 check("typed.cap", typed.cap, 4)
 check("typed.first", typed.first, 3)
 check("typed.last", typed.last, 17)
-check("typed.empty-extra", typed.empty?(1, 2, 3), false)
+check("typed.empty-extra rejected", surplus_rejected?(->() typed.empty?(1, 2, 3)), true)
 
 bits = bool[3]
 bits[0] = true

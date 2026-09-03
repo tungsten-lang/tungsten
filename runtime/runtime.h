@@ -2070,6 +2070,11 @@ WValue w_array_view(WValue arr, WValue lo_v, WValue len_v);
 /* arr[from..to] / arr[from...to] — wraps the slice form above
  * with Range-arg resolution (inclusive vs exclusive end + neg-index wrap). */
 WValue w_array_view_range(WValue arr, WValue from_v, WValue to_v, WValue exclusive_v);
+/* str[from..to] / str[from...to] — the String arm of the same sugar,
+ * indexed by code point (see w_string_idx_raw). Reached both through
+ * w_array_view_range's polymorphic dispatch and by a direct ccall from the
+ * tree-walking interpreter, so the two engines share one implementation. */
+WValue w_string_slice_range(WValue str, WValue from_v, WValue to_v, WValue exclusive_v);
 /* Dot-prefix elementwise operators — `lhs .+ rhs` etc. lift
  * scalar arithmetic over a typed array. Lhs is the array; rhs is either
  * another array (elementwise pair) or a scalar (broadcast). Returns a

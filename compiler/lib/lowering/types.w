@@ -125,6 +125,35 @@ builtin_runtime_classes = ["Socket", "Response", "TLS", "StringBuffer", "Standar
     "Mac"           => 0x85
     => nil
 
+# Body of the accessor a `- data` block auto-creates for one field, or nil
+# when no accessor should exist at all.
+#
+# For an ordinary class the data block IS the object's storage, so the field
+# reads back as the matching ivar. For a class that maps to a NATIVE runtime
+# layout (type_dispatch_key — Hash, Array, StringBuffer, …) the block only
+# MIRRORS a C header: the receiver is a packed or heap primitive, never a
+# WObject, so an `@field` load dies inside w_ivar_get_wv's as_object check —
+# that is the "runtime error: expected object" from `{a: 1}.count`, where
+# Hash's generated `count` getter shadows Enumerable#count. Read the header
+# field through the same `$field` view load core's hand-written accessors use
+# (core/hash.w's `-> size` is literally `$count`).
+#
+# Non-scalar fields on a native class get NO accessor: the view load is a raw
+# scalar read, so a pointer or fixed-array field (`* w64[] keys`, `u8[2] _pad`)
+# has no meaningful public value, and those names belong to the runtime's own
+# handlers (Hash#keys, Hash#values). collect_view_fields still records every
+# field, so `$keys` inside a core method is unaffected. Mirrors the
+# interpreter's data_field arm (dispatch_method / native_data_field_supported?).
+-> data_field_getter_body(class_name, field_name, field_type)
+  if type_dispatch_key(class_name) == nil
+    return Tungsten:AST:Ivar.new("@" + field_name)
+  if field_type == nil
+    return nil
+  ft = "" + field_type
+  if ft.starts_with?("*") || ft.include?("\[")
+    return nil
+  Tungsten:AST:ViewField.new(field_name)
+
 -> mark_builtin_class_used(mod, name)
   builtin_names = mod[:builtin_class_names]
   if builtin_names == nil || builtin_names[name] != true

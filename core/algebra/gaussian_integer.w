@@ -127,7 +127,7 @@
   # Euclidean division: returns [quotient, remainder] with N(remainder) less
   # than N(other).
   -> divmod(other)
-    raise "division by zero in Z[i]" if other.zero?
+    raise "division by zero in Z\[i]" if other.zero?
     scaled = self * other.conjugate
     denominator = other.norm
     quotient = GaussianInteger.new(

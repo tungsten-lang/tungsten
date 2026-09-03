@@ -369,6 +369,7 @@
   out << declare_fn("w_print", wv, wv)
   out << declare_fn("w_to_s", wv, wv)
   out << declare_fn("w_str_concat", wv, wv2)
+  out << declare_fn("w_str_concat_own", wv, wv3)
   out << declare_fn("w_str_append", wv, wv2)
   out << declare_fn("w_slab_freeze_safe", wv, "")
   out << declare_fn("w_type_tables_lock_safe", wv, "")
@@ -693,6 +694,15 @@
   out << declare_fn_attrs("pow", "double", dd, libm_attrs)
   out << declare_fn_attrs("atan2", "double", dd, libm_attrs)
   out << declare_fn_attrs("hypot", "double", dd, libm_attrs)
+  # Intrinsic twins of the libm names above (see libm_intrinsic_symbol).
+  # `speculatable` matches the attributes LLVM gives these intrinsics itself.
+  intr_attrs = "nounwind willreturn memory(none) speculatable"
+  out << declare_fn_attrs("llvm.sqrt.f64", "double", "double", intr_attrs)
+  out << declare_fn_attrs("llvm.fabs.f64", "double", "double", intr_attrs)
+  out << declare_fn_attrs("llvm.floor.f64", "double", "double", intr_attrs)
+  out << declare_fn_attrs("llvm.ceil.f64", "double", "double", intr_attrs)
+  out << declare_fn_attrs("llvm.round.f64", "double", "double", intr_attrs)
+  out << declare_fn_attrs("llvm.trunc.f64", "double", "double", intr_attrs)
   # IEEE-754-2019 minimumNumber/maximumNumber intrinsics (NaN = missing
   # data; single fminnm/fmaxnm on AArch64). The fused-pipeline raw f64
   # min/max combine calls these only when the host clang knows them
@@ -756,6 +766,38 @@
 
 -> declare_fn_noreturn(name, ret_type, arg_types_str)
   declare_fn_attrs(name, ret_type, arg_types_str, "noreturn cold nounwind")
+
+# The LLVM symbol a :call_libm_f64 target is actually emitted as.
+#
+# For the six libm names below the intrinsic is an exact semantic twin that
+# lowers to ONE machine instruction (fsqrt/fabs/frintm/frintp/frinta/frintz on
+# AArch64), so the mapping costs nothing — and it is what makes them
+# vectorizable. A bare `call double @sqrt(...)` is an opaque libcall: LLVM's
+# SLP bundler refuses to widen it, so n-body's ten pairwise `.sqrt` calls stay
+# scalar while clang -O3 on the identical C emits `fsqrt.2d`. `llvm.sqrt.f64`
+# has a <2 x double> form the bundler knows.
+#
+# errno is not lost: these declarations already carry memory(none) (the
+# comment on libm_attrs in declare_runtime explains why that is sound here),
+# so the libcall was never observably setting it either.
+#
+# Transcendentals (sin/cos/tan/exp/log/pow/…) deliberately keep the libm name:
+# their widening goes through clang's -fveclib libcall mapping (_simd_sin_d2 &
+# co.), which matches on the C name, and the intrinsic form would lose it.
+-> libm_intrinsic_symbol(name)
+  if name == "sqrt"
+    return "llvm.sqrt.f64"
+  if name == "fabs"
+    return "llvm.fabs.f64"
+  if name == "floor"
+    return "llvm.floor.f64"
+  if name == "ceil"
+    return "llvm.ceil.f64"
+  if name == "round"
+    return "llvm.round.f64"
+  if name == "trunc"
+    return "llvm.trunc.f64"
+  name
 
 -> declare_fn_attrs(name, ret_type, arg_types_str, attrs)
   out = StringBuffer(ret_type.size() + name.size() + arg_types_str.size() + attrs.size() + 20)

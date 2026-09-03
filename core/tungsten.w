@@ -594,6 +594,8 @@
   auto :WeilCubic,              "algebra"
 
   auto :Comparable,   "traits/comparable"
+  auto :BitOrdered,   "traits/bit_ordered"
+  auto :BitEqual,     "traits/bit_equal"
   auto :Enumerable,   "traits/enumerable"
   auto :Printable,    "traits/printable"
   auto :Inspectable,  "traits/inspectable"

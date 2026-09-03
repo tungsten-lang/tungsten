@@ -138,6 +138,7 @@ use wire_constructors
     # The physical callee slot receives one Array even though the source call
     # may supply any number of arguments at that position.
     known_fn_splat_info: {},
+    known_fn_defs: {},
     known_fn_overloads: {},
     known_typed_overload_counts: {},
     known_unique_typed_overload_keys: {},

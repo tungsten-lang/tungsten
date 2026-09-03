@@ -1,0 +1,25 @@
+# Integers: division and modulo signs, shifts, bitwise ops, literal bases.
+#
+# Cross-engine parity spec (scripts/parity.sh).
+
+<< "div.neg [-7 / 2]"
+<< "mod.neg [-7 % 2]"
+<< "mod.neg2 [7 % -2]"
+<< "div.floor [7 / 2]"
+<< "shl [1 << 10]"
+<< "shr [1024 >> 3]"
+<< "and [12 & 10]"
+<< "or [12 | 10]"
+<< "xor [12 ^ 10]"
+<< "hex [0xff]"
+<< "bin [0b1010]"
+<< "oct [0o17]"
+<< "under [1_000_000]"
+<< "tos16 [(255).to_s(16)]"
+<< "tos2 [(5).to_s(2)]"
+<< "abs [(-5).abs]"
+<< "pow.neg [2 ** -1]"
+<< "pow.zero [0 ** 0]"
+<< "gcd [(12).gcd(18)]"
+<< "prec [1 + 2 * 3 - 4 / 2]"
+<< "bit.prec [1 | 2 == 3]"

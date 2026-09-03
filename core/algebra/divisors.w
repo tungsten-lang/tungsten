@@ -504,7 +504,7 @@
     while term_index < terms.size
       term = terms[term_index]
       if term.class_name != "Array" || term.size != 2
-        raise "a divisor term must be [coefficient, place]"
+        raise "a divisor term must be \[coefficient, place]"
       coefficient = term[0]
       place = term[1]
       coefficient_class = coefficient.class_name

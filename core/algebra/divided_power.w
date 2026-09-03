@@ -286,7 +286,7 @@ use core/algebra/integer_lattice
 
   -> validate_element(value)
     if value.class_name != "Array" || value.size != 2
-      raise "binary-carry element must be [linear, quadratic]"
+      raise "binary-carry element must be \[linear, quadratic]"
     element(value[0], value[1])
 
   -> same_vector?(left, right)

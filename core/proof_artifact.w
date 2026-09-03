@@ -64,7 +64,7 @@ use core/digest
     @source_bindings.each -> (binding)
       if (binding.class_name != "Array" || binding.size != 2 ||
           !ProofArtifacts.valid_sha256?(binding[1]))
-        raise "proof artifact source binding must be [name, sha256]"
+        raise "proof artifact source binding must be \[name, sha256]"
     @dependencies.each -> (dependency)
       if dependency.class_name != "ProofArtifactBundle"
         raise "proof artifact dependency has the wrong type"

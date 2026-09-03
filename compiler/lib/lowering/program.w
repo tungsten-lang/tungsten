@@ -196,6 +196,14 @@
   nil
 
 -> const_disqualify_nested_seq(seq, assign_count)
+  # A body-ish field is not always a node list: rescue_expr (postfix
+  # `rescue`) packs its body and fallback as SINGLE nodes, and .size() on
+  # an AST node is nil — `i < nil` raises in the compiled compiler. Route a
+  # single node through the node walker, loader.w's
+  # collect_autoload_refs_seq convention.
+  if is_ast_node?(seq)
+    const_disqualify_nested(seq, assign_count)
+    return nil
   i = 0
   while i < seq.size()
     const_disqualify_nested(seq[i], assign_count)

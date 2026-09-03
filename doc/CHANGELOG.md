@@ -2,6 +2,78 @@
 
 ## Unreleased
 
+- **Compile-time arity contracts** — a call that passes more arguments than
+  the callee declares, or fewer than its required leading parameters, is a
+  compile error (`E_LOWER_ARITY`, `tungsten explain E_LOWER_ARITY`) wherever
+  the callee is resolved at compile time: source functions, constructors
+  (too many as well as too few), class statics, and instance methods on a
+  receiver whose class is exactly known (a local bound from a constructor,
+  an exactly typed ivar, `Cls.new(...)`). The interpreter raises the same
+  message when it binds parameters. Previously extra arguments were silently
+  dropped and missing ones nil-padded (`arr.first(10)` returned `arr.first`).
+  Dynamic dispatch on an unknown receiver is not checked, so compiled code
+  pays nothing at runtime. `TUNGSTEN_ARITY=off` disables the check for triage.
+- **Explicit partial application** — a bare `_` argument is a placeholder:
+  `add(1, _)` is `->(x) add(1, x)`, one parameter per placeholder in argument
+  order (`[1, 2, 3].map(add(10, _))`). A name `_` assigned in the enclosing
+  function is an ordinary variable.
+- **Method references and currying** — `add/2` denotes the source function
+  `add` as a closure of arity 2 (the value form of the `-> add/2` declaration
+  spelling; the arity must be one the definition accepts). `Closure#arity`
+  and `Closure#curry` (`(add/2).curry.call(1).call(2)`; `curry(n)` for a
+  closure of unknown arity; arities 1..4) work on both engines. `x/2` on a
+  variable is still division; write `(add/2).curry`, since `/` binds looser
+  than `.`.
+- **Loop temporaries are freed at scope close** — `s = "payload-[i]-" + "x" * 200`
+  and `a = [i, i + 1, i + 2, i + 3]` inside a loop body no longer leak one
+  allocation per iteration (1.1 GB → 3 MB and 131 MB → 2 MB peak RSS at two
+  million iterations). `String * Int` is typed and lowered as a direct
+  repeat, integer interpolation parts stringify through a fresh producer, and
+  a concat whose operands are anonymous fresh temporaries takes ownership of
+  them (`w_str_concat_own`), flattening instead of building a rope that would
+  retain both leaves. Array literals are recognized as owned producers. A
+  temporary stored in a top-level (global) variable is still retained: it may
+  be read from anywhere.
+- **Exact `Decimal#round(digits)`** — `(2.345).round(2)` is `2.35` on both
+  engines (rounding on the significand, half away from zero); the digits
+  argument was silently ignored. `Float#round(digits)` rounds to that many
+  places.
+- **Inference evidence policy** — `compiler/lib/lowering/inference.w` now
+  documents which arms rest on declared, literal, or closed-form evidence,
+  and `TUNGSTEN_INFER=boxed` is a reference oracle that routes all untyped
+  integer arithmetic through the guarded, promoting runtime path so a
+  program's output can be diffed against the default lowering. The remaining
+  name-based guess (`String#to_i` past i64 typed as a machine int) is pinned
+  as a known divergence in `spec/parity/integer_to_i_bignum_spec.w`.
+- **Cross-engine parity suite** — `spec/parity/` runs each spec through the
+  native interpreter and the compiled path and diffs the transcripts
+  (`make parity`, `scripts/parity.sh`, `doc/PARITY.md`; a default stage of
+  `scripts/test-specs.sh`). Divergences carry a `## parity xfail` header and a
+  row in `spec/parity/DIVERGENCES.md`; an unexpected agreement is reported so
+  the ledger cannot go stale.
+- **Fixed** — `"abcdef"[1..3]` SIGSEGV compiled; `super(name)` in a subclass
+  constructor leaving the field empty compiled; `~5` / `~1e10` emitting
+  invalid IR; `Hash#count` dying compiled; a raise from a constructor with a
+  default or keyword parameter, or from a zero-argument function called
+  without parentheses, escaping `begin`/`rescue` compiled; a symbol literal
+  passed to a user class's own `select`/`map`/`reject`/`count` being rewritten
+  into a block; bracketed prose in core validation messages (`[x, y]`)
+  interpolating as code; `BitOrdered`/`BitEqual` missing from the autoload
+  manifest; `make specs` running nothing because one spec was unclassified;
+  twelve default-lane spec failures (WIRE-record specs, a Range pipeline
+  SIGSEGV, an i128 shift miscompile, a postfix-rescue lowering crash, a
+  no-raise summary eliding a landing pad, `Tempfile.create`, `Atomic.new`, and
+  the S-class relation search bound).
+- **Performance** — `bigint_fib` 476 ms → 38 ms (the bigint arena walked every
+  chunk on each freelist miss; the drain is now gated on a cross-thread
+  release epoch) and `array_fill` 170 ms → 16 ms (a typed-array size was
+  treated as an escape, pinning the loop bound boxed). Cross-language suite:
+  1.43x vs C, 1.23x vs Rust on the head-to-head geomean.
+- **Removed from the tree** — 416 flip-graph result text files (223 MB) under
+  `benchmarks/matmul/metaflip/`; see `TODO.md` for the history purge.
+
+### Earlier unreleased notes
+
 - **Machine-int annotated params materialize as raw entry slots** — a
   parameter reassigned anywhere in its body with `## i64/u64` now gets a
   raw machine slot at function ENTRY (the representation a local gets from

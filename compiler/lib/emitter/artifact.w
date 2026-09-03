@@ -47,9 +47,14 @@
   # Collect all call targets that need declarations, and track used runtime functions
   ccall_needed = {}
   used_runtime_fns = {}
+  # Verbatim `ll <<~IR` bodies, concatenated: their `@name(` call targets are
+  # invisible to the instruction scan below (see embedded_ir_calls?).
+  embedded_ir_text = StringBuffer(256)
   fi = 0
   while fi < mod[:functions].size()
     wfunc = mod[:functions][fi]
+    if wfunc[:embedded_ll] != nil
+      embedded_ir_text << wfunc[:embedded_ll]
     bi = 0
     while bi < wfunc[:blocks].size()
       blk = wfunc[:blocks][bi]
@@ -2290,7 +2295,7 @@
   if slab_info != nil && slab_info[:slab_entries].size() > 0
     used_runtime_fns["w_slab_init_static"] = true
 
-  decls_out = filter_runtime_decls(declare_runtime(), used_runtime_fns) + seam_decls.to_s()
+  decls_out = filter_runtime_decls(declare_runtime(), used_runtime_fns, embedded_ir_text.to_s()) + seam_decls.to_s()
   if ccall_needed.has_key?("__w_bigint_sqr4_locked_exact") || ccall_needed.has_key?("__w_bigint_sqr5_locked_exact")
     # Keep the large exact sqr@4 worker and its size test behind one outlined
     # default-path call. Inlining either into the locked caller makes LLVM
@@ -2749,14 +2754,22 @@
   # Entry block: allocas for all var slots, then instructions
   lbr = "\["
   rbr = "]"
-  # Pre-scan for max method call arg count (needed for scratch alloca)
+  # Pre-scan for max method call arg count (needed for scratch alloca), and
+  # for a setjmp — a landing pad this function can be resumed at by longjmp
+  # from anywhere inside the region it guards. Var-slot traffic then has to be
+  # volatile so LLVM's mem2reg/SROA leave the slots in memory and a rescue
+  # clause observes the writes its try body made (cfg.w#has_setjmp skips the
+  # in-house mem2reg for the same reason).
   max_mcall_argc = 0
+  volatile_slots = false
   bi = 0
   while bi < f[:blocks].size()
     blk = f[:blocks][bi]
     ji = 0
     while ji < blk[:instructions].size()
       inst = blk[:instructions][ji]
+      if wire_kind(inst) == :setjmp
+        volatile_slots = true
       if wire_kind(inst) == :call_method_i64 && wire_get(inst, :args) != nil
         argc = wire_sequence_size(wire_get(inst, :args))
         needs_scratch = argc > 0 && !scalar_source_call?(inst)
@@ -2769,6 +2782,11 @@
   if fp_flags == nil
     fp_flags = ""
   direct_buffer_emit = env("TUNGSTEN_DIRECT_BUFFER_EMIT") != "0"
+  # The direct buffer path renders the fixed load/store shapes with no
+  # volatile marker; route this function's instructions through the ordinary
+  # renderer instead of duplicating the marker in the hot fast path.
+  if volatile_slots
+    direct_buffer_emit = false
 
   # Emit all blocks — always emit entry block label so SSA phi nodes can reference it
   slots = f[:var_slots]
@@ -2833,7 +2851,7 @@
       out << "  "
       inst = blk[:instructions][j]
       if !direct_buffer_emit || !append_instruction_direct(out, inst, phi_label_redirects)
-        out << render_instruction(inst, string_wvs, used_ptr_ids, phi_label_redirects, fp_flags, arm64_target, windows_target)
+        out << render_instruction(inst, string_wvs, used_ptr_ids, phi_label_redirects, fp_flags, arm64_target, windows_target, volatile_slots)
       out << "\n"
       j += 1
     i += 1

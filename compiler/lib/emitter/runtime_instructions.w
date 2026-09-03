@@ -1,6 +1,6 @@
 # Emitter runtime instructions — constants, calls, control flow, and objects.
 
--> render_runtime_instruction(inst, string_wvs, used_ptr_ids, phi_label_redirects = nil, fp_flags = "", arm64_target = true, windows_target = false)
+-> render_runtime_instruction(inst, string_wvs, used_ptr_ids, phi_label_redirects = nil, fp_flags = "", arm64_target = true, windows_target = false, volatile_slots = false)
   op = wire_kind(inst)
 
   case op
@@ -1574,9 +1574,9 @@
     rbr = "]"
     wire_get(inst, :temp) + " = getelementptr inbounds " + lbr + wire_get(inst, :count).to_s() + " x i64" + rbr + ", ptr " + wire_get(inst, :base) + ", i32 0, i32 " + wire_get(inst, :index).to_s()
   when :store_ptr
-    "store i64 " + wire_get(inst, :value) + ", ptr " + wire_get(inst, :dest) + ", align 8"
+    "store " + slot_volatile_marker(volatile_slots, wire_get(inst, :dest)) + "i64 " + wire_get(inst, :value) + ", ptr " + wire_get(inst, :dest) + ", align 8"
   when :load_ptr
-    wire_get(inst, :temp) + " = load i64, ptr " + wire_get(inst, :ptr) + ", align 8"
+    wire_get(inst, :temp) + " = load " + slot_volatile_marker(volatile_slots, wire_get(inst, :ptr)) + "i64, ptr " + wire_get(inst, :ptr) + ", align 8"
 
   # SSA phi with N inputs (from mem2reg)
   when :phi_ssa

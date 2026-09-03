@@ -2,6 +2,15 @@
 # Natural arithmetic always normalizes zero back to Integer, so the synthetic
 # size-zero/no-storage cases remain a compiled C-fixture gate.
 
+# Surplus arguments are an error on both engines (E_LOWER_ARITY at compile
+# time where the callee is known; the interpreter raises at the call).
+-> surplus_rejected?(f)
+  begin
+    f.call
+    false
+  rescue surplus_error
+    true
+
 -> check(name, got, expected)
   if got != expected
     << "FAIL interpreter [name]: got=[got] expected=[expected]"
@@ -43,11 +52,11 @@ while i < values.size()
   check("[i].odd", value.odd?, !expected_even[i])
   check("[i].negative", value.negative?, expected_negative[i])
   check("[i].positive", value.positive?, !expected_negative[i])
-  check("[i].extra.zero", value.zero?(1, 2, 3, 4), false)
-  check("[i].extra.even", value.even?(1, 2, 3, 4), expected_even[i])
-  check("[i].extra.odd", value.odd?(1, 2, 3, 4), !expected_even[i])
-  check("[i].extra.negative", value.negative?(1, 2, 3, 4), expected_negative[i])
-  check("[i].extra.positive", value.positive?(1, 2, 3, 4), !expected_negative[i])
+  check("[i].extra.zero rejected", surplus_rejected?(->() value.zero?(1, 2, 3, 4)), true)
+  check("[i].extra.even rejected", surplus_rejected?(->() value.even?(1, 2, 3, 4)), true)
+  check("[i].extra.odd rejected", surplus_rejected?(->() value.odd?(1, 2, 3, 4)), true)
+  check("[i].extra.negative rejected", surplus_rejected?(->() value.negative?(1, 2, 3, 4)), true)
+  check("[i].extra.positive rejected", surplus_rejected?(->() value.positive?(1, 2, 3, 4)), true)
   i += 1
 
 # Tree-walker source dispatch historically binds but does not implicitly

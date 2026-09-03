@@ -93,6 +93,20 @@ with `Undefined symbols: ___w_NAME`.
 types at the call site. Note that the *actual* element width is what matters —
 `i32[8]`, `Array.zeros` variants, and Metal buffer views each pin their own.
 
+## E_LOWER_ARITY
+
+A call passes more arguments than the callee declares, or fewer than its
+required (non-defaulted, non-keyword) leading parameters, and the callee was
+resolved at compile time: a source function, a constructor, a class static,
+or an instance method on a receiver whose class is exactly known. Tungsten
+never silently drops extra arguments or pads missing ones with nil; the
+interpreter raises the same error when it binds parameters. Dynamic dispatch
+on an unknown receiver is not checked at runtime.
+
+**Fix:** Fix the call, or give the definition a default (`b = 10`), a `*rest`
+splat, or a block parameter if it is meant to be variadic. `TUNGSTEN_ARITY=off`
+disables the check for triage only.
+
 ## E_LOWER_UNKNOWN_TRAIT
 
 A class says `is TraitName` but that trait was not found at lower time.

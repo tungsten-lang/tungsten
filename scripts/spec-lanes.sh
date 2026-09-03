@@ -397,6 +397,70 @@ compiled_specs=(
   spec/numeric/rational_spec.w
   spec/numeric/vector_spec.w
   spec/core/date_native_spec.w
+  spec/core/algebra_chain_complex_spec.w
+  spec/core/algebra_group_presentation_spec.w
+  spec/core/algebra_integer_lattice_spec.w
+  spec/core/algebra_ntt_spec.w
+  spec/core/algebra_smith_normal_form_hnf_spec.w
+  spec/core/algebra_smith_normal_form_spec.w
+  spec/core/algebra_toric_fan_spec.w
+  spec/core/blank_slate_spec.w
+  spec/core/calibration_spec.w
+  spec/core/char_spec.w
+  spec/core/character_spec.w
+  spec/core/color_spec.w
+  spec/core/combinatorics_coding_spec.w
+  spec/core/combinatorics_graph_spec.w
+  spec/core/crypto_crc32_spec.w
+  spec/core/crypto_pbkdf2_spec.w
+  spec/core/crypto_sha1_spec.w
+  spec/core/crypto_sha2_spec.w
+  spec/core/crypto_sha256_spec.w
+  spec/core/digest_spec.w
+  spec/core/directory_spec.w
+  spec/core/duration_spec.w
+  spec/core/dynamics_integrators_spec.w
+  spec/core/fft_spec.w
+  spec/core/geometry_geodesic_spec.w
+  spec/core/graphics_spec.w
+  spec/core/hash_custom_spec.w
+  spec/core/heap_spec.w
+  spec/core/hole_spec.w
+  spec/core/interpolate_spec.w
+  spec/core/locale_spec.w
+  spec/core/measurement_spec.w
+  spec/core/metal_sgemm_bf16_spec.w
+  spec/core/metal_sgemm_spec.w
+  spec/core/mlx_spec.w
+  spec/core/multiset_spec.w
+  spec/core/nil_spec.w
+  spec/core/object_spec.w
+  spec/core/os_spec.w
+  spec/core/path_spec.w
+  spec/core/physics_finite_volume_spec.w
+  spec/core/physics_simulation_spec.w
+  spec/core/plot_spec.w
+  spec/core/plot3d_spec.w
+  spec/core/protocol_spec.w
+  spec/core/random_spec.w
+  spec/core/set_spec.w
+  spec/core/sgemm_auto_spec.w
+  spec/core/stats_spec.w
+  spec/core/table_csv_spec.w
+  spec/core/table_group_join_spec.w
+  spec/core/table_spec.w
+  spec/core/traits_bit_equal_spec.w
+  spec/core/traits_bit_ordered_spec.w
+  spec/core/tuple_spec.w
+  spec/numeric/centumduodetrigintanion_spec.w
+  spec/numeric/ducentiquinquagintasexion_spec.w
+  spec/numeric/octonion_spec.w
+  spec/numeric/quaternion_spec.w
+  spec/numeric/sedenion_spec.w
+  spec/numeric/sexagintaquatronion_spec.w
+  spec/numeric/trigintaduonion_spec.w
+  spec/core/instant_spec.w
+  spec/core/time_spec.w
 )
 compiled_priority_specs=(
   spec/core/algebra_c_ab_divisors_spec.w
@@ -580,6 +644,62 @@ interpreter_specs=(
   benchmarks/runtime_ports/identity_leaf_interpreter.w
   benchmarks/runtime_ports/small_big_array_interpreter.w
   benchmarks/runtime_ports/sync_wrapper_revisit_interpreter.w
+  spec/core/algebra_chain_complex_spec.w
+  spec/core/algebra_eisenstein_integer_spec.w
+  spec/core/algebra_group_presentation_spec.w
+  spec/core/algebra_integer_lattice_spec.w
+  spec/core/algebra_ntt_spec.w
+  spec/core/algebra_smith_normal_form_spec.w
+  spec/core/blank_slate_spec.w
+  spec/core/calibration_spec.w
+  spec/core/char_spec.w
+  spec/core/character_spec.w
+  spec/core/color_spec.w
+  spec/core/combinatorics_coding_spec.w
+  spec/core/crypto_crc32_spec.w
+  spec/core/crypto_pbkdf2_spec.w
+  spec/core/crypto_sha1_spec.w
+  spec/core/crypto_sha2_spec.w
+  spec/core/crypto_sha256_spec.w
+  spec/core/digest_spec.w
+  spec/core/directory_spec.w
+  spec/core/duration_spec.w
+  spec/core/dynamics_integrators_spec.w
+  spec/core/fft_spec.w
+  spec/core/geometry_geodesic_spec.w
+  spec/core/graphics_spec.w
+  spec/core/hash_custom_spec.w
+  spec/core/heap_spec.w
+  spec/core/hole_spec.w
+  spec/core/interpolate_spec.w
+  spec/core/locale_spec.w
+  spec/core/measurement_spec.w
+  spec/core/mlx_spec.w
+  spec/core/module_spec.w
+  spec/core/multiset_spec.w
+  spec/core/nil_spec.w
+  spec/core/object_spec.w
+  spec/core/path_spec.w
+  spec/core/physics_finite_volume_spec.w
+  spec/core/physics_simulation_spec.w
+  spec/core/plot_spec.w
+  spec/core/plot3d_spec.w
+  spec/core/protocol_spec.w
+  spec/core/random_spec.w
+  spec/core/set_spec.w
+  spec/core/stats_spec.w
+  spec/core/table_csv_spec.w
+  spec/core/table_group_join_spec.w
+  spec/core/table_spec.w
+  spec/core/traits_bit_equal_spec.w
+  spec/core/tuple_spec.w
+  spec/numeric/centumduodetrigintanion_spec.w
+  spec/numeric/ducentiquinquagintasexion_spec.w
+  spec/numeric/octonion_spec.w
+  spec/numeric/quaternion_spec.w
+  spec/numeric/sedenion_spec.w
+  spec/numeric/sexagintaquatronion_spec.w
+  spec/numeric/trigintaduonion_spec.w
 )
 interpreter_reject_specs=(
   spec/compiler/date_invalid_constructor.w
@@ -746,6 +866,8 @@ parity_specs=(
   spec/parity/units_derived_spec.w
   spec/parity/units_printing_spec.w
   spec/parity/units_unary_minus_spec.w
+  spec/parity/integer_inference_pins_spec.w
+  spec/parity/integer_to_i_bignum_spec.w
 )
 exclude_specs=(
   spec/compiler/bigint_addmul_fusion_spec.w
@@ -1078,6 +1200,7 @@ exclude_specs=(
   spec/sci/tensor_unit_spec.w
   spec/sci/wtensor_slice_spec.w
   spec/sci/wtensor_spec.w
+  spec/core/calculus_jet_spec.w
 )
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

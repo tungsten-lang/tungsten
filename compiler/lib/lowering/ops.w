@@ -332,6 +332,21 @@
   bits = value.to_i() ## u64
   "u0x" + ccall("w_int_to_hex_str", bits)
 
+# The 128-bit machine type a binary op must be evaluated at when its
+# declared 64-bit context is narrower than one of its operands (u128 wins
+# over i128, as in machine_int_result_type); nil when the context is
+# already 128-bit or neither operand is statically 128-bit.
+-> machine_int128_operand_type(ctx, node, type)
+  if is_machine_int128_type(type)
+    return nil
+  lt = canonical_machine_int_type(infer_type(node.left, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps))
+  rt = canonical_machine_int_type(infer_type(node.right, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps))
+  if is_u128_type(lt) || is_u128_type(rt)
+    return :u128
+  if is_i128_type(lt) || is_i128_type(rt)
+    return :i128
+  nil
+
 -> lower_machine_int_expression(ctx, node, type)
   # An assignment hint belongs to the target, so a conditional RHS reaches
   # this helper without an inner TypeAscription node. Merge its arms in a raw
@@ -368,6 +383,18 @@
     int_op = machine_int_op(type, node.op)
     if int_op != nil
       wfn = ctx[:func]
+      # The context narrows the RESULT, never an operand wider than it. A
+      # 64-bit context over a 128-bit operand — `(product >> 64) ## u64`,
+      # the high half of a u128 product — must shift at 128 bits and
+      # truncate after. Recursing under :u64 truncated `product` first and
+      # then shifted the i64 by 64: poison in LLVM, folded into a trap
+      # (BigInt#lcm SIGTRAP) or, through unreachable-propagation, into a
+      # mis-folded branch upstream of the shift. Lower the whole tree at
+      # the widest operand width, then cast down once.
+      wide = machine_int128_operand_type(ctx, node, type)
+      if wide != nil
+        wide_reg = lower_machine_int_expression(ctx, node, wide)
+        return cast_raw_machine_int(wfn, wide_reg, wide, type)
       lhs = lower_machine_int_expression(ctx, node.left, type)
       rhs = lower_machine_int_expression(ctx, node.right, type)
       temp = next_temp(wfn)
@@ -1551,6 +1578,30 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   wfn = ctx[:func]
   op = node.op
 
+  # `add/2` — a method reference: a bare source-function name over an
+  # integer literal denotes the function as a closure of that arity
+  # (`->(a, b) add(a, b)`), the value form of the `-> add/2` declaration
+  # spelling. Only a name that is NOT a local variable and IS a known
+  # source function qualifies, so `x/2` on a variable stays a division.
+  # The arity must be one the definition accepts (E_LOWER_ARITY otherwise).
+  if op == :SLASH && node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :var && node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :int
+    ref_name = node.left.name
+    ref_def = ctx[:mod][:known_fn_defs][ref_name]
+    ref_is_local = (ctx[:var_types] != nil && ctx[:var_types][ref_name] != nil) || (ctx[:local_assignment_counts] != nil && ctx[:local_assignment_counts][ref_name] != nil)
+    if ref_def != nil && !ref_is_local
+      ref_arity = node.right.value
+      check_static_call_arity(ctx, node, ref_def, "'" + ref_name + "/" + ref_arity.to_s() + "'", ref_arity)
+      ref_params = []
+      ref_args = []
+      ri = 0
+      while ri < ref_arity
+        pname = "__mr" + (ri + 1).to_s()
+        ref_params.push(pname)
+        ref_args.push(Tungsten:AST:Var.new(pname))
+        ri += 1
+      ref_call = Tungsten:AST:Call.new(nil, ref_name, ref_args, nil)
+      return lower_expression(ctx, Tungsten:AST:Block.new(ref_params, [ref_call]))
+
   # Tag-guard fold: a comparison over NaN-box tag bits decided by a
   # :structural fact folds to its constant. An undecided or fact-free
   # compare falls through unchanged — the nil path is the load-bearing
@@ -1899,6 +1950,20 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, "w_str_append", nil, nil, temp)
     return rebind_local_i64(ctx, node.left.name, temp, :string)
 
+  # String * Int: statically text × integer → direct w_string_repeat (the
+  # runtime the `.repeat(n)` method route already uses). The generic path
+  # (__w_mul_fast → w_mul) re-discovers stringiness per call and, being an
+  # opaque call, hides the fresh heap string from the ownership pass —
+  # `s = "x" * 200` in a loop leaked every iteration (1.1 GB at 2M).
+  if op == :STAR && lt == :string && is_integer_like_type(rt)
+    lhs = lower_expression(ctx, node.left)
+    rhs = lower_expression(ctx, node.right)
+    lhs_reg = ensure_i64_value(wfn, lhs)
+    rhs_reg = ensure_i64_value(wfn, rhs)
+    temp = next_temp(wfn)
+    emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, "w_string_repeat", nil, nil, temp)
+    return typed_value(:i64, temp)
+
   # String + String: both sides statically text → direct w_str_concat.
   # The generic path (__w_add_fast → w_add) re-discovers stringiness per
   # call and coerces the RHS through w_to_s; with both types known that
@@ -1906,10 +1971,27 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # canonical w_string_n below) are w_add's own string arm.
   if op == :PLUS && lt == :string && rt == :string
     lhs = lower_expression(ctx, node.left)
-    rhs = lower_expression(ctx, node.right)
     lhs_reg = ensure_i64_value(wfn, lhs)
+    lhs_last = last_emitted_instruction(wfn)
+    rhs = lower_expression(ctx, node.right)
     rhs_reg = ensure_i64_value(wfn, rhs)
     temp = next_temp(wfn)
+    # Owned operands: an operand that is syntactically anonymous (no name
+    # can alias it) AND whose lowering's last emitted instruction is a
+    # guaranteed-fresh string producer with that very temp is consumed by
+    # this concat alone, so the concat may take ownership and release it —
+    # the generalization of the w_int_to_s trick below to both sides and
+    # every fresh producer. Past 61 bytes w_str_concat would build a rope
+    # retaining both leaves (unfreeable); w_str_concat_own flattens instead.
+    own_mask = 0
+    if env("TUNGSTEN_FREE") != "0"
+      if fresh_string_operand?(node.left, lhs_last, lhs_reg)
+        own_mask += 1
+      if fresh_string_operand?(node.right, last_emitted_instruction(wfn), rhs_reg)
+        own_mask += 2
+    if own_mask != 0
+      emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg, own_mask.to_s()], nil, nil, "w_str_concat_own", nil, nil, temp)
+      return typed_value(:i64, temp)
     # `pre + i.to_s()`: when the RHS is syntactically an anonymous call
     # whose lowering's LAST emitted instruction is a guaranteed-fresh
     # string producer with this very temp (w_int_to_s mints an
@@ -4081,3 +4163,19 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     emit_wire_call_direct_i64(wfn, nil, [a_reg, b_reg], nil, nil, math_runtime, nil, nil, temp)
     return typed_value(:i64, temp)
   nil
+
+# An operand of a string concat that this concat may take ownership of: the
+# source node is anonymous (a literal/interpolation/operator/call result —
+# never a var, ivar, self, or global that a name could alias), and the last
+# instruction its lowering emitted is a direct call to a producer that mints
+# an independent heap string per call, writing exactly this register.
+-> fresh_string_operand?(operand_node, last_inst, reg)
+  if operand_node == nil || !is_ast_node?(operand_node)
+    return false
+  if ast_kind(operand_node) in (:var :ivar :self_ref :global :class_ref :cvar :const)
+    return false
+  if last_inst == nil || wire_kind(last_inst) != :call_direct_i64
+    return false
+  if wire_get(last_inst, :temp) != reg
+    return false
+  wire_get(last_inst, :name) in ("w_int_to_s" "w_string_repeat" "w_str_concat" "w_str_concat_free_lhs" "w_str_concat_free_rhs" "w_str_concat_own")

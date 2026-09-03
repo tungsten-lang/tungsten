@@ -60,9 +60,24 @@
   ctor_ctx = {mod: mod, class_name: class_name}
   ctor = class_set_ctor_name(ctor_ctx, node)
   if ctor != nil
-    constructor_worker = mod[:class_constructor_fn_names][ctor + ".new/" + node.args.size().to_s()]
+    # Resolve the initializer the way lower_method_call does — up the
+    # superclass chain, keyed by the CALL SITE's argument count.
+    constructor_worker = nil
+    ctor_owner = ctor
+    ctor_guard = 0
+    while ctor_owner != nil && ctor_guard < 64
+      constructor_worker = mod[:class_constructor_fn_names][ctor_owner + ".new/" + node.args.size().to_s()]
+      if constructor_worker != nil
+        break
+      ctor_owner = mod[:class_super_names][ctor_owner]
+      ctor_guard += 1
     if constructor_worker == nil
-      return true
+      # No summarized initializer for this arity. `.new` either dispatches to
+      # one the registry does not index (defaults, keywords, splat, or a block
+      # param — see definitions.w's `plain` gate) or, with no constructor at
+      # all, raises the arity error the constructor protocol mandates. Neither
+      # is a no-raise fact.
+      return false
     return no_raise_add_worker_dependencies(mod, [constructor_worker], dependencies)
 
   receiver_fact = nil
@@ -112,6 +127,14 @@
     return false
   if kind == :call
     return no_raise_call_safe?(mod, node, class_name, var_types, dependencies)
+  # A bare identifier that names a source function is a zero-argument CALL
+  # (lowering resolves it that way); treating it as a plain variable read
+  # summarized `begin boom0 rescue ...` as no-raise and let the raise escape
+  # the landing pad. Locals shadow functions, so a name with a recorded
+  # local type stays a read.
+  if kind == :var && mod[:known_calls] != nil && mod[:known_calls][node.name] != nil && (var_types == nil || var_types[node.name] == nil)
+    synthetic_call = Tungsten:AST:Call.new(nil, node.name, [], nil)
+    return no_raise_call_safe?(mod, synthetic_call, class_name, var_types, dependencies)
   if kind == :binary_op
     return no_raise_binary_safe?(mod, node, class_name, var_types, dependencies)
   if kind == :compound_assign
@@ -139,6 +162,16 @@
     return no_raise_node_safe?(mod, node.fallback, class_name, class_set_copy_env(var_types), dependencies)
   if kind in (:fn_def :method_def :class_def :module_def :trait_def :block)
     return true
+  # Everything else stays may-raise, as the contract at the top of this file
+  # states. Only forms that perform NO dispatch of their own — literals, plain
+  # reads, and structural control flow — delegate the question to their
+  # children below. `yield`, `super`, `<<`, string interpolation, `case`
+  # comparisons and every dated/quantity/regex literal all invoke code this
+  # analysis has not summarized; walking their children would prove nothing
+  # and used to elide the enclosing landing pad, silently skipping `ensure`
+  # and letting a rescued exception escape.
+  if !(kind in (:program :if :while :and :or :not :return :break :next :nil_lit :bool :int :float :string :symbol :char :codepoint :array :var :ivar :cvar :gvar :self_ref :class_ref :key :param :magic_constant :return_nil))
+    return false
   children = ast_children(node)
   i = 0
   while i < children.size()

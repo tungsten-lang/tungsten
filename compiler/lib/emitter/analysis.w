@@ -1,6 +1,6 @@
 # Emitter analysis — declarations, metadata, call contracts, and cache policy.
 
--> filter_runtime_decls(decls, used_fns)
+-> filter_runtime_decls(decls, used_fns, embedded_ir)
   lines = decls.split("\n")
   out = StringBuffer(decls.size())
   i = 0
@@ -8,11 +8,22 @@
     line = lines[i]
     if line != ""
       name = runtime_decl_name(line)
-      if name != nil && used_fns[name] == true
+      if name != nil && (used_fns[name] == true || embedded_ir_calls?(embedded_ir, name))
         out << line
         out << "\n"
     i += 1
   out.to_s()
+
+# An `ll <<~IR` body is opaque to the WIRE-instruction scan that builds
+# used_fns, so the externs it calls survived only when ordinary code happened
+# to reference them too: core/numeric/big_int.w's __bigint_isqrt_u128 calls
+# `@sqrt` and rode on the Math.sqrt fast path's declaration until that path
+# started emitting `@llvm.sqrt.f64` instead. A declaration the embedded text
+# actually calls is kept on its own evidence.
+-> embedded_ir_calls?(embedded_ir, name)
+  if embedded_ir == nil || embedded_ir == ""
+    return false
+  embedded_ir.index("@" + name + "(") != nil
 
 -> function_attr_text(frame_pointers, host_fn_attrs, preserve_debug_frames = false)
   out = StringBuffer(160)
@@ -573,7 +584,9 @@ function_emit_cache_state = {
   when :bigint_literal_i64
     ["w_bigint_literal_cached"]
   when :call_libm_f64
-    [wire_get(inst, :name)]
+    # Must name the symbol render_instruction actually emits, or the
+    # declaration filter drops the intrinsic's declare.
+    [libm_intrinsic_symbol(wire_get(inst, :name))]
   when :call_num_to_f64
     ["w_num_to_f64"]
   when :call_loc_set_col

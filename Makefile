@@ -1,4 +1,4 @@
-.PHONY: lowering-graph specs
+.PHONY: lowering-graph specs parity
 
 # Print the dependency graph of lowering.w's worker modules.
 # Reads `use lowering/<name>` lines from compiler/lib/lowering.w in
@@ -13,3 +13,9 @@ lowering-graph:
 # RUN_REPL_SPECS=1 for broader runtime/hardware/system specs.
 specs:
 	@scripts/test-specs.sh
+
+# Cross-engine conformance: run every spec/parity/*_spec.w through the
+# interpreter and the compiled path and diff the transcripts (doc/PARITY.md).
+# PARITY_ARGS passes extra flags, e.g. PARITY_ARGS="--engines interp,compiled,ruby".
+parity:
+	@scripts/parity.sh $(PARITY_ARGS)

@@ -2,6 +2,31 @@
 # function return-type inference over the AST, consulted by nearly
 # every lowering worker.
 #
+# EVIDENCE POLICY. A non-nil answer here authorizes lowering to UNBOX and
+# to elide runtime tag guards, so a wrong answer is a silent wrong number,
+# never an error. Every arm must therefore rest on one of three kinds of
+# evidence, and anything weaker answers nil ("unknown: box it, keep the
+# guard"):
+#   declared    — a `## T` ascription, a typed signature, a declared field,
+#                 a raw-ABI intrinsic (`$value`, wvalue_bits, ccall_nobox);
+#   literal     — the node IS a literal of that type, or a constructor whose
+#                 result type is fixed (`i64[n]`, `Array.new`, Math.*);
+#   closed-form — the result type follows from the operand types by the
+#                 language's own rules (int ⊕ int, float ⊕ float, `.size`
+#                 of an array is a machine int, string ⊕ string is text).
+# Name-based guesses about an UNKNOWN receiver are not evidence: `x.to_i`
+# typed :i64 unboxes the BigInt that `"99999999999999999999".to_i`
+# legitimately returns and `x + 1` prints 7766279631452241920. Two such
+# arms remain (`to_i`, `to_s`; see their comment) because the compiler's
+# own sources depend on them; the divergence is pinned in spec/parity.
+#
+# TUNGSTEN_INFER=boxed is the reference oracle: every untyped decimal
+# integer literal answers :int and integer arithmetic never picks a machine
+# width, so all untyped integer arithmetic takes the guarded, promoting
+# runtime path. Diffing a program's output between the default and boxed
+# modes localizes an unsound arm without a second engine (compare with
+# scripts/parity.sh, which diffs engines instead).
+#
 # This file deliberately has no `use` directives — see pass_registry.w
 # for the rationale (path resolution from compiler/lib/lowering/).
 
@@ -45,6 +70,8 @@
     # identity break. `format` is an eager field; its read is
     # side-effect-free (the :hex arm's precedent).
     if node.format == :dec_big
+      return :int
+    if infer_boxed_mode?
       return :int
     return :i64
   when :wvalue
@@ -222,6 +249,14 @@
     # returns a string and user to_s methods that don't would already break
     # interpolation, so downstream sites — `.size()`, `s + x.to_s()` — may
     # take the typed-string direct routes instead of IC dispatch.
+    # KNOWN GUESSES (see the evidence policy above): both arms answer for an
+    # unknown receiver by NAME. They cannot be retired in isolation because
+    # the compiler's own sources are written against them (e.g. the emitter
+    # computes NaN-box constants from `raw.to_s().to_i()` and hands the raw
+    # i64 to a bit formatter); gating them changes how the compiler compiles
+    # itself. Retiring them means annotating those sites first. The one
+    # unsound consequence — String#to_i past i64 typed as a machine int — is
+    # pinned in spec/parity/integer_to_i_bignum_spec.w.
     if node.name == "to_s" && node.args != nil && node.args.size() <= 1
       return :string
     # Math.* compiler intrinsics always yield a float: the w_math_*
@@ -308,6 +343,12 @@
     # following .size()/+ takes the direct routes instead of IC dispatch.
     if node.op == :PLUS && lt == :string && rt == :string
       return :string
+    # `String * Int` repeats — a text result. Typing it keeps the :string
+    # fact flowing (a following `+`/.size takes the direct routes) and lets
+    # the ownership pass free the repeat at scope close instead of leaking
+    # it through the generic __w_mul_fast path.
+    if node.op == :STAR && lt == :string && is_integer_like_type(rt)
+      return :string
     if node.op == :PERCENT && lt == :string
       return :string
     # `int ** int` is intentionally NOT typed :int. w_pow returns a *boxed*
@@ -339,7 +380,7 @@
         # the ENCLOSING op: `(0 - <big literal>) * 3` kept the guarded
         # subtract but then ran `mul i64` on its possibly-boxed result.
         # Mirrors lower_binary_op's promotable_int_operand exclusion.
-        if lt == :int || rt == :int
+        if lt == :int || rt == :int || infer_boxed_mode?
           return :int
         mt = machine_int_result_type(lt, rt)
         if mt != nil
@@ -384,3 +425,7 @@
     if last.type_hint in ("i64" "u64" "i128" "u128")
       return normalize_type_symbol(last.type_hint)
   infer_type(last, {}, {}, infer_maps)
+
+# TUNGSTEN_INFER=boxed — the reference oracle described in the header.
+-> infer_boxed_mode?
+  env("TUNGSTEN_INFER") == "boxed"

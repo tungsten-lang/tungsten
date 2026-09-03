@@ -24,7 +24,7 @@ use ../../compiler/lib/compiler
     i += 1
   true
 
-first = {
+first = wire_instruction({
   op: :add_i64,
   temp: "%first",
   lhs: "1",
@@ -33,8 +33,8 @@ first = {
   src_col: 11,
   loc_site_id: 12,
   sentinel: "keep-first"
-}
-second = {
+})
+second = wire_instruction({
   op: :call_direct_i64,
   temp: "%second",
   name: "w_int",
@@ -43,34 +43,34 @@ second = {
   src_col: 21,
   loc_site_id: 22,
   sentinel: "keep-second"
-}
-third = {
+})
+third = wire_instruction({
   op: :ret_i64,
   value: "%second",
   src_line: 30,
   src_col: 31,
   loc_site_id: 32,
   sentinel: "keep-third"
-}
-without_metadata = {
+})
+without_metadata = wire_instruction({
   op: :br,
   label: "exit",
   sentinel: "keep-without-metadata"
-}
+})
 
 mixed_instructions = [
-  {op: :call_loc_set_col, line: 1, col: 2},
+  wire_instruction({op: :call_loc_set_col, line: 1, col: 2}),
   first,
-  {op: :call_loc_set_col, line: 3, col: 4},
-  {op: :call_loc_set_col, line: 5, col: 6},
+  wire_instruction({op: :call_loc_set_col, line: 3, col: 4}),
+  wire_instruction({op: :call_loc_set_col, line: 5, col: 6}),
   second,
   third,
-  {op: :call_loc_set_col, line: 7, col: 8}
+  wire_instruction({op: :call_loc_set_col, line: 7, col: 8})
 ]
 marker_free_instructions = [without_metadata]
 marker_only_instructions = [
-  {op: :call_loc_set_col, line: 40, col: 41},
-  {op: :call_loc_set_col, line: 42, col: 43}
+  wire_instruction({op: :call_loc_set_col, line: 40, col: 41}),
+  wire_instruction({op: :call_loc_set_col, line: 42, col: 43})
 ]
 empty_instructions = []
 
@@ -150,7 +150,9 @@ check("second pass remains marker-free", no_location_markers?(mixed_again) && no
 # Every instruction string-id spelling, including nested string-switch cases,
 # must participate in the live set and remap. The dead source path models a
 # release-only call_loc_set_col string after the instruction itself was
-# stripped.
+# stripped. Packed WIRE records need a registered opcode: the probe rides
+# :switch_i64, the instruction whose :cases sequence the compaction walks,
+# with every other string-id spelling stacked on top.
 string_mod = {
   strings: [
     {id: 0, text: "dead/source.w"},
@@ -168,8 +170,8 @@ string_mod = {
   string_index: {stale: true},
   functions: [{
     name: "string_ids",
-    blocks: [{label: "entry", instructions: [{
-      op: :probe,
+    blocks: [{label: "entry", instructions: [wire_instruction({
+      op: :switch_i64,
       string_id: 1,
       str_id: 2,
       name_str_id: 3,
@@ -177,7 +179,7 @@ string_mod = {
       file_str_id: 5,
       ivar_str_id: 6,
       cases: [{string_id: 7}]
-    }]}]
+    })]}]
   }]
 }
 

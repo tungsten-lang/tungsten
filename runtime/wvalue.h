@@ -1031,6 +1031,13 @@ static inline int64_t w_range_imm_end(WValue v) {
     return (int64_t)((v >> 1) & 0xFFFFFFFFFFULL);
 }
 
+/* Element count: end - start + 1, one fewer when exclusive, never
+ * negative — the same arithmetic as core/range.w's Range#size. */
+static inline int64_t w_range_imm_size(WValue v) {
+    int64_t n = w_range_imm_end(v) - w_range_imm_start(v) + 1 - w_range_imm_excl(v);
+    return n < 0 ? 0 : n;
+}
+
 /* Constructor funnel: packed value when the range fits, W_NIL when it
  * must go heap. Loop shape is tried first so 0..n never burns span
  * bits; a loop-shaped start with a negative end (0..-1 slices) falls

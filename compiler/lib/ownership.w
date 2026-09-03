@@ -2,6 +2,7 @@
 # Runs after SSA conversion, before emit. Walks SSA'd WIRE IR in RPO.
 
 use runtime_types
+use wire
 
 # Does this instruction produce a value that definitely heap-allocates?
 # Only track KNOWN constructors, not arbitrary call results.
@@ -20,7 +21,12 @@ use runtime_types
   # w_int_to_s guarantees an independent result for every input.
   if op == :call_direct_i64
     name = wire_get(inst, :name)
-    return name in ("w_string" "w_hash_new" "w_array_new" "w_strbuf_new" "w_str_concat" "w_str_concat_free_rhs" "w_str_concat_free_lhs" "w_int_to_s")
+    # w_string_repeat mallocs a fresh WString for results past the inline
+    # limit (and returns an inline/slab value below it, which w_value_free
+    # ignores) — an independent result for every call, like w_int_to_s.
+    # w_array_new_uninit_sized backs `[a, b, c]` literals (slots filled by
+    # __w_array_lit_store below): a fresh owned WArray, freed like w_array_new.
+    return name in ("w_string" "w_hash_new" "w_array_new" "w_array_new_uninit_sized" "w_strbuf_new" "w_str_concat" "w_str_concat_free_rhs" "w_str_concat_free_lhs" "w_str_concat_own" "w_int_to_s" "w_string_repeat")
   false
 
 # Runtime calls that only READ their arguments: no argument pointer is
@@ -31,11 +37,15 @@ use runtime_types
 #   w_hash_get — probes by hash + eq; the key is compared, never stored
 #   w_eq / w_neq / cmp fast helpers — pure comparisons
 #   w_string_index / w_string_rindex / w_string_count — read-only scans
+#   w_string_repeat — copies the receiver's bytes into a fresh buffer; the
+#     receiver is not retained (rope receivers are flattened first)
+#   __w_string_byte_length_fast — the alwaysinline IR helper behind
+#     String#size on a known string: reads the header, memory(read)
 # NOT here, deliberately: w_str_concat (retains both sides in a rope
 # node past 61 bytes), w_str_append (may realloc its receiver's buffer
 # into the result), w_hash_set / w_array_push (store the value).
 -> is_nonretaining_consumer(name)
-  name in ("w_string_byte_length" "w_hash_get" "w_eq" "w_neq" "w_eq_lit" "w_neq_lit" "__w_streq_fast" "__w_streq2_fast" "__w_eq_fast" "__w_neq_fast" "__w_eq_lit_fast" "__w_neq_lit_fast" "__w_lt_fast" "__w_gt_fast" "__w_lte_fast" "__w_gte_fast" "w_string_index" "w_string_rindex" "w_string_count" "w_wire_sequence_from_array")
+  name in ("w_string_byte_length" "w_hash_get" "w_eq" "w_neq" "w_eq_lit" "w_neq_lit" "__w_streq_fast" "__w_streq2_fast" "__w_eq_fast" "__w_neq_fast" "__w_eq_lit_fast" "__w_neq_lit_fast" "__w_lt_fast" "__w_gt_fast" "__w_lte_fast" "__w_gte_fast" "w_string_index" "w_string_rindex" "w_string_count" "w_string_repeat" "__w_string_byte_length_fast" "w_wire_sequence_from_array")
 
 # Mark temps that escape through this instruction.
 -> mark_escapes(inst, escaped)
@@ -46,6 +56,15 @@ use runtime_types
     # without the whitelist, `s = i.to_s(); use(s.size())` pinned every
     # transient string as escaped and no loop string was ever freed.
     if op == :call_direct_i64 && is_nonretaining_consumer(wire_get(inst, :name))
+      return nil
+    # `__w_array_lit_store(arr, idx, val)` writes val into a slot of the
+    # array literal being built: the VALUE is retained (by the array), the
+    # array itself is not. Marking the array escaped here pinned every
+    # `[i, j, k]` literal in a loop (131 MB at 2M iterations).
+    if op == :call_direct_i64 && wire_get(inst, :name) == "__w_array_lit_store"
+      args = wire_get(inst, :args)
+      if args != nil && wire_sequence_size(args) >= 3
+        escaped[wire_sequence_get(args, 2)] = true
       return nil
     args = wire_get(inst, :args)
     if args != nil

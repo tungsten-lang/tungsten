@@ -8,7 +8,7 @@
     ccall("w_to_s", self)
   -> floor
   -> ceil
-  -> round
+  -> round(digits = 0)
   -> sqrt
   -> sq
 

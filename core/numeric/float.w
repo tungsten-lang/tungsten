@@ -36,8 +36,11 @@
   -> ceil
     ccall("w_int", ccall_nobox("w_numeric_to_i64", Math.ceil(self)))
 
-  -> round
-    ccall("w_int", ccall_nobox("w_numeric_to_i64", Math.round(self)))
+  -> round(digits = 0)
+    if digits == nil || digits == 0
+      return ccall("w_int", ccall_nobox("w_numeric_to_i64", Math.round(self)))
+    scale = ~10.0 ** digits
+    Math.round(self * scale) / scale
 
   # Preserve libm sqrt behavior, including -0, infinities, and canonical
   # NaN boxing, through the same direct Math primitive used elsewhere.

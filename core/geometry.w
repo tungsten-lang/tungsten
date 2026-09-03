@@ -22,6 +22,7 @@ use core/geometry/plane_symmetry
 use core/geometry/wallpaper_group
 use core/geometry/polyomino
 use core/geometry/polyomino_packing
+use core/geometry/tiling
 use core/geometry/measure
 use core/geometry/flat_torus
 use core/geometry/chart

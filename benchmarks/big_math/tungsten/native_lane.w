@@ -319,7 +319,7 @@ fn __bench_launder(x) (i64) i64
     i += 1
   [thread_cpu_ns() - started, checksum, iterations]
 
--> time_fromstr(decimal, iterations)(String i64)
+-> time_fromstr(decimal, iterations)
   result = nil
   checksum = 0 ## i64
   i = 0 ## i64

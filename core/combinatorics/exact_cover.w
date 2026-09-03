@@ -198,3 +198,35 @@
 
   -> count_solutions(limit)
     solve_all(limit).size
+
+  # Streaming search: call `callback` with each solution (an array of row
+  # ids) as it is found, without accumulating them; the callback returns
+  # true to stop the search early. Returns true if it was stopped.
+  -> each_solution(callback)
+    @stack = []
+    @visit = callback
+    search_each()
+
+  -> search_each
+    if @right[0] == 0
+      return @visit.call(ExactCover.copy_ints(@stack))
+    c = choose_column
+    return false if @size[c] == 0
+    cover(c)
+    stop = false
+    r = @down[c]
+    while r != c && !stop
+      @stack.push(@row_of[r])
+      j = @right[r]
+      while j != r
+        cover(@column[j])
+        j = @right[j]
+      stop = search_each()
+      j = @left[r]
+      while j != r
+        uncover(@column[j])
+        j = @left[j]
+      @stack.pop
+      r = @down[r]
+    uncover(c)
+    stop

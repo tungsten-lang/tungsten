@@ -1085,6 +1085,11 @@ exclude_specs=(
   spec/core/http_tls_socket_spec.w
   spec/core/increment_assign_spec.w
   spec/core/lattice_geometry_spec.w
+  spec/core/tiling_grid_spec.w
+  spec/core/tiling_corona_spec.w
+  spec/core/tiling_criteria_spec.w
+  spec/core/tiling_cnf_spec.w
+  spec/core/tiling_wassat_spec.w
   spec/core/location_range_mode11_spec.w
   spec/core/manuscript_math_autoload_spec.w
   spec/core/math_constants_spec.w

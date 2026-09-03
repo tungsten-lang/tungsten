@@ -5032,6 +5032,71 @@ static inline uint64_t bn_addmul_2(uint64_t *rp, const uint64_t *up,
                                    int32_t n, uint64_t v0, uint64_t v1) {
     return bn_addmul_2s(rp, up, n, v0, v1, 0);
 }
+
+
+/* ---- Multi-row multiply-accumulate (autotuned BN_ADDMUL_ROWS) ------------
+ * Straight-line k-row addmul (k = 3, 4), same shape as bn_addmul_2s but with
+ * k multiplier limbs and a k-limb scalar carry window. Halving the memory
+ * traffic per extra row pays on wide-issue cores (Apple M-series); the best
+ * k is machine-specific, so `tungsten autotune` sweeps it and bakes
+ * -DBN_ADDMUL_ROWS. Default 2 keeps the hand-asm bn_addmul_2 path. */
+#ifndef BN_ADDMUL_ROWS
+#define BN_ADDMUL_ROWS 2
+#endif
+#if BN_ADDMUL_ROWS >= 3
+typedef unsigned __int128 bn_u128_t;
+/* rp[0..n+2] += up[0..n) * (v0 + v1 B + v2 B^2); acc=1 reads rp, acc=0 fresh. */
+static uint64_t bn_addmul_3_body(uint64_t *rp, const uint64_t *up, int32_t n,
+                                 uint64_t v0, uint64_t v1, uint64_t v2, int acc) {
+    uint64_t c0 = 0, c1 = 0, c2 = 0;
+    for (int32_t i = 0; i < n; i++) {
+        uint64_t u = up[i];
+        bn_u128_t p0 = (bn_u128_t)u * v0, p1 = (bn_u128_t)u * v1, p2 = (bn_u128_t)u * v2;
+        bn_u128_t s0 = (bn_u128_t)c0 + (uint64_t)p0 + (acc ? rp[i] : 0);
+        rp[i] = (uint64_t)s0;
+        bn_u128_t s1 = (bn_u128_t)c1 + (uint64_t)(p0 >> 64) + (uint64_t)p1 + (uint64_t)(s0 >> 64);
+        bn_u128_t s2 = (bn_u128_t)c2 + (uint64_t)(p1 >> 64) + (uint64_t)p2 + (uint64_t)(s1 >> 64);
+        c0 = (uint64_t)s1; c1 = (uint64_t)s2; c2 = (uint64_t)(p2 >> 64) + (uint64_t)(s2 >> 64);
+    }
+    rp[n] = c0; rp[n + 1] = c1; return c2;
+}
+static uint64_t bn_addmul_4_body(uint64_t *rp, const uint64_t *up, int32_t n,
+                                 uint64_t v0, uint64_t v1, uint64_t v2, uint64_t v3, int acc) {
+    uint64_t c0 = 0, c1 = 0, c2 = 0, c3 = 0;
+    for (int32_t i = 0; i < n; i++) {
+        uint64_t u = up[i];
+        bn_u128_t p0 = (bn_u128_t)u * v0, p1 = (bn_u128_t)u * v1, p2 = (bn_u128_t)u * v2, p3 = (bn_u128_t)u * v3;
+        bn_u128_t s0 = (bn_u128_t)c0 + (uint64_t)p0 + (acc ? rp[i] : 0);
+        rp[i] = (uint64_t)s0;
+        bn_u128_t s1 = (bn_u128_t)c1 + (uint64_t)(p0 >> 64) + (uint64_t)p1 + (uint64_t)(s0 >> 64);
+        bn_u128_t s2 = (bn_u128_t)c2 + (uint64_t)(p1 >> 64) + (uint64_t)p2 + (uint64_t)(s1 >> 64);
+        bn_u128_t s3 = (bn_u128_t)c3 + (uint64_t)(p2 >> 64) + (uint64_t)p3 + (uint64_t)(s2 >> 64);
+        c0 = (uint64_t)s1; c1 = (uint64_t)s2; c2 = (uint64_t)s3; c3 = (uint64_t)(p3 >> 64) + (uint64_t)(s3 >> 64);
+    }
+    rp[n] = c0; rp[n + 1] = c1; rp[n + 2] = c2; return c3;
+}
+/* Full n x n product, k rows per pass (k = BN_ADDMUL_ROWS in {3,4}), with a
+ * 1- or 2-row tail. out must hold 2n limbs (zeroed by the first pass). */
+static void bn_mul_eq_multirow(uint64_t *out, const uint64_t *a, const uint64_t *b, int32_t n) {
+    const int32_t K = BN_ADDMUL_ROWS;
+    memset(out, 0, (size_t)2 * n * sizeof(uint64_t));
+    int32_t j = 0;
+    for (; j + K <= n; j += K) {
+        if (K == 4)
+            out[j + n + 3] = bn_addmul_4_body(out + j, a, n, b[j], b[j + 1], b[j + 2], b[j + 3], 1);
+        else
+            out[j + n + 2] = bn_addmul_3_body(out + j, a, n, b[j], b[j + 1], b[j + 2], 1);
+    }
+    for (; j < n; j++) {
+        uint64_t cy = 0, v = b[j];
+        for (int32_t i = 0; i < n; i++) {
+            bn_u128_t pr = (bn_u128_t)a[i] * v + out[j + i] + cy;
+            out[j + i] = (uint64_t)pr; cy = (uint64_t)(pr >> 64);
+        }
+        out[j + n] += cy;
+    }
+}
+#endif
 #endif /* BN_ADDMUL_2 */
 
 /* submul_1: rp[0..n) -= up[0..n)·v; returns the borrow word (∈ [0, v]) to
@@ -6204,6 +6269,10 @@ static void bn_mul_eq17(uint64_t *out, const uint64_t *a, const uint64_t *b) {
 __attribute__((noinline))
 __attribute__((BN_HOT_SECTION, aligned(64)))
 static void bn_mul_eq16(uint64_t *out, const uint64_t *a, const uint64_t *b) {
+#if BN_ADDMUL_ROWS >= 3
+    bn_mul_eq_multirow(out, a, b, 16);
+    return;
+#endif
 #if BN_MUL_EQ16_ADDMUL2
     /* Eight two-row passes: one mul_2 then seven addmul_2, each writing
      * out[i+16] itself and returning out[i+17]. */

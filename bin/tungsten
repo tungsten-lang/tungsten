@@ -232,10 +232,11 @@ case "$1" in
         --slots)      export AUTOTUNE_SLOTS=1 ;;
         --capacity)   export AUTOTUNE_CAPACITY=1 ;;
         --thresholds) export AUTOTUNE_THRESHOLDS=1 ;;
+        --addmul-rows) export AUTOTUNE_ADDMUL_ROWS=1 ;;
         --emit-cflags) export AUTOTUNE_EMIT_CFLAGS=1 ;;
         --json)       export AUTOTUNE_JSON=1 ;;
         -h|--help)
-          echo "Usage: tungsten autotune [--quick] [--deep] [--slots] [--capacity] [--thresholds] [--emit-cflags] [--json]"
+          echo "Usage: tungsten autotune [--quick] [--deep] [--slots] [--capacity] [--thresholds] [--addmul-rows] [--emit-cflags] [--json]"
           echo
           echo "  Sweep runtime & memory parameters to discover optimal settings"
           echo "  for the local host machine, CPU architecture, and cache hierarchy."
@@ -245,6 +246,7 @@ case "$1" in
           echo "  --slots         sweep thread-local parked buffer capacity (1..8 slots/bucket)"
           echo "  --capacity      sweep result-buffer capacity quanta and power-of-two boundaries"
           echo "  --thresholds    sweep arithmetic kernel crossover thresholds"
+          echo "  --addmul-rows   sweep multiply-accumulate row width (BN_ADDMUL_ROWS, rebuilds harness)"
           echo "  --emit-cflags   print recommended -D compiler flags for optimal build"
           echo "  --json          output machine-readable results as JSON"
           exit 0 ;;

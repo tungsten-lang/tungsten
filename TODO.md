@@ -856,3 +856,22 @@ projects stay unchecked until their stated acceptance criteria are met.
   `SYNTAX_WISHLIST` source of truth.
 - [x] Treat `tungsten-lang.org` as launched in project notes and future audits;
   do not repeat the stale pre-launch status.
+
+## Purge flip-graph result text from git history (2026-09-02)
+
+`benchmarks/matmul/metaflip/*.txt` (416 files, 223 MB in the working tree;
+GF(2) matmul flip-graph decompositions such as
+`matmul_28x32x32_rank14271_block47_unbalanced_gf2.txt`) were removed from the
+tree at this commit. They remain in history, so `.git` is still ~218 MB and
+every clone pays for them. To finish:
+
+1. Archive them outside git first (the metaflip tooling under
+   `benchmarks/matmul/metaflip/*.{w,py,sh}` names 209 of them as inputs;
+   the removed list is reproducible with
+   `git show <this-commit>^ --stat -- 'benchmarks/matmul/metaflip/*.txt'`,
+   and any file is recoverable with `git show <this-commit>^:<path>`).
+2. Rewrite history: `git filter-repo --path-glob 'benchmarks/matmul/metaflip/*.txt' --invert-paths`
+   (coordinate with every active worktree and codex branch first; all of them
+   must be rebased or recreated after the rewrite), then `git gc --prune=now`.
+3. Point the metaflip tooling at the archive location (or a release asset) so
+   its tests can fetch inputs on demand instead of reading them from the tree.

@@ -784,3 +784,10 @@ exhaustively-tested-negative result (don't re-try these), the GPU threadgroup-me
 and its debugging history, the `cal2zone` band-escalation schedule, and the overnight
 CPU+GPU relay run's live infrastructure (`overnight_orchestrator.py`, `bin/`, `runs/`,
 `records/`).
+
+## Result text files removed from the tree (2026-09-02)
+
+The `matmul_*_gf2.txt` decomposition files (416 files, 223 MB) are no longer
+tracked; they are in history up to that commit and will be purged (see the
+root `TODO.md`). Scripts here that read them by name need the archive path
+restored locally first: `git show <pre-removal-commit>:benchmarks/matmul/metaflip/<file> > <file>`.

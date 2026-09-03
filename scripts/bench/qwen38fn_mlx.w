@@ -16,7 +16,12 @@
 #   bin/tungsten run scripts/bench/qwen38fn_mlx.w concurrent 8
 #   bin/tungsten run scripts/bench/qwen38fn_mlx.w baseline 8 5
 #
-# ARGV: [0] mode = baseline|concurrent   [1] tokens to generate
+# Serve (OpenAI-compatible HTTP; see the SERVE MODE section at the end of
+# this file and bits/tungsten-llama/docs/serve.md):
+#   FN_QUANT=1 bin/tungsten run scripts/bench/qwen38fn_mlx.w serve 8080
+#
+# ARGV: [0] mode = baseline|concurrent|serve   [1] tokens to generate
+#           (serve: the TCP port, default 8080)
 #       [2] prompt token count (default 5 = parity fixture)
 #       [3] JSON file of prompt token ids (overrides [2])
 #       [4] golden prefix: dump per-layer H + logits for the LAST prompt
@@ -28,6 +33,7 @@ use core/metal
 use core/json
 use tungsten-llama/sharded_safetensors
 use tungsten-llama/tokenizer
+use tungsten-llama/sampler
 
 MODEL_DIR = "/Users/erik/.cache/tungsten/qwen38-flash-next-nvfp4/"
 MODEL_INDEX = MODEL_DIR + "index.slim.json"
@@ -138,12 +144,29 @@ if ARGV.size() > 5 && ARGV[5] == "mtp:adaptive"
 elsif ARGV.size() > 5 && ARGV[5].size() > 4 && ARGV[5].slice(0, 4) == "mtp:"
   mtp_spec = ARGV[5].slice(4, ARGV[5].size() - 4).to_i()
 if mtp_spec > 7 then raise "mtp draft depth must be <= 7"
+# ---- serve mode ----------------------------------------------------------
+# "serve <port>" runs an OpenAI-compatible HTTP server. Everything it needs
+# lives in the SERVE MODE section at the END of this file (top-level fns must
+# be defined before they are called, so the entry point is the last statement
+# in the file); here we only park the bench driver — zero prompt tokens and
+# zero generated tokens make the prompt/prefill/decode block below a no-op.
+serve_mode = mode == "serve"
+serve_port = 8080
+if serve_mode
+  if ARGV.size() > 1 then serve_port = ARGV[1].to_i()
+  n_generate = 0
+  prompt_tokens = 0
+  # FN_SPEC=<D>: load the MTP head and decode greedy requests with the
+  # depth-D speculative loop (same arm as the bench's "mtp:D").
+  fn_spec_env = ccall("__w_env", "FN_SPEC")
+  if fn_spec_env != nil && fn_spec_env != "" then mtp_spec = fn_spec_env.to_i()
+  if mtp_spec > 7 then raise "FN_SPEC draft depth must be <= 7"
 mtp_d_cur = [mtp_spec]
 mtp_streak = [0]
 naive_mv = multi_n > 0
-concurrent = mode == "concurrent"
-if mode != "concurrent" && mode != "baseline"
-  raise "usage: qwen38fn_mlx.w [baseline|concurrent] [tokens] [prompt_tokens] [prompt_ids.json] [golden_prefix]"
+concurrent = mode == "concurrent" || serve_mode
+if mode != "concurrent" && mode != "baseline" && !serve_mode
+  raise "usage: qwen38fn_mlx.w [baseline|concurrent|serve] [tokens|port] [prompt_tokens] [prompt_ids.json] [golden_prefix]"
 if prompt_tokens + n_generate > MAX_POS
   raise "prompt " + prompt_tokens.to_s + " + generate " + n_generate.to_s + " exceeds MAX_POS " + MAX_POS.to_s + "; the K/V cache would wrap and the run would report plausible numbers for garbage output"
 
@@ -235,7 +258,7 @@ mtp_depth = 0
 if ccall("__w_env", "FN_MTP") != nil && ccall("__w_env", "FN_MTP") != ""
   mtp_depth = ccall("__w_env", "FN_MTP").to_i()
 if mtp_spec > 0 then mtp_depth = mtp_spec
-if qsa_on && (mode != "concurrent" || golden_prefix != "" || expert_hist || skip_spec != "" || hc_fused)
+if qsa_on && (!concurrent || golden_prefix != "" || expert_hist || skip_spec != "" || hc_fused)
   raise "QSA (FN_CTX > 2051 or FN_QSA=1) requires the concurrent fast path"
 if MAX_POS > 2051 && (multi_n > 0 || mtp_spec > 0)
   raise "multi/mtp modes beyond ctx 2051 need the QSA multi path (not yet wired)"
@@ -1591,7 +1614,7 @@ if fn_chunk_w_env != nil && fn_chunk_w_env != ""
 PREFILL_CHUNK = MULTI_MAX
 # only the final chunk needs logits; cap it so logits_m stays 64-wide
 PREFILL_LAST_MAX = 64
-if multi_n > 0 || mtp_depth > 0 || prompt_tokens > 8 || prompt_ids_file != ""
+if multi_n > 0 || mtp_depth > 0 || prompt_tokens > 8 || prompt_ids_file != "" || serve_mode
   fnm_lib = metal_compile_source(device, read_file(FN_DIR + "fn_multi.metal"))
   grms_m_pipe = metal_pipeline(fnm_lib, "grouped_rms_norm_multi")
   hc_mix_reduce_m_pipe = metal_pipeline(fnm_lib, "hc_mix_reduce_multi")
@@ -2826,7 +2849,8 @@ if golden_prefix != ""
   << "goldens -> " + golden_prefix + "_{h,logits,dbg}.f32"
 
 ids = []
-ids.push(pred)
+# serve mode runs no bench prompt, so the prefill above produced no prediction
+if pred >= 0 then ids.push(pred)
 pos = prompt.size()
 t0 = ccall("__w_clock_ms")
 round_ms = []
@@ -2971,3 +2995,596 @@ if multi_n > 0
   else
     << "MULTI FAILED: " + mismatches.to_s + " mismatches over " + base.to_s + " tokens"
   << "multi rounds: median " + mmed.to_s + " ms per block of " + multi_n.to_s + " = " + (1000.0 * multi_n / mmed).to_s + " tok/s if fully accepted (" + base.to_s + " tokens in " + m_elapsed.to_s + " ms)"
+
+# =========================================================================
+# ==== SERVE MODE — OpenAI-compatible HTTP server =========================
+# =========================================================================
+# Entered from `qwen38fn_mlx.w serve <port>` (FN_HOST, default 127.0.0.1).
+# Everything below is self-contained: nothing above this banner calls into
+# it, and the bench driver is a no-op in serve mode (n_generate = 0).
+#
+#   GET  /health              liveness + context/spec configuration
+#   GET  /v1/models           OpenAI model list
+#   POST /v1/chat/completions messages / stream / max_tokens / temperature /
+#                             top_k / stop / enable_thinking
+#   POST /v1/completions      prompt / the same knobs
+#
+# Single-threaded on the main thread: the GPU is one engine, so requests are
+# served strictly one at a time (accept -> read -> generate -> respond ->
+# close). Socket#write is a real write(2) with TCP_NODELAY, so an SSE chunk
+# per token reaches the client as it is produced.
+#
+# Every request state (GDN conv/recurrent, PLE conv + n-gram context, MTP
+# bookkeeping, banked scratch selection) is reset before the prefill; the
+# K/V and QSA caches are position-indexed and need no zeroing.
+SERVE_MODEL = "qwen3.8-flash-next"
+# The chat template's default (enable_thinking unset/true) reasoning_effort
+# preamble; only emitted when a request asks for thinking.
+SERVE_REASONING = "Reasoning effort is set to xhigh. Please think carefully through the task, validate key assumptions, consider plausible alternatives, and prioritize correctness, consistency, and clarity in the final answer."
+SERVE_IM_START = 248045
+SERVE_IM_END = 248046
+SERVE_ENDOFTEXT = 248044
+SERVE_THINK = 248068
+SERVE_THINK_END = 248069
+serve_req_no = [0]
+serve_seed = [20260902]
+serve_boot_s = [0]
+
+-> serve_log(msg)
+  ccall("w_eputs", "\[serve] " + msg)
+
+-> serve_now_s
+  ccall("w_instant_now").to_s.to_i() / 1000
+
+# ---- engine glue ---------------------------------------------------------
+# Zero everything a previous request advanced. The K/V + QSA caches are
+# position-indexed (a fresh prefill overwrites slot 0 upward), so only the
+# recurrent state and the host-side bookkeeping need clearing.
+-> serve_reset
+  reset_states
+  mtp_pending[0] = 0 - 1
+  mtp_hits[0] = 0
+  mtp_total[0] = 0
+  mtp_d_cur[0] = mtp_spec
+  mtp_streak[0] = 0
+  multi_head_on[0] = 1
+  flip_defer[0] = 0
+  mbank[0] = 0
+  while pending_cbs.size() > 0
+    metal_command_buffer_wait(pending_cbs.pop())
+  encode_ms[0] = ~0.0
+  encode_ms[1] = ~0.0
+  encode_ms[2] = ~0.0
+  encode_ms[3] = 0
+
+# Prefill `toks` at positions 0.., returning the greedy next-token id. Mirrors
+# the bench driver: PREFILL_CHUNK-wide blocks through the recorded multi path
+# (last block capped to PREFILL_LAST_MAX so logits_m holds it), serial
+# token-by-token below 9 tokens or under FN_CHUNK=0. Leaves the last
+# position's hidden stream in H and its logits in `logits` so the width-1
+# decode loop and the sampler can both pick up from there.
+-> serve_prefill(toks)
+  n = toks.size()
+  pred = -1
+  i = 0
+  if n > 8 && ccall("__w_env", "FN_CHUNK") != "0"
+    while i < n
+      remaining = n - i
+      cw = remaining
+      if cw > PREFILL_CHUNK then cw = PREFILL_CHUNK
+      if cw == remaining && cw > PREFILL_LAST_MAX
+        cw = remaining - PREFILL_LAST_MAX
+      is_last = i + cw >= n
+      multi_head_on[0] = is_last ? 1 : 0
+      pf_preds = forward_multi(toks.slice(i, cw), i, cw)
+      if is_last then pred = pf_preds[cw - 1]
+      if mtp_depth > 0
+        nxt = []
+        ti = 0
+        while ti < cw
+          nxt.push(i + ti + 1 < n ? toks[i + ti + 1] : pred)
+          ti = ti + 1
+        mtp_prefill_chunk(nxt, i + 1, cw)
+      if is_last
+        # forward_multi only fills the token-major h_m / logits_m; publish the
+        # final row into the width-1 buffers the decode loops read
+        metal_batch_begin(queue)
+        metal_dispatch_n(queue, copy_at_pipe, [h_m, H, (cw - 1) * HC_HIDDEN, 0, HC_HIDDEN], HC_HIDDEN)
+        metal_dispatch_n(queue, copy_at_pipe, [logits_m, logits, (cw - 1) * N_VOCAB, 0, N_VOCAB], N_VOCAB)
+        metal_batch_commit(queue)
+      i = i + cw
+    multi_head_on[0] = 1
+  else
+    while i < n
+      pred = forward(toks[i], i, i == n - 1)
+      if mtp_depth > 0
+        mtp_step(i + 1 < n ? toks[i + 1] : pred, i + 1, 0)
+      i = i + 1
+  pred
+
+# ---- byte / text helpers -------------------------------------------------
+# Longest prefix of the first n bytes of b that ends on a complete UTF-8
+# sequence, so a token that splits a multi-byte character is held back until
+# the next one completes it.
+-> serve_utf8_prefix(b, n)
+  k = n
+  back = 0
+  while back < 4 && k > 0
+    c = b[k - 1]
+    if c < 128 then return n
+    if c >= 192
+      need = 2
+      if c >= 224 then need = 3
+      if c >= 240 then need = 4
+      if k - 1 + need <= n then return n
+      return k - 1
+    k = k - 1
+    back = back + 1
+  n
+
+# JSON.encode escapes only " \ \n \r \t, so a raw control byte would produce
+# an invalid document. Slice around the offending bytes (never rebuild from
+# codepoints) so multi-byte UTF-8 sequences survive verbatim.
+-> serve_sanitize(s)
+  b = s.bytes
+  n = b.size
+  bad = 0
+  i = 0
+  while i < n
+    c = b[i]
+    if c < 32 && c != 10 && c != 13 && c != 9 then bad = 1
+    i = i + 1
+  if bad == 0 then return s
+  out = ""
+  start = 0
+  i = 0
+  while i < n
+    c = b[i]
+    if c < 32 && c != 10 && c != 13 && c != 9
+      if i > start then out = out + s.slice(start, i - start)
+      start = i + 1
+    i = i + 1
+  if n > start then out = out + s.slice(start, n - start)
+  out
+
+# ---- HTTP ----------------------------------------------------------------
+-> serve_status_text(code)
+  if code == 200 then return "OK"
+  if code == 400 then return "Bad Request"
+  if code == 404 then return "Not Found"
+  if code == 405 then return "Method Not Allowed"
+  if code == 413 then return "Payload Too Large"
+  if code == 500 then return "Internal Server Error"
+  "OK"
+
+# true when the whole payload reached the peer (a short write means the
+# client hung up mid-stream).
+-> serve_write(conn, s)
+  n = conn.write(s)
+  n == s.size()
+
+-> serve_send(conn, code, ctype, body)
+  hdr = "HTTP/1.1 " + code.to_s + " " + serve_status_text(code) + "\r\n"
+  hdr = hdr + "Content-Type: " + ctype + "\r\n"
+  hdr = hdr + "Content-Length: " + body.size().to_s + "\r\n"
+  hdr = hdr + "Access-Control-Allow-Origin: *\r\n"
+  hdr = hdr + "Connection: close\r\n\r\n"
+  serve_write(conn, hdr + body)
+
+-> serve_send_json(conn, code, obj)
+  serve_send(conn, code, "application/json", JSON.encode(obj))
+
+-> serve_error(conn, code, msg, etype)
+  serve_log("HTTP " + code.to_s + " " + msg)
+  serve_send_json(conn, code, {"error": {"message": msg, "type": etype, "param": nil, "code": nil}})
+
+# Read one HTTP/1.1 request: headers up to CRLFCRLF, then Content-Length
+# body bytes. Returns [method, path, body], or nil when the peer closed or
+# the framing was unusable.
+-> serve_read_request(conn)
+  buf = ""
+  hend = nil
+  while hend == nil
+    chunk = conn.read(65536)
+    if chunk == nil then return nil
+    buf = buf + chunk
+    hend = buf.index("\r\n\r\n")
+    if hend == nil && buf.size() > 262144 then return nil
+  head = buf.slice(0, hend)
+  body = buf.slice(hend + 4, buf.size() - hend - 4)
+  lines = head.split("\r\n")
+  if lines.size() == 0 then return nil
+  parts = lines[0].split(" ")
+  if parts.size() < 2 then return nil
+  clen = 0
+  li = 1
+  while li < lines.size()
+    ln = lines[li]
+    c = ln.index(":")
+    if c != nil && ln.slice(0, c).downcase == "content-length"
+      clen = ln.slice(c + 1, ln.size() - c - 1).strip.to_i()
+    li = li + 1
+  if clen > 8388608 then return nil
+  while body.size() < clen
+    chunk = conn.read(65536)
+    if chunk == nil then return nil
+    body = body + chunk
+  [parts[0], parts[1], body]
+
+# ---- chat template -------------------------------------------------------
+# Tokenizer.encode has no special-token awareness (it BPE-shreds
+# "<|im_start|>"), so every text span between special tokens is encoded on
+# its own and the special ids are spliced in by hand — which is exactly what
+# HF tokenizers do with an added-tokens split.
+-> serve_push_text(ids, txt)
+  if txt == "" then return ids
+  enc = tokenizer.encode(txt)
+  i = 0
+  while i < enc.size()
+    ids.push(enc[i])
+    i = i + 1
+  ids
+
+# A message's content: a plain string, or an OpenAI content-part array whose
+# text parts are concatenated. nil = a shape this server does not support.
+-> serve_content_text(c)
+  if c == nil then return ""
+  t = type(c)
+  if t == "String" then return c
+  if t == "Array"
+    out = ""
+    i = 0
+    while i < c.size()
+      it = c[i]
+      if type(it) == "String"
+        out = out + it
+      elsif type(it) == "Hash" && type(it["text"]) == "String"
+        out = out + it["text"]
+      else
+        return nil
+      i = i + 1
+    return out
+  nil
+
+# chat_template.jinja, non-tool path: a leading system message (with the
+# reasoning preamble folded in when thinking is on), then one
+# "<|im_start|>ROLE\nCONTENT<|im_end|>\n" block per message, then the
+# generation prompt. enable_thinking=false closes an empty <think> block so
+# the model answers directly.
+-> serve_chat_ids(messages, enable_thinking)
+  reasoning = enable_thinking ? SERVE_REASONING : ""
+  ids = []
+  sys_txt = ""
+  if messages.size() > 0 && messages[0]["role"] == "system"
+    sys_txt = serve_content_text(messages[0]["content"]).strip
+  if reasoning != "" || sys_txt != ""
+    sbody = sys_txt
+    if reasoning != ""
+      sbody = sys_txt != "" ? reasoning + "\n\n" + sys_txt : reasoning
+    ids.push(SERVE_IM_START)
+    serve_push_text(ids, "system\n" + sbody)
+    ids.push(SERVE_IM_END)
+    serve_push_text(ids, "\n")
+  i = 0
+  while i < messages.size()
+    m = messages[i]
+    role = m["role"]
+    if role != "system"
+      content = serve_content_text(m["content"]).strip
+      ids.push(SERVE_IM_START)
+      if role == "assistant"
+        rc = type(m["reasoning_content"]) == "String" ? m["reasoning_content"].strip : ""
+        serve_push_text(ids, "assistant\n")
+        ids.push(SERVE_THINK)
+        serve_push_text(ids, "\n" + rc + "\n")
+        ids.push(SERVE_THINK_END)
+        serve_push_text(ids, "\n\n" + content)
+      else
+        serve_push_text(ids, role + "\n" + content)
+      ids.push(SERVE_IM_END)
+      serve_push_text(ids, "\n")
+    i = i + 1
+  ids.push(SERVE_IM_START)
+  serve_push_text(ids, "assistant\n")
+  ids.push(SERVE_THINK)
+  if enable_thinking
+    serve_push_text(ids, "\n")
+  else
+    serve_push_text(ids, "\n\n")
+    ids.push(SERVE_THINK_END)
+    serve_push_text(ids, "\n\n")
+  ids
+
+# ---- SSE -----------------------------------------------------------------
+-> serve_chunk_obj(rid, created, choice, is_chat)
+  {"id": rid, "object": is_chat ? "chat.completion.chunk" : "text_completion", "created": created, "model": SERVE_MODEL, "choices": [choice]}
+
+-> serve_stream_send(conn, obj)
+  serve_write(conn, "data: " + JSON.encode(obj) + "\n\n")
+
+-> serve_stream_delta(conn, rid, created, piece, is_chat)
+  ch = is_chat ? {"index": 0, "delta": {"content": piece}, "finish_reason": nil} : {"index": 0, "text": piece, "finish_reason": nil}
+  serve_stream_send(conn, serve_chunk_obj(rid, created, ch, is_chat))
+
+# ---- generation ----------------------------------------------------------
+# One request end to end. Greedy requests run the speculative loop when the
+# server was started with FN_SPEC (the MTP verify is argmax-only); anything
+# with temperature > 0 runs the serial width-1 loop and samples the logits
+# buffer the head just wrote.
+-> serve_run(conn, prompt_ids, max_new, temperature, top_k, stops, stream, is_chat)
+  serve_req_no[0] = serve_req_no[0] + 1
+  created = serve_now_s
+  rid = is_chat ? "chatcmpl-fn" : "cmpl-fn"
+  rid = rid + created.to_s + "-" + serve_req_no[0].to_s
+  np = prompt_ids.size()
+  sampler = nil
+  if temperature > ~0.0
+    sampler = Tungsten:Llama:Sampler.new(temperature, top_k, serve_seed[0])
+    serve_seed[0] = serve_seed[0] + 7919
+  use_spec = mtp_spec > 0 && sampler == nil
+  # longest stop string: streaming holds back that many bytes minus one so a
+  # stop that straddles two tokens is never emitted
+  max_stop = 0
+  si = 0
+  while si < stops.size()
+    if stops[si].size() > max_stop then max_stop = stops[si].size()
+    si = si + 1
+  t_pf = ccall("__w_clock_ms")
+  serve_reset
+  first = serve_prefill(prompt_ids)
+  if sampler != nil then first = sampler.sample(logits, N_VOCAB)
+  serve_log("prefill " + np.to_s + " tokens in " + (ccall("__w_clock_ms") - t_pf).to_s + " ms")
+  alive = [1]
+  if stream
+    hdr = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n"
+    if !serve_write(conn, hdr) then alive[0] = 0
+    if is_chat && alive[0] == 1
+      serve_stream_send(conn, serve_chunk_obj(rid, created, {"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": nil}, true))
+  gen = []
+  emitted = 0
+  stop_at = nil
+  finish = "length"
+  done = false
+  cur = first
+  newly = [first]
+  pos = np
+  t_dec = ccall("__w_clock_ms")
+  while !done
+    ni = 0
+    while ni < newly.size() && !done
+      tk = newly[ni]
+      if tk == SERVE_IM_END || tk == SERVE_ENDOFTEXT
+        finish = "stop"
+        done = true
+      else
+        gen.push(tk)
+        full = serve_sanitize(tokenizer.decode(gen))
+        fb = full.bytes
+        limit = serve_utf8_prefix(fb, fb.size)
+        if max_stop > 1
+          hold = full.size() - (max_stop - 1)
+          if hold < limit then limit = hold
+        sj = 0
+        while sj < stops.size()
+          p = full.index(stops[sj])
+          if p != nil && (stop_at == nil || p < stop_at) then stop_at = p
+          sj = sj + 1
+        if stop_at != nil
+          limit = stop_at
+          finish = "stop"
+          done = true
+        if limit < emitted then limit = emitted
+        if stream && limit > emitted && alive[0] == 1
+          if !serve_stream_delta(conn, rid, created, full.slice(emitted, limit - emitted), is_chat) then alive[0] = 0
+        if limit > emitted then emitted = limit
+        if !done && gen.size() >= max_new
+          finish = "length"
+          done = true
+      ni = ni + 1
+    if !done && alive[0] == 0
+      # the client hung up — stop burning GPU on a response nobody reads
+      finish = "stop"
+      done = true
+    if !done && pos + 1 > MAX_POS
+      finish = "length"
+      done = true
+    if !done && use_spec
+      # draft d tokens with the MTP head, verify the width-(d+1) block, keep
+      # the longest matching prefix and tape-replay the states for the rest
+      d = mtp_spec
+      if pos + d + 1 > MAX_POS then d = MAX_POS - pos - 1
+      if d < 0 then d = 0
+      drafts = []
+      di = 0
+      while di < d
+        drafts.push(mtp_step(di == 0 ? cur : drafts[di - 1], pos + 1 + di, di == 0 ? 0 : 1))
+        di = di + 1
+      block = [cur]
+      di = 0
+      while di < d
+        block.push(drafts[di])
+        di = di + 1
+      sctx0 = ple_ctx[0]
+      sctx1 = ple_ctx[1]
+      flip_defer[0] = 1
+      preds = forward_multi(block, pos, d + 1)
+      flip_defer[0] = 0
+      a = 0
+      while a < d && drafts[a] == preds[a]
+        a = a + 1
+      newly = []
+      ei = 0
+      while ei <= a
+        newly.push(preds[ei])
+        ei = ei + 1
+      n_keep = a + 1
+      if n_keep < d + 1
+        ple_ctx[0] = sctx0
+        ple_ctx[1] = sctx1
+        ki = 0
+        while ki < n_keep
+          ple_advance(block[ki])
+          ki = ki + 1
+      spec_rollback([n_keep, d + 1])
+      cur = preds[a]
+      pos = pos + n_keep
+    elsif !done
+      nxt = forward(cur, pos, true)
+      if sampler != nil then nxt = sampler.sample(logits, N_VOCAB)
+      newly = [nxt]
+      cur = nxt
+      pos = pos + 1
+  text = serve_sanitize(tokenizer.decode(gen))
+  if stop_at != nil then text = text.slice(0, stop_at)
+  ncomp = gen.size()
+  dec_ms = ccall("__w_clock_ms") - t_dec
+  rate = dec_ms > 0 ? (1000.0 * ncomp / dec_ms).to_s : "inf"
+  serve_log("decode " + ncomp.to_s + " tokens in " + dec_ms.to_s + " ms = " + rate + " tok/s, finish=" + finish)
+  usage = {"prompt_tokens": np, "completion_tokens": ncomp, "total_tokens": np + ncomp}
+  if stream
+    if alive[0] == 1 && text.size() > emitted
+      serve_stream_delta(conn, rid, created, text.slice(emitted, text.size() - emitted), is_chat)
+    if alive[0] == 1
+      fin = is_chat ? {"index": 0, "delta": {}, "finish_reason": finish} : {"index": 0, "text": "", "finish_reason": finish}
+      o = serve_chunk_obj(rid, created, fin, is_chat)
+      o["usage"] = usage
+      serve_stream_send(conn, o)
+      serve_write(conn, "data: \[DONE]\n\n")
+    return nil
+  ch = is_chat ? {"index": 0, "message": {"role": "assistant", "content": text}, "finish_reason": finish} : {"index": 0, "text": text, "logprobs": nil, "finish_reason": finish}
+  serve_send_json(conn, 200, {"id": rid, "object": is_chat ? "chat.completion" : "text_completion", "created": created, "model": SERVE_MODEL, "choices": [ch], "usage": usage})
+
+# ---- request handling ----------------------------------------------------
+# Every field is type-checked before use: a wrong-typed value that reaches an
+# undefined method is a fatal, uncatchable abort, not an exception.
+-> serve_completions(conn, body, is_chat)
+  req = nil
+  begin
+    req = JSON.parse(body)
+  rescue e
+    return serve_error(conn, 400, "invalid JSON body", "invalid_request_error")
+  if type(req) != "Hash" then return serve_error(conn, 400, "body must be a JSON object", "invalid_request_error")
+  max_new = 256
+  mt = req["max_tokens"]
+  if mt == nil then mt = req["max_completion_tokens"]
+  if mt != nil
+    if type(mt) != "Int" then return serve_error(conn, 400, "max_tokens must be an integer", "invalid_request_error")
+    max_new = mt
+  if max_new < 1 then max_new = 1
+  temperature = ~0.0
+  tv = req["temperature"]
+  if tv != nil
+    if type(tv) != "Int" && type(tv) != "Float" then return serve_error(conn, 400, "temperature must be a number", "invalid_request_error")
+    temperature = ~0.0 + tv
+  if temperature < ~0.0 then temperature = ~0.0
+  top_k = 0
+  kv = req["top_k"]
+  if kv != nil
+    if type(kv) != "Int" then return serve_error(conn, 400, "top_k must be an integer", "invalid_request_error")
+    top_k = kv
+  if top_k < 0 then top_k = 0
+  stream = false
+  sv = req["stream"]
+  if sv != nil
+    if type(sv) != "Boolean" then return serve_error(conn, 400, "stream must be a boolean", "invalid_request_error")
+    stream = sv
+  stops = []
+  st = req["stop"]
+  if st != nil
+    if type(st) == "String"
+      if st != "" then stops.push(st)
+    elsif type(st) == "Array"
+      i = 0
+      while i < st.size()
+        if type(st[i]) != "String" then return serve_error(conn, 400, "stop entries must be strings", "invalid_request_error")
+        if st[i] != "" then stops.push(st[i])
+        i = i + 1
+    else
+      return serve_error(conn, 400, "stop must be a string or an array of strings", "invalid_request_error")
+  prompt_ids = []
+  if is_chat
+    msgs = req["messages"]
+    if type(msgs) != "Array" then return serve_error(conn, 400, "messages must be an array", "invalid_request_error")
+    if msgs.size() == 0 then return serve_error(conn, 400, "messages must not be empty", "invalid_request_error")
+    i = 0
+    while i < msgs.size()
+      m = msgs[i]
+      if type(m) != "Hash" then return serve_error(conn, 400, "each message must be an object", "invalid_request_error")
+      if type(m["role"]) != "String" then return serve_error(conn, 400, "each message needs a string role", "invalid_request_error")
+      if serve_content_text(m["content"]) == nil then return serve_error(conn, 400, "message content must be a string or an array of text parts", "invalid_request_error")
+      i = i + 1
+    et = false
+    ev = req["enable_thinking"]
+    if ev == nil
+      ck = req["chat_template_kwargs"]
+      if type(ck) == "Hash" then ev = ck["enable_thinking"]
+    if ev != nil
+      if type(ev) != "Boolean" then return serve_error(conn, 400, "enable_thinking must be a boolean", "invalid_request_error")
+      et = ev
+    prompt_ids = serve_chat_ids(msgs, et)
+  else
+    pv = req["prompt"]
+    if type(pv) == "Array" && pv.size() == 1 then pv = pv[0]
+    if type(pv) != "String" then return serve_error(conn, 400, "prompt must be a string", "invalid_request_error")
+    prompt_ids = tokenizer.encode(pv)
+  if prompt_ids.size() == 0 then return serve_error(conn, 400, "empty prompt", "invalid_request_error")
+  if prompt_ids.size() + max_new > MAX_POS
+    return serve_error(conn, 400, "prompt (" + prompt_ids.size().to_s + " tokens) + max_tokens (" + max_new.to_s + ") exceeds this server's context of " + MAX_POS.to_s + " tokens; restart the server with a larger FN_CTX", "context_length_exceeded")
+  serve_run(conn, prompt_ids, max_new, temperature, top_k, stops, stream, is_chat)
+
+-> serve_handle(conn)
+  req = serve_read_request(conn)
+  if req == nil then return nil
+  method = req[0]
+  path = req[1]
+  q = path.index("?")
+  if q != nil then path = path.slice(0, q)
+  serve_log(method + " " + path)
+  if method == "OPTIONS"
+    return serve_write(conn, "HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Headers: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+  if method == "GET" && path == "/health"
+    return serve_send_json(conn, 200, {"status": "ok", "model": SERVE_MODEL, "max_context": MAX_POS, "spec_depth": mtp_spec, "quantized": selfquant})
+  if method == "GET" && (path == "/v1/models" || path == "/models")
+    return serve_send_json(conn, 200, {"object": "list", "data": [{"id": SERVE_MODEL, "object": "model", "created": serve_boot_s[0], "owned_by": "tungsten"}]})
+  if method == "POST" && (path == "/v1/chat/completions" || path == "/chat/completions")
+    return serve_completions(conn, req[2], true)
+  if method == "POST" && (path == "/v1/completions" || path == "/completions")
+    return serve_completions(conn, req[2], false)
+  if method != "GET" && method != "POST"
+    return serve_error(conn, 405, "method not allowed", "invalid_request_error")
+  serve_error(conn, 404, "unknown route " + path, "invalid_request_error")
+
+# Accept loop. Outside a goroutine, a socket park is a plain blocking poll(2),
+# which is exactly what a one-request-at-a-time GPU server wants. No failure
+# here may kill the process: a handler that raises answers 500 (when nothing
+# has been written yet) and the loop goes back to accept.
+-> serve_main
+  host = ccall("__w_env", "FN_HOST")
+  if host == nil || host == "" then host = "127.0.0.1"
+  serve_boot_s[0] = serve_now_s
+  srv = Socket.listen(host, serve_port, 64)
+  serve_log(SERVE_MODEL + " OpenAI-compatible server on http://" + host + ":" + serve_port.to_s)
+  serve_log("routes: GET /health, GET /v1/models, POST /v1/chat/completions, POST /v1/completions")
+  serve_log("context " + MAX_POS.to_s + " tokens (FN_CTX), spec depth " + mtp_spec.to_s + " (FN_SPEC), quant " + selfquant.to_s)
+  while true
+    conn = nil
+    begin
+      conn = srv.accept
+    rescue e
+      serve_log("accept failed: " + e.to_s)
+    if conn != nil
+      begin
+        serve_handle(conn)
+      rescue e2
+        serve_log("request failed: " + e2.to_s)
+        begin
+          serve_send_json(conn, 500, {"error": {"message": "internal error: " + e2.to_s, "type": "internal_error", "param": nil, "code": nil}})
+        rescue e3
+          serve_log("could not report the failure to the client")
+      begin
+        conn.close
+      rescue e4
+        serve_log("close failed")
+
+if serve_mode
+  serve_main

@@ -18,7 +18,15 @@
 #
 # Serve (OpenAI-compatible HTTP; see the SERVE MODE section at the end of
 # this file and bits/tungsten-llama/docs/serve.md):
-#   FN_QUANT=1 bin/tungsten run scripts/bench/qwen38fn_mlx.w serve 8080
+#   BIT_HOME=$PWD/bits FN_QUANT=1 \
+#     bin/tungsten run scripts/bench/qwen38fn_mlx.w serve 8080
+#
+# BIT_HOME is not optional. `use tungsten-llama/...` otherwise resolves to the
+# INSTALLED bit tree ($TUNGSTEN_HOME/bits, default ~/.tungsten/bits), which
+# drags in that install's core/ as well — a months-old core/json.w whose
+# parser reads past the end of truncated input. Serving is the case that
+# notices: one malformed request body hangs or kills the process. The same
+# applies to any bench run that wants this checkout's bits.
 #
 # ARGV: [0] mode = baseline|concurrent|serve   [1] tokens to generate
 #           (serve: the TCP port, default 8080)

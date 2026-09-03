@@ -8,10 +8,11 @@ server instead of a benchmark run.
 ## Start the server
 
 ```bash
-FN_QUANT=1 bin/tungsten run scripts/bench/qwen38fn_mlx.w serve 8080
+BIT_HOME=$PWD/bits FN_QUANT=1 bin/tungsten run scripts/bench/qwen38fn_mlx.w serve 8080
 ```
 
-That is the whole command. Weights are read from
+Run it from the repository root. `BIT_HOME` is **not optional** — see
+*The BIT_HOME trap* below. Weights are read from
 `~/.cache/tungsten/qwen38-flash-next-nvfp4/`; the first minute or two is model
 load (75 GB of no-copy mmap'd shards + kernel compilation). The server is ready
 when stderr prints:
@@ -29,7 +30,7 @@ A useful production-ish invocation — 32k context, speculative decode, listenin
 on all interfaces:
 
 ```bash
-FN_QUANT=1 FN_CTX=32768 FN_HOST=0.0.0.0 \
+BIT_HOME=$PWD/bits FN_QUANT=1 FN_CTX=32768 FN_HOST=0.0.0.0 \
   bin/tungsten run scripts/bench/qwen38fn_mlx.w serve 8080
 ```
 
@@ -39,6 +40,7 @@ FN_QUANT=1 FN_CTX=32768 FN_HOST=0.0.0.0 \
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
+| `BIT_HOME` | `~/.tungsten/bits` | **Set this to `$PWD/bits`.** Without it the engine builds against the installed bit tree and its stale `core/`. |
 | `FN_QUANT=1` | off | Route the big matvecs through the self-quantized NVFP4 sidecars. **Recommended** — much faster, and what the published numbers use. |
 | `FN_HOST` | `127.0.0.1` | Bind address. Use `0.0.0.0` to accept remote clients (there is no auth — put it behind something). |
 | `FN_CTX` | `2051` | Maximum position count = the hard cap on `prompt + max_tokens`. Up to `262144`. Above 2051 the QSA lightning indexer takes over from dense attention. Larger contexts allocate proportionally larger K/V and index caches. |
@@ -48,6 +50,31 @@ FN_QUANT=1 FN_CTX=32768 FN_HOST=0.0.0.0 \
 | `FN_TIME=1` | off | Per-round host phase timings on stdout. |
 
 The port is `ARGV[1]` (default `8080`).
+
+## The BIT_HOME trap
+
+`use tungsten-llama/...` resolves through `BIT_HOME`, which defaults to the
+**installed** bit tree (`$TUNGSTEN_HOME/bits`, i.e. `~/.tungsten/bits`) rather
+than this checkout's `bits/`. That install carries its own `core/` too, so the
+build silently picks up an old `core/json.w` — one whose byte parser indexes a
+borrowed `u8[]` view without bounds checks.
+
+Nothing about the build fails; the server starts and answers normal requests
+fine. It only shows up when a client sends malformed JSON: the parser walks off
+the end of the string and the process either spins (allocating until the OS
+kills it) or dies outright, taking the loaded model with it.
+
+`BIT_HOME=$PWD/bits` pins resolution to this checkout. To confirm you got the
+right one:
+
+```bash
+BIT_HOME=$PWD/bits bin/tungsten -e 'use core/json
+<< JSON.parse("\[1e5]").to_s'
+```
+
+`[100000]` is the current parser. `[1, 5]` means you are on the old one — the
+exponent was split into two array elements — and the server will not survive a
+malformed request.
 
 ## Routes
 

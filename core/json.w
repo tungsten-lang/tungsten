@@ -122,11 +122,6 @@
   # and malformed input raises instead of walking off the end. (Truncated
   # documents used to spin in the object/array loops or return garbage,
   # depending on what happened to follow the string in memory.)
-  -> .lit_check_b(s, view, n, pos, word)
-    if pos + word.size() > n || s.slice(pos, word.size()) != word
-      raise "JSON.parse: invalid literal at byte " + pos.to_s
-    true
-
   -> .parse_value_b(s, view, n, pos)
     pos = skip_ws_b(view, n, pos)
     if pos >= n
@@ -139,14 +134,22 @@
       return parse_object_b(s, view, n, pos)
     if b == 91
       return parse_array_b(s, view, n, pos)
+    # Checked inline rather than through a helper whose result is discarded:
+    # a call kept only for its raise is dead by value, and nothing here needs
+    # to depend on that call surviving. Note the lead byte alone is not
+    # enough — "not json" starts with 'n', so without the full compare it
+    # would parse as `null`.
     if b == 116
-      lit_check_b(s, view, n, pos, "true")
+      if pos + 4 > n || s.slice(pos, 4) != "true"
+        raise "JSON.parse: invalid literal at byte " + pos.to_s
       return [true, pos + 4]
     if b == 102
-      lit_check_b(s, view, n, pos, "false")
+      if pos + 5 > n || s.slice(pos, 5) != "false"
+        raise "JSON.parse: invalid literal at byte " + pos.to_s
       return [false, pos + 5]
     if b == 110
-      lit_check_b(s, view, n, pos, "null")
+      if pos + 4 > n || s.slice(pos, 4) != "null"
+        raise "JSON.parse: invalid literal at byte " + pos.to_s
       return [nil, pos + 4]
 
     # Number

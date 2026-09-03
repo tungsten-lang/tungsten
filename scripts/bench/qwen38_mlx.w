@@ -61,7 +61,6 @@ ATTN_SCALE = ~1.0 / Math.sqrt(~0.0 + HEAD_DIM)
 ROT_DIM = 64
 ROT_HALF = ROT_DIM / 2
 ROPE_BASE = ~10000000.0
-MAX_POS = 640
 MTP_DRAFT_PREFIX = 98304
 MTP_DRAFT_CONTROL_START = 248044
 MTP_DRAFT_CONTROL_COUNT = 26
@@ -121,6 +120,16 @@ if dflash2_block < 2 || dflash2_block > 8 then raise "dflash2 block width must b
 # the serial lm_head path.
 prefill_gemm = ARGV.size() > 6 && ARGV[6] == "gemm-prefill"
 if prefill_gemm then triplet_variant = "auto"
+# K/V cache capacity in positions. gemm-prefill exists to run long prompts, so
+# it gets 2048; every other mode keeps the 640 that the decode-path
+# pair/triplet/quad SDPA kernels are compiled for (their score arrays are
+# threadgroup-static at 640 and truncate silently past it).
+MAX_POS = prefill_gemm ? 2048 : 640
+# decode_multi.metal's block-verify SDPA holds its scores in a threadgroup
+# array of MULTI_MAX_DECODE_POS floats and clamps `usable` to it -- past that
+# the attention SILENTLY drops the oldest positions and every reported number
+# stays plausible. It is a hard ceiling on prompt + generate.
+SDPA_MULTI_MAX_POS = 2051
 if prefill_gemm && devchain then raise "gemm-prefill replaces the devchain triplet prefill; drop devchain"
 multi_verify = dflash2_enabled || prefill_gemm || (ARGV.size() > 7 && (ARGV[7] == "multi" || ARGV[7] == "row-scan-multi"))
 multi_variant = (multi_verify && ARGV.size() > 8) ? ARGV[8] : "auto"
@@ -168,6 +177,8 @@ if profile_prompt_tokens < 1 then raise "profile prompt length must be positive"
 # instead: a benchmark that lies quietly is worse than one that stops.
 if profile_prompt_tokens + n_generate > MAX_POS
   raise "prompt " + profile_prompt_tokens.to_s + " + generate " + n_generate.to_s + " exceeds MAX_POS " + MAX_POS.to_s + "; the K/V cache would wrap and the run would report plausible numbers for garbage output"
+if prefill_gemm && profile_prompt_tokens + n_generate > SDPA_MULTI_MAX_POS
+  raise "prompt " + profile_prompt_tokens.to_s + " + generate " + n_generate.to_s + " exceeds the block-verify SDPA ceiling " + SDPA_MULTI_MAX_POS.to_s + " (decode_multi.metal MULTI_MAX_DECODE_POS); attention would silently truncate"
 setup_t0 = ccall("__w_clock_ms")
 # Mutable profiling state (closure-local assignment would shadow scalars):
 # phase, decode target ms/count, prefill target ms/count, verify ms/count,
@@ -217,17 +228,22 @@ kv_write_pipe = metal_pipeline(metal_compile_source(device, read_file(SHARED_DIR
 add_pipe = metal_pipeline(metal_compile_source(device, read_file(SHARED_DIR + "residual_add.metal")), "residual_add")
 silu_pipe = metal_pipeline(metal_compile_source(device, read_file(SHARED_DIR + "silu_mul.metal")), "silu_mul")
 
-# --- Neural-Accelerator (matmul2d) FFN prefill path (gemm-prefill only) ---
-m4_comp = metal4_compiler(device)
-m4_queue = metal4_queue(device)
-m4_alloc = metal4_allocator(device)
-m4_ffn_pipe = metal4_pipeline(m4_comp, metal_compile_source(device, read_file("bits/tungsten-llama/lib/kernels/nvfp4_matmul_m4.metal")), "nvfp4_matmul_m4_m64", 128, 1, 1)
+# --- Neural-Accelerator (matmul2d) prefill path (gemm-prefill only) ---
+# The "na" kernels take plain device pointers and build their tensor views
+# in-shader, so they dispatch from the CLASSIC compute encoder straight into
+# forward_multi's single concurrent command buffer: no Metal-4 argument table,
+# command buffer, allocator or residency set, and -- the point -- no commit
+# segmentation. The MTL4 predecessor cost five blocking GPU round-trips per
+# layer. See docs/na-classic-encoder-2026-09-02.md.
+NA_DIR = "bits/tungsten-llama/lib/kernels/na/"
+NA_MT = 128
+NA_MT64 = 64
+na_lib = metal_compile_source(device, read_file(NA_DIR + "nvfp4_matmul_na.metal"))
+na_pipe = metal_pipeline(na_lib, "nvfp4_matmul_na")
+na_m64_pipe = metal_pipeline(na_lib, "nvfp4_matmul_na_m64")
 f32_to_f16_pipe = metal_pipeline(metal_compile_source(device, read_file(NVFP4_DIR + "f32_to_f16.metal")), "f32_to_f16")
-k_hidden_buf = metal_buffer(device, 4)
-metal_buffer_write_i32(k_hidden_buf, 0, HIDDEN)
-k_ffn_buf = metal_buffer(device, 4)
-metal_buffer_write_i32(k_ffn_buf, 0, FFN)
-g_m4_ffn = false
+g_na_ffn = false
+g_na_attn = false
 argmax_pipe = metal_pipeline(metal_compile_source(device, read_file(SHARED_DIR + "argmax.metal")), "argmax")
 argmax_parallel_lib = metal_compile_source(device, read_file(SHARED_DIR + "argmax_two_stage.metal"))
 argmax_stage1_pipe = metal_pipeline(argmax_parallel_lib, "argmax_stage1")
@@ -344,8 +360,26 @@ argmax_quad_pipe = metal_pipeline_with_int_constants(argmax_pair_lib, "argmax_ba
 argmax_triplet_pipe = metal_pipeline_with_int_constants(argmax_pair_lib, "argmax_batch_fc", [N_VOCAB, 3])
 
 # ---- runtime-width block verify (n <= MULTI_MAX rows in one causal pass) ----
-MULTI_MAX = prefill_gemm ? 64 : 8
+# The gemm-prefill chunk width IS the M of every prefill GEMM. The Neural
+# Accelerators need M >= 512 to reach their ~53 TFLOPS plateau (crossover vs
+# the simdgroup ladder is M ~= 48-64), so the chunk is 512 by default.
+# PREFILL_CHUNK overrides it, which is what keeps the pre-NA 64-row arm
+# runnable for A/Bs. It must be 64 or a multiple of the 128-row NA tile: the
+# cooperative-tensor store does not clip, so a chunk that is not tile-aligned
+# would let na_proj round a width up past the scratch buffers' row count.
+prefill_chunk_env = ccall("__w_env", "PREFILL_CHUNK")
+PREFILL_CHUNK = prefill_chunk_env == nil ? 512 : prefill_chunk_env.to_i()
+if PREFILL_CHUNK != 64 && (PREFILL_CHUNK < 128 || PREFILL_CHUNK % 128 != 0)
+  raise "PREFILL_CHUNK must be 64 or a multiple of 128, got " + PREFILL_CHUNK.to_s
+MULTI_MAX = prefill_gemm ? PREFILL_CHUNK : 8
 MULTI_WIDE_MAX = 8
+# Only the VERIFY reads whole logit rows, and it is never wider than the
+# speculative block. Sizing the logits scratch by MULTI_MAX would cost 508 MB
+# at chunk 512 for eight rows of use.
+LOGITS_MULTI_MAX = 8
+# The simdgroup-matrix GEMM ladder tops out at 64 rows (nvfp4_gemm_f32's
+# widest tile is MT=8 x 8 rows). Wider chunks go to the Neural Accelerators.
+MULTI_LADDER_MAX = 64
 multi_pipes = {}
 multi_rows = {}
 if multi_verify
@@ -757,7 +791,13 @@ if multi_verify
   up_multi_tmp = metal_buffer(device, MULTI_MAX * FFN * 4)
   xn_h16 = metal_buffer(device, MULTI_MAX * HIDDEN * 2)
   h_h16 = metal_buffer(device, MULTI_MAX * FFN * 2)
-  down_m4_tmp = metal_buffer(device, MULTI_MAX * HIDDEN * 4)
+  down_na_tmp = metal_buffer(device, MULTI_MAX * HIDDEN * 4)
+  # Staging for projections routed to the Neural Accelerators outside the FFN:
+  # f16 activations (widest kdim is FFN) and, because the NA kernel has no
+  # accumulate-into-C mode, a destination for the residual projections (whose
+  # ndim is always HIDDEN) that a residual_add then folds into x_multi.
+  na_in_h16 = metal_buffer(device, MULTI_MAX * FFN * 2)
+  na_out_tmp = metal_buffer(device, MULTI_MAX * HIDDEN * 4)
   hidden_multi_tmp = metal_buffer(device, MULTI_MAX * FFN * 4)
   z_multi_tmp = metal_buffer(device, MULTI_MAX * V_DIM * 4)
   a_multi_tmp = metal_buffer(device, MULTI_MAX * HV * 4)
@@ -773,7 +813,7 @@ if multi_verify
   attn_multi_tmp = metal_buffer(device, MULTI_MAX * ATTN_DIM * 4)
   cos_multi_tmp = metal_buffer(device, MULTI_MAX * ROT_HALF * 4)
   sin_multi_tmp = metal_buffer(device, MULTI_MAX * ROT_HALF * 4)
-  logits_multi = metal_buffer(device, MULTI_MAX * N_VOCAB * 4)
+  logits_multi = metal_buffer(device, LOGITS_MULTI_MAX * N_VOCAB * 4)
   argmax_multi_out = metal_buffer(device, MULTI_MAX * 4)
   token_multi_buf = metal_buffer(device, MULTI_MAX * 4)
   # DFlash2 conditioning taps [MAX_POS, 5, HIDDEN] (65 MB), filled by the
@@ -1893,6 +1933,26 @@ rope_power = ~2.0 / ROT_DIM
   if multi_pipes[key] == nil then return auto_key
   key
 
+# One projection on the Neural Accelerators for a width the simdgroup ladder
+# cannot serve. Stages the f32 activations to f16 (matmul2d takes fp16
+# operands), then runs the NA GEMM. `residual` folds the result into `output`
+# with a separate add, since the kernel has no accumulate-into-C mode.
+#
+# The scratch is shared across projections, so each write is fenced on BOTH
+# sides: the leading barrier is the WAR against the previous projection's
+# still-reading GEMM, the trailing one the RAW for this one.
+-> na_scaled_multi(w, input, output, kdim, ndim, n, residual)
+  na_stage(input, na_in_h16, n, kdim)
+  if !residual
+    na_proj(w, na_in_h16, output, kdim, ndim, n)
+    return
+  if ndim > HIDDEN
+    raise "na residual projection ndim " + ndim.to_s + " exceeds na_out_tmp width " + HIDDEN.to_s
+  dep_barrier_on([na_out_tmp])
+  na_proj(w, na_in_h16, na_out_tmp, kdim, ndim, n)
+  dep_barrier_on([na_out_tmp])
+  metal_dispatch_n(queue, add_pipe, [output, na_out_tmp, n * ndim], n * ndim)
+
 -> enqueue_scaled_multi(spec)
   w = spec[0]
   input = spec[1]
@@ -1900,6 +1960,9 @@ rope_power = ~2.0 / ROT_DIM
   kdim = spec[3]
   rows = spec[4]
   n = spec[5]
+  if n > MULTI_LADDER_MAX || g_na_attn
+    na_scaled_multi(w, input, output, kdim, rows, n, false)
+    return
   key = multi_pipe_key(n, kdim, false)
   if multi_rows[key] == 0
     # simdgroup-matrix GEMM rung: 32 output rows per 128-thread group.
@@ -1917,6 +1980,9 @@ rope_power = ~2.0 / ROT_DIM
   kdim = spec[3]
   rows = spec[4]
   n = spec[5]
+  if n > MULTI_LADDER_MAX || g_na_attn
+    na_scaled_multi(w, input, residual, kdim, rows, n, true)
+    return
   key = multi_pipe_key(n, kdim, true)
   if multi_rows[key] == 0
     metal_dispatch_groups(queue, multi_pipes[key],
@@ -1938,8 +2004,16 @@ rope_power = ~2.0 / ROT_DIM
     ss_out = lyr[:ss_a]
   enqueue_rms([x_multi, lyr[:in_norm], xn_multi, n])
   dependency_barrier()
-  enqueue_scaled_multi([lyr[:qkv], xn_multi, lyr[:qkv_m], HIDDEN, QKV_DIM, n])
-  enqueue_scaled_multi([lyr[:z], xn_multi, z_multi_tmp, HIDDEN, V_DIM, n])
+  # qkv and z read the SAME normalized activations, so the f16 staging is
+  # hoisted out of both: one conversion, then two NA GEMMs that run
+  # concurrently instead of being serialized by a shared staging buffer.
+  if g_na_attn
+    na_stage(xn_multi, xn_h16, n, HIDDEN)
+    na_proj(lyr[:qkv], xn_h16, lyr[:qkv_m], HIDDEN, QKV_DIM, n)
+    na_proj(lyr[:z], xn_h16, z_multi_tmp, HIDDEN, V_DIM, n)
+  else
+    enqueue_scaled_multi([lyr[:qkv], xn_multi, lyr[:qkv_m], HIDDEN, QKV_DIM, n])
+    enqueue_scaled_multi([lyr[:z], xn_multi, z_multi_tmp, HIDDEN, V_DIM, n])
   metal_dispatch_groups(queue, multi_bf16_pipe,
     [lyr[:a], xn_multi, a_multi_tmp, HIDDEN, HV, n], HV, 32)
   metal_dispatch_groups(queue, multi_bf16_pipe,
@@ -1984,9 +2058,17 @@ rope_power = ~2.0 / ROT_DIM
   n = spec[2]
   enqueue_rms([x_multi, lyr[:in_norm], xn_multi, n])
   dependency_barrier()
-  enqueue_scaled_multi([lyr[:q], xn_multi, qfull_multi_tmp, HIDDEN, QFULL_DIM, n])
-  enqueue_scaled_multi([lyr[:k], xn_multi, k_multi_tmp, HIDDEN, KV_DIM, n])
-  enqueue_scaled_multi([lyr[:v], xn_multi, v_multi_tmp, HIDDEN, KV_DIM, n])
+  # q, k and v read the SAME normalized activations: stage to f16 once, then
+  # let the three NA GEMMs run concurrently.
+  if g_na_attn
+    na_stage(xn_multi, xn_h16, n, HIDDEN)
+    na_proj(lyr[:q], xn_h16, qfull_multi_tmp, HIDDEN, QFULL_DIM, n)
+    na_proj(lyr[:k], xn_h16, k_multi_tmp, HIDDEN, KV_DIM, n)
+    na_proj(lyr[:v], xn_h16, v_multi_tmp, HIDDEN, KV_DIM, n)
+  else
+    enqueue_scaled_multi([lyr[:q], xn_multi, qfull_multi_tmp, HIDDEN, QFULL_DIM, n])
+    enqueue_scaled_multi([lyr[:k], xn_multi, k_multi_tmp, HIDDEN, KV_DIM, n])
+    enqueue_scaled_multi([lyr[:v], xn_multi, v_multi_tmp, HIDDEN, KV_DIM, n])
   dependency_barrier()
   metal_dispatch_n(queue, split_multi_pipe,
     [qfull_multi_tmp, queries_multi_tmp, attn_gate_multi_tmp,
@@ -2014,44 +2096,59 @@ rope_power = ~2.0 / ROT_DIM
     [lyr[:out], attn_multi_tmp, x_multi, ATTN_DIM, HIDDEN, n])
   dependency_barrier()
 
-# One FFN/attn projection on the Neural Accelerators (matmul2d, m64 tile).
-# in_buf: f16 activation (MULTI_MAX x kdim). out_buf: f32 (MULTI_MAX x ndim).
-# Tensors span MULTI_MAX rows (the tile is 64); rows >= n are computed but unused.
--> m4_proj(w, in_buf, out_buf, kdim, kbuf, ndim)
-  tab = metal4_argtable(device, 6)
-  metal4_argtable_set_tensor(tab, 0, metal_tensor_2d(in_buf, METAL_DTYPE_FLOAT16, MULTI_MAX, kdim, 0, 0))
-  metal4_argtable_set_buffer(tab, 1, w[0])
-  metal4_argtable_set_buffer(tab, 2, w[1])
-  metal4_argtable_set_tensor(tab, 3, metal_tensor_2d(out_buf, METAL_DTYPE_FLOAT32, MULTI_MAX, ndim, 0, 0))
-  metal4_argtable_set_buffer(tab, 4, kbuf)
-  metal4_argtable_set_buffer(tab, 5, w[2])
-  rr = [in_buf, w[0], w[1], out_buf, kbuf, w[2]]
-  metal4_dispatch_groups_3d(m4_queue, m4_alloc, m4_ffn_pipe, tab, rr, 16384, 1, (ndim + 63) / 64, 1, 128, 1, 1)
+# One projection on the M5 Neural Accelerators (mpp::tensor_ops::matmul2d),
+# dispatched from the CLASSIC compute encoder into the batch already open.
+#
+# in_buf: f16 activations [MULTI_MAX][kdim]; out_buf: f32 [MULTI_MAX][ndim].
+# The cooperative-tensor store does NOT clip to the extents, so the row count
+# handed to the kernel is rounded UP to the M tile and the dispatch covers
+# exactly those rows: the scratch buffers carry MULTI_MAX rows, so rows in
+# [n, mrows) are computed and unused, and mrows <= MULTI_MAX always because
+# MULTI_MAX is itself tile-aligned. Every projection in this model satisfies
+# the other two alignment rules already (kdim % 128 == 0, ndim % 64 == 0).
+-> na_proj(w, in_buf, out_buf, kdim, ndim, n)
+  if n <= NA_MT64
+    metal_dispatch_3d(queue, na_m64_pipe,
+      [in_buf, w[0], w[1], out_buf, kdim, w[2], NA_MT64, ndim],
+      1, ndim / 64, 1, 128, 1, 1)
+    return
+  mrows = ((n + NA_MT - 1) / NA_MT) * NA_MT
+  metal_dispatch_3d(queue, na_pipe,
+    [in_buf, w[0], w[1], out_buf, kdim, w[2], mrows, ndim],
+    mrows / NA_MT, ndim / 64, 1, 128, 1, 1)
 
-# matmul2d FFN (gemm-prefill). Commit-segments the batch around the MTL4 stream:
-# convert->commit, gate/up on m4_queue, silu+convert->commit, down on m4_queue,
-# residual add. Numerically parity-safe (f16 acts preserve argmax; see the doc).
--> ffn_m4(lyr, n)
-  metal_dispatch_n(queue, f32_to_f16_pipe, [xn_multi, xn_h16, n * HIDDEN], n * HIDDEN)
-  metal_batch_commit(queue)
-  m4_proj(lyr[:gate], xn_h16, gate_multi_tmp, HIDDEN, k_hidden_buf, FFN)
-  m4_proj(lyr[:up], xn_h16, up_multi_tmp, HIDDEN, k_hidden_buf, FFN)
-  metal_batch_begin_concurrent(queue)
+# Stage n rows of an f32 activation block as f16 for the NA GEMMs (matmul2d
+# takes fp16 operands). Fenced on BOTH sides: the leading barrier is the WAR
+# against whatever GEMM last read this staging buffer, the trailing one the
+# RAW for the GEMMs about to read it.
+-> na_stage(src, dst, n, dim)
+  dep_barrier_on([dst])
+  metal_dispatch_n(queue, f32_to_f16_pipe, [src, dst, n * dim], n * dim)
+  dep_barrier_on([dst])
+
+# Neural-Accelerator FFN (gemm-prefill). Every dispatch -- the two f32->f16
+# activation stagings, the three NA GEMMs, silu and the residual add -- lands
+# in the SAME concurrent command buffer, ordered by scoped resource barriers.
+# Numerically parity-safe (f16 acts preserve argmax; see the tuning doc).
+-> ffn_na(lyr, n)
+  na_stage(xn_multi, xn_h16, n, HIDDEN)
+  na_proj(lyr[:gate], xn_h16, gate_multi_tmp, HIDDEN, FFN, n)
+  na_proj(lyr[:up], xn_h16, up_multi_tmp, HIDDEN, FFN, n)
+  dep_barrier_on([gate_multi_tmp, up_multi_tmp])
   metal_dispatch_n(queue, silu_pipe,
     [gate_multi_tmp, up_multi_tmp, hidden_multi_tmp, n * FFN], n * FFN)
   dep_barrier_on([hidden_multi_tmp])
-  metal_dispatch_n(queue, f32_to_f16_pipe, [hidden_multi_tmp, h_h16, n * FFN], n * FFN)
-  metal_batch_commit(queue)
-  m4_proj(lyr[:down], h_h16, down_m4_tmp, FFN, k_ffn_buf, HIDDEN)
-  metal_batch_begin_concurrent(queue)
-  metal_dispatch_n(queue, add_pipe, [x_multi, down_m4_tmp, n * HIDDEN], n * HIDDEN)
+  na_stage(hidden_multi_tmp, h_h16, n, FFN)
+  na_proj(lyr[:down], h_h16, down_na_tmp, FFN, HIDDEN, n)
+  dep_barrier_on([down_na_tmp])
+  metal_dispatch_n(queue, add_pipe, [x_multi, down_na_tmp, n * HIDDEN], n * HIDDEN)
   dep_barrier_on([x_multi])
 
 -> enqueue_ffn_multi(lyr, n)
   enqueue_rms([x_multi, lyr[:post_norm], xn_multi, n])
   dep_barrier_on([xn_multi])
-  if g_m4_ffn
-    ffn_m4(lyr, n)
+  if g_na_ffn
+    ffn_na(lyr, n)
   else
     enqueue_scaled_multi([lyr[:gate], xn_multi, gate_multi_tmp, HIDDEN, FFN, n])
     enqueue_scaled_multi([lyr[:up], xn_multi, up_multi_tmp, HIDDEN, FFN, n])
@@ -2078,6 +2175,8 @@ rope_power = ~2.0 / ROT_DIM
   # the prompt's end). Default: every row's argmax (verify).
   logits_mode = spec.size() > 4 ? spec[4] : "all"
   if n < 1 || n > MULTI_MAX then raise "forward_multi width " + n.to_s + " out of range"
+  if logits_mode == "all" && n > LOGITS_MULTI_MAX
+    raise "forward_multi asked for " + n.to_s + " rows of logits but the scratch holds " + LOGITS_MULTI_MAX.to_s
   if tokens != nil
     i = 0
     while i < n
@@ -2549,11 +2648,18 @@ if prompt_ids_file != ""
   prompt = JSON.parse(read_file(prompt_ids_file))
   if prompt.size() + n_generate > MAX_POS
     raise "prompt file " + prompt.size().to_s + " + generate " + n_generate.to_s + " exceeds MAX_POS " + MAX_POS.to_s
+  if prefill_gemm && prompt.size() + n_generate > SDPA_MULTI_MAX_POS
+    raise "prompt file " + prompt.size().to_s + " + generate " + n_generate.to_s + " exceeds the block-verify SDPA ceiling " + SDPA_MULTI_MAX_POS.to_s + "; attention would silently truncate"
 setup_elapsed = ccall("__w_clock_ms") - setup_t0
 << "prefill " + prompt.size().to_s + " tokens"
 prefill_t0 = ccall("__w_clock_ms")
 profile_stats[0] = 1
-g_m4_ffn = prefill_gemm && ccall("__w_env", "M4_FFN") != "0"
+g_na_ffn = prefill_gemm && ccall("__w_env", "M4_FFN") != "0"
+# The attention/GDN projections (q, k, v, o and qkv, z, out) on the Neural
+# Accelerators. Chunks wider than the 64-row simdgroup ladder go there
+# regardless -- this toggle is what makes the FFN-only arm measurable at
+# chunk 64.
+g_na_attn = prefill_gemm && ccall("__w_env", "NA_ATTN") != "0"
 i = 0
 pred = -1
 prefill_last_batched = false
@@ -2603,7 +2709,8 @@ while i < prompt.size()
 # the last prompt token's hidden for the first decode draft.
 if prefill_last_batched && mtp_enabled
   copy_hidden_triplet_row(2)
-g_m4_ffn = false
+g_na_ffn = false
+g_na_attn = false
 profile_stats[0] = 0
 prefill_elapsed = ccall("__w_clock_ms") - prefill_t0
 if prompt.size() == 5 && pred != 11751
@@ -2969,7 +3076,7 @@ if row_scan
   while r < scan_reps
     if multi_verify
       mw = 1
-      while mw <= MULTI_MAX
+      while mw <= MULTI_WIDE_MAX
         mtoks = []
         j = 0
         while j < mw
@@ -3048,7 +3155,7 @@ if row_scan
   if multi_verify
     prev = ~0.0
     mw = 1
-    while mw <= MULTI_MAX
+    while mw <= MULTI_WIDE_MAX
       mm = scan_multi[mw].sort()[scan_reps / 2]
       << "rowscan multi " + mw.to_s + "row median " + mm.to_s + " ms  (marginal " + (mm - prev).to_s + ", variant " + multi_variant + ")"
       prev = mm

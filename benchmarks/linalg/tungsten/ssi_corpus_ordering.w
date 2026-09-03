@@ -1,6 +1,22 @@
 # Run Tungsten's sparse-ordering portfolio on one SSI challenge pattern.
 #
-# Input format: n nnz row0 col0 row1 col1 ...
+# The input is deliberately simple so the public JSONL corpus can be adapted
+# without adding a JSON parser to the timed Tungsten process:
+#
+#   n nnz row0 col0 row1 col1 ...
+#
+# Input decoding and SparseAnalysis construction are outside the timer.  The
+# reported time therefore covers the same ordering call that is optimized in
+# core/sparse_factor.w.  The Ruby driver beside this file creates the flat input,
+# launches a fresh process per round, and checks deterministic fill/flops/order.
+#
+# Build (frame pointers are useful for `bin/tungsten flame`):
+#   bin/tungsten compile --release --native \
+#     --out /tmp/ssi-corpus-ordering \
+#     benchmarks/linalg/tungsten/ssi_corpus_ordering.w
+#
+# Direct invocation:
+#   /tmp/ssi-corpus-ordering PATTERN.txt [stream] [budget] [restarts]
 
 use core/sparse
 
@@ -26,6 +42,7 @@ stream = ARGV.size > 1 ? ARGV[1].to_i : 7
 budget = ARGV.size > 2 ? ARGV[2].to_i : 100000000
 raise "budget must be non-negative" if budget < 0
 
+# Preserve the restart policy used by the archived SSI campaign adapter.
 restarts = m == 0 ? 1 : 600000 / m
 restarts = 48 if restarts > 48
 restarts = 1 if restarts < 1

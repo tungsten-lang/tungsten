@@ -6097,6 +6097,90 @@ static inline uint64_t bn_mul_1_f64(uint64_t *rp, const uint64_t *up, uint64_t v
 #endif
 #endif
 
+#ifndef BN_MUL1_2WAY
+#define BN_MUL1_2WAY 1
+#endif
+#if defined(__aarch64__) && BN_MUL1_2WAY
+/* Straight 4-limbs-per-iteration mul_1 schedule (BN_MUL1_2WAY, default on):
+ * a narrower, GMP-mul_1-shaped variant of the rolling-carry kernel, used for
+ * the boxed n in {48,64,96} shapes.  Each iteration issues two independent
+ * 2-limb product pairs (four mul/umulh) and threads a single live carry: the
+ * C flag continues the adcs chain across the loop back-edge (sub/cbnz leave
+ * it untouched) and the rolling high word (x17) is written late so the chain
+ * never stalls -- one carry-resolve `adc` closes it after the loop.  Same
+ * 1-adcs-per-limb floor and the same in-place (rp==up) contract as bn_mul_1
+ * (every source limb of an iteration is loaded before any of its stores), so
+ * the result is identical to bn_mul_1_ref for every length and value.  The
+ * narrower unroll keeps two 2-by-1 steps in flight the way GMP's mul_1
+ * pipelines them, trading a shorter loop body for a per-4-limb branch. */
+__attribute__((naked, noinline, aligned(64), BN_HOT_SECTION))
+static uint64_t bn_mul_1_2way(uint64_t *rp, const uint64_t *up, int32_t n,
+                              uint64_t v) {
+    __asm__(
+        "mov x17, xzr\n"
+        "cmn xzr, xzr\n"
+        "tbz w2, #0, 1f\n"
+        "ldr x4, [x1], #8\n"
+        "mul x8, x4, x3\n"
+        "umulh x17, x4, x3\n"
+        "str x8, [x0], #8\n"
+        "1:\n"
+        "tbz w2, #1, 2f\n"
+        "ldp x4, x5, [x1], #16\n"
+        "mul x8, x4, x3\n"
+        "umulh x12, x4, x3\n"
+        "mul x9, x5, x3\n"
+        "umulh x13, x5, x3\n"
+        "adcs x8, x8, x17\n"
+        "adcs x9, x9, x12\n"
+        "mov x17, x13\n"
+        "stp x8, x9, [x0], #16\n"
+        "2:\n"
+        "lsr w2, w2, #2\n"
+        "cbz x2, 4f\n"
+        /* 4 limbs per pass: two independent 2-limb product chains feeding one
+         * rolling carry.  x17 alone carries the high word between passes; it
+         * is rewritten (umulh x17) only after the pass's first adcs has read
+         * its previous value, so no move sits on the carry path. */
+        "3:\n"
+        "ldp x4, x5, [x1], #32\n"
+        "ldp x6, x7, [x1, #-16]\n"
+        "mul x8, x4, x3\n"
+        "umulh x12, x4, x3\n"
+        "mul x9, x5, x3\n"
+        "umulh x13, x5, x3\n"
+        "mul x10, x6, x3\n"
+        "umulh x14, x6, x3\n"
+        "mul x11, x7, x3\n"
+        "adcs x8, x8, x17\n"
+        "umulh x17, x7, x3\n"
+        "adcs x9, x9, x12\n"
+        "adcs x10, x10, x13\n"
+        "adcs x11, x11, x14\n"
+        "stp x8, x9, [x0], #32\n"
+        "stp x10, x11, [x0, #-16]\n"
+        "sub x2, x2, #1\n"
+        "cbnz x2, 3b\n"
+        "4:\n"
+        "adc x0, x17, xzr\n"
+        "ret\n"
+    );
+}
+
+static inline uint64_t bn_mul_1_2way_f48(uint64_t *rp, const uint64_t *up,
+                                         uint64_t v) {
+    return bn_mul_1_2way(rp, up, 48, v);
+}
+static inline uint64_t bn_mul_1_2way_f64(uint64_t *rp, const uint64_t *up,
+                                         uint64_t v) {
+    return bn_mul_1_2way(rp, up, 64, v);
+}
+static inline uint64_t bn_mul_1_2way_f96(uint64_t *rp, const uint64_t *up,
+                                         uint64_t v) {
+    return bn_mul_1_2way(rp, up, 96, v);
+}
+#endif
+
 static inline __attribute__((always_inline))
 uint64_t bn_addmul_4_inline(uint64_t *rp, const uint64_t *up, uint64_t v) {
     uint64_t carry = 0;
@@ -6680,8 +6764,56 @@ void bn_sqr8_kara4_inline(uint64_t *out, const uint64_t *a) {
 #endif
 }
 
+/* ITEM 9 knob: swap bn_sqr16_split's Karatsuba split (knob off, below) for a
+ * direct GMP-style sqr_basecase — off-diagonal cross rows via the two-row
+ * bn_addmul_2 kernel + a single diagonal addlsh1 fold.  bn_sqr16_split's own
+ * shape is a Karatsuba split (two 8-limb squares + a doubled 8x8 cross), not a
+ * direct schoolbook square, so this is an alternative ALGORITHM offered under
+ * the knob for A/B measurement, not an in-place row acceleration.  Both paths
+ * emit the exact 16-limb square; verify with --fuzz-sqr / mpn_sqr. */
+#ifndef BN_SQR16_ADDMUL2
+#define BN_SQR16_ADDMUL2 1
+#endif
 static __attribute__((noinline, BN_HOT_SECTION, aligned(64)))
 void bn_sqr16_split(uint64_t *out, const uint64_t *a) {
+#if BN_SQR16_ADDMUL2 && BN_ADDMUL_2
+    /* Direct 16-limb square = bn_sqr_school's algorithm spelled with N = 16:
+     * row 0 writes the a[0] off-diagonal via mul_1; rows i,i+1 share the tail
+     * a[i+2..16) through one bn_addmul_2s pass (corner a[i]*a[i+1] added at
+     * out[2i+1], its high word seeding the pass); then one pass doubles the
+     * off-diagonal sum and folds in each diagonal a[j]^2. */
+    enum { N = 16 };
+    out[N] = bn_mul_1(out + 1, a + 1, N - 1, a[0]);
+    int32_t i = 1;
+    for (; i + 1 < N - 1; i += 2) {
+        __uint128_t corner = (__uint128_t)a[i] * a[i + 1];
+        __uint128_t s = (__uint128_t)out[2 * i + 1] + (uint64_t)corner;
+        out[2 * i + 1] = (uint64_t)s;
+        out[N + i + 1] = bn_addmul_2s(
+            out + 2 * i + 2, a + i + 2, N - i - 2, a[i], a[i + 1],
+            (uint64_t)(corner >> 64) + (uint64_t)(s >> 64));
+    }
+    if (i < N - 1)
+        out[N + i] = bn_addmul_1(out + 2 * i + 1, a + i + 1, N - i - 1, a[i]);
+    out[0] = 0;
+    out[2 * N - 1] = 0;
+    uint64_t double_carry = 0, carry = 0;
+    for (int32_t j = 0; j < N; j++) {
+        __uint128_t p = (__uint128_t)a[j] * a[j];
+        uint64_t v = out[2 * j];
+        uint64_t doubled = (v << 1) | double_carry;
+        double_carry = v >> 63;
+        __uint128_t sv = (__uint128_t)doubled + (uint64_t)p + carry;
+        out[2 * j] = (uint64_t)sv;
+        v = out[2 * j + 1];
+        doubled = (v << 1) | double_carry;
+        double_carry = v >> 63;
+        __uint128_t s2 = (__uint128_t)doubled + (uint64_t)(p >> 64) +
+                         (uint64_t)(sv >> 64);
+        out[2 * j + 1] = (uint64_t)s2;
+        carry = (uint64_t)(s2 >> 64);
+    }
+#else
     uint64_t cross[BN_SQR16_FUSED_CROSS ? 16 : 17];
     bn_sqr8_kara4_inline(out, a);
     bn_sqr8_kara4_inline(out + 16, a + 8);
@@ -6726,6 +6858,7 @@ void bn_sqr16_split(uint64_t *out, const uint64_t *a) {
         add_carry = out[8 + i] == 0;
     }
 #endif
+#endif /* BN_SQR16_ADDMUL2 */
 }
 
 /* out[0..na+nb) = a[0..na) * b[0..nb)  (plain O(n*m) schoolbook).
@@ -11963,10 +12096,19 @@ static WValue bigint_mul_n1(const uint64_t *al, int32_t n, uint64_t w,
         r->limbs[32] = bn_mul_1_f32(r->limbs, al, w);
     else if (n == 40)
         r->limbs[40] = bn_mul_1_f40(r->limbs, al, w);
+#if defined(__aarch64__) && BN_MUL1_2WAY
+    else if (n == 48)
+        r->limbs[48] = bn_mul_1_2way_f48(r->limbs, al, w);
+    else if (n == 64)
+        r->limbs[64] = bn_mul_1_2way_f64(r->limbs, al, w);
+    else if (n == 96)
+        r->limbs[96] = bn_mul_1_2way_f96(r->limbs, al, w);
+#else
     else if (n == 48)
         r->limbs[48] = bn_mul_1_f48(r->limbs, al, w);
     else if (n == 64)
         r->limbs[64] = bn_mul_1_f64(r->limbs, al, w);
+#endif
     else
 #endif
         r->limbs[n] = bn_mul_1(r->limbs, al, n, w);
@@ -13685,6 +13827,9 @@ static inline uint64_t bn_udiv_qr_3by2(uint64_t n2, uint64_t n1, uint64_t n0,
     return q;
 }
 
+#ifndef BN_DIV1_2WAY
+#define BN_DIV1_2WAY 1
+#endif
 static uint64_t mag_div_wide_preinv_cached(uint64_t *quotient,
                                            const uint64_t *a, int32_t alen,
                                            uint64_t d,
@@ -13693,6 +13838,39 @@ static uint64_t mag_div_wide_preinv_cached(uint64_t *quotient,
     uint64_t normalized_d = d << shift;
     uint64_t dinv = bn_div_preinv_cached(normalized_d, cache);
     uint64_t rem = shift ? a[alen - 1] >> (64 - shift) : 0;
+#if BN_DIV1_2WAY
+    /* Software-pipelined two-limbs-per-iteration form of the single-step
+     * loop kept under the #else.  The remainder recurrence is inherently
+     * serial, but unrolling by two halves the loop overhead and widens the
+     * scheduling window so the out-of-order core overlaps the low step's
+     * normalized-`low` setup and quotient store with the high step's
+     * reciprocal multiply -- the two-steps-in-flight schedule GMP's
+     * mpn_divrem_1 uses.  Bit-identical to the serial loop for every input:
+     * the two 2-by-1 steps execute in the same high-to-low order and thread
+     * the same `rem`, and each `low` word is formed exactly as below (no
+     * cross-limb shift-in for limb 0). */
+    int32_t i = alen - 1;
+    for (; i >= 1; i -= 2) {
+        uint64_t low_hi = a[i] << shift;
+        if (shift) low_hi |= a[i - 1] >> (64 - shift);
+        uint64_t low_lo = a[i - 1] << shift;
+        if (shift && i - 1 > 0) low_lo |= a[i - 2] >> (64 - shift);
+        uint64_t q_hi =
+            bn_div_qr_preinv(rem, low_hi, normalized_d, dinv, &rem);
+        uint64_t q_lo =
+            bn_div_qr_preinv(rem, low_lo, normalized_d, dinv, &rem);
+        if (quotient) {
+            quotient[i] = q_hi;
+            quotient[i - 1] = q_lo;
+        }
+    }
+    if (i == 0) {
+        uint64_t low = a[0] << shift;
+        uint64_t q =
+            bn_div_qr_preinv(rem, low, normalized_d, dinv, &rem);
+        if (quotient) quotient[0] = q;
+    }
+#else
     for (int32_t i = alen - 1; i >= 0; i--) {
         uint64_t low = a[i] << shift;
         if (shift && i > 0) low |= a[i - 1] >> (64 - shift);
@@ -13700,6 +13878,7 @@ static uint64_t mag_div_wide_preinv_cached(uint64_t *quotient,
             bn_div_qr_preinv(rem, low, normalized_d, dinv, &rem);
         if (quotient) quotient[i] = q;
     }
+#endif
     return shift ? rem >> shift : rem;
 }
 
@@ -15749,6 +15928,19 @@ static void mag_divmod_bz(const uint64_t *u, int32_t ulen,
 #ifndef BN_DIV_BARRETT_SKIP_MAX
 #define BN_DIV_BARRETT_SKIP_MAX 64
 #endif
+/* ITEM 11: a repeated fixed modulus in the Barrett skip band (mod@64) can
+ * reuse the very reciprocal the quotient path (div1) caches for the same
+ * divisor value, instead of re-deriving reduction constants every call.  With
+ * reuse on, the remainder-only path no longer short-circuits at the skip band
+ * (see mag_divmod_reciprocal_certified); it enters the shared reciprocal cache
+ * keyed by the divisor value, so once the divisor clears the 3-sighting warmup
+ * gate the cached reciprocal is reused with no recompute.  The warmup gate
+ * still keeps varying (cold) divisors on the ordinary division route, so a
+ * one-shot modulus never pays for a reciprocal.  Off (0) restores the
+ * unconditional skip-band bypass (baseline). */
+#ifndef BN_MOD_RECIP_REUSE
+#define BN_MOD_RECIP_REUSE 1
+#endif
 #ifndef BN_DIV_RECIP_WARMUP_SIGHTINGS
 #define BN_DIV_RECIP_WARMUP_SIGHTINGS 3
 #endif
@@ -15940,10 +16132,16 @@ static int mag_divmod_reciprocal_certified(
     const uint64_t *u, int32_t ulen,
     const uint64_t *v, int32_t vlen,
     WBigint **q_out, WBigint **r_out) {
+#if !BN_MOD_RECIP_REUSE
+    /* Baseline: the remainder-only path skips the reciprocal machinery inside
+     * the narrow Barrett hole.  With BN_MOD_RECIP_REUSE on this bypass is
+     * dropped so a repeated modulus can reach the shared reciprocal cache;
+     * the warmup gate below still routes cold divisors to ordinary division. */
     if (r_out && !q_out &&
         vlen >= BN_DIV_BARRETT_SKIP_MIN &&
         vlen <= BN_DIV_BARRETT_SKIP_MAX)
         return 0;
+#endif
 #ifdef BN_DIV_ROUTE_COUNTERS
     if (vlen > BN_DIV_RECIP_Q_MAX)
         bn_div_recip_reject_qmax++;
@@ -17544,6 +17742,127 @@ WValue bigint_isqrt_34(const uint64_t *al, int32_t alen) {
 
 static __thread uint64_t *bn_sqrt_ws = NULL;
 static __thread size_t bn_sqrt_ws_cap = 0;
+
+/* Round-3 item 1: direct few-limb integer sqrt that divides with the raw
+ * bn_udiv_qr_3by2 3-by-2 step (GMP divrem_2 shape) instead of the certified
+ * 6/3 quotient (mag_div_q_63_certified) that the remainder-free top-level
+ * path reaches at root widths 4-5.  Default on; item 1 routes operand
+ * alen 3..8 (root <= 4, covering the isqrt@4 losing cell), item 17 widens
+ * BN_ISQRT4V2_MAX to reach root 5 (alen 10). */
+#ifndef BN_ISQRT4V2
+#define BN_ISQRT4V2 0
+#endif
+/* Operand-limb cutoff for the direct kernel.  isqrt@4 (bench root 4) is a
+ * 2*4 = 8-limb operand, and mag_div_q_63_certified fires at operand alen
+ * 7..10 (root 4..5); routing alen 3..8 removes it from isqrt@4 -- the losing
+ * cell -- and from root 3.  Item 17 raises this to reach root 5 (alen 10). */
+#ifndef BN_ISQRT4V2_MAX
+#define BN_ISQRT4V2_MAX 8
+#endif
+#if BN_ISQRT4V2
+/* Exact integer Newton fallback for the rare case where the fast sqrtrem
+ * candidate fails its certificate (a near-perfect-square edge the sqrtrem
+ * overflow branch still mishandles at the n=2 top level: rem_hi plus the
+ * refine carry can reach 2, whose << 63 wraps to 0 and misfires the
+ * candidate == B^n overshoot correction).  The normalized operand keeps its
+ * root in the top limb, so the all-ones seed B^m-1 is within a factor of two
+ * and the descent converges in a couple of steps.  Rare, so the per-step
+ * mag_divmod allocations are irrelevant.  Standard result: for s0 >=
+ * floor(sqrt(N)) the map s -> (s + floor(N/s))/2 is monotone until it stops
+ * decreasing, and the value it stops at is floor(sqrt(N)). */
+static void bn_isqrt_small_newton(const uint64_t *nsave, int32_t wide,
+                                  uint64_t *sp, int32_t m) {
+    uint64_t s[12], t[14];
+    for (int32_t i = 0; i < m; i++) s[i] = UINT64_MAX;   /* s0 = B^m - 1 */
+    int32_t slen = m;
+    for (;;) {
+        WBigint *q = NULL, *r = NULL;
+        mag_divmod(nsave, wide, s, slen, &q, &r);         /* q = floor(N/s) */
+        int32_t qlen = q->size;
+        int cmp = qlen != slen
+            ? (qlen < slen ? -1 : 1)
+            : mag_cmp(q->limbs, qlen, s, slen);
+        if (cmp >= 0) { bigint_release(q); bigint_release(r); break; }
+        /* t = s + q  (q < s < B^m, so the sum is below 2 B^m) */
+        int32_t n = slen > qlen ? slen : qlen;
+        uint64_t carry = 0;
+        for (int32_t i = 0; i < n; i++) {
+            uint64_t sv = i < slen ? s[i] : 0;
+            uint64_t qv = i < qlen ? q->limbs[i] : 0;
+            uint64_t lo = sv + qv;
+            uint64_t c1 = lo < sv;
+            uint64_t rr = lo + carry;
+            carry = c1 | (rr < lo);
+            t[i] = rr;
+        }
+        t[n] = carry;
+        int32_t tn = n + (carry ? 1 : 0);
+        for (int32_t i = 0; i + 1 < tn; i++)              /* s = t >> 1 */
+            s[i] = (t[i] >> 1) | (t[i + 1] << 63);
+        s[tn - 1] = t[tn - 1] >> 1;
+        slen = tn;
+        while (slen > 1 && s[slen - 1] == 0) slen--;
+        bigint_release(q);
+        bigint_release(r);
+    }
+    for (int32_t i = 0; i < m; i++) sp[i] = i < slen ? s[i] : 0;
+}
+
+/* Operand alen 3..BN_ISQRT4V2_MAX limbs (root m = ceil(alen/2) <= 4 limbs).
+ * Normalize into an even 2m-limb window (top limb >= 2^62) and take the
+ * divide-and-conquer sqrtrem, whose h <= 2 divide is the raw bn_udiv_qr_3by2
+ * step and whose h = 3,4 divide is allocation-free Knuth -- never the
+ * certified 6/3.  A cheap exact s^2 certificate guards the candidate; the
+ * rare miss falls back to the exact Newton above.  Every buffer is a tiny
+ * stack array (wide <= 8). */
+static WValue bigint_isqrt_4direct(const uint64_t *al, int32_t alen) {
+    int32_t m = (alen + 1) >> 1;
+    int32_t wide = 2 * m;
+    int32_t shift =
+        (int32_t)((((int64_t)(wide - alen) << 6) +
+                   __builtin_clzll(al[alen - 1])) & ~1LL);   /* even, < 128 */
+    uint64_t np[20], nsave[20], sp[12];
+    int32_t off = shift >> 6;                   /* == wide - alen (0 or 1) */
+    int b = shift & 63;
+    if (off) np[0] = 0;
+    if (b == 0) {
+        memcpy(np + off, al, (size_t)alen * sizeof(uint64_t));
+    } else {
+        np[off] = al[0] << b;
+        for (int32_t i = 1; i < alen; i++)
+            np[off + i] = (al[i] << b) | (al[i - 1] >> (64 - b));
+    }
+    memcpy(nsave, np, (size_t)wide * sizeof(uint64_t));
+
+    (void)bn_dc_sqrtrem(np, sp, m);             /* candidate root (m limbs) */
+
+    /* Exact certificate on the normalized value: 0 <= N - sp^2 <= 2*sp. */
+    uint64_t sq[20], rem[20], two_s[20];
+    bigint_sqr_dispatch(sq, sp, m);
+    int ok = mag_cmp(sq, wide, nsave, wide) <= 0;
+    if (ok) {
+        (void)bn_sub_n(rem, nsave, sq, wide);
+        uint64_t c = bn_add_n(two_s, sp, sp, m);
+        two_s[m] = c;
+        for (int32_t i = m + 1; i < wide; i++) two_s[i] = 0;
+        if (mag_cmp(rem, wide, two_s, wide) > 0) ok = 0;
+    }
+    if (!ok)
+        bn_isqrt_small_newton(nsave, wide, sp, m);
+
+    int32_t back = shift >> 1;                   /* < 64 */
+    if (back) {
+        for (int32_t i = 0; i + 1 < m; i++)
+            sp[i] = (sp[i] >> back) | (sp[i + 1] << (64 - back));
+        sp[m - 1] >>= back;
+    }
+    WBigint *res = bigint_alloc_raw_hot(m);
+    memcpy(res->limbs, sp, (size_t)m * sizeof(uint64_t));
+    res->size = m;
+    while (res->size > 0 && res->limbs[res->size - 1] == 0) res->size--;
+    return bigint_box(res);
+}
+#endif
 
 /* Integer square root of any non-negative int48-or-bigint WValue; exact
  * floor(sqrt(a)). Negative receivers die with Int#isqrt's message. */
@@ -50526,6 +50845,32 @@ void w_pow_small_sqr(uint64_t *out, const uint64_t *a, int32_t len) {
     }
 }
 
+/* ITEM 7 (round 3): in the small-base pow ladder, run each squaring whose
+ * width matches an item-18 equal-length two-row multiply kernel through
+ * that kernel (cur·cur), so the square rides the bn_mul_2/bn_addmul_2 pass
+ * instead of the Karatsuba-split / dedicated square.  bn_mul_eq{12,16,24}
+ * use the addmul_2 kernels internally (BN_MUL_EQ*_ADDMUL2).  out and a are
+ * disjoint (ping-pong buffers), so cur·cur is a safe general multiply.  The
+ * equal-width multiply-by-base already routes through the same kernels via
+ * bigint_mul_schoolbook_into, so only the square needs steering here. Off ⇒
+ * byte-identical w_pow_small_sqr. */
+#ifndef BN_POW_ADDMUL2
+#define BN_POW_ADDMUL2 1
+#endif
+#if BN_POW_ADDMUL2
+static inline __attribute__((always_inline))
+void w_pow_small_sqr_addmul2(uint64_t *out, const uint64_t *a, int32_t len) {
+    switch (len) {
+#if BN_MUL_POWER2_FIXED
+    case 16: bn_mul_eq16(out, a, a); return;
+#endif
+    case 12: bn_mul_eq12(out, a, a); return;
+    case 24: bn_mul_eq24(out, a, a); return;
+    default: w_pow_small_sqr(out, a, len); return;
+    }
+}
+#endif
+
 static WValue w_pow_small_bigint(const uint64_t *bl, int32_t n,
                                  int negative, uint64_t e) {
     uint64_t bufs[2][W_POW_SMALL_MAX_RESULT + 8];
@@ -50540,7 +50885,11 @@ static WValue w_pow_small_bigint(const uint64_t *bl, int32_t n,
         int last = bit == 0;
         int mul_step = (e >> bit) & 1;
         uint64_t *out = (last && !mul_step) ? r->limbs : bufs[which];
+#if BN_POW_ADDMUL2
+        w_pow_small_sqr_addmul2(out, cur, len);
+#else
         w_pow_small_sqr(out, cur, len);
+#endif
         len *= 2;
         while (len > 1 && out[len - 1] == 0) len--;
         cur = out;
@@ -56449,14 +56798,19 @@ static uint64_t bn_powm_addmul_2(uint64_t *rp, const uint64_t *up, int32_t n,
     );
 }
 
-/* Pairs-structure REDC: two plain addmul_1
- * rows per pair with the pair's carries PARKED in the just-retired low slots
- * (row 0's carry sits at T[i+k] so row 1's addmul_1 absorbs it in-stream; the
- * combined limb then moves down to retired slot T[i], carry-for-column i+k),
- * and one final add_n folds the parked column T[0..k) into T[k..2k). No
- * per-row carry-propagation walks, and every inner loop is the asm addmul_1
- * kernel. Measures 15-25% faster than the dual-row asm at k = 8..128. The
- * dual-row kernel keeps the k < 8 path where its single-call overhead wins. */
+/* ITEM 2 (round 3): fold each two-row REDC pass into a SINGLE bn_addmul_2
+ * pass instead of two bn_addmul_1 rows, halving the accumulator/memory
+ * traffic of the pair.  bn_addmul_2(rp, up, k, m0, m1) accumulates
+ * rp[0..k) += n·(m0 + m1·B) in place, WRITES rp[k] = c0 (the column-(i+k)
+ * carry) and RETURNS c1 (the column-(i+k+1) carry).  c0 and c1 map exactly
+ * onto the pair's two parked carries, so the T layout, the parked-carry
+ * fold, and the conditional final subtract are all unchanged.  Unlike the
+ * naked bn_powm_addmul_2, the item-18 bn_addmul_2 family carries no
+ * all-ones restriction on (m0,m1), so no guard is needed.  The classic
+ * two-addmul_1 path stays byte-identical under the knob off. */
+#ifndef BN_POWM_REDC_ADDMUL2
+#define BN_POWM_REDC_ADDMUL2 1
+#endif
 static inline __attribute__((always_inline))
 void w_powm_redc2_pair(uint64_t *T, const uint64_t *n, int32_t k,
                        uint64_t np0, uint64_t np1, int32_t i) {
@@ -56465,10 +56819,16 @@ void w_powm_redc2_pair(uint64_t *T, const uint64_t *n, int32_t k,
     uint64_t m0 = (uint64_t)p;
     uint64_t m1 = (uint64_t)(p >> 64) + t0 * np1 + t1 * np0;
     uint64_t saved = T[i + k];
+#if BN_POWM_REDC_ADDMUL2 && BN_ADDMUL_2
+    uint64_t cy1 = bn_addmul_2(T + i, n, k, m0, m1); /* writes T[i+k] = c0 */
+    T[i] = T[i + k];      /* retired slot i <- c0 (column i+k) */
+    T[i + 1] = cy1;       /* retired slot i+1 <- c1 (column i+k+1) */
+#else
     T[i + k] = bn_addmul_1(T + i, n, k, m0);         /* park cy0 on top */
     uint64_t cy1 = bn_addmul_1(T + i + 1, n, k, m1); /* absorbs parked cy0 */
     T[i] = T[i + k];      /* retired slot i <- carry for column i+k */
     T[i + 1] = cy1;       /* retired slot i+1 <- carry for column i+k+1 */
+#endif
     T[i + k] = saved;
 }
 
@@ -56544,6 +56904,20 @@ static void w_powm_redc2_pairs8(uint64_t *out, uint64_t *T,
 static void w_powm_redc2_pairs16(uint64_t *out, uint64_t *T,
                                  const uint64_t *n, uint64_t np0,
                                  uint64_t np1) {
+#if BN_POWM_REDC_ADDMUL2 && BN_ADDMUL_2 && BN_MUL_EQ16_ADDMUL2
+/* One fixed 16-limb two-row addmul_2 pass per pair (see w_powm_redc2_pair). */
+#define W_POWM_REDC2_PAIR16(i) do {                                      \
+    uint64_t t0 = T[i], t1 = T[(i) + 1];                                 \
+    __uint128_t p = (__uint128_t)t0 * np0;                               \
+    uint64_t m0 = (uint64_t)p;                                            \
+    uint64_t m1 = (uint64_t)(p >> 64) + t0 * np1 + t1 * np0;             \
+    uint64_t saved = T[(i) + 16];                                         \
+    uint64_t cy1 = bn_addmul_2_f16(T + (i), n, m0, m1); /* T[i+16]=c0 */  \
+    T[i] = T[(i) + 16];                                                    \
+    T[(i) + 1] = cy1;                                                      \
+    T[(i) + 16] = saved;                                                   \
+} while (0)
+#else
 #define W_POWM_REDC2_PAIR16(i) do {                                      \
     uint64_t t0 = T[i], t1 = T[(i) + 1];                                 \
     __uint128_t p = (__uint128_t)t0 * np0;                               \
@@ -56556,6 +56930,7 @@ static void w_powm_redc2_pairs16(uint64_t *out, uint64_t *T,
     T[(i) + 1] = cy1;                                                      \
     T[(i) + 16] = saved;                                                   \
 } while (0)
+#endif
     W_POWM_REDC2_PAIR16(0);
     W_POWM_REDC2_PAIR16(2);
     W_POWM_REDC2_PAIR16(4);

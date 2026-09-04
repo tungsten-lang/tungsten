@@ -16,7 +16,7 @@ Only focused checks are run locally; the complete suite belongs to CI.
 | 8 | Source-level debugging | Editor/debugger integration and readable Tungsten values | LLDB summaries, source-map breakpoints, editor templates; real LLDB/native debug build passed; full local-variable DWARF remains open |
 | 10 | Separate purity and memoization | Concrete design with compatibility and effect rules | Proposed in purity-and-memoization.md; current fn behavior preserved |
 | 11 | Exhaustive destructuring matches | Concrete AST/WIRE examples, grammar, exhaustiveness rules | Proposed named-field exhaustive case in exhaustive-patterns.md |
-| 15 | Event-loop waits | Concrete migration design, then applicable focused implementation | Queued |
+| 15 | Event-loop waits | Concrete migration design | Proposed staged wait-token/deadline migration in event-loop-waits.md; scheduler implementation remains open |
 | 17 | Small matrix allocation | Correctness and matched value-semantic/operator measurements | Queued |
 | 18 | Shape safety and performance | Specify checks/elision and measure small-matrix overhead | Queued |
 | 19 | HDF5 interoperability | Foreign fixtures, metadata and multidimensional shapes | Queued |

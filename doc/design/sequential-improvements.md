@@ -1,0 +1,44 @@
+# Sequential Tungsten improvements
+
+Requested 2026-09-04. Worktree: `codex/tungsten-next-sequential`, starting at
+`f4dbdbf6`. Work proceeds in the user's numbered order. The original checkout
+contains unrelated staged and unstaged work and is not part of this branch.
+Only focused checks are run locally; the complete suite belongs to CI.
+
+## Queue and acceptance
+
+| Item | Work | Acceptance | Status |
+| --- | --- | --- | --- |
+| 2 | Experiment with dependency-aware incremental compilation | Source-edit invalidation, uncached LLVM/sidemap identity, bootstrap fixed point, matched edit-to-run measurements | Prefix experiment completed; not promoted; general per-file lowering remains open |
+| 4 | Safe LSP refactoring | Semantic rename and code-action contracts; reject ambiguous edits | In progress |
+| 6 | Python/NumPy bridge proof of concept | Real round trip, ownership/copy contract, correctness and timing | Queued |
+| 7 | Explain missed optimizations | Source-located facts from actual compiler decisions | Queued |
+| 8 | Source-level debugging | Editor/debugger integration and readable Tungsten values | Queued |
+| 10 | Separate purity and memoization | Concrete design with compatibility and effect rules | Queued design |
+| 11 | Exhaustive destructuring matches | Concrete AST/WIRE examples, grammar, exhaustiveness rules | Queued design |
+| 15 | Event-loop waits | Concrete migration design, then applicable focused implementation | Queued |
+| 17 | Small matrix allocation | Correctness and matched value-semantic/operator measurements | Queued |
+| 18 | Shape safety and performance | Specify checks/elision and measure small-matrix overhead | Queued |
+| 19 | HDF5 interoperability | Foreign fixtures, metadata and multidimensional shapes | Queued |
+| 20 | Columnar interchange | Standards-compatible independent round trip | Queued |
+| 21 | Versioned unit contexts | Proposed syntax and provenance/inheritance semantics | Queued design |
+| 22 | Reproducible experiments | Concrete manifest design and integration example | Queued design |
+| 23 | Certificate inspection | Concrete presentation protocol preserving proof levels | Queued design |
+| 25 | Portable GPU subset | Machine-readable capabilities and shared dialect checks | Queued |
+| 26 | `bin/tungsten notes` and Notes integration | Locate app, launcher, structured rendering protocol proposal | Queued |
+| 27 | Scoped WASM target | Runnable numerical subset with explicit limits | Queued |
+| 29 | Tungsten Notes flagship | End-to-end example joining the supported capabilities | Queued |
+
+## Item 2: initial evidence
+
+The current compiler already persists protected Core, parsed files, whole
+imported-library WIRE cohorts, rendered functions, and final link artifacts.
+`compiler/lib/lowering/library_cache.w` keys the entire library cohort on its
+source manifest and the whole-program ABI/inference context. Each restored
+cohort is tied to an exact counter/string boundary. Per-file reuse therefore
+must preserve context invalidation and must not splice incompatible global
+symbol IDs or restore stale analysis state.
+
+Baseline bootstrap passed from this worktree's committed sources, including
+stage-1/stage-2 LLVM identity. Its log is `build/reports/bootstrap-baseline.log`.
+The prefix experiment and results are in `experiments/incremental-prefix/`.

@@ -1,0 +1,87 @@
+diff --git i/compiler/lib/lowering/library_cache.w w/compiler/lib/lowering/library_cache.w
+index 7d37ada0..9ed496d9 100644
+--- i/compiler/lib/lowering/library_cache.w
++++ w/compiler/lib/lowering/library_cache.w
+@@ -336,0 +337,78 @@ incremental_library_cache_state = {
++# Experimental first step toward file-grained reuse. A numeric leaf has no
++# source-body dependency on a later file: every variable is a declared raw
++# scalar parameter, and no call, constant, capture, or user dispatch is allowed.
++# Keep the complete ABI/inference context in the key even for these leaves.
++-> incremental_library_prefix_leaf_value?(value, names)
++  if value == nil
++    return true
++  if type(value) == "Array"
++    i = 0
++    while i < value.size()
++      if !incremental_library_prefix_leaf_value?(value[i], names)
++        return false
++      i += 1
++    return true
++  if !is_ast_node?(value)
++    return true
++  kind = ast_kind(value)
++  if kind == :var
++    return names[ast_get(value, :name)] == true
++  if !(kind in (:int :float :bool :binary_op :unary_op :return :if :and :or :not :nil))
++    return false
++  if kind == :binary_op && !(ast_get(value, :op) in (:PLUS :MINUS :STAR :LT :LTE :GT :GTE :EQ :NEQ))
++    return false
++  children = ast_children(value)
++  i = 0
++  while i < children.size()
++    if !incremental_library_prefix_leaf_value?(children[i], names)
++      return false
++    i += 1
++  true
++
++-> incremental_library_prefix_leaf_definition?(expr)
++  if !(ast_kind(expr) in (:fn_def :method_def)) || ast_get(expr, :is_class_method) == true
++    return false
++  params = ast_get(expr, :params)
++  types = ast_get(expr, :param_types)
++  if params == nil || types == nil || params.size() != types.size()
++    return false
++  names = {}
++  i = 0
++  while i < params.size()
++    param = params[i]
++    if !(types[i] in (:i64 :f64)) || ast_get(param, :default) != nil || ast_get(param, :splat) == true || ast_get(param, :keyword) == true || ast_get(param, :block_param) == true || ast_get(param, :ivar_assign) == true
++      return false
++    names[ast_get(param, :name)] = true
++    i += 1
++  incremental_library_prefix_leaf_value?(ast_get(expr, :body), names)
++
++-> incremental_library_prefix_partition(expressions, partition)
++  paths = {}
++  accepted = 0
++  i = 0
++  while i < partition[:prefix_count]
++    path = ast_get(expressions[i], :source_path)
++    # Interleaved files need relocatable snapshots, not a prefix shortcut.
++    if paths[path] == true
++      return partition
++    end_index = i
++    safe = true
++    while end_index < partition[:prefix_count] && ast_get(expressions[end_index], :source_path) == path
++      if !incremental_library_prefix_leaf_definition?(expressions[end_index])
++        safe = false
++      end_index += 1
++    if !safe
++      break
++    paths[path] = true
++    accepted = end_index
++    i = end_index
++  if accepted == 0 || accepted == partition[:prefix_count]
++    return partition
++  # No accepted path may appear again beyond the selected boundary.
++  i = accepted
++  while i < expressions.size()
++    if paths[ast_get(expressions[i], :source_path)] == true
++      return partition
++    i += 1
++  {ok: true, entry_path: partition[:entry_path], paths: paths, prefix_count: accepted}
++
+@@ -363,0 +442,3 @@ incremental_library_cache_state = {
++  if env("TUNGSTEN_LIBRARY_PREFIX_CACHE") == "1"
++    partition = incremental_library_prefix_partition(expressions, partition)
++    mod[:incremental_library_prefix_cache_count] = partition[:prefix_count]

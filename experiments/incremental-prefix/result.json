@@ -1,0 +1,35 @@
+{
+  "checks": "passed",
+  "fixture": "100 raw scalar polynomial helpers",
+  "edited_cached_wall_seconds": 0.13897366600000005,
+  "edited_uncached_wall_seconds": 0.13201183400000005,
+  "linked_edit_pairs": [
+    {
+      "prefix": 0.38010858300000194,
+      "whole": 0.3675163330000011
+    },
+    {
+      "whole": 0.3591991669999999,
+      "prefix": 0.4062328330000007
+    },
+    {
+      "prefix": 0.38290670900000023,
+      "whole": 0.3512630839999993
+    },
+    {
+      "whole": 0.3703887909999999,
+      "prefix": 0.36046029199999907
+    },
+    {
+      "prefix": 0.39286966699999937,
+      "whole": 0.3706430420000011
+    },
+    {
+      "whole": 0.34817391700000044,
+      "prefix": 0.35245412499999773
+    }
+  ],
+  "linked_prefix_median_seconds": 0.3815076460000011,
+  "linked_whole_median_seconds": 0.3633577500000005,
+  "timing_status": "synthetic edit workload; not a whole-project speedup claim"
+}

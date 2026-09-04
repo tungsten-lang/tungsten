@@ -132,6 +132,10 @@ case "$1" in
     shift
     exec env TUNGSTEN_CACHE_GC_FORCE=1 bash "$ROOT/bin/commands/cache_gc.sh" "$@"
     ;;
+  notes)
+    shift
+    exec bash "$ROOT/bin/commands/notes.sh" "$@"
+    ;;
   gpu-check)
     shift
     exec python3 "$ROOT/scripts/gpu-check.py" "$@"

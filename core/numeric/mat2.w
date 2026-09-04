@@ -7,6 +7,8 @@
     T elements[4]
 
   -> new(@elements ## T[4])
+    if @elements.size() != 4
+      raise "Mat2 requires 4 elements"
 
   -> rows 2
   -> cols 2

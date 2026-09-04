@@ -4,6 +4,8 @@
     T elements[9]
 
   -> new(@elements ## T[9])
+    if @elements.size() != 9
+      raise "Mat3 requires 9 elements"
 
   -> rows 3
   -> cols 3

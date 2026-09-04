@@ -6,6 +6,8 @@
     T elements[16]
 
   -> new(@elements ## T[16])
+    if @elements.size() != 16
+      raise "Mat4 requires 16 elements"
 
   -> rows 4
   -> cols 4

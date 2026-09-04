@@ -105,3 +105,35 @@
       a[0] * v[0] + a[2] * v[1],
       a[1] * v[0] + a[3] * v[1]
     ] ## T[2])
+
+  # Caller-owned componentwise outputs; exact input/output alias is safe.
+  -> add_into/2(Mat2 Mat2)
+    a = @elements
+    b = @1.elements
+    o = @2.elements
+    o[0] = a[0] + b[0]
+    o[1] = a[1] + b[1]
+    o[2] = a[2] + b[2]
+    o[3] = a[3] + b[3]
+    @2
+
+  -> sub_into/2(Mat2 Mat2)
+    a = @elements
+    b = @1.elements
+    o = @2.elements
+    o[0] = a[0] - b[0]
+    o[1] = a[1] - b[1]
+    o[2] = a[2] - b[2]
+    o[3] = a[3] - b[3]
+    @2
+
+  # As with Mat3/Mat4, destination must not overlap either input.
+  -> mul_into/2(Mat2 Mat2)
+    a = @elements
+    b = @1.elements
+    o = @2.elements
+    o[0] = a[0] * b[0] + a[2] * b[1]
+    o[1] = a[1] * b[0] + a[3] * b[1]
+    o[2] = a[0] * b[2] + a[2] * b[3]
+    o[3] = a[1] * b[2] + a[3] * b[3]
+    @2

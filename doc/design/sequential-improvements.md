@@ -17,7 +17,7 @@ Only focused checks are run locally; the complete suite belongs to CI.
 | 10 | Separate purity and memoization | Concrete design with compatibility and effect rules | Proposed in purity-and-memoization.md; current fn behavior preserved |
 | 11 | Exhaustive destructuring matches | Concrete AST/WIRE examples, grammar, exhaustiveness rules | Proposed named-field exhaustive case in exhaustive-patterns.md |
 | 15 | Event-loop waits | Concrete migration design | Proposed staged wait-token/deadline migration in event-loop-waits.md; scheduler implementation remains open |
-| 17 | Small matrix allocation | Correctness and matched value-semantic/operator measurements | Queued |
+| 17 | Small matrix allocation | Correctness and matched value-semantic/operator measurements | Added add_into/sub_into to Mat2/3/4 and Mat2.mul_into; numerical/alias checks and paired timings passed |
 | 18 | Shape safety and performance | Specify checks/elision and measure small-matrix overhead | Queued |
 | 19 | HDF5 interoperability | Foreign fixtures, metadata and multidimensional shapes | Queued |
 | 20 | Columnar interchange | Standards-compatible independent round trip | Queued |

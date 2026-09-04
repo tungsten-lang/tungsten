@@ -167,3 +167,34 @@
     o[7] = a[1] * b[6] + a[4] * b[7] + a[7] * b[8]
     o[8] = a[2] * b[6] + a[5] * b[7] + a[8] * b[8]
     @2
+
+  # Caller-owned componentwise outputs; exact input/output alias is safe.
+  -> add_into/2(Mat3 Mat3)
+    a = @elements
+    b = @1.elements
+    o = @2.elements
+    o[0] = a[0] + b[0]
+    o[1] = a[1] + b[1]
+    o[2] = a[2] + b[2]
+    o[3] = a[3] + b[3]
+    o[4] = a[4] + b[4]
+    o[5] = a[5] + b[5]
+    o[6] = a[6] + b[6]
+    o[7] = a[7] + b[7]
+    o[8] = a[8] + b[8]
+    @2
+
+  -> sub_into/2(Mat3 Mat3)
+    a = @elements
+    b = @1.elements
+    o = @2.elements
+    o[0] = a[0] - b[0]
+    o[1] = a[1] - b[1]
+    o[2] = a[2] - b[2]
+    o[3] = a[3] - b[3]
+    o[4] = a[4] - b[4]
+    o[5] = a[5] - b[5]
+    o[6] = a[6] - b[6]
+    o[7] = a[7] - b[7]
+    o[8] = a[8] - b[8]
+    @2

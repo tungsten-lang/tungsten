@@ -1,0 +1,11 @@
+{
+  "version": "2.0.0",
+  "tasks": [{
+    "label": "Tungsten: debug build",
+    "type": "process",
+    "command": "${workspaceFolder}/bin/tungsten",
+    "args": ["debug", "--build-only", "--output", "${workspaceFolder}/build/debug-program", "${file}"],
+    "options": {"cwd": "${workspaceFolder}"},
+    "problemMatcher": []
+  }]
+}

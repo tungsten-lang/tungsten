@@ -118,9 +118,9 @@ command -v "$DEBUGGER" >/dev/null 2>&1 || die "$DEBUGGER is not installed or not
 echo "==> Launch $DEBUGGER"
 if [[ "$DEBUGGER" == lldb ]]; then
   if [[ "${#PROGRAM_ARGS[@]}" -eq 0 ]]; then
-    exec lldb -- "$OUTPUT"
+    exec lldb -o "command script import \"$ROOT/scripts/debug/tungsten_lldb.py\"" -- "$OUTPUT"
   fi
-  exec lldb -- "$OUTPUT" "${PROGRAM_ARGS[@]}"
+  exec lldb -o "command script import \"$ROOT/scripts/debug/tungsten_lldb.py\"" -- "$OUTPUT" "${PROGRAM_ARGS[@]}"
 fi
 if [[ "${#PROGRAM_ARGS[@]}" -eq 0 ]]; then
   exec gdb --args "$OUTPUT"

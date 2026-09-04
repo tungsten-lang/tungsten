@@ -1,0 +1,12 @@
+{
+  "version": "0.2.0",
+  "configurations": [{
+    "name": "Tungsten: current file",
+    "type": "lldb",
+    "request": "launch",
+    "program": "${workspaceFolder}/build/debug-program",
+    "cwd": "${workspaceFolder}",
+    "preLaunchTask": "Tungsten: debug build",
+    "initCommands": ["command script import \"${workspaceFolder}/scripts/debug/tungsten_lldb.py\""]
+  }]
+}

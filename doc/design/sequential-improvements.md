@@ -21,7 +21,7 @@ Only focused checks are run locally; the complete suite belongs to CI.
 | 18 | Shape safety and performance | Specify checks/elision and measure small-matrix overhead | Fixed-size constructor length guards added; invalid/valid cases and before/after paired timings passed; mutable storage can still invalidate shape |
 | 19 | HDF5 interoperability | Foreign fixtures, metadata and multidimensional shapes | Optional standard h5py bridge; compiled Tungsten/independent h5py round trip and negative cases passed |
 | 20 | Columnar interchange | Standards-compatible independent round trip | Optional standard Parquet/Arrow IPC bridge; independent exact schema/metadata/null/value round trips passed |
-| 21 | Versioned unit contexts | Proposed syntax and provenance/inheritance semantics | Queued design |
+| 21 | Versioned unit contexts | Proposed syntax and provenance/inheritance semantics | Proposed immutable explicit UnitContext API in unit-contexts.md |
 | 22 | Reproducible experiments | Concrete manifest design and integration example | Queued design |
 | 23 | Certificate inspection | Concrete presentation protocol preserving proof levels | Queued design |
 | 25 | Portable GPU subset | Machine-readable capabilities and shared dialect checks | Queued |

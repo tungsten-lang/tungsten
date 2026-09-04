@@ -36,6 +36,8 @@ h5py. `SciIO.read_hdf5_dataset` returns shape/dtype/values/attribute records;
 `SciIO.write_hdf5_standard` writes genuine HDF5 readable by independent tools.
 This supports compressed multidimensional datasets through h5py, with explicit
 copy/size/type limits. See [the contract and test](../../experiments/science-interop/README.md).
+The same optional import provides standard Parquet and Arrow IPC file methods,
+including nulls and schema metadata. TPAR remains a separate native format.
 Core's default native path still requires no system scientific I/O libraries.
 
 ## Format status

@@ -20,7 +20,7 @@ Only focused checks are run locally; the complete suite belongs to CI.
 | 17 | Small matrix allocation | Correctness and matched value-semantic/operator measurements | Added add_into/sub_into to Mat2/3/4 and Mat2.mul_into; numerical/alias checks and paired timings passed |
 | 18 | Shape safety and performance | Specify checks/elision and measure small-matrix overhead | Fixed-size constructor length guards added; invalid/valid cases and before/after paired timings passed; mutable storage can still invalidate shape |
 | 19 | HDF5 interoperability | Foreign fixtures, metadata and multidimensional shapes | Optional standard h5py bridge; compiled Tungsten/independent h5py round trip and negative cases passed |
-| 20 | Columnar interchange | Standards-compatible independent round trip | Queued |
+| 20 | Columnar interchange | Standards-compatible independent round trip | Optional standard Parquet/Arrow IPC bridge; independent exact schema/metadata/null/value round trips passed |
 | 21 | Versioned unit contexts | Proposed syntax and provenance/inheritance semantics | Queued design |
 | 22 | Reproducible experiments | Concrete manifest design and integration example | Queued design |
 | 23 | Certificate inspection | Concrete presentation protocol preserving proof levels | Queued design |

@@ -38,3 +38,15 @@ use ../process
   # Standard HDF5, exclusive create. Existing destinations are never replaced.
   -> .write_hdf5_standard(path, datasets)
     SciIO.interop_request({operation: "hdf5_write", path: path, datasets: datasets})
+
+  -> .read_parquet_standard(path)
+    SciIO.interop_request({operation: "parquet_read", path: path})
+
+  -> .write_parquet_standard(path, table)
+    SciIO.interop_request({operation: "parquet_write", path: path, table: table})
+
+  -> .read_arrow_ipc(path)
+    SciIO.interop_request({operation: "arrow_read", path: path})
+
+  -> .write_arrow_ipc(path, table)
+    SciIO.interop_request({operation: "arrow_write", path: path, table: table})

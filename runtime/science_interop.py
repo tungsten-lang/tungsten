@@ -23,7 +23,11 @@ def json_value(value):
         return value.decode('utf-8')
     if isinstance(value, (list, tuple)):
         return [json_value(x) for x in value]
-    if value is None or isinstance(value, (str, bool, int)):
+    if isinstance(value, str):
+        if any(ord(c) < 32 and c not in '\t\n\r' for c in value):
+            raise ValueError('protocol v1 does not support this string control character')
+        return value
+    if value is None or isinstance(value, (bool, int)):
         return value
     if isinstance(value, float) and math.isfinite(value):
         return value
@@ -114,11 +118,99 @@ def hdf5(request):
     return {'path': request['path'], 'datasets': list(records), 'format': 'hdf5'}
 
 
+def metadata_encode(metadata):
+    import base64
+    return {base64.b64encode(k).decode(): base64.b64encode(v).decode() for k, v in (metadata or {}).items()}
+
+
+def metadata_decode(metadata):
+    import base64
+    return {base64.b64decode(k, validate=True): base64.b64decode(v, validate=True) for k, v in metadata.items()} or None
+
+
+def columnar(request):
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    import pyarrow.ipc as ipc
+    types = {'float32': pa.float32(), 'float64': pa.float64(), 'int32': pa.int32(),
+             'int64': pa.int64(), 'uint32': pa.uint32(), 'uint64': pa.uint64(),
+             'bool': pa.bool_(), 'string': pa.string()}
+    operation = request['operation']
+    if operation.endswith('_read'):
+        if operation == 'parquet_read':
+            file = pq.ParquetFile(request['path'])
+            if file.metadata.num_rows > MAX_ELEMENTS:
+                raise ValueError('one-million-row limit exceeded')
+            table = file.read()
+        else:
+            with pa.memory_map(request['path'], 'r') as source:
+                file = ipc.open_file(source)
+                batches = []; count = 0
+                for i in range(file.num_record_batches):
+                    batch = file.get_batch(i); count += batch.num_rows
+                    if count > MAX_ELEMENTS:
+                        raise ValueError('one-million-row limit exceeded')
+                    batches.append(batch)
+                table = pa.Table.from_batches(batches, schema=file.schema)
+        if len(set(table.column_names)) != table.num_columns:
+            raise ValueError('duplicate column names are unsupported')
+        columns = []
+        for field, column in zip(table.schema, table.columns):
+            if pa.types.is_dictionary(column.type):
+                column = column.cast(column.type.value_type)
+            dtype = next((name for name, kind in types.items() if kind == column.type), None)
+            if dtype is None:
+                raise ValueError('unsupported column dtype: ' + str(column.type))
+            columns.append({'name': field.name, 'dtype': dtype, 'nullable': field.nullable,
+                            'values': json_value(column.to_pylist()),
+                            'metadata_base64': metadata_encode(field.metadata)})
+        return {'columns': columns, 'rows': table.num_rows,
+                'metadata_base64': metadata_encode(table.schema.metadata)}
+    record = request['table']
+    fields = []; arrays = []; names = set(); count = None
+    for column in record['columns']:
+        name = column['name']; dtype = column['dtype']; values = column['values']
+        if not isinstance(name, str) or name in names or dtype not in types:
+            raise ValueError('invalid/duplicate column name or unsupported dtype')
+        names.add(name)
+        if len(values) > MAX_ELEMENTS or (count is not None and count != len(values)):
+            raise ValueError('column lengths differ or row limit exceeded')
+        count = len(values)
+        if dtype == 'string':
+            if any(v is not None and not isinstance(v, str) for v in values):
+                raise ValueError('string column contains a non-string')
+        else:
+            nonnull = [v for v in values if v is not None]
+            checked = iter(array_from_record({'dtype': dtype, 'shape': [len(nonnull)], 'values': nonnull}).tolist())
+            values = [next(checked) if v is not None else None for v in values]
+        nullable = column.get('nullable', True)
+        if type(nullable) is not bool or (not nullable and any(v is None for v in values)):
+            raise ValueError('non-nullable column contains null or invalid nullable flag')
+        arrays.append(pa.array(values, type=types[dtype]))
+        fields.append(pa.field(name, types[dtype], nullable=nullable,
+                               metadata=metadata_decode(column.get('metadata_base64', {}))))
+    if not fields:
+        raise ValueError('at least one typed column is required')
+    if 'rows' in record and record['rows'] != count:
+        raise ValueError('declared row count differs from columns')
+    table = pa.Table.from_arrays(arrays, schema=pa.schema(fields, metadata=metadata_decode(record.get('metadata_base64', {}))))
+    def write(path):
+        if operation == 'parquet_write':
+            pq.write_table(table, path, compression='snappy')
+        else:
+            with ipc.new_file(path, table.schema) as file:
+                file.write_table(table)
+    write_new(request['path'], write)
+    return {'path': request['path'], 'rows': table.num_rows, 'columns': table.num_columns}
+
+
 def dispatch(request):
     if request.get('version') != 1:
         raise ValueError('unsupported protocol version')
     if request.get('operation') in ('hdf5_read', 'hdf5_write'):
         return hdf5(request)
+    if request.get('operation') in ('parquet_read', 'parquet_write', 'arrow_read', 'arrow_write'):
+        return columnar(request)
     raise ValueError('unsupported operation')
 
 
@@ -133,7 +225,7 @@ def main():
         response = {'version': 1, 'ok': True, 'result': dispatch(request)}
     except Exception as error:
         response = {'version': 1, 'ok': False, 'error': str(error), 'error_type': type(error).__name__}
-    encoded = json.dumps(response, allow_nan=False)
+    encoded = json.dumps(response, allow_nan=False, ensure_ascii=False)
     if len(encoded.encode()) > MAX_JSON:
         encoded = json.dumps({'version': 1, 'ok': False, 'error': 'response exceeds 64 MiB'})
     Path(sys.argv[2]).write_text(encoded)

@@ -39,3 +39,32 @@ empty/scalar values, uint64 above 2^63, no-overwrite, and invalid records.
 
 References: [h5py datasets](https://docs.h5py.org/en/stable/high/dataset.html),
 [h5py attributes](https://docs.h5py.org/en/stable/high/attr.html).
+
+## Parquet and Arrow IPC (item 20)
+
+The same explicit import provides `SciIO.read_parquet_standard(path)` /
+`write_parquet_standard(path, table)` and `read_arrow_ipc(path)` /
+`write_arrow_ipc(path, table)`. These use PyArrow's actual Parquet and Arrow
+IPC **file** formats; the old TPAR functions are unchanged.
+
+A table record contains ordered `columns`, `rows`, and `metadata_base64`.
+Each column has `name`, `dtype`, `nullable`, `values` (nil represents null), and
+`metadata_base64`. Schema/field metadata bytes are base64 so arbitrary bytes
+survive the JSON boundary. Numeric types above plus UTF-8 strings are supported;
+dictionary-encoded reads normalize to their value type. Unsupported nested,
+temporal, binary, decimal and extension types fail explicitly. IPC streams and
+zero-copy C Data Interface exchange are future work.
+
+Column lengths, nullability, numeric ranges and names are validated. The limit
+is one million rows and 64 MiB serialized JSON; tables are materialized, not
+streamed. UTF-8 is sent directly because Core JSON does not decode Unicode
+escapes. C0 string controls other than tab/newline/carriage-return are rejected.
+
+`build/venv-science/bin/python scripts/test-columnar-interop.py` independently
+creates dictionary/compressed Parquet, passes it through compiled Tungsten into
+both formats, then reads Arrow through Tungsten and writes Parquet again.
+PyArrow checks exact values/schema/metadata, nulls, Unicode and large uint64;
+invalid nullability/column lengths are also tested.
+
+References: [Parquet](https://arrow.apache.org/docs/python/parquet.html),
+[Arrow IPC](https://arrow.apache.org/docs/python/ipc.html).

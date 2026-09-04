@@ -26,6 +26,7 @@ UNSUPPORTED_WGSL_SHARED="$ROOT/spec/cli/gpu_check_wgsl_shared_type.w"
 VALID_GPU="$ROOT/spec/compiler/gpu_wgsl_emit_spec.w"
 CUDA_GPU="$ROOT/spec/compiler/gpu_cuda_tg_reduce_reject_spec.w"
 EXIT_7="$ROOT/spec/cli/exit_7.w"
+USE_CYCLE_A="$ROOT/spec/cli/use_cycle_a.w"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/tungsten-cli-contracts.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT INT TERM
 
@@ -249,6 +250,30 @@ if "$TUNGSTEN" explain NO_SUCH_CODE >"$TMP/explain-missing.out" 2>&1; then
   exit 1
 fi
 
+# E_LOAD_CYCLE: two fixtures that `use` each other. The loader must report
+# the cycle at the `use` that closes it (use_cycle_b.w:6) instead of
+# silently deduplicating the second load and failing later on a missing
+# definition. `-c` and `run` share the loader, so both must reject it.
+if "$TUNGSTEN" -c "$USE_CYCLE_A" >"$TMP/check-use-cycle.out" 2>&1; then
+  printf 'tungsten -c accepted a circular use\n' >&2
+  exit 1
+fi
+grep -q 'E_LOAD_CYCLE' "$TMP/check-use-cycle.out"
+grep -q 'circular use: .*use_cycle_a.w -> .*use_cycle_b.w -> .*use_cycle_a.w' "$TMP/check-use-cycle.out"
+grep -q 'use_cycle_b.w:6:' "$TMP/check-use-cycle.out"
+if "$TUNGSTEN" run "$USE_CYCLE_A" >"$TMP/run-use-cycle.out" 2>&1; then
+  printf 'tungsten run accepted a circular use\n' >&2
+  exit 1
+fi
+grep -q 'E_LOAD_CYCLE' "$TMP/run-use-cycle.out"
+if "$TUNGSTEN" run --interpret "$USE_CYCLE_A" >"$TMP/interp-use-cycle.out" 2>&1; then
+  printf 'tungsten run --interpret accepted a circular use\n' >&2
+  exit 1
+fi
+grep -q 'E_LOAD_CYCLE' "$TMP/interp-use-cycle.out"
+"$TUNGSTEN" explain E_LOAD_CYCLE >"$TMP/explain-cycle.out"
+grep -q '^E_LOAD_CYCLE$' "$TMP/explain-cycle.out"
+
 "$TUNGSTEN" gpu-bench --help >"$TMP/gpu-bench-help.out"
 grep -q '^Usage: tungsten gpu-bench' "$TMP/gpu-bench-help.out"
 if "$TUNGSTEN" gpu-bench --backend bogus >"$TMP/gpu-bench-error.out" 2>&1; then
@@ -274,4 +299,4 @@ if [[ "$debug_child_status" -ne 7 ]]; then
   exit 1
 fi
 
-printf 'CLI check, GPU preflight, debug, explain, gpu-bench, and exit-status contracts: ok\n'
+printf 'CLI check, GPU preflight, use-cycle, debug, explain, gpu-bench, and exit-status contracts: ok\n'

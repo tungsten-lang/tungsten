@@ -159,6 +159,20 @@ A `use` path could not be resolved to a `.w` file.
 **Fix:** Check the path relative to the project, install deps with `bit install`
 (looks under `vendor/bits`), or set `BIT_HOME` for monorepo bits.
 
+## E_LOAD_CYCLE
+
+Two or more files `use` each other, directly or through intermediates
+(`a.w -> b.w -> a.w`). `use` splices the used file's definitions into the
+program, so a cycle has no meaning: the loader used to deduplicate the second
+load silently and the missing definitions surfaced later as an unrelated
+"undefined" error. The message lists the cycle and points at the `use` that
+closes it. Using the same file twice from two non-cyclic places is fine and
+stays a silent dedup.
+
+**Fix:** Break the cycle. Move the shared definitions into a third file both
+sides `use`, or drop the back-reference — the file that is used already sees
+everything its user defines once both are spliced into the program.
+
 ## E_GPU_KERNEL_UNSUPPORTED
 
 An `@gpu fn` feature is not available for the selected GPU dialect

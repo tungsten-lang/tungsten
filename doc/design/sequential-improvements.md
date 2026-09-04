@@ -23,7 +23,7 @@ Only focused checks are run locally; the complete suite belongs to CI.
 | 20 | Columnar interchange | Standards-compatible independent round trip | Optional standard Parquet/Arrow IPC bridge; independent exact schema/metadata/null/value round trips passed |
 | 21 | Versioned unit contexts | Proposed syntax and provenance/inheritance semantics | Proposed immutable explicit UnitContext API in unit-contexts.md |
 | 22 | Reproducible experiments | Concrete manifest design and integration example | Proposed run-directory manifest and W facade in reproducible-experiments.md |
-| 23 | Certificate inspection | Concrete presentation protocol preserving proof levels | Queued design |
+| 23 | Certificate inspection | Concrete presentation protocol preserving proof levels | Proposed claim/level/evidence protocol and Notes view in certificate-inspection.md |
 | 25 | Portable GPU subset | Machine-readable capabilities and shared dialect checks | Queued |
 | 26 | `bin/tungsten notes` and Notes integration | Locate app, launcher, structured rendering protocol proposal | Queued |
 | 27 | Scoped WASM target | Runnable numerical subset with explicit limits | Queued |

@@ -58,7 +58,12 @@ end
 
 namespace :check do
   desc "Run generated-data and layout consistency checks in parallel"
-  multitask all: %i[units layouts core_doc claims ast_schema dispatch_contracts]
+  multitask all: %i[units layouts core_doc claims ast_schema dispatch_contracts explain]
+
+  desc "Verify every diagnostic code has a lesson in doc/explain.md and no lesson is stale"
+  task :explain do
+    run_command "ruby", File.join(ROOT, "scripts/check_explain_coverage.rb")
+  end
 
   desc "Verify runtime-backed Core dispatch tables and compiler whitelists"
   task :dispatch_contracts do

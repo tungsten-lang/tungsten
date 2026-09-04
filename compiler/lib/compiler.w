@@ -289,6 +289,13 @@ use target
     write_file(ssa_report, ssa_converted.sort().join("\n") + "\n")
   t_cfg = clock() - cfg_started_at
 
+  # Escape summaries first: ownership consults mod[:fn_escs] to avoid
+  # pinning a caller's argument (or a guarded `Cls.new` result) as escaped
+  # when the callee provably never retains that parameter.
+  esc_started_at = clock()
+  escape_pass(mod)
+  t_escape = clock() - esc_started_at
+
   ownership_started_at = clock()
   ownership_jobs = ownership_parallel_job_count(mod)
   if ownership_jobs > 1
@@ -297,10 +304,6 @@ use target
   else
     ownership_pass(mod)
   t_ownership = clock() - ownership_started_at
-
-  esc_started_at = clock()
-  escape_pass(mod)
-  t_escape = clock() - esc_started_at
 
   t_free = 0
   if env("TUNGSTEN_FREE") != "0"

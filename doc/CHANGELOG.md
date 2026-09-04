@@ -8,6 +8,46 @@
   checkout's compiler into the new tree. An existing local compiler is never
   replaced.
 
+- **Typed rescue and an error hierarchy** — `rescue e: Class` binds only an
+  instance of `Class` or a subclass, `rescue Class` matches without binding,
+  and a `begin` may carry several rescue clauses tried in source order; an
+  unmatched error propagates unchanged (ensure still runs). `Error` now
+  descends from the abstract `Exception` and carries `code`, `cause`, `data`
+  and `backtrace` alongside `message`, with `with_cause` / `with_code` /
+  `with_data` builders and `full_message` (the cause chain, one line each).
+  New core classes: `NameError > NoMethodError`, `KeyError`, `IndexError`,
+  `ZeroDivisionError`, `OverflowError`, `FrozenError`, `NotImplementedError`,
+  `StopIteration`, `IOError > FileNotFound / PermissionDenied / EndOfFile`,
+  `NetworkError > ConnectionRefused / TimeoutError / TLSError`, `ParseError`,
+  `CancelledError`, `AssertionError`, and `SystemExit` / `Interrupt` directly
+  under `Exception`. Runtime failures start mapping onto the hierarchy:
+  integer division by zero raises `ZeroDivisionError`, a missing method
+  `NoMethodError`, mutation of a frozen AST body `FrozenError`, and the
+  string/number coercion failures `TypeError`. Any program containing a
+  `begin`/`rescue` or postfix `rescue` links the whole hierarchy, so the typed
+  object is always available to a handler; programs with no handler at all
+  keep the historical plain-string raise (and die fatally as before). These
+  typed runtime failures are rescuable in ordinary programs (plain `die`
+  sites stay fatal outside the REPL). The interpreter builds the same typed
+  objects for its own undefined-name errors and for tagged runtime messages.
+  Typed clauses are a parser desugar, so both engines share one
+  implementation. A raise inside a rescue body now runs the begin's `ensure`
+  on the compiled engine before propagating, as the interpreter already did.
+
+- **Objects are freed at scope close** — `Cls.new(...)` on a class name now
+  lowers to the guarded construct arm (allocate, then call the plain
+  initializer worker directly) that `class.new` inside methods already used,
+  and the ownership pass treats that fresh object as an owned producer when
+  the initializer provably never stores `self`. A devirtualized method call
+  on such an object consults the method's escape summary instead of pinning
+  the receiver, so `p = Pt.new(i, i + 1); total += p.sum` in a loop no longer
+  leaks one WObject per iteration (163 MB → constant at two million
+  iterations). Ivar values are not recursed into. Escape summaries
+  (`compiler/lib/escape.w`) now cover every retention shape the ownership
+  pass knows, distinguish "stored" from "returned", and treat any unknown
+  call-shaped instruction as retaining its operands; the ownership pass runs
+  after them and uses them for every direct call to a source function.
+
 - **Compile-time arity contracts** — a call that passes more arguments than
   the callee declares, or fewer than its required leading parameters, is a
   compile error (`E_LOWER_ARITY`, `tungsten explain E_LOWER_ARITY`) wherever

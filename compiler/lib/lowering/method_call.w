@@ -2589,9 +2589,22 @@
     # directly, and call a plain initializer worker.  A subclass receiver, a
     # static `.new` override, an inherited non-plain initializer, or any stale
     # compiler fact retains the ordinary constructor IC path.
-    if method_name == "new" && rk2 == :var && recv_node.name == "class" && ctx[:class_name] != nil && normal_source_instance_class?(ctx[:mod], ctx[:class_name])
+    #
+    # `Cls.new(...)` on a class NAME takes the same guarded arm: the receiver
+    # is the load of that very class, so the guard is a tautology and the
+    # allocation is visible to the ownership pass as a fresh producer
+    # (ownership.w construct_producer_class) — the way loop temporaries such
+    # as `Pt.new(i, i + 1)` become freeable at scope exit instead of leaking
+    # one WObject per iteration.
+    construct_owner = nil
+    if method_name == "new" && node.block == nil
+      if rk2 == :var && recv_node.name == "class" && ctx[:class_name] != nil && normal_source_instance_class?(ctx[:mod], ctx[:class_name])
+        construct_owner = ctx[:class_name]
+      elsif rk2 == :class_ref && recv_node.name != nil
+        construct_owner = resolve_exact_source_class_name(ctx[:mod], ctx[:class_name], recv_node.name)
+    if construct_owner != nil
       static_new = false
-      scan_class = ctx[:class_name]
+      scan_class = construct_owner
       guard = 0
       while scan_class != nil && guard < 64
         if ctx[:mod][:class_static_new][scan_class] == true
@@ -2599,13 +2612,13 @@
           break
         scan_class = ctx[:mod][:class_super_names][scan_class]
         guard += 1
-      ctor_owner = ctx[:class_name]
+      ctor_owner = construct_owner
       guard = 0
       while !static_new && ctor_owner != nil && guard < 64
         ctor_fn = ctx[:mod][:class_constructor_fn_names][ctor_owner + ".new/" + node.args.size().to_s()]
         if ctor_fn != nil
           construct_fn = ctor_fn
-          construct_class = ctx[:class_name]
+          construct_class = construct_owner
           break
         ctor_owner = ctx[:mod][:class_super_names][ctor_owner]
         guard += 1

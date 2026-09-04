@@ -58,34 +58,111 @@
 -> is_pure_builtin(name)
   name in ("w_add" "w_sub" "w_mul" "w_div" "w_mod" "w_eq" "w_neq" "w_eq_lit" "w_neq_lit" "w_lt" "w_gt" "w_lte" "w_gte" "__w_eq_fast" "__w_neq_fast" "__w_eq_lit_fast" "__w_neq_lit_fast" "__w_lt_fast" "__w_gt_fast" "__w_lte_fast" "__w_gte_fast" "w_bit_and" "w_bit_or" "w_bit_xor" "w_bit_shl" "w_bit_shr" "w_negate" "w_not" "w_to_s" "w_int_to_s" "w_to_i" "w_to_f" "w_string" "w_str_to_sym" "w_str_concat" "w_str_concat_free_rhs" "w_str_concat_free_lhs" "w_str_length" "w_string_byte_length" "__w_type" "w_hash_new" "w_array_new" "w_box_int_checked" "w_wire_sequence_from_array")
 
-# Analyze one function: determine which params escape and whether it's pure.
+# Param index for a WIRE value: a parameter register itself, or a temp the
+# forward derivation walk below traced back to one. nil when unrelated.
+-> escape_param_source(value, temp_from_param, param_idx)
+  if value == nil
+    return nil
+  src = temp_from_param[value]
+  if src != nil
+    return src
+  if type(value) == "String" && value.size() > 1
+    bare = value
+    if bare.starts_with?("%")
+      bare = value.slice(1, value.size() - 1)
+    return param_idx[bare]
+  nil
+
+# Record that `value` (if param-derived) escapes. `stored` distinguishes a
+# value retained somewhere that outlives the call (ivar, global, container,
+# closure, unknown callee) from one that merely flows out through `ret`.
+-> escape_mark_value(value, stored, state)
+  src = escape_param_source(value, state[:temp_from_param], state[:param_idx])
+  if src == nil
+    return nil
+  state[:param_escaped][src] = true
+  if stored
+    state[:param_stored][src] = true
+  nil
+
+-> escape_mark_args(args, stored, state)
+  if args == nil
+    return nil
+  ai = 0
+  while ai < wire_sequence_size(args)
+    escape_mark_value(wire_sequence_get(args, ai), stored, state)
+    ai += 1
+  nil
+
+# The result of `inst` may alias any param-derived argument: pure builtins
+# such as w_to_s return their argument for string inputs, w_str_concat retains
+# both sides in a rope, and a callee whose summary says it returns parameter
+# i hands the caller that same value under a new temp.
+-> escape_derive_result_from_args(inst, args, state)
+  temp = wire_get(inst, :temp)
+  if temp == nil || args == nil
+    return nil
+  ai = 0
+  while ai < wire_sequence_size(args)
+    src = escape_param_source(wire_sequence_get(args, ai), state[:temp_from_param], state[:param_idx])
+    if src != nil
+      state[:temp_from_param][temp] = src
+      return nil
+    ai += 1
+  nil
+
+# Alias-carrying operand fields of value-producing ops the main walk has no
+# specific rule for: conversions (:value, :boxed, :raw), container and
+# pointer bases (:arr, :base, :ptr), and arithmetic that may be pointer
+# arithmetic (:lhs, :rhs). The result inherits the first param derivation
+# found among them.
+-> escape_derive_result_from_fields(inst, state)
+  temp = wire_get(inst, :temp)
+  if temp == nil
+    return nil
+  fields = [:value, :boxed, :raw, :arr, :base, :ptr, :lhs, :rhs]
+  fi = 0
+  while fi < fields.size()
+    src = escape_param_source(wire_get(inst, fields[fi]), state[:temp_from_param], state[:param_idx])
+    if src != nil
+      state[:temp_from_param][temp] = src
+      return nil
+    fi += 1
+  nil
+
+# Concat variants that RELEASE or take ownership of an operand: an argument
+# handed to one of these is consumed, never merely read.
+-> is_consuming_builtin(name)
+  name in ("w_str_concat_free_lhs" "w_str_concat_free_rhs" "w_str_concat_own")
+
+# Analyze one function: which parameters escape (stored somewhere that
+# outlives the call, or returned) and whether the function is pure.
+#
+# Instruction coverage mirrors ownership.w's mark_escapes op-for-op. The
+# ownership pass consumes these summaries to avoid pinning a caller's
+# argument (or the fresh object a guarded `Cls.new` produced) as escaped, so
+# every instruction that can retain a value there must mark a param-derived
+# value here. Derivation is tracked forward through phis, selects, results
+# of pure builtins, and results of callees that return a parameter.
 -> escape_analyze(func, mod, fn_escs)
   params = func[:params]
   if params == nil
     return nil
 
-  # Track which params escape: param_escaped[i] = true/false
   param_escaped = []
-  pi = 0
-  while pi < params.size()
-    param_escaped.push(false)
-    pi += 1
-
-  # Build param name → index map
+  param_stored = []
   param_idx = {}
   pi = 0
   while pi < params.size()
+    param_escaped.push(false)
+    param_stored.push(false)
     param_idx[params[pi]] = pi
     pi += 1
 
-  # Track: does this function have side effects?
+  state = {param_escaped: param_escaped, param_stored: param_stored, param_idx: param_idx, temp_from_param: {}}
+  temp_from_param = state[:temp_from_param]
   has_side_effects = false
 
-  # Track which temps flow from which params (simple forward dataflow)
-  # temp_from_param[temp] = param_index (or nil if not from a param)
-  temp_from_param = {}
-
-  # Walk all blocks
   bi = 0
   while bi < func[:blocks].size()
     instrs = func[:blocks][bi][:instructions]
@@ -94,110 +171,148 @@
       inst = instrs[ii]
       op = wire_kind(inst)
 
-      # Phi: if any incoming is from a param, the phi result is from that param
       if op == :phi_ssa
         incoming = wire_get(inst, :incoming)
         if incoming != nil
           pi = 0
           while pi < wire_sequence_size(incoming)
-            incoming_value = wire_sequence_get(incoming, pi)
-            src_param = temp_from_param[incoming_value]
-            if src_param != nil
-              temp_from_param[wire_get(inst, :temp)] = src_param
-            # Also check if incoming value is a param register directly
-            pname = incoming_value
-            if pname != nil && type(pname) == "String" && pname.size() > 1
-              bare = pname
-              if bare.starts_with?("%")
-                bare = pname.slice(1, pname.size() - 1)
-              pidx = param_idx[bare]
-              if pidx != nil
-                temp_from_param[wire_get(inst, :temp)] = pidx
+            src = escape_param_source(wire_sequence_get(incoming, pi), temp_from_param, param_idx)
+            if src != nil
+              temp_from_param[wire_get(inst, :temp)] = src
             pi += 2
 
-      # Check if instruction uses a param value
-      # For call args: if an arg is a param (or derived from param), mark it escaped
-      if op in (:call_direct_i64 :call_direct_void)
+      elsif op == :phi_i64
+        src = escape_param_source(wire_get(inst, :a_value), temp_from_param, param_idx)
+        if src == nil
+          src = escape_param_source(wire_get(inst, :b_value), temp_from_param, param_idx)
+        if src != nil
+          temp_from_param[wire_get(inst, :temp)] = src
+
+      elsif op == :select_i64
+        src = escape_param_source(wire_get(inst, :then_val), temp_from_param, param_idx)
+        if src == nil
+          src = escape_param_source(wire_get(inst, :else_val), temp_from_param, param_idx)
+        if src != nil
+          temp_from_param[wire_get(inst, :temp)] = src
+
+      elsif op in (:call_direct_i64 :call_direct_void)
         call_name = wire_get(inst, :name)
-        # Pure builtins: args don't escape
-        if !is_pure_builtin(call_name)
-          # Check callee escape summary if available
+        args = wire_get(inst, :args)
+        if is_consuming_builtin(call_name)
+          escape_mark_args(args, true, state)
+          escape_derive_result_from_args(inst, args, state)
+        elsif is_pure_builtin(call_name)
+          escape_derive_result_from_args(inst, args, state)
+        else
           callee_escs = fn_escs[call_name]
-          args = wire_get(inst, :args)
           if args != nil
             ai = 0
             while ai < wire_sequence_size(args)
               arg = wire_sequence_get(args, ai)
-              # Check if this arg is a param or derived from one
-              src = temp_from_param[arg]
-              if src == nil
-                # Check if arg is directly a param register
-                if arg != nil && type(arg) == "String" && arg.size() > 1
-                  bare = arg
-                  if bare.starts_with?("%")
-                    bare = arg.slice(1, arg.size() - 1)
-                  pidx = param_idx[bare]
-                  if pidx != nil
-                    src = pidx
+              src = escape_param_source(arg, temp_from_param, param_idx)
               if src != nil
-                # Does this callee escape this arg position?
+                known = false
                 if callee_escs != nil && callee_escs[:escs] != nil && ai < callee_escs[:escs].size()
-                  if callee_escs[:escs][ai] == true
+                  known = true
+                  stored_list = callee_escs[:stored_escs]
+                  if stored_list == nil || ai >= stored_list.size() || stored_list[ai] == true
                     param_escaped[src] = true
-                else
-                  # Unknown callee or no summary: conservatively escape
+                    param_stored[src] = true
+                  elsif callee_escs[:escs][ai] == true
+                    # Returned by the callee, not stored: the result aliases it.
+                    if wire_get(inst, :temp) != nil
+                      temp_from_param[wire_get(inst, :temp)] = src
+                if !known
                   param_escaped[src] = true
+                  param_stored[src] = true
               ai += 1
-          # Impure calls cause side effects
           if is_impure_call(call_name)
             has_side_effects = true
 
       elsif op == :call_method_i64
-        # Dynamic dispatch: all param-derived args escape, and it's impure
         has_side_effects = true
-        args = wire_get(inst, :args)
-        if args != nil
-          ai = 0
-          while ai < wire_sequence_size(args)
-            src = temp_from_param[wire_sequence_get(args, ai)]
-            if src != nil
-              param_escaped[src] = true
-            ai += 1
-        # Receiver too
-        if wire_get(inst, :receiver) != nil
-          src = temp_from_param[wire_get(inst, :receiver)]
-          if src != nil
-            param_escaped[src] = true
+        escape_mark_args(wire_get(inst, :args), true, state)
+        escape_mark_value(wire_get(inst, :receiver), true, state)
 
       elsif op == :ret_i64
-        # Returned value: if derived from param, that param escapes
-        src = temp_from_param[wire_get(inst, :value)]
-        if src != nil
-          param_escaped[src] = true
+        escape_mark_value(wire_get(inst, :value), false, state)
 
-      elsif op == :ivar_set
+      elsif op in (:ivar_set :ivar_set_idx :store_global :store_cvar :class_store)
         has_side_effects = true
-        src = temp_from_param[wire_get(inst, :value)]
-        if src != nil
-          param_escaped[src] = true
+        escape_mark_value(wire_get(inst, :value), true, state)
 
-      elsif op == :store_global
+      elsif op in (:store_ptr :store_i64 :view_store_field :store_memo_ptr :slab_node_set_idx)
+        escape_mark_value(wire_get(inst, :value), true, state)
+
+      elsif op in (:small_array_set_inline :typed_array_set_inline :typed_array_compound_op_inline)
+        escape_mark_value(wire_get(inst, :value), true, state)
+
+      elsif op in (:bool_array_set_inline :bool_array_set_byte_inline)
+        escape_mark_value(wire_get(inst, :val), true, state)
+
+      elsif op in (:cleanup_push_hash :cleanup_push_array :cleanup_push_typed :cleanup_push_strbuf :call_recycle_hash :call_recycle_array :call_recycle_typed :call_recycle_strbuf)
+        escape_mark_value(wire_get(inst, :value), true, state)
+
+      elsif op == :closure_new
+        escape_mark_value(wire_get(inst, :captures_ptr), true, state)
+
+      elsif op in (:memo_call0_i64 :memo_call1_i64 :memo_call2_i64)
+        escape_mark_args(wire_get(inst, :args), true, state)
+
+      elsif op in (:puts_i64 :print_i64)
         has_side_effects = true
-        src = temp_from_param[wire_get(inst, :value)]
-        if src != nil
-          param_escaped[src] = true
+        escape_mark_value(wire_get(inst, :value), true, state)
 
-      elsif op == :store_ptr
-        src = temp_from_param[wire_get(inst, :value)]
-        if src != nil
-          param_escaped[src] = true
+      elsif op in (:call_direct_i128 :call_direct_i64_ptr1 :call_direct_void_ptr1 :call_direct_ptr :call_fused_out_reuse)
+        # The ptr1 kinds carry their single payload in :arg, not :args.
+        escape_mark_args(wire_get(inst, :args), true, state)
+        escape_mark_value(wire_get(inst, :arg), true, state)
+
+      elsif op == :slab_alloc_init
+        # Packed AST node constructor: every field value is frozen into the
+        # AST arena and stored in the node (w_ast_freeze_if_array keeps the
+        # array it is handed) — the node retains all of them.
+        escape_mark_args(wire_get(inst, :fields), true, state)
+
+      elsif op in (:typed_array_store_u64 :view_store_inline_elem)
+        # Raw stores whose slot may hold a boxed WValue (w64[] arrays,
+        # `- data` inline element slots).
+        escape_mark_value(wire_get(inst, :value), true, state)
+
+      elsif op in (:class_add_method :class_add_static_method :class_add_ivar :type_class_register :node_kind_class_register)
+        has_side_effects = true
+        escape_mark_value(wire_get(inst, :class_temp), true, state)
+
+      elsif op == :class_new
+        has_side_effects = true
+        escape_mark_value(wire_get(inst, :super_reg), true, state)
+
+      else
+        # Catch-all for every other instruction shape. Any op that carries
+        # an argument list or a receiver is a call the rules above do not
+        # know (typed raw-ABI ccall_rawargs targets are emitted through
+        # wire_make_dynamic_N with a return-type-specific kind, for one):
+        # the callee may retain anything, so every param-derived operand is
+        # stored. Any other op that yields a temp from an operand (pointer
+        # and box conversions, guards, pointer arithmetic, data-address
+        # takes) may alias that operand, so the result inherits its
+        # derivation. Missing a case here silently makes a caller free a
+        # value the callee still holds — err towards escape.
+        catch_args = wire_get(inst, :args)
+        catch_recv = wire_get(inst, :receiver)
+        if catch_args != nil || catch_recv != nil
+          has_side_effects = true
+          escape_mark_args(catch_args, true, state)
+          escape_mark_value(catch_recv, true, state)
+        elsif wire_get(inst, :temp) != nil
+          escape_derive_result_from_fields(inst, state)
 
       ii += 1
     bi += 1
 
-  # Store summary
   fn_escs[func[:name]] = {
     escs: param_escaped,
+    stored_escs: param_stored,
     pure: !has_side_effects,
     param_count: params.size()
   }

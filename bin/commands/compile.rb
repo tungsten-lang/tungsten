@@ -412,6 +412,7 @@ parser = OptionParser.new do |opts|
     else
       puts "No lesson for #{code} yet — the registry lives in doc/explain.md."
       puts "Known codes with lessons: #{sections.map { |s| s.lines.first&.strip }.compact.join(", ")}"
+      exit 1
     end
     exit 0
   end

@@ -1006,6 +1006,19 @@ loader_parse_cache_state = {
       return nil
     if t == :trait_include && node.name != nil
       consider_autoload_name(node.name, defined, registry, seen, pending)
+    # A handler can receive a runtime failure (division by zero, undefined
+    # method, ...), which the runtime raises as an instance of the matching
+    # core error class WHEN that class is linked. Link the whole hierarchy
+    # into any program that can rescue, so `rescue e: ZeroDivisionError`
+    # and `e.message` work without the program naming the class first, and
+    # so both engines see the same typed object. Programs without a handler
+    # pay nothing — an unrescued failure is fatal either way.
+    if t in (:begin :rescue_expr)
+      err_names = runtime_error_class_names()
+      eni = 0
+      while eni < err_names.size()
+        consider_autoload_name(err_names[eni], defined, registry, seen, pending)
+        eni += 1
     if t == :class_def
       # `+ Name` is a reopen when Name is supplied by core. Load the core
       # definition before the user's body even though collect_defined_names
@@ -1348,6 +1361,12 @@ loader_parse_cache_state = {
     if name in ("w_array_new_empty" "w_array_new" "w_array_new_filled" "w_array_new_uninit" "w_array_new_uninit_sized" "w_array_new_inline" "w_array_new_aligned" "w_array_zeros" "w_array_view_raw" "w_array_view" "w_array_view_range" "w_array_reinterpret" "w_array_copy_range" "w_array_reuse_or_new_empty" "w_bytes_new" "w_bool_array_new")
       return "Array"
     nil
+
+  # The core error hierarchy (core/exception.w, core/error.w and the
+  # subclasses registered in core/tungsten.w). Kept in step with the manifest
+  # and with runtime/runtime.c's die_as / w_raise_error_named class names.
+  -> runtime_error_class_names
+    ["Exception", "Error", "ArgumentError", "RangeError", "TypeError", "NameError", "NoMethodError", "KeyError", "IndexError", "ZeroDivisionError", "OverflowError", "FrozenError", "NotImplementedError", "StopIteration", "IOError", "FileNotFound", "PermissionDenied", "EndOfFile", "NetworkError", "ConnectionRefused", "TimeoutError", "TLSError", "ParseError", "CancelledError", "AssertionError", "SystemExit", "Interrupt"]
 
   -> consider_autoload_name(name, defined, registry, seen, pending, force = false)
     if name == nil || name == 0 || type(name) != "String" || name == ""

@@ -294,7 +294,7 @@ A value-bearing `case` compares the subject against `when` patterns (desugared t
 ### 3.6.4 Exceptions
 
     Begin = "begin" Block
-            [ "rescue" [ Identifier [ ":" ClassName ] ] Block ]
+            { "rescue" [ Identifier [ ":" ClassName ] | ClassName ] Block }
             [ "ensure" Block ]
           .
 

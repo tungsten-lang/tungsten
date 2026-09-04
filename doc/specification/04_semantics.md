@@ -215,7 +215,7 @@ Suffix `expr while c` repeats evaluation of `expr` while `c` remains truthy.
 ### 4.6.5 `begin` / `rescue` / `ensure`
 
 1. Evaluate the `begin` body.
-2. If a non-local error is raised and a `rescue` clause is present, bind the exception (when a name is given) and evaluate the rescue body.
+2. If a non-local error is raised, try the `rescue` clauses in source order. A clause with a class (`rescue e: Class`, `rescue Class`) matches only when the error is an instance of that class or a subclass; an untyped clause matches any error, and later clauses are unreachable after it. The first matching clause binds the error (when a name is given) and its body is evaluated. If no clause matches, the error propagates unchanged (step 4).
 3. Whether the body completed or was rescued, evaluate `ensure` if present.
 4. If the error was not rescued, propagate it after `ensure`.
 

@@ -1301,8 +1301,8 @@ use target
       return ccall("w_quantity_parse", "1", "" + name.to_s())
     hint = foreign_name_hint(name)
     if hint != nil
-      raise "Undefined variable or method '[name]' — [hint]"
-    raise "Undefined variable or method '[name]'"
+      raise_typed("NameError", "Undefined variable or method '[name]' — [hint]")
+    raise_typed("NameError", "Undefined variable or method '[name]'")
 
   # The libm set the compiled path treats as intrinsics. Returns nil when the
   # name isn't one (all real results are Floats, so nil is a safe sentinel).
@@ -3618,7 +3618,7 @@ use target
       if type(v) == "Array" && v.size() == 2 && is_ast_node?(v[1]) && ast_kind(v[1]) == :block
         return call_block(v, args)
 
-    raise "Undefined method '[name]'"
+    raise_typed("NoMethodError", "Undefined method '[name]'")
 
   -> dispatch_method(recv, name, args, block, env)
     # A closure value (an [env, block-node] pair) responds to `.call(args)` by
@@ -4134,7 +4134,7 @@ use target
       if args.size() == 1 && name == "gcd"
         return ccall("w_method_call", recv, "" + name, args)
 
-    raise "undefined method '[name]' for [w_to_s(recv)]"
+    raise_typed("NoMethodError", "undefined method '[name]' for [w_to_s(recv)]")
 
   -> primitive_runtime_class(recv)
     class_name = nil
@@ -6061,6 +6061,67 @@ use target
   # rescued, raised unrescued, or was exited by a control signal — and an
   # unrescued error (or signal) propagates AFTER ensure. The pending-error
   # shape keeps the re-raise outside this frame's own rescue.
+  # Raise a typed error object (a core Error subclass) the way `raise Cls,
+  # msg` does, so `rescue e: Cls` can select it; when the class is not
+  # available the message string is raised alone, as before.
+  -> raise_typed(class_name, msg)
+    if try_autoload_class(class_name) && @classes.has_key?(class_name)
+      @raised_value = construct_error(class_name, msg)
+      @raised_message = msg
+    raise msg
+
+  # `Cls.new(msg)` evaluated exactly as `raise Cls, msg` evaluates it — the
+  # ordinary call path binds `self` for the constructor and accessors; a
+  # direct instantiate() from here left the message ivar unreadable.
+  -> construct_error(class_name, msg)
+    obj = {rt: :object, w_class: @classes[class_name], ivars: {}}
+    obj[:ivars]["@message"] = msg
+    obj
+
+  # The compiled runtime raises "ClassName: message" strings when the typed
+  # class is not linked into this binary (w_raise_error_named); the
+  # interpreter can still build the named core class for the interpreted
+  # program. Returns the typed object, or nil when the message is not a
+  # tagged core error.
+  -> typed_runtime_error(message)
+    if type(message) != "String"
+      return mirror_compiled_error(message)
+    idx = message.index(": ")
+    if idx == nil || idx <= 0
+      return nil
+    class_name = message.slice(0, idx)
+    if autoload_registry()[class_name] == nil
+      return nil
+    if !try_autoload_class(class_name) || !@classes.has_key?(class_name)
+      return nil
+    construct_error(class_name, message.slice(idx + 2, message.size() - idx - 2))
+
+  # When this binary links the core error classes (any program with a
+  # handler does, and the compiler is one), the runtime raises a COMPILED
+  # instance. Interpreted accessors cannot run against a compiled object, so
+  # mirror it as an interpreted instance of the same core class, carrying
+  # the message read through runtime dispatch. Anything that is not an
+  # Exception descendant is returned unchanged.
+  -> mirror_compiled_error(value)
+    class_name = "" + type(value).to_s()
+    if autoload_registry()[class_name] == nil
+      return nil
+    if !try_autoload_class(class_name) || !@classes.has_key?(class_name)
+      return nil
+    if !interpreted_class_descends_from?(@classes[class_name], "Exception")
+      return nil
+    construct_error(class_name, ccall("w_method_call", value, "message", []))
+
+  -> interpreted_class_descends_from?(w_class, ancestor_name)
+    cur = w_class
+    guard = 0
+    while cur != nil && guard < 64
+      if cur[:name] == ancestor_name
+        return true
+      cur = cur[:superclass]
+      guard += 1
+    false
+
   -> eval_begin(node, env)
     result = nil
     pending = nil
@@ -6072,10 +6133,15 @@ use target
       elsif ast_get(node, :rescue_body) != nil
         # Bind the raised VALUE when this message matches the most recent
         # user-level raise (error objects survive rescue); otherwise the
-        # host message string is all there is.
+        # host message string is all there is — unless it is a tagged core
+        # error from the runtime, which becomes the named class here.
         bound = err
         if @raised_value != nil && @raised_message == err
           bound = @raised_value
+        else
+          typed = typed_runtime_error(err)
+          if typed != nil
+            bound = typed
         @raised_value = nil
         @raised_message = nil
         if ast_get(node, :rescue_var) != nil

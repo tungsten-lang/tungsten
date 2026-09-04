@@ -1919,9 +1919,30 @@
     emit_wire_store_i64(wfn, ptr, err)
   rescue_recycle_depth = wfn[:scope_recycle_stack].size()
   emit_scope_push(wfn, rescue_sid)
+  # A raise INSIDE the rescue body must still run this begin's ensure before
+  # it propagates (spec 4.6.5; the interpreter already does). The try frame
+  # was consumed by this landing pad, so guard the rescue body with a second
+  # frame whose landing pad runs the ensure body and re-raises. Typed rescue
+  # clauses rely on it: an unmatched class re-raises the original error from
+  # the rescue body. Emitted only when there is both a rescue body and an
+  # ensure clause — the common begin/rescue pays nothing.
+  rescue_guard = node.rescue_body != nil && node.ensure_body != nil
+  rescue_fail_label = nil
+  if rescue_guard
+    guard_buf = next_temp(wfn)
+    emit_wire_call_direct_ptr(wfn, [], "w_exception_push", guard_buf)
+    guard_sj = next_temp(wfn)
+    emit_wire_setjmp(wfn, guard_buf, guard_sj)
+    guard_cmp = next_temp(wfn)
+    emit_wire_icmp_eq_i32(wfn, guard_sj, "0", guard_cmp)
+    rescue_body_label = next_label(wfn, "rescue.body")
+    rescue_fail_label = next_label(wfn, "rescue.fail")
+    emit_wire_cond_br(wfn, guard_cmp, rescue_fail_label, nil, rescue_body_label)
+    start_block(wfn, rescue_body_label)
+    wfn[:eh_depth] = wfn[:eh_depth] + 1
   if node.rescue_body != nil
-    # The ensure clause guards the rescue body too (its frame is already
-    # consumed by this landing pad, so eh_base == the current depth).
+    # The ensure clause guards the rescue body too: a control transfer out
+    # of it replays the ensure body at the transfer site.
     if ensure_entry != nil
       wfn[:ensure_stack].push(ensure_entry)
     if result_ptr != nil && node.rescue_body.size() > 0
@@ -1930,6 +1951,10 @@
       lower_program(ctx, node.rescue_body)
     if ensure_entry != nil
       wfn[:ensure_stack].pop()
+  if rescue_guard
+    wfn[:eh_depth] = wfn[:eh_depth] - 1
+    if !block_terminated(wfn)
+      emit_wire_call_direct_void(wfn, [], "w_exception_pop")
   if !block_terminated(wfn)
     materialize_bindings(ctx)
     emit_scope_pop(wfn, rescue_sid)
@@ -1948,6 +1973,22 @@
         emit_wire_br(wfn, end_label, nil, nil)
   else
     restore_recycle_scope_depth(wfn, rescue_recycle_depth)
+
+  if rescue_guard
+    # Landing pad for a raise inside the rescue body: run ensure, then
+    # propagate the new error. The rescue scope is deliberately not popped
+    # here — its producers need not dominate this path, so freeing them
+    # could free a value the normal path still owns; leaking is the safe
+    # side.
+    start_block(wfn, rescue_fail_label)
+    guard_err = next_temp(wfn)
+    emit_wire_call_direct_i64(wfn, nil, [], nil, nil, "w_exception_error", nil, nil, guard_err)
+    emit_wire_call_direct_void(wfn, [], "w_exception_pop")
+    lower_program(ctx, node.ensure_body)
+    materialize_bindings(ctx)
+    if !block_terminated(wfn)
+      emit_wire_call_direct_void(wfn, [guard_err], "w_raise")
+      emit_wire_unreachable(wfn)
 
   start_block(wfn, end_label)
   if result_ptr != nil

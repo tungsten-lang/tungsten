@@ -85,6 +85,8 @@ WValue __w_type(WValue v);
 static int64_t integer_low_i64(WValue v);
 static void die(const char *msg);
 static void dief(const char *fmt, ...);
+static void die_as(const char *class_name, const char *msg) __attribute__((noreturn));
+static void w_raise_error_named(const char *class_name, const char *msg) __attribute__((noreturn));
 static WValue w_string_n(const char *s, size_t len);
 static WValue w_string_n_known_ascii(const char *s, size_t len, int ascii);
 static WValue w_string_take_known_ascii(char *s, size_t len, int ascii);
@@ -13907,7 +13909,7 @@ static inline __attribute__((always_inline))
 int32_t mag_div_single_to(uint64_t *q, const uint64_t *a, int32_t alen,
                           uint64_t d, uint64_t *rem,
                           BnDivPreinvCache *cache) {
-    if (d == 0) die("division by zero");
+    if (d == 0) die_as("ZeroDivisionError", "division by zero");
 
     if (d == 1) {
         if (q != a)
@@ -15257,7 +15259,7 @@ static __attribute__((no_stack_protector))
 void mag_divmod_knuth(const uint64_t *u, int32_t ulen,
                              const uint64_t *v, int32_t vlen,
                              WBigint **q_out, WBigint **r_out) {
-    if (vlen == 0) die("division by zero");
+    if (vlen == 0) die_as("ZeroDivisionError", "division by zero");
 
     /* Single-limb divisor: fast path */
     if (vlen == 1) {
@@ -16728,7 +16730,7 @@ WValue bigint_div_any_generic(WValue a, WValue b) {
     int result_neg = (alen < 0) != (blen < 0);
     int32_t a_abs = alen < 0 ? -alen : alen;
     int32_t b_abs = blen < 0 ? -blen : blen;
-    if (b_abs == 0) die("division by zero");
+    if (b_abs == 0) die_as("ZeroDivisionError", "division by zero");
     if (a_abs == 0) return w_box_int(0);
 
     WBigint *q;
@@ -16833,7 +16835,7 @@ WValue bigint_div_any(WValue a, WValue b) {
             if (alen == 1) {
                 /* One hardware divide; keep mag_div_single's error for a
                  * denormal zero divisor. */
-                if (__builtin_expect(d == 0, 0)) die("division by zero");
+                if (__builtin_expect(d == 0, 0)) die_as("ZeroDivisionError", "division by zero");
                 return bigint_finish_one_limb(aa->limbs[0] / d, neg);
             }
             uint64_t remainder;
@@ -16917,7 +16919,7 @@ WValue bigint_div_any(WValue a, WValue b) {
  * so only the dividend's sign/length remains. */
 static inline __attribute__((always_inline))
 WValue bigint_div_ui_any(WValue a, uint64_t divisor) {
-    if (__builtin_expect(divisor == 0, 0)) die("division by zero");
+    if (__builtin_expect(divisor == 0, 0)) die_as("ZeroDivisionError", "division by zero");
     if (divisor == 1) {
         if (w_is_bigint(a)) w_bigint_mark_shared(w_as_bigint(a));
         return a;
@@ -24236,7 +24238,7 @@ WValue w_decimal_div(WValue a, WValue b) {
     decimal_extract(a, &a_sig64, &a_scale);
     decimal_extract(b, &b_sig64, &b_scale);
     if (b_sig64 == 0) {
-        die("decimal division by zero");
+        die_as("ZeroDivisionError", "decimal division by zero");
     }
     /* Scale up the dividend for precision, then divide */
     __int128 a_sig = (__int128)a_sig64;
@@ -24416,7 +24418,7 @@ static WValue decimal_big_div(WValue a, WValue b) {
     WValue a_sig, b_sig; int64_t a_scale, b_scale;
     decimal_extract_boxed(a, &a_sig, &a_scale);
     decimal_extract_boxed(b, &b_sig, &b_scale);
-    if (w_is_int(b_sig) && w_as_int(b_sig) == 0) die("decimal division by zero");
+    if (w_is_int(b_sig) && w_as_int(b_sig) == 0) die_as("ZeroDivisionError", "decimal division by zero");
     /* Mirror the plain path's policy: extend the dividend by 12 digits
      * of precision, truncate the quotient. */
     WValue scaled = w_mul(a_sig, decimal_pow10_boxed(12));
@@ -31578,7 +31580,7 @@ static WValue quantity_combine(WValue a, WValue b, int divide) {
     int64_t sig;
     int scale;
     if (divide) {
-        if (b_sig == 0) die("division by zero");
+        if (b_sig == 0) die_as("ZeroDivisionError", "division by zero");
         sig = a_sig;
         scale = a_scale - b_scale;
         if (!apply_rational(&sig, &scale, 1, b_sig))
@@ -31779,7 +31781,7 @@ WValue w_quantity_div_scalar(WValue quantity, WValue scalar) {
         die("cannot divide an affine absolute temperature; convert it to kelvin or use a temperature difference");
     if (w_is_int(scalar)) {
         int64_t sv = w_as_int(scalar);
-        if (sv == 0) die("division by zero");
+        if (sv == 0) die_as("ZeroDivisionError", "division by zero");
         /* Scale up for precision, then divide */
         __int128 q_sig = (__int128)q_sig64;
         q_sig *= (__int128)1000000000000LL;
@@ -31795,7 +31797,7 @@ WValue w_quantity_div_scalar(WValue quantity, WValue scalar) {
         } else {
             decimal_extract(scalar, &s_sig, &s_scale);
         }
-        if (s_sig == 0) die("division by zero");
+        if (s_sig == 0) die_as("ZeroDivisionError", "division by zero");
         __int128 q_sig = (__int128)q_sig64;
         q_sig *= (__int128)1000000000000LL;
         int result_scale = q_scale - s_scale - 12;
@@ -40010,7 +40012,7 @@ static WValue w_rational_div(WValue a, WValue b) {
     rational_parts(a, &an, &ad);
     rational_parts(b, &bn, &bd);
     if (bigint_compare(bn, w_int(0)) == 0)
-        die("division by zero (rational)");
+        die_as("ZeroDivisionError", "division by zero (rational)");
     WValue gcd_num = bigint_gcd_any_inline(an, bn);
     WValue gcd_den = bigint_gcd_any_inline(bd, ad);
     WValue numerator = bigint_mul_any(bigint_div_any(an, gcd_num),
@@ -40383,7 +40385,6 @@ static inline int w_is_plain_scalar_num(WValue v) {
  * otherwise the "TypeError: ..." message raises as a plain string
  * (the same shape as a bare `raise "msg"`), so the error stays
  * catchable in thin programs that never reference the class. */
-static WClass *g_type_error_class = NULL;
 static void w_raise_type_error(const char *fmt, WValue offender, WValue other) __attribute__((noreturn));
 static void w_raise_type_error(const char *fmt, WValue offender, WValue other) {
     char msg[256];
@@ -40393,25 +40394,64 @@ static void w_raise_type_error(const char *fmt, WValue offender, WValue other) {
                 msg, as_str(w_to_s(offender)), as_str(w_to_s(other)));
         w_print_error_tail(32);
     }
-    if (!g_type_error_class) {
-        for (int i = 0; i < g_next_class_id; i++) {
-            WClass *k = g_class_table[i];
-            if (k && strcmp(k->name, "TypeError") == 0) { g_type_error_class = k; break; }
-        }
+    /* Same construct-or-tag policy as every other typed runtime error. */
+    w_raise_error_named("TypeError", msg);
+    __builtin_unreachable();
+}
+
+/* Typed runtime errors. Raise an instance of the named core Error subclass
+ * when the program links it (a `rescue e: Cls`, `raise Cls, ...`, or any
+ * other reference autoloads it); otherwise an instance of the base Error
+ * when THAT is linked, so `rescue e: Error` still catches runtime failures
+ * and `e.message` works; otherwise the historical "Class: message" tagged
+ * string, so thin programs that never mention an error class keep the
+ * plain-string contract. Class lookups are cached per name — errors are
+ * rare, but a hot rescue loop should not rescan the class table. */
+static WValue w_error_class_by_name(const char *name) {
+    enum { W_ERR_CLASS_CACHE = 32 };
+    static const char *cache_names[W_ERR_CLASS_CACHE];
+    static WValue cache_vals[W_ERR_CLASS_CACHE];
+    static int cache_count = 0;
+    for (int i = 0; i < cache_count; i++) {
+        if (strcmp(cache_names[i], name) == 0) return cache_vals[i];
     }
-    if (g_type_error_class) {
-        /* Construct through the class's compiled `new` (mirrors what
-         * `raise TypeError, msg` lowers to) — compiled constructors set
-         * @message by slot index, which a by-name w_ivar_set can't reach. */
+    WValue found = W_NIL;
+    for (int i = 0; i < g_next_class_id; i++) {
+        WClass *k = g_class_table[i];
+        if (k && strcmp(k->name, name) == 0) { found = w_box_ptr(k, W_SUBTAG_CLASS); break; }
+    }
+    if (cache_count < W_ERR_CLASS_CACHE) {
+        cache_names[cache_count] = name;
+        cache_vals[cache_count] = found;
+        cache_count++;
+    }
+    return found;
+}
+
+static void w_raise_error_named(const char *class_name, const char *msg) {
+    WValue klass = w_error_class_by_name(class_name);
+    if (klass == W_NIL) klass = w_error_class_by_name("Error");
+    if (klass != W_NIL) {
         WValue msg_v = w_string(msg);
-        WValue err = w_method_call_fast(w_box_ptr(g_type_error_class, W_SUBTAG_CLASS),
-                                        w_string("new"), &msg_v, 1);
+        WValue err = w_method_call_fast(klass, w_string("new"), &msg_v, 1);
         w_raise(err);
-    } else {
-        char tagged[288];
-        snprintf(tagged, sizeof(tagged), "TypeError: %s", msg);
-        w_raise(w_string(tagged));
     }
+    char tagged[320];
+    snprintf(tagged, sizeof(tagged), "%s: %s", class_name, msg);
+    w_raise(w_string(tagged));
+    __builtin_unreachable();
+}
+
+/* die(), but typed: with a handler active the failure is a rescuable
+ * instance of class_name (see w_raise_error_named); without one it is the
+ * same fatal "runtime error:" exit as die. */
+static void die_as(const char *class_name, const char *msg) {
+    /* Unlike die(), a typed failure is rescuable in ordinary programs, not
+     * only in the REPL: spec 4.6.5 lists system errors among what
+     * begin/rescue catches, and a typed class is only useful if a handler
+     * can select it. Without a handler it is the same fatal exit as die. */
+    if (w_exception_stack) w_raise_error_named(class_name, msg);
+    die(msg);
     __builtin_unreachable();
 }
 
@@ -42233,12 +42273,12 @@ WValue w_div(WValue a, WValue b) {
     }
     if (w_is_double(a) || w_is_double(b)) {
         double bv = as_numeric_double(b);
-        if (bv == 0.0) die("division by zero");
+        if (bv == 0.0) die_as("ZeroDivisionError", "division by zero");
         return w_float(as_numeric_double(a) / bv);
     }
     if (w_both_ints(a, b)) {
         int64_t bv = w_as_int(b);
-        if (bv == 0) die("division by zero");
+        if (bv == 0) die_as("ZeroDivisionError", "division by zero");
         return w_box_int_checked(w_as_int(a) / bv);
     }
     if (w_both_integers_any(a, b)) {
@@ -42249,7 +42289,7 @@ WValue w_div(WValue a, WValue b) {
         return bigint_div_any(a, b);
     }
     { int64_t bv = as_int(b);
-      if (bv == 0) die("division by zero");
+      if (bv == 0) die_as("ZeroDivisionError", "division by zero");
       return w_box_int_checked(as_int(a) / bv); }
 }
 
@@ -47738,7 +47778,7 @@ __attribute__((preserve_most)) WValue w_bigint_div_mut(WValue a, WValue b) {
     int b_neg;
     if (w_is_int(b)) {
         int64_t ib = w_as_int(b);
-        if (__builtin_expect(ib == 0, 0)) die("division by zero");
+        if (__builtin_expect(ib == 0, 0)) die_as("ZeroDivisionError", "division by zero");
         b_neg = ib < 0;
         d = b_neg ? (uint64_t)(-(ib + 1)) + 1U : (uint64_t)ib;
     } else if (w_is_bigint(b)) {
@@ -47753,7 +47793,7 @@ __attribute__((preserve_most)) WValue w_bigint_div_mut(WValue a, WValue b) {
         }
         b_neg = bs < 0;
         d = bb->limbs[0];
-        if (__builtin_expect(d == 0, 0)) die("division by zero");
+        if (__builtin_expect(d == 0, 0)) die_as("ZeroDivisionError", "division by zero");
     } else {
         return w_bigint_div_mut_fallback(a, b);
     }
@@ -50956,7 +50996,7 @@ WValue w_pow(WValue base, WValue ex) {
                 WValue numerator, denominator;
                 rational_parts(base, &numerator, &denominator);
                 if (bigint_compare(numerator, w_int(0)) == 0)
-                    die("division by zero (rational)");
+                    die_as("ZeroDivisionError", "division by zero (rational)");
                 factor = rational_from_parts(denominator, numerator);
                 magnitude = (uint64_t)(-e);
             } else {
@@ -62910,8 +62950,12 @@ invoke_static_method:
         const WIcSite *site = w_resolve_ic_site(g_last_miss_slot);
         if (site) __w_loc_set_col(site->file, site->line, site->col);
     }
-    dief("undefined method '%s' for %s (%s 0x%llx)",
-         as_str(name), type_name, w_type_label(recv), (unsigned long long)recv);
+    {
+        char nm_buf[256];
+        snprintf(nm_buf, sizeof(nm_buf), "undefined method '%s' for %s (%s 0x%llx)",
+                 as_str(name), type_name, w_type_label(recv), (unsigned long long)recv);
+        die_as("NoMethodError", nm_buf);
+    }
     return W_NIL;
 }
 
@@ -65009,7 +65053,7 @@ static int w_array_has_views(WValue parent);
 
 WValue w_array_push(WValue arr, WValue val) {
     if (w_is_body(arr)) {
-        w_raise(w_string("push: cannot mutate an AST body reference (immutable once frozen)"));
+        w_raise_error_named("FrozenError", "push: cannot mutate an AST body reference (immutable once frozen)");
     }
     WArray *a = w_as_array(arr);
     if ((a->flags & W_FLAG_OWNED) == 0) {
@@ -66450,7 +66494,7 @@ WValue w_array_set(WValue arr, WValue index, WValue val) {
     if (w_is_wire_sequence(arr))
         return w_wire_sequence_set(arr, w_as_int(index), val);
     if (w_is_body(arr)) {
-        w_raise(w_string("[]=: cannot mutate an AST body reference (immutable once frozen)"));
+        w_raise_error_named("FrozenError", "[]=: cannot mutate an AST body reference (immutable once frozen)");
     }
     return w_array_write_at(w_as_array(arr), w_as_int(index), val);
 }
@@ -72517,9 +72561,9 @@ WValue w_freeze(WValue obj) {
 }
 
 /* Release a WValue if it's a heap-allocated type. Safe to call on any value.
- * Frees mode-7 heap strings, arrays, hashes, string buffers and closures,
- * and returns bounded-size BigInt boxes to the thread-local capacity
- * recycler. Objects/instances are never freed here.
+ * Frees mode-7 heap strings, arrays, hashes, string buffers, closures and
+ * unfrozen source-class instances, and returns bounded-size BigInt boxes to
+ * the thread-local capacity recycler.
  * Bigints: a single calloc (limbs are a flexible array member, see
  * bigint_alloc) and never interned — every bigint_from_* mints or takes a
  * distinct allocation, so releasing a provably-dead box is safe. The compiler emits
@@ -72606,6 +72650,21 @@ void w_value_free(WValue v) {
         WClosure *cl = (WClosure *)w_as_ptr(v);
         if (cl->capture_count > 0) free(cl->captures);
         free(cl);
+        return;
+    }
+    /* Source-class instance (W_SUBTAG_INSTANCE). w_object_new is ONE calloc —
+     * header plus inline ivar slots — and nothing else ever owns the block,
+     * so the header is the whole allocation. Ivar VALUES are not recursed
+     * into: the compiler marked them escaped when the initializer stored
+     * them, so they may be live elsewhere. The compiler hands an instance
+     * here only when the guarded `Cls.new` construct arm produced it and
+     * its initializer provably never stored `self` (ownership.w
+     * construct_producer_class). A frozen instance was frozen for sharing
+     * across goroutines — leave it alone, like the frozen-hash bail above. */
+    if (w_is_instance(v)) {
+        WObject *obj = (WObject *)w_as_ptr(v);
+        if (obj->flags & W_OBJ_FLAG_FROZEN) return;
+        free(obj);
         return;
     }
     /* RegexMatch owns its private group/offset containers. The immutable name

@@ -2832,23 +2832,38 @@ use ../../core/token
     # The lexer scans the use path as a STRING token (bare or quoted)
     Tungsten:AST:Use.new(advance_value())
 
+  # begin / rescue / ensure. One or more rescue clauses may follow the body:
+  #   rescue e            bind any error
+  #   rescue e: Class     bind only an instance of Class (or a subclass)
+  #   rescue Class        match without binding
+  #   rescue              match without binding
+  # Clauses are tried in source order; the first match wins. A single
+  # untyped clause is the Begin node's native shape. Typed or multiple
+  # clauses desugar in the parser — so both engines share one implementation
+  # — to a hidden binding plus an `is_a?` chain, whose final arm re-raises
+  # the ORIGINAL error object so the enclosing handler (and this begin's own
+  # ensure) see it unchanged.
   -> parse_begin
     expect_kw("begin")
     skip_newlines()
     body = parse_body()
 
-    rescue_var = nil
-    rescue_body = nil
-    if at_kw?("rescue")
+    clauses = []
+    while at_kw?("rescue")
       advance()
-      rescue_var = nil
+      clause_var = nil
+      clause_class = nil
       if !at_type?(T_NEWLINE) && !at_type?(T_INDENT) && !at_type?(T_DEDENT) && !at_type?(T_EOF)
-        rescue_var = expect_type_value(T_ID)
-        if at_type?(T_COLON)
-          advance()
-          expect_name_or_constant()
+        if at_type?(T_ID)
+          clause_var = expect_type_value(T_ID)
+          if at_type?(T_COLON)
+            advance()
+            clause_class = expect_name_or_constant_value()
+        else
+          clause_class = expect_name_or_constant_value()
       skip_newlines()
-      rescue_body = parse_body()
+      clause_body = parse_body()
+      clauses.push([clause_var, clause_class, clause_body])
 
     ensure_body = nil
     if at_kw?("ensure")
@@ -2856,7 +2871,46 @@ use ../../core/token
       skip_newlines()
       ensure_body = parse_body()
 
-    Tungsten:AST:Begin.new(body, rescue_var, rescue_body, ensure_body)
+    if clauses.size() == 0
+      return Tungsten:AST:Begin.new(body, nil, nil, ensure_body)
+    if clauses[0][1] == nil
+      # An untyped first clause catches everything; later clauses are
+      # unreachable, exactly as in Ruby.
+      return Tungsten:AST:Begin.new(body, clauses[0][0], clauses[0][2], ensure_body)
+    hidden = "__rescued"
+    Tungsten:AST:Begin.new(body, hidden, [rescue_dispatch_chain(hidden, clauses)], ensure_body)
+
+  # `__rescued.is_a?(Class)`
+  -> rescue_class_test(hidden, class_name)
+    Tungsten:AST:Call.new(Tungsten:AST:Var.new(hidden), "is_a?", [Tungsten:AST:ClassRef.new(class_name)], nil)
+
+  # The clause body, prefixed with `var = __rescued` when the clause binds.
+  -> rescue_clause_body(hidden, clause)
+    stmts = []
+    if clause[0] != nil
+      stmts.push(Tungsten:AST:Assign.new(Tungsten:AST:Var.new(clause[0]), Tungsten:AST:Var.new(hidden), nil))
+    i = 0
+    while i < clause[2].size()
+      stmts.push(clause[2][i])
+      i += 1
+    stmts
+
+  # if __rescued.is_a?(C1) ... elsif __rescued.is_a?(C2) ... else <bare
+  # clause body, or `raise __rescued`>. The first clause is known typed.
+  -> rescue_dispatch_chain(hidden, clauses)
+    elsifs = []
+    else_body = nil
+    i = 1
+    while i < clauses.size()
+      clause = clauses[i]
+      if clause[1] == nil
+        else_body = rescue_clause_body(hidden, clause)
+        break
+      elsifs.push([rescue_class_test(hidden, clause[1]), rescue_clause_body(hidden, clause)])
+      i += 1
+    if else_body == nil
+      else_body = [Tungsten:AST:Raise.new(Tungsten:AST:Var.new(hidden))]
+    Tungsten:AST:If.new(rescue_class_test(hidden, clauses[0][1]), rescue_clause_body(hidden, clauses[0]), elsifs, else_body)
 
   -> parse_yield
     advance()

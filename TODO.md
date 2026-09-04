@@ -875,3 +875,233 @@ every clone pays for them. To finish:
    must be rebased or recreated after the rewrite), then `git gc --prune=now`.
 3. Point the metaflip tooling at the archive location (or a release asset) so
    its tests can fetch inputs on demand instead of reading them from the tree.
+
+## Design notes from the 2026-09-03 improvement review
+
+Decisions recorded from the review with Erik on 2026-09-03. Items marked
+DECIDED are settled and being implemented; items marked DEFERRED are written
+up here so the design is not lost, and are not scheduled.
+
+### DECIDED: diagnostics
+
+- Multi-error collection: default cap of 20 errors per file; `--errors` with no
+  argument means unlimited, `--errors N` caps at N, `--errors 0` stops at the
+  first error (the old behaviour, and what `--check` did). `TUNGSTEN_ERRORS`
+  mirrors the flag.
+- "Did you mean" uses Damerau-Levenshtein (optimal string alignment: insert,
+  delete, substitute, and adjacent transposition each cost 1), threshold
+  `max(1, len / 3)`, at most three candidates, a case-insensitive exact match
+  ranked first. Rendered as a dim `help:` line under the error.
+- Parse errors render token spellings (`expected ')' before end of input`),
+  never numeric token IDs.
+- Every error code the compiler can emit has a lesson in `doc/explain.md`, and
+  a `check:explain` rake task fails when a code lacks one or a lesson names a
+  dead code.
+- Undefined bare names at script level are a compile error
+  (`E_LOWER_UNDEFINED_NAME`) instead of silently lowering to nil; unknown
+  classes in `Cls.new` are `E_LOWER_UNKNOWN_CLASS` with a caret.
+
+### DECIDED: memory — `Cls.new` is an owned producer
+
+Compiled binaries never reclaimed objects because the ownership pass
+(`compiler/lib/ownership.w`) only trusts an allowlist of runtime producers and
+marks any value passed to a non-whitelisted call as escaped. Two million
+two-field objects in a loop peaked at 163 MB. The fix: treat the `object_new`
+WIRE op as a heap producer, and give source methods per-parameter escape
+summaries so that passing a fresh object as `self` to a constructor or method
+whose body provably does not retain `self` does not pin it. A per-class object
+pool is NOT the fix — a pool needs the same liveness knowledge and only saves
+malloc cost; a `pool N` class-body directive stays an option once profiling
+shows malloc on a hot path.
+
+### DECIDED: pattern matching (item 11)
+
+`case` grows destructuring arms. Field destructuring by constructor order
+comes from `-> new(@w, @h)` fixing the field order; hash destructuring uses
+`{ name, age }` (bare keys bind same-named locals), not `{name:, age:}`.
+
+```
+case shape
+when Circle(radius: r)          << π * r²
+when Rect(w, h) if w == h       << "square [w]"
+when Rect(w, h)                 << w * h
+when [x, y]                     << "point [x],[y]"
+when { name, age } if age >= 18 << name
+when Int | Float                << "scalar"
+else                            raise TypeError, "not a shape"
+```
+
+Exhaustiveness checking only fires when the scrutinee's type is closed, which
+depends on unions (below, deferred).
+
+### DECIDED: exception hierarchy and typed errors (item 10)
+
+```
+Exception                      # abstract root; a bare rescue does not catch it
+  Error                        # message, code, cause, backtrace, data
+    ArgumentError, TypeError, RangeError      # exist today
+    NameError > NoMethodError, KeyError, IndexError
+    ZeroDivisionError, OverflowError          # OverflowError is what :trap raises
+    FrozenError, NotImplementedError, StopIteration
+    IOError > FileNotFound, PermissionDenied, EndOfFile
+    NetworkError > ConnectionRefused, TimeoutError, TLSError
+    ParseError                                # JSON, CSV, Date, URL
+    CancelledError                            # concurrency
+    AssertionError                            # spec framework
+  SystemExit, Interrupt        # not caught by `rescue Error`
+```
+
+Every runtime error raised from C maps onto one of these with a stable code so
+`rescue e: IOError` works whether the error came from Tungsten or the runtime.
+`Backtrace` becomes real frames from the sidemap (`frames`, `filter`, `to_s`).
+`raise` gains `cause:`. A `Result` type waits for unions and matching.
+
+
+### FOLLOW-UP: map every runtime failure onto the error hierarchy
+
+`die`/`dief` (364 sites) and `w_raise(w_string(...))` (348 sites) in
+`runtime/runtime.c` still raise plain strings for most failures. The typed
+path exists (`die_as(class, msg)` / `w_raise_error_named(class, msg)`, which
+construct the core class when it is linked and fall back to `Error`, then to
+the tagged string); division by zero, undefined method, and frozen AST-body
+mutation use it. Remaining families to route, keeping message text stable:
+index/bounds → `IndexError`; missing hash key → `KeyError`; `as_int` and the
+other "expected X, got Y" unboxers (currently `exit(1)`, not even
+rescuable) → `TypeError`; `:trap` overflow → `OverflowError`; file open/read
+(`strerror(errno)`) → `IOError` / `FileNotFound` / `PermissionDenied` /
+`EndOfFile`; socket connect/timeout/TLS → the `NetworkError` family; JSON,
+CSV, Date, URL parsers → `ParseError`; channel/future cancellation →
+`CancelledError`. Then attach `backtrace` frames at raise time (the frame
+walk in `w_print_backtrace` already resolves Tungsten-level `at fn
+(file:line:col)` rows) and wire `SystemExit` so `exit` inside `begin` runs
+`ensure` without being caught by `rescue e: Error`.
+
+### DEFERRED: unions (item 12) and `private` (item 13)
+
+Unions: a closed set of alternatives, each a real class, the union sealed so
+`case` can prove coverage; `+ Shape = Circle(radius) | Rect(w, h) | Empty` or
+the block form with per-variant methods. Bare enums are the fieldless case.
+Skipped for now.
+
+`private`: mostly for the developer; the secondary win is that a private
+method cannot be overridden or reached dynamically, so it devirtualizes,
+inlines, loses its IC row, and dead-strips without whole-program analysis
+(what `LOCK_THE_DOORS!` does globally). Skipped for now.
+
+### DEFERRED: structured concurrency and cancellation (item 14)
+
+A *nursery* (Trio) / *task group* (Swift, Kotlin, Python) is a scope that owns
+the tasks started inside it: the scope cannot exit until every child finishes;
+if a child raises, the scope cancels its siblings, waits for them, and
+re-raises. A *wait group* (Go) is the weaker form: a counter incremented
+before spawn and decremented on completion, no cancellation, no error
+propagation. Proposed Tungsten spelling:
+
+```
+scope -> s
+  a = s.go -> fetch(url_a)      # returns a Future
+  b = s.go -> fetch(url_b)
+  << a.value + b.value
+# nothing escapes: both goroutines are finished here
+
+scope(timeout: 5 s) -> s        # a deadline is scheduled cancellation
+  s.go -> slow_work
+```
+
+Cancellation semantics: cooperative, never preemptive. Each task has a cancel
+flag set by its parent. Every blocking operation (channel send/receive, sleep,
+join, socket read, `Future#value`) is a checkpoint that raises
+`CancelledError` inside the task if the flag is set; `ensure` blocks still
+run. Cancelling a scope cancels children recursively and the parent waits for
+acknowledgement. Bare `go` outside any scope keeps fire-and-forget semantics.
+This subsumes the existing "Define cancellation and close semantics shared by
+Thread, Channel, Future, and Promise" item above.
+
+### DEFERRED: park timers and channel waits on the event loop (item 15)
+
+Today a Timer is an OS thread sleeping in `nanosleep`, and a blocked channel
+operation blocks the OS thread under it. Go's design covers both: timers are a
+min-heap owned by the scheduler; the network poller waits with a timeout equal
+to the next deadline; a goroutine blocked on a channel is parked on the
+channel's wait queue while its OS thread runs something else; `select`
+enqueues the goroutine on every channel and the first to fire dequeues it from
+the rest. libuv, tokio, and Java virtual threads do the same under other
+names. Tungsten already has the M:N scheduler and the kqueue/epoll/io_uring
+loops, so the work is three pieces: a deadline heap in the scheduler that sets
+the poll timeout; park/unpark on channel waiter queues; multi-channel
+registration for `select`. Payoff: zero threads per timer, zero OS threads per
+blocked goroutine.
+
+### DEFERRED: typed FFI declarations (item 16)
+
+Language survey, one line each:
+
+- Rust: `extern "C" { fn strlen(s: *const c_char) -> usize; }`, calls unsafe.
+- Zig: `extern fn strlen(s: [*:0]const u8) usize;` plus `@cImport` for headers.
+- Nim: `proc strlen(s: cstring): csize_t {.importc, header: "<string.h>".}`.
+- Crystal: `lib LibC` / `fun strlen(s : UInt8*) : SizeT`.
+- Odin: `foreign libc { strlen :: proc(cstring) -> c.size_t --- }`.
+- Ruby FFI: `attach_function :strlen, [:string], :size_t`.
+- Julia: `ccall((:strlen, "libc"), Csize_t, (Cstring,), s)` — what Tungsten's
+  `ccall` does today.
+- Swift and cgo: import the header, call `C.strlen` directly.
+
+Proposed Tungsten spelling: keep the parsed `extern lib "name"` block
+(`compiler/lib/parser.w` `parse_extern_lib`) and switch its lines to the
+typed-signature form methods already use, so it reads like a class body:
+
+```
+extern lib "sqlite3"
+  -> sqlite3_open_v2(path, out, flags, vfs) (cstring ptr i32 cstring) i32
+  -> sqlite3_column_text(stmt, col) (ptr i32) cstring borrowed
+  -> sqlite3_errmsg(db) (ptr) cstring borrowed
+  -> sqlite3_free(p) (ptr owned) void
+  -> sqlite3_exec(db, sql, cb, arg, err) (ptr cstring fn(ptr i32 ptr ptr) i32 ptr ptr) i32
+  @platform darwin linux
+```
+
+New words are representation and ownership: `cstring` copies a String to a
+NUL-terminated buffer; `bytes` passes pointer plus length; `string` passes the
+boxed value; `ptr` is an opaque handle; `owned`/`borrowed` say who frees a
+result or argument; `fn(...)` produces a C trampoline for a closure; a `- data`
+class name passes a struct by pointer with the declared layout. Calls use the
+plain name with no `ccall`; the generated contract table becomes the thing
+these declarations are checked against; `ccall` stays as the untyped escape
+hatch while core migrates.
+
+### DEFERRED: reverse-operand dispatch via `coerce` (item 19)
+
+The left operand chooses the method, so `0 - v` for a user `Vec` reaches
+`Int#-` with a `Vec` argument and crashes; `v - v` works. Ruby solves it with
+`coerce`: `Integer#-` calls `v.coerce(0)`, which returns `[Vec.zero, v]`, and
+retries. Python uses reflected methods (`__rsub__`). Recommendation: `coerce`
+— one method per class covers every operator, and the compiler can lower
+`literal OP obj` straight to `obj.coerce(literal)` when it knows the right
+side is not numeric.
+
+```
++ Vec
+  -> new(@x, @y)
+  -> -(other)  Vec.new(@x - other.x, @y - other.y)
+  -> coerce(other)  [Vec.new(other, other), self]
+```
+
+### DECIDED / NOTES: standard library (item 20)
+
+- `bits/tungsten-argon` IS the CLI argument parser (it generates the options
+  parser from the manpage); core needs no second one.
+- Add `core/logger.w`: levels, lazy block form, structured fields in text and
+  JSON, child loggers with bound fields, a process-wide default, mutex-guarded
+  line writes.
+- Make `core/time.w` timezone-aware (`core/timezone.w` reading IANA tzdata from
+  `/usr/share/zoneinfo`). Do NOT add `core/datetime.w`: four concepts cover
+  everything — `Instant` is an absolute nanosecond on the timeline, `Time` is
+  an Instant paired with a zone (what people mean by a date-time), `Date` is a
+  calendar date with no zone, `Duration` is elapsed time. A separate DateTime
+  would duplicate Time under another name, which is the mistake Ruby made and
+  later papered over. This supersedes the `core/datetime.w` mention in the
+  "Add `core/timezone.w`, `core/datetime.w`, and `core/timestamp.w`" item above.
+- SQLite lives in a bit, `bits/tungsten-sqlite`, binding system libsqlite3.
+- Move the test framework from `bits/tungsten-spec` into core as `core/spec.w`,
+  `core/fixture.w`, `core/stub.w` (plus matcher/mock siblings); the bit becomes
+  a compatibility shim.

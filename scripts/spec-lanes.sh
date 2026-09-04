@@ -384,6 +384,8 @@ compiled_specs=(
   spec/compiler/postfix_rescue_loader_spec.w
   spec/numeric/bigint_view_field_write_spec.w
   spec/compiler/hash_free_escape_spec.w
+  spec/compiler/object_free_escape_spec.w
+  spec/core/error_hierarchy_spec.w
   spec/numeric/bit_ops_spec.w
   spec/numeric/big_decimal_spec.w
   spec/numeric/complex_spec.w
@@ -595,6 +597,8 @@ interpreter_specs=(
   spec/compiler/postfix_rescue_loader_spec.w
   spec/numeric/bigint_view_field_write_spec.w
   spec/compiler/hash_free_escape_spec.w
+  spec/compiler/object_free_escape_spec.w
+  spec/core/error_hierarchy_spec.w
   spec/numeric/bit_ops_spec.w
   spec/numeric/big_decimal_spec.w
   spec/numeric/rational_spec.w
@@ -808,6 +812,7 @@ spec/numeric/rational_spec.w
 # from spec_emit_default_spec_w. Add every new spec/parity file here.
 parity_specs=(
   spec/parity/arity_extra_args_named_spec.w
+  spec/parity/typed_rescue_spec.w
   spec/parity/arity_missing_args_spec.w
   spec/parity/arity_mixed_call_sites_spec.w
   spec/parity/arity_slash_form_spec.w

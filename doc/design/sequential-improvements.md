@@ -27,7 +27,7 @@ Only focused checks are run locally; the complete suite belongs to CI.
 | 25 | Portable GPU subset | Machine-readable capabilities and shared dialect checks | Added gpu-check text/JSON profile; positive/negative checks and actual Metal smoke passed; CUDA/WGSL device parity untested |
 | 26 | `bin/tungsten notes` and Notes integration | Locate app, launcher, structured rendering protocol proposal | Started native Notes prototype and launcher; #to_notes structured export/native decoder tested; app launched |
 | 27 | Scoped WASM target | Runnable numerical subset with explicit limits | Added raw-i64 leaf WASM command; native/Node/oracle parity and zero-import/rejection checks passed; full runtime/f64/WASI remain open |
-| 29 | Tungsten Notes flagship | End-to-end example joining the supported capabilities | Queued |
+| 29 | Tungsten Notes flagship | End-to-end example joining the supported capabilities | Native -> WASM/reference -> HDF5/Parquet/Arrow -> verified Notes run completed and opened; run manifests retain success/failure |
 
 ## Item 2: initial evidence
 
@@ -42,3 +42,17 @@ symbol IDs or restore stale analysis state.
 Baseline bootstrap passed from this worktree's committed sources, including
 stage-1/stage-2 LLVM identity. Its log is `build/reports/bootstrap-baseline.log`.
 The prefix experiment and results are in `experiments/incremental-prefix/`.
+
+## Final handoff
+
+The approved queue was processed in order. Design-question items (10, 11, 15,
+21, 22, 23) have concrete proposals; they are not claimed as implemented
+language/runtime features. Implemented tranches and experiments retain the
+limits stated above. No full local rake suite was run.
+
+The Notes example is `examples/notes/experiment.w`, orchestrated by
+`scripts/run-notes-demo.py`. The successful initial run is
+`build/cache/notes-demo/runs/20260904T053837Z-d42f1cb5/`; its manifest records
+commands, hashes, versions and verification. The `.tnotes` document was opened
+in the new native app. The preceding failed run is retained separately with
+status `failed`.

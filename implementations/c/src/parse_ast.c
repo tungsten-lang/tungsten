@@ -2276,6 +2276,21 @@ static TcAstValue not_node_from_operand_ast(TcAstParser *p, size_t start, TcAstV
   return node;
 }
 
+/* parser.w parse_assign_value: postfix `rescue` binds TIGHTER than an
+ * assignment operator, so `x = e rescue f` is `x = (e rescue f)` — x is
+ * bound to f when e raises. A span with a top-level assignment before the
+ * `rescue` is therefore NOT a rescue suffix; the compound/assign paths
+ * split it at the operator and the value span re-enters
+ * parse_suffix_expr_ast without one. */
+static int top_level_assign_before_ast(TcAstParser *p, size_t start, size_t end) {
+  static const TcKind assign_ops[] = {
+      TC_K_ASSIGN, TC_K_PLUS_EQ, TC_K_MINUS_EQ, TC_K_STAR_EQ, TC_K_SLASH_EQ, TC_K_PERCENT_EQ,
+      TC_K_POW_EQ, TC_K_AMP_EQ, TC_K_PIPE_EQ, TC_K_CARET_EQ, TC_K_LSHIFT_EQ, TC_K_RSHIFT_EQ,
+      TC_K_OR_ASSIGN};
+  size_t pos = 0;
+  return top_level_any_ast(p, start, end, assign_ops, sizeof(assign_ops) / sizeof(assign_ops[0]), &pos);
+}
+
 static TcAstValue parse_suffix_expr_ast(TcAstParser *p, size_t start, size_t end, TcError *err) {
   size_t suffix_pos = 0;
   const char *suffix = NULL;
@@ -2285,7 +2300,8 @@ static TcAstValue parse_suffix_expr_ast(TcAstParser *p, size_t start, size_t end
     suffix = "unless";
   } else if (top_level_keyword_ast(p, start, end, "while", &suffix_pos, 1) && suffix_pos > start) {
     suffix = "while";
-  } else if (top_level_keyword_ast(p, start, end, "rescue", &suffix_pos, 1) && suffix_pos > start) {
+  } else if (top_level_keyword_ast(p, start, end, "rescue", &suffix_pos, 1) && suffix_pos > start &&
+             !top_level_assign_before_ast(p, start, suffix_pos)) {
     suffix = "rescue";
   }
   if (!suffix) return tc_ast_nil();

@@ -26,6 +26,7 @@ use target
     @method_stack = [nil]
     @signal = {type: nil, value: nil}
     @loaded_files = []
+    @use_stack = []
     @current_file = nil
     @autoload_registry = nil
     @entry_file = nil
@@ -167,6 +168,7 @@ use target
     if file_path != nil
       @current_file = file_path
       @entry_file = file_path
+      @use_stack = [file_path]
     ast = parse_source(source)
     prepare_interpreter_contracts(ast, file_path)
     result = execute_program(ast)
@@ -5789,6 +5791,25 @@ use target
       base_dir = parts.join("/")
     path = resolve_use_path(ast_get(node, :path), base_dir)
 
+    # Cycle: the used file is still executing its own top level (a.w ->
+    # b.w -> a.w). Mirrors loader.w's E_LOAD_CYCLE — the dedup below would
+    # otherwise re-run the entry file's body or silently drop the use.
+    if path != nil && @use_stack.include?(path)
+      chain = []
+      in_cycle = false
+      ui = 0
+      while ui < @use_stack.size()
+        if @use_stack[ui] == path
+          in_cycle = true
+        if in_cycle
+          chain.push(@use_stack[ui])
+        ui += 1
+      chain.push(path)
+      at = @current_file == nil ? "top level" : @current_file
+      if node.line != nil
+        at = at + ":" + node.line.to_s()
+      raise "E_LOAD_CYCLE: circular use: " + chain.join(" -> ") + " (at " + at + ")"
+
     if @loaded_files.include?(path)
       return nil
     @loaded_files.push(path)
@@ -5803,11 +5824,13 @@ use target
       raise "use: cannot load '" + ast_get(node, :path) + "' (resolved to " + shown + ", from " + from + ")"
     prev_file = @current_file
     @current_file = path
+    @use_stack.push(path)
     begin
       ast = parse_source(source)
       execute_program(ast)
     ensure
       @current_file = prev_file
+      @use_stack.pop()
 
   -> resolve_use_path(use_path, base_dir)
     # `core/` prefix: resolves against the NEAREST ancestor that actually

@@ -27,6 +27,7 @@ loader_parse_cache_state = {
 + Loader
   -> new(@verbose = false)
     @loaded_files = []
+    @use_stack = []
     @manifest_files = []
     @cacheable = false
     @runtime_id = nil
@@ -331,11 +332,12 @@ loader_parse_cache_state = {
       i += 1
     parts.join(",")
 
-  -> load_program_ast(path, from_file = nil)
+  -> load_program_ast(path, from_file = nil, use_node = nil)
     resolved = resolve_path(path, from_file)
 
     if from_file == nil
       @loaded_files = []
+      @use_stack = []
       @manifest_files = []
       @runtime_id = runtime_identity()
       @cacheable = @runtime_id.starts_with?("ruby ")
@@ -353,10 +355,20 @@ loader_parse_cache_state = {
         validate_program_contracts(cached.expressions, resolved)
         return cached
 
+    # A `use` resolving to a file whose expressions are still being spliced
+    # is a cycle (a.w -> b.w -> a.w). The dedup below would swallow it
+    # silently and the missing definitions would surface far downstream as
+    # unresolved names; report it at the offending `use` instead. A file
+    # used twice from two non-cyclic places is not on the stack and stays
+    # a silent dedup.
+    if @use_stack.include?(resolved)
+      raise load_cycle_error(resolved, from_file, use_node)
+
     if @loaded_files.include?(resolved)
       return Tungsten:AST:Program.new([])
 
     @loaded_files.push(resolved)
+    @use_stack.push(resolved)
     record_manifest_file(resolved)
     if @verbose && env("DEBUG_LOADS") == "1"
       << "  load " + display_path(resolved)
@@ -386,12 +398,13 @@ loader_parse_cache_state = {
     while i < ast.expressions.size()
       expr = ast.expressions[i]
       if ast_kind(expr) == :use
-        imported = load_program_ast(expr.path, resolved)
+        imported = load_program_ast(expr.path, resolved, expr)
         imported.expressions.each -> (imported_expr)
           expressions.push(imported_expr)
       else
         expressions.push(expr)
       i += 1
+    @use_stack.pop()
 
     ast = Tungsten:AST:Program.new(expressions)
     if from_file == nil
@@ -1509,6 +1522,26 @@ loader_parse_cache_state = {
     if @manifest_poisoned == true || @manifest_wanted != true
       return nil
     @manifest_files
+
+  # E_LOAD_CYCLE: `resolved` is already on the use-stack. Render the cycle
+  # from its first occurrence (a.w -> b.w -> a.w) and locate the error at
+  # the `use` node that closed it; callers without a node (the implicit
+  # support-module loads) fall back to line 1 of the using file.
+  -> load_cycle_error(resolved, from_file, use_node)
+    chain = []
+    in_cycle = false
+    i = 0
+    while i < @use_stack.size()
+      if @use_stack[i] == resolved
+        in_cycle = true
+      if in_cycle
+        chain.push(display_path(@use_stack[i]))
+      i += 1
+    chain.push(display_path(resolved))
+    message = "circular use: " + chain.join(" -> ")
+    if use_node != nil && use_node.line != nil
+      return compile_error_for_node(:E_LOAD_CYCLE, message, from_file, use_node)
+    compile_error(:E_LOAD_CYCLE, message, from_file, 1, 1)
 
   -> resolve_path(path, from_file = nil)
     # Service registry: if `path` is a bare service name (no slash)

@@ -851,6 +851,7 @@ parity_specs=(
   spec/parity/nonlocal_return_from_block_spec.w
   spec/parity/object_equality_default_spec.w
   spec/parity/percent_spec.w
+  spec/parity/postfix_rescue_assign_spec.w
   spec/parity/range_basics_spec.w
   spec/parity/range_closed_form_sums_spec.w
   spec/parity/range_type_name_spec.w

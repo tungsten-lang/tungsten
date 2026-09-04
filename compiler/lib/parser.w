@@ -1071,7 +1071,7 @@ use ../../core/token
           break
       if found_assign
         advance()
-        value = parse_assignment()
+        value = parse_assign_value()
         return Tungsten:AST:MultiAssign.new(targets, value)
       @pos = saved_pos
       sync_current()
@@ -1090,12 +1090,12 @@ use ../../core/token
       validate_type_hint_spelling(hint)
       advance()
       advance()
-      value = parse_assignment()
+      value = parse_assign_value()
       return Tungsten:AST:Assign.new(to_assign_target(left), value, hint)
 
     if at_type?(T_ASSIGN)
       advance()
-      value = parse_assignment()
+      value = parse_assign_value()
       # Inline type annotation: a = 34 ## i128
       # Inline memory hint:     a = [] ## reuse  /  a = {} ## recycle
       # Inline axis tag:        a = expr ## axis :name [, type]
@@ -1159,67 +1159,67 @@ use ../../core/token
 
     if at_type?(T_PLUS_EQ)
       advance()
-      value = parse_assignment()
+      value = parse_assign_value()
       target = to_assign_target(left)
       return Tungsten:AST:CompoundAssign.new(target, :PLUS, value)
 
     if at_type?(T_MINUS_EQ)
       advance()
-      value = parse_assignment()
+      value = parse_assign_value()
       target = to_assign_target(left)
       return Tungsten:AST:CompoundAssign.new(target, :MINUS, value)
 
     if at_type?(T_STAR_EQ)
       advance()
-      value = parse_assignment()
+      value = parse_assign_value()
       target = to_assign_target(left)
       return Tungsten:AST:CompoundAssign.new(target, :STAR, value)
 
     if at_type?(T_SLASH_EQ)
       advance()
-      value = parse_assignment()
+      value = parse_assign_value()
       target = to_assign_target(left)
       return Tungsten:AST:CompoundAssign.new(target, :SLASH, value)
 
     if at_type?(T_PERCENT_EQ)
       advance()
-      value = parse_assignment()
+      value = parse_assign_value()
       target = to_assign_target(left)
       return Tungsten:AST:CompoundAssign.new(target, :PERCENT, value)
 
     if at_type?(T_POW_EQ)
       advance()
-      value = parse_assignment()
+      value = parse_assign_value()
       target = to_assign_target(left)
       return Tungsten:AST:CompoundAssign.new(target, :POW, value)
 
     if at_type?(T_AMP_EQ)
       advance()
-      value = parse_assignment()
+      value = parse_assign_value()
       target = to_assign_target(left)
       return Tungsten:AST:CompoundAssign.new(target, :AMPERSAND, value)
 
     if at_type?(T_PIPE_EQ)
       advance()
-      value = parse_assignment()
+      value = parse_assign_value()
       target = to_assign_target(left)
       return Tungsten:AST:CompoundAssign.new(target, :PIPE, value)
 
     if at_type?(T_CARET_EQ)
       advance()
-      value = parse_assignment()
+      value = parse_assign_value()
       target = to_assign_target(left)
       return Tungsten:AST:CompoundAssign.new(target, :CARET, value)
 
     if at_type?(T_LSHIFT_EQ)
       advance()
-      value = parse_assignment()
+      value = parse_assign_value()
       target = to_assign_target(left)
       return Tungsten:AST:CompoundAssign.new(target, :LSHIFT, value)
 
     if at_type?(T_RSHIFT_EQ)
       advance()
-      value = parse_assignment()
+      value = parse_assign_value()
       target = to_assign_target(left)
       return Tungsten:AST:CompoundAssign.new(target, :RSHIFT, value)
 
@@ -1235,11 +1235,27 @@ use ../../core/token
 
     if at_type?(T_OR_ASSIGN)
       advance()
-      value = parse_assignment()
+      value = parse_assign_value()
       target = to_assign_target(left)
       return Tungsten:AST:Assign.new(target, Tungsten:AST:Or.new(left, value))
 
     left
+
+  # Right-hand side of an assignment. Postfix `rescue` binds TIGHTER than
+  # `=` here (Ruby's `lhs = arg rescue arg`), so `x = e rescue f` parses
+  # as `x = (e rescue f)` and binds x to f when e raises — not as
+  # `(x = e) rescue f`, which left x unbound. Statement-level
+  # `stmt rescue handler` (no assignment) still wraps the whole statement
+  # in parse_statement; the same-line / non-block guards mirror its rules
+  # so a `rescue` clause of an enclosing `begin` is never captured here.
+  -> parse_assign_value
+    start_line = current_line()
+    value = parse_assignment()
+    if at_kw?("rescue") && current_line() == start_line && !is_block_node?(value)
+      advance()
+      fallback = parse_assignment()
+      value = Tungsten:AST:RescueExpr.new(value, fallback)
+    value
 
   -> valid_assign_target?(node)
     t = ast_kind(node)
@@ -1685,7 +1701,7 @@ use ../../core/token
         expect_type(T_RBRACKET)
         if at_type?(T_ASSIGN)
           advance()
-          value = parse_assignment()
+          value = parse_assign_value()
           expr = Tungsten:AST:Call.new(expr, "\[]=", [index, value])
         else
           expr = Tungsten:AST:Call.new(expr, "\[]", [index])
@@ -2828,9 +2844,15 @@ use ../../core/token
     Tungsten:AST:Call.new(nil, "exit", [parse_assignment()])
 
   -> parse_use
+    # Stamp the `use` keyword's location so the loader can point an
+    # E_LOAD_CYCLE at the offending directive (file:line). Use nodes are
+    # spliced out before lowering, so the loc never reaches codegen.
+    use_loc = make_loc_here()
     advance()
     # The lexer scans the use path as a STRING token (bare or quoted)
-    Tungsten:AST:Use.new(advance_value())
+    node = Tungsten:AST:Use.new(advance_value())
+    node.loc = use_loc
+    node
 
   -> parse_begin
     expect_kw("begin")

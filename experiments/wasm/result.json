@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "profile": "raw-i64-leaves-v1",
+  "source_sha256": "3eead716804c849b0ce4ef6ea18df344a65fc3b969eed424b1b97a640919e7c5",
+  "compiler_sha256": "21b5f846a0d636565f8deb8396225e21b493ee092c53f26ede3a4908e80749d3",
+  "wasm_sha256": "c56556a79e36fd1c5f7134b588480ec0cbd66f3b4fe3bd1877365a6b6de882b7",
+  "exports": {
+    "polynomial": {
+      "parameters": [
+        "i64"
+      ],
+      "result": "i64"
+    },
+    "sum_to": {
+      "parameters": [
+        "i64"
+      ],
+      "result": "i64"
+    }
+  },
+  "target": "wasm32-unknown-unknown",
+  "wasi": false,
+  "runtime_imports": false,
+  "clang": "Homebrew clang version 23.1.0",
+  "linker": "Homebrew LLD 23.1.0"
+}

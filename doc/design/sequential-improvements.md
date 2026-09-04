@@ -26,7 +26,7 @@ Only focused checks are run locally; the complete suite belongs to CI.
 | 23 | Certificate inspection | Concrete presentation protocol preserving proof levels | Proposed claim/level/evidence protocol and Notes view in certificate-inspection.md |
 | 25 | Portable GPU subset | Machine-readable capabilities and shared dialect checks | Added gpu-check text/JSON profile; positive/negative checks and actual Metal smoke passed; CUDA/WGSL device parity untested |
 | 26 | `bin/tungsten notes` and Notes integration | Locate app, launcher, structured rendering protocol proposal | Started native Notes prototype and launcher; #to_notes structured export/native decoder tested; app launched |
-| 27 | Scoped WASM target | Runnable numerical subset with explicit limits | Queued |
+| 27 | Scoped WASM target | Runnable numerical subset with explicit limits | Added raw-i64 leaf WASM command; native/Node/oracle parity and zero-import/rejection checks passed; full runtime/f64/WASI remain open |
 | 29 | Tungsten Notes flagship | End-to-end example joining the supported capabilities | Queued |
 
 ## Item 2: initial evidence

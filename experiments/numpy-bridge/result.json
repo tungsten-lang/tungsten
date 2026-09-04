@@ -1,0 +1,95 @@
+{
+  "checks": "passed",
+  "numpy": "2.0.2",
+  "python": "3.9.6 (default, Apr  7 2026, 02:38:40) \n[Clang 21.0.0 (clang-2100.0.123.102)]",
+  "elements": 1000000,
+  "pairs": [
+    {
+      "transfer": {
+        "elements": 1000000,
+        "input_bytes": 8000000,
+        "output_bytes": 8000000,
+        "worker_started": true,
+        "input_seconds": 0.0008536670000000024,
+        "worker_seconds": 0.006395167000000035,
+        "output_seconds": 0.0007623330000000039,
+        "total_seconds": 0.008323750000000019
+      },
+      "tungsten": 0.008355707999999962,
+      "numpy": 0.0014381250000000123
+    },
+    {
+      "numpy": 0.0005645830000000074,
+      "transfer": {
+        "elements": 1000000,
+        "input_bytes": 8000000,
+        "output_bytes": 8000000,
+        "worker_started": true,
+        "input_seconds": 0.0008467500000000072,
+        "worker_seconds": 0.006812583000000039,
+        "output_seconds": 0.0007586669999999907,
+        "total_seconds": 0.008867250000000049
+      },
+      "tungsten": 0.008911082999999986
+    },
+    {
+      "transfer": {
+        "elements": 1000000,
+        "input_bytes": 8000000,
+        "output_bytes": 8000000,
+        "worker_started": true,
+        "input_seconds": 0.0009145420000000182,
+        "worker_seconds": 0.00696587500000001,
+        "output_seconds": 0.0006597079999999811,
+        "total_seconds": 0.008820417000000025
+      },
+      "tungsten": 0.008846624999999997,
+      "numpy": 0.001671958000000029
+    },
+    {
+      "numpy": 0.0005384999999999973,
+      "transfer": {
+        "elements": 1000000,
+        "input_bytes": 8000000,
+        "output_bytes": 8000000,
+        "worker_started": true,
+        "input_seconds": 0.0008989999999999831,
+        "worker_seconds": 0.006771791000000027,
+        "output_seconds": 0.0006352089999999699,
+        "total_seconds": 0.00860962500000001
+      },
+      "tungsten": 0.008643208999999985
+    },
+    {
+      "transfer": {
+        "elements": 1000000,
+        "input_bytes": 8000000,
+        "output_bytes": 8000000,
+        "worker_started": true,
+        "input_seconds": 0.000927375000000008,
+        "worker_seconds": 0.006419291999999965,
+        "output_seconds": 0.0006003330000000084,
+        "total_seconds": 0.008289875000000002
+      },
+      "tungsten": 0.008315375000000014,
+      "numpy": 0.0015851250000000205
+    },
+    {
+      "numpy": 0.0005365420000000287,
+      "transfer": {
+        "elements": 1000000,
+        "input_bytes": 8000000,
+        "output_bytes": 8000000,
+        "worker_started": true,
+        "input_seconds": 0.0010734159999999937,
+        "worker_seconds": 0.006457042000000024,
+        "output_seconds": 0.0007054579999999921,
+        "total_seconds": 0.008554540999999971
+      },
+      "tungsten": 0.008580416999999951
+    }
+  ],
+  "tungsten_median_seconds": 0.008611812999999968,
+  "numpy_median_seconds": 0.0010013540000000098,
+  "scope": "whole-call cost, including process launch and file transfers; not kernel-only timing"
+}

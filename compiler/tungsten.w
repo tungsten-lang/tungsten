@@ -20,6 +20,7 @@ use lib/return_inference
 use lib/metal_emitter
 use lib/repl
 use lib/hashing
+use lib/optimization_report
 
 args = argv()
 if args.size() == 0
@@ -34,6 +35,8 @@ if args.size() == 0
   << "Options:"
   << "  --out FILE       Output path for compiled binary"
   << "  --emit-wire      Emit WIRE IR text instead of LLVM IR"
+  << "  --optimizations  Explain lowering costs in the entry source"
+  << "  --optimizations-json  Emit the explanation as JSON"
   << "  --intern ALGO    Static slab encoding (raw or zstd)"
   << "  --no-lto         Disable link-time optimization"
   << "  --frame-pointers Keep frame pointers (for profiling/debugging)"
@@ -64,6 +67,8 @@ file_path      = nil
 eval_code      = nil
 emit_wire      = false
 tags_mode      = false
+optimizations_mode = false
+optimizations_json = false
 verbose        = false
 show_ast       = false
 show_canonical_ast = false
@@ -133,6 +138,8 @@ while i < args.size()
     << "Options:"
     << "  --out FILE       Output path for compiled binary"
     << "  --emit-wire      Emit WIRE IR text instead of LLVM IR"
+    << "  --optimizations  Explain lowering costs in the entry source"
+    << "  --optimizations-json  Emit the explanation as JSON"
     << "  --intern ALGO    Static slab encoding (raw or zstd)"
     << "  --no-lto         Disable link-time optimization"
     << "  --lto            Whole-program LTO (leaner binary; default links a fast native runtime archive)"
@@ -166,6 +173,10 @@ while i < args.size()
   elsif arg == "--tags"
     emit_wire = true
     tags_mode = true
+  elsif arg in ("--optimizations" "--optimizations-json")
+    emit_wire = true
+    optimizations_mode = true
+    optimizations_json = arg == "--optimizations-json"
   elsif arg == "--no-lto"
     no_lto = true
   elsif arg == "--lto"
@@ -263,7 +274,8 @@ while i < args.size()
     verbose = true
   elsif arg == "-v"
     verbose = true
-    << "tungsten version 2026.07.04"
+    if !args.include?("--optimizations-json")
+      << "tungsten version 2026.07.04"
   elsif arg == "--ast"
     show_ast = true
   elsif arg == "--canonical-ast"
@@ -323,6 +335,9 @@ while i < args.size()
   else
     script_args.push(arg)
   i += 1
+
+if optimizations_json
+  verbose = false
 
 # Process-parallel compile-batch children own independent source shards. Mark
 # them before emission so per-function threading does not nest underneath the
@@ -1026,6 +1041,11 @@ driver_homebrew_prefix_memo = {}
 
     if verbose
       << fmt_elapsed(phase_elapsed(wire_started_at)) + " lower to wire"
+
+    if optimizations_mode
+      report = optimization_report(mod)
+      << (optimizations_json ? JSON.encode(report) : optimization_report_text(report))
+      return nil
 
     if tags_mode
       # `--tags`: the dispatch report instead of the wire dump — which

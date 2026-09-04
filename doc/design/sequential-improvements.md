@@ -12,7 +12,7 @@ Only focused checks are run locally; the complete suite belongs to CI.
 | 2 | Experiment with dependency-aware incremental compilation | Source-edit invalidation, uncached LLVM/sidemap identity, bootstrap fixed point, matched edit-to-run measurements | Prefix experiment completed; not promoted; general per-file lowering remains open |
 | 4 | Safe LSP refactoring | Semantic rename and code-action contracts; reject ambiguous edits | Implemented parameter rename and duplicate-import quick fix; 14 protocol cases and executable parity passed |
 | 6 | Python/NumPy bridge proof of concept | Real round trip, ownership/copy contract, correctness and timing | Passed; process/file boundary costs 8.612 ms vs 1.001 ms NumPy on the one-million-element polynomial |
-| 7 | Explain missed optimizations | Source-located facts from actual compiler decisions | In progress |
+| 7 | Explain missed optimizations | Source-located facts from actual compiler decisions | Implemented text/JSON report; no-execution and baseline LLVM/sidemap identity passed |
 | 8 | Source-level debugging | Editor/debugger integration and readable Tungsten values | Queued |
 | 10 | Separate purity and memoization | Concrete design with compatibility and effect rules | Queued design |
 | 11 | Exhaustive destructuring matches | Concrete AST/WIRE examples, grammar, exhaustiveness rules | Queued design |

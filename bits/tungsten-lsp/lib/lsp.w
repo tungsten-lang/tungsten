@@ -7,7 +7,9 @@ use json
 use ../../../compiler/lib/ast
 use ../../../compiler/lib/lexer
 use ../../../compiler/lib/parser
+use ../../../compiler/lib/error_formatter
 use analyze
+use refactor
 
 # -- LSP I/O --
 
@@ -52,6 +54,7 @@ use analyze
 # -- Document store --
 
 documents = {}
+document_versions = {}
 
 -> doc_open(uri, text)
   documents[uri] = text
@@ -67,6 +70,7 @@ documents = {}
 
 -> doc_close(uri)
   documents.delete(uri)
+  document_versions.delete(uri)
   # Clear diagnostics for a closed file (LSP: publish an empty list).
   lsp_notify("textDocument/publishDiagnostics", {"uri": uri, "diagnostics": []})
 
@@ -93,13 +97,44 @@ documents = {}
       "referencesProvider": true,
       "completionProvider": {"triggerCharacters": [".", ":"]},
       "signatureHelpProvider": {"triggerCharacters": ["(", ","]},
-      "workspaceSymbolProvider": true
+      "workspaceSymbolProvider": true,
+      "renameProvider": {"prepareProvider": true},
+      "codeActionProvider": {"codeActionKinds": ["quickfix"]}
     },
     "serverInfo": {
       "name": "tungsten-lsp",
       "version": "0.2.0"
     }
   })
+
+-> handle_rename(id, params, prepare = false)
+  uri = params["textDocument"]["uri"]
+  text = doc_text(uri)
+  if text == nil
+    return lsp_error(id, -32602, "The document is not available")
+  begin
+    name = prepare ? nil : params["newName"]
+    if !prepare && type(name) != "String"
+      return lsp_error(id, -32602, "newName must be a string")
+    plan = refactor_parameter_plan(text, params["position"]["line"], params["position"]["character"], name)
+    if plan[:error] != nil
+      return lsp_error(id, -32602, plan[:error])
+    if prepare
+      return lsp_respond(id, {"range": plan[:range], "placeholder": plan[:name]})
+    lsp_respond(id, {"documentChanges": [{"textDocument": {"uri": uri, "version": document_versions[uri]}, "edits": plan[:edits]}]})
+  rescue err
+    lsp_error(id, -32602, "Cannot rename this buffer safely")
+
+-> handle_code_actions(id, params)
+  uri = params["textDocument"]["uri"]
+  text = doc_text(uri)
+  if text == nil
+    return lsp_respond(id, [])
+  context = params["context"]
+  if context != nil && context["only"] != nil && !context["only"].include?("quickfix")
+    return lsp_respond(id, [])
+  actions = refactor_duplicate_imports(text, uri, document_versions[uri], params["range"]["start"]["line"], params["range"]["end"]["line"])
+  lsp_respond(id, actions)
 
 -> handle_document_symbols(id, params)
   uri = params["textDocument"]["uri"]
@@ -210,9 +245,11 @@ documents = {}
       running = false
     elsif method == "textDocument/didOpen"
       td = msg["params"]["textDocument"]
+      document_versions[td["uri"]] = td["version"]
       doc_open(td["uri"], td["text"])
     elsif method == "textDocument/didChange"
       uri = msg["params"]["textDocument"]["uri"]
+      document_versions[uri] = msg["params"]["textDocument"]["version"]
       changes = msg["params"]["contentChanges"]
       if changes.size > 0
         doc_change(uri, changes[changes.size - 1]["text"])
@@ -230,6 +267,12 @@ documents = {}
       handle_completion(id, msg["params"])
     elsif method == "textDocument/signatureHelp"
       handle_signature_help(id, msg["params"])
+    elsif method == "textDocument/prepareRename"
+      handle_rename(id, msg["params"], true)
+    elsif method == "textDocument/rename"
+      handle_rename(id, msg["params"])
+    elsif method == "textDocument/codeAction"
+      handle_code_actions(id, msg["params"])
     elsif method == "workspace/symbol"
       handle_workspace_symbols(id, msg["params"])
     elsif id != nil

@@ -23,22 +23,20 @@
 - **Write/list/read TH5D** multi-named f32 datasets
 - Round-trip **our** writers ↔ **our** readers
 
-**What we did *not* implement (full HDF5)**
+**Current native foreign-reader subset**
 
-- Object headers (OHDR), B-trees, local heaps, fractal heaps
-- Groups, attributes, links, soft/external links
-- Datatypes beyond contiguous little-endian f32
-- Chunking, compression filters, virtual datasets
-- Interop with `h5dump` / h5py / NetCDF-4-on-HDF5 files beyond magic sniff
+`runtime/sci_io_native.c` also walks foreign HDF5 object headers for a limited
+contiguous numeric subset, including endian conversion. It does not implement
+a general chunk/filter reader. TH5C/TH5D writers remain Tungsten-specific.
 
-Foreign HDF5 files will typically fail at the TH5C/TH5D magic check with a
-message like *full OHDR walk TBD*. That is intentional until a real OHDR
-walker lands (or an optional `libhdf5` bridge — currently **not** required
-and not linked by default).
+**Optional standard-format bridge**
 
-There is a leftover `runtime/sci_io_bridge.c` skeleton that *could* call
-system libhdf5 under `TUNGSTEN_HAVE_HDF5`; the **shipped** path is pure
-`sci_io_native.c` only.
+Explicitly import `core/io/interop` and configure `TUNGSTEN_SCIENCE_PYTHON` with
+h5py. `SciIO.read_hdf5_dataset` returns shape/dtype/values/attribute records;
+`SciIO.write_hdf5_standard` writes genuine HDF5 readable by independent tools.
+This supports compressed multidimensional datasets through h5py, with explicit
+copy/size/type limits. See [the contract and test](../../experiments/science-interop/README.md).
+Core's default native path still requires no system scientific I/O libraries.
 
 ## Format status
 

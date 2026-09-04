@@ -56,6 +56,12 @@ while [ -L "$SELF" ]; do
 done
 ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
 COMPILER="$ROOT/bin/tungsten-compiler"
+# Worktrees do not inherit the gitignored compiler. The post-checkout hook
+# usually plants a symlink; this is the same link for checkouts that never
+# ran the hook (existing worktrees, --no-checkout, hooksPath unset).
+if [ ! -x "$COMPILER" ] && [ -f "$ROOT/.githooks/link-host-compiler.sh" ]; then
+  bash "$ROOT/.githooks/link-host-compiler.sh" "$ROOT" >/dev/null 2>&1 || true
+fi
 RUBY_CLI="$ROOT/bin/tungsten.rb"
 CUSTOM_RUBY="$ROOT/src/patched/ruby/ruby"
 

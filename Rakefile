@@ -125,6 +125,7 @@ namespace :test do
   desc "Run CLI exit-status, check-mode, and explain contracts"
   task :cli_contracts do
     run_command "bash", File.join(ROOT, "scripts/test-cli-contracts.sh")
+    run_command "bash", File.join(ROOT, "scripts/test-worktree-compiler-hook.sh")
   end
 
   desc "Classify every tracked spec/**/*_spec.w and fail closed on unlisted files"

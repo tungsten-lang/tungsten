@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# tungsten: symlink host compiler into worktrees
+#
+# Installed to $GIT_COMMON_DIR/hooks/post-checkout by `bin/tungsten doctor`.
+# Git invokes this after checkout and after `git worktree add`. A missing
+# compiler must never fail the checkout.
+root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+script="$root/.githooks/link-host-compiler.sh"
+[ -f "$script" ] || exit 0
+bash "$script" "$root" >/dev/null 2>&1 || true
+exit 0

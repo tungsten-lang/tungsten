@@ -139,6 +139,39 @@ else
   check "Compiler" "not built — run: bin/tungsten bootstrap" 1
 fi
 
+# `git worktree add` does not copy gitignored bin/tungsten-compiler.
+# Install a shared post-checkout hook that symlinks the primary checkout's
+# compiler into a new worktree. Never overwrite a foreign post-checkout.
+install_worktree_compiler_hook() {
+  local src dest common marker
+  src="$ROOT/.githooks/post-checkout"
+  [ -f "$src" ] || return 1
+  common="$(git -C "$ROOT" rev-parse --git-common-dir 2>/dev/null)" || return 1
+  case "$common" in
+    /*) ;;
+    *) common="$(cd "$ROOT/$common" && pwd)" ;;
+  esac
+  dest="$common/hooks/post-checkout"
+  mkdir -p "$common/hooks" || return 1
+  marker="tungsten: symlink host compiler into worktrees"
+  if [ -e "$dest" ] && ! grep -q "$marker" "$dest" 2>/dev/null; then
+    return 2
+  fi
+  cp "$src" "$dest" || return 1
+  chmod +x "$dest" || return 1
+  return 0
+}
+hook_status=0
+install_worktree_compiler_hook || hook_status=$?
+if [ "$hook_status" -eq 0 ]; then
+  check "worktree compiler hook" "post-checkout" 1
+  bash "$ROOT/.githooks/link-host-compiler.sh" "$ROOT" >/dev/null 2>&1 || true
+elif [ "$hook_status" -eq 2 ]; then
+  check "worktree compiler hook" "skipped — existing post-checkout" 1
+else
+  check "worktree compiler hook" "not installed" 1
+fi
+
 if tool_ok "$DOCTOR_CC"; then
   check "clang" "$($DOCTOR_CC --version 2>/dev/null | head -1) [$DOCTOR_CC]" 1
 else

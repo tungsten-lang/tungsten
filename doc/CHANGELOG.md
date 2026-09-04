@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Worktrees inherit the host compiler** — `git worktree add` no longer
+  leaves you without `bin/tungsten-compiler`. A post-checkout hook (installed
+  by `bin/tungsten doctor`) and a `bin/tungsten` fallback symlink the primary
+  checkout's compiler into the new tree. An existing local compiler is never
+  replaced.
+
 - **Compile-time arity contracts** — a call that passes more arguments than
   the callee declares, or fewer than its required leading parameters, is a
   compile error (`E_LOWER_ARITY`, `tungsten explain E_LOWER_ARITY`) wherever

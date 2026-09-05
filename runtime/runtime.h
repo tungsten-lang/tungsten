@@ -1530,6 +1530,15 @@ typedef struct WGoroutine {
     int32_t io_result;        /* io_uring CQE result: bytes transferred or -errno */
     int16_t io_buf_id;        /* provided buffer ID from CQE (-1 = none) */
     uint8_t io_zc_pending;    /* waiting for SEND_ZC notification CQE */
+    /* Unwind state parked with the goroutine while it is not running: its
+     * exception frames, block-return frames and recycle-cleanup stack (the
+     * latter allocated on first push and kept with the struct). The
+     * scheduler swaps these with the thread-locals on every switch in and
+     * out (g_unwind_enter / g_unwind_leave in runtime.c). */
+    WExceptionFrame *exception_stack;
+    void *block_return_stack;
+    void *cleanup_stack;
+    int cleanup_top;
 } WGoroutine;
 
 WValue w_goroutine_spawn(WValue closure);

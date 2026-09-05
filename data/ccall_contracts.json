@@ -23560,6 +23560,27 @@
       ]
     },
     {
+      "symbol": "w_goroutine_stack_size_hint",
+      "native": {
+        "symbol": "w_goroutine_stack_size_hint",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 1,
+        "source": "runtime/runtime.c"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
       "symbol": "w_int_overflow_trap",
       "native": {
         "symbol": "w_int_overflow_trap",

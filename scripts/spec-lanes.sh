@@ -844,6 +844,7 @@ parity_specs=(
   spec/parity/float_literal_no_decimal_point_spec.w
   spec/parity/float_negative_zero_spec.w
   spec/parity/float_printing_spec.w
+  spec/parity/go_concurrency_spec.w
   spec/parity/hash_count_spec.w
   spec/parity/hash_insertion_order_spec.w
   spec/parity/integer_boundaries_spec.w
@@ -858,6 +859,7 @@ parity_specs=(
   spec/parity/nil_display_spec.w
   spec/parity/nonlocal_return_from_block_spec.w
   spec/parity/object_equality_default_spec.w
+  spec/parity/parallel_with_side_effects_spec.w
   spec/parity/percent_spec.w
   spec/parity/range_basics_spec.w
   spec/parity/range_closed_form_sums_spec.w

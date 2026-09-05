@@ -49917,11 +49917,55 @@ static __thread WBlockReturnFrame *w_block_return_stack = NULL;
 
 typedef struct { WValue value; WRecycleFn fn; } WCleanupEntry;
 
-static __thread WCleanupEntry g_cleanup_stack[CLEANUP_STACK_MAX];
+/* The current unwind context's cleanup stack. Allocated on first push, per
+ * context: the thread's own (main / an OS thread) and one per goroutine (kept
+ * on the WGoroutine and reused with the struct) — see g_unwind_enter. */
+static __thread WCleanupEntry *g_cleanup_stack = NULL;
 static __thread int g_cleanup_top = 0;
+
+/* ---- Per-goroutine unwind state ----
+ * Exception frames, block-return frames and the cleanup stack are
+ * thread-locals, but a goroutine that parks inside a rescue region (a
+ * Channel#send under `begin`, say) hands the thread back with its frames
+ * still linked, and whoever runs next pushes and pops on top of them: a
+ * raise then longjmps into the wrong context. The scheduler therefore swaps
+ * the three around every switch into a goroutine, so each context only ever
+ * sees its own frames. A fresh goroutine starts empty. */
+typedef struct WUnwindSave {
+    WExceptionFrame *exception_stack;
+    WBlockReturnFrame *block_return_stack;
+    WCleanupEntry *cleanup_stack;
+    int cleanup_top;
+} WUnwindSave;
+
+static inline void g_unwind_enter(WGoroutine *g, WUnwindSave *save) {
+    save->exception_stack = w_exception_stack;
+    save->block_return_stack = w_block_return_stack;
+    save->cleanup_stack = g_cleanup_stack;
+    save->cleanup_top = g_cleanup_top;
+    w_exception_stack = g->exception_stack;
+    w_block_return_stack = (WBlockReturnFrame *)g->block_return_stack;
+    g_cleanup_stack = (WCleanupEntry *)g->cleanup_stack;
+    g_cleanup_top = g->cleanup_top;
+}
+
+static inline void g_unwind_leave(WGoroutine *g, const WUnwindSave *save) {
+    g->exception_stack = w_exception_stack;
+    g->block_return_stack = w_block_return_stack;
+    g->cleanup_stack = g_cleanup_stack;
+    g->cleanup_top = g_cleanup_top;
+    w_exception_stack = save->exception_stack;
+    w_block_return_stack = save->block_return_stack;
+    g_cleanup_stack = save->cleanup_stack;
+    g_cleanup_top = save->cleanup_top;
+}
 
 void w_cleanup_push(WValue value, WRecycleFn fn) {
     if (g_cleanup_top < CLEANUP_STACK_MAX) {
+        if (!g_cleanup_stack) {
+            g_cleanup_stack = calloc(CLEANUP_STACK_MAX, sizeof(WCleanupEntry));
+            if (!g_cleanup_stack) return;
+        }
         g_cleanup_stack[g_cleanup_top].value = value;
         g_cleanup_stack[g_cleanup_top].fn = fn;
         g_cleanup_top++;
@@ -69781,7 +69825,16 @@ WValue w_string_take_byte_array(WValue bytes, WValue len_wv) {
 
 static size_t g_page_size(void) { return (size_t)sysconf(_SC_PAGESIZE); }
 static size_t g_align_up(size_t v, size_t a) { return (v + a - 1) & ~(a - 1); }
-static size_t g_stack_size(void) { return g_align_up(W_GOROUTINE_STACK_SIZE, g_page_size()); }
+/* Goroutine stack size. W_GOROUTINE_STACK_SIZE unless a host asked for more
+ * before the first spawn: the tree-walking interpreter runs each `go` body
+ * as a goroutine and its recursive evaluator needs an order of magnitude
+ * more stack per source-level call than compiled code (the arena is a
+ * PROT_NONE reservation, so a larger slot costs address space, not memory). */
+static size_t g_stack_size_hint = 0;
+static size_t g_stack_size(void) {
+    size_t requested = g_stack_size_hint > (size_t)W_GOROUTINE_STACK_SIZE ? g_stack_size_hint : (size_t)W_GOROUTINE_STACK_SIZE;
+    return g_align_up(requested, g_page_size());
+}
 static size_t g_slot_size(void) { return g_stack_size() + g_page_size(); }
 
 typedef struct {
@@ -69813,6 +69866,15 @@ static pthread_mutex_t g_global_pool_lock = PTHREAD_MUTEX_INITIALIZER;
 static void *g_stack_freelist[W_STACK_FREELIST_MAX];
 static int g_stack_freelist_count = 0;
 static pthread_mutex_t g_stack_freelist_lock = PTHREAD_MUTEX_INITIALIZER;
+
+/* Ask for goroutine stacks of at least `bytes` (see g_stack_size). Effective
+ * only before the stack arena exists — the first spawn fixes the slot size
+ * for the process; returns whether the request took. */
+WValue w_goroutine_stack_size_hint(WValue bytes) {
+    if (g_arena_initialized || !w_is_int(bytes) || w_as_int(bytes) <= 0) return W_FALSE;
+    g_stack_size_hint = (size_t)w_as_int(bytes);
+    return W_TRUE;
+}
 
 static void g_arena_init_once(void) {
     size_t total = g_slot_size() * W_MAX_GOROUTINES;
@@ -70271,6 +70333,10 @@ WValue w_goroutine_spawn(WValue closure) {
         g->io_result = 0;
         g->io_buf_id = -1;
         g->io_zc_pending = 0;
+        /* Fresh unwind state; the cleanup-stack allocation is kept for reuse */
+        g->exception_stack = NULL;
+        g->block_return_stack = NULL;
+        g->cleanup_top = 0;
     } else {
         /* Allocate fresh goroutine */
         void *stack = g_arena_alloc_stack();
@@ -70397,7 +70463,10 @@ void w_scheduler_run(void) {
         idle_spins = 0;
         g->state = G_RUNNING;
         g_current = g;
+        WUnwindSave unwind;
+        g_unwind_enter(g, &unwind);
         w_ctx_swap(&g_scheduler_ctx, &g->ctx);
+        g_unwind_leave(g, &unwind);
         g_current = NULL;
 
         /* Recycle dead goroutines */
@@ -70421,7 +70490,10 @@ static int w_scheduler_run_one(void) {
     if (!g) return 0;
     g->state = G_RUNNING;
     g_current = g;
+    WUnwindSave unwind;
+    g_unwind_enter(g, &unwind);
     w_ctx_swap(&g_scheduler_ctx, &g->ctx);
+    g_unwind_leave(g, &unwind);
     g_current = NULL;
     if (g->state == G_DEAD) g_pool_return(g);
     return 1;
@@ -70596,7 +70668,10 @@ static void *p_thread_entry(void *arg) {
         if (g) {
             g->state = G_RUNNING;
             g_current = g;
+            WUnwindSave unwind;
+            g_unwind_enter(g, &unwind);
             w_ctx_swap(&g_scheduler_ctx, &g->ctx);
+            g_unwind_leave(g, &unwind);
             g_current = NULL;
 
             if (g->state == G_RUNNABLE) {

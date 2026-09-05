@@ -3,6 +3,7 @@ use ast
 use lexer
 use parser
 use environment
+use builtin_arity
 use builtins
 use target
 
@@ -3802,6 +3803,22 @@ use target
     else
       primitive_class = primitive_runtime_class(recv)
     if primitive_class != nil
+      # Arity contract of a runtime builtin (a native inline-cache row):
+      # the shared table in builtin_arity.w mirrors runtime.c, and the
+      # compiled engine raises the same message on its IC-miss path. The
+      # block counts as the trailing argument, as the runtime receives it.
+      # Checked before every shortcut below so no arm can drop or pad.
+      if env("TUNGSTEN_ARITY") != "off"
+        builtin_class = primitive_class[:name]
+        if builtin_class == "Symbol"
+          builtin_class = "String"
+        builtin_contract = builtin_method_arity(builtin_class, name)
+        if builtin_contract != nil
+          native_argc = args.size()
+          if block != nil
+            native_argc += 1
+          if !builtin_arity_accepts?(builtin_contract, native_argc)
+            raise_typed("ArgumentError", builtin_arity_message(builtin_class, name, builtin_contract, native_argc))
       # The native WN_sort IC row intercepts every compiled blockless
       # `sort` dispatch before the type-class body is consulted. Mirror
       # that interception here (host .sort() rides the same IC row). A
@@ -4057,8 +4074,19 @@ use target
     if args.size() == 1 && name in ("strftime" "to_s") && w_type_name(recv) == "Date"
       return ccall("w_method_call", recv, "" + name, args)
 
-    # Builtins
+    # Builtins. The receiver-method arms in builtins.w state their argument
+    # contract in builtin_fallback_arity; a call outside it raises here
+    # (same message as a source method) instead of the arm dropping or
+    # padding arguments.
     if is_builtin?(name)
+      if env("TUNGSTEN_ARITY") != "off"
+        fallback_contract = builtin_fallback_arity(name)
+        if fallback_contract != nil
+          fallback_argc = args.size()
+          if block != nil
+            fallback_argc += 1
+          if !builtin_arity_accepts?(fallback_contract, fallback_argc)
+            raise_typed("ArgumentError", arity_contract_message(name, fallback_contract, fallback_argc))
       return dispatch_builtin(self, name, recv, args, block)
 
     # Index operators. Arrays need Ruby `[]` semantics the tree-walker's host

@@ -850,6 +850,9 @@ parity_specs=(
   spec/parity/integer_i64_wrap_spec.w
   spec/parity/integer_int_hint_spec.w
   spec/parity/integer_literal_i64_overflow_spec.w
+  spec/parity/int_overflow_modes_spec.w
+  spec/parity/int_overflow_trap_spec.w
+  spec/parity/int_overflow_wrap_compound_spec.w
   spec/parity/integer_ops_spec.w
   spec/parity/iteration_blocks_spec.w
   spec/parity/nil_display_spec.w

@@ -1,5 +1,6 @@
-## parity xfail `## i64` locals wrap on overflow compiled but promote to bignum interpreted (b + 1 at i64 max, d << 62)
-# Integers: `## i64` annotated locals at the i64 boundary.
+# Integers: `## i64` annotated locals at the i64 boundary — both engines wrap
+# (the interpreter records the ascription on the binding and mirrors the
+# compiled machine-int path; see interpreter.w integer_overflow_op).
 #
 # Cross-engine parity spec (scripts/parity.sh).
 

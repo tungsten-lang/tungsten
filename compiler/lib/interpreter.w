@@ -64,6 +64,14 @@ use target
     @raised_value = nil
     @raised_message = nil
     seed_primitive_class_stubs()
+    # Lexical integer overflow mode of the innermost enclosing
+    # `Math.promote / trap / wrap ->` block (nil outside any block). Mirrors
+    # ctx[:overflow_mode] in lowering.
+    @overflow_mode = nil
+    # Set once any `## i64/u64/i128/u128` ascription has been evaluated. Until
+    # then the arithmetic hot path skips the machine-type inspection entirely,
+    # so untyped programs pay nothing for the fixed-width mirror.
+    @machine_hints_seen = false
 
   -> argv
     @argv.copy(0, @argv.size())
@@ -656,13 +664,24 @@ use target
     # body. Evaluate its statements and return the last value (mirrors the
     # compiled lower_mathmode_block, which reads node[:body] by subscript —
     # these are plain hash nodes, not slab nodes).
-    # `Math.promote / trap / wrap` overflow-mode blocks are a transparent scoped
-    # body in the tree-walker: the interpreter does arbitrary-precision integer
-    # arithmetic, so :promote is implicit and :wrap/:trap are not yet enforced
-    # here (a known interp-vs-compiled divergence — the compiled lowering
-    # applies the mode). See [[project_math_wrap_fix]].
-    if t in (:fastmath_block :strictmath_block :overflow_block)
+    if t in (:fastmath_block :strictmath_block)
       return evaluate_body(ast_get(node, :body), env)
+
+    # `Math.promote / trap / wrap ->` overflow-mode blocks: set the lexical
+    # mode for the body, exactly like lower_overflow_block sets
+    # ctx[:overflow_mode]. The arithmetic hooks (integer_overflow_op) read it:
+    # :wrap wraps +/-/* to i64, :trap aborts through the same llvm.trap the
+    # compiled guarded arms branch to when a result leaves the inline i48
+    # range, :promote keeps exact arithmetic even for `## i64` operands.
+    if t == :overflow_block
+      saved_mode = @overflow_mode
+      @overflow_mode = ccall("w_switch_canonical", ast_get(node, :mode))
+      ovf_result = nil
+      begin
+        ovf_result = evaluate_body(ast_get(node, :body), env)
+      ensure
+        @overflow_mode = saved_mode
+      return ovf_result
 
     # `go -> …` spawns a goroutine. The tree-walker has no preemptive
     # scheduler, so queue the body (with its captured env) and drain it at
@@ -2401,11 +2420,26 @@ use target
 
   -> eval_assign(node, env)
     value = evaluate(ast_get(node, :value), env)
-    value = apply_type_hint(value, ast_get(node, :type_hint))
+    hint = ast_get(node, :type_hint)
+    value = apply_type_hint(value, hint)
     target = ast_get(node, :target)
 
     if ast_kind(target) == :var
-      env.set(ast_get(target, :name), value)
+      name = ast_get(target, :name)
+      # `x = v ## i64` declares a fixed-width slot: remember the width on the
+      # binding so later arithmetic on `x` wraps like the compiled machine-int
+      # path. A re-assignment without a hint stores INTO that slot, so it
+      # coerces to the recorded width (compiled: sticky machine type).
+      if hint != nil
+        mt = machine_hint_type(resolve_interpreted_type_hint(hint))
+        if mt != nil
+          env.set_hint(name, mt)
+          @machine_hints_seen = true
+      elsif @machine_hints_seen
+        mt = env.hint(name)
+        if mt != nil
+          value = coerce_machine_int(value, mt)
+      env.set(name, value)
       return value
 
     if ast_kind(target) == :gvar
@@ -2492,9 +2526,19 @@ use target
     new_val = evaluate(ast_get(node, :value), env)
 
     if ast_kind(target) == :var
-      old = env.get(ast_get(target, :name))
-      result = apply_compound_op(op, old, new_val)
-      env.set(ast_get(target, :name), result)
+      name = ast_get(target, :name)
+      old = env.get(name)
+      result = nil
+      if @machine_hints_seen || @overflow_mode != nil
+        # `x += v` on a `## i64` slot (or inside an overflow-mode block) is
+        # the binary op `x = x + v` with the slot's width as the result type.
+        mt = nil
+        if @machine_hints_seen
+          mt = machine_result_type(env.hint(name), machine_type_of(ast_get(node, :value), env))
+        result = integer_overflow_op(op, old, new_val, mt)
+      if result == nil
+        result = apply_compound_op(op, old, new_val)
+      env.set(name, result)
       return result
 
     if ast_kind(target) == :gvar
@@ -2502,7 +2546,11 @@ use target
       old = @globals[name]
       if old == nil
         old = 0
-      result = apply_compound_op(op, old, new_val)
+      result = nil
+      if @overflow_mode != nil
+        result = integer_overflow_op(op, old, new_val, nil)
+      if result == nil
+        result = apply_compound_op(op, old, new_val)
       @globals[name] = result
       return result
 
@@ -2511,7 +2559,11 @@ use target
       old = obj[:ivars][ast_get(target, :name)]
       if old == nil
         old = 0
-      result = apply_compound_op(op, old, new_val)
+      result = nil
+      if @overflow_mode != nil
+        result = integer_overflow_op(op, old, new_val, nil)
+      if result == nil
+        result = apply_compound_op(op, old, new_val)
       obj[:ivars][ast_get(target, :name)] = result
       return result
 
@@ -2801,7 +2853,7 @@ use target
         star_rv = eval_var(star_r, env, true)
       else
         star_rv = evaluate(star_r, env)
-      return apply_binary_op(node_op, star_lv, star_rv)
+      return guarded_binary_op(node, node_op, star_lv, star_rv, env)
     if node_op == :LSHIFT && ast_get(node, :left) != nil && ast_kind(ast_get(node, :left)) == :var
       left = evaluate(ast_get(node, :left), env)
       if type(left) == "String"
@@ -2832,7 +2884,21 @@ use target
         if node_op == :NEQ
           return !eq_r
         return eq_r
-    apply_binary_op(node_op, left, right)
+    guarded_binary_op(node, node_op, left, right, env)
+
+  # apply_binary_op behind the fixed-width (`## i64` operand) and
+  # overflow-mode (`Math.wrap / trap`) integer rules. Off the hot path until
+  # either is in play. Every evaluated binary op ends here — the
+  # script-level `*` arm included — so one site owns the mirror.
+  -> guarded_binary_op(node, op, left, right, env)
+    if @machine_hints_seen || @overflow_mode != nil
+      mt = nil
+      if @machine_hints_seen
+        mt = machine_type_of(node, env)
+      ovf = integer_overflow_op(op, left, right, mt)
+      if ovf != nil
+        return ovf
+    apply_binary_op(op, left, right)
 
   -> apply_binary_op(op, left, right)
     # Ordered user values compare through their polymorphic `<=>`. Dispatching
@@ -3013,6 +3079,18 @@ use target
       # w_neg -> `-@` instance dispatch. Primitives keep the `0 - x` arm.
       if type(operand) == "Hash" && operand.has_key?(:rt) && operand[:rt] == :object
         return dispatch_method(operand, "-@", [], nil, nil)
+      # Integer `-x` is `0 - x` on the compiled path (lower_unary_op), so a
+      # `## i64` operand or an enclosing Math.wrap/trap block applies the
+      # same width / mode rule as subtraction. The result itself carries no
+      # machine type for an enclosing op (compiled infers the unary node as
+      # untyped), which machine_type_of mirrors by not descending into it.
+      if @machine_hints_seen || @overflow_mode != nil
+        mt = nil
+        if @machine_hints_seen
+          mt = machine_type_of(ast_get(node, :operand), env)
+        neg = integer_overflow_op(:MINUS, 0, operand, mt)
+        if neg != nil
+          return neg
       # BigInt negation must reach the runtime's w_neg, not the `0 - x`
       # subtraction: w_neg is the tag-sign flip (encoding v4) — a zero-copy
       # LINKED VIEW whose bang-mutation semantics both engines must share.
@@ -3040,9 +3118,14 @@ use target
       if value_type in ("Int" "BigInt" "Float" "Decimal" "Rational")
         return ccall("w_num_to_float", value)
       return value
-    if value_type == "Float" && hint in ("u64" "i64" "u128" "i128")
-      value = value.to_i()
-      value_type = type(value)
+    if hint in ("u64" "i64" "u128" "i128")
+      # A wide machine ascription anywhere (`(x + y) ## i64` as much as an
+      # assignment) arms the fixed-width arithmetic mirror; see
+      # integer_overflow_op.
+      @machine_hints_seen = true
+      if value_type == "Float"
+        value = value.to_i()
+        value_type = type(value)
     if !(value_type in ("Int" "BigInt"))
       return value
     if hint == "u64"
@@ -3090,6 +3173,125 @@ use target
       i += 1
     resolved
 
+  # -- Fixed-width and overflow-mode integer arithmetic --
+  #
+  # The compiled engine gives integer arithmetic three lexical overflow modes
+  # (`Math.promote / trap / wrap ->`) and fixed-width machine arithmetic for
+  # `## i64 / u64 / i128 / u128` operands (lowering/ops.w lower_binary_op).
+  # integer_overflow_op reproduces both on the interpreter's exact integers:
+  #
+  #   * a machine-typed operand on either side makes the op wrap at that
+  #     width (machine_int_result_type ranking) — except +,-,* inside
+  #     Math.promote / Math.trap, where the mode wins and the guarded
+  #     (promoting / trapping) path is taken, exactly as
+  #     overflow_mode_guards_machine_int_arith? routes it;
+  #   * Math.wrap wraps +,-,* to i64 when both operands lie within i64
+  #     (compiled: ensure_raw_i64 + native op). Wider operands are BigInt
+  #     values whose static type is not integer-like there, and promote;
+  #   * Math.trap aborts when +,-,* on two inline (i48) ints leaves the
+  #     inline range: the add/sub/mul_i48_guarded arm with :trap set branches
+  #     to llvm.trap, and w_int_overflow_trap is that same instruction. A
+  #     BigInt operand is already outside the inline range and promotes, as
+  #     compiled does for a statically-BigInt operand;
+  #   * anything else is exact (promoting) arithmetic.
+  #
+  # `mt` is the machine result type the caller derived from the AST
+  # (machine_type_of), or nil. Returns nil when no rule applies, so callers
+  # fall through to the exact path.
+  -> integer_overflow_op(op, left, right, mt)
+    if !(op in (:PLUS :MINUS :STAR :SLASH :PERCENT :AMPERSAND :PIPE :CARET :LSHIFT :RSHIFT))
+      return nil
+    if !int_value?(left) || !int_value?(right)
+      return nil
+    arith = op in (:PLUS :MINUS :STAR)
+    mode = @overflow_mode
+    if arith && mode == :promote
+      return nil
+    if arith && mode == :trap
+      if !inline_int?(left) || !inline_int?(right)
+        return nil
+      trapped = apply_binary_op(op, left, right)
+      if !inline_int?(trapped)
+        ccall("w_int_overflow_trap")
+      return trapped
+    if mt != nil
+      return coerce_machine_int(apply_binary_op(op, left, right), mt)
+    if arith && mode == :wrap && fits_i64?(left) && fits_i64?(right)
+      return wrap_signed_bits(apply_binary_op(op, left, right), 64)
+    nil
+
+  -> int_value?(value)
+    type(value) in ("Int" "BigInt")
+
+  # Inside the NaN-boxed inline range [-2^47, 2^47 - 1]?
+  -> inline_int?(value)
+    wrap_signed_bits(value, 48) == value
+
+  -> fits_i64?(value)
+    wrap_signed_bits(value, 64) == value
+
+  # Static machine type of an expression, from the AST plus the scope's
+  # recorded `## T` hints — the interpreter's mirror of infer_type for the
+  # four wide machine widths. A literal is neutral (it adopts the other
+  # operand's width), a `-x` or a call carries no width for an enclosing op
+  # (compiled infers those untyped), and `LIT << x` is excluded like
+  # inference.w does: a bare literal base shifts through the promoting path.
+  -> machine_type_of(node, env)
+    if node == nil || !is_ast_node?(node)
+      return nil
+    k = ast_kind(node)
+    if k != :assign
+      hint = ast_get(node, :type_hint)
+      if hint != nil
+        return machine_hint_type(resolve_interpreted_type_hint(hint))
+    if k == :var
+      return env.hint(ast_get(node, :name))
+    if k == :binary_op
+      op = ccall("w_switch_canonical", ast_get(node, :op))
+      if !(op in (:PLUS :MINUS :STAR :SLASH :PERCENT :AMPERSAND :PIPE :CARET :LSHIFT :RSHIFT))
+        return nil
+      left = ast_get(node, :left)
+      if op == :LSHIFT && is_ast_node?(left) && ast_kind(left) == :int
+        return nil
+      return machine_result_type(machine_type_of(left, env), machine_type_of(ast_get(node, :right), env))
+    nil
+
+  # "i64" / "u64" / "i128" / "u128" for a resolved hint spelling, else nil.
+  -> machine_hint_type(hint)
+    if hint == nil
+      return nil
+    h = "" + hint.to_s()
+    if h == "i64" || h == "u64" || h == "i128" || h == "u128"
+      return h
+    nil
+
+  # Widest wins, unsigned over signed at equal width (machine_int_result_type).
+  -> machine_result_type(l, r)
+    if l == nil
+      return r
+    if r == nil
+      return l
+    if l == "u128" || r == "u128"
+      return "u128"
+    if l == "i128" || r == "i128"
+      return "i128"
+    if l == "u64" || r == "u64"
+      return "u64"
+    "i64"
+
+  -> coerce_machine_int(value, mt)
+    if !int_value?(value)
+      return value
+    if mt == "i64"
+      return wrap_signed_bits(value, 64)
+    if mt == "u64"
+      return wrap_unsigned_bits(value, 64)
+    if mt == "i128"
+      return wrap_signed_bits(value, 128)
+    if mt == "u128"
+      return wrap_unsigned_bits(value, 128)
+    value
+
   -> wrap_unsigned_bits(value, bits)
     modulus = pow2(bits)
     wrapped = value % modulus
@@ -3114,6 +3316,8 @@ use target
       return 18446744073709551616
     if bits == 128
       return 340282366920938463463374607431768211456
+    if bits == 48
+      return 281474976710656
     result = 1
     i = 0
     while i < bits
@@ -3360,6 +3564,11 @@ use target
       if !env.defined?("__block__")
         return false
       return env.get("__block__") != nil
+    # `flush` — the compiled no-raise builtin (lowering/no_raise.w) that
+    # drains buffered stdout; the same runtime call, so output ordering
+    # around a fatal stop matches across engines.
+    if name == "flush" && args.size() == 0
+      return ccall("w_flush")
     # `constant_alias "WC"` bit directive. The parser stamped the declaring
     # file's `in` namespace as a second argument (parser.w), so registration
     # needs no file context; the single-arg form (no active namespace at the

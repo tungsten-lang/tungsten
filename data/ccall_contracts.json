@@ -23560,6 +23560,22 @@
       ]
     },
     {
+      "symbol": "w_int_overflow_trap",
+      "native": {
+        "symbol": "w_int_overflow_trap",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [],
+        "arity": 0,
+        "source": "runtime/runtime.c"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
       "symbol": "w_int_to_hex_str",
       "native": {
         "symbol": "w_int_to_hex_str",

@@ -46224,6 +46224,14 @@ WValue w_flush(void) {
     return W_NIL;
 }
 
+/* `Math.trap ->` overflow abort for the interpreter (compiler/lib/interpreter.w
+ * integer_overflow_op): the same llvm.trap the compiled add/sub/mul_i48_guarded
+ * arms branch to with :trap set, so both engines die identically — SIGTRAP, no
+ * message, no unwinding, buffered stdout left unflushed. */
+WValue w_int_overflow_trap(void) {
+    __builtin_trap();
+}
+
 /* Read one line from stdin (for the REPL / `gets`). Flushes stdout first so a
  * prompt printed with w_print appears before we block. Returns the line WITHOUT
  * its trailing newline, or W_NIL on EOF (Ctrl-D). */

@@ -26,4 +26,11 @@ autoload_check("calculus.integrate_gk15", integral_ok)
 autoload_check("quadrature_result.reused",
                integral.class_name == "QuadratureResult")
 
+vector = Calculus.numerical_gradient(-> (v) v[0]*v[0], [~2.0])
+autoload_check("numerical_array_result", vector.class_name == "NumericalArrayResult" && vector.converged?)
+tape = Tape.new
+tape_index = tape.var(~1.0)
+tape_value = TapeValue.new(tape, tape_index)
+autoload_check("tape_value", tape_value.class_name == "TapeValue")
+
 << "calculus_autoload_spec: all checks passed"

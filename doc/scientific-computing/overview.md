@@ -10,8 +10,8 @@ Flat under `core/` (no `core/sci/` namespace):
 | `fft.w` | pure radix-2 DFT |
 | `special.w` / `stats.w` | specials + distributions |
 | `solve.w` / `optim.w` / `interpolate.w` | ODE / opt / interp |
-| `calculus.w` | Taylor/differential AD, black-box derivatives, Simpson and GK15 quadrature |
-| `autodiff.w` | Dual + Tape |
+| `calculus.w` | Taylor/differential AD, numerical gradients/Jacobians, Simpson and breakpoint GK15 quadrature |
+| `autodiff.w` | Dual JVP and Tape/TapeValue VJP; calculus facades |
 | `physics.w` | measurements/GLS, gas laws, Euler systems, Cartesian finite volume, diagnostics |
 | `blas.w` | Accelerate BLAS1/2/3 + vDSP |
 | `mlx.w` | MLX GPU opt-in: GEMM + elementwise + reduce + softmax + FFT + RNG |

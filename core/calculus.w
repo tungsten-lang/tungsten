@@ -12,7 +12,11 @@
 #   Calculus.hessian(f, point)
 #   Calculus.numerical_derivative(f, x, order, scheme)
 #   Calculus.integrate(f, a, b, abs_tol, rel_tol, max_depth)
-#   Calculus.integrate_gk15(f, a, b, abs_tol, rel_tol, limits)
+#   Calculus.integrate_gk15(f, a, b, abs_tol, rel_tol, max_intervals, max_evaluations)
+#   Calculus.integrate_with_points(f, a, b, points)
+#   Calculus.numerical_gradient(f, point)
+#   Calculus.numerical_jacobian(f, point)
+#   Calculus.jvp(f, point, tangent) / Calculus.vjp(f, point, cotangent)
 
 use core/math
 use core/numeric/rational
@@ -24,6 +28,8 @@ use core/calculus/puiseux
 use core/calculus/jet
 use core/calculus/differential
 use core/calculus/numerical
+use core/calculus/numerical_vector
+use core/autodiff
 use core/calculus/quadrature
 use core/calculus/gauss_kronrod
 use core/calculus/radial_mellin
@@ -32,6 +38,15 @@ use core/calculus/radial_mellin
   -> .integer?(value)
     name = value.class_name
     name == "Integer" || name == "Int" || name == "BigInt"
+
+  -> .jvp(f, point, tangent)
+    Autodiff.jvp(f, point, tangent)
+
+  -> .vjp(f, point, cotangent)
+    Autodiff.vjp(f, point, cotangent)
+
+  -> .reverse_gradient(f, point)
+    Autodiff.vjp(f, point, ~1.0)["vjp"]
 
   -> .validate_order(order)
     if !Calculus.integer?(order) || order < 0
@@ -64,6 +79,45 @@ use core/calculus/radial_mellin
   -> .finite_f64?(value)
     return false if value.class_name != "Float"
     !value.nan? && !value.infinite?
+
+  -> .within_tolerance?(error, magnitude, abs_tol, rel_tol)
+    return false if !Calculus.finite_f64?(error) || error < ~0.0
+    return true if error <= abs_tol
+    return false if magnitude == ~0.0 || rel_tol == ~0.0
+    error / magnitude <= rel_tol
+
+  -> .midpoint(a, b)
+    ~0.5*a + ~0.5*b
+
+  # Saturation is used only for diagnostic bounds, never computed values.
+  -> .bounded_error(value)
+    return ~1.7976931348623157e308 if !Calculus.finite_f64?(value)
+    value
+
+  -> .scalar_value?(value)
+    return true if Expression.scalar_value?(value)
+    value.respond_to?("components") && value.respond_to?("abs")
+
+  -> .finite_scalar?(value)
+    return Calculus.finite_f64?(value) if value.class_name == "Float"
+    return false if !Calculus.scalar_value?(value)
+    if value.respond_to?("components")
+      values = value.components
+      i = 0
+      while i < values.size
+        return false if !Calculus.finite_scalar?(values[i])
+        i += 1
+      return true
+    if value.respond_to?("nan?")
+      return false if value.nan?
+    if value.respond_to?("infinite?")
+      return false if value.infinite?
+    true
+
+  -> .require_real_domain(value, valid, operation)
+    if !Calculus.finite_scalar?(value) || !valid
+      raise operation + " outside its finite real differentiable domain"
+    value
 
   # Norm used by numerical error estimators. Unlike `abs`, this also accepts
   # Complex and the normed Hypercomplex types.

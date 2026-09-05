@@ -60,7 +60,7 @@ numerical_check("derivative.sine.estimate", sine.estimate_available?)
 numerical_check("derivative.sine.algorithm",
                 sine.algorithm == :richardson_extrapolation)
 numerical_check("derivative.sine.error_model",
-                sine.error_model == :successive_extrapolation_consistency)
+                sine.error_model == :extrapolation_with_resolution_floor)
 numerical_check("derivative.sine.not_certified", !sine.certified?)
 
 quartic_second = Calculus.numerical_derivative(
@@ -69,7 +69,7 @@ numerical_check("derivative.second.status", quartic_second.converged?)
 numerical_check("derivative.second.value",
                 numerical_close?(quartic_second.value, ~48.0))
 numerical_check("derivative.second.evaluations",
-                quartic_second.evaluations == 3 * quartic_second.levels)
+                quartic_second.evaluations == 1 + 2 * quartic_second.levels)
 
 forward = Calculus.numerical_derivative(
   -> (x) x*x*x, ~0.0, 1, :forward)
@@ -77,7 +77,7 @@ numerical_check("derivative.forward.status", forward.converged?)
 numerical_check("derivative.forward.value",
                 numerical_close?(forward.value, ~0.0))
 numerical_check("derivative.forward.evaluations",
-                forward.evaluations == 3 * forward.levels)
+                forward.evaluations == 1 + 2 * forward.levels)
 
 backward_second = Calculus.numerical_derivative(
   -> (x) x*x*x*x, ~1.0, 2, :backward)
@@ -134,13 +134,13 @@ constant_backward_first = Calculus.numerical_derivative(
   -> (x) large_constant(x), ~0.0, 1, :backward)
 constant_backward_second = Calculus.numerical_derivative(
   -> (x) large_constant(x), ~0.0, 2, :backward)
-numerical_check("derivative.large_constant.all_stencils",
-                constant_central_first.converged? &&
-                constant_central_second.converged? &&
-                constant_forward_first.converged? &&
-                constant_forward_second.converged? &&
-                constant_backward_first.converged? &&
-                constant_backward_second.converged?)
+numerical_check("derivative.large_constant.resolution_visible",
+                !constant_central_first.converged? &&
+                !constant_central_second.converged? &&
+                !constant_forward_first.converged? &&
+                !constant_forward_second.converged? &&
+                !constant_backward_first.converged? &&
+                !constant_backward_second.converged?)
 numerical_check("derivative.large_constant.zero",
                 constant_central_first.value == ~0.0 &&
                 constant_central_second.value == ~0.0 &&
@@ -178,7 +178,7 @@ numerical_check("derivative.forward_duplicate",
 
 overflowing_abscissa = Calculus.numerical_derivative(
   -> (x) ~0.0, ~1.0e308, 1, :forward,
-  ~1.0e308, ~1.0e-10, ~1.0e-8, 2, ~1.1)
+  ~1.0e308, ~1.0e-10, ~1.0e-8, 2, ~1.1, 2)
 numerical_check("derivative.nonfinite_abscissa",
                 overflowing_abscissa.status == :nonfinite_abscissa)
 numerical_check("derivative.nonfinite_abscissa.no_estimate",
@@ -376,7 +376,7 @@ numerical_check("gk.nonfinite_integrand.no_estimate",
 complex_integrand = Calculus.integrate_gk15(
   -> (x) Complex<f64>.real(x), ~0.0, ~1.0)
 numerical_check("gk.complex_integrand_is_unsupported",
-                complex_integrand.status == :nonfinite_integrand)
+                complex_integrand.status == :unsupported_sample_type)
 
 large_integral = Calculus.integrate_gk15(
   -> (x) large_constant(x), ~0.0, ~1.0)

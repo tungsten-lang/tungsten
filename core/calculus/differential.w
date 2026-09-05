@@ -138,11 +138,13 @@
     self.unary_transform(value, value, value)
 
   -> log
+    Calculus.require_real_domain(@value, @value > ~0.0, "Differential.log")
     inverse = ~1.0 / @value
     self.unary_transform(
       Math.log(@value), inverse, ~0.0 - inverse * inverse)
 
   -> sqrt
+    Calculus.require_real_domain(@value, @value > ~0.0, "Differential.sqrt")
     value = Math.sqrt(@value)
     first = ~1.0 / (~2.0 * value)
     second = ~0.0 - ~1.0 / (~4.0 * value * value * value)
@@ -183,6 +185,7 @@
       (~0.0 - @value) / (base * root))
 
   -> acosh
+    Calculus.require_real_domain(@value, @value > ~1.0, "Differential.acosh")
     base = @value * @value - ~1.0
     root = Math.sqrt(base)
     self.unary_transform(
@@ -191,6 +194,7 @@
       (~0.0 - @value) / (base * root))
 
   -> atanh
+    Calculus.require_real_domain(@value, @value > ~-1.0 && @value < ~1.0, "Differential.atanh")
     base = ~1.0 - @value * @value
     self.unary_transform(
       Math.atanh(@value),
@@ -202,11 +206,13 @@
     self.unary_transform(Math.expm1(@value), exponential, exponential)
 
   -> log1p
+    Calculus.require_real_domain(@value, @value > ~-1.0, "Differential.log1p")
     inverse = ~1.0 / (~1.0 + @value)
     self.unary_transform(
       Math.log1p(@value), inverse, ~0.0 - inverse * inverse)
 
   -> log2
+    Calculus.require_real_domain(@value, @value > ~0.0, "Differential.log2")
     inverse_log_two = ~1.4426950408889634
     inverse = ~1.0 / @value
     self.unary_transform(
@@ -215,6 +221,7 @@
       ~0.0 - inverse_log_two * inverse * inverse)
 
   -> log10
+    Calculus.require_real_domain(@value, @value > ~0.0, "Differential.log10")
     inverse_log_ten = ~0.4342944819032518
     inverse = ~1.0 / @value
     self.unary_transform(
@@ -288,6 +295,7 @@
     self.lambert_w
 
   -> asin
+    Calculus.require_real_domain(@value, @value > ~-1.0 && @value < ~1.0, "Differential.asin")
     base = ~1.0 - @value * @value
     root = Math.sqrt(base)
     self.unary_transform(
@@ -296,6 +304,7 @@
       @value / (base * root))
 
   -> acos
+    Calculus.require_real_domain(@value, @value > ~-1.0 && @value < ~1.0, "Differential.acos")
     base = ~1.0 - @value * @value
     root = Math.sqrt(base)
     self.unary_transform(
@@ -311,8 +320,14 @@
       (~0.0 - ~2.0 * @value) / (base * base))
 
   -> pow(exponent)
-    return Differential.constant(~1.0, self.dimension) if exponent == 0
-    return self if exponent == 1
+    Calculus.require_real_domain(exponent, true, "Differential.pow exponent")
+    exponent = exponent + ~0.0
+    integral = exponent == Math.floor(exponent)
+    valid = @value > ~0.0 || integral
+    valid = false if @value == ~0.0 && exponent < ~0.0
+    Calculus.require_real_domain(@value, valid, "Differential.pow")
+    return Differential.constant(~1.0, self.dimension) if exponent == ~0.0
+    return self if exponent == ~1.0
     value = Math.pow(@value, exponent)
     first = exponent * Math.pow(@value, exponent - ~1.0)
     second = exponent * (exponent - ~1.0) * Math.pow(@value, exponent - ~2.0)
@@ -335,6 +350,8 @@
     variables = []
     i = 0
     while i < point.size
+      if !Calculus.finite_scalar?(point[i])
+        raise "calculus point entries must be finite scalars"
       variables.push(Differential.variable(point[i], point.size, i))
       i += 1
     variables
@@ -343,7 +360,13 @@
     variables = Calculus.variables(point)
     result = f(variables)
     if result.class_name == "Differential"
+      if result.dimension != point.size
+        raise "calculus result Differential dimension mismatch"
+      if !Calculus.finite_scalar?(result.value)
+        raise "calculus result must have a finite scalar value"
       return result
+    if !Calculus.finite_scalar?(result)
+      raise "calculus scalar function must return a finite scalar or Differential"
     Differential.constant(result, point.size)
 
   -> .value_gradient_hessian(f, point)
@@ -368,7 +391,13 @@
     rows = []
     outputs.each ->
       if item.class_name == "Differential"
+        if item.dimension != point.size
+          raise "jacobian result Differential dimension mismatch"
+        if !Calculus.finite_scalar?(item.value)
+          raise "jacobian output must have a finite scalar value"
         rows.push(item.gradient)
       else
+        if !Calculus.finite_scalar?(item)
+          raise "jacobian entries must be finite scalars or Differential values"
         rows.push(Calculus.zero_vector(point.size))
     rows

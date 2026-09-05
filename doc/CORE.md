@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(627 total), grouped by area, with its declaration, a one-line
+(629 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -82,6 +82,7 @@ summary from the source header, and a link to the source.
 | `TaylorJet` | — | — | [`core/calculus.w`](../core/calculus.w) |
 | `Differential` | — | — | [`core/calculus.w`](../core/calculus.w) |
 | `NumericalDerivativeResult` | — | — | [`core/calculus.w`](../core/calculus.w) |
+| `NumericalArrayResult` | — | — | [`core/calculus.w`](../core/calculus.w) |
 | `QuadratureResult` | — | — | [`core/calculus.w`](../core/calculus.w) |
 | `RadialMellinTransform` | `+ RadialMellinTransform` | — | [`core/calculus/radial_mellin.w`](../core/calculus/radial_mellin.w) |
 | `CohnElkiesAsymptotics` | `+ CohnElkiesAsymptotics` | — | [`core/calculus/radial_mellin.w`](../core/calculus/radial_mellin.w) |
@@ -186,6 +187,7 @@ summary from the source header, and a link to the source.
 | `StandardMap` | — | — | [`core/dynamics.w`](../core/dynamics.w) |
 | `Dual` | `+ Dual` | Autodiff — forward-mode dual numbers + reverse-mode tape (v0). | [`core/autodiff.w`](../core/autodiff.w) |
 | `Tape` | `+ Tape` | Reverse-mode: very small tape of (op, a, b, out) nodes. | [`core/autodiff.w`](../core/autodiff.w) |
+| `TapeValue` | `+ TapeValue` | — | [`core/autodiff.w`](../core/autodiff.w) |
 | `Autodiff` | `+ Autodiff` | — | [`core/autodiff.w`](../core/autodiff.w) |
 | `Solve` | `+ Solve` | Solve — initial-value ODE solvers (SciPy solve_ivp analogue). | [`core/solve.w`](../core/solve.w) |
 | `DenseSolution` | `+ DenseSolution` | Continuous DP5(4) solution. Each accepted step keeps its size and the | [`core/solve.w`](../core/solve.w) |

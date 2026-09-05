@@ -1,84 +1,72 @@
-# Status-aware scalar numerical differentiation for opaque f64 callbacks.
-#
-# This complements `Calculus.derivative`, which remains TaylorJet automatic
-# differentiation.  Richardson differences are empirical consistency
-# estimates, never interval certificates.  Callbacks are assumed pure,
-# deterministic, and smooth near the query point.
+# Scalar f64 differences with empirical truncation and resolution diagnostics.
+# Callbacks must be pure and deterministic; the center sample is cached.
 
 + NumericalDerivativeResult
   -> new(@value, @error_estimate, @step, @evaluations, @levels,
          @order, @scheme, @status, @cancellation_indicator,
-         @estimate_available, attempts = nil)
+         @estimate_available, attempts = nil, resolution_floor = nil)
     @attempts = attempts == nil ? @levels : attempts
+    @resolution_floor = resolution_floor
+    if !Calculus.integer?(@evaluations) || @evaluations < 0 || !Calculus.integer?(@levels) || @levels < 0
+      raise "numerical derivative counts must be nonnegative integers"
+    if !Calculus.integer?(@attempts) || @attempts < @levels
+      raise "numerical derivative attempts must cover all valid levels"
+    if @estimate_available
+      if !Calculus.finite_f64?(@value) || !Calculus.finite_f64?(@error_estimate)
+        raise "numerical derivative estimate must be finite"
+      if @error_estimate < ~0.0 || !Calculus.finite_f64?(@step) || @step <= ~0.0
+        raise "numerical derivative estimate has invalid error or step"
+    elsif @status == :converged || @value != nil || @error_estimate != nil || @step != nil || @cancellation_indicator != nil
+      raise "numerical derivative result has inconsistent estimate availability"
 
   -> derivative
     @value
-
   -> value
     @value
-
   -> error_estimate
     @error_estimate
-
   -> step
     @step
-
   -> evaluations
     @evaluations
-
   -> levels
     @levels
-
   -> attempts
     @attempts
-
   -> order
     @order
-
   -> scheme
     @scheme
-
   -> status
     @status
-
   -> cancellation_indicator
     @cancellation_indicator
-
+  -> resolution_floor
+    @resolution_floor
   -> estimate_available?
     @estimate_available
-
   -> converged?
     @status == :converged
-
   -> algorithm
     :richardson_extrapolation
-
   -> error_model
-    :successive_extrapolation_consistency
-
+    :extrapolation_with_resolution_floor
   -> certified?
     false
-
   -> to_a
     [@value, @error_estimate]
-
   -> to_s
     if !@estimate_available
       return "NumericalDerivativeResult(no estimate, " + @status.to_s + ")"
-    text = "NumericalDerivativeResult(" + @value.to_s + " ± "
-    text += @error_estimate.to_s + ", " + @status.to_s + ")"
-    text
-
+    "NumericalDerivativeResult(" + @value.to_s + " ± " + @error_estimate.to_s + ", " + @status.to_s + ")"
   -> inspect
     self.to_s
-
 
 + Calculus
   -> .numerical_abscissae_failure(points)
     i = 0
     while i < points.size
-      if !Calculus.finite_f64?(points[i])
-        return :nonfinite_abscissa
+      return :nonfinite_abscissa if !Calculus.finite_f64?(points[i])
       j = 0
       while j < i
         return :step_unrepresentable if points[i] == points[j]
@@ -86,181 +74,108 @@
       i += 1
     :ok
 
-  -> .numerical_cancellation(scale, numerator)
-    limit = ~1.0e308
-    denominator = Calculus.abs(numerator)
-    return limit if denominator == ~0.0 && scale != ~0.0
-    return ~1.0 if denominator == ~0.0
-    ratio = scale / denominator
-    return limit if !Calculus.finite_f64?(ratio) || ratio > limit
-    ratio
-
-  -> .numerical_indicator_scale(values, weights)
-    limit = ~1.0e308
-    total = ~0.0
-    i = 0
-    while i < values.size
-      magnitude = Calculus.abs(values[i])
-      weight = weights[i]
-      return limit if magnitude >= limit / weight
-      term = weight * magnitude
-      return limit if total >= limit - term
-      total += term
-      i += 1
-    total
-
   -> .numerical_smaller_step(h, contraction)
     next_h = h / contraction
     return nil if !Calculus.finite_f64?(next_h)
     return nil if next_h <= ~0.0 || next_h >= h
     next_h
 
-  # Internal tuple:
-  # [value, evaluations, failure, cancellation indicator]
-  -> .numerical_stencil(f, x, h, order, scheme)
-    value = ~0.0
+  # [value, evaluations, status, cancellation, resolution floor]. The floor
+  # models coordinate rounding plus 16 binary64 roundoffs per weighted sample;
+  # it is deliberately conservative, not a bound on an arbitrary callback.
+  -> .numerical_stencil(f, x, h, order, scheme, center_cache = nil)
+    offsets = scheme == :central ? [~1.0, ~-1.0] : [~1.0, ~2.0]
+    offsets.push(~3.0) if scheme != :central && order == 2
+    direction = scheme == :backward ? ~-1.0 : ~1.0
+    points = [x]
+    defect = ~0.0
+    i = 0
+    while i < offsets.size
+      multiplier = (direction * offsets[i]) ## f64
+      step64 = h ## f64
+      point64 = x ## f64
+      coordinate = fma(multiplier, step64, point64)
+      points.push(coordinate)
+      i += 1
+    failure = Calculus.numerical_abscissae_failure(points)
+    return [nil, 0, failure, nil, nil] if failure != :ok
+    i = 0
+    while i < offsets.size
+      ratio = ((points[i + 1] - x) / h) / (direction*offsets[i])
+      deviation = Calculus.bounded_error(Calculus.abs(ratio - ~1.0))
+      defect = deviation if deviation > defect
+      i += 1
+
+    values = []
     evaluations = 0
-    indicator = ~1.0
-    valid = true
-
-    if scheme == :central
-      xp = x + h
-      xm = x - h
-      points = order == 1 ? [xp, xm] : [xp, x, xm]
-      failure = Calculus.numerical_abscissae_failure(points)
-      return [nil, 0, failure, nil] if failure != :ok
-
-      fp = f(xp)
-      fm = f(xm)
-      evaluations = 2
-      valid = Calculus.finite_f64?(fp)
-      valid = false if !Calculus.finite_f64?(fm)
-      if order == 1
-        if valid
-          numerator = fp - fm
-          scale = Calculus.numerical_indicator_scale(
-            [fp, fm], [~1.0, ~1.0])
-          value = (numerator / ~2.0) / h
-          indicator = Calculus.numerical_cancellation(scale, numerator)
-        else
-          numerator = ~0.0
-          scale = ~0.0
+    needs_center = order == 2 || scheme != :central
+    if needs_center
+      if center_cache != nil && center_cache.size > 0
+        f0 = center_cache[0]
       else
         f0 = f(x)
-        evaluations = 3
-        valid = false if !Calculus.finite_f64?(f0)
-        if valid
-          numerator = (fp - f0) + (fm - f0)
-          scale = Calculus.numerical_indicator_scale(
-            [fp, f0, fm], [~1.0, ~2.0, ~1.0])
-          value = (numerator / h) / h
-          indicator = Calculus.numerical_cancellation(scale, numerator)
-        else
-          numerator = ~0.0
-          scale = ~0.0
-    elsif scheme == :forward
-      x1 = x + h
-      x2 = x + ~2.0 * h
-      points = [x, x1, x2]
-      x3 = x + ~3.0 * h
-      points.push(x3) if order == 2
-      failure = Calculus.numerical_abscissae_failure(points)
-      return [nil, 0, failure, nil] if failure != :ok
+        evaluations += 1
+        center_cache.push(f0) if center_cache != nil
+      return [nil, evaluations, :unsupported_sample_type, nil, nil] if f0.class_name != "Float"
+      return [nil, evaluations, :nonfinite_sample, nil, nil] if !Calculus.finite_f64?(f0)
+      values.push(f0)
+    i = 1
+    while i < points.size
+      value = f(points[i])
+      evaluations += 1
+      return [nil, evaluations, :unsupported_sample_type, nil, nil] if value.class_name != "Float"
+      return [nil, evaluations, :nonfinite_sample, nil, nil] if !Calculus.finite_f64?(value)
+      values.push(value)
+      i += 1
 
-      f0 = f(x)
-      f1 = f(x1)
-      f2 = f(x2)
-      evaluations = 3
-      valid = Calculus.finite_f64?(f0)
-      valid = false if !Calculus.finite_f64?(f1)
-      valid = false if !Calculus.finite_f64?(f2)
+    if scheme == :central
       if order == 1
-        if valid
-          numerator = ~4.0 * (f1 - f0) - (f2 - f0)
-          scale = Calculus.numerical_indicator_scale(
-            [f0, f1, f2], [~3.0, ~4.0, ~1.0])
-          value = (numerator / ~2.0) / h
-          indicator = Calculus.numerical_cancellation(scale, numerator)
-        else
-          numerator = ~0.0
-          scale = ~0.0
+        numerator = values[0] - values[1]
+        weights = [~1.0, ~1.0]
       else
-        f3 = f(x3)
-        evaluations = 4
-        valid = false if !Calculus.finite_f64?(f3)
-        if valid
-          d1 = f1 - f0
-          d2 = f2 - f1
-          d3 = f3 - f2
-          second_difference = d2 - d1
-          third_difference = (d3 - d2) - (d2 - d1)
-          numerator = second_difference - third_difference
-          scale = Calculus.numerical_indicator_scale(
-            [f0, f1, f2, f3], [~2.0, ~5.0, ~4.0, ~1.0])
-          value = (numerator / h) / h
-          indicator = Calculus.numerical_cancellation(scale, numerator)
-        else
-          numerator = ~0.0
-          scale = ~0.0
+        numerator = (values[1] - values[0]) + (values[2] - values[0])
+        weights = [~2.0, ~1.0, ~1.0]
+    elsif order == 1
+      numerator = direction * (~4.0*(values[1] - values[0]) - (values[2] - values[0]))
+      weights = [~3.0, ~4.0, ~1.0]
     else
-      x1 = x - h
-      x2 = x - ~2.0 * h
-      points = [x, x1, x2]
-      x3 = x - ~3.0 * h
-      points.push(x3) if order == 2
-      failure = Calculus.numerical_abscissae_failure(points)
-      return [nil, 0, failure, nil] if failure != :ok
+      d1 = values[1] - values[0]
+      d2 = values[2] - values[1]
+      d3 = values[3] - values[2]
+      numerator = (d2 - d1) - ((d3 - d2) - (d2 - d1))
+      weights = [~2.0, ~5.0, ~4.0, ~1.0]
+    value = order == 1 ? (numerator / ~2.0) / h : (numerator / h) / h
+    if !Calculus.finite_f64?(numerator) || !Calculus.finite_f64?(value)
+      return [nil, evaluations, :nonfinite_arithmetic, nil, nil]
 
-      f0 = f(x)
-      f1 = f(x1)
-      f2 = f(x2)
-      evaluations = 3
-      valid = Calculus.finite_f64?(f0)
-      valid = false if !Calculus.finite_f64?(f1)
-      valid = false if !Calculus.finite_f64?(f2)
-      if order == 1
-        if valid
-          numerator = ~4.0 * (f0 - f1) - (f0 - f2)
-          scale = Calculus.numerical_indicator_scale(
-            [f0, f1, f2], [~3.0, ~4.0, ~1.0])
-          value = (numerator / ~2.0) / h
-          indicator = Calculus.numerical_cancellation(scale, numerator)
-        else
-          numerator = ~0.0
-          scale = ~0.0
-      else
-        f3 = f(x3)
-        evaluations = 4
-        valid = false if !Calculus.finite_f64?(f3)
-        if valid
-          d1 = f1 - f0
-          d2 = f2 - f1
-          d3 = f3 - f2
-          second_difference = d2 - d1
-          third_difference = (d3 - d2) - (d2 - d1)
-          numerator = second_difference - third_difference
-          scale = Calculus.numerical_indicator_scale(
-            [f0, f1, f2, f3], [~2.0, ~5.0, ~4.0, ~1.0])
-          value = (numerator / h) / h
-          indicator = Calculus.numerical_cancellation(scale, numerator)
-        else
-          numerator = ~0.0
-          scale = ~0.0
+    maximum = ~0.0
+    values.each ->
+      magnitude = Calculus.abs(item)
+      maximum = magnitude if magnitude > maximum
+    normalized = ~0.0
+    if maximum != ~0.0
+      i = 0
+      while i < values.size
+        normalized += weights[i] * (Calculus.abs(values[i]) / maximum)
+        i += 1
+    indicator = ~1.0
+    if maximum != ~0.0
+      indicator = numerator == ~0.0 ? ~1.0e308 : Calculus.bounded_error((maximum / Calculus.abs(numerator))*normalized)
+      indicator = ~1.0e308 if indicator > ~1.0e308
+    # Form the small uncertainty factor first, so large offsets do not
+    # overflow before division by h. Include gradual-underflow uncertainty.
+    uncertainty = defect + ~3.552713678800501e-15
+    floor = Calculus.bounded_error(uncertainty * maximum)
+    floor = Calculus.bounded_error(floor * normalized + ~4.9406564584124654e-324)
+    floor = Calculus.bounded_error((floor / ~2.0) / h) if order == 1
+    floor = Calculus.bounded_error(Calculus.bounded_error(floor / h) / h) if order == 2
+    [value, evaluations, :ok, indicator, floor]
 
-    return [nil, evaluations, :nonfinite_sample, nil] if !valid
-    arithmetic_valid = Calculus.finite_f64?(numerator)
-    arithmetic_valid = false if !Calculus.finite_f64?(scale)
-    arithmetic_valid = false if !Calculus.finite_f64?(value)
-    arithmetic_valid = false if !Calculus.finite_f64?(indicator)
-    if !arithmetic_valid
-      return [nil, evaluations, :nonfinite_arithmetic, nil]
-    [value, evaluations, :ok, indicator]
-
-  -> .numerical_derivative(f, x, order = 1, scheme = :central,
-                           initial_step = nil,
-                           abs_tol = ~1.0e-10, rel_tol = ~1.0e-8,
-                           max_levels = 10, contraction = ~1.4)
-    if order != 1 && order != 2
+  # Shared validation also covers empty numerical gradients/Jacobians.
+  -> .numerical_initial_step(x, order, scheme, initial_step,
+                             abs_tol, rel_tol, max_levels,
+                             contraction, max_coarse_shrinks)
+    if !Calculus.integer?(order) || (order != 1 && order != 2)
       raise "numerical derivative supports orders 1 and 2"
     if scheme != :central && scheme != :forward && scheme != :backward
       raise "numerical derivative scheme must be central, forward, or backward"
@@ -274,7 +189,8 @@
       raise "numerical derivative contraction must be finite f64 at least 1.1"
     if !Calculus.integer?(max_levels) || max_levels < 2
       raise "numerical derivative max_levels must be an integer of at least two"
-
+    if !Calculus.integer?(max_coarse_shrinks) || max_coarse_shrinks < 0
+      raise "numerical derivative max_coarse_shrinks must be nonnegative"
     h = initial_step
     if h == nil
       scale = Calculus.abs(x)
@@ -282,11 +198,26 @@
       h = ~0.1 * scale
     if !Calculus.finite_f64?(h) || h <= ~0.0
       raise "numerical derivative initial_step must be positive finite f64"
+    h
 
-    table = []
+  -> .numerical_derivative(f, x, order = 1, scheme = :central,
+                           initial_step = nil,
+                           abs_tol = ~1.0e-10, rel_tol = ~1.0e-8,
+                           max_levels = 10, contraction = ~1.4,
+                           max_coarse_shrinks = 64)
+    h = Calculus.numerical_initial_step(x, order, scheme, initial_step,
+      abs_tol, rel_tol, max_levels, contraction, max_coarse_shrinks)
+
+    previous_row = []
+    previous_floors = []
+    center_cache = []
+    levels = 0
     evaluations = 0
+    attempts = 0
+    coarse_shrinks = 0
     best_value = nil
     best_error = nil
+    best_floor = nil
     best_step = nil
     best_indicator = nil
     selected_indicator = ~1.0
@@ -294,25 +225,18 @@
     previous_level_error = nil
     previous_level_stable = false
     non_improving_streak = 0
+    resolution_limited = false
     status = :working
-    attempts = 0
-    coarse_shrinks = 0
-
-    while table.size < max_levels && status == :working
-      sample = Calculus.numerical_stencil(f, x, h, order, scheme)
+    while levels < max_levels && status == :working
+      sample = Calculus.numerical_stencil(f, x, h, order, scheme, center_cache)
       attempts += 1
       evaluations += sample[1]
       failure = sample[2]
       if failure != :ok
-        # A coarse stencil can cross a callback domain or overflow even though
-        # a smaller one is usable. Keep this recovery bounded independently
-        # of the valid Richardson-row budget.
-        shrink_coarse = failure == :nonfinite_abscissa
-        shrink_coarse = true if failure == :nonfinite_sample
-        shrink_coarse = true if failure == :nonfinite_arithmetic
-        shrink_coarse = false if table.size != 0
-        shrink_coarse = false if coarse_shrinks >= max_levels
-        if shrink_coarse
+        recoverable = failure == :nonfinite_abscissa || failure == :nonfinite_sample || failure == :nonfinite_arithmetic
+        # A nonfinite cached center cannot recover through changing h.
+        recoverable = false if center_cache.size > 0 && !Calculus.finite_f64?(center_cache[0])
+        if recoverable && levels == 0 && coarse_shrinks < max_coarse_shrinks
           next_h = Calculus.numerical_smaller_step(h, contraction)
           if next_h == nil
             status = :step_unrepresentable
@@ -322,109 +246,86 @@
         else
           status = failure
       else
-        indicator = sample[3]
-        selected_indicator = indicator if indicator > selected_indicator
+        levels += 1
+        selected_indicator = sample[3] if sample[3] > selected_indicator
         row = [sample[0]]
-        table.push(row)
-        row_index = table.size - 1
+        floors = [sample[4]]
+        level_value = sample[0]
+        level_error = nil
+        level_floor = sample[4]
+        factor = contraction * contraction
+        j = 1
+        while j < levels && status == :working
+          current = row[j - 1]
+          previous = previous_row[j - 1]
+          denominator = factor - ~1.0
+          difference = current - previous
+          if !Calculus.finite_f64?(denominator) || !Calculus.finite_f64?(difference)
+            status = :nonfinite_arithmetic
+          else
+            extrapolated = current + difference / denominator
+            if !Calculus.finite_f64?(extrapolated)
+              status = :nonfinite_arithmetic
+            else
+              floor = Calculus.bounded_error(
+                floors[j - 1] + (floors[j - 1] / denominator) + (previous_floors[j - 1] / denominator))
+              floor = Calculus.bounded_error(floor + ~4.440892098500626e-16*Calculus.abs(extrapolated))
+              err1 = Calculus.bounded_error(Calculus.abs(extrapolated - current))
+              err2 = Calculus.bounded_error(Calculus.abs(extrapolated - previous))
+              error = err1 > err2 ? err1 : err2
+              error = floor if floor > error
+              row.push(extrapolated)
+              floors.push(floor)
+              if level_error == nil || error < level_error
+                level_value = extrapolated
+                level_error = error
+                level_floor = floor
+              factor *= scheme == :central ? contraction*contraction : contraction
+          j += 1
 
-        if row_index == 0
+        if level_error != nil
+          if best_error == nil || level_error < best_error
+            best_value = level_value
+            best_error = level_error
+            best_floor = level_floor
+            best_step = h
+            best_indicator = selected_indicator
+          if status == :working
+            stable = Calculus.within_tolerance?(level_error, Calculus.abs(level_value), abs_tol, rel_tol)
+            resolution_limited = level_floor >= ~0.99*level_error && !Calculus.within_tolerance?(level_floor, Calculus.abs(level_value), abs_tol, rel_tol)
+            if previous_level_stable && stable
+              continuity = Calculus.bounded_error(Calculus.abs(level_value - previous_level_value))
+              if Calculus.within_tolerance?(continuity, Calculus.abs(level_value), abs_tol, rel_tol)
+                best_value = level_value
+                best_error = continuity > level_error ? continuity : level_error
+                best_floor = level_floor
+                best_step = h
+                best_indicator = selected_indicator
+                status = :converged
+            if previous_level_error != nil
+              if level_error >= ~0.99*previous_level_error
+                non_improving_streak += 1
+              else
+                non_improving_streak = 0
+            previous_level_value = level_value
+            previous_level_error = level_error
+            previous_level_stable = stable
+        previous_row = row
+        previous_floors = floors
+        if status == :working && levels < max_levels
           next_h = Calculus.numerical_smaller_step(h, contraction)
           if next_h == nil
             status = :step_unrepresentable
           else
             h = next_h
-        else
-          level_value = sample[0]
-          level_error = nil
-          factor = contraction * contraction
-          j = 1
-          while j <= row_index && status == :working
-            current = table[row_index][j - 1]
-            previous = table[row_index - 1][j - 1]
-            denominator = factor - ~1.0
-            difference = current - previous
-            arithmetic_valid = Calculus.finite_f64?(denominator)
-            arithmetic_valid = false if denominator <= ~0.0
-            arithmetic_valid = false if !Calculus.finite_f64?(difference)
-            extrapolated = ~0.0
-            candidate_error = ~0.0
-            if arithmetic_valid
-              correction = difference / denominator
-              extrapolated = current + correction
-              err_current = Calculus.abs(extrapolated - current)
-              err_previous = Calculus.abs(extrapolated - previous)
-              candidate_error = err_current
-              candidate_error = err_previous if err_previous > candidate_error
-              arithmetic_valid = false if !Calculus.finite_f64?(correction)
-              arithmetic_valid = false if !Calculus.finite_f64?(extrapolated)
-              arithmetic_valid = false if !Calculus.finite_f64?(candidate_error)
-            if !arithmetic_valid
-              status = :nonfinite_arithmetic
-            else
-              table[row_index].push(extrapolated)
-              if level_error == nil || candidate_error < level_error
-                level_error = candidate_error
-                level_value = extrapolated
-              if best_error == nil || candidate_error < best_error
-                best_value = extrapolated
-                best_error = candidate_error
-                best_step = h
-                best_indicator = selected_indicator
-              if scheme == :central
-                factor *= contraction * contraction
-              else
-                factor *= contraction
-            j += 1
 
-          if status == :working
-            target = abs_tol
-            relative_target = rel_tol * Calculus.abs(level_value)
-            target = relative_target if relative_target > target
-            if !Calculus.finite_f64?(target)
-              status = :nonfinite_arithmetic
-            else
-              level_stable = level_error != nil && level_error <= target
-              if previous_level_stable && level_stable
-                continuity_error = Calculus.abs(
-                  level_value - previous_level_value)
-                if !Calculus.finite_f64?(continuity_error)
-                  status = :nonfinite_arithmetic
-                elsif continuity_error <= target
-                  evidence_error = level_error
-                  evidence_error = continuity_error if continuity_error > evidence_error
-                  best_value = level_value
-                  best_error = evidence_error
-                  best_step = h
-                  best_indicator = selected_indicator
-                  status = :converged
-
-              if previous_level_error != nil && level_error != nil
-                threshold = ~0.99 * previous_level_error
-                if level_error >= threshold
-                  non_improving_streak += 1
-                else
-                  non_improving_streak = 0
-              previous_level_value = level_value
-              previous_level_error = level_error
-              previous_level_stable = level_stable
-            if status == :working
-              next_h = Calculus.numerical_smaller_step(h, contraction)
-              if next_h == nil
-                status = :step_unrepresentable
-              else
-                h = next_h
     if status == :working
-      if non_improving_streak >= 3
-        status = :roundoff_or_noise_limited
-      else
-        status = :max_levels
-
+      status = resolution_limited || non_improving_streak >= 3 ? :roundoff_or_noise_limited : :max_levels
     available = best_error != nil
-    value_out = available ? best_value : nil
-    error_out = available ? best_error : nil
-    step_out = available ? best_step : nil
-    indicator_out = available ? best_indicator : nil
+    if available && status != :converged && previous_level_value != nil
+      disagreement = Calculus.bounded_error(Calculus.abs(best_value - previous_level_value))
+      best_error = disagreement if disagreement > best_error
+      best_error = previous_level_error if previous_level_error > best_error
     NumericalDerivativeResult.new(
-      value_out, error_out, step_out, evaluations, table.size,
-      order, scheme, status, indicator_out, available, attempts)
+      best_value, best_error, best_step, evaluations, levels, order, scheme,
+      status, best_indicator, available, attempts, best_floor)

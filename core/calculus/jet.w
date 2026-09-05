@@ -176,7 +176,7 @@
     self.jet_exp
 
   -> jet_log
-    raise "TaylorJet.log needs a positive constant term" if self.value <= ~0.0
+    Calculus.require_real_domain(self.value, self.value > ~0.0, "TaylorJet.log")
     quotient = self.derivative / self
     out = [Math.log(self.value)]
     n = 1
@@ -245,11 +245,13 @@
     pair[0] / pair[1]
 
   -> asin
+    Calculus.require_real_domain(self.value, self.value > ~-1.0 && self.value < ~1.0, "TaylorJet.asin")
     one = TaylorJet.constant(~1.0, self.order)
     derivative = self.derivative / (one - self * self).sqrt
     derivative.antiderivative(Math.asin(self.value))
 
   -> acos
+    Calculus.require_real_domain(self.value, self.value > ~-1.0 && self.value < ~1.0, "TaylorJet.acos")
     one = TaylorJet.constant(~1.0, self.order)
     derivative = -(self.derivative / (one - self * self).sqrt)
     derivative.antiderivative(Math.acos(self.value))
@@ -265,11 +267,13 @@
     derivative.antiderivative(Math.asinh(self.value))
 
   -> acosh
+    Calculus.require_real_domain(self.value, self.value > ~1.0, "TaylorJet.acosh")
     one = TaylorJet.constant(~1.0, self.order)
     derivative = self.derivative / (self * self - one).sqrt
     derivative.antiderivative(Math.acosh(self.value))
 
   -> atanh
+    Calculus.require_real_domain(self.value, self.value > ~-1.0 && self.value < ~1.0, "TaylorJet.atanh")
     one = TaylorJet.constant(~1.0, self.order)
     derivative = self.derivative / (one - self * self)
     derivative.antiderivative(Math.atanh(self.value))
@@ -369,6 +373,7 @@
     self.lambert_w
 
   -> sqrt
+    Calculus.require_real_domain(self.value, self.value >= ~0.0, "TaylorJet.sqrt")
     root = Math.sqrt(self.value)
     if root == ~0.0
       i = 1
@@ -399,9 +404,17 @@
 + Calculus
   -> .jet(f, x, order = 1)
     Calculus.validate_order(order)
+    if !Calculus.finite_scalar?(x)
+      raise "calculus jet point must be a finite scalar"
     result = f(TaylorJet.variable(x, order))
     if result.class_name == "TaylorJet"
+      if result.order != order
+        raise "calculus result TaylorJet order mismatch"
+      if !Calculus.finite_scalar?(result.value)
+        raise "calculus result must have a finite scalar value"
       return result
+    if !Calculus.finite_scalar?(result)
+      raise "calculus scalar function must return a finite scalar or TaylorJet"
     TaylorJet.constant(result, order)
 
   -> .derivative(f, x, order = 1)

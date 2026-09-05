@@ -160,7 +160,8 @@ result = Calculus.numerical_derivative(
   ~1.0e-10,   # absolute tolerance
   ~1.0e-8,    # relative tolerance
   10,         # maximum refinement levels
-  ~1.4        # step contraction factor
+  ~1.4,       # step contraction factor
+  64          # maximum coarse-step retries before a valid row
 )
 
 result.value
@@ -170,9 +171,10 @@ result.evaluations
 result.levels                 # valid Richardson rows
 result.attempts               # rows plus bounded coarse-step retries
 result.cancellation_indicator
+result.resolution_floor
 result.status
 result.algorithm              # :richardson_extrapolation
-result.error_model            # :successive_extrapolation_consistency
+result.error_model            # :extrapolation_with_resolution_floor
 result.estimate_available?
 result.converged?
 result.derivative             # alias for value
@@ -181,9 +183,10 @@ result.derivative             # alias for value
 `contraction` must be at least `1.1`; values too close to one make the
 Richardson denominators ill-conditioned. Each refinement must also produce a
 strictly smaller representable step. `max_levels` bounds valid Richardson
-rows; before the first valid row, the controller may make at most that many
-additional coarse-step retries for a nonfinite coordinate, sample, or
-intermediate. `attempts` exposes both kinds of work.
+rows. The separate `max_coarse_shrinks` budget (default 64) controls retries
+for a nonfinite coordinate, sample, or intermediate before the first valid
+row. `attempts` exposes both kinds of work. A budget of two valid rows can
+produce an estimate but cannot satisfy the two-row convergence check.
 
 The implementation combines second-order central or one-sided stencils with
 Richardson/Ridders extrapolation. Central errors are eliminated in powers
@@ -192,9 +195,24 @@ successive current refinement rows to satisfy both the requested tolerance and
 an inter-row consistency check. The returned converged value is that current
 candidate, not an older historical minimum.
 
+Coordinates use explicitly fused multiply-add. A resolution floor combines
+the measured defect between actual and intended node offsets with 16 binary64
+roundoffs per weighted sample, and propagates through the extrapolation
+coefficients. Convergence requires this floor as well as consistency to meet
+tolerance. This prevents repeated rounded stencil values from masquerading
+as accurate derivatives; very large constant offsets can be resolution limited
+even when every sample is identical. On failure, the reported error also
+includes disagreement with the latest usable extrapolation row.
+
+Only the previous and current Richardson rows are retained. The center sample
+is cached for second derivatives and one-sided schemes: with no retries,
+central first/second and one-sided first use respectively `2*levels`,
+`1+2*levels`, and `1+2*levels` evaluations; one-sided second uses `1+3*levels`.
+
 Visible statuses include `:converged`, `:max_levels`,
 `:roundoff_or_noise_limited`, `:step_unrepresentable`,
-`:nonfinite_abscissa`, `:nonfinite_sample`, and `:nonfinite_arithmetic`.
+`:nonfinite_abscissa`, `:nonfinite_sample`, `:unsupported_sample_type`, and
+`:nonfinite_arithmetic`.
 Configuration errors raise. Callback exceptions propagate. If no valid
 extrapolated estimate exists, `estimate_available?` is false and the value,
 error, step, and cancellation indicator are `nil`.
@@ -203,6 +221,29 @@ The callback must be a pure deterministic `f64 -> f64` function smooth near
 the query point. The error is a consistency estimate; it cannot establish
 differentiability, detect every scale, or separate truncation, roundoff, and
 sample noise. `NumericalDerivativeResult#certified?` is always false.
+
+For opaque vector inputs, `Calculus.numerical_gradient(f, point, scheme,
+initial_step, abs_tol, rel_tol, max_levels)` and `numerical_jacobian` use the
+same defaults and return `NumericalArrayResult`. Its `value` and
+`error_estimate` are a vector or row-major matrix; `component_results` retains
+the individual derivative diagnostics. `status` is the first component failure
+or `:converged`; the aggregate value is nil if any component has no estimate.
+Tolerances apply per component, not to a matrix norm. `evaluations` counts
+actual callback calls: Jacobian samples are shared across output components.
+Changing output length raises, and all inputs and callback entries must be f64.
+
+```w
+g = Calculus.numerical_gradient(-> (v) v[0]*v[1], [~2.0, ~3.0])
+j = Calculus.numerical_jacobian(
+  -> (v) [v[0]*v[1], v[0]*v[0]], [~2.0, ~3.0])
+g.value  # approximately [3, 2]
+j.value  # approximately [[3, 2], [4, 0]]
+```
+
+`Optim.fd_grad_result` exposes this result directly. `Optim.fd_grad` retains
+its vector return on convergence and raises with the status otherwise.
+`Autodiff.grad_fd` similarly checks convergence instead of returning a fixed
+step estimate without diagnostics.
 
 ## Gradients, Jacobians, and Hessians
 
@@ -228,6 +269,28 @@ piecewise-smooth `abs` and constant powers. Branches and singular points retain
 their ordinary analytic limitations; `abs` at zero and `cbrt` derivatives at
 zero fail loudly.
 
+Scalar AD facades reject array/non-scalar outputs and require returned active
+values to match the requested dimension or jet order. Real logarithms, inverse
+trigonometric/hyperbolic functions and square roots reject invalid domains and
+singular derivative points. NaN/infinite input points are rejected.
+
+`Calculus.jvp(f, point, tangent)` and `Calculus.vjp(f, point, cotangent)` delegate
+to the existing `Autodiff` module. JVP uses `Dual` tangent seeds and returns
+`{"value": primal, "jvp": directional_derivative}`. VJP records operations
+using `TapeValue` over `Tape` and returns `{"value": primal, "vjp": input_vector}`.
+The callback may return a scalar or Array; cotangent shape must match it.
+`Calculus.reverse_gradient(f, point)` is the scalar-output VJP seeded with one.
+
+Both paths support arithmetic, constant powers, `scale`, `sqrt`, `exp`, `log`,
+`sin`, `cos`, and `tanh`. Unsupported methods raise. Use methods on active
+values (e.g. `v[0].sin`) so operations are traced. Tape values from different
+recordings cannot be combined. Reverse propagation visits structural ancestors
+of the requested outputs, validates finite values and local derivatives, and
+ignores unrelated operations. This is runtime operator-overloading AD;
+compiler transformations, checkpointing, mutation analysis, and higher-order
+reverse differentiation are not provided. Derivatives describe the executed
+smooth program and do not certify differentiability at a branch boundary.
+
 ## Adaptive Simpson integration
 
 `Calculus.integrate` uses adaptive Simpson subdivision on a finite real
@@ -249,7 +312,7 @@ result.error_estimate
 result.evaluations
 result.intervals
 result.converged?
-result.status       # :converged or :max_depth
+result.status       # :converged, :max_depth, or a failure status (see below)
 result.algorithm    # :adaptive_simpson
 result.error_model  # :richardson_difference
 ```
@@ -270,13 +333,23 @@ Simpson/Richardson estimate, not an interval-arithmetic proof. Improper,
 oscillatory-specialized, singular, and multidimensional quadrature remain
 future capabilities.
 
+Simpson validates finite bounds/tolerances and samples, and reports
+`:nonfinite_integrand`, `:nonfinite_arithmetic`, or `:precision_limit` when
+appropriate. An initial failure has no estimate. A later failure may retain
+a complete earlier estimate with the failure status; inspect `converged?`.
+`:tolerance_not_met` indicates that the final accumulated error missed the
+global tolerance after the initial relative-tolerance allocation. Public result
+constructors reject contradictory availability, coverage, and convergence.
+
 ## Adaptive Gauss-Kronrod integration
 
 `Calculus.integrate_gk15` is a separate finite-real f64 path. Each panel uses
 an embedded 7-point Gauss / 15-point Kronrod pair, QUADPACK-style `resasc`
 rescaling, and a binary64 roundoff floor. The global controller repeatedly
-bisects the panel with the largest estimated error and rebuilds active-panel
-totals with compensated summation.
+bisects the panel with the largest estimated error using a stable max-heap.
+Compensated incremental totals are rebuilt as the partition doubles, before
+accepting convergence, and before returning. Equal errors retain the old
+active-array ordering. Rule constants are allocated once per integration.
 
 ```w
 result = Calculus.integrate_gk15(
@@ -305,7 +378,7 @@ result.complete_coverage?
 The algorithm is reported as `:adaptive_gk15` with error model
 `:embedded_gauss_kronrod`. Statuses include `:converged`, `:max_intervals`,
 `:max_evaluations`, `:roundoff_limited`, `:precision_limit`,
-`:nonfinite_integrand`, and `:nonfinite_arithmetic`. A successful initial panel
+`:nonfinite_integrand`, `:unsupported_sample_type`, and `:nonfinite_arithmetic`. A successful initial panel
 uses 15 evaluations; each accepted bisection adds 30, so a normal run satisfies
 `evaluations == 15 + 30 * (intervals - 1)`.
 
@@ -318,13 +391,29 @@ answer.
 
 Gauss-Kronrod agreement is still heuristic and can miss narrow or adversarial
 features. The method does not accept complex-valued integrands; use the
-existing Simpson path for those. Known discontinuities should be split by the
-caller. Panels whose smallest mapped weight would be subnormal stop with
+existing Simpson path for those. Callbacks must be pure and deterministic;
+sampling stops immediately on a failed sample or child panel. Panels whose
+smallest mapped weight would be subnormal stop with
 `:precision_limit`; so do nonzero mapped sample/deviation contributions that
 would be subnormal. This avoids trusting quantized embedded-rule agreement.
 Improper, singularity-specialized, oscillatory-specialized, and
 multidimensional rules remain separate future work. `certified?` is always
 false.
+
+`Calculus.integrate_with_points(f, lower, upper, points, abs_tol, rel_tol,
+max_intervals, max_evaluations)` initializes the same global GK15 controller
+at caller-declared breakpoints. Points must be finite, strictly ascending,
+unique, and interior, including when bounds are reversed. Both budgets include
+the initial partition and must cover it. There is one global error target;
+independently relaxed relative tolerances are not assigned to separate pieces.
+The open-node rule does not evaluate the breakpoint itself. With `p` initial
+pieces and no failed panel, `evaluations == 15*p + 30*(intervals-p)`.
+
+```w
+piecewise = -> (x) x < ~0.2 ? ~-2.0 : ~3.0
+q = Calculus.integrate_with_points(piecewise, ~0.0, ~1.0, [~0.2])
+q.value  # 2
+```
 
 ## Radial Mellin/Fourier identities
 

@@ -8,7 +8,7 @@
 + Calculus
   -> .gk15_tolerance(value, abs_tol, rel_tol)
     target = abs_tol
-    relative = rel_tol * Calculus.abs(value)
+    relative = Calculus.bounded_error(rel_tol * Calculus.abs(value))
     target = relative if relative > target
     target
 
@@ -40,7 +40,7 @@
 
   # Internal panel tuple:
   # [a, b, kronrod, gauss, error, resabs, resasc, status, evaluations]
-  -> .gk15_panel(f, a, b)
+  -> .gk15_rule
     nodes = [
       ~0.9914553711208126,
       ~0.9491079123427585,
@@ -66,6 +66,13 @@
       ~0.3818300505051189,
       ~0.4179591836734694
     ]
+    [nodes, kronrod_weights, gauss_weights]
+
+  -> .gk15_panel(f, a, b, rule = nil)
+    rule = Calculus.gk15_rule if rule == nil
+    nodes = rule[0]
+    kronrod_weights = rule[1]
+    gauss_weights = rule[2]
 
     center = ~0.5 * a + ~0.5 * b
     half = ~0.5 * b - ~0.5 * a
@@ -96,6 +103,8 @@
       return [a, b, nil, nil, nil, nil, nil, :precision_limit, 0]
 
     fc = f(center)
+    if fc.class_name != "Float"
+      return [a, b, nil, nil, nil, nil, nil, :unsupported_sample_type, 1]
     if !Calculus.finite_f64?(fc)
       return [a, b, nil, nil, nil, nil, nil,
               :nonfinite_integrand, 1]
@@ -125,7 +134,13 @@
     while i < nodes.size
       offset = half * nodes[i]
       fl = f(center - offset)
+      if fl.class_name != "Float"
+        return [a, b, nil, nil, nil, nil, nil, :unsupported_sample_type, 2 + 2*i]
+      if !Calculus.finite_f64?(fl)
+        return [a, b, nil, nil, nil, nil, nil, :nonfinite_integrand, 2 + 2*i]
       fr = f(center + offset)
+      if fr.class_name != "Float"
+        return [a, b, nil, nil, nil, nil, nil, :unsupported_sample_type, 3 + 2*i]
       samples_finite = Calculus.finite_f64?(fl)
       samples_finite = false if !Calculus.finite_f64?(fr)
       if !samples_finite
@@ -288,9 +303,82 @@
       worst_interval, worst_error, companion_out,
       estimate_available, complete_coverage)
 
+  -> .gk15_accumulate(state, value)
+    total = state[0]
+    updated = total + value
+    correction = state[1]
+    if Calculus.abs(total) >= Calculus.abs(value)
+      correction += (total - updated) + value
+    else
+      correction += (value - updated) + total
+    state[0] = updated
+    state[1] = correction
+    Calculus.finite_f64?(updated) && Calculus.finite_f64?(correction)
+
+  -> .gk15_rebuild(panels)
+    totals = []
+    field = 2
+    while field <= 5
+      value = Calculus.gk15_compensated_total(panels, field)
+      return nil if value == nil
+      totals.push([value, ~0.0])
+      field += 1
+    totals
+
+  -> .gk15_totals_values(totals)
+    out = []
+    i = 0
+    while i < 4
+      value = totals[i][0] + totals[i][1]
+      return nil if !Calculus.finite_f64?(value)
+      return nil if i >= 2 && value < ~0.0
+      out.push(value)
+      i += 1
+    out
+
+  # Stable priority: largest error, then lowest original active-array slot.
+  # Left children retain the parent's slot, exactly matching the old scan.
+  -> .gk15_precedes?(panels, a, b)
+    ea = panels[a][4]
+    eb = panels[b][4]
+    ea > eb || (ea == eb && a < b)
+
+  -> .gk15_heap_push(heap, panels, index)
+    heap.push(index)
+    child = heap.size - 1
+    while child > 0
+      parent = (child - 1) / 2
+      return heap if !Calculus.gk15_precedes?(panels, heap[child], heap[parent])
+      temporary = heap[parent]
+      heap[parent] = heap[child]
+      heap[child] = temporary
+      child = parent
+    heap
+
+  -> .gk15_heap_down(heap, panels)
+    parent = 0
+    while 2*parent + 1 < heap.size
+      child = 2*parent + 1
+      if child + 1 < heap.size && Calculus.gk15_precedes?(panels, heap[child + 1], heap[child])
+        child += 1
+      return heap if !Calculus.gk15_precedes?(panels, heap[child], heap[parent])
+      temporary = heap[parent]
+      heap[parent] = heap[child]
+      heap[child] = temporary
+      parent = child
+    heap
+
   -> .integrate_gk15(f, lower, upper,
                       abs_tol = ~1.0e-10, rel_tol = ~1.0e-10,
                       max_intervals = 1024, max_evaluations = 30_705)
+    Calculus.integrate_with_points(f, lower, upper, [],
+      abs_tol, rel_tol, max_intervals, max_evaluations)
+
+  # One global tolerance and work budget, including the initial partition.
+  # Breakpoints are ascending even when the integration direction is reversed.
+  -> .integrate_with_points(f, lower, upper, points,
+                             abs_tol = ~1.0e-10, rel_tol = ~1.0e-10,
+                             max_intervals = 1024, max_evaluations = 30_705)
     if !Calculus.finite_f64?(lower)
       raise "Gauss-Kronrod lower bound must be finite f64"
     if !Calculus.finite_f64?(upper)
@@ -303,107 +391,115 @@
       raise "Gauss-Kronrod max_intervals must be a positive integer"
     if !Calculus.integer?(max_evaluations) || max_evaluations < 15
       raise "Gauss-Kronrod max_evaluations must be at least fifteen"
+    if points.class_name != "Array"
+      raise "quadrature breakpoints must be an Array"
+    sign = lower <= upper ? ~1.0 : ~-1.0
+    a = lower <= upper ? lower : upper
+    b = lower <= upper ? upper : lower
+    boundaries = [a]
+    previous = a
+    points.each ->
+      if !Calculus.finite_f64?(item) || item <= previous || item >= b
+        raise "quadrature breakpoints must be finite, ascending, unique, and interior"
+      boundaries.push(item)
+      previous = item
+    boundaries.push(b)
+    if max_intervals < points.size + 1 || max_evaluations < 15*(points.size + 1)
+      raise "quadrature budgets must cover the initial breakpoint partition"
+    if a == b
+      return QuadratureResult.new(~0.0, ~0.0, 0, 0, true, :converged,
+        :adaptive_gk15, :embedded_gauss_kronrod, ~0.0, nil, nil, ~0.0, true, true)
 
-    if lower == upper
-      return QuadratureResult.new(
-        ~0.0, ~0.0, 0, 0, true, :converged,
-        :adaptive_gk15, :embedded_gauss_kronrod,
-        ~0.0, nil, nil, ~0.0, true, true)
-
-    sign = ~1.0
-    a = lower
-    b = upper
-    if b < a
-      temporary = a
-      a = b
-      b = temporary
-      sign = ~-1.0
-
-    first = Calculus.gk15_panel(f, a, b)
-    evaluations = first[8]
-    if first[7] != :ok
-      return Calculus.gk15_result(
-        sign, [], nil, nil, nil, nil, evaluations,
-        first[7], false, false)
-
-    panels = [first]
-    value = first[2]
-    companion = first[3]
-    error = first[4]
-    resabs = first[5]
+    rule = Calculus.gk15_rule
+    panels = []
+    heap = []
+    evaluations = 0
+    i = 0
+    while i + 1 < boundaries.size
+      panel = Calculus.gk15_panel(f, boundaries[i], boundaries[i + 1], rule)
+      evaluations += panel[8]
+      if panel[7] != :ok
+        return Calculus.gk15_result(sign, [], nil, nil, nil, nil,
+          evaluations, panel[7], false, false)
+      panels.push(panel)
+      Calculus.gk15_heap_push(heap, panels, i)
+      i += 1
+    totals = Calculus.gk15_rebuild(panels)
+    if totals == nil
+      return Calculus.gk15_result(sign, [], nil, nil, nil, nil,
+        evaluations, :nonfinite_arithmetic, false, false)
+    values = Calculus.gk15_totals_values(totals)
     status = :working
     roundoff_streak = 0
+    rebuild_at = 2*panels.size
 
     while status == :working
-      target = Calculus.gk15_tolerance(value, abs_tol, rel_tol)
-      if !Calculus.finite_f64?(target)
-        status = :nonfinite_arithmetic
-      elsif error <= target
-        status = :converged
-      elsif panels.size >= max_intervals
-        status = :max_intervals
-      elsif evaluations + 30 > max_evaluations
-        status = :max_evaluations
-      else
-        index = Calculus.gk15_largest_error_index(panels)
-        old = panels[index]
-        middle = ~0.5 * old[0] + ~0.5 * old[1]
-        if middle == old[0] || middle == old[1]
-          status = :precision_limit
+      if Calculus.within_tolerance?(values[2], Calculus.abs(values[0]), abs_tol, rel_tol)
+        # Recheck the full active partition before accepting incremental sums.
+        totals = Calculus.gk15_rebuild(panels)
+        if totals == nil
+          status = :nonfinite_arithmetic
         else
-          left = Calculus.gk15_panel(f, old[0], middle)
-          right = Calculus.gk15_panel(f, middle, old[1])
-          evaluations += left[8] + right[8]
+          values = Calculus.gk15_totals_values(totals)
+          if Calculus.within_tolerance?(values[2], Calculus.abs(values[0]), abs_tol, rel_tol)
+            status = :converged
+      if status == :working
+        if panels.size >= max_intervals
+          status = :max_intervals
+        elsif evaluations + 30 > max_evaluations
+          status = :max_evaluations
+        elsif roundoff_streak >= 8
+          status = :roundoff_limited
+        else
+          index = heap[0]
+          old = panels[index]
+          middle = Calculus.midpoint(old[0], old[1])
+          left = Calculus.gk15_panel(f, old[0], middle, rule)
+          evaluations += left[8]
           if left[7] != :ok
             status = left[7]
-          elsif right[7] != :ok
-            status = right[7]
           else
-            candidate_panels = Calculus.copy_vector(panels)
-            candidate_panels[index] = left
-            candidate_panels.push(right)
-            candidate_value = Calculus.gk15_compensated_total(
-              candidate_panels, 2)
-            candidate_companion = Calculus.gk15_compensated_total(
-              candidate_panels, 3)
-            candidate_error = Calculus.gk15_compensated_total(
-              candidate_panels, 4)
-            candidate_resabs = Calculus.gk15_compensated_total(
-              candidate_panels, 5)
-            totals_valid = candidate_value != nil
-            totals_valid = false if candidate_companion == nil
-            totals_valid = false if candidate_error == nil
-            totals_valid = false if candidate_resabs == nil
-            if !totals_valid
-              status = :nonfinite_arithmetic
+            right = Calculus.gk15_panel(f, middle, old[1], rule)
+            evaluations += right[8]
+            if right[7] != :ok
+              status = right[7]
             else
-              child_error = left[4] + right[4]
-              child_value = left[2] + right[2]
-              value_change = Calculus.abs(child_value - old[2])
-              value_scale = Calculus.abs(old[2])
-              value_scale = ~1.0 if value_scale < ~1.0
-              value_floor = ~1.1102230246251565e-14 * value_scale
-              stalled = child_error >= ~0.99 * old[4]
-              stalled = false if value_change > value_floor
-              if stalled
-                roundoff_streak += 1
-              else
-                roundoff_streak = 0
-
-              panels = candidate_panels
-              value = candidate_value
-              companion = candidate_companion
-              error = candidate_error
-              resabs = candidate_resabs
-              candidate_target = Calculus.gk15_tolerance(
-                value, abs_tol, rel_tol)
-              if !Calculus.finite_f64?(candidate_target)
+              previous_values = values
+              panels[index] = left
+              panels.push(right)
+              field = 0
+              incremental_ok = true
+              while field < 4
+                incremental_ok = Calculus.gk15_accumulate(totals[field], ~0.0 - old[field + 2]) && incremental_ok
+                incremental_ok = Calculus.gk15_accumulate(totals[field], left[field + 2]) && incremental_ok
+                incremental_ok = Calculus.gk15_accumulate(totals[field], right[field + 2]) && incremental_ok
+                field += 1
+              values = Calculus.gk15_totals_values(totals)
+              if !incremental_ok || values == nil || panels.size >= rebuild_at
+                totals = Calculus.gk15_rebuild(panels)
+                values = totals == nil ? nil : Calculus.gk15_totals_values(totals)
+                rebuild_at = 2*panels.size
+              if values == nil
+                # Restore the last full partition; the heap is not changed yet.
+                panels.pop
+                panels[index] = old
+                values = previous_values
                 status = :nonfinite_arithmetic
-              elsif error <= candidate_target
-                status = :converged
-              elsif roundoff_streak >= 8
-                status = :roundoff_limited
+              else
+                Calculus.gk15_heap_down(heap, panels)
+                Calculus.gk15_heap_push(heap, panels, panels.size - 1)
+                child_error = left[4] + right[4]
+                child_value = left[2] + right[2]
+                value_change = Calculus.abs(child_value - old[2])
+                value_scale = Calculus.abs(old[2])
+                value_scale = ~1.0 if value_scale < ~1.0
+                stalled = child_error >= ~0.99*old[4] && value_change <= ~1.1102230246251565e-14*value_scale
+                roundoff_streak = stalled ? roundoff_streak + 1 : 0
 
-    Calculus.gk15_result(
-      sign, panels, value, companion, error, resabs,
-      evaluations, status, true, true)
+    final_totals = Calculus.gk15_rebuild(panels)
+    if final_totals != nil
+      values = Calculus.gk15_totals_values(final_totals)
+    else
+      status = :nonfinite_arithmetic
+    Calculus.gk15_result(sign, panels, values[0], values[1], values[2],
+      values[3], evaluations, status, true, true)

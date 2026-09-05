@@ -51,22 +51,13 @@
     {:x => x, :fun => f(x)}
 
   -> .fd_grad(f, x)
-    h = ~0.000001
-    g = []
-    i = 0
-    while i < x.size()
-      xp = []
-      xm = []
-      j = 0
-      while j < x.size()
-        xp = xp.push(x[j])
-        xm = xm.push(x[j])
-        j = j + 1
-      xp[i] = xp[i] + h
-      xm[i] = xm[i] - h
-      g = g.push((f(xp) - f(xm)) / (~2.0 * h))
-      i = i + 1
-    g
+    result = Optim.fd_grad_result(f, x)
+    if !result.converged?
+      raise "Optim.fd_grad: numerical gradient " + result.status.to_s
+    result.value
+
+  -> .fd_grad_result(f, x, abs_tol = ~1.0e-10, rel_tol = ~1.0e-8)
+    Calculus.numerical_gradient(f, x, :central, nil, abs_tol, rel_tol)
 
   -> .minimize_nm(f, x0, iters)
     # thin wrapper: coordinate descent fallback for v0

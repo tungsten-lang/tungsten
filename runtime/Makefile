@@ -251,7 +251,36 @@ test-goroutines: tests/test_goroutines
 tests/test_goroutines: tests/test_goroutines.c $(RUNTIME_DEPS)
 	$(CLANG) -O2 $(RUNTIME_CFLAGS) -pthread $(RUNTIME_SRCS) tests/test_goroutines.c $(RUNTIME_LDFLAGS) -o tests/test_goroutines
 
+# Includes runtime.c to exercise the actual private queue/publication helpers.
+test-scheduler-fifo-park: tests/test_scheduler_fifo_park
+	./tests/test_scheduler_fifo_park
+
+tests/test_scheduler_fifo_park: tests/test_scheduler_fifo_park.c $(RUNTIME_DEPS)
+	$(CLANG) -O2 $(RUNTIME_CFLAGS) -pthread -I$(RUNTIME_DIR) tests/test_scheduler_fifo_park.c $(filter-out runtime.c,$(RUNTIME_SRCS)) $(RUNTIME_LDFLAGS) -o $@
+
+test-scheduler-sync-migration: tests/test_scheduler_sync_migration
+	./tests/test_scheduler_sync_migration
+
+tests/test_scheduler_sync_migration: tests/test_scheduler_sync_migration.c $(RUNTIME_DEPS)
+	$(CLANG) -O2 $(RUNTIME_CFLAGS) -pthread -I$(RUNTIME_DIR) tests/test_scheduler_sync_migration.c $(filter-out runtime.c,$(RUNTIME_SRCS)) $(RUNTIME_LDFLAGS) -o $@
+
+test-scheduler-evented-idle: tests/test_scheduler_evented_idle
+	./tests/test_scheduler_evented_idle
+
+tests/test_scheduler_evented_idle: tests/test_scheduler_evented_idle.c $(RUNTIME_DEPS)
+	$(CLANG) -O2 $(RUNTIME_CFLAGS) -pthread -I$(RUNTIME_DIR) tests/test_scheduler_evented_idle.c $(filter-out runtime.c,$(RUNTIME_SRCS)) $(RUNTIME_LDFLAGS) -o $@
+
+.PHONY: test-scheduler-fifo-park test-scheduler-sync-migration test-scheduler-evented-idle
+
 # Event loop + non-blocking I/O test
+test-event-deadlines: tests/test_event_deadlines
+	./tests/test_event_deadlines
+
+tests/test_event_deadlines: tests/test_event_deadlines.c $(RUNTIME_DEPS)
+	$(CLANG) -O2 $(RUNTIME_CFLAGS) -pthread $(RUNTIME_SRCS) tests/test_event_deadlines.c $(RUNTIME_LDFLAGS) -o $@
+
+.PHONY: test-event-deadlines
+
 test-event-loop: tests/test_event_loop
 	./tests/test_event_loop
 

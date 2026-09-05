@@ -5,7 +5,12 @@ cancellation at most every 5 ms. `Channel.select` rotates nonblocking probes
 and sleeps 100 microseconds. Runtime channel/mutex waits likewise yield or
 sleep. Socket I/O already parks goroutines through `runtime/event_loop.h`.
 
-I propose one shared wait-registration protocol, integrated in stages:
+The [scheduler ownership tranche](scheduler-ownership.md) implements the
+cooperative deadline/wakeup backend in step 1, including sticky cross-thread
+wakes and safe park/commit publication. Core Timer, channel and mutex waiting
+have not yet migrated; M:P retains its shared deadline list and idle tick.
+
+The shared wait-registration protocol is being integrated in stages:
 
 1. Add monotonic deadline heaps and a cross-thread wakeup source to the existing
    kqueue/epoll backends. The next heap deadline bounds the blocking poll. A
@@ -46,7 +51,8 @@ channels: CPU time, native-thread count, memory, and wakeup p50/p99. Idle CPU
 and waiting-thread count should fall without regressing wakeup tails or
 changing cancellation outcomes.
 
-This entry is the requested migration proposal. It does not change the default
-scheduler or claim that polling has already been removed. The first concrete
-implementation should be the deadline/wakeup backend API; a timer-only patch
-without interrupting a blocked poll would have a lost-wakeup bug.
+This entry records the remaining migration contracts, not a claim that all
+polling is removed. The deadline/wakeup backend is now available for cooperative
+socket waits. Moving Core Timer onto it still requires preserving its callback,
+cancellation and join contracts; a timer-only patch without interrupting a
+blocked poll would have a lost-wakeup bug.

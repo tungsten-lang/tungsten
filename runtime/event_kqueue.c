@@ -15,24 +15,50 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <errno.h>
+#include <mach/mach_time.h>
 
 struct WEventLoop {
     int kq;
+    WEventDeadlineQueue deadlines;
 };
+
+WEventDeadlineQueue *w_event_deadline_queue(WEventLoop *el) { return &el->deadlines; }
 
 WEventLoop *w_event_init(void) {
     int kq = kqueue();
     if (kq < 0) return NULL;
 
     WEventLoop *el = malloc(sizeof(WEventLoop));
+    if (!el) { close(kq); return NULL; }
     el->kq = kq;
+    if (w_event_deadline_queue_init(&el->deadlines) != 0) {
+        close(kq);
+        free(el);
+        return NULL;
+    }
+    struct kevent wake;
+    EV_SET(&wake, 0, EVFILT_USER, EV_ADD | EV_CLEAR, 0, 0, NULL);
+    if (kevent(kq, &wake, 1, NULL, 0, NULL) < 0) {
+        w_event_destroy(el);
+        return NULL;
+    }
     return el;
 }
 
 void w_event_destroy(WEventLoop *el) {
     if (!el) return;
     close(el->kq);
+    w_event_deadline_queue_destroy(&el->deadlines);
     free(el);
+}
+
+int w_event_wake(WEventLoop *el) {
+    struct kevent wake;
+    EV_SET(&wake, 0, EVFILT_USER, 0, NOTE_TRIGGER, 0, NULL);
+    int result;
+    do { result = kevent(el->kq, &wake, 1, NULL, 0, NULL); }
+    while (result < 0 && errno == EINTR);
+    return result;
 }
 
 void w_event_register(WEventLoop *el, int fd, int events, WGoroutine *g) {
@@ -62,8 +88,12 @@ void w_event_unregister(WEventLoop *el, int fd) {
 }
 
 int w_event_poll(WEventLoop *el, int timeout_ms, WGoroutine **out, int max_out) {
+    if (max_out <= 0) return 0;
     struct kevent events[64];
     int nevents = max_out < 64 ? max_out : 64;
+    int requested_timeout = timeout_ms;
+    int64_t deadline;
+    timeout_ms = w_event_deadline_prepare_poll(el, timeout_ms, &deadline);
 
     struct timespec ts;
     struct timespec *tsp = NULL;
@@ -73,9 +103,29 @@ int w_event_poll(WEventLoop *el, int timeout_ms, WGoroutine **out, int max_out) 
         tsp = &ts;
     }
 
+    /* The public poll budget is milliseconds, but a monotonic deadline must
+     * not acquire a whole millisecond of extra rounding on kqueue. polling
+     * was armed with the captured frontier above; later changes wake us. */
+    if (deadline > 0) {
+        int64_t now = __w_clock_ticks_raw();
+        static __thread mach_timebase_info_data_t tb;
+        if (tb.denom == 0) mach_timebase_info(&tb);
+        __uint128_t ns = deadline <= now ? 0 :
+            ((__uint128_t)(uint64_t)(deadline - now) * tb.numer + tb.denom - 1) / tb.denom;
+        if (tsp == NULL || ns < (__uint128_t)(uint64_t)timeout_ms * 1000000) {
+            if (ns > INT64_MAX) ns = INT64_MAX;
+            ts.tv_sec = (time_t)(ns / 1000000000);
+            ts.tv_nsec = (long)(ns % 1000000000);
+            tsp = &ts;
+        }
+    }
+
     int n = kevent(el->kq, NULL, 0, events, nevents, tsp);
+    int poll_errno = errno;
+    w_event_deadline_finish_poll(el, requested_timeout);
     if (n < 0) {
-        if (errno == EINTR) return 0;
+        errno = poll_errno;
+        if (poll_errno == EINTR) return 0;
         return -1;
     }
 

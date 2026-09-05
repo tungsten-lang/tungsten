@@ -41,6 +41,8 @@
 struct WEventLoop {
     /* Readiness backend (epoll) */
     int epfd;
+    int wake_fd;
+    WEventDeadlineQueue deadlines;
 
     /* Completion backend (io_uring) */
     struct io_uring ring;
@@ -64,17 +66,31 @@ struct WEventLoop {
     int has_send_zc;     /* IORING_OP_SEND_ZC available */
 };
 
+WEventDeadlineQueue *w_event_deadline_queue(WEventLoop *el) { return &el->deadlines; }
+
 /* ==== Init / Destroy ==== */
 
 WEventLoop *w_event_init(void) {
     WEventLoop *el = calloc(1, sizeof(WEventLoop));
     if (!el) return NULL;
     el->uring_efd = -1;
+    el->wake_fd = -1;
     el->send_free_top = -1;
 
     /* Always create epoll for readiness */
     el->epfd = epoll_create1(EPOLL_CLOEXEC);
     if (el->epfd < 0) { free(el); return NULL; }
+    if (w_event_deadline_queue_init(&el->deadlines) != 0) {
+        close(el->epfd);
+        free(el);
+        return NULL;
+    }
+    el->wake_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+    struct epoll_event wake = { .events = EPOLLIN, .data.ptr = el };
+    if (el->wake_fd < 0 || epoll_ctl(el->epfd, EPOLL_CTL_ADD, el->wake_fd, &wake) < 0) {
+        w_event_destroy(el);
+        return NULL;
+    }
 
     /* Try io_uring (SQPOLL → basic → fail) */
     struct io_uring_params params;
@@ -159,6 +175,7 @@ WEventLoop *w_event_init(void) {
 
 void w_event_destroy(WEventLoop *el) {
     if (!el) return;
+    if (el->wake_fd >= 0) close(el->wake_fd);
     if (el->uring_efd >= 0) close(el->uring_efd);
     close(el->epfd);
     if (el->has_uring) {
@@ -170,7 +187,16 @@ void w_event_destroy(WEventLoop *el) {
     }
     if (el->recv_base) munmap(el->recv_base, (size_t)RECV_BUF_COUNT * RECV_BUF_SIZE);
     if (el->send_base) munmap(el->send_base, (size_t)SEND_BUF_COUNT * SEND_BUF_SIZE);
+    w_event_deadline_queue_destroy(&el->deadlines);
     free(el);
+}
+
+int w_event_wake(WEventLoop *el) {
+    uint64_t one = 1;
+    ssize_t result;
+    do { result = write(el->wake_fd, &one, sizeof(one)); }
+    while (result < 0 && errno == EINTR);
+    return result == sizeof(one) || (result < 0 && errno == EAGAIN) ? 0 : -1;
 }
 
 /* ==== Readiness API (epoll) ==== */
@@ -423,6 +449,7 @@ static int harvest_cqes(WEventLoop *el, WGoroutine **out, int count, int max_out
 }
 
 int w_event_poll(WEventLoop *el, int timeout_ms, WGoroutine **out, int max_out) {
+    if (max_out <= 0) return 0;
     int count = 0;
 
     /* Check for pending CQEs first — no syscall, just shared memory scan.
@@ -432,23 +459,33 @@ int w_event_poll(WEventLoop *el, int timeout_ms, WGoroutine **out, int max_out) 
         count = harvest_cqes(el, out, count, max_out);
     }
 
-    /* epoll_wait: readiness events + io_uring eventfd notifications.
-     * Limit nevents to available out[] slots + 1 for the eventfd, so we
+    /* epoll_wait: readiness events + io_uring/wakeup eventfd notifications.
+     * Limit nevents to available out[] slots, so we
      * never consume (and disarm via EPOLLONESHOT) more events than we can
      * deliver. Without this limit, goroutines whose events are consumed
      * but not processed become orphaned with disarmed fds. */
     struct epoll_event events[64];
     int slots = max_out - count;
-    int nevents = (slots + 1) < 64 ? (slots + 1) : 64;  /* +1 for eventfd */
-    if (nevents < 1) nevents = 1;  /* always check for at least the eventfd */
+    if (slots <= 0) return count;
+    int nevents = slots < 64 ? slots : 64;
+    int requested_timeout = count > 0 ? 0 : timeout_ms;
+    timeout_ms = w_event_deadline_prepare_poll(el, requested_timeout, NULL);
 
-    int n = epoll_wait(el->epfd, events, nevents, count > 0 ? 0 : timeout_ms);
+    int n = epoll_wait(el->epfd, events, nevents, timeout_ms);
+    int poll_errno = errno;
+    w_event_deadline_finish_poll(el, requested_timeout);
     if (n < 0) {
-        if (errno == EINTR) return count;
+        errno = poll_errno;
+        if (poll_errno == EINTR) return count;
         return count > 0 ? count : -1;
     }
 
     for (int i = 0; i < n; i++) {
+        if (events[i].data.ptr == el) {
+            uint64_t val;
+            while (read(el->wake_fd, &val, sizeof(val)) < 0 && errno == EINTR) {}
+            continue;
+        }
         if (events[i].data.ptr == NULL) {
             uint64_t val;
             (void)read(el->uring_efd, &val, sizeof(val));

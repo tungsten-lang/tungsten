@@ -1483,7 +1483,15 @@ typedef enum {
     G_RUNNABLE,
     G_RUNNING,
     G_WAITING,
-    G_DEAD
+    G_DEAD,
+    /* Transitional states retain stack ownership until the scheduler has
+     * saved the context. WAKING_PARKED records a committed park while a
+     * concurrent waker is still finishing the result/registration cleanup. */
+    G_YIELDING,
+    G_PARKING,
+    G_WAKING,
+    G_NOTIFIED,
+    G_WAKING_PARKED
 } GState;
 
 /* Lightweight context for goroutine switching — replaces ucontext_t.
@@ -1516,22 +1524,47 @@ typedef ucontext_t WContext;
 typedef struct WGoroutine {
     WContext ctx;
     void *stack_base;
-    GState state;
-    int queued;               /* true while present in any scheduler queue */
+    _Atomic GState state;
+    _Atomic int queued;       /* true while present in any scheduler queue */
     WValue closure;
     WValue result;
-    struct WGoroutine *next;  /* run queue link */
+    /* A G cannot be both queued and deadline-linked. Reuse the queue link as
+     * the deadline predecessor while parked, keeping cancellation O(1)
+     * without growing this hot structure. Deadline links are lock-protected. */
+    struct WGoroutine *next;
     int wait_fd;              /* fd this goroutine is parked on (-1 = none) */
     int wait_events;          /* W_EVENT_READ / W_EVENT_WRITE */
     int wait_timed_out;       /* set when a deadline wakes this goroutine */
-    int deadline_linked;      /* lazily-cleared deadline-heap membership */
+    int deadline_linked;      /* 0 detached, 1 cooperative heap, 2 M:P list */
     int64_t wait_deadline_ticks;
     WEventLoop *wait_loop;
-    struct WGoroutine *deadline_next;
+    union {                  /* heap index or M:P list link; never both */
+        size_t deadline_index;
+        struct WGoroutine *deadline_next;
+    };
     int32_t io_result;        /* io_uring CQE result: bytes transferred or -errno */
     int16_t io_buf_id;        /* provided buffer ID from CQE (-1 = none) */
     uint8_t io_zc_pending;    /* waiting for SEND_ZC notification CQE */
+    uint8_t deadline_kind;    /* stable wait domain, even after eager detach */
 } WGoroutine;
+
+/* One polling owner per loop. Producers may update deadlines concurrently;
+ * the mutex protects frontier publication and arming a blocking poll. */
+typedef struct {
+    pthread_mutex_t lock;
+    WGoroutine **heap;
+    size_t count;
+    size_t capacity;
+    int polling;
+} WEventDeadlineQueue;
+
+int w_event_deadline_queue_init(WEventDeadlineQueue *q);
+void w_event_deadline_queue_destroy(WEventDeadlineQueue *q);
+WEventDeadlineQueue *w_event_deadline_queue(WEventLoop *el);
+/* With deadline_out, return the original budget plus one armed absolute
+ * snapshot for a precise backend clamp; otherwise clamp in milliseconds. */
+int w_event_deadline_prepare_poll(WEventLoop *el, int timeout_ms, int64_t *deadline_out);
+void w_event_deadline_finish_poll(WEventLoop *el, int timeout_ms);
 
 WValue w_goroutine_spawn(WValue closure);
 void   w_goroutine_yield(void);
@@ -1544,18 +1577,19 @@ WValue w_scheduler_run_w(void);
 #define W_MAX_PROCESSORS 64
 #define W_LOCAL_QUEUE_MAX 256
 
-/* Metadata first, then the 2 KB queue array on its own cache-line boundary —
- * queue churn (push/pop/steal) no longer evicts the metadata line, and the
- * head/tail CAS words live one line apart from the slot array they index. */
+/* Single-producer, multiple-consumer FIFO. The owning worker publishes tail;
+ * owner and thieves claim entries through the same atomic head. Atomic slots
+ * also make speculative reads of concurrently reused ring slots race-free.
+ * 64-bit positions avoid signed overflow and short-lived head ABA. */
 typedef struct WProcessor {
     int id;
-    volatile int local_head;  /* steal from head */
-    volatile int local_tail;  /* push/pop from tail */
+    _Atomic uint64_t local_head;
+    _Atomic uint64_t local_tail;
     volatile int spinning;
     volatile int active;
     pthread_t thread;
     WEventLoop *event_loop;   /* per-processor event loop for I/O parking */
-    WGoroutine *local_queue[W_LOCAL_QUEUE_MAX] __attribute__((aligned(64)));
+    _Atomic(WGoroutine *) local_queue[W_LOCAL_QUEUE_MAX] __attribute__((aligned(64)));
 } WProcessor;
 
 void w_scheduler_init(void);

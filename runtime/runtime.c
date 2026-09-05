@@ -63779,8 +63779,16 @@ void w_ctx_swap(WContext *save, WContext *restore);
 #endif
 static __thread WEventLoop *g_coop_event_loop = NULL;  /* cooperative scheduler's event loop (per-thread) */
 
+/* M:P still permits cross-worker expiry while a wait's owning processor is
+ * busy. Cooperative waits use only their event loop's indexed frontier. */
 static pthread_mutex_t g_wait_deadline_lock = PTHREAD_MUTEX_INITIALIZER;
 static WGoroutine *g_wait_deadline_head = NULL;
+
+/* Deterministic scheduler tests can stop at publication boundaries. Normal
+ * builds emit no hook or branch. 1 = wake claimed, 2 = just before park swap. */
+#ifndef W_SCHEDULER_TEST_HOOK
+#define W_SCHEDULER_TEST_HOOK(point, g) ((void)0)
+#endif
 
 static int w_deadline_expired(int64_t deadline_ticks) {
     return deadline_ticks > 0 && __w_clock_ticks_raw() >= deadline_ticks;
@@ -63793,7 +63801,7 @@ static int w_deadline_timeout_ms(int64_t deadline_ticks, int default_ms) {
     if (now >= deadline_ticks) return 0;
 
 #ifdef __APPLE__
-    static mach_timebase_info_data_t tb;
+    static __thread mach_timebase_info_data_t tb;
     if (tb.denom == 0) mach_timebase_info(&tb);
     uint64_t delta_ticks = (uint64_t)(deadline_ticks - now);
     uint64_t ns = delta_ticks / (uint64_t)tb.denom * (uint64_t)tb.numer;
@@ -63810,7 +63818,7 @@ static int w_deadline_timeout_ms(int64_t deadline_ticks, int default_ms) {
 /* Absolute deadline (monotonic ticks) `ms` milliseconds from now. */
 static int64_t w_deadline_ticks_after_ms(int64_t ms) {
 #ifdef __APPLE__
-    static mach_timebase_info_data_t tb;
+    static __thread mach_timebase_info_data_t tb;
     if (tb.denom == 0) mach_timebase_info(&tb);
     uint64_t ticks_per_ms = (1000000ULL * (uint64_t)tb.denom) / (uint64_t)tb.numer;
     return __w_clock_ticks_raw() + ms * (int64_t)ticks_per_ms;
@@ -63819,46 +63827,307 @@ static int64_t w_deadline_ticks_after_ms(int64_t ms) {
 #endif
 }
 
+int w_event_deadline_queue_init(WEventDeadlineQueue *q) {
+    memset(q, 0, sizeof(*q));
+    return pthread_mutex_init(&q->lock, NULL);
+}
+
+void w_event_deadline_queue_destroy(WEventDeadlineQueue *q) {
+    /* Poller/producers have stopped; waiting goroutines are still alive. */
+    for (size_t i = 0; i < q->count; i++) {
+        q->heap[i]->deadline_linked = 0;
+        q->heap[i]->deadline_index = 0;
+        q->heap[i]->wait_loop = NULL;
+        q->heap[i]->deadline_kind = 0;
+    }
+    free(q->heap);
+    pthread_mutex_destroy(&q->lock);
+}
+
+static void event_deadline_up(WEventDeadlineQueue *q, size_t i) {
+    WGoroutine *g = q->heap[i];
+    while (i > 0) {
+        size_t parent = (i - 1) / 2;
+        if (q->heap[parent]->wait_deadline_ticks <= g->wait_deadline_ticks) break;
+        q->heap[i] = q->heap[parent];
+        q->heap[i]->deadline_index = i;
+        i = parent;
+    }
+    q->heap[i] = g;
+    g->deadline_index = i;
+}
+
+static void event_deadline_down(WEventDeadlineQueue *q, size_t i) {
+    WGoroutine *g = q->heap[i];
+    while (i < q->count / 2) {
+        size_t child = 2 * i + 1;
+        if (child + 1 < q->count &&
+            q->heap[child + 1]->wait_deadline_ticks < q->heap[child]->wait_deadline_ticks)
+            child++;
+        if (g->wait_deadline_ticks <= q->heap[child]->wait_deadline_ticks) break;
+        q->heap[i] = q->heap[child];
+        q->heap[i]->deadline_index = i;
+        i = child;
+    }
+    q->heap[i] = g;
+    g->deadline_index = i;
+}
+
+static void event_deadline_remove(WEventDeadlineQueue *q, WGoroutine *g) {
+    size_t i = g->deadline_index;
+    WGoroutine *tail = q->heap[--q->count];
+    if (i < q->count) {
+        q->heap[i] = tail;
+        tail->deadline_index = i;
+        if (i > 0 && tail->wait_deadline_ticks < q->heap[(i - 1) / 2]->wait_deadline_ticks)
+            event_deadline_up(q, i);
+        else
+            event_deadline_down(q, i);
+    }
+    g->deadline_linked = 0;
+    g->deadline_index = 0;
+}
+
+int w_event_deadline_set(WEventLoop *el, WGoroutine *g, int64_t ticks) {
+    if (!el || !g || ticks <= 0) { errno = EINVAL; return -1; }
+    WEventDeadlineQueue *q = w_event_deadline_queue(el);
+    pthread_mutex_lock(&q->lock);
+    if (g->deadline_linked && (g->deadline_linked != 1 || g->wait_loop != el)) {
+        pthread_mutex_unlock(&q->lock);
+        errno = EINVAL;
+        return -1;
+    }
+    int64_t old_first = q->count ? q->heap[0]->wait_deadline_ticks : 0;
+    if (!g->deadline_linked) {
+        if (q->count == q->capacity) {
+            size_t cap = q->capacity ? q->capacity * 2 : 16;
+            if (cap < q->capacity || cap > SIZE_MAX / sizeof(*q->heap)) {
+                pthread_mutex_unlock(&q->lock);
+                errno = ENOMEM;
+                return -1;
+            }
+            WGoroutine **heap = realloc(q->heap, cap * sizeof(*heap));
+            if (!heap) { pthread_mutex_unlock(&q->lock); return -1; }
+            q->heap = heap;
+            q->capacity = cap;
+        }
+        g->wait_loop = el;
+        g->deadline_kind = 1;
+        g->wait_deadline_ticks = ticks;
+        g->deadline_linked = 1;
+        g->deadline_index = q->count;
+        q->heap[q->count++] = g;
+        event_deadline_up(q, g->deadline_index);
+    } else {
+        int64_t old = g->wait_deadline_ticks;
+        g->wait_deadline_ticks = ticks;
+        if (ticks < old) event_deadline_up(q, g->deadline_index);
+        else if (ticks > old) event_deadline_down(q, g->deadline_index);
+    }
+    int wake = q->polling && old_first != q->heap[0]->wait_deadline_ticks;
+    pthread_mutex_unlock(&q->lock);
+    if (wake && w_event_wake(el) < 0) die("event loop deadline wake failed");
+    return 0;
+}
+
+int w_event_deadline_cancel(WEventLoop *el, WGoroutine *g) {
+    if (!el || !g) return 0;
+    WEventDeadlineQueue *q = w_event_deadline_queue(el);
+    pthread_mutex_lock(&q->lock);
+    int found = g->deadline_linked == 1 && g->wait_loop == el;
+    int wake = found && g->deadline_index == 0 && q->polling;
+    if (found) event_deadline_remove(q, g);
+    pthread_mutex_unlock(&q->lock);
+    if (wake && w_event_wake(el) < 0) die("event loop deadline wake failed");
+    return found;
+}
+
+int64_t w_event_deadline_next(WEventLoop *el) {
+    WEventDeadlineQueue *q = w_event_deadline_queue(el);
+    pthread_mutex_lock(&q->lock);
+    int64_t next = q->count ? q->heap[0]->wait_deadline_ticks : 0;
+    pthread_mutex_unlock(&q->lock);
+    return next;
+}
+
+WGoroutine *w_event_deadline_pop(WEventLoop *el, int64_t now) {
+    WEventDeadlineQueue *q = w_event_deadline_queue(el);
+    pthread_mutex_lock(&q->lock);
+    WGoroutine *g = q->count ? q->heap[0] : NULL;
+    if (g && g->wait_deadline_ticks <= now) event_deadline_remove(q, g);
+    else g = NULL;
+    pthread_mutex_unlock(&q->lock);
+    return g;
+}
+
+int w_event_deadline_prepare_poll(WEventLoop *el, int timeout_ms, int64_t *deadline_out) {
+    if (deadline_out) *deadline_out = 0;
+    if (timeout_ms == 0) return 0;
+    WEventDeadlineQueue *q = w_event_deadline_queue(el);
+    pthread_mutex_lock(&q->lock);
+    /* Arm before taking the snapshot: a concurrent earlier insertion either
+     * appears in this snapshot or triggers a persistent kernel wake event. */
+    q->polling = 1;
+    int64_t next = q->count ? q->heap[0]->wait_deadline_ticks : 0;
+    pthread_mutex_unlock(&q->lock);
+    /* A high-resolution backend applies this one captured deadline directly;
+     * do not read the clock and round it to milliseconds only to undo that. */
+    if (deadline_out) {
+        *deadline_out = next;
+        return timeout_ms;
+    }
+    if (next) {
+        int deadline_ms = w_deadline_timeout_ms(next, -1);
+        if (timeout_ms < 0 || deadline_ms < timeout_ms) timeout_ms = deadline_ms;
+    }
+    return timeout_ms;
+}
+
+void w_event_deadline_finish_poll(WEventLoop *el, int timeout_ms) {
+    if (timeout_ms == 0) return;
+    WEventDeadlineQueue *q = w_event_deadline_queue(el);
+    pthread_mutex_lock(&q->lock);
+    q->polling = 0;
+    pthread_mutex_unlock(&q->lock);
+}
+
 static void g_deadline_add(WGoroutine *g) {
-    if (g->wait_deadline_ticks <= 0 || g->deadline_linked) return;
+    if (g->wait_deadline_ticks <= 0) return;
+    if (!p_current) {
+        if (w_event_deadline_set(g->wait_loop, g, g->wait_deadline_ticks) < 0) {
+            atomic_store_explicit(&g->state, G_RUNNING, memory_order_relaxed);
+            w_raise(w_string("event deadline allocation failed"));
+        }
+        return;
+    }
+    g->deadline_kind = 2;
     pthread_mutex_lock(&g_wait_deadline_lock);
     if (!g->deadline_linked) {
+        g->next = NULL;
         g->deadline_next = g_wait_deadline_head;
+        if (g_wait_deadline_head) g_wait_deadline_head->next = g;
         g_wait_deadline_head = g;
-        g->deadline_linked = 1;
+        g->deadline_linked = 2;
     }
     pthread_mutex_unlock(&g_wait_deadline_lock);
 }
 
-static int g_try_wake_waiting(WGoroutine *g, int timed_out) {
-    if (!g) return 0;
-    if (__sync_bool_compare_and_swap(&g->state, G_WAITING, G_RUNNABLE)) {
-        g->wait_timed_out = timed_out;
-        if (timed_out && g->wait_loop && g->wait_fd >= 0) {
-            w_event_unregister(g->wait_loop, g->wait_fd);
-        }
-        return 1;
+/* Queue membership and deadline membership are mutually exclusive. During
+ * a wait, next is the predecessor, not a runnable-queue link. Caller holds
+ * g_wait_deadline_lock, and detaches before any runnable publication. */
+static void g_deadline_remove_locked(WGoroutine *g) {
+    if (g->deadline_linked != 2) die("invalid M:P deadline membership");
+    if (g->next) g->next->deadline_next = g->deadline_next;
+    else g_wait_deadline_head = g->deadline_next;
+    if (g->deadline_next) g->deadline_next->next = g->next;
+    g->next = NULL;
+    g->deadline_next = NULL;
+    g->deadline_linked = 0;
+}
+
+/* The wait's domain remains stable after removal. Always acquire its lock:
+ * an expiry worker may have detached this entry but still be claiming it.
+ * No readiness waker may publish RUNNABLE until that reader has finished. */
+static void g_deadline_cancel(WGoroutine *g) {
+    if (g->wait_deadline_ticks <= 0) return;
+    if (g->deadline_kind == 1) {
+        w_event_deadline_cancel(g->wait_loop, g);
+        return;
     }
-    return 0;
+    if (g->deadline_kind != 2) die("invalid wait deadline domain");
+    pthread_mutex_lock(&g_wait_deadline_lock);
+    if (g->deadline_linked) g_deadline_remove_locked(g);
+    pthread_mutex_unlock(&g_wait_deadline_lock);
+}
+
+static void g_finish_wait(WGoroutine *g, int deadline_locked) {
+    if (!deadline_locked) g_deadline_cancel(g);
+    if (g->wait_timed_out && g->wait_loop && g->wait_fd >= 0)
+        w_event_unregister(g->wait_loop, g->wait_fd);
+    atomic_store_explicit(&g->state, G_RUNNABLE, memory_order_release);
+}
+
+/* Return 1 only when this waker owns enqueueing. An early wake never makes a
+ * still-running stack available: it records NOTIFIED, or takes over enqueueing
+ * if the scheduler concurrently acknowledges the completed context save. */
+static int g_try_wake_waiting_impl(WGoroutine *g, int timed_out, int deadline_locked) {
+    if (!g) return 0;
+    GState state = atomic_load_explicit(&g->state, memory_order_acquire);
+    for (;;) {
+        if (state != G_WAITING && state != G_PARKING) return 0;
+        GState claimed = state == G_WAITING ? G_WAKING_PARKED : G_WAKING;
+        if (atomic_compare_exchange_weak_explicit(&g->state, &state, claimed,
+                memory_order_acq_rel, memory_order_acquire)) {
+            W_SCHEDULER_TEST_HOOK(1, g);
+            g->wait_timed_out = timed_out;
+            if (claimed == G_WAKING) {
+                GState expected = G_WAKING;
+                if (atomic_compare_exchange_strong_explicit(&g->state, &expected, G_NOTIFIED,
+                        memory_order_acq_rel, memory_order_acquire)) return 0;
+                if (expected != G_WAKING_PARKED) die("invalid early goroutine wake state");
+            }
+            g_finish_wait(g, deadline_locked);
+            return 1;
+        }
+    }
+}
+
+static int g_try_wake_waiting(WGoroutine *g, int timed_out) {
+    return g_try_wake_waiting_impl(g, timed_out, 0);
+}
+
+/* Called only after w_ctx_swap has saved this goroutine's complete context.
+ * Neither this function nor its caller may inspect g after publishing WAITING
+ * or WAKING_PARKED: a different worker can then wake and run it immediately. */
+static int g_commit_park(WGoroutine *g) {
+    GState state = atomic_load_explicit(&g->state, memory_order_acquire);
+    for (;;) {
+        if (state == G_PARKING) {
+            if (atomic_compare_exchange_weak_explicit(&g->state, &state, G_WAITING,
+                    memory_order_acq_rel, memory_order_acquire)) return 0;
+        } else if (state == G_WAKING) {
+            if (atomic_compare_exchange_weak_explicit(&g->state, &state, G_WAKING_PARKED,
+                    memory_order_acq_rel, memory_order_acquire)) return 0;
+        } else if (state == G_NOTIFIED) {
+            g_finish_wait(g, 0);
+            return 1;
+        } else {
+            die("invalid goroutine park commit state");
+        }
+    }
 }
 
 static int g_wake_expired_deadlines(WEventLoop *loop, WGoroutine **out, int max_out) {
-    if (!g_wait_deadline_head || max_out <= 0) return 0;
+    if (max_out <= 0) return 0;
 
     int count = 0;
     int64_t now = __w_clock_ticks_raw();
+    if (loop) {
+        WEventDeadlineQueue *q = w_event_deadline_queue(loop);
+        pthread_mutex_lock(&q->lock);
+        while (q->count && count < max_out) {
+            WGoroutine *g = q->heap[0];
+            if (g->wait_deadline_ticks > now) break;
+            event_deadline_remove(q, g);
+            /* Keep removal and the winning wake claim in one lifetime
+             * boundary. Readiness cleanup takes this same domain lock. */
+            if (g_try_wake_waiting_impl(g, 1, 1)) out[count++] = g;
+        }
+        pthread_mutex_unlock(&q->lock);
+        return count;
+    }
     pthread_mutex_lock(&g_wait_deadline_lock);
 
     WGoroutine **link = &g_wait_deadline_head;
     while (*link && count < max_out) {
         WGoroutine *g = *link;
-        int expired_here = now >= g->wait_deadline_ticks && (loop == NULL || g->wait_loop == loop);
-        if (g->state != G_WAITING || g->wait_deadline_ticks <= 0 || expired_here) {
-            *link = g->deadline_next;
-            g->deadline_next = NULL;
-            g->deadline_linked = 0;
-            if (g->state == G_WAITING && g->wait_deadline_ticks > 0 && expired_here) {
-                if (g_try_wake_waiting(g, 1)) out[count++] = g;
+        GState state = atomic_load_explicit(&g->state, memory_order_acquire);
+        int waiting = state == G_WAITING || state == G_PARKING;
+        int expired_here = now >= g->wait_deadline_ticks;
+        if (!waiting || g->wait_deadline_ticks <= 0 || expired_here) {
+            g_deadline_remove_locked(g);
+            if (waiting && g->wait_deadline_ticks > 0 && expired_here) {
+                if (g_try_wake_waiting_impl(g, 1, 1)) out[count++] = g;
             }
         } else {
             link = &g->deadline_next;
@@ -63869,19 +64138,15 @@ static int g_wake_expired_deadlines(WEventLoop *loop, WGoroutine **out, int max_
     return count;
 }
 
-/* Milliseconds until the nearest pending park deadline for `loop`
- * (NULL = any loop); -1 when none is pending. Used to clamp blocking
- * event polls: a poll that blocks past the nearest deadline would starve
- * g_wake_expired_deadlines, so park deadlines on fds that never become
- * ready must bound the poll timeout (classic event-loop pattern). */
+/* Frontier probe for diagnostics (NULL means the M:P compatibility list).
+ * Production cooperative blocking polls arm and snapshot in the backend. */
 static int g_next_deadline_timeout_ms(WEventLoop *loop) {
-    if (!g_wait_deadline_head) return -1;
-
+    if (loop) return w_deadline_timeout_ms(w_event_deadline_next(loop), -1);
     int64_t nearest = 0;
     pthread_mutex_lock(&g_wait_deadline_lock);
     for (WGoroutine *g = g_wait_deadline_head; g; g = g->deadline_next) {
-        if (g->state != G_WAITING || g->wait_deadline_ticks <= 0) continue;
-        if (loop != NULL && g->wait_loop != loop) continue;
+        GState state = atomic_load_explicit(&g->state, memory_order_acquire);
+        if ((state != G_WAITING && state != G_PARKING) || g->wait_deadline_ticks <= 0) continue;
         if (nearest == 0 || g->wait_deadline_ticks < nearest) {
             nearest = g->wait_deadline_ticks;
         }
@@ -63894,6 +64159,9 @@ static int g_next_deadline_timeout_ms(WEventLoop *loop) {
 
 /* Park the current goroutine on an fd until events are ready.
  * If not running inside a goroutine, falls back to poll(2). */
+/* Keep the TLS lookup inside each invocation: a suspended G may resume on
+ * another worker, so callers must not hoist TLS addresses across park calls. */
+__attribute__((noinline))
 int w_socket_park_until(int fd, int events, int64_t deadline_ticks) {
     if (w_deadline_expired(deadline_ticks)) return 0;
 
@@ -63922,12 +64190,13 @@ int w_socket_park_until(int fd, int events, int64_t deadline_ticks) {
         g->wait_timed_out = 0;
         g->wait_deadline_ticks = deadline_ticks;
         g->wait_loop = el;
-        g->state = G_WAITING;
+        atomic_store_explicit(&g->state, G_PARKING, memory_order_release);
 
         g_deadline_add(g);
         w_event_register(el, fd, events, g);
 
         /* Swap back to scheduler — we'll be re-enqueued when fd is ready */
+        W_SCHEDULER_TEST_HOOK(2, g);
         w_ctx_swap(&g->ctx, &g_scheduler_ctx);
 
         int timed_out = g->wait_timed_out;
@@ -63958,7 +64227,7 @@ void w_socket_park(int fd, int events) {
  * On resume, result is in g->io_result and buffer ID in g->io_buf_id. */
 static void w_socket_park_uring(void) {
     WGoroutine *g = g_current;
-    g->state = G_WAITING;
+    atomic_store_explicit(&g->state, G_PARKING, memory_order_release);
     w_ctx_swap(&g->ctx, &g_scheduler_ctx);
 }
 
@@ -70052,12 +70321,12 @@ static WGoroutine *g_shared_queue_tail = NULL;
 static pthread_mutex_t g_sched_lock = PTHREAD_MUTEX_INITIALIZER;
 /* Lock-free fast path for cooperative (single-threaded) scheduler.
  * The mutex is only needed when the M:P scheduler is active. */
-static volatile int g_mp_scheduler_active = 0;
+static _Atomic int g_mp_scheduler_active = 0;
 static volatile int g_scheduler_initialized = 0;
 static pthread_once_t g_scheduler_once = PTHREAD_ONCE_INIT;
 static WProcessor g_processors[W_MAX_PROCESSORS];
 static int g_num_processors = 0;
-static volatile int g_scheduler_active = 0;
+static _Atomic int g_scheduler_active = 0;
 
 static pthread_mutex_t g_debug_goroutines_lock = PTHREAD_MUTEX_INITIALIZER;
 static WGoroutine *g_debug_goroutines[W_MAX_GOROUTINES];
@@ -70071,6 +70340,11 @@ static const char *g_state_name(GState state) {
         case G_RUNNING: return "running";
         case G_WAITING: return "waiting";
         case G_DEAD: return "dead";
+        case G_YIELDING: return "yielding";
+        case G_PARKING: return "parking";
+        case G_WAKING: return "waking";
+        case G_NOTIFIED: return "notified";
+        case G_WAKING_PARKED: return "waking-parked";
     }
     return "unknown";
 }
@@ -70084,11 +70358,45 @@ static void g_debug_register_goroutine(WGoroutine *g) {
 }
 
 static inline int g_mark_queued(WGoroutine *g) {
-    return __sync_bool_compare_and_swap(&g->queued, 0, 1);
+    int expected = 0;
+    return atomic_compare_exchange_strong_explicit(&g->queued, &expected, 1,
+        memory_order_acq_rel, memory_order_relaxed);
 }
 
 static inline void g_mark_dequeued(WGoroutine *g) {
-    __sync_lock_test_and_set(&g->queued, 0);
+    atomic_store_explicit(&g->queued, 0, memory_order_relaxed);
+}
+
+static inline void g_claim_running(WGoroutine *g) {
+    GState expected = G_RUNNABLE;
+    if (!atomic_compare_exchange_strong_explicit(&g->state, &expected, G_RUNNING,
+            memory_order_acquire, memory_order_relaxed))
+        die("scheduler dequeued a goroutine without runnable ownership");
+}
+
+/* Cooperative queues have one execution owner. There is no competing runner
+ * to arbitrate here; retain the publication check without a CAS transaction. */
+static inline void g_claim_running_local(WGoroutine *g) {
+    /* w_scheduler_run can also drain the shared queue when M:P is active. */
+    if (atomic_load_explicit(&g_mp_scheduler_active, memory_order_relaxed)) {
+        g_claim_running(g);
+        return;
+    }
+    if (atomic_load_explicit(&g->state, memory_order_acquire) != G_RUNNABLE)
+        die("local scheduler dequeued a goroutine without runnable ownership");
+    atomic_store_explicit(&g->state, G_RUNNING, memory_order_relaxed);
+}
+
+/* 1: caller owns enqueue; -1: caller owns recycling; 0: park ownership was
+ * handed off and the caller must no longer inspect this goroutine. */
+static inline int g_after_switch(WGoroutine *g) {
+    GState state = atomic_load_explicit(&g->state, memory_order_acquire);
+    if (state == G_YIELDING) {
+        atomic_store_explicit(&g->state, G_RUNNABLE, memory_order_release);
+        return 1;
+    }
+    if (state == G_DEAD) return -1;
+    return g_commit_park(g);
 }
 
 static void g_scheduler_debug_signal_handler(int signum) {
@@ -70125,6 +70433,9 @@ static void g_scheduler_maybe_dump(const char *where) {
             case G_RUNNING: running++; break;
             case G_WAITING: waiting++; break;
             case G_DEAD: dead++; break;
+            case G_YIELDING: running++; break;
+            case G_PARKING: case G_WAKING: case G_NOTIFIED:
+            case G_WAKING_PARKED: waiting++; break;
         }
     }
 
@@ -70140,9 +70451,11 @@ static void g_scheduler_maybe_dump(const char *where) {
         queued, shared_depth, g_mp_scheduler_active, g_num_processors);
 
     for (int i = 0; i < g_num_processors; i++) {
-        int depth = g_processors[i].local_tail - g_processors[i].local_head;
-        fprintf(stderr, "  processor %d active=%d local_queue=%d\n",
-                g_processors[i].id, g_processors[i].active, depth);
+        uint64_t head = atomic_load_explicit(&g_processors[i].local_head, memory_order_acquire);
+        uint64_t depth = atomic_load_explicit(&g_processors[i].local_tail, memory_order_acquire) - head;
+        if (depth > W_LOCAL_QUEUE_MAX) depth = W_LOCAL_QUEUE_MAX;
+        fprintf(stderr, "  processor %d active=%d local_queue=%llu\n",
+                g_processors[i].id, g_processors[i].active, (unsigned long long)depth);
     }
 
     int shown = 0;
@@ -70172,6 +70485,13 @@ static void g_scheduler_maybe_dump(const char *where) {
     fflush(stderr);
 }
 
+static inline void g_enqueue_local_claimed(WGoroutine *g) {
+    g->next = NULL;
+    if (g_run_queue_tail) g_run_queue_tail->next = g;
+    else g_run_queue_head = g;
+    g_run_queue_tail = g;
+}
+
 static inline void g_enqueue_claimed(WGoroutine *g) {
     g->next = NULL;
     if (g_mp_scheduler_active) {
@@ -70186,18 +70506,21 @@ static inline void g_enqueue_claimed(WGoroutine *g) {
         pthread_mutex_unlock(&g_sched_lock);
     } else {
         /* Cooperative mode: push to per-thread TLS queue (no lock needed) */
-        if (g_run_queue_tail) {
-            g_run_queue_tail->next = g;
-        } else {
-            g_run_queue_head = g;
-        }
-        g_run_queue_tail = g;
+        g_enqueue_local_claimed(g);
     }
 }
 
 static inline void g_enqueue(WGoroutine *g) {
-    if (!g_mark_queued(g)) return;
-    g_enqueue_claimed(g);
+    if (atomic_load_explicit(&g_mp_scheduler_active, memory_order_relaxed)) {
+        if (!g_mark_queued(g)) return;
+        g_enqueue_claimed(g);
+    } else {
+        /* Only this thread accesses its cooperative run queue. Other threads
+         * must publish a wake to its owner, never enqueue into this TLS list. */
+        if (atomic_load_explicit(&g->queued, memory_order_relaxed)) return;
+        atomic_store_explicit(&g->queued, 1, memory_order_relaxed);
+        g_enqueue_local_claimed(g);
+    }
 }
 
 static inline WGoroutine *g_dequeue(void) {
@@ -70229,7 +70552,6 @@ static inline WGoroutine *g_dequeue(void) {
 /* Forward declarations for cap metrics */
 void w_goroutine_count_inc(void);
 void w_goroutine_count_dec(void);
-static int g_rescue_stranded_runnables(WGoroutine **out, int max_out);
 
 static void g_body_entry(void) {
     WGoroutine *g = g_current;
@@ -70240,8 +70562,8 @@ static void g_body_entry(void) {
     WClosure *cl = (WClosure *)w_as_ptr(g->closure);
     typedef WValue (*fn0_t)(WValue *);
     g->result = ((fn0_t)cl->fn_ptr)(cl->captures);
-    g->state = G_DEAD;
-    if (g_coop_live_goroutines > 0) g_coop_live_goroutines--;
+    atomic_store_explicit(&g->state, G_DEAD, memory_order_release);
+    if (!p_current && g_coop_live_goroutines > 0) g_coop_live_goroutines--;
     w_goroutine_count_dec();
 
     /* Return to scheduler */
@@ -70260,7 +70582,7 @@ WValue w_goroutine_spawn(WValue closure) {
     WGoroutine *g = g_pool_get();
     if (g) {
         /* Reuse struct + stack — just reset fields */
-        g->state = G_RUNNABLE;
+        atomic_store_explicit(&g->state, G_IDLE, memory_order_relaxed);
         g->queued = 0;
         g->closure = closure;
         g->result = W_NIL;
@@ -70270,6 +70592,8 @@ WValue w_goroutine_spawn(WValue closure) {
         g->wait_timed_out = 0;
         g->wait_deadline_ticks = 0;
         g->wait_loop = NULL;
+        g->deadline_linked = 0;
+        g->deadline_next = NULL;
         g->io_result = 0;
         g->io_buf_id = -1;
         g->io_zc_pending = 0;
@@ -70282,7 +70606,7 @@ WValue w_goroutine_spawn(WValue closure) {
         g = calloc(1, sizeof(WGoroutine));
         g_debug_register_goroutine(g);
         g->stack_base = stack;
-        g->state = G_RUNNABLE;
+        atomic_init(&g->state, G_IDLE);
         g->queued = 0;
         g->closure = closure;
         g->result = W_NIL;
@@ -70307,24 +70631,26 @@ WValue w_goroutine_spawn(WValue closure) {
 #endif
 
     w_goroutine_count_inc();
-    g_coop_live_goroutines++;
+    if (!atomic_load_explicit(&g_mp_scheduler_active, memory_order_relaxed))
+        g_coop_live_goroutines++;
+    atomic_store_explicit(&g->state, G_RUNNABLE, memory_order_release);
     g_enqueue(g);
     return w_box_ptr(g, W_SUBTAG_GENERIC);
 }
 
+/* An out-of-line suspension boundary prevents a caller's loop from caching
+ * this worker's TLS addresses across a migration to another worker. */
+__attribute__((noinline))
 void w_goroutine_yield(void) {
     WGoroutine *g = g_current;
     if (!g) return;  /* main thread, no-op */
-    g->state = G_RUNNABLE;
-    /* In M:P mode, DON'T enqueue here — the worker's post-swap check
-     * (p_thread_entry line "if g->state == G_RUNNABLE") handles it.
-     * Enqueueing here + worker re-enqueueing = double-enqueue race. */
-    if (!g_mp_scheduler_active) {
-        g_enqueue(g);
-    }
+    /* The current stack is still live. Publish runnable and enqueue only
+     * after returning to the scheduler with the context completely saved. */
+    atomic_store_explicit(&g->state, G_YIELDING, memory_order_release);
     w_ctx_swap(&g->ctx, &g_scheduler_ctx);
 }
 
+__attribute__((noinline))
 WValue w_goroutine_current(void) {
     if (!g_current) return W_NIL;
     return w_box_ptr(g_current, W_SUBTAG_GENERIC);
@@ -70343,39 +70669,23 @@ void w_scheduler_run(void) {
         g_coop_event_loop = w_event_init();
     }
 
-    int idle_spins = 0;
-
     while (1) {
         g_scheduler_maybe_dump("coop");
         WGoroutine *g = g_dequeue();
 
         if (!g) {
-            /* No runnable goroutines — poll event loop for woken I/O goroutines */
+            /* A drained batch has nothing left to wait for. Do not perform
+             * a final empty event syscall. */
+            if (!g_scheduler_persistent && g_coop_live_goroutines == 0) break;
+
+            /* Readiness is level-triggered in the kernel until consumed:
+             * a blocking poll also returns immediately for already-ready
+             * I/O. Repeating 64 empty nonblocking polls adds no information.
+             * The backend arms sticky wakes before taking its per-loop
+             * deadline snapshot, so an earlier timer cannot be missed. */
             if (g_coop_event_loop) {
-                /* Adaptive timeout: 0ms when hot, block indefinitely when idle.
-                 * This avoids busy-spinning while keeping latency near-zero
-                 * when connections are active. */
-                int timeout;
-                if (idle_spins < 64)
-                    timeout = 0;          /* hot: non-blocking poll */
-                else if (g_scheduler_persistent)
-                    timeout = -1;         /* server idle: block until event */
-                else
-                    timeout = 1;          /* batch mode: 1ms then exit */
-
-                /* Clamp any blocking poll to the nearest pending park
-                 * deadline. Without this, persistent mode's -1 blocks
-                 * until an fd event, so w_socket_park_until deadlines on
-                 * quiet sockets would never fire (the expiry sweep below
-                 * only runs after the poll returns). */
-                if (timeout != 0) {
-                    int deadline_ms = g_next_deadline_timeout_ms(g_coop_event_loop);
-                    if (deadline_ms >= 0 && (timeout < 0 || deadline_ms < timeout))
-                        timeout = deadline_ms;
-                }
-
                 WGoroutine *woken[256];
-                int n = w_event_poll(g_coop_event_loop, timeout, woken, 256);
+                int n = w_event_poll(g_coop_event_loop, -1, woken, 256);
                 for (int i = 0; i < n; i++) {
                     if (g_try_wake_waiting(woken[i], 0)) {
                         g_enqueue(woken[i]);
@@ -70385,27 +70695,18 @@ void w_scheduler_run(void) {
                 for (int i = 0; i < expired; i++) {
                     g_enqueue(woken[i]);
                 }
-                int rescued = 0;
-                if (n > 0 || expired > 0 || rescued > 0) {
-                    idle_spins = 0;
-                    continue;
-                }
-                idle_spins++;
             }
-            if (g_scheduler_persistent || g_coop_live_goroutines > 0) continue;
-            break;
+            continue;
         }
 
-        idle_spins = 0;
-        g->state = G_RUNNING;
+        g_claim_running_local(g);
         g_current = g;
         w_ctx_swap(&g_scheduler_ctx, &g->ctx);
         g_current = NULL;
 
-        /* Recycle dead goroutines */
-        if (g->state == G_DEAD) {
-            g_pool_return(g);
-        }
+        int action = g_after_switch(g);
+        if (action > 0) g_enqueue(g);
+        else if (action < 0) g_pool_return(g);
     }
 }
 
@@ -70421,11 +70722,13 @@ WValue w_scheduler_run_w(void) {
 static int w_scheduler_run_one(void) {
     WGoroutine *g = g_dequeue();
     if (!g) return 0;
-    g->state = G_RUNNING;
+    g_claim_running_local(g);
     g_current = g;
     w_ctx_swap(&g_scheduler_ctx, &g->ctx);
     g_current = NULL;
-    if (g->state == G_DEAD) g_pool_return(g);
+    int action = g_after_switch(g);
+    if (action > 0) g_enqueue(g);
+    else if (action < 0) g_pool_return(g);
     return 1;
 }
 
@@ -70467,17 +70770,18 @@ int w_scheduler_queue_depth(void) {
 
 /* ---- M:P Scheduler ---- */
 
-/* Per-P local queue: push to tail, pop from tail, steal from head */
+/* Per-P FIFO: one owner publishes tail; owner and thieves claim head.
+ * Queue ownership is independent of the goroutine's execution state. */
 static void p_local_push_claimed(WProcessor *p, WGoroutine *g) {
-    int tail = p->local_tail;
-    if (tail - p->local_head >= W_LOCAL_QUEUE_MAX) {
+    uint64_t tail = atomic_load_explicit(&p->local_tail, memory_order_relaxed);
+    uint64_t head = atomic_load_explicit(&p->local_head, memory_order_acquire);
+    if (tail - head >= W_LOCAL_QUEUE_MAX) {
         /* Overflow: push to global queue. g is already marked queued. */
         g_enqueue_claimed(g);
         return;
     }
-    p->local_queue[tail % W_LOCAL_QUEUE_MAX] = g;
-    __sync_synchronize();
-    p->local_tail = tail + 1;
+    atomic_store_explicit(&p->local_queue[tail % W_LOCAL_QUEUE_MAX], g, memory_order_relaxed);
+    atomic_store_explicit(&p->local_tail, tail + 1, memory_order_release);
 }
 
 static void p_local_push(WProcessor *p, WGoroutine *g) {
@@ -70485,72 +70789,29 @@ static void p_local_push(WProcessor *p, WGoroutine *g) {
     p_local_push_claimed(p, g);
 }
 
-static int g_is_in_any_queue(WGoroutine *target) {
-    int found = 0;
-
-    pthread_mutex_lock(&g_sched_lock);
-    for (WGoroutine *g = g_shared_queue_head; g; g = g->next) {
-        if (g == target) { found = 1; break; }
-    }
-    pthread_mutex_unlock(&g_sched_lock);
-    if (found) return 1;
-
-    for (int i = 0; i < g_num_processors; i++) {
-        int head = g_processors[i].local_head;
-        int tail = g_processors[i].local_tail;
-        if (tail < head) continue;
-        if (tail - head > W_LOCAL_QUEUE_MAX) tail = head + W_LOCAL_QUEUE_MAX;
-        for (int j = head; j < tail; j++) {
-            if (g_processors[i].local_queue[j % W_LOCAL_QUEUE_MAX] == target) return 1;
+static WGoroutine *p_fifo_take(WProcessor *p) {
+    uint64_t head = atomic_load_explicit(&p->local_head, memory_order_acquire);
+    for (;;) {
+        uint64_t tail = atomic_load_explicit(&p->local_tail, memory_order_acquire);
+        if (head == tail) return NULL;
+        if (tail - head > W_LOCAL_QUEUE_MAX) {
+            head = atomic_load_explicit(&p->local_head, memory_order_acquire);
+            continue;
+        }
+        WGoroutine *g = atomic_load_explicit(
+            &p->local_queue[head % W_LOCAL_QUEUE_MAX], memory_order_relaxed);
+        if (atomic_compare_exchange_weak_explicit(&p->local_head, &head, head + 1,
+                memory_order_acq_rel, memory_order_acquire)) {
+            g_mark_dequeued(g);
+            return g;
         }
     }
-
-    return 0;
 }
 
-static int g_rescue_stranded_runnables(WGoroutine **out, int max_out) {
-    if (max_out <= 0) return 0;
-    int count = 0;
-    pthread_mutex_lock(&g_debug_goroutines_lock);
-    for (int i = 0; i < g_debug_goroutine_count && count < max_out; i++) {
-        WGoroutine *g = g_debug_goroutines[i];
-        if (g->state == G_RUNNABLE && !g_is_in_any_queue(g)) {
-            __sync_lock_test_and_set(&g->queued, 0);
-            if (!g_mark_queued(g)) continue;
-            out[count++] = g;
-        }
-    }
-    pthread_mutex_unlock(&g_debug_goroutines_lock);
-    return count;
-}
-
-static WGoroutine *p_local_pop(WProcessor *p) {
-    int tail = p->local_tail - 1;
-    p->local_tail = tail;
-    __sync_synchronize();
-    int head = p->local_head;
-    if (head <= tail) {
-        WGoroutine *g = p->local_queue[tail % W_LOCAL_QUEUE_MAX];
-        g_mark_dequeued(g);
-        return g;
-    }
-    /* Queue empty or race — restore tail */
-    p->local_tail = tail + 1;
-    return NULL;
-}
+static WGoroutine *p_local_pop(WProcessor *p) { return p_fifo_take(p); }
 
 static WGoroutine *p_steal(WProcessor *victim) {
-    int head = victim->local_head;
-    __sync_synchronize();
-    int tail = victim->local_tail;
-    if (head >= tail) return NULL;
-
-    WGoroutine *g = victim->local_queue[head % W_LOCAL_QUEUE_MAX];
-    if (__sync_bool_compare_and_swap(&victim->local_head, head, head + 1)) {
-        g_mark_dequeued(g);
-        return g;
-    }
-    return NULL;  /* Lost race */
+    return p_fifo_take(victim);
 }
 
 __thread WProcessor *p_current = NULL;
@@ -70576,13 +70837,18 @@ static void *p_thread_entry(void *arg) {
     WProcessor *p = (WProcessor *)arg;
     p_current = p;
     p_set_affinity(p->id);
+    unsigned dispatches = 0;
 
-    while (g_scheduler_active) {
+    while (atomic_load_explicit(&g_scheduler_active, memory_order_acquire)) {
         g_scheduler_maybe_dump("mp");
         WGoroutine *g = NULL;
 
+        /* Bound global-queue starvation even when local work keeps yielding.
+         * This is a dispatch budget, not a wall-clock preemption guarantee. */
+        if ((dispatches++ & 63u) == 0) g = g_dequeue();
+
         /* 1. Try local queue */
-        g = p_local_pop(p);
+        if (!g) g = p_local_pop(p);
 
         /* 2. Try global queue */
         if (!g) g = g_dequeue();
@@ -70596,18 +70862,19 @@ static void *p_thread_entry(void *arg) {
         }
 
         if (g) {
-            g->state = G_RUNNING;
+            g_claim_running(g);
             g_current = g;
             w_ctx_swap(&g_scheduler_ctx, &g->ctx);
             g_current = NULL;
 
-            if (g->state == G_RUNNABLE) {
+            int action = g_after_switch(g);
+            if (action > 0) {
                 p_local_push(p, g);
-            } else if (g->state == G_DEAD) {
+            } else if (action < 0) {
                 /* Recycle the goroutine's stack */
                 g_stack_free(g->stack_base);
             }
-            /* G_WAITING goroutines are registered on event loop — don't re-enqueue */
+            /* A committed park transfers ownership; do not read g again. */
         } else {
             /* No work: poll event loop for I/O-parked goroutines */
             if (p->event_loop) {
@@ -70621,10 +70888,6 @@ static void *p_thread_entry(void *arg) {
                 int expired = g_wake_expired_deadlines(NULL, woken, 256);
                 for (int i = 0; i < expired; i++) {
                     p_local_push(p, woken[i]);
-                }
-                int rescued = g_rescue_stranded_runnables(woken, 256);
-                for (int i = 0; i < rescued; i++) {
-                    p_local_push_claimed(p, woken[i]);
                 }
             } else {
                 struct timespec ts = {0, 100000};  /* 100µs */
@@ -70665,6 +70928,10 @@ void w_scheduler_start(WValue num_procs_wv) {
         g_processors[i].spinning = 0;
         g_processors[i].active = 1;
         g_processors[i].event_loop = w_event_init();
+    }
+    /* No worker may steal from a processor whose ring is still being reset,
+     * especially after a stop/restart with nonzero old head/tail positions. */
+    for (int i = 0; i < num_procs; i++) {
         pthread_create(&g_processors[i].thread, NULL, p_thread_entry, &g_processors[i]);
     }
 }
@@ -70677,15 +70944,21 @@ void w_scheduler_wait(void) {
 }
 
 void w_scheduler_stop(void) {
-    g_scheduler_active = 0;
+    atomic_store_explicit(&g_scheduler_active, 0, memory_order_release);
     for (int i = 0; i < g_num_processors; i++) {
         pthread_join(g_processors[i].thread, NULL);
+    }
+    /* A worker can finish a deadline registered on another worker's loop.
+     * Keep all loops alive until no scheduler thread can still access them. */
+    for (int i = 0; i < g_num_processors; i++) {
         g_processors[i].active = 0;
         if (g_processors[i].event_loop) {
             w_event_destroy(g_processors[i].event_loop);
             g_processors[i].event_loop = NULL;
         }
     }
+    atomic_store_explicit(&g_mp_scheduler_active, 0, memory_order_release);
+    g_num_processors = 0;
 }
 
 #pragma clang diagnostic pop
@@ -70697,11 +70970,11 @@ static WMutex *as_mutex(WValue value) {
     return (WMutex *)w_as_ptr(value);
 }
 
-static int w_mutex_owned_by_current(WMutex *mutex) {
+static int w_mutex_owned_by_current(WMutex *mutex, WGoroutine *self) {
     if (!mutex->locked) return 0;
-    if (g_current) {
+    if (self) {
         return mutex->owner_is_goroutine &&
-               mutex->owner_goroutine == g_current;
+               mutex->owner_goroutine == self;
     }
     return !mutex->owner_is_goroutine &&
            pthread_equal(mutex->owner_thread, pthread_self());
@@ -70724,8 +70997,8 @@ static void w_mutex_untrack_thread_lock(WMutex *mutex) {
     }
 }
 
-static void w_mutex_pause(void) {
-    if (g_current) {
+static __attribute__((noinline)) void w_mutex_pause(WGoroutine *self) {
+    if (self) {
         w_goroutine_yield();
     } else if (!g_mp_scheduler_active && w_scheduler_run_one()) {
         /* drove a goroutine cooperatively */
@@ -70735,11 +71008,11 @@ static void w_mutex_pause(void) {
     }
 }
 
-static void w_mutex_take(WMutex *mutex) {
+static void w_mutex_take(WMutex *mutex, WGoroutine *self) {
     mutex->locked = 1;
-    mutex->owner_is_goroutine = g_current ? 1 : 0;
-    mutex->owner_goroutine = g_current;
-    if (!g_current) {
+    mutex->owner_is_goroutine = self ? 1 : 0;
+    mutex->owner_goroutine = self;
+    if (!self) {
         mutex->owner_thread = pthread_self();
         w_mutex_track_thread_lock(mutex);
     }
@@ -70758,42 +71031,47 @@ WValue w_mutex_new(void) {
 
 WValue w_mutex_lock(WValue value) {
     WMutex *mutex = as_mutex(value);
+    /* A G's identity survives migration; the address of its original worker's
+     * TLS does not. Keep the identity, never a TLS slot, across the wait loop. */
+    WGoroutine *self = g_current;
     while (1) {
         pthread_mutex_lock(&mutex->guard);
         if (!mutex->locked) {
-            w_mutex_take(mutex);
+            w_mutex_take(mutex, self);
             pthread_mutex_unlock(&mutex->guard);
             return value;
         }
-        if (w_mutex_owned_by_current(mutex)) {
+        if (w_mutex_owned_by_current(mutex, self)) {
             pthread_mutex_unlock(&mutex->guard);
             w_raise(w_string("Mutex is not reentrant"));
         }
         pthread_mutex_unlock(&mutex->guard);
-        w_mutex_pause();
+        w_mutex_pause(self);
     }
 }
 
 WValue w_mutex_try_lock(WValue value) {
     WMutex *mutex = as_mutex(value);
+    WGoroutine *self = g_current;
     pthread_mutex_lock(&mutex->guard);
     if (mutex->locked) {
         pthread_mutex_unlock(&mutex->guard);
         return W_FALSE;
     }
-    w_mutex_take(mutex);
+    w_mutex_take(mutex, self);
     pthread_mutex_unlock(&mutex->guard);
     return W_TRUE;
 }
 
 WValue w_mutex_unlock(WValue value) {
     WMutex *mutex = as_mutex(value);
+    WGoroutine *self = g_current;
     pthread_mutex_lock(&mutex->guard);
     if (!mutex->locked) {
         pthread_mutex_unlock(&mutex->guard);
         w_raise(w_string("unlock of unlocked Mutex"));
     }
-    if (!w_mutex_owned_by_current(mutex)) {
+    if (!w_mutex_owned_by_current(mutex, self)) {
         pthread_mutex_unlock(&mutex->guard);
         w_raise(w_string("Mutex unlocked by non-owner"));
     }
@@ -70884,7 +71162,9 @@ enum {
     W_CHAN_RESULT_RECEIVED = 1
 };
 
-static void w_chan_pause(void) {
+/* Keep TLS lookup inside a fresh call: inlining into a retry loop lets the C
+ * compiler retain the old worker's TLS address across a migrating yield. */
+static __attribute__((noinline)) void w_chan_pause(void) {
     if (g_current) {
         w_goroutine_yield();
     } else if (!g_mp_scheduler_active && w_scheduler_run_one()) {
@@ -70905,14 +71185,22 @@ static void w_chan_receiver_wait_cleanup(void *arg) {
 /* Advertise an unbuffered receiver only for one cancellable scheduler pause.
  * pthread cleanup prevents a killed native receiver from leaving stale
  * readiness behind and making try_send lose a value. */
-static void w_chan_receiver_pause(WChan *ch) {
+static __attribute__((noinline)) void w_chan_receiver_pause(WChan *ch) {
     if (ch->cap != 0) {
         w_chan_pause();
         return;
     }
+    WGoroutine *self = g_current;
     pthread_mutex_lock(&ch->lock);
     ch->recv_waiters++;
     pthread_mutex_unlock(&ch->lock);
+    if (self) {
+        /* pthread cleanup belongs to an OS thread, not a migrating G. No
+         * native cleanup frame may remain installed across a G suspension. */
+        w_chan_pause();
+        w_chan_receiver_wait_cleanup(ch);
+        return;
+    }
     pthread_cleanup_push(w_chan_receiver_wait_cleanup, ch);
     w_chan_pause();
     pthread_cleanup_pop(1);

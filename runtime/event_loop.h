@@ -1,6 +1,8 @@
 #ifndef TUNGSTEN_EVENT_LOOP_H
 #define TUNGSTEN_EVENT_LOOP_H
 
+#include <stdint.h>
+
 /* Forward declaration — full definition in runtime.h */
 typedef struct WGoroutine WGoroutine;
 
@@ -27,6 +29,26 @@ void w_event_unregister(WEventLoop *el, int fd);
 /* Poll for ready goroutines. Returns count of woken goroutines (up to max_out).
  * timeout_ms: -1 = block, 0 = non-blocking, >0 = milliseconds */
 int w_event_poll(WEventLoop *el, int timeout_ms, WGoroutine **out, int max_out);
+
+/* Interrupt a poll, including a wake issued just before it blocks. Wakeups
+ * may coalesce and never appear as a goroutine in out[]. One polling thread
+ * owns each loop; wake and deadline updates may come from other threads.
+ * Destroy requires the poller and all producers to have stopped. */
+int w_event_wake(WEventLoop *el);
+
+/* Absolute deadlines use __w_clock_ticks_raw(), NOT wall time or milliseconds.
+ * Set inserts or updates (in either direction); cancel/pop eagerly detach.
+ * A goroutine must stay alive until detached, and may belong to only one loop.
+ * Cross-loop migration requires external synchronization after detachment.
+ * These APIs manage the frontier, not goroutine state or scheduler admission.
+ * Set returns 0 on success, -1 on invalid input or allocation failure.
+ * Cancel returns whether the entry was present; next returns 0 for empty.
+ * w_event_poll automatically bounds its timeout by this loop's next deadline;
+ * the owner then pops due entries and claims/schedules the winning waits. */
+int w_event_deadline_set(WEventLoop *el, WGoroutine *g, int64_t ticks);
+int w_event_deadline_cancel(WEventLoop *el, WGoroutine *g);
+int64_t w_event_deadline_next(WEventLoop *el);
+WGoroutine *w_event_deadline_pop(WEventLoop *el, int64_t now);
 
 /* ---- Completion I/O API (io_uring only, stubs on epoll/kqueue) ----
  *

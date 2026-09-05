@@ -550,6 +550,7 @@ interpreter_specs=(
   spec/core/integer_tower_spec.w
   spec/core/url_spec.w
   spec/core/http_spec.w
+  spec/core/http_chunked_spec.w
   spec/core/filesystem_walk_spec.w
   spec/core/file_stat_tempfile_spec.w
   spec/core/filesystem_mutation_spec.w
@@ -730,6 +731,7 @@ core_specs=(
   spec/core/url_spec.w
   spec/core/http_spec.w
   spec/core/http_socket_spec.w
+  spec/core/http_chunked_spec.w
   spec/core/socket_repeated_connect_spec.w
   spec/core/socket_read_into_spec.w
   spec/core/byte_array_slice_spec.w

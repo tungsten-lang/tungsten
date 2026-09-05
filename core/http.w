@@ -99,10 +99,10 @@
       out = @buffer.slice(@cursor, count)
       @cursor += count
       return out
-    if @socket == nil
-      raise "HTTP: incomplete " + what
     if @limit != nil && count - avail > @limit - @received
       raise "HTTP: response exceeds max_response_bytes"
+    if @socket == nil
+      raise "HTTP: incomplete " + what
     out = StringBuffer(count)
     if avail > 0
       out.append(@buffer.slice(@cursor, avail))

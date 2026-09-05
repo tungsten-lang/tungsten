@@ -63809,6 +63809,15 @@ static int64_t w_deadline_ticks_after_ms(int64_t ms) {
 #endif
 }
 
+/* Park deadline (0 = none) for one Socket#read on `s`: the read timeout from
+ * Socket#set_timeout, measured from now. Shared with the TLS read and
+ * handshake paths (tls.c) so a TLS socket honours the same deadline as a
+ * plain one. */
+int64_t w_socket_read_deadline_ticks(WSocket *s) {
+    if (s->read_timeout_ms <= 0) return 0;
+    return w_deadline_ticks_after_ms(s->read_timeout_ms);
+}
+
 static void g_deadline_add(WGoroutine *g) {
     if (g->wait_deadline_ticks <= 0 || g->deadline_linked) return;
     pthread_mutex_lock(&g_wait_deadline_lock);
@@ -64120,10 +64129,7 @@ WValue w_socket_read(WValue sock, WValue buf_size) {
 
     /* Read deadline (Socket#set_timeout): computed once per read call.
      * 0 = no deadline (park indefinitely, as before). */
-    int64_t deadline_ticks = 0;
-    if (s->read_timeout_ms > 0) {
-        deadline_ticks = w_deadline_ticks_after_ms(s->read_timeout_ms);
-    }
+    int64_t deadline_ticks = w_socket_read_deadline_ticks(s);
 
     WString *ws = malloc(sizeof(WString) + (size_t)n + 1);
 

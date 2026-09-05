@@ -691,6 +691,15 @@ projects stay unchecked until their stated acceptance criteria are met.
   runtime is built with TLS support. Production HTTP still needs streaming
   bodies, redirects, cancellation, per-phase timeouts, configurable trust and
   proxy behavior, and typed transport/status errors.
+  - [x] Frame responses incrementally through one `HTTPReader` shared by the
+    plain-TCP, TLS, and buffered paths: `Transfer-Encoding: chunked` per
+    RFC 9112 section 7.1 (chunk extensions, trailers exposed on
+    `HTTPResponse#trailers`), exact Content-Length, read-to-EOF, and bodiless
+    HEAD/1xx/204/304. The response bound refuses announced sizes before
+    download, a complete message returns without waiting for the server to
+    close, obs-fold continuations are unfolded, and TLS reads honour the
+    `set_timeout` read deadline. `spec/core/http_chunked_spec.w` covers it
+    with an in-process loopback server; Content-Encoding is still not decoded.
 - [x] Replace the tungsten-crypto price fetcher's curl subprocess with Core's
   verified in-process TLS transport. The local integration test validates the
   certificate chain and hostname on macOS and Linux CI; concurrency and

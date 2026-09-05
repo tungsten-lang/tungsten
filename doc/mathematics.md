@@ -100,6 +100,38 @@ claim a valid embedding or nonzero face area, and it leaves dense mesh fields,
 sparse assembled operators, rendering, and physics discretizations with
 `Tensor`, `Sparse`, `Plot`/`Plot3D`, and `Physics`, respectively.
 
+`TriangleMesh` accepts exact Integer/BigInt/Rational or finite Float
+coordinates (`~0.5` is a Float; ordinary `0.5` is a Decimal and is currently
+unsupported). It owns copies of mutable exact values. Its first `topology`
+query builds and caches packed integer incidence; constructing a mesh alone
+does not pay for the audit. The report exposes `edge_faces(edge_id)`,
+`vertex_faces(vertex_id)`, `vertex_neighbors(vertex_id)`,
+`face_neighbors(face_id)`, `vertex_components`, `surface_components`, and
+`boundary_loops`. Edges are lexicographically ordered. Component IDs include
+isolated vertices; surface-component face lists omit them. Boundary cycles
+start at their smallest vertex, take the smaller neighbor next, and omit the
+repeated closing vertex; `nil` indicates failed manifold preconditions.
+
+`orientable?` checks face-flip parity independently of the supplied winding.
+`orientation_face_flips` gives a deterministic list of faces to reverse
+(lowest face ID per dual component remains unflipped), or `nil` if the
+surface cannot be certified orientable. `mesh.reoriented` returns a new mesh.
+`consistently_oriented?` still describes the input winding; `orientable_genus`
+now also works for an orientable surface supplied with inconsistent winding.
+These methods do not choose an outward direction. All report Arrays are copies.
+Incidence is bounded to u32 vertex and halfedge counts.
+
+Predicate entry points validate each point once and share internal arithmetic
+kernels. In-circle is a Euclidean predicate; its raw determinant is defined
+for collinear inputs, while `incircle2d` and `incircle2d_location` reject a
+collinear defining triangle. Exact signs continue to reject Float/Decimal.
+
+Flat-torus orbits, straightenings, and extremum witnesses own their returned
+Arrays and mutable exact numbers. Dimensions and generators reject callable
+numeric class scaffolds before arithmetic. Integer/BigInt validation and
+snapshot helpers live in `core/integer` (`Integer.value?`, `copy_value`), with
+the corresponding `Rational.copy_value` in `core/numeric/rational`.
+
 `WarpedConeSurface` models the intrinsic metric
 `dt^2 + f(t)^2 dtheta^2`. Exponential and power profiles keep `f(t) > 0` at
 every finite proper height while shrinking toward an ideal apex at infinity;
@@ -107,6 +139,9 @@ the linear profile reaches a singular Euclidean-cone tip after finite proper
 distance and is retained as a control. The API reports normalized angular
 separation separately from the shrinking cross-section arc, and its display
 samples are explicitly non-isometric plotting coordinates.
+Numeric parameters, heights, and angles must have finite real conversions.
+Integer negative powers in symbolic evaluation and rational linear apex
+heights retain exact fractions.
 
 The first physical models exercise that chain rather than hard-coding their
 curvature. `Schwarzschild.new(M)` derives the coordinate Einstein tensor and

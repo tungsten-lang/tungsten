@@ -15,15 +15,24 @@
 # grows with the generator heights and it is not a replacement for lattice or
 # sieve methods on very large inputs.
 
-+ FlatTorusOrbitExtremum
-  -> new(@value, @times)
-    @times = @times.dup
+use core/numeric/rational
 
-  ro :value
-  ro :times
++ FlatTorusOrbitExtremum
+  -> new(value, times)
+    @value = Rational.copy_value(Rational.coerce(value))
+    @times = []
+    times.each -> (time) @times.push(Rational.copy_value(Rational.coerce(time)))
+
+  -> value
+    Rational.copy_value(@value)
+
+  -> times
+    out = []
+    @times.each -> (time) out.push(Rational.copy_value(time))
+    out
 
   -> witness_time
-    @times[0]
+    Rational.copy_value(@times[0])
 
 
 # An exact GL(n,Z) coordinate change which sends an integer torus direction
@@ -42,9 +51,9 @@
       raise "flat torus straightening needs a nonempty integer direction"
     @source = []
     generators.each -> (generator)
-      integer = generator.class_name == "Integer" || generator.class_name == "Int"
-      raise "flat torus straightening needs integer coordinates" if !integer
-      @source.push(generator)
+      if !Integer.value?(generator)
+        raise "flat torus straightening needs integer coordinates"
+      @source.push(Integer.copy_value(generator))
 
     @matrix = integer_identity(@source.size)
     @inverse = integer_identity(@source.size)
@@ -103,11 +112,36 @@
     if !certified?
       raise "flat torus unimodular straightening failed certification"
 
-  ro :source
-  ro :matrix
-  ro :inverse
-  ro :image
-  ro :divisor
+  -> __copy_vector(values)
+    out = []
+    values.each -> (value)
+      if Integer.value?(value)
+        out.push(Integer.copy_value(value))
+      elsif value.class_name == "Rational"
+        out.push(Rational.copy_value(value))
+      else
+        out.push(value)
+    out
+
+  -> __copy_matrix(rows)
+    out = []
+    rows.each -> (row) out.push(__copy_vector(row))
+    out
+
+  -> source
+    __copy_vector(@source)
+
+  -> matrix
+    __copy_matrix(@matrix)
+
+  -> inverse
+    __copy_matrix(@inverse)
+
+  -> image
+    __copy_vector(@image)
+
+  -> divisor
+    Integer.copy_value(@divisor)
 
   -> primitive?
     @divisor == 1
@@ -201,6 +235,7 @@
     @source.size.times -> (index)
       expected.push(index == 0 ? @divisor : 0)
     return false if !vectors_equal?(@image, expected)
+    return false if !vectors_equal?(matrix_vector(@matrix, @source), @image)
     identity = integer_identity(@source.size)
     forward = matrices_equal?(matrix_product(@matrix, @inverse), identity)
     backward = matrices_equal?(matrix_product(@inverse, @matrix), identity)
@@ -208,11 +243,11 @@
 
   -> straighten(vector)
     raise "flat torus point has the wrong dimension" if vector.size != @source.size
-    matrix_vector(@matrix, vector)
+    __copy_vector(matrix_vector(@matrix, vector))
 
   -> unstraighten(vector)
     raise "flat torus point has the wrong dimension" if vector.size != @source.size
-    matrix_vector(@inverse, vector)
+    __copy_vector(matrix_vector(@inverse, vector))
 
 + FlatTorusOrbit
   -> new(generators)
@@ -222,9 +257,9 @@
     normalized = []
     common = 0
     generators.each -> (generator)
-      integer = generator.class_name == "Integer" || generator.class_name == "Int"
-      raise "flat torus orbit generators must be nonzero integers" if !integer
-      value = generator.abs
+      if !Integer.value?(generator)
+        raise "flat torus orbit generators must be nonzero integers"
+      value = Integer.copy_value(generator).abs
       raise "flat torus orbit generators must be nonzero integers" if value == 0
       normalized.push(value)
       common = common == 0 ? value : common.gcd(value)
@@ -236,7 +271,10 @@
         index += 1
     @generators = normalized
 
-  ro :generators
+  -> generators
+    out = []
+    @generators.each -> (value) out.push(Integer.copy_value(value))
+    out
 
   -> dimension
     @generators.size
@@ -250,13 +288,14 @@
     common == 1
 
   -> coordinate_distance(index, time)
-    raise "flat torus coordinate index is out of bounds" if index < 0 || index >= dimension
+    if !Integer.value?(index) || index < 0 || index >= dimension
+      raise "flat torus coordinate index is out of bounds"
     value = Rational.coerce(time) * @generators[index]
     denominator = value.denominator
     residue = value.numerator % denominator
     residue += denominator if residue < 0
     residue = denominator - residue if residue * 2 > denominator
-    Rational.new(residue, denominator)
+    Rational.copy_value(Rational.new(residue, denominator))
 
   -> minimum_coordinate_distance(time)
     best = coordinate_distance(0, time)
@@ -304,8 +343,7 @@
       raise "flat torus coordinate selection must be a nonempty Array"
     seen = {}
     indices.each -> (index)
-      integer = index.class_name == "Integer" || index.class_name == "Int"
-      if !integer || index < 0 || index >= dimension
+      if !Integer.value?(index) || index < 0 || index >= dimension
         raise "flat torus coordinate index is out of bounds"
       key = index.to_s
       raise "flat torus coordinate selection contains a duplicate" if seen.has_key?(key)

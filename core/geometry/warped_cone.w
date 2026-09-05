@@ -31,14 +31,14 @@
     @shrink_law = shrink_law.to_s.to_sym
     if ![:exponential, :power, :linear].include?(@shrink_law)
       raise "warped cone shrink law must be exponential, power, or linear"
-    initial_value = @initial_radius.to_f
-    rate_value = @rate.to_f
+    initial_value = self.__finite_value(@initial_radius, "initial radius")
+    rate_value = self.__finite_value(@rate, "rate or slope")
     if initial_value <= ~0.0
       raise "warped cone initial radius must be positive"
     if rate_value <= ~0.0
       raise "warped cone rate or slope must be positive"
     if @shrink_law == :power
-      exponent_value = @exponent.to_f
+      exponent_value = self.__finite_value(@exponent, "power exponent")
       if exponent_value <= ~0.0
         raise "warped cone power exponent must be positive"
 
@@ -84,13 +84,13 @@
   # distance.  The linear model's value is exact for exact scalar inputs.
   -> finite_apex_height
     return nil if self.ideal_apex?
-    @initial_radius / @rate
+    Expression.divide_values(@initial_radius, @rate)
 
   -> radius_limit_at_apex
     0
 
   -> regular_height?(height)
-    value = height.to_f
+    value = self.__finite_value(height, "height")
     return false if value < ~0.0
     return true if self.ideal_apex?
     value < self.finite_apex_height.to_f
@@ -150,11 +150,13 @@
   # Shortest angular separation on the normalized unit cross-section, in
   # radians.  Period reduction requires a floating approximation to pi.
   -> normalized_separation(first_angle, second_angle)
-    first_value = first_angle.to_f
-    second_value = second_angle.to_f
+    first_value = self.__finite_value(first_angle, "angle")
+    second_value = self.__finite_value(second_angle, "angle")
     pi = Math.acos(~-1.0)
     tau = ~2.0 * pi
-    difference = Math.abs(first_value - second_value) % tau
+    # Reduce before subtraction to avoid overflow, then normalize the signed
+    # floating remainders so opposite-sign angles still give a circular gap.
+    difference = Math.abs(first_value % tau - second_value % tau) % tau
     difference > pi ? tau - difference : difference
 
   # Arc length on one height-t circle.  This is not the unrestricted surface
@@ -224,7 +226,7 @@
   # connect each returned row without special casing closure.
   -> surface_samples(start_height = 0, stop_height = nil,
                      height_count = 41, angular_count = 49)
-    if !Expression.integer?(angular_count) || angular_count < 3
+    if !Integer.value?(angular_count) || angular_count < 3
       raise "warped cone angular sample count must be an integer " + (
         "of at least three")
     profile = self.profile_samples(start_height, stop_height, height_count)
@@ -264,19 +266,37 @@
         base * base))
 
   -> validate_height(height)
-    value = height.to_f
+    value = self.__finite_value(height, "height")
     if value < ~0.0
       raise "warped cone height must be nonnegative"
     if self.finite_apex? && value > self.finite_apex_height.to_f
       raise "warped cone height lies beyond the finite linear apex"
     true
 
+  -> __finite_value(value, label)
+    valid = false
+    number = nil
+    begin
+      name = value.class_name
+      valid = Integer.value?(value) || name == "Rational" || name == "Float" || name == "Decimal"
+      if valid
+        text = value.to_s
+        valid = text != nil && text.class_name == "String"
+      number = value.to_f if valid
+      valid = valid && number != nil && number.class_name == "Float"
+      valid = !number.nan? && !number.infinite? if valid
+    rescue error
+      valid = false
+    if !valid
+      raise "warped cone " + label + " must be a finite real value"
+    number
+
   -> validate_sample_interval(start_height, stop_height, count)
     self.validate_height(start_height)
     self.validate_height(stop_height)
     if stop_height.to_f <= start_height.to_f
       raise "warped cone samples need start height below stop height"
-    if !Expression.integer?(count) || count < 2
+    if !Integer.value?(count) || count < 2
       raise "warped cone sample count must be an integer of at least two"
     true
 

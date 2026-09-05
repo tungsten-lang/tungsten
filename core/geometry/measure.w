@@ -4,13 +4,12 @@
 
 use core/expression
 use core/special
+use core/integer
 
 + EuclideanMeasure
   -> .validate_dimension(dimension, positive = false)
-    name = dimension.class_name
-    integer = name == "Integer" || name == "Int" || name == "BigInt"
     minimum = positive ? 1 : 0
-    if !integer || dimension < minimum
+    if !Integer.value?(dimension) || dimension < minimum
       label = positive ? "positive" : "nonnegative"
       raise "Euclidean dimension must be a " + label + " integer"
     dimension

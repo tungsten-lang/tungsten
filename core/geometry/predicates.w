@@ -1,4 +1,4 @@
-# Exact affine predicates for two- and three-dimensional geometry.
+# Exact geometric predicates for two- and three-dimensional geometry.
 #
 # Coordinates must be Integer (including BigInt) or Rational values.  Integer
 # products promote through the arbitrary-precision tower and Rational
@@ -20,20 +20,11 @@ use core/numeric/rational
   # methods are implementation details; only the predicate methods without
   # that prefix form this namespace's supported API.
   -> .__exact_integer_value?(value)
-    valid = false
-    begin
-      text = value.to_s
-      if text != nil && text.class_name == "String"
-        parsed = text.to_i
-        valid = parsed == value
-    rescue error
-      valid = false
-    valid
+    Integer.value?(value)
 
   -> .__exact_coordinate?(value)
     name = value.class_name
-    if name == "Integer" || name == "BigInt"
-      return GeometryPredicates.__exact_integer_value?(value)
+    return true if GeometryPredicates.__exact_integer_value?(value)
     if name == "Rational"
       begin
         return GeometryPredicates.__exact_integer_value?(value.numerator) && (
@@ -60,6 +51,9 @@ use core/numeric/rational
     GeometryPredicates.__validate_point(a, 2, "orient2d point a")
     GeometryPredicates.__validate_point(b, 2, "orient2d point b")
     GeometryPredicates.__validate_point(c, 2, "orient2d point c")
+    GeometryPredicates.__orient2d_determinant(a, b, c)
+
+  -> .__orient2d_determinant(a, b, c)
     (b[0] - a[0])*(c[1] - a[1]) - (
       b[1] - a[1])*(c[0] - a[0])
 
@@ -88,11 +82,16 @@ use core/numeric/rational
     GeometryPredicates.__sign(
       GeometryPredicates.orient3d_determinant(a, b, c, d))
 
+  # The raw polynomial is defined even for collinear a,b,c. Circle sign and
+  # location queries below require a non-collinear defining triangle.
   -> .incircle2d_determinant(a, b, c, d)
     GeometryPredicates.__validate_point(a, 2, "incircle2d point a")
     GeometryPredicates.__validate_point(b, 2, "incircle2d point b")
     GeometryPredicates.__validate_point(c, 2, "incircle2d point c")
     GeometryPredicates.__validate_point(d, 2, "incircle2d point d")
+    GeometryPredicates.__incircle2d_determinant(a, b, c, d)
+
+  -> .__incircle2d_determinant(a, b, c, d)
     adx = a[0] - d[0]
     ady = a[1] - d[1]
     bdx = b[0] - d[0]
@@ -109,17 +108,19 @@ use core/numeric/rational
 
   -> .incircle2d(a, b, c, d)
     orientation = GeometryPredicates.orient2d(a, b, c)
-    determinant = GeometryPredicates.incircle2d_determinant(a, b, c, d)
     if orientation == 0
       raise "incircle2d needs three non-collinear circle points"
-    GeometryPredicates.__sign(determinant)
+    GeometryPredicates.__validate_point(d, 2, "incircle2d point d")
+    GeometryPredicates.__sign(
+      GeometryPredicates.__incircle2d_determinant(a, b, c, d))
 
   -> .incircle2d_location(a, b, c, d)
     orientation = GeometryPredicates.orient2d(a, b, c)
-    determinant = GeometryPredicates.incircle2d_determinant(a, b, c, d)
     if orientation == 0
       raise "incircle2d needs three non-collinear circle points"
-    value = GeometryPredicates.__sign(determinant)
+    GeometryPredicates.__validate_point(d, 2, "incircle2d point d")
+    value = GeometryPredicates.__sign(
+      GeometryPredicates.__incircle2d_determinant(a, b, c, d))
     value *= orientation
     return :inside if value > 0
     return :outside if value < 0
@@ -135,7 +136,7 @@ use core/numeric/rational
       endpoint_b <= value && value <= endpoint_a
 
   -> .__point_on_segment2d_validated?(point, a, b)
-    return false if GeometryPredicates.orient2d(a, b, point) != 0
+    return false if GeometryPredicates.__orient2d_determinant(a, b, point) != 0
     GeometryPredicates.__between?(point[0], a[0], b[0]) && (
       GeometryPredicates.__between?(point[1], a[1], b[1]))
 
@@ -169,10 +170,10 @@ use core/numeric/rational
       return GeometryPredicates.__point_on_segment2d_validated?(c, a, b) ? (
         :touching) : :disjoint
 
-    o1 = GeometryPredicates.orient2d(a, b, c)
-    o2 = GeometryPredicates.orient2d(a, b, d)
-    o3 = GeometryPredicates.orient2d(c, d, a)
-    o4 = GeometryPredicates.orient2d(c, d, b)
+    o1 = GeometryPredicates.__sign(GeometryPredicates.__orient2d_determinant(a, b, c))
+    o2 = GeometryPredicates.__sign(GeometryPredicates.__orient2d_determinant(a, b, d))
+    o3 = GeometryPredicates.__sign(GeometryPredicates.__orient2d_determinant(c, d, a))
+    o4 = GeometryPredicates.__sign(GeometryPredicates.__orient2d_determinant(c, d, b))
 
     if o1 == 0 && o2 == 0 && o3 == 0 && o4 == 0
       axis = a[0] != b[0] || c[0] != d[0] ? 0 : 1

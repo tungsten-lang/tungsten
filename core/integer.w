@@ -4,6 +4,21 @@
 # heap-backed continuation. Algorithms here are shared by both and must not
 # depend on either representation or on Int's promotion policy.
 + Integer < Real
+
+  # Operational integer values, including heap BigInt, identified by the
+  # encoding-v4 tags in runtime/wvalue.h. Class scaffolds are ordinary objects
+  # and must never reach integer arithmetic merely because of their name.
+  -> .value?(value)
+    tag = ((value$value >> 48) & 0xFFFF)
+    tag == 0xFFFA || tag == 0xFFFB
+
+  # Independent storage for the mutable BigInt tier; immediate integers are
+  # immutable. Decimal text is deliberately restricted to the heap-copy path.
+  -> .copy_value(value)
+    raise "expected an operational Integer value" if !Integer.value?(value)
+    return value if ((value$value >> 48) & 0xFFFF) == 0xFFFA
+    value.to_s.to_i
+
   # @todo other operators. NB: the bodyless `-> +/1` arity-suffix form does
   # NOT parse for an operator name (only `-> name/N` on identifiers does), so
   # it silently failed to load this whole file in the past. Use the param form.

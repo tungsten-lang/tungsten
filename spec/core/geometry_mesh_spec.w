@@ -119,7 +119,9 @@ flipped = TriangleMesh.new(tetra_vertices, [
 ])
 mesh_check("orientation.conflict", !flipped.consistently_oriented? &&
            flipped.topology.orientation_conflicts.size == 3)
-mesh_check("orientation.genus_withheld", flipped.orientable_genus == nil)
+mesh_check("orientation.genus_independent", flipped.orientable? && flipped.orientable_genus == 0)
+mesh_check("orientation.repair", flipped.reoriented.consistently_oriented? &&
+           !flipped.consistently_oriented?)
 
 # Three triangles sharing one edge violate the at-most-two-face condition.
 nonmanifold_edge = TriangleMesh.new(
@@ -176,7 +178,7 @@ nonfinite_rejected = true
 mesh_check("validation.nonfinite", nonfinite_rejected)
 
 scaffold_coordinate_rejected = true
-[Integer.new, Int.new, BigInt.new, Float.new, Decimal.new].each -> (coordinate)
+[Integer.new, Int.new, BigInt.new, Float.new, 0.5].each -> (coordinate)
   begin
     TriangleMesh.new([[coordinate, 0], [1, 0], [0, 1]], [[0, 1, 2]])
     scaffold_coordinate_rejected = false
@@ -195,7 +197,7 @@ scaffold_index_rejected = true
 mesh_check("validation.index_scaffolds", scaffold_index_rejected)
 
 noninteger_index_rejected = true
-[Rational.new(1, 1), Decimal.new, ~1.0].each -> (index)
+[Rational.new(1, 1), 0.0, ~1.0].each -> (index)
   begin
     TriangleMesh.new([[0, 0], [1, 0], [0, 1]], [[0, index, 2]])
     noninteger_index_rejected = false
@@ -223,5 +225,92 @@ invalid_face_accessor_rejected = true
     invalid_face_accessor_rejected = false if !error.to_s.include?(
       "face index")
 mesh_check("validation.face_accessor_indices", invalid_face_accessor_rejected)
+
+mesh_check("adjacency.edge_faces", disk.topology.edge_faces(1) == [0, 1])
+mesh_check("adjacency.vertex_faces", disk.topology.vertex_faces(0) == [0, 1])
+mesh_check("adjacency.vertex_neighbors", disk.topology.vertex_neighbors(0) == [1, 2, 3])
+mesh_check("adjacency.face_neighbors", disk.topology.face_neighbors(0) == [1])
+mesh_check("boundary.canonical_cycles", disk.topology.boundary_loops == [[0, 1, 2, 3]] &&
+           annulus.topology.boundary_loops == [[0, 1, 2, 3], [4, 5, 6, 7]])
+mesh_check("boundary.closed", torus.topology.boundary_loops == [])
+mesh_check("boundary.nonmanifold", bow_tie.topology.boundary_loops == nil)
+mesh_check("components.isolates", with_isolate.topology.vertex_components == [[0, 1, 2], [3]] &&
+           with_isolate.topology.surface_components == [[0]] &&
+           with_isolate.topology.vertex_component(3) == 1 &&
+           with_isolate.topology.face_component(0) == 0)
+
+# Every winding of a tetrahedral sphere admits the same genus and a repair.
+mask = 0
+while mask < 16
+  faces = tetra.faces
+  i = 0
+  while i < 4
+    if (mask & (1 << i)) != 0
+      old = faces[i][1]
+      faces[i][1] = faces[i][2]
+      faces[i][2] = old
+    i += 1
+  candidate = TriangleMesh.new(tetra_vertices, faces)
+  mesh_check("orientation.all_tetra_windings", candidate.orientable_genus == 0 &&
+             candidate.reoriented.consistently_oriented?)
+  mask += 1
+
+# Six-vertex triangulation of RP2; removing one open triangle gives a
+# Mobius band. These abstract complexes intentionally use label coordinates.
+projective_faces = [
+  [0, 1, 2], [0, 1, 3], [0, 2, 4], [0, 3, 5], [0, 4, 5],
+  [1, 2, 5], [1, 3, 4], [1, 4, 5], [2, 3, 4], [2, 3, 5]
+]
+labels = [[0, 0], [1, 0], [2, 0], [3, 0], [4, 0], [5, 0]]
+projective = TriangleMesh.new(labels, projective_faces)
+mesh_check("orientation.projective_plane", projective.closed? &&
+           projective.topology.euler_characteristic == 1 && !projective.orientable? &&
+           projective.orientable_genus == nil && projective.topology.orientation_face_flips == nil)
+mobius = TriangleMesh.new(labels, projective_faces.drop(1))
+mesh_check("orientation.mobius", mobius.combinatorial_manifold? && !mobius.closed? &&
+           !mobius.orientable? && mobius.topology.boundary_loops == [[0, 1, 2]])
+repair_rejected = false
+begin
+  projective.reoriented
+rescue error
+  repair_rejected = error.to_s.include?("orientable")
+mesh_check("orientation.reject_nonorientable_repair", repair_rejected)
+
+combined_faces = tetra.faces
+torus.faces.each -> (face)
+  combined_faces.push([face[0] + 4, face[1] + 4, face[2] + 4])
+torus3 = []
+torus.vertices.each -> (vertex) torus3.push([vertex[0], vertex[1], 0])
+combined = TriangleMesh.new(tetra_vertices + torus3, combined_faces)
+mesh_check("components.total_genus", combined.closed? && combined.orientable_genus == 1 &&
+           combined.topology.surface_component_count == 2 &&
+           combined.topology.surface_components[0] == [0, 1, 2, 3] &&
+           combined.topology.face_component(4) == 1)
+
+disk.topology.edge_faces(1).push(99)
+disk.topology.vertex_faces(0).push(99)
+disk.topology.vertex_neighbors(0).push(99)
+disk.topology.face_neighbors(0).push(99)
+disk.topology.boundary_loops[0][0] = 99
+disk.topology.surface_components[0][0] = 99
+disk.topology.vertex_components[0][0] = 99
+flipped.topology.orientation_face_flips.push(99)
+mesh_check("adjacency.defensive_copies", disk.topology.edge_faces(1) == [0, 1] &&
+           disk.topology.vertex_faces(0) == [0, 1] &&
+           disk.topology.vertex_neighbors(0) == [1, 2, 3] &&
+           disk.topology.face_neighbors(0) == [1] &&
+           disk.topology.boundary_loops == [[0, 1, 2, 3]] &&
+           disk.topology.surface_components == [[0, 1]] &&
+           disk.topology.vertex_components == [[0, 1, 2, 3]] &&
+           flipped.reoriented.consistently_oriented?)
+
+duplicate_many = TriangleMesh.new([[0, 0], [1, 0], [0, 1]],
+                                  [[0, 1, 2], [1, 2, 0], [2, 1, 0]])
+mesh_check("duplicates.high_incidence", duplicate_many.topology.duplicate_face_groups == [[0, 1, 2]])
+empty_faces = TriangleMesh.new([[0, 0], [1, 1]], [])
+mesh_check("empty_faces.policy", !empty_faces.combinatorial_manifold? &&
+           empty_faces.topology.connected_component_count == 2 &&
+           empty_faces.topology.surface_components == [] &&
+           empty_faces.topology.boundary_loops == nil)
 
 << "geometry_mesh_spec: all checks passed"

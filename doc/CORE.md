@@ -118,7 +118,7 @@ summary from the source header, and a link to the source.
 | `Geometry` | `+ Geometry` | — | [`core/geometry.w`](../core/geometry.w) |
 | `GeometryPredicates` | `+ GeometryPredicates` | — | [`core/geometry/predicates.w`](../core/geometry/predicates.w) |
 | `TriangleMesh` | `+ TriangleMesh` | — | [`core/geometry/mesh.w`](../core/geometry/mesh.w) |
-| `TriangleMeshTopology` | `+ TriangleMeshTopology` | Deterministic combinatorial diagnostics derived from a TriangleMesh. | [`core/geometry/mesh.w`](../core/geometry/mesh.w) |
+| `TriangleMeshTopology` | `+ TriangleMeshTopology` | — | [`core/geometry/mesh_topology.w`](../core/geometry/mesh_topology.w) |
 | `EuclideanMeasure` | `+ EuclideanMeasure` | — | [`core/geometry/measure.w`](../core/geometry/measure.w) |
 | `Polyomino` | `+ Polyomino` | Discrete lattice geometry: polyominoes on the integer grid Z x Z. | [`core/geometry/polyomino.w`](../core/geometry/polyomino.w) |
 | `LatticeSymmetry` | `+ LatticeSymmetry` | Finite symmetry groups acting on a lattice by integer matrices. | [`core/geometry/lattice_symmetry.w`](../core/geometry/lattice_symmetry.w) |
@@ -250,7 +250,7 @@ summary from the source header, and a link to the source.
 | `Vector` | — | — | [`core/vector.w`](../core/vector.w) |
 | `PrimeSieve` | `+ PrimeSieve` | — | [`core/prime_sieve.w`](../core/prime_sieve.w) |
 | `FlatTorusOrbit` | `+ FlatTorusOrbit` | — | [`core/geometry/flat_torus.w`](../core/geometry/flat_torus.w) |
-| `FlatTorusOrbitExtremum` | `+ FlatTorusOrbitExtremum` | Exact one-parameter orbits in a flat torus. | [`core/geometry/flat_torus.w`](../core/geometry/flat_torus.w) |
+| `FlatTorusOrbitExtremum` | `+ FlatTorusOrbitExtremum` | — | [`core/geometry/flat_torus.w`](../core/geometry/flat_torus.w) |
 | `FlatTorusOrbitStraightening` | `+ FlatTorusOrbitStraightening` | An exact GL(n,Z) coordinate change which sends an integer torus direction | [`core/geometry/flat_torus.w`](../core/geometry/flat_torus.w) |
 | `Algebra` | `+ Algebra` | — | [`core/algebra.w`](../core/algebra.w) |
 | `ArithmeticCircuitNode` | `+ ArithmeticCircuitNode` | — | [`core/algebra/arithmetic_circuit.w`](../core/algebra/arithmetic_circuit.w) |
@@ -643,7 +643,7 @@ summary from the source header, and a link to the source.
 | `Float80` | `+ Float80 < Float` | Denormalized float64 | [`core/numeric/float80.w`](../core/numeric/float80.w) |
 | `Float128` | `+ Float128 < Float` | The IEEE 754-2008 standard specifies **binary128** as having: | [`core/numeric/float128.w`](../core/numeric/float128.w) |
 | `Float256` | `+ Float256 < Float` | The IEEE 754-2008 standard specifies **binary256** as having: | [`core/numeric/float256.w`](../core/numeric/float256.w) |
-| `Rational` | `+ Rational < Real` | Rational — exact fractions stored as a reduced numerator/denominator pair. | [`core/numeric/rational.w`](../core/numeric/rational.w) |
+| `Rational` | `+ Rational < Real` | — | [`core/numeric/rational.w`](../core/numeric/rational.w) |
 | `Real` | `+ Real < Number` | Real — the totally ordered numbers: Int, Float, Decimal and their | [`core/numeric/real.w`](../core/numeric/real.w) |
 
 ## Traits

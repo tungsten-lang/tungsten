@@ -4,7 +4,15 @@
 # directly in the WValue. Larger values transparently promote to a heap object
 # whose numerator and denominator use the arbitrary-precision Integer tower.
 # Both representations have the same public class and dispatch surface.
+use core/integer
+
 + Rational < Real
+
+  -> .copy_value(value)
+    if value.class_name != "Rational"
+      raise "expected a Rational value"
+    Rational.new(Integer.copy_value(value.numerator),
+                 Integer.copy_value(value.denominator))
 
   # Constructors are runtime-backed so they can return the packed value
   # or its heap-backed overflow tier instead of an ordinary class instance.

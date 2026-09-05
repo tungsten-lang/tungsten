@@ -336,7 +336,17 @@ compiled_specs=(
   spec/core/calculus_improvements_spec.w
   spec/core/calculus_autoload_spec.w
   spec/core/geometry_predicates_spec.w
+  # Full symbolic relativity curvature is native-only (interpreter memory).
+  spec/core/relativity_geometry_spec.w
   spec/core/geometry_mesh_spec.w
+  spec/core/geometry_autoload_spec.w
+  spec/core/geometry_safety_spec.w
+  spec/core/geometry_spec.w
+  spec/core/geometry_measure_spec.w
+  spec/core/geometry_flat_torus_spec.w
+  spec/core/geometry_warped_cone_spec.w
+  spec/core/sparse_canonical_spec.w
+  spec/core/expression_exact_division_spec.w
   spec/core/expression_spec.w
   spec/core/expression_autoload_spec.w
   spec/core/expression_calculus_spec.w
@@ -630,6 +640,14 @@ interpreter_specs=(
   spec/core/calculus_autoload_spec.w
   spec/core/geometry_predicates_spec.w
   spec/core/geometry_mesh_spec.w
+  spec/core/geometry_autoload_spec.w
+  spec/core/geometry_safety_spec.w
+  spec/core/geometry_spec.w
+  spec/core/geometry_measure_spec.w
+  spec/core/geometry_flat_torus_spec.w
+  spec/core/geometry_warped_cone_spec.w
+  spec/core/sparse_canonical_spec.w
+  spec/core/expression_exact_division_spec.w
   spec/core/expression_spec.w
   spec/core/expression_autoload_spec.w
   spec/core/expression_calculus_spec.w
@@ -1100,15 +1118,10 @@ exclude_specs=(
   spec/core/digest64_spec.w
   spec/core/doc_taught_surface_spec.w
   spec/core/dynamics_spec.w
-  spec/core/expression_exact_division_spec.w
   spec/core/expression_gamma_spec.w
   spec/core/f16_array_native_spec.w
   spec/core/f16_array_spec.w
   spec/core/gaussian_integer_spec.w
-  spec/core/geometry_flat_torus_spec.w
-  spec/core/geometry_measure_spec.w
-  spec/core/geometry_spec.w
-  spec/core/geometry_warped_cone_spec.w
   spec/core/gsub_replacement_spec.w
   spec/core/http_tls_socket_spec.w
   spec/core/increment_assign_spec.w
@@ -1135,7 +1148,6 @@ exclude_specs=(
   spec/core/proof_artifact_spec.w
   spec/core/puiseux_autoload_spec.w
   spec/core/quantum_spec.w
-  spec/core/relativity_geometry_spec.w
   spec/core/scientific_surface_spec.w
   spec/core/simd_vector_wvalue_spec.w
   spec/core/smith_eisenstein_spec.w

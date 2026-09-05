@@ -106,7 +106,7 @@
   auto :Geometry,      "geometry"
   auto :GeometryPredicates, "geometry/predicates"
   auto :TriangleMesh,  "geometry/mesh"
-  auto :TriangleMeshTopology, "geometry/mesh"
+  auto :TriangleMeshTopology, "geometry/mesh_topology"
   auto :EuclideanMeasure, "geometry/measure"
   auto :Polyomino,     "geometry/polyomino"
   auto :LatticeSymmetry, "geometry/lattice_symmetry"

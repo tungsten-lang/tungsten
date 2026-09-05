@@ -122,4 +122,41 @@ rescue error
   scaffold_rejected = error.to_s.include?("exact Integer or Rational")
 predicate_check("coordinate.scaffold_rejected", scaffold_rejected)
 
+# Translation, argument symmetry and endpoint reversal must preserve the
+# geometric decisions even when every coordinate is in the heap tower.
+shift = 281474976710657
+permutations = [[0, 1, 2, 1], [1, 2, 0, 1], [2, 0, 1, 1],
+                [0, 2, 1, -1], [2, 1, 0, -1], [1, 0, 2, -1]]
+points = [[shift, shift], [shift + 4, shift], [shift, shift + 4]]
+permutations.each -> (p)
+  predicate_check("permutation.orient2d", Geometry.orient2d(points[p[0]], points[p[1]], points[p[2]]) == p[3])
+  predicate_check("permutation.incircle", Geometry.incircle2d(points[p[0]], points[p[1]], points[p[2]], [shift + 1, shift + 1]) == p[3])
+  predicate_check("permutation.location", Geometry.incircle2d_location(points[p[0]], points[p[1]], points[p[2]], [shift + 1, shift + 1]) == :inside)
+predicate_check("orient3d.rational", Geometry.orient3d_determinant(
+                  origin3, [Rational.new(1, 2), 0, 0],
+                  [0, Rational.new(1, 3), 0], [0, 0, Rational.new(1, 5)]) == Rational.new(1, 30))
+predicate_check("incircle.raw_degenerate", Geometry.incircle2d_determinant([0,0], [1,1], [2,2], [0,1]) == 4)
+predicate_check("segment.degenerate_point", Geometry.point_on_segment2d?([1,2], [1,2], [1,2]) &&
+                !Geometry.point_on_segment2d?([1,3], [1,2], [1,2]))
+
+# Exhaustive pairs of segments on a 2x2 grid, including point segments.
+grid = [[0,0], [0,1], [1,0], [1,1]]
+symmetry = true
+grid.each -> (a)
+  grid.each -> (b)
+    grid.each -> (c)
+      grid.each -> (d)
+        relation = Geometry.segment_relation2d(a, b, c, d)
+        symmetry = false if relation != Geometry.segment_relation2d(c, d, a, b)
+        symmetry = false if relation != Geometry.segment_relation2d(b, a, c, d)
+        symmetry = false if relation != Geometry.segment_relation2d(a, b, d, c)
+predicate_check("segment.exhaustive_symmetry", symmetry)
+[Integer.new, Int.new, BigInt.new, 1.0, Float.new].each -> (coordinate)
+  rejected = false
+  begin
+    Geometry.orient2d([coordinate, 0], [1, 0], [0, 1])
+  rescue error
+    rejected = error.to_s.include?("exact Integer or Rational")
+  predicate_check("coordinate.operational_domain", rejected)
+
 << "geometry_predicates_spec: all checks passed"

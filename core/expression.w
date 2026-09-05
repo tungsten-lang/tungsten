@@ -1323,6 +1323,8 @@ use core/special
     if @operation == "divide"
       return Expression.divide_values(values[0], values[1])
     if @operation == "power"
+      if Expression.integer?(values[0]) && Expression.integer?(values[1]) && values[1] < 0
+        return Rational.new(1, values[0] ** (0 - values[1]))
       return values[0] ** values[1]
     if @operation == "polygamma"
       order = values[0]

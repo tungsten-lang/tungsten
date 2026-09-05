@@ -185,4 +185,111 @@ simulation.run!
 fv_check("simulation.rerun_rebuilds_configuration",
   simulation.fv.cells[0] == 6 && simulation.fv.steps == 1)
 
-<< "physics_finite_volume_spec: all checks passed"
+# Inflow configuration order cannot change any face's prescribed state.
+inflow_a = FiniteVolume.new(ie2, [4, 4], [~1.0, ~1.0])
+inflow_b = FiniteVolume.new(ie2, [4, 4], [~1.0, ~1.0])
+inflow_a.boundary_face(0, 0, :inflow, [~1.0, ~10.0, ~0.0])
+inflow_a.boundary_face(1, 0, :inflow, [~2.0, ~0.0, ~20.0])
+inflow_b.boundary_face(1, 0, :inflow, [~2.0, ~0.0, ~20.0])
+inflow_b.boundary_face(0, 0, :inflow, [~1.0, ~10.0, ~0.0])
+inflow_a.init_each(-> (x, y) [~1.0, ~0.0, ~0.0])
+inflow_b.init_each(-> (x, y) [~1.0, ~0.0, ~0.0])
+fv_check("inflow.multidimensional_cfl",
+  fv_close?(inflow_a.stable_dt, ~0.4 / (~4.0 * (~11.0 + ~21.0))))
+inflow_a.step!(~1.0e-4)
+inflow_b.step!(~1.0e-4)
+same_inflow = true
+j = 0
+while j < 4
+  i = 0
+  while i < 4
+    same_inflow = same_inflow && inflow_a.cell(i, j) == inflow_b.cell(i, j)
+    i += 1
+  j += 1
+fv_check("inflow.per_face_order_independent", same_inflow)
+
+fast_inflow = FiniteVolume.new(Physics.isothermal_euler(1, ~1.0), [4], [~1.0])
+fast_inflow.init_each(-> (x) [~1.0, ~0.0])
+fast_inflow.boundary_face(0, 0, :inflow, [~1.0, ~100.0])
+fv_check("inflow.cfl_includes_boundary",
+  fv_close?(fast_inflow.stable_dt, ~0.4 / (~101.0 * ~4.0)))
+fast_inflow.step!
+fv_check("inflow.fast_default_step", fast_inflow.steps == 1 && fast_inflow.invalid_cells == 0)
+
+# A one-cell impermeable wall isolates the right-hand initial-value problem.
+wall_a = FiniteVolume.new(Physics.isothermal_euler(1, ~1.0), [7], [~7.0])
+wall_b = FiniteVolume.new(Physics.isothermal_euler(1, ~1.0), [7], [~7.0])
+wall_a.boundary(:reflect)
+wall_b.boundary(:reflect)
+wall_a.init_each(-> (x) [x < ~3.0 ? ~1.8 : x - ~2.5, ~0.0])
+wall_b.init_each(-> (x) [x < ~3.0 ? ~0.2 : x - ~2.5, ~0.0])
+wall_a.solid_each(-> (x) x > ~3.0 && x < ~4.0)
+wall_b.solid_each(-> (x) x > ~3.0 && x < ~4.0)
+wall_mass = wall_a.totals[0]
+wall_a.step!(~0.001)
+wall_b.step!(~0.001)
+isolated = true
+i = 4
+while i < 7
+  isolated = isolated && wall_a.cell(i) == wall_b.cell(i)
+  i += 1
+fv_check("solid.one_cell_wall_isolation", isolated)
+fv_check("solid.wall_mass_conserved", fv_close?(wall_a.totals[0], wall_mass))
+
+clock_probe = FiniteVolume.new(Physics.isothermal_euler(1, ~1.0), [1], [~10.0])
+clock_probe.init_each(-> (x) [~1.0, ~0.0])
+clock_probe.step!(~1.0)
+before_clock_cell = clock_probe.cell(0)
+tiny_step_rejected = false
+begin
+  clock_probe.step!(~1.0e-20)
+rescue error
+  tiny_step_rejected = error.to_s.include?("cannot advance")
+fv_check("step.no_progress_rejected", tiny_step_rejected)
+fv_check("step.no_progress_atomic",
+  clock_probe.time == ~1.0 && clock_probe.steps == 1 && clock_probe.cell(0) == before_clock_cell)
+
+unpaired_rejected = false
+begin
+  clock_probe.boundary_face(0, 0, :periodic)
+  clock_probe.step!(~0.01)
+rescue error
+  unpaired_rejected = error.to_s.include?("must be paired")
+fv_check("boundary.unpaired_periodic_rejected", unpaired_rejected)
+clock_probe.boundary_face(0, 1, :periodic)
+clock_probe.step!(~0.01)
+fv_check("boundary.paired_periodic_accepted", clock_probe.steps == 2)
+
+three_d = FiniteVolume.new(Physics.compressible_euler(3), [2, 2, 2], [~1.0, ~1.0, ~1.0])
+three_d.boundary(:periodic)
+three_d.init_each(-> (x, y, z) [~2.0, ~1.0, ~2.0, ~-3.0, ~4.0])
+three_d.step!(~0.001)
+fv_check("fields.transverse_velocities",
+  three_d.field(:vy)[0] == ~2.0 && three_d.field(:vz)[0] == ~-3.0)
+fv_check("fields.internal_energy_density",
+  fv_close?(three_d.field(:internal_energy_density)[0], ~10.0))
+fv_check("fields.internal_energy_units",
+  fv_close?(three_d.field(:specific_internal_energy)[0], ~5.0))
+inactive_field_rejected = false
+begin
+  fv2.field(:vz)
+rescue error
+  inactive_field_rejected = error.to_s.include?("inactive")
+fv_check("fields.inactive_direction_rejected", inactive_field_rejected)
+
+builder = Physics.isothermal_simulation(1).resolution([4]).domain([~1.0])
+builder.duration(~0.001).capture([:rho], 1).init(-> (x) [~1.0, ~0.0])
+bad_builder_boundary_rejected = false
+begin
+  builder.boundary(:teleport)
+rescue error
+  bad_builder_boundary_rejected = error.to_s.include?("unknown boundary")
+fv_check("builder.boundary_validates_immediately", bad_builder_boundary_rejected)
+begin
+  builder.duration(~-1.0)
+rescue error
+  nil
+builder.run!
+fv_check("builder.rejected_change_is_atomic", builder.fv.time == ~0.001)
+
+<< "physics_finite_volume_contract_spec: all checks passed"

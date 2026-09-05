@@ -71,7 +71,8 @@ nonlinear_check("burgers.negative_time_rejected", negative_time_rejected)
 
 nonfinite_time_rejected = false
 begin
-  not_a_number = ~1.0e999 - ~1.0e999
+  infinity = Math.exp(~1000.0)
+  not_a_number = infinity - infinity
   BurgersEquation.riemann_value_at(~1.0, ~0.0, ~0.0, not_a_number)
 rescue error
   nonfinite_time_rejected = error.to_s.include?("finite number")
@@ -158,7 +159,6 @@ rescue error
 nonlinear_check("diagnostics.nonfinite_field_rejected",
                 nonfinite_field_rejected)
 
-infinity = ~1.0e999
 infinite_cfl_rejected = false
 begin
   FiniteVolumeDiagnostics.cfl_contract?(~0.5, infinity)

@@ -51,7 +51,7 @@
     d = 0
     while d < @dim
       count = cells[d]
-      if count.class_name != "Integer" || count <= 0
+      if !Physics.integer?(count) || count <= 0
         raise "FiniteVolume: cell counts must be positive Integers"
       length = Physics.si(lengths[d], "m")
       if !EulerSystem.finite_number?(length) || length <= ~0.0
@@ -83,8 +83,12 @@
     @amax_out = f64[4]
     # Face boundary kinds, indexed [2*dir + side]: default outflow.
     @bc_kind = [1, 1, 1, 1, 1, 1]
-    @bc_lo = f64[8]
-    @bc_hi = f64[8]
+    # Each face owns its state; different directions must never alias.
+    @bc_states = []
+    face = 0
+    while face < 2 * @dim
+      @bc_states.push(f64[8])
+      face += 1
     # Global unsplit Courant number: dt = cfl / sum_d(a_d / dx_d).
     @cfl = ~0.4
     @time = ~0.0
@@ -136,8 +140,26 @@
   # primitive state [rho, v..., p] that should stream in.
   -> boundary_face(dir, side, kind, prim = nil)
     @sys.validate_direction(dir)
-    if side.class_name != "Integer" || side < 0 || side > 1
+    if !Physics.integer?(side) || side < 0 || side > 1
       raise "FiniteVolume: boundary side must be 0 or 1"
+    code = FiniteVolume.boundary_code(kind)
+    conserved_inflow = nil
+    if code == 3
+      if prim == nil
+        raise "FiniteVolume: inflow boundary needs a primitive state"
+      conserved_inflow = @sys.conserved(prim)
+    # Commit the face configuration only after every supplied value has been
+    # validated, so a rescued invalid inflow call cannot poison solver state.
+    @bc_kind[2 * dir + side] = code
+    if code == 3
+      state = @bc_states[2 * dir + side]
+      k = 0
+      while k < @ns
+        state[k] = conserved_inflow[k]
+        k = k + 1
+    self
+
+  -> .boundary_code(kind)
     code = 1
     case kind
       when :periodic
@@ -150,43 +172,37 @@
         code = 3
       else
         raise "FiniteVolume: unknown boundary kind [kind]"
-    conserved_inflow = nil
-    if code == 3
-      if prim == nil
-        raise "FiniteVolume: inflow boundary needs a primitive state"
-      conserved_inflow = @sys.conserved(prim)
-    # Commit the face configuration only after every supplied value has been
-    # validated, so a rescued invalid inflow call cannot poison solver state.
-    @bc_kind[2 * dir + side] = code
-    if code == 3
-      k = 0
-      while k < @ns
-        if side == 0
-          @bc_lo[k] = conserved_inflow[k]
-        else
-          @bc_hi[k] = conserved_inflow[k]
-        k = k + 1
-    self
+    code
+
+  -> validate_boundaries
+    dir = 0
+    while dir < @dim
+      low_periodic = @bc_kind[2 * dir] == 0
+      high_periodic = @bc_kind[2 * dir + 1] == 0
+      if low_periodic != high_periodic
+        raise "FiniteVolume: periodic boundaries must be paired on each axis"
+      dir += 1
+    true
 
   # -- coordinates and cell access ------------------------------------------
 
   # Cell-centre coordinate of interior cell index along dir (0-based).
   -> centre(dir, i)
     @sys.validate_direction(dir)
-    if i.class_name != "Integer" || i < 0 || i >= @cells[dir]
+    if !Physics.integer?(i) || i < 0 || i >= @cells[dir]
       raise "FiniteVolume: cell coordinate is out of bounds"
     (i.to_f() + ~0.5) * @dx[dir]
 
   -> validate_cell_indices(i, j = 0, k = 0)
-    if i.class_name != "Integer" || i < 0 || i >= @cells[0]
+    if !Physics.integer?(i) || i < 0 || i >= @cells[0]
       raise "FiniteVolume: x cell index is out of bounds"
     if @dim >= 2
-      if j.class_name != "Integer" || j < 0 || j >= @cells[1]
+      if !Physics.integer?(j) || j < 0 || j >= @cells[1]
         raise "FiniteVolume: y cell index is out of bounds"
     elsif j != 0
       raise "FiniteVolume: y cell index is inactive"
     if @dim >= 3
-      if k.class_name != "Integer" || k < 0 || k >= @cells[2]
+      if !Physics.integer?(k) || k < 0 || k >= @cells[2]
         raise "FiniteVolume: z cell index is out of bounds"
     elsif k != 0
       raise "FiniteVolume: z cell index is inactive"
@@ -411,6 +427,8 @@
 
   # Minmod edge reconstruction along one direction:
   #   ql = U − ½·minmod(U−U_L, U_R−U),  qr = U + ½·minmod(U−U_L, U_R−U).
+  # Fluid cells touching a solid use their cell average. A shared solid
+  # ghost cannot represent both sides of a one-cell wall independently.
   -> .reconstruct(q, ql, qr, mask, base0, n, sd, na, sa, nb, sb, ns) (f64[] f64[] f64[] u8[] i64 i64 i64 i64 i64 i64 i64 i64) i64
     b = 0 ## i64
     while b < nb
@@ -421,7 +439,7 @@
         while p < n - 1
           ci = line + p * sd
           base = ci * ns
-          if mask[ci] == 1
+          if mask[ci] == 1 || mask[ci - sd] == 1 || mask[ci + sd] == 1
             c = 0 ## i64
             while c < ns
               v = q[base + c]
@@ -929,6 +947,12 @@
               v = q[base + 1] / rho
             elsif what == 4
               v = (q[base + ie] - ~0.5 * ke) / rho
+            elsif what == 5
+              v = q[base + 2] / rho
+            elsif what == 6
+              v = q[base + 3] / rho
+            elsif what == 7
+              v = q[base + ie] - ~0.5 * ke
             out[w] = v
           w = w + 1
           i = i + 1
@@ -976,6 +1000,10 @@
               v = Math.sqrt(ke / rho)
             elsif what == 3
               v = q[base + 1] / rho
+            elsif what == 5
+              v = q[base + 2] / rho
+            elsif what == 6
+              v = q[base + 3] / rho
 
             out[w] = v
           w = w + 1
@@ -1121,7 +1149,7 @@
     while dir < @dim
       g = self.geometry(dir, true)
       base = g[4] * g[3] + g[7] * g[6]
-      FiniteVolume.bc_fill(@q, @bc_lo, @bc_hi, base, g[0], g[1], g[2], g[3], g[5], g[6], @ns, 1 + dir, @bc_kind[2 * dir], @bc_kind[2 * dir + 1])
+      FiniteVolume.bc_fill(@q, @bc_states[2 * dir], @bc_states[2 * dir + 1], base, g[0], g[1], g[2], g[3], g[5], g[6], @ns, 1 + dir, @bc_kind[2 * dir], @bc_kind[2 * dir + 1])
       dir = dir + 1
     nil
 
@@ -1154,12 +1182,31 @@
   # Configured CFL timestep estimate from the current state. The public CFL
   # range is an API bound, not a stability theorem for every flow.
   -> stable_dt
+    self.validate_boundaries()
     if self.invalid_cells() > 0
       raise "FiniteVolume: stable_dt needs an admissible finite state"
     if @compressible
       FiniteVolume.amax_ce(@q, @mask, @amax_out, @nx, @ny, @nz, @ns, @dim, @gamma)
     else
       FiniteVolume.amax_ie(@q, @mask, @amax_out, @nx, @ny, @nz, @ns, @dim, @vt)
+    # Inflow states can be much faster than the current interior state.
+    # Include every velocity component because the update is unsplit.
+    face = 0
+    while face < 2 * @dim
+      if @bc_kind[face] == 3
+        inflow = []
+        c = 0
+        while c < @ns
+          inflow.push(@bc_states[face][c])
+          c += 1
+        dir = 0
+        while dir < @dim
+          speed = @sys.max_wavespeed(inflow, dir)
+          if !EulerSystem.finite_number?(speed)
+            raise "FiniteVolume: inflow wavespeed must be finite"
+          @amax_out[dir] = speed if speed > @amax_out[dir]
+          dir += 1
+      face += 1
     rate = ~0.0
     dir = 0
     while dir < @dim
@@ -1167,13 +1214,15 @@
       dir = dir + 1
     if !EulerSystem.finite_number?(rate) || rate <= ~0.0
       raise "FiniteVolume: zero wavespeed everywhere (empty or invalid state)"
-    @cfl / rate
+    result = @cfl / rate
+    if !EulerSystem.finite_number?(result) || result <= ~0.0
+      raise "FiniteVolume: CFL timestep is not representable"
+    result
 
   # One SSP-RK2 step of size dt (or the stable dt if omitted). Returns the
   # dt actually taken.
   -> step!(dt = nil)
     total = @ncells * @ns
-    self.apply_boundaries()
     step_dt = dt
     stable_limit = self.stable_dt()
     if step_dt == nil
@@ -1184,6 +1233,10 @@
         raise "FiniteVolume: step dt must be positive and finite"
       if step_dt > stable_limit * (~1.0 + ~1.0e-12)
         raise "FiniteVolume: step dt exceeds the configured CFL limit"
+    next_time = @time + step_dt
+    if !EulerSystem.finite_number?(next_time) || next_time <= @time
+      raise "FiniteVolume: timestep cannot advance floating-point time"
+    self.apply_boundaries()
     FiniteVolume.kernel_copy(@q0, @q, total)
     previous_fallbacks = @last_reconstruction_fallbacks
     @last_reconstruction_fallbacks = 0
@@ -1207,7 +1260,7 @@
       FiniteVolume.kernel_copy(@q, @q0, total)
       @last_reconstruction_fallbacks = previous_fallbacks
       raise "FiniteVolume: SSP-RK2 average left the admissible state set"
-    @time = @time + step_dt
+    @time = next_time
     @steps = @steps + 1
     step_dt
 
@@ -1253,11 +1306,15 @@
     FiniteVolume.kernel_invalid(@q, @mask, @nx, @ny, @nz, @ns, @dim, flag)
 
   # Field extraction into a fresh f64[] over the interior (x fastest).
-  # name: :rho, :pressure, :speed, :vx, :specific_internal_energy.
+  # name: :rho, :pressure, :speed, :vx/:vy/:vz (active directions),
+  # :specific_internal_energy, :internal_energy_density.
   # :internal_energy remains a compatibility alias for the specific value.
   -> field(name, fill = ~0.0)
+    if (name == :vy && @dim < 2) || (name == :vz && @dim < 3)
+      raise "FiniteVolume: velocity field direction is inactive"
     if (!@compressible &&
-        (name == :internal_energy || name == :specific_internal_energy))
+        (name == :internal_energy || name == :specific_internal_energy ||
+         name == :internal_energy_density))
       raise "FiniteVolume: isothermal Euler has no internal-energy field"
     inx = @cells[0]
     iny = 1
@@ -1279,6 +1336,12 @@
         what = 4
       when :specific_internal_energy
         what = 4
+      when :vy
+        what = 5
+      when :vz
+        what = 6
+      when :internal_energy_density
+        what = 7
       else
         raise "FiniteVolume: unknown field [name]"
     if @compressible

@@ -30,7 +30,7 @@
   -> new(mode, dim)
     if mode != :compressible && mode != :isothermal
       raise "EulerSimulation: mode must be compressible or isothermal"
-    if dim.class_name != "Integer" || dim < 1 || dim > 3
+    if !Physics.integer?(dim) || dim < 1 || dim > 3
       raise "EulerSimulation: dim must be 1, 2, or 3"
     @mode = mode
     @dim = dim
@@ -60,7 +60,7 @@
     if cells.class_name != "Array" || cells.size != @dim
       raise "EulerSimulation: resolution needs [@dim] entries"
     cells.each -> (count)
-      if count.class_name != "Integer" || count <= 0
+      if !Physics.integer?(count) || count <= 0
         raise "EulerSimulation: resolution entries must be positive Integers"
     @cells = cells.dup
     self
@@ -69,41 +69,46 @@
   -> domain(lengths)
     if lengths.class_name != "Array" || lengths.size != @dim
       raise "EulerSimulation: domain needs [@dim] entries"
-    @lengths_si = lengths.map -> (v) Physics.si(v, "m")
-    @lengths_si.each -> (length)
+    next_lengths = lengths.map -> (v) Physics.si(v, "m")
+    next_lengths.each -> (length)
       if !EulerSystem.finite_number?(length) || length <= ~0.0
         raise "EulerSimulation: domain lengths must be positive and finite"
+    @lengths_si = next_lengths
     self
 
   -> gas_gamma(value)
-    @gamma = Physics.dimensionless(value)
-    if !EulerSystem.finite_number?(@gamma) || @gamma <= ~1.0
+    next_gamma = Physics.dimensionless(value)
+    if next_gamma <= ~1.0
       raise "EulerSimulation: gas gamma must be finite and greater than one"
+    @gamma = next_gamma
     self
 
   # Isothermal thermal velocity: Quantity (speed) or raw m/s.
   -> thermal_velocity(value)
-    @vt_si = Physics.si(value, "m/s")
-    if !EulerSystem.finite_number?(@vt_si) || @vt_si <= ~0.0
+    next_vt = Physics.si(value, "m/s")
+    if next_vt <= ~0.0
       raise "EulerSimulation: thermal velocity must be positive and finite"
+    @vt_si = next_vt
     self
 
   -> courant(value)
-    @cfl = Physics.dimensionless(value)
-    if (!EulerSystem.finite_number?(@cfl) || @cfl <= ~0.0 ||
-        @cfl > ~1.0)
+    next_cfl = Physics.dimensionless(value)
+    if next_cfl <= ~0.0 || next_cfl > ~1.0
       raise "EulerSimulation: CFL must be finite and in (0, 1]"
+    @cfl = next_cfl
     self
 
   # Physical duration to simulate: Quantity (time) or raw seconds.
   -> duration(value)
-    @t_end_si = Physics.si(value, "s")
-    if !EulerSystem.finite_number?(@t_end_si) || @t_end_si < ~0.0
+    next_duration = Physics.si(value, "s")
+    if next_duration < ~0.0
       raise "EulerSimulation: duration must be finite and nonnegative"
+    @t_end_si = next_duration
     self
 
-  # Fields to record (subset of :rho :pressure :speed :vx,
-  # :internal_energy, and :specific_internal_energy) and how many frames to
+  # Fields to record (subset of :rho :pressure :speed :vx :vy :vz,
+  # :internal_energy, :specific_internal_energy, :internal_energy_density)
+  # and how many frames to
   # capture across the run.
   -> capture(fields, frame_count = 40)
     if fields.class_name != "Array" || fields.size == 0
@@ -112,12 +117,16 @@
       supported = name == :rho || name == :pressure || name == :speed
       supported = true if name == :vx || name == :internal_energy
       supported = true if name == :specific_internal_energy
+      supported = true if name == :vy || name == :vz || name == :internal_energy_density
       if !supported
         raise "EulerSimulation: unsupported capture field [name]"
+      if (name == :vy && @dim < 2) || (name == :vz && @dim < 3)
+        raise "EulerSimulation: velocity field direction is inactive"
       if (@mode == :isothermal &&
-          (name == :internal_energy || name == :specific_internal_energy))
+          (name == :internal_energy || name == :specific_internal_energy ||
+           name == :internal_energy_density))
         raise "EulerSimulation: isothermal mode has no internal-energy field"
-    if frame_count.class_name != "Integer" || frame_count <= 0
+    if !Physics.integer?(frame_count) || frame_count <= 0
       raise "EulerSimulation: frame count must be a positive Integer"
     @capture_fields = fields.dup
     @frame_count = frame_count
@@ -125,15 +134,26 @@
 
   # Boundary kind for all faces, or per-face via boundary_face.
   -> boundary(kind)
+    code = FiniteVolume.boundary_code(kind)
+    if code == 3
+      raise "EulerSimulation: inflow needs boundary_face and a primitive state"
     @bc = [kind]
     self
 
   -> boundary_face(dir, side, kind, prim = nil)
-    if dir.class_name != "Integer" || dir < 0 || dir >= @dim
+    if !Physics.integer?(dir) || dir < 0 || dir >= @dim
       raise "EulerSimulation: boundary direction is out of range"
-    if side.class_name != "Integer" || side < 0 || side > 1
+    if !Physics.integer?(side) || side < 0 || side > 1
       raise "EulerSimulation: boundary side must be 0 or 1"
-    @bc_faces.push([dir, side, kind, prim])
+    code = FiniteVolume.boundary_code(kind)
+    state = nil
+    if code == 3
+      if prim == nil
+        raise "EulerSimulation: inflow boundary needs a primitive state"
+      sys = self.configured_system()
+      sys.conserved(prim)
+      state = prim.dup
+    @bc_faces.push([dir, side, kind, state])
     self
 
   # Initial condition lambda (SI coordinates -> primitive SI state).
@@ -183,20 +203,22 @@
 
   # -- run -------------------------------------------------------------------
 
+  -> configured_system
+    if @mode == :compressible
+      return CompressibleEuler.new(@dim, @gamma)
+    IsothermalEuler.new(@dim, @vt_si)
+
   -> build_solver
     if @cells == nil || @lengths_si == nil
       raise "EulerSimulation: resolution and domain must be set"
     if @init_fn == nil
       raise "EulerSimulation: init must be set"
-    sys = nil
-    if @mode == :compressible
-      sys = CompressibleEuler.new(@dim, @gamma)
-    else
-      sys = IsothermalEuler.new(@dim, @vt_si)
+    sys = self.configured_system()
     fv = FiniteVolume.new(sys, @cells, @lengths_si)
     fv.boundary(@bc[0])
     @bc_faces.each -> (spec)
       fv.boundary_face(spec[0], spec[1], spec[2], spec[3])
+    fv.validate_boundaries()
     fv.cfl = @cfl if @cfl != nil
     fv.init_each(@init_fn)
     if @solid_fn != nil

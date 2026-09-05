@@ -8,7 +8,7 @@
 + FiniteVolumeDiagnostics
   -> .finite_number?(value)
     name = value.class_name
-    numeric = name == "Float" || name == "Integer"
+    numeric = name == "Float" || name == "Integer" || name == "Int"
     numeric = true if name == "BigInt" || name == "Decimal"
     return false if !numeric
     number = value.to_f()

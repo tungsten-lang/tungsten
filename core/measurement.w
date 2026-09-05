@@ -114,7 +114,7 @@
 
   -> .finite_number?(value)
     name = value.class_name
-    numeric = name == "Float" || name == "Integer"
+    numeric = name == "Float" || name == "Integer" || name == "Int"
     numeric = true if name == "BigInt" || name == "Decimal"
     return false if !numeric
     number = value.to_f()
@@ -355,10 +355,13 @@
     calibration.apply(self)
 
   -> to_s
+    suffix = ""
+    if coverage_factor != ~1.0
+      suffix = " (k=" + coverage_factor.to_s + ")"
     if lower_uncertainty != upper_uncertainty
       return (value.to_s + " +" + upper_uncertainty.to_s +
-              "/-" + lower_uncertainty.to_s)
-    value.to_s + " ± " + uncertainty.to_s
+              "/-" + lower_uncertainty.to_s + suffix)
+    value.to_s + " ± " + uncertainty.to_s + suffix
 
   -> inspect
     to_s

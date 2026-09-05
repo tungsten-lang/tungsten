@@ -74,7 +74,8 @@ physics_check("ce.pressure", close?(ce.pressure(u), ~0.7))
 physics_check("ce.negative_internal_energy_invalid",
   !ce.state_valid?([~1.0, ~10.0, ~0.0, ~0.0, ~1.0]))
 physics_check("ce.wrong_arity_invalid", !ce.state_valid?([~1.0, ~1.0]))
-not_a_number = ~1.0e999 - ~1.0e999
+infinity = Math.exp(~1000.0)
+not_a_number = infinity - infinity
 physics_check("ce.nonfinite_state_invalid",
   !ce.state_valid?([~1.0, not_a_number, ~0.0, ~0.0, ~3.0]))
 
@@ -127,7 +128,6 @@ physics_check("lf.invalid_state_rejected",
 physics_check("lf.nonfinite_state_rejected",
   !LaxFriedrichs.waves_valid?(
     ce1, [~1.0, not_a_number, ~3.0], ur, 0))
-infinity = ~1.0e999
 physics_check("lf.infinite_tolerance_rejected",
   !LaxFriedrichs.waves_valid?(ce1, ul, ur, 0, infinity))
 
@@ -185,5 +185,35 @@ begin
 rescue error
   minmod_nonfinite_rejected = error.to_s.include?("finite numbers")
 physics_check("minmod.nonfinite_rejected", minmod_nonfinite_rejected)
+
+physics_check("isothermal.is_compressible", ie.compressible? && !ie.energy_equation?)
+physics_check("si.integer", Physics.si(3, "m") == ~3.0)
+nonnumeric_si_rejected = false
+begin
+  Physics.si("not a length", "m")
+rescue error
+  nonnumeric_si_rejected = error.to_s.include?("finite number")
+physics_check("si.nonnumeric_rejected", nonnumeric_si_rejected)
+nonnumeric_velocity_rejected = false
+begin
+  ce1.conserved([~1.0, "not a velocity", ~1.0])
+rescue error
+  nonnumeric_velocity_rejected = error.to_s.include?("finite numbers")
+physics_check("primitive.nonnumeric_rejected", nonnumeric_velocity_rejected)
+temperature = IdealGas.temperature(p_air, 1.225 kg/m³, 287.0528 J/(kg·K))
+physics_check("ideal_gas.absolute_temperature_roundtrip",
+  close?(Physics.si(temperature, "K"), ~288.15))
+bad_temperature_rejected = false
+begin
+  IdealGas.sound_speed(~1.4, ~287.0, ~-1.0)
+rescue error
+  bad_temperature_rejected = error.to_s.include?("positive and finite")
+physics_check("ideal_gas.nonphysical_temperature_rejected", bad_temperature_rejected)
+bad_sound_speed_rejected = false
+begin
+  IdealGas.mach_number(~1.0, ~0.0)
+rescue error
+  bad_sound_speed_rejected = error.to_s.include?("positive and finite")
+physics_check("ideal_gas.zero_sound_speed_rejected", bad_sound_speed_rejected)
 
 << "PHYSICS_SPEC_OK"

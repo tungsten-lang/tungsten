@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(597 total), grouped by area, with its declaration, a one-line
+(626 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -44,7 +44,8 @@ summary from the source header, and a link to the source.
 | `Directory` | `+ Directory` | — | [`core/directory.w`](../core/directory.w) |
 | `Duration` | `+ Duration` | Duration — time span (tag 0xFFFF). Two-component representation: | [`core/duration.w`](../core/duration.w) |
 | `Env` | `+ Env` | Env — the current process environment. | [`core/env.w`](../core/env.w) |
-| `Error` | `+ Error` | Error — base error class | [`core/error.w`](../core/error.w) |
+| `Exception` | `+ Exception` | Exception — the root of everything `raise` can carry. Treat it as | [`core/exception.w`](../core/exception.w) |
+| `Error` | `+ Error < Exception` | Error — the base class of every rescuable error. | [`core/error.w`](../core/error.w) |
 | `Float` | `+ Float` | Float — IEEE 754 double (quiet NaN range) | [`core/float.w`](../core/float.w) |
 | `File` | `+ File` | File — whole-file I/O, metadata, paths, and filesystem operations. | [`core/file.w`](../core/file.w) |
 | `FileStat` | `+ FileStat` | FileStat — portable POSIX file metadata with nanosecond timestamps. | [`core/file.w`](../core/file.w) |
@@ -154,14 +155,20 @@ summary from the source header, and a link to the source.
 | `BraneBulkChord` | — | — | [`core/geometry.w`](../core/geometry.w) |
 | `RandallSundrumSpacetime` | — | — | [`core/geometry.w`](../core/geometry.w) |
 | `RandallSundrum` | — | — | [`core/geometry.w`](../core/geometry.w) |
-| `Physics` | — | — | [`core/physics.w`](../core/physics.w) |
+| `Physics` | `+ Physics` | — | [`core/physics.w`](../core/physics.w) |
+| `PhysicalObservable` | — | — | [`core/physics.w`](../core/physics.w) |
+| `PhysicalObservation` | — | — | [`core/physics.w`](../core/physics.w) |
+| `ExperimentalDataset` | — | — | [`core/physics.w`](../core/physics.w) |
+| `PhysicsEstimate` | — | — | [`core/physics.w`](../core/physics.w) |
 | `IdealGas` | — | — | [`core/physics.w`](../core/physics.w) |
 | `EulerSystem` | — | — | [`core/physics.w`](../core/physics.w) |
 | `CompressibleEuler` | — | — | [`core/physics.w`](../core/physics.w) |
 | `IsothermalEuler` | — | — | [`core/physics.w`](../core/physics.w) |
 | `LaxFriedrichs` | — | — | [`core/physics.w`](../core/physics.w) |
 | `Minmod` | — | — | [`core/physics.w`](../core/physics.w) |
+| `BurgersEquation` | — | — | [`core/physics.w`](../core/physics.w) |
 | `FiniteVolume` | — | — | [`core/physics.w`](../core/physics.w) |
+| `FiniteVolumeDiagnostics` | — | — | [`core/physics.w`](../core/physics.w) |
 | `EulerSimulation` | — | — | [`core/physics.w`](../core/physics.w) |
 | `Dynamics` | — | — | [`core/dynamics.w`](../core/dynamics.w) |
 | `Flow` | — | — | [`core/dynamics.w`](../core/dynamics.w) |
@@ -207,7 +214,7 @@ summary from the source header, and a link to the source.
 | `QuantumCircuit` | `+ QuantumCircuit` | Quantum — reversible circuit construction, cost accounting, and simulation. | [`core/quantum.w`](../core/quantum.w) |
 | `QuantumBasisState` | `+ QuantumBasisState` | QuantumBasisState — permutation-and-phase simulation. | [`core/quantum.w`](../core/quantum.w) |
 | `QuantumState` | `+ QuantumState` | QuantumState — dense state vector over 2^width complex amplitudes. | [`core/quantum.w`](../core/quantum.w) |
-| `Measurement` | `+ Measurement` | Measurement — a measured scalar and its standard uncertainty. | [`core/measurement.w`](../core/measurement.w) |
+| `Measurement` | `+ Measurement` | Measurement — a scalar estimate and its standard uncertainty. | [`core/measurement.w`](../core/measurement.w) |
 | `Calibration` | `+ Calibration` | Calibration — polynomial measurement model with a standard-uncertainty | [`core/calibration.w`](../core/calibration.w) |
 | `Random` | `+ Random` | — | [`core/random.w`](../core/random.w) |
 | `Range` | `+ Range` | Integer Range over the immediate WValue encoding (Location mode 11). | [`core/range.w`](../core/range.w) |
@@ -565,6 +572,28 @@ summary from the source header, and a link to the source.
 | `ArgumentError` | `+ ArgumentError < Error` | ArgumentError — raised when an argument's value is unacceptable, | [`core/argument_error.w`](../core/argument_error.w) |
 | `RangeError` | `+ RangeError < Error` | RangeError — raised when a value falls outside the range an | [`core/range_error.w`](../core/range_error.w) |
 | `TypeError` | `+ TypeError < Error` | TypeError — raised when a value of the wrong type reaches an | [`core/type_error.w`](../core/type_error.w) |
+| `NameError` | `+ NameError < Error` | NameError — a name (variable, function, constant) could not be resolved. | [`core/name_error.w`](../core/name_error.w) |
+| `NoMethodError` | `+ NoMethodError < NameError` | NoMethodError — the receiver has no method of that name. | [`core/no_method_error.w`](../core/no_method_error.w) |
+| `KeyError` | `+ KeyError < Error` | KeyError — a required key is missing from a Hash or map. | [`core/key_error.w`](../core/key_error.w) |
+| `IndexError` | `+ IndexError < Error` | IndexError — an index is outside the receiver's bounds. | [`core/index_error.w`](../core/index_error.w) |
+| `ZeroDivisionError` | `+ ZeroDivisionError < Error` | ZeroDivisionError — integer or exact division by zero. | [`core/zero_division_error.w`](../core/zero_division_error.w) |
+| `OverflowError` | `+ OverflowError < Error` | OverflowError — an integer operation left its declared width under trap mode. | [`core/overflow_error.w`](../core/overflow_error.w) |
+| `FrozenError` | `+ FrozenError < Error` | FrozenError — a frozen (immutable or shared) value was mutated. | [`core/frozen_error.w`](../core/frozen_error.w) |
+| `NotImplementedError` | `+ NotImplementedError < Error` | NotImplementedError — an abstract or declared-only method has no body here. | [`core/not_implemented_error.w`](../core/not_implemented_error.w) |
+| `StopIteration` | `+ StopIteration < Error` | StopIteration — an enumerator has been exhausted. | [`core/stop_iteration.w`](../core/stop_iteration.w) |
+| `IOError` | `+ IOError < Error` | IOError — a file, stream, or device operation failed. | [`core/io_error.w`](../core/io_error.w) |
+| `FileNotFound` | `+ FileNotFound < IOError` | FileNotFound — the named file or directory does not exist. | [`core/file_not_found.w`](../core/file_not_found.w) |
+| `PermissionDenied` | `+ PermissionDenied < IOError` | PermissionDenied — the process lacks permission for the operation. | [`core/permission_denied.w`](../core/permission_denied.w) |
+| `EndOfFile` | `+ EndOfFile < IOError` | EndOfFile — a read past the end of the stream. | [`core/end_of_file.w`](../core/end_of_file.w) |
+| `NetworkError` | `+ NetworkError < Error` | NetworkError — a socket, DNS, or protocol operation failed. | [`core/network_error.w`](../core/network_error.w) |
+| `ConnectionRefused` | `+ ConnectionRefused < NetworkError` | ConnectionRefused — the remote host refused the connection. | [`core/connection_refused.w`](../core/connection_refused.w) |
+| `TimeoutError` | `+ TimeoutError < NetworkError` | TimeoutError — an operation exceeded its deadline. | [`core/timeout_error.w`](../core/timeout_error.w) |
+| `TLSError` | `+ TLSError < NetworkError` | TLSError — a TLS handshake, certificate, or record failure. | [`core/tls_error.w`](../core/tls_error.w) |
+| `ParseError` | `+ ParseError < Error` | ParseError — malformed input to a parser (JSON, CSV, Date, URL, ...). | [`core/parse_error.w`](../core/parse_error.w) |
+| `CancelledError` | `+ CancelledError < Error` | CancelledError — the running task was cancelled by its owner. | [`core/cancelled_error.w`](../core/cancelled_error.w) |
+| `AssertionError` | `+ AssertionError < Error` | AssertionError — a spec expectation or assertion failed. | [`core/assertion_error.w`](../core/assertion_error.w) |
+| `SystemExit` | `+ SystemExit < Exception` | SystemExit — the program is exiting; not caught by a rescue of Error. | [`core/system_exit.w`](../core/system_exit.w) |
+| `Interrupt` | `+ Interrupt < Exception` | Interrupt — the process received an interrupt signal; not caught by a rescue of Error. | [`core/interrupt.w`](../core/interrupt.w) |
 
 ## Numeric tower
 

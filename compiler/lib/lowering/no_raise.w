@@ -138,9 +138,15 @@
   if kind == :binary_op
     return no_raise_binary_safe?(mod, node, class_name, var_types, dependencies)
   if kind == :compound_assign
+    # A property/index assignment also dispatches a writer. Proving its
+    # read and arithmetic safe does not prove the setter cannot raise.
+    if !(ast_kind(node.target) in (:var :ivar))
+      return false
     synthetic = Tungsten:AST:BinaryOp.new(node.target, node.op, node.value)
     return no_raise_binary_safe?(mod, synthetic, class_name, var_types, dependencies)
   if kind == :assign
+    if node.target == nil || !(ast_kind(node.target) in (:var :ivar))
+      return false
     safe = no_raise_node_safe?(mod, node.value, class_name, var_types, dependencies)
     if safe && node.target != nil && ast_kind(node.target) == :var
       inferred = infer_type(node.value, var_types, mod[:fn_return_types], lowering_infer_maps)

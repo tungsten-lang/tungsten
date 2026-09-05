@@ -154,7 +154,8 @@ measurement_check("variance.invalid_rejected", invalid_variance_rejected)
 
 nonfinite_variance_rejected = false
 begin
-  not_a_number = ~1.0e999 - ~1.0e999
+  infinity = Math.exp(~1000.0)
+  not_a_number = infinity - infinity
   Measurement.nonnegative_variance(not_a_number, ~1.0)
 rescue error
   nonfinite_variance_rejected = error.to_s.include?("must be finite")
@@ -167,5 +168,12 @@ rescue error
   nonfinite_measurement_rejected = error.to_s.include?("value must be")
 measurement_check("measurement.nonfinite_rejected",
   nonfinite_measurement_rejected)
+
+expanded = Measurement.new(~10.0, ~2.0).expanded(~2.0)
+measurement_check("format.expanded", expanded.to_s == "10 ± 2 (k=2)")
+measurement_check("format.expanded_interval", expanded.interval == [~6.0, ~14.0])
+expanded_asymmetric = Measurement.asymmetric(~5.0, ~1.0, ~3.0).expanded(~2.0)
+measurement_check("format.expanded_asymmetric",
+  expanded_asymmetric.to_s == "5 +3/-1 (k=2)")
 
 << "physics_measurement_spec: all checks passed"

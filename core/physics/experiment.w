@@ -7,9 +7,6 @@
 # This keeps the independence assumption visible at the dataset boundary.
 
 + Physics
-  -> .finite_number?(value)
-    Measurement.finite_number?(value)
-
   # Relative comparison for covariance entries. Unlike a general numerical
   # close predicate, this deliberately has no unit-scale absolute floor:
   # variances can be far below one in the observable's chosen unit.
@@ -29,7 +26,9 @@
       copy[key] = value
     copy
 
-  -> .validate_covariance(matrix, observations)
+  # Return a validated copy. Tolerated input asymmetry is averaged before
+  # any factorization, so the matrix stored and solved is exactly symmetric.
+  -> .canonical_covariance(matrix, observations)
     count = observations.size
     if matrix.class_name != "Array" || matrix.size != count
       raise "covariance must have one row per observation"
@@ -47,6 +46,8 @@
       expected_variance = (
         observations[row].standard_uncertainty *
         observations[row].standard_uncertainty)
+      if !Physics.finite_number?(expected_variance) || expected_variance <= ~0.0
+        raise "observation variance is outside the representable covariance range"
       if !Physics.covariance_close?(matrix[row][row], expected_variance)
         raise "covariance diagonal must match observation uncertainty"
       column = 0
@@ -56,9 +57,45 @@
           raise "covariance must be symmetric"
         column += 1
       row += 1
-    # Cholesky is both the current positive-definiteness gate and a loud
-    # failure for exactly singular correlation models.
-    LinAlg.cholesky(matrix)
+    canonical = Physics.copy_matrix(matrix)
+    row = 0
+    while row < count
+      uncertainty = observations[row].standard_uncertainty
+      canonical[row][row] = uncertainty * uncertainty
+      column = 0
+      while column < row
+        left = canonical[row][column]
+        right = canonical[column][row]
+        midpoint = left + (right - left) * ~0.5
+        canonical[row][column] = midpoint
+        canonical[column][row] = midpoint
+        column += 1
+      row += 1
+    canonical
+
+  # C = D R D. Factoring the dimensionless correlation matrix avoids
+  # forming inverse variances at the scale of the observable's units.
+  -> .correlation_matrix(covariance, observations)
+    count = observations.size
+    result = LinAlg.eye(count)
+    row = 0
+    while row < count
+      column = 0
+      while column < row
+        rho = (covariance[row][column] /
+          observations[row].standard_uncertainty /
+          observations[column].standard_uncertainty)
+        if !Physics.finite_number?(rho) || rho.abs >= ~1.0
+          raise "covariance must be strictly positive definite"
+        result[row][column] = rho
+        result[column][row] = rho
+        column += 1
+      row += 1
+    result
+
+  -> .validate_covariance(matrix, observations)
+    canonical = Physics.canonical_covariance(matrix, observations)
+    LinAlg.cholesky(Physics.correlation_matrix(canonical, observations))
     true
 
 
@@ -86,7 +123,7 @@
   -> to_s
     label = symbol == nil ? name.to_s : symbol.to_s
     return label if unit == nil
-    label + " [" + unit.to_s + "]"
+    label + " \[" + unit.to_s + "\]"
 
   -> inspect
     to_s
@@ -221,6 +258,13 @@
         raise "dataset observations must describe the same observable and unit"
       if observation.standard_uncertainty <= ~0.0
         raise "GLS observations need positive standard uncertainty"
+      @observations.each -> (previous)
+        if (Measurement.same_object?(previous, observation) ||
+            Measurement.same_object?(previous.measurement, observation.measurement))
+          raise "dataset cannot repeat an observation or Measurement"
+        if (covariance == nil &&
+            previous.measurement.correlation_with(observation.measurement) != ~0.0)
+          raise "correlated observations need an explicit covariance matrix"
       @observations.push(observation)
 
     if covariance == nil
@@ -228,8 +272,10 @@
       @covariance = ExperimentalDataset.diagonal_covariance(@observations)
     else
       @covariance_source = :supplied
-      @covariance = Physics.copy_matrix(covariance)
-    Physics.validate_covariance(@covariance, @observations)
+      @covariance = covariance
+    @covariance = Physics.canonical_covariance(@covariance, @observations)
+    @cholesky = LinAlg.cholesky(
+      Physics.correlation_matrix(@covariance, @observations))
 
   -> .diagonal_covariance(observations)
     count = observations.size
@@ -267,27 +313,67 @@
       result.push(observation.standard_uncertainty)
     result
 
+  # Forward substitution in the retained Cholesky factor of R. A whitened
+  # residual has squared Euclidean norm equal to its covariance chi-square.
+  -> whiten(rhs)
+    result = []
+    i = 0
+    while i < size
+      value = rhs[i]
+      j = 0
+      while j < i
+        value -= @cholesky[i][j] * result[j]
+        j += 1
+      value /= @cholesky[i][i]
+      if !Physics.finite_number?(value)
+        raise "GLS whitening exceeded numerical range"
+      result.push(value)
+      i += 1
+    result
+
   # Generalized least-squares estimate of one constant shared by all rows:
   #   mu = (1^T C^-1 y)/(1^T C^-1 1), u(mu)^2 = 1/(1^T C^-1 1).
   -> gls_mean
     count = size
-    ones = []
-    count.times -> ones.push(~1.0)
-    weights = LinAlg.solve(@covariance, ones)
-    information = LinAlg.dot(ones, weights)
+    uncertainty_scale = standard_uncertainties.min
+    sample_values = values
+    value_scale = ~0.0
+    sample_values.each -> (value)
+      value_scale = value.abs if value.abs > value_scale
+    value_scale = ~1.0 if value_scale == ~0.0
+    anchor = sample_values[0] / value_scale
+    design = []
+    centered = []
+    i = 0
+    while i < count
+      weight = uncertainty_scale / @observations[i].standard_uncertainty
+      design.push(weight)
+      centered.push(weight * (sample_values[i] / value_scale - anchor))
+      i += 1
+    whitened_design = whiten(design)
+    information = LinAlg.dot(whitened_design, whitened_design)
     if !Physics.finite_number?(information) || information <= ~0.0
       raise "covariance produced nonpositive information"
-    mean = LinAlg.dot(weights, values) / information
-    result_uncertainty = Math.sqrt(~1.0 / information)
+    correction = LinAlg.dot(whitened_design, whiten(centered)) / information
+    mean = (anchor + correction) * value_scale
+    result_uncertainty = uncertainty_scale / Math.sqrt(information)
     if (!Physics.finite_number?(mean) ||
         !Physics.finite_number?(result_uncertainty))
       raise "GLS constant fit produced a nonfinite estimate"
 
     residuals = []
-    values.each -> (value) residuals.push(value - mean)
-    solved_residuals = LinAlg.solve(@covariance, residuals)
-    chi_square = LinAlg.dot(residuals, solved_residuals)
-    chi_square = ~0.0 if chi_square < ~0.0 && chi_square > ~-1.0e-12
+    i = 0
+    while i < count
+      residual = sample_values[i] - mean
+      uncertainty = @observations[i].standard_uncertainty
+      if Physics.finite_number?(residual)
+        residual /= uncertainty
+      else
+        residual = sample_values[i] / uncertainty - mean / uncertainty
+      residuals.push(residual)
+      i += 1
+    whitened_residuals = whiten(residuals)
+    chi_square = LinAlg.dot(whitened_residuals, whitened_residuals)
     if !Physics.finite_number?(chi_square) || chi_square < ~0.0
       raise "GLS constant fit produced an invalid chi-square"
 

@@ -441,6 +441,7 @@ compiled_specs=(
   spec/core/path_spec.w
   spec/core/physics_finite_volume_spec.w
   spec/core/physics_finite_volume_contract_spec.w
+  spec/core/physics_autoload_spec.w
   spec/core/physics_measurement_spec.w
   spec/core/physics_experiment_spec.w
   spec/core/physics_nonlinear_reference_spec.w
@@ -691,6 +692,7 @@ interpreter_specs=(
   spec/core/path_spec.w
   spec/core/physics_finite_volume_spec.w
   spec/core/physics_finite_volume_contract_spec.w
+  spec/core/physics_autoload_spec.w
   spec/core/physics_measurement_spec.w
   spec/core/physics_experiment_spec.w
   spec/core/physics_nonlinear_reference_spec.w
@@ -823,6 +825,7 @@ spec/numeric/rational_spec.w
 parity_specs=(
   spec/parity/arity_extra_args_named_spec.w
   spec/parity/typed_rescue_spec.w
+  spec/parity/rescue_property_assignment_spec.w
   spec/parity/arity_missing_args_spec.w
   spec/parity/arity_mixed_call_sites_spec.w
   spec/parity/arity_slash_form_spec.w

@@ -15,7 +15,7 @@
 + EulerSystem
   -> .finite_number?(value)
     name = value.class_name
-    numeric = name == "Float" || name == "Integer"
+    numeric = name == "Float" || name == "Integer" || name == "Int"
     numeric = true if name == "BigInt" || name == "Decimal"
     return false if !numeric
     number = value.to_f()
@@ -31,7 +31,7 @@
     u.class_name == "Array" && u.size == @nstate
 
   -> direction_valid?(dir)
-    dir.class_name == "Integer" && dir >= 0 && dir < @dim
+    Physics.integer?(dir) && dir >= 0 && dir < @dim
 
   -> validate_state_shape(u)
     if !self.state_shape_valid?(u)
@@ -95,7 +95,7 @@
 + CompressibleEuler < EulerSystem
   # gas_gamma: adiabatic index, must exceed 1 (Decimal or Float accepted).
   -> new(dim, gas_gamma)
-    if dim.class_name != "Integer" || dim < 1 || dim > 3
+    if !Physics.integer?(dim) || dim < 1 || dim > 3
       raise "CompressibleEuler: dim must be 1, 2, or 3 (got [dim])"
     @dim = dim
     @nstate = dim + 2
@@ -161,6 +161,9 @@
   -> conserved(prim)
     if prim.class_name != "Array" || prim.size != @nstate
       raise "CompressibleEuler: primitive state needs [@nstate] components"
+    prim.each -> (value)
+      if !EulerSystem.finite_number?(value)
+        raise "CompressibleEuler: primitive entries must be finite numbers"
     rho = prim[0].to_f()
     if !EulerSystem.finite_number?(rho) || rho <= ~0.0
       raise "CompressibleEuler: primitive density must be positive and finite"
@@ -196,7 +199,7 @@
   # vt: constant thermal velocity, must be positive. Accepts a Quantity
   # (converted to m/s) or a raw number.
   -> new(dim, vt)
-    if dim.class_name != "Integer" || dim < 1 || dim > 3
+    if !Physics.integer?(dim) || dim < 1 || dim > 3
       raise "IsothermalEuler: dim must be 1, 2, or 3 (got [dim])"
     @dim = dim
     @nstate = dim + 1
@@ -211,7 +214,7 @@
     "isothermal_euler_[@dim]d"
 
   -> compressible?
-    false
+    true
 
   -> energy_equation?
     false
@@ -253,6 +256,9 @@
   -> conserved(prim)
     if prim.class_name != "Array" || prim.size != @nstate
       raise "IsothermalEuler: primitive state needs [@nstate] components"
+    prim.each -> (value)
+      if !EulerSystem.finite_number?(value)
+        raise "IsothermalEuler: primitive entries must be finite numbers"
     rho = prim[0].to_f()
     if !EulerSystem.finite_number?(rho) || rho <= ~0.0
       raise "IsothermalEuler: primitive density must be positive and finite"

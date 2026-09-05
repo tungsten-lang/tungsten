@@ -12,6 +12,11 @@
 # the inlined copies against these references.
 
 + IdealGas
+  -> .positive(value, label)
+    if !Physics.finite_number?(value) || value <= ~0.0
+      raise "IdealGas: " + label + " must be positive and finite"
+    value
+
   # p = ρ R_s T  (specific gas constant form). Quantity in, Quantity out.
   # The registry keeps temperature deltas as their own dimension, so the
   # K⁻¹ inside R_s can't cancel a delta directly; each factor crosses to
@@ -21,20 +26,29 @@
     rho = (density | "kg/m³") / 1 kg/m³
     rs = (specific_gas_constant | "J/(kg·K)") / 1 J/(kg·K)
     t = ((temperature | "K") - 0 K) / (2 K - 1 K)
+    IdealGas.positive(rho, "density")
+    IdealGas.positive(rs, "specific gas constant")
+    IdealGas.positive(t, "absolute temperature")
     rho * rs * t * 1 Pa
 
   -> .density(pressure, specific_gas_constant, temperature)
     p = (pressure | "Pa") / 1 Pa
     rs = (specific_gas_constant | "J/(kg·K)") / 1 J/(kg·K)
     t = ((temperature | "K") - 0 K) / (2 K - 1 K)
+    IdealGas.positive(p, "pressure")
+    IdealGas.positive(rs, "specific gas constant")
+    IdealGas.positive(t, "absolute temperature")
     p / (rs * t) * 1 kg/m³
 
-  # Absolute temperature as kelvins above absolute zero (a K delta).
+  # Absolute temperature (a K point, suitable for pressure/sound_speed).
   -> .temperature(pressure, density, specific_gas_constant)
     p = (pressure | "Pa") / 1 Pa
     rho = (density | "kg/m³") / 1 kg/m³
     rs = (specific_gas_constant | "J/(kg·K)") / 1 J/(kg·K)
-    p / (rho * rs) * (2 K - 1 K)
+    IdealGas.positive(p, "pressure")
+    IdealGas.positive(rho, "density")
+    IdealGas.positive(rs, "specific gas constant")
+    0 K + p / (rho * rs) * (2 K - 1 K)
 
   # -- raw f64 gamma-law core ----------------------------------------------
 
@@ -53,8 +67,17 @@
     gamma_f = Physics.dimensionless(gas_gamma)
     rs = Physics.si(specific_gas_constant, "J/(kg·K)")
     t = Physics.si(temperature, "K")
-    Math.sqrt(gamma_f * rs * t)
+    if gamma_f <= ~1.0
+      raise "IdealGas: gamma must be greater than one"
+    IdealGas.positive(rs, "specific gas constant")
+    IdealGas.positive(t, "absolute temperature")
+    result = Math.sqrt(gamma_f) * Math.sqrt(rs) * Math.sqrt(t)
+    IdealGas.positive(result, "sound speed")
 
   # Mach number from dimensioned or raw m/s speeds.
   -> .mach_number(speed, sound_speed)
-    Physics.si(speed, "m/s") / Physics.si(sound_speed, "m/s")
+    velocity = Physics.si(speed, "m/s")
+    acoustic_speed = IdealGas.positive(Physics.si(sound_speed, "m/s"), "sound speed")
+    if velocity < ~0.0
+      raise "IdealGas: speed must be nonnegative"
+    velocity / acoustic_speed

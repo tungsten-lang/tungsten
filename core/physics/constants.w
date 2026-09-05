@@ -13,6 +13,18 @@
 # re-attach units only when reporting.
 
 + Physics
+  -> .integer?(value)
+    name = value.class_name
+    name == "Int" || name == "Integer"
+
+  -> .finite_number?(value)
+    name = value.class_name
+    numeric = name == "Float" || name == "Integer" || name == "Int"
+    numeric = true if name == "BigInt" || name == "Decimal"
+    return false if !numeric
+    number = value.to_f()
+    !number.nan? && !number.infinite?
+
   # -- exact SI defining constants ----------------------------------------
 
   -> .speed_of_light
@@ -115,6 +127,8 @@
     if unit != nil
       Physics.si_quantity(value, unit_name)
     else
+      if !Physics.finite_number?(value)
+        raise "Physics.si: value must be a finite number or Quantity"
       value.to_f()
 
   # value is always a Quantity here. Temperatures use point-delta algebra:
@@ -149,6 +163,8 @@
       out = ((value | "N") / 1 N).to_f()
     else
       raise "Physics.si: unsupported unit '[unit_name]'"
+    if !Physics.finite_number?(out)
+      raise "Physics.si: converted value must be finite"
     out
 
   # Raw f64 from a plain number (Int/Decimal/Float). Rejects Quantities so
@@ -157,4 +173,6 @@
     unit = ccall("w_quantity_unit_name", value)
     if unit != nil
       raise "Physics.dimensionless: value carries units ([value])"
+    if !Physics.finite_number?(value)
+      raise "Physics.dimensionless: value must be a finite number"
     value.to_f()

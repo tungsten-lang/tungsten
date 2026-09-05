@@ -50,6 +50,10 @@ standard uncertainty even when an input was asymmetric. Nonlinear propagation
 is a local linearization: it can be inaccurate for large uncertainties,
 singular points, strongly skewed distributions, or discontinuous models. A
 `Measurement` is not an interval enclosure or a distributional guarantee.
+At a stationary point the first-order uncertainty can be zero despite a
+nonzero input uncertainty (for example, squaring a zero-valued measurement).
+Expanded uncertainty is stored as standard uncertainty with a coverage factor;
+rendering includes `(k=...)` when that factor is not one.
 
 ```tungsten
 length = Measurement.new(~2.0, ~0.01)
@@ -71,6 +75,16 @@ capture label, metadata, and measurement provenance.
 `ExperimentalDataset` accepts either independent observations or a supplied
 covariance matrix. The matrix must be square, symmetric, positive definite,
 and have diagonal entries equal to the squared observation uncertainties.
+Repeated observation objects or observations sharing the same `Measurement`
+are rejected: copying a row must not manufacture independent evidence.
+Omitting covariance also rejects directly declared nonzero pair correlations;
+provide the complete covariance explicitly for correlated observations.
+
+Within a relative tolerance of `1e-12`, accepted off-diagonal asymmetry is
+averaged and diagonals are snapped to the squared standard uncertainties.
+The resulting symmetric copy is used for both validation and estimation;
+the caller's matrix is not modified. Singular covariance is rejected, as are
+uncertainties whose squared values underflow to zero or overflow.
 `fit_constant`/`gls_mean` estimates one constant shared by every row:
 
 ```text
@@ -82,8 +96,12 @@ The result reports chi-square and degrees of freedom. It assumes that the
 covariance is complete and fixed and interprets the inputs as first-order
 Gaussian standard uncertainties. It neither estimates nor rescales the
 covariance, and `converged?` describes completion of the direct solve rather
-than goodness of fit. It is numerical and deliberately reports
-`certified? == false`; no conditioning or rank-revealing solver is yet used.
+than goodness of fit. A retained Cholesky factor of the dimensionless
+correlation matrix whitens a scaled design and centered observations, avoiding
+explicit inverse variances and many avoidable overflows. This does not
+guarantee accuracy for ill-conditioned covariance or arbitrary dynamic range.
+It is numerical and deliberately reports `certified? == false`; no condition
+estimate or rank-revealing solver is yet used.
 
 ## Units and raw SI kernels
 
@@ -92,11 +110,15 @@ dimensioned `Quantity` values. Their `_si` forms return raw `f64` values in SI
 base units. `Physics.si(value, unit)` is the explicit conversion boundary used
 by configured simulations; a plain number is assumed to already use the
 requested SI unit.
+Nonnumeric and nonfinite values are rejected rather than coerced to zero.
 
 `IdealGas` provides dimensioned pressure, density, and temperature helpers and
 raw-SI gamma-law helpers. `FiniteVolume` deliberately stores plain `f64[]`
 arrays for its hot loops. Units should be checked and converted once at the
 configuration boundary and reattached when reporting results.
+The dimensioned gas-law helpers require positive thermodynamic inputs;
+`IdealGas.temperature` returns an absolute Kelvin temperature, not a
+temperature difference.
 
 ## Euler state model
 
@@ -113,6 +135,8 @@ compressible state is admissible only when all components are finite,
 `rho > 0`, and internal-energy density
 `E - |momentum|²/(2 rho) > 0`. Isothermal states require finite components and
 positive density.
+Both systems describe compressible flow and return `compressible? == true`;
+use `energy_equation?` to distinguish the full from the isothermal system.
 
 Use the explicit grid methods when state layout matters:
 
@@ -133,6 +157,9 @@ dimensions. It combines componentwise minmod reconstruction, local
 Lax-Friedrichs fluctuations, conservative intra-cell flux correction, and an
 explicit SSP-RK2 update. Boundaries support the solver's periodic, outflow,
 reflecting, inflow, and masked-solid paths.
+Inflow states belong to individual `(direction, side)` faces, so configuring
+one face never overwrites another. Periodic boundaries must be paired along
+each axis; validation occurs after configuration and before evolution.
 
 The public CFL value is the global sum-rate Courant number:
 
@@ -140,10 +167,15 @@ The public CFL value is the global sum-rate Courant number:
 dt = cfl / sum_d(max_wave_speed_d / dx_d).
 ```
 
+Each directional maximum includes the interior and every prescribed inflow
+state, including its transverse velocity. This is a conservative global
+bound; it is not an evolved-stage CFL guarantee.
+
 Its default is `0.4`; assignments must be finite and in `(0, 1]`. That range
 is an API safety bound, not a theorem that every configuration is stable at
 `cfl = 1`. Explicit timesteps must also be positive, finite, and no larger
-than the current CFL step.
+than the current CFL step. Steps too small to advance the stored time are
+rejected without changing the solution or step counter.
 
 Second-order reconstructed face states that are non-finite or violate density
 or internal-energy admissibility fall back locally to the cell-average state.
@@ -153,10 +185,16 @@ restores the pre-step state and raises. This is a controlled failure policy,
 not a proof of positivity preservation. There is no step retry, adaptive
 fallback hierarchy, vacuum model, or demonstrated convergence order for the
 Euler driver yet.
+Cells adjoining a solid in the reconstruction direction use first-order face
+states. This prevents a one-cell-thick wall from coupling fluids on its
+opposite sides; spatial order is locally reduced near masked walls.
 
 `field(:internal_energy)` and `field(:specific_internal_energy)` return
 specific internal energy for compressible Euler. Isothermal systems have no
-energy equation and reject these fields. `totals` multiplies the conserved
+energy equation and reject these fields. `field(:internal_energy_density)`
+returns internal energy per volume instead. Velocity fields `:vx`, `:vy`, and
+`:vz` are available only for active coordinate directions.
+`totals` multiplies the conserved
 cell densities by cell volume and returns their discrete domain integrals,
 excluding masked solid cells. Conservation interpretation requires compatible
 closed or periodic boundaries and consistent source-free evolution.

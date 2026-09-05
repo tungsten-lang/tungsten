@@ -170,7 +170,8 @@ field, tensor, score meaning, or candidate representation. A domain adapter
 provides three one-argument closures:
 
 - a portfolio of strategies taking `Metaflip:Request` and returning a
-  `Metaflip:Proposal`, a bounded `Metaflip:ProposalBatch`, or `nil`;
+  `Metaflip:Proposal`, a bounded `Metaflip:ProposalBatch`, a costed
+  `Metaflip:NoProposal`, or `nil`;
 - an exact verifier returning `Metaflip:Assessment` or `nil`;
 - a snapshot function that makes an independent stored copy of a candidate.
 
@@ -204,7 +205,10 @@ search.run(1000)
 
 `Proposal.cost` is a positive, adapter-defined exposure unit, allowing the
 portfolio to compare a cheap local mutation with a batched solver or GPU
-strategy. Descriptor and identity equality use ordinary Tungsten `==`, so
+strategy. A strategy that performed nontrivial work without finding a
+candidate may return `NoProposal.new(cost)` so exploration is charged by the
+same exposure scale; plain `nil` remains a unit-cost miss. Descriptor and
+identity equality use ordinary Tungsten `==`, so
 they may be integers, strings, symbols, or immutable value objects. An
 identity of `nil` disables cross-niche deduplication. The focused non-GF(2)
 regression is `spec/generic_search_test.w`.
@@ -217,6 +221,9 @@ The first exact candidate in an unseeded run establishes the baseline and does
 not give its arm an order-dependent improvement or novelty windfall. Keep
 batches bounded: they expose alternatives to the archive, not a substitute for
 streaming a very large campaign.
+
+`step` returns a telemetry event for interactive callers. `run(steps)` avoids
+allocating those per-step events and returns only the snapshotted best state.
 
 `spec/proximity_orbit_gain_bench.w` is a retained historical-gain test rather
 than a toy optimizer. Its external adapter encodes the exact integer ledger

@@ -1193,7 +1193,60 @@
       secondary = 1
   primary * 3 + secondary
 
+# Specialize the dominant rectangular plan (V primary, W secondary). The
+# bundled 229/346/446/456/457 workers all select this plan.
+-> ffw_pressure_batch_raw_until_p5(data, u0, v0, w0, u1, v1, w1, query_count, stop_at) (i64 i64 i64 i64 i64 i64 i64 i64 i64) i64
+  uo = raw_load_u64(data, 44 * 8) ## i64
+  vo = raw_load_u64(data, 45 * 8) ## i64
+  wo = raw_load_u64(data, 46 * 8) ## i64
+  vhead = raw_load_u64(data, 54 * 8) ## i64
+  whead = raw_load_u64(data, 55 * 8) ## i64
+  vnext = raw_load_u64(data, 58 * 8) ## i64
+  wnext = raw_load_u64(data, 60 * 8) ## i64
+  hash_mask = raw_load_u64(data, 43 * 8) ## i64
+  total = 0 ## i64
+  query = 0 ## i64
+  while query < query_count
+    u = u0 ## i64
+    v = v0 ## i64
+    w = w0 ## i64
+    if query == 1
+      u = u1
+      v = v1
+      w = w1
+    y = v ^ (v >> 21) ^ (v >> 42) ## i64
+    bucket = ((y * 2654435761) >> 13) & hash_mask ## i64
+    c = raw_load_u64(data, (vhead + bucket) * 8) ## i64
+    while c != 0
+      slot = c - 1 ## i64
+      if raw_load_u64(data, (vo + slot) * 8) == v
+        sameu = 0 ## i64
+        samew = 0 ## i64
+        if raw_load_u64(data, (uo + slot) * 8) == u
+          sameu = 1
+        if raw_load_u64(data, (wo + slot) * 8) == w
+          samew = 1
+        if sameu + samew == 1
+          total += 1
+          return total if stop_at > 0 && total >= stop_at
+      c = raw_load_u64(data, (vnext + slot) * 8)
+    y = w ^ (w >> 21) ^ (w >> 42)
+    bucket = ((y * 2654435761) >> 13) & hash_mask
+    c = raw_load_u64(data, (whead + bucket) * 8)
+    while c != 0
+      slot = c - 1 ## i64
+      if raw_load_u64(data, (wo + slot) * 8) == w
+        if raw_load_u64(data, (vo + slot) * 8) != v
+          if raw_load_u64(data, (uo + slot) * 8) == u
+            total += 1
+            return total if stop_at > 0 && total >= stop_at
+      c = raw_load_u64(data, (wnext + slot) * 8)
+    query += 1
+  total
+
 -> ffw_pressure_batch_raw_until(data, plan, u0, v0, w0, u1, v1, w1, query_count, stop_at) (i64 i64 i64 i64 i64 i64 i64 i64 i64 i64) i64
+  if plan == 5
+    return ffw_pressure_batch_raw_until_p5(data, u0, v0, w0, u1, v1, w1, query_count, stop_at)
   # Pressure is a read-only hash-chain traversal over the fixed flat worker
   # state.  Decode the typed-array storage once in the caller and use native
   # raw loads here; ordinary `st[index]` has to re-read the WArray slots/start
@@ -1502,15 +1555,20 @@
     axis = (((word >> 22) & 511) * 3) >> 9 ## i64
     partner_word = (word_pair >> 31) & 2147483647 ## i64
     second = ffw_pick_partner_min(st, axis, first, partner_word, min_slot) ## i64
-    axis_probe = 1 ## i64
     # A miss depends only on the selected term and factor chains, not on the
     # partner ordinal word. Reuse that still-uniform word on alternate axes;
     # drawing again would spend up to two PCG steps on the dominant all-miss
     # path without adding partner coverage.
-    while second < 0 && axis_probe < 3
-      axis = (axis + 1) % 3
+    if second < 0
+      axis += 1
+      if axis == 3
+        axis = 0
       second = ffw_pick_partner_min(st, axis, first, partner_word, min_slot)
-      axis_probe += 1
+    if second < 0
+      axis += 1
+      if axis == 3
+        axis = 0
+      second = ffw_pick_partner_min(st, axis, first, partner_word, min_slot)
     if second < 0
       st[23] = st[23] + 1
       st[22] = st[22] + 1

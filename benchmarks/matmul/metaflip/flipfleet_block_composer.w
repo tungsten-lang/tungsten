@@ -638,6 +638,35 @@
 # bounded enumerator is for the slower support-aware research pass, where an
 # outer term can benefit from concentrating width on blocks outside one of its
 # supports (for example 6,6,6,8 instead of 6,6,7,7 at total 26).
+-> ffbc_bounded_allocations_rec(result, allocation, index, remaining, parts, minimum, maximum) (Array i64[] i64 i64 i64 i64 i64) i64
+  if index == parts - 1
+    if remaining >= minimum && remaining <= maximum
+      allocation[index] = remaining
+      copy = i64[parts]
+      i = 0 ## i64
+      while i < parts
+        copy[i] = allocation[i]
+        i += 1
+      result.push(copy)
+    return 0
+
+  rest = parts - index - 1 ## i64
+  lo = minimum ## i64
+  required_lo = remaining - rest * maximum ## i64
+  if required_lo > lo
+    lo = required_lo
+  hi = maximum ## i64
+  allowed_hi = remaining - rest * minimum ## i64
+  if allowed_hi < hi
+    hi = allowed_hi
+  value = lo ## i64
+  while value <= hi
+    allocation[index] = value
+    ffbc_bounded_allocations_rec(result, allocation, index + 1,
+                                 remaining - value, parts, minimum, maximum)
+    value += 1
+  0
+
 -> ffbc_bounded_allocations(total, parts, minimum, maximum) (i64 i64 i64 i64)
   result = []
   if parts < 1 || parts > 20 || minimum < 0 || maximum < minimum
@@ -645,34 +674,8 @@
   if total < parts * minimum || total > parts * maximum
     return result
   allocation = i64[parts]
-  i = 0 ## i64
-  while i < parts
-    allocation[i] = minimum
-    i += 1
-  finished = 0 ## i64
-  while finished == 0
-    sum = 0 ## i64
-    i = 0
-    while i < parts
-      sum += allocation[i]
-      i += 1
-    if sum == total
-      copy = i64[parts]
-      i = 0
-      while i < parts
-        copy[i] = allocation[i]
-        i += 1
-      result.push(copy)
-
-    i = parts - 1
-    while i >= 0 && allocation[i] == maximum
-      allocation[i] = minimum
-      i -= 1
-    if i < 0
-      finished = 1
-    else
-      next_value = allocation[i] + 1 ## i64
-      allocation[i] = next_value
+  ffbc_bounded_allocations_rec(result, allocation, 0, total, parts,
+                               minimum, maximum)
   result
 
 # Return [alloc_n, alloc_m, alloc_p, nominal_rank] for the cheapest balanced

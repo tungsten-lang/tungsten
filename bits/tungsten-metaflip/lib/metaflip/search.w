@@ -9,7 +9,7 @@
 #
 # Callback arity stays at one so native closure calls remain portable:
 #
-#   strategy.call(request) -> Metaflip:Proposal | Metaflip:ProposalBatch | nil
+#   strategy.call(request) -> Proposal | ProposalBatch | NoProposal | nil
 #   verifier.call(candidate) -> Metaflip:Assessment | nil
 #   snapshot.call(candidate) -> independent candidate copy
 #
@@ -87,6 +87,15 @@
       raise "Metaflip::Proposal candidate must not be nil"
     if !@cost.is_a?(Integer) || @cost < 1
       raise "Metaflip::Proposal cost must be a positive Integer"
+
+# A strategy that performed bounded work but found no candidate can report its
+# true exposure instead of being charged as a unit-cost `nil` miss.
++ Metaflip:NoProposal
+  ro :cost
+
+  -> new(@cost = 1)
+    if !@cost.is_a?(Integer) || @cost < 1
+      raise "Metaflip::NoProposal cost must be a positive Integer"
 
 # A strategy may expose a bounded neighborhood instead of guessing which one
 # of several flips deserves the single exact check.  The coordinator verifies
@@ -370,9 +379,11 @@
     result = __verify_and_admit(candidate, 0 - 1)
     result[0] > 0
 
-  -> __select_parent
+  -> __select_parent(arm)
     return nil if @states.size() == 0
-    start = @iterations % @states.size()
+    # Dephase arm and parent traversal. A global iteration offset can otherwise
+    # pair each arm with the same incompatible archive family indefinitely.
+    start = ((@iterations / @strategies.size()) + arm + 1) % @states.size()
     selected = start
     offset = 1
     while offset < @states.size()
@@ -415,9 +426,9 @@
 
   # Run one adaptive proposal.  The returned event is telemetry only; all
   # trusted state is retained behind the exact gate.
-  -> step
+  -> __step(emit_event)
     arm = __select_arm()
-    parent = __select_parent()
+    parent = __select_parent(arm)
     best = nil
     best = @snapshot.call(@best_state) if @best_state != nil
     @rng_seed = metaflip_search_next_seed(@rng_seed)
@@ -425,11 +436,17 @@
     @iterations += 1
 
     emitted = @strategies[arm].call(request)
+    if emitted.is_a?(Metaflip:NoProposal)
+      @proposal_misses += 1
+      __record_arm(arm, emitted.cost, 0, 0, 0)
+      return nil if !emit_event
+      return {status: :no_proposal, arm: arm, archive_action: 0, improved: false}
     valid_emission = emitted != nil
     valid_emission = false if valid_emission && !emitted.is_a?(Metaflip:Proposal) && !emitted.is_a?(Metaflip:ProposalBatch)
     if !valid_emission
       @proposal_misses += 1
       __record_arm(arm, 1, 0, 0, 0)
+      return nil if !emit_event
       return {status: :no_proposal, arm: arm, archive_action: 0, improved: false}
 
     proposals = [emitted]
@@ -463,15 +480,21 @@
         rewarded_improvement += result[2]
       i += 1
     __record_arm(arm, total_cost, valid, rewarded_novel, rewarded_improvement)
+    return nil if !emit_event
     {status: valid > 0 ? :exact_valid : :exact_reject, arm: arm,
       archive_action: archive_action, novel: novel > 0, improved: improved > 0}
+
+  # Run one adaptive proposal and return its telemetry event. Bulk `run`
+  # bypasses this allocation when callers need only the retained search state.
+  -> step
+    __step(true)
 
   -> run(steps)
     if !steps.is_a?(Integer) || steps < 0
       raise "Metaflip::Search run steps must be a non-negative Integer"
     i = 0
     while i < steps
-      step()
+      __step(false)
       i += 1
     best_state()
 

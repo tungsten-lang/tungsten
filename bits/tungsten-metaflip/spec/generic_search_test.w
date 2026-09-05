@@ -129,4 +129,46 @@ generic_search_expect("exploration normalized by exposure",
     cost_arms[1][:exposure] + 8 >= cost_arms[0][:exposure] &&
     cost_arms[1][:pulls] < cost_arms[0][:pulls])
 
+# Empty strategies can still report their actual work. An expensive miss must
+# not receive the same exploration schedule as a cheap miss.
+cheap_miss = Metaflip:NoProposal.new(1)
+expensive_miss = Metaflip:NoProposal.new(100)
+cheap_empty_arm = -> (request) cheap_miss
+expensive_empty_arm = -> (request) expensive_miss
+miss_aware = Metaflip:Search.new([cheap_empty_arm, expensive_empty_arm],
+  -> (candidate) nil, flat_snapshot, [1], {capacity: 1, seed: 71031,
+    valid_reward: 0, novel_reward: 0, improvement_reward: 0,
+    exploration: 1000000})
+miss_aware.run(10000)
+miss_arms = miss_aware.arm_stats
+generic_search_expect("empty-arm cost accounting",
+  miss_arms[0][:pulls] > 9000 && miss_arms[1][:pulls] < 100 &&
+    miss_arms[0][:exposure] <= miss_arms[1][:exposure] + 100)
+
+# Arm and parent traversal must not phase-lock. Each planted arm accepts only
+# the opposite archive family; both should eventually receive useful parents.
+family_snapshot = -> (state) [state[0], state[1]]
+family_verifier = -> (state)
+  result = nil
+  if state != nil && state.is_a?(Array) && state.size() == 2
+    if state[0].is_a?(Integer) && state[1].is_a?(Integer) && state[0] >= 0 && state[0] <= 1 && state[1] >= 0
+      result = Metaflip:Assessment.new([state[1]], state[0],
+        state[0] * 1000000 + state[1])
+  result
+family_arm0 = -> (request)
+  return nil if request.parent == nil || request.parent[0] != 1
+  Metaflip:Proposal.new([1, request.parent[1] + 1], 1)
+family_arm1 = -> (request)
+  return nil if request.parent == nil || request.parent[0] != 0
+  Metaflip:Proposal.new([0, request.parent[1] + 1], 1)
+dephased = Metaflip:Search.new([family_arm0, family_arm1], family_verifier,
+  family_snapshot, [1], {capacity: 2, seed: 71033, valid_reward: 0,
+    novel_reward: 0, improvement_reward: 0, exploration: 1000000})
+generic_search_expect("first parent family", dephased.seed([0, 0]))
+generic_search_expect("second parent family", dephased.seed([1, 0]))
+dephased.run(16)
+family_arms = dephased.arm_stats
+generic_search_expect("arm-parent traversal dephased",
+  family_arms[0][:exact_valid] > 0 && family_arms[1][:exact_valid] > 0)
+
 << "generic_search_test: all checks passed"

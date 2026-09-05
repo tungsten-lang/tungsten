@@ -724,27 +724,55 @@
     ni += 1
   best
 
-# Precompute one outer factor's row/column support extents for every ordered
-# pair of block allocations.  Extents are at most `maximum` in the bounded
-# scanner, so one i64 can carry both values without allocation in the hot
-# three-axis product.  This turns repeated 4x4 mask walks into table reads.
--> ffbc_pair_extent_codes(factors, width, rows, cols, row_allocations, column_allocations, rank) (i64[] i64 i64 i64 Array Array i64)
-  row_count = row_allocations.size() ## i64
-  column_count = column_allocations.size() ## i64
-  result = i64[row_count * column_count * rank]
-  extent = i64[2]
-  ri = 0 ## i64
-  while ri < row_count
-    ci = 0 ## i64
-    while ci < column_count
-      term = 0 ## i64
-      while term < rank
-        ffbc_extent(factors, term * width, rows, cols,
-                    row_allocations[ri], column_allocations[ci], extent)
-        result[(ri * column_count + ci) * rank + term] = extent[0] | (extent[1] << 8)
-        term += 1
-      ci += 1
-    ri += 1
+# Maximum supported allocation on one factor axis.  Row and column extents
+# are independent, so bounded scoring can precompute one linear table per
+# shared tensor axis instead of a quadratic table per allocation pair.
+-> ffbc_axis_extent(factors, base, rows, cols, allocation, row_axis) (i64[] i64 i64 i64 i64[] i64) i64
+  result = 0 ## i64
+  if row_axis == 1
+    i = 0 ## i64
+    while i < rows
+      if allocation[i] > result
+        j = 0 ## i64
+        while j < cols
+          if ffbc_bit(factors, base, i * cols + j) == 1
+            result = allocation[i]
+            j = cols
+          else
+            j += 1
+      i += 1
+  else
+    j = 0 ## i64
+    while j < cols
+      if allocation[j] > result
+        i = 0 ## i64
+        while i < rows
+          if ffbc_bit(factors, base, i * cols + j) == 1
+            result = allocation[j]
+            i = rows
+          else
+            i += 1
+      j += 1
+  result
+
+# Precompute the effective extent shared by two outer factors on one tensor
+# axis.  The result is indexed by allocation then outer term.
+-> ffbc_shared_axis_extents(first, first_width, first_rows, first_cols, first_row_axis, second, second_width, second_rows, second_cols, second_row_axis, allocations, rank) (i64[] i64 i64 i64 i64 i64[] i64 i64 i64 i64 Array i64)
+  count = allocations.size() ## i64
+  result = i64[count * rank]
+  ai = 0 ## i64
+  while ai < count
+    term = 0 ## i64
+    while term < rank
+      extent = ffbc_axis_extent(first, term * first_width, first_rows,
+                                first_cols, allocations[ai], first_row_axis) ## i64
+      other = ffbc_axis_extent(second, term * second_width, second_rows,
+                               second_cols, allocations[ai], second_row_axis) ## i64
+      if other < extent
+        extent = other
+      result[ai * rank + term] = extent
+      term += 1
+    ai += 1
   result
 
 # Dense oriented rank lookup for every induced leaf shape in the requested
@@ -774,8 +802,8 @@
 
 # Allocation-equivalent fast path for the exhaustive bounded scanner.  It
 # preserves the exact traversal and first-minimum tie rule of
-# `ffbc_best_bounded_recipe`, while precomputing all pairwise U/V/W support
-# extents and using a dense oriented leaf-rank table.  Materialisation remains
+# `ffbc_best_bounded_recipe`, while precomputing separable axis support extents
+# and using a dense oriented leaf-rank table.  Materialisation remains
 # behind the ordinary exact gate; this routine changes formula scoring only.
 -> ffbc_best_bounded_recipe_fast(outer, target_n, target_m, target_p, minimum, maximum, leaves) (FFBCScheme i64 i64 i64 i64 i64 Array)
   nas = ffbc_bounded_allocations(target_n, outer.n(), minimum, maximum)
@@ -785,9 +813,15 @@
     return nil
 
   rank = outer.rank() ## i64
-  u_codes = ffbc_pair_extent_codes(outer.us(), outer.uw(), outer.n(), outer.m(), nas, mas, rank)
-  v_codes = ffbc_pair_extent_codes(outer.vs(), outer.vw(), outer.m(), outer.p(), mas, pas, rank)
-  w_codes = ffbc_pair_extent_codes(outer.ws(), outer.ww(), outer.n(), outer.p(), nas, pas, rank)
+  n_extents = ffbc_shared_axis_extents(
+    outer.us(), outer.uw(), outer.n(), outer.m(), 1,
+    outer.ws(), outer.ww(), outer.n(), outer.p(), 1, nas, rank)
+  m_extents = ffbc_shared_axis_extents(
+    outer.us(), outer.uw(), outer.n(), outer.m(), 0,
+    outer.vs(), outer.vw(), outer.m(), outer.p(), 1, mas, rank)
+  p_extents = ffbc_shared_axis_extents(
+    outer.vs(), outer.vw(), outer.m(), outer.p(), 0,
+    outer.ws(), outer.ww(), outer.n(), outer.p(), 0, pas, rank)
   leaf_ranks = ffbc_leaf_rank_table(leaves, maximum)
   stride = maximum + 1 ## i64
 
@@ -795,38 +829,29 @@
   best_score = 0x7fffffff ## i64
   ni = 0 ## i64
   while ni < nas.size()
+    n_base = ni * rank ## i64
     mi = 0 ## i64
     while mi < mas.size()
-      u_base = (ni * mas.size() + mi) * rank ## i64
+      m_base = mi * rank ## i64
       pi = 0 ## i64
       while pi < pas.size()
-        v_base = (mi * pas.size() + pi) * rank ## i64
-        w_base = (ni * pas.size() + pi) * rank ## i64
+        p_base = pi * rank ## i64
         score = 0 ## i64
         term = 0 ## i64
-        while term < rank && score >= 0
-          ue = u_codes[u_base + term] ## i64
-          ve = v_codes[v_base + term] ## i64
-          we = w_codes[w_base + term] ## i64
-          sn = ue & 255 ## i64
-          wn = we & 255 ## i64
-          if wn < sn
-            sn = wn
-          sm = (ue >> 8) & 255 ## i64
-          vm = ve & 255 ## i64
-          if vm < sm
-            sm = vm
-          sp = (ve >> 8) & 255 ## i64
-          wp = (we >> 8) & 255 ## i64
-          if wp < sp
-            sp = wp
-          leaf_rank = 0 - 1 ## i64
-          if sn <= maximum && sm <= maximum && sp <= maximum
-            leaf_rank = leaf_ranks[(sn * stride + sm) * stride + sp]
-          if leaf_rank < 0
-            score = 0 - 1
-          else
-            score += leaf_rank
+        # Leaf ranks are nonnegative and ties keep the first recipe, so this
+        # candidate cannot win once its partial score reaches the incumbent.
+        while term < rank && score >= 0 && score < best_score
+          sn = n_extents[n_base + term] ## i64
+          sm = m_extents[m_base + term] ## i64
+          sp = p_extents[p_base + term] ## i64
+          if sn > 0 && sm > 0 && sp > 0
+            leaf_rank = 0 - 1 ## i64
+            if sn <= maximum && sm <= maximum && sp <= maximum
+              leaf_rank = leaf_ranks[(sn * stride + sm) * stride + sp]
+            if leaf_rank < 0
+              score = 0 - 1
+            else
+              score += leaf_rank
           term += 1
         if score >= 0 && score < best_score
           best_score = score

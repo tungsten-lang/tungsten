@@ -135,7 +135,7 @@
   #   valid_reward:       reward for an exact-valid result (default 1000)
   #   novel_reward:       reward for a new descriptor (default 100000)
   #   improvement_reward: reward for a new global best (default 1000000)
-  #   exploration:        untried/low-pull portfolio bonus (default 50000)
+  #   exploration:        untried/low-exposure portfolio bonus (default 50000)
   -> new(strategies, verifier, snapshot, directions, options = {})
     if strategies == nil || !strategies.is_a?(Array) || strategies.size() < 1
       raise "Metaflip::Search requires at least one strategy closure"
@@ -399,7 +399,7 @@
       utility = @arm_improvements[arm] * @improvement_reward
       utility += @arm_novel[arm] * @novel_reward
       utility += @arm_valid[arm] * @valid_reward
-      score = utility / exposure + @exploration / (@arm_pulls[arm] + 1)
+      score = utility / exposure + @exploration / (exposure + 1)
       if score > best_score
         best = arm
         best_score = score

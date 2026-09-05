@@ -24,33 +24,22 @@ use flipfleet_block_leaf_pool
     return 0
   1
 
--> ffbsbte_score_codes(u_codes, v_codes, w_codes, leaf_ranks, stride, rank, mas_count, pas_count, ni, mi, pi) (i64[] i64[] i64[] i64[] i64 i64 i64 i64 i64 i64 i64) i64
-  u_base = (ni * mas_count + mi) * rank ## i64
-  v_base = (mi * pas_count + pi) * rank ## i64
-  w_base = (ni * pas_count + pi) * rank ## i64
+-> ffbsbte_score_extents(n_extents, m_extents, p_extents, leaf_ranks, stride, rank, ni, mi, pi) (i64[] i64[] i64[] i64[] i64 i64 i64 i64 i64) i64
+  n_base = ni * rank ## i64
+  m_base = mi * rank ## i64
+  p_base = pi * rank ## i64
   score = 0 ## i64
   term = 0 ## i64
   while term < rank && score >= 0
-    ue = u_codes[u_base + term] ## i64
-    ve = v_codes[v_base + term] ## i64
-    we = w_codes[w_base + term] ## i64
-    sn = ue & 255 ## i64
-    wn = we & 255 ## i64
-    if wn < sn
-      sn = wn
-    sm = (ue >> 8) & 255 ## i64
-    vm = ve & 255 ## i64
-    if vm < sm
-      sm = vm
-    sp = (ve >> 8) & 255 ## i64
-    wp = (we >> 8) & 255 ## i64
-    if wp < sp
-      sp = wp
-    leaf_rank = leaf_ranks[(sn * stride + sm) * stride + sp] ## i64
-    if leaf_rank < 0
-      score = 0 - 1
-    else
-      score += leaf_rank
+    sn = n_extents[n_base + term] ## i64
+    sm = m_extents[m_base + term] ## i64
+    sp = p_extents[p_base + term] ## i64
+    if sn > 0 && sm > 0 && sp > 0
+      leaf_rank = leaf_ranks[(sn * stride + sm) * stride + sp] ## i64
+      if leaf_rank < 0
+        score = 0 - 1
+      else
+        score += leaf_rank
     term += 1
   score
 
@@ -192,18 +181,24 @@ use flipfleet_block_leaf_pool
       nas = ffbc_bounded_allocations(source_dims[0], outer.n(), 2, 8)
       mas = ffbc_bounded_allocations(source_dims[1], outer.m(), 2, 8)
       pas = ffbc_bounded_allocations(source_dims[2], outer.p(), 2, 8)
-      u_codes = ffbc_pair_extent_codes(outer.us(), outer.uw(), outer.n(), outer.m(), nas, mas, rank)
-      v_codes = ffbc_pair_extent_codes(outer.vs(), outer.vw(), outer.m(), outer.p(), mas, pas, rank)
-      w_codes = ffbc_pair_extent_codes(outer.ws(), outer.ww(), outer.n(), outer.p(), nas, pas, rank)
+      n_extents = ffbc_shared_axis_extents(
+        outer.us(), outer.uw(), outer.n(), outer.m(), 1,
+        outer.ws(), outer.ww(), outer.n(), outer.p(), 1, nas, rank)
+      m_extents = ffbc_shared_axis_extents(
+        outer.us(), outer.uw(), outer.n(), outer.m(), 0,
+        outer.vs(), outer.vw(), outer.m(), outer.p(), 1, mas, rank)
+      p_extents = ffbc_shared_axis_extents(
+        outer.vs(), outer.vw(), outer.m(), outer.p(), 0,
+        outer.ws(), outer.ww(), outer.n(), outer.p(), 0, pas, rank)
       ni = 0 ## i64
       while ni < nas.size()
         mi = 0 ## i64
         while mi < mas.size()
           pi = 0 ## i64
           while pi < pas.size()
-            score = ffbsbte_score_codes(u_codes, v_codes, w_codes, leaf_ranks,
-                                        stride, rank, mas.size(), pas.size(),
-                                        ni, mi, pi) ## i64
+            score = ffbsbte_score_extents(n_extents, m_extents, p_extents,
+                                          leaf_ranks, stride, rank,
+                                          ni, mi, pi) ## i64
             if score >= 0 && score < formula_rank
               # The checked-in bounded scan supplies the claimed global
               # minimum.  Replaying every triple here must never undercut it.

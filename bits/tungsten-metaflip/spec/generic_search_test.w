@@ -104,4 +104,29 @@ generic_search_expect("batch exposure accounting", batched.arm_stats[0][:pulls] 
   batched.arm_stats[0][:exposure] == 10 && batched.arm_stats[0][:exact_valid] == 2 &&
   batched.arm_stats[0][:improvements] == 1 && batch_event[:improved])
 
+# Exploration is cost-aware too: a batch that spends eight exposure units per
+# pull must not receive the same number of exploratory pulls as a unit-cost
+# arm. Otherwise it can consume nearly the whole exact-check budget before
+# either arm has earned any reward.
+cheap_arm = -> (request)
+  Metaflip:Proposal.new(request.generation * 100 + 1, 1)
+wide_arm = -> (request)
+  proposals = []
+  i = 0
+  while i < 4
+    proposals.push(Metaflip:Proposal.new(request.generation * 100 + 10 + i, 2))
+    i += 1
+  Metaflip:ProposalBatch.new(proposals)
+flat_verifier = -> (candidate) Metaflip:Assessment.new([0], candidate % 2, candidate)
+flat_snapshot = -> (candidate) candidate
+cost_aware = Metaflip:Search.new([cheap_arm, wide_arm], flat_verifier,
+  flat_snapshot, [1], {capacity: 4, seed: 71029, valid_reward: 0,
+    novel_reward: 0, improvement_reward: 0, exploration: 1000000})
+cost_aware.run(20)
+cost_arms = cost_aware.arm_stats
+generic_search_expect("exploration normalized by exposure",
+  cost_arms[0][:exposure] + 8 >= cost_arms[1][:exposure] &&
+    cost_arms[1][:exposure] + 8 >= cost_arms[0][:exposure] &&
+    cost_arms[1][:pulls] < cost_arms[0][:pulls])
+
 << "generic_search_test: all checks passed"

@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- **Arity contracts reach runtime builtins** — methods the runtime implements
+  natively through its inline-cache rows (Array#push, String#slice,
+  Hash#keys, Int#abs, Float#to_i, Decimal#round, Socket#read, … about 190
+  rows) now carry `[min, max]` argument contracts, populated from what each
+  C handler consumes (a trailing block counts as one argument). A call that
+  misses the contract is `E_LOWER_ARITY` at compile time when the receiver's
+  static type names the class (`[1, 2, 3].push(4, 5)`, `s.slice(1, 2, 3)`),
+  and on an erased receiver a rescuable `ArgumentError` with the same message
+  at the call — checked once per call site on the inline-cache miss path, so
+  a cache hit costs nothing. Core source methods reached through type-class
+  dispatch (`arr.size(5)`, `arr.first(10)`) are checked the same way against
+  their registered signatures, and the universal dispatcher arms (`to_s`,
+  `hash`, `respond_to?`, `<=>`, `is_a?`, the file builtins) reject surplus
+  arguments they used to ignore. The interpreter applies the same table on
+  primitive receivers and states a contract for each of its builtin arms
+  (`String#to_i(base)` now forwards the base). `compiler/lib/builtin_arity.w`
+  mirrors the runtime rows; `scripts/check-core-dispatch-contracts.rb` fails
+  when a runtime row, its compiler mirror, or a Core `.w` declaration of the
+  same method disagree. `TUNGSTEN_ARITY=off` still disables every check.
+  Parity spec: `spec/parity/builtin_arity_spec.w`.
+
 - **Worktrees inherit the host compiler** — `git worktree add` no longer
   leaves you without `bin/tungsten-compiler`. A post-checkout hook (installed
   by `bin/tungsten doctor`) and a `bin/tungsten` fallback symlink the primary
@@ -58,7 +79,9 @@
   message when it binds parameters. Previously extra arguments were silently
   dropped and missing ones nil-padded (`arr.first(10)` returned `arr.first`).
   Dynamic dispatch on an unknown receiver is not checked, so compiled code
-  pays nothing at runtime. `TUNGSTEN_ARITY=off` disables the check for triage.
+  pays nothing at runtime (runtime builtins and Core methods on erased
+  receivers are covered by the follow-up entry above). `TUNGSTEN_ARITY=off`
+  disables the check for triage.
 - **Explicit partial application** — a bare `_` argument is a placeholder:
   `add(1, _)` is `->(x) add(1, x)`, one parameter per placeholder in argument
   order (`[1, 2, 3].map(add(10, _))`). A name `_` assigned in the enclosing

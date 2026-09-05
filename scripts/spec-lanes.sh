@@ -816,6 +816,7 @@ parity_specs=(
   spec/parity/arity_missing_args_spec.w
   spec/parity/arity_mixed_call_sites_spec.w
   spec/parity/arity_slash_form_spec.w
+  spec/parity/builtin_arity_spec.w
   spec/parity/array_basics_spec.w
   spec/parity/array_enumerable_spec.w
   spec/parity/array_equality_sort_spec.w

@@ -446,7 +446,7 @@ module Tungsten
     rescue Tungsten::Error => e
       e.call_stack ||= build_call_stack
       raise
-    rescue NoMethodError, ZeroDivisionError, SystemStackError, TypeError => e
+    rescue NoMethodError, ZeroDivisionError, SystemStackError, TypeError, ::FrozenError => e
       raise runtime_error_from_exception(e)
     ensure
       print_profile_report
@@ -605,7 +605,7 @@ module Tungsten
         build_runtime_error("division by zero", node: node)
       when SystemStackError
         build_runtime_error("stack level too deep (infinite recursion?)", node: node)
-      when TypeError
+      when TypeError, ::FrozenError
         build_runtime_error(error.message, node: node)
       else
         raise error
@@ -3059,7 +3059,7 @@ module Tungsten
         result = evaluate(node.body)
       rescue Tungsten::Error => e
         result = evaluate_begin_rescue(node, e)
-      rescue NoMethodError, ZeroDivisionError, SystemStackError, TypeError => e
+      rescue NoMethodError, ZeroDivisionError, SystemStackError, TypeError, ::FrozenError => e
         result = evaluate_begin_rescue(node, runtime_error_from_exception(e, node: node))
       ensure
         evaluate(node.ensure_body) if node.ensure_body && !node.ensure_body.empty?

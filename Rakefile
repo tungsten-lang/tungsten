@@ -80,7 +80,7 @@ namespace :check do
     run_command "ruby", File.join(ROOT, "scripts/check_claim_staleness.rb")
   end
 
-  desc "Verify generated unit lookup tables match data/units.tsv"
+  desc "Verify generated unit lookup tables match the external registry and legacy IDs"
   task :units do
     run_command "ruby", File.join(ROOT, "scripts/gen_units.rb"), "--check"
   end

@@ -56,11 +56,31 @@ binary prefixes run from kibi (`Ki`, 2¹⁰) through quebi (`Qi`, 2¹⁰⁰). Ex
 unit and alias spellings take precedence over prefix decomposition, so `M` is
 molar concentration while `Mm` is a megametre.
 
+Definitions, exact rational factors, semantic dimensions, aliases, and prefixes
+live in `data/unit_registry.json`. Both the Ruby reader and compiler generator
+consume that file. Descriptions, etymologies, and histories live in
+`data/unit_metadata.tsv`; material-density reference values live separately in
+`data/substance_densities.json`. See the [registry format](../specification/unit_registry_format.md)
+and [generated catalog](units_catalog.md).
+
 The compiler and reference lexers load `data/unit_names.txt` once at process
-startup and retain its names in a hash. Tokenization performs only in-memory
+startup, validate it, and retain its names in a [frozen hash](../specification/hash_freezing.md).
+Tokenization performs only in-memory
 membership checks; it does not read the file per token. The file is generated
 from the shared registry by `scripts/gen_units.rb` and must be shipped beside
 the compiler's other external data.
+
+`TUNGSTEN_UNIT_NAMES` selects an explicit names file. Otherwise the loader uses
+`TUNGSTEN_ROOT`, the compiler's installation directory, then a development
+working-directory fallback, in that order. Explicit paths fail if unavailable.
+The installed registry takes precedence over an unrelated project's data file.
+Editing the file after startup does not change the current lexers.
+
+The names file controls spelling recognition only. Add physical definitions to
+the JSON registry and regenerate with `ruby scripts/gen_units.rb --write` before
+rebuilding. Native applications retain generated conversion tables and perform
+ordinary quantity arithmetic without external registry files. Compiler startup
+validation does not add per-token or per-operation filesystem work.
 
 The focused cross-domain surface includes:
 

@@ -2001,6 +2001,23 @@ module Tungsten
         end
 
         interpreter.define_method_builtin("freeze") do |recv, _args, _block|
+          # Match Hash's native transitive contract, including nested hashes
+          # reached through arrays. Track identity to handle self references.
+          if recv.is_a?(::Hash)
+            seen = {}.compare_by_identity
+            pending = [recv]
+            until pending.empty?
+              value = pending.pop
+              next if seen.key?(value)
+              seen[value] = true
+              if value.is_a?(::Hash)
+                value.each { |key, child| pending << key << child }
+                value.freeze
+              elsif value.is_a?(::Array)
+                pending.concat(value)
+              end
+            end
+          end
           recv.freeze
         end
 

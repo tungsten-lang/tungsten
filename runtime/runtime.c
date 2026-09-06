@@ -24711,7 +24711,7 @@ static const char *unit_names[W_UNIT_CAPACITY] = {
     /* 255-: sentinel */
     [255] = "%",
 
-    /* 256-: Ruby registry */
+    /* 256-: registry */
     [256] = "\xc2\xb0R",
     [257] = "\xc2\xb0\x44\x65",
     [258] = "\xc2\xb0N",
@@ -24738,11 +24738,11 @@ static const char *unit_names[W_UNIT_CAPACITY] = {
     [279] = "fathom",
     [280] = "cable",
 
-    /* 281-: Ruby compound */
+    /* 281-: compound */
     [281] = "knot",
     [282] = "kph",
 
-    /* 283-: Ruby registry */
+    /* 283-: registry */
     [283] = "mach",
     [284] = "lightsecond",
     [285] = "lightminute",
@@ -24841,10 +24841,10 @@ static const char *unit_names[W_UNIT_CAPACITY] = {
     [378] = "PS",
     [379] = "Ga",
 
-    /* 380-: Ruby compound */
+    /* 380-: compound */
     [380] = "Ci",
 
-    /* 381-: Ruby registry */
+    /* 381-: registry */
     [381] = "rem",
     [382] = "deg",
     [383] = "arcmin",
@@ -24860,12 +24860,12 @@ static const char *unit_names[W_UNIT_CAPACITY] = {
     [393] = "PiB",
     [394] = "EiB",
 
-    /* 395-: Ruby compound */
+    /* 395-: compound */
     [395] = "bps",
     [396] = "Bps",
     [397] = "baud",
 
-    /* 398-: Ruby registry */
+    /* 398-: registry */
     [398] = "P",
     [399] = "cP",
     [400] = "St",
@@ -24893,11 +24893,11 @@ static const char *unit_names[W_UNIT_CAPACITY] = {
     [422] = "warhol",
     [423] = "kilowarhol",
 
-    /* 424-: Ruby compound */
+    /* 424-: compound */
     [424] = "rpm",
     [425] = "rd",
 
-    /* 426-: Ruby registry */
+    /* 426-: registry */
     [426] = "Mx",
     [427] = "millihelen",
     [428] = "nit",
@@ -25277,7 +25277,7 @@ static const char *unit_names[W_UNIT_CAPACITY] = {
     [802] = "RBE",
     [803] = "hounsfield_unit",
 
-    /* 804-: Ruby compound */
+    /* 804-: compound */
     [804] = "bpm",
     [805] = "fps",
     [806] = "dpm",
@@ -46791,7 +46791,7 @@ WValue w_hash_recycle_or_new(void) {
 void w_hash_recycle(WValue v) {
     if (!w_is_hash(v)) return;
     WHash *hash = (WHash *)w_as_ptr(v);
-    if (hash->flags & W_HASH_FLAG_POOLED) return;
+    if (hash->flags & (W_HASH_FLAG_POOLED | W_HASH_FLAG_FROZEN)) return;
     if (g_hash_pool_count < ARRAY_POOL_MAX) {
         hash->flags |= W_HASH_FLAG_POOLED;
         g_hash_pool[g_hash_pool_count++] = v;
@@ -48960,6 +48960,10 @@ WValue w_hash_new(void) {
  * the index table. O(cap/2) words — the dense arrays need no clearing
  * because `used` bounds every walk. */
 static inline void w_hash_reset(WHash *hash) {
+    if (hash->flags & W_HASH_FLAG_FROZEN) {
+        w_raise_error_named("FrozenError", "cannot modify frozen Hash");
+        return;
+    }
     memset(hash->index, 0xFF, sizeof(int32_t) * hash->cap);
     hash->count = 0;
     hash->used = 0;
@@ -48986,6 +48990,10 @@ WValue w_hash_reuse_or_new(WValue *slot) {
     WValue v = *slot;
     if (v != W_NIL) {
         WHash *hash = (WHash *)w_as_ptr(v);
+        if (hash->flags & W_HASH_FLAG_FROZEN) {
+            *slot = w_hash_new();
+            return *slot;
+        }
         w_hash_reset(hash);
         return v;
     }
@@ -49003,6 +49011,10 @@ WValue w_hash_reuse_and_drain_or_new(WValue *slot) {
     WValue v = *slot;
     if (v != W_NIL) {
         WHash *hash = (WHash *)w_as_ptr(v);
+        if (hash->flags & W_HASH_FLAG_FROZEN) {
+            *slot = w_hash_new();
+            return *slot;
+        }
         WValue self_v = v;
         for (uint32_t i = 0; i < hash->used; i++) {
             if (hash->keys[i] == W_MEMO_MISS) continue;
@@ -49036,6 +49048,10 @@ WValue w_hash_reuse_and_drain_or_new(WValue *slot) {
 
 WValue w_hash_set(WValue hash_val, WValue key, WValue val) {
     WHash *hash = as_hash(hash_val);
+    if (hash->flags & W_HASH_FLAG_FROZEN) {
+        w_raise_error_named("FrozenError", "cannot modify frozen Hash");
+        return W_NIL;
+    }
     /* Match the language/Ruby-host mutation contract: values on live keys may
      * change during iteration, but a new key would extend/rebuild the dense
      * table under the traversal. Check the existing-key case before
@@ -49254,6 +49270,10 @@ WValue w_hash_values(WValue hash_val) {
 
 WValue w_hash_delete(WValue hash_val, WValue key) {
     WHash *hash = as_hash(hash_val);
+    if (hash->flags & W_HASH_FLAG_FROZEN) {
+        w_raise_error_named("FrozenError", "cannot modify frozen Hash");
+        return W_NIL;
+    }
     int64_t dense = -1;
     int64_t slot = w_hash_find_slot(hash, key, &dense);
     if (dense < 0) return W_NIL;
@@ -60893,6 +60913,10 @@ static WValue w_ic_hash_values(WValue r, WValue *a, int c) {
 }
 static WValue w_ic_hash_merge_bang(WValue r, WValue *a, int c) {
     if (c < 1 || !w_is_hash(a[0])) die("merge! requires 1 hash argument");
+    if (as_hash(r)->flags & W_HASH_FLAG_FROZEN) {
+        w_raise_error_named("FrozenError", "cannot modify frozen Hash");
+        return W_NIL;
+    }
     WHash *other = as_hash(a[0]);
     for (uint32_t i = 0; i < other->used; i++) {
         if (other->keys[i] != W_MEMO_MISS)
@@ -72789,8 +72813,8 @@ WValue w_socket_serve_http(WValue listener, WValue handler, int workers) {
 /* Transitive freeze with cycle detection using a visited set */
 #define FREEZE_VISITED_MAX 1024
 
-static int freeze_visited_count = 0;
-static void *freeze_visited[FREEZE_VISITED_MAX];
+static __thread int freeze_visited_count = 0;
+static __thread void *freeze_visited[FREEZE_VISITED_MAX];
 
 static int freeze_is_visited(void *ptr) {
     for (int i = 0; i < freeze_visited_count; i++) {
@@ -72808,6 +72832,19 @@ static void freeze_mark_visited(void *ptr) {
 static void freeze_recursive(WValue v);
 
 static void freeze_recursive(WValue v) {
+    /* Mark before traversing: a hash may contain itself, directly or through
+     * another container. Frozen hashes never enter the scratch/recycle pools. */
+    if (w_is_hash(v)) {
+        WHash *hash = as_hash(v);
+        if (hash->flags & W_HASH_FLAG_FROZEN) return;
+        hash->flags |= W_HASH_FLAG_FROZEN;
+        for (uint32_t i = 0; i < hash->used; i++) {
+            if (hash->keys[i] == W_MEMO_MISS) continue;
+            freeze_recursive(hash->keys[i]);
+            freeze_recursive(hash->values[i]);
+        }
+        return;
+    }
     /* Arrays left object space (v5: W_TAG_ARRAY) — handle them before
      * the object-space gate below or their elements never freeze. */
     if (w_is_array(v)) {
@@ -72995,6 +73032,8 @@ WValue w_int_to_hex_str(uint64_t v) {
 }
 
 WValue w_frozen_p(WValue obj) {
+    if (w_is_hash(obj))
+        return (as_hash(obj)->flags & W_HASH_FLAG_FROZEN) ? W_TRUE : W_FALSE;
     /* Value types are always frozen */
     if (!w_is_obj(obj)) return W_TRUE;
 

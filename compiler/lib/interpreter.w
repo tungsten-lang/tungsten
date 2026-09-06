@@ -1579,6 +1579,14 @@ use target
       if args.size() != 2 || !(type(args[1]) in ("Int" "BigInt"))
         raise "w_u64 expects one Integer argument"
       return args[1]
+    when "w_freeze"
+      if args.size() != 2
+        raise "w_freeze expects one argument"
+      return ccall("w_freeze", args[1])
+    when "w_frozen_p"
+      if args.size() != 2
+        raise "w_frozen_p expects one argument"
+      return ccall("w_frozen_p", args[1])
     when "w_num_to_float"
       if args.size() != 2
         raise "w_num_to_float expects one numeric argument"
@@ -2636,8 +2644,7 @@ use target
       uname = interp_pipe_unit_spelling(r, env)
     if uname == nil
       return nil
-    # Materialize: node-field strings can be lexer slices whose WValue bits
-    # never match known_unit_name?'s interned tuple members.
+    # Normalize the AST spelling to a String for the shared registry lookup.
     uname = "" + uname.to_s()
     if !known_unit_name?(uname)
       return nil

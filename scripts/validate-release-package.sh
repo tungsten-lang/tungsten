@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -ne 2 ]]; then
-  printf 'usage: %s PACKAGE TARGET-LABEL\n' "$0" >&2
+if [[ $# -lt 2 || $# -gt 3 || ( $# -eq 3 && "$3" != "--structure-only" ) ]]; then
+  printf 'usage: %s PACKAGE TARGET-LABEL [--structure-only]\n' "$0" >&2
   exit 2
 fi
 
@@ -50,6 +50,10 @@ for path in \
   bin/tungsten-compiler \
   core/tungsten.w \
   data/units.tsv \
+  data/unit_names.txt \
+  data/unit_registry.json \
+  data/unit_metadata.tsv \
+  data/substance_densities.json \
   doc/CORE.md \
   runtime/runtime.c
 do
@@ -68,6 +72,31 @@ fi
 if [[ ! -x "$PACKAGE_ROOT/bin/tungsten" || ! -x "$PACKAGE_ROOT/bin/tungsten-compiler" ]]; then
   printf 'release package launchers are not executable\n' >&2
   exit 1
+fi
+
+# Invoke the extracted compiler directly from an unrelated directory. This
+# exercises executable-relative data discovery without the launcher/root env.
+if [[ "${3:-}" != "--structure-only" ]]; then
+  LEX_SOURCE="$WORK/release-units.w"
+  LEX_OUTPUT="$WORK/$TARGET_LABEL.units.out"
+  printf '1 mmol/L\n1 eV\n' > "$LEX_SOURCE"
+  if ! (cd "$WORK" && env -u TUNGSTEN_ROOT -u TUNGSTEN_UNIT_NAMES \
+      "$PACKAGE_ROOT/bin/tungsten-compiler" --lex "$LEX_SOURCE") > "$LEX_OUTPUT" 2>&1 ||
+     ! grep -Fq '44 [1, mmol/L]' "$LEX_OUTPUT" ||
+     ! grep -Fq '44 [1, eV]' "$LEX_OUTPUT"; then
+    printf 'release package unit registry smoke test failed\n' >&2
+    head -20 "$LEX_OUTPUT" >&2
+    exit 1
+  fi
+  REPL_OUTPUT="$WORK/$TARGET_LABEL.metadata.out"
+  if ! (cd "$WORK" && printf '? 1 m\n' | env -u TUNGSTEN_ROOT -u TUNGSTEN_UNIT_NAMES \
+      "$PACKAGE_ROOT/bin/tungsten-compiler" --repl) > "$REPL_OUTPUT" 2>&1 ||
+     ! grep -Fq 'etymology' "$REPL_OUTPUT" ||
+     ! grep -Fq 'history' "$REPL_OUTPUT"; then
+    printf 'release package external unit metadata smoke test failed\n' >&2
+    head -20 "$REPL_OUTPUT" >&2
+    exit 1
+  fi
 fi
 
 printf 'PASS release package %s\n' "$EXPECTED_NAME"

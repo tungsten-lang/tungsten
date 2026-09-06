@@ -281,9 +281,22 @@ fi
 
 echo ""
 echo "==> Exhaustive Ruby/compiled unit registry superset..."
+if ! ruby "$ROOT/compiler/test/unit_registry_startup_test.rb" ||
+   ! ruby "$ROOT/compiler/test/unit_registry_data_test.rb" ||
+   ! ruby "$ROOT/scripts/test-unit-release-package.rb" ||
+   ! ruby "$ROOT/scripts/test-ruby-unit-package.rb"; then
+  FAIL=$((FAIL + 1))
+  ERRORS="${ERRORS}\n--- external unit registry contract failed ---"
+fi
 if ! ruby "$ROOT/compiler/test/unit_registry_superset_test.rb"; then
   FAIL=$((FAIL + 1))
   ERRORS="${ERRORS}\n--- exhaustive unit registry superset failed ---"
+fi
+
+if ! "$TUNGSTEN" compile --no-lto "$ROOT/compiler/test/unit_lexer_superset.w" --out "$TMP/unit-lexer-superset" > "$TMP/unit-lexer-superset.build" 2>&1 ||
+   ! TUNGSTEN_ROOT="$ROOT" "$TMP/unit-lexer-superset"; then
+  FAIL=$((FAIL + 1))
+  ERRORS="${ERRORS}\n--- exhaustive lexer unit superset failed ---\n$(tail -20 "$TMP/unit-lexer-superset.build")"
 fi
 
 echo ""

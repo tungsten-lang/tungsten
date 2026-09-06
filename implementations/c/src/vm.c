@@ -1417,6 +1417,10 @@ static int promote_ast_value(TcValue *value, TcError *err) {
 }
 
 static int hash_set_value(TcRuntimeHash *hash, TcValue key, TcValue value, TcError *err) {
+  if (hash->flags & TC_HASH_FLAG_FROZEN) {
+    tc_error_set(err, "FrozenError: cannot modify frozen Hash");
+    return 0;
+  }
   if (!promote_ast_value(&value, err)) return 0;
   if (hash->cap == 0 && !hash_grow(hash, 8, err)) return 0;
   // Keep consumed dense entries (live + holes) below 75% of cap — that
@@ -1474,6 +1478,33 @@ static TcValue hash_delete_value(TcRuntimeHash *hash, TcValue key) {
   return removed;
 }
 
+
+/* Hash freezing mirrors the native flag and traverses hash keys/values,
+ * including hashes reached through arrays. The identity set handles cycles. */
+static int runtime_freeze_value(TcValue value, TcRuntimeArray *seen, TcError *err) {
+  TcValueKind kind = tc_kind(value);
+  if (kind != TC_VAL_HASH && kind != TC_VAL_ARRAY) return 1;
+  for (int32_t i = 0; i < seen->size; i++)
+    if (seen->slots[i] == value) return 1;
+  if (!runtime_array_ensure_cap(seen, (size_t)seen->size + 1, err)) return 0;
+  seen->slots[seen->size++] = value;
+  if (kind == TC_VAL_HASH) {
+    TcRuntimeHash *hash = tc_as_hash(value);
+    if (hash->flags & TC_HASH_FLAG_FROZEN) return 1;
+    hash->flags |= TC_HASH_FLAG_FROZEN;
+    for (uint32_t i = 0; i < hash->used; i++) {
+      if (hash->keys[i] == TC_HASH_TOMBSTONE) continue;
+      if (!runtime_freeze_value(hash->keys[i], seen, err) ||
+          !runtime_freeze_value(hash->values[i], seen, err)) return 0;
+    }
+  } else {
+    TcRuntimeArray *array = tc_as_array(value);
+    if (array->ebits == 65)
+      for (int32_t i = 0; i < array->size; i++)
+        if (!runtime_freeze_value(array->slots[array->start + i], seen, err)) return 0;
+  }
+  return 1;
+}
 
 static int string_split_value(TcValue receiver, TcValue sep, TcValue *out, TcError *err) {
   if (tc_kind(receiver) != TC_VAL_STRING || tc_kind(sep) != TC_VAL_STRING) {

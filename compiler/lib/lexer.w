@@ -520,6 +520,16 @@ use ../../languages/tungsten/lexers/known_units
 
     when 0x02
       start = pos
+      if c == 39
+        # Keep the boxed helper result out of the raw scanner's offset state.
+        phrase_end = ccall_nobox("w_numeric_to_i64", unit_apostrophe_phrase_end(lc, pos, count)) ## i64
+        if phrase_end > pos
+          # The number materializer owns this whole phrase. Emit a transport
+          # chunk and leave the next newline/statement to the raw scanner.
+          pos = phrase_end
+          tokens[tc] = t_id | (((pos - start) & 0xFFF) << 26) | (start << 2)
+          tc++
+          next
       pos++
       if c == :-\"
         loop
@@ -3613,7 +3623,3 @@ use ../../languages/tungsten/lexers/known_units
       @sup_skip_to = deg_j
     else
       raise_unexpected_character(raw, off)
-
-# --- BEGIN GENERATED: known_unit_name ---
-# Unit membership is loaded once from data/unit_names.txt by known_units.w.
-# --- END GENERATED: known_unit_name ---

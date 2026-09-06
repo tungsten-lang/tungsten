@@ -1,5 +1,5 @@
 # Legacy unit-ID table. These compact IDs are kept stable for inline WValue
-# compatibility; scripts/gen_units.rb appends the full Ruby unit registry and
+# compatibility; scripts/gen_units.rb appends the external unit registry and
 # aliases when generating the compiler and runtime tables.
 #
 # Format: id<TAB>name<TAB>category

@@ -49,3 +49,8 @@ ruby-tungsten -e '<< "hello world"'
 
 The gem is distributed under the MIT license. The full repository is dual
 licensed as described in the root README.
+
+Build a local gem with `bundle exec rake build` from this directory. Its build
+prerequisite copies the shared external unit definitions, metadata, density
+references, and neutral registry reader into the package. These copies are
+generated packaging inputs; edit the repository-root data files instead.

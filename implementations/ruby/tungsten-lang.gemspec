@@ -36,6 +36,11 @@ Gem::Specification.new do |spec|
     end
   end
 
+  # Prepared by `rake build` from the repository's authoritative shared data.
+  # These generated package inputs are ignored in Git, so list them explicitly.
+  spec.files += %w[data/unit_registry.json data/unit_metadata.tsv
+                   data/substance_densities.json lib/tungsten/generated_unit_registry.rb]
+
   spec.bindir        = "exe"
   spec.executables   = spec.files.grep(%r{\Aexe/}) { |f| File.basename(f) }
   spec.require_paths = ["lib"]

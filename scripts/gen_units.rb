@@ -2,7 +2,7 @@
 # frozen_string_literal: true
 
 # Generates unit lookup tables from the stable legacy IDs in data/units.tsv
-# plus the full Ruby reference registry for:
+# plus the language-neutral data/unit_registry.json for:
 #   1. compiler/lib/lowering/literals.w  (Tungsten case/when)
 #   2. runtime/runtime.c (C initializer)
 #   3. data/unit_names.txt (lexer membership, one spelling per line)
@@ -12,16 +12,17 @@
 #   ruby scripts/gen_units.rb --tungsten   # Tungsten case/when only
 #   ruby scripts/gen_units.rb --c          # C initializer only
 #   ruby scripts/gen_units.rb --manifest   # name<TAB>id<TAB>canonical for tests
-#   ruby scripts/gen_units.rb --write      # overwrite both files in-place
+#   ruby scripts/gen_units.rb --write      # update all generated outputs
 #   ruby scripts/gen_units.rb --check      # verify generated files are current
 
 ROOT = File.expand_path("..", __dir__)
+require_relative "lib/unit_registry"
 TSV_PATH = File.join(ROOT, "data/units.tsv")
 UNIT_NAMES_PATH = File.join(ROOT, "data/unit_names.txt")
 C_LEXER_MIXED_UNIT_NAMES_PATH = File.join(ROOT, "implementations/c/include/unit_mixed_case_names.inc")
 
 Unit = Struct.new(:id, :name, :category, keyword_init: true)
-Registry = Struct.new(:units, :aliases, :custom_dimensions, keyword_init: true)
+Registry = Struct.new(:units, :aliases, :custom_dimensions, :source, keyword_init: true)
 
 UNIT_CAPACITY = 8192
 # Prefixed and custom quantities are heap-backed, so their unit IDs are not
@@ -42,31 +43,30 @@ def load_legacy_units
 end
 
 # Preserve the compact legacy IDs, then append every canonical unit from the
-# Ruby reference registry above the 8-bit inline range. Aliases share their
+# external registry above the 8-bit inline range. Aliases share their
 # canonical ID and therefore do not consume registry slots.
 def load_registry
   legacy = load_legacy_units
-  $LOAD_PATH.unshift File.join(ROOT, "implementations/ruby/lib")
-  require "tungsten"
+  source = TungstenUnitRegistry::Document.new(File.join(ROOT, "data/unit_registry.json"))
 
   units = legacy.dup
   unit_by_name = units.to_h { |u| [u.name, u] }
-  canonical_names = Tungsten::Units::UNIT_TABLE.keys | Tungsten::Units::COMPOUND_DEFS.keys
-  # Ruby resolves every symbolic SI/IEC prefix dynamically. Materialize that
-  # same surface in the generated compiler/runtime registry so `1 Qm`, `1 qHz`,
+  canonical_names = source.units.keys | source.compounds.keys
+  # Materialize every symbolic SI/IEC prefix from the shared prefix policy.
+  # This keeps the generated surface equal to the dynamic readers: `1 Qm`, `1 qHz`,
   # and `1 Kib` do not become unrelated custom dimensions in native programs.
-  # Exact names and aliases win before prefix decomposition in the Ruby parser;
+  # Exact names and aliases win before prefix decomposition;
   # preserve that precedence for collisions such as `at`, `ct`, and `pt`.
-  reserved_names = canonical_names | Tungsten::Units::UNIT_ALIASES.keys
+  reserved_names = canonical_names | source.aliases.keys
   prefixed_names = []
-  Tungsten::Units::PREFIX_TABLE.each_key do |prefix|
-    Tungsten::Units::PREFIXABLE.each do |base|
+  source.prefixes.fetch("si").each_key do |prefix|
+    source.prefixable.each do |base|
       name = "#{prefix}#{base}"
       prefixed_names << name unless reserved_names.include?(name)
     end
   end
-  Tungsten::Units::BINARY_PREFIX_TABLE.each_key do |prefix|
-    Tungsten::Units::BINARY_PREFIXABLE.each do |base|
+  source.prefixes.fetch("binary").each_key do |prefix|
+    source.binary_prefixable.each do |base|
       name = "#{prefix}#{base}"
       prefixed_names << name unless reserved_names.include?(name)
     end
@@ -80,10 +80,10 @@ def load_registry
 
     category = if prefixed_names.include?(name)
                  "generated prefix"
-               elsif Tungsten::Units::COMPOUND_DEFS.key?(name)
-                 "Ruby compound"
+               elsif source.compounds.key?(name)
+                 "compound"
                else
-                 "Ruby registry"
+                 "registry"
                end
     unit = Unit.new(id: next_id, name: name, category: category)
     units << unit
@@ -93,19 +93,19 @@ def load_registry
 
   aliases = {}
   units.each { |u| aliases[u.name] = u.id }
-  Tungsten::Units::UNIT_ALIASES.each do |name, canonical|
+  source.aliases.each do |name, canonical|
     target = unit_by_name[canonical]
     aliases[name] ||= target.id if target
   end
 
   custom_names = units.flat_map do |u|
     next [] if u.name == "%"
-    Tungsten::Units.parse(u.name).dimension.customs.keys
+    source.resolve(u.name).dimension.customs.keys
   end.uniq.sort
   custom_dimensions = custom_names.each_with_index.to_h { |name, i| [name, i + 1] }
 
   Registry.new(units: units.sort_by(&:id), aliases: aliases,
-               custom_dimensions: custom_dimensions)
+               custom_dimensions: custom_dimensions, source: source)
 end
 
 def utf8_c_literal(str)
@@ -143,7 +143,11 @@ def generate_tungsten(registry)
 
   canonical_by_id = registry.units.to_h { |unit| [unit.id, unit.name] }
   signature_by_id = canonical_by_id.transform_values do |name|
-    dimension = Tungsten::Units.parse(name).dimension
+    dimension = if name == "%"
+                  TungstenUnitRegistry::Dimension.new(*Array.new(8, 0), {"%" => 1})
+                else
+                  registry.source.resolve(name).dimension
+                end
     base = %i[length mass time current temperature substance luminosity information].map do |field|
       dimension.public_send(field)
     end
@@ -254,7 +258,7 @@ def compact_rational(value)
 end
 
 # Conversion metadata (dimension vector, custom tag, and rational/decimal SI
-# factor) comes from the Ruby reference implementation. Generation fails if
+# factor) comes from the external registry. Generation fails if
 # any non-percent registry entry cannot be represented.
 def generate_c_info(registry)
   lines = []
@@ -277,7 +281,7 @@ def generate_c_info(registry)
       next
     end
     begin
-      parsed = Tungsten::Units.parse(u.name)
+      parsed = registry.source.resolve(u.name)
       dim = parsed.dimension.to_a
       if parsed.dimension.customs.size > 1
         raise "compiled unit metadata supports one semantic axis per named unit; " \
@@ -340,12 +344,6 @@ end
 TUNGSTEN_FILE = File.join(ROOT, "compiler/lib/lowering/literals.w")
 TUNGSTEN_START = "# --- BEGIN GENERATED: lookup_unit_id ---"
 TUNGSTEN_END   = "# --- END GENERATED: lookup_unit_id ---"
-
-LEXER_FILE = File.join(ROOT, "compiler/lib/lexer.w")
-LEXER_START = "# --- BEGIN GENERATED: known_unit_name ---"
-LEXER_END   = "# --- END GENERATED: known_unit_name ---"
-
-LEXER_EXTERNAL_STUB = "# Unit membership is loaded once from data/unit_names.txt by known_units.w."
 
 C_FILE = File.join(ROOT, "runtime/runtime.c")
 C_START = "/* --- BEGIN GENERATED: unit_names --- */"
@@ -430,10 +428,6 @@ when "--write"
     puts "Updated #{TUNGSTEN_FILE}"
   end
 
-  if replace_between(LEXER_FILE, LEXER_START, LEXER_END, LEXER_EXTERNAL_STUB)
-    puts "Updated #{LEXER_FILE} (external unit membership)"
-  end
-
   if write_if_changed(UNIT_NAMES_PATH, unit_names)
     puts "Updated #{UNIT_NAMES_PATH}"
   end
@@ -458,7 +452,6 @@ when "--check"
 
   ok = true
   ok = check_between(TUNGSTEN_FILE, TUNGSTEN_START, TUNGSTEN_END, tungsten_code) && ok
-  ok = check_between(LEXER_FILE, LEXER_START, LEXER_END, LEXER_EXTERNAL_STUB) && ok
   ok = check_file(UNIT_NAMES_PATH, unit_names) && ok
   ok = check_file(C_LEXER_MIXED_UNIT_NAMES_PATH, c_lexer_mixed_unit_names) && ok
   ok = check_between(C_FILE, C_START, C_END, c_code) && ok

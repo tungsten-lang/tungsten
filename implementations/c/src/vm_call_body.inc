@@ -37,6 +37,58 @@
         const char *name = tc_str_bytes_only(chunk->consts[name_id]);
         size_t name_len = tc_str_len(chunk->consts[name_id]);
 
+        /* Startup registry validation uses byte bounds and strict UTF-8 on
+         * stage 0 as well as in the native compiler. */
+        if (has_receiver && tc_kind(receiver) == TC_VAL_STRING &&
+            ((name_len == 7 && memcmp(name, "byte_at", 7) == 0 && argc == 1) ||
+             (name_len == 11 && memcmp(name, "valid_utf8?", 11) == 0 && argc == 0))) {
+          const unsigned char *bytes = (const unsigned char *)tc_str_bytes_only(receiver);
+          size_t len = tc_str_len(receiver);
+          TcValue out = tc_box_nil();
+          if (name[0] == 'v') {
+            int valid = 1;
+            for (size_t at = 0; at < len && valid;) {
+              unsigned c = bytes[at++];
+              if (c < 128) continue;
+              unsigned count, cp, minimum;
+              if (c >= 0xc2 && c <= 0xdf) { count = 1; cp = c & 31; minimum = 0x80; }
+              else if (c >= 0xe0 && c <= 0xef) { count = 2; cp = c & 15; minimum = 0x800; }
+              else if (c >= 0xf0 && c <= 0xf4) { count = 3; cp = c & 7; minimum = 0x10000; }
+              else { valid = 0; break; }
+              if (at + count > len) { valid = 0; break; }
+              for (unsigned j = 0; j < count; j++) {
+                unsigned next = bytes[at++];
+                if ((next & 0xc0) != 0x80) { valid = 0; break; }
+                cp = (cp << 6) | (next & 63);
+              }
+              if (cp < minimum || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) valid = 0;
+            }
+            out = tc_box_bool(valid);
+          } else {
+            int64_t at = value_as_int(args[0]);
+            if (at < 0) at += (int64_t)len;
+            if (at >= 0 && (uint64_t)at < len) out = int_value(bytes[at]);
+          }
+          FREE_ARGS();
+          if (!push(&vm, out, err)) goto cleanup_fail;
+          CNEXT();
+        }
+        if (has_receiver && tc_kind(receiver) == TC_VAL_HASH && argc == 0 &&
+            ((name_len == 6 && memcmp(name, "freeze", 6) == 0) ||
+             (name_len == 7 && memcmp(name, "frozen?", 7) == 0))) {
+          TcRuntimeHash *hash = tc_as_hash(receiver);
+          TcValue out = receiver;
+          if (name_len == 6) {
+            TcRuntimeArray *seen = runtime_array_new(0, err);
+            int ok = seen && runtime_freeze_value(receiver, seen, err);
+            if (seen) { free(seen->slots); free(seen); }
+            if (!ok) { FREE_ARGS(); goto cleanup_fail; }
+          } else out = tc_box_bool((hash->flags & TC_HASH_FLAG_FROZEN) != 0);
+          FREE_ARGS();
+          if (!push(&vm, out, err)) goto cleanup_fail;
+          CNEXT();
+        }
+
         /* The stage-0 VM represents wide integer payloads with TcHeapInt, so
          * their numeric value already is the raw bit pattern requested by
          * wvalue_bits. This bridge is required by the self-hosted LexChar
@@ -1295,6 +1347,11 @@
         }
         if (has_receiver && name == NAME_DELETE && argc == 1 &&
             tc_kind(receiver) == TC_VAL_HASH && tc_as_hash(receiver)) {
+          if (tc_as_hash(receiver)->flags & TC_HASH_FLAG_FROZEN) {
+            tc_error_set(err, "FrozenError: cannot modify frozen Hash");
+            FREE_ARGS();
+            goto cleanup_fail;
+          }
           TcValue out = hash_delete_value(tc_as_hash(receiver), args[0]);
           FREE_ARGS();
           if (!push(&vm, out, err)) {

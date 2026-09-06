@@ -9,6 +9,19 @@ end
 
 require "bundler/gem_tasks"
 
+desc "Copy shared unit registry inputs into the standalone Ruby gem"
+task :prepare_unit_registry do
+  require "fileutils"
+  root = File.expand_path("../..", __dir__)
+  %w[unit_registry.json unit_metadata.tsv substance_densities.json].each do |name|
+    FileUtils.mkdir_p(File.join(__dir__, "data"))
+    FileUtils.cp(File.join(root, "data", name), File.join(__dir__, "data", name))
+  end
+  FileUtils.cp(File.join(root, "scripts/lib/unit_registry.rb"),
+               File.join(__dir__, "lib/tungsten/generated_unit_registry.rb"))
+end
+Rake::Task["build"].enhance([:prepare_unit_registry])
+
 require "rubocop/rake_task"
 RuboCop::RakeTask.new
 

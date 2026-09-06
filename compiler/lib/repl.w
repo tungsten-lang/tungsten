@@ -1076,6 +1076,12 @@ INSP_RESULT_VALUE_LIMIT = 240
     path = "data/unit_metadata.tsv"
     if root != nil && root != ""
       path = root + "/data/unit_metadata.tsv"
+    else
+      executable_dir = ccall("w_executable_dir")
+      if executable_dir != nil && executable_dir != ""
+        installed = executable_dir + "/../data/unit_metadata.tsv"
+        if file?(installed)
+          path = installed
     content = read_file(path)
     if content == nil
       return @unit_metadata

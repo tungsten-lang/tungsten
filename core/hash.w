@@ -18,6 +18,14 @@
   -> __enumerable_yields_pair?
     true
 
+  # Freezes this table and recursively freezes supported keys and values.
+  # Every alias sees the same frozen header; reads and iteration remain valid.
+  -> freeze
+    ccall("w_freeze", self)
+
+  -> frozen?
+    ccall("w_frozen_p", self)
+
   # Direct WHash view-field load; the u32 count is boxed inline as an Integer.
   -> size
     $count
@@ -55,6 +63,8 @@
   # Destructive union: copy other's entries into self (other wins on
   # collision) and return self (Ruby Hash#merge! / #update).
   -> merge!(other)
+    if frozen?
+      raise FrozenError.new("cannot modify frozen Hash")
     other.each -> (k, v)
       self[k] = v
     self

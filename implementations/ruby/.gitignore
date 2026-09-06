@@ -8,3 +8,9 @@
 /spec/reports/
 /spec/status.txt
 /tmp/
+
+# Byte-identical shared inputs copied by rake build for standalone gem installs.
+/data/unit_registry.json
+/data/unit_metadata.tsv
+/data/substance_densities.json
+/lib/tungsten/generated_unit_registry.rb

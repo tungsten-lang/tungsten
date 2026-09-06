@@ -4,13 +4,12 @@
 # once when this module is initialized; token scans only perform Hash lookups.
 
 -> unit_names_registry_path
+  override = env("TUNGSTEN_UNIT_NAMES")
+  if override != nil && override != ""
+    return override
   root = env("TUNGSTEN_ROOT")
   if root != nil && root != ""
-    rooted = root + "/data/unit_names.txt"
-    if file?(rooted)
-      return rooted
-  if file?("data/unit_names.txt")
-    return "data/unit_names.txt"
+    return root + "/data/unit_names.txt"
   # `bin/tungsten` exports TUNGSTEN_ROOT, but tungsten-compiler is also a
   # public executable and must remain relocatable when invoked directly.
   # Its installed layout is <root>/bin/tungsten-compiler, so the executable
@@ -20,29 +19,98 @@
     installed = executable_dir + "/../data/unit_names.txt"
     if file?(installed)
       return installed
+  if file?("data/unit_names.txt")
+    return "data/unit_names.txt"
   nil
+
+-> unit_registry_error(path, line, message)
+  raise path + ":" + line.to_s() + ": " + message
 
 -> load_known_unit_names
   path = unit_names_registry_path()
   if path == nil
     raise "missing unit-name registry data/unit_names.txt; set TUNGSTEN_ROOT to the Tungsten install root"
+  if !file?(path)
+    raise "missing unit-name registry " + path
   source = read_file(path)
   if source == nil
     raise "could not read unit-name registry " + path
+  if source.size() > 1048576
+    unit_registry_error(path, 1, "unit-name registry exceeds 1 MiB")
+  if !source.valid_utf8?()
+    unit_registry_error(path, 1, "unit-name registry must be valid UTF-8")
 
   names = {}
   lines = source.split("\n")
   i = 0
   while i < lines.size()
-    name = lines[i].strip()
+    name = lines[i]
+    if name.ends_with?("\r")
+      name = name.slice(0, name.size() - 1)
     if name != ""
+      if name != name.strip()
+        unit_registry_error(path, i + 1, "leading or trailing whitespace in unit name")
+      if name.size() > 1024
+        unit_registry_error(path, i + 1, "unit name exceeds 1024 bytes")
+      if name == "in" || name == "%"
+        unit_registry_error(path, i + 1, "reserved unit spelling " + name)
+      j = 0
+      while j < name.size()
+        byte = name.byte_at(j)
+        if byte < 32 || byte == 127
+          unit_registry_error(path, i + 1, "control character in unit name")
+        j += 1
+      if names.has_key?(name)
+        unit_registry_error(path, i + 1, "duplicate unit name " + name)
       names[name] = true
     i += 1
-  names
+  if names.empty?()
+    unit_registry_error(path, 1, "unit-name registry is empty")
+  names.freeze()
 
 # Top-level containers are initialized once per compiler process. Both lexer
 # implementations share this immutable-after-load membership hash.
 known_unit_names = load_known_unit_names()
+
+# Only quoted phrases need help in the raw scanner: its string scan otherwise
+# consumes a phrase's apostrophe through a later quote, hiding intervening
+# newlines. Prepare the tiny candidate list once alongside membership.
+-> unit_apostrophe_entries
+  result = []
+  known_unit_names.keys().each -> (name)
+    if name.include?("'")
+      chars = name.chars()
+      i = 0
+      while i < chars.size()
+        if chars[i] == "'"
+          result.push([chars, i])
+        i += 1
+  result
+
+known_unit_apostrophes = unit_apostrophe_entries()
+
+## i64[]: lc
+## i64: quote_pos, count
+-> unit_apostrophe_phrase_end(lc, quote_pos, count)
+  i = 0
+  while i < known_unit_apostrophes.size()
+    entry = known_unit_apostrophes[i]
+    chars = entry[0]
+    start = quote_pos - entry[1]
+    finish = start + chars.size()
+    # A recognized quantity phrase is preceded by number + space. Without
+    # that context, x'y' retains its existing identifier/string tokenization.
+    if start >= 2 && finish <= count && ((lc[start - 1] >> 18) & 0x1FFFFF) == 32 && (lc[start - 2] & 1) != 0
+      matches = true
+      j = 0
+      while j < chars.size() && matches
+        if ((lc[start + j] >> 18) & 0x1FFFFF) != chars[j].ord()
+          matches = false
+        j += 1
+      if matches && (finish == count || (lc[finish] & 0x21) == 0)
+        return finish
+    i += 1
+  0
 
 -> known_unit_name?(s)
   known_unit_names.has_key?(s)

@@ -167,17 +167,14 @@ literal_rows = rows.reject do |name, _canonical|
   # still covered by the exhaustive runtime-parser leg below.
   name.match?(/\A\d/)
 end
-apostrophe_rows, batched_literal_rows = literal_rows.partition { |name, _canonical| name.include?("'") }
 Dir.mktmpdir("tungsten-unit-superset") do |tmpdir|
   # Runtime construction proves every spelling exists in the generated C
   # registry. Literal construction additionally exercises the compiled lexer
   # and lowering table for the exact same union.
   compile_and_compare!(tmpdir, "runtime", rows)
-  compile_and_compare!(tmpdir, "literal", batched_literal_rows)
-  # An apostrophe is also Tungsten's postfix syntax. Keep those registered
-  # phrases in isolated source files so the packed-token skip marker cannot
-  # consume the statement that follows while still testing the literal itself.
-  apostrophe_rows.each { |row| compile_and_compare!(tmpdir, "literal", [row]) }
+  # Apostrophe phrases stay in ordinary batches: the next statement must
+  # survive tokenization too (the historical isolated-file workaround hid it).
+  compile_and_compare!(tmpdir, "literal", literal_rows)
 end
 
 puts "PASS  unit registry superset: #{superset.length} spellings " \

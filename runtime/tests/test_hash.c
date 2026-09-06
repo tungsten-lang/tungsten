@@ -136,6 +136,40 @@ static void test_frozen_dynamic_string_reuses_slab_key(void) {
            "dynamic symbol returns literal-keyed value");
 }
 
+static void test_hash_freeze(void) {
+    WValue hash = w_hash_new(), child = w_hash_new();
+    w_hash_set(hash, w_string("child"), child);
+    w_hash_set(hash, w_string("self"), hash);
+    w_hash_set(child, w_string("n"), w_int(42));
+    ASSERT(w_frozen_p(hash) == W_FALSE, "hash starts mutable");
+    ASSERT(w_freeze(hash) == hash, "freeze returns its receiver");
+    ASSERT(w_frozen_p(hash) == W_TRUE, "hash header is frozen");
+    ASSERT(w_frozen_p(child) == W_TRUE, "hash values freeze transitively");
+    ASSERT(w_freeze(hash) == hash, "freeze is idempotent with cycles");
+    for (int operation = 0; operation < 4; operation++) {
+        void *frame = w_exception_push();
+        if (setjmp(*(jmp_buf *)frame) == 0) {
+            if (operation == 0) w_hash_set(hash, w_string("child"), W_NIL);
+            if (operation == 1) w_hash_delete(hash, w_string("self"));
+            if (operation == 2) w_hash_delete(hash, w_string("missing"));
+            if (operation == 3) w_hash_clear_reuse(hash);
+            w_exception_pop();
+            ASSERT(0, "frozen hash mutation must raise");
+        } else {
+            w_exception_pop();
+            ASSERT(1, "frozen hash mutation raised");
+        }
+    }
+    ASSERT(w_hash_get(hash, w_string("child")) == child, "failed writes preserve contents");
+    WValue slot = hash;
+    ASSERT(w_hash_reuse_or_new(&slot) != hash, "scratch reuse allocates after freeze");
+    slot = hash;
+    ASSERT(w_hash_reuse_and_drain_or_new(&slot) != hash, "draining reuse allocates after freeze");
+    w_hash_recycle(hash);
+    ASSERT(w_hash_recycle_or_new() != hash, "frozen hash never enters recycle pool");
+    ASSERT(w_hash_get(child, w_string("n")) == w_int(42), "nested contents survive recycling");
+}
+
 int main(void) {
     setvbuf(stdout, NULL, _IONBF, 0);
 
@@ -146,6 +180,7 @@ int main(void) {
     test_rope_string_ordering();
     test_inline_symbol_string_distinct();
     test_frozen_dynamic_string_reuses_slab_key();
+    test_hash_freeze();
 
     printf("\n=== Results: %d/%d passed ===\n", pass_count, test_count);
     return pass_count == test_count ? 0 : 1;

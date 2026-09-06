@@ -602,6 +602,7 @@ struct TcRuntimeHash {
 };
 
 #define TC_HASH_SLOT_EMPTY (-1)
+#define TC_HASH_FLAG_FROZEN (1u << 0)
 #define TC_HASH_SLOT_TOMB  (-2)
 
 // Dense-hole sentinel — same as runtime/wvalue.h's W_MEMO_MISS, a

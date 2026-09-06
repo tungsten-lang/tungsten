@@ -102,7 +102,7 @@ jobs:
           path: |
             build/cache
             implementations/c/build/cache-*
-          key: tungsten-build-v3-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('VERSION', 'Bitfile', 'bin/commands/build.w', 'bin/commands/bootstrap*.sh', 'bin/commands/config.sh', 'compiler/**', 'core/**', 'data/units.tsv', 'implementations/c/Makefile', 'implementations/c/include/**', 'implementations/c/src/**', 'languages/tungsten/**', 'runtime/**') }}
+          key: tungsten-build-v3-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('VERSION', 'Bitfile', 'bin/commands/build.w', 'bin/commands/bootstrap*.sh', 'bin/commands/config.sh', 'compiler/**', 'core/**', 'data/**', 'scripts/gen_units.rb', 'scripts/lib/unit_registry.rb', 'implementations/c/Makefile', 'implementations/c/include/**', 'implementations/c/src/**', 'languages/tungsten/**', 'runtime/**') }}
           restore-keys: |
             tungsten-build-v3-${{ runner.os }}-${{ runner.arch }}-
 

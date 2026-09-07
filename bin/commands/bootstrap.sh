@@ -23,6 +23,7 @@ tungsten_load_build_config
 
 FORCE=0
 RELEASE=0
+PGO=0
 PORTABLE=0
 DEBUG_REQUESTED=0
 NO_DEBUG_REQUESTED=0
@@ -41,6 +42,7 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --force|-f) FORCE=1 ;;
     --release) RELEASE=1 ;;
+    --pgo) PGO=1 ;;
     --debug) DEBUG_REQUESTED=1 ;;
     --no-debug) NO_DEBUG_REQUESTED=1 ;;
     --no-bits) NO_BITS=1 ;;
@@ -70,6 +72,7 @@ Options:
   --force          Ignore cached bootstrap artifacts
   --no-bits        Skip compiling bit entry points in the chained build
   --release        -O3, full LTO, no dev checks, reduced metadata
+  --pgo            Train and profile-optimize the installed/release compiler
   --debug          Include symbols, safety checks, and runtime metadata
   --no-debug       Omit debug symbols and development checks
   --cpu CPU        Target CPU (v1/v2/v3/v4/native aliases accepted)
@@ -693,6 +696,7 @@ fi
 build_flags=()
 if [ "$FORCE" -eq 1 ]; then build_flags+=(--force); fi
 if [ "$RELEASE" -eq 1 ]; then build_flags+=(--release); fi
+if [ "$PGO" -eq 1 ]; then build_flags+=(--pgo); fi
 if [ "$DEBUG_REQUESTED" -eq 1 ]; then build_flags+=(--debug); fi
 if [ "$NO_DEBUG_REQUESTED" -eq 1 ]; then build_flags+=(--no-debug); fi
 if [ "$NO_BITS" -eq 1 ]; then build_flags+=(--no-bits); fi

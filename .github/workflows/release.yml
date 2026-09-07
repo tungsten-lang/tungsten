@@ -9,7 +9,10 @@ on:
       - .github/workflows/release.yml
       - VERSION
       - bin/commands/release.sh
+      - bin/commands/bootstrap.sh
+      - bin/commands/build.w
       - scripts/package-release.sh
+      - scripts/test-build-stage1-cache-identity.rb
       - scripts/validate-release-package.sh
 
 concurrency:
@@ -31,6 +34,9 @@ jobs:
 
       - name: Exercise release dry run
         run: bin/tungsten release --dry-run
+
+      - name: Verify tagged PGO build contract
+        run: ruby scripts/test-build-stage1-cache-identity.rb
 
       - name: Build package fixture
         run: |
@@ -119,9 +125,24 @@ jobs:
           TARGET: ${{ matrix.target }}
           CPU: ${{ matrix.cpu }}
         run: |
-          args=(--release --target "$TARGET")
+          args=(--release --pgo --target "$TARGET")
           if [[ -n "$CPU" ]]; then args+=(--cpu "$CPU"); fi
           bin/tungsten bootstrap "${args[@]}"
+
+      - name: Verify PGO release artifact
+        env:
+          ARTIFACT_DIR: ${{ matrix.artifact_dir }}
+        run: |
+          compiler="build/releases/$ARTIFACT_DIR/tungsten-compiler"
+          stamp="$compiler.pgo"
+          if command -v sha256sum >/dev/null 2>&1; then
+            compiler_sha="$(sha256sum "$compiler" | awk '{print $1}')"
+          else
+            compiler_sha="$(shasum -a 256 "$compiler" | awk '{print $1}')"
+          fi
+          grep -Fxq 'tungsten-compiler-pgo-v1' "$stamp"
+          grep -Fxq 'profile=compiler-pgo-v2' "$stamp"
+          grep -Fxq "compiler_sha256=$compiler_sha" "$stamp"
 
       - name: Package release
         env:

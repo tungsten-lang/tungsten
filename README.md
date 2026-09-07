@@ -206,6 +206,7 @@ Ruby is **not** required for normal; it is needed for the `--ruby` developer opt
 | ----------------- | ------------ |
 | *(default)*        | Optimized `-O3` native-archive build with development checks, symbols, and source metadata; no whole-program LTO. |
 | `--release`       | Release profile: `-O3`, full LTO, no development safety checks, and reduced runtime metadata. Defaults to `--no-debug`. |
+| `--pgo`           | With `build`/`bootstrap`, train and profile-optimize the compiler. A target artifact must match the builder's OS and architecture so its profile is exact. |
 | `--dev`           | Fast edit/test profile: `-O0` application and runtime code with development checks; mutually exclusive with `--release`. |
 | `--debug`         | Include debug symbols, safety checks, and full runtime/source-location metadata. Overrides the release profile's no-debug default. |
 | `--no-debug`      | Omit debug symbols and development checks. |
@@ -227,9 +228,10 @@ bin/tungsten build --portable
 ```
 
 `bin/tungsten release [VERSION]` runs the root `rake` gate, creates and pushes
-an annotated version tag, and lets GitHub build and attest the native release
-matrix. ARM64 uses each target's portable baseline; x86_64 ships both v2 and
-v3 packages on macOS and Linux. Use `--dry-run` to validate without tagging.
+an annotated version tag, and lets GitHub build and attest the PGO-trained
+native release matrix. ARM64 uses each target's portable baseline; x86_64
+ships both v2 and v3 packages on macOS and Linux. Use `--dry-run` to validate
+without tagging.
 
 Tungsten's documented x86-64 release set is:
 

@@ -99,4 +99,4 @@ if [[ "$NO_PUSH" -eq 1 ]]; then
 fi
 
 git push "$REMOTE" "$TAG"
-printf 'pushed %s; GitHub Actions will publish the native artifacts\n' "$TAG"
+printf 'pushed %s; GitHub Actions will publish the PGO-trained native artifacts\n' "$TAG"

@@ -75,6 +75,7 @@ _tungsten() {
         bootstrap)
           _arguments \
             '--force[Ignore cached bootstrap artifacts]' \
+            '--pgo[Train and profile-optimize the installed/release compiler]' \
             '--release[-O3, full LTO, reduced metadata]' \
             '--debug[Include symbols, checks, and runtime metadata]' \
             '--no-debug[Omit debug symbols and development checks]' \

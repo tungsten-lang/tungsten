@@ -459,6 +459,33 @@ if array_contains?(args, "--help") || array_contains?(args, "-h")
     return from_config
   "clang"
 
+-> pgo_profdata_tool
+  cc = preflight_cc()
+
+  # Ask the selected compiler first. This is important on macOS, where PATH
+  # can select Homebrew Clang while `xcrun` selects Apple's llvm-profdata;
+  # their raw-profile formats need not be compatible.
+  reported = capture(shq(cc) + " --print-prog-name=llvm-profdata 2>/dev/null").strip
+  if reported != ""
+    resolved = resolve_executable(reported)
+    if executable?(resolved)
+      return resolved
+
+  sibling = sibling_tool(cc, "llvm-profdata")
+  if sibling != nil
+    return sibling
+
+  fallback = resolve_executable("llvm-profdata")
+  if executable?(fallback)
+    return fallback
+
+  if IS_DARWIN
+    xcrun = capture("xcrun -f llvm-profdata 2>/dev/null").strip
+    if xcrun != "" && executable?(xcrun)
+      return xcrun
+
+  "llvm-profdata"
+
 -> tool_on_path?(name)
   if executable?(name)
     return true
@@ -1387,20 +1414,23 @@ skip_bits = skip_bits_requested || (!bit_only && (stage0_only || stage1_only || 
 
 # ── PGO post-step ───────────────────────────────────────────────
 
--> run_pgo_post_step(stage2_bin, label, build_scratch_dir, probe_prefix)
+PGO_TRAINING_VERSION = "compiler-pgo-v2"
+
+-> run_pgo_post_step(stage2_bin, label, pgo_scratch_dir, probe_prefix, compile_flags_cmd, compile_env_prefix)
   << ""
-  << BOLD + "==> PGO: profile-guided optimization" + RESET
+  pgo_label = label == "" ? "" : " (" + label + ")"
+  << BOLD + "==> PGO: profile-guided optimization" + pgo_label + RESET
   t_pgo_start = clock_ms()
-  pgo_training_version = "compiler-pgo-v2"
-  pgo_dir = build_scratch_dir + "/pgo"
+  pgo_training_version = PGO_TRAINING_VERSION
+  pgo_dir = pgo_scratch_dir + "/pgo"
   pgo_profdata = pgo_dir + "/default.profdata"
   pgo_instrumented = pgo_dir + "/tungsten-instrumented"
   pgo_optimized = pgo_dir + "/tungsten-pgo"
   make_dirs(pgo_dir)
   pgo_fast_flag = FAST_MODE ? " -ffast-math" : ""
   << "    " + DIM + "instrumenting..." + RESET
-  instr_env = "TUNGSTEN_CLANG_OPT=" + shq("-O3 -fprofile-generate=" + pgo_dir + " -mllvm -vp-counters-per-site=8" + pgo_fast_flag) + " TUNGSTEN_INCREMENTAL=0 "
-  if sh("cd " + shq(ROOT) + " && " + instr_env + shq(stage2_bin) + " compile " + shq(TUNGSTEN_W) + " --out " + shq(pgo_instrumented) + STAGE_FLAGS_CMD) != 0
+  instr_env = probe_prefix + compile_env_prefix + "TUNGSTEN_CLANG_OPT=" + shq("-O3 -fprofile-generate=" + pgo_dir + " -mllvm -vp-counters-per-site=8" + pgo_fast_flag) + " TUNGSTEN_INCREMENTAL=0 "
+  if sh("cd " + shq(ROOT) + " && " + instr_env + shq(stage2_bin) + " compile " + shq(TUNGSTEN_W) + " --out " + shq(pgo_instrumented) + compile_flags_cmd) != 0
     eputs(RED + "PGO instrumentation build failed" + RESET)
     exit(1)
   sh_ok("rm -f " + shq(pgo_dir) + "/*.profraw")
@@ -1451,9 +1481,8 @@ skip_bits = skip_bits_requested || (!bit_only && (stage0_only || stage1_only || 
   if sh(batch_cmd) != 0
     eputs(RED + "PGO profiling run failed" + RESET + " (batch)")
     exit(1)
-  llvm_profdata = capture("xcrun -f llvm-profdata 2>/dev/null").strip
-  if llvm_profdata == ""
-    llvm_profdata = "llvm-profdata"
+  llvm_profdata = pgo_profdata_tool()
+  << "    " + DIM + "merging with " + llvm_profdata + RESET
   raws = capture("ls " + shq(pgo_dir) + "/*.profraw 2>/dev/null").split("\n")
   raw_count = 0
   raw_cmd = ""
@@ -1467,13 +1496,13 @@ skip_bits = skip_bits_requested || (!bit_only && (stage0_only || stage1_only || 
     eputs(RED + "llvm-profdata merge failed" + RESET)
     exit(1)
   << "    " + DIM + "optimizing..." + RESET
-  opt_env = "TUNGSTEN_CLANG_OPT=" + shq("-O3 -fprofile-use=" + pgo_profdata + " -Wno-profile-instr-unprofiled -Wno-profile-instr-out-of-date" + pgo_fast_flag) + " TUNGSTEN_INCREMENTAL=0 "
-  if sh("cd " + shq(ROOT) + " && " + opt_env + shq(stage2_bin) + " compile " + shq(TUNGSTEN_W) + " --out " + shq(pgo_optimized) + STAGE_FLAGS_CMD) != 0
+  opt_env = probe_prefix + compile_env_prefix + "TUNGSTEN_CLANG_OPT=" + shq("-O3 -fprofile-use=" + pgo_profdata + " -Wno-profile-instr-unprofiled -Werror=profile-instr-out-of-date -Werror=backend-plugin" + pgo_fast_flag) + " TUNGSTEN_INCREMENTAL=0 "
+  if sh("cd " + shq(ROOT) + " && " + opt_env + shq(stage2_bin) + " compile " + shq(TUNGSTEN_W) + " --out " + shq(pgo_optimized) + compile_flags_cmd) != 0
     eputs(RED + "PGO optimization build failed" + RESET)
     exit(1)
   << "    " + DIM + "PGO: " + ms(clock_ms() - t_pgo_start) + RESET
   << ""
-  install_compiler(pgo_optimized, label, true)
+  pgo_optimized
 
 FAST_MODE = fast_mode
 
@@ -1664,8 +1693,9 @@ if !bit_only
           eputs("    " + DIM + "missing emitted .ll for one or both stages" + RESET)
 
       << ""
-      if pgo_build
-        run_pgo_post_step(stage2, "C VM + PGO", build_scratch_dir, probe_env_prefix)
+      if pgo_build && target_triple == "" && !portable_mode
+        pgo_binary = run_pgo_post_step(stage2, "C VM + PGO", build_scratch_dir, probe_env_prefix, STAGE_FLAGS_CMD, "")
+        install_compiler(pgo_binary, "C VM + PGO", true)
       else
         install_compiler(stage2, "C VM", true)
   elsif use_spinel_bootstrap
@@ -1877,8 +1907,9 @@ if !bit_only
         else
           eputs("    " + DIM + "missing emitted .ll for one or both stages" + RESET)
 
-      if pgo_build
-        run_pgo_post_step(stage2, "PGO", build_scratch_dir, probe_env_prefix)
+      if pgo_build && target_triple == "" && !portable_mode
+        pgo_binary = run_pgo_post_step(stage2, "PGO", build_scratch_dir, probe_env_prefix, STAGE_FLAGS_CMD, "")
+        install_compiler(pgo_binary, "PGO", true)
       else
         << ""
         install_compiler(stage2, "", true)
@@ -1914,6 +1945,21 @@ elsif target_triple != ""
     i = i + 1
   out
 
+# PGO executes an instrumented compiler built with the artifact's exact target
+# and CPU flags. It therefore requires a matching host OS and architecture.
+# Tagged CI deliberately assigns every release target to such a runner;
+# cross-target builds must omit --pgo.
+-> pgo_target_matches_host?(target)
+  os_matches = (IS_DARWIN && str_has?(target, "apple")) || (IS_LINUX && str_has?(target, "linux"))
+  if !os_matches
+    return false
+  host_arch = capture("uname -m").strip
+  if host_arch == "x86_64" || host_arch == "amd64"
+    return target.starts_with?("x86_64-") || target.starts_with?("x86_64_")
+  if host_arch == "arm64" || host_arch == "aarch64"
+    return target.starts_with?("arm64-") || target.starts_with?("arm64_") || target.starts_with?("aarch64-") || target.starts_with?("aarch64_")
+  false
+
 if artifact_targets.size > 0
   << ""
   << BOLD + "==> Release artifacts" + RESET
@@ -1937,14 +1983,31 @@ if artifact_targets.size > 0
       artifact_flags = artifact_flags + " --sysroot " + shq(target_sysroot)
     if fast_mode
       artifact_flags = artifact_flags + " --fast"
-    art_cmd = "cd " + shq(ROOT) + " && " + probe_env_prefix + "TUNGSTEN_MARCH_ARGS='' " + shq(COMPILER_BIN) + " compile " + shq(TUNGSTEN_W) + " --out " + shq(out_bin) + artifact_flags
-    if sh(art_cmd) != 0
-      eputs(RED + "Failed to build " + artifact_target + "/" + cpu_label + RESET)
-      exit(1)
+    if pgo_build
+      if !pgo_target_matches_host?(artifact_target)
+        eputs(RED + "--pgo release artifacts require a matching host OS and architecture: " + artifact_target + RESET)
+        exit(1)
+      artifact_pgo_dir = build_scratch_dir + "/release-" + sanitize_target_label(artifact_target) + "-" + sanitize_target_label(cpu_label)
+      pgo_binary = run_pgo_post_step(stage2, "release " + artifact_target + "/" + cpu_label, artifact_pgo_dir, probe_env_prefix, artifact_flags, "TUNGSTEN_MARCH_ARGS='' ")
+      atomic_copy(pgo_binary, out_bin)
+      sh_ok("chmod 755 " + shq(out_bin))
+    else
+      artifact_opt = artifact_release ? "-O3" : "-O0"
+      if fast_mode
+        artifact_opt = artifact_opt + " -ffast-math"
+      art_cmd = "cd " + shq(ROOT) + " && " + probe_env_prefix + "TUNGSTEN_MARCH_ARGS='' TUNGSTEN_CLANG_OPT=" + shq(artifact_opt) + " " + shq(COMPILER_BIN) + " compile " + shq(TUNGSTEN_W) + " --out " + shq(out_bin) + artifact_flags
+      if sh(art_cmd) != 0
+        eputs(RED + "Failed to build " + artifact_target + "/" + cpu_label + RESET)
+        exit(1)
     if str_has?(artifact_target, "apple")
       if !codesign_ok(out_bin)
         eputs(RED + "Failed to ad-hoc sign " + artifact_target + "/" + cpu_label + RESET)
         exit(1)
+    pgo_stamp = out_bin + ".pgo"
+    if pgo_build
+      atomic_write("tungsten-compiler-pgo-v1\nprofile=" + PGO_TRAINING_VERSION + "\ncompiler_sha256=" + file_sha(out_bin) + "\n", pgo_stamp)
+    else
+      sh_ok("rm -f " + shq(pgo_stamp))
     << "    " + GREEN + "built" + RESET + " " + project_relative_path(out_bin)
     ai = ai + 1
 

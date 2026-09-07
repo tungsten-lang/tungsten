@@ -27,6 +27,11 @@ scratch[0] = 0 - 1
 failures += verify_scratch_expect("square naive rank", rank == 8)
 failures += verify_scratch_expect("square current reusable exact", ffw_verify_current_exact_scratch(square, n, scratch, words) == ffw_verify_current_exact(square, n))
 failures += verify_scratch_expect("square best reusable exact", ffw_verify_best_exact_scratch(square, n, scratch, words) == ffw_verify_best_exact(square, n))
+# Omit the final naive term: the only syndrome is bit 63 of the first word.
+# This tests the sign bit, not just shifts representable as positive i64.
+sign_error = ffw_support_tensor_error_scratch(square, square[47], square[48], square[49], 0 - 1, 7, 2, 2, 2, scratch, words) ## i64
+failures += verify_scratch_expect("raw parity sign bit diagnostic", sign_error == 64 && scratch[0] < 0)
+failures += verify_scratch_expect("sign bit cleared on reuse", ffw_verify_best_exact_scratch(square, n, scratch, words) == 1)
 
 # Leave a real syndrome in scratch, repair the view, and prove the following
 # call clears that residue rather than inheriting a false mismatch.

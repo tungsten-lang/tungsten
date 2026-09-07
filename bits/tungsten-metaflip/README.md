@@ -52,24 +52,36 @@ A Tungsten compiler is required both to build the coordinator and, for the
 current release, at run time when the fleet materializes specialized workers.
 Worker builds resolve the driver through `METAFLIP_TUNGSTEN`, `TUNGSTEN_BIN`,
 `TUNGSTEN`, `TUNGSTEN_ROOT`, and finally `tungsten` on `PATH`.
-From the Tungsten monorepo, run the pure-Tungsten CLI source directly:
+From the Tungsten monorepo:
 
 ```sh
-bin/tungsten run bits/tungsten-metaflip/bin/metaflip.w -- --tensor 5x5
+cd bits/tungsten-metaflip
+tungsten build
+bin/metaflip --tensor 5x5
 ```
 
-The extensionless `bin/metaflip` path is intentionally ignored: Bit and local
-builds may place a generated native executable there, so it is not a stable
-source-checkout launcher and may become stale. Rebuild generated executables
-after compiler or source changes. `METAFLIP_TUNGSTEN` may select the compiler
-used later when the running fleet materializes specialized workers.
+`tungsten build` reads the `Bitfile` executable declaration and builds
+`bin/metaflip` from `bin/metaflip.w`. Run it again after source or compiler
+changes. From a standalone package checkout, use the same last two commands.
+The fleet finds its packaged runtime automatically.
 
-From a checkout of this bit:
+The executable's Bitfile defaults to `profile: "release", native: true`, so
+the ordinary build optimizes the hot loop and targets the host CPU. Use
+`tungsten build --debug` to override optimization for debugging, or an explicit
+`--cpu` for another CPU of the same architecture. Application cross-compilation
+uses `bit build --target TRIPLE`; the root build's `--target` option instead
+controls compiler release artifacts. Other bits keep their
+own build defaults. Executable declarations also accept `opt_level: "2"`
+and a quoted, whitespace-separated `cflags: "-fno-omit-frame-pointer"` string.
+These are compiler tokens, not shell commands; changed flags invalidate the
+build cache. Do not add `--fast` by default: it separately relaxes floating-point
+semantics.
 
-```sh
-tungsten compile bin/metaflip.w \
-  --out ./metaflip --release --fast --lto
-```
+Defaults are `-J max(logical CPUs - 2, 1)`, GPU enabled, TUI enabled, and
+`--secs 0` (no time limit). On an 18-core host this starts 16 CPU islands.
+Override them with `-J N`, `--no-gpu`, `--no-tui`, or `--secs N`.
+Specialized GPU workers are built and cached on first use. Press `q` or
+Ctrl-C in the TUI to stop.
 
 Alternatively, let Bit preserve the executable, runtime worker sources, and
 assets as one relocatable build tree:
@@ -79,19 +91,81 @@ bit build --release
 ./build/bin/metaflip --self-test --no-gpu
 ```
 
-To create a standalone executable from the Tungsten monorepo, use its
-checked-out compiler:
-
-```sh
-bin/tungsten compile bits/tungsten-metaflip/bin/metaflip.w \
-  --out bits/tungsten-metaflip/metaflip --release --fast --lto
-```
-
 Run a CPU-only smoke test before starting a long campaign:
 
 ```sh
-./metaflip --self-test --no-gpu
+bin/metaflip --self-test --no-gpu
 ```
+
+### Optional Core ML ranking experiment (macOS)
+
+Core ML can advise a fraction of natural shoulder-seed renewals while CPU and
+Metal search continue. It never supplies moves or bypasses exact GF(2)
+verification. This is off by default, supports 5x5 only, and is not a demonstrated
+record-finding improvement. Two bounded snapshot pools prevent recycled bank
+slots from changing a candidate while inference is pending. Stale, malformed,
+nonfinite, timed-out, or inexact recommendations are rejected; helper failure
+leaves the ordinary search running.
+
+Train only on local, exact-verified rollouts (Python with NumPy and coremltools
+is needed for export; no model or data downloads are performed):
+
+```sh
+mkdir -p build/coreml/candidates
+tungsten compile spec/coreml_ranker_dataset.w --out build/coreml/dataset --release --native
+build/coreml/dataset --out build/coreml/dataset.jsonl --bank-dir build/coreml/candidates \
+  --origins 12 --candidates 24 --steps 4096 --max-ms 30000
+python3 tools/train_coreml_ranker.py build/coreml/dataset.jsonl --out-dir build/coreml/model
+swiftc -parse-as-library -O tools/coreml_ranker.swift -o build/coreml/helper
+bin/metaflip --tensor 5x5 --coreml-model build/coreml/model/ranker.mlpackage \
+  --coreml-helper build/coreml/helper --coreml-workers 1 --coreml-compute cpuOnly
+```
+
+`--coreml-workers` controls host preprocessing concurrency, **not** reserved CPU
+cores or Neural Engine cores. `cpuAndNeuralEngine` excludes Metal and requires
+ANE-preferred operations in the loaded execution plan; it fails closed if
+there are none. The first measured model was ANE-supported but CPU-preferred,
+and an Instruments trace showed no ANE execution. Use `cpuOnly` explicitly for
+that model. Device availability or model support alone is not acceleration.
+
+`METAFLIP_PHASE_TIMING=1` emits worker/barrier/coordinator timings;
+`METAFLIP_CPU_EPOCH_MS=250` overrides the batch target without rebuilding.
+`METAFLIP_CPU_SCHEDULER=sync|async` selects the square fleet's CPU scheduling
+mode. The default remains `sync`: matched runs of the improved coordinator did
+not show a consistent throughput benefit from async, despite higher occupancy.
+Async lanes publish into fixed, coordinator-owned snapshots and restart after
+their own exact intake and lease renewal, overlapping GPU harvesting and status
+work. Rank-drop migrations, explicit resets, and shutdown still drain pending
+epochs. No speculative endpoint is discarded, and there are exactly two state
+buffers per CPU lane. `--rounds` stops after every lane has completed at least
+that many epochs; fast lanes can complete more before the final drain.
+The phase record's `barrier_ms` is only the completion wait in async mode, not
+a fleet-wide barrier. `coordinator_ms` overlaps worker execution; it must not
+be interpreted as idle CPU time. `leases_ms` separates local lease renewal from
+global `reseeds_ms`; `completed` and `inflight` expose the pipeline occupancy.
+
+`tools/bench_cpu_epochs.rb` performs bounded isolated cadence or CPU/Core ML
+allocation sweeps, logs process/GPU samples and model timings, and independently
+verifies final tensors. Its `--allocations 16:0,16:1,15:1,14:2,12:4` means
+CPU-search workers : helper preprocessing workers; `0` disables the model.
+Provide `--binary`, `--expected-sha`, `--runtime-root`, `--output`, and, for
+model runs, `--model`, `--helper`, and `--compute cpuOnly` explicitly.
+For a matched scheduler comparison use `--schedulers sync,async,async,sync`.
+To compare a preserved pre-change binary, supply `--baseline-binary` and
+`--baseline-sha`, then use `--schedulers baseline,async,async,baseline`.
+Each trial has isolated state, an independent final GF(2) check, process/GPU
+samples, bounded descendant cleanup, binary hashes, and an RSS-growth estimate.
+
+The frontier archive reuses a bounded pair-distance cache. It checks the full
+rank, dimension, and ordered factor triples on every access, so in-place
+reseeding invalidates affected rows without trusting a digest for freshness.
+Admission decisions and tie-breaking are unchanged from the exhaustive policy;
+the cache does not replace any tensor verification gate.
+The GPU Pareto bank also copies endpoints only after admission and recycles
+evicted buffers; rejected endpoints no longer allocate full CPU search states.
+
+The measured scheduler and allocation results, exactness checks, limitations,
+and replay commands are in [the follow-up profile](tools/PROFILE-SCHEDULER-2026-09-06.md).
 
 The package also ships a compile-time layout check and an optional one-epoch
 Metal integration check:
@@ -290,9 +364,9 @@ Metaflip.
 Square campaigns select their tensor explicitly:
 
 ```sh
-./metaflip --tensor 3x3
-./metaflip --tensor 5x5 --secs 3600
-./metaflip --tensor 7x7 --no-gpu
+bin/metaflip --tensor 3x3
+bin/metaflip --tensor 5x5 --secs 3600
+bin/metaflip --tensor 7x7 --no-gpu
 ```
 
 Independent square-fleet shards can use `--seed-nonce N`.  Nonce zero is the
@@ -472,7 +546,19 @@ portfolio. Thread and lane counts have hardware-aware defaults; use `-J` and
 portfolio default is 16 base rounds per allocation epoch. Explicit
 `--rect-epoch-rounds N` values from 1 through 256 are accepted for bounded
 experiments and single-shape cloud parents; raising the ceiling does not change
-the interactive default. The current Metal throughput knee is 8,192 walkers
+the interactive default. Fast children use bounded multi-round fills while
+slower base quotas run, including during GPU startup. `METAFLIP_RECT_FILL=single`
+restores one-round fills for comparisons; `batch` is the default. The
+[matched fill measurements](tools/PROFILE-SCHEDULER-2026-09-06.md#rectangular-fill-scheduling)
+also document exact verification and the limits of the performance claim.
+Rectangular CPU islands continue in short, bounded batches while their GPU
+epoch is in flight. `METAFLIP_RECT_CPU_GPU=barrier` restores the old wait;
+`overlap` is the default. This does not change CPU-only quotas or the square
+fleet scheduler. The status fields `cpu_followup_batches` and
+`cpu_followup_moves` expose the extra work, which is included in `cpu_moves`.
+The [matched overlap comparison](tools/PROFILE-SCHEDULER-2026-09-06.md#cpu-work-during-gpu-epochs)
+measured higher throughput, not better tensor ranks.
+The current Metal throughput knee is 8,192 walkers
 with 40,000 trajectory steps per
 scheduler epoch. Adaptive rectangular scheduling keeps each active child at
 that occupancy floor and rotates shapes between epochs; larger explicit lane
@@ -550,8 +636,8 @@ not a second implementation of the full adaptive fleet.
 The package keeps its public API, executable, immutable runtime, mutable state,
 and curated results separate:
 
-- `bin/metaflip.w` is the command-line entry source. `bit build` installs it
-  as the extensionless `build/bin/metaflip` command.
+- `bin/metaflip.w` is the command-line entry source. `tungsten build` compiles
+  it to `bin/metaflip`; `bit build` installs it to `build/bin/metaflip`.
 - `lib/metaflip.w` is the side-effect-free public library entry. Importing it
   exposes scheme, verifier, rectangular, composition, and path APIs without
   starting a fleet.

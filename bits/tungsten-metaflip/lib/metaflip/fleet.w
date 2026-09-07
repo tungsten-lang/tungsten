@@ -32,6 +32,7 @@ use fleet/lineage
 use fleet/provenance
 use fleet/cpu_experiments
 use fleet/cpu_pool
+use fleet/coreml
 use kernels/metallib_cache
 use kernels/bundles/workers
 use kernels/reject
@@ -286,11 +287,7 @@ use paths
 
 -> ffn_dump_trusted(state, path, run_tag) (i64[] String String) i64
   rank = ffw_best_rank(state) ## i64
-  body = rank.to_s() + "\n"
-  i = 0 ## i64
-  while i < rank
-    body = body + ffw_read_best_u(state, i).to_s() + " " + ffw_read_best_v(state, i).to_s() + " " + ffw_read_best_w(state, i).to_s() + "\n"
-    i += 1
+  body = ffw_view_text(state, state[47], state[48], state[49], 0 - 1, rank)
   stored = ffn_atomic_write(path, body, run_tag) ## i64
   if stored == 1
     return rank
@@ -1854,15 +1851,19 @@ use paths
   << "  --naive                 start from the naive decomposition"
   << ""
   << "Resources and limits:"
-  << "  -J, --walkers N         CPU islands (default: host-adjusted)"
+  << "  -J, --walkers N         CPU islands (default: logical CPUs minus 2, minimum 1)"
   << "  --steps N               moves per nominal CPU chunk"
   << "  --rounds N              maximum coordinator rounds"
-  << "  --secs N                wall-time limit in seconds"
+  << "  --secs N                wall-time limit in seconds (default: 0, unlimited)"
   << "  --gpu / --no-gpu        enable or disable GPU lanes (GPU is default)"
   << "  --gpu-policy POLICY     adaptive (default) or single"
+  << "  --coreml-model PATH     optional trained 5x5 escape ranker (default: off)"
+  << "  --coreml-helper PATH    persistent Core ML helper executable"
+  << "  --coreml-workers N      helper preprocessing concurrency: 1, 2, or 4"
+  << "  --coreml-compute MODE   cpuAndNeuralEngine (default) or cpuOnly"
   << ""
   << "Output and diagnostics:"
-  << "  --tui / --no-tui        enable or disable the terminal dashboard"
+  << "  --tui / --no-tui        enable or disable the terminal dashboard (default: on)"
   << "  --quiet                 suppress interactive output"
   << "  --self-test             short exact CPU-only smoke test"
   << "  -h, --help              show this help"
@@ -1933,10 +1934,18 @@ STATE_DIR_EXPLICIT = 0 ## i64
 # startup (after algebraic escape construction).
 NEAR_DIR = ""
 NEAR_EXPLICIT = 0 ## i64
+COREML_MODEL = ""
+COREML_HELPER = ""
+COREML_WORKERS = 1 ## i64
+COREML_COMPUTE = "cpuAndNeuralEngine"
 
 av = argv()
 value_options = ["--tensor", "--rect-shapes", "--rect-epoch-rounds", "--rect-restart-nonce", "--rect-door-ticket", "-J", "--walkers", "--steps", "--rounds", "--secs", "-d", "--density", "--cycles", "--seed", "--seed-nonce", "--record", "--gpu-walkers", "--gpu-policy", "--gpu-steps", "--gpu-epoch-rounds", "--gpu-binary", "--gpu-novelty-size", "--runtime-root", "--asset-root", "--repo-root", "--state-dir", "--strategy", "--migrate", "--archive-size", "--cpu-near-size", "--cpu-near-signature-quota", "--cpu-symmetry-seeds", "--cpu-work-moves", "--cpu-wander-moves", "--status", "--best", "--run-tag", "--near-dir"]
 switch_options = ["--rect", "--rect-portfolio-child", "--rebuild-gpu", "--no-gpu", "--gpu", "--no-tui", "--tui", "--quiet", "--stop-on-record", "--self-test", "--naive", "--help", "-h"]
+value_options.push("--coreml-model")
+value_options.push("--coreml-helper")
+value_options.push("--coreml-workers")
+value_options.push("--coreml-compute")
 ai = 0 ## i64
 while ai < av.size()
   arg = av[ai]
@@ -2053,6 +2062,18 @@ while ai < av.size()
   if arg == "--strategy" && ai + 1 < av.size()
     STRATEGY = av[ai + 1]
     ai += 1
+  if arg == "--coreml-model"
+    COREML_MODEL = av[ai + 1]
+    ai += 1
+  if arg == "--coreml-helper"
+    COREML_HELPER = av[ai + 1]
+    ai += 1
+  if arg == "--coreml-workers"
+    COREML_WORKERS = ffcli_require_i64(arg, av[ai + 1])
+    ai += 1
+  if arg == "--coreml-compute"
+    COREML_COMPUTE = av[ai + 1]
+    ai += 1
   if arg == "--migrate" && ai + 1 < av.size()
     MIGRATE = ffcli_require_i64(arg, av[ai + 1])
     ai += 1
@@ -2153,9 +2174,21 @@ if RECT_PORTFOLIO != 0
 if RECT_PORTFOLIO == 0 && RECT_MODE == 0
   TENSOR_LABEL = N.to_s() + "x" + N.to_s()
 HOST_THREADS = System.cpu_count ## i64
+if COREML_MODEL != ""
+  if N != 5 || RECT_MODE != 0 || RECT_PORTFOLIO != 0
+    << "metaflip: this Core ML ranker contract supports --tensor 5x5 only"
+    exit(2)
+  if COREML_HELPER == "" || !file?(COREML_HELPER)
+    << "metaflip: --coreml-model requires --coreml-helper PATH"
+    exit(2)
+  if COREML_WORKERS != 1 && COREML_WORKERS != 2 && COREML_WORKERS != 4
+    << "metaflip: --coreml-workers must be 1, 2, or 4"
+    exit(2)
+  if COREML_COMPUTE != "cpuAndNeuralEngine" && COREML_COMPUTE != "cpuOnly"
+    << "metaflip: --coreml-compute must be cpuAndNeuralEngine or cpuOnly"
+    exit(2)
 if J_EXPLICIT == 0
-  # Default: host cores minus six. With no GPU the reserve (plus strategy
-  # slots inside J) hosts the continuous-role / pool CPU strategy layout.
+  # Leave two logical CPUs available for coordination and the desktop.
   J = ffp_default_cpu_walkers(HOST_THREADS, GPU)
 if J < 1
   J = 1
@@ -2389,6 +2422,7 @@ polar_bank = []
 c3_base = nil
 archive_counters = i64[3] # admissions, evictions, rejections
 gpu_pareto_archive = []
+gpu_pareto_free = []
 gpu_pareto_ranks = []
 gpu_pareto_bits = []
 gpu_pareto_pairs = []
@@ -2425,7 +2459,8 @@ while frontier_index < frontier_paths.size()
   if frontier_rank == ffw_best_rank(best)
     z = ffn_archive_add(archive, frontier_candidate, ARCHIVE_CAP, 4, archive_counters)
   frontier_index += 1
-archive_min_cache = ffn_archive_min_distance(archive) ## i64
+frontier_distance_cache = MetaflipArchiveDistances.new(ARCHIVE_CAP, CAPACITY)
+archive_min_cache = ffn_archive_min_distance(archive, frontier_distance_cache) ## i64
 # Algebraic escapes of the live best, then any file-backed shoulder inventory
 # under --near-dir (near1/near2 subdirs written by prior dumps).
 bank_count = ffn_build_escape_banks(best, N, CAPACITY, STATE_SIZE, DSLACK, CYCLES, near1, near2, near1_signatures, near1_uses, near1_successes, near2_signatures, near2_uses, near2_successes, symmetry, mixed, orbit_bank, polar_bank, near1_capacity, near2_capacity, NEAR_SIGNATURE_QUOTA, SYMMETRY_CAP, near_counters, SEED_NONCE) ## i64
@@ -3315,6 +3350,9 @@ rect_reject_status = i64[8]
 cycleouts = 0 ## i64
 basin_rotations = 0 ## i64
 running = 1 ## i64
+coreml = nil
+if COREML_MODEL != ""
+  coreml = MetaflipCoreML.new(COREML_MODEL, COREML_HELPER, COREML_WORKERS, COREML_COMPUTE, ffls_run_dir(STATE_DIR, "gf2", STATE_SHAPE, RUN_TAG), RUN_TAG)
 
 # CPU islands are persistent.  The old coordinator created and joined J OS
 # threads every round; Tungsten's campaign-lifetime allocator consequently
@@ -3322,16 +3360,37 @@ running = 1 ## i64
 # list.  Private start channels plus one bounded completion channel keep both
 # the OS-thread count and coordinator allocation footprint constant.
 cpu_round_steps = i64[J]
-# Coordinator work is serial even though the walkers are not.  On wide hosts
-# adapt each independent lane toward a measured multi-second wall-time epoch, amortizing
-# exact intake/archive work without changing sticky state or small-fleet
-# trajectories.  J<=32 returns target zero and remains bit-for-bit unchanged.
+# Coordinator work is serial even though the walkers are not. Adapt each
+# independent lane toward 250ms for 8..32 workers and 3s on wider hosts;
+# tiny fleets retain their historical fixed move budget. An opt-in override
+# permits matched cadence measurements without changing the default policy.
 cpu_epoch_target_ms = ffcp_epoch_target_ms(J) ## i64
+# Keep the cached synchronous path as the default: on the matched 5x5
+# workload async raised CPU occupancy but did not consistently raise flips/s.
+cpu_async = 0 ## i64
+cpu_scheduler_override = env("METAFLIP_CPU_SCHEDULER")
+if cpu_scheduler_override != nil && cpu_scheduler_override != ""
+  if cpu_scheduler_override != "sync" && cpu_scheduler_override != "async"
+    << "metaflip: METAFLIP_CPU_SCHEDULER must be sync or async"
+    exit(2)
+  cpu_async = 0
+  if cpu_scheduler_override == "async"
+    cpu_async = 1
+cpu_epoch_override = env("METAFLIP_CPU_EPOCH_MS")
+if cpu_epoch_override != nil && cpu_epoch_override != ""
+  cpu_epoch_target_ms = ffcli_require_i64("METAFLIP_CPU_EPOCH_MS", cpu_epoch_override)
+  if cpu_epoch_target_ms < 0
+    << "metaflip: METAFLIP_CPU_EPOCH_MS must be nonnegative"
+    exit(2)
+# All additional clocks and worker scans are conditional. These are wall-time
+# phase diagnostics, not OS CPU utilization; record emission is excluded.
+phase_timing = 0 ## i64
+if env("METAFLIP_PHASE_TIMING") == "1"
+  phase_timing = 1
+phase_ticks = i64[9]
 cpu_epoch_range = i64[2]
 cpu_core_slots = i64[1]
-cpu_start_channels = []
-cpu_threads = []
-cpu_done_channel = Channel.new(J)
+cpu_modes = i64[J]
 i = 0
 while i < J
   cpu_mode = 0 ## i64
@@ -3341,11 +3400,16 @@ while i < J
     cpu_mode = 2
   if i == cycle_watch_index
     cpu_mode = 3
+  cpu_modes[i] = cpu_mode
   cpu_round_steps[i] = STEPS
-  start_channel = Channel.new(1)
-  cpu_start_channels.push(start_channel)
-  cpu_threads.push(ffcp_spawn(states, i, cpu_mode, cpu_round_steps, cpu_core_slots, racer_controls, cycle_recent, cycle_recent_capacity, cycle_stats, cpu_elapsed_ms, start_channel, cpu_done_channel))
+  if i == core_fringe_index
+    cpu_round_steps[i] = core_round_steps
   i += 1
+cpu_pool = MetaflipCPUPool.new(states, STATE_SIZE, cpu_modes, cpu_round_steps, cpu_core_slots, racer_controls, cycle_recent, cycle_recent_capacity, cycle_stats, cpu_elapsed_ms)
+cpu_ready = cpu_pool.ready()
+cpu_threads = cpu_pool.threads()
+cpu_stopping = 0 ## i64
+strict_drop = 0 ## i64
 
 # The strict-drop helper arrays are also campaign-owned.  Most rounds leave
 # them empty, so allocating fresh arrays in the loop was pure retained churn.
@@ -3399,33 +3463,41 @@ if QUIET == 0 && TUI == 0
   near_note = ""
   if NEAR_DIR != ""
     near_note = " near_dir=" + NEAR_DIR + " near_loaded=" + near_loaded.to_s() + " near1=" + near1.size().to_s() + " near2=" + near2.size().to_s()
-  << "metaflip native: tensor=" + N.to_s() + "x" + N.to_s() + " walkers=" + J.to_s() + " strategy=" + STRATEGY + " gpu=" + GPU.to_s() + " policy=" + GPU_POLICY + " banks=" + mixed.size().to_s() + " " + seed_note + " seed_nonce=" + SEED_NONCE.to_s() + " cpu_epoch_target_ms=" + ffcp_epoch_target_ms(J).to_s() + " best_rank=" + ffw_best_rank(best).to_s() + " WR=" + RECORD.to_s() + " wr_status=" + wr_note + near_note
+  << "metaflip native: tensor=" + N.to_s() + "x" + N.to_s() + " walkers=" + J.to_s() + " strategy=" + STRATEGY + " gpu=" + GPU.to_s() + " policy=" + GPU_POLICY + " banks=" + mixed.size().to_s() + " " + seed_note + " seed_nonce=" + SEED_NONCE.to_s() + " cpu_epoch_target_ms=" + cpu_epoch_target_ms.to_s() + " best_rank=" + ffw_best_rank(best).to_s() + " WR=" + RECORD.to_s() + " wr_status=" + wr_note + near_note
   flush()
 
 while running == 1
-  i = 0
-  while i < J
-    cpu_elapsed_ms[i] = 0
-    if i == core_fringe_index
-      cpu_round_steps[i] = core_round_steps
-    cpu_core_slots[0] = core_fringe_slots
-    cpu_start_channels[i].send(1)
-    i += 1
-  i = 0
-  while i < J
-    completed_slot = cpu_done_channel.recv() ## i64
-    if completed_slot < 0
-      completed_slot = 0
-    i += 1
+  if phase_timing == 1
+    phase_ticks[0] = ccall("__w_clock_ms")
+  cpu_core_slots[0] = core_fringe_slots
+  if core_fringe_index >= 0 && cpu_ready[core_fringe_index] != 0
+    cpu_round_steps[core_fringe_index] = core_round_steps
+  # Start only parked, already-intaken lanes. Published states are never the
+  # working buffers, so rendering and seed selection remain race-free.
+  if strict_drop == 0 && cpu_stopping == 0
+    z = cpu_pool.launch_idle()
+  z = cpu_pool.begin_intake()
+  cpu_drain = 0 ## i64
+  if cpu_async == 0 || cpu_stopping != 0 || strict_drop != 0
+    cpu_drain = 1
+  z = cpu_pool.collect(cpu_drain)
 
+  if phase_timing == 1
+    phase_ticks[1] = ccall("__w_clock_ms")
+
+  if coreml != nil
+    z = coreml.poll(near1, near2, ffw_best_rank(best), ccall("__w_clock_ms"))
   if cpu_epoch_target_ms > 0
     i = 0
     while i < J
-      if i != core_fringe_index
-        cpu_round_steps[i] = ffcp_adapt_epoch_steps(cpu_round_steps[i], cpu_elapsed_ms[i], cpu_epoch_target_ms, STEPS)
+      if i != core_fringe_index && cpu_ready[i] != 0
+        measured_ms = cpu_elapsed_ms[i] ## i64
+        if measured_ms < 1
+          measured_ms = 1
+        cpu_round_steps[i] = ffcp_adapt_epoch_steps(cpu_round_steps[i], measured_ms, cpu_epoch_target_ms, STEPS)
       i += 1
 
-  if core_fringe_index >= 0 && cpu_elapsed_ms[core_fringe_index] > 0
+  if core_fringe_index >= 0 && cpu_ready[core_fringe_index] != 0
     ordinary_ms = 0 ## i64
     ordinary_count = 0 ## i64
     i = 0
@@ -3434,9 +3506,16 @@ while running == 1
         ordinary_ms += cpu_elapsed_ms[i]
         ordinary_count += 1
       i += 1
-    if ordinary_count > 0
-      target_ms = ordinary_ms / ordinary_count ## i64
-      proposed_core_steps = core_round_steps * target_ms / cpu_elapsed_ms[core_fringe_index] ## i64
+    # A fast fringe lane often completes alone. It must not depend on a
+    # simultaneous ordinary completion to escape a tiny initial epoch.
+    if ordinary_count > 0 || cpu_epoch_target_ms > 0
+      target_ms = cpu_epoch_target_ms ## i64
+      if target_ms == 0
+        target_ms = ordinary_ms / ordinary_count
+      measured_core_ms = cpu_elapsed_ms[core_fringe_index] ## i64
+      if measured_core_ms < 1
+        measured_core_ms = 1
+      proposed_core_steps = core_round_steps * target_ms / measured_core_ms ## i64
       min_core_steps = STEPS / 64 ## i64
       if min_core_steps < 1
         min_core_steps = 1
@@ -3450,20 +3529,23 @@ while running == 1
       if proposed_core_steps > max_core_steps
         proposed_core_steps = max_core_steps
       core_round_steps = (core_round_steps * 3 + proposed_core_steps) / 4
+      if measured_core_ms * 4 < target_ms || measured_core_ms > target_ms * 4
+        core_round_steps = proposed_core_steps
       if core_round_steps < 1
         core_round_steps = 1
 
   now_ms = ccall("__w_clock_ms") ## i64
   elapsed_s = (now_ms - start_ms) / 1000 ## i64
-  strict_drop = 0 ## i64
-  demoted_frontiers.clear
-  preserved_shoulders.clear
+  if strict_drop == 0
+    demoted_frontiers.clear
+    preserved_shoulders.clear
 
-  # TUI controls, polled between rounds while every walker thread is joined
-  # (states are safe to mutate here).  Space starts a fresh naive frontier and
+  # Only explicit keyboard controls drain all live epochs. Space starts a fresh naive frontier and
   # rank timeline; q / Ctrl-C (byte 3 in raw mode) = cooperative stop, twice = force.
   if TUI == 1
     key = ccall("w_input_poll", 0) ## i64
+    if key >= 0
+      z = cpu_pool.collect(1)
     keys_seen = 0 ## i64
     while key >= 0 && keys_seen < 8
       if key == 32
@@ -3496,8 +3578,13 @@ while running == 1
         naive_best = ffn_clone_exact(states[0], N, CAPACITY, STATE_SIZE, 50023 + round * 131, DSLACK, CYCLES, balanced_work, balanced_wander)
         if naive_best != nil
           best = naive_best
+          strict_drop = 0
+          demoted_frontiers.clear
+          preserved_shoulders.clear
           recovered = 0
           fleet_generation += 1
+          if coreml != nil
+            z = coreml.invalidate()
           best_source = "manual-naive-reset"
           best_strategy = "reset-naive"
           z = fflp_set(best_provenance, 0, 0 - 1, 0 - 1, 0 - 1, round, SEED_NONCE, ffbi_best_id(best), ffw_best_rank(best), ffw_best_bits(best), 0, 0 - 1, 0 - 1, ffbi_best_id(best), ffw_best_rank(best), ffw_best_bits(best), elapsed_s)
@@ -3518,7 +3605,8 @@ while running == 1
           archive.clear
           archive_counters = i64[3]
           near_counters = i64[5]
-          gpu_pareto_archive.clear
+          while gpu_pareto_archive.size() > 0
+            gpu_pareto_free.push(gpu_pareto_archive.pop())
           gpu_pareto_ranks.clear
           gpu_pareto_bits.clear
           gpu_pareto_pairs.clear
@@ -3571,7 +3659,7 @@ while running == 1
               z = ffme_add_copy(map_states, map_keys, map_uses, map_sources, reset_map_pool[reset_map_index], ffw_best_rank(best), N, MAP_CAPACITY, reset_map_source, STATE_SIZE, 52051 + reset_map_source * 101 + reset_map_index)
               reset_map_index += 1
             reset_map_source += 1
-          archive_min_cache = ffn_archive_min_distance(archive)
+          archive_min_cache = ffn_archive_min_distance(archive, frontier_distance_cache)
           symmetry_cpu_uses = 0
 
           if core_fringe_index >= 0
@@ -3674,8 +3762,14 @@ while running == 1
       keys_seen += 1
       key = ccall("w_input_poll", 0) ## i64
 
+  if phase_timing == 1
+    phase_ticks[2] = ccall("__w_clock_ms")
   i = 0
   while i < J
+    if cpu_ready[i] == 0
+      last_ages[i] = (now_ms - last_progress_ms[i]) / 1000
+      i += 1
+      next
     state = states[i]
     rank = ffw_best_rank(state) ## i64
     bits = ffw_best_bits(state) ## i64
@@ -3761,9 +3855,9 @@ while running == 1
         # fixed archive storage; neither archive nor MAP retains the mutable
         # island state itself.
         if rank == ffw_best_rank(best)
-          archive_changed = ffn_archive_add_copy(archive, state, ARCHIVE_CAP, 4, archive_counters, STATE_SIZE, 7101 + round * 23 + i) ## i64
+          archive_changed = ffn_archive_add_copy(archive, state, ARCHIVE_CAP, 4, archive_counters, STATE_SIZE, 7101 + round * 23 + i, frontier_distance_cache) ## i64
           if archive_changed == 1
-            archive_min_cache = ffn_archive_min_distance(archive)
+            archive_min_cache = ffn_archive_min_distance(archive, frontier_distance_cache)
         if active_near_seeds[i] != nil
           if rank < ffw_best_rank(active_near_seeds[i])
             seed_door_s = ffp_seed_door(doors[i]) ## i64
@@ -3887,9 +3981,9 @@ while running == 1
               timeline_times[255] = elapsed_s - timeline_start_s
               timeline_ranks[255] = rank
             # Archive owns its own copy; reseed-in-place when replacing a slot.
-            archive_changed = ffn_archive_add_copy(archive, best, ARCHIVE_CAP, 4, archive_counters, STATE_SIZE, 12001 + round * 37 + i) ## i64
+            archive_changed = ffn_archive_add_copy(archive, best, ARCHIVE_CAP, 4, archive_counters, STATE_SIZE, 12001 + round * 37 + i, frontier_distance_cache) ## i64
             if archive_changed == 1
-              archive_min_cache = ffn_archive_min_distance(archive)
+              archive_min_cache = ffn_archive_min_distance(archive, frontier_distance_cache)
             stored_best = ffn_dump_trusted(best, BEST_PATH, RUN_TAG) ## i64
             if stored_best >= 1
               z = ffn_persist_best_provenance(BEST_PATH, RUN_TAG, N, SEED_NONCE, best_provenance, best_source, best_strategy)
@@ -3937,6 +4031,155 @@ while running == 1
       if baseline_rate > last_rates[cycle_watch_index] && baseline_rate > 0
         cycle_overhead = (baseline_rate - last_rates[cycle_watch_index]) * 100 / baseline_rate
     sources[cycle_watch_index] = "cycle-watch u" + cycle_stats[2].to_s() + " h" + cycle_stats[3].to_s() + " i" + cycle_stats[4].to_s() + " o" + cycle_overhead.to_s() + "%"
+
+  if phase_timing == 1
+    phase_ticks[3] = ccall("__w_clock_ms")
+  # Individual cycle-outs preserve door and zone; there is no fleet-wide wrap.
+  # Short and balanced islands also have a finite basin lease independent of
+  # the four-wrap sawtooth cycle. This rotates reversible shoulder escapes in
+  # seconds/minutes rather than leaving them on one seed for hours; high-band
+  # and marathon islands retain their deliberately deep leases.
+  i = 0
+  while i < J
+    if cpu_ready[i] == 0 || strict_drop != 0
+      i += 1
+      next
+    cycle_due = ffw_cycled(states[i]) ## i64
+    lease_due = 0 ## i64
+    seed_moves = ffw_moves(states[i]) - active_seed_start_moves[i] ## i64
+    seed_door_l = ffp_seed_door(doors[i]) ## i64
+    if zones[i] <= 1 && seed_door_l != 0 && seed_door_l != 6
+      lease_moves = cpu_work_moves[zones[i]] + cpu_wander_moves[zones[i]] ## i64
+      if seed_moves >= lease_moves
+        lease_due = 1
+    if cycle_due == 1 || lease_due == 1
+      if lineage_roles[i] >= 0
+        if ffl_returned_to_origin(states[i], lineage_origin_ids[i]) == 1
+          lineage_returns += 1
+      if i == racer_index
+        racer_spent = ffw_moves(states[i]) - racer_lease_start_moves + racer_setup[6] ## i64
+        racer_returned = 0 ## i64
+        if ffbi_current_id(states[i]) == racer_lease_origin_id
+          racer_returned = 1
+        racer_drop = racer_setup[0] + racer_lease_start_rank - ffw_best_rank(states[i]) ## i64
+        if racer_drop < 0
+          racer_drop = 0
+        racer_density_gain = racer_setup[1] ## i64
+        if ffw_best_rank(states[i]) == racer_lease_start_rank && ffw_best_bits(states[i]) < racer_lease_start_bits
+          racer_density_gain += racer_lease_start_bits - ffw_best_bits(states[i])
+        z = ffcr_record_lease(racer_arm, racer_spent, racer_lease_novel, racer_returned, racer_drop, racer_density_gain, racer_pulls, racer_exposure, racer_novel, racer_returns, racer_drops, racer_density) ## i64
+        racer_epoch += 1
+        racer_arm = ffcr_select_arm(racer_epoch, racer_pulls, racer_exposure, racer_novel, racer_returns, racer_drops, racer_density)
+      # Equal-density frontier states are algebraically exact but were not
+      # personal bests, so sample the live state through a fresh exhaustive
+      # gate before the lease is recycled.
+      if ffw_current_rank(states[i]) == ffw_best_rank(best)
+        current_distance = ffn_current_to_best_distance(states[i], best) ## i64
+        if current_distance >= 4
+          live_loaded = ffn_clone_current_exact_into(states[i], live_candidate_scratch, live_us_scratch, live_vs_scratch, live_ws_scratch, N, CAPACITY, 23001 + round * 53 + i, DSLACK, CYCLES, balanced_work, balanced_wander) ## i64
+          if live_loaded > 0
+            archive_changed = ffn_archive_add_copy(archive, live_candidate_scratch, ARCHIVE_CAP, 4, archive_counters, STATE_SIZE, 23051 + round * 53 + i, frontier_distance_cache) ## i64
+            if archive_changed == 1
+              archive_min_cache = ffn_archive_min_distance(archive, frontier_distance_cache)
+            live_source = doors[i] ## i64
+            if lineage_roles[i] >= 0
+              live_source = ffl_gpu_source(lineage_roles[i], lineage_modes[i])
+            z = ffme_add_copy(map_states, map_keys, map_uses, map_sources, live_candidate_scratch, ffw_best_rank(best), N, MAP_CAPACITY, live_source, STATE_SIZE, 23101 + round * 53 + i)
+            z = ffl_registry_add(lineage_registry_ids, lineage_registry_sources, live_candidate_scratch, live_source, LINEAGE_REGISTRY_CAPACITY)
+      old_debt = active_seed_ranks[i] - ffw_best_rank(best) ## i64
+      if old_debt > 0 && active_seed_finished[i] == 0
+        spent = ffw_moves(states[i]) - active_seed_start_moves[i] ## i64
+        z = ffrd_finish(old_debt, 0, spent, debt_returns, debt_failures, debt_exposure)
+      native_seed = ffn_door_has_native_seed(doors[i], archive, near1, near2, symmetry, mixed)
+      selected = ffn_pick_seed(doors[i], best, anchor, archive, near1, near2, near1_uses, near2_uses, symmetry, mixed, states, cursor, ffcp_campaign_seed(round * J + i, SEED_NONCE))
+      if coreml != nil && (seed_door_l == 2 || seed_door_l == 3) && i != core_fringe_index
+        advised = coreml.take(seed_door_l - 1, ffw_best_rank(best))
+        if advised != nil
+          selected = advised
+      next_core_slots = core_fringe_slots ## i64
+      core_rebuilt_in_place = 0 ## i64
+      if i == core_fringe_index
+        # Build into scratch then reseed the island slot — no orphaned STATE_SIZE.
+        if ffn_core_fringe_state_into(live_candidate_scratch, best, archive, near1, near2, mixed, N, CAPACITY, ffcp_campaign_seed(24001 + round * 53 + i, SEED_NONCE), DSLACK, CYCLES, cpu_work_moves[zones[i]], cpu_wander_moves[zones[i]], core_fringe_out_scratch) == 1
+          selected = live_candidate_scratch
+          next_core_slots = core_fringe_out_scratch[0]
+          core_rebuilt_in_place = 1
+      active_near_seeds[i] = nil
+      if seed_door_l == 2 && near1.size() > 0
+        active_near_seeds[i] = selected
+      if seed_door_l == 3 && near2.size() > 0
+        active_near_seeds[i] = selected
+      if seed_door_l == 4 && symmetry.size() > 0
+        symmetry_cpu_uses += 1
+      z = ffw_reseed_from(states[i], selected, ffcp_campaign_seed(25001 + round * 53 + i, SEED_NONCE))
+      if core_rebuilt_in_place == 1 && z >= 1
+        # selected was scratch; island now owns the rebuilt seed.
+        selected = states[i]
+      used_anchor_fallback = 0 ## i64
+      if z < 1
+        z = ffw_reseed_from(states[i], anchor, ffcp_campaign_seed(27001 + round * 53 + i, SEED_NONCE))
+        active_near_seeds[i] = nil
+        selected = anchor
+        sources[i] = ffp_door_name(doors[i]) + "/anchor-fallback"
+        used_anchor_fallback = 1
+      if z >= 1 && native_seed != 0 && used_anchor_fallback == 0
+        sources[i] = ffp_door_name(doors[i]) + "/seed" + (ffn_current_basin_id(selected) % 100000).to_s() + "/" + ffn_global_isotropy_tag(selected)
+      if z >= 1 && native_seed == 0 && used_anchor_fallback == 0
+        sources[i] = ffp_door_name(doors[i]) + "/leader-fallback"
+      if z >= 1 && i == core_fringe_index
+        core_fringe_slots = next_core_slots
+        sources[i] = "core-fringe/frozen-" + core_fringe_slots.to_s()
+      origin_source = ffl_registry_find(selected, lineage_registry_ids, lineage_registry_sources) ## i64
+      if origin_source < 0
+        origin_source = ffl_find_source(selected, map_states, map_sources)
+      lineage_roles[i] = ffl_source_role(origin_source)
+      lineage_modes[i] = ffl_source_pool_mode(origin_source)
+      lineage_origin_ids[i] = ffbi_best_id(selected)
+      lineage_start_ranks[i] = ffw_best_rank(selected)
+      lineage_start_bits[i] = ffw_best_bits(selected)
+      lineage_debts[i] = lineage_start_ranks[i] - ffw_best_rank(best)
+      lineage_paid[i] = 0
+      active_seed_ranks[i] = ffw_best_rank(states[i])
+      active_seed_start_moves[i] = ffw_moves(states[i])
+      active_seed_finished[i] = 0
+      next_debt = active_seed_ranks[i] - ffw_best_rank(best) ## i64
+      if next_debt > 0
+        z = ffrd_launch(next_debt, debt_launches)
+        adaptive_work = ffrd_budget(cpu_work_moves[zones[i]], next_debt, debt_returns, debt_failures) ## i64
+        adaptive_wander = ffrd_budget(cpu_wander_moves[zones[i]], next_debt, debt_returns, debt_failures) ## i64
+        z = ffw_set_zone_quotas(states[i], adaptive_work, adaptive_wander)
+      if next_debt <= 0
+        active_seed_finished[i] = 1
+      if i == racer_index
+        z = ffcr_apply_arm_measured(states[i], racer_arm, cpu_work_moves[zones[i]], cpu_wander_moves[zones[i]], racer_controls, racer_setup)
+        racer_lease_start_moves = ffw_moves(states[i])
+        racer_lease_start_rank = ffw_best_rank(states[i])
+        racer_lease_start_bits = ffw_best_bits(states[i])
+        racer_lease_origin_id = ffbi_current_id(states[i])
+        racer_lease_novel = 0
+        sources[i] = sources[i] + "/race-a" + racer_arm.to_s()
+      if i == cycle_watch_index
+        cycle_stats[8] = 0
+        sources[i] = sources[i] + "/cycle-watch"
+      last_seen_rank[i] = ffw_best_rank(states[i])
+      last_seen_bits[i] = ffw_best_bits(states[i])
+      last_moves[i] = ffw_moves(states[i])
+      last_progress_ms[i] = now_ms
+      if cycle_due == 1
+        cycleouts += 1
+      if cycle_due == 0 && lease_due == 1
+        basin_rotations += 1
+    i += 1
+
+  if phase_timing == 1
+    phase_ticks[8] = ccall("__w_clock_ms")
+  # Overlap GPU harvesting/status with the next CPU epochs. Each endpoint
+  # above has completed exact intake and lease renewal before it is resumed.
+  if cpu_async == 1 && strict_drop == 0 && cpu_stopping == 0 && stop_key == 0 && ccall("__w_interrupted") == 0 && cpu_pool.minimum_epochs() < MAX_ROUNDS && (MAX_SECS == 0 || elapsed_s < MAX_SECS) && (STOP_ON_RECORD == 0 || ffw_best_rank(best) >= RECORD)
+    cpu_core_slots[0] = core_fringe_slots
+    if core_fringe_index >= 0
+      cpu_round_steps[core_fringe_index] = core_round_steps
+    z = cpu_pool.launch_idle()
 
   # Harvest completed bounded generic-GPU epochs.  The generated Tungsten host
   # already performs an exhaustive gate; loading here repeats the independent
@@ -4014,19 +4257,14 @@ while running == 1
             pareto_admitted = 0 ## i64
             if gpu_rank == before_rank
               # Archive/MAP-style: copy only on admit, reseed on replace.
-              archive_changed = ffn_archive_add_copy(archive, gpu_candidate, ARCHIVE_CAP, 4, archive_counters, STATE_SIZE, 43001 + round * 67 + gpu_role) ## i64
+              archive_changed = ffn_archive_add_copy(archive, gpu_candidate, ARCHIVE_CAP, 4, archive_counters, STATE_SIZE, 43001 + round * 67 + gpu_role, frontier_distance_cache) ## i64
               if archive_changed == 1
-                archive_min_cache = ffn_archive_min_distance(archive)
-              # Pareto bank still takes a stable owned snapshot only when admitted
-              # by its own policy (reference form); reseed is handled inside
-              # ffbp_pareto_add if present — clone only when needed.
-              gpu_snapshot = ffn_clone_trusted(gpu_candidate, STATE_SIZE, 43003 + round * 67 + gpu_role)
-              if gpu_snapshot != nil
-                pareto_admitted = ffbp_pareto_add(gpu_pareto_archive, gpu_pareto_ranks, gpu_pareto_bits, gpu_pareto_pairs, gpu_pareto_novelties, gpu_pareto_roles, gpu_pareto_uses, gpu_snapshot, best, GPU_NOVELTY_CAP, gpu_role, gpu_pareto_counters)
-                if pareto_admitted == 1
-                  pareto_index = ffbp_find_state(gpu_pareto_archive, gpu_snapshot) ## i64
-                  if pareto_index >= 0
-                    novelty = gpu_pareto_novelties[pareto_index]
+                archive_min_cache = ffn_archive_min_distance(archive, frontier_distance_cache)
+              pareto_admitted = ffbp_pareto_add(gpu_pareto_archive, gpu_pareto_ranks, gpu_pareto_bits, gpu_pareto_pairs, gpu_pareto_novelties, gpu_pareto_roles, gpu_pareto_uses, gpu_candidate, best, GPU_NOVELTY_CAP, gpu_role, gpu_pareto_counters, gpu_pareto_free, STATE_SIZE, 43003 + round * 67 + gpu_role)
+              if pareto_admitted == 1
+                pareto_index = ffbp_find_state(gpu_pareto_archive, gpu_candidate) ## i64
+                if pareto_index >= 0
+                  novelty = gpu_pareto_novelties[pareto_index]
             c3_branch_reward = 0 ## i64
             if ffn_state_is_c3(gpu_candidate, N, CAPACITY) == 1
               c3_better = 0 ## i64
@@ -4456,7 +4694,9 @@ while running == 1
             rect_launch_number[rect_component] = rect_launch_number[rect_component] + 1
         rect_component += 1
 
-  if strict_drop == 1
+  if phase_timing == 1
+    phase_ticks[4] = ccall("__w_clock_ms")
+  if strict_drop == 1 && cpu_pool.active() == 0
     # GPU-originated rank drops reach this point without traversing the CPU
     # candidate path above.  Normalize the final round leader once, before
     # rebuilding frontier-relative banks.
@@ -4497,7 +4737,8 @@ while running == 1
     # mislabeled as same-rank frontier diversity.
     old_archive = archive
     archive = []
-    gpu_pareto_archive = []
+    while gpu_pareto_archive.size() > 0
+      gpu_pareto_free.push(gpu_pareto_archive.pop())
     gpu_pareto_ranks = []
     gpu_pareto_bits = []
     gpu_pareto_pairs = []
@@ -4574,7 +4815,7 @@ while running == 1
       if rr == final_rank + 2
         z = ffbp_near_add_scratch(near2, near2_signatures, near2_uses, near2_successes, old_archive[pi], near2_capacity, NEAR_SIGNATURE_QUOTA, 2, near_counters, near_signature_values, near_signature_counts, near_axis_signatures)
       pi += 1
-    archive_min_cache = ffn_archive_min_distance(archive)
+    archive_min_cache = ffn_archive_min_distance(archive, frontier_distance_cache)
 
     # Rebuild MAP into existing slots via reseed; drop old list only after
     # reseeding so we do not orphan every elite buffer on each rank drop.
@@ -4667,6 +4908,7 @@ while running == 1
     frontier_escape_completed_batches = 0
     partial_auto_attempts = 0
     partial_auto_last_ms = now_ms
+    strict_drop = 0
 
   # Expand one exact kind from one frozen frontier source per minute.  Source
   # rotates fastest, then kind, then nonce.  This bounds a 10-seed 7x7
@@ -4727,140 +4969,12 @@ while running == 1
               z = ff7_partial_auto_admit(archive, ARCHIVE_CAP, 4, archive_counters, map_states, map_keys, map_uses, map_sources, MAP_CAPACITY, partial_auto_state, ffw_best_rank(best), N, STATE_SIZE, 0, 29101 + round * 61 + partial_auto_source_index * 193 + partial_auto_nonce, partial_auto_intake) ## i64
               if partial_auto_intake[0] == 1
                 partial_auto_admissions += 1
-                archive_min_cache = ffn_archive_min_distance(archive)
+                archive_min_cache = ffn_archive_min_distance(archive, frontier_distance_cache)
               if partial_auto_intake[1] > 0
                 partial_auto_map_admissions += 1
 
-  # Individual cycle-outs preserve door and zone; there is no fleet-wide wrap.
-  # Short and balanced islands also have a finite basin lease independent of
-  # the four-wrap sawtooth cycle. This rotates reversible shoulder escapes in
-  # seconds/minutes rather than leaving them on one seed for hours; high-band
-  # and marathon islands retain their deliberately deep leases.
-  i = 0
-  while i < J
-    cycle_due = ffw_cycled(states[i]) ## i64
-    lease_due = 0 ## i64
-    seed_moves = ffw_moves(states[i]) - active_seed_start_moves[i] ## i64
-    seed_door_l = ffp_seed_door(doors[i]) ## i64
-    if zones[i] <= 1 && seed_door_l != 0 && seed_door_l != 6
-      lease_moves = cpu_work_moves[zones[i]] + cpu_wander_moves[zones[i]] ## i64
-      if seed_moves >= lease_moves
-        lease_due = 1
-    if cycle_due == 1 || lease_due == 1
-      if lineage_roles[i] >= 0
-        if ffl_returned_to_origin(states[i], lineage_origin_ids[i]) == 1
-          lineage_returns += 1
-      if i == racer_index
-        racer_spent = ffw_moves(states[i]) - racer_lease_start_moves + racer_setup[6] ## i64
-        racer_returned = 0 ## i64
-        if ffbi_current_id(states[i]) == racer_lease_origin_id
-          racer_returned = 1
-        racer_drop = racer_setup[0] + racer_lease_start_rank - ffw_best_rank(states[i]) ## i64
-        if racer_drop < 0
-          racer_drop = 0
-        racer_density_gain = racer_setup[1] ## i64
-        if ffw_best_rank(states[i]) == racer_lease_start_rank && ffw_best_bits(states[i]) < racer_lease_start_bits
-          racer_density_gain += racer_lease_start_bits - ffw_best_bits(states[i])
-        z = ffcr_record_lease(racer_arm, racer_spent, racer_lease_novel, racer_returned, racer_drop, racer_density_gain, racer_pulls, racer_exposure, racer_novel, racer_returns, racer_drops, racer_density) ## i64
-        racer_epoch += 1
-        racer_arm = ffcr_select_arm(racer_epoch, racer_pulls, racer_exposure, racer_novel, racer_returns, racer_drops, racer_density)
-      # Equal-density frontier states are algebraically exact but were not
-      # personal bests, so sample the live state through a fresh exhaustive
-      # gate before the lease is recycled.
-      if ffw_current_rank(states[i]) == ffw_best_rank(best)
-        current_distance = ffn_current_to_best_distance(states[i], best) ## i64
-        if current_distance >= 4
-          live_loaded = ffn_clone_current_exact_into(states[i], live_candidate_scratch, live_us_scratch, live_vs_scratch, live_ws_scratch, N, CAPACITY, 23001 + round * 53 + i, DSLACK, CYCLES, balanced_work, balanced_wander) ## i64
-          if live_loaded > 0
-            archive_changed = ffn_archive_add_copy(archive, live_candidate_scratch, ARCHIVE_CAP, 4, archive_counters, STATE_SIZE, 23051 + round * 53 + i) ## i64
-            if archive_changed == 1
-              archive_min_cache = ffn_archive_min_distance(archive)
-            live_source = doors[i] ## i64
-            if lineage_roles[i] >= 0
-              live_source = ffl_gpu_source(lineage_roles[i], lineage_modes[i])
-            z = ffme_add_copy(map_states, map_keys, map_uses, map_sources, live_candidate_scratch, ffw_best_rank(best), N, MAP_CAPACITY, live_source, STATE_SIZE, 23101 + round * 53 + i)
-            z = ffl_registry_add(lineage_registry_ids, lineage_registry_sources, live_candidate_scratch, live_source, LINEAGE_REGISTRY_CAPACITY)
-      old_debt = active_seed_ranks[i] - ffw_best_rank(best) ## i64
-      if old_debt > 0 && active_seed_finished[i] == 0
-        spent = ffw_moves(states[i]) - active_seed_start_moves[i] ## i64
-        z = ffrd_finish(old_debt, 0, spent, debt_returns, debt_failures, debt_exposure)
-      native_seed = ffn_door_has_native_seed(doors[i], archive, near1, near2, symmetry, mixed)
-      selected = ffn_pick_seed(doors[i], best, anchor, archive, near1, near2, near1_uses, near2_uses, symmetry, mixed, states, cursor, ffcp_campaign_seed(round * J + i, SEED_NONCE))
-      next_core_slots = core_fringe_slots ## i64
-      core_rebuilt_in_place = 0 ## i64
-      if i == core_fringe_index
-        # Build into scratch then reseed the island slot — no orphaned STATE_SIZE.
-        if ffn_core_fringe_state_into(live_candidate_scratch, best, archive, near1, near2, mixed, N, CAPACITY, ffcp_campaign_seed(24001 + round * 53 + i, SEED_NONCE), DSLACK, CYCLES, cpu_work_moves[zones[i]], cpu_wander_moves[zones[i]], core_fringe_out_scratch) == 1
-          selected = live_candidate_scratch
-          next_core_slots = core_fringe_out_scratch[0]
-          core_rebuilt_in_place = 1
-      active_near_seeds[i] = nil
-      if seed_door_l == 2 && near1.size() > 0
-        active_near_seeds[i] = selected
-      if seed_door_l == 3 && near2.size() > 0
-        active_near_seeds[i] = selected
-      if seed_door_l == 4 && symmetry.size() > 0
-        symmetry_cpu_uses += 1
-      z = ffw_reseed_from(states[i], selected, ffcp_campaign_seed(25001 + round * 53 + i, SEED_NONCE))
-      if core_rebuilt_in_place == 1 && z >= 1
-        # selected was scratch; island now owns the rebuilt seed.
-        selected = states[i]
-      used_anchor_fallback = 0 ## i64
-      if z < 1
-        z = ffw_reseed_from(states[i], anchor, ffcp_campaign_seed(27001 + round * 53 + i, SEED_NONCE))
-        active_near_seeds[i] = nil
-        selected = anchor
-        sources[i] = ffp_door_name(doors[i]) + "/anchor-fallback"
-        used_anchor_fallback = 1
-      if z >= 1 && native_seed != 0 && used_anchor_fallback == 0
-        sources[i] = ffp_door_name(doors[i]) + "/seed" + (ffn_current_basin_id(selected) % 100000).to_s() + "/" + ffn_global_isotropy_tag(selected)
-      if z >= 1 && native_seed == 0 && used_anchor_fallback == 0
-        sources[i] = ffp_door_name(doors[i]) + "/leader-fallback"
-      if z >= 1 && i == core_fringe_index
-        core_fringe_slots = next_core_slots
-        sources[i] = "core-fringe/frozen-" + core_fringe_slots.to_s()
-      origin_source = ffl_registry_find(selected, lineage_registry_ids, lineage_registry_sources) ## i64
-      if origin_source < 0
-        origin_source = ffl_find_source(selected, map_states, map_sources)
-      lineage_roles[i] = ffl_source_role(origin_source)
-      lineage_modes[i] = ffl_source_pool_mode(origin_source)
-      lineage_origin_ids[i] = ffbi_best_id(selected)
-      lineage_start_ranks[i] = ffw_best_rank(selected)
-      lineage_start_bits[i] = ffw_best_bits(selected)
-      lineage_debts[i] = lineage_start_ranks[i] - ffw_best_rank(best)
-      lineage_paid[i] = 0
-      active_seed_ranks[i] = ffw_best_rank(states[i])
-      active_seed_start_moves[i] = ffw_moves(states[i])
-      active_seed_finished[i] = 0
-      next_debt = active_seed_ranks[i] - ffw_best_rank(best) ## i64
-      if next_debt > 0
-        z = ffrd_launch(next_debt, debt_launches)
-        adaptive_work = ffrd_budget(cpu_work_moves[zones[i]], next_debt, debt_returns, debt_failures) ## i64
-        adaptive_wander = ffrd_budget(cpu_wander_moves[zones[i]], next_debt, debt_returns, debt_failures) ## i64
-        z = ffw_set_zone_quotas(states[i], adaptive_work, adaptive_wander)
-      if next_debt <= 0
-        active_seed_finished[i] = 1
-      if i == racer_index
-        z = ffcr_apply_arm_measured(states[i], racer_arm, cpu_work_moves[zones[i]], cpu_wander_moves[zones[i]], racer_controls, racer_setup)
-        racer_lease_start_moves = ffw_moves(states[i])
-        racer_lease_start_rank = ffw_best_rank(states[i])
-        racer_lease_start_bits = ffw_best_bits(states[i])
-        racer_lease_origin_id = ffbi_current_id(states[i])
-        racer_lease_novel = 0
-        sources[i] = sources[i] + "/race-a" + racer_arm.to_s()
-      if i == cycle_watch_index
-        cycle_stats[8] = 0
-        sources[i] = sources[i] + "/cycle-watch"
-      last_seen_rank[i] = ffw_best_rank(states[i])
-      last_seen_bits[i] = ffw_best_bits(states[i])
-      last_moves[i] = ffw_moves(states[i])
-      last_progress_ms[i] = now_ms
-      if cycle_due == 1
-        cycleouts += 1
-      if cycle_due == 0 && lease_due == 1
-        basin_rotations += 1
-    i += 1
-
+  if phase_timing == 1
+    phase_ticks[5] = ccall("__w_clock_ms")
   # Rebalance only at a clean epoch boundary, then relaunch every active role
   # from its current role-specific exact bank.  This keeps lane accounting
   # honest: an allocation changes only after all old allocations completed.
@@ -5118,6 +5232,8 @@ while running == 1
         gpu_disabled[10] = 1
         gpu_retry_round[10] = round + ffn_gpu_retry_delay(gpu_failures[10])
 
+  if phase_timing == 1
+    phase_ticks[6] = ccall("__w_clock_ms")
   if ff_tui_heartbeat_due(last_status_ms, now_ms, 500) == 1
     sequence += 1
     z = ffcp_round_step_range(cpu_round_steps, J, cpu_epoch_range) ## i64
@@ -5170,25 +5286,39 @@ while running == 1
     << "round=" + round.to_s() + " best=" + ffw_best_rank(best).to_s() + " bits=" + ffw_best_bits(best).to_s() + " WR=" + RECORD.to_s() + " wr=" + round_wr + " moves=" + total_moves.to_s() + " exact_bad=" + invalid_candidates.to_s() + " archive=" + archive.size().to_s() + " near1=" + near1.size().to_s() + " near2=" + near2.size().to_s()
     flush()
 
+  if phase_timing == 1
+    phase_ticks[7] = ccall("__w_clock_ms")
+    phase_worker_sum = 0 ## i64
+    phase_worker_max = 0 ## i64
+    phase_lane = 0 ## i64
+    while phase_lane < J
+      phase_worker_sum += cpu_elapsed_ms[phase_lane]
+      if cpu_elapsed_ms[phase_lane] > phase_worker_max
+        phase_worker_max = cpu_elapsed_ms[phase_lane]
+      phase_lane += 1
+    << "METAFLIP_PHASE round=" + round.to_s() + " workers=" + J.to_s() + " async=" + cpu_async.to_s() + " completed=" + cpu_pool.completed().to_s() + " inflight=" + cpu_pool.active().to_s() + " epoch_target_ms=" + cpu_epoch_target_ms.to_s() + " worker_wall_sum_ms=" + phase_worker_sum.to_s() + " worker_wall_max_ms=" + phase_worker_max.to_s() + " barrier_ms=" + (phase_ticks[1] - phase_ticks[0]).to_s() + " coordinator_ms=" + (phase_ticks[7] - phase_ticks[1]).to_s() + " controls_ms=" + (phase_ticks[2] - phase_ticks[1]).to_s() + " intake_ms=" + (phase_ticks[3] - phase_ticks[2]).to_s() + " leases_ms=" + (phase_ticks[8] - phase_ticks[3]).to_s() + " harvest_ms=" + (phase_ticks[4] - phase_ticks[8]).to_s() + " reseeds_ms=" + (phase_ticks[5] - phase_ticks[4]).to_s() + " launch_ms=" + (phase_ticks[6] - phase_ticks[5]).to_s() + " status_ms=" + (phase_ticks[7] - phase_ticks[6]).to_s()
+    flush()
+
   round += 1
   interrupted = ccall("__w_interrupted") ## i64
   if interrupted != 0 || stop_key != 0
-    running = 0
-  if round >= MAX_ROUNDS
-    running = 0
+    cpu_stopping = 1
+  if cpu_pool.minimum_epochs() >= MAX_ROUNDS
+    cpu_stopping = 1
   if MAX_SECS > 0
     if elapsed_s >= MAX_SECS
-      running = 0
+      cpu_stopping = 1
   if STOP_ON_RECORD == 1
     if ffw_best_rank(best) < RECORD
-      running = 0
+      cpu_stopping = 1
+  if cpu_stopping != 0 && cpu_pool.active() == 0
+    running = 0
 
 # Stop workers only at a clean epoch boundary.  Every state is quiescent here,
 # before GPU late-result adoption and final certificate persistence.
-i = 0
-while i < J
-  cpu_start_channels[i].send(0)
-  i += 1
+if coreml != nil
+  z = coreml.stop()
+z = cpu_pool.stop_commands()
 i = 0
 while i < J
   # CPU walkers return i64 move counts; discard without integer coercion of bools.

@@ -21,6 +21,13 @@ use basins
 use cpu_pool
 use doors
 
+-> ffrc_cpu_gpu_mode(value) (String) i64
+  if value == "barrier"
+    return 0
+  if value == nil || value == "" || value == "overlap"
+    return 1
+  0 - 1
+
 -> ffrc_better(rank, bits, best_rank, best_bits) (i64 i64 i64 i64) i64
   if rank < best_rank
     return 1
@@ -558,6 +565,10 @@ use doors
 # restart_door_ticket is an independent low-discrepancy schedule ordinal; it
 # must not replace the mixed nonce used for proposal RNG streams.
 -> ffrc_run_seeded(tensor, repo_root, seed_path, best_path, status_path, run_tag, walkers, steps, max_rounds, max_secs, dslack, cycles, record_override, gpu_requested, gpu_walkers, gpu_steps, gpu_epoch_rounds, gpu_binary, gpu_rebuild, quiet, tui, stop_on_record, naive_seed, portfolio_child, restart_nonce, restart_door_ticket) (String String String String String String i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 String i64 i64 i64 i64 i64 i64 i64 i64) i64
+  cpu_gpu_overlap = ffrc_cpu_gpu_mode(env("METAFLIP_RECT_CPU_GPU")) ## i64
+  if cpu_gpu_overlap < 0
+    << "RECT_ERROR code=cpu-gpu-policy METAFLIP_RECT_CPU_GPU must be barrier or overlap"
+    return 2
   n = ffrp_n(tensor) ## i64
   m = ffrp_m(tensor) ## i64
   p = ffrp_p(tensor) ## i64
@@ -839,6 +850,7 @@ use doors
   cpu_epoch_steps = steps ## i64
   z = ffrp_campaign_budgets(cpu_epoch_steps, phase_moves)
   elapsed_cpu = i64[walkers]
+  total_elapsed_cpu = i64[walkers]
   cpu_start_channels = []
   cpu_threads = []
   cpu_done_channel = Channel.new(walkers)
@@ -851,6 +863,8 @@ use doors
     lane += 1
   cpu_moves = 0 ## i64
   cpu_ms = 0 ## i64
+  cpu_followup_batches = 0 ## i64
+  cpu_followup_moves = 0 ## i64
   gpu_moves = 0 ## i64
   gpu_ms = 0 ## i64
   mitm_attempts = 0 ## i64
@@ -997,11 +1011,12 @@ use doors
         status_degraded = 1
 
     round_cpu_steps = cpu_epoch_steps ## i64
+    z = ffrp_campaign_budgets(cpu_epoch_steps, phase_moves)
     lane = 0
     while lane < walkers
-      elapsed_cpu[lane] = 0
-      cpu_start_channels[lane].send(1)
+      total_elapsed_cpu[lane] = 0
       lane += 1
+    z = ffrcp_dispatch(cpu_start_channels, elapsed_cpu, walkers)
 
     gpu_thread = nil
     gpu_completed = 0 ## i64
@@ -1025,13 +1040,40 @@ use doors
       if gpu_thread == nil
         gpu_failures += 1
 
+    first_cpu_ms = ffrcp_collect(cpu_done_channel, elapsed_cpu, total_elapsed_cpu, walkers) ## i64
+    # GPU and block jobs own immutable round-start snapshots, not live islands.
+    # Continue parked CPU islands until the GPU finishes. Each short batch
+    # fully joins before changing quotas; publication and rebases still wait
+    # for all producers. A first rank drop goes straight to exact intake.
+    followups = 0 ## i64
+    followup_steps = ffrcp_followup_steps(cpu_epoch_steps, first_cpu_ms) ## i64
+    while cpu_gpu_overlap != 0 && gpu_thread != nil && gpu_thread.alive? && followups < 128
+      if ccall("__w_interrupted") != 0
+        break
+      if max_secs > 0 && ccall("__w_clock_ms") - start_ms >= max_secs * 1000
+        break
+      rank_drop = 0 ## i64
+      lane = 0
+      while lane < walkers
+        if ffr_best_rank(states[lane]) < ffr_best_rank(best)
+          rank_drop = 1
+        lane += 1
+      if rank_drop != 0 || followup_steps < 1 || round_cpu_steps > 9223372036854775807 - followup_steps
+        break
+      z = ffrp_campaign_budgets(followup_steps, phase_moves)
+      z = ffrcp_dispatch(cpu_start_channels, elapsed_cpu, walkers)
+      followup_ms = ffrcp_collect(cpu_done_channel, elapsed_cpu, total_elapsed_cpu, walkers) ## i64
+      round_cpu_steps += followup_steps
+      cpu_followup_moves += walkers * followup_steps
+      cpu_followup_batches += 1
+      followups += 1
+      followup_steps = ffrcp_followup_steps(followup_steps, followup_ms)
     slowest_cpu_ms = 0 ## i64
     lane = 0
     while lane < walkers
-      completed_slot = cpu_done_channel.recv() ## i64
-      if completed_slot >= 0 && completed_slot < walkers
-        if elapsed_cpu[completed_slot] > slowest_cpu_ms
-          slowest_cpu_ms = elapsed_cpu[completed_slot]
+      elapsed_cpu[lane] = total_elapsed_cpu[lane]
+      if elapsed_cpu[lane] > slowest_cpu_ms
+        slowest_cpu_ms = elapsed_cpu[lane]
       lane += 1
     if gpu_thread != nil
       gpu_ok = ffrc_thread_join_release(gpu_thread)
@@ -1147,7 +1189,7 @@ use doors
     # work/adaptive/wander split applies to the next round and never mutates a
     # live worker. CPU-only profiles remain fixed because no GPU completed.
     if gpu_completed != 0 && gpu_elapsed[0] > 0
-      cpu_epoch_steps = ffrc_balanced_cpu_steps(cpu_epoch_steps, slowest_cpu_ms, gpu_elapsed[0], steps)
+      cpu_epoch_steps = ffrc_balanced_cpu_steps(cpu_epoch_steps, first_cpu_ms, gpu_elapsed[0], steps)
       z = ffrp_campaign_budgets(cpu_epoch_steps, phase_moves)
 
     if gpu_completed != 0 && ffrc_file_nonempty(gpu_output_path) == 1
@@ -1395,6 +1437,7 @@ use doors
       status = ffrc_status_body("running", sequence, tensor, record, record_known, best, walkers, cpu_moves, cpu_ms, gpu_requested, gpu_supported, gpu_ready, lanes, gpu_moves, gpu_ms, gpu_failures, exact_rejects, elapsed_s)
       status = status.strip() + " cpu_epoch_steps=" + cpu_epoch_steps.to_s() + " cpu_seed_nonce=" + restart_nonce.to_s() + " cpu_door_ticket=" + restart_door_ticket.to_s() + " cpu_leader_lanes=" + cpu_leader_lanes.to_s() + " cpu_side_lanes=" + cpu_side_lanes.to_s() + " block_attempts=" + block_stats[0].to_s() + " block_local=" + block_stats[1].to_s() + " block_exact=" + block_stats[2].to_s() + " block_drops=" + block_stats[3].to_s() + " block_density=" + block_stats[4].to_s() + " block_neutral=" + block_stats[5].to_s() + " block_ms=" + block_ms.to_s() + " block_period=" + block_period.to_s() + " gpu_degraded=" + status_degraded.to_s() + " gpu_internal_rejects=" + gpu_internal_rejects.to_s() + " gpu_seed_source=" + gpu_seed_source + " gpu_door_adoptions=" + gpu_door_adoptions.to_s() + " mitm_supported=" + mitm_supported.to_s() + " mitm_ready=" + mitm_ready.to_s() + " mitm_attempts=" + mitm_attempts.to_s() + " mitm_pairs=" + mitm_pairs.to_s() + " mitm_ms=" + mitm_ms.to_s() + " mitm_failures=" + mitm_failures.to_s() + "\n"
       status = status.strip() + " side_archive_cap=" + ffrda_cap().to_s() + " side_archive_loaded=" + side_archive_loaded.to_s() + " side_archive_seeded=" + side_archive_seeded.to_s() + " side_archive_checkpoints=" + side_archive_checkpoints.to_s() + " side_archive_saved=" + side_archive_stats[2].to_s() + " side_archive_rejects=" + side_archive_stats[1].to_s() + " side_archive_write_failures=" + side_archive_stats[3].to_s() + "\n"
+      status = status.strip() + " cpu_gpu_overlap=" + cpu_gpu_overlap.to_s() + " cpu_followup_batches=" + cpu_followup_batches.to_s() + " cpu_followup_moves=" + cpu_followup_moves.to_s() + "\n"
       status_ok = ffrc_atomic_write(status_path, status, run_tag, sequence)
       if status_ok == 1
         last_status_ms = now_ms
@@ -1495,6 +1538,7 @@ use doors
   final_status = ffrc_status_body("stopped", sequence + 1, tensor, record, record_known, best, walkers, cpu_moves, cpu_ms, gpu_requested, gpu_supported, gpu_ready, lanes, gpu_moves, gpu_ms, gpu_failures, exact_rejects, final_elapsed_s)
   final_status = final_status.strip() + " cpu_epoch_steps=" + cpu_epoch_steps.to_s() + " cpu_seed_nonce=" + restart_nonce.to_s() + " cpu_door_ticket=" + restart_door_ticket.to_s() + " cpu_leader_lanes=" + cpu_leader_lanes.to_s() + " cpu_side_lanes=" + cpu_side_lanes.to_s() + " block_attempts=" + block_stats[0].to_s() + " block_local=" + block_stats[1].to_s() + " block_exact=" + block_stats[2].to_s() + " block_drops=" + block_stats[3].to_s() + " block_density=" + block_stats[4].to_s() + " block_neutral=" + block_stats[5].to_s() + " block_ms=" + block_ms.to_s() + " block_period=" + block_period.to_s() + " gpu_degraded=" + status_degraded.to_s() + " gpu_internal_rejects=" + gpu_internal_rejects.to_s() + " gpu_seed_source=" + gpu_seed_source + " gpu_door_adoptions=" + gpu_door_adoptions.to_s() + " mitm_supported=" + mitm_supported.to_s() + " mitm_ready=" + mitm_ready.to_s() + " mitm_attempts=" + mitm_attempts.to_s() + " mitm_pairs=" + mitm_pairs.to_s() + " mitm_ms=" + mitm_ms.to_s() + " mitm_failures=" + mitm_failures.to_s() + "\n"
   final_status = final_status.strip() + " side_archive_cap=" + ffrda_cap().to_s() + " side_archive_loaded=" + side_archive_loaded.to_s() + " side_archive_seeded=" + side_archive_seeded.to_s() + " side_archive_checkpoints=" + side_archive_checkpoints.to_s() + " side_archive_saved=" + side_archive_stats[2].to_s() + " side_archive_rejects=" + side_archive_stats[1].to_s() + " side_archive_write_failures=" + side_archive_stats[3].to_s() + "\n"
+  final_status = final_status.strip() + " cpu_gpu_overlap=" + cpu_gpu_overlap.to_s() + " cpu_followup_batches=" + cpu_followup_batches.to_s() + " cpu_followup_moves=" + cpu_followup_moves.to_s() + "\n"
   status_ok = ffrc_atomic_write(status_path, final_status, run_tag, sequence + 1)
   saved = ffrc_dump_atomic(best, best_path, run_tag, sequence + 100000) ## i64
   if saved < 1

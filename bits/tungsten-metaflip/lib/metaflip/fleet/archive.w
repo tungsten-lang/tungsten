@@ -32,7 +32,10 @@ use basins
   found
 
 -> ffn_distance(a, b) (i64[] i64[]) i64
-  if ffbi_best_id(a) == ffbi_best_id(b)
+  ffn_distance_known_ids(a, b, ffbi_best_id(a), ffbi_best_id(b))
+
+-> ffn_distance_known_ids(a, b, aid, bid) (i64[] i64[] i64 i64) i64
+  if aid == bid
     return 0
   arank = ffw_best_rank(a) ## i64
   brank = ffw_best_rank(b) ## i64
@@ -42,6 +45,80 @@ use basins
     common += ffn_term_in(b, ffw_read_best_u(a, i), ffw_read_best_v(a, i), ffw_read_best_w(a, i))
     i += 1
   arank + brank - common - common
+
+# Coordinator-owned bounded cache. Validate complete ordered factor triples,
+# rank and dimension, not a hash: even in-place reseeds, reordering, clearing
+# and reusing archive slots invalidate exactly the affected rows. Digests are
+# only reused as inputs to the existing diversity policy, never as proof of
+# cache freshness or tensor exactness. No per-admission arrays are allocated.
++ MetaflipArchiveDistances
+  ro :recomputed_pairs
+
+  -> new(capacity, term_capacity)
+    @capacity = capacity
+    @term_capacity = term_capacity
+    @ranks = i64[capacity]
+    @dimensions = i64[capacity]
+    @terms = i64[capacity * term_capacity * 3]
+    @identities = i64[capacity]
+    @changed = i64[capacity]
+    @pairs = i64[capacity * capacity]
+    @count = 0
+    @recomputed_pairs = 0
+
+  -> prepare(items)
+    count = items.size() ## i64
+    if count > @capacity
+      return 0
+    i = 0 ## i64
+    while i < count
+      if ffw_best_rank(items[i]) > @term_capacity
+        return 0
+      i += 1
+    i = 0
+    while i < count
+      state = items[i]
+      rank = ffw_best_rank(state) ## i64
+      dimension = ffw_n(state) ## i64
+      changed = 0 ## i64
+      if i >= @count || @ranks[i] != rank || @dimensions[i] != dimension
+        changed = 1
+      term = 0 ## i64
+      base = i * @term_capacity * 3 ## i64
+      while term < rank
+        u = ffw_read_best_u(state, term) ## i64
+        v = ffw_read_best_v(state, term) ## i64
+        w = ffw_read_best_w(state, term) ## i64
+        offset = base + term * 3 ## i64
+        if @terms[offset] != u || @terms[offset + 1] != v || @terms[offset + 2] != w
+          changed = 1
+        @terms[offset] = u
+        @terms[offset + 1] = v
+        @terms[offset + 2] = w
+        term += 1
+      @changed[i] = changed
+      @ranks[i] = rank
+      @dimensions[i] = dimension
+      if changed != 0
+        @identities[i] = ffbi_best_id(state)
+      i += 1
+    i = 0
+    while i < count
+      j = i + 1 ## i64
+      while j < count
+        if @changed[i] != 0 || @changed[j] != 0
+          @pairs[i * @capacity + j] = ffn_distance_known_ids(items[i], items[j], @identities[i], @identities[j])
+          @recomputed_pairs += 1
+        j += 1
+      i += 1
+    @count = count
+    1
+
+  -> pair(i, j)
+    @pairs[i * @capacity + j]
+
+  -> identity(i)
+    @identities[i]
 
 # Retained for the shoulder banks and as the exhaustive test oracle's scalar
 # primitive.  The frontier archive action below no longer calls it once per
@@ -67,14 +144,23 @@ use basins
       i += 1
   result
 
--> ffn_archive_admission_action(archive, candidate, capacity, min_distance) i64
+-> ffn_archive_admission_action(archive, candidate, capacity, min_distance, cache = nil) i64
+  cached = 0 ## i64
+  if cache != nil
+    cached = cache.prepare(archive)
+  candidate_id = ffbi_best_id(candidate) ## i64
   duplicate = 0 ## i64
   closest = 999999999 ## i64
   closest_slot = 0 - 1 ## i64
   second_closest = 999999999 ## i64
   i = 0 ## i64
   while i < archive.size()
-    distance = ffn_distance(archive[i], candidate) ## i64
+    archive_id = 0 ## i64
+    if cached == 1
+      archive_id = cache.identity(i)
+    else
+      archive_id = ffbi_best_id(archive[i])
+    distance = ffn_distance_known_ids(archive[i], candidate, archive_id, candidate_id) ## i64
     if distance == 0
       duplicate = 1
     if distance < closest
@@ -105,7 +191,11 @@ use basins
   while i < archive.size()
     j = i + 1 ## i64
     while j < archive.size()
-      distance = ffn_distance(archive[i], archive[j]) ## i64
+      distance = 0 ## i64
+      if cached == 1
+        distance = cache.pair(i, j)
+      else
+        distance = ffn_distance(archive[i], archive[j])
       if distance < current_min
         current_min = distance
         min_left = i
@@ -121,7 +211,11 @@ use basins
   while i < archive.size()
     j = i + 1
     while j < archive.size()
-      distance = ffn_distance(archive[i], archive[j]) ## i64
+      distance = 0 ## i64
+      if cached == 1
+        distance = cache.pair(i, j)
+      else
+        distance = ffn_distance(archive[i], archive[j])
       if i != min_left && j != min_left
         if distance < without_left
           without_left = distance
@@ -179,8 +273,8 @@ use basins
 # Hot CPU candidates are copied into archive-owned storage only after the
 # allocation-free admission plan succeeds. Appends allocate at most capacity
 # slots; replacements reuse the selected slot in place.
--> ffn_archive_add_copy(archive, candidate, capacity, min_distance, counters, state_size, seed) i64
-  action = ffn_archive_admission_action(archive, candidate, capacity, min_distance) ## i64
+-> ffn_archive_add_copy(archive, candidate, capacity, min_distance, counters, state_size, seed, cache = nil) i64
+  action = ffn_archive_admission_action(archive, candidate, capacity, min_distance, cache) ## i64
   if action == 0
     counters[2] = counters[2] + 1
     return 0
@@ -201,7 +295,10 @@ use basins
   counters[0] = counters[0] + 1
   1
 
--> ffn_archive_min_distance(archive)
+-> ffn_archive_min_distance(archive, cache = nil)
+  cached = 0 ## i64
+  if cache != nil
+    cached = cache.prepare(archive)
   result = 0 - 1 ## i64
   if archive.size() > 1
     result = 999999999
@@ -209,7 +306,11 @@ use basins
     while i < archive.size()
       j = i + 1 ## i64
       while j < archive.size()
-        d = ffn_distance(archive[i], archive[j]) ## i64
+        d = 0 ## i64
+        if cached == 1
+          d = cache.pair(i, j)
+        else
+          d = ffn_distance(archive[i], archive[j])
         if d < result
           result = d
         j += 1

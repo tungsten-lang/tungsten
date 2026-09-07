@@ -482,6 +482,9 @@
   words = ffw_verify_scratch_words(n, m, p) ## i64
   if scratch_words < words
     return 0 - 20
+  # A literal Integer shift boxes high-bit masks into retained BigInts. These
+  # are raw parity words, including bit 63, so keep both operands fixed-width.
+  one = 1 ## i64
 
   # Exact inputs leave the slab zero, but rejected external candidates do not.
   # Clear on every entry so the same buffer is valid after either outcome.
@@ -509,7 +512,7 @@
             while ci < ww
               if ((w >> ci) & 1) != 0
                 cell = base + ci ## i64
-                parity[cell / 64] = parity[cell / 64] ^ (1 << (cell % 64))
+                parity[cell / 64] = parity[cell / 64] ^ (one << (cell % 64))
               ci += 1
           bi += 1
       ai += 1
@@ -525,7 +528,7 @@
         bi = inner * p + column
         ci = row * p + column
         cell = (ai * vw + bi) * ww + ci
-        parity[cell / 64] = parity[cell / 64] ^ (1 << (cell % 64))
+        parity[cell / 64] = parity[cell / 64] ^ (one << (cell % 64))
         column += 1
       inner += 1
     row += 1
@@ -1031,15 +1034,32 @@
   result = rank
   result
 
+# Serialization alone grants no exactness authority. The public dump helpers
+# below verify first; coordinator callers must already own an exact endpoint.
+# Building once avoids retaining every growing prefix of a checkpoint.
+-> ffw_view_text(st, uo, vo, wo, liveo, rank) (i64[] i64 i64 i64 i64 i64)
+  body = StringBuffer() ## recycle
+  body.append(rank.to_s())
+  body.append("\n")
+  i = 0 ## i64
+  while i < rank
+    slot = i ## i64
+    if liveo >= 0
+      slot = st[liveo + i]
+    body.append(st[uo + slot].to_s())
+    body.append(" ")
+    body.append(st[vo + slot].to_s())
+    body.append(" ")
+    body.append(st[wo + slot].to_s())
+    body.append("\n")
+    i += 1
+  body.to_s()
+
 -> ffw_dump_best(st, path) (i64[] String) i64
   result = 0 - 1 ## i64
   if ffw_verify_best_exact(st, st[2]) == 1
     rank = st[7] ## i64
-    body = rank.to_s() + "\n"
-    i = 0 ## i64
-    while i < rank
-      body = body + st[st[47] + i].to_s() + " " + st[st[48] + i].to_s() + " " + st[st[49] + i].to_s() + "\n"
-      i += 1
+    body = ffw_view_text(st, st[47], st[48], st[49], 0 - 1, rank)
     z = write_file(path, body)
     st[32] = st[32] + 1
     result = rank
@@ -1049,12 +1069,7 @@
   result = 0 - 1 ## i64
   if ffw_verify_current_exact(st, st[2]) == 1
     rank = st[6] ## i64
-    body = rank.to_s() + "\n"
-    i = 0 ## i64
-    while i < rank
-      slot = st[st[50] + i] ## i64
-      body = body + st[st[44] + slot].to_s() + " " + st[st[45] + slot].to_s() + " " + st[st[46] + slot].to_s() + "\n"
-      i += 1
+    body = ffw_view_text(st, st[44], st[45], st[46], st[50], rank)
     z = write_file(path, body)
     st[32] = st[32] + 1
     result = rank

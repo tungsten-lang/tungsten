@@ -1,18 +1,9 @@
 # Evidence-guided native Metaflip defaults for square tensors 2x2 through 7x7.
 
-# Default walker count is host cores minus six, whether or not a GPU is
-# present.  A repeated 5x5 sweep on the 18-vCPU reference host put twelve
-# walkers ahead of fourteen and sixteen in aggregate moves/s.  The reserved
-# cores cover coordinator and accelerator feeder work and, with no GPU, the
-# dedicated CPU strategy lanes/pool described below.
+# Reserve two logical CPUs for coordination and the rest of the system.
+# Explicit -J values override this default, with or without a GPU.
 -> ffp_default_cpu_walkers(host_threads, gpu_enabled) (i64 i64) i64
-  host = host_threads ## i64
-  if host < 1
-    host = 1
-  reserve = 6 ## i64
-  if host <= reserve
-    reserve = host / 2
-  walkers = host - reserve ## i64
+  walkers = host_threads - 2 ## i64
   if walkers < 1
     walkers = 1
   walkers

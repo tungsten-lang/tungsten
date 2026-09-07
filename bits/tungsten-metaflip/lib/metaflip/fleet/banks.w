@@ -349,7 +349,9 @@ use basins
     strict = 1
   no_worse * strict
 
--> ffbp_pareto_remove(states, ranks, bits, pairs, novelties, roles, uses, index)
+-> ffbp_pareto_remove(states, ranks, bits, pairs, novelties, roles, uses, index, free_states = nil)
+  if free_states != nil
+    free_states.push(states[index])
   z = ffbp_remove_at(states, index) ## i64
   z = ffbp_remove_at(ranks, index)
   z = ffbp_remove_at(bits, index)
@@ -359,8 +361,11 @@ use basins
   z = ffbp_remove_at(uses, index)
   1
 
-# Counters: admitted, evicted, rejected, duplicate.
--> ffbp_pareto_add(states, ranks, bits, pairs, novelties, roles, uses, candidate, best, capacity, role, counters)
+# Counters: admitted, evicted, rejected, duplicate. With `free_states`, own
+# copies only after admission and recycle removed storage. Live + free buffers
+# never exceed the capacity high-water mark; rejected GPU endpoints allocate
+# no full search state. The reference form is retained for existing callers.
+-> ffbp_pareto_add(states, ranks, bits, pairs, novelties, roles, uses, candidate, best, capacity, role, counters, free_states = nil, state_size = 0, seed = 1)
   candidate_rank = ffw_best_rank(candidate) ## i64
   candidate_bits = ffw_best_bits(candidate) ## i64
   candidate_pairs = ffbp_flip_pairs(candidate) ## i64
@@ -384,7 +389,7 @@ use basins
       return 0
     if candidate_rank < lowest_rank
       while states.size() > 0
-        z = ffbp_pareto_remove(states, ranks, bits, pairs, novelties, roles, uses, states.size() - 1) ## i64
+        z = ffbp_pareto_remove(states, ranks, bits, pairs, novelties, roles, uses, states.size() - 1, free_states) ## i64
         counters[1] = counters[1] + 1
 
   i = 0
@@ -407,12 +412,23 @@ use basins
   i = states.size() - 1 ## i64
   while i >= 0
     if ffbp_dominates(candidate_bits, candidate_pairs, candidate_novelty, bits[i], pairs[i], novelties[i]) == 1
-      z = ffbp_pareto_remove(states, ranks, bits, pairs, novelties, roles, uses, i) ## i64
+      z = ffbp_pareto_remove(states, ranks, bits, pairs, novelties, roles, uses, i, free_states) ## i64
       counters[1] = counters[1] + 1
     i -= 1
 
   if states.size() < capacity
-    states.push(candidate)
+    stored = candidate
+    if free_states != nil
+      if free_states.size() > 0
+        stored = free_states.pop()
+      else
+        stored = i64[state_size]
+      loaded = ffw_reseed_from(stored, candidate, seed) ## i64
+      if loaded < 1
+        free_states.push(stored)
+        counters[2] = counters[2] + 1
+        return 0
+    states.push(stored)
     ranks.push(candidate_rank)
     bits.push(candidate_bits)
     pairs.push(candidate_pairs)
@@ -451,6 +467,9 @@ use basins
       return 0
   loaded = ffw_reseed_from(states[victim], candidate, 1) ## i64
   if loaded < 1
+    if free_states != nil
+      counters[2] = counters[2] + 1
+      return 0
     states[victim] = candidate
   ranks[victim] = candidate_rank
   bits[victim] = candidate_bits

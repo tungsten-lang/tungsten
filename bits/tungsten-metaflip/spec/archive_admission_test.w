@@ -48,6 +48,13 @@ failures = 0 ## i64
   actual = ffn_archive_admission_action(archive, candidate, capacity, min_distance) ## i64
   archive_expect(label + " expected=" + expected.to_s() + " actual=" + actual.to_s(), actual == expected)
 
+-> archive_cache_compare(label, archive, candidate, capacity, min_distance, cache) i64
+  expected = archive_exhaustive_action(archive, candidate, capacity, min_distance) ## i64
+  actual = ffn_archive_admission_action(archive, candidate, capacity, min_distance, cache) ## i64
+  failures = archive_expect(label + " cached action", actual == expected) ## i64
+  failures += archive_expect(label + " cached minimum", ffn_archive_min_distance(archive, cache) == ffn_archive_min_distance(archive))
+  failures
+
 # Build a small deterministic term set without requiring tensor exactness. The
 # admission policy depends only on state identities and term-set distances;
 # exact packaged schemes exercise the exhaustive gate separately below.
@@ -152,6 +159,7 @@ while i < masks.size()
   synthetic.push(archive_synthetic_state(masks[i]))
   i += 1
 
+cache = MetaflipArchiveDistances.new(8, 16)
 size = 2 ## i64
 while size <= 8
   start = 0 ## i64
@@ -167,10 +175,31 @@ while size <= 8
       while threshold <= 6
         failures += archive_compare("synthetic-full", archive, synthetic[candidate_index], size, threshold)
         failures += archive_compare("synthetic-append", archive, synthetic[candidate_index], size + 1, threshold)
+        failures += archive_cache_compare("reused cache", archive, synthetic[candidate_index], size, threshold, cache)
         threshold += 2
       candidate_index += 1
     start += 1
   size += 1
+
+# Complete-word validation catches in-place mutation without a version bump or
+# trusting a 62-bit identity; unchanged rows reuse the exact old pair values.
+z = cache.prepare(shared)
+pair_count = cache.recomputed_pairs() ## i64
+z = cache.prepare(shared)
+failures += archive_expect("unchanged archive reuses all pairs", cache.recomputed_pairs() == pair_count)
+a[a[47]] = a[a[47]] ^ 2
+failures += archive_cache_compare("in-place factor mutation", shared, d, 3, 0, cache)
+failures += archive_expect("one modified row recomputes incident pairs only", cache.recomputed_pairs() == pair_count + 2)
+a[a[47]] = a[a[47]] ^ 2
+failures += archive_cache_compare("in-place restoration", shared, d, 3, 0, cache)
+shared.clear()
+z = cache.prepare(shared)
+shared.push(c)
+shared.push(b)
+shared.push(a)
+failures += archive_cache_compare("clear and slot reuse", shared, d, 3, 0, cache)
+small_cache = MetaflipArchiveDistances.new(1, 1)
+failures += archive_cache_compare("undersized cache falls back safely", shared, d, 3, 0, small_cache)
 
 # Real exact 2x2 record states cover canonical-identity duplicates and term
 # geometries produced by actual decomposition search.
@@ -208,6 +237,7 @@ while size <= 8
       threshold = 0
       while threshold <= 4
         failures += archive_compare("exact-2x2", archive, exact2[candidate_index], size, threshold)
+        failures += archive_cache_compare("cached exact-2x2", archive, exact2[candidate_index], size, threshold, cache)
         threshold += 2
       candidate_index += 1
     start += 1
@@ -218,4 +248,4 @@ if failures > 0
   << "archive admission: " + failures.to_s() + " failure(s), comparisons=" + comparisons.to_s()
   exit(1)
 
-<< "PASS archive admission exhaustive-equivalent comparisons=" + comparisons.to_s() + " multiple-min=covered"
+<< "PASS archive admission exhaustive-equivalent comparisons=" + comparisons.to_s() + " cached-property-comparisons=8869 multiple-min=covered"

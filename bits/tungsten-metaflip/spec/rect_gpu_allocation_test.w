@@ -102,6 +102,54 @@ exposure[0] = 0
 used = ffrpo_gpu_allocate(32768, 2, "single", shapes, ready, drops, density, leverage, exposure, failures, allocation, scores)
 failed += rect_gpu_alloc_expect("single policy conserves full width on one child", used == 32768 && rect_gpu_alloc_sum(allocation) == 32768 && rect_gpu_alloc_active(allocation) == 1 && allocation[2] == 32768)
 
+# A failed shape's penalty/exposure can dwarf every competitor indefinitely.
+# Once backoff expires, a GPU recovery epoch must not depend on winning that
+# score comparison. This reproduces the hibernation-spanning failure state.
+recovery = i64[count]
+recovery[0] = 1
+exposure[0] = 93585377
+failures[0] = 1
+used = ffrpo_gpu_allocate(8192, 1, "adaptive", shapes, ready, drops, density, leverage, exposure, failures, allocation, scores)
+failed += rect_gpu_alloc_expect("ordinary scoring cannot guarantee a recovery probe", allocation[0] == 0)
+used = ffrpo_gpu_allocate_recovering(8192, 1, "adaptive", shapes, ready, drops, density, leverage, exposure, failures, recovery, allocation, scores)
+failed += rect_gpu_alloc_expect("eligible degraded child receives a full-width recovery probe", used == 8192 && allocation[0] == 8192 && rect_gpu_alloc_active(allocation) == 1)
+
+# Backoff/ineligible-host state remains authoritative even for a degraded GPU.
+ready[0] = 0
+used = ffrpo_gpu_allocate_recovering(8192, 1, "adaptive", shapes, ready, drops, density, leverage, exposure, failures, recovery, allocation, scores)
+failed += rect_gpu_alloc_expect("recovery never bypasses readiness and backoff", allocation[0] == 0 && used == 8192)
+ready[0] = 1
+
+# Multiple persistent recovery requests rotate independently of their scores.
+i = 0
+while i < count
+  recovery[i] = 1
+  seen[i] = 0
+  i += 1
+epoch = 0
+while epoch < count
+  used = ffrpo_gpu_allocate_recovering(8192, epoch, "adaptive", shapes, ready, drops, density, leverage, exposure, failures, recovery, allocation, scores)
+  i = 0
+  while i < count
+    if allocation[i] > 0
+      seen[i] += 1
+    i += 1
+  epoch += 1
+failed += rect_gpu_alloc_expect("unequal-score recovery requests all receive probes", seen[0] == 1 && seen[1] == 1 && seen[2] == 1 && seen[3] == 1)
+used = ffrpo_gpu_allocate_recovering(16384, 2, "adaptive", shapes, ready, drops, density, leverage, exposure, failures, recovery, allocation, scores)
+failed += rect_gpu_alloc_expect("recovery preserves adaptive occupancy and distinct children", used == 16384 && allocation[2] == 8192 && allocation[3] == 8192 && rect_gpu_alloc_active(allocation) == 2)
+used = ffrpo_gpu_allocate_recovering(32768, 0, "single", shapes, ready, drops, density, leverage, exposure, failures, recovery, allocation, scores)
+failed += rect_gpu_alloc_expect("single policy preserves full width during recovery", used == 32768 && allocation[0] == 32768 && rect_gpu_alloc_active(allocation) == 1)
+
+# A clean GPU epoch clears the existing health gate; normal selection resumes.
+i = 0
+while i < count
+  recovery[i] = ffrpo_accelerator_degraded_after_epoch(recovery[i], 1, 0, 0)
+  i += 1
+used = ffrpo_gpu_allocate_recovering(8192, 1, "adaptive", shapes, ready, drops, density, leverage, exposure, failures, recovery, allocation, scores)
+failed += rect_gpu_alloc_expect("clean GPU epoch returns scheduling to ordinary scores", used == 8192 && allocation[0] == 0)
+failed += rect_gpu_alloc_expect("CPU-only epoch does not falsely clear GPU health", ffrpo_accelerator_degraded_after_epoch(1, 0, 0, 0) == 1)
+
 ready[0] = 0
 ready[1] = 0
 ready[2] = 0
@@ -111,4 +159,4 @@ failed += rect_gpu_alloc_expect("no eligible host means no GPU allocation", used
 
 if failed != 0
   exit(1)
-<< "PASS rectangular GPU allocation preserves occupancy, rotation, and host gates"
+<< "PASS rectangular GPU allocation preserves occupancy, recovery, rotation, and host gates"

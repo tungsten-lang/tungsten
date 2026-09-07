@@ -101,3 +101,18 @@ if new_ns < 1
 
 speedup_milli = old_ns * 1000 / new_ns ## i64
 << "ARCHIVE_ADMISSION_BENCH tensor=7x7 archive=16 exhaustive_distance_calls=2056 bounded_distance_calls=256 old_ns=" + old_ns.to_s() + " new_ns=" + new_ns.to_s() + " speedup_milli=" + speedup_milli.to_s() + " action=" + new_action.to_s()
+
+cache = MetaflipArchiveDistances.new(16, 320)
+warm_cached = ffn_archive_admission_action(archive, candidate, 16, 0, cache) ## i64
+started = ccall_nobox("__w_clock_ns_raw")
+i = 0
+while i < 20
+  cached_action = ffn_archive_admission_action(archive, candidate, 16, 0, cache) ## i64
+  if cached_action != new_action || warm_cached != new_action
+    << "FAIL cached archive semantic mismatch"
+    exit(1)
+  i += 1
+cached_ns = (ccall_nobox("__w_clock_ns_raw") - started) / 20 ## i64
+if cached_ns < 1
+  cached_ns = 1
+<< "ARCHIVE_CACHE_BENCH tensor=7x7 archive=16 iterations=20 uncached_ns=" + new_ns.to_s() + " cached_ns=" + cached_ns.to_s() + " speedup_milli=" + (new_ns * 1000 / cached_ns).to_s() + " recomputed_pairs=" + cache.recomputed_pairs().to_s() + " action=" + new_action.to_s()

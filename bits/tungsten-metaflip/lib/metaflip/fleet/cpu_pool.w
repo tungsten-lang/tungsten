@@ -180,3 +180,149 @@
           elapsed_ms[slot] = elapsed_ms[slot]
         done_channel.send(slot)
     0
+
+# Copy the complete continuation, not just its best scheme: RNG, hash chains,
+# current state, leases and move counters must all survive a publication.
+-> ffcp_copy_words(destination, source, count) (i64[] i64[] i64) i64
+  word = 0 ## i64
+  while word < count
+    destination[word] = source[word]
+    word += 1
+  count
+
+# Two fixed buffers per lane. Only the worker touches `live` during an epoch;
+# coordinator banks/rendering see the stable published buffer. A completion
+# transfers ownership through the channel, and that lane stays parked until
+# its endpoint has been exact-gated and any reseed has been applied. No endpoint
+# or speculative continuation is dropped/coalesced. Other lanes need not park.
++ MetaflipCPUPool
+  ro :ready, :threads, :active, :epochs, :completed
+
+  -> new(states, state_size, modes, steps, core_slots, controls, recent, recent_capacity, stats, elapsed)
+    @states = states
+    @state_size = state_size
+    @workers = states.size()
+    if @workers < 1
+      raise "metaflip CPU pool: at least one worker is required"
+    @modes = modes
+    @steps = steps
+    @core_slots = core_slots
+    @controls = controls
+    @stats = stats
+    @elapsed = elapsed
+    @live = []
+    @starts = []
+    @threads = []
+    @busy = i64[@workers]
+    @ready = i64[@workers]
+    @epochs = i64[@workers]
+    @live_elapsed = i64[@workers]
+    @live_steps = i64[@workers]
+    @live_core = i64[1]
+    @live_controls = i64[7]
+    @live_stats = i64[9]
+    @done = Channel.new(@workers)
+    @active = 0
+    @completed = 0
+    @stopped = 0
+    special_modes = i64[4]
+    lane = 0 ## i64
+    while lane < @workers
+      mode = modes[lane] ## i64
+      if mode < 0 || mode > 3
+        raise "metaflip CPU pool: invalid worker mode"
+      if mode > 0
+        if special_modes[mode] != 0
+          raise "metaflip CPU pool: special lanes must have unique controls"
+        special_modes[mode] = 1
+      lane += 1
+    lane = 0
+    while lane < @workers
+      @live.push(i64[state_size])
+      start = Channel.new(1)
+      @starts.push(start)
+      @threads.push(ffcp_spawn(@live, lane, modes[lane], @live_steps, @live_core, @live_controls, recent, recent_capacity, @live_stats, @live_elapsed, start, @done))
+      lane += 1
+
+  -> launch_idle()
+    if @stopped != 0
+      raise "metaflip CPU pool: cannot restart a stopped pool"
+    lane = 0 ## i64
+    while lane < @workers
+      if @busy[lane] == 0
+        z = ffcp_copy_words(@live[lane], @states[lane], @state_size)
+        @live_steps[lane] = @steps[lane]
+        if @modes[lane] == 1
+          @live_core[0] = @core_slots[0]
+        if @modes[lane] == 2
+          z = ffcp_copy_words(@live_controls, @controls, 7)
+        if @modes[lane] == 3
+          z = ffcp_copy_words(@live_stats, @stats, 9)
+        @busy[lane] = 1
+        @active += 1
+        @starts[lane].send(1)
+      lane += 1
+    @active
+
+  -> begin_intake()
+    lane = 0 ## i64
+    while lane < @workers
+      @ready[lane] = 0
+      @elapsed[lane] = 0
+      lane += 1
+    @completed = 0
+    0
+
+  -> publish(lane)
+    if lane < 0 || lane >= @workers || @busy[lane] != 1
+      raise "metaflip CPU pool: invalid or duplicate completion"
+    z = ffcp_copy_words(@states[lane], @live[lane], @state_size)
+    if @modes[lane] == 3
+      z = ffcp_copy_words(@stats, @live_stats, 9)
+    @elapsed[lane] = @live_elapsed[lane]
+    @epochs[lane] = @epochs[lane] + 1
+    @busy[lane] = 0
+    @ready[lane] = 1
+    @active -= 1
+    @completed += 1
+    lane
+
+  # `all` is reserved for synchronous comparison, explicit generation reset,
+  # rank-drop migration, and shutdown. Normal intake waits for one completion
+  # then consumes only the already-ready bounded queue, never a straggler.
+  -> collect(all)
+    if @active > 0
+      z = self.publish(@done.recv())
+    if all == 1
+      while @active > 0
+        z = self.publish(@done.recv())
+    else
+      available = 1 ## i64
+      while @active > 0 && available == 1
+        result = @done.try_receive()
+        if result.received?()
+          z = self.publish(result.value())
+        else
+          available = 0
+    @completed
+
+  -> minimum_epochs()
+    minimum = @epochs[0] ## i64
+    lane = 1 ## i64
+    while lane < @workers
+      if @epochs[lane] < minimum
+        minimum = @epochs[lane]
+      lane += 1
+    minimum
+
+  -> stop_commands()
+    if @stopped != 0
+      return 0
+    if @active != 0
+      raise "metaflip CPU pool: drain and intake before stopping"
+    lane = 0 ## i64
+    while lane < @workers
+      @starts[lane].send(0)
+      lane += 1
+    @stopped = 1
+    0

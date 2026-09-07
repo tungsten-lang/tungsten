@@ -106,3 +106,40 @@
     threads[lane] = nil
     lane += 1
   1
+
+# Quotas and state slots stay immutable from dispatch through collect.
+# Totals span all CPU batches in one GPU epoch.
+-> ffrcp_dispatch(starts, elapsed_ms, workers)
+  lane = 0 ## i64
+  while lane < workers
+    elapsed_ms[lane] = 0
+    starts[lane].send(1)
+    lane += 1
+  1
+
+-> ffrcp_collect(done_channel, elapsed_ms, total_ms, workers)
+  slowest = 0 ## i64
+  lane = 0 ## i64
+  while lane < workers
+    slot = done_channel.recv() ## i64
+    if slot >= 0 && slot < workers
+      total_ms[slot] += elapsed_ms[slot]
+      if elapsed_ms[slot] > slowest
+        slowest = elapsed_ms[slot]
+    lane += 1
+  slowest
+
+# Never enlarge a follow-up beyond the measured first batch. Divide longer
+# batches into roughly <=200 ms pieces without computing steps*target_ms.
+-> ffrcp_followup_steps(steps, wall_ms) (i64 i64) i64
+  if steps < 1
+    return 0
+  if wall_ms <= 200
+    return steps
+  divisor = wall_ms / 200 ## i64
+  if wall_ms % 200 != 0
+    divisor += 1
+  next_steps = steps / divisor ## i64
+  if next_steps < 1
+    next_steps = 1
+  next_steps

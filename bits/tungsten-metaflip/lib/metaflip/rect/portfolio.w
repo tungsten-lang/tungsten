@@ -8,10 +8,10 @@
 # that shape's checkpoint, refreshing basins without unsafe live migration.
 #
 # Within an epoch, every shape first runs `shape_epoch_rounds` ordinary rounds
-# (default sixteen). Fast shapes then keep taking one extra round at a time while
-# their observed average round wall-time still fits before the predicted finish
-# of the slowest shape's base quota — straggler-fill instead of sitting idle at
-# the portfolio join.
+# (default sixteen). Fast shapes then take bounded batches of extra rounds
+# while their observed wall-time fits before the slowest base quota finishes.
+# A GPU child awaiting its first progress report permits at most one predicted
+# second of fill work, so cold compilation need not park the other CPU lanes.
 
 use campaign
 use policy
@@ -324,6 +324,44 @@ use ../paths
   if avg_round_ms < remaining
     return 1
   0
+
+# Amortize child startup/checkpoint intake without creating an unbounded extra
+# epoch. Batch to at most one predicted second and the original base quota;
+# retain a single-round fallback for inherently slower rounds that still fit.
+# A cold GPU has no finish estimate: use a one-second
+# provisional window only while that base child is still alive. The caller
+# clamps even this window to the campaign's hard launch deadline.
+-> ffrpo_fill_quota(avg_round_ms, now_ms, deadline_ms, max_rounds, cold_gpu, batch) (i64 i64 i64 i64 i64 i64) i64
+  if batch == 0
+    return ffrpo_should_fill_round(avg_round_ms, now_ms, deadline_ms)
+  if avg_round_ms < 1 || max_rounds < 1
+    return 0
+  remaining = deadline_ms - now_ms ## i64
+  if cold_gpu != 0 && remaining > 1000
+    remaining = 1000
+  if remaining <= avg_round_ms
+    return 0
+  budget = remaining / 2 ## i64
+  if budget > 1000
+    budget = 1000
+  rounds = budget / avg_round_ms ## i64
+  if rounds < 1
+    rounds = 1
+  if rounds > max_rounds
+    rounds = max_rounds
+  rounds
+
+-> ffrpo_segment_rounds(quota, sequence, terminal) (i64 i64 i64) i64
+  if quota < 1
+    quota = 1
+  # Child final status increments sequence once without doing another round.
+  if terminal != 0
+    if sequence <= 1
+      return 0
+    sequence -= 1
+  if sequence > 0 && sequence < quota
+    return sequence
+  quota
 
 -> ffrpo_backoff(failures) (i64) i64
   count = failures ## i64
@@ -1041,7 +1079,27 @@ use ../paths
     selected[best] = 1
   best
 
--> ffrpo_gpu_allocate(total_lanes, epoch, policy, shapes, ready, rank_drops, density_gains, leverage, exposure, failures, allocation, scores) (i64 i64 String i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[]) i64
+# An eligible degraded child needs a real GPU epoch to establish recovery.
+# Score penalties (especially wall-time exposure spanning host sleep) must not
+# indefinitely prevent that probe. The caller has already applied backoff and
+# CPU-host gates in `ready`; rotate probes independently of empirical scores.
+-> ffrpo_gpu_pick_recovery(epoch, ready, selected, recovery) (i64 i64[] i64[] i64[]) i64
+  count = ready.size() ## i64
+  if count < 1 || selected.size() < count || recovery.size() < count
+    return 0 - 1
+  start = epoch % count ## i64
+  if start < 0
+    start += count
+  offset = 0 ## i64
+  while offset < count
+    i = (start + offset) % count ## i64
+    if ready[i] != 0 && recovery[i] != 0 && selected[i] == 0
+      selected[i] = 1
+      return i
+    offset += 1
+  0 - 1
+
+-> ffrpo_gpu_allocate_recovering(total_lanes, epoch, policy, shapes, ready, rank_drops, density_gains, leverage, exposure, failures, recovery, allocation, scores) (i64 i64 String i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[]) i64
   count = shapes.size() ## i64
   units = total_lanes / 16 ## i64
   zero_gpu_discount = i64[count]
@@ -1064,7 +1122,9 @@ use ../paths
     active_limit = ffrpo_gpu_adaptive_limit(units * 16, ready)
   active_count = 0 ## i64
   while active_count < active_limit
-    best = ffrpo_gpu_pick(epoch + active_count, ready, selected, scores) ## i64
+    best = ffrpo_gpu_pick_recovery(epoch + active_count, ready, selected, recovery) ## i64
+    if best < 0
+      best = ffrpo_gpu_pick(epoch + active_count, ready, selected, scores)
     if best < 0
       break
     active_count += 1
@@ -1144,6 +1204,10 @@ use ../paths
     allocation[i] = unit_allocation[i] * 16
     i += 1
   used * 16
+
+-> ffrpo_gpu_allocate(total_lanes, epoch, policy, shapes, ready, rank_drops, density_gains, leverage, exposure, failures, allocation, scores) (i64 i64 String i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[]) i64
+  recovery = i64[shapes.size()]
+  ffrpo_gpu_allocate_recovering(total_lanes, epoch, policy, shapes, ready, rank_drops, density_gains, leverage, exposure, failures, recovery, allocation, scores)
 
 # Keep the GPU useful on very small portfolios: if CPU floor rotation selected
 # only CPU-only shapes, move one already-budgeted CPU host slot to a supported
@@ -1243,6 +1307,17 @@ use ../paths
 # portfolio reallocations; each shape keeps its sticky islands for
 # `shape_epoch_rounds` ordinary rectangular rounds before the exact restart.
 -> ffrpo_run(shape_spec, repo_root, state_dir, best_base, best_explicit, status_path, status_explicit, run_tag, total_j, steps, max_epochs, max_secs, shape_epoch_rounds, dslack, cycles, gpu_requested, total_gpu_lanes, gpu_policy, gpu_steps, gpu_epoch_rounds, gpu_binary, gpu_rebuild, quiet, tui, stop_on_record, naive_seed, worker_binary) (String String String String i64 String i64 String i64 i64 i64 i64 i64 i64 i64 i64 i64 String i64 i64 String i64 i64 i64 i64 i64 String) i64
+  if ffrc_cpu_gpu_mode(env("METAFLIP_RECT_CPU_GPU")) < 0
+    << "RECT_PORTFOLIO_ERROR code=cpu-gpu-policy METAFLIP_RECT_CPU_GPU must be barrier or overlap"
+    return 2
+  fill_batch = 1 ## i64
+  fill_override = env("METAFLIP_RECT_FILL")
+  if fill_override != nil && fill_override != ""
+    if fill_override != "single" && fill_override != "batch"
+      << "RECT_PORTFOLIO_ERROR code=fill-policy METAFLIP_RECT_FILL must be single or batch"
+      return 2
+    if fill_override == "single"
+      fill_batch = 0
   labels = []
   code_storage = i64[32]
   count = ffrpo_parse_shapes(shape_spec, labels, code_storage) ## i64
@@ -1423,6 +1498,7 @@ use ../paths
   # arena was fixed.
   threads = []
   segment_joined = i64[count]
+  segment_quotas = i64[count]
   parent_cancelled = i64[count]
   base_complete = i64[count]
   base_wall_ms = i64[count]
@@ -1533,7 +1609,7 @@ use ../paths
       if gpu_sched_ready[i] != 0 && cpu_allocation[i] > 0
         gpu_launch_ready[i] = 1
       i += 1
-    gpu_allocated = ffrpo_gpu_allocate(total_gpu_lanes, epoch, gpu_policy, shapes, gpu_launch_ready, rank_drops, density_gains, leverage, exposure, gpu_failures, gpu_allocation, gpu_scores) ## i64
+    gpu_allocated = ffrpo_gpu_allocate_recovering(total_gpu_lanes, epoch, gpu_policy, shapes, gpu_launch_ready, rank_drops, density_gains, leverage, exposure, gpu_failures, gpu_degraded, gpu_allocation, gpu_scores) ## i64
     if quiet == 0 && tui == 0
       << "RECT_PORTFOLIO_CAPABILITY state=launch epoch=" + epoch.to_s() + " cpu=" + allocated.to_s() + " gpu=" + gpu_allocated.to_s()
       flush()
@@ -1546,6 +1622,7 @@ use ../paths
       reset_children[i] = 0
       active[i] = 0
       segment_joined[i] = 1
+      segment_quotas[i] = shape_epoch_rounds
       parent_cancelled[i] = 0
       base_complete[i] = 0
       base_wall_ms[i] = 0
@@ -1607,8 +1684,9 @@ use ../paths
       now_ms = ccall("__w_clock_ms") ## i64
       elapsed_s = (now_ms - start_ms) / 1000
 
-      # Harvest finished segments and optionally start one-round straggler fills.
+      # Harvest complete segments before reusing their checkpoint/status paths.
       deadline_ms = epoch_started_ms ## i64
+      cold_gpu = 0 ## i64
       i = 0
       while i < count
         if launched[i] != 0
@@ -1622,20 +1700,11 @@ use ../paths
               segment_ms = 0
             total_wall_ms[i] += segment_ms
             body = read_file(child_status_paths[i])
-            seg_rounds = shape_epoch_rounds ## i64
-            if base_complete[i] != 0
-              seg_rounds = 1
+            seg_rounds = segment_quotas[i] ## i64
             if body != nil && body.size() > 0
               child_status_seen = ffrpo_parse_child_status(body, child_status_values) ## i64
               seq = ffrpo_parsed_status_i64(child_status_values, child_status_seen, 0, 0) ## i64
-              if seq > 0
-                if base_complete[i] == 0
-                  if seq < shape_epoch_rounds
-                    seg_rounds = seq
-                  if seq >= shape_epoch_rounds
-                    seg_rounds = shape_epoch_rounds
-                if base_complete[i] != 0
-                  seg_rounds = 1
+              seg_rounds = ffrpo_segment_rounds(segment_quotas[i], seq, ffrpo_child_status_stopped(body))
               acc_cpu_moves[i] += ffrpo_parsed_status_i64(child_status_values, child_status_seen, 1, 0)
               acc_gpu_moves[i] += ffrpo_parsed_status_i64(child_status_values, child_status_seen, 2, 0)
               acc_cpu_ms[i] += ffrpo_parsed_status_i64(child_status_values, child_status_seen, 3, segment_ms * cpu_allocation[i])
@@ -1677,6 +1746,8 @@ use ../paths
             live_body = read_file(child_status_paths[i])
             child_status_seen = ffrpo_parse_child_status(live_body, child_status_values) ## i64
             live_rounds = ffrpo_parsed_status_i64(child_status_values, child_status_seen, 0, 0) ## i64
+            if child_gpu_flags[i] != 0 && live_rounds < 1 && now_ms - epoch_started_ms >= 250
+              cold_gpu = 1
             predicted = ffrpo_predict_base_finish_ms(epoch_started_ms, now_ms, shape_epoch_rounds, live_rounds, 0, 0) ## i64
             if predicted > deadline_ms
               deadline_ms = predicted
@@ -1685,6 +1756,10 @@ use ../paths
         i += 1
 
       now_ms = ccall("__w_clock_ms") ## i64
+      if fill_batch != 0 && cold_gpu != 0 && deadline_ms < now_ms + 1000
+        deadline_ms = now_ms + 1000
+      if max_secs > 0 && deadline_ms > start_ms + max_secs * 1000
+        deadline_ms = start_ms + max_secs * 1000
       i = 0
       while i < count
         do_fill = 1 ## i64
@@ -1699,8 +1774,11 @@ use ../paths
           avg_round = total_wall_ms[i] / total_rounds[i]
         if do_fill != 0 && avg_round < 1 && total_wall_ms[i] > 0
           avg_round = total_wall_ms[i]
-        if do_fill != 0 && ffrpo_should_fill_round(avg_round, now_ms, deadline_ms) == 0
-          do_fill = 0
+        fill_rounds = 0 ## i64
+        if do_fill != 0
+          fill_rounds = ffrpo_fill_quota(avg_round, now_ms, deadline_ms, shape_epoch_rounds, cold_gpu, fill_batch)
+          if fill_rounds == 0
+            do_fill = 0
         if do_fill != 0
           fill_serial[i] += 1
           shape_label = labels[i]
@@ -1714,9 +1792,10 @@ use ../paths
           if cleared
             child_elapsed_ms[i] = 0
             segment_joined[i] = 0
+            segment_quotas[i] = fill_rounds
             restart_nonce = ffrcb_portfolio_nonce(epoch, i, fill_serial[i]) ## i64
             restart_door_ticket = ffrcb_portfolio_door_ticket(epoch, i, fill_serial[i]) ## i64
-            threads[i] = ffrpo_dispatch_shape(worker_binary, launcher_threads, launcher_commands, launcher_states, shape_label, repo_root, best_paths[i], child_status_paths[i], child_tag, cpu_allocation[i], steps, 1, remain_secs, dslack, cycles, child_gpu_flags[i], gpu_allocation[i], gpu_steps, gpu_epoch_rounds, ffrpo_gpu_binary(gpu_binary, shape_label), 0, stop_on_record, 0, restart_nonce, restart_door_ticket, exit_codes, child_elapsed_ms, i)
+            threads[i] = ffrpo_dispatch_shape(worker_binary, launcher_threads, launcher_commands, launcher_states, shape_label, repo_root, best_paths[i], child_status_paths[i], child_tag, cpu_allocation[i], steps, fill_rounds, remain_secs, dslack, cycles, child_gpu_flags[i], gpu_allocation[i], gpu_steps, gpu_epoch_rounds, ffrpo_gpu_binary(gpu_binary, shape_label), 0, stop_on_record, 0, restart_nonce, restart_door_ticket, exit_codes, child_elapsed_ms, i)
             if threads[i] == nil
               exit_codes[i] = 2
               segment_joined[i] = 1
@@ -1889,6 +1968,8 @@ use ../paths
               if finish > dl
                 dl = finish
             i += 1
+          if max_secs > 0 && dl > start_ms + max_secs * 1000
+            dl = start_ms + max_secs * 1000
           i = 0
           while i < count
             if launched[i] != 0 && base_complete[i] != 0 && segment_joined[i] != 0 && exit_codes[i] == 0 && acc_exact_rejects[i] == 0 && stop_requested == 0
@@ -1911,19 +1992,25 @@ use ../paths
     while i < count
       thread = threads[i]
       # The live loop normally joins and harvests every completed segment.
-      # Only a genuinely unharvested final segment belongs here; replaying an
-      # already joined status doubles moves, reward exposure, and archive
-      # counters.
-      if thread != nil && segment_joined[i] == 0
-        joined = ffrpo_finish_segment(worker_binary, thread, launcher_states, i) ## i64
+      # Cancellation joins the OS thread but does not harvest its last status.
+      # Keep that already-published work; ordinary joined segments must not be
+      # replayed, since doing so doubles their counters.
+      if (thread != nil && segment_joined[i] == 0) || parent_cancelled[i] != 0
+        if parent_cancelled[i] == 0
+          joined = ffrpo_finish_segment(worker_binary, thread, launcher_states, i) ## i64
         threads[i] = nil
         segment_joined[i] = 1
-        if child_elapsed_ms[i] > 0 && launched[i] != 0
-          # Final unharvested segment (should be rare after the loop).
+        if launched[i] != 0 && (child_elapsed_ms[i] > 0 || parent_cancelled[i] != 0)
           total_wall_ms[i] += child_elapsed_ms[i]
+          seg_rounds = segment_quotas[i] ## i64
+          if parent_cancelled[i] != 0
+            seg_rounds = 0
+            reported_terminal[i] = 0
           body = read_file(child_status_paths[i])
           if body != nil && body.size() > 0
             child_status_seen = ffrpo_parse_child_status(body, child_status_values) ## i64
+            seq = ffrpo_parsed_status_i64(child_status_values, child_status_seen, 0, 0) ## i64
+            seg_rounds = ffrpo_segment_rounds(segment_quotas[i], seq, ffrpo_child_status_stopped(body))
             acc_cpu_moves[i] += ffrpo_parsed_status_i64(child_status_values, child_status_seen, 1, 0)
             acc_gpu_moves[i] += ffrpo_parsed_status_i64(child_status_values, child_status_seen, 2, 0)
             acc_cpu_ms[i] += ffrpo_parsed_status_i64(child_status_values, child_status_seen, 3, child_elapsed_ms[i] * cpu_allocation[i])
@@ -1952,12 +2039,10 @@ use ../paths
                 reported_terminal[i] = 1
           if body != nil
             ccall("w_value_free_w", body)
+          total_rounds[i] += seg_rounds
           if base_complete[i] == 0
             base_complete[i] = 1
             base_wall_ms[i] = child_elapsed_ms[i]
-            total_rounds[i] += shape_epoch_rounds
-          if base_complete[i] != 0 && total_rounds[i] < shape_epoch_rounds
-            total_rounds[i] = shape_epoch_rounds
       active[i] = 0
       i += 1
 
@@ -1991,6 +2076,8 @@ use ../paths
             failed = 1
         if failed == 0
           audit_due = ffrpo_metric_audit_due(epoch) ## i64
+          if parent_cancelled[i] != 0
+            audit_due = 1
           terminal_ok = reported_terminal[i] ## i64
           if terminal_ok != 0 && (reported_ranks[i] < 1 || reported_bits[i] < 0)
             terminal_ok = 0

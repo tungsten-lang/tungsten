@@ -7,7 +7,9 @@ description "Domain-neutral exact-gated adaptive search plus Pure-Tungsten CPU a
 license     "MIT OR Apache-2.0 WITH LLVM-exception"
 authors     ["Erik Peterson"]
 
-executable  "metaflip", source: "bin/metaflip.w"
+# The search hot loop needs optimized code; `tungsten build --debug` remains
+# available for debugging without changing other packages' build defaults.
+executable  "metaflip", source: "bin/metaflip.w", profile: "release", native: true
 # Metaflip compiles specialized workers at run time, so installed builds
 # retain the namespaced pure-Tungsten sources and operational seed schemes as
 # one relocatable runtime subtree. Generated GPU artifacts stay in the cache.

@@ -752,8 +752,12 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
 + BitExecutable
   ro :name
   ro :source
+  ro :profile
+  ro :native
+  ro :opt_level
+  ro :cflags
 
-  -> new(@name, @source)
+  -> new(@name, @source, @profile = "", @native = "false", @opt_level = "", @cflags = "")
 
 + Bitfile
   ro :name
@@ -826,14 +830,27 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
     groups
 
   -> quoted(line)
-    first = line.index("\"")
-    if first == nil
-      return nil
-    rest = line.slice(first + 1, line.size() - first - 1)
-    second = rest.index("\"")
-    if second == nil
-      return nil
-    rest.slice(0, second)
+    i = 0
+    quote = ""
+    value = ""
+    while i < line.size()
+      c = line.slice(i, 1)
+      if quote == ""
+        if c == "\"" || c == "'"
+          quote = c
+      elsif c == quote
+        return value
+      elsif c == "\\" && i + 1 < line.size()
+        following = line.slice(i + 1, 1)
+        if following == quote || following == "\\"
+          value = value + following
+          i += 1
+        else
+          value = value + c
+      else
+        value = value + c
+      i += 1
+    nil
 
   -> second_quoted(line)
     first = line.index("\"")
@@ -846,20 +863,58 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
     tail = rest.slice(second + 1, rest.size() - second - 1)
     quoted(tail)
 
-  -> option_value(line, name)
+  -> option_tail(line, name)
     marker = name + ":"
-    pos = line.index(marker)
-    if pos == nil
-      return nil
+    quote = ""
+    i = 0
+    while i < line.size()
+      c = line.slice(i, 1)
+      if quote != ""
+        if c == "\\"
+          i += 1
+        elsif c == quote
+          quote = ""
+      elsif c == "\"" || c == "'"
+        quote = c
+      elsif line.slice(i, marker.size()) == marker
+        if i == 0 || line.slice(i - 1, 1) == "," || line.slice(i - 1, 1) == " " || line.slice(i - 1, 1) == "\t"
+          return line.slice(i + marker.size(), line.size() - i - marker.size()).strip()
+      i += 1
+    nil
 
-    tail = line.slice(pos + marker.size(), line.size() - pos - marker.size()).strip()
-    if tail.starts_with?("\"")
-      return quoted(tail)
+  -> option_value(line, name)
+    tail = option_tail(line, name)
+    if tail == nil
+      return nil
+    if tail.starts_with?("\"") || tail.starts_with?("'")
+      value = quoted(tail)
+      if value == nil
+        << "Error: Missing quoted value for " + name
+        exit(1)
+      return value
 
     comma = tail.index(",")
     if comma != nil
       tail = tail.slice(0, comma)
     tail.strip()
+
+  -> strip_comment(line)
+    quote = ""
+    i = 0
+    while i < line.size()
+      c = line.slice(i, 1)
+      if quote != ""
+        if c == "\\"
+          i += 1
+        elsif c == quote
+          quote = ""
+      elsif c == "\"" || c == "'"
+        quote = c
+      elsif c == "#"
+        if i == 0 || line.slice(i - 1, 1) == " " || line.slice(i - 1, 1) == "\t"
+          return line.slice(0, i)
+      i += 1
+    line
 
   -> option_bool(line, name)
     option_value(line, name) == "true"
@@ -892,7 +947,7 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
       @name = value
 
   -> apply_line(raw)
-    line = raw.strip()
+    line = strip_comment(raw).strip()
     if line == "" || line.starts_with?("#")
       return nil
 
@@ -928,7 +983,16 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
         executable_source = option_value(line, "source")
         if executable_source == nil || executable_source == ""
           executable_source = "lib/" + executable_name + ".w"
-        @executables.push(BitExecutable.new(executable_name, executable_source))
+        executable_profile = option_value(line, "profile") || ""
+        executable_native = option_value(line, "native") || "false"
+        executable_opt = option_value(line, "opt_level") || ""
+        executable_cflags = option_value(line, "cflags") || ""
+        cflags_tail = option_tail(line, "cflags")
+        if cflags_tail != nil
+          if !cflags_tail.starts_with?("\"") && !cflags_tail.starts_with?("'")
+            << "Error: Executable cflags must be a quoted whitespace-separated flag string"
+            exit(1)
+        @executables.push(BitExecutable.new(executable_name, executable_source, executable_profile, executable_native, executable_opt, executable_cflags))
     elsif line.starts_with?("asset ")
       append_unique(@assets, value) if value
     elsif line.starts_with?("bit ") || line.starts_with?("dependency ")
@@ -1264,12 +1328,18 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
 + BuildConfig
   ro :output
   ro :release
+  ro :debug
+  ro :native
+  ro :cpu
   ro :target
   ro :jobs
 
-  -> new(output: "build", release: false, target: "native", jobs: 1)
+  -> new(output: "build", release: false, debug: false, native: false, cpu: "", target: "", jobs: 1)
     @output = output
     @release = release
+    @debug = debug
+    @native = native
+    @cpu = cpu
     @target = target
     @jobs = jobs
 
@@ -1293,7 +1363,7 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
   -> available?
     @command != nil && @command != ""
 
-  -> compile(source, output = nil)
+  -> compile(source, output = nil, profile = "", native = "false", opt_level = "", cflags = "")
     if !available?
       return false
 
@@ -1303,9 +1373,32 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
       out = File.join(@config.output, name.replace(".w", ""))
     FileUtils.mkdir_p(path_parent(out))
     @compiled.push(out)
+    release = @config.release || (profile == "release" && !@config.debug)
+    configured_opt = env("TUNGSTEN_BITS_CLANG_OPT") || ""
+    if configured_opt == ""
+      configured_opt = env("TUNGSTEN_CLANG_OPT") || ""
+    clang_opt = configured_opt
+    if clang_opt == "" && (cflags != "" || opt_level != "" || @config.debug || profile == "debug")
+      clang_opt = (@config.debug || profile == "debug") && !@config.release ? "-O0" : "-O3"
+      cflags.replace("\t", " ").replace("\r", " ").replace("\n", " ").split(" ").each -> (token)
+        is_opt = ["-O", "-O0", "-O1", "-O2", "-O3", "-Os", "-Oz", "-Og", "-Ofast", "-O4"].include?(token)
+        if token != "" && !((@config.release || @config.debug || opt_level != "") && is_opt)
+          clang_opt = clang_opt + " " + shell_quote(token)
+      if !@config.release && !@config.debug && opt_level != ""
+        clang_opt = clang_opt + " -O" + opt_level
     command = shell_quote(@command) + " compile " + shell_quote(source) + " --out " + shell_quote(out)
-    if @config.release
+    if clang_opt != ""
+      command = "TUNGSTEN_CLANG_OPT=" + shell_quote(clang_opt) + " " + command
+    if release
       command = command + " --release"
+    if @config.debug || (profile == "debug" && !@config.release)
+      command = command + " --debug"
+    if @config.target != ""
+      command = command + " --target " + shell_quote(@config.target)
+    if @config.cpu != ""
+      command = command + " --cpu " + shell_quote(@config.cpu)
+    if @config.native || (native == "true" && @config.cpu == "" && @config.target == "")
+      command = command + " --native"
     system(command)
 
   -> link

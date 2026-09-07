@@ -3,6 +3,7 @@
 require_relative "spec_helper"
 require "fileutils"
 require "open3"
+require "shellwords"
 require "socket"
 require "tmpdir"
 
@@ -374,6 +375,90 @@ RSpec.describe "tungsten-bit CLI" do
     expect(File).not_to exist(File.join(package_dir, "build/lib/lib/main.w"))
   end
 
+  it "honors executable release profiles while retaining an explicit debug override" do
+    package_dir = File.join(@tmpdir, "profile-application-bit")
+    FileUtils.mkdir_p(File.join(package_dir, "lib"))
+    File.write(File.join(package_dir, "Bitfile"), <<~BITFILE)
+      name "profile-app"
+      version "0.1.0"
+      executable "profile-app", source: "lib/main.w", profile: "release"
+    BITFILE
+    File.write(File.join(package_dir, "lib/main.w"), "<< \"profile\"\n")
+    compiler_log = File.join(@tmpdir, "profile-compiler.log")
+    fake_compiler = write_fake_compiler(File.join(@tmpdir, "profile-tungsten"))
+    environment = {"TUNGSTEN_COMPILER" => fake_compiler, "FAKE_COMPILER_LOG" => compiler_log}
+
+    _out, err, status = run_bit("build", chdir: package_dir, env: environment)
+    expect(status.success?).to be(true), err
+    expect(File.read(compiler_log).lines.map(&:strip)).to include("--release")
+
+    File.write(compiler_log, "")
+    _out, err, status = run_bit("build", "--debug", chdir: package_dir, env: environment)
+    expect(status.success?).to be(true), err
+    debug_arguments = File.read(compiler_log).lines.map(&:strip)
+    expect(debug_arguments).to include("--debug")
+    expect(debug_arguments).not_to include("--release")
+  end
+
+  it "rejects an unknown executable build profile" do
+    package_dir = File.join(@tmpdir, "invalid-profile-bit")
+    FileUtils.mkdir_p(File.join(package_dir, "lib"))
+    File.write(File.join(package_dir, "Bitfile"), "name \"invalid-profile\"\nexecutable \"app\", source: \"lib/main.w\", profile: \"typo\"\n")
+    File.write(File.join(package_dir, "lib/main.w"), "<< \"profile\"\n")
+    fake_compiler = write_fake_compiler(File.join(@tmpdir, "invalid-profile-tungsten"))
+    out, err, status = run_bit("build", chdir: package_dir, env: {"TUNGSTEN_COMPILER" => fake_compiler})
+    expect(status.success?).to be(false)
+    expect(out + err).to include("Executable profile must be release or debug")
+  end
+
+  it "honors executable native and compiler flags with explicit CLI and environment precedence" do
+    package_dir = File.join(@tmpdir, "flags-bit")
+    FileUtils.mkdir_p(File.join(package_dir, "lib"))
+    File.write(File.join(package_dir, "lib/main.w"), "<< 1\n")
+    File.write(File.join(package_dir, "Bitfile"), <<~BITFILE)
+      name "flags-app"
+      executable "app", source: "lib/main.w", cflags: '-DNAME="solver" -Dtext=profile:debug #literal -O1 -funroll-loops', profile: "release", native: true, opt_level: "s" # comment
+    BITFILE
+    compiler_log = File.join(@tmpdir, "flags-compiler.log")
+    env_log = File.join(@tmpdir, "flags-environment.log")
+    environment = {"TUNGSTEN_COMPILER" => write_fake_compiler(File.join(@tmpdir, "flags-tungsten")), "FAKE_COMPILER_LOG" => compiler_log, "FAKE_COMPILER_ENV_LOG" => env_log, "TUNGSTEN_CLANG_OPT" => "", "TUNGSTEN_BITS_CLANG_OPT" => ""}
+    run = lambda do |arguments, overrides = {}|
+      File.write(compiler_log, "")
+      File.write(env_log, "")
+      _out, err, status = run_bit("build", *arguments, chdir: package_dir, env: environment.merge(overrides))
+      expect(status.success?).to be(true), err
+      [File.read(compiler_log).lines.map(&:chomp), Shellwords.split(File.read(env_log))]
+    end
+    argv, flags = run.call([])
+    expect(argv).to include("--release", "--native")
+    expect(flags).to eq(["-O3", '-DNAME="solver"', "-Dtext=profile:debug", "#literal", "-funroll-loops", "-Os"])
+    argv, flags = run.call(["--debug", "--cpu", "generic"])
+    expect(argv).to include("--debug", "--cpu", "generic")
+    expect(argv).not_to include("--release", "--native")
+    expect(flags).to include("-O0", "-funroll-loops")
+    expect(flags).not_to include("-O1", "-Os", "-O3")
+    argv, flags = run.call(["--release", "--target", "aarch64-linux-gnu"])
+    expect(argv).to include("--release", "--target", "aarch64-linux-gnu")
+    expect(argv).not_to include("--native")
+    expect(flags).to include("-O3")
+    expect(flags).not_to include("-O1", "-Os")
+    _argv, flags = run.call(["--debug"], "TUNGSTEN_BITS_CLANG_OPT" => "-O2 -g")
+    expect(flags).to eq(["-O2", "-g"])
+  end
+
+  it "rejects malformed executable native optimization and cflags metadata" do
+    package_dir = File.join(@tmpdir, "invalid-flags-bit")
+    FileUtils.mkdir_p(File.join(package_dir, "lib"))
+    File.write(File.join(package_dir, "lib/main.w"), "<< 1\n")
+    fake_compiler = write_fake_compiler(File.join(@tmpdir, "invalid-flags-tungsten"))
+    { 'native: "yes"' => "native must be true or false", 'opt_level: "fastest"' => "opt_level must be", 'cflags: -O3' => "cflags must be a quoted", 'cflags: "unterminated' => "Missing quoted value" }.each do |metadata, message|
+      File.write(File.join(package_dir, "Bitfile"), %(name "invalid-flags"\nexecutable "app", source: "lib/main.w", #{metadata}\n))
+      out, err, status = run_bit("build", chdir: package_dir, env: {"TUNGSTEN_COMPILER" => fake_compiler})
+      expect(status.success?).to be(false), metadata
+      expect(out + err).to include(message)
+    end
+  end
+
   it "finds the Tungsten driver on PATH when building outside a checkout" do
     package_dir = File.join(@tmpdir, "path-application-bit")
     tool_dir = File.join(@tmpdir, "tools")
@@ -451,6 +536,9 @@ RSpec.describe "tungsten-bit CLI" do
       #!/bin/sh
       set -eu
       printf '%s\n' "$@" >> "$FAKE_COMPILER_LOG"
+      if [ -n "${FAKE_COMPILER_ENV_LOG:-}" ]; then
+        printf '%s\n' "${TUNGSTEN_CLANG_OPT:-}" >> "$FAKE_COMPILER_ENV_LOG"
+      fi
       output=""
       while [ "$#" -gt 0 ]; do
         if [ "$1" = "--out" ]; then

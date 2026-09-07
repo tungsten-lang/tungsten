@@ -6,7 +6,7 @@ in Tungsten:Bit:Commands
     "Build a bit according to its Bitfile"
 
   -> usage
-    "USAGE\n  bit build (options)\n\nOPTIONS\n  -o, --output DIR    Output directory\n      --release       Build with optimizations\n      --target TARGET Cross-compile target triple\n  -j, --jobs NUM      Parallel compilation jobs\n"
+    "USAGE\n  bit build (options)\n\nOPTIONS\n  -o, --output DIR    Output directory\n      --release       Build with optimizations\n      --debug         Override executable profiles with a debug build\n      --native        Build for the current CPU\n      --cpu CPU       Explicit target CPU\n      --target TARGET Cross-compile target triple\n  -j, --jobs NUM      Parallel compilation jobs\n"
 
   -> execute
     bitfile = Bitfile.load("Bitfile")
@@ -14,10 +14,17 @@ in Tungsten:Bit:Commands
     unless bitfile
       abort "No Bitfile found in current directory"
 
+    if flag?(:native) && option(:target) != nil
+      abort "--native cannot be combined with --target"
+    if flag?(:native) && option(:cpu) != nil && option(:cpu) != "native"
+      abort "--native conflicts with --cpu"
     config = BuildConfig.new(
       output:  option(:output, "build"),
       release: flag?(:release),
-      target:  option(:target, Tungsten:Bit:System.target_triple),
+      debug:   flag?(:debug),
+      native:  flag?(:native),
+      cpu:     option(:cpu, ""),
+      target:  option(:target, ""),
       jobs:    option(:jobs, Tungsten:Bit:System.cpu_count) |> self.to_i
     )
 
@@ -45,6 +52,13 @@ in Tungsten:Bit:Commands
       bitfile.executables.each -> (executable)
         name = executable.name
         source = executable.source
+        profile = executable.profile
+        unless profile == "" || profile == "release" || profile == "debug"
+          abort "Executable profile must be release or debug: " + profile.to_s
+        unless executable.native == "true" || executable.native == "false"
+          abort "Executable native must be true or false"
+        unless ["", "0", "1", "2", "3", "s", "z"].include?(executable.opt_level)
+          abort "Executable opt_level must be 0, 1, 2, 3, s, or z"
         unless safe_package_path?(name)
           abort "Executable name must be a package-relative path: " + name.to_s
         unless safe_package_path?(source)
@@ -55,7 +69,7 @@ in Tungsten:Bit:Commands
         output = File.join(config.output, "bin/" + name)
         sources.push(source)
         verbose("  compile " + source + " -> " + output)
-        unless compiler.compile(source, output)
+        unless compiler.compile(source, output, profile, executable.native, executable.opt_level, executable.cflags)
           abort "Could not compile " + source
 
     # Link

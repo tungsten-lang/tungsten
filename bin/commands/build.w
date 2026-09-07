@@ -424,6 +424,8 @@ if array_contains?(args, "--help") || array_contains?(args, "-h")
   << ""
   << "Bootstrap the self-hosted Tungsten compiler and build bit entry points."
   << "Default bootstrap: implementations/c (the C bytecode VM)."
+  << "Inside a bit, build its Bitfile executables into bin/ without bootstrapping."
+  << "Executable profile: \"release\" selects an optimized default; --debug overrides it."
   << ""
   << "Options:"
   << "  -1          Build and install only the stage-1 compiler"
@@ -1205,6 +1207,13 @@ if bootstrap_compiler_clang_opt == ""
     elsif c == quote
       out.push(current)
       current = nil
+    elsif c == "\\" && i + 1 < text.size
+      following = text.slice(i + 1, 1)
+      if following == quote || following == "\\"
+        current = current + following
+        i = i + 1
+      else
+        current = current + c
     else
       current = current + c
     i = i + 1
@@ -1212,11 +1221,18 @@ if bootstrap_compiler_clang_opt == ""
 
 -> strip_bitfile_comment(line)
   i = 0
+  quote = ""
   while i < line.size
     c = line.slice(i, 1)
-    if c == "#" && i > 0
-      prev = line.slice(i - 1, 1)
-      if prev == " " || prev == "\t"
+    if quote != ""
+      if c == "\\"
+        i = i + 1
+      elsif c == quote
+        quote = ""
+    elsif c == "\"" || c == "'"
+      quote = c
+    elsif c == "#"
+      if i == 0 || line.slice(i - 1, 1) == " " || line.slice(i - 1, 1) == "\t"
         return line.slice(0, i)
     i = i + 1
   line
@@ -1264,6 +1280,172 @@ if bootstrap_compiler_clang_opt == ""
     out.push(File.expand_path(abs))
     i = i + 1
   uniq_strings(out)
+
+# Application bits can keep a side-effect-free lib entry separate from their
+# command. Respect explicit executable sources; retain the historical entry
+# point convention for older manifests without executable declarations.
+-> bit_option_tail(line, name)
+  marker = name + ":"
+  quote = ""
+  i = 0
+  while i < line.size
+    c = line.slice(i, 1)
+    if quote != ""
+      if c == "\\"
+        i = i + 1
+      elsif c == quote
+        quote = ""
+    elsif c == "\"" || c == "'"
+      quote = c
+    elsif line.slice(i, marker.size) == marker
+      if i == 0 || line.slice(i - 1, 1) == "," || line.slice(i - 1, 1) == " " || line.slice(i - 1, 1) == "\t"
+        return line.slice(i + marker.size, line.size - i - marker.size).strip
+    i = i + 1
+  nil
+
+-> bit_option_value(line, name)
+  tail = bit_option_tail(line, name)
+  if tail == nil
+    return nil
+  if tail.starts_with?("\"") || tail.starts_with?("'")
+    values = extract_quoted(tail)
+    if values.size == 0
+      die("Missing value for executable " + name)
+    return values[0]
+  comma = tail.index(",")
+  if comma != nil
+    tail = tail.slice(0, comma)
+  tail.strip
+
+-> bit_valid_opt_level(level)
+  level == "" || level == "0" || level == "1" || level == "2" || level == "3" || level == "s" || level == "z"
+
+-> bit_entry_points(bit_root)
+  entries = []
+  manifest = read_file(bit_root + "/Bitfile")
+  if manifest != nil
+    lines = manifest.split("\n")
+    i = 0
+    while i < lines.size
+      line = strip_bitfile_comment(lines[i]).strip
+      i = i + 1
+      if line.starts_with?("executable ") || line.starts_with?("executable\t")
+        quoted = extract_quoted(line)
+        if quoted.size == 0 || quoted[0] == ""
+          die("Invalid executable declaration in " + bit_root + "/Bitfile")
+        name = quoted[0]
+        source = "lib/" + name + ".w"
+        source_value = bit_option_value(line, "source")
+        if source_value != nil
+          if source_value == ""
+            die("Executable source is missing in " + bit_root + "/Bitfile")
+          source = source_value
+        if !bit_relative_path?(name) || !bit_relative_path?(source)
+          die("Executable name and source must be package-relative paths in " + bit_root + "/Bitfile")
+        profile = bit_option_value(line, "profile")
+        if profile != nil
+          if profile != "release" && profile != "debug"
+            die("Executable profile must be release or debug in " + bit_root + "/Bitfile")
+        else
+          profile = ""
+        native = bit_option_value(line, "native")
+        if native != nil && native != "true" && native != "false"
+          die("Executable native must be true or false in " + bit_root + "/Bitfile")
+        opt_level = bit_option_value(line, "opt_level")
+        if opt_level == nil
+          opt_level = ""
+        if !bit_valid_opt_level(opt_level)
+          die("Executable opt_level must be 0, 1, 2, 3, s, or z in " + bit_root + "/Bitfile")
+        cflags = bit_option_value(line, "cflags")
+        if cflags == nil
+          cflags = ""
+        else
+          cflags_tail = bit_option_tail(line, "cflags")
+          if !cflags_tail.starts_with?("\"") && !cflags_tail.starts_with?("'")
+            die("Executable cflags must be a quoted whitespace-separated flag string in " + bit_root + "/Bitfile")
+        entries.push({name: name, source: source, profile: profile, native: native == "true", opt_level: opt_level, cflags: cflags})
+  if entries.size == 0
+    name = basename_of(bit_root)
+    if name.starts_with?("tungsten-")
+      name = name.slice(9, name.size - 9)
+    entries.push({name: name, source: "lib/" + name + ".w", profile: "", native: false, opt_level: "", cflags: ""})
+  entries
+
+-> bit_relative_path?(path)
+  if path == "" || path.starts_with?("/")
+    return false
+  parts = path.split("/")
+  i = 0
+  while i < parts.size
+    if parts[i] == ".." || parts[i] == ""
+      return false
+    i = i + 1
+  true
+
+# An executable's profile is a default for that entry only. Explicit build
+# flags still win, and a caller-provided bit clang override remains exact.
+-> bit_profile_release(profile, explicit_release, explicit_debug)
+  profile == "release" && !explicit_release && !explicit_debug
+
+-> bit_profile_flags(profile, default_flags, explicit_release, explicit_debug)
+  if profile == "" || explicit_release || explicit_debug
+    return default_flags
+  flags = []
+  i = 0
+  while i < default_flags.size
+    flag = default_flags[i]
+    if flag != "--debug" && flag != "--no-debug"
+      flags.push(flag)
+    i = i + 1
+  if profile == "release"
+    flags.push("--release")
+    flags.push("--no-debug")
+  else
+    flags.push("--debug")
+  flags
+
+-> bit_profile_clang_opt(profile, default_opt, configured_opt, explicit_release, explicit_debug, fast)
+  if profile == "debug" && configured_opt == "" && !explicit_release && !explicit_debug
+    return fast ? "-O0 -ffast-math" : "-O0"
+  if configured_opt != "" || !bit_profile_release(profile, explicit_release, explicit_debug)
+    return default_opt
+  fast ? "-O3 -ffast-math" : "-O3"
+
+-> bit_native_flags(default_flags, native, explicit_target)
+  if !native || explicit_target
+    return default_flags
+  flags = []
+  i = 0
+  while i < default_flags.size
+    flag = default_flags[i]
+    if flag == "--cpu"
+      i = i + 2
+    else
+      if flag != "--native"
+        flags.push(flag)
+      i = i + 1
+  flags.push("--native")
+  flags
+
+# This is a token list, never shell source. Quote every token for the inner
+# clang command as well as quoting the complete environment assignment.
+# Explicit CLI optimization or an explicit environment override wins over
+# both manifest opt_level and optimization switches embedded in cflags.
+-> bit_cflags_opt(default_opt, cflags, opt_level, configured_opt, explicit_release, explicit_debug)
+  if configured_opt != ""
+    return default_opt
+  result = default_opt
+  tokens = split_ws(cflags.replace("\t", " ").replace("\r", " ").replace("\n", " "))
+  i = 0
+  while i < tokens.size
+    token = tokens[i]
+    optimization_override = explicit_release || explicit_debug || opt_level != ""
+    if !(optimization_override && ["-O", "-O0", "-O1", "-O2", "-O3", "-Os", "-Oz", "-Og", "-Ofast", "-O4"].include?(token))
+      result = result + " " + shq(token)
+    i = i + 1
+  if !explicit_release && !explicit_debug && opt_level != ""
+    result = result + " -O" + opt_level
+  result
 
 CWD = capture("pwd -P").strip
 bit_root_found = find_bit_root(CWD)
@@ -2053,6 +2235,8 @@ make_dirs(bit_cache_dir)
   single = []
   single.push(bit_path)
   buf << tree_sha(single)
+  buf << "bit-entrypoints-v4-build-flags"
+  buf << file_sha(bit_path + "/Bitfile")
   includes = bitfile_includes(bit_path)
   i = 0
   while i < includes.size
@@ -2068,15 +2252,14 @@ make_dirs(bit_cache_dir)
   buf << join_tab(compiler_flags_arg)
   Digest.sha256(buf.to_s).slice(0, 16)
 
--> compile_bit(entry, out_bin, bit_clang_opt_arg, toolchain_prefix)
-  this_bit_root = dirname_of(dirname_of(entry))
+-> compile_bit(this_bit_root, entry, out_bin, bit_clang_opt_arg, compiler_flags_arg, toolchain_prefix)
   bit_name = basename_of(this_bit_root)
   build_env = toolchain_prefix + "BIT_HOME=" + shq(ROOT + "/bits") + " TUNGSTEN_CLANG_OPT=" + shq(bit_clang_opt_arg) + " "
   includes = bitfile_includes(this_bit_root)
   if includes.size > 0
     build_env = build_env + "TUNGSTEN_C_INCLUDES=" + shq(includes.join(":")) + " "
   log_path = "/tmp/tungsten-build-" + bit_name + ".log"
-  cmd = "cd " + shq(ROOT) + " && " + build_env + shq(COMPILER_BIN) + " compile " + shq(entry) + " --out " + shq(out_bin) + PROGRAM_FLAGS_CMD + " > " + shq(log_path) + " 2>&1"
+  cmd = "cd " + shq(ROOT) + " && " + build_env + shq(COMPILER_BIN) + " compile " + shq(entry) + " --out " + shq(out_bin) + flags_to_cmd(compiler_flags_arg) + " > " + shq(log_path) + " 2>&1"
   ok = sh_ok(cmd)
   if !ok || !regular_file?(out_bin)
     reason = ""
@@ -2111,23 +2294,30 @@ if skip_bits
   << BOLD + "==> Bits: skipped" + RESET
 elsif bit_only
   short_name = bit_short_name(bit_root_found)
-  entry = bit_root_found + "/lib/" + short_name + ".w"
-  bin_dir = bit_root_found + "/bin"
-  make_dirs(bin_dir)
-  out_bin = bin_dir + "/" + short_name
-  bit_sha = bit_build_sha(bit_root_found, runtime_key, link_flags, link_libs, bit_clang_opt, program_flags)
-  stamp = bit_cache_dir + "/" + short_name + ".sha"
   << BOLD + "==> Building " + basename_of(bit_root_found) + RESET
-  stamp_content = read_file(stamp)
-  stamp_hit = stamp_content != nil && stamp_content.strip == bit_sha
-  if !force_build && executable?(out_bin) && stamp_hit
-    << "    " + DIM + "skip" + RESET + "    " + project_relative_path(out_bin)
-    bits_skipped = 1
-  elsif compile_bit(entry, out_bin, bit_clang_opt, toolchain_env_prefix)
-    write_file(stamp, bit_sha + "\n")
-    bits_built = 1
-  else
-    exit(1)
+  entries = bit_entry_points(bit_root_found)
+  ei = 0
+  while ei < entries.size
+    entry = bit_root_found + "/" + entries[ei][:source]
+    out_bin = bit_root_found + "/bin/" + entries[ei][:name]
+    entry_flags = bit_profile_flags(entries[ei][:profile], program_flags, release_mode, debug_requested)
+    entry_flags = bit_native_flags(entry_flags, entries[ei][:native], native_mode || cpu_name != nil || target_triple != "" || portable_mode)
+    entry_clang_opt = bit_profile_clang_opt(entries[ei][:profile], bit_clang_opt, env_or_empty("TUNGSTEN_BITS_CLANG_OPT"), release_mode, debug_requested, fast_mode)
+    entry_clang_opt = bit_cflags_opt(entry_clang_opt, entries[ei][:cflags], entries[ei][:opt_level], env_or_empty("TUNGSTEN_BITS_CLANG_OPT"), release_mode, debug_requested)
+    bit_sha = bit_build_sha(bit_root_found, runtime_key, link_flags, link_libs, entry_clang_opt, entry_flags)
+    ei = ei + 1
+    make_dirs(dirname_of(out_bin))
+    stamp = bit_cache_dir + "/" + Digest.sha256(out_bin).slice(0, 16) + ".sha"
+    stamp_content = read_file(stamp)
+    stamp_hit = stamp_content != nil && stamp_content.strip == bit_sha
+    if !force_build && executable?(out_bin) && stamp_hit
+      << "    " + DIM + "skip" + RESET + "    " + project_relative_path(out_bin)
+      bits_skipped = bits_skipped + 1
+    elsif compile_bit(bit_root_found, entry, out_bin, entry_clang_opt, entry_flags, toolchain_env_prefix)
+      write_file(stamp, bit_sha + "\n")
+      bits_built = bits_built + 1
+    else
+      exit(1)
 else
   << BOLD + "==> Bits: compiling entry points" + RESET
   bit_dirs = capture("find " + shq(ROOT + "/bits") + " -mindepth 1 -maxdepth 1 -type d 2>/dev/null | LC_ALL=C sort").split("\n")
@@ -2136,28 +2326,32 @@ else
     bit_path = bit_dirs[bi].strip
     bi = bi + 1
     eligible = bit_path != "" && file_directory?(bit_path + "/bin")
-    entry = ""
-    out_bin = ""
     if eligible
-      short_name = bit_short_name(bit_path)
-      entry = bit_path + "/lib/" + short_name + ".w"
-      out_bin = bit_path + "/bin/" + short_name
-      if !regular_file?(entry)
-        eligible = false
-    if eligible
-      short_name = bit_short_name(bit_path)
-      bit_sha = bit_build_sha(bit_path, runtime_key, link_flags, link_libs, bit_clang_opt, program_flags)
-      stamp = bit_cache_dir + "/" + short_name + ".sha"
-      stamp_content = read_file(stamp)
-      stamp_hit = stamp_content != nil && stamp_content.strip == bit_sha
-      if !force_build && executable?(out_bin) && stamp_hit
-        << "    " + DIM + "skip" + RESET + "    " + project_relative_path(out_bin)
-        bits_skipped = bits_skipped + 1
-      elsif compile_bit(entry, out_bin, bit_clang_opt, toolchain_env_prefix)
-        write_file(stamp, bit_sha + "\n")
-        bits_built = bits_built + 1
-      else
-        bits_skipped = bits_skipped + 1
+      entries = bit_entry_points(bit_path)
+      ei = 0
+      while ei < entries.size
+        entry = bit_path + "/" + entries[ei][:source]
+        out_bin = bit_path + "/bin/" + entries[ei][:name]
+        entry_flags = bit_profile_flags(entries[ei][:profile], program_flags, release_mode, debug_requested)
+        entry_flags = bit_native_flags(entry_flags, entries[ei][:native], native_mode || cpu_name != nil || target_triple != "" || portable_mode)
+        entry_clang_opt = bit_profile_clang_opt(entries[ei][:profile], bit_clang_opt, env_or_empty("TUNGSTEN_BITS_CLANG_OPT"), release_mode, debug_requested, fast_mode)
+        entry_clang_opt = bit_cflags_opt(entry_clang_opt, entries[ei][:cflags], entries[ei][:opt_level], env_or_empty("TUNGSTEN_BITS_CLANG_OPT"), release_mode, debug_requested)
+        bit_sha = bit_build_sha(bit_path, runtime_key, link_flags, link_libs, entry_clang_opt, entry_flags)
+        ei = ei + 1
+        if !regular_file?(entry)
+          next
+        make_dirs(dirname_of(out_bin))
+        stamp = bit_cache_dir + "/" + Digest.sha256(out_bin).slice(0, 16) + ".sha"
+        stamp_content = read_file(stamp)
+        stamp_hit = stamp_content != nil && stamp_content.strip == bit_sha
+        if !force_build && executable?(out_bin) && stamp_hit
+          << "    " + DIM + "skip" + RESET + "    " + project_relative_path(out_bin)
+          bits_skipped = bits_skipped + 1
+        elsif compile_bit(bit_path, entry, out_bin, entry_clang_opt, entry_flags, toolchain_env_prefix)
+          write_file(stamp, bit_sha + "\n")
+          bits_built = bits_built + 1
+        else
+          bits_skipped = bits_skipped + 1
 
 t6 = clock_ms()
 

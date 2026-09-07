@@ -210,6 +210,36 @@ marked trusted.
 **`executable NAME, source: PATH`** — Build a runnable application entry point.
 Repeat the directive for multiple programs. `bit build` writes each program to
 `build/bin/NAME`; when `source:` is omitted it defaults to `lib/NAME.w`.
+Inside a package, `tungsten build` uses the same declarations and writes to
+`bin/NAME`. Each executable can set its own build defaults:
+
+```ruby
+executable "solver", source: "bin/solver.w", profile: "release", native: true
+executable "small", source: "bin/small.w", opt_level: "s", cflags: "-fno-omit-frame-pointer -funroll-loops"
+```
+
+| Option | Effect |
+|--------|--------|
+| `profile: "release"` or `"debug"` | Default build profile for this executable |
+| `native: true` or `false` | Request host-specific code generation (`--native`) |
+| `opt_level: "0"`, `"1"`, `"2"`, `"3"`, `"s"`, or `"z"` | Override the executable's default Clang optimization level |
+| `cflags: "FLAGS"` | Additional whitespace-separated Clang arguments |
+
+Explicit `--release` or `--debug` wins over manifest optimization settings,
+including `-O` flags in `cflags`. An explicit `opt_level` wins over `-O` flags
+in `cflags`. Explicit CPU/target selection overrides `native: true`;
+`tungsten build --portable` also suppresses it. `TUNGSTEN_BITS_CLANG_OPT`
+is a full override of manifest Clang flags and optimization settings, including
+when a profile is supplied on the command line. `bit build` also accepts
+`TUNGSTEN_CLANG_OPT` as a fallback full override.
+
+The `cflags` value must be a single- or double-quoted Bitfile string. Its
+contents are split on whitespace, not parsed as shell code: shell
+metacharacters and quotes within tokens are passed literally. Embedded spaces
+or shell-style grouping of an argument are not supported. Use the opposite
+outer quote or escape an outer quote when a macro argument needs quote
+characters, for example `cflags: '-DNAME="solver"'`. These defaults affect only
+the declared executable, not other packages or the runtime build.
 
 **`asset PATH`** — Include a package-relative file or directory in archives and
 copy it to the same relative path under `build/`. Repeat it for multiple paths.

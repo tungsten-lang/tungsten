@@ -21484,19 +21484,25 @@ static const uint32_t g_wire_initial_cap_words = 262144;
 
 #define W_WIRE_FIELD_CACHE_SIZE 8192u
 typedef struct {
-    uint32_t off;
+    uint16_t kind;
     uint16_t index;
-    uint16_t reserved;
     WValue sym;
 } WWireFieldCacheEntry;
 /* Emission can read independent frozen functions concurrently. Field lookup
  * is logically read-only, but this small accelerator writes its last-seen
- * entry; keep it per thread so those speculative writes cannot race. */
+ * entry; keep it per thread so those speculative writes cannot race.
+ *
+ * The cache is schema-shaped rather than record-shaped. Generated WIRE
+ * constructors give every opcode one canonical field order, so learning
+ * (:call_direct_i64, :temp) once applies to every direct call in every later
+ * pass. The load/store paths still verify the symbol at the cached ordinal;
+ * compatibility records with a different layout therefore fall back to the
+ * linear scan instead of trusting stale schema state. */
 static _Thread_local WWireFieldCacheEntry g_wire_field_cache[W_WIRE_FIELD_CACHE_SIZE];
 
-static inline WWireFieldCacheEntry *w_wire_field_cache_entry(uint32_t off,
+static inline WWireFieldCacheEntry *w_wire_field_cache_entry(uint16_t kind,
                                                               WValue sym) {
-    uint64_t mixed = (uint64_t)off * 2654435761u;
+    uint64_t mixed = (uint64_t)kind * 2654435761u;
     mixed ^= (uint64_t)sym ^ ((uint64_t)sym >> 32);
     return &g_wire_field_cache[mixed & (W_WIRE_FIELD_CACHE_SIZE - 1u)];
 }
@@ -21570,8 +21576,8 @@ static WValue w_wire_fixed_record_new(int kind, int field_count,
         if (!w_is_symbol(sym)) die("WIRE fixed record field is not a Symbol");
         g_wire_arena.base[off + 1u + (uint32_t)i * 2u] = sym;
         g_wire_arena.base[off + 2u + (uint32_t)i * 2u] = values[i];
-        WWireFieldCacheEntry *cached = w_wire_field_cache_entry(off, sym);
-        cached->off = off;
+        WWireFieldCacheEntry *cached = w_wire_field_cache_entry((uint16_t)kind, sym);
+        cached->kind = (uint16_t)kind;
         cached->index = (uint16_t)i;
         cached->sym = sym;
     }
@@ -21797,6 +21803,7 @@ static WValue w_wire_canonical_field_value(WValue wire, WValue sym,
 
 WValue w_wire_field_store_at(WValue wire, int64_t index, WValue sym, WValue value) {
     uint64_t off = w_wire_checked_offset(wire);
+    uint16_t kind = (uint16_t)w_wire_kind(wire);
     uint32_t cap = w_wire_record_capacity(off);
     if (index < 0 || (uint64_t)index >= cap)
         die("w_wire_field_store_at: index exceeds record capacity");
@@ -21806,8 +21813,8 @@ WValue w_wire_field_store_at(WValue wire, int64_t index, WValue sym, WValue valu
     g_wire_arena.base[off + 2 + idx * 2] = value;
     uint32_t count = w_wire_record_count(off);
     if (idx >= count) w_wire_record_header(off, idx + 1, cap);
-    WWireFieldCacheEntry *cached = w_wire_field_cache_entry((uint32_t)off, sym);
-    cached->off = (uint32_t)off;
+    WWireFieldCacheEntry *cached = w_wire_field_cache_entry(kind, sym);
+    cached->kind = kind;
     cached->index = (uint16_t)idx;
     cached->sym = sym;
     return wire;
@@ -21815,16 +21822,17 @@ WValue w_wire_field_store_at(WValue wire, int64_t index, WValue sym, WValue valu
 
 WValue w_wire_field_load(WValue wire, WValue sym) {
     uint64_t off = w_wire_checked_offset(wire);
+    uint16_t kind = (uint16_t)w_wire_kind(wire);
     uint32_t count = w_wire_record_count(off);
-    WWireFieldCacheEntry *cached = w_wire_field_cache_entry((uint32_t)off, sym);
-    if (cached->off == (uint32_t)off && cached->sym == sym &&
+    WWireFieldCacheEntry *cached = w_wire_field_cache_entry(kind, sym);
+    if (cached->kind == kind && cached->sym == sym &&
         cached->index < count &&
         g_wire_arena.base[off + 1 + (uint32_t)cached->index * 2] == sym) {
         return g_wire_arena.base[off + 2 + (uint32_t)cached->index * 2];
     }
     for (uint32_t i = 0; i < count; i++) {
         if (g_wire_arena.base[off + 1 + i * 2] == sym) {
-            cached->off = (uint32_t)off;
+            cached->kind = kind;
             cached->index = (uint16_t)i;
             cached->sym = sym;
             return g_wire_arena.base[off + 2 + i * 2];
@@ -21861,11 +21869,12 @@ WValue w_wire_field_value_at(WValue wire, int64_t index) {
 
 WValue w_wire_field_store(WValue wire, WValue sym, WValue value) {
     uint64_t off = w_wire_checked_offset(wire);
+    uint16_t kind = (uint16_t)w_wire_kind(wire);
     value = w_wire_canonical_field_value(wire, sym, value);
     uint32_t count = w_wire_record_count(off);
     uint32_t cap = w_wire_record_capacity(off);
-    WWireFieldCacheEntry *cached = w_wire_field_cache_entry((uint32_t)off, sym);
-    if (cached->off == (uint32_t)off && cached->sym == sym &&
+    WWireFieldCacheEntry *cached = w_wire_field_cache_entry(kind, sym);
+    if (cached->kind == kind && cached->sym == sym &&
         cached->index < count &&
         g_wire_arena.base[off + 1 + (uint32_t)cached->index * 2] == sym) {
         g_wire_arena.base[off + 2 + (uint32_t)cached->index * 2] = value;
@@ -21874,7 +21883,7 @@ WValue w_wire_field_store(WValue wire, WValue sym, WValue value) {
     for (uint32_t i = 0; i < count; i++) {
         if (g_wire_arena.base[off + 1 + i * 2] == sym) {
             g_wire_arena.base[off + 2 + i * 2] = value;
-            cached->off = (uint32_t)off;
+            cached->kind = kind;
             cached->index = (uint16_t)i;
             cached->sym = sym;
             return value;
@@ -21885,7 +21894,7 @@ WValue w_wire_field_store(WValue wire, WValue sym, WValue value) {
     g_wire_arena.base[off + 1 + count * 2] = sym;
     g_wire_arena.base[off + 2 + count * 2] = value;
     w_wire_record_header(off, count + 1, cap);
-    cached->off = (uint32_t)off;
+    cached->kind = kind;
     cached->index = (uint16_t)count;
     cached->sym = sym;
     return value;
@@ -21911,6 +21920,8 @@ int64_t w_wire_store_reset(int64_t reserved) {
     g_wire_arena.cursor = keep;
     g_wire_arena.generation++;
     if (g_wire_arena.generation == 0) g_wire_arena.generation = 1;
+    /* Symbol handles can be reused for different names after an arena reset.
+     * Keep schema-shaped entries within one generation only. */
     memset(g_wire_field_cache, 0, sizeof(g_wire_field_cache));
     return 0;
 }

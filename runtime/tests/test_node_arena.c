@@ -140,6 +140,21 @@ static void test_wire_arena(void) {
     CHECK(w_as_int(w_wire_field_load(clone, key_arg)) == 100,
           "WIRE clone accepts in-place field rewrite");
 
+    /* Compatibility records are allowed to use a noncanonical field order.
+     * A kind-shaped cache must verify its remembered ordinal before using it. */
+    WValue reordered = w_wire_alloc(/*same kind=*/37, 2);
+    w_wire_field_store_at(reordered, 0, key_arg, w_box_int(201));
+    w_wire_field_store_at(reordered, 1, key_op, w_box_int(202));
+    CHECK(w_as_int(w_wire_field_load(original, key_arg)) == 99,
+          "WIRE field lookup primes the canonical kind ordinal");
+    CHECK(w_as_int(w_wire_field_load(reordered, key_arg)) == 201,
+          "WIRE kind cache falls back for a reordered compatibility record");
+    CHECK(w_as_int(w_wire_field_load(original, key_arg)) == 99,
+          "WIRE field lookup reprimes the canonical kind ordinal");
+    w_wire_field_store(reordered, key_arg, w_box_int(203));
+    CHECK(w_as_int(w_wire_field_load(reordered, key_arg)) == 203,
+          "WIRE kind cache stores through a reordered compatibility record");
+
     WValue *retained_base = g_wire_arena.base;
     uint32_t retained_cap = g_wire_arena.cap;
     int64_t retained_mark = w_wire_store_mark();

@@ -1,17 +1,18 @@
 # Object free-insertion / escape analysis (ownership.w construct_producer_class
-# + escape.w per-parameter summaries + the runtime w_value_free instance arm).
+# + escape.w per-parameter summaries + the runtime object-shell recycler).
 #
 # `Cls.new(...)` on a class name lowers to the guarded construct arm
 # (w_object_new + plain initializer worker). When the initializer never stores
 # `self`, the fresh object is a heap producer, and a devirtualized method call
 # on it consults the method's escape summary instead of pinning the receiver.
-# So a loop temporary such as `Pt.new(i, i + 1)` is freed at scope exit
-# instead of leaking one WObject per iteration (163 MB at 2M iterations).
+# So a loop temporary such as `Pt.new(i, i + 1)` is returned to a bounded
+# thread-local shell pool at scope exit instead of allocating and freeing one
+# WObject per iteration (or leaking one when free insertion is disabled).
 #
 # This spec pins BOTH halves of that contract, mirroring hash_free_escape_spec:
-#   * transient objects MUST compute correctly across the free boundary — a
-#     wrong free shows up as corrupted fields once malloc recycles the block,
-#     so the loops run long enough to reuse addresses many times;
+#   * transient objects MUST compute correctly across the recycle boundary —
+#     a wrong lifetime or incomplete reset shows up as corrupted fields, so
+#     the loops run long enough to reuse the same addresses many times;
 #   * objects that ESCAPE (returned, stored in an ivar/array/global, captured
 #     by a closure, registered by their own initializer, returned as `self`
 #     from a builder method, threaded through a rescue merge, frozen) must

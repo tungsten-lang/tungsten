@@ -706,12 +706,17 @@ function_emit_cache_state = {
     else
       runtime_fns.push("w_method_call_cached")
     if wire_get(inst, :construct_fn) != nil
-      runtime_fns.push("w_object_new")
+      if wire_get(inst, :construct_recycle) == true
+        runtime_fns.push("w_object_recycle_or_new")
+      else
+        runtime_fns.push("w_object_new")
     runtime_fns
   when :closure_new
     ["w_closure_new_a"]
   when :free_value
     ["w_value_free"]
+  when :recycle_object
+    ["w_object_recycle"]
 
   when :memo_init
     ["w_memo_init"]

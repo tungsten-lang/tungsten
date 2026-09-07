@@ -1166,12 +1166,13 @@ typedef struct WClass {
 typedef struct WObject {
     uint16_t class_id;
     uint8_t  ivar_count;
-    uint8_t  flags;             /* bit 0 = frozen */
+    uint8_t  flags;             /* W_OBJ_FLAG_* */
     uint32_t _reserved;
     WValue   ivars[];
 } WObject;
 
 #define W_OBJ_FLAG_FROZEN  (1u << 0)
+#define W_OBJ_FLAG_POOLED  (1u << 1)
 
 #define W_MAX_CLASSES 65535
 extern WClass *g_class_table[];
@@ -1201,6 +1202,8 @@ int    w_class_add_ivar_wv(WValue klass, WValue name);
 int    w_class_ivar_offset(WValue klass, const char *name);
 int    w_class_ivar_offset_wv(WValue klass, WValue name);
 WValue w_object_new(WValue klass);
+WValue w_object_recycle_or_new(WValue klass);
+void   w_object_recycle(WValue obj);
 WValue w_ivar_get(WValue obj, const char *name);
 WValue w_ivar_get_wv(WValue obj, WValue name);
 WValue w_ivar_set(WValue obj, const char *name, WValue val);

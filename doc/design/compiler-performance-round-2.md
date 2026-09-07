@@ -18,7 +18,7 @@ must preserve native behavior and every applicable LLVM/sidemap identity gate.
 | 7 | Persistent compiler service | Existing `compile-batch` process/pool is the supported path; daemon work remains open |
 | 8 | Replace hot WIRE field lookups with numeric schema identity | Retained |
 | 9 | Complete closed-world flow-sensitive type propagation | Retained |
-| 10 | Use effect/escape facts for proven allocation removal and LLVM attributes | In progress |
+| 10 | Use effect/escape facts for proven allocation removal and LLVM attributes | Object-shell reuse retained; generic source-function attributes rejected |
 
 ## Rejected reachability-lowering prototype
 
@@ -117,3 +117,63 @@ A compiler rebuilt from this source then re-emitted the compiler with the same
 cache-disabled release/native/fast/no-debug profile. The two successive stages
 were byte-identical at SHA-256
 `d60d072b72716fcbc5b69fdcaa5ef75ab8af377cb6fd579688e74c950f616d37`.
+
+## Escape-proven source-object shell reuse
+
+The ownership pass already identified exact guarded `Class.new` results that
+could not escape and inserted `w_value_free` at their proven lifetime end. It
+now couples the two sides of that proof: the guarded allocation arm uses
+`w_object_recycle_or_new`, and the matching release uses `w_object_recycle`.
+The common eight-ivar object shape is kept in a bounded thread-local LIFO pool.
+The shell is reset before reuse, so nested or reentrant allocations pop distinct
+objects; uncommon larger layouts retain the existing `calloc`/`free` behavior.
+Frozen objects never enter the pool.
+
+The recycle flag is late-pass metadata in a spare packed-WIRE field rather than
+part of every method-call record's canonical layout. The new release opcode was
+appended to the stable opcode table. Content hashing includes the recycle flag,
+so an ordinary constructor body cannot content-collapse with a recycling one.
+Because the allocation arm is marked only while free insertion runs,
+`TUNGSTEN_FREE=0` restores both ordinary allocation and the absence of an
+inserted release.
+
+The permanent `benchmarks/primitives/new_object.w` benchmark was corrected to
+put its temporary in a function-local scope. Its former top-level `o` was a
+global and therefore measured an escaping object that the compiler correctly
+could not recycle. Eight alternating pairs used 50,000,000 iterations and
+`--release --native --fast --no-debug`; every run printed the same operation
+count and checksum `0`. External user CPU median moved from 1.220 s to 0.245 s
+(-79.92%), and mean moved from 1.221 s to 0.245 s (-79.94%). Wall median moved
+from 3.78 s to 0.57 s, but wall time was background-load sensitive and is not
+the primary acceptance signal. A one-million-iteration statistics run recorded
+999,999 object-pool hits, one miss, and no drops. LLVM confirms the intended
+boundary: the old hot loop calls `w_object_new` plus `w_value_free`; the new
+loop calls `w_object_recycle_or_new` plus `w_object_recycle`.
+
+The feature is not claimed as a broad compiler-throughput win. Eight
+cache-disabled compiler self-check pairs were neutral (user median 3.910 s to
+3.890 s, -0.51%; means 3.885 s and 3.890 s). Eight full self-emission pairs
+showed a small but noisy movement (user median 6.030 s to 5.950 s, -1.33%; mean
+6.066 s to 5.884 s, -3.01%), while wall measurements were unusable under host
+contention. Both compilers emitted the same compiler LLVM, and no recycler call
+appears in that compiler image, so these timings do not justify a general
+compile-speed claim.
+
+Focused gates cover runtime shell reset, cross-class reuse, nested live-object
+separation, frozen objects, duplicate releases, content-hash identity, the
+`TUNGSTEN_FREE=0` kill switch, and batch-versus-solo LLVM identity. A debug
+emission still contains the recycler calls while retaining `uwtable`, all frame
+pointers, `noinline`, and disabled tail calls for backtrace fidelity. The final
+compiler re-emitted byte-identical LLVM at SHA-256
+`e59e372b27ba5c509f7e9d721afcfcd2cef63c38a531282d1df68d2810a758ca`.
+
+### Rejected generic source-function attribute
+
+A controlled probe added `memory(none)` to a noinline, register-only Tungsten
+helper. After the ordinary `clang -O3` stage, annotated and unannotated modules
+were byte-identical once their input filenames were normalized (SHA-256
+`736b31055571ef6fd5c6c279318aa38a9121456a05f76dcbdc0fb1cbd1f2d312`).
+LLVM inferred the same effect and optimized the caller identically. The current
+escape summary's `pure` bit is also intentionally too coarse for LLVM memory
+semantics: some operations allocate, release operands, or call incompletely
+classified externs. No generic source-function memory attribute was added.

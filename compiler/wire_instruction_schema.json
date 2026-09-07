@@ -699,6 +699,9 @@
     "temp",
     "value"
   ],
+  "recycle_object": [
+    "value"
+  ],
   "register_unit": [
     "byte_len",
     "str_id",

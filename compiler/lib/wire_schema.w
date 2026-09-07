@@ -283,7 +283,10 @@ wire_kind_symbols = [
   :cttz_i64,
   :typed_array_load_u64,
   :typed_array_store_u64,
-  :typed_array_prefetch
+  :typed_array_prefetch,
+  # Automatic source-object pool operations. Appended to preserve every
+  # serialized WIRE opcode id above.
+  :recycle_object
 ]
 
 wire_kind_ids = {}

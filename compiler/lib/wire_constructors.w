@@ -1359,6 +1359,14 @@
 -> emit_wire_puts_i64(f, temp, value)
   current_block(f)[:instructions].push(wire_make_puts_i64(temp, value))
 
+-> wire_make_recycle_object(value)
+  handle = ccall_rawargs("w_wire_alloc", 274, 1)
+  ccall_nobox("w_wire_field_store_at", handle, 0, :value, value)
+  handle
+
+-> emit_wire_recycle_object(f, value)
+  current_block(f)[:instructions].push(wire_make_recycle_object(value))
+
 -> wire_make_register_unit(byte_len, str_id, unit_id)
   handle = ccall_rawargs("w_wire_alloc", 130, 3)
   ccall_nobox("w_wire_field_store_at", handle, 0, :byte_len, byte_len)

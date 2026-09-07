@@ -508,6 +508,8 @@
   out << declare_fn("w_type_class_register_wv", "void", i32_wv)
   out << declare_fn("w_node_kind_class_register_wv", "void", i32_wv)
   out << declare_fn("w_object_new", wv, wv)
+  out << declare_fn("w_object_recycle_or_new", wv, wv)
+  out << "declare void @w_object_recycle(i64)\n"
   out << declare_fn("w_ivar_get", wv, wv_ptr)
   out << declare_fn("w_ivar_get_wv", wv, wv2)
   out << declare_fn("w_ivar_set", wv, wv_ptr_wv)

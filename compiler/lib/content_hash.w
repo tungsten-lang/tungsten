@@ -262,6 +262,8 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
       buf << wire_get(inst, :construct_fn)
       buf << ":"
       buf << wire_get(inst, :construct_class)
+      if wire_get(inst, :construct_recycle) == true
+        buf << ":recycle"
 
     buf << ";"
     return nil

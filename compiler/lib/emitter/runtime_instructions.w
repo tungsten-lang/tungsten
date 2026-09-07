@@ -559,7 +559,8 @@
       parts << t + ".same = icmp eq i64 " + wire_get(inst, :receiver) + ", " + t + ".cw\n  "
       parts << "br i1 " + t + ".same, label %" + lbl + ".d, label %" + lbl + ".s\n"
       parts << lbl + ".d:\n  "
-      parts << t + ".dv = call i64 @w_object_new(i64 " + wire_get(inst, :receiver) + ")\n  "
+      allocator = wire_get(inst, :construct_recycle) == true ? "w_object_recycle_or_new" : "w_object_new"
+      parts << t + ".dv = call i64 @" + allocator + "(i64 " + wire_get(inst, :receiver) + ")\n  "
       parts << t + ".init = call i64 @" + wire_get(inst, :construct_fn) + "(i64 " + t + ".dv"
       di = 0
       while di < argc
@@ -1597,6 +1598,8 @@
   # Free a non-escaped heap value at scope exit
   when :free_value
     "call void @w_value_free(i64 " + wire_get(inst, :value) + ")"
+  when :recycle_object
+    "call void @w_object_recycle(i64 " + wire_get(inst, :value) + ")"
 
   # Scope markers — pseudo-instructions for ownership analysis, no codegen
   when :scope_push, :scope_pop

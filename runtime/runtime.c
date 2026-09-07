@@ -46654,7 +46654,7 @@ WValue w_array_concat(WValue lhs, WValue rhs) {
     return out;
 }
 
-/* ---- Recycle pools (## recycle annotation) ---- */
+/* ---- Recycle pools (explicit annotations and proven-dead objects) ---- */
 /* Thread-local bounded stacks. Pushes beyond cap are silently dropped.
  *
  * Pool stats: when TUNGSTEN_POOL_STATS=1 is set at program start, hit/miss/drop
@@ -46665,7 +46665,8 @@ WValue w_array_concat(WValue lhs, WValue rhs) {
 #define POOL_KIND_HASH    1
 #define POOL_KIND_TYPED   2
 #define POOL_KIND_STRBUF  3
-#define POOL_KIND_COUNT   4
+#define POOL_KIND_OBJECT  4
+#define POOL_KIND_COUNT   5
 
 static int g_pool_stats_enabled = 0;
 static pthread_once_t g_pool_stats_once = PTHREAD_ONCE_INIT;
@@ -46730,6 +46731,7 @@ static const char *pool_kind_name(int kind) {
         case POOL_KIND_HASH:   return "hash_pool       ";
         case POOL_KIND_TYPED:  return "array_typed_pool";
         case POOL_KIND_STRBUF: return "strbuf_pool     ";
+        case POOL_KIND_OBJECT: return "object_pool     ";
         default: return "?";
     }
 }
@@ -49790,6 +49792,47 @@ WValue w_object_new(WValue klass_val) {
     obj->ivar_count = (uint8_t)slots;
     obj->flags = 0;
     return w_box_ptr(obj, W_SUBTAG_INSTANCE);
+}
+
+/* Automatically recycled source-object shells. The ownership pass selects
+ * this path only when the exact guarded constructor result cannot escape and
+ * inserts w_object_recycle at the proven end of its lifetime. The common
+ * eight-slot shape gets a bounded TLS stack, so nested/reentrant lifetimes pop
+ * distinct shells and return them in LIFO order. Larger uncommon layouts keep
+ * the ordinary calloc/free path until a size-bucket policy is justified. */
+#define OBJECT_POOL_MAX 16
+static __thread WValue g_object_pool[OBJECT_POOL_MAX];
+static __thread int g_object_pool_count = 0;
+
+WValue w_object_recycle_or_new(WValue klass_val) {
+    WClass *klass = as_class(klass_val);
+    int slots = klass->ivar_count > 8 ? klass->ivar_count : 8;
+    if (slots == 8 && g_object_pool_count > 0) {
+        w_pool_stat_hit(POOL_KIND_OBJECT);
+        WValue value = g_object_pool[--g_object_pool_count];
+        WObject *obj = (WObject *)w_as_ptr(value);
+        obj->class_id = klass->class_id;
+        obj->ivar_count = 8;
+        obj->flags = 0;
+        obj->_reserved = 0;
+        memset(obj->ivars, 0, 8 * sizeof(WValue));
+        return value;
+    }
+    w_pool_stat_miss(POOL_KIND_OBJECT);
+    return w_object_new(klass_val);
+}
+
+void w_object_recycle(WValue value) {
+    if (!w_is_instance(value)) return;
+    WObject *obj = (WObject *)w_as_ptr(value);
+    if (obj->flags & (W_OBJ_FLAG_FROZEN | W_OBJ_FLAG_POOLED)) return;
+    if (obj->ivar_count == 8 && g_object_pool_count < OBJECT_POOL_MAX) {
+        obj->flags |= W_OBJ_FLAG_POOLED;
+        g_object_pool[g_object_pool_count++] = value;
+        return;
+    }
+    if (obj->ivar_count == 8) w_pool_stat_drop(POOL_KIND_OBJECT);
+    free(obj);
 }
 
 WValue w_ivar_get(WValue obj_val, const char *name) {
@@ -73049,7 +73092,7 @@ void w_value_free(WValue v) {
      * across goroutines — leave it alone, like the frozen-hash bail above. */
     if (w_is_instance(v)) {
         WObject *obj = (WObject *)w_as_ptr(v);
-        if (obj->flags & W_OBJ_FLAG_FROZEN) return;
+        if (obj->flags & (W_OBJ_FLAG_FROZEN | W_OBJ_FLAG_POOLED)) return;
         free(obj);
         return;
     }

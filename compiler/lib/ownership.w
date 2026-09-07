@@ -359,7 +359,7 @@ use wire
             producer_class = construct_producer_class(inst, mod, class_temps)
             is_producer = producer_class != nil
           if is_producer
-            producers[wire_get(inst, :temp)] = {op: op, block: bi, class: producer_class}
+            producers[wire_get(inst, :temp)] = {op: op, block: bi, class: producer_class, instruction: inst}
             if scope_stack.size() > 0
               scope_stack[scope_stack.size() - 1][:temps].push(wire_get(inst, :temp))
             elsif bi == 0
@@ -444,8 +444,19 @@ use wire
     worker += 1
   nil
 
-# Insert free calls at scope_pop for non-escaped heap-produced values.
-# Modifies WIRE blocks in place: injects :free_value instructions before scope_pop.
+# Choose the matching release for a dead producer. A source instance whose
+# guarded constructor arm is known to run can return its shell to the bounded
+# object pool. Marking the allocation arm here keeps the optimization tied to
+# the same escape proof that inserts the release; `TUNGSTEN_FREE=0` therefore
+# retains ordinary allocation as well as omitting release calls.
+-> release_dead_producer(temp, producer)
+  if producer[:class] != nil && producer[:instruction] != nil
+    wire_set(producer[:instruction], :construct_recycle, true)
+    return wire_make_recycle_object(temp)
+  wire_make_free_value(temp)
+
+# Insert releases at scope_pop for non-escaped heap-produced values.
+# Modifies WIRE blocks in place before scope_pop and each dominated return.
 -> insert_frees(func)
   own = func[:ownership]
   if own == nil
@@ -472,7 +483,7 @@ use wire
           while li < locals.size()
             temp = locals[li]
             if escaped[temp] != true && producers[temp] != nil
-              new_instrs.push(wire_make_free_value(temp))
+              new_instrs.push(release_dead_producer(temp, producers[temp]))
             li += 1
       # Function-body scope: free non-escaped entry-block producers right
       # before each return. The entry block dominates every ret, so these
@@ -484,7 +495,7 @@ use wire
         while fi < func_scope.size()
           temp = func_scope[fi]
           if escaped[temp] != true && producers[temp] != nil
-            new_instrs.push(wire_make_free_value(temp))
+            new_instrs.push(release_dead_producer(temp, producers[temp]))
           fi += 1
       new_instrs.push(inst)
       ii += 1

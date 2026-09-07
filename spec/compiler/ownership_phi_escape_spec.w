@@ -170,3 +170,34 @@ if escaped2["%owned2"] == true
   exit(1)
 
 << "PASS ownership retention shapes"
+
+# A guarded source constructor gets a matching pool release only after the
+# same ownership proof has established that its result does not escape. Other
+# heap producers retain the generic release operation.
+construct_inst = wire_instruction({
+  op: :call_method_i64,
+  temp: "%object",
+  receiver: "%klass",
+  method_name_val: "0",
+  args: [],
+  construct_class: "OwnedPoint",
+  construct_fn: "__w_OwnedPoint_new__a3"
+})
+object_release = release_dead_producer("%object", {
+  class: "OwnedPoint",
+  instruction: construct_inst
+})
+if wire_kind(object_release) != :recycle_object || wire_get(object_release, :value) != "%object"
+  << "FAIL ownership object release: missing recycle operation"
+  exit(1)
+if wire_get(construct_inst, :construct_recycle) != true
+  << "FAIL ownership object release: allocation arm was not marked"
+  exit(1)
+
+ordinary_inst = wire_instruction({op: :call_direct_i64, temp: "%hash", name: "w_hash_new", args: []})
+ordinary_release = release_dead_producer("%hash", {class: nil, instruction: ordinary_inst})
+if wire_kind(ordinary_release) != :free_value || wire_get(ordinary_release, :value) != "%hash"
+  << "FAIL ownership object release: generic producer changed release kind"
+  exit(1)
+
+<< "PASS ownership object recycler selection"

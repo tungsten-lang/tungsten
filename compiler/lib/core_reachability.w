@@ -7,9 +7,6 @@
 # Core graph remains on the module so a cold incremental-cache compile still
 # stores the reusable 929-function cohort after emission.
 
--> core_reachability_enabled?
-  env("TUNGSTEN_CORE_REACHABILITY") != "0"
-
 -> core_reachability_add_function(name, functions_by_name, live, queue)
   if name == nil || live[name] == true
     return nil
@@ -198,7 +195,7 @@
 
 -> core_reachability_prepare(mod, filter_registrations = true)
   mod[:core_reachability_registration_restore] = []
-  if !core_reachability_enabled?
+  if env("TUNGSTEN_CORE_REACHABILITY") == "0"
     mod[:core_reachability_status] = :disabled
     return nil
   if mod[:incremental_core_cache_key] == nil || mod[:protect_core] != true

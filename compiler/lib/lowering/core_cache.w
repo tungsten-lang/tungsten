@@ -119,12 +119,12 @@ incremental_core_cache_state = {
     path = entry[0]
     if core_source_path?(path)
       mtime = entry[1]
-      stat = File.stat(path)
-      if stat == nil
+      stat = file_stat_data(path, true)
+      if stat == nil || stat.size() < 13
         return nil
-      current_mtime = stat.mtime_ns()
-      size = stat.size()
-      ctime = stat.ctime_ns()
+      current_mtime = stat[11]
+      size = stat[7]
+      ctime = stat[12]
       # The manifest describes the source that was parsed. If the file moved
       # while that parse was in flight, bypass reuse rather than key old AST
       # data with the new on-disk digest.

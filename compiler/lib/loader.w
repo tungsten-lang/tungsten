@@ -331,18 +331,24 @@ loader_parse_cache_state = {
       i += 1
     parts.join(",")
 
+  -> begin_program_manifest
+    @manifest_files = []
+    @manifest_poisoned = false
+    @runtime_id = runtime_identity()
+    @cacheable = @runtime_id.starts_with?("ruby ")
+    # Manifest recording engages for the ruby AST cache AND the compiled
+    # driver's incremental binary/Core caches. Stage 0 implements the same
+    # nanosecond file metadata boundary so its cold lowering order and Core
+    # reachability decision remain byte-identical with the native stage.
+    @manifest_wanted = @cacheable || @runtime_id in ("compiled-runtime" "tungsten-c")
+    nil
+
   -> load_program_ast(path, from_file = nil)
     resolved = resolve_path(path, from_file)
 
     if from_file == nil
       @loaded_files = []
-      @manifest_files = []
-      @runtime_id = runtime_identity()
-      @cacheable = @runtime_id.starts_with?("ruby ")
-      # Manifest recording engages for the ruby AST cache AND the compiled
-      # driver's incremental binary cache. The C VM stage-0 lacks the bare
-      # file_mtime_ns builtin, so it must not attempt to record at all.
-      @manifest_wanted = @cacheable || @runtime_id == "compiled-runtime"
+      begin_program_manifest()
 
       cached = read_ast_cache(resolved)
       if cached != nil
@@ -583,9 +589,18 @@ loader_parse_cache_state = {
     # at the compiler's top produced duplicate __bigint_* fns).
     if fast_loaded != nil
       @loaded_files = []
+      begin_program_manifest()
+      manifest_seen = {}
       fli = 0
       while fli < fast_loaded.size()
-        @loaded_files.push(fast_loaded[fli])
+        loaded_path = fast_loaded[fli]
+        @loaded_files.push(loaded_path)
+        # fast_loaded also carries relative aliases used solely for Loader's
+        # duplicate-load checks. The first spelling for each file is its
+        # canonical absolute path; only those belong in the source manifest.
+        if loaded_path.starts_with?("/") && manifest_seen[loaded_path] != true
+          record_manifest_file(loaded_path)
+          manifest_seen[loaded_path] = true
         fli += 1
     registry = autoload_registry(base_resolved)
     if registry == nil

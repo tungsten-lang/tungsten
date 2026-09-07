@@ -628,6 +628,18 @@
         }
         // Keep compiler-driver diagnostics on stderr when a rescue path runs
         // under the stage-0 VM. Native stages call runtime.c's w_eputs.
+        if (!has_receiver && name_len == 5 && memcmp(name, "ccall", 5) == 0 && argc == 1
+            && tc_kind(args[0]) == TC_VAL_STRING
+            && tc_str_len(args[0]) == sizeof("w_compiler_image_lean_profile") - 1
+            && memcmp(tc_str_bytes_only(args[0]), "w_compiler_image_lean_profile",
+                      sizeof("w_compiler_image_lean_profile") - 1) == 0) {
+          /* Link-profile marker only. The C VM emits stage-1 LLVM but never
+           * links its runtime, so consuming this as nil exactly mirrors the
+           * native no-op while preserving the marker call in native stages. */
+          FREE_ARGS();
+          if (!push(&vm, tc_box_nil(), err)) goto cleanup_fail;
+          CNEXT();
+        }
         if (!has_receiver && name_len == 5 && memcmp(name, "ccall", 5) == 0 && argc == 2
             && tc_kind(args[0]) == TC_VAL_STRING
             && tc_str_len(args[0]) == 7
@@ -947,6 +959,36 @@
           if (!push(&vm, tc_box_wvalue(exists ? W_TRUE : W_FALSE), err)) {
             goto cleanup_fail;
           }
+          CNEXT();
+        }
+        if (!has_receiver && name == NAME_FILE_MTIME_NS && argc == 1) {
+          TcValue out;
+          if (!file_mtime_ns_value(args[0], &out, err)) {
+            FREE_ARGS();
+            goto cleanup_fail;
+          }
+          FREE_ARGS();
+          if (!push(&vm, out, err)) goto cleanup_fail;
+          CNEXT();
+        }
+        if (!has_receiver && name == NAME_FILE_STAT_DATA && argc == 2) {
+          TcValue out;
+          if (!file_stat_data_value(args[0], args[1], &out, err)) {
+            FREE_ARGS();
+            goto cleanup_fail;
+          }
+          FREE_ARGS();
+          if (!push(&vm, out, err)) goto cleanup_fail;
+          CNEXT();
+        }
+        if (!has_receiver && name == NAME_DIGEST_FILE64 && argc == 1) {
+          TcValue out;
+          if (!digest_file64_value(args[0], &out, err)) {
+            FREE_ARGS();
+            goto cleanup_fail;
+          }
+          FREE_ARGS();
+          if (!push(&vm, out, err)) goto cleanup_fail;
           CNEXT();
         }
         if (!has_receiver && name == NAME_RUNTIME_IDENTITY && argc == 0) {
@@ -1473,7 +1515,7 @@
           int ok = 0;
           if (tc_kind(receiver) == TC_VAL_STRING && tc_kind(args[0]) == TC_VAL_STRING) {
             TcValue idx;
-            if (!string_index_value(receiver, args[0], &idx, err)) {
+            if (!string_index_value(receiver, args[0], tc_box_nil(), 0, &idx, err)) {
               FREE_ARGS();
               goto cleanup_fail;
             }
@@ -1516,9 +1558,10 @@
           }
           CNEXT();
         }
-        if (has_receiver && name == NAME_INDEX && argc == 1) {
+        if (has_receiver && name == NAME_INDEX && (argc == 1 || argc == 2)) {
           TcValue out;
-          if (!string_index_value(receiver, args[0], &out, err)) {
+          if (!string_index_value(receiver, args[0], argc == 2 ? args[1] : tc_box_nil(),
+                                  argc == 2, &out, err)) {
             FREE_ARGS();
             goto cleanup_fail;
           }
@@ -1528,9 +1571,10 @@
           }
           CNEXT();
         }
-        if (has_receiver && name == NAME_RINDEX && argc == 1) {
+        if (has_receiver && name == NAME_RINDEX && (argc == 1 || argc == 2)) {
           TcValue out;
-          if (!string_rindex_value(receiver, args[0], &out, err)) {
+          if (!string_rindex_value(receiver, args[0], argc == 2 ? args[1] : tc_box_nil(),
+                                   argc == 2, &out, err)) {
             FREE_ARGS();
             goto cleanup_fail;
           }
@@ -2181,6 +2225,23 @@
               }
             }
           }
+        }
+
+        /* Entry-program closed-world declarations are compile-time contracts.
+         * The self-hosted lowering pass validates and erases them, but stage 0
+         * executes the compiler launcher while producing stage 1. Its compact
+         * call representation preserves the qualified spelling and has no
+         * runtime receiver, so consume the three declarations here as nil. */
+        if (!has_receiver && argc == 0 &&
+            ((name_len == sizeof("Tungsten.PROTECT_THE_CORE!") - 1 &&
+              memcmp(name, "Tungsten.PROTECT_THE_CORE!", name_len) == 0) ||
+             (name_len == sizeof("Tungsten.STOP_THE_PRESS!") - 1 &&
+              memcmp(name, "Tungsten.STOP_THE_PRESS!", name_len) == 0) ||
+             (name_len == sizeof("Tungsten.LOCK_THE_DOORS!") - 1 &&
+              memcmp(name, "Tungsten.LOCK_THE_DOORS!", name_len) == 0))) {
+          FREE_ARGS();
+          if (!push(&vm, tc_box_nil(), err)) goto cleanup_fail;
+          CNEXT();
         }
 
         size_t fn_len = 0;

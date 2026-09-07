@@ -93,6 +93,10 @@ test: $(BIN)
 		diff -u tests/positional_arity.expected -
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/string_buffer_size.w | \
 		diff -u tests/string_buffer_size.expected -
+	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/string_search_offset.w | \
+		diff -u tests/string_search_offset.expected -
+	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/file_stat_manifest.w | \
+		diff -u tests/file_stat_manifest.expected -
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/implicit_constructor.w | \
 		diff -u tests/implicit_constructor.expected -
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/inherited_dispatch.w | \
@@ -125,6 +129,8 @@ test: $(BIN)
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/parenthesized_type_hint.w | \
 		diff -u tests/parenthesized_type_hint.output -
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) --check-ast tests/operator_method_name.w
+	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) --check-ast tests/uppercase_method_suffix.w
+	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/uppercase_method_suffix.w
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/embedded_ll_vector_const.w | \
 		diff -u tests/embedded_ll_vector_const.expected -
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/embedded_asm_hash_immediate.w | \

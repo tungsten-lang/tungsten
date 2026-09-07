@@ -110,7 +110,7 @@ namespace :test do
   desc "Run all default non-hardware test suites"
   task all: %i[ruby tungsten remaining]
 
-  multitask remaining: %i[wvalue parity unit_registry_superset regex_lexer_parity c_vm ccall_contracts cli_contracts spec_classify compile_profiles fmt generic_constraints http_tls lint repl_contracts bit_install cache_gc cache_location performance_ci frontend_fuzz fast_parse_parity linear_wire_postprocess]
+  multitask remaining: %i[wvalue parity unit_registry_superset regex_lexer_parity c_vm ccall_contracts cli_contracts compiler_images spec_classify compile_profiles fmt generic_constraints http_tls lint repl_contracts bit_install cache_gc cache_location performance_ci frontend_fuzz fast_parse_parity linear_wire_postprocess]
 
   desc "Verify generated C-call ABI contracts and the WIRE consistency guard"
   task :ccall_contracts do
@@ -131,6 +131,11 @@ namespace :test do
   task :cli_contracts do
     run_command "bash", File.join(ROOT, "scripts/test-cli-contracts.sh")
     run_command "bash", File.join(ROOT, "scripts/test-worktree-compiler-hook.sh")
+  end
+
+  desc "Verify optional REPL/interpreter/GPU compiler image boundaries"
+  task :compiler_images do
+    run_command "ruby", File.join(ROOT, "scripts/test-compiler-images.rb")
   end
 
   desc "Classify every tracked spec/**/*_spec.w and fail closed on unlisted files"

@@ -49644,6 +49644,14 @@ int64_t w_method_tables_are_locked(void) {
     return locked;
 }
 
+/* Emitted only by compiler-image launchers. The call is intentionally a
+ * semantic no-op: compiler/tungsten_driver.w detects it in pre-link LLVM and
+ * selects TUNGSTEN_RUNTIME_COMPILER_IMAGE while compiling this translation
+ * unit. FullLTO then removes the marker call and this definition. */
+WValue w_compiler_image_lean_profile(void) {
+    return W_NIL;
+}
+
 static void w_method_table_mutation_begin(void) {
     pthread_mutex_lock(&g_method_table_barrier_mutex);
     if (g_method_tables_locked) {
@@ -61064,6 +61072,7 @@ static WValue w_ic_decimal_round(WValue r, WValue *a, int c) {
 /* The packed-network inspect aliases remain native until a tiny, sound
  * unknown-boundary autoload facade is proven not to regress compile/binary
  * size. Their to_s rows migrate independently to the existing source bodies. */
+#ifndef TUNGSTEN_RUNTIME_COMPILER_IMAGE
 static WValue w_ic_value_to_s(WValue r, WValue *a, int c) {
     (void)a; (void)c;
     return w_to_s(r);
@@ -61098,6 +61107,7 @@ static WValue w_ic_date_to_s(WValue r, WValue *a, int c) {
     strftime(dbuf, sizeof(dbuf), as_str(a[0]), &tm);
     return w_string(dbuf);
 }
+#endif
 
 /* Resolution tables — WValue keys for O(1) integer compare */
 typedef struct { WValue name; WValue (*fn)(WValue, WValue*, int); } WICEntry;
@@ -61276,6 +61286,7 @@ static WICEntry w_ic_thread_table[] = {
     {0, NULL}
 };
 
+#ifndef TUNGSTEN_RUNTIME_COMPILER_IMAGE
 static WICEntry w_ic_socket_table[] = {
     {0, w_ic_socket_accept},
     {0, w_ic_socket_read},
@@ -61299,6 +61310,7 @@ static WICEntry w_ic_mmap_table[] = {
     {0, w_ic_mmap_view_at},
     {0, NULL}
 };
+#endif
 
 static WICEntry w_ic_strbuf_table[] = {
     {0, w_ic_strbuf_to_s},
@@ -61315,11 +61327,13 @@ static WICEntry w_ic_strbuf_table[] = {
     {0, NULL}
 };
 
+#ifndef TUNGSTEN_RUNTIME_COMPILER_IMAGE
 static WICEntry w_ic_channel_table[] = {
     {0, w_ic_channel_send},
     {0, w_ic_channel_close},
     {0, NULL}
 };
+#endif
 
 /* Raw WValue bit views for the `? <value>` inspector's u0x breakdown panel.
  * Done in C so the 0xFFFE… top bits don't trip Tungsten's i64 sign handling.
@@ -61658,6 +61672,7 @@ static WICEntry w_ic_float_table[] = {
  * proof. Keep this table aligned with the direct-call whitelist in
  * lowering/method_call.w; scripts/check-core-dispatch-contracts.rb enforces
  * the three-way contract. */
+#ifndef TUNGSTEN_RUNTIME_COMPILER_IMAGE
 static WValue w_ic_quantity_point_fn(WValue r, WValue *a, int c) {
     if (c == 0) return w_quantity_point(r, w_symbol("default"));
     if (c == 1) return w_quantity_point(r, a[0]);
@@ -61717,6 +61732,7 @@ static WICEntry w_ic_quantity_table[] = {
     {0, w_ic_quantity_equivalent_fn},
     {0, NULL}
 };
+#endif
 
 static WICEntry w_ic_decimal_table[] = {     /* 0xFFFD numeric tag */
     {0, w_ic_decimal_to_i},
@@ -61731,6 +61747,7 @@ static WICEntry w_ic_decimal_table[] = {     /* 0xFFFD numeric tag */
     {0, NULL}
 };
 
+#ifndef TUNGSTEN_RUNTIME_COMPILER_IMAGE
 static WICEntry w_ic_date_table[] = {        /* packed date, subtype 4 */
     {0, w_ic_date_to_s},         /* to_s — ISO; with a format arg, strftime */
     {0, w_ic_date_to_s},         /* strftime — same handler */
@@ -61752,6 +61769,7 @@ static WICEntry w_ic_mac_table[] = {
     {0, w_ic_value_to_s},        /* inspect */
     {0, NULL}
 };
+#endif
 
 static void w_init_ic_tables(void) {
     /* Private WIRE records/sequences. */
@@ -61896,6 +61914,7 @@ static void w_init_ic_tables(void) {
     /* Thread */
     w_ic_thread_table[0].name = WN_join;
     w_ic_thread_table[1].name = WN_kill;
+#ifndef TUNGSTEN_RUNTIME_COMPILER_IMAGE
     /* Socket */
     w_ic_socket_table[0].name = WN_accept;
     w_ic_socket_table[1].name = WN_read;
@@ -61914,6 +61933,7 @@ static void w_init_ic_tables(void) {
     w_ic_mmap_table[1].name   = WN_byte_at;
     w_ic_mmap_table[2].name   = WN_idx;
     w_ic_mmap_table[3].name   = WN_view_at;
+#endif
     /* StringBuffer */
     w_ic_strbuf_table[0].name  = WN_to_s;
     w_ic_strbuf_table[1].name  = WN_include_q;
@@ -61926,9 +61946,11 @@ static void w_init_ic_tables(void) {
     w_ic_strbuf_table[8].name  = WN_idx;
     w_ic_strbuf_table[9].name  = WN_clear;
     w_ic_strbuf_table[10].name = WN_empty_q;
+#ifndef TUNGSTEN_RUNTIME_COMPILER_IMAGE
     /* Channel */
     w_ic_channel_table[0].name = WN_send;
     w_ic_channel_table[1].name = WN_close;
+#endif
     /* Atomic */
     w_ic_atomic_table[0].name  = WN_cas;
     w_ic_atomic_table[1].name  = WN_get;
@@ -61960,6 +61982,7 @@ static void w_init_ic_tables(void) {
     w_ic_decimal_table[7].name = WN_abs;
     w_ic_decimal_table[8].name = WN_to_d;
 
+#ifndef TUNGSTEN_RUNTIME_COMPILER_IMAGE
     w_ic_ipv4_table[0].name = w_string("inspect");
     w_ic_ipv6_table[0].name = w_string("inspect");
     w_ic_mac_table[0].name = w_string("inspect");
@@ -61978,6 +62001,7 @@ static void w_init_ic_tables(void) {
     w_ic_date_table[0].name = WN_to_s;
     w_ic_date_table[1].name = WN_strftime;
     w_ic_date_table[2].name = w_string("inspect");
+#endif
 }
 
 static WValue (*w_resolve_ic(uint64_t key, WValue name, WValue recv))(WValue, WValue*, int) {
@@ -61990,22 +62014,30 @@ static WValue (*w_resolve_ic(uint64_t key, WValue name, WValue recv))(WValue, WV
         case 0xFA: table = w_ic_int_table;     break;
         case 0xFF: table = w_ic_float_table;   break;
         case 0xFD: table = w_ic_decimal_table;  break;
+#ifndef TUNGSTEN_RUNTIME_COMPILER_IMAGE
         case 0xC1: table = w_ic_quantity_table; break;
+#endif
         case 0x05: table = w_ic_hash_table;    break;
         case 0x01: table = w_ic_atomic_table;  break;
+#ifndef TUNGSTEN_RUNTIME_COMPILER_IMAGE
         case 0x84: table = w_ic_channel_table; break;  /* 0x80 | W_TYPE_CHANNEL=4 */
+#endif
         case 0x0B: table = w_ic_strbuf_table;  break;  /* W_SUBTAG_STRBUF */
         case 0x07: table = w_ic_regex_table;   break;  /* W_SUBTAG_REGEX */
         case 0x0E: table = w_ic_regex_match_table; break; /* W_SUBTAG_REGEX_MATCH */
         case 0x81: table = w_ic_thread_table;  break;  /* 0x80 | W_TYPE_THREAD=1 */
+#ifndef TUNGSTEN_RUNTIME_COMPILER_IMAGE
         case 0x83: table = w_ic_socket_table;  break;  /* 0x80 | W_TYPE_SOCKET=3 */
         case 0x91: table = w_ic_mmap_table;    break;  /* 0x80 | W_TYPE_MMAP=17 */
+#endif
         case 0x92: table = w_ic_big_array_table;   break;  /* 0x80 | W_TYPE_BIG_ARRAY=18 */
         case 0x09: table = w_ic_small_array_table; break;  /* W_SUBTAG_SMALL_ARRAY=9 */
+#ifndef TUNGSTEN_RUNTIME_COMPILER_IMAGE
         case 0xE4: table = w_ic_date_table;        break;  /* packed date subtype 4 */
         case 0xE5: table = w_ic_ipv4_table;        break;  /* packed IPv4 subtype 5 */
         case 0x85: table = w_ic_mac_table;         break;  /* 0x80 | W_TYPE_MAC=5 */
         case 0x86: table = w_ic_ipv6_table;        break;  /* 0x80 | W_TYPE_IPV6=6 */
+#endif
         default: return NULL;
     }
     for (int i = 0; table[i].fn; i++) {
@@ -62071,6 +62103,11 @@ static __thread WValue g_generic_ctor_recv;
  * would make the first call use the builtin and every later call return nil.
  * Constructors already have a separate non-publishing path below. */
 static int w_builtin_static_precedes_source(WValue recv, WValue name) {
+#ifdef TUNGSTEN_RUNTIME_COMPILER_IMAGE
+    (void)recv;
+    (void)name;
+    return 0;
+#else
     if (!w_is_class(recv)) return 0;
     WClass *klass = as_class(recv);
     if (strcmp(klass->name, "Socket") == 0)
@@ -62079,6 +62116,7 @@ static int w_builtin_static_precedes_source(WValue recv, WValue name) {
         return w_hash_key_eq(name, WN_init) || w_hash_key_eq(name, WN_load_cert) ||
                w_hash_key_eq(name, WN_client_wrap);
     return 0;
+#endif
 }
 
 /* Out-of-line slow path: cache miss → full dispatch + populate IC.
@@ -62665,6 +62703,7 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
     if (w_is_class(recv)) {
         WClass *klass = as_class(recv);
 
+#ifndef TUNGSTEN_RUNTIME_COMPILER_IMAGE
         /* Socket.listen(host, port, backlog) */
         if (strcmp(klass->name, "Socket") == 0 && w_hash_key_eq(name, WN_listen)) {
             if (args->size < 2) die("Socket.listen requires at least host and port");
@@ -62706,6 +62745,7 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
             if (args->size < 2) die("Response.new requires status and body");
             return w_response_new_wv(args->slots[0], args->slots[1]);
         }
+#endif
 
 
         /* ByteArray.new(length) */

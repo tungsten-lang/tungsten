@@ -1630,7 +1630,7 @@
   last != nil && is_ast_node?(last) && ast_kind(last) == :hash_literal && last.from_kwargs == true
 
 -> collect_param_type_observations(mod, expressions, core_expressions = nil, core_top_local = nil)
-  if !param_infer_enabled?
+  if env("TUNGSTEN_PARAM_INFER") == "0"
     return nil
   mod[:observed_param_types] = {}
   mod[:param_infer_bailed] = {}

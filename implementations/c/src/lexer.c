@@ -933,6 +933,10 @@ int tc_lex_source(const TcSource *source, TcTokens *tokens, TcError *err) {
     if (c >= 'A' && c <= 'Z') {
       size_t start = pos++;
       while (pos < count && id_continue_or_upper(source, pos)) pos++;
+      if (pos < count) {
+        uint32_t c2 = cp_at(source, pos);
+        if (c2 == '?' || c2 == '!') pos++;
+      }
       if (!token_push(tokens, token_new(TC_T_NAME, start, pos, 0), err)) return 0;
       continue;
     }

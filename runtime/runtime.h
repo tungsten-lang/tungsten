@@ -1183,6 +1183,7 @@ WValue w_type_tables_lock_safe(void);
 int64_t w_type_tables_are_locked(void);
 WValue w_method_tables_lock_safe(void);
 int64_t w_method_tables_are_locked(void);
+WValue w_compiler_image_lean_profile(void);
 void   w_class_add_method(WValue klass, const char *name, void *fn_ptr, int arity);
 void   w_class_add_method_wv(WValue klass, WValue name, void *fn_ptr, int arity);
 void   w_class_add_method_range_wv(WValue klass, WValue name, void *fn_ptr,

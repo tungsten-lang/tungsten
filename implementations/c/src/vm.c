@@ -8,6 +8,7 @@
 #include <spawn.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <time.h>
 
@@ -165,6 +166,9 @@ static TcRuntimeHash *cvar_table = NULL;
   X(ENV,            "env")           \
   X(CLOCK,          "clock")         \
   X(FILE_Q,         "file?")         \
+  X(FILE_MTIME_NS,  "file_mtime_ns") \
+  X(FILE_STAT_DATA, "file_stat_data") \
+  X(DIGEST_FILE64,  "digest_file64") \
   X(SYSTEM,         "system")        \
   X(CAPTURE,        "capture")       \
   X(READ_FILE,      "read_file")     \
@@ -1023,16 +1027,30 @@ static int string_replace_all(TcValue receiver, TcValue needle, TcValue replacem
   return 1;
 }
 
-static int string_index_value(TcValue receiver, TcValue needle, TcValue *out, TcError *err) {
+static int string_index_value(TcValue receiver, TcValue needle, TcValue offset_value,
+                              int has_offset, TcValue *out, TcError *err) {
   if (tc_kind(receiver) != TC_VAL_STRING || tc_kind(needle) != TC_VAL_STRING) {
     tc_error_set(err, "index expects string receiver and argument");
     return 0;
   }
+  size_t offset = 0;
+  if (has_offset) {
+    if (!value_is_int(offset_value)) {
+      tc_error_set(err, "index offset must be an integer");
+      return 0;
+    }
+    int64_t requested = value_as_int(offset_value);
+    if (requested < 0 || (size_t)requested > tc_str_len(receiver)) {
+      *out = tc_box_nil();
+      return 1;
+    }
+    offset = (size_t)requested;
+  }
   if (tc_str_len(needle) == 0) {
-    *out = int_value(0);
+    *out = int_value((int64_t)offset);
     return 1;
   }
-  for (size_t i = 0; i + tc_str_len(needle) <= tc_str_len(receiver); i++) {
+  for (size_t i = offset; i + tc_str_len(needle) <= tc_str_len(receiver); i++) {
     if (memcmp(tc_str_bytes_only(receiver) + i, tc_str_bytes_only(needle), tc_str_len(needle)) == 0) {
       *out = int_value((int64_t)i);
       return 1;
@@ -1042,17 +1060,33 @@ static int string_index_value(TcValue receiver, TcValue needle, TcValue *out, Tc
   return 1;
 }
 
-static int string_rindex_value(TcValue receiver, TcValue needle, TcValue *out, TcError *err) {
+static int string_rindex_value(TcValue receiver, TcValue needle, TcValue pos_value,
+                               int has_pos, TcValue *out, TcError *err) {
   if (tc_kind(receiver) != TC_VAL_STRING || tc_kind(needle) != TC_VAL_STRING) {
     tc_error_set(err, "rindex expects string receiver and argument");
     return 0;
   }
+  size_t limit = tc_str_len(receiver);
+  if (has_pos) {
+    if (!value_is_int(pos_value)) {
+      tc_error_set(err, "rindex position must be an integer");
+      return 0;
+    }
+    int64_t requested = value_as_int(pos_value);
+    if (requested < 0) {
+      *out = tc_box_nil();
+      return 1;
+    }
+    if ((size_t)requested < limit) limit = (size_t)requested;
+  }
   if (tc_str_len(needle) == 0) {
-    *out = int_value((int64_t)tc_str_len(receiver));
+    *out = int_value((int64_t)limit);
     return 1;
   }
   if (tc_str_len(needle) <= tc_str_len(receiver)) {
-    for (size_t i = tc_str_len(receiver) - tc_str_len(needle) + 1; i-- > 0; ) {
+    size_t start = tc_str_len(receiver) - tc_str_len(needle);
+    if (limit < start) start = limit;
+    for (size_t i = start + 1; i-- > 0; ) {
       if (memcmp(tc_str_bytes_only(receiver) + i, tc_str_bytes_only(needle), tc_str_len(needle)) == 0) {
         *out = int_value((int64_t)i);
         return 1;
@@ -1060,6 +1094,173 @@ static int string_rindex_value(TcValue receiver, TcValue needle, TcValue *out, T
     }
   }
   *out = tc_box_nil();
+  return 1;
+}
+
+static int64_t tc_stat_mtime_ns(const struct stat *st) {
+#ifdef __APPLE__
+  return (int64_t)st->st_mtimespec.tv_sec * 1000000000LL +
+         (int64_t)st->st_mtimespec.tv_nsec;
+#elif defined(__linux__)
+  return (int64_t)st->st_mtim.tv_sec * 1000000000LL +
+         (int64_t)st->st_mtim.tv_nsec;
+#else
+  return (int64_t)st->st_mtime * 1000000000LL;
+#endif
+}
+
+static int64_t tc_stat_atime_ns(const struct stat *st) {
+#ifdef __APPLE__
+  return (int64_t)st->st_atimespec.tv_sec * 1000000000LL +
+         (int64_t)st->st_atimespec.tv_nsec;
+#elif defined(__linux__)
+  return (int64_t)st->st_atim.tv_sec * 1000000000LL +
+         (int64_t)st->st_atim.tv_nsec;
+#else
+  return (int64_t)st->st_atime * 1000000000LL;
+#endif
+}
+
+static int64_t tc_stat_ctime_ns(const struct stat *st) {
+#ifdef __APPLE__
+  return (int64_t)st->st_ctimespec.tv_sec * 1000000000LL +
+         (int64_t)st->st_ctimespec.tv_nsec;
+#elif defined(__linux__)
+  return (int64_t)st->st_ctim.tv_sec * 1000000000LL +
+         (int64_t)st->st_ctim.tv_nsec;
+#else
+  return (int64_t)st->st_ctime * 1000000000LL;
+#endif
+}
+
+static const char *tc_stat_type_name(mode_t mode) {
+  if (S_ISREG(mode)) return "file";
+  if (S_ISDIR(mode)) return "directory";
+  if (S_ISLNK(mode)) return "symlink";
+  if (S_ISCHR(mode)) return "character";
+  if (S_ISBLK(mode)) return "block";
+  if (S_ISFIFO(mode)) return "fifo";
+#ifdef S_ISSOCK
+  if (S_ISSOCK(mode)) return "socket";
+#endif
+  return "unknown";
+}
+
+static int stat_path_value(TcValue path_value, int follow, struct stat *st,
+                           TcError *err) {
+  if (tc_kind(path_value) != TC_VAL_STRING && tc_kind(path_value) != TC_VAL_SYMBOL) {
+    tc_error_set(err, "file metadata path must be a string");
+    return -1;
+  }
+  size_t len = tc_str_len(path_value);
+  char *path = (char *)malloc(len + 1);
+  if (!path) {
+    tc_error_set(err, "file metadata path allocation failed");
+    return -1;
+  }
+  memcpy(path, tc_str_bytes_only(path_value), len);
+  path[len] = '\0';
+  int rc = follow ? stat(path, st) : lstat(path, st);
+  free(path);
+  return rc == 0 ? 1 : 0;
+}
+
+static int file_mtime_ns_value(TcValue path_value, TcValue *out, TcError *err) {
+  struct stat st;
+  int found = stat_path_value(path_value, 1, &st, err);
+  if (found < 0) return 0;
+  *out = found ? int_value(tc_stat_mtime_ns(&st)) : tc_box_nil();
+  return 1;
+}
+
+static int file_stat_data_value(TcValue path_value, TcValue follow_value,
+                                TcValue *out, TcError *err) {
+  struct stat st;
+  int found = stat_path_value(path_value, !falsey(follow_value), &st, err);
+  if (found < 0) return 0;
+  if (!found) {
+    *out = tc_box_nil();
+    return 1;
+  }
+  TcRuntimeArray *data = runtime_array_new(15, err);
+  if (!data) return 0;
+  data->slots[0] = int_value((int64_t)st.st_dev);
+  data->slots[1] = int_value((int64_t)st.st_ino);
+  data->slots[2] = int_value((int64_t)st.st_mode);
+  data->slots[3] = int_value((int64_t)st.st_nlink);
+  data->slots[4] = int_value((int64_t)st.st_uid);
+  data->slots[5] = int_value((int64_t)st.st_gid);
+  data->slots[6] = int_value((int64_t)st.st_rdev);
+  data->slots[7] = int_value((int64_t)st.st_size);
+  data->slots[8] = int_value((int64_t)st.st_blksize);
+  data->slots[9] = int_value((int64_t)st.st_blocks);
+  data->slots[10] = int_value(tc_stat_atime_ns(&st));
+  data->slots[11] = int_value(tc_stat_mtime_ns(&st));
+  data->slots[12] = int_value(tc_stat_ctime_ns(&st));
+#ifdef __APPLE__
+  data->slots[13] = int_value((int64_t)st.st_birthtimespec.tv_sec * 1000000000LL +
+                              (int64_t)st.st_birthtimespec.tv_nsec);
+#else
+  data->slots[13] = tc_box_nil();
+#endif
+  const char *type_name = tc_stat_type_name(st.st_mode);
+  if (!make_string_value(type_name, strlen(type_name), &data->slots[14], err)) {
+    free(data->slots);
+    free(data);
+    return 0;
+  }
+  *out = tc_box_array(data);
+  return 1;
+}
+
+static int digest_file64_value(TcValue path_value, TcValue *out, TcError *err) {
+  if (tc_kind(path_value) != TC_VAL_STRING && tc_kind(path_value) != TC_VAL_SYMBOL) {
+    tc_error_set(err, "digest_file64 path must be a string");
+    return 0;
+  }
+  size_t path_len = tc_str_len(path_value);
+  char *path = (char *)malloc(path_len + 1);
+  if (!path) {
+    tc_error_set(err, "digest_file64 path allocation failed");
+    return 0;
+  }
+  memcpy(path, tc_str_bytes_only(path_value), path_len);
+  path[path_len] = '\0';
+  FILE *file = fopen(path, "rb");
+  free(path);
+  if (!file) {
+    *out = tc_box_nil();
+    return 1;
+  }
+  if (fseek(file, 0, SEEK_END) != 0) {
+    fclose(file);
+    *out = tc_box_nil();
+    return 1;
+  }
+  long end = ftell(file);
+  if (end < 0 || fseek(file, 0, SEEK_SET) != 0) {
+    fclose(file);
+    *out = tc_box_nil();
+    return 1;
+  }
+  size_t len = (size_t)end;
+  unsigned char *bytes = (unsigned char *)malloc(len > 0 ? len : 1);
+  if (!bytes) {
+    fclose(file);
+    tc_error_set(err, "digest_file64 buffer allocation failed");
+    return 0;
+  }
+  size_t read_len = fread(bytes, 1, len, file);
+  int failed = ferror(file);
+  fclose(file);
+  if (failed || read_len != len) {
+    free(bytes);
+    *out = tc_box_nil();
+    return 1;
+  }
+  uint64_t digest = tc_wyhash64_bytes(bytes, len);
+  free(bytes);
+  *out = int_value((int64_t)digest);
   return 1;
 }
 

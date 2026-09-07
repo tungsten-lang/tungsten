@@ -1,0 +1,3 @@
+Tungsten.PROTECT_THE_CORE!
+Tungsten.STOP_THE_PRESS!
+Tungsten.LOCK_THE_DOORS!

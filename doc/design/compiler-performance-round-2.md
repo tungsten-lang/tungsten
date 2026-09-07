@@ -177,3 +177,39 @@ LLVM inferred the same effect and optimized the caller identically. The current
 escape summary's `pure` bit is also intentionally too coarse for LLVM memory
 semantics: some operations allocate, release operands, or call incompletely
 classified externs. No generic source-function memory attribute was added.
+
+## Combined landing validation — 2026-09-07
+
+The three retained round-two commits were rebased after the module split on
+local main `ab662a58`. A fresh release/native/fast/no-debug compiler, current C
+VM, and native runtime tests validate the combined changes. The older bootstrap
+compiler's emission has 22 more inline-cache calls than the new compiler's
+emission, reflecting the loop-edge facts. Rebuilding from the new compiler's
+own output reaches a byte-identical self-host fixed point at SHA-256
+`a36744163f53f122a64bd3409a7d452c6bf9d3e1741578d6783a28027af33e1d`.
+
+Fresh focused gates passed: fast-loader/canonical-parser LLVM identity and its
+native acid test; generated units and all 188 WIRE constructors; compiler image
+and module boundaries; native object-shell and arena tests; content-hash,
+ownership-phi, and escaping-object specs; the complete focused type-facts
+contract script; and five-program batch/solo LLVM identity, including the new
+loop-edge fixture. Debug emission retains backtrace attributes while recycling;
+`TUNGSTEN_FREE=0` removes both recycler allocation and release calls. The full
+suite remains a CI responsibility.
+
+Runtime reruns compare the main compiler built from `99a2beaa` (the compiler,
+Core, and runtime sources are unchanged through `ab662a58`) with the combined
+compiler. Both benchmark variants link the same current runtime sources and use
+`--release --native --fast --no-debug`. One warmup and three alternating measured
+pairs each run 50,000,000 iterations, with identical outputs (`50000000` for the
+shared-owner dispatch loop and `0` for the object checksum).
+
+| Workload | Before user CPU | After user CPU | Before wall | After wall |
+| --- | ---: | ---: | ---: | ---: |
+| Shared-owner loop dispatch | 0.82 s | 0.02 s | 0.838 s | 0.030 s |
+| Non-escaping object churn | 0.81 s | 0.16 s | 0.821 s | 0.170 s |
+
+These are workload-specific runtime improvements, not a claim that the compiler
+itself is uniformly faster. The module split's cold-compilation regression in
+`compiler-module-boundaries.md` remains an open follow-up; it was not silently
+removed from the landing report.

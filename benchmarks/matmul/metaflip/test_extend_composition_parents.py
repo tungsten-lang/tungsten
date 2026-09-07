@@ -1,0 +1,252 @@
+from collections import Counter
+import hashlib
+from itertools import combinations_with_replacement
+import json
+from pathlib import Path
+import tempfile
+import unittest
+
+from extend_composition_parents import extend, identity
+from test_verify_composition_recipes import naive
+from test_verify_parent_only_walk import ParentOnlyWalkTest
+from verify_composition_recipes import verify as verify_products
+from verify_parent_only_walk import verify as verify_walk
+from verify_coordinate_projections import verify as verify_projection
+
+
+def put(path, data):
+    path.write_text(json.dumps(data))
+
+
+def body(terms):
+    return (str(len(terms)) + '\n' + ''.join(' '.join(map(str, t)) + '\n' for t in terms)).encode()
+
+
+def alternate():
+    # An invertible GF(2) basis change in each two-term U bucket. Rank and
+    # all three bucket signatures equal naive 2x2x2; literal state differs.
+    return [t for i in range(2) for j in range(2) for t in (
+        (1 << (2*i+j), 3 << (2*j), 1 << (2*i)),
+        (1 << (2*i+j), 2 << (2*j), 3 << (2*i)))]
+
+
+class ExtendCompositionParentsTest(unittest.TestCase):
+    def prior(self, root):
+        inputs, plan = root / 'inputs.json', root / 'plan.json'
+        put(inputs, dict(complete=True, field='GF(2)', record_claim=False, parents=[]))
+        shapes = list(combinations_with_replacement(range(1, 5), 3))
+        put(plan, dict(complete=True, field='GF(2)', record_claim=False, model_shapes=shapes,
+            baseline_recipes=[dict(kind='naive', rank=a*b*c) for a, b, c in shapes]))
+        return inputs, plan
+
+    def products(self, root, entries):
+        root.mkdir()
+        tensors = []
+        for shape, terms, suffix in entries:
+            raw = body(terms)
+            digest = hashlib.sha256(raw).hexdigest()
+            directory = root / suffix
+            directory.mkdir(exist_ok=True)
+            path = directory / ('x'.join(map(str, shape)) + '-' + digest + '.txt')
+            path.write_bytes(raw)
+            tensors.append(dict(path=str(path.relative_to(root)), shape=shape, sha256=digest))
+        put(root / 'report.json', dict(complete=True, field='GF(2)', record_claim=False,
+            tensors=tensors, recipes=[], outputs=[], materialized_targets=0))
+        put(root / 'independent-audit.json', verify_products(root, 1))
+        return root
+
+    def test_literal_states_not_equal_rank_or_signature(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d).resolve()
+            args = self.prior(root)
+            n, alt = naive((2, 2, 2)), alternate()
+            signature = lambda ts: [sorted(Counter(t[a] for t in ts).values()) for a in range(3)]
+            self.assertEqual(signature(n), signature(alt))
+            self.assertNotEqual(identity((2, 2, 2), n), identity((2, 2, 2), alt))
+            source = self.products(root / 'products', [([2, 2, 2], n, 'first'),
+                ([2, 2, 2], alt, 'second'), ([2, 2, 2], n, 'duplicate')])
+            report = extend(*args, [source], [], root / 'out', maximum=4)
+            self.assertEqual(report['parents'], 2)
+            self.assertEqual(report['added'], {'composition_audit': 2})
+            self.assertFalse(report['actual_price_improvements'])
+            self.assertTrue(report['screen_only'])
+            admissions = json.loads((root / 'out/admissions.json').read_text())
+            self.assertEqual(sum(a['duplicate'] for a in admissions), 1)
+            with self.assertRaisesRegex(ValueError, 'output must not exist'):
+                extend(*args, [source], [], root / 'out', maximum=4)
+
+    def test_closed_plan_reuse_keeps_states_and_matches_full_control(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            args = self.prior(root)
+            source = self.products(root / 'first', [([2, 2, 2], naive((2, 2, 2)), 'tensor')])
+            initial = extend(*args, [source], [], root / 'initial', maximum=4)
+            self.assertFalse(initial['pricing_reuse']['used'])
+            source = self.products(root / 'next', [([2, 2, 2], alternate(), 'tensor')])
+            prior = (root / 'initial/inputs.json', root / 'initial/report.json')
+            reused = extend(*prior, [source], [], root / 'reused', maximum=4)
+            control = extend(*prior, [source], [], root / 'control', maximum=4, reuse_priced_expressions=False)
+            self.assertTrue(reused['pricing_reuse']['used'])
+            self.assertEqual(reused['pricing_reuse']['covered_axes'], 3)
+            self.assertEqual(reused['parents'], 2)
+            self.assertEqual(reused['evaluated_bud_expressions'], 0)
+            for key in ('model_shapes', 'baseline_recipes', 'actual_price_improvements',
+                        'bud_expressions', 'mixed_bud_expressions'):
+                self.assertEqual(json.loads(json.dumps(reused[key])), json.loads(json.dumps(control[key])))
+            for mutation in ('engine', 'table', 'parents'):
+                inputs = json.loads(prior[0].read_bytes())
+                plan = json.loads(prior[1].read_bytes())
+                if mutation == 'engine':
+                    plan['pricing_certificate']['engine_sha256'] = '0'*64
+                elif mutation == 'table':
+                    plan['baseline_recipes'][0]['rank'] += 1
+                else:
+                    inputs['parents'][0]['provenance'] = 'modified'
+                a, b = root / f'{mutation}-inputs.json', root / f'{mutation}-plan.json'
+                put(a, inputs); put(b, plan)
+                fallback = extend(a, b, [source], [], root / mutation, maximum=4)
+                self.assertFalse(fallback['pricing_reuse']['used'])
+
+    def test_new_expression_does_not_reuse_closed_plan(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            args = self.prior(root)
+            source = self.products(root / 'first', [([2, 2, 2], naive((2, 2, 2)), 'tensor')])
+            extend(*args, [source], [], root / 'initial', maximum=4)
+            strassen = [(9,9,9),(12,1,12),(1,10,10),(8,5,5),(3,8,3),(5,3,8),(10,12,1)]
+            source = self.products(root / 'next', [([2, 2, 2], strassen, 'tensor')])
+            result = extend(root / 'initial/inputs.json', root / 'initial/report.json',
+                            [source], [], root / 'out', maximum=4)
+            self.assertFalse(result['pricing_reuse']['used'])
+            self.assertTrue(result['actual_price_improvements'])
+
+    def test_source_and_shape_changes_rejected(self):
+        for mutation in ('report', 'bytes', 'shape', 'proof'):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as d:
+                root = Path(d).resolve()
+                args = self.prior(root)
+                source = self.products(root / 'products', [([2, 2, 2], naive((2, 2, 2)), 'tensor')])
+                if mutation == 'report':
+                    with (source / 'report.json').open('a') as stream:
+                        stream.write(' ')
+                elif mutation == 'bytes':
+                    next((source / 'tensor').glob('*.txt')).write_bytes(body(alternate()))
+                else:
+                    audit = json.loads((source / 'independent-audit.json').read_text())
+                    audit['results'][0]['target' if mutation == 'shape' else 'sha256'] = (
+                        '2x2x3' if mutation == 'shape' else '0'*64)
+                    put(source / 'independent-audit.json', audit)
+                with self.assertRaises(ValueError):
+                    extend(*args, [source], [], root / 'out', maximum=4)
+
+    def test_trivial_and_out_of_range_sources_are_audited_but_not_parents(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d).resolve()
+            args = self.prior(root)
+            source = self.products(root / 'products', [([1, 1, 1], [(1, 1, 1)], 'trivial'),
+                ([2, 2, 5], naive((2, 2, 5)), 'large')])
+            report = extend(*args, [source], [], root / 'out', maximum=4)
+            self.assertEqual(report['parents'], 0)
+            admissions = json.loads((root / 'out/admissions.json').read_text())
+            self.assertEqual({a['skip'] for a in admissions},
+                             {'non_decreasing_dependency', 'outside_maximum'})
+
+    def test_verified_walk_endpoints_are_retained(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d).resolve()
+            args = self.prior(root)
+            source = root / 'walk'
+            source.mkdir()
+            ParentOnlyWalkTest().fixture(source)
+            alt = alternate()
+            raw = body(alt)
+            (source / 'study/walk/end-0.txt').write_bytes(raw)
+            study = json.loads((source / 'study/report.json').read_text())
+            study['arms'][0]['trials'][0]['end_parent'] = dict(rank=len(alt),
+                density=sum(v.bit_count() for t in alt for v in t), sha256=hashlib.sha256(raw).hexdigest())
+            put(source / 'study/report.json', study)
+            put(source / 'independent-audit.json', verify_walk(source, 1))
+            report = extend(*args, [], [source], root / 'out', maximum=4)
+            self.assertEqual(report['added'], {'walk_audit': 2})
+            admissions = json.loads((root / 'out/admissions.json').read_text())
+            end = next(a for a in admissions if a['path'] == 'study/walk/end-0.txt')
+            self.assertFalse(end['duplicate'])
+            self.assertIsNotNone(end['parent'])
+
+    def test_improved_shapes_round_trip_as_json_lists(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d).resolve()
+            args = self.prior(root)
+            strassen = [(9,9,9),(12,1,12),(1,10,10),(8,5,5),
+                        (3,8,3),(5,3,8),(10,12,1)]
+            source = self.products(root/'products', [([2,2,2],strassen,'strassen')])
+            report = extend(*args,[source],[],root/'out',maximum=4)
+            saved = json.loads((root/'out/report.json').read_text())
+            self.assertEqual(json.loads(json.dumps(report)),saved)
+            row = next(r for r in saved['actual_price_improvements'] if r['shape']==[2,2,2])
+            self.assertEqual((row['baseline'],row['rank']),(8,7))
+            self.assertEqual(saved['baseline_recipes'],report['baseline_recipes'])
+
+    def projections(self, root):
+        root.mkdir()
+        source_shape = (2, 3, 2)
+        terms = naive(source_shape)
+        (u, v, w), (_, vv, ww) = terms[:2]
+        terms[:2] = [(u, v ^ vv, w), (u, vv, w ^ ww)]
+        from verify_coordinate_projections import project_grid
+        parent_data = body(terms)
+        (root / 'parent.txt').write_bytes(parent_data)
+        outputs = []
+        for i, middle in enumerate(([0, 1], [1, 2])):
+            keep = [[0, 1], middle, [0, 1]]
+            child = project_grid(source_shape, terms, keep)
+            data = body(child)
+            name = f'child-{i}.txt'
+            (root / name).write_bytes(data)
+            outputs.append(dict(shape=[2, 2, 2], rank=len(child), baseline=8,
+                improves_local=False, keep=keep, parent_shape=list(source_shape),
+                parent_path='parent.txt', parent_sha256=hashlib.sha256(parent_data).hexdigest(),
+                path=name, sha256=hashlib.sha256(data).hexdigest()))
+        put(root / 'report.json', dict(complete=True, field='GF(2)', record_claim=False,
+            selected_parents=1, parents_done=1, views=2, rows=[dict(views=2)], outputs=outputs))
+        put(root / 'independent-audit.json', verify_projection(root, 1))
+        return root
+
+    def test_projection_admission_preserves_distinct_representations(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d).resolve()
+            args = self.prior(root)
+            source = self.projections(root / 'projections')
+            report = extend(*args, [], [], root / 'out', maximum=4, projection_roots=[source])
+            self.assertEqual({'projection_audit': 2}, report['added'])
+            parents = json.loads((root / 'out/inputs.json').read_text())['parents']
+            self.assertEqual(2, len({p['identity'] for p in parents}))
+            self.assertEqual({8}, {p['rank'] for p in parents})
+
+    def test_projection_admission_rejects_stale_bytes_and_proofs(self):
+        for mutation in ('report', 'parent', 'child', 'proof', 'count'):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as d:
+                root = Path(d).resolve()
+                args = self.prior(root)
+                source = self.projections(root / 'projections')
+                if mutation == 'report':
+                    (source / 'report.json').write_bytes((source / 'report.json').read_bytes() + b' ')
+                elif mutation in ('parent', 'child'):
+                    path = source / ('parent.txt' if mutation == 'parent' else 'child-0.txt')
+                    path.write_bytes(path.read_bytes() + b'\n')
+                else:
+                    audit = json.loads((source / 'independent-audit.json').read_text())
+                    if mutation == 'proof':
+                        # The two child tensors share a shape, but require their own proof digests.
+                        for result in audit['results']:
+                            if result['target'] == '2x2x2':
+                                result['sha256'] = '0'*64
+                    else:
+                        audit['outputs'] += 1
+                    put(source / 'independent-audit.json', audit)
+                with self.assertRaises(ValueError):
+                    extend(*args, [], [], root / 'out', maximum=4, projection_roots=[source])
+
+
+if __name__ == '__main__':
+    unittest.main()

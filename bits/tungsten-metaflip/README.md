@@ -686,6 +686,69 @@ prescribed local replacement and compile a replayable exact setup/flip/cleanup
 word, but they are not production fleet lanes unless matched frontier
 experiments show useful candidates.
 
+### Offline composition tools and local studies
+
+The dated benchmark audit directories linked below are local evidence bundles,
+not part of the source-only package. Reusable tools and tests are versioned;
+generated tensors and imported leaves remain separate pending provenance and
+redistribution review. A missing local audit directory is not a test dependency.
+
+`tools/bud_products.rb` is an offline, arbitrary-width GF(2) composition
+experiment. It searches disjoint equal-factor groups (buds), composes them
+with exact local leaf witnesses, and saves self-contained replay recipes.
+Its `--leaders-only` control measures what is lost by discarding alternate
+and higher-rank parents. It never mutates the live fleet archive or labels an
+output a world record. See [the bounded scan and replay instructions](tools/BUD-PRODUCTS-2026-09-06.md).
+These wide products are not implicitly admitted to the u64 flip kernels.
+
+`tools/bud_parent_walk.w` and `tools/bench_bud_parents.rb` add a bounded native
+parent-walk experiment with certificate-backed composition scoring and
+matched ordinary/greedy/annealing controls. The measured strategy tradeoffs
+and independently verified product witnesses are in
+[the parent-walk report](tools/BUD-PARENT-WALKS-2026-09-06.md).
+This remains offline: greedy acceptance did not beat ordinary wandering in
+the matched study, and no new production strategy is enabled by it.
+The optional [fixed elementary-group objective](tools/BUD-FIXED-GROUP-WALKS-2026-09-07.md)
+keeps a verified leaf cover while walking the remaining terms, including
+parents above rank 64; its first matched study found no further rank gain.
+
+`tools/bud_packings.rb` adds a bounded exact disjoint-bud packing check with
+explicit incomplete-result flags and baseline recipe replay. The
+[packing and neighborhood follow-up](tools/BUD-PACKING-FOLLOWUP-2026-09-06.md)
+documents the two further local product improvements and the negative
+rank-debt/density-slack sweeps. These results do not establish world records.
+The [September 7 follow-up](../../benchmarks/matmul/metaflip/near_packing_followup_audit_2026_09_07/README.md)
+retains 56 more independently verified local bounds and matched dense-component
+packing measurements. `tools/bud_component_dp.w` is an optional offline exact
+subset oracle; it is not enabled in the live flip fleet or shared packer.
+
+The [projected-parent follow-up](../../benchmarks/matmul/metaflip/projected_parent_composition_audit_2026_09_07/README.md)
+retains 453 exact near-best small representations rather than only rank leaders.
+Their recomposition gives 268 independently checked local bounds, ten below the
+dated public-reference closure, including 14×16×16 at rank 2,062. These remain
+GF(2) candidate records, not confirmed novelty or matrix-kernel speedups. The
+offline projection scanner and independent replay do not change the live fleet.
+The [all-image control study](../../benchmarks/matmul/metaflip/projection_variant_followup_audit_2026_09_07/README.md)
+kept another 3,857 exact images and found six further local bounds, but no new
+reference crossing or measured benefit from nonminimum images. Its pricing
+template cache reduced offline construction CPU by 2.30× on the matched
+small-target workload while preserving every parent and exact witness choice.
+The [linear-projection follow-up](../../benchmarks/matmul/metaflip/linear_projection_followup_audit_2026_09_07/README.md)
+adds independently checked one-sided and paired XOR restrictions. Its three
+bounded scans retained 3,849 new representations but found no further local
+bound. The offline planner now reuses an unchanged closed table only after
+checking explicit coverage of every appended ordinary pricing expression;
+all tensor identities remain available, and new expressions still run the
+complete planner. `--no-reuse-priced-expressions` selects the matched control.
+
+`tools/composition_closure.rb` checks candidates against a verified recursive
+block/Kronecker library and propagates useful candidates to other shapes.
+It exports both comparison and candidate tensors for independent replay.
+The [closure and catalog audit](tools/COMPOSITION-CLOSURE-2026-09-06.md) separates
+31 further local improvements from already-known constructions and the
+remaining novelty-audit shortlist. `bud_products.rb --recursive-products`
+enables the same optional leaf-pricing family; the default is unchanged.
+
 Bundled seed files can have licenses or attribution requirements different
 from the engine. Read [THIRD_PARTY.md](THIRD_PARTY.md) before redistributing a
 package archive or adding a new imported seed.

@@ -94,6 +94,20 @@ if grep -q 'call_method_i64.*\(SharedSet\|DistinctSet\).*value' <<<"$class_set_m
   echo "locked bounded class set retained inline-cache dispatch" >&2
   exit 1
 fi
+run_compiler --emit-wire "$root/compiler/test/fixtures/locked_class_set_loop_edges.w" > "$tmp/class-set-loop-edges.wire"
+loop_edges_main="$(awk '/function main/{inside=1; next} inside && /^function /{exit} inside{print}' "$tmp/class-set-loop-edges.wire")"
+if [[ "$(grep -c 'call_direct_i64.*__w_LoopEdgeDog_value__a1' <<<"$loop_edges_main")" -lt 2 ]] || \
+   [[ "$(grep -c 'call_direct_i64.*__w_LoopEdgeCat_value__a1' <<<"$loop_edges_main")" -lt 2 ]]; then
+  echo "break/next class-set edges did not produce exhaustive direct dispatch" >&2
+  exit 1
+fi
+if grep -q 'call_method_i64.*LoopEdge.*value' <<<"$loop_edges_main"; then
+  echo "break/next class-set edges retained a value inline cache" >&2
+  exit 1
+fi
+run_compiler run "$root/compiler/test/fixtures/locked_class_set_loop_edges.w" > "$tmp/class-set-loop-edges.out"
+printf '83\n41\n' > "$tmp/class-set-loop-edges.expected"
+cmp "$tmp/class-set-loop-edges.expected" "$tmp/class-set-loop-edges.out"
 run_compiler --emit-wire "$root/compiler/test/fixtures/locked_return_class_sets.w" > "$tmp/return-class-sets.wire"
 return_class_main="$(awk '/function main/{inside=1; next} inside && /^function /{exit} inside{print}' "$tmp/return-class-sets.wire")"
 if [[ "$(grep -c 'call_direct_i64.*__w_ReturnSetDog_value__a1' <<<"$return_class_main")" -lt 2 ]] || \

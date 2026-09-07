@@ -1083,6 +1083,10 @@ use lowering/definitions
     if mod[:incremental_library_cache_status] in (:hit :miss)
       ctx[:incremental_library_cache_statements] = user_expressions
       ctx[:incremental_library_cache_prefix_count] = mod[:incremental_library_cache_prefix_count]
+    # Core and user expressions are two roots lowered through the same main
+    # context. Nested lower_program calls must share their root's facts, but
+    # the user root needs a fresh analysis after the Core root completes.
+    ctx[:class_set_analysis_ready] = false
     lower_program(ctx, user_expressions)
     ctx[:incremental_library_cache_statements] = nil
     ctx[:incremental_library_cache_prefix_count] = nil

@@ -17,7 +17,7 @@ must preserve native behavior and every applicable LLVM/sidemap identity gate.
 | 6 | Incremental or parallel escape/content hashing | Linear dependency-order experiment rejected; finer summary reuse remains open |
 | 7 | Persistent compiler service | Existing `compile-batch` process/pool is the supported path; daemon work remains open |
 | 8 | Replace hot WIRE field lookups with numeric schema identity | Retained |
-| 9 | Complete closed-world flow-sensitive type propagation | In progress |
+| 9 | Complete closed-world flow-sensitive type propagation | Retained |
 | 10 | Use effect/escape facts for proven allocation removal and LLVM attributes | In progress |
 
 ## Rejected reachability-lowering prototype
@@ -75,3 +75,45 @@ fast-loader/canonical-parser stage-1 identity, and a compiled native acid test.
 The serial/parallel emitter LLVM mismatch observed by its older standalone gate
 also reproduces byte-for-byte with the unmodified baseline; it is not introduced
 by this cache.
+
+## Closed-world loop-edge class sets
+
+The bounded class-set pass now models ordinary `break` exits and `next`
+backedges explicitly. A loop fixed point joins fallthrough and `next`
+environments at its header, then joins stable `break` environments with the
+condition-false exit. `redo`, transfers through `begin`/`ensure`, and iterator
+regions remain conservative until their extra control-flow is represented.
+
+Protected-Core lowering also needed a root-boundary fix. Core and user
+expressions are lowered through the same main context, while nested
+`lower_program` calls intentionally share the current root's analysis. After a
+cached Core partition completes, the user root now resets only the analysis
+readiness marker so its top-level calls receive their own flow facts. A
+regression combines `PROTECT_THE_CORE!`, `LOCK_THE_DOORS!`, `break`, and `next`;
+the resulting two-class receiver sets emit exhaustive direct arms and no value
+inline cache, and the native result is checked.
+
+The runtime acceptance benchmark constructs two objects once, alternates their
+references for 50,000,000 iterations, and calls a method both classes inherit
+from the same owner. Before this change the hot call is `call_method_i64`; after
+it is one direct source call. Eight alternating binaries built with
+`--release --native --fast --no-debug` produced identical result `50000000`.
+External wall median moved from 3.160 s to 0.075 s (-97.63%) and user CPU median
+from 1.245 s to 0.030 s (-97.59%). This deliberately demonstrates downstream
+optimization potential: once dispatch is direct, full LTO inlines the
+constant-return method and collapses most of the loop. It is not a standalone
+measurement of raw IC latency.
+
+That optimization has a compile-time cost. Against the exact preceding commit,
+eight cache-disabled frontend-only self-check pairs moved user CPU median from
+3.835 s to 4.035 s (+5.22%) and mean from 3.911 s to 4.045 s (+3.42%). A full
+six-pair self-compile, which also benefits from 22 fewer emitted method-cache
+calls, moved user CPU median from 6.155 s to 6.200 s (+0.73%) and mean from
+6.165 s to 6.218 s (+0.87%); its wall data was too contention-sensitive to use
+as the primary cost measure. The change is retained for the large closed-world
+runtime opportunity, with the frontend cost recorded rather than hidden.
+
+A compiler rebuilt from this source then re-emitted the compiler with the same
+cache-disabled release/native/fast/no-debug profile. The two successive stages
+were byte-identical at SHA-256
+`d60d072b72716fcbc5b69fdcaa5ef75ab8af377cb6fd579688e74c950f616d37`.

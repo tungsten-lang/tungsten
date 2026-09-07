@@ -820,52 +820,64 @@
     i += 1
   env
 
--> class_set_body_has_loop_transfer?(body)
-  if body == nil
+# `break` and `next` have explicit edge environments below. `redo` targets the
+# body entry without re-evaluating the condition, and a transfer through
+# begin/ensure or an iterator region must run additional control-flow first.
+# Keep those less common shapes conservative. Nested loops own their transfers.
+-> class_set_body_has_unmodeled_loop_transfer?(value, complex_region = false)
+  if value == nil
     return false
-  nodes = body
-  if type(nodes) != "Array"
-    nodes = [nodes]
-  i = 0
-  while i < nodes.size()
-    node = nodes[i]
-    if node != nil && is_ast_node?(node)
-      kind = ast_kind(node)
-      if kind in (:break :next :redo)
+  if type(value) == "Array"
+    i = 0
+    while i < value.size()
+      if class_set_body_has_unmodeled_loop_transfer?(value[i], complex_region)
         return true
-      if kind == :if
-        if class_set_body_has_loop_transfer?(node.then_body) || class_set_body_has_loop_transfer?(node.else_body)
-          return true
-        clauses = node.elsif_clauses
-        if clauses != nil
-          ci = 0
-          while ci < clauses.size()
-            if class_set_body_has_loop_transfer?(clauses[ci][1])
-              return true
-            ci += 1
-      if kind in (:case :case_value)
-        arms = ast_get(node, :arms)
-        if arms == nil
-          arms = ast_get(node, :clauses)
-        if arms != nil
-          ai = 0
-          while ai < arms.size()
-            if class_set_body_has_loop_transfer?(ast_get(arms[ai], :body))
-              return true
-            ai += 1
-        if class_set_body_has_loop_transfer?(ast_get(node, :else_body))
-          return true
-      if !(kind in (:fn_def :method_def :class_def :module_def :trait_def :block))
-        children = ast_children(node)
-        if class_set_body_has_loop_transfer?(children)
-          return true
+      i += 1
+    return false
+  if !is_ast_node?(value)
+    return false
+  kind = ast_kind(value)
+  if kind == :redo
+    return true
+  if kind in (:break :next)
+    return complex_region
+  if kind in (:fn_def :method_def :class_def :module_def :trait_def :block :while)
+    return false
+  child_complex = complex_region || kind in (:begin :with :parallel_with)
+  children = ast_children(value)
+  i = 0
+  while i < children.size()
+    if class_set_body_has_unmodeled_loop_transfer?(children[i], child_complex)
+      return true
     i += 1
   false
 
-# A loop with break/next/redo needs edge-specific environments. Until those
-# edges are represented explicitly, suppress class-set rewrites for calls in
-# that loop. This is conservative and localized: ordinary loops still use the
-# fixed point above, and facts outside the loop survive for untouched locals.
+-> class_set_loop_edges
+  {breaks: [], nexts: []}
+
+-> class_set_capture_loop_edge(ctx, kind, env)
+  edges = ctx[:class_set_loop_edges]
+  if edges == nil
+    return false
+  if kind == :break
+    edges[:breaks].push(class_set_copy_env(env))
+    return true
+  if kind == :next
+    edges[:nexts].push(class_set_copy_env(env))
+    return true
+  false
+
+-> class_set_analyze_loop_body(ctx, body, start_env)
+  previous = ctx[:class_set_loop_edges]
+  edges = class_set_loop_edges()
+  ctx[:class_set_loop_edges] = edges
+  state = class_set_analyze_body(ctx, body, start_env)
+  ctx[:class_set_loop_edges] = previous
+  {state: state, edges: edges}
+
+# Suppress class-set rewrites only for control flow that the loop analysis does
+# not yet model explicitly. Ordinary loops, including direct `break` and
+# `next` edges, use the fixed point above.
 -> class_set_mark_calls_unknown(ctx, value)
   if value == nil
     return nil
@@ -904,15 +916,23 @@
   nil
 
 -> class_set_analyze_while(ctx, node, entry_env)
+  unmodeled = class_set_body_has_unmodeled_loop_transfer?(node.body)
   header = class_set_copy_env(entry_env)
   iteration = 0
   while iteration < 10
     cond_env = class_set_copy_env(header)
     class_set_eval_expr(ctx, node.condition, cond_env)
-    body_state = class_set_analyze_body(ctx, node.body, class_set_copy_env(cond_env))
+    analyzed = class_set_analyze_loop_body(ctx, node.body, class_set_copy_env(cond_env))
+    body_state = analyzed[:state]
     incoming = [entry_env]
     if body_state[:reachable]
       incoming.push(body_state[:env])
+    if !unmodeled
+      next_envs = analyzed[:edges][:nexts]
+      ni = 0
+      while ni < next_envs.size()
+        incoming.push(next_envs[ni])
+        ni += 1
     next_header = class_set_join_envs(ctx[:mod], incoming)
     if class_set_env_equal?(header, next_header)
       header = next_header
@@ -922,13 +942,21 @@
 
   exit_env = class_set_copy_env(header)
   class_set_eval_expr(ctx, node.condition, exit_env)
-  # break/next paths require edge-specific environments. Until that detail is
-  # represented, invalidate only locals written by such a loop; unchanged
-  # incoming facts remain useful and sound.
-  if class_set_body_has_loop_transfer?(node.body)
+  if unmodeled
     class_set_mark_calls_unknown(ctx, node.body)
     class_set_kill_assigned(exit_env, node.body)
-  class_set_flow(exit_env, true)
+    return class_set_flow(exit_env, true)
+
+  # Re-evaluate the body at the stable header to obtain break exits rather
+  # than retaining edge facts from an intermediate fixed-point iteration.
+  final_body = class_set_analyze_loop_body(ctx, node.body, class_set_copy_env(exit_env))
+  exits = [exit_env]
+  break_envs = final_body[:edges][:breaks]
+  bi = 0
+  while bi < break_envs.size()
+    exits.push(break_envs[bi])
+    bi += 1
+  class_set_flow(class_set_join_envs(ctx[:mod], exits), true)
 
 # `with` and `parallel_with` are iterative regions whose bodies may update
 # captured locals on every element.  Until the analysis models their binding,
@@ -1029,6 +1057,7 @@
     value = ast_get(node, :value)
     if value != nil
       class_set_eval_expr(ctx, value, env)
+    class_set_capture_loop_edge(ctx, kind, env)
     return class_set_flow(env, false)
   when :fn_def, :method_def, :class_def, :module_def, :trait_def, :gpu_kernel_def
     return class_set_flow(env, true)

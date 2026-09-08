@@ -2322,6 +2322,8 @@ STATE_SIZE = ffw_state_size(CAPACITY) ## i64
 # slab; all serial intake/proof boundaries can therefore reuse it safely.
 exact_scratch_words = ffw_verify_scratch_words(N, N, N) ## i64
 exact_scratch = i64[exact_scratch_words]
+pair_scratch_words = ffpc_scratch_words(CAPACITY) ## i64
+pair_scratch = i64[pair_scratch_words]
 cpu_work_moves = i64[4]
 cpu_wander_moves = i64[4]
 zone_index = 0 ## i64
@@ -2364,7 +2366,9 @@ if SEED_NAIVE == 0
     exit(2)
   if SEED_PATH == "" && loaded < 1
     loaded = ffw_init_naive_cap(anchor, N, CAPACITY, ffcp_campaign_seed(17, SEED_NONCE), DSLACK, CYCLES, balanced_work, balanced_wander)
-if loaded < 1 || ffw_verify_best_exact_scratch(anchor, N, exact_scratch, exact_scratch_words) != 1
+if loaded > 0
+  loaded = ffpc_gate_square_best(anchor, N, pair_scratch, pair_scratch_words, exact_scratch, exact_scratch_words)
+if loaded < 1
   << "metaflip: exact anchor initialization failed"
   exit(2)
 
@@ -2379,6 +2383,8 @@ if SEED_NAIVE == 0
   durable = i64[STATE_SIZE]
   durable_text = read_file(BEST_PATH)
   durable_rank = ffw_load_scheme_cap(durable, BEST_PATH, N, CAPACITY, 31, DSLACK, CYCLES, balanced_work, balanced_wander) ## i64
+  if durable_rank > 0
+    durable_rank = ffpc_gate_square_best(durable, N, pair_scratch, pair_scratch_words, exact_scratch, exact_scratch_words)
   if durable_text != nil && durable_rank < 1
     << "metaflip: refusing to overwrite malformed, inexact, or wrong-tensor --best checkpoint"
     exit(2)
@@ -2597,8 +2603,9 @@ while i < J
   if ffn_door_has_native_seed(doors[i], archive, near1, near2, symmetry, mixed) == 0
     source_name = source_name + "/leader-fallback"
   sources.push(source_name)
-  last_seen_rank[i] = ffw_best_rank(st)
-  last_seen_bits[i] = ffw_best_bits(st)
+  # Even an unchanged seed must cross the cold cleanup gate once.
+  last_seen_rank[i] = 0 - 1
+  last_seen_bits[i] = 0
   last_moves[i] = ffw_moves(st)
   last_rates[i] = 0
   last_ages[i] = 0
@@ -3565,8 +3572,8 @@ while running == 1
           lineage_debts[rw] = 0
           lineage_paid[rw] = 0
           sources[rw] = ffp_door_name(doors[rw]) + "/manual-naive"
-          last_seen_rank[rw] = ffw_best_rank(states[rw])
-          last_seen_bits[rw] = ffw_best_bits(states[rw])
+          last_seen_rank[rw] = 0 - 1
+          last_seen_bits[rw] = 0
           last_moves[rw] = ffw_moves(states[rw])
           last_progress_ms[rw] = now_ms
           rw += 1
@@ -3674,8 +3681,8 @@ while running == 1
               lineage_roles[core_fringe_index] = 0 - 1
               lineage_modes[core_fringe_index] = 0 - 1
               lineage_origin_ids[core_fringe_index] = ffbi_best_id(states[core_fringe_index])
-              last_seen_rank[core_fringe_index] = ffw_best_rank(states[core_fringe_index])
-              last_seen_bits[core_fringe_index] = ffw_best_bits(states[core_fringe_index])
+              last_seen_rank[core_fringe_index] = 0 - 1
+              last_seen_bits[core_fringe_index] = 0
               last_moves[core_fringe_index] = ffw_moves(states[core_fringe_index])
               last_progress_ms[core_fringe_index] = now_ms
 
@@ -3731,8 +3738,8 @@ while running == 1
             sources[rw] = ffp_door_name(doors[rw]) + "/manual-naive-anchor"
           if SEED_NAIVE == 0
             sources[rw] = ffp_door_name(doors[rw]) + "/manual-record"
-          last_seen_rank[rw] = ffw_best_rank(states[rw])
-          last_seen_bits[rw] = ffw_best_bits(states[rw])
+          last_seen_rank[rw] = 0 - 1
+          last_seen_bits[rw] = 0
           last_moves[rw] = ffw_moves(states[rw])
           last_progress_ms[rw] = now_ms
           rw += 1
@@ -3818,7 +3825,16 @@ while running == 1
     # bypass the window and retain the original immediate exact-gated path.
     candidate_intake = ffci_should_intake(candidate_changed, i, J, round, rank, bits, ffw_best_rank(best), ffw_best_bits(best)) ## i64
     if candidate_intake == 1
-      exact = ffw_verify_best_exact_scratch(state, N, exact_scratch, exact_scratch_words) ## i64
+      # Rotation may defer a raw nonleader, but never rejects it by raw rank:
+      # cleanup precedes every identity/archive/fleet objective comparison.
+      cleaned_rank = ffpc_gate_square_best(state, N, pair_scratch, pair_scratch_words, exact_scratch, exact_scratch_words) ## i64
+      exact = 0 ## i64
+      if cleaned_rank > 0
+        exact = 1
+        if cleaned_rank < rank
+          sources[i] = sources[i] + "/pair-cleanup"
+        rank = cleaned_rank
+        bits = ffw_best_bits(state)
       if exact == 1
         descendant_identity = ffbi_best_id(state) ## i64
         if lineage_roles[i] >= 0 && lineage_paid[i] == 0
@@ -4161,8 +4177,8 @@ while running == 1
       if i == cycle_watch_index
         cycle_stats[8] = 0
         sources[i] = sources[i] + "/cycle-watch"
-      last_seen_rank[i] = ffw_best_rank(states[i])
-      last_seen_bits[i] = ffw_best_bits(states[i])
+      last_seen_rank[i] = 0 - 1
+      last_seen_bits[i] = 0
       last_moves[i] = ffw_moves(states[i])
       last_progress_ms[i] = now_ms
       if cycle_due == 1
@@ -4242,6 +4258,8 @@ while running == 1
           if gpu_rank > 0 && gpu_role == 2
             if ffn_state_is_c3(gpu_candidate, N, CAPACITY) == 0
               gpu_rank = 0 - 1
+          if gpu_rank > 0
+            gpu_rank = ffpc_gate_square_best(gpu_candidate, N, pair_scratch, pair_scratch_words, exact_scratch, exact_scratch_words)
           if gpu_rank > 0
             gpu_bits = ffw_best_bits(gpu_candidate) ## i64
             gpu_peel_relation = 0 ## i64
@@ -4435,6 +4453,8 @@ while running == 1
           rect_rank = 0 - 1 ## i64
           if rect_join_ok == 1 && ffn_scheme_file_nonempty(raw_rect_output) == 1
             rect_rank = ffr_load_scheme_cap(rect_candidate, rect_output, rect_n, rect_m, rect_p, rect_capacities[rect_component], 63001 + round * 71 + rect_component, DSLACK, CYCLES, balanced_work, balanced_wander)
+          if rect_rank > 0
+            rect_rank = ffpc_gate_rect_best(rect_candidate, rect_n, rect_m, rect_p, pair_scratch, pair_scratch_words, exact_scratch, exact_scratch_words)
           if rect_rank > 0 && rect_states[rect_component] != nil
             rect_candidates[rect_component] = rect_candidates[rect_component] + 1
             old_rect_rank = ffr_best_rank(rect_states[rect_component]) ## i64
@@ -4518,6 +4538,8 @@ while running == 1
       composed_candidate = rect_composed_candidate
       if composed_rank > 0
         composed_loaded = ffw_load_scheme_cap(composed_candidate, composed_path, 7, CAPACITY, 64007 + round * 73 + compose_source, DSLACK, CYCLES, balanced_work, balanced_wander)
+      if composed_loaded > 0
+        composed_loaded = ffpc_gate_square_best(composed_candidate, N, pair_scratch, pair_scratch_words, exact_scratch, exact_scratch_words)
       if composed_loaded > 0
         rect_composition_dirty = 0
         rect_composition_retry_round = 0
@@ -4856,8 +4878,8 @@ while running == 1
         lineage_start_ranks[core_fringe_index] = ffw_best_rank(refreshed_core)
         lineage_start_bits[core_fringe_index] = ffw_best_bits(refreshed_core)
         lineage_paid[core_fringe_index] = 0
-        last_seen_rank[core_fringe_index] = ffw_best_rank(refreshed_core)
-        last_seen_bits[core_fringe_index] = ffw_best_bits(refreshed_core)
+        last_seen_rank[core_fringe_index] = 0 - 1
+        last_seen_bits[core_fringe_index] = 0
         last_moves[core_fringe_index] = 0
 
     # Only the leader island migrates now; every other sticky door keeps
@@ -4892,8 +4914,8 @@ while running == 1
         lineage_paid[i] = 0
         if i == cycle_watch_index
           cycle_stats[8] = 0
-        last_seen_rank[i] = ffw_best_rank(states[i])
-        last_seen_bits[i] = ffw_best_bits(states[i])
+        last_seen_rank[i] = 0 - 1
+        last_seen_bits[i] = 0
         last_moves[i] = ffw_moves(states[i])
         migrated = 1
       i += 1
@@ -5372,6 +5394,8 @@ if GPU == 1 && gpu_ready == 1
         if ffn_state_is_c3(late, N, CAPACITY) == 0
           late_rank = 0 - 1
       if late_rank > 0
+        late_rank = ffpc_gate_square_best(late, N, pair_scratch, pair_scratch_words, exact_scratch, exact_scratch_words)
+      if late_rank > 0
         late_bits = ffw_best_bits(late) ## i64
         late_peel_relation = 0 ## i64
         late_peel_meta = i64[12]
@@ -5426,6 +5450,8 @@ if GPU == 1 && gpu_ready == 1
       late_rect_rank = 0 - 1 ## i64
       if late_rect_join_ok == 1 && ffn_scheme_file_nonempty(late_rect_raw) == 1
         late_rect_rank = ffr_load_scheme_cap(late_rect, late_rect_path, ffn_rect_n(rect_component), ffn_rect_m(rect_component), ffn_rect_p(rect_component), rect_capacities[rect_component], 71003 + rect_component, DSLACK, CYCLES, balanced_work, balanced_wander) ## i64
+      if late_rect_rank > 0
+        late_rect_rank = ffpc_gate_rect_best(late_rect, ffn_rect_n(rect_component), ffn_rect_m(rect_component), ffn_rect_p(rect_component), pair_scratch, pair_scratch_words, exact_scratch, exact_scratch_words)
       if late_rect_rank > 0 && rect_states[rect_component] != nil
         late_rect_bits = ffr_best_bits(late_rect) ## i64
         old_rect_rank = ffr_best_rank(rect_states[rect_component]) ## i64
@@ -5491,6 +5517,8 @@ if GPU == 1 && gpu_ready == 1
     late_composed = i64[STATE_SIZE]
     if late_composed_rank > 0
       late_composed_loaded = ffw_load_scheme_cap(late_composed, late_composed_path, 7, CAPACITY, 72007 + compose_source, DSLACK, CYCLES, balanced_work, balanced_wander) ## i64
+    if late_composed_loaded > 0
+      late_composed_loaded = ffpc_gate_square_best(late_composed, N, pair_scratch, pair_scratch_words, exact_scratch, exact_scratch_words)
     if late_composed_loaded > 0
       rect_composition_dirty = 0
       if ffn_better(late_composed_loaded, ffw_best_bits(late_composed), ffw_best_rank(best), ffw_best_bits(best)) == 1

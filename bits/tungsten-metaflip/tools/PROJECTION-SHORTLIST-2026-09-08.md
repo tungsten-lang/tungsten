@@ -158,7 +158,7 @@ theorem. All 94 focused Python tests pass, including unchanged legacy modes.
 
 Full composition pricing (no reuse of cached expression prices) admitted four
 distinct parents and checked 2,722,106 expressions, including 835,454 mixed
-expressions. It lowered five local prices:
+expressions. It lowered five raw composition-table prices:
 
 | Shape | Previous price | New price | Replay status |
 | --- | ---: | ---: | --- |
@@ -174,8 +174,8 @@ checked catalog. An attempted broader materialization stopped at an unavailable
 3x14x27 rank-840 construction; its incomplete output is not a verified result.
 The three remaining prices above are not counted as expanded witnesses.
 
-The shape-deduplicated cumulative cohort is **390 local improvements: 56
-expanded and 334 recipe-only**. This adds one distinct shape, not five. All
+At that point the shape-deduplicated raw-price cohort was **390 shapes: 56
+expanded and 334 recipe-only**. This added one distinct shape, not five. All
 nine cohort crossings of the saved reference are expanded; no new crossing,
 primitive improvement, main-square improvement, or confirmed world record is
 claimed. The broader restriction shortlist still has 49 metadata crossings.
@@ -191,3 +191,55 @@ the retained balanced-dual gzip corpus plus a new tail; that round trip is
 also checked. This is retained-output replay, not full search exhaustion.
 Existing dated bundles were neither removed nor moved, and imported data
 remains local-only pending redistribution review.
+
+## Next neighbor and corrected cumulative screen
+
+The verified 20x23x27/r6,920 parent gives **20x23x26=6,834**. The previous
+padding-corrected bound was 6,852 (the raw composition table said 6,921), so
+the genuine local gain is 18, not 87. Its saved comparison is already 6,707;
+this does not add a reference crossing or establish a world record.
+
+A 70-view coordinate screen reached 6,860; 2,703 fixed-anchor linear views
+tied it. Allowing every anchor tried 18,981 views in 197.19 seconds CPU and
+found dimension-2 kernels `u=1<<19`, `v=(1<<19)|(1<<15)`, with shared anchor
+19. Their raw 6,862 terms reduce to 6,860 and then 6,834. Rejecting that raw
+rank against the 6,860 coordinate control would have discarded the winner.
+Independent map reconstruction and full tensor expansion checked two tensors,
+13,754 terms and 3,011,596 support-pair XORs. The child SHA-256 is
+`63e4ad96ef08db9fb7c98c77c81bf77966650076c774524ce1cea2f45d3a02fd`.
+
+The missing historical 3x14x27/r840 ancestry was recovered as a mixed-bud
+recipe from the checked 3x7x9/r141 parent. Replaying it completed the earlier
+**23x23x27=8,304** construction: ten tensors, 18,170 terms, 3,169,434 XORs,
+eight recipes including two buds. This completes an existing priced result,
+not a newly lower price. The earlier failed materialization remains incomplete.
+
+Full propagation checked 2,737,698 expressions (835,454 mixed), with no cached
+pricing reuse, and increased the parent corpus from 31,287 to 31,296. Besides
+the 6,834 result it lowered 23x23x26's raw price from 8,237 to 8,168, but a
+pre-existing padding bound of 8,079 already dominates that result. Likewise,
+the earlier 22x23x27/r7,878 and 23x26x27/r9,264 raw-price changes were already
+dominated by padding bounds 7,735 and 9,225. They are not new best local bounds.
+
+The cumulative audit therefore separates **392 raw-price shapes** (58 expanded,
+334 recipe-only) from **311 not dominated by the current padding table**
+(54 expanded, 257 recipe-only). The other 81 raw-price shapes are retained for
+audit provenance, not counted as current best candidates. All nine raw-cohort
+reference crossings remain expanded; the broader metadata shortlist still
+contains 49 crossings. This finite table screen is not a novelty certificate.
+
+The follow-up evidence archive is outside the checkout:
+`~/.local/share/tungsten-metaflip/evidence/2026-09-08-focused-followup.tar.gz`
+(7,247,049 bytes; SHA-256
+`76af7075d067fa3836a5b5ba89b90d9a2f8422f3d9a89e39a9adc8254d8af201`).
+It contains 89 logical files as 73 unique objects, including source pins,
+drivers, tensors, recipes, the corrected rollup and a lossless pricing-input
+delta. Four copied independent checkers successfully replayed the extracted
+coordinate, fixed-anchor, all-anchor and recipe outputs; the input delta also
+passed its complete hash round trip. Retained-output verification does not
+certify search exhaustion.
+
+The same GF(2) cleanup identity is now implemented in the packaged live
+coordinator, with native/offline parity tests. This does not move the large
+projection searches into the fleet or expand its signed-i64 shape envelope.
+No new long-running search, GPU run, publication or submission was started.

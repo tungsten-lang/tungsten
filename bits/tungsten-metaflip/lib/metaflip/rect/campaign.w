@@ -13,6 +13,7 @@
 # --no-tui keeps the machine-parseable RECT_STATUS/RECT_RESULT stream.
 
 use ../rect
+use ../fleet/pair_cleanup
 use ../kernels/bundles/rect
 use ../kernels/rect_reject
 use ../strategies/rect_block_interior
@@ -582,6 +583,8 @@ use doors
   # GPU, block, or MITM threads. Reuse it across serial admission gates.
   exact_scratch_words = ffw_verify_scratch_words(n, m, p) ## i64
   exact_scratch = i64[exact_scratch_words]
+  pair_scratch_words = ffpc_scratch_words(capacity) ## i64
+  pair_scratch = i64[pair_scratch_words]
   workq = ffrp_work_quota(steps) ## i64
   wanderq = ffrp_wander_quota(steps) ## i64
   record = ffrp_record_rank(n, m, p) ## i64
@@ -608,6 +611,8 @@ use doors
     if canonical_seed == "" || canonical_seed == "record"
       canonical_seed = repo_root + "/" + ffrp_seed_rel(n, m, p)
     anchor_rank = ffr_load_scheme_cap(anchor, canonical_seed, n, m, p, capacity, anchor_seed, dslack, cycles, workq, wanderq)
+  if anchor_rank > 0
+    anchor_rank = ffpc_gate_rect_best(anchor, n, m, p, pair_scratch, pair_scratch_words, exact_scratch, exact_scratch_words)
   if anchor_rank < 1
     << "RECT_ERROR code=seed tensor=" + tensor + " path=" + canonical_seed
     return 2
@@ -625,6 +630,8 @@ use doors
     if durable_body != nil
       durable = i64[state_size]
       durable_rank = ffr_load_scheme_cap(durable, best_path, n, m, p, capacity, ffrcb_seed(81017, restart_nonce, 0, 0), dslack, cycles, workq, wanderq) ## i64
+      if durable_rank > 0
+        durable_rank = ffpc_gate_rect_best(durable, n, m, p, pair_scratch, pair_scratch_words, exact_scratch, exact_scratch_words)
       if durable_rank < 1
         << "RECT_ERROR code=checkpoint tensor=" + tensor + " path=" + best_path
         return 2
@@ -1129,6 +1136,7 @@ use doors
       if worker_ms < 1
         worker_ms = 1
       island_rates[lane] = delta_moves * 1000 / worker_ms
+      gated_rank = ffpc_gate_rect_best(candidate, n, m, p, pair_scratch, pair_scratch_words, exact_scratch, exact_scratch_words) ## i64
       lane_rank = ffr_best_rank(candidate) ## i64
       lane_bits = ffr_best_bits(candidate) ## i64
       if ffrc_better(lane_rank, lane_bits, island_last_rank[lane], island_last_bits[lane]) == 1
@@ -1136,7 +1144,7 @@ use doors
         island_last_bits[lane] = lane_bits
         island_last_progress_ms[lane] = now_ms
       island_ages[lane] = (now_ms - island_last_progress_ms[lane]) / 1000
-      if ffr_verify_best_exact_scratch(candidate, n, m, p, exact_scratch, exact_scratch_words) == 1
+      if gated_rank > 0
         candidate_rank = ffr_best_rank(candidate) ## i64
         candidate_bits = ffr_best_bits(candidate) ## i64
         if ffrc_better(candidate_rank, candidate_bits, ffr_best_rank(best), ffr_best_bits(best)) == 1
@@ -1160,6 +1168,11 @@ use doors
     # a record breakthrough made during this tranche.  Compare the exact block
     # endpoint independently, then reset that lane's display bookkeeping so a
     # snapshot rewind cannot double-count moves or inherit a misleading age.
+    if block_candidate != nil && block_lane >= 0
+      if ffpc_gate_rect_best(block_candidate, n, m, p, pair_scratch, pair_scratch_words, exact_scratch, exact_scratch_words) < 1
+        exact_rejects += 1
+        status_degraded = 1
+        block_candidate = nil
     if block_candidate != nil && block_lane >= 0
       block_rank = ffr_best_rank(block_candidate) ## i64
       block_bits = ffr_best_bits(block_candidate) ## i64
@@ -1195,6 +1208,8 @@ use doors
     if gpu_completed != 0 && ffrc_file_nonempty(gpu_output_path) == 1
       gpu_candidate = i64[state_size]
       gpu_rank = ffr_load_scheme_cap(gpu_candidate, gpu_output_path, n, m, p, capacity, 84007 + round * 137, dslack, cycles, workq, wanderq) ## i64
+      if gpu_rank > 0
+        gpu_rank = ffpc_gate_rect_best(gpu_candidate, n, m, p, pair_scratch, pair_scratch_words, exact_scratch, exact_scratch_words)
       if gpu_rank > 0
         gpu_candidates += 1
         # Same milli-reward scale as the square GPU portfolio: rank gain
@@ -1276,7 +1291,9 @@ use doors
     if mitm_ok == 1 && ffrc_file_nonempty(mitm_output_path) == 1
       mitm_candidate = i64[state_size]
       mitm_rank = ffr_load_scheme_cap(mitm_candidate, mitm_output_path, n, m, p, capacity, 84503 + round * 149, dslack, cycles, workq, wanderq) ## i64
-      if mitm_rank > 0 && ffr_verify_best_exact_scratch(mitm_candidate, n, m, p, exact_scratch, exact_scratch_words) == 1
+      if mitm_rank > 0
+        mitm_rank = ffpc_gate_rect_best(mitm_candidate, n, m, p, pair_scratch, pair_scratch_words, exact_scratch, exact_scratch_words)
+      if mitm_rank > 0
         if ffrc_better(mitm_rank, ffr_best_bits(mitm_candidate), ffr_best_rank(best), ffr_best_bits(best)) == 1
           mitm_clone = ffrc_clone_exact(mitm_candidate, n, m, p, capacity, 84509 + round * 151, dslack, cycles, workq, wanderq)
           if mitm_clone != nil

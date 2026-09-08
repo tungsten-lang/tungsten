@@ -9,6 +9,7 @@
 # the window and is inspected immediately.
 
 use ../strategies/delta_components
+use pair_cleanup
 
 -> ffci_canonical_intake_width() i64
   12
@@ -71,6 +72,13 @@ use ../strategies/delta_components
     return 0
   peeled = i64[ffw_state_size(capacity)]
   rank = ffdc_crossover_best_states(incumbent, candidate, n, ffci_component_difference_bound(), peeled, capacity, seed, dslack, cycles, workq, wanderq, meta) ## i64
+  if rank < 1
+    return 0
+  cleanup_words = ffpc_scratch_words(capacity) ## i64
+  cleanup = i64[cleanup_words]
+  parity_words = ffw_verify_scratch_words(n, n, n) ## i64
+  parity = i64[parity_words]
+  rank = ffpc_gate_square_best(peeled, n, cleanup, cleanup_words, parity, parity_words)
   if rank < 1
     return 0
   if ffci_candidate_better(rank, ffw_best_bits(peeled), candidate_rank, candidate_bits) == 0

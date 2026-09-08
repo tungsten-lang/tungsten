@@ -33,6 +33,11 @@ Metaflip executable:
   sidecar. It records CPU island/door/zone and worker moves, GPU slot/role/pool
   mode and launch seed, or rectangular composition source without changing
   the native TUI.
+- `fleet/pair_cleanup.w` supplies allocation-free shared-pair fixed-point
+  reduction in coordinator-owned scratch space. CPU/GPU/composition intake
+  runs it before rank comparisons and independently exact-checks its output.
+  Only the saved best changes; current terms, RNG and hot flip loops do not.
+  Axis order 0,1,2 matches the offline reducer, without claiming optimality.
 - `strategies/rect_catalyst_lift2.w` and
   `strategies/macro_double_annihilation.w` retain the exact target-directed
   setup/trigger/cleanup compilers. They are bounded offline scouts, not default

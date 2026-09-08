@@ -83,6 +83,31 @@ Override them with `-J N`, `--no-gpu`, `--no-tui`, or `--secs N`.
 Specialized GPU workers are built and cached on first use. Press `q` or
 Ctrl-C in the TUI to stop.
 
+Candidate admission now includes deterministic exact shared-pair cleanup:
+terms sharing two factors are merged by XORing the third, sweeping axes
+`0,1,2` until no further pair reduction is possible. The coordinator applies
+this before objective/archive comparisons to CPU endpoints, GPU results
+(including late results), and rectangular/composed candidates. A raw-rank
+nonleader can therefore become a leader after cleanup. The wide-host intake
+window can defer inspection, but does not reject a candidate by its raw rank.
+Freshly installed CPU seeds remain pending for their first inspection.
+
+The cleanup uses reusable scratch space and exact-checks the result before
+updating the saved best. Current worker terms, hash chains, RNG and move count
+are preserved; the density delta is rebased. It does not run in the per-flip
+loop or silently rewrite the declared-rank contract of scheme-file loaders.
+The default is one deterministic axis order, not an optimal-rank oracle or
+all six orders. Large multiword-mask projections remain offline.
+
+Focused native tests cover square/rectangular admission, cascading reductions,
+rejection without payload mutation, source-mask validation and continued
+walking. `spec/pair_cleanup_parity_test.py NATIVE_TEST_BINARY` compares 480
+native cases against the offline reducer over all six orders. The bounded
+`spec/pair_cleanup_bench.w` measured cleanup alone at 0.4–1.4 microseconds on
+the local 2x5x6/r47, 5x5/r93 and 7x7/r247 controls; complete admission added
+roughly 0.4–2.5 microseconds over exact verification alone (64 repetitions).
+These are local cold-path timings, not a live-fleet throughput claim.
+
 Alternatively, let Bit preserve the executable, runtime worker sources, and
 assets as one relocatable build tree:
 
@@ -814,11 +839,16 @@ For targeted coordinate follow-ups, `projection_composition_scan.py` accepts
 `--target SHAPE --targets-only` to skip the otherwise additive default
 neighborhood. A [focused recursive projection](tools/PROJECTION-SHORTLIST-2026-09-08.md#focused-target-only-follow-ups)
 and second-axis paired refinement independently verified 20x23x27=6,920,
-improving the previous 6,931 bound, and its 22x23x27 block at 7,878. Five
-prices improved; the cumulative cohort is now 390 shapes (56 expanded,
-334 recipe-only), still with nine expanded reference crossings and no
-confirmed world record. These remain offline exact-gated tools. New replay
-evidence is compressed and deduplicated outside the checkout.
+improving the previous 6,931 bound, and expanded its 22x23x27 block at 7,878
+(already dominated by a 7,735 padding bound). The next step independently
+verified **20x23x26=6,834**, improving the padding-corrected 6,852 bound by 18,
+and completed the earlier 23x23x27=8,304 recipe. The cumulative raw-price
+audit cohort is 392 shapes (58 expanded, 334 recipe-only); after removing
+81 shapes dominated by current padding bounds, 311 remain (54 expanded,
+257 recipe-only). There is no new reference crossing or confirmed world
+record. These projection searches remain offline; only their pair-cleanup
+primitive is now also used by live candidate admission. New replay evidence
+is compressed and deduplicated outside the checkout.
 
 `tools/composition_closure.rb` checks candidates against a verified recursive
 block/Kronecker library and propagates useful candidates to other shapes.

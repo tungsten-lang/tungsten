@@ -89,7 +89,7 @@ terms sharing two factors are merged by XORing the third, sweeping axes
 pass then factors each group sharing just one factor, replacing it when its
 matrix rank is smaller and repeating to a fixed point. This catches reductions
 that pair cleanup cannot see. The coordinator applies both passes
-this before objective/archive comparisons to CPU endpoints, GPU results
+before objective/archive comparisons to CPU endpoints, GPU results
 (including late results), and rectangular/composed candidates. A raw-rank
 nonleader can therefore become a leader after cleanup. The wide-host intake
 window can defer inspection, but does not reject a candidate by its raw rank.
@@ -113,15 +113,52 @@ matrix cleanup alone at 0.6–3.1 microseconds and combined admission at
 5.2–131.6 microseconds on the local 2x5x6/r47, 5x5/r93 and 7x7/r247 controls
 (64 repetitions). These are local cold-path timings, not a fleet throughput claim.
 
-Automatic refinement is being integrated in stages. Native one-axis neutral
-bases and coordinate projection primitives are tested, but are **not yet
-scheduled by the fleet**. `spec/refinement_replay_test.w N M P TENSOR AXIS
-COORDINATE` checks a supplied tensor, projects one coordinate, cleans it, and
-checks the complete output tensor. It reproduces the audited 4x8x4/r94 ->
-4x7x4/r85 parent exactly. The bounded background queue, retained-rank-tie
-refinement, cross-shape archive/seed feedback and incremental composition
-remain unfinished; ordinary `bin/metaflip` does not yet run that full pipeline.
-Large multiword-mask compositions still use offline tools.
+Square and rectangular fleets now enqueue distinct exact-gated candidates
+automatically, including rank ties and nonleaders. Identity includes the
+ordered shape and the complete sorted term multiset. SHA-256 locates an
+immutable object; full bytes and the tensor identity are checked separately.
+The immediate cleanup remains synchronous, but the cold refinement runs in
+one low-priority (`nice -n 10`) native child with at most two jobs per batch:
+
+- matrix compression and six bounded one-axis basis proposals;
+- every single-coordinate projection of the cleaned source and its best
+  grouping endpoint, followed by exact pair/matrix compression;
+- full tensor verification of every output, including unchanged-rank bases.
+
+The queue is on disk beside the status file, in `status.txt.refinement/`.
+`objects/` holds canonical `MFR1` tensors; `tasks/` and `results/` bind input
+and output identities; `by-shape/` indexes projected outputs. Active worker
+memory is bounded and overflow remains as deferred disk tickets. This is not
+a fixed disk-byte quota: long runs can accumulate artifacts. Disk/write or
+validation failures increment `refine_failures`, not successful-job counts.
+Completed manifests and the consumed cursor support restart with the same
+status path/run tag. `--naive` and the space-key reset use fresh spool
+generations, so earlier refinement does not leak into a fresh frontier.
+
+Same-shape proposals enter the ordinary exact seed/archive path; useful rank
+ties are not discarded by a rank-only intake filter. Seed delivery is bounded
+and does not stop result collection. Different shapes remain in the indexed
+artifact archive. The TUI and status expose submitted/completed/pending jobs,
+outputs, cross-shape outputs, failures and seed-use counts. Submitted/completed
+persist across restart; output/duplicate/seed-use counts are per process.
+Graceful shutdown stops the child but preserves unfinished tickets. Use
+`METAFLIP_REFINEMENT=0 bin/metaflip ...` for an unchanged-search control.
+
+`spec/refinement_worker_parity_test.py NATIVE_TEST_BINARY [EXTERNAL_4x8x4]`
+independently replays the complete bounded worker family, canonical objects,
+rank-tie intake, restart, cancellation and corrupted-input rejection.
+The optional external r94 parent reproduces 4x7x4/r85 without redistributing
+that imported input. `spec/refinement_fleet_test.py bin/metaflip` exercises
+both public coordinators, same-shape feedback and stopped-child checks.
+`spec/refinement_replay_test.w N M P TENSOR AXIS COORDINATE` also checks the
+standalone projection primitive.
+
+This is still a bounded family, not an exhaustive basis search. Incremental
+composition repricing/materialization, cross-shape campaign dispatch and
+large multiword-mask compositions remain offline. Ordinary `bin/metaflip`
+does not yet generate the entire 7x12x12/r651 composition chain automatically.
+See the [native integration audit](tools/NATIVE-REFINEMENT-2026-09-08.md) for
+the exact replay boundaries and short resource canary.
 
 Alternatively, let Bit preserve the executable, runtime worker sources, and
 assets as one relocatable build tree:

@@ -14,6 +14,7 @@
 
 use ../rect
 use ../fleet/pair_cleanup
+use ../fleet/refinement
 use ../kernels/bundles/rect
 use ../kernels/rect_reject
 use ../strategies/rect_block_interior
@@ -887,6 +888,17 @@ use doors
   sequence = 0 ## i64
   round = 0 ## i64
   running = 1 ## i64
+  refinement_root = status_path + ".refinement"
+  if naive_seed != 0
+    refinement_root = refinement_root + "-naive-" + ccall("__w_clock_ms").to_s()
+  refinement = MetaflipRefinement.new(refinement_root, System.executable_path())
+  refinement_candidate = i64[state_size]
+  refinement_us = i64[capacity]
+  refinement_vs = i64[capacity]
+  refinement_ws = i64[capacity]
+  refinement_seed_uses = 0 ## i64
+  refinement_generation = 0 ## i64
+  z = refinement.submit(best, n, m, p)
   start_ms = ccall("__w_clock_ms") ## i64
   last_side_checkpoint_ms = start_ms ## i64
   side_archive_checkpoints = 0 ## i64
@@ -941,6 +953,7 @@ use doors
   gpu_seed_source = "fleet-best"
 
   while running == 1
+    z = refinement.poll(ccall("__w_clock_ms"))
     # One block-interior probe snapshots a rotating sticky island while all
     # states are quiescent, then runs on the coordinator-reserved core beside
     # the ordinary CPU/GPU tranche.  The result is harvested only after every
@@ -1145,6 +1158,7 @@ use doors
         island_last_progress_ms[lane] = now_ms
       island_ages[lane] = (now_ms - island_last_progress_ms[lane]) / 1000
       if gated_rank > 0
+        z = refinement.submit(candidate, n, m, p)
         candidate_rank = ffr_best_rank(candidate) ## i64
         candidate_bits = ffr_best_bits(candidate) ## i64
         if ffrc_better(candidate_rank, candidate_bits, ffr_best_rank(best), ffr_best_bits(best)) == 1
@@ -1175,6 +1189,7 @@ use doors
         block_candidate = nil
     if block_candidate != nil && block_lane >= 0
       block_rank = ffr_best_rank(block_candidate) ## i64
+      z = refinement.submit(block_candidate, n, m, p)
       block_bits = ffr_best_bits(block_candidate) ## i64
       if ffrc_better(block_rank, block_bits, ffr_best_rank(best), ffr_best_bits(best)) == 1
         block_clone = ffrc_clone_exact(block_candidate, n, m, p, capacity, 83503 + round * 133 + block_lane, dslack, cycles, workq, wanderq)
@@ -1212,6 +1227,7 @@ use doors
         gpu_rank = ffpc_gate_rect_best(gpu_candidate, n, m, p, pair_scratch, pair_scratch_words, exact_scratch, exact_scratch_words)
       if gpu_rank > 0
         gpu_candidates += 1
+        z = refinement.submit(gpu_candidate, n, m, p)
         # Same milli-reward scale as the square GPU portfolio: rank gain
         # dominates, same-rank density gain is bounded at 2000.
         rank_gain = ffr_best_rank(best) - gpu_rank ## i64
@@ -1294,6 +1310,7 @@ use doors
       if mitm_rank > 0
         mitm_rank = ffpc_gate_rect_best(mitm_candidate, n, m, p, pair_scratch, pair_scratch_words, exact_scratch, exact_scratch_words)
       if mitm_rank > 0
+        z = refinement.submit(mitm_candidate, n, m, p)
         if ffrc_better(mitm_rank, ffr_best_bits(mitm_candidate), ffr_best_rank(best), ffr_best_bits(best)) == 1
           mitm_clone = ffrc_clone_exact(mitm_candidate, n, m, p, capacity, 84509 + round * 151, dslack, cycles, workq, wanderq)
           if mitm_clone != nil
@@ -1311,10 +1328,40 @@ use doors
         mitm_failures += 1
         status_degraded = 1
 
+    # All live endpoints have been harvested. Consume one same-shape exact
+    # proposal at a bounded cadence, and copy it into a rotating owned island.
+    # Never lend the reusable output buffer to a CPU thread or archive.
+    if round % 4 == 0
+      refined_rank = refinement.take_into(refinement_candidate, n, m, p, capacity, 84701 + round * 157, dslack, cycles, workq, wanderq) ## i64
+      if refined_rank > 0 && refined_rank <= ffr_best_rank(best) + 2
+        if ffrc_better(refined_rank, ffr_best_bits(refinement_candidate), ffr_best_rank(best), ffr_best_bits(best)) == 1
+          refined_best = ffrc_clone_exact(refinement_candidate, n, m, p, capacity, 84703 + round * 157, dslack, cycles, workq, wanderq)
+          if refined_best != nil
+            if refined_rank < ffr_best_rank(best)
+              new_bests += 1
+            else
+              tie_bests += 1
+            best = refined_best
+            adopted = 1
+            timeline_count = ffrc_timeline_push(timeline_times, timeline_ranks, timeline_count, elapsed_s - timeline_start_s, refined_rank)
+        refine_lane = (round / 4) % walkers ## i64
+        exported = ffw_export_best(refinement_candidate, refinement_us, refinement_vs, refinement_ws) ## i64
+        if exported == refined_rank
+          copied = ffr_init_terms_cap(states[refine_lane], refinement_us, refinement_vs, refinement_ws, refined_rank, n, m, p, capacity, 84709 + round * 157, dslack, cycles, workq, wanderq) ## i64
+          if copied == refined_rank
+            refinement_seed_uses += 1
+            island_sources[refine_lane] = "refine/" + refinement.last_kind() + "/" + refinement.last_identity().slice(0, 12)
+            island_last_rank[refine_lane] = refined_rank
+            island_last_bits[refine_lane] = ffr_best_bits(states[refine_lane])
+            island_last_moves[refine_lane] = ffr_moves(states[refine_lane])
+            island_last_progress_ms[refine_lane] = now_ms
+            island_ages[refine_lane] = 0
+
     if adopted != 0
       saved = ffrc_dump_atomic(best, best_path, run_tag, round + 1) ## i64
       if saved < 1
         stopped = ffrcp_stop(cpu_start_channels, cpu_threads, walkers) ## i64
+        z = refinement.stop()
         if tui != 0
           ccall("w_term_raw_disable")
         << "RECT_ERROR code=checkpoint-write tensor=" + tensor + " path=" + best_path
@@ -1356,6 +1403,10 @@ use doors
             naive_best = ffrc_clone_exact(naive_anchor, n, m, p, capacity, 86013 + round * 151, dslack, cycles, workq, wanderq)
           if naive_best != nil
             best = naive_best
+            z = refinement.stop()
+            refinement_generation += 1
+            refinement = MetaflipRefinement.new(status_path + ".refinement-reset-" + now_ms.to_s() + "-" + refinement_generation.to_s(), System.executable_path())
+            z = refinement.submit(best, n, m, p)
             timeline_start_s = elapsed_s
             timeline_count = 1
             timeline_times[0] = 0
@@ -1455,6 +1506,7 @@ use doors
       status = status.strip() + " cpu_epoch_steps=" + cpu_epoch_steps.to_s() + " cpu_seed_nonce=" + restart_nonce.to_s() + " cpu_door_ticket=" + restart_door_ticket.to_s() + " cpu_leader_lanes=" + cpu_leader_lanes.to_s() + " cpu_side_lanes=" + cpu_side_lanes.to_s() + " block_attempts=" + block_stats[0].to_s() + " block_local=" + block_stats[1].to_s() + " block_exact=" + block_stats[2].to_s() + " block_drops=" + block_stats[3].to_s() + " block_density=" + block_stats[4].to_s() + " block_neutral=" + block_stats[5].to_s() + " block_ms=" + block_ms.to_s() + " block_period=" + block_period.to_s() + " gpu_degraded=" + status_degraded.to_s() + " gpu_internal_rejects=" + gpu_internal_rejects.to_s() + " gpu_seed_source=" + gpu_seed_source + " gpu_door_adoptions=" + gpu_door_adoptions.to_s() + " mitm_supported=" + mitm_supported.to_s() + " mitm_ready=" + mitm_ready.to_s() + " mitm_attempts=" + mitm_attempts.to_s() + " mitm_pairs=" + mitm_pairs.to_s() + " mitm_ms=" + mitm_ms.to_s() + " mitm_failures=" + mitm_failures.to_s() + "\n"
       status = status.strip() + " side_archive_cap=" + ffrda_cap().to_s() + " side_archive_loaded=" + side_archive_loaded.to_s() + " side_archive_seeded=" + side_archive_seeded.to_s() + " side_archive_checkpoints=" + side_archive_checkpoints.to_s() + " side_archive_saved=" + side_archive_stats[2].to_s() + " side_archive_rejects=" + side_archive_stats[1].to_s() + " side_archive_write_failures=" + side_archive_stats[3].to_s() + "\n"
       status = status.strip() + " cpu_gpu_overlap=" + cpu_gpu_overlap.to_s() + " cpu_followup_batches=" + cpu_followup_batches.to_s() + " cpu_followup_moves=" + cpu_followup_moves.to_s() + "\n"
+      status = status.strip() + refinement.status_fields() + " refine_seed_uses=" + refinement_seed_uses.to_s() + "\n"
       status_ok = ffrc_atomic_write(status_path, status, run_tag, sequence)
       if status_ok == 1
         last_status_ms = now_ms
@@ -1472,6 +1524,8 @@ use doors
         if width < 60
           width = 60
         frame_rows = ffrc_frame_rows(tensor, seed_door, walkers, round, elapsed_s, cpu_moves + gpu_moves, record, record_known, best, states, island_rates, island_ages, island_sources, phase_moves, gpu_requested, gpu_supported, gpu_ready, lanes, gpu_seed_rank, gpu_candidates, gpu_rank_drops, gpu_density_improvements, gpu_reward_milli, gpu_exposure, gpu_ms, gpu_failures, cpu_moves, cpu_drops, cpu_ties, timeline_times, timeline_ranks, timeline_count, elapsed_s - timeline_start_s, status_degraded, last_status_ms, sequence, now_ms, rank_levels, rank_ticks, rank_level_count, bits_levels, bits_ticks, bits_level_count, new_bests, tie_bests, exact_rejects, dslack, flash_text, flash_until_ms, width)
+        refine_row = "  " + refinement.status_row()
+        frame_rows.push(ff_tui_fit(refine_row, ff_tui_dim(refine_row), width))
         z = ffrc_render(frame_rows)
 
     round += 1
@@ -1511,6 +1565,8 @@ use doors
     while si < walkers
       source_lane = si ## i64
       live_door = ffrda_clone_current_exact(states[source_lane], n, m, p, capacity, ffrcb_seed(87001 + si * 31, restart_nonce, source_lane, 0), dslack, cycles, workq, wanderq)
+      if live_door != nil
+        z = refinement.submit(live_door, n, m, p)
       action = ffrda_collect_unique(exit_doors, live_door, best, n, m, p) ## i64
       if action < 0
         side_archive_stats[1] += 1
@@ -1550,12 +1606,14 @@ use doors
     if side_archive_stats[3] > 0
       status_degraded = 1
 
+  refinement_stopped = refinement.stop() ## i64
   final_ms = ccall("__w_clock_ms") ## i64
   final_elapsed_s = (final_ms - start_ms) / 1000 ## i64
   final_status = ffrc_status_body("stopped", sequence + 1, tensor, record, record_known, best, walkers, cpu_moves, cpu_ms, gpu_requested, gpu_supported, gpu_ready, lanes, gpu_moves, gpu_ms, gpu_failures, exact_rejects, final_elapsed_s)
   final_status = final_status.strip() + " cpu_epoch_steps=" + cpu_epoch_steps.to_s() + " cpu_seed_nonce=" + restart_nonce.to_s() + " cpu_door_ticket=" + restart_door_ticket.to_s() + " cpu_leader_lanes=" + cpu_leader_lanes.to_s() + " cpu_side_lanes=" + cpu_side_lanes.to_s() + " block_attempts=" + block_stats[0].to_s() + " block_local=" + block_stats[1].to_s() + " block_exact=" + block_stats[2].to_s() + " block_drops=" + block_stats[3].to_s() + " block_density=" + block_stats[4].to_s() + " block_neutral=" + block_stats[5].to_s() + " block_ms=" + block_ms.to_s() + " block_period=" + block_period.to_s() + " gpu_degraded=" + status_degraded.to_s() + " gpu_internal_rejects=" + gpu_internal_rejects.to_s() + " gpu_seed_source=" + gpu_seed_source + " gpu_door_adoptions=" + gpu_door_adoptions.to_s() + " mitm_supported=" + mitm_supported.to_s() + " mitm_ready=" + mitm_ready.to_s() + " mitm_attempts=" + mitm_attempts.to_s() + " mitm_pairs=" + mitm_pairs.to_s() + " mitm_ms=" + mitm_ms.to_s() + " mitm_failures=" + mitm_failures.to_s() + "\n"
   final_status = final_status.strip() + " side_archive_cap=" + ffrda_cap().to_s() + " side_archive_loaded=" + side_archive_loaded.to_s() + " side_archive_seeded=" + side_archive_seeded.to_s() + " side_archive_checkpoints=" + side_archive_checkpoints.to_s() + " side_archive_saved=" + side_archive_stats[2].to_s() + " side_archive_rejects=" + side_archive_stats[1].to_s() + " side_archive_write_failures=" + side_archive_stats[3].to_s() + "\n"
   final_status = final_status.strip() + " cpu_gpu_overlap=" + cpu_gpu_overlap.to_s() + " cpu_followup_batches=" + cpu_followup_batches.to_s() + " cpu_followup_moves=" + cpu_followup_moves.to_s() + "\n"
+  final_status = final_status.strip() + refinement.status_fields() + " refine_seed_uses=" + refinement_seed_uses.to_s() + "\n"
   status_ok = ffrc_atomic_write(status_path, final_status, run_tag, sequence + 1)
   saved = ffrc_dump_atomic(best, best_path, run_tag, sequence + 100000) ## i64
   if saved < 1
@@ -1566,4 +1624,9 @@ use doors
   # failures still surface immediately through RECT_ERROR.
   if portfolio_child == 0
     << "RECT_RESULT tensor=" + tensor + " rank=" + ffr_best_rank(best).to_s() + " bits=" + ffr_best_bits(best).to_s() + " exact=" + ffr_verify_best_exact_scratch(best, n, m, p, exact_scratch, exact_scratch_words).to_s() + " path=" + best_path
+    if quiet == 0 || refinement.failures() > 0
+      << "METAFLIP_REFINEMENT" + refinement.status_fields() + " refine_seed_uses=" + refinement_seed_uses.to_s()
+  if refinement_stopped != 1
+    << "RECT_ERROR code=refinement-stop tensor=" + tensor
+    return 2
   0

@@ -33,6 +33,7 @@ use fleet/provenance
 use fleet/cpu_experiments
 use fleet/cpu_pool
 use fleet/coreml
+use fleet/refinement
 use kernels/metallib_cache
 use kernels/bundles/workers
 use kernels/reject
@@ -1636,7 +1637,7 @@ use paths
     return 0
   best_rank - record
 
--> ffn_status(path, run_tag, producer_state, updated_ms, sequence, n, record, record_known, seed_nonce, cpu_epoch_target_ms, cpu_epoch_steps_min, cpu_epoch_steps_max, best, states, basin_stats, best_provenance, best_source, best_strategy, moves, elapsed_s, archive, near1, near2, symmetry, partial_auto_attempts, partial_auto_hits, partial_auto_archive, partial_auto_map, gpu_enabled, gpu_degraded) i64
+-> ffn_status(path, run_tag, producer_state, updated_ms, sequence, n, record, record_known, seed_nonce, cpu_epoch_target_ms, cpu_epoch_steps_min, cpu_epoch_steps_max, best, states, basin_stats, best_provenance, best_source, best_strategy, moves, elapsed_s, archive, near1, near2, symmetry, partial_auto_attempts, partial_auto_hits, partial_auto_archive, partial_auto_map, gpu_enabled, gpu_degraded, refinement_fields) i64
   best_rank = ffw_best_rank(best) ## i64
   best_bits = ffw_best_bits(best) ## i64
   wr_gap = ffn_wr_gap(best_rank, record) ## i64
@@ -1659,11 +1660,11 @@ use paths
   body = body + " near2=" + near2.size().to_s() + " symmetry=" + symmetry.size().to_s()
   body = body + " partial_auto_attempts=" + partial_auto_attempts.to_s() + " partial_auto_hits=" + partial_auto_hits.to_s()
   body = body + " partial_auto_archive=" + partial_auto_archive.to_s() + " partial_auto_map=" + partial_auto_map.to_s()
-  body = body + " gpu=" + gpu_enabled.to_s() + " gpu_degraded=" + gpu_degraded.to_s() + "\n"
+  body = body + " gpu=" + gpu_enabled.to_s() + " gpu_degraded=" + gpu_degraded.to_s() + refinement_fields + "\n"
   stored = ffn_atomic_write(path, body, run_tag) ## i64
   stored
 
--> ffn_render(n, threads_count, round, elapsed_s, total_moves, record, record_known, recovered, best, states, island_best_ranks, doors, zones, sources, last_rates, last_ages, cpu_work_moves, cpu_wander_moves, archive, archive_capacity, near1, near1_capacity, near2, near2_capacity, symmetry, symmetry_capacity, archive_counters, archive_min_distance, cohort_moves, cohort_drops, cohort_ties, cohort_near, timeline_times, timeline_ranks, timeline_count, timeline_elapsed_s, gpu_enabled, gpu_policy, gpu_degraded, gpu_lanes, gpu_candidates, gpu_rank_drops, gpu_density, gpu_rewards, gpu_epochs, gpu_wall_ms, gpu_failures, gpu_disabled, gpu_retry_round, gpu_seed_ranks, gpu_pareto, gpu_pareto_archive, gpu_pareto_capacity, gpu_pareto_counters, symmetry_cpu_uses, gpu_launch_number, pool_active_modes, pool_mode_ready, rect_enabled, rect_ready, rect_active, rect_lanes, rect_states, rect_archive_counts, rect_candidates, rect_rank_drops, rect_density, rect_rewards, rect_exposure, rect_failures, rect_retry_round, rect_composition_failures, last_status_ms, sequence, now_ms, rank_levels, rank_ticks, rank_level_count, bits_levels, bits_ticks, bits_level_count, new_bests_count, tie_bests_count, cycleouts_count, exact_rejects, dslack, flash_text, flash_until_ms)
+-> ffn_render(n, threads_count, round, elapsed_s, total_moves, record, record_known, recovered, best, states, island_best_ranks, doors, zones, sources, last_rates, last_ages, cpu_work_moves, cpu_wander_moves, archive, archive_capacity, near1, near1_capacity, near2, near2_capacity, symmetry, symmetry_capacity, archive_counters, archive_min_distance, cohort_moves, cohort_drops, cohort_ties, cohort_near, timeline_times, timeline_ranks, timeline_count, timeline_elapsed_s, gpu_enabled, gpu_policy, gpu_degraded, gpu_lanes, gpu_candidates, gpu_rank_drops, gpu_density, gpu_rewards, gpu_epochs, gpu_wall_ms, gpu_failures, gpu_disabled, gpu_retry_round, gpu_seed_ranks, gpu_pareto, gpu_pareto_archive, gpu_pareto_capacity, gpu_pareto_counters, symmetry_cpu_uses, gpu_launch_number, pool_active_modes, pool_mode_ready, rect_enabled, rect_ready, rect_active, rect_lanes, rect_states, rect_archive_counts, rect_candidates, rect_rank_drops, rect_density, rect_rewards, rect_exposure, rect_failures, rect_retry_round, rect_composition_failures, last_status_ms, sequence, now_ms, rank_levels, rank_ticks, rank_level_count, bits_levels, bits_ticks, bits_level_count, new_bests_count, tie_bests_count, cycleouts_count, exact_rejects, dslack, flash_text, flash_until_ms, refinement_row)
   width = ccall("w_term_cols") ## i64
   if width < 60
     width = 60
@@ -1709,6 +1710,7 @@ use paths
   counter_plains = ["  new-bests " + new_bests_count.to_s(), "   ties " + tie_bests_count.to_s(), "   cycleouts " + cycleouts_count.to_s(), "   exact-rejects " + exact_rejects.to_s(), "   density-slack " + dslack.to_s()]
   counter_painteds = ["  " + ff_tui_dim("new-bests") + " " + new_bests_count.to_s(), "   " + ff_tui_dim("ties") + " " + tie_bests_count.to_s(), "   " + ff_tui_dim("cycleouts") + " " + cycleouts_count.to_s(), "   " + ff_tui_dim("exact-rejects") + " " + exact_rejects.to_s(), "   " + ff_tui_dim("density-slack") + " " + dslack.to_s()]
   rows.push(ff_tui_join_fit(counter_plains, counter_painteds, width))
+  rows.push(ff_tui_fit("  " + refinement_row, "  " + ff_tui_dim(refinement_row), width))
   if flash_text != ""
     if now_ms < flash_until_ms
       rows.push("  " + ff_tui_paint(ff_tui_clip(flash_text, inner), "1;33"))
@@ -1940,6 +1942,8 @@ COREML_WORKERS = 1 ## i64
 COREML_COMPUTE = "cpuAndNeuralEngine"
 
 av = argv()
+if av.size() == 4 && av[0] == "--refine-batch"
+  exit(ffrf_batch(av[1], ffw_parse_decimal_i64(av[2]), ffw_parse_decimal_i64(av[3])))
 value_options = ["--tensor", "--rect-shapes", "--rect-epoch-rounds", "--rect-restart-nonce", "--rect-door-ticket", "-J", "--walkers", "--steps", "--rounds", "--secs", "-d", "--density", "--cycles", "--seed", "--seed-nonce", "--record", "--gpu-walkers", "--gpu-policy", "--gpu-steps", "--gpu-epoch-rounds", "--gpu-binary", "--gpu-novelty-size", "--runtime-root", "--asset-root", "--repo-root", "--state-dir", "--strategy", "--migrate", "--archive-size", "--cpu-near-size", "--cpu-near-signature-quota", "--cpu-symmetry-seeds", "--cpu-work-moves", "--cpu-wander-moves", "--status", "--best", "--run-tag", "--near-dir"]
 switch_options = ["--rect", "--rect-portfolio-child", "--rebuild-gpu", "--no-gpu", "--gpu", "--no-tui", "--tui", "--quiet", "--stop-on-record", "--self-test", "--naive", "--help", "-h"]
 value_options.push("--coreml-model")
@@ -3358,6 +3362,19 @@ cycleouts = 0 ## i64
 basin_rotations = 0 ## i64
 running = 1 ## i64
 coreml = nil
+refinement_root = STATUS_PATH + ".refinement"
+if SEED_NAIVE != 0
+  refinement_root = refinement_root + "-naive-" + ccall("__w_clock_ms").to_s()
+refinement = MetaflipRefinement.new(refinement_root, System.executable_path())
+refinement_candidate = i64[STATE_SIZE]
+refinement_output = i64[STATE_SIZE]
+refinement_ready = 0 ## i64
+refinement_seed_uses = 0 ## i64
+refinement_seed_identity = ""
+refinement_seed_kind = ""
+refinement_last_seed_ms = 0 ## i64
+refinement_generation = 0 ## i64
+z = refinement.submit(best, N, N, N)
 if COREML_MODEL != ""
   coreml = MetaflipCoreML.new(COREML_MODEL, COREML_HELPER, COREML_WORKERS, COREML_COMPUTE, ffls_run_dir(STATE_DIR, "gf2", STATE_SHAPE, RUN_TAG), RUN_TAG)
 
@@ -3494,6 +3511,19 @@ while running == 1
 
   if coreml != nil
     z = coreml.poll(near1, near2, ffw_best_rank(best), ccall("__w_clock_ms"))
+  z = refinement.poll(ccall("__w_clock_ms"))
+  refined_rank = refinement.take_into(refinement_output, N, N, N, CAPACITY, 29003 + round * 59, DSLACK, CYCLES, balanced_work, balanced_wander) ## i64
+  if refined_rank > 0 && refined_rank <= ffw_best_rank(best) + 2
+    if refinement_ready == 0 || refined_rank < ffw_best_rank(refinement_candidate)
+      if ffw_reseed_from(refinement_candidate, refinement_output, 29007 + round * 59) == refined_rank
+        refinement_ready = 1
+        refinement_seed_identity = refinement.last_identity()
+        refinement_seed_kind = refinement.last_kind()
+    if refined_rank == ffw_best_rank(best)
+      refinement_archive_changed = ffn_archive_add_copy(archive, refinement_output, ARCHIVE_CAP, 1, archive_counters, STATE_SIZE, 29009 + round * 59, frontier_distance_cache) ## i64
+      if refinement_archive_changed == 1
+        archive_min_cache = ffn_archive_min_distance(archive, frontier_distance_cache)
+    z = ffme_add_copy(map_states, map_keys, map_uses, map_sources, refinement_output, ffw_best_rank(best), N, MAP_CAPACITY, 0, STATE_SIZE, 29011 + round * 59)
   if cpu_epoch_target_ms > 0
     i = 0
     while i < J
@@ -3592,6 +3622,11 @@ while running == 1
           fleet_generation += 1
           if coreml != nil
             z = coreml.invalidate()
+          z = refinement.stop()
+          refinement_generation += 1
+          refinement = MetaflipRefinement.new(STATUS_PATH + ".refinement-reset-" + now_ms.to_s() + "-" + refinement_generation.to_s(), System.executable_path())
+          refinement_ready = 0
+          z = refinement.submit(best, N, N, N)
           best_source = "manual-naive-reset"
           best_strategy = "reset-naive"
           z = fflp_set(best_provenance, 0, 0 - 1, 0 - 1, 0 - 1, round, SEED_NONCE, ffbi_best_id(best), ffw_best_rank(best), ffw_best_bits(best), 0, 0 - 1, 0 - 1, ffbi_best_id(best), ffw_best_rank(best), ffw_best_bits(best), elapsed_s)
@@ -3836,6 +3871,7 @@ while running == 1
         rank = cleaned_rank
         bits = ffw_best_bits(state)
       if exact == 1
+        z = refinement.submit(state, N, N, N)
         descendant_identity = ffbi_best_id(state) ## i64
         if lineage_roles[i] >= 0 && lineage_paid[i] == 0
           lineage_novel = 0 ## i64
@@ -4068,6 +4104,11 @@ while running == 1
       lease_moves = cpu_work_moves[zones[i]] + cpu_wander_moves[zones[i]] ## i64
       if seed_moves >= lease_moves
         lease_due = 1
+    # The one/two-island configuration may have no short native lease at all.
+    # Offer a waiting background seed to one parked non-fringe lane at most
+    # once per two seconds; a strict rank drop need not wait for that cadence.
+    if refinement_ready == 1 && i != core_fringe_index && (ffw_best_rank(refinement_candidate) < ffw_best_rank(best) || now_ms - refinement_last_seed_ms >= 2000)
+      lease_due = 1
     if cycle_due == 1 || lease_due == 1
       if lineage_roles[i] >= 0
         if ffl_returned_to_origin(states[i], lineage_origin_ids[i]) == 1
@@ -4094,6 +4135,7 @@ while running == 1
         if current_distance >= 4
           live_loaded = ffn_clone_current_exact_into(states[i], live_candidate_scratch, live_us_scratch, live_vs_scratch, live_ws_scratch, N, CAPACITY, 23001 + round * 53 + i, DSLACK, CYCLES, balanced_work, balanced_wander) ## i64
           if live_loaded > 0
+            z = refinement.submit(live_candidate_scratch, N, N, N)
             archive_changed = ffn_archive_add_copy(archive, live_candidate_scratch, ARCHIVE_CAP, 4, archive_counters, STATE_SIZE, 23051 + round * 53 + i, frontier_distance_cache) ## i64
             if archive_changed == 1
               archive_min_cache = ffn_archive_min_distance(archive, frontier_distance_cache)
@@ -4112,6 +4154,11 @@ while running == 1
         advised = coreml.take(seed_door_l - 1, ffw_best_rank(best))
         if advised != nil
           selected = advised
+      used_refinement = 0 ## i64
+      if refinement_ready == 1 && i != core_fringe_index && (now_ms - refinement_last_seed_ms >= 2000 || ffw_best_rank(refinement_candidate) < ffw_best_rank(best))
+        selected = refinement_candidate
+        used_refinement = 1
+        refinement_ready = 0
       next_core_slots = core_fringe_slots ## i64
       core_rebuilt_in_place = 0 ## i64
       if i == core_fringe_index
@@ -4125,6 +4172,10 @@ while running == 1
         active_near_seeds[i] = selected
       if seed_door_l == 3 && near2.size() > 0
         active_near_seeds[i] = selected
+      if used_refinement == 1
+        # The output buffer is reused on the next poll; an island owns the
+        # reseeded copy, but long-lived near-bank pointers must not alias it.
+        active_near_seeds[i] = nil
       if seed_door_l == 4 && symmetry.size() > 0
         symmetry_cpu_uses += 1
       z = ffw_reseed_from(states[i], selected, ffcp_campaign_seed(25001 + round * 53 + i, SEED_NONCE))
@@ -4142,6 +4193,10 @@ while running == 1
         sources[i] = ffp_door_name(doors[i]) + "/seed" + (ffn_current_basin_id(selected) % 100000).to_s() + "/" + ffn_global_isotropy_tag(selected)
       if z >= 1 && native_seed == 0 && used_anchor_fallback == 0
         sources[i] = ffp_door_name(doors[i]) + "/leader-fallback"
+      if z >= 1 && used_refinement == 1 && used_anchor_fallback == 0
+        sources[i] = "refine/" + refinement_seed_kind + "/" + refinement_seed_identity.slice(0, 12)
+        refinement_seed_uses += 1
+        refinement_last_seed_ms = now_ms
       if z >= 1 && i == core_fringe_index
         core_fringe_slots = next_core_slots
         sources[i] = "core-fringe/frozen-" + core_fringe_slots.to_s()
@@ -4262,6 +4317,7 @@ while running == 1
             gpu_rank = ffpc_gate_square_best(gpu_candidate, N, pair_scratch, pair_scratch_words, exact_scratch, exact_scratch_words)
           if gpu_rank > 0
             gpu_bits = ffw_best_bits(gpu_candidate) ## i64
+            z = refinement.submit(gpu_candidate, N, N, N)
             gpu_peel_relation = 0 ## i64
             gpu_peel_meta = i64[12]
             peeled_gpu_rank = ffci_try_component_peel(best, gpu_candidate, N, CAPACITY, 42001 + round * 67 + gpu_role, DSLACK, CYCLES, balanced_work, balanced_wander, gpu_peel_meta) ## i64
@@ -4456,6 +4512,7 @@ while running == 1
           if rect_rank > 0
             rect_rank = ffpc_gate_rect_best(rect_candidate, rect_n, rect_m, rect_p, pair_scratch, pair_scratch_words, exact_scratch, exact_scratch_words)
           if rect_rank > 0 && rect_states[rect_component] != nil
+            z = refinement.submit(rect_candidate, rect_n, rect_m, rect_p)
             rect_candidates[rect_component] = rect_candidates[rect_component] + 1
             old_rect_rank = ffr_best_rank(rect_states[rect_component]) ## i64
             old_rect_bits = ffr_best_bits(rect_states[rect_component]) ## i64
@@ -4542,6 +4599,7 @@ while running == 1
         composed_loaded = ffpc_gate_square_best(composed_candidate, N, pair_scratch, pair_scratch_words, exact_scratch, exact_scratch_words)
       if composed_loaded > 0
         rect_composition_dirty = 0
+        z = refinement.submit(composed_candidate, N, N, N)
         rect_composition_retry_round = 0
         composed_bits = ffw_best_bits(composed_candidate) ## i64
         square_before_rank = ffw_best_rank(best) ## i64
@@ -5257,9 +5315,12 @@ while running == 1
   if phase_timing == 1
     phase_ticks[6] = ccall("__w_clock_ms")
   if ff_tui_heartbeat_due(last_status_ms, now_ms, 500) == 1
+    # Include a leader normalized by a later isotropy/peeling stage, even if
+    # its original pre-normalization endpoint was already queued at intake.
+    z = refinement.submit(best, N, N, N)
     sequence += 1
     z = ffcp_round_step_range(cpu_round_steps, J, cpu_epoch_range) ## i64
-    z = ffn_status(STATUS_PATH, RUN_TAG, "LIVE", now_ms, sequence, N, RECORD, RECORD_KNOWN, SEED_NONCE, cpu_epoch_target_ms, cpu_epoch_range[0], cpu_epoch_range[1], best, states, status_basin_stats, best_provenance, best_source, best_strategy, total_moves, elapsed_s, archive, near1, near2, symmetry, partial_auto_attempts, partial_auto_hits, partial_auto_admissions, partial_auto_map_admissions, GPU, gpu_degraded)
+    z = ffn_status(STATUS_PATH, RUN_TAG, "LIVE", now_ms, sequence, N, RECORD, RECORD_KNOWN, SEED_NONCE, cpu_epoch_target_ms, cpu_epoch_range[0], cpu_epoch_range[1], best, states, status_basin_stats, best_provenance, best_source, best_strategy, total_moves, elapsed_s, archive, near1, near2, symmetry, partial_auto_attempts, partial_auto_hits, partial_auto_admissions, partial_auto_map_admissions, GPU, gpu_degraded, refinement.status_fields() + " refine_seed_uses=" + refinement_seed_uses.to_s())
     if z == 0
       gpu_degraded = 1
     if z == 1
@@ -5302,7 +5363,7 @@ while running == 1
         bits_levels[bits_level_count] = tick_bits
         bits_ticks[bits_level_count] = 1
         bits_level_count += 1
-      z = ffn_render(N, J, round, elapsed_s, total_moves, RECORD, RECORD_KNOWN, recovered, best, states, island_best_ranks, doors, zones, sources, last_rates, last_ages, cpu_work_moves, cpu_wander_moves, archive, ARCHIVE_CAP, near1, near1_capacity, near2, near2_capacity, symmetry, SYMMETRY_CAP, archive_counters, archive_min_cache, cohort_moves, cohort_drops, cohort_ties, cohort_near, timeline_times, timeline_ranks, timeline_count, elapsed_s - timeline_start_s, GPU, GPU_POLICY, gpu_degraded, gpu_lanes, gpu_candidates, gpu_rank_drops, gpu_density, gpu_rewards, gpu_lane_epochs, gpu_wall_ms, gpu_failures, gpu_disabled, gpu_retry_round, gpu_seed_ranks, gpu_pareto, gpu_pareto_archive, GPU_NOVELTY_CAP, gpu_pareto_counters, symmetry_cpu_uses, gpu_launch_number, pool_active_modes, pool_mode_ready, rect_enabled, rect_ready, rect_active, rect_lanes, rect_states, rect_archive_counts, rect_candidates, rect_rank_drops, rect_density, rect_rewards, rect_exposure, rect_failures, rect_retry_round, rect_composition_failures, last_status_ms, sequence, now_ms, rank_levels, rank_ticks, rank_level_count, bits_levels, bits_ticks, bits_level_count, new_bests, tie_bests, cycleouts, invalid_candidates, DSLACK, flash_text, flash_until_ms)
+      z = ffn_render(N, J, round, elapsed_s, total_moves, RECORD, RECORD_KNOWN, recovered, best, states, island_best_ranks, doors, zones, sources, last_rates, last_ages, cpu_work_moves, cpu_wander_moves, archive, ARCHIVE_CAP, near1, near1_capacity, near2, near2_capacity, symmetry, SYMMETRY_CAP, archive_counters, archive_min_cache, cohort_moves, cohort_drops, cohort_ties, cohort_near, timeline_times, timeline_ranks, timeline_count, elapsed_s - timeline_start_s, GPU, GPU_POLICY, gpu_degraded, gpu_lanes, gpu_candidates, gpu_rank_drops, gpu_density, gpu_rewards, gpu_lane_epochs, gpu_wall_ms, gpu_failures, gpu_disabled, gpu_retry_round, gpu_seed_ranks, gpu_pareto, gpu_pareto_archive, GPU_NOVELTY_CAP, gpu_pareto_counters, symmetry_cpu_uses, gpu_launch_number, pool_active_modes, pool_mode_ready, rect_enabled, rect_ready, rect_active, rect_lanes, rect_states, rect_archive_counts, rect_candidates, rect_rank_drops, rect_density, rect_rewards, rect_exposure, rect_failures, rect_retry_round, rect_composition_failures, last_status_ms, sequence, now_ms, rank_levels, rank_ticks, rank_level_count, bits_levels, bits_ticks, bits_level_count, new_bests, tie_bests, cycleouts, invalid_candidates, DSLACK, flash_text, flash_until_ms, refinement.status_row())
   if QUIET == 0 && TUI == 0
     round_wr = ffn_wr_status(ffw_best_rank(best), RECORD, RECORD_KNOWN)
     << "round=" + round.to_s() + " best=" + ffw_best_rank(best).to_s() + " bits=" + ffw_best_bits(best).to_s() + " WR=" + RECORD.to_s() + " wr=" + round_wr + " moves=" + total_moves.to_s() + " exact_bad=" + invalid_candidates.to_s() + " archive=" + archive.size().to_s() + " near1=" + near1.size().to_s() + " near2=" + near2.size().to_s()
@@ -5397,6 +5458,7 @@ if GPU == 1 && gpu_ready == 1
         late_rank = ffpc_gate_square_best(late, N, pair_scratch, pair_scratch_words, exact_scratch, exact_scratch_words)
       if late_rank > 0
         late_bits = ffw_best_bits(late) ## i64
+        z = refinement.submit(late, N, N, N)
         late_peel_relation = 0 ## i64
         late_peel_meta = i64[12]
         peeled_late_rank = ffci_try_component_peel(best, late, N, CAPACITY, 51101 + gpu_slot, DSLACK, CYCLES, balanced_work, balanced_wander, late_peel_meta) ## i64
@@ -5453,6 +5515,7 @@ if GPU == 1 && gpu_ready == 1
       if late_rect_rank > 0
         late_rect_rank = ffpc_gate_rect_best(late_rect, ffn_rect_n(rect_component), ffn_rect_m(rect_component), ffn_rect_p(rect_component), pair_scratch, pair_scratch_words, exact_scratch, exact_scratch_words)
       if late_rect_rank > 0 && rect_states[rect_component] != nil
+        z = refinement.submit(late_rect, ffn_rect_n(rect_component), ffn_rect_m(rect_component), ffn_rect_p(rect_component))
         late_rect_bits = ffr_best_bits(late_rect) ## i64
         old_rect_rank = ffr_best_rank(rect_states[rect_component]) ## i64
         old_rect_bits = ffr_best_bits(rect_states[rect_component]) ## i64
@@ -5521,6 +5584,7 @@ if GPU == 1 && gpu_ready == 1
       late_composed_loaded = ffpc_gate_square_best(late_composed, N, pair_scratch, pair_scratch_words, exact_scratch, exact_scratch_words)
     if late_composed_loaded > 0
       rect_composition_dirty = 0
+      z = refinement.submit(late_composed, N, N, N)
       if ffn_better(late_composed_loaded, ffw_best_bits(late_composed), ffw_best_rank(best), ffw_best_bits(best)) == 1
         late_square_rank = ffw_best_rank(best) ## i64
         late_square_bits = ffw_best_bits(best) ## i64
@@ -5538,9 +5602,15 @@ if GPU == 1 && gpu_ready == 1
       rect_composition_failures += 1
       invalid_candidates += 1
 
+# Preserve late candidates as deferred tickets, then stop only our native
+# child. Shutdown never waits for the entire disk backlog to be processed.
+z = refinement.submit(best, N, N, N)
+refinement_stopped = refinement.stop() ## i64
 final_ms = ccall("__w_clock_ms") ## i64
 final_s = (final_ms - start_ms) / 1000 ## i64
 final_write_failed = 0 ## i64
+if refinement_stopped != 1
+  final_write_failed = 1
 # Every adoption path is already exact-gated, but make the durable handoff a
 # proof boundary of its own. A would-be record is never written or reported as
 # exact merely because an earlier in-memory invariant was expected to hold.
@@ -5570,10 +5640,12 @@ final_state = "DONE"
 if final_write_failed != 0
   final_state = "FAILED"
 z = ffcp_round_step_range(cpu_round_steps, J, cpu_epoch_range) ## i64
-status_ok = ffn_status(STATUS_PATH, RUN_TAG, final_state, final_ms, sequence + 1, N, RECORD, RECORD_KNOWN, SEED_NONCE, cpu_epoch_target_ms, cpu_epoch_range[0], cpu_epoch_range[1], best, states, status_basin_stats, best_provenance, best_source, best_strategy, total_moves, final_s, archive, near1, near2, symmetry, partial_auto_attempts, partial_auto_hits, partial_auto_admissions, partial_auto_map_admissions, GPU, gpu_degraded) ## i64
+status_ok = ffn_status(STATUS_PATH, RUN_TAG, final_state, final_ms, sequence + 1, N, RECORD, RECORD_KNOWN, SEED_NONCE, cpu_epoch_target_ms, cpu_epoch_range[0], cpu_epoch_range[1], best, states, status_basin_stats, best_provenance, best_source, best_strategy, total_moves, final_s, archive, near1, near2, symmetry, partial_auto_attempts, partial_auto_hits, partial_auto_admissions, partial_auto_map_admissions, GPU, gpu_degraded, refinement.status_fields() + " refine_seed_uses=" + refinement_seed_uses.to_s()) ## i64
 if status_ok == 0
   final_write_failed = 1
 final_wr = ffn_wr_status(ffw_best_rank(best), RECORD, RECORD_KNOWN)
+if QUIET == 0 || refinement.failures() > 0
+  << "METAFLIP_REFINEMENT" + refinement.status_fields() + " refine_seed_uses=" + refinement_seed_uses.to_s()
 if TUI == 1
   << ""
   if final_write_failed == 0

@@ -27,18 +27,22 @@ def project_dual_grid(row, terms):
     assert all(sum(a*b for a, b in zip(m, nrow)) % 2 == int(i == j)
                for i, m in enumerate(left) for j, nrow in enumerate(right))
     affected = [axis for axis, edge in enumerate(EDGES) if dimension in edge]
+    # Retain the independently built dense matrices and their pairing check,
+    # but expand only nonzero matrix entries inside the tensor loop.
+    supports = []
+    for axis, (a, b) in enumerate(EDGES):
+        maps = [[[int(old == j) for j in range(shape[d])] for old in keep[d]] for d in (a, b)]
+        if dimension in (a, b):
+            maps[(a, b).index(dimension)] = left if axis == affected[0] else right
+        supports.append([[tuple(j for j, value in enumerate(r) if value) for r in matrix] for matrix in maps])
     counts = Counter()
     for term in terms:
         mapped = []
         for axis, (word, (a, b)) in enumerate(zip(term, EDGES)):
-            maps = [[[int(old == j) for j in range(shape[d])] for old in keep[d]] for d in (a, b)]
-            if dimension in (a, b):
-                maps[(a, b).index(dimension)] = left if axis == affected[0] else right
             value = 0
-            for i, mr in enumerate(maps[0]):
-                for j, mc in enumerate(maps[1]):
-                    bit = sum(mr[x]*mc[y]*((word >> (x*shape[b]+y)) & 1)
-                              for x in range(shape[a]) for y in range(shape[b])) % 2
+            for i, mr in enumerate(supports[axis][0]):
+                for j, mc in enumerate(supports[axis][1]):
+                    bit = sum((word >> (x*shape[b]+y)) & 1 for x in mr for y in mc) % 2
                     value |= bit << (i*len(keep[b])+j)
             mapped.append(value)
         if all(mapped):

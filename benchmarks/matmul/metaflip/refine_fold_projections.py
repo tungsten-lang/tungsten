@@ -73,10 +73,21 @@ def fold_family(shape, keep, max_weight, max_axes=1):
     return count, generate()
 
 
-def scan_map(entry, keep, baseline, max_weight=1, order=(0, 1, 2), max_views=2000, max_axes=1):
+def refinement_family(shape, keep, max_weight, max_axes, dual_kernels, all_dual_anchors=False):
+    if all_dual_anchors and not dual_kernels:
+        raise ValueError('all dual anchors requires the dual-kernel mode')
+    if dual_kernels:
+        if type(max_weight) is not int or type(max_axes) is not int or max_weight != 1 or max_axes != 1:
+            raise ValueError('balanced dual kernels use a fixed one-extra-bit shell, not fold mask/axis limits')
+        from dual_projection_scan import anchored_dual_family
+        return anchored_dual_family(shape, keep, all_dual_anchors)
+    return fold_family(shape, keep, max_weight, max_axes)
+
+
+def scan_map(entry, keep, baseline, max_weight=1, order=(0, 1, 2), max_views=2000, max_axes=1, dual_kernels=False, all_dual_anchors=False):
     if len(order) != 3 or any(type(i) is not int for i in order) or sorted(order) != [0, 1, 2]:
         raise ValueError('invalid pair order')
-    count, family = fold_family(entry['shape'], keep, max_weight, max_axes)
+    count, family = refinement_family(entry['shape'], keep, max_weight, max_axes, dual_kernels, all_dual_anchors)
     if type(max_views) is not int or max_views < count:
         raise ValueError(f'fold family needs {count} views, exceeding the allowance')
     start = time.process_time()
@@ -84,11 +95,30 @@ def scan_map(entry, keep, baseline, max_weight=1, order=(0, 1, 2), max_views=200
     if hashlib.sha256(raw).hexdigest() != entry['sha256']:
         raise ValueError('source changed')
     terms = parse_terms(raw, entry['rank'])
-    cache = (FoldCache(entry['shape'], terms) if max_axes == 1 else JointFoldCache(entry['shape'], terms, keep))
-    shape, fold_key = tuple(map(len, keep)), 'fold' if max_axes == 1 else 'folds'
+    if dual_kernels:
+        from dual_projection_scan import DualProjectionCache, dual_maps
+        cache = DualProjectionCache(entry['shape'], terms)
+    else:
+        cache = (FoldCache(entry['shape'], terms) if max_axes == 1 else JointFoldCache(entry['shape'], terms, keep))
+    shape = tuple(map(len, keep))
+    fold_key = 'dual' if dual_kernels else ('fold' if max_axes == 1 else 'folds')
     best, control, trials, changed = None, None, [], 0
     for fold in family:
-        if max_axes > 1:
+        actual_keep, detail = keep, {}
+        if dual_kernels:
+            anchor, anchor_keep = None, keep
+            if fold is None:
+                child = cache.base.restrict(keep, True)
+            else:
+                d, u, v = (fold[k] for k in ('dimension', 'u', 'v'))
+                actual_keep = list(keep)
+                actual_keep[d] = dual_maps(entry['shape'][d], u, v)[0]
+                anchor = (u & v).bit_length()-1
+                anchor_keep = list(keep)
+                anchor_keep[d] = tuple(i for i in range(entry['shape'][d]) if i != anchor)
+                child = cache.restrict(actual_keep, d, u, v)
+            detail = dict(seed_keep=anchor_keep, dual_anchor=anchor)
+        elif max_axes > 1:
             child = cache.restrict(fold)
         else:
             child = (cache.base.restrict(keep, True) if fold is None else
@@ -96,7 +126,7 @@ def scan_map(entry, keep, baseline, max_weight=1, order=(0, 1, 2), max_views=200
         raw_rank = len(child)
         child, trace = reduce_pairs(child, order) if has_merge(child) else (child, [])
         changed += bool(trace)
-        row = dict(shape=shape, keep=keep, **{fold_key: fold}, rank=len(child), raw_rank=raw_rank,
+        row = dict(shape=shape, keep=actual_keep, **{fold_key: fold}, **detail, rank=len(child), raw_rank=raw_rank,
                    baseline=baseline, reduction_order=order, reduction_trace=trace)
         if not fold:
             control = dict(raw_rank=raw_rank, rank=len(child))
@@ -109,7 +139,7 @@ def scan_map(entry, keep, baseline, max_weight=1, order=(0, 1, 2), max_views=200
                 cpu_seconds=time.process_time()-start)
 
 
-def run(seeds, prices_path, output, max_weight=1, order=(0, 1, 2), max_views=2000, max_axes=1):
+def run(seeds, prices_path, output, max_weight=1, order=(0, 1, 2), max_views=2000, max_axes=1, dual_kernels=False, all_dual_anchors=False):
     output = Path(output).resolve()
     if output.exists():
         raise ValueError('output must not exist')
@@ -142,7 +172,7 @@ def run(seeds, prices_path, output, max_weight=1, order=(0, 1, 2), max_views=200
         if type(index) is not int or not 0 <= index < len(source['outputs']):
             raise ValueError('invalid seed output index')
         row = source['outputs'][index]
-        if row.get('fold') is not None or row.get('folds'):
+        if row.get('fold') is not None or row.get('folds') or row.get('dual') is not None:
             raise ValueError('seed must be a coordinate map, not an existing fold')
         if audit['source_sha256'][row['path']] != row['sha256'] or hashlib.sha256(
                 blob(contained(root, row['path']))).hexdigest() != row['sha256']:
@@ -154,13 +184,15 @@ def run(seeds, prices_path, output, max_weight=1, order=(0, 1, 2), max_views=200
             raise ValueError('seed parent changed')
         entry = dict(shape=row['parent_shape'], path=str(path), sha256=row['parent_sha256'],
                      rank=int(data.splitlines()[0]))
-        count, _ = fold_family(entry['shape'], row['keep'], max_weight, max_axes)
+        count, _ = refinement_family(entry['shape'], row['keep'], max_weight, max_axes, dual_kernels, all_dual_anchors)
         if count > max_views:
             raise ValueError(f'fold family needs {count} views, exceeding the allowance')
         selected.append((entry, row['keep'], dict(root=str(root), index=index)))
     for name in ('refine_fold_projections.py', 'fold_projection_scan.py', 'projection_composition_scan.py',
                  'pair_reduction_scan.py', 'extend_composition_parents.py', 'verify_representation_portfolio.py'):
         blob(Path(__file__).with_name(name))
+    if dual_kernels:
+        blob(Path(__file__).with_name('dual_projection_scan.py'))
     output.mkdir(); (output/'parents').mkdir(); (output/'tensors').mkdir()
     report = dict(complete=False, field='GF(2)', record_claim=False, redistribution_cleared=False,
         canonical_archive_changed=False, projection_kind='bounded_fold_then_shared_pair_reduction',
@@ -171,6 +203,11 @@ def run(seeds, prices_path, output, max_weight=1, order=(0, 1, 2), max_views=200
     if max_axes > 1:
         report['projection_kind'] = 'bounded_joint_fold_then_shared_pair_reduction'
         report['limits']['max_folded_axes'] = max_axes
+    if dual_kernels:
+        report['projection_kind'] = 'anchored_dual_then_shared_pair_reduction'
+        report['limits'].update(dual_kernel_extra_bits=1, fixed_keep_sets=False,
+                                other_axis_keeps_fixed=True, canonical_least_pivot=True)
+        if all_dual_anchors: report['limits']['all_dual_anchors'] = True
     start, seen = time.monotonic(), set()
 
     def save():
@@ -181,7 +218,7 @@ def run(seeds, prices_path, output, max_weight=1, order=(0, 1, 2), max_views=200
 
     save()
     for index, (entry, keep, seed) in enumerate(selected):
-        result = scan_map(entry, keep, prices[tuple(sorted(map(len, keep)))], max_weight, order, max_views, max_axes)
+        result = scan_map(entry, keep, prices[tuple(sorted(map(len, keep)))], max_weight, order, max_views, max_axes, dual_kernels, all_dual_anchors)
         row = result.pop('winner'); child = row.pop('terms')
         if row['identity'] not in seen:
             seen.add(row['identity'])
@@ -210,8 +247,12 @@ if __name__ == '__main__':
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--max-mask-weight', type=int, choices=range(4), default=1)
     p.add_argument('--max-folded-axes', type=int, choices=(1, 2, 3), default=1)
+    p.add_argument('--dual-kernels', action='store_true',
+                   help='balanced shell: each paired kernel is the deleted unit plus at most one extra unit')
+    p.add_argument('--all-dual-anchors', action='store_true',
+                   help='try every shared anchor, keeping the other dimensions fixed; requires --dual-kernels')
     p.add_argument('--max-views-per-seed', type=int, default=2000)
     p.add_argument('--pair-order', default='0,1,2')
     a = p.parse_args()
     seeds = [(root, int(index)) for root, index in (s.rsplit(':', 1) for s in a.seed)]
-    run(seeds, a.prices, a.output, a.max_mask_weight, tuple(map(int, a.pair_order.split(','))), a.max_views_per_seed, a.max_folded_axes)
+    run(seeds, a.prices, a.output, a.max_mask_weight, tuple(map(int, a.pair_order.split(','))), a.max_views_per_seed, a.max_folded_axes, a.dual_kernels, a.all_dual_anchors)

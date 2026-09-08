@@ -794,6 +794,14 @@ found no lower primitive rank; an ordinary-walk control yielded three further
 verified local composition bounds, with no new public-reference crossing.
 These tools remain offline and do not enable an additional fleet lane.
 
+[Balanced dual refinement](tools/BALANCED-DUAL-PROJECTIONS-2026-09-08.md)
+extends the offline runner to sparse paired kernels on large shared dimensions.
+Lazy XOR tables avoid exponential allocation, and coordinate/delta reuse cut
+CPU time by 16.8% in a matched 1,690-view replay with identical retained tensors.
+The all-anchor follow-up verifies 20x23x29 at 7,430 and a 21x23x29 block at
+8,097, with six lower local composition prices and no new reference crossing.
+This is an offline workload measurement, not a live-fleet speedup.
+
 `tools/composition_closure.rb` checks candidates against a verified recursive
 block/Kronecker library and propagates useful candidates to other shapes.
 It exports both comparison and candidate tensors for independent replay.

@@ -31,35 +31,121 @@ def dual_maps(n, u, v):
     return keep, left, right
 
 
+def anchored_dual_family(shape, keep, all_anchors=False):
+    """Balanced shell: each kernel is the deleted unit plus <=1 other unit.
+
+    The canonical output basis can change with u; only the other dimensions'
+    coordinate keeps are fixed. Include the ordinary coordinate control once.
+    """
+    validate_keep(shape, keep)
+    dimensions = [i for i, n in enumerate(shape) if n-len(keep[i]) == 1]
+    if type(all_anchors) is not bool: raise ValueError('all_anchors must be boolean')
+    count = 1+sum((shape[i]*(shape[i]*(shape[i]-1)+1)-1 if all_anchors else
+                   shape[i]*(shape[i]-1)) for i in dimensions)
+
+    def generate():
+        yield None
+        for dimension in dimensions:
+            n = shape[dimension]
+            original, = set(range(n))-set(keep[dimension])
+            for pivot in (range(n) if all_anchors else (original,)):
+                anchor = 1 << pivot
+                options = [anchor]+[anchor | (1 << i) for i in range(n) if i != pivot]
+                for u, v in product(options, repeat=2):
+                    if u == v == anchor and pivot == original: continue
+                    if (u & v).bit_count() % 2:
+                        yield dict(dimension=dimension, u=u, v=v)
+    return count, generate()
+
+
 class WordMap:
     """Map one shared coordinate after restricting the other coordinate."""
     def __init__(self, ids, words, n, other_extent, row_coordinate):
         self.ids, self.words = ids, words
         self.n, self.other, self.row_coordinate = n, other_extent, row_coordinate
+        self.ordinary_cache, self.delta_cache = {}, {}
         if row_coordinate:
             mask = (1 << other_extent)-1
-            self.combinations = []
+            self.row_chunks = []
+            self.combinations = [] if n <= 8 else None
             for word in words:
-                rows = [(word >> (i*other_extent)) & mask for i in range(n)]
-                sums = [0]
-                for bits in range(1, 1 << n):
-                    low = bits & -bits
-                    sums.append(sums[bits ^ low] ^ rows[low.bit_length()-1])
-                self.combinations.append(sums)
+                rows = tuple((word >> (i*other_extent)) & mask for i in range(n))
+                self.row_chunks.append(rows)
+                if self.combinations is not None:
+                    sums = [0]
+                    for bits in range(1, 1 << n):
+                        low = bits & -bits
+                        sums.append(sums[bits ^ low] ^ rows[low.bit_length()-1])
+                    self.combinations.append(sums)
         else:
             mask = (1 << n)-1
             self.chunks = [tuple((word >> (i*n)) & mask for i in range(other_extent)) for word in words]
+            self.needed_chunks = {chunk for chunks in self.chunks for chunk in chunks} if n > 8 else None
 
-    def transform(self, rows):
+    @staticmethod
+    def subset_xor(parts, bits):
+        value = 0
+        while bits:
+            low = bits & -bits
+            value ^= parts[low.bit_length()-1]
+            bits ^= low
+        return value
+
+    def transform_delta(self, rows, coordinates):
+        """Reuse coordinate images and requested XOR deltas, not full maps."""
+        coordinates = tuple(coordinates)
+        if (len(coordinates) != len(rows) or len(set(coordinates)) != len(coordinates) or
+            any(type(i) is not int or not 0 <= i < self.n for i in coordinates) or
+            any(type(row) is not int or not 0 <= row < 1 << self.n for row in rows)):
+            raise ValueError('invalid coordinate baseline for word map')
+        if coordinates not in self.ordinary_cache:
+            if self.row_coordinate:
+                base = tuple(sum(parts[j] << (i*self.other) for i, j in enumerate(coordinates))
+                             for parts in self.row_chunks)
+            else:
+                base = tuple(sum(sum(((chunk >> j) & 1) << i for i, j in enumerate(coordinates)) << (r*len(rows))
+                                 for r, chunk in enumerate(chunks)) for chunks in self.chunks)
+            self.ordinary_cache[coordinates] = base
+        words = list(self.ordinary_cache[coordinates])
+        groups = {}
+        for i, (row, coordinate) in enumerate(zip(rows, coordinates)):
+            delta = row ^ (1 << coordinate)
+            if delta: groups.setdefault(delta, []).append(i)
+        for delta, positions in groups.items():
+            key = delta, len(rows)
+            if key not in self.delta_cache:
+                if self.row_coordinate:
+                    values = tuple(self.subset_xor(parts, delta) for parts in self.row_chunks)
+                else:
+                    values = tuple(sum(((chunk & delta).bit_count() % 2) << (r*len(rows))
+                                       for r, chunk in enumerate(chunks)) for chunks in self.chunks)
+                self.delta_cache[key] = values
+            for j, value in enumerate(self.delta_cache[key]):
+                for i in positions:
+                    words[j] ^= value << (i*self.other if self.row_coordinate else i)
+        return tuple(words[i] for i in self.ids)
+
+    def transform(self, rows, coordinates=None):
+        if self.n > 8 and coordinates is not None:
+            return self.transform_delta(rows, coordinates)
         if self.row_coordinate:
-            words = [sum(sums[row] << (i*self.other) for i, row in enumerate(rows))
-                     for sums in self.combinations]
+            if self.combinations is not None:
+                words = [sum(sums[row] << (i*self.other) for i, row in enumerate(rows))
+                         for sums in self.combinations]
+            else:
+                # Evaluate requested row combinations only; n=32 must not
+                # allocate 2**32 entries for every distinct factor word.
+                words = [sum(self.subset_xor(chunks, row) << (i*self.other) for i, row in enumerate(rows))
+                         for chunks in self.row_chunks]
         else:
             columns = [sum(((row >> j) & 1) << i for i, row in enumerate(rows)) for j in range(self.n)]
-            lut = [0]
-            for bits in range(1, 1 << self.n):
-                low = bits & -bits
-                lut.append(lut[bits ^ low] ^ columns[low.bit_length()-1])
+            if self.needed_chunks is None:
+                lut = [0]
+                for bits in range(1, 1 << self.n):
+                    low = bits & -bits
+                    lut.append(lut[bits ^ low] ^ columns[low.bit_length()-1])
+            else:
+                lut = {bits: self.subset_xor(columns, bits) for bits in self.needed_chunks}
             words = [sum(lut[chunk] << (i*len(rows)) for i, chunk in enumerate(chunks)) for chunks in self.chunks]
         return tuple(words[i] for i in self.ids)
 
@@ -97,11 +183,11 @@ class DualProjectionCache:
         maps, unaffected, left_cache = self.prepare(keep, dimension)
         first, second = sorted(maps)
         if u not in left_cache:
-            left_cache[u] = maps[first].transform(left)
+            left_cache[u] = maps[first].transform(left, actual_keep)
         columns = [None]*3
         columns[unaffected[0]] = unaffected[1]
         columns[first] = left_cache[u]
-        columns[second] = maps[second].transform(right)
+        columns[second] = maps[second].transform(right, actual_keep)
         parity = set()
         for term in zip(*columns):
             if all(term):

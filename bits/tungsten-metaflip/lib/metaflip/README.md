@@ -34,10 +34,17 @@ Metaflip executable:
   mode and launch seed, or rectangular composition source without changing
   the native TUI.
 - `fleet/pair_cleanup.w` supplies allocation-free shared-pair fixed-point
-  reduction in coordinator-owned scratch space. CPU/GPU/composition intake
-  runs it before rank comparisons and independently exact-checks its output.
+  reduction followed by `fleet/matrix_cleanup.w` shared-factor matrix
+  compression in coordinator-owned scratch space. CPU/GPU/composition intake
+  runs both before rank comparisons and independently exact-checks the output.
   Only the saved best changes; current terms, RNG and hot flip loops do not.
   Axis order 0,1,2 matches the offline reducer, without claiming optimality.
+  Matrix rank ties are left unchanged on this immediate path.
+- `fleet/matrix_cleanup.w` also exposes bounded neutral basis proposals;
+  `fleet/projection.w` supplies validated one-coordinate projections with
+  disjoint input/output slabs, for factors of at most 63 bits. Both are
+  native primitives, not yet background-scheduled. They do not widen the
+  live shape allowlist or implicitly admit a projected tensor.
 - `strategies/rect_catalyst_lift2.w` and
   `strategies/macro_double_annihilation.w` retain the exact target-directed
   setup/trigger/cleanup compilers. They are bounded offline scouts, not default

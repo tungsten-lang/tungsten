@@ -1,10 +1,11 @@
-# Exact shared-pair reduction on the serial candidate-admission path.
+# Exact algebraic cleanup on the serial candidate-admission path.
 # For each axis, XOR all factors with the same other two factors, then repeat
-# the axis sweep to a fixed point. This matches offline reduce_pairs(0,1,2),
-# as a term set; it is not a minimum-rank oracle or a six-order search.
+# the axis sweep to a fixed point, followed by shared-factor matrix reduction.
+# The raw pair routine matches offline reduce_pairs(0,1,2), as a term set;
+# matrix reduction matches compress_terms. Neither is a minimum-rank oracle.
 # Scratch and parity slabs belong to the coordinator, never to live workers.
 
-use ../rect
+use matrix_cleanup
 
 -> ffpc_hash_capacity(capacity) (i64) i64
   slots = 16 ## i64
@@ -13,15 +14,16 @@ use ../rect
   slots
 
 -> ffpc_scratch_words(capacity) (i64) i64
-  3 * capacity + ffpc_hash_capacity(capacity)
+  ffmc_scratch_words(capacity)
 
 # Raw slab: three capacity-sized factor arrays, followed by open-addressed
 # group indices. Validate before mutation; callers supply explicit capacities
-# because typed-array size is not a safe native/raw boundary.
+# because typed-array size is not a safe native/raw boundary. The full gate
+# requests a larger slab so it can reuse the same storage for matrix cleanup.
 -> ffpc_reduce(work, words, capacity, rank, a0, a1, a2) (i64[] i64 i64 i64 i64 i64 i64) i64
   if capacity < 1 || rank < 0 || rank > capacity
     return 0 - 1
-  if words < ffpc_scratch_words(capacity)
+  if words < 3 * capacity + ffpc_hash_capacity(capacity)
     return 0 - 1
   if a0 < 0 || a0 > 2 || a1 < 0 || a1 > 2 || a2 < 0 || a2 > 2 || a0 == a1 || a0 == a2 || a1 == a2
     return 0 - 1
@@ -135,6 +137,8 @@ use ../rect
     work[2 * capacity + i] = w
     i += 1
   cleaned = ffpc_reduce(work, words, capacity, rank, 0, 1, 2) ## i64
+  if cleaned > 0
+    cleaned = ffmc_reduce(work, words, capacity, cleaned)
   if cleaned < 1 || ffw_support_tensor_error_scratch(work, 0, capacity, 2 * capacity, 0 - 1, cleaned, n, m, p, parity, parity_words) != 0
     st[30] = st[30] + 1
     return 0 - 1

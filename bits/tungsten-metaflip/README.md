@@ -83,9 +83,12 @@ Override them with `-J N`, `--no-gpu`, `--no-tui`, or `--secs N`.
 Specialized GPU workers are built and cached on first use. Press `q` or
 Ctrl-C in the TUI to stop.
 
-Candidate admission now includes deterministic exact shared-pair cleanup:
+Candidate admission now includes deterministic exact algebraic cleanup:
 terms sharing two factors are merged by XORing the third, sweeping axes
-`0,1,2` until no further pair reduction is possible. The coordinator applies
+`0,1,2` until no further pair reduction is possible. A native GF(2) matrix
+pass then factors each group sharing just one factor, replacing it when its
+matrix rank is smaller and repeating to a fixed point. This catches reductions
+that pair cleanup cannot see. The coordinator applies both passes
 this before objective/archive comparisons to CPU endpoints, GPU results
 (including late results), and rectangular/composed candidates. A raw-rank
 nonleader can therefore become a leader after cleanup. The wide-host intake
@@ -97,16 +100,28 @@ updating the saved best. Current worker terms, hash chains, RNG and move count
 are preserved; the density delta is rebased. It does not run in the per-flip
 loop or silently rewrite the declared-rank contract of scheme-file loaders.
 The default is one deterministic axis order, not an optimal-rank oracle or
-all six orders. Large multiword-mask projections remain offline.
+all six orders. There is no Ruby/Python runtime dependency.
 
 Focused native tests cover square/rectangular admission, cascading reductions,
 rejection without payload mutation, source-mask validation and continued
 walking. `spec/pair_cleanup_parity_test.py NATIVE_TEST_BINARY` compares 480
-native cases against the offline reducer over all six orders. The bounded
-`spec/pair_cleanup_bench.w` measured cleanup alone at 0.4–1.4 microseconds on
-the local 2x5x6/r47, 5x5/r93 and 7x7/r247 controls; complete admission added
-roughly 0.4–2.5 microseconds over exact verification alone (64 repetitions).
-These are local cold-path timings, not a live-fleet throughput claim.
+native cases against the offline pair reducer over all six orders.
+`spec/matrix_cleanup_parity_test.py NATIVE_TEST_BINARY` compares 700 matrix
+compression/neutral-basis cases with an independent row-equation oracle,
+including 63-bit masks. The bounded `spec/pair_cleanup_bench.w` measured
+matrix cleanup alone at 0.6–3.1 microseconds and combined admission at
+5.2–131.6 microseconds on the local 2x5x6/r47, 5x5/r93 and 7x7/r247 controls
+(64 repetitions). These are local cold-path timings, not a fleet throughput claim.
+
+Automatic refinement is being integrated in stages. Native one-axis neutral
+bases and coordinate projection primitives are tested, but are **not yet
+scheduled by the fleet**. `spec/refinement_replay_test.w N M P TENSOR AXIS
+COORDINATE` checks a supplied tensor, projects one coordinate, cleans it, and
+checks the complete output tensor. It reproduces the audited 4x8x4/r94 ->
+4x7x4/r85 parent exactly. The bounded background queue, retained-rank-tie
+refinement, cross-shape archive/seed feedback and incremental composition
+remain unfinished; ordinary `bin/metaflip` does not yet run that full pipeline.
+Large multiword-mask compositions still use offline tools.
 
 Alternatively, let Bit preserve the executable, runtime worker sources, and
 assets as one relocatable build tree:
@@ -846,14 +861,14 @@ and completed the earlier 23x23x27=8,304 recipe. The cumulative raw-price
 audit cohort is 392 shapes (58 expanded, 334 recipe-only); after removing
 81 shapes dominated by current padding bounds, 311 remain (54 expanded,
 257 recipe-only). There is no new reference crossing or confirmed world
-record. These projection searches remain offline; only their pair-cleanup
-primitive is now also used by live candidate admission. New replay evidence
+record. These projection searches remain offline; their pair and matrix
+cleanup primitives are now also used by live candidate admission. New replay evidence
 is compressed and deduplicated outside the checkout.
 
-For stronger offline cleanup, `tools/compress_checked_products.rb SOURCE OUTPUT`
+For offline replay, `tools/compress_checked_products.rb SOURCE OUTPUT`
 accepts audited composition, flat projection, and observer-walk reports. It
-exactly factors the matrix formed by terms sharing one factor; this is stronger
-than the live two-shared-factor XOR cleanup. The independent
+exactly factors the matrix formed by terms sharing one factor, matching the
+native matrix-cleanup primitive. The independent
 `verify_product_compression.py OUTPUT --workers 1` replays the factorization
 and complete tensors, including source-rank checks. Walk intake includes every
 rank winner, context winner, and endpoint. It checks all snapshot references

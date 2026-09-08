@@ -3832,7 +3832,7 @@ while running == 1
       if cleaned_rank > 0
         exact = 1
         if cleaned_rank < rank
-          sources[i] = sources[i] + "/pair-cleanup"
+          sources[i] = sources[i] + "/exact-cleanup"
         rank = cleaned_rank
         bits = ffw_best_bits(state)
       if exact == 1

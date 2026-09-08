@@ -22,6 +22,7 @@ use ../lib/metaflip/fleet/pair_cleanup
   checksum = 0 ## i64
   ordinary_ns = 0 ## i64
   cleanup_ns = 0 ## i64
+  matrix_ns = 0 ## i64
   combined_ns = 0 ## i64
   trial = 0 ## i64
   while trial < 68
@@ -44,7 +45,7 @@ use ../lib/metaflip/fleet/pair_cleanup
         cleaned = ffpc_gate_best(st, n, m, p, rectangular, work, words, parity, parity_words) ## i64
         elapsed = ccall_nobox("__w_clock_ns_raw") - started ## i64
         if cleaned != loaded
-          << "FAIL benchmark requires a pair-free control"
+          << "FAIL benchmark requires an exact-cleanup fixed-point control"
           return 1
         if trial >= 4
           combined_ns += elapsed
@@ -60,9 +61,14 @@ use ../lib/metaflip/fleet/pair_cleanup
     elapsed = ccall_nobox("__w_clock_ns_raw") - started ## i64
     if trial >= 4
       cleanup_ns += elapsed
+    started = ccall_nobox("__w_clock_ns_raw") ## i64
+    checksum += ffmc_reduce(work, words, capacity, loaded)
+    elapsed = ccall_nobox("__w_clock_ns_raw") - started ## i64
+    if trial >= 4
+      matrix_ns += elapsed
     trial += 1
-  << "PAIR_CLEANUP_BENCH shape=" + n.to_s() + "x" + m.to_s() + "x" + p.to_s() + " rank=" + loaded.to_s() + " repeats=64 gate_ns=" + (ordinary_ns / 64).to_s() + " cleanup_only_ns=" + (cleanup_ns / 64).to_s() + " combined_gate_ns=" + (combined_ns / 64).to_s() + " scratch_bytes=" + (words * 8).to_s()
-  if checksum != loaded * 68
+  << "EXACT_CLEANUP_BENCH shape=" + n.to_s() + "x" + m.to_s() + "x" + p.to_s() + " rank=" + loaded.to_s() + " repeats=64 gate_ns=" + (ordinary_ns / 64).to_s() + " pair_only_ns=" + (cleanup_ns / 64).to_s() + " matrix_only_ns=" + (matrix_ns / 64).to_s() + " combined_gate_ns=" + (combined_ns / 64).to_s() + " scratch_bytes=" + (words * 8).to_s()
+  if checksum != loaded * 136
     return 1
   0
 

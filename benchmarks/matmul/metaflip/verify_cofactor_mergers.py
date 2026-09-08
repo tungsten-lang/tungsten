@@ -53,7 +53,9 @@ def matrix_factors(pairs, *, max_bits=256, reverse_columns=False):
 
     Ruby incrementally encodes each column during elimination. Here basis
     selection uses rank tests, then a separate low-pivot row system solves
-    all right factors simultaneously. Every output matrix is reconstructed.
+    all right factors simultaneously. Sparse transposition skips identically
+    zero coordinate rows; their ascending order is otherwise unchanged.
+    Every output matrix is reconstructed.
     """
     assert type(max_bits) is int and 1 <= max_bits <= 4096
     assert type(reverse_columns) is bool
@@ -66,10 +68,19 @@ def matrix_factors(pairs, *, max_bits=256, reverse_columns=False):
     for j in sorted(columns, reverse=reverse_columns):
         if rank(basis + [columns[j]]) > len(basis):
             basis.append(columns[j])
+    coefficient_rows, right_rows = defaultdict(int), defaultdict(int)
+    for i, value in enumerate(basis):
+        for coordinate in positions(value):
+            coefficient_rows[coordinate] |= 1 << i
+    for j, value in columns.items():
+        for coordinate in positions(value):
+            right_rows[coordinate] |= 1 << j
     equations = {}
-    for coordinate in range(max((v.bit_length() for v in basis), default=0)):
-        mask = sum(((v >> coordinate) & 1) << i for i, v in enumerate(basis))
-        rhs = sum(((v >> coordinate) & 1) << j for j, v in columns.items())
+    # Include RHS-only rows too: a missing coefficient must not hide an
+    # inconsistent system. Each source column index is unique, so OR is exact.
+    for coordinate in sorted(coefficient_rows.keys() | right_rows.keys()):
+        mask = coefficient_rows[coordinate]
+        rhs = right_rows[coordinate]
         while mask:
             pivot = (mask & -mask).bit_length() - 1
             if pivot not in equations:

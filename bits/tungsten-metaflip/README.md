@@ -876,6 +876,17 @@ recipe has been expanded at its new price. The cumulative counts remain
 (54 expanded, 260 recipe-only). No new reference crossing or world record.
 See the [matrix-scored projection audit](tools/PROJECTION-SHORTLIST-2026-09-08.md#matrix-scored-coordinate-projections).
 
+A 348-view neighbor follow-up plus bounded basis refinement independently
+verified **19x23x26=6,623**, **19x23x27=6,721**, and **20x22x27=6,701**.
+The cumulative raw-price cohort is now 399 shapes (60 expanded, 339
+recipe-only); 316 survive padding (56 expanded, 260 recipe-only). No new
+reference crossing or main-square improvement. The independent matrix
+checker now constructs only nonzero coordinate rows, retaining the separate
+rank tests, row solve and full reconstruction. A matched two-configuration
+replay was about 4.8x faster; the complete 39-tensor audit reproduced its
+previous result exactly. This speeds offline verification, not live flips.
+See the [neighbor and replay audit](tools/PROJECTION-SHORTLIST-2026-09-08.md#neighbor-projections-and-sparse-row-replay).
+
 `tools/composition_closure.rb` checks candidates against a verified recursive
 block/Kronecker library and propagates useful candidates to other shapes.
 It exports both comparison and candidate tensors for independent replay.

@@ -393,3 +393,66 @@ reproduced the originals exactly; the input-delta hash round trip passed.
 The sealed prototype predates the CLI mode flag, so its replay uses an
 explicit compatibility callback for the same independent transforms and
 full tensor check; its report is not rewritten to masquerade as a CLI run.
+
+## Neighbor projections and sparse-row replay
+
+The new matrix-scored mode searched all 348 one-axis coordinate deletions
+from five verified parents: two distinct 20x23x26/r6,740 tensors and three
+20x23x27/r6,844 tensors. It took 50.81 seconds wall time, with 30.95 seconds
+Python CPU (excluding the serial Ruby worker). Six retained projections
+and their source tensors passed independent replay: eight distinct tensors,
+53,667 terms and 11,418,078 XOR contributions.
+
+Only the three padding-corrected improvements entered the next basis round.
+All 36 two-pass configurations completed in 74.31 seconds. Independent replay
+checked 216 steps, 198 distinct transitions, and all 39 complete tensors
+(260,708 terms; 54,091,064 XOR contributions).
+
+| Shape | Previous padded bound | Matrix projection | Verified basis result |
+| --- | ---: | ---: | ---: |
+| 19x23x26 | 6,740 | 6,633 | **6,623** |
+| 19x23x27 | 6,758 | 6,741 | **6,721** |
+| 20x22x27 | 6,734 | 6,727 | **6,701** |
+
+Full repricing admitted 41 canonical identities (31,388 -> 31,429), with
+2,738,053 expressions, 835,454 mixed expressions and no cache reuse. CPU
+time was 70.58 seconds. Five raw prices improved; the other two remain
+padding-dominated: the expanded 20x23x25/r6,602 tensor loses to 6,528, and
+the 23x23x25/r7,884 recipe loses to 7,752. That larger recipe is not expanded.
+
+The deduplicated cumulative raw-price cohort is **399 shapes (60 expanded,
+339 recipe-only)**, an increase of three distinct shapes, not five. After
+padding, **316 remain (56 expanded, 260 recipe-only)**; 83 are dominated.
+All nine cohort reference crossings remain expanded, and the broader
+shortlist stays at 49. Saved references for the three new rows are 6,388,
+6,639 and 6,608, respectively. No new crossing, main-square improvement or
+confirmed world record was found.
+
+Profiling the independent matrix checker found the dense RHS row scan
+dominated its sampled cost. The checker now transposes only set bits into
+coordinate rows, including RHS-only rows so an inconsistent system cannot
+be silently skipped. It preserves the original ascending row order, column
+basis rank tests, separate low-pivot equation solve and output reconstruction.
+An exhaustive-span oracle and deliberate broken-rank-oracle test supplement
+the existing wide, random, corruption and full-tensor tests; 23 focused tests
+pass.
+
+Three alternating-order repetitions of 108 real matrix cases produced
+identical factor hashes: median CPU 0.1752 seconds before, 0.0168 after.
+A complete source/axis fell from 0.3122 to 0.0359 seconds. Two real recorded
+basis configurations, measured twice in alternating order, fell from
+2.850/2.866 to 0.593/0.595 seconds CPU (about **4.8x**). The entire 36-trial,
+39-tensor replay then matched its saved audit exactly in 18.81 seconds wall
+time / 18.58 seconds CPU including children. The earlier audit's roughly
+20-minute timestamp span is not used as a controlled speedup ratio. These
+are offline verification measurements, not live-fleet throughput claims.
+
+The retained neighbor constructions, pricing delta, old/new checker sources,
+profile and matched measurements are archived outside the checkout in
+`~/.local/share/tungsten-metaflip/evidence/2026-09-08-matrix-neighbor-projections.tar.gz`
+(40,174,178 bytes; SHA-256
+`761390035f943d1defd8c402ba582abb571ddb3efdd3993cc12577da8d7770f2`).
+It stores 152 logical files as 107 unique objects. Both copied projection
+and basis audits reproduced the saved results exactly, and the pricing-input
+delta passed its full hash round trip. Imports remain local-only; no old
+evidence bundle was deleted and no search outputs were added to the checkout.

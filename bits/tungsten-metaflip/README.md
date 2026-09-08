@@ -719,6 +719,11 @@ grouping across observers. Matched eight-observer runs cut native time by
 18–33% on the tested 4×4×5/5×5×5 parents with identical outputs; this is not
 a default-fleet speedup. Its follow-up search verified five local product
 improvements but found no new reference crossings.
+[Primary-plus-observer scoring](tools/BUD-UNIFIED-OBJECTIVES-2026-09-08.md)
+now shares the remaining primary grouping pass too. Matched runs retain exact
+outputs and cut observer-enabled native time by 4–8% on the tested larger
+parents. A bounded projection/continuation follow-up independently verified
+5x32x32 at rank 3430 (previous local 3460; pinned reference 3200), not a record.
 The optional [fixed elementary-group objective](tools/BUD-FIXED-GROUP-WALKS-2026-09-07.md)
 keeps a verified leaf cover while walking the remaining terms, including
 parents above rank 64; its first matched study found no further rank gain.

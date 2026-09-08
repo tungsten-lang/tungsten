@@ -329,7 +329,9 @@ class BudParentWalkTest < Minitest::Test
   def test_read_only_observers_match_separate_runs_without_extra_flips
     Dir.mktmpdir('bud-sidecar-observers') do |root|
       limit = 20
-      primary = Array.new(3) { (0..limit).to_a }
+      # Nonlinear primary prices exercise the extra first table in the shared
+      # grouping pass; a rank-only primary could conceal a table-offset bug.
+      primary = 3.times.map { |axis| (0..limit).map { |k| 23*k - (axis==1 ? 5*(k/3) : 0) } }
       secondary = (0...8).map do |observer|
         3.times.map { |axis| (0..limit).map { |k| (11+observer)*k - (axis==observer%3 ? 3*(k/2) : 0) } }
       end
@@ -354,6 +356,7 @@ class BudParentWalkTest < Minitest::Test
       end
       assert_equal '4096',together[2]['attempted']
       2.times do |trial|
+        assert_equal alone[0][1][trial],together[1][trial]
         assert_equal File.binread(File.join(alone[0][0],"trial-#{trial}.txt")),File.binread(File.join(together[0],"trial-#{trial}.txt"))
         alone.each do |result|
           assert_equal File.binread(File.join(result[0],"end-#{trial}.txt")),File.binread(File.join(together[0],"end-#{trial}.txt"))
@@ -382,12 +385,21 @@ class BudParentWalkTest < Minitest::Test
         tables = 8.times.map do |observer|
           3.times.map { |axis| (0..limit).map { |k| (observer+5)*k-(axis==observer%3 ? k/2 : 0) } }
         end
-        lines = [limit.to_s]+Array.new(3) { (0..limit).to_a.join(' ') }+['observers 8']
+        primary = 3.times.map { |axis| (0..limit).map { |k| 29*k - (axis==2 ? 7*(k/2) : 0) } }
+        lines = [limit.to_s]+primary.map { |row|row.join(' ') }+['observers 8']
         lines += tables.flatten(1).map { |row|row.join(' ') }
         prices = File.join(directory,'prices')
         File.write(prices,lines.join("\n")+"\n")
         output,status = Open3.capture2e(@binary,source,shape.join('x'),prices,'1','2','32','walk','817',directory,'2','4','1')
         assert status.success?,output
+        main = output.lines.grep(/^BUD_TRIAL /).map { |line|line.split.drop(1).to_h { |word|word.split('=',2) } }.fetch(0)
+        winner = B.load_scheme(File.join(directory,'trial-0.txt'),shape)
+        expected = 3.times.map do |axis|
+          winner.terms.group_by { |term|term[axis] }.values.sum { |group|primary[axis].fetch(group.size) }
+        end.min
+        assert_equal expected,main.fetch('score').to_i
+        assert_equal winner.rank,main.fetch('rank').to_i
+        assert winner.audit[:exact]
         rows = output.lines.grep(/^BUD_OBSERVER /).map { |line|line.split.drop(1).to_h { |word|word.split('=',2) } }
         assert_equal 8,rows.size
         rows.each do |row|

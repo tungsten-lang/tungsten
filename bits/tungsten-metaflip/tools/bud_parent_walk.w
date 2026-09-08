@@ -71,7 +71,17 @@ while axis < 3
     prices[axis * stride + i] = price
     i += 1
   axis += 1
-observer_prices = i64[3 * stride * observer_count]
+# Observer mode uses the same whole-tensor cover as the primary objective.
+# Put the primary table first so all objectives share one grouping pass.
+scored_tables = 0 ## i64
+if observer_count > 0
+  scored_tables = observer_count + 1
+observer_prices = i64[3 * stride * scored_tables]
+if observer_count > 0
+  i = 0 ## i64
+  while i < 3 * stride
+    observer_prices[i] = prices[i]
+    i += 1
 observer = 0 ## i64
 while observer < observer_count
   axis = 0
@@ -87,7 +97,7 @@ while observer < observer_count
       if price < 0 || price > 1000000000 || price_label != fields[i] || (i == 0 && price != 0) || (i > 0 && price == 0)
         << "invalid observer bucket price"
         exit(2)
-      observer_prices[(3 * observer + axis) * stride + i] = price
+      observer_prices[(3 * (observer + 1) + axis) * stride + i] = price
       i += 1
     axis += 1
   observer += 1
@@ -114,7 +124,7 @@ winner = i64[words]
 observed = i64[words]
 observer_winners = i64[words * observer_count]
 observer_scores = i64[observer_count]
-observer_current_scores = i64[observer_count]
+observer_current_scores = i64[scored_tables]
 observer_ranks = i64[observer_count]
 observer_bits = i64[observer_count]
 observer_at = i64[observer_count]
@@ -192,11 +202,11 @@ while trial < trials
   best_at = 0 ## i64
   accepted = 0 ## i64
   if observer_count > 0
-    z = ffbp_observer_costs(original,observer_prices,stride,observer_count,keys,counts,observer_current_scores)
+    z = ffbp_observer_costs(original,observer_prices,stride,scored_tables,keys,counts,observer_current_scores)
   observer = 0
   while observer < observer_count
     z = ffbp_store_observer(original,observer_winners,observer * words,words)
-    observer_scores[observer] = observer_current_scores[observer]
+    observer_scores[observer] = observer_current_scores[observer + 1]
     observer_ranks[observer] = rank
     observer_bits[observer] = ffr_current_bits(original)
     observer_at[observer] = 0
@@ -226,7 +236,11 @@ while trial < trials
         << "holdout join capacity failed"
         exit(1)
       holdout_cancellations += cancelled
-      score = ffbh_cost(observed,work,cancelled,held_cost,prices,stride,keys,counts,grid_prices)
+      if observer_count > 0
+        z = ffbp_observer_costs(observed,observer_prices,stride,scored_tables,keys,counts,observer_current_scores)
+        score = observer_current_scores[0]
+      else
+        score = ffbh_cost(observed,work,cancelled,held_cost,prices,stride,keys,counts,grid_prices)
       current_rank = ffr_current_rank(observed) ## i64
       bits = ffr_current_bits(observed) ## i64
       if current_rank > sampled_peak_rank
@@ -244,11 +258,9 @@ while trial < trials
         best_rank = current_rank
         best_bits = bits
         best_at = chunk * steps + done
-      if observer_count > 0
-        z = ffbp_observer_costs(observed,observer_prices,stride,observer_count,keys,counts,observer_current_scores)
       observer = 0
       while observer < observer_count
-        observer_score = observer_current_scores[observer] ## i64
+        observer_score = observer_current_scores[observer + 1] ## i64
         if ffbp_better(observer_score,current_rank,bits,observer_scores[observer],observer_ranks[observer],observer_bits[observer]) == 1
           z = ffbp_copy(observed,observer_scratch,words)
           if ffbp_verify(observer_scratch,n,m,p) != 1

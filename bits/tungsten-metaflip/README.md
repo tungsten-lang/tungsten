@@ -740,6 +740,13 @@ bound. The offline planner now reuses an unchanged closed table only after
 checking explicit coverage of every appended ordinary pricing expression;
 all tensor identities remain available, and new expressions still run the
 complete planner. `--no-reuse-priced-expressions` selects the matched control.
+The [joint-projection follow-up](tools/JOINT-PROJECTIONS-2026-09-08.md)
+adds simultaneous two-coordinate restrictions without an intermediate rank
+gate and optional exact pair cleanup before final retention. Its independent
+checker also verifies sources of negative scans. The bounded projection arm
+found no lower primitive rank; an ordinary-walk control yielded three further
+verified local composition bounds, with no new public-reference crossing.
+These tools remain offline and do not enable an additional fleet lane.
 
 `tools/composition_closure.rb` checks candidates against a verified recursive
 block/Kronecker library and propagates useful candidates to other shapes.

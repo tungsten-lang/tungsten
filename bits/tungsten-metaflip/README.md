@@ -862,6 +862,20 @@ recomposition verifies **23x23x27=8,228**. See the
 for padding-corrected counts and replay evidence. These stronger operations
 remain offline; no live-fleet throughput or world-record claim is made.
 
+The coordinate projection scanner also offers `--pair-order 0,1,2
+--matrix-cleanup`: score **every** view after matrix factorization, rather
+than factor only the pair-ranked winner. It is opt-in, requires Ruby, and
+keeps one serial Ruby worker per configured projection worker. With
+`--workers 1` only one candidate is processed at a time. Python independently
+replays the selected projection, pair reduction, matrix factorization and
+complete tensor. The matched 81-view test selected rank 6,755 rather than
+6,761; bounded basis refinement then verified **20x23x26=6,740**. Repricing
+also lowered the 23x23x26 and 23x26x26 recipes to 8,074 and 9,018. Neither
+recipe has been expanded at its new price. The cumulative counts remain
+396 raw-price shapes (57 expanded, 339 recipe-only), or 314 after padding
+(54 expanded, 260 recipe-only). No new reference crossing or world record.
+See the [matrix-scored projection audit](tools/PROJECTION-SHORTLIST-2026-09-08.md#matrix-scored-coordinate-projections).
+
 `tools/composition_closure.rb` checks candidates against a verified recursive
 block/Kronecker library and propagates useful candidates to other shapes.
 It exports both comparison and candidate tensors for independent replay.

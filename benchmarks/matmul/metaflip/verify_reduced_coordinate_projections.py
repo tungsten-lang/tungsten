@@ -17,14 +17,28 @@ def project_reduced_grid(row,terms):
         reduction_trace=row['reduction_trace']),projected)
 
 
+def project_matrix_grid(row,terms):
+    from verify_cofactor_mergers import compress_shared
+    paired=project_reduced_grid(row,terms)
+    assert type(row['pair_rank']) is int and len(paired)==row['pair_rank']
+    width=max(row['shape'][a]*row['shape'][b] for a,b in ((0,1),(1,2),(0,2)))
+    assert type(row['matrix_max_bits']) is int and row['matrix_max_bits']==width
+    result,history=compress_shared(paired,max_bits=width)
+    assert history==row['compression']
+    return sorted(result)
+
+
 def verify(root,workers=1):
     root=Path(root).resolve()
     report=json.loads((root/'report.json').read_bytes())
-    assert report['projection_kind']=='coordinate_then_shared_pair_reduction'
+    kind=report['projection_kind']
+    assert kind in ('coordinate_then_shared_pair_reduction','coordinate_then_pair_then_matrix')
+    matrix=kind=='coordinate_then_pair_then_matrix'
+    assert report['limits'].get('matrix_cleanup',False) is matrix
     order=report['limits']['pair_order']
     assert len(order)==3 and all(type(i) is int for i in order) and sorted(order)==[0,1,2]
     assert all(row['reduction_order']==order for row in report['outputs'])
-    result=verify_base(root,workers,reconstruct=project_reduced_grid)
+    result=verify_base(root,workers,reconstruct=project_matrix_grid if matrix else project_reduced_grid)
     result['projection_kind']=report['projection_kind']
     return result
 

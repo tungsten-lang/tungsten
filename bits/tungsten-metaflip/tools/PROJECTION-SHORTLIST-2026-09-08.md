@@ -325,3 +325,71 @@ extraction and reproduced their saved audits exactly. The complete input-delta
 hash round trip also passed. Existing historical source corpora remain
 externally pinned; this is retained-construction replay, not complete search
 or worldwide-novelty certification.
+
+## Matrix-scored coordinate projections
+
+`projection_composition_scan.py --pair-order 0,1,2 --matrix-cleanup` now
+applies shared-factor matrix compression to every projected view **before**
+minimum selection. Neither raw nor pair-cleaned rank prunes those views.
+The flag is off by default and requires an explicit pair order and Ruby.
+Each configured projection worker owns one synchronous Ruby worker, reuses
+the existing matrix producer, and reaps it on normal or exceptional exits.
+`--workers 1` remains the bounded single-candidate setting. The report pins
+the Ruby sources and records the pair rank, matrix width and compression
+history. Its source CPU time excludes Ruby; wall time includes it.
+
+On three distinct verified 20x23x27/r6,844 parents, each with 27 possible
+coordinate deletions, the matched 81-view control was:
+
+| Selection policy | Best pair rank | Matrix-cleaned selected rank |
+| --- | ---: | ---: |
+| Choose pair winner, then factor it | 6,785 | 6,761 |
+| Factor every view, then choose | 6,787 for the winning view | **6,755** |
+
+The packaged CLI reproduced the prototype's per-parent minima and exact
+winning tensor hash, in 12.31 seconds wall time (7.40 seconds Python CPU).
+Independent bit-grid projection, sort/group pair cleanup, separate Python
+matrix factorization, and full tensor expansion verified the selected result.
+The audit checks retained constructions, not search exhaustion.
+
+Twelve two-pass basis configurations reduced 6,755 to **6,740**, improving
+the previous 20x23x26 tensor by two. A follow-up on two distinct tied minima
+ran all 24 configurations in 8.26 seconds and tied 6,740 throughout; it is a
+bounded negative, not basis-orbit optimality. The saved reference remains
+6,707, so this is not a record claim.
+
+Full composition pricing admitted 13 new identities (31,375 -> 31,388),
+evaluated 2,737,945 expressions including 835,454 mixed ones without cached
+price reuse, and used 58.39 seconds CPU. Five raw prices decreased by two.
+Three beat the previous padding-corrected table:
+
+| Shape | Previous bound | New bound | Evidence |
+| --- | ---: | ---: | --- |
+| 20x23x26 | 6,742 | **6,740** | Expanded tensor |
+| 23x23x26 | 8,076 | **8,074** | Recipe only |
+| 23x26x26 | 9,020 | **9,018** | Recipe only |
+
+21x23x26/r7,338 and 22x23x26/r7,662 remain dominated by padding bounds
+7,279 and 7,602. No new distinct cohort shape was added: the cumulative
+raw-price cohort remains **396 (57 expanded, 339 recipe-only)**; after
+padding **314 remain (54 expanded, 260 recipe-only)**. All nine cohort
+reference crossings remain expanded; the broader shortlist is unchanged
+at 49. No main-square gain, new crossing, or confirmed world record.
+
+The 22 focused tests cover independent wide-matrix parity, all-view
+selection, malformed metadata and tensor rejection, default compatibility,
+and worker timeout/failure reaping. Stronger matrix and basis work remains
+offline, on one low-priority CPU with no GPU or live fleet. Evidence stays
+outside the checkout; imported derivatives remain local-only.
+
+Replay bundle:
+`~/.local/share/tungsten-metaflip/evidence/2026-09-08-matrix-scored-projections.tar.gz`
+(21,277,749 bytes; SHA-256
+`08cecddfd3a6f70267f02e244b2578aa697c24bdc1eb1438b9a0ca4dc2910e58`).
+Its 124 logical files use 94 deduplicated objects, retaining controls,
+prototype, integrated run, both basis rounds, source/checker snapshots,
+cohort summary and a lossless pricing-input delta. All six copied audits
+reproduced the originals exactly; the input-delta hash round trip passed.
+The sealed prototype predates the CLI mode flag, so its replay uses an
+explicit compatibility callback for the same independent transforms and
+full tensor check; its report is not rewritten to masquerade as a CLI run.

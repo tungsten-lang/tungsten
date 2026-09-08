@@ -16,12 +16,69 @@ import json
 import math
 import multiprocessing
 from pathlib import Path
+import select
+import subprocess
 import time
 
 from extend_composition_parents import identity
 from verify_representation_portfolio import parse_terms
 
 EDGES=((0,1),(1,2),(0,2))
+
+
+class MatrixCleanup:
+    """One serial Ruby worker; independent Python replay uses row equations.
+
+    Keep the existing exact matrix implementation rather than a second Python
+    producer. Requests are synchronous, so the coordinator waits while Ruby
+    works. The worker is always reaped, including exceptional exits.
+    """
+    @staticmethod
+    def sources():
+        directory=Path(__file__).resolve().parents[3]/'bits/tungsten-metaflip/tools'
+        return [directory/(name+'.rb') for name in ('cancellation_patterns','bud_products','verify_tensor')]
+
+    def __enter__(self):
+        worker="""
+require 'json'
+require ARGV.fetch(0)
+STDIN.each_line do |line|
+  row=JSON.parse(line)
+  terms,history=MetaflipSharedFactorCompression.compress_terms(row.fetch('terms'),max_bits:row.fetch('width'))
+  puts JSON.generate(terms:terms,compression:history)
+  $stdout.flush
+end
+"""
+        self.process=subprocess.Popen(['ruby','-e',worker,str(self.sources()[0])],
+            stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True)
+        return self
+
+    def reduce(self,terms,width):
+        self.process.stdin.write(json.dumps(dict(terms=terms,width=width))+'\n')
+        self.process.stdin.flush()
+        if not select.select([self.process.stdout],[],[],60)[0]:
+            raise TimeoutError('matrix cleanup worker exceeded 60 seconds')
+        line=self.process.stdout.readline()
+        if not line:raise RuntimeError('matrix cleanup worker exited before replying')
+        result=json.loads(line);child=list(map(tuple,result['terms']))
+        assert len(child)<=len(terms)
+        return child,result['compression']
+
+    def __exit__(self,kind,value,traceback):
+        process=self.process
+        try:
+            process.stdin.close()
+        except BrokenPipeError:
+            pass
+        try:
+            code=process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.terminate()
+            try:code=process.wait(timeout=5)
+            except subprocess.TimeoutExpired:process.kill();code=process.wait()
+        finally:
+            process.stdout.close()
+        if kind is None and code:raise RuntimeError(f'matrix cleanup worker exited with status {code}')
 
 
 def validate_keep(shape,keep):
@@ -109,7 +166,16 @@ def families(shape,targets,max_views,max_deleted_axes=3,targets_only=False):
             yield 'target-'+'x'.join(map(str,target)),[tuple(combinations(range(n),t)) for n,t in zip(shape,target)],count
 
 
-def scan_parent(job,max_deleted_axes=3,pair_order=None,targets_only=False):
+def scan_parent(job,max_deleted_axes=3,pair_order=None,targets_only=False,matrix_cleanup=False):
+    if type(matrix_cleanup) is not bool or (matrix_cleanup and pair_order is None):
+        raise ValueError('matrix_cleanup must be boolean and requires pair_order')
+    if matrix_cleanup:
+        with MatrixCleanup() as matrix:
+            return scan_parent_impl(job,max_deleted_axes,pair_order,targets_only,matrix)
+    return scan_parent_impl(job,max_deleted_axes,pair_order,targets_only)
+
+
+def scan_parent_impl(job,max_deleted_axes=3,pair_order=None,targets_only=False,matrix=None):
     if pair_order is not None:
         # The cleanup CLI imports our serializer; avoid a module-level cycle.
         from pair_reduction_scan import has_merge, reduce_pairs
@@ -121,7 +187,7 @@ def scan_parent(job,max_deleted_axes=3,pair_order=None,targets_only=False):
     assert identity(shape,terms)==entry['identity'],'source identity changed'
     cache=ProjectionCache(shape,terms);full=tuple(tuple(range(n)) for n in shape)
     seen=set();best={};skipped=[];family_counts={};start=time.process_time()
-    reduced_views=0;raw_minima={}
+    reduced_views=0;raw_minima={};matrix_views=0;pair_minima={}
     for name,axes,count in families(shape,targets,max_views,max_deleted_axes,targets_only):
         if axes is None:
             skipped.append(dict(family=name,views=count,reason='explicit per-family view allowance'));continue
@@ -139,6 +205,12 @@ def scan_parent(job,max_deleted_axes=3,pair_order=None,targets_only=False):
                 if has_merge(child):child,trace=reduce_pairs(child,pair_order)
                 rank=len(child);reduced_views+=bool(trace)
                 detail=dict(raw_rank=raw_rank,reduction_order=tuple(pair_order),reduction_trace=trace)
+                if matrix is not None:
+                    pair_minima[target]=min(pair_minima.get(target,rank),rank)
+                    width=max(target[a]*target[b] for a,b in EDGES)
+                    child,history=matrix.reduce(child,width)
+                    detail.update(pair_rank=rank,matrix_max_bits=width,compression=history)
+                    rank=len(child);matrix_views+=bool(history)
             prior=best.get(target)
             if prior is None or (rank,keep)<(prior['rank'],prior['keep']):
                 best[target]=dict(shape=target,rank=rank,keep=keep,**detail)
@@ -150,6 +222,11 @@ def scan_parent(job,max_deleted_axes=3,pair_order=None,targets_only=False):
             assert len(result)==row['raw_rank']
             result,trace=reduce_pairs(result,pair_order)
             assert trace==row['reduction_trace']
+        if matrix is not None:
+            assert len(result)==row['pair_rank']
+            result,history=matrix.reduce(result,row['matrix_max_bits'])
+            assert history==row['compression']
+            result=sorted(result)
         assert len(result)==row['rank']
         rows.append(dict(row,terms=result))
     result=dict(parent=entry['id'],source=entry,views=len(seen),families=family_counts,
@@ -157,6 +234,9 @@ def scan_parent(job,max_deleted_axes=3,pair_order=None,targets_only=False):
     if pair_order is not None:
         result.update(pair_reduced_views=reduced_views,raw_rank_pruning=False,
             raw_minima=[dict(shape=s,rank=r) for s,r in sorted(raw_minima.items())])
+    if matrix is not None:
+        result.update(matrix_reduced_views=matrix_views,pair_rank_pruning=False,
+            pair_minima=[dict(shape=s,rank=r) for s,r in sorted(pair_minima.items())])
     return result
 
 
@@ -174,12 +254,15 @@ def main():
     p.add_argument('--max-deleted-axes',type=int,choices=(1,2,3),default=3,
         help='base neighborhood: delete at most one coordinate on this many axes; named --target families are unchanged')
     p.add_argument('--pair-order',help='exact shared-pair cleanup before selecting minima, e.g. 0,1,2; default disabled')
+    p.add_argument('--matrix-cleanup',action='store_true',
+        help='also exactly factor shared-factor matrices before selecting minima; requires --pair-order and Ruby')
     p.add_argument('--target',action='append',default=[])
     p.add_argument('--targets-only',action='store_true',
         help='search only named target subset families, without the default one-per-axis neighborhood')
     p.add_argument('--workers',type=int,choices=range(1,5),default=2)
     a=p.parse_args();assert not a.output.exists()
     if a.targets_only and not a.target:p.error('--targets-only requires at least one --target')
+    if a.matrix_cleanup and a.pair_order is None:p.error('--matrix-cleanup requires --pair-order')
     pair_order=None
     if a.pair_order is not None:
         from pair_reduction_scan import reduce_pairs
@@ -202,6 +285,9 @@ def main():
     if pair_order is not None:
         path=Path(__file__).with_name('pair_reduction_scan.py')
         pins[str(path.resolve())]=hashlib.sha256(path.read_bytes()).hexdigest()
+    if a.matrix_cleanup:
+        for path in MatrixCleanup.sources():
+            pins[str(path.resolve())]=hashlib.sha256(path.read_bytes()).hexdigest()
     report=dict(complete=False,field='GF(2)',record_claim=False,canonical_archive_changed=False,
         source_sha256=pins,limits=dict(max_source_rank=a.max_source_rank,
         max_source_dimension=a.max_source_dimension,max_family_views=a.max_family_views,
@@ -211,6 +297,10 @@ def main():
     if pair_order is not None:
         report['projection_kind']='coordinate_then_shared_pair_reduction'
         report['limits']['pair_order']=pair_order
+    if a.matrix_cleanup:
+        report['projection_kind']='coordinate_then_pair_then_matrix'
+        report['limits']['matrix_cleanup']=True
+        report['timing_scope']='source_cpu_seconds excludes the serial Ruby worker; elapsed_seconds includes it'
     best={};start=time.monotonic()
     def save():
         report['elapsed_seconds']=time.monotonic()-start
@@ -220,7 +310,7 @@ def main():
     with ProcessPoolExecutor(max_workers=a.workers,mp_context=multiprocessing.get_context('fork')) as pool:
         jobs=((entry,targets,a.max_family_views) for entry in selected)
         for result in pool.map(partial(scan_parent,max_deleted_axes=a.max_deleted_axes,pair_order=pair_order,
-                                      targets_only=a.targets_only),jobs):
+                                      targets_only=a.targets_only,matrix_cleanup=a.matrix_cleanup),jobs):
             entry=result.pop('source');raw=Path(entry['path']).read_bytes()
             assert hashlib.sha256(raw).hexdigest()==entry['sha256']
             parent_name=f"parents/{entry['id']}.txt";(a.output/parent_name).write_bytes(raw)

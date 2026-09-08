@@ -91,3 +91,40 @@ only on the repair loop; the estimate's quality only affects cost. That
 separation — an oracle that is cheap and usually right, a fix-up that is
 always right — is worth copying whenever a numeric shortcut is hard to
 certify.
+
+## Follow-up lessons from the next day's frontier (2026-09-08)
+
+Competitors built on the shifted-entry routine within hours; their notes and
+diffs add four things worth keeping.
+
+- **Measure the hard limit before the proof.** A native speedup that cannot
+  pass the unchanged artifact generator is not a result. One team lost a
+  6.7 KB candidate to the ~5.5 KB elaboration cap after its kernel was done;
+  the working version removed a superseded specialization to make room. Any
+  pipeline with a fixed-cost gate (artifact size, proof budget, kernel
+  register file) should be probed with a throwaway artifact first.
+- **Size-versus-speed by per-site measurement, then a knapsack.** Every
+  constant site was encoded short (complement plus `NOT`) as the common base,
+  each site was restored to the wide encoding alone and scored, and a 0/1
+  knapsack over (measured gas benefit, byte cost) chose the layout under the
+  size budget. The predicted sum matched the measured total. The same recipe
+  applies to any code-size budget with per-site costs: unrolling and inlining
+  decisions, GPU kernel constant hoisting, `bits` optimization flags.
+- **Padding is not free: pad with a cheaper wide encoding, not a no-op.** The
+  frontier keeps instruction boundaries by widening a `PUSH` immediate
+  (`PUSH7` of a small constant) instead of inserting `JUMPDEST`s; the wide
+  push costs the same 3 gas as the short one, the no-op costs one more every
+  time it executes. Same idea as choosing alignment padding that lives in
+  never-executed slots.
+- **Saturate an estimate that can wrap.** The quotient estimate of the
+  shifted entry is a word; if the top-limb comparison shows the true quotient
+  would exceed the word, clamp the estimate to all-ones instead of letting it
+  wrap. The repair rounds already accept any estimate, so this changes cost,
+  not correctness: a wrapped estimate would need on the order of `B` add
+  rounds, a saturated one at most a few subtract rounds. Section 4's recipe
+  should include this clamp whenever the dividend is not known to keep the
+  quotient below the radix.
+
+Commutativity was also mined for stack shuffles (an `ADDMOD` operand swap
+elided, two gas per estimate); that is a stack-machine concern with no
+counterpart in Tungsten's register lowering.

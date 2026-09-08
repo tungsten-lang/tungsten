@@ -78,8 +78,9 @@ use bud_parent_shapes
     axis += 1
   best
 
-# Group each axis once for all read-only observers. The price tables and
-# walked state stay immutable; only scratch counts and output scores change.
+# Reuse the walker's exact factor hash chains for all read-only observers.
+# keys is capacity-sized scratch, used here as marks on live slot IDs. Hash
+# collisions still compare complete factor words; no state or table is changed.
 -> ffbp_observer_costs(st, prices, stride, observers, keys, counts, scores) (i64[] i64[] i64 i64 i64[] i64[] i64[]) i64
   observer = 0 ## i64
   while observer < observers
@@ -91,19 +92,28 @@ use bud_parent_shapes
   axis = 0 ## i64
   while axis < 3
     offset = st[44 + axis] ## i64
+    head = st[53 + axis] ## i64
+    nexto = st[56 + 2 * axis] ## i64
     groups = 0 ## i64
     i = 0 ## i64
     while i < rank
+      keys[st[st[50] + i]] = 0
+      i += 1
+    i = 0
+    while i < rank
       slot = st[st[50] + i] ## i64
-      value = st[offset + slot] ## i64
-      j = 0 ## i64
-      while j < groups && keys[j] != value
-        j += 1
-      if j == groups
-        keys[j] = value
-        counts[j] = 0
+      if keys[slot] == 0
+        value = st[offset + slot] ## i64
+        count = 0 ## i64
+        link = st[head + ffw_hash(st,value)] ## i64
+        while link != 0
+          member = link - 1 ## i64
+          if st[offset + member] == value
+            keys[member] = 1
+            count += 1
+          link = st[nexto + member]
+        counts[groups] = count
         groups += 1
-      counts[j] += 1
       i += 1
     observer = 0
     while observer < observers

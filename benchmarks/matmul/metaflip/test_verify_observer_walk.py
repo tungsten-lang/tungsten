@@ -21,7 +21,7 @@ class ObserverWalkTest(unittest.TestCase):
         (root/'prices.txt').write_bytes(price)
         totals = dict(strategy='walk', trials='1', chunks='2', steps='7', observe_every='3',
                       attempted='14', observations='6', held_terms='0', held_cost='0',
-                      holdout_cancellations='0', initial='8')
+                      holdout_cancellations='0', initial='8', density_slack='4')
         native = dict(trial='0', rank='8', score='8', bits='24')
         observer = dict(observer=0, native=dict(native, observer='0', trial='0'), winner=entry)
         trial = dict(trial=0, native=native, winner=entry, endpoint=entry, observers=[observer],
@@ -33,7 +33,7 @@ class ObserverWalkTest(unittest.TestCase):
                    contexts=[dict(scale=[1, 1, 1], target=[2, 2, 2], reference=9, prices=table)],
                    summary=[summary])
         report = dict(complete=True, field='GF(2)', record_claim=False, trials=1, chunks=2, steps=7,
-                      observe_every=3, rows=[row], attempts=14)
+                      observe_every=3, debt=2, density_slack=4, rows=[row], attempts=14)
         plan = dict(complete=True, field='GF(2)', record_claim=False,
                     model_shapes=[[1, 1, k] for k in range(1, 11)],
                     baseline_recipes=[dict(kind='naive', rank=k) for k in range(1, 11)])
@@ -115,6 +115,35 @@ class ObserverWalkTest(unittest.TestCase):
             (root/'report.json').write_text(json.dumps(report))
             with self.assertRaises(ValueError):
                 verify(root, root/'plan.json')
+
+    def test_run_flags_and_native_density_echo_must_agree(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            original, _ = self.fixture(root)
+            original['rng_seed'] = 19
+            # Old locations are legal after moving a bundle; numeric settings
+            # and shape are still checked against the complete run report.
+            original['rows'][0]['command'] = ['old/binary', 'old/input', '2x2x2', 'old/prices',
+                '1', '2', '7', 'walk', '19', 'old/output', '2', '4', '3']
+            for mutation in (None, 'echo', 'density', 'debt', 'bool', 'seed', 'shape', 'mode', 'steps', 'extra'):
+                with self.subTest(mutation=mutation):
+                    report = copy.deepcopy(original)
+                    row = report['rows'][0]
+                    if mutation == 'echo': row['totals']['density_slack'] = '16'
+                    elif mutation == 'density': report['density_slack'] = 16
+                    elif mutation == 'debt': report['debt'] = 3
+                    elif mutation == 'bool': report['debt'] = True
+                    elif mutation == 'seed': row['command'][8] = '20'
+                    elif mutation == 'shape': row['command'][2] = '2x2x3'
+                    elif mutation == 'mode': row['command'][7] = 'anneal'
+                    elif mutation == 'steps': row['command'][6] = '8'
+                    elif mutation == 'extra': row['command'].append('holdout.txt')
+                    (root/'report.json').write_text(json.dumps(report))
+                    if mutation is None:
+                        self.assertTrue(verify(root, root/'plan.json')['complete'])
+                    else:
+                        with self.assertRaises(AssertionError):
+                            verify(root, root/'plan.json')
 
 
 if __name__ == '__main__':

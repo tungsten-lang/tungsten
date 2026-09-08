@@ -33,6 +33,9 @@ def verify(root, price_plan):
                and type(rank) is int and rank > 0 for s, rank in prices.items())
     trials, chunks, steps, interval = (report[k] for k in ('trials', 'chunks', 'steps', 'observe_every'))
     assert all(type(x) is int and x > 0 for x in (trials, chunks, steps, interval)) and interval <= steps
+    debt, density = report['debt'], report['density_slack']
+    assert type(debt) is int and 0 <= debt <= 8
+    assert type(density) is int and 0 <= density <= 1024
     cases, pins, rows, cells = {}, {}, [], set()
 
     def read(relative):
@@ -66,7 +69,7 @@ def verify(root, price_plan):
         assert digest == row['prices']['sha256']
         lines = blob.decode('ascii').splitlines()
         limit, n = int(lines[0]), len(row['contexts'])
-        assert len(source) <= limit and 0 <= n <= 8
+        assert len(source)+debt <= limit and 0 <= n <= 8
         if n:
             assert len(lines) == 5+3*n and lines[4] == f'observers {n}'
         else:
@@ -93,9 +96,20 @@ def verify(root, price_plan):
                                                   for j in range(1, min(size, len(costs))+1))
         totals = row['totals']
         assert totals['strategy'] == 'walk' and int(totals['held_terms']) == 0
+        assert int(totals['density_slack']) == density
         assert int(totals['held_cost']) == int(totals['holdout_cancellations']) == 0
         assert int(totals['initial']) == len(source)
         assert all(int(totals[k]) == report[k] for k in ('trials', 'chunks', 'steps', 'observe_every'))
+        if 'command' in row:
+            # Historical paths can refer to the pre-retention directory. Pin
+            # tensors separately, but do not silently accept different flags.
+            command = row['command']
+            assert len(command) == 13 and all(type(v) is str for v in command)
+            assert command[2] == 'x'.join(map(str, shape))
+            seed = report['rng_seed']
+            assert type(seed) is int and 0 <= seed <= 2**31-1
+            assert command[4:9] == [str(trials), str(chunks), str(steps), 'walk', str(seed)]
+            assert command[10:] == [str(debt), str(density), str(interval)]
         expected = trials*chunks*steps
         assert int(totals['attempted']) == expected
         assert int(totals['observations']) == trials*chunks*((steps+interval-1)//interval)

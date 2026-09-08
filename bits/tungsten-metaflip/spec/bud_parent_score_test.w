@@ -74,4 +74,63 @@ i = 0
 while i < grid_words
   z = bud_check("read-only grid scorer",grid_state[i] == grid_copy[i])
   i += 1
-<< "PASS exact read-only bud/grid scoring and parent acceptance controls"
+# A synthetic rank-one tensor isolates equal-word hash collisions. It is not
+# presented as a matrix-multiplication witness. All chains are built by toggle.
+chain_cap = 32 ## i64
+chain_words = ffw_state_size(chain_cap) ## i64
+chain = i64[chain_words]
+chain_copy = i64[chain_words]
+chain_keys = i64[chain_cap]
+chain_counts = i64[chain_cap]
+z = ffw_prepare(chain,4,chain_cap,9917,4,4,1000,500)
+collider = 2 ## i64
+while collider < 65536 && ffw_hash(chain,collider) != ffw_hash(chain,1)
+  collider += 1
+z = bud_check("distinct same-bucket factor words",collider < 65536 && collider != 1)
+chain_rank = 0 ## i64
+chain_rank = ffw_toggle(chain,1,1,1,chain_rank)
+chain_rank = ffw_toggle(chain,collider,2,2,chain_rank)
+chain_rank = ffw_toggle(chain,1,4,4,chain_rank)
+chain_rank = ffw_toggle(chain,collider,8,8,chain_rank)
+chain_rank = ffw_toggle(chain,1,16,16,chain_rank)
+chain[6] = chain_rank
+all_prices = i64[9 * 3 * 33]
+one_prices = i64[3 * 33]
+all_scores = i64[9]
+observer = 0 ## i64
+while observer < 9
+  axis = 0
+  while axis < 3
+    i = 1
+    while i < 33
+      all_prices[(3 * observer + axis) * 33 + i] = (observer + 1) * i * i + axis * (10 - observer)
+      i += 1
+    axis += 1
+  observer += 1
+round = 0 ## i64
+while round < 3
+  z = ffbp_copy(chain,chain_copy,chain_words)
+  z = bud_check("batched chain score succeeds",ffbp_observer_costs(chain,all_prices,33,9,chain_keys,chain_counts,all_scores) == 1)
+  observer = 0
+  while observer < 9
+    i = 0
+    while i < 3 * 33
+      one_prices[i] = all_prices[observer * 3 * 33 + i]
+      i += 1
+    z = bud_check("collision-aware score equals independent linear grouping",all_scores[observer] == ffbp_cost(chain,one_prices,33,chain_keys,chain_counts))
+    observer += 1
+  i = 0
+  while i < chain_words
+    z = bud_check("hash-chain scoring leaves entire state unchanged",chain[i] == chain_copy[i])
+    i += 1
+  # Remove then restore a term: scratch marks must follow live physical slots,
+  # not a packed rank index, including reused slots and changed chain ordering.
+  chain_rank = ffw_toggle(chain,1,4,4,chain_rank)
+  chain[6] = chain_rank
+  round += 1
+z = bud_check("invalid observer stride rejects",ffbp_observer_costs(chain,all_prices,chain_rank,9,chain_keys,chain_counts,all_scores) == 0)
+observer = 0
+while observer < 9
+  z = bud_check("invalid observer score sentinel",all_scores[observer] == 9223372036854775807)
+  observer += 1
+<< "PASS exact read-only bud/grid/hash-chain scoring and parent acceptance controls"

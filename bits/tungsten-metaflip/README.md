@@ -850,6 +850,18 @@ record. These projection searches remain offline; only their pair-cleanup
 primitive is now also used by live candidate admission. New replay evidence
 is compressed and deduplicated outside the checkout.
 
+For stronger offline cleanup, `tools/compress_checked_products.rb SOURCE OUTPUT`
+now accepts both audited composition reports and flat projection reports. It
+exactly factors the matrix formed by terms sharing one factor; this is stronger
+than the live two-shared-factor XOR cleanup. The independent
+`verify_product_compression.py OUTPUT --workers 1` replays the factorization
+and complete tensors, including source-rank checks. A bounded basis-refactoring
+follow-up then reached **20x23x26=6,742** and **20x23x27=6,844**, and their
+recomposition verifies **23x23x27=8,228**. See the
+[shared-factor follow-up](tools/PROJECTION-SHORTLIST-2026-09-08.md#shared-factor-matrices-and-neutral-bases)
+for padding-corrected counts and replay evidence. These stronger operations
+remain offline; no live-fleet throughput or world-record claim is made.
+
 `tools/composition_closure.rb` checks candidates against a verified recursive
 block/Kronecker library and propagates useful candidates to other shapes.
 It exports both comparison and candidate tensors for independent replay.

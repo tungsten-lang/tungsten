@@ -243,3 +243,85 @@ The same GF(2) cleanup identity is now implemented in the packaged live
 coordinator, with native/offline parity tests. This does not move the large
 projection searches into the fleet or expand its signed-i64 shape envelope.
 No new long-running search, GPU run, publication or submission was started.
+
+## Shared-factor matrices and neutral bases
+
+The audited compression runner now accepts flat projection outputs as well as
+the existing wrapped composition outputs. A present but invalid `result` does
+not fall back to the flat form. Both producer and checker reject a declared
+source rank that disagrees with its hash-pinned complete tensor. Thirteen
+focused Python tests pass under Python 3.14, covering both formats, mutation
+rejection, wide exact matrix rank, and neutral-basis replay. The system Python
+3.9 cannot run the older `int.bit_count`-using cofactor tests; it is not the
+validation interpreter for this run.
+
+The stronger identity fixes one tensor factor and treats the other two as a
+binary matrix. Exact matrix-rank factorization can reduce a group even when
+no two terms share both remaining factors. Neutral column-basis changes can
+then expose new reductions on another axis. Ruby produces the factorizations;
+Python independently chooses a basis and solves a separate row-equation
+system, then expands every complete retained tensor.
+
+| Shape | Previous tensor | Matrix cleanup | Basis round 1 | Final verified tensor |
+| --- | ---: | ---: | ---: | ---: |
+| 20x23x26 | 6,834 | 6,776 | 6,746 | **6,742** |
+| 20x23x27 | 6,920 | 6,879 | 6,847 | **6,844** |
+| 22x23x27 | 7,878 | 7,837 | 7,805 | 7,805 |
+| 23x23x27 | 8,304 | 8,263 | 8,231 | **8,228** |
+
+Round 1 ran all six axis orders with forward/reverse column ordering, two
+passes each: 48 trials on the four compressed inputs. Round 2 used only the
+two 20x23 parents, keeping both distinct tied minima for 20x23x26: 36 trials.
+Both bounded sweeps completed, for 84 trials and 504 replayed axis steps. The
+last 23x23x27 result is the explicit block sum 3x23x27/r1,384 plus the new
+20x23x27/r6,844 parent, not an inferred subtraction from a reported rank.
+Its three complete tensors and block recipe passed independent replay.
+No unrestricted basis-orbit exhaustion or optimality is asserted.
+
+Full pricing admitted 79 new canonical tensor identities (31,296 -> 31,375
+parents) and evaluated 2,737,912 expressions, including 835,454 mixed ones,
+without cached-price reuse. It used 70.44 seconds CPU. The eight changes below
+beat the previous padding-corrected table; recipe-only rows have not yet been
+expanded at their newly lower price.
+
+| Shape | Previous padded bound | New bound | Evidence |
+| --- | ---: | ---: | --- |
+| 20x23x26 | 6,834 | 6,742 | Expanded |
+| 20x23x27 | 6,920 | 6,844 | Expanded |
+| 21x23x27 | 7,485 | 7,465 | Recipe only |
+| 23x23x26 | 8,079 | 8,076 | Recipe only |
+| 23x23x27 | 8,304 | 8,228 | Expanded |
+| 23x26x26 | 9,041 | 9,020 | Recipe only |
+| 23x26x27 | 9,225 | 9,188 | Recipe only |
+| 23x27x29 | 10,287 | 10,211 | Recipe only |
+
+Four other raw-price changes remain padding-dominated: 21x23x26/r7,340,
+22x23x26/r7,664, 22x23x27/r7,802, and 23x27x31/r10,990. In particular, the
+verified 22x23x27/r7,805 tensor and its cheaper r7,802 composition recipe are
+both worse than the existing r7,735 padding bound.
+
+The cumulative raw-price cohort is **396 shapes: 57 expanded at the current
+price and 339 recipe-only**. This adds four distinct shapes, not twelve.
+After padding, **314 remain: 54 expanded and 260 recipe-only**; 82 are
+dominated. The expanded count can fall when a lower, not-yet-expanded recipe
+supersedes an older witness. All nine cohort reference crossings remain
+expanded, and the broader reference shortlist remains 49. No new crossing,
+main-square improvement, or confirmed world record was found. The saved
+20x23x26 reference is 6,707, still below the new 6,742 tensor.
+
+These runs used one low-priority CPU worker, no GPU and no live fleet. The
+stronger matrix/basis operations remain offline. Imported derivatives remain
+local-only; no older bundle was removed or moved and no publication or push
+was performed.
+
+Replay evidence is saved outside the checkout at
+`~/.local/share/tungsten-metaflip/evidence/2026-09-08-shared-factor-basis.tar.gz`
+(80,187,483 bytes; SHA-256
+`f2668423fa81f5d9a33ec1ade2624324ce6af82ca203af601537b19e3cc4713c`).
+It retains 233 logical files as 143 unique objects, including all retained
+basis endpoints, source pins, drivers, independent checkers, the cohort rollup
+and a lossless pricing-input delta. All seven copied checkers passed after
+extraction and reproduced their saved audits exactly. The complete input-delta
+hash round trip also passed. Existing historical source corpora remain
+externally pinned; this is retained-construction replay, not complete search
+or worldwide-novelty certification.

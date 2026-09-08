@@ -1,5 +1,6 @@
 #!/usr/bin/env ruby
-# Exact offline postcomposition compression. Never admits a rank-only claim.
+# Exact offline compression of audited compositions or projections.
+# Never admits a rank-only claim.
 require 'json'
 require 'digest'
 require 'fileutils'
@@ -17,7 +18,14 @@ module MetaflipCheckedProductCompression
     raise 'unfinished or unverified source' unless report['complete'] && audit['complete'] &&
       report['field']=='GF(2)' && audit['field']=='GF(2)' && !report['record_claim'] &&
       !audit['record_claim'] && audit['report_sha256']==Digest::SHA256.hexdigest(raw)
-    entries=report.fetch('outputs').map{|row|row.fetch('result')}
+    # Composition reports wrap snapshots in `result`; projection reports
+    # store them directly. A present-but-empty result is never a fallback.
+    entries=report.fetch('outputs').map do |row|
+      raise 'invalid source output' unless row.is_a?(Hash)
+      entry=row.key?('result') ? row.fetch('result') : row
+      raise 'missing source snapshot' unless entry.is_a?(Hash)
+      entry
+    end
     raise 'duplicate outputs' unless entries.map{|e|[e['shape'],e['sha256']]}.uniq.size==entries.size
     FileUtils.mkdir_p(root)
     File.binwrite(File.join(root,'source-report.json'),raw)
@@ -36,6 +44,9 @@ module MetaflipCheckedProductCompression
       raise 'source changed' unless Digest::SHA256.hexdigest(body)==e['sha256'] &&
         audit.fetch('source_sha256').fetch(e['path'])==e['sha256']
       input=B::Scheme.new(e['shape'],body)
+      if e.key?('rank')
+        raise 'source rank mismatch' unless e['rank'].is_a?(Integer) && e['rank']==input.rank
+      end
       max_bits=B::EDGES.map{|a,b|input.shape[a]*input.shape[b]}.max
       terms,history=MetaflipSharedFactorCompression.compress_terms(input.terms,max_bits:max_bits)
       raise 'rank increased' if terms.size>input.rank

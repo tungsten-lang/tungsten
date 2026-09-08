@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Independently replay wide postcomposition compression and full tensors."""
+"""Independently replay audited composition/projection compression and tensors."""
 import argparse
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict
@@ -16,6 +16,16 @@ import verify_block_composition_records as tensor
 
 def digest(body):
     return hashlib.sha256(body).hexdigest()
+
+
+def source_entries(report):
+    entries = []
+    for row in report['outputs']:
+        assert isinstance(row, dict)
+        entry = row['result'] if 'result' in row else row
+        assert isinstance(entry, dict)
+        entries.append(entry)
+    return entries
 
 
 def check_row(job):
@@ -57,8 +67,7 @@ def verify(root, workers=2):
     assert prior['complete'] and audit['complete'] and audit['report_sha256'] == digest(prior_raw)
     assert prior['field'] == audit['field'] == 'GF(2)'
     assert not prior['record_claim'] and not audit['record_claim']
-    expected = {(tuple(e['result']['shape']), e['result']['sha256']): e['result']
-                for e in prior['outputs']}
+    expected = {(tuple(e['shape']), e['sha256']): e for e in source_entries(prior)}
     assert len(expected) == len(prior['outputs']) == report['inputs'] == len(report['rows'])
     seen = set()
     for row in report['rows']:
@@ -71,6 +80,8 @@ def verify(root, workers=2):
         assert copied['shape'] == source['shape']
         assert digest(original) == copied['sha256'] == source['sha256']
         assert row['rank_before'] == int(original.splitlines()[0])
+        if 'rank' in source:
+            assert type(source['rank']) is int and source['rank'] == row['rank_before']
     pins, tensors = {}, {}
     with ProcessPoolExecutor(max_workers=workers, mp_context=multiprocessing.get_context('fork')) as pool:
         for i, entries in enumerate(pool.map(check_row, ((root, r) for r in report['rows'])), 1):

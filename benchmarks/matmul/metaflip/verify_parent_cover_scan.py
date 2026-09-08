@@ -132,6 +132,33 @@ def verify(root, inputs_path, plan_path):
     assert all(type(report[k]) is int and report[k] > 0 for k in ('requested_parents', 'requested_cases'))
     assert all(type(report[k]) is bool for k in ('all_cases_attempted', 'all_exact_within_model'))
     assert len(parents) <= report['requested_parents'] and len(seen) <= report['requested_cases']
+    families = report.get('selection', {}).get('families')
+    if families is not None:
+        # New reusable-producer format: independently bind "all" and the
+        # declared heuristic sample to the entire frozen input corpus.
+        assert isinstance(families, list) and families
+        family_shapes, selected = set(), set()
+        for family in families:
+            shape = tuple(family['shape'])
+            assert len(shape) == 3 and all(type(d) is int and 1 <= d <= maximum for d in shape)
+            assert shape not in family_shapes and type(family['sampling_only']) is bool
+            family_shapes.add(shape)
+            members = [(i,p) for i,p in enumerate(inputs['parents']) if tuple(p['shape']) == shape]
+            assert members and type(family['family_parents']) is int and family['family_parents'] == len(members)
+            if family['sampling_only']:
+                latest = {json.dumps(p['signature'], separators=(',', ':')): i for i,p in members}
+                picked = set(latest.values()) | {i for i,p in members if p.get('mixed_partitions', [])}
+            else:
+                picked = {i for i,p in members}
+            assert type(family['selected_parents']) is int and family['selected_parents'] == len(picked)
+            selected.update(picked)
+        expected_parents = sorted(selected)
+        assert report['requested_parents'] == len(expected_parents)
+        expected_cases = sum((maximum//inputs['parents'][i]['shape'][0]) *
+                             (maximum//inputs['parents'][i]['shape'][1]) *
+                             (maximum//inputs['parents'][i]['shape'][2]) for i in expected_parents)
+        assert report['requested_cases'] == expected_cases
+        assert list(parents) == expected_parents[:len(parents)]
     assert report['all_cases_attempted'] is (len(seen) == report['requested_cases'])
     producer_exact = report['all_cases_attempted'] and all(r.get('packing', {}).get('exact_within_model') for r in report['rows'])
     assert report['all_exact_within_model'] == producer_exact
@@ -150,6 +177,7 @@ def verify(root, inputs_path, plan_path):
     assert all(hashlib.sha256(contained(root, p).read_bytes()).hexdigest() == h for p, h in pins.items())
     return dict(complete=True, field='GF(2)', record_claim=False,
                 products_materialized=False, search_optimality_certified=False, price_plan_leaves_reverified=False,
+                family_selection_verified=families is not None,
                 report_sha256=hashlib.sha256(blobs[0]).hexdigest(), inputs_sha256=hashlib.sha256(blobs[1]).hexdigest(),
                 price_plan_sha256=hashlib.sha256(blobs[2]).hexdigest(), source_sha256=pins,
                 parents=len(parents), cases=len(seen), covers=cover_hashes, tensors=len(checked),

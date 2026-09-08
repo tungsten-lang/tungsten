@@ -761,6 +761,13 @@ retains 56 more independently verified local bounds and matched dense-component
 packing measurements. `tools/bud_component_dp.w` is an optional offline exact
 subset oracle; it is not enabled in the live flip fleet or shared packer.
 
+`tools/scan_parent_covers.rb` scans frozen retained families with explicit
+`--all` or heuristic `--sample` selection, bounded time and independently
+checked coverage. The [5x5x6/5x5x7 follow-up](tools/BUD-PARENT-COVER-SCAN-2026-09-08.md)
+finds 24 lower local composition prices and independently expands six products,
+including propagation to 26x31x31. It does not claim new world records or alter
+the live fleet.
+
 The [projected-parent follow-up](../../benchmarks/matmul/metaflip/projected_parent_composition_audit_2026_09_07/README.md)
 retains 453 exact near-best small representations rather than only rank leaders.
 Their recomposition gives 268 independently checked local bounds, ten below the

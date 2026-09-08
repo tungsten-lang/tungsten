@@ -7,7 +7,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from extend_composition_parents import extend, identity, observer_walk_entries
+from extend_composition_parents import extend, identity, observer_walk_entries, json_digest
 from test_verify_composition_recipes import naive
 from test_verify_parent_only_walk import ParentOnlyWalkTest
 from verify_composition_recipes import verify as verify_products
@@ -15,6 +15,8 @@ from verify_parent_only_walk import verify as verify_walk
 from verify_coordinate_projections import verify as verify_projection
 import test_verify_observer_walk as observer_fixture
 from verify_observer_walk import verify as verify_observers
+from verify_parent_cover_scan import verify as verify_covers
+import test_verify_parent_cover_scan as cover_fixture
 
 
 def put(path, data):
@@ -34,6 +36,75 @@ def alternate():
 
 
 class ExtendCompositionParentsTest(unittest.TestCase):
+    def cover_scan(self, root):
+        root.mkdir()
+        fixture = cover_fixture.ParentCoverScanTest()
+        report, inputs, plan = fixture.fixture(root)
+        (root/'original.txt').write_bytes((root/'seed.txt').read_bytes())
+        inputs['parents'][0]['path'] = str(root/'original.txt')
+        fixture.write(root, report, inputs, plan)
+        extend(root/'inputs.json', root/'plan.json', [], [], root/'closed', maximum=2)
+        inputs = json.loads((root/'closed/inputs.json').read_bytes())
+        plan = json.loads((root/'closed/report.json').read_bytes())
+        fixture.write(root, report, inputs, plan)
+        put(root/'independent-audit.json', verify_covers(root, root/'inputs.json', root/'plan.json'))
+        return root/'inputs.json', root/'plan.json'
+
+    def test_parent_covers_keep_identity_deduplicate_and_invalidate_append_only_reuse(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            scan = root/'scan'
+            prior = self.cover_scan(scan)
+            control = extend(*prior, [], [], root/'control', maximum=2)
+            self.assertTrue(control['pricing_reuse']['used'])
+            result = extend(*prior, [], [], root/'out', maximum=2, parent_cover_roots=[scan, scan])
+            self.assertEqual(result['parents'], 1)
+            self.assertEqual(result['added_cover_partitions'], 1)
+            self.assertFalse(result['pricing_reuse']['used'])
+            parent = json.loads((root/'out/inputs.json').read_bytes())['parents'][0]
+            original = json.loads(prior[0].read_bytes())['parents'][0]
+            for key in ('path', 'identity', 'sha256', 'rank'):
+                self.assertEqual(parent[key], original[key])
+            self.assertEqual(len(parent['mixed_partitions']), 1)
+            admissions = json.loads((root/'out/admissions.json').read_bytes())
+            self.assertEqual([r['duplicate'] for r in admissions], [False, True])
+            self.assertEqual([r['cover'] for r in admissions], [0, 0])
+            self.assertTrue(all(r['kind'] == 'parent_cover_audit' for r in admissions))
+
+    def test_parent_cover_proofs_and_literal_factor_maps_fail_closed(self):
+        for mutation in ('stale', 'plan', 'proof', 'order', 'factor', 'partition'):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as name:
+                root = Path(name)
+                scan = root/'scan'
+                prior = self.cover_scan(scan)
+                report = json.loads((scan/'report.json').read_bytes())
+                audit = json.loads((scan/'independent-audit.json').read_bytes())
+                if mutation == 'plan':
+                    audit['price_plan_sha256'] = '0'*64
+                elif mutation == 'proof':
+                    audit['covers'][0]['sha256'] = '0'*64
+                elif mutation == 'order':
+                    lines = (scan/'seed.txt').read_bytes().splitlines()
+                    lines[1], lines[2] = lines[2], lines[1]
+                    raw = b'\n'.join(lines)+b'\n'
+                    (scan/'seed.txt').write_bytes(raw)
+                    digest = hashlib.sha256(raw).hexdigest()
+                    report['parents'][0]['source']['sha256'] = digest
+                    audit['source_sha256']['seed.txt'] = digest
+                elif mutation in ('factor', 'partition'):
+                    groups = report['parents'][0]['covers'][0]
+                    if mutation == 'factor':
+                        groups[0] = dict(axis=0, indices=[0, 1, 2, 3])
+                    else:
+                        groups[-1]['indices'] = [0]
+                    audit['covers'][0]['sha256'] = json_digest(groups)
+                put(scan/'report.json', report)
+                if mutation != 'stale':
+                    audit['report_sha256'] = hashlib.sha256((scan/'report.json').read_bytes()).hexdigest()
+                put(scan/'independent-audit.json', audit)
+                with self.assertRaises(ValueError):
+                    extend(*prior, [], [], root/'out', maximum=2, parent_cover_roots=[scan])
+
     def prior(self, root):
         inputs, plan = root / 'inputs.json', root / 'plan.json'
         put(inputs, dict(complete=True, field='GF(2)', record_claim=False, parents=[]))

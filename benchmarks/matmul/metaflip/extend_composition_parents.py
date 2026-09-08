@@ -18,6 +18,7 @@ import time
 
 from composition_impact import CompositionImpact
 from composition_expression_cover import ordinary_expression_cover
+from verify_bud_renewal import factor_maps
 from verify_representation_portfolio import contained, parse_terms
 
 
@@ -61,7 +62,7 @@ def observer_walk_entries(report):
 
 
 def extend(prior_inputs, prior_plan, product_roots, walk_roots, output, maximum=32,
-           projection_roots=(), reuse_priced_expressions=True, observer_walk_roots=()):
+           projection_roots=(), reuse_priced_expressions=True, observer_walk_roots=(), parent_cover_roots=()):
     if type(maximum) is not int or not 2 <= maximum <= 32:
         raise ValueError('invalid maximum')
     output = Path(output).resolve()
@@ -213,8 +214,64 @@ def extend(prior_inputs, prior_plan, product_roots, walk_roots, output, maximum=
         source(root, 'projection_audit')
     for root in observer_walk_roots:
         source(root, 'observer_walk_audit')
+    added_cover_partitions = 0
+    for root in parent_cover_roots:
+        root = Path(root).resolve()
+        raw = blob(root/'report.json')
+        scan, audit = json.loads(raw), read(root/'independent-audit.json')
+        checked(scan); checked(audit)
+        if (audit['report_sha256'] != hashlib.sha256(raw).hexdigest() or
+            audit['inputs_sha256'] != pins[str(Path(prior_inputs).resolve())] or
+            audit['price_plan_sha256'] != pins[str(Path(prior_plan).resolve())]):
+            raise ValueError('stale parent cover audit or different frozen corpus/plan')
+        proofs = {(r['parent'], r['cover']): r['sha256'] for r in audit['covers']}
+        if (len(proofs) != len(audit['covers']) or audit['parents'] != len(scan['parents']) or
+            len(proofs) != sum(len(p['covers']) for p in scan['parents'])):
+            raise ValueError('parent cover audit accounting mismatch')
+        visited = set()
+        for row in scan['parents']:
+            i = row['index']
+            if type(i) is not int or not 0 <= i < old_count or i in visited:
+                raise ValueError('invalid parent cover index')
+            visited.add(i)
+            parent = parents[i]
+            if row['identity'] != parent['identity'] or row['shape'] != parent['shape']:
+                raise ValueError('parent cover identity mismatch')
+            entry = row['source']; relative = entry['path']
+            saved = blob(contained(root, relative))
+            if (hashlib.sha256(saved).hexdigest() != entry['sha256'] or
+                audit['source_sha256'][relative] != entry['sha256']):
+                raise ValueError('parent cover source changed')
+            original = blob(parent['path'])
+            if hashlib.sha256(original).hexdigest() != parent['sha256']:
+                raise ValueError('prior parent changed')
+            terms = parse_terms(original, parent['rank'])
+            if parse_terms(saved, entry['rank']) != terms:
+                raise ValueError('parent cover term order changed')
+            existing = {json_digest(g): j for j, g in enumerate(parent['mixed_partitions'])}
+            for cover_id, groups in enumerate(row['covers']):
+                digest = json_digest(groups)
+                if proofs.get((i, cover_id)) != digest:
+                    raise ValueError('parent cover proof mismatch')
+                if sorted(j for g in groups for j in g['indices']) != list(range(parent['rank'])):
+                    raise ValueError('parent cover is not a complete term partition')
+                for group in groups:
+                    if set(group) not in ({'axis', 'indices'}, {'elementary_shape', 'indices'}):
+                        raise ValueError('unsupported parent cover group')
+                    try:
+                        factor_maps(terms, group)
+                    except (AssertionError, KeyError, TypeError) as error:
+                        raise ValueError('invalid parent cover factor map') from error
+                duplicate = digest in existing
+                if not duplicate:
+                    existing[digest] = len(parent['mixed_partitions'])
+                    parent['mixed_partitions'].append(copy.deepcopy(groups))
+                    added_cover_partitions += 1
+                admissions.append(dict(kind='parent_cover_audit', source_root=str(root),
+                    parent=i, cover=cover_id, partition=existing[digest], duplicate=duplicate,
+                    cover_sha256=digest, identity=parent['identity']))
     for name in ('extend_composition_parents.py', 'composition_impact.py',
-                 'composition_expression_cover.py', 'verify_representation_portfolio.py'):
+                 'composition_expression_cover.py', 'verify_representation_portfolio.py', 'verify_bud_renewal.py'):
         blob(Path(__file__).resolve().parent / name)
     engine_sha256 = pins[str(Path(__file__).resolve().with_name('composition_impact.py'))]
     inputs = dict(complete=True, field='GF(2)', record_claim=False, parents=parents,
@@ -223,7 +280,9 @@ def extend(prior_inputs, prior_plan, product_roots, walk_roots, output, maximum=
     (output / 'admissions.json').write_text(json.dumps(admissions, indent=2) + '\n')
     start, cpu = time.monotonic(), time.process_time()
     cover = None
-    if (reuse_priced_expressions and old_plan.get('maximum') == maximum and
+    # Covers add expressions to existing parents, not just appended parents.
+    # The append-only ordinary-expression certificate cannot cover that change.
+    if (reuse_priced_expressions and added_cover_partitions == 0 and old_plan.get('maximum') == maximum and
         isinstance(old_plan.get('pricing_certificate'), dict) and
         old_plan.get('pricing_certificate') == pricing_certificate(old_inputs['parents'], old_plan, engine_sha256)):
         cover = ordinary_expression_cover(old_inputs['parents'], parents[old_count:], maximum)
@@ -248,6 +307,7 @@ def extend(prior_inputs, prior_plan, product_roots, walk_roots, output, maximum=
         evaluated = bud_count
     report = dict(complete=True, field='GF(2)', record_claim=False, screen_only=True,
         canonical_archive_changed=False, prior_parents=old_count, parents=len(parents), added=dict(added),
+        added_cover_partitions=added_cover_partitions,
         maximum=maximum, model_shapes=shapes, baseline_recipes=recipes,
         actual_price_improvements=gains, bud_expressions=bud_count,
         mixed_bud_expressions=mixed_count, evaluated_bud_expressions=evaluated,
@@ -269,6 +329,8 @@ if __name__ == '__main__':
     parser.add_argument('--walk', type=Path, action='append', default=[])
     parser.add_argument('--observer-walk', type=Path, action='append', default=[],
                         help='rank-primary reports replayed by verify_observer_walk.py, with or without sidecars')
+    parser.add_argument('--parent-cover', type=Path, action='append', default=[],
+                        help='mixed covers replayed by verify_parent_cover_scan.py against this exact corpus/plan')
     parser.add_argument('--projection', type=Path, action='append', default=[])
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--maximum', type=int, choices=range(2, 33), default=32)
@@ -277,7 +339,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     result = extend(args.inputs, args.plan, args.products, args.walk, args.output, args.maximum,
                     projection_roots=args.projection, reuse_priced_expressions=not args.no_reuse_priced_expressions,
-                    observer_walk_roots=args.observer_walk)
+                    observer_walk_roots=args.observer_walk, parent_cover_roots=args.parent_cover)
     print(json.dumps({k: v for k, v in result.items()
         if k not in ('source_sha256', 'model_shapes', 'baseline_recipes', 'actual_price_improvements')}))
     for row in result['actual_price_improvements']:

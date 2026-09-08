@@ -153,12 +153,36 @@ both public coordinators, same-shape feedback and stopped-child checks.
 `spec/refinement_replay_test.w N M P TENSOR AXIS COORDINATE` also checks the
 standalone projection primitive.
 
-This is still a bounded family, not an exhaustive basis search. Incremental
-composition repricing/materialization, cross-shape campaign dispatch and
-large multiword-mask compositions remain offline. Ordinary `bin/metaflip`
-does not yet generate the entire 7x12x12/r651 composition chain automatically.
+Every new input and refined output also enters native **pair composition**.
+The first bounded family pairs shared U, V or W factors, scaling the other
+two dimensions by 2, 3 and 4. Exact small leaves are built from packaged seeds;
+no Ruby/Python or catalog download is used at runtime. Each parent is priced
+once by complete-term identity. A price is only a scheduling heuristic: the
+expanded tensor passes the full coefficient check before archive admission.
+Rank ties remain separate parents and outputs.
+
+`composition/` inside the spool has its own durable tasks, results, consumed
+cursor, per-shape best index and hexadecimal `MFW1` tensor objects. Packed
+32-bit limbs support factors through 1,024 bits (16,384 terms), beyond the
+live walker's 63-bit limit. At most two expansions run after a refinement
+input, and four per idle batch, in the same single low-priority native child.
+`compose_submitted/completed/pending/failures` expose the backlog separately.
+An invalid or over-budget head recipe stays pending with an `error` file;
+automatic composition pauses while ordinary refinement/flipping continues.
+There is still no disk-byte quota.
+
+The regression **4x8x4/r94 → 4x7x4/r85 → 12x7x12/r651** now runs through
+native queue intake and expansion (12x7x12 is a permutation of 7x12x12).
+The external parent is test-only, not redistributed. Replay with
+`spec/composition_queue_test.py NATIVE_TEST_BINARY [EXTERNAL_4x8x4]`.
+
+This is still a bounded family, not an exhaustive basis/packing search.
+Larger shared groups, changing-leaf dependency propagation, recursive wide
+composition and automatic cross-shape campaign dispatch remain follow-up work.
+Wide outputs are exact archived witnesses, not yet live wide-worker seeds.
 See the [native integration audit](tools/NATIVE-REFINEMENT-2026-09-08.md) for
-the exact replay boundaries and short resource canary.
+the first refinement milestone, and the
+[native composition audit](tools/NATIVE-COMPOSITION-2026-09-08.md) for this extension.
 
 Alternatively, let Bit preserve the executable, runtime worker sources, and
 assets as one relocatable build tree:

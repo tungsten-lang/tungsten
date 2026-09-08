@@ -10,6 +10,7 @@ import tempfile
 
 from refinement_worker_parity_test import exact
 from verify_representation_portfolio import parse_terms
+from composition_queue_test import audit as audit_composition
 
 
 def run(binary, root, tensor, enabled, seconds=2, require_outputs=True):
@@ -53,6 +54,8 @@ def run(binary, root, tensor, enabled, seconds=2, require_outputs=True):
             assert int(fields['refine_cross_shape']) > 0
         assert int(fields['refine_pending']) == int(fields['refine_submitted'])-int(fields['refine_completed'])
         assert (spool/'stop').is_file()
+        assert int(fields['compose_failures']) == 0, fields
+        assert int(fields['compose_pending']) == int(fields['compose_submitted'])-int(fields['compose_completed'])
         objects = 0
         for path in (spool/'objects').glob('*.tensor'):
             data = path.read_bytes()
@@ -66,11 +69,13 @@ def run(binary, root, tensor, enabled, seconds=2, require_outputs=True):
             objects += 1
         processes = subprocess.run(['ps', '-axo', 'pid=,command='], check=True,
                                    text=True, stdout=subprocess.PIPE).stdout
-        assert not any('--refine-batch' in line and str(spool) in line
+        assert not any(('--refine-batch' in line or '--compose-batch' in line) and str(spool) in line
                        for line in processes.splitlines()), processes
+        composed = audit_composition(spool)
         print(f'PASS fleet {tensor}: {objects} full tensors; '
               f'{fields["refine_seed_uses"]} seed uses; '
-              f'{fields["refine_completed"]}/{fields["refine_submitted"]} jobs; stopped')
+              f'{fields["refine_completed"]}/{fields["refine_submitted"]} jobs; '
+              f'{fields["compose_completed"]}/{fields["compose_submitted"]} compositions; stopped')
     else:
         assert not spool.exists()
         assert int(fields['refine_submitted']) == int(fields['refine_outputs']) == 0
@@ -83,6 +88,7 @@ def check(binary):
         root = Path(directory)
         square = run(binary, root/'square', '5x5', 1)
         assert int(square['refine_seed_uses']) > 0, square
+        assert int(square['compose_completed']) > 0, square
         first = run(binary, root/'rect', '2x5x6', 1)
         resumed = run(binary, root/'rect', '2x5x6', 1, seconds=1, require_outputs=False)
         assert int(resumed['refine_completed']) >= int(first['refine_completed'])

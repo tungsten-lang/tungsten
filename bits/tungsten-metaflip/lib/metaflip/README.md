@@ -42,9 +42,16 @@ Metaflip executable:
   Matrix rank ties are left unchanged on this immediate path.
 - `fleet/matrix_cleanup.w` also exposes bounded neutral basis proposals;
   `fleet/projection.w` supplies validated one-coordinate projections with
-  disjoint input/output slabs, for factors of at most 63 bits. Both are
-  native primitives, not yet background-scheduled. They do not widen the
-  live shape allowlist or implicitly admit a projected tensor.
+  disjoint input/output slabs, for factors of at most 63 bits.
+  `fleet/refinement.w` schedules both in one low-priority native child, with
+  durable complete-term intake and independent exact output/seed gates.
+  These do not widen the live shape allowlist.
+- `composition/` prices shared-factor pairs for each new refinement input and
+  output, then expands bounded batches using exact packaged small leaves.
+  Packed 32-bit limbs and a full fiber-wise tensor gate support factors wider
+  than the live walker. Pending recipes and exact MFW1 witnesses persist in a
+  separate spool; prices/hashes never replace verification. This first family
+  is not recursive wide search or automatic cross-shape fleet dispatch.
 - `strategies/rect_catalyst_lift2.w` and
   `strategies/macro_double_annihilation.w` retain the exact target-directed
   setup/trigger/cleanup compilers. They are bounded offline scouts, not default

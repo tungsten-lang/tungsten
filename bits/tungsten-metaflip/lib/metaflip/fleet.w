@@ -1944,6 +1944,10 @@ COREML_COMPUTE = "cpuAndNeuralEngine"
 av = argv()
 if av.size() == 4 && av[0] == "--refine-batch"
   exit(ffrf_batch(av[1], ffw_parse_decimal_i64(av[2]), ffw_parse_decimal_i64(av[3])))
+if av.size() == 5 && av[0] == "--refine-batch"
+  exit(ffrf_batch_with_composition(av[1], ffw_parse_decimal_i64(av[2]), ffw_parse_decimal_i64(av[3]), av[4]))
+if av.size() == 3 && av[0] == "--compose-batch"
+  exit(ffbc_drain(av[1], ffw_parse_decimal_i64(av[2])))
 value_options = ["--tensor", "--rect-shapes", "--rect-epoch-rounds", "--rect-restart-nonce", "--rect-door-ticket", "-J", "--walkers", "--steps", "--rounds", "--secs", "-d", "--density", "--cycles", "--seed", "--seed-nonce", "--record", "--gpu-walkers", "--gpu-policy", "--gpu-steps", "--gpu-epoch-rounds", "--gpu-binary", "--gpu-novelty-size", "--runtime-root", "--asset-root", "--repo-root", "--state-dir", "--strategy", "--migrate", "--archive-size", "--cpu-near-size", "--cpu-near-signature-quota", "--cpu-symmetry-seeds", "--cpu-work-moves", "--cpu-wander-moves", "--status", "--best", "--run-tag", "--near-dir"]
 switch_options = ["--rect", "--rect-portfolio-child", "--rebuild-gpu", "--no-gpu", "--gpu", "--no-tui", "--tui", "--quiet", "--stop-on-record", "--self-test", "--naive", "--help", "-h"]
 value_options.push("--coreml-model")
@@ -3365,7 +3369,7 @@ coreml = nil
 refinement_root = STATUS_PATH + ".refinement"
 if SEED_NAIVE != 0
   refinement_root = refinement_root + "-naive-" + ccall("__w_clock_ms").to_s()
-refinement = MetaflipRefinement.new(refinement_root, System.executable_path())
+refinement = MetaflipRefinement.new(refinement_root, System.executable_path(), RUNTIME_ROOT)
 refinement_candidate = i64[STATE_SIZE]
 refinement_output = i64[STATE_SIZE]
 refinement_ready = 0 ## i64
@@ -3624,7 +3628,7 @@ while running == 1
             z = coreml.invalidate()
           z = refinement.stop()
           refinement_generation += 1
-          refinement = MetaflipRefinement.new(STATUS_PATH + ".refinement-reset-" + now_ms.to_s() + "-" + refinement_generation.to_s(), System.executable_path())
+          refinement = MetaflipRefinement.new(STATUS_PATH + ".refinement-reset-" + now_ms.to_s() + "-" + refinement_generation.to_s(), System.executable_path(), RUNTIME_ROOT)
           refinement_ready = 0
           z = refinement.submit(best, N, N, N)
           best_source = "manual-naive-reset"

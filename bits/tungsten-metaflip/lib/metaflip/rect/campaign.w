@@ -891,7 +891,7 @@ use doors
   refinement_root = status_path + ".refinement"
   if naive_seed != 0
     refinement_root = refinement_root + "-naive-" + ccall("__w_clock_ms").to_s()
-  refinement = MetaflipRefinement.new(refinement_root, System.executable_path())
+  refinement = MetaflipRefinement.new(refinement_root, System.executable_path(), repo_root)
   refinement_candidate = i64[state_size]
   refinement_us = i64[capacity]
   refinement_vs = i64[capacity]
@@ -1405,7 +1405,7 @@ use doors
             best = naive_best
             z = refinement.stop()
             refinement_generation += 1
-            refinement = MetaflipRefinement.new(status_path + ".refinement-reset-" + now_ms.to_s() + "-" + refinement_generation.to_s(), System.executable_path())
+            refinement = MetaflipRefinement.new(status_path + ".refinement-reset-" + now_ms.to_s() + "-" + refinement_generation.to_s(), System.executable_path(), repo_root)
             z = refinement.submit(best, n, m, p)
             timeline_start_s = elapsed_s
             timeline_count = 1

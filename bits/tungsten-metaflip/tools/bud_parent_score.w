@@ -78,6 +78,54 @@ use bud_parent_shapes
     axis += 1
   best
 
+# A read-only observer of a separate, flattened three-axis price table.
+# Keep the primary scoring/acceptance path unchanged when no sidecars are used.
+-> ffbp_observer_cost(st, prices, stride, observer, keys, counts) (i64[] i64[] i64 i64 i64[] i64[]) i64
+  rank = ffr_current_rank(st) ## i64
+  if rank < 1 || rank >= stride
+    return 9223372036854775807
+  best = 9223372036854775807 ## i64
+  axis = 0 ## i64
+  while axis < 3
+    offset = st[44 + axis] ## i64
+    groups = 0 ## i64
+    i = 0 ## i64
+    while i < rank
+      slot = st[st[50] + i] ## i64
+      value = st[offset + slot] ## i64
+      j = 0 ## i64
+      while j < groups && keys[j] != value
+        j += 1
+      if j == groups
+        keys[j] = value
+        counts[j] = 0
+        groups += 1
+      counts[j] += 1
+      i += 1
+    total = 0 ## i64
+    i = 0
+    while i < groups
+      total += prices[(3 * observer + axis) * stride + counts[i]]
+      i += 1
+    if total < best
+      best = total
+    axis += 1
+  best
+
+-> ffbp_store_observer(src, dst, offset, words) (i64[] i64[] i64 i64) i64
+  i = 0 ## i64
+  while i < words
+    dst[offset + i] = src[i]
+    i += 1
+  1
+
+-> ffbp_load_observer(src, offset, dst, words) (i64[] i64 i64[] i64) i64
+  i = 0 ## i64
+  while i < words
+    dst[i] = src[offset + i]
+    i += 1
+  1
+
 # Best pure-axis partition after removing the four live indices of a grid.
 -> ffbp_without_four(st, prices, stride, keys, counts, i0, i1, i2, i3) (i64[] i64[] i64 i64[] i64[] i64 i64 i64 i64) i64
   rank = ffr_current_rank(st) ## i64

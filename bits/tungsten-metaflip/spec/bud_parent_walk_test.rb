@@ -326,6 +326,82 @@ class BudParentWalkTest < Minitest::Test
     end
   end
 
+  def test_read_only_observers_match_separate_runs_without_extra_flips
+    Dir.mktmpdir('bud-sidecar-observers') do |root|
+      limit = 20
+      primary = Array.new(3) { (0..limit).to_a }
+      secondary = (0...8).map do |observer|
+        3.times.map { |axis| (0..limit).map { |k| (11+observer)*k - (axis==observer%3 ? 3*(k/2) : 0) } }
+      end
+      parse = ->(output, label) { output.lines.grep(/^#{label} /).map { |line| line.split.drop(1).to_h { |w| w.split('=',2) } } }
+      run = lambda do |name, prices, observers|
+        directory = File.join(root,name)
+        Dir.mkdir(directory)
+        rows = [limit.to_s] + prices.map { |r|r.join(' ') }
+        rows += ["observers #{observers.size}"] + observers.flatten(1).map { |r|r.join(' ') } unless observers.empty?
+        table = File.join(directory,'prices.txt')
+        File.write(table,rows.join("\n")+"\n")
+        output,status = Open3.capture2e(@binary,@parent,'2x2x5',table,'2','16','128','walk','910701',directory,'2','4','16')
+        assert status.success?,output
+        [directory,parse.call(output,'BUD_TRIAL'),parse.call(output,'BUD_RESULT').fetch(0),parse.call(output,'BUD_OBSERVER')]
+      end
+      alone = [primary,*secondary].each_with_index.map { |table,i| run.call("single-#{i}",table,[]) }
+      together = run.call('together',primary,secondary)
+      assert_equal [],alone[0][3]
+      assert_equal 2*secondary.size,together[3].size
+      %w[attempted accepted_flips accepted_chunks observations].each do |key|
+        alone.each { |result| assert_equal result[2][key],together[2][key] }
+      end
+      assert_equal '4096',together[2]['attempted']
+      2.times do |trial|
+        assert_equal File.binread(File.join(alone[0][0],"trial-#{trial}.txt")),File.binread(File.join(together[0],"trial-#{trial}.txt"))
+        alone.each do |result|
+          assert_equal File.binread(File.join(result[0],"end-#{trial}.txt")),File.binread(File.join(together[0],"end-#{trial}.txt"))
+        end
+        secondary.each_index do |observer|
+          entry = together[3].find { |r|r['observer']==observer.to_s && r['trial']==trial.to_s }
+          assert_equal alone[observer+1][1][trial].slice('score','rank','bits','best_at'),entry.slice('score','rank','bits','best_at')
+          expected = File.binread(File.join(alone[observer+1][0],"trial-#{trial}.txt"))
+          actual = File.join(together[0],"observer-#{observer}-trial-#{trial}.txt")
+          assert_equal expected,File.binread(actual)
+          assert B.load_scheme(actual,[2,2,5]).audit[:exact]
+        end
+      end
+    end
+  end
+
+  def test_observer_tables_fail_closed
+    Dir.mktmpdir('bud-observer-gates') do |root|
+      table = File.join(root,'prices.txt')
+      lines = ['20'] + Array.new(3) { (0..20).to_a.join(' ') }
+      valid = lines + ['observers 1'] + lines.drop(1)
+      args = [@binary,@parent,'2x2x5',table,'1','1','1','walk','17',root,'2','4','1']
+      [lines+['observers 2']+lines.drop(1), lines+['observers 0']+lines.drop(1),
+       lines+['observers 9']+lines.drop(1)*9,
+       valid[0...-1]+['0 1'], valid[0...-1]+[(0..20).map { |i|i==1 ? -1 : i }.join(' ')]].each do |bad|
+        File.write(table,bad.join("\n")+"\n")
+        output,status = Open3.capture2e(*args)
+        refute status.success?,output
+        assert_includes output,'invalid observer'
+        refute File.exist?(File.join(root,'trial-0.txt'))
+      end
+      File.write(table,valid.join("\n")+"\n")
+      incompatible = args.dup;incompatible[7]='greedy'
+      output,status = Open3.capture2e(*incompatible)
+      refute status.success?,output
+      assert_includes output,'invalid observer layout or strategy'
+      output,status = Open3.capture2e(*(args+['not-a-holdout.txt']))
+      refute status.success?,output
+      assert_includes output,'invalid observer layout or strategy'
+      kept = File.join(root,'observer-0-trial-0.txt')
+      File.write(kept,'keep')
+      output,status = Open3.capture2e(*args)
+      refute status.success?,output
+      assert_includes output,'refusing to overwrite observer output'
+      assert_equal 'keep',File.read(kept)
+    end
+  end
+
   def test_fixed_elementary_holdout_prices_a_witness_and_supports_rank_above_64
     Dir.mktmpdir('bud-fixed-elementary') do |root|
       [[2,2,2],[2,3,12]].each do |shape|

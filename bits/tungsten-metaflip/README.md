@@ -708,6 +708,12 @@ and independently verified product witnesses are in
 [the parent-walk report](tools/BUD-PARENT-WALKS-2026-09-06.md).
 This remains offline: greedy acceptance did not beat ordinary wandering in
 the matched study, and no new production strategy is enabled by it.
+Optional [read-only context observers](tools/BUD-CONTEXT-OBSERVERS-2026-09-08.md)
+retain up to eight additional price objectives along one ordinary walk. The
+same-path study reproduced both rank and context winners with half the
+duplicated attempts, and recomposition found three new reference-crossing
+GF(2) candidates (not confirmed world records). Observers are off by default,
+verify complete tensors, and do not steer or add a live fleet lane.
 The optional [fixed elementary-group objective](tools/BUD-FIXED-GROUP-WALKS-2026-09-07.md)
 keeps a verified leaf cover while walking the remaining terms, including
 parents above rank 64; its first matched study found no further rank gain.

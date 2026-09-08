@@ -34,9 +34,22 @@ if table == nil
   << "missing price table"
   exit(2)
 lines = table.strip().split("\n")
+observer_count = 0 ## i64
 if lines.size() != 4 && lines.size() != 5
-  << "invalid price rows"
-  exit(2)
+  if lines.size() < 8
+    << "invalid price rows"
+    exit(2)
+  header = lines[4].split(" ")
+  if header.size() != 2 || header[0] != "observers"
+    << "invalid observer header"
+    exit(2)
+  observer_count = header[1].to_i()
+  observer_label = observer_count.to_s()
+  # Sidecars do not steer the walk. Holdout/grid objectives require a
+  # different cover and are deliberately not supported by these tables.
+  if observer_count < 1 || observer_count > 8 || observer_label != header[1] || lines.size() != 5 + 3 * observer_count || mode != "walk" || ARGV.size() >= 13
+    << "invalid observer layout or strategy"
+    exit(2)
 limit = lines[0].to_i() ## i64
 if limit < 1 || limit > 4096
   << "invalid price rank limit"
@@ -58,6 +71,26 @@ while axis < 3
     prices[axis * stride + i] = price
     i += 1
   axis += 1
+observer_prices = i64[3 * stride * observer_count]
+observer = 0 ## i64
+while observer < observer_count
+  axis = 0
+  while axis < 3
+    fields = lines[5 + 3 * observer + axis].split(" ")
+    if fields.size() != stride
+      << "invalid observer price columns"
+      exit(2)
+    i = 0 ## i64
+    while i < stride
+      price = fields[i].to_i() ## i64
+      price_label = price.to_s()
+      if price < 0 || price > 1000000000 || price_label != fields[i] || (i == 0 && price != 0) || (i > 0 && price == 0)
+        << "invalid observer bucket price"
+        exit(2)
+      observer_prices[(3 * observer + axis) * stride + i] = price
+      i += 1
+    axis += 1
+  observer += 1
 grid_prices = i64[3]
 if lines.size() == 5
   fields = lines[4].split(" ")
@@ -79,6 +112,15 @@ anchor = i64[words]
 work = i64[words]
 winner = i64[words]
 observed = i64[words]
+observer_winners = i64[words * observer_count]
+observer_scores = i64[observer_count]
+observer_ranks = i64[observer_count]
+observer_bits = i64[observer_count]
+observer_at = i64[observer_count]
+observer_scratch_words = 0 ## i64
+if observer_count > 0
+  observer_scratch_words = words
+observer_scratch = i64[observer_scratch_words]
 held = i64[3 * capacity]
 keys = i64[capacity]
 counts = i64[capacity]
@@ -148,6 +190,14 @@ while trial < trials
   best_bits = ffr_current_bits(original) ## i64
   best_at = 0 ## i64
   accepted = 0 ## i64
+  observer = 0
+  while observer < observer_count
+    z = ffbp_store_observer(original,observer_winners,observer * words,words)
+    observer_scores[observer] = ffbp_observer_cost(original,observer_prices,stride,observer,keys,counts)
+    observer_ranks[observer] = rank
+    observer_bits[observer] = ffr_current_bits(original)
+    observer_at[observer] = 0
+    observer += 1
   chunk = 0 ## i64
   while chunk < chunks
     z = ffbp_copy(anchor,work,words)
@@ -191,6 +241,20 @@ while trial < trials
         best_rank = current_rank
         best_bits = bits
         best_at = chunk * steps + done
+      observer = 0
+      while observer < observer_count
+        observer_score = ffbp_observer_cost(observed,observer_prices,stride,observer,keys,counts) ## i64
+        if ffbp_better(observer_score,current_rank,bits,observer_scores[observer],observer_ranks[observer],observer_bits[observer]) == 1
+          z = ffbp_copy(observed,observer_scratch,words)
+          if ffbp_verify(observer_scratch,n,m,p) != 1
+            << "inexact observer parent"
+            exit(1)
+          z = ffbp_store_observer(observer_scratch,observer_winners,observer * words,words)
+          observer_scores[observer] = observer_score
+          observer_ranks[observer] = current_rank
+          observer_bits[observer] = bits
+          observer_at[observer] = chunk * steps + done
+        observer += 1
     if ffbp_accept(mode,score,anchor_score,best,chunk) == 1
       z = ffbp_copy(work,anchor,words)
       anchor_score = score
@@ -213,6 +277,18 @@ while trial < trials
     if read_file(end_path) != nil || ffbp_dump(observed,end_path,n,m,p) != ffr_current_rank(observed)
       << "end-state output gate failed"
       exit(1)
+  observer = 0
+  while observer < observer_count
+    observer_path = outdir + "/observer-" + observer.to_s() + "-trial-" + trial.to_s() + ".txt"
+    if read_file(observer_path) != nil
+      << "refusing to overwrite observer output"
+      exit(2)
+    z = ffbp_load_observer(observer_winners,observer * words,observer_scratch,words)
+    if ffbp_dump(observer_scratch,observer_path,n,m,p) != observer_ranks[observer]
+      << "observer output gate failed"
+      exit(1)
+    << "BUD_OBSERVER observer=" + observer.to_s() + " trial=" + trial.to_s() + " score=" + observer_scores[observer].to_s() + " rank=" + observer_ranks[observer].to_s() + " bits=" + observer_bits[observer].to_s() + " best_at=" + observer_at[observer].to_s()
+    observer += 1
   << "BUD_TRIAL trial=" + trial.to_s() + " strategy=" + mode + " score=" + best.to_s() + " rank=" + best_rank.to_s() + " bits=" + best_bits.to_s() + " chunks_accepted=" + accepted.to_s() + " best_at=" + best_at.to_s()
   trial += 1
 elapsed = ccall("__w_clock_ms") - start_ms ## i64

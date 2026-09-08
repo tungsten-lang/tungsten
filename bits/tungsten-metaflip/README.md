@@ -887,6 +887,16 @@ replay was about 4.8x faster; the complete 39-tensor audit reproduced its
 previous result exactly. This speeds offline verification, not live flips.
 See the [neighbor and replay audit](tools/PROJECTION-SHORTLIST-2026-09-08.md#neighbor-projections-and-sparse-row-replay).
 
+A [compact-parent follow-up](tools/COMPACT-PARENT-PROJECTIONS-2026-09-08.md)
+finds a rank-85 4x4x7 representation with 38 shared-factor pairs. Its primitive
+rank is unchanged, but its grouping gives verified larger bounds including
+7x12x12=651 and 28x32x32=14,122. Coordinate/matrix cleanup also verifies
+15x15x15=2,030 and 15x15x16=2,081. The cumulative cohort is now 787 raw-price
+shapes, or 630 after padding (115 expanded, 515 recipe-only); all 68 cohort
+reference crossings are expanded. These remain source-scoped candidates,
+not confirmed world records. Stronger cleanup stays offline; replay evidence
+is compressed outside the checkout.
+
 `tools/composition_closure.rb` checks candidates against a verified recursive
 block/Kronecker library and propagates useful candidates to other shapes.
 It exports both comparison and candidate tensors for independent replay.

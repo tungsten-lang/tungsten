@@ -456,3 +456,46 @@ It stores 152 logical files as 107 unique objects. Both copied projection
 and basis audits reproduced the saved results exactly, and the pricing-input
 delta passed its full hash round trip. Imports remain local-only; no old
 evidence bundle was deleted and no search outputs were added to the checkout.
+
+## Near-minimum and main-square basis controls
+
+The next bounded control kept all nine distinct coordinate projections within
+seven terms of the matrix minimum: three inputs each at ranks 6,755, 6,761,
+and 6,762. All 108 two-pass basis configurations completed in 41.88 seconds.
+They produced 70 distinct endpoints but none beat **20x23x26/r6,740**. The
+independent checker replayed 648 steps, 594 distinct transitions and 79 full
+tensors (533,060 terms; 114,373,096 support-pair XORs).
+
+Full composition repricing admitted 66 identities (31,429 -> 31,495) and
+evaluated 2,738,194 expressions, including 835,454 mixed expressions, without
+price-cache reuse. It took 56.63 seconds CPU and changed **zero** of the 5,984
+prices. The cumulative cohort therefore remains 399 raw-price shapes, or 316
+after padding; expanded counts remain 60 and 56, respectively.
+
+A separate control used every packaged seed at the current local best rank
+for 3x3 through 6x6, deduplicated by full canonical literal tensor identity:
+
+| Shape | Distinct inputs | Configurations | Best rank | Rank drops |
+| --- | ---: | ---: | ---: | ---: |
+| 3x3x3 | 2 | 24 | 23 | 0 |
+| 4x4x4 | 2 | 24 | 47 | 0 |
+| 5x5x5 | 12 | 144 | 93 | 0 |
+| 6x6x6 | 12 | 144 | 153 | 0 |
+
+The 336 configurations completed in 0.68 seconds. Independent replay checked
+1,944 steps, 1,515 distinct transitions and 67 full tensors. These results
+rule out an improvement only in the specified two-pass, six-axis-order,
+two-column-order families, not arbitrary bases or flip graphs. No new
+reference crossing or main-square improvement was found. Both controls used
+one low-priority CPU worker and no GPU; repeating them unchanged is not the
+next search priority.
+
+Evidence is outside the checkout at
+`~/.local/share/tungsten-metaflip/evidence/2026-09-08-basis-controls.tar.gz`
+(70,709,967 bytes; SHA-256
+`15add1c4d3ea504d4c8f9e301591df3b2046e1989f0f04b8d426760547e9d8e5`).
+The bundle has 303 logical files stored as 195 objects. All three copied
+projection/basis audits reproduced their originals exactly after extraction.
+It retains the pricing report and hashes, but not the full pricing input
+corpus or its delta: that unchanged-price screen is not independently
+recertified by this bundle. No new discovery or novelty claim is made.

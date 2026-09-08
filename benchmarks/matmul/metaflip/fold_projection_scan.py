@@ -96,6 +96,49 @@ class FoldCache:
         return sorted(parity) if materialize else len(parity)
 
 
+class JointFoldCache:
+    """Compose distinct-axis folds with only one cached prefix path.
+
+    Intermediate images are not pair-reduced. Each axis map is linear, and
+    distinct shared dimensions commute, even when they affect the same factor.
+    Never retain the whole Cartesian tree of large intermediate tensors.
+    """
+    def __init__(self, shape, terms, keep):
+        validate_keep(shape, keep)
+        if any(n-len(k) not in (0, 1) for n, k in zip(shape, keep)):
+            raise ValueError('joint folds require at most one deletion per axis')
+        self.keep = tuple(map(tuple, keep))
+        self.dimensions = tuple(i for i, n in enumerate(shape) if len(keep[i]) != n)
+        self.caches, self.tokens = [FoldCache(shape, terms)], []
+
+    def restrict(self, folds):
+        chosen = {}
+        for fold in folds:
+            if set(fold) != {'dimension', 'factor', 'mask'}:
+                raise ValueError('invalid joint fold fields')
+            d, f, m = (fold[k] for k in ('dimension', 'factor', 'mask'))
+            if (type(d) is not int or d not in self.dimensions or d in chosen or
+                type(f) is not int or f not in range(3) or d not in EDGES[f] or
+                type(m) is not int or not 0 < m < 1 << len(self.keep[d])):
+                raise ValueError('invalid or repeated joint fold axis')
+            chosen[d] = f, m
+        if not self.dimensions:
+            return self.caches[0].base.restrict(self.keep, True)
+        for i, dimension in enumerate(self.dimensions):
+            cache = self.caches[i]
+            keep = [tuple(range(n)) for n in cache.shape]
+            keep[dimension] = self.keep[dimension]
+            token = chosen.get(dimension)
+            if i < len(self.dimensions)-1 and i < len(self.tokens) and token == self.tokens[i]:
+                continue
+            child = (cache.base.restrict(keep, True) if token is None else
+                     cache.restrict(keep, dimension, token[0], token[1]))
+            if i == len(self.dimensions)-1:
+                return child
+            self.tokens = self.tokens[:i]+[token]
+            self.caches = self.caches[:i+1]+[FoldCache(tuple(map(len, keep)), child)]
+
+
 def scan_parent(job):
     entry, targets, prices, slack, allowance = job
     raw = Path(entry['path']).read_bytes()

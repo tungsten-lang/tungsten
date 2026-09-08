@@ -1,7 +1,10 @@
 import itertools
 import random
 import hashlib
+import json
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 from collections import Counter
@@ -106,6 +109,60 @@ class ProjectionCompositionTest(unittest.TestCase):
                     expected=direct(shape,terms,output['keep'])
                     self.assertEqual(output['terms'],expected)
                     self.assertEqual(output['rank'],len(expected))
+
+    def test_targets_only_counts_guards_and_budget(self):
+        rows=list(families((20,23,29),[(20,23,27)],20000,targets_only=True))
+        self.assertEqual([(r[0],r[2]) for r in rows],[('target-20x23x27',406)])
+        self.assertEqual(len(list(itertools.product(*rows[0][1]))),406)
+        duplicates=list(families((3,3,3),[(2,3,3),(3,2,3)],1000,targets_only=True))
+        self.assertEqual(len(duplicates),3)
+        self.assertEqual(sum(r[2] for r in duplicates),9)
+        skipped=list(families((9,9,9),[(6,6,6)],20000,targets_only=True))
+        self.assertEqual(len(skipped),1)
+        self.assertIsNone(skipped[0][1]);self.assertEqual(skipped[0][2],592704)
+        for targets,flag in (([],True),([(2,3,3)],1),([(2,3,3)],None)):
+            with self.assertRaises(ValueError):list(families((3,3,3),targets,1000,targets_only=flag))
+
+    def test_targets_only_matches_named_family_minima_without_prefix_selection(self):
+        shape=(3,3,4);terms=naive(shape);body=text(terms)
+        with tempfile.TemporaryDirectory() as temporary:
+            path=Path(temporary)/'parent.txt';path.write_bytes(body)
+            entry=dict(id=0,path=str(path),shape=shape,rank=len(terms),
+                sha256=hashlib.sha256(body).hexdigest(),identity=identity(shape,terms))
+            job=(entry,[(3,3,2)],1000)
+            normal=scan_parent(job,pair_order=(2,0,1))
+            focused=scan_parent(job,pair_order=(2,0,1),targets_only=True)
+            expected={tuple(row['shape']):row for row in normal['rows'] if sorted(row['shape'])==[2,3,3]}
+            self.assertEqual({tuple(row['shape']):row for row in focused['rows']},expected)
+            self.assertEqual(focused['views'],30)
+            self.assertLess(focused['views'],normal['views'])
+            self.assertTrue(all(name.startswith('target-') for name in focused['families']))
+            for row in focused['rows']:
+                self.assertEqual(row['terms'],direct(shape,terms,row['keep']))
+
+    def test_targets_only_cli_and_independent_replay(self):
+        from verify_coordinate_projections import verify
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);shape=(3,3,3);terms=naive(shape);body=text(terms)
+            path=root/'parent.txt';path.write_bytes(body)
+            entry=dict(path=str(path),shape=shape,rank=len(terms),sha256=hashlib.sha256(body).hexdigest(),
+                       identity=identity(shape,terms))
+            (root/'inputs.json').write_text(json.dumps(dict(complete=True,parents=[entry])))
+            (root/'prices.json').write_text(json.dumps(dict(complete=True,field='GF(2)',record_claim=False,
+                model_shapes=[[2,3,3]],baseline_recipes=[dict(rank=18)])))
+            output=root/'out'
+            command=[sys.executable,'-B',str(Path(__file__).with_name('projection_composition_scan.py')),
+                '--inputs',str(root/'inputs.json'),'--prices',str(root/'prices.json'),
+                '--output',str(output),'--targets-only','--workers','1']
+            failed=subprocess.run(command,capture_output=True,text=True,timeout=30)
+            self.assertNotEqual(failed.returncode,0);self.assertFalse(output.exists())
+            self.assertIn('requires at least one --target',failed.stderr)
+            result=subprocess.run(command+['--target','2x3x3'],capture_output=True,text=True,timeout=30)
+            self.assertEqual(result.returncode,0,result.stderr)
+            report=json.loads((output/'report.json').read_bytes())
+            self.assertTrue(report['limits']['targets_only']);self.assertEqual(report['views'],9)
+            self.assertEqual(len(report['outputs']),3)
+            self.assertTrue(verify(output,1)['complete'])
 
 
 if __name__=='__main__':unittest.main()

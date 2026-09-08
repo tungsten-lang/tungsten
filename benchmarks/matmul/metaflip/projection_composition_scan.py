@@ -81,22 +81,25 @@ class ProjectionCache:
                        columns[2][1][k>>twice]) for k in parity)
 
 
-def families(shape,targets,max_views,max_deleted_axes=3):
-    """Delete zero/one coordinate on each axis, plus named subset families."""
+def families(shape,targets,max_views,max_deleted_axes=3,targets_only=False):
+    """Named subset families, optionally preceded by one-per-axis neighbors."""
     if type(max_deleted_axes) is not int or not 1<=max_deleted_axes<=3:
         raise ValueError('max_deleted_axes must be 1, 2, or 3')
-    full=tuple(tuple(range(n)) for n in shape)
-    axes=[(all_,)+tuple(tuple(i for i in all_ if i!=drop) for drop in all_) if len(all_)>1 else (all_,)
-          for all_ in full]
-    if max_deleted_axes==3:
-        # Keep the established default domain, order and family accounting.
-        yield 'one-per-axis',axes,math.prod(map(len,axes))-1
-    else:
-        active=[axis for axis,n in enumerate(shape) if n>1]
-        for count in range(1,max_deleted_axes+1):
-            for deleted in combinations(active,count):
-                choices=[axis[1:] if i in deleted else axis[:1] for i,axis in enumerate(axes)]
-                yield 'delete-axes-'+'-'.join(map(str,deleted)),choices,math.prod(map(len,choices))
+    if type(targets_only) is not bool or (targets_only and not targets):
+        raise ValueError('targets_only must be boolean and requires explicit targets')
+    if not targets_only:
+        full=tuple(tuple(range(n)) for n in shape)
+        axes=[(all_,)+tuple(tuple(i for i in all_ if i!=drop) for drop in all_) if len(all_)>1 else (all_,)
+              for all_ in full]
+        if max_deleted_axes==3:
+            # Keep the established default domain, order and family accounting.
+            yield 'one-per-axis',axes,math.prod(map(len,axes))-1
+        else:
+            active=[axis for axis,n in enumerate(shape) if n>1]
+            for count in range(1,max_deleted_axes+1):
+                for deleted in combinations(active,count):
+                    choices=[axis[1:] if i in deleted else axis[:1] for i,axis in enumerate(axes)]
+                    yield 'delete-axes-'+'-'.join(map(str,deleted)),choices,math.prod(map(len,choices))
     for target in sorted({p for t in targets for p in permutations(t)}):
         if any(t>n for t,n in zip(target,shape)) or tuple(target)==tuple(shape):continue
         count=math.prod(math.comb(n,t) for n,t in zip(shape,target))
@@ -106,7 +109,7 @@ def families(shape,targets,max_views,max_deleted_axes=3):
             yield 'target-'+'x'.join(map(str,target)),[tuple(combinations(range(n),t)) for n,t in zip(shape,target)],count
 
 
-def scan_parent(job,max_deleted_axes=3,pair_order=None):
+def scan_parent(job,max_deleted_axes=3,pair_order=None,targets_only=False):
     if pair_order is not None:
         # The cleanup CLI imports our serializer; avoid a module-level cycle.
         from pair_reduction_scan import has_merge, reduce_pairs
@@ -119,7 +122,7 @@ def scan_parent(job,max_deleted_axes=3,pair_order=None):
     cache=ProjectionCache(shape,terms);full=tuple(tuple(range(n)) for n in shape)
     seen=set();best={};skipped=[];family_counts={};start=time.process_time()
     reduced_views=0;raw_minima={}
-    for name,axes,count in families(shape,targets,max_views,max_deleted_axes):
+    for name,axes,count in families(shape,targets,max_views,max_deleted_axes,targets_only):
         if axes is None:
             skipped.append(dict(family=name,views=count,reason='explicit per-family view allowance'));continue
         checked=0
@@ -172,8 +175,11 @@ def main():
         help='base neighborhood: delete at most one coordinate on this many axes; named --target families are unchanged')
     p.add_argument('--pair-order',help='exact shared-pair cleanup before selecting minima, e.g. 0,1,2; default disabled')
     p.add_argument('--target',action='append',default=[])
+    p.add_argument('--targets-only',action='store_true',
+        help='search only named target subset families, without the default one-per-axis neighborhood')
     p.add_argument('--workers',type=int,choices=range(1,5),default=2)
     a=p.parse_args();assert not a.output.exists()
+    if a.targets_only and not a.target:p.error('--targets-only requires at least one --target')
     pair_order=None
     if a.pair_order is not None:
         from pair_reduction_scan import reduce_pairs
@@ -201,6 +207,7 @@ def main():
         max_source_dimension=a.max_source_dimension,max_family_views=a.max_family_views,
         max_deleted_axes=a.max_deleted_axes,targets=targets),
         selected_parents=len(selected),parents_done=0,views=0,rows=[],outputs=[],source_cpu_seconds=0)
+    if a.targets_only:report['limits']['targets_only']=True
     if pair_order is not None:
         report['projection_kind']='coordinate_then_shared_pair_reduction'
         report['limits']['pair_order']=pair_order
@@ -212,7 +219,8 @@ def main():
     save()
     with ProcessPoolExecutor(max_workers=a.workers,mp_context=multiprocessing.get_context('fork')) as pool:
         jobs=((entry,targets,a.max_family_views) for entry in selected)
-        for result in pool.map(partial(scan_parent,max_deleted_axes=a.max_deleted_axes,pair_order=pair_order),jobs):
+        for result in pool.map(partial(scan_parent,max_deleted_axes=a.max_deleted_axes,pair_order=pair_order,
+                                      targets_only=a.targets_only),jobs):
             entry=result.pop('source');raw=Path(entry['path']).read_bytes()
             assert hashlib.sha256(raw).hexdigest()==entry['sha256']
             parent_name=f"parents/{entry['id']}.txt";(a.output/parent_name).write_bytes(raw)

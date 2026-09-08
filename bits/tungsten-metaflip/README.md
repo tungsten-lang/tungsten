@@ -810,6 +810,15 @@ Replaying downward projections of those parents then verified 20x23x28=6,970
 (previously 6,982), and its 21x23x28 block at 7,614. Seventeen local prices
 improved; the cumulative cohort is 389 shapes (55 expanded, 334 recipe-only),
 with no additional reference crossing or confirmed world record.
+For targeted coordinate follow-ups, `projection_composition_scan.py` accepts
+`--target SHAPE --targets-only` to skip the otherwise additive default
+neighborhood. A [focused recursive projection](tools/PROJECTION-SHORTLIST-2026-09-08.md#focused-target-only-follow-ups)
+and second-axis paired refinement independently verified 20x23x27=6,920,
+improving the previous 6,931 bound, and its 22x23x27 block at 7,878. Five
+prices improved; the cumulative cohort is now 390 shapes (56 expanded,
+334 recipe-only), still with nine expanded reference crossings and no
+confirmed world record. These remain offline exact-gated tools. New replay
+evidence is compressed and deduplicated outside the checkout.
 
 `tools/composition_closure.rb` checks candidates against a verified recursive
 block/Kronecker library and propagates useful candidates to other shapes.

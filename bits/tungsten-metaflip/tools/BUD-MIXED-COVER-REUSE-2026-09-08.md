@@ -55,7 +55,8 @@ through four, two seconds per case, and 180 seconds for the campaign. All cases
 completed in 82.19 seconds. One `nice -n 10` CPU worker was used, with no GPU.
 
 The scan audit checked 198 tensors, 29,705 terms, and 685,268 support-pair XORs.
-Full repricing evaluated 2,461,730 ordinary and 575,742 mixed expressions in
+Full repricing evaluated 2,461,730 total group expressions, including 575,742
+mixed expressions (1,885,988 ordinary), in
 54.79 seconds wall time. These are non-exclusive-host observations, not general
 performance guarantees. The 69 improvements overlap earlier discoveries: only
 **42 additional distinct shapes** enter the running improvement cohort.

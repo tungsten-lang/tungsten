@@ -94,7 +94,8 @@ cadences, and all 16 seed/objective minima tie, including at every-move
 observation. The latter does capture more same-path sidecars than the saved
 rank winner, but that does not produce a better target construction. These
 runs add 322 literal parents. Full bounded repricing of the **31,215-parent**
-corpus evaluates 2,411,290 ordinary and 525,302 retained mixed expressions,
+corpus evaluates 2,411,290 total group expressions, including 525,302 retained
+mixed expressions (1,885,988 ordinary),
 with **zero lower-price shapes**. Recipe tie choices may differ.
 
 The improvement cohort therefore remains **258 distinct lower-local-price

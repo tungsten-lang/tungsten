@@ -1,4 +1,5 @@
 from collections import Counter
+import copy
 import hashlib
 from itertools import combinations_with_replacement
 import json
@@ -6,7 +7,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from extend_composition_parents import extend, identity
+from extend_composition_parents import extend, identity, observer_walk_entries
 from test_verify_composition_recipes import naive
 from test_verify_parent_only_walk import ParentOnlyWalkTest
 from verify_composition_recipes import verify as verify_products
@@ -210,6 +211,47 @@ class ExtendCompositionParentsTest(unittest.TestCase):
                 alternate_row = next(r for r in admissions if r['path'] == 'alternate.txt')
                 self.assertFalse(alternate_row['duplicate'])
                 self.assertIsNotNone(alternate_row['parent'])
+                self.assertEqual(alternate_row['origin']['role'], 'observer' if sidecar else 'endpoint')
+                self.assertEqual(alternate_row['origin']['trial'], 0)
+                self.assertEqual(alternate_row['origin']['cell'], 'one')
+
+    def test_observer_origins_retain_all_occurrences_without_classifying_by_index(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name).resolve()
+            args = self.prior(root)
+            source = self.observer_walk(root/'walk')
+            report = json.loads((source/'report.json').read_text())
+            row = report['rows'][0]
+            row.update(cohort='prior_rank_matched', parent_index=999999)
+            second = copy.deepcopy(row)
+            second.update(cell='two', cohort='projected', parent_index=1)
+            report['rows'].append(second)
+            report['attempts'] *= 2
+            put(source/'report.json', report)
+            put(source/'independent-audit.json', verify_observers(source, source/'plan.json'))
+            before = copy.deepcopy(report)
+            entries = list(observer_walk_entries(report))
+            self.assertEqual(report, before)
+            self.assertEqual(len(entries), 8)
+            result = extend(*args, [], [], root/'out', maximum=4, observer_walk_roots=[source])
+            self.assertEqual(result['parents'], 2)
+            admissions = json.loads((root/'out/admissions.json').read_text())
+            self.assertEqual(len(admissions), 8)
+            self.assertEqual(sum(a['duplicate'] for a in admissions), 6)
+            shared = [a for a in admissions if a['path'] == 'alternate.txt']
+            self.assertEqual(len({a['identity'] for a in shared}), 1)
+            self.assertEqual([a['origin']['reported_cohort'] for a in shared],
+                             ['prior_rank_matched', 'projected'])
+            self.assertEqual([a['origin']['reported_parent_index'] for a in shared], [999999, 1])
+            for a in admissions:
+                origin = a['origin']
+                self.assertEqual(origin['source_path'], row['source']['path'])
+                self.assertEqual(origin['source_sha256'], row['source']['sha256'])
+                self.assertEqual(origin['cell'], report['rows'][origin['row']]['cell'])
+                self.assertNotIn('cohort', a)
+            self.assertEqual({a['origin']['role'] for a in admissions},
+                             {'source', 'winner', 'endpoint', 'observer'})
+            self.assertEqual([a['origin']['observer'] for a in shared], [0, 0])
 
     def test_observer_admission_rejects_stale_artifacts(self):
         for mutation in ('report', 'tensor', 'prices', 'proof', 'attempts', 'cells', 'shape'):

@@ -38,6 +38,28 @@ def pricing_certificate(parents, report, engine_sha256):
                 table_sha256=json_digest({key: report[key] for key in fields}))
 
 
+def observer_walk_entries(report):
+    """Enumerate report locations, not inferred ancestry or verified cohort labels.
+
+    Keep every occurrence, including byte-identical winners from different
+    cells/trials/observers. Corpus append order is not a lineage classifier.
+    Callers admitting tensors must still validate the complete source audit.
+    """
+    for position, row in enumerate(report['rows']):
+        origin = dict(row=position, cell=row['cell'], source_path=row['source']['path'],
+                      source_sha256=row['source']['sha256'])
+        for key in ('cohort', 'parent_index'):
+            if key in row:
+                origin['reported_'+key] = copy.deepcopy(row[key])
+        yield row['source'], dict(origin, role='source')
+        for trial in row['trials']:
+            current = dict(origin, trial=trial['trial'])
+            for role in ('winner', 'endpoint'):
+                yield trial[role], dict(current, role=role)
+            for observer in trial['observers']:
+                yield observer['winner'], dict(current, role='observer', observer=observer['observer'])
+
+
 def extend(prior_inputs, prior_plan, product_roots, walk_roots, output, maximum=32,
            projection_roots=(), reuse_priced_expressions=True, observer_walk_roots=()):
     if type(maximum) is not int or not 2 <= maximum <= 32:
@@ -92,7 +114,7 @@ def extend(prior_inputs, prior_plan, product_roots, walk_roots, output, maximum=
                 raise ValueError('invalid audited shape')
             proofs[shape, row['sha256']] = row
 
-        def admit(path, shape, digest):
+        def admit(path, shape, digest, origin=None):
             path = Path(path).resolve()
             relative = str(path.relative_to(root))
             body = blob(path)
@@ -120,9 +142,12 @@ def extend(prior_inputs, prior_plan, product_roots, walk_roots, output, maximum=
                     mixed_partitions=[], provenance=kind))
                 seen[key] = index
                 added[kind] += 1
-            admissions.append(dict(source_root=str(root), path=relative, sha256=digest,
+            admission = dict(source_root=str(root), path=relative, sha256=digest,
                 shape=list(shape), identity=key, parent=seen.get(key), duplicate=existing, kind=kind,
-                skip=skip))
+                skip=skip)
+            if origin is not None:
+                admission['origin'] = origin
+            admissions.append(admission)
 
         if kind == 'composition_audit':
             if audit['report_sha256'] != hashlib.sha256(raw).hexdigest():
@@ -156,15 +181,10 @@ def extend(prior_inputs, prior_plan, product_roots, walk_roots, output, maximum=
             for name, digest in audit['source_sha256'].items():
                 if hashlib.sha256(blob(contained(root, name))).hexdigest() != digest:
                     raise ValueError('observer walk source changed')
-            for row in report['rows']:
-                entries = [row['source']]
-                for trial in row['trials']:
-                    entries.extend((trial['winner'], trial['endpoint']))
-                    entries.extend(observer['winner'] for observer in trial['observers'])
-                for entry in entries:
-                    if entry['shape'] != row['shape']:
-                        raise ValueError('observer walk tensor shape mismatch')
-                    admit(contained(root, entry['path']), entry['shape'], entry['sha256'])
+            for entry, origin in observer_walk_entries(report):
+                if entry['shape'] != report['rows'][origin['row']]['shape']:
+                    raise ValueError('observer walk tensor shape mismatch')
+                admit(contained(root, entry['path']), entry['shape'], entry['sha256'], origin)
         else:
             if audit['attempts'] != report['total_attempts']:
                 raise ValueError('walk audit accounting mismatch')

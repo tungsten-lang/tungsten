@@ -741,6 +741,12 @@ adds four checked local product improvements, but no reference crossings.
 Rank-only controls now share that replay format, and
 `extend_composition_parents.py --observer-walk` admits their verified full
 states, including endpoints, without one-off audit/admission scripts.
+[Explicit lineage and composition observers](tools/BUD-OBSERVER-LINEAGE-2026-09-08.md)
+retain every cell/trial/role occurrence and correct a five-seed cohort-labeling
+error without discarding valid tensors. The follow-up checks three more local
+products, including 16x18x30 at 4833 (a pinned-reference tie, not a new record).
+The bounded cohort now totals 258 lower-local-price shapes, 21 expanded and
+237 recipe-only; the scoped reference-crossing shortlist remains 42.
 The optional [fixed elementary-group objective](tools/BUD-FIXED-GROUP-WALKS-2026-09-07.md)
 keeps a verified leaf cover while walking the remaining terms, including
 parents above rank 64; its first matched study found no further rank gain.

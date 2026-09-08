@@ -54,14 +54,22 @@ module MetaflipBudPackings
   # Complete nondegenerate rectangles in two factor classes. The third
   # factor is a free coordinate image. Duplicate cells enumerate every term
   # choice, rather than silently retaining only one equivalent-looking mask.
-  def grid_groups(parent, shapes: nil, max_side: 2)
+  def grid_groups(parent, shapes: nil, max_side: 2, min_free_multiplicity: 1)
     raise "invalid grid side" unless max_side.is_a?(Integer) && max_side.between?(2, 4)
-    return enum_for(__method__, parent, shapes: shapes, max_side: max_side) unless block_given?
+    raise "invalid free multiplicity" unless min_free_multiplicity.is_a?(Integer) && min_free_multiplicity.positive?
+    return enum_for(__method__, parent, shapes: shapes, max_side: max_side,
+                   min_free_multiplicity: min_free_multiplicity) unless block_given?
     [0, 1, 2].combination(2) do |a, b|
       row_vertex = (B::EDGES[a] - B::EDGES[b]).first
       col_vertex = (B::EDGES[b] - B::EDGES[a]).first
       cells = {}
+      # Optional subgraph restriction. Default grid packing is unchanged.
+      # Stacking two layers requires each free-factor value at least twice;
+      # singleton free images can never participate in such a stack.
+      free = ([0, 1, 2] - [a, b]).first
+      counts = parent.terms.map { |term| term[free] }.tally if min_free_multiplicity > 1
       parent.terms.each_with_index do |term, index|
+        next if counts && counts.fetch(term[free]) < min_free_multiplicity
         ((cells[term[a]] ||= {})[term[b]] ||= []) << index
       end
       cols = cells.values.flat_map(&:keys).uniq.sort

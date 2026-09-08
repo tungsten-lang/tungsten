@@ -118,3 +118,6 @@ materialization attempts, recovered leaf, product recipes, source versions,
 provenance and a checked hash manifest. Imported tensors and derivatives remain
 outside commits pending redistribution review. No live archive change, GPU work,
 push, publication or submission occurs.
+
+The [subsequent full-family and cube screen](ELEMENTARY-CUBE-SCAN-2026-09-08.md)
+completed all 445 retained 5x5x6 parents without another lower local price.

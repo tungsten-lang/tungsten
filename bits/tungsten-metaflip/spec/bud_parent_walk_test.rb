@@ -370,6 +370,40 @@ class BudParentWalkTest < Minitest::Test
     end
   end
 
+  def test_batched_observer_scores_above_rank_64_match_direct_bucket_sums
+    Dir.mktmpdir('bud-large-observers') do |root|
+      [[3,4,11],[5,5,5]].each do |shape|
+        parent = B.naive(shape)
+        source = File.join(root,shape.join('x')+'.txt')
+        File.write(source,parent.source_text)
+        directory = File.join(root,shape.join('x'))
+        Dir.mkdir(directory)
+        limit = parent.rank+2
+        tables = 8.times.map do |observer|
+          3.times.map { |axis| (0..limit).map { |k| (observer+5)*k-(axis==observer%3 ? k/2 : 0) } }
+        end
+        lines = [limit.to_s]+Array.new(3) { (0..limit).to_a.join(' ') }+['observers 8']
+        lines += tables.flatten(1).map { |row|row.join(' ') }
+        prices = File.join(directory,'prices')
+        File.write(prices,lines.join("\n")+"\n")
+        output,status = Open3.capture2e(@binary,source,shape.join('x'),prices,'1','2','32','walk','817',directory,'2','4','1')
+        assert status.success?,output
+        rows = output.lines.grep(/^BUD_OBSERVER /).map { |line|line.split.drop(1).to_h { |word|word.split('=',2) } }
+        assert_equal 8,rows.size
+        rows.each do |row|
+          observer = row.fetch('observer').to_i
+          value = B.load_scheme(File.join(directory,"observer-#{observer}-trial-0.txt"),shape)
+          expected = 3.times.map do |axis|
+            value.terms.group_by { |term|term[axis] }.values.sum { |group|tables[observer][axis].fetch(group.size) }
+          end.min
+          assert_equal expected,row.fetch('score').to_i
+          assert_equal value.rank,row.fetch('rank').to_i
+          assert value.audit[:exact]
+        end
+      end
+    end
+  end
+
   def test_observer_tables_fail_closed
     Dir.mktmpdir('bud-observer-gates') do |root|
       table = File.join(root,'prices.txt')

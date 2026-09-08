@@ -114,6 +114,7 @@ winner = i64[words]
 observed = i64[words]
 observer_winners = i64[words * observer_count]
 observer_scores = i64[observer_count]
+observer_current_scores = i64[observer_count]
 observer_ranks = i64[observer_count]
 observer_bits = i64[observer_count]
 observer_at = i64[observer_count]
@@ -190,10 +191,12 @@ while trial < trials
   best_bits = ffr_current_bits(original) ## i64
   best_at = 0 ## i64
   accepted = 0 ## i64
+  if observer_count > 0
+    z = ffbp_observer_costs(original,observer_prices,stride,observer_count,keys,counts,observer_current_scores)
   observer = 0
   while observer < observer_count
     z = ffbp_store_observer(original,observer_winners,observer * words,words)
-    observer_scores[observer] = ffbp_observer_cost(original,observer_prices,stride,observer,keys,counts)
+    observer_scores[observer] = observer_current_scores[observer]
     observer_ranks[observer] = rank
     observer_bits[observer] = ffr_current_bits(original)
     observer_at[observer] = 0
@@ -241,9 +244,11 @@ while trial < trials
         best_rank = current_rank
         best_bits = bits
         best_at = chunk * steps + done
+      if observer_count > 0
+        z = ffbp_observer_costs(observed,observer_prices,stride,observer_count,keys,counts,observer_current_scores)
       observer = 0
       while observer < observer_count
-        observer_score = ffbp_observer_cost(observed,observer_prices,stride,observer,keys,counts) ## i64
+        observer_score = observer_current_scores[observer] ## i64
         if ffbp_better(observer_score,current_rank,bits,observer_scores[observer],observer_ranks[observer],observer_bits[observer]) == 1
           z = ffbp_copy(observed,observer_scratch,words)
           if ffbp_verify(observer_scratch,n,m,p) != 1

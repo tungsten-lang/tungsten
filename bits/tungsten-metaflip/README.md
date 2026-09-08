@@ -714,6 +714,11 @@ same-path study reproduced both rank and context winners with half the
 duplicated attempts, and recomposition found three new reference-crossing
 GF(2) candidates (not confirmed world records). Observers are off by default,
 verify complete tensors, and do not steer or add a live fleet lane.
+[Batched scoring](tools/BUD-BATCHED-OBSERVERS-2026-09-08.md) now shares axis
+grouping across observers. Matched eight-observer runs cut native time by
+18–33% on the tested 4×4×5/5×5×5 parents with identical outputs; this is not
+a default-fleet speedup. Its follow-up search verified five local product
+improvements but found no new reference crossings.
 The optional [fixed elementary-group objective](tools/BUD-FIXED-GROUP-WALKS-2026-09-07.md)
 keeps a verified leaf cover while walking the remaining terms, including
 parents above rank 64; its first matched study found no further rank gain.

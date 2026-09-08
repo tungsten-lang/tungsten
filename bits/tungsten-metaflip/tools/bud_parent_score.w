@@ -78,13 +78,16 @@ use bud_parent_shapes
     axis += 1
   best
 
-# A read-only observer of a separate, flattened three-axis price table.
-# Keep the primary scoring/acceptance path unchanged when no sidecars are used.
--> ffbp_observer_cost(st, prices, stride, observer, keys, counts) (i64[] i64[] i64 i64 i64[] i64[]) i64
+# Group each axis once for all read-only observers. The price tables and
+# walked state stay immutable; only scratch counts and output scores change.
+-> ffbp_observer_costs(st, prices, stride, observers, keys, counts, scores) (i64[] i64[] i64 i64 i64[] i64[] i64[]) i64
+  observer = 0 ## i64
+  while observer < observers
+    scores[observer] = 9223372036854775807
+    observer += 1
   rank = ffr_current_rank(st) ## i64
   if rank < 1 || rank >= stride
-    return 9223372036854775807
-  best = 9223372036854775807 ## i64
+    return 0
   axis = 0 ## i64
   while axis < 3
     offset = st[44 + axis] ## i64
@@ -102,15 +105,18 @@ use bud_parent_shapes
         groups += 1
       counts[j] += 1
       i += 1
-    total = 0 ## i64
-    i = 0
-    while i < groups
-      total += prices[(3 * observer + axis) * stride + counts[i]]
-      i += 1
-    if total < best
-      best = total
+    observer = 0
+    while observer < observers
+      total = 0 ## i64
+      i = 0
+      while i < groups
+        total += prices[(3 * observer + axis) * stride + counts[i]]
+        i += 1
+      if total < scores[observer]
+        scores[observer] = total
+      observer += 1
     axis += 1
-  best
+  1
 
 -> ffbp_store_observer(src, dst, offset, words) (i64[] i64[] i64 i64) i64
   i = 0 ## i64

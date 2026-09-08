@@ -730,6 +730,12 @@ integer and GF(2) checks. Importing 28 additional literal literature parents
 gave 131 lower local composition prices; five expanded products pass independent
 replay, but none newly crosses the pinned reference bounds. The importer is
 offline and does not automatically admit seeds or clear redistribution rights.
+[Structured-parent continuation](tools/BUD-STRUCTURED-CONTINUATION-2026-09-08.md)
+then verified a GF(2) 21x24x30 upper bound of 8064, below the refreshed bounded
+reference screen of 8067. Two additional shared-U pairs in a rank-150 5x6x7
+parent supply the saving; its primitive rank is unchanged. This remains a
+reference-crossing candidate, not a confirmed world record. A reusable
+`verify_observer_walk.py` now checks the saved observer tensors and scores.
 The optional [fixed elementary-group objective](tools/BUD-FIXED-GROUP-WALKS-2026-09-07.md)
 keeps a verified leaf cover while walking the remaining terms, including
 parents above rank 64; its first matched study found no further rank gain.

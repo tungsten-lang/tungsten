@@ -106,7 +106,11 @@ def families(shape,targets,max_views,max_deleted_axes=3):
             yield 'target-'+'x'.join(map(str,target)),[tuple(combinations(range(n),t)) for n,t in zip(shape,target)],count
 
 
-def scan_parent(job,max_deleted_axes=3):
+def scan_parent(job,max_deleted_axes=3,pair_order=None):
+    if pair_order is not None:
+        # The cleanup CLI imports our serializer; avoid a module-level cycle.
+        from pair_reduction_scan import has_merge, reduce_pairs
+        reduce_pairs([],pair_order)
     entry,targets,max_views=job
     raw=Path(entry['path']).read_bytes()
     assert hashlib.sha256(raw).hexdigest()==entry['sha256'],'source hash changed'
@@ -114,6 +118,7 @@ def scan_parent(job,max_deleted_axes=3):
     assert identity(shape,terms)==entry['identity'],'source identity changed'
     cache=ProjectionCache(shape,terms);full=tuple(tuple(range(n)) for n in shape)
     seen=set();best={};skipped=[];family_counts={};start=time.process_time()
+    reduced_views=0;raw_minima={}
     for name,axes,count in families(shape,targets,max_views,max_deleted_axes):
         if axes is None:
             skipped.append(dict(family=name,views=count,reason='explicit per-family view allowance'));continue
@@ -121,18 +126,35 @@ def scan_parent(job,max_deleted_axes=3):
         for keep in product(*axes):
             if keep==full or keep in seen:continue
             seen.add(keep);checked+=1
-            target=tuple(map(len,keep));rank=cache.restrict(keep)
+            target=tuple(map(len,keep));detail={}
+            if pair_order is None:
+                rank=cache.restrict(keep)
+            else:
+                child=cache.restrict(keep,True);raw_rank=len(child)
+                raw_minima[target]=min(raw_minima.get(target,raw_rank),raw_rank)
+                trace=[]
+                if has_merge(child):child,trace=reduce_pairs(child,pair_order)
+                rank=len(child);reduced_views+=bool(trace)
+                detail=dict(raw_rank=raw_rank,reduction_order=tuple(pair_order),reduction_trace=trace)
             prior=best.get(target)
             if prior is None or (rank,keep)<(prior['rank'],prior['keep']):
-                best[target]=dict(shape=target,rank=rank,keep=keep)
+                best[target]=dict(shape=target,rank=rank,keep=keep,**detail)
         family_counts[name]=checked
     rows=[]
     for target,row in sorted(best.items()):
         result=cache.restrict(row['keep'],materialize=True)
+        if pair_order is not None:
+            assert len(result)==row['raw_rank']
+            result,trace=reduce_pairs(result,pair_order)
+            assert trace==row['reduction_trace']
         assert len(result)==row['rank']
         rows.append(dict(row,terms=result))
-    return dict(parent=entry['id'],source=entry,views=len(seen),families=family_counts,
+    result=dict(parent=entry['id'],source=entry,views=len(seen),families=family_counts,
                 skipped=skipped,rows=rows,cpu_seconds=time.process_time()-start)
+    if pair_order is not None:
+        result.update(pair_reduced_views=reduced_views,raw_rank_pruning=False,
+            raw_minima=[dict(shape=s,rank=r) for s,r in sorted(raw_minima.items())])
+    return result
 
 
 def text(terms):return (str(len(terms))+'\n'+''.join(' '.join(map(str,t))+'\n' for t in terms)).encode()
@@ -148,9 +170,17 @@ def main():
     p.add_argument('--max-family-views',type=int,default=20000)
     p.add_argument('--max-deleted-axes',type=int,choices=(1,2,3),default=3,
         help='base neighborhood: delete at most one coordinate on this many axes; named --target families are unchanged')
+    p.add_argument('--pair-order',help='exact shared-pair cleanup before selecting minima, e.g. 0,1,2; default disabled')
     p.add_argument('--target',action='append',default=[])
     p.add_argument('--workers',type=int,choices=range(1,5),default=2)
     a=p.parse_args();assert not a.output.exists()
+    pair_order=None
+    if a.pair_order is not None:
+        from pair_reduction_scan import reduce_pairs
+        try:
+            pair_order=tuple(map(int,a.pair_order.split(',')))
+            reduce_pairs([],pair_order)
+        except ValueError as error:p.error(str(error))
     assert a.max_source_rank>0 and a.max_source_dimension>0 and a.max_family_views>0
     targets=[tuple(map(int,t.split('x'))) for t in a.target]
     assert all(len(t)==3 and all(n>0 for n in t) for t in targets)
@@ -163,11 +193,17 @@ def main():
     pins={str(path.resolve()):hashlib.sha256(path.read_bytes()).hexdigest()
           for path in [a.inputs,a.prices,Path(__file__),Path(__file__).with_name('extend_composition_parents.py'),
                        Path(__file__).with_name('verify_representation_portfolio.py')]}
+    if pair_order is not None:
+        path=Path(__file__).with_name('pair_reduction_scan.py')
+        pins[str(path.resolve())]=hashlib.sha256(path.read_bytes()).hexdigest()
     report=dict(complete=False,field='GF(2)',record_claim=False,canonical_archive_changed=False,
         source_sha256=pins,limits=dict(max_source_rank=a.max_source_rank,
         max_source_dimension=a.max_source_dimension,max_family_views=a.max_family_views,
         max_deleted_axes=a.max_deleted_axes,targets=targets),
         selected_parents=len(selected),parents_done=0,views=0,rows=[],outputs=[],source_cpu_seconds=0)
+    if pair_order is not None:
+        report['projection_kind']='coordinate_then_shared_pair_reduction'
+        report['limits']['pair_order']=pair_order
     best={};start=time.monotonic()
     def save():
         report['elapsed_seconds']=time.monotonic()-start
@@ -176,7 +212,7 @@ def main():
     save()
     with ProcessPoolExecutor(max_workers=a.workers,mp_context=multiprocessing.get_context('fork')) as pool:
         jobs=((entry,targets,a.max_family_views) for entry in selected)
-        for result in pool.map(partial(scan_parent,max_deleted_axes=a.max_deleted_axes),jobs):
+        for result in pool.map(partial(scan_parent,max_deleted_axes=a.max_deleted_axes,pair_order=pair_order),jobs):
             entry=result.pop('source');raw=Path(entry['path']).read_bytes()
             assert hashlib.sha256(raw).hexdigest()==entry['sha256']
             parent_name=f"parents/{entry['id']}.txt";(a.output/parent_name).write_bytes(raw)

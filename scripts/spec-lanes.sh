@@ -1206,6 +1206,7 @@ exclude_specs=(
   spec/numeric/bigint_mul7_source_spec.w
   spec/numeric/bigint_mul8_source_spec.w
   spec/numeric/bigint_powmod_spec.w
+  spec/numeric/bigint_powmod_entry_spec.w
   spec/numeric/bigint_prime_spec.w
   spec/numeric/bigint_shift_source_spec.w
   spec/numeric/bigint_sqr16_source_spec.w

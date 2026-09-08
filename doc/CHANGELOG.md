@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **`Integer#modpow` enters Montgomery form by one division** — the runtime's
+  Montgomery ladder (odd moduli of 3 limbs and up) used to compute
+  R² = B^2k mod n by a 2k-by-k division and then pay two Montgomery
+  multiplies of setup (base·R² and R mod n). It now converts the base with a
+  single division of base·B^k (the limb-shift-and-reduce entry from the
+  EIP-8200 MODEXP work), and the odd-power window table only builds the rows
+  the exponent's sliding windows actually select — a fixed exponent such as
+  65537 = 2^16 + 1 builds none. RSA-shaped 32-limb calls: e=3 3.4 → 1.7 µs,
+  e=65537 10.3 → 7.8 µs, full-width exponents unchanged (runtime
+  `bench_powmod`, `make bench-powmod`). Prime testing keeps its full context.
+  Spec: `spec/numeric/bigint_powmod_entry_spec.w`.
+
 - **Worktrees inherit the host compiler** — `git worktree add` no longer
   leaves you without `bin/tungsten-compiler`. A post-checkout hook (installed
   by `bin/tungsten doctor`) and a `bin/tungsten` fallback symlink the primary

@@ -7,7 +7,7 @@ import random
 import tempfile
 import unittest
 
-from fold_projection_scan import EDGES, FoldCache
+from fold_projection_scan import EDGES, FoldCache, FoldValues
 from verify_fold_projections import project_fold_grid, verify
 from projection_composition_scan import text
 from test_projection_variant_portfolio import naive, expansion
@@ -42,6 +42,32 @@ def walked(shape, seed):
 
 
 class FoldProjectionTest(unittest.TestCase):
+    def test_lazy_large_coordinate_matches_dense_grid_without_exponential_tables(self):
+        shape = (32, 2, 2)
+        terms = walked(shape, 12)
+        keep = [list(range(1, 32)), [0, 1], [0, 1]]
+        cache = FoldCache(shape, terms)
+        for factor in (0, 2):
+            for mask in (0, 1, 1 << 30, (1 << 30) | 5, (1 << 31)-1):
+                row = dict(parent_shape=shape, keep=keep,
+                           fold=dict(dimension=0, factor=factor, mask=mask))
+                child = cache.restrict(keep, 0, factor, mask)
+                self.assertEqual(child, project_fold_grid(row, terms))
+                self.assertEqual(expansion(child), expansion(naive((31, 2, 2))))
+            _, folded = cache.prepare(keep, 0, factor)
+            self.assertTrue(all(table.dense is None and len(table.additions) == 31 for table in folded.values()))
+
+    def test_dense_and_lazy_word_tables_match_xor_definition(self):
+        for width in (0, 3, 8, 9):
+            additions = [((i+3)*17) << i for i in range(width)]
+            table = FoldValues(137, additions)
+            self.assertEqual(table.dense is not None, width <= 8)
+            for mask in range(1 << width):
+                expected = 137
+                for i, addition in enumerate(additions):
+                    if mask & (1 << i): expected ^= addition
+                self.assertEqual(table[mask], expected)
+
     def test_full_file_audit_and_changed_fold_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()

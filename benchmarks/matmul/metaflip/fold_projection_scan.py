@@ -20,6 +20,28 @@ from projection_composition_scan import EDGES, ProjectionCache, restrict_word, t
 from verify_representation_portfolio import parse_terms
 
 
+class FoldValues:
+    """Dense for tiny coordinates; otherwise O(width), not O(2**width), storage."""
+    def __init__(self, value, additions):
+        self.value, self.additions = value, tuple(additions)
+        self.dense = None
+        if len(additions) <= 8:
+            self.dense = [value]
+            for mask in range(1, 1 << len(additions)):
+                bit = mask & -mask
+                self.dense.append(self.dense[mask ^ bit] ^ additions[bit.bit_length()-1])
+
+    def __getitem__(self, mask):
+        if self.dense is not None:
+            return self.dense[mask]
+        value = self.value
+        while mask:
+            bit = mask & -mask
+            value ^= self.additions[bit.bit_length()-1]
+            mask ^= bit
+        return value
+
+
 class FoldCache:
     def __init__(self, shape, terms):
         self.base = ProjectionCache(shape, terms)
@@ -51,11 +73,7 @@ class FoldCache:
             else:
                 spread = sum(((dropped >> i) & 1) << (i*len(cols)) for i in range(len(rows)))
                 additions = [spread << j for j in range(len(cols))]
-            values = [value]
-            for mask in range(1, 1 << len(keep[dimension])):
-                bit = mask & -mask
-                values.append(values[mask ^ bit] ^ additions[bit.bit_length()-1])
-            folded[word] = values
+            folded[word] = FoldValues(value, additions)
         self.tables[key] = streams, folded
         return streams, folded
 
@@ -64,7 +82,10 @@ class FoldCache:
         if type(mask) is not int or not 0 <= mask < 1 << len(keep[dimension]):
             raise ValueError('invalid fold mask')
         columns = list(streams)
-        columns[factor] = (folded[term[factor]][mask] for term in self.terms)
+        # Evaluate only requested masks, once per distinct word, including on
+        # the lazy path. Repeated factor words do not repeat the XOR work.
+        values = {word: table[mask] for word, table in folded.items()}
+        columns[factor] = (values[term[factor]] for term in self.terms)
         parity = set()
         for term in zip(*columns):
             if all(term):

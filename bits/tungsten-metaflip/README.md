@@ -724,6 +724,12 @@ now shares the remaining primary grouping pass too. Matched runs retain exact
 outputs and cut observer-enabled native time by 4–8% on the tested larger
 parents. A bounded projection/continuation follow-up independently verified
 5x32x32 at rank 3430 (previous local 3460; pinned reference 3200), not a record.
+[Structured integer-source import](tools/BUD-STRUCTURED-IMPORT-2026-09-08.md)
+now handles rectangular orientations and non-ternary coefficients with full
+integer and GF(2) checks. Importing 28 additional literal literature parents
+gave 131 lower local composition prices; five expanded products pass independent
+replay, but none newly crosses the pinned reference bounds. The importer is
+offline and does not automatically admit seeds or clear redistribution rights.
 The optional [fixed elementary-group objective](tools/BUD-FIXED-GROUP-WALKS-2026-09-07.md)
 keeps a verified leaf cover while walking the remaining terms, including
 parents above rank 64; its first matched study found no further rank gain.

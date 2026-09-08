@@ -90,6 +90,7 @@ class that produced the current records for several matmul tensor formats.
 | `flipfleet_block_composer.w` / `flipfleet_block_compose.w` | pure-Tungsten wide-factor support-aware composer and all-S3 CLI |
 | `flipfleet_block_formula_scan.w` / `flipfleet_block_formula_scan_wide.w` / `flipfleet_block_formula_scan_cross.w` / `flipfleet_block_variant_scan.w` | reproducible legacy, continuous 12--32, cross-band, exact-tie, and same-rank-leaf scans |
 | `catalog_gf2_import.py` / `catalog_gf2_export.py` | independently reconstructing dense-catalog import and publishable GF(2) JSON export with explicit W-order correction |
+| `structured_exp_import.py` | offline rectangular integer `.exp` import: explicit source hashes, inferred trace orientation, exact integer and GF(2) tensor gates; no automatic seed or license admission. [Bounded replay](../../../bits/tungsten-metaflip/tools/BUD-STRUCTURED-IMPORT-2026-09-08.md) |
 | `block_composition_cross_audit.tsv` / `block_composition_cross_audit_sources.tsv` | persisted 20/21 seam comparison and pinned source revisions/digest |
 | `block_composition_smallblock_audit.tsv` / `block_composition_smallblock_audit_sources.tsv` | bounded size-1/2/9 frontier audit, field-aware comparisons, and pinned leaf hashes |
 | `flipfleet_block_formula_scan_small_cross.w` / `flipfleet_block_small_cross_compose.w` / `BLOCK_COMPOSITION_SMALL_CROSS_AUDIT.md` | complete 84-leaf 8--11-by-32 scan, 40 materialized exact GF(2) upper bounds, field-aware comparison, and replay |

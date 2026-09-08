@@ -3,6 +3,8 @@
 use ../fleet/refinement_artifacts
 use ../compose
 use pairs
+use pages
+use leaf_walk
 
 -> ffbc_counter(path) (String) i64
   raw = File.read_prefix(path, 32)
@@ -20,9 +22,10 @@ use pairs
   old = File.read_prefix(marker, 66)
   if old != nil
     identity = old.strip()
-    if ffrf_load(root, identity, work, cap, meta, parity) == 1 && meta[0] == 2 && meta[1] == scale && meta[2] == scale
+    if ffrf_load(root, identity, work, cap, meta, parity) != 1 || meta[0] != 2 || meta[1] != scale || meta[2] != scale
+      return ""
+    if scale != 4 || meta[3] <= 26
       return identity
-    return ""
   us = i64[64]
   vs = i64[64]
   ws = i64[64]
@@ -33,6 +36,10 @@ use pairs
   if scale == 3
     path = runtime + "/seeds/gf2/matmul_2x3x5_rank26_peterson_2026_block15_11_gf2.txt"
     m = 3
+    p = 5
+  if scale == 4
+    path = runtime + "/seeds/gf2/matmul_2x4x5_rank33_catalog_gf2.txt"
+    m = 4
     p = 5
   rank = ffsc_load(path, us, vs, ws, 64) ## i64
   if rank < 1
@@ -52,32 +59,10 @@ use pairs
     rank = ffpc_reduce(work, ffmc_scratch_words(cap), cap, rank, 0, 1, 2)
     rank = ffmc_reduce(work, ffmc_scratch_words(cap), cap, rank)
   elsif scale == 4
-    # Four disjoint <2,2,2> blocks form an exact <2,4,4> leaf.
-    block = 0 ## i64
-    while block < 4
-      i = 0
-      while i < rank
-        axis = 0 ## i64
-        while axis < 3
-          rowoff = 0 ## i64
-          coloff = (block/2)*2 ## i64
-          if axis == 1
-            rowoff = (block/2)*2
-            coloff = (block%2)*2
-          if axis == 2
-            coloff = (block%2)*2
-          value = source[axis*cap+i] ## i64
-          mapped = 0 ## i64
-          bit = 0 ## i64
-          while bit < 4
-            if ((value >> bit) & 1) != 0
-              mapped = mapped ^ (1 << ((bit/2+rowoff)*4+bit%2+coloff))
-            bit += 1
-          work[axis*cap+block*rank+i] = mapped
-          axis += 1
-        i += 1
-      block += 1
-    rank *= 4
+    rank = ffmp_project(source, 3*cap, cap, rank, 2, 4, 5, 2, 2, work, ffmc_scratch_words(cap), cap)
+    rank = ffpc_reduce(work, ffmc_scratch_words(cap), cap, rank, 0, 1, 2)
+    rank = ffmc_reduce(work, ffmc_scratch_words(cap), cap, rank)
+    rank = ffbc_walk_leaf4(root, work, cap, rank, parity)
   else
     z = ffrf_copy(work, source, cap, rank) ## i64
   if ffrf_exact(work, cap, rank, 2, scale, scale, parity) != 1
@@ -91,23 +76,39 @@ use pairs
   if ffrf_hash_valid(identity) != 1
     return 0
   marker = root + "/composition/parents/" + identity
-  if File.exists?(marker)
+  stamp = "MFC_PARENT2 " + leaves[0] + " " + leaves[1] + " " + leaves[2] + "\n"
+  previous_parent = File.read_prefix(marker, 257)
+  if previous_parent == stamp
     return 1
+  previous_leaves = []
+  if previous_parent != nil
+    tokens = previous_parent.strip().split(" ")
+    if tokens.size() == 4 && tokens[0] == "MFC_PARENT2"
+      previous_leaves = tokens
   cap = ffrf_capacity() ## i64
   if ffrf_load(root, identity, work, cap, meta, parity) != 1
     return 0
   queue = root + "/composition/"
   sequence = ffbc_counter(queue + "submitted") ## i64
   # Recover a task committed just before its counter/dedup index.
-  while File.exists?(queue + "tasks/" + (sequence+1).to_s())
+  recovery = 0 ## i64
+  while ffbq_read(queue, "tasks", sequence+1) != nil
+    if ffbq_read(queue, "tasks", sequence+1) == "" || recovery >= 9
+      return 0
     sequence += 1
-  if sequence > 0
-    tail = File.read_prefix(queue + "tasks/" + sequence.to_s(), 257)
-    if tail == nil || tail.size() > 256
+    recovery += 1
+  # One bounded suffix read per parent, not nine page scans per recipe.
+  # Newly appended records join this local list (at most 18 records total).
+  recent_records = []
+  recent = sequence-8 ## i64
+  if recent < 1
+    recent = 1
+  while recent <= sequence
+    saved = ffbq_read(queue, "tasks", recent)
+    if saved == nil || saved == ""
       return 0
-    tail_id = Crypto:SHA256.hexdigest(tail)
-    if ffrf_atomic(queue + "by-id/" + tail_id, sequence.to_s() + "\n", "composition") != 1
-      return 0
+    recent_records.push(saved)
+    recent += 1
   axis = 0 ## i64
   while axis < 3
     pairs = ffbd_pairs(work, 3*cap, cap, meta[3], axis, mates, cap) ## i64
@@ -121,30 +122,45 @@ use pairs
       predicted = (meta[3]-2*pairs)*scale*scale+pairs*ranks[scale-2] ## i64
       # Scheduling family: only recipes better than this parent's naive
       # Kronecker expansion. This is not an exhaustive-search lower bound.
-      if pairs > 0 && predicted < meta[3]*scale*scale && predicted <= 16384 && ffpk_stride(n, m, p) > 0
+      unchanged = 0 ## i64
+      if previous_leaves.size() == 4 && previous_leaves[scale-1] == leaves[scale-2]
+        unchanged = 1
+      if unchanged == 0 && pairs > 0 && predicted < meta[3]*scale*scale && predicted <= 16384 && ffpk_stride(n, m, p) > 0
         body = "MFC1 " + identity + " " + leaves[scale-2] + " " + axis.to_s() + " " + scale.to_s() + " " + n.to_s() + " " + m.to_s() + " " + p.to_s() + " " + predicted.to_s() + "\n"
         task_id = Crypto:SHA256.hexdigest(body)
         previous = File.read_prefix(queue + "by-id/" + task_id, 32)
-        if previous == nil
-          sequence += 1
-          if ffrf_atomic(queue + "tasks/" + sequence.to_s(), body, "composition") != 1 || ffrf_atomic(queue + "by-id/" + task_id, sequence.to_s() + "\n", "composition") != 1
-            return 0
-        else
-          stored = File.read_prefix(queue + "tasks/" + previous.strip(), 257)
+        duplicate = 0 ## i64
+        if previous != nil
+          stored = ffbq_read(queue, "tasks", ffw_parse_decimal_i64(previous.strip()))
           if stored != body
             return 0
+          duplicate = 1
+        # At most nine recipes belong to the single in-flight parent. Recover
+        # its unacknowledged suffix by full bytes; no per-recipe index file.
+        r = 0 ## i64
+        while duplicate == 0 && r < recent_records.size()
+          if recent_records[r] == body
+            duplicate = 1
+          r += 1
+        if duplicate == 0
+          sequence += 1
+          if ffbq_put(queue, "tasks", sequence, body) != 1
+            return 0
+          recent_records.push(body)
       scale += 1
     axis += 1
   if ffrf_atomic(queue + "submitted", sequence.to_s() + "\n", "composition") != 1
     return 0
-  ffrf_atomic(marker, "pair-scales-2-4-v1\n", "composition")
+  ffrf_atomic(marker, stamp, "composition")
 
 # Called before the refinement completion manifest: a crash/stop cannot
 # acknowledge the source job while losing its composition intake.
 -> ffbc_prepare(root, runtime, identity, ids) i64
   if runtime == ""
     return 1
-  directories = ["tasks", "by-id", "parents", "objects", "results", "leaves", "best", "by-shape"]
+  if File.exists?(root + "/stop")
+    return 0-1
+  directories = ["tasks", "tasks-pages", "by-id", "parents", "objects", "results", "results-pages", "leaves", "best", "by-shape"]
   i = 0 ## i64
   while i < directories.size()
     if !File.mkdir_p(root + "/composition/" + directories[i])
@@ -162,6 +178,8 @@ use pairs
   while scale <= 4
     leaf = ffbc_leaf(root, runtime, scale, work, source, parity)
     if leaf == "" || ffrf_load(root, leaf, work, cap, meta, parity) != 1
+      if File.exists?(root + "/stop")
+        return 0-1
       return 0
     ranks[scale-2] = meta[3]
     leaves.push(leaf)
@@ -181,7 +199,7 @@ use pairs
 # tensor gate BEFORE archive/best/result writes. Formula ranks are not gates.
 -> ffbc_task(root, sequence, parent, leaf, mates, out, scratch, parity) (String i64 i64[] i64[] i64[] i64[] i64[] i64[]) i64
   queue = root + "/composition/"
-  raw = File.read_prefix(queue + "tasks/" + sequence.to_s(), 257)
+  raw = ffbq_read(queue, "tasks", sequence)
   if raw == nil || raw.size() > 256
     return 0
   fields = raw.strip().split(" ")
@@ -238,7 +256,7 @@ use pairs
   if rank < best_rank && ffrf_atomic(queue + "best/" + shape, rank.to_s() + " " + identity + "\n", "composition") != 1
     return 0
   result = "MFC_RESULT1 " + task_id + " " + identity + " " + shape + " " + rank.to_s() + "\n"
-  ffrf_atomic(queue + "results/" + sequence.to_s(), result, "composition")
+  ffbq_put(queue, "results", sequence, result)
 
 -> ffbc_drain(root, limit) (String i64) i64
   if limit < 1 || limit > 4

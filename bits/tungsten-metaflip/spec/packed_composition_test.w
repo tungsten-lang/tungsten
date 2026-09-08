@@ -1,6 +1,56 @@
 use ../lib/metaflip/fleet/refinement_worker
 use ../lib/metaflip/composition/pairs
 
+if ARGV.size() == 2 && ARGV[0] == "--pages-test"
+  queue = ARGV[1] + "/"
+  kinds = ["tasks", "results"]
+  k = 0 ## i64
+  while k < 2
+    kind = kinds[k]
+    if !File.mkdir_p(queue + kind) || !File.mkdir_p(queue + kind + "-pages")
+      exit(1)
+    k += 1
+  # New pages cross both 64-record boundaries. Legacy records end midway
+  # through a page; the new suffix must not shadow or rewrite that evidence.
+  if ffbq_put(queue, "tasks", 2, "gap\n") != 0 || ffbq_put(queue, "tasks", 65, "gap\n") != 0
+    exit(1)
+  i = 1 ## i64
+  while i <= 130
+    record = "record-" + i.to_s() + "\n"
+    if ffbq_put(queue, "tasks", i, record) != 1 || ffbq_put(queue, "tasks", i, record) != 1 || ffbq_put(queue, "tasks", i, "conflict\n") != 0
+      exit(1)
+    if i < 38
+      if !write_file(queue + "results/" + i.to_s(), record)
+        exit(1)
+    elsif ffbq_put(queue, "results", i, record) != 1
+      exit(1)
+    i += 1
+  i = 1
+  while i <= 130
+    record = "record-" + i.to_s() + "\n"
+    if ffbq_read(queue, "tasks", i) != record || ffbq_read(queue, "results", i) != record
+      exit(1)
+    i += 1
+  long = ""
+  i = 0
+  while i < 255
+    long = long + "x"
+    i += 1
+  if ffbq_read(queue, "tasks", 131) != nil || ffbq_put(queue, "tasks", 132, "gap\n") != 0 || ffbq_put(queue, "tasks", 193, "gap\n") != 0 || ffbq_put(queue, "tasks", 131, long + "\n") != 1
+    exit(1)
+  if ffbq_put(queue, "tasks", 132, long + "x\n") != 0 || ffbq_put(queue, "tasks", 132, "two\nlines\n") != 0 || ffbq_put(queue, "tasks", 132, "\n") != 0 || ffbq_put(queue, "tasks", 132, "unterminated") != 0
+    exit(1)
+  if ffbq_put(queue, "tasks", 0, "invalid\n") != 0 || ffbq_put(queue, "tasks", 1000000000001, "invalid\n") != 0
+    exit(1)
+  if !write_file(queue + "results/1", "two\nlines\n") || ffbq_read(queue, "results", 1) != "" || ffbq_put(queue, "results", 1, "record-1\n") != 0
+    exit(1)
+  if !write_file(queue + "results/1", "record-1\n")
+    exit(1)
+  if !write_file(queue + "stop", "stop\n") || ffbc_prepare(ARGV[1], "runtime", "unused", []) != 0-1
+    exit(1)
+  ccall("__w_unlink", queue + "stop")
+  << "PASS record pages: 64/65, 128/129, legacy prefix, idempotence, length/gap rejection"
+  exit(0)
 if ARGV.size() == 4 && ARGV[0] == "--prepare"
   if ffbc_prepare(ARGV[1], ARGV[2], ARGV[3], []) != 1
     exit(1)

@@ -50,7 +50,11 @@ Metaflip executable:
   output, then expands bounded batches using exact packaged small leaves.
   Packed 32-bit limbs and a full fiber-wise tensor gate support factors wider
   than the live walker. Pending recipes and exact MFW1 witnesses persist in a
-  separate spool; prices/hashes never replace verification. This first family
+  separate spool; task/result pages contain at most 64 bounded records and
+  preserve legacy per-record queues. The scale-four leaf is built by an exact
+  projection plus bounded native walk to rank 26; changed leaf identities
+  reprice their scales when a parent is offered again. Prices/hashes never
+  replace verification. This first family
   is not recursive wide search or automatic cross-shape fleet dispatch.
 - `strategies/rect_catalyst_lift2.w` and
   `strategies/macro_double_annihilation.w` retain the exact target-directed

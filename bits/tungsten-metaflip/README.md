@@ -156,13 +156,23 @@ standalone projection primitive.
 Every new input and refined output also enters native **pair composition**.
 The first bounded family pairs shared U, V or W factors, scaling the other
 two dimensions by 2, 3 and 4. Exact small leaves are built from packaged seeds;
-no Ruby/Python or catalog download is used at runtime. Each parent is priced
-once by complete-term identity. A price is only a scheduling heuristic: the
+no Ruby/Python or catalog download is used at runtime. The scale-four leaf
+projects the packaged 2x4x5/r33 seed, cleans it to rank 27, then replays a
+bounded 524,288-move native walk to an independently checked 2x4x4/r26 leaf.
+It is cached only after full tensor verification. A parent marker records
+the three leaf identities: re-offering it after a leaf change prices only
+the affected scales. There is not yet a global reverse-dependency sweep.
+A price is only a scheduling heuristic: the
 expanded tensor passes the full coefficient check before archive admission.
 Rank ties remain separate parents and outputs.
 
 `composition/` inside the spool has its own durable tasks, results, consumed
-cursor, per-shape best index and hexadecimal `MFW1` tensor objects. Packed
+cursor, per-shape best index and hexadecimal `MFW1` tensor objects. New
+task/result pages hold at most 64 bounded records with an atomic rewrite and
+payload digest; new recipes need no individual task-index files. Existing
+per-record spools remain readable, including partially completed queues and
+old leaf recipes. No previous evidence is silently deleted or rewritten.
+The digest checks serialization, not the tensor identity. Packed
 32-bit limbs support factors through 1,024 bits (16,384 terms), beyond the
 live walker's 63-bit limit. At most two expansions run after a refinement
 input, and four per idle batch, in the same single low-priority native child.
@@ -173,6 +183,8 @@ There is still no disk-byte quota.
 
 The regression **4x8x4/r94 → 4x7x4/r85 → 12x7x12/r651** now runs through
 native queue intake and expansion (12x7x12 is a permutation of 7x12x12).
+The rank-26 scale-four leaf also gives **16x7x16/r1132**, down from the native
+rank-28 leaf's 1,208. These reproduce known local constructions, not new records.
 The external parent is test-only, not redistributed. Replay with
 `spec/composition_queue_test.py NATIVE_TEST_BINARY [EXTERNAL_4x8x4]`.
 
@@ -182,7 +194,9 @@ composition and automatic cross-shape campaign dispatch remain follow-up work.
 Wide outputs are exact archived witnesses, not yet live wide-worker seeds.
 See the [native integration audit](tools/NATIVE-REFINEMENT-2026-09-08.md) for
 the first refinement milestone, and the
-[native composition audit](tools/NATIVE-COMPOSITION-2026-09-08.md) for this extension.
+[native composition audit](tools/NATIVE-COMPOSITION-2026-09-08.md) and
+[paged queue/leaf upgrade audit](tools/NATIVE-COMPOSITION-PAGES-2026-09-08.md)
+for these extensions.
 
 Alternatively, let Bit preserve the executable, runtime worker sources, and
 assets as one relocatable build tree:

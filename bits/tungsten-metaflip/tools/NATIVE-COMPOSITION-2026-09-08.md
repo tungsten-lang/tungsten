@@ -1,5 +1,9 @@
 # Native incremental pair composition — 2026-09-08
 
+This records the initial `d851dc7c` milestone. The subsequent
+[paged queue and native leaf upgrade](NATIVE-COMPOSITION-PAGES-2026-09-08.md)
+retains the same exact admission boundary.
+
 Implementation milestone, not a new rank record. Refinement inputs and outputs
 now trigger a native composition queue in ordinary square/rectangular fleets.
 The old standalone 7x7 composer is unchanged.

@@ -1,5 +1,5 @@
 #!/usr/bin/env ruby
-# Exact offline compression of audited compositions or projections.
+# Exact offline compression of audited compositions, projections or walks.
 # Never admits a rank-only claim.
 require 'json'
 require 'digest'
@@ -10,6 +10,28 @@ module MetaflipCheckedProductCompression
   B=MetaflipBudProducts
   module_function
 
+  def source_entries(report)
+    if report.key?('outputs')
+      # A present-but-empty wrapped result is never a flat-output fallback.
+      report.fetch('outputs').map do |row|
+        raise 'invalid source output' unless row.is_a?(Hash)
+        entry=row.key?('result') ? row.fetch('result') : row
+        raise 'missing source snapshot' unless entry.is_a?(Hash)
+        entry
+      end
+    else
+      # Retain rank winners, context winners AND endpoints, not just leaders.
+      report.fetch('rows').flat_map do |row|
+        raise 'invalid observer walk' unless row.is_a?(Hash) && row['contexts'].is_a?(Array)
+        entries=[row.fetch('source')]+row.fetch('trials').flat_map do |trial|
+          [trial.fetch('winner'),trial.fetch('endpoint')]+trial.fetch('observers').map{|o|o.fetch('winner')}
+        end
+        raise 'invalid walk snapshot' unless entries.all?{|e|e.is_a?(Hash) && e['shape']==row['shape']}
+        entries
+      end
+    end
+  end
+
   def run(source,root)
     source=File.expand_path(source);root=File.expand_path(root)
     raise 'output exists' if File.exist?(root)
@@ -18,15 +40,22 @@ module MetaflipCheckedProductCompression
     raise 'unfinished or unverified source' unless report['complete'] && audit['complete'] &&
       report['field']=='GF(2)' && audit['field']=='GF(2)' && !report['record_claim'] &&
       !audit['record_claim'] && audit['report_sha256']==Digest::SHA256.hexdigest(raw)
-    # Composition reports wrap snapshots in `result`; projection reports
-    # store them directly. A present-but-empty result is never a fallback.
-    entries=report.fetch('outputs').map do |row|
-      raise 'invalid source output' unless row.is_a?(Hash)
-      entry=row.key?('result') ? row.fetch('result') : row
-      raise 'missing source snapshot' unless entry.is_a?(Hash)
-      entry
+    references=source_entries(report)
+    # Validate every occurrence before deduplication, including aliases and
+    # nonwinning endpoints. A duplicate cannot hide a stale path or rank.
+    checked={}
+    references.each do |e|
+      path=File.expand_path(e.fetch('path'),source)
+      raise 'source path escapes root' unless path.start_with?(source+File::SEPARATOR)
+      raise 'unbound source' unless audit.fetch('source_sha256').fetch(e['path'])==e['sha256']
+      checked[path]||=[Digest::SHA256.file(path).hexdigest,File.open(path){|f|Integer(f.readline,10)}]
+      hash,rank=checked.fetch(path)
+      raise 'source changed' unless hash==e['sha256']
+      raise 'source rank mismatch' if e.key?('rank') && (!e['rank'].is_a?(Integer) || e['rank']!=rank)
     end
-    raise 'duplicate outputs' unless entries.map{|e|[e['shape'],e['sha256']]}.uniq.size==entries.size
+    entries=references.uniq{|e|[e['shape'],e['sha256']]}
+    raise 'duplicate outputs' if report.key?('outputs') && entries.size!=references.size
+    raise 'empty source' if entries.empty?
     FileUtils.mkdir_p(root)
     File.binwrite(File.join(root,'source-report.json'),raw)
     File.binwrite(File.join(root,'source-audit.json'),audit_raw)

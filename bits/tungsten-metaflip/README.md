@@ -851,11 +851,15 @@ primitive is now also used by live candidate admission. New replay evidence
 is compressed and deduplicated outside the checkout.
 
 For stronger offline cleanup, `tools/compress_checked_products.rb SOURCE OUTPUT`
-now accepts both audited composition reports and flat projection reports. It
+accepts audited composition, flat projection, and observer-walk reports. It
 exactly factors the matrix formed by terms sharing one factor; this is stronger
 than the live two-shared-factor XOR cleanup. The independent
 `verify_product_compression.py OUTPUT --workers 1` replays the factorization
-and complete tensors, including source-rank checks. A bounded basis-refactoring
+and complete tensors, including source-rank checks. Walk intake includes every
+rank winner, context winner, and endpoint. It checks all snapshot references
+before deduplicating by exact shape and tensor hash; stale duplicate metadata
+cannot disappear in that step. It does not run on every live flip.
+A bounded basis-refactoring
 follow-up then reached **20x23x26=6,742** and **20x23x27=6,844**, and their
 recomposition verifies **23x23x27=8,228**. See the
 [shared-factor follow-up](tools/PROJECTION-SHORTLIST-2026-09-08.md#shared-factor-matrices-and-neutral-bases)

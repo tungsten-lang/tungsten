@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Independently replay audited composition/projection compression and tensors."""
+"""Independently replay audited composition/projection/walk compression and tensors."""
 import argparse
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict
@@ -20,11 +20,21 @@ def digest(body):
 
 def source_entries(report):
     entries = []
-    for row in report['outputs']:
-        assert isinstance(row, dict)
-        entry = row['result'] if 'result' in row else row
-        assert isinstance(entry, dict)
-        entries.append(entry)
+    if 'outputs' in report:
+        for row in report['outputs']:
+            assert isinstance(row, dict)
+            entry = row['result'] if 'result' in row else row
+            assert isinstance(entry, dict)
+            entries.append(entry)
+    else:
+        for row in report['rows']:
+            assert isinstance(row, dict) and isinstance(row['contexts'], list)
+            current = [row['source']]
+            for trial in row['trials']:
+                current.extend((trial['winner'], trial['endpoint']))
+                current.extend(o['winner'] for o in trial['observers'])
+            assert all(isinstance(e, dict) and e['shape'] == row['shape'] for e in current)
+            entries.extend(current)
     return entries
 
 
@@ -67,8 +77,13 @@ def verify(root, workers=2):
     assert prior['complete'] and audit['complete'] and audit['report_sha256'] == digest(prior_raw)
     assert prior['field'] == audit['field'] == 'GF(2)'
     assert not prior['record_claim'] and not audit['record_claim']
-    expected = {(tuple(e['shape']), e['sha256']): e for e in source_entries(prior)}
-    assert len(expected) == len(prior['outputs']) == report['inputs'] == len(report['rows'])
+    references, expected = source_entries(prior), {}
+    for entry in references:
+        assert audit['source_sha256'][entry['path']] == entry['sha256']
+        expected.setdefault((tuple(entry['shape']), entry['sha256']), entry)
+    assert expected and len(expected) == report['inputs'] == len(report['rows'])
+    if 'outputs' in prior:
+        assert len(expected) == len(references)
     seen = set()
     for row in report['rows']:
         source, copied = row['source'], row['input']
@@ -82,6 +97,11 @@ def verify(root, workers=2):
         assert row['rank_before'] == int(original.splitlines()[0])
         if 'rank' in source:
             assert type(source['rank']) is int and source['rank'] == row['rank_before']
+    ranks = {(tuple(r['source']['shape']), r['source']['sha256']): r['rank_before'] for r in report['rows']}
+    for entry in references:
+        # Check metadata on duplicate references too, not just the representative.
+        if 'rank' in entry:
+            assert type(entry['rank']) is int and entry['rank'] == ranks[tuple(entry['shape']), entry['sha256']]
     pins, tensors = {}, {}
     with ProcessPoolExecutor(max_workers=workers, mp_context=multiprocessing.get_context('fork')) as pool:
         for i, entries in enumerate(pool.map(check_row, ((root, r) for r in report['rows'])), 1):

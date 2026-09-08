@@ -9,7 +9,7 @@ from verify_product_compression import check_row, digest, source_entries, verify
 
 
 class ProductCompressionTest(unittest.TestCase):
-    def run_fixture(self, flat=False):
+    def run_fixture(self, flat=False, walk=False):
         with tempfile.TemporaryDirectory(prefix='metaflip-compression-test-') as directory:
             root = Path(directory);source = root/'source';source.mkdir()
             entries = []
@@ -21,11 +21,16 @@ class ProductCompressionTest(unittest.TestCase):
                 body = (str(len(terms))+'\n'+''.join(' '.join(map(str,t))+'\n' for t in terms)).encode()
                 name = 'x'.join(map(str,shape))+'.txt';(source/name).write_bytes(body)
                 entry = dict(path=name, shape=shape, sha256=digest(body))
-                if flat:
+                if flat or walk:
                     entry['rank'] = len(terms)
                 entries.append(entry)
             prior = dict(complete=True, field='GF(2)', record_claim=False,
                          outputs=entries if flat else [dict(result=e) for e in entries])
+            if walk:
+                del prior['outputs']
+                # Repeated rank/context snapshots must not suppress endpoints.
+                prior['rows'] = [dict(shape=e['shape'], source=e, contexts=[], trials=[
+                    dict(winner=e, endpoint=copy.deepcopy(e), observers=[dict(winner=e)])]) for e in entries]
             raw = (json.dumps(prior)+'\n').encode();(source/'report.json').write_bytes(raw)
             audit = dict(complete=True, field='GF(2)', record_claim=False,
                          report_sha256=digest(raw), source_sha256={e['path']:e['sha256'] for e in entries})
@@ -41,6 +46,9 @@ class ProductCompressionTest(unittest.TestCase):
             self.assertEqual(result['rank_saved'], 4)
             self.assertEqual(result['tensors'], 4)
             report = json.loads((out/'report.json').read_text())
+            if walk:
+                self.assertEqual(report['inputs'], 2)
+                self.check_duplicate_walk_corruption(source, out, root, tool, prior, audit, report)
             bad = copy.deepcopy(report['rows'][0]);bad['rank_after'] += 1
             self.assertRaises(AssertionError, check_row, (out,bad))
             bad = copy.deepcopy(report['rows'][1]);bad['max_bits'] = 256
@@ -85,6 +93,49 @@ class ProductCompressionTest(unittest.TestCase):
 
     def test_flat_projection_replay_and_rank_corruption(self):
         self.run_fixture(flat=True)
+
+    def test_observer_walk_replay_dedup_and_corruption(self):
+        self.run_fixture(walk=True)
+
+    def check_duplicate_walk_corruption(self, source, out, root, tool, prior, audit, report):
+        # Re-pin a wrong rank only on a duplicate endpoint. Both implementations
+        # must reject it before deduplication can discard the corrupted entry.
+        broken = copy.deepcopy(prior)
+        broken['rows'][0]['trials'][0]['endpoint']['rank'] += 1
+        raw = (json.dumps(broken)+'\n').encode()
+        bad_audit = dict(audit, report_sha256=digest(raw))
+        audit_raw = (json.dumps(bad_audit)+'\n').encode()
+        bad_report = dict(report, source_report_sha256=digest(raw), source_audit_sha256=digest(audit_raw))
+        originals = {name:(out/name).read_bytes() for name in ('source-report.json','source-audit.json','report.json')}
+        (out/'source-report.json').write_bytes(raw)
+        (out/'source-audit.json').write_bytes(audit_raw)
+        (out/'report.json').write_text(json.dumps(bad_report)+'\n')
+        self.assertRaises(AssertionError, verify, out, workers=1)
+        for name, body in originals.items():
+            (out/name).write_bytes(body)
+        (source/'report.json').write_bytes(raw)
+        (source/'independent-audit.json').write_bytes(audit_raw)
+        run = subprocess.run(['ruby', str(tool), str(source), str(root/'bad-duplicate')],
+                             capture_output=True, text=True, check=False)
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn('source rank mismatch', run.stderr)
+        # An unbound alias cannot be ignored either, even with identical SHA.
+        broken['rows'][0]['trials'][0]['endpoint'] = dict(broken['rows'][0]['source'], path='unbound.txt')
+        raw = (json.dumps(broken)+'\n').encode()
+        bad_audit['report_sha256'] = digest(raw)
+        (source/'report.json').write_bytes(raw)
+        (source/'independent-audit.json').write_text(json.dumps(bad_audit)+'\n')
+        run = subprocess.run(['ruby', str(tool), str(source), str(root/'bad-alias')],
+                             capture_output=True, text=True, check=False)
+        self.assertNotEqual(run.returncode, 0)
+
+    def test_walk_extraction_keeps_each_role_and_rejects_shape_drift(self):
+        snapshots = [dict(shape=[1,2,2], path=f'{i}.txt', sha256=str(i)*64, rank=4) for i in range(4)]
+        row = dict(shape=[1,2,2], source=snapshots[0], contexts=[], trials=[
+            dict(winner=snapshots[1], endpoint=snapshots[2], observers=[dict(winner=snapshots[3])])])
+        self.assertEqual(source_entries(dict(rows=[row])), snapshots)
+        row['trials'][0]['endpoint'] = dict(snapshots[2], shape=[1,2,3])
+        self.assertRaises(AssertionError, source_entries, dict(rows=[row]))
 
     def test_present_result_never_falls_back_to_flat_snapshot(self):
         entry = dict(shape=[1,2,2], path='input.txt', sha256='a'*64, rank=4)

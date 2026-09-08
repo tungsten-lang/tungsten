@@ -57543,7 +57543,16 @@ static int32_t w_prime_sub_mag_inplace(uint64_t *a, int32_t alen, const uint64_t
  * required for EVEN moduli, whose limb 0 has no inverse mod 2^64). The prime
  * paths always pass W_MONT_MAX_LIMBS with an odd modulus; bigint_powmod_any
  * passes 0 for even moduli and its own cap for odd ones. */
-static void w_prime_modctx_init_cap(WPrimeModCtx *ctx, WValue modulus, int32_t mont_cap) {
+/* powm_only: the caller is bigint_powmod_any's Montgomery ladder, which
+ * enters the domain by one division (x·B^k mod n, see w_powm_mont_enter) and
+ * never touches R², one_m, (n−1)_m or Barrett's μ.  Skipping them removes a
+ * 2k-by-k division and two Montgomery multiplies of pure setup — for RSA-style
+ * public exponents (3, 65537) that setup was most of the call.  The idea comes
+ * from the EIP-8200 MODEXP work: convert into Montgomery form by shifting the
+ * operand limb by limb and reducing, instead of multiplying by a precomputed
+ * R² mod n. */
+static void w_prime_modctx_init_cap_mode(WPrimeModCtx *ctx, WValue modulus,
+                                         int32_t mont_cap, int powm_only) {
     uint64_t sm;
     int32_t mlen;
     const uint64_t *mlimbs = integer_limbs(modulus, &sm, &mlen);
@@ -57553,14 +57562,22 @@ static void w_prime_modctx_init_cap(WPrimeModCtx *ctx, WValue modulus, int32_t m
     ctx->sloti = 0;
     ctx->bkp1 = w_bigint_pow_base_limbs(mlen + 1);
 
-    WBigint *b2k = bigint_alloc(2 * mlen + 1);
-    b2k->limbs[2 * mlen] = 1ULL;
-    b2k->size = 2 * mlen + 1;
-    WBigint *mu;
+    /* Domain policy first: k=1 and 3..mont_cap use Montgomery; k=2 keeps the
+     * register-Barrett fast path and large k keeps Barrett (subquadratic
+     * muls).  A powm-only Montgomery context skips every constant below. */
+    int mont = mont_cap > 0 && (mlen == 1 || (mlen >= 3 && mlen <= mont_cap));
+    int skip_constants = powm_only && mont;
+
+    WBigint *mu = NULL;
     WBigint *r2rem = NULL;      /* b^2k mod n = R² mod n — Montgomery's constant */
-    mag_divmod(b2k->limbs, b2k->size, mlimbs, mlen, &mu, &r2rem);
-    bigint_backing_free(b2k);
-    ctx->mu = bigint_normalize(mu);
+    if (!skip_constants) {
+        WBigint *b2k = bigint_alloc(2 * mlen + 1);
+        b2k->limbs[2 * mlen] = 1ULL;
+        b2k->size = 2 * mlen + 1;
+        mag_divmod(b2k->limbs, b2k->size, mlimbs, mlen, &mu, &r2rem);
+        bigint_backing_free(b2k);
+    }
+    ctx->mu = mu ? bigint_normalize(mu) : W_NIL;
 
     /* work-buffer layout (see w_prime_modctx_reduce_limbs), sized to the ACTUAL
      * Barrett scratch, not three temporaries: a 4k product region + six regions
@@ -57576,9 +57593,7 @@ static void w_prime_modctx_init_cap(WPrimeModCtx *ctx, WValue modulus, int32_t m
         ctx->slotv[i] = bigint_box(ctx->slot[i]);
     }
 
-    /* Domain setup. k=1 and 3..mont_cap use Montgomery; k=2 keeps the
-     * register-Barrett fast path and large k keeps Barrett (subquadratic muls). */
-    ctx->mont = mont_cap > 0 && (mlen == 1 || (mlen >= 3 && mlen <= mont_cap));
+    ctx->mont = mont;
     ctx->nprime = 0;
     ctx->r2b = NULL;
     ctx->r2v = 0;
@@ -57586,7 +57601,9 @@ static void w_prime_modctx_init_cap(WPrimeModCtx *ctx, WValue modulus, int32_t m
     ctx->nm1mb = bigint_alloc(mlen + 2);
     ctx->onemv = bigint_box(ctx->onemb);
     ctx->nm1mv = bigint_box(ctx->nm1mb);
-    if (ctx->mont) {
+    if (skip_constants) {
+        ctx->nprime = 0ULL - w_mont_ninv(mlimbs[0]);
+    } else if (ctx->mont) {
         ctx->nprime = 0ULL - w_mont_ninv(mlimbs[0]);
         ctx->r2b = r2rem;
         ctx->r2v = bigint_box(r2rem);
@@ -57612,8 +57629,56 @@ static void w_prime_modctx_init_cap(WPrimeModCtx *ctx, WValue modulus, int32_t m
     }
 }
 
+static void w_prime_modctx_init_cap(WPrimeModCtx *ctx, WValue modulus, int32_t mont_cap) {
+    w_prime_modctx_init_cap_mode(ctx, modulus, mont_cap, 0);
+}
+
 static void w_prime_modctx_init(WPrimeModCtx *ctx, WValue modulus) {
-    w_prime_modctx_init_cap(ctx, modulus, W_MONT_MAX_LIMBS);
+    w_prime_modctx_init_cap_mode(ctx, modulus, W_MONT_MAX_LIMBS, 0);
+}
+
+/* Montgomery domain entry by division: out = x·B^k mod n for a reduced k-limb
+ * x (high-zero padded).  One 2k-by-k division replaces MontMul(x, R²) and the
+ * R² = B^2k mod n division behind it. */
+static void w_powm_mont_enter(uint64_t *out, const uint64_t *x, int32_t k,
+                              const uint64_t *n) {
+    int32_t xl = k;
+    while (xl > 0 && x[xl - 1] == 0) xl--;
+    if (xl == 0) {
+        for (int32_t j = 0; j < k; j++) out[j] = 0;
+        return;
+    }
+    uint64_t *u = (uint64_t *)calloc((size_t)(k + xl), sizeof(uint64_t));
+    for (int32_t j = 0; j < xl; j++) u[k + j] = x[j];
+    WBigint *rem = NULL;
+    mag_divmod(u, k + xl, n, k, NULL, &rem);
+    free(u);
+    int32_t rl = rem->size < 0 ? -rem->size : rem->size;
+    for (int32_t j = 0; j < rl; j++) out[j] = rem->limbs[j];
+    for (int32_t j = rl; j < k; j++) out[j] = 0;
+    bigint_backing_free(rem);
+}
+
+static inline int w_powm_bit(const uint64_t *l, int32_t len, int i);
+static inline int w_powm_bits(const uint64_t *l, int32_t len, int lo, int cnt);
+
+/* Highest odd-power table row the sliding window over e will read: replays
+ * the ladder's window selection without arithmetic, so a fixed exponent such
+ * as 65537 = 2^16 + 1 (windows "1" and "1") builds no b², b³ at all. */
+static int32_t w_powm_table_rows_used(const uint64_t *el, int32_t elen, int eb,
+                                      int wbits) {
+    int32_t maxidx = 0;
+    int i = eb - 1;
+    while (i >= 0) {
+        if (!w_powm_bit(el, elen, i)) { i--; continue; }
+        int l = i - wbits + 1;
+        if (l < 0) l = 0;
+        while (!w_powm_bit(el, elen, l)) l++;
+        int32_t idx = (int32_t)(w_powm_bits(el, elen, l, i - l + 1) >> 1);
+        if (idx > maxidx) maxidx = idx;
+        i = l - 1;
+    }
+    return maxidx + 1;
 }
 
 static void w_prime_modctx_fini(WPrimeModCtx *ctx) {
@@ -58673,12 +58738,17 @@ WValue bigint_powmod_any(WValue base, WValue expv, WValue modv) {
     }
 
     WPrimeModCtx ctx;
-    w_prime_modctx_init_cap(&ctx, modmag,
-                            (ml[0] & 1ULL) ? W_POWM_MONT_MAX_LIMBS : 0);
+    /* The raw-row ladder below (odd modulus, k >= 3) enters the domain by
+     * division and needs none of the context's Montgomery constants. */
+    w_prime_modctx_init_cap_mode(&ctx, modmag,
+                                 (ml[0] & 1ULL) ? W_POWM_MONT_MAX_LIMBS : 0,
+                                 (ml[0] & 1ULL) && mabs >= 3);
     int32_t k = ctx.limbs, cap = k + 2;
     int wbits = w_powm_window_bits(eb);
     int32_t tcount = 1 << (wbits - 1);
     int32_t elen = le < 0 ? -le : le;
+    /* Only the odd-power rows the exponent's windows actually select. */
+    int32_t tused = w_powm_table_rows_used(el, elen, eb, wbits);
 
     if (ctx.mont && k >= 3) {
         /* Fast Montgomery ladder on raw k-limb rows: direct dispatcher +
@@ -58763,14 +58833,11 @@ WValue bigint_powmod_any(WValue base, WValue expv, WValue modv) {
          * per call). */
         if (r0v != base && w_is_bigint(r0v))
             bigint_release_if_live(w_as_bigint(r0v));
-        {   /* domain entry: tbl[0] = MontMul(base, R²) = base·R */
-            WBigint *r2 = ctx.r2b;
-            int32_t r2l = r2->size < 0 ? -r2->size : r2->size;
-            w_powm_mont_mul(W_POWM_ROW(0), x, r2->limbs, r2l, k, nl, np0, np1, mip, T);
-        }
-        if (tcount > 1) {                           /* odd powers via base² (staged in x) */
+        /* domain entry: tbl[0] = base·R mod n by one division (no R²) */
+        w_powm_mont_enter(W_POWM_ROW(0), x, k, nl);
+        if (tused > 1) {                            /* odd powers via base² (staged in x) */
             w_powm_mont_sqr(x, W_POWM_ROW(0), k, nl, np0, np1, mip, T);
-            for (int32_t t = 1; t < tcount; t++)
+            for (int32_t t = 1; t < tused; t++)
                 w_powm_mont_mul(W_POWM_ROW(t), W_POWM_ROW(t - 1), x, k, k,
                                 nl, np0, np1, mip, T);
         }
@@ -58848,9 +58915,9 @@ WValue bigint_powmod_any(WValue base, WValue expv, WValue modv) {
         for (int32_t i = 0; i < bs; i++) tbl[0]->limbs[i] = xbuf->limbs[i];
         tbl[0]->size = bs;
     }
-    if (tcount > 1) {
+    if (tused > 1) {
         gg->size = w_prime_modctx_sqr_bigint_into(gg, &ctx, tbl[0]);
-        for (int32_t t = 1; t < tcount; t++)
+        for (int32_t t = 1; t < tused; t++)
             tbl[t]->size = w_prime_modctx_mul_bigint_into(tbl[t], &ctx, tbl[t - 1], gg);
     }
 

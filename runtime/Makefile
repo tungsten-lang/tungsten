@@ -98,6 +98,12 @@ bench_wvalue: bench_wvalue.c $(RUNTIME_DEPS) w_char_table.c
 bench-bigint: bench_bigint
 	./bench_bigint
 
+bench-powmod: bench_powmod
+	./bench_powmod
+
+bench_powmod: bench_powmod.c $(RUNTIME_DEPS) w_char_table.c
+	$(CLANG) $(BENCH_FLAGS) $(RUNTIME_CFLAGS) bench_powmod.c terminal_input.c ssmr_witness.c $(EVENT_SRC) $(TLS_IMPL) aks.c $(METAL_SRC) $(RUNTIME_LDFLAGS) -o bench_powmod
+
 bench_bigint: bench_bigint.c $(RUNTIME_DEPS) w_char_table.c
 	$(CLANG) $(BENCH_FLAGS) $(RUNTIME_CFLAGS) bench_bigint.c terminal_input.c ssmr_witness.c $(EVENT_SRC) $(TLS_IMPL) aks.c $(METAL_SRC) $(RUNTIME_LDFLAGS) -o bench_bigint
 

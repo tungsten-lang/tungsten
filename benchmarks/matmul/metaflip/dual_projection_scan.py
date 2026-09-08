@@ -58,6 +58,31 @@ def anchored_dual_family(shape, keep, all_anchors=False):
     return count, generate()
 
 
+def dual_neighborhood(shape, keep, center, radius):
+    """All admissible kernel pairs within a bounded concatenated bit radius."""
+    validate_keep(shape, keep)
+    if not isinstance(center, dict) or set(center) != {'dimension', 'u', 'v'}:
+        raise ValueError('dual center must specify dimension, u and v')
+    d, u, v = (center[k] for k in ('dimension', 'u', 'v'))
+    if type(d) is not int or d not in (0, 1, 2):
+        raise ValueError('invalid dual center dimension')
+    canonical, _, _ = dual_maps(shape[d], u, v)
+    if tuple(keep[d]) != canonical:
+        raise ValueError('dual center keep must use the canonical pivot')
+    if type(radius) is not int or not 1 <= radius <= 3:
+        raise ValueError('dual edit radius must be in 1..3')
+    n = shape[d]
+    def generate():
+        for size in range(radius+1):
+            for bits in combinations(range(2*n), size):
+                du = sum(1 << bit for bit in bits if bit < n)
+                dv = sum(1 << (bit-n) for bit in bits if bit >= n)
+                a, b = u ^ du, v ^ dv
+                if a and b and (a & b).bit_count() % 2:
+                    yield dict(dimension=d, u=a, v=b)
+    return sum(1 for _ in generate()), generate()
+
+
 class WordMap:
     """Map one shared coordinate after restricting the other coordinate."""
     def __init__(self, ids, words, n, other_extent, row_coordinate):

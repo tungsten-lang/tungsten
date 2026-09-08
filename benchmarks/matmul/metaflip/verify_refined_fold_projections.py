@@ -54,7 +54,14 @@ def project_anchored_dual(row, terms):
 
 def project_reduced_fold(row, terms):
     if 'dual' in row:
-        child = project_anchored_dual(row, terms)
+        if 'dual_center' in row:
+            shape, seed, center, dual = row['parent_shape'], row['seed_keep'], row['dual_center'], row['dual']
+            project_dual_grid(dict(parent_shape=shape, keep=seed, dual=center), [])
+            assert center['dimension'] == dual['dimension']
+            assert all(row['keep'][i] == seed[i] for i in range(3) if i != center['dimension'])
+            child = project_dual_grid(row, terms)
+        else:
+            child = project_anchored_dual(row, terms)
     else:
         child = project_joint_fold_grid(row, terms) if 'folds' in row else project_fold_grid(row, terms)
     assert type(row['raw_rank']) is int and row['raw_rank'] == len(child)
@@ -68,9 +75,11 @@ def verify(root, workers=1):
     report = json.loads((root/'report.json').read_bytes())
     assert report['projection_kind'] in ('bounded_fold_then_shared_pair_reduction',
                                         'bounded_joint_fold_then_shared_pair_reduction',
-                                        'anchored_dual_then_shared_pair_reduction')
+                                        'anchored_dual_then_shared_pair_reduction',
+                                        'bounded_dual_neighborhood_then_shared_pair_reduction')
     joint = report['projection_kind'] == 'bounded_joint_fold_then_shared_pair_reduction'
     dual = report['projection_kind'] == 'anchored_dual_then_shared_pair_reduction'
+    neighborhood = report['projection_kind'] == 'bounded_dual_neighborhood_then_shared_pair_reduction'
     limits = report['limits']; order = limits['pair_order']; weight = limits['max_mask_weight']
     assert type(weight) is int and 0 <= weight <= 3
     assert len(order) == 3 and all(type(i) is int for i in order) and sorted(order) == [0, 1, 2]
@@ -78,10 +87,21 @@ def verify(root, workers=1):
     assert type(axes) is int and axes in (1, 2, 3)
     if dual:
         assert type(limits['dual_kernel_extra_bits']) is int and limits['dual_kernel_extra_bits'] == 1
+    if neighborhood:
+        radius = limits['dual_edit_radius']
+        assert type(radius) is int and 1 <= radius <= 3
     for row in report['outputs']:
         assert row['reduction_order'] == order
-        if dual:
+        if dual or neighborhood:
             assert 'fold' not in row and 'folds' not in row and 'dual' in row
+            if neighborhood:
+                assert 'dual_anchor' not in row
+                center, target = row['dual_center'], row['dual']
+                assert set(center) == set(target) == {'dimension', 'u', 'v'}
+                assert all(type(value[k]) is int for value in (center, target) for k in ('u', 'v'))
+                assert (center['u'] ^ target['u']).bit_count()+(center['v'] ^ target['v']).bit_count() <= radius
+            else:
+                assert 'dual_center' not in row
             continue
         assert 'dual' not in row
         if joint:

@@ -801,6 +801,15 @@ CPU time by 16.8% in a matched 1,690-view replay with identical retained tensors
 The all-anchor follow-up verifies 20x23x29 at 7,430 and a 21x23x29 block at
 8,097, with six lower local composition prices and no new reference crossing.
 This is an offline workload measurement, not a live-fleet speedup.
+The same runner can now refine an audited paired map with
+`--dual-edit-radius 1`, `2`, or `3`, with exact preflight limits and independent
+map/cleanup replay. The initial neighborhoods tied the existing ranks; varied
+cleanup orders retained a second exact 7,430-term representation for downstream
+search, not a new rank record.
+Replaying downward projections of those parents then verified 20x23x28=6,970
+(previously 6,982), and its 21x23x28 block at 7,614. Seventeen local prices
+improved; the cumulative cohort is 389 shapes (55 expanded, 334 recipe-only),
+with no additional reference crossing or confirmed world record.
 
 `tools/composition_closure.rb` checks candidates against a verified recursive
 block/Kronecker library and propagates useful candidates to other shapes.

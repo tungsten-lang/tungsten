@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Refine audited coordinate winners with bounded folds, then exact pair cleanup.
+"""Refine audited coordinate or dual winners, then apply exact pair cleanup.
 
-Only the supplied keep sets and one-sided masks up to the requested Hamming
-weight are searched. This is not an exhaustive linear-map or rank search.
+Search bounded folds, sparse paired kernels, or bit neighborhoods of a
+retained paired map. This is not an exhaustive linear-map or rank search.
 """
 import argparse
 import hashlib
@@ -73,7 +73,16 @@ def fold_family(shape, keep, max_weight, max_axes=1):
     return count, generate()
 
 
-def refinement_family(shape, keep, max_weight, max_axes, dual_kernels, all_dual_anchors=False):
+def refinement_family(shape, keep, max_weight, max_axes, dual_kernels, all_dual_anchors=False,
+                      dual_center=None, dual_edit_radius=None):
+    if dual_edit_radius is not None:
+        if (dual_kernels or all_dual_anchors or type(max_weight) is not int or max_weight != 1 or
+            type(max_axes) is not int or max_axes != 1):
+            raise ValueError('dual neighborhoods cannot combine with fold or anchor-family options')
+        from dual_projection_scan import dual_neighborhood
+        return dual_neighborhood(shape, keep, dual_center, dual_edit_radius)
+    if dual_center is not None:
+        raise ValueError('a dual center requires an edit radius')
     if all_dual_anchors and not dual_kernels:
         raise ValueError('all dual anchors requires the dual-kernel mode')
     if dual_kernels:
@@ -84,10 +93,12 @@ def refinement_family(shape, keep, max_weight, max_axes, dual_kernels, all_dual_
     return fold_family(shape, keep, max_weight, max_axes)
 
 
-def scan_map(entry, keep, baseline, max_weight=1, order=(0, 1, 2), max_views=2000, max_axes=1, dual_kernels=False, all_dual_anchors=False):
+def scan_map(entry, keep, baseline, max_weight=1, order=(0, 1, 2), max_views=2000, max_axes=1,
+             dual_kernels=False, all_dual_anchors=False, dual_center=None, dual_edit_radius=None):
     if len(order) != 3 or any(type(i) is not int for i in order) or sorted(order) != [0, 1, 2]:
         raise ValueError('invalid pair order')
-    count, family = refinement_family(entry['shape'], keep, max_weight, max_axes, dual_kernels, all_dual_anchors)
+    count, family = refinement_family(entry['shape'], keep, max_weight, max_axes, dual_kernels, all_dual_anchors,
+                                      dual_center, dual_edit_radius)
     if type(max_views) is not int or max_views < count:
         raise ValueError(f'fold family needs {count} views, exceeding the allowance')
     start = time.process_time()
@@ -95,17 +106,18 @@ def scan_map(entry, keep, baseline, max_weight=1, order=(0, 1, 2), max_views=200
     if hashlib.sha256(raw).hexdigest() != entry['sha256']:
         raise ValueError('source changed')
     terms = parse_terms(raw, entry['rank'])
-    if dual_kernels:
+    paired = dual_kernels or dual_edit_radius is not None
+    if paired:
         from dual_projection_scan import DualProjectionCache, dual_maps
         cache = DualProjectionCache(entry['shape'], terms)
     else:
         cache = (FoldCache(entry['shape'], terms) if max_axes == 1 else JointFoldCache(entry['shape'], terms, keep))
     shape = tuple(map(len, keep))
-    fold_key = 'dual' if dual_kernels else ('fold' if max_axes == 1 else 'folds')
+    fold_key = 'dual' if paired else ('fold' if max_axes == 1 else 'folds')
     best, control, trials, changed = None, None, [], 0
     for fold in family:
         actual_keep, detail = keep, {}
-        if dual_kernels:
+        if paired:
             anchor, anchor_keep = None, keep
             if fold is None:
                 child = cache.base.restrict(keep, True)
@@ -117,7 +129,8 @@ def scan_map(entry, keep, baseline, max_weight=1, order=(0, 1, 2), max_views=200
                 anchor_keep = list(keep)
                 anchor_keep[d] = tuple(i for i in range(entry['shape'][d]) if i != anchor)
                 child = cache.restrict(actual_keep, d, u, v)
-            detail = dict(seed_keep=anchor_keep, dual_anchor=anchor)
+            detail = (dict(seed_keep=keep, dual_center=dict(dual_center)) if dual_edit_radius is not None else
+                      dict(seed_keep=anchor_keep, dual_anchor=anchor))
         elif max_axes > 1:
             child = cache.restrict(fold)
         else:
@@ -128,7 +141,7 @@ def scan_map(entry, keep, baseline, max_weight=1, order=(0, 1, 2), max_views=200
         changed += bool(trace)
         row = dict(shape=shape, keep=actual_keep, **{fold_key: fold}, **detail, rank=len(child), raw_rank=raw_rank,
                    baseline=baseline, reduction_order=order, reduction_trace=trace)
-        if not fold:
+        if not fold or (dual_edit_radius is not None and fold == dual_center):
             control = dict(raw_rank=raw_rank, rank=len(child))
         trials.append(dict(**{fold_key: fold}, raw_rank=raw_rank, rank=len(child)))
         if best is None or len(child) < best['rank']:
@@ -139,7 +152,8 @@ def scan_map(entry, keep, baseline, max_weight=1, order=(0, 1, 2), max_views=200
                 cpu_seconds=time.process_time()-start)
 
 
-def run(seeds, prices_path, output, max_weight=1, order=(0, 1, 2), max_views=2000, max_axes=1, dual_kernels=False, all_dual_anchors=False):
+def run(seeds, prices_path, output, max_weight=1, order=(0, 1, 2), max_views=2000, max_axes=1,
+        dual_kernels=False, all_dual_anchors=False, dual_edit_radius=None):
     output = Path(output).resolve()
     if output.exists():
         raise ValueError('output must not exist')
@@ -172,8 +186,14 @@ def run(seeds, prices_path, output, max_weight=1, order=(0, 1, 2), max_views=200
         if type(index) is not int or not 0 <= index < len(source['outputs']):
             raise ValueError('invalid seed output index')
         row = source['outputs'][index]
-        if row.get('fold') is not None or row.get('folds') or row.get('dual') is not None:
+        if dual_edit_radius is not None:
+            if row.get('dual') is None or row.get('fold') is not None or row.get('folds'):
+                raise ValueError('dual neighborhoods require an audited paired-map seed')
+            center = row['dual']
+        elif row.get('fold') is not None or row.get('folds') or row.get('dual') is not None:
             raise ValueError('seed must be a coordinate map, not an existing fold')
+        else:
+            center = None
         if audit['source_sha256'][row['path']] != row['sha256'] or hashlib.sha256(
                 blob(contained(root, row['path']))).hexdigest() != row['sha256']:
             raise ValueError('seed tensor changed')
@@ -184,14 +204,15 @@ def run(seeds, prices_path, output, max_weight=1, order=(0, 1, 2), max_views=200
             raise ValueError('seed parent changed')
         entry = dict(shape=row['parent_shape'], path=str(path), sha256=row['parent_sha256'],
                      rank=int(data.splitlines()[0]))
-        count, _ = refinement_family(entry['shape'], row['keep'], max_weight, max_axes, dual_kernels, all_dual_anchors)
+        count, _ = refinement_family(entry['shape'], row['keep'], max_weight, max_axes, dual_kernels, all_dual_anchors,
+                                     center, dual_edit_radius)
         if count > max_views:
             raise ValueError(f'fold family needs {count} views, exceeding the allowance')
-        selected.append((entry, row['keep'], dict(root=str(root), index=index)))
+        selected.append((entry, row['keep'], dict(root=str(root), index=index), center))
     for name in ('refine_fold_projections.py', 'fold_projection_scan.py', 'projection_composition_scan.py',
                  'pair_reduction_scan.py', 'extend_composition_parents.py', 'verify_representation_portfolio.py'):
         blob(Path(__file__).with_name(name))
-    if dual_kernels:
+    if dual_kernels or dual_edit_radius is not None:
         blob(Path(__file__).with_name('dual_projection_scan.py'))
     output.mkdir(); (output/'parents').mkdir(); (output/'tensors').mkdir()
     report = dict(complete=False, field='GF(2)', record_claim=False, redistribution_cleared=False,
@@ -208,6 +229,10 @@ def run(seeds, prices_path, output, max_weight=1, order=(0, 1, 2), max_views=200
         report['limits'].update(dual_kernel_extra_bits=1, fixed_keep_sets=False,
                                 other_axis_keeps_fixed=True, canonical_least_pivot=True)
         if all_dual_anchors: report['limits']['all_dual_anchors'] = True
+    if dual_edit_radius is not None:
+        report['projection_kind'] = 'bounded_dual_neighborhood_then_shared_pair_reduction'
+        report['limits'].update(dual_edit_radius=dual_edit_radius, fixed_keep_sets=False,
+                                other_axis_keeps_fixed=True, canonical_least_pivot=True)
     start, seen = time.monotonic(), set()
 
     def save():
@@ -217,8 +242,9 @@ def run(seeds, prices_path, output, max_weight=1, order=(0, 1, 2), max_views=200
         pending.replace(output/'report.json')
 
     save()
-    for index, (entry, keep, seed) in enumerate(selected):
-        result = scan_map(entry, keep, prices[tuple(sorted(map(len, keep)))], max_weight, order, max_views, max_axes, dual_kernels, all_dual_anchors)
+    for index, (entry, keep, seed, center) in enumerate(selected):
+        result = scan_map(entry, keep, prices[tuple(sorted(map(len, keep)))], max_weight, order, max_views, max_axes,
+                          dual_kernels, all_dual_anchors, center, dual_edit_radius)
         row = result.pop('winner'); child = row.pop('terms')
         if row['identity'] not in seen:
             seen.add(row['identity'])
@@ -251,8 +277,11 @@ if __name__ == '__main__':
                    help='balanced shell: each paired kernel is the deleted unit plus at most one extra unit')
     p.add_argument('--all-dual-anchors', action='store_true',
                    help='try every shared anchor, keeping the other dimensions fixed; requires --dual-kernels')
+    p.add_argument('--dual-edit-radius', type=int, choices=(1, 2, 3),
+                   help='refine an audited paired map within this total u/v bit-edit distance')
     p.add_argument('--max-views-per-seed', type=int, default=2000)
     p.add_argument('--pair-order', default='0,1,2')
     a = p.parse_args()
     seeds = [(root, int(index)) for root, index in (s.rsplit(':', 1) for s in a.seed)]
-    run(seeds, a.prices, a.output, a.max_mask_weight, tuple(map(int, a.pair_order.split(','))), a.max_views_per_seed, a.max_folded_axes, a.dual_kernels, a.all_dual_anchors)
+    run(seeds, a.prices, a.output, a.max_mask_weight, tuple(map(int, a.pair_order.split(','))), a.max_views_per_seed,
+        a.max_folded_axes, a.dual_kernels, a.all_dual_anchors, a.dual_edit_radius)

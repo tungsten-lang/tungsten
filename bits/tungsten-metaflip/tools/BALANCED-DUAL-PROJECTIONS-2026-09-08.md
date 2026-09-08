@@ -144,3 +144,92 @@ and a checked manifest. Ancestry inputs are resolved by content hash; large
 input tables are losslessly compressed. The source-only commit excludes
 imported tensors and generated witnesses. The expanded block has not yet been
 readmitted as a literal parent for another pricing pass.
+
+## Refining a retained paired map
+
+`--dual-edit-radius 1`, `2`, or `3` explores an audited paired-map winner's
+neighborhood, instead of returning to coordinate or weight-two kernels. An
+edit toggles one bit in the concatenated `(u,v)` pair. The family contains
+every nonzero pair at the declared total bit distance with odd inner product,
+including the center first. It retains the canonical least-pivot basis and
+fixes the other dimensions' keep sets. It does not walk the tensor's terms.
+
+```sh
+nice -n 10 python3 -B benchmarks/matmul/metaflip/refine_fold_projections.py \
+  --seed AUDITED_PAIRED_DIRECTORY:OUTPUT_INDEX \
+  --prices PRICE_PLAN --output NEW_SCAN \
+  --dual-edit-radius 2 --max-views-per-seed 2000
+nice -n 10 python3 -B benchmarks/matmul/metaflip/verify_refined_fold_projections.py \
+  --root NEW_SCAN --output NEW_SCAN/independent-audit.json --workers 1
+```
+
+Neighborhood mode requires a previously audited paired-map seed and rejects
+mixed anchor/fold-family options. Its exact size is checked before opening a
+parent or allocating caches. The independent checker reconstructs the maps,
+checks the declared bit distance and unchanged other-axis coordinates, then
+replays cleanup and the complete tensor. It certifies retained constructions,
+not every trial rank, seed-lineage history, or an exhaustive rank minimum.
+
+The two-bit runs tested 977 maps around the 20x23x29 winner and 1,409 around
+the 19x24x27 winner. They tied 7,430 and 6,854, respectively, in 74.77 seconds
+CPU. A three-bit run around the first winner tested 13,725 maps in 222.66
+seconds CPU and also tied 7,430. The first 977 maps are included in that wider
+family, so these runs cover 15,134 distinct parent/map combinations, not
+16,111. These are finite negative search results, not optimality claims.
+
+Five alternate cleanup orders added 4,885 evaluations of the first two-bit
+family in 95.62 seconds CPU. All tied 7,430. Orders beginning with factor 1,
+and order `(2,1,0)`, produced a second exact representation at term-set
+distance 80 from the original. It is a structural alternative, not a lower
+rank. No raw-rank pruning was used in any of these scans.
+
+All 91 focused Python tests pass, including brute-force small bit balls,
+nontrivial odd-overlap kernels on all three axes, all six cleanup orders,
+audited-seed chaining, pre-allocation limits, incompatible modes, and corrupt
+radius/center/coordinate/report rejection. The new strategy remains offline;
+it changes no live CPU/GPU fleet defaults.
+
+## Downward replay and another composition pass
+
+Both rank-7,430 representations were screened through every one- and
+two-axis coordinate deletion, followed by cleanup: 3,558 views in 199.31
+seconds CPU. This found **20x23x28 at rank 6,970**, improving 6,982. The
+winner comes from deleting coordinate 0 of dimension 2 from the original
+20x23x29 tensor; no additional cleanup is needed. The alternative parent
+did not give a lower minimum. Thus this gain is downward propagation of the
+earlier all-anchor winner, not a successful radius-three map refinement.
+
+Independent replay checked all six retained projections: seven tensors,
+50,117 terms, and 10,904,445 support-pair XORs. The stronger result remains
+below the saved restriction-corrected reference of 7,050. This strengthens an
+existing comparison crossing; it is not a new crossing or a novelty proof.
+
+The checked alternative, six projected endpoints and previously expanded
+21x23x29 block were admitted by exact tensor identity, adding eight parents
+for 31,283 total. A full, non-reused pricing pass checked 2,722,001 expressions
+(835,454 mixed-bud expressions) in 55.47 seconds CPU. Seventeen prices fall:
+the direct shape and sixteen block descendants. Fifteen were already in the
+audit cohort; 20x23x32 and 23x23x32 are newly improved cohort shapes.
+
+The 21x23x28 block was expanded at **7,614**, down from 7,626. Its independent
+audit checked four recipes and four tensors, 15,229 terms and 3,292,137 XORs.
+Other examples remain recipe-only: 20x23x30=7,681, 20x23x32=8,182,
+22x23x28=7,962, and 23x23x32=9,823. Superseded witnesses are removed before
+counting: the cumulative cohort is **389 lower local prices, 55 expanded at
+their current best price and 334 recipe-only**. All nine cohort crossings
+remain expanded; the larger metadata shortlist is still 49. There is no new
+main-square or primitive-rank improvement.
+
+New evidence is kept as a single local-only, hash-deduplicated compressed
+archive outside the checkout:
+`~/.local/share/tungsten-metaflip/evidence/2026-09-08-dual-neighborhood.tar.gz`.
+It retains reports, source/checker snapshots, witnesses, recipes and the
+scoped reference refresh. The large composition input uses a lossless
+base-prefix-plus-tail delta against the prior archive instead of another
+full copy. Retained-tensor replay is self-contained after materializing the
+manifest; producer reruns additionally need the pinned ancestry inputs.
+Existing unpacked archives were not moved or deleted.
+The archive is 14,142,702 bytes: 108 logical files stored as 84 unique objects.
+The 498,647,805-byte corpus round-trips exactly from its 496,027,008-byte shared
+prefix plus a 2,620,797-byte tail. The archive hash is
+`9c783041e370db209146e20db1c68f4d635eeb9c055b168416a86016c7da2e2e`.

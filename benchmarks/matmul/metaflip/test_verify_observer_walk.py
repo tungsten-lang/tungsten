@@ -50,6 +50,25 @@ class ObserverWalkTest(unittest.TestCase):
             self.assertFalse(result['record_claim'] or result['products_materialized'])
             self.assertFalse(result['references_revalidated'] or result['price_plan_leaves_reverified'])
 
+    def test_rank_only_control_without_sidecars(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            report, _ = self.fixture(root)
+            row = report['rows'][0]
+            row['contexts'] = row['summary'] = []
+            row['trials'][0]['observers'] = row['trials'][0]['rank_winner_context_costs'] = []
+            for suffix in (b'', b'grids 1 1 1\n', b'observers 0\n'):
+                price = b'\n'.join((root/'prices.txt').read_bytes().splitlines()[:4])+b'\n'+suffix
+                (root/'prices.txt').write_bytes(price)
+                row['prices']['sha256'] = hashlib.sha256(price).hexdigest()
+                (root/'report.json').write_text(json.dumps(report))
+                if suffix:
+                    with self.assertRaises(AssertionError):
+                        verify(root, root/'plan.json')
+                else:
+                    result = verify(root, root/'plan.json')
+                    self.assertEqual((result['attempts'], result['tensors'], result['rows']), (14, 1, []))
+
     def test_mutated_fields_fail_closed(self):
         for mutation in ('score', 'rank', 'density', 'observer_id', 'trial_id', 'primary_id', 'summary', 'target',
                          'source_shape', 'attempts', 'observations', 'duplicate_cell', 'plan', 'price', 'path'):

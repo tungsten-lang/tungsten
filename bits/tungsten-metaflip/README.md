@@ -736,6 +736,11 @@ reference screen of 8067. Two additional shared-U pairs in a rank-150 5x6x7
 parent supply the saving; its primitive rank is unchanged. This remains a
 reference-crossing candidate, not a confirmed world record. A reusable
 `verify_observer_walk.py` now checks the saved observer tensors and scores.
+[Projection continuation and admission](tools/BUD-PROJECTION-ADMISSION-2026-09-08.md)
+adds four checked local product improvements, but no reference crossings.
+Rank-only controls now share that replay format, and
+`extend_composition_parents.py --observer-walk` admits their verified full
+states, including endpoints, without one-off audit/admission scripts.
 The optional [fixed elementary-group objective](tools/BUD-FIXED-GROUP-WALKS-2026-09-07.md)
 keeps a verified leaf cover while walking the remaining terms, including
 parents above rank 64; its first matched study found no further rank gain.

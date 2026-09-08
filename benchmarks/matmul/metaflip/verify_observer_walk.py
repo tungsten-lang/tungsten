@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Replay rank-primary walks with up to eight read-only price observers.
 
-Checks complete saved tensors, observer tables against a supplied frozen price
+Accepts rank-only controls as well as runs with observer sidecars. Checks
+complete saved tensors, observer tables against a supplied frozen price
 plan, scores, and accounting. The plan's leaves and reference/novelty claims
 are NOT verified here; larger products still require full recipe replay.
 """
@@ -65,8 +66,13 @@ def verify(root, price_plan):
         assert digest == row['prices']['sha256']
         lines = blob.decode('ascii').splitlines()
         limit, n = int(lines[0]), len(row['contexts'])
-        assert len(source) <= limit and 1 <= n <= 8
-        assert len(lines) == 5+3*n and lines[4] == f'observers {n}'
+        assert len(source) <= limit and 0 <= n <= 8
+        if n:
+            assert len(lines) == 5+3*n and lines[4] == f'observers {n}'
+        else:
+            # Four rows are the native rank-only format. A fifth row would
+            # enable a different (grid) objective, which this replay excludes.
+            assert len(lines) == 4
         assert all(list(map(int, line.split())) == list(range(limit+1)) for line in lines[1:4])
         for i, context in enumerate(row['contexts']):
             table = [list(map(int, line.split())) for line in lines[5+3*i:8+3*i]]

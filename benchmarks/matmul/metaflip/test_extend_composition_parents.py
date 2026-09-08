@@ -12,6 +12,8 @@ from test_verify_parent_only_walk import ParentOnlyWalkTest
 from verify_composition_recipes import verify as verify_products
 from verify_parent_only_walk import verify as verify_walk
 from verify_coordinate_projections import verify as verify_projection
+import test_verify_observer_walk as observer_fixture
+from verify_observer_walk import verify as verify_observers
 
 
 def put(path, data):
@@ -172,6 +174,66 @@ class ExtendCompositionParentsTest(unittest.TestCase):
             end = next(a for a in admissions if a['path'] == 'study/walk/end-0.txt')
             self.assertFalse(end['duplicate'])
             self.assertIsNotNone(end['parent'])
+
+    def observer_walk(self, root, sidecar=True):
+        root.mkdir()
+        report, _ = observer_fixture.ObserverWalkTest().fixture(root)
+        row = report['rows'][0]
+        terms = alternate()
+        raw = body(terms)
+        (root/'alternate.txt').write_bytes(raw)
+        entry = dict(shape=[2, 2, 2], path='alternate.txt', rank=len(terms),
+                     sha256=hashlib.sha256(raw).hexdigest())
+        if sidecar:
+            row['trials'][0]['observers'][0]['winner'] = entry
+            row['trials'][0]['observers'][0]['native']['bits'] = str(sum(v.bit_count() for t in terms for v in t))
+        else:
+            row['contexts'] = row['summary'] = []
+            row['trials'][0]['observers'] = row['trials'][0]['rank_winner_context_costs'] = []
+            row['trials'][0]['endpoint'] = entry
+            price = b'\n'.join((root/'prices.txt').read_bytes().splitlines()[:4])+b'\n'
+            (root/'prices.txt').write_bytes(price)
+            row['prices']['sha256'] = hashlib.sha256(price).hexdigest()
+        put(root/'report.json', report)
+        put(root/'independent-audit.json', verify_observers(root, root/'plan.json'))
+        return root
+
+    def test_observer_and_rank_only_admission_preserves_literal_states(self):
+        for sidecar in (False, True):
+            with self.subTest(sidecar=sidecar), tempfile.TemporaryDirectory() as name:
+                root = Path(name).resolve()
+                args = self.prior(root)
+                source = self.observer_walk(root/'walk', sidecar)
+                result = extend(*args, [], [], root/'out', maximum=4, observer_walk_roots=[source])
+                self.assertEqual(result['added'], {'observer_walk_audit': 2})
+                admissions = json.loads((root/'out/admissions.json').read_text())
+                alternate_row = next(r for r in admissions if r['path'] == 'alternate.txt')
+                self.assertFalse(alternate_row['duplicate'])
+                self.assertIsNotNone(alternate_row['parent'])
+
+    def test_observer_admission_rejects_stale_artifacts(self):
+        for mutation in ('report', 'tensor', 'prices', 'proof', 'attempts', 'cells', 'shape'):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as name:
+                root = Path(name).resolve()
+                args = self.prior(root)
+                source = self.observer_walk(root/'walk')
+                audit = json.loads((source/'independent-audit.json').read_text())
+                if mutation in ('report', 'tensor', 'prices'):
+                    path = source/({'report': 'report.json', 'tensor': 'alternate.txt', 'prices': 'prices.txt'}[mutation])
+                    path.write_bytes(path.read_bytes()+b'\n')
+                elif mutation == 'proof':
+                    for result in audit['results']:
+                        result['sha256'] = '0'*64
+                elif mutation == 'shape':
+                    report = json.loads((source/'report.json').read_text())
+                    report['rows'][0]['trials'][0]['observers'][0]['winner']['shape'] = [2, 2, 3]
+                    put(source/'report.json', report)
+                    audit['report_sha256'] = hashlib.sha256((source/'report.json').read_bytes()).hexdigest()
+                else:
+                    audit[mutation] += 1
+                put(source/'independent-audit.json', audit)
+                with self.assertRaises(ValueError):
+                    extend(*args, [], [], root/'out', maximum=4, observer_walk_roots=[source])
 
     def test_improved_shapes_round_trip_as_json_lists(self):
         with tempfile.TemporaryDirectory() as d:

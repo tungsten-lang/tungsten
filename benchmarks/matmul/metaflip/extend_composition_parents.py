@@ -39,7 +39,7 @@ def pricing_certificate(parents, report, engine_sha256):
 
 
 def extend(prior_inputs, prior_plan, product_roots, walk_roots, output, maximum=32,
-           projection_roots=(), reuse_priced_expressions=True):
+           projection_roots=(), reuse_priced_expressions=True, observer_walk_roots=()):
     if type(maximum) is not int or not 2 <= maximum <= 32:
         raise ValueError('invalid maximum')
     output = Path(output).resolve()
@@ -148,6 +148,23 @@ def extend(prior_inputs, prior_plan, product_roots, walk_roots, output, maximum=
             for row in report['outputs']:
                 path = contained(root, row['path'])
                 admit(path, row['shape'], row['sha256'])
+        elif kind == 'observer_walk_audit':
+            if audit['report_sha256'] != hashlib.sha256(raw).hexdigest():
+                raise ValueError('stale observer walk audit')
+            if audit['attempts'] != report['attempts'] or audit['cells'] != len(report['rows']):
+                raise ValueError('observer walk audit accounting mismatch')
+            for name, digest in audit['source_sha256'].items():
+                if hashlib.sha256(blob(contained(root, name))).hexdigest() != digest:
+                    raise ValueError('observer walk source changed')
+            for row in report['rows']:
+                entries = [row['source']]
+                for trial in row['trials']:
+                    entries.extend((trial['winner'], trial['endpoint']))
+                    entries.extend(observer['winner'] for observer in trial['observers'])
+                for entry in entries:
+                    if entry['shape'] != row['shape']:
+                        raise ValueError('observer walk tensor shape mismatch')
+                    admit(contained(root, entry['path']), entry['shape'], entry['sha256'])
         else:
             if audit['attempts'] != report['total_attempts']:
                 raise ValueError('walk audit accounting mismatch')
@@ -174,6 +191,8 @@ def extend(prior_inputs, prior_plan, product_roots, walk_roots, output, maximum=
         source(root, 'walk_audit')
     for root in projection_roots:
         source(root, 'projection_audit')
+    for root in observer_walk_roots:
+        source(root, 'observer_walk_audit')
     for name in ('extend_composition_parents.py', 'composition_impact.py',
                  'composition_expression_cover.py', 'verify_representation_portfolio.py'):
         blob(Path(__file__).resolve().parent / name)
@@ -228,6 +247,8 @@ if __name__ == '__main__':
     parser.add_argument('--plan', type=Path, required=True)
     parser.add_argument('--products', type=Path, action='append', default=[])
     parser.add_argument('--walk', type=Path, action='append', default=[])
+    parser.add_argument('--observer-walk', type=Path, action='append', default=[],
+                        help='rank-primary reports replayed by verify_observer_walk.py, with or without sidecars')
     parser.add_argument('--projection', type=Path, action='append', default=[])
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--maximum', type=int, choices=range(2, 33), default=32)
@@ -235,7 +256,8 @@ if __name__ == '__main__':
                         help='matched control: always run the complete composition planner')
     args = parser.parse_args()
     result = extend(args.inputs, args.plan, args.products, args.walk, args.output, args.maximum,
-                    projection_roots=args.projection, reuse_priced_expressions=not args.no_reuse_priced_expressions)
+                    projection_roots=args.projection, reuse_priced_expressions=not args.no_reuse_priced_expressions,
+                    observer_walk_roots=args.observer_walk)
     print(json.dumps({k: v for k, v in result.items()
         if k not in ('source_sha256', 'model_shapes', 'baseline_recipes', 'actual_price_improvements')}))
     for row in result['actual_price_improvements']:

@@ -41,12 +41,23 @@ lines = table.strip().split("\n")
 observer_count = 0 ## i64
 mixed_count = 0 ## i64
 mixed_budget = 0 ## i64
+mixed_primary = 0 ## i64
 if lines.size() != 4 && lines.size() != 5
   if lines.size() < 6
     << "invalid price rows"
     exit(2)
   header = lines[4].split(" ")
-  if header.size() == 3 && header[0] == "mixed-observers"
+  if header.size() == 3 && header[0] == "mixed-primary"
+    if header[1] == "pairs"
+      mixed_primary = 1
+    if header[1] == "groups"
+      mixed_primary = 2
+    mixed_budget = header[2].to_i()
+    mixed_budget_label = mixed_budget.to_s()
+    if mixed_primary == 0 || mixed_budget < 1 || mixed_budget > 1000000 || mixed_budget_label != header[2] || lines.size() != 6 || ARGV.size() >= 13
+      << "invalid mixed primary layout or strategy"
+      exit(2)
+  elsif header.size() == 3 && header[0] == "mixed-observers"
     mixed_count = header[1].to_i()
     mixed_budget = header[2].to_i()
     mixed_count_label = mixed_count.to_s()
@@ -67,7 +78,7 @@ if lines.size() != 4 && lines.size() != 5
     << "invalid observer header"
     exit(2)
 limit = lines[0].to_i() ## i64
-if limit < 1 || limit > 4096 || (mixed_count > 0 && limit > 512)
+if limit < 1 || limit > 4096 || ((mixed_count > 0 || mixed_primary > 0) && limit > 512)
   << "invalid price rank limit"
   exit(2)
 stride = limit + 1 ## i64
@@ -135,17 +146,34 @@ while observer < mixed_count
     i += 1
   observer += 1
 mixed_scratch = 0 ## i64
-if mixed_count > 0
+if mixed_count > 0 || mixed_primary > 0
   mixed_scratch = 1
 mixed_parent = i64[3*512*mixed_scratch]
-mixed_costs = i64[4*mixed_scratch]
+mixed_costs = i64[10*mixed_scratch]
 mixed_mates = i64[512*mixed_scratch]
 mixed_axes = i64[512*mixed_scratch]
 mixed_work = i64[6*512*mixed_scratch]
 mixed_memo = i64[65536*mixed_scratch]
 mixed_choice = i64[65536*mixed_scratch]
-mixed_status = i64[3*mixed_scratch]
-mixed_totals = i64[4]
+mixed_status = i64[4*mixed_scratch]
+mixed_totals = i64[5]
+if mixed_primary > 0
+  fields = lines[5].split(" ")
+  width = 4 ## i64
+  if mixed_primary == 2
+    width = 10
+  if fields.size() != width
+    << "invalid mixed primary prices"
+    exit(2)
+  i = 0 ## i64
+  while i < width
+    price = fields[i].to_i() ## i64
+    price_label = price.to_s()
+    if price_label != fields[i] || price > 128 || price < 0-1 || price == 0 || (i < 4 && price < 1)
+      << "invalid mixed primary prices"
+      exit(2)
+    mixed_costs[i] = price
+    i += 1
 grid_prices = i64[3]
 if lines.size() == 5
   fields = lines[4].split(" ")
@@ -225,6 +253,11 @@ if ARGV.size() == 14
 # observed is the private residual copy established above. A zero held_cost
 # preserves the previous objective and never reads that residual argument.
 initial = ffbh_cost(original,observed,0,held_cost,prices,stride,keys,counts,grid_prices) ## i64
+if mixed_primary > 0
+  initial = ffbp_packing_cost(original,mixed_primary,mixed_costs,mixed_parent,mixed_mates,mixed_axes,mixed_work,mixed_memo,mixed_choice,mixed_status,mixed_totals,mixed_budget)
+  if initial < 1
+    << "invalid initial mixed primary score"
+    exit(1)
 attempted = 0 ## i64
 flips_accepted = 0 ## i64
 restarts_accepted = 0 ## i64
@@ -285,7 +318,12 @@ while trial < trials
         << "holdout join capacity failed"
         exit(1)
       holdout_cancellations += cancelled
-      if mixed_count > 0
+      if mixed_primary > 0
+        score = ffbp_packing_cost(observed,mixed_primary,mixed_costs,mixed_parent,mixed_mates,mixed_axes,mixed_work,mixed_memo,mixed_choice,mixed_status,mixed_totals,mixed_budget)
+        if score < 1
+          << "invalid mixed primary score"
+          exit(1)
+      elsif mixed_count > 0
         score = ffbh_cost(observed,work,cancelled,held_cost,prices,stride,keys,counts,grid_prices)
         if ffbp_mixed_costs(observed,mixed_tables,mixed_count,observer_current_scores,mixed_parent,mixed_costs,mixed_mates,mixed_axes,mixed_work,mixed_memo,mixed_choice,mixed_status,mixed_totals,mixed_budget) != 1
           << "invalid mixed observer score"
@@ -370,4 +408,9 @@ while trial < trials
 elapsed = ccall("__w_clock_ms") - start_ms ## i64
 if mixed_count > 0
   << "BUD_MIXED observers=" + mixed_count.to_s() + " budget=" + mixed_budget.to_s() + " evaluations=" + mixed_totals[0].to_s() + " states=" + mixed_totals[1].to_s() + " fallback_components=" + mixed_totals[2].to_s() + " components=" + mixed_totals[3].to_s()
+if mixed_primary > 0
+  kind = "pairs"
+  if mixed_primary == 2
+    kind = "groups"
+  << "BUD_PACK kind=" + kind + " budget=" + mixed_budget.to_s() + " evaluations=" + mixed_totals[0].to_s() + " probes_or_states=" + mixed_totals[1].to_s() + " pair_states=" + mixed_totals[4].to_s() + " fallback_components=" + mixed_totals[2].to_s() + " components=" + mixed_totals[3].to_s()
 << "BUD_RESULT strategy=" + mode + " trials=" + trials.to_s() + " chunks=" + chunks.to_s() + " steps=" + steps.to_s() + " attempted=" + attempted.to_s() + " accepted_flips=" + flips_accepted.to_s() + " accepted_chunks=" + restarts_accepted.to_s() + " initial=" + initial.to_s() + " density_slack=" + density_slack.to_s() + " observe_every=" + observe_every.to_s() + " observations=" + observations.to_s() + " sampled_peak_rank=" + sampled_peak_rank.to_s() + " sampled_peak_bits=" + sampled_peak_bits.to_s() + " held_terms=" + held_count.to_s() + " held_cost=" + held_cost.to_s() + " holdout_cancellations=" + holdout_cancellations.to_s() + " elapsed_ms=" + elapsed.to_s()

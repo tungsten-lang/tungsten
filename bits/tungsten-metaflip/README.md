@@ -936,6 +936,15 @@ studies retained six distinct control-relative improved target shapes, with
 ten full output replays, but none beat the retained archive. This remains
 opt-in offline research, not an additional default CPU/GPU lane or a flip
 throughput improvement.
+An optional [packing-driven primary objective](tools/PACKING-PRIMARY-WALKS-2026-09-09.md)
+now lets this research walker use the native mixed-pair or size-2/3/4 group
+price for chunk acceptance and winner selection. Unlike observers, it can
+steer greedy/annealing trajectories; ordinary walk endpoints remain unchanged.
+Two bounded matched studies plus broader leaf/grid repricing retained 280
+distinct parents. Five target minima beat both matched controls, but none
+beat the retained archive. This is not enabled in the live fleet or exposed
+by `bench_bud_parents.rb`; numeric tables must be bound to verified leaf
+witnesses before any product is admitted.
 Optional [read-only context observers](tools/BUD-CONTEXT-OBSERVERS-2026-09-08.md)
 retain up to eight additional price objectives along one ordinary walk. The
 same-path study reproduced both rank and context winners with half the

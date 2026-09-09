@@ -54,7 +54,9 @@ Metaflip executable:
   preserve legacy per-record queues. The scale-four leaf is built by an exact
   projection plus bounded native walk to rank 26; changed leaf identities
   reprice their scales when a parent is offered again. Prices/hashes never
-  replace verification. This first family
+  replace verification. A bounded 128-ticket window reserves every fourth
+  completion for the oldest pending ticket; a constant-size completion mask
+  preserves out-of-order restart and supports the FIFO control. This first family
   is not recursive wide search or automatic cross-shape fleet dispatch.
 - `strategies/rect_catalyst_lift2.w` and
   `strategies/macro_double_annihilation.w` retain the exact target-directed

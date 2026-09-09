@@ -177,7 +177,17 @@ The digest checks serialization, not the tensor identity. Packed
 live walker's 63-bit limit. At most two expansions run after a refinement
 input, and four per idle batch, in the same single low-priority native child.
 `compose_submitted/completed/pending/failures` expose the backlog separately.
-An invalid or over-budget head recipe stays pending with an `error` file;
+Composition uses a bounded 128-ticket priority window. It favors a smaller
+predicted rank relative to the current verified per-shape best (or the naive
+rank when absent), with cheaper-rank/older-ticket tie breaks. Every fourth
+completion serves the oldest pending ticket, so new proposals cannot starve
+old work in a non-failing queue. This is ordering, never dominance pruning.
+`METAFLIP_COMPOSITION_FIFO=1` selects the FIFO control. `MFC_RESULT2` records
+bind completion order to original ticket IDs; a small checksummed completion
+mask supports restart without duplicating or losing out-of-order work. Legacy
+FIFO records remain readable. An interrupted result/state/cursor commit is
+replayed through the full tensor gate, not accepted from its hashes alone.
+An invalid or over-budget selected recipe stays pending with an `error` file;
 automatic composition pauses while ordinary refinement/flipping continues.
 There is still no disk-byte quota.
 
@@ -196,7 +206,11 @@ See the [native integration audit](tools/NATIVE-REFINEMENT-2026-09-08.md) for
 the first refinement milestone, and the
 [native composition audit](tools/NATIVE-COMPOSITION-2026-09-08.md) and
 [paged queue/leaf upgrade audit](tools/NATIVE-COMPOSITION-PAGES-2026-09-08.md)
-for these extensions.
+and [priority scheduling audit](tools/NATIVE-COMPOSITION-PRIORITY-2026-09-08.md)
+for these extensions. The matched 105-recipe regression reaches r1132 on
+completion 4 rather than 48, and r651 on 7 rather than 47; both schedules end
+with the identical verified output set. This is one workload, not a universal
+performance or efficacy claim.
 
 Alternatively, let Bit preserve the executable, runtime worker sources, and
 assets as one relocatable build tree:

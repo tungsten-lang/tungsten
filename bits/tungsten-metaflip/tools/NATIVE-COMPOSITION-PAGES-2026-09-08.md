@@ -1,5 +1,9 @@
 # Native composition: paged storage and rank-26 leaf — 2026-09-08
 
+This records `0fc7038c`; the subsequent
+[priority scheduling audit](NATIVE-COMPOSITION-PRIORITY-2026-09-08.md) covers
+out-of-order completion and its restart protocol.
+
 Follow-up to `d851dc7c`, not a new world-record claim. Ordinary MetaFlip already
 feeds exact inputs and refined outputs into native pair composition. This
 change reduces its small-file cost and strengthens its scale-four leaf.

@@ -1,6 +1,27 @@
 use ../lib/metaflip/fleet/refinement_worker
 use ../lib/metaflip/composition/pairs
 
+if ARGV.size() == 1 && ARGV[0] == "--schedule-test"
+  state = i64[6]
+  state[1] = 1
+  if ffbs_valid(state, 1024) != 1 || ffbs_mark(state, 129, 1024) != 0
+    exit(1)
+  block = 0 ## i64
+  while block < 8
+    i = 0 ## i64
+    while i < 128
+      ticket = block*128+(73*i)%128+1 ## i64
+      if ffbs_mark(state, ticket, 1024) != 1 || ffbs_mark(state, ticket, 1024) != 0
+        exit(1)
+      i += 1
+    if state[0] != (block+1)*128 || state[1] != state[0]+1 || state[2] != 0 || state[3] != 0 || state[4] != 0 || state[5] != 0
+      exit(1)
+    block += 1
+  state[2] = 4294967296
+  if ffbs_valid(state, 1024) != 0
+    exit(1)
+  << "PASS scheduler masks: 1024 out-of-order completions, limb/window boundaries, duplicate rejection"
+  exit(0)
 if ARGV.size() == 2 && ARGV[0] == "--pages-test"
   queue = ARGV[1] + "/"
   kinds = ["tasks", "results"]

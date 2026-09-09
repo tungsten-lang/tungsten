@@ -1,10 +1,11 @@
 # Incremental, certificate-backed pair composition. One native low-priority
-# process owns this queue. FIFO work is durable; a price is never verification.
+# process owns this queue. All work is durable; a price is never verification.
 use ../fleet/refinement_artifacts
 use ../compose
 use pairs
 use pages
 use leaf_walk
+use schedule
 
 -> ffbc_counter(path) (String) i64
   raw = File.read_prefix(path, 32)
@@ -14,6 +15,13 @@ use leaf_walk
   if value < 0 || value > 1000000000000
     return 0
   value
+
+-> ffbc_failure(queue, ticket, ordinal, code) (String i64 i64 i64) i64
+  failures = ffbc_counter(queue + "failures") + 1 ## i64
+  z = ffrf_atomic(queue + "failures", failures.to_s() + "\n", "composition") ## i64
+  z = ffrf_atomic(queue + "error", "task=" + ticket.to_s() + " ordinal=" + ordinal.to_s() + " code=" + code.to_s() + "\n", "composition")
+  << "METAFLIP_COMPOSE_FAILED task=" + ticket.to_s() + " code=" + code.to_s()
+  1
 
 -> ffbc_leaf(root, runtime, scale, work, source, parity) (String String i64 i64[] i64[] i64[])
   cap = ffrf_capacity() ## i64
@@ -197,7 +205,7 @@ use leaf_walk
 
 # Inputs and leaves are rechecked. The full multiword result crosses the exact
 # tensor gate BEFORE archive/best/result writes. Formula ranks are not gates.
--> ffbc_task(root, sequence, parent, leaf, mates, out, scratch, parity) (String i64 i64[] i64[] i64[] i64[] i64[] i64[]) i64
+-> ffbc_task(root, sequence, ordinal, parent, leaf, mates, out, scratch, parity) (String i64 i64 i64[] i64[] i64[] i64[] i64[] i64[]) i64
   queue = root + "/composition/"
   raw = ffbq_read(queue, "tasks", sequence)
   if raw == nil || raw.size() > 256
@@ -255,8 +263,13 @@ use leaf_walk
       best_rank = ffw_parse_decimal_i64(values[0])
   if rank < best_rank && ffrf_atomic(queue + "best/" + shape, rank.to_s() + " " + identity + "\n", "composition") != 1
     return 0
-  result = "MFC_RESULT1 " + task_id + " " + identity + " " + shape + " " + rank.to_s() + "\n"
-  ffbq_put(queue, "results", sequence, result)
+  suffix = task_id + " " + identity + " " + shape + " " + rank.to_s() + "\n"
+  result = "MFC_RESULT2 " + sequence.to_s() + " " + suffix
+  # Old completion records are retained byte-for-byte, after full replay.
+  old_result = ffbq_read(queue, "results", ordinal)
+  if sequence == ordinal && old_result == "MFC_RESULT1 " + suffix
+    return 1
+  ffbq_put(queue, "results", ordinal, result)
 
 -> ffbc_drain(root, limit) (String i64) i64
   if limit < 1 || limit > 4
@@ -264,6 +277,11 @@ use leaf_walk
   queue = root + "/composition/"
   consumed = ffbc_counter(queue + "consumed") ## i64
   submitted = ffbc_counter(queue + "submitted") ## i64
+  if File.exists?(root + "/stop")
+    return 0
+  state = i64[6]
+  if ffbs_load(queue, submitted, consumed, state) != 1
+    return ffbc_failure(queue, 0, consumed+1, 0-3)
   if consumed >= submitted
     return 0
   cap = ffrf_capacity() ## i64
@@ -277,19 +295,31 @@ use leaf_walk
   while consumed < submitted && done < limit
     if File.exists?(root + "/stop")
       return 0
-    result = ffbc_task(root, consumed+1, parent, leaf, mates, out, scratch, parity) ## i64
+    ordinal = consumed+1 ## i64
+    ticket = 0 ## i64
+    saved = ffbq_read(queue, "results", ordinal)
+    if saved != nil
+      ticket = ffbs_result_ticket(saved, ordinal)
+    elsif consumed == state[0]
+      fifo = 0 ## i64
+      if env("METAFLIP_COMPOSITION_FIFO") == "1"
+        fifo = 1
+      ticket = ffbs_choose(queue, submitted, state, fifo)
+    result = 0 ## i64
+    recovering = consumed < state[0] ## bool
+    if ticket > 0 && ticket <= submitted && ((recovering && ffbs_done(state, ticket) == 1) || (!recovering && ticket >= state[1] && ticket < state[1]+128 && ffbs_done(state, ticket) == 0))
+      result = ffbc_task(root, ticket, ordinal, parent, leaf, mates, out, scratch, parity)
     if result == 0-1
       return 0
     if result != 1
-      failures = ffbc_counter(queue + "failures") + 1 ## i64
-      z = ffrf_atomic(queue + "failures", failures.to_s() + "\n", "composition") ## i64
-      z = ffrf_atomic(queue + "error", "task=" + (consumed+1).to_s() + " code=" + result.to_s() + "\n", "composition")
-      << "METAFLIP_COMPOSE_FAILED task=" + (consumed+1).to_s() + " code=" + result.to_s()
-      return 1
+      return ffbc_failure(queue, ticket, ordinal, result)
+    if !recovering
+      if ffbs_mark(state, ticket, submitted) != 1 || ffrf_atomic(queue + "schedule", ffbs_blob(state), "composition") != 1
+        return ffbc_failure(queue, ticket, ordinal, 0-4)
     ccall("__w_unlink", queue + "error")
     consumed += 1
     if ffrf_atomic(queue + "consumed", consumed.to_s() + "\n", "composition") != 1
-      return 1
+      return ffbc_failure(queue, ticket, ordinal, 0-5)
     done += 1
   << "METAFLIP_COMPOSE_COMPLETED done=" + consumed.to_s() + " pending=" + (submitted-consumed).to_s()
   0

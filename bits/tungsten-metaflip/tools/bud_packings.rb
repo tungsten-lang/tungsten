@@ -272,6 +272,7 @@ module MetaflipBudPackings
     OptionParser.new do |p|
       p.banner = "Usage: bud_packings.rb --output DIR [--scale AxBxC PARENT... | --from-report FILE]"
       %i[scale output library].each { |key| p.on("--#{key} VALUE") { |v| options[key] = v } }
+      p.on('--native-spool DIR', 'Add fully verified immutable native leaf-bank witnesses') { |v| options[:native_spool] = v }
       p.on("--from-report FILE") { |v| options[:from_report] = v }
       p.on("--recursive-products", "Match verified Kronecker leaf pricing from bud_products") { options[:products] = true }
       p.on("--grids", "Also pack checked two-axis elementary groups") { options[:grids] = true }
@@ -291,7 +292,8 @@ module MetaflipBudPackings
     raise "output must be new or empty" if File.exist?(root) && (!File.directory?(root) || !Dir.empty?(root))
     sources = Dir[File.join(options[:library], "matmul_*_gf2.txt")].sort
     raise "empty witness library" if sources.empty?
-    library = B::Library.new(sources.map { |p| B.load_scheme(p) }, products: !!options[:products])
+    native_schemes, native_banks = options[:native_spool] ? B.native_bank_schemes(File.expand_path(options[:native_spool])) : [[], []]
+    library = B::Library.new(sources.map { |p| B.load_scheme(p) } + native_schemes, products: !!options[:products])
     jobs = if options[:from_report]
       prior = JSON.parse(File.read(options[:from_report]))
       raise "unsupported baseline" unless prior["schema"] == 1 && prior["field"] == "GF(2)"
@@ -330,12 +332,14 @@ module MetaflipBudPackings
       puts JSON.generate(row)
       row
     end
-    File.write(File.join(root, "report.json"), JSON.pretty_generate({schema: 1, field: "GF(2)",
+    report = {schema: 1, field: "GF(2)",
       record_claim: false, options: options, source_sha256: Digest::SHA256.file(__FILE__).hexdigest,
       composer_sha256: Digest::SHA256.file(File.join(__dir__, "bud_products.rb")).hexdigest,
       baseline_sha256: options[:from_report] && Digest::SHA256.file(options[:from_report]).hexdigest,
       library_sha256: sources.to_h { |p| [File.expand_path(p), Digest::SHA256.file(p).hexdigest] },
-      rows: rows}) + "\n")
+      rows: rows}
+    report[:native_banks] = native_banks unless native_banks.empty?
+    File.write(File.join(root, "report.json"), JSON.pretty_generate(report) + "\n")
   end
 end
 

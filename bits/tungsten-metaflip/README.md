@@ -872,7 +872,7 @@ and independently verified product witnesses are in
 [the parent-walk report](tools/BUD-PARENT-WALKS-2026-09-06.md).
 This remains offline: greedy acceptance did not beat ordinary wandering in
 the matched study, and no new production strategy is enabled by it.
-Both `bench_bud_parents.rb` and `bud_products.rb` accept
+`bench_bud_parents.rb`, `bud_products.rb`, and `bud_packings.rb` accept
 `--native-spool /path/to/status.txt.refinement` to reuse a native run's
 verified leaf banks. This closes the cost mismatch where a packaged-only
 offline library missed the native rank-15/rank-26 small leaves. Each bank and
@@ -880,6 +880,11 @@ member crosses hash, shape, canonical-format and full tensor checks; the
 selected witnesses are snapshotted into the study's self-contained recipes.
 The option does not mutate or launch the fleet. See the
 [native-bank search audit](tools/NATIVE-BANK-SEARCH-2026-09-09.md).
+The packer accepts the option in direct-parent and `--from-report` modes,
+so exact mixed-group refinement can preserve a native-bank baseline's leaf
+prices. The [projection/packing follow-up](tools/PROJECTION-PACKING-2026-09-09.md)
+records three expanded local improvements but no new reference crossing;
+its unsuccessful projection-selector change was not enabled.
 Optional [read-only context observers](tools/BUD-CONTEXT-OBSERVERS-2026-09-08.md)
 retain up to eight additional price objectives along one ordinary walk. The
 same-path study reproduced both rank and context winners with half the

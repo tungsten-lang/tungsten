@@ -208,4 +208,57 @@ class BudPackingsTest < Minitest::Test
       assert B.replay(row.fetch("recipe"))[:exact]
     end
   end
+
+  def test_native_bank_supports_parent_and_report_modes_with_standalone_replay
+    Dir.mktmpdir('bud-packing-native') do |root|
+      spool = File.join(root,'spool')
+      %w[objects composition/banks composition/bank-latest].each { |p| FileUtils.mkdir_p(File.join(spool,p)) }
+      native = B::Library.new([@leaves.first])
+      ids = (1..6).map do |k|
+        leaf = native.scheme([k,2,2])
+        raw = "MFR1 #{k} 2 2 #{leaf.rank}\n" + leaf.terms.sort.map { |t| t.join(' ')+"\n" }.join
+        key = Digest::SHA256.hexdigest(raw)
+        File.write(File.join(spool,'objects',"#{key}.tensor"),raw)
+        key
+      end
+      manifest = ['MFC_BANK1','2',*ids].join(' ')+"\n"
+      bank_id = Digest::SHA256.hexdigest(manifest)
+      File.write(File.join(spool,'composition/banks',bank_id),manifest)
+      pointer = File.join(spool,'composition/bank-latest/2')
+      File.write(pointer,bank_id+"\n")
+      library = File.join(root,'library'); Dir.mkdir(library)
+      File.write(File.join(library,'matmul_1x1x1_rank1_gf2.txt'),B.naive([1,1,1]).source_text)
+      parent = B.naive([1,1,2]); scale = [2,2,1]
+      source = File.join(root,'matmul_1x1x2_rank2_gf2.txt')
+      File.write(source,parent.source_text)
+      groups = [{axis:0,indices:[0,1]}]
+      _result,recipe = B.export(File.join(root,'baseline'),parent,scale,groups,native)
+      from = File.join(root,'baseline.json')
+      File.write(from,JSON.generate(schema:1,field:'GF(2)',rows:[{recipe:recipe}]))
+      base = ['--library',library]
+      error = assert_raises(RuntimeError) do
+        P.main(base+['--from-report',from,'--output',File.join(root,'without-native')])
+      end
+      assert_equal 'baseline leaf pricing changed',error.message
+      recipes = []
+      [['--scale','2x2x1',source],['--from-report',from]].each_with_index do |mode,i|
+        output = File.join(root,"output-#{i}")
+        capture_io { P.main(base+['--native-spool',spool,'--output',output]+mode) }
+        report = JSON.parse(File.read(File.join(output,'report.json')))
+        assert_equal [bank_id],report.fetch('native_banks').map { |b| b.fetch('identity') }
+        row = report.fetch('rows').first
+        assert_equal 7,row.fetch('formula_rank')
+        assert row.fetch('exact_within_model')
+        assert B.replay(row.fetch('recipe'))[:exact]
+        recipes << row.fetch('recipe')
+      end
+      File.write(pointer,'broken')
+      assert_raises(RuntimeError) do
+        P.main(base+['--native-spool',spool,'--scale','2x2x1','--output',File.join(root,'bad'),source])
+      end
+      refute File.exist?(File.join(root,'bad'))
+      FileUtils.rm_rf(spool)
+      recipes.each { |r| assert B.replay(r)[:exact] }
+    end
+  end
 end

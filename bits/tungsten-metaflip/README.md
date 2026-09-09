@@ -153,15 +153,26 @@ both public coordinators, same-shape feedback and stopped-child checks.
 `spec/refinement_replay_test.w N M P TENSOR AXIS COORDINATE` also checks the
 standalone projection primitive.
 
-Every new input and refined output also enters native **pair composition**.
-The first bounded family pairs shared U, V or W factors, scaling the other
-two dimensions by 2, 3 and 4. Exact small leaves are built from packaged seeds;
+Every new input and refined output also enters native **group composition**.
+The bounded family groups shared U, V or W factors, scaling the other
+two dimensions by 2, 3 and 4. At scales three/four, a bucket dynamic program
+chooses disjoint groups of up to six terms. Its exact leaf costs include
+singletons and pairs, so its predicted rank cannot exceed pair-only pricing.
+Equal prices prefer larger leaves, preserving potentially useful rank-tied
+representations. This is optimal only within that fixed-axis bucket family,
+not over arbitrary or overlapping groups. Scale two keeps the pair path.
+Exact small leaves are built from packaged seeds and disjoint-row sums;
 no Ruby/Python or catalog download is used at runtime. The scale-four leaf
 projects the packaged 2x4x5/r33 seed, cleans it to rank 27, then replays a
 bounded 524,288-move native walk to an independently checked 2x4x4/r26 leaf.
-It is cached only after full tensor verification. A parent marker records
-the three leaf identities: re-offering it after a leaf change prices only
-the affected scales. There is not yet a global reverse-dependency sweep.
+It is cached only after full tensor verification. Immutable leaf-bank
+manifests bind all six verified leaves. `MCG1` recipes reference a bank;
+pair-only `MFC1` recipes remain readable. Each parent still emits at most
+nine recipes, preserving the existing backpressure reservation. Parent
+markers record recipe identities: re-offering after a leaf change prices
+only affected recipes. There is not yet a global reverse-dependency sweep.
+`METAFLIP_COMPOSITION_GROUPS=0` selects the pair-only control for new intake;
+previously queued grouped recipes still replay exactly.
 A price is only a scheduling heuristic: the
 expanded tensor passes the full coefficient check before archive admission.
 Rank ties remain separate parents and outputs.
@@ -208,11 +219,17 @@ The regression **4x8x4/r94 → 4x7x4/r85 → 12x7x12/r651** now runs through
 native queue intake and expansion (12x7x12 is a permutation of 7x12x12).
 The rank-26 scale-four leaf also gives **16x7x16/r1132**, down from the native
 rank-28 leaf's 1,208. These reproduce known local constructions, not new records.
+Larger groups also reproduce **2x2x8/r28 → 8x8x8/r329**, versus the pair-only
+price 364, without changing the parent. Eighteen leaf tensors and 90 composed
+outputs have independent full tensor and term-set regressions in
+`spec/group_composition_parity_test.py`; grouped queue upgrade, corrupted
+dependencies and selective repricing are covered by
+`spec/group_composition_queue_test.py`.
 The external parent is test-only, not redistributed. Replay with
 `spec/composition_queue_test.py NATIVE_TEST_BINARY [EXTERNAL_4x8x4]`.
 
 This is still a bounded family, not an exhaustive basis/packing search.
-Larger shared groups, changing-leaf dependency propagation, recursive wide
+Overlapping/mixed-axis groups, changing-leaf dependency propagation, recursive wide
 composition and automatic cross-shape campaign dispatch remain follow-up work.
 Wide outputs are exact archived witnesses, not yet live wide-worker seeds.
 See the [native integration audit](tools/NATIVE-REFINEMENT-2026-09-08.md) for
@@ -220,12 +237,15 @@ the first refinement milestone, and the
 [native composition audit](tools/NATIVE-COMPOSITION-2026-09-08.md) and
 [paged queue/leaf upgrade audit](tools/NATIVE-COMPOSITION-PAGES-2026-09-08.md)
 and [priority scheduling audit](tools/NATIVE-COMPOSITION-PRIORITY-2026-09-08.md)
-for these extensions. The matched 105-recipe regression reaches r1132 on
-completion 4 rather than 48, and r651 on 7 rather than 47; both schedules end
+for these extensions. With grouped composition enabled, the matched
+105-recipe regression reaches r1132 on completion 4 rather than 48, and
+r651 on 8 rather than 47; both schedules end
 with the identical verified output set. This is one workload, not a universal
 performance or efficacy claim.
 The [backpressure audit](tools/NATIVE-REFINEMENT-BACKPRESSURE-2026-09-08.md)
 covers bounded pending work, restart, the public canary and subsequent searches.
+The [larger-group integration audit](tools/NATIVE-GROUP-COMPOSITION-2026-09-08.md)
+covers the leaf bank, independent replay and frozen-parent screen.
 
 Alternatively, let Bit preserve the executable, runtime worker sources, and
 assets as one relocatable build tree:

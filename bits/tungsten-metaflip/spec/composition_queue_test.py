@@ -7,6 +7,7 @@ import sys
 import tempfile
 import os
 from packed_composition_parity_test import ROOT, exact, expected, naive, parse_terms, leaf_schemes
+from group_composition_parity_test import bank, expected_groups
 
 RUNTIME = ROOT/'bits/tungsten-metaflip/lib/metaflip'
 
@@ -78,10 +79,14 @@ def audit(root):
         assert ticket not in tickets and 1<=ticket<=value(q/'submitted')
         tickets.add(ticket)
         task=read_record(q,'tasks',ticket); fields=task.decode().split()
-        assert len(fields)==9 and fields[0]=='MFC1'
-        shape,terms=narrow(root,fields[1]); ls,leaf=narrow(root,fields[2])
-        axis,k=map(int,fields[3:5]); assert ls==(2,k,k)
-        target,want=expected(shape,terms,axis,k,leaf)
+        assert len(fields)==9 and fields[0] in ('MFC1','MCG1')
+        shape,terms=narrow(root,fields[1]); axis,k=map(int,fields[3:5])
+        if fields[0]=='MCG1':
+            target,want,price=expected_groups(shape,terms,axis,k,bank(root,fields[2],k))
+            assert int(fields[8])==price
+        else:
+            ls,leaf=narrow(root,fields[2]); assert ls==(2,k,k)
+            target,want=expected(shape,terms,axis,k,leaf)
         assert result[0]=='MFC_RESULT1' and result[1]==sha256(task).hexdigest()
         raw=(q/'objects'/f'{result[2]}.tensor').read_bytes()
         assert result[2]==sha256(raw).hexdigest()

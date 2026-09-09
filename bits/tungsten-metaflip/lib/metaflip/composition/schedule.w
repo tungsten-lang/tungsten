@@ -128,7 +128,7 @@ use packed
       if raw == nil || raw == ""
         return 0
       fields = raw.strip().split(" ")
-      if fields.size() != 9 || fields[0] != "MFC1" || ffrf_hash_valid(fields[1]) != 1 || ffrf_hash_valid(fields[2]) != 1
+      if fields.size() != 9 || (fields[0] != "MFC1" && fields[0] != "MCG1") || ffrf_hash_valid(fields[1]) != 1 || ffrf_hash_valid(fields[2]) != 1
         return 0
       n = ffw_parse_decimal_i64(fields[5]) ## i64
       m = ffw_parse_decimal_i64(fields[6]) ## i64

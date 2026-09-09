@@ -46,14 +46,18 @@ Metaflip executable:
   `fleet/refinement.w` schedules both in one low-priority native child, with
   durable complete-term intake and independent exact output/seed gates.
   These do not widen the live shape allowlist.
-- `composition/` prices shared-factor pairs for each new refinement input and
-  output, then expands bounded batches using exact packaged small leaves.
+- `composition/` prices fixed-axis shared-factor groups for each new refinement
+  input and output, then expands bounded batches using exact packaged leaves.
+  At scales three/four a bucket DP chooses groups of up to six, including
+  singletons/pairs; scale two keeps pairs. Full-tensor-gated leaf-bank manifests
+  bind grouped recipes. Each parent still has at most nine scheduled recipes;
+  `METAFLIP_COMPOSITION_GROUPS=0` is the pair-only intake control.
   Packed 32-bit limbs and a full fiber-wise tensor gate support factors wider
   than the live walker. Pending recipes and exact MFW1 witnesses persist in a
   separate spool; task/result pages contain at most 64 bounded records and
   preserve legacy per-record queues. The scale-four leaf is built by an exact
   projection plus bounded native walk to rank 26; changed leaf identities
-  reprice their scales when a parent is offered again. Prices/hashes never
+  reprice affected recipes when a parent is offered again. Prices/hashes never
   replace verification. A bounded 128-ticket window reserves every fourth
   completion for the oldest pending ticket; a constant-size completion mask
   preserves out-of-order restart and supports the FIFO control. Source jobs

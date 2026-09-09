@@ -22,26 +22,27 @@ use ../lib/metaflip/fleet/refinement_artifacts
   z = ffrf_sort(parent, 512, rank) ## i64
   rank
 
--> ffbp_mixed_costs(st, tables, observers, scores, parent, costs, mates, axes, scratch, memo, choice, status, totals, budget) (i64[] i64[] i64 i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64) i64
-  if observers < 1 || observers > 8
+-> ffbp_mixed_costs(st, tables, observers, kind, scores, parent, costs, mates, axes, scratch, memo, choice, status, totals, budget) (i64[] i64[] i64 i64 i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64) i64
+  if observers < 1 || observers > 8 || kind < 1 || kind > 3
     return 0
   rank = ffbp_mixed_parent(st, parent) ## i64
   if rank < 1
     return 0
+  width = 4 ## i64
+  if kind == 2
+    width = 10
+  if kind == 3
+    width = 13
   observer = 0 ## i64
   while observer < observers
     i = 0 ## i64
-    while i < 4
-      costs[i] = tables[observer*4+i]
+    while i < width
+      costs[i] = tables[observer*width+i]
       i += 1
-    price = ffmm_plan(parent, 3*512, 512, rank, costs, 4, mates, axes, 512, scratch, 6*512, memo, choice, 65536, status, 3, budget) ## i64
+    price = ffbp_packing_plan(rank,kind,costs,parent,mates,axes,scratch,memo,choice,status,totals,budget) ## i64
     if price < 1
       return 0
     scores[observer+1] = price
-    totals[0] += 1
-    totals[1] += status[0]
-    totals[2] += status[1]
-    totals[3] += status[2]
     observer += 1
   1
 
@@ -51,7 +52,12 @@ use ../lib/metaflip/fleet/refinement_artifacts
 # binding remains the research caller's obligation before product admission.
 -> ffbp_packing_cost(st, kind, costs, parent, mates, axes, scratch, memo, choice, status, totals, budget) (i64[] i64 i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64) i64
   rank = ffbp_mixed_parent(st, parent) ## i64
-  if rank < 1 || kind < 1 || kind > 3
+  ffbp_packing_plan(rank,kind,costs,parent,mates,axes,scratch,memo,choice,status,totals,budget)
+
+# The observers share one canonical parent copy, not the walk or the plans.
+# Each context gets its own full bounded solve and contributes to all counters.
+-> ffbp_packing_plan(rank, kind, costs, parent, mates, axes, scratch, memo, choice, status, totals, budget) (i64 i64 i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64) i64
+  if rank < 1 || rank > 512 || kind < 1 || kind > 3
     return 0
   score = 0 ## i64
   if kind == 1

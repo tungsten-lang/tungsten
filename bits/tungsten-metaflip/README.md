@@ -941,13 +941,21 @@ prices. The [projection/packing follow-up](tools/PROJECTION-PACKING-2026-09-09.m
 records three expanded local improvements but no new reference crossing;
 its unsuccessful projection-selector change was not enabled.
 The native parent walker also accepts optional
-[mixed-pair observers](tools/BUD-MIXED-OBSERVERS-2026-09-09.md), scoring up to
+[mixed-packing observers](tools/BUD-MIXED-OBSERVERS-2026-09-09.md), scoring up to
 eight mixed-axis contexts from the same unmodified walk. Canonical private
 copies reproduce the automatic composer's exact/fallback prices. Two matched
 studies retained six distinct control-relative improved target shapes, with
 ten full output replays, but none beat the retained archive. This remains
 opt-in offline research, not an additional default CPU/GPU lane or a flip
 throughput improvement.
+Named `mixed-observers groups N BUDGET` and `mixed-observers grids N BUDGET`
+now retain up to eight native group/grid objectives without changing the
+walk. A seven-parent matched study, including 3x3/4x4/5x5 and scale-one
+composition contexts, verified twelve control-relative target gains from
+one new rank-23 3x3 representation, but no new retained bound. All 329
+distinct outputs also passed exact matrix-cleanup replay without a reduction.
+These numeric observer profiles can include verified scale-one leaves; the
+automatic composer's immutable bank still targets scales 2..4 in every axis.
 An optional [packing-driven primary objective](tools/PACKING-PRIMARY-WALKS-2026-09-09.md)
 now lets this research walker use the native mixed-pair, size-2/3/4 group,
 or combined group/2x2-grid price for chunk acceptance and winner selection.

@@ -1,8 +1,8 @@
-# Read-only mixed-pair observers
+# Read-only mixed-packing observers
 
-The automatic composer now supports mixed-axis pairings, but the offline
-parent walker previously retained only fixed-axis price winners. The walker
-can now retain up to eight mixed-pair objectives along the same trajectory.
+The automatic composer supports mixed-axis pairs, groups and grids. The
+offline parent walker can retain up to eight objectives of any one of these
+families along the same trajectory, without steering it toward one target.
 This is optional native research tooling, not a new default fleet lane.
 The bounded studies below found no new local bound or world-record candidate.
 
@@ -27,6 +27,17 @@ integer in 1..128. The rank-table limit is at most 512. The sidecars require
 and do not replace the primary objective. Four-line ordinary tables and the
 previous fixed-axis observer/grid interfaces retain their behavior.
 
+The legacy three-word header above selects pairs. Named headers also accept
+`mixed-observers pairs N BUDGET`, `mixed-observers groups N BUDGET`, or
+`mixed-observers grids N BUDGET`. Group rows have ten prices: singleton,
+U/V/W pairs, triples, then quadruples. Grid rows append three 2x2-grid prices
+for U/V, U/W and V/W, for thirteen prices total. The first four prices must
+be in 1..128; optional group/grid prices may instead be `-1`, meaning no
+verified leaf. Zero is not an absence marker. Each row must have exactly
+the required width and canonical integer spelling. Count and budget limits
+are unchanged. Named modes still require an ordinary `walk`; they are not
+a multi-objective acceptance rule or a Pareto-optimality claim.
+
 For scales `(a,b,c)`, costs correspond to leaves of shapes `(a,b,c)`,
 `(a,b,2c)`, `(2a,b,c)` and `(a,2b,c)`. A caller must bind those numbers to
 verified leaf witnesses before treating a score as a constructive rank
@@ -34,7 +45,8 @@ bound. Arbitrary score tables, hashes and the matching price alone cannot
 establish a new tensor bound. Materialize and independently check products.
 
 The observer copies the live terms into reusable private scratch and sorts
-them canonically. It invokes the same `ffmm_plan` used by automatic recipes,
+them canonically **once per observation**. It invokes the same `ffmm_plan`,
+`ffmg_plan` or `ffmx_plan` used by automatic recipes for each context,
 with no mutation of the walk state, hash chains, RNG or counters. Canonical
 ordering is important for deterministic fallback: a live slot order must not
 silently yield a different price from the later archived tensor.
@@ -45,13 +57,20 @@ are `mixed-observer-I-trial-J.txt` with `BUD_MIXED_OBSERVER` rows, deliberately
 distinct from fixed-axis observers. `BUD_MIXED` reports evaluation count,
 visited matching states, fallback components and total components. A fallback
 score is a legal packing, never an optimality certificate.
+The original pair statistics retain their format. Group/grid statistics
+add `kind`, `probes_or_states` and `pair_states`; grid mode also exposes the
+baseline `group_probes`, `group_fallback_components` and `group_components`.
+Each pass in each context has its own budget. The eight contexts share
+scratch, not a plan or an unfinished-solve classification.
 
 ## Focused verification
 
 ```sh
-bin/tungsten-compiler compile bits/tungsten-metaflip/tools/bud_parent_walk.w \
-  --out /tmp/bud-mixed-observers --release --native --no-lto
+bin/tungsten compile bits/tungsten-metaflip/tools/bud_parent_walk.w \
+  --out /tmp/bud-mixed-observers --release --native
 python3 bits/tungsten-metaflip/spec/mixed_observer_walk_test.py \
+  /tmp/bud-mixed-observers
+python3 bits/tungsten-metaflip/spec/packing_observer_walk_test.py \
   /tmp/bud-mixed-observers
 METAFLIP_BUD_WALK_BINARY=/tmp/bud-mixed-observers \
   ruby bits/tungsten-metaflip/spec/bud_parent_walk_test.rb
@@ -123,6 +142,98 @@ Runs used one low-priority CPU process at a time and no GPU. Compilation or
 focused checks could overlap; recorded timings are not isolated performance
 measurements. Mixed scoring costs more than fixed-axis scoring in most
 tested cells, and no live-flip throughput improvement is claimed.
+
+## Group/grid retention and scale-one follow-up
+
+The named modes share the primary scorer's bounded dispatch, while preserving
+the original pair-header behavior. Their focused test independently checks
+every one of 33 small states against eight group and grid objectives; compares
+batched and separate retention byte-for-byte; checks repeated multi-trial
+walks, unchanged primary winners and endpoints, budget-one fallback above
+rank 64, and 22 malformed/incompatible calls. It passes in release/native
+and non-release builds. The legacy mixed-observer tests, packing-primary
+tests and parent-walk suite (16 runs / 958 assertions, no skips) also pass.
+
+A matched study used seven parents: 3x3x3/r23, 4x4x4/r47, 5x5x5/r93,
+4x4x5/r60, 4x7x4/r85, 4x5x7/r104 and 5x5x7/r127. Each of the pair,
+group and grid arms retained eight objectives selected by closeness to
+retained bounds, deduplicated target and proportional cost profile. Selected
+contexts enlarge at least two axes, but may keep the third at one. The
+post-hoc audit includes **all 63 nonidentity scales in {1,2,3,4} cubed**,
+including single-axis expansions. No dominance claim excludes those scales.
+
+This matters for useful existing constructions: 4x7x4 at scale 3x1x3 gives
+7x12x12/r651. All three observer modes reproduce price 651 in every trial.
+The earlier {2,3,4}-cubed studies could not see this context. Its verified
+bound is already in the retained comparison and is not a new discovery.
+Scale-one leaf witnesses here are exactly constructed by the offline library;
+the public automatic composer's immutable bank still requires every scale
+coordinate to be at least two. Extending that worker is a separate seam,
+not functionality silently supplied by these numeric observer tables.
+
+Each arm used 16 trials, 128 chunks of 16,384 attempts, observations every
+2,048 attempts, debt two, density slack eight and a 50,000 budget per packing
+pass. The study made **704,643,072 attempted flips**, with three matched
+arms following the same 234,881,024-attempt trajectory set. Every primary
+winner and endpoint is byte-identical across those arms. No GPU or live
+fleet was launched. Native evaluations total 2,755,200. There was one pair
+fallback, one group fallback, and eight grid fallback components, all in
+the 3x3 cell; these retain valid constructive plans, not optimality claims.
+
+There are **329 distinct parents** from 3,360 output occurrences. Common
+repricing with the same 168-leaf constructive library completed all
+**20,727 parent/context recipes**, covering 236 canonical targets, within
+the bounded group/grid model (max leaf 16, component 24, 50,000 states and
+candidates). No group-arm target beats the pair arm on these common prices.
+Grid retention captures a new rank-23 3x3 representation with identity
+`54b8c0bdb0ccf51dfdecd885dc98d87a2590439ca7a28602fcdeb89017771ed3`,
+which improves these twelve minima over **both** controls:
+
+| Target | Pair/group control | Grid-retained exact rank | Retained bound |
+| --- | ---: | ---: | ---: |
+| 3x3x6 | 46 | 45 | 42 |
+| 3x3x9 | 69 | 68 | 63 |
+| 3x3x12 | 92 | 90 | 84 |
+| 3x6x9 | 134 | 133 | 122 |
+| 6x6x6 | 161 | 159 | 153 |
+| 6x6x9 | 245 | 243 | 224 |
+| 6x6x12 | 314 | 309 | 294 |
+| 6x9x9 | 341 | 338 | 338 |
+| 6x9x12 | 452 | 451 | 433 |
+| 9x9x9 | 521 | 517 | 482 |
+| 9x9x12 | 651 | 648 | 626 |
+| 9x12x12 | 862 | 857 | 810 |
+
+All twelve products plus four scale-one diagnostics passed independent
+Python substitution and full tensor checks: 51 distinct parent/leaf/output
+tensors and 5,857 terms. Exact matrix cleanup was then applied to **all 329**
+parents and independently replayed; none reduced. There is **no primitive
+3x3/4x4/5x5 rank improvement, new retained bound or reference crossing**.
+This was an attempt-matched retention test, not a wall-time win: group and
+grid scoring cost more than pairs, and no default hot-loop change follows.
+
+Deduplication against earlier studies adds **325**, not 329, identities.
+The recent rollup is **2,119 parents / 69,057 distinct parent-context pairs**.
+That second number is not 2,119 times 63: older parents only have their
+already-tested 27 contexts, with the new 36 added where actually checked.
+These are coverage counts, not record counts. The comparison includes all
+five prior two-grid follow-up bounds, so none is recredited.
+
+Evidence is outside the checkout at
+`/private/tmp/metaflip-packing-observer-study-20260909`: `setup.json`,
+`search.json`, `reprice.json` and `independent.json`, with bound leaf witnesses
+and sixteen complete products. The compression source and independently
+audited report are in the sibling `metaflip-packing-observer-compression-source-20260909`
+and `metaflip-packing-observer-compressed-20260909` directories.
+
+The durable local archive is
+`/Users/erik/.local/share/tungsten-metaflip/evidence/2026-09-09-packing-observers.tar.gz`
+(6,241,012 bytes; SHA-256
+`b8589270c2eedd90eee56126e35e5ee4987909ab0f414ee7f06a8f05a649fdf0`).
+A fresh extraction checked all 4,374 manifest hashes, the deduplicated
+coverage rollup, all 329 compression inputs and all sixteen expanded
+products. Imported tensors remain private local evidence; this archive
+does not establish redistribution rights or worldwide novelty.
 
 ## Decision
 

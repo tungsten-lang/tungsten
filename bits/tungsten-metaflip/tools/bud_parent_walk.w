@@ -40,6 +40,8 @@ if table == nil
 lines = table.strip().split("\n")
 observer_count = 0 ## i64
 mixed_count = 0 ## i64
+mixed_kind = 1 ## i64
+mixed_width = 4 ## i64
 mixed_budget = 0 ## i64
 mixed_primary = 0 ## i64
 if lines.size() != 4 && lines.size() != 5
@@ -59,12 +61,24 @@ if lines.size() != 4 && lines.size() != 5
     if mixed_primary == 0 || mixed_budget < 1 || mixed_budget > 1000000 || mixed_budget_label != header[2] || lines.size() != 6 || ARGV.size() >= 13
       << "invalid mixed primary layout or strategy"
       exit(2)
-  elsif header.size() == 3 && header[0] == "mixed-observers"
-    mixed_count = header[1].to_i()
-    mixed_budget = header[2].to_i()
+  elsif (header.size() == 3 || header.size() == 4) && header[0] == "mixed-observers"
+    offset = 1 ## i64
+    if header.size() == 4
+      mixed_kind = 0
+      offset = 2
+      if header[1] == "pairs"
+        mixed_kind = 1
+      if header[1] == "groups"
+        mixed_kind = 2
+        mixed_width = 10
+      if header[1] == "grids"
+        mixed_kind = 3
+        mixed_width = 13
+    mixed_count = header[offset].to_i()
+    mixed_budget = header[offset+1].to_i()
     mixed_count_label = mixed_count.to_s()
     mixed_budget_label = mixed_budget.to_s()
-    if mixed_count < 1 || mixed_count > 8 || mixed_count_label != header[1] || mixed_budget < 1 || mixed_budget > 1000000 || mixed_budget_label != header[2] || lines.size() != 5+mixed_count || mode != "walk" || ARGV.size() >= 13
+    if mixed_kind == 0 || mixed_count < 1 || mixed_count > 8 || mixed_count_label != header[offset] || mixed_budget < 1 || mixed_budget > 1000000 || mixed_budget_label != header[offset+1] || lines.size() != 5+mixed_count || mode != "walk" || ARGV.size() >= 13
       << "invalid mixed observer layout or strategy"
       exit(2)
     observer_count = mixed_count
@@ -130,21 +144,21 @@ while observer < observer_count && mixed_count == 0
       i += 1
     axis += 1
   observer += 1
-mixed_tables = i64[4*mixed_count]
+mixed_tables = i64[mixed_width*mixed_count]
 observer = 0
 while observer < mixed_count
   fields = lines[5+observer].split(" ")
-  if fields.size() != 4
+  if fields.size() != mixed_width
     << "invalid mixed observer prices"
     exit(2)
   i = 0 ## i64
-  while i < 4
+  while i < mixed_width
     price = fields[i].to_i() ## i64
     price_label = price.to_s()
-    if price < 1 || price > 128 || price_label != fields[i]
+    if price_label != fields[i] || price > 128 || price < 0-1 || price == 0 || (i < 4 && price < 1)
       << "invalid mixed observer prices"
       exit(2)
-    mixed_tables[4*observer+i] = price
+    mixed_tables[mixed_width*observer+i] = price
     i += 1
   observer += 1
 mixed_scratch = 0 ## i64
@@ -284,7 +298,7 @@ while trial < trials
   best_at = 0 ## i64
   accepted = 0 ## i64
   if mixed_count > 0
-    if ffbp_mixed_costs(original,mixed_tables,mixed_count,observer_current_scores,mixed_parent,mixed_costs,mixed_mates,mixed_axes,mixed_work,mixed_memo,mixed_choice,mixed_status,mixed_totals,mixed_budget) != 1
+    if ffbp_mixed_costs(original,mixed_tables,mixed_count,mixed_kind,observer_current_scores,mixed_parent,mixed_costs,mixed_mates,mixed_axes,mixed_work,mixed_memo,mixed_choice,mixed_status,mixed_totals,mixed_budget) != 1
       << "invalid initial mixed observer score"
       exit(1)
   elsif observer_count > 0
@@ -329,7 +343,7 @@ while trial < trials
           exit(1)
       elsif mixed_count > 0
         score = ffbh_cost(observed,work,cancelled,held_cost,prices,stride,keys,counts,grid_prices)
-        if ffbp_mixed_costs(observed,mixed_tables,mixed_count,observer_current_scores,mixed_parent,mixed_costs,mixed_mates,mixed_axes,mixed_work,mixed_memo,mixed_choice,mixed_status,mixed_totals,mixed_budget) != 1
+        if ffbp_mixed_costs(observed,mixed_tables,mixed_count,mixed_kind,observer_current_scores,mixed_parent,mixed_costs,mixed_mates,mixed_axes,mixed_work,mixed_memo,mixed_choice,mixed_status,mixed_totals,mixed_budget) != 1
           << "invalid mixed observer score"
           exit(1)
       elsif observer_count > 0
@@ -411,7 +425,16 @@ while trial < trials
   trial += 1
 elapsed = ccall("__w_clock_ms") - start_ms ## i64
 if mixed_count > 0
-  << "BUD_MIXED observers=" + mixed_count.to_s() + " budget=" + mixed_budget.to_s() + " evaluations=" + mixed_totals[0].to_s() + " states=" + mixed_totals[1].to_s() + " fallback_components=" + mixed_totals[2].to_s() + " components=" + mixed_totals[3].to_s()
+  if mixed_kind == 1
+    << "BUD_MIXED observers=" + mixed_count.to_s() + " budget=" + mixed_budget.to_s() + " evaluations=" + mixed_totals[0].to_s() + " states=" + mixed_totals[1].to_s() + " fallback_components=" + mixed_totals[2].to_s() + " components=" + mixed_totals[3].to_s()
+  else
+    kind = "groups"
+    if mixed_kind == 3
+      kind = "grids"
+    line = "BUD_MIXED kind=" + kind + " observers=" + mixed_count.to_s() + " budget=" + mixed_budget.to_s() + " evaluations=" + mixed_totals[0].to_s() + " probes_or_states=" + mixed_totals[1].to_s() + " pair_states=" + mixed_totals[4].to_s() + " fallback_components=" + mixed_totals[2].to_s() + " components=" + mixed_totals[3].to_s()
+    if mixed_kind == 3
+      line = line + " group_probes=" + mixed_totals[5].to_s() + " group_fallback_components=" + mixed_totals[6].to_s() + " group_components=" + mixed_totals[7].to_s()
+    << line
 if mixed_primary > 0
   kind = "pairs"
   if mixed_primary == 2

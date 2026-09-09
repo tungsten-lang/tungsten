@@ -24,7 +24,7 @@ def check(binary):
 
         def run(name, kind=None, mode='walk', steps=32, every=1, chunks=1,
                 budget=50000, costs=costs, shape=shape, source=source,
-                limit=14, raw=None, extra=(), success=True):
+                limit=14, raw=None, extra=(), success=True, trials=1):
             out = root/name
             out.mkdir()
             primary = [str(limit)]+[' '.join(map(str,range(limit+1)))]*3
@@ -33,7 +33,7 @@ def check(binary):
                             ' '.join(map(str,costs[:4] if kind == 'pairs' else costs[:10] if kind == 'groups' else costs))]
             table = out/'prices.txt'
             table.write_text(raw if raw is not None else '\n'.join(primary)+'\n')
-            command = [binary,str(source),'x'.join(map(str,shape)),str(table),'1',str(chunks),str(steps),
+            command = [binary,str(source),'x'.join(map(str,shape)),str(table),str(trials),str(chunks),str(steps),
                        mode,'950113',str(out),'2','8',str(every),*extra]
             p = subprocess.run(command,capture_output=True,text=True,timeout=60)
             assert (p.returncode == 0) == success,(command,p.stdout,p.stderr)
@@ -42,11 +42,11 @@ def check(binary):
                 return out,p.stdout
             assert not fields(p.stdout,'BUD_MIXED_OBSERVER') and not fields(p.stdout,'BUD_OBSERVER')
             t=fields(p.stdout,'BUD_RESULT')[0]
-            assert int(t['attempted']) == chunks*steps
+            assert int(t['attempted']) == trials*chunks*steps
             if kind:
                 stats=fields(p.stdout,'BUD_PACK')[0]
                 assert stats['kind']==kind and int(stats['budget'])==budget
-                evaluations=1+chunks*((steps+every-1)//every)
+                evaluations=1+trials*chunks*((steps+every-1)//every)
                 assert int(stats['evaluations'])==evaluations
                 assert int(stats['probes_or_states'])<=evaluations*budget
                 assert int(stats['pair_states'])<=evaluations*budget
@@ -86,6 +86,21 @@ def check(binary):
             assert (coarse/'end-0.txt').read_bytes()==(control/'end-0.txt').read_bytes()
             assert fields(coarse_text,'BUD_RESULT')[0]['accepted_flips']==fields(ct,'BUD_RESULT')[0]['accepted_flips']
         print('PASS packing primary: 33 observation minima, independent greedy/anneal acceptance, cadence-neutral walk and counters',flush=True)
+
+        # Primary scoring prices the fixed initial tensor once, not once per
+        # trial as the read-only observer interface does. Include an incomplete
+        # observation span so neither trial nor cadence accounting can drift.
+        for kind in ('pairs','groups','grids'):
+            out,text=run('trial-count-'+kind,kind,trials=3,chunks=2,steps=17,every=5,costs=grid_costs)
+            totals=fields(text,'BUD_RESULT')[0]
+            assert int(totals['trials'])==3 and int(totals['observations'])==24
+            assert int(fields(text,'BUD_PACK')[0]['evaluations'])==25
+            saved=fields(text,'BUD_TRIAL')
+            assert [int(r['trial']) for r in saved]==[0,1,2]
+            for trial in range(3):
+                assert len(read_scheme(out/f'trial-{trial}.txt',shape))==int(saved[trial]['rank'])
+                read_scheme(out/f'end-{trial}.txt',shape)
+        print('PASS packing primary: one initial evaluation across multiple trials and partial observation spans',flush=True)
 
         # Multi-chunk steering, reproducibility and canonical post-hoc scoring.
         for kind,oracle in (('groups',lambda t:group_optimal(t,costs)),('grids',lambda t:grid_optimal(t,grid_costs))):

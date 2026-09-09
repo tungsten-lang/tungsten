@@ -132,7 +132,7 @@ manifest. No bulk benchmark tree, canonical seed promotion, or live worker
 was added. The finite jobs used low-priority CPU processes and no GPU;
 their timings are not isolated throughput benchmarks.
 
-The next falsifiable experiment is a matched continuation from aligned
-parents versus their original parents. Merely exposing a grid already
-improves some local composition prices, but the current evidence does not
-justify making this an unconditional default refinement stage.
+The [matched continuation and native-refinement control](ALIGNED-CONTINUATION-AUDIT-2026-09-09.md)
+is now complete: no new retained bound, and existing native refinement
+matches all four selected raw starting gains. Merely exposing a grid does
+not justify making this an unconditional default refinement stage.

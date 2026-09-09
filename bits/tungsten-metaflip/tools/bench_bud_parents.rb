@@ -153,10 +153,10 @@ begin
     summary[:holdout].merge!(elementary_shape: options[:holdout_shape], leaf: held_snapshot, cost: held_leaf.rank)
     summary[:score_kind] = 'fixed-elementary-group-or-pure-axis-upper-bound'
   end
-  summary[:source_sha256] = %w[bud_parent_walk.w bud_holdout.w bud_parent_score.w bud_parent_shapes.w bud_products.rb bud_packings.rb bud_fixed_group.rb bench_bud_parents.rb].to_h do |name|
+  summary[:source_sha256] = %w[bud_parent_walk.w bud_holdout.w bud_parent_score.w bud_mixed_score.w bud_parent_shapes.w bud_products.rb bud_packings.rb bud_fixed_group.rb bench_bud_parents.rb].to_h do |name|
     [name, Digest::SHA256.file(File.join(__dir__, name)).hexdigest]
   end
-  summary[:engine_sha256] = %w[rect.w seeds/rect.w scheme.w].to_h do |name|
+  summary[:engine_sha256] = %w[rect.w seeds/rect.w scheme.w composition/mixed_pairs.w].to_h do |name|
     [name, Digest::SHA256.file(File.join(__dir__, "../lib/metaflip", name)).hexdigest]
   end
   %w[walk greedy anneal].each do |mode|

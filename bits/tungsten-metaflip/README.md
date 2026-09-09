@@ -919,6 +919,14 @@ so exact mixed-group refinement can preserve a native-bank baseline's leaf
 prices. The [projection/packing follow-up](tools/PROJECTION-PACKING-2026-09-09.md)
 records three expanded local improvements but no new reference crossing;
 its unsuccessful projection-selector change was not enabled.
+The native parent walker also accepts optional
+[mixed-pair observers](tools/BUD-MIXED-OBSERVERS-2026-09-09.md), scoring up to
+eight mixed-axis contexts from the same unmodified walk. Canonical private
+copies reproduce the automatic composer's exact/fallback prices. Two matched
+studies retained six distinct control-relative improved target shapes, with
+ten full output replays, but none beat the retained archive. This remains
+opt-in offline research, not an additional default CPU/GPU lane or a flip
+throughput improvement.
 Optional [read-only context observers](tools/BUD-CONTEXT-OBSERVERS-2026-09-08.md)
 retain up to eight additional price objectives along one ordinary walk. The
 same-path study reproduced both rank and context winners with half the

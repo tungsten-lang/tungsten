@@ -1,4 +1,5 @@
 use bud_holdout
+use bud_mixed_score
 
 # Bounded one-thread experiment; never touches a fleet archive or a GPU.
 if ARGV.size() < 10 || ARGV.size() > 14
@@ -38,23 +39,35 @@ if table == nil
   exit(2)
 lines = table.strip().split("\n")
 observer_count = 0 ## i64
+mixed_count = 0 ## i64
+mixed_budget = 0 ## i64
 if lines.size() != 4 && lines.size() != 5
-  if lines.size() < 8
+  if lines.size() < 6
     << "invalid price rows"
     exit(2)
   header = lines[4].split(" ")
-  if header.size() != 2 || header[0] != "observers"
+  if header.size() == 3 && header[0] == "mixed-observers"
+    mixed_count = header[1].to_i()
+    mixed_budget = header[2].to_i()
+    mixed_count_label = mixed_count.to_s()
+    mixed_budget_label = mixed_budget.to_s()
+    if mixed_count < 1 || mixed_count > 8 || mixed_count_label != header[1] || mixed_budget < 1 || mixed_budget > 1000000 || mixed_budget_label != header[2] || lines.size() != 5+mixed_count || mode != "walk" || ARGV.size() >= 13
+      << "invalid mixed observer layout or strategy"
+      exit(2)
+    observer_count = mixed_count
+  elsif header.size() == 2 && header[0] == "observers"
+    observer_count = header[1].to_i()
+    observer_label = observer_count.to_s()
+    # Sidecars do not steer the walk. Holdout/grid objectives require a
+    # different cover and are deliberately not supported by these tables.
+    if observer_count < 1 || observer_count > 8 || observer_label != header[1] || lines.size() != 5 + 3 * observer_count || mode != "walk" || ARGV.size() >= 13
+      << "invalid observer layout or strategy"
+      exit(2)
+  else
     << "invalid observer header"
     exit(2)
-  observer_count = header[1].to_i()
-  observer_label = observer_count.to_s()
-  # Sidecars do not steer the walk. Holdout/grid objectives require a
-  # different cover and are deliberately not supported by these tables.
-  if observer_count < 1 || observer_count > 8 || observer_label != header[1] || lines.size() != 5 + 3 * observer_count || mode != "walk" || ARGV.size() >= 13
-    << "invalid observer layout or strategy"
-    exit(2)
 limit = lines[0].to_i() ## i64
-if limit < 1 || limit > 4096
+if limit < 1 || limit > 4096 || (mixed_count > 0 && limit > 512)
   << "invalid price rank limit"
   exit(2)
 stride = limit + 1 ## i64
@@ -80,13 +93,13 @@ scored_tables = 0 ## i64
 if observer_count > 0
   scored_tables = observer_count + 1
 observer_prices = i64[3 * stride * scored_tables]
-if observer_count > 0
+if observer_count > 0 && mixed_count == 0
   i = 0 ## i64
   while i < 3 * stride
     observer_prices[i] = prices[i]
     i += 1
 observer = 0 ## i64
-while observer < observer_count
+while observer < observer_count && mixed_count == 0
   axis = 0
   while axis < 3
     fields = lines[5 + 3 * observer + axis].split(" ")
@@ -104,6 +117,35 @@ while observer < observer_count
       i += 1
     axis += 1
   observer += 1
+mixed_tables = i64[4*mixed_count]
+observer = 0
+while observer < mixed_count
+  fields = lines[5+observer].split(" ")
+  if fields.size() != 4
+    << "invalid mixed observer prices"
+    exit(2)
+  i = 0 ## i64
+  while i < 4
+    price = fields[i].to_i() ## i64
+    price_label = price.to_s()
+    if price < 1 || price > 128 || price_label != fields[i]
+      << "invalid mixed observer prices"
+      exit(2)
+    mixed_tables[4*observer+i] = price
+    i += 1
+  observer += 1
+mixed_scratch = 0 ## i64
+if mixed_count > 0
+  mixed_scratch = 1
+mixed_parent = i64[3*512*mixed_scratch]
+mixed_costs = i64[4*mixed_scratch]
+mixed_mates = i64[512*mixed_scratch]
+mixed_axes = i64[512*mixed_scratch]
+mixed_work = i64[6*512*mixed_scratch]
+mixed_memo = i64[65536*mixed_scratch]
+mixed_choice = i64[65536*mixed_scratch]
+mixed_status = i64[3*mixed_scratch]
+mixed_totals = i64[4]
 grid_prices = i64[3]
 if lines.size() == 5
   fields = lines[4].split(" ")
@@ -204,7 +246,11 @@ while trial < trials
   best_bits = ffr_current_bits(original) ## i64
   best_at = 0 ## i64
   accepted = 0 ## i64
-  if observer_count > 0
+  if mixed_count > 0
+    if ffbp_mixed_costs(original,mixed_tables,mixed_count,observer_current_scores,mixed_parent,mixed_costs,mixed_mates,mixed_axes,mixed_work,mixed_memo,mixed_choice,mixed_status,mixed_totals,mixed_budget) != 1
+      << "invalid initial mixed observer score"
+      exit(1)
+  elsif observer_count > 0
     z = ffbp_observer_costs(original,observer_prices,stride,scored_tables,keys,counts,observer_current_scores)
   observer = 0
   while observer < observer_count
@@ -239,7 +285,12 @@ while trial < trials
         << "holdout join capacity failed"
         exit(1)
       holdout_cancellations += cancelled
-      if observer_count > 0
+      if mixed_count > 0
+        score = ffbh_cost(observed,work,cancelled,held_cost,prices,stride,keys,counts,grid_prices)
+        if ffbp_mixed_costs(observed,mixed_tables,mixed_count,observer_current_scores,mixed_parent,mixed_costs,mixed_mates,mixed_axes,mixed_work,mixed_memo,mixed_choice,mixed_status,mixed_totals,mixed_budget) != 1
+          << "invalid mixed observer score"
+          exit(1)
+      elsif observer_count > 0
         z = ffbp_observer_costs(observed,observer_prices,stride,scored_tables,keys,counts,observer_current_scores)
         score = observer_current_scores[0]
       else
@@ -299,7 +350,12 @@ while trial < trials
       exit(1)
   observer = 0
   while observer < observer_count
-    observer_path = outdir + "/observer-" + observer.to_s() + "-trial-" + trial.to_s() + ".txt"
+    prefix = "observer-"
+    label = "BUD_OBSERVER"
+    if mixed_count > 0
+      prefix = "mixed-observer-"
+      label = "BUD_MIXED_OBSERVER"
+    observer_path = outdir + "/" + prefix + observer.to_s() + "-trial-" + trial.to_s() + ".txt"
     if read_file(observer_path) != nil
       << "refusing to overwrite observer output"
       exit(2)
@@ -307,9 +363,11 @@ while trial < trials
     if ffbp_dump(observer_scratch,observer_path,n,m,p) != observer_ranks[observer]
       << "observer output gate failed"
       exit(1)
-    << "BUD_OBSERVER observer=" + observer.to_s() + " trial=" + trial.to_s() + " score=" + observer_scores[observer].to_s() + " rank=" + observer_ranks[observer].to_s() + " bits=" + observer_bits[observer].to_s() + " best_at=" + observer_at[observer].to_s()
+    << label + " observer=" + observer.to_s() + " trial=" + trial.to_s() + " score=" + observer_scores[observer].to_s() + " rank=" + observer_ranks[observer].to_s() + " bits=" + observer_bits[observer].to_s() + " best_at=" + observer_at[observer].to_s()
     observer += 1
   << "BUD_TRIAL trial=" + trial.to_s() + " strategy=" + mode + " score=" + best.to_s() + " rank=" + best_rank.to_s() + " bits=" + best_bits.to_s() + " chunks_accepted=" + accepted.to_s() + " best_at=" + best_at.to_s()
   trial += 1
 elapsed = ccall("__w_clock_ms") - start_ms ## i64
+if mixed_count > 0
+  << "BUD_MIXED observers=" + mixed_count.to_s() + " budget=" + mixed_budget.to_s() + " evaluations=" + mixed_totals[0].to_s() + " states=" + mixed_totals[1].to_s() + " fallback_components=" + mixed_totals[2].to_s() + " components=" + mixed_totals[3].to_s()
 << "BUD_RESULT strategy=" + mode + " trials=" + trials.to_s() + " chunks=" + chunks.to_s() + " steps=" + steps.to_s() + " attempted=" + attempted.to_s() + " accepted_flips=" + flips_accepted.to_s() + " accepted_chunks=" + restarts_accepted.to_s() + " initial=" + initial.to_s() + " density_slack=" + density_slack.to_s() + " observe_every=" + observe_every.to_s() + " observations=" + observations.to_s() + " sampled_peak_rank=" + sampled_peak_rank.to_s() + " sampled_peak_bits=" + sampled_peak_bits.to_s() + " held_terms=" + held_count.to_s() + " held_cost=" + held_cost.to_s() + " holdout_cancellations=" + holdout_cancellations.to_s() + " elapsed_ms=" + elapsed.to_s()

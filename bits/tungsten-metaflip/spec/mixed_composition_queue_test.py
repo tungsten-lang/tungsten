@@ -10,6 +10,7 @@ import tempfile
 from composition_queue_test import (RUNTIME, audit, completion, exact, naive, narrow,
                                     parse_terms, read_record, replace_record, store, value)
 from mixed_composition_parity_test import load_bank, optimal, components
+from mixed_group_composition_parity_test import context_prices, group_components, optimal as group_optimal
 from packed_composition_parity_test import orient
 
 
@@ -37,10 +38,11 @@ def mixed_audit(root):
         seen.add(ticket)
         raw = read_record(m, 'tasks', ticket)
         fields = raw.decode().split()
-        assert len(fields) == 9 and fields[0] == 'MFM1'
+        assert len(fields) == 9 and fields[0] in ('MFM1', 'MFM2')
         parent_ticket, context, n, k, p, price = map(int, fields[3:])
         assert 0 <= context < 27
-        assert read_record(m, 'parents', parent_ticket) == f'MFMD1 {fields[1]} {fields[2]}\n'.encode()
+        parent_version = 'MFMD2' if fields[0] == 'MFM2' else 'MFMD1'
+        assert read_record(m, 'parents', parent_ticket) == f'{parent_version} {fields[1]} {fields[2]}\n'.encode()
         shape, terms = narrow(root, fields[1])
         scales = (2+context//9, 2+(context//3)%3, 2+context%3)
         target = tuple(x*y for x,y in zip(shape, scales))
@@ -50,7 +52,14 @@ def mixed_audit(root):
         leaves = banks[fields[2]]
         a,b,c = scales
         costs = [len(leaves[tuple(sorted(s))]) for s in (scales,(a,b,2*c),(2*a,b,c),(a,2*b,c))]
-        if all(len(g) <= 16 for g in components(terms, costs)):
+        if fields[0] == 'MFM2':
+            costs = context_prices(scales, leaves)
+            if all(len(g) <= 12 for g in group_components(terms, costs)):
+                # Recipes bind a probe budget, not a claim of optimality.
+                # Exact-equality checks live in the engine test, which sees
+                # the explicit completion/fallback status for every plan.
+                assert group_optimal(terms, costs) <= price
+        elif all(len(g) <= 16 for g in components(terms, costs)):
             assert price == optimal(terms, costs)
         assert result[1] == sha256(raw).hexdigest()
         data = (q/'objects'/f'{result[2]}.tensor').read_bytes()
@@ -68,13 +77,16 @@ def mixed_audit(root):
 def check(binary):
     base_env = dict(os.environ, METAFLIP_COMPOSITION_PENDING='1269', METAFLIP_COMPOSITION_FIFO='0')
     base_env.pop('METAFLIP_COMPOSITION_MIXED', None)  # Test default-on, not an opt-in.
+    base_env.pop('METAFLIP_COMPOSITION_MIXED_GROUPS', None)
 
-    def run(*args, ok=True, off=False, unlimited=False):
+    def run(*args, ok=True, off=False, unlimited=False, pairs=False):
         env = dict(base_env)
         if off:
             env['METAFLIP_COMPOSITION_MIXED'] = '0'
         if unlimited:
             env['METAFLIP_COMPOSITION_PENDING'] = '0'
+        if pairs:
+            env['METAFLIP_COMPOSITION_MIXED_GROUPS'] = '0'
         p = subprocess.run([binary, *map(str,args)], env=env, capture_output=True, text=True, timeout=60)
         assert (p.returncode == 0) == ok, (args, p.returncode, p.stdout, p.stderr)
         return p.stdout
@@ -86,6 +98,7 @@ def check(binary):
         q = root/'composition'; m = q/'mixed'
         assert value(q/'submitted') == 9 and value(m/'submitted') == 0 and deferred(root) == 27
         parent_record = read_record(m, 'parents', 1)
+        assert parent_record.startswith(b'MFMD2 ')
         stamp = m/'by-parent'/sha256(parent_record).hexdigest()
         # Parent record before cursor/index commit: repair, not a duplicate.
         (m/'parent-submitted').write_text('0\n'); stamp.unlink()
@@ -169,6 +182,42 @@ def check(binary):
         assert all(p.read_bytes() == raw for p,raw in saved_banks.items())
         mixed_audit(root)
         print('PASS mixed queue: default intake, ties, 3 exact-gate failures, independent journals and restart',flush=True)
+
+    with tempfile.TemporaryDirectory(prefix='metaflip-mixed-versions-') as directory:
+        root = Path(directory); setup(root)
+        key = store(root, (2,2,3), naive((2,2,3)))
+        run('--prepare', root, RUNTIME, key, pairs=True)
+        q = root/'composition'; m = q/'mixed'
+        old_parent = read_record(m, 'parents', 1)
+        assert old_parent.startswith(b'MFMD1 ')
+        run('--mixed-admit', root, 1)
+        old_task = read_record(m, 'tasks', 1)
+        assert old_task.startswith(b'MFM1 ')
+        run('--prepare', root, RUNTIME, key)
+        assert value(m/'parent-submitted') == 2
+        assert read_record(m, 'parents', 2).startswith(b'MFMD2 ')
+        run('--prepare', root, RUNTIME, key, pairs=True)
+        run('--prepare', root, RUNTIME, key)
+        assert value(m/'parent-submitted') == 2
+        # New offers do not change an old ticket's planner or leaf identity.
+        while pending(root) or deferred(root):
+            run('--compose-batch', root, 4, pairs=True)
+        assert value(m/'consumed') == 54
+        assert read_record(m, 'parents', 1) == old_parent and read_record(m, 'tasks', 1) == old_task
+        plans = [read_record(m, 'tasks', i).decode().split() for i in range(1,55)]
+        assert all(p[0] == 'MFM1' for p in plans[:27])
+        assert all(p[0] == 'MFM2' for p in plans[27:])
+        assert all(int(new[-1]) <= int(old[-1]) for old,new in zip(plans[:27], plans[27:]))
+        assert any(int(new[-1]) < int(old[-1]) for old,new in zip(plans[:27], plans[27:]))
+        mixed_audit(root)
+        # A recipe cannot select a different algorithm than its parent ticket.
+        bad = plans[-1].copy(); bad[0] = 'MFM1'
+        raw = read_record(m, 'tasks', 54)
+        replace_record(m, 'tasks', 54, (' '.join(bad)+'\n').encode())
+        run('--mixed-admit', root, 1, ok=False)
+        replace_record(m, 'tasks', 54, raw)
+        run('--mixed-admit', root, 1)
+        print('PASS mixed versions: old/new coexist, group gains, exact replay and algorithm binding',flush=True)
 
     with tempfile.TemporaryDirectory(prefix='metaflip-mixed-cap-') as directory:
         root = Path(directory); setup(root)

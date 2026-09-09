@@ -239,16 +239,19 @@ The external parent is test-only, not redistributed. Replay with
 `spec/composition_queue_test.py NATIVE_TEST_BINARY [EXTERNAL_4x8x4]`.
 
 This is still a bounded family, not an exhaustive basis/packing search.
-Overlapping groups, changing-leaf dependency propagation, recursive wide
+General elementary grids, changing-leaf dependency propagation, recursive wide
 composition and automatic cross-shape campaign dispatch remain follow-up work.
-The native `composition/mixed_pairs.w` engine supports disjoint pairs from
-different axes in one construction, using a verified 22-leaf bank for all
-27 scale triples in `{2,3,4}^3`. Small connected components use exact weighted
-matching; larger or state-limited components keep a valid deterministic
-fallback. This now runs automatically for every distinct verified input and
+The native `composition/mixed_groups.w` engine supports disjoint shared-factor
+groups of up to four terms from different axes in one construction, using
+the existing verified 22-leaf bank for all 27 scale triples in `{2,3,4}^3`.
+Only groups with actual bank witnesses are eligible. It starts with the
+mixed-pair plan, then solves components of at most 16 terms; larger or
+probe-limited components retain their original pair plan. This runs
+automatically for every distinct verified input and
 refined parent, including rank ties. An immutable parent/bank reference yields
-up to 27 `MFM1` recipes, admitted at most 27 contexts per cold batch under the
-shared pending limit. Recipes fix a 50,000-state matching budget and replay
+up to 27 `MFM2` recipes, admitted at most 27 contexts per cold batch under the
+shared pending limit. Recipes fix a 50,000-state pair budget plus 50,000 group
+probes (including memo hits), and replay
 the parent, leaf bank, price and full tensor check before admission. Supported
 contexts without pair savings are retained too. Input ranks above 512,
 factor widths above 1,024 bits or predicted outputs above 16,384 terms are
@@ -256,7 +259,10 @@ outside this bounded family; skipping those contexts is not a verified
 tensor completion.
 
 `METAFLIP_COMPOSITION_MIXED=0` disables new mixed intake without abandoning
-already queued work. A changed bank identity is repriced when its parent is
+already queued work. `METAFLIP_COMPOSITION_MIXED_GROUPS=0` selects pair-only
+`MFM1` offers. Old parent tickets keep their exact algorithm when resumed;
+re-offering an old parent under the new version creates separate contexts.
+A changed bank identity is repriced when its parent is
 re-offered; old recipes remain reproducible. There is no full dependency
 rescan. Restart, stop, exact-gate rejection, shared-cap and deferred-only
 coordinator checks are in `spec/mixed_composition_queue_test.py`. See
@@ -264,7 +270,10 @@ coordinator checks are in `spec/mixed_composition_queue_test.py`. See
 for the integration audit and its 1,620 fully verified outputs across 153
 canonical shapes (zero new local bounds), and
 [Native mixed-axis pairs](tools/NATIVE-MIXED-PAIRS-2026-09-09.md)
-for the engine's independent 891-case comparison.
+for the engine's independent 891-case comparison. The
+[mixed-group audit](tools/NATIVE-MIXED-GROUPS-2026-09-09.md) covers the new
+bounded family: 876 lower construction prices in 7,803 distinct retained
+parent/scale cases, but no new local bound or world-record claim.
 Wide outputs are exact archived witnesses, not yet live wide-worker seeds.
 See the [native integration audit](tools/NATIVE-REFINEMENT-2026-09-08.md) for
 the first refinement milestone, and the

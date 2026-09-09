@@ -1,5 +1,9 @@
 # Automatic mixed-axis composition
 
+This is the original `MFM1` integration audit. The default now uses
+versioned `MFM2` mixed groups, while preserving old tickets exactly; see
+[the mixed-group extension](NATIVE-MIXED-GROUPS-2026-09-09.md).
+
 The native mixed-pair engine now runs by default after candidate refinement.
 Every distinct verified input and refined parent, including rank ties, is
 offered with its immutable 22-leaf bank. This extends the existing automatic

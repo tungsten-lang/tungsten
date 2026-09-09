@@ -3,6 +3,7 @@
 use ../fleet/refinement_artifacts
 use ../compose
 use mixed_pairs
+use mixed_groups
 
 -> ffmb_shape(slot, dims) (i64 i64[]) i64
   index = 0 ## i64
@@ -132,6 +133,33 @@ use mixed_pairs
     if rank < 1
       return 0
     prices[i] = rank
+    i += 1
+  1
+
+# Reuse the immutable pair bank for available size-3/4 groups. Unsupported
+# shapes have price -1, never a price-only substitute for a missing witness.
+-> ffmb_group_context(bank, bank_words, costs, cost_words, a, b, c, out, out_words, prices, price_words) (i64[] i64 i64[] i64 i64 i64 i64 i64[] i64 i64[] i64) i64
+  if out_words < 30*128 || price_words < 10 || ffmb_context(bank, bank_words, costs, cost_words, a, b, c, out, out_words, prices, price_words) != 1
+    return 0
+  i = 4 ## i64
+  while i < 10
+    axis = (i-1)%3 ## i64
+    size = 2+(i-1)/3 ## i64
+    n = a ## i64
+    m = b ## i64
+    p = c ## i64
+    if axis == 0
+      p *= size
+    if axis == 1
+      n *= size
+    if axis == 2
+      m *= size
+    prices[i] = 0-1
+    if ffmb_slot(n, m, p) >= 0
+      rank = ffmb_extract(bank, bank_words, costs, cost_words, n, m, p, out, out_words, i*3*128) ## i64
+      if rank < 1
+        return 0
+      prices[i] = rank
     i += 1
   1
 

@@ -21,6 +21,32 @@ class BudParentWalkTest < Minitest::Test
      "--output", output, "--trials", "2", "--chunks", "8", "--steps", "128"]
   end
 
+  def test_native_creates_output_directory_and_rejects_failed_writes
+    Dir.mktmpdir("bud-native-output") do |root|
+      table = File.join(root,"prices.txt")
+      File.write(table,(["20"]+3.times.map { (0..20).to_a.join(" ") }).join("\n")+"\n")
+      output = File.join(root,"new","walk")
+      args = [@binary,@parent,"2x2x5",table,"1","1","16","walk","17",output,"2","4","1"]
+      text,status = Open3.capture2e(*args)
+      assert status.success?,text
+      %w[trial-0.txt end-0.txt].each do |name|
+        assert B.load_scheme(File.join(output,name),[2,2,5]).audit[:exact]
+      end
+      blocked = File.join(root,"blocked")
+      File.write(blocked,"not a directory\n")
+      args[9] = File.join(blocked,"child")
+      text,status = Open3.capture2e(*args)
+      refute status.success?
+      assert_includes text,"cannot create parent output directory"
+      bad = File.join(root,"bad")
+      Dir.mkdir(bad); Dir.mkdir(File.join(bad,"trial-0.txt"))
+      args[9] = bad
+      text,status = Open3.capture2e(*args)
+      refute status.success?
+      refute_includes text,"BUD_RESULT"
+    end
+  end
+
   def test_matched_accounting_exact_replay_repeatability_and_overwrite_refusal
     Dir.mktmpdir("bud-parent-test") do |root|
       reports = %w[first second].map do |name|

@@ -29,6 +29,9 @@ if shape != n.to_s() + "x" + m.to_s() + "x" + p.to_s() || ffbp_supported(n,m,p) 
 if mode != "walk" && mode != "greedy" && mode != "anneal"
   << "invalid strategy"
   exit(2)
+if !File.mkdir_p(outdir)
+  << "cannot create parent output directory"
+  exit(2)
 table = read_file(table_path)
 if table == nil
   << "missing price table"

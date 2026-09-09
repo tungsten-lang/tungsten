@@ -29,11 +29,13 @@ use bud_parent_shapes
   ffr_wander(st,steps)
 
 -> ffbp_dump(st, path, n, m, p) (i64[] String i64 i64 i64) i64
-  if n == m && m == p
-    return ffw_dump_current(st,path)
-  if ffr_supported(n,m,p) != 1
-    return ffbo_dump(st,path,n,m,p)
-  ffr_dump_current(st,path)
+  if ffbp_verify(st,n,m,p) != 1
+    return 0-1
+  body = ffw_view_text(st,st[44],st[45],st[46],st[50],st[6])
+  if !write_file(path,body) || File.read_prefix(path,body.size()+1) != body
+    return 0-1
+  st[32] += 1
+  st[6]
 
 -> ffbp_copy(src, dst, words) (i64[] i64[] i64) i64
   i = 0 ## i64

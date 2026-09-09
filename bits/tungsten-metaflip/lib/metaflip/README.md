@@ -56,7 +56,10 @@ Metaflip executable:
   reprice their scales when a parent is offered again. Prices/hashes never
   replace verification. A bounded 128-ticket window reserves every fourth
   completion for the oldest pending ticket; a constant-size completion mask
-  preserves out-of-order restart and supports the FIFO control. This first family
+  preserves out-of-order restart and supports the FIFO control. Source jobs
+  reserve their worst-case recipe expansion against a default 4,096-pending
+  limit; originals remain queued while composition drains. This is not a
+  disk-byte quota. This first family
   is not recursive wide search or automatic cross-shape fleet dispatch.
 - `strategies/rect_catalyst_lift2.w` and
   `strategies/macro_double_annihilation.w` retain the exact target-directed

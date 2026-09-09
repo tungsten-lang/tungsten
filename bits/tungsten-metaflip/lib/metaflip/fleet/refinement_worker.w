@@ -1,10 +1,12 @@
 use refinement_artifacts
-use ../composition/worker
+use refinement_budget
 
 # Six bounded one-axis basis proposals, each exact-compressed. Project every
 # coordinate of the source and the best grouping endpoint (if different).
 # This deliberately bounded family is not an exhaustive basis search.
 -> ffrf_job(root, sequence, source, work, selected, meta, parity, runtime) (String i64 i64[] i64[] i64[] i64[] i64[] String) i64
+  if runtime != ""
+    ccall("__w_unlink", root + "/backpressure")
   ticket = File.read_prefix(root + "/tasks/" + sequence.to_s(), 66)
   if ticket == nil
     return 0
@@ -17,6 +19,11 @@ use ../composition/worker
   m = meta[1] ## i64
   p = meta[2] ## i64
   rank = meta[3] ## i64
+  reservation = ffrf_composition_reserve(n, m, p) ## i64
+  if runtime != ""
+    ready = ffrf_budget_begin(root, sequence, reservation) ## i64
+    if ready != 1
+      return ready
   z = ffrf_copy(work, source, capacity, rank) ## i64
   clean_rank = ffpc_reduce(work, words, capacity, rank, 0, 1, 2) ## i64
   clean_rank = ffmc_reduce(work, words, capacity, clean_rank)
@@ -84,6 +91,8 @@ use ../composition/worker
         removed += 1
       axis += 1
     base += 1
+  if 9*(ids.size()+1) > reservation
+    return 0
   prepared = ffbc_prepare(root, runtime, identity, ids) ## i64
   if prepared != 1
     return prepared
@@ -111,6 +120,9 @@ use ../composition/worker
       return 0
     result = ffrf_job(root, sequence, source, work, selected, meta, parity, runtime) ## i64
     if result == 0-1
+      return 0
+    if result == 0-3
+      << "METAFLIP_REFINE_PENDING job=" + sequence.to_s() + " reason=composition-backpressure"
       return 0
     if result != 1
       << "METAFLIP_REFINE_FAILED job=" + sequence.to_s()

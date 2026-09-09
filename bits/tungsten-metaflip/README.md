@@ -188,8 +188,21 @@ mask supports restart without duplicating or losing out-of-order work. Legacy
 FIFO records remain readable. An interrupted result/state/cursor commit is
 replayed through the full tensor gate, not accepted from its hashes alone.
 An invalid or over-budget selected recipe stays pending with an `error` file;
-automatic composition pauses while ordinary refinement/flipping continues.
-There is still no disk-byte quota.
+automatic composition pauses while ordinary flipping continues.
+
+Refinement expansion reserves space for its entire bounded output family
+before writing derived objects or recipes. The default pending-composition
+limit is 4,096 (`METAFLIP_COMPOSITION_PENDING=1269..1000000`; `0` selects the
+unlimited control). When insufficient space remains, original source tickets
+stay queued and the child drains composition even while source jobs await
+refinement. `refine_blocked` and `compose_limit` expose this backpressure;
+the TUI also shows `blocked`. It is not counted as a failure or a completion.
+The setting is fixed at startup; invalid values use the default. Existing
+over-limit queues drain without deleting evidence. The limit applies to
+automatic/source-job expansion, not offline tools or manually edited spools.
+There is still no disk-byte quota: unprocessed originals and completed tensor
+artifacts remain retained. Backpressure bounds automatic composition backlog,
+not all disk storage, and a composition error can also hold up new expansion.
 
 The regression **4x8x4/r94 → 4x7x4/r85 → 12x7x12/r651** now runs through
 native queue intake and expansion (12x7x12 is a permutation of 7x12x12).
@@ -211,6 +224,8 @@ for these extensions. The matched 105-recipe regression reaches r1132 on
 completion 4 rather than 48, and r651 on 7 rather than 47; both schedules end
 with the identical verified output set. This is one workload, not a universal
 performance or efficacy claim.
+The [backpressure audit](tools/NATIVE-REFINEMENT-BACKPRESSURE-2026-09-08.md)
+covers bounded pending work, restart, the public canary and subsequent searches.
 
 Alternatively, let Bit preserve the executable, runtime worker sources, and
 assets as one relocatable build tree:

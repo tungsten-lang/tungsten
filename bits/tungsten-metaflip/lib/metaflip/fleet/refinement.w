@@ -24,6 +24,9 @@ use core/system
     @compose_completed = 0
     @compose_failures = 0
     @compose_poll_ms = 0
+    @compose_limit = ffrf_composition_limit()
+    @budget_request = i64[2]
+    @budget_blocked = 0
     @composing = 0
     @enabled = 1
     if env("METAFLIP_REFINEMENT") == "0"
@@ -158,21 +161,28 @@ use core/system
     if @enabled == 0 || now_ms < @next_poll_ms
       return 0
     @next_poll_ms = now_ms + 25
+    if @thread != nil && !@thread.alive?()
+      z = @thread.join(0)
+      @thread = nil
+      request_ok = ffrf_budget_request(@root, @budget_request) ## i64
+      deferred = request_ok == 1 && @budget_request[0] >= @batch_first && @budget_request[0] <= @batch_last ## bool
+      if @composing == 0 && !File.exists?(@root + "/results/" + @batch_last.to_s()) && @stopped == 0 && !deferred
+        @failures += 1
+        @retry_at = now_ms + 1000
+      @composing = 0
+      @compose_poll_ms = 0
     if @runtime != "" && now_ms >= @compose_poll_ms
       @compose_completed = ffbc_counter(@root + "/composition/consumed")
       @compose_submitted = ffbc_counter(@root + "/composition/submitted")
       @compose_failures = ffbc_counter(@root + "/composition/failures")
+      request_ok = ffrf_budget_request(@root, @budget_request) ## i64
+      @budget_blocked = 0
+      if @compose_limit != 0 && request_ok == 1 && @budget_request[1] > 0 && @compose_submitted - @compose_completed + @budget_request[1] > @compose_limit
+        @budget_blocked = 1
       @compose_poll_ms = now_ms + 1000
-    if @thread != nil && !@thread.alive?()
-      z = @thread.join(0)
-      @thread = nil
-      if @composing == 0 && !File.exists?(@root + "/results/" + @batch_last.to_s()) && @stopped == 0
-        @failures += 1
-        @retry_at = now_ms + 1000
-      @composing = 0
     # A completed batch can be consumed while stopped. Never relaunch work
     # whose manifests exist but whose candidates have not yet been drained.
-    if @thread == nil && @stopped == 0 && @completed < @submitted && now_ms >= @retry_at && !File.exists?(@root + "/results/" + (@completed+1).to_s())
+    if @thread == nil && @stopped == 0 && @budget_blocked == 0 && @completed < @submitted && now_ms >= @retry_at && !File.exists?(@root + "/results/" + (@completed+1).to_s())
       @batch_first = @completed+1
       @batch_last = @batch_first+1
       if @batch_last > @submitted
@@ -184,7 +194,7 @@ use core/system
       @thread = Thread.new ->
         system(command)
       @retry_at = now_ms + 100
-    elsif @thread == nil && @runtime != "" && @stopped == 0 && @completed >= @submitted && @compose_completed < @compose_submitted && now_ms >= @retry_at && !File.exists?(@root + "/composition/error")
+    elsif @thread == nil && @runtime != "" && @stopped == 0 && (@budget_blocked != 0 || @completed >= @submitted) && @compose_completed < @compose_submitted && now_ms >= @retry_at && !File.exists?(@root + "/composition/error")
       @composing = 1
       command = "exec nice -n 10 " + ffls_shell_quote(@executable) + " --compose-batch " + ffls_shell_quote(@root) + " 4 > " + ffls_shell_quote(@root + "/worker.log") + " 2>&1"
       @thread = Thread.new ->
@@ -291,12 +301,12 @@ use core/system
     0
 
   -> status_fields()
-    " refine=" + @enabled.to_s() + " refine_submitted=" + @submitted.to_s() + " refine_completed=" + @completed.to_s() + " refine_pending=" + self.pending().to_s() + " refine_duplicates=" + @duplicates.to_s() + " refine_outputs=" + @outputs.to_s() + " refine_cross_shape=" + @cross_shape.to_s() + " refine_failures=" + @failures.to_s() + " compose_submitted=" + @compose_submitted.to_s() + " compose_completed=" + @compose_completed.to_s() + " compose_pending=" + (@compose_submitted - @compose_completed).to_s() + " compose_failures=" + @compose_failures.to_s()
+    " refine=" + @enabled.to_s() + " refine_submitted=" + @submitted.to_s() + " refine_completed=" + @completed.to_s() + " refine_pending=" + self.pending().to_s() + " refine_duplicates=" + @duplicates.to_s() + " refine_outputs=" + @outputs.to_s() + " refine_cross_shape=" + @cross_shape.to_s() + " refine_failures=" + @failures.to_s() + " refine_blocked=" + @budget_blocked.to_s() + " compose_limit=" + @compose_limit.to_s() + " compose_submitted=" + @compose_submitted.to_s() + " compose_completed=" + @compose_completed.to_s() + " compose_pending=" + (@compose_submitted - @compose_completed).to_s() + " compose_failures=" + @compose_failures.to_s()
 
   -> status_row()
     if @enabled == 0
       return "refinement off; failures " + @failures.to_s()
-    "refine " + @completed.to_s() + "/" + @submitted.to_s() + "; compose " + @compose_completed.to_s() + "/" + @compose_submitted.to_s() + "; pending " + (self.pending() + @compose_submitted - @compose_completed).to_s() + "; failures " + (@failures + @compose_failures).to_s()
+    "refine " + @completed.to_s() + "/" + @submitted.to_s() + "; compose " + @compose_completed.to_s() + "/" + @compose_submitted.to_s() + "; pending " + (self.pending() + @compose_submitted - @compose_completed).to_s() + "; blocked " + @budget_blocked.to_s() + "; failures " + (@failures + @compose_failures).to_s()
 
   -> stop()
     @stopped = 1

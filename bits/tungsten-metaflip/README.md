@@ -239,19 +239,26 @@ The external parent is test-only, not redistributed. Replay with
 `spec/composition_queue_test.py NATIVE_TEST_BINARY [EXTERNAL_4x8x4]`.
 
 This is still a bounded family, not an exhaustive basis/packing search.
-General elementary grids, changing-leaf dependency propagation, recursive wide
+Larger elementary grids, changing-leaf dependency propagation, recursive wide
 composition and automatic cross-shape campaign dispatch remain follow-up work.
 The native `composition/mixed_groups.w` engine supports disjoint shared-factor
 groups of up to four terms from different axes in one construction, using
 the existing verified 22-leaf bank for all 27 scale triples in `{2,3,4}^3`.
 Only groups with actual bank witnesses are eligible. It starts with the
 mixed-pair plan, then solves components of at most 16 terms; larger or
-probe-limited components retain their original pair plan. This runs
+probe-limited components retain their original pair plan. The default
+`composition/mixed_grids.w` pass additionally packs disjoint 2x2 grids in
+U/V, U/W or V/W factor classes together with those groups. It validates all
+four distinct cells and their complete linear maps, using only available
+bank leaves. An oversized or probe-limited grid component keeps the previous
+group plan; contexts without a useful grid leaf skip the additional solve.
+This runs
 automatically for every distinct verified input and
 refined parent, including rank ties. An immutable parent/bank reference yields
-up to 27 `MFM2` recipes, admitted at most 27 contexts per cold batch under the
+up to 27 `MFM3` recipes, admitted at most 27 contexts per cold batch under the
 shared pending limit. Recipes fix a 50,000-state pair budget plus 50,000 group
-probes (including memo hits), and replay
+probes (including memo hits), plus 50,000 grid/group probes. Failed rectangle
+probes also consume the budget. The recipes replay
 the parent, leaf bank, price and full tensor check before admission. Supported
 contexts without pair savings are retained too. Input ranks above 512,
 factor widths above 1,024 bits or predicted outputs above 16,384 terms are
@@ -259,7 +266,8 @@ outside this bounded family; skipping those contexts is not a verified
 tensor completion.
 
 `METAFLIP_COMPOSITION_MIXED=0` disables new mixed intake without abandoning
-already queued work. `METAFLIP_COMPOSITION_MIXED_GROUPS=0` selects pair-only
+already queued work. `METAFLIP_COMPOSITION_GRIDS=0` selects the previous
+group-only `MFM2` offers. `METAFLIP_COMPOSITION_MIXED_GROUPS=0` selects pair-only
 `MFM1` offers. Old parent tickets keep their exact algorithm when resumed;
 re-offering an old parent under the new version creates separate contexts.
 A changed bank identity is repriced when its parent is
@@ -274,6 +282,10 @@ for the engine's independent 891-case comparison. The
 [mixed-group audit](tools/NATIVE-MIXED-GROUPS-2026-09-09.md) covers the new
 bounded family: 876 lower construction prices in 7,803 distinct retained
 parent/scale cases, but no new local bound or world-record claim.
+The [multi-grid integration audit](tools/NATIVE-MIXED-GRIDS-2026-09-09.md)
+reproduces the externally found 8x10x14/724, 8x15x21/1548 and 12x15x14/1542
+constructions in the native pipeline. These are integration regressions,
+not additional discoveries.
 Wide outputs are exact archived witnesses, not yet live wide-worker seeds.
 See the [native integration audit](tools/NATIVE-REFINEMENT-2026-09-08.md) for
 the first refinement milestone, and the
@@ -950,7 +962,7 @@ rank-104 4x5x7 representation in the ordinary control arm. Full grid packing
 and checked block composition yield five verified local improvements,
 including 8x10x14/724 and 8x14x26/1805 below the refreshed screened references.
 These are GF(2) candidates, not confirmed world records. Their two disjoint
-2x2 grids are not yet supported by the native automatic composer; the
+2x2 grids are now supported by the native automatic composer; the
 held-grid search policy itself did not produce these wins.
 Optional [read-only context observers](tools/BUD-CONTEXT-OBSERVERS-2026-09-08.md)
 retain up to eight additional price objectives along one ordinary walk. The

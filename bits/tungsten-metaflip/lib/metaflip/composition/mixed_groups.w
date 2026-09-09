@@ -5,11 +5,72 @@ use mixed_pairs
 -> ffmg_price(costs, axis, size) (i64[] i64 i64) i64
   if size == 1
     return costs[0]
+  if axis >= 3
+    return costs[7+axis]
   costs[1+3*(size-2)+axis]
+
+# Grid kinds 3/4/5 share the U,V / U,W / V,W factor classes. Their
+# elementary shapes are 2x1x2 / 1x2x2 / 2x2x1. The third factor map is
+# arbitrary: the four distinct cells, not a rank-only price, justify it.
+-> ffmx_first(kind) (i64) i64
+  if kind == 5
+    return 1
+  0
+
+-> ffmx_second(kind) (i64) i64
+  if kind == 3
+    return 1
+  2
+
+-> ffmx_fixed(kind) (i64) i64
+  if kind == 3
+    return 1
+  if kind == 4
+    return 0
+  2
+
+# Validate/reorder four members by the two factor classes (00,01,10,11).
+# A repeated cell or third class is rejected before the output is touched.
+-> ffmx_order(parent, cap, members, kind) (i64[] i64 i64[] i64) i64
+  first = ffmx_first(kind) ## i64
+  second = ffmx_second(kind) ## i64
+  v0 = parent[first*cap+members[0]] ## i64
+  w0 = parent[second*cap+members[0]] ## i64
+  v1 = 0 ## i64
+  w1 = 0 ## i64
+  slots = i64[4]
+  occupied = 0 ## i64
+  i = 0 ## i64
+  while i < 4
+    v = parent[first*cap+members[i]] ## i64
+    w = parent[second*cap+members[i]] ## i64
+    cell = 0 ## i64
+    if v != v0
+      if v1 != 0 && v1 != v
+        return 0
+      v1 = v
+      cell += 2
+    if w != w0
+      if w1 != 0 && w1 != w
+        return 0
+      w1 = w
+      cell += 1
+    if (occupied & (1 << cell)) != 0
+      return 0
+    occupied = occupied | (1 << cell)
+    slots[cell] = members[i]
+    i += 1
+  if occupied != 15
+    return 0
+  i = 0
+  while i < 4
+    members[i] = slots[i]
+    i += 1
+  1
 
 # Every recursive probe, including memo hits, consumes budget. choice packs
 # a <=16-bit group mask and its axis; zero selects the singleton branch.
--> ffmg_visit(mask, equal, costs, memo, choice, status, budget) (i64 i64[] i64[] i64[] i64[] i64[] i64) i64
+-> ffmg_visit(mask, equal, costs, slots, memo, choice, status, budget) (i64 i64[] i64[] i64 i64[] i64[] i64[] i64) i64
   if status[0] >= budget
     return 0-1
   status[0] += 1
@@ -17,7 +78,7 @@ use mixed_pairs
     return memo[mask]
   first = ffpk_ctz(mask) ## i64
   rest = mask ^ (1 << first) ## i64
-  best = ffmg_visit(rest, equal, costs, memo, choice, status, budget) ## i64
+  best = ffmg_visit(rest, equal, costs, slots, memo, choice, status, budget) ## i64
   if best < 0
     return 0-1
   selected = 0 ## i64
@@ -30,7 +91,7 @@ use mixed_pairs
       pair = (1 << first) | (1 << j) ## i64
       cost = ffmg_price(costs, axis, 2) ## i64
       if cost > 0 && cost < 2*costs[0]
-        tail = ffmg_visit(mask ^ pair, equal, costs, memo, choice, status, budget) ## i64
+        tail = ffmg_visit(mask ^ pair, equal, costs, slots, memo, choice, status, budget) ## i64
         if tail < 0
           return 0-1
         gain = 2*costs[0]-cost+tail ## i64
@@ -44,7 +105,7 @@ use mixed_pairs
         triple = pair | (1 << k) ## i64
         cost = ffmg_price(costs, axis, 3)
         if cost > 0 && cost < 3*costs[0]
-          tail = ffmg_visit(mask ^ triple, equal, costs, memo, choice, status, budget) ## i64
+          tail = ffmg_visit(mask ^ triple, equal, costs, slots, memo, choice, status, budget) ## i64
           if tail < 0
             return 0-1
           gain = 3*costs[0]-cost+tail ## i64
@@ -58,7 +119,7 @@ use mixed_pairs
             l = ffpk_ctz(fourth) ## i64
             fourth = fourth & (fourth-1)
             group = triple | (1 << l) ## i64
-            tail = ffmg_visit(mask ^ group, equal, costs, memo, choice, status, budget) ## i64
+            tail = ffmg_visit(mask ^ group, equal, costs, slots, memo, choice, status, budget) ## i64
             if tail < 0
               return 0-1
             gain = 4*costs[0]-cost+tail ## i64
@@ -66,6 +127,40 @@ use mixed_pairs
               best = gain
               selected = group | (axis << 16)
     axis += 1
+  if slots >= 13
+    kind = 3 ## i64
+    while kind < 6
+      cost = costs[7+kind] ## i64
+      if cost > 0 && cost < 4*costs[0]
+        a0 = ffmx_first(kind) ## i64
+        a1 = ffmx_second(kind) ## i64
+        right = rest & equal[a0*16+first] & (65535 ^ equal[a1*16+first]) ## i64
+        down = rest & equal[a1*16+first] & (65535 ^ equal[a0*16+first]) ## i64
+        while right > 0
+          j = ffpk_ctz(right) ## i64
+          right = right & (right-1)
+          remaining = down ## i64
+          while remaining > 0
+            # Failed rectangle probes count too; dense non-grids must not
+            # hide unbounded work behind a small memo-state count.
+            if status[0] >= budget
+              return 0-1
+            status[0] += 1
+            k = ffpk_ctz(remaining) ## i64
+            remaining = remaining & (remaining-1)
+            opposite = rest & equal[a0*16+k] & equal[a1*16+j] ## i64
+            while opposite > 0
+              l = ffpk_ctz(opposite) ## i64
+              opposite = opposite & (opposite-1)
+              group = (1 << first) | (1 << j) | (1 << k) | (1 << l) ## i64
+              tail = ffmg_visit(mask ^ group, equal, costs, slots, memo, choice, status, budget) ## i64
+              if tail < 0
+                return 0-1
+              gain = 4*costs[0]-cost+tail ## i64
+              if gain > best
+                best = gain
+                selected = group | (kind << 16)
+      kind += 1
   memo[mask] = best
   choice[mask] = selected
   best
@@ -161,7 +256,7 @@ use mixed_pairs
             choice[i] = 0
             i += 1
           memo[0] = 0
-          exact_gain = ffmg_visit(mask, equal, costs, memo, choice, status, budget)
+          exact_gain = ffmg_visit(mask, equal, costs, 10, memo, choice, status, budget)
           if exact_gain >= 0
             price = count*costs[0]-exact_gain ## i64
             if price > prior
@@ -192,7 +287,7 @@ use mixed_pairs
     start += 1
   total
 
-# Ten oriented leaves, matching the cost slots above. Validate the complete
+# Ten group leaves, or thirteen with UV/UW/VW grids. Validate the complete
 # plan and all available leaves before touching the packed output buffer.
 -> ffmg_compose(parent, words, cap, rank, n, m, p, a, b, c, leaves, leaf_words, leafcap, costs, cost_words, heads, axes, plan_words, out, out_words) (i64[] i64 i64 i64 i64 i64 i64 i64 i64 i64 i64[] i64 i64 i64[] i64 i64[] i64[] i64 i64[] i64) i64
   if n < 1 || m < 1 || p < 1 || n > 63 || m > 63 || p > 63 || n*m > 63 || m*p > 63 || n*p > 63 || cap < 1 || cap > 4096 || rank < 1 || rank > cap || rank > 512 || words < 3*cap || a < 2 || a > 4 || b < 2 || b > 4 || c < 2 || c > 4 || leafcap < 1 || leafcap > 128 || leaf_words < 30*leafcap || cost_words < 10 || plan_words < rank
@@ -200,8 +295,15 @@ use mixed_pairs
   stride = ffpk_stride(n*a, m*b, p*c) ## i64
   if stride == 0
     return 0-1
+  slots = 10 ## i64
+  maxaxis = 2 ## i64
+  if cost_words >= 13
+    slots = 13
+    maxaxis = 5
+    if leaf_words < 39*leafcap
+      return 0-1
   i = 0 ## i64
-  while i < 10
+  while i < slots
     cost = costs[i] ## i64
     if (i < 4 && cost < 1) || (cost != 0-1 && (cost < 1 || cost > leafcap))
       return 0-1
@@ -209,7 +311,15 @@ use mixed_pairs
       ln = a ## i64
       lm = b ## i64
       lp = c ## i64
-      if i > 0
+      if i >= 10
+        fixed = ffmx_fixed(i-7) ## i64
+        if fixed != 0
+          ln *= 2
+        if fixed != 1
+          lm *= 2
+        if fixed != 2
+          lp *= 2
+      elsif i > 0
         axis = (i-1)%3 ## i64
         size = 2+(i-1)/3 ## i64
         if axis == 0
@@ -243,20 +353,33 @@ use mixed_pairs
       f += 1
     head = heads[i] ## i64
     axis = axes[i] ## i64
-    if head < 0 || head > i || heads[head] != head || axis < 0-1 || axis > 2 || axes[head] != axis
+    if head < 0 || head > i || heads[head] != head || axis < 0-1 || axis > maxaxis || axes[head] != axis
       return 0-1
-    if head != i && (axis < 0 || parent[axis*cap+i] != parent[axis*cap+head])
+    if head != i && (axis < 0 || (axis < 3 && parent[axis*cap+i] != parent[axis*cap+head]))
       return 0-1
     sizes[head] += 1
     if sizes[head] > 4
       return 0-1
     i += 1
   price = 0 ## i64
+  members = i64[4]
   i = 0
   while i < rank
     if heads[i] == i
       if (sizes[i] == 1 && axes[i] != 0-1) || (sizes[i] > 1 && axes[i] < 0)
         return 0-1
+      if axes[i] >= 3
+        if sizes[i] != 4
+          return 0-1
+        count = 0 ## i64
+        j = i ## i64
+        while j < rank
+          if heads[j] == i
+            members[count] = j
+            count += 1
+          j += 1
+        if ffmx_order(parent, cap, members, axes[i]) != 1
+          return 0-1
       cost = ffmg_price(costs, axes[i], sizes[i]) ## i64
       if cost < 1
         return 0-1
@@ -269,7 +392,6 @@ use mixed_pairs
     out[i] = 0
     i += 1
   output = 0 ## i64
-  members = i64[4]
   i = 0
   while i < rank
     if heads[i] == i
@@ -278,6 +400,8 @@ use mixed_pairs
       slot = 0 ## i64
       if size > 1
         slot = 1+3*(size-2)+axis
+      if axis >= 3
+        slot = 7+axis
       count = 0 ## i64
       j = i ## i64
       while j < rank
@@ -285,6 +409,8 @@ use mixed_pairs
           members[count] = j
           count += 1
         j += 1
+      if axis >= 3
+        ordered = ffmx_order(parent, cap, members, axis) ## i64
       l = 0 ## i64
       while l < costs[slot]
         factor = 0 ## i64
@@ -301,8 +427,10 @@ use mixed_pairs
           if axis == 2
             expanded = 1
           column_dim = 1 ## i64
+          row_dim = 0 ## i64
           if factor == 1
             row_scale = b
+            row_dim = 1
           if factor > 0
             column_scale = c
             parentcols = p
@@ -310,12 +438,33 @@ use mixed_pairs
             leafcols = c
           if expanded == column_dim
             leafcols *= size
+          if axis >= 3 && ffmx_fixed(axis) != column_dim
+            leafcols *= 2
           value = leaves[(slot*3+factor)*leafcap+l] ## i64
           while value > 0
             bit = ffmm_bit(value) ## i64
             lr = bit / leafcols ## i64
             lc = bit%leafcols ## i64
             member = lr / row_scale+lc / column_scale ## i64
+            if axis >= 3
+              # Coordinates for the two independent factor values. The
+              # shared dimension has size one and contributes no index.
+              d0 = 0 ## i64
+              d1 = 0 ## i64
+              d2 = 0 ## i64
+              if row_dim == 0
+                d0 = lr / row_scale
+              else
+                d1 = lr / row_scale
+              if column_dim == 1
+                d1 = lc / column_scale
+              else
+                d2 = lc / column_scale
+              member = 2*d0+d2
+              if axis == 4
+                member = 2*d1+d2
+              if axis == 5
+                member = 2*d1+d0
             outer = parent[factor*cap+members[member]] ## i64
             while outer > 0
               obit = ffmm_bit(outer) ## i64

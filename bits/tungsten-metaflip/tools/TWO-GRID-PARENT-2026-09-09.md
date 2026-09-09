@@ -153,9 +153,11 @@ census. The archive includes reports, source metadata, raw outputs and
 disposable drivers. Its original directory is
 `/private/tmp/metaflip-grid-holdout-20260909/`.
 
-The native automatic composer currently supports disjoint equal-factor
-groups, not these two-factor grids. The next integration target is bounded
-bank-backed multi-grid composition in the cold worker, preserving full-mask
-identity, versioned replay, explicit budgets and full tensor admission.
+At the time of this search, the native automatic composer supported disjoint
+equal-factor groups, not these two-factor grids. The subsequent
+[native multi-grid integration](NATIVE-MIXED-GRIDS-2026-09-09.md) now reproduces
+the three direct constructions automatically, with full-mask identity,
+versioned replay, explicit budgets and full tensor admission. That replay
+does not add discoveries to this study's count.
 No imported tensor, canonical seed promotion, push or publication is part
 of this source commit.

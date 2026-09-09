@@ -8,7 +8,7 @@ use pages
   if raw == nil || raw == ""
     return 0
   fields = raw.strip().split(" ")
-  if fields.size() != 3 || (fields[0] != "MFMD1" && fields[0] != "MFMD2") || ffrf_hash_valid(fields[1]) != 1 || ffrf_hash_valid(fields[2]) != 1 || raw != fields[0] + " " + fields[1] + " " + fields[2] + "\n"
+  if fields.size() != 3 || (fields[0] != "MFMD1" && fields[0] != "MFMD2" && fields[0] != "MFMD3") || ffrf_hash_valid(fields[1]) != 1 || ffrf_hash_valid(fields[2]) != 1 || raw != fields[0] + " " + fields[1] + " " + fields[2] + "\n"
     return 0
   1
 
@@ -18,7 +18,7 @@ use pages
   if raw == nil || raw == ""
     return 0-1
   fields = raw.strip().split(" ")
-  if fields.size() != 9 || (fields[0] != "MFM1" && fields[0] != "MFM2") || ffrf_hash_valid(fields[1]) != 1 || ffrf_hash_valid(fields[2]) != 1
+  if fields.size() != 9 || (fields[0] != "MFM1" && fields[0] != "MFM2" && fields[0] != "MFM3") || ffrf_hash_valid(fields[1]) != 1 || ffrf_hash_valid(fields[2]) != 1
     return 0-1
   ticket = ffw_parse_decimal_i64(fields[3]) ## i64
   context = ffw_parse_decimal_i64(fields[4]) ## i64
@@ -31,6 +31,8 @@ use pages
   version = "MFMD1"
   if fields[0] == "MFM2"
     version = "MFMD2"
+  if fields[0] == "MFM3"
+    version = "MFMD3"
   if ffbq_read(queue, "parents", ticket) != version + " " + fields[1] + " " + fields[2] + "\n"
     return 0-1
   if raw != fields[0] + " " + fields[1] + " " + fields[2] + " " + ticket.to_s() + " " + context.to_s() + " " + n.to_s() + " " + m.to_s() + " " + p.to_s() + " " + price.to_s() + "\n"
@@ -105,7 +107,9 @@ use pages
     i += 1
   if ffmd_recover(root) != 1
     return 0
-  version = "MFMD2"
+  version = "MFMD3"
+  if env("METAFLIP_COMPOSITION_GRIDS") == "0"
+    version = "MFMD2"
   if env("METAFLIP_COMPOSITION_MIXED_GROUPS") == "0"
     version = "MFMD1"
   body = version + " " + parent + " " + bank + "\n"
@@ -166,14 +170,14 @@ use pages
   bank = i64[22*3*128]
   costs = i64[22]
   work = i64[3*128]
-  leaves = i64[30*128]
-  prices = i64[10]
+  leaves = i64[39*128]
+  prices = i64[13]
   mates = i64[512]
   axes = i64[512]
   plan = i64[6*512]
   memo = i64[65536]
   choice = i64[65536]
-  status = i64[4]
+  status = i64[7]
   loaded = 0 ## i64
   fields = []
   done = 0 ## i64
@@ -204,7 +208,12 @@ use pages
     if meta[3] <= 512 && ffpk_stride(n, m, p) > 0
       version = "MFM1"
       price = 0 ## i64
-      if fields[0] == "MFMD2"
+      if fields[0] == "MFMD3"
+        version = "MFM3"
+        if ffmb_grid_context(bank, 22*3*128, costs, 22, a, b, c, leaves, 39*128, prices, 13) != 1
+          return 0
+        price = ffmx_plan(parent, 3*cap, cap, meta[3], prices, 13, mates, axes, 512, plan, 6*512, memo, choice, 65536, status, 7, 50000)
+      elsif fields[0] == "MFMD2"
         version = "MFM2"
         if ffmb_group_context(bank, 22*3*128, costs, 22, a, b, c, leaves, 30*128, prices, 10) != 1
           return 0
@@ -230,6 +239,7 @@ use pages
 
 # Reconstruct the algorithm bound to the parent version. MFM1 retains its
 # 50k-state pair plan; MFM2 adds 50k group probes with pair-plan fallback.
+# MFM3 adds 50k grid/group probes and keeps MFM2 on an incomplete component.
 -> ffmd_expand(root, raw, parent, meta, out, parity) (String String i64[] i64[] i64[] i64[]) i64
   queue = root + "/composition/mixed/"
   if ffmd_task_code(queue, raw, ffmd_count(queue + "parent-submitted")) < 0
@@ -248,18 +258,22 @@ use pages
   bank = i64[22*3*128]
   costs = i64[22]
   work = i64[3*128]
-  leaves = i64[30*128]
-  prices = i64[10]
+  leaves = i64[39*128]
+  prices = i64[13]
   mates = i64[512]
   axes = i64[512]
   plan = i64[6*512]
   memo = i64[65536]
   choice = i64[65536]
-  status = i64[4]
+  status = i64[7]
   if ffmb_load_bank(root, fields[2], bank, 22*3*128, costs, 22, work, parity) != 1
     return 0-1
   price = 0 ## i64
-  if fields[0] == "MFM2"
+  if fields[0] == "MFM3"
+    if ffmb_grid_context(bank, 22*3*128, costs, 22, a, b, c, leaves, 39*128, prices, 13) != 1
+      return 0-1
+    price = ffmx_plan(parent, 3*cap, cap, meta[3], prices, 13, mates, axes, 512, plan, 6*512, memo, choice, 65536, status, 7, 50000)
+  elsif fields[0] == "MFM2"
     if ffmb_group_context(bank, 22*3*128, costs, 22, a, b, c, leaves, 30*128, prices, 10) != 1
       return 0-1
     price = ffmg_plan(parent, 3*cap, cap, meta[3], prices, 10, mates, axes, 512, plan, 6*512, memo, choice, 65536, status, 4, 50000)
@@ -270,7 +284,9 @@ use pages
   if price < 1 || price > 16384 || fields[5] != n.to_s() || fields[6] != m.to_s() || fields[7] != p.to_s() || fields[8] != price.to_s()
     return 0-1
   rank = 0 ## i64
-  if fields[0] == "MFM2"
+  if fields[0] == "MFM3"
+    rank = ffmg_compose(parent, 3*cap, cap, meta[3], meta[0], meta[1], meta[2], a, b, c, leaves, 39*128, 128, prices, 13, mates, axes, 512, out, 3*32*16384)
+  elsif fields[0] == "MFM2"
     rank = ffmg_compose(parent, 3*cap, cap, meta[3], meta[0], meta[1], meta[2], a, b, c, leaves, 30*128, 128, prices, 10, mates, axes, 512, out, 3*32*16384)
   else
     rank = ffmm_compose(parent, 3*cap, cap, meta[3], meta[0], meta[1], meta[2], a, b, c, leaves, 12*128, 128, prices, 4, mates, axes, 512, out, 3*32*16384)

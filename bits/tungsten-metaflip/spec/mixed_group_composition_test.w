@@ -1,44 +1,122 @@
 use ../lib/metaflip/fleet/refinement_worker
 use ../lib/metaflip/composition/mixed_bank
 
+slots = 10 ## i64
+if env("METAFLIP_TEST_GRIDS") == "1"
+  slots = 13
+
+if ARGV.size() == 1 && ARGV[0] == "--grid-bounds-test"
+  parent = i64[12]
+  leaves = i64[39*128]
+  prices = i64[13]
+  heads = i64[4]
+  axes = i64[4]
+  scratch = i64[24]
+  memo = i64[65536]
+  choice = i64[65536]
+  status = i64[7]
+  out = i64[384]
+  mode = 0 ## i64
+  while mode < 11
+    i = 0 ## i64
+    while i < 13
+      prices[i] = 1
+      i += 1
+    i = 0
+    while i < 39*128
+      leaves[i] = 1
+      i += 1
+    i = 0
+    while i < 4
+      parent[i] = 1 << (i/2)
+      parent[4+i] = 1 << (i%2)
+      parent[8+i] = 1 << i
+      heads[i] = 0
+      axes[i] = 3
+      i += 1
+    lw = 39*128 ## i64
+    cw = 13 ## i64
+    if mode == 0
+      lw -= 1
+    if mode == 1
+      cw = 10
+    if mode == 2
+      axes[0] = 6
+    if mode == 3
+      parent[3] = 1
+    if mode == 4
+      parent[3] = 3
+    if mode == 5
+      parent[4+3] = 1
+    if mode == 6
+      heads[3] = 3
+      axes[3] = 0-1
+    if mode == 7
+      prices[10] = 0-1
+    if mode == 8
+      leaves[30*128] = 0
+    if mode == 9
+      leaves[38*128] = 65536
+    if mode == 10
+      prices[12] = 129
+    out[0] = 777
+    if ffmg_compose(parent, 12, 4, 4, 2, 1, 2, 2, 2, 2, leaves, lw, 128, prices, cw, heads, axes, 4, out, 384) != 0-1 || out[0] != 777
+      << "bad grid guard=" + mode.to_s()
+      exit(1)
+    mode += 1
+  heads[0] = 777
+  if ffmx_plan(parent, 12, 4, 4, prices, 13, heads, axes, 4, scratch, 24, memo, choice, 65536, status, 7, 50000) != 0-1 || heads[0] != 777
+    exit(1)
+  prices[12] = 1
+  if ffmx_plan(parent, 12, 4, 4, prices, 13, heads, axes, 4, scratch, 24, memo, choice, 65536, status, 6, 50000) != 0-1 || heads[0] != 777
+    exit(1)
+  << "PASS grid guards"
+  exit(0)
+
 if ARGV.size() == 3 && ARGV[0] == "--plans"
   raw = File.read_prefix(ARGV[1], 1048577)
   if raw == nil || raw.size() >= 1048576
     exit(1)
   parent = i64[3*512]
-  costs = i64[10]
+  costs = i64[13]
   heads = i64[512]
   axes = i64[512]
   scratch = i64[6*512]
   memo = i64[65536]
   choice = i64[65536]
-  status = i64[4]
+  status = i64[7]
   result = StringBuffer(32768)
   lines = raw.strip().split("\n")
   row = 0 ## i64
   while row < lines.size()
     fields = lines[row].split(" ")
-    if fields.size() < 12
+    if fields.size() < slots+2
       exit(1)
     rank = ffw_parse_decimal_i64(fields[0]) ## i64
-    budget = ffw_parse_decimal_i64(fields[11]) ## i64
-    if rank < 1 || rank > 512 || fields.size() != 12+3*rank
+    budget = ffw_parse_decimal_i64(fields[slots+1]) ## i64
+    if rank < 1 || rank > 512 || fields.size() != slots+2+3*rank
       exit(1)
     i = 0 ## i64
-    while i < 10
+    while i < slots
       costs[i] = ffw_parse_decimal_i64(fields[1+i])
       i += 1
     i = 0
     while i < rank
       f = 0 ## i64
       while f < 3
-        parent[f*512+i] = ffw_parse_decimal_i64(fields[12+3*i+f])
+        parent[f*512+i] = ffw_parse_decimal_i64(fields[slots+2+3*i+f])
         f += 1
       i += 1
-    price = ffmg_plan(parent, 3*512, 512, rank, costs, 10, heads, axes, 512, scratch, 6*512, memo, choice, 65536, status, 4, budget) ## i64
+    price = 0 ## i64
+    if slots == 13
+      price = ffmx_plan(parent, 3*512, 512, rank, costs, 13, heads, axes, 512, scratch, 6*512, memo, choice, 65536, status, 7, budget)
+    else
+      price = ffmg_plan(parent, 3*512, 512, rank, costs, 10, heads, axes, 512, scratch, 6*512, memo, choice, 65536, status, 4, budget)
     if price < 1
       exit(1)
     result.append(price.to_s() + " " + status[0].to_s() + " " + status[1].to_s() + " " + status[2].to_s() + " " + status[3].to_s())
+    if slots == 13
+      result.append(" " + status[4].to_s() + " " + status[5].to_s() + " " + status[6].to_s())
     i = 0
     while i < rank
       result.append(" " + heads[i].to_s() + " " + axes[i].to_s())
@@ -176,22 +254,30 @@ if (ARGV.size() == 9 || ARGV.size() == 10) && ARGV[0] == "--compose"
   b = ffw_parse_decimal_i64(ARGV[5]) ## i64
   c = ffw_parse_decimal_i64(ARGV[6]) ## i64
   budget = ffw_parse_decimal_i64(ARGV[8]) ## i64
-  leaves = i64[30*128]
-  prices = i64[10]
-  if ffmb_group_context(bank, 22*3*128, costs, 22, a, b, c, leaves, 30*128, prices, 10) != 1
-    exit(1)
+  leaves = i64[39*128]
+  prices = i64[13]
+  if slots == 13
+    if ffmb_grid_context(bank, 22*3*128, costs, 22, a, b, c, leaves, 39*128, prices, 13) != 1
+      exit(1)
+  else
+    if ffmb_group_context(bank, 22*3*128, costs, 22, a, b, c, leaves, 30*128, prices, 10) != 1
+      exit(1)
   heads = i64[512]
   axes = i64[512]
   plan = i64[6*512]
   memo = i64[65536]
   choice = i64[65536]
-  status = i64[4]
-  price = ffmg_plan(parent, 3*cap, cap, meta[3], prices, 10, heads, axes, 512, plan, 6*512, memo, choice, 65536, status, 4, budget) ## i64
+  status = i64[7]
+  price = 0 ## i64
+  if slots == 13
+    price = ffmx_plan(parent, 3*cap, cap, meta[3], prices, 13, heads, axes, 512, plan, 6*512, memo, choice, 65536, status, 7, budget)
+  else
+    price = ffmg_plan(parent, 3*cap, cap, meta[3], prices, 10, heads, axes, 512, plan, 6*512, memo, choice, 65536, status, 4, budget)
   # Force a four-member group to test substitution even where pair/triple
   # ties cause the optimizer to choose another equally priced partition.
   if ARGV.size() == 10
     axis = ffw_parse_decimal_i64(ARGV[9]) ## i64
-    if meta[3] != 4 || axis < 0 || axis > 2
+    if meta[3] != 4 || axis < 0 || axis > slots-8
       exit(1)
     i = 0 ## i64
     while i < 4
@@ -200,7 +286,7 @@ if (ARGV.size() == 9 || ARGV.size() == 10) && ARGV[0] == "--compose"
       i += 1
     price = prices[7+axis]
   out = i64[3*32*16384]
-  rank = ffmg_compose(parent, 3*cap, cap, meta[3], meta[0], meta[1], meta[2], a, b, c, leaves, 30*128, 128, prices, 10, heads, axes, 512, out, 3*32*16384) ## i64
+  rank = ffmg_compose(parent, 3*cap, cap, meta[3], meta[0], meta[1], meta[2], a, b, c, leaves, 3*slots*128, 128, prices, slots, heads, axes, 512, out, 3*32*16384) ## i64
   n = meta[0]*a ## i64
   m = meta[1]*b ## i64
   p = meta[2]*c ## i64
@@ -209,6 +295,8 @@ if (ARGV.size() == 9 || ARGV.size() == 10) && ARGV[0] == "--compose"
     exit(1)
   body = StringBuffer(16384)
   body.append(price.to_s() + " " + status[0].to_s() + " " + status[1].to_s() + " " + status[2].to_s() + " " + status[3].to_s())
+  if slots == 13
+    body.append(" " + status[4].to_s() + " " + status[5].to_s() + " " + status[6].to_s())
   i = 0 ## i64
   while i < meta[3]
     body.append(" " + heads[i].to_s() + " " + axes[i].to_s())

@@ -4,6 +4,7 @@ use ../fleet/refinement_artifacts
 use ../compose
 use mixed_pairs
 use mixed_groups
+use mixed_grids
 
 -> ffmb_shape(slot, dims) (i64 i64[]) i64
   index = 0 ## i64
@@ -154,6 +155,32 @@ use mixed_groups
       n *= size
     if axis == 2
       m *= size
+    prices[i] = 0-1
+    if ffmb_slot(n, m, p) >= 0
+      rank = ffmb_extract(bank, bank_words, costs, cost_words, n, m, p, out, out_words, i*3*128) ## i64
+      if rank < 1
+        return 0
+      prices[i] = rank
+    i += 1
+  1
+
+# Two expanded coordinates for UV/UW/VW grids; the same immutable bank
+# supplies every available witness. Unavailable shapes remain disabled.
+-> ffmb_grid_context(bank, bank_words, costs, cost_words, a, b, c, out, out_words, prices, price_words) (i64[] i64 i64[] i64 i64 i64 i64 i64[] i64 i64[] i64) i64
+  if out_words < 39*128 || price_words < 13 || ffmb_group_context(bank, bank_words, costs, cost_words, a, b, c, out, out_words, prices, price_words) != 1
+    return 0
+  i = 10 ## i64
+  while i < 13
+    n = a ## i64
+    m = b ## i64
+    p = c ## i64
+    fixed = ffmx_fixed(i-7) ## i64
+    if fixed != 0
+      n *= 2
+    if fixed != 1
+      m *= 2
+    if fixed != 2
+      p *= 2
     prices[i] = 0-1
     if ffmb_slot(n, m, p) >= 0
       rank = ffmb_extract(bank, bank_words, costs, cost_words, n, m, p, out, out_words, i*3*128) ## i64

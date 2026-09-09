@@ -949,14 +949,20 @@ ten full output replays, but none beat the retained archive. This remains
 opt-in offline research, not an additional default CPU/GPU lane or a flip
 throughput improvement.
 An optional [packing-driven primary objective](tools/PACKING-PRIMARY-WALKS-2026-09-09.md)
-now lets this research walker use the native mixed-pair or size-2/3/4 group
-price for chunk acceptance and winner selection. Unlike observers, it can
+now lets this research walker use the native mixed-pair, size-2/3/4 group,
+or combined group/2x2-grid price for chunk acceptance and winner selection.
+Unlike observers, it can
 steer greedy/annealing trajectories; ordinary walk endpoints remain unchanged.
 Two bounded matched studies plus broader leaf/grid repricing retained 280
 distinct parents. Five target minima beat both matched controls, but none
 beat the retained archive. This is not enabled in the live fleet or exposed
 by `bench_bud_parents.rb`; numeric tables must be bound to verified leaf
 witnesses before any product is admitted.
+A matched grid-primary follow-up tested 2.416 billion attempts under two
+exploration envelopes, retaining 881 distinct parents and repricing 23,787
+parent/context recipes. No retained bound improved. Matching the acceptance
+policy exposed losses from greedy grid steering, so it remains opt-in;
+automatic grid composition is still enabled independently of search steering.
 The [two-grid follow-up](tools/TWO-GRID-PARENT-2026-09-09.md) found a new
 rank-104 4x5x7 representation in the ordinary control arm. Full grid packing
 and checked block composition yield five verified local improvements,

@@ -52,6 +52,8 @@ if lines.size() != 4 && lines.size() != 5
       mixed_primary = 1
     if header[1] == "groups"
       mixed_primary = 2
+    if header[1] == "grids"
+      mixed_primary = 3
     mixed_budget = header[2].to_i()
     mixed_budget_label = mixed_budget.to_s()
     if mixed_primary == 0 || mixed_budget < 1 || mixed_budget > 1000000 || mixed_budget_label != header[2] || lines.size() != 6 || ARGV.size() >= 13
@@ -149,19 +151,21 @@ mixed_scratch = 0 ## i64
 if mixed_count > 0 || mixed_primary > 0
   mixed_scratch = 1
 mixed_parent = i64[3*512*mixed_scratch]
-mixed_costs = i64[10*mixed_scratch]
+mixed_costs = i64[13*mixed_scratch]
 mixed_mates = i64[512*mixed_scratch]
 mixed_axes = i64[512*mixed_scratch]
 mixed_work = i64[6*512*mixed_scratch]
 mixed_memo = i64[65536*mixed_scratch]
 mixed_choice = i64[65536*mixed_scratch]
-mixed_status = i64[4*mixed_scratch]
-mixed_totals = i64[5]
+mixed_status = i64[7*mixed_scratch]
+mixed_totals = i64[8]
 if mixed_primary > 0
   fields = lines[5].split(" ")
   width = 4 ## i64
   if mixed_primary == 2
     width = 10
+  if mixed_primary == 3
+    width = 13
   if fields.size() != width
     << "invalid mixed primary prices"
     exit(2)
@@ -412,5 +416,10 @@ if mixed_primary > 0
   kind = "pairs"
   if mixed_primary == 2
     kind = "groups"
-  << "BUD_PACK kind=" + kind + " budget=" + mixed_budget.to_s() + " evaluations=" + mixed_totals[0].to_s() + " probes_or_states=" + mixed_totals[1].to_s() + " pair_states=" + mixed_totals[4].to_s() + " fallback_components=" + mixed_totals[2].to_s() + " components=" + mixed_totals[3].to_s()
+  if mixed_primary == 3
+    kind = "grids"
+  line = "BUD_PACK kind=" + kind + " budget=" + mixed_budget.to_s() + " evaluations=" + mixed_totals[0].to_s() + " probes_or_states=" + mixed_totals[1].to_s() + " pair_states=" + mixed_totals[4].to_s() + " fallback_components=" + mixed_totals[2].to_s() + " components=" + mixed_totals[3].to_s()
+  if mixed_primary == 3
+    line = line + " group_probes=" + mixed_totals[5].to_s() + " group_fallback_components=" + mixed_totals[6].to_s() + " group_components=" + mixed_totals[7].to_s()
+  << line
 << "BUD_RESULT strategy=" + mode + " trials=" + trials.to_s() + " chunks=" + chunks.to_s() + " steps=" + steps.to_s() + " attempted=" + attempted.to_s() + " accepted_flips=" + flips_accepted.to_s() + " accepted_chunks=" + restarts_accepted.to_s() + " initial=" + initial.to_s() + " density_slack=" + density_slack.to_s() + " observe_every=" + observe_every.to_s() + " observations=" + observations.to_s() + " sampled_peak_rank=" + sampled_peak_rank.to_s() + " sampled_peak_bits=" + sampled_peak_bits.to_s() + " held_terms=" + held_count.to_s() + " held_cost=" + held_cost.to_s() + " holdout_cancellations=" + holdout_cancellations.to_s() + " elapsed_ms=" + elapsed.to_s()

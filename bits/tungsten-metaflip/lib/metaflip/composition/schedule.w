@@ -2,6 +2,7 @@
 # completions serves its oldest pending ticket. No price discards a candidate.
 use pages
 use packed
+use mixed_contexts
 
 # state = [completion count, first unfinished ticket, four unsigned 32-bit
 # completion masks]. Thus count = first-1 + popcount(masks), even on restart.
@@ -128,7 +129,7 @@ use packed
       if raw == nil || raw == ""
         return 0
       fields = raw.strip().split(" ")
-      if fields.size() != 9 || (fields[0] != "MFC1" && fields[0] != "MCG1" && fields[0] != "MFM1" && fields[0] != "MFM2" && fields[0] != "MFM3") || ffrf_hash_valid(fields[1]) != 1 || ffrf_hash_valid(fields[2]) != 1
+      if fields.size() != 9 || (fields[0] != "MFC1" && fields[0] != "MCG1" && ffmd_version(fields[0], "MFM") == 0) || ffrf_hash_valid(fields[1]) != 1 || ffrf_hash_valid(fields[2]) != 1
         return 0
       n = ffw_parse_decimal_i64(fields[5]) ## i64
       m = ffw_parse_decimal_i64(fields[6]) ## i64

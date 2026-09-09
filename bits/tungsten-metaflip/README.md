@@ -255,7 +255,10 @@ group plan; contexts without a useful grid leaf skip the additional solve.
 This runs
 automatically for every distinct verified input and
 refined parent, including rank ties. An immutable parent/bank reference yields
-up to 27 `MFM3` recipes, admitted at most 27 contexts per cold batch under the
+two separately versioned batches: up to 27 `MFM3` recipes for `{2,3,4}^3`,
+and up to 27 `MFM6` recipes with exactly one scale coordinate equal to one
+and the other two in `{2,3,4}`. Admission still visits at most 27 contexts
+per cold batch under the
 shared pending limit. Recipes fix a 50,000-state pair budget plus 50,000 group
 probes (including memo hits), plus 50,000 grid/group probes. Failed rectangle
 probes also consume the budget. The recipes replay
@@ -266,14 +269,25 @@ outside this bounded family; skipping those contexts is not a verified
 tensor completion.
 
 `METAFLIP_COMPOSITION_MIXED=0` disables new mixed intake without abandoning
-already queued work. `METAFLIP_COMPOSITION_GRIDS=0` selects the previous
-group-only `MFM2` offers. `METAFLIP_COMPOSITION_MIXED_GROUPS=0` selects pair-only
-`MFM1` offers. Old parent tickets keep their exact algorithm when resumed;
+already queued work. `METAFLIP_COMPOSITION_SCALE_ONE=0` disables new offers
+of the second domain without abandoning its queued work. Unit-coordinate
+leaves are literal naive tensor witnesses; optional leaves exceeding the
+63-bit positive-mask limit are unavailable, not assigned an estimated price.
+The immutable 22-leaf bank and all old recipe identities stay unchanged.
+`METAFLIP_COMPOSITION_GRIDS=0` selects group-only `MFM2`/`MFM5` offers.
+`METAFLIP_COMPOSITION_MIXED_GROUPS=0` selects pair-only `MFM1`/`MFM4` offers.
+The first number is the old domain, the second the scale-one domain.
+Old parent tickets keep their exact algorithm and domain when resumed;
 re-offering an old parent under the new version creates separate contexts.
 A changed bank identity is repriced when its parent is
 re-offered; old recipes remain reproducible. There is no full dependency
 rescan. Restart, stop, exact-gate rejection, shared-cap and deferred-only
 coordinator checks are in `spec/mixed_composition_queue_test.py`. See
+[Automatic scale-one composition](tools/AUTOMATIC-SCALE-ONE-COMPOSITION-2026-09-09.md)
+and `spec/scale_one_composition_test.py` for the added witness/domain and
+recovery checks. Single-axis-only expansions (two scale coordinates equal
+to one) are supported by direct composition but not yet this automatic
+batch; no dominance argument discards them. See
 [Automatic mixed composition](tools/AUTOMATIC-MIXED-COMPOSITION-2026-09-09.md)
 for the integration audit and its 1,620 fully verified outputs across 153
 canonical shapes (zero new local bounds), and
@@ -954,8 +968,10 @@ walk. A seven-parent matched study, including 3x3/4x4/5x5 and scale-one
 composition contexts, verified twelve control-relative target gains from
 one new rank-23 3x3 representation, but no new retained bound. All 329
 distinct outputs also passed exact matrix-cleanup replay without a reduction.
-These numeric observer profiles can include verified scale-one leaves; the
-automatic composer's immutable bank still targets scales 2..4 in every axis.
+These numeric observer profiles can include verified scale-one leaves.
+The automatic composer now also schedules the 27 exactly-one-unit contexts
+using literal unit leaves alongside its unchanged bank; nine single-axis-only
+contexts in the offline 63-context audit remain outside automatic scheduling.
 An optional [packing-driven primary objective](tools/PACKING-PRIMARY-WALKS-2026-09-09.md)
 now lets this research walker use the native mixed-pair, size-2/3/4 group,
 or combined group/2x2-grid price for chunk acceptance and winner selection.

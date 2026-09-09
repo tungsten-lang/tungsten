@@ -3,12 +3,13 @@
 use counters
 use mixed_bank
 use pages
+use mixed_contexts
 
 -> ffmd_parent_valid(raw) (String) i64
   if raw == nil || raw == ""
     return 0
   fields = raw.strip().split(" ")
-  if fields.size() != 3 || (fields[0] != "MFMD1" && fields[0] != "MFMD2" && fields[0] != "MFMD3") || ffrf_hash_valid(fields[1]) != 1 || ffrf_hash_valid(fields[2]) != 1 || raw != fields[0] + " " + fields[1] + " " + fields[2] + "\n"
+  if fields.size() != 3 || ffmd_version(fields[0], "MFMD") == 0 || ffrf_hash_valid(fields[1]) != 1 || ffrf_hash_valid(fields[2]) != 1 || raw != fields[0] + " " + fields[1] + " " + fields[2] + "\n"
     return 0
   1
 
@@ -18,7 +19,7 @@ use pages
   if raw == nil || raw == ""
     return 0-1
   fields = raw.strip().split(" ")
-  if fields.size() != 9 || (fields[0] != "MFM1" && fields[0] != "MFM2" && fields[0] != "MFM3") || ffrf_hash_valid(fields[1]) != 1 || ffrf_hash_valid(fields[2]) != 1
+  if fields.size() != 9 || ffmd_version(fields[0], "MFM") == 0 || ffrf_hash_valid(fields[1]) != 1 || ffrf_hash_valid(fields[2]) != 1
     return 0-1
   ticket = ffw_parse_decimal_i64(fields[3]) ## i64
   context = ffw_parse_decimal_i64(fields[4]) ## i64
@@ -28,11 +29,7 @@ use pages
   price = ffw_parse_decimal_i64(fields[8]) ## i64
   if ticket < 1 || ticket > parents || context < 0 || context >= 27 || price < 1 || price > 16384 || ffpk_stride(n, m, p) < 1
     return 0-1
-  version = "MFMD1"
-  if fields[0] == "MFM2"
-    version = "MFMD2"
-  if fields[0] == "MFM3"
-    version = "MFMD3"
+  version = "MFMD" + ffmd_version(fields[0], "MFM").to_s()
   if ffbq_read(queue, "parents", ticket) != version + " " + fields[1] + " " + fields[2] + "\n"
     return 0-1
   if raw != fields[0] + " " + fields[1] + " " + fields[2] + " " + ticket.to_s() + " " + context.to_s() + " " + n.to_s() + " " + m.to_s() + " " + p.to_s() + " " + price.to_s() + "\n"
@@ -96,7 +93,21 @@ use pages
   27*parents-cursor
 
 -> ffmd_offer(root, parent, bank) (String String String) i64
-  if ffrf_hash_valid(parent) != 1 || ffrf_hash_valid(bank) != 1
+  version = 3 ## i64
+  if env("METAFLIP_COMPOSITION_GRIDS") == "0"
+    version = 2
+  if env("METAFLIP_COMPOSITION_MIXED_GROUPS") == "0"
+    version = 1
+  if ffmd_offer_version(root, parent, bank, version) != 1
+    return 0
+  if env("METAFLIP_COMPOSITION_SCALE_ONE") != "0"
+    return ffmd_offer_version(root, parent, bank, version+3)
+  1
+
+# Separate durable offers preserve both domains, old tickets and recovery.
+# A crash between the two appends is repaired by idempotently re-offering.
+-> ffmd_offer_version(root, parent, bank, version) (String String String i64) i64
+  if version < 1 || version > 6 || ffrf_hash_valid(parent) != 1 || ffrf_hash_valid(bank) != 1
     return 0
   queue = root + "/composition/mixed/"
   dirs = ["parents", "parents-pages", "by-parent", "tasks", "tasks-pages", "results", "results-pages"]
@@ -107,12 +118,7 @@ use pages
     i += 1
   if ffmd_recover(root) != 1
     return 0
-  version = "MFMD3"
-  if env("METAFLIP_COMPOSITION_GRIDS") == "0"
-    version = "MFMD2"
-  if env("METAFLIP_COMPOSITION_MIXED_GROUPS") == "0"
-    version = "MFMD1"
-  body = version + " " + parent + " " + bank + "\n"
+  body = "MFMD" + version.to_s() + " " + parent + " " + bank + "\n"
   marker = queue + "by-parent/" + Crypto:SHA256.hexdigest(body)
   previous = File.read_prefix(marker, 32)
   submitted = ffmd_count(queue + "parent-submitted") ## i64
@@ -199,22 +205,22 @@ use pages
       if ffrf_load(root, fields[1], parent, cap, meta, parity) != 1 || ffmb_load_bank(root, fields[2], bank, 22*3*128, costs, 22, work, parity) != 1
         return 0
       loaded = ticket
-    a = 2+context/9 ## i64
-    b = 2+(context/3)%3 ## i64
-    c = 2+context%3 ## i64
+    parent_version = ffmd_version(fields[0], "MFMD") ## i64
+    kind = 1+(parent_version-1)%3 ## i64
+    a = ffmd_scale(parent_version, context, 0) ## i64
+    b = ffmd_scale(parent_version, context, 1) ## i64
+    c = ffmd_scale(parent_version, context, 2) ## i64
     n = meta[0]*a ## i64
     m = meta[1]*b ## i64
     p = meta[2]*c ## i64
     if meta[3] <= 512 && ffpk_stride(n, m, p) > 0
-      version = "MFM1"
+      version = "MFM" + parent_version.to_s()
       price = 0 ## i64
-      if fields[0] == "MFMD3"
-        version = "MFM3"
+      if kind == 3
         if ffmb_grid_context(bank, 22*3*128, costs, 22, a, b, c, leaves, 39*128, prices, 13) != 1
           return 0
         price = ffmx_plan(parent, 3*cap, cap, meta[3], prices, 13, mates, axes, 512, plan, 6*512, memo, choice, 65536, status, 7, 50000)
-      elsif fields[0] == "MFMD2"
-        version = "MFM2"
+      elsif kind == 2
         if ffmb_group_context(bank, 22*3*128, costs, 22, a, b, c, leaves, 30*128, prices, 10) != 1
           return 0
         price = ffmg_plan(parent, 3*cap, cap, meta[3], prices, 10, mates, axes, 512, plan, 6*512, memo, choice, 65536, status, 4, 50000)
@@ -240,6 +246,7 @@ use pages
 # Reconstruct the algorithm bound to the parent version. MFM1 retains its
 # 50k-state pair plan; MFM2 adds 50k group probes with pair-plan fallback.
 # MFM3 adds 50k grid/group probes and keeps MFM2 on an incomplete component.
+# MFM4..6 keep the respective algorithms with the unit-coordinate domain.
 -> ffmd_expand(root, raw, parent, meta, out, parity) (String String i64[] i64[] i64[] i64[]) i64
   queue = root + "/composition/mixed/"
   if ffmd_task_code(queue, raw, ffmd_count(queue + "parent-submitted")) < 0
@@ -249,9 +256,11 @@ use pages
   if ffrf_load(root, fields[1], parent, cap, meta, parity) != 1 || meta[3] > 512
     return 0-1
   context = ffw_parse_decimal_i64(fields[4]) ## i64
-  a = 2+context/9 ## i64
-  b = 2+(context/3)%3 ## i64
-  c = 2+context%3 ## i64
+  version = ffmd_version(fields[0], "MFM") ## i64
+  kind = 1+(version-1)%3 ## i64
+  a = ffmd_scale(version, context, 0) ## i64
+  b = ffmd_scale(version, context, 1) ## i64
+  c = ffmd_scale(version, context, 2) ## i64
   n = meta[0]*a ## i64
   m = meta[1]*b ## i64
   p = meta[2]*c ## i64
@@ -269,11 +278,11 @@ use pages
   if ffmb_load_bank(root, fields[2], bank, 22*3*128, costs, 22, work, parity) != 1
     return 0-1
   price = 0 ## i64
-  if fields[0] == "MFM3"
+  if kind == 3
     if ffmb_grid_context(bank, 22*3*128, costs, 22, a, b, c, leaves, 39*128, prices, 13) != 1
       return 0-1
     price = ffmx_plan(parent, 3*cap, cap, meta[3], prices, 13, mates, axes, 512, plan, 6*512, memo, choice, 65536, status, 7, 50000)
-  elsif fields[0] == "MFM2"
+  elsif kind == 2
     if ffmb_group_context(bank, 22*3*128, costs, 22, a, b, c, leaves, 30*128, prices, 10) != 1
       return 0-1
     price = ffmg_plan(parent, 3*cap, cap, meta[3], prices, 10, mates, axes, 512, plan, 6*512, memo, choice, 65536, status, 4, 50000)
@@ -284,9 +293,9 @@ use pages
   if price < 1 || price > 16384 || fields[5] != n.to_s() || fields[6] != m.to_s() || fields[7] != p.to_s() || fields[8] != price.to_s()
     return 0-1
   rank = 0 ## i64
-  if fields[0] == "MFM3"
+  if kind == 3
     rank = ffmg_compose(parent, 3*cap, cap, meta[3], meta[0], meta[1], meta[2], a, b, c, leaves, 39*128, 128, prices, 13, mates, axes, 512, out, 3*32*16384)
-  elsif fields[0] == "MFM2"
+  elsif kind == 2
     rank = ffmg_compose(parent, 3*cap, cap, meta[3], meta[0], meta[1], meta[2], a, b, c, leaves, 30*128, 128, prices, 10, mates, axes, 512, out, 3*32*16384)
   else
     rank = ffmm_compose(parent, 3*cap, cap, meta[3], meta[0], meta[1], meta[2], a, b, c, leaves, 12*128, 128, prices, 4, mates, axes, 512, out, 3*32*16384)

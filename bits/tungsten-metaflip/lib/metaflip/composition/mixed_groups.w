@@ -290,7 +290,7 @@ use mixed_pairs
 # Ten group leaves, or thirteen with UV/UW/VW grids. Validate the complete
 # plan and all available leaves before touching the packed output buffer.
 -> ffmg_compose(parent, words, cap, rank, n, m, p, a, b, c, leaves, leaf_words, leafcap, costs, cost_words, heads, axes, plan_words, out, out_words) (i64[] i64 i64 i64 i64 i64 i64 i64 i64 i64 i64[] i64 i64 i64[] i64 i64[] i64[] i64 i64[] i64) i64
-  if n < 1 || m < 1 || p < 1 || n > 63 || m > 63 || p > 63 || n*m > 63 || m*p > 63 || n*p > 63 || cap < 1 || cap > 4096 || rank < 1 || rank > cap || rank > 512 || words < 3*cap || a < 2 || a > 4 || b < 2 || b > 4 || c < 2 || c > 4 || leafcap < 1 || leafcap > 128 || leaf_words < 30*leafcap || cost_words < 10 || plan_words < rank
+  if n < 1 || m < 1 || p < 1 || n > 63 || m > 63 || p > 63 || n*m > 63 || m*p > 63 || n*p > 63 || cap < 1 || cap > 4096 || rank < 1 || rank > cap || rank > 512 || words < 3*cap || a < 1 || a > 4 || b < 1 || b > 4 || c < 1 || c > 4 || leafcap < 1 || leafcap > 128 || leaf_words < 30*leafcap || cost_words < 10 || plan_words < rank
     return 0-1
   stride = ffpk_stride(n*a, m*b, p*c) ## i64
   if stride == 0

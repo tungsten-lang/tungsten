@@ -5,6 +5,33 @@ slots = 10 ## i64
 if env("METAFLIP_TEST_GRIDS") == "1"
   slots = 13
 
+if ARGV.size() == 1 && ARGV[0] == "--unit-leaves-test"
+  bank = i64[22*3*128]
+  prices = i64[22]
+  out = i64[3*128]
+  parity = i64[4096]
+  n = 1 ## i64
+  while n <= 16
+    m = 1 ## i64
+    while m <= 16
+      p = 1 ## i64
+      while p <= 16
+        if n == 1 || m == 1 || p == 1
+          out[0] = 777
+          rank = ffmb_extract(bank, 22*3*128, prices, 22, n, m, p, out, 3*128, 0) ## i64
+          if n*m <= 63 && m*p <= 63 && n*p <= 63
+            if rank != n*m*p || ffrf_exact(out, 128, rank, n, m, p, parity) != 1
+              exit(1)
+          elsif rank != 0 || out[0] != 777
+            exit(1)
+        p += 1
+      m += 1
+    n += 1
+  if ffmb_unit(1, 63, 1) != 1 || ffmb_unit(1, 64, 1) != 0 || ffmb_unit(0, 1, 1) != 0 || ffmb_unit(1, 1, 0-1) != 0
+    exit(1)
+  << "PASS unit leaves: complete naive witnesses, optional width rejection and positive-mask boundary"
+  exit(0)
+
 if ARGV.size() == 1 && ARGV[0] == "--grid-bounds-test"
   parent = i64[12]
   leaves = i64[39*128]

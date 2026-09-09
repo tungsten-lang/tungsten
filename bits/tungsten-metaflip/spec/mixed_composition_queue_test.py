@@ -9,7 +9,7 @@ import tempfile
 
 from composition_queue_test import (RUNTIME, audit, completion, exact, naive, narrow,
                                     parse_terms, read_record, replace_record, store, value)
-from mixed_composition_parity_test import load_bank, optimal, components
+from mixed_composition_parity_test import load_bank, optimal, components, unit_leaves
 from mixed_group_composition_parity_test import context_prices, group_components, optimal as group_optimal
 from mixed_grid_composition_parity_test import context_prices as grid_prices, optimal as grid_optimal
 from packed_composition_parity_test import orient
@@ -39,25 +39,35 @@ def mixed_audit(root):
         seen.add(ticket)
         raw = read_record(m, 'tasks', ticket)
         fields = raw.decode().split()
-        assert len(fields) == 9 and fields[0] in ('MFM1', 'MFM2', 'MFM3')
+        assert len(fields) == 9 and fields[0] in tuple(f'MFM{i}' for i in range(1, 7))
+        version = int(fields[0][-1]); kind = (version-1)%3+1
         parent_ticket, context, n, k, p, price = map(int, fields[3:])
         assert 0 <= context < 27
         parent_version = 'MFMD'+fields[0][-1]
         assert read_record(m, 'parents', parent_ticket) == f'{parent_version} {fields[1]} {fields[2]}\n'.encode()
         shape, terms = narrow(root, fields[1])
         scales = (2+context//9, 2+(context//3)%3, 2+context%3)
+        if version > 3:
+            scales = [2+(context%9)//3, 2+context%3]
+            scales.insert(context//9, 1)
+            scales = tuple(scales)
         target = tuple(x*y for x,y in zip(shape, scales))
         assert target == (n,k,p)
         if fields[2] not in banks:
             banks[fields[2]] = load_bank(root, fields[2])
         leaves = banks[fields[2]]
+        if version > 3:
+            unit_key = fields[2]+':unit'
+            if unit_key not in banks:
+                banks[unit_key] = unit_leaves(leaves)
+            leaves = banks[unit_key]
         a,b,c = scales
         costs = [len(leaves[tuple(sorted(s))]) for s in (scales,(a,b,2*c),(2*a,b,c),(a,2*b,c))]
-        if fields[0] == 'MFM3':
+        if kind == 3:
             costs = grid_prices(scales, leaves)
             if len(terms) <= 12:
                 assert grid_optimal(terms, costs) <= price
-        elif fields[0] == 'MFM2':
+        elif kind == 2:
             costs = context_prices(scales, leaves)
             if all(len(g) <= 12 for g in group_components(terms, costs)):
                 # Recipes bind a probe budget, not a claim of optimality.
@@ -80,7 +90,10 @@ def mixed_audit(root):
 
 
 def check(binary):
-    base_env = dict(os.environ, METAFLIP_COMPOSITION_PENDING='1269', METAFLIP_COMPOSITION_FIFO='0')
+    # Preserve the original domain's recovery/cap fixtures. The companion
+    # scale-one suite covers default-on dual-domain intake and coexistence.
+    base_env = dict(os.environ, METAFLIP_COMPOSITION_PENDING='1269', METAFLIP_COMPOSITION_FIFO='0',
+                    METAFLIP_COMPOSITION_SCALE_ONE='0')
     base_env.pop('METAFLIP_COMPOSITION_MIXED', None)  # Test default-on, not an opt-in.
     base_env.pop('METAFLIP_COMPOSITION_MIXED_GROUPS', None)
     base_env.pop('METAFLIP_COMPOSITION_GRIDS', None)

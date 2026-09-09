@@ -252,7 +252,7 @@ use deferred
   if raw == nil || raw.size() > 256
     return 0
   fields = raw.strip().split(" ")
-  if fields.size() == 9 && (fields[0] == "MFM1" || fields[0] == "MFM2" || fields[0] == "MFM3") && queue == root + "/composition/mixed/"
+  if fields.size() == 9 && ffmd_version(fields[0], "MFM") > 0 && queue == root + "/composition/mixed/"
     mixed_meta = i64[4]
     mixed_rank = ffmd_expand(root, raw, parent, mixed_meta, out, parity) ## i64
     return ffbc_finish_task(root, queue, sequence, ordinal, raw, mixed_rank, mixed_meta[3], mixed_meta[0], mixed_meta[1], mixed_meta[2], out, scratch)

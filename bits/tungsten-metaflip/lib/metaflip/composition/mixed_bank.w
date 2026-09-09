@@ -1,5 +1,6 @@
 # Constructive leaves for all 27 scale triples in {2,3,4}^3, plus each
 # doubled-coordinate pair. Canonical coordinate permutations need 22 leaves.
+# Unit-coordinate leaves are generated exactly, without changing this bank.
 use ../fleet/refinement_artifacts
 use ../compose
 use mixed_pairs
@@ -54,11 +55,38 @@ use mixed_grids
     slot += 1
   0-1
 
+-> ffmb_unit(n, m, p) (i64 i64 i64) i64
+  if n < 1 || m < 1 || p < 1 || n > 63 || m > 63 || p > 63 || (n != 1 && m != 1 && p != 1)
+    return 0
+  if n*m > 63 || m*p > 63 || n*p > 63 || n*m*p > 128
+    return 0
+  1
+
+-> ffmb_available(n, m, p) (i64 i64 i64) i64
+  if ffmb_unit(n, m, p) == 1 || ffmb_slot(n, m, p) >= 0
+    return 1
+  0
+
 # The caller has loaded and exact-checked the canonical bank. This map also
 # validates masks and the requested permutation before writing its output.
 -> ffmb_extract(bank, bank_words, costs, cost_words, n, m, p, out, out_words, offset) (i64[] i64 i64[] i64 i64 i64 i64 i64[] i64 i64) i64
   if bank_words < 22*3*128 || cost_words < 22 || offset < 0 || offset > 22*3*128 || out_words < offset+3*128
     return 0
+  if ffmb_unit(n, m, p) == 1
+    # The literal matrix-product triples are full witnesses, not price-only
+    # substitutes. Width checks above avoid shifting into the i64 sign bit.
+    rank = n*m*p ## i64
+    one = 1 ## i64
+    term = 0 ## i64
+    while term < rank
+      i = term / (m*p) ## i64
+      j = (term / p)%m ## i64
+      k = term%p ## i64
+      out[offset+term] = one << (i*m+j)
+      out[offset+128+term] = one << (j*p+k)
+      out[offset+256+term] = one << (i*p+k)
+      term += 1
+    return rank
   slot = ffmb_slot(n, m, p) ## i64
   if slot < 0
     return 0
@@ -117,7 +145,7 @@ use mixed_grids
   rank
 
 -> ffmb_context(bank, bank_words, costs, cost_words, a, b, c, out, out_words, prices, price_words) (i64[] i64 i64[] i64 i64 i64 i64 i64[] i64 i64[] i64) i64
-  if a < 2 || a > 4 || b < 2 || b > 4 || c < 2 || c > 4 || out_words < 12*128 || price_words < 4
+  if a < 1 || a > 4 || b < 1 || b > 4 || c < 1 || c > 4 || out_words < 12*128 || price_words < 4
     return 0
   i = 0 ## i64
   while i < 4
@@ -156,7 +184,7 @@ use mixed_grids
     if axis == 2
       m *= size
     prices[i] = 0-1
-    if ffmb_slot(n, m, p) >= 0
+    if ffmb_available(n, m, p) == 1
       rank = ffmb_extract(bank, bank_words, costs, cost_words, n, m, p, out, out_words, i*3*128) ## i64
       if rank < 1
         return 0
@@ -182,7 +210,7 @@ use mixed_grids
     if fixed != 2
       p *= 2
     prices[i] = 0-1
-    if ffmb_slot(n, m, p) >= 0
+    if ffmb_available(n, m, p) == 1
       rank = ffmb_extract(bank, bank_words, costs, cost_words, n, m, p, out, out_words, i*3*128) ## i64
       if rank < 1
         return 0

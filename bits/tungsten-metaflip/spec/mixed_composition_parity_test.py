@@ -148,6 +148,19 @@ def oriented(leaves, shape):
     return orient(source, leaves[source], perm)
 
 
+def unit_leaves(leaves):
+    """Independent literal witnesses; 64-bit signed factor masks are excluded."""
+    result = dict(leaves)
+    for a in range(1, 17):
+        for b in range(a, 17):
+            if a*b <= 63:
+                shape = (1, a, b)
+                terms = naive(shape)
+                exact(shape, terms)
+                result[shape] = terms
+    return result
+
+
 def expected(shape, terms, scales, leaves, plan):
     target = tuple(x*y for x, y in zip(shape, scales))
     result = set()

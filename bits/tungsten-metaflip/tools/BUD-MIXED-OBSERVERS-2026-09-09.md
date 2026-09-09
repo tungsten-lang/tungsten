@@ -166,10 +166,13 @@ This matters for useful existing constructions: 4x7x4 at scale 3x1x3 gives
 7x12x12/r651. All three observer modes reproduce price 651 in every trial.
 The earlier {2,3,4}-cubed studies could not see this context. Its verified
 bound is already in the retained comparison and is not a new discovery.
-Scale-one leaf witnesses here are exactly constructed by the offline library;
-the public automatic composer's immutable bank still requires every scale
-coordinate to be at least two. Extending that worker is a separate seam,
-not functionality silently supplied by these numeric observer tables.
+Scale-one leaf witnesses here are exactly constructed by the offline library.
+At the time of this study the automatic **mixed** composer still required
+every scale coordinate to be at least two; the older fixed-axis lane already
+reproduced rank 651. The subsequent
+[scale-one integration](AUTOMATIC-SCALE-ONE-COMPOSITION-2026-09-09.md) adds
+27 exactly-one-unit mixed contexts. Numeric observer tables themselves do
+not supply leaf witnesses or expand the worker's constructive domain.
 
 Each arm used 16 trials, 128 chunks of 16,384 attempts, observations every
 2,048 attempts, debt two, density slack eight and a 50,000 budget per packing

@@ -56,6 +56,56 @@ module MetaflipBudProducts
     Scheme.new(shape, File.binread(path))
   end
 
+  # Read one immutable snapshot of native refinement leaves. Neither a bank
+  # hash nor an advertised rank substitutes for a full GF(2) tensor check.
+  def native_bank_bytes(path, limit)
+    raw = File.open(path, 'rb') { |f| f.read(limit + 1) }
+    raise 'native bank file exceeds bound' if raw.bytesize > limit
+    raw
+  end
+
+  def native_bank_schemes(root)
+    schemes, provenance = [], []
+    (2..4).each do |scale|
+      marker = File.join(root, 'composition', 'bank-latest', scale.to_s)
+      next unless File.exist?(marker)
+      pointer = native_bank_bytes(marker, 65)
+      raise 'invalid native bank pointer' unless pointer.match?(/\A[0-9a-f]{64}\n\z/)
+      identity = pointer.strip
+      raw = native_bank_bytes(File.join(root, 'composition', 'banks', identity), 1024)
+      raise 'native bank digest mismatch' unless Digest::SHA256.hexdigest(raw) == identity
+      fields = raw.split
+      unless fields.length == 8 && fields[0, 2] == ['MFC_BANK1', scale.to_s] &&
+             fields.drop(2).all? { |id| id.match?(/\A[0-9a-f]{64}\z/) } && raw == fields.join(' ') + "\n"
+        raise 'invalid native bank manifest'
+      end
+      members = fields.drop(2).each_with_index.map do |leaf_id, index|
+        blob = native_bank_bytes(File.join(root, 'objects', "#{leaf_id}.tensor"), 65536)
+        raise 'native leaf digest mismatch' unless Digest::SHA256.hexdigest(blob) == leaf_id
+        lines = blob.lines.map(&:strip)
+        header = lines.shift.split
+        shape = [index + 1, scale, scale]
+        unless header.length == 5 && header[0, 4] == ['MFR1', *shape.map(&:to_s)] &&
+               header[4].match?(/\A[1-9][0-9]*\z/)
+          raise 'invalid native leaf shape'
+        end
+        rank = Integer(header[4], 10)
+        raise 'invalid native leaf rank' unless rank.between?(1, 128) && lines.length == rank
+        terms = lines.map { |line| line.split.map { |word| Integer(word, 10) } }
+        canonical = header.join(' ') + "\n" + terms.map { |term| term.join(' ') + "\n" }.join
+        unless terms.all? { |term| term.length == 3 } && terms == terms.sort && blob == canonical
+          raise 'noncanonical native leaf'
+        end
+        scheme = Scheme.new(shape, text(terms))
+        schemes << scheme
+        { identity: leaf_id, shape: shape, rank: scheme.rank }
+      end
+      provenance << { scale: scale, identity: identity, members: members }
+    end
+    raise 'no native leaf bank found' if provenance.empty?
+    [schemes, provenance]
+  end
+
   def naive(shape)
     n, m, p = shape
     terms = n.times.flat_map do |i|
@@ -397,6 +447,7 @@ module MetaflipBudProducts
     OptionParser.new do |parser|
       parser.banner = "Usage: bud_products.rb --output DIR [options] PARENT..."
       parser.on("--library DIR") { |v| options[:library] = v }
+      parser.on('--native-spool DIR', 'Add fully verified immutable native leaf-bank witnesses') { |v| options[:native_spool] = v }
       parser.on("--output DIR") { |v| options[:output] = v }
       parser.on("--max-dimension N", Integer) { |v| options[:max_dimension] = v }
       parser.on("--max-scale N", Integer) { |v| options[:max_scale] = v }
@@ -426,7 +477,8 @@ module MetaflipBudProducts
     end
     sources = Dir[File.join(options[:library], "matmul_*_gf2.txt")].sort
     raise "empty witness library" if sources.empty?
-    library = Library.new(sources.map { |path| load_scheme(path) }, products: !!options[:products])
+    native_schemes, native_banks = options[:native_spool] ? native_bank_schemes(File.expand_path(options[:native_spool])) : [[], []]
+    library = Library.new(sources.map { |path| load_scheme(path) } + native_schemes, products: !!options[:products])
     require_relative "bud_packings" if options[:grids]
     grid_limits = { max_leaf: 16, max_vertices: 24, max_states: 50_000, max_candidates: 50_000 }
     FileUtils.mkdir_p(root)
@@ -492,6 +544,7 @@ module MetaflipBudProducts
                verifier_sha256: Digest::SHA256.file(File.join(__dir__, "verify_tensor.rb")).hexdigest,
                elapsed_seconds: Process.clock_gettime(Process::CLOCK_MONOTONIC) - started,
                rows: rows }
+    report[:native_banks] = native_banks unless native_banks.empty?
     File.write(File.join(root, "report.json"), JSON.pretty_generate(report) + "\n")
     puts JSON.generate(report.reject { |k, _| k == :rows }.merge(targets: rows.length,
                          below_plain_product: rows.count { |r| r[:exact_rank] < r[:plain_product_rank] },

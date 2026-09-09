@@ -47,6 +47,43 @@ class BudParentWalkTest < Minitest::Test
     end
   end
 
+  def test_verified_native_bank_changes_search_costs_and_keeps_exact_exports
+    bank_binary = ENV['METAFLIP_GROUP_BINARY']
+    skip 'Set METAFLIP_GROUP_BINARY to the native group test driver' unless bank_binary
+    Dir.mktmpdir('bud-native-bank-study') do |root|
+      spool = File.join(root,'spool')
+      output,status = Open3.capture2e(bank_binary,'--bank',spool,File.join(@bit,'lib/metaflip'),'4')
+      assert status.success?,output
+      scores = {}
+      %w[packaged native].each do |mode|
+        directory = File.join(root,mode)
+        cmd = command(directory)
+        cmd[cmd.index('--parent')+1] = File.join(@bit,'lib/metaflip/seeds/gf2/matmul_2x2x5_rank18_d92_block_local_gl_gf2.txt')
+        cmd[cmd.index('--scale')+1] = '4x4x1'
+        cmd += ['--native-spool',spool] if mode == 'native'
+        output,status = Open3.capture2e(*cmd)
+        assert status.success?,output
+        report = JSON.parse(File.read(File.join(directory,'report.json')))
+        scores[mode] = report.fetch('initial_score')
+        if mode == 'native'
+          assert_equal [4], report.fetch('native_banks').map { |b| b.fetch('scale') }
+          assert_equal 26, report.fetch('native_banks').first.fetch('members')[1].fetch('rank')
+        else
+          refute report.key?('native_banks')
+        end
+        report.fetch('arms').each do |arm|
+          arm.fetch('trials').each do |trial|
+            replay = B.replay(trial.fetch('recipe'))
+            assert replay[:exact]
+            assert_equal '8x8x5',replay[:shape]
+            assert_operator replay[:rank], :<=, trial.fetch('score')
+          end
+        end
+      end
+      assert_equal({'packaged'=>236,'native'=>230},scores)
+    end
+  end
+
   def test_matched_accounting_exact_replay_repeatability_and_overwrite_refusal
     Dir.mktmpdir("bud-parent-test") do |root|
       reports = %w[first second].map do |name|

@@ -12,6 +12,96 @@ class BudProductsTest < Minitest::Test
     @library = B::Library.new([@strassen])
   end
 
+  def native_fixture(root)
+    FileUtils.mkdir_p(File.join(root,'objects'))
+    FileUtils.mkdir_p(File.join(root,'composition','banks'))
+    FileUtils.mkdir_p(File.join(root,'composition','bank-latest'))
+    ids = (1..6).map do |k|
+      leaf = @library.scheme([k,2,2])
+      raw = "MFR1 #{k} 2 2 #{leaf.rank}\n" + leaf.terms.sort.map { |t| t.join(' ') + "\n" }.join
+      id = Digest::SHA256.hexdigest(raw)
+      File.write(File.join(root,'objects',"#{id}.tensor"),raw)
+      id
+    end
+    native_manifest(root, ['MFC_BANK1','2',*ids])
+    ids
+  end
+
+  def native_manifest(root, fields)
+    raw = fields.join(' ') + "\n"
+    id = Digest::SHA256.hexdigest(raw)
+    File.write(File.join(root,'composition','banks',id),raw)
+    File.write(File.join(root,'composition','bank-latest','2'),id+"\n")
+    id
+  end
+
+  def test_native_bank_full_tensor_loading_and_immutable_snapshot
+    Dir.mktmpdir('bud-native-bank') do |root|
+      native_fixture(root)
+      schemes, records = B.native_bank_schemes(root)
+      assert_equal [4,7,11,14,18,21], schemes.map(&:rank)
+      assert schemes.all? { |s| s.audit[:exact] }
+      assert_equal [2], records.map { |r| r[:scale] }
+      assert_equal 6, records.first[:members].size
+      library = B::Library.new(schemes)
+      assert_equal 7, library.rank([2,2,2])
+      File.write(File.join(root,'composition','bank-latest','2'),'broken')
+      assert_raises(RuntimeError) { B.native_bank_schemes(root) }
+      assert_equal 7, library.scheme([2,2,2]).rank
+    end
+  end
+
+  def test_native_bank_rejects_forgery_even_with_recomputed_hashes
+    Dir.mktmpdir('bud-native-bank-forgery') do |root|
+      assert_raises(RuntimeError) { B.native_bank_schemes(root) }
+      ids = native_fixture(root)
+      pointer = File.join(root,'composition','bank-latest','2')
+      bank = File.join(root,'composition','banks',File.read(pointer).strip)
+      raw = File.binread(bank); File.write(bank,raw+' ')
+      assert_raises(RuntimeError) { B.native_bank_schemes(root) }
+      File.write(bank,raw)
+      native_manifest(root,['MFC_BANK1','2',ids[1],*ids.drop(1)])
+      assert_raises(RuntimeError) { B.native_bank_schemes(root) }
+      native_manifest(root,['MFC_BANK1','2',*ids])
+      original = File.binread(File.join(root,'objects',"#{ids[1]}.tensor"))
+      lines = original.lines; term = lines[1].split.map(&:to_i)
+      term[0] ^= term[0] == 1 ? 2 : 1
+      lines[1] = term.join(' ')+"\n"
+      corrupted = lines.first + lines.drop(1).map { |s| s.split.map(&:to_i) }.sort.map { |t| t.join(' ')+"\n" }.join
+      id = Digest::SHA256.hexdigest(corrupted)
+      File.write(File.join(root,'objects',"#{id}.tensor"),corrupted)
+      bad_ids = ids.dup; bad_ids[1] = id
+      native_manifest(root,['MFC_BANK1','2',*bad_ids])
+      assert_raises(RuntimeError) { B.native_bank_schemes(root) }
+      native_manifest(root,['MFC_BANK1','2',*ids])
+      File.write(File.join(root,'objects',"#{ids[1]}.tensor"),'x'*65537)
+      assert_raises(RuntimeError) { B.native_bank_schemes(root) }
+    end
+  end
+
+  def test_native_bank_composer_cli_exports_self_contained_products
+    Dir.mktmpdir('bud-native-bank-compose') do |root|
+      native_fixture(root)
+      library = File.join(root,'library'); Dir.mkdir(library)
+      leaf = B.naive([1,1,1])
+      File.write(File.join(library,'matmul_1x1x1_rank1_gf2.txt'),leaf.source_text)
+      source = File.join(root,'matmul_1x1x2_rank2_gf2.txt')
+      File.write(source,B.naive([1,1,2]).source_text)
+      output = File.join(root,'output')
+      capture_io do
+        B.main(['--library',library,'--native-spool',root,'--output',output,
+                '--max-dimension','4','--max-scale','2','--trials','0',source])
+      end
+      report = JSON.parse(File.read(File.join(output,'report.json')))
+      assert_equal 1,report.fetch('native_banks').length
+      target = report.fetch('rows').find { |row| row['target'] == '2x2x2' }
+      assert_equal 7,target.fetch('exact_rank')
+      FileUtils.rm_rf(File.join(root,'objects'))
+      FileUtils.rm_rf(File.join(root,'composition'))
+      assert report.fetch('rows').all? { |row| B.replay(row.fetch('recipe'))[:exact] }
+    end
+  end
+
   def test_each_bud_axis_constructs_strassen_not_an_unverified_rank_number
     [[0, [1, 1, 2], [2, 2, 1]], [1, [2, 1, 1], [1, 2, 2]],
      [2, [1, 2, 1], [2, 1, 2]]].each do |axis, shape, scale|

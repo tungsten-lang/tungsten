@@ -11,6 +11,7 @@ options = { trials: 16, chunks: 512, steps: 512, seed: 900001, debt: 2, density_
 OptionParser.new do |parser|
   parser.banner = "Usage: bench_bud_parents.rb --binary FILE --parent FILE --scale AxBxC --output DIR"
   %i[binary parent scale output library portfolio].each { |key| parser.on("--#{key} VALUE") { |v| options[key] = v } }
+  parser.on('--native-spool DIR', 'Add fully verified immutable native leaf-bank witnesses') { |v| options[:native_spool] = v }
   parser.on('--holdout-shape AxBxC', 'Price the held literal terms as one verified elementary group') { |v| options[:holdout_shape] = v }
   %i[trials chunks steps seed debt].each { |key| parser.on("--#{key} N", Integer) { |v| options[key] = v } }
   parser.on("--density-slack N", Integer) { |v| options[:density_slack] = v }
@@ -67,7 +68,8 @@ begin
     cases = [{'scale' => scale, 'weight' => 1}]
   end
   scale = cases.first.fetch('scale')
-  library = B::Library.new(Dir[File.join(options[:library], "matmul_*_gf2.txt")].sort.map { |p| B.load_scheme(p) }, products: !!options[:products])
+  native_schemes, native_banks = options[:native_spool] ? B.native_bank_schemes(File.expand_path(options[:native_spool])) : [[], []]
+  library = B::Library.new(Dir[File.join(options[:library], "matmul_*_gf2.txt")].sort.map { |p| B.load_scheme(p) } + native_schemes, products: !!options[:products])
   FileUtils.mkdir_p(root)
   File.binwrite(File.join(root, 'portfolio.json'), portfolio_raw) if portfolio_raw
   snapshot = B.save_snapshot(root, "input", parent)
@@ -139,6 +141,7 @@ begin
   summary = { schema: 1, field: "GF(2)", record_claim: false, options: options,
               binary_sha256: digest, price_sha256: Digest::SHA256.hexdigest(table), parent: snapshot,
               initial_score: initial, arms: [] }
+  summary[:native_banks] = native_banks unless native_banks.empty?
   if options[:portfolio]
     summary[:portfolio] = cases
     summary[:portfolio_source_sha256] = portfolio_hash

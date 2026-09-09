@@ -945,6 +945,13 @@ distinct parents. Five target minima beat both matched controls, but none
 beat the retained archive. This is not enabled in the live fleet or exposed
 by `bench_bud_parents.rb`; numeric tables must be bound to verified leaf
 witnesses before any product is admitted.
+The [two-grid follow-up](tools/TWO-GRID-PARENT-2026-09-09.md) found a new
+rank-104 4x5x7 representation in the ordinary control arm. Full grid packing
+and checked block composition yield five verified local improvements,
+including 8x10x14/724 and 8x14x26/1805 below the refreshed screened references.
+These are GF(2) candidates, not confirmed world records. Their two disjoint
+2x2 grids are not yet supported by the native automatic composer; the
+held-grid search policy itself did not produce these wins.
 Optional [read-only context observers](tools/BUD-CONTEXT-OBSERVERS-2026-09-08.md)
 retain up to eight additional price objectives along one ordinary walk. The
 same-path study reproduced both rank and context winners with half the

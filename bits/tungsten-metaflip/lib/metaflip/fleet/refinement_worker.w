@@ -128,7 +128,7 @@ use refinement_budget
       << "METAFLIP_REFINE_FAILED job=" + sequence.to_s()
       return 1
     << "METAFLIP_REFINE_COMPLETED job=" + sequence.to_s()
-    if runtime != "" && !File.exists?(root + "/composition/error")
+    if runtime != "" && !File.exists?(root + "/composition/error") && !File.exists?(root + "/composition/mixed/error")
       # Refinement manifests and composition completion have separate cursors.
       # At most two expansions per input; overflow is served by idle batches.
       z = ffbc_drain(root, 2) ## i64

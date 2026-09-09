@@ -11,6 +11,8 @@ import tempfile
 from refinement_worker_parity_test import exact
 from verify_representation_portfolio import parse_terms
 from composition_queue_test import audit as audit_composition
+from composition_queue_test import value
+from mixed_composition_queue_test import mixed_audit, deferred
 
 
 def run(binary, root, tensor, enabled, seconds=2, require_outputs=True):
@@ -23,6 +25,7 @@ def run(binary, root, tensor, enabled, seconds=2, require_outputs=True):
                '--state-dir', str(root/'state'), '--run-tag', 'refinement-test',
                '--status', str(status), '--best', str(best)]
     env = dict(os.environ, METAFLIP_REFINEMENT=str(enabled),
+               METAFLIP_COMPOSITION_MIXED='1',
                OMP_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1',
                VECLIB_MAXIMUM_THREADS='1')
     proc = subprocess.Popen(command, env=env, stdout=subprocess.PIPE,
@@ -56,6 +59,9 @@ def run(binary, root, tensor, enabled, seconds=2, require_outputs=True):
         assert (spool/'stop').is_file()
         assert int(fields['compose_failures']) == 0, fields
         assert int(fields['compose_pending']) == int(fields['compose_submitted'])-int(fields['compose_completed'])
+        assert int(fields['compose_deferred']) == deferred(spool)
+        assert int(fields['compose_submitted']) == value(spool/'composition/submitted')+value(spool/'composition/mixed/submitted')
+        assert int(fields['compose_completed']) == value(spool/'composition/consumed')+value(spool/'composition/mixed/consumed')
         objects = 0
         for path in (spool/'objects').glob('*.tensor'):
             data = path.read_bytes()
@@ -72,10 +78,12 @@ def run(binary, root, tensor, enabled, seconds=2, require_outputs=True):
         assert not any(('--refine-batch' in line or '--compose-batch' in line) and str(spool) in line
                        for line in processes.splitlines()), processes
         composed = audit_composition(spool)
+        mixed = mixed_audit(spool)
         print(f'PASS fleet {tensor}: {objects} full tensors; '
               f'{fields["refine_seed_uses"]} seed uses; '
               f'{fields["refine_completed"]}/{fields["refine_submitted"]} jobs; '
-              f'{fields["compose_completed"]}/{fields["compose_submitted"]} compositions; stopped')
+              f'{fields["compose_completed"]}/{fields["compose_submitted"]} compositions; '
+              f'{len(mixed)} mixed outputs, {fields["compose_deferred"]} deferred contexts; stopped')
     else:
         assert not spool.exists()
         assert int(fields['refine_submitted']) == int(fields['refine_outputs']) == 0

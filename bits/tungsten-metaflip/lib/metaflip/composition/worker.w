@@ -7,15 +7,7 @@ use pages
 use leaf_walk
 use schedule
 use group_bank
-
--> ffbc_counter(path) (String) i64
-  raw = File.read_prefix(path, 32)
-  if raw == nil
-    return 0
-  value = ffw_parse_decimal_i64(raw.strip()) ## i64
-  if value < 0 || value > 1000000000000
-    return 0
-  value
+use deferred
 
 -> ffbc_failure(queue, ticket, ordinal, code) (String i64 i64 i64) i64
   failures = ffbc_counter(queue + "failures") + 1 ## i64
@@ -233,23 +225,39 @@ use group_bank
     scale += 1
   if ffbc_submit_parent(root, identity, leaves, ranks, banks, prices, work, meta, parity, mates) != 1
     return 0
+  mixed_bank = ""
+  if env("METAFLIP_COMPOSITION_MIXED") != "0"
+    mixed_leaves = i64[22*3*128]
+    mixed_costs = i64[22]
+    mixed_bank = ffmb_bank(root, runtime, leaves[1], leaves[2], mixed_leaves, 22*3*128, mixed_costs, 22, leaf_work, parity)
+    if mixed_bank == "" || ffmd_offer(root, identity, mixed_bank) != 1
+      if File.exists?(root + "/stop")
+        return 0-1
+      return 0
   i = 0
   while i < ids.size()
     if File.exists?(root + "/stop")
       return 0-1
     if ffbc_submit_parent(root, ids[i], leaves, ranks, banks, prices, work, meta, parity, mates) != 1
       return 0
+    if mixed_bank != "" && ffmd_offer(root, ids[i], mixed_bank) != 1
+      return 0
     i += 1
   1
 
 # Inputs and leaves are rechecked. The full multiword result crosses the exact
 # tensor gate BEFORE archive/best/result writes. Formula ranks are not gates.
--> ffbc_task(root, sequence, ordinal, parent, leaf, mates, out, scratch, parity) (String i64 i64 i64[] i64[] i64[] i64[] i64[] i64[]) i64
-  queue = root + "/composition/"
+-> ffbc_task_at(root, queue, sequence, ordinal, parent, leaf, mates, out, scratch, parity) (String String i64 i64 i64[] i64[] i64[] i64[] i64[] i64[]) i64
   raw = ffbq_read(queue, "tasks", sequence)
   if raw == nil || raw.size() > 256
     return 0
   fields = raw.strip().split(" ")
+  if fields.size() == 9 && fields[0] == "MFM1" && queue == root + "/composition/mixed/"
+    mixed_meta = i64[4]
+    mixed_rank = ffmd_expand(root, raw, parent, mixed_meta, out, parity) ## i64
+    return ffbc_finish_task(root, queue, sequence, ordinal, raw, mixed_rank, mixed_meta[3], mixed_meta[0], mixed_meta[1], mixed_meta[2], out, scratch)
+  if queue != root + "/composition/"
+    return 0
   if fields.size() != 9 || (fields[0] != "MFC1" && fields[0] != "MCG1") || ffrf_hash_valid(fields[1]) != 1 || ffrf_hash_valid(fields[2]) != 1
     return 0
   axis = ffw_parse_decimal_i64(fields[3]) ## i64
@@ -284,14 +292,17 @@ use group_bank
   canonical = fields[0] + " " + fields[1] + " " + fields[2] + " " + axis.to_s() + " " + scale.to_s() + " " + n.to_s() + " " + m.to_s() + " " + p.to_s() + " " + predicted.to_s() + "\n"
   if raw != canonical
     return 0
-  task_id = Crypto:SHA256.hexdigest(raw)
   rank = 0 ## i64
   if fields[0] == "MCG1"
     rank = ffbg_compose(parent, 3*cap, cap, meta[3], meta[0], meta[1], meta[2], axis, scale, bank, 18*128, 128, costs, 7, mates, cap, sizes, cap, plan, 4*(cap+1), out, 3*32*16384)
   else
     rank = ffbd_compose(parent, 3*cap, cap, meta[3], meta[0], meta[1], meta[2], axis, scale, leaf, 3*cap, cap, lm[3], mates, cap, out, 3*32*16384)
-  if rank < 1 || rank > predicted
+  ffbc_finish_task(root, queue, sequence, ordinal, raw, rank, predicted, n, m, p, out, scratch)
+
+-> ffbc_finish_task(root, queue, sequence, ordinal, raw, rank, predicted, n, m, p, out, scratch) (String String i64 i64 String i64 i64 i64 i64 i64 i64[] i64[]) i64
+  if rank < 1 || rank > predicted || predicted > 16384
     return 0
+  task_id = Crypto:SHA256.hexdigest(raw)
   checked = ffpk_exact(out, 3*32*16384, rank, n, m, p, scratch, 32768, 20000000) ## i64
   if checked == 0-1
     # Keep the recipe pending. A budget exhaustion cannot become an archive
@@ -303,23 +314,24 @@ use group_bank
     return 0-1
   blob = ffpk_blob(out, rank, n, m, p)
   identity = Crypto:SHA256.hexdigest(blob)
-  path = queue + "objects/" + identity + ".tensor"
+  archive = root + "/composition/"
+  path = archive + "objects/" + identity + ".tensor"
   old = File.read_prefix(path, 13000000)
   if old != nil && old != blob
     return 0
   if old == nil && ffrf_atomic(path, blob, "composition") != 1
     return 0
   shape = n.to_s() + "x" + m.to_s() + "x" + p.to_s()
-  if !File.mkdir_p(queue + "by-shape/" + shape) || ffrf_atomic(queue + "by-shape/" + shape + "/" + identity, task_id + "\n", "composition") != 1
+  if !File.mkdir_p(archive + "by-shape/" + shape) || ffrf_atomic(archive + "by-shape/" + shape + "/" + identity, task_id + "\n", "composition") != 1
     return 0
   # Best is an advisory index of VERIFIED outputs, never a price cutoff.
-  previous = File.read_prefix(queue + "best/" + shape, 100)
+  previous = File.read_prefix(archive + "best/" + shape, 100)
   best_rank = 16385 ## i64
   if previous != nil
     values = previous.strip().split(" ")
     if values.size() == 2 && ffrf_hash_valid(values[1]) == 1
       best_rank = ffw_parse_decimal_i64(values[0])
-  if rank < best_rank && ffrf_atomic(queue + "best/" + shape, rank.to_s() + " " + identity + "\n", "composition") != 1
+  if rank < best_rank && ffrf_atomic(archive + "best/" + shape, rank.to_s() + " " + identity + "\n", "composition") != 1
     return 0
   suffix = task_id + " " + identity + " " + shape + " " + rank.to_s() + "\n"
   result = "MFC_RESULT2 " + sequence.to_s() + " " + suffix
@@ -329,10 +341,12 @@ use group_bank
     return 1
   ffbq_put(queue, "results", ordinal, result)
 
--> ffbc_drain(root, limit) (String i64) i64
+-> ffbc_task(root, sequence, ordinal, parent, leaf, mates, out, scratch, parity) (String i64 i64 i64[] i64[] i64[] i64[] i64[] i64[]) i64
+  ffbc_task_at(root, root + "/composition/", sequence, ordinal, parent, leaf, mates, out, scratch, parity)
+
+-> ffbc_drain_queue(root, queue, limit) (String String i64) i64
   if limit < 1 || limit > 4
     return 2
-  queue = root + "/composition/"
   consumed = ffbc_counter(queue + "consumed") ## i64
   submitted = ffbc_counter(queue + "submitted") ## i64
   if File.exists?(root + "/stop")
@@ -362,11 +376,11 @@ use group_bank
       fifo = 0 ## i64
       if env("METAFLIP_COMPOSITION_FIFO") == "1"
         fifo = 1
-      ticket = ffbs_choose(queue, submitted, state, fifo)
+      ticket = ffbs_choose_at(queue, root + "/composition/", submitted, state, fifo)
     result = 0 ## i64
     recovering = consumed < state[0] ## bool
     if ticket > 0 && ticket <= submitted && ((recovering && ffbs_done(state, ticket) == 1) || (!recovering && ticket >= state[1] && ticket < state[1]+128 && ffbs_done(state, ticket) == 0))
-      result = ffbc_task(root, ticket, ordinal, parent, leaf, mates, out, scratch, parity)
+      result = ffbc_task_at(root, queue, ticket, ordinal, parent, leaf, mates, out, scratch, parity)
     if result == 0-1
       return 0
     if result != 1
@@ -380,4 +394,38 @@ use group_bank
       return ffbc_failure(queue, ticket, ordinal, 0-5)
     done += 1
   << "METAFLIP_COMPOSE_COMPLETED done=" + consumed.to_s() + " pending=" + (submitted-consumed).to_s()
+  0
+
+# Alternate lanes whenever both have work. Admission is bounded separately
+# from the at-most-four exact expansions, and never changes old-lane tickets.
+-> ffbc_drain(root, limit) (String i64) i64
+  if limit < 1 || limit > 4
+    return 2
+  if File.exists?(root + "/stop")
+    return 0
+  queue = root + "/composition/"
+  mixed = queue + "mixed/"
+  if ffmd_admit(root, 27) != 1
+    return ffbc_failure(mixed, 0, ffmd_count(mixed + "context"), 0-6)
+  done = 0 ## i64
+  while done < limit
+    old_done = ffbc_counter(queue + "consumed") ## i64
+    mixed_done = ffbc_counter(mixed + "consumed") ## i64
+    old_pending = ffbc_counter(queue + "submitted")-old_done ## i64
+    mixed_pending = ffbc_counter(mixed + "submitted")-mixed_done ## i64
+    if old_pending <= 0 && mixed_pending <= 0
+      if done == 0
+        result = ffbc_drain_queue(root, queue, 1) ## i64
+        if result != 0
+          return result
+        if File.exists?(mixed + "submitted")
+          return ffbc_drain_queue(root, mixed, 1)
+      return 0
+    selected = queue
+    if old_pending <= 0 || (mixed_pending > 0 && (old_done+mixed_done)%2 == 1)
+      selected = mixed
+    result = ffbc_drain_queue(root, selected, 1) ## i64
+    if result != 0
+      return result
+    done += 1
   0

@@ -8,6 +8,25 @@ if ARGV.size() == 5 && ARGV[0] == "--refine-batch"
   exit(ffrf_batch_with_composition(ARGV[1], ffw_parse_decimal_i64(ARGV[2]), ffw_parse_decimal_i64(ARGV[3]), ARGV[4]))
 if ARGV.size() == 3 && ARGV[0] == "--compose-batch"
   exit(ffbc_drain(ARGV[1], ffw_parse_decimal_i64(ARGV[2])))
+if ARGV.size() == 3 && ARGV[0] == "--mixed-admit"
+  if ffmd_admit(ARGV[1], ffw_parse_decimal_i64(ARGV[2])) != 1
+    exit(1)
+  exit(0)
+if ARGV.size() == 3 && ARGV[0] == "--mixed-coordinator"
+  queue = MetaflipRefinement.new(ARGV[1], System.executable_path(), ARGV[2])
+  start = ccall("__w_clock_ms") ## i64
+  z = queue.poll(start) ## i64
+  while ccall("__w_clock_ms")-start < 30000
+    z = queue.poll(ccall("__w_clock_ms"))
+    if ffmd_deferred(ARGV[1]) == 0 && ffmd_occupancy(ARGV[1]) == 0
+      break
+    ccall("__w_sleep", ~0.002)
+  stopped = queue.stop() ## i64
+  if stopped != 1 || ffmd_deferred(ARGV[1]) != 0 || ffmd_occupancy(ARGV[1]) != 0 || queue.failures() != 0
+    << "FAIL mixed coordinator" + queue.status_fields()
+    exit(1)
+  << "PASS mixed coordinator" + queue.status_fields() + " tui=" + queue.status_row()
+  exit(0)
 if ARGV.size() == 3 && ARGV[0] == "--coordinator"
   queue = MetaflipRefinement.new(ARGV[1], System.executable_path(), ARGV[2])
   cap = ffw_default_capacity(2) ## i64

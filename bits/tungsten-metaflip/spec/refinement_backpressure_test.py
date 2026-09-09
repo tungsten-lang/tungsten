@@ -13,7 +13,7 @@ from packed_composition_parity_test import parse_terms
 
 def check(binary, external):
     env = dict(os.environ, METAFLIP_COMPOSITION_PENDING='1269',
-               METAFLIP_COMPOSITION_FIFO='0')
+               METAFLIP_COMPOSITION_FIFO='0', METAFLIP_COMPOSITION_MIXED='0')
 
     def run(*args, expected=0, unlimited=False):
         options = dict(env)

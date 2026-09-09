@@ -99,7 +99,7 @@ use packed
 
 # Prices order work only. They are checked against the parent/leaf again at
 # materialization, and the entire output must pass the tensor gate.
--> ffbs_choose(queue, submitted, state, fifo) (String i64 i64[] i64) i64
+-> ffbs_choose_at(queue, archive, submitted, state, fifo) (String String i64 i64[] i64) i64
   if state[1] > submitted
     return 0
   if fifo != 0 || state[0]%4 == 0
@@ -128,7 +128,7 @@ use packed
       if raw == nil || raw == ""
         return 0
       fields = raw.strip().split(" ")
-      if fields.size() != 9 || (fields[0] != "MFC1" && fields[0] != "MCG1") || ffrf_hash_valid(fields[1]) != 1 || ffrf_hash_valid(fields[2]) != 1
+      if fields.size() != 9 || (fields[0] != "MFC1" && fields[0] != "MCG1" && fields[0] != "MFM1") || ffrf_hash_valid(fields[1]) != 1 || ffrf_hash_valid(fields[2]) != 1
         return 0
       n = ffw_parse_decimal_i64(fields[5]) ## i64
       m = ffw_parse_decimal_i64(fields[6]) ## i64
@@ -138,7 +138,7 @@ use packed
         return 0
       baseline = n*m*p ## i64
       shape = n.to_s() + "x" + m.to_s() + "x" + p.to_s()
-      prior = File.read_prefix(queue + "best/" + shape, 100)
+      prior = File.read_prefix(archive + "best/" + shape, 100)
       if prior != nil
         values = prior.strip().split(" ")
         if values.size() == 2 && ffrf_hash_valid(values[1]) == 1
@@ -157,3 +157,6 @@ use packed
         best_den = baseline
     ticket += 1
   best
+
+-> ffbs_choose(queue, submitted, state, fifo) (String i64 i64[] i64) i64
+  ffbs_choose_at(queue, queue, submitted, state, fifo)

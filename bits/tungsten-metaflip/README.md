@@ -168,7 +168,8 @@ bounded 524,288-move native walk to an independently checked 2x4x4/r26 leaf.
 It is cached only after full tensor verification. Immutable leaf-bank
 manifests bind all six verified leaves. `MCG1` recipes reference a bank;
 pair-only `MFC1` recipes remain readable. Each parent still emits at most
-nine recipes, preserving the existing backpressure reservation. Parent
+nine fixed-axis recipes, preserving the source-job reservation. Mixed-axis
+contexts are offered separately for deferred admission, described below. Parent
 markers record recipe identities: re-offering after a leaf change prices
 only affected recipes. There is not yet a global reverse-dependency sweep.
 `METAFLIP_COMPOSITION_GROUPS=0` selects the pair-only control for new intake;
@@ -177,8 +178,10 @@ A price is only a scheduling heuristic: the
 expanded tensor passes the full coefficient check before archive admission.
 Rank ties remain separate parents and outputs.
 
-`composition/` inside the spool has its own durable tasks, results, consumed
-cursor, per-shape best index and hexadecimal `MFW1` tensor objects. New
+`composition/` inside the spool has durable tasks, results and a consumed
+cursor for fixed-axis work; `composition/mixed/` has independent journals for
+mixed-axis work. Both use the same per-shape best index and hexadecimal
+`MFW1` tensor objects in `composition/`. New
 task/result pages hold at most 64 bounded records with an atomic rewrite and
 payload digest; new recipes need no individual task-index files. Existing
 per-record spools remain readable, including partially completed queues and
@@ -187,12 +190,16 @@ The digest checks serialization, not the tensor identity. Packed
 32-bit limbs support factors through 1,024 bits (16,384 terms), beyond the
 live walker's 63-bit limit. At most two expansions run after a refinement
 input, and four per idle batch, in the same single low-priority native child.
-`compose_submitted/completed/pending/failures` expose the backlog separately.
-Composition uses a bounded 128-ticket priority window. It favors a smaller
+`compose_submitted/completed/pending/failures` sum both lanes, separately from
+source refinement. `compose_deferred` counts mixed parent/context references
+not yet admitted as recipes; the TUI also shows this deferred work.
+The lanes alternate while both have work. Each uses a bounded 128-ticket
+priority window. It favors a smaller
 predicted rank relative to the current verified per-shape best (or the naive
 rank when absent), with cheaper-rank/older-ticket tie breaks. Every fourth
-completion serves the oldest pending ticket, so new proposals cannot starve
-old work in a non-failing queue. This is ordering, never dominance pruning.
+completion in that lane serves its oldest pending ticket, so new proposals
+cannot starve old work in a non-failing queue. This is ordering, never
+dominance pruning.
 `METAFLIP_COMPOSITION_FIFO=1` selects the FIFO control. `MFC_RESULT2` records
 bind completion order to original ticket IDs; a small checksummed completion
 mask supports restart without duplicating or losing out-of-order work. Legacy
@@ -201,19 +208,22 @@ replayed through the full tensor gate, not accepted from its hashes alone.
 An invalid or over-budget selected recipe stays pending with an `error` file;
 automatic composition pauses while ordinary flipping continues.
 
-Refinement expansion reserves space for its entire bounded output family
-before writing derived objects or recipes. The default pending-composition
+Refinement expansion reserves space for the fixed-axis recipes of its entire
+bounded output family before writing derived objects or recipes. Mixed-axis
+parent/bank references are deferred, then expanded into recipes only as shared
+queue capacity becomes available. The default pending-composition
 limit is 4,096 (`METAFLIP_COMPOSITION_PENDING=1269..1000000`; `0` selects the
 unlimited control). When insufficient space remains, original source tickets
 stay queued and the child drains composition even while source jobs await
-refinement. `refine_blocked` and `compose_limit` expose this backpressure;
+refinement. Mixed admission yields freed capacity to a blocked source job.
+`refine_blocked` and `compose_limit` expose this backpressure;
 the TUI also shows `blocked`. It is not counted as a failure or a completion.
 The setting is fixed at startup; invalid values use the default. Existing
 over-limit queues drain without deleting evidence. The limit applies to
-automatic/source-job expansion, not offline tools or manually edited spools.
-There is still no disk-byte quota: unprocessed originals and completed tensor
-artifacts remain retained. Backpressure bounds automatic composition backlog,
-not all disk storage, and a composition error can also hold up new expansion.
+materialized pending recipes across both lanes, not offline tools or manually
+edited spools. There is still no disk-byte quota: unprocessed originals,
+deferred parent references and completed tensor artifacts remain retained.
+A composition error can also hold up new expansion.
 
 The regression **4x8x4/r94 → 4x7x4/r85 → 12x7x12/r651** now runs through
 native queue intake and expansion (12x7x12 is a permutation of 7x12x12).
@@ -231,15 +241,30 @@ The external parent is test-only, not redistributed. Replay with
 This is still a bounded family, not an exhaustive basis/packing search.
 Overlapping groups, changing-leaf dependency propagation, recursive wide
 composition and automatic cross-shape campaign dispatch remain follow-up work.
-The native `composition/mixed_pairs.w` engine now supports disjoint pairs from
+The native `composition/mixed_pairs.w` engine supports disjoint pairs from
 different axes in one construction, using a verified 22-leaf bank for all
 27 scale triples in `{2,3,4}^3`. Small connected components use exact weighted
 matching; larger or state-limited components keep a valid deterministic
-fallback. This engine is **not yet wired into automatic queue intake**:
-the existing reservation assumes at most nine recipes per parent, and the
-new family needs deferred admission to preserve that bound. Its focused
-native/independent regressions and the 891-case comparison are documented in
-[Native mixed-axis pairs](tools/NATIVE-MIXED-PAIRS-2026-09-09.md).
+fallback. This now runs automatically for every distinct verified input and
+refined parent, including rank ties. An immutable parent/bank reference yields
+up to 27 `MFM1` recipes, admitted at most 27 contexts per cold batch under the
+shared pending limit. Recipes fix a 50,000-state matching budget and replay
+the parent, leaf bank, price and full tensor check before admission. Supported
+contexts without pair savings are retained too. Input ranks above 512,
+factor widths above 1,024 bits or predicted outputs above 16,384 terms are
+outside this bounded family; skipping those contexts is not a verified
+tensor completion.
+
+`METAFLIP_COMPOSITION_MIXED=0` disables new mixed intake without abandoning
+already queued work. A changed bank identity is repriced when its parent is
+re-offered; old recipes remain reproducible. There is no full dependency
+rescan. Restart, stop, exact-gate rejection, shared-cap and deferred-only
+coordinator checks are in `spec/mixed_composition_queue_test.py`. See
+[Automatic mixed composition](tools/AUTOMATIC-MIXED-COMPOSITION-2026-09-09.md)
+for the integration audit and its 1,620 fully verified outputs across 153
+canonical shapes (zero new local bounds), and
+[Native mixed-axis pairs](tools/NATIVE-MIXED-PAIRS-2026-09-09.md)
+for the engine's independent 891-case comparison.
 Wide outputs are exact archived witnesses, not yet live wide-worker seeds.
 See the [native integration audit](tools/NATIVE-REFINEMENT-2026-09-08.md) for
 the first refinement milestone, and the

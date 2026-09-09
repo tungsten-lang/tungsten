@@ -23,6 +23,7 @@ use core/system
     @compose_submitted = 0
     @compose_completed = 0
     @compose_failures = 0
+    @compose_deferred = 0
     @compose_poll_ms = 0
     @compose_limit = ffrf_composition_limit()
     @budget_request = i64[2]
@@ -91,6 +92,13 @@ use core/system
 
   -> pending()
     @submitted - @completed
+
+  -> read_composition()
+    @compose_completed = ffbc_counter(@root + "/composition/consumed") + ffbc_counter(@root + "/composition/mixed/consumed")
+    @compose_submitted = ffbc_counter(@root + "/composition/submitted") + ffbc_counter(@root + "/composition/mixed/submitted")
+    @compose_failures = ffbc_counter(@root + "/composition/failures") + ffbc_counter(@root + "/composition/mixed/failures")
+    @compose_deferred = ffmd_deferred(@root)
+    1
 
   -> remember(n, m, p, rank)
     slot = @cache_cursor
@@ -172,9 +180,7 @@ use core/system
       @composing = 0
       @compose_poll_ms = 0
     if @runtime != "" && now_ms >= @compose_poll_ms
-      @compose_completed = ffbc_counter(@root + "/composition/consumed")
-      @compose_submitted = ffbc_counter(@root + "/composition/submitted")
-      @compose_failures = ffbc_counter(@root + "/composition/failures")
+      z = self.read_composition() ## i64
       request_ok = ffrf_budget_request(@root, @budget_request) ## i64
       @budget_blocked = 0
       if @compose_limit != 0 && request_ok == 1 && @budget_request[1] > 0 && @compose_submitted - @compose_completed + @budget_request[1] > @compose_limit
@@ -194,7 +200,7 @@ use core/system
       @thread = Thread.new ->
         system(command)
       @retry_at = now_ms + 100
-    elsif @thread == nil && @runtime != "" && @stopped == 0 && (@budget_blocked != 0 || @completed >= @submitted) && @compose_completed < @compose_submitted && now_ms >= @retry_at && !File.exists?(@root + "/composition/error")
+    elsif @thread == nil && @runtime != "" && @stopped == 0 && (@budget_blocked != 0 || @completed >= @submitted) && (@compose_completed < @compose_submitted || @compose_deferred != 0) && now_ms >= @retry_at && !File.exists?(@root + "/composition/error") && !File.exists?(@root + "/composition/mixed/error")
       @composing = 1
       command = "exec nice -n 10 " + ffls_shell_quote(@executable) + " --compose-batch " + ffls_shell_quote(@root) + " 4 > " + ffls_shell_quote(@root + "/worker.log") + " 2>&1"
       @thread = Thread.new ->
@@ -301,12 +307,12 @@ use core/system
     0
 
   -> status_fields()
-    " refine=" + @enabled.to_s() + " refine_submitted=" + @submitted.to_s() + " refine_completed=" + @completed.to_s() + " refine_pending=" + self.pending().to_s() + " refine_duplicates=" + @duplicates.to_s() + " refine_outputs=" + @outputs.to_s() + " refine_cross_shape=" + @cross_shape.to_s() + " refine_failures=" + @failures.to_s() + " refine_blocked=" + @budget_blocked.to_s() + " compose_limit=" + @compose_limit.to_s() + " compose_submitted=" + @compose_submitted.to_s() + " compose_completed=" + @compose_completed.to_s() + " compose_pending=" + (@compose_submitted - @compose_completed).to_s() + " compose_failures=" + @compose_failures.to_s()
+    " refine=" + @enabled.to_s() + " refine_submitted=" + @submitted.to_s() + " refine_completed=" + @completed.to_s() + " refine_pending=" + self.pending().to_s() + " refine_duplicates=" + @duplicates.to_s() + " refine_outputs=" + @outputs.to_s() + " refine_cross_shape=" + @cross_shape.to_s() + " refine_failures=" + @failures.to_s() + " refine_blocked=" + @budget_blocked.to_s() + " compose_limit=" + @compose_limit.to_s() + " compose_submitted=" + @compose_submitted.to_s() + " compose_completed=" + @compose_completed.to_s() + " compose_pending=" + (@compose_submitted - @compose_completed).to_s() + " compose_deferred=" + @compose_deferred.to_s() + " compose_failures=" + @compose_failures.to_s()
 
   -> status_row()
     if @enabled == 0
       return "refinement off; failures " + @failures.to_s()
-    "refine " + @completed.to_s() + "/" + @submitted.to_s() + "; compose " + @compose_completed.to_s() + "/" + @compose_submitted.to_s() + "; pending " + (self.pending() + @compose_submitted - @compose_completed).to_s() + "; blocked " + @budget_blocked.to_s() + "; failures " + (@failures + @compose_failures).to_s()
+    "refine " + @completed.to_s() + "/" + @submitted.to_s() + "; compose " + @compose_completed.to_s() + "/" + @compose_submitted.to_s() + "; pending " + (self.pending() + @compose_submitted - @compose_completed).to_s() + "; deferred " + @compose_deferred.to_s() + "; blocked " + @budget_blocked.to_s() + "; failures " + (@failures + @compose_failures).to_s()
 
   -> stop()
     @stopped = 1
@@ -319,7 +325,5 @@ use core/system
         return 0
       @thread = nil
     if @runtime != ""
-      @compose_completed = ffbc_counter(@root + "/composition/consumed")
-      @compose_submitted = ffbc_counter(@root + "/composition/submitted")
-      @compose_failures = ffbc_counter(@root + "/composition/failures")
+      z = self.read_composition()
     1

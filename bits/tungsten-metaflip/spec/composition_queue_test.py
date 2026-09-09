@@ -113,7 +113,8 @@ def audit(root):
 def check(binary, external=None):
     def run(*args, ok=True, fifo=False):
         p=subprocess.run([binary,*map(str,args)],timeout=60,capture_output=True,text=True,
-                         env=dict(os.environ,METAFLIP_COMPOSITION_FIFO='1' if fifo else '0'))
+                         env=dict(os.environ,METAFLIP_COMPOSITION_FIFO='1' if fifo else '0',
+                                  METAFLIP_COMPOSITION_MIXED='0'))
         assert (p.returncode==0)==ok, (args,p.returncode,p.stdout,p.stderr)
         return p
     run('--schedule-test')

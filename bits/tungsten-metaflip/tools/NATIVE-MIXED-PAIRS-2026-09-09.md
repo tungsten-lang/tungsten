@@ -1,8 +1,10 @@
 # Native mixed-axis pair engine
 
 This ports a useful part of offline algebraic composition into native
-Tungsten. It does not add a new record, replace the live flip kernel, or yet
-enable mixed-axis recipes in the automatic background queue.
+Tungsten. It does not add a new record or replace the live flip kernel.
+This document records the engine-only milestone. The subsequent
+[automatic queue integration](AUTOMATIC-MIXED-COMPOSITION-2026-09-09.md)
+is now default-on and retains the same bounded engine and exact gates.
 
 ## Implemented
 
@@ -110,15 +112,15 @@ Its report, parent/bank spool and full witnesses are retained outside the
 checkout at `/private/tmp/metaflip-native-mixed-20260909/`; no generated
 tensor corpus or imported parent was added to the repository.
 
-## Remaining automatic integration
+## Automatic integration boundary at this milestone
 
 Do not simply append these 27 contexts inside `ffbc_submit_parent`.
 `refinement_budget.w` reserves at most nine recipes per parent and recovers
 at most nine unacknowledged records. Expanding that family in place can
 overflow the default backlog or make a whole source reservation impossible.
 
-The next step is durable deferred parent/context admission, with bounded
-recipe expansion, explicit pending counters, restart-safe deduplication,
-and stop/backpressure tests. The current fixed-axis queue and CPU/GPU paths
-are unchanged by this engine milestone. Mixed outputs also remain wide
-archive witnesses, not live wide-worker seeds.
+The subsequent integration adds durable deferred parent/context admission,
+bounded recipe expansion, explicit pending counters, restart-safe
+deduplication and stop/backpressure tests, without enlarging the old
+fixed-axis reservation. The CPU/GPU flip kernels are unchanged. Mixed
+outputs remain wide archive witnesses, not live wide-worker seeds.

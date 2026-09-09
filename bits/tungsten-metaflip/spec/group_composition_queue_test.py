@@ -14,7 +14,7 @@ def check(binary):
     def run(*args, groups=True, ok=True):
         result = subprocess.run([binary,*map(str,args)], capture_output=True,text=True,timeout=60,
                                 env=dict(os.environ,METAFLIP_COMPOSITION_GROUPS='1' if groups else '0',
-                                         METAFLIP_COMPOSITION_FIFO='1'))
+                                         METAFLIP_COMPOSITION_FIFO='1',METAFLIP_COMPOSITION_MIXED='0'))
         assert (result.returncode == 0) == ok, (args,result.stdout,result.stderr)
         return result
 

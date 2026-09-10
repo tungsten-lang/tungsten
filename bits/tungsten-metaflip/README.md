@@ -204,6 +204,12 @@ There is still no recursive wide basis/projection search or live wide-mask
 flip worker. The native path now reproduces the earlier **19x27x28
 8,169 -> 8,129** cleanup within its limits; this is an integration regression,
 not another new bound. See the [wide-refinement audit](tools/NATIVE-WIDE-REFINEMENT-2026-09-10.md).
+Native wide neutral-basis and coordinate-projection primitives are also
+available in `composition/matrix_cleanup.w` and `composition/projection.w`.
+They retain rank ties, validate slab/width limits, and require a separate full
+tensor admission check. They are not yet scheduled recursively by the ordinary
+wide composition queue. The [bounded wide-transform study](tools/WIDE-BASIS-PROJECTION-2026-09-10.md)
+tests this next integration layer without silently increasing live-search work.
 `compose_submitted/completed/pending/failures` sum both lanes, separately from
 source refinement. `compose_deferred` counts mixed parent/context references
 not yet admitted as recipes; the TUI also shows this deferred work.

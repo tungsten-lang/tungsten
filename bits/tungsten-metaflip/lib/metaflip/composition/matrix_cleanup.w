@@ -47,7 +47,7 @@ use packed
 
 # Exact column-basis factorization. Scratch writes cannot affect source or
 # previously finished groups. -2 means budget stop, not a rank certificate.
--> ffwm_factor(data, scratch, stride, first, links, left, right, base, count, stats) (i64[] i64[] i64 i64 i64 i64 i64 i64 i64 i64[]) i64
+-> ffwm_factor(data, scratch, stride, first, links, left, right, base, count, neutral, reverse_columns, stats) (i64[] i64[] i64 i64 i64 i64 i64 i64 i64 i64 i64 i64[]) i64
   width = 32*stride ## i64
   slab = width*stride ## i64
   columns = base ## i64
@@ -93,13 +93,20 @@ use packed
       limb += 1
     i = scratch[links+i]
   basis_count = 0 ## i64
-  j = 0 ## i64
-  while j < width
+  column_index = 0 ## i64
+  while column_index < width
     if ffwm_charge(stats, 1) != 1
       return 0-2
-    while j < width && scratch[column_used+j] == 0
-      j += 1
-    if j >= width
+    j = column_index ## i64
+    if reverse_columns == 1
+      j = width-1-column_index
+    while column_index < width && scratch[column_used+j] == 0
+      column_index += 1
+      if column_index < width
+        j = column_index
+        if reverse_columns == 1
+          j = width-1-column_index
+    if column_index >= width
       break
     if ffwm_charge(stats, 2*stride) != 1
       return 0-2
@@ -128,7 +135,7 @@ use packed
         basis_count += 1
         # Matrix rank cannot exceed the number of summands. Once equality
         # is witnessed no remaining columns can make a strict reduction.
-        if basis_count == count
+        if basis_count == count && neutral == 0
           return count
         pivot = 0-1
       else
@@ -148,10 +155,10 @@ use packed
         scratch[right_basis+b*stride+j/32] = scratch[right_basis+b*stride+j/32] | (1 << (j%32))
         bits = bits & (bits-1)
       limb += 1
-    j += 1
+    column_index += 1
   basis_count
 
--> ffwm_axis(data, scratch, capacity, rank, stride, axis, stats) (i64[] i64[] i64 i64 i64 i64 i64[]) i64
+-> ffwm_axis(data, scratch, capacity, rank, stride, axis, neutral, reverse_columns, stats) (i64[] i64[] i64 i64 i64 i64 i64 i64 i64[]) i64
   heads = 3*capacity*stride ## i64
   tails = heads+capacity ## i64
   links = tails+capacity ## i64
@@ -210,7 +217,7 @@ use packed
     first = scratch[heads+group] ## i64
     second = scratch[links+first] ## i64
     factor = second >= 0 && stats[2] == 0 ## bool
-    if factor && scratch[links+second] < 0 && ffwm_equal(data, (3*first+left)*stride, (3*second+left)*stride, stride) == 0 && ffwm_equal(data, (3*first+right)*stride, (3*second+right)*stride, stride) == 0
+    if factor && neutral == 0 && scratch[links+second] < 0 && ffwm_equal(data, (3*first+left)*stride, (3*second+left)*stride, stride) == 0 && ffwm_equal(data, (3*first+right)*stride, (3*second+right)*stride, stride) == 0
       factor = false
     replacement = 0-1 ## i64
     count = 0 ## i64
@@ -219,8 +226,8 @@ use packed
       while i >= 0
         count += 1
         i = scratch[links+i]
-      reduced = ffwm_factor(data, scratch, stride, first, links, left, right, base, count, stats) ## i64
-      if reduced >= 0 && reduced < count
+      reduced = ffwm_factor(data, scratch, stride, first, links, left, right, base, count, neutral, reverse_columns, stats) ## i64
+      if reduced >= 0 && (reduced < count || neutral == 1)
         replacement = reduced
     if replacement >= 0
       b = 0 ## i64
@@ -233,7 +240,8 @@ use packed
           k += 1
         kept += 1
         b += 1
-      stats[4] += 1
+      if replacement < count
+        stats[4] += 1
       stats[5] += count-replacement
     else
       i = first
@@ -269,7 +277,24 @@ use packed
     before = rank
     axis = 0 ## i64
     while axis < 3 && rank > 0 && stats[2] == 0
-      rank = ffwm_axis(data, scratch, capacity, rank, stride, axis, stats)
+      rank = ffwm_axis(data, scratch, capacity, rank, stride, axis, 0, 0, stats)
       axis += 1
   rank = ffpk_canonicalize(data, words, rank, stride)
   rank
+
+# One bounded tensor-preserving basis proposal. Rank ties are intentional:
+# another axis or a later projection may reduce them. No archive admission
+# or implicit repetition; callers must still check the full output tensor.
+# Stats retain their reduce meaning: [4] counts strictly reduced groups only.
+-> ffwm_refactor(data, words, rank, n, m, p, scratch, scratch_words, axis, reverse_columns, budget, stats, stats_words) (i64[] i64 i64 i64 i64 i64 i64[] i64 i64 i64 i64 i64[] i64) i64
+  stride = ffpk_stride(n, m, p) ## i64
+  needed = ffwm_scratch_words(rank, stride) ## i64
+  if axis < 0 || axis > 2 || reverse_columns < 0 || reverse_columns > 1 || stats_words < 6 || needed == 0 || scratch_words < needed || budget < 0 || budget > 1000000000 || ffpk_valid(data, words, rank, n, m, p) != 1
+    return 0-1
+  i = 0 ## i64
+  while i < 6
+    stats[i] = 0
+    i += 1
+  stats[1] = budget
+  rank = ffwm_axis(data, scratch, rank, rank, stride, axis, 1, reverse_columns, stats)
+  ffpk_canonicalize(data, words, rank, stride)

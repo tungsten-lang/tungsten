@@ -1127,6 +1127,13 @@ recomposition verifies **23x23x27=8,228**. See the
 for padding-corrected counts and replay evidence. These stronger operations
 remain offline; no live-fleet throughput or world-record claim is made.
 
+The offline `checked_price_library.rb` now backtracks over price-compatible
+block/Kronecker alternatives when a component has no witness. Corrupt sources
+remain fatal. This recovered 16 previously failing constructions; subsequent
+wide matrix cleanup verified **19x27x28=8,129**, versus retained 8,169, still
+above the saved public comparison 7,983. See the
+[native-feedback and backtracking audit](tools/NATIVE-FEEDBACK-BACKTRACKING-2026-09-10.md).
+
 The coordinate projection scanner also offers `--pair-order 0,1,2
 --matrix-cleanup`: score **every** view after matrix factorization, rather
 than factor only the pair-ranked winner. It is opt-in, requires Ruby, and

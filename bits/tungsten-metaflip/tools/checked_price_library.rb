@@ -4,6 +4,15 @@ require_relative 'bud_products'
 
 class MetaflipCheckedPriceLibrary
   B = MetaflipBudProducts
+  # Only this failure permits trying another decomposition. Bad source pins,
+  # malformed inputs and tensor-identity failures must still abort admission.
+  class MissingConstruction < RuntimeError
+    attr_reader :shape, :rank
+    def initialize(shape, rank)
+      @shape, @rank = shape.dup.freeze, rank
+      super("price has no checked construction: #{shape.inspect}=#{rank}")
+    end
+  end
   attr_reader :used_sources
 
   def initialize(prices, sources, maximum: 32)
@@ -11,8 +20,11 @@ class MetaflipCheckedPriceLibrary
     raise 'invalid maximum' unless maximum.is_a?(Integer) && maximum.between?(2,32)
     @prices = prices.to_h { |shape,rank| [key(shape),rank] }
     raise 'invalid price' unless @prices.values.all? { |r| r.is_a?(Integer) && r.positive? }
-    @sources = sources.group_by { |row| key(row.fetch(:shape)) }
-    @schemes, @used_sources = {}, {}
+    @sources = sources.map do |row|
+      { shape:row.fetch(:shape).dup.freeze, rank:row.fetch(:rank),
+        path:row.fetch(:path).dup.freeze, sha256:row.fetch(:sha256).dup.freeze }.freeze
+    end.group_by { |row| key(row.fetch(:shape)) }
+    @schemes, @used_sources, @missing = {}, {}, {}
   end
 
   def key(shape)
@@ -27,8 +39,14 @@ class MetaflipCheckedPriceLibrary
 
   def scheme(shape)
     k=key(shape)
+    raise MissingConstruction.new(k,rank(k)) if @missing[k]
     @schemes[k] ||= construct(k)
     B.orient(@schemes.fetch(k),shape)
+  rescue MissingConstruction
+    # Prices and source membership are fixed for this library instance. All
+    # dependencies decrease volume, so failed subproblems can be memoized.
+    @missing[k]=true
+    raise
   end
 
   def construct(shape)
@@ -50,8 +68,13 @@ class MetaflipCheckedPriceLibrary
           left,right=shape.dup,shape.dup
           left[axis],right[axis]=cut,shape[axis]-cut
           next unless rank(left)+rank(right)==target
+          begin
+            l,r=scheme(left),scheme(right)
+          rescue MissingConstruction
+            next
+          end
           offset=[0,0,0];offset[axis]=cut
-          terms=B.embed_block(scheme(left),shape,[0,0,0])+B.embed_block(scheme(right),shape,offset)
+          terms=B.embed_block(l,shape,[0,0,0])+B.embed_block(r,shape,offset)
           result=B::Scheme.new(shape,B.text(terms));break
         end
       end
@@ -61,11 +84,17 @@ class MetaflipCheckedPriceLibrary
           next if left==[1,1,1] || left==shape
           right=shape.zip(left).map { |a,b| a/b }
           next unless rank(left)*rank(right)==target
-          result=B.tensor_product(scheme(left),scheme(right));break
+          begin
+            l,r=scheme(left),scheme(right)
+          rescue MissingConstruction
+            next
+          end
+          result=B.tensor_product(l,r);break
         end
       end
     end
-    raise "price has no checked construction: #{shape.inspect}=#{target}" unless result && result.rank==target
+    raise MissingConstruction.new(shape,target) unless result
+    raise 'constructed price mismatch' unless result.rank==target
     result
   end
 

@@ -99,12 +99,14 @@ input. Its comparison table already includes r8109, so rediscovering that
 witness cannot be counted as another gain.
 
 The bounded run completes 5,215 contexts and stops with 122 materialized
-contexts pending. It does not exhaust the projection family. Its numerical
-screen reports no additional retained bound. The full independent corpus replay
-is still in progress at this integration commit; do not treat that screen as
-a completed independent audit. Its checkpoint is
-`/private/tmp/metaflip-wide-auto-study-20260910/report.json`; a successful full
-replay will add `audit.json`. The run used the initial
+contexts pending. It does not exhaust the projection family. The completed
+independent replay checks all 5,215 contexts: 306 basis contexts, 4,909
+projections, 190 changed rank ties and 4,975 distinct full tensors. It also
+checks all 58 best-shape rows. No context is verification-limited and no
+additional retained bound improves. Ticket 1,441, mode 14, automatically
+reproduces the exact prior r8109 object. This is a regression, not a new gain.
+The report and completed `audit.json` are in
+`/private/tmp/metaflip-wide-auto-study-20260910`. The run used the initial
 batch loop; the subsequent batching-only control checks byte-identical tasks
 and results across the fixed loop on a matched 64-context workload.
 
@@ -116,6 +118,19 @@ tensors. The separate final public-fleet tests independently expand 170
 distinct tensors across 51 shapes; none beats the current retained table.
 Reports are in `/private/tmp/metaflip-wide-batching-study-20260910/report.json`
 and `/private/tmp/metaflip-wide-transform-public-final-20260910/bound-audit.json`.
+
+The independent projection oracle now contracts row-sized integer blocks and
+caches repeated factor words instead of scanning the entire bit grid. It
+agrees with the retained grid oracle on 461 dense/sparse/duplicate/edge fixtures
+and twelve production projections. On those twelve projections alone, one
+matched observation changes 0.301s to 0.0162s; this is a checker improvement,
+not a CPU/GPU flip-throughput measurement. Native transformation/admission
+code is unchanged by the oracle optimization. The focused 169-context and
+public four-context regressions pass again.
+
+The [mixed-direction follow-up](MIXED-DIRECTION-SEARCH-2026-09-10.md) retains
+the completed automatic audit and bulk objects in its external evidence
+package. Its extra experimental modes are not added to the default queue.
 
 No fresh public-record audit, new record claim, canonical seed promotion or GPU
 campaign is included. Bulk tensor objects and binaries remain outside the

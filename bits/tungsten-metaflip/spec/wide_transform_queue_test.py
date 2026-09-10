@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Full tensor, paged dedup/recovery and finite automatic wide-family gates."""
 from hashlib import sha256
+from collections import Counter
 from functools import lru_cache
 from itertools import permutations
 from pathlib import Path
@@ -8,6 +9,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import random
 
 from composition_queue_test import read_record
 from wide_matrix_cleanup_parity_test import blob, read_blob
@@ -18,6 +20,50 @@ from verify_coordinate_projections import project_grid
 
 def count(path):
     return int(path.read_text()) if path.exists() else 0
+
+
+def project_coordinate(shape, terms, axis, removed):
+    """Independent row-block contraction, unlike the native per-bit mapper."""
+    assert axis in range(3) and shape[axis]>1 and 0<=removed<shape[axis]
+    result=Counter(); maps=[{} for _ in range(3)]
+    for term in terms:
+        row=[]
+        for k,(a,b) in enumerate(((0,1),(1,2),(0,2))):
+            word=term[k]
+            if word not in maps[k]:
+                if axis==a:
+                    below=removed*shape[b]
+                    value=(word&((1<<below)-1))|((word>>((removed+1)*shape[b]))<<below)
+                elif axis==b:
+                    value=0; width=shape[b]; low=(1<<removed)-1
+                    for r in range(shape[a]):
+                        chunk=(word>>(r*width))&((1<<width)-1)
+                        contracted=(chunk&low)|((chunk>>(removed+1))<<removed)
+                        value|=contracted<<(r*(width-1))
+                else:
+                    value=word
+                maps[k][word]=value
+            row.append(maps[k][word])
+        if all(row): result[tuple(row)]^=1
+    return sorted(t for t,odd in result.items() if odd)
+
+
+def projection_oracle_tests():
+    rng=random.Random(20260910); checked=0
+    shapes=[(2,3,4),(1,1,65),(2,1,512),(32,32,1),(7,7,7)]
+    shapes += [tuple(rng.randrange(1,33) for _ in range(3)) for _ in range(50)]
+    for shape in shapes:
+        widths=(shape[0]*shape[1],shape[1]*shape[2],shape[0]*shape[2])
+        terms=[tuple(rng.getrandbits(w) or 1 for w in widths) for _ in range(12)]
+        # Include duplicates, sparse edge bits and zero-producing restrictions.
+        terms+=terms[:3]+[(1,1,1),tuple(1<<(w-1) for w in widths)]
+        for axis,size in enumerate(shape):
+            if size<2: continue
+            for removed in sorted({0,size//2,size-1}):
+                coords=[list(range(n)) for n in shape]; coords[axis].remove(removed)
+                assert project_coordinate(shape,terms,axis,removed)==sorted(project_grid(shape,terms,coords))
+                checked+=1
+    return checked
 
 
 def audit(root, progress=None):
@@ -60,7 +106,7 @@ def audit(root, progress=None):
                 index-=size
             assert coordinate is not None
             axis,index=coordinate; coords=[list(range(d)) for d in shape]; coords[axis].remove(index)
-            expected=project_grid(shape,terms,coords); dims=tuple(map(len,coords))
+            expected=project_coordinate(shape,terms,axis,index); dims=tuple(map(len,coords))
         assert (n,m,p)==dims
         expected,_=compress_shared(expected,max_bits=width)
         if status==3:
@@ -80,6 +126,7 @@ def audit(root, progress=None):
 
 def check(binary, retained=None, public=None):
     binary=str(Path(binary).resolve())
+    print('PASS row-block projection oracle:',projection_oracle_tests(),'dense/sparse grid comparisons')
     with tempfile.TemporaryDirectory(prefix='metaflip-wide-queue-') as temp:
         root=Path(temp) if retained is None else Path(retained)
         if retained is not None: assert not root.exists(); root.mkdir()

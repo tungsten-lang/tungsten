@@ -24,6 +24,8 @@ use core/system
     @compose_completed = 0
     @compose_failures = 0
     @compose_deferred = 0
+    @wide_status = 0
+    @wide_saved = 0
     @compose_poll_ms = 0
     @compose_limit = ffrf_composition_limit()
     @budget_request = i64[2]
@@ -98,6 +100,15 @@ use core/system
     @compose_submitted = ffbc_counter(@root + "/composition/submitted") + ffbc_counter(@root + "/composition/mixed/submitted")
     @compose_failures = ffbc_counter(@root + "/composition/failures") + ffbc_counter(@root + "/composition/mixed/failures")
     @compose_deferred = ffmd_deferred(@root)
+    last_wide = File.read_prefix(@root + "/composition/cleanup/last", 32)
+    if last_wide != nil
+      fields = last_wide.strip().split(" ")
+      if fields.size() == 2
+        status = ffpk_decimal(fields[0]) ## i64
+        saved = ffpk_decimal(fields[1]) ## i64
+        if status >= 1 && status <= 3 && saved >= 0 && saved <= 16384
+          @wide_status = status
+          @wide_saved = saved
     1
 
   -> remember(n, m, p, rank)
@@ -307,12 +318,19 @@ use core/system
     0
 
   -> status_fields()
-    " refine=" + @enabled.to_s() + " refine_submitted=" + @submitted.to_s() + " refine_completed=" + @completed.to_s() + " refine_pending=" + self.pending().to_s() + " refine_duplicates=" + @duplicates.to_s() + " refine_outputs=" + @outputs.to_s() + " refine_cross_shape=" + @cross_shape.to_s() + " refine_failures=" + @failures.to_s() + " refine_blocked=" + @budget_blocked.to_s() + " compose_limit=" + @compose_limit.to_s() + " compose_submitted=" + @compose_submitted.to_s() + " compose_completed=" + @compose_completed.to_s() + " compose_pending=" + (@compose_submitted - @compose_completed).to_s() + " compose_deferred=" + @compose_deferred.to_s() + " compose_failures=" + @compose_failures.to_s()
+    " refine=" + @enabled.to_s() + " refine_submitted=" + @submitted.to_s() + " refine_completed=" + @completed.to_s() + " refine_pending=" + self.pending().to_s() + " refine_duplicates=" + @duplicates.to_s() + " refine_outputs=" + @outputs.to_s() + " refine_cross_shape=" + @cross_shape.to_s() + " refine_failures=" + @failures.to_s() + " refine_blocked=" + @budget_blocked.to_s() + " compose_limit=" + @compose_limit.to_s() + " compose_submitted=" + @compose_submitted.to_s() + " compose_completed=" + @compose_completed.to_s() + " compose_pending=" + (@compose_submitted - @compose_completed).to_s() + " compose_deferred=" + @compose_deferred.to_s() + " compose_failures=" + @compose_failures.to_s() + " compose_wide_status=" + @wide_status.to_s() + " compose_wide_saved=" + @wide_saved.to_s()
 
   -> status_row()
     if @enabled == 0
       return "refinement off; failures " + @failures.to_s()
-    "refine " + @completed.to_s() + "/" + @submitted.to_s() + "; compose " + @compose_completed.to_s() + "/" + @compose_submitted.to_s() + "; pending " + (self.pending() + @compose_submitted - @compose_completed).to_s() + "; deferred " + @compose_deferred.to_s() + "; blocked " + @budget_blocked.to_s() + "; failures " + (@failures + @compose_failures).to_s()
+    wide = "idle"
+    if @wide_status == 1
+      wide = "fixed"
+    elsif @wide_status == 2
+      wide = "work-limited"
+    elsif @wide_status == 3
+      wide = "verify-limited"
+    "refine " + @completed.to_s() + "/" + @submitted.to_s() + "; compose " + @compose_completed.to_s() + "/" + @compose_submitted.to_s() + "; pending " + (self.pending() + @compose_submitted - @compose_completed).to_s() + "; deferred " + @compose_deferred.to_s() + "; blocked " + @budget_blocked.to_s() + "; wide " + wide + "/-" + @wide_saved.to_s() + "; failures " + (@failures + @compose_failures).to_s()
 
   -> stop()
     @stopped = 1

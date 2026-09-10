@@ -190,6 +190,20 @@ The digest checks serialization, not the tensor identity. Packed
 32-bit limbs support factors through 1,024 bits (16,384 terms), beyond the
 live walker's 63-bit limit. At most two expansions run after a refinement
 input, and four per idle batch, in the same single low-priority native child.
+Each distinct verified composition now also receives **native multiword
+matrix cleanup**. It uses sparse scratch initialization and full-limb hashing,
+with a 20-million-unit algebra limit. The original object and recipe result
+stay unchanged; any strictly smaller output passes another complete tensor
+check before entering the shared best/by-shape index. Cached reduced objects
+are also fully checked. `composition/cleanup/results/` binds source/result
+identities and work status; `compose_wide_status` is 0=idle, 1=fixed point,
+2=work-limited, 3=verification-limited, and `compose_wide_saved` is the latest
+attempt's admitted saving (not a cumulative total). Limited attempts are not
+reported as fixed points or automatically retried with an unlimited budget.
+There is still no recursive wide basis/projection search or live wide-mask
+flip worker. The native path now reproduces the earlier **19x27x28
+8,169 -> 8,129** cleanup within its limits; this is an integration regression,
+not another new bound. See the [wide-refinement audit](tools/NATIVE-WIDE-REFINEMENT-2026-09-10.md).
 `compose_submitted/completed/pending/failures` sum both lanes, separately from
 source refinement. `compose_deferred` counts mixed parent/context references
 not yet admitted as recipes; the TUI also shows this deferred work.

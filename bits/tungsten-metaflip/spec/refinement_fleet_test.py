@@ -13,6 +13,7 @@ from verify_representation_portfolio import parse_terms
 from composition_queue_test import audit as audit_composition
 from composition_queue_test import value
 from mixed_composition_queue_test import mixed_audit, deferred
+from wide_composition_refinement_test import audit as audit_wide
 
 
 def run(binary, root, tensor, enabled, seconds=2, require_outputs=True):
@@ -79,11 +80,19 @@ def run(binary, root, tensor, enabled, seconds=2, require_outputs=True):
                        for line in processes.splitlines()), processes
         composed = audit_composition(spool)
         mixed = mixed_audit(spool)
+        assert int(fields['compose_wide_status']) in (0,1,2,3)
+        assert 0 <= int(fields['compose_wide_saved']) <= 16384
+        wide = dict(records=0, improved=0, limited=0)
+        if (spool/'composition/cleanup/results').exists():
+            wide = audit_wide(spool)
+            last = list(map(int, (spool/'composition/cleanup/last').read_text().split()))
+            assert last == [int(fields['compose_wide_status']), int(fields['compose_wide_saved'])]
         print(f'PASS fleet {tensor}: {objects} full tensors; '
               f'{fields["refine_seed_uses"]} seed uses; '
               f'{fields["refine_completed"]}/{fields["refine_submitted"]} jobs; '
               f'{fields["compose_completed"]}/{fields["compose_submitted"]} compositions; '
-              f'{len(mixed)} mixed outputs, {fields["compose_deferred"]} deferred contexts; stopped')
+              f'{len(mixed)} mixed outputs, {fields["compose_deferred"]} deferred contexts; '
+              f'{wide} wide cleanup; stopped')
     else:
         assert not spool.exists()
         assert int(fields['refine_submitted']) == int(fields['refine_outputs']) == 0
@@ -91,18 +100,27 @@ def run(binary, root, tensor, enabled, seconds=2, require_outputs=True):
     return fields
 
 
-def check(binary):
-    with tempfile.TemporaryDirectory(prefix='metaflip-refinement-fleet-') as directory:
-        root = Path(directory)
-        square = run(binary, root/'square', '5x5', 1)
-        assert int(square['refine_seed_uses']) > 0, square
-        assert int(square['compose_completed']) > 0, square
-        first = run(binary, root/'rect', '2x5x6', 1)
-        resumed = run(binary, root/'rect', '2x5x6', 1, seconds=1, require_outputs=False)
-        assert int(resumed['refine_completed']) >= int(first['refine_completed'])
-        assert int(resumed['refine_duplicates']) > 0
-        run(binary, root/'disabled', '2x5x6', 0, seconds=1)
+def check_at(binary, root):
+    square = run(binary, root/'square', '5x5', 1)
+    assert int(square['refine_seed_uses']) > 0, square
+    assert int(square['compose_completed']) > 0, square
+    first = run(binary, root/'rect', '2x5x6', 1)
+    resumed = run(binary, root/'rect', '2x5x6', 1, seconds=1, require_outputs=False)
+    assert int(resumed['refine_completed']) >= int(first['refine_completed'])
+    assert int(resumed['refine_duplicates']) > 0
+    run(binary, root/'disabled', '2x5x6', 0, seconds=1)
+
+
+def check(binary, retained=None):
+    if retained is not None:
+        root = Path(retained)
+        assert not root.exists()
+        root.mkdir(parents=True)
+        check_at(binary, root)
+    else:
+        with tempfile.TemporaryDirectory(prefix='metaflip-refinement-fleet-') as directory:
+            check_at(binary, Path(directory))
 
 
 if __name__ == '__main__':
-    check(Path(sys.argv[1]).resolve())
+    check(Path(sys.argv[1]).resolve(), sys.argv[2] if len(sys.argv)>2 else None)

@@ -80,6 +80,31 @@ if ARGV.size() == 5 && ARGV[0] == "--refine-batch"
   exit(ffrf_batch_with_composition(ARGV[1], ffw_parse_decimal_i64(ARGV[2]), ffw_parse_decimal_i64(ARGV[3]), ARGV[4]))
 if ARGV.size() == 3 && ARGV[0] == "--compose-batch"
   exit(ffbc_drain(ARGV[1], ffw_parse_decimal_i64(ARGV[2])))
+if ARGV.size() == 3 && ARGV[0] == "--finish-wide"
+  root = ARGV[1]
+  queue = root + "/composition/"
+  names = ["objects", "results", "results-pages", "best", "by-shape"]
+  i = 0 ## i64
+  while i < names.size()
+    if !File.mkdir_p(queue + names[i])
+      exit(2)
+    i += 1
+  raw = File.read_prefix(ARGV[2], 12632129)
+  if raw == nil
+    exit(2)
+  out = i64[3*32*16384]
+  scratch = i64[32768]
+  meta = i64[4]
+  rank = ffpk_parse(raw, out, 3*32*16384, meta, 4) ## i64
+  if rank < 1
+    exit(2)
+  # Exercise the actual post-construction gate without needing a catalog
+  # composition that happens to contain this synthetic reducible matrix.
+  result = ffbc_finish_task(root, queue, 1, 1, "MFW_TEST1\n", rank, rank, meta[0], meta[1], meta[2], out, scratch) ## i64
+  if result != 1
+    << "WIDE_FINISH_REJECTED " + result.to_s()
+    exit(1)
+  exit(0)
 if ARGV.size() == 7 && ARGV[0] == "--compose"
   cap = 4096 ## i64
   parent = i64[3*cap]

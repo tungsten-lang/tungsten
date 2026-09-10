@@ -8,6 +8,7 @@ use leaf_walk
 use schedule
 use group_bank
 use deferred
+use refinement
 
 -> ffbc_failure(queue, ticket, ordinal, code) (String i64 i64 i64) i64
   failures = ffbc_counter(queue + "failures") + 1 ## i64
@@ -333,6 +334,9 @@ use deferred
       best_rank = ffw_parse_decimal_i64(values[0])
   if rank < best_rank && ffrf_atomic(archive + "best/" + shape, rank.to_s() + " " + identity + "\n", "composition") != 1
     return 0
+  refined = ffwc_refine(root, identity, rank, n, m, p, out, scratch) ## i64
+  if refined != 1
+    return refined
   suffix = task_id + " " + identity + " " + shape + " " + rank.to_s() + "\n"
   result = "MFC_RESULT2 " + sequence.to_s() + " " + suffix
   # Old completion records are retained byte-for-byte, after full replay.

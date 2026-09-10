@@ -71,7 +71,9 @@
 
 # Full coefficient check, including off-support entries, one U-fiber at a
 # time. Scratch is bc*ceil(ac/32), not the entire six-index tensor. A positive
-# operation budget yields -1 on exhaustion, NEVER a verified result.
+# XOR-work budget counts nonzero W limbs and yields -1 on exhaustion, NEVER
+# a verified result. Zero-limb XORs are omitted, not unchecked coefficients:
+# every fiber entry, including off-support zeros, is still compared below.
 -> ffpk_exact(data, words, rank, n, m, p, scratch, scratch_words, budget) (i64[] i64 i64 i64 i64 i64 i64[] i64 i64) i64
   if ffpk_valid(data, words, rank, n, m, p) != 1
     return 0
@@ -91,18 +93,25 @@
     t = 0 ## i64
     while t < rank
       if ((data[3*t*stride+a/32] >> (a%32)) & 1) != 0
+        wmask = 0 ## i64
+        k = 0 ## i64
+        while k < wlimbs
+          if data[(3*t+2)*stride+k] != 0
+            wmask = wmask | (1 << k)
+          k += 1
         vb = 0 ## i64
         while vb < vlimbs
           value = data[(3*t+1)*stride+vb] ## i64
           while value != 0
             b = 32*vb+ffpk_ctz(value) ## i64
-            used += wlimbs
-            if budget > 0 && used > budget
-              return 0-1
-            k = 0 ## i64
-            while k < wlimbs
+            active = wmask ## i64
+            while active != 0
+              used += 1
+              if budget > 0 && used > budget
+                return 0-1
+              k = ffpk_ctz(active)
               scratch[b*wlimbs+k] = scratch[b*wlimbs+k] ^ data[(3*t+2)*stride+k]
-              k += 1
+              active = active & (active-1)
             value = value & (value-1)
           vb += 1
       t += 1
@@ -220,3 +229,82 @@
       axis += 1
     t += 1
   text.to_s()
+
+-> ffpk_decimal(value) (String) i64
+  if value.size() < 1 || value.size() > 10 || (value.size() > 1 && value.byte_at(0) == 48)
+    return 0-1
+  out = 0 ## i64
+  i = 0 ## i64
+  while i < value.size()
+    digit = value.byte_at(i)-48 ## i64
+    if digit < 0 || digit > 9
+      return 0-1
+    out = out*10+digit
+    i += 1
+  out
+
+# Strict canonical MFW1 reader, for checked cold-path artifacts. A successful
+# parse validates limbs/order, NOT the tensor identity. Failure may clobber
+# the scratch destination, so callers must never admit it without both gates.
+-> ffpk_parse(raw, data, words, meta, meta_words) (String i64[] i64 i64[] i64) i64
+  if raw.size() < 16 || raw.size() > 12632128 || meta_words < 4
+    return 0-1
+  end_header = 0 ## i64
+  while end_header < raw.size() && end_header < 64 && raw.byte_at(end_header) != 10
+    end_header += 1
+  if end_header >= 64 || end_header >= raw.size()
+    return 0-1
+  header = raw.slice(0, end_header).split(" ")
+  if header.size() != 5 || header[0] != "MFW1"
+    return 0-1
+  n = ffpk_decimal(header[1]) ## i64
+  m = ffpk_decimal(header[2]) ## i64
+  p = ffpk_decimal(header[3]) ## i64
+  rank = ffpk_decimal(header[4]) ## i64
+  stride = ffpk_stride(n, m, p) ## i64
+  if stride == 0 || rank < 1 || rank > 16384 || words < 3*stride*rank
+    return 0-1
+  if raw.slice(0, end_header) != "MFW1 " + n.to_s() + " " + m.to_s() + " " + p.to_s() + " " + rank.to_s()
+    return 0-1
+  i = 0 ## i64
+  while i < 3*stride*rank
+    data[i] = 0
+    i += 1
+  cursor = end_header+1 ## i64
+  t = 0 ## i64
+  while t < rank
+    axis = 0 ## i64
+    while axis < 3
+      first = cursor ## i64
+      separator = 32 ## i64
+      if axis == 2
+        separator = 10
+      while cursor < raw.size() && raw.byte_at(cursor) != separator && cursor-first <= 8*stride
+        cursor += 1
+      length = cursor-first ## i64
+      if cursor >= raw.size() || length < 1 || length > 8*stride || raw.byte_at(first) == 48
+        return 0-1
+      i = 0
+      while i < length
+        byte = raw.byte_at(first+i) ## i64
+        digit = byte-48 ## i64
+        if byte >= 97 && byte <= 102
+          digit = byte-87
+        elsif byte < 48 || byte > 57
+          return 0-1
+        nibble = length-1-i ## i64
+        index = (3*t+axis)*stride+nibble/8 ## i64
+        data[index] = data[index] | (digit << (4*(nibble%8)))
+        i += 1
+      cursor += 1
+      axis += 1
+    if t > 0 && ffpk_compare(data, t-1, t, stride) >= 0
+      return 0-1
+    t += 1
+  if cursor != raw.size() || ffpk_valid(data, words, rank, n, m, p) != 1
+    return 0-1
+  meta[0] = n
+  meta[1] = m
+  meta[2] = p
+  meta[3] = rank
+  rank

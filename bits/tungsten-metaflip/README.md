@@ -200,20 +200,48 @@ identities and work status; `compose_wide_status` is 0=idle, 1=fixed point,
 2=work-limited, 3=verification-limited, and `compose_wide_saved` is the latest
 attempt's admitted saving (not a cumulative total). Limited attempts are not
 reported as fixed points or automatically retried with an unlimited budget.
-There is still no recursive wide basis/projection search or live wide-mask
-flip worker. The native path now reproduces the earlier **19x27x28
+The native path reproduces the earlier **19x27x28
 8,169 -> 8,129** cleanup within its limits; this is an integration regression,
 not another new bound. See the [wide-refinement audit](tools/NATIVE-WIDE-REFINEMENT-2026-09-10.md).
-Native wide neutral-basis and coordinate-projection primitives are also
-available in `composition/matrix_cleanup.w` and `composition/projection.w`.
-They retain rank ties, validate slab/width limits, and require a separate full
-tensor admission check. They are not yet scheduled recursively by the ordinary
-wide composition queue. The [bounded wide-transform study](tools/WIDE-BASIS-PROJECTION-2026-09-10.md)
-tests this next integration layer without silently increasing live-search work.
-`compose_submitted/completed/pending/failures` sum both lanes, separately from
+Verified cleanup outputs now also enter an **automatic wide-transform lane**.
+It runs 18 bounded neutral-basis contexts (both column orders, single axes or
+two cycles of each axis permutation), followed by strict matrix cleanup.
+Every source and distinct admitted basis endpoint gets its coordinate-deletion
+family, including same-rank representations. Every output passes a complete
+tensor check before indexing; neither a saved hash nor a claimed rank suffices.
+The native operators and scheduler have no Python/Ruby runtime dependency.
+The [wide-transform study](tools/WIDE-BASIS-PROJECTION-2026-09-10.md) supplies
+the retained 8,109 regression; the
+[automatic integration audit](tools/AUTOMATIC-WIDE-TRANSFORMS-2026-09-10.md)
+documents scheduling, replay and the public-binary tests.
+
+This is one finite projection generation, not unrestricted recursive search:
+projected outputs do not automatically start another basis/projection family
+or another composition expansion, and wide witnesses are not live u64 seeds.
+One context runs per scheduler turn; its successors go behind existing work.
+Normally wide work receives one in three turns. At 256 pending wide contexts,
+composition expansion pauses until this lane drains below that high-water mark.
+Existing continuations can temporarily increase the pending count, so 256 is
+not a hard queue limit or a disk-byte quota. A basis context makes at most six
+20-million-unit axis passes plus one similarly bounded cleanup; output
+verification has a separate 20-million-XOR limit. These are work limits, not
+wall-clock deadlines. The same single low-priority native child runs all lanes.
+
+`composition/transforms/` stores paged task/result journals and paged
+source/context indexes. Appends and consumed-cursor interruptions are replayed
+idempotently through full tensor gates. `wide_transform_*` exposes submitted,
+completed, pending, failures, status and latest term-count delta; pending counts
+materialized contexts, not all future continuations. Status is 0=idle,
+1=context completed, 2=algebra-limited, 3=verification-limited. Limited output
+is not labeled a fixed point, and verification-limited output is not admitted.
+A projection's delta compares different shapes, not a best-known-rank gain.
+`METAFLIP_WIDE_TRANSFORMS=0` disables new intake and pauses existing wide work
+without deleting it. Corrupt tasks remain pending with a visible error.
+
+`compose_submitted/completed/pending/failures` sum the two primary lanes, separately from
 source refinement. `compose_deferred` counts mixed parent/context references
 not yet admitted as recipes; the TUI also shows this deferred work.
-The lanes alternate while both have work. Each uses a bounded 128-ticket
+The primary lanes alternate on their turns while both have work. Each uses a bounded 128-ticket
 priority window. It favors a smaller
 predicted rank relative to the current verified per-shape best (or the naive
 rank when absent), with cheaper-rank/older-ticket tie breaks. Every fourth
@@ -240,8 +268,9 @@ refinement. Mixed admission yields freed capacity to a blocked source job.
 the TUI also shows `blocked`. It is not counted as a failure or a completion.
 The setting is fixed at startup; invalid values use the default. Existing
 over-limit queues drain without deleting evidence. The limit applies to
-materialized pending recipes across both lanes, not offline tools or manually
-edited spools. There is still no disk-byte quota: unprocessed originals,
+materialized pending recipes across both primary lanes, not the separately
+throttled transform lane, offline tools or manually edited spools. There is
+still no disk-byte quota: unprocessed originals,
 deferred parent references and completed tensor artifacts remain retained.
 A composition error can also hold up new expansion.
 

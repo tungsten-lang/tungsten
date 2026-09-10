@@ -9,6 +9,7 @@ use schedule
 use group_bank
 use deferred
 use refinement
+use transform_queue
 
 -> ffbc_failure(queue, ticket, ordinal, code) (String i64 i64 i64) i64
   failures = ffbc_counter(queue + "failures") + 1 ## i64
@@ -337,6 +338,9 @@ use refinement
   refined = ffwc_refine(root, identity, rank, n, m, p, out, scratch) ## i64
   if refined != 1
     return refined
+  offered = ffxt_intake(root, identity, n, m, p) ## i64
+  if offered != 1
+    return offered
   suffix = task_id + " " + identity + " " + shape + " " + rank.to_s() + "\n"
   result = "MFC_RESULT2 " + sequence.to_s() + " " + suffix
   # Old completion records are retained byte-for-byte, after full replay.
@@ -400,8 +404,8 @@ use refinement
   << "METAFLIP_COMPOSE_COMPLETED done=" + consumed.to_s() + " pending=" + (submitted-consumed).to_s()
   0
 
-# Alternate lanes whenever both have work. Admission is bounded separately
-# from the at-most-four exact expansions, and never changes old-lane tickets.
+# Wide work normally gets one in three turns; above its high-water mark it
+# drains before creating more roots. Fixed/mixed alternation is unchanged.
 -> ffbc_drain(root, limit) (String i64) i64
   if limit < 1 || limit > 4
     return 2
@@ -409,6 +413,7 @@ use refinement
     return 0
   queue = root + "/composition/"
   mixed = queue + "mixed/"
+  transforms = queue + "transforms/"
   if ffmd_admit(root, 27) != 1
     return ffbc_failure(mixed, 0, ffmd_count(mixed + "context"), 0-6)
   done = 0 ## i64
@@ -417,7 +422,15 @@ use refinement
     mixed_done = ffbc_counter(mixed + "consumed") ## i64
     old_pending = ffbc_counter(queue + "submitted")-old_done ## i64
     mixed_pending = ffbc_counter(mixed + "submitted")-mixed_done ## i64
-    if old_pending <= 0 && mixed_pending <= 0
+    transform_done = ffbc_counter(transforms + "consumed") ## i64
+    transform_pending = ffbc_counter(transforms + "submitted")-transform_done ## i64
+    if env("METAFLIP_WIDE_TRANSFORMS") == "0" || File.exists?(transforms + "error")
+      transform_pending = 0
+    if ffxt_turn(transform_pending, old_pending+mixed_pending, old_done+mixed_done+transform_done) == 1
+      result = ffxt_drain(root, 1) ## i64
+      if result != 0
+        return result
+    elsif old_pending <= 0 && mixed_pending <= 0
       if done == 0
         result = ffbc_drain_queue(root, queue, 1) ## i64
         if result != 0
@@ -425,11 +438,13 @@ use refinement
         if File.exists?(mixed + "submitted")
           return ffbc_drain_queue(root, mixed, 1)
       return 0
-    selected = queue
-    if old_pending <= 0 || (mixed_pending > 0 && (old_done+mixed_done)%2 == 1)
-      selected = mixed
-    result = ffbc_drain_queue(root, selected, 1) ## i64
-    if result != 0
-      return result
+    else
+      selected = queue
+      if old_pending <= 0 || (mixed_pending > 0 && (old_done+mixed_done)%2 == 1)
+        selected = mixed
+      result = ffbc_drain_queue(root, selected, 1) ## i64
+      if result != 0
+        return result
+    # One shared increment also covers wide-only public batches.
     done += 1
   0

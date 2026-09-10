@@ -26,6 +26,14 @@ use core/system
     @compose_deferred = 0
     @wide_status = 0
     @wide_saved = 0
+    @transform_submitted = 0
+    @transform_completed = 0
+    @transform_failures = 0
+    @transform_status = 0
+    @transform_delta = 0
+    @transform_enabled = 1
+    if env("METAFLIP_WIDE_TRANSFORMS") == "0"
+      @transform_enabled = 0
     @compose_poll_ms = 0
     @compose_limit = ffrf_composition_limit()
     @budget_request = i64[2]
@@ -100,6 +108,18 @@ use core/system
     @compose_submitted = ffbc_counter(@root + "/composition/submitted") + ffbc_counter(@root + "/composition/mixed/submitted")
     @compose_failures = ffbc_counter(@root + "/composition/failures") + ffbc_counter(@root + "/composition/mixed/failures")
     @compose_deferred = ffmd_deferred(@root)
+    @transform_submitted = ffbc_counter(@root + "/composition/transforms/submitted")
+    @transform_completed = ffbc_counter(@root + "/composition/transforms/consumed")
+    @transform_failures = ffbc_counter(@root + "/composition/transforms/failures")
+    last_transform = File.read_prefix(@root + "/composition/transforms/last", 32)
+    if last_transform != nil
+      parts = last_transform.strip().split(" ")
+      if parts.size() == 2
+        status = ffpk_decimal(parts[0]) ## i64
+        delta = ffpk_decimal(parts[1]) ## i64
+        if status >= 1 && status <= 3 && delta >= 0 && delta <= 16384
+          @transform_status = status
+          @transform_delta = delta
     last_wide = File.read_prefix(@root + "/composition/cleanup/last", 32)
     if last_wide != nil
       fields = last_wide.strip().split(" ")
@@ -211,7 +231,7 @@ use core/system
       @thread = Thread.new ->
         system(command)
       @retry_at = now_ms + 100
-    elsif @thread == nil && @runtime != "" && @stopped == 0 && (@budget_blocked != 0 || @completed >= @submitted) && (@compose_completed < @compose_submitted || @compose_deferred != 0) && now_ms >= @retry_at && !File.exists?(@root + "/composition/error") && !File.exists?(@root + "/composition/mixed/error")
+    elsif @thread == nil && @runtime != "" && @stopped == 0 && (@budget_blocked != 0 || @completed >= @submitted) && (@compose_completed < @compose_submitted || @compose_deferred != 0 || (@transform_enabled != 0 && @transform_completed < @transform_submitted && !File.exists?(@root + "/composition/transforms/error"))) && now_ms >= @retry_at && !File.exists?(@root + "/composition/error") && !File.exists?(@root + "/composition/mixed/error")
       @composing = 1
       command = "exec nice -n 10 " + ffls_shell_quote(@executable) + " --compose-batch " + ffls_shell_quote(@root) + " 4 > " + ffls_shell_quote(@root + "/worker.log") + " 2>&1"
       @thread = Thread.new ->
@@ -317,8 +337,11 @@ use core/system
           return rank
     0
 
+  -> transform_fields()
+    " wide_transform_enabled=" + @transform_enabled.to_s() + " wide_transform_submitted=" + @transform_submitted.to_s() + " wide_transform_completed=" + @transform_completed.to_s() + " wide_transform_pending=" + (@transform_submitted - @transform_completed).to_s() + " wide_transform_failures=" + @transform_failures.to_s() + " wide_transform_status=" + @transform_status.to_s() + " wide_transform_delta=" + @transform_delta.to_s()
+
   -> status_fields()
-    " refine=" + @enabled.to_s() + " refine_submitted=" + @submitted.to_s() + " refine_completed=" + @completed.to_s() + " refine_pending=" + self.pending().to_s() + " refine_duplicates=" + @duplicates.to_s() + " refine_outputs=" + @outputs.to_s() + " refine_cross_shape=" + @cross_shape.to_s() + " refine_failures=" + @failures.to_s() + " refine_blocked=" + @budget_blocked.to_s() + " compose_limit=" + @compose_limit.to_s() + " compose_submitted=" + @compose_submitted.to_s() + " compose_completed=" + @compose_completed.to_s() + " compose_pending=" + (@compose_submitted - @compose_completed).to_s() + " compose_deferred=" + @compose_deferred.to_s() + " compose_failures=" + @compose_failures.to_s() + " compose_wide_status=" + @wide_status.to_s() + " compose_wide_saved=" + @wide_saved.to_s()
+    " refine=" + @enabled.to_s() + " refine_submitted=" + @submitted.to_s() + " refine_completed=" + @completed.to_s() + " refine_pending=" + self.pending().to_s() + " refine_duplicates=" + @duplicates.to_s() + " refine_outputs=" + @outputs.to_s() + " refine_cross_shape=" + @cross_shape.to_s() + " refine_failures=" + @failures.to_s() + " refine_blocked=" + @budget_blocked.to_s() + " compose_limit=" + @compose_limit.to_s() + " compose_submitted=" + @compose_submitted.to_s() + " compose_completed=" + @compose_completed.to_s() + " compose_pending=" + (@compose_submitted - @compose_completed).to_s() + " compose_deferred=" + @compose_deferred.to_s() + " compose_failures=" + @compose_failures.to_s() + " compose_wide_status=" + @wide_status.to_s() + " compose_wide_saved=" + @wide_saved.to_s() + self.transform_fields()
 
   -> status_row()
     if @enabled == 0
@@ -330,7 +353,7 @@ use core/system
       wide = "work-limited"
     elsif @wide_status == 3
       wide = "verify-limited"
-    "refine " + @completed.to_s() + "/" + @submitted.to_s() + "; compose " + @compose_completed.to_s() + "/" + @compose_submitted.to_s() + "; pending " + (self.pending() + @compose_submitted - @compose_completed).to_s() + "; deferred " + @compose_deferred.to_s() + "; blocked " + @budget_blocked.to_s() + "; wide " + wide + "/-" + @wide_saved.to_s() + "; failures " + (@failures + @compose_failures).to_s()
+    "refine " + @completed.to_s() + "/" + @submitted.to_s() + "; compose " + @compose_completed.to_s() + "/" + @compose_submitted.to_s() + "; pending " + (self.pending() + @compose_submitted - @compose_completed + @transform_submitted - @transform_completed).to_s() + "; deferred " + @compose_deferred.to_s() + "; blocked " + @budget_blocked.to_s() + "; wide " + wide + "/-" + @wide_saved.to_s() + "; transforms " + @transform_completed.to_s() + "/" + @transform_submitted.to_s() + "; failures " + (@failures + @compose_failures + @transform_failures).to_s()
 
   -> stop()
     @stopped = 1

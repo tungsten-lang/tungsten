@@ -14,6 +14,7 @@ from composition_queue_test import audit as audit_composition
 from composition_queue_test import value
 from mixed_composition_queue_test import mixed_audit, deferred
 from wide_composition_refinement_test import audit as audit_wide
+from wide_transform_queue_test import audit as audit_transforms
 
 
 def run(binary, root, tensor, enabled, seconds=2, require_outputs=True):
@@ -87,12 +88,23 @@ def run(binary, root, tensor, enabled, seconds=2, require_outputs=True):
             wide = audit_wide(spool)
             last = list(map(int, (spool/'composition/cleanup/last').read_text().split()))
             assert last == [int(fields['compose_wide_status']), int(fields['compose_wide_saved'])]
+        transforms = spool/'composition/transforms'
+        assert int(fields['wide_transform_enabled']) == 1
+        assert int(fields['wide_transform_submitted']) == value(transforms/'submitted')
+        assert int(fields['wide_transform_completed']) == value(transforms/'consumed')
+        assert int(fields['wide_transform_pending']) == value(transforms/'submitted')-value(transforms/'consumed')
+        assert int(fields['wide_transform_failures']) == value(transforms/'failures') == 0
+        assert int(fields['wide_transform_status']) in (0,1,2,3)
+        transform_checks = audit_transforms(spool)
+        if (transforms/'last').exists():
+            last = list(map(int,(transforms/'last').read_text().split()))
+            assert last == [int(fields['wide_transform_status']),int(fields['wide_transform_delta'])]
         print(f'PASS fleet {tensor}: {objects} full tensors; '
               f'{fields["refine_seed_uses"]} seed uses; '
               f'{fields["refine_completed"]}/{fields["refine_submitted"]} jobs; '
               f'{fields["compose_completed"]}/{fields["compose_submitted"]} compositions; '
               f'{len(mixed)} mixed outputs, {fields["compose_deferred"]} deferred contexts; '
-              f'{wide} wide cleanup; stopped')
+              f'{wide} wide cleanup; {transform_checks} wide transforms; stopped')
     else:
         assert not spool.exists()
         assert int(fields['refine_submitted']) == int(fields['refine_outputs']) == 0

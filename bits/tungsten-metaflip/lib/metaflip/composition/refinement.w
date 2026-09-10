@@ -4,7 +4,7 @@
 use matrix_cleanup
 use ../fleet/refinement_artifacts
 
--> ffwc_index(root, identity, blob, rank, n, m, p, source) (String String String i64 i64 i64 i64 String) i64
+-> ffwc_index_kind(root, identity, blob, rank, n, m, p, source, kind) (String String String i64 i64 i64 i64 String String) i64
   archive = root + "/composition/"
   path = archive + "objects/" + identity + ".tensor"
   old = File.read_prefix(path, 12632129)
@@ -16,7 +16,7 @@ use ../fleet/refinement_artifacts
   if !File.mkdir_p(archive + "by-shape/" + shape)
     return 0
   marker = archive + "by-shape/" + shape + "/" + identity
-  if !File.exists?(marker) && ffrf_atomic(marker, "MFW_CLEAN1 " + source + "\n", "wide-cleanup") != 1
+  if !File.exists?(marker) && ffrf_atomic(marker, kind + " " + source + "\n", "wide-cleanup") != 1
     return 0
   previous = File.read_prefix(archive + "best/" + shape, 100)
   best = 16385 ## i64
@@ -27,6 +27,9 @@ use ../fleet/refinement_artifacts
   if rank < best && ffrf_atomic(archive + "best/" + shape, rank.to_s() + " " + identity + "\n", "wide-cleanup") != 1
     return 0
   1
+
+-> ffwc_index(root, identity, blob, rank, n, m, p, source) (String String String i64 i64 i64 i64 String) i64
+  ffwc_index_kind(root, identity, blob, rank, n, m, p, source, "MFW_CLEAN1")
 
 # Both source and cached output still cross full tensor gates. The cache is a
 # dedup optimization, never authority for rank or validity. Metadata describes

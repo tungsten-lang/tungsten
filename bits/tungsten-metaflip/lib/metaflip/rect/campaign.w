@@ -555,8 +555,8 @@ use doors
   flush()
   1
 
--> ffrc_run(tensor, repo_root, seed_path, best_path, status_path, run_tag, walkers, steps, max_rounds, max_secs, dslack, cycles, record_override, gpu_requested, gpu_walkers, gpu_steps, gpu_epoch_rounds, gpu_binary, gpu_rebuild, quiet, tui, stop_on_record, naive_seed, portfolio_child) (String String String String String String i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 String i64 i64 i64 i64 i64 i64) i64
-  ffrc_run_seeded(tensor, repo_root, seed_path, best_path, status_path, run_tag, walkers, steps, max_rounds, max_secs, dslack, cycles, record_override, gpu_requested, gpu_walkers, gpu_steps, gpu_epoch_rounds, gpu_binary, gpu_rebuild, quiet, tui, stop_on_record, naive_seed, portfolio_child, 0, 0 - 1)
+-> ffrc_run(tensor, repo_root, seed_path, best_path, status_path, run_tag, walkers, steps, max_rounds, max_secs, dslack, cycles, record_override, gpu_requested, gpu_walkers, gpu_steps, gpu_epoch_rounds, gpu_binary, gpu_rebuild, quiet, tui, stop_on_record, naive_seed, portfolio_child, state_root) (String String String String String String i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 String i64 i64 i64 i64 i64 i64 String) i64
+  ffrc_run_seeded(tensor, repo_root, seed_path, best_path, status_path, run_tag, walkers, steps, max_rounds, max_secs, dslack, cycles, record_override, gpu_requested, gpu_walkers, gpu_steps, gpu_epoch_rounds, gpu_binary, gpu_rebuild, quiet, tui, stop_on_record, naive_seed, portfolio_child, 0, 0 - 1, state_root)
 
 # Run a rectangular campaign using the common Metaflip CLI controls. Return
 # 0 on a clean bounded/interrupt stop and 2 for an invalid seed/checkpoint.
@@ -566,10 +566,10 @@ use doors
 # epoch/fill restarts; zero retains the historical standalone seed streams.
 # restart_door_ticket is an independent low-discrepancy schedule ordinal; it
 # must not replace the mixed nonce used for proposal RNG streams.
--> ffrc_run_seeded(tensor, repo_root, seed_path, best_path, status_path, run_tag, walkers, steps, max_rounds, max_secs, dslack, cycles, record_override, gpu_requested, gpu_walkers, gpu_steps, gpu_epoch_rounds, gpu_binary, gpu_rebuild, quiet, tui, stop_on_record, naive_seed, portfolio_child, restart_nonce, restart_door_ticket) (String String String String String String i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 String i64 i64 i64 i64 i64 i64 i64 i64) i64
-  ffrc_run_scheduled(tensor, repo_root, seed_path, best_path, status_path, run_tag, walkers, steps, max_rounds, max_secs, dslack, cycles, record_override, gpu_requested, gpu_walkers, gpu_steps, gpu_epoch_rounds, gpu_binary, gpu_rebuild, quiet, tui, stop_on_record, naive_seed, portfolio_child, restart_nonce, restart_door_ticket, "", "", 0)
+-> ffrc_run_seeded(tensor, repo_root, seed_path, best_path, status_path, run_tag, walkers, steps, max_rounds, max_secs, dslack, cycles, record_override, gpu_requested, gpu_walkers, gpu_steps, gpu_epoch_rounds, gpu_binary, gpu_rebuild, quiet, tui, stop_on_record, naive_seed, portfolio_child, restart_nonce, restart_door_ticket, state_root) (String String String String String String i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 String i64 i64 i64 i64 i64 i64 i64 i64 String) i64
+  ffrc_run_scheduled(tensor, repo_root, seed_path, best_path, status_path, run_tag, walkers, steps, max_rounds, max_secs, dslack, cycles, record_override, gpu_requested, gpu_walkers, gpu_steps, gpu_epoch_rounds, gpu_binary, gpu_rebuild, quiet, tui, stop_on_record, naive_seed, portfolio_child, restart_nonce, restart_door_ticket, "", "", 0, state_root)
 
--> ffrc_run_scheduled(tensor, repo_root, seed_path, best_path, status_path, run_tag, walkers, steps, max_rounds, max_secs, dslack, cycles, record_override, gpu_requested, gpu_walkers, gpu_steps, gpu_epoch_rounds, gpu_binary, gpu_rebuild, quiet, tui, stop_on_record, naive_seed, portfolio_child, restart_nonce, restart_door_ticket, cycle_fields, cycle_caption, cycle_deadline_ms) (String String String String String String i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 String i64 i64 i64 i64 i64 i64 i64 i64 String String i64) i64
+-> ffrc_run_scheduled(tensor, repo_root, seed_path, best_path, status_path, run_tag, walkers, steps, max_rounds, max_secs, dslack, cycles, record_override, gpu_requested, gpu_walkers, gpu_steps, gpu_epoch_rounds, gpu_binary, gpu_rebuild, quiet, tui, stop_on_record, naive_seed, portfolio_child, restart_nonce, restart_door_ticket, cycle_fields, cycle_caption, cycle_deadline_ms, state_root) (String String String String String String i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 String i64 i64 i64 i64 i64 i64 i64 i64 String String i64 String) i64
   cpu_gpu_overlap = ffrc_cpu_gpu_mode(env("METAFLIP_RECT_CPU_GPU")) ## i64
   if cpu_gpu_overlap < 0
     << "RECT_ERROR code=cpu-gpu-policy METAFLIP_RECT_CPU_GPU must be barrier or overlap"
@@ -693,10 +693,16 @@ use doors
   # their historical initialization exactly.
   side_archive = []
   side_archive_stats = i64[4] # loaded, rejected, saved, write-failures
+  feedback_loaded = 0 ## i64
   archive_enabled = ffrc_side_archive_enabled(portfolio_child, restart_nonce, restart_door_ticket, use_profile_frontier) ## i64
   if archive_enabled != 0 && naive_seed == 0
     side_seed = ffrcb_seed(81201, restart_nonce, 0, 0) ## i64
     side_count = ffrda_load_anchored(best_path, best, frontier_anchors, n, m, p, capacity, side_seed, dslack, cycles, workq, wanderq, side_archive, side_archive_stats) ## i64
+    # Checked cross-shape feedback spooled for this shape by other campaigns
+    # crosses the same door gate and R..R+2 policy as the persisted side doors.
+    if ffrf_spool_enabled() == 1
+      spool_seed = ffrcb_seed(81301, restart_nonce, 0, 0) ## i64
+      feedback_loaded = ffrda_load_paths(ffrf_spool_paths(state_root, n, m, p), best, frontier_anchors, n, m, p, capacity, spool_seed, dslack, cycles, workq, wanderq, side_archive, side_archive_stats) - side_count
   side_archive_loaded = side_archive.size() ## i64
   side_archive_seeded = 0 ## i64
 
@@ -894,7 +900,8 @@ use doors
   refinement_root = status_path + ".refinement"
   if naive_seed != 0
     refinement_root = refinement_root + "-naive-" + ccall("__w_clock_ms").to_s()
-  refinement = MetaflipRefinement.new(refinement_root, System.executable_path(), repo_root)
+  refinement = MetaflipRefinement.new(refinement_root, System.executable_path(), repo_root, state_root)
+  z = refinement.spool_loaded(feedback_loaded)
   refinement_candidate = i64[state_size]
   refinement_us = i64[capacity]
   refinement_vs = i64[capacity]
@@ -1409,7 +1416,7 @@ use doors
             best = naive_best
             z = refinement.stop()
             refinement_generation += 1
-            refinement = MetaflipRefinement.new(status_path + ".refinement-reset-" + now_ms.to_s() + "-" + refinement_generation.to_s(), System.executable_path(), repo_root)
+            refinement = MetaflipRefinement.new(status_path + ".refinement-reset-" + now_ms.to_s() + "-" + refinement_generation.to_s(), System.executable_path(), repo_root, state_root)
             z = refinement.submit(best, n, m, p)
             timeline_start_s = elapsed_s
             timeline_count = 1

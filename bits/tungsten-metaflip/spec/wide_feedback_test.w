@@ -27,8 +27,26 @@ if ARGV.size() == 2 && ARGV[0] == "--recover"
   if ffwf_recover(ARGV[1] + "/composition/feedback/") != 1
     exit(1)
   exit(0)
-if ARGV.size() == 7 && (ARGV[0] == "--take" || ARGV[0] == "--take-stopped")
+if ARGV.size() == 3 && ARGV[0] == "--spool"
+  raw = File.read_prefix(ARGV[2], 12632129)
+  if raw == nil
+    exit(2)
+  packed = i64[3*32*16384]
+  meta = i64[4]
+  rank = ffpk_parse(raw, packed, 3*32*16384, meta, 4) ## i64
+  if rank < 1 || rank > 4096
+    exit(2)
+  narrow = i64[3*rank]
+  parity = i64[4096]
+  if ffwf_unpack(packed, 6*rank, rank, meta[0], meta[1], meta[2], narrow, 3*rank, rank) != 1
+    exit(2)
+  << "SPOOL " + ffrf_spool_offer(ARGV[1], narrow, rank, rank, meta[0], meta[1], meta[2], parity, "test").to_s()
+  exit(0)
+if (ARGV.size() == 7 || ARGV.size() == 8) && (ARGV[0] == "--take" || ARGV[0] == "--take-stopped")
   root = ARGV[1]
+  state_root = ""
+  if ARGV.size() == 8
+    state_root = ARGV[7]
   n = ffpk_decimal(ARGV[2]) ## i64
   m = ffpk_decimal(ARGV[3]) ## i64
   p = ffpk_decimal(ARGV[4]) ## i64
@@ -36,7 +54,7 @@ if ARGV.size() == 7 && (ARGV[0] == "--take" || ARGV[0] == "--take-stopped")
   calls = ffpk_decimal(ARGV[6]) ## i64
   if cap < 1 || cap > 4096 || calls < 1 || calls > 20
     exit(2)
-  queue = MetaflipRefinement.new(root, System.executable_path())
+  queue = MetaflipRefinement.new(root, System.executable_path(), "", state_root)
   if ARGV[0] == "--take-stopped"
     stopped = queue.stop() ## i64
   state = i64[ffw_state_size(cap)]

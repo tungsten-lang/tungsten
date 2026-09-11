@@ -794,7 +794,7 @@ use ../paths
   # executable. Production always supplies System.executable_path().
   Thread.new ->
     started = ccall("__w_clock_ms") ## i64
-    code = ffrc_run_seeded(tensor, repo_root, "", best_path, status_path, child_tag, walkers, steps, epoch_rounds, max_secs, dslack, cycles, 0, gpu_requested, gpu_lanes, gpu_steps, gpu_epoch_rounds, gpu_binary, gpu_rebuild, 1, 0, stop_on_record, naive_seed, 1, restart_nonce, restart_door_ticket) ## i64
+    code = ffrc_run_seeded(tensor, repo_root, "", best_path, status_path, child_tag, walkers, steps, epoch_rounds, max_secs, dslack, cycles, 0, gpu_requested, gpu_lanes, gpu_steps, gpu_epoch_rounds, gpu_binary, gpu_rebuild, 1, 0, stop_on_record, naive_seed, 1, restart_nonce, restart_door_ticket, "") ## i64
     exit_codes[slot] = code
     elapsed_ms[slot] = ccall("__w_clock_ms") - started
     true

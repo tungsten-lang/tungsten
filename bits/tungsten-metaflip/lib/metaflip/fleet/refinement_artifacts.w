@@ -182,6 +182,89 @@ use ../paths
     return ""
   identity
 
+# Cross-shape feedback spool: eight bare rank-header scheme slots per
+# live-seedable shape beside that shape's restart banks under the shared state
+# root, so the existing square near-bank and rectangular side-archive loaders
+# admit them through their unchanged exact gates. Every write follows a full
+# tensor check. A full spool keeps the lowest ranks (ties: lower body SHA-256),
+# so replaying the same descendant is a no-op and the slot set stays finite.
+# Concurrent campaigns may race one slot; a lost race costs one offer, never
+# an unverified seed, because each slot is reconstructed on load. No
+# rank-record claim.
+-> ffrf_spool_slots() i64
+  8
+
+-> ffrf_spool_dir(state_root, n, m, p) (String i64 i64 i64)
+  ffls_bank_dir(state_root, "gf2", n.to_s() + "x" + m.to_s() + "x" + p.to_s()) + "/feedback"
+
+-> ffrf_spool_path(dir, slot) (String i64)
+  token = slot.to_s()
+  if slot < 10
+    token = "0" + token
+  dir + "/feedback_" + token + ".txt"
+
+-> ffrf_spool_paths(state_root, n, m, p) (String i64 i64 i64)
+  paths = []
+  if state_root == ""
+    return paths
+  slot = 0 ## i64
+  while slot < ffrf_spool_slots()
+    paths.push(ffrf_spool_path(ffrf_spool_dir(state_root, n, m, p), slot))
+    slot += 1
+  paths
+
+-> ffrf_hash_before(a, b) (String String) i64
+  i = 0 ## i64
+  while i < a.size() && i < b.size()
+    if a.byte_at(i) != b.byte_at(i)
+      if a.byte_at(i) < b.byte_at(i)
+        return 1
+      return 0
+    i += 1
+  0
+
+# 1 = slot written (new or replacing the deterministic victim), 0 otherwise.
+-> ffrf_spool_offer(state_root, work, capacity, rank, n, m, p, parity, writer) (String i64[] i64 i64 i64 i64 i64 i64[] String) i64
+  if state_root == "" || ffrf_exact(work, capacity, rank, n, m, p, parity) != 1
+    return 0
+  z = ffrf_sort(work, capacity, rank) ## i64
+  header = "MFR1 " + n.to_s() + " " + m.to_s() + " " + p.to_s() + " "
+  blob = ffrf_blob(work, capacity, rank, n, m, p)
+  body = blob.slice(header.size(), blob.size() - header.size())
+  identity = Crypto:SHA256.hexdigest(body)
+  dir = ffrf_spool_dir(state_root, n, m, p)
+  if !File.mkdir_p(dir)
+    return 0
+  target = 0-1 ## i64
+  victim = 0-1 ## i64
+  victim_rank = 0 ## i64
+  victim_identity = ""
+  cursor = i64[1]
+  slot = 0 ## i64
+  while slot < ffrf_spool_slots()
+    old = File.read_prefix(ffrf_spool_path(dir, slot), 262145)
+    if old == nil || old == ""
+      if target < 0
+        target = slot
+    else
+      if old == body
+        return 0
+      cursor[0] = 0
+      old_rank = ffrf_unsigned(old, cursor, 10) ## i64
+      if old_rank < 1
+        old_rank = 1 << 40
+      old_identity = Crypto:SHA256.hexdigest(old)
+      if victim < 0 || old_rank > victim_rank || (old_rank == victim_rank && ffrf_hash_before(victim_identity, old_identity) == 1)
+        victim = slot
+        victim_rank = old_rank
+        victim_identity = old_identity
+    slot += 1
+  if target < 0
+    if victim < 0 || rank > victim_rank || (rank == victim_rank && ffrf_hash_before(identity, victim_identity) != 1)
+      return 0
+    target = victim
+  ffrf_atomic(ffrf_spool_path(dir, target), body, writer)
+
 # Grouping is only a projection scheduling heuristic. Every distinct neutral
 # representation is still emitted, regardless of rank/density or this score.
 -> ffrf_pairs(work, capacity, rank) (i64[] i64 i64) i64

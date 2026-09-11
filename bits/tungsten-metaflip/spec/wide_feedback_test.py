@@ -66,8 +66,8 @@ def check(binary, retained=None):
     for i,(shape,terms) in enumerate(fixtures):
         exact(shape,terms);p=root/f'input-{i}.tensor';p.write_bytes(blob(shape,terms));paths.append(p)
     def publish(q,index=0,**kw):return run('--publish',q,paths[index],**kw)
-    def take(q,shape=(2,2,2),cap=64,calls=1,mode='--take',**kw):
-        out=run(mode,q,*shape,cap,calls,**kw)
+    def take(q,shape=(2,2,2),cap=64,calls=1,mode='--take',state=None,**kw):
+        out=run(mode,q,*shape,cap,calls,*([state] if state else []),**kw)
         fields=dict(t.split('=',1) for t in out.split() if '=' in t)
         return out,fields
     q=root/'basic'
@@ -109,6 +109,71 @@ def check(binary, retained=None):
     assert f['refine_submitted']=='1' and f['refine_failures']=='0'
     x=root/'rectangular';publish(x,66);out,f=take(x,shape=(2,5,6),cap=128)
     assert 'TAKE 60 wide-feedback' in out and f['refine_failures']=='0'
+    # Cross-shape checked descendants of live-seedable shapes are spooled for
+    # that shape's next campaign start under the shared state root. Unsupported
+    # shapes and same-shape records never reach the spool; ranks above 4096
+    # are already refused upstream by ffwf_valid_record (fixture 65 above).
+    def spooled(state,shape):
+        d=state/'banks/gf2'/('%dx%dx%d'%shape)/'feedback'
+        return sorted(p.read_text() for p in d.glob('feedback_*.txt')) if d.exists() else []
+    def scheme(shape,terms):
+        return f'{len(terms)}\n'+''.join(f'{u} {v} {w}\n' for u,v,w in sorted(terms))
+    x=root/'spool';state=root/'spool-state'
+    publish(x);out,f=take(x,shape=(2,5,6),cap=128,state=state)
+    assert f['refine_cross_shape']=='1' and f['wide_feedback_offered']=='1' and f['refine_failures']=='0'
+    assert spooled(state,(2,2,2))==[scheme(*fixtures[0])]
+    exact((2,2,2),parse_terms(spooled(state,(2,2,2))[0].encode(),7))
+    # Intake-before-ack replay is idempotent: the same single slot, no re-offer.
+    (x/'composition/feedback/consumed').unlink()
+    out,f=take(x,shape=(2,5,6),cap=128,state=state)
+    assert f['wide_feedback_offered']=='0' and f['wide_feedback_completed']=='1'
+    assert spooled(state,(2,2,2))==[scheme(*fixtures[0])]
+    # The consuming campaign's own capacity does not gate another shape's spool.
+    publish(x,1);out,f=take(x,shape=(2,5,6),cap=4,state=state)
+    assert f['wide_feedback_offered']=='1' and f['wide_feedback_oversized']=='0'
+    assert spooled(state,(2,2,2))==sorted(scheme(*fixtures[i]) for i in (0,1))
+    publish(x,64);out,f=take(x,shape=(2,5,6),cap=128,state=state)
+    assert f['refine_cross_shape']=='1' and f['wide_feedback_offered']=='0'
+    assert not (state/'banks/gf2/1x1x63').exists()
+    publish(x,66);out,f=take(x,shape=(2,5,6),cap=128,state=state)
+    assert 'TAKE 60 wide-feedback' in out and f['wide_feedback_offered']=='0'
+    assert spooled(state,(2,5,6))==[] and f['refine_failures']=='0'
+    y=root/'spool-off';publish(y);out,f=take(y,shape=(2,5,6),cap=128)
+    assert f['refine_cross_shape']=='1' and f['wide_feedback_offered']=='0'
+    assert not (root/'banks').exists()
+    # Bounded spool: eight slots keep the lowest ranks, ties by lower body
+    # SHA-256; a losing offer is dropped and any surviving body is a no-op.
+    def split(terms,i,axis):
+        term=list(terms[i]);low=term[axis]&-term[axis];rest=list(term);rest[axis]^=low;term[axis]=low
+        return terms[:i]+[tuple(term),tuple(rest)]+terms[i+1:]
+    variants=[];bodies=set()
+    for terms in (fixtures[0][1],fixtures[1][1]):
+        for i in range(len(terms)):
+            for axis in range(3):
+                if terms[i][axis]&(terms[i][axis]-1):
+                    body=scheme((2,2,2),split(terms,i,axis))
+                    if body not in bodies:bodies.add(body);variants.append(split(terms,i,axis))
+    variants=[fixtures[0][1],fixtures[1][1]]+variants[:10]
+    assert len(variants)==12
+    def key(body):return (int(body.split('\n',1)[0]),sha256(body.encode()).hexdigest())
+    state=root/'bounded-state';slots=[]
+    for i,terms in enumerate(variants):
+        exact((2,2,2),terms);path=root/f'bounded-{i}.tensor';path.write_bytes(blob((2,2,2),terms))
+        body=scheme((2,2,2),terms)
+        if body in slots:expected=0
+        elif len(slots)<8:slots.append(body);expected=1
+        else:
+            worst=max(slots,key=key)
+            expected=int(key(body)<key(worst))
+            if expected:slots[slots.index(worst)]=body
+        assert f'SPOOL {expected}' in run('--spool',state,path),i
+        assert spooled(state,(2,2,2))==sorted(slots)
+    assert len(slots)==8 and sum(key(b)[0]==7 for b in slots)==2
+    assert sorted(slots,key=key)==sorted((scheme((2,2,2),t) for t in variants),key=key)[:8]
+    for i in range(len(variants)):
+        assert f'SPOOL 0' in run('--spool',state,root/f'bounded-{i}.tensor')
+    assert spooled(state,(2,2,2))==sorted(slots)
+    for body in spooled(state,(2,2,2)):exact((2,2,2),parse_terms(body.encode(),key(body)[0]))
     x=root/'disabled';publish(x,env={'METAFLIP_WIDE_FEEDBACK':'0'})
     assert not (x/'composition/feedback').exists()
     x=root/'disable-consumer';publish(x);out,f=take(x,env={'METAFLIP_WIDE_FEEDBACK':'0'})

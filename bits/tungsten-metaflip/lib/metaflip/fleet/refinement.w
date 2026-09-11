@@ -14,13 +14,26 @@ use core/system
     return 0
   value
 
+# Shapes whose live campaigns can seed from spooled cross-shape feedback:
+# the same gate take_feedback applies to matching tickets, without widening.
+-> ffrf_spool_shape(n, m, p) (i64 i64 i64) i64
+  if n == m && m == p && n >= 2 && n <= 7
+    return 1
+  ffr_supported(n, m, p)
+
+-> ffrf_spool_enabled() i64
+  if env("METAFLIP_WIDE_FEEDBACK") == "0"
+    return 0
+  1
+
 + MetaflipRefinement
   ro :submitted, :completed, :duplicates, :failures, :outputs, :cross_shape, :last_identity, :last_kind
 
-  -> new(root, executable, runtime = "")
+  -> new(root, executable, runtime = "", state_root = "")
     @root = root
     @executable = executable
     @runtime = runtime
+    @state_root = state_root
     @compose_submitted = 0
     @compose_completed = 0
     @compose_failures = 0
@@ -56,6 +69,8 @@ use core/system
     @feedback_oversized = 0
     @feedback_unsupported = 0
     @feedback_seed_uses = 0
+    @feedback_offered = 0
+    @feedback_loaded = 0
     @feedback_broken = 0
     @feedback_next_ms = 0
     @outputs = 0
@@ -424,12 +439,18 @@ use core/system
         loaded = ffr_init_terms_cap(state, @us, @vs, @ws, rank, n, m, p, capacity, seed, dslack, cycles, workq, wanderq)
       if loaded != rank
         return self.feedback_failure()
+    # A checked descendant of another live-seedable shape is spooled for that
+    # shape's next campaign start (before the ack, so replay stays a no-op).
+    offered = 0 ## i64
+    if !matching && rank <= ffrf_capacity() && ffrf_spool_shape(@meta[0], @meta[1], @meta[2]) == 1
+      offered = ffrf_spool_offer(@state_root, @work, @capacity, rank, @meta[0], @meta[1], @meta[2], @parity, "intake")
     if ffrf_atomic(queue + "consumed", ticket.to_s() + "\n", "intake") != 1
       return self.feedback_failure()
     @feedback_completed = ticket
     @outputs += 1
     if !matching
       @cross_shape += 1
+      @feedback_offered += offered
     elsif rank > capacity
       @feedback_oversized += 1
     elsif !seedable
@@ -441,7 +462,12 @@ use core/system
     loaded
 
   -> feedback_fields()
-    " wide_feedback_enabled=" + @feedback_enabled.to_s() + " wide_feedback_submitted=" + @feedback_submitted.to_s() + " wide_feedback_completed=" + @feedback_completed.to_s() + " wide_feedback_pending=" + (@feedback_submitted - @feedback_completed).to_s() + " wide_feedback_failures=" + @feedback_failures.to_s() + " wide_feedback_oversized=" + @feedback_oversized.to_s() + " wide_feedback_unsupported=" + @feedback_unsupported.to_s() + " wide_feedback_seed_uses=" + @feedback_seed_uses.to_s()
+    " wide_feedback_enabled=" + @feedback_enabled.to_s() + " wide_feedback_submitted=" + @feedback_submitted.to_s() + " wide_feedback_completed=" + @feedback_completed.to_s() + " wide_feedback_pending=" + (@feedback_submitted - @feedback_completed).to_s() + " wide_feedback_failures=" + @feedback_failures.to_s() + " wide_feedback_oversized=" + @feedback_oversized.to_s() + " wide_feedback_unsupported=" + @feedback_unsupported.to_s() + " wide_feedback_seed_uses=" + @feedback_seed_uses.to_s() + " wide_feedback_offered=" + @feedback_offered.to_s() + " wide_feedback_loaded=" + @feedback_loaded.to_s()
+
+  # Spool slots this campaign admitted at start through its own exact loader.
+  -> spool_loaded(count)
+    @feedback_loaded = count
+    count
 
   -> seed_used(kind)
     if kind == "wide-feedback"

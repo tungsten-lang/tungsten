@@ -6,6 +6,7 @@ use counters
 use pages
 use projection
 use refinement
+use feedback
 
 # Stop creating fresh wide roots while this lane is above its high-water
 # mark. Existing finite continuations still run; this is not a disk quota.
@@ -247,6 +248,9 @@ use refinement
     result = Crypto:SHA256.hexdigest(output)
     if ffwc_index_kind(root, result, output, rank, meta[0], meta[1], meta[2], identity, "MFW_TRANSFORM1") != 1
       return 0
+    offered = ffwf_publish(root, result, output, rank, meta[0], meta[1], meta[2]) ## i64
+    if offered != 1
+      return offered
     admitted = rank
   # Offer at most two continuations. Paged per-source indexes make a replay
   # idempotent even if other producers append after an interrupted task.

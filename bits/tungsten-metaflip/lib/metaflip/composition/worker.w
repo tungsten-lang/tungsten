@@ -338,6 +338,9 @@ use transform_queue
   refined = ffwc_refine(root, identity, rank, n, m, p, out, scratch) ## i64
   if refined != 1
     return refined
+  feedback = ffwf_cleanup(root, identity, n, m, p) ## i64
+  if feedback != 1
+    return feedback
   offered = ffxt_intake(root, identity, n, m, p) ## i64
   if offered != 1
     return offered

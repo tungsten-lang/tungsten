@@ -2,6 +2,7 @@
 # only one low-priority native child (at most two jobs) runs at a time. Hashes
 # locate immutable objects; full bytes and tensor identity are still checked.
 use refinement_worker
+use ../composition/feedback
 use core/system
 
 -> ffrf_counter(path) (String) i64
@@ -46,6 +47,17 @@ use core/system
     @completed = 0
     @duplicates = 0
     @failures = 0
+    @feedback_enabled = 1
+    if env("METAFLIP_WIDE_FEEDBACK") == "0"
+      @feedback_enabled = 0
+    @feedback_submitted = 0
+    @feedback_completed = 0
+    @feedback_failures = 0
+    @feedback_oversized = 0
+    @feedback_unsupported = 0
+    @feedback_seed_uses = 0
+    @feedback_broken = 0
+    @feedback_next_ms = 0
     @outputs = 0
     @cross_shape = 0
     @last_identity = ""
@@ -71,6 +83,7 @@ use core/system
     @us = i64[@capacity]
     @vs = i64[@capacity]
     @ws = i64[@capacity]
+    @feedback_packed = i64[6*@capacity]
     if @enabled != 0
       directories = ["objects", "tasks", "by-id", "results"]
       directory_index = 0 ## i64
@@ -99,11 +112,20 @@ use core/system
               if ffrf_atomic(tail_path, @submitted.to_s() + "\n", "intake") != 1
                 @failures += 1
         z = ccall("__w_unlink", root + "/stop")
+        @feedback_completed = ffmd_count(root + "/composition/feedback/consumed")
+        @feedback_submitted = ffmd_count(root + "/composition/feedback/submitted")
+        if @feedback_completed < 0 || @feedback_submitted < @feedback_completed
+          z = self.feedback_failure()
 
   -> pending()
     @submitted - @completed
 
   -> read_composition()
+    feed_count = ffmd_count(@root + "/composition/feedback/submitted") ## i64
+    if feed_count >= @feedback_completed
+      @feedback_submitted = feed_count
+    elsif @feedback_broken == 0
+      z = self.feedback_failure() ## i64
     @compose_completed = ffbc_counter(@root + "/composition/consumed") + ffbc_counter(@root + "/composition/mixed/consumed")
     @compose_submitted = ffbc_counter(@root + "/composition/submitted") + ffbc_counter(@root + "/composition/mixed/submitted")
     @compose_failures = ffbc_counter(@root + "/composition/failures") + ffbc_counter(@root + "/composition/mixed/failures")
@@ -160,6 +182,12 @@ use core/system
       @work[@capacity+i] = state[state[48]+i]
       @work[2*@capacity+i] = state[state[49]+i]
       i += 1
+    self.enqueue_work(n, m, p, rank)
+
+  # The coordinator is the sole intake-ticket writer, including feedback.
+  -> enqueue_work(n, m, p, rank)
+    if @enabled == 0 || @stopped != 0
+      return 0
     if ffrf_exact(@work, @capacity, rank, n, m, p, @parity) != 1
       @failures += 1
       return 0-1
@@ -295,6 +323,9 @@ use core/system
   -> take_into(state, n, m, p, capacity, seed, dslack, cycles, workq, wanderq)
     if @enabled == 0
       return 0
+    feedback = self.take_feedback(state, n, m, p, capacity, seed, dslack, cycles, workq, wanderq) ## i64
+    if feedback != 0
+      return feedback
     inspected = 0 ## i64
     while inspected < 8
       if self.read_record() != 1
@@ -337,8 +368,85 @@ use core/system
           return rank
     0
 
+  -> feedback_failure(already_counted = 0)
+    if @feedback_broken == 0
+      @feedback_failures += 1
+      if already_counted == 0
+        @failures += 1
+      @feedback_broken = 1
+      z = ffrf_atomic(@root + "/composition/feedback/error", "ticket=" + (@feedback_completed+1).to_s() + "\n", "intake")
+    0-1
+
+  # At most one outbox record per 250 ms; pause intake at eight pending jobs
+  # or composition backpressure. Overflow remains durably visible in outbox.
+  -> take_feedback(state, n, m, p, capacity, seed, dslack, cycles, workq, wanderq)
+    if @enabled == 0 || @feedback_enabled == 0 || @feedback_broken != 0 || @stopped != 0 || self.pending() >= 8 || @budget_blocked != 0 || File.exists?(@root + "/stop")
+      return 0
+    now = ccall("__w_clock_ms") ## i64
+    if now < @feedback_next_ms
+      return 0
+    @feedback_next_ms = now+250
+    queue = @root + "/composition/feedback/"
+    submitted = ffmd_count(queue + "submitted") ## i64
+    if submitted < @feedback_completed
+      return self.feedback_failure()
+    @feedback_submitted = submitted
+    if submitted == @feedback_completed
+      return 0
+    ticket = @feedback_completed+1 ## i64
+    raw = ffbq_read(queue, "tasks", ticket)
+    if ffwf_load(@root, raw, @feedback_packed, @work, @capacity, @meta, @parity) != 1
+      return self.feedback_failure()
+    fields = raw.strip().split(" ")
+    if File.read_prefix(queue + "by-id/" + fields[1], 32) != ticket.to_s() + "\n"
+      return self.feedback_failure()
+    failures_before = @failures ## i64
+    queued = self.enqueue_work(@meta[0], @meta[1], @meta[2], @meta[3]) ## i64
+    if queued < 0 || @failures != failures_before
+      return self.feedback_failure(1)
+    loaded = 0 ## i64
+    matching = @meta[0] == n && @meta[1] == m && @meta[2] == p ## bool
+    rank = @meta[3] ## i64
+    seedable = capacity >= 4 && ((n == m && m == p && n >= 2 && n <= 7) || ffr_supported(n, m, p) == 1) ## bool
+    if matching && rank <= capacity && seedable
+      i = 0 ## i64
+      while i < rank
+        @us[i] = @work[i]
+        @vs[i] = @work[@capacity+i]
+        @ws[i] = @work[2*@capacity+i]
+        i += 1
+      if n == m && m == p
+        loaded = ffw_init_terms_cap(state, @us, @vs, @ws, rank, n, capacity, seed, dslack, cycles, workq, wanderq)
+      else
+        loaded = ffr_init_terms_cap(state, @us, @vs, @ws, rank, n, m, p, capacity, seed, dslack, cycles, workq, wanderq)
+      if loaded != rank
+        return self.feedback_failure()
+    if ffrf_atomic(queue + "consumed", ticket.to_s() + "\n", "intake") != 1
+      return self.feedback_failure()
+    @feedback_completed = ticket
+    @outputs += 1
+    if !matching
+      @cross_shape += 1
+    elsif rank > capacity
+      @feedback_oversized += 1
+    elsif !seedable
+      @feedback_unsupported += 1
+    if loaded > 0
+      @last_identity = fields[2]
+      @last_kind = "wide-feedback"
+    ccall("__w_unlink", queue + "error")
+    loaded
+
+  -> feedback_fields()
+    " wide_feedback_enabled=" + @feedback_enabled.to_s() + " wide_feedback_submitted=" + @feedback_submitted.to_s() + " wide_feedback_completed=" + @feedback_completed.to_s() + " wide_feedback_pending=" + (@feedback_submitted - @feedback_completed).to_s() + " wide_feedback_failures=" + @feedback_failures.to_s() + " wide_feedback_oversized=" + @feedback_oversized.to_s() + " wide_feedback_unsupported=" + @feedback_unsupported.to_s() + " wide_feedback_seed_uses=" + @feedback_seed_uses.to_s()
+
+  -> seed_used(kind)
+    if kind == "wide-feedback"
+      @feedback_seed_uses += 1
+    1
+
   -> transform_fields()
-    " wide_transform_enabled=" + @transform_enabled.to_s() + " wide_transform_submitted=" + @transform_submitted.to_s() + " wide_transform_completed=" + @transform_completed.to_s() + " wide_transform_pending=" + (@transform_submitted - @transform_completed).to_s() + " wide_transform_failures=" + @transform_failures.to_s() + " wide_transform_status=" + @transform_status.to_s() + " wide_transform_delta=" + @transform_delta.to_s()
+    " wide_transform_enabled=" + @transform_enabled.to_s() + " wide_transform_submitted=" + @transform_submitted.to_s() + " wide_transform_completed=" + @transform_completed.to_s() + " wide_transform_pending=" + (@transform_submitted - @transform_completed).to_s() + " wide_transform_failures=" + @transform_failures.to_s() + " wide_transform_status=" + @transform_status.to_s() + " wide_transform_delta=" + @transform_delta.to_s() + self.feedback_fields()
 
   -> status_fields()
     " refine=" + @enabled.to_s() + " refine_submitted=" + @submitted.to_s() + " refine_completed=" + @completed.to_s() + " refine_pending=" + self.pending().to_s() + " refine_duplicates=" + @duplicates.to_s() + " refine_outputs=" + @outputs.to_s() + " refine_cross_shape=" + @cross_shape.to_s() + " refine_failures=" + @failures.to_s() + " refine_blocked=" + @budget_blocked.to_s() + " compose_limit=" + @compose_limit.to_s() + " compose_submitted=" + @compose_submitted.to_s() + " compose_completed=" + @compose_completed.to_s() + " compose_pending=" + (@compose_submitted - @compose_completed).to_s() + " compose_deferred=" + @compose_deferred.to_s() + " compose_failures=" + @compose_failures.to_s() + " compose_wide_status=" + @wide_status.to_s() + " compose_wide_saved=" + @wide_saved.to_s() + self.transform_fields()
@@ -353,7 +461,7 @@ use core/system
       wide = "work-limited"
     elsif @wide_status == 3
       wide = "verify-limited"
-    "refine " + @completed.to_s() + "/" + @submitted.to_s() + "; compose " + @compose_completed.to_s() + "/" + @compose_submitted.to_s() + "; pending " + (self.pending() + @compose_submitted - @compose_completed + @transform_submitted - @transform_completed).to_s() + "; deferred " + @compose_deferred.to_s() + "; blocked " + @budget_blocked.to_s() + "; wide " + wide + "/-" + @wide_saved.to_s() + "; transforms " + @transform_completed.to_s() + "/" + @transform_submitted.to_s() + "; failures " + (@failures + @compose_failures + @transform_failures).to_s()
+    "refine " + @completed.to_s() + "/" + @submitted.to_s() + "; compose " + @compose_completed.to_s() + "/" + @compose_submitted.to_s() + "; pending " + (self.pending() + @compose_submitted - @compose_completed + @transform_submitted - @transform_completed + @feedback_submitted - @feedback_completed).to_s() + "; deferred " + @compose_deferred.to_s() + "; blocked " + @budget_blocked.to_s() + "; wide " + wide + "/-" + @wide_saved.to_s() + "; transforms " + @transform_completed.to_s() + "/" + @transform_submitted.to_s() + "; feedback " + @feedback_completed.to_s() + "/" + @feedback_submitted.to_s() + "; failures " + (@failures + @compose_failures + @transform_failures).to_s()
 
   -> stop()
     @stopped = 1

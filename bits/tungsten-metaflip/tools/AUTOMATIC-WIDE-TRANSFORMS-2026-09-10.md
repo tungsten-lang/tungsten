@@ -26,10 +26,13 @@ Each context ends with strict matrix cleanup. Coordinate deletion contracts the
 correct U/V/W grids and removes empty/duplicate terms before cleanup. All
 operators are native Tungsten. Python remains an independent testing oracle.
 
-This is deliberately a finite generation. Projections do not recursively start
+At this integration milestone this was deliberately a finite generation. Projections did not recursively start
 new basis/projection families or compose their wide outputs again. Wide outputs
-are verified archives, not silently converted into u64 walker seeds. Automatic
-wide-to-composition feedback remains a separate integration step.
+were verified archives, not silently converted into u64 walker seeds. The
+[September 11 feedback follow-up](WIDE-FEEDBACK-2026-09-11.md) now returns
+eligible 63-bit outputs through an explicit full-checked handoff to narrow
+refinement/composition and the existing supported-shape seed policy. Larger
+wide outputs still remain archives.
 
 ## Scheduling, persistence and limits
 

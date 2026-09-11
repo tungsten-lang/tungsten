@@ -15,6 +15,7 @@ from composition_queue_test import value
 from mixed_composition_queue_test import mixed_audit, deferred
 from wide_composition_refinement_test import audit as audit_wide
 from wide_transform_queue_test import audit as audit_transforms
+from wide_feedback_test import audit as audit_feedback
 
 
 def run(binary, root, tensor, enabled, seconds=2, require_outputs=True):
@@ -96,6 +97,13 @@ def run(binary, root, tensor, enabled, seconds=2, require_outputs=True):
         assert int(fields['wide_transform_failures']) == value(transforms/'failures') == 0
         assert int(fields['wide_transform_status']) in (0,1,2,3)
         transform_checks = audit_transforms(spool)
+        feedback_checks = audit_feedback(spool)
+        assert int(fields['wide_feedback_enabled'])==1
+        assert int(fields['wide_feedback_failures'])==0
+        assert 0<=int(fields['wide_feedback_seed_uses'])<=int(fields['refine_seed_uses'])
+        assert int(fields['wide_feedback_submitted'])==feedback_checks['submitted']
+        assert int(fields['wide_feedback_completed'])==feedback_checks['consumed']
+        assert int(fields['wide_feedback_pending'])==feedback_checks['pending']
         if (transforms/'last').exists():
             last = list(map(int,(transforms/'last').read_text().split()))
             assert last == [int(fields['wide_transform_status']),int(fields['wide_transform_delta'])]
@@ -104,7 +112,8 @@ def run(binary, root, tensor, enabled, seconds=2, require_outputs=True):
               f'{fields["refine_completed"]}/{fields["refine_submitted"]} jobs; '
               f'{fields["compose_completed"]}/{fields["compose_submitted"]} compositions; '
               f'{len(mixed)} mixed outputs, {fields["compose_deferred"]} deferred contexts; '
-              f'{wide} wide cleanup; {transform_checks} wide transforms; stopped')
+              f'{wide} wide cleanup; {transform_checks} wide transforms; '
+              f'{feedback_checks} wide feedback; stopped')
     else:
         assert not spool.exists()
         assert int(fields['refine_submitted']) == int(fields['refine_outputs']) == 0

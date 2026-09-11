@@ -4200,6 +4200,7 @@ while running == 1
       if z >= 1 && used_refinement == 1 && used_anchor_fallback == 0
         sources[i] = "refine/" + refinement_seed_kind + "/" + refinement_seed_identity.slice(0, 12)
         refinement_seed_uses += 1
+        refinement_noted = refinement.seed_used(refinement_seed_kind)
         refinement_last_seed_ms = now_ms
       if z >= 1 && i == core_fringe_index
         core_fringe_slots = next_core_slots

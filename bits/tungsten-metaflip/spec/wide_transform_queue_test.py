@@ -16,6 +16,7 @@ from wide_matrix_cleanup_parity_test import blob, read_blob
 from packed_composition_parity_test import exact, naive
 from verify_cofactor_mergers import refactor_shared, compress_shared
 from verify_coordinate_projections import project_grid
+from wide_feedback_test import audit as audit_feedback
 
 
 def count(path):
@@ -173,6 +174,8 @@ def check(binary, retained=None, public=None):
             run(['--drain',root,4])
         assert count(q/'consumed')==count(q/'submitted')==169
         checked=audit(root)
+        feedback=audit_feedback(root)
+        assert feedback['submitted']>0 and feedback['consumed']==0
         assert checked['basis']==36 and checked['project']==133 and checked['neutral']>0 and checked['limited']==0
         # Full-term identity retains the useful rank tie, not just one rank.
         assert len(list((root/'composition/by-shape/1x1x65').iterdir()))==2
@@ -197,7 +200,7 @@ def check(binary, retained=None, public=None):
         snapshot={p:p.read_bytes() for p in root.rglob('*') if p.is_file()}
         run(['--offer-file',root,source]); run(['--drain',root,4])
         assert snapshot=={p:p.read_bytes() for p in root.rglob('*') if p.is_file()}
-        print('PASS automatic wide queue:',checked)
+        print('PASS automatic wide queue:',checked,'feedback:',feedback)
         if public is not None:
             cold=root/'public-batch'; cold.mkdir()
             run(['--offer-file',cold,second])
@@ -205,7 +208,9 @@ def check(binary, retained=None, public=None):
                              capture_output=True,text=True,timeout=30)
             assert p.returncode==0,(p.stdout,p.stderr)
             assert count(cold/'composition/transforms/consumed')==4,(p.stdout,p.stderr)
-            print('PASS public four-context batch:',audit(cold))
+            feedback=audit_feedback(cold)
+            assert feedback['submitted']>0
+            print('PASS public four-context batch:',audit(cold),'feedback:',feedback)
 
 
 if __name__=='__main__':

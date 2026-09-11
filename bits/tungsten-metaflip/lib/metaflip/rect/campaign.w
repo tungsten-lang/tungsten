@@ -1350,6 +1350,7 @@ use doors
           copied = ffr_init_terms_cap(states[refine_lane], refinement_us, refinement_vs, refinement_ws, refined_rank, n, m, p, capacity, 84709 + round * 157, dslack, cycles, workq, wanderq) ## i64
           if copied == refined_rank
             refinement_seed_uses += 1
+            refinement_noted = refinement.seed_used(refinement.last_kind())
             island_sources[refine_lane] = "refine/" + refinement.last_kind() + "/" + refinement.last_identity().slice(0, 12)
             island_last_rank[refine_lane] = refined_rank
             island_last_bits[refine_lane] = ffr_best_bits(states[refine_lane])

@@ -218,9 +218,13 @@ An additional [seeded matrix-basis operator](tools/SEEDED-BASIS-SEARCH-2026-09-1
 is available as an explicit library proposal, not a default queue mode. Its
 bounded search and composition/projection follow-up found no new retained rank.
 
-This is one finite projection generation, not unrestricted recursive search:
-projected outputs do not automatically start another basis/projection family
-or another composition expansion, and wide witnesses are not live u64 seeds.
+Each wide root schedules one finite projection generation. Checked outputs
+whose three factor widths fit 63 bits and whose rank is at most 4,096 now
+return through an automatic narrow-format feedback queue. Distinct outputs,
+including rank ties, enter ordinary refinement and incremental composition;
+matching supported campaign shapes can also become live seeds under the
+existing near-best policy. Larger outputs remain checked wide archives, not
+live u64 seeds or recursively expanded wide roots.
 One context runs per scheduler turn; its successors go behind existing work.
 Normally wide work receives one in three turns. At 256 pending wide contexts,
 composition expansion pauses until this lane drains below that high-water mark.
@@ -240,6 +244,17 @@ is not labeled a fixed point, and verification-limited output is not admitted.
 A projection's delta compares different shapes, not a best-known-rank gain.
 `METAFLIP_WIDE_TRANSFORMS=0` disables new intake and pauses existing wide work
 without deleting it. Corrupt tasks remain pending with a visible error.
+
+The child-owned `composition/feedback/` outbox binds both full tensor formats.
+Only the main coordinator writes narrow intake tickets and acknowledges this
+outbox. It rechecks both objects and their exact termwise conversion, consumes
+at most one record per 250 ms, and pauses at eight pending refinement jobs or
+composition backpressure. Excess work stays durable; this is not a disk quota.
+`METAFLIP_WIDE_FEEDBACK=0` disables publication and pauses consumption without
+discarding the archive. `wide_feedback_*` reports submitted/completed/pending,
+failures, oversized/unsupported live seeds, and actual live `seed_uses` (not
+merely queue consumption). See the
+[feedback and square-restriction audit](tools/WIDE-FEEDBACK-2026-09-11.md).
 
 `compose_submitted/completed/pending/failures` sum the two primary lanes, separately from
 source refinement. `compose_deferred` counts mixed parent/context references

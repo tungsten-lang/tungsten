@@ -1009,8 +1009,13 @@ and curated results separate:
   abrupt stop; a missing or stale telemetry sidecar never invalidates the
   independently exact certificate.
 - `tungsten-metaflip-results` is the separate curated public repository for
-  verified certificates, known bests, attribution, and durable research
-  artifacts. Promote a live result there only after independent verification.
+  verified certificates, known bests, attribution, and record provenance.
+  Promote a live result there only after independent verification.
+- [tungsten-lang/metaflip-archives](https://github.com/tungsten-lang/metaflip-archives)
+  stores bulk research evidence as release assets. Its Git history contains
+  only indexes, checksums and upload receipts, not large tarballs. Archives
+  include bounded and negative studies; hosting a snapshot is not record
+  promotion. Repository access may require authentication.
 
 Temporary worker binaries, Metal sources and libraries, rejects, and scratch
 data may use the system temporary directory. Runtime compiler output is
@@ -1035,7 +1040,13 @@ experiments show useful candidates.
 
 ### Offline composition tools and local studies
 
-The dated benchmark audit directories linked below are local evidence bundles,
+The dated benchmark audit directories referenced below are historical generated
+evidence. Wholly untracked dated folders are preserved in the `checkout-audits`
+release assets of [metaflip-archives](https://github.com/tungsten-lang/metaflip-archives).
+Use its `archives.json` folder inventory to find the matching snapshot, verify
+its checksum, and extract it into a fresh directory when those inputs are
+needed. Curated records, proof fixtures and tracked sources remain here.
+These snapshots are byte-preserved evidence bundles,
 not part of the source-only package. Reusable tools and tests are versioned;
 generated tensors and imported leaves remain separate pending provenance and
 redistribution review. A missing local audit directory is not a test dependency.

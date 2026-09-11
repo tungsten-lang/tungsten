@@ -235,7 +235,7 @@ while rank <= 168
 
 # Every generated rectangular worker must use the same inline permutation and
 # must agree with the profile geometry used by the coordinator.
-tags = ["225","226","227","228","229","234","235","245","256","334","335","344","345","346","347","355","356","445","446","456","457","467"]
+tags = ["225","226","227","228","229","234","235","245","256","334","335","344","345","346","347","355","356","357","445","446","455","456","457","458","466","467","468","567"]
 i = 0
 while i < tags.size()
   path = __DIR__ + "/../lib/metaflip/kernels/rectangular/cal2zone_" + tags[i] + ".w"
@@ -247,7 +247,10 @@ while i < tags.size()
     ok = body.include?("sample = ((sample >> ((sample >> 28) + 4)) ^ sample) * 277803737")
   if ok
     ok = body.include?("sample = (sample >> 22) ^ sample")
-  wide = tags[i] == "457" || tags[i] == "467"
+  n = tags[i].slice(0, 1).to_i() ## i64
+  m = tags[i].slice(1, 1).to_i() ## i64
+  p = tags[i].slice(2, 1).to_i() ## i64
+  wide = ffrgb_mask_bytes(n, m, p) == 8
   if ok && wide
     ok = body.split("277803737").size() == 5 && body.split("sample2 = (state ^ wide_salt) ## u32").size() == 3 && body.include?("wide_salt = (mv * 747796405) ^ (tid * 289133645)") && body.split("u1 = sample\n").size() == 3 && !body.include?("u1 = sample ## i64")
   if ok && tags[i] == "457"
@@ -292,9 +295,6 @@ while i < tags.size()
     ok = body.include?("dchk = step % 4096\n    if dchk == 0")
   if ok
     ok = body.include?("docap = 0\n    if rank < best\n      docap = 1\n    if rank == best\n      if (step % 64) == 0\n        docap = 1")
-  n = tags[i].slice(0, 1).to_i() ## i64
-  m = tags[i].slice(1, 1).to_i() ## i64
-  p = tags[i].slice(2, 1).to_i() ## i64
   cap = ffrp_gpu_cap(n, m, p) ## i64
   wpg = ffrp_gpu_wpg(n, m, p) ## i64
   mask_bytes = ffrgb_mask_bytes(n, m, p) ## i64

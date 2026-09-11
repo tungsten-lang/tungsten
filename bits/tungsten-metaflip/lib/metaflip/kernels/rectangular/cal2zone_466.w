@@ -61,9 +61,9 @@
   sb = tid * 9 ## i32
   seedid = tid % nseeds ## i32
   seedbase = seedid * seedstride ## i32
-  sus = gpu.shared_i64(1344)
-  svs = gpu.shared_i64(1344)
-  sws = gpu.shared_i64(1344)
+  sus = gpu.shared_i64(1280)
+  svs = gpu.shared_i64(1280)
+  sws = gpu.shared_i64(1280)
   i = 0 ## i32
   rank = 0 ## i32
   best = 0 ## i32
@@ -158,7 +158,7 @@
           # Two independently permuted 32-bit values feed the wide mask. Salt
           # the second with lane and move counters: two adjacent LCG states
           # alone contain only 32 bits of entropy and would cover at most one
-          # 1024th of the 42-bit V-factor domain.
+          # 16th of the 36-bit V-factor domain.
           sample = state ## u32
           sample = ((sample >> ((sample >> 28) + 4)) ^ sample) * 277803737
           sample = (sample >> 22) ^ sample
@@ -168,7 +168,7 @@
           sample2 = (state ^ wide_salt) ## u32
           sample2 = ((sample2 >> ((sample2 >> 28) + 4)) ^ sample2) * 277803737
           sample2 = (sample2 >> 22) ^ sample2
-          u1 = (((u1 & 1023) << 32) ^ (sample2 ## i64)) & 4398046511103
+          u1 = (((u1 & 15) << 32) ^ (sample2 ## i64)) & 68719476735
           state = state * 1103515245 + 12345
           paxis = state % 3
           if paxis < 0
@@ -176,9 +176,9 @@
           if paxis == 0
             u1 = u1 & 16777215
           if paxis == 1
-            u1 = u1 & 4398046511103
+            u1 = u1 & 68719476735
           if paxis == 2
-            u1 = u1 & 268435455
+            u1 = u1 & 16777215
           # Rejection keeps zero out without biasing it onto a distinguished mask.
           while u1 == 0
             state = state * 1103515245 + 12345
@@ -191,13 +191,13 @@
             sample2 = (state ^ wide_salt) ## u32
             sample2 = ((sample2 >> ((sample2 >> 28) + 4)) ^ sample2) * 277803737
             sample2 = (sample2 >> 22) ^ sample2
-            u1 = (((u1 & 1023) << 32) ^ (sample2 ## i64)) & 4398046511103
+            u1 = (((u1 & 15) << 32) ^ (sample2 ## i64)) & 68719476735
             if paxis == 0
               u1 = u1 & 16777215
             if paxis == 1
-              u1 = u1 & 4398046511103
+              u1 = u1 & 68719476735
             if paxis == 2
-              u1 = u1 & 268435455
+              u1 = u1 & 16777215
           pb = pt * 8 + ltid
           if paxis == 0
             if u1 != sus[pb]
@@ -543,7 +543,7 @@ use core/system
   # This is an adoption gate, not a probabilistic corruption check.  Copy the
   # candidate out of Metal once, reject malformed factors, then reconstruct
   # every A[i,j] * B[j,k] -> C[i,k] tensor coordinate over GF(2).  The bundle
-  # is specialized for <4,6,7>; its configured CAP is below 512.
+  # is specialized for <4,6,6>; its configured CAP is below 512.
   ab = nn * mm
   bb = mm * pp
   cb = nn * pp
@@ -668,7 +668,7 @@ use core/system
 
 NW = 4096
 WPG = 8
-CAP = 168
+CAP = 160
 STEPS = 500000
 # Re-seed (reset each thread back to the seed + band-1 fresh start) only every
 # RESEED_EVERY rounds instead of every round, so a thread runs STEPS*RESEED_EVERY
@@ -684,11 +684,11 @@ WQWANDER = 60000
 WTHR0 = 7
 ESCAPE_SEEDS = 256
 
-seedpath = "runs/run_467/current_best.txt"
-gpubestpath = "runs/run_467/gpu_best.txt"
+seedpath = "runs/run_466/current_best.txt"
+gpubestpath = "runs/run_466/gpu_best.txt"
 nn = 4
 mm = 6
-pp = 7
+pp = 6
 av0 = argv()
 if av0.size() > 0
   seedpath = av0[0]
@@ -764,12 +764,12 @@ live_gen = 0
 << "GPU cfg: NW=" + NW.to_s() + " STEPS=" + STEPS.to_s() + " ROUNDS=" + ROUNDS.to_s() + " RESEED=" + RESEED_EVERY.to_s() + " MARGIN=" + MARGIN.to_s() + " WORKQ=" + WQWORK.to_s() + " WANDERQ=" + WQWANDER.to_s() + " WTHR=" + WTHR0.to_s() + " ESCAPES=" + ESCAPE_SEEDS.to_s()
 flush()
 
-seedu = i64[168 * ESCAPE_SEEDS]
-seedv = i64[168 * ESCAPE_SEEDS]
-seedw = i64[168 * ESCAPE_SEEDS]
-baseu = i64[168]
-basev = i64[168]
-basew = i64[168]
+seedu = i64[160 * ESCAPE_SEEDS]
+seedv = i64[160 * ESCAPE_SEEDS]
+seedw = i64[160 * ESCAPE_SEEDS]
+baseu = i64[160]
+basev = i64[160]
+basew = i64[160]
 
 device = metal_device()
 library = nil
@@ -787,9 +787,9 @@ best_us = metal_buffer(device, NW * CAP * 8)
 best_vs = metal_buffer(device, NW * CAP * 8)
 best_ws = metal_buffer(device, NW * CAP * 8)
 st = metal_buffer(device, NW * 9 * 4)
-seed_us = metal_buffer(device, 168 * ESCAPE_SEEDS * 8)
-seed_vs = metal_buffer(device, 168 * ESCAPE_SEEDS * 8)
-seed_ws = metal_buffer(device, 168 * ESCAPE_SEEDS * 8)
+seed_us = metal_buffer(device, 160 * ESCAPE_SEEDS * 8)
+seed_vs = metal_buffer(device, 160 * ESCAPE_SEEDS * 8)
+seed_ws = metal_buffer(device, 160 * ESCAPE_SEEDS * 8)
 params = metal_buffer(device, 11 * 4)
 queue = metal_queue(device)
 bufs = [work_us, work_vs, work_ws, best_us, best_vs, best_ws, st, seed_us, seed_vs, seed_ws, params]
@@ -882,7 +882,7 @@ while rd < ROUNDS || persistent_mode == 1
     startrank = baserank + 1
   sid = 0
   while sid < ESCAPE_SEEDS
-    soff = sid * 168
+    soff = sid * 160
     ii = 0
     while ii < baserank
       seedu[soff + ii] = baseu[ii]
@@ -1014,7 +1014,7 @@ while rd < ROUNDS || persistent_mode == 1
   metal_buffer_write_i32(params, 7, WTHR0)
   metal_buffer_write_i32(params, 8, reseed)
   metal_buffer_write_i32(params, 9, ESCAPE_SEEDS)
-  metal_buffer_write_i32(params, 10, 168)
+  metal_buffer_write_i32(params, 10, 160)
   metal_dispatch_groups(queue, pipeline, bufs, NW / WPG, WPG)
   # pick the lexicographic (rank, density) best thread: lower rank wins; at equal
   # rank, lower density (fewer base-case ops) wins.

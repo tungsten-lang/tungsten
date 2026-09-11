@@ -1244,6 +1244,14 @@ snapshots; global novelty and redistribution clearance remain unclaimed.
 This bounded offline study preserves equal-rank variants and does not change
 runtime scheduling or canonical seeds.
 
+`tools/wide_group_plans.py` now adapts those multiword parents to the native
+mixed-group/grid planner using exact factor labels and bounded equality
+components. It returns checked plans, not admitted tensors. The
+[wide-group follow-up](tools/WIDE-GROUP-ADAPTER-2026-09-11.md) fully verifies
+48 compositions and 135 selected restrictions, with no new best rank.
+Equal-cost grouping in the tested leaf bank reproduces plain products;
+different leaf presentations or embeddings are the next useful experiment.
+
 `tools/composition_closure.rb` checks candidates against a verified recursive
 block/Kronecker library and propagates useful candidates to other shapes.
 It exports both comparison and candidate tensors for independent replay.

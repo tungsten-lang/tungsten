@@ -704,13 +704,16 @@ use doors
         << "RECT_ERROR code=frontier-seed tensor=" + tensor + " slot=" + frontier_slot.to_s() + " path=" + frontier_path
         return 2
       if ffrc_frontier_rank_eligible(frontier_rank, ffr_best_rank(best)) != 0
-        duplicate_frontier = ffrda_same_best(frontier, best) ## i64
-        if duplicate_frontier == 0
-          duplicate_frontier = ffrda_already_selected(frontier_anchors, frontier)
-        if duplicate_frontier != 0
-          << "RECT_ERROR code=frontier-duplicate tensor=" + tensor + " slot=" + frontier_slot.to_s() + " path=" + frontier_path
-          return 2
-        frontier_anchors.push(frontier)
+        # A frontier door that already is the durable leader is not a
+        # packaging error: a later visit legitimately finds best.txt equal to
+        # the slot it adopted (a lower-density door than slot 0) on an earlier
+        # visit.  It contributes nothing as an anchor, so skip it.  Two slots
+        # duplicating each other remain a packaging error.
+        if ffrda_same_best(frontier, best) == 0
+          if ffrda_already_selected(frontier_anchors, frontier) != 0
+            << "RECT_ERROR code=frontier-duplicate tensor=" + tensor + " slot=" + frontier_slot.to_s() + " path=" + frontier_path
+            return 2
+          frontier_anchors.push(frontier)
       frontier_slot += 1
     frontier_count = frontier_anchors.size() + 1
 

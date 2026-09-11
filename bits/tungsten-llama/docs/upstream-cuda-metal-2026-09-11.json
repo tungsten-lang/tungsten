@@ -1,0 +1,65 @@
+{
+  "created_utc": "2026-09-11T04:15:12.876696+00:00",
+  "cuda_upstream": "f0dd8b67f118e7b2acb55e47505cba7b485085e0",
+  "metal_upstream": "b22bf811d429f6c49c204011b0154cb15e73ac2d",
+  "tungsten_head_at_validation": "f2088fa61237ce879d0f985a0ede41590ded94c9",
+  "default_behavior": "reference kernels retained; new router, grouped QSA and normalization are opt-in",
+  "metal_gate": {
+    "passed": true,
+    "compared_bytes": 1350071040,
+    "fast_math_modes": [
+      false,
+      true
+    ],
+    "device": "Apple M5 Max",
+    "unified_memory_gib": 128,
+    "macos": "26.6.2 (25G83)",
+    "xcode": "26.4.1 (17E202)"
+  },
+  "tungsten_dispatch": {
+    "passed": true,
+    "modes": [
+      "direct",
+      "recorded"
+    ],
+    "log": "PASS: router, normalization, and QSA match through direct and recorded Tungsten dispatch"
+  },
+  "cuda_gate": {
+    "compiler": "Homebrew Clang 23.1.0",
+    "headers": "official CUDA 13.0",
+    "ptx_targets": [
+      "sm_100",
+      "sm_121"
+    ],
+    "host_syntax_passed": true,
+    "nvcc_build": false,
+    "gpu_execution": false,
+    "libdevice_linked": false
+  },
+  "full_model_run": {
+    "attempted": false,
+    "reason": "configured local cache is missing all 192 expert shards and two backbone-index shards; Runpod stopped at user request"
+  },
+  "commands": [
+    "bash bits/tungsten-llama/scripts/test_upstream_kernels.sh",
+    "BIT_HOME=\"$PWD/bits\" bin/tungsten run bits/tungsten-llama/scripts/test_upstream_dispatch.w",
+    "BIT_HOME=\"$PWD/bits\" bin/tungsten-compiler --check scripts/bench/qwen38fn_mlx.w",
+    "/opt/homebrew/opt/llvm/bin/clang++ -x cuda --cuda-host-only --cuda-gpu-arch=sm_100 -nocudainc -nocudalib -I <cuda13-include> -include __clang_cuda_runtime_wrapper.h -std=c++17 -fsyntax-only bits/tungsten-llama/scripts/test_upstream_router.cu",
+    "/opt/homebrew/opt/llvm/bin/clang++ -x cuda --cuda-device-only --cuda-gpu-arch=<sm_100-or-sm_121> -Xclang -target-feature -Xclang +ptx90 -nocudainc -nocudalib -I <cuda13-include> -include __clang_cuda_runtime_wrapper.h -std=c++17 -O2 -S bits/tungsten-llama/scripts/test_upstream_router.cu -o <output.ptx>"
+  ],
+  "source_sha256": {
+    "bits/tungsten-llama/lib/kernels/qwen4_fn/fn_multi.metal": "e5b77785f66cc8e05703a709ce4703221d9aa966a951762601cb97e9c28d2370",
+    "bits/tungsten-llama/lib/kernels/qwen4_fn/grouped_rms_norm_warp.metal": "0e804aa2c31a492c9b852d1ff2cf7edc50e99814bafd3a19de90821eb0762d59",
+    "bits/tungsten-llama/lib/kernels/qwen4_fn/qsa.metal": "44a0b7251414a82aee46919a1ab1f7f68bbad8c41c90e60b7f887e774e46552d",
+    "bits/tungsten-llama/lib/kernels/qwen4_fn/qsa_selected_group2.metal": "bd486cb3aa121fb63b1dbf5d5bb180781158d1c608f0e4d0abb2cef66617ac34",
+    "bits/tungsten-llama/lib/kernels/qwen4_fn/router_softmax_topk10.metal": "0e2098a6589f97c0d5c7c8e556ec2e253fd97f0460862657e612f87862e85c1f",
+    "bits/tungsten-llama/lib/kernels/qwen4_fn/router_softmax_topk10_warp.cu": "3afe148f16702a9d470537dc6e044b7a0b0e35d254723819251f1c045791239d",
+    "bits/tungsten-llama/lib/kernels/qwen4_fn/router_softmax_topk10_warp.metal": "32788b57e4c61bdc599148408e4d1a5f00eb43b4dff122fe627527149fd61a1c",
+    "bits/tungsten-llama/scripts/test_upstream_dispatch.w": "b2def084e066a666375177bbf5f228d8ed11e1a97e419a8807985d7ed5267bc7",
+    "bits/tungsten-llama/scripts/test_upstream_kernels.mm": "74997671a6e57b31baad9b0f6d10642db69b8a53dc37b7477f46e22bc8642b20",
+    "bits/tungsten-llama/scripts/test_upstream_kernels.sh": "3253072bf0a4ee2194fb3ccd3abfb2f8648d44dd28f4470ca31bacf0d68a0981",
+    "bits/tungsten-llama/scripts/test_upstream_router.cu": "aa8681665225faf573ca15f56094475ada22c63e137dcb59a8d81aeb123d4c22",
+    "bits/tungsten-llama/scripts/test_upstream_router_cuda.sh": "4e6653d626aa214ec09a56b4fc172c89241bf1b4f1592ef73157593292f406ff",
+    "scripts/bench/qwen38fn_mlx.w": "8646b55b277f7d8fc22450ccca8233d6dc79dd2745007d8dcb9dde15e2a7bbbe"
+  }
+}

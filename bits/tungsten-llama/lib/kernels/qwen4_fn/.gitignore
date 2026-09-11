@@ -1,0 +1,2 @@
+# Handwritten CUDA source, not a compiler-emitted sidecar.
+!router_softmax_topk10_warp.cu

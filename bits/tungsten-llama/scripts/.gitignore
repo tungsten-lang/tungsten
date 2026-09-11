@@ -1,0 +1,2 @@
+# Handwritten CUDA regression oracle, not a generated sidecar.
+!test_upstream_router.cu

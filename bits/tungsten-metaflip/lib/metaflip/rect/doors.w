@@ -585,9 +585,18 @@ use ../rect
 
 # stats: loaded, rejected, saved, write-failures.
 -> ffrda_load_anchored(best_path, leader, anchors, n, m, p, capacity, seed_base, dslack, cycles, workq, wanderq, bank, stats) i64
+  paths = []
   slot = 0 ## i64
   while slot < ffrda_cap()
-    path = ffrda_path(best_path, slot)
+    paths.push(ffrda_path(best_path, slot))
+    slot += 1
+  ffrda_load_paths(paths, leader, anchors, n, m, p, capacity, seed_base, dslack, cycles, workq, wanderq, bank, stats)
+
+# Same gate for any explicit slot list (side doors, cross-shape feedback spool).
+-> ffrda_load_paths(paths, leader, anchors, n, m, p, capacity, seed_base, dslack, cycles, workq, wanderq, bank, stats) i64
+  slot = 0 ## i64
+  while slot < paths.size()
+    path = paths[slot]
     body = read_file(path)
     if body != nil && body.size() > 0
       candidate = i64[ffr_state_size(capacity)]

@@ -9,6 +9,7 @@ import sys
 import tempfile
 
 from refinement_worker_parity_test import exact
+from packed_composition_parity_test import naive
 from verify_representation_portfolio import parse_terms
 from composition_queue_test import audit as audit_composition
 from composition_queue_test import value
@@ -18,7 +19,7 @@ from wide_transform_queue_test import audit as audit_transforms
 from wide_feedback_test import audit as audit_feedback
 
 
-def run(binary, root, tensor, enabled, seconds=2, require_outputs=True):
+def run(binary, root, tensor, enabled, seconds=2, require_outputs=True, extra=()):
     root.mkdir(parents=True, exist_ok=True)
     status = root/'status.txt'
     best = root/'best.txt'
@@ -26,7 +27,7 @@ def run(binary, root, tensor, enabled, seconds=2, require_outputs=True):
                '--no-gpu', '--no-tui', '--quiet', '--secs', str(seconds),
                '--rounds', '1000000000', '--steps', '65536',
                '--state-dir', str(root/'state'), '--run-tag', 'refinement-test',
-               '--status', str(status), '--best', str(best)]
+               '--status', str(status), '--best', str(best), *extra]
     env = dict(os.environ, METAFLIP_REFINEMENT=str(enabled),
                METAFLIP_COMPOSITION_MIXED='1',
                OMP_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1',
@@ -104,6 +105,7 @@ def run(binary, root, tensor, enabled, seconds=2, require_outputs=True):
         assert int(fields['wide_feedback_submitted'])==feedback_checks['submitted']
         assert int(fields['wide_feedback_completed'])==feedback_checks['consumed']
         assert int(fields['wide_feedback_pending'])==feedback_checks['pending']
+        assert int(fields['wide_feedback_offered'])>=0 and int(fields['wide_feedback_loaded'])>=0
         if (transforms/'last').exists():
             last = list(map(int,(transforms/'last').read_text().split()))
             assert last == [int(fields['wide_transform_status']),int(fields['wide_transform_delta'])]
@@ -130,6 +132,52 @@ def check_at(binary, root):
     assert int(resumed['refine_completed']) >= int(first['refine_completed'])
     assert int(resumed['refine_duplicates']) > 0
     run(binary, root/'disabled', '2x5x6', 0, seconds=1)
+    # A cross-shape feedback slot spooled for this shape under the shared state
+    # root is admitted only through the campaign's own exact loader (square
+    # near bank; rectangular side archive) and reported as wide_feedback_loaded.
+    # Slots are rank+1 term splits of packaged seeds: no rank-record claim.
+    seeds = Path(__file__).resolve().parents[1]/'lib/metaflip/seeds/gf2'
+    def split(terms, axis):
+        index = next(i for i, term in enumerate(terms) if term[axis] & (term[axis]-1))
+        term = list(terms[index]); low = term[axis] & -term[axis]
+        rest = list(term); rest[axis] ^= low; term[axis] = low
+        return terms[:index] + [tuple(term), tuple(rest)] + terms[index+1:]
+    def spool(case, shape, slots):
+        for slot, (name, rank, axes) in enumerate(slots):
+            terms = parse_terms((seeds/name).read_bytes(), rank)
+            for axis in axes:
+                terms = split(terms, axis)
+            exact(shape, terms)
+            path = case/'state/banks/gf2'/('%dx%dx%d' % shape)/f'feedback/feedback_0{slot}.txt'
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(f'{len(terms)}\n' + ''.join(f'{u} {v} {w}\n' for u, v, w in sorted(terms)))
+    # Algebraic +1 escapes of the packaged leader already fill near1 (a single
+    # Strassen split is a duplicate there), so spool a different packaged
+    # basin's split and a rank+2 double split: distinct exact tensors.
+    spool(root/'square-feedback', (2, 2, 2), [('matmul_2x2_rank7_d36_gl120_gf2.txt', 7, [1]),
+                                              ('matmul_2x2_rank7_strassen_gf2.txt', 7, [1, 0])])
+    fed = run(binary, root/'square-feedback', '2x2', 1, require_outputs=False)
+    assert int(fed['wide_feedback_loaded']) == 2, fed
+    assert int(first['wide_feedback_loaded']) == 0 and int(square['wide_feedback_loaded']) == 0
+    spool(root/'rect-feedback', (2, 5, 6), [('matmul_2x5x6_rank47_catalog_gf2.txt', 47, [1])])
+    fed = run(binary, root/'rect-feedback', '2x5x6', 1, require_outputs=False, extra=('--rect-door-ticket', '0'))
+    assert int(fed['wide_feedback_loaded']) == 1, fed
+    assert int(fed['side_archive_loaded']) == 1, fed
+    # A spooled slot strictly below the loaded best crosses the checkpoint
+    # gate and becomes the starting best, also for an unsalted explicit --seed
+    # start that loads no side archive. Start from the 28-term naive 2x2x7
+    # scheme (the packaged rank-26 door is cleaned to 25 at the anchor gate)
+    # and spool the packaged rank-25 seed. No rank-record claim.
+    case = root/'rect-spool-best'
+    case.mkdir(parents=True)
+    start = case/'naive_2x2x7.txt'
+    terms = naive((2, 2, 7))
+    exact((2, 2, 7), terms)
+    start.write_text(f'{len(terms)}\n' + ''.join(f'{u} {v} {w}\n' for u, v, w in terms))
+    spool(case, (2, 2, 7), [('matmul_2x2x7_rank25_d128_rect_portfolio_gf2.txt', 25, [])])
+    fed = run(binary, case, '2x2x7', 1, require_outputs=False, extra=('--seed', str(start)))
+    assert int(fed['best_rank']) == 25 and int(fed['wide_feedback_loaded']) == 1, fed
+    assert int(fed['side_archive_loaded']) == 0, fed
 
 
 def check(binary, retained=None):

@@ -50,6 +50,10 @@ def check(public, transform, retained=None):
     after=audit(spool)
     assert all(ticket<=after['consumed'] for ticket,_,_ in matches)
     assert int(status['wide_feedback_seed_uses'])>0
+    # Projections of this parent are 2x5x6 (matching, seeded live) or shapes
+    # outside the live allowlist, so nothing is spooled for another campaign.
+    assert int(status['wide_feedback_offered'])==0 and int(status['wide_feedback_loaded'])==0
+    assert not list((case/'state').glob('banks/gf2/*/feedback'))
     assert all((spool/'by-id'/identity).exists() for _,identity,_ in matches)
     result=dict(complete=True,record_claim=False,before=before,after=after,
                 matching_projected_outputs=matches,seed_uses=int(status['wide_feedback_seed_uses']))

@@ -2454,14 +2454,18 @@ if CYCLE_MODE != 0 && QUIET == 0
 # structures, keeping ordinary 2x2..7x7 runs on their existing runtime hot
 # path; the rectangular coordinator renders the same TUI from its own loop.
 if RECT_PORTFOLIO == 1
+  # Children receive explicit --best/--status paths; forward an explicit state
+  # root so their cross-shape feedback spool stays under the same tree.
+  if STATE_DIR_EXPLICIT != 0
+    Env.set("METAFLIP_HOME", STATE_DIR)
   result = ffrpo_run(RECT_SHAPES, RUNTIME_ROOT, STATE_DIR.to_s(), BEST_PATH, BEST_EXPLICIT, STATUS_PATH, STATUS_EXPLICIT, RUN_TAG, J, STEPS, MAX_ROUNDS, MAX_SECS, RECT_EPOCH_ROUNDS, DSLACK, CYCLES, GPU, GPU_WALKERS, GPU_POLICY, GPU_STEPS, GPU_EPOCH_ROUNDS, GPU_BINARY, GPU_REBUILD, QUIET, TUI, STOP_ON_RECORD, SEED_NAIVE, System.executable_path()) ## i64
   exit(result)
 
 if RECT_MODE == 1
   if RECT_PORTFOLIO_CHILD != 0
-    result = ffrc_run_seeded(TENSOR_LABEL, RUNTIME_ROOT, SEED_PATH, BEST_PATH, STATUS_PATH, RUN_TAG, J, STEPS, MAX_ROUNDS, MAX_SECS, DSLACK, CYCLES, RECORD_OVERRIDE, GPU, GPU_WALKERS, GPU_STEPS, GPU_EPOCH_ROUNDS, GPU_BINARY, GPU_REBUILD, QUIET, TUI, STOP_ON_RECORD, SEED_NAIVE, 1, RECT_RESTART_NONCE, RECT_DOOR_TICKET) ## i64
+    result = ffrc_run_seeded(TENSOR_LABEL, RUNTIME_ROOT, SEED_PATH, BEST_PATH, STATUS_PATH, RUN_TAG, J, STEPS, MAX_ROUNDS, MAX_SECS, DSLACK, CYCLES, RECORD_OVERRIDE, GPU, GPU_WALKERS, GPU_STEPS, GPU_EPOCH_ROUNDS, GPU_BINARY, GPU_REBUILD, QUIET, TUI, STOP_ON_RECORD, SEED_NAIVE, 1, RECT_RESTART_NONCE, RECT_DOOR_TICKET, STATE_DIR) ## i64
     exit(result)
-  result = ffrc_run_scheduled(TENSOR_LABEL, RUNTIME_ROOT, SEED_PATH, BEST_PATH, STATUS_PATH, RUN_TAG, J, STEPS, MAX_ROUNDS, MAX_SECS, DSLACK, CYCLES, RECORD_OVERRIDE, GPU, GPU_WALKERS, GPU_STEPS, GPU_EPOCH_ROUNDS, GPU_BINARY, GPU_REBUILD, QUIET, TUI, STOP_ON_RECORD, SEED_NAIVE, 0, RECT_RESTART_NONCE, RECT_DOOR_TICKET, CYCLE_FIELDS, CYCLE_CAPTION, CYCLE_DEADLINE_MS) ## i64
+  result = ffrc_run_scheduled(TENSOR_LABEL, RUNTIME_ROOT, SEED_PATH, BEST_PATH, STATUS_PATH, RUN_TAG, J, STEPS, MAX_ROUNDS, MAX_SECS, DSLACK, CYCLES, RECORD_OVERRIDE, GPU, GPU_WALKERS, GPU_STEPS, GPU_EPOCH_ROUNDS, GPU_BINARY, GPU_REBUILD, QUIET, TUI, STOP_ON_RECORD, SEED_NAIVE, 0, RECT_RESTART_NONCE, RECT_DOOR_TICKET, CYCLE_FIELDS, CYCLE_CAPTION, CYCLE_DEADLINE_MS, STATE_DIR) ## i64
   if CYCLE_MODE != 0 && result == 0
     cycle_status = read_file(STATUS_PATH)
     if ffrpo_status_i64(cycle_status, "stop_requested", 1) == 0
@@ -2661,6 +2665,12 @@ if NEAR_DIR != ""
   # Snapshot whatever the bank holds at startup (algebraic + loaded) so the
   # near-dir is never empty while the campaign is still filling.
   z = ffn_dump_near_dirs(near1, near2, NEAR_DIR, RUN_TAG) ## i64
+# Checked cross-shape feedback spooled for this shape by other campaigns enters
+# only through the same near-bank reconstruction gate as any file-backed dump.
+feedback_loaded = 0 ## i64
+if SEED_NAIVE == 0 && ffrf_spool_enabled() == 1
+  feedback_loaded = ffn_load_near_bank(ffrf_spool_dir(STATE_DIR, N, N, N), "feedback", ffrf_spool_slots(), N, CAPACITY, STATE_SIZE, 83001, DSLACK, CYCLES, balanced_work, balanced_wander, near1, near1_signatures, near1_uses, near1_successes, near1_capacity, NEAR_SIGNATURE_QUOTA, 2, near_counters)
+  bank_count += feedback_loaded
 mi = 0 ## i64
 while mi < archive.size()
   z = ffme_add_copy(map_states, map_keys, map_uses, map_sources, archive[mi], ffw_best_rank(best), N, MAP_CAPACITY, 0, STATE_SIZE, 6001 + mi)
@@ -3535,7 +3545,8 @@ coreml = nil
 refinement_root = STATUS_PATH + ".refinement"
 if SEED_NAIVE != 0
   refinement_root = refinement_root + "-naive-" + ccall("__w_clock_ms").to_s()
-refinement = MetaflipRefinement.new(refinement_root, System.executable_path(), RUNTIME_ROOT)
+refinement = MetaflipRefinement.new(refinement_root, System.executable_path(), RUNTIME_ROOT, STATE_DIR)
+z = refinement.spool_loaded(feedback_loaded)
 refinement_candidate = i64[STATE_SIZE]
 refinement_output = i64[STATE_SIZE]
 refinement_ready = 0 ## i64
@@ -3794,7 +3805,7 @@ while running == 1
             z = coreml.invalidate()
           z = refinement.stop()
           refinement_generation += 1
-          refinement = MetaflipRefinement.new(STATUS_PATH + ".refinement-reset-" + now_ms.to_s() + "-" + refinement_generation.to_s(), System.executable_path(), RUNTIME_ROOT)
+          refinement = MetaflipRefinement.new(STATUS_PATH + ".refinement-reset-" + now_ms.to_s() + "-" + refinement_generation.to_s(), System.executable_path(), RUNTIME_ROOT, STATE_DIR)
           refinement_ready = 0
           z = refinement.submit(best, N, N, N)
           best_source = "manual-naive-reset"

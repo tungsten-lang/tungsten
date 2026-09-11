@@ -300,7 +300,16 @@ composition backpressure. Excess work stays durable; this is not a disk quota.
 `METAFLIP_WIDE_FEEDBACK=0` disables publication and pauses consumption without
 discarding the archive. `wide_feedback_*` reports submitted/completed/pending,
 failures, oversized/unsupported live seeds, and actual live `seed_uses` (not
-merely queue consumption). See the
+merely queue consumption). A consumed descendant of a *different* live-seedable
+shape (square 2x2..7x7 or an allowlisted rectangle) is re-verified as a full
+tensor and spooled as a bare rank-header scheme into that shape's
+`banks/gf2/<n>x<m>x<p>/feedback/feedback_00..07.txt` under the shared state
+root (`wide_feedback_offered`); a full spool keeps the lowest ranks, ties by
+lower body SHA-256, so replay is a no-op and the slot set stays finite. The
+next non-naive campaign for that shape admits those slots only through its
+existing exact loader (square near bank; rectangular side archive when that
+archive is enabled) and reports `wide_feedback_loaded`. No allowlist widens
+and no rank-record claim follows from a spooled slot. See the
 [feedback and square-restriction audit](tools/WIDE-FEEDBACK-2026-09-11.md).
 
 `compose_submitted/completed/pending/failures` sum the two primary lanes, separately from

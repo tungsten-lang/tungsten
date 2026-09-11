@@ -1,0 +1,808 @@
+{
+  "utc": "2026-09-11T17:44:09.070690+00:00",
+  "scope": "Focused diagnostic; 3 interleaved rounds, not a broad performance qualification. Host also running Lean proof checks.",
+  "source_base": "656b7624a4cfc93318e3a4a2aa069584d73e25c2",
+  "remote_main_base": "ce09bdfc553e667a9f5be5ca4c0db102d98603db",
+  "cpu": "Apple M5 Max",
+  "platform": "macOS-26.6.2-arm64-arm-64bit",
+  "load_end": [
+    9.3623046875,
+    8.12646484375,
+    8.75146484375
+  ],
+  "compiler": "Apple clang version 21.0.0 (clang-2100.0.123.102)",
+  "build": "make -C runtime bench_powmod (same harness compiled against each pinned runtime source)",
+  "runtime_hashes": {
+    "candidate": "443eec4c728ff78888e11f6aac851123a71366ff786d5b2ca6cc8d1612f6648d",
+    "before-fermat": "10d93de075ca43d69a1151362a4a00c3c1b2d9a8728490a23cf72109d8f9103f",
+    "remote-main": "f887706ff5268c4da351dda1d46d270c6b80661eca0929e259cbe113e7d81220"
+  },
+  "benchmark_sha256": "0e643be67add7696e76f26e4c970433c91df391db106e4cb01a39aa404cd1615",
+  "raw": [
+    {
+      "round": 0,
+      "variant": "remote-main",
+      "cells": [
+        {
+          "case": "k=8 e=3",
+          "us_per_op": 0.4685,
+          "checksum": "7ebd3686ca1da7e3"
+        },
+        {
+          "case": "k=8 e=65537",
+          "us_per_op": 1.2783,
+          "checksum": "b24e3c340f665fd8"
+        },
+        {
+          "case": "k=8 e=full(512 bits)",
+          "us_per_op": 25.419,
+          "checksum": "71c59452d747c528"
+        },
+        {
+          "case": "k=16 e=3",
+          "us_per_op": 1.032,
+          "checksum": "e2a51e1b570d9b8c"
+        },
+        {
+          "case": "k=16 e=65537",
+          "us_per_op": 2.832,
+          "checksum": "5f4823f82a85aff0"
+        },
+        {
+          "case": "k=16 e=full(1024 bits)",
+          "us_per_op": 133.8571,
+          "checksum": "61281377a5dd50a2"
+        },
+        {
+          "case": "k=32 e=3",
+          "us_per_op": 3.505,
+          "checksum": "96b5ca7c91b9ea0d"
+        },
+        {
+          "case": "k=32 e=65537",
+          "us_per_op": 10.4436,
+          "checksum": "6ead7e1e95bd3058"
+        },
+        {
+          "case": "k=32 e=full(2048 bits)",
+          "us_per_op": 1000.4,
+          "checksum": "b7e1643fe03001c4"
+        },
+        {
+          "case": "bn254 e=p-1",
+          "us_per_op": 4.6029,
+          "checksum": "00000000000f4243"
+        },
+        {
+          "case": "bn254 e=p-2",
+          "us_per_op": 4.7106,
+          "checksum": "91910e8ad721486c"
+        },
+        {
+          "case": "secp256k1 e=p-1",
+          "us_per_op": 4.9285,
+          "checksum": "00000000000f4243"
+        },
+        {
+          "case": "secp256k1 e=p-2",
+          "us_per_op": 4.9015,
+          "checksum": "ffffd8ee7f6b0d48"
+        }
+      ]
+    },
+    {
+      "round": 0,
+      "variant": "before-fermat",
+      "cells": [
+        {
+          "case": "k=8 e=3",
+          "us_per_op": 0.3155,
+          "checksum": "7ebd3686ca1da7e3"
+        },
+        {
+          "case": "k=8 e=65537",
+          "us_per_op": 0.9205,
+          "checksum": "b24e3c340f665fd8"
+        },
+        {
+          "case": "k=8 e=full(512 bits)",
+          "us_per_op": 25.9238,
+          "checksum": "71c59452d747c528"
+        },
+        {
+          "case": "k=16 e=3",
+          "us_per_op": 0.6967,
+          "checksum": "e2a51e1b570d9b8c"
+        },
+        {
+          "case": "k=16 e=65537",
+          "us_per_op": 2.358,
+          "checksum": "5f4823f82a85aff0"
+        },
+        {
+          "case": "k=16 e=full(1024 bits)",
+          "us_per_op": 135.5952,
+          "checksum": "61281377a5dd50a2"
+        },
+        {
+          "case": "k=32 e=3",
+          "us_per_op": 1.825,
+          "checksum": "96b5ca7c91b9ea0d"
+        },
+        {
+          "case": "k=32 e=65537",
+          "us_per_op": 10.1203,
+          "checksum": "6ead7e1e95bd3058"
+        },
+        {
+          "case": "k=32 e=full(2048 bits)",
+          "us_per_op": 1067.0667,
+          "checksum": "b7e1643fe03001c4"
+        },
+        {
+          "case": "bn254 e=p-1",
+          "us_per_op": 5.4722,
+          "checksum": "00000000000f4243"
+        },
+        {
+          "case": "bn254 e=p-2",
+          "us_per_op": 5.9859,
+          "checksum": "91910e8ad721486c"
+        },
+        {
+          "case": "secp256k1 e=p-1",
+          "us_per_op": 5.974,
+          "checksum": "00000000000f4243"
+        },
+        {
+          "case": "secp256k1 e=p-2",
+          "us_per_op": 5.4729,
+          "checksum": "ffffd8ee7f6b0d48"
+        }
+      ]
+    },
+    {
+      "round": 0,
+      "variant": "candidate",
+      "cells": [
+        {
+          "case": "k=8 e=3",
+          "us_per_op": 0.342,
+          "checksum": "7ebd3686ca1da7e3"
+        },
+        {
+          "case": "k=8 e=65537",
+          "us_per_op": 1.2948,
+          "checksum": "b24e3c340f665fd8"
+        },
+        {
+          "case": "k=8 e=full(512 bits)",
+          "us_per_op": 33.6762,
+          "checksum": "71c59452d747c528"
+        },
+        {
+          "case": "k=16 e=3",
+          "us_per_op": 0.8113,
+          "checksum": "e2a51e1b570d9b8c"
+        },
+        {
+          "case": "k=16 e=65537",
+          "us_per_op": 3.014,
+          "checksum": "5f4823f82a85aff0"
+        },
+        {
+          "case": "k=16 e=full(1024 bits)",
+          "us_per_op": 153.0,
+          "checksum": "61281377a5dd50a2"
+        },
+        {
+          "case": "k=32 e=3",
+          "us_per_op": 2.2625,
+          "checksum": "96b5ca7c91b9ea0d"
+        },
+        {
+          "case": "k=32 e=65537",
+          "us_per_op": 10.8722,
+          "checksum": "6ead7e1e95bd3058"
+        },
+        {
+          "case": "k=32 e=full(2048 bits)",
+          "us_per_op": 1200.7333,
+          "checksum": "b7e1643fe03001c4"
+        },
+        {
+          "case": "bn254 e=p-1",
+          "us_per_op": 0.0064,
+          "checksum": "00000000000f4243"
+        },
+        {
+          "case": "bn254 e=p-2",
+          "us_per_op": 5.3406,
+          "checksum": "91910e8ad721486c"
+        },
+        {
+          "case": "secp256k1 e=p-1",
+          "us_per_op": 0.0061,
+          "checksum": "00000000000f4243"
+        },
+        {
+          "case": "secp256k1 e=p-2",
+          "us_per_op": 5.6073,
+          "checksum": "ffffd8ee7f6b0d48"
+        }
+      ]
+    },
+    {
+      "round": 1,
+      "variant": "candidate",
+      "cells": [
+        {
+          "case": "k=8 e=3",
+          "us_per_op": 0.3432,
+          "checksum": "7ebd3686ca1da7e3"
+        },
+        {
+          "case": "k=8 e=65537",
+          "us_per_op": 0.9565,
+          "checksum": "b24e3c340f665fd8"
+        },
+        {
+          "case": "k=8 e=full(512 bits)",
+          "us_per_op": 31.6381,
+          "checksum": "71c59452d747c528"
+        },
+        {
+          "case": "k=16 e=3",
+          "us_per_op": 0.6267,
+          "checksum": "e2a51e1b570d9b8c"
+        },
+        {
+          "case": "k=16 e=65537",
+          "us_per_op": 2.3,
+          "checksum": "5f4823f82a85aff0"
+        },
+        {
+          "case": "k=16 e=full(1024 bits)",
+          "us_per_op": 143.5,
+          "checksum": "61281377a5dd50a2"
+        },
+        {
+          "case": "k=32 e=3",
+          "us_per_op": 1.7925,
+          "checksum": "96b5ca7c91b9ea0d"
+        },
+        {
+          "case": "k=32 e=65537",
+          "us_per_op": 8.2932,
+          "checksum": "6ead7e1e95bd3058"
+        },
+        {
+          "case": "k=32 e=full(2048 bits)",
+          "us_per_op": 1289.2667,
+          "checksum": "b7e1643fe03001c4"
+        },
+        {
+          "case": "bn254 e=p-1",
+          "us_per_op": 0.0061,
+          "checksum": "00000000000f4243"
+        },
+        {
+          "case": "bn254 e=p-2",
+          "us_per_op": 5.1427,
+          "checksum": "91910e8ad721486c"
+        },
+        {
+          "case": "secp256k1 e=p-1",
+          "us_per_op": 0.0054,
+          "checksum": "00000000000f4243"
+        },
+        {
+          "case": "secp256k1 e=p-2",
+          "us_per_op": 5.4361,
+          "checksum": "ffffd8ee7f6b0d48"
+        }
+      ]
+    },
+    {
+      "round": 1,
+      "variant": "before-fermat",
+      "cells": [
+        {
+          "case": "k=8 e=3",
+          "us_per_op": 0.3375,
+          "checksum": "7ebd3686ca1da7e3"
+        },
+        {
+          "case": "k=8 e=65537",
+          "us_per_op": 1.4051,
+          "checksum": "b24e3c340f665fd8"
+        },
+        {
+          "case": "k=8 e=full(512 bits)",
+          "us_per_op": 29.8095,
+          "checksum": "71c59452d747c528"
+        },
+        {
+          "case": "k=16 e=3",
+          "us_per_op": 0.618,
+          "checksum": "e2a51e1b570d9b8c"
+        },
+        {
+          "case": "k=16 e=65537",
+          "us_per_op": 2.58,
+          "checksum": "5f4823f82a85aff0"
+        },
+        {
+          "case": "k=16 e=full(1024 bits)",
+          "us_per_op": 174.0476,
+          "checksum": "61281377a5dd50a2"
+        },
+        {
+          "case": "k=32 e=3",
+          "us_per_op": 2.33,
+          "checksum": "96b5ca7c91b9ea0d"
+        },
+        {
+          "case": "k=32 e=65537",
+          "us_per_op": 10.8496,
+          "checksum": "6ead7e1e95bd3058"
+        },
+        {
+          "case": "k=32 e=full(2048 bits)",
+          "us_per_op": 1220.2667,
+          "checksum": "b7e1643fe03001c4"
+        },
+        {
+          "case": "bn254 e=p-1",
+          "us_per_op": 5.5264,
+          "checksum": "00000000000f4243"
+        },
+        {
+          "case": "bn254 e=p-2",
+          "us_per_op": 5.6378,
+          "checksum": "91910e8ad721486c"
+        },
+        {
+          "case": "secp256k1 e=p-1",
+          "us_per_op": 5.7334,
+          "checksum": "00000000000f4243"
+        },
+        {
+          "case": "secp256k1 e=p-2",
+          "us_per_op": 5.9031,
+          "checksum": "ffffd8ee7f6b0d48"
+        }
+      ]
+    },
+    {
+      "round": 1,
+      "variant": "remote-main",
+      "cells": [
+        {
+          "case": "k=8 e=3",
+          "us_per_op": 0.5773,
+          "checksum": "7ebd3686ca1da7e3"
+        },
+        {
+          "case": "k=8 e=65537",
+          "us_per_op": 1.7472,
+          "checksum": "b24e3c340f665fd8"
+        },
+        {
+          "case": "k=8 e=full(512 bits)",
+          "us_per_op": 37.981,
+          "checksum": "71c59452d747c528"
+        },
+        {
+          "case": "k=16 e=3",
+          "us_per_op": 1.5233,
+          "checksum": "e2a51e1b570d9b8c"
+        },
+        {
+          "case": "k=16 e=65537",
+          "us_per_op": 3.882,
+          "checksum": "5f4823f82a85aff0"
+        },
+        {
+          "case": "k=16 e=full(1024 bits)",
+          "us_per_op": 167.2857,
+          "checksum": "61281377a5dd50a2"
+        },
+        {
+          "case": "k=32 e=3",
+          "us_per_op": 4.4075,
+          "checksum": "96b5ca7c91b9ea0d"
+        },
+        {
+          "case": "k=32 e=65537",
+          "us_per_op": 14.218,
+          "checksum": "6ead7e1e95bd3058"
+        },
+        {
+          "case": "k=32 e=full(2048 bits)",
+          "us_per_op": 1225.0,
+          "checksum": "b7e1643fe03001c4"
+        },
+        {
+          "case": "bn254 e=p-1",
+          "us_per_op": 5.3533,
+          "checksum": "00000000000f4243"
+        },
+        {
+          "case": "bn254 e=p-2",
+          "us_per_op": 5.2804,
+          "checksum": "91910e8ad721486c"
+        },
+        {
+          "case": "secp256k1 e=p-1",
+          "us_per_op": 5.4732,
+          "checksum": "00000000000f4243"
+        },
+        {
+          "case": "secp256k1 e=p-2",
+          "us_per_op": 5.498,
+          "checksum": "ffffd8ee7f6b0d48"
+        }
+      ]
+    },
+    {
+      "round": 2,
+      "variant": "remote-main",
+      "cells": [
+        {
+          "case": "k=8 e=3",
+          "us_per_op": 0.5015,
+          "checksum": "7ebd3686ca1da7e3"
+        },
+        {
+          "case": "k=8 e=65537",
+          "us_per_op": 1.4366,
+          "checksum": "b24e3c340f665fd8"
+        },
+        {
+          "case": "k=8 e=full(512 bits)",
+          "us_per_op": 31.181,
+          "checksum": "71c59452d747c528"
+        },
+        {
+          "case": "k=16 e=3",
+          "us_per_op": 1.2413,
+          "checksum": "e2a51e1b570d9b8c"
+        },
+        {
+          "case": "k=16 e=65537",
+          "us_per_op": 3.92,
+          "checksum": "5f4823f82a85aff0"
+        },
+        {
+          "case": "k=16 e=full(1024 bits)",
+          "us_per_op": 185.7857,
+          "checksum": "61281377a5dd50a2"
+        },
+        {
+          "case": "k=32 e=3",
+          "us_per_op": 4.4125,
+          "checksum": "96b5ca7c91b9ea0d"
+        },
+        {
+          "case": "k=32 e=65537",
+          "us_per_op": 13.9398,
+          "checksum": "6ead7e1e95bd3058"
+        },
+        {
+          "case": "k=32 e=full(2048 bits)",
+          "us_per_op": 1233.2,
+          "checksum": "b7e1643fe03001c4"
+        },
+        {
+          "case": "bn254 e=p-1",
+          "us_per_op": 5.0911,
+          "checksum": "00000000000f4243"
+        },
+        {
+          "case": "bn254 e=p-2",
+          "us_per_op": 5.123,
+          "checksum": "91910e8ad721486c"
+        },
+        {
+          "case": "secp256k1 e=p-1",
+          "us_per_op": 5.1307,
+          "checksum": "00000000000f4243"
+        },
+        {
+          "case": "secp256k1 e=p-2",
+          "us_per_op": 5.5542,
+          "checksum": "ffffd8ee7f6b0d48"
+        }
+      ]
+    },
+    {
+      "round": 2,
+      "variant": "before-fermat",
+      "cells": [
+        {
+          "case": "k=8 e=3",
+          "us_per_op": 0.4235,
+          "checksum": "7ebd3686ca1da7e3"
+        },
+        {
+          "case": "k=8 e=65537",
+          "us_per_op": 1.3593,
+          "checksum": "b24e3c340f665fd8"
+        },
+        {
+          "case": "k=8 e=full(512 bits)",
+          "us_per_op": 33.4476,
+          "checksum": "71c59452d747c528"
+        },
+        {
+          "case": "k=16 e=3",
+          "us_per_op": 0.714,
+          "checksum": "e2a51e1b570d9b8c"
+        },
+        {
+          "case": "k=16 e=65537",
+          "us_per_op": 2.684,
+          "checksum": "5f4823f82a85aff0"
+        },
+        {
+          "case": "k=16 e=full(1024 bits)",
+          "us_per_op": 174.119,
+          "checksum": "61281377a5dd50a2"
+        },
+        {
+          "case": "k=32 e=3",
+          "us_per_op": 2.11,
+          "checksum": "96b5ca7c91b9ea0d"
+        },
+        {
+          "case": "k=32 e=65537",
+          "us_per_op": 10.1504,
+          "checksum": "6ead7e1e95bd3058"
+        },
+        {
+          "case": "k=32 e=full(2048 bits)",
+          "us_per_op": 1294.9333,
+          "checksum": "b7e1643fe03001c4"
+        },
+        {
+          "case": "bn254 e=p-1",
+          "us_per_op": 5.1723,
+          "checksum": "00000000000f4243"
+        },
+        {
+          "case": "bn254 e=p-2",
+          "us_per_op": 4.9645,
+          "checksum": "91910e8ad721486c"
+        },
+        {
+          "case": "secp256k1 e=p-1",
+          "us_per_op": 5.268,
+          "checksum": "00000000000f4243"
+        },
+        {
+          "case": "secp256k1 e=p-2",
+          "us_per_op": 5.3686,
+          "checksum": "ffffd8ee7f6b0d48"
+        }
+      ]
+    },
+    {
+      "round": 2,
+      "variant": "candidate",
+      "cells": [
+        {
+          "case": "k=8 e=3",
+          "us_per_op": 0.4307,
+          "checksum": "7ebd3686ca1da7e3"
+        },
+        {
+          "case": "k=8 e=65537",
+          "us_per_op": 1.3713,
+          "checksum": "b24e3c340f665fd8"
+        },
+        {
+          "case": "k=8 e=full(512 bits)",
+          "us_per_op": 39.2286,
+          "checksum": "71c59452d747c528"
+        },
+        {
+          "case": "k=16 e=3",
+          "us_per_op": 0.758,
+          "checksum": "e2a51e1b570d9b8c"
+        },
+        {
+          "case": "k=16 e=65537",
+          "us_per_op": 2.482,
+          "checksum": "5f4823f82a85aff0"
+        },
+        {
+          "case": "k=16 e=full(1024 bits)",
+          "us_per_op": 144.381,
+          "checksum": "61281377a5dd50a2"
+        },
+        {
+          "case": "k=32 e=3",
+          "us_per_op": 1.67,
+          "checksum": "96b5ca7c91b9ea0d"
+        },
+        {
+          "case": "k=32 e=65537",
+          "us_per_op": 8.7594,
+          "checksum": "6ead7e1e95bd3058"
+        },
+        {
+          "case": "k=32 e=full(2048 bits)",
+          "us_per_op": 1251.4667,
+          "checksum": "b7e1643fe03001c4"
+        },
+        {
+          "case": "bn254 e=p-1",
+          "us_per_op": 0.0051,
+          "checksum": "00000000000f4243"
+        },
+        {
+          "case": "bn254 e=p-2",
+          "us_per_op": 4.9806,
+          "checksum": "91910e8ad721486c"
+        },
+        {
+          "case": "secp256k1 e=p-1",
+          "us_per_op": 0.0049,
+          "checksum": "00000000000f4243"
+        },
+        {
+          "case": "secp256k1 e=p-2",
+          "us_per_op": 5.1815,
+          "checksum": "ffffd8ee7f6b0d48"
+        }
+      ]
+    }
+  ],
+  "summary": [
+    {
+      "case": "k=8 e=3",
+      "median_us_per_op": {
+        "remote-main": 0.5015,
+        "before-fermat": 0.3375,
+        "candidate": 0.3432
+      },
+      "candidate_over_before_fermat": 1.0168888888888887,
+      "candidate_over_remote_main": 0.6843469591226322
+    },
+    {
+      "case": "k=8 e=65537",
+      "median_us_per_op": {
+        "remote-main": 1.4366,
+        "before-fermat": 1.3593,
+        "candidate": 1.2948
+      },
+      "candidate_over_before_fermat": 0.9525491061575811,
+      "candidate_over_remote_main": 0.9012947236530696
+    },
+    {
+      "case": "k=8 e=full(512 bits)",
+      "median_us_per_op": {
+        "remote-main": 31.181,
+        "before-fermat": 29.8095,
+        "candidate": 33.6762
+      },
+      "candidate_over_before_fermat": 1.1297136818799376,
+      "candidate_over_remote_main": 1.0800230909848947
+    },
+    {
+      "case": "k=16 e=3",
+      "median_us_per_op": {
+        "remote-main": 1.2413,
+        "before-fermat": 0.6967,
+        "candidate": 0.758
+      },
+      "candidate_over_before_fermat": 1.0879862207549877,
+      "candidate_over_remote_main": 0.6106501248690889
+    },
+    {
+      "case": "k=16 e=65537",
+      "median_us_per_op": {
+        "remote-main": 3.882,
+        "before-fermat": 2.58,
+        "candidate": 2.482
+      },
+      "candidate_over_before_fermat": 0.962015503875969,
+      "candidate_over_remote_main": 0.639361154044307
+    },
+    {
+      "case": "k=16 e=full(1024 bits)",
+      "median_us_per_op": {
+        "remote-main": 167.2857,
+        "before-fermat": 174.0476,
+        "candidate": 144.381
+      },
+      "candidate_over_before_fermat": 0.8295489279944108,
+      "candidate_over_remote_main": 0.8630803469752645
+    },
+    {
+      "case": "k=32 e=3",
+      "median_us_per_op": {
+        "remote-main": 4.4075,
+        "before-fermat": 2.11,
+        "candidate": 1.7925
+      },
+      "candidate_over_before_fermat": 0.8495260663507109,
+      "candidate_over_remote_main": 0.40669313669880885
+    },
+    {
+      "case": "k=32 e=65537",
+      "median_us_per_op": {
+        "remote-main": 13.9398,
+        "before-fermat": 10.1504,
+        "candidate": 8.7594
+      },
+      "candidate_over_before_fermat": 0.8629610655737705,
+      "candidate_over_remote_main": 0.6283734343390867
+    },
+    {
+      "case": "k=32 e=full(2048 bits)",
+      "median_us_per_op": {
+        "remote-main": 1225.0,
+        "before-fermat": 1220.2667,
+        "candidate": 1251.4667
+      },
+      "candidate_over_before_fermat": 1.0255681811197503,
+      "candidate_over_remote_main": 1.021605469387755
+    },
+    {
+      "case": "bn254 e=p-1",
+      "median_us_per_op": {
+        "remote-main": 5.0911,
+        "before-fermat": 5.4722,
+        "candidate": 0.0061
+      },
+      "candidate_over_before_fermat": 0.0011147253389861482,
+      "candidate_over_remote_main": 0.0011981693543634971
+    },
+    {
+      "case": "bn254 e=p-2",
+      "median_us_per_op": {
+        "remote-main": 5.123,
+        "before-fermat": 5.6378,
+        "candidate": 5.1427
+      },
+      "candidate_over_before_fermat": 0.9121820568306785,
+      "candidate_over_remote_main": 1.0038454030841302
+    },
+    {
+      "case": "secp256k1 e=p-1",
+      "median_us_per_op": {
+        "remote-main": 5.1307,
+        "before-fermat": 5.7334,
+        "candidate": 0.0054
+      },
+      "candidate_over_before_fermat": 0.0009418495133777516,
+      "candidate_over_remote_main": 0.0010524879646052197
+    },
+    {
+      "case": "secp256k1 e=p-2",
+      "median_us_per_op": {
+        "remote-main": 5.498,
+        "before-fermat": 5.4729,
+        "candidate": 5.4361
+      },
+      "candidate_over_before_fermat": 0.9932759597288457,
+      "candidate_over_remote_main": 0.9887413604947253
+    }
+  ],
+  "validation": {
+    "powmod_spec": 73,
+    "entry_spec": 32,
+    "prime_spec": "PASS",
+    "independent_pow": 132,
+    "oracle_lanes": [
+      "debug",
+      "release/native/fast"
+    ],
+    "fixed_guard_values_recomputed": 27,
+    "spec_classification": "PASS: 726 classified; negative controls reject unclassified specs"
+  },
+  "benchmark_source": "#include <stdint.h>\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n#include <time.h>\n\n/* Times bigint_powmod_any on RSA-shaped inputs: odd k-limb moduli with the\n * top bit set, small public exponents (3, 65537) and a full-width exponent.\n * Includes runtime.c directly, like bench_bigint.c. */\n#include \"runtime.c\"\n\nstatic double bench_now(void) {\n    struct timespec ts;\n    clock_gettime(CLOCK_MONOTONIC, &ts);\n    return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;\n}\n\nstatic uint64_t bench_rng(uint64_t *state) {\n    uint64_t x = *state;\n    x ^= x >> 12; x ^= x << 25; x ^= x >> 27;\n    *state = x;\n    return x * 2685821657736338717ULL;\n}\n\nstatic WValue bench_value(int32_t n, uint64_t seed, int modulus) {\n    WBigint *b = bigint_alloc(n);\n    uint64_t state = seed;\n    for (int32_t i = 0; i < n; i++) b->limbs[i] = bench_rng(&state);\n    if (modulus) { b->limbs[0] |= 1ULL; b->limbs[n - 1] |= 1ULL << 63; }\n    else b->limbs[n - 1] &= ~(1ULL << 63);      /* base < modulus */\n    b->size = n;\n    return bigint_box(b);\n}\n\nstatic void bench_run(const char *name, WValue base, WValue e, WValue m, int iters) {\n    uint64_t sum = 0;\n    for (int i = 0; i < 3; i++) {\n        WValue r = bigint_powmod_any(base, e, m);\n        uint64_t s; int32_t l; const uint64_t *rl = integer_limbs(r, &s, &l);\n        sum += l ? rl[0] : 0;\n        if (w_is_bigint(r)) bigint_backing_free(w_as_bigint(r));\n    }\n    double t0 = bench_now();\n    for (int i = 0; i < iters; i++) {\n        WValue r = bigint_powmod_any(base, e, m);\n        uint64_t s; int32_t l; const uint64_t *rl = integer_limbs(r, &s, &l);\n        sum += l ? rl[0] : 0;\n        if (w_is_bigint(r)) bigint_backing_free(w_as_bigint(r));\n    }\n    double dt = (bench_now() - t0) / iters;\n    printf(\"%-28s %10.4f us/op   (checksum %016llx)\\n\", name, dt * 1e6,\n           (unsigned long long)sum);\n}\n\nstatic void bench_fermat(void) {\n    const uint64_t primes[2][4] = {\n        {0x3c208c16d87cfd47ULL, 0x97816a916871ca8dULL,\n         0xb85045b68181585dULL, 0x30644e72e131a029ULL},\n        {0xfffffffefffffc2fULL, UINT64_MAX, UINT64_MAX, UINT64_MAX}\n    };\n    const char *names[2] = {\"bn254\", \"secp256k1\"};\n    for (int i = 0; i < 2; i++) {\n        WBigint *m = bigint_alloc(4), *e = bigint_alloc(4);\n        memcpy(m->limbs, primes[i], sizeof primes[i]);\n        memcpy(e->limbs, primes[i], sizeof primes[i]);\n        m->size = e->size = 4;\n        e->limbs[0]--;\n        char name[64];\n        snprintf(name, sizeof name, \"%s e=p-1\", names[i]);\n        if (bigint_powmod_any(w_box_int(2), bigint_box(e), bigint_box(m)) != w_box_int(1)) {\n            fprintf(stderr, \"incorrect Fermat result: %s\\n\", names[i]);\n            exit(1);\n        }\n        bench_run(name, w_box_int(2), bigint_box(e), bigint_box(m), 1000000);\n        e->limbs[0]--;                 /* guard miss: ordinary inversion */\n        snprintf(name, sizeof name, \"%s e=p-2\", names[i]);\n        bench_run(name, w_box_int(2), bigint_box(e), bigint_box(m), 20000);\n        bigint_backing_free(e);\n        bigint_backing_free(m);\n    }\n}\n\nint main(int argc, char **argv) {\n    (void)argc; (void)argv;\n    int32_t ks[3] = {8, 16, 32};\n    for (int ki = 0; ki < 3; ki++) {\n        int32_t k = ks[ki];\n        WValue m = bench_value(k, 0x9e3779b97f4a7c15ULL + (uint64_t)k, 1);\n        WValue b = bench_value(k, 0xd1b54a32d192ed03ULL + (uint64_t)k, 0);\n        WValue efull = bench_value(k, 0xa0761d6478bd642fULL + (uint64_t)k, 0);\n        char name[64];\n        int base_iters = k == 32 ? 400 : k == 16 ? 1500 : 4000;\n        snprintf(name, sizeof name, \"k=%d e=3\", k);\n        bench_run(name, b, w_box_int(3), m, base_iters);\n        snprintf(name, sizeof name, \"k=%d e=65537\", k);\n        bench_run(name, b, w_box_int(65537), m, base_iters / 3);\n        snprintf(name, sizeof name, \"k=%d e=full(%d bits)\", k, 64 * k);\n        bench_run(name, b, efull, m, base_iters / 40 + 5);\n    }\n    bench_fermat();\n    return 0;\n}\n",
+  "oracle_fixture_sha256": "05b5d49b70664eb5e664ec9c6279b6144f7113fe5c615f5a4b4f0a2866356d12"
+}

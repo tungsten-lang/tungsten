@@ -3,11 +3,16 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <errno.h>
+#include <limits.h>
 
 /* Times bigint_powmod_any on RSA-shaped inputs: odd k-limb moduli with the
  * top bit set, small public exponents (3, 65537) and a full-width exponent.
  * Includes runtime.c directly, like bench_bigint.c. */
 #include "runtime.c"
+
+static const char *bench_filter;
+static int bench_iters, bench_matched;
 
 static double bench_now(void) {
     struct timespec ts;
@@ -33,6 +38,9 @@ static WValue bench_value(int32_t n, uint64_t seed, int modulus) {
 }
 
 static void bench_run(const char *name, WValue base, WValue e, WValue m, int iters) {
+    if (bench_filter && strcmp(name, bench_filter) != 0) return;
+    bench_matched++;
+    if (bench_iters) iters = bench_iters;
     uint64_t sum = 0;
     for (int i = 0; i < 3; i++) {
         WValue r = bigint_powmod_any(base, e, m);
@@ -48,12 +56,51 @@ static void bench_run(const char *name, WValue base, WValue e, WValue m, int ite
         if (w_is_bigint(r)) bigint_backing_free(w_as_bigint(r));
     }
     double dt = (bench_now() - t0) / iters;
-    printf("%-28s %10.2f us/op   (checksum %016llx)\n", name, dt * 1e6,
+    printf("%-28s %10.4f us/op   (checksum %016llx)\n", name, dt * 1e6,
            (unsigned long long)sum);
 }
 
+static void bench_fermat(void) {
+    const uint64_t primes[2][4] = {
+        {0x3c208c16d87cfd47ULL, 0x97816a916871ca8dULL,
+         0xb85045b68181585dULL, 0x30644e72e131a029ULL},
+        {0xfffffffefffffc2fULL, UINT64_MAX, UINT64_MAX, UINT64_MAX}
+    };
+    const char *names[2] = {"bn254", "secp256k1"};
+    for (int i = 0; i < 2; i++) {
+        WBigint *m = bigint_alloc(4), *e = bigint_alloc(4);
+        memcpy(m->limbs, primes[i], sizeof primes[i]);
+        memcpy(e->limbs, primes[i], sizeof primes[i]);
+        m->size = e->size = 4;
+        e->limbs[0]--;
+        char name[64];
+        snprintf(name, sizeof name, "%s e=p-1", names[i]);
+        if (bigint_powmod_any(w_box_int(2), bigint_box(e), bigint_box(m)) != w_box_int(1)) {
+            fprintf(stderr, "incorrect Fermat result: %s\n", names[i]);
+            exit(1);
+        }
+        bench_run(name, w_box_int(2), bigint_box(e), bigint_box(m), 1000000);
+        e->limbs[0]--;                 /* guard miss: ordinary inversion */
+        snprintf(name, sizeof name, "%s e=p-2", names[i]);
+        bench_run(name, w_box_int(2), bigint_box(e), bigint_box(m), 20000);
+        bigint_backing_free(e);
+        bigint_backing_free(m);
+    }
+}
+
 int main(int argc, char **argv) {
-    (void)argc; (void)argv;
+    if (argc != 1) {
+        char *end;
+        errno = 0;
+        long count = argc == 4 ? strtol(argv[3], &end, 10) : 0;
+        if (argc != 4 || strcmp(argv[1], "--block") || errno ||
+            count <= 0 || count > INT_MAX || *end) {
+            fprintf(stderr, "usage: %s [--block 'case name' iterations]\n", argv[0]);
+            return 2;
+        }
+        bench_filter = argv[2];
+        bench_iters = (int)count;
+    }
     int32_t ks[3] = {8, 16, 32};
     for (int ki = 0; ki < 3; ki++) {
         int32_t k = ks[ki];
@@ -68,6 +115,11 @@ int main(int argc, char **argv) {
         bench_run(name, b, w_box_int(65537), m, base_iters / 3);
         snprintf(name, sizeof name, "k=%d e=full(%d bits)", k, 64 * k);
         bench_run(name, b, efull, m, base_iters / 40 + 5);
+    }
+    bench_fermat();
+    if (!bench_matched) {
+        fprintf(stderr, "unknown benchmark case: %s\n", bench_filter);
+        return 2;
     }
     return 0;
 }

@@ -58652,6 +58652,29 @@ static WValue w_powmod_u64_odd_e1(uint64_t b0, uint64_t e, int eb, uint64_t n) {
     return bigint_from_u64(res);
 }
 
+#if BN_ALGEBRAIC_IDENTITY_FAST
+/* Recognize e = p - 1 for the BN254 and secp256k1 base-field primes.
+ * Constants are little-endian 64-bit limbs from EIP-196 and SEC 2 v2 §2.4.1:
+ * https://eips.ethereum.org/EIPS/eip-196
+ * https://www.secg.org/sec2-v2.pdf
+ * These are exact prime checks, not a probable-prime test. Both low limbs
+ * are nonzero, so subtracting one never borrows into the upper limbs. */
+static inline int w_powm_fermat_prime_exponent(const uint64_t *m, int32_t mlen,
+                                             const uint64_t *e, int32_t elen) {
+    if (mlen != 4 || elen != 4) return 0;
+    if (e[0] != m[0] - 1 || e[1] != m[1] ||
+        e[2] != m[2] || e[3] != m[3]) return 0;
+    return (m[0] == 0x3c208c16d87cfd47ULL &&
+            m[1] == 0x97816a916871ca8dULL &&
+            m[2] == 0xb85045b68181585dULL &&
+            m[3] == 0x30644e72e131a029ULL) ||
+           (m[0] == 0xfffffffefffffc2fULL &&
+            m[1] == 0xffffffffffffffffULL &&
+            m[2] == 0xffffffffffffffffULL &&
+            m[3] == 0xffffffffffffffffULL);
+}
+#endif
+
 WValue bigint_powmod_any(WValue base, WValue expv, WValue modv) {
     if (!w_is_integer_any(base) || !w_is_integer_any(expv) ||
         !w_is_integer_any(modv))
@@ -58722,6 +58745,17 @@ WValue bigint_powmod_any(WValue base, WValue expv, WValue modv) {
     int rneg = lr < 0;
     int32_t rabs = rneg ? -lr : lr;
     if (rabs == 0) return w_box_int(0);                    /* base ≡ 0, e ≥ 1 */
+
+#if BN_ALGEBRAIC_IDENTITY_FAST
+    if (w_powm_fermat_prime_exponent(ml, mabs, el, le)) {
+        /* Fermat: a nonzero residue has a^(p-1) = 1 mod p. Divisible
+         * bases already returned zero above. Signs need no fold here;
+         * the modulus magnitude and nonzero test suffice. */
+        if (r0v != base && w_is_bigint(r0v))
+            bigint_release_if_live(w_as_bigint(r0v));
+        return w_box_int(1);
+    }
+#endif
 
     /* The ctx wants a positive modulus value; |m| drives everything else. */
     WBigint *mposb = NULL;

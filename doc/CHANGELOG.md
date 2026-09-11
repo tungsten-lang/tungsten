@@ -2,14 +2,21 @@
 
 ## Unreleased
 
+- **`Integer#modpow` recognizes two exact Fermat identities** — for the
+  BN254 and secp256k1 base-field primes with exponent `p - 1`, it returns
+  zero for divisible bases and one otherwise. All modulus/exponent limbs
+  are checked; signed and oversized bases retain their existing semantics.
+  Added guard-miss regressions and an independent Python-pow oracle. See
+  [the MODEXP transfer audit](design/montgomery-entry.md).
+
 - **`Integer#modpow` enters Montgomery form by one division** — the runtime's
   Montgomery ladder (odd moduli of 3 limbs and up) used to compute
   R² = B^2k mod n by a 2k-by-k division and then pay two Montgomery
   multiplies of setup (base·R² and R mod n). It now converts the base with a
   single division of base·B^k (the limb-shift-and-reduce entry from the
-  EIP-8200 MODEXP work), and the odd-power window table only builds the rows
-  the exponent's sliding windows actually select — a fixed exponent such as
-  65537 = 2^16 + 1 builds none. RSA-shaped 32-limb calls: e=3 3.4 → 1.7 µs,
+  EIP-8200 MODEXP work), and the odd-power window table only builds the prefix
+  through the largest row selected by the exponent — a fixed exponent such as
+  65537 = 2^16 + 1 builds no additional powers. RSA-shaped 32-limb calls: e=3 3.4 → 1.7 µs,
   e=65537 10.3 → 7.8 µs, full-width exponents unchanged (runtime
   `bench_powmod`, `make bench-powmod`). Prime testing keeps its full context.
   Spec: `spec/numeric/bigint_powmod_entry_spec.w`.

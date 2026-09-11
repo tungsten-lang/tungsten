@@ -154,3 +154,83 @@ No canonical seed, installed binary, live search, public catalogue, push or
 publication changed in this study. The next useful test is to propagate
 these checked representations into larger targets, rather than continue
 the unchanged negative 8x13x16 basis search.
+
+## Propagation and native-optimal-parent follow-up
+
+The next bounded run expands two more source-scoped candidates:
+
+| Canonical shape | Previous retained | Checked rank | Fresh Lille |
+| --- | ---: | ---: | ---: |
+| 7x17x32 | 2,450 | **2,440** | 2,444 |
+| 8x17x32 | 2,653 | **2,652** | 2,663 |
+
+These are literal products of 7x16x17/r1220 and 8x16x17/r1326 with
+the two-term 1x2x1 tensor, respectively, listed up to axis permutation.
+They are not two additional primitive search breakthroughs. Each product
+is fully expanded and checked; its rank doubles exactly.
+
+The propagation input bank contains one checked best representation for
+each of the 219 width-five targets, the eight preceding candidate shapes,
+and 95 checked scale tensors, including literal one-dimensional factors.
+At least one operand must come from the width-five bank. With every target
+dimension at most 32, the complete literal screen has **1,751 products
+and 1,829 compatible block sums**. Select the lowest formula price per
+canonical target and materialize every such winner below its pinned
+retained bound: nine tensors. All nine verify; seven improve local bounds
+without beating the frozen catalogue comparison. Other contexts could
+clean differently, so the shortlist is not a cleanup-optimality proof.
+
+The independent checker reconstructs the complete 3,580-context census,
+uses a separate coordinate implementation for product/sum replay, checks
+all 322 input tensors and the nine new outputs, and recomputes cleanup.
+Both independent and native full checkers reject one-bit corruptions of
+the two headline products. Fresh September 11 responses at 15:47 UTC
+confirm [7x17x32](https://fmm.univ-lille.fr/7x17x32.html) at 2,444 and
+[8x17x32](https://fmm.univ-lille.fr/8x17x32.html) at 2,663. Saved response
+hashes and ranks are checked during replay.
+
+| Shape | Full MFW1 SHA-256 |
+| --- | --- |
+| 7x17x32 | `58a6cf0ba5f67790c615b862099bfe62413aa9ae111cf5a191fa40e1a9c38764` |
+| 8x17x32 | `115751153adced83b5e4f3fd6285ff68692b9b2aefb5e544d63aff195a9de98a` |
+
+Separately, the newly implemented native optimal-parent cache supplies all
+**36 literal 2x2x2/r7 variants** from its 216 GL(2,2)^3 codes. An independent
+matrix-action implementation verifies the orbit equality and every parent.
+The width-3/4/5 allocation census containing a five has **23,940 contexts**
+across **31 canonical targets**. The two lowest formula-price contexts per
+target give 62 exact, independently replayed constructions. None beats
+the pinned retained bound. A corrupted endpoint is rejected by both full
+checkers. This closes that finite price census and shortlist, not all
+rank-seven parent algorithms, allocation widths or cleanup outcomes.
+
+The two materialization phases take about 1.4 and 2.1 seconds respectively
+on one low-priority CPU worker, without GPU use. Standalone package replay
+passes both phases. This finite negative supports backing off an
+unproductive optimal-parent visit; it does not justify banning optimal
+parents or asserting that other compositions cannot benefit.
+
+The study-series rollup is now **19 source-scoped candidate shapes** and
+**12,646 complete-object identities**: 12,575 preceding, nine propagated,
+and 62 optimal-parent endpoints. With 166 original inputs, there are 12,480
+non-input representations. There is still no main-square improvement or
+confirmed world-record claim.
+
+The follow-up bundle retains both cohorts, all input snapshots, native and
+independent checkers, censuses, recipes, results, reference responses and
+the prior identity receipt. Run `python3 -B replay.py` after extraction;
+NumPy and a host compatible with the bundled native binaries are required.
+
+```
+~/.local/share/tungsten-metaflip/evidence/2026-09-11-width-followup.tar.gz
+9,525,807 bytes; 926 payloads
+SHA256 252f99f9659fcab6a02f4325a0c8534630fc277f9678a9e1e101e9994da5c08b
+```
+
+Archive readback and a fresh extraction pass the complete payload manifest,
+including hardlinks, with no unmanifested payloads.
+
+No tensor files or default runtime changes are added to the repository by
+this follow-up. The next distinct construction family is to apply the
+mixed-width leaf bank to other small checked outer parents, rather than
+repeat this unchanged 2x2x2 orbit cohort.

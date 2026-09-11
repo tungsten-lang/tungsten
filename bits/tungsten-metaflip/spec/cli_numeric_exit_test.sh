@@ -33,6 +33,7 @@ expect_exit_2() {
 }
 
 for option in \
+  --cycle-secs --cycle-position --cycle-deadline-ms \
   --rect-epoch-rounds --rect-restart-nonce --rect-door-ticket \
   -J --walkers --steps --rounds --secs -d --density --cycles \
   --seed-nonce --record --gpu-walkers --gpu-steps --gpu-epoch-rounds \

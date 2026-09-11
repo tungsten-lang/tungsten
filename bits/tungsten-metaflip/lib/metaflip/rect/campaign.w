@@ -567,6 +567,9 @@ use doors
 # restart_door_ticket is an independent low-discrepancy schedule ordinal; it
 # must not replace the mixed nonce used for proposal RNG streams.
 -> ffrc_run_seeded(tensor, repo_root, seed_path, best_path, status_path, run_tag, walkers, steps, max_rounds, max_secs, dslack, cycles, record_override, gpu_requested, gpu_walkers, gpu_steps, gpu_epoch_rounds, gpu_binary, gpu_rebuild, quiet, tui, stop_on_record, naive_seed, portfolio_child, restart_nonce, restart_door_ticket) (String String String String String String i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 String i64 i64 i64 i64 i64 i64 i64 i64) i64
+  ffrc_run_scheduled(tensor, repo_root, seed_path, best_path, status_path, run_tag, walkers, steps, max_rounds, max_secs, dslack, cycles, record_override, gpu_requested, gpu_walkers, gpu_steps, gpu_epoch_rounds, gpu_binary, gpu_rebuild, quiet, tui, stop_on_record, naive_seed, portfolio_child, restart_nonce, restart_door_ticket, "", "", 0)
+
+-> ffrc_run_scheduled(tensor, repo_root, seed_path, best_path, status_path, run_tag, walkers, steps, max_rounds, max_secs, dslack, cycles, record_override, gpu_requested, gpu_walkers, gpu_steps, gpu_epoch_rounds, gpu_binary, gpu_rebuild, quiet, tui, stop_on_record, naive_seed, portfolio_child, restart_nonce, restart_door_ticket, cycle_fields, cycle_caption, cycle_deadline_ms) (String String String String String String i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 String i64 i64 i64 i64 i64 i64 i64 i64 String String i64) i64
   cpu_gpu_overlap = ffrc_cpu_gpu_mode(env("METAFLIP_RECT_CPU_GPU")) ## i64
   if cpu_gpu_overlap < 0
     << "RECT_ERROR code=cpu-gpu-policy METAFLIP_RECT_CPU_GPU must be barrier or overlap"
@@ -1508,6 +1511,7 @@ use doors
       status = status.strip() + " side_archive_cap=" + ffrda_cap().to_s() + " side_archive_loaded=" + side_archive_loaded.to_s() + " side_archive_seeded=" + side_archive_seeded.to_s() + " side_archive_checkpoints=" + side_archive_checkpoints.to_s() + " side_archive_saved=" + side_archive_stats[2].to_s() + " side_archive_rejects=" + side_archive_stats[1].to_s() + " side_archive_write_failures=" + side_archive_stats[3].to_s() + "\n"
       status = status.strip() + " cpu_gpu_overlap=" + cpu_gpu_overlap.to_s() + " cpu_followup_batches=" + cpu_followup_batches.to_s() + " cpu_followup_moves=" + cpu_followup_moves.to_s() + "\n"
       status = status.strip() + refinement.status_fields() + " refine_seed_uses=" + refinement_seed_uses.to_s() + "\n"
+      status = status.strip() + cycle_fields + "\n"
       status_ok = ffrc_atomic_write(status_path, status, run_tag, sequence)
       if status_ok == 1
         last_status_ms = now_ms
@@ -1527,12 +1531,16 @@ use doors
         frame_rows = ffrc_frame_rows(tensor, seed_door, walkers, round, elapsed_s, cpu_moves + gpu_moves, record, record_known, best, states, island_rates, island_ages, island_sources, phase_moves, gpu_requested, gpu_supported, gpu_ready, lanes, gpu_seed_rank, gpu_candidates, gpu_rank_drops, gpu_density_improvements, gpu_reward_milli, gpu_exposure, gpu_ms, gpu_failures, cpu_moves, cpu_drops, cpu_ties, timeline_times, timeline_ranks, timeline_count, elapsed_s - timeline_start_s, status_degraded, last_status_ms, sequence, now_ms, rank_levels, rank_ticks, rank_level_count, bits_levels, bits_ticks, bits_level_count, new_bests, tie_bests, exact_rejects, dslack, flash_text, flash_until_ms, width)
         refine_row = "  " + refinement.status_row()
         frame_rows.push(ff_tui_fit(refine_row, ff_tui_dim(refine_row), width))
+        if cycle_caption != ""
+          frame_rows.push(ff_tui_clip(cycle_caption, width))
         z = ffrc_render(frame_rows)
 
     round += 1
     if round >= max_rounds
       running = 0
     if max_secs > 0 && elapsed_s >= max_secs
+      running = 0
+    if cycle_deadline_ms > 0 && ccall("__w_clock_ms") >= cycle_deadline_ms
       running = 0
     if stop_on_record != 0 && ((proven_optimal == 0 && ffr_best_rank(best) < record) || (proven_optimal != 0 && ffr_best_rank(best) <= record))
       running = 0
@@ -1615,10 +1623,20 @@ use doors
   final_status = final_status.strip() + " side_archive_cap=" + ffrda_cap().to_s() + " side_archive_loaded=" + side_archive_loaded.to_s() + " side_archive_seeded=" + side_archive_seeded.to_s() + " side_archive_checkpoints=" + side_archive_checkpoints.to_s() + " side_archive_saved=" + side_archive_stats[2].to_s() + " side_archive_rejects=" + side_archive_stats[1].to_s() + " side_archive_write_failures=" + side_archive_stats[3].to_s() + "\n"
   final_status = final_status.strip() + " cpu_gpu_overlap=" + cpu_gpu_overlap.to_s() + " cpu_followup_batches=" + cpu_followup_batches.to_s() + " cpu_followup_moves=" + cpu_followup_moves.to_s() + "\n"
   final_status = final_status.strip() + refinement.status_fields() + " refine_seed_uses=" + refinement_seed_uses.to_s() + "\n"
+  stop_requested = 0 ## i64
+  if stop_key != 0 || ccall("__w_interrupted") != 0
+    stop_requested = 1
+  if stop_on_record != 0 && ((proven_optimal == 0 && ffr_best_rank(best) < record) || (proven_optimal != 0 && ffr_best_rank(best) <= record))
+    stop_requested = 1
+  final_status = final_status.strip() + " stop_requested=" + stop_requested.to_s() + "\n"
+  final_status = final_status.strip() + cycle_fields + "\n"
   status_ok = ffrc_atomic_write(status_path, final_status, run_tag, sequence + 1)
   saved = ffrc_dump_atomic(best, best_path, run_tag, sequence + 100000) ## i64
   if saved < 1
     << "RECT_ERROR code=final-checkpoint tensor=" + tensor + " path=" + best_path
+    return 2
+  if status_ok != 1
+    << "RECT_ERROR code=final-status tensor=" + tensor + " path=" + status_path
     return 2
   # A multi-shape parent owns the terminal and emits one atomic portfolio
   # frame/status record.  Suppress only the child summary in that mode; exact

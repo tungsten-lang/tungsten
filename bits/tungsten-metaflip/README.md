@@ -57,7 +57,7 @@ From the Tungsten monorepo:
 ```sh
 cd bits/tungsten-metaflip
 tungsten build
-bin/metaflip --tensor 5x5
+bin/metaflip
 ```
 
 `tungsten build` reads the `Bitfile` executable declaration and builds
@@ -80,6 +80,25 @@ semantics.
 Defaults are `-J max(logical CPUs - 2, 1)`, GPU enabled, TUI enabled, and
 `--secs 0` (no time limit). On an 18-core host this starts 16 CPU islands.
 Override them with `-J N`, `--no-gpu`, `--no-tui`, or `--secs N`.
+With no campaign selector, MetaFlip cycles through **all 34 supported live
+profiles**: squares 2x2 through 7x7, then the 28 supported rectangular
+profiles. Each gets **60 seconds of search**, using the full configured CPU
+and GPU allocation. Exact shutdown/checkpointing finishes before the next
+shape starts, so visits can take slightly longer than a minute, especially
+on a cold GPU cache. The foreground process replaces its search arena between
+visits; it does not accumulate workers or memory from completed campaigns.
+Checkpoints and banks remain separate for each shape and are reloaded on
+later visits. `q` or Ctrl-C stops the entire cycle, not just the current shape.
+
+Use `--tensor 5x5` to stay on one shape, or `--tensor all` to explicitly cycle.
+`--cycle-secs N` changes the per-shape search duration; `--cycle-shapes
+5x5,4x5x7,7x7` selects an ordered subset. `--secs N` sets one overall deadline,
+not reset between visits; initialization and in-flight work may finish after
+it. `--rounds N` remains a per-visit round cap.
+`--rect` still selects the separate adaptive rectangle-only portfolio and
+is **not needed** to include rectangles in the default cycle. Single-shape
+seed/record/checkpoint/near-bank/GPU-binary/Core-ML overrides require an explicit
+`--tensor SHAPE`, preventing accidental reuse across incompatible shapes.
 Specialized GPU workers are built and cached on first use. Press `q` or
 Ctrl-C in the TUI to stop.
 

@@ -7,6 +7,7 @@
 
 use core/system
 use cli
+use cycle
 use scheme
 use strategies/escape
 use fleet/banks
@@ -1846,7 +1847,11 @@ use paths
   << "Exact GF(2) matrix-multiplication decomposition search."
   << ""
   << "Campaign selection:"
-  << "  --tensor SHAPE          square 2x2..7x7 or a supported rectangular shape"
+  << "  (default)               cycle all supported shapes, 60 seconds each"
+  << "  --tensor SHAPE          pin one square 2x2..7x7 or rectangular shape"
+  << "  --tensor all            explicitly select the default cycling mode"
+  << "  --cycle-shapes LIST     cycle a comma-separated square/rectangle subset"
+  << "  --cycle-secs N          search seconds per shape (default: 60)"
   << "  --rect                  adaptive multi-shape rectangular portfolio"
   << "  --rect-shapes LIST      comma-separated rectangular portfolio subset"
   << "  --seed PATH             start from one exact decomposition"
@@ -1888,6 +1893,14 @@ RECT_DOOR_TICKET = 0 - 1 ## i64
 RECT_RESTART_EXPLICIT = 0 ## i64
 RECT_DOOR_EXPLICIT = 0 ## i64
 TENSOR_EXPLICIT = 0 ## i64
+CYCLE_MODE = 0 ## i64
+CYCLE_EXPLICIT = 0 ## i64
+CYCLE_SHAPES = ""
+CYCLE_SECS = 60 ## i64
+CYCLE_POSITION = 0 ## i64
+CYCLE_DEADLINE_MS = 0 ## i64
+CYCLE_FIELDS = ""
+CYCLE_CAPTION = ""
 J = 0 ## i64
 J_EXPLICIT = 0 ## i64
 STEPS = 500000 ## i64
@@ -1954,6 +1967,10 @@ value_options.push("--coreml-model")
 value_options.push("--coreml-helper")
 value_options.push("--coreml-workers")
 value_options.push("--coreml-compute")
+value_options.push("--cycle-shapes")
+value_options.push("--cycle-secs")
+value_options.push("--cycle-position")
+value_options.push("--cycle-deadline-ms")
 ai = 0 ## i64
 while ai < av.size()
   arg = av[ai]
@@ -1975,6 +1992,9 @@ while ai < av.size()
   if arg == "--tensor" && ai + 1 < av.size()
     TENSOR_EXPLICIT = 1
     TENSOR_LABEL = av[ai + 1].downcase
+    if TENSOR_LABEL == "all"
+      CYCLE_EXPLICIT = 1
+      TENSOR_EXPLICIT = 0
     N = ffcli_parse_square_tensor(TENSOR_LABEL)
     RECT_MODE = 0
     if N == 0 && ffrp_supported_label(TENSOR_LABEL) == 1
@@ -1982,6 +2002,25 @@ while ai < av.size()
     ai += 1
   if arg == "--rect"
     RECT_PORTFOLIO = 1
+  if arg == "--cycle-shapes"
+    CYCLE_EXPLICIT = 1
+    CYCLE_SHAPES = av[ai + 1]
+    if CYCLE_SHAPES == ""
+      << "metaflip: --cycle-shapes may not be empty"
+      exit(2)
+    ai += 1
+  if arg == "--cycle-secs"
+    CYCLE_EXPLICIT = 1
+    CYCLE_SECS = ffcli_require_i64(arg, av[ai + 1])
+    ai += 1
+  if arg == "--cycle-position"
+    CYCLE_EXPLICIT = 1
+    CYCLE_POSITION = ffcli_require_i64(arg, av[ai + 1])
+    ai += 1
+  if arg == "--cycle-deadline-ms"
+    CYCLE_EXPLICIT = 1
+    CYCLE_DEADLINE_MS = ffcli_require_i64(arg, av[ai + 1])
+    ai += 1
   if arg == "--rect-shapes" && ai + 1 < av.size()
     RECT_SHAPES = av[ai + 1].downcase
     RECT_PORTFOLIO = 1
@@ -2142,6 +2181,45 @@ if CPU_WANDER_SPEC != "" && ffcli_parse_move_portfolio(CPU_WANDER_SPEC, cli_move
   << "metaflip: --cpu-wander-moves requires four positive comma-separated budgets"
   exit(2)
 
+if CYCLE_EXPLICIT != 0 && (TENSOR_EXPLICIT != 0 || RECT_PORTFOLIO != 0 || SELF_TEST != 0)
+  << "metaflip: cycling conflicts with --tensor SHAPE, --rect, and --self-test"
+  exit(2)
+if TENSOR_EXPLICIT == 0 && RECT_PORTFOLIO == 0 && SELF_TEST == 0
+  CYCLE_MODE = 1
+if CYCLE_SECS < 1 || CYCLE_SECS > 86400
+  << "metaflip: --cycle-secs must be 1 through 86400"
+  exit(2)
+if CYCLE_POSITION < 0 || CYCLE_DEADLINE_MS < 0 || MAX_SECS < 0 || MAX_SECS > 9223372036854775
+  << "metaflip: invalid negative or overflowing cycle/time limit"
+  exit(2)
+cycle_labels = []
+if CYCLE_MODE != 0
+  if SEED_PATH != "" || RECORD_OVERRIDE != 0 || BEST_EXPLICIT != 0 || NEAR_EXPLICIT != 0 || GPU_BINARY != "" || COREML_MODEL != "" || RECT_RESTART_EXPLICIT != 0 || RECT_DOOR_EXPLICIT != 0
+    << "metaflip: shape-specific seed, record, best, near-dir, GPU binary, Core ML or rectangular nonce options require --tensor SHAPE"
+    exit(2)
+  if CYCLE_SHAPES == ""
+    cycle_labels = ffcy_default_shapes()
+  else
+    if ffcy_parse_shapes(CYCLE_SHAPES, cycle_labels) == 0
+      << "metaflip: --cycle-shapes requires distinct supported square or rectangular labels"
+      exit(2)
+  TENSOR_LABEL = cycle_labels[CYCLE_POSITION % cycle_labels.size()]
+  N = ffcli_parse_square_tensor(TENSOR_LABEL)
+  RECT_MODE = 0
+  if N == 0
+    RECT_MODE = 1
+  cycle_now = ccall("__w_clock_ms") ## i64
+  if CYCLE_DEADLINE_MS == 0 && MAX_SECS > 0
+    if MAX_SECS > (9223372036854775807 - cycle_now) / 1000
+      << "metaflip: --secs overflows the cycle deadline"
+      exit(2)
+    CYCLE_DEADLINE_MS = cycle_now + MAX_SECS * 1000
+  MAX_SECS = ffcy_slice_seconds(CYCLE_SECS, CYCLE_DEADLINE_MS, cycle_now)
+  if MAX_SECS == 0
+    exit(0)
+  CYCLE_FIELDS = " cycle_visit=" + CYCLE_POSITION.to_s() + " cycle_count=" + cycle_labels.size().to_s() + " cycle_seconds=" + CYCLE_SECS.to_s()
+  CYCLE_CAPTION = " | cycle " + (CYCLE_POSITION % cycle_labels.size() + 1).to_s() + "/" + cycle_labels.size().to_s() + " (" + CYCLE_SECS.to_s() + "s)"
+
 if RECT_PORTFOLIO != 0 && TENSOR_EXPLICIT != 0
   << "metaflip: --rect conflicts with --tensor; use --rect-shapes to select the portfolio"
   exit(2)
@@ -2264,6 +2342,9 @@ if RUNTIME_ROOT == ""
 
 if RUN_TAG == ""
   RUN_TAG = capture("printf '%s' $$").strip() + "_" + ccall("__w_clock_ms").to_s()
+  if CYCLE_MODE != 0
+    av.push("--run-tag")
+    av.push(RUN_TAG)
 if RUN_TAG.include?("/") || RUN_TAG.include?("..")
   << "metaflip: --run-tag may not contain '/' or '..'"
   exit(2)
@@ -2300,6 +2381,9 @@ if NEAR_EXPLICIT == 0 && RECT_PORTFOLIO == 0 && RECT_MODE == 0
 if state_dirs_ok == 0
   << "metaflip: could not create default live-state directories under " + STATE_DIR
   exit(2)
+if CYCLE_MODE != 0 && QUIET == 0
+  << "metaflip cycle: tensor=" + TENSOR_LABEL + CYCLE_FIELDS + " (checkpoint, then advance)"
+  flush()
 
 # Rectangular profiles share this entry point, CLI, and styled dashboard but
 # not the square state layout.  Dispatch before allocating any square worker
@@ -2313,7 +2397,11 @@ if RECT_MODE == 1
   if RECT_PORTFOLIO_CHILD != 0
     result = ffrc_run_seeded(TENSOR_LABEL, RUNTIME_ROOT, SEED_PATH, BEST_PATH, STATUS_PATH, RUN_TAG, J, STEPS, MAX_ROUNDS, MAX_SECS, DSLACK, CYCLES, RECORD_OVERRIDE, GPU, GPU_WALKERS, GPU_STEPS, GPU_EPOCH_ROUNDS, GPU_BINARY, GPU_REBUILD, QUIET, TUI, STOP_ON_RECORD, SEED_NAIVE, 1, RECT_RESTART_NONCE, RECT_DOOR_TICKET) ## i64
     exit(result)
-  result = ffrc_run_seeded(TENSOR_LABEL, RUNTIME_ROOT, SEED_PATH, BEST_PATH, STATUS_PATH, RUN_TAG, J, STEPS, MAX_ROUNDS, MAX_SECS, DSLACK, CYCLES, RECORD_OVERRIDE, GPU, GPU_WALKERS, GPU_STEPS, GPU_EPOCH_ROUNDS, GPU_BINARY, GPU_REBUILD, QUIET, TUI, STOP_ON_RECORD, SEED_NAIVE, 0, RECT_RESTART_NONCE, RECT_DOOR_TICKET) ## i64
+  result = ffrc_run_scheduled(TENSOR_LABEL, RUNTIME_ROOT, SEED_PATH, BEST_PATH, STATUS_PATH, RUN_TAG, J, STEPS, MAX_ROUNDS, MAX_SECS, DSLACK, CYCLES, RECORD_OVERRIDE, GPU, GPU_WALKERS, GPU_STEPS, GPU_EPOCH_ROUNDS, GPU_BINARY, GPU_REBUILD, QUIET, TUI, STOP_ON_RECORD, SEED_NAIVE, 0, RECT_RESTART_NONCE, RECT_DOOR_TICKET, CYCLE_FIELDS, CYCLE_CAPTION, CYCLE_DEADLINE_MS) ## i64
+  if CYCLE_MODE != 0 && result == 0
+    cycle_status = read_file(STATUS_PATH)
+    if ffrpo_status_i64(cycle_status, "stop_requested", 1) == 0
+      exit(ffcy_continue(System.executable_path(), av, CYCLE_POSITION, CYCLE_DEADLINE_MS, value_options))
   exit(result)
 
 RECORD = ffp_record(N) ## i64
@@ -5325,7 +5413,7 @@ while running == 1
     z = refinement.submit(best, N, N, N)
     sequence += 1
     z = ffcp_round_step_range(cpu_round_steps, J, cpu_epoch_range) ## i64
-    z = ffn_status(STATUS_PATH, RUN_TAG, "LIVE", now_ms, sequence, N, RECORD, RECORD_KNOWN, SEED_NONCE, cpu_epoch_target_ms, cpu_epoch_range[0], cpu_epoch_range[1], best, states, status_basin_stats, best_provenance, best_source, best_strategy, total_moves, elapsed_s, archive, near1, near2, symmetry, partial_auto_attempts, partial_auto_hits, partial_auto_admissions, partial_auto_map_admissions, GPU, gpu_degraded, refinement.status_fields() + " refine_seed_uses=" + refinement_seed_uses.to_s())
+    z = ffn_status(STATUS_PATH, RUN_TAG, "LIVE", now_ms, sequence, N, RECORD, RECORD_KNOWN, SEED_NONCE, cpu_epoch_target_ms, cpu_epoch_range[0], cpu_epoch_range[1], best, states, status_basin_stats, best_provenance, best_source, best_strategy, total_moves, elapsed_s, archive, near1, near2, symmetry, partial_auto_attempts, partial_auto_hits, partial_auto_admissions, partial_auto_map_admissions, GPU, gpu_degraded, refinement.status_fields() + " refine_seed_uses=" + refinement_seed_uses.to_s() + CYCLE_FIELDS)
     if z == 0
       gpu_degraded = 1
     if z == 1
@@ -5368,7 +5456,7 @@ while running == 1
         bits_levels[bits_level_count] = tick_bits
         bits_ticks[bits_level_count] = 1
         bits_level_count += 1
-      z = ffn_render(N, J, round, elapsed_s, total_moves, RECORD, RECORD_KNOWN, recovered, best, states, island_best_ranks, doors, zones, sources, last_rates, last_ages, cpu_work_moves, cpu_wander_moves, archive, ARCHIVE_CAP, near1, near1_capacity, near2, near2_capacity, symmetry, SYMMETRY_CAP, archive_counters, archive_min_cache, cohort_moves, cohort_drops, cohort_ties, cohort_near, timeline_times, timeline_ranks, timeline_count, elapsed_s - timeline_start_s, GPU, GPU_POLICY, gpu_degraded, gpu_lanes, gpu_candidates, gpu_rank_drops, gpu_density, gpu_rewards, gpu_lane_epochs, gpu_wall_ms, gpu_failures, gpu_disabled, gpu_retry_round, gpu_seed_ranks, gpu_pareto, gpu_pareto_archive, GPU_NOVELTY_CAP, gpu_pareto_counters, symmetry_cpu_uses, gpu_launch_number, pool_active_modes, pool_mode_ready, rect_enabled, rect_ready, rect_active, rect_lanes, rect_states, rect_archive_counts, rect_candidates, rect_rank_drops, rect_density, rect_rewards, rect_exposure, rect_failures, rect_retry_round, rect_composition_failures, last_status_ms, sequence, now_ms, rank_levels, rank_ticks, rank_level_count, bits_levels, bits_ticks, bits_level_count, new_bests, tie_bests, cycleouts, invalid_candidates, DSLACK, flash_text, flash_until_ms, refinement.status_row())
+      z = ffn_render(N, J, round, elapsed_s, total_moves, RECORD, RECORD_KNOWN, recovered, best, states, island_best_ranks, doors, zones, sources, last_rates, last_ages, cpu_work_moves, cpu_wander_moves, archive, ARCHIVE_CAP, near1, near1_capacity, near2, near2_capacity, symmetry, SYMMETRY_CAP, archive_counters, archive_min_cache, cohort_moves, cohort_drops, cohort_ties, cohort_near, timeline_times, timeline_ranks, timeline_count, elapsed_s - timeline_start_s, GPU, GPU_POLICY, gpu_degraded, gpu_lanes, gpu_candidates, gpu_rank_drops, gpu_density, gpu_rewards, gpu_lane_epochs, gpu_wall_ms, gpu_failures, gpu_disabled, gpu_retry_round, gpu_seed_ranks, gpu_pareto, gpu_pareto_archive, GPU_NOVELTY_CAP, gpu_pareto_counters, symmetry_cpu_uses, gpu_launch_number, pool_active_modes, pool_mode_ready, rect_enabled, rect_ready, rect_active, rect_lanes, rect_states, rect_archive_counts, rect_candidates, rect_rank_drops, rect_density, rect_rewards, rect_exposure, rect_failures, rect_retry_round, rect_composition_failures, last_status_ms, sequence, now_ms, rank_levels, rank_ticks, rank_level_count, bits_levels, bits_ticks, bits_level_count, new_bests, tie_bests, cycleouts, invalid_candidates, DSLACK, flash_text, flash_until_ms, CYCLE_CAPTION + " " + refinement.status_row())
   if QUIET == 0 && TUI == 0
     round_wr = ffn_wr_status(ffw_best_rank(best), RECORD, RECORD_KNOWN)
     << "round=" + round.to_s() + " best=" + ffw_best_rank(best).to_s() + " bits=" + ffw_best_bits(best).to_s() + " WR=" + RECORD.to_s() + " wr=" + round_wr + " moves=" + total_moves.to_s() + " exact_bad=" + invalid_candidates.to_s() + " archive=" + archive.size().to_s() + " near1=" + near1.size().to_s() + " near2=" + near2.size().to_s()
@@ -5396,6 +5484,8 @@ while running == 1
   if MAX_SECS > 0
     if elapsed_s >= MAX_SECS
       cpu_stopping = 1
+  if CYCLE_DEADLINE_MS > 0 && ccall("__w_clock_ms") >= CYCLE_DEADLINE_MS
+    cpu_stopping = 1
   if STOP_ON_RECORD == 1
     if ffw_best_rank(best) < RECORD
       cpu_stopping = 1
@@ -5645,7 +5735,7 @@ final_state = "DONE"
 if final_write_failed != 0
   final_state = "FAILED"
 z = ffcp_round_step_range(cpu_round_steps, J, cpu_epoch_range) ## i64
-status_ok = ffn_status(STATUS_PATH, RUN_TAG, final_state, final_ms, sequence + 1, N, RECORD, RECORD_KNOWN, SEED_NONCE, cpu_epoch_target_ms, cpu_epoch_range[0], cpu_epoch_range[1], best, states, status_basin_stats, best_provenance, best_source, best_strategy, total_moves, final_s, archive, near1, near2, symmetry, partial_auto_attempts, partial_auto_hits, partial_auto_admissions, partial_auto_map_admissions, GPU, gpu_degraded, refinement.status_fields() + " refine_seed_uses=" + refinement_seed_uses.to_s()) ## i64
+status_ok = ffn_status(STATUS_PATH, RUN_TAG, final_state, final_ms, sequence + 1, N, RECORD, RECORD_KNOWN, SEED_NONCE, cpu_epoch_target_ms, cpu_epoch_range[0], cpu_epoch_range[1], best, states, status_basin_stats, best_provenance, best_source, best_strategy, total_moves, final_s, archive, near1, near2, symmetry, partial_auto_attempts, partial_auto_hits, partial_auto_admissions, partial_auto_map_admissions, GPU, gpu_degraded, refinement.status_fields() + " refine_seed_uses=" + refinement_seed_uses.to_s() + CYCLE_FIELDS) ## i64
 if status_ok == 0
   final_write_failed = 1
 final_wr = ffn_wr_status(ffw_best_rank(best), RECORD, RECORD_KNOWN)
@@ -5665,3 +5755,6 @@ if TUI == 0
 flush()
 if final_write_failed != 0
   exit(1)
+if CYCLE_MODE != 0 && interrupted == 0 && stop_key == 0
+  if STOP_ON_RECORD == 0 || ffw_best_rank(best) >= RECORD
+    exit(ffcy_continue(System.executable_path(), av, CYCLE_POSITION, CYCLE_DEADLINE_MS, value_options))

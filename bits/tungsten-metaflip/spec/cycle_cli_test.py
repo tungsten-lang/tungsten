@@ -1,0 +1,114 @@
+#!/usr/bin/env python3
+"""Focused real-executable rotation, checkpoint, and terminal-stop checks."""
+import os
+from pathlib import Path
+import pty
+import re
+import select
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+
+BINARY = Path(os.environ.get('METAFLIP_TEST_BINARY', Path(__file__).resolve().parents[1] / 'bin/metaflip')).resolve()
+RUNTIME = Path(__file__).resolve().parents[1] / 'lib/metaflip'
+
+
+def fields(path):
+    if not path.exists():
+        return {}
+    return dict(token.split('=', 1) for token in path.read_text().split() if '=' in token)
+
+
+def run(args, timeout=40):
+    return subprocess.run([str(BINARY), '--runtime-root', str(RUNTIME), *args],
+                          text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout)
+
+
+def check_terminal_stop(root, shape, key):
+    path = root / ('terminal-' + shape + '-' + str(key[0]))
+    path.mkdir()
+    status = path / 'status.txt'
+    pid, master = pty.fork()
+    if pid == 0:
+        os.execv(str(BINARY), [str(BINARY), '--runtime-root', str(RUNTIME), '--cycle-shapes', shape + ',3x3',
+                              '--cycle-secs', '60', '-J', '1', '--steps', '200', '--no-gpu', '--tui',
+                              '--state-dir', str(path), '--status', str(status)])
+    output = bytearray()
+    sent = False
+    done = False
+    deadline = time.monotonic() + 30
+    try:
+        while time.monotonic() < deadline:
+            readable, _, _ = select.select([master], [], [], 0.05)
+            if readable:
+                try:
+                    output.extend(os.read(master, 65536))
+                except OSError:
+                    pass
+            live = fields(status)
+            if not sent and live.get('producer_state') in ('LIVE', 'running'):
+                os.write(master, key)
+                sent = True
+            waited, code = os.waitpid(pid, os.WNOHANG)
+            if waited:
+                assert os.waitstatus_to_exitcode(code) == 0, output[-6000:].decode(errors='replace')
+                done = True
+                break
+        assert sent and done, output[-6000:].decode(errors='replace')
+        body = fields(status)
+        assert body['tensor'] == shape and body['cycle_visit'] == '0', body
+        assert body['producer_state'] in ('DONE', 'stopped'), body
+        assert b'tensor=3x3' not in output, 'q/Ctrl-C advanced to another shape'
+    finally:
+        if not done:
+            os.killpg(pid, signal.SIGTERM)
+            time.sleep(0.2)
+            try:
+                os.killpg(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            os.waitpid(pid, 0)
+        os.close(master)
+
+
+with tempfile.TemporaryDirectory(prefix='metaflip-cycle-check-') as temp:
+    root = Path(temp)
+    for args, message in [(['--cycle-secs', '0'], '--cycle-secs'),
+                          (['--cycle-shapes', '5x5,05x05'], '--cycle-shapes'),
+                          (['--cycle-shapes', ''], '--cycle-shapes'),
+                          (['--cycle-shapes', '5x5,'], '--cycle-shapes'),
+                          (['--tensor', '5x5', '--cycle-secs', '1'], 'conflicts'),
+                          (['--rect', '--cycle-secs', '1'], 'conflicts'),
+                          (['--best', str(root / 'wrong-best')], 'shape-specific')]:
+        result = run(args)
+        assert result.returncode == 2 and message in result.stdout, (args, result.stdout)
+
+    state = root / 'rotation'
+    result = run(['--cycle-shapes', '2x2,2x2x5', '--cycle-secs', '1', '--secs', '5', '-J', '1',
+                  '--steps', '200', '--no-gpu', '--no-tui', '--state-dir', str(state)], timeout=25)
+    assert result.returncode == 0, result.stdout[-8000:]
+    visits = re.findall(r'metaflip cycle: tensor=(\S+) .*?cycle_visit=(\d+)', result.stdout)
+    assert len(visits) >= 3 and visits[:3] == [('2x2', '0'), ('2x2x5', '1'), ('2x2', '2')], visits
+    for shape in ('2x2x2', '2x2x5'):
+        assert (state / 'checkpoints/gf2' / shape / 'best.txt').exists()
+        statuses = list((state / 'runs/gf2' / shape).glob('*/status.txt'))
+        assert len(statuses) == 1, 'run tag changed, stranding the per-shape refinement queue'
+        data = fields(statuses[0])
+        assert data['cycle_count'] == '2' and data['cycle_seconds'] == '1', data
+        assert data.get('exact_rejects', '0') == '0', data
+
+    pinned = run(['--tensor', '2x2', '--rounds', '1', '--steps', '10', '-J', '1', '--no-gpu', '--no-tui',
+                  '--state-dir', str(root / 'pinned')])
+    assert pinned.returncode == 0 and 'metaflip cycle:' not in pinned.stdout, pinned.stdout
+    assert pinned.stdout.count('metaflip native done:') == 1
+    # The no-selector entry point also exercises the actual default 60s dwell.
+    default = run(['--secs', '1', '--steps', '100', '-J', '1', '--no-gpu', '--no-tui',
+                   '--state-dir', str(root / 'default')])
+    assert default.returncode == 0 and 'cycle_count=34 cycle_seconds=60' in default.stdout, default.stdout
+    for shape in ('2x2', '2x2x5'):
+        check_terminal_stop(root, shape, b'q')
+        check_terminal_stop(root, shape, b'\x03')
+
+print('PASS mixed cycling, resume paths, pinning, default dwell, q and Ctrl-C')

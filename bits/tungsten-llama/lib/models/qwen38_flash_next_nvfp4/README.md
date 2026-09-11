@@ -16,6 +16,18 @@ Weights land in `~/.cache/tungsten/qwen38-flash-next-nvfp4/` as symlinks plus
 three synthesized manifests (`index.slim.json`, `experts_manifest.json`,
 `ple_manifest.json` — see the prep script header).
 
+## Upstream CUDA/Metal kernel ports (2026-09-11)
+
+`FN_ROUTER_WARP=1` enables the exact 32-lane router in serial, multi-token
+and MTP paths. `FN_QSA_GROUP2=1` enables paired-head K/V reuse for active
+QSA prefill at widths >=64. The default paths remain unchanged pending
+full-model parity and throughput checks. `FN_NORM_THREADS=32|64|128` is an
+experimental normalization sweep, not a consistent performance gain.
+
+The ports, CUDA counterpart, exact-output tests, source pins and isolated
+timings are documented in
+[the upstream port report](../../../docs/upstream-cuda-metal-2026-09-11.md).
+
 ## Architecture vs Qwen3.8-27B (the working port this one clones)
 
 Same bones: 3:1 GatedDeltaNet : full-attention interval, identical GDN head

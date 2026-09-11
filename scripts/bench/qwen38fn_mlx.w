@@ -322,7 +322,17 @@ hc_lib = metal_compile_source(device, read_file(FN_DIR + "hc_ops.metal"))
 silu_div_pipe = metal_pipeline(hc_lib, "silu_div")
 hc_mix_reduce_pipe = metal_pipeline(hc_lib, "hc_mix_reduce")
 hc_combine_pipe = metal_pipeline(hc_lib, "hc_combine")
-router_pipe = metal_pipeline(metal_compile_source(device, read_file(FN_DIR + "router_softmax_topk10.metal")), "router_softmax_topk10")
+# FN_ROUTER_WARP=1 selects the exact 32-lane router. Retain the reference
+# default until matched full-model throughput and generated-ID checks pass.
+router_reference = ccall("__w_env", "FN_ROUTER_WARP") != "1"
+router_threads = 32
+router_warp_lib = nil
+if router_reference
+  router_threads = 512
+  router_pipe = metal_pipeline(metal_compile_source(device, read_file(FN_DIR + "router_softmax_topk10.metal")), "router_softmax_topk10")
+else
+  router_warp_lib = metal_compile_source(device, read_file(FN_DIR + "router_softmax_topk10_warp.metal"))
+  router_pipe = metal_pipeline(router_warp_lib, "router_softmax_topk10_warp")
 gather_pipe = metal_pipeline(metal_compile_source(device, read_file(FN_DIR + "moe_gather_nvfp4.metal")), "moe_gather_matvec")
 moe_combine_lib = metal_compile_source(device, read_file(FN_DIR + "moe_combine.metal"))
 moe_wsum_pipe = metal_pipeline(moe_combine_lib, "moe_weighted_sum")
@@ -349,6 +359,11 @@ qsa_select_pipe = metal_pipeline(qsa_lib, ccall("__w_env", "FN_QSA_PAR") == "0" 
 # FN_QSA_PAR=0 restores the per-position-barrier selected SDPA (ids A/B arm);
 # the default is the parallel clone of sdpa_prefill_multi_hd256.
 qsa_sdpa_pipe = metal_pipeline(qsa_lib, ccall("__w_env", "FN_QSA_PAR") == "0" ? "qsa_sdpa_selected" : "qsa_sdpa_selected_par")
+# CUDA-inspired K/V reuse across two query heads, gated to measured prefill
+# widths. FN_QSA_PAR=0 always keeps the original selected-attention path.
+qsa_group2_pipe = nil
+if ccall("__w_env", "FN_QSA_GROUP2") == "1" && ccall("__w_env", "FN_QSA_PAR") != "0" && GQA % 2 == 0 && N_HEADS % 2 == 0
+  qsa_group2_pipe = metal_pipeline(metal_compile_source(device, read_file(FN_DIR + "qsa_selected_group2.metal")), "qsa_sdpa_selected_group2")
 ple_gather_pipe = metal_pipeline(ple_gpu_lib, "ple_table_gather")
 ple_lib = metal_compile_source(device, read_file(FN_DIR + "ple_ops.metal"))
 ple_gate_pipe = metal_pipeline(ple_lib, "ple_gate")
@@ -931,7 +946,7 @@ argmax_partial_indices = metal_buffer(device, ARGMAX_CHUNKS * 4)
   prog_mv([prog, lyr[:sh_up], xn, su_tmp, HIDDEN, SHARED_FFN])
   prog.push([0, bf16_matvec_pipe, [lyr[:sh_seg], xn, seg_tmp, HIDDEN], 1, 32])
   prog.push([1, nil, [router_logits, sg_tmp, su_tmp], 0, 0])
-  prog.push([0, router_pipe, [router_logits, top_idx, top_w], 1, 512])
+  prog.push([0, router_pipe, [router_logits, top_idx, top_w], 1, router_threads])
   prog.push([2, silu_pipe, [sg_tmp, su_tmp, sh_tmp, SHARED_FFN], SHARED_FFN, 0])
   prog.push([1, nil, [top_idx, sh_tmp], 0, 0])
   prog.push([0, gather_pipe, [q[0], q[1], q[2], q[3], top_idx, ex[:slot_map], xn, eg_tmp, HIDDEN, MOE_FFN, og[0], og[1], og[2], og[3], og[4], og[5], 0, ex[:hot], og[6], og[7], og[8]], TOP_K * (MOE_FFN / 8), 64])
@@ -1430,7 +1445,7 @@ scoped_barriers = ccall("__w_env", "FN_FULLBAR") != "1"
     enqueue_bf16([lyr[:sh_up], xn, su_tmp, HIDDEN, SHARED_FFN])
     metal_dispatch_groups(queue, bf16_matvec_pipe, [lyr[:sh_seg], xn, seg_tmp, HIDDEN], 1, 32)
   dep_on([router_logits, sg_tmp, su_tmp])
-  metal_dispatch_groups(queue, router_pipe, [router_logits, top_idx, top_w], 1, 512)
+  metal_dispatch_groups(queue, router_pipe, [router_logits, top_idx, top_w], 1, router_threads)
   if !skip_shared
     metal_dispatch_n(queue, silu_pipe, [sg_tmp, su_tmp, sh_tmp, SHARED_FFN], SHARED_FFN)
   dep_on([top_idx, sh_tmp])
@@ -1625,9 +1640,24 @@ PREFILL_LAST_MAX = 64
 if multi_n > 0 || mtp_depth > 0 || prompt_tokens > 8 || prompt_ids_file != "" || serve_mode
   fnm_lib = metal_compile_source(device, read_file(FN_DIR + "fn_multi.metal"))
   grms_m_pipe = metal_pipeline(fnm_lib, "grouped_rms_norm_multi")
+  # Virtual-warp normalization is an exact experimental port, not a default
+  # win on this model. The shape sweep is in test_upstream_kernels.sh.
+  grms_wide_pipe = nil
+  grms_wide_threads = 256
+  fn_norm_threads_env = ccall("__w_env", "FN_NORM_THREADS")
+  if fn_norm_threads_env != nil && fn_norm_threads_env != "" && fn_norm_threads_env != "256"
+    if fn_norm_threads_env != "32" && fn_norm_threads_env != "64" && fn_norm_threads_env != "128"
+      raise "FN_NORM_THREADS must be 32, 64, 128, or 256"
+    grms_wide_threads = fn_norm_threads_env.to_i()
+    norm_name = "grouped_rms_norm_multi_t" + fn_norm_threads_env
+    if grms_wide_threads == 32 then norm_name = "grouped_rms_norm_multi_warp"
+    grms_wide_pipe = metal_pipeline(metal_compile_source(device, read_file(FN_DIR + "grouped_rms_norm_warp.metal")), norm_name)
   hc_mix_reduce_m_pipe = metal_pipeline(fnm_lib, "hc_mix_reduce_multi")
   hc_combine_m_pipe = metal_pipeline(fnm_lib, "hc_combine_multi")
-  router_m_pipe = metal_pipeline(fnm_lib, "router_softmax_topk10_multi")
+  if router_reference
+    router_m_pipe = metal_pipeline(fnm_lib, "router_softmax_topk10_multi")
+  else
+    router_m_pipe = metal_pipeline(router_warp_lib, "router_softmax_topk10_multi_warp")
   gather_m_pipe = metal_pipeline(fnm_lib, "moe_gather_matvec_multi")
   bf16_mp_pipe = metal_pipeline(fnm_lib, "bf16_matvec_multi_p")
   sdpa_pf_pipe = metal_pipeline(fnm_lib, "sdpa_prefill_multi_hd256")
@@ -1932,6 +1962,12 @@ mrec = [0]
   else
     metal_dispatch_n(queue, pipe, args, nthreads)
 
+-> mgrms(args, groups, n)
+  if grms_wide_pipe != nil && n >= 128
+    mdg(grms_wide_pipe, args, groups, grms_wide_threads)
+  else
+    mdg(grms_m_pipe, args, groups, 256)
+
 -> mbar(bufs)
   if mrec[0] == 1
     mprog.push([1, nil, bufs, 0, 0])
@@ -2026,7 +2062,7 @@ mrec = [0]
 
 -> hc_mix_multi(hc, n)
   if skip_hc then return
-  mdg(grms_m_pipe, [h_m, hc[:norm], n_tmp_m, HIDDEN, HC_COUNT, EPS], n * HC_COUNT, 256)
+  mgrms([h_m, hc[:norm], n_tmp_m, HIDDEN, HC_COUNT, EPS], n * HC_COUNT, n)
   if !skip_hcbar then mbar([n_tmp_m])
   if !skip_hcmv
     mv_multi(hc[:down], n_tmp_m, lowrank_m, HC_HIDDEN, HC_LOWRANK, n)
@@ -2112,7 +2148,10 @@ mrec = [0]
   mdn(kv_write_m_pipe, [k_m, v_m, lyr[:k_cache], lyr[:v_cache], mpos_buf, KV_DIM, n], n * KV_DIM)
   mbar([lyr[:k_cache], lyr[:v_cache]])
   if qsa_on
-    mdg(qsa_sdpa_pipe, [queries_m, lyr[:k_cache], lyr[:v_cache], attn_m, qsa_sel_m, qsa_ns_m, GQA, N_HEADS, KV_DIM, ATTN_SCALE, QSA_SEL_STRIDE, n], n * N_HEADS, 256)
+    if qsa_group2_pipe != nil && n >= 64
+      mdg(qsa_group2_pipe, [queries_m, lyr[:k_cache], lyr[:v_cache], attn_m, qsa_sel_m, qsa_ns_m, GQA, N_HEADS, KV_DIM, ATTN_SCALE, QSA_SEL_STRIDE, n], n * (N_HEADS / 2), 256)
+    else
+      mdg(qsa_sdpa_pipe, [queries_m, lyr[:k_cache], lyr[:v_cache], attn_m, qsa_sel_m, qsa_ns_m, GQA, N_HEADS, KV_DIM, ATTN_SCALE, QSA_SEL_STRIDE, n], n * N_HEADS, 256)
   elsif n > 8
     # thread-per-position scores: no per-position barriers (prefill shape).
     # NOT bit-identical to the decode sdpa (different dot order) — the
@@ -2140,7 +2179,7 @@ mrec = [0]
     mv_multi(lyr[:sh_up], xn_m, su_m, HIDDEN, SHARED_FFN, n)
   mdg(bf16_mp_pipe, [lyr[:sh_seg], xn_m, seg_m, HIDDEN, 1, n], (n + 7) / 8, 32)
   mbar([rlog_m, sg_m, su_m])
-  mdg(router_m_pipe, [rlog_m, tidx_m, tw_m], n, 512)
+  mdg(router_m_pipe, [rlog_m, tidx_m, tw_m], n, router_threads)
   mdn(silu_pipe, [sg_m, su_m, sh_m, n * SHARED_FFN], n * SHARED_FFN)
   mbar([tidx_m, sh_m])
   mdg(moe_sort_pipe, [tidx_m, order_m, n * TOP_K, moe_offs_buf], 1, 512)
@@ -2205,21 +2244,21 @@ mrec = [0]
   cs_out = ping == 0 ? pp[:cs_b] : pp[:cs_a]
   mv_multi(pp[:key], e_m, plk_m, HIDDEN, HC_HIDDEN, n)
   mv_multi(pp[:value], e_m, plv_m, HIDDEN, HIDDEN, n)
-  mdg(grms_m_pipe, [h_m, pp[:norm_query], plqn_m, HIDDEN, HC_COUNT, EPS], n * HC_COUNT, 256)
+  mgrms([h_m, pp[:norm_query], plqn_m, HIDDEN, HC_COUNT, EPS], n * HC_COUNT, n)
   mbar([plk_m, plqn_m])
-  mdg(grms_m_pipe, [plk_m, pp[:norm_key], plkn_m, HIDDEN, HC_COUNT, EPS], n * HC_COUNT, 256)
+  mgrms([plk_m, pp[:norm_key], plkn_m, HIDDEN, HC_COUNT, EPS], n * HC_COUNT, n)
   mbar([plkn_m, plv_m])
   mdg(ple_gate_m_pipe, [plkn_m, plqn_m, plv_m, plgv_m, HIDDEN, HC_COUNT], n * HC_COUNT, 256)
   mbar([plgv_m])
   nc_d = n <= 8 ? pp[:nc_v] : plnc_m
-  mdg(grms_m_pipe, [plgv_m, pp[:norm_conv], nc_d, HIDDEN, HC_COUNT, EPS], n * HC_COUNT, 256)
+  mgrms([plgv_m, pp[:norm_conv], nc_d, HIDDEN, HC_COUNT, EPS], n * HC_COUNT, n)
   mbar([nc_d])
   mdn(ple_conv_m_pipe, [pp[:conv], cs_in, nc_d, plgv_m, h_m, cs_out, HC_HIDDEN, n], n * HC_HIDDEN)
   mbar([h_m, cs_out])
   if flip_defer[0] == 0 then pp[:ping] = 1 - ping
 
 -> head_multi(n)
-  mdg(grms_m_pipe, [h_m, mixer[:norm], n_tmp_m, HIDDEN, HC_COUNT, EPS], n * HC_COUNT, 256)
+  mgrms([h_m, mixer[:norm], n_tmp_m, HIDDEN, HC_COUNT, EPS], n * HC_COUNT, n)
   mbar([n_tmp_m])
   mv_multi(mixer[:down], n_tmp_m, lowrank_m, HC_HIDDEN, HC_LOWRANK, n)
   mbar([lowrank_m])
@@ -2596,7 +2635,7 @@ if mtp_depth > 0
   mv_multi(mtp_sh_up, xn_m, su_m, HIDDEN, SHARED_FFN, n)
   mdg(bf16_m_pipe, [mtp_seg, xn_m, seg_m, HIDDEN, 1, n], 1, 32)
   mbar([rlog_m, sg_m, su_m])
-  mdg(router_m_pipe, [rlog_m, tidx_m, tw_m], n, 512)
+  mdg(router_m_pipe, [rlog_m, tidx_m, tw_m], n, router_threads)
   mdn(silu_pipe, [sg_m, su_m, sh_m, n * SHARED_FFN], n * SHARED_FFN)
   mbar([tidx_m, sh_m])
   mdg(mtp_gather_pipe, [mtp_experts_gu, tidx_m, xn_m, egu_m, HIDDEN, 2 * MOE_FFN, 2 * MOE_FFN * HIDDEN, 0, TOP_K, 0], n * TOP_K * (2 * MOE_FFN / 8), 64)
@@ -2611,9 +2650,9 @@ if mtp_depth > 0
 
 -> mtp_fuse_gpu(hsrc, n)
   mdn(embed_m_pipe, [embed_w, e_m, tok_ids_m, HIDDEN, n], n * HIDDEN)
-  mdg(grms_m_pipe, [hsrc, mtp_pre_norm_h, mtp_hn_m, HC_HIDDEN, 1, EPS], n, 256)
+  mgrms([hsrc, mtp_pre_norm_h, mtp_hn_m, HC_HIDDEN, 1, EPS], n, n)
   mbar([e_m, mtp_hn_m])
-  mdg(grms_m_pipe, [e_m, mtp_pre_norm_e, mtp_en_m, HIDDEN, 1, EPS], n, 256)
+  mgrms([e_m, mtp_pre_norm_e, mtp_en_m, HIDDEN, 1, EPS], n, n)
   mdg(bf16_m_pipe, [mtp_fc_h, mtp_hn_m, mtp_hf_m, HIDDEN, HIDDEN, n * HC_COUNT], HIDDEN, 32)
   mbar([mtp_en_m])
   mdg(bf16_m_pipe, [mtp_fc_e, mtp_en_m, mtp_ef_m, HIDDEN, HIDDEN, n], HIDDEN, 32)
@@ -2634,7 +2673,7 @@ if mtp_depth > 0
     t = t + 1
 
 -> mtp_head_multi(n)
-  mdg(grms_m_pipe, [h_m, mtp_mixer[:norm], n_tmp_m, HIDDEN, HC_COUNT, EPS], n * HC_COUNT, 256)
+  mgrms([h_m, mtp_mixer[:norm], n_tmp_m, HIDDEN, HC_COUNT, EPS], n * HC_COUNT, n)
   mbar([n_tmp_m])
   mv_multi(mtp_mixer[:down], n_tmp_m, lowrank_m, HC_HIDDEN, HC_LOWRANK, n)
   mbar([lowrank_m])

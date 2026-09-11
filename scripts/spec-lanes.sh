@@ -925,9 +925,12 @@ exclude_specs=(
   spec/compiler/bigint_add_equal_fixed_source_c_differential_spec.w
   spec/compiler/bigint_addsub_equal_fixed_reopen_source_seam_spec.w
   spec/compiler/bigint_addsub_equal_fixed_source_c_differential_spec.w
+  spec/compiler/bigint_addsub_equal_generic_reopen_source_seam_spec.w
+  spec/compiler/bigint_addsub_equal_generic_source_c_differential_spec.w
   spec/numeric/bigint_add3_equal_source_spec.w
   spec/numeric/bigint_add_equal_fixed_source_spec.w
   spec/numeric/bigint_addsub_equal_fixed_source_spec.w
+  spec/numeric/bigint_addsub_equal_generic_source_spec.w
   spec/compiler/bigint_addmul_fusion_spec.w
   spec/compiler/bigint_literal_typing_spec.w
   spec/compiler/bigint_mul12_reopen_source_seam_spec.w

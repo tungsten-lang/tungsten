@@ -43,6 +43,7 @@ use kernels/rect_reject
 use kernels/bundles/differential
 use fleet/frontier
 use kernels/bundles/frozen_fringe_sat
+use kernels/build_cache
 use kernels/bundles/global_kernel_shear
 use kernels/bundles/pooled_exact
 use strategies/syndrome_repair
@@ -1169,66 +1170,18 @@ use paths
     exists = 1
   exists
 
--> ffn_binary_fresh(binary, source) (String String) i64
-  fresh = 0 ## i64
-  if ffn_executable_exists(binary) == 1
-    binary_mtime = file_mtime_ns(binary)
-    source_mtime = file_mtime_ns(source)
-    if binary_mtime != nil && source_mtime != nil
-      if binary_mtime >= source_mtime
-        fresh = 1
-  fresh
+# One rectangular worker build on its own thread; the result lands in results\[slot].
+-> ffn_rect_build_thread(root, n, m, p, binary, results, slot) (String i64 i64 i64 String i64[] i64)
+  Thread.new ->
+    results[slot] = ffrgb_build(root, n, m, p, binary)
+    true
 
--> ffn_binary_fresh2(binary, first, second) (String String String) i64
-  fresh = ffn_binary_fresh(binary, first) ## i64
-  if fresh == 1
-    binary_mtime = file_mtime_ns(binary)
-    second_mtime = file_mtime_ns(second)
-    if binary_mtime == nil || second_mtime == nil || binary_mtime < second_mtime
-      fresh = 0
-  fresh
+# Content-addressed: fresh while the recorded digest of the compiler and the
+# exact input contents matches (kernels/build_cache.w), so a new checkout
+# or worktree with identical sources never recompiles a worker.
+-> ffn_binary_fresh_all(binary, inputs) (String Array) i64
+  ffmk_fresh(RUNTIME_ROOT, binary, inputs)
 
--> ffn_binary_fresh3(binary, first, second, third) (String String String String) i64
-  fresh = ffn_binary_fresh2(binary, first, second) ## i64
-  if fresh == 1
-    binary_mtime = file_mtime_ns(binary)
-    third_mtime = file_mtime_ns(third)
-    if binary_mtime == nil || third_mtime == nil || binary_mtime < third_mtime
-      fresh = 0
-  fresh
-
--> ffn_binary_fresh4(binary, first, second, third, fourth) (String String String String String) i64
-  if ffn_executable_exists(binary) == 0
-    return 0
-  binary_mtime = file_mtime_ns(binary)
-  if binary_mtime == nil
-    return 0
-  paths = [first, second, third, fourth]
-  i = 0 ## i64
-  while i < paths.size()
-    dependency_mtime = file_mtime_ns(paths[i])
-    if dependency_mtime == nil || binary_mtime < dependency_mtime
-      return 0
-    i += 1
-  1
-
--> ffn_binary_fresh5(binary, first, second, third, fourth, fifth) (String String String String String String) i64
-  if ffn_binary_fresh4(binary, first, second, third, fourth) == 0
-    return 0
-  binary_mtime = file_mtime_ns(binary)
-  fifth_mtime = file_mtime_ns(fifth)
-  if binary_mtime == nil || fifth_mtime == nil || binary_mtime < fifth_mtime
-    return 0
-  1
-
--> ffn_binary_fresh6(binary, first, second, third, fourth, fifth, sixth) (String String String String String String String) i64
-  if ffn_binary_fresh5(binary, first, second, third, fourth, fifth) == 0
-    return 0
-  binary_mtime = file_mtime_ns(binary)
-  sixth_mtime = file_mtime_ns(sixth)
-  if binary_mtime == nil || sixth_mtime == nil || binary_mtime < sixth_mtime
-    return 0
-  1
 
 -> ffn_persistent_command_path(run_tag, slot) (String i64)
   "/tmp/metaflip_gpu_persist_cmd_" + run_tag + "_" + slot.to_s() + ".txt"
@@ -3125,48 +3078,61 @@ if GPU == 1
 
   if GPU_BINARY == ""
     GPU_BINARY = "/tmp/metaflip_gpu_cal2zone_" + N.to_s()
+  # Every worker that needs (re)building compiles concurrently: each build is
+  # one single-threaded compiler + clang run of 30-60 s, and a cold 7x7 visit
+  # needs a dozen of them.  Results are joined once, below, before readiness
+  # and lane bookkeeping are evaluated.
+  build_results = i64[12]
+  rect_build_results = i64[2]
+  rect_build_threads = [nil, nil]
+  generic_build_thread = nil
+  c3_build_thread = nil
+  simd_build_thread = nil
+  mitm_build_thread = nil
+  constraint_build_thread = nil
+  kxor_build_thread = nil
+  span_build_thread = nil
+  shear_build_thread = nil
+  differential_build_thread = nil
+  frozen_sat_build_thread = nil
+  global_shear_build_thread = nil
+  pooled_exact_build_thread = nil
   needs_build = GPU_REBUILD ## i64
-  if needs_build == 0 && (ffn_binary_fresh(GPU_BINARY, ffb_source_path(RUNTIME_ROOT, N)) == 0 || ffb_gpu_artifact_ready(RUNTIME_ROOT, N, GPU_BINARY) == 0)
+  if needs_build == 0 && (ffn_binary_fresh_all(GPU_BINARY, [ffb_source_path(RUNTIME_ROOT, N)]) == 0 || ffb_gpu_artifact_ready(RUNTIME_ROOT, N, GPU_BINARY) == 0)
     needs_build = 1
   if needs_build == 1
     if QUIET == 0
       << "metaflip: compiling Tungsten GPU worker for " + N.to_s() + "x" + N.to_s()
       flush()
-    gpu_generic_ready = ffb_build(RUNTIME_ROOT, N, GPU_BINARY)
+    generic_build_thread = Thread.new ->
+      build_results[0] = ffb_build(RUNTIME_ROOT, N, GPU_BINARY)
+      true
   if needs_build == 0
     gpu_generic_ready = 1
 
   C3_BINARY = "/tmp/metaflip_gpu_c3_" + N.to_s()
   if gpu_eligible[2] != 0
     c3_needs_build = GPU_REBUILD ## i64
-    if c3_needs_build == 0 && (ffn_binary_fresh(C3_BINARY, ffc3_source_path(RUNTIME_ROOT, N)) == 0 || ffc3_gpu_artifact_ready(RUNTIME_ROOT, N, C3_BINARY) == 0)
+    if c3_needs_build == 0 && (ffn_binary_fresh_all(C3_BINARY, [ffc3_source_path(RUNTIME_ROOT, N)]) == 0 || ffc3_gpu_artifact_ready(RUNTIME_ROOT, N, C3_BINARY) == 0)
       c3_needs_build = 1
     if c3_needs_build == 1
-      gpu_c3_ready = ffc3_build(RUNTIME_ROOT, N, C3_BINARY)
+      c3_build_thread = Thread.new ->
+        build_results[1] = ffc3_build(RUNTIME_ROOT, N, C3_BINARY)
+        true
     if c3_needs_build == 0
       gpu_c3_ready = 1
-    if gpu_c3_ready == 0
-      gpu_eligible[2] = 0
-      gpu_disabled[2] = 1
-      gpu_failures[2] = gpu_failures[2] + 1
-      gpu_retry_round[2] = 1
-      gpu_degraded = 1
 
   SIMD_BINARY = "/tmp/metaflip_gpu_simd_" + N.to_s()
   if gpu_eligible[9] != 0
     simd_needs_build = GPU_REBUILD ## i64
-    if simd_needs_build == 0 && (ffn_binary_fresh(SIMD_BINARY, ffsimd_source_path(RUNTIME_ROOT, N)) == 0 || ffsimd_gpu_artifact_ready(RUNTIME_ROOT, N, SIMD_BINARY) == 0)
+    if simd_needs_build == 0 && (ffn_binary_fresh_all(SIMD_BINARY, [ffsimd_source_path(RUNTIME_ROOT, N)]) == 0 || ffsimd_gpu_artifact_ready(RUNTIME_ROOT, N, SIMD_BINARY) == 0)
       simd_needs_build = 1
     if simd_needs_build == 1
-      gpu_simd_ready = ffsimd_build(RUNTIME_ROOT, N, SIMD_BINARY)
+      simd_build_thread = Thread.new ->
+        build_results[2] = ffsimd_build(RUNTIME_ROOT, N, SIMD_BINARY)
+        true
     if simd_needs_build == 0
       gpu_simd_ready = 1
-    if gpu_simd_ready == 0
-      gpu_eligible[9] = 0
-      gpu_disabled[9] = 1
-      gpu_failures[9] = gpu_failures[9] + 1
-      gpu_retry_round[9] = 1
-      gpu_degraded = 1
 
   MITM_BINARY = "/tmp/metaflip_gpu_mitm"
   if gpu_eligible[10] != 0
@@ -3174,10 +3140,12 @@ if GPU == 1
     mitm_worker = RUNTIME_ROOT + "/kernels/workers/mitm.w"
     mitm_library = RUNTIME_ROOT + "/kernels/mitm.w"
     worker_bundle = RUNTIME_ROOT + "/kernels/bundles/workers.w"
-    if mitm_needs_build == 0 && (ffn_binary_fresh3(MITM_BINARY, mitm_worker, mitm_library, worker_bundle) == 0 || ffm_gpu_artifact_ready(RUNTIME_ROOT, MITM_BINARY) == 0)
+    if mitm_needs_build == 0 && (ffn_binary_fresh_all(MITM_BINARY, [mitm_worker, mitm_library, worker_bundle]) == 0 || ffm_gpu_artifact_ready(RUNTIME_ROOT, MITM_BINARY) == 0)
       mitm_needs_build = 1
     if mitm_needs_build == 1
-      gpu_mitm_ready = ffm_build(RUNTIME_ROOT, MITM_BINARY)
+      mitm_build_thread = Thread.new ->
+        build_results[3] = ffm_build(RUNTIME_ROOT, MITM_BINARY)
+        true
     if mitm_needs_build == 0
       gpu_mitm_ready = 1
 
@@ -3185,10 +3153,12 @@ if GPU == 1
     constraint_worker = RUNTIME_ROOT + "/kernels/workers/constraint.w"
     constraint_library = RUNTIME_ROOT + "/kernels/constraint.w"
     constraint_needs_build = GPU_REBUILD ## i64
-    if constraint_needs_build == 0 && (ffn_binary_fresh3(CONSTRAINT_BINARY, constraint_worker, constraint_library, worker_bundle) == 0 || ffpc_gpu_artifact_ready(RUNTIME_ROOT, CONSTRAINT_BINARY) == 0)
+    if constraint_needs_build == 0 && (ffn_binary_fresh_all(CONSTRAINT_BINARY, [constraint_worker, constraint_library, worker_bundle]) == 0 || ffpc_gpu_artifact_ready(RUNTIME_ROOT, CONSTRAINT_BINARY) == 0)
       constraint_needs_build = 1
     if constraint_needs_build == 1
-      gpu_constraint_ready = ffpc_build(RUNTIME_ROOT, CONSTRAINT_BINARY)
+      constraint_build_thread = Thread.new ->
+        build_results[4] = ffpc_build(RUNTIME_ROOT, CONSTRAINT_BINARY)
+        true
     if constraint_needs_build == 0
       gpu_constraint_ready = 1
 
@@ -3196,10 +3166,12 @@ if GPU == 1
     kxor_worker = RUNTIME_ROOT + "/kernels/workers/kxor.w"
     kxor_library = RUNTIME_ROOT + "/kernels/kxor.w"
     kxor_needs_build = GPU_REBUILD ## i64
-    if kxor_needs_build == 0 && (ffn_binary_fresh4(KXOR_BINARY, kxor_worker, kxor_library, mitm_library, worker_bundle) == 0 || ffx_gpu_artifact_ready(RUNTIME_ROOT, KXOR_BINARY) == 0)
+    if kxor_needs_build == 0 && (ffn_binary_fresh_all(KXOR_BINARY, [kxor_worker, kxor_library, mitm_library, worker_bundle]) == 0 || ffx_gpu_artifact_ready(RUNTIME_ROOT, KXOR_BINARY) == 0)
       kxor_needs_build = 1
     if kxor_needs_build == 1
-      gpu_kxor_ready = ffx_build(RUNTIME_ROOT, KXOR_BINARY)
+      kxor_build_thread = Thread.new ->
+        build_results[5] = ffx_build(RUNTIME_ROOT, KXOR_BINARY)
+        true
     if kxor_needs_build == 0
       gpu_kxor_ready = 1
 
@@ -3209,10 +3181,12 @@ if GPU == 1
     span_core = RUNTIME_ROOT + "/strategies/span_refactor.w"
     span_block_interior = RUNTIME_ROOT + "/strategies/block_interior.w"
     span_needs_build = GPU_REBUILD ## i64
-    if span_needs_build == 0 && (ffn_binary_fresh5(SPAN_BINARY, span_worker, span_library, span_core, span_block_interior, worker_bundle) == 0 || ffsrp_gpu_artifact_ready(RUNTIME_ROOT, SPAN_BINARY) == 0)
+    if span_needs_build == 0 && (ffn_binary_fresh_all(SPAN_BINARY, [span_worker, span_library, span_core, span_block_interior, worker_bundle]) == 0 || ffsrp_gpu_artifact_ready(RUNTIME_ROOT, SPAN_BINARY) == 0)
       span_needs_build = 1
     if span_needs_build == 1
-      gpu_span_ready = ffsrp_build(RUNTIME_ROOT, SPAN_BINARY)
+      span_build_thread = Thread.new ->
+        build_results[6] = ffsrp_build(RUNTIME_ROOT, SPAN_BINARY)
+        true
     if span_needs_build == 0
       gpu_span_ready = 1
 
@@ -3223,10 +3197,12 @@ if GPU == 1
     shear_core = RUNTIME_ROOT + "/strategies/shear.w"
     if N >= 5
       shear_needs_build = GPU_REBUILD ## i64
-      if shear_needs_build == 0 && (ffn_binary_fresh5(SHEAR_BINARY, shear_worker, shear_library, shear_search, shear_core, worker_bundle) == 0 || fflrsp_gpu_artifact_ready(RUNTIME_ROOT, SHEAR_BINARY) == 0)
+      if shear_needs_build == 0 && (ffn_binary_fresh_all(SHEAR_BINARY, [shear_worker, shear_library, shear_search, shear_core, worker_bundle]) == 0 || fflrsp_gpu_artifact_ready(RUNTIME_ROOT, SHEAR_BINARY) == 0)
         shear_needs_build = 1
       if shear_needs_build == 1
-        gpu_shear_ready = fflrsp_build(RUNTIME_ROOT, SHEAR_BINARY)
+        shear_build_thread = Thread.new ->
+          build_results[7] = fflrsp_build(RUNTIME_ROOT, SHEAR_BINARY)
+          true
       if shear_needs_build == 0
         gpu_shear_ready = 1
 
@@ -3238,10 +3214,12 @@ if GPU == 1
     differential_nullspace = RUNTIME_ROOT + "/strategies/archive_nullspace.w"
     differential_components = RUNTIME_ROOT + "/strategies/delta_components.w"
     differential_needs_build = GPU_REBUILD ## i64
-    if differential_needs_build == 0 && ffn_binary_fresh6(DIFFERENTIAL_BINARY, differential_worker, differential_lib, differential_kxor, differential_mitm, differential_nullspace, differential_components) == 0
+    if differential_needs_build == 0 && ffn_binary_fresh_all(DIFFERENTIAL_BINARY, [differential_worker, differential_lib, differential_kxor, differential_mitm, differential_nullspace, differential_components]) == 0
       differential_needs_build = 1
     if differential_needs_build == 1
-      gpu_differential_ready = ffdb_build(RUNTIME_ROOT, DIFFERENTIAL_BINARY)
+      differential_build_thread = Thread.new ->
+        build_results[8] = ffdb_build(RUNTIME_ROOT, DIFFERENTIAL_BINARY)
+        true
     if differential_needs_build == 0
       gpu_differential_ready = 1
 
@@ -3254,10 +3232,12 @@ if GPU == 1
     frozen_sat_worker_core = RUNTIME_ROOT + "/scheme.w"
     if N == 4 && system("command -v cryptominisat5 >/dev/null 2>&1")
       frozen_sat_needs_build = GPU_REBUILD ## i64
-      if frozen_sat_needs_build == 0 && ffn_binary_fresh6(FROZEN_SAT_BINARY, frozen_sat_worker, frozen_sat_library, frozen_sat_core, frozen_sat_encoder, frozen_sat_span, frozen_sat_worker_core) == 0
+      if frozen_sat_needs_build == 0 && ffn_binary_fresh_all(FROZEN_SAT_BINARY, [frozen_sat_worker, frozen_sat_library, frozen_sat_core, frozen_sat_encoder, frozen_sat_span, frozen_sat_worker_core]) == 0
         frozen_sat_needs_build = 1
       if frozen_sat_needs_build == 1
-        gpu_frozen_sat_ready = fffsb_build(RUNTIME_ROOT, FROZEN_SAT_BINARY)
+        frozen_sat_build_thread = Thread.new ->
+          build_results[9] = fffsb_build(RUNTIME_ROOT, FROZEN_SAT_BINARY)
+          true
       if frozen_sat_needs_build == 0
         gpu_frozen_sat_ready = 1
 
@@ -3270,10 +3250,12 @@ if GPU == 1
     global_shear_worker_core = RUNTIME_ROOT + "/scheme.w"
     if N == 5
       global_shear_needs_build = GPU_REBUILD ## i64
-      if global_shear_needs_build == 0 && ffn_binary_fresh6(GLOBAL_SHEAR_BINARY, global_shear_worker, global_shear_library, global_shear_core, global_shear_tunnel, global_shear_span, global_shear_worker_core) == 0
+      if global_shear_needs_build == 0 && ffn_binary_fresh_all(GLOBAL_SHEAR_BINARY, [global_shear_worker, global_shear_library, global_shear_core, global_shear_tunnel, global_shear_span, global_shear_worker_core]) == 0
         global_shear_needs_build = 1
       if global_shear_needs_build == 1
-        gpu_global_shear_ready = ffgksb_build(RUNTIME_ROOT, GLOBAL_SHEAR_BINARY)
+        global_shear_build_thread = Thread.new ->
+          build_results[10] = ffgksb_build(RUNTIME_ROOT, GLOBAL_SHEAR_BINARY)
+          true
       if global_shear_needs_build == 0
         gpu_global_shear_ready = 1
 
@@ -3285,15 +3267,14 @@ if GPU == 1
     pooled_exact_debt_mitm = RUNTIME_ROOT + "/strategies/debt_mitm.w"
     pooled_exact_dynamic_syzygy = RUNTIME_ROOT + "/strategies/dynamic_syzygy.w"
     pooled_exact_needs_build = GPU_REBUILD ## i64
-    if pooled_exact_needs_build == 0 && ffn_binary_fresh6(POOLED_EXACT_BINARY, pooled_exact_worker, pooled_exact_library, pooled_exact_common, pooled_exact_mode_locked, pooled_exact_debt_mitm, pooled_exact_dynamic_syzygy) == 0
+    if pooled_exact_needs_build == 0 && ffn_binary_fresh_all(POOLED_EXACT_BINARY, [pooled_exact_worker, pooled_exact_library, pooled_exact_common, pooled_exact_mode_locked, pooled_exact_debt_mitm, pooled_exact_dynamic_syzygy]) == 0
       pooled_exact_needs_build = 1
     if pooled_exact_needs_build == 1
-      gpu_pooled_exact_ready = ffpeb_build(RUNTIME_ROOT, POOLED_EXACT_BINARY)
+      pooled_exact_build_thread = Thread.new ->
+        build_results[11] = ffpeb_build(RUNTIME_ROOT, POOLED_EXACT_BINARY)
+        true
     if pooled_exact_needs_build == 0
       gpu_pooled_exact_ready = 1
-    if gpu_pooled_exact_ready == 0
-      gpu_pooled_exact_failures = 1
-      gpu_pooled_exact_retry_round = ffn_gpu_retry_delay(gpu_pooled_exact_failures)
 
     if rect_enabled != 0
       rect_component = 0
@@ -3305,17 +3286,81 @@ if GPU == 1
           rect_source = ffrgb_source_path(RUNTIME_ROOT, rect_n, rect_m, rect_p)
           rect_glue = RUNTIME_ROOT + "/kernels/bundles/rect.w"
           rect_needs_build = GPU_REBUILD ## i64
-          if rect_needs_build == 0 && (ffn_binary_fresh2(rect_binaries[rect_component], rect_source, rect_glue) == 0 || ffrgb_gpu_artifact_ready(RUNTIME_ROOT, rect_n, rect_m, rect_p, rect_binaries[rect_component]) == 0)
+          if rect_needs_build == 0 && (ffn_binary_fresh_all(rect_binaries[rect_component], [rect_source, rect_glue]) == 0 || ffrgb_gpu_artifact_ready(RUNTIME_ROOT, rect_n, rect_m, rect_p, rect_binaries[rect_component]) == 0)
             rect_needs_build = 1
           if rect_needs_build == 1
-            rect_ready[rect_component] = ffrgb_build(RUNTIME_ROOT, rect_n, rect_m, rect_p, rect_binaries[rect_component])
+            rect_build_threads[rect_component] = ffn_rect_build_thread(RUNTIME_ROOT, rect_n, rect_m, rect_p, rect_binaries[rect_component], rect_build_results, rect_component)
           if rect_needs_build == 0
             rect_ready[rect_component] = 1
-          if rect_ready[rect_component] == 0
-            rect_failures[rect_component] = rect_failures[rect_component] + 1
-            rect_retry_round[rect_component] = 1
         rect_component += 1
 
+
+  # Join every concurrent worker build, then apply the bookkeeping that used
+  # to follow each build inline.
+  if generic_build_thread != nil
+    z = ffn_thread_join_release(generic_build_thread)
+    gpu_generic_ready = build_results[0]
+  if c3_build_thread != nil
+    z = ffn_thread_join_release(c3_build_thread)
+    gpu_c3_ready = build_results[1]
+  if simd_build_thread != nil
+    z = ffn_thread_join_release(simd_build_thread)
+    gpu_simd_ready = build_results[2]
+  if mitm_build_thread != nil
+    z = ffn_thread_join_release(mitm_build_thread)
+    gpu_mitm_ready = build_results[3]
+  if constraint_build_thread != nil
+    z = ffn_thread_join_release(constraint_build_thread)
+    gpu_constraint_ready = build_results[4]
+  if kxor_build_thread != nil
+    z = ffn_thread_join_release(kxor_build_thread)
+    gpu_kxor_ready = build_results[5]
+  if span_build_thread != nil
+    z = ffn_thread_join_release(span_build_thread)
+    gpu_span_ready = build_results[6]
+  if shear_build_thread != nil
+    z = ffn_thread_join_release(shear_build_thread)
+    gpu_shear_ready = build_results[7]
+  if differential_build_thread != nil
+    z = ffn_thread_join_release(differential_build_thread)
+    gpu_differential_ready = build_results[8]
+  if frozen_sat_build_thread != nil
+    z = ffn_thread_join_release(frozen_sat_build_thread)
+    gpu_frozen_sat_ready = build_results[9]
+  if global_shear_build_thread != nil
+    z = ffn_thread_join_release(global_shear_build_thread)
+    gpu_global_shear_ready = build_results[10]
+  if pooled_exact_build_thread != nil
+    z = ffn_thread_join_release(pooled_exact_build_thread)
+    gpu_pooled_exact_ready = build_results[11]
+  if gpu_eligible[2] != 0
+    if gpu_c3_ready == 0
+      gpu_eligible[2] = 0
+      gpu_disabled[2] = 1
+      gpu_failures[2] = gpu_failures[2] + 1
+      gpu_retry_round[2] = 1
+      gpu_degraded = 1
+  if gpu_eligible[9] != 0
+    if gpu_simd_ready == 0
+      gpu_eligible[9] = 0
+      gpu_disabled[9] = 1
+      gpu_failures[9] = gpu_failures[9] + 1
+      gpu_retry_round[9] = 1
+      gpu_degraded = 1
+  if gpu_eligible[10] != 0
+    if gpu_pooled_exact_ready == 0
+      gpu_pooled_exact_failures = 1
+      gpu_pooled_exact_retry_round = ffn_gpu_retry_delay(gpu_pooled_exact_failures)
+    rect_component = 0
+    while rect_component < 2
+      if rect_build_threads[rect_component] != nil
+        z = ffn_thread_join_release(rect_build_threads[rect_component])
+        rect_ready[rect_component] = rect_build_results[rect_component]
+      if rect_enabled != 0 && rect_states[rect_component] != nil
+        if rect_ready[rect_component] == 0
+          rect_failures[rect_component] = rect_failures[rect_component] + 1
+          rect_retry_round[rect_component] = 1
+      rect_component += 1
     parent_pair_ready = ffn_has_parent_pair(map_states, archive, ffdb_min_distance()) ## i64
     gpu_pool_ready = ffn_fill_pool_readiness(pool_mode_ready, N, gpu_generic_ready, gpu_mitm_ready, gpu_constraint_ready, gpu_kxor_ready, gpu_differential_ready, gpu_span_ready, gpu_shear_ready, gpu_frozen_sat_ready, gpu_global_shear_ready, gpu_pooled_exact_ready, parent_pair_ready, orbit_bank, polar_bank)
     rect_ready_count = rect_ready[0] + rect_ready[1] ## i64

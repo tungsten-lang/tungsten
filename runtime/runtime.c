@@ -41363,29 +41363,27 @@ static inline int bigint_src_shape(WValue a, WValue b, int neg_b) {
      * on EVERY w_add/w_sub bigint pair: a longer compare chain measured as a
      * ~2 ns tax on the unchanged word-shape rows, and reordering the add
      * lines moved the add@3 leaf by several percent, so the add lines that
-     * predate this checkpoint keep their original text and order, and the
-     * new equal-width widths (2, 4, 8, 16, 24; 3 is the line above) follow
-     * as one bit test. Every other word/sign shape retains C. */
+     * predate this checkpoint keep their original text and order, and every
+     * positive equal width from 2 through 24 follows as one range test
+     * (exact fixed-kernel leaves at 2, 3, 4, 8, 16, 24; the generic
+     * quad-loop leaf elsewhere). Every other word/sign shape retains C. */
     if (!neg_b) {
         if (sa == 1 && sb == 1) return 1;
         if (sa == 3 && sb == 1) return 1;
         if (sa == 3 && sb == 3) return 1;
         if (sa > 8 && sa <= 4096 && sb == 1) return 1;
-        if (sa == sb && (uint32_t)sa <= 24U &&
-            ((0x1010114U >> (uint32_t)sa) & 1U))
-            return 1;
+        if (sa == sb && sa >= 2 && sa <= 24) return 1;
     } else {
         /* Word shapes (`sb == 1`) as one branch and a range test instead of
-         * the former eight-line chain; then the exact equal-width subtract
-         * leaves at widths 2, 3, 4, 8, 16, 24, with `x - x` left to C's
+         * the former eight-line chain; then every positive equal width from
+         * 2 through 24 for the subtract leaves, with `x - x` left to C's
          * O(1) identity ahead of any compare. (Folding these admissions into
          * the equal-length block below measured worse: add@5 1.08, sub@4
          * 1.07, both 0/31.) */
         if (sb == 1) {
             if (sa == 2) return BN_BIGINT_SUB1_2_SRC_DIRECT ? 3 : 1;
             if (sa >= 3 && sa <= 4096) return 1;
-        } else if (sa == sb && a != b && (uint32_t)sa <= 24U &&
-                   ((0x101011CU >> (uint32_t)sa) & 1U)) {
+        } else if (sa == sb && a != b && sa >= 2 && sa <= 24) {
             return 1;
         }
     }
@@ -60358,6 +60356,16 @@ WValue w_bigint_add24_equal_finish_raw(WValue v, uint64_t carry) {
      * normalized size is 24 or 25. */
     r->limbs[24] = carry;
     r->size = 24 + (int32_t)carry;
+    return v;
+}
+/* Generic equal-width add publication for the widths without a fixed
+ * kernel: identical to bigint_add_equal_fast's epilogue at any length. */
+__attribute__((always_inline))
+WValue w_bigint_add_equal_finish_raw(WValue v, int64_t len, uint64_t carry) {
+    WBigint *r = w_as_bigint(v);
+    int32_t n = (int32_t)len;
+    r->limbs[n] = carry;
+    r->size = n + (int32_t)carry;
     return v;
 }
 __attribute__((always_inline))

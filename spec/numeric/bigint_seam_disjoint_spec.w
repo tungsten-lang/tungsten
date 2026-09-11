@@ -3,9 +3,10 @@
 # `w_add`/`w_sub`/`w_mul` admit a pair into the migrated source bodies via
 # `bigint_src_shape` / `bigint_mul_src_shape` (runtime.c): both heap
 # BigInts, 2..4096 limbs (2..24 for `*`), excluding equal-length pairs
-# whose RAW signs match except the exact migrated positive equal-width
-# add and sub leaves at widths 2, 3, 4, 8, 16, and 24 (C keeps the
-# remaining *_equal_fast arms and the `x - x` identity), and squaring.
+# whose RAW signs match except the migrated positive equal-width add and
+# sub leaves at every width 2..24 (exact fixed kernels at 2, 3, 4, 8, 16,
+# 24 and the generic quad loop elsewhere; C keeps the negative pairs,
+# widths 25 and up, and the `x - x` identity), and squaring.
 # The source bodies (core/numeric/big_int.w) carry NO tag or zero checks
 # of their own — every entry route proves heap-BigInt operands (the
 # guarded direct call site, the w_add shape gate, the dispatcher's typed
@@ -63,8 +64,12 @@ sb_over = 1 << (64 * 24 + 10)      # 25 limbs — just past the mul band
 band_hi = 1 << (64 * 4095 + 10)    # 4096 limbs — inside the add band
 band_over = 1 << (64 * 4096 + 10)  # 4097 limbs — just past the add band
 
-five_a = (1 << 270) + 5            # 5 limbs, unported equal width
+five_a = (1 << 270) + 5            # 5 limbs, generic equal-width leaf
 five_b = (1 << 271) + 7
+twelve_a = (1 << 718) + 5          # 12 limbs, generic equal-width leaf
+twelve_b = (1 << 719) + 7
+twentyfive_a = (1 << 1550) + 5     # 25 limbs, just past the equal band (C)
+twentyfive_b = (1 << 1551) + 7
 neg_two_b = 0 - two_b
 neg_two_c = 0 - two_c
 neg_three = 0 - three_a
@@ -79,12 +84,18 @@ check("sub.uneq.pin", two_a - two_b, 1266412660188944021221804081145)
 check("sub.uneq.round", (three_a - two_b) + two_b, three_a)
 
 # Remaining equal-length same-raw-sign shapes (C's *_equal_fast, NOT
-# admitted): negative pairs at every width, and positive pairs at widths
-# outside the migrated set.
+# admitted): negative pairs at every width, and positive pairs past 24.
 check("add.eq.same_sign.neg", (neg_two_c + neg_two_b) - neg_two_b, neg_two_c)
 check("sub.eq.same_sign.neg", (neg_two_c - neg_two_b) + neg_two_b, neg_two_c)
-check("add.eq.five", (five_a + five_b) - five_b, five_a)
-check("sub.eq.five", (five_a - five_b) + five_b, five_a)
+check("add.eq.twentyfive", (twentyfive_a + twentyfive_b) - twentyfive_b, twentyfive_a)
+check("sub.eq.twentyfive", (twentyfive_a - twentyfive_b) + twentyfive_b, twentyfive_a)
+
+# Generic equal-width leaves (admitted and fully handled in source).
+check("add.eq.five_source", (five_a + five_b) - five_b, five_a)
+check("sub.eq.five_source", (five_a - five_b) + five_b, five_a)
+check("add.eq.twelve_source", (twelve_a + twelve_b) - twelve_b, twelve_a)
+check("sub.eq.twelve_source", (twelve_a - twelve_b) + twelve_b, twelve_a)
+check("sub.eq.twelve_cancel", (twelve_a + 0) - (twelve_a + 0), 0)
 
 # Exact positive equal-width add/sub exceptions at widths 2, 3, 4, 8, 16, 24
 # (admitted and fully handled in source, including cancellation to zero).

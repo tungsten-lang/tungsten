@@ -225,3 +225,90 @@ tied and cancelling top limbs every fourth case), and reopen semantics for
 both operators at every width. A fresh `bin/tungsten build --no-bits`
 reports stage-1 LLVM byte-identical to stage 2 with the new core compiling
 the compiler.
+
+
+SECOND TRANCHE — GENERIC EQUAL WIDTHS 5..7, 9..15, 17..23
+=========================================================
+
+Scope
+-----
+
+The widths between the fixed kernels have no straight-line C arm: C reaches
+them through bigint_{add,sub}_equal_fast's `default:` case, which runs the
+blocked bn_add_n / bn_sub_n loops. This tranche routes every positive
+equal width from 2 through 24 to source:
+
+  * add@5..7, add@9..15, add@17..23 — one generic raw leaf
+    (`__bigint_add_equal_generic_raw(a, b, n)`): the hot take in C's class
+    (the power of two above n: 8, 16, 32), the quad `adcs` loop
+    (`asm_add_no`), and C's unconditional carry-limb publication through
+    `w_bigint_add_equal_finish_raw(v, n, carry)`.
+  * sub@5..7, sub@9..15 — one generic raw leaf
+    (`__bigint_sub_equal_generic_raw(a, b, n)`): the top-limb compare with
+    the full scan on a tie, the same class take, the quad `sbcs` loop
+    (`asm_sub_no`), and the existing top-limb / trim-and-demote finisher.
+  * sub@17..23 — the same leaf, but the kernel is a generated straight-line
+    `sbcs` chain per width (four-limb groups in the fixed kernels' schedule
+    plus a two- and/or one-limb remainder, no branches). With the quad loop
+    these widths measured 1.05 (sub@20) and 1.08 (sub@23): its
+    per-iteration overhead against C's 16-limb blocked loop.
+
+The runtime gate's admission is now one range test per operator
+(`sa == sb && 2 <= sa <= 24`, sub additionally `a != b`), cheaper than the
+previous bit test, and the workers' equal-width blocks gain one
+`5 <= an <= 23` arm after their fixed-width switches. Widths 25 and up,
+negatives, mixed signs and `x - x` keep C.
+
+Promotion (CPU clock, QoS, 21 alternating pairs x 3 runs x 300 ms, against
+a baseline built from commit 1005cd69; host load 12-15 throughout)
+--------------------------------------------------------------------------
+
+  cell    baseline_ns  candidate_ns  candidate/baseline  IQR     wins
+  add@5      8.3772       5.7694          0.6969         0.0374  21/21
+  add@7      8.4550       6.4264          0.7522         0.0588  21/21
+  add@12     9.5667       7.5028          0.7885         0.0653  21/21
+  add@20    10.4139       9.3844          0.8860         0.0436  21/21
+  add@23    12.1384      11.4271          0.9358         0.0311  20/21
+  sub@5      8.8722       8.9413          1.0149         0.0398   6/21
+  sub@7      9.8750       9.7855          1.0119         0.0631   7/21
+  sub@12    10.3583      10.3762          1.0182         0.0656   8/21
+  sub@17     9.8779       9.5296          0.9509         0.0754  16/21
+  sub@18     9.5390       8.9436          0.9523         0.0678  17/21
+  sub@19    11.4497      10.7120          0.9430         0.0411  19/21
+  sub@20    10.8709      10.5367          0.9727         0.0328  18/21
+  sub@21    11.4469      11.2100          0.9745         0.0477  18/21
+  sub@22    11.5841      10.6025          0.9208         0.0444  19/21
+  sub@23    11.7011      11.0315          0.9439         0.0677  18/21
+
+(sub@5/7/12 from the first round, whose loop kernel they still use; the
+straight-line sub rows and sub@5/12 re-measured in the second round after
+the 17..23 change, at 1.015 / 1.018.)
+
+The previous tranche's one over-budget cell, add@5 at 1.059, is now a 30%
+win. The add side wins because the source route drops the seam call into
+C's dispatch tree and the `default:` arm; the sub side pays its compare
+and the worker prologue, which the loop kernel repays to parity and the
+straight-line kernels beat.
+
+Controls (CPU clock, QoS, 21 pairs x 3 runs x 200 ms; * from the second
+round at 300 ms)
+---------------------------------------------------------------------------
+
+  cell      candidate/baseline  IQR     wins
+  add@3             1.0038      0.0354   8/21
+  add@4             0.9878      0.0650  13/21
+  add@8             1.0028      0.0653  10/21
+  add@16            1.0326      0.0871   6/21
+  add@24            1.0009      0.0694   9/21
+  sub@2             0.9829      0.1000  13/21
+  sub@4             1.0017      0.0495  10/21
+  sub@8             0.9690      0.0901  15/21
+  sub@16 *          0.9964      0.0279  13/21
+  sub@24            1.0052      0.1094  10/21
+  add@32            1.0081      0.0740   7/21
+  sub@32            1.0082      0.0611   8/21
+  add1@4            0.9956      0.0613  12/21
+  sub1@4            1.0028      0.0366   9/21
+  mul@4             0.9999      0.0660  11/21
+  sub@24 *          0.9777      0.0406  13/21
+  add@20 *          0.9060      0.0477  20/21   (unchanged target, repeated)

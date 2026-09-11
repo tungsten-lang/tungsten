@@ -1,4 +1,7 @@
-# Nine checked GF(2) candidates from mixed-width blocks
+# Checked GF(2) candidates from mixed-width blocks
+
+Latest: the [five-parent sweep](#reusable-frontier-and-five-parent-sweep)
+adds 17 candidate shapes and strengthens 8x13x17 to rank 1,128.
 
 Allowing width-five blocks in the per-slot construction produces nine new
 **source-scoped candidates** below the freshly fetched Lille comparisons.
@@ -234,3 +237,109 @@ No tensor files or default runtime changes are added to the repository by
 this follow-up. The next distinct construction family is to apply the
 mixed-width leaf bank to other small checked outer parents, rather than
 repeat this unchanged 2x2x2 orbit cohort.
+
+## Reusable frontier and five-parent sweep
+
+`MetaflipOuterBasisProducts.width_frontier` now provides the reusable
+bounded census used by these experiments. It streams allocation records,
+keeps a bounded formula shortlist per canonical target, caches leaf prices,
+and reports visited/scored/expected counts and completeness. The work budget
+also counts allocations excluded by the required-width filter. It does not
+silently declare an interrupted scan exhausted or treat its prices as
+verified tensors. The existing `materialize`/`export` boundaries remain
+responsible for exact admission.
+
+```ruby
+frontier = MetaflipOuterBasisProducts.width_frontier(
+  images, library, widths: [3,4,5], required_width: 5,
+  per_target: 2, context_limit: 100_000
+) { |row| save_census_row(row) }
+```
+
+Each `frontier[:targets]` entry contains the canonical `:shape` and the
+`:candidates` tuples accepted by the existing `materialize` method. A
+complete formula census is still not an exhaustive post-cleanup minimum.
+This is a reusable offline Ruby API; this change does **not** make the
+ordinary CPU/GPU executable automatically run the new width sweep.
+
+The real campaign uses checked parents 2x2x3/r11, 2x2x4/r14, 2x3x3/r15,
+2x3x4/r20 and 3x3x3/r23 with the same ten checked width-3/4/5 leaf types.
+Of **54,675** visited allocations, **53,011** contain a width five. Across
+**404** canonical targets, the two lowest formula contexts per target
+(one where only one exists) yield **804** constructions. All are
+materialized, cleaned and fully verified, finishing in about 54.5 seconds
+with one low-priority CPU worker and no GPU.
+
+There are 35 pinned local-bound improvements. The following 18 also beat
+their fresh Lille comparisons; 17 are new candidate shapes in this series,
+and 8x13x17 strengthens the preceding rank 1,140 candidate.
+
+| Canonical shape | Previous retained | Checked rank | Fresh Lille |
+| --- | ---: | ---: | ---: |
+| 7x11x15 | 778 | **772** | [777](https://fmm.univ-lille.fr/7x11x15.html) |
+| 7x12x13 | 730 | **717** | [724](https://fmm.univ-lille.fr/7x12x13.html) |
+| 7x12x17 | 946 | **934** | [938](https://fmm.univ-lille.fr/7x12x17.html) |
+| 7x13x13 | 798 | **788** | [794](https://fmm.univ-lille.fr/7x13x13.html) |
+| 7x13x15 | 909 | **903** | [909](https://fmm.univ-lille.fr/7x13x15.html) |
+| 7x13x16 | 966 | **960** | [962](https://fmm.univ-lille.fr/7x13x16.html) |
+| 8x11x13 | 754 | **739** | [750](https://fmm.univ-lille.fr/8x11x13.html) |
+| 8x11x14 | 804 | **800** | [804](https://fmm.univ-lille.fr/8x11x14.html) |
+| 8x11x17 | 993 | **969** | [976](https://fmm.univ-lille.fr/8x11x17.html) |
+| 8x11x20 | 1,148 | **1,129** | [1,138](https://fmm.univ-lille.fr/8x11x20.html) |
+| 8x12x17 | 1,036 | **1,018** | [1,038](https://fmm.univ-lille.fr/8x12x17.html) |
+| 8x12x19 | 1,156 | **1,148** | [1,160](https://fmm.univ-lille.fr/8x12x19.html) |
+| 8x13x13 | 885 | **867** | [880](https://fmm.univ-lille.fr/8x13x13.html) |
+| 8x13x14 | 942 | **938** | [945](https://fmm.univ-lille.fr/8x13x14.html) |
+| 8x13x16 | 1,060 | **1,044** | [1,054](https://fmm.univ-lille.fr/8x13x16.html) |
+| 8x13x17 | 1,140 | **1,128** | [1,145](https://fmm.univ-lille.fr/8x13x17.html) |
+| 8x13x19 | 1,273 | **1,270** | [1,273](https://fmm.univ-lille.fr/8x13x19.html) |
+| 10x11x12 | 850 | **848** | [849](https://fmm.univ-lille.fr/10x11x12.html) |
+
+Every headline construction uses the already-optimal 2x3x3/r15 or
+2x3x4/r20 parent (GF(2) rank metadata is in `seeds/bounds.w`). For example,
+8x13x16 uses twelve rank-47 and eight rank-60 leaves: `12*47+8*60=1044`.
+The useful change is the outer-parent/allocation combination, not further
+rank reduction of an optimal parent. In contrast, 8x11x20 has nominal rank
+`4*47+16*60=1148`; exact matrix cleanup saves 19 terms. The 8x11x17 winner
+also saves five terms after its nominal rank 974. This illustrates why
+formula prices must remain separate from final assessment.
+
+The independent Python replay reconstructs the entire census and shortlist
+without the new Ruby method, rebuilds every coordinate embedding and exact
+cleanup, and checks all 804 complete output tensors. The native full
+verifier also accepts all outputs without limited results. Both verifiers
+reject a validly encoded one-bit corruption of each of the 18 headline
+endpoints. Fresh response bytes, ranks and hashes are checked during replay;
+the two catalogue HEADs remain the same pinned commits listed above.
+
+Focused checks pass: the new frontier spec has six tests/97 assertions;
+existing outer-basis and leaf-portfolio specs pass ten/350 and fourteen/508,
+respectively. These include zero/partial budgets, filtered-work accounting,
+deterministic ties retaining parent identity, exact export/replay, malformed
+rank rejection and rejection of a misleading positive formula price at
+materialization. No full test suite or compiler rebuild is needed for this
+Ruby-only addition.
+
+The series now has **36 source-scoped candidate shapes** and **13,450
+complete-object identities** (13,284 non-inputs). All 804 endpoints are new
+relative to the preceding 12,646. There is no main-square improvement,
+world-record confirmation or general-field claim.
+
+The private bundle retains every census row and materialized recipe,
+source/leaf and endpoint tensors, fresh references, pinned checker sources,
+native binaries, focused test and prior identity receipt. It also includes
+`replay-frontier.rb`, which checks the reusable Ruby API's complete output
+against the saved census, alongside independent `python3 -B replay.py`.
+Both standalone replays pass. No tensor collection is added to Git.
+
+```
+~/.local/share/tungsten-metaflip/evidence/2026-09-11-small-width-frontier.tar.gz
+45,027,971 bytes; 6,999 payloads
+SHA256 2715d4d5e41ed3fb57295b6b728f3298cffb01f3aa0bece04f735be1b0201a84
+```
+
+Archive readback and a fresh extraction pass the full manifest, including
+hardlink targets, with no unmanifested payloads. No installed binary,
+canonical seed, user search, public catalogue, push or publication changes
+in this experiment. A useful next test is bounded leaf-portfolio refinement
+of the new 2x3x3/2x3x4 constructions and propagation of their verified gains.

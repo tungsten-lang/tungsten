@@ -211,6 +211,62 @@ module MetaflipOuterBasisProducts
   end
 
   # Formula-only screening is separate from exact candidate admission.
+  # Stream a bounded allocation census across targets, keeping only k prices
+  # per canonical shape. These are proposals: cancellation/cleanup can change
+  # their ordering, and library ranks need checked witnesses at materialization.
+  def width_frontier(images, library, widths: [3,4,5], required_width: nil, per_target: 2, context_limit: 100_000)
+    raise "invalid width frontier" unless images.is_a?(Array) && !images.empty? &&
+      images.all? { |e| e.is_a?(Hash) && e[:parent].is_a?(B::Scheme) } &&
+      widths.is_a?(Array) && !widths.empty? && widths.uniq.length == widths.length &&
+      widths.all? { |v| v.is_a?(Integer) && v.between?(1,16) } &&
+      (required_width.nil? || (required_width.is_a?(Integer) && widths.include?(required_width))) &&
+      per_target.is_a?(Integer) && per_target.positive? &&
+      context_limit.is_a?(Integer) && context_limit >= 0
+    widths = widths.sort.freeze
+    expected = images.sum { |e| widths.length**e[:parent].shape.sum }
+    eligible = images.sum do |e|
+      parts = e[:parent].shape.sum
+      widths.length**parts - (required_width.nil? ? 0 : (widths.length-1)**parts)
+    end
+    prices = {}
+    targets = {}
+    visited = scored = 0
+    images.each_with_index do |entry,index|
+      break if visited >= context_limit
+      parent = entry.fetch(:parent)
+      profiles = support_profiles(parent)
+      widths.repeated_permutation(parent.shape.sum) do |word|
+        break if visited >= context_limit
+        visited += 1
+        next if required_width && !word.include?(required_width)
+        offset = 0
+        allocation = parent.shape.map { |n| row = word.slice(offset,n).freeze; offset += n; row }.freeze
+        dims = 3.times.map { |axis| extents(profiles[axis],allocation[axis]) }
+        formula = parent.rank.times.sum do |term|
+          shape = dims.map { |d| d[term] }.sort.freeze
+          prices.fetch(shape) do
+            value = library.rank(shape)
+            raise "invalid library rank" unless value.is_a?(Integer) && value.positive?
+            prices[shape] = value
+          end
+        end
+        target = allocation.map(&:sum).sort.freeze
+        candidate = [formula,index,allocation].freeze
+        rows = targets[target] ||= []
+        rows << candidate
+        rows.sort!
+        rows.pop while rows.length > per_target
+        yield({index:scored,parent_index:index,allocation:allocation,target:allocation.map(&:sum).freeze,
+          formula_rank:formula}.freeze) if block_given?
+        scored += 1
+      end
+    end
+    {complete:visited == expected,visited_allocations:visited,expected_allocations:expected,
+      scored:scored,expected_contexts:eligible,context_limit:context_limit,widths:widths,required_width:required_width,
+      per_target:per_target,selection:"formula shortlist; not exhaustive cleanup minimization",
+      targets:targets.sort.map { |shape,rows| {shape:shape,formula_min:rows.first[0],candidates:rows} }}
+  end
+
   def formula_scan(images, target, library, minimum: 1, maximum: 15, slack: 4)
     raise "invalid scan limits" unless [minimum,maximum,slack].all? { |n| n.is_a?(Integer) } &&
       minimum >= 0 && maximum.between?(1,16) && minimum <= maximum && slack >= 0

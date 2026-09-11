@@ -180,7 +180,7 @@ while p <= 8
 
 # All specialized workers must retain the same portfolio mapping. This catches
 # a newly cloned shape silently falling back to the old O(rank) affine doors.
-tags = ["225","226","227","228","229","234","235","245","256","334","335","344","345","346","347","355","356","445","446","456","457","467"]
+tags = ["225","226","227","228","229","234","235","245","256","334","335","344","345","346","347","355","356","357","445","446","455","456","457","458","466","467","468","567"]
 i = 0
 while i < tags.size()
   path = __DIR__ + "/../lib/metaflip/kernels/rectangular/cal2zone_" + tags[i] + ".w"

@@ -158,7 +158,7 @@
           # Two independently permuted 32-bit values feed the wide mask. Salt
           # the second with lane and move counters: two adjacent LCG states
           # alone contain only 32 bits of entropy and would cover at most one
-          # 1024th of the 42-bit V-factor domain.
+          # 256th of the 40-bit V-factor domain.
           sample = state ## u32
           sample = ((sample >> ((sample >> 28) + 4)) ^ sample) * 277803737
           sample = (sample >> 22) ^ sample
@@ -168,17 +168,17 @@
           sample2 = (state ^ wide_salt) ## u32
           sample2 = ((sample2 >> ((sample2 >> 28) + 4)) ^ sample2) * 277803737
           sample2 = (sample2 >> 22) ^ sample2
-          u1 = (((u1 & 1023) << 32) ^ (sample2 ## i64)) & 4398046511103
+          u1 = (((u1 & 255) << 32) ^ (sample2 ## i64)) & 1099511627775
           state = state * 1103515245 + 12345
           paxis = state % 3
           if paxis < 0
             paxis = paxis + 3
           if paxis == 0
-            u1 = u1 & 16777215
+            u1 = u1 & 1048575
           if paxis == 1
-            u1 = u1 & 4398046511103
+            u1 = u1 & 1099511627775
           if paxis == 2
-            u1 = u1 & 268435455
+            u1 = u1 & 4294967295
           # Rejection keeps zero out without biasing it onto a distinguished mask.
           while u1 == 0
             state = state * 1103515245 + 12345
@@ -191,13 +191,13 @@
             sample2 = (state ^ wide_salt) ## u32
             sample2 = ((sample2 >> ((sample2 >> 28) + 4)) ^ sample2) * 277803737
             sample2 = (sample2 >> 22) ^ sample2
-            u1 = (((u1 & 1023) << 32) ^ (sample2 ## i64)) & 4398046511103
+            u1 = (((u1 & 255) << 32) ^ (sample2 ## i64)) & 1099511627775
             if paxis == 0
-              u1 = u1 & 16777215
+              u1 = u1 & 1048575
             if paxis == 1
-              u1 = u1 & 4398046511103
+              u1 = u1 & 1099511627775
             if paxis == 2
-              u1 = u1 & 268435455
+              u1 = u1 & 4294967295
           pb = pt * 8 + ltid
           if paxis == 0
             if u1 != sus[pb]
@@ -543,7 +543,7 @@ use core/system
   # This is an adoption gate, not a probabilistic corruption check.  Copy the
   # candidate out of Metal once, reject malformed factors, then reconstruct
   # every A[i,j] * B[j,k] -> C[i,k] tensor coordinate over GF(2).  The bundle
-  # is specialized for <4,6,7>; its configured CAP is below 512.
+  # is specialized for <4,5,8>; its configured CAP is below 512.
   ab = nn * mm
   bb = mm * pp
   cb = nn * pp
@@ -684,11 +684,11 @@ WQWANDER = 60000
 WTHR0 = 7
 ESCAPE_SEEDS = 256
 
-seedpath = "runs/run_467/current_best.txt"
-gpubestpath = "runs/run_467/gpu_best.txt"
+seedpath = "runs/run_458/current_best.txt"
+gpubestpath = "runs/run_458/gpu_best.txt"
 nn = 4
-mm = 6
-pp = 7
+mm = 5
+pp = 8
 av0 = argv()
 if av0.size() > 0
   seedpath = av0[0]

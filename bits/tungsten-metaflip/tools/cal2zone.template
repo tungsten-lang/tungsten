@@ -26,22 +26,27 @@
 # Any descent (rank < best) resets aband back to bstart(=1) immediately.
 #
 # Re-seeding uses a portfolio of exact +1 split escapes derived from the CPU
+#@if rect
 # frontier. One quarter reuses factors from donor terms; the other lanes
 # enumerate the nonzero proper split factor itself. Each GPU lane selects
 # `tid % nseeds`, so a full-width epoch covers thousands of genuinely distinct
 # shoulders instead of repeating only O(rank) affine donor pairs.
+#@else
+# frontier.  Each GPU lane selects `tid % nseeds`, so the GPU spends its width
+# in distinct basins instead of cloning the same seed thousands of times.
+#@end
 # Set ESCAPE_SEEDS=1 for the historical single-seed behavior.
 
-## i64[]: work_us
-## i64[]: work_vs
-## i64[]: work_ws
-## i64[]: best_us
-## i64[]: best_vs
-## i64[]: best_ws
+## {{MT}}[]: work_us
+## {{MT}}[]: work_vs
+## {{MT}}[]: work_ws
+## {{MT}}[]: best_us
+## {{MT}}[]: best_vs
+## {{MT}}[]: best_ws
 ## i32[]: st
-## i64[]: seed_us
-## i64[]: seed_vs
-## i64[]: seed_ws
+## {{MT}}[]: seed_us
+## {{MT}}[]: seed_vs
+## {{MT}}[]: seed_ws
 ## i32[]: params
 @gpu fn flipwalk(work_us, work_vs, work_ws, best_us, best_vs, best_ws, st, seed_us, seed_vs, seed_ws, params)
   tid = gpu.thread_position_in_grid.x ## i32
@@ -61,9 +66,9 @@
   sb = tid * 9 ## i32
   seedid = tid % nseeds ## i32
   seedbase = seedid * seedstride ## i32
-  sus = gpu.shared_i64(1344)
-  svs = gpu.shared_i64(1344)
-  sws = gpu.shared_i64(1344)
+  sus = gpu.shared_{{MT}}({{SHARED}})
+  svs = gpu.shared_{{MT}}({{SHARED}})
+  sws = gpu.shared_{{MT}}({{SHARED}})
   i = 0 ## i32
   rank = 0 ## i32
   best = 0 ## i32
@@ -77,7 +82,7 @@
   roll = 0 ## i32
   didplus = 0 ## i32
   pt = 0 ## i32
-  u1 = 0 ## i64
+  u1 = 0 ## {{MT}}
   fi = 0 ## i32
   axis = 0 ## i32
   off = 0 ## i32
@@ -101,14 +106,16 @@
   dsum = 0 ## i32
   capit = 0 ## i32
   docap = 0 ## i32
-  pz = 0 ## i64
+  pz = 0 ## {{MT}}
+#@if rect wide
   wide_salt = 0 ## i32
+#@end
   if doinit == 1
     i = 0
     while i < nterms
-      sus[i * 8 + ltid] = seed_us[seedbase + i]
-      svs[i * 8 + ltid] = seed_vs[seedbase + i]
-      sws[i * 8 + ltid] = seed_ws[seedbase + i]
+      sus[i * {{WPG}} + ltid] = seed_us[seedbase + i]
+      svs[i * {{WPG}} + ltid] = seed_vs[seedbase + i]
+      sws[i * {{WPG}} + ltid] = seed_ws[seedbase + i]
       best_us[base + i] = seed_us[seedbase + i]
       best_vs[base + i] = seed_vs[seedbase + i]
       best_ws[base + i] = seed_ws[seedbase + i]
@@ -135,30 +142,40 @@
   if doinit == 0
     i = 0
     while i < rank
-      sus[i * 8 + ltid] = work_us[base + i]
-      svs[i * 8 + ltid] = work_vs[base + i]
-      sws[i * 8 + ltid] = work_ws[base + i]
+      sus[i * {{WPG}} + ltid] = work_us[base + i]
+      svs[i * {{WPG}} + ltid] = work_vs[base + i]
+      sws[i * {{WPG}} + ltid] = work_ws[base + i]
       i = i + 1
   step = 0
   while step < steps
     mv = mv + 1
     state = state * 1103515245 + 12345
+#@if rect
     roll = state % 6
     if roll < 0
       roll = roll + 6
+#@else
+    roll = ((state % 6) + 6) % 6
+#@end
     didplus = 0
     if roll == 0
       if rank < best + margin
         if rank < cap - 1
           state = state * 1103515245 + 12345
+#@if rect
           pt = state % rank
           if pt < 0
             pt = pt + rank
+#@else
+          pt = ((state % rank) + rank) % rank
+#@end
           state = state * 1103515245 + 12345
+#@if rect
+#@if wide
           # Two independently permuted 32-bit values feed the wide mask. Salt
           # the second with lane and move counters: two adjacent LCG states
           # alone contain only 32 bits of entropy and would cover at most one
-          # 1024th of the 42-bit V-factor domain.
+          # {{WIDE_FRACTION}} of the {{MAXBITS}}-bit {{WIDE_AXIS}}-factor domain.
           sample = state ## u32
           sample = ((sample >> ((sample >> 28) + 4)) ^ sample) * 277803737
           sample = (sample >> 22) ^ sample
@@ -168,17 +185,42 @@
           sample2 = (state ^ wide_salt) ## u32
           sample2 = ((sample2 >> ((sample2 >> 28) + 4)) ^ sample2) * 277803737
           sample2 = (sample2 >> 22) ^ sample2
-          u1 = (((u1 & 1023) << 32) ^ (sample2 ## i64)) & 4398046511103
+          u1 = (((u1 & {{HIGH}}) << 32) ^ (sample2 ## i64)) & {{ENV}}
+#@else
+          # Division-free PCG RXS-M-XS permutes the full-period LCG state before
+          # masking.  Unsigned shifts mix high state bits into every factor width,
+          # avoiding the short low-bit cycles and cross-lane lattice of a raw mask.
+          sample = state ## u32
+          sample = ((sample >> ((sample >> 28) + 4)) ^ sample) * 277803737
+          sample = (sample >> 22) ^ sample
+          u1 = sample & {{ENV}}
+#@end
           state = state * 1103515245 + 12345
           paxis = state % 3
           if paxis < 0
             paxis = paxis + 3
+#@else
+          # <{{N}},{{M}},{{P}}> factors span {{UBITS}}/{{VBITS}}/{{WBITS}} bits.  Sample the {{MAXBITS}}-bit envelope, then trim it to the selected axis.
+#@if wide
+          u1 = state & 2147483647
+          state = state * 1103515245 + 12345
+          u1 = ((u1 << 31) ^ (state & 2147483647)) & {{ENV}}
+          if u1 == 0
+            u1 = 1
+#@else
+          u1 = (((state % {{ENV}}) + {{ENV}}) % {{ENV}}) + 1
+#@end
+          state = state * 1103515245 + 12345
+          paxis = ((state % 3) + 3) % 3
+#@end
           if paxis == 0
-            u1 = u1 & 16777215
+            u1 = u1 & {{UMASK}}
           if paxis == 1
-            u1 = u1 & 4398046511103
+            u1 = u1 & {{VMASK}}
           if paxis == 2
-            u1 = u1 & 268435455
+            u1 = u1 & {{WMASK}}
+#@if rect
+#@if wide
           # Rejection keeps zero out without biasing it onto a distinguished mask.
           while u1 == 0
             state = state * 1103515245 + 12345
@@ -191,103 +233,143 @@
             sample2 = (state ^ wide_salt) ## u32
             sample2 = ((sample2 >> ((sample2 >> 28) + 4)) ^ sample2) * 277803737
             sample2 = (sample2 >> 22) ^ sample2
-            u1 = (((u1 & 1023) << 32) ^ (sample2 ## i64)) & 4398046511103
+            u1 = (((u1 & {{HIGH}}) << 32) ^ (sample2 ## i64)) & {{ENV}}
             if paxis == 0
-              u1 = u1 & 16777215
+              u1 = u1 & {{UMASK}}
             if paxis == 1
-              u1 = u1 & 4398046511103
+              u1 = u1 & {{VMASK}}
             if paxis == 2
-              u1 = u1 & 268435455
-          pb = pt * 8 + ltid
+              u1 = u1 & {{WMASK}}
+#@else
+          # Rejection discards zero instead of doubling the probability of value one.
+          # Conditional on the uniform PCG output, every nonzero mask is equally
+          # likely; four-bit axes retry only 1/16 of draws and wider axes less.
+          while u1 == 0
+            state = state * 1103515245 + 12345
+            sample = state ## u32
+            sample = ((sample >> ((sample >> 28) + 4)) ^ sample) * 277803737
+            sample = (sample >> 22) ^ sample
+            if paxis == 0
+              u1 = sample & {{UMASK}}
+            if paxis == 1
+              u1 = sample & {{VMASK}}
+            if paxis == 2
+              u1 = sample & {{WMASK}}
+#@end
+#@else
+          if u1 == 0
+            u1 = 1
+#@end
+          pb = pt * {{WPG}} + ltid
           if paxis == 0
             if u1 != sus[pb]
-              sus[rank * 8 + ltid] = sus[pb] ^ u1
-              svs[rank * 8 + ltid] = svs[pb]
-              sws[rank * 8 + ltid] = sws[pb]
+              sus[rank * {{WPG}} + ltid] = sus[pb] ^ u1
+              svs[rank * {{WPG}} + ltid] = svs[pb]
+              sws[rank * {{WPG}} + ltid] = sws[pb]
               sus[pb] = u1
               rank = rank + 1
               didplus = 1
           if paxis == 1
             if u1 != svs[pb]
-              svs[rank * 8 + ltid] = svs[pb] ^ u1
-              sus[rank * 8 + ltid] = sus[pb]
-              sws[rank * 8 + ltid] = sws[pb]
+              svs[rank * {{WPG}} + ltid] = svs[pb] ^ u1
+              sus[rank * {{WPG}} + ltid] = sus[pb]
+              sws[rank * {{WPG}} + ltid] = sws[pb]
               svs[pb] = u1
               rank = rank + 1
               didplus = 1
           if paxis == 2
             if u1 != sws[pb]
-              sws[rank * 8 + ltid] = sws[pb] ^ u1
-              sus[rank * 8 + ltid] = sus[pb]
-              svs[rank * 8 + ltid] = svs[pb]
+              sws[rank * {{WPG}} + ltid] = sws[pb] ^ u1
+              sus[rank * {{WPG}} + ltid] = sus[pb]
+              svs[rank * {{WPG}} + ltid] = svs[pb]
               sws[pb] = u1
               rank = rank + 1
               didplus = 1
     if didplus == 0
       state = state * 1103515245 + 12345
+#@if rect
       fi = state % rank
       if fi < 0
         fi = fi + rank
+#@else
+      fi = ((state % rank) + rank) % rank
+#@end
       state = state * 1103515245 + 12345
+#@if rect
       axis = state % 3
       if axis < 0
         axis = axis + 3
+#@else
+      axis = ((state % 3) + 3) % 3
+#@end
       state = state * 1103515245 + 12345
+#@if rect
       off = state % rank
       if off < 0
         off = off + rank
+#@else
+      off = ((state % rank) + rank) % rank
+#@end
       fj = -1
       scan = 0
       while scan < rank
         if fj < 0
+#@if rect
           # `off` and `scan` are both in [0, rank), so their sum needs at
           # most one wrap.  Avoid a variable integer remainder in every
           # iteration of this O(rank) hot scan.
           cand = off + scan
           if cand >= rank
             cand = cand - rank
+#@else
+          cand = (off + scan) % rank
+#@end
           if cand != fi
             if axis == 0
-              if sus[cand * 8 + ltid] == sus[fi * 8 + ltid]
+              if sus[cand * {{WPG}} + ltid] == sus[fi * {{WPG}} + ltid]
                 fj = cand
             if axis == 1
-              if svs[cand * 8 + ltid] == svs[fi * 8 + ltid]
+              if svs[cand * {{WPG}} + ltid] == svs[fi * {{WPG}} + ltid]
                 fj = cand
             if axis == 2
-              if sws[cand * 8 + ltid] == sws[fi * 8 + ltid]
+              if sws[cand * {{WPG}} + ltid] == sws[fi * {{WPG}} + ltid]
                 fj = cand
         scan = scan + 1
       if fj >= 0
         if axis == 0
-          sws[fi * 8 + ltid] = sws[fi * 8 + ltid] ^ sws[fj * 8 + ltid]
-          svs[fj * 8 + ltid] = svs[fi * 8 + ltid] ^ svs[fj * 8 + ltid]
+          sws[fi * {{WPG}} + ltid] = sws[fi * {{WPG}} + ltid] ^ sws[fj * {{WPG}} + ltid]
+          svs[fj * {{WPG}} + ltid] = svs[fi * {{WPG}} + ltid] ^ svs[fj * {{WPG}} + ltid]
         if axis == 1
-          sws[fi * 8 + ltid] = sws[fi * 8 + ltid] ^ sws[fj * 8 + ltid]
-          sus[fj * 8 + ltid] = sus[fi * 8 + ltid] ^ sus[fj * 8 + ltid]
+          sws[fi * {{WPG}} + ltid] = sws[fi * {{WPG}} + ltid] ^ sws[fj * {{WPG}} + ltid]
+          sus[fj * {{WPG}} + ltid] = sus[fi * {{WPG}} + ltid] ^ sus[fj * {{WPG}} + ltid]
         if axis == 2
-          svs[fi * 8 + ltid] = svs[fi * 8 + ltid] ^ svs[fj * 8 + ltid]
-          sus[fj * 8 + ltid] = sus[fi * 8 + ltid] ^ sus[fj * 8 + ltid]
+          svs[fi * {{WPG}} + ltid] = svs[fi * {{WPG}} + ltid] ^ svs[fj * {{WPG}} + ltid]
+          sus[fj * {{WPG}} + ltid] = sus[fi * {{WPG}} + ltid] ^ sus[fj * {{WPG}} + ltid]
+#@if rect
     # An unmatched ordinary move did not touch the scheme.  The previous
     # step's cleanup invariant therefore proves there is no new zero or
     # touched-slot duplicate to inspect.  Keep the scheduled full duplicate
     # audit and density capture below: an improvement made on step 63 can be
     # first observed on an unmatched step 64.
+#@end
     t = 0
+#@if rect
     if didplus == 0
       if fj < 0
         t = rank
+#@end
     while t < rank
       z = 0
-      if sus[t * 8 + ltid] == 0
+      if sus[t * {{WPG}} + ltid] == 0
         z = 1
-      if svs[t * 8 + ltid] == 0
+      if svs[t * {{WPG}} + ltid] == 0
         z = 1
-      if sws[t * 8 + ltid] == 0
+      if sws[t * {{WPG}} + ltid] == 0
         z = 1
       if z == 1
-        sus[t * 8 + ltid] = sus[(rank - 1) * 8 + ltid]
-        svs[t * 8 + ltid] = svs[(rank - 1) * 8 + ltid]
-        sws[t * 8 + ltid] = sws[(rank - 1) * 8 + ltid]
+        sus[t * {{WPG}} + ltid] = sus[(rank - 1) * {{WPG}} + ltid]
+        svs[t * {{WPG}} + ltid] = svs[(rank - 1) * {{WPG}} + ltid]
+        sws[t * {{WPG}} + ltid] = sws[(rank - 1) * {{WPG}} + ltid]
         rank = rank - 1
       if z == 0
         t = t + 1
@@ -303,9 +385,9 @@
         bb = 0
         while bb < a
           if dup < 0
-            if sus[a * 8 + ltid] == sus[bb * 8 + ltid]
-              if svs[a * 8 + ltid] == svs[bb * 8 + ltid]
-                if sws[a * 8 + ltid] == sws[bb * 8 + ltid]
+            if sus[a * {{WPG}} + ltid] == sus[bb * {{WPG}} + ltid]
+              if svs[a * {{WPG}} + ltid] == svs[bb * {{WPG}} + ltid]
+                if sws[a * {{WPG}} + ltid] == sws[bb * {{WPG}} + ltid]
                   dup = bb
           bb = bb + 1
         if dup >= 0
@@ -317,29 +399,33 @@
             hi = swap
           rank = rank - 1
           if hi < rank
-            sus[hi * 8 + ltid] = sus[rank * 8 + ltid]
-            svs[hi * 8 + ltid] = svs[rank * 8 + ltid]
-            sws[hi * 8 + ltid] = sws[rank * 8 + ltid]
+            sus[hi * {{WPG}} + ltid] = sus[rank * {{WPG}} + ltid]
+            svs[hi * {{WPG}} + ltid] = svs[rank * {{WPG}} + ltid]
+            sws[hi * {{WPG}} + ltid] = sws[rank * {{WPG}} + ltid]
           rank = rank - 1
           if lo < rank
-            sus[lo * 8 + ltid] = sus[rank * 8 + ltid]
-            svs[lo * 8 + ltid] = svs[rank * 8 + ltid]
-            sws[lo * 8 + ltid] = sws[rank * 8 + ltid]
+            sus[lo * {{WPG}} + ltid] = sus[rank * {{WPG}} + ltid]
+            svs[lo * {{WPG}} + ltid] = svs[rank * {{WPG}} + ltid]
+            sws[lo * {{WPG}} + ltid] = sws[rank * {{WPG}} + ltid]
     if didplus == 0
+#@if rect
       # Use rank as an out-of-range sentinel when the factor scan found no
       # partner; both touched-slot checks then become constant-time no-ops.
       a = rank
       if fj >= 0
         a = fi
+#@else
+      a = fi
+#@end
       if a < rank
         dup = -1
         bb = 0
         while bb < rank
           if dup < 0
             if bb != a
-              if sus[a * 8 + ltid] == sus[bb * 8 + ltid]
-                if svs[a * 8 + ltid] == svs[bb * 8 + ltid]
-                  if sws[a * 8 + ltid] == sws[bb * 8 + ltid]
+              if sus[a * {{WPG}} + ltid] == sus[bb * {{WPG}} + ltid]
+                if svs[a * {{WPG}} + ltid] == svs[bb * {{WPG}} + ltid]
+                  if sws[a * {{WPG}} + ltid] == sws[bb * {{WPG}} + ltid]
                     dup = bb
           bb = bb + 1
         if dup >= 0
@@ -351,14 +437,14 @@
             hi = swap
           rank = rank - 1
           if hi < rank
-            sus[hi * 8 + ltid] = sus[rank * 8 + ltid]
-            svs[hi * 8 + ltid] = svs[rank * 8 + ltid]
-            sws[hi * 8 + ltid] = sws[rank * 8 + ltid]
+            sus[hi * {{WPG}} + ltid] = sus[rank * {{WPG}} + ltid]
+            svs[hi * {{WPG}} + ltid] = svs[rank * {{WPG}} + ltid]
+            sws[hi * {{WPG}} + ltid] = sws[rank * {{WPG}} + ltid]
           rank = rank - 1
           if lo < rank
-            sus[lo * 8 + ltid] = sus[rank * 8 + ltid]
-            svs[lo * 8 + ltid] = svs[rank * 8 + ltid]
-            sws[lo * 8 + ltid] = sws[rank * 8 + ltid]
+            sus[lo * {{WPG}} + ltid] = sus[rank * {{WPG}} + ltid]
+            svs[lo * {{WPG}} + ltid] = svs[rank * {{WPG}} + ltid]
+            sws[lo * {{WPG}} + ltid] = sws[rank * {{WPG}} + ltid]
       a = fj
       if a < 0
         a = rank
@@ -368,9 +454,9 @@
         while bb < rank
           if dup < 0
             if bb != a
-              if sus[a * 8 + ltid] == sus[bb * 8 + ltid]
-                if svs[a * 8 + ltid] == svs[bb * 8 + ltid]
-                  if sws[a * 8 + ltid] == sws[bb * 8 + ltid]
+              if sus[a * {{WPG}} + ltid] == sus[bb * {{WPG}} + ltid]
+                if svs[a * {{WPG}} + ltid] == svs[bb * {{WPG}} + ltid]
+                  if sws[a * {{WPG}} + ltid] == sws[bb * {{WPG}} + ltid]
                     dup = bb
           bb = bb + 1
         if dup >= 0
@@ -382,14 +468,14 @@
             hi = swap
           rank = rank - 1
           if hi < rank
-            sus[hi * 8 + ltid] = sus[rank * 8 + ltid]
-            svs[hi * 8 + ltid] = svs[rank * 8 + ltid]
-            sws[hi * 8 + ltid] = sws[rank * 8 + ltid]
+            sus[hi * {{WPG}} + ltid] = sus[rank * {{WPG}} + ltid]
+            svs[hi * {{WPG}} + ltid] = svs[rank * {{WPG}} + ltid]
+            sws[hi * {{WPG}} + ltid] = sws[rank * {{WPG}} + ltid]
           rank = rank - 1
           if lo < rank
-            sus[lo * 8 + ltid] = sus[rank * 8 + ltid]
-            svs[lo * 8 + ltid] = svs[rank * 8 + ltid]
-            sws[lo * 8 + ltid] = sws[rank * 8 + ltid]
+            sus[lo * {{WPG}} + ltid] = sus[rank * {{WPG}} + ltid]
+            svs[lo * {{WPG}} + ltid] = svs[rank * {{WPG}} + ltid]
+            sws[lo * {{WPG}} + ltid] = sws[rank * {{WPG}} + ltid]
     dchk = step % 4096
     if dchk == 0
       a = 0
@@ -398,9 +484,9 @@
         bb = a + 1
         while bb < rank
           if dup < 0
-            if sus[a * 8 + ltid] == sus[bb * 8 + ltid]
-              if svs[a * 8 + ltid] == svs[bb * 8 + ltid]
-                if sws[a * 8 + ltid] == sws[bb * 8 + ltid]
+            if sus[a * {{WPG}} + ltid] == sus[bb * {{WPG}} + ltid]
+              if svs[a * {{WPG}} + ltid] == svs[bb * {{WPG}} + ltid]
+                if sws[a * {{WPG}} + ltid] == sws[bb * {{WPG}} + ltid]
                   dup = bb
           bb = bb + 1
         if dup >= 0
@@ -412,14 +498,14 @@
             hi = swap
           rank = rank - 1
           if hi < rank
-            sus[hi * 8 + ltid] = sus[rank * 8 + ltid]
-            svs[hi * 8 + ltid] = svs[rank * 8 + ltid]
-            sws[hi * 8 + ltid] = sws[rank * 8 + ltid]
+            sus[hi * {{WPG}} + ltid] = sus[rank * {{WPG}} + ltid]
+            svs[hi * {{WPG}} + ltid] = svs[rank * {{WPG}} + ltid]
+            sws[hi * {{WPG}} + ltid] = sws[rank * {{WPG}} + ltid]
           rank = rank - 1
           if lo < rank
-            sus[lo * 8 + ltid] = sus[rank * 8 + ltid]
-            svs[lo * 8 + ltid] = svs[rank * 8 + ltid]
-            sws[lo * 8 + ltid] = sws[rank * 8 + ltid]
+            sus[lo * {{WPG}} + ltid] = sus[rank * {{WPG}} + ltid]
+            svs[lo * {{WPG}} + ltid] = svs[rank * {{WPG}} + ltid]
+            sws[lo * {{WPG}} + ltid] = sws[rank * {{WPG}} + ltid]
         if dup < 0
           a = a + 1
     # Capture best by lexicographic (rank, density): a strictly lower rank
@@ -437,15 +523,15 @@
       dsum = 0
       ci = 0
       while ci < rank
-        pz = sus[ci * 8 + ltid]
+        pz = sus[ci * {{WPG}} + ltid]
         while pz != 0
           pz = pz & (pz - 1)
           dsum = dsum + 1
-        pz = svs[ci * 8 + ltid]
+        pz = svs[ci * {{WPG}} + ltid]
         while pz != 0
           pz = pz & (pz - 1)
           dsum = dsum + 1
-        pz = sws[ci * 8 + ltid]
+        pz = sws[ci * {{WPG}} + ltid]
         while pz != 0
           pz = pz & (pz - 1)
           dsum = dsum + 1
@@ -461,9 +547,9 @@
         bestden = dsum
         ci = 0
         while ci < rank
-          best_us[base + ci] = sus[ci * 8 + ltid]
-          best_vs[base + ci] = svs[ci * 8 + ltid]
-          best_ws[base + ci] = sws[ci * 8 + ltid]
+          best_us[base + ci] = sus[ci * {{WPG}} + ltid]
+          best_vs[base + ci] = svs[ci * {{WPG}} + ltid]
+          best_ws[base + ci] = sws[ci * {{WPG}} + ltid]
           ci = ci + 1
         if aband + 1 > wthr
           wthr = aband + 1
@@ -482,9 +568,9 @@
           state = state * 1103515245 + 12345
           i = 0
           while i < nterms
-            sus[i * 8 + ltid] = seed_us[seedbase + i]
-            svs[i * 8 + ltid] = seed_vs[seedbase + i]
-            sws[i * 8 + ltid] = seed_ws[seedbase + i]
+            sus[i * {{WPG}} + ltid] = seed_us[seedbase + i]
+            svs[i * {{WPG}} + ltid] = seed_vs[seedbase + i]
+            sws[i * {{WPG}} + ltid] = seed_ws[seedbase + i]
             i = i + 1
           rank = nterms
           best = nterms
@@ -503,9 +589,9 @@
     step = step + 1
   i = 0
   while i < rank
-    work_us[base + i] = sus[i * 8 + ltid]
-    work_vs[base + i] = svs[i * 8 + ltid]
-    work_ws[base + i] = sws[i * 8 + ltid]
+    work_us[base + i] = sus[i * {{WPG}} + ltid]
+    work_vs[base + i] = svs[i * {{WPG}} + ltid]
+    work_ws[base + i] = sws[i * {{WPG}} + ltid]
     i = i + 1
   st[sb] = rank
   st[sb + 1] = best
@@ -543,7 +629,7 @@ use core/system
   # This is an adoption gate, not a probabilistic corruption check.  Copy the
   # candidate out of Metal once, reject malformed factors, then reconstruct
   # every A[i,j] * B[j,k] -> C[i,k] tensor coordinate over GF(2).  The bundle
-  # is specialized for <4,6,7>; its configured CAP is below 512.
+  # is specialized for <{{N}},{{M}},{{P}}>; its configured CAP is below 512.
   ab = nn * mm
   bb = mm * pp
   cb = nn * pp
@@ -558,9 +644,15 @@ use core/system
   cws = i64[512]
   t = 0 ## i64
   while t < rank
-    cus[t] = metal_buffer_read_i64(bufu, baseoff + t)
-    cvs[t] = metal_buffer_read_i64(bufv, baseoff + t)
-    cws[t] = metal_buffer_read_i64(bufw, baseoff + t)
+#@if view
+    cus[t] = bufu[baseoff + t]
+    cvs[t] = bufv[baseoff + t]
+    cws[t] = bufw[baseoff + t]
+#@else
+    cus[t] = metal_buffer_read_{{MT}}(bufu, baseoff + t)
+    cvs[t] = metal_buffer_read_{{MT}}(bufv, baseoff + t)
+    cws[t] = metal_buffer_read_{{MT}}(bufw, baseoff + t)
+#@end
     if cus[t] == 0 || cvs[t] == 0 || cws[t] == 0
       return 0
     if (cus[t] & amask) != cus[t]
@@ -615,9 +707,15 @@ use core/system
   cws = i64[512]
   t = 0 ## i64
   while t < rank
-    cus[t] = metal_buffer_read_i64(bufu, baseoff + t)
-    cvs[t] = metal_buffer_read_i64(bufv, baseoff + t)
-    cws[t] = metal_buffer_read_i64(bufw, baseoff + t)
+#@if view
+    cus[t] = bufu[baseoff + t]
+    cvs[t] = bufv[baseoff + t]
+    cws[t] = bufw[baseoff + t]
+#@else
+    cus[t] = metal_buffer_read_{{MT}}(bufu, baseoff + t)
+    cvs[t] = metal_buffer_read_{{MT}}(bufv, baseoff + t)
+    cws[t] = metal_buffer_read_{{MT}}(bufw, baseoff + t)
+#@end
     if cus[t] == 0
       return 0 - 10
     if cvs[t] == 0
@@ -667,8 +765,8 @@ use core/system
   0
 
 NW = 4096
-WPG = 8
-CAP = 168
+WPG = {{WPG}}
+CAP = {{CAP}}
 STEPS = 500000
 # Re-seed (reset each thread back to the seed + band-1 fresh start) only every
 # RESEED_EVERY rounds instead of every round, so a thread runs STEPS*RESEED_EVERY
@@ -684,11 +782,11 @@ WQWANDER = 60000
 WTHR0 = 7
 ESCAPE_SEEDS = 256
 
-seedpath = "runs/run_467/current_best.txt"
-gpubestpath = "runs/run_467/gpu_best.txt"
-nn = 4
-mm = 6
-pp = 7
+seedpath = "runs/run_{{TAG}}/current_best.txt"
+gpubestpath = "runs/run_{{TAG}}/gpu_best.txt"
+nn = {{N}}
+mm = {{M}}
+pp = {{P}}
 av0 = argv()
 if av0.size() > 0
   seedpath = av0[0]
@@ -764,12 +862,12 @@ live_gen = 0
 << "GPU cfg: NW=" + NW.to_s() + " STEPS=" + STEPS.to_s() + " ROUNDS=" + ROUNDS.to_s() + " RESEED=" + RESEED_EVERY.to_s() + " MARGIN=" + MARGIN.to_s() + " WORKQ=" + WQWORK.to_s() + " WANDERQ=" + WQWANDER.to_s() + " WTHR=" + WTHR0.to_s() + " ESCAPES=" + ESCAPE_SEEDS.to_s()
 flush()
 
-seedu = i64[168 * ESCAPE_SEEDS]
-seedv = i64[168 * ESCAPE_SEEDS]
-seedw = i64[168 * ESCAPE_SEEDS]
-baseu = i64[168]
-basev = i64[168]
-basew = i64[168]
+seedu = i64[{{CAP}} * ESCAPE_SEEDS]
+seedv = i64[{{CAP}} * ESCAPE_SEEDS]
+seedw = i64[{{CAP}} * ESCAPE_SEEDS]
+baseu = i64[{{CAP}}]
+basev = i64[{{CAP}}]
+basew = i64[{{CAP}}]
 
 device = metal_device()
 library = nil
@@ -780,17 +878,25 @@ if library == nil
   library = metal_compile_source(device, msl)
 pipeline = metal_pipeline(library, "flipwalk")
 
-work_us = metal_buffer(device, NW * CAP * 8)
-work_vs = metal_buffer(device, NW * CAP * 8)
-work_ws = metal_buffer(device, NW * CAP * 8)
-best_us = metal_buffer(device, NW * CAP * 8)
-best_vs = metal_buffer(device, NW * CAP * 8)
-best_ws = metal_buffer(device, NW * CAP * 8)
+work_us = metal_buffer(device, NW * CAP * {{MB}})
+work_vs = metal_buffer(device, NW * CAP * {{MB}})
+work_ws = metal_buffer(device, NW * CAP * {{MB}})
+best_us = metal_buffer(device, NW * CAP * {{MB}})
+best_vs = metal_buffer(device, NW * CAP * {{MB}})
+best_ws = metal_buffer(device, NW * CAP * {{MB}})
 st = metal_buffer(device, NW * 9 * 4)
-seed_us = metal_buffer(device, 168 * ESCAPE_SEEDS * 8)
-seed_vs = metal_buffer(device, 168 * ESCAPE_SEEDS * 8)
-seed_ws = metal_buffer(device, 168 * ESCAPE_SEEDS * 8)
+seed_us = metal_buffer(device, {{CAP}} * ESCAPE_SEEDS * {{MB}})
+seed_vs = metal_buffer(device, {{CAP}} * ESCAPE_SEEDS * {{MB}})
+seed_ws = metal_buffer(device, {{CAP}} * ESCAPE_SEEDS * {{MB}})
 params = metal_buffer(device, 11 * 4)
+#@if view
+seed_us_view = metal_buffer_view(seed_us, 66, {{CAP}} * ESCAPE_SEEDS) ## i64[]
+seed_vs_view = metal_buffer_view(seed_vs, 66, {{CAP}} * ESCAPE_SEEDS) ## i64[]
+seed_ws_view = metal_buffer_view(seed_ws, 66, {{CAP}} * ESCAPE_SEEDS) ## i64[]
+best_us_view = metal_buffer_view(best_us, 66, NW * CAP) ## i64[]
+best_vs_view = metal_buffer_view(best_vs, 66, NW * CAP) ## i64[]
+best_ws_view = metal_buffer_view(best_ws, 66, NW * CAP) ## i64[]
+#@end
 queue = metal_queue(device)
 bufs = [work_us, work_vs, work_ws, best_us, best_vs, best_ws, st, seed_us, seed_vs, seed_ws, params]
 
@@ -870,9 +976,42 @@ while rd < ROUNDS || persistent_mode == 1
   while ti2 < baserank
     ln = lines[ti2 + line_base]
     parts = ln.split(" ")
+#@if view
+    utext = parts[field_base]
+    ucut = utext.size() - 7
+    umask = 0 ## i64
+    if ucut > 0
+      uhi = utext.slice(0, ucut).to_i() ## i64
+      ulo = utext.slice(ucut, 7).to_i() ## i64
+      umask = uhi * 10000000 + ulo
+    if ucut <= 0
+      umask = utext.to_i()
+    baseu[ti2] = umask
+    vtext = parts[field_base + 1]
+    vcut = vtext.size() - 7
+    vmask = 0 ## i64
+    if vcut > 0
+      vhi = vtext.slice(0, vcut).to_i() ## i64
+      vlo = vtext.slice(vcut, 7).to_i() ## i64
+      vmask = vhi * 10000000 + vlo
+    if vcut <= 0
+      vmask = vtext.to_i()
+    basev[ti2] = vmask
+    wtext = parts[field_base + 2]
+    wcut = wtext.size() - 7
+    wmask = 0 ## i64
+    if wcut > 0
+      whi = wtext.slice(0, wcut).to_i() ## i64
+      wlo = wtext.slice(wcut, 7).to_i() ## i64
+      wmask = whi * 10000000 + wlo
+    if wcut <= 0
+      wmask = wtext.to_i()
+    basew[ti2] = wmask
+#@else
     baseu[ti2] = parts[field_base].to_i()
     basev[ti2] = parts[field_base + 1].to_i()
     basew[ti2] = parts[field_base + 2].to_i()
+#@end
     ti2 += 1
   # Build exact split identities natively.  Portfolio slot 0 is the base seed
   # when ESCAPE_SEEDS=1.  Otherwise every slot replaces one term by two terms
@@ -882,7 +1021,7 @@ while rd < ROUNDS || persistent_mode == 1
     startrank = baserank + 1
   sid = 0
   while sid < ESCAPE_SEEDS
-    soff = sid * 168
+    soff = sid * {{CAP}}
     ii = 0
     while ii < baserank
       seedu[soff + ii] = baseu[ii]
@@ -890,6 +1029,7 @@ while rd < ROUNDS || persistent_mode == 1
       seedw[soff + ii] = basew[ii]
       ii += 1
     if ESCAPE_SEEDS > 1
+#@if rect
       axis = sid % 3
       escape_index = sid / 3
       # Enumerate targets first, then distinct partitions of that target.
@@ -929,8 +1069,12 @@ while rd < ROUNDS || persistent_mode == 1
           tries += 1
       # The other three quarters enumerate arbitrary legal factor partitions.
       if mode > 0
+#@if wide
         factor_limit = 1 ## i64
         factor_limit = (factor_limit << factor_width) - 1
+#@else
+        factor_limit = (1 << factor_width) - 1
+#@end
         valid_parts = factor_limit - 1
         generic_choice = (choice / 4) * 3 + mode - 1
         generic_span = ((choices_per_target + 3) / 4) * 3
@@ -938,6 +1082,28 @@ while rd < ROUNDS || persistent_mode == 1
         part = part_ordinal + 1
         if part >= oldfactor
           part += 1
+#@else
+      target = (sid * 37 + rd * 17) % baserank
+      axis = (sid / baserank) % 3
+      donor = (target + 1 + sid * 13) % baserank
+      oldfactor = baseu[target]
+      part = baseu[donor]
+      if axis == 1
+        oldfactor = basev[target]
+        part = basev[donor]
+      if axis == 2
+        oldfactor = basew[target]
+        part = basew[donor]
+      tries = 0
+      while (part == 0 || part == oldfactor) && tries < baserank
+        donor = (donor + 1) % baserank
+        part = baseu[donor]
+        if axis == 1
+          part = basev[donor]
+        if axis == 2
+          part = basew[donor]
+        tries += 1
+#@end
       # Every practical frontier has at least two factors on each live axis;
       # retain a deterministic algebraic fallback for malformed portfolios.
       if part == 0 || part == oldfactor
@@ -958,9 +1124,15 @@ while rd < ROUNDS || persistent_mode == 1
         seedw[soff + baserank] = oldfactor ^ part
     ii = 0
     while ii < startrank
-      metal_buffer_write_i64(seed_us, soff + ii, seedu[soff + ii])
-      metal_buffer_write_i64(seed_vs, soff + ii, seedv[soff + ii])
-      metal_buffer_write_i64(seed_ws, soff + ii, seedw[soff + ii])
+#@if view
+      seed_us_view[soff + ii] = seedu[soff + ii]
+      seed_vs_view[soff + ii] = seedv[soff + ii]
+      seed_ws_view[soff + ii] = seedw[soff + ii]
+#@else
+      metal_buffer_write_{{MT}}(seed_us, soff + ii, seedu[soff + ii])
+      metal_buffer_write_{{MT}}(seed_vs, soff + ii, seedv[soff + ii])
+      metal_buffer_write_{{MT}}(seed_ws, soff + ii, seedw[soff + ii])
+#@end
       ii += 1
     sid += 1
   # density (total mask popcount = base-case ops budget) of the current seed;
@@ -1014,7 +1186,7 @@ while rd < ROUNDS || persistent_mode == 1
   metal_buffer_write_i32(params, 7, WTHR0)
   metal_buffer_write_i32(params, 8, reseed)
   metal_buffer_write_i32(params, 9, ESCAPE_SEEDS)
-  metal_buffer_write_i32(params, 10, 168)
+  metal_buffer_write_i32(params, 10, {{CAP}})
   metal_dispatch_groups(queue, pipeline, bufs, NW / WPG, WPG)
   # pick the lexicographic (rank, density) best thread: lower rank wins; at equal
   # rank, lower density (fewer base-case ops) wins.
@@ -1044,13 +1216,23 @@ while rd < ROUNDS || persistent_mode == 1
     if localden < seedden
       improved = 1
   if improved == 1
+#@if view
+    vok = verify_buf(best_us_view, best_vs_view, best_ws_view, bestthread * CAP, localmin, 555, nn, mm, pp)
+#@else
     vok = verify_buf(best_us, best_vs, best_ws, bestthread * CAP, localmin, 555, nn, mm, pp)
+#@end
     body = localmin.to_s() + " " + localden.to_s() + "\n"
     di = 0
     while di < localmin
-      uu = metal_buffer_read_i64(best_us, bestthread * CAP + di)
-      vv = metal_buffer_read_i64(best_vs, bestthread * CAP + di)
-      ww = metal_buffer_read_i64(best_ws, bestthread * CAP + di)
+#@if view
+      uu = best_us_view[bestthread * CAP + di]
+      vv = best_vs_view[bestthread * CAP + di]
+      ww = best_ws_view[bestthread * CAP + di]
+#@else
+      uu = metal_buffer_read_{{MT}}(best_us, bestthread * CAP + di)
+      vv = metal_buffer_read_{{MT}}(best_vs, bestthread * CAP + di)
+      ww = metal_buffer_read_{{MT}}(best_ws, bestthread * CAP + di)
+#@end
       body = body + uu.to_s() + " " + vv.to_s() + " " + ww.to_s() + "\n"
       di += 1
     if vok == 1
@@ -1064,7 +1246,11 @@ while rd < ROUNDS || persistent_mode == 1
           recordhit = recordhit + 1
           write_file(recordpath + "_" + recordhit.to_s() + ".txt", body)
     if vok == 0
+#@if view
+      exact_error = verify_buf_error(best_us_view, best_vs_view, best_ws_view, bestthread * CAP, localmin, 555, nn, mm, pp) ## i64
+#@else
       exact_error = verify_buf_error(best_us, best_vs, best_ws, bestthread * CAP, localmin, 555, nn, mm, pp) ## i64
+#@end
       # Publish metadata last.  Its presence is the commit marker for the
       # replay bundle; the coordinator freezes these stable sidecars under a
       # generation/launch nonce before starting another epoch.

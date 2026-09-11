@@ -44,9 +44,7 @@ use ../../seeds/rect
   ffrp_gpu_wpg(n, m, p)
 
 -> ffrgb_mask_bytes(n, m, p) (i64 i64 i64) i64
-  if n * m > 30 || m * p > 30 || n * p > 30
-    return 8
-  4
+  ffrp_gpu_mask_bytes(n, m, p)
 
 -> ffrgb_shared_bytes(n, m, p) (i64 i64 i64) i64
   ffrgb_cap(n, m, p) * ffrgb_wpg(n, m, p) * ffrgb_mask_bytes(n, m, p) * 3

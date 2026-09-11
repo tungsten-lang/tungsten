@@ -459,9 +459,17 @@ use bounds
     return 107
   if n == 3 && m == 5 && p == 6
     return 122
+  # 3x5x7 has 15/35/21-bit factors, so it takes the i64 worker.  CAP=128
+  # keeps 49 slots above the rank-79 reference at 128*8*8*3 = 24,576 bytes.
+  if n == 3 && m == 5 && p == 7
+    return 128
   if n == 4 && m == 4 && p == 5
     return 112
   if n == 4 && m == 4 && p == 6
+    return 128
+  # 4x5x5 (20/25/20-bit factors) fits the i32 worker.  CAP=128 keeps 52
+  # slots above the rank-76 reference at 128*16*4*3 = 24,576 bytes.
+  if n == 4 && m == 5 && p == 5
     return 128
   if n == 4 && m == 5 && p == 6
     return 152
@@ -470,19 +478,48 @@ use bounds
   # 32,768-byte Metal threadgroup allocation.
   if n == 4 && m == 5 && p == 7
     return 168
+  # 4x5x8 (20/40/32-bit factors) reuses the 168-slot eight-walker i64
+  # geometry: 50 slots above its rank-118 reference in 32,256 bytes.
+  if n == 4 && m == 5 && p == 8
+    return 168
+  # 4x6x6 (24/36/24-bit factors): CAP=160 keeps 55 slots above the rank-105
+  # reference at 160*8*8*3 = 30,720 bytes.
+  if n == 4 && m == 6 && p == 6
+    return 160
   # The high-leverage 4x6x7 frontier has 24/42/28-bit factors.  Its rank-123
   # and rank-168 naive seeds both fit the same 168-slot, eight-walker i64
   # geometry as 4x5x7 (32,256 bytes of threadgroup memory).
   if n == 4 && m == 6 && p == 7
     return 168
+  # 4x6x8 (24/48/32-bit factors) is the widest bundled rectangle.  CAP=170 is
+  # the largest eight-walker i64 capacity under the ceiling (170*8*8*3 =
+  # 32,640 bytes) and keeps 30 slots above the rank-140 reference.
+  if n == 4 && m == 6 && p == 8
+    return 170
+  # 5x6x7 (30/42/35-bit factors) needs 50 slots above its rank-150 reference;
+  # eight walkers would cap out at 170, so it runs four walkers per group:
+  # 200*4*8*3 = 19,200 bytes.
+  if n == 5 && m == 6 && p == 7
+    return 200
   0
 
--> ffrp_gpu_wpg(n, m, p) (i64 i64 i64) i64
-  if n == 4 && ((m == 5 && p == 7) || (m == 6 && p == 7))
+# Factor masks wider than 30 bits need the i64 worker variant; the host relay
+# and the generated kernel size their buffers from this same rule.
+-> ffrp_gpu_mask_bytes(n, m, p) (i64 i64 i64) i64
+  if n * m > 30 || m * p > 30 || n * p > 30
     return 8
-  if ffrp_gpu_cap(n, m, p) > 0
-    return 16
-  0
+  4
+
+-> ffrp_gpu_wpg(n, m, p) (i64 i64 i64) i64
+  if ffrp_gpu_cap(n, m, p) < 1
+    return 0
+  # Eight-byte masks halve the walkers that fit one 32,768-byte threadgroup;
+  # 5x6x7 halves again so its rank-150 frontier keeps 50 slots of room.
+  if n == 5 && m == 6 && p == 7
+    return 4
+  if ffrp_gpu_mask_bytes(n, m, p) == 8
+    return 8
+  16
 
 # A finite standalone campaign must not depend on the RNG-selected starting
 # band to see both sides of the search.  Reserve deterministic bookends for

@@ -9,6 +9,7 @@ use ../lib/metaflip/kernels/bundles/rect
 use ../lib/metaflip/kernels/bundles/pooled_exact
 use ../lib/metaflip/kernels/metallib_cache
 use ../lib/metaflip/paths
+use ../tools/cal2zone_generator
 
 failures = 0 ## i64
 
@@ -18,13 +19,48 @@ failures = 0 ## i64
     return 1
   0
 
--> package_expect_rect_partner_guard(runtime_root, shape) (String String) i64
-  source = read_file(runtime_root + "/kernels/rectangular/cal2zone_" + shape + ".w")
-  package_expect("rectangular " + shape + " guards a missing partner", source != nil && source.include?("a = fj\n      if a < 0\n        a = rank\n      if a < rank"))
+# Every bundled cal2zone worker must be exactly what tools/gen_cal2zone.w
+# renders from tools/cal2zone.template and the runtime geometry tables, so a
+# hand edit to one clone, or a geometry change without a regeneration, fails
+# here instead of drifting.
+-> package_expect_generated_workers(runtime_root, template_path) (String String) i64
+  template = read_file(template_path)
+  if template == nil
+    return package_expect("cal2zone template is packaged", false)
+  failures = 0 ## i64
+  codes = ffgz_shapes()
+  i = 0
+  while i < codes.size()
+    code = codes[i] ## i64
+    family = ffgz_family(code)
+    n = ffgz_code_n(code) ## i64
+    m = ffgz_code_m(code) ## i64
+    p = ffgz_code_p(code) ## i64
+    rel = ffgz_rel_path(family, n, m, p)
+    expected = ffgz_render(template, family, n, m, p)
+    actual = read_file(runtime_root + "/kernels/" + rel)
+    failures += package_expect("kernels/" + rel + " matches tools/cal2zone.template", expected != "" && actual != nil && actual == expected)
+    i += 1
+  failures
 
--> package_expect_generic_partner_guard(runtime_root, shape) (String String) i64
-  source = read_file(runtime_root + "/kernels/generic/cal2zone_" + shape + ".w")
-  package_expect("generic " + shape + " guards a missing partner", source != nil && source.include?("a = fj\n      if a < 0\n        a = rank\n      if a < rank"))
+# Every supported rectangular profile now ships a generated GPU worker, and
+# the portfolio policy must advertise exactly the shapes the bundle can build.
+-> package_expect_rect_gpu_coverage() i64
+  failures = 0 ## i64
+  n = 2
+  while n <= 9
+    m = 2
+    while m <= 9
+      p = 2
+      while p <= 9
+        if ffrp_supported(n, m, p) == 1
+          label = n.to_s() + "x" + m.to_s() + "x" + p.to_s()
+          failures += package_expect(label + " has valid GPU geometry", ffrgb_geometry_valid(n, m, p) == 1)
+          failures += package_expect(label + " policy GPU capability matches the bundle", ffrpp_default_gpu_capable(n * 100 + m * 10 + p) == ffrgb_supported(n, m, p))
+        p += 1
+      m += 1
+    n += 1
+  failures
 
 package_root = __DIR__ + "/.."
 runtime_root = package_root + "/lib/metaflip"
@@ -54,56 +90,26 @@ failures += package_expect("456 preserves three doors", ffrp_frontier_seed_count
 failures += package_expect("456 d906 seed is packaged", read_file(runtime_root + "/" + ffrp_seed_rel(4, 5, 6)) != nil)
 failures += package_expect("rect leverage audit is current", ffrpp_default_leverage(346) == 1679 && ffrpp_default_leverage(347) == 1458 && ffrpp_default_leverage(445) == 1411 && ffrpp_default_leverage(356) == 1638)
 failures += package_expect("generic GPU worker is packaged", read_file(ffb_source_path(runtime_root, 5)) != nil)
-failures += package_expect_generic_partner_guard(runtime_root, "333")
-failures += package_expect_generic_partner_guard(runtime_root, "444")
-failures += package_expect_generic_partner_guard(runtime_root, "555")
-failures += package_expect_generic_partner_guard(runtime_root, "666")
-failures += package_expect_generic_partner_guard(runtime_root, "777")
 failures += package_expect("generated Metal sidecar is not packaged", read_file(runtime_root + "/kernels/generic/cal2zone_555.metal") == nil)
 failures += package_expect("C3 worker is packaged", read_file(ffc3_source_path(runtime_root, 5)) != nil)
 failures += package_expect("SIMD worker is packaged", read_file(ffsimd_source_path(runtime_root, 5)) != nil)
 failures += package_expect("rectangular worker is packaged", read_file(ffrgb_source_path(runtime_root, 2, 2, 5)) != nil)
-failures += package_expect_rect_partner_guard(runtime_root, "225")
 failures += package_expect("226 GPU geometry is packaged", ffrgb_geometry_valid(2, 2, 6) == 1 && ffrgb_cap(2, 2, 6) == 64 && ffrgb_shared_bytes(2, 2, 6) == 12288)
-failures += package_expect_rect_partner_guard(runtime_root, "226")
 failures += package_expect("346 GPU geometry is packaged", ffrgb_geometry_valid(3, 4, 6) == 1 && ffrgb_cap(3, 4, 6) == 104 && ffrgb_shared_bytes(3, 4, 6) == 19968)
-failures += package_expect_rect_partner_guard(runtime_root, "346")
-source346 = read_file(ffrgb_source_path(runtime_root, 3, 4, 6))
-failures += package_expect("346 GPU masks and exact gate are packaged", source346 != nil && source346.include?("u1 = u1 & 4095") && source346.include?("u1 = u1 & 16777215") && source346.include?("u1 = u1 & 262143") && source346.include?("while ai < ab") && source346.include?("while bi < bb") && source346.include?("while ci < cb") && source346.include?("if got != want"))
 failures += package_expect("347 GPU geometry is packaged", ffrgb_geometry_valid(3, 4, 7) == 1 && ffrgb_cap(3, 4, 7) == 116 && ffrgb_shared_bytes(3, 4, 7) == 22272)
-failures += package_expect_rect_partner_guard(runtime_root, "347")
-source347 = read_file(ffrgb_source_path(runtime_root, 3, 4, 7))
-failures += package_expect("347 GPU masks and exact gate are packaged", source347 != nil && source347.include?("u1 = u1 & 4095") && source347.include?("u1 = u1 & 268435455") && source347.include?("u1 = u1 & 2097151") && source347.include?("while ai < ab") && source347.include?("while bi < bb") && source347.include?("while ci < cb") && source347.include?("if got != want"))
 failures += package_expect("356 GPU geometry is packaged", ffrgb_geometry_valid(3, 5, 6) == 1 && ffrgb_cap(3, 5, 6) == 122 && ffrgb_shared_bytes(3, 5, 6) == 23424)
-failures += package_expect_rect_partner_guard(runtime_root, "356")
-source356 = read_file(ffrgb_source_path(runtime_root, 3, 5, 6))
-failures += package_expect("356 GPU masks and exact gate are packaged", source356 != nil && source356.include?("u1 = u1 & 32767") && source356.include?("u1 = u1 & 1073741823") && source356.include?("u1 = u1 & 262143") && source356.include?("while ai < ab") && source356.include?("while bi < bb") && source356.include?("while ci < cb") && source356.include?("if got != want"))
 failures += package_expect("446 GPU geometry is packaged", ffrgb_geometry_valid(4, 4, 6) == 1 && ffrgb_cap(4, 4, 6) == 128 && ffrgb_wpg(4, 4, 6) == 16 && ffrgb_mask_bytes(4, 4, 6) == 4 && ffrgb_shared_bytes(4, 4, 6) == 24576)
-failures += package_expect_rect_partner_guard(runtime_root, "446")
-source446 = read_file(ffrgb_source_path(runtime_root, 4, 4, 6))
-failures += package_expect("446 GPU masks and exact gate are packaged", source446 != nil && source446.include?("u1 = u1 & 65535") && source446.include?("u1 = u1 & 16777215") && source446.include?("while ai < ab") && source446.include?("while bi < bb") && source446.include?("while ci < cb") && source446.include?("if got != want"))
 failures += package_expect("456 GPU geometry is packaged", ffrgb_geometry_valid(4, 5, 6) == 1 && ffrgb_cap(4, 5, 6) == 152 && ffrgb_wpg(4, 5, 6) == 16 && ffrgb_mask_bytes(4, 5, 6) == 4 && ffrgb_shared_bytes(4, 5, 6) == 29184)
-failures += package_expect_rect_partner_guard(runtime_root, "456")
-source456 = read_file(ffrgb_source_path(runtime_root, 4, 5, 6))
-failures += package_expect("456 GPU masks and exact gate are packaged", source456 != nil && source456.include?("u1 = u1 & 1048575") && source456.include?("u1 = u1 & 1073741823") && source456.include?("u1 = u1 & 16777215") && source456.include?("while ai < ab") && source456.include?("while bi < bb") && source456.include?("while ci < cb") && source456.include?("if got != want"))
 failures += package_expect("457 wide GPU geometry is packaged", ffrgb_geometry_valid(4, 5, 7) == 1 && ffrgb_cap(4, 5, 7) == 168 && ffrgb_wpg(4, 5, 7) == 8 && ffrgb_mask_bytes(4, 5, 7) == 8 && ffrgb_shared_bytes(4, 5, 7) == 32256)
-failures += package_expect_rect_partner_guard(runtime_root, "457")
-source457 = read_file(ffrgb_source_path(runtime_root, 4, 5, 7))
-failures += package_expect("457 full-width masks and exact gate are packaged", source457 != nil && source457.include?("## i64[]: work_us") && source457.include?("gpu.shared_i64(1344)") && source457.include?("sample2 = (state ^ wide_salt) ## u32") && source457.include?("u1 = u1 & 1048575") && source457.include?("u1 = u1 & 34359738367") && source457.include?("u1 = u1 & 268435455") && source457.include?("metal_buffer_write_i64(seed_us") && source457.include?("metal_buffer_read_i64(best_us") && source457.include?("while ai < ab") && source457.include?("while bi < bb") && source457.include?("while ci < cb") && source457.include?("if got != want"))
 failures += package_expect("467 wide GPU geometry is packaged", ffrgb_geometry_valid(4, 6, 7) == 1 && ffrgb_cap(4, 6, 7) == 168 && ffrgb_wpg(4, 6, 7) == 8 && ffrgb_mask_bytes(4, 6, 7) == 8 && ffrgb_shared_bytes(4, 6, 7) == 32256)
-failures += package_expect_rect_partner_guard(runtime_root, "467")
-source467 = read_file(ffrgb_source_path(runtime_root, 4, 6, 7))
-failures += package_expect("467 full-width masks and exact gate are packaged", source467 != nil && source467.include?("## i64[]: work_us") && source467.include?("gpu.shared_i64(1344)") && source467.include?("sample2 = (state ^ wide_salt) ## u32") && source467.include?("u1 = (((u1 & 1023) << 32) ^ (sample2 ## i64)) & 4398046511103") && source467.include?("u1 = u1 & 16777215") && source467.include?("u1 = u1 & 4398046511103") && source467.include?("u1 = u1 & 268435455") && source467.include?("metal_buffer_write_i64(seed_us") && source467.include?("metal_buffer_read_i64(best_us") && source467.include?("while ai < ab") && source467.include?("while bi < bb") && source467.include?("while ci < cb") && source467.include?("if got != want"))
-failures += package_expect_rect_partner_guard(runtime_root, "234")
-failures += package_expect_rect_partner_guard(runtime_root, "235")
-failures += package_expect_rect_partner_guard(runtime_root, "245")
-failures += package_expect_rect_partner_guard(runtime_root, "256")
-failures += package_expect_rect_partner_guard(runtime_root, "334")
-failures += package_expect_rect_partner_guard(runtime_root, "335")
-failures += package_expect_rect_partner_guard(runtime_root, "344")
-failures += package_expect_rect_partner_guard(runtime_root, "345")
-failures += package_expect_rect_partner_guard(runtime_root, "355")
-failures += package_expect_rect_partner_guard(runtime_root, "445")
+failures += package_expect("357 wide GPU geometry is packaged", ffrgb_geometry_valid(3, 5, 7) == 1 && ffrgb_cap(3, 5, 7) == 128 && ffrgb_wpg(3, 5, 7) == 8 && ffrgb_mask_bytes(3, 5, 7) == 8 && ffrgb_shared_bytes(3, 5, 7) == 24576)
+failures += package_expect("455 GPU geometry is packaged", ffrgb_geometry_valid(4, 5, 5) == 1 && ffrgb_cap(4, 5, 5) == 128 && ffrgb_wpg(4, 5, 5) == 16 && ffrgb_mask_bytes(4, 5, 5) == 4 && ffrgb_shared_bytes(4, 5, 5) == 24576)
+failures += package_expect("458 wide GPU geometry is packaged", ffrgb_geometry_valid(4, 5, 8) == 1 && ffrgb_cap(4, 5, 8) == 168 && ffrgb_wpg(4, 5, 8) == 8 && ffrgb_mask_bytes(4, 5, 8) == 8 && ffrgb_shared_bytes(4, 5, 8) == 32256)
+failures += package_expect("466 wide GPU geometry is packaged", ffrgb_geometry_valid(4, 6, 6) == 1 && ffrgb_cap(4, 6, 6) == 160 && ffrgb_wpg(4, 6, 6) == 8 && ffrgb_mask_bytes(4, 6, 6) == 8 && ffrgb_shared_bytes(4, 6, 6) == 30720)
+failures += package_expect("468 wide GPU geometry is packaged", ffrgb_geometry_valid(4, 6, 8) == 1 && ffrgb_cap(4, 6, 8) == 170 && ffrgb_wpg(4, 6, 8) == 8 && ffrgb_mask_bytes(4, 6, 8) == 8 && ffrgb_shared_bytes(4, 6, 8) == 32640)
+failures += package_expect("567 wide GPU geometry is packaged", ffrgb_geometry_valid(5, 6, 7) == 1 && ffrgb_cap(5, 6, 7) == 200 && ffrgb_wpg(5, 6, 7) == 4 && ffrgb_mask_bytes(5, 6, 7) == 8 && ffrgb_shared_bytes(5, 6, 7) == 19200)
+failures += package_expect_rect_gpu_coverage()
+failures += package_expect_generated_workers(runtime_root, package_root + "/tools/cal2zone.template")
 failures += package_expect("seed provenance manifest is packaged", read_file(runtime_root + "/manifests/seeds.tsv") != nil)
 failures += package_expect("greedy pocket seed is packaged", read_file(runtime_root + "/seeds/gf2/matmul_7x7_rank247_d3496_fixed_rank_pocket_greedy_closure_gf2.txt") != nil && package_sums != nil && package_sums.include?("matmul_7x7_rank247_d3496_fixed_rank_pocket_greedy_closure_gf2.txt"))
 failures += package_expect("Runpod epoch-1965 C013 endpoint and former active parent are packaged", read_file(runtime_root + "/seeds/gf2/matmul_7x7_rank247_d3486_c013_runpod_epoch1965_continuation_gf2.txt") != nil && read_file(runtime_root + "/seeds/gf2/matmul_7x7_rank247_d3492_outer_isotropy_c013_cuda_epoch67_gf2.txt") != nil && package_sums != nil && package_sums.include?("matmul_7x7_rank247_d3486_c013_runpod_epoch1965_continuation_gf2.txt") && package_sums.include?("matmul_7x7_rank247_d3492_outer_isotropy_c013_cuda_epoch67_gf2.txt"))

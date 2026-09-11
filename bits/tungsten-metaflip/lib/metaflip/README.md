@@ -75,7 +75,10 @@ Metaflip executable:
   matched packaged-frontier screens found no useful production-pool signal.
 - `kernels/` contains the canonical pure-Tungsten runtime workers. Generated
   Metal sources and libraries are redirected to the writable worker cache and
-  must never appear here.
+  must never appear here. The `rectangular/` and `generic/` cal2zone workers
+  are renderings of `tools/cal2zone.template` for each shape's runtime geometry;
+  regenerate them with `tools/gen_cal2zone.w` instead of editing a clone, and
+  `spec/package_layout_test.w` fails on any drift.
 - `seeds/gf2/` holds the exact starting, frontier, shoulder, and explicitly
   experimental schemes
   selected by the square and rectangular production profiles.

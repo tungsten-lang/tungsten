@@ -1,0 +1,3583 @@
+{
+  "scope": "Follow-up on all apparent >5% regressions and both exact-prime guard misses in the initial diagnostic. Nine alternating ABBA/BAAB rounds per comparison; shared iteration counts calibrated for >=110 ms in faster candidate/before-fermat pilot. Not broad bignum qualification.",
+  "runtime_sha256": "443eec4c728ff78888e11f6aac851123a71366ff786d5b2ca6cc8d1612f6648d",
+  "benchmark_sha256": "3bbf3bf257de7eed5daf28d2dc2c5828dec601a2449e9769ea49cdd5e97a7fcd",
+  "load_end": [
+    5.52001953125,
+    7.06591796875,
+    8.18115234375
+  ],
+  "raw": [
+    {
+      "phase": "pilot",
+      "variant": "before-fermat",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 128,
+      "round": -1,
+      "us_per_op": 25.5078,
+      "checksum": "68d0d777722a047a"
+    },
+    {
+      "phase": "pilot",
+      "variant": "candidate",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 128,
+      "round": -1,
+      "us_per_op": 25.8516,
+      "checksum": "68d0d777722a047a"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 0,
+      "us_per_op": 25.7111,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 0,
+      "us_per_op": 25.4707,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 0,
+      "us_per_op": 25.5117,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 0,
+      "us_per_op": 25.572,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 1,
+      "us_per_op": 25.6603,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 1,
+      "us_per_op": 26.5787,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 1,
+      "us_per_op": 26.1071,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 1,
+      "us_per_op": 25.5208,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 2,
+      "us_per_op": 25.5857,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 2,
+      "us_per_op": 25.4878,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 2,
+      "us_per_op": 25.7823,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 2,
+      "us_per_op": 25.9592,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 3,
+      "us_per_op": 26.4619,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 3,
+      "us_per_op": 25.9228,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 3,
+      "us_per_op": 26.4299,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 3,
+      "us_per_op": 25.6339,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 4,
+      "us_per_op": 25.6633,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 4,
+      "us_per_op": 26.1477,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 4,
+      "us_per_op": 27.3939,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 4,
+      "us_per_op": 27.3596,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 5,
+      "us_per_op": 25.9195,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 5,
+      "us_per_op": 25.6671,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 5,
+      "us_per_op": 26.942,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 5,
+      "us_per_op": 25.9427,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 6,
+      "us_per_op": 29.5323,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 6,
+      "us_per_op": 26.4106,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 6,
+      "us_per_op": 26.0939,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 6,
+      "us_per_op": 25.8903,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 7,
+      "us_per_op": 25.8168,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 7,
+      "us_per_op": 25.9803,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 7,
+      "us_per_op": 25.9689,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 7,
+      "us_per_op": 25.994,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 8,
+      "us_per_op": 27.6096,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 8,
+      "us_per_op": 27.4081,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 8,
+      "us_per_op": 29.3383,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 8,
+      "us_per_op": 29.5092,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 0,
+      "us_per_op": 26.7528,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 0,
+      "us_per_op": 27.4932,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 0,
+      "us_per_op": 26.8743,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 0,
+      "us_per_op": 26.0318,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 1,
+      "us_per_op": 25.8085,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 1,
+      "us_per_op": 26.4621,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 1,
+      "us_per_op": 29.4609,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 1,
+      "us_per_op": 27.1164,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 2,
+      "us_per_op": 26.543,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 2,
+      "us_per_op": 29.3638,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 2,
+      "us_per_op": 27.1843,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 2,
+      "us_per_op": 27.3248,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 3,
+      "us_per_op": 25.9075,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 3,
+      "us_per_op": 25.5001,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 3,
+      "us_per_op": 25.2418,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 3,
+      "us_per_op": 25.4776,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 4,
+      "us_per_op": 25.7477,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 4,
+      "us_per_op": 25.9668,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 4,
+      "us_per_op": 29.5755,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 4,
+      "us_per_op": 25.5864,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 5,
+      "us_per_op": 26.0665,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 5,
+      "us_per_op": 25.9263,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 5,
+      "us_per_op": 25.7048,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 5,
+      "us_per_op": 26.0148,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 6,
+      "us_per_op": 26.0209,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 6,
+      "us_per_op": 25.8062,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 6,
+      "us_per_op": 26.2353,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 6,
+      "us_per_op": 25.2863,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 7,
+      "us_per_op": 25.5407,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 7,
+      "us_per_op": 25.2745,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 7,
+      "us_per_op": 25.3079,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 7,
+      "us_per_op": 25.7712,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 8,
+      "us_per_op": 25.6569,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 8,
+      "us_per_op": 25.8458,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 8,
+      "us_per_op": 25.547,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=8 e=full(512 bits)",
+      "iterations": 4313,
+      "round": 8,
+      "us_per_op": 25.2843,
+      "checksum": "21790b0188471c48"
+    },
+    {
+      "phase": "pilot",
+      "variant": "before-fermat",
+      "case": "k=16 e=3",
+      "iterations": 128,
+      "round": -1,
+      "us_per_op": 0.5937,
+      "checksum": "54a5fb4cd0be13dc"
+    },
+    {
+      "phase": "pilot",
+      "variant": "candidate",
+      "case": "k=16 e=3",
+      "iterations": 128,
+      "round": -1,
+      "us_per_op": 0.5937,
+      "checksum": "54a5fb4cd0be13dc"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 0,
+      "us_per_op": 0.5782,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 0,
+      "us_per_op": 0.5816,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 0,
+      "us_per_op": 0.5764,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 0,
+      "us_per_op": 0.5747,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 1,
+      "us_per_op": 0.5778,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 1,
+      "us_per_op": 0.5687,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 1,
+      "us_per_op": 0.5659,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 1,
+      "us_per_op": 0.5726,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 2,
+      "us_per_op": 0.5741,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 2,
+      "us_per_op": 0.5703,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 2,
+      "us_per_op": 0.5707,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 2,
+      "us_per_op": 0.5675,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 3,
+      "us_per_op": 0.57,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 3,
+      "us_per_op": 0.5672,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 3,
+      "us_per_op": 0.5769,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 3,
+      "us_per_op": 0.5848,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 4,
+      "us_per_op": 0.5921,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 4,
+      "us_per_op": 0.5874,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 4,
+      "us_per_op": 0.577,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 4,
+      "us_per_op": 0.5734,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 5,
+      "us_per_op": 0.5852,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 5,
+      "us_per_op": 0.5852,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 5,
+      "us_per_op": 0.5882,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 5,
+      "us_per_op": 0.5884,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 6,
+      "us_per_op": 0.5981,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 6,
+      "us_per_op": 0.6101,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 6,
+      "us_per_op": 0.5843,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 6,
+      "us_per_op": 0.5758,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 7,
+      "us_per_op": 0.5907,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 7,
+      "us_per_op": 0.5936,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 7,
+      "us_per_op": 0.5844,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 7,
+      "us_per_op": 0.5876,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 8,
+      "us_per_op": 0.613,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 8,
+      "us_per_op": 0.6198,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 8,
+      "us_per_op": 0.617,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 8,
+      "us_per_op": 0.5925,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 0,
+      "us_per_op": 1.0695,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 0,
+      "us_per_op": 0.5959,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 0,
+      "us_per_op": 0.5989,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 0,
+      "us_per_op": 1.1086,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 1,
+      "us_per_op": 0.6132,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 1,
+      "us_per_op": 1.0545,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 1,
+      "us_per_op": 1.0725,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 1,
+      "us_per_op": 0.7211,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 2,
+      "us_per_op": 1.2027,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 2,
+      "us_per_op": 0.7082,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 2,
+      "us_per_op": 0.681,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 2,
+      "us_per_op": 1.0823,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 3,
+      "us_per_op": 0.6141,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 3,
+      "us_per_op": 1.0948,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 3,
+      "us_per_op": 1.1219,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 3,
+      "us_per_op": 0.7156,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 4,
+      "us_per_op": 1.0868,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 4,
+      "us_per_op": 0.6379,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 4,
+      "us_per_op": 0.6759,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 4,
+      "us_per_op": 1.088,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 5,
+      "us_per_op": 0.5908,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 5,
+      "us_per_op": 1.1124,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 5,
+      "us_per_op": 1.0669,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 5,
+      "us_per_op": 0.591,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 6,
+      "us_per_op": 1.0762,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 6,
+      "us_per_op": 0.6029,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 6,
+      "us_per_op": 0.6072,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 6,
+      "us_per_op": 1.0411,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 7,
+      "us_per_op": 0.603,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 7,
+      "us_per_op": 1.169,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 7,
+      "us_per_op": 1.0674,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 7,
+      "us_per_op": 0.606,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 8,
+      "us_per_op": 1.0546,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 8,
+      "us_per_op": 0.5857,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 8,
+      "us_per_op": 0.5979,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=16 e=3",
+      "iterations": 185279,
+      "round": 8,
+      "us_per_op": 1.0188,
+      "checksum": "210eacb732d34ee8"
+    },
+    {
+      "phase": "pilot",
+      "variant": "before-fermat",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": -1,
+      "us_per_op": 1089.8906,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "pilot",
+      "variant": "candidate",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": -1,
+      "us_per_op": 1038.9453,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 0,
+      "us_per_op": 1010.8516,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 0,
+      "us_per_op": 1009.7734,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 0,
+      "us_per_op": 1008.0859,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 0,
+      "us_per_op": 1004.6953,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 1,
+      "us_per_op": 984.6719,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 1,
+      "us_per_op": 984.3047,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 1,
+      "us_per_op": 982.6172,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 1,
+      "us_per_op": 989.0234,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 2,
+      "us_per_op": 1003.0859,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 2,
+      "us_per_op": 1036.0547,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 2,
+      "us_per_op": 1014.4766,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 2,
+      "us_per_op": 995.3828,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 3,
+      "us_per_op": 1009.3984,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 3,
+      "us_per_op": 1021.875,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 3,
+      "us_per_op": 1020.7266,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 3,
+      "us_per_op": 1027.3828,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 4,
+      "us_per_op": 1003.0313,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 4,
+      "us_per_op": 1054.2813,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 4,
+      "us_per_op": 1009.0469,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 4,
+      "us_per_op": 1021.7969,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 5,
+      "us_per_op": 1018.0469,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 5,
+      "us_per_op": 1006.5547,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 5,
+      "us_per_op": 1006.9531,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 5,
+      "us_per_op": 994.0937,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 6,
+      "us_per_op": 1002.2812,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 6,
+      "us_per_op": 1013.7344,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 6,
+      "us_per_op": 996.7891,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 6,
+      "us_per_op": 992.0391,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 7,
+      "us_per_op": 998.4531,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 7,
+      "us_per_op": 984.9687,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 7,
+      "us_per_op": 1000.8203,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 7,
+      "us_per_op": 989.1719,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 8,
+      "us_per_op": 992.0703,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 8,
+      "us_per_op": 990.3203,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 8,
+      "us_per_op": 979.3516,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 8,
+      "us_per_op": 990.9453,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 0,
+      "us_per_op": 993.0625,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 0,
+      "us_per_op": 1012.1406,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 0,
+      "us_per_op": 994.4141,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 0,
+      "us_per_op": 987.5547,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 1,
+      "us_per_op": 981.6719,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 1,
+      "us_per_op": 991.6094,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 1,
+      "us_per_op": 989.9453,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 1,
+      "us_per_op": 1014.5234,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 2,
+      "us_per_op": 1004.9922,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 2,
+      "us_per_op": 1022.8672,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 2,
+      "us_per_op": 1050.6484,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 2,
+      "us_per_op": 1004.9609,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 3,
+      "us_per_op": 1011.7891,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 3,
+      "us_per_op": 1022.6797,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 3,
+      "us_per_op": 1021.6328,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 3,
+      "us_per_op": 990.0781,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 4,
+      "us_per_op": 1026.4453,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 4,
+      "us_per_op": 1013.4453,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 4,
+      "us_per_op": 1007.7031,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 4,
+      "us_per_op": 1082.6953,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 5,
+      "us_per_op": 1048.2812,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 5,
+      "us_per_op": 1024.7109,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 5,
+      "us_per_op": 1031.1641,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 5,
+      "us_per_op": 1043.8203,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 6,
+      "us_per_op": 1034.9609,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 6,
+      "us_per_op": 1018.4141,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 6,
+      "us_per_op": 1001.8359,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 6,
+      "us_per_op": 996.2578,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 7,
+      "us_per_op": 990.4766,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 7,
+      "us_per_op": 1276.5312,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 7,
+      "us_per_op": 989.1094,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 7,
+      "us_per_op": 1107.0391,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 8,
+      "us_per_op": 978.5078,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 8,
+      "us_per_op": 981.6563,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 8,
+      "us_per_op": 978.1016,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "k=32 e=full(2048 bits)",
+      "iterations": 128,
+      "round": 8,
+      "us_per_op": 985.9766,
+      "checksum": "2c04cb5f1879d3f6"
+    },
+    {
+      "phase": "pilot",
+      "variant": "before-fermat",
+      "case": "bn254 e=p-2",
+      "iterations": 128,
+      "round": -1,
+      "us_per_op": 4.7422,
+      "checksum": "e253d7d863facdec"
+    },
+    {
+      "phase": "pilot",
+      "variant": "candidate",
+      "case": "bn254 e=p-2",
+      "iterations": 128,
+      "round": -1,
+      "us_per_op": 4.6641,
+      "checksum": "e253d7d863facdec"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 0,
+      "us_per_op": 4.6684,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 0,
+      "us_per_op": 4.696,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 0,
+      "us_per_op": 4.6858,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 0,
+      "us_per_op": 4.7097,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 1,
+      "us_per_op": 4.6397,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 1,
+      "us_per_op": 4.6437,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 1,
+      "us_per_op": 4.6281,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 1,
+      "us_per_op": 4.6234,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 2,
+      "us_per_op": 4.7248,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 2,
+      "us_per_op": 4.7128,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 2,
+      "us_per_op": 4.805,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 2,
+      "us_per_op": 4.7009,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 3,
+      "us_per_op": 4.7381,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 3,
+      "us_per_op": 4.6643,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 3,
+      "us_per_op": 4.745,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 3,
+      "us_per_op": 4.8332,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 4,
+      "us_per_op": 4.7629,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 4,
+      "us_per_op": 4.732,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 4,
+      "us_per_op": 4.6532,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 4,
+      "us_per_op": 4.7562,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 5,
+      "us_per_op": 5.2377,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 5,
+      "us_per_op": 4.8141,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 5,
+      "us_per_op": 4.7944,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 5,
+      "us_per_op": 4.8444,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 6,
+      "us_per_op": 4.7334,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 6,
+      "us_per_op": 4.7316,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 6,
+      "us_per_op": 4.8268,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 6,
+      "us_per_op": 4.7637,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 7,
+      "us_per_op": 4.7061,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 7,
+      "us_per_op": 5.024,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 7,
+      "us_per_op": 4.7852,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 7,
+      "us_per_op": 4.8076,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 8,
+      "us_per_op": 4.6692,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 8,
+      "us_per_op": 4.669,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 8,
+      "us_per_op": 4.7715,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 8,
+      "us_per_op": 4.695,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 0,
+      "us_per_op": 4.6288,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 0,
+      "us_per_op": 4.6931,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 0,
+      "us_per_op": 4.6857,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 0,
+      "us_per_op": 4.6681,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 1,
+      "us_per_op": 4.7084,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 1,
+      "us_per_op": 4.5429,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 1,
+      "us_per_op": 4.5469,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 1,
+      "us_per_op": 4.6485,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 2,
+      "us_per_op": 4.5254,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 2,
+      "us_per_op": 4.7479,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 2,
+      "us_per_op": 4.8097,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 2,
+      "us_per_op": 4.5857,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 3,
+      "us_per_op": 4.6883,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 3,
+      "us_per_op": 4.6325,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 3,
+      "us_per_op": 4.6192,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 3,
+      "us_per_op": 4.7267,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 4,
+      "us_per_op": 4.6135,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 4,
+      "us_per_op": 4.7665,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 4,
+      "us_per_op": 4.7175,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 4,
+      "us_per_op": 4.5181,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 5,
+      "us_per_op": 4.6612,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 5,
+      "us_per_op": 4.5426,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 5,
+      "us_per_op": 4.528,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 5,
+      "us_per_op": 4.7615,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 6,
+      "us_per_op": 4.6951,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 6,
+      "us_per_op": 5.025,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 6,
+      "us_per_op": 4.6669,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 6,
+      "us_per_op": 4.5462,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 7,
+      "us_per_op": 4.6557,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 7,
+      "us_per_op": 4.542,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 7,
+      "us_per_op": 4.6343,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 7,
+      "us_per_op": 4.7369,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 8,
+      "us_per_op": 4.637,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 8,
+      "us_per_op": 4.6675,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 8,
+      "us_per_op": 4.7947,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "bn254 e=p-2",
+      "iterations": 23585,
+      "round": 8,
+      "us_per_op": 4.5779,
+      "checksum": "1375f481ae4cbf10"
+    },
+    {
+      "phase": "pilot",
+      "variant": "before-fermat",
+      "case": "secp256k1 e=p-2",
+      "iterations": 128,
+      "round": -1,
+      "us_per_op": 4.9766,
+      "checksum": "ffffffbe7fff0648"
+    },
+    {
+      "phase": "pilot",
+      "variant": "candidate",
+      "case": "secp256k1 e=p-2",
+      "iterations": 128,
+      "round": -1,
+      "us_per_op": 5.1563,
+      "checksum": "ffffffbe7fff0648"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 0,
+      "us_per_op": 4.8064,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 0,
+      "us_per_op": 4.802,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 0,
+      "us_per_op": 4.9765,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 0,
+      "us_per_op": 4.9411,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 1,
+      "us_per_op": 4.9341,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 1,
+      "us_per_op": 4.9018,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 1,
+      "us_per_op": 4.857,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 1,
+      "us_per_op": 4.9187,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 2,
+      "us_per_op": 4.8458,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 2,
+      "us_per_op": 4.8023,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 2,
+      "us_per_op": 4.7977,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 2,
+      "us_per_op": 4.8014,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 3,
+      "us_per_op": 4.8282,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 3,
+      "us_per_op": 4.812,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 3,
+      "us_per_op": 4.8063,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 3,
+      "us_per_op": 4.8123,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 4,
+      "us_per_op": 4.8481,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 4,
+      "us_per_op": 4.8455,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 4,
+      "us_per_op": 4.7954,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 4,
+      "us_per_op": 4.8054,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 5,
+      "us_per_op": 4.8002,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 5,
+      "us_per_op": 4.7913,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 5,
+      "us_per_op": 4.8056,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 5,
+      "us_per_op": 4.8161,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 6,
+      "us_per_op": 4.8297,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 6,
+      "us_per_op": 4.8264,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 6,
+      "us_per_op": 4.8004,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 6,
+      "us_per_op": 4.8106,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 7,
+      "us_per_op": 4.8223,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 7,
+      "us_per_op": 4.8452,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 7,
+      "us_per_op": 4.8783,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 7,
+      "us_per_op": 4.883,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 8,
+      "us_per_op": 4.8106,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 8,
+      "us_per_op": 4.8774,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 8,
+      "us_per_op": 4.8274,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "before-fermat",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 8,
+      "us_per_op": 4.8237,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 0,
+      "us_per_op": 4.7586,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 0,
+      "us_per_op": 4.8452,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 0,
+      "us_per_op": 4.8342,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 0,
+      "us_per_op": 4.7453,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 1,
+      "us_per_op": 4.8226,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 1,
+      "us_per_op": 4.7477,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 1,
+      "us_per_op": 4.9828,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 1,
+      "us_per_op": 5.1179,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 2,
+      "us_per_op": 4.8269,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 2,
+      "us_per_op": 4.8796,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 2,
+      "us_per_op": 4.8608,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 2,
+      "us_per_op": 4.8859,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 3,
+      "us_per_op": 4.8933,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 3,
+      "us_per_op": 4.8082,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 3,
+      "us_per_op": 4.8127,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 3,
+      "us_per_op": 4.9688,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 4,
+      "us_per_op": 4.7921,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 4,
+      "us_per_op": 4.9297,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 4,
+      "us_per_op": 5.0253,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 4,
+      "us_per_op": 4.8595,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 5,
+      "us_per_op": 4.9997,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 5,
+      "us_per_op": 4.7865,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 5,
+      "us_per_op": 4.7829,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 5,
+      "us_per_op": 4.9248,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 6,
+      "us_per_op": 4.7868,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 6,
+      "us_per_op": 4.8629,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 6,
+      "us_per_op": 4.8802,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 6,
+      "us_per_op": 4.7809,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 7,
+      "us_per_op": 4.8079,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 7,
+      "us_per_op": 4.7971,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 7,
+      "us_per_op": 4.8187,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 7,
+      "us_per_op": 4.8579,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 8,
+      "us_per_op": 4.7896,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 8,
+      "us_per_op": 4.8213,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "candidate",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 8,
+      "us_per_op": 4.7935,
+      "checksum": "ffffd4d27f5b6288"
+    },
+    {
+      "phase": "measurement",
+      "variant": "remote-main",
+      "case": "secp256k1 e=p-2",
+      "iterations": 22104,
+      "round": 8,
+      "us_per_op": 4.7615,
+      "checksum": "ffffd4d27f5b6288"
+    }
+  ],
+  "summary": [
+    {
+      "case": "k=8 e=full(512 bits)",
+      "control": "before-fermat",
+      "iterations": 4313,
+      "rounds": 9,
+      "median_ratio": 0.9941364699091904,
+      "quartile_ratios": [
+        0.9858028363914229,
+        0.9941364699091904,
+        0.9950928987425672
+      ],
+      "raw_ratios": [
+        0.9941364699091904,
+        0.971440122385918,
+        0.9946687257129222,
+        0.9950928987425672,
+        1.0097825656461643,
+        0.9858028363914229,
+        0.947348193697156,
+        0.9973358588775187,
+        0.9934802551874339
+      ]
+    },
+    {
+      "case": "k=8 e=full(512 bits)",
+      "control": "remote-main",
+      "iterations": 4313,
+      "rounds": 9,
+      "median_ratio": 1.0143118314778432,
+      "quartile_ratios": [
+        1.0088651229260401,
+        1.0143118314778432,
+        1.029987913141333
+      ],
+      "raw_ratios": [
+        1.029987913141333,
+        0.9463887845787957,
+        1.0497569976869299,
+        1.0126759147765454,
+        1.081976697750618,
+        1.0087195508133662,
+        1.0143118314778432,
+        1.0144220123995698,
+        1.0088651229260401
+      ]
+    },
+    {
+      "case": "k=16 e=3",
+      "control": "before-fermat",
+      "iterations": 185279,
+      "rounds": 9,
+      "median_ratio": 1.004423627374447,
+      "quartile_ratios": [
+        1.0001704448610875,
+        1.004423627374447,
+        1.0139256125506786
+      ],
+      "raw_ratios": [
+        1.004423627374447,
+        1.0139256125506786,
+        0.9994744218640506,
+        1.0093523293418407,
+        0.9990561990561991,
+        1.0001704448610875,
+        1.0174631569980408,
+        1.0002546689303906,
+        1.0259643301534633
+      ]
+    },
+    {
+      "case": "k=16 e=3",
+      "control": "remote-main",
+      "iterations": 185279,
+      "rounds": 9,
+      "median_ratio": 0.5715297784914749,
+      "quartile_ratios": [
+        0.5485514898305863,
+        0.5715297784914749,
+        0.6041015265771564
+      ],
+      "raw_ratios": [
+        0.5485514898305863,
+        0.6273154677950165,
+        0.607964989059081,
+        0.5998556412685523,
+        0.6041015265771564,
+        0.5422842197035745,
+        0.5715297784914749,
+        0.5406009658379539,
+        0.5708498119031542
+      ]
+    },
+    {
+      "case": "k=32 e=full(2048 bits)",
+      "control": "before-fermat",
+      "iterations": 128,
+      "rounds": 9,
+      "median_ratio": 1.0011472816633542,
+      "quartile_ratios": [
+        0.999320985992704,
+        1.0011472816633542,
+        1.0081246728521993
+      ],
+      "raw_ratios": [
+        1.0011472816633542,
+        1.0034436547785655,
+        1.0260512461366043,
+        0.997150496699895,
+        1.0190139588138885,
+        0.999320985992704,
+        1.0081246728521993,
+        1.0009245695287867,
+        0.9932710060374713
+      ]
+    },
+    {
+      "case": "k=32 e=full(2048 bits)",
+      "control": "remote-main",
+      "iterations": 128,
+      "rounds": 9,
+      "median_ratio": 0.9975940251803477,
+      "quartile_ratios": [
+        0.9792373719771317,
+        0.9975940251803477,
+        1.0130956653309886
+      ],
+      "raw_ratios": [
+        1.0130956653309886,
+        1.0073884410054388,
+        1.0316238722187099,
+        0.9792373719771317,
+        0.9582805432696141,
+        1.0176209643096004,
+        0.9945999414046356,
+        0.9257936585352505,
+        0.9975940251803477
+      ]
+    },
+    {
+      "case": "bn254 e=p-2",
+      "control": "before-fermat",
+      "iterations": 23585,
+      "rounds": 9,
+      "median_ratio": 1.006454601931116,
+      "quartile_ratios": [
+        0.9990616708729699,
+        1.006454601931116,
+        1.0097711575798085
+      ],
+      "raw_ratios": [
+        1.0003945362066944,
+        0.9990616708729699,
+        1.0097711575798085,
+        1.0172170087041545,
+        0.9859335441375762,
+        1.0492896914190561,
+        1.006454601931116,
+        0.9698752191819924,
+        1.0081480532239806
+      ]
+    },
+    {
+      "case": "bn254 e=p-2",
+      "control": "remote-main",
+      "iterations": 23585,
+      "rounds": 9,
+      "median_ratio": 1.0293845849193601,
+      "quartile_ratios": [
+        1.023571592036006,
+        1.0293845849193601,
+        1.0388177187837628
+      ],
+      "raw_ratios": [
+        1.008809388075595,
+        1.0293845849193601,
+        1.0490061573245821,
+        1.017650810121383,
+        1.0385912654956417,
+        1.0388177187837628,
+        1.0487593736811922,
+        1.023571592036006,
+        1.0268369705585518
+      ]
+    },
+    {
+      "case": "secp256k1 e=p-2",
+      "control": "before-fermat",
+      "iterations": 22104,
+      "rounds": 9,
+      "median_ratio": 1.002021486104888,
+      "quartile_ratios": [
+        0.9985996286422621,
+        1.002021486104888,
+        1.003180302641703
+      ],
+      "raw_ratios": [
+        1.003180302641703,
+        1.0096323318440792,
+        0.9951073886723609,
+        1.002308100184024,
+        0.9986947739161963,
+        1.002021486104888,
+        0.9985996286422621,
+        0.998128246001954,
+        1.007317604807822
+      ]
+    },
+    {
+      "case": "secp256k1 e=p-2",
+      "control": "remote-main",
+      "iterations": 22104,
+      "rounds": 9,
+      "median_ratio": 1.018466103389135,
+      "quartile_ratios": [
+        1.0066693888662037,
+        1.018466103389135,
+        1.0250704196073133
+      ],
+      "raw_ratios": [
+        1.018466103389135,
+        1.0215816247880376,
+        1.0028416110699283,
+        1.0250704196073133,
+        1.0314352024534794,
+        1.0371078646519114,
+        1.0183325146064361,
+        1.0051997753697042,
+        1.0066693888662037
+      ]
+    }
+  ],
+  "baseline_source_refs": {
+    "remote-main": "ce09bdfc553e667a9f5be5ca4c0db102d98603db",
+    "before-fermat": "656b7624a4cfc93318e3a4a2aa069584d73e25c2"
+  },
+  "compiler": "Apple clang version 21.0.0 (clang-2100.0.123.102)",
+  "cpu": "Apple M5 Max",
+  "platform": "macOS-26.6.2-arm64-arm-64bit",
+  "build": "Same final runtime/bench_powmod.c, clang -O3 -mcpu=native via runtime/Makefile, with the runtime include replaced by the pinned baseline source for controls.",
+  "command": "block-<variant> --block <case> <iterations>"
+}

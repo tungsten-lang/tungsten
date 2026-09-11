@@ -35,3 +35,65 @@ check(
 
 check("powmod.exponent_zero", base16.modpow(0, modulus16), "1")
 check("powmod.modulus_one", base16.modpow(exponent, 1), "0")
+
+# Fermat shortcut for the two recognized base-field primes. Exercise both
+# sides of the divisibility test, signed inputs, and bases wider than p.
+-> check_fermat_prime(name, p)
+  e = p - 1
+  wide = p * (1 << 256)
+  check(name + ".zero", 0.modpow(e, p), "0")
+  check(name + ".one", 1.modpow(e, p), "1")
+  check(name + ".negative_one", (0 - 1).modpow(e, p), "1")
+  check(name + ".two", 2.modpow(e, p), "1")
+  check(name + ".negative_two", (0 - 2).modpow(e, p), "1")
+  check(name + ".p_minus_one", (p - 1).modpow(e, p), "1")
+  check(name + ".p", p.modpow(e, p), "0")
+  check(name + ".negative_p", (0 - p).modpow(e, p), "0")
+  check(name + ".multiple", (3 * p).modpow(e, p), "0")
+  check(name + ".negative_multiple", (0 - 3 * p).modpow(e, p), "0")
+  check(name + ".unreduced", (p + 17).modpow(e, p), "1")
+  check(name + ".negative_unreduced", (0 - p - 17).modpow(e, p), "1")
+  check(name + ".wide_multiple", wide.modpow(e, p), "0")
+  check(name + ".wide_minus", (wide - 7).modpow(e, p), "1")
+  check(name + ".wide_plus", (wide + 7).modpow(e, p), "1")
+  check(name + ".negative_modulus", 2.modpow(e, 0 - p), "1")
+  check(name + ".negative_modulus_multiple", wide.modpow(e, 0 - p), "0")
+  check(name + ".both_negative", (0 - wide - 7).modpow(e, 0 - p), "1")
+  check(name + ".pow_alias", 2.pow(e, p), "1")
+  check(name + ".bigint_pow_alias", (p + 17).pow(e, p), "1")
+
+bn254 = 21888242871839275222246405745257275088696311157297823662689037894645226208583
+check_fermat_prime("fermat.bn254", bn254)
+secp256k1 = 115792089237316195423570985008687907853269984665640564039457584007908834671663
+check_fermat_prime("fermat.secp256k1", secp256k1)
+
+# Guard misses: expected values independently generated with Python pow.
+# Mutate each limb separately so partial modulus/exponent matches fail.
+
+check("fermat.bn254.e_zero", 2.modpow(0, bn254), "1")
+check("fermat.bn254.e_one", 2.modpow(1, bn254), "2")
+check("fermat.bn254.e_p_minus_2", 2.modpow(bn254 - 2, bn254), "10944121435919637611123202872628637544348155578648911831344518947322613104292")
+check("fermat.bn254.e_p", 2.modpow(bn254, bn254), "2")
+check("fermat.bn254.e_limb_1", 2.modpow((bn254 - 1) ^ (1 << 64), bn254), "17618147099064223766277761133066483534697022909772948134838731292679875737139")
+check("fermat.bn254.e_limb_2", 2.modpow((bn254 - 1) ^ (1 << 128), bn254), "4089706272279694960693549413094915440377451631844888040970565329870846333931")
+check("fermat.bn254.e_limb_3", 2.modpow((bn254 - 1) ^ (1 << 192), bn254), "11163131542093324721630253246922048865989392573224108290384782882144398113633")
+check("fermat.bn254.e_wide", 2.modpow(bn254 - 1 + (1 << 256), bn254), "11515461482808674315285760198030206876215179491516504435506901975249272710130")
+check("fermat.bn254.m_wide", 2.modpow(bn254 - 1, bn254 + (1 << 256)), "388280185879533332509866535206659744778444853863027315561673731209140517759")
+check("fermat.bn254.m_limb_0", 2.modpow((bn254 ^ (1 << 0)) - 1, (bn254 ^ (1 << 0))), "2774299519000871551090560874260726011988533873648121089463680195403617296568")
+check("fermat.bn254.m_limb_1", 2.modpow((bn254 ^ (1 << 64)) - 1, (bn254 ^ (1 << 64))), "1582722157183583259217814977359085249853300555777310293601739661314249570996")
+check("fermat.bn254.m_limb_2", 2.modpow((bn254 ^ (1 << 128)) - 1, (bn254 ^ (1 << 128))), "19227362810651908066894930463513991788133823426148080631671622758129332864034")
+check("fermat.bn254.m_limb_3", 2.modpow((bn254 ^ (1 << 192)) - 1, (bn254 ^ (1 << 192))), "9468754523552934773127289580813583819421800566197322203112176378922263625359")
+check("fermat.secp256k1.e_zero", 2.modpow(0, secp256k1), "1")
+check("fermat.secp256k1.e_one", 2.modpow(1, secp256k1), "2")
+check("fermat.secp256k1.e_p_minus_2", 2.modpow(secp256k1 - 2, secp256k1), "57896044618658097711785492504343953926634992332820282019728792003954417335832")
+check("fermat.secp256k1.e_p", 2.modpow(secp256k1, secp256k1), "2")
+check("fermat.secp256k1.e_limb_1", 2.modpow((secp256k1 - 1) ^ (1 << 64), secp256k1), "4303572073106257642496893123013608881982808694273030117046121784273815061539")
+check("fermat.secp256k1.e_limb_2", 2.modpow((secp256k1 - 1) ^ (1 << 128), secp256k1), "33221338818596854258905025845088228403290700408986422809825642920746846360272")
+check("fermat.secp256k1.e_limb_3", 2.modpow((secp256k1 - 1) ^ (1 << 192), secp256k1), "64076410431963735524244613605144198556077551152535007611873024932630370704405")
+check("fermat.secp256k1.e_wide", 2.modpow(secp256k1 - 1 + (1 << 256), secp256k1), "12606815125742921844691356923789087730333395061018347223761727058549763256721")
+check("fermat.secp256k1.m_wide", 2.modpow(secp256k1 - 1, secp256k1 + (1 << 256)), "6449994246046757586166514635222576063046489406497755588212625116587112213077")
+check("fermat.secp256k1.m_limb_0", 2.modpow((secp256k1 ^ (1 << 0)) - 1, (secp256k1 ^ (1 << 0))), "76998934668165585209754357404775513297621022610626247108261214766706843069708")
+check("fermat.secp256k1.m_limb_1", 2.modpow((secp256k1 ^ (1 << 64)) - 1, (secp256k1 ^ (1 << 64))), "92657744037437535466421138062769826708438555973110065805700576638571052157649")
+check("fermat.secp256k1.m_limb_2", 2.modpow((secp256k1 ^ (1 << 128)) - 1, (secp256k1 ^ (1 << 128))), "111587921523430701893269342142191501366943741462055159445198884757319303989489")
+check("fermat.secp256k1.m_limb_3", 2.modpow((secp256k1 ^ (1 << 192)) - 1, (secp256k1 ^ (1 << 192))), "333301362246481042541340592437003254579891423524832595050656236436736194018")
+check("fermat.composite", 2.modpow(14, 15), "4")

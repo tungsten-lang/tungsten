@@ -2,6 +2,8 @@
 
 Latest: the [five-parent sweep](#reusable-frontier-and-five-parent-sweep)
 adds 17 candidate shapes and strengthens 8x13x17 to rank 1,128.
+Its [refinement and propagation follow-up](#leaf-refinement-and-larger-products)
+strengthens 7x13x16 to 959 and adds two larger candidate shapes.
 
 Allowing width-five blocks in the per-slot construction produces nine new
 **source-scoped candidates** below the freshly fetched Lille comparisons.
@@ -343,3 +345,85 @@ hardlink targets, with no unmanifested payloads. No installed binary,
 canonical seed, user search, public catalogue, push or publication changes
 in this experiment. A useful next test is bounded leaf-portfolio refinement
 of the new 2x3x3/2x3x4 constructions and propagation of their verified gains.
+
+## Leaf refinement and larger products
+
+The bounded leaf portfolio completes all 18 headline cases with two
+single-slot rounds and the existing two-slot shortlist of width four,
+using one source per leaf shape plus checked representation variants.
+It performs **71,292 proposal checks** in about 10.2 seconds on one
+low-priority CPU worker. Full final-tensor replay verifies all 18 endpoints.
+The complete deterministic producer traces, not just their winning ranks,
+are retained for replay.
+
+The only rank gain is **7x13x16: 960 to 959**. Its unchanged rank-20 outer
+parent still has nominal leaf cost 960; one embedded term becomes zero
+after a leaf-representation change. The complete endpoint identity is
+`cac5c6dbbbe8b0a50366cfb89325782e9573aa7e9f2ccf7768b983a1d729cbac`.
+An independently and natively rejected one-bit corruption checks the
+admission boundary.
+
+Crucially, raw-score improvement is not final-rank improvement. One new
+8x11x20 presentation cleans to **1,145**, worse than its original **1,129**.
+The original remains available; no retained bound is overwritten. Both
+same-rank variants and the original constructions remain eligible inputs
+for the next bounded composition bank. This is evidence to test
+cleanup-aware assessment, not to trust the raw-rank/density proxy.
+
+The propagation bank keeps **658 full parent representations**, including
+distinct representations of the same shape. It does not use shape or
+rank alone as an identity. With 95 checked scale tensors and target
+dimensions at most 32, the literal census contains **6,479 products and
+13,559 compatible block sums**. At least one operand is from the latest
+small-parent sweep or its refinement. All **53** lowest-price target
+winners below their pinned retained bound are materialized and checked.
+This shortlist is not an exhaustive post-cleanup minimum.
+
+Two also beat fresh Lille comparisons:
+
+| Canonical shape | Previous retained | Checked rank | Fresh Lille |
+| --- | ---: | ---: | ---: |
+| 16x22x26 | 5,268 | **5,173** | [5,250](https://fmm.univ-lille.fr/16x22x26.html) |
+| 16x26x26 | 6,075 | **6,069** | [6,094](https://fmm.univ-lille.fr/16x26x26.html) |
+
+They are the fully expanded rank-7 Strassen products of 8x11x13/r739 and
+8x13x13/r867: `739*7=5173` and `867*7=6069`. Their full MFW1 hashes are,
+respectively,
+`f8ebd044fe653f85e2a48c3a169dd329518600161df4bc63770573debff1b2de`
+and `8b3316c4b6af9f537cf208ba4dc593205e2c46868336733b738df1f52b166bf0`.
+Fresh responses at September 11, 16:19 UTC supply the catalogue values;
+saved response bytes/ranks/hashes are independently checked. These are
+source-scoped candidates, not confirmed world records or general-field
+algorithms.
+
+Independent replay reconstructs the entire 20,038-context census and
+selection, checks all 753 input tensors, rebuilds all 53 product/sum
+endpoints with a separate coordinate implementation, and recomputes exact
+cleanup. Every native full check finishes without a limited result; both
+headline corruptions are rejected by both checkers. Materialization takes
+about 4.2 seconds with one low-priority CPU worker and no GPU.
+
+The cumulative series is now **38 source-scoped candidate shapes** and
+**13,521 complete-object identities** (13,355 non-inputs): 13,450 preceding,
+18 refinement endpoints and 53 propagated endpoints, all distinct.
+No main-square bound changes.
+
+The private bundle contains full input/leaf snapshots, all recipes and
+endpoints, censuses, search traces, fresh references, pinned source and
+native checkers, and prior identity receipts. Its `python3 -B replay.py`
+also runs the complete deterministic Ruby refinement replay. Ruby, NumPy
+and a host compatible with the native binaries are required.
+The standalone replay passes all refinement traces, tensor gates and the
+product/sum census.
+
+```
+~/.local/share/tungsten-metaflip/evidence/2026-09-11-small-width-followup.tar.gz
+16,803,846 bytes; 1,100 payloads
+SHA256 bd69897dd04665c956abf695229f6da89b02467e5896e261fb54b72ded68d19e
+```
+
+Archive readback and a fresh extraction pass the complete payload manifest,
+including hardlinks, with no unmanifested payloads.
+
+This follow-up changes no installed binary, canonical seed, user search,
+public catalogue or runtime default. Evidence tensors remain outside Git.

@@ -278,19 +278,9 @@ module MetaflipOuterLeafPortfolio
      kernel_pair_width:kernel_pair_width}
   end
 
-  def optimize(parent, allocation, leaves:, seeds:, seed_limit: 4, rounds: 4, shears: true, pair_width: 0)
-    raise "invalid search limits" unless seed_limit.is_a?(Integer) && seed_limit.between?(1,32) &&
-      rounds.is_a?(Integer) && rounds.between?(1,32) && pair_width.is_a?(Integer) && pair_width.between?(0,32)
-    baseline, = M.compose(parent,allocation,leaves:leaves)
-    current = leaves.dup
-    mapped = current.each_with_index.map{|leaf,i|mapped_terms(parent,i,allocation,leaf)}
-    parity = mapped.reduce(Set.new){|state,part|state ^ part}
-    raise "initial parity mismatch" unless parity == baseline.terms.to_set
-    density_cache = {}
-    weight = lambda{|term|density_cache[term] ||= term.sum{|v|MetaflipTensorVerifier.bit_positions(v).length}}
-    current_density = parity.sum(&weight)
+  def leaf_pools(parent, allocation, leaves, seeds, seed_limit, shears)
     pools, used_sources, variant_cache = [], {}, {}
-    current.each_with_index do |leaf,slot|
+    leaves.each_with_index do |leaf,slot|
       unless leaf
         pools << []
         next
@@ -312,6 +302,139 @@ module MetaflipOuterLeafPortfolio
       end
       pools << by_image.values.sort_by{|r|[r[:terms].length,r[:leaf].canonical_id]}
     end
+    [pools,used_sources.values,variant_cache.values.sum(&:length)]
+  end
+
+  # Raw scores only order a bounded shortlist. Cleanup returns a tensor, not
+  # a score; recheck its complete identity before comparing rank/density.
+  # Preserve every assessment (including rank ties) and the raw recipe state.
+  # A cache reuses cleanup for identical raw tensors, never prunes leaf states.
+  def optimize_cleaned(parent, allocation, leaves:, seeds:, cleanup:, seed_limit: 4,
+      rounds: 4, shears: true, pair_width: 0, shortlist: 16, assessment_limit: 65)
+    raise "invalid search limits" unless seed_limit.is_a?(Integer) && seed_limit.between?(1,32) &&
+      rounds.is_a?(Integer) && rounds.between?(1,32) && pair_width.is_a?(Integer) && pair_width.between?(0,32) &&
+      shortlist.is_a?(Integer) && shortlist.between?(1,256) &&
+      assessment_limit.is_a?(Integer) && assessment_limit.between?(1,4096)
+    raise "missing cleanup callback" unless cleanup.respond_to?(:call)
+    baseline, = M.compose(parent,allocation,leaves:leaves)
+    pools,sources,verified_variants = leaf_pools(parent,allocation,leaves,seeds,seed_limit,shears)
+    current = leaves.dup
+    cache, assessments, history, round_audits = {}, [], [], []
+    objective = ->(s){[s.rank,s.audit.fetch(:density)]}
+    assess = lambda do |state,action|
+      raw,audit, = M.compose(parent,allocation,leaves:state)
+      raw.freeze
+      cached = cache.key?(raw.canonical_id)
+      cleaned = cache.fetch(raw.canonical_id) do
+        candidate = cleanup.call(raw)
+        raise "cleanup must return a same-shape Scheme" unless candidate.is_a?(B::Scheme) && candidate.shape == raw.shape
+        checked = B::Scheme.new(raw.shape,B.text(candidate.terms))
+        cache[raw.canonical_id] = checked.freeze
+      end
+      result = (objective.call(cleaned) <=> objective.call(raw)) <= 0 ? cleaned : raw
+      entry = {raw:raw,cleaned:cleaned,result:result,leaves:state.dup.freeze,audit:audit,
+        action:action,cached:cached,rank:result.rank,density:result.audit[:density]}
+      assessments << entry
+      entry
+    end
+    best = assess.call(current,{kind:"baseline"})
+    initial = objective.call(best[:result])
+    checks, pair_checks = 0, 0
+    stop_reason = :round_limit
+    rounds.times do |round|
+      if assessments.length == assessment_limit
+        stop_reason = :assessment_limit
+        break
+      end
+      mapped = current.each_with_index.map{|leaf,i|mapped_terms(parent,i,allocation,leaf)}
+      parity = best[:raw].terms.to_set
+      density = best[:raw].audit[:density]
+      weights = {}
+      weight = ->(t){weights[t] ||= t.sum{|v|MetaflipTensorVerifier.bit_positions(v).length}}
+      proposals, generated = [], 0
+      offer = lambda do |replacements,delta,score|
+        next if delta.empty?
+        generated += 1
+        proposal = {replacements:replacements,score:score,index:generated}
+        proposals << proposal
+        proposals.sort_by!{|p|[*p[:score],p[:index]]}
+        proposals.pop if proposals.length > shortlist
+      end
+      singles = pools.each_with_index.map do |pool,slot|
+        pool.map do |candidate|
+          delta = mapped[slot] ^ candidate[:terms]
+          score = delta_score(parity,density,delta,weight)
+          checks += 1
+          offer.call([[slot,candidate]],delta,score)
+          {candidate:candidate,delta:delta,score:score}
+        end.sort_by{|r|[r[:score],r[:candidate][:leaf].canonical_id]}.first(pair_width)
+      end
+      if pair_width.positive?
+        current.each_index.to_a.combination(2) do |a,b|
+          singles[a].product(singles[b]).each do |left,right|
+            next if left[:delta].empty? || right[:delta].empty?
+            delta = left[:delta] ^ right[:delta]
+            score = delta_score(parity,density,delta,weight)
+            checks += 1
+            pair_checks += 1
+            offer.call([[a,left[:candidate]],[b,right[:candidate]]],delta,score)
+          end
+        end
+      end
+      evaluated, winner = 0, best
+      proposals.each do |proposal|
+        break if assessments.length == assessment_limit
+        state = current.dup
+        replacements = proposal[:replacements]
+        action = {kind:replacements.length == 1 ? "single" : "pair",round:round,
+          slots:replacements.map(&:first),from:replacements.map{|slot,_|current[slot].canonical_id},
+          to:replacements.map{|_,c|c[:leaf].canonical_id},raw_score:proposal[:score]}
+        replacements.each{|slot,c|state[slot]=c[:leaf]}
+        entry = assess.call(state,action)
+        raise "cleanup proposal mismatch" unless objective.call(entry[:raw]) == proposal[:score]
+        evaluated += 1
+        winner = entry if (objective.call(entry[:result]) <=> objective.call(winner[:result])) == -1
+      end
+      round_audits << {round:round,generated:generated,shortlisted:proposals.length,evaluated:evaluated,
+        unassessed:generated-evaluated}
+      if winner.equal?(best)
+        stop_reason = if evaluated < proposals.length
+          :assessment_limit
+        elsif generated.zero?
+          :empty_neighborhood
+        else
+          :no_shortlisted_improvement
+        end
+        break
+      end
+      best, current = winner, winner[:leaves].dup
+      history << {assessment:assessments.index{|e|e.equal?(winner)},**winner[:action],
+        rank:winner[:rank],density:winner[:density]}
+    end
+    raise "non-monotone cleaned search" unless (objective.call(best[:result]) <=> initial) <= 0
+    {result:best[:result],raw:best[:raw],leaves:best[:leaves],audit:best[:audit],
+      initial_rank:initial[0],initial_density:initial[1],raw_initial_rank:baseline.rank,
+      rank:best[:rank],density:best[:density],checks:checks,pair_checks:pair_checks,
+      assessment_count:assessments.length,cleanup_calls:cache.length,assessments:assessments,history:history,
+      rounds:round_audits.length,round_audits:round_audits,stop_reason:stop_reason,
+      unassessed_proposals:round_audits.sum{|r|r[:unassessed]},
+      mapped_pool_sizes:pools.map(&:length),verified_variants:verified_variants,sources:sources,
+      seed_limit:seed_limit,round_limit:rounds,shears:shears,pair_width:pair_width,
+      shortlist:shortlist,assessment_limit:assessment_limit}
+  end
+
+  def optimize(parent, allocation, leaves:, seeds:, seed_limit: 4, rounds: 4, shears: true, pair_width: 0)
+    raise "invalid search limits" unless seed_limit.is_a?(Integer) && seed_limit.between?(1,32) &&
+      rounds.is_a?(Integer) && rounds.between?(1,32) && pair_width.is_a?(Integer) && pair_width.between?(0,32)
+    baseline, = M.compose(parent,allocation,leaves:leaves)
+    current = leaves.dup
+    mapped = current.each_with_index.map{|leaf,i|mapped_terms(parent,i,allocation,leaf)}
+    parity = mapped.reduce(Set.new){|state,part|state ^ part}
+    raise "initial parity mismatch" unless parity == baseline.terms.to_set
+    density_cache = {}
+    weight = lambda{|term|density_cache[term] ||= term.sum{|v|MetaflipTensorVerifier.bit_positions(v).length}}
+    current_density = parity.sum(&weight)
+    pools,sources,verified_variants = leaf_pools(parent,allocation,leaves,seeds,seed_limit,shears)
     checks, history, settled, completed = 0, [], false, 0
     rounds.times do |round|
       changed = false
@@ -385,7 +508,7 @@ module MetaflipOuterLeafPortfolio
     raise "non-monotone search" unless ([result.rank,current_density] <=> [baseline.rank,baseline.audit[:density]]) <= 0
     {result:result,leaves:current,audit:audit,initial_rank:baseline.rank,initial_density:baseline.audit[:density],
      rank:result.rank,density:current_density,checks:checks,pair_checks:pair_checks,rounds:completed,settled:settled,history:history,
-     mapped_pool_sizes:pools.map(&:length),verified_variants:variant_cache.values.sum(&:length),
-     sources:used_sources.values,seed_limit:seed_limit,round_limit:rounds,shears:shears,pair_width:pair_width}
+     mapped_pool_sizes:pools.map(&:length),verified_variants:verified_variants,
+     sources:sources,seed_limit:seed_limit,round_limit:rounds,shears:shears,pair_width:pair_width}
   end
 end

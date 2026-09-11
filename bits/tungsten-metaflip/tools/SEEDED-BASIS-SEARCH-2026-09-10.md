@@ -105,6 +105,9 @@ every cleanup agrees with the matrix oracle, and every resulting full tensor
 passes native and independent verification. No rank beats the saved bound.
 The remaining projections are untested, not rejected.
 
+The [subsequent follow-up](SUBSPACE-PROJECTIONS-2026-09-11.md) completes those
+remaining 869 contexts and tests sheared restrictions and their compositions.
+
 ## Integration boundary and next useful work
 
 The [automatic pipeline](AUTOMATIC-WIDE-TRANSFORMS-2026-09-10.md) already

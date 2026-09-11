@@ -155,7 +155,10 @@ use span_refactor
   if want > 1
     clauses_per_cell += (want - 1) * 4
   clauses = cells * clauses_per_cell ## i64
-  body = ""
+  # One line per clause, joined once: repeated string concatenation is
+  # quadratic and, without a collector, leaks every intermediate copy (a
+  # 4x4 window at k=16 exhausted tens of gigabytes before the solver ran).
+  lines = []
   cell = 0 ## i64
   while cell < cells
     wi = cell % aw ## i64
@@ -168,17 +171,17 @@ use span_refactor
       vvar = ffsdr_primary_v(term, vi, au, av, aw) ## i64
       wvar = ffsdr_primary_w(term, wi, au, av, aw) ## i64
       product = ffsdr_product_var(cell, term, want, primary) ## i64
-      body = body + (0 - product).to_s() + " " + uvar.to_s() + " 0\n"
-      body = body + (0 - product).to_s() + " " + vvar.to_s() + " 0\n"
-      body = body + (0 - product).to_s() + " " + wvar.to_s() + " 0\n"
-      body = body + product.to_s() + " " + (0 - uvar).to_s() + " " + (0 - vvar).to_s() + " " + (0 - wvar).to_s() + " 0\n"
+      lines.push((0 - product).to_s() + " " + uvar.to_s() + " 0\n")
+      lines.push((0 - product).to_s() + " " + vvar.to_s() + " 0\n")
+      lines.push((0 - product).to_s() + " " + wvar.to_s() + " 0\n")
+      lines.push(product.to_s() + " " + (0 - uvar).to_s() + " " + (0 - vvar).to_s() + " " + (0 - wvar).to_s() + " 0\n")
       term += 1
     if want == 1
       product = ffsdr_product_var(cell, 0, want, primary) ## i64
       if ffsdr_bit(target, cell) == 1
-        body = body + product.to_s() + " 0\n"
+        lines.push(product.to_s() + " 0\n")
       else
-        body = body + (0 - product).to_s() + " 0\n"
+        lines.push((0 - product).to_s() + " 0\n")
     else
       left = ffsdr_product_var(cell, 0, want, primary) ## i64
       right = ffsdr_product_var(cell, 1, want, primary) ## i64
@@ -188,20 +191,20 @@ use span_refactor
         if stage > 0
           left = ffsdr_parity_var(cell, stage - 1, cells, want, primary)
           right = ffsdr_product_var(cell, stage + 1, want, primary)
-        body = body + left.to_s() + " " + right.to_s() + " " + (0 - parity).to_s() + " 0\n"
-        body = body + (0 - left).to_s() + " " + (0 - right).to_s() + " " + (0 - parity).to_s() + " 0\n"
-        body = body + left.to_s() + " " + (0 - right).to_s() + " " + parity.to_s() + " 0\n"
-        body = body + (0 - left).to_s() + " " + right.to_s() + " " + parity.to_s() + " 0\n"
+        lines.push(left.to_s() + " " + right.to_s() + " " + (0 - parity).to_s() + " 0\n")
+        lines.push((0 - left).to_s() + " " + (0 - right).to_s() + " " + (0 - parity).to_s() + " 0\n")
+        lines.push(left.to_s() + " " + (0 - right).to_s() + " " + parity.to_s() + " 0\n")
+        lines.push((0 - left).to_s() + " " + right.to_s() + " " + parity.to_s() + " 0\n")
         stage += 1
       final_parity = ffsdr_parity_var(cell, want - 2, cells, want, primary) ## i64
       if ffsdr_bit(target, cell) == 1
-        body = body + final_parity.to_s() + " 0\n"
+        lines.push(final_parity.to_s() + " 0\n")
       else
-        body = body + (0 - final_parity).to_s() + " 0\n"
+        lines.push((0 - final_parity).to_s() + " 0\n")
     cell += 1
   meta[4] = variables
   meta[5] = clauses
-  "p cnf " + variables.to_s() + " " + clauses.to_s() + "\n" + body
+  "p cnf " + variables.to_s() + " " + clauses.to_s() + "\n" + lines.join("")
 
 -> ffsdr_shell_quote(text) (String)
   "'" + text.replace("'", "'\"'\"'") + "'"

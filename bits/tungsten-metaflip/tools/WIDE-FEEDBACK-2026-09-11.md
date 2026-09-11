@@ -161,3 +161,96 @@ No canonical seed promotion, publication, GPU search or performance claim is
 included. Unrelated compiler/runtime/spec edits remain untouched; their
 seven-file diff hash is
 `318ba7d82e3752664e353ae1fb672b0b8a493b05f3cfaeb19f241f68462a27b3`.
+
+## Follow-up: live-parent and larger-tensor refinement
+
+No new retained rank or world record. This follow-up tests newly generated
+representations from the live runs above, rather than repeating the original
+166-parent study. It does not enable another default fleet lane. The withdrawn
+profiling request was not executed.
+
+The current [Lille table](https://fmm.univ-lille.fr/) was refreshed (5,426
+formats). The [catalogue](https://github.com/solven-eu/matmulcatalog) snapshot
+still matches `solven-eu/matmulcatalog` commit
+`f3a7f0f61b1005666c2cb03f98f2a16727604ea0`; its JSON SHA-256 is
+`df3be3959d449ba715834211a5023f41a90b43f7f9a129c8fbea1bc88d8ca419`.
+The small source corpus was already imported in the September 6 study, so no
+duplicate import campaign was run. Retained constructive bounds, catalogue F2
+metadata and Lille ranks remain separate fields. The minimum reported rank is
+used only to order work conservatively, not as an admitted GF(2) leaf or a
+field-transfer theorem. For example, Lille lists 3x3x6/r40, whereas the pinned
+catalogue's minimum F2-labelled rank for that shape is 42.
+
+From the recent live spools, select all 197 distinct witnesses within two
+terms of the retained bound, with factor width <=63 bits and rank <=512.
+They cover 28 canonical shapes. Every input is independently reconstructed
+and native-full-verified. All 12,411 parent/scale plans complete, covering
+423 targets; none improves the retained bound. A round-robin shortlist of
+32 full compositions covers all 28 parent-shape families, with no cleanup
+reduction.
+
+A 180-second native seeded-basis sweep completes 2,249 of 3,152 configured
+contexts, with 11 or 12 contexts for every input. Independent row-equation
+replay checks all 5,714 actual algebra steps, including cache reuse and
+context lineage. There are 122 distinct endpoints not among the cohort's
+inputs, across nine shapes; no native verification deferrals or retained-rank
+gains. This is a terminal bounded sample, not an exhausted basis search.
+
+All 7,686 scale plans for those endpoints complete. Nineteen target minima
+are cheaper than the original live cohort. Both sides of all 19 comparisons
+are fully expanded with the same checked leaf bank, independently substituted
+and tensor-verified, then cleaned. All 19 improvements survive, saving 1--16
+terms, but none beats the retained bound. Examples:
+
+| Target | Original live cohort | Basis-derived | Retained |
+| --- | ---: | ---: | ---: |
+| 3x9x32 | 696 | 680 | 645 |
+| 6x12x16 | 752 | 744 | 736 |
+| 6x9x12 | 435 | 433 | 433 |
+| 8x9x9 | 434 | 433 | 432 |
+
+These are cohort improvements, not newly best-known shapes. An additional
+32 diverse derived compositions also pass full checks. In total this covers
+102 full compositions and 20,097 checked price plans; price-only cases are
+not claimed expanded. None of the 102 full compositions decreases rank in
+cleanup. All 218 selected one-coordinate projections also complete, with
+independent coordinate contraction, matrix cleanup and complete tensor checks;
+none improves the retained bound.
+
+Finally, select 25 newly expanded tensors across 20 shapes, rank <=1,000 and
+within two terms of the retained bound, and refine the larger tensors directly.
+All 400 configured contexts complete in about 81 seconds. They produce 166
+additional cohort endpoints, with no retained-rank gain or verification
+deferral. This tests the post-expansion stage instead of inferring that a
+small parent's refinement result settles its larger descendants.
+
+Decision: keep seeded diversification opt-in. It changes useful composition
+structure, but this sample does not justify spending extra default work on
+every candidate. Preserve the checked rank ties for later projection and
+context-specific selection. Do not infer a search-space impossibility from
+these finite negative rank results. No canonical seeds, runtime defaults,
+GPU work, performance claims or public record claims were added.
+
+All new bulk evidence remains outside the checkout. Working root:
+`/private/tmp/metaflip-live-study-evidence-20260911`. Its portable cold checker
+is `package.py audit`; it replays algebra, full compositions and projections
+against copied independent oracles and pinned native verification binaries.
+Cold replay passes all 7,667 algebra steps, 102 full compositions and 218
+projections. It also rechecks every distinct admitted endpoint with the
+native full-tensor verifier and the independent integer reconstruction.
+The final study-series rollup is **6,957 representations**, including the
+166 original inputs, or **6,791 non-input representations**. This follow-up
+adds 572 representations beyond the prior 6,385; intermediate scratch
+states, duplicate contexts and price-only plans are not counted as additions.
+
+Sealed evidence (every manifest payload read back and hash-checked):
+
+```
+~/.local/share/tungsten-metaflip/evidence/2026-09-11-live-parent-followup.tar.gz
+12,336,587 bytes; 2,924 payloads
+SHA256 b65e4b48effdc67747d0b7583396892076b05e34ed90666a09c0e4d224b46254
+```
+
+All owned search and audit processes are terminal. No full `rake`, push,
+publication or canonical seed promotion was performed. The seven-file
+unrelated diff hash above is unchanged.

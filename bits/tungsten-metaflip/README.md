@@ -1252,6 +1252,14 @@ components. It returns checked plans, not admitted tensors. The
 Equal-cost grouping in the tested leaf bank reproduces plain products;
 different leaf presentations or embeddings are the next useful experiment.
 
+The subsequent [per-slot leaf campaign](tools/PER-SLOT-LEAF-CANDIDATES-2026-09-11.md)
+uses each outer term's actual block extents to choose its checked leaf. It
+verifies **7x11x12/r613, 8x11x11/r631, 8x11x12/r669 and 8x11x16/r891**,
+then expands four larger reference-crossing constructions. Full replay and
+corruption checks pass; these remain source-scoped GF(2) candidates, not
+confirmed world records. The existing offline tools perform this campaign;
+it is not another automatic runtime lane or a main-square improvement.
+
 `tools/composition_closure.rb` checks candidates against a verified recursive
 block/Kronecker library and propagates useful candidates to other shapes.
 It exports both comparison and candidate tensors for independent replay.

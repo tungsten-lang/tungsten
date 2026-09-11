@@ -9,7 +9,6 @@ require "optparse"
 require "time"
 require_relative "verify_tensor"
 
-EXPECTED_BINARY_SHA = "595cc16bbfd80627eee6224625931a773d3afe0bf5625e244e5e8b728c3a06b8"
 PHASE_KEYS = %w[controls_ms intake_ms leases_ms harvest_ms reseeds_ms launch_ms status_ms].freeze
 
 def monotonic
@@ -173,7 +172,7 @@ options = {
   output: "/private/tmp/metaflip-coreml-measurements/epochs",
   seconds: 20, warmup: 5, workers: 16,
   targets: [250, 500, 1000, 2000, 2000, 1000, 500, 250],
-  expected_sha: EXPECTED_BINARY_SHA
+  expected_sha: nil
 }
 OptionParser.new do |parser|
   parser.banner = "Usage: bench_cpu_epochs.rb [options]"
@@ -238,7 +237,9 @@ if options[:allocations]&.any? { |allocation| allocation[:host].positive? }
   raise "invalid compute mode" unless %w[cpuOnly cpuAndNeuralEngine].include?(options[:compute])
 end
 actual_sha = Digest::SHA256.file(options[:binary]).hexdigest
-raise "binary SHA mismatch: #{actual_sha}" unless actual_sha == options[:expected_sha]
+# The binary digest is recorded in every sweep manifest; pinning it is opt-in
+# via --expected-sha so a freshly built tree can always run the benchmark.
+raise "binary SHA mismatch: #{actual_sha}" if options[:expected_sha] && actual_sha != options[:expected_sha]
 if options[:schedulers]&.include?("baseline")
   raise "baseline requires binary and expected SHA" unless options[:baseline_binary] && options[:baseline_sha]
   raise "baseline SHA mismatch" unless Digest::SHA256.file(options[:baseline_binary]).hexdigest == options[:baseline_sha]

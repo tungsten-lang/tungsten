@@ -629,6 +629,8 @@ use doors
   # Under --naive, ignore any prior checkpoint (would re-inject earlier or
   # published knowledge).  Still write a fresh checkpoint for this run's own
   # discoveries.
+  feedback_loaded = 0 ## i64
+  spool_doors = []
   if naive_seed == 0
     durable_body = read_file(best_path)
     if durable_body != nil
@@ -643,6 +645,32 @@ use doors
         durable_clone = ffrc_clone_exact(durable, n, m, p, capacity, ffrcb_seed(81019, restart_nonce, 0, 0), dslack, cycles, workq, wanderq)
         if durable_clone != nil
           best = durable_clone
+    # Checked cross-shape feedback spooled for this shape by other campaigns:
+    # a slot whose exact cleaned rank is strictly below the loaded best crosses
+    # this same checkpoint gate and becomes the starting best (hence the next
+    # checkpoint candidate), for salted and unsalted starts alike. Slots at
+    # R..R+2 remain side-archive doors below. Bounded to the eight spool
+    # slots; no rank-record claim follows from adoption.
+    if ffrf_spool_enabled() == 1
+      spool_paths = ffrf_spool_paths(state_root, n, m, p)
+      spool_slot = 0 ## i64
+      while spool_slot < spool_paths.size()
+        spool_adopted = 0 ## i64
+        spool_body = read_file(spool_paths[spool_slot])
+        if spool_body != nil && spool_body.size() > 0
+          spooled = i64[state_size]
+          spooled_rank = ffr_load_scheme_cap(spooled, spool_paths[spool_slot], n, m, p, capacity, ffrcb_seed(81303, restart_nonce, spool_slot, 0), dslack, cycles, workq, wanderq) ## i64
+          if spooled_rank > 0 && spooled_rank < ffr_best_rank(best)
+            spooled_rank = ffpc_gate_rect_best(spooled, n, m, p, pair_scratch, pair_scratch_words, exact_scratch, exact_scratch_words)
+          if spooled_rank > 0 && spooled_rank < ffr_best_rank(best)
+            spooled_clone = ffrc_clone_exact(spooled, n, m, p, capacity, ffrcb_seed(81307, restart_nonce, spool_slot, 0), dslack, cycles, workq, wanderq)
+            if spooled_clone != nil
+              best = spooled_clone
+              feedback_loaded += 1
+              spool_adopted = 1
+        if spool_adopted == 0
+          spool_doors.push(spool_paths[spool_slot])
+        spool_slot += 1
   persisted = ffrc_dump_atomic(best, best_path, run_tag, 0) ## i64
   if persisted < 1
     << "RECT_ERROR code=checkpoint-write tensor=" + tensor + " path=" + best_path
@@ -693,16 +721,15 @@ use doors
   # their historical initialization exactly.
   side_archive = []
   side_archive_stats = i64[4] # loaded, rejected, saved, write-failures
-  feedback_loaded = 0 ## i64
   archive_enabled = ffrc_side_archive_enabled(portfolio_child, restart_nonce, restart_door_ticket, use_profile_frontier) ## i64
   if archive_enabled != 0 && naive_seed == 0
     side_seed = ffrcb_seed(81201, restart_nonce, 0, 0) ## i64
     side_count = ffrda_load_anchored(best_path, best, frontier_anchors, n, m, p, capacity, side_seed, dslack, cycles, workq, wanderq, side_archive, side_archive_stats) ## i64
-    # Checked cross-shape feedback spooled for this shape by other campaigns
-    # crosses the same door gate and R..R+2 policy as the persisted side doors.
-    if ffrf_spool_enabled() == 1
+    # Spool slots not adopted as best above cross the same door gate and
+    # R..R+2 policy as the persisted side doors.
+    if spool_doors.size() > 0
       spool_seed = ffrcb_seed(81301, restart_nonce, 0, 0) ## i64
-      feedback_loaded = ffrda_load_paths(ffrf_spool_paths(state_root, n, m, p), best, frontier_anchors, n, m, p, capacity, spool_seed, dslack, cycles, workq, wanderq, side_archive, side_archive_stats) - side_count
+      feedback_loaded += ffrda_load_paths(spool_doors, best, frontier_anchors, n, m, p, capacity, spool_seed, dslack, cycles, workq, wanderq, side_archive, side_archive_stats) - side_count
   side_archive_loaded = side_archive.size() ## i64
   side_archive_seeded = 0 ## i64
 

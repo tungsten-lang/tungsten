@@ -9,6 +9,7 @@ import sys
 import tempfile
 
 from refinement_worker_parity_test import exact
+from packed_composition_parity_test import naive
 from verify_representation_portfolio import parse_terms
 from composition_queue_test import audit as audit_composition
 from composition_queue_test import value
@@ -162,6 +163,21 @@ def check_at(binary, root):
     fed = run(binary, root/'rect-feedback', '2x5x6', 1, require_outputs=False, extra=('--rect-door-ticket', '0'))
     assert int(fed['wide_feedback_loaded']) == 1, fed
     assert int(fed['side_archive_loaded']) == 1, fed
+    # A spooled slot strictly below the loaded best crosses the checkpoint
+    # gate and becomes the starting best, also for an unsalted explicit --seed
+    # start that loads no side archive. Start from the 28-term naive 2x2x7
+    # scheme (the packaged rank-26 door is cleaned to 25 at the anchor gate)
+    # and spool the packaged rank-25 seed. No rank-record claim.
+    case = root/'rect-spool-best'
+    case.mkdir(parents=True)
+    start = case/'naive_2x2x7.txt'
+    terms = naive((2, 2, 7))
+    exact((2, 2, 7), terms)
+    start.write_text(f'{len(terms)}\n' + ''.join(f'{u} {v} {w}\n' for u, v, w in terms))
+    spool(case, (2, 2, 7), [('matmul_2x2x7_rank25_d128_rect_portfolio_gf2.txt', 25, [])])
+    fed = run(binary, case, '2x2x7', 1, require_outputs=False, extra=('--seed', str(start)))
+    assert int(fed['best_rank']) == 25 and int(fed['wide_feedback_loaded']) == 1, fed
+    assert int(fed['side_archive_loaded']) == 0, fed
 
 
 def check(binary, retained=None):

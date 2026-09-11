@@ -76,6 +76,7 @@ def check_terminal_stop(root, shape, key):
 with tempfile.TemporaryDirectory(prefix='metaflip-cycle-check-') as temp:
     root = Path(temp)
     for args, message in [(['--cycle-secs', '0'], '--cycle-secs'),
+                          (['--cycle-policy', 'bogus'], '--cycle-policy'),
                           (['--cycle-shapes', '5x5,05x05'], '--cycle-shapes'),
                           (['--cycle-shapes', ''], '--cycle-shapes'),
                           (['--cycle-shapes', '5x5,'], '--cycle-shapes'),
@@ -98,15 +99,34 @@ with tempfile.TemporaryDirectory(prefix='metaflip-cycle-check-') as temp:
         data = fields(statuses[0])
         assert data['cycle_count'] == '2' and data['cycle_seconds'] == '1', data
         assert data.get('exact_rejects', '0') == '0', data
+        assert data['search_purpose'] == 'composition-parent', data
+        assert data['proven_rank'] == ('7' if shape == '2x2x2' else '18'), data
+        if shape == '2x2x2':
+            assert data['mode'] == 'optimal-parent' and data['cpu_lanes'] == '0', data
+            assert data['orbit_codes'] == '216' and data['refine_submitted'] == '36', data
 
     pinned = run(['--tensor', '2x2', '--rounds', '1', '--steps', '10', '-J', '1', '--no-gpu', '--no-tui',
                   '--state-dir', str(root / 'pinned')])
     assert pinned.returncode == 0 and 'metaflip cycle:' not in pinned.stdout, pinned.stdout
     assert pinned.stdout.count('metaflip native done:') == 1
-    # The no-selector entry point also exercises the actual default 60s dwell.
+    # Default uses the adaptive parent slice; uniform restores the full ceiling.
     default = run(['--secs', '1', '--steps', '100', '-J', '1', '--no-gpu', '--no-tui',
                    '--state-dir', str(root / 'default')])
-    assert default.returncode == 0 and 'cycle_count=34 cycle_seconds=60' in default.stdout, default.stdout
+    assert default.returncode == 0 and 'cycle_count=34 cycle_seconds=15' in default.stdout, default.stdout
+    uniform = run(['--cycle-policy', 'uniform', '--secs', '1', '-J', '1', '--no-gpu', '--no-tui',
+                   '--state-dir', str(root / 'uniform')])
+    assert uniform.returncode == 0 and 'cycle_count=34 cycle_seconds=60' in uniform.stdout, uniform.stdout
+    unresolved = run(['--cycle-shapes', '3x3', '--secs', '1', '--steps', '100', '-J', '1', '--no-gpu', '--no-tui',
+                      '--state-dir', str(root / 'unresolved')])
+    assert unresolved.returncode == 0 and 'search_purpose=rank-search proven_rank=0' in unresolved.stdout, unresolved.stdout
+    shared = root / 'shared-status.txt'
+    shared_run = run(['--cycle-shapes', '2x2,2x2x5', '--cycle-secs', '1', '--secs', '4',
+                      '--steps', '100', '-J', '1', '--no-gpu', '--no-tui',
+                      '--state-dir', str(root / 'shared'), '--status', str(shared)])
+    assert shared_run.returncode == 0, shared_run.stdout
+    assert 'tensor=2x2x5' in shared_run.stdout
+    assert fields(shared)['refine_failures'] == '0', fields(shared)
+    assert Path(str(shared)+'.refinement/composition/utility/source').read_text() == 'mixed\n'
     for shape in ('2x2', '2x2x5'):
         check_terminal_stop(root, shape, b'q')
         check_terminal_stop(root, shape, b'\x03')

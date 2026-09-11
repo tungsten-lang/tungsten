@@ -16,7 +16,7 @@ use ../lib/metaflip/rect/policy
   rank = ffr_load_scheme_cap(state, seed, 2, 2, p, cap, 92700 + p, 4, 4, 1000, 250) ## i64
   label = "2x2x" + p.to_s() ## String
   z = ffr2278_expect(label + " enabled", ffrp_supported(2, 2, p) == 1 && ffrp_supported_label(label) == 1)
-  z = ffr2278_expect(label + " record/target", ffrp_record_rank(2, 2, p) == expected_rank && ffrp_target_rank(2, 2, p) == expected_rank - 1)
+  z = ffr2278_expect(label + " optimal parent target", ffrp_record_rank(2, 2, p) == expected_rank && ffrp_target_rank(2, 2, p) == expected_rank && ffrp_proven_optimal(2,2,p) == 1)
   z = ffr2278_expect(label + " seed rank", rank == expected_rank && ffr_best_rank(state) == expected_rank)
   z = ffr2278_expect(label + " full exact gate", ffr_verify_best_exact(state, 2, 2, p) == 1)
   z = ffr2278_expect(label + " density", ffr_best_bits(state) == expected_density)

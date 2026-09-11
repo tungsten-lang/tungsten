@@ -176,6 +176,9 @@ use core/system
     if ffw_valid(state) != 1 || rank < 1 || rank > @capacity || rank > state[4]
       @failures += 1
       return 0-1
+    if ffcu_source(@root, n, m, p) != 1
+      @failures += 1
+      return 0-1
     i = 0 ## i64
     while i < rank
       @work[i] = state[state[47]+i]
@@ -446,7 +449,7 @@ use core/system
     1
 
   -> transform_fields()
-    " wide_transform_enabled=" + @transform_enabled.to_s() + " wide_transform_submitted=" + @transform_submitted.to_s() + " wide_transform_completed=" + @transform_completed.to_s() + " wide_transform_pending=" + (@transform_submitted - @transform_completed).to_s() + " wide_transform_failures=" + @transform_failures.to_s() + " wide_transform_status=" + @transform_status.to_s() + " wide_transform_delta=" + @transform_delta.to_s() + self.feedback_fields()
+    " downstream_saved=" + ffbc_counter(@root + "/composition/utility/saved").to_s() + " wide_transform_enabled=" + @transform_enabled.to_s() + " wide_transform_submitted=" + @transform_submitted.to_s() + " wide_transform_completed=" + @transform_completed.to_s() + " wide_transform_pending=" + (@transform_submitted - @transform_completed).to_s() + " wide_transform_failures=" + @transform_failures.to_s() + " wide_transform_status=" + @transform_status.to_s() + " wide_transform_delta=" + @transform_delta.to_s() + self.feedback_fields()
 
   -> status_fields()
     " refine=" + @enabled.to_s() + " refine_submitted=" + @submitted.to_s() + " refine_completed=" + @completed.to_s() + " refine_pending=" + self.pending().to_s() + " refine_duplicates=" + @duplicates.to_s() + " refine_outputs=" + @outputs.to_s() + " refine_cross_shape=" + @cross_shape.to_s() + " refine_failures=" + @failures.to_s() + " refine_blocked=" + @budget_blocked.to_s() + " compose_limit=" + @compose_limit.to_s() + " compose_submitted=" + @compose_submitted.to_s() + " compose_completed=" + @compose_completed.to_s() + " compose_pending=" + (@compose_submitted - @compose_completed).to_s() + " compose_deferred=" + @compose_deferred.to_s() + " compose_failures=" + @compose_failures.to_s() + " compose_wide_status=" + @wide_status.to_s() + " compose_wide_saved=" + @wide_saved.to_s() + self.transform_fields()

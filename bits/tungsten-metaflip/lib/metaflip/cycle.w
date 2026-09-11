@@ -3,6 +3,96 @@
 # campaign's native arrays per visit. There is no extra CPU/GPU supervisor.
 use cli
 use seeds/rect
+use composition/utility
+
+-> ffcy_optimal_rank(label) (String) i64
+  n = ffcli_parse_square_tensor(label) ## i64
+  if n > 0
+    return ffpr_exact_rank(n,n,n)
+  ffpr_exact_rank(ffrp_n(label),ffrp_m(label),ffrp_p(label))
+
+# Default parent exploration: 15s, then 7s/3s on completed unproductive
+# visits. A verified downstream rank decrease earns up to 30s next time.
+# A user-specified shorter cycle ceiling always wins; no shape is starved.
+-> ffcy_parent_seconds(ceiling, misses, reward) (i64 i64 i64) i64
+  seconds = 15 ## i64
+  if reward > 0
+    seconds = 30
+  else
+    if misses > 0
+      seconds = 7
+    if misses > 1
+      seconds = 3
+  if seconds > ceiling
+    seconds = ceiling
+  seconds
+
+# A partial/interrupted visit and a malformed queue are never a failed trial.
+-> ffcy_parent_complete(root, visits) (String i64) i64
+  ffrf_atomic(root + "/composition/utility/completed", visits.to_s() + "\n", "cycle")
+
+-> ffcy_parent_pending(root) (String) i64
+  queues = ["", "/composition", "/composition/mixed", "/composition/transforms", "/composition/feedback"]
+  pending = 0 ## i64
+  i = 0 ## i64
+  while i < queues.size()
+    submitted = ffmd_count(root + queues[i] + "/submitted") ## i64
+    consumed = ffmd_count(root + queues[i] + "/consumed") ## i64
+    if submitted < 0 || consumed < 0 || consumed > submitted
+      return 0-1
+    pending += submitted-consumed
+    i += 1
+  parents = ffmd_count(root + "/composition/mixed/parent-submitted") ## i64
+  cursor = ffmd_count(root + "/composition/mixed/context") ## i64
+  if parents < 0 || parents > 1000000000000 || cursor < 0 || cursor > 27*parents
+    return 0-1
+  pending+27*parents-cursor
+
+# meta = saved, misses, visit count, pending, telemetry error. Scheduling is
+# advisory only. Malformed or rolled-back state resets to exploration.
+-> ffcy_parent_budget(root, ceiling, meta) (String i64 i64[]) i64
+  meta[4] = 0
+  queue = root + "/composition/utility/"
+  saved = ffmd_count(queue + "saved") ## i64
+  old_saved = saved ## i64
+  misses = 0 ## i64
+  visits = 0 ## i64
+  raw = File.read_prefix(queue + "cycle", 128)
+  if saved < 0 || saved > 1000000000000
+    saved = 0
+    old_saved = 0
+    meta[4] = 1
+  if raw != nil
+    fields = raw.strip().split(" ")
+    if fields.size() == 4 && fields[0] == "MFCP1"
+      old_saved = ffw_parse_decimal_i64(fields[1])
+      misses = ffw_parse_decimal_i64(fields[2])
+      visits = ffw_parse_decimal_i64(fields[3])
+      canonical = "MFCP1 " + old_saved.to_s() + " " + misses.to_s() + " " + visits.to_s() + "\n"
+      if old_saved < 0 || old_saved > saved || misses < 0 || misses > 2 || visits < 0 || visits > 1000000000000 || raw != canonical
+        meta[4] = 1
+    else
+      meta[4] = 1
+  if meta[4] != 0
+    old_saved = saved
+    misses = 0
+    visits = 0
+  pending = ffcy_parent_pending(root) ## i64
+  reward = saved - old_saved ## i64
+  if reward > 0
+    misses = 0
+  elsif visits > 0 && ffmd_count(queue + "completed") == visits && pending == 0 && misses < 2
+    misses += 1
+  meta[0] = saved
+  meta[1] = misses
+  meta[2] = visits + 1
+  meta[3] = pending
+  next_record = "MFCP1 " + saved.to_s() + " " + misses.to_s() + " " + (visits+1).to_s() + "\n"
+  if !File.mkdir_p(queue)
+    meta[4] = 1
+  elsif ffrf_atomic(queue + "cycle", next_record, "cycle") != 1
+    meta[4] = 1
+  ffcy_parent_seconds(ceiling, misses, reward)
 
 -> ffcy_default_shapes()
   labels = ["2x2", "3x3", "4x4", "5x5", "6x6", "7x7"]

@@ -35,6 +35,7 @@ use fleet/cpu_experiments
 use fleet/cpu_pool
 use fleet/coreml
 use fleet/refinement
+use fleet/optimal_parent
 use kernels/metallib_cache
 use kernels/bundles/workers
 use kernels/reject
@@ -1851,7 +1852,8 @@ use paths
   << "  --tensor SHAPE          pin one square 2x2..7x7 or rectangular shape"
   << "  --tensor all            explicitly select the default cycling mode"
   << "  --cycle-shapes LIST     cycle a comma-separated square/rectangle subset"
-  << "  --cycle-secs N          search seconds per shape (default: 60)"
+  << "  --cycle-secs N          per-shape time ceiling (default: 60)"
+  << "  --cycle-policy MODE     adaptive (default): optimal parents 3..30s; uniform: equal slices"
   << "  --rect                  adaptive multi-shape rectangular portfolio"
   << "  --rect-shapes LIST      comma-separated rectangular portfolio subset"
   << "  --seed PATH             start from one exact decomposition"
@@ -1901,6 +1903,8 @@ CYCLE_POSITION = 0 ## i64
 CYCLE_DEADLINE_MS = 0 ## i64
 CYCLE_FIELDS = ""
 CYCLE_CAPTION = ""
+CYCLE_POLICY = "adaptive"
+CYCLE_PARENT = 0 ## i64
 J = 0 ## i64
 J_EXPLICIT = 0 ## i64
 STEPS = 500000 ## i64
@@ -1969,6 +1973,7 @@ value_options.push("--coreml-workers")
 value_options.push("--coreml-compute")
 value_options.push("--cycle-shapes")
 value_options.push("--cycle-secs")
+value_options.push("--cycle-policy")
 value_options.push("--cycle-position")
 value_options.push("--cycle-deadline-ms")
 ai = 0 ## i64
@@ -2012,6 +2017,10 @@ while ai < av.size()
   if arg == "--cycle-secs"
     CYCLE_EXPLICIT = 1
     CYCLE_SECS = ffcli_require_i64(arg, av[ai + 1])
+    ai += 1
+  if arg == "--cycle-policy"
+    CYCLE_EXPLICIT = 1
+    CYCLE_POLICY = av[ai + 1]
     ai += 1
   if arg == "--cycle-position"
     CYCLE_EXPLICIT = 1
@@ -2188,6 +2197,9 @@ if TENSOR_EXPLICIT == 0 && RECT_PORTFOLIO == 0 && SELF_TEST == 0
   CYCLE_MODE = 1
 if CYCLE_SECS < 1 || CYCLE_SECS > 86400
   << "metaflip: --cycle-secs must be 1 through 86400"
+  exit(2)
+if CYCLE_POLICY != "adaptive" && CYCLE_POLICY != "uniform"
+  << "metaflip: --cycle-policy must be adaptive or uniform"
   exit(2)
 if CYCLE_POSITION < 0 || CYCLE_DEADLINE_MS < 0 || MAX_SECS < 0 || MAX_SECS > 9223372036854775
   << "metaflip: invalid negative or overflowing cycle/time limit"
@@ -2381,6 +2393,25 @@ if NEAR_EXPLICIT == 0 && RECT_PORTFOLIO == 0 && RECT_MODE == 0
 if state_dirs_ok == 0
   << "metaflip: could not create default live-state directories under " + STATE_DIR
   exit(2)
+if CYCLE_MODE != 0
+  exact_rank = ffcy_optimal_rank(TENSOR_LABEL) ## i64
+  visit_seconds = CYCLE_SECS ## i64
+  parent_meta = i64[5]
+  purpose = "rank-search"
+  if exact_rank > 0 && SEED_NAIVE == 0
+    CYCLE_PARENT = 1
+    purpose = "composition-parent"
+    if CYCLE_POLICY == "adaptive"
+      visit_seconds = ffcy_parent_seconds(CYCLE_SECS,0,0)
+      if STATUS_EXPLICIT == 0
+        visit_seconds = ffcy_parent_budget(STATUS_PATH + ".refinement", CYCLE_SECS, parent_meta)
+  MAX_SECS = ffcy_slice_seconds(visit_seconds, CYCLE_DEADLINE_MS, ccall("__w_clock_ms"))
+  if MAX_SECS == 0
+    exit(0)
+  CYCLE_FIELDS = " cycle_visit=" + CYCLE_POSITION.to_s() + " cycle_count=" + cycle_labels.size().to_s() + " cycle_seconds=" + visit_seconds.to_s()
+  CYCLE_FIELDS = CYCLE_FIELDS + " cycle_ceiling=" + CYCLE_SECS.to_s() + " cycle_policy=" + CYCLE_POLICY + " search_purpose=" + purpose + " proven_rank=" + exact_rank.to_s()
+  CYCLE_FIELDS = CYCLE_FIELDS + " parent_saved=" + parent_meta[0].to_s() + " parent_misses=" + parent_meta[1].to_s() + " parent_pending=" + parent_meta[3].to_s() + " parent_policy_error=" + parent_meta[4].to_s()
+  CYCLE_CAPTION = " | cycle " + (CYCLE_POSITION % cycle_labels.size() + 1).to_s() + "/" + cycle_labels.size().to_s() + " " + purpose + " (" + visit_seconds.to_s() + "s)"
 if CYCLE_MODE != 0 && QUIET == 0
   << "metaflip cycle: tensor=" + TENSOR_LABEL + CYCLE_FIELDS + " (checkpoint, then advance)"
   flush()
@@ -2401,6 +2432,8 @@ if RECT_MODE == 1
   if CYCLE_MODE != 0 && result == 0
     cycle_status = read_file(STATUS_PATH)
     if ffrpo_status_i64(cycle_status, "stop_requested", 1) == 0
+      if CYCLE_PARENT != 0 && CYCLE_POLICY == "adaptive" && STATUS_EXPLICIT == 0
+        z = ffcy_parent_complete(STATUS_PATH + ".refinement",parent_meta[2])
       exit(ffcy_continue(System.executable_path(), av, CYCLE_POSITION, CYCLE_DEADLINE_MS, value_options))
   exit(result)
 
@@ -2488,6 +2521,18 @@ if SEED_NAIVE == 0
     if ffn_better(durable_rank, ffw_best_bits(durable), ffw_best_rank(best), ffw_best_bits(best)) == 1
       best = durable
       recovered = durable_rank
+
+# A solved tiny parent is a finite basis/enrichment visit, not a GPU rank-six
+# campaign. Explicit pinned/naive runs retain their ordinary walker semantics.
+if CYCLE_PARENT != 0 && N == 2 && ffw_best_rank(anchor) == 7
+  parent_result = ffop_run(anchor,best,RUNTIME_ROOT,STATUS_PATH,BEST_PATH,MAX_SECS,CYCLE_DEADLINE_MS,CYCLE_FIELDS,CYCLE_CAPTION,TUI,QUIET) ## i64
+  if parent_result == 0
+    if CYCLE_POLICY == "adaptive" && STATUS_EXPLICIT == 0
+      z = ffcy_parent_complete(STATUS_PATH + ".refinement",parent_meta[2])
+    exit(ffcy_continue(System.executable_path(),av,CYCLE_POSITION,CYCLE_DEADLINE_MS,value_options))
+  if parent_result == 1
+    exit(0)
+  exit(parent_result)
 
 # Provenance follows the monotonic fleet best, independently of mutable island
 # lineage.  Initial/recovered leaders are explicit too, so every status and

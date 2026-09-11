@@ -4,7 +4,8 @@
 # and dimension-specialized Tungsten GPU worker consume it. Shapes are deliberately
 # allowlisted.  Although the rectangular worker is runtime-generic, admitting
 # a shape here means that Metaflip has an exact checked-in frontier seed and a
-# documented strict-improvement target for it.
+# documented rank target or proved-optimal parent role for it.
+use bounds
 
 -> ffrp_supported(n, m, p) (i64 i64 i64) i64
   ok = 0 ## i64
@@ -172,17 +173,16 @@
 
 -> ffrp_target_rank(n, m, p) (i64 i64 i64) i64
   record = ffrp_record_rank(n, m, p) ## i64
-  # The checked quotient-rank proof closes <2,3,4> at exactly 20 over GF(2).
-  # Keep the profile available for explicit density/basin work, but do not
-  # advertise the now-impossible rank-19 search as its next target.
-  if n == 2 && m == 3 && p == 4
+  # Proved-optimal profiles remain available for diversity/composition work,
+  # but never advertise a rank target below their proved bound.
+  if ffpr_exact_rank(n,m,p) == record && record > 0
     return record
   if record > 0
     return record - 1
   0
 
 -> ffrp_proven_optimal(n, m, p) (i64 i64 i64) i64
-  if n == 2 && m == 3 && p == 4
+  if ffpr_exact_rank(n,m,p) > 0 && ffpr_exact_rank(n,m,p) == ffrp_record_rank(n,m,p)
     return 1
   0
 

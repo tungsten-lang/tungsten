@@ -28,7 +28,7 @@ state = i64[ffr_state_size(cap)]
 rank = ffr_load_scheme_cap(state, seed, 2, 2, 9, cap, 92209, 4, 4, 1000, 250) ## i64
 
 z = ffr229_expect("explicit profile enabled", ffrp_supported(2, 2, 9) == 1 && ffrp_supported_label("2x2x9") == 1)
-z = ffr229_expect("record and strict target", ffrp_record_rank(2, 2, 9) == 32 && ffrp_target_rank(2, 2, 9) == 31)
+z = ffr229_expect("record and optimal parent target", ffrp_record_rank(2, 2, 9) == 32 && ffrp_target_rank(2, 2, 9) == 32 && ffrp_proven_optimal(2,2,9) == 1)
 z = ffr229_expect("rank-32 imported seed", rank == 32 && ffr_best_rank(state) == 32)
 z = ffr229_expect("independent full tensor gate", ffr_verify_best_exact(state, 2, 2, 9) == 1)
 z = ffr229_expect("reduced density", ffr_best_bits(state) == 156)

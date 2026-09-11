@@ -75,6 +75,8 @@ def check(binary):
         assert read_record(q, 'results', 1) is None
         assert not (q/'cleanup/results').exists()
         (root/'stop').unlink()
+        (root/'composition/utility').mkdir(parents=True)
+        (root/'composition/utility/source').write_text('2x2x2\n')
         run()
         counts = audit(root)
         assert counts == dict(records=1, improved=1, limited=0)
@@ -84,6 +86,8 @@ def check(binary):
         assert fields[4:8] == ['66', '65', '65', '1']
         assert (q/'objects'/f'{key}.tensor').read_bytes() == first
         assert (q/'best/1x1x65').read_text() == f'65 {output}\n'
+        assert (q/'utility/saved').read_text() == '1\n'
+        assert (q/'utility/best/1x1x65').read_text() == f'65 {output}\n'
         completion = read_record(q, 'results', 1)
         assert completion.split()[3:] == [key.encode(), b'1x1x65', b'66']
         saved = {p:p.read_bytes() for p in q.rglob('*') if p.is_file()}

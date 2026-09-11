@@ -3,6 +3,7 @@
 # records a full-check-admitted improvement or an explicit work/verify limit.
 use matrix_cleanup
 use ../fleet/refinement_artifacts
+use utility
 
 -> ffwc_index_kind(root, identity, blob, rank, n, m, p, source, kind) (String String String i64 i64 i64 i64 String String) i64
   archive = root + "/composition/"
@@ -26,7 +27,7 @@ use ../fleet/refinement_artifacts
       best = ffpk_decimal(fields[0])
   if rank < best && ffrf_atomic(archive + "best/" + shape, rank.to_s() + " " + identity + "\n", "wide-cleanup") != 1
     return 0
-  1
+  ffcu_record(root, identity, rank, n, m, p)
 
 -> ffwc_index(root, identity, blob, rank, n, m, p, source) (String String String i64 i64 i64 i64 String) i64
   ffwc_index_kind(root, identity, blob, rank, n, m, p, source, "MFW_CLEAN1")

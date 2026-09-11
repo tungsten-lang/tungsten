@@ -41358,22 +41358,37 @@ static inline int bigint_src_shape(WValue a, WValue b, int neg_b) {
     (void)neg_b;
     int32_t la = sa < 0 ? -sa : sa;
     int32_t lb = sb < 0 ? -sb : sb;
-    /* Exact migrated scalar-word arms. Keep these before the general
-     * equal-length/one-limb exclusions and make each gate identical to its
-     * source worker's route. Every other word/sign shape retains C. */
-    if (!neg_b && sa == 1 && sb == 1) return 1;
-    if (!neg_b && sa == 3 && sb == 1) return 1;
-    if (!neg_b && sa == 3 && sb == 3) return 1;
-    if (!neg_b && sa > 8 && sa <= 4096 && sb == 1) return 1;
-    if (neg_b && sa == 2 && sb == 1)
-        return BN_BIGINT_SUB1_2_SRC_DIRECT ? 3 : 1;
-    if (neg_b && sa == 3 && sb == 1) return 1;
-    if (neg_b && sa == 4 && sb == 1) return 1;
-    if (neg_b && sa == 5 && sb == 1) return 1;
-    if (neg_b && sa == 6 && sb == 1) return 1;
-    if (neg_b && sa == 7 && sb == 1) return 1;
-    if (neg_b && sa == 8 && sb == 1) return 1;
-    if (neg_b && sa > 8 && sa <= 4096 && sb == 1) return 1;
+    /* Exact migrated arms. `neg_b` is a per-call-site constant (0 in w_add,
+     * 1 in w_sub), so each operator sees only its own branch. This gate runs
+     * on EVERY w_add/w_sub bigint pair: a longer compare chain measured as a
+     * ~2 ns tax on the unchanged word-shape rows, and reordering the add
+     * lines moved the add@3 leaf by several percent, so the add lines that
+     * predate this checkpoint keep their original text and order, and the
+     * new equal-width widths (2, 4, 8, 16, 24; 3 is the line above) follow
+     * as one bit test. Every other word/sign shape retains C. */
+    if (!neg_b) {
+        if (sa == 1 && sb == 1) return 1;
+        if (sa == 3 && sb == 1) return 1;
+        if (sa == 3 && sb == 3) return 1;
+        if (sa > 8 && sa <= 4096 && sb == 1) return 1;
+        if (sa == sb && (uint32_t)sa <= 24U &&
+            ((0x1010114U >> (uint32_t)sa) & 1U))
+            return 1;
+    } else {
+        /* Word shapes (`sb == 1`) as one branch and a range test instead of
+         * the former eight-line chain; then the exact equal-width subtract
+         * leaves at widths 2, 3, 4, 8, 16, 24, with `x - x` left to C's
+         * O(1) identity ahead of any compare. (Folding these admissions into
+         * the equal-length block below measured worse: add@5 1.08, sub@4
+         * 1.07, both 0/31.) */
+        if (sb == 1) {
+            if (sa == 2) return BN_BIGINT_SUB1_2_SRC_DIRECT ? 3 : 1;
+            if (sa >= 3 && sa <= 4096) return 1;
+        } else if (sa == sb && a != b && (uint32_t)sa <= 24U &&
+                   ((0x101011CU >> (uint32_t)sa) & 1U)) {
+            return 1;
+        }
+    }
     /* Exclusion keys on the RAW operand signs, NOT the post-flip effective
      * ones: C's `bigint_add_equal_fast` and `bigint_sub_equal_fast` each
      * specialize equal-length pairs whose own signs match, per operator.
@@ -60221,6 +60236,10 @@ WValue w_bigint_alloc_hot32_raw(void) {
     return bigint_box(bigint_alloc_raw_hot(32));
 }
 __attribute__((always_inline))
+WValue w_bigint_alloc_hot32_exact_raw(void) {
+    return bigint_box(bigint_alloc_raw_hot_exact(32U));
+}
+__attribute__((always_inline))
 WValue w_bigint_alloc_hot64_raw(void) {
     return bigint_box(bigint_alloc_raw_hot_exact(64U));
 }
@@ -60300,6 +60319,85 @@ WValue w_bigint_add3_equal_finish_raw(WValue v, uint64_t carry) {
     r->limbs[3] = carry;
     r->size = 3 + (int32_t)carry;
     return v;
+}
+__attribute__((always_inline))
+WValue w_bigint_add4_equal_finish_raw(WValue v, uint64_t carry) {
+    WBigint *r = w_as_bigint(v);
+    /* Match bigint_add_equal_fast exactly: cap is the power-of-two class of
+     * 4+1, the carry limb is published unconditionally, and the normalized
+     * size is 4 or 5. */
+    r->limbs[4] = carry;
+    r->size = 4 + (int32_t)carry;
+    return v;
+}
+__attribute__((always_inline))
+WValue w_bigint_add8_equal_finish_raw(WValue v, uint64_t carry) {
+    WBigint *r = w_as_bigint(v);
+    /* Match bigint_add_equal_fast exactly: cap is the power-of-two class of
+     * 8+1, the carry limb is published unconditionally, and the normalized
+     * size is 8 or 9. */
+    r->limbs[8] = carry;
+    r->size = 8 + (int32_t)carry;
+    return v;
+}
+__attribute__((always_inline))
+WValue w_bigint_add16_equal_finish_raw(WValue v, uint64_t carry) {
+    WBigint *r = w_as_bigint(v);
+    /* Match bigint_add_equal_fast exactly: cap is the power-of-two class of
+     * 16+1, the carry limb is published unconditionally, and the normalized
+     * size is 16 or 17. */
+    r->limbs[16] = carry;
+    r->size = 16 + (int32_t)carry;
+    return v;
+}
+__attribute__((always_inline))
+WValue w_bigint_add24_equal_finish_raw(WValue v, uint64_t carry) {
+    WBigint *r = w_as_bigint(v);
+    /* Match bigint_add_equal_fast exactly: cap is the power-of-two class of
+     * 24+1 (32), the carry limb is published unconditionally, and the
+     * normalized size is 24 or 25. */
+    r->limbs[24] = carry;
+    r->size = 24 + (int32_t)carry;
+    return v;
+}
+__attribute__((always_inline))
+WValue w_bigint_add2_equal_finish_raw(WValue v, uint64_t carry) {
+    WBigint *r = w_as_bigint(v);
+    /* Match bigint_add_two_limb_magnitudes' same-sign arm exactly: cap is
+     * four, the carry limb is published unconditionally, size two or three. */
+    r->limbs[2] = carry;
+    r->size = 2 + (int32_t)carry;
+    return v;
+}
+/* Match bigint_sub_equal_fast's publication exactly: a nonzero top limb
+ * publishes the full width with the larger operand's sign; otherwise the
+ * normalized (possibly demoted) magnitude goes through bigint_finish_mag_sub. */
+__attribute__((always_inline))
+WValue w_bigint_sub_equal_finish_raw(WValue v, int64_t len, int64_t negative) {
+    WBigint *r = w_as_bigint(v);
+    int32_t n = (int32_t)len;
+    uint64_t top = r->limbs[n - 1];
+    if (top != 0) {
+        r->size = negative ? -n : n;
+        return v;
+    }
+    r->size = n;
+    while (r->size > 0 && r->limbs[r->size - 1] == 0) r->size--;
+    if (negative && r->size > 0) r->size = -r->size;
+    return bigint_finish_mag_sub(r);
+}
+/* Match bigint_add_two_limb_magnitudes' opposite-sign arm exactly: a zero
+ * high limb demotes through bigint_finish_one_limb, otherwise the hot
+ * two-limb take is published with the larger operand's sign. */
+__attribute__((always_inline))
+WValue w_bigint_sub2_equal_finish_raw(uint64_t low, uint64_t high,
+                                      int64_t negative) {
+    if (high == 0) return bigint_finish_one_limb(low, negative != 0);
+    WBigint *result = bigint_alloc_raw_hot(2);
+    result->limbs[0] = low;
+    result->limbs[1] = high;
+    result->size = negative ? -2 : 2;
+    return bigint_box(result);
 }
 WValue w_bigint_add1_4_finish_raw(WValue v, uint64_t carry) {
     WBigint *r = w_as_bigint(v);

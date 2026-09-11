@@ -3,8 +3,9 @@
 # `w_add`/`w_sub`/`w_mul` admit a pair into the migrated source bodies via
 # `bigint_src_shape` / `bigint_mul_src_shape` (runtime.c): both heap
 # BigInts, 2..4096 limbs (2..24 for `*`), excluding equal-length pairs
-# whose RAW signs match except the exact migrated positive add@3 leaf
-# (C keeps the remaining *_equal_fast arms), and squaring.
+# whose RAW signs match except the exact migrated positive equal-width
+# add and sub leaves at widths 2, 3, 4, 8, 16, and 24 (C keeps the
+# remaining *_equal_fast arms and the `x - x` identity), and squaring.
 # The source bodies (core/numeric/big_int.w) carry NO tag or zero checks
 # of their own — every entry route proves heap-BigInt operands (the
 # guarded direct call site, the w_add shape gate, the dispatcher's typed
@@ -49,11 +50,21 @@ two_b = (1 << 90) + 7              # 2 limbs (unequal magnitude, same count)
 two_c = (1 << 100) + 3             # 2 limbs, same count as two_a
 three_a = (1 << 140) + 5           # 3 limbs
 three_b = (1 << 141) + 7           # 3 limbs, positive add@3 source leaf
+four_a = (1 << 200) + 5            # 4 limbs, positive add@4 source leaf
+four_b = (1 << 201) + 7
+eight_a = (1 << 456) + 5           # 8 limbs, positive add@8 source leaf
+eight_b = (1 << 457) + 7
+sixteen_a = (1 << 968) + 5         # 16 limbs, positive add@16 source leaf
+sixteen_b = (1 << 969) + 7
+twentyfour_a = (1 << 1480) + 5     # 24 limbs, positive add@24 source leaf
+twentyfour_b = (1 << 1481) + 7
 sb_hi = 1 << (64 * 23 + 10)        # 24 limbs — inside the mul band
 sb_over = 1 << (64 * 24 + 10)      # 25 limbs — just past the mul band
 band_hi = 1 << (64 * 4095 + 10)    # 4096 limbs — inside the add band
 band_over = 1 << (64 * 4096 + 10)  # 4097 limbs — just past the add band
 
+five_a = (1 << 270) + 5            # 5 limbs, unported equal width
+five_b = (1 << 271) + 7
 neg_two_b = 0 - two_b
 neg_two_c = 0 - two_c
 neg_three = 0 - three_a
@@ -67,13 +78,32 @@ check("add.uneq.pin", two_a + two_b, 1268888540267514781771602329607)
 check("sub.uneq.pin", two_a - two_b, 1266412660188944021221804081145)
 check("sub.uneq.round", (three_a - two_b) + two_b, three_a)
 
-# Remaining equal-length same-raw-sign shapes (C's *_equal_fast, NOT admitted).
-check("add.eq.same_sign", (two_a + two_c) - two_c, two_a)
-check("sub.eq.same_sign", (two_a - two_c) + two_c, two_a)
+# Remaining equal-length same-raw-sign shapes (C's *_equal_fast, NOT
+# admitted): negative pairs at every width, and positive pairs at widths
+# outside the migrated set.
 check("add.eq.same_sign.neg", (neg_two_c + neg_two_b) - neg_two_b, neg_two_c)
+check("sub.eq.same_sign.neg", (neg_two_c - neg_two_b) + neg_two_b, neg_two_c)
+check("add.eq.five", (five_a + five_b) - five_b, five_a)
+check("sub.eq.five", (five_a - five_b) + five_b, five_a)
 
-# Exact positive add@3 exception (admitted and fully handled in source).
+# Exact positive equal-width add/sub exceptions at widths 2, 3, 4, 8, 16, 24
+# (admitted and fully handled in source, including cancellation to zero).
+check("add.eq.two_source", (two_a + two_c) - two_c, two_a)
+check("sub.eq.two_source", (two_a - two_c) + two_c, two_a)
 check("add.eq.three_source", (three_a + three_b) - three_b, three_a)
+check("sub.eq.three_source", (three_a - three_b) + three_b, three_a)
+check("add.eq.four_source", (four_a + four_b) - four_b, four_a)
+check("sub.eq.four_source", (four_a - four_b) + four_b, four_a)
+check("add.eq.eight_source", (eight_a + eight_b) - eight_b, eight_a)
+check("sub.eq.eight_source", (eight_a - eight_b) + eight_b, eight_a)
+check("add.eq.sixteen_source", (sixteen_a + sixteen_b) - sixteen_b, sixteen_a)
+check("sub.eq.sixteen_source", (sixteen_a - sixteen_b) + sixteen_b, sixteen_a)
+check("add.eq.twentyfour_source",
+      (twentyfour_a + twentyfour_b) - twentyfour_b, twentyfour_a)
+check("sub.eq.twentyfour_source",
+      (twentyfour_a - twentyfour_b) + twentyfour_b, twentyfour_a)
+check("sub.eq.four_cancel", (four_a + 0) - (four_a + 0), 0)
+check("sub.eq.four_identity", four_a - four_a, 0)
 
 # Equal-length differing raw signs (admitted — no C arm).
 check("add.eq.mixed_sign", (two_a + neg_two_c) - neg_two_c, two_a)

@@ -1,0 +1,227 @@
+BIGINT POSITIVE EQUAL-WIDTH ADD@{2,4,8,16,24} AND SUB@{2,3,4,8,16,24}
+EXACT SOURCE CHECKPOINT
+=====================================================================
+
+Scope
+-----
+
+This checkpoint ports the remaining positive equal-width fixed-kernel
+add/sub leaves from C to native Tungsten, completing the equal-width family
+that the earlier add@3 checkpoint opened:
+
+  * add@2   — bigint_add_two_limb_magnitudes' same-sign arm (exact class-four
+              hot take, two limb sums with explicit carries, unconditional
+              third-limb publication, size two or three);
+  * add@4, add@8, add@16, add@24 — bigint_add_equal_fast's fixed arms: the
+              literal AArch64 bn_add{4,8,16,24}_fixed load/add-with-carry/
+              store schedules, the hot take in the power-of-two class of N+1
+              limbs (8, 16, 32, 32), an unconditional carry-limb store, and a
+              normalized size of N or N+1;
+  * sub@2   — bigint_add_two_limb_magnitudes' opposite-sign arm (two-limb
+              compare, larger minus smaller, C's one-limb demotion or exact
+              two-limb publication);
+  * sub@3, sub@4, sub@8, sub@16, sub@24 — bigint_sub_any's boxed equal-width
+              route into bigint_sub_equal_fast: the top-limb compare with the
+              full descending scan on a tie, the hot take in N's smallest-fit
+              class (4, 4, 8, 16, 32), the literal bn_sub{3,4,8,16,24}_fixed
+              schedule over larger minus smaller, then C's exact top-limb
+              publication or trim-and-demote finisher.
+
+Every kernel schedule was generated from, and verified token-for-token
+against, the C text in runtime/runtime.c (the generator's instruction list
+equals the BN_FIXED_ADDSUB / BN_FIXED_ADDSUB24 expansion for each width).
+Negative operands, mixed signs, `x - x` (C's O(1) identity), every other
+equal width (5..7, 9..15, 17..23, and 32 and above, which carry C's
+page-rehome hazard guard), unequal widths, and open-world BigInt#+ /
+BigInt#- replacements retain their previous routes. The add@3 leaf,
+retained by the previous checkpoint, is now always-inlined into the +
+worker (see "add@3" below). This is the exact-port checkpoint; no
+native-only arithmetic redesign is included.
+
+Retained dispatch (ten candidates were measured to reach it)
+------------------------------------------------------------
+
+  * Runtime gate `bigint_src_shape` (runtime.c). It runs on EVERY
+    w_add/w_sub bigint pair, including the typed harness lanes, which reach
+    it through `__w_add_fast`/`__w_sub_fast`. The add lines that predate
+    this checkpoint keep their exact text and order, followed by one bit
+    test admitting widths 2, 4, 8, 16, 24. The sub side is one `sb == 1`
+    word-shape branch with a range test (replacing an eight-line chain),
+    then one bit test admitting widths 2, 3, 4, 8, 16, 24 with `a != b`.
+    Rejected forms: seven extra equal-width lines ahead of the word line
+    (unchanged sub1@4 4.4 -> 6.2 ns, sub@5 5.9 -> 7.9 ns); the word branch
+    ahead of the add lines (add@3 1.06-1.07); a branch-free predicate
+    ahead of everything (add@3 1.01-1.08 under load, no better); the
+    admissions folded into the equal-length exclusion block (add@5 1.081
+    and sub@4 1.071, both 0/31 wins).
+  * `+` worker: after the scalar-word case, `an == bn` then direct compares
+    for widths 3 and 2, then `(an & 3) == 0` ahead of a switch over 4, 8,
+    16, 24. A six-way switch alone lowered to a compare cluster that cost
+    add@3 6% against its former single compare.
+  * `-` worker: the scalar-word chain of eight `an == N && bn0 == 1`
+    compares became one `bn0 == 1` test with a width switch, mirroring +;
+    the equal-width leaves are one switch over 2, 3, 4, 8, 16, 24. Two
+    direct compares ahead of that switch measured 8-13% on sub@4/8/16
+    (2-5 wins of 21 in two rounds), while the switch alone held parity.
+  * add@3 leaf `; tungsten:alwaysinline`. With everything else identical,
+    add@3 measured 1.056 (3/21) against baseline: its gate and worker
+    paths are instruction-identical, only w_add's block placement moved
+    (the shared return block sits 0x1d4 bytes further). Inlining the
+    ten-instruction leaf removes its call/return pair and puts the cell at
+    1.007 (11/31) with add1@1/4/16 at 0.99/0.99/0.98.
+
+Build
+-----
+
+base_commit=1d8ea1b7 (bignum files identical through 8834aa26)
+host=Apple M5 Max, arm64 macOS 26.6.2, Battery Power
+compiler=Homebrew clang 23.1.0; bin/tungsten compile --release --native --fast
+baseline=benchmarks/big_math/tungsten/native_lane.w built from the unmodified
+         tree before any edit; candidate=the same source plus this checkpoint
+clock variants: the shipped harness (CLOCK_MONOTONIC) and a scratch copy of
+         native_lane_ref.c timing with CLOCK_THREAD_CPUTIME_ID, built for
+         BOTH baseline and candidate (the baseline from a momentarily
+         checked-out unmodified tree)
+
+Another session ran a multi-threaded job for the whole campaign: host load
+5-14 for the first rounds and 15-28 afterwards, with wall-clock absolute
+times two to three times their quiet-host values. Paired alternating-
+process ratios are the verdict; absolute nanoseconds are diagnostic only.
+
+Method
+------
+
+Alternating process pairs of the two harness binaries: each leg is
+`bench_big_math_tungsten_native --sweep OP LIMBS 3 300` (min of three
+warmed samples), baseline-then-candidate on even pairs and the reverse on
+odd pairs, every leg under `taskpolicy -c utility -t 0 -l 0` (the repo's
+bench_pinned.sh tier); the verdict is the median paired ratio
+candidate/baseline. Every leg checks its cell against the C oracle before
+timing.
+
+Null controls (baseline against a byte-identical copy of itself, 21 pairs):
+wall clock add@3 0.9988 (IQR 0.042), add@5 0.9944 (0.031); QoS wall clock
+add@3 0.9898 (0.063), sub@4 1.0087 (0.060); QoS CPU clock add@3 0.9699
+(0.049), sub@4 0.9922 (0.037). The method is unbiased to within its
++/-3-5% per-cell noise floor at this load; the CPU clock removes the
+preemption component and is used for the final tables.
+
+Final promotion (CPU clock, QoS; 21 pairs x 3 runs x 300 ms unless noted)
+------------------------------------------------------------------------
+
+Retained form = candidate 9. Rows marked * are from the candidate 9 run
+(31 pairs); the others are from candidate 8, which differs from 9 only by
+the add@3 leaf's inlining and does not touch those cells' code.
+
+  cell    baseline_ns  candidate_ns  candidate/baseline  IQR     wins
+  add@2 *    4.4259       3.3153          0.7469         0.0516  31/31
+  add@3 *    3.0785       2.8362          1.0074         0.0410  11/31
+  add@4 *    5.1588       4.4926          0.8744         0.0490  30/31
+  add@8      5.9958       5.0670          0.9090         0.0656  20/21
+  add@16     8.1254       7.0349          0.8631         0.0965  20/21
+  add@24     9.7789       8.6932          0.8838         0.0501  20/21
+  sub@2      7.0375       6.7373          0.9603         0.0189  20/21
+  sub@3      7.6078       7.5244          0.9749         0.0453  16/21
+  sub@4 *    6.3645       6.5104          1.0186         0.0652  10/31
+  sub@8      8.1983       8.2294          1.0212         0.0649   6/21
+  sub@16     8.9648       8.8324          0.9970         0.0583  12/21
+  sub@24    10.9735      10.5507          0.9546         0.0715  15/21
+
+The add leaves are strict wins: the source route removes the seam call
+into C's dispatch tree. The sub leaves are at parity: C's subtract path was
+already fully inlined into w_sub, and the source path adds the seam call
+plus the worker prologue, which the native kernel exactly repays.
+
+Controls (CPU clock, QoS; 21 pairs x 3 runs x 200 ms; * = 31 pairs x 300)
+--------------------------------------------------------------------------
+
+  cell      candidate/baseline  IQR     wins
+  add1@1 *          0.9916      0.0362  21/31
+  add1@4 *          0.9942      0.0581  18/31
+  add1@16 *         0.9809      0.0418  21/31
+  sub1@1            1.0046      0.0994  10/21
+  sub1@4            0.9825      0.0721  13/21
+  sub1@16           0.9751      0.0978  12/21
+  sub@5             1.0101      0.0724   9/21
+  add@32            1.0087      0.0981   8/21
+  sub@32            1.0118      0.0890   9/21
+  mul@4             1.0059      0.0557   8/21
+  cmp@4             1.0088      0.0817   8/21
+  add@5 *           1.0585      0.0716   3/31
+
+add@5 is the one row over the 5% budget, and it is not a dispatch cost:
+that width never enters the worker (baseline and candidate both leave the
+gate with 0 and run C's bigint_add_equal_fast inline in w_add). It pays the
+new admission bit test (eight instructions, three predicted branches) plus
+w_add's block movement, about 0.3 ns. It read 1.04-1.08 in every candidate
+and 1.08 (0/31) when the test was folded into the exclusion block, so the
+retained form is the cheapest measured. The width is outside the default
+matrix; the default-matrix widths on the same C path pay only a `<= 24`
+range exit and are at parity (add@32 1.009, add@64 0.983-1.008 across
+rounds). A cheaper admission for the unported 5..23 widths would need a
+different mechanism than a gate predicate (for example a width-indexed
+seam table); it is left as the known cost of admitting five more widths.
+
+Wall-clock cross-checks (shipped harness clock, QoS, 21 pairs x 3 x 300),
+candidate 8: add@2 0.6889 (21/21), sub@4 1.0175 (7/21), add@3 1.0847
+(2/21, before the leaf inlining that candidate 9 retains).
+
+Earlier rounds (candidates 1 and 4, wall clock, before the gate and
+dispatch restructures, host load 5-14): add@4/8/16 0.7375/0.7665/0.7925 and
+0.7498/0.7830/0.7973 (21/21 each); add@2/add@24 0.7492/0.8353 (21/21);
+sub@2..24 0.9615-1.0077. Raw campaign outputs are in the session
+scratchpad; every retained number above is reproducible from the two
+binaries and `--sweep`.
+
+Public C/native/GMP cross-check (bin/tungsten bench bignum --cell X --accurate)
+-------------------------------------------------------------------------------
+
+Same host load; the C lane is the direct runtime harness, which bypasses the
+program boundary a Tungsten source program must cross (w_add/w_sub dispatch,
+the source seam, and the worker's full callee-saved prologue).
+
+  cell     Tungsten C ns  native ns  GMP ns   C/native  native/GMP
+  add@2       1.858        2.342     2.375     0.793      0.986
+  add@4       2.438        3.370     2.768     0.723      1.218
+  add@16      3.420        4.412     4.156     0.775      1.062
+  sub@4       2.550        4.385     3.092     0.582      1.418
+
+These ratios are the boundary's price, not the leaves': the promotion
+tables above show the same cells 13-25% faster than their own predecessor
+(add) or at parity (sub). The largest remaining lever for every native
+leaf, including the scalar-word rows, is that price: the + and - workers
+save and restore seven register pairs on every entry because their generic
+fused-kernel paths need them, and LLVM does not shrink-wrap around the
+early-returning leaf routes. Splitting each worker into a small leaf
+dispatcher and an out-of-line generic body is the next tranche's candidate.
+
+Correctness and structural gates
+--------------------------------
+
+  bin/tungsten run spec/numeric/bigint_add_equal_fixed_source_spec.w      (both engines)
+  bin/tungsten run spec/numeric/bigint_addsub_equal_fixed_source_spec.w   (both engines)
+  bin/tungsten run spec/numeric/bigint_add3_equal_source_spec.w           (both engines)
+  bin/tungsten run spec/numeric/bigint_seam_disjoint_spec.w               (both engines, 48 rows)
+  bin/tungsten run spec/numeric/bigint_{add1,sub1}_{1,2,4,8,wide}_source_spec.w (both engines)
+  bin/tungsten run spec/numeric/bigint_{bang,tag_sign,limb_sweep}_spec.w, rational_spec.w (both engines)
+  bin/tungsten run spec/compiler/int_bigint_promotion_spec.w, bigint_mutate_unique_spec.w (both engines)
+  bin/tungsten run spec/compiler/bigint_add_equal_fixed_source_c_differential_spec.w   --release --native --fast
+  bin/tungsten run spec/compiler/bigint_addsub_equal_fixed_source_c_differential_spec.w --release --native --fast
+  bin/tungsten run spec/compiler/bigint_add_equal_fixed_reopen_source_seam_spec.w       --release --native --fast
+  bin/tungsten run spec/compiler/bigint_addsub_equal_fixed_reopen_source_seam_spec.w    --release --native --fast
+  bin/tungsten run spec/compiler/bigint_add3_equal_{source_c_differential,reopen_source_seam}_spec.w
+  bin/tungsten run spec/compiler/bigint_sub1_{1,2}_reopen_source_seam_spec.w
+  bin/tungsten run spec/compiler/bigint_release_reassign_spec.w, bigint_core_receiver_locked_direct_spec.w
+  benchmarks/big_math/bench_big_math_tungsten_native --self-test (every candidate)
+  scripts/spec-lanes.sh --files <the nine campaign specs>
+
+All 50 runs pass. Coverage includes no-carry and carry growth, full ripple
+chains, minimum/maximum and distinct-equal boxes, commutation, operand
+immutability, exact header sizes, top-limb ties resolved by the full scan,
+cancellation to fewer limbs / one limb / an inline i48 / exact zero in
+distinct boxes, `x - x`, signed and neighboring-width controls, 100,000
+direct source/C differentials per family (forward and reverse for sub, with
+tied and cancelling top limbs every fourth case), and reopen semantics for
+both operators at every width. A fresh `bin/tungsten build --no-bits`
+reports stage-1 LLVM byte-identical to stage 2 with the new core compiling
+the compiler.

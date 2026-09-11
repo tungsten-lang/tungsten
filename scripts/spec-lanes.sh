@@ -127,7 +127,10 @@ spec_classify_files() {
     spec_discover_tracked >"$input"
   fi
   spec_emit_classified_paths | LC_ALL=C sort -u >"$classified"
-  LC_ALL=C sort -u "$input" | comm -23 - "$classified" >"$unclassified_file"
+  # comm collates in the current locale; its inputs are C-sorted, so pin it
+  # too or a UTF-8 locale mis-orders names around `_` and reports false
+  # unclassified files.
+  LC_ALL=C sort -u "$input" | LC_ALL=C comm -23 - "$classified" >"$unclassified_file"
   if [[ -s "$unclassified_file" ]]; then
     echo "unclassified specs:" >&2
     sed 's/^/  /' "$unclassified_file" >&2
@@ -916,6 +919,15 @@ parity_specs=(
   spec/parity/integer_to_i_bignum_spec.w
 )
 exclude_specs=(
+  spec/compiler/bigint_add3_equal_reopen_source_seam_spec.w
+  spec/compiler/bigint_add3_equal_source_c_differential_spec.w
+  spec/compiler/bigint_add_equal_fixed_reopen_source_seam_spec.w
+  spec/compiler/bigint_add_equal_fixed_source_c_differential_spec.w
+  spec/compiler/bigint_addsub_equal_fixed_reopen_source_seam_spec.w
+  spec/compiler/bigint_addsub_equal_fixed_source_c_differential_spec.w
+  spec/numeric/bigint_add3_equal_source_spec.w
+  spec/numeric/bigint_add_equal_fixed_source_spec.w
+  spec/numeric/bigint_addsub_equal_fixed_source_spec.w
   spec/compiler/bigint_addmul_fusion_spec.w
   spec/compiler/bigint_literal_typing_spec.w
   spec/compiler/bigint_mul12_reopen_source_seam_spec.w

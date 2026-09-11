@@ -176,3 +176,7 @@ Next useful tests include allocations clipped on all three axes, additional
 checked leaf variants, and preserving this recipe lineage when scheduling
 automatic per-slot refinement. More attempts in the unchanged rank-47 walk
 would not address the failure observed here.
+
+The [triple-clipped and outer-basis follow-up](TRIPLE-SLOT-BASIS-AUDIT-2026-09-11.md)
+now checks that first family: 2,378 additional representations, no retained
+bound gain. The eight candidates above remain unchanged.

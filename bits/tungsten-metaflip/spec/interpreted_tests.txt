@@ -1,0 +1,76 @@
+# Metaflip unit tests that pass under `tungsten run --interpret`, grouped into
+# the shards run by spec/metaflip_unit_shard<N>_spec.w (one child interpreter
+# process per test, from the bit root). Columns: shard path. The trailing
+# comment is the wall time the shard harness measured on 2026-09-11 (four
+# shards in parallel on a loaded M-series host); the shards are balanced on
+# those seconds so every shard stays well inside the root gate's 300 s
+# watchdog. Rebalance (or add a shard runner) when a shard drifts upward;
+# spec/metaflip_test_manifest_spec.w requires every listed shard to have a
+# runner and every runner to have tests. Tests that cannot run interpreted
+# belong in spec/native_tests.txt instead; the guard fails when a
+# spec/*_test.w is missing from both manifests or listed in both.
+# shard 1: 3 tests, 113 s measured
+1 spec/cpu_default_test.w  # 1s
+1 spec/rect_fill_quota_test.w  # 1s
+1 spec/wide_projection_test.w  # 111s
+# shard 2: 5 tests, 113 s measured
+2 spec/proof_cdcl_test.w  # 2s
+2 spec/rect_227_228_test.w  # 6s
+2 spec/rect_endpoint_path_rect_test.w  # 13s
+2 spec/rect_gpu_allocation_test.w  # 1s
+2 spec/rect_gpu_sampler_test.w  # 91s
+# shard 3: 6 tests, 113 s measured
+3 spec/cli_help_coverage_test.w  # 2s
+3 spec/finite_map_search_test.w  # 1s
+3 spec/generic_search_test.w  # 5s
+3 spec/macro_double_annihilation_test.w  # 88s
+3 spec/rect_gpu_seed_diversity_test.w  # 1s
+3 spec/refinement_backpressure_test.w  # 16s
+# shard 4: 4 tests, 113 s measured
+4 spec/macro_commutator_ribbon_test.w  # 10s
+4 spec/matrix_cleanup_test.w  # 14s
+4 spec/rect_catalyst_lift_test.w  # 88s
+4 spec/rect_kxor_test.w  # 1s
+# shard 5: 7 tests, 113 s measured
+5 spec/macro_holonomy_test.w  # 18s
+5 spec/macro_resolved_commutator_test.w  # 3s
+5 spec/rank_one_completion_test.w  # 30s
+5 spec/rect_229_test.w  # 2s
+5 spec/rect_kxor_selection_coverage_test.w  # 56s
+5 spec/rect_kxor_shoulder_parent_test.w  # 3s
+5 spec/rect_parent_telemetry_test.w  # 1s
+# shard 6: 6 tests, 113 s measured
+6 spec/assertion_helper_semantics_test.w  # 8s
+6 spec/cpu_pool_quota_test.w  # 20s
+6 spec/kxor_spectator_repair_test.w  # 1s
+6 spec/packed_composition_test.w  # 31s
+6 spec/rect_frontier_corpus_test.w  # 52s
+6 spec/rect_shard_archive_test.w  # 1s
+# shard 7: 6 tests, 113 s measured
+7 spec/bud_holdout_test.w  # 43s
+7 spec/large_host_seed_scheduler_test.w  # 1s
+7 spec/rank_two_completion_test.w  # 36s
+7 spec/refinement_replay_test.w  # 1s
+7 spec/seed_catalog_test.w  # 8s
+7 spec/seven_by_seven_rect_seed_rotation_test.w  # 24s
+# shard 8: 20 tests, 112 s measured
+8 spec/best_provenance_test.w  # 0s
+8 spec/block_interior_test.w  # 0s
+8 spec/bud_parent_score_test.w  # 7s
+8 spec/cli_numeric_parser_test.w  # 0s
+8 spec/four_split_arm_test.w  # 0s
+8 spec/kernel_pool_test.w  # 0s
+8 spec/kxor_candidate_schedule_test.w  # 0s
+8 spec/macro_commutator_test.w  # 0s
+8 spec/package_layout_test.w  # 0s
+8 spec/rank_three_completion_test.w  # 40s
+8 spec/rect_basin_coverage_test.w  # 0s
+8 spec/rect_basin_restart_test.w  # 25s
+8 spec/rect_kxor_endpoint_exclusion_test.w  # 0s
+8 spec/rect_status_cadence_test.w  # 0s
+8 spec/rect_zero_partner_debt_test.w  # 38s
+8 spec/refinement_worker_test.w  # 0s
+8 spec/runtime_manifests_test.w  # 0s
+8 spec/seven_by_seven_cpu_role_policy_test.w  # 0s
+8 spec/verify_scratch_test.w  # 2s
+8 spec/wide_feedback_test.w  # 0s

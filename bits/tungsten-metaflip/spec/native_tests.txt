@@ -1,0 +1,56 @@
+# Metaflip unit tests the root gate cannot run through the interpreter.
+# Columns: path reason. Reasons:
+#   native  - needs a runtime call the interpreter lacks (named in the comment)
+#   argv    - needs positional arguments (a parity driver, not a self-test)
+#   gpu     - needs a Metal device
+#   timeout - compute-heavy: exceeded the 120 s interpreted sweep budget
+# Run these natively (bin/tungsten compile) or via their driver scripts.
+spec/archive_admission_test.w timeout  # 120s+ interpreted
+spec/axis_sweep_racer_test.w timeout  # 120s+ interpreted
+spec/checkpoint_text_test.w timeout  # 120s+ interpreted
+spec/coreml_protocol_test.w argv  # positional arguments required
+spec/cpu_pool_async_test.w timeout  # 120s+ interpreted
+spec/cycle_test.w native  # w_string_byte_ptr
+spec/delta_component_peel_test.w native  # __w_clock_ms
+spec/fixed_rank_pocket_strategy_test.w timeout  # 121s+ interpreted
+spec/group_composition_test.w argv  # positional arguments required
+spec/kxor_gpu_collision_test.w gpu  # w_metal_device_default
+spec/large_host_intake_scheduler_test.w native  # __w_clock_ms
+spec/macro_core_rewrite_test.w timeout  # 120s+ interpreted
+spec/macro_goal_beam_test.w timeout  # 120s+ interpreted
+spec/macro_rankdrop_goal_test.w timeout  # 120s+ interpreted
+spec/macro_resolved_commutator7_test.w timeout  # 121s+ interpreted
+spec/mixed_composition_test.w argv  # positional arguments required
+spec/mixed_group_composition_test.w argv  # positional arguments required
+spec/optimal_parent_test.w native  # __w_clock_ms
+spec/pair_cleanup_test.w native  # w_array_data_ptr
+spec/pareto_owned_storage_test.w timeout  # 121s+ interpreted
+spec/partial_automorphism_intake_test.w timeout  # 120s+ interpreted
+spec/partial_automorphism_schedule_test.w timeout  # 120s+ interpreted
+spec/pooled_exact_moves_test.w native  # __w_clock_ms
+spec/proof_psi_test.w timeout  # 120s+ interpreted
+spec/rect_block_interior_test.w native  # __w_clock_ms
+spec/rect_catalyst_lift2_test.w timeout  # 120s+ interpreted
+spec/rect_catalyst_lift_rect_test.w native  # __w_clock_ms
+spec/rect_child_status_parse_test.w native  # w_string_byte_ptr
+spec/rect_concurrent_command_test.w native  # __w_clock_ms
+spec/rect_cpu_followup_test.w native  # w_string_byte_ptr
+spec/rect_cpu_pool_test.w timeout  # 120s+ interpreted
+spec/rect_default_portfolio_test.w native  # w_string_byte_ptr
+spec/rect_endpoint_path_test.w timeout  # 121s+ interpreted
+spec/rect_endpoint_rankdown2_test.w timeout  # 120s+ interpreted
+spec/rect_endpoint_rankdown_test.w timeout  # 120s+ interpreted
+spec/rect_gpu_split_escape_test.w timeout  # 121s+ interpreted
+spec/rect_parent_mitm_failure_test.w native  # w_string_byte_ptr
+spec/rect_parent_telemetry_integration_test.w native  # __w_clock_ms
+spec/rect_process_isolation_test.w native  # w_string_byte_ptr
+spec/rect_side_archive_diversity_test.w native  # __w_rename
+spec/rect_side_archive_structural_test.w timeout  # 121s+ interpreted
+spec/rect_side_archive_test.w native  # w_array_data_ptr
+spec/scheme_hotpath_test.w native  # w_array_data_ptr
+spec/seven_by_seven_cloud_seed_promotion_test.w timeout  # 120s+ interpreted
+spec/seven_by_seven_low_quota_seed_test.w timeout  # 121s+ interpreted
+spec/seven_by_seven_shoulder_test.w timeout  # 120s+ interpreted
+spec/square_campaign_nonce_diversity_test.w timeout  # 120s+ interpreted
+spec/wide_matrix_cleanup_test.w timeout  # 120s+ interpreted
+spec/wide_transform_queue_test.w argv  # positional arguments required

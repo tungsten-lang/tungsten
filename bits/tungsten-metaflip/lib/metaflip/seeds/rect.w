@@ -288,9 +288,19 @@ use bounds
   if n == 2 && m == 4 && p == 5
     return 3
   if n == 2 && m == 5 && p == 6
-    return 2
-  if n == 3 && m == 4 && (p == 6 || p == 7)
-    return 2
+    return 4
+  if n == 3 && m == 3 && p == 5
+    return 5
+  if n == 3 && m == 4 && p == 6
+    return 3
+  if n == 3 && m == 4 && p == 7
+    return 3
+  if n == 3 && m == 5 && p == 5
+    return 7
+  if n == 3 && m == 5 && p == 6
+    return 3
+  if n == 3 && m == 5 && p == 7
+    return 8
   if n == 3 && m == 3 && p == 4
     return 4
   if n == 3 && m == 4 && p == 4
@@ -300,12 +310,18 @@ use bounds
   if n == 4 && m == 4 && p == 5
     return 3
   if n == 4 && m == 4 && p == 6
-    return 2
+    return 4
   if n == 4 && m == 5 && p == 6
     return 3
-  if n == 4 && m == 5 && (p == 7 || p == 8)
+  if n == 4 && m == 5 && p == 7
+    return 8
+  if n == 4 && m == 5 && p == 8
+    return 4
+  if n == 4 && m == 6 && p == 6
     return 2
-  if n == 4 && m == 6 && (p == 7 || p == 8)
+  if n == 4 && m == 6 && p == 7
+    return 3
+  if n == 4 && m == 6 && p == 8
     return 2
   if n == 4 && m == 5 && p == 5
     return 4
@@ -419,6 +435,86 @@ use bounds
     return "seeds/gf2/matmul_5x6x7_rank151_peterson_2026_isotropy_split_plus1_parent_58d60803a6_gf2.txt"
   if n == 5 && m == 6 && p == 7 && slot == 3
     return "seeds/gf2/matmul_5x6x7_rank152_peterson_2026_isotropy_split_plus2_parent_806ac40bca_gf2.txt"
+  # Public-corpus doors (2026-09 import; per-file provenance in THIRD_PARTY.md):
+  # normalized GF(2) reductions of MIT-licensed FastMatrixMultiplication
+  # schemes (Perminov results, plus its AlphaTensor/AlphaEvolve conversions)
+  # and of AlphaTensor's Apache-2.0 F2 factorizations.  Every door differs
+  # from every earlier door of its profile in exact term set and in
+  # `ffrda_structural_signature`, and same-rank doors are at least ceil(R/4)
+  # terms of symmetric difference from every earlier door, so no import is
+  # a coordinate relabeling or a few-flip neighbour of a packaged seed.
+  # Slots list same-rank doors by ascending density, then at most one R+1
+  # and one R+2 shoulder.  Slot zero (`ffrp_seed_rel`) is unchanged.
+  if n == 2 && m == 5 && p == 6 && slot == 2
+    return "seeds/gf2/matmul_2x5x6_rank47_d763_perminov_2026_serendipitous_5ec0a82ac7_gf2.txt"
+  if n == 2 && m == 5 && p == 6 && slot == 3
+    return "seeds/gf2/matmul_2x5x6_rank47_d892_perminov_2026_serendipitous_66ab3aeb9f_gf2.txt"
+  if n == 3 && m == 3 && p == 5 && slot == 1
+    return "seeds/gf2/matmul_3x3x5_rank36_d265_alphatensor_2022_z_gf2.txt"
+  if n == 3 && m == 3 && p == 5 && slot == 2
+    return "seeds/gf2/matmul_3x3x5_rank36_d317_alphatensor_2022_f2_gf2.txt"
+  if n == 3 && m == 3 && p == 5 && slot == 3
+    return "seeds/gf2/matmul_3x3x5_rank36_d392_perminov_2026_serendipitous_dcc0b5ad07_gf2.txt"
+  if n == 3 && m == 3 && p == 5 && slot == 4
+    return "seeds/gf2/matmul_3x3x5_rank38_d328_perminov_2026_serendipitous_8438674c82_gf2.txt"
+  if n == 3 && m == 4 && p == 6 && slot == 2
+    return "seeds/gf2/matmul_3x4x6_rank56_d489_perminov_2025_zt_gf2.txt"
+  if n == 3 && m == 4 && p == 7 && slot == 2
+    return "seeds/gf2/matmul_3x4x7_rank64_d603_perminov_2025_zt_gf2.txt"
+  if n == 3 && m == 5 && p == 5 && slot == 1
+    return "seeds/gf2/matmul_3x5x5_rank58_d482_perminov_2025_naive_c351_gf2.txt"
+  if n == 3 && m == 5 && p == 5 && slot == 2
+    return "seeds/gf2/matmul_3x5x5_rank58_d500_alphatensor_2022_z_gf2.txt"
+  if n == 3 && m == 5 && p == 5 && slot == 3
+    return "seeds/gf2/matmul_3x5x5_rank58_d544_alphatensor_2022_f2_gf2.txt"
+  if n == 3 && m == 5 && p == 5 && slot == 4
+    return "seeds/gf2/matmul_3x5x5_rank58_d613_perminov_2026_serendipitous_506f8f6eb3_gf2.txt"
+  if n == 3 && m == 5 && p == 5 && slot == 5
+    return "seeds/gf2/matmul_3x5x5_rank58_d634_perminov_2026_serendipitous_e3fdc8efb8_gf2.txt"
+  if n == 3 && m == 5 && p == 5 && slot == 6
+    return "seeds/gf2/matmul_3x5x5_rank60_d1011_perminov_2026_serendipitous_73950dde67_gf2.txt"
+  if n == 3 && m == 5 && p == 6 && slot == 1
+    return "seeds/gf2/matmul_3x5x6_rank68_d677_perminov_2026_serendipitous_e2edca7153_gf2.txt"
+  if n == 3 && m == 5 && p == 6 && slot == 2
+    return "seeds/gf2/matmul_3x5x6_rank70_d719_perminov_2025_addred_cr265_gf2.txt"
+  if n == 3 && m == 5 && p == 7 && slot == 1
+    return "seeds/gf2/matmul_3x5x7_rank79_d796_perminov_2026_serendipitous_6fdc4c9f06_gf2.txt"
+  if n == 3 && m == 5 && p == 7 && slot == 2
+    return "seeds/gf2/matmul_3x5x7_rank79_d797_perminov_2026_serendipitous_cdc7d44ac6_gf2.txt"
+  if n == 3 && m == 5 && p == 7 && slot == 3
+    return "seeds/gf2/matmul_3x5x7_rank79_d924_perminov_2026_serendipitous_943c9b5305_gf2.txt"
+  if n == 3 && m == 5 && p == 7 && slot == 4
+    return "seeds/gf2/matmul_3x5x7_rank79_d1630_perminov_2026_serendipitous_92252b0e1a_gf2.txt"
+  if n == 3 && m == 5 && p == 7 && slot == 5
+    return "seeds/gf2/matmul_3x5x7_rank79_d1690_perminov_2026_z_gf2.txt"
+  if n == 3 && m == 5 && p == 7 && slot == 6
+    return "seeds/gf2/matmul_3x5x7_rank80_d831_alphaevolve_2025_gf2.txt"
+  if n == 3 && m == 5 && p == 7 && slot == 7
+    return "seeds/gf2/matmul_3x5x7_rank81_d895_perminov_2026_zt_gf2.txt"
+  if n == 4 && m == 4 && p == 6 && slot == 2
+    return "seeds/gf2/matmul_4x4x6_rank73_d735_perminov_2025_zt_gf2.txt"
+  if n == 4 && m == 4 && p == 6 && slot == 3
+    return "seeds/gf2/matmul_4x4x6_rank73_d1406_perminov_2026_serendipitous_fb4e63f7bf_gf2.txt"
+  if n == 4 && m == 5 && p == 7 && slot == 2
+    return "seeds/gf2/matmul_4x5x7_rank104_d1222_perminov_2025_serendipitous_c41080c5e5_gf2.txt"
+  if n == 4 && m == 5 && p == 7 && slot == 3
+    return "seeds/gf2/matmul_4x5x7_rank104_d1247_perminov_2025_serendipitous_63dd14617f_gf2.txt"
+  if n == 4 && m == 5 && p == 7 && slot == 4
+    return "seeds/gf2/matmul_4x5x7_rank104_d1252_perminov_2025_serendipitous_43d850ea60_gf2.txt"
+  if n == 4 && m == 5 && p == 7 && slot == 5
+    return "seeds/gf2/matmul_4x5x7_rank104_d1377_perminov_2026_serendipitous_444e8a9ac8_gf2.txt"
+  if n == 4 && m == 5 && p == 7 && slot == 6
+    return "seeds/gf2/matmul_4x5x7_rank104_d1391_perminov_2026_serendipitous_0b3b2fc9c4_gf2.txt"
+  if n == 4 && m == 5 && p == 7 && slot == 7
+    return "seeds/gf2/matmul_4x5x7_rank104_d1394_perminov_2026_serendipitous_a71031bd4e_gf2.txt"
+  if n == 4 && m == 5 && p == 8 && slot == 2
+    return "seeds/gf2/matmul_4x5x8_rank118_d1789_perminov_2025_zt_gf2.txt"
+  if n == 4 && m == 5 && p == 8 && slot == 3
+    return "seeds/gf2/matmul_4x5x8_rank118_d1810_perminov_2026_serendipitous_b428f55b8f_gf2.txt"
+  if n == 4 && m == 6 && p == 6 && slot == 1
+    return "seeds/gf2/matmul_4x6x6_rank105_d1198_perminov_2026_serendipitous_6c1e220825_gf2.txt"
+  if n == 4 && m == 6 && p == 7 && slot == 2
+    return "seeds/gf2/matmul_4x6x7_rank123_d1930_perminov_2025_serendipitous_1c38c2b939_gf2.txt"
   ffrp_seed_rel(n, m, p)
 
 # GPU geometry is intentionally present only for profiles with a specialized

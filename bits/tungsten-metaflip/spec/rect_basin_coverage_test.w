@@ -216,8 +216,8 @@ z = ffrbct_expect("blocked p9 J5 windows stay balanced", ffrbct_all(p9_new_four,
 # d128 leader, retained d132 same-rank door, and +1/+2 shoulders) and p9 to
 # thirteen. Complete windows remain exactly balanced. At the active cloud
 # widths, one child epoch touches every nonleader source: J14 covers all twelve
-# p9 side doors, and J15 covers all nine side doors of a profile such as 4x6x7
-# that has one checked-in nonleader plus the eight persisted doors.
+# p9 side doors, and J15 covers all ten side doors of a profile such as 4x6x7
+# that has two checked-in nonleaders plus the eight persisted doors.
 current_p7_choices = ffrp_frontier_seed_count(2, 2, 7) + ffrda_cap() ## i64
 current_p9_choices = ffrp_frontier_seed_count(2, 2, 9) + ffrda_cap() ## i64
 current_p7 = ffrbct_scheduled_counts(2, current_p7_choices, current_p7_choices * 4)
@@ -229,7 +229,7 @@ p9_current_workers = ffrbct_multiworker_counts(4, p9_current_side, 14, 1, 1)
 z = ffrbct_expect("J14 reaches every p9 side door", ffrbct_seen(p9_current_workers) == p9_current_side)
 p467_current_side = ffrp_frontier_seed_count(4, 6, 7) - 1 + ffrda_cap() ## i64
 p467_current_workers = ffrbct_multiworker_counts(2, p467_current_side, 15, 1, 1)
-z = ffrbct_expect("J15 reaches every p467 side door", p467_current_side == 9 && ffrbct_seen(p467_current_workers) == p467_current_side)
+z = ffrbct_expect("J15 reaches every p467 side door", p467_current_side == 10 && ffrbct_seen(p467_current_workers) == p467_current_side)
 
 # Two workers have a one-door window, so their exact historical schedule and
 # replay remain unchanged.

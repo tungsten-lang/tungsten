@@ -96,6 +96,105 @@ reconstruction verifies all 784 target coefficients over GF(2). The normalized
 certificate SHA-256 is
 `bf071351b20e442a1d3b532bff5bf534a1b22b00ac75f657c3da4c2265d5515c`.
 
+### FastMatrixMultiplication rectangular doors (2026-09 import)
+
+The 33 rectangular doors in the table below are normalized GF(2)
+reductions of files in
+[`dronperminov/FastMatrixMultiplication`](https://github.com/dronperminov/FastMatrixMultiplication)
+at revision `db560ca5811bc38d5a6d5c0a3ec4315937ceabce` (2026-09-05), distributed
+under the MIT License, copyright Andrew Perminov (2025). Normalization reduces
+every coefficient modulo two (the `_Q` schemes have only odd denominators, so
+their rational coefficients reduce as 2-adic integers), transposes the output
+factor from upstream `(k,i)` order to Metaflip `(i,k)` bit order, and
+reconstructs every tensor coefficient with both the package gate and
+`tools/verify_tensor.rb`. No term dropped or cancelled in any file, so each
+GF(2) rank equals the upstream rank. Families, with the scientific attribution
+that the upstream catalog records:
+
+- `schemes/results/ZT/` and `schemes/results/Z/`: Andrew I. Perminov's
+  ternary and integer meta-flip-graph results (arXiv:2511.20317,
+  arXiv:2603.02398).
+- `schemes/results/serendipitous_base/`: Perminov's SAT-completed alternative
+  schemes (arXiv:2606.02480). The ten-hex tag in each runtime filename is the
+  prefix of the upstream scheme hash.
+- `schemes/results/addition_reduced_ZT/` and `naive_addition_reduced_ZT/`:
+  Perminov's addition-reduced presentations (arXiv:2512.13365). Only files
+  whose bilinear term set is not already packaged were retained; the reduced
+  addition circuits themselves are not imported.
+- `schemes/known/alpha_tensor/` and `schemes/known/alpha_evolve/`: Perminov's
+  JSON conversions of DeepMind decompositions. The algorithms are due to
+  Fawzi et al. (AlphaTensor, Nature 610, 2022) and Novikov et al. (AlphaEvolve,
+  2025); both upstream repositories are Apache-2.0. Attribute the algorithm to
+  those authors, not to the importer.
+
+Admission was mechanical: a candidate was rejected when its exact term
+multiset equalled a packaged seed (12 candidates), when it equalled another
+candidate (10), when the package's `ffrda_structural_signature` matched a
+packaged or already-admitted door (a coordinate relabeling; 2), when a
+same-rank candidate was fewer than ceil(R/4) terms of symmetric difference
+from a packaged or admitted door (8), or when a second R+1/R+2 shoulder was
+offered for a profile (2). `schemes/known/tensor/*.mpl` and the
+addition-reduced files whose term sets equal them (3x3x5 `cr123`, 3x5x5
+`cr221`, 4x6x6 `cr430`, 4x6x8 `cr551`) were not imported: they mirror the
+Universite de Lille FMM catalogue (Sedoglavic), which publishes no license
+statement. `jakobmoosbauer/flips` (GPL-3.0) and `solven-eu/matmulcatalog` (no
+license file at revision `f3a7f0f61b1005666c2cb03f98f2a16727604ea0`) were not
+used.
+
+| Runtime file | Upstream path (first commit, date) | Family | Upstream SHA-256 | Certificate SHA-256 |
+|---|---|---|---|---|
+| `matmul_2x5x6_rank47_d763_perminov_2026_serendipitous_5ec0a82ac7_gf2.txt` | `schemes/results/serendipitous_base/2x5x6_m47_5ec0a82ac73bd3bfcc87c60784674ec9d83c136c_Z.json` (`796919142c`, 2026-06-08) | serendipitous | `25b4224aaaf7ddad788cb3504c44e43b0caa8b91dde557a9d3a368676d074724` | `b24e8c97ce7f3e542d404878e6d26160bc061599b50c9f503689314a456b1828` |
+| `matmul_2x5x6_rank47_d892_perminov_2026_serendipitous_66ab3aeb9f_gf2.txt` | `schemes/results/serendipitous_base/2x5x6_m47_66ab3aeb9f74d7da872f7af3eb496edad7068432_Q.json` (`796919142c`, 2026-06-08) | serendipitous | `11ec534fb1f7c59e3e1e05b4cbbcedccb9a991a3f8482ba79aacb933e79c2116` | `a95743b7958d417efd914b8c7967f0de2319d741ce25c76613c64e3a3f57946c` |
+| `matmul_3x3x5_rank36_d265_alphatensor_2022_z_gf2.txt` | `schemes/known/alpha_tensor/3x3x5_m36_Z.json` (`5d6eebda02`, 2025-11-26) | AlphaTensor (Fawzi et al. 2022) conversion | `92d9a63b5f65dd072b97ff1b4d152a4842b565d8b4142a123ac50b989faff378` | `dbf5e9e98d0bbbb86f5ef3c2df390def99197786c9fbf6742ebc4cf4f80d5f6e` |
+| `matmul_3x3x5_rank36_d392_perminov_2026_serendipitous_dcc0b5ad07_gf2.txt` | `schemes/results/serendipitous_base/3x3x5_m36_dcc0b5ad07a3d871f80d1dc7012b9f7d7b033200_ZT.json` (`796919142c`, 2026-06-08) | serendipitous | `3574812b269ca77f4cb6a2a7c905988985d42611e1820c778542f8c7420eb15f` | `8d3c4c4e1cabcd6b13a1cbf73c00abd0e8756924a9f3d177898bd63d52236fe3` |
+| `matmul_3x3x5_rank38_d328_perminov_2026_serendipitous_8438674c82_gf2.txt` | `schemes/results/serendipitous_base/3x3x5_m38_8438674c827dec3dcd647f3ad09cdc2627a6df8c_ZT.json` (`796919142c`, 2026-06-08) | serendipitous | `c2f98644ecfd00d2816f5f69913b2d43091f3344d2226d992f12282b94434e9d` | `8d77e11626b09930411147a75615e2f20db3da5e3fc844f476e3b328c074f2e3` |
+| `matmul_3x4x6_rank56_d489_perminov_2025_zt_gf2.txt` | `schemes/results/ZT/3x4x6_m56_ZT.json` (`9e91c33e3f`, 2025-12-08) | ternary result | `047933ce0c005b95dad5ff11bee5ed5cd47fc518a27397733c9eff3e4806bc13` | `587cb6456c207c4d84d591965f74e3150f13f2d6dd397b437ef19f1b5365d53f` |
+| `matmul_3x4x7_rank64_d603_perminov_2025_zt_gf2.txt` | `schemes/results/ZT/3x4x7_m64_ZT.json` (`30ca877f69`, 2025-11-26) | ternary result | `229e7c5b145c27fe62565912cf68b28036a39a8f969868560344b16df696bacd` | `7226f317feab4389f2a92b7d5c24af1fd802c1d2f5c64302d07b66c8ddaab8f5` |
+| `matmul_3x5x5_rank58_d482_perminov_2025_naive_c351_gf2.txt` | `schemes/results/naive_addition_reduced_ZT/3x5x5_m58_c351_ZT.json` (`1aa0608911`, 2025-12-24) | naive addition-reduced | `4204984a7237ea50401f98191ca6f7ff09a0827935558e410f03b9158c64f8e9` | `cf441567cf30efd8efd53001215da5baecb0aef3346928ec2abba85c809cfec0` |
+| `matmul_3x5x5_rank58_d500_alphatensor_2022_z_gf2.txt` | `schemes/known/alpha_tensor/3x5x5_m58_ZT.json` (`5d6eebda02`, 2025-11-26) | AlphaTensor (Fawzi et al. 2022) conversion | `5aac12f4f62c455b5aaf6c5e46ec80cc5ad04a6da87c8e3c93ccd5f259a9b24d` | `77a1435ffc32f1ccf0992f81aa36fc7e7fcdc4e0599c292df7cb870e9f1781a1` |
+| `matmul_3x5x5_rank58_d613_perminov_2026_serendipitous_506f8f6eb3_gf2.txt` | `schemes/results/serendipitous_base/3x5x5_m58_506f8f6eb3be5c9dc28e5ed69a03660f55b50fc2_ZT.json` (`796919142c`, 2026-06-08) | serendipitous | `08d04ded2273abeb3617f9d30ef552d19ef2f1c05f919c2d43755772ff19cf25` | `44c2a007495c84509628d54db9c6f500b2e0edfaa90e245797508f0c378175eb` |
+| `matmul_3x5x5_rank58_d634_perminov_2026_serendipitous_e3fdc8efb8_gf2.txt` | `schemes/results/serendipitous_base/3x5x5_m58_e3fdc8efb89aac032c6eb9901d691bef1a0f61db_ZT.json` (`e0ec7db4cb`, 2026-07-05) | serendipitous | `665074e6c7791ad7c3300afc559ac95123dbe3c2316843825f91e633fcc888fd` | `dee7044d44e14aac685177b472fb8cfa21a7e424acfe88b8e473aa77cbc4ce0d` |
+| `matmul_3x5x5_rank60_d1011_perminov_2026_serendipitous_73950dde67_gf2.txt` | `schemes/results/serendipitous_base/3x5x5_m60_73950dde677a8f275decdc34329d6dcbf4d6f1ee_ZT.json` (`796919142c`, 2026-06-08) | serendipitous | `8558a737ee3b8ed3999d3db7ddbad733ad58afbce6d6909380dcf2f6d9dde85b` | `837b37cc58d9cdd824c492bca6a3867bf2140d6a59e7aa0747512590e8db4bfd` |
+| `matmul_3x5x6_rank68_d677_perminov_2026_serendipitous_e2edca7153_gf2.txt` | `schemes/results/serendipitous_base/3x5x6_m68_e2edca7153548a921d91804c8c7565ce4e17a519_ZT.json` (`796919142c`, 2026-06-08) | serendipitous | `51dd4e15ee014171ce7c09cd3c73f7c728f8b9f5f2df0a2a37cc1bcd72d5eedf` | `b1cacb086d57cde98ccc13852f3043f164d13f54ade2290800b7bd33b44d99e5` |
+| `matmul_3x5x6_rank70_d719_perminov_2025_addred_cr265_gf2.txt` | `schemes/results/addition_reduced_ZT/3x5x6_m70_cr265_cn561_ZT_reduced.json` (`5723a1de18`, 2025-12-15) | addition-reduced | `4b5148d2af0c2ce96e809274b01011568fedd33687082859c2012c994b4379f9` | `102f3a8f250e998e447e1e9ab4a3e73ddf0e1b3472e89088aca56d2acaf5ff38` |
+| `matmul_3x5x7_rank79_d796_perminov_2026_serendipitous_6fdc4c9f06_gf2.txt` | `schemes/results/serendipitous_base/3x5x7_m79_6fdc4c9f063006ae3fea03be11b73d7cc4a853f4_ZT.json` (`796919142c`, 2026-06-08) | serendipitous | `867d36a8b25272087c54482966c2b5260063ae105893c5f076b1102ecfbd09c3` | `20af50792f845bc65b9ce37263bb9c626d7c10de37e17b90a1f8fad76a80ffaa` |
+| `matmul_3x5x7_rank79_d797_perminov_2026_serendipitous_cdc7d44ac6_gf2.txt` | `schemes/results/serendipitous_base/3x5x7_m79_cdc7d44ac6dd6a0f44dd3091e8cacdcecdec7a76_ZT.json` (`796919142c`, 2026-06-08) | serendipitous | `d8b3a6ac602b1e2f2025201225dc7faede15fd4bb9d304ed071f2e502171b19c` | `29230bd412def3337888cf000804a6d254c3edf5d87ad4c0f378cfe913169e0b` |
+| `matmul_3x5x7_rank79_d924_perminov_2026_serendipitous_943c9b5305_gf2.txt` | `schemes/results/serendipitous_base/3x5x7_m79_943c9b5305e17e7d7f50d8427f249a438e84e8c2_ZT.json` (`796919142c`, 2026-06-08) | serendipitous | `f6942a044e8d13dddde4746ce25ae22695d2d76b894debce7c17656a8ab70599` | `8cc8fffc31aac48c10d7ddd87d20225446464d22fb272d82bfafff6d68bb1f39` |
+| `matmul_3x5x7_rank79_d1630_perminov_2026_serendipitous_92252b0e1a_gf2.txt` | `schemes/results/serendipitous_base/3x5x7_m79_92252b0e1aef386b99693f6c0c804dcef46ff7b7_Q.json` (`796919142c`, 2026-06-08) | serendipitous | `7ad1fe24f28067f197a4448d47d5a3014dbb8234efbed86e388ca692552f98ba` | `90e921a491633530eb9ad405711788ca11f27980e9eba52ff04e3f43d46275c8` |
+| `matmul_3x5x7_rank79_d1690_perminov_2026_z_gf2.txt` | `schemes/results/Z/3x5x7_m79_Z.json` (`3bf237f5b7`, 2026-01-10) | integer result | `0c08fbf2f6dcfeaecc18696d65119a500a5ca0405a5fd55197fee251de758762` | `018825af836d2d9731c6fd3b5b844f5d360c9e2ec7f3b47b724a4caa6ddac7af` |
+| `matmul_3x5x7_rank80_d831_alphaevolve_2025_gf2.txt` | `schemes/known/alpha_evolve/3x5x7_m80_mod0.json` (`5d6eebda02`, 2025-11-26) | AlphaEvolve (Novikov et al. 2025) conversion | `531432cadc9c7255ea070f7bcffbf82f9d823a5aa59ec3fbca38dc265a926b08` | `db5c69391c260ed72e78bd4aca009119b8c101c8ba17eb6610d9308b27c577b9` |
+| `matmul_3x5x7_rank81_d895_perminov_2026_zt_gf2.txt` | `schemes/results/ZT/3x5x7_m81_ZT.json` (`c48971b546`, 2026-02-05) | ternary result | `02127a34816e5a52b52a2b3fe531d8ac16d59db2e8889c4ac90173db63177bc0` | `b8ae0ac179f896ee766b25543e558571dd81bd92ad82d9fad386ddb544732beb` |
+| `matmul_4x4x6_rank73_d735_perminov_2025_zt_gf2.txt` | `schemes/results/ZT/4x4x6_m73_ZT.json` (`30ca877f69`, 2025-11-26) | ternary result | `644c0f4c62475ebfd4b256c2f15ffb702d0592e6883a85b07cafbdfd94cd6293` | `85881a14f5aa22af9db2eef7f3f7f15331d35b5ce30bfc96327bc867c41ef42f` |
+| `matmul_4x4x6_rank73_d1406_perminov_2026_serendipitous_fb4e63f7bf_gf2.txt` | `schemes/results/serendipitous_base/4x4x6_m73_fb4e63f7bf52c6fe7aa505d4a56215740560ec08_Q.json` (`796919142c`, 2026-06-08) | serendipitous | `8dcc17588a5c8d34a3a73926d08e910818f8623a8c70c69c8ff6d78d3ae5766f` | `6c5cf62332a45af15b157188ba99651cd07558f3b417b61d8eafae5be778a863` |
+| `matmul_4x5x7_rank104_d1222_perminov_2025_serendipitous_c41080c5e5_gf2.txt` | `schemes/results/serendipitous_base/4x5x7_m104_c41080c5e592d5a2fe8915276b472887a3cb39d1_ZT.json` (`30ca877f69`, 2025-11-26) | serendipitous | `df8b3cb4fb449b45186afb92c19abc90f0c267e78a2599ebbb7bb2af8849a7f7` | `0e68435f323799ee29f433f9ecad79759bde48d177900cf3eac01ee9b9663b6d` |
+| `matmul_4x5x7_rank104_d1247_perminov_2025_serendipitous_63dd14617f_gf2.txt` | `schemes/results/serendipitous_base/4x5x7_m104_63dd14617f6f21b9596bca061a309342217c79d9_ZT.json` (`30ca877f69`, 2025-11-26) | serendipitous | `da81d7c9f1e8ab08a96e41acde830975fccb18e8a04e52a2ed52a77324dbcbba` | `c2f503d301a89db9eaa5b2d84d8b6b64cc18f17fe0cac6c0b7205b04f98663ca` |
+| `matmul_4x5x7_rank104_d1252_perminov_2025_serendipitous_43d850ea60_gf2.txt` | `schemes/results/serendipitous_base/4x5x7_m104_43d850ea60039894c6a70c9e04fcd9527c9c977a_ZT.json` (`30ca877f69`, 2025-11-26) | serendipitous | `6d3be67945e8b436aa1cf8e4563a0053206e1558420a6e8fc0ac9a6229277786` | `380b6a936a79ba6f3f28d9535bcd113d73231747c34477a4bd4b1211993ddda2` |
+| `matmul_4x5x7_rank104_d1377_perminov_2026_serendipitous_444e8a9ac8_gf2.txt` | `schemes/results/serendipitous_base/4x5x7_m104_444e8a9ac8f6ce24ea1cbda06f9f886924a01f84_ZT.json` (`796919142c`, 2026-06-08) | serendipitous | `4dc666bf9935c714fb801faac9b816fa8dedd26d9c2d8caab7d170ea8c77d01d` | `38b9460d638936975bd1a6096cfb882e55bd51285b7373dfd46764b3829afdec` |
+| `matmul_4x5x7_rank104_d1391_perminov_2026_serendipitous_0b3b2fc9c4_gf2.txt` | `schemes/results/serendipitous_base/4x5x7_m104_0b3b2fc9c4cbcfe3b316124a26f121639509f344_ZT.json` (`796919142c`, 2026-06-08) | serendipitous | `70792ba337c9b443902deba9e0a6f3ee5c4569bcde7d511b357225015c2045cf` | `b051b195a9fc1bdbf853b0b63be7a6b5880a6927b0d0daf9bdd62dfc362eb202` |
+| `matmul_4x5x7_rank104_d1394_perminov_2026_serendipitous_a71031bd4e_gf2.txt` | `schemes/results/serendipitous_base/4x5x7_m104_a71031bd4ec0cfde44afbcc41c4201e76b8719b7_ZT.json` (`796919142c`, 2026-06-08) | serendipitous | `8597327b35ee2a7de47df73e85eb4084b0069d6059259ae200009f435588f512` | `f406f7456635be81aeb7321a8162845c2cc7fe4e7421cd1f86baf6c9da762499` |
+| `matmul_4x5x8_rank118_d1789_perminov_2025_zt_gf2.txt` | `schemes/results/ZT/4x5x8_m118_ZT.json` (`30ca877f69`, 2025-11-26) | ternary result | `431ee9707e4f52e4855d8d111fc320e65aea43d52eda48406f85983fac6268b9` | `d30f6246aa66b95faafcda905ad379d2848f77dafb140f6cc7a3e5b3f99ae655` |
+| `matmul_4x5x8_rank118_d1810_perminov_2026_serendipitous_b428f55b8f_gf2.txt` | `schemes/results/serendipitous_base/4x5x8_m118_b428f55b8fbabfabf3cf8775ffe0568b17529448_ZT.json` (`796919142c`, 2026-06-08) | serendipitous | `bd47a11884c7dcd4586875954f443ccc38de5364098d0cd4186ad4eaceb23e10` | `a40937ae113571c39228238527c9b738dd251afcec75c8ac2ecb80495cb6afc8` |
+| `matmul_4x6x6_rank105_d1198_perminov_2026_serendipitous_6c1e220825_gf2.txt` | `schemes/results/serendipitous_base/4x6x6_m105_6c1e2208258487800107a32eb5530452ac68b43d_ZT.json` (`796919142c`, 2026-06-08) | serendipitous | `5794f7623e6f087ab9a6b05ef738bc5b65c099f210ec80c83d341729aaed122f` | `2430981a18f2d9ac6e260e73d6fbe0b49e8cbf9cc2c0618af6b14f3d5be531d4` |
+| `matmul_4x6x7_rank123_d1930_perminov_2025_serendipitous_1c38c2b939_gf2.txt` | `schemes/results/serendipitous_base/4x6x7_m123_1c38c2b939f13535874e3ac958e2816f7de62e8a_ZT.json` (`30ca877f69`, 2025-11-26) | serendipitous | `8be1858e203ab22667b6eae2389426b1e8f96d2c04317d66f133291ee61935ad` | `4eb2b73c1b5c9f02d9001bc934ab5fa20b373aa495950e5f562ff9ac99e9def6` |
+
+### AlphaTensor GF(2) factorizations
+
+`matmul_3x3x5_rank36_d317_alphatensor_2022_f2_gf2.txt` and `matmul_3x5x5_rank58_d544_alphatensor_2022_f2_gf2.txt` are normalized from the
+`3,3,5` and `3,5,5` entries of `algorithms/factorizations_f2.npz` in
+[`google-deepmind/alphatensor`](https://github.com/google-deepmind/alphatensor)
+at revision `1949163da3bef7e3eb268a3ac015fd1c2dbfc767` (Apache License 2.0,
+copyright DeepMind Technologies Limited). The upstream archive SHA-256 is
+`70f09f349d8d2874ef0e0e089459c7320f5aa3eef277df5ffa67f573709db2da`. These are AlphaTensor's
+native GF(2) decompositions (Fawzi et al., *Discovering faster matrix
+multiplication algorithms with reinforcement learning*, Nature 610, 2022) and
+are distinct from the integer AlphaTensor schemes converted by
+FastMatrixMultiplication above. The output factor was transposed from
+upstream `(k,i)` order and every coefficient reconstructed. Certificate
+digests:
+
+- `matmul_3x3x5_rank36_d317_alphatensor_2022_f2_gf2.txt`: `f7264d5014854ac2f02f0a7e595c5f8d6ed12a234fd6a92ad0869983a3f0cfa7`
+- `matmul_3x5x5_rank58_d544_alphatensor_2022_f2_gf2.txt`: `a098d128cb68f109b8e18cf4189068c78e07556cd6b31656cb5dd22ceda02900`
+
 ## Release rule
 
 Keep an imported scheme outside the bit when its redistribution status is not

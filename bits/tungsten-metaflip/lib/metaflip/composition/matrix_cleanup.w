@@ -14,6 +14,12 @@ use packed
     return 0
   3*capacity*stride + 3*capacity + ffwm_slots(capacity) + 160*stride*stride + 66*stride
 
+-> ffwm_seeded_scratch_words(capacity, stride) (i64 i64) i64
+  base = ffwm_scratch_words(capacity, stride) ## i64
+  if base == 0
+    return 0
+  base + 32*stride
+
 # stats: charged algebra work, limit (0=unlimited), exhausted, full axes,
 # reduced groups, terms saved. Copying/sorting/validation have separate fixed
 # rank/width bounds; this count is not CPU instructions or elapsed time.
@@ -59,6 +65,31 @@ use packed
   coefficients = remainder+stride ## i64
   column_used = coefficients+stride ## i64
   row_used = column_used+width ## i64
+  column_order = row_used+width ## i64
+  # Modes 0/1 preserve the legacy column order and exact work counters.
+  # Seeded mode stores a full permutation, including unused padded columns.
+  # Salt by the fixed factor so unrelated groups need not choose alike.
+  if reverse_columns >= 2
+    if ffwm_charge(stats, stride+4*width) != 1
+      return 0-2
+    random = (reverse_columns-2) ^ 2654435769 ## i64
+    fixed = 3-left-right ## i64
+    k = 0 ## i64
+    while k < stride
+      random = ((random ^ data[(3*first+fixed)*stride+k])*16777619) & 4294967295
+      k += 1
+    k = 0
+    while k < width
+      scratch[column_order+k] = k
+      k += 1
+    k = width-1
+    while k > 0
+      random = (random*1664525+1013904223) & 4294967295
+      selected = random%(k+1) ## i64
+      value = scratch[column_order+k] ## i64
+      scratch[column_order+k] = scratch[column_order+selected]
+      scratch[column_order+selected] = value
+      k -= 1
   if ffwm_charge(stats, 2*width) != 1
     return 0-2
   k = 0 ## i64
@@ -100,12 +131,16 @@ use packed
     j = column_index ## i64
     if reverse_columns == 1
       j = width-1-column_index
+    elsif reverse_columns >= 2
+      j = scratch[column_order+column_index]
     while column_index < width && scratch[column_used+j] == 0
       column_index += 1
       if column_index < width
         j = column_index
         if reverse_columns == 1
           j = width-1-column_index
+        elsif reverse_columns >= 2
+          j = scratch[column_order+column_index]
     if column_index >= width
       break
     if ffwm_charge(stats, 2*stride) != 1
@@ -297,4 +332,20 @@ use packed
     i += 1
   stats[1] = budget
   rank = ffwm_axis(data, scratch, rank, rank, stride, axis, 1, reverse_columns, stats)
+  ffpk_canonicalize(data, words, rank, stride)
+
+# Experimental deterministic pivot diversification. No queue intake or rank
+# claim: callers must full-check outputs and explicitly choose their seed.
+# The seed is part of proposal identity; it is not a cryptographic RNG.
+-> ffwm_refactor_seeded(data, words, rank, n, m, p, scratch, scratch_words, axis, seed, budget, stats, stats_words) (i64[] i64 i64 i64 i64 i64 i64[] i64 i64 i64 i64 i64[] i64) i64
+  stride = ffpk_stride(n, m, p) ## i64
+  needed = ffwm_seeded_scratch_words(rank, stride) ## i64
+  if axis < 0 || axis > 2 || seed < 0 || seed > 4294967295 || stats_words < 6 || needed == 0 || scratch_words < needed || budget < 0 || budget > 1000000000 || ffpk_valid(data, words, rank, n, m, p) != 1
+    return 0-1
+  i = 0 ## i64
+  while i < 6
+    stats[i] = 0
+    i += 1
+  stats[1] = budget
+  rank = ffwm_axis(data, scratch, rank, rank, stride, axis, 1, seed+2, stats)
   ffpk_canonicalize(data, words, rank, stride)

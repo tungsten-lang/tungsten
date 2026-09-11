@@ -214,6 +214,9 @@ The [wide-transform study](tools/WIDE-BASIS-PROJECTION-2026-09-10.md) supplies
 the retained 8,109 regression; the
 [automatic integration audit](tools/AUTOMATIC-WIDE-TRANSFORMS-2026-09-10.md)
 documents scheduling, replay and the public-binary tests.
+An additional [seeded matrix-basis operator](tools/SEEDED-BASIS-SEARCH-2026-09-10.md)
+is available as an explicit library proposal, not a default queue mode. Its
+bounded search and composition/projection follow-up found no new retained rank.
 
 This is one finite projection generation, not unrestricted recursive search:
 projected outputs do not automatically start another basis/projection family
@@ -1215,8 +1218,9 @@ rank is unchanged, but its grouping gives verified larger bounds including
 15x15x15=2,030 and 15x15x16=2,081. The cumulative cohort is now 787 raw-price
 shapes, or 630 after padding (115 expanded, 515 recipe-only); all 68 cohort
 reference crossings are expanded. These remain source-scoped candidates,
-not confirmed world records. Stronger cleanup stays offline; replay evidence
-is compressed outside the checkout.
+not confirmed world records. This was an offline campaign; native matrix
+cleanup and bounded basis/projection scheduling are now integrated as described
+above. Replay evidence is compressed outside the checkout.
 
 `tools/composition_closure.rb` checks candidates against a verified recursive
 block/Kronecker library and propagates useful candidates to other shapes.

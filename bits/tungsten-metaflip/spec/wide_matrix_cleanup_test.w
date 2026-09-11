@@ -7,7 +7,7 @@ use core/file
     return 1
   0
 
-if (ARGV.size() == 4 && ARGV[0] == "--clean") || (ARGV.size() == 6 && ARGV[0] == "--basis")
+if (ARGV.size() == 4 && ARGV[0] == "--clean") || (ARGV.size() == 6 && (ARGV[0] == "--basis" || ARGV[0] == "--basis-seeded"))
   raw = File.read_prefix(ARGV[1], 12632129)
   if raw == nil
     exit(2)
@@ -18,6 +18,8 @@ if (ARGV.size() == 4 && ARGV[0] == "--clean") || (ARGV.size() == 6 && ARGV[0] ==
   if rank < 1 || budget < 0
     exit(2)
   words = ffwm_scratch_words(rank, ffpk_stride(meta[0], meta[1], meta[2])) ## i64
+  if ARGV[0] == "--basis-seeded"
+    words = ffwm_seeded_scratch_words(rank, ffpk_stride(meta[0], meta[1], meta[2]))
   scratch = i64[words]
   stats = i64[6]
   reduced = 0-1 ## i64
@@ -25,6 +27,9 @@ if (ARGV.size() == 4 && ARGV[0] == "--clean") || (ARGV.size() == 6 && ARGV[0] ==
   if ARGV[0] == "--basis"
     reduced = ffwm_refactor(data, 3*32*16384, rank, meta[0], meta[1], meta[2], scratch, words, ffpk_decimal(ARGV[4]), ffpk_decimal(ARGV[5]), budget, stats, 6)
     tag = "WIDE_BASIS "
+  elsif ARGV[0] == "--basis-seeded"
+    reduced = ffwm_refactor_seeded(data, 3*32*16384, rank, meta[0], meta[1], meta[2], scratch, words, ffpk_decimal(ARGV[4]), ffpk_decimal(ARGV[5]), budget, stats, 6)
+    tag = "WIDE_SEEDED "
   else
     reduced = ffwm_reduce(data, 3*32*16384, rank, meta[0], meta[1], meta[2], scratch, words, budget, stats, 6)
   if reduced < 0 || !write_file(ARGV[2], ffpk_blob(data, reduced, meta[0], meta[1], meta[2]))
@@ -83,6 +88,21 @@ while p <= 1024
   failures += wm_expect("basis invalid direction rejected", ffwm_refactor(data, 3*stride*capacity, rank, 1, 1, p, scratch, words, 0, 2, 0, stats, 6) < 0)
   failures += wm_expect("basis overlarge budget rejected", ffwm_refactor(data, 3*stride*capacity, rank, 1, 1, p, scratch, words, 0, 0, 1000000001, stats, 6) < 0)
   failures += wm_expect("basis rejections are nonmutating", ffpk_blob(data, rank, 1, 1, p) == blob && stats[0] == 987)
+  seeded_words = ffwm_seeded_scratch_words(rank, stride) ## i64
+  seeded_scratch = i64[seeded_words]
+  failures += wm_expect("seeded scratch extension", seeded_words == ffwm_scratch_words(rank, stride)+32*stride)
+  failures += wm_expect("seeded short scratch rejected", ffwm_refactor_seeded(data, 3*stride*capacity, rank, 1, 1, p, seeded_scratch, seeded_words-1, 0, 0, 0, stats, 6) < 0)
+  failures += wm_expect("seeded short source rejected", ffwm_refactor_seeded(data, 3*stride*rank-1, rank, 1, 1, p, seeded_scratch, seeded_words, 0, 0, 0, stats, 6) < 0)
+  failures += wm_expect("seeded short stats rejected", ffwm_refactor_seeded(data, 3*stride*capacity, rank, 1, 1, p, seeded_scratch, seeded_words, 0, 0, 0, stats, 5) < 0)
+  failures += wm_expect("seeded negative seed rejected", ffwm_refactor_seeded(data, 3*stride*capacity, rank, 1, 1, p, seeded_scratch, seeded_words, 0, 0-1, 0, stats, 6) < 0)
+  failures += wm_expect("seeded large seed rejected", ffwm_refactor_seeded(data, 3*stride*capacity, rank, 1, 1, p, seeded_scratch, seeded_words, 0, 4294967296, 0, stats, 6) < 0)
+  failures += wm_expect("seeded axis rejected", ffwm_refactor_seeded(data, 3*stride*capacity, rank, 1, 1, p, seeded_scratch, seeded_words, 3, 0, 0, stats, 6) < 0)
+  failures += wm_expect("seeded budget rejected", ffwm_refactor_seeded(data, 3*stride*capacity, rank, 1, 1, p, seeded_scratch, seeded_words, 0, 0, 1000000001, stats, 6) < 0)
+  failures += wm_expect("seeded rejections are nonmutating", ffpk_blob(data, rank, 1, 1, p) == blob && stats[0] == 987)
+  failures += wm_expect("seeded budget preservation", ffwm_refactor_seeded(data, 3*stride*capacity, rank, 1, 1, p, seeded_scratch, seeded_words, 0, 4294967295, 1, stats, 6) == rank && stats[2] == 1 && stats[0] <= 1)
+  failures += wm_expect("seeded complete", ffwm_refactor_seeded(data, 3*stride*capacity, rank, 1, 1, p, seeded_scratch, seeded_words, 0, 4294967295, 0, stats, 6) == rank && stats[2] == 0)
+  failures += wm_expect("seeded result identity", ffpk_exact(data, 3*stride*capacity, rank, 1, 1, p, parity, p*stride, 0) == 1)
+  blob = ffpk_blob(data, rank, 1, 1, p)
   copy = i64[3*stride*rank]
   meta = i64[4]
   failures += wm_expect("strict packed round trip", ffpk_parse(blob, copy, 3*stride*rank, meta, 4) == rank && ffpk_blob(copy, rank, 1, 1, p) == blob)

@@ -1237,6 +1237,13 @@ not confirmed world records. This was an offline campaign; native matrix
 cleanup and bounded basis/projection scheduling are now integrated as described
 above. Replay evidence is compressed outside the checkout.
 
+The [composition/restriction follow-up](tools/COMPOSED-PROJECTION-CANDIDATES-2026-09-11.md)
+fully checks GF(2) candidates 8x11x11/r640, 8x11x12/r673 and 8x11x16/r895,
+plus two larger Strassen products. All five beat the checked reference
+snapshots; global novelty and redistribution clearance remain unclaimed.
+This bounded offline study preserves equal-rank variants and does not change
+runtime scheduling or canonical seeds.
+
 `tools/composition_closure.rb` checks candidates against a verified recursive
 block/Kronecker library and propagates useful candidates to other shapes.
 It exports both comparison and candidate tensors for independent replay.

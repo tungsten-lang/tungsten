@@ -13,10 +13,10 @@ use ../lib/metaflip/strategies/global_isotropy
   lw = i64[capacity]
   ru = i64[capacity]
   rv = i64[capacity]
-  rw = i64[capacity]
+  rww = i64[capacity]
   left_rank = ffw_export_current(left, lu, lv, lw) ## i64
-  right_rank = ffw_export_current(right, ru, rv, rw) ## i64
-  ffgir_term_set_distance(lu, lv, lw, left_rank, ru, rv, rw, right_rank)
+  right_rank = ffw_export_current(right, ru, rv, rww) ## i64
+  ffgir_term_set_distance(lu, lv, lw, left_rank, ru, rv, rww, right_rank)
 
 n = 2 ## i64
 m = 5 ## i64

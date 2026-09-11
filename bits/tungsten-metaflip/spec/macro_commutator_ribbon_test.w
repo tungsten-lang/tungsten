@@ -49,9 +49,9 @@ z=ffccrt_expect("find setup ribbon",found==5 && wstats[11]==1) ## i64
 z=ffccrt_expect("conjugate or commutator length",wr[0]==7 || wr[0]==8)
 z=ffccrt_expect("target retained",ffcc_target_hit(wu,wv,ww,wr[5],wr[6],wr[7])==1)
 z=ffccrt_expect("changed exact endpoint",wr[9]>0 && ffmh_local_exact(su,sv,sw,5,wu,wv,ww,5)==1)
-ru=i64[5];rv=i64[5];rw=i64[5];meta=i64[6]
-replayed=ffcc3_replay(su,sv,sw,5,wr,ru,rv,rw,meta) ## i64
+ru=i64[5];rv=i64[5];rww=i64[5];meta=i64[6]
+replayed=ffcc3_replay(su,sv,sw,5,wr,ru,rv,rww,meta) ## i64
 z=ffccrt_expect("deterministic replay",replayed==5 && meta[0]==1 && meta[1]==1 && meta[2]==1)
-z=ffccrt_expect("same endpoint",fftc_terms_same_set(wu,wv,ww,5,ru,rv,rw,5)==1)
+z=ffccrt_expect("same endpoint",fftc_terms_same_set(wu,wv,ww,5,ru,rv,rww,5)==1)
 
 << "macro_commutator_ribbon_test: length="+wr[0].to_s()+" distance="+wr[9].to_s()+" density_delta="+wr[10].to_s()+" inverse_closes="+wstats[5].to_s()

@@ -49,9 +49,9 @@ z=ffrc7t_expect("find seven-edge word",found==6 && wstats[17]==1) ## i64
 z=ffrc7t_expect("specific target",ffrc_target(wu,wv,ww,wr[9],wr[10],wr[11])==1)
 z=ffrc7t_expect("restored anchor",ffrc_term_equal(wu,wv,ww,wr[12],su,sv,sw,wr[12])==1)
 z=ffrc7t_expect("changed exact",wr[14]>0 && ffmh_local_exact(su,sv,sw,6,wu,wv,ww,6)==1)
-ru=i64[6];rv=i64[6];rw=i64[6];meta=i64[8]
-replayed=ffrc7_replay(su,sv,sw,6,wr,ru,rv,rw,meta) ## i64
+ru=i64[6];rv=i64[6];rww=i64[6];meta=i64[8]
+replayed=ffrc7_replay(su,sv,sw,6,wr,ru,rv,rww,meta) ## i64
 z=ffrc7t_expect("replay",replayed==6 && meta[0]==1 && meta[2]==1 && meta[3]==1)
-z=ffrc7t_expect("same endpoint",fftc_terms_same_set(wu,wv,ww,6,ru,rv,rw,6)==1)
+z=ffrc7t_expect("same endpoint",fftc_terms_same_set(wu,wv,ww,6,ru,rv,rww,6)==1)
 
 << "macro_resolved_commutator7_test: distance="+wr[14].to_s()+" density_delta="+wr[15].to_s()+" debt="+wr[18].to_s()+" cleanup_tried="+wstats[8].to_s()

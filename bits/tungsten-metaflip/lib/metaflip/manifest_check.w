@@ -25,6 +25,41 @@ use paths
 -> ffmf_listing(root, command) (String String)
   ffmf_lines(capture("cd " + ffls_shell_quote(root) + " && " + command))
 
+# Generated GPU sidecars and compiler outputs sit beside the sources in a
+# working tree that has run the fleet; they are never part of the packaged
+# runtime, so neither manifest lists them.
+-> ffmf_generated(rel) (String) i64
+  suffixes = [".metal", ".cu", ".air", ".metallib", ".ll", ".sidemap", ".wc"]
+  i = 0 ## i64
+  while i < suffixes.size()
+    if rel.ends_with?(suffixes[i])
+      return 1
+    i += 1
+  if rel.include?(".dSYM/")
+    return 1
+  0
+
+# Files of the runtime subtree: the tracked files inside a git checkout,
+# otherwise (an unpacked package) everything on disk except generated
+# artifacts.  Both listings are C-sorted so the manifests are reproducible.
+-> ffmf_runtime_files(root, only_sources) (String i64)
+  tracked = ffmf_listing(root, "git ls-files -- lib/metaflip 2>/dev/null | LC_ALL=C sort")
+  if tracked.size() == 0
+    tracked = ffmf_listing(root, "find lib/metaflip -type f | LC_ALL=C sort")
+  out = []
+  i = 0 ## i64
+  while i < tracked.size()
+    rel = tracked[i]
+    keep = 1 ## i64
+    if ffmf_generated(rel) == 1 || rel == "lib/metaflip/SHA256SUMS"
+      keep = 0
+    if only_sources == 1 && !rel.ends_with?(".w")
+      keep = 0
+    if keep == 1
+      out.push(rel)
+    i += 1
+  out
+
 -> ffmf_hash_file(root, rel) (String String)
   body = read_file(root + "/" + rel)
   if body == nil
@@ -38,20 +73,23 @@ use paths
   root + "/lib/metaflip/manifests/runtime-sources.tsv"
 
 -> ffmf_render_sha256sums(root) (String)
-  files = ffmf_listing(root, "find lib/metaflip -type f | LC_ALL=C sort")
+  files = ffmf_runtime_files(root, 0)
   out = ""
   i = 0 ## i64
   while i < files.size()
-    rel = files[i]
-    if rel != "lib/metaflip/SHA256SUMS"
-      out = out + ffmf_hash_file(root, rel) + "  " + rel + "\n"
+    out = out + ffmf_hash_file(root, files[i]) + "  " + files[i] + "\n"
     i += 1
   out
 
 -> ffmf_render_runtime_sources(root) (String)
-  files = ffmf_listing(root, "(echo bin/metaflip.w; echo lib/metaflip.w; find lib/metaflip -type f -name '*.w' | LC_ALL=C sort)")
-  out = "source_path\tsha256\n"
+  sources = ffmf_runtime_files(root, 1)
+  files = ["bin/metaflip.w", "lib/metaflip.w"]
   i = 0 ## i64
+  while i < sources.size()
+    files.push(sources[i])
+    i += 1
+  out = "source_path\tsha256\n"
+  i = 0
   while i < files.size()
     out = out + files[i] + "\t" + ffmf_hash_file(root, files[i]) + "\n"
     i += 1

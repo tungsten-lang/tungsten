@@ -225,6 +225,16 @@ use doors
 # 4x per observation and 32x from the caller's base, so a stalled/failing GPU
 # cannot create a minutes-long unresponsive CPU round. CPU-only profiles pass
 # gpu_ms=0 and retain the exact caller-supplied budget.
+# Any round-start producer still running: parked islands may keep walking.
+-> ffrc_producer_alive(gpu_thread, mitm_thread, block_thread) i64
+  if gpu_thread != nil && gpu_thread.alive?
+    return 1
+  if mitm_thread != nil && mitm_thread.alive?
+    return 1
+  if block_thread != nil && block_thread.alive?
+    return 1
+  0
+
 -> ffrc_balanced_cpu_steps(current, cpu_ms, gpu_ms, base) (i64 i64 i64 i64) i64
   if current < 1
     current = 1
@@ -247,7 +257,10 @@ use doors
   absolute_min = base / 4 ## i64
   if absolute_min < 1
     absolute_min = 1
-  absolute_max = base * 32 ## i64
+  # 32x the base chunk (16M moves, ~0.4 s) capped the first chunk well below
+  # a 1-2 s GPU epoch; follow-ups now fill the rest, so the cap only bounds
+  # how much work a single barrier can hold.
+  absolute_max = base * 128 ## i64
   if proposed < absolute_min
     proposed = absolute_min
   if proposed > absolute_max
@@ -1101,13 +1114,16 @@ use doors
         gpu_failures += 1
 
     first_cpu_ms = ffrcp_collect(cpu_done_channel, elapsed_cpu, total_elapsed_cpu, walkers) ## i64
-    # GPU and block jobs own immutable round-start snapshots, not live islands.
-    # Continue parked CPU islands until the GPU finishes. Each short batch
-    # fully joins before changing quotas; publication and rebases still wait
-    # for all producers. A first rank drop goes straight to exact intake.
+    # GPU, MITM and block jobs own immutable round-start snapshots, not live
+    # islands.  Continue parked CPU islands until every concurrent producer
+    # finishes: a round is gated by its slowest lane, and an island parked
+    # behind the block-interior or MITM thread was idle for most of the
+    # round (single-island 4x5x7 measured 16% duty).  Each short batch fully
+    # joins before changing quotas; publication and rebases still wait for
+    # all producers. A first rank drop goes straight to exact intake.
     followups = 0 ## i64
     followup_steps = ffrcp_followup_steps(cpu_epoch_steps, first_cpu_ms) ## i64
-    while cpu_gpu_overlap != 0 && gpu_thread != nil && gpu_thread.alive? && followups < 128
+    while cpu_gpu_overlap != 0 && ffrc_producer_alive(gpu_thread, mitm_thread, block_thread) != 0 && followups < 128
       if ccall("__w_interrupted") != 0
         break
       if max_secs > 0 && ccall("__w_clock_ms") - start_ms >= max_secs * 1000

@@ -3167,10 +3167,210 @@ on macos && arm64
   # pairs have been consumed, matching the retained differential oracle.
   fn __bigint_add3_equal_exact(rp, ap, bp) (i64 i64 i64) i64
     ll <<~IR
-      ; tungsten:noinline
+      ; tungsten:alwaysinline
       entry:
         %carry = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldr x6, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldr x10, [${3:x}, #16]\0Aadds x12, x4, x8\0Aadcs x13, x5, x9\0Aadcs x14, x6, x10\0Astp x12, x13, [${1:x}]\0Astr x14, [${1:x}, #16]\0Acset ${0:x}, hs", "=r,r,r,r,~{x4},~{x5},~{x6},~{x8},~{x9},~{x10},~{x12},~{x13},~{x14},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
         ret i64 %carry
+    IR
+
+  # Literal current-C bn_add4_fixed / bn_add8_fixed / bn_add16_fixed
+  # schedules for positive equal-width add. Each four-limb group loads both
+  # operand quads, runs the carry chain, and stores the quad before the next
+  # group's loads, exactly as the C kernels do; the carry-out is the flag.
+  fn __bigint_add4_equal_exact(rp, ap, bp) (i64 i64 i64) i64
+    ll <<~IR
+      ; tungsten:noinline
+      entry:
+        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldp x6, x7, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldp x10, x11, [${3:x}, #16]\0Aadds x12, x4, x8\0Aadcs x13, x5, x9\0Aadcs x14, x6, x10\0Aadcs x15, x7, x11\0Astp x12, x13, [${1:x}]\0Astp x14, x15, [${1:x}, #16]\0Acset ${0:x}, hs", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
+        ret i64 %flag
+    IR
+
+  fn __bigint_add8_equal_exact(rp, ap, bp) (i64 i64 i64) i64
+    ll <<~IR
+      ; tungsten:noinline
+      entry:
+        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldp x6, x7, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldp x10, x11, [${3:x}, #16]\0Aadds x12, x4, x8\0Aadcs x13, x5, x9\0Aadcs x14, x6, x10\0Aadcs x15, x7, x11\0Astp x12, x13, [${1:x}]\0Astp x14, x15, [${1:x}, #16]\0Aldp x4, x5, [${2:x}, #32]\0Aldp x6, x7, [${2:x}, #48]\0Aldp x8, x9, [${3:x}, #32]\0Aldp x10, x11, [${3:x}, #48]\0Aadcs x12, x4, x8\0Aadcs x13, x5, x9\0Aadcs x14, x6, x10\0Aadcs x15, x7, x11\0Astp x12, x13, [${1:x}, #32]\0Astp x14, x15, [${1:x}, #48]\0Acset ${0:x}, hs", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
+        ret i64 %flag
+    IR
+
+  fn __bigint_add16_equal_exact(rp, ap, bp) (i64 i64 i64) i64
+    ll <<~IR
+      ; tungsten:noinline
+      entry:
+        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldp x6, x7, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldp x10, x11, [${3:x}, #16]\0Aadds x12, x4, x8\0Aadcs x13, x5, x9\0Aadcs x14, x6, x10\0Aadcs x15, x7, x11\0Astp x12, x13, [${1:x}]\0Astp x14, x15, [${1:x}, #16]\0Aldp x4, x5, [${2:x}, #32]\0Aldp x6, x7, [${2:x}, #48]\0Aldp x8, x9, [${3:x}, #32]\0Aldp x10, x11, [${3:x}, #48]\0Aadcs x12, x4, x8\0Aadcs x13, x5, x9\0Aadcs x14, x6, x10\0Aadcs x15, x7, x11\0Astp x12, x13, [${1:x}, #32]\0Astp x14, x15, [${1:x}, #48]\0Aldp x4, x5, [${2:x}, #64]\0Aldp x6, x7, [${2:x}, #80]\0Aldp x8, x9, [${3:x}, #64]\0Aldp x10, x11, [${3:x}, #80]\0Aadcs x12, x4, x8\0Aadcs x13, x5, x9\0Aadcs x14, x6, x10\0Aadcs x15, x7, x11\0Astp x12, x13, [${1:x}, #64]\0Astp x14, x15, [${1:x}, #80]\0Aldp x4, x5, [${2:x}, #96]\0Aldp x6, x7, [${2:x}, #112]\0Aldp x8, x9, [${3:x}, #96]\0Aldp x10, x11, [${3:x}, #112]\0Aadcs x12, x4, x8\0Aadcs x13, x5, x9\0Aadcs x14, x6, x10\0Aadcs x15, x7, x11\0Astp x12, x13, [${1:x}, #96]\0Astp x14, x15, [${1:x}, #112]\0Acset ${0:x}, hs", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
+        ret i64 %flag
+    IR
+
+  # Literal current-C bn_add24_fixed schedule (six four-limb groups).
+  fn __bigint_add24_equal_exact(rp, ap, bp) (i64 i64 i64) i64
+    ll <<~IR
+      ; tungsten:noinline
+      entry:
+        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldp x6, x7, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldp x10, x11, [${3:x}, #16]\0Aadds x12, x4, x8\0Aadcs x13, x5, x9\0Aadcs x14, x6, x10\0Aadcs x15, x7, x11\0Astp x12, x13, [${1:x}]\0Astp x14, x15, [${1:x}, #16]\0Aldp x4, x5, [${2:x}, #32]\0Aldp x6, x7, [${2:x}, #48]\0Aldp x8, x9, [${3:x}, #32]\0Aldp x10, x11, [${3:x}, #48]\0Aadcs x12, x4, x8\0Aadcs x13, x5, x9\0Aadcs x14, x6, x10\0Aadcs x15, x7, x11\0Astp x12, x13, [${1:x}, #32]\0Astp x14, x15, [${1:x}, #48]\0Aldp x4, x5, [${2:x}, #64]\0Aldp x6, x7, [${2:x}, #80]\0Aldp x8, x9, [${3:x}, #64]\0Aldp x10, x11, [${3:x}, #80]\0Aadcs x12, x4, x8\0Aadcs x13, x5, x9\0Aadcs x14, x6, x10\0Aadcs x15, x7, x11\0Astp x12, x13, [${1:x}, #64]\0Astp x14, x15, [${1:x}, #80]\0Aldp x4, x5, [${2:x}, #96]\0Aldp x6, x7, [${2:x}, #112]\0Aldp x8, x9, [${3:x}, #96]\0Aldp x10, x11, [${3:x}, #112]\0Aadcs x12, x4, x8\0Aadcs x13, x5, x9\0Aadcs x14, x6, x10\0Aadcs x15, x7, x11\0Astp x12, x13, [${1:x}, #96]\0Astp x14, x15, [${1:x}, #112]\0Aldp x4, x5, [${2:x}, #128]\0Aldp x6, x7, [${2:x}, #144]\0Aldp x8, x9, [${3:x}, #128]\0Aldp x10, x11, [${3:x}, #144]\0Aadcs x12, x4, x8\0Aadcs x13, x5, x9\0Aadcs x14, x6, x10\0Aadcs x15, x7, x11\0Astp x12, x13, [${1:x}, #128]\0Astp x14, x15, [${1:x}, #144]\0Aldp x4, x5, [${2:x}, #160]\0Aldp x6, x7, [${2:x}, #176]\0Aldp x8, x9, [${3:x}, #160]\0Aldp x10, x11, [${3:x}, #176]\0Aadcs x12, x4, x8\0Aadcs x13, x5, x9\0Aadcs x14, x6, x10\0Aadcs x15, x7, x11\0Astp x12, x13, [${1:x}, #160]\0Astp x14, x15, [${1:x}, #176]\0Acset ${0:x}, hs", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
+        ret i64 %flag
+    IR
+
+  # Exact port of bigint_add_two_limb_magnitudes' same-sign arm: two limb
+  # sums with explicit unsigned carries, both low limbs stored, and the
+  # carry-out returned for the unconditional third-limb publication.
+  fn __bigint_add2_equal_exact(rp, ap, bp) (i64 i64 i64) i64
+    ll <<~IR
+      ; tungsten:alwaysinline
+      entry:
+        %rq = inttoptr i64 %rp to ptr
+        %aq = inttoptr i64 %ap to ptr
+        %bq = inttoptr i64 %bp to ptr
+        %a0 = load i64, ptr %aq, align 8
+        %a1p = getelementptr inbounds i64, ptr %aq, i64 1
+        %a1 = load i64, ptr %a1p, align 8
+        %b0 = load i64, ptr %bq, align 8
+        %b1p = getelementptr inbounds i64, ptr %bq, i64 1
+        %b1 = load i64, ptr %b1p, align 8
+        %low = add i64 %a0, %b0
+        %carry_low = icmp ult i64 %low, %a0
+        %high_sum = add i64 %a1, %b1
+        %carry_high = icmp ult i64 %high_sum, %a1
+        %carry_low_w = zext i1 %carry_low to i64
+        %high = add i64 %high_sum, %carry_low_w
+        %carry_high2 = icmp ult i64 %high, %high_sum
+        %carry = or i1 %carry_high, %carry_high2
+        store i64 %low, ptr %rq, align 8
+        %r1p = getelementptr inbounds i64, ptr %rq, i64 1
+        store i64 %high, ptr %r1p, align 8
+        %carry_w = zext i1 %carry to i64
+        ret i64 %carry_w
+    IR
+
+  # Literal current-C bn_sub{3,4,8,16,24}_fixed schedules for positive
+  # equal-width magnitude subtraction (larger minus smaller). The borrow-out
+  # flag is returned for parity with C, which discards it.
+
+  fn __bigint_sub3_equal_exact(rp, ap, bp) (i64 i64 i64) i64
+    ll <<~IR
+      ; tungsten:noinline
+      entry:
+        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldr x6, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldr x10, [${3:x}, #16]\0Asubs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Astp x12, x13, [${1:x}]\0Astr x14, [${1:x}, #16]\0Acset ${0:x}, lo", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
+        ret i64 %flag
+    IR
+
+  fn __bigint_sub4_equal_exact(rp, ap, bp) (i64 i64 i64) i64
+    ll <<~IR
+      ; tungsten:noinline
+      entry:
+        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldp x6, x7, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldp x10, x11, [${3:x}, #16]\0Asubs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}]\0Astp x14, x15, [${1:x}, #16]\0Acset ${0:x}, lo", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
+        ret i64 %flag
+    IR
+
+  fn __bigint_sub8_equal_exact(rp, ap, bp) (i64 i64 i64) i64
+    ll <<~IR
+      ; tungsten:noinline
+      entry:
+        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldp x6, x7, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldp x10, x11, [${3:x}, #16]\0Asubs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}]\0Astp x14, x15, [${1:x}, #16]\0Aldp x4, x5, [${2:x}, #32]\0Aldp x6, x7, [${2:x}, #48]\0Aldp x8, x9, [${3:x}, #32]\0Aldp x10, x11, [${3:x}, #48]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #32]\0Astp x14, x15, [${1:x}, #48]\0Acset ${0:x}, lo", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
+        ret i64 %flag
+    IR
+
+  fn __bigint_sub16_equal_exact(rp, ap, bp) (i64 i64 i64) i64
+    ll <<~IR
+      ; tungsten:noinline
+      entry:
+        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldp x6, x7, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldp x10, x11, [${3:x}, #16]\0Asubs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}]\0Astp x14, x15, [${1:x}, #16]\0Aldp x4, x5, [${2:x}, #32]\0Aldp x6, x7, [${2:x}, #48]\0Aldp x8, x9, [${3:x}, #32]\0Aldp x10, x11, [${3:x}, #48]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #32]\0Astp x14, x15, [${1:x}, #48]\0Aldp x4, x5, [${2:x}, #64]\0Aldp x6, x7, [${2:x}, #80]\0Aldp x8, x9, [${3:x}, #64]\0Aldp x10, x11, [${3:x}, #80]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #64]\0Astp x14, x15, [${1:x}, #80]\0Aldp x4, x5, [${2:x}, #96]\0Aldp x6, x7, [${2:x}, #112]\0Aldp x8, x9, [${3:x}, #96]\0Aldp x10, x11, [${3:x}, #112]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #96]\0Astp x14, x15, [${1:x}, #112]\0Acset ${0:x}, lo", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
+        ret i64 %flag
+    IR
+
+  fn __bigint_sub24_equal_exact(rp, ap, bp) (i64 i64 i64) i64
+    ll <<~IR
+      ; tungsten:noinline
+      entry:
+        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldp x6, x7, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldp x10, x11, [${3:x}, #16]\0Asubs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}]\0Astp x14, x15, [${1:x}, #16]\0Aldp x4, x5, [${2:x}, #32]\0Aldp x6, x7, [${2:x}, #48]\0Aldp x8, x9, [${3:x}, #32]\0Aldp x10, x11, [${3:x}, #48]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #32]\0Astp x14, x15, [${1:x}, #48]\0Aldp x4, x5, [${2:x}, #64]\0Aldp x6, x7, [${2:x}, #80]\0Aldp x8, x9, [${3:x}, #64]\0Aldp x10, x11, [${3:x}, #80]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #64]\0Astp x14, x15, [${1:x}, #80]\0Aldp x4, x5, [${2:x}, #96]\0Aldp x6, x7, [${2:x}, #112]\0Aldp x8, x9, [${3:x}, #96]\0Aldp x10, x11, [${3:x}, #112]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #96]\0Astp x14, x15, [${1:x}, #112]\0Aldp x4, x5, [${2:x}, #128]\0Aldp x6, x7, [${2:x}, #144]\0Aldp x8, x9, [${3:x}, #128]\0Aldp x10, x11, [${3:x}, #144]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #128]\0Astp x14, x15, [${1:x}, #144]\0Aldp x4, x5, [${2:x}, #160]\0Aldp x6, x7, [${2:x}, #176]\0Aldp x8, x9, [${3:x}, #160]\0Aldp x10, x11, [${3:x}, #176]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #160]\0Astp x14, x15, [${1:x}, #176]\0Acset ${0:x}, lo", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
+        ret i64 %flag
+    IR
+
+
+  # Straight-line sbcs chains for the generic subtract widths 17..23 (C
+  # runs its blocked bn_sub_n loop there): four-limb groups in the fixed
+  # kernels' schedule, then a two- and/or one-limb remainder, no branches.
+  fn __bigint_sub17_equal_exact(rp, ap, bp) (i64 i64 i64) i64
+    ll <<~IR
+      ; tungsten:noinline
+      entry:
+        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldp x6, x7, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldp x10, x11, [${3:x}, #16]\0Asubs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}]\0Astp x14, x15, [${1:x}, #16]\0Aldp x4, x5, [${2:x}, #32]\0Aldp x6, x7, [${2:x}, #48]\0Aldp x8, x9, [${3:x}, #32]\0Aldp x10, x11, [${3:x}, #48]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #32]\0Astp x14, x15, [${1:x}, #48]\0Aldp x4, x5, [${2:x}, #64]\0Aldp x6, x7, [${2:x}, #80]\0Aldp x8, x9, [${3:x}, #64]\0Aldp x10, x11, [${3:x}, #80]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #64]\0Astp x14, x15, [${1:x}, #80]\0Aldp x4, x5, [${2:x}, #96]\0Aldp x6, x7, [${2:x}, #112]\0Aldp x8, x9, [${3:x}, #96]\0Aldp x10, x11, [${3:x}, #112]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #96]\0Astp x14, x15, [${1:x}, #112]\0Aldr x4, [${2:x}, #128]\0Aldr x8, [${3:x}, #128]\0Asbcs x12, x4, x8\0Astr x12, [${1:x}, #128]\0Acset ${0:x}, lo", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
+        ret i64 %flag
+    IR
+
+  fn __bigint_sub18_equal_exact(rp, ap, bp) (i64 i64 i64) i64
+    ll <<~IR
+      ; tungsten:noinline
+      entry:
+        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldp x6, x7, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldp x10, x11, [${3:x}, #16]\0Asubs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}]\0Astp x14, x15, [${1:x}, #16]\0Aldp x4, x5, [${2:x}, #32]\0Aldp x6, x7, [${2:x}, #48]\0Aldp x8, x9, [${3:x}, #32]\0Aldp x10, x11, [${3:x}, #48]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #32]\0Astp x14, x15, [${1:x}, #48]\0Aldp x4, x5, [${2:x}, #64]\0Aldp x6, x7, [${2:x}, #80]\0Aldp x8, x9, [${3:x}, #64]\0Aldp x10, x11, [${3:x}, #80]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #64]\0Astp x14, x15, [${1:x}, #80]\0Aldp x4, x5, [${2:x}, #96]\0Aldp x6, x7, [${2:x}, #112]\0Aldp x8, x9, [${3:x}, #96]\0Aldp x10, x11, [${3:x}, #112]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #96]\0Astp x14, x15, [${1:x}, #112]\0Aldp x4, x5, [${2:x}, #128]\0Aldp x8, x9, [${3:x}, #128]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Astp x12, x13, [${1:x}, #128]\0Acset ${0:x}, lo", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
+        ret i64 %flag
+    IR
+
+  fn __bigint_sub19_equal_exact(rp, ap, bp) (i64 i64 i64) i64
+    ll <<~IR
+      ; tungsten:noinline
+      entry:
+        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldp x6, x7, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldp x10, x11, [${3:x}, #16]\0Asubs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}]\0Astp x14, x15, [${1:x}, #16]\0Aldp x4, x5, [${2:x}, #32]\0Aldp x6, x7, [${2:x}, #48]\0Aldp x8, x9, [${3:x}, #32]\0Aldp x10, x11, [${3:x}, #48]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #32]\0Astp x14, x15, [${1:x}, #48]\0Aldp x4, x5, [${2:x}, #64]\0Aldp x6, x7, [${2:x}, #80]\0Aldp x8, x9, [${3:x}, #64]\0Aldp x10, x11, [${3:x}, #80]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #64]\0Astp x14, x15, [${1:x}, #80]\0Aldp x4, x5, [${2:x}, #96]\0Aldp x6, x7, [${2:x}, #112]\0Aldp x8, x9, [${3:x}, #96]\0Aldp x10, x11, [${3:x}, #112]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #96]\0Astp x14, x15, [${1:x}, #112]\0Aldp x4, x5, [${2:x}, #128]\0Aldp x8, x9, [${3:x}, #128]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Astp x12, x13, [${1:x}, #128]\0Aldr x4, [${2:x}, #144]\0Aldr x8, [${3:x}, #144]\0Asbcs x12, x4, x8\0Astr x12, [${1:x}, #144]\0Acset ${0:x}, lo", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
+        ret i64 %flag
+    IR
+
+  fn __bigint_sub20_equal_exact(rp, ap, bp) (i64 i64 i64) i64
+    ll <<~IR
+      ; tungsten:noinline
+      entry:
+        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldp x6, x7, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldp x10, x11, [${3:x}, #16]\0Asubs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}]\0Astp x14, x15, [${1:x}, #16]\0Aldp x4, x5, [${2:x}, #32]\0Aldp x6, x7, [${2:x}, #48]\0Aldp x8, x9, [${3:x}, #32]\0Aldp x10, x11, [${3:x}, #48]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #32]\0Astp x14, x15, [${1:x}, #48]\0Aldp x4, x5, [${2:x}, #64]\0Aldp x6, x7, [${2:x}, #80]\0Aldp x8, x9, [${3:x}, #64]\0Aldp x10, x11, [${3:x}, #80]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #64]\0Astp x14, x15, [${1:x}, #80]\0Aldp x4, x5, [${2:x}, #96]\0Aldp x6, x7, [${2:x}, #112]\0Aldp x8, x9, [${3:x}, #96]\0Aldp x10, x11, [${3:x}, #112]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #96]\0Astp x14, x15, [${1:x}, #112]\0Aldp x4, x5, [${2:x}, #128]\0Aldp x6, x7, [${2:x}, #144]\0Aldp x8, x9, [${3:x}, #128]\0Aldp x10, x11, [${3:x}, #144]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #128]\0Astp x14, x15, [${1:x}, #144]\0Acset ${0:x}, lo", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
+        ret i64 %flag
+    IR
+
+  fn __bigint_sub21_equal_exact(rp, ap, bp) (i64 i64 i64) i64
+    ll <<~IR
+      ; tungsten:noinline
+      entry:
+        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldp x6, x7, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldp x10, x11, [${3:x}, #16]\0Asubs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}]\0Astp x14, x15, [${1:x}, #16]\0Aldp x4, x5, [${2:x}, #32]\0Aldp x6, x7, [${2:x}, #48]\0Aldp x8, x9, [${3:x}, #32]\0Aldp x10, x11, [${3:x}, #48]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #32]\0Astp x14, x15, [${1:x}, #48]\0Aldp x4, x5, [${2:x}, #64]\0Aldp x6, x7, [${2:x}, #80]\0Aldp x8, x9, [${3:x}, #64]\0Aldp x10, x11, [${3:x}, #80]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #64]\0Astp x14, x15, [${1:x}, #80]\0Aldp x4, x5, [${2:x}, #96]\0Aldp x6, x7, [${2:x}, #112]\0Aldp x8, x9, [${3:x}, #96]\0Aldp x10, x11, [${3:x}, #112]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #96]\0Astp x14, x15, [${1:x}, #112]\0Aldp x4, x5, [${2:x}, #128]\0Aldp x6, x7, [${2:x}, #144]\0Aldp x8, x9, [${3:x}, #128]\0Aldp x10, x11, [${3:x}, #144]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #128]\0Astp x14, x15, [${1:x}, #144]\0Aldr x4, [${2:x}, #160]\0Aldr x8, [${3:x}, #160]\0Asbcs x12, x4, x8\0Astr x12, [${1:x}, #160]\0Acset ${0:x}, lo", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
+        ret i64 %flag
+    IR
+
+  fn __bigint_sub22_equal_exact(rp, ap, bp) (i64 i64 i64) i64
+    ll <<~IR
+      ; tungsten:noinline
+      entry:
+        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldp x6, x7, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldp x10, x11, [${3:x}, #16]\0Asubs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}]\0Astp x14, x15, [${1:x}, #16]\0Aldp x4, x5, [${2:x}, #32]\0Aldp x6, x7, [${2:x}, #48]\0Aldp x8, x9, [${3:x}, #32]\0Aldp x10, x11, [${3:x}, #48]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #32]\0Astp x14, x15, [${1:x}, #48]\0Aldp x4, x5, [${2:x}, #64]\0Aldp x6, x7, [${2:x}, #80]\0Aldp x8, x9, [${3:x}, #64]\0Aldp x10, x11, [${3:x}, #80]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #64]\0Astp x14, x15, [${1:x}, #80]\0Aldp x4, x5, [${2:x}, #96]\0Aldp x6, x7, [${2:x}, #112]\0Aldp x8, x9, [${3:x}, #96]\0Aldp x10, x11, [${3:x}, #112]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #96]\0Astp x14, x15, [${1:x}, #112]\0Aldp x4, x5, [${2:x}, #128]\0Aldp x6, x7, [${2:x}, #144]\0Aldp x8, x9, [${3:x}, #128]\0Aldp x10, x11, [${3:x}, #144]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #128]\0Astp x14, x15, [${1:x}, #144]\0Aldp x4, x5, [${2:x}, #160]\0Aldp x8, x9, [${3:x}, #160]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Astp x12, x13, [${1:x}, #160]\0Acset ${0:x}, lo", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
+        ret i64 %flag
+    IR
+
+  fn __bigint_sub23_equal_exact(rp, ap, bp) (i64 i64 i64) i64
+    ll <<~IR
+      ; tungsten:noinline
+      entry:
+        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldp x6, x7, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldp x10, x11, [${3:x}, #16]\0Asubs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}]\0Astp x14, x15, [${1:x}, #16]\0Aldp x4, x5, [${2:x}, #32]\0Aldp x6, x7, [${2:x}, #48]\0Aldp x8, x9, [${3:x}, #32]\0Aldp x10, x11, [${3:x}, #48]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #32]\0Astp x14, x15, [${1:x}, #48]\0Aldp x4, x5, [${2:x}, #64]\0Aldp x6, x7, [${2:x}, #80]\0Aldp x8, x9, [${3:x}, #64]\0Aldp x10, x11, [${3:x}, #80]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #64]\0Astp x14, x15, [${1:x}, #80]\0Aldp x4, x5, [${2:x}, #96]\0Aldp x6, x7, [${2:x}, #112]\0Aldp x8, x9, [${3:x}, #96]\0Aldp x10, x11, [${3:x}, #112]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #96]\0Astp x14, x15, [${1:x}, #112]\0Aldp x4, x5, [${2:x}, #128]\0Aldp x6, x7, [${2:x}, #144]\0Aldp x8, x9, [${3:x}, #128]\0Aldp x10, x11, [${3:x}, #144]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #128]\0Astp x14, x15, [${1:x}, #144]\0Aldp x4, x5, [${2:x}, #160]\0Aldp x8, x9, [${3:x}, #160]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Astp x12, x13, [${1:x}, #160]\0Aldr x4, [${2:x}, #176]\0Aldr x8, [${3:x}, #176]\0Asbcs x12, x4, x8\0Astr x12, [${1:x}, #176]\0Acset ${0:x}, lo", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
+        ret i64 %flag
+    IR
+
+  # Exact port of bigint_add_two_limb_magnitudes' opposite-sign arm
+  # arithmetic (larger minus smaller over two limbs). Returns the pair as a
+  # u128 (high limb in the upper half) so the raw finisher can apply C's
+  # one-limb demotion or two-limb publication.
+  fn __bigint_sub2_equal_magnitude(ap, bp) (i64 i64) u128
+    ll <<~IR
+      ; tungsten:alwaysinline
+      entry:
+        %aq = inttoptr i64 %ap to ptr
+        %bq = inttoptr i64 %bp to ptr
+        %a0 = load i64, ptr %aq, align 8
+        %a1p = getelementptr inbounds i64, ptr %aq, i64 1
+        %a1 = load i64, ptr %a1p, align 8
+        %b0 = load i64, ptr %bq, align 8
+        %b1p = getelementptr inbounds i64, ptr %bq, i64 1
+        %b1 = load i64, ptr %b1p, align 8
+        %low = sub i64 %a0, %b0
+        %borrow = icmp ult i64 %a0, %b0
+        %borrow_w = zext i1 %borrow to i64
+        %high0 = sub i64 %a1, %b1
+        %high = sub i64 %high0, %borrow_w
+        %low128 = zext i64 %low to i128
+        %high128 = zext i64 %high to i128
+        %high_shifted = shl i128 %high128, 64
+        %pair = or i128 %high_shifted, %low128
+        ret i128 %pair
     IR
 
   fn __bigint_add1_4_exact(rp, ap, word) (i64 i64 i64) i64
@@ -3627,6 +3827,312 @@ fn __bigint_add3_equal_raw(a, b) (i64 i64) i64
   bp = (b & mask) + 16 ## i64
   carry = __bigint_add3_equal_exact(rp, ap, bp) ## i64
   ccall_nobox("w_bigint_add3_equal_finish_raw", result, carry)
+
+# Exact C-shaped positive equal-width add@4: bigint_add_equal_fast takes the
+# hot buffer in the power-of-two class of 4+1 limbs, runs the fixed kernel,
+# publishes the carry limb unconditionally, and sizes the result 4 or 5.
+fn __bigint_add4_equal_raw(a, b) (i64 i64) i64
+  result = ccall_nobox("w_bigint_alloc_hot8_raw") ## i64
+  mask = 140737488355327 ## i64
+  rp = (result & mask) + 16 ## i64
+  ap = (a & mask) + 16 ## i64
+  bp = (b & mask) + 16 ## i64
+  carry = __bigint_add4_equal_exact(rp, ap, bp) ## i64
+  ccall_nobox("w_bigint_add4_equal_finish_raw", result, carry)
+
+# Exact C-shaped positive equal-width add@8: bigint_add_equal_fast takes the
+# hot buffer in the power-of-two class of 8+1 limbs, runs the fixed kernel,
+# publishes the carry limb unconditionally, and sizes the result 8 or 9.
+fn __bigint_add8_equal_raw(a, b) (i64 i64) i64
+  result = ccall_nobox("w_bigint_alloc_hot16_raw") ## i64
+  mask = 140737488355327 ## i64
+  rp = (result & mask) + 16 ## i64
+  ap = (a & mask) + 16 ## i64
+  bp = (b & mask) + 16 ## i64
+  carry = __bigint_add8_equal_exact(rp, ap, bp) ## i64
+  ccall_nobox("w_bigint_add8_equal_finish_raw", result, carry)
+
+# Exact C-shaped positive equal-width add@16: bigint_add_equal_fast takes the
+# hot buffer in the power-of-two class of 16+1 limbs, runs the fixed kernel,
+# publishes the carry limb unconditionally, and sizes the result 16 or 17.
+fn __bigint_add16_equal_raw(a, b) (i64 i64) i64
+  result = ccall_nobox("w_bigint_alloc_hot32_exact_raw") ## i64
+  mask = 140737488355327 ## i64
+  rp = (result & mask) + 16 ## i64
+  ap = (a & mask) + 16 ## i64
+  bp = (b & mask) + 16 ## i64
+  carry = __bigint_add16_equal_exact(rp, ap, bp) ## i64
+  ccall_nobox("w_bigint_add16_equal_finish_raw", result, carry)
+
+# Exact C-shaped positive equal-width add@24: the hot buffer in the
+# power-of-two class of 25 limbs (32), the fixed kernel, the unconditional
+# carry-limb store, and a normalized size of 24 or 25.
+fn __bigint_add24_equal_raw(a, b) (i64 i64) i64
+  result = ccall_nobox("w_bigint_alloc_hot32_exact_raw") ## i64
+  mask = 140737488355327 ## i64
+  rp = (result & mask) + 16 ## i64
+  ap = (a & mask) + 16 ## i64
+  bp = (b & mask) + 16 ## i64
+  carry = __bigint_add24_equal_exact(rp, ap, bp) ## i64
+  ccall_nobox("w_bigint_add24_equal_finish_raw", result, carry)
+
+# Exact C-shaped positive add@2 (bigint_add_two_limb_magnitudes, same-sign
+# arm): the exact hot class-four take, two limb sums, and the unconditional
+# third-limb publication with size two or three.
+fn __bigint_add2_equal_raw(a, b) (i64 i64) i64
+  result = ccall_nobox("w_bigint_alloc_hot4_raw") ## i64
+  mask = 140737488355327 ## i64
+  rp = (result & mask) + 16 ## i64
+  ap = (a & mask) + 16 ## i64
+  bp = (b & mask) + 16 ## i64
+  carry = __bigint_add2_equal_exact(rp, ap, bp) ## i64
+  ccall_nobox("w_bigint_add2_equal_finish_raw", result, carry)
+
+# Positive equal-width magnitude compare, exactly as C's boxed subtract
+# entry orders it: the top limbs decide when they differ, otherwise the full
+# descending limb scan (mag_cmp).
+fn __bigint_equal_compare_raw(ap, bp, n) (i64 i64 i64) i64
+  top_offset = (n - 1) * 8 ## i64
+  atop = raw_load_u64(ap, top_offset) ## u64
+  btop = raw_load_u64(bp, top_offset) ## u64
+  compare = 0 ## i64
+  if atop != btop
+    if atop > btop
+      compare = 1
+    else
+      compare = 0 - 1
+    return compare
+  k = n - 2 ## i64
+  while k >= 0 && compare == 0
+    xa = raw_load_u64(ap, k * 8) ## u64
+    xb = raw_load_u64(bp, k * 8) ## u64
+    if xa != xb
+      if xa > xb
+        compare = 1
+      else
+        compare = 0 - 1
+    k -= 1
+  compare
+
+# Exact C-shaped positive equal-width sub@3 (bigint_sub_any's boxed equal
+# route into bigint_sub_equal_fast): compare, the hot take in 3's
+# smallest-fit class, the fixed kernel over larger minus smaller, then C's
+# exact top-limb publication or trim-and-demote finisher.
+fn __bigint_sub3_equal_raw(a, b) (i64 i64) i64
+  mask = 140737488355327 ## i64
+  ap = (a & mask) + 16 ## i64
+  bp = (b & mask) + 16 ## i64
+  compare = __bigint_equal_compare_raw(ap, bp, 3) ## i64
+  if compare == 0
+    return ccall_nobox("w_int", 0)
+  lp = ap
+  sp = bp
+  negative = 0 ## i64
+  if compare < 0
+    lp = bp
+    sp = ap
+    negative = 1
+  result = ccall_nobox("w_bigint_alloc_hot4_raw") ## i64
+  rp = (result & mask) + 16 ## i64
+  __bigint_sub3_equal_exact(rp, lp, sp)
+  ccall_nobox("w_bigint_sub_equal_finish_raw", result, 3, negative)
+
+# Exact C-shaped positive equal-width sub@4 (bigint_sub_any's boxed equal
+# route into bigint_sub_equal_fast): compare, the hot take in 4's
+# smallest-fit class, the fixed kernel over larger minus smaller, then C's
+# exact top-limb publication or trim-and-demote finisher.
+fn __bigint_sub4_equal_raw(a, b) (i64 i64) i64
+  mask = 140737488355327 ## i64
+  ap = (a & mask) + 16 ## i64
+  bp = (b & mask) + 16 ## i64
+  compare = __bigint_equal_compare_raw(ap, bp, 4) ## i64
+  if compare == 0
+    return ccall_nobox("w_int", 0)
+  lp = ap
+  sp = bp
+  negative = 0 ## i64
+  if compare < 0
+    lp = bp
+    sp = ap
+    negative = 1
+  result = ccall_nobox("w_bigint_alloc_hot4_raw") ## i64
+  rp = (result & mask) + 16 ## i64
+  __bigint_sub4_equal_exact(rp, lp, sp)
+  ccall_nobox("w_bigint_sub_equal_finish_raw", result, 4, negative)
+
+# Exact C-shaped positive equal-width sub@8 (bigint_sub_any's boxed equal
+# route into bigint_sub_equal_fast): compare, the hot take in 8's
+# smallest-fit class, the fixed kernel over larger minus smaller, then C's
+# exact top-limb publication or trim-and-demote finisher.
+fn __bigint_sub8_equal_raw(a, b) (i64 i64) i64
+  mask = 140737488355327 ## i64
+  ap = (a & mask) + 16 ## i64
+  bp = (b & mask) + 16 ## i64
+  compare = __bigint_equal_compare_raw(ap, bp, 8) ## i64
+  if compare == 0
+    return ccall_nobox("w_int", 0)
+  lp = ap
+  sp = bp
+  negative = 0 ## i64
+  if compare < 0
+    lp = bp
+    sp = ap
+    negative = 1
+  result = ccall_nobox("w_bigint_alloc_hot8_raw") ## i64
+  rp = (result & mask) + 16 ## i64
+  __bigint_sub8_equal_exact(rp, lp, sp)
+  ccall_nobox("w_bigint_sub_equal_finish_raw", result, 8, negative)
+
+# Exact C-shaped positive equal-width sub@16 (bigint_sub_any's boxed equal
+# route into bigint_sub_equal_fast): compare, the hot take in 16's
+# smallest-fit class, the fixed kernel over larger minus smaller, then C's
+# exact top-limb publication or trim-and-demote finisher.
+fn __bigint_sub16_equal_raw(a, b) (i64 i64) i64
+  mask = 140737488355327 ## i64
+  ap = (a & mask) + 16 ## i64
+  bp = (b & mask) + 16 ## i64
+  compare = __bigint_equal_compare_raw(ap, bp, 16) ## i64
+  if compare == 0
+    return ccall_nobox("w_int", 0)
+  lp = ap
+  sp = bp
+  negative = 0 ## i64
+  if compare < 0
+    lp = bp
+    sp = ap
+    negative = 1
+  result = ccall_nobox("w_bigint_alloc_hot16_raw") ## i64
+  rp = (result & mask) + 16 ## i64
+  __bigint_sub16_equal_exact(rp, lp, sp)
+  ccall_nobox("w_bigint_sub_equal_finish_raw", result, 16, negative)
+
+# Exact C-shaped positive equal-width sub@24 (bigint_sub_any's boxed equal
+# route into bigint_sub_equal_fast): compare, the hot take in 24's
+# smallest-fit class, the fixed kernel over larger minus smaller, then C's
+# exact top-limb publication or trim-and-demote finisher.
+fn __bigint_sub24_equal_raw(a, b) (i64 i64) i64
+  mask = 140737488355327 ## i64
+  ap = (a & mask) + 16 ## i64
+  bp = (b & mask) + 16 ## i64
+  compare = __bigint_equal_compare_raw(ap, bp, 24) ## i64
+  if compare == 0
+    return ccall_nobox("w_int", 0)
+  lp = ap
+  sp = bp
+  negative = 0 ## i64
+  if compare < 0
+    lp = bp
+    sp = ap
+    negative = 1
+  result = ccall_nobox("w_bigint_alloc_hot32_exact_raw") ## i64
+  rp = (result & mask) + 16 ## i64
+  __bigint_sub24_equal_exact(rp, lp, sp)
+  ccall_nobox("w_bigint_sub_equal_finish_raw", result, 24, negative)
+
+# Exact C-shaped positive sub@2 (bigint_add_two_limb_magnitudes,
+# opposite-sign arm): the two-limb compare, larger minus smaller, then C's
+# one-limb demotion or exact two-limb publication.
+fn __bigint_sub2_equal_raw(a, b) (i64 i64) i64
+  mask = 140737488355327 ## i64
+  ap = (a & mask) + 16 ## i64
+  bp = (b & mask) + 16 ## i64
+  a1 = raw_load_u64(ap, 8) ## u64
+  b1 = raw_load_u64(bp, 8) ## u64
+  compare = 0 ## i64
+  if a1 != b1
+    if a1 > b1
+      compare = 1
+    else
+      compare = 0 - 1
+  else
+    a0 = raw_load_u64(ap, 0) ## u64
+    b0 = raw_load_u64(bp, 0) ## u64
+    if a0 > b0
+      compare = 1
+    else
+      if a0 < b0
+        compare = 0 - 1
+  if compare == 0
+    return ccall_nobox("w_int", 0)
+  lp = ap
+  sp = bp
+  negative = 0 ## i64
+  if compare < 0
+    lp = bp
+    sp = ap
+    negative = 1
+  pair = __bigint_sub2_equal_magnitude(lp, sp) ## u128
+  low = pair ## u64
+  high_wide = pair >> 64 ## u128
+  high = high_wide ## u64
+  ccall_nobox(
+    "w_bigint_sub2_equal_finish_raw", low ## i64, high ## i64, negative
+  )
+
+# Hot take in C's capacity class for an equal-width result: the power of two
+# above n (bigint_alloc_capacity rounds n+1 up; the subtract path's
+# smallest-fit take lands in the same class for every width here).
+fn __bigint_equal_class_alloc_raw(n) (i64) i64
+  if n <= 7
+    return ccall_nobox("w_bigint_alloc_hot8_raw") ## i64
+  if n <= 15
+    return ccall_nobox("w_bigint_alloc_hot16_raw") ## i64
+  ccall_nobox("w_bigint_alloc_hot32_exact_raw") ## i64
+
+# Positive equal-width add at the widths without a fixed C kernel (5..7,
+# 9..15, 17..23). C runs its blocked bn_add_n loop from
+# bigint_add_equal_fast; source takes the same hot class, runs the quad
+# adcs loop, and publishes the carry limb unconditionally as C does.
+fn __bigint_add_equal_generic_raw(a, b, n) (i64 i64 i64) i64
+  result = __bigint_equal_class_alloc_raw(n) ## i64
+  mask = 140737488355327 ## i64
+  rp = (result & mask) + 16 ## i64
+  ap = (a & mask) + 16 ## i64
+  bp = (b & mask) + 16 ## i64
+  carry = asm_add_no(rp, 0, ap, 0, bp, 0, n) ## i64
+  ccall_nobox("w_bigint_add_equal_finish_raw", result, n, carry)
+
+# Positive equal-width subtract at the same widths: C's boxed equal route
+# (top-limb compare with the full scan on a tie, bn_sub_n over larger minus
+# smaller, then top-limb publication or the trim-and-demote finisher).
+fn __bigint_sub_equal_generic_raw(a, b, n) (i64 i64 i64) i64
+  mask = 140737488355327 ## i64
+  ap = (a & mask) + 16 ## i64
+  bp = (b & mask) + 16 ## i64
+  compare = __bigint_equal_compare_raw(ap, bp, n) ## i64
+  if compare == 0
+    return ccall_nobox("w_int", 0)
+  lp = ap
+  sp = bp
+  negative = 0 ## i64
+  if compare < 0
+    lp = bp
+    sp = ap
+    negative = 1
+  result = __bigint_equal_class_alloc_raw(n) ## i64
+  rp = (result & mask) + 16 ## i64
+  # The quad loop holds parity through 15 limbs; from 17 its per-iteration
+  # overhead measured 5-8% behind C's blocked loop, so those widths take
+  # straight-line chains.
+  if n >= 17
+    case n
+      17 =>
+        __bigint_sub17_equal_exact(rp, lp, sp)
+      18 =>
+        __bigint_sub18_equal_exact(rp, lp, sp)
+      19 =>
+        __bigint_sub19_equal_exact(rp, lp, sp)
+      20 =>
+        __bigint_sub20_equal_exact(rp, lp, sp)
+      21 =>
+        __bigint_sub21_equal_exact(rp, lp, sp)
+      22 =>
+        __bigint_sub22_equal_exact(rp, lp, sp)
+      23 =>
+        __bigint_sub23_equal_exact(rp, lp, sp)
+  else
+    asm_sub_no(rp, 0, lp, 0, sp, 0, n)
+  ccall_nobox("w_bigint_sub_equal_finish_raw", result, n, negative)
 
 fn __bigint_add1_2_raw(a, b) (i64 i64) i64
   result = ccall_nobox("w_bigint_alloc_hot", 2) ## i64
@@ -4894,14 +5400,49 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
             return ccall("w_bigint_add", self, other)
 
       # Equal-width same-sign operands otherwise fall through a long generic
-      # setup only to return to C's tuned equal-fast tree. Complete the one
-      # exact positive native leaf here and send every neighboring or negative
-      # width straight to that same C boundary. This keeps the source worker's
-      # new branch from becoming a tax on every unported equal-width operation.
+      # setup only to return to C's tuned equal-fast tree. Complete the
+      # positive native leaves here (exact fixed kernels at 2, 3, 4, 8, 16,
+      # 24 and the generic quad loop at every other width through 23) and
+      # send every negative or wider width straight to that same C boundary.
       if an == bn
+        # Widths three and two first, as direct compares: they are the most
+        # common equal-width shapes, and add@3's original single-compare
+        # route measured 6% slower behind the switch's compare cluster.
         if an == 3
           return wvalue_from_bits(
             __bigint_add3_equal_raw($value ## i64, other$value ## i64)
+          )
+        if an == 2
+          return wvalue_from_bits(
+            __bigint_add2_equal_raw($value ## i64, other$value ## i64)
+          )
+        # The remaining leaves are the multiples of four with fixed C
+        # kernels; one mask test sends every other width straight to C.
+        if (an & 3) == 0
+          case an
+            4 =>
+              return wvalue_from_bits(
+                __bigint_add4_equal_raw($value ## i64, other$value ## i64)
+              )
+            8 =>
+              return wvalue_from_bits(
+                __bigint_add8_equal_raw($value ## i64, other$value ## i64)
+              )
+            16 =>
+              return wvalue_from_bits(
+                __bigint_add16_equal_raw($value ## i64, other$value ## i64)
+              )
+            24 =>
+              return wvalue_from_bits(
+                __bigint_add24_equal_raw($value ## i64, other$value ## i64)
+              )
+        # Every other width through 23 has no fixed C kernel; the generic
+        # quad-loop leaf replaces C's blocked bn_add_n at the same class.
+        if an >= 5 && an <= 23
+          return wvalue_from_bits(
+            __bigint_add_equal_generic_raw(
+              $value ## i64, other$value ## i64, an ## i64
+            )
           )
         return ccall("w_bigint_add", self, other)
 
@@ -5004,68 +5545,118 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
     bn0 = ((other$value >> 47) & 1) == 1 ? 0 - other$size : other$size
 
     on macos && arm64
-      if an == 1 && bn0 == 1
-        return wvalue_from_bits(
-          __bigint_sub1_1_raw($value ## i64, other$value ## i64)
-        )
-      if an == 2 && bn0 == 1
-        return wvalue_from_bits(
-          __bigint_sub1_2_raw($value ## i64, other$value ## i64)
-        )
-      if an == 3 && bn0 == 1
-        return wvalue_from_bits(
-          __bigint_sub1_3_raw($value ## i64, other$value ## i64)
-        )
-      if an == 4 && bn0 == 1
-        return wvalue_from_bits(
-          __bigint_sub1_4_raw($value ## i64, other$value ## i64)
-        )
-      if an == 5 && bn0 == 1
-        return wvalue_from_bits(
-          __bigint_sub1_5_raw($value ## i64, other$value ## i64)
-        )
-      if an == 6 && bn0 == 1
-        return wvalue_from_bits(
-          __bigint_sub1_6_raw($value ## i64, other$value ## i64)
-        )
-      if an == 7 && bn0 == 1
-        return wvalue_from_bits(
-          __bigint_sub1_7_raw($value ## i64, other$value ## i64)
-        )
-      if an == 8 && bn0 == 1
-        return wvalue_from_bits(
-          __bigint_sub1_8_raw($value ## i64, other$value ## i64)
-        )
-      # Exact port of bigint_sub_word_into's wide arm.  Limbs 0 and 1 are
-      # always processed, deeper borrow propagation is rare, and the untouched
-      # suffix retains C's tuned overlap-copy helper through an inlinable raw
-      # boundary.  Allocation and shrink normalization remain in C order.
-      if an > 8 && an <= 4096 && bn0 == 1
-        wide_n = __bigint_effective_size_raw($value ## i64) ## i64
-        result = ccall_rawargs("w_bigint_alloc_hot", wide_n) ## BigInt
-        mask_wide = 140737488355312 ## i64
-        rp_wide = (result$value & mask_wide) + 16 ## i64
-        ap_wide = ($value & mask_wide) + 16 ## i64
-        word = other$limbs[0] ## u64
-        i = __bigint_sub1_wide_prefix(
-          rp_wide, ap_wide, wide_n, word ## i64
-        ) ## i64
+      # Complete scalar-word shapes with one word test and a width switch,
+      # exactly like the + worker: a linear chain of eight two-operand
+      # compares ahead of the equal-width leaves measured as a 10-15% tax on
+      # every equal-width subtraction.
+      if bn0 == 1
+        case an
+          1 =>
+            return wvalue_from_bits(
+              __bigint_sub1_1_raw($value ## i64, other$value ## i64)
+            )
+          2 =>
+            return wvalue_from_bits(
+              __bigint_sub1_2_raw($value ## i64, other$value ## i64)
+            )
+          3 =>
+            return wvalue_from_bits(
+              __bigint_sub1_3_raw($value ## i64, other$value ## i64)
+            )
+          4 =>
+            return wvalue_from_bits(
+              __bigint_sub1_4_raw($value ## i64, other$value ## i64)
+            )
+          5 =>
+            return wvalue_from_bits(
+              __bigint_sub1_5_raw($value ## i64, other$value ## i64)
+            )
+          6 =>
+            return wvalue_from_bits(
+              __bigint_sub1_6_raw($value ## i64, other$value ## i64)
+            )
+          7 =>
+            return wvalue_from_bits(
+              __bigint_sub1_7_raw($value ## i64, other$value ## i64)
+            )
+          8 =>
+            return wvalue_from_bits(
+              __bigint_sub1_8_raw($value ## i64, other$value ## i64)
+            )
+          =>
+            # Exact port of bigint_sub_word_into's wide arm.  Limbs 0 and 1 are
+            # always processed, deeper borrow propagation is rare, and the untouched
+            # suffix retains C's tuned overlap-copy helper through an inlinable raw
+            # boundary.  Allocation and shrink normalization remain in C order.
+            if an > 8 && an <= 4096
+              wide_n = __bigint_effective_size_raw($value ## i64) ## i64
+              result = ccall_rawargs("w_bigint_alloc_hot", wide_n) ## BigInt
+              mask_wide = 140737488355312 ## i64
+              rp_wide = (result$value & mask_wide) + 16 ## i64
+              ap_wide = ($value & mask_wide) + 16 ## i64
+              word = other$limbs[0] ## u64
+              i = __bigint_sub1_wide_prefix(
+                rp_wide, ap_wide, wide_n, word ## i64
+              ) ## i64
 
-        if i < wide_n
-          ccall_nobox(
-            "w_bigint_copy_tail_raw", rp_wide, ap_wide, i, wide_n
-          )
+              if i < wide_n
+                ccall_nobox(
+                  "w_bigint_copy_tail_raw", rp_wide, ap_wide, i, wide_n
+                )
 
-        rlen = wide_n ## i64
-        top_offset = (wide_n - 1) * 8 ## i64
-        if raw_load_u64(rp_wide, top_offset) == 0
-          rlen -= 1
-        if rlen < wide_n
+              rlen = wide_n ## i64
+              top_offset = (wide_n - 1) * 8 ## i64
+              if raw_load_u64(rp_wide, top_offset) == 0
+                rlen -= 1
+              if rlen < wide_n
+                return wvalue_from_bits(
+                  ccall_nobox("w_bigint_finish_sub_raw", result$value, rlen) ## i64
+                )
+              result$size = rlen
+              return result
+
+      # Equal-width same-raw-sign operands are bigint_sub_equal_fast's
+      # domain. Complete the positive native leaves here (exact fixed kernels
+      # at 2, 3, 4, 8, 16, 24 and the generic quad loop at every other width
+      # through 23) and send every negative or wider width straight to the
+      # direct C entry instead of the generic setup below.
+      if an == bn0
+        # One width switch, unlike the + worker's direct compares for widths
+        # three and two: every sub leaf is new (its predecessor was C), and
+        # two extra compares ahead of the switch measured 8-13% on sub@4/8/16
+        # while the switch alone held every width at parity.
+        case an
+          2 =>
+            return wvalue_from_bits(
+              __bigint_sub2_equal_raw($value ## i64, other$value ## i64)
+            )
+          3 =>
+            return wvalue_from_bits(
+              __bigint_sub3_equal_raw($value ## i64, other$value ## i64)
+            )
+          4 =>
+            return wvalue_from_bits(
+              __bigint_sub4_equal_raw($value ## i64, other$value ## i64)
+            )
+          8 =>
+            return wvalue_from_bits(
+              __bigint_sub8_equal_raw($value ## i64, other$value ## i64)
+            )
+          16 =>
+            return wvalue_from_bits(
+              __bigint_sub16_equal_raw($value ## i64, other$value ## i64)
+            )
+          24 =>
+            return wvalue_from_bits(
+              __bigint_sub24_equal_raw($value ## i64, other$value ## i64)
+            )
+        if an >= 5 && an <= 23
           return wvalue_from_bits(
-            ccall_nobox("w_bigint_finish_sub_raw", result$value, rlen) ## i64
+            __bigint_sub_equal_generic_raw(
+              $value ## i64, other$value ## i64, an ## i64
+            )
           )
-        result$size = rlen
-        return result
+        return ccall("w_bigint_sub", self, other)
 
     bn = 0 - bn0
 

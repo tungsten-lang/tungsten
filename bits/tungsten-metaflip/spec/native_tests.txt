@@ -54,3 +54,4 @@ spec/seven_by_seven_shoulder_test.w timeout  # 120s+ interpreted
 spec/square_campaign_nonce_diversity_test.w timeout  # 120s+ interpreted
 spec/wide_matrix_cleanup_test.w timeout  # 120s+ interpreted
 spec/wide_transform_queue_test.w argv  # positional arguments required
+spec/rect_public_seed_corpus_test.w timeout  # 186 s interpreted (56 exact door loads); passes, but exceeds a shard budget

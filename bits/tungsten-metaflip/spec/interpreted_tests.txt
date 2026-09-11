@@ -74,3 +74,4 @@
 8 spec/seven_by_seven_cpu_role_policy_test.w  # 0s
 8 spec/verify_scratch_test.w  # 2s
 8 spec/wide_feedback_test.w  # 0s
+8 spec/sat_repair_encoder_test.w  # 26s

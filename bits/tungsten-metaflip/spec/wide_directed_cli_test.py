@@ -27,6 +27,10 @@ def check(state):
     assert len(terms) == int(raw[0].split()[4]) == int(values['rank'])
     verify(16, terms)
     assert values['exact_rejects'] == '0' and values['producer_state'] == 'stopped', values
+    assert values['walk_density']=='unrestricted', values
+    assert int(values['cpu_accepts'])+int(values['cpu_no_pair'])+int(values['cpu_blocked'])==int(values['cpu_moves']), values
+    if values.get('directed_mode','0') in ('0','1'):
+        assert values['cpu_blocked']=='0', values
     return values
 
 with tempfile.TemporaryDirectory(prefix='metaflip-directed-cli-') as directory:

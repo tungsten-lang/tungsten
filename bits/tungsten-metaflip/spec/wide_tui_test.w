@@ -43,6 +43,9 @@ while width <= 160
       << "FAIL wide dashboard telemetry"
       exit(1)
   if width == 120
+    if !body.include?("density: archive only") || body.include?("density-slack") || !body.include?("no pair") || !body.include?("blocked")
+      << "FAIL density policy and separated attempt labels"
+      exit(1)
     << body
   width += 40
 << "PASS wide TUI layout, large ranks, rates, history and honest capabilities"

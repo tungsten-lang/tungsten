@@ -155,6 +155,8 @@ use ../rect/campaign
   ties = 0 ## i64
   accepted = 0 ## i64
   rejected = 0 ## i64
+  no_pair = 0 ## i64
+  walk_fields = " cpu_accepts=0 cpu_no_pair=0 cpu_blocked=0"
   sequence = 0 ## i64
   last_status = 0-1 ## i64
   stop_requested = 0 ## i64
@@ -173,7 +175,7 @@ use ../rect/campaign
   if directed_lane>=0
     directed_caption=" directed w"+directed_lane.to_s()+"="+directed_option
   tensor = n.to_s()+"x"+n.to_s()
-  seed_fields = " seed_count="+starts.size().to_s()+" reference_rank="+ffws_reference_rank(n).to_s()
+  seed_fields = " seed_count="+starts.size().to_s()+" reference_rank="+ffws_reference_rank(n).to_s()+" walk_density=unrestricted"
   if tui != 0
     z = ccall("w_term_raw_enable")
     << "\e[2J\e[H"
@@ -216,7 +218,7 @@ use ../rect/campaign
       if now-last_render >= 1000
         last_render=now
         sequence += 1
-        status = "mode=wide-cpu tensor="+tensor+" backend=packed-cpu rank="+rank.to_s()+" bits="+density.to_s()+" cpu_lanes="+workers.to_s()+" cpu_moves="+moves.to_s()+" gpu_requested="+gpu.to_s()+" gpu_supported=0 gpu_moves=0 round="+round.to_s()+" producer_state=running stop_requested="+stop_requested.to_s()+seed_fields+directed_fields+cycle_fields+"\n"
+        status = "mode=wide-cpu tensor="+tensor+" backend=packed-cpu rank="+rank.to_s()+" bits="+density.to_s()+" cpu_lanes="+workers.to_s()+" cpu_moves="+moves.to_s()+" gpu_requested="+gpu.to_s()+" gpu_supported=0 gpu_moves=0 round="+round.to_s()+" producer_state=running stop_requested="+stop_requested.to_s()+seed_fields+directed_fields+walk_fields+cycle_fields+"\n"
         if ffrf_atomic(status_path,status,"wide") != 1
           failure=1
           stop[0]=1
@@ -228,7 +230,7 @@ use ../rect/campaign
           width=ccall("w_term_cols") ## i64
           if width < 40
             width=40
-          rows=ffws_frame_rows(n,rank,density,moves,workers,round,(now-start) / 1000,gpu,failure,sequence,last_status,now,drops,ties,accepted,rejected,slack,lanes,rank_levels,rank_ticks,rank_count,bits_levels,bits_ticks,bits_count,timeline_times,timeline_ranks,timeline_count,cycle_caption+directed_caption,width,ffws_reference_rank(n),starts.size())
+          rows=ffws_frame_rows(n,rank,density,moves,workers,round,(now-start) / 1000,gpu,failure,sequence,last_status,now,drops,ties,accepted,rejected,no_pair,lanes,rank_levels,rank_ticks,rank_count,bits_levels,bits_ticks,bits_count,timeline_times,timeline_ranks,timeline_count,cycle_caption+directed_caption,width,ffws_reference_rank(n),starts.size())
           z = ffrc_render(rows)
         elsif quiet == 0
           << "WIDE_STATUS "+status.strip()
@@ -238,6 +240,7 @@ use ../rect/campaign
     moves=0
     accepted=0
     rejected=0
+    no_pair=0
     changed=0 ## i64
     while lane < workers
       joined=ffrc_thread_join_release(threads[lane])
@@ -245,6 +248,7 @@ use ../rect/campaign
       moves += state[7]
       accepted += state[8]
       rejected += state[9]
+      no_pair += state[23]
       at=lane*9 ## i64
       duration=worker_elapsed[lane] ## i64
       if duration < 1
@@ -281,6 +285,7 @@ use ../rect/campaign
             i += 1
           changed=1
       lane += 1
+    walk_fields=" cpu_accepts="+accepted.to_s()+" cpu_no_pair="+no_pair.to_s()+" cpu_blocked="+(rejected-no_pair).to_s()
     # Read experimental counters only after every worker has joined. Match
     # its next epoch to baseline worker time instead of making the cohort
     # wait for the same number of more expensive legal proposals.
@@ -317,7 +322,7 @@ use ../rect/campaign
     stop_requested=1
   if tui != 0
     z=ccall("w_term_raw_disable")
-  status="mode=wide-cpu tensor="+tensor+" backend=packed-cpu rank="+rank.to_s()+" bits="+density.to_s()+" cpu_lanes="+workers.to_s()+" cpu_moves="+moves.to_s()+" gpu_supported=0 gpu_moves=0 round="+round.to_s()+" producer_state=stopped stop_requested="+stop_requested.to_s()+" next_requested="+next_requested.to_s()+" exact_rejects="+failure.to_s()+seed_fields+directed_fields+cycle_fields+"\n"
+  status="mode=wide-cpu tensor="+tensor+" backend=packed-cpu rank="+rank.to_s()+" bits="+density.to_s()+" cpu_lanes="+workers.to_s()+" cpu_moves="+moves.to_s()+" gpu_supported=0 gpu_moves=0 round="+round.to_s()+" producer_state=stopped stop_requested="+stop_requested.to_s()+" next_requested="+next_requested.to_s()+" exact_rejects="+failure.to_s()+seed_fields+directed_fields+walk_fields+cycle_fields+"\n"
   if ffrf_atomic(status_path,status,"wide") != 1
     failure=1
   if quiet == 0

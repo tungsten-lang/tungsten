@@ -1,5 +1,12 @@
 # Bounded directed wide-search experiment — 2026-09-12
 
+Historical measurement: this screen used the former per-move density cutoff.
+The later archive-only density change removes that cutoff on all packed
+workers and limits history aspiration to new rank bests. Its split/history
+rules remain. The measurements below must not be attributed to that new
+policy without rerunning the sweep. Current status marks it explicitly as
+`walk_density=unrestricted`.
+
 Decision: retain an opt-in experimental CPU island; keep the baseline default.
 This is not a record-finding improvement claim or an exhaustive state search.
 It applies to the packed 8x8 through 16x16 squares, not the narrow/GPU backend.

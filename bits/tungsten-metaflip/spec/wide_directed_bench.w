@@ -51,4 +51,4 @@ if ffpk_exact(out,words,r,n,n,n,parity,parity.size(),0)!=1
 r=ffpk_canonicalize(out,words,r,stride)
 if !write_file(av[4]+"-best.mfw",ffpk_blob(out,r,n,n,n))
   exit(1)
-<< "RESULT n="+n.to_s()+" mode="+mode.to_s()+" seed="+nonce.to_s()+" ms="+ms.to_s()+" attempts="+st[7].to_s()+" accepted="+st[8].to_s()+" best_rank="+st[5].to_s()+" best_bits="+st[11].to_s()+" legal="+c[9].to_s()+" inverse="+c[10].to_s()+" tabu="+c[11].to_s()+" novelty_hashes="+c[12].to_s()+" repeat_hashes="+c[13].to_s()+" resets="+c[18].to_s()+" escapes="+c[17].to_s()+" samples="+samples.to_s()
+<< "RESULT n="+n.to_s()+" mode="+mode.to_s()+" seed="+nonce.to_s()+" density_unrestricted=1 ms="+ms.to_s()+" attempts="+st[7].to_s()+" accepted="+st[8].to_s()+" no_pair="+st[23].to_s()+" blocked="+(st[9]-st[23]).to_s()+" best_rank="+st[5].to_s()+" best_bits="+st[11].to_s()+" legal="+(st[7]-st[23]).to_s()+" inverse="+c[10].to_s()+" tabu="+c[11].to_s()+" novelty_hashes="+c[12].to_s()+" repeat_hashes="+c[13].to_s()+" resets="+c[18].to_s()+" escapes="+c[17].to_s()+" samples="+samples.to_s()

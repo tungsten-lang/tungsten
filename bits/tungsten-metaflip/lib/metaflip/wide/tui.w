@@ -5,7 +5,7 @@ use ../tui
 # Each lane is a joined-worker snapshot: best rank, current rank, moves,
 # moves/sec, last improvement ms, snapshot ms, best density, accepts, rejects.
 # Never inspect a worker's mutable tensor or counters from the render loop.
--> ffws_frame_rows(n, rank, density, moves, workers, round, elapsed_s, gpu, failures, sequence, last_status_ms, now_ms, drops, ties, accepted, rejected, dslack, lanes, rank_levels, rank_ticks, rank_count, bits_levels, bits_ticks, bits_count, timeline_times, timeline_ranks, timeline_count, cycle_caption, width, reference, seeds)
+-> ffws_frame_rows(n, rank, density, moves, workers, round, elapsed_s, gpu, failures, sequence, last_status_ms, now_ms, drops, ties, accepted, rejected, no_pair, lanes, rank_levels, rank_ticks, rank_count, bits_levels, bits_ticks, bits_count, timeline_times, timeline_ranks, timeline_count, cycle_caption, width, reference, seeds)
   inner = width - 2 ## i64
   rows = []
   state = ff_tui_health(failures, 0, 0, 0, last_status_ms, now_ms, 5000)
@@ -30,8 +30,8 @@ use ../tui
   if rank_count > 0
     rows.push("  " + ff_tui_dim("rank    ") + ff_tui_paint(ff_tui_spark_runs(rank_levels, rank_ticks, rank_count, spark_width), "32") + ff_tui_dim(" " + rank_levels[0].to_s() + "→" + rank.to_s()))
     rows.push("  " + ff_tui_dim("density ") + ff_tui_paint(ff_tui_spark_runs(bits_levels, bits_ticks, bits_count, spark_width), "33") + ff_tui_dim(" " + bits_levels[0].to_s() + "→" + density.to_s()))
-  plains = ["  new-bests " + drops.to_s(), "   ties " + ties.to_s(), "   exact-rejects " + failures.to_s(), "   density-slack " + dslack.to_s()]
-  painteds = ["  " + ff_tui_dim("new-bests") + " " + drops.to_s(), "   " + ff_tui_dim("ties") + " " + ties.to_s(), "   " + ff_tui_dim("exact-rejects") + " " + failures.to_s(), "   " + ff_tui_dim("density-slack") + " " + dslack.to_s()]
+  plains = ["  new-bests " + drops.to_s(), "   ties " + ties.to_s(), "   exact-rejects " + failures.to_s(), "   density: archive only"]
+  painteds = ["  " + ff_tui_dim("new-bests") + " " + drops.to_s(), "   " + ff_tui_dim("ties") + " " + ties.to_s(), "   " + ff_tui_dim("exact-rejects") + " " + failures.to_s(), "   " + ff_tui_dim("density: archive only")]
   rows.push(ff_tui_join_fit(plains, painteds, width))
 
   rows.push("")
@@ -68,7 +68,7 @@ use ../tui
   rows.push("")
   rows.push(ff_tui_paint(ff_tui_rule("Effectiveness (exposure-normalized)", width), "36"))
   rows.push("  " + ff_tui_cpu_effectiveness("packed/flip-split", moves, drops, ties, 0, inner))
-  rows.push("  " + ff_tui_dim(ff_tui_clip("pair flips: accept " + ff_tui_compact(accepted) + " / reject " + ff_tui_compact(rejected) + " (not record claims)", inner)))
+  rows.push("  " + ff_tui_dim(ff_tui_clip("pair attempts: accept " + ff_tui_compact(accepted) + " / no pair " + ff_tui_compact(no_pair) + " / blocked " + ff_tui_compact(rejected-no_pair), inner)))
 
   rows.push("")
   rows.push(ff_tui_paint(ff_tui_rule("Rank timeline (wall-time; lower rank is up; * density-only)", width), "36"))

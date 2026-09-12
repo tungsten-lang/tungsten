@@ -1,6 +1,8 @@
 # Multiword square islands, using the existing 32-bit-limb MFW1 format.
 # Stable slots and three factor hash chains keep proposals independent of
 # rank. Hash equality only selects a bucket; every factor is compared exactly.
+# Header[23] counts attempts with no legal pair. Density only selects the
+# saved best at equal rank; it never gates a walk transition.
 use ../composition/packed
 use ../scheme
 
@@ -189,9 +191,12 @@ use ../scheme
 
 # Scratch holds two source terms and two proposed terms. Ordinary pair flips
 # preserve the shared factor and XOR the other two, exactly as narrow flips.
+# Keep the legacy slack argument for caller compatibility; it is unused.
 -> ffws_one(st, scratch, slack) (i64[] i64[] i64) i64
   st[7] += 1
   if st[4] < 2
+    st[9] += 1
+    st[23] += 1
     return 0
   stride = st[1] ## i64
   first = st[st[16]+((ffws_rand(st)*st[4]) >> 31)] ## i64
@@ -199,6 +204,7 @@ use ../scheme
   second = ffws_partner(st,first,axis,ffws_rand(st)) ## i64
   if second < 0
     st[9] += 1
+    st[23] += 1
     return 0
   i = 0 ## i64
   while i < 3*stride
@@ -215,12 +221,11 @@ use ../scheme
     scratch[9*stride+left*stride+i]=scratch[left*stride+i] ^ scratch[3*stride+left*stride+i]
     i += 1
   old_rank = st[4] ## i64
-  old_bits = st[10] ## i64
   z = ffws_remove(st,first) ## i64
   z = ffws_remove(st,second)
   z = ffws_toggle(st,scratch,6*stride)
   z = ffws_toggle(st,scratch,9*stride)
-  if st[4] < old_rank || (st[4] == old_rank && st[10] <= old_bits+slack)
+  if st[4] <= old_rank
     st[8] += 1
     z = ffws_adopt(st)
     return 1

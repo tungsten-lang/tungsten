@@ -2,12 +2,13 @@
 # state: a legal-bucket index and two 63-bit term-order-independent hashes.
 # History is a bounded direct-mapped heuristic, NOT an exact visited set.
 # Hash collisions can reject a valid neighbor; the full tensor gate, never
-# these hashes, decides correctness. Baseline ffws_work is unchanged.
+# these hashes, decides correctness. Like the baseline, density is archival
+# only: no density filter or density-driven history aspiration.
 use scheme
 
 # Header: mode,hc,active,history-cap,h1,h2,prev1,prev2,prev-valid,
 # legal,inverse-blocked,history-blocked,cache-misses,cache-hits,
-# density-rejects,aspirations,no-edge,escapes,history-resets,stalled.
+# rank-rejects,rank-aspirations,no-edge,escapes,history-resets,stalled.
 # Offsets 24..29: active IDs, reverse positions, pair witness, hash1/hash2/used.
 # Dirty bucket IDs are kept in header 32..43; length is header[23].
 -> ffwd_words(st, history) (i64[] i64) i64
@@ -58,7 +59,7 @@ use scheme
   c[c[29]+slot]=1
   seen
 
-# New bests override both heuristic guards. Return the rejection reason.
+# New rank bests override both heuristic guards. Return the rejection reason.
 -> ffwd_guard(c, h1, h2, aspiration) (i64[] i64 i64 i64) i64
   if aspiration!=0 || c[0]<2
     return 0
@@ -194,6 +195,7 @@ use scheme
   st[7]+=1
   if c[2]==0
     c[16]+=1
+    st[23]+=1
     st[9]+=1
     return 0
   id=c[c[24]+((ffws_rand(st)*c[2]) >> 31)] ## i64
@@ -245,20 +247,22 @@ use scheme
     h2=h2 ^ ffwd_term(scratch,i*3*stride,stride,7809847782465536322)
     i+=1
   old_rank=st[4] ## i64
-  old_bits=st[10] ## i64
   z=ffws_remove(st,first) ## i64
   z=ffws_remove(st,second)
   z=ffws_toggle(st,scratch,6*stride)
   z=ffws_toggle(st,scratch,9*stride)
   accept=0 ## i64
-  if st[4]<old_rank || (st[4]==old_rank && st[10]<=old_bits+slack)
+  if st[4]<=old_rank
     accept=1
   else
     c[14]+=1
   aspiration=0 ## i64
-  if st[4]<st[5] || (st[4]==st[5] && st[10]<st[11])
+  if st[4]<st[5]
     aspiration=1
   if accept==1
+    # Save every encountered best before a history rejection can roll back
+    # the walk. A lower-density tie does not influence the next walk state.
+    z=ffws_adopt(st)
     guard=ffwd_guard(c,h1,h2,aspiration) ## i64
     if guard==1
       c[10]+=1
@@ -278,7 +282,6 @@ use scheme
     st[8]+=1
     z=ffwd_remember(c)
     z=ffwd_refresh_dirty(st,c)
-    z=ffws_adopt(st)
     return 1
   z=ffws_toggle(st,scratch,6*stride)
   z=ffws_toggle(st,scratch,9*stride)

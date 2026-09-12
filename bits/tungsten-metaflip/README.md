@@ -149,6 +149,15 @@ published seeds and alternative small-seed compositions within 5% of the
 leader. One published near-best seed was available for 9, 11 and 13; the other
 sizes have 2–4 automatic starts. `--seed` or `--naive` pins a single start.
 Higher-rank published alternatives remain bundled for explicit `--seed` use.
+Packed CPU workers use **density only for archival**, never to choose walk
+transitions. All legal rank-neutral pair flips may increase density without
+a cutoff; `--density` applies only to the narrow/rectangular backends. The
+saved best still minimizes rank first, then density. Rank/split limits remain,
+and the optional directed history guards below can still block revisits.
+Even a density-only best blocked by a history guard is saved without steering
+the current walk toward it. Status reports `walk_density=unrestricted`; the
+TUI distinguishes accepted flips, no-partner attempts, and blocked proposals.
+
 Packed squares also have an **opt-in directed-search arm**:
 
 ```sh
@@ -165,13 +174,15 @@ does not hold the cohort to an equal count of more expensive legal proposals.
 Status reports `directed_*` counters from joined epochs, and the TUI footer
 identifies the policy and island. Fingerprints are two 63-bit hashes, not
 an exact no-revisit certificate: collisions, eviction, aspiration for a new
-best, and bounded forgetting all affect the heuristic. Sampling is uniform
+best rank, and bounded forgetting all affect the heuristic. Sampling is uniform
 over eligible hash buckets, not uniform over all legal graph edges. Exact
 tensor validation still gates every promoted checkpoint.
 `directed_novel_hashes` counts cache misses, **not** globally distinct states;
 evicted or forgotten states can be counted again. The bounded
-[64-run experiment](tools/DIRECTED-WIDE-SEARCH-2026-09-12.md) found mixed results
-and no lower ranks, so no directed policy is enabled by default.
+[64-run experiment](tools/DIRECTED-WIDE-SEARCH-2026-09-12.md), conducted before
+removing the density cutoff, found mixed results and no lower ranks. Those
+rates do not describe the new unrestricted-density policy. No directed
+policy is enabled by default.
 
 See the [source and field audit](tools/LARGE-SQUARE-SEEDS-2026-09-12.md).
 Existing historical 13x13 rank-1402 and 15x15 rank-2008 witnesses can be

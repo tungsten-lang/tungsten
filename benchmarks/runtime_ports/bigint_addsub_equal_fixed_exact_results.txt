@@ -407,3 +407,68 @@ disjoint, every equal-width and word-shape spec on both engines, the
 direct differentials, reopen semantics, rational and promotion specs),
 the open-world harness correctness checks, the native self-test, and an
 eleven-shape probe of the generic routes against the C oracle.
+
+
+FOURTH TRANCHE — `Tungsten.noinline!` AND THE `*` WORKER SPLIT
+==============================================================
+
+Scope
+-----
+
+The `*` worker had the same shape as `+`/`-` before the third tranche:
+1245 instructions and six callee-saved register pairs on every entry, with
+its generic body (the in-band schoolbook path: alloc, `asm_mulbase`, seal)
+inline. Unlike the add/sub body it has a single caller, so an out-of-line
+raw function was inlined straight back by LLVM's last-call bonus. This
+tranche adds the missing tool and uses it:
+
+  * `Tungsten.noinline!` as the first statement of any fn or method body
+    is an emitted-code attribute: lowering drops the statement and gives
+    the function its own attribute group carrying `noinline` (both the
+    top-level and class-method lowering paths); the emit cache bypasses
+    such functions (their group id is interned at emit time); the content
+    hash includes the flag so two otherwise-identical bodies do not
+    compact into one symbol; the tree walker treats the statement as a
+    no-op; anywhere but the first statement is a compile error. Spec:
+    `spec/compiler/noinline_directive_spec.w` (both engines); doc:
+    `doc/embedded-ll-asm.md`.
+  * `__bigint_times_general_raw(a, b, an, bn)` carries the directive and
+    the schoolbook body; the `*` dispatcher calls it directly. The
+    dispatcher is now 1060 instructions with three register pairs, and the
+    body survives in the binary with its own `noinline` attribute group.
+
+Only the shapes `bigint_mul_src_shape` admits (2..24 limbs, unequal or
+mixed-sign, never squaring) run the `*` worker at all; the equal-length,
+squaring, and n-by-1 cells reach their exact leaves through the runtime's
+own seams and never see it.
+
+Gates: forced `bin/tungsten build --no-bits --force` with the compiler
+change reports stage-1 LLVM byte-identical to stage 2; the fast compiled
+and interpreted lanes, the multiply/square/word-multiply source and
+differential specs, the seam-disjoint spec, the directive spec, and both
+open-world harness checks pass (48 runs; the two embedded-IR specs are
+compile-only by design and fail under the walker as they always have).
+
+Promotion (CPU clock, QoS, 21 alternating pairs x 3 runs x 300 ms against
+the baseline built from 55bd5006; host load 5-35)
+---------------------------------------------------------------------
+
+Native lane (cells that never enter the `*` worker; expected parity):
+  mul@1 1.0015, mul@2 0.9935, mul@3 1.0066, mul@4 0.9893, mul@8 1.0169,
+  mul@16 0.9995, mul@24 0.9998, mul@32 1.0004, sqr@2 0.9908, sqr@4 0.9941,
+  sqr@8 0.9979, sqr@16 1.0006, mul1@1 1.0146, mul1@4 0.8815 (19/21),
+  mul1@16 1.0131. The add/sub/cmp controls, first measured in a segment
+  where the host load reached 35 (sub@4 1.051 at IQR 0.17, cmp@4 IQR
+  0.36), were re-measured at load 5: sub@4 0.9991 (IQR 0.028), add@4
+  0.9908, sub1@4 0.9978, cmp@4 1.0002, add1@4 1.0023.
+
+Open-world multiply harness (benchmarks/runtime_ports/bigint_opmul_public.w,
+15 pairs; `mixed` and `skew` are the rows that run the `*` worker):
+
+  row          cand/base   IQR     wins
+  one            0.9963    0.0723   8/15
+  int-arg        0.9878    0.0649   9/15
+  four           0.9991    0.0675   8/15
+  mixed          0.8769    0.0734  15/15
+  sixtyfour      0.9977    0.0070  10/15
+  skew           0.8978    0.0467  14/15

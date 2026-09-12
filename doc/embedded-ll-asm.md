@@ -58,6 +58,16 @@ it). Measured on the 64-limb add kernel (Apple M): portable `addcarry` loop
   (`content_hash.w`), so incremental caching and the compact `__wy_`
   symbol names stay correct.
 
+Ordinary Tungsten bodies (a `fn` or a method, any signature) can request
+the same attribute with `Tungsten.noinline!` as their first statement. It
+is an emitted-code attribute, not a call: lowering drops the statement and
+gives the function its own attribute group, and the tree walker ignores
+it. Use it for an out-of-line generic body behind a hot leaf dispatcher,
+where LLVM's last-call bonus would otherwise inline a single-caller body
+straight back and restore the register pressure the split removed
+(`core/numeric/big_int.w`'s `__bigint_times_general_raw`). Anywhere but the
+first statement is a compile error.
+
 ## Class-scoped kernels
 
 The same `fn` + heredoc shape inside a class body compiles to a

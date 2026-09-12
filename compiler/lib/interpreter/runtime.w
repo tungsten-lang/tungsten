@@ -176,6 +176,14 @@
       return name
     nil
 
+  # `Tungsten.noinline!` is an emitted-code attribute (see lowering); the
+  # tree walker treats the statement as a no-op.
+  -> interpreter_noinline_directive?(node)
+    if node == nil || !is_ast_node?(node) || ast_kind(node) != :call || ast_get(node, :name) != "noinline!"
+      return false
+    recv = ast_get(node, :receiver)
+    recv != nil && is_ast_node?(recv) && ast_kind(recv) == :class_ref && ast_get(recv, :name) == "Tungsten"
+
   -> interpreter_definition?(node)
     ast_kind(node) in (:class_def :module_def :trait_def :fn_def :method_def)
 

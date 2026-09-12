@@ -175,6 +175,7 @@ spec_lanes_main() {
 }
 
 compiled_specs=(
+  spec/compiler/noinline_directive_spec.w
   spec/sci/io_prefix_spec.w
   compiler/test/regex_features.w
   spec/core/date_calendar_surface_spec.w
@@ -531,6 +532,7 @@ cuda_reject_specs=(
   spec/compiler/gpu_cuda_simdgroup_reject_spec.w
 )
 interpreter_specs=(
+  spec/compiler/noinline_directive_spec.w
   compiler/test/regex_features.w
   benchmarks/runtime_ports/bigint_predicate_relaxed_autoload.w
   spec/core/date_calendar_surface_spec.w

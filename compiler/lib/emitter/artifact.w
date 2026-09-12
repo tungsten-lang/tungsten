@@ -991,6 +991,9 @@
   out = StringBuffer(4096)
   ret_ty = f[:return_type]
   attr_text = function_attr_text(frame_pointers, host_fn_attrs, preserve_debug_frames)
+  # `Tungsten.noinline!` bodies get their own attribute group.
+  if f[:noinline] == true
+    attr_text = attr_text + " noinline"
   attr_id = nil
   if attr_groups != nil
     attr_id = function_attr_group_id(attr_groups, attr_text)

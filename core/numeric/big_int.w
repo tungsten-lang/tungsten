@@ -4228,6 +4228,31 @@ fn __bigint_addsub_general_raw(a, b, an, bn, is_sub) (i64 i64 i64 i64 i64) i64
     signed_bl = 0 - bl
   ccall_nobox("w_bigint_seal_raw", dresult, signed_bl)
 
+# Out-of-line schoolbook multiply for BigInt#*'s in-band pairs (2..24
+# limbs, unequal or mixed-sign, never squaring): one alloc, one asm_mulbase
+# call writing the whole na+nb product, seal (which trims the possible high
+# zero limb). `Tungsten.noinline!` keeps this single-caller body out of the
+# dispatcher, which otherwise inherited its frame (six register pairs).
+fn __bigint_times_general_raw(a, b, an, bn) (i64 i64 i64 i64) i64
+  Tungsten.noinline!
+  am = an ## i64
+  if an < 0
+    am = 0 - an
+  bm = bn ## i64
+  if bn < 0
+    bm = 0 - bn
+  mask = 140737488355312 ## i64
+  pa = (a & mask) + 16 ## i64
+  pb = (b & mask) + 16 ## i64
+  total = am + bm ## i64
+  result = ccall_nobox("w_bigint_alloc_hot", total) ## i64
+  rp = (result & mask) + 16 ## i64
+  asm_mulbase(rp, 0, pa, 0, pb, 0, am, bm)
+  signed_total = total ## i64
+  if (an < 0) != (bn < 0)
+    signed_total = 0 - total
+  ccall_nobox("w_bigint_seal_raw", result, signed_total)
+
 fn __bigint_add1_2_raw(a, b) (i64 i64) i64
   result = ccall_nobox("w_bigint_alloc_hot", 2) ## i64
   mask = 140737488355327 ## i64
@@ -5816,17 +5841,13 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
     if $value == other$value
       return ccall("w_bigint_mul_builtin_exact", self, other)
 
-    mask = 140737488355312
-    pa = ($value & mask) + 16
-    pb = (other$value & mask) + 16
-    total = am + bm
-    result = ccall("w_bigint_alloc_boxed", total)
-    rp = (result$value & mask) + 16
-    asm_mulbase(rp ## i64, 0, pa ## i64, 0, pb ## i64, 0, am ## i64, bm ## i64)
-    neg = false
-    if (an < 0) != (bn < 0)
-      neg = true
-    ccall("w_bigint_seal", result, neg ? 0 - total : total)
+    # Out-of-line schoolbook body (see __bigint_times_general_raw): keeps
+    # asm_mulbase's frame and register pressure out of this dispatcher.
+    wvalue_from_bits(
+      __bigint_times_general_raw(
+        $value ## i64, other$value ## i64, an ## i64, bn ## i64
+      )
+    )
 
   -> *(other)(Number)
     ccall("w_mul", self, other)

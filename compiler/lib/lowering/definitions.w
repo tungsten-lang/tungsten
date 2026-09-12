@@ -690,6 +690,12 @@
 # cannot pattern-match from portable code (multi-limb carry chains: the
 # vectorizer cannot touch a loop-carried carry, and the flag spills across
 # back-edges — LLVM issue #74493).
+-> noinline_directive?(st)
+  if st == nil || !is_ast_node?(st) || ast_kind(st) != :call || st.name != "noinline!"
+    return false
+  recv = st.receiver
+  recv != nil && is_ast_node?(recv) && ast_kind(recv) == :class_ref && recv.name == "Tungsten"
+
 -> embedded_body_directive(node)
   body = node.body
   if body == nil || body.size() != 1
@@ -858,6 +864,21 @@
       else
         new_fn[:embedded_asm] = embedded[1]
       return nil
+
+  # `Tungsten.noinline!` as the first body statement is an emitted-code
+  # attribute, not a call: the function keeps its own frame out of every
+  # caller, so a hot leaf dispatcher does not inherit an out-of-line body's
+  # register pressure (a single-caller body is otherwise inlined straight
+  # back by LLVM's last-call bonus). Dropped from the lowered body; a use
+  # anywhere else is rejected in lower_method_call.
+  if body != nil && body.size() > 0 && noinline_directive?(body[0])
+    new_fn[:noinline] = true
+    trimmed = []
+    bi = 1
+    while bi < body.size()
+      trimmed.push(body[bi])
+      bi += 1
+    body = trimmed
 
   mark_fused_reuse_assignments(body)
 
@@ -2034,6 +2055,16 @@
       else
         kernel_fn[:embedded_asm] = embedded[1]
       return nil
+  # `Tungsten.noinline!` first statement: see lower_method_def.
+  noinline_body = false
+  if body != nil && body.size() > 0 && noinline_directive?(body[0])
+    noinline_body = true
+    trimmed = []
+    bi = 1
+    while bi < body.size()
+      trimmed.push(body[bi])
+      bi += 1
+    body = trimmed
   mark_fused_reuse_assignments(body)
   # Monomorphization override — uses a mangled fn name and pre-types
   # __self so dispatch in the body picks up the variant (e.g. typed_array_u8
@@ -2073,6 +2104,8 @@
   # wins. Without this, mod[:functions] ends up with duplicate-named
   # entries that confuse the content-hash topo sort (keyed by name).
   new_fn = build_function(fn_name, param_names, "i64", false, [])
+  if noinline_body
+    new_fn[:noinline] = true
   if node.is_class_method == true
     new_fn[:source_kind] = :static_method
   else

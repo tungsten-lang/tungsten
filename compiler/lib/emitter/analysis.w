@@ -447,6 +447,11 @@ function_emit_cache_state = {
   function_emit_cache_bucket_for_key(out.to_s(), :library, paths)
 
 -> function_emit_cache_candidate?(f, bucket)
+  # A noinline body carries its own attribute group, whose numeric id is
+  # interned at emit time; a cached copy could name an id the current
+  # module never interns.
+  if f[:noinline] == true
+    return false
   if bucket[:scope] == :core
     return (f[:incremental_core_frozen] == true || f[:incremental_core_candidate] == true) && f[:name] != "main"
   if bucket[:scope] == :library

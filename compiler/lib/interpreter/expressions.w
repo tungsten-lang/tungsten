@@ -859,6 +859,8 @@
   # -- Method calls --
 
   -> eval_call(node, env)
+    if interpreter_noinline_directive?(node)
+      return nil
     contract = interpreter_contract_name(node)
     if contract != nil
       if ast_get(node, :validated_program_contract) != true

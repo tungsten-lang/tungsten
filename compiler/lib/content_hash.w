@@ -534,6 +534,11 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
       buf << func[:embedded_asm]
     buf << "|"
 
+  # The noinline directive changes the emitted attribute group; keep two
+  # otherwise-identical bodies from compacting into one symbol.
+  if func[:noinline] == true
+    buf << "NOINLINE|"
+
   # Build label map: label → sequential index
   label_map = {}
   bi = 0

@@ -10,7 +10,7 @@ GF(2), with bilinear tensor identities, not arbitrary commutative algorithms.
 | 10 | 651 | 651 | 4 | 651, 686 |
 | 11 | 975 | 873 | 1 | 873, 960 |
 | 12 | 1071 | 1068 | 4 | 1068, 1071 |
-| 13 | 1575 | 1426 | 1 | 1426 |
+| 13 | 1575 | 1426 / 1402 local reference | 1 | 1426 |
 | 14 | 1729 | 1725 | 4 | 1725 |
 | 15 | 2139 | 2058 | 4 | 2058 |
 | 16 | 2209 | 2209 | 2 | 2401 |
@@ -40,6 +40,12 @@ review, so these two witnesses are **not bundled** in the runtime package.
 With those local checkpoints, the 13x13 and 15x15 starts are 1402 and 2008,
 respectively, with two near-best bank entries each; the table above describes
 a clean installation without those local artifacts.
+
+The displayed 13x13 reference is now **1402**, using that verified historical
+local composition. The bundled default remains 1426; changing the comparison
+does not redistribute the local witness or claim that 1402 is optimal.
+A resumed rank-1402 search therefore ties the reference rather than appearing
+to have newly beaten 1426 by 24. Reference and seed availability are separate.
 
 ## Sources and field exclusions
 

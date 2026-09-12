@@ -140,8 +140,10 @@ use ../seeds/catalog
     i += 1
   paths
 
-# Public field-compatible reference, audited 2026-09-12. This is not an
-# optimality claim; smaller Q-only/commutative catalog ranks are excluded.
+# Verified field-compatible references, audited 2026-09-12; not optimality
+# claims. Q-only/commutative ranks are excluded. The 13x13 reference is the
+# exact local block composition recovered from a0c14c3b, not a bundled seed;
+# see tools/LARGE-SQUARE-SEEDS-2026-09-12.md for provenance.
 -> ffws_reference_rank(n) (i64) i64
   ranks = i64[9]
   ranks[0]=329
@@ -149,7 +151,7 @@ use ../seeds/catalog
   ranks[2]=651
   ranks[3]=873
   ranks[4]=1068
-  ranks[5]=1426
+  ranks[5]=1402
   ranks[6]=1725
   ranks[7]=2058
   ranks[8]=2209

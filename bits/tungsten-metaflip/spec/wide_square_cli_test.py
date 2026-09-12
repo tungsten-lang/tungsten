@@ -10,7 +10,9 @@ import time
 
 BINARY = Path(os.environ.get('METAFLIP_TEST_BINARY', Path(__file__).resolve().parents[1] / 'bin/metaflip')).resolve()
 RUNTIME = Path(__file__).resolve().parents[1] / 'lib/metaflip'
-REFERENCES = dict(zip(range(8, 17), (329, 486, 651, 873, 1068, 1426, 1725, 2058, 2209)))
+REFERENCES = dict(zip(range(8, 17), (329, 486, 651, 873, 1068, 1402, 1725, 2058, 2209)))
+# A known reference need not be distributable as a bundled starting tensor.
+DEFAULT_RANKS = {**REFERENCES, 13: 1426}
 
 
 def read_blob(raw):
@@ -66,7 +68,8 @@ with tempfile.TemporaryDirectory(prefix='metaflip-wide-cli-') as tmp:
         assert body['gpu_supported'] == '0' and body['gpu_moves'] == '0', body
         assert body['cpu_moves'] == '8200' and body['exact_rejects'] == '0', body
         assert body['producer_state'] == 'stopped', body
-        assert int(body['reference_rank']) == REFERENCES[n] and int(body['rank']) <= REFERENCES[n], body
+        assert int(body['reference_rank']) == REFERENCES[n], body
+        assert int(body['rank']) <= DEFAULT_RANKS[n], body
         assert 1 <= int(body['seed_count']) <= 4, body
         if n in (8, 10, 12, 14, 15, 16):
             assert int(body['seed_count']) >= 2, body

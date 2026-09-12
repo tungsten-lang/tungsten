@@ -1,4 +1,12 @@
 use ../lib/metaflip/wide/tui
+use ../lib/metaflip/wide/seeds
+
+# References can be stronger than the redistributable seed bank. Resuming
+# the historical 13x13 checkpoint is a tie, not a fresh 24-rank improvement.
+reference13 = ffws_reference_rank(13) ## i64
+if reference13 != 1402 || ff_tui_objective_compare(1402,reference13,"reference") != "matches reference 1402" || ff_tui_objective_compare(1426,reference13,"reference") != "24 above reference 1402"
+  << "FAIL historical 13x13 reference comparison"
+  exit(1)
 
 lanes = i64[18]
 lanes[0]=2209

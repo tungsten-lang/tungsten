@@ -11,6 +11,7 @@
 # cooperative SIMD, and MITM retain their dedicated native engines.
 
 use ../metallib_cache
+use ../build_cache
 use ../persistent
 
 -> ffb_supported(n) (i64) i64
@@ -109,10 +110,7 @@ use ../persistent
   command = ffb_build_command(root, n, binary)
   if command == ""
     return 0
-  built = system(command)
-  if !built
-    return 0
-  ffmc_build_or_source(root, ffmc_generated_source_path(binary), binary)
+  ffmk_build(root, binary, [ffb_source_path(root, n)], command, 1)
 
 -> ffb_metallib_path(binary) (String)
   ffmc_library_path(binary)

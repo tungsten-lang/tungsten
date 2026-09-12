@@ -1,6 +1,7 @@
 # Build/launch glue for the bounded CPU frozen-fringe SAT child.
 
 use ../metallib_cache
+use ../build_cache
 
 -> fffsb_shell_quote(text) (String)
   "'" + text.replace("'", "'\"'\"'") + "'"
@@ -10,9 +11,7 @@ use ../metallib_cache
   "cd " + fffsb_shell_quote(root) + " && TUNGSTEN_GPU_DIALECTS=none TUNGSTEN_LL_PATH=" + fffsb_shell_quote(binary + ".ll") + " TUNGSTEN_METAL_PATH=" + fffsb_shell_quote(ffmc_generated_source_path(binary)) + " " + fffsb_shell_quote(ffmc_tungsten(root)) + " compile " + fffsb_shell_quote(source) + " --release --fast --lto --out " + fffsb_shell_quote(binary)
 
 -> fffsb_build(root, binary) (String String) i64
-  if system(fffsb_build_command(root, binary))
-    return 1
-  0
+  ffmk_build(root, binary, [root + "/kernels/workers/frozen_fringe_sat.w", root + "/kernels/frozen_fringe_sat.w", root + "/strategies/frozen_fringe_sat.w", root + "/strategies/sat_repair.w", root + "/strategies/span_refactor.w", root + "/scheme.w"], fffsb_build_command(root, binary), 0)
 
 -> fffsb_plan_valid(timeout_s, nonce) (i64 i64) i64
   if timeout_s < 1 || timeout_s > 86400 || nonce < 0

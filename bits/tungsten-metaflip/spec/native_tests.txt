@@ -35,6 +35,7 @@ spec/rect_catalyst_lift_rect_test.w native  # __w_clock_ms
 spec/rect_child_status_parse_test.w native  # w_string_byte_ptr
 spec/rect_concurrent_command_test.w native  # __w_clock_ms
 spec/rect_cpu_followup_test.w native  # w_string_byte_ptr
+spec/refinement_atomic_test.w native  # concurrent publication and thread joins
 spec/rect_cpu_pool_test.w timeout  # 120s+ interpreted
 spec/rect_default_portfolio_test.w native  # w_string_byte_ptr
 spec/rect_endpoint_path_test.w timeout  # 121s+ interpreted

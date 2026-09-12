@@ -78,10 +78,7 @@ use ../../seeds/rect
   command = ffrgb_build_command(root, n, m, p, binary)
   if command == ""
     return 0
-  built = system(command)
-  if !built
-    return 0
-  ffmc_build_or_source(root, ffmc_generated_source_path(binary), binary)
+  ffmk_build(root, binary, [ffrgb_source_path(root, n, m, p), root + "/kernels/bundles/rect.w"], command, 1)
 
 -> ffrgb_metallib_path(binary) (String)
   ffmc_library_path(binary)
@@ -155,10 +152,7 @@ use ../../seeds/rect
   "cd " + ffrgb_shell_quote(root) + " && TUNGSTEN_GPU_DIALECTS=none TUNGSTEN_LL_PATH=" + ffrgb_shell_quote(binary + ".ll") + " TUNGSTEN_METAL_PATH=" + ffrgb_shell_quote(ffmc_generated_source_path(binary)) + " " + ffrgb_shell_quote(ffmc_tungsten(root)) + " -o " + ffrgb_shell_quote(binary) + " " + ffrgb_shell_quote(ffrmw_source_rel()) + " --release --fast --lto"
 
 -> ffrmw_build(root, binary) (String String) i64
-  built = system(ffrmw_build_command(root, binary))
-  if !built
-    return 0
-  ffmc_build_or_source(root, ffmc_generated_source_path(binary), binary)
+  ffmk_build(root, binary, [root + "/kernels/workers/rect_mitm.w", root + "/kernels/rect_mitm.w", root + "/kernels/mitm.w", root + "/kernels/bundles/workers.w"], ffrmw_build_command(root, binary), 1)
 
 -> ffrmw_metallib_path(binary) (String)
   ffmc_library_path(binary)

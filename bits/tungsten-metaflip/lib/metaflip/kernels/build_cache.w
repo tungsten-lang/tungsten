@@ -11,6 +11,7 @@
 # these sources in this tree) is adopted once by writing the sidecar, so
 # nothing is rebuilt merely to migrate.
 use core/system
+use core/file
 use core/crypto/sha256
 use metallib_cache
 
@@ -40,7 +41,7 @@ use metallib_cache
 # an input is missing.  Paths are deliberately excluded so the same sources
 # in another checkout hash identically.
 -> ffmk_digest(root, inputs) (String Array)
-  body = ffmk_compiler_tag(root) + "\n"
+  body = "metaflip-worker-inputs-v2\n" + ffmk_compiler_tag(root) + "\n"
   i = 0 ## i64
   while i < inputs.size()
     content = read_file(inputs[i])
@@ -70,11 +71,36 @@ use metallib_cache
 
 -> ffmk_record(root, binary, inputs) (String String Array) i64
   digest = ffmk_digest(root, inputs)
-  if digest == ""
+  if digest == "" || ffmk_executable(binary) == 0
     return 0
-  if write_file(ffmk_sidecar(binary), digest + "\n")
-    return 1
-  0
+  ffmk_stamp(binary, digest)
+
+-> ffmk_stamp(binary, digest) (String String) i64
+  path = ffmk_sidecar(binary)
+  tmp = file_temp_for(path)
+  if tmp == nil
+    return 0
+  ok = write_file(tmp, digest + "\n")
+  if ok
+    ok = file_rename(tmp, path)
+  if !ok
+    z = file_unlink(tmp)
+    return 0
+  1
+
+# Invalidate even failed/partial builds. A present invalid stamp cannot use
+# timestamp adoption. Refuse certification if inputs change during the build.
+-> ffmk_build(root, binary, inputs, command, metal) (String String Array String i64) i64
+  digest = ffmk_digest(root, inputs)
+  if digest == "" || command == "" || ffmk_stamp(binary, "building") != 1
+    return 0
+  if !system(command) || ffmk_executable(binary) == 0
+    return 0
+  if metal != 0 && ffmc_build_or_source(root, ffmc_generated_source_path(binary), binary) != 1
+    return 0
+  if ffmk_digest(root, inputs) != digest
+    return 0
+  ffmk_stamp(binary, digest)
 
 # 1 when `binary` was built from exactly these inputs by this compiler.
 -> ffmk_fresh(root, binary, inputs) (String String Array) i64
@@ -86,7 +112,6 @@ use metallib_cache
   recorded = read_file(ffmk_sidecar(binary))
   if recorded != nil && recorded.strip() == digest
     return 1
-  if ffmk_mtime_fresh(binary, inputs) == 1
-    z = ffmk_record(root, binary, inputs) ## i64
-    return 1
+  if recorded == nil && ffmk_mtime_fresh(binary, inputs) == 1
+    return ffmk_record(root, binary, inputs)
   0

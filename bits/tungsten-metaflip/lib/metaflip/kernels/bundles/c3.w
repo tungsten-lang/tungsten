@@ -13,6 +13,7 @@
 # candidate gates pass.
 
 use ../metallib_cache
+use ../build_cache
 
 -> ffc3_supported(n) (i64) i64
   ok = 0 ## i64
@@ -91,10 +92,7 @@ use ../metallib_cache
   command = ffc3_build_command(root, n, binary)
   if command == ""
     return 0
-  built = system(command)
-  if !built
-    return 0
-  ffmc_build_or_source(root, ffmc_generated_source_path(binary), binary)
+  ffmk_build(root, binary, [ffc3_source_path(root, n)], command, 1)
 
 -> ffc3_metallib_path(binary) (String)
   ffmc_library_path(binary)

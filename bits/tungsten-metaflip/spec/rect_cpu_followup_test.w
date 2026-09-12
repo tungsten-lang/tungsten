@@ -22,6 +22,37 @@ z = followup_check("pending lanes are skipped", ffrc_pick_ready_lane(ready, pend
 pending[3] = 1
 z = followup_check("no free ready lane", ffrc_pick_ready_lane(ready, pending, 4, 0) == -1)
 
+# A delayed producer preserves its alternate current state but inherits the
+# latest CPU best. Test rank and density progress, and invalid incumbents.
+fixture_root = __DIR__ + "/../lib/metaflip/seeds/gf2/"
+incumbent = i64[ffr_state_size(128)]
+z = followup_check("new incumbent fixture", ffr_load_scheme_cap(incumbent, fixture_root + "matmul_2x2x5_rank18_d84_gf2.txt", 2, 2, 5, 128, 901, 4, 4, 1000, 250) == 18)
+case_number = 0 ## i64
+while case_number < 2
+  delayed = i64[ffr_state_size(128)]
+  if case_number == 0
+    z = followup_check("delayed rank fixture", ffr_init_naive_cap(delayed, 2, 2, 5, 128, 903, 4, 4, 1000, 250) == 20)
+  else
+    z = followup_check("delayed density fixture", ffr_load_scheme_cap(delayed, fixture_root + "matmul_2x2x5_rank18_d92_block_local_gl_gf2.txt", 2, 2, 5, 128, 907, 4, 4, 1000, 250) == 18)
+  before = i64[delayed.size()]
+  z = ffcp_copy_words(before, delayed, delayed.size())
+  z = followup_check("carry newer island best", ffrc_preserve_island_best(delayed, incumbent, 2, 2, 5) == 1)
+  z = followup_check("rank/density retained", ffr_best_rank(delayed) == 18 && ffr_best_bits(delayed) == 84)
+  z = followup_check("both views exact", ffr_verify_best_exact(delayed, 2, 2, 5) == 1 && ffr_verify_current_exact(delayed, 2, 2, 5) == 1)
+  z = followup_check("density delta retained", delayed[64] == ffr_current_bits(delayed) - ffr_best_bits(delayed))
+  word = 0 ## i64
+  while word < delayed.size()
+    best_word = (word >= delayed[47] && word < delayed[47] + 18) || (word >= delayed[48] && word < delayed[48] + 18) || (word >= delayed[49] && word < delayed[49] + 18)
+    if !best_word && word != 7 && word != 36 && word != 64 && word != 29 && word != 30 && word != 38
+      z = followup_check("alternate continuation unchanged", delayed[word] == before[word])
+    word += 1
+  z = followup_check("worse/equal incumbent ignored", ffrc_preserve_island_best(delayed, before, 2, 2, 5) == 0)
+  corrupt = i64[incumbent.size()]
+  z = ffcp_copy_words(corrupt, incumbent, incumbent.size())
+  corrupt[corrupt[47]] = 0
+  z = followup_check("invalid incumbent ignored", ffrc_preserve_island_best(before, corrupt, 2, 2, 5) == 0)
+  case_number += 1
+
 labels = ["2x3x4", "2x2x9", "4x6x7"]
 shape = 0 ## i64
 while shape < labels.size()

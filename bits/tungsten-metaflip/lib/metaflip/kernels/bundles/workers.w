@@ -5,6 +5,7 @@
 # kernels into itself.
 
 use ../metallib_cache
+use ../build_cache
 
 -> ffgwb_shell_quote(text) (String)
   "'" + text.replace("'", "'\"'\"'") + "'"
@@ -14,10 +15,7 @@ use ../metallib_cache
   "cd " + ffgwb_shell_quote(root) + " && TUNGSTEN_GPU_DIALECTS=none TUNGSTEN_LL_PATH=" + ffgwb_shell_quote(binary + ".ll") + " TUNGSTEN_METAL_PATH=" + ffgwb_shell_quote(ffmc_generated_source_path(binary)) + " " + ffgwb_shell_quote(ffmc_tungsten(root)) + " -o " + ffgwb_shell_quote(binary) + " " + ffgwb_shell_quote(source) + " --release --fast --lto"
 
 -> ffm_build(root, binary) (String String) i64
-  built = system(ffm_build_command(root, binary))
-  if !built
-    return 0
-  ffmc_build_or_source(root, ffmc_generated_source_path(binary), binary)
+  ffmk_build(root, binary, [root + "/kernels/workers/mitm.w", root + "/kernels/mitm.w", root + "/kernels/bundles/workers.w"], ffm_build_command(root, binary), 1)
 
 -> ffm_metallib_path(binary) (String)
   ffmc_library_path(binary)
@@ -50,10 +48,7 @@ use ../metallib_cache
   "cd " + ffgwb_shell_quote(root) + " && TUNGSTEN_GPU_DIALECTS=none TUNGSTEN_LL_PATH=" + ffgwb_shell_quote(binary + ".ll") + " TUNGSTEN_METAL_PATH=" + ffgwb_shell_quote(ffmc_generated_source_path(binary)) + " " + ffgwb_shell_quote(ffmc_tungsten(root)) + " -o " + ffgwb_shell_quote(binary) + " " + ffgwb_shell_quote(source) + " --release --fast --lto"
 
 -> ffpc_build(root, binary) (String String) i64
-  built = system(ffpc_build_command(root, binary))
-  if !built
-    return 0
-  ffmc_build_or_source(root, ffmc_generated_source_path(binary), binary)
+  ffmk_build(root, binary, [root + "/kernels/workers/constraint.w", root + "/kernels/constraint.w", root + "/kernels/bundles/workers.w"], ffpc_build_command(root, binary), 1)
 
 -> ffpc_metallib_path(binary) (String)
   ffmc_library_path(binary)
@@ -74,10 +69,7 @@ use ../metallib_cache
   "cd " + ffgwb_shell_quote(root) + " && TUNGSTEN_GPU_DIALECTS=none TUNGSTEN_LL_PATH=" + ffgwb_shell_quote(binary + ".ll") + " TUNGSTEN_METAL_PATH=" + ffgwb_shell_quote(ffmc_generated_source_path(binary)) + " " + ffgwb_shell_quote(ffmc_tungsten(root)) + " -o " + ffgwb_shell_quote(binary) + " " + ffgwb_shell_quote(source) + " --release --fast --lto"
 
 -> ffx_build(root, binary) (String String) i64
-  built = system(ffx_build_command(root, binary))
-  if !built
-    return 0
-  ffmc_build_or_source(root, ffmc_generated_source_path(binary), binary)
+  ffmk_build(root, binary, [root + "/kernels/workers/kxor.w", root + "/kernels/kxor.w", root + "/kernels/mitm.w", root + "/kernels/bundles/workers.w"], ffx_build_command(root, binary), 1)
 
 -> ffx_metallib_path(binary) (String)
   ffmc_library_path(binary)
@@ -101,10 +93,7 @@ use ../metallib_cache
   "cd " + ffgwb_shell_quote(root) + " && TUNGSTEN_GPU_DIALECTS=none TUNGSTEN_LL_PATH=" + ffgwb_shell_quote(binary + ".ll") + " TUNGSTEN_METAL_PATH=" + ffgwb_shell_quote(ffmc_generated_source_path(binary)) + " " + ffgwb_shell_quote(ffmc_tungsten(root)) + " -o " + ffgwb_shell_quote(binary) + " " + ffgwb_shell_quote(source) + " --release --fast --lto"
 
 -> ffsrp_build(root, binary) (String String) i64
-  built = system(ffsrp_build_command(root, binary))
-  if !built
-    return 0
-  ffmc_build_or_source(root, ffmc_generated_source_path(binary), binary)
+  ffmk_build(root, binary, [root + "/kernels/workers/span_refactor.w", root + "/kernels/span_refactor.w", root + "/strategies/span_refactor.w", root + "/strategies/block_interior.w", root + "/kernels/bundles/workers.w"], ffsrp_build_command(root, binary), 1)
 
 -> ffsrp_metallib_path(binary) (String)
   ffmc_library_path(binary)
@@ -147,10 +136,7 @@ use ../metallib_cache
   "cd " + ffgwb_shell_quote(root) + " && TUNGSTEN_GPU_DIALECTS=none TUNGSTEN_LL_PATH=" + ffgwb_shell_quote(binary + ".ll") + " TUNGSTEN_METAL_PATH=" + ffgwb_shell_quote(ffmc_generated_source_path(binary)) + " " + ffgwb_shell_quote(ffmc_tungsten(root)) + " -o " + ffgwb_shell_quote(binary) + " " + ffgwb_shell_quote(source) + " --release --fast --lto"
 
 -> fflrsp_build(root, binary) (String String) i64
-  built = system(fflrsp_build_command(root, binary))
-  if !built
-    return 0
-  ffmc_build_or_source(root, ffmc_generated_source_path(binary), binary)
+  ffmk_build(root, binary, [root + "/kernels/workers/low_rank_shear.w", root + "/kernels/low_rank_shear.w", root + "/strategies/low_rank_shear.w", root + "/strategies/shear.w", root + "/kernels/bundles/workers.w"], fflrsp_build_command(root, binary), 1)
 
 -> fflrsp_metallib_path(binary) (String)
   ffmc_library_path(binary)

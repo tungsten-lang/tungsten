@@ -22,10 +22,16 @@ use ../paths
   1
 
 -> ffrf_atomic(path, body, writer) (String String String) i64
-  tmp = path + ".tmp." + writer
+  # Role labels are shared across campaigns. Reserve a unique sibling so a
+  # losing writer can never modify an inode another writer already published.
+  tmp = file_temp_for(path)
+  if tmp == nil
+    return 0
   if !write_file(tmp, body)
+    z = file_unlink(tmp)
     return 0
   if !ccall("__w_rename", tmp, path)
+    z = file_unlink(tmp)
     return 0
   1
 

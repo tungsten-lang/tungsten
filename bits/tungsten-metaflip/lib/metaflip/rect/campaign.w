@@ -90,6 +90,26 @@ use doors
     return 0
   ffrc_better(ffr_best_rank(candidate), ffr_best_bits(candidate), ffr_best_rank(incumbent), ffr_best_bits(incumbent))
 
+# Preserve the newer island best without changing a delayed producer's
+# alternate current terms, RNG, move count, or hash tables. Both views must
+# still pass exact verification. Density delta is current minus best.
+-> ffrc_preserve_island_best(candidate, incumbent, n, m, p) (i64[] i64[] i64 i64 i64) i64
+  if ffrc_door_improvement(incumbent, candidate, n, m, p) != 1
+    return 0
+  rank = ffr_best_rank(incumbent) ## i64
+  bits = ffr_best_bits(incumbent) ## i64
+  old_bits = ffr_best_bits(candidate) ## i64
+  i = 0 ## i64
+  while i < rank
+    candidate[candidate[47] + i] = incumbent[incumbent[47] + i]
+    candidate[candidate[48] + i] = incumbent[incumbent[48] + i]
+    candidate[candidate[49] + i] = incumbent[incumbent[49] + i]
+    i += 1
+  candidate[7] = rank
+  candidate[36] = bits
+  candidate[64] = candidate[64] + old_bits - bits
+  1
+
 -> ffrc_shell_quote(text) (String)
   "'" + text.replace("'", "'\"'\"'") + "'"
 
@@ -1581,6 +1601,7 @@ use doors
     while lane < walkers
       if pending_flags[lane] != 0 && pool.busy_lane(lane) == 0
         installed = pending_states[lane]
+        z = ffrc_preserve_island_best(installed, states[lane], n, m, p)
         states[lane] = installed
         island_sources[lane] = pending_sources[lane]
         island_last_rank[lane] = ffr_best_rank(installed)

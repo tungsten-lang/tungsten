@@ -1,6 +1,7 @@
 # Build and launch glue for the one-process bounded exact-move CPU pool.
 
 use ../metallib_cache
+use ../build_cache
 
 -> ffpeb_shell_quote(text) (String)
   "'" + text.replace("'", "'\"'\"'") + "'"
@@ -10,9 +11,7 @@ use ../metallib_cache
   "cd " + ffpeb_shell_quote(root) + " && TUNGSTEN_GPU_DIALECTS=none TUNGSTEN_LL_PATH=" + ffpeb_shell_quote(binary + ".ll") + " " + ffpeb_shell_quote(ffmc_tungsten(root)) + " compile " + ffpeb_shell_quote(source) + " --release --fast --lto --out " + ffpeb_shell_quote(binary)
 
 -> ffpeb_build(root, binary) (String String) i64
-  if system(ffpeb_build_command(root, binary))
-    return 1
-  0
+  ffmk_build(root, binary, [root + "/kernels/workers/pooled_exact.w", root + "/kernels/pooled_exact.w", root + "/strategies/pooled_exact.w", root + "/strategies/mode_locked.w", root + "/strategies/debt_mitm.w", root + "/strategies/dynamic_syzygy.w"], ffpeb_build_command(root, binary), 0)
 
 -> ffpeb_plan_valid(n, kind, budget, nonce) (i64 i64 i64 i64) i64
   if n < 2 || n > 7

@@ -94,7 +94,9 @@ shape starts, so visits can take slightly longer than a minute, especially
 on a cold GPU cache. The foreground process replaces its search arena between
 visits; it does not accumulate workers or memory from completed campaigns.
 Checkpoints and banks remain separate for each shape and are reloaded on
-later visits. `q` or Ctrl-C stops the entire cycle, not just the current shape.
+later visits. `n` ends the current visit early (exact shutdown and
+checkpoint) and moves to the next shape; `q` or Ctrl-C stops the entire
+cycle, not just the current shape.
 
 Use `--tensor 5x5` to stay on one shape, or `--tensor all` to explicitly cycle.
 `--cycle-secs N` changes the per-shape ceiling; `--cycle-shapes

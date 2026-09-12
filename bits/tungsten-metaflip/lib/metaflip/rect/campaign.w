@@ -617,7 +617,7 @@ use doors
   if timeline_count <= 1
     rows.push("  " + ff_tui_dim("no adoptions yet this run — a new best rank plots o, a density-only best plots *"))
   rows.push("")
-  rows.push("  " + ff_tui_dim("rank → asymptotic exponent (want ↓) · density → base-case ops (want ↓) · space=reset naive · w=reseed anchor · q/Ctrl-C stops"))
+  rows.push("  " + ff_tui_dim("rank → asymptotic exponent (want ↓) · density → base-case ops (want ↓) · space=reset naive · w=reseed anchor · n=next shape · q/Ctrl-C stops"))
   rows
 
 # Paint one frame: home + erase-to-EOL per row + erase-below, inside a DEC
@@ -1094,6 +1094,7 @@ use doors
   if mitm_failures > 0
     status_degraded = 1
   stop_key = 0 ## i64
+  next_key = 0 ## i64
   if tui != 0
     ccall("w_term_raw_enable")
   gpu_seed_path = "/tmp/metaflip_rect_seed_" + run_tag + "_" + ffrgb_tag(n, m, p) + ".txt"
@@ -1477,6 +1478,10 @@ use doors
         if key == 32 || key == 119 || key == 87
           reset_key = key
           drain_request = 1
+        if key == 110 || key == 78
+          next_key = 1
+          flash_text = "next shape — draining the GPU epoch and saving state"
+          flash_until_ms = now_ms + 10000
         if key == 3 || key == 113 || key == 81
           if stop_key == 1
             ccall("w_term_raw_disable")
@@ -1660,6 +1665,10 @@ use doors
     if stop_key != 0
       stop_now = 1
     if ccall("__w_interrupted") != 0
+      stop_now = 1
+    # `n`: finish this visit like an elapsed deadline; stop_requested stays 0
+    # so the cycle driver continues with the next shape.
+    if next_key != 0
       stop_now = 1
     if stop_now != 0
       stopping = 1

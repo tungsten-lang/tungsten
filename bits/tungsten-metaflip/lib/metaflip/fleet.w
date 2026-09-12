@@ -1781,7 +1781,7 @@ use paths
   if timeline_count <= 1
     rows.push("  " + ff_tui_dim("no adoptions yet this run — a new best rank plots o, a density-only best plots *"))
   rows.push("")
-  rows.push("  " + ff_tui_dim("rank → asymptotic exponent (want ↓) · density → base-case ops (want ↓) · space=reset naive · w=reseed anchor · q/Ctrl-C stops"))
+  rows.push("  " + ff_tui_dim("rank → asymptotic exponent (want ↓) · density → base-case ops (want ↓) · space=reset naive · w=reseed anchor · n=next shape · q/Ctrl-C stops"))
 
   # One atomic write per frame: home + erase-to-EOL per row + erase-below,
   # wrapped in DEC 2026 synchronized update.  No full-screen clear, no flicker.
@@ -3571,6 +3571,9 @@ interrupted = 0 ## i64
 # Raw keyboard for TUI controls (no-op when stdin is not a tty).  Raw mode
 # clears ISIG, so Ctrl-C arrives as byte 3 and is handled in the key loop.
 stop_key = 0 ## i64
+# `n` ends the current visit cleanly (drain, checkpoint) without stopping
+# the cycle, so the driver moves on to the next shape.
+next_key = 0 ## i64
 flash_text = ""
 flash_until_ms = 0 ## i64
 if TUI == 1
@@ -4021,6 +4024,10 @@ while running == 1
         if SEED_NAIVE == 0
           flash_text = "fleet reseeded on the record anchor (r" + ffw_best_rank(anchor).to_s + ")"
         flash_until_ms = now_ms + 4000
+      if key == 110 || key == 78
+        next_key = 1
+        flash_text = "next shape — draining GPU epochs and saving state"
+        flash_until_ms = now_ms + 10000
       if key == 3 || key == 113 || key == 81
         if stop_key == 1
           ccall("w_term_raw_disable")
@@ -5620,6 +5627,8 @@ while running == 1
     if elapsed_s >= MAX_SECS
       cpu_stopping = 1
   if CYCLE_DEADLINE_MS > 0 && ccall("__w_clock_ms") >= CYCLE_DEADLINE_MS
+    cpu_stopping = 1
+  if next_key != 0
     cpu_stopping = 1
   if STOP_ON_RECORD == 1
     if ffw_best_rank(best) < RECORD

@@ -72,6 +72,46 @@ def check_terminal_stop(root, shape, key):
             os.waitpid(pid, 0)
         os.close(master)
 
+def check_terminal_next(root, shapes):
+    """`n` ends the current visit early and the cycle continues with the next shape."""
+    path = root / ('next-' + shapes.replace(',', '_'))
+    status = path / 'status.txt'
+    pid, master = pty.fork()
+    if pid == 0:
+        os.execv(str(BINARY), [str(BINARY), '--runtime-root', str(RUNTIME), '--cycle-shapes', shapes,
+                              '--cycle-secs', '60', '--secs', '12', '-J', '1', '--steps', '200', '--no-gpu', '--tui',
+                              '--state-dir', str(path), '--status', str(status)])
+    output = bytearray()
+    sent = False
+    done = False
+    started = time.monotonic()
+    deadline = started + 45
+    try:
+        while time.monotonic() < deadline:
+            readable, _, _ = select.select([master], [], [], 0.05)
+            if readable:
+                try:
+                    output.extend(os.read(master, 65536))
+                except OSError:
+                    pass
+            live = fields(status)
+            if not sent and live.get('producer_state') in ('LIVE', 'running'):
+                os.write(master, b'n')
+                sent = True
+            waited, code = os.waitpid(pid, os.WNOHANG)
+            if waited:
+                assert os.waitstatus_to_exitcode(code) == 0, output[-6000:].decode(errors='replace')
+                done = True
+                break
+        text = output.decode(errors='replace')
+        assert sent and done, text[-6000:]
+        first, second = shapes.split(',')
+        assert 'tensor=' + second in text, text[-6000:]
+        assert time.monotonic() - started < 40, 'n did not cut the 60 s visit short'
+    finally:
+        os.close(master)
+
+
 
 with tempfile.TemporaryDirectory(prefix='metaflip-cycle-check-') as temp:
     root = Path(temp)
@@ -130,5 +170,6 @@ with tempfile.TemporaryDirectory(prefix='metaflip-cycle-check-') as temp:
     for shape in ('2x2', '2x2x5'):
         check_terminal_stop(root, shape, b'q')
         check_terminal_stop(root, shape, b'\x03')
+    check_terminal_next(root, '2x2x5,2x2')
 
-print('PASS mixed cycling, resume paths, pinning, default dwell, q and Ctrl-C')
+print('PASS mixed cycling, resume paths, pinning, default dwell, n, q and Ctrl-C')

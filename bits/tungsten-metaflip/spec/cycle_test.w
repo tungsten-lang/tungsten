@@ -15,7 +15,7 @@ if av.size() > 0 && av[0] == "exec-child"
   exit(0)
 
 labels = ffcy_default_shapes()
-if labels.size() != 34 || labels[0] != "2x2" || labels[5] != "7x7" || labels[33] != "5x6x7"
+if labels.size() != 43 || labels[0] != "2x2" || labels[5] != "7x7" || labels[14] != "16x16" || labels[42] != "5x6x7"
   exit(1)
 i = 0 ## i64
 while i < labels.size()
@@ -26,9 +26,9 @@ while i < labels.size()
     j += 1
   i += 1
 parsed = []
-if ffcy_parse_shapes("05X05, 2x2x5,7x7", parsed) != 3 || parsed[0] != "5x5"
+if ffcy_parse_shapes("05X05, 2x2x5,7x7,8x8,16x16", parsed) != 5 || parsed[0] != "5x5" || parsed[4] != "16x16"
   exit(1)
-bad = ["5x5,05x05", "4x4,", ",4x4", "4x4,,5x5", "4x4, ,5x5", "8x8", "5junkx5junk"]
+bad = ["5x5,05x05", "4x4,", ",4x4", "4x4,,5x5", "4x4, ,5x5", "17x17", "5junkx5junk"]
 i = 0
 while i < bad.size()
   invalid = []

@@ -80,10 +80,10 @@ semantics.
 Defaults are `-J max(logical CPUs - 2, 1)`, GPU enabled, TUI enabled, and
 `--secs 0` (no time limit). On an 18-core host this starts 16 CPU islands.
 Override them with `-J N`, `--no-gpu`, `--no-tui`, or `--secs N`.
-With no campaign selector, MetaFlip cycles through **all 34 supported live
-profiles**: squares 2x2 through 7x7, then the 28 supported rectangular
-profiles. Unresolved shapes get **60 seconds of rank search**, using the full
-configured CPU and GPU allocation. Proved-optimal shapes instead get
+With no campaign selector, MetaFlip cycles through **all 43 supported live
+profiles**: squares 2x2 through 16x16, then the 28 supported rectangular
+profiles. Unresolved shapes get **60 seconds of rank search**, using the
+configured CPU allocation and GPU where supported. Proved-optimal shapes instead get
 **composition-parent visits**: initially 15 seconds, falling to 7 then 3 after
 completed visits without a downstream gain, or rising to 30 after a verified
 downstream rank decrease. Pending refinement work is not counted as failure.
@@ -110,6 +110,25 @@ seed/record/checkpoint/near-bank/GPU-binary/Core-ML overrides require an explici
 `--tensor SHAPE`, preventing accidental reuse across incompatible shapes.
 Specialized GPU workers are built and cached on first use. Press `q` or
 Ctrl-C in the TUI to stop.
+
+Squares **8x8 through 16x16 are CPU-only**: they use private CPU islands
+with packed multiword factor storage, beyond the narrow/Metal engine's
+current 7x7 limit. `-J` has the same default and override; a requested GPU
+is explicitly reported as unavailable (`gpu_supported=0`). For example:
+
+```sh
+bin/metaflip --tensor 16x16
+bin/metaflip --cycle-shapes 8x8,12x12,16x16 --cycle-secs 60
+```
+
+These workers start from full-tensor-verified Kronecker products/projections
+of bundled smaller seeds (or `--naive`), perform multiword pair flips and
+bounded splits, and exactly verify every promoted checkpoint. Large-square
+`--seed` and `best.txt` use canonical **MFW1** hexadecimal masks, not the
+narrow decimal-mask format. A malformed checkpoint is rejected without
+overwriting it, and `--naive` never replaces a better saved result. The new
+backend does not yet run GPU, Core ML, or the small-shape refinement/portfolio
+strategies. Composed starting ranks are not claims of new records.
 
 For the solved 2x2 parent, a cycle visit enumerates all 216 GL(2,2)^3 basis
 codes (36 full-identity-distinct rank-seven tensors) into the durable exact

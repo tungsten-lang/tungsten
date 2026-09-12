@@ -23,6 +23,7 @@ use kernels/bundles/simd
 use rect
 use kernels/bundles/rect
 use rect/campaign
+use wide/campaign
 use rect/portfolio
 use compose
 use fleet/seven_by_seven
@@ -1802,7 +1803,8 @@ use paths
   << ""
   << "Campaign selection:"
   << "  (default)               cycle all supported shapes, 60 seconds each"
-  << "  --tensor SHAPE          pin one square 2x2..7x7 or rectangular shape"
+  << "  --tensor SHAPE          pin one square 2x2..16x16 or rectangular shape"
+  << "                          squares 8x8..16x16 use packed CPU workers (no GPU kernel)"
   << "  --tensor all            explicitly select the default cycling mode"
   << "  --cycle-shapes LIST     cycle a comma-separated square/rectangle subset"
   << "  --cycle-secs N          per-shape time ceiling (default: 60)"
@@ -2248,8 +2250,8 @@ if RECT_RESTART_NONCE < 0
 if RECT_DOOR_TICKET < 0 && RECT_DOOR_EXPLICIT != 0
   << "metaflip: --rect-door-ticket must be nonnegative"
   exit(2)
-if RECT_PORTFOLIO == 0 && RECT_MODE == 0 && (N < 2 || N > 7)
-  << "metaflip: --tensor must be square 2x2 through 7x7 or a supported rectangular profile (2x2x5, 2x2x6, 2x3x4, 2x3x5, 2x4x5, 2x5x6, 3x3x4, 3x3x5, 3x4x4, 3x4x5, 3x4x6, 3x4x7, 3x5x5, 3x5x6, 3x5x7, 4x4x5, 4x4x6, 4x5x5, 4x5x6, 4x5x7, 4x5x8, 4x6x6, 4x6x7, 4x6x8, 5x6x7)"
+if RECT_PORTFOLIO == 0 && RECT_MODE == 0 && (N < 2 || N > 16)
+  << "metaflip: --tensor must be square 2x2 through 16x16 or a supported rectangular profile (2x2x5, 2x2x6, 2x3x4, 2x3x5, 2x4x5, 2x5x6, 3x3x4, 3x3x5, 3x4x4, 3x4x5, 3x4x6, 3x4x7, 3x5x5, 3x5x6, 3x5x7, 4x4x5, 4x4x6, 4x5x5, 4x5x6, 4x5x7, 4x5x8, 4x6x6, 4x6x7, 4x6x8, 5x6x7)"
   exit(2)
 if RECT_PORTFOLIO != 0
   TENSOR_LABEL = "rect"
@@ -2424,6 +2426,17 @@ if RECT_MODE == 1
     if ffrpo_status_i64(cycle_status, "stop_requested", 1) == 0
       if CYCLE_PARENT != 0 && CYCLE_POLICY == "adaptive" && STATUS_EXPLICIT == 0
         z = ffcy_parent_complete(STATUS_PATH + ".refinement",parent_meta[2])
+      exit(ffcy_continue(System.executable_path(), av, CYCLE_POSITION, CYCLE_DEADLINE_MS, value_options))
+  exit(result)
+
+if N >= 8
+  if GPU_BINARY != "" || RECORD_OVERRIDE != 0 || STOP_ON_RECORD != 0 || STRATEGY != "islands" || CPU_WORK_SPEC != "" || CPU_WANDER_SPEC != ""
+    << "metaflip: packed squares currently support CPU islands, not GPU binaries, record targets or narrow CPU portfolios"
+    exit(2)
+  result = ffws_run(N, RUNTIME_ROOT, SEED_PATH, BEST_PATH, STATUS_PATH, J, STEPS, MAX_ROUNDS, MAX_SECS, SEED_NAIVE, SEED_NONCE, DSLACK, QUIET, TUI, GPU, CYCLE_FIELDS, CYCLE_CAPTION, CYCLE_DEADLINE_MS) ## i64
+  if CYCLE_MODE != 0 && result == 0
+    cycle_status = read_file(STATUS_PATH)
+    if ffrpo_status_i64(cycle_status, "stop_requested", 1) == 0
       exit(ffcy_continue(System.executable_path(), av, CYCLE_POSITION, CYCLE_DEADLINE_MS, value_options))
   exit(result)
 

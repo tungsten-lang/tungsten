@@ -152,10 +152,10 @@ with tempfile.TemporaryDirectory(prefix='metaflip-cycle-check-') as temp:
     # Default uses the adaptive parent slice; uniform restores the full ceiling.
     default = run(['--secs', '1', '--steps', '100', '-J', '1', '--no-gpu', '--no-tui',
                    '--state-dir', str(root / 'default')])
-    assert default.returncode == 0 and 'cycle_count=34 cycle_seconds=15' in default.stdout, default.stdout
+    assert default.returncode == 0 and 'cycle_count=43 cycle_seconds=15' in default.stdout, default.stdout
     uniform = run(['--cycle-policy', 'uniform', '--secs', '1', '-J', '1', '--no-gpu', '--no-tui',
                    '--state-dir', str(root / 'uniform')])
-    assert uniform.returncode == 0 and 'cycle_count=34 cycle_seconds=60' in uniform.stdout, uniform.stdout
+    assert uniform.returncode == 0 and 'cycle_count=43 cycle_seconds=60' in uniform.stdout, uniform.stdout
     unresolved = run(['--cycle-shapes', '3x3', '--secs', '1', '--steps', '100', '-J', '1', '--no-gpu', '--no-tui',
                       '--state-dir', str(root / 'unresolved')])
     assert unresolved.returncode == 0 and 'search_purpose=rank-search proven_rank=0' in unresolved.stdout, unresolved.stdout
@@ -167,9 +167,10 @@ with tempfile.TemporaryDirectory(prefix='metaflip-cycle-check-') as temp:
     assert 'tensor=2x2x5' in shared_run.stdout
     assert fields(shared)['refine_failures'] == '0', fields(shared)
     assert Path(str(shared)+'.refinement/composition/utility/source').read_text() == 'mixed\n'
-    for shape in ('2x2', '2x2x5'):
+    for shape in ('2x2', '2x2x5', '8x8'):
         check_terminal_stop(root, shape, b'q')
         check_terminal_stop(root, shape, b'\x03')
     check_terminal_next(root, '2x2x5,2x2')
+    check_terminal_next(root, '16x16,8x8')
 
 print('PASS mixed cycling, resume paths, pinning, default dwell, n, q and Ctrl-C')

@@ -96,6 +96,10 @@ use composition/utility
 
 -> ffcy_default_shapes()
   labels = ["2x2", "3x3", "4x4", "5x5", "6x6", "7x7"]
+  square = 8 ## i64
+  while square <= 16
+    labels.push(square.to_s() + "x" + square.to_s())
+    square += 1
   n = 2 ## i64
   while n <= 7
     m = n ## i64
@@ -117,7 +121,7 @@ use composition/utility
   while i < parts.size()
     label = parts[i].strip().downcase
     n = ffcli_parse_square_tensor(label) ## i64
-    if n >= 2 && n <= 7
+    if n >= 2 && n <= 16
       label = n.to_s() + "x" + n.to_s()
     elsif ffrp_supported_label(label) == 0
       return 0

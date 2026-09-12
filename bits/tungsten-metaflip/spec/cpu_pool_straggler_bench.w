@@ -68,6 +68,7 @@ while lane < workers
   lane += 1
 
 round_steps = i64[workers]
+cadences = i64[workers]
 worker_modes = i64[workers]
 epoch_eligible = i64[workers]
 epoch_scratch = i64[workers]
@@ -112,7 +113,7 @@ while lane < workers
       round_steps[lane] = 1
   start = Channel.new(1)
   starts.push(start)
-  threads.push(ffcp_spawn(states, lane, mode, round_steps, core_slots, controls, recent, recent_capacity, stats, elapsed_ms, start, done))
+  threads.push(ffcp_spawn(states, lane, mode, round_steps, cadences, core_slots, controls, recent, recent_capacity, stats, elapsed_ms, start, done))
   lane += 1
 
 completion = i64[workers]

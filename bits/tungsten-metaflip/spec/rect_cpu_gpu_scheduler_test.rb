@@ -29,13 +29,16 @@ Dir.mktmpdir("metaflip-cpu-gpu-") do |root|
     %w[exact_rejects gpu_failures gpu_degraded side_archive_rejects side_archive_write_failures].each do |key|
       raise "#{mode.inspect}: #{key}=#{fields[key]}" unless fields.fetch(key, "0") == "0"
     end
-    followups = fields.fetch("cpu_followup_batches").to_i
-    extra = fields.fetch("cpu_followup_moves").to_i
+    duty = fields.fetch("cpu_duty").to_i
+    ticks = fields.fetch("cpu_ticks").to_i
     cpu = fields.fetch("cpu_moves").to_i
+    raise "cpu_duty out of range: #{duty}" unless (0..100).cover?(duty)
+    raise "no coordinator ticks" unless ticks.positive?
     if gpu && mode != "barrier"
-      raise "no CPU work overlapped GPU" unless followups.positive? && extra.positive? && cpu > extra
-    else
-      raise "unexpected followup work" unless followups.zero? && extra.zero?
+      # Rolling epochs: islands are published and relaunched independently of
+      # the GPU epoch, so the coordinator ticks more often than it collects
+      # whole rounds.
+      raise "islands parked behind the GPU epoch" unless ticks > 2
     end
     if gpu
       raise "GPU did not execute" unless fields.fetch("gpu_moves").to_i.positive? && fields["gpu_ready"] == "1"
@@ -45,6 +48,6 @@ Dir.mktmpdir("metaflip-cpu-gpu-") do |root|
     witnesses = Dir.glob(File.join(directory, "checkpoints/gf2/*/*.txt"))
     raise "no persisted witnesses" if witnesses.empty?
     witnesses.each { |path| MetaflipTensorVerifier.verify(path, 2, 5, 6) }
-    puts "PASS rectangular #{gpu ? 'CPU+GPU' : 'CPU-only'} policy=#{mode || 'default'} extra_batches=#{followups} extra_moves=#{extra} exact_witnesses=#{witnesses.size}"
+    puts "PASS rectangular #{gpu ? 'CPU+GPU' : 'CPU-only'} policy=#{mode || 'default'} cpu_duty=#{duty} ticks=#{ticks} exact_witnesses=#{witnesses.size}"
   end
 end

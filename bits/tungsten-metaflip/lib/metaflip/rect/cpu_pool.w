@@ -1,10 +1,11 @@
-# Persistent CPU worker pool for rectangular Metaflip campaigns.
+# Rectangular island cadence helpers.
 #
-# Every island owns one OS thread for the lifetime of the campaign. The
-# coordinator publishes the current three-phase budget, then releases each
-# worker through its private start channel. A shared completion channel forms
-# the round barrier. Workers reread `state_slots[slot]` after every acquire so
-# a coordinator rebase or manual reseed takes effect on the next epoch.
+# Rectangular islands run on the fleet's rolling-epoch pool
+# (`fleet/cpu_pool.w`, worker mode 4): every lane owns a private live buffer,
+# publishes its endpoint on completion, and is relaunched as soon as the
+# coordinator has taken that endpoint in — no round barrier, no straggler
+# wait. This file keeps the per-lane split-cadence policy and the cold-cadence
+# walkers that mode 4 selects.
 
 # The 2x2x9 frontier benefits from a colder rank-debt split cadence, but the
 # measured effect is continuation/side-door value rather than a direct record
@@ -67,79 +68,3 @@
       z = ffw_advance_zone(st)
     i += 1
   st[7]
-
--> ffrcp_spawn(state_slots, slot, phase_moves, split_cadence, elapsed_ms, start_channel, done_channel)
-  Thread.new ->
-    running = 1 ## i64
-    while running == 1
-      command = start_channel.recv() ## i64
-      if command == 0
-        running = 0
-      if command != 0
-        worker_state = state_slots[slot]
-        t0 = ccall("__w_clock_ms") ## i64
-        result = 0 ## i64
-        if split_cadence == 2000
-          result = ffr_work(worker_state, phase_moves[0])
-          result = ffr_walk(worker_state, phase_moves[1])
-          result = ffr_wander(worker_state, phase_moves[2])
-        if split_cadence != 2000
-          result = ffrcp_work_cadence(worker_state, phase_moves[0], split_cadence)
-          result = ffrcp_walk_cadence(worker_state, phase_moves[1], split_cadence)
-          result = ffrcp_wander_cadence(worker_state, phase_moves[2], split_cadence)
-        elapsed_ms[slot] = ccall("__w_clock_ms") - t0
-        # Keep the search result live through the epoch without boxing it into
-        # the channel; all mutable state already resides in the stable slot.
-        if result < 0
-          elapsed_ms[slot] = elapsed_ms[slot]
-        done_channel.send(slot)
-    0
-
--> ffrcp_stop(start_channels, threads, workers)
-  lane = 0 ## i64
-  while lane < workers
-    start_channels[lane].send(0)
-    lane += 1
-  lane = 0
-  while lane < workers
-    result = ccall("w_thread_join_release", threads[lane])
-    threads[lane] = nil
-    lane += 1
-  1
-
-# Quotas and state slots stay immutable from dispatch through collect.
-# Totals span all CPU batches in one GPU epoch.
--> ffrcp_dispatch(starts, elapsed_ms, workers)
-  lane = 0 ## i64
-  while lane < workers
-    elapsed_ms[lane] = 0
-    starts[lane].send(1)
-    lane += 1
-  1
-
--> ffrcp_collect(done_channel, elapsed_ms, total_ms, workers)
-  slowest = 0 ## i64
-  lane = 0 ## i64
-  while lane < workers
-    slot = done_channel.recv() ## i64
-    if slot >= 0 && slot < workers
-      total_ms[slot] += elapsed_ms[slot]
-      if elapsed_ms[slot] > slowest
-        slowest = elapsed_ms[slot]
-    lane += 1
-  slowest
-
-# Never enlarge a follow-up beyond the measured first batch. Divide longer
-# batches into roughly <=200 ms pieces without computing steps*target_ms.
--> ffrcp_followup_steps(steps, wall_ms) (i64 i64) i64
-  if steps < 1
-    return 0
-  if wall_ms <= 200
-    return steps
-  divisor = wall_ms / 200 ## i64
-  if wall_ms % 200 != 0
-    divisor += 1
-  next_steps = steps / divisor ## i64
-  if next_steps < 1
-    next_steps = 1
-  next_steps

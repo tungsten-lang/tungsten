@@ -38,7 +38,8 @@ controls = i64[7]
 recent = i64[512]
 stats = i64[9]
 elapsed = i64[2]
-pool = MetaflipCPUPool.new(states, size, modes, steps, core, controls, recent, 512, stats, elapsed)
+cadences = i64[2]
+pool = MetaflipCPUPool.new(states, size, modes, steps, core, controls, recent, 512, stats, elapsed, cadences)
 z = pool.launch_idle()
 # Mutating the coordinator's next quota cannot affect an in-flight epoch.
 steps[0] = 2048
@@ -113,7 +114,8 @@ while i < 4
   special_steps[i] = 50000
   special_modes[i] = i
   i += 1
-special = MetaflipCPUPool.new(special_states, size, special_modes, special_steps, core, controls, special_recent, 512, special_stats, special_elapsed)
+special_cadences = i64[special_states.size()]
+special = MetaflipCPUPool.new(special_states, size, special_modes, special_steps, core, controls, special_recent, 512, special_stats, special_elapsed, special_cadences)
 z = special.launch_idle()
 controls[0] = 0 - 1
 core[0] = 0

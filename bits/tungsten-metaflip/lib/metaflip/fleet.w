@@ -3610,7 +3610,8 @@ while i < J
   if i == core_fringe_index
     cpu_round_steps[i] = core_round_steps
   i += 1
-cpu_pool = MetaflipCPUPool.new(states, STATE_SIZE, cpu_modes, cpu_round_steps, cpu_core_slots, racer_controls, cycle_recent, cycle_recent_capacity, cycle_stats, cpu_elapsed_ms)
+cpu_cadences = i64[J]
+cpu_pool = MetaflipCPUPool.new(states, STATE_SIZE, cpu_modes, cpu_round_steps, cpu_core_slots, racer_controls, cycle_recent, cycle_recent_capacity, cycle_stats, cpu_elapsed_ms, cpu_cadences)
 cpu_ready = cpu_pool.ready()
 cpu_threads = cpu_pool.threads()
 cpu_stopping = 0 ## i64

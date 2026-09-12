@@ -3,8 +3,11 @@
 # This is deliberately separate from the square coordinator's hot path.  A
 # rectangular `--tensor` dispatch enters here before square state allocation;
 # square 3x3..7x7 runs therefore pay no lane, memory, or scheduling overhead.
-# CPU islands keep independent states across epochs.  One island is rebased
-# after a fleet-best adoption, leaving the other islands in their old basins.
+# CPU islands keep independent states across epochs and walk on the fleet's
+# rolling-epoch pool: an island is relaunched the moment its endpoint has
+# been taken in, never waiting on a straggler, a GPU epoch, or a bounded
+# child.  One island is rebased after a fleet-best adoption, leaving the
+# other islands in their old basins.
 # Profiles with a specialized Tungsten GPU worker run that engine beside
 # the CPU islands; CPU-only profiles are an expected capability, not DEGRADED.
 #
@@ -13,6 +16,7 @@
 # --no-tui keeps the machine-parseable RECT_STATUS/RECT_RESULT stream.
 
 use ../rect
+use ../fleet/cpu_pool
 use ../fleet/pair_cleanup
 use ../fleet/refinement
 use ../kernels/bundles/rect
@@ -271,6 +275,73 @@ use doors
   if next_steps > absolute_max
     next_steps = absolute_max
   next_steps
+
+# Island duty for telemetry: walked ms (published epochs) plus the in-flight
+# time of busy lanes, over walkers x wall.  Bounded to 100 for display.
+-> ffrc_cpu_duty_percent(walked_ms, inflight_ms, walkers, wall_ms) (i64 i64 i64 i64) i64
+  if walkers < 1 || wall_ms < 1
+    return 0
+  total = walked_ms + inflight_ms ## i64
+  if total < 0
+    total = 0
+  percent = total * 100 / (walkers * wall_ms) ## i64
+  if percent > 100
+    percent = 100
+  percent
+
+-> ffrc_inflight_ms(pool, launch_ms, walkers, now_ms) i64
+  total = 0 ## i64
+  lane = 0 ## i64
+  while lane < walkers
+    if pool.busy_lane(lane) != 0 && now_ms > launch_ms[lane]
+      total += now_ms - launch_ms[lane]
+    lane += 1
+  total
+
+-> ffrc_max_i64(values, count) (i64[] i64) i64
+  best = 0 ## i64
+  i = 0 ## i64
+  while i < count
+    if values[i] > best
+      best = values[i]
+    i += 1
+  best
+
+# Choose the `ordinal`-th (modulo count) published lane that has no deferred
+# replacement queued, or -1 when every ready lane is spoken for.
+-> ffrc_pick_ready_lane(ready, pending, walkers, ordinal) (i64[] i64[] i64 i64) i64
+  count = 0 ## i64
+  lane = 0 ## i64
+  while lane < walkers
+    if ready[lane] != 0 && pending[lane] == 0
+      count += 1
+    lane += 1
+  if count < 1
+    return 0 - 1
+  target = ordinal % count ## i64
+  if target < 0
+    target = 0 - target
+  lane = 0
+  while lane < walkers
+    if ready[lane] != 0 && pending[lane] == 0
+      if target == 0
+        return lane
+      target -= 1
+    lane += 1
+  0 - 1
+
+# Drain, park, and reap every island thread.  Publishing the final endpoints
+# first keeps `states` exact for the exit-door archive and final checkpoint.
+-> ffrc_pool_stop(pool, walkers) i64
+  z = pool.collect(1)
+  z = pool.stop_commands()
+  threads = pool.threads()
+  lane = 0 ## i64
+  while lane < walkers
+    result = ccall("w_thread_join_release", threads[lane])
+    threads[lane] = nil
+    lane += 1
+  1
 
 -> ffrc_binary_fresh(binary, source, glue) (String String String) i64
   binary_mtime = file_mtime_ns(binary)
@@ -909,37 +980,74 @@ use doors
   phase_moves = i64[3]
   cpu_epoch_steps = steps ## i64
   z = ffrp_campaign_budgets(cpu_epoch_steps, phase_moves)
-  elapsed_cpu = i64[walkers]
-  total_elapsed_cpu = i64[walkers]
-  cpu_start_channels = []
-  cpu_threads = []
-  cpu_done_channel = Channel.new(walkers)
+  # Rolling-epoch island pool (fleet worker mode 4).  Every lane owns a
+  # private live buffer; `states[lane]` is that lane's last published
+  # endpoint.  The coordinator reads any published endpoint at any time and
+  # replaces one only while its lane is parked (after publish, before the
+  # next launch); a busy lane's slot is a read-only snapshot.
+  cpu_steps = i64[walkers]
+  cpu_cadences = i64[walkers]
+  cpu_modes = i64[walkers]
+  cpu_elapsed = i64[walkers]
+  cpu_core_slots = i64[1]
+  cpu_controls = i64[7]
+  cpu_recent = i64[1]
+  cpu_stats = i64[9]
   lane = 0
   while lane < walkers
-    start_channel = Channel.new(1)
-    cpu_start_channels.push(start_channel)
-    split_cadence = ffrcp_split_cadence(n, m, p, lane, walkers, restart_door_ticket) ## i64
-    cpu_threads.push(ffrcp_spawn(states, lane, phase_moves, split_cadence, elapsed_cpu, start_channel, cpu_done_channel))
+    cpu_steps[lane] = cpu_epoch_steps
+    cpu_cadences[lane] = ffrcp_split_cadence(n, m, p, lane, walkers, restart_door_ticket)
+    cpu_modes[lane] = 4
+    lane += 1
+  pool = MetaflipCPUPool.new(states, state_size, cpu_modes, cpu_steps, cpu_core_slots, cpu_controls, cpu_recent, 1, cpu_stats, cpu_elapsed, cpu_cadences)
+  pool_ready = pool.ready()
+  lane_launch_ms = i64[walkers]
+  lane_epoch_ms = i64[walkers]
+  # Deferred slot replacements for lanes that were busy when a producer
+  # result (block-interior endpoint, GPU door improvement, leader rebase)
+  # arrived.  Installed at that lane's next intake, after its own endpoint
+  # has been gated, so no discovery is lost to a snapshot rewind.
+  pending_states = []
+  pending_sources = []
+  pending_flags = i64[walkers]
+  lane = 0
+  while lane < walkers
+    pending_states.push(nil)
+    pending_sources.push("")
     lane += 1
   cpu_moves = 0 ## i64
   cpu_ms = 0 ## i64
-  cpu_followup_batches = 0 ## i64
-  cpu_followup_moves = 0 ## i64
+  cpu_epoch_ms_max = 0 ## i64
   gpu_moves = 0 ## i64
   gpu_ms = 0 ## i64
+  gpu_epoch = 0 ## i64
+  gpu_retry_ms = 0 ## i64
+  gpu_alternate_lane = 0 - 1 ## i64
   mitm_attempts = 0 ## i64
   mitm_pairs = 0 ## i64
   mitm_ms = 0 ## i64
+  mitm_launch_ms = 0 ## i64
+  mitm_last_round = 0 - 1 ## i64
   block_stats = i64[7]
   block_ms = 0 ## i64
   block_period = 1 ## i64
+  block_last_round = 0 - 1 ## i64
+  block_lane = 0 - 1 ## i64
+  block_rejects_before = 0 ## i64
   exact_rejects = 0 ## i64
   gpu_internal_rejects = 0 ## i64
   gpu_reject_scratch = i64[state_size]
   gpu_reject_status = i64[8]
   sequence = 0 ## i64
   round = 0 ## i64
+  cpu_round = 0 ## i64
   running = 1 ## i64
+  stopping = 0 ## i64
+  drain_request = 0 ## i64
+  reset_key = 0 ## i64
+  rebase_pending = 0 ## i64
+  rebase_rotation = 0 ## i64
+  refine_last_round = 0 - 1 ## i64
   refinement_root = status_path + ".refinement"
   if naive_seed != 0
     refinement_root = refinement_root + "-naive-" + ccall("__w_clock_ms").to_s()
@@ -959,7 +1067,7 @@ use doors
 
   # Dashboard state: adoption counters, run-length sparkline histories, the
   # wall-time rank timeline, and raw keyboard controls.  Raw mode clears ISIG,
-  # so Ctrl-C arrives as byte 3 and is handled in the key loop between rounds.
+  # so Ctrl-C arrives as byte 3 and is handled in the key loop every tick.
   new_bests = 0 ## i64
   tie_bests = 0 ## i64
   cpu_drops = 0 ## i64
@@ -986,6 +1094,7 @@ use doors
   flash_until_ms = 0 ## i64
   last_render_ms = 0 - 1 ## i64
   last_status_ms = 0 - 1 ## i64
+  last_print_ms = 0 - 1 ## i64
   status_degraded = 0 ## i64
   if mitm_failures > 0
     status_degraded = 1
@@ -1004,251 +1113,166 @@ use doors
   persistent_generations = i64[1]
   persistent_lanes = i64[1]
   gpu_seed_source = "fleet-best"
+  gpu_thread = nil
+  gpu_elapsed = i64[1]
+  mitm_thread = nil
+  mitm_elapsed_round = i64[1]
+  block_thread = nil
+  block_results = []
+  block_results.push(nil)
+  block_elapsed_round = i64[1]
 
+  # Event loop.  One tick = at least one published island endpoint (or a
+  # bounded 5 ms wait so producers are polled promptly).  Ready lanes are
+  # taken in and relaunched at the next tick top; GPU, MITM and block-interior
+  # producers start from immutable snapshots, are polled with `alive?`, and
+  # restart as soon as their result has crossed the exact gates.  A drain
+  # tick (barrier policy, manual reset, shutdown) waits for every lane and
+  # joins every producer before intake.
   while running == 1
-    z = refinement.poll(ccall("__w_clock_ms"))
-    # One block-interior probe snapshots a rotating sticky island while all
-    # states are quiescent, then runs on the coordinator-reserved core beside
-    # the ordinary CPU/GPU tranche.  The result is harvested only after every
-    # producer joins; a neutral endpoint replaces one island, never the fleet.
-    block_thread = nil
-    block_results = []
-    block_results.push(nil)
-    block_elapsed_round = i64[1]
-    block_lane = 0 - 1 ## i64
-    block_rejects_before = block_stats[6] ## i64
-    if round % block_period == 0
-      block_phase = restart_nonce % 1000003 ## i64
-      # Advance selectors, cuts, arity, and islands by completed probe count,
-      # not wall rounds: adaptive period-two/four cadence must not lock the
-      # resident forever onto one parity or subset of islands.
-      block_nonce = block_stats[0] + block_phase ## i64
-      block_lane = (block_stats[0] + block_phase + 1) % walkers
-      block_source = ffrbi_copy_state(states[block_lane])
-      block_thread = Thread.new ->
-        block_t0 = ccall("__w_clock_ms") ## i64
-        block_results[0] = ffrbi_try(block_source, n, m, p, block_nonce, block_stats)
-        block_elapsed_round[0] = ccall("__w_clock_ms") - block_t0
-        true
-
-    # Snapshot the next GPU seed before CPU island threads start mutating their
-    # private states. Half of the epochs keep grinding the fleet objective;
-    # the other half rotate only the nonleader checked-in frontier doors. This
-    # preserves the sticky-island basin policy on Metal instead of silently
-    # cloning the density leader into every GPU epoch.
-    seeded = 0 ## i64
-    cleared = false
-    sidecars_ready = 0 ## i64
-    gpu_seed_state = best
-    gpu_seed_source = "fleet-best"
-    gpu_door_count = frontier_count ## i64
-    if archive_enabled != 0
-      gpu_door_count += side_archive_loaded
-    rotate_lane_zero = portfolio_child ## i64
-    if restart_door_ticket >= 0
-      rotate_lane_zero = 1
-    alternate_lane = ffrc_gpu_seed_lane(round, gpu_door_count, walkers, rotate_lane_zero) ## i64
-    if alternate_lane >= 0
-      gpu_seed_state = states[alternate_lane]
-      gpu_seed_source = island_sources[alternate_lane]
-    if gpu_ready != 0 && lanes > 0
-      seeded = ffrc_dump_atomic(gpu_seed_state, gpu_seed_path, run_tag, round + 1000)
-      cleared = write_file(gpu_output_path, "")
-      sidecars_ready = ffrgr_prepare_worker_sidecars(gpu_output_path)
-      if seeded > 0
-        gpu_seed_rank = ffr_best_rank(gpu_seed_state)
-
-    # The sparse 5 -> 4 MITM lane receives the same exact fleet-best snapshot
-    # that existed at this round boundary, then runs concurrently with the CPU
-    # islands and cal2zone.  Its candidate is deliberately not considered
-    # until every producer has joined, so adoption still compares against the
-    # freshest CPU/GPU result and remains deterministic under replay.
-    mitm_thread = nil
-    mitm_elapsed_round = i64[1]
-    mitm_ok = false
-    if mitm_ready != 0 && ffrmw_due(round, portfolio_child) != 0
-      launch_number = ffrmw_launch_number(run_tag, round, portfolio_child) ## i64
-      mitm_pool = ffrmw_pool(n, m, p) ## i64
-      mitm_nearby = ffrmw_nearby(launch_number) ## i64
-      mitm_offset = ffrmw_offset(launch_number) ## i64
-      mitm_subsets = 16 ## i64
-      mitm_seeded = ffrc_dump_atomic(best, mitm_seed_path, run_tag + "_mitm", round + 2000) ## i64
-      mitm_cleared = write_file(mitm_output_path, "")
-      mitm_command = ffrmw_epoch_command(repo_root, mitm_binary, mitm_seed_path, mitm_output_path, n, m, p, mitm_subsets, mitm_pool, mitm_nearby, mitm_offset)
-      if mitm_seeded > 0 && mitm_cleared && mitm_command != ""
-        mitm_attempts += 1
-        mitm_pairs += mitm_subsets * mitm_pool * (mitm_pool - 1) / 2
-        mitm_thread = ffrc_spawn_logged_command(mitm_command, mitm_log_path, mitm_elapsed_round)
-      else
-        mitm_failures += 1
-        status_degraded = 1
-
-    round_cpu_steps = cpu_epoch_steps ## i64
-    z = ffrp_campaign_budgets(cpu_epoch_steps, phase_moves)
-    lane = 0
-    while lane < walkers
-      total_elapsed_cpu[lane] = 0
-      lane += 1
-    z = ffrcp_dispatch(cpu_start_channels, elapsed_cpu, walkers)
-
-    gpu_thread = nil
-    gpu_completed = 0 ## i64
-    gpu_elapsed = i64[1]
-    if gpu_ready != 0 && lanes > 0
-      if seeded > 0 && cleared && sidecars_ready != 0
-        command = ffrgb_epoch_command(repo_root, gpu_binary, n, m, p, gpu_seed_path, gpu_output_path, "", target, gpu_steps, 200, dslack, workq, wanderq, 7, lanes, "", lanes, gpu_epoch_rounds)
-        if command != ""
-          gpu_thread = Thread.new ->
-            t0 = ccall("__w_clock_ms") ## i64
-            ok = false
-            if gpu_epoch_rounds == 1
-              persistent_ok = ffrc_persistent_dispatch(command, gpu_log_path, run_tag, tensor, lanes, gpu_steps, 200, dslack, workq, wanderq, 7, lanes, persistent_processes, persistent_active, persistent_generations, persistent_lanes) ## i64
-              if persistent_ok == 1
-                ok = true
-            if gpu_epoch_rounds != 1
-              bounded_command = command + " > " + ffrc_shell_quote(gpu_log_path) + " 2>&1"
-              ok = system(bounded_command)
-            gpu_elapsed[0] = ccall("__w_clock_ms") - t0
-            ok
-      if gpu_thread == nil
-        gpu_failures += 1
-
-    first_cpu_ms = ffrcp_collect(cpu_done_channel, elapsed_cpu, total_elapsed_cpu, walkers) ## i64
-    # GPU, MITM and block jobs own immutable round-start snapshots, not live
-    # islands.  Continue parked CPU islands until every concurrent producer
-    # finishes: a round is gated by its slowest lane, and an island parked
-    # behind the block-interior or MITM thread was idle for most of the
-    # round (single-island 4x5x7 measured 16% duty).  Each short batch fully
-    # joins before changing quotas; publication and rebases still wait for
-    # all producers. A first rank drop goes straight to exact intake.
-    followups = 0 ## i64
-    followup_steps = ffrcp_followup_steps(cpu_epoch_steps, first_cpu_ms) ## i64
-    while cpu_gpu_overlap != 0 && ffrc_producer_alive(gpu_thread, mitm_thread, block_thread) != 0 && followups < 128
-      if ccall("__w_interrupted") != 0
-        break
-      if max_secs > 0 && ccall("__w_clock_ms") - start_ms >= max_secs * 1000
-        break
-      rank_drop = 0 ## i64
+    draining = stopping ## i64
+    drain = 0 ## i64
+    if stopping != 0 || cpu_gpu_overlap == 0 || drain_request != 0
+      drain = 1
+    now_ms = ccall("__w_clock_ms") ## i64
+    if stopping == 0
       lane = 0
       while lane < walkers
-        if ffr_best_rank(states[lane]) < ffr_best_rank(best)
-          rank_drop = 1
+        if pool.busy_lane(lane) == 0 && pool.lane_epochs(lane) < max_rounds
+          cpu_steps[lane] = cpu_epoch_steps
+          lane_launch_ms[lane] = now_ms
         lane += 1
-      if rank_drop != 0 || followup_steps < 1 || round_cpu_steps > 9223372036854775807 - followup_steps
-        break
-      z = ffrp_campaign_budgets(followup_steps, phase_moves)
-      z = ffrcp_dispatch(cpu_start_channels, elapsed_cpu, walkers)
-      followup_ms = ffrcp_collect(cpu_done_channel, elapsed_cpu, total_elapsed_cpu, walkers) ## i64
-      round_cpu_steps += followup_steps
-      cpu_followup_moves += walkers * followup_steps
-      cpu_followup_batches += 1
-      followups += 1
-      followup_steps = ffrcp_followup_steps(followup_steps, followup_ms)
-    slowest_cpu_ms = 0 ## i64
-    lane = 0
-    while lane < walkers
-      elapsed_cpu[lane] = total_elapsed_cpu[lane]
-      if elapsed_cpu[lane] > slowest_cpu_ms
-        slowest_cpu_ms = elapsed_cpu[lane]
-      lane += 1
-    if gpu_thread != nil
-      gpu_ok = ffrc_thread_join_release(gpu_thread)
-      gpu_completed = 1
-      if gpu_ok != true
-        gpu_failures += 1
-      gpu_ms += gpu_elapsed[0]
-      gpu_moves += lanes * gpu_steps * gpu_epoch_rounds
-      # Exposure in 32-lane/100ms quanta, the square dashboard's reward
-      # normalization unit, so engine effectiveness reads on the same scale.
-      lane_chunks = lanes / 32 ## i64
-      if lane_chunks < 1
-        lane_chunks = 1
-      elapsed_quanta = (gpu_elapsed[0] + 99) / 100 ## i64
-      if elapsed_quanta < 1
-        elapsed_quanta = 1
-      gpu_exposure += lane_chunks * elapsed_quanta
-    if mitm_thread != nil
-      mitm_ok = ffrc_thread_join_bounded(mitm_thread, 30000)
-      mitm_thread = nil
-      mitm_ms += mitm_elapsed_round[0]
-      if mitm_ok == 0
-        mitm_failures += 1
-        status_degraded = 1
-
-    block_candidate = nil
-    if block_thread != nil
-      block_ok = ffrc_thread_join_release(block_thread)
-      block_ms += block_elapsed_round[0]
-      block_period = ffrbi_next_period(block_period, block_elapsed_round[0], slowest_cpu_ms)
-      new_block_rejects = block_stats[6] - block_rejects_before ## i64
-      if new_block_rejects > 0
-        exact_rejects += new_block_rejects
-        status_degraded = 1
-      if block_ok == true && block_results[0] != nil && block_lane >= 0
-        block_candidate = block_results[0]
-      if block_ok != true
-        status_degraded = 1
-
-    now_ms = ccall("__w_clock_ms") ## i64
+      z = pool.launch_idle_below(max_rounds)
+    z = pool.begin_intake()
+    if drain != 0
+      z = pool.collect(1)
+    else
+      if pool.active() > 0
+        z = pool.collect_within(5)
+      else
+        z = ccall("__w_sleep_ms", 5)
+    z = refinement.poll(ccall("__w_clock_ms"))
+    now_ms = ccall("__w_clock_ms")
     elapsed_s = (now_ms - start_ms) / 1000 ## i64
     adopted = 0 ## i64
+    ready_count = 0 ## i64
+
+    # ---- intake of every published island endpoint (never a straggler) ----
     lane = 0
     while lane < walkers
-      cpu_ms += elapsed_cpu[lane]
-      candidate = states[lane]
-      moves_now = ffr_moves(candidate) ## i64
-      delta_moves = moves_now - island_last_moves[lane] ## i64
-      if delta_moves < 0
-        delta_moves = moves_now
-      island_last_moves[lane] = moves_now
-      worker_ms = elapsed_cpu[lane] ## i64
-      if worker_ms < 1
-        worker_ms = 1
-      island_rates[lane] = delta_moves * 1000 / worker_ms
-      gated_rank = ffpc_gate_rect_best(candidate, n, m, p, pair_scratch, pair_scratch_words, exact_scratch, exact_scratch_words) ## i64
-      lane_rank = ffr_best_rank(candidate) ## i64
-      lane_bits = ffr_best_bits(candidate) ## i64
-      if ffrc_better(lane_rank, lane_bits, island_last_rank[lane], island_last_bits[lane]) == 1
-        island_last_rank[lane] = lane_rank
-        island_last_bits[lane] = lane_bits
-        island_last_progress_ms[lane] = now_ms
-      island_ages[lane] = (now_ms - island_last_progress_ms[lane]) / 1000
-      if gated_rank > 0
-        z = refinement.submit(candidate, n, m, p)
-        candidate_rank = ffr_best_rank(candidate) ## i64
-        candidate_bits = ffr_best_bits(candidate) ## i64
-        if ffrc_better(candidate_rank, candidate_bits, ffr_best_rank(best), ffr_best_bits(best)) == 1
-          clone = ffrc_clone_exact(candidate, n, m, p, capacity, 83003 + round * 131 + lane, dslack, cycles, workq, wanderq)
-          if clone != nil
-            if candidate_rank < ffr_best_rank(best)
-              new_bests += 1
-              cpu_drops += 1
-            else
-              tie_bests += 1
-              cpu_ties += 1
-            timeline_count = ffrc_timeline_push(timeline_times, timeline_ranks, timeline_count, elapsed_s - timeline_start_s, candidate_rank)
-            best = clone
-            adopted = 1
-      else
-        exact_rejects += 1
+      if pool_ready[lane] != 0
+        ready_count += 1
+        worker_ms = cpu_elapsed[lane] ## i64
+        cpu_ms += worker_ms
+        lane_epoch_ms[lane] = worker_ms
+        cpu_moves += cpu_steps[lane]
+        candidate = states[lane]
+        moves_now = ffr_moves(candidate) ## i64
+        delta_moves = moves_now - island_last_moves[lane] ## i64
+        if delta_moves < 0
+          delta_moves = moves_now
+        island_last_moves[lane] = moves_now
+        if worker_ms < 1
+          worker_ms = 1
+        island_rates[lane] = delta_moves * 1000 / worker_ms
+        gated_rank = ffpc_gate_rect_best(candidate, n, m, p, pair_scratch, pair_scratch_words, exact_scratch, exact_scratch_words) ## i64
+        lane_rank = ffr_best_rank(candidate) ## i64
+        lane_bits = ffr_best_bits(candidate) ## i64
+        if ffrc_better(lane_rank, lane_bits, island_last_rank[lane], island_last_bits[lane]) == 1
+          island_last_rank[lane] = lane_rank
+          island_last_bits[lane] = lane_bits
+          island_last_progress_ms[lane] = now_ms
+        island_ages[lane] = (now_ms - island_last_progress_ms[lane]) / 1000
+        if gated_rank > 0
+          z = refinement.submit(candidate, n, m, p)
+          candidate_rank = ffr_best_rank(candidate) ## i64
+          candidate_bits = ffr_best_bits(candidate) ## i64
+          if ffrc_better(candidate_rank, candidate_bits, ffr_best_rank(best), ffr_best_bits(best)) == 1
+            clone = ffrc_clone_exact(candidate, n, m, p, capacity, 83003 + round * 131 + lane, dslack, cycles, workq, wanderq)
+            if clone != nil
+              if candidate_rank < ffr_best_rank(best)
+                new_bests += 1
+                cpu_drops += 1
+              else
+                tie_bests += 1
+                cpu_ties += 1
+              timeline_count = ffrc_timeline_push(timeline_times, timeline_ranks, timeline_count, elapsed_s - timeline_start_s, candidate_rank)
+              best = clone
+              adopted = 1
+        else
+          exact_rejects += 1
       lane += 1
+    cpu_epoch_ms_max = ffrc_max_i64(lane_epoch_ms, walkers)
 
-    # The resident started from a pre-round snapshot.  Harvest every ordinary
-    # CPU endpoint before installing it, otherwise the selected lane can lose
-    # a record breakthrough made during this tranche.  Compare the exact block
-    # endpoint independently, then reset that lane's display bookkeeping so a
-    # snapshot rewind cannot double-count moves or inherit a misleading age.
-    if block_candidate != nil && block_lane >= 0
+    # ---- producers: join the finished ones and harvest through the gates ----
+    gpu_completed = 0 ## i64
+    if gpu_thread != nil
+      if drain != 0 || gpu_thread.alive? == false
+        gpu_ok = ffrc_thread_join_release(gpu_thread)
+        gpu_thread = nil
+        gpu_completed = 1
+        if gpu_ok != true
+          gpu_failures += 1
+        gpu_ms += gpu_elapsed[0]
+        gpu_moves += lanes * gpu_steps * gpu_epoch_rounds
+        # Exposure in 32-lane/100ms quanta, the square dashboard's reward
+        # normalization unit, so engine effectiveness reads on the same scale.
+        lane_chunks = lanes / 32 ## i64
+        if lane_chunks < 1
+          lane_chunks = 1
+        elapsed_quanta = (gpu_elapsed[0] + 99) / 100 ## i64
+        if elapsed_quanta < 1
+          elapsed_quanta = 1
+        gpu_exposure += lane_chunks * elapsed_quanta
+    mitm_ok = 0 ## i64
+    mitm_completed = 0 ## i64
+    if mitm_thread != nil
+      mitm_budget_ms = 30000 - (now_ms - mitm_launch_ms) ## i64
+      if mitm_budget_ms < 1
+        mitm_budget_ms = 1
+      if mitm_thread.alive? == false
+        mitm_budget_ms = 1
+      if drain != 0 || mitm_thread.alive? == false || now_ms - mitm_launch_ms >= 30000
+        mitm_ok = ffrc_thread_join_bounded(mitm_thread, mitm_budget_ms)
+        mitm_thread = nil
+        mitm_completed = 1
+        mitm_ms += mitm_elapsed_round[0]
+        if mitm_ok == 0
+          mitm_failures += 1
+          status_degraded = 1
+    block_candidate = nil
+    block_candidate_lane = 0 - 1 ## i64
+    if block_thread != nil
+      if drain != 0 || block_thread.alive? == false
+        block_ok = ffrc_thread_join_release(block_thread)
+        block_thread = nil
+        block_ms += block_elapsed_round[0]
+        block_period = ffrbi_next_period(block_period, block_elapsed_round[0], cpu_epoch_ms_max)
+        new_block_rejects = block_stats[6] - block_rejects_before ## i64
+        if new_block_rejects > 0
+          exact_rejects += new_block_rejects
+          status_degraded = 1
+        if block_ok == true && block_results[0] != nil && block_lane >= 0
+          block_candidate = block_results[0]
+          block_candidate_lane = block_lane
+        if block_ok != true
+          status_degraded = 1
+        block_lane = 0 - 1
+
+    # The resident started from a published snapshot.  Compare the exact block
+    # endpoint independently, then queue it for its island: installed after
+    # that lane's next intake so a snapshot rewind cannot lose a discovery.
+    if block_candidate != nil && block_candidate_lane >= 0
       if ffpc_gate_rect_best(block_candidate, n, m, p, pair_scratch, pair_scratch_words, exact_scratch, exact_scratch_words) < 1
         exact_rejects += 1
         status_degraded = 1
         block_candidate = nil
-    if block_candidate != nil && block_lane >= 0
+    if block_candidate != nil && block_candidate_lane >= 0
       block_rank = ffr_best_rank(block_candidate) ## i64
       z = refinement.submit(block_candidate, n, m, p)
       block_bits = ffr_best_bits(block_candidate) ## i64
       if ffrc_better(block_rank, block_bits, ffr_best_rank(best), ffr_best_bits(best)) == 1
-        block_clone = ffrc_clone_exact(block_candidate, n, m, p, capacity, 83503 + round * 133 + block_lane, dslack, cycles, workq, wanderq)
+        block_clone = ffrc_clone_exact(block_candidate, n, m, p, capacity, 83503 + round * 133 + block_candidate_lane, dslack, cycles, workq, wanderq)
         if block_clone != nil
           if block_rank < ffr_best_rank(best)
             new_bests += 1
@@ -1259,21 +1283,18 @@ use doors
           timeline_count = ffrc_timeline_push(timeline_times, timeline_ranks, timeline_count, elapsed_s - timeline_start_s, block_rank)
           best = block_clone
           adopted = 1
-      states[block_lane] = block_candidate
-      if !island_sources[block_lane].include?("/block")
-        island_sources[block_lane] = island_sources[block_lane] + "/block"
-      island_last_moves[block_lane] = ffr_moves(block_candidate)
-      island_last_rank[block_lane] = block_rank
-      island_last_bits[block_lane] = block_bits
-      island_last_progress_ms[block_lane] = now_ms
-      island_ages[block_lane] = 0
-    cpu_moves += walkers * round_cpu_steps
+      block_source = island_sources[block_candidate_lane]
+      if !block_source.include?("/block")
+        block_source = block_source + "/block"
+      pending_states[block_candidate_lane] = block_candidate
+      pending_sources[block_candidate_lane] = block_source
+      pending_flags[block_candidate_lane] = 1
 
-    # Tune only after both sides of the barrier have completed. The updated
-    # work/adaptive/wander split applies to the next round and never mutates a
-    # live worker. CPU-only profiles remain fixed because no GPU completed.
+    # Tune the next island epochs against the measured Metal epoch.  The
+    # updated quota applies only to lanes launched afterwards and never
+    # mutates a live worker. CPU-only profiles remain fixed.
     if gpu_completed != 0 && gpu_elapsed[0] > 0
-      cpu_epoch_steps = ffrc_balanced_cpu_steps(cpu_epoch_steps, first_cpu_ms, gpu_elapsed[0], steps)
+      cpu_epoch_steps = ffrc_balanced_cpu_steps(cpu_epoch_steps, cpu_epoch_ms_max, gpu_elapsed[0], steps)
       z = ffrp_campaign_budgets(cpu_epoch_steps, phase_moves)
 
     if gpu_completed != 0 && ffrc_file_nonempty(gpu_output_path) == 1
@@ -1315,25 +1336,23 @@ use doors
         # came from, preserving every other sticky door and the fleet best.
         # The bounded side archive below makes this monotonic side frontier
         # survive the portfolio boundary without changing the public best.
-        if gpu_global_adopted == 0 && alternate_lane >= 0
-          if ffrc_door_improvement(gpu_candidate, states[alternate_lane], n, m, p) == 1
-            old_door_bits = ffr_best_bits(states[alternate_lane]) ## i64
-            door_clone = ffrc_clone_exact(gpu_candidate, n, m, p, capacity, 84201 + round * 149 + alternate_lane, dslack, cycles, workq, wanderq)
+        if gpu_global_adopted == 0 && gpu_alternate_lane >= 0
+          if ffrc_door_improvement(gpu_candidate, states[gpu_alternate_lane], n, m, p) == 1
+            old_door_bits = ffr_best_bits(states[gpu_alternate_lane]) ## i64
+            door_clone = ffrc_clone_exact(gpu_candidate, n, m, p, capacity, 84201 + round * 149 + gpu_alternate_lane, dslack, cycles, workq, wanderq)
             if door_clone != nil
               door_debt = 0 ## i64
               if use_profile_frontier != 0
                 door_ticket = restart_door_ticket ## i64
                 if door_ticket >= 0
                   door_ticket += round
-                door_debt = ffrc_seed_profile_debt(door_clone, alternate_lane, door_ticket, 84203 + round * 151 + alternate_lane * 193)
-              states[alternate_lane] = door_clone
-              island_sources[alternate_lane] = island_sources[alternate_lane] + "/gpu-r" + gpu_rank.to_s()
+                door_debt = ffrc_seed_profile_debt(door_clone, gpu_alternate_lane, door_ticket, 84203 + round * 151 + gpu_alternate_lane * 193)
+              door_source = island_sources[gpu_alternate_lane] + "/gpu-r" + gpu_rank.to_s()
               if door_debt > 0
-                island_sources[alternate_lane] = island_sources[alternate_lane] + "/braid+" + door_debt.to_s()
-              island_last_rank[alternate_lane] = ffr_best_rank(door_clone)
-              island_last_bits[alternate_lane] = ffr_best_bits(door_clone)
-              island_last_moves[alternate_lane] = ffr_moves(door_clone)
-              island_last_progress_ms[alternate_lane] = now_ms
+                door_source = door_source + "/braid+" + door_debt.to_s()
+              pending_states[gpu_alternate_lane] = door_clone
+              pending_sources[gpu_alternate_lane] = door_source
+              pending_flags[gpu_alternate_lane] = 1
               gpu_door_adoptions += 1
               gpu_density_improvements += 1
               door_bit_gain = old_door_bits - ffr_best_bits(door_clone) ## i64
@@ -1357,10 +1376,9 @@ use doors
         gpu_failures += 1
         status_degraded = 1
 
-    # Harvest only after the common round barrier.  This preserves the old
-    # exact gate, replay nonces, and "no output is not a failure" convention;
-    # only the bounded child execution moved off the sequential critical path.
-    if mitm_ok == 1 && ffrc_file_nonempty(mitm_output_path) == 1
+    # Same exact gate, replay nonces, and "no output is not a failure"
+    # convention as before; only the wait moved off the islands' critical path.
+    if mitm_completed != 0 && mitm_ok == 1 && ffrc_file_nonempty(mitm_output_path) == 1
       mitm_candidate = i64[state_size]
       mitm_rank = ffr_load_scheme_cap(mitm_candidate, mitm_output_path, n, m, p, capacity, 84503 + round * 149, dslack, cycles, workq, wanderq) ## i64
       if mitm_rank > 0
@@ -1384,10 +1402,15 @@ use doors
         mitm_failures += 1
         status_degraded = 1
 
-    # All live endpoints have been harvested. Consume one same-shape exact
-    # proposal at a bounded cadence, and copy it into a rotating owned island.
-    # Never lend the reusable output buffer to a CPU thread or archive.
-    if round % 4 == 0
+    # Consume one same-shape exact proposal every four island epochs, and copy
+    # it into a parked island.  Never lend the reusable output buffer to a CPU
+    # thread or archive.
+    cpu_round = pool.minimum_epochs()
+    refine_lane = 0 - 1 ## i64
+    if cpu_round % 4 == 0 && refine_last_round != cpu_round
+      refine_lane = ffrc_pick_ready_lane(pool_ready, pending_flags, walkers, cpu_round / 4)
+    if refine_lane >= 0
+      refine_last_round = cpu_round
       refined_rank = refinement.take_into(refinement_candidate, n, m, p, capacity, 84701 + round * 157, dslack, cycles, workq, wanderq) ## i64
       if refined_rank > 0 && refined_rank <= ffr_best_rank(best) + 2
         if ffrc_better(refined_rank, ffr_best_bits(refinement_candidate), ffr_best_rank(best), ffr_best_bits(best)) == 1
@@ -1400,7 +1423,6 @@ use doors
             best = refined_best
             adopted = 1
             timeline_count = ffrc_timeline_push(timeline_times, timeline_ranks, timeline_count, elapsed_s - timeline_start_s, refined_rank)
-        refine_lane = (round / 4) % walkers ## i64
         exported = ffw_export_best(refinement_candidate, refinement_us, refinement_vs, refinement_ws) ## i64
         if exported == refined_rank
           copied = ffr_init_terms_cap(states[refine_lane], refinement_us, refinement_vs, refinement_ws, refined_rank, n, m, p, capacity, 84709 + round * 157, dslack, cycles, workq, wanderq) ## i64
@@ -1417,116 +1439,49 @@ use doors
     if adopted != 0
       saved = ffrc_dump_atomic(best, best_path, run_tag, round + 1) ## i64
       if saved < 1
-        stopped = ffrcp_stop(cpu_start_channels, cpu_threads, walkers) ## i64
+        z = ffrc_pool_stop(pool, walkers)
         z = refinement.stop()
         if tui != 0
           ccall("w_term_raw_disable")
         << "RECT_ERROR code=checkpoint-write tensor=" + tensor + " path=" + best_path
         return 2
-      # Follow the new leader with one rotating island.  Every other island
-      # keeps its current basin and is not reset by fleet-wide progress.
-      rebase_lane = round % walkers ## i64
-      rebased = ffrc_clone_exact(best, n, m, p, capacity, 85001 + round * 149, dslack, cycles, workq, wanderq)
-      if rebased != nil
-        rebase_debt = 0 ## i64
-        if use_profile_frontier != 0
-          rebase_ticket = restart_door_ticket ## i64
-          if rebase_ticket >= 0
-            rebase_ticket += round
-          rebase_debt = ffrc_seed_profile_debt(rebased, rebase_lane, rebase_ticket, 85003 + round * 157 + rebase_lane * 197)
-        states[rebase_lane] = rebased
-        island_sources[rebase_lane] = seed_door + "/rebase-r" + ffr_best_rank(best).to_s()
-        if rebase_debt > 0
-          island_sources[rebase_lane] = island_sources[rebase_lane] + "/braid+" + rebase_debt.to_s()
-        island_last_rank[rebase_lane] = ffr_best_rank(rebased)
-        island_last_bits[rebase_lane] = ffr_best_bits(rebased)
-        island_last_moves[rebase_lane] = ffr_moves(rebased)
-        island_last_progress_ms[rebase_lane] = now_ms
+      rebase_pending = 1
+    # Follow the new leader with one rotating parked island.  Every other
+    # island keeps its current basin and is not reset by fleet-wide progress.
+    # A producer adoption that lands while every island is busy rebases the
+    # first island to publish afterwards.
+    if rebase_pending != 0
+      rebase_lane = ffrc_pick_ready_lane(pool_ready, pending_flags, walkers, rebase_rotation) ## i64
+      if rebase_lane >= 0
+        rebase_rotation += 1
+        rebase_pending = 0
+        rebased = ffrc_clone_exact(best, n, m, p, capacity, 85001 + round * 149, dslack, cycles, workq, wanderq)
+        if rebased != nil
+          rebase_debt = 0 ## i64
+          if use_profile_frontier != 0
+            rebase_ticket = restart_door_ticket ## i64
+            if rebase_ticket >= 0
+              rebase_ticket += round
+            rebase_debt = ffrc_seed_profile_debt(rebased, rebase_lane, rebase_ticket, 85003 + round * 157 + rebase_lane * 197)
+          rebase_source = seed_door + "/rebase-r" + ffr_best_rank(best).to_s()
+          if rebase_debt > 0
+            rebase_source = rebase_source + "/braid+" + rebase_debt.to_s()
+          pending_states[rebase_lane] = rebased
+          pending_sources[rebase_lane] = rebase_source
+          pending_flags[rebase_lane] = 1
 
-    # TUI controls, polled between rounds while every island thread is joined
-    # and the GPU epoch is drained (states are safe to mutate here).  Space
-    # starts a fresh naive frontier and rank timeline; w reseeds the islands
-    # on the campaign anchor; q / Ctrl-C (byte 3 in raw mode) = cooperative
-    # stop, twice = force.
+    # TUI controls, polled every tick.  Space starts a fresh naive frontier
+    # and rank timeline; w reseeds the islands on the campaign anchor.  Both
+    # request a drain tick and apply once every island is parked and every
+    # producer has been harvested.  q / Ctrl-C (byte 3 in raw mode) =
+    # cooperative stop, twice = force.
     if tui != 0
       key = ccall("w_input_poll", 0) ## i64
       keys_seen = 0 ## i64
       while key >= 0 && keys_seen < 8
-        if key == 32
-          naive_anchor = i64[state_size]
-          naive_rank = ffr_init_naive_cap(naive_anchor, n, m, p, capacity, 86011 + round * 151, dslack, cycles, workq, wanderq) ## i64
-          naive_best = nil
-          if naive_rank > 0
-            naive_best = ffrc_clone_exact(naive_anchor, n, m, p, capacity, 86013 + round * 151, dslack, cycles, workq, wanderq)
-          if naive_best != nil
-            best = naive_best
-            z = refinement.stop()
-            refinement_generation += 1
-            refinement = MetaflipRefinement.new(status_path + ".refinement-reset-" + now_ms.to_s() + "-" + refinement_generation.to_s(), System.executable_path(), repo_root, state_root)
-            z = refinement.submit(best, n, m, p)
-            timeline_start_s = elapsed_s
-            timeline_count = 1
-            timeline_times[0] = 0
-            timeline_ranks[0] = ffr_best_rank(best)
-            rank_level_count = ffrc_level_push(rank_levels, rank_ticks, 0, ffr_best_rank(best))
-            bits_level_count = ffrc_level_push(bits_levels, bits_ticks, 0, ffr_best_bits(best))
-            new_bests = 0
-            tie_bests = 0
-            cpu_drops = 0
-            cpu_ties = 0
-            rw = 0 ## i64
-            while rw < walkers
-              fresh = i64[state_size]
-              fresh_rank = ffr_init_naive_cap(fresh, n, m, p, capacity, 86101 + round * 157 + rw * 977, dslack, cycles, workq, wanderq) ## i64
-              if fresh_rank > 0
-                states[rw] = fresh
-                island_sources[rw] = seed_door + "/manual-naive"
-                island_last_rank[rw] = ffr_best_rank(fresh)
-                island_last_bits[rw] = ffr_best_bits(fresh)
-                island_last_moves[rw] = ffr_moves(fresh)
-                island_last_progress_ms[rw] = now_ms
-              rw += 1
-            reset_saved = ffrc_dump_atomic(best, best_path, run_tag, round + 200000) ## i64
-            if reset_saved < 1
-              status_degraded = 1
-              flash_text = "fleet best reset to naive; checkpoint write failed"
-            if reset_saved >= 1
-              side_cleared = ffrda_clear(best_path, run_tag + "-manual-naive", round + 210000) ## i64
-              if side_cleared == 1
-                side_archive.clear
-                side_archive_loaded = 0
-                side_archive_seeded = 0
-                archive_enabled = 0
-                last_side_checkpoint_ms = now_ms
-                flash_text = "fleet best, rank timeline, and side doors reset to naive (r" + ffr_best_rank(best).to_s() + ")"
-              if side_cleared == 0
-                status_degraded = 1
-                flash_text = "fleet best reset to naive; side-door clear failed"
-          if naive_best == nil
-            flash_text = "naive reseed failed exact best clone; fleet best unchanged"
-          flash_until_ms = now_ms + 4000
-        if key == 119 || key == 87
-          rw = 0 ## i64
-          while rw < walkers
-            reseeded = ffrc_clone_exact(anchor, n, m, p, capacity, 87001 + round * 163 + rw * 991, dslack, cycles, workq, wanderq)
-            if reseeded != nil
-              reseed_debt = 0 ## i64
-              if use_profile_frontier != 0
-                reseed_ticket = restart_door_ticket ## i64
-                if reseed_ticket >= 0
-                  reseed_ticket += round
-                reseed_debt = ffrc_seed_profile_debt(reseeded, rw, reseed_ticket, 87003 + round * 167 + rw * 997)
-              states[rw] = reseeded
-              island_sources[rw] = seed_door + "/manual-anchor"
-              if reseed_debt > 0
-                island_sources[rw] = island_sources[rw] + "/braid+" + reseed_debt.to_s()
-              island_last_rank[rw] = ffr_best_rank(reseeded)
-              island_last_bits[rw] = ffr_best_bits(reseeded)
-              island_last_moves[rw] = ffr_moves(reseeded)
-              island_last_progress_ms[rw] = now_ms
-            rw += 1
-          flash_text = "islands reseeded on the " + seed_door + " anchor (r" + ffr_best_rank(anchor).to_s() + ")"
-          flash_until_ms = now_ms + 4000
+        if key == 32 || key == 119 || key == 87
+          reset_key = key
+          drain_request = 1
         if key == 3 || key == 113 || key == 81
           if stop_key == 1
             ccall("w_term_raw_disable")
@@ -1536,10 +1491,110 @@ use doors
           flash_until_ms = now_ms + 10000
         keys_seen += 1
         key = ccall("w_input_poll", 0) ## i64
+    if reset_key != 0 && pool.active() == 0 && ffrc_producer_alive(gpu_thread, mitm_thread, block_thread) == 0
+      if reset_key == 32
+        naive_anchor = i64[state_size]
+        naive_rank = ffr_init_naive_cap(naive_anchor, n, m, p, capacity, 86011 + round * 151, dslack, cycles, workq, wanderq) ## i64
+        naive_best = nil
+        if naive_rank > 0
+          naive_best = ffrc_clone_exact(naive_anchor, n, m, p, capacity, 86013 + round * 151, dslack, cycles, workq, wanderq)
+        if naive_best != nil
+          best = naive_best
+          z = refinement.stop()
+          refinement_generation += 1
+          refinement = MetaflipRefinement.new(status_path + ".refinement-reset-" + now_ms.to_s() + "-" + refinement_generation.to_s(), System.executable_path(), repo_root, state_root)
+          z = refinement.submit(best, n, m, p)
+          timeline_start_s = elapsed_s
+          timeline_count = 1
+          timeline_times[0] = 0
+          timeline_ranks[0] = ffr_best_rank(best)
+          rank_level_count = ffrc_level_push(rank_levels, rank_ticks, 0, ffr_best_rank(best))
+          bits_level_count = ffrc_level_push(bits_levels, bits_ticks, 0, ffr_best_bits(best))
+          new_bests = 0
+          tie_bests = 0
+          cpu_drops = 0
+          cpu_ties = 0
+          rebase_pending = 0
+          rw = 0 ## i64
+          while rw < walkers
+            fresh = i64[state_size]
+            fresh_rank = ffr_init_naive_cap(fresh, n, m, p, capacity, 86101 + round * 157 + rw * 977, dslack, cycles, workq, wanderq) ## i64
+            if fresh_rank > 0
+              states[rw] = fresh
+              pending_states[rw] = nil
+              pending_flags[rw] = 0
+              island_sources[rw] = seed_door + "/manual-naive"
+              island_last_rank[rw] = ffr_best_rank(fresh)
+              island_last_bits[rw] = ffr_best_bits(fresh)
+              island_last_moves[rw] = ffr_moves(fresh)
+              island_last_progress_ms[rw] = now_ms
+            rw += 1
+          reset_saved = ffrc_dump_atomic(best, best_path, run_tag, round + 200000) ## i64
+          if reset_saved < 1
+            status_degraded = 1
+            flash_text = "fleet best reset to naive; checkpoint write failed"
+          if reset_saved >= 1
+            side_cleared = ffrda_clear(best_path, run_tag + "-manual-naive", round + 210000) ## i64
+            if side_cleared == 1
+              side_archive.clear
+              side_archive_loaded = 0
+              side_archive_seeded = 0
+              archive_enabled = 0
+              last_side_checkpoint_ms = now_ms
+              flash_text = "fleet best, rank timeline, and side doors reset to naive (r" + ffr_best_rank(best).to_s() + ")"
+            if side_cleared == 0
+              status_degraded = 1
+              flash_text = "fleet best reset to naive; side-door clear failed"
+        if naive_best == nil
+          flash_text = "naive reseed failed exact best clone; fleet best unchanged"
+        flash_until_ms = now_ms + 4000
+      if reset_key == 119 || reset_key == 87
+        rw = 0 ## i64
+        while rw < walkers
+          reseeded = ffrc_clone_exact(anchor, n, m, p, capacity, 87001 + round * 163 + rw * 991, dslack, cycles, workq, wanderq)
+          if reseeded != nil
+            reseed_debt = 0 ## i64
+            if use_profile_frontier != 0
+              reseed_ticket = restart_door_ticket ## i64
+              if reseed_ticket >= 0
+                reseed_ticket += round
+              reseed_debt = ffrc_seed_profile_debt(reseeded, rw, reseed_ticket, 87003 + round * 167 + rw * 997)
+            states[rw] = reseeded
+            pending_states[rw] = nil
+            pending_flags[rw] = 0
+            island_sources[rw] = seed_door + "/manual-anchor"
+            if reseed_debt > 0
+              island_sources[rw] = island_sources[rw] + "/braid+" + reseed_debt.to_s()
+            island_last_rank[rw] = ffr_best_rank(reseeded)
+            island_last_bits[rw] = ffr_best_bits(reseeded)
+            island_last_moves[rw] = ffr_moves(reseeded)
+            island_last_progress_ms[rw] = now_ms
+          rw += 1
+        flash_text = "islands reseeded on the " + seed_door + " anchor (r" + ffr_best_rank(anchor).to_s() + ")"
+        flash_until_ms = now_ms + 4000
+      reset_key = 0
+      drain_request = 0
 
-    # Island threads and accelerator children are all joined here. Snapshot
-    # their monotonic exact bests to the bounded side archive without rebasing
-    # or otherwise disturbing a sticky basin.
+    # Install deferred replacements into parked lanes (their own endpoints
+    # were taken in above), so the next launch copies the new basin.
+    lane = 0
+    while lane < walkers
+      if pending_flags[lane] != 0 && pool.busy_lane(lane) == 0
+        installed = pending_states[lane]
+        states[lane] = installed
+        island_sources[lane] = pending_sources[lane]
+        island_last_rank[lane] = ffr_best_rank(installed)
+        island_last_bits[lane] = ffr_best_bits(installed)
+        island_last_moves[lane] = ffr_moves(installed)
+        island_last_progress_ms[lane] = now_ms
+        island_ages[lane] = 0
+        pending_states[lane] = nil
+        pending_flags[lane] = 0
+      lane += 1
+
+    # Snapshot monotonic exact island bests to the bounded side archive
+    # without rebasing or otherwise disturbing a sticky basin.  Published
+    # slots are stable while their lanes walk private buffers.
     checkpoint_due = ffrc_side_checkpoint_due(archive_enabled, last_side_checkpoint_ms, now_ms, adopted) ## i64
     if checkpoint_due != 0 && naive_seed == 0
       checkpoint_seed = ffrcb_seed(89501 + side_archive_checkpoints * 211, restart_nonce, round, side_archive_checkpoints) ## i64
@@ -1552,17 +1607,23 @@ use doors
       now_ms = ccall("__w_clock_ms")
       elapsed_s = (now_ms - start_ms) / 1000
 
-    sequence += 1
+    # `sequence` counts completed island epochs (the `--rounds` unit a
+    # portfolio parent schedules and predicts with); `round` counts ticks.
+    sequence = pool.minimum_epochs()
+    cpu_round = sequence
+    cpu_duty = ffrc_cpu_duty_percent(cpu_ms, ffrc_inflight_ms(pool, lane_launch_ms, walkers, now_ms), walkers, now_ms - start_ms) ## i64
     # A portfolio parent polls child telemetry at 50 ms and publishes at one
-    # second cadence. Avoid an atomic temp-file/rename on every fast CPU round;
-    # the terminal status below is still unconditional, so completed segments
-    # always expose their exact final counters and sequence.
+    # second cadence; a standalone stream is throttled to one write per
+    # second unless a leader adoption happened.  The final status below is
+    # unconditional, so completed segments always expose exact counters.
     status_due = ffrc_live_status_due(portfolio_child, last_status_ms, now_ms) ## i64
+    if portfolio_child == 0 && adopted == 0 && last_status_ms >= 0 && now_ms - last_status_ms < 1000
+      status_due = 0
     if status_due != 0
       status = ffrc_status_body("running", sequence, tensor, record, record_known, best, walkers, cpu_moves, cpu_ms, gpu_requested, gpu_supported, gpu_ready, lanes, gpu_moves, gpu_ms, gpu_failures, exact_rejects, elapsed_s)
       status = status.strip() + " cpu_epoch_steps=" + cpu_epoch_steps.to_s() + " cpu_seed_nonce=" + restart_nonce.to_s() + " cpu_door_ticket=" + restart_door_ticket.to_s() + " cpu_leader_lanes=" + cpu_leader_lanes.to_s() + " cpu_side_lanes=" + cpu_side_lanes.to_s() + " block_attempts=" + block_stats[0].to_s() + " block_local=" + block_stats[1].to_s() + " block_exact=" + block_stats[2].to_s() + " block_drops=" + block_stats[3].to_s() + " block_density=" + block_stats[4].to_s() + " block_neutral=" + block_stats[5].to_s() + " block_ms=" + block_ms.to_s() + " block_period=" + block_period.to_s() + " gpu_degraded=" + status_degraded.to_s() + " gpu_internal_rejects=" + gpu_internal_rejects.to_s() + " gpu_seed_source=" + gpu_seed_source + " gpu_door_adoptions=" + gpu_door_adoptions.to_s() + " mitm_supported=" + mitm_supported.to_s() + " mitm_ready=" + mitm_ready.to_s() + " mitm_attempts=" + mitm_attempts.to_s() + " mitm_pairs=" + mitm_pairs.to_s() + " mitm_ms=" + mitm_ms.to_s() + " mitm_failures=" + mitm_failures.to_s() + "\n"
       status = status.strip() + " side_archive_cap=" + ffrda_cap().to_s() + " side_archive_loaded=" + side_archive_loaded.to_s() + " side_archive_seeded=" + side_archive_seeded.to_s() + " side_archive_checkpoints=" + side_archive_checkpoints.to_s() + " side_archive_saved=" + side_archive_stats[2].to_s() + " side_archive_rejects=" + side_archive_stats[1].to_s() + " side_archive_write_failures=" + side_archive_stats[3].to_s() + "\n"
-      status = status.strip() + " cpu_gpu_overlap=" + cpu_gpu_overlap.to_s() + " cpu_followup_batches=" + cpu_followup_batches.to_s() + " cpu_followup_moves=" + cpu_followup_moves.to_s() + "\n"
+      status = status.strip() + " cpu_gpu_overlap=" + cpu_gpu_overlap.to_s() + " cpu_duty=" + cpu_duty.to_s() + " cpu_ticks=" + round.to_s() + "\n"
       status = status.strip() + refinement.status_fields() + " refine_seed_uses=" + refinement_seed_uses.to_s() + "\n"
       status = status.strip() + cycle_fields + "\n"
       status_ok = ffrc_atomic_write(status_path, status, run_tag, sequence)
@@ -1571,10 +1632,12 @@ use doors
       if status_ok == 0
         status_degraded = 1
     if quiet == 0 && tui == 0
-      << "RECT_STATUS tensor=" + tensor + " round=" + round.to_s() + " rank=" + ffr_best_rank(best).to_s() + " bits=" + ffr_best_bits(best).to_s() + " cpu_moves=" + cpu_moves.to_s() + " cpu_epoch_steps=" + cpu_epoch_steps.to_s() + " block=" + block_stats[2].to_s() + "/" + block_stats[0].to_s() + "/p" + block_period.to_s() + " gpu_moves=" + gpu_moves.to_s() + " gpu_door_adoptions=" + gpu_door_adoptions.to_s() + " side_archive=" + side_archive_loaded.to_s() + "/" + side_archive_seeded.to_s() + "/" + side_archive_stats[2].to_s() + " mitm_attempts=" + mitm_attempts.to_s() + " mitm_pairs=" + mitm_pairs.to_s() + " exact_rejects=" + exact_rejects.to_s() + " gpu_internal_rejects=" + gpu_internal_rejects.to_s() + " gpu_degraded=" + status_degraded.to_s()
-      flush()
+      if last_print_ms < 0 || now_ms - last_print_ms >= 1000 || draining != 0
+        last_print_ms = now_ms
+        << "RECT_STATUS tensor=" + tensor + " round=" + round.to_s() + " epochs=" + sequence.to_s() + " rank=" + ffr_best_rank(best).to_s() + " bits=" + ffr_best_bits(best).to_s() + " cpu_moves=" + cpu_moves.to_s() + " cpu_epoch_steps=" + cpu_epoch_steps.to_s() + " cpu_duty=" + cpu_duty.to_s() + " block=" + block_stats[2].to_s() + "/" + block_stats[0].to_s() + "/p" + block_period.to_s() + " gpu_moves=" + gpu_moves.to_s() + " gpu_door_adoptions=" + gpu_door_adoptions.to_s() + " side_archive=" + side_archive_loaded.to_s() + "/" + side_archive_seeded.to_s() + "/" + side_archive_stats[2].to_s() + " mitm_attempts=" + mitm_attempts.to_s() + " mitm_pairs=" + mitm_pairs.to_s() + " exact_rejects=" + exact_rejects.to_s() + " gpu_internal_rejects=" + gpu_internal_rejects.to_s() + " gpu_degraded=" + status_degraded.to_s()
+        flush()
     if tui != 0
-      if ff_tui_heartbeat_due(last_render_ms, now_ms, 200) == 1
+      if ff_tui_heartbeat_due(last_render_ms, now_ms, 1000) == 1
         last_render_ms = now_ms
         rank_level_count = ffrc_level_push(rank_levels, rank_ticks, rank_level_count, ffr_best_rank(best))
         bits_level_count = ffrc_level_push(bits_levels, bits_ticks, bits_level_count, ffr_best_bits(best))
@@ -1588,21 +1651,116 @@ use doors
           frame_rows.push(ff_tui_clip(cycle_caption, width))
         z = ffrc_render(frame_rows)
 
-    round += 1
-    if round >= max_rounds
-      running = 0
+    # Stop conditions are evaluated before any producer restarts so the
+    # drain tick that follows never waits on a freshly launched epoch.
+    stop_now = 0 ## i64
+    if cpu_round >= max_rounds
+      stop_now = 1
     if max_secs > 0 && elapsed_s >= max_secs
-      running = 0
+      stop_now = 1
     if cycle_deadline_ms > 0 && ccall("__w_clock_ms") >= cycle_deadline_ms
-      running = 0
+      stop_now = 1
     if stop_on_record != 0 && ((proven_optimal == 0 && ffr_best_rank(best) < record) || (proven_optimal != 0 && ffr_best_rank(best) <= record))
-      running = 0
+      stop_now = 1
     if stop_key != 0
-      running = 0
+      stop_now = 1
     if ccall("__w_interrupted") != 0
+      stop_now = 1
+    if stop_now != 0
+      stopping = 1
+
+    # ---- restart idle producers from published snapshots ------------------
+    if stopping == 0
+      # Half of the Metal epochs grind the fleet objective; the other half
+      # rotate only the nonleader doors, preserving the sticky-island basin
+      # policy on Metal instead of cloning the density leader every epoch.
+      if gpu_thread == nil && gpu_ready != 0 && lanes > 0 && now_ms >= gpu_retry_ms
+        gpu_seed_state = best
+        gpu_seed_source = "fleet-best"
+        gpu_door_count = frontier_count ## i64
+        if archive_enabled != 0
+          gpu_door_count += side_archive_loaded
+        rotate_lane_zero = portfolio_child ## i64
+        if restart_door_ticket >= 0
+          rotate_lane_zero = 1
+        gpu_alternate_lane = ffrc_gpu_seed_lane(gpu_epoch, gpu_door_count, walkers, rotate_lane_zero)
+        if gpu_alternate_lane >= 0
+          gpu_seed_state = states[gpu_alternate_lane]
+          gpu_seed_source = island_sources[gpu_alternate_lane]
+        seeded = ffrc_dump_atomic(gpu_seed_state, gpu_seed_path, run_tag, round + 1000) ## i64
+        cleared = write_file(gpu_output_path, "")
+        sidecars_ready = ffrgr_prepare_worker_sidecars(gpu_output_path) ## i64
+        if seeded > 0
+          gpu_seed_rank = ffr_best_rank(gpu_seed_state)
+        if seeded > 0 && cleared && sidecars_ready != 0
+          command = ffrgb_epoch_command(repo_root, gpu_binary, n, m, p, gpu_seed_path, gpu_output_path, "", target, gpu_steps, 200, dslack, workq, wanderq, 7, lanes, "", lanes, gpu_epoch_rounds)
+          if command != ""
+            gpu_elapsed[0] = 0
+            gpu_thread = Thread.new ->
+              t0 = ccall("__w_clock_ms") ## i64
+              ok = false
+              if gpu_epoch_rounds == 1
+                persistent_ok = ffrc_persistent_dispatch(command, gpu_log_path, run_tag, tensor, lanes, gpu_steps, 200, dslack, workq, wanderq, 7, lanes, persistent_processes, persistent_active, persistent_generations, persistent_lanes) ## i64
+                if persistent_ok == 1
+                  ok = true
+              if gpu_epoch_rounds != 1
+                bounded_command = command + " > " + ffrc_shell_quote(gpu_log_path) + " 2>&1"
+                ok = system(bounded_command)
+              gpu_elapsed[0] = ccall("__w_clock_ms") - t0
+              ok
+        gpu_epoch += 1
+        if gpu_thread == nil
+          gpu_failures += 1
+          gpu_retry_ms = now_ms + 1000
+
+      # The sparse 5 -> 4 MITM lane receives the exact fleet-best snapshot at
+      # its launch, runs beside the islands and cal2zone, and is bounded at
+      # thirty seconds from launch.
+      if mitm_thread == nil && mitm_ready != 0 && ffrmw_due(cpu_round, portfolio_child) != 0 && mitm_last_round != cpu_round
+        mitm_last_round = cpu_round
+        launch_number = ffrmw_launch_number(run_tag, cpu_round, portfolio_child) ## i64
+        mitm_pool = ffrmw_pool(n, m, p) ## i64
+        mitm_nearby = ffrmw_nearby(launch_number) ## i64
+        mitm_offset = ffrmw_offset(launch_number) ## i64
+        mitm_subsets = 16 ## i64
+        mitm_seeded = ffrc_dump_atomic(best, mitm_seed_path, run_tag + "_mitm", round + 2000) ## i64
+        mitm_cleared = write_file(mitm_output_path, "")
+        mitm_command = ffrmw_epoch_command(repo_root, mitm_binary, mitm_seed_path, mitm_output_path, n, m, p, mitm_subsets, mitm_pool, mitm_nearby, mitm_offset)
+        if mitm_seeded > 0 && mitm_cleared && mitm_command != ""
+          mitm_attempts += 1
+          mitm_pairs += mitm_subsets * mitm_pool * (mitm_pool - 1) / 2
+          mitm_elapsed_round[0] = 0
+          mitm_launch_ms = now_ms
+          mitm_thread = ffrc_spawn_logged_command(mitm_command, mitm_log_path, mitm_elapsed_round)
+        else
+          mitm_failures += 1
+          status_degraded = 1
+
+      # One block-interior probe snapshots a rotating sticky island's published
+      # endpoint and runs on the coordinator-reserved core.  Cadence advances
+      # by completed probe count and island epochs, not ticks.
+      if block_thread == nil && block_lane < 0 && cpu_round % block_period == 0 && block_last_round != cpu_round
+        block_phase = restart_nonce % 1000003 ## i64
+        block_nonce = block_stats[0] + block_phase ## i64
+        probe_lane = (block_stats[0] + block_phase + 1) % walkers ## i64
+        if pending_flags[probe_lane] == 0
+          block_last_round = cpu_round
+          block_lane = probe_lane
+          block_rejects_before = block_stats[6]
+          block_source = ffrbi_copy_state(states[block_lane])
+          block_results[0] = nil
+          block_elapsed_round[0] = 0
+          block_thread = Thread.new ->
+            block_t0 = ccall("__w_clock_ms") ## i64
+            block_results[0] = ffrbi_try(block_source, n, m, p, block_nonce, block_stats)
+            block_elapsed_round[0] = ccall("__w_clock_ms") - block_t0
+            true
+
+    round += 1
+    if draining != 0
       running = 0
 
-  stopped = ffrcp_stop(cpu_start_channels, cpu_threads, walkers) ## i64
+  z = ffrc_pool_stop(pool, walkers)
   if tui != 0
     ccall("w_term_raw_disable")
     << ""
@@ -1674,7 +1832,8 @@ use doors
   final_status = ffrc_status_body("stopped", sequence + 1, tensor, record, record_known, best, walkers, cpu_moves, cpu_ms, gpu_requested, gpu_supported, gpu_ready, lanes, gpu_moves, gpu_ms, gpu_failures, exact_rejects, final_elapsed_s)
   final_status = final_status.strip() + " cpu_epoch_steps=" + cpu_epoch_steps.to_s() + " cpu_seed_nonce=" + restart_nonce.to_s() + " cpu_door_ticket=" + restart_door_ticket.to_s() + " cpu_leader_lanes=" + cpu_leader_lanes.to_s() + " cpu_side_lanes=" + cpu_side_lanes.to_s() + " block_attempts=" + block_stats[0].to_s() + " block_local=" + block_stats[1].to_s() + " block_exact=" + block_stats[2].to_s() + " block_drops=" + block_stats[3].to_s() + " block_density=" + block_stats[4].to_s() + " block_neutral=" + block_stats[5].to_s() + " block_ms=" + block_ms.to_s() + " block_period=" + block_period.to_s() + " gpu_degraded=" + status_degraded.to_s() + " gpu_internal_rejects=" + gpu_internal_rejects.to_s() + " gpu_seed_source=" + gpu_seed_source + " gpu_door_adoptions=" + gpu_door_adoptions.to_s() + " mitm_supported=" + mitm_supported.to_s() + " mitm_ready=" + mitm_ready.to_s() + " mitm_attempts=" + mitm_attempts.to_s() + " mitm_pairs=" + mitm_pairs.to_s() + " mitm_ms=" + mitm_ms.to_s() + " mitm_failures=" + mitm_failures.to_s() + "\n"
   final_status = final_status.strip() + " side_archive_cap=" + ffrda_cap().to_s() + " side_archive_loaded=" + side_archive_loaded.to_s() + " side_archive_seeded=" + side_archive_seeded.to_s() + " side_archive_checkpoints=" + side_archive_checkpoints.to_s() + " side_archive_saved=" + side_archive_stats[2].to_s() + " side_archive_rejects=" + side_archive_stats[1].to_s() + " side_archive_write_failures=" + side_archive_stats[3].to_s() + "\n"
-  final_status = final_status.strip() + " cpu_gpu_overlap=" + cpu_gpu_overlap.to_s() + " cpu_followup_batches=" + cpu_followup_batches.to_s() + " cpu_followup_moves=" + cpu_followup_moves.to_s() + "\n"
+  final_duty = ffrc_cpu_duty_percent(cpu_ms, 0, walkers, final_ms - start_ms) ## i64
+  final_status = final_status.strip() + " cpu_gpu_overlap=" + cpu_gpu_overlap.to_s() + " cpu_duty=" + final_duty.to_s() + " cpu_ticks=" + round.to_s() + "\n"
   final_status = final_status.strip() + refinement.status_fields() + " refine_seed_uses=" + refinement_seed_uses.to_s() + "\n"
   stop_requested = 0 ## i64
   if stop_key != 0 || ccall("__w_interrupted") != 0

@@ -149,7 +149,8 @@ cycle_stats = i64[9]
 elapsed_ms = i64[1]
 start_channel = Channel.new(1)
 done_channel = Channel.new(1)
-worker = ffcp_spawn(state_slots, 0, 2, round_steps, core_slots, controls, recent, 64, cycle_stats, elapsed_ms, start_channel, done_channel)
+cadences = i64[1]
+worker = ffcp_spawn(state_slots, 0, 2, round_steps, cadences, core_slots, controls, recent, 64, cycle_stats, elapsed_ms, start_channel, done_channel)
 start_channel.send(1)
 completed = done_channel.recv() ## i64
 start_channel.send(0)

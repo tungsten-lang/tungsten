@@ -11,6 +11,11 @@
 #   1 frozen-core/fringe walk
 #   2 tuned control-race walk (negative split cadence selects axis-sweep)
 #   3 accepted-state cycle-watch walk
+#   4 rectangular three-phase island walk (`cadences[lane]` selects the
+#     split cadence; the phase quotas derive from the lane's live step count)
+
+use ../rect
+use ../rect/cpu_pool
 
 # Return the lower median elapsed time of eligible workers.  `scratch` is
 # campaign-owned so the round controller does not allocate at the barrier.
@@ -150,9 +155,10 @@
   output[1] = maximum
   maximum
 
--> ffcp_spawn(state_slots, slot, mode, round_steps, core_slots, controls, recent, recent_capacity, stats, elapsed_ms, start_channel, done_channel)
+-> ffcp_spawn(state_slots, slot, mode, round_steps, cadences, core_slots, controls, recent, recent_capacity, stats, elapsed_ms, start_channel, done_channel)
   Thread.new ->
     running = 1 ## i64
+    phases = i64[3]
     while running == 1
       command = start_channel.recv() ## i64
       if command == 0
@@ -172,6 +178,17 @@
             result = ffw_walk_axis_sweep_tuned(worker_state, round_steps[slot], controls)
         if mode == 3
           result = ffw_walk_cycle_watch(worker_state, round_steps[slot], recent, recent_capacity, stats)
+        if mode == 4
+          z = ffrp_campaign_budgets(round_steps[slot], phases) ## i64
+          cadence = cadences[slot] ## i64
+          if cadence == 2000
+            result = ffr_work(worker_state, phases[0])
+            result = ffr_walk(worker_state, phases[1])
+            result = ffr_wander(worker_state, phases[2])
+          if cadence != 2000
+            result = ffrcp_work_cadence(worker_state, phases[0], cadence)
+            result = ffrcp_walk_cadence(worker_state, phases[1], cadence)
+            result = ffrcp_wander_cadence(worker_state, phases[2], cadence)
         elapsed_ms[slot] = ccall("__w_clock_ms") - t0
         # Keep the hot result live through the end of the epoch.  The result is
         # intentionally not sent: all mutable search state already lives in
@@ -198,7 +215,7 @@
 + MetaflipCPUPool
   ro :ready, :threads, :active, :epochs, :completed
 
-  -> new(states, state_size, modes, steps, core_slots, controls, recent, recent_capacity, stats, elapsed)
+  -> new(states, state_size, modes, steps, core_slots, controls, recent, recent_capacity, stats, elapsed, cadences)
     @states = states
     @state_size = state_size
     @workers = states.size()
@@ -229,9 +246,11 @@
     lane = 0 ## i64
     while lane < @workers
       mode = modes[lane] ## i64
-      if mode < 0 || mode > 3
+      if mode < 0 || mode > 4
         raise "metaflip CPU pool: invalid worker mode"
-      if mode > 0
+      if mode == 4 && (cadences == nil || cadences.size() < @workers)
+        raise "metaflip CPU pool: rectangular lanes need a per-lane cadence"
+      if mode > 0 && mode < 4
         if special_modes[mode] != 0
           raise "metaflip CPU pool: special lanes must have unique controls"
         special_modes[mode] = 1
@@ -241,15 +260,21 @@
       @live.push(i64[state_size])
       start = Channel.new(1)
       @starts.push(start)
-      @threads.push(ffcp_spawn(@live, lane, modes[lane], @live_steps, @live_core, @live_controls, recent, recent_capacity, @live_stats, @live_elapsed, start, @done))
+      @threads.push(ffcp_spawn(@live, lane, modes[lane], @live_steps, cadences, @live_core, @live_controls, recent, recent_capacity, @live_stats, @live_elapsed, start, @done))
       lane += 1
 
   -> launch_idle()
+    self.launch_idle_below(9223372036854775807)
+
+  # Start every parked lane that has completed fewer than `epoch_cap` epochs.
+  # A bounded campaign (`--rounds N`) parks each lane at exactly N epochs; a
+  # fast lane never runs past the cap while a slower lane finishes its quota.
+  -> launch_idle_below(epoch_cap)
     if @stopped != 0
       raise "metaflip CPU pool: cannot restart a stopped pool"
     lane = 0 ## i64
     while lane < @workers
-      if @busy[lane] == 0
+      if @busy[lane] == 0 && @epochs[lane] < epoch_cap
         z = ffcp_copy_words(@live[lane], @states[lane], @state_size)
         @live_steps[lane] = @steps[lane]
         if @modes[lane] == 1
@@ -305,6 +330,30 @@
         else
           available = 0
     @completed
+
+  # Rolling intake with a bounded wait: publish whatever completes within
+  # `timeout_ms`, then drain only the already-ready queue.  A coordinator that
+  # also polls external producers (GPU epochs, bounded child processes) uses
+  # this so neither a slow island nor a slow producer parks the other side.
+  -> collect_within(timeout_ms)
+    if @active > 0 && @completed == 0
+      result = @done.receive_result(timeout_ms)
+      if result.received?()
+        z = self.publish(result.value())
+    available = 1 ## i64
+    while @active > 0 && available == 1
+      result = @done.try_receive()
+      if result.received?()
+        z = self.publish(result.value())
+      else
+        available = 0
+    @completed
+
+  -> busy_lane(lane)
+    @busy[lane]
+
+  -> lane_epochs(lane)
+    @epochs[lane]
 
   -> minimum_epochs()
     minimum = @epochs[0] ## i64

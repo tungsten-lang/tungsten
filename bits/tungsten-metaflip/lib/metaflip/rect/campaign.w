@@ -343,15 +343,10 @@ use doors
     lane += 1
   1
 
--> ffrc_binary_fresh(binary, source, glue) (String String String) i64
-  binary_mtime = file_mtime_ns(binary)
-  source_mtime = file_mtime_ns(source)
-  glue_mtime = file_mtime_ns(glue)
-  if binary_mtime == nil || source_mtime == nil || glue_mtime == nil
-    return 0
-  if binary_mtime < source_mtime || binary_mtime < glue_mtime
-    return 0
-  1
+# Content-addressed (kernels/build_cache.w): a worker built from these exact
+# sources by this compiler stays fresh across checkouts and worktrees.
+-> ffrc_binary_fresh(root, binary, source, glue) (String String String String) i64
+  ffmk_fresh(root, binary, [source, glue])
 
 # Keep the Metal device, library, pipeline, and buffers alive for the default
 # one-round scheduler epochs.  This is the same command/ack protocol used by
@@ -939,7 +934,7 @@ use doors
     glue = repo_root + "/kernels/bundles/rect.w"
     needs_build = gpu_rebuild ## i64
     if needs_build == 0
-      if ffrc_binary_fresh(gpu_binary, source, glue) == 0 || ffrgb_gpu_artifact_ready(repo_root, n, m, p, gpu_binary) == 0
+      if ffrc_binary_fresh(repo_root, gpu_binary, source, glue) == 0 || ffrgb_gpu_artifact_ready(repo_root, n, m, p, gpu_binary) == 0
         needs_build = 1
     if needs_build != 0
       if quiet == 0

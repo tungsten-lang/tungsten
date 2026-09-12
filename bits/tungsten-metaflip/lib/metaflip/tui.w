@@ -507,7 +507,9 @@
   if basin_distance >= 0
     distance_text = "d" + basin_distance.to_s()
 
-  row = ff_tui_pad_right(id_text, 4) + ff_tui_pad_right(door, 9) + ff_tui_pad_right(zone, 10) + ff_tui_pad_right(rank_text, 10) + ff_tui_pad_right(delta_text, 6) + ff_tui_pad_right(band_text, 5) + ff_tui_pad_left(rate_text, 9) + "  " + ff_tui_pad_right(idle_text, 10) + " " + ff_tui_pad_right(budget_text, 12) + " " + ff_tui_pad_right(distance_text, 5) + basin_text
+  # A fixed twelve-column rank cell also holds r4096/r4096 without hiding
+  # the last digit, and keeps the grid aligned across three/four-digit ranks.
+  row = ff_tui_pad_right(id_text, 4) + ff_tui_pad_right(door, 9) + ff_tui_pad_right(zone, 10) + ff_tui_pad_right(rank_text, 12) + ff_tui_pad_right(delta_text, 6) + ff_tui_pad_right(band_text, 5) + ff_tui_pad_left(rate_text, 9) + "  " + ff_tui_pad_right(idle_text, 10) + " " + ff_tui_pad_right(budget_text, 12) + " " + ff_tui_pad_right(distance_text, 5) + basin_text
 
   source_text = source
   prefix = door + "/"

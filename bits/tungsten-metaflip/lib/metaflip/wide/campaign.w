@@ -1,9 +1,12 @@
 use seeds
+use tui
 use ../rect/campaign
 
--> ffws_thread(st, scratch, steps, stop, slack)
+-> ffws_thread(st, scratch, steps, stop, slack, elapsed, lane)
   Thread.new ->
+    started = ccall("__w_clock_ms") ## i64
     z = ffws_work(st,scratch,steps,stop,slack)
+    elapsed[lane] = ccall("__w_clock_ms") - started
     true
 
 -> ffws_bits(data, count) (i64[] i64) i64
@@ -80,6 +83,35 @@ use ../rect/campaign
     << "metaflip: cannot write large-square checkpoint"
     return 2
   stop = i64[1]
+  # Only joined workers feed the presentation snapshots. The render path
+  # never races a worker mutating its packed tensor, ranks or counters.
+  lanes = i64[workers*9]
+  worker_elapsed = i64[workers]
+  lane = 0
+  while lane < workers
+    state = states[lane]
+    lanes[lane*9] = state[5]
+    lanes[lane*9+1] = state[4]
+    lanes[lane*9+3] = 0-1
+    lanes[lane*9+4] = start
+    lanes[lane*9+5] = start
+    lanes[lane*9+6] = state[11]
+    lane += 1
+  rank_levels = i64[256]
+  rank_ticks = i64[256]
+  bits_levels = i64[256]
+  bits_ticks = i64[256]
+  rank_count = 0 ## i64
+  bits_count = 0 ## i64
+  timeline_times = i64[256]
+  timeline_ranks = i64[256]
+  timeline_count = ffrc_timeline_push(timeline_times,timeline_ranks,0,0,rank) ## i64
+  drops = 0 ## i64
+  ties = 0 ## i64
+  accepted = 0 ## i64
+  rejected = 0 ## i64
+  sequence = 0 ## i64
+  last_status = 0-1 ## i64
   stop_requested = 0 ## i64
   next_requested = 0 ## i64
   failure = 0 ## i64
@@ -91,7 +123,7 @@ use ../rect/campaign
     z = ccall("w_term_raw_enable")
     << "\e[2J\e[H"
   elsif quiet == 0
-    << "metaflip wide: tensor="+tensor+" backend=packed-cpu cpu_lanes="+workers.to_s()+" gpu_supported=0 seed_rank="+rank.to_s()
+    << "metaflip wide: tensor="+tensor+" backend=packed-cpu cpu_lanes="+workers.to_s()+" gpu_supported=0 best_rank="+rank.to_s()
   while round < rounds && stop[0] == 0
     now = ccall("__w_clock_ms") ## i64
     if (seconds > 0 && now-start >= seconds*1000) || (cycle_deadline > 0 && now >= cycle_deadline) || ccall("__w_interrupted") != 0
@@ -99,7 +131,7 @@ use ../rect/campaign
     threads = []
     lane = 0
     while lane < workers
-      threads.push(ffws_thread(states[lane],scratch[lane],steps,stop,slack))
+      threads.push(ffws_thread(states[lane],scratch[lane],steps,stop,slack,worker_elapsed,lane))
       lane += 1
     alive = 1 ## i64
     while alive != 0
@@ -125,12 +157,20 @@ use ../rect/campaign
         stop[0]=1
       if now-last_render >= 1000
         last_render=now
+        sequence += 1
         status = "mode=wide-cpu tensor="+tensor+" backend=packed-cpu rank="+rank.to_s()+" bits="+density.to_s()+" cpu_lanes="+workers.to_s()+" cpu_moves="+moves.to_s()+" gpu_requested="+gpu.to_s()+" gpu_supported=0 gpu_moves=0 round="+round.to_s()+" producer_state=running stop_requested="+stop_requested.to_s()+cycle_fields+"\n"
         if ffrf_atomic(status_path,status,"wide") != 1
           failure=1
           stop[0]=1
+        else
+          last_status=now
         if tui != 0
-          rows=["  "+ff_tui_paint("METAFLIP  "+tensor+"  packed CPU islands","1;36"),"", "  rank "+rank.to_s()+"  density "+density.to_s()+"  lanes "+workers.to_s(),"  CPU flips "+moves.to_s()+"  rounds "+round.to_s(),"  GPU: unavailable for multiword square factors", "  "+cycle_caption,"", "  n = next shape   q / Ctrl-C = checkpoint and stop"]
+          rank_count=ffrc_level_push(rank_levels,rank_ticks,rank_count,rank)
+          bits_count=ffrc_level_push(bits_levels,bits_ticks,bits_count,density)
+          width=ccall("w_term_cols") ## i64
+          if width < 40
+            width=40
+          rows=ffws_frame_rows(n,rank,density,moves,workers,round,(now-start) / 1000,gpu,failure,sequence,last_status,now,drops,ties,accepted,rejected,slack,lanes,rank_levels,rank_ticks,rank_count,bits_levels,bits_ticks,bits_count,timeline_times,timeline_ranks,timeline_count,cycle_caption,width)
           z = ffrc_render(rows)
         elsif quiet == 0
           << "WIDE_STATUS "+status.strip()
@@ -138,11 +178,30 @@ use ../rect/campaign
         z = ccall("__w_sleep_ms",5)
     lane = 0
     moves=0
+    accepted=0
+    rejected=0
     changed=0 ## i64
     while lane < workers
       joined=ffrc_thread_join_release(threads[lane])
       state=states[lane]
       moves += state[7]
+      accepted += state[8]
+      rejected += state[9]
+      at=lane*9 ## i64
+      duration=worker_elapsed[lane] ## i64
+      if duration < 1
+        duration=1
+      lanes[at+3]=(state[7]-lanes[at+2])*1000 / duration
+      now=ccall("__w_clock_ms")
+      if state[5] < lanes[at] || (state[5] == lanes[at] && state[11] < lanes[at+6])
+        lanes[at+4]=now
+      lanes[at]=state[5]
+      lanes[at+1]=state[4]
+      lanes[at+2]=state[7]
+      lanes[at+5]=now
+      lanes[at+6]=state[11]
+      lanes[at+7]=state[8]
+      lanes[at+8]=state[9]
       if state[5] < rank || (state[5] == rank && state[11] < density)
         proposed=ffws_export(state,trial,1) ## i64
         proposed=ffpk_canonicalize(trial,words,proposed,stride)
@@ -150,7 +209,12 @@ use ../rect/campaign
           failure=1
           stop[0]=1
         else
+          if proposed < rank
+            drops += 1
+          else
+            ties += 1
           rank=proposed
+          timeline_count=ffrc_timeline_push(timeline_times,timeline_ranks,timeline_count,(now-start) / 1000,rank)
           density=0
           i=0
           while i < rank*3*stride

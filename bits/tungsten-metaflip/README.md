@@ -114,7 +114,12 @@ Ctrl-C in the TUI to stop.
 Squares **8x8 through 16x16 are CPU-only**: they use private CPU islands
 with packed multiword factor storage, beyond the narrow/Metal engine's
 current 7x7 limit. `-J` has the same default and override; a requested GPU
-is explicitly reported as unavailable (`gpu_supported=0`). For example:
+is explicitly reported as unavailable (`gpu_supported=0`). The TUI keeps
+the same dashboard layout, colors, rank/density sparklines, CPU-island rows,
+effectiveness section and rank timeline. Per-island rates/ranks are snapshots
+from completed worker epochs; their age is shown. Unsupported GPU, diversity
+and refinement features are labeled unavailable, not populated with proxy data.
+For example:
 
 ```sh
 bin/metaflip --tensor 16x16

@@ -143,7 +143,12 @@ with tempfile.TemporaryDirectory(prefix='metaflip-cycle-check-') as temp:
         assert data['proven_rank'] == ('7' if shape == '2x2x2' else '18'), data
         if shape == '2x2x2':
             assert data['mode'] == 'optimal-parent' and data['cpu_lanes'] == '0', data
-            assert data['orbit_codes'] == '216' and data['refine_submitted'] == '36', data
+            # A one-second visit may stop partway through enumeration. The
+            # untimed optimal_parent_test checks all 216 codes / 36 parents.
+            assert data['orbit_total'] == '216' and 0 <= int(data['orbit_codes']) <= 216, data
+            assert 0 < int(data['refine_submitted']) <= 36, data
+            if data['orbit_codes'] == '216':
+                assert data['refine_submitted'] == '36', data
 
     pinned = run(['--tensor', '2x2', '--rounds', '1', '--steps', '10', '-J', '1', '--no-gpu', '--no-tui',
                   '--state-dir', str(root / 'pinned')])

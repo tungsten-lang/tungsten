@@ -4134,6 +4134,100 @@ fn __bigint_sub_equal_generic_raw(a, b, n) (i64 i64 i64) i64
     asm_sub_no(rp, 0, lp, 0, sp, 0, n)
   ccall_nobox("w_bigint_sub_equal_finish_raw", result, n, negative)
 
+# Out-of-line generic body shared by BigInt#+ and BigInt#-: unequal
+# widths, mixed signs, and the over-band bail. `an`/`bn` are the operands'
+# effective signed sizes after the operator's own sign treatment (the -
+# dispatcher passes `0 - bn0`), and `is_sub` selects the operator's C
+# bails: + keeps C for equal-length pairs whose raw signs match (its
+# equal-fast arm) and for the one-limb word arms; - keeps C for the
+# equal-length pairs whose raw signs match, which after the flip are the
+# opposite-effective-sign pairs. One raw function with two direct call
+# sites: it stays out of line (a single-caller raw body was inlined back
+# into its dispatcher, restoring the prologue this split removes), and a
+# method call from inside the class went through the inline cache and cost
+# the mixed-sign and skew shapes 15-25%. Plain if/else, never ternaries, for
+# raw limb addresses, lengths, and result signs.
+fn __bigint_addsub_general_raw(a, b, an, bn, is_sub) (i64 i64 i64 i64 i64) i64
+  if is_sub == 0
+    # The still-C-specialized one-limb neighbors return to the direct
+    # BigInt tree before any generic magnitude/sign setup.
+    if an == 1 || an == -1 || bn == 1 || bn == -1
+      return ccall_nobox("w_bigint_add", a, b)
+  am = an ## i64
+  if an < 0
+    am = 0 - an
+  bm = bn ## i64
+  if bn < 0
+    bm = 0 - bn
+  if am > 4096 || bm > 4096
+    if is_sub == 0
+      return ccall_nobox("w_add", a, b)
+    return ccall_nobox("w_sub", a, b)
+  mask = 140737488355312 ## i64
+  pa = (a & mask) + 16 ## i64
+  pb = (b & mask) + 16 ## i64
+  if (an > 0) == (bn > 0)
+    # Same effective sign: magnitude add. For + this is the raw-sign-equal
+    # stratum, whose equal-length slice past the migrated band is C's
+    # equal-fast domain; for - the raw signs differ and C has no such arm.
+    if am == bm && is_sub == 0
+      return ccall_nobox("w_bigint_add", a, b)
+    lp = pa
+    ll = am
+    sp = pb
+    sl = bm
+    if am < bm
+      lp = pb
+      ll = bm
+      sp = pa
+      sl = am
+    result = ccall_nobox("w_bigint_alloc_hot", ll + 1) ## i64
+    rp = (result & mask) + 16 ## i64
+    carry = asm_add_uneq(rp, lp, ll, sp, sl) ## i64
+    negative = 0 ## i64
+    if an < 0
+      negative = 1
+    return ccall_nobox(
+      "w_bigint_uneq_add_finish_raw", result, ll, carry, negative
+    )
+  # Opposite effective signs: magnitude subtract, larger operand's sign
+  # wins. For - the raw signs match, so the equal-length slice past the
+  # migrated band is bigint_sub_equal_fast's domain.
+  if am == bm && is_sub == 1
+    return ccall_nobox("w_bigint_sub", a, b)
+  cmp = 0 ## i64
+  if am != bm
+    if am > bm
+      cmp = 1
+    else
+      cmp = 0 - 1
+  else
+    cmp = __bigint_equal_compare_raw(pa, pb, am) ## i64
+  if cmp == 0
+    return ccall_nobox("w_int", 0)
+  bp2 = pa
+  bl = am
+  sp2 = pb
+  sl2 = bm
+  negative = 0 ## i64
+  if an < 0
+    negative = 1
+  if cmp < 0
+    bp2 = pb
+    bl = bm
+    sp2 = pa
+    sl2 = am
+    negative = 0
+    if bn < 0
+      negative = 1
+  dresult = ccall_nobox("w_bigint_alloc_hot", bl) ## i64
+  drp = (dresult & mask) + 16 ## i64
+  asm_sub_uneq(drp, bp2, bl, sp2, sl2)
+  signed_bl = bl ## i64
+  if negative == 1
+    signed_bl = 0 - bl
+  ccall_nobox("w_bigint_seal_raw", dresult, signed_bl)
+
 fn __bigint_add1_2_raw(a, b) (i64 i64) i64
   result = ccall_nobox("w_bigint_alloc_hot", 2) ## i64
   mask = 140737488355327 ## i64
@@ -5446,91 +5540,15 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
           )
         return ccall("w_bigint_add", self, other)
 
-    # The declared-BigInt direct route must not turn the still-C-specialized
-    # one-limb neighbors into the generic source kernel.  Return them to the
-    # direct BigInt tree before any generic magnitude/sign setup; the migrated
-    # positive fixed arms above are the sole exceptions.
-    if an == 1 || an == -1 || bn == 1 || bn == -1
-      return ccall("w_bigint_add", self, other)
-
-    am = an < 0 ? 0 - an : an
-    bm = bn < 0 ? 0 - bn : bn
-
-    if am > 4096 || bm > 4096
-      return ccall("w_add", self, other)
-
-    mask = 140737488355312
-    pa = ($value & mask) + 16
-    pb = (other$value & mask) + 16
-
-    if (an > 0) == (bn > 0)
-      # Equal-length same-sign pairs are bigint_add_equal_fast's domain —
-      # the dedicated C arm source measured 1.12-1.30 against. Route them
-      # through the direct bigint entry (not w_add: both operands are
-      # proven, skip the polymorphic preamble).
-      if am == bm
-        return ccall("w_bigint_add", self, other)
-
-      # Same sign: magnitude add. One fused kernel call covers the common
-      # limbs AND the longer operand's remainder — no source tail loop.
-      # Plain assignments, never ternaries, for raw limb ADDRESSES: a
-      # ternary can box its result and `## i64` would then reinterpret the
-      # boxed bits as a pointer (and a swapped length underflows the
-      # kernel's remainder count into a ~2^64 write loop).
-      lp = pa
-      ll = am
-      sp = pb
-      sl = bm
-
-      if am < bm
-        lp = pb
-        ll = bm
-        sp = pa
-        sl = am
-
-      result = ccall("w_bigint_alloc_boxed", ll + 1) ## BigInt
-      rp = (result$value & mask) + 16
-      carry = asm_add_uneq(rp ## i64, lp ## i64, ll ## i64, sp ## i64, sl ## i64) ## u64
-      n = ll
-
-      if carry != 0
-        result$limbs[ll] = carry
-        n = ll + 1
-
-      return ccall("w_bigint_seal", result, an < 0 ? 0 - n : n)
-
-    # Opposite signs: magnitude subtract, larger operand's sign wins.
-    cmp = 0
-    if am != bm
-      cmp = am > bm ? 1 : 0 - 1
-    else
-      k = am - 1
-      while k >= 0 && cmp == 0
-        xa = $limbs[k] ## u64
-        xb = other$limbs[k] ## u64
-        if xa != xb
-          cmp = xa > xb ? 1 : 0 - 1
-        k -= 1
-    if cmp == 0
-      return 0
-
-    bp2 = pa
-    bl = am
-    sp2 = pb
-    sl2 = bm
-
-    if cmp < 0
-      bp2 = pb
-      bl = bm
-      sp2 = pa
-      sl2 = am
-    dresult = ccall("w_bigint_alloc_boxed", bl)
-    drp = (dresult$value & mask) + 16
-    asm_sub_uneq(drp ## i64, bp2 ## i64, bl ## i64, sp2 ## i64, sl2 ## i64)
-    dneg = an < 0
-    if cmp < 0
-      dneg = bn < 0
-    ccall("w_bigint_seal", dresult, dneg ? 0 - bl : bl)
+    # Out-of-line generic body (unequal widths, mixed signs, the over-band
+    # bail) as a raw direct call: its fused-kernel machinery and register
+    # pressure stay out of this dispatcher, whose every leaf path was
+    # paying the body's seven-register-pair prologue.
+    wvalue_from_bits(
+      __bigint_addsub_general_raw(
+        $value ## i64, other$value ## i64, an ## i64, bn ## i64, 0
+      )
+    )
 
   # Polymorphic catch-all: every non-BigInt argument (int promotion,
   # rational, decimal, complex, float error paths) keeps the full C arm
@@ -5658,90 +5676,12 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
           )
         return ccall("w_bigint_sub", self, other)
 
-    bn = 0 - bn0
-
-    am = an < 0 ? 0 - an : an
-    bm = bn < 0 ? 0 - bn : bn
-
-    if am > 4096 || bm > 4096
-      return ccall("w_sub", self, other)
-
-    mask = 140737488355312
-    pa = ($value & mask) + 16
-    pb = (other$value & mask) + 16
-
-    if (an > 0) == (bn > 0)
-      # Same sign: magnitude add. One fused kernel call covers the common
-      # limbs AND the longer operand's remainder — no source tail loop.
-      # Plain assignments, never ternaries, for raw limb ADDRESSES: a
-      # ternary can box its result and `## i64` would then reinterpret the
-      # boxed bits as a pointer (and a swapped length underflows the
-      # kernel's remainder count into a ~2^64 write loop).
-      lp = pa
-      ll = am
-      sp = pb
-      sl = bm
-
-      if am < bm
-        lp = pb
-        ll = bm
-        sp = pa
-        sl = am
-
-      result = ccall("w_bigint_alloc_boxed", ll + 1) ## BigInt
-      rp = (result$value & mask) + 16
-      carry = asm_add_uneq(rp ## i64, lp ## i64, ll ## i64, sp ## i64, sl ## i64) ## u64
-      n = ll
-
-      if carry != 0
-        result$limbs[ll] = carry
-        n = ll + 1
-
-      return ccall("w_bigint_seal", result, an < 0 ? 0 - n : n)
-
-    # Post-flip opposite signs mean the RAW operand signs MATCH — and the
-    # equal-length slice of that stratum is bigint_sub_equal_fast's domain
-    # (the C arm source measured up to 1.30 against). Direct bigint entry:
-    # both operands are proven, skip the polymorphic preamble.
-    if am == bm
-      return ccall("w_bigint_sub", self, other)
-
-    # Opposite signs: magnitude subtract, larger operand's sign wins.
-    cmp = 0
-    if am != bm
-      cmp = am > bm ? 1 : 0 - 1
-    else
-      k = am - 1
-      while k >= 0 && cmp == 0
-        xa = $limbs[k] ## u64
-        xb = other$limbs[k] ## u64
-        if xa != xb
-          cmp = xa > xb ? 1 : 0 - 1
-        k -= 1
-
-    if cmp == 0
-      return 0
-
-    bp2 = pa
-    bl = am
-    sp2 = pb
-    sl2 = bm
-
-    if cmp < 0
-      bp2 = pb
-      bl = bm
-      sp2 = pa
-      sl2 = am
-
-    dresult = ccall("w_bigint_alloc_boxed", bl)
-    drp = (dresult$value & mask) + 16
-    asm_sub_uneq(drp ## i64, bp2 ## i64, bl ## i64, sp2 ## i64, sl2 ## i64)
-    dneg = an < 0
-
-    if cmp < 0
-      dneg = bn < 0
-
-    ccall("w_bigint_seal", dresult, dneg ? 0 - bl : bl)
+    # Out-of-line generic body, exactly as for +.
+    wvalue_from_bits(
+      __bigint_addsub_general_raw(
+        $value ## i64, other$value ## i64, an ## i64, 0 - bn0 ## i64, 1
+      )
+    )
 
   -> -(other)(Number)
     ccall("w_sub", self, other)

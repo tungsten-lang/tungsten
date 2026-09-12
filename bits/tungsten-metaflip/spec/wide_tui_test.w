@@ -30,7 +30,7 @@ times[1]=1
 times[2]=2
 width = 40 ## i64
 while width <= 160
-  rows=ffws_frame_rows(16,2209,29000,22000000,2,4,2,1,0,3,1950,2000,2,1,40,100,4,lanes,levels,ticks,3,bits,ticks,2,times,levels,3," | cycle 2/43 rank-search (60s)",width)
+  rows=ffws_frame_rows(16,2209,29000,22000000,2,4,2,1,0,3,1950,2000,2,1,40,100,4,lanes,levels,ticks,3,bits,ticks,2,times,levels,3," | cycle 2/43 rank-search (60s)",width,2209,2)
   body=rows.join("\n")
   if !body.include?("metaflip") || !body.include?("GF(2)") || !body.include?("CPU islands") || !body.include?("Diversity") || !body.include?("Effectiveness") || !body.include?("Rank timeline")
     << "FAIL wide dashboard structure"

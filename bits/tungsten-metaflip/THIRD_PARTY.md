@@ -195,6 +195,35 @@ digests:
 - `matmul_3x3x5_rank36_d317_alphatensor_2022_f2_gf2.txt`: `f7264d5014854ac2f02f0a7e595c5f8d6ed12a234fd6a92ad0869983a3f0cfa7`
 - `matmul_3x5x5_rank58_d544_alphatensor_2022_f2_gf2.txt`: `a098d128cb68f109b8e18cf4189068c78e07556cd6b31656cb5dd22ceda02900`
 
+### Large-square GF(2) seeds (2026-09-12)
+
+The twelve `.mfw` files under `lib/metaflip/seeds/gf2/wide/` are normalized
+reductions of `schemes/results/ZT/*.json` at FastMatrixMultiplication revision
+`db560ca5811bc38d5a6d5c0a3ec4315937ceabce` (2026-09-05). These are Andrew
+Perminov's published result presentations, not algorithms discovered by
+Metaflip. The recursive Strassen lineage of the 8/16 rank-343/2401 schemes
+and the upstream catalog's credited earlier algorithms remain acknowledged.
+The exact source path, git object hash, source SHA-256, certificate SHA-256,
+upstream rank, GF(2) rank and density of **each** asset are recorded in
+`lib/metaflip/manifests/wide-seeds.tsv`. The complete MIT License, copyright
+Andrew Perminov (2025), is shipped beside the assets in `LICENSE-PERMINOV`.
+
+All coefficients were reduced exactly modulo two; the output dual factor was
+transposed from `(k,i)` to `(i,k)` order. Identical GF(2) terms cancel in pairs,
+then terms are sorted. Every retained source keeps its advertised rank.
+The rank-343 addition-reduced presentation was downloaded and verified but
+not retained twice: it gives the same normalized tensor as the dense file.
+Python, the independent Ruby verifier and the native packed tensor gate all
+reconstruct the complete identity. No upstream code is executed.
+
+The unlicensed Lille mirrored `.mpl` files and matmulcatalog coefficient files
+are **not bundled**. Their tables/metadata were consulted to distinguish
+GF(2)-compatible ranks from Q-only and commutative-only bounds. The 8/16
+default rank-329/2209 starts are verified compositions of the already bundled
+Strassen and AlphaTensor rank-47 4x4 seeds, which improve on the published
+ternary starts without asserting a new record. Alternative compositions are
+presentations of those known constructions, not independent discoveries.
+
 ## Release rule
 
 Keep an imported scheme outside the bit when its redistribution status is not

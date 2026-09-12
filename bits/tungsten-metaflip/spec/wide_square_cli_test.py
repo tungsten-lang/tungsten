@@ -10,6 +10,7 @@ import time
 
 BINARY = Path(os.environ.get('METAFLIP_TEST_BINARY', Path(__file__).resolve().parents[1] / 'bin/metaflip')).resolve()
 RUNTIME = Path(__file__).resolve().parents[1] / 'lib/metaflip'
+REFERENCES = dict(zip(range(8, 17), (329, 486, 651, 873, 1068, 1426, 1725, 2058, 2209)))
 
 
 def read_blob(raw):
@@ -65,6 +66,10 @@ with tempfile.TemporaryDirectory(prefix='metaflip-wide-cli-') as tmp:
         assert body['gpu_supported'] == '0' and body['gpu_moves'] == '0', body
         assert body['cpu_moves'] == '8200' and body['exact_rejects'] == '0', body
         assert body['producer_state'] == 'stopped', body
+        assert int(body['reference_rank']) == REFERENCES[n] and int(body['rank']) <= REFERENCES[n], body
+        assert 1 <= int(body['seed_count']) <= 4, body
+        if n in (8, 10, 12, 14, 15, 16):
+            assert int(body['seed_count']) >= 2, body
         shape, terms = read_blob(best.read_bytes())
         assert shape == (n, n, n) and len(terms) == int(body['rank']) < n**3
         exact(shape, terms)
@@ -84,7 +89,19 @@ with tempfile.TemporaryDirectory(prefix='metaflip-wide-cli-') as tmp:
         best.write_bytes(before)
         result = run(*args, '--rounds', 1, '--seed', case / 'missing')
         assert result.returncode == 2 and best.read_bytes() == before, result.stdout
-        print(f'PASS public {n}x{n}: 2 lanes, 8200 flips, exact rank {len(terms)}, restart gates')
+        print(f'PASS public {n}x{n}: 2 lanes, {body["seed_count"]} seeds, 8200 flips, exact rank {len(terms)}, restart gates')
+
+    # Exercise every entry in an automatic four-seed bank, not just the
+    # first two lanes used above. Imported and composed starts both walk.
+    four = root / 'four-seeds'
+    four.mkdir()
+    result = run('--tensor', '8x8', '-J', 4, '--rounds', 1, '--steps', 2050,
+                 '--no-tui', '--no-gpu', '--state-dir', four, '--status', four/'status', '--best', four/'best')
+    assert result.returncode == 0, result.stdout
+    body = fields(four/'status')
+    assert body['cpu_lanes'] == body['seed_count'] == '4' and body['cpu_moves'] == '8200', body
+    shape, terms = read_blob((four/'best').read_bytes())
+    exact(shape, terms)
 
     bounded = root / 'bounded'
     started = time.monotonic()

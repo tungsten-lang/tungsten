@@ -9,26 +9,6 @@ use ../rect/campaign
     elapsed[lane] = ccall("__w_clock_ms") - started
     true
 
--> ffws_bits(data, count) (i64[] i64) i64
-  result = 0 ## i64
-  i = 0 ## i64
-  while i < count
-    result += popcount(data[i])
-    i += 1
-  result
-
--> ffws_checked_load(path, data, words, n, parity) (String i64[] i64 i64 i64[]) i64
-  raw = File.read_prefix(path,12632129)
-  if raw == nil
-    return 0
-  meta = i64[4]
-  rank = ffpk_parse(raw,data,words,meta,4) ## i64
-  if rank < 1 || meta[0] != n || meta[1] != n || meta[2] != n
-    return 0-1
-  if ffpk_exact(data,words,rank,n,n,n,parity,n*n*ffpk_stride(n,n,n),0) != 1
-    return 0-1
-  rank
-
 # Large factors have no current Metal kernel. Keep GPU capability explicit;
 # every requested CPU lane gets a private state and scratch. Checkpoints use
 # MFW1, never truncated integer masks. Only the coordinator writes them.
@@ -58,15 +38,40 @@ use ../rect/campaign
       best[i]=trial[i]
       i += 1
   density = ffws_bits(best,rank*3*stride) ## i64
-  cap = rank+64 ## i64
-  if cap > 8192
-    cap = 8192
+  starts = [best]
+  start_ranks = i64[4]
+  start_ranks[0]=rank
+  if naive == 0 && seed_path == "" && workers > 1
+    paths = ffws_packaged_paths(root,n)
+    p = 0 ## i64
+    while p < paths.size()
+      data = i64[words]
+      candidate = ffws_checked_load(root+"/"+paths[p],data,words,n,parity) ## i64
+      if candidate < 1
+        << "metaflip: invalid packaged large-square seed"
+        return 2
+      z = ffws_bank_add(starts,start_ranks,data,candidate,stride,rank)
+      p += 1
+    variant = 0 ## i64
+    while variant < 3 && starts.size() < 4
+      data = i64[words]
+      candidate = ffws_composed_seed(data,n,root,0,variant) ## i64
+      if candidate < 1 || ffpk_exact(data,words,candidate,n,n,n,parity,n*n*stride,0) != 1
+        << "metaflip: invalid composed large-square seed"
+        return 2
+      z = ffws_bank_add(starts,start_ranks,data,candidate,stride,rank)
+      variant += 1
   states = []
   scratch = []
   lane = 0 ## i64
   while lane < workers
+    door = lane % starts.size() ## i64
+    seed_rank = start_ranks[door] ## i64
+    cap = seed_rank+64 ## i64
+    if cap > 8192
+      cap=8192
     state = i64[ffws_words(n,cap)]
-    if ffws_init(state,n,cap,best,rank,19071+nonce+lane*104729) != 1
+    if ffws_init(state,n,cap,starts[door],seed_rank,19071+nonce+lane*104729) != 1
       return 2
     states.push(state)
     scratch.push(i64[12*stride])
@@ -119,11 +124,12 @@ use ../rect/campaign
   moves = 0 ## i64
   last_render = 0 ## i64
   tensor = n.to_s()+"x"+n.to_s()
+  seed_fields = " seed_count="+starts.size().to_s()+" reference_rank="+ffws_reference_rank(n).to_s()
   if tui != 0
     z = ccall("w_term_raw_enable")
     << "\e[2J\e[H"
   elsif quiet == 0
-    << "metaflip wide: tensor="+tensor+" backend=packed-cpu cpu_lanes="+workers.to_s()+" gpu_supported=0 best_rank="+rank.to_s()
+    << "metaflip wide: tensor="+tensor+" backend=packed-cpu cpu_lanes="+workers.to_s()+" gpu_supported=0 best_rank="+rank.to_s()+seed_fields
   while round < rounds && stop[0] == 0
     now = ccall("__w_clock_ms") ## i64
     if (seconds > 0 && now-start >= seconds*1000) || (cycle_deadline > 0 && now >= cycle_deadline) || ccall("__w_interrupted") != 0
@@ -158,7 +164,7 @@ use ../rect/campaign
       if now-last_render >= 1000
         last_render=now
         sequence += 1
-        status = "mode=wide-cpu tensor="+tensor+" backend=packed-cpu rank="+rank.to_s()+" bits="+density.to_s()+" cpu_lanes="+workers.to_s()+" cpu_moves="+moves.to_s()+" gpu_requested="+gpu.to_s()+" gpu_supported=0 gpu_moves=0 round="+round.to_s()+" producer_state=running stop_requested="+stop_requested.to_s()+cycle_fields+"\n"
+        status = "mode=wide-cpu tensor="+tensor+" backend=packed-cpu rank="+rank.to_s()+" bits="+density.to_s()+" cpu_lanes="+workers.to_s()+" cpu_moves="+moves.to_s()+" gpu_requested="+gpu.to_s()+" gpu_supported=0 gpu_moves=0 round="+round.to_s()+" producer_state=running stop_requested="+stop_requested.to_s()+seed_fields+cycle_fields+"\n"
         if ffrf_atomic(status_path,status,"wide") != 1
           failure=1
           stop[0]=1
@@ -170,7 +176,7 @@ use ../rect/campaign
           width=ccall("w_term_cols") ## i64
           if width < 40
             width=40
-          rows=ffws_frame_rows(n,rank,density,moves,workers,round,(now-start) / 1000,gpu,failure,sequence,last_status,now,drops,ties,accepted,rejected,slack,lanes,rank_levels,rank_ticks,rank_count,bits_levels,bits_ticks,bits_count,timeline_times,timeline_ranks,timeline_count,cycle_caption,width)
+          rows=ffws_frame_rows(n,rank,density,moves,workers,round,(now-start) / 1000,gpu,failure,sequence,last_status,now,drops,ties,accepted,rejected,slack,lanes,rank_levels,rank_ticks,rank_count,bits_levels,bits_ticks,bits_count,timeline_times,timeline_ranks,timeline_count,cycle_caption,width,ffws_reference_rank(n),starts.size())
           z = ffrc_render(rows)
         elsif quiet == 0
           << "WIDE_STATUS "+status.strip()
@@ -231,7 +237,7 @@ use ../rect/campaign
     stop_requested=1
   if tui != 0
     z=ccall("w_term_raw_disable")
-  status="mode=wide-cpu tensor="+tensor+" backend=packed-cpu rank="+rank.to_s()+" bits="+density.to_s()+" cpu_lanes="+workers.to_s()+" cpu_moves="+moves.to_s()+" gpu_supported=0 gpu_moves=0 round="+round.to_s()+" producer_state=stopped stop_requested="+stop_requested.to_s()+" next_requested="+next_requested.to_s()+" exact_rejects="+failure.to_s()+cycle_fields+"\n"
+  status="mode=wide-cpu tensor="+tensor+" backend=packed-cpu rank="+rank.to_s()+" bits="+density.to_s()+" cpu_lanes="+workers.to_s()+" cpu_moves="+moves.to_s()+" gpu_supported=0 gpu_moves=0 round="+round.to_s()+" producer_state=stopped stop_requested="+stop_requested.to_s()+" next_requested="+next_requested.to_s()+" exact_rejects="+failure.to_s()+seed_fields+cycle_fields+"\n"
   if ffrf_atomic(status_path,status,"wide") != 1
     failure=1
   if quiet == 0

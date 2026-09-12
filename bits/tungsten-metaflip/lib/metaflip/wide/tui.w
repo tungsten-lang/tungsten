@@ -5,7 +5,7 @@ use ../tui
 # Each lane is a joined-worker snapshot: best rank, current rank, moves,
 # moves/sec, last improvement ms, snapshot ms, best density, accepts, rejects.
 # Never inspect a worker's mutable tensor or counters from the render loop.
--> ffws_frame_rows(n, rank, density, moves, workers, round, elapsed_s, gpu, failures, sequence, last_status_ms, now_ms, drops, ties, accepted, rejected, dslack, lanes, rank_levels, rank_ticks, rank_count, bits_levels, bits_ticks, bits_count, timeline_times, timeline_ranks, timeline_count, cycle_caption, width)
+-> ffws_frame_rows(n, rank, density, moves, workers, round, elapsed_s, gpu, failures, sequence, last_status_ms, now_ms, drops, ties, accepted, rejected, dslack, lanes, rank_levels, rank_ticks, rank_count, bits_levels, bits_ticks, bits_count, timeline_times, timeline_ranks, timeline_count, cycle_caption, width, reference, seeds)
   inner = width - 2 ## i64
   rows = []
   state = ff_tui_health(failures, 0, 0, 0, last_status_ms, now_ms, 5000)
@@ -16,6 +16,8 @@ use ../tui
   rows.push(ff_tui_fit(title, painted, width))
 
   objective = ff_tui_objective(rank, 0, 0, 0)
+  if reference > 0
+    objective = ff_tui_objective_compare(rank,reference,"reference")
   moves_text = ff_tui_compact_fixed(moves, 6)
   plains = ["  " + objective, "   density " + density.to_s(), "   moves " + moves_text, "   elapsed " + ff_tui_duration(elapsed_s), "   threads " + workers.to_s(), "   round " + round.to_s()]
   painteds = ["  " + ff_tui_paint(objective, "1;32"), "   " + ff_tui_dim("density") + " " + density.to_s(), "   " + ff_tui_dim("moves") + " " + moves_text, "   " + ff_tui_dim("elapsed") + " " + ff_tui_duration(elapsed_s), "   " + ff_tui_dim("threads") + " " + workers.to_s(), "   " + ff_tui_dim("round") + " " + round.to_s()]
@@ -38,7 +40,7 @@ use ../tui
   while lane < workers
     at = lane * 9 ## i64
     idle = (now_ms - lanes[at+4]) / 1000 ## i64
-    row = ff_tui_cpu_island_row(lane, "packed", "walk", rank, lanes[at], lanes[at+1], 0-1, 0-1, 0-1, lanes[at+2], lanes[at+3], idle, "packed/cpu", "running", 0, 0, inner)
+    row = ff_tui_cpu_island_row(lane, "packed", "walk", rank, lanes[at], lanes[at+1], 0-1, 0-1, 0-1, lanes[at+2], lanes[at+3], idle, "packed/seed"+(lane % seeds).to_s(), "running", 0, 0, inner)
     code = ""
     if lanes[at] == rank
       code = "32"
@@ -60,7 +62,7 @@ use ../tui
 
   rows.push("")
   rows.push(ff_tui_paint(ff_tui_rule("Diversity", width), "36"))
-  rows.push("  " + ff_tui_clip(workers.to_s() + " independent RNG streams; term-set distance not collected", inner))
+  rows.push("  " + ff_tui_clip(seeds.to_s()+" verified seeds; "+workers.to_s() + " RNG streams; term-set distance not collected", inner))
   rows.push("  " + ff_tui_dim(ff_tui_clip("Frontier/shoulder archives and refinement: unavailable on packed backend", inner)))
 
   rows.push("")

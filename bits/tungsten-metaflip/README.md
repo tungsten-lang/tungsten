@@ -126,14 +126,42 @@ bin/metaflip --tensor 16x16
 bin/metaflip --cycle-shapes 8x8,12x12,16x16 --cycle-secs 60
 ```
 
-These workers start from full-tensor-verified Kronecker products/projections
-of bundled smaller seeds (or `--naive`), perform multiword pair flips and
+These workers start from pinned published GF(2) decompositions or better
+full-tensor-verified Kronecker products/projections of bundled smaller seeds
+(or `--naive`), perform multiword pair flips and
 bounded splits, and exactly verify every promoted checkpoint. Large-square
 `--seed` and `best.txt` use canonical **MFW1** hexadecimal masks, not the
 narrow decimal-mask format. A malformed checkpoint is rejected without
 overwriting it, and `--naive` never replaces a better saved result. The new
 backend does not yet run GPU, Core ML, or the small-shape refinement/portfolio
 strategies. Composed starting ranks are not claims of new records.
+
+The 2026-09-12 large-square refresh adds 12 literal-distinct published
+certificates (1,316,280 bytes total), with exact upstream hashes and MIT
+attribution in `lib/metaflip/manifests/wide-seeds.tsv`. A normal launch needs
+no download and no Python. Default GF(2) reference ranks for 8..16 are
+**329, 486, 651, 873, 1068, 1426, 1725, 2058, 2209**. The TUI says
+"reference", not "proved optimal"; characteristic-zero-only and commutative
+catalog results are not GF(2) tensor records.
+
+At startup, workers are distributed across at most four full-term-distinct verified starts:
+published seeds and alternative small-seed compositions within 5% of the
+leader. One published near-best seed was available for 9, 11 and 13; the other
+sizes have 2–4 automatic starts. `--seed` or `--naive` pins a single start.
+Higher-rank published alternatives remain bundled for explicit `--seed` use.
+See the [source and field audit](tools/LARGE-SQUARE-SEEDS-2026-09-12.md).
+Existing historical 13x13 rank-1402 and 15x15 rank-2008 witnesses can be
+restored from local Git history with `tools/recover_wide_local_seeds.py
+--repo /path/to/tungsten`. This writes only new local checkpoints, never
+overwrites existing state, and does not bundle coefficients with unresolved
+redistribution provenance. Those stronger local starts take precedence.
+
+Offline refresh/replay (raw source JSON stays outside the repository):
+
+```sh
+python3 tools/import_wide_seeds.py --runtime lib/metaflip
+python3 spec/wide_seed_import_test.py
+```
 
 For the solved 2x2 parent, a cycle visit enumerates all 216 GL(2,2)^3 basis
 codes (36 full-identity-distinct rank-seven tensors) into the durable exact

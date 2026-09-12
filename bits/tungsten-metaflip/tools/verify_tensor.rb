@@ -27,8 +27,16 @@ module MetaflipTensorVerifier
     raise "non-positive shape" unless [n, m, p].all? { |value| value.is_a?(Integer) && value.positive? }
     lines = text.lines.map(&:strip).reject { |line| line.empty? || line.start_with?("#") }
     raise "empty tensor certificate" if lines.empty?
-    header = lines.first.match?(/\A[0-9]+\z/)
-    rank = header ? Integer(lines.shift, 10) : lines.length
+    packed = lines.first.start_with?("MFW1")
+    header = packed || lines.first.match?(/\A[0-9]+\z/)
+    if packed
+      fields = lines.shift.split
+      raise "malformed MFW1 header" unless fields.length == 5 && fields[0] == "MFW1" && fields[1..].all? { |s| s.match?(/\A[1-9][0-9]*\z/) }
+      raise "MFW1 shape mismatch" unless fields[1, 3].map(&:to_i) == [n, m, p]
+      rank = Integer(fields[4], 10)
+    else
+      rank = header ? Integer(lines.shift, 10) : lines.length
+    end
     raise "wrong term count" unless rank.positive? && lines.length == rank
     widths = [n * m, m * p, n * p]
     tensor = Array.new(widths[0] * widths[1], 0)
@@ -38,10 +46,12 @@ module MetaflipTensorVerifier
       # Curated corpus files use R-prefixed rows without a numeric header;
       # checkpoints use three decimal words after a rank header.
       prefixed = words.first == "R"
+      raise "R prefix in MFW1" if packed && prefixed
       words.shift if prefixed
       raise "missing rank header or R prefix" unless header || prefixed
-      raise "malformed factor triple at term #{index}" unless words.length == 3 && words.all? { |word| word.match?(/\A[0-9]+\z/) }
-      factors = words.map { |word| Integer(word, 10) }
+      pattern = packed ? /\A[0-9a-f]+\z/ : /\A[0-9]+\z/
+      raise "malformed factor triple at term #{index}" unless words.length == 3 && words.all? { |word| word.match?(pattern) }
+      factors = words.map { |word| Integer(word, packed ? 16 : 10) }
       raise "zero or out-of-bounds factor at term #{index}" unless factors.zip(widths).all? { |word, width| word.positive? && word.bit_length <= width }
       u, v, w = factors
       ubits, vbits, wbits = factors.map { |word| bit_positions(word) }

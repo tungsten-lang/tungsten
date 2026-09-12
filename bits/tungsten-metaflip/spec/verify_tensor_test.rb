@@ -55,4 +55,16 @@ class VerifyTensorTest < Minitest::Test
     assert_raises(RuntimeError) { MetaflipTensorVerifier.dimensions("2x0x4") }
     assert_raises(RuntimeError) { MetaflipTensorVerifier.infer_shape("/tmp/unlabeled.txt") }
   end
+
+  def test_mfw1_multiword_and_rejections
+    n = 9
+    rows = naive(n, n, n).lines.drop(1).map { |line| line.split.map { |v| Integer(v).to_s(16) }.join(" ") }
+    text = (["MFW1 9 9 9 #{rows.length}"] + rows).join("\n") + "\n"
+    assert_equal 729, MetaflipTensorVerifier.verify_text(text, n, n, n)[:rank]
+    [text.sub("MFW1 9 9 9", "MFW1 8 9 9"), text.sub("729", "728"),
+     text.sub("1 1 1\n", "R 1 1 1\n"), text.sub("1 1 1\n", "1 1 g\n"),
+     text.sub("1 1 1\n", "0 1 1\n"), text.sub("1 1 1\n", "1 1 2\n")].each do |bad|
+      assert_raises(RuntimeError) { MetaflipTensorVerifier.verify_text(bad, n, n, n) }
+    end
+  end
 end

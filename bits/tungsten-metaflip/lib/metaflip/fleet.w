@@ -3298,40 +3298,40 @@ if GPU == 1
   # Join every concurrent worker build, then apply the bookkeeping that used
   # to follow each build inline.
   if generic_build_thread != nil
-    z = ffn_thread_join_release(generic_build_thread)
+    build_joined = ffn_thread_join_release(generic_build_thread)
     gpu_generic_ready = build_results[0]
   if c3_build_thread != nil
-    z = ffn_thread_join_release(c3_build_thread)
+    build_joined = ffn_thread_join_release(c3_build_thread)
     gpu_c3_ready = build_results[1]
   if simd_build_thread != nil
-    z = ffn_thread_join_release(simd_build_thread)
+    build_joined = ffn_thread_join_release(simd_build_thread)
     gpu_simd_ready = build_results[2]
   if mitm_build_thread != nil
-    z = ffn_thread_join_release(mitm_build_thread)
+    build_joined = ffn_thread_join_release(mitm_build_thread)
     gpu_mitm_ready = build_results[3]
   if constraint_build_thread != nil
-    z = ffn_thread_join_release(constraint_build_thread)
+    build_joined = ffn_thread_join_release(constraint_build_thread)
     gpu_constraint_ready = build_results[4]
   if kxor_build_thread != nil
-    z = ffn_thread_join_release(kxor_build_thread)
+    build_joined = ffn_thread_join_release(kxor_build_thread)
     gpu_kxor_ready = build_results[5]
   if span_build_thread != nil
-    z = ffn_thread_join_release(span_build_thread)
+    build_joined = ffn_thread_join_release(span_build_thread)
     gpu_span_ready = build_results[6]
   if shear_build_thread != nil
-    z = ffn_thread_join_release(shear_build_thread)
+    build_joined = ffn_thread_join_release(shear_build_thread)
     gpu_shear_ready = build_results[7]
   if differential_build_thread != nil
-    z = ffn_thread_join_release(differential_build_thread)
+    build_joined = ffn_thread_join_release(differential_build_thread)
     gpu_differential_ready = build_results[8]
   if frozen_sat_build_thread != nil
-    z = ffn_thread_join_release(frozen_sat_build_thread)
+    build_joined = ffn_thread_join_release(frozen_sat_build_thread)
     gpu_frozen_sat_ready = build_results[9]
   if global_shear_build_thread != nil
-    z = ffn_thread_join_release(global_shear_build_thread)
+    build_joined = ffn_thread_join_release(global_shear_build_thread)
     gpu_global_shear_ready = build_results[10]
   if pooled_exact_build_thread != nil
-    z = ffn_thread_join_release(pooled_exact_build_thread)
+    build_joined = ffn_thread_join_release(pooled_exact_build_thread)
     gpu_pooled_exact_ready = build_results[11]
   if gpu_eligible[2] != 0
     if gpu_c3_ready == 0
@@ -3354,7 +3354,7 @@ if GPU == 1
     rect_component = 0
     while rect_component < 2
       if rect_build_threads[rect_component] != nil
-        z = ffn_thread_join_release(rect_build_threads[rect_component])
+        build_joined = ffn_thread_join_release(rect_build_threads[rect_component])
         rect_ready[rect_component] = rect_build_results[rect_component]
       if rect_enabled != 0 && rect_states[rect_component] != nil
         if rect_ready[rect_component] == 0

@@ -402,8 +402,10 @@ compiled_specs=(
   spec/compiler/postfix_rescue_loader_spec.w
   spec/numeric/bigint_view_field_write_spec.w
   spec/compiler/hash_free_escape_spec.w
+  spec/compiler/short_circuit_literal_free_spec.w
   spec/compiler/object_free_escape_spec.w
   spec/core/error_hierarchy_spec.w
+  spec/core/file_read_missing_spec.w
   spec/numeric/bit_ops_spec.w
   spec/numeric/big_decimal_spec.w
   spec/numeric/complex_spec.w
@@ -623,6 +625,7 @@ interpreter_specs=(
   spec/compiler/hash_free_escape_spec.w
   spec/compiler/object_free_escape_spec.w
   spec/core/error_hierarchy_spec.w
+  spec/core/file_read_missing_spec.w
   spec/numeric/bit_ops_spec.w
   spec/numeric/big_decimal_spec.w
   spec/numeric/rational_spec.w

@@ -76,9 +76,14 @@ use core/mmap
     else
       file_open(path, mode)
 
-  # Whole-file reads/writes
+  # Whole-file reads/writes. The runtime readers answer nil when the path
+  # cannot be opened or read; surface that as FileNotFound (an IOError) so a
+  # missing file fails at the read, not at the next use of a nil result.
   -> .read(path)
-    read_file(path)
+    data = read_file(path)
+    if data == nil
+      raise FileNotFound.new("File.read: cannot read " + path.to_s)
+    data
 
   # Read no more than `length` bytes from the beginning of a file.  Unlike
   # `read`, the allocation and I/O are bounded by the caller's request.
@@ -86,10 +91,13 @@ use core/mmap
     ccall("__w_read_file_prefix", path, length)
 
   -> .read_bytes(path)
-    read_file_bytes(path)
+    data = read_file_bytes(path)
+    if data == nil
+      raise FileNotFound.new("File.read_bytes: cannot read " + path.to_s)
+    data
 
   -> .binread(path)
-    read_file_bytes(path)
+    File.read_bytes(path)
 
   -> .write(path, *args)
     if block?

@@ -3,6 +3,19 @@
 
 use runtime_types
 use wire
+use cfg
+
+# Does block `a` dominate block `b`? `idom` is compute_dominators' array:
+# idom[entry] = entry and -1 marks an unreachable block.
+-> block_dominates?(idom, a, b)
+  if a == b || a == 0
+    return true
+  cur = b
+  while cur != 0 && cur != -1
+    cur = idom[cur]
+    if cur == a
+      return true
+  false
 
 # Does this instruction produce a value that definitely heap-allocates?
 # Only track KNOWN constructors, not arbitrary call results.
@@ -313,6 +326,9 @@ use wire
   scope_locals = {}
   scope_stack = []
   func_scope_temps = []
+  # Dominators are built lazily, only when a scope holds a producer from a
+  # block other than the block of its scope_pop.
+  idom = nil
   # temp → class name for :load_class results; construct_producer_class
   # needs to know that a construct's receiver IS the guarded class.
   class_temps = {}
@@ -336,7 +352,26 @@ use wire
       elsif op == :scope_pop
         if scope_stack.size() > 0
           scope = scope_stack.pop()
-          scope_locals[scope[:id]] = scope[:temps]
+          # A producer born in a block that does not dominate this pop — the
+          # right operand of a short-circuit `&&`/`||`, for instance, which
+          # lowers into its own block — is defined on only some paths here.
+          # Releasing it at the pop broke SSA dominance ("Instruction does not
+          # dominate all uses" from LLVM). Keep only producers whose block
+          # dominates the pop's block; the rest stay with the collector.
+          kept = []
+          ti = 0
+          while ti < scope[:temps].size()
+            temp = scope[:temps][ti]
+            pb = producers[temp][:block]
+            if pb == bi
+              kept.push(temp)
+            else
+              if idom == nil
+                idom = compute_dominators(build_cfg(func))
+              if block_dominates?(idom, pb, bi)
+                kept.push(temp)
+            ti += 1
+          scope_locals[scope[:id]] = kept
       elsif op == :phi_ssa
         # Treat the phi and every incoming value as one escaping group.  An
         # incoming producer may only dominate one branch, so freeing it at a

@@ -6,6 +6,7 @@
 #   timeout - compute-heavy: exceeded the 120 s interpreted sweep budget
 # Run these natively (bin/tungsten compile) or via their driver scripts.
 spec/archive_admission_test.w timeout  # 120s+ interpreted
+spec/basin_identity_test.w native  # exhaustive bit permutations and live snapshot parity
 spec/axis_sweep_racer_test.w timeout  # 120s+ interpreted
 spec/checkpoint_text_test.w timeout  # 120s+ interpreted
 spec/coreml_protocol_test.w argv  # positional arguments required

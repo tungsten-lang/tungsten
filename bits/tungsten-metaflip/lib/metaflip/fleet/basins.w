@@ -11,6 +11,15 @@ use ../scheme
 use ../strategies/escape
 
 -> ffbi_reverse_factor(mask, n) (i64 i64) i64
+  if n >= 1 && n <= 7
+    # Reverse bits inside bytes, then reverse the seven low bytes. Keeping
+    # the intermediate below bit 56 avoids signed-right-shift extension.
+    x = mask ## i64
+    x = ((x >> 1) & 0x5555555555555555) | ((x & 0x5555555555555555) << 1)
+    x = ((x >> 2) & 0x3333333333333333) | ((x & 0x3333333333333333) << 2)
+    x = ((x >> 4) & 0x0f0f0f0f0f0f0f0f) | ((x & 0x0f0f0f0f0f0f0f0f) << 4)
+    reversed = ((x & 255) << 48) | (((x >> 8) & 255) << 40) | (((x >> 16) & 255) << 32) | (((x >> 24) & 255) << 24) | (((x >> 32) & 255) << 16) | (((x >> 40) & 255) << 8) | ((x >> 48) & 255) ## i64
+    return reversed >> (56 - n * n)
   result = 0 ## i64
   row = 0 ## i64
   while row < n
@@ -21,6 +30,31 @@ use ../strategies/escape
         target = (n - 1 - row) * n + (n - 1 - col) ## i64
         result = result | (1 << target)
       col += 1
+    row += 1
+  result
+
+# Pack into an 8x8 bit matrix, transpose with three delta swaps, and unpack.
+# Valid square factors have n<=7, so no intermediate uses the sign bit.
+# This is the same permutation as ffe_transpose, without per-set-bit division.
+-> ffbi_transpose_factor(mask, n) (i64 i64) i64
+  if n < 1 || n > 7
+    return ffe_transpose(mask, n)
+  rows = 0 ## i64
+  row_mask = (1 << n) - 1 ## i64
+  row = 0 ## i64
+  while row < n
+    rows = rows | (((mask >> (row * n)) & row_mask) << (row * 8))
+    row += 1
+  swap = (rows ^ (rows >> 7)) & 0x00aa00aa00aa00aa ## i64
+  rows = rows ^ swap ^ (swap << 7)
+  swap = (rows ^ (rows >> 14)) & 0x0000cccc0000cccc
+  rows = rows ^ swap ^ (swap << 14)
+  swap = (rows ^ (rows >> 28)) & 0x00000000f0f0f0f0
+  rows = rows ^ swap ^ (swap << 28)
+  result = 0 ## i64
+  row = 0
+  while row < n
+    result = result | (((rows >> (row * 8)) & row_mask) << (row * n))
     row += 1
   result
 
@@ -38,23 +72,23 @@ use ../strategies/escape
   if code == 1
     result = v
     if axis == 1
-      result = ffe_transpose(w, n)
+      result = ffbi_transpose_factor(w, n)
     if axis == 2
-      result = ffe_transpose(u, n)
+      result = ffbi_transpose_factor(u, n)
   if code == 2
-    result = ffe_transpose(w, n)
+    result = ffbi_transpose_factor(w, n)
     if axis == 1
       result = u
     if axis == 2
-      result = ffe_transpose(v, n)
+      result = ffbi_transpose_factor(v, n)
   if code == 3
-    result = ffe_transpose(v, n)
+    result = ffbi_transpose_factor(v, n)
     if axis == 1
-      result = ffe_transpose(u, n)
+      result = ffbi_transpose_factor(u, n)
     if axis == 2
-      result = ffe_transpose(w, n)
+      result = ffbi_transpose_factor(w, n)
   if code == 4
-    result = ffe_transpose(u, n)
+    result = ffbi_transpose_factor(u, n)
     if axis == 1
       result = w
     if axis == 2
@@ -62,7 +96,7 @@ use ../strategies/escape
   if code == 5
     result = w
     if axis == 1
-      result = ffe_transpose(v, n)
+      result = ffbi_transpose_factor(v, n)
     if axis == 2
       result = u
   if reverse != 0

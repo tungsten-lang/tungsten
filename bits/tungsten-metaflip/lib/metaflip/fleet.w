@@ -28,6 +28,7 @@ use rect/portfolio
 use compose
 use fleet/seven_by_seven
 use fleet/basins
+use fleet/basin_stats
 use fleet/archive
 use fleet/intake
 use fleet/lineage
@@ -405,101 +406,6 @@ use paths
         out = candidate
   out
 
--> ffn_current_term_in(state, u, v, w) (i64[] i64 i64 i64) i64
-  # Live states already maintain an exact three-factor hash index. Basin
-  # telemetry runs at the status heartbeat, so use it instead of rescanning a
-  # peer's complete term set for every term in every island pair.
-  if ffw_find_term(state, u, v, w) >= 0
-    return 1
-  0
-
-# Raw term-set distance between two live working states. Unlike the personal
-# best rank shown historically by the TUI, this distinguishes active basins.
--> ffn_current_distance_raw(left, right) (i64[] i64[]) i64
-  left_rank = ffw_current_rank(left) ## i64
-  right_rank = ffw_current_rank(right) ## i64
-  common = 0 ## i64
-  i = 0 ## i64
-  while i < left_rank
-    common += ffn_current_term_in(right, ffw_read_current_u(left, i), ffw_read_current_v(left, i), ffw_read_current_w(left, i))
-    i += 1
-  left_rank + right_rank - common - common
-
--> ffn_current_distance(left, right) (i64[] i64[]) i64
-  if ffbi_current_id(left) == ffbi_current_id(right)
-    return 0
-  ffn_current_distance_raw(left, right)
-
--> ffn_current_to_best_distance(state, best) (i64[] i64[]) i64
-  if ffbi_current_id(state) == ffbi_best_id(best)
-    return 0
-  current_rank = ffw_current_rank(state) ## i64
-  best_rank = ffw_best_rank(best) ## i64
-  common = 0 ## i64
-  i = 0 ## i64
-  while i < current_rank
-    common += ffn_term_in(best, ffw_read_current_u(state, i), ffw_read_current_v(state, i), ffw_read_current_w(state, i))
-    i += 1
-  current_rank + best_rank - common - common
-
--> ffn_best_to_current_distance(candidate, active) (i64[] i64[]) i64
-  if ffbi_best_id(candidate) == ffbi_current_id(active)
-    return 0
-  candidate_rank = ffw_best_rank(candidate) ## i64
-  active_rank = ffw_current_rank(active) ## i64
-  common = 0 ## i64
-  i = 0 ## i64
-  while i < candidate_rank
-    common += ffn_current_term_in(active, ffw_read_best_u(candidate, i), ffw_read_best_v(candidate, i), ffw_read_best_w(candidate, i))
-    i += 1
-  candidate_rank + active_rank - common - common
-
-# Order-independent digest of the live term set. It is telemetry and a seed
-# selection aid, never an exactness or equality proof.
--> ffn_current_basin_id(state) (i64[]) i64
-  ffbi_current_id(state)
-
-# stats: unique live digests, minimum pair distance, states exactly on the
-# fleet leader term set, mean distance from the fleet leader.
--> ffn_active_basin_stats(states, best, stats)
-  count = states.size() ## i64
-  unique = 0 ## i64
-  on_leader = 0 ## i64
-  distance_sum = 0 ## i64
-  min_distance = 0 - 1 ## i64
-  if count > 1
-    min_distance = 999999999
-  # No temporary identities[] — campaign-lifetime allocator retained one
-  # J-word array every TUI frame under the previous version.
-  i = 0 ## i64
-  while i < count
-    id_i = ffbi_current_id(states[i]) ## i64
-    seen = 0 ## i64
-    j = 0 ## i64
-    while j < i
-      id_j = ffbi_current_id(states[j]) ## i64
-      pair_distance = 0 ## i64
-      if id_i != id_j
-        pair_distance = ffn_current_distance_raw(states[i], states[j])
-      if pair_distance < min_distance
-        min_distance = pair_distance
-      if pair_distance == 0
-        seen = 1
-      j += 1
-    if seen == 0
-      unique += 1
-    distance = ffn_current_to_best_distance(states[i], best) ## i64
-    if distance == 0
-      on_leader += 1
-    distance_sum += distance
-    i += 1
-  stats[0] = unique
-  stats[1] = min_distance
-  stats[2] = on_leader
-  stats[3] = 0
-  if count > 0
-    stats[3] = distance_sum / count
-  unique
 
 -> ffn_seed_min_active_distance(candidate, active) i64
   if active.size() == 0
@@ -1620,7 +1526,7 @@ use paths
   stored = ffn_atomic_write(path, body, run_tag) ## i64
   stored
 
--> ffn_render(n, threads_count, round, elapsed_s, total_moves, record, record_known, recovered, best, states, island_best_ranks, doors, zones, sources, last_rates, last_ages, cpu_work_moves, cpu_wander_moves, archive, archive_capacity, near1, near1_capacity, near2, near2_capacity, symmetry, symmetry_capacity, archive_counters, archive_min_distance, cohort_moves, cohort_drops, cohort_ties, cohort_near, timeline_times, timeline_ranks, timeline_count, timeline_elapsed_s, gpu_enabled, gpu_policy, gpu_degraded, gpu_lanes, gpu_candidates, gpu_rank_drops, gpu_density, gpu_rewards, gpu_epochs, gpu_wall_ms, gpu_failures, gpu_disabled, gpu_retry_round, gpu_seed_ranks, gpu_pareto, gpu_pareto_archive, gpu_pareto_capacity, gpu_pareto_counters, symmetry_cpu_uses, gpu_launch_number, pool_active_modes, pool_mode_ready, rect_enabled, rect_ready, rect_active, rect_lanes, rect_states, rect_archive_counts, rect_candidates, rect_rank_drops, rect_density, rect_rewards, rect_exposure, rect_failures, rect_retry_round, rect_composition_failures, last_status_ms, sequence, now_ms, rank_levels, rank_ticks, rank_level_count, bits_levels, bits_ticks, bits_level_count, new_bests_count, tie_bests_count, cycleouts_count, exact_rejects, dslack, flash_text, flash_until_ms, refinement_row)
+-> ffn_render(n, threads_count, round, elapsed_s, total_moves, record, record_known, recovered, best, states, basin_stats, island_best_ranks, doors, zones, sources, last_rates, last_ages, cpu_work_moves, cpu_wander_moves, archive, archive_capacity, near1, near1_capacity, near2, near2_capacity, symmetry, symmetry_capacity, archive_counters, archive_min_distance, cohort_moves, cohort_drops, cohort_ties, cohort_near, timeline_times, timeline_ranks, timeline_count, timeline_elapsed_s, gpu_enabled, gpu_policy, gpu_degraded, gpu_lanes, gpu_candidates, gpu_rank_drops, gpu_density, gpu_rewards, gpu_epochs, gpu_wall_ms, gpu_failures, gpu_disabled, gpu_retry_round, gpu_seed_ranks, gpu_pareto, gpu_pareto_archive, gpu_pareto_capacity, gpu_pareto_counters, symmetry_cpu_uses, gpu_launch_number, pool_active_modes, pool_mode_ready, rect_enabled, rect_ready, rect_active, rect_lanes, rect_states, rect_archive_counts, rect_candidates, rect_rank_drops, rect_density, rect_rewards, rect_exposure, rect_failures, rect_retry_round, rect_composition_failures, last_status_ms, sequence, now_ms, rank_levels, rank_ticks, rank_level_count, bits_levels, bits_ticks, bits_level_count, new_bests_count, tie_bests_count, cycleouts_count, exact_rejects, dslack, flash_text, flash_until_ms, refinement_row)
   width = ccall("w_term_cols") ## i64
   if width < 60
     width = 60
@@ -1673,14 +1579,15 @@ use paths
 
   rows.push("")
   rows.push(ff_tui_paint(ff_tui_rule("CPU islands (sticky doors; independent work/wander zones)", width), "36"))
+  z = ffn_active_basin_stats(states, best, basin_stats)
   i = 0 ## i64
   while i < threads_count
     door_name = ffp_door_name(doors[i])
     if sources[i].starts_with?("core-fringe")
       door_name = "core"
     zone_name = ffp_zone_name(zones[i])
-    basin_id = ffn_current_basin_id(states[i]) ## i64
-    basin_distance = ffn_current_to_best_distance(states[i], best) ## i64
+    basin_id = basin_stats[4 + i] ## i64
+    basin_distance = basin_stats[4 + threads_count + i] ## i64
     island_row = ff_tui_cpu_island_row(i, door_name, zone_name, ffw_best_rank(best), island_best_ranks[i], ffw_current_rank(states[i]), ffw_band(states[i]), basin_id, basin_distance, ffw_moves(states[i]), last_rates[i], last_ages[i], sources[i], "running", cpu_work_moves[zones[i]], cpu_wander_moves[zones[i]], inner)
     island_code = ""
     if island_best_ranks[i] > 0 && island_best_ranks[i] == ffw_best_rank(best)
@@ -1745,8 +1652,6 @@ use paths
       role += 1
   rows.push("")
   rows.push(ff_tui_paint(ff_tui_rule("Diversity", width), "36"))
-  basin_stats = i64[4]
-  z = ffn_active_basin_stats(states, best, basin_stats)
   basin_line = "cpu active " + basin_stats[0].to_s() + "/" + threads_count.to_s() + " term-sets · min d " + basin_stats[1].to_s() + " · on leader " + basin_stats[2].to_s() + " · mean d " + basin_stats[3].to_s()
   rows.push("  " + ff_tui_clip(basin_line, inner))
   rows.push("  " + ff_tui_clip(ff_tui_frontier_diversity(archive.size(), archive_capacity, archive_min_distance, archive_counters[1], archive_counters[2]), inner))
@@ -3568,7 +3473,8 @@ start_ms = ccall("__w_clock_ms") ## i64
 last_status_ms = 0 - 1 ## i64
 last_render_ms = 0 - 1 ## i64
 last_near_dump_ms = 0 - 1 ## i64
-status_basin_stats = i64[4]
+status_basin_stats = i64[ffn_basin_stats_words(J)]
+render_basin_stats = i64[ffn_basin_stats_words(J)]
 frontier_escape_last_ms = start_ms ## i64
 frontier_escape_sources = []
 frontier_escape_source_count = ffn_snapshot_archive_into(frontier_escape_sources, archive, ARCHIVE_CAP, STATE_SIZE, 28801) ## i64
@@ -5612,7 +5518,7 @@ while running == 1
         bits_levels[bits_level_count] = tick_bits
         bits_ticks[bits_level_count] = 1
         bits_level_count += 1
-      z = ffn_render(N, J, round, elapsed_s, total_moves, RECORD, RECORD_KNOWN, recovered, best, states, island_best_ranks, doors, zones, sources, last_rates, last_ages, cpu_work_moves, cpu_wander_moves, archive, ARCHIVE_CAP, near1, near1_capacity, near2, near2_capacity, symmetry, SYMMETRY_CAP, archive_counters, archive_min_cache, cohort_moves, cohort_drops, cohort_ties, cohort_near, timeline_times, timeline_ranks, timeline_count, elapsed_s - timeline_start_s, GPU, GPU_POLICY, gpu_degraded, gpu_lanes, gpu_candidates, gpu_rank_drops, gpu_density, gpu_rewards, gpu_lane_epochs, gpu_wall_ms, gpu_failures, gpu_disabled, gpu_retry_round, gpu_seed_ranks, gpu_pareto, gpu_pareto_archive, GPU_NOVELTY_CAP, gpu_pareto_counters, symmetry_cpu_uses, gpu_launch_number, pool_active_modes, pool_mode_ready, rect_enabled, rect_ready, rect_active, rect_lanes, rect_states, rect_archive_counts, rect_candidates, rect_rank_drops, rect_density, rect_rewards, rect_exposure, rect_failures, rect_retry_round, rect_composition_failures, last_status_ms, sequence, now_ms, rank_levels, rank_ticks, rank_level_count, bits_levels, bits_ticks, bits_level_count, new_bests, tie_bests, cycleouts, invalid_candidates, DSLACK, flash_text, flash_until_ms, CYCLE_CAPTION + " " + refinement.status_row())
+      z = ffn_render(N, J, round, elapsed_s, total_moves, RECORD, RECORD_KNOWN, recovered, best, states, render_basin_stats, island_best_ranks, doors, zones, sources, last_rates, last_ages, cpu_work_moves, cpu_wander_moves, archive, ARCHIVE_CAP, near1, near1_capacity, near2, near2_capacity, symmetry, SYMMETRY_CAP, archive_counters, archive_min_cache, cohort_moves, cohort_drops, cohort_ties, cohort_near, timeline_times, timeline_ranks, timeline_count, elapsed_s - timeline_start_s, GPU, GPU_POLICY, gpu_degraded, gpu_lanes, gpu_candidates, gpu_rank_drops, gpu_density, gpu_rewards, gpu_lane_epochs, gpu_wall_ms, gpu_failures, gpu_disabled, gpu_retry_round, gpu_seed_ranks, gpu_pareto, gpu_pareto_archive, GPU_NOVELTY_CAP, gpu_pareto_counters, symmetry_cpu_uses, gpu_launch_number, pool_active_modes, pool_mode_ready, rect_enabled, rect_ready, rect_active, rect_lanes, rect_states, rect_archive_counts, rect_candidates, rect_rank_drops, rect_density, rect_rewards, rect_exposure, rect_failures, rect_retry_round, rect_composition_failures, last_status_ms, sequence, now_ms, rank_levels, rank_ticks, rank_level_count, bits_levels, bits_ticks, bits_level_count, new_bests, tie_bests, cycleouts, invalid_candidates, DSLACK, flash_text, flash_until_ms, CYCLE_CAPTION + " " + refinement.status_row())
   if QUIET == 0 && TUI == 0
     round_wr = ffn_wr_status(ffw_best_rank(best), RECORD, RECORD_KNOWN)
     << "round=" + round.to_s() + " best=" + ffw_best_rank(best).to_s() + " bits=" + ffw_best_bits(best).to_s() + " WR=" + RECORD.to_s() + " wr=" + round_wr + " moves=" + total_moves.to_s() + " exact_bad=" + invalid_candidates.to_s() + " archive=" + archive.size().to_s() + " near1=" + near1.size().to_s() + " near2=" + near2.size().to_s()

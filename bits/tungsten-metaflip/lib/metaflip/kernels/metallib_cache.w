@@ -76,13 +76,11 @@ use ../paths
 # Dispatch readiness additionally ties both compiler outputs to the checked-in
 # worker source.  This prevents a surviving sibling `.metal` from masking a
 # source update when the executable was rebuilt incompletely.
+# Executable freshness against the checked-in worker source is decided by the
+# content digest in kernels/build_cache.w; here only the generated MSL and
+# its library must exist beside a present executable.
 -> ffmc_artifact_ready(worker_source_path, source_path, binary) (String String String) i64
-  worker_mtime = file_mtime_ns(worker_source_path)
-  source_mtime = file_mtime_ns(source_path)
-  binary_mtime = file_mtime_ns(binary)
-  if worker_mtime == nil || source_mtime == nil || binary_mtime == nil
-    return 0
-  if source_mtime < worker_mtime || binary_mtime < worker_mtime
+  if file_mtime_ns(worker_source_path) == nil || file_mtime_ns(source_path) == nil || file_mtime_ns(binary) == nil
     return 0
   ffmc_ready(source_path, binary)
 

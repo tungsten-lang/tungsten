@@ -75,3 +75,4 @@
 8 spec/verify_scratch_test.w  # 2s
 8 spec/wide_feedback_test.w  # 0s
 8 spec/sat_repair_encoder_test.w  # 26s
+1 spec/build_cache_test.w  # 48s

@@ -7,6 +7,7 @@
 # tensor reconstruction before it writes any candidate.
 
 use ../metallib_cache
+use ../build_cache
 use ../persistent
 use ../../seeds/rect
 
@@ -163,16 +164,7 @@ use ../../seeds/rect
   ffmc_library_path(binary)
 
 -> ffrmw_fresh(root, binary) (String String) i64
-  binary_mtime = file_mtime_ns(binary)
-  worker_mtime = file_mtime_ns(root + "/" + ffrmw_source_rel())
-  library_mtime = file_mtime_ns(root + "/" + ffrmw_library_rel())
-  shared_mtime = file_mtime_ns(root + "/" + ffrmw_shared_library_rel())
-  bundle_mtime = file_mtime_ns(root + "/kernels/bundles/workers.w")
-  if binary_mtime == nil || worker_mtime == nil || library_mtime == nil || shared_mtime == nil || bundle_mtime == nil
-    return 0
-  if binary_mtime < worker_mtime || binary_mtime < library_mtime || binary_mtime < shared_mtime || binary_mtime < bundle_mtime
-    return 0
-  ffmc_ready(ffmc_generated_source_path(binary), binary)
+  ffmk_fresh(root, binary, [root + "/" + ffrmw_source_rel(), root + "/" + ffrmw_library_rel(), root + "/" + ffrmw_shared_library_rel(), root + "/kernels/bundles/workers.w"])
 
 -> ffrmw_pool(n, m, p) (i64 i64 i64) i64
   if n == 2 && m == 2 && p == 5

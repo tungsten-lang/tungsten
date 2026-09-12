@@ -930,6 +930,8 @@ WValue w_bigint_add16_equal_finish_raw(WValue v, uint64_t carry);
 WValue w_bigint_add24_equal_finish_raw(WValue v, uint64_t carry);
 WValue w_bigint_add2_equal_finish_raw(WValue v, uint64_t carry);
 WValue w_bigint_add_equal_finish_raw(WValue v, int64_t len, uint64_t carry);
+WValue w_bigint_uneq_add_finish_raw(WValue v, int64_t len, uint64_t carry,
+                                    int64_t negative);
 WValue w_bigint_sub_equal_finish_raw(WValue v, int64_t len, int64_t negative);
 WValue w_bigint_sub2_equal_finish_raw(uint64_t low, uint64_t high,
                                       int64_t negative);

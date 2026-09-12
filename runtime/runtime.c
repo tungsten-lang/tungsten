@@ -60358,6 +60358,20 @@ WValue w_bigint_add24_equal_finish_raw(WValue v, uint64_t carry) {
     r->size = 24 + (int32_t)carry;
     return v;
 }
+/* Unequal-width magnitude-add publication for the out-of-line generic
+ * source body: the buffer holds len+1 limbs, so the carry limb is stored
+ * unconditionally (a zero limb beyond `size` is inert) and the signed size
+ * goes through bigint_finish_mag_add like w_bigint_finish_add_raw. */
+__attribute__((always_inline))
+WValue w_bigint_uneq_add_finish_raw(WValue v, int64_t len, uint64_t carry,
+                                    int64_t negative) {
+    WBigint *r = w_as_bigint(v);
+    int32_t n = (int32_t)len;
+    r->limbs[n] = carry;
+    n += (int32_t)carry;
+    r->size = negative ? -n : n;
+    return bigint_finish_mag_add(r);
+}
 /* Generic equal-width add publication for the widths without a fixed
  * kernel: identical to bigint_add_equal_fast's epilogue at any length. */
 __attribute__((always_inline))

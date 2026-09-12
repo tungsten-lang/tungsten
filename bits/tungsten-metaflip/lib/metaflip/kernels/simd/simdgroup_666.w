@@ -890,3 +890,9 @@ if GROUPS > 0
   if elapsed > 0
     perwalker = (attemptsum / GROUPS) * 1000 / elapsed
 << "SIMDGROUP_RESULT mode=" + MODE.to_s() + " n=" + nn.to_s() + " groups=" + GROUPS.to_s() + " steps=" + STEPS.to_s() + " dispatches=" + DISPATCHES.to_s() + " elapsed_ms=" + elapsed.to_s() + " attempted=" + attemptsum.to_s() + " partners=" + partnersum.to_s() + " aggregate_steps_s=" + rate.to_s() + " trajectory_steps_s=" + perwalker.to_s() + " rank=" + bestrank.to_s() + " density=" + bestdensity.to_s() + " verify_full=" + vok.to_s() + " output=" + outpath
+
+# Closed-world contracts for this standalone worker program: all definitions
+# above are final, so the compiler devirtualizes sends and emits only the
+# reachable Core cohort (smaller binary, faster compile).
+Tungsten.PROTECT_THE_CORE!
+Tungsten.LOCK_THE_DOORS!

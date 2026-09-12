@@ -12,3 +12,9 @@ meta = i64[20]
 result = ffpem_run(args[0], args[1], n, kind, budget, nonce, meta) ## i64
 if result < 0
   exit(2)
+
+# Closed-world contracts for this standalone worker program: all definitions
+# above are final, so the compiler devirtualizes sends and emits only the
+# reachable Core cohort (smaller binary, faster compile).
+Tungsten.PROTECT_THE_CORE!
+Tungsten.LOCK_THE_DOORS!

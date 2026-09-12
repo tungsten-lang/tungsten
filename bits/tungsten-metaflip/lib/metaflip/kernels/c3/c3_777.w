@@ -775,3 +775,9 @@ rate = 0 ## i64
 if elapsed > 0
   rate = attemptsum * 1000 / elapsed
 << "C3GPU_RESULT n=" + NN.to_s() + " walkers=" + WALKERS.to_s() + " steps=" + STEPS.to_s() + " dispatches=" + DISPATCHES.to_s() + " band=" + BAND.to_s() + " plusper=" + PLUSPER.to_s() + " elapsed_ms=" + elapsed.to_s() + " attempted=" + attemptsum.to_s() + " partners=" + partnersum.to_s() + " pluses=" + plussum.to_s() + " resets=" + resetsum.to_s() + " aggregate_steps_s=" + rate.to_s() + " rank=" + bestrank.to_s() + " density=" + bestdensity.to_s() + " verify_full=" + vok.to_s() + " c3_closed=" + c3ok.to_s() + " factors_valid=" + factorok.to_s() + " output=" + outpath
+
+# Closed-world contracts for this standalone worker program: all definitions
+# above are final, so the compiler devirtualizes sends and emits only the
+# reachable Core cohort (smaller binary, faster compile).
+Tungsten.PROTECT_THE_CORE!
+Tungsten.LOCK_THE_DOORS!

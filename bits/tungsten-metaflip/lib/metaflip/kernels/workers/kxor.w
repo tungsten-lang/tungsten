@@ -20,3 +20,9 @@ result = ffx_search(args[0], args[1], args[2].to_i(), args[3].to_i(), args[4].to
 if result < 0
   << "GPU_POOL_KXOR_ERROR code=" + result.to_s()
   exit(2)
+
+# Closed-world contracts for this standalone worker program: all definitions
+# above are final, so the compiler devirtualizes sends and emits only the
+# reachable Core cohort (smaller binary, faster compile).
+Tungsten.PROTECT_THE_CORE!
+Tungsten.LOCK_THE_DOORS!

@@ -1270,3 +1270,9 @@ while rd < ROUNDS || persistent_mode == 1
 
 << ""
 << "GPU-CAL2ZONE DONE.  global best over " + ROUNDS.to_s() + " rounds x " + NW.to_s() + " walkers = " + globalbest.to_s()
+
+# Closed-world contracts for this standalone worker program: all definitions
+# above are final, so the compiler devirtualizes sends and emits only the
+# reachable Core cohort (smaller binary, faster compile).
+Tungsten.PROTECT_THE_CORE!
+Tungsten.LOCK_THE_DOORS!

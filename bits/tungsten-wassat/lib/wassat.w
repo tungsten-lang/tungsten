@@ -20,6 +20,7 @@
 
 use version
 use cnf
+use xor_format
 use policy
 use atomic_stop
 use solver
@@ -71,6 +72,7 @@ use portfolio
   << "    wassat sls <problem.cnf> --flips <n> --seed <n>"
   << "    wassat trim <proof.wrat> --out <path> --drat <path>"
   << "    wassat explain <proof.wrat> --labels <path>"
+  << "    wassat convert <input.xcnf> --out <output.cnf>"
   << "    wassat version"
   << "    wassat help"
   << ""
@@ -100,6 +102,11 @@ use portfolio
   << "in-process race. --threads <n> defaults to 4, --timeout-ms <n> defaults"
   << "to 300000, --no-share disables learned-clause sharing, and --gpu adds"
   << "a model-only Metal arm to --fast. --dir chooses a work-directory parent."
+  << ""
+  << "CONVERSION"
+  << "convert expands CryptoMiniSat-style DIMACS+XOR into strict CNF."
+  << "Solve and verify proofs against the emitted CNF; original variable IDs"
+  << "are preserved, with fresh auxiliary variables appended. --out - prints CNF."
   << ""
   << "SLS OPTIONS"
   << "--flips <n>, --seed <n>, and --pre are CPU controls. --gpu selects the"
@@ -1334,6 +1341,17 @@ use portfolio
     rescue e
       << "c error: [e]"
       << "s UNKNOWN"
+      exit(1)
+  elsif cmd == "convert"
+    rest = []
+    i = 1
+    while i < args.size
+      rest.push(args[i])
+      i += 1
+    begin
+      wassat_run_convert(rest)
+    rescue e
+      << "c error: [e]"
       exit(1)
   elsif cmd == "trim"
     rest = []

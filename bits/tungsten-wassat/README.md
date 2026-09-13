@@ -112,6 +112,29 @@ The CLI accepts strict DIMACS CNF. It rejects malformed or duplicate headers,
 wrong clause counts, unterminated clauses, non-integer tokens, overflowing
 counts and literals, out-of-range variables, and native XNF/XOR syntax.
 
+### DIMACS with XOR clauses
+
+Use the explicit converter for CryptoMiniSat-style parity input:
+
+```sh
+wassat convert tensor.xcnf --out tensor.cnf
+wassat tensor.cnf --proof tensor.wrat
+wrat tensor.cnf tensor.wrat
+```
+
+The input header remains `p cnf V C`; `C` counts both ordinary and XOR
+clauses. `x1 -2 3 0` and `x 1 -2 3 0` mean that the XOR of those signed
+literals is true. Duplicate variables cancel, negative literals toggle the
+parity, and a linear-size Tseitin chain introduces fresh variables after `V`.
+Original variable IDs are preserved. `--out -` writes the expanded CNF to stdout.
+The converter checks the whole input before atomically replacing its output,
+and rejects output aliases of the source.
+
+This is an interchange format, **not native Gaussian-elimination support**.
+Solve and check refutations against the emitted CNF. A proof for that CNF must
+not be handed to WRAT together with the unexpanded XOR input. General XNF and
+OPB/pseudo-Boolean input are not supported by this converter.
+
 Certificate destinations never alias the input or each other, including
 symlink and hardlink aliases. A stale final certificate is removed before a
 run. Search writes to a unique temporary file beside the destination; only a

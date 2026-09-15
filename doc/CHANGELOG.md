@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Dates remember civil history without extra bits** — packed `Date` stays a
+  Y-M-D-h-m-s tuple. `Date.parse` / `Date.new` accept Sweden's 1712-02-30 and
+  Julian century leaps; `23:59:60` only on IERS leap-second dates; ordinals
+  `YYYY-DDD` walk extras, skips, and repeats. `Date.in("Sweden")` (and
+  Denmark, Britain, Rome, Russia, Amsterdam) rejects days that never existed
+  there. Packed years are −1024…3071 (`year−1024` in 12 bits). Amsterdam
+  `+00:20` packs as a spare tz code. Ruby inspection matches the native word.
+
 - **`Integer#modpow` recognizes two exact Fermat identities** — for the
   BN254 and secp256k1 base-field primes with exponent `p - 1`, it returns
   zero for divisible bases and one otherwise. All modulus/exponent limbs

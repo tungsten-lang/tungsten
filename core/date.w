@@ -1,8 +1,16 @@
 # Date — validated packed proleptic-Gregorian calendar and datetime values.
 #
-# Years are limited by the WValue representation to -2048..2047. Constructors,
+# Years are limited by the WValue representation to -1024..3071 (12-bit
+# field stored as year−1024). Constructors,
 # ISO/ordinal/Julian factories, and period boundaries raise rather than wrapping
 # when a requested result cannot be represented.
+#
+# Catch-up days that historically existed (Sweden 1712-02-30, Julian century
+# leaps 1700/1800/1900-02-29) are accepted. UTC leap seconds are second 60
+# only on the IERS dates (1972–2016), as 23:59:60Z — not an arbitrary :60.
+# Location- and period-aware calendars live on Date.in / Calendar
+# (doc/design/calendars.md). Packed Date is one civil tuple plus a UTC
+# offset: 15-minute steps, with Amsterdam +00:20 as a spare-code singleton.
 + Date
   is Enumerable
 
@@ -41,14 +49,13 @@
     year = 100 * b + d - 4_800 + m / 10
     Date.new(year, month, day)
 
-  # Proleptic-Gregorian ordinal day, 1..365/366.
+  # Numbered day of the year (`YYYY-DDD` / Date.ordinal). Walks local
+  # midnights: extras (Sweden 1712-02-30) exist, repeats (Samoa 1892-07-04)
+  # occupy two numbers with the same civil date, skips jump the label.
   -> .ordinal(year, number)
     if !number.is_a?(Int)
       raise "Date.ordinal expects an integer ordinal day"
-    first = Date.new(year, 1, 1)
-    if number < 1 || number > first.days_in_year
-      raise "Date.ordinal day is outside the requested year"
-    first + (number - 1)
+    ccall("w_date_from_ordinal", year, number)
 
   # ISO week date: Monday=1, Sunday=7; week 1 contains January 4.
   -> .commercial(year, week, day)
@@ -88,7 +95,8 @@
 
   -> year
     raw_year = (($value >> 33) & 0xFFF) ## i64
-    raw_year >= 0x800 ? raw_year - 0x1000 : raw_year
+    stored = raw_year >= 0x800 ? raw_year - 0x1000 : raw_year
+    stored + 1024
 
   -> hour
     ($value >> 19) & 0x1F
@@ -101,10 +109,18 @@
 
   -> tz
     raw_tz = ($value & 0x7F) ## i64
+    # Spare code 63 is Amsterdam statutory +00:20, not +15:45.
+    if raw_tz == 63
+      return 20
     quarters = raw_tz ## i64
     if quarters >= 0x40
       quarters -= 0x80
     quarters * 15
+
+  # Named jurisdiction / zone. Packed Date stays a civil tuple; Calendar
+  # knows cutovers and historical offsets. See doc/design/calendars.md.
+  -> .in(name)
+    Calendar.at(name)
 
   # Period values are their starting Gregorian year, making decade_abbr
   # naturally produce strings such as "2020s". Normalize negative remainders
@@ -135,9 +151,7 @@
     self.strftime(FORMATS[:ctime])
 
   -> cwday
-    y = (($value >> 33) & 0xFFF) ## i64
-    if y >= 0x800
-      y -= 0x1000
+    y = year
     m = (($value >> 29) & 0xF) ## i64
     d = (($value >> 24) & 0x1F) ## i64
     a = ((14 - m) / 12) ## i64
@@ -147,9 +161,7 @@
     (((jdn % 7) + 7) % 7 + 1) ## i64
 
   -> cweek
-    y = (($value >> 33) & 0xFFF) ## i64
-    if y >= 0x800
-      y -= 0x1000
+    y = year
     m = (($value >> 29) & 0xF) ## i64
     d = (($value >> 24) & 0x1F) ## i64
 
@@ -208,9 +220,7 @@
   -> cwyear
     week = cweek
     m = (($value >> 29) & 0xF) ## i64
-    y = (($value >> 33) & 0xFFF) ## i64
-    if y >= 0x800
-      y -= 0x1000
+    y = year
     if m == 1 && week >= 52
       return y - 1
     if m == 12 && week == 1
@@ -218,9 +228,7 @@
     y
 
   -> wday
-    y = (($value >> 33) & 0xFFF) ## i64
-    if y >= 0x800
-      y -= 0x1000
+    y = year
     m = (($value >> 29) & 0xF) ## i64
     d = (($value >> 24) & 0x1F) ## i64
     a = ((14 - m) / 12) ## i64
@@ -251,9 +259,7 @@
     "[decade]s"
 
   -> day_of_week
-    y = (($value >> 33) & 0xFFF) ## i64
-    if y >= 0x800
-      y -= 0x1000
+    y = year
     m = (($value >> 29) & 0xF) ## i64
     d = (($value >> 24) & 0x1F) ## i64
     a = ((14 - m) / 12) ## i64
@@ -283,9 +289,7 @@
     result
 
   -> day_of_year
-    y = (($value >> 33) & 0xFFF) ## i64
-    if y >= 0x800
-      y -= 0x1000
+    y = year
     m = (($value >> 29) & 0xF) ## i64
     yday = (($value >> 24) & 0x1F) ## i64
     if m > 1
@@ -314,9 +318,7 @@
     yday
 
   -> yday
-    y = (($value >> 33) & 0xFFF) ## i64
-    if y >= 0x800
-      y -= 0x1000
+    y = year
     m = (($value >> 29) & 0xF) ## i64
     yday = (($value >> 24) & 0x1F) ## i64
     if m > 1
@@ -345,10 +347,12 @@
     yday
 
   -> days_in_month
-    y = (($value >> 33) & 0xFFF) ## i64
-    if y >= 0x800
-      y -= 0x1000
+    y = year
     m = (($value >> 29) & 0xF) ## i64
+    if m == 2 && y == 1712
+      return 30
+    if m == 2 && y >= 100 && y <= 1900 && y % 100 == 0 && y % 400 != 0
+      return 29
     if m == 2
       leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
       return leap ? 29 : 28
@@ -357,11 +361,14 @@
     31 - ((0xA50 >> m) & 1)
 
   -> days_in_year
-    y = (($value >> 33) & 0xFFF) ## i64
-    if y >= 0x800
-      y -= 0x1000
+    y = year
     leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
-    leap ? 366 : 365
+    n = leap ? 366 : 365
+    if y == 1712
+      n = 367
+    elsif y >= 100 && y <= 1900 && y % 100 == 0 && y % 400 != 0
+      n = 366
+    n
 
   -> first_of_week
     self - (cwday - 1)
@@ -415,21 +422,15 @@
     last_of_millenium
 
   -> leap_year?
-    y = (($value >> 33) & 0xFFF) ## i64
-    if y >= 0x800
-      y -= 0x1000
+    y = year
     (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
 
   -> leap?
-    y = (($value >> 33) & 0xFFF) ## i64
-    if y >= 0x800
-      y -= 0x1000
+    y = year
     (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
 
   -> jd
-    y = (($value >> 33) & 0xFFF) ## i64
-    if y >= 0x800
-      y -= 0x1000
+    y = year
     m = (($value >> 29) & 0xF) ## i64
     d = (($value >> 24) & 0x1F) ## i64
     a = ((14 - m) / 12) ## i64

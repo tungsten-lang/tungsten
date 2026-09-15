@@ -695,7 +695,7 @@ module Tungsten
     def date_inspection_lines(date_value)
       date = date_value.value
       holiday = holiday_label(date)
-      calendar = month_calendar_lines(date, zero_pad: true)
+      calendar = month_calendar_lines(date, zero_pad: true, extra_day: date.day)
       right_panel = date_scene_right_panel(date, holiday)
 
       lines = [
@@ -762,6 +762,9 @@ module Tungsten
     end
 
     def holiday_label(date)
+      hist = history_label(date)
+      return hist if hist
+
       fixed = {
         [ 1, 1 ] => "\u2728 New Year's Day",
         [ 2, 14 ] => "\u2665 Valentine's Day",
@@ -777,13 +780,64 @@ module Tungsten
       fixed[[ date.month, date.day ]] || floating_holiday_label(date)
     end
 
+    def history_label(date)
+      if date.respond_to?(:sec) && date.sec == 60
+        return "UTC leap second"
+      end
+      return "tillökningsdagen" if date.year == 1712 && date.month == 2 && date.day == 30
+      if date.month == 2 && date.day == 29 && date.year >= 100 && date.year <= 1900 &&
+         (date.year % 100).zero? && (date.year % 400) != 0
+        return "Julian century leap"
+      end
+      return "Samoa's two Independences" if date.year == 1892 && date.month == 7 && date.day == 4
+      return "Alaska Purchase" if date.year == 1867 && date.month == 10 && [6, 18].include?(date.day)
+
+      nil
+    end
+
+    def history_art(date)
+      if date.respond_to?(:sec) && date.sec == 60
+        return [
+          "IERS inserted a positive leap",
+          "second: 23:59:60 UTC. Packed",
+          "Date stores second 60; parse",
+          "rejects any other :60. POSIX",
+          "clocks often repeat 00:00:00."
+        ]
+      end
+      if date.year == 1712 && date.month == 2 && date.day == 30
+        return [
+          "Charles XII added a second",
+          "leap day (tillökningsdagen)",
+          "after a botched gradual",
+          "Gregorian conversion.",
+          "Year had 367 days."
+        ]
+      end
+      if date.month == 2 && date.day == 29 && date.year >= 100 && date.year <= 1900 &&
+         (date.year % 100).zero? && (date.year % 400) != 0
+        return [
+          "Gregorian skips century years",
+          "not divisible by 400.",
+          "Julian jurisdictions still",
+          "had 29 February — Britain",
+          "until 1752, Russia until 1918."
+        ]
+      end
+
+      []
+    end
+
     def holiday_scene_label(label)
       label.to_s.sub(/\A\S+\s+/, "")
     end
 
     def date_scene_header_line(date)
       title = "#{date.strftime("%A, %B")} #{date.day}#{ordinal_suffix(date.day)}, #{date.year}"
-      day_week = "[Day #{date.yday}/#{date.leap? ? 366 : 365}] Week #{date.cweek}"
+      diy = date.year == 1712 ? 367 : (date.leap? ? 366 : 365)
+      yday = date.respond_to?(:yday) ? date.yday : date.day
+      cweek = date.respond_to?(:cweek) ? date.cweek : 0
+      day_week = "[Day #{yday}/#{diy}] Week #{cweek}"
       season_rail = date_scene_season_rail(date)
       season_col = date_scene_season_column(title, day_week, season_rail)
       stats_col = DATE_SCENE_WIDTH - visible_length(day_week)
@@ -819,6 +873,9 @@ module Tungsten
     end
 
     def date_scene_right_panel(date, holiday)
+      hist = history_art(date)
+      return hist unless hist.empty?
+
       holiday ? holiday_art(date) : []
     end
 
@@ -1108,15 +1165,18 @@ module Tungsten
       "\e[#{code}m#{text}\e[0m"
     end
 
-    def month_calendar_lines(date, zero_pad: false)
+    def month_calendar_lines(date, zero_pad: false, extra_day: nil)
       first = ::Date.new(date.year, date.month, 1)
       last = ::Date.new(date.year, date.month, -1)
+      max_day = last.day
+      max_day = extra_day if extra_day && extra_day > max_day
       lines = [ calendar_header_line, calendar_separator_line ]
       week = Array.new(first.wday, "    ")
 
-      (first..last).each do |day|
-        week << [ day.wday, day.day, day.day == date.day, zero_pad ]
-        if day.wday == 6
+      (1..max_day).each do |day_n|
+        wday = (first.wday + day_n - 1) % 7
+        week << [ wday, day_n, day_n == date.day, zero_pad ]
+        if wday == 6
           lines << calendar_week_line(week)
           week = []
         end
@@ -1485,30 +1545,34 @@ module Tungsten
         return unsupported_wvalue("#{date_time} has sub-second precision beyond Tungsten's packed date-time fields")
       end
 
-      offset_hours = value.offset * 24
-      unless offset_hours.denominator == 1
+      tz_min = (value.offset * 24 * 60).to_i
+      unless Tungsten::Date.packed_tz?(tz_min)
         return unsupported_wvalue(
-          "#{date_time} has a non-hour timezone offset beyond Tungsten's packed date-time field"
+          "#{date_time} has a timezone offset that does not pack (15-minute steps or Amsterdam +00:20)"
         )
       end
 
+      second = date_time.respond_to?(:sec) ? date_time.sec : value.sec
       coerce_packed_date_fields(
         value.year, value.month, value.day,
-        value.hour, value.min, value.sec, offset_hours.to_i
+        value.hour, value.min, second, tz_min
       )
     end
 
-    def coerce_packed_date_fields(year, month, day, hour, minute, second, timezone)
-      unless fits_signed_width?(year, 12)
-        return unsupported_wvalue("Year #{year} is outside Tungsten's signed 12-bit packed date range")
+    def coerce_packed_date_fields(year, month, day, hour, minute, second, tz_min)
+      unless fits_signed_width?(year - 1024, 12)
+        return unsupported_wvalue("Year #{year} is outside Tungsten's packed date range -1024..3071")
       end
-      unless timezone.between?(-32, 31)
-        return unsupported_wvalue("Timezone offset #{timezone} is outside Tungsten's signed 6-bit packed date range")
+      unless Tungsten::Date.packed_tz?(tz_min)
+        return unsupported_wvalue("Timezone offset #{tz_min} minutes does not pack")
       end
 
+      tz_code = tz_min == 20 ? 63 : tz_min / 15
       bits = W_TAG_PACKED | (4 << 45) |
-             (signed_payload(year, 12) << 32) | (month << 28) | (day << 23) |
-             (hour << 18) | (minute << 12) | (second << 6) | signed_payload(timezone, 6)
+             (signed_payload(year - 1024, 12) << 33) |
+             ((month & 0xF) << 29) | ((day & 0x1F) << 24) |
+             ((hour & 0x1F) << 19) | ((minute & 0x3F) << 13) |
+             ((second & 0x3F) << 7) | (tz_code & 0x7F)
       exact_wvalue(bits, "exact immediate encoding")
     end
 
@@ -1917,13 +1981,15 @@ module Tungsten
         )
         lines << inspection_field_line("den", "bits 21..0", (bits & 0x3F_FFFF).to_s, "denominator")
       when 4
-        lines << inspection_field_line("year", "bits 43..32", sign_extend((bits >> 32) & 0xFFF, 12).to_s, nil)
-        lines << inspection_field_line("month", "bits 31..28", ((bits >> 28) & 0xF).to_s, nil)
-        lines << inspection_field_line("day", "bits 27..23", ((bits >> 23) & 0x1F).to_s, nil)
-        lines << inspection_field_line("hour", "bits 22..18", ((bits >> 18) & 0x1F).to_s, nil)
-        lines << inspection_field_line("minute", "bits 17..12", ((bits >> 12) & 0x3F).to_s, nil)
-        lines << inspection_field_line("second", "bits 11..6", ((bits >> 6) & 0x3F).to_s, nil)
-        lines << inspection_field_line("tz", "bits 5..0", sign_extend(bits & 0x3F, 6).to_s, "timezone offset")
+        tz_code = bits & 0x7F
+        tz_min = tz_code == 63 ? 20 : sign_extend(tz_code, 7) * 15
+        lines << inspection_field_line("year", "bits 44..33", (sign_extend((bits >> 33) & 0xFFF, 12) + 1024).to_s, "civil year (stored as year−1024)")
+        lines << inspection_field_line("month", "bits 32..29", ((bits >> 29) & 0xF).to_s, nil)
+        lines << inspection_field_line("day", "bits 28..24", ((bits >> 24) & 0x1F).to_s, nil)
+        lines << inspection_field_line("hour", "bits 23..19", ((bits >> 19) & 0x1F).to_s, nil)
+        lines << inspection_field_line("minute", "bits 18..13", ((bits >> 13) & 0x3F).to_s, nil)
+        lines << inspection_field_line("second", "bits 12..7", ((bits >> 7) & 0x3F).to_s, nil)
+        lines << inspection_field_line("tz", "bits 6..0", tz_min.to_s, "minutes east of UTC")
       when 5
         addr = (bits >> 12) & 0xFFFF_FFFF
         lines << inspection_field_line("addr", "bits 43..12", format("0x%08X", addr), ipv4_label(addr))

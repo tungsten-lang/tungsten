@@ -476,6 +476,10 @@
       if args.size() != 2
         raise "w_date_parse expects one string"
       return ccall("w_date_parse", args[1])
+    when "w_date_from_ordinal"
+      if args.size() != 3
+        raise "w_date_from_ordinal expects a year and day-of-year"
+      return ccall("w_date_from_ordinal", args[1], args[2])
     when "w_date_new_w"
       if args.size() != 8
         raise "w_date_new_w expects seven fields"

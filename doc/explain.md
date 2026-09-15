@@ -572,6 +572,13 @@ A rational literal `n/0` has a zero denominator.
 **Fix:** Every rational needs a non-zero denominator; write `1/2`, `3/4`, and
 so on. Division by a runtime zero raises `ZeroDivisionError` instead.
 
+## E_LOWER_DATE_INVALID_YEAR
+
+A date literal's year is outside the packed range −1024…3071 (12-bit field
+stored as year−1024).
+
+**Fix:** Use a year in that range, or `Instant` / Julian day for farther dates.
+
 ## E_LOWER_DATE_INVALID_MONTH
 
 A `YYYY-MM-DD` date literal's month is not in 1..12.
@@ -605,10 +612,20 @@ A time literal's minute is outside 0..59.
 
 ## E_LOWER_TIME_INVALID_SECOND
 
-A time literal's second is outside 0..59. Leap seconds are not representable
-in literals.
+A time literal's second is outside 0..60, or is 60 on a clock that is not a
+UTC leap second.
 
-**Fix:** Correct the value; `23:59:60` is rejected.
+**Fix:** Second 60 is only `23:59:60Z` on an IERS leap-second date
+(1972–2016), or the time-only clock face `23:59:60`. `2024-01-01T23:59:60`
+and `12:00:60` are rejected.
+
+## E_LOWER_TIME_INVALID_TZ
+
+A datetime/time literal's offset is not a packable UTC offset.
+
+**Fix:** 15-minute steps in −16:00..+15:30, or Amsterdam statutory `+00:20`
+(packed as a spare tz code). Nepal `+05:45` is a normal 15-minute step.
+Paris `+00:09:21` still needs `Date.in`.
 
 ## E_LOWER_DURATION_INVALID_UNIT
 

@@ -78,6 +78,7 @@ module Tungsten
   autoload :Currency,            "tungsten/literals/currency"
   autoload :Calibration,         "tungsten/literals/calibration"
   autoload :CalibrationCertificate, "tungsten/literals/calibration"
+  autoload :Calendar,            "tungsten/literals/calendar"
   autoload :Date,                "tungsten/literals/date"
   autoload :DateTime,            "tungsten/literals/date_time"
   autoload :Digest,              "tungsten/support/crypto"

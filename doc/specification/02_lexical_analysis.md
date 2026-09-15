@@ -1262,7 +1262,12 @@ Examples:
 
 Besides strings and numbers, the lexer recognizes several families of _domain literals_ — colors, dates, network addresses, and durations — each as a single token that yields a value of a dedicated built-in type. Because these forms overlap syntactically with comments, subtraction, and method chains, the lexer disambiguates them by strict adjacency (no interior spaces) and, in most cases, by digit count.
 
-_Note: The reference interpreter is the authoritative implementation of these literals. The self-hosted native compiler recognizes the common cases but does not yet lex every form — MAC addresses, microsecond and ISO-8601 durations, and the fully-expanded (non-`::`) IPv6 form are reference-interpreter-only — and it validates digit counts and octet ranges without range-checking calendar or clock fields. Divergences are noted per form below._
+_Note: Product semantics are the self-hosted compiler (WIRE → LLVM) and the
+native tree-walker, which share this lexer. The Ruby implementation in
+`implementations/ruby` is an alternate host and may still accept extra
+surface forms (MAC addresses, microsecond and ISO-8601 durations, fully
+expanded IPv6 input, zone IDs). Calendar and clock fields are range-checked
+before packing (`Date.new`, `Date.parse`, compiled date literals)._
 
 ### 2.10.1 Color literals
 
@@ -1304,7 +1309,10 @@ A year followed by `-` and a two-digit month but no `-DD` yields a `Month` value
 
 **Disambiguation from subtraction.** The date scanner fires only when each hyphen is immediately adjacent to the digits on both sides. `YYYY-MM-DD` is a date; `YYYY - MM - DD`, with spaces around the operators, is integer subtraction (§2.3).
 
-_Compiler divergence: the reference interpreter range-checks the fields (months `01`–`12`, days `01`–`31`, ordinals `001`–`366`) and additionally accepts ISO week dates such as `YYYY-Www-D`; the native compiler checks only digit counts, so it accepts an out-of-range date like `YYYY-99-99`._
+Out-of-range calendar fields (`2024-02-30`, `2024-13-01`, ordinal `000`/`367`)
+are not valid Date values. Compiled literals are rejected at lowering;
+`Date.parse` and interp literals are rejected by `w_date_parse`. ISO week
+dates (`YYYY-Www-D`) are not product literals.
 
 Token: `DATE`, or `MONTH` for the day-less form. Runtime types: `Date`, `Month`.
 
@@ -1321,7 +1329,15 @@ A datetime literal is a calendar date, the letter `T`, and a time. Hours and min
     YYYY-MM-DDT09:00:00-08:00   # with offset
     YYYY-MM-DDT14:30:00.500+05:30
 
-_Compiler divergence: the reference interpreter range-checks the clock fields (hours `00`–`23`, minutes `00`–`59`, seconds `00`–`60` for leap seconds), caps fractional seconds at three digits, and accepts the `24:00` end-of-day form; the native compiler checks only digit counts on the time and leaves the fraction unbounded._
+Clock fields must be hours `00`–`23`, minutes `00`–`59`, seconds `00`–`59`,
+or the UTC leap second `23:59:60` on an IERS date (1972–2016) with offset
+`Z` / `+00:00` / omitted. A random `:60` is not a leap second. Invalid
+clocks in a datetime (`2024-01-01T25:00:00`, `2024-01-01T23:59:60`) are
+rejected the same way as invalid calendar days. Standalone `25:00:00` is
+not a TIME token (the lexer only scans hours `0`–`23`). `24:00` is not a
+product form. Timezone offsets on packed Date are 15-minute steps
+(Nepal `+05:45` is valid; Amsterdam `+00:20` is a location, not a packed
+offset).
 
 Token: `DATETIME`.
 
@@ -1339,7 +1355,7 @@ An IPv4 literal is four dot-separated octets, each in the range 0–255, with an
 
 The IPv4 scanner runs before the floating-point path: a one-to-three-digit integer ≤ 255 immediately followed by `.` and a digit begins an address attempt, which succeeds only when exactly four octets are present. A three-part form such as `1.2.3` therefore backtracks to a decimal `1.2` followed by `.3` (see §2.10.8).
 
-Both engines also recognize IPv6 literals ([RFC 5952](https://www.rfc-editor.org/rfc/rfc5952)) in `::`-compressed form (`::1`, `2001:db8::1`, bare `::`) and the IPv4-mapped form (`::ffff:1.2.3.4`); the native compiler prints them fully expanded (`::1` → `0:0:0:0:0:0:0:1`). Per RFC 5952 §4.3 an IPv6 literal must be **lowercase**: `fe80::1` is an address, `FE80::1` is not — reserving an uppercase leading letter for class references (`Tungsten:JSON`). An IPv6 literal also never follows a word character, so `Foo::Bar` stays a name/scope form, not an address. Reference-interpreter-only: the fully-expanded *input* form with no `::` (`2001:db8:0:0:0:0:0:1`) — which the compiler leaves as colon-separated fragments to avoid mis-lexing hash keys and namespaces — plus zone identifiers, bracketed-with-port forms, and MAC addresses.
+Both product engines recognize IPv6 literals ([RFC 5952](https://www.rfc-editor.org/rfc/rfc5952)) in `::`-compressed form (`::1`, `2001:db8::1`, bare `::`) and the IPv4-mapped form (`::ffff:1.2.3.4`), and print them fully expanded (`::1` → `0:0:0:0:0:0:0:1`). Per RFC 5952 §4.3 an IPv6 literal must be **lowercase**: `fe80::1` is an address, `FE80::1` is not — reserving an uppercase leading letter for class references (`Tungsten:JSON`). An IPv6 literal also never follows a word character, so `Foo::Bar` stays a name/scope form, not an address. The fully-expanded *input* form with no `::` (`2001:db8:0:0:0:0:0:1`) is not a literal (it would collide with hash keys and namespaces); `IPv6.parse` accepts that spelling. Zone identifiers, bracketed-with-port forms, and MAC addresses are not product literals.
 
 Token: `IP4` / `IP6`. Runtime types: `IPv4`, `IPv6`.
 
@@ -1357,7 +1373,7 @@ A prefix greater than 32 is not a CIDR; the `/prefix` is left as a division oper
 
 Both engines also recognize IPv6 CIDR (`2001:db8::/32`, `::/0`, prefix 0–128) for the `::`-compressed address forms.
 
-Token: `CIDR4` (reference-only `CIDR6`). Runtime type: `CIDR`.
+Token: `CIDR4` / `CIDR6`. Runtime type: `CIDR` / `IPv6` with prefix.
 
 ### 2.10.6 Duration literals
 

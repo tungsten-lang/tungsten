@@ -811,9 +811,9 @@ RSpec.describe Tungsten::REPL do
       expect(output).to include("          01   02   03  [04]  05")
       expect(output).to include("--+--        --+--              --+--")
       expect(output).not_to include("first quarter")
-      expect(output).to include("u0xFFFE87E972000000")
+      expect(output).to include("u0xFFFE87D2E4000000")
       expect(output).to include("subtype  bits 47..45  4                  date")
-      expect(output).to include("year     bits 43..32  2025")
+      expect(output).to include("year     bits 44..33  2025")
 
       scene_lines = output.lines.drop_while { |line| !line.start_with?("Friday,") }.take_while do |line|
         !line.start_with?("u0x")
@@ -965,18 +965,18 @@ RSpec.describe Tungsten::REPL do
       expect(output).to include("scrub> 2025-01-01")
       expect(output).to include("result   2025-01-01")
       expect(output).to include("Su   Mo   Tu   We   Th   Fr   Sa")
-      expect(output).to include("u0xFFFE87E910800000")
+      expect(output).to include("u0xFFFE87D221000000")
       expect(output).not_to include("=> 2025-01-01")
     end
 
     it "re-encodes date-times and durations when their fields fit" do
       date_time_output = inspect_output("2024-10-31T14:30:00Z")
 
-      expect(date_time_output).to include("u0xFFFE87E8AFB9E000")
+      expect(date_time_output).to include("u0xFFFE87D15F73C000")
       expect(date_time_output).to include("subtype  bits 47..45  4                  date")
-      expect(date_time_output).to include("hour     bits 22..18  14")
-      expect(date_time_output).to include("minute   bits 17..12  30")
-      expect(date_time_output).to include("tz       bits 5..0    0                  timezone offset")
+      expect(date_time_output).to include("hour     bits 23..19  14")
+      expect(date_time_output).to include("minute   bits 18..13  30")
+      expect(date_time_output).to include("tz       bits 6..0    0                  minutes east of UTC")
 
       duration_output = inspect_output("2h15m")
 

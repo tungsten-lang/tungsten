@@ -22,6 +22,7 @@
   auto :Color,        "color"
   auto :Crypto,       "crypto"
   auto :Currency,     "currency"
+  auto :Calendar,     "calendar"
   auto :Date,         "date"
   auto :Digest,       "digest"
   auto :Dir,          "dir"

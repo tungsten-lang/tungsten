@@ -868,10 +868,13 @@
     day = parts[2].to_i()
     validate_date(year, month, day, raw, ctx, node)
   elsif parts.size() == 2 && parts[1].size() == 3
-    # Ordinal date YYYY-DDD: store day-of-year, month=0
-    day = parts[1].to_i()
-    if day < 1 || day > 366
+    # Ordinal date YYYY-DDD: resolve to civil Y-M-D (packed day is 5 bits).
+    dayn = parts[1].to_i()
+    civil = ordinal_to_civil(year, dayn)
+    if civil == nil
       raise compile_error_for_node(:E_LOWER_DATE_INVALID_ORDINAL, "Invalid ordinal day in date literal: " + raw, ctx[:source_path], node)
+    month = civil[0]
+    day = civil[1]
   temp = next_temp(wfn)
   emit_wire_const_date(wfn, day, 0, 0, month, 0, temp, 0, year)
   typed_value(:i64, temp)
@@ -891,7 +894,7 @@
   validate_date(year, month, day, raw, ctx, node)
   # Parse time with timezone
   parsed = parse_time_string(time_part)
-  validate_time(parsed[:hour], parsed[:min], parsed[:sec], raw, ctx, node)
+  validate_time(parsed[:hour], parsed[:min], parsed[:sec], raw, ctx, node, year, month, day, parsed[:tz])
   temp = next_temp(wfn)
   emit_wire_const_date(wfn, day, parsed[:hour], parsed[:min], month, parsed[:sec], temp, parsed[:tz], year)
   typed_value(:i64, temp)
@@ -900,7 +903,7 @@
   wfn = ctx[:func]
   # Parse "hh:mm:ss[.frac][±hh:mm|Z]"
   parsed = parse_time_string(node.value)
-  validate_time(parsed[:hour], parsed[:min], parsed[:sec], node.value, ctx, node)
+  validate_time(parsed[:hour], parsed[:min], parsed[:sec], node.value, ctx, node, 0, 0, 0, parsed[:tz])
   temp = next_temp(wfn)
   emit_wire_const_date(wfn, 0, parsed[:hour], parsed[:min], 0, parsed[:sec], temp, parsed[:tz], 0)
   typed_value(:i64, temp)
@@ -954,7 +957,127 @@
     sec = sec_str.to_i()
   {hour: hour, min: min, sec: sec, tz: tz}
 
+# Historically attested extra civil days. Keep in lockstep with
+# runtime.c date_is_catchup_day: Sweden 1712-02-30, plus Julian century
+# leaps (1700/1800/1900-02-29) that Gregorian rejects. 2024-02-30 stays invalid.
+-> date_is_catchup_day(year, month, day)
+  if year == 1712 && month == 2 && day == 30
+    return true
+  if month == 2 && day == 29 && year >= 100 && year <= 1900 && year % 100 == 0 && year % 400 != 0
+    return true
+  false
+
+# Keep in lockstep with runtime.c days_in_month / HIST_SKIP / HIST_REPEAT.
+-> date_gregorian_leap(year)
+  (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+
+-> date_month_length(year, month)
+  if month == 2 && year == 1712
+    return 30
+  if month == 2 && year >= 100 && year <= 1900 && year % 100 == 0 && year % 400 != 0
+    return 29
+  if month == 2
+    if date_gregorian_leap(year)
+      return 29
+    return 28
+  if month in (4 6 9 11)
+    return 30
+  31
+
+-> date_civil_skipped(year, month, day)
+  if year == 1582 && month == 10 && day >= 5 && day <= 14
+    return true
+  if year == 1752 && month == 9 && day >= 3 && day <= 13
+    return true
+  if year == 1753 && month == 2 && day >= 18 && day <= 28
+    return true
+  if year == 1844 && month == 12 && day == 31
+    return true
+  if year == 1867 && month == 10 && day >= 7 && day <= 17
+    return true
+  if year == 1918 && month == 2 && day >= 1 && day <= 13
+    return true
+  if year == 1993 && month == 8 && day == 21
+    return true
+  if year == 2011 && month == 12 && day == 30
+    return true
+  false
+
+-> date_civil_repeat(year, month, day)
+  year == 1892 && month == 7 && day == 4
+
+-> date_ordinal_len(year)
+  n = 365
+  if date_gregorian_leap(year)
+    n = 366
+  if year == 1712
+    n = n + 1
+  elsif year >= 100 && year <= 1900 && year % 100 == 0 && year % 400 != 0
+    n = n + 1
+  if year == 1892
+    n = n + 1
+  if year == 1582
+    n = n - 10
+  if year == 1752
+    n = n - 11
+  if year == 1753
+    n = n - 11
+  if year == 1844
+    n = n - 1
+  if year == 1867
+    n = n - 11
+  if year == 1918
+    n = n - 13
+  if year == 1993
+    n = n - 1
+  if year == 2011
+    n = n - 1
+  n
+
+-> date_advance_civil(year, month, day)
+  d = day + 1
+  m = month
+  while true
+    if m < 1 || m > 12
+      return nil
+    dim = date_month_length(year, m)
+    if d > dim
+      d = 1
+      m = m + 1
+      if m > 12
+        return nil
+    elsif date_civil_skipped(year, m, d)
+      d = d + 1
+    else
+      return [m, d]
+  nil
+
+# Local midnight number n (1-based) → [month, day]. Repeated midnights
+# (Samoa 1892-07-04) return the same civil date for two consecutive n.
+-> ordinal_to_civil(year, n)
+  len = date_ordinal_len(year)
+  if n < 1 || n > len
+    return nil
+  m = 1
+  d = 1
+  held = false
+  i = 1
+  while i < n
+    if !held && date_civil_repeat(year, m, d)
+      held = true
+    else
+      held = false
+      nxt = date_advance_civil(year, m, d)
+      if nxt == nil
+        return nil
+      m = nxt[0]
+      d = nxt[1]
+    i = i + 1
+  [m, d]
+
 -> validate_date(year, month, day, raw, ctx, node)
+  if year < -1024 || year > 3071
+    raise compile_error_for_node(:E_LOWER_DATE_INVALID_YEAR, "Date year must be between -1024 and 3071: " + raw, ctx[:source_path], node)
   if month < 1 || month > 12
     raise compile_error_for_node(:E_LOWER_DATE_INVALID_MONTH, "Invalid month in date literal: " + raw, ctx[:source_path], node)
   max_day = 31
@@ -967,17 +1090,48 @@
       max_day = 29
     else
       max_day = 28
+  if date_is_catchup_day(year, month, day)
+    return nil
   if day < 1 || day > max_day
     raise compile_error_for_node(:E_LOWER_DATE_INVALID_DAY, "Invalid day in date literal: " + raw, ctx[:source_path], node)
   nil
 
--> validate_time(hour, min, sec, raw, ctx, node)
+# IERS positive UTC leap seconds (1972–2016). Packed Date can store
+# second 60; lowering of literals decides whether that second existed.
+# Keep in lockstep with runtime.c LEAP_SECOND_UTC.
+-> date_is_leap_second(year, month, day, hour, min, sec, tz)
+  if sec != 60
+    return false
+  if hour != 23 || min != 59
+    return false
+  if tz != 0
+    return false
+  if year == 0 && month == 0 && day == 0
+    return true
+  if year == 1972 && ((month == 6 && day == 30) || (month == 12 && day == 31))
+    return true
+  if month == 12 && day == 31 && year in (1973 1974 1975 1976 1977 1978 1979 1987 1989 1990 1995 1998 2005 2008 2016)
+    return true
+  if month == 6 && day == 30 && year in (1981 1982 1983 1985 1992 1993 1994 1997 2012 2015)
+    return true
+  false
+
+-> date_tz_ok(tz)
+  if tz == 20
+    return true
+  tz >= -960 && tz <= 930 && tz % 15 == 0
+
+-> validate_time(hour, min, sec, raw, ctx, node, year, month, day, tz)
   if hour < 0 || hour > 23
     raise compile_error_for_node(:E_LOWER_TIME_INVALID_HOUR, "Invalid hour in time literal: " + raw, ctx[:source_path], node)
   if min < 0 || min > 59
     raise compile_error_for_node(:E_LOWER_TIME_INVALID_MINUTE, "Invalid minute in time literal: " + raw, ctx[:source_path], node)
-  if sec < 0 || sec > 59
+  if sec < 0 || sec > 60
     raise compile_error_for_node(:E_LOWER_TIME_INVALID_SECOND, "Invalid second in time literal: " + raw, ctx[:source_path], node)
+  if !date_tz_ok(tz)
+    raise compile_error_for_node(:E_LOWER_TIME_INVALID_TZ, "Timezone must be a 15-minute offset or Amsterdam +00:20: " + raw, ctx[:source_path], node)
+  if sec == 60 && !date_is_leap_second(year, month, day, hour, min, sec, tz)
+    raise compile_error_for_node(:E_LOWER_TIME_INVALID_SECOND, "Second 60 is only valid as a UTC leap second: " + raw, ctx[:source_path], node)
   nil
 
 -> check_type_algebra(lt, rt, op, node)

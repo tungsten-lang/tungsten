@@ -580,13 +580,13 @@ Calendar date with time and timezone:
 
 ```
 bits 47-45: 100 (subtype)
-bits 44-33: year (12 bits, signed, ±2047)
+bits 44-33: year (12 bits, stored as year−1024, civil −1024…3071)
 bits 32-29: month (4 bits, 1-12)
 bits 28-24: day (5 bits, 1-31)
 bits 23-19: hour (5 bits, 0-23)
 bits 18-13: minute (6 bits, 0-59)
-bits 12-7:  second (6 bits, 0-59)
-bits 6-1:   timezone offset (6 bits, signed, ±31 half-hours from UTC)
+bits 12-7:  second (6 bits, 0-60 leap)
+bits 6-0:   timezone (7 bits, signed quarter-hours + singleton codes)
 ```
 
 ### 9.6 IPv4 (subtype 101)

@@ -24117,6 +24117,58 @@ static void decimal_normalize(int64_t *sig, int *scale) {
     }
 }
 
+/* n / d as a decimal significand. Fractional digits are appended to the
+ * dividend until the quotient is exact, or carries 12 extra places AND at
+ * least 12 significant digits: a fixed 10^12 scale-up alone lets a wide
+ * divisor (2 / 1.7320508075688772) swallow every digit and yield 0. Stops
+ * before the quotient would outgrow an int64 or n an __int128, so a wide
+ * dividend degrades to fewer places instead of overflowing. `round` rounds
+ * half away from zero; otherwise the quotient truncates. `*scale` is the
+ * quotient's starting scale (dividend minus divisor). Returns 0 when d is
+ * zero or the significand cannot fit an int64. */
+static int decimal_quotient_i128(__int128 n, __int128 d, int round,
+                                 int64_t *sig, int *scale) {
+    const __int128 sig_floor = (__int128)100000000000LL;                     /* 10^11 */
+    const __int128 n_cap = (__int128)10000000000000000000ULL * 1000000000000000000LL; /* 10^37 */
+    if (d == 0) return 0;
+    if (d < 0) { d = -d; n = -n; }
+    int extra = 0;
+    while (n % d != 0) {
+        __int128 q = n / d, an = n;
+        if (q < 0) q = -q;
+        if (an < 0) an = -an;
+        if (q > INT64_MAX / 10 || an >= n_cap) break;
+        if (extra >= 12 && q >= sig_floor) break;
+        n *= 10; (*scale)--; extra++;
+    }
+    __int128 q = n / d;
+    if (round && n % d != 0) {
+        __int128 r = n % d;
+        if (r < 0) r = -r;
+        if (2 * r >= d) q += (n < 0 ? -1 : 1);
+    }
+    while (q != 0 && q % 10 == 0 && *scale < 0) { q /= 10; (*scale)++; }
+    if (q > INT64_MAX || q < INT64_MIN) return 0;
+    *sig = (int64_t)q;
+    return 1;
+}
+
+/* Narrow an __int128 significand to int64 by dropping low digits (rounding
+ * half away from zero) and raising the scale to match. Quantities have no
+ * bigsig form, so a 12-digit × 12-digit product keeps its leading digits
+ * instead of overflowing. */
+static void decimal_narrow_i128(__int128 *sig, int *scale) {
+    __int128 v = *sig;
+    while (v > INT64_MAX || v < INT64_MIN) {
+        __int128 r = v % 10;
+        v /= 10;
+        if (r >= 5) v++;
+        else if (r <= -5) v--;
+        (*scale)++;
+    }
+    *sig = v;
+}
+
 /* Forward declarations for domain heap overflow */
 static WValue domain_heap_alloc(uint8_t type, int64_t sig, int32_t scale,
                                  int32_t extra, int64_t extra2);
@@ -24251,14 +24303,15 @@ WValue w_decimal_div(WValue a, WValue b) {
     if (b_sig64 == 0) {
         die_as("ZeroDivisionError", "decimal division by zero");
     }
-    /* Scale up the dividend for precision, then divide */
-    __int128 a_sig = (__int128)a_sig64;
-    /* Add 12 digits of precision */
-    a_sig *= (__int128)1000000000000LL;
-    int result_scale = a_scale - b_scale - 12;
-    __int128 result_sig = a_sig / b_sig64;
-    if (!decimal_i128_fits_i64(result_sig)) return decimal_big_div(a, b);
-    return w_decimal((int64_t)result_sig, result_scale);
+    /* A dividend too wide for 12 extra places in an int64 takes the bigsig
+     * path, which keeps them; the fast path would degrade to fewer. */
+    __int128 probe = (__int128)a_sig64 * 1000000000000LL / b_sig64;
+    if (!decimal_i128_fits_i64(probe)) return decimal_big_div(a, b);
+    int64_t result_sig;
+    int result_scale = a_scale - b_scale;
+    if (!decimal_quotient_i128(a_sig64, b_sig64, 0, &result_sig, &result_scale))
+        return decimal_big_div(a, b);
+    return w_decimal(result_sig, result_scale);
 }
 
 static int decimal_compare(WValue a, WValue b) {
@@ -24430,10 +24483,22 @@ static WValue decimal_big_div(WValue a, WValue b) {
     decimal_extract_boxed(a, &a_sig, &a_scale);
     decimal_extract_boxed(b, &b_sig, &b_scale);
     if (w_is_int(b_sig) && w_as_int(b_sig) == 0) die_as("ZeroDivisionError", "decimal division by zero");
-    /* Mirror the plain path's policy: extend the dividend by 12 digits
-     * of precision, truncate the quotient. */
-    WValue scaled = w_mul(a_sig, decimal_pow10_boxed(12));
-    return w_decimal_big(w_div(scaled, b_sig), a_scale - b_scale - 12);
+    /* Mirror the plain path's policy: extend the dividend by 12 digits of
+     * precision, truncate the quotient. A divisor wider than the dividend
+     * gets further digits until the quotient keeps 12 significant ones. */
+    int extra = 12;
+    WValue scaled = w_mul(a_sig, decimal_pow10_boxed(extra));
+    WValue q = w_div(scaled, b_sig);
+    WValue floor = w_box_int(100000000000LL);   /* 10^11 */
+    while (extra < 12 + W_DECIMAL_SCALE_MAX &&
+           w_lt(q, floor) == W_TRUE && w_lt(w_neg(q), floor) == W_TRUE) {
+        WValue rem = w_mod(scaled, b_sig);
+        if (w_is_int(rem) && w_as_int(rem) == 0) break;
+        extra++;
+        scaled = w_mul(scaled, w_box_int(10));
+        q = w_div(scaled, b_sig);
+    }
+    return w_decimal_big(q, a_scale - b_scale - extra);
 }
 
 static int decimal_big_compare(WValue a, WValue b) {
@@ -24464,6 +24529,49 @@ static int w_is_percent_value(WValue v) {
         return d->domain_type == W_DOMAIN_QUANTITY && d->extra == W_UNIT_PERCENT;
     }
     return 0;
+}
+
+static WValue percent_as_decimal(WValue pct) {
+    int unit, p_scale;
+    int64_t p_sig;
+    quantity_extract(pct, &unit, &p_sig, &p_scale);
+    return w_decimal(p_sig, p_scale - 2); /* p% = p/100 */
+}
+
+/* Scale `base` by a percent. mode +1 is `base + p%` (×(1+p/100)),
+ * -1 is `base - p%`, 0 is `base * p%` (× p/100). Quantity and currency
+ * keep their units; a bare number stays a number when the result is
+ * integral, otherwise a Decimal. */
+static WValue apply_percent(WValue base, WValue pct, int mode) {
+    WValue frac = percent_as_decimal(pct);
+    WValue factor = frac;
+    if (mode != 0) {
+        WValue one = w_decimal(1, 0);
+        factor = mode > 0 ? w_decimal_add(one, frac) : w_decimal_sub(one, frac);
+    }
+    if (is_quantity_any(base) && !w_is_percent_value(base))
+        return w_quantity_mul_scalar(base, factor);
+    if (is_currency_any(base))
+        return w_currency_mul_scalar(base, factor);
+    WValue prod;
+    if (w_is_int(base))
+        prod = w_decimal_mul(w_decimal(w_as_int(base), 0), factor);
+    else if (is_decimal_any(base))
+        prod = w_decimal_mul(base, factor);
+    else if (w_is_double(base)) {
+        int64_t s; int sc;
+        decimal_extract(factor, &s, &sc);
+        return w_float(w_as_double(base) * (double)s * pow(10.0, (double)sc));
+    } else {
+        die("cannot apply percent to non-numeric");
+        return W_NIL;
+    }
+    if (is_decimal_any(prod)) {
+        int64_t sig; int scale;
+        decimal_extract(prod, &sig, &scale);
+        if (scale == 0) return w_int(sig);
+    }
+    return prod;
 }
 
 static WValue currency_apply_percent(WValue cur, WValue pct, int sign) {
@@ -31149,23 +31257,7 @@ static int quantity_dims_equal(const WUnitInfo *x, const WUnitInfo *y) {
  * is the starting decimal exponent (0 for the affine path, the input scale
  * for the multiplicative path). Returns 0 on int64 overflow. */
 static int quantity_rat_to_decimal(__int128 n, __int128 d, int64_t *sig, int *scale) {
-    if (d == 0) return 0;
-    if (d < 0) { d = -d; n = -n; }
-    int extra = 0;
-    while (n % d != 0 && extra < 12) { n *= 10; (*scale)--; extra++; }
-    if (n % d != 0) {
-        __int128 q = n / d;
-        __int128 r = n % d;
-        if (r < 0) r = -r;
-        if (2 * r >= d) q += (n < 0 ? -1 : 1);
-        n = q;
-    } else {
-        n /= d;
-    }
-    while (n != 0 && n % 10 == 0 && *scale < 0) { n /= 10; (*scale)++; }
-    if (n > INT64_MAX || n < INT64_MIN) return 0;
-    *sig = (int64_t)n;
-    return 1;
+    return decimal_quotient_i128(n, d, 1, sig, scale);
 }
 
 static int quantity_convert(int64_t *sig, int *scale, int from_unit, int to_unit) {
@@ -31454,24 +31546,7 @@ static int rat_mul64(int64_t an, int64_t ad, int64_t bn, int64_t bd,
 /* value ← value × num/den with decimal scale extension (round half-up
  * after 12 extra digits). Same contract as quantity_convert's tail. */
 static int apply_rational(int64_t *sig, int *scale, int64_t num, int64_t den) {
-    if (den == 0) return 0;
-    __int128 n = (__int128)(*sig) * num;
-    __int128 d = den;
-    if (d < 0) { d = -d; n = -n; }
-    int extra = 0;
-    while (n % d != 0 && extra < 12) { n *= 10; (*scale)--; extra++; }
-    if (n % d != 0) {
-        __int128 q = n / d, r = n % d;
-        if (r < 0) r = -r;
-        if (2 * r >= d) q += (n < 0 ? -1 : 1);
-        n = q;
-    } else {
-        n /= d;
-    }
-    while (n != 0 && n % 10 == 0 && *scale < 0) { n /= 10; (*scale)++; }
-    if (n > INT64_MAX || n < INT64_MIN) return 0;
-    *sig = (int64_t)n;
-    return 1;
+    return decimal_quotient_i128((__int128)(*sig) * num, den, 1, sig, scale);
 }
 
 /* Synthesize (or find) a custom unit for an unnamed dimension/factor combo.
@@ -31600,8 +31675,7 @@ static WValue quantity_combine(WValue a, WValue b, int divide) {
         __int128 p = (__int128)a_sig * b_sig;
         scale = a_scale + b_scale;
         while (p != 0 && p % 10 == 0 && scale < 0) { p /= 10; scale++; }
-        if (p > INT64_MAX || p < INT64_MIN)
-            dief("quantity overflow multiplying %s and %s", na, nb);
+        decimal_narrow_i128(&p, &scale);
         sig = (int64_t)p;
     }
 
@@ -31777,6 +31851,7 @@ WValue w_quantity_mul_scalar(WValue quantity, WValue scalar) {
     } else {
         die("cannot multiply quantity by non-numeric");
     }
+    decimal_narrow_i128(&q_sig, &q_scale);
     return quantity_result_with_role(w_quantity(unit, (int64_t)q_sig, q_scale), role, quantity_origin_value(quantity));
 }
 
@@ -31790,34 +31865,26 @@ WValue w_quantity_div_scalar(WValue quantity, WValue scalar) {
         die("cannot divide a point; subtract points or operate on a delta");
     if (unit_info[unit].off_num != 0)
         die("cannot divide an affine absolute temperature; convert it to kelvin or use a temperature difference");
+    int64_t s_sig; int s_scale;
     if (w_is_int(scalar)) {
-        int64_t sv = w_as_int(scalar);
-        if (sv == 0) die_as("ZeroDivisionError", "division by zero");
-        /* Scale up for precision, then divide */
-        __int128 q_sig = (__int128)q_sig64;
-        q_sig *= (__int128)1000000000000LL;
-        int result_scale = q_scale - 12;
-        __int128 result_sig = q_sig / sv;
-        return quantity_result_with_role(w_quantity(unit, (int64_t)result_sig, result_scale), role, quantity_origin_value(quantity));
-    } else if (is_decimal_any(scalar) || w_is_double(scalar)) {
-        int64_t s_sig; int s_scale;
-        if (w_is_double(scalar)) {
-            /* Float divisor: snap to 12 significant digits, like `| unit`. */
-            if (!double_to_sig_scale(w_as_double(scalar), &s_sig, &s_scale))
-                die("cannot divide quantity by non-finite float");
-        } else {
-            decimal_extract(scalar, &s_sig, &s_scale);
-        }
-        if (s_sig == 0) die_as("ZeroDivisionError", "division by zero");
-        __int128 q_sig = (__int128)q_sig64;
-        q_sig *= (__int128)1000000000000LL;
-        int result_scale = q_scale - s_scale - 12;
-        __int128 result_sig = q_sig / s_sig;
-        return quantity_result_with_role(w_quantity(unit, (int64_t)result_sig, result_scale), role, quantity_origin_value(quantity));
+        s_sig = w_as_int(scalar);
+        s_scale = 0;
+    } else if (w_is_double(scalar)) {
+        /* Float divisor: snap to 12 significant digits, like `| unit`. */
+        if (!double_to_sig_scale(w_as_double(scalar), &s_sig, &s_scale))
+            die("cannot divide quantity by non-finite float");
+    } else if (is_decimal_any(scalar)) {
+        decimal_extract(scalar, &s_sig, &s_scale);
     } else {
         die("cannot divide quantity by non-numeric");
+        return W_NIL;
     }
-    return W_NIL;
+    if (s_sig == 0) die_as("ZeroDivisionError", "division by zero");
+    int64_t result_sig;
+    int result_scale = q_scale - s_scale;
+    if (!decimal_quotient_i128(q_sig64, s_sig, 0, &result_sig, &result_scale))
+        die("quantity overflow dividing by scalar");
+    return quantity_result_with_role(w_quantity(unit, result_sig, result_scale), role, quantity_origin_value(quantity));
 }
 
 static double quantity_unit_factor_double(const WUnitInfo *u) {
@@ -37765,6 +37832,8 @@ WValue w_color(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     return w_box_color(r, g, b, a, 0);  /* sRGB default, no flags */
 }
 
+/* Bit-packer only. Validity (catch-up days, leap seconds, tz quantum) is
+ * Date.parse / Date.new / lowering, not this encoding. */
 WValue w_date(int year, int month, int day, int hour, int min, int sec, int tz) {
     return w_box_date(year, month, day, hour, min, sec, tz);
 }
@@ -38280,12 +38349,22 @@ WValue w_rational_denominator(WValue rational) {
     return denominator;
 }
 
+/* Calendar/clock checks shared by w_date_parse / w_time_parse and the
+ * validated Date.new leaf. Defined with days_in_month later; called from
+ * the parse shims so interp literals cannot pack truncated invalid fields.
+ * Packed Date is a dumb civil tuple — leap seconds, catch-up days, and
+ * 15-minute offset legality live here, not in w_date / w_box_date. */
+static void date_parse_check(int y, int mo, int d, int hh, int mi, int ss,
+                             int tz_min, int time_only);
+
 /* ---- String/value-parsing literal constructors for the tree-walking
  * interpreter (compiler/lib/interpreter.w). The compiled -o path parses these
  * literals in lowering and emits const_* ops; the interpreter has no lowering
  * pass, so its evaluate() arms call these w_*_parse shims instead — mirroring
  * w_decimal_parse/w_currency_parse. Each reuses the SAME constructor the
  * compiled path's const_* op ultimately calls, so -e and -o agree. */
+static int date_ordinal_to_civil(int y, int n, int *mo, int *d);
+
 WValue w_date_parse(WValue str_v) {
     const char *s = as_str(str_v);
     int y = 0, mo = 0, d = 0, hh = 0, mi = 0, ss = 0;
@@ -38305,16 +38384,26 @@ WValue w_date_parse(WValue str_v) {
                 }
             }
         }
+        date_parse_check(y, mo, d, hh, mi, ss, tz, 0);
         return w_date(y, mo, d, hh, mi, ss, tz);
     }
     /* full date "YYYY-MM-DD" */
     if (sscanf(s, "%d-%d-%d", &y, &mo, &d) == 3) {
+        date_parse_check(y, mo, d, 0, 0, 0, 0, 0);
         return w_date(y, mo, d, 0, 0, 0, 0);
     }
-    /* two fields: "YYYY-DDD" ordinal day-of-year (month=0) or "YYYY-MM" month */
+    /* two fields: "YYYY-DDD" ordinal day-of-year, or "YYYY-MM" month */
     if (sscanf(s, "%d-%d", &y, &mo) == 2) {
         const char *dash = strchr(s, '-');
-        if (dash && strlen(dash + 1) == 3) return w_date(y, 0, mo, 0, 0, 0, 0);
+        if (dash && strlen(dash + 1) == 3) {
+            int month, day;
+            if (!date_ordinal_to_civil(y, mo, &month, &day)) {
+                w_raise(w_string("Date ordinal day is outside the requested year"));
+                return W_NIL;
+            }
+            return w_date(y, month, day, 0, 0, 0, 0);
+        }
+        date_parse_check(y, mo, 1, 0, 0, 0, 0, 0);
         return w_date(y, mo, 1, 0, 0, 0, 0);
     }
     dief("invalid date literal: %s", s);
@@ -38336,6 +38425,7 @@ WValue w_time_parse(WValue str_v) {
             if (*sign == '-') tz = -tz;
         }
     }
+    date_parse_check(0, 0, 0, hh, mi, ss, tz, 1);
     return w_date(0, 0, 0, hh, mi, ss, tz);
 }
 
@@ -40173,8 +40263,193 @@ static int is_leap_year(int y) {
 }
 
 static int days_in_month(int y, int m) {
+    if (m == 2 && y == 1712) return 30; /* tillökningsdagen */
+    /* Julian century leaps: 1700/1800/1900-02-29 existed civilly. */
+    if (m == 2 && y >= 100 && y <= 1900 && (y % 100) == 0 && (y % 400) != 0)
+        return 29;
     if (m == 2 && is_leap_year(y)) return 29;
     return days_in_month_table[m];
+}
+
+/* Civil dates that were skipped locally (one midnight jumped many labels).
+ * Inclusive [year, month, first_day, last_day], same month. */
+static const int HIST_SKIP[][4] = {
+    {1582, 10,  5, 14}, /* Catholic Gregorian: Oct 4 → Oct 15 */
+    {1752,  9,  3, 13}, /* Britain: Sep 2 → Sep 14 */
+    {1753,  2, 18, 28}, /* Sweden: Feb 17 → Mar 1 */
+    {1844, 12, 31, 31}, /* Philippines: Dec 30 → Jan 1 */
+    {1867, 10,  7, 17}, /* Alaska Purchase: Oct 6 → Oct 18 */
+    {1918,  2,  1, 13}, /* Russia: Jan 31 → Feb 14 */
+    {1993,  8, 21, 21}, /* Kwajalein date-line: Aug 20 → Aug 22 */
+    {2011, 12, 30, 30}, /* Samoa date-line: Dec 29 → Dec 31 */
+};
+
+/* Civil dates that occurred twice (two midnights, one Y-M-D). */
+static const int HIST_REPEAT[][3] = {
+    {1892, 7, 4}, /* Samoa: Monday 4 July celebrated twice */
+};
+
+static int date_civil_skipped(int y, int m, int d) {
+    for (size_t i = 0; i < sizeof(HIST_SKIP) / sizeof(HIST_SKIP[0]); i++) {
+        if (HIST_SKIP[i][0] == y && HIST_SKIP[i][1] == m &&
+            d >= HIST_SKIP[i][2] && d <= HIST_SKIP[i][3])
+            return 1;
+    }
+    return 0;
+}
+
+static int date_civil_repeat(int y, int m, int d) {
+    for (size_t i = 0; i < sizeof(HIST_REPEAT) / sizeof(HIST_REPEAT[0]); i++) {
+        if (HIST_REPEAT[i][0] == y && HIST_REPEAT[i][1] == m && HIST_REPEAT[i][2] == d)
+            return 1;
+    }
+    return 0;
+}
+
+/* Local midnights in year y: Gregorian length ± extras/repeats/skips. */
+static int date_ordinal_len(int y) {
+    int n = is_leap_year(y) ? 366 : 365;
+    if (y == 1712) n += 1;
+    else if (y >= 100 && y <= 1900 && (y % 100) == 0 && (y % 400) != 0) n += 1;
+    for (size_t i = 0; i < sizeof(HIST_REPEAT) / sizeof(HIST_REPEAT[0]); i++)
+        if (HIST_REPEAT[i][0] == y) n += 1;
+    for (size_t i = 0; i < sizeof(HIST_SKIP) / sizeof(HIST_SKIP[0]); i++) {
+        if (HIST_SKIP[i][0] == y)
+            n -= HIST_SKIP[i][3] - HIST_SKIP[i][2] + 1;
+    }
+    return n;
+}
+
+/* Advance one local midnight: skip vanished civil labels; extras exist in
+ * days_in_month. Repeats are handled by the caller (held copy). */
+static int date_advance_civil(int y, int *m, int *d) {
+    (*d)++;
+    for (;;) {
+        if (*m < 1 || *m > 12) return 0;
+        int dim = days_in_month(y, *m);
+        if (*d > dim) {
+            *d = 1;
+            (*m)++;
+            if (*m > 12) return 0;
+            continue;
+        }
+        if (date_civil_skipped(y, *m, *d)) {
+            (*d)++;
+            continue;
+        }
+        return 1;
+    }
+}
+
+/* YYYY-DDD → civil month/day. Repeated midnights (Samoa 1892-07-04) map two
+ * consecutive ordinals onto the same Y-M-D. Returns 0 if n is out of range. */
+static int date_ordinal_to_civil(int y, int n, int *mo, int *d) {
+    int len = date_ordinal_len(y);
+    if (n < 1 || n > len) return 0;
+    int m = 1, day = 1;
+    int held = 0;
+    for (int i = 1; i < n; i++) {
+        if (!held && date_civil_repeat(y, m, day)) {
+            held = 1;
+            continue;
+        }
+        held = 0;
+        if (!date_advance_civil(y, &m, &day)) return 0;
+    }
+    *mo = m;
+    *d = day;
+    return 1;
+}
+
+/* Extra civil days that existed during calendar catch-up, even though they
+ * are invalid in proleptic Gregorian.
+ *
+ *   1712-02-30  Sweden inserted Feb 30 (and briefly planned 31) when
+ *               reversing a failed gradual Julian→Gregorian conversion.
+ *   Y-02-29     Julian century leaps (Y % 100 == 0, Y % 400 != 0) through
+ *               1900: Britain until 1752, Russia until 1918, etc. 2024-02-30
+ *               and 2100-02-29 stay invalid. */
+static int date_is_catchup_day(int y, int mo, int d) {
+    if (y == 1712 && mo == 2 && d == 30) return 1;
+    if (mo == 2 && d == 29 && y >= 100 && y <= 1900 &&
+        (y % 100) == 0 && (y % 400) != 0)
+        return 1;
+    return 0;
+}
+
+/* IERS positive UTC leap-second dates (1972–2016). Packed Date can store
+ * second 60 (6 bits); Date.parse / Date.new decide whether that second
+ * existed. Keep in lockstep with lowering date_is_leap_second and
+ * Tungsten::Date::LEAP_SECOND_UTC. */
+static const int LEAP_SECOND_UTC[][3] = {
+    {1972,  6, 30}, {1972, 12, 31}, {1973, 12, 31}, {1974, 12, 31},
+    {1975, 12, 31}, {1976, 12, 31}, {1977, 12, 31}, {1978, 12, 31},
+    {1979, 12, 31}, {1981,  6, 30}, {1982,  6, 30}, {1983,  6, 30},
+    {1985,  6, 30}, {1987, 12, 31}, {1989, 12, 31}, {1990, 12, 31},
+    {1992,  6, 30}, {1993,  6, 30}, {1994,  6, 30}, {1995, 12, 31},
+    {1997,  6, 30}, {1998, 12, 31}, {2005, 12, 31}, {2008, 12, 31},
+    {2012,  6, 30}, {2015,  6, 30}, {2016, 12, 31},
+};
+
+static int date_tz_ok(int tz_min) {
+    if (tz_min == W_DATE_TZ_AMT20_MIN) return 1; /* Amsterdam +00:20, tz code 63 */
+    /* Code 63 is the singleton; linear packing tops out at 62 × 15 = +15:30. */
+    return tz_min >= -960 && tz_min <= 930 && tz_min % 15 == 0;
+}
+
+static int date_is_leap_second(int y, int mo, int d, int hh, int mi, int ss, int tz_min) {
+    if (ss != 60) return 0;
+    if (hh != 23 || mi != 59) return 0;
+    if (tz_min != 0) return 0; /* UTC / Z / omitted offset only */
+    if (y == 0 && mo == 0 && d == 0) return 1; /* time-only 23:59:60 clock face */
+    for (size_t i = 0; i < sizeof(LEAP_SECOND_UTC) / sizeof(LEAP_SECOND_UTC[0]); i++) {
+        if (LEAP_SECOND_UTC[i][0] == y && LEAP_SECOND_UTC[i][1] == mo &&
+            LEAP_SECOND_UTC[i][2] == d)
+            return 1;
+    }
+    return 0;
+}
+
+static int date_day_permitted(int y, int mo, int d) {
+    if (mo < 1 || mo > 12) return 0;
+    if (d >= 1 && d <= days_in_month(y, mo)) return 1;
+    return date_is_catchup_day(y, mo, d);
+}
+
+/* Same calendar/clock contract as w_date_new_w and lowering's validate_date
+ * / validate_time. month==0 is the ordinal YYYY-DDD encoding (day 1..366). */
+static void date_parse_check(int y, int mo, int d, int hh, int mi, int ss,
+                             int tz_min, int time_only) {
+    if (hh < 0 || hh > 23 || mi < 0 || mi > 59 || ss < 0 || ss > 60) {
+        w_raise(w_string("Date time must be within 00:00:00 and 23:59:60"));
+        return;
+    }
+    if (!date_tz_ok(tz_min)) {
+        w_raise(w_string("Date timezone must be a 15-minute offset, or Amsterdam +00:20"));
+        return;
+    }
+    if (ss == 60 && !date_is_leap_second(y, mo, d, hh, mi, ss, tz_min)) {
+        w_raise(w_string("Second 60 is only valid as a UTC leap second (23:59:60 on a known leap-second date)"));
+        return;
+    }
+    if (time_only) return;
+    if (y < W_DATE_YEAR_MIN || y > W_DATE_YEAR_MAX) {
+        w_raise(w_string("Date year must be between -1024 and 3071"));
+        return;
+    }
+    if (mo == 0) {
+        if (d < 1 || d > 366) {
+            w_raise(w_string("Date day is outside the requested month"));
+        }
+        return;
+    }
+    if (mo < 1 || mo > 12) {
+        w_raise(w_string("Date month must be between 1 and 12"));
+        return;
+    }
+    if (!date_day_permitted(y, mo, d)) {
+        w_raise(w_string("Date day is outside the requested month"));
+    }
 }
 
 /* Boxed constructor boundary used by core/date.w. Keeping this one leaf in C
@@ -40199,29 +40474,49 @@ WValue w_date_new_w(WValue year_v, WValue month_v, WValue day_v,
     int64_t sec = w_to_i64(sec_v);
     int64_t tz = w_to_i64(tz_v);
 
-    if (year < -2048 || year > 2047) {
-        w_raise(w_string("Date year must be between -2048 and 2047"));
+    if (year < W_DATE_YEAR_MIN || year > W_DATE_YEAR_MAX) {
+        w_raise(w_string("Date year must be between -1024 and 3071"));
         return W_NIL;
     }
     if (month < 1 || month > 12) {
         w_raise(w_string("Date month must be between 1 and 12"));
         return W_NIL;
     }
-    if (day < 1 || day > days_in_month((int)year, (int)month)) {
+    if (!date_day_permitted((int)year, (int)month, (int)day)) {
         w_raise(w_string("Date day is outside the requested month"));
         return W_NIL;
     }
-    if (hour < 0 || hour > 23 || min < 0 || min > 59 || sec < 0 || sec > 59) {
-        w_raise(w_string("Date time must be within 00:00:00 and 23:59:59"));
+    if (hour < 0 || hour > 23 || min < 0 || min > 59 || sec < 0 || sec > 60) {
+        w_raise(w_string("Date time must be within 00:00:00 and 23:59:60"));
         return W_NIL;
     }
-    if (tz < -960 || tz > 945 || tz % 15 != 0) {
-        w_raise(w_string("Date timezone must be a 15-minute offset between -960 and 945 minutes"));
+    if (sec == 60 && !date_is_leap_second((int)year, (int)month, (int)day,
+                                          (int)hour, (int)min, (int)sec, (int)tz)) {
+        w_raise(w_string("Second 60 is only valid as a UTC leap second (23:59:60 on a known leap-second date)"));
+        return W_NIL;
+    }
+    if (!date_tz_ok((int)tz)) {
+        w_raise(w_string("Date timezone must be a 15-minute offset, or Amsterdam +00:20"));
         return W_NIL;
     }
 
     return w_box_date((int)year, (int)month, (int)day,
                       (int)hour, (int)min, (int)sec, (int)tz);
+}
+
+WValue w_date_from_ordinal(WValue year_v, WValue n_v) {
+    if (!w_is_integer_any(year_v) || !w_is_integer_any(n_v)) {
+        w_raise(w_string("Date.ordinal expects integer year and day"));
+        return W_NIL;
+    }
+    int y = (int)w_to_i64(year_v);
+    int n = (int)w_to_i64(n_v);
+    int m, d;
+    if (!date_ordinal_to_civil(y, n, &m, &d)) {
+        w_raise(w_string("Date ordinal day is outside the requested year"));
+        return W_NIL;
+    }
+    return w_box_date(y, m, d, 0, 0, 0, 0);
 }
 
 WValue w_date_today(void) {
@@ -40259,7 +40554,7 @@ static WValue date_add_days(WValue d, int64_t n) {
         if (m < 1) { m = 12; y--; }
         day += days_in_month(y, m);
     }
-    if (y < -2048 || y > 2047) {
+    if (y < W_DATE_YEAR_MIN || y > W_DATE_YEAR_MAX) {
         w_raise(w_string("Date arithmetic exceeded the representable year range"));
         return W_NIL;
     }
@@ -40276,9 +40571,13 @@ WValue w_date_scrub(WValue str_v, int64_t unit, int64_t delta) {
     int has_t = (strchr(s, 'T') != NULL);
     int dashes = 0, colons = 0;
     for (const char *p = s; *p; p++) { if (*p == '-') dashes++; if (*p == ':') colons++; }
-    int shape;  /* 0=date 1=datetime 2=month 3=time */
+    int shape;  /* 0=date 1=datetime 2=month 3=time 4=ordinal YYYY-DDD */
+    const char *ord_dash = strchr(s, '-');
+    int is_ordinal = (dashes == 1 && !has_t && colons == 0 &&
+                      ord_dash && strlen(ord_dash + 1) == 3);
     if (has_t)                      { shape = 1; sscanf(s, "%d-%d-%dT%d:%d:%d", &y,&mo,&d,&hh,&mi,&ss); }
     else if (colons >= 1 && dashes == 0) { shape = 3; sscanf(s, "%d:%d:%d", &hh,&mi,&ss); }
+    else if (is_ordinal)            { shape = 4; sscanf(s, "%d-%d", &y, &d); }
     else if (dashes >= 2)           { shape = 0; sscanf(s, "%d-%d-%d", &y,&mo,&d); }
     else                            { shape = 2; sscanf(s, "%d-%d", &y,&mo); }
 
@@ -40286,6 +40585,28 @@ WValue w_date_scrub(WValue str_v, int64_t unit, int64_t delta) {
         int64_t add = (unit == 4) ? delta * 3600 : delta * 60;  /* hour vs minute */
         int64_t total = (((int64_t)hh*3600 + mi*60 + ss + add) % 86400 + 86400) % 86400;
         hh = (int)(total/3600); mi = (int)((total/60)%60); ss = (int)(total%60);
+    } else if (shape == 4) {                            /* ordinal YYYY-DDD */
+        int n = d;
+        if (unit == 2) {
+            y += (int)delta;
+        } else if (unit == 1) {
+            n += (int)delta * 30;
+        } else {
+            n += (int)delta;
+        }
+        int guard = 0;
+        while (n > date_ordinal_len(y) && guard++ < 8) {
+            n -= date_ordinal_len(y);
+            y++;
+        }
+        while (n < 1 && guard++ < 16) {
+            y--;
+            n += date_ordinal_len(y);
+        }
+        if (n < 1) n = 1;
+        int len = date_ordinal_len(y);
+        if (n > len) n = len;
+        d = n;
     } else {                                            /* date / datetime / month */
         int eff = (int)unit;
         if (shape == 2 && eff == 0) eff = 1;            /* a month literal's "small" step is a month */
@@ -40307,6 +40628,7 @@ WValue w_date_scrub(WValue str_v, int64_t unit, int64_t delta) {
     char buf[40];
     if (shape == 1)      snprintf(buf, sizeof buf, "%04d-%02d-%02dT%02d:%02d:%02d", y,mo,d,hh,mi,ss);
     else if (shape == 3) snprintf(buf, sizeof buf, "%02d:%02d:%02d", hh,mi,ss);
+    else if (shape == 4) snprintf(buf, sizeof buf, "%04d-%03d", y, d);
     else if (shape == 2) snprintf(buf, sizeof buf, "%04d-%02d", y,mo);
     else                 snprintf(buf, sizeof buf, "%04d-%02d-%02d", y,mo,d);
     return w_string(buf);
@@ -41485,6 +41807,10 @@ WValue w_add(WValue a, WValue b) {
         return w_decimal_add(w_decimal(w_as_int(a), 0), b);
     if (is_currency_any(a) && (is_currency_any(b) || w_is_percent_value(b)))
         return w_currency_add(a, b);
+    if (w_is_percent_value(b) && !w_is_percent_value(a))
+        return apply_percent(a, b, +1);
+    if (w_is_percent_value(a) && !w_is_percent_value(b))
+        return apply_percent(b, a, +1);
     if (is_quantity_any(a) && is_quantity_any(b))
         return w_quantity_add(a, b);
     /* π-quantity + plain numeric: π is a number, so mixed addition is an
@@ -41618,6 +41944,8 @@ WValue w_sub(WValue a, WValue b) {
         return w_decimal_sub(w_decimal(w_as_int(a), 0), b);
     if (is_currency_any(a) && (is_currency_any(b) || w_is_percent_value(b)))
         return w_currency_sub(a, b);
+    if (w_is_percent_value(b) && !w_is_percent_value(a))
+        return apply_percent(a, b, -1);
     if (is_quantity_any(a) && is_quantity_any(b))
         return w_quantity_sub(a, b);
     /* π-quantity ∓ plain numeric: evaluation boundary, same as w_add. */
@@ -41732,6 +42060,10 @@ WValue w_mul(WValue a, WValue b) {
         return w_currency_mul_scalar(a, b);
     if ((w_is_int(a) || is_decimal_any(a)) && is_currency_any(b))
         return w_currency_mul_scalar(b, a);
+    if (w_is_percent_value(b) && !w_is_percent_value(a))
+        return apply_percent(a, b, 0);
+    if (w_is_percent_value(a) && !w_is_percent_value(b))
+        return apply_percent(b, a, 0);
     /* quantity * quantity — dimensional algebra (ft × ft → ft²) */
     if (is_quantity_any(a) && is_quantity_any(b))
         return w_quantity_mul(a, b);
@@ -44809,6 +45141,17 @@ WValue w_eq(WValue a, WValue b) {
         }
         eq_pair_depth--;
         return result;
+    }
+
+    /* Quantities compare by value on a shared dimension: 1 km == 1000 m.
+     * Dimension mismatch is false, not an error (same as `≈`). */
+    if (is_quantity_any(a) && is_quantity_any(b)) {
+        int ua, ub, sa, sb;
+        int64_t ga, gb;
+        quantity_extract(a, &ua, &ga, &sa);
+        quantity_extract(b, &ub, &gb, &sb);
+        if (ua != ub && !quantity_convert(&gb, &sb, ub, ua)) return W_FALSE;
+        return w_bool(decimal_compare(w_decimal(ga, sa), w_decimal(gb, sb)) == 0);
     }
 
     /* User-defined `==`: if `a` is a class instance whose class OVERRIDES `==`
@@ -61311,9 +61654,9 @@ static WValue w_ic_decimal_ceil(WValue r, WValue *a, int c) {
  * rounded away from zero — and the result is a Decimal of that scale.
  * (2.345).round(2) is therefore 2.35, not the 2.34 a binary double gives.
  * A digits argument used to be silently ignored on this row. */
-static WValue w_ic_decimal_round(WValue r, WValue *a, int c) {
+WValue w_decimal_round(WValue r, WValue digits_v) {
     int64_t digits = 0;
-    if (c >= 1 && w_is_int(a[0])) digits = w_as_int(a[0]);
+    if (w_is_int(digits_v)) digits = w_as_int(digits_v);
     if (digits <= 0)
         return w_int((int64_t)round(cmp_numeric_double(r)));
     if (decimal_is_bigsig(r)) {
@@ -61342,6 +61685,12 @@ static WValue w_ic_decimal_round(WValue r, WValue *a, int c) {
     if (rem < 0) rem = -rem;
     if (rem * 2 >= div) q += (sig < 0) ? -1 : 1;
     return w_decimal(q, (int)-digits);
+}
+
+static WValue w_ic_decimal_round(WValue r, WValue *a, int c) {
+    int64_t digits = 0;
+    if (c >= 1 && w_is_int(a[0])) digits = w_as_int(a[0]);
+    return w_decimal_round(r, w_box_int(digits));
 }
 
 /* The packed-network inspect aliases remain native until a tiny, sound
@@ -68885,6 +69234,10 @@ __attribute__((weak)) WValue w_blas_dsyev_values(WValue a, WValue w, WValue n) {
 }
 __attribute__((weak)) WValue w_blas_dgesdd_values(WValue a, WValue s, WValue m, WValue n) {
     (void)a; (void)s; (void)m; (void)n; w_raise(w_string("dgesdd_values: LAPACK bridge not linked")); return W_NIL;
+}
+__attribute__((weak)) WValue w_blas_dgesdd_thin(WValue a, WValue s, WValue u, WValue vt, WValue m, WValue n) {
+    (void)a; (void)s; (void)u; (void)vt; (void)m; (void)n;
+    w_raise(w_string("dgesdd_thin: LAPACK bridge not linked")); return W_NIL;
 }
 __attribute__((weak)) WValue w_blas_dgelsy(WValue a, WValue b, WValue m, WValue n) {
     (void)a; (void)b; (void)m; (void)n; w_raise(w_string("dgelsy: LAPACK bridge not linked")); return W_NIL;

@@ -1,9 +1,10 @@
-require "date"
-
 module Tungsten::AST
   class DateTime < Value
     def initialize(value)
-      @value = ::DateTime.parse(value.to_s)
+      # Keep the source spelling. Ruby's DateTime cannot store second 60
+      # (it clamps or raises), so Tungsten::DateTime validates leap seconds
+      # from the text the same way Date.parse does.
+      @value = value.to_s
     end
   end
 end

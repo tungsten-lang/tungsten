@@ -35,9 +35,9 @@ module Tungsten
       end
     end
 
-    def hour    = (@seconds / 3600).to_i % 24
-    def minute  = ((@seconds % 3600) / 60).to_i
-    def second  = (@seconds % 60).to_i
+    def hour    = leap_second_clock? ? 23 : (@seconds / 3600).to_i % 24
+    def minute  = leap_second_clock? ? 59 : ((@seconds % 3600) / 60).to_i
+    def second  = leap_second_clock? ? 60 : (@seconds % 60).to_i
     def fraction = @seconds - @seconds.to_i
     def naive?  = @tz_offset.nil?
 
@@ -123,7 +123,33 @@ module Tungsten
       end
     end
 
+    LEAP_SECOND_OF_DAY = 23 * 3600 + 59 * 60 + 60
+
+    def leap_second_clock?
+      @seconds >= LEAP_SECOND_OF_DAY && @seconds < LEAP_SECOND_OF_DAY + 1
+    end
+
     def parse_string(str)
+      tz_min = Tungsten::Date.parse_iso_offset_minutes(str)
+      unless Tungsten::Date.packed_tz?(tz_min)
+        raise ArgumentError,
+              "Date timezone must be a 15-minute offset, or Amsterdam +00:20"
+      end
+      if str =~ /\A(\d{1,2}):(\d{2}):60(?!\d)/
+        hour = $1.to_i
+        min = $2.to_i
+        unless Tungsten::Date.utc_leap_second?(0, 0, 0, hour, min, 60, tz_min)
+          raise ArgumentError,
+                "Second 60 is only valid as a UTC leap second (23:59:60 on a known leap-second date)"
+        end
+        @seconds = Rational(LEAP_SECOND_OF_DAY)
+        frac = str[/\.(\d+)/, 1]
+        @seconds += Rational("0.#{frac}") if frac
+        @tz_offset = if str =~ /[Zz]\z/ || str =~ /[+\-]\d/
+                       tz_min * 60
+                     end
+        return
+      end
       ruby_time = ::Time.parse("1970-01-01T#{str}")
       sec_int = ruby_time.hour * 3600 + ruby_time.min * 60 + ruby_time.sec
       @seconds = Rational(sec_int) + Rational(ruby_time.subsec)

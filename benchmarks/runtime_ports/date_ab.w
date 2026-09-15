@@ -132,9 +132,9 @@ WARMUP_ITERS = 50_000
   # Exhaust every signed year encoding and every hour/minute/second/timezone
   # field encoding. Invalid clock values are intentional here: the packed
   # accessors must preserve all bit patterns exactly, just as the old C did.
-  raw_year = -2048
-  while raw_year <= 2047
-    i = raw_year + 2048
+  raw_year = -1024
+  while raw_year <= 3071
+    i = raw_year + 1024
     date = make_date(raw_year, i % 12 + 1, i % 28 + 1,
                      i % 32, i % 64, (i * 17) % 64,
                      (i % 128 - 64) * 15)

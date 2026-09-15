@@ -599,11 +599,14 @@ use known_units
     if @pos + 3 > @char_count || !is_digit?(@lc[@pos + 1]) || !is_digit?(@lc[@pos + 2])
       @pos = saved_pos
       return false
-    if @chars[@pos + 1] > "5"
+    # 00–59, or 60 (UTC leap second). Random 61+ still rejected.
+    sec_hi = @chars[@pos + 1]
+    sec_lo = @chars[@pos + 2]
+    if sec_hi > "5" && !(sec_hi == "6" && sec_lo == "0")
       @pos = saved_pos
       return false
     @pos += 1  # consume ':'
-    seconds = @chars[@pos] + @chars[@pos + 1]
+    seconds = sec_hi + sec_lo
     @pos += 2
     time_str = hour_str + ":" + minutes + ":" + seconds
     # Optional fractional seconds

@@ -1,5 +1,5 @@
 # Date construction and calendar-period helpers across static and erased class
-# dispatch. The packed representation is limited to years -2048..2047.
+# dispatch. The packed representation is limited to years -1024..3071.
 
 -> check(name, got, want)
   if got != want
@@ -80,6 +80,33 @@ rescue error
   invalid_day = true
 check("invalid day rejected", invalid_day, true)
 
+invalid_parse_day = false
+begin
+  Date.parse("2024-02-30")
+rescue error
+  invalid_parse_day = true
+check("invalid parse day rejected", invalid_parse_day, true)
+
+invalid_parse_month = false
+begin
+  Date.parse("2024-13-01")
+rescue error
+  invalid_parse_month = true
+check("invalid parse month rejected", invalid_parse_month, true)
+
+invalid_parse_hour = false
+begin
+  Date.parse("2024-01-01T25:00:00")
+rescue error
+  invalid_parse_hour = true
+check("invalid parse hour rejected", invalid_parse_hour, true)
+
+sweden = Date.parse("1712-02-30")
+check("sweden 1712-02-30", sweden.day, 30)
+check("sweden Date.new", Date.new(1712, 2, 30).day, 30)
+check("sweden date literal", (1712-02-30).day, 30)
+check("julian 1700-02-29", Date.parse("1700-02-29").day, 29)
+
 invalid_ordinal = false
 begin
   Date.ordinal(2023, 366)
@@ -96,14 +123,14 @@ check("invalid ISO week rejected", invalid_week, true)
 
 upper_overflow = false
 begin
-  Date.new(2047, 12, 31) + 1
+  Date.new(3071, 12, 31) + 1
 rescue error
   upper_overflow = true
 check("upper year overflow rejected", upper_overflow, true)
 
 lower_overflow = false
 begin
-  Date.new(-2048, 1, 1) - 1
+  Date.new(-1024, 1, 1) - 1
 rescue error
   lower_overflow = true
 check("lower year overflow rejected", lower_overflow, true)
@@ -114,6 +141,20 @@ begin
 rescue error
   huge_shift = true
 check("huge day shift rejected", huge_shift, true)
+
+too_high = false
+begin
+  Date.new(3072, 1, 1)
+rescue error
+  too_high = true
+check("year 3072 rejected", too_high, true)
+
+too_low = false
+begin
+  Date.new(-1025, 1, 1)
+rescue error
+  too_low = true
+check("year -1025 rejected", too_low, true)
 
 today = Date.today
 check("today type", type(today), "Date")

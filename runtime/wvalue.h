@@ -865,20 +865,55 @@ static inline int32_t w_unbox_rational_num(WValue v) {
 static inline uint32_t w_unbox_rational_den(WValue v) { return (uint32_t)(v & 0xFFFFFULL); }
 
 /* Date: [12 year][4 month][5 day][5 hour][6 min][6 sec][7 tz] in bits 44-0.
-   tz is stored as signed quarter-hours (15-minute units, range -32:00..
-   +31:45) so half-hour and :45 zones fit; every real offset lies in
-   -12:00..+14:00. The box/unbox API speaks MINUTES — conversion to
-   quarters is internal to the encoding. */
+ *
+ *   63……48  tag 0xFFFE
+ *   47……45  packed subtype 4 (DATE)
+ *   44……33  year   12-bit signed, stored as year−1024 → civil −1024…3071
+ *   32……29  month  0=time-only, 1–12
+ *   28……24  day    0=time-only, 1–31
+ *   23……19  hour   0–23 (24–31 unused)
+ *   18……13  minute 0–59 (60–63 unused)
+ *   12…… 7  second 0–60 leap (61–63 unused)
+ *    6…… 0  tz     7-bit signed quarter-hours, with a few spare
+ *                  codes as singleton offsets (see pack/unpack)
+ *
+ * Linear tz: code * 15 minutes, −16:00…+15:30 after stealing the top
+ * code. Code 63 is Amsterdam statutory +00:20 (1937–1940). The box/unbox
+ * API speaks MINUTES. The encoding does not know calendar history. */
+#define W_DATE_YEAR_BIAS 1024
+#define W_DATE_YEAR_MIN  (-1024)
+#define W_DATE_YEAR_MAX  3071
+#define W_DATE_TZ_AMT20_CODE 63
+#define W_DATE_TZ_AMT20_MIN  20
+
+static inline int w_date_pack_year(int year) {
+    return year - W_DATE_YEAR_BIAS;
+}
+static inline int w_date_unpack_year(int stored) {
+    return stored + W_DATE_YEAR_BIAS;
+}
+
+static inline int w_date_pack_tz(int tz_offset_min) {
+    if (tz_offset_min == W_DATE_TZ_AMT20_MIN) return W_DATE_TZ_AMT20_CODE;
+    return tz_offset_min / 15;
+}
+static inline int w_date_unpack_tz(int code) {
+    unsigned c = (unsigned)code & 0x7F;
+    if (c == (unsigned)W_DATE_TZ_AMT20_CODE) return W_DATE_TZ_AMT20_MIN;
+    return (((int8_t)(c << 1)) >> 1) * 15;
+}
+
 static inline WValue w_box_date(int year, int month, int day,
                                  int hour, int min, int sec, int tz_offset_min) {
     return W_TAG_PACKED | ((uint64_t)W_PACKED_DATE << 45) |
-           (((uint64_t)year & 0xFFF) << 33) | (((uint64_t)month & 0xF) << 29) |
+           (((uint64_t)w_date_pack_year(year) & 0xFFF) << 33) | (((uint64_t)month & 0xF) << 29) |
            (((uint64_t)day & 0x1F) << 24) | (((uint64_t)hour & 0x1F) << 19) |
            (((uint64_t)min & 0x3F) << 13) | (((uint64_t)sec & 0x3F) << 7) |
-           ((uint64_t)(tz_offset_min / 15) & 0x7F);
+           ((uint64_t)w_date_pack_tz(tz_offset_min) & 0x7F);
 }
 static inline int w_unbox_date_year(WValue v) {
-    return ((int16_t)(((v >> 33) & 0xFFF) << 4)) >> 4;
+    int stored = ((int16_t)(((v >> 33) & 0xFFF) << 4)) >> 4;
+    return w_date_unpack_year(stored);
 }
 static inline int w_unbox_date_month(WValue v) { return (int)((v >> 29) & 0xF); }
 static inline int w_unbox_date_day(WValue v) { return (int)((v >> 24) & 0x1F); }
@@ -886,7 +921,7 @@ static inline int w_unbox_date_hour(WValue v) { return (int)((v >> 19) & 0x1F); 
 static inline int w_unbox_date_min(WValue v) { return (int)((v >> 13) & 0x3F); }
 static inline int w_unbox_date_sec(WValue v) { return (int)((v >> 7) & 0x3F); }
 static inline int w_unbox_date_tz(WValue v) {
-    return (((int8_t)((v & 0x7F) << 1)) >> 1) * 15;  /* 7-bit signed quarter-hours -> minutes */
+    return w_date_unpack_tz((int)(v & 0x7F));
 }
 
 /* IPv4: [32 address][6 CIDR][6 flags] in bits 44-0 */

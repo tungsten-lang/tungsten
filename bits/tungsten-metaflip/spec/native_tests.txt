@@ -60,4 +60,5 @@ spec/wide_directed_test.w native  # directed bucket index, history, rollback and
 spec/wide_density_neutral_test.w native  # density-independent walks and archive-before-history rejection
 spec/wide_tui_test.w native  # native packed telemetry and dashboard renderer
 spec/wide_transform_queue_test.w argv  # positional arguments required
+spec/learned_residual_native.w argv  # independent native parity harness supplies model/cases
 spec/rect_public_seed_corpus_test.w timeout  # 186 s interpreted (56 exact door loads); passes, but exceeds a shard budget

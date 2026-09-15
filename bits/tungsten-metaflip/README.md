@@ -1136,7 +1136,40 @@ prescribed local replacement and compile a replayable exact setup/flip/cleanup
 word, but they are not production fleet lanes unless matched frontier
 experiments show useful candidates.
 
+### Learned residual completion: research only
+
+Useful search strategies belong in the automatic pipeline; experiments without
+demonstrated benefit do not become public behavior switches. The learned
+residual arm's runtime integration and `--learned-residual` option were removed.
+The matched real-seed audit found no additional recoveries, no rank drops, and
+higher cost; native correctness tests did not establish composition utility.
+
+The bounded native model/search implementation and tiny trained fixture remain
+under [tools/learned_residual](tools/learned_residual/README.md) for further
+matched testing, outside the shipped runtime. Existing automatic exact cleanup,
+basis refinement, projections and composition feedback remain unchanged.
+
 ### Offline composition tools and local studies
+
+The independent training/benchmark implementation remains available offline:
+
+```sh
+python3 tools/learned_residual_completion.py --output /tmp/metaflip-learned-run
+python3 tools/audit_learned_residual.py /tmp/metaflip-learned-run
+```
+
+It trains a small local NumPy model on synthetic GF(2) decompositions, then
+compares learned, residual-popcount, and random beam ordering on identical
+3–6-term windows from five verified seeds. Known recipe lengths are upper-bound
+labels, not optimal ranks. Compression uses only the residual tensor; model
+features are basis-invariant slice-rank histograms, with no factor-density
+preference. Exact flattening bounds and final tensor checks remain authoritative.
+The initial model supports compressed mode dimensions at most four; larger
+windows are explicitly reported as unsupported, not exhausted. Model/data and
+candidate files stay outside the source tree. Running this offline tool does
+not add a production arm, publish candidates, or update reference ranks.
+The [first matched audit](tools/LEARNED-RESIDUAL-AUDIT-2026-09-14.md) records
+synthetic gains but no real rank drops, including inference overhead.
 
 The dated benchmark audit directories referenced below are historical generated
 evidence. Wholly untracked dated folders are preserved in the `checkout-audits`

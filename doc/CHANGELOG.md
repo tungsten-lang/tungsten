@@ -4,11 +4,25 @@
 
 - **Dates remember civil history without extra bits** — packed `Date` stays a
   Y-M-D-h-m-s tuple. `Date.parse` / `Date.new` accept Sweden's 1712-02-30 and
-  Julian century leaps; `23:59:60` only on IERS leap-second dates; ordinals
-  `YYYY-DDD` walk extras, skips, and repeats. `Date.in("Sweden")` (and
-  Denmark, Britain, Rome, Russia, Amsterdam) rejects days that never existed
-  there. Packed years are −1024…3071 (`year−1024` in 12 bits). Amsterdam
-  `+00:20` packs as a spare tz code. Ruby inspection matches the native word.
+  Julian century leaps; `23:59:60` only on IERS leap-second dates. Ordinals
+  and `+` are proleptic Gregorian; skips/repeats/extra days belong on
+  `Date.in`. Packed years are −1024…3071 (unsigned 12-bit `year+1024`). Amsterdam
+  `+00:20` packs as a spare tz code; explicit `Z` is not overwritten.
+  Constructors reject out-of-range years and oversized day values instead of
+  wrapping. Bare `1712-02-30 + 1` raises until `Date.in("Sweden")`.
+  Native `?` / `w_value_fields` and Ruby inspection both decode year and tz
+  through the unpack helpers. Skip/repeat/extra days are one list on
+  `Calendar`; local year length is derived from that list, and both
+  inspectors call `Calendar.history_title` / `history_art`. On the Ruby
+  engine, `Date.ordinal` no longer dies at `is_a?(Int)`, `Date.parse`
+  keeps datetime clocks and rejects non-packed offsets such as `+00:10`,
+  catch-up `1712-02-30 + 1` raises instead of clamping to Feb 29, and
+  `Date.new(y, m, d)` runs the core class method through a date `ccall`
+  allowlist instead of dying with `undefined method ccall`. Clock
+  arithmetic wraps ordinary days at 86400 (`23:59:59Z + 1s` is the next
+  midnight) and leap-second days at 86401. Ruby `Date.in` autoloads
+  calendar constants in the interpreter root env so they survive the
+  caller method frame.
 
 - **`Integer#modpow` recognizes two exact Fermat identities** — for the
   BN254 and secp256k1 base-field primes with exponent `p - 1`, it returns

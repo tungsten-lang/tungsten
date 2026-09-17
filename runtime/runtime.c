@@ -38397,6 +38397,10 @@ WValue w_date_parse(WValue str_v) {
         const char *dash = strchr(s, '-');
         if (dash && strlen(dash + 1) == 3) {
             int month, day;
+            if (y < W_DATE_YEAR_MIN || y > W_DATE_YEAR_MAX) {
+                w_raise(w_string("Date year must be between -1024 and 3071"));
+                return W_NIL;
+            }
             if (!date_ordinal_to_civil(y, mo, &month, &day)) {
                 w_raise(w_string("Date ordinal day is outside the requested year"));
                 return W_NIL;
@@ -40262,103 +40266,36 @@ static int is_leap_year(int y) {
     return (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0);
 }
 
+/* Proleptic Gregorian month length. Catch-up days (1712-02-30, Julian
+ * century leaps) are still accepted at parse/new via date_is_catchup_day;
+ * they do not change + or Date.ordinal. Location-specific walks live on
+ * Date.in. */
 static int days_in_month(int y, int m) {
-    if (m == 2 && y == 1712) return 30; /* tillökningsdagen */
-    /* Julian century leaps: 1700/1800/1900-02-29 existed civilly. */
-    if (m == 2 && y >= 100 && y <= 1900 && (y % 100) == 0 && (y % 400) != 0)
-        return 29;
     if (m == 2 && is_leap_year(y)) return 29;
     return days_in_month_table[m];
 }
 
-/* Civil dates that were skipped locally (one midnight jumped many labels).
- * Inclusive [year, month, first_day, last_day], same month. */
-static const int HIST_SKIP[][4] = {
-    {1582, 10,  5, 14}, /* Catholic Gregorian: Oct 4 → Oct 15 */
-    {1752,  9,  3, 13}, /* Britain: Sep 2 → Sep 14 */
-    {1753,  2, 18, 28}, /* Sweden: Feb 17 → Mar 1 */
-    {1844, 12, 31, 31}, /* Philippines: Dec 30 → Jan 1 */
-    {1867, 10,  7, 17}, /* Alaska Purchase: Oct 6 → Oct 18 */
-    {1918,  2,  1, 13}, /* Russia: Jan 31 → Feb 14 */
-    {1993,  8, 21, 21}, /* Kwajalein date-line: Aug 20 → Aug 22 */
-    {2011, 12, 30, 30}, /* Samoa date-line: Dec 29 → Dec 31 */
-};
-
-/* Civil dates that occurred twice (two midnights, one Y-M-D). */
-static const int HIST_REPEAT[][3] = {
-    {1892, 7, 4}, /* Samoa: Monday 4 July celebrated twice */
-};
-
-static int date_civil_skipped(int y, int m, int d) {
-    for (size_t i = 0; i < sizeof(HIST_SKIP) / sizeof(HIST_SKIP[0]); i++) {
-        if (HIST_SKIP[i][0] == y && HIST_SKIP[i][1] == m &&
-            d >= HIST_SKIP[i][2] && d <= HIST_SKIP[i][3])
-            return 1;
-    }
-    return 0;
-}
-
-static int date_civil_repeat(int y, int m, int d) {
-    for (size_t i = 0; i < sizeof(HIST_REPEAT) / sizeof(HIST_REPEAT[0]); i++) {
-        if (HIST_REPEAT[i][0] == y && HIST_REPEAT[i][1] == m && HIST_REPEAT[i][2] == d)
-            return 1;
-    }
-    return 0;
-}
-
-/* Local midnights in year y: Gregorian length ± extras/repeats/skips. */
 static int date_ordinal_len(int y) {
-    int n = is_leap_year(y) ? 366 : 365;
-    if (y == 1712) n += 1;
-    else if (y >= 100 && y <= 1900 && (y % 100) == 0 && (y % 400) != 0) n += 1;
-    for (size_t i = 0; i < sizeof(HIST_REPEAT) / sizeof(HIST_REPEAT[0]); i++)
-        if (HIST_REPEAT[i][0] == y) n += 1;
-    for (size_t i = 0; i < sizeof(HIST_SKIP) / sizeof(HIST_SKIP[0]); i++) {
-        if (HIST_SKIP[i][0] == y)
-            n -= HIST_SKIP[i][3] - HIST_SKIP[i][2] + 1;
-    }
-    return n;
+    return is_leap_year(y) ? 366 : 365;
 }
 
-/* Advance one local midnight: skip vanished civil labels; extras exist in
- * days_in_month. Repeats are handled by the caller (held copy). */
-static int date_advance_civil(int y, int *m, int *d) {
-    (*d)++;
-    for (;;) {
-        if (*m < 1 || *m > 12) return 0;
-        int dim = days_in_month(y, *m);
-        if (*d > dim) {
-            *d = 1;
-            (*m)++;
-            if (*m > 12) return 0;
-            continue;
-        }
-        if (date_civil_skipped(y, *m, *d)) {
-            (*d)++;
-            continue;
-        }
-        return 1;
-    }
-}
-
-/* YYYY-DDD → civil month/day. Repeated midnights (Samoa 1892-07-04) map two
- * consecutive ordinals onto the same Y-M-D. Returns 0 if n is out of range. */
+/* YYYY-DDD → civil month/day in proleptic Gregorian. */
 static int date_ordinal_to_civil(int y, int n, int *mo, int *d) {
     int len = date_ordinal_len(y);
     if (n < 1 || n > len) return 0;
-    int m = 1, day = 1;
-    int held = 0;
-    for (int i = 1; i < n; i++) {
-        if (!held && date_civil_repeat(y, m, day)) {
-            held = 1;
-            continue;
+    int m = 1;
+    int day = n;
+    while (m <= 12) {
+        int dim = days_in_month(y, m);
+        if (day <= dim) {
+            *mo = m;
+            *d = day;
+            return 1;
         }
-        held = 0;
-        if (!date_advance_civil(y, &m, &day)) return 0;
+        day -= dim;
+        m++;
     }
-    *mo = m;
-    *d = day;
-    return 1;
+    return 0;
 }
 
 /* Extra civil days that existed during calendar catch-up, even though they
@@ -40482,6 +40419,10 @@ WValue w_date_new_w(WValue year_v, WValue month_v, WValue day_v,
         w_raise(w_string("Date month must be between 1 and 12"));
         return W_NIL;
     }
+    if (day < 1 || day > 31) {
+        w_raise(w_string("Date day is outside the requested month"));
+        return W_NIL;
+    }
     if (!date_day_permitted((int)year, (int)month, (int)day)) {
         w_raise(w_string("Date day is outside the requested month"));
         return W_NIL;
@@ -40495,7 +40436,7 @@ WValue w_date_new_w(WValue year_v, WValue month_v, WValue day_v,
         w_raise(w_string("Second 60 is only valid as a UTC leap second (23:59:60 on a known leap-second date)"));
         return W_NIL;
     }
-    if (!date_tz_ok((int)tz)) {
+    if (tz != W_DATE_TZ_AMT20_MIN && (tz < -960 || tz > 930 || tz % 15 != 0)) {
         w_raise(w_string("Date timezone must be a 15-minute offset, or Amsterdam +00:20"));
         return W_NIL;
     }
@@ -40509,8 +40450,18 @@ WValue w_date_from_ordinal(WValue year_v, WValue n_v) {
         w_raise(w_string("Date.ordinal expects integer year and day"));
         return W_NIL;
     }
-    int y = (int)w_to_i64(year_v);
-    int n = (int)w_to_i64(n_v);
+    int64_t y64 = w_to_i64(year_v);
+    int64_t n64 = w_to_i64(n_v);
+    if (y64 < W_DATE_YEAR_MIN || y64 > W_DATE_YEAR_MAX) {
+        w_raise(w_string("Date year must be between -1024 and 3071"));
+        return W_NIL;
+    }
+    if (n64 < 1 || n64 > 366) {
+        w_raise(w_string("Date ordinal day is outside the requested year"));
+        return W_NIL;
+    }
+    int y = (int)y64;
+    int n = (int)n64;
     int m, d;
     if (!date_ordinal_to_civil(y, n, &m, &d)) {
         w_raise(w_string("Date ordinal day is outside the requested year"));
@@ -40536,6 +40487,15 @@ static WValue date_add_days(WValue d, int64_t n) {
     int y = w_unbox_date_year(d), m = w_unbox_date_month(d), day = w_unbox_date_day(d);
     int h = w_unbox_date_hour(d), min = w_unbox_date_min(d), sec = w_unbox_date_sec(d);
     int tz = w_unbox_date_tz(d);
+    /* Catch-up tuples (1712-02-30, Julian century leaps) are representable
+     * civil labels. +0 preserves them; any neighbor-walking shift needs
+     * Date.in calendar context. */
+    if (n == 0)
+        return d;
+    if (m != 0 && date_is_catchup_day(y, m, day)) {
+        w_raise(w_string("calendar context required"));
+        return W_NIL;
+    }
     /* The entire packed year domain spans fewer than 1.5 million days. Reject
      * obviously unrepresentable shifts before narrowing into the int calendar
      * loop; otherwise an i48-sized operand could overflow `day` first. */
@@ -40558,6 +40518,8 @@ static WValue date_add_days(WValue d, int64_t n) {
         w_raise(w_string("Date arithmetic exceeded the representable year range"));
         return W_NIL;
     }
+    if (sec == 60 && !date_is_leap_second(y, m, day, h, min, sec, tz))
+        sec = 59;
     return w_box_date(y, m, day, h, min, sec, tz);
 }
 
@@ -40634,6 +40596,9 @@ WValue w_date_scrub(WValue str_v, int64_t unit, int64_t delta) {
     return w_string(buf);
 }
 
+static WValue date_pack_shifted(int y, int mo, int day, int tz,
+                                int64_t days, int64_t insec);
+
 /* date/datetime ± duration. ns-mode durations shift by whole seconds
  * with calendar rollover through date_add_days; calendar-mode (months)
  * durations shift months with day clamping, then apply the ms part. */
@@ -40642,6 +40607,13 @@ static WValue date_shift_duration(WValue d, WValue dur, int sign) {
     int h = w_unbox_date_hour(d), mi = w_unbox_date_min(d), sec = w_unbox_date_sec(d);
     int tz = w_unbox_date_tz(d);
     int64_t days, insec;
+    if (mo != 0 && date_is_catchup_day(y, mo, day) &&
+        !(duration_get_mode(dur) == 0 && duration_get_ns(dur) == 0) &&
+        !(duration_get_mode(dur) != 0 && w_unbox_duration_months(dur) == 0 &&
+          w_unbox_duration_ms(dur) == 0)) {
+        w_raise(w_string("calendar context required"));
+        return W_NIL;
+    }
     if (duration_get_mode(dur) == 0) {
         int64_t total_sec = duration_get_ns(dur) / 1000000000LL * (int64_t)sign;
         days = total_sec / 86400;
@@ -40658,12 +40630,54 @@ static WValue date_shift_duration(WValue d, WValue dur, int sign) {
         days = 0;
         insec = (int64_t)h * 3600 + mi * 60 + sec + ms / 1000;
     }
-    while (insec < 0)      { insec += 86400; days -= 1; }
-    while (insec >= 86400) { insec -= 86400; days += 1; }
+    return date_pack_shifted(y, mo, day, tz, days, insec);
+}
+
+/* Civil day length in seconds. IERS leap-second dates have a 23:59:60
+ * slot (86401); every other day wraps at 86400. */
+static int date_day_seconds(int y, int mo, int d, int tz) {
+    return date_is_leap_second(y, mo, d, 23, 59, 60, tz) ? 86401 : 86400;
+}
+
+/* Apply day+seconds-of-day after a shift. Normalize `insec` against the
+ * starting civil day first (ordinary days wrap at 86400 so 23:59:59Z + 1s
+ * is the next midnight; leap-second dates keep 86400 as 23:59:60). Then
+ * apply remaining whole days. A 86400 landing on a non-leap day clamps to
+ * 23:59:59 (Date.new would reject :60 there). */
+static WValue date_pack_shifted(int y, int mo, int day, int tz,
+                                int64_t days, int64_t insec) {
+    int guard = 0;
+    while (insec < 0 && guard++ < 16) {
+        WValue prev = date_add_days(w_box_date(y, mo, day, 0, 0, 0, tz), -1);
+        y = w_unbox_date_year(prev);
+        mo = w_unbox_date_month(prev);
+        day = w_unbox_date_day(prev);
+        insec += date_day_seconds(y, mo, day, tz);
+    }
+    while (guard++ < 16) {
+        int64_t len = date_day_seconds(y, mo, day, tz);
+        if (insec < len)
+            break;
+        insec -= len;
+        WValue nxt = date_add_days(w_box_date(y, mo, day, 0, 0, 0, tz), 1);
+        y = w_unbox_date_year(nxt);
+        mo = w_unbox_date_month(nxt);
+        day = w_unbox_date_day(nxt);
+    }
     WValue shifted = date_add_days(w_box_date(y, mo, day, 0, 0, 0, tz), days);
-    return w_box_date(w_unbox_date_year(shifted), w_unbox_date_month(shifted),
-                      w_unbox_date_day(shifted), (int)(insec / 3600),
-                      (int)((insec / 60) % 60), (int)(insec % 60), tz);
+    int sy = w_unbox_date_year(shifted), smo = w_unbox_date_month(shifted);
+    int sday = w_unbox_date_day(shifted);
+    int hh, mi2, ss;
+    if (insec == 86400) {
+        hh = 23;
+        mi2 = 59;
+        ss = date_is_leap_second(sy, smo, sday, 23, 59, 60, tz) ? 60 : 59;
+    } else {
+        hh = (int)(insec / 3600);
+        mi2 = (int)((insec / 60) % 60);
+        ss = (int)(insec % 60);
+    }
+    return w_box_date(sy, smo, sday, hh, mi2, ss, tz);
 }
 
 /* date/datetime ± a time-dimensioned quantity (`210 days`, `2h`): the
@@ -40683,19 +40697,22 @@ static WValue date_shift_quantity(WValue d, WValue q, int sign) {
     int y = w_unbox_date_year(d), mo = w_unbox_date_month(d), day = w_unbox_date_day(d);
     int h = w_unbox_date_hour(d), mi = w_unbox_date_min(d), sec = w_unbox_date_sec(d);
     int tz = w_unbox_date_tz(d);
+    if (mo != 0 && date_is_catchup_day(y, mo, day) && total_sec != 0) {
+        w_raise(w_string("calendar context required"));
+        return W_NIL;
+    }
     int64_t days = total_sec / 86400;
     int64_t insec = (int64_t)h * 3600 + mi * 60 + sec + total_sec % 86400;
-    while (insec < 0)      { insec += 86400; days -= 1; }
-    while (insec >= 86400) { insec -= 86400; days += 1; }
-    WValue shifted = date_add_days(w_box_date(y, mo, day, 0, 0, 0, tz), days);
-    return w_box_date(w_unbox_date_year(shifted), w_unbox_date_month(shifted),
-                      w_unbox_date_day(shifted), (int)(insec / 3600),
-                      (int)((insec / 60) % 60), (int)(insec % 60), tz);
+    return date_pack_shifted(y, mo, day, tz, days, insec);
 }
 
 /* Julian day number for date comparison/difference */
 static int64_t date_to_jdn(WValue d) {
     int y = w_unbox_date_year(d), m = w_unbox_date_month(d), day = w_unbox_date_day(d);
+    if (m != 0 && date_is_catchup_day(y, m, day)) {
+        w_raise(w_string("calendar context required"));
+        return 0;
+    }
     /* Gregorian calendar JDN formula */
     int a = (14 - m) / 12;
     int yy = y + 4800 - a;
@@ -62069,13 +62086,20 @@ WValue w_value_fields(WValue vv) {
             snprintf(dec, sizeof dec, "%lld", (long long)w_signext((bits >> 22) & 0x3FFFFF, 22)); w_fld(&p, e, "num", "bits 43..22", dec, "numerator");
             snprintf(dec, sizeof dec, "%llu", (unsigned long long)(bits & 0x3FFFFF));             w_fld(&p, e, "den", "bits 21..0", dec, "denominator");
         } else if (sub == 4) {  /* date */
-            snprintf(dec, sizeof dec, "%lld", (long long)w_signext((bits >> 33) & 0xFFF, 12)); w_fld(&p, e, "year", "bits 44..33", dec, "");
-            snprintf(dec, sizeof dec, "%llu", (unsigned long long)((bits >> 29) & 0xF));       w_fld(&p, e, "month", "bits 32..29", dec, "");
-            snprintf(dec, sizeof dec, "%llu", (unsigned long long)((bits >> 24) & 0x1F));      w_fld(&p, e, "day", "bits 28..24", dec, "");
-            snprintf(dec, sizeof dec, "%llu", (unsigned long long)((bits >> 19) & 0x1F));      w_fld(&p, e, "hour", "bits 23..19", dec, "");
-            snprintf(dec, sizeof dec, "%llu", (unsigned long long)((bits >> 13) & 0x3F));      w_fld(&p, e, "minute", "bits 18..13", dec, "");
-            snprintf(dec, sizeof dec, "%llu", (unsigned long long)((bits >> 7) & 0x3F));       w_fld(&p, e, "second", "bits 12..7", dec, "");
-            snprintf(dec, sizeof dec, "%lld", (long long)(w_signext(bits & 0x7F, 7) * 15));    w_fld(&p, e, "tz", "bits 6..0", dec, "timezone offset (minutes)");
+            snprintf(dec, sizeof dec, "%d", w_unbox_date_year(vv));
+            w_fld(&p, e, "year", "bits 44..33", dec, "civil year (stored as year+1024)");
+            snprintf(dec, sizeof dec, "%d", w_unbox_date_month(vv));
+            w_fld(&p, e, "month", "bits 32..29", dec, "");
+            snprintf(dec, sizeof dec, "%d", w_unbox_date_day(vv));
+            w_fld(&p, e, "day", "bits 28..24", dec, "");
+            snprintf(dec, sizeof dec, "%d", w_unbox_date_hour(vv));
+            w_fld(&p, e, "hour", "bits 23..19", dec, "");
+            snprintf(dec, sizeof dec, "%d", w_unbox_date_min(vv));
+            w_fld(&p, e, "minute", "bits 18..13", dec, "");
+            snprintf(dec, sizeof dec, "%d", w_unbox_date_sec(vv));
+            w_fld(&p, e, "second", "bits 12..7", dec, "");
+            snprintf(dec, sizeof dec, "%d", w_unbox_date_tz(vv));
+            w_fld(&p, e, "tz", "bits 6..0", dec, "minutes east of UTC");
         } else if (sub == 5) {  /* ipv4 */
             uint32_t addr = (uint32_t)((bits >> 12) & 0xFFFFFFFFu);
             snprintf(raw, sizeof raw, "0x%08X", addr);

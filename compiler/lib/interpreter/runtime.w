@@ -521,6 +521,15 @@
       return eval_and(node, env)
     if t == :or
       return eval_or(node, env)
+    if t == :in_test
+      lhs = evaluate(ast_get(node, :lhs), env)
+      elems = ast_get(node, :elements)
+      i = 0
+      while i < elems.size()
+        if lhs == evaluate(elems[i], env)
+          return true
+        i += 1
+      return false
     if t == :passthrough
       # `expression : value` evaluates the left side for its effects and
       # returns the right side. Storage iterators use this to yield every item

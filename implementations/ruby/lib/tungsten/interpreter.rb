@@ -307,6 +307,7 @@ module Tungsten
 
     def initialize(argv: nil, sandbox: false)
       @env = Environment.new
+      @root_env = @env
       @classes = {}
       @modules = {}
       @self_stack = [nil]
@@ -1646,9 +1647,15 @@ module Tungsten
           case expr
           when Tungsten::AST::Def
             body = register_trailing_accessors(expr, w_class)
+            class_method = !expr.receiver.nil?
             w_method = Runtime::WMethod.new(expr.name, expr.args, body, w_class,
-                                            splat_index: expr.splat_index, param_types: expr.param_types)
-            w_class.define_method(expr.name.to_s, w_method)
+                                            splat_index: expr.splat_index, param_types: expr.param_types,
+                                            class_method: class_method)
+            if class_method
+              w_class.define_class_method(expr.name.to_s, w_method)
+            else
+              w_class.define_method(expr.name.to_s, w_method)
+            end
           when Tungsten::AST::Is
             trait = @modules[expr.trait_name]
             if trait.nil?
@@ -1847,6 +1854,14 @@ module Tungsten
         when "+" then return +recv
         end
 
+        # Tungsten `is_a?(Int)` passes the Int WClass, which is not a Ruby
+        # Class/Module. Integer#is_a? then raises TypeError ("class or module
+        # required") and core methods such as Date.ordinal never reach their
+        # Ruby fallback. Answer the check with Tungsten type names instead.
+        if node.name == "is_a?" && !block && small_arg_length_without_splat(node.args) == 1
+          return tungsten_is_a?(recv, evaluate(node.args[0]))
+        end
+
         # Anonymous arrows are represented as nameless Def nodes by the Ruby
         # reference parser. They retain their defining environment and expose
         # the same call surface as compiled Block values.
@@ -1893,6 +1908,20 @@ module Tungsten
           if recv.name == "Tungsten" && node.name == "root" && no_call_args?(node.args)
             root_builtin = @builtins["__project_root"]
             Tungsten::PathValue.new(root_builtin ? root_builtin.call(nil, EMPTY_ARGS, nil) : Dir.pwd)
+          elsif (class_method = recv.lookup_class_method(node.name.to_s, argc: (node.args || EMPTY_ARGS).size))
+            # `-> .parse` / `-> .new` live on the class, distinct from
+            # instance constructors (`-> new(@x)`). Date.new is the former
+            # and returns a packed scalar via ccall.
+            begin
+              call_w_method_from_nodes(recv, class_method, node.args, block, call_node: node)
+            rescue Tungsten::Error
+              ruby_class = ruby_constant_for_w_class(recv.name)
+              if !hidden_ruby_object_method?(node.name) && ruby_class&.respond_to?(node.name)
+                args = evaluate_args(node.args)
+                return ruby_class.send(node.name, *args)
+              end
+              raise
+            end
           elsif node.name == "new"
             if recv.name == "Array"
               construct_array(evaluate_args(node.args), block, node)
@@ -2017,6 +2046,9 @@ module Tungsten
         end
       else
         name = node.name.to_s
+        if name == "ccall"
+          return dispatch_interpreted_ccall(evaluate_args(node.args), node)
+        end
 
         # Class constructor call: Dog("Rex") → Dog.new("Rex")
         if (w_class = @classes[name])
@@ -3192,12 +3224,20 @@ module Tungsten
       source = File.read(core_path)
       @file_sources[core_path] = source
       prev_file = @current_file
+      prev_env = @env
       @current_file = core_path
+      # Native execute_program always evaluates autoloaded core in the
+      # interpreter root env. Evaluating here in a method frame would bind
+      # class constants such as Calendar::SKIP_ROWS on that frame, then
+      # drop them when the caller returns — Date.in then dies looking them
+      # up. Keep autoload at top level, matching the self-hosted walker.
+      @env = @root_env
       begin
         ast = parse_with_file(source, core_path)
         evaluate(ast)
       ensure
         @current_file = prev_file
+        @env = prev_env
       end
 
       @classes[name] || @modules[name]
@@ -5067,13 +5107,7 @@ module Tungsten
       when "is_a?"
         return NO_DIRECT_CALL unless len == 1
 
-        target = evaluate(arg_nodes[0]).to_s
-        klass = recv.w_class
-        while klass
-          return true if klass.name == target
-          klass = klass.superclass
-        end
-        false
+        tungsten_is_a?(recv, evaluate(arg_nodes[0]))
       when "respond_to?"
         return NO_DIRECT_CALL unless len == 1
 
@@ -5131,10 +5165,37 @@ module Tungsten
     def instantiate_from_nodes(w_class, arg_nodes)
       return Rational(*evaluate_args(arg_nodes)) if w_class.name == "Rational"
 
+      argc = (arg_nodes || EMPTY_ARGS).size
+      class_ctor = w_class.lookup_class_method("new", argc: argc)
+      if class_ctor
+        return call_w_method_from_nodes(w_class, class_ctor, arg_nodes)
+      end
+
       obj = Runtime::WObject.new(w_class)
-      constructor = w_class.lookup_method("new", argc: (arg_nodes || EMPTY_ARGS).size)
+      constructor = w_class.lookup_method("new", argc: argc)
       call_w_method_from_nodes(obj, constructor, arg_nodes) if constructor
       obj
+    end
+
+    def dispatch_interpreted_ccall(args, node = nil)
+      runtime_error("ccall requires a runtime function name", node: node) if args.empty?
+      cname = args[0].to_s
+      case cname
+      when "w_date_new_w"
+        runtime_error("w_date_new_w expects seven fields", node: node) unless args.size == 8
+        Date.new(args[1], args[2], args[3], args[4], args[5], args[6], args[7])
+      when "w_date_parse"
+        runtime_error("w_date_parse expects one string", node: node) unless args.size == 2
+        Date.parse(args[1].to_s)
+      when "w_date_from_ordinal"
+        runtime_error("w_date_from_ordinal expects a year and day-of-year", node: node) unless args.size == 3
+        Date.ordinal(args[1], args[2])
+      when "w_date_today"
+        runtime_error("w_date_today expects no arguments", node: node) unless args.size == 1
+        Date.today
+      else
+        runtime_error("undefined method 'ccall'", node: node, length: 5)
+      end
     end
 
     def bind_exact_small_args_from_nodes(env, params, arg_nodes, splat_index, memo)
@@ -5602,6 +5663,25 @@ module Tungsten
       end
     end
 
+    def tungsten_is_a?(recv, target)
+      type_name = target.is_a?(Runtime::WClass) ? target.name : target.to_s
+      if recv.is_a?(Runtime::WObject)
+        klass = recv.w_class
+        while klass
+          return true if klass.name == type_name
+
+          klass = klass.superclass
+        end
+        return false
+      end
+      if recv.is_a?(Runtime::WClass)
+        return type_name == "Class" || recv.name == type_name
+      end
+
+      typed_overload_value_matches?(recv, type_name) ||
+        tungsten_class_name(recv) == type_name
+    end
+
     def call_builtin(recv, name, args)
       case name
       when "to_s"       then recv.to_s
@@ -5610,13 +5690,7 @@ module Tungsten
       when "nil?"    then false
       when "itself" then recv
       when "is_a?"
-        target = args[0].to_s
-        klass = recv.w_class
-        while klass
-          return true if klass.name == target
-          klass = klass.superclass
-        end
-        false
+        tungsten_is_a?(recv, args[0])
       when "respond_to?"
         method_name = args[0].to_s
         !!recv.w_class.lookup_method(method_name) ||

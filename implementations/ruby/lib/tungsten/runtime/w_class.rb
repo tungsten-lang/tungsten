@@ -15,13 +15,16 @@ module Tungsten
         attr_reader :typed_overload_names
       end
 
-      attr_accessor :name, :superclass, :methods, :traits, :version, :class_vars, :method_overloads
+      attr_accessor :name, :superclass, :methods, :traits, :version, :class_vars, :method_overloads,
+                    :class_methods, :class_method_overloads
 
       def initialize(name, superclass = nil)
         @name = name
         @superclass = superclass
         @methods = {}
         @method_overloads = {}
+        @class_methods = {}
+        @class_method_overloads = {}
         @traits = []
         @version = 0
         @class_vars = {}
@@ -59,10 +62,36 @@ module Tungsten
       # declared param types coexist as typed overloads and a same-arity
       # same-param-type redefinition replaces its old slot.
       def define_method(name, method)
-        register_overload(name, method)
+        register_overload(name, method, @method_overloads)
         WClass.typed_overload_names[name] = true if method.param_types
         @methods[name] = method
         @version += 1
+      end
+
+      def define_class_method(name, method)
+        register_overload(name, method, @class_method_overloads)
+        WClass.typed_overload_names[name] = true if method.param_types
+        @class_methods[name] = method
+        @version += 1
+      end
+
+      def lookup_class_method(name, argc: nil)
+        klass = self
+        while klass
+          if argc.nil?
+            method = klass.class_methods[name]
+            return method if method
+          else
+            overloads = klass.class_method_overloads[name]
+            if overloads
+              method = overloads.reverse_each.find { |candidate| method_accepts_arity?(candidate, argc) }
+              return method if method
+            end
+          end
+
+          klass = klass.superclass
+        end
+        argc.nil? ? nil : lookup_class_method(name)
       end
 
       def include_trait(trait)
@@ -109,8 +138,8 @@ module Tungsten
         argc >= required && argc <= params.size
       end
 
-      def register_overload(name, method)
-        overloads = (@method_overloads[name] ||= [])
+      def register_overload(name, method, table = @method_overloads)
+        overloads = (table[name] ||= [])
         arity = (method.params || EMPTY_PARAMS).size
         index = overloads.index do |m|
           (m.params || EMPTY_PARAMS).size == arity && m.param_types == method.param_types

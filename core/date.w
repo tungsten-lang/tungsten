@@ -1,7 +1,7 @@
 # Date — validated packed proleptic-Gregorian calendar and datetime values.
 #
 # Years are limited by the WValue representation to -1024..3071 (12-bit
-# field stored as year−1024). Constructors,
+# field stored as year+1024). Constructors,
 # ISO/ordinal/Julian factories, and period boundaries raise rather than wrapping
 # when a requested result cannot be represented.
 #
@@ -49,9 +49,8 @@
     year = 100 * b + d - 4_800 + m / 10
     Date.new(year, month, day)
 
-  # Numbered day of the year (`YYYY-DDD` / Date.ordinal). Walks local
-  # midnights: extras (Sweden 1712-02-30) exist, repeats (Samoa 1892-07-04)
-  # occupy two numbers with the same civil date, skips jump the label.
+  # Numbered day of the year (`YYYY-DDD` / Date.ordinal) in proleptic
+  # Gregorian. Historical skips and extras belong on Date.in.
   -> .ordinal(year, number)
     if !number.is_a?(Int)
       raise "Date.ordinal expects an integer ordinal day"
@@ -94,9 +93,7 @@
     ((($value >> 29) & 0xF) - 1) / 3 + 1
 
   -> year
-    raw_year = (($value >> 33) & 0xFFF) ## i64
-    stored = raw_year >= 0x800 ? raw_year - 0x1000 : raw_year
-    stored + 1024
+    (($value >> 33) & 0xFFF) - 1024
 
   -> hour
     ($value >> 19) & 0x1F
@@ -116,6 +113,25 @@
     if quarters >= 0x40
       quarters -= 0x80
     quarters * 15
+
+  # Catch-up civil tuples (1712-02-30, Julian century leaps) are
+  # representable without a calendar. Neighbor-walking ops need Date.in.
+  -> unresolved?
+    m = month
+    d = day
+    if m == 0
+      return false
+    y = year
+    if y == 1712 && m == 2 && d == 30
+      return true
+    if m == 2 && d == 29 && y >= 100 && y <= 1900 && y % 100 == 0 && y % 400 != 0
+      return true
+    false
+
+  -> require_calendar
+    if unresolved?
+      raise "calendar context required"
+    nil
 
   # Named jurisdiction / zone. Packed Date stays a civil tuple; Calendar
   # knows cutovers and historical offsets. See doc/design/calendars.md.
@@ -151,6 +167,7 @@
     self.strftime(FORMATS[:ctime])
 
   -> cwday
+    require_calendar()
     y = year
     m = (($value >> 29) & 0xF) ## i64
     d = (($value >> 24) & 0x1F) ## i64
@@ -161,6 +178,7 @@
     (((jdn % 7) + 7) % 7 + 1) ## i64
 
   -> cweek
+    require_calendar()
     y = year
     m = (($value >> 29) & 0xF) ## i64
     d = (($value >> 24) & 0x1F) ## i64
@@ -228,6 +246,7 @@
     y
 
   -> wday
+    require_calendar()
     y = year
     m = (($value >> 29) & 0xF) ## i64
     d = (($value >> 24) & 0x1F) ## i64
@@ -259,6 +278,7 @@
     "[decade]s"
 
   -> day_of_week
+    require_calendar()
     y = year
     m = (($value >> 29) & 0xF) ## i64
     d = (($value >> 24) & 0x1F) ## i64
@@ -272,6 +292,7 @@
     ($value >> 24) & 0x1F
 
   -> day_of_quarter
+    require_calendar()
     month_in_quarter = (month - 1) % 3
     result = day
     if month_in_quarter >= 1
@@ -289,6 +310,7 @@
     result
 
   -> day_of_year
+    require_calendar()
     y = year
     m = (($value >> 29) & 0xF) ## i64
     yday = (($value >> 24) & 0x1F) ## i64
@@ -318,6 +340,7 @@
     yday
 
   -> yday
+    require_calendar()
     y = year
     m = (($value >> 29) & 0xF) ## i64
     yday = (($value >> 24) & 0x1F) ## i64
@@ -347,12 +370,9 @@
     yday
 
   -> days_in_month
+    require_calendar()
     y = year
     m = (($value >> 29) & 0xF) ## i64
-    if m == 2 && y == 1712
-      return 30
-    if m == 2 && y >= 100 && y <= 1900 && y % 100 == 0 && y % 400 != 0
-      return 29
     if m == 2
       leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
       return leap ? 29 : 28
@@ -361,14 +381,10 @@
     31 - ((0xA50 >> m) & 1)
 
   -> days_in_year
+    require_calendar()
     y = year
     leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
-    n = leap ? 366 : 365
-    if y == 1712
-      n = 367
-    elsif y >= 100 && y <= 1900 && y % 100 == 0 && y % 400 != 0
-      n = 366
-    n
+    leap ? 366 : 365
 
   -> first_of_week
     self - (cwday - 1)
@@ -430,6 +446,7 @@
     (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
 
   -> jd
+    require_calendar()
     y = year
     m = (($value >> 29) & 0xF) ## i64
     d = (($value >> 24) & 0x1F) ## i64

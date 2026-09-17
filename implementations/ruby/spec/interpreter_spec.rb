@@ -1220,6 +1220,25 @@ RSpec.describe Tungsten::Interpreter do
     expect(run(code)).to eq([true, true, false])
   end
 
+  it "checks is_a?(Int) on integer values without calling Ruby Integer#is_a?" do
+    expect(run("250.is_a?(Int)")).to eq(true)
+    expect(run("250.is_a?(String)")).to eq(false)
+    expect(run("Date.ordinal(1867, 250).day")).to eq(7)
+  end
+
+  it "constructs Date.new via the core class method ccall" do
+    d = run("Date.new(2024, 1, 1)")
+    expect(d.year).to eq(2024)
+    expect(d.month).to eq(1)
+    expect(d.day).to eq(1)
+    expect(run("Date.new(1712, 2, 30).day")).to eq(30)
+  end
+
+  it "loads Calendar constants when Date.in autoloads from a method frame" do
+    expect(run('Date.in("Sweden").parse("1712-02-30").day')).to eq(30)
+    expect(run('Date.in("Samoa").ordinal(2011, 364).day')).to eq(31)
+  end
+
   it "evaluates with loop" do
     code = <<~W
       result = 0

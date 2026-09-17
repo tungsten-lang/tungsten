@@ -868,7 +868,7 @@ static inline uint32_t w_unbox_rational_den(WValue v) { return (uint32_t)(v & 0x
  *
  *   63……48  tag 0xFFFE
  *   47……45  packed subtype 4 (DATE)
- *   44……33  year   12-bit signed, stored as year−1024 → civil −1024…3071
+ *   44……33  year   12-bit unsigned, stored as year+1024 → civil −1024…3071
  *   32……29  month  0=time-only, 1–12
  *   28……24  day    0=time-only, 1–31
  *   23……19  hour   0–23 (24–31 unused)
@@ -887,10 +887,10 @@ static inline uint32_t w_unbox_rational_den(WValue v) { return (uint32_t)(v & 0x
 #define W_DATE_TZ_AMT20_MIN  20
 
 static inline int w_date_pack_year(int year) {
-    return year - W_DATE_YEAR_BIAS;
+    return year + W_DATE_YEAR_BIAS;
 }
 static inline int w_date_unpack_year(int stored) {
-    return stored + W_DATE_YEAR_BIAS;
+    return stored - W_DATE_YEAR_BIAS;
 }
 
 static inline int w_date_pack_tz(int tz_offset_min) {
@@ -912,8 +912,7 @@ static inline WValue w_box_date(int year, int month, int day,
            ((uint64_t)w_date_pack_tz(tz_offset_min) & 0x7F);
 }
 static inline int w_unbox_date_year(WValue v) {
-    int stored = ((int16_t)(((v >> 33) & 0xFFF) << 4)) >> 4;
-    return w_date_unpack_year(stored);
+    return w_date_unpack_year((int)((v >> 33) & 0xFFF));
 }
 static inline int w_unbox_date_month(WValue v) { return (int)((v >> 29) & 0xF); }
 static inline int w_unbox_date_day(WValue v) { return (int)((v >> 24) & 0x1F); }

@@ -780,52 +780,20 @@ module Tungsten
       fixed[[ date.month, date.day ]] || floating_holiday_label(date)
     end
 
-    def history_label(date)
-      if date.respond_to?(:sec) && date.sec == 60
-        return "UTC leap second"
-      end
-      return "tillökningsdagen" if date.year == 1712 && date.month == 2 && date.day == 30
-      if date.month == 2 && date.day == 29 && date.year >= 100 && date.year <= 1900 &&
-         (date.year % 100).zero? && (date.year % 400) != 0
-        return "Julian century leap"
-      end
-      return "Samoa's two Independences" if date.year == 1892 && date.month == 7 && date.day == 4
-      return "Alaska Purchase" if date.year == 1867 && date.month == 10 && [6, 18].include?(date.day)
+    def history_second(date)
+      return date.sec if date.respond_to?(:sec)
+      return date.second if date.respond_to?(:second)
 
-      nil
+      0
+    end
+
+    def history_label(date)
+      title = Tungsten::Calendar.history_title(date.year, date.month, date.day, history_second(date))
+      title.nil? || title.empty? ? nil : title
     end
 
     def history_art(date)
-      if date.respond_to?(:sec) && date.sec == 60
-        return [
-          "IERS inserted a positive leap",
-          "second: 23:59:60 UTC. Packed",
-          "Date stores second 60; parse",
-          "rejects any other :60. POSIX",
-          "clocks often repeat 00:00:00."
-        ]
-      end
-      if date.year == 1712 && date.month == 2 && date.day == 30
-        return [
-          "Charles XII added a second",
-          "leap day (tillökningsdagen)",
-          "after a botched gradual",
-          "Gregorian conversion.",
-          "Year had 367 days."
-        ]
-      end
-      if date.month == 2 && date.day == 29 && date.year >= 100 && date.year <= 1900 &&
-         (date.year % 100).zero? && (date.year % 400) != 0
-        return [
-          "Gregorian skips century years",
-          "not divisible by 400.",
-          "Julian jurisdictions still",
-          "had 29 February — Britain",
-          "until 1752, Russia until 1918."
-        ]
-      end
-
-      []
+      Tungsten::Calendar.history_art(date.year, date.month, date.day, history_second(date))
     end
 
     def holiday_scene_label(label)
@@ -834,7 +802,7 @@ module Tungsten
 
     def date_scene_header_line(date)
       title = "#{date.strftime("%A, %B")} #{date.day}#{ordinal_suffix(date.day)}, #{date.year}"
-      diy = date.year == 1712 ? 367 : (date.leap? ? 366 : 365)
+      diy = date.leap? ? 366 : 365
       yday = date.respond_to?(:yday) ? date.yday : date.day
       cweek = date.respond_to?(:cweek) ? date.cweek : 0
       day_week = "[Day #{yday}/#{diy}] Week #{cweek}"
@@ -1560,7 +1528,8 @@ module Tungsten
     end
 
     def coerce_packed_date_fields(year, month, day, hour, minute, second, tz_min)
-      unless fits_signed_width?(year - 1024, 12)
+      stored_year = year + 1024
+      unless stored_year.between?(0, 4095)
         return unsupported_wvalue("Year #{year} is outside Tungsten's packed date range -1024..3071")
       end
       unless Tungsten::Date.packed_tz?(tz_min)
@@ -1569,7 +1538,7 @@ module Tungsten
 
       tz_code = tz_min == 20 ? 63 : tz_min / 15
       bits = W_TAG_PACKED | (4 << 45) |
-             (signed_payload(year - 1024, 12) << 33) |
+             ((stored_year & 0xFFF) << 33) |
              ((month & 0xF) << 29) | ((day & 0x1F) << 24) |
              ((hour & 0x1F) << 19) | ((minute & 0x3F) << 13) |
              ((second & 0x3F) << 7) | (tz_code & 0x7F)
@@ -1983,7 +1952,7 @@ module Tungsten
       when 4
         tz_code = bits & 0x7F
         tz_min = tz_code == 63 ? 20 : sign_extend(tz_code, 7) * 15
-        lines << inspection_field_line("year", "bits 44..33", (sign_extend((bits >> 33) & 0xFFF, 12) + 1024).to_s, "civil year (stored as year−1024)")
+        lines << inspection_field_line("year", "bits 44..33", (((bits >> 33) & 0xFFF) - 1024).to_s, "civil year (stored as year+1024)")
         lines << inspection_field_line("month", "bits 32..29", ((bits >> 29) & 0xF).to_s, nil)
         lines << inspection_field_line("day", "bits 28..24", ((bits >> 24) & 0x1F).to_s, nil)
         lines << inspection_field_line("hour", "bits 23..19", ((bits >> 19) & 0x1F).to_s, nil)

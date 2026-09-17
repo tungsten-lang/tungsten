@@ -88,8 +88,51 @@ check("amsterdam parse offset", Date.parse("1937-07-01T12:00:00+00:20").tz, 20)
 check("amsterdam Date.new offset", Date.new(1937, 7, 1, 12, 0, 0, 20).tz, 20)
 check("nepal still +05:45", Date.parse("2024-01-01T12:00:00+05:45").tz, 345)
 check("amsterdam winter 1936 not amt", Date.in("Amsterdam").parse("1936-07-01T12:00:00").tz, 0)
+check("amsterdam Z stays utc", Date.in("Amsterdam").parse("1938-01-01T12:00:00Z").tz, 0)
+check("amsterdam naive gets +20", Date.in("Amsterdam").parse("1938-01-01T12:00:00").tz, 20)
+
+samoa = Date.in("Samoa")
+check("samoa local 364 is Dec 31 2011", samoa.ordinal(2011, 364), Date.new(2011, 12, 31))
+samoa_365 = false
+begin
+  samoa.ordinal(2011, 365)
+rescue error
+  samoa_365 = true
+check("samoa 2011 has 364 local midnights", samoa_365, true)
+check("samoa skipped Dec 30", samoa.parse("2011-12-29") + 1, Date.parse("2011-12-31"))
+check("samoa 1892 first July 4", samoa.ordinal(1892, 186), Date.new(1892, 7, 4))
+check("samoa 1892 repeated July 4", samoa.ordinal(1892, 187), Date.new(1892, 7, 4))
+check("samoa 1892 day after pair", samoa.ordinal(1892, 188), Date.new(1892, 7, 5))
+
+ak = Date.in("Alaska")
+check("alaska local 279 is Oct 6", ak.ordinal(1867, 279), Date.new(1867, 10, 6))
+check("alaska local 280 is Oct 18", ak.ordinal(1867, 280), Date.new(1867, 10, 18))
+
+gb1752 = Date.in("Britain").ordinal(1752, 355)
+check("britain 1752 last local midnight", gb1752.month, 12)
+check("britain 1752 last local day", gb1752.day, 31)
 
 check("bare Date still accepts 1712-02-30", Date.parse("1712-02-30").day, 30)
 check("bare Date still accepts 1700-02-29", Date.parse("1700-02-29").day, 29)
+
+# Year length is derived from the one skip/extra/repeat list, not a
+# parallel subtraction table.
+check("samoa 2011 length", samoa.local_ordinal_len(2011), 364)
+check("samoa 1892 length", samoa.local_ordinal_len(1892), 367)
+check("sweden 1712 length", se.local_ordinal_len(1712), 367)
+check("sweden 1700 length", se.local_ordinal_len(1700), 365)
+check("sweden 1753 length", se.local_ordinal_len(1753), 354)
+check("britain 1752 length", Date.in("Britain").local_ordinal_len(1752), 355)
+check("denmark 1700 length", dk.local_ordinal_len(1700), 355)
+check("rome 1582 length", rome.local_ordinal_len(1582), 355)
+check("russia 1918 length", ru.local_ordinal_len(1918), 352)
+check("alaska 1867 length", ak.local_ordinal_len(1867), 354)
+check("philippines 1844 length", Date.in("Philippines").local_ordinal_len(1844), 365)
+check("kwajalein 1993 length", Date.in("Kwajalein").local_ordinal_len(1993), 364)
+check("sweden 1712 last midnight", se.ordinal(1712, 367), Date.new(1712, 12, 31))
+check("sweden 1712 feb 30 ordinal", se.ordinal(1712, 61), Date.new(1712, 2, 30))
+check("history tillokning", Calendar.history_title(1712, 2, 30), "tillökningsdagen")
+check("history leap second", Calendar.history_title(2016, 12, 31, 60), "UTC leap second")
+check("history ordinary empty", Calendar.history_title(2024, 1, 1), "")
 
 << "calendar_spec: all checks passed"

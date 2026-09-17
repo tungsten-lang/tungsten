@@ -2,7 +2,7 @@
 
 Packed `Date` is a dumb civil tuple: year, month, day, hour, minute, second,
 and a 15-minute UTC offset. Years −1024…3071 (12-bit field stored as
-year−1024). The bit layout does not know
+year+1024). The bit layout does not know
 history. `Date.parse`, `Date.new`, and compiled literals decide which civil
 tuples existed.
 
@@ -26,23 +26,23 @@ Tungsten accepts those dates in `Date.new` / `Date.parse` / date literals.
 
 ## Numbered days (`YYYY-DDD`)
 
-`1867-250` is the 250th local midnight of 1867, resolved to a civil
-`Y-M-D` (the packed day field is only 5 bits, so the ordinal is never
-stored raw). Walking those numbers:
+`1867-250` is the 250th day of 1867 in **proleptic Gregorian**, resolved
+to civil `Y-M-D` (the packed day field is only 5 bits, so the ordinal is
+never stored raw). `Date.ordinal(year, n)` is the inverse of
+`day_of_year`: `Date.ordinal(y, d.day_of_year) == d`. Samoa, Alaska, and
+other local midnight walks live on `Date.in("Samoa").ordinal`.
 
-- **Extras** occupy a slot (`1712-061` is 30 February).
-- **Repeats** occupy two slots with the **same** civil date (`1892-186`
-  and `1892-187` are both 4 July in Samoa).
-- **Skips** jump the label (`1867-279` is 6 Oct in Sitka, `1867-280` is
-  18 Oct — eleven Gregorian names never happened there).
+Catch-up labels such as `1712-02-30` are valid civil tuples: fields,
+`to_s`, equality, and `+ 0` work without a calendar. Neighbor-walking
+(`+ 1`, weekday, ordinal, Julian day) raises `calendar context required`
+until `Date.in("Sweden")` (or another jurisdiction) names the neighbors.
 
-`Date.ordinal(year, n)` is the same mapping. `Date + 1` still moves one
-civil label except that extras exist in `days_in_month` (so 29 Feb 1712
-+ 1 is 30 Feb). Repeats cannot be two distinct packed Dates.
-
-Skipped ranges (Britain 1752-09-03…13, Alaska 1867-10-07…17, …) remain
-valid proleptic-Gregorian literals; they are only omitted from the
-ordinal walk. A jurisdiction calendar would reject them as civil dates.
+```
+1712-02-29 + 1                         # 1712-03-01  (Gregorian)
+1712-02-30 + 1                         # raise
+Date.in("Sweden").parse("1712-02-29") + 1  # 1712-02-30
+Date.in("Sweden").parse("1712-02-30") + 1  # 1712-03-01
+```
 
 ## Leap seconds
 
@@ -114,6 +114,12 @@ Gregorian grew 10→11→12→13, then they jumped 13 days at once.
 `Date.in` is not yet full IANA tzdata (DST folds, every LMT). It is the
 jurisdiction layer. Do not grow a second Date type; attach place when
 asked.
+
+Skip ranges, extra days, and repeated midnights are one list on
+`Calendar`. Local year length is the era leap length plus extras and
+repeats minus the skip count from that list. WIT `?` and the Ruby
+inspector read `Calendar.history_title` / `history_art`; they do not
+keep a fourth copy of the cutovers.
 
 Which calendar was in force depends on **where** and **when**:
 

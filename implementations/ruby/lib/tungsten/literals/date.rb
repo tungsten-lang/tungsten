@@ -46,8 +46,8 @@ module Tungsten
 
       def +(n)
         n = n.to_i
-        # Feb 30 1712 + 1 → Mar 1 1712; century-leap Feb 29 + 1 → Mar 1.
-        ::Date.new(year, month + 1, 1) + (n - 1)
+        return self if n.zero?
+        raise Tungsten::Error, "calendar context required"
       end
 
       def -(n)
@@ -119,92 +119,47 @@ module Tungsten
     end
 
     def self.parse_civil(str)
-      if str.to_s =~ /\A(-?\d+)-(\d+)-(\d+)/
-        [$1.to_i, $2.to_i, $3.to_i]
-      elsif str.to_s =~ /\A(-?\d+)-(\d{3})\z/
-        ordinal_to_civil($1.to_i, $2.to_i)
-      else
-        d = ::Date.parse(str.to_s)
-        [d.year, d.month, d.day]
+      parse_fields(str)[0, 3]
+    end
+
+    # ISO date, ordinal YYYY-DDD, or datetime with offset. Time and tz are
+    # kept; offsets that are not a packed 15-minute step (or Amsterdam
+    # +00:20) are rejected, matching native w_date_parse.
+    def self.parse_fields(str)
+      text = str.to_s
+      if text =~ /\A(-?\d+)-(\d{3})\z/
+        y, m, d = ordinal_to_civil($1.to_i, $2.to_i)
+        return [y, m, d, 0, 0, 0, 0]
       end
-    end
-
-    HIST_SKIP = [
-      [1582, 10, 5, 14],
-      [1752, 9, 3, 13],
-      [1753, 2, 18, 28],
-      [1844, 12, 31, 31],
-      [1867, 10, 7, 17],
-      [1918, 2, 1, 13],
-      [1993, 8, 21, 21],
-      [2011, 12, 30, 30]
-    ].freeze
-    HIST_REPEAT = [[1892, 7, 4]].freeze
-
-    def self.month_length(year, month)
-      return 30 if month == 2 && year == 1712
-      return 29 if month == 2 && year >= 100 && year <= 1900 && (year % 100).zero? && (year % 400) != 0
-      ::Date.new(year, month, -1).day
-    rescue ArgumentError
-      28
-    end
-
-    def self.civil_skipped?(year, month, day)
-      HIST_SKIP.any? { |y, m, a, b| y == year && m == month && day >= a && day <= b }
-    end
-
-    def self.civil_repeat?(year, month, day)
-      HIST_REPEAT.any? { |y, m, d| y == year && m == month && d == day }
+      if text =~ /\A(-?\d+)-(\d+)-(\d+)(?:T(\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(?:Z|z|[+-]\d{1,2}(?::?\d{2})?)?)?\z/
+        y = $1.to_i
+        m = $2.to_i
+        d = $3.to_i
+        hour = ($4 || "0").to_i
+        min = ($5 || "0").to_i
+        sec = ($6 || "0").to_i
+        tz = $4 ? parse_iso_offset_minutes(text) : 0
+        return [y, m, d, hour, min, sec, tz]
+      end
+      d = ::Date.parse(text)
+      [d.year, d.month, d.day, 0, 0, 0, 0]
     end
 
     def self.ordinal_len(year)
-      n = ::Date.gregorian_leap?(year) ? 366 : 365
-      n += 1 if year == 1712
-      n += 1 if year >= 100 && year <= 1900 && (year % 100).zero? && (year % 400) != 0
-      n += HIST_REPEAT.count { |y, _, _| y == year }
-      HIST_SKIP.each { |y, _, a, b| n -= (b - a + 1) if y == year }
-      n
-    end
-
-    def self.advance_civil(year, month, day)
-      d = day + 1
-      m = month
-      loop do
-        return nil if m < 1 || m > 12
-        dim = month_length(year, m)
-        if d > dim
-          d = 1
-          m += 1
-          return nil if m > 12
-        elsif civil_skipped?(year, m, d)
-          d += 1
-        else
-          return [m, d]
-        end
-      end
+      ::Date.gregorian_leap?(year) ? 366 : 365
     end
 
     def self.ordinal_to_civil(year, n)
-      raise ArgumentError, "Date ordinal day is outside the requested year" if n < 1 || n > ordinal_len(year)
-      m = 1
-      d = 1
-      held = false
-      (1...n).each do
-        if !held && civil_repeat?(year, m, d)
-          held = true
-        else
-          held = false
-          nxt = advance_civil(year, m, d)
-          raise ArgumentError, "Date ordinal day is outside the requested year" unless nxt
-          m, d = nxt
-        end
-      end
-      [year, m, d]
+      raise Tungsten::Error, "Date ordinal day is outside the requested year" if n < 1 || n > ordinal_len(year)
+      d = ::Date.ordinal(year, n)
+      [d.year, d.month, d.day]
     end
 
     def self.ordinal(year, number)
-      y, m, d = ordinal_to_civil(year, number)
-      new(y, m, d)
+      y = year.to_i
+      raise Tungsten::Error, "Date year must be between -1024 and 3071" unless y.between?(-1024, 3071)
+      yy, m, d = ordinal_to_civil(y, number.to_i)
+      new(yy, m, d)
     end
 
     def self.make_value(year, month, day)
@@ -219,22 +174,20 @@ module Tungsten
       new(str)
     end
 
+    def self.today
+      t = ::Time.now
+      new(t.year, t.month, t.day)
+    end
+
     def self.in(name)
       Calendar.at(name)
     end
 
     def initialize(*args)
-      if args.length >= 3
-        @value = self.class.make_value(args[0].to_i, args[1].to_i, args[2].to_i)
-      elsif args.length == 1
-        value = args[0]
-        @value =
-          case value
-          when ::Date, CatchupDate then value
-          else
-            y, m, d = self.class.parse_civil(value.to_s)
-            self.class.make_value(y, m, d)
-          end
+      if args.length == 1 && !args[0].is_a?(Integer)
+        assign_from(args[0])
+      elsif args.length.between?(1, 7)
+        assign_civil(args[0], args[1] || 1, args[2] || 1, args[3] || 0, args[4] || 0, args[5] || 0, args[6] || 0)
       else
         raise ArgumentError, "Date.new expects a string or year, month, day"
       end
@@ -243,7 +196,12 @@ module Tungsten
     def year = @value.year
     def month = @value.month
     def day = @value.day
+    def hour = @hour
+    def minute = @minute
+    def second = @second
+    def tz = @tz
     def quarter = ((month - 1) / 3) + 1
+    def unresolved? = self.class.catchup?(year, month, day)
 
     def strftime(fmt)
       @value.strftime(fmt.to_s)
@@ -253,34 +211,45 @@ module Tungsten
       if fmt
         strftime(fmt)
       else
-        "#{strftime("%Y-%m-%d")}T00:00:00Z"
+        stamp = format("%04d-%02d-%02dT%02d:%02d:%02d", year, month, day, hour, minute, second)
+        off = tz
+        if off.zero?
+          "#{stamp}Z"
+        else
+          sign = off.negative? ? "-" : "+"
+          mag = off.abs
+          format("%s%s%02d:%02d", stamp, sign, mag / 60, mag % 60)
+        end
       end
     end
 
     def +(other)
       case other
       when Duration
+        require_calendar unless duration_zero?(other)
         base = calendar_date
         shifted = other.apply_months(base)
         if other.seconds.nil? || other.seconds == 0
-          Date.new(shifted.is_a?(::Date) ? shifted : shifted.to_date)
+          with_clock(shifted.is_a?(::Date) ? shifted : shifted.to_date)
         else
           date_or_datetime(shifted.to_datetime + Rational(other.seconds, 86400))
         end
       when Quantity
+        require_calendar unless quantity_zero?(other)
         if (months = calendar_months(other))
-          Date.new(calendar_date >> months)
+          with_clock(calendar_date >> months)
         else
           seconds = quantity_to_seconds(other)
           if seconds % 86400 == 0
-            Date.new(calendar_date + (seconds / 86400).to_i)
+            shift_civil_days((seconds / 86400).to_i)
           else
             date_or_datetime(calendar_date.to_datetime + Rational(seconds, 86400))
           end
         end
       when Integer
-        Date.new(calendar_date + other)
+        shift_civil_days(other)
       else
+        require_calendar
         Date.new(@value + other)
       end
     end
@@ -291,26 +260,40 @@ module Tungsten
         self + Duration.new(-other.months, -other.seconds)
       when Quantity
         if (months = calendar_months(other))
-          Date.new(calendar_date >> -months)
+          require_calendar unless months.zero?
+          with_clock(calendar_date >> -months)
         else
           seconds = quantity_to_seconds(other)
           if seconds % 86400 == 0
-            Date.new(calendar_date - (seconds / 86400).to_i)
+            shift_civil_days(-(seconds / 86400).to_i)
           else
+            require_calendar unless seconds.zero?
             date_or_datetime(calendar_date.to_datetime - Rational(seconds, 86400))
           end
         end
       when Date
+        require_calendar
+        other.require_calendar
         (calendar_date - other.send(:calendar_date)).to_i
       when Integer
-        Date.new(calendar_date - other)
+        shift_civil_days(-other)
       else
+        require_calendar
         Date.new(@value - other)
       end
     end
 
-    def succ = Date.new(calendar_date + 1)
-    def <=>(other) = calendar_date <=> (other.is_a?(Date) ? other.send(:calendar_date) : other)
+    def succ = shift_civil_days(1)
+    def <=>(other)
+      mine = [year, month, day, hour, minute, second, tz]
+      theirs =
+        if other.is_a?(Date)
+          [other.year, other.month, other.day, other.hour, other.minute, other.second, other.tz]
+        else
+          [other.year, other.month, other.day, 0, 0, 0, 0]
+        end
+      mine <=> theirs
+    end
 
     def short = @value.strftime("%a, %b %-d, %Y")
 
@@ -325,7 +308,88 @@ module Tungsten
       @value.strftime("%A, %B %-d") + suffix + @value.strftime(", %Y")
     end
 
+    def require_calendar
+      raise Tungsten::Error, "calendar context required" if unresolved?
+    end
+
     private
+
+    def assign_from(value)
+      case value
+      when Date
+        assign_civil(value.year, value.month, value.day, value.hour, value.minute, value.second, value.tz)
+      when CatchupDate
+        assign_civil(value.year, value.month, value.day, 0, 0, 0, 0)
+      when ::DateTime
+        tz_min = (value.offset * 24 * 60).to_i
+        assign_civil(value.year, value.month, value.day, value.hour, value.min, value.sec, tz_min)
+      when ::Date
+        assign_civil(value.year, value.month, value.day, 0, 0, 0, 0)
+      else
+        assign_civil(*self.class.parse_fields(value.to_s))
+      end
+    end
+
+    def assign_civil(year, month, day, hour = 0, minute = 0, second = 0, tz = 0)
+      y = year.to_i
+      m = month.to_i
+      d = day.to_i
+      h = hour.to_i
+      min = minute.to_i
+      sec = second.to_i
+      tz_min = tz.to_i
+      unless y.between?(-1024, 3071)
+        raise Tungsten::Error, "Date year must be between -1024 and 3071"
+      end
+      unless d.between?(1, 31)
+        raise Tungsten::Error, "Date day is outside the requested month"
+      end
+      unless h.between?(0, 23) && min.between?(0, 59) && sec.between?(0, 60)
+        raise Tungsten::Error, "Date time must be within 00:00:00 and 23:59:60"
+      end
+      unless self.class.packed_tz?(tz_min)
+        raise Tungsten::Error, "Date timezone must be a 15-minute offset, or Amsterdam +00:20"
+      end
+      if sec == 60 && !self.class.utc_leap_second?(y, m, d, h, min, sec, tz_min)
+        raise Tungsten::Error,
+              "Second 60 is only valid as a UTC leap second (23:59:60 on a known leap-second date)"
+      end
+      @value = self.class.make_value(y, m, d)
+      @hour = h
+      @minute = min
+      @second = sec
+      @tz = tz_min
+    end
+
+    def shift_civil_days(n)
+      n = n.to_i
+      return self if n.zero?
+
+      require_calendar
+      shifted = calendar_date + n
+      with_clock(shifted)
+    end
+
+    def with_clock(civil)
+      sec = second
+      if sec == 60 &&
+         !self.class.utc_leap_second?(civil.year, civil.month, civil.day, hour, minute, 60, tz)
+        sec = 59
+      end
+      Date.new(civil.year, civil.month, civil.day, hour, minute, sec, tz)
+    end
+
+    def duration_zero?(other)
+      other.months.to_i.zero? && (other.seconds.nil? || other.seconds == 0)
+    end
+
+    def quantity_zero?(other)
+      if (months = calendar_months(other))
+        months.zero?
+      else
+        quantity_to_seconds(other).zero?
+      end
+    end
 
     def calendar_date
       case @value

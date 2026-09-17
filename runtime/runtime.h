@@ -684,6 +684,7 @@ WValue w_color(uint8_t r, uint8_t g, uint8_t b, uint8_t a);
 WValue w_date(int year, int month, int day, int hour, int min, int sec, int tz);
 WValue w_date_new_w(WValue year, WValue month, WValue day, WValue hour,
                     WValue min, WValue sec, WValue tz);
+WValue w_date_from_ordinal(WValue year, WValue day_of_year);
 WValue w_date_today(void);
 WValue w_ipv4(uint8_t a, uint8_t b, uint8_t c, uint8_t d, int cidr);
 WValue w_ipv4_parse(WValue str_v);

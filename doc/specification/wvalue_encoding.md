@@ -580,7 +580,7 @@ Calendar date with time and timezone:
 
 ```
 bits 47-45: 100 (subtype)
-bits 44-33: year (12 bits, stored as year−1024, civil −1024…3071)
+bits 44-33: year (12 bits unsigned, stored as year+1024, civil −1024…3071)
 bits 32-29: month (4 bits, 1-12)
 bits 28-24: day (5 bits, 1-31)
 bits 23-19: hour (5 bits, 0-23)

@@ -87,15 +87,53 @@ check("ordinal 1867-250", 1867-250, Date.new(1867, 9, 7))
 check("ordinal Date.ordinal", Date.ordinal(1867, 250), Date.new(1867, 9, 7))
 check("ordinal 1867-250 month", (1867-250).month, 9)
 check("ordinal 1867-250 day", (1867-250).day, 7)
-check("sweden ordinal 61 is Feb 30", 1712-061, Date.new(1712, 2, 30))
-check("sweden Feb 29 + 1", 1712-02-29 + 1, 1712-02-30)
-check("sweden Feb 30 + 1", 1712-02-30 + 1, 1712-03-01)
-check("samoa first July 4", 1892-186, Date.new(1892, 7, 4))
-check("samoa repeated July 4", 1892-187, Date.new(1892, 7, 4))
-check("samoa same date twice", 1892-186, 1892-187)
-check("samoa day after the pair", 1892-188, Date.new(1892, 7, 5))
-check("alaska last Friday Julian", 1867-279, Date.new(1867, 10, 6))
-check("alaska next local midnight", 1867-280, Date.new(1867, 10, 18))
+check("gregorian 1712-061 is Mar 1", 1712-061, Date.new(1712, 3, 1))
+check("gregorian Feb 29 1712 + 1", 1712-02-29 + 1, 1712-03-01)
+check("bare Feb 30 + 0 preserved", 1712-02-30 + 0, 1712-02-30)
+feb30_shift = false
+begin
+  1712-02-30 + 1
+rescue error
+  feb30_shift = true
+check("bare Feb 30 + 1 needs calendar", feb30_shift, true)
+feb30_wday = false
+begin
+  (1712-02-30).wday
+rescue error
+  feb30_wday = true
+check("bare Feb 30 wday needs calendar", feb30_wday, true)
+check("sweden Feb 29 + 1 is Feb 30", Date.in("Sweden").parse("1712-02-29") + 1, Date.parse("1712-02-30"))
+check("sweden Feb 30 + 1 is Mar 1", Date.in("Sweden").parse("1712-02-30") + 1, Date.parse("1712-03-01"))
+check("samoa 186 is July 4", 1892-186, Date.new(1892, 7, 4))
+check("samoa 187 is July 5", 1892-187, Date.new(1892, 7, 5))
+check("alaska 279 is Oct 6", 1867-279, Date.new(1867, 10, 6))
+check("alaska 280 is Oct 7", 1867-280, Date.new(1867, 10, 7))
+check("samoa skip is not global", Date.ordinal(2011, 364), Date.new(2011, 12, 30))
+check("samoa 365 is Dec 31", Date.ordinal(2011, 365), Date.new(2011, 12, 31))
+nye = Date.new(2011, 12, 31)
+check("ordinal inverts day_of_year", Date.ordinal(2011, nye.day_of_year), nye)
+check("1752 leap nye ordinal", Date.ordinal(1752, Date.new(1752, 12, 31).day_of_year), Date.new(1752, 12, 31))
+check("1700 nye ordinal", Date.ordinal(1700, Date.new(1700, 12, 31).day_of_year), Date.new(1700, 12, 31))
+ord_1700_366 = false
+begin
+  Date.ordinal(1700, 366)
+rescue error
+  ord_1700_366 = true
+check("1700 has 365 Gregorian days", ord_1700_366, true)
+
+wrap_year = false
+begin
+  Date.ordinal(3072, 1)
+rescue error
+  wrap_year = true
+check("ordinal year 3072 rejected", wrap_year, true)
+
+wide_day = false
+begin
+  Date.new(2024, 1, 4294967297)
+rescue error
+  wide_day = true
+check("wide day rejected before pack", wide_day, true)
 
 leap_sec = Date.parse("2016-12-31T23:59:60Z")
 check("leap second literal", 2016-12-31T23:59:60Z, leap_sec)
@@ -133,6 +171,25 @@ rescue error
 check("non-UTC leap second rejected", offset_leap, true)
 
 check("amsterdam +00:20 packed", Date.parse("1937-07-01T12:00:00+00:20").tz, 20)
+
+check("midnight + 1s rolls over", 2024-01-15T23:59:59Z + 1s, Date.parse("2024-01-16T00:00:00Z"))
+check("90s crosses midnight", 2024-01-15T23:59:00Z + 90s, Date.parse("2024-01-16T00:00:30Z"))
+check("midnight - 1s", 2024-01-16T00:00:00Z - 1s, Date.parse("2024-01-15T23:59:59Z"))
+
+leap = Date.parse("2016-12-31T23:59:60Z")
+check("leap + 0s stays 60", (leap + 0s).second, 60)
+check("leap + 0s stays the day", (leap + 0s).day, 31)
+check("leap 23:59:59 + 1s is leap second", 2016-12-31T23:59:59Z + 1s, leap)
+check("leap + 1s is next midnight", (leap + 1s), Date.parse("2017-01-01T00:00:00Z"))
+next_day = leap + 1
+check("leap + 1 day year", next_day.year, 2017)
+check("leap + 1 day month", next_day.month, 1)
+check("leap + 1 day day", next_day.day, 1)
+check("leap + 1 day hour", next_day.hour, 23)
+check("leap + 1 day minute", next_day.minute, 59)
+check("leap + 1 day drops invalid :60", next_day.second, 59)
+check("leap + 1day quantity", (leap + 1day).second, 59)
+check("leap + 1day not packable as :60", (leap + 1).second != 60, true)
 
 not_june_2016 = false
 begin

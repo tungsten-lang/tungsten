@@ -575,7 +575,7 @@ so on. Division by a runtime zero raises `ZeroDivisionError` instead.
 ## E_LOWER_DATE_INVALID_YEAR
 
 A date literal's year is outside the packed range −1024…3071 (12-bit field
-stored as year−1024).
+stored as year+1024).
 
 **Fix:** Use a year in that range, or `Instant` / Julian day for farther dates.
 

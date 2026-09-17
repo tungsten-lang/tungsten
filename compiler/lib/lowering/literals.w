@@ -863,6 +863,8 @@
   year = parts[0].to_i()
   month = 0
   day = 0
+  if year < -1024 || year > 3071
+    raise compile_error_for_node(:E_LOWER_DATE_INVALID_YEAR, "Date year must be between -1024 and 3071: " + raw, ctx[:source_path], node)
   if parts.size() == 3
     month = parts[1].to_i()
     day = parts[2].to_i()
@@ -967,15 +969,10 @@
     return true
   false
 
-# Keep in lockstep with runtime.c days_in_month / HIST_SKIP / HIST_REPEAT.
 -> date_gregorian_leap(year)
   (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
 
 -> date_month_length(year, month)
-  if month == 2 && year == 1712
-    return 30
-  if month == 2 && year >= 100 && year <= 1900 && year % 100 == 0 && year % 400 != 0
-    return 29
   if month == 2
     if date_gregorian_leap(year)
       return 29
@@ -984,96 +981,26 @@
     return 30
   31
 
--> date_civil_skipped(year, month, day)
-  if year == 1582 && month == 10 && day >= 5 && day <= 14
-    return true
-  if year == 1752 && month == 9 && day >= 3 && day <= 13
-    return true
-  if year == 1753 && month == 2 && day >= 18 && day <= 28
-    return true
-  if year == 1844 && month == 12 && day == 31
-    return true
-  if year == 1867 && month == 10 && day >= 7 && day <= 17
-    return true
-  if year == 1918 && month == 2 && day >= 1 && day <= 13
-    return true
-  if year == 1993 && month == 8 && day == 21
-    return true
-  if year == 2011 && month == 12 && day == 30
-    return true
-  false
-
--> date_civil_repeat(year, month, day)
-  year == 1892 && month == 7 && day == 4
-
 -> date_ordinal_len(year)
-  n = 365
   if date_gregorian_leap(year)
-    n = 366
-  if year == 1712
-    n = n + 1
-  elsif year >= 100 && year <= 1900 && year % 100 == 0 && year % 400 != 0
-    n = n + 1
-  if year == 1892
-    n = n + 1
-  if year == 1582
-    n = n - 10
-  if year == 1752
-    n = n - 11
-  if year == 1753
-    n = n - 11
-  if year == 1844
-    n = n - 1
-  if year == 1867
-    n = n - 11
-  if year == 1918
-    n = n - 13
-  if year == 1993
-    n = n - 1
-  if year == 2011
-    n = n - 1
-  n
+    return 366
+  365
 
--> date_advance_civil(year, month, day)
-  d = day + 1
-  m = month
-  while true
-    if m < 1 || m > 12
-      return nil
-    dim = date_month_length(year, m)
-    if d > dim
-      d = 1
-      m = m + 1
-      if m > 12
-        return nil
-    elsif date_civil_skipped(year, m, d)
-      d = d + 1
-    else
-      return [m, d]
-  nil
-
-# Local midnight number n (1-based) → [month, day]. Repeated midnights
-# (Samoa 1892-07-04) return the same civil date for two consecutive n.
+# YYYY-DDD → [month, day] in proleptic Gregorian. Historical skips/repeats
+# belong on Date.in, not the packed ordinal.
 -> ordinal_to_civil(year, n)
   len = date_ordinal_len(year)
   if n < 1 || n > len
     return nil
   m = 1
-  d = 1
-  held = false
-  i = 1
-  while i < n
-    if !held && date_civil_repeat(year, m, d)
-      held = true
-    else
-      held = false
-      nxt = date_advance_civil(year, m, d)
-      if nxt == nil
-        return nil
-      m = nxt[0]
-      d = nxt[1]
-    i = i + 1
-  [m, d]
+  d = n
+  while m <= 12
+    dim = date_month_length(year, m)
+    if d <= dim
+      return [m, d]
+    d = d - dim
+    m = m + 1
+  nil
 
 -> validate_date(year, month, day, raw, ctx, node)
   if year < -1024 || year > 3071

@@ -1407,128 +1407,12 @@ INSP_RESULT_VALUE_LIMIT = 240
       return "New Year's Eve"
     ""
 
-  # Historical catch-up days that are invalid Gregorian but were civil
-  # locally. Title is the subheader; the body is the right-hand panel.
+  # Historical catch-up / cutover copy lives on Calendar (one skip list).
   -> insp_history_title(yr, mo, dy, ss)
-    if ss == 60
-      return "UTC leap second"
-    if yr == 1712 && mo == 2 && dy == 30
-      return "tillökningsdagen"
-    if mo == 2 && dy == 29 && yr >= 100 && yr <= 1900 && yr % 100 == 0 && yr % 400 != 0
-      return "Julian century leap"
-    if yr == 1892 && mo == 7 && dy == 4
-      return "Samoa's two Independences"
-    if yr == 1867 && mo == 10 && (dy == 6 || dy == 18)
-      return "Alaska Purchase"
-    if yr == 1844 && mo == 12 && dy == 30
-      return "Clavería skipped New Year's Eve"
-    if yr == 1752 && mo == 9 && (dy == 2 || dy == 14)
-      return "Chesterfield's Act"
-    if yr == 1582 && mo == 10 && (dy == 4 || dy == 15)
-      return "Inter gravissimas"
-    if yr == 1700 && mo == 2 && dy == 18
-      return "Denmark–Norway new style"
-    if yr == 1753 && mo == 2 && dy == 17
-      return "Swedish new style"
-    if yr == 1918 && mo == 2 && (dy == 1 || dy == 14) || (yr == 1918 && mo == 1 && dy == 31)
-      return "Soviet calendar decree"
-    if yr == 2011 && mo == 12 && (dy == 29 || dy == 31)
-      return "Samoa skipped a Friday"
-    ""
+    Calendar.history_title(yr, mo, dy, ss)
 
   -> insp_history_art(yr, mo, dy, ss)
-    if ss == 60
-      return [
-        "IERS inserted a positive leap",
-        "second: 23:59:60 UTC. Packed",
-        "Date stores second 60; parse",
-        "rejects any other :60. POSIX",
-        "clocks often repeat 00:00:00."
-      ]
-    if yr == 1712 && mo == 2 && dy == 30
-      return [
-        "Charles XII added a second",
-        "leap day (tillökningsdagen)",
-        "after a botched gradual",
-        "Gregorian conversion.",
-        "Year had 367 days."
-      ]
-    if mo == 2 && dy == 29 && yr >= 100 && yr <= 1900 && yr % 100 == 0 && yr % 400 != 0
-      return [
-        "Gregorian skips century years",
-        "not divisible by 400.",
-        "Julian jurisdictions still",
-        "had 29 February — Britain",
-        "until 1752, Russia until 1918."
-      ]
-    if yr == 1892 && mo == 7 && dy == 4
-      return [
-        "Samoa kept the American day-",
-        "count by living Monday 4 July",
-        "twice. 1892-186 and 1892-187",
-        "are the same civil date."
-      ]
-    if yr == 1867 && mo == 10 && (dy == 6 || dy == 18)
-      return [
-        "Sitka went to bed Friday 6 Oct",
-        "(Julian) and woke Friday 18 Oct",
-        "(Gregorian): calendar + date",
-        "line. 1867-279 → 6th, 1867-280",
-        "→ 18th — eleven labels skipped."
-      ]
-    if yr == 1844 && mo == 12 && dy == 30
-      return [
-        "Governor Clavería jumped the",
-        "Philippines to the Asian date.",
-        "30 Dec was followed by 1 Jan;",
-        "1844-365 does not exist there."
-      ]
-    if yr == 1752 && mo == 9 && (dy == 2 || dy == 14)
-      return [
-        "Britain skipped 3–13 September.",
-        "2 Sep was followed by 14 Sep.",
-        "Proleptic Gregorian still names",
-        "the missing days; ordinals here",
-        "count local midnights."
-      ]
-    if yr == 1582 && mo == 10 && (dy == 4 || dy == 15)
-      return [
-        "Gregory XIII: Thursday 4 Oct",
-        "was followed by Friday 15 Oct.",
-        "Ten days (5–14) never existed",
-        "in Rome, Spain, Portugal.",
-        "Date.in(\"Rome\") rejects them."
-      ]
-    if yr == 1700 && mo == 2 && dy == 18
-      return [
-        "Denmark–Norway: Sunday 18 Feb",
-        "was followed by Monday 1 Mar.",
-        "Skipped 19–29 Feb (11 days,",
-        "including the Julian leap).",
-        "Date.in(\"Denmark\") knows this."
-      ]
-    if yr == 1753 && mo == 2 && dy == 17
-      return [
-        "Sweden: 17 Feb followed by",
-        "1 Mar. Skipped 18–28 Feb",
-        "(11 days), after the 1700–1712",
-        "false start. Finland too."
-      ]
-    if yr == 1918 && ((mo == 1 && dy == 31) || (mo == 2 && (dy == 1 || dy == 14)))
-      return [
-        "Sovnarkom: 31 Jan 1918 was",
-        "followed by 14 Feb (13 days).",
-        "Civil Russia is Gregorian;",
-        "the Orthodox church still",
-        "uses Julian (Christmas 7 Jan)."
-      ]
-    if yr == 2011 && mo == 12 && (dy == 29 || dy == 31)
-      return [
-        "Samoa skipped Friday 30 Dec to",
-        "join the Asian day-count.",
-        "29 Dec was followed by 31 Dec."
-      ]
-    []
+    Calendar.history_art(yr, mo, dy, ss)
 
   -> insp_christmas_tree
     g = "32"
@@ -1706,8 +1590,6 @@ INSP_RESULT_VALUE_LIMIT = 240
     diy = 365
     if isleap
       diy = 366
-    if yr == 1712
-      diy = 367
     wday1 = ((wd - (dy - 1)) % 7 + 7) % 7
     ins("")
     ins(insp_header(yr, mo, dy, wd, yday, cwk, diy))

@@ -2193,10 +2193,35 @@ if artifact_targets.size > 0
     << "    " + GREEN + "built" + RESET + " " + project_relative_path(out_bin)
     ai = ai + 1
 
-# ── Bits ────────────────────────────────────────────────────────
+# ── Compiler images ─────────────────────────────────────────────
+# The REPL (bin/wit) and Metal images are products of this build, never of a
+# launch: delegate_compiler_image only execs what is built here. Each goes
+# through the ordinary incremental compile, so an unchanged image is a
+# link-cache hit (~0.3s) and a changed one is one native compile.
 
 t3 = t_runtime_start
 t4 = t_runtime_end
+
+images_built = 0
+if !stage0_only && !bit_only
+  << ""
+  << BOLD + "==> Compiler images" + RESET
+  image_kinds = ["repl", "metal"]
+  ii = 0
+  while ii < image_kinds.size
+    kind = image_kinds[ii]
+    ii = ii + 1
+    image_log = "/tmp/tungsten-build-image-" + kind + ".log"
+    image_cmd = "cd " + shq(ROOT) + " && TUNGSTEN_ROOT=" + shq(ROOT) + " " + toolchain_env_prefix + shq(COMPILER_BIN) + " build-image " + kind + " > " + shq(image_log) + " 2>&1"
+    t_image = clock_ms()
+    if sh_ok(image_cmd)
+      << "    " + GREEN + "built" + RESET + "   build/cache/compiler-images/tungsten-" + kind + " " + DIM + ms(clock_ms() - t_image) + RESET
+      images_built = images_built + 1
+    else
+      eputs(RED + "failed to build the " + kind + " compiler image (see " + image_log + ")" + RESET)
+      exit(1)
+
+# ── Bits ────────────────────────────────────────────────────────
 
 bit_clang_opt = env_or_empty("TUNGSTEN_BITS_CLANG_OPT")
 if bit_clang_opt == ""

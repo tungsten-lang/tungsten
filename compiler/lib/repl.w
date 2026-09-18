@@ -41,9 +41,6 @@ HL_CONST   = "\e\[1;38;5;179m"   # Constant/Symbol/nil/self   — bold 179
 HL_KEYWORDS = ["if", "else", "elsif", "unless", "case", "when", "then", "while", "until", "do", "begin", "rescue", "ensure", "return", "break", "continue", "next", "use", "load", "require", "trait", "is", "as", "in", "and", "not", "or", "xor", "super", "yield", "raise", "error", "throw", "module", "with", "always", "redo", "retry", "fn", "ro", "rw", "wo", "static", "for", "switch", "const", "struct", "typedef", "sizeof", "goto", "default", "union", "enum", "extern", "inline", "volatile", "unsigned", "signed", "void", "int", "char", "size_t", "uint8_t", "int64_t", "uint64_t", "uint32_t", "int32_t", "bool"]
 
 # Date-inspector tables (port of inspection.rb's date scene — `? <date>`).
-INSP_DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
-INSP_MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
-INSP_CAL_WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
 INSP_OBJECT_FIELD_LIMIT = 12
 INSP_COLLECTION_PREVIEW_LIMIT = 6
 INSP_FIELD_VALUE_LIMIT = 120
@@ -732,8 +729,31 @@ INSP_RESULT_VALUE_LIMIT = 240
         v = 255
       rep = v.to_s()
     else
-      rep = ccall("w_date_scrub", "" + text, mag, delta)
+      # Month/year steps aim at the day-of-month the run started on, so
+      # Mar 30 → Feb 29 → Jan 30 and back to Mar 30; a short month only
+      # clamps the display. A day step (or a field change, see the scrub
+      # loop) clears the anchor so the next run re-anchors where it starts.
+      if mag == 0
+        @scrub_anchor = 0
+      elsif @scrub_anchor == 0
+        @scrub_anchor = scrub_day_of(text)
+      # w_date_scrub takes raw int64 unit/delta. Untyped parameters are boxed
+      # WValues, whose tag bits read as an enormous shift and trip the range
+      # guard in date_add_days, so unbox explicitly at the ccall boundary.
+      unit = mag ## i64
+      steps = delta ## i64
+      anchor = @scrub_anchor ## i64
+      rep = ccall("w_date_scrub", "" + text, unit, steps, anchor)
     src.slice(0, start) + rep + src.slice(start + flen, src.size() - (start + flen))
+
+  # Day-of-month of a YYYY-MM-DD[Thh:mm:ss] scrub field; 0 for the other
+  # date shapes (month, time, ordinal), which have no day to anchor.
+  -> scrub_day_of(text)
+    if text.size() < 10
+      return 0
+    if text.slice(4, 1) != "-" || text.slice(7, 1) != "-"
+      return 0
+    text.slice(8, 2).to_i()
 
   -> scrub_nxt(cur, count)
     if count == 0
@@ -1323,11 +1343,6 @@ INSP_RESULT_VALUE_LIMIT = 240
   # plus the name tables above (core/date.w's bodied strftime isn't loadable
   # yet). Layout is codepoint-aware (DATE_SCENE_WIDTH=80, right column=42).
 
-  -> insp_pad(n)
-    if n <= 0
-      return ""
-    " " * n
-
   -> insp_pad2(n)
     if n < 10
       return "0" + n.to_s()
@@ -1349,143 +1364,6 @@ INSP_RESULT_VALUE_LIMIT = 240
         i = i + 1
     out.chars().size()
 
-  -> insp_ansi(text, code)
-    "\e\[" + code + "m" + text + "\e\[0m"
-
-  -> insp_ordinal(day)
-    m100 = day % 100
-    if m100 >= 11 && m100 <= 13
-      return "th"
-    m10 = day % 10
-    if m10 == 1
-      return "st"
-    if m10 == 2
-      return "nd"
-    if m10 == 3
-      return "rd"
-    "th"
-
-  -> insp_season_idx(mo, dy)
-    md = mo * 100 + dy
-    if md >= 320 && md <= 620
-      return 0
-    if md >= 621 && md <= 921
-      return 1
-    if md >= 922 && md <= 1220
-      return 2
-    3
-
-  -> insp_season_rail(idx)
-    if idx == 0
-      return "\[✿\] ☀  ☙  ❄"
-    if idx == 1
-      return "✿ \[☀\] ☙  ❄"
-    if idx == 2
-      return "✿  ☀ \[☙\] ❄"
-    "✿  ☀  ☙ \[❄\]"
-
-  # Holiday name (no icon) for the subheader, or "" if none. Fixed-date only
-  # for now (floating MLK/Easter/Thanksgiving deferred).
-  -> insp_holiday(mo, dy)
-    if mo == 1 && dy == 1
-      return "New Year's Day"
-    if mo == 2 && dy == 14
-      return "Valentine's Day"
-    if mo == 3 && dy == 14
-      return "Pi Day"
-    if mo == 3 && dy == 17
-      return "St. Patrick's Day"
-    if mo == 6 && dy == 19
-      return "Juneteenth"
-    if mo == 7 && dy == 4
-      return "Independence Day"
-    if mo == 10 && dy == 31
-      return "Halloween"
-    if mo == 12 && dy == 25
-      return "Christmas"
-    if mo == 12 && dy == 31
-      return "New Year's Eve"
-    ""
-
-  # Historical catch-up / cutover copy lives on Calendar (one skip list).
-  -> insp_history_title(yr, mo, dy, ss)
-    Calendar.history_title(yr, mo, dy, ss)
-
-  -> insp_history_art(yr, mo, dy, ss)
-    Calendar.history_art(yr, mo, dy, ss)
-
-  -> insp_christmas_tree
-    g = "32"
-    [insp_ansi(" o", "31") + "--" + insp_ansi("o", "33") + "--" + insp_ansi("o", "32") + "--" + insp_ansi("o", "36") + "--" + insp_ansi("o", "35") + "--" + insp_ansi("o", "31") + "--" + insp_ansi("o", "33") + "--" + insp_ansi("o", "32"),
-     "                         " + insp_ansi("*", "33"),
-     "                        " + insp_ansi("/_\\", g),
-     "                       " + insp_ansi("/_", g) + insp_ansi("o", "31") + insp_ansi("_\\", g),
-     "                      " + insp_ansi("/_", g) + insp_ansi("o", "33") + insp_ansi("_", g) + insp_ansi("o", "31") + insp_ansi("_\\", g),
-     "                     " + insp_ansi("/_", g) + insp_ansi("o", "31") + insp_ansi("_", g) + insp_ansi("o", "33") + insp_ansi("_", g) + insp_ansi("o", "36") + insp_ansi("_\\", g),
-     "                    " + insp_ansi("/_________\\", g),
-     "                        " + insp_ansi("|_|", "38;5;94")]
-
-  -> insp_fourth_of_july
-    r = "31"
-    w = "37"
-    b = "34"
-    ["  " + insp_ansi("\\|/", r) + "           " + insp_ansi("\\|/", w) + "                " + insp_ansi("\\|/", b),
-     " " + insp_ansi("--", r) + insp_ansi("+", w) + insp_ansi("--", r) + "        " + insp_ansi("--", w) + insp_ansi("+", r) + insp_ansi("--", w) + "              " + insp_ansi("--", b) + insp_ansi("+", w) + insp_ansi("--", b),
-     "  " + insp_ansi("/|\\", r) + "           " + insp_ansi("/|\\", w) + "                " + insp_ansi("/|\\", b)]
-
-  -> insp_holiday_art(mo, dy)
-    if mo == 12 && dy == 25
-      return insp_christmas_tree()
-    if mo == 7 && dy == 4
-      return insp_fourth_of_july()
-    []
-
-  # Splice `text` over buf[col, len(text)] (ASCII-only buffer → byte == col).
-  -> insp_splice(buf, col, text)
-    tl = text.size()
-    buf.slice(0, col) + text + buf.slice(col + tl, buf.size() - (col + tl))
-
-  # Month calendar lines (33 wide), the current day boxed with [DD].
-  -> insp_calendar(wday1, curday, dim)
-    lines = []
-    hdr = ""
-    wi = 0
-    while wi < 7
-      hdr = hdr + INSP_CAL_WEEKDAYS[wi]
-      if wi < 6
-        hdr = hdr + "   "
-      wi = wi + 1
-    lines.push(hdr)
-    lines.push("-" * 33)
-    buf = " " * 33
-    wd = wday1
-    d = 1
-    while d <= dim
-      col = wd * 5
-      text = insp_pad2(d)
-      buf = insp_splice(buf, col, text)
-      if d == curday
-        if col == 0
-          buf = insp_splice(buf, 0, "\[" + text + "\]")
-        else
-          buf = insp_splice(buf, col - 1, "\[")
-          buf = insp_splice(buf, col + 2, "\]")
-      if wd == 6
-        lines.push(insp_rstrip(buf))
-        buf = " " * 33
-      d = d + 1
-      wd = wd + 1
-      if wd > 6
-        wd = 0
-    if insp_rstrip(buf).size() > 0
-      lines.push(insp_rstrip(buf))
-    # A 5-week month leaves the calendar one date-row shorter than a 6-week one
-    # (and than the 8-line holiday art); pad a trailing blank so the block lines
-    # up. lines = header + separator + week rows, so 5 weeks ⇒ size 7.
-    if lines.size() == 7
-      lines.push("")
-    lines
-
   -> insp_rstrip(s)
     n = s.size()
     while n > 0 && s.slice(n - 1, 1) == " "
@@ -1494,28 +1372,6 @@ INSP_RESULT_VALUE_LIMIT = 240
 
   -> insp_iso(yr, mo, dy)
     yr.to_s() + "-" + insp_pad2(mo) + "-" + insp_pad2(dy)
-
-  -> insp_header(yr, mo, dy, wd, yday, cwk, diy)
-    title = INSP_DAY_NAMES[wd] + ", " + INSP_MONTH_NAMES[mo - 1] + " " + dy.to_s() + insp_ordinal(dy) + ", " + yr.to_s()
-    daywk = "\[Day " + yday.to_s() + "/" + diy.to_s() + "\] Week " + cwk.to_s()
-    rail = insp_season_rail(insp_season_idx(mo, dy))
-    statscol = 80 - insp_vlen(daywk)
-    seasoncol = (80 - insp_vlen(rail)) / 2 + 4
-    leftb = insp_vlen(title) + 2
-    rightb = statscol - insp_vlen(rail) - 2
-    if seasoncol < leftb
-      seasoncol = leftb
-    if seasoncol > rightb
-      seasoncol = rightb
-    line = title
-    line = line + insp_pad(seasoncol - insp_vlen(line)) + rail
-    line = line + insp_pad(statscol - insp_vlen(line)) + daywk
-    line
-
-  -> insp_scene_cols(left, right)
-    if right == ""
-      return left
-    left + insp_pad(42 - insp_vlen(left)) + right
 
   # WValue bit-field breakdown panel (port of inspection.rb format_wvalue_
   # breakdown + packed_breakdown for a date). Raw hex/binary come from the
@@ -1574,57 +1430,16 @@ INSP_RESULT_VALUE_LIMIT = 240
       return "Tungsten::" + tn
     tn
 
-  # The date SCENE only (header / season rail / calendar / art). The result+type
-  # header and the u0x breakdown are now universal (handle_inspect/insp_breakdown).
+  # The date SCENE only (header / season rail / calendar / art). Rendered by
+  # compiler/lib/wit/scenes/date.w, which the Ruby REPL evaluates too, so the scene is
+  # written once. The result+type header and the u0x breakdown are
+  # universal (handle_inspect/insp_breakdown).
   -> inspect_date_scene(v)
-    yr = v.year
-    mo = v.month
-    dy = v.day
-    wd = v.wday
-    yday = v.day_of_year
-    cwk = v.cweek
-    dim = v.days_in_month
-    if dy > dim
-      dim = dy
-    isleap = v.leap?
-    diy = 365
-    if isleap
-      diy = 366
-    wday1 = ((wd - (dy - 1)) % 7 + 7) % 7
-    ins("")
-    ins(insp_header(yr, mo, dy, wd, yday, cwk, diy))
-    # Always emit the holiday/history subheader line — blank when neither —
-    # so the calendar stays put and the scrub line count is constant as the
-    # date crosses in/out of a holiday (mirrors inspection.rb).
-    sub = insp_history_title(yr, mo, dy, v.second)
-    if sub == ""
-      sub = insp_holiday(mo, dy)
-    ins(sub)
-    ins("")
-    cal = insp_calendar(wday1, dy, dim)
-    hist = insp_history_art(yr, mo, dy, v.second)
-    art = []
-    if hist.size() > 0
-      hi = 0
-      while hi < hist.size()
-        art.push(DIM + hist[hi] + RESET)
-        hi = hi + 1
-    else
-      art = insp_holiday_art(mo, dy)
-    maxl = cal.size()
-    if art.size() > maxl
-      maxl = art.size()
+    lines = DateScene.scene(v.year, v.month, v.day, v.second)
     i = 0
-    while i < maxl
-      l = ""
-      if i < cal.size()
-        l = cal[i]
-      r = ""
-      if i < art.size()
-        r = art[i]
-      ins(insp_scene_cols(l, r))
+    while i < lines.size()
+      ins(lines[i])
       i = i + 1
-    ins("")
 
   # jumpback > 0 means the prior `? expr` inspection (that many lines) is right
   # above the prompt; move the cursor up over it so the scrub repaints in place.
@@ -1642,6 +1457,7 @@ INSP_RESULT_VALUE_LIMIT = 240
     cursor = spans.size() - 1
     page = 0
     @scrub_lines = 0
+    @scrub_anchor = 0
     if jumpback > 0
       k = 0
       while k < jumpback
@@ -1731,6 +1547,7 @@ INSP_RESULT_VALUE_LIMIT = 240
             cursor = spans.size() - 1
           redraw_scrub(src, spans, cursor)
         elsif moved
+          @scrub_anchor = 0
           redraw_scrub(src, spans, cursor)
     ensure
       ccall("w_print", "\e\[?25h")

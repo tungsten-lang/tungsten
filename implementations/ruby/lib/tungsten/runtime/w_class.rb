@@ -16,7 +16,7 @@ module Tungsten
       end
 
       attr_accessor :name, :superclass, :methods, :traits, :version, :class_vars, :method_overloads,
-                    :class_methods, :class_method_overloads
+                    :class_methods, :class_method_overloads, :constants
 
       def initialize(name, superclass = nil)
         @name = name
@@ -28,6 +28,21 @@ module Tungsten
         @traits = []
         @version = 0
         @class_vars = {}
+        @constants = {}
+      end
+
+      # Class-body constants (`ROWS = [...]` inside `+ Foo`), resolved
+      # against this class, its traits, and its superclass chain. Returns
+      # Environment::UNDEFINED when no class in the chain defines `name`.
+      def lookup_constant(name)
+        klass = self
+        while klass
+          return klass.constants[name] if klass.constants.key?(name)
+
+          klass.traits.each { |trait| return trait.constants[name] if trait.constants.key?(name) }
+          klass = klass.superclass
+        end
+        Tungsten::Environment::UNDEFINED
       end
 
       def lookup_method(name, argc: nil)

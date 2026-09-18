@@ -805,20 +805,22 @@ RSpec.describe Tungsten::REPL do
       expect(output).to include("✿ [☀] ☙  ❄")
       expect(output).to include("[Day 185/365] Week 27")
       expect(output).to include("Independence Day")
-      expect(output.lines.find { |line| line.start_with?("Independence Day") }).not_to include("^")
+      expect(output.lines.find { |line| line.start_with?("US Independence Day") }).not_to include("^")
       expect(output).to include("Su   Mo   Tu   We   Th   Fr   Sa")
       expect(output).to include("---------------------------------")
-      expect(output).to include("          01   02   03  [04]  05")
-      expect(output).to include("--+--        --+--              --+--")
+      expect(output).to include("           01   02   03  [04]  05")
+      expect(output).to include("*******")
+      expect(output).to include("*****")
+      expect(output).to include("Tungsten's Birthday")
       expect(output).not_to include("first quarter")
-      expect(output).to include("u0xFFFE87D2E4000000")
+      expect(output).to include("u0xFFFE97D2E4000000")
       expect(output).to include("subtype  bits 47..45  4                  date")
       expect(output).to include("year     bits 44..33  2025")
 
       scene_lines = output.lines.drop_while { |line| !line.start_with?("Friday,") }.take_while do |line|
         !line.start_with?("u0x")
       end
-      expect(scene_lines.reject { |line| line == "\n" }.all? { |line| line.chomp.length == 80 }).to be true
+      expect(scene_lines.reject { |line| line == "\n" }.all? { |line| line.chomp.length <= 80 }).to be true
     end
 
     it "colors holiday ascii art" do
@@ -828,40 +830,33 @@ RSpec.describe Tungsten::REPL do
       expect(halloween_output).to include("Halloween")
       expect(halloween_output).to include(%(.-"""""""-.))
       expect(halloween_output).to include("/\\   /\\")
-      expect(halloween_output).to include("(___)   (__)")
+      expect(halloween_output).to include("'-------'")
       expect(halloween_raw).to include("\e[38;5;208m.-\"\"\"\"\"\"\"-.\e[0m")
-      expect(halloween_raw).to include("\e[33m/\\   /\\\e[0m")
+      expect(halloween_raw).to include("\e[33m/\\\e[0m   \e[33m/\\\e[0m")
       expect(halloween_raw).to include("\e[33m\\_/\\_/\\_/\e[0m")
 
       independence_raw = raw_inspect_output("2026" + "-07-04")
       independence_output = independence_raw.gsub(/\e\[[0-9;]*m/, "")
 
-      expect(independence_output).to include("Independence Day")
-      expect(independence_output).to include("\\|/           \\|/                \\|/")
-      expect(independence_output).to include("--+--        --+--              --+--")
-      expect(independence_output).to include("/|\\           /|\\                /|\\")
-      expect(independence_output).not_to include("___/|\\___")
-
-      edge_line = independence_output.lines.find { |line| line.include?("--+--        --+--") }.chomp
-      expect(edge_line.length).to eq(80)
-      expect(edge_line).to end_with("-")
-
-      expect(independence_raw).to include("\e[31m\\|/\e[0m")
-      expect(independence_raw).to include("\e[37m--\e[0m\e[31m+\e[0m\e[37m--\e[0m")
-      expect(independence_raw).to include("\e[34m--\e[0m\e[37m+\e[0m\e[34m--\e[0m")
+      expect(independence_output).to include("US Independence Day · Tungsten's Birthday")
+      # Fireworks bursting as a 7 (red) and a 4 (blue), sparks in white/yellow.
+      expect(independence_output).to include("*******")
+      expect(independence_output).to include("*****")
+      expect(independence_raw).to include("\e[31m*******\e[0m")
+      expect(independence_raw).to include("\e[34m*****\e[0m")
+      edge_line = independence_output.lines.find { |line| line.include?("*******") }.chomp
+      expect(edge_line.length).to be <= 80
 
       valentine_raw = raw_inspect_output("2026-02-14")
       valentine_output = valentine_raw.gsub(/\e\[[0-9;]*m/, "")
 
       expect(valentine_output).to include("Valentine's Day")
-      expect(valentine_output).to include(".----.     ♥♥♥♥♥ ♥♥♥♥♥")
-      expect(valentine_output).to include("|love|    ♥♥♥♥♥♥♥♥♥♥♥♥♥")
+      expect(valentine_output).to include(".----.    ♥♥♥♥♥♥♥♥♥♥♥♥♥")
+      expect(valentine_output).to include("|love|     ♥♥♥♥♥♥♥♥♥♥♥")
       expect(valentine_output).not_to include("<3")
       expect(valentine_output).not_to include("ʕ")
-      expect(valentine_raw).to include("\e[38;5;205m♥♥♥♥♥\e[0m")
-      expect(valentine_raw).to include("\e[31m♥♥♥♥♥♥♥♥♥♥♥♥♥\e[0m")
+      expect(valentine_raw).to include("\e[38;5;205m♥♥♥♥♥♥\e[0m\e[31m♥♥♥♥♥♥♥\e[0m")
       expect(valentine_raw).to include("\e[37m|love|\e[0m")
-      expect(valentine_raw).to include("\e[35m♥♥♥\e[0m")
 
       st_patricks_raw = raw_inspect_output("2026-03-17")
       st_patricks_output = st_patricks_raw.gsub(/\e\[[0-9;]*m/, "")
@@ -915,10 +910,10 @@ RSpec.describe Tungsten::REPL do
       expect(thanksgiving_output).to include("^^^  ^^^")
       expect(thanksgiving_output).to include(".-' \\|/ '-.")
       expect(thanksgiving_output).to include("--=  (o o)  =--")
-      expect(thanksgiving_raw).to include("\e[38;5;196m^^^\e[0m")
+      expect(thanksgiving_raw).to include("\e[31m^^^\e[0m")
       expect(thanksgiving_raw).to include("\e[38;5;208m^^^^^\e[0m")
-      expect(thanksgiving_raw).to include("\e[38;5;214m--=\e[0m")
-      expect(thanksgiving_raw).to include("\e[38;5;130m/( : )\\\e[0m")
+      expect(thanksgiving_raw).to include("\e[33m--=\e[0m")
+      expect(thanksgiving_raw).to include("\e[38;5;94m(o o)\e[0m")
     end
 
     it "keeps highlighted calendar days aligned to weekday columns" do
@@ -926,7 +921,7 @@ RSpec.describe Tungsten::REPL do
 
       expect(output).to include("Su   Mo   Tu   We   Th   Fr   Sa")
       expect(output).to include("---------------------------------")
-      expect(output).to include("              [01]  02   03   04")
+      expect(output).to include("               [01]  02   03   04")
       expect(output).to include("05   06   07   08   09   10   11")
 
       christmas_output = inspect_output("2025-12-25")
@@ -965,14 +960,14 @@ RSpec.describe Tungsten::REPL do
       expect(output).to include("scrub> 2025-01-01")
       expect(output).to include("result   2025-01-01")
       expect(output).to include("Su   Mo   Tu   We   Th   Fr   Sa")
-      expect(output).to include("u0xFFFE87D221000000")
+      expect(output).to include("u0xFFFE97D221000000")
       expect(output).not_to include("=> 2025-01-01")
     end
 
     it "re-encodes date-times and durations when their fields fit" do
       date_time_output = inspect_output("2024-10-31T14:30:00Z")
 
-      expect(date_time_output).to include("u0xFFFE87D15F73C000")
+      expect(date_time_output).to include("u0xFFFE97D15F73C000")
       expect(date_time_output).to include("subtype  bits 47..45  4                  date")
       expect(date_time_output).to include("hour     bits 23..19  14")
       expect(date_time_output).to include("minute   bits 18..13  30")

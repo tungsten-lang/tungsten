@@ -140,12 +140,7 @@ module Tungsten
       [ "\u{1F318}", "waning crescent" ]
     ].freeze
 
-    CALENDAR_WEEKDAYS = %w[Su Mo Tu We Th Fr Sa].freeze
-    CALENDAR_COLUMN_WIDTH = 5
-    CALENDAR_LINE_WIDTH = ((CALENDAR_WEEKDAYS.size - 1) * CALENDAR_COLUMN_WIDTH) + 3
     DATE_SCENE_WIDTH = 80
-    DATE_SCENE_RIGHT_COLUMN = 42
-    DATE_SCENE_SEASON_SHIFT = 4
 
     UUID_VERSION_LABELS = {
       1 => "time-based",
@@ -692,25 +687,26 @@ module Tungsten
       "\u2588" * filled + "\u2591" * (width - filled)
     end
 
+    # The date scene (header, season rail, holiday name and art, calendar)
+    # is compiler/lib/wit/scenes/date.w, evaluated here through the
+    # interpreter so this host renders exactly what the compiled REPL does.
+    WIT_DATE_SCENE = "compiler/lib/wit/scenes/date.w"
+
     def date_inspection_lines(date_value)
       date = date_value.value
-      holiday = holiday_label(date)
-      calendar = month_calendar_lines(date, zero_pad: true, extra_day: date.day)
-      right_panel = date_scene_right_panel(date, holiday)
+      second = date.respond_to?(:sec) ? date.sec : (date.respond_to?(:second) ? date.second : 0)
+      ensure_wit_scene_loaded
+      run("DateScene.scene(#{date.year}, #{date.month}, #{date.day}, #{second.to_i})").map(&:to_s)
+    end
 
-      lines = [
-        "",
-        date_scene_header_line(date),
-        date_scene_subheader_line(date, holiday),
-        scene_line("")
-      ]
+    def ensure_wit_scene_loaded
+      return if @classes.key?("DateScene")
 
-      max_lines = [ calendar.length, right_panel.length ].max
-      max_lines.times do |i|
-        lines << scene_columns(calendar[i].to_s, right_panel[i].to_s)
-      end
-      lines << ""
-      lines
+      root = find_project_root(@current_file ? File.dirname(@current_file) : Dir.pwd)
+      path = root && File.join(root, WIT_DATE_SCENE)
+      raise Tungsten::Error, "wit date scene not found: #{WIT_DATE_SCENE} (set TUNGSTEN_ROOT)" unless path && File.exist?(path)
+
+      run(File.read(path), file_path: path)
     end
 
     def date_time_inspection_lines(date_time)
@@ -742,16 +738,6 @@ module Tungsten
       end
     end
 
-    def season_index(date)
-      md = (date.month * 100) + date.day
-      case md
-      when 320..620 then 0
-      when 621..921 then 1
-      when 922..1220 then 2
-      else 3
-      end
-    end
-
     def moon_phase_label(date)
       lunation = 29.530588853
       age = ((date.jd - 2_451_550.1) % lunation)
@@ -759,110 +745,6 @@ module Tungsten
       symbol, name = MOON_PHASES[phase_index]
       illumination = ((1 - Math.cos((2 * Math::PI * age) / lunation)) / 2 * 100).round
       "#{symbol} #{name} · age #{format("%.1f", age)}d · #{illumination}% lit"
-    end
-
-    def holiday_label(date)
-      hist = history_label(date)
-      return hist if hist
-
-      fixed = {
-        [ 1, 1 ] => "\u2728 New Year's Day",
-        [ 2, 14 ] => "\u2665 Valentine's Day",
-        [ 3, 14 ] => "\u03C0 Pi Day",
-        [ 3, 17 ] => "\u2618 St. Patrick's Day",
-        [ 4, 1 ] => "\u203D April Fools' Day",
-        [ 6, 19 ] => "\u2726 Juneteenth",
-        [ 7, 4 ] => "\u2605 Independence Day",
-        [ 10, 31 ] => "\u25B2 Halloween",
-        [ 12, 25 ] => "\u2726 Christmas",
-        [ 12, 31 ] => "\u2728 New Year's Eve"
-      }
-      fixed[[ date.month, date.day ]] || floating_holiday_label(date)
-    end
-
-    def history_second(date)
-      return date.sec if date.respond_to?(:sec)
-      return date.second if date.respond_to?(:second)
-
-      0
-    end
-
-    def history_label(date)
-      title = Tungsten::Calendar.history_title(date.year, date.month, date.day, history_second(date))
-      title.nil? || title.empty? ? nil : title
-    end
-
-    def history_art(date)
-      Tungsten::Calendar.history_art(date.year, date.month, date.day, history_second(date))
-    end
-
-    def holiday_scene_label(label)
-      label.to_s.sub(/\A\S+\s+/, "")
-    end
-
-    def date_scene_header_line(date)
-      title = "#{date.strftime("%A, %B")} #{date.day}#{ordinal_suffix(date.day)}, #{date.year}"
-      diy = date.leap? ? 366 : 365
-      yday = date.respond_to?(:yday) ? date.yday : date.day
-      cweek = date.respond_to?(:cweek) ? date.cweek : 0
-      day_week = "[Day #{yday}/#{diy}] Week #{cweek}"
-      season_rail = date_scene_season_rail(date)
-      season_col = date_scene_season_column(title, day_week, season_rail)
-      stats_col = DATE_SCENE_WIDTH - visible_length(day_week)
-
-      line = blank_scene_line
-      place_scene_text(line, 0, title)
-      place_scene_text(line, season_col, season_rail)
-      place_scene_text(line, stats_col, day_week)
-      line
-    end
-
-    def date_scene_subheader_line(_date, holiday)
-      line = blank_scene_line
-      place_scene_text(line, 0, holiday_scene_label(holiday)) if holiday
-      line
-    end
-
-    def date_scene_season_rail(date)
-      case season_index(date)
-      when 0 then "[\u273F] \u2600  \u2619  \u2744"
-      when 1 then "\u273F [\u2600] \u2619  \u2744"
-      when 2 then "\u273F  \u2600 [\u2619] \u2744"
-      else "\u273F  \u2600  \u2619 [\u2744]"
-      end
-    end
-
-    def date_scene_season_column(title, day_week, season_rail)
-      stats_col = DATE_SCENE_WIDTH - visible_length(day_week)
-      centered = ((DATE_SCENE_WIDTH - visible_length(season_rail)) / 2) + DATE_SCENE_SEASON_SHIFT
-      left_bound = visible_length(title) + 2
-      right_bound = stats_col - visible_length(season_rail) - 2
-      [ [ centered, left_bound ].max, right_bound ].min
-    end
-
-    def date_scene_right_panel(date, holiday)
-      hist = history_art(date)
-      return hist unless hist.empty?
-
-      holiday ? holiday_art(date) : []
-    end
-
-    def ordinal_suffix(day)
-      return "th" if (11..13).include?(day % 100)
-
-      case day % 10
-      when 1 then "st"
-      when 2 then "nd"
-      when 3 then "rd"
-      else "th"
-      end
-    end
-
-    def scene_columns(left, right)
-      return scene_line(left) if right.empty?
-
-      padding = [ DATE_SCENE_RIGHT_COLUMN - visible_length(left), 1 ].max
-      scene_line(left + (" " * padding) + right)
     end
 
     def scene_line(text)
@@ -884,319 +766,8 @@ module Tungsten
       text.to_s.gsub(/\e\[[0-9;]*m/, "").length
     end
 
-    def floating_holiday_label(date)
-      return "\u2696 Martin Luther King Jr. Day" if nth_weekday?(date, 1, 1, 3)
-      return "\u273F Easter" if date == easter_date(date.year)
-      return "\u2691 Memorial Day" if last_weekday?(date, 5, 1)
-      return "\u2692 Labor Day" if nth_weekday?(date, 9, 1, 1)
-      return "\u2606 Thanksgiving" if nth_weekday?(date, 11, 4, 4)
-
-      nil
-    end
-
-    def easter_date(year)
-      a = year % 19
-      b = year / 100
-      c = year % 100
-      d = b / 4
-      e = b % 4
-      f = (b + 8) / 25
-      g = (b - f + 1) / 3
-      h = ((19 * a) + b - d - g + 15) % 30
-      i = c / 4
-      k = c % 4
-      l = (32 + (2 * e) + (2 * i) - h - k) % 7
-      m = (a + (11 * h) + (22 * l)) / 451
-      month = (h + l - (7 * m) + 114) / 31
-      day = ((h + l - (7 * m) + 114) % 31) + 1
-      ::Date.new(year, month, day)
-    end
-
-    def nth_weekday?(date, month, weekday, nth)
-      date.month == month && date.wday == weekday && ((date.day - 1) / 7) + 1 == nth
-    end
-
-    def last_weekday?(date, month, weekday)
-      date.month == month && date.wday == weekday && (date + 7).month != month
-    end
-
-    def holiday_art(date)
-      case [ date.month, date.day ]
-      when [ 10, 31 ]
-        halloween_pumpkin_art
-      when [ 12, 25 ]
-        christmas_tree_art
-      when [ 3, 17 ]
-        st_patricks_art
-      when [ 7, 4 ]
-        fourth_of_july_art
-      when [ 2, 14 ]
-        valentine_heart_art
-      else
-        return thanksgiving_art if nth_weekday?(date, 11, 4, 4)
-
-        date == easter_date(date.year) ? easter_art : []
-      end
-    end
-
-    def halloween_pumpkin_art
-      orange = "38;5;208"
-      yellow = "33"
-      [
-        "                   #{ansi_color("_", 32)}",
-        "            #{ansi_color(".-\"\"\"\"\"\"\"-.", orange)}",
-        "          #{ansi_color(".'", orange)}  #{ansi_color("/\\   /\\", yellow)}  #{ansi_color("'.", orange)}",
-        "         #{ansi_color("/", orange)}      #{ansi_color("/_\\", yellow)}      #{ansi_color("\\", orange)}",
-        "        #{ansi_color("|", orange)}    #{ansi_color("\\_/\\_/\\_/", yellow)}    #{ansi_color("|", orange)}",
-        "         #{ansi_color("\\", orange)}    #{ansi_color("'--v--'", yellow)}    #{ansi_color("/", orange)}",
-        [
-          "  ", ansi_color("(___)", orange), "   ", ansi_color("(__)", orange),
-          "      ", ansi_color("'._   _.'", orange)
-        ].join
-      ]
-    end
-
-    def christmas_lights_line
-      [
-        " ", ansi_color("o", 31), "--", ansi_color("o", 33), "--", ansi_color("o", 32),
-        "--", ansi_color("o", 36), "--", ansi_color("o", 35), "--", ansi_color("o", 31),
-        "--", ansi_color("o", 33), "--", ansi_color("o", 32)
-      ].join
-    end
-
-    def christmas_tree_art
-      [
-        christmas_lights_line,
-        "                         #{ansi_color("*", 33)}",
-        "                        #{ansi_color("/_\\", 32)}",
-        "                       #{ansi_color("/_", 32)}#{ansi_color("o", 31)}#{ansi_color("_\\", 32)}",
-        [
-          "                      ", ansi_color("/_", 32), ansi_color("o", 33),
-          ansi_color("_", 32), ansi_color("o", 31), ansi_color("_\\", 32)
-        ].join,
-        [
-          "                     ", ansi_color("/_", 32), ansi_color("o", 31),
-          ansi_color("_", 32), ansi_color("o", 33), ansi_color("_", 32),
-          ansi_color("o", 36), ansi_color("_\\", 32)
-        ].join,
-        "                    #{ansi_color("/_________\\", 32)}",
-        "                        #{ansi_color("|_|", "38;5;94")}"
-      ]
-    end
-
-    def st_patricks_art
-      green = 32
-      dark_green = "38;5;28"
-      gold = 33
-      pot = "38;5;94"
-      red = 31
-      orange = "38;5;208"
-      blue = 34
-      violet = 35
-      [
-        [
-          " ", ansi_color("~~~~", red), ansi_color("~~~~", orange),
-          ansi_color("~~~~", gold), ansi_color("~~~~", green),
-          ansi_color("~~~~", blue), ansi_color("~~~~", violet)
-        ].join,
-        [
-          "       ", ansi_color("\u2618", green), "             ", ansi_color("\u2618", green)
-        ].join,
-        [
-          "          ", ansi_color("\u2618", green), "  ", ansi_color("\u2618", green),
-          "  ", ansi_color("\u2618", green)
-        ].join,
-        "            #{ansi_color("\\ | /", dark_green)}",
-        [
-          "       ", ansi_color(".-======-.", pot), "  ", ansi_color("$", gold)
-        ].join,
-        [
-          "      ", ansi_color("/", pot), " ", ansi_color("$ $ $ $", gold),
-          " ", ansi_color("\\", pot)
-        ].join,
-        "      #{ansi_color("\\________/", pot)}"
-      ]
-    end
-
-    def easter_art
-      pink = 35
-      yellow = 33
-      cyan = 36
-      [
-        "                    #{ansi_color("(\\_/)", 37)}",
-        "                    #{ansi_color("(o.o)", 37)}",
-        "                    #{ansi_color("/ >\u{1F955}", 32)}",
-        [
-          "       ", ansi_color(".-.", pink), "      ", ansi_color(".-.", yellow),
-          "      ", ansi_color(".-.", cyan)
-        ].join,
-        [
-          "      ", ansi_color("/ ~ \\", pink), "    ", ansi_color("/ ^ \\", yellow),
-          "    ", ansi_color("/ * \\", cyan)
-        ].join,
-        [
-          "      ", ansi_color("\\___/", pink), "    ", ansi_color("\\___/", yellow),
-          "    ", ansi_color("\\___/", cyan)
-        ].join
-      ]
-    end
-
-    def fourth_of_july_art
-      red = 31
-      white = 37
-      blue = 34
-      [
-        [
-          "  ", ansi_color("\\|/", red),
-          "           ", ansi_color("\\|/", white),
-          "                ", ansi_color("\\|/", blue)
-        ].join,
-        [
-          " ", ansi_color("--", red), ansi_color("+", white), ansi_color("--", red),
-          "        ", ansi_color("--", white), ansi_color("+", red), ansi_color("--", white),
-          "              ", ansi_color("--", blue), ansi_color("+", white), ansi_color("--", blue)
-        ].join,
-        [
-          "  ", ansi_color("/|\\", red),
-          "           ", ansi_color("/|\\", white),
-          "                ", ansi_color("/|\\", blue)
-        ].join
-      ]
-    end
-
-    def valentine_heart_art
-      red = 31
-      pink = "38;5;205"
-      magenta = 35
-      paper = 37
-      [
-        [
-          "      ", ansi_color("♥", magenta), "                         ", ansi_color("♥", red)
-        ].join,
-        "                 #{ansi_color("♥♥", pink)}     #{ansi_color("♥♥", red)}",
-        [
-          "    ", ansi_color(".----.", paper), "     ",
-          ansi_color("♥♥♥♥♥", pink), " ", ansi_color("♥♥♥♥♥", red)
-        ].join,
-        [
-          "    ", ansi_color("|love|", paper), "    ",
-          ansi_color("♥♥♥♥♥♥♥♥♥♥♥♥♥", red)
-        ].join,
-        [
-          "    ", ansi_color("'----'", paper), "     ",
-          ansi_color("♥♥♥♥♥♥♥♥♥♥♥", pink)
-        ].join,
-        "      #{ansi_color("♥", red)}          #{ansi_color("♥♥♥♥♥♥♥", magenta)}",
-        "                   #{ansi_color("♥♥♥", magenta)}",
-        "                    #{ansi_color("♥", magenta)}"
-      ]
-    end
-
-    def thanksgiving_art
-      brown = "38;5;130"
-      trunk = "38;5;94"
-      red = "38;5;196"
-      orange = "38;5;208"
-      gold = "38;5;214"
-      yellow = "38;5;220"
-      green = "38;5;142"
-      purple = "38;5;165"
-
-      [
-        [
-          "  ", ansi_color("^^^", red), "  ", ansi_color("^^^", orange),
-          "       ", ansi_color(".-^-.", gold)
-        ].join,
-        [
-          " ", ansi_color("^^^^^", orange), " ", ansi_color("^^^^^", yellow),
-          "    ", ansi_color(".-'", green), " ", ansi_color("\\", orange),
-          ansi_color("|", yellow), ansi_color("/", red), " ", ansi_color("'-.", purple)
-        ].join,
-        [
-          "  ", ansi_color("||", trunk), "    ", ansi_color("||", trunk),
-          "    ", ansi_color(".'", red), " ", ansi_color("\\", orange),
-          "  ", ansi_color("|", gold), "  ", ansi_color("/", yellow),
-          " ", ansi_color("'.", purple)
-        ].join,
-        [
-          "            ", ansi_color("--=", gold), "  ", ansi_color("(o o)", brown),
-          "  ", ansi_color("=--", gold)
-        ].join,
-        "                 #{ansi_color("\\ v /", yellow)}",
-        "               #{ansi_color("/( : )\\", brown)}",
-        "                #{ansi_color("/|\\", brown)}",
-        "               #{ansi_color("/_|_\\", brown)}"
-      ]
-    end
-
     def ansi_color(text, code)
       "\e[#{code}m#{text}\e[0m"
-    end
-
-    def month_calendar_lines(date, zero_pad: false, extra_day: nil)
-      first = ::Date.new(date.year, date.month, 1)
-      last = ::Date.new(date.year, date.month, -1)
-      max_day = last.day
-      max_day = extra_day if extra_day && extra_day > max_day
-      lines = [ calendar_header_line, calendar_separator_line ]
-      week = Array.new(first.wday, "    ")
-
-      (1..max_day).each do |day_n|
-        wday = (first.wday + day_n - 1) % 7
-        week << [ wday, day_n, day_n == date.day, zero_pad ]
-        if wday == 6
-          lines << calendar_week_line(week)
-          week = []
-        end
-      end
-
-      lines << calendar_week_line(week) unless week.empty?
-      lines
-    end
-
-    def calendar_header_line
-      line = blank_calendar_line
-      CALENDAR_WEEKDAYS.each_with_index do |day, wday|
-        line[calendar_column(wday), day.length] = day
-      end
-      line.rstrip
-    end
-
-    def calendar_separator_line
-      "-" * CALENDAR_LINE_WIDTH
-    end
-
-    def calendar_week_line(week)
-      line = blank_calendar_line
-      week.each do |entry|
-        next if entry.is_a?(String)
-
-        wday, day, current, zero_pad = entry
-        calendar_place_day(line, wday, day, current: current, zero_pad: zero_pad)
-      end
-      line.rstrip
-    end
-
-    def calendar_place_day(line, wday, day, current:, zero_pad:)
-      column = calendar_column(wday)
-      text = zero_pad ? format("%02d", day) : day.to_s.rjust(2)
-      line[column, text.length] = text
-      return unless current
-
-      if column.zero?
-        line[column, text.length + 2] = "[#{text}]"
-      else
-        line[column - 1] = "["
-        line[column + text.length] = "]"
-      end
-    end
-
-    def calendar_column(wday)
-      wday * CALENDAR_COLUMN_WIDTH
-    end
-
-    def blank_calendar_line
-      " " * CALENDAR_LINE_WIDTH
     end
 
     def ip4_inspection_lines(ip)

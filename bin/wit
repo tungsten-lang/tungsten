@@ -24,7 +24,8 @@ if [ ! -x "$COMPILER" ]; then
   exit 1
 fi
 
-# The public REPL is always compiler/lib/repl.w embedded in the self-hosted
-# compiler. A cold checkout bootstraps first; it never substitutes the Ruby
-# tree walker and silently changes interactive semantics.
+# The public REPL is always compiler/lib/repl.w, compiled into the REPL image
+# by bin/tungsten build. Launch execs whatever was last built and never
+# compiles; it never substitutes the Ruby tree walker and silently changes
+# interactive semantics.
 exec "$COMPILER" --repl "$@"

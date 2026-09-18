@@ -24,7 +24,7 @@ use lib/driver/link
 use lib/driver/pipeline
 
 gpu_emitter = CompilerGPUEmitter.new()
-if env("TUNGSTEN_COMPILER_IMAGE") in ("metal" "repl")
+if env("TUNGSTEN_COMPILER_IMAGE") == "metal"
   gpu_emitter = MetalCompilerGPUEmitter.new()
 
 args = argv()
@@ -310,6 +310,15 @@ while i < args.size()
     command = "compile"
   elsif arg == "compile-batch"
     command = "compile-batch"
+  # `build-image KIND` compiles an optional compiler image (repl, metal) into
+  # the cache. Only `bin/tungsten build` calls this; launches never compile.
+  elsif arg == "build-image"
+    i += 1
+    if i >= args.size()
+      ccall("w_eputs", "build-image expects an image kind (repl or metal)")
+      exit 1
+    build_compiler_image(args[i])
+    exit 0
   elsif arg.starts_with?("-D")
     # `-D NAME=VALUE` or `-DNAME=VALUE` — set a build-time constant
     # visible to .w source. The defines are passed through to lower_ast,

@@ -169,10 +169,11 @@ check("non-holiday date keeps the calendar at the same offset as a holiday date"
       cal_offset(holiday) == cal_offset(plain), f"holiday={cal_offset(holiday)} plain={cal_offset(plain)}")
 check("holiday date still shows the name (Christmas)", any("Christmas" in l for l in holiday))
 
-# ── 8. July 4th shows the fireworks art panel ──────────────────────────────
+# ── 8. July 4th shows the fireworks art panel (bursts shaped as 7 and 4) ───
 lines = screen(run([b"? " + b"2026" + b"-07-04\n", b"q"]))
 full = "\n".join(lines)
-check("July 4th renders fireworks art (\\|/ … /|\\)", "\\|/" in full and "/|\\" in full)
+check("July 4th names Tungsten's birthday", "Tungsten's Birthday" in full)
+check("July 4th renders 74 fireworks art (7 bar and 4 crossbar)", "*******" in full and "*****" in full)
 
 # ── 9. 5-week month is padded to the same scene height as a 6-week month ────
 def scene_height(expr):

@@ -477,54 +477,80 @@
     return parent + "/build/cache"
   nil
 
--> delegate_compiler_image(kind)
+# Optional compiler images (repl for bin/wit, metal for @gpu programs) are
+# products of `bin/tungsten build`, never of a launch: bin/wit must start on
+# whatever was last built in well under a second. `build-image KIND` compiles
+# one through the ordinary incremental compile path (an unchanged image is a
+# link-cache hit); delegate_compiler_image only execs an existing image and
+# otherwise points at the build.
+-> compiler_image_root(kind)
   root = env("TUNGSTEN_ROOT")
   if root == nil || root == ""
     ccall("w_eputs", "the " + kind + " compiler image requires TUNGSTEN_ROOT; invoke it through bin/tungsten")
     exit 1
+  root
 
+-> compiler_image_dir(kind)
+  cache = compiler_cache_dir()
+  if cache == nil || cache == ""
+    ccall("w_eputs", "could not select a cache directory for the " + kind + " compiler image")
+    exit 1
+  cache + "/compiler-images"
+
+-> compiler_image_path(kind)
+  compiler_image_dir(kind) + "/tungsten-" + kind
+
+-> build_compiler_image(kind)
+  if !(kind in ("repl" "metal"))
+    ccall("w_eputs", "unknown compiler image kind: " + kind + " (expected repl or metal)")
+    exit 1
+  root = compiler_image_root(kind)
   source_name = kind == "repl" ? "repl" : "tungsten_" + kind
   source = root + "/compiler/" + source_name + ".w"
   if !file?(source)
     ccall("w_eputs", "missing compiler image source: " + source)
     exit 1
-
-  cache = compiler_cache_dir()
-  if cache == nil || cache == ""
-    ccall("w_eputs", "could not select a cache directory for the " + kind + " compiler image")
-    exit 1
-  image_dir = cache + "/compiler-images"
+  image_dir = compiler_image_dir(kind)
   if system("mkdir -p " + dev_runtime_shell_quote(image_dir)) != true
     ccall("w_eputs", "could not create compiler image cache: " + image_dir)
     exit 1
-
   exe = ccall("w_executable_path")
   if exe == nil || exe == ""
     ccall("w_eputs", "compiler executable path is unavailable")
     exit 1
-  image = image_dir + "/tungsten-" + kind
-
-  # Invoke compile every time and let the existing manifest cache decide if
-  # the wrapper or any transitive `use` changed. This avoids a second, subtly
-  # different dependency freshness implementation for optional images.
+  image = compiler_image_path(kind)
+  # The existing manifest/link caches decide whether the wrapper or any
+  # transitive `use` changed; there is no second freshness implementation.
   build_cmd = "TUNGSTEN_INCREMENTAL=1 TUNGSTEN_LL_PATH='' " + dev_runtime_shell_quote(exe) + " compile " + dev_runtime_shell_quote(source) + " --out " + dev_runtime_shell_quote(image) + " --release --native --no-debug --no-lto >/dev/null"
   if system(build_cmd) != true
     ccall("w_eputs", "failed to build the " + kind + " compiler image")
     exit 1
+  image
 
-  run_cmd = StringBuffer(256)
-  run_cmd << "TUNGSTEN_COMPILER_IMAGE="
-  run_cmd << dev_runtime_shell_quote(kind)
-  run_cmd << " "
-  run_cmd << dev_runtime_shell_quote(image)
+-> delegate_compiler_image(kind)
+  # Running needs only the cache (compiler_cache_dir falls back to the
+  # executable's checkout), so `tungsten-compiler --repl` works from any cwd
+  # and env; TUNGSTEN_ROOT is required only to BUILD an image.
+  image = compiler_image_path(kind)
+  if !file?(image)
+    ccall("w_eputs", "the " + kind + " compiler image is not built: " + image)
+    ccall("w_eputs", "run bin/tungsten build (compiler images are built with the compiler, never on launch)")
+    exit 1
+
+  # exec, not spawn: Process.spawn puts the child in its own process group,
+  # and an interactive image (bin/wit) is then stopped by the terminal on its
+  # first read. exec keeps the image as the foreground job and its exit
+  # status is ours. The inner process sees its kind to prevent re-delegation.
+  ccall("w_setenv", "TUNGSTEN_COMPILER_IMAGE", kind)
+  exec_args = [image]
   image_args = argv()
   ai = 0
   while ai < image_args.size()
-    run_cmd << " "
-    run_cmd << dev_runtime_shell_quote(image_args[ai])
+    exec_args.push(image_args[ai])
     ai += 1
-  process = Process.spawn(["/bin/sh", "-c", run_cmd.to_s()])
-  exit process.wait()
+  err = Process.exec(exec_args)
+  ccall("w_eputs", "could not exec the " + kind + " compiler image " + image + " (errno " + (0 - err).to_s() + ")")
+  exit 1
 
 # Canonicalize the selected runtime root without making direct C-VM execution
 # depend on File.expand_path (the C VM intentionally implements only the small

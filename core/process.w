@@ -1,4 +1,4 @@
-# Child-process control: spawn / poll / wait / kill.
+# Child-process control: spawn / poll / wait / kill, plus exec.
 #
 # For coordinators that manage worker fleets — portfolio solvers, build
 # farms — where `system` is unusable: it collapses the exit status to a
@@ -28,6 +28,13 @@
     pid = ccall("__w_proc_spawn", argv)
     raise "process spawn failed for [argv[0]] ([pid])" if pid <= 0
     Process.new(pid)
+
+  # Replace the current process with argv (no shell). The new program keeps
+  # this process's terminal, process group, and descriptors, so an
+  # interactive program stays the foreground job (a spawned child would stop
+  # on its first terminal access). Returns only on failure, as -errno.
+  -> .exec(argv)
+    ccall("__w_proc_exec", argv)
 
   -> pid
     @pid

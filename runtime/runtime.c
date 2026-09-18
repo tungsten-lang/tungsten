@@ -40526,8 +40526,11 @@ static WValue date_add_days(WValue d, int64_t n) {
 /* Nudge a date/datetime/month/time literal string by `delta` of `unit`
  * (0=day, 1=month, 2=year for dates; 0/3=minute, 4=hour for time), with
  * calendar rollover, preserving the literal's shape. Returns the reformatted
- * string. Used by the REPL's type-aware scrubber (compiler/lib/repl.w). */
-WValue w_date_scrub(WValue str_v, int64_t unit, int64_t delta) {
+ * string. Used by the REPL's type-aware scrubber (compiler/lib/repl.w).
+ * `anchor_day` (0 = none) is the day-of-month a run of month/year steps is
+ * aiming at: Mar 30 → Feb 29 → Jan 30, and back to Mar 30, with the short
+ * month clamped for display only. The REPL owns the anchor's lifetime. */
+WValue w_date_scrub(WValue str_v, int64_t unit, int64_t delta, int64_t anchor_day) {
     const char *s = as_str(str_v);
     int y = 0, mo = 1, d = 1, hh = 0, mi = 0, ss = 0;
     int has_t = (strchr(s, 'T') != NULL);
@@ -40572,14 +40575,17 @@ WValue w_date_scrub(WValue str_v, int64_t unit, int64_t delta) {
     } else {                                            /* date / datetime / month */
         int eff = (int)unit;
         if (shape == 2 && eff == 0) eff = 1;            /* a month literal's "small" step is a month */
+        int want = (anchor_day > 0 && anchor_day <= 31) ? (int)anchor_day : d;
         if (eff == 2) {                                 /* year */
             y += (int)delta;
+            d = want;
             if (d > days_in_month(y, mo)) d = days_in_month(y, mo);
         } else if (eff == 1) {                          /* month, with year carry + day clamp */
             int tot = y*12 + (mo-1) + (int)delta;
             y = tot / 12; mo = tot % 12;
             if (mo < 0) { mo += 12; y -= 1; }
             mo += 1;
+            d = want;
             if (d > days_in_month(y, mo)) d = days_in_month(y, mo);
         } else {                                        /* day, full calendar rollover */
             WValue dd = date_add_days(w_box_date(y,mo,d,hh,mi,ss,0), delta);
@@ -53138,6 +53144,38 @@ WValue __w_proc_spawn(WValue argv_val) {
     free(argv);
     if (err != 0) return w_int(-(int64_t)err);
     return w_int((int64_t)pid);
+}
+
+/* Replace THIS process with argv (PATH search, no shell). Unlike
+ * __w_proc_spawn the new program inherits the terminal, process group, and
+ * descriptors, so an interactive child stays the foreground job: a spawned
+ * child sits in its own process group and is stopped (SIGTTIN/SIGTTOU) on
+ * its first terminal access. Used by delegate_compiler_image for bin/wit.
+ * Returns only on failure, as -errno. */
+WValue __w_proc_exec(WValue argv_val) {
+    w_sandbox_gate("proc_exec", "");
+    WArray *arr = w_as_array(argv_val);
+    int argc = (int)arr->size;
+    if (argc < 1) return w_int(-1);
+    char **argv = (char **)malloc(sizeof(char *) * (argc + 1));
+    if (!argv) return w_int(-1);
+    memset(argv, 0, sizeof(char *) * (argc + 1));
+    for (int i = 0; i < argc; i++) {
+        /* Same as_str() ring-buffer hazard as __w_proc_spawn: own each
+         * argument before converting the next. */
+        const char *text = as_str(arr->slots[arr->start + i]);
+        argv[i] = strdup(text);
+        if (!argv[i]) {
+            for (int j = 0; j < i; j++) free(argv[j]);
+            free(argv);
+            return w_int(-1);
+        }
+    }
+    execvp(argv[0], argv);
+    int err = errno;
+    for (int i = 0; i < argc; i++) free(argv[i]);
+    free(argv);
+    return w_int(-(int64_t)err);
 }
 
 /* Wait for one child. block=0 polls (WNOHANG). Returns:

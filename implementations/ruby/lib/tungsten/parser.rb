@@ -972,6 +972,10 @@ module Tungsten
         when :"[]="
           error "expected space after ']', e.g. array[i] = value"
         when :"[]"
+          # Same rule as `[` below: after a control-flow statement a `[]` on
+          # the next line is a new (empty) array literal, not an index call
+          # on the statement's value (`while … / i = i + 1 / []`).
+          break if atomic.is_a?(If) || atomic.is_a?(While) || atomic.is_a?(Begin) || atomic.is_a?(Case) || atomic.is_a?(CaseExpr)
           check_void_value(atomic)
 
           next_token_skip_space

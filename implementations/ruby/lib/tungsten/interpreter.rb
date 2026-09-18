@@ -1670,6 +1670,13 @@ module Tungsten
             else
               evaluate(expr)
             end
+          when Tungsten::AST::Assign
+            # A class-body constant (`ROWS = [...]`) also lives on the class
+            # so its methods can read it regardless of who called them —
+            # method frames chain to the CALLER's env, not the class body's.
+            value = evaluate(expr)
+            target = expr.name
+            w_class.constants[target.name.to_s] = value if target.is_a?(Tungsten::AST::Var) && target.constant?
           else
             evaluate(expr)
           end
@@ -4136,6 +4143,14 @@ module Tungsten
         return namespaced if namespaced
       end
 
+      # Bare constant: the defining class's table beats names leaked from
+      # the CALLER's frames (a method env chains to its caller's env); a
+      # local of the current method scope (up to its barrier) still shadows.
+      if node.constant? && !@env.defined_locally_or_in_scope?(name)
+        value = resolve_class_constant(name)
+        return value unless value.equal?(Environment::UNDEFINED)
+      end
+
       value = resolve_cached_local(node, name)
       unless value.equal?(Environment::UNDEFINED)
         if value.is_a?(Tungsten::AST::Def) && (value.args.nil? || value.args.all? { |a| a.default })
@@ -4182,6 +4197,41 @@ module Tungsten
       end
 
       runtime_error("undefined local variable or method '#{name}'", node: node, length: name.length)
+    end
+
+    # A bare constant inside a method body resolves against the class that
+    # DEFINES the executing method (and its traits/superclasses), then the
+    # current self's class, then the defining classes of outer frames — the
+    # last covers blocks yielded from another class's method, since blocks
+    # push neither self nor a call frame. Callers fall back to lexical and
+    # builtin lookups when this misses.
+    def resolve_class_constant(name)
+      seen = nil
+      innermost = @call_methods.last&.defining_class
+      self_class = find_current_class
+      [innermost, self_class].each do |klass|
+        next unless klass
+        next if seen&.key?(klass)
+
+        value = klass.lookup_constant(name)
+        return value unless value.equal?(Environment::UNDEFINED)
+
+        (seen ||= {}.compare_by_identity)[klass] = true
+      end
+
+      i = @call_methods.length - 2
+      while i >= 0
+        klass = @call_methods[i].defining_class
+        if klass && !seen&.key?(klass)
+          value = klass.lookup_constant(name)
+          return value unless value.equal?(Environment::UNDEFINED)
+
+          (seen ||= {}.compare_by_identity)[klass] = true
+        end
+        i -= 1
+      end
+
+      Environment::UNDEFINED
     end
 
     def resolve_unique_namespaced_constant(name)

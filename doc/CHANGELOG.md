@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+- **One date scene for every host** — the `? date` inspection (header,
+  season rail, calendar grid, holiday names and artwork, history panels)
+  now lives in `compiler/lib/wit/scenes/date.w` as `DateScene`, a pure function of civil
+  fields. The compiled REPL calls it natively and the Ruby REPL evaluates it
+  through its interpreter, so the two renderers can no longer drift. New
+  names: Christmas Eve, Leap Day, US Independence Day (also Tungsten's
+  birthday, with fireworks bursting as a 7 and a 4), Martin Luther King
+  Jr. Day, Memorial Day, Labor Day, and the equinoxes and solstices (Meeus
+  Table 27.B in scaled integer arithmetic). The compiled REPL gains the
+  Valentine's, St. Patrick's, Halloween, Easter, and Thanksgiving art the
+  Ruby inspector already had. The current day renders bright white, the
+  grid keeps a gutter so `[21]` never shifts the number, and month/year
+  scrubs remember the day they started on (Mar 30 → Feb 29 → Jan 30, and
+  back). The scene is not on the global autoload manifest: the REPL image
+  `use`s it and the Ruby REPL loads the file on first inspection. Two Ruby
+  host fixes made that possible: class-body constants now resolve against
+  the class that defines the method (previously the caller's scope, which
+  broke `Date.in` and any cross-class call into `Calendar`), and a `[]` on
+  the line after a control-flow statement is an empty array literal, not an
+  index call on the statement's value.
+
+- **`bin/wit` never compiles on launch** — the REPL and Metal compiler
+  images are built by `bin/tungsten build` (new `build-image KIND` compiler
+  command, same incremental link cache as any compile) and `--repl` only
+  execs the last built image, failing fast with "run bin/tungsten build"
+  when none exists. Previously every launch after a compiler, core, or REPL
+  edit blocked on a ~30s native build. The delegate now `exec`s the image
+  (new `Process.exec`) instead of spawning it into its own process group,
+  which had left the interactive REPL stopped by the terminal before its
+  first prompt. The REPL image no longer links the Metal GPU emitter;
+  `@gpu` programs delegate to the metal image as usual. Date scrubbing in
+  `wit` (blank Enter after `? date`, then arrows) works again: the nudge
+  passed boxed integers to a raw-int leaf, whose tag bits tripped the
+  "exceeded the representable year range" guard and killed the REPL.
+
 - **Dates remember civil history without extra bits** — packed `Date` stays a
   Y-M-D-h-m-s tuple. `Date.parse` / `Date.new` accept Sweden's 1712-02-30 and
   Julian century leaps; `23:59:60` only on IERS leap-second dates. Ordinals

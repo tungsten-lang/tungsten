@@ -1148,7 +1148,7 @@ loader_parse_cache_state = {
       # on it would autoload Integer/BigInt into every block-using program
       # (including the compiler itself, which broke stage identity).
       bitwise_op_send = call_receiver != nil && call_name in ("&" "|" "^" "/" "%")
-      if bitwise_op_send || call_name in ("to_i" "prev" "succ" "next" "zero?" "even?" "odd?" "negative?" "positive?" "sq" "gcd" "lcm" "chr" "pow" "modpow" "factorial" "digits" "isqrt" "bit_length" "to_s" "to_f" "abs" "prime?" "+" "-" "*")
+      if bitwise_op_send || call_name in ("to_i" "prev" "succ" "next" "zero?" "even?" "odd?" "negative?" "positive?" "sq" "gcd" "lcm" "chr" "pow" "modpow" "factorial" "primorial" "digits" "isqrt" "bit_length" "to_s" "to_f" "abs" "prime?" "+" "-" "*")
         consider_autoload_name("Int", defined, registry, seen, pending)
         if call_name == "to_i" && @bigint_to_i_unresolved
           consider_autoload_name("BigInt", defined, registry, seen, pending)
@@ -1170,6 +1170,8 @@ loader_parse_cache_state = {
       consider_autoload_name(node.name, defined, registry, seen, pending)
       if node.name == "ARGV"
         consider_autoload_name("Array", defined, registry, seen, pending)
+    if t == :var && node.name.ends_with?("!")
+      consider_autoload_name("Int", defined, registry, seen, pending)
     if t == :var && node.name == "ARGV"
       consider_autoload_name("Array", defined, registry, seen, pending)
     # Literal-driven autoload: an array literal `[...]` needs Array's

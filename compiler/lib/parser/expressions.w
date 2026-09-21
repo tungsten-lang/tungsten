@@ -3,8 +3,23 @@
   # -- Method calls, indexing, dot access --
 
   -> parse_call_chain
-    expr_line = current_line()
-    parse_postfix_from(parse_primary())
+    primary_type = parser_tok_type(@current_packed)
+    expr = parse_primary()
+    # Parentheses explicitly delimit a receiver, including a call result.
+    # Bare method chains still keep bang-method syntax (list.first!).
+    product_receiver = primary_type == T_LPAREN || (primary_type in (T_INT T_ID T_IVAR T_CVAR T_GLOBAL T_PARG T_CONSTANT) && ast_kind(expr) in (:int :var :ivar :cvar :gvar :parg) && !(ast_kind(expr) == :var && expr.name.ends_with?("!")))
+    if product_receiver && parser_tok_type(@current_packed) in (T_BANG T_PRIMORIAL) && !@sp_before
+      # Compare with the final consumed token, so a multiline group may
+      # carry a suffix directly on its closing parenthesis.
+      previous = @packed_tokens[@pos - 1]
+      if current_offset() == parser_tok_off(previous) + parser_tok_len(previous)
+        op_loc = make_loc_here()
+        name = at_type?(T_BANG) ? "factorial" : "primorial"
+        advance()
+        expr = Tungsten:AST:Call.new(expr, name, [], nil)
+        expr.loc = op_loc
+        expr.loc_end = make_end_loc()
+    parse_postfix_from(expr)
 
   # Tight postfix chain (`.method` `/map` `:reduce` `[]` `?.`) applied to an
   # already-parsed receiver. Shared by parse_call_chain (seeded with a primary)
@@ -756,6 +771,11 @@
       name_col = current_col()
       name_loc = make_loc_here()
       name = advance_value()
+      # SCREAMING_SNAKE names have a separate bang token. Preserve the same
+      # variable spelling as n! before bare-argument parsing can take ! as not.
+      if !is_class_ref && at_type?(T_BANG) && !@sp_before && current_line() == name_line
+        advance()
+        return Tungsten:AST:Var.new(name + "!")
       # Handle namespace paths: Name:Sub:Sub (tokenized as NAME SYMBOL*)
       while at_type?(T_SYMBOL)
         name = name + ":" + advance_value()

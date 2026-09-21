@@ -334,6 +334,7 @@ Expressions form a precedence hierarchy. From lowest binding power to highest (s
 | Multiply / divide / remainder | `*`, `/`, `%`, `·`, and related product operators |
 | Power | `**`, superscript exponents (`x⁷`) |
 | Unary | `!`, `-`, `√`, … |
+| Tight postfix | `expr!`, `expr#`, `.name`, indexing |
 | Primary | literals, `self`, `super`, groups, collections, calls |
 
 Infix operators **must** be surrounded by whitespace (see _Lexical Analysis_ §2.3). Juxtaposition without spaces is reserved for quantity and unit forms (`10m/s`).
@@ -415,6 +416,26 @@ Notable special cases:
 * `<=>` is always a method call (`left.<=>(right)`).
 * Superscript digits after an expression desugar to exponentiation (`x⁷` ⇒ `x ** 7`).
 * `√expr` desugars to a unary square-root send.
+* Tight postfix `expr!` calls `.factorial`; `expr#` calls `.primorial`.
+  For nonnegative integers, factorial multiplies `1..n`, and primorial
+  multiplies the primes at most `n`: `10! == 3628800`, `10# == 210`.
+  Both return 1 for 0 and 1, reject negative receivers, and promote to
+  BigInt as needed. They bind before power: `3! ** 2 == 36`.
+  Suffixes must directly touch an integer literal, variable, or the closing
+  parenthesis of a grouped expression: `10!`, `n#`, `(a + b)!`, `(a + b)#`.
+  Parentheses also allow call and indexing results: `(list.first)!`,
+  `(f())#`, `(list[0])!`. Ungrouped calls and indexing cannot take these
+  suffixes. `(a + b) !` is invalid; `!(a + b)` remains logical NOT.
+  `list.first!` remains a bang method call. A bare `name!` uses factorial
+  when `name` is a bound variable; otherwise existing bang method lookup
+  is preserved. `n # comment` remains a comment and `n ## i64` a type hint.
+  Lowering cancels factorial quotients with nonnegative literal bounds in
+  the inline integer range when the numerator bound is at least the
+  denominator bound: `10! / 5!` evaluates only the product `6..10`.
+  The result remains an ordinary exact integer, with BigInt promotion;
+  factorials do not create lazy values. This optimization requires unchanged
+  Core factorial, arithmetic, and enumeration methods. Variable bounds and
+  other product expressions currently retain ordinary eager evaluation.
 * Print forms: `<< expr` prints values; `<- expr` is the related print variant accepted by the parser.
 
 ## 3.10 Layout and data declarations

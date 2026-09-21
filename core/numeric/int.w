@@ -312,6 +312,14 @@
       raise "Int#factorial: negative receiver"
     (2..self).reduce(1) -> (acc, it) acc * it
 
+  # n# — product of primes <= n; 0# == 1# == 1. Reduce preserves
+  # automatic BigInt promotion, just like factorial.
+  -> primorial
+    if self < 0
+      raise "Int#primorial: negative receiver"
+    (2..self).reduce(1) -> (acc, item)
+      item.prime? ? acc * item : acc
+
   # Exact prime-power factorization. The returned value is enumerable and
   # exposes `primes` for the distinct-prime projection used by algebra scripts.
   -> factor

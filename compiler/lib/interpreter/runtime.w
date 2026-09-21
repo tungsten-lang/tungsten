@@ -1244,6 +1244,10 @@
 
   -> eval_var(node, env, symbolic = false)
     name = ast_get(node, :name)
+    if name.ends_with?("!") && name.size() > 1
+      base = name.slice(0, name.size() - 1)
+      if env.defined?(base)
+        return evaluate(Tungsten:AST:Call.new(Tungsten:AST:Var.new(base), "factorial", [], nil), env)
     if name == "ARGV"
       # Script-scoped args (the run driver strips `run <script> --`), NOT
       # the bare argv() builtin — that one sees the compiler binary's own

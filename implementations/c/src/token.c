@@ -177,6 +177,7 @@ static TcKind classify_op(const TcSource *source, WValue token, TcKind last_kind
   if (token_text_is(source, token, "<")) return TC_K_LT;
   if (token_text_is(source, token, ">")) return TC_K_GT;
   if (token_text_is(source, token, "=")) return TC_K_ASSIGN;
+  if (token_text_is(source, token, "#")) return TC_K_PRIMORIAL;
   if (token_text_is(source, token, "!")) return TC_K_BANG;
   if (token_text_is(source, token, "...")) return TC_K_DOTDOTDOT;
   if (token_text_is(source, token, "..")) return TC_K_DOTDOT;
@@ -259,7 +260,7 @@ const char *tc_kind_name(TcKind kind) {
     TC_KIND_CASE(MINUS_MINUS); TC_KIND_CASE(MINUS_EQ); TC_KIND_CASE(POW); TC_KIND_CASE(STAR_EQ);
     TC_KIND_CASE(SLASH_EQ); TC_KIND_CASE(PERCENT_EQ); TC_KIND_CASE(MINUS); TC_KIND_CASE(STAR);
     TC_KIND_CASE(SLASH); TC_KIND_CASE(DOT_PRODUCT); TC_KIND_CASE(CROSS_PRODUCT); TC_KIND_CASE(PERCENT);
-    TC_KIND_CASE(LT); TC_KIND_CASE(GT); TC_KIND_CASE(ASSIGN); TC_KIND_CASE(BANG);
+    TC_KIND_CASE(LT); TC_KIND_CASE(GT); TC_KIND_CASE(ASSIGN); TC_KIND_CASE(BANG); TC_KIND_CASE(PRIMORIAL);
     TC_KIND_CASE(DOTDOTDOT); TC_KIND_CASE(DOTDOT); TC_KIND_CASE(DOT_PLUS); TC_KIND_CASE(DOT_MINUS);
     TC_KIND_CASE(DOT_STAR); TC_KIND_CASE(DOT_SLASH); TC_KIND_CASE(DOT_PIPE); TC_KIND_CASE(DOT_AMP);
     TC_KIND_CASE(DOT_CARET); TC_KIND_CASE(DOT_LSHIFT); TC_KIND_CASE(DOT_RSHIFT); TC_KIND_CASE(DOT);

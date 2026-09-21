@@ -795,6 +795,7 @@
     when :FAT_ARROW then 63
     when :SAFE_NAV then 64
     when :BANG then 65
+    when :PRIMORIAL then 169
     when :QUESTION then 66
     when :PIPE_FWD then 67
     when :MAP then 68

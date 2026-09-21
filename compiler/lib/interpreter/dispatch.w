@@ -1223,6 +1223,8 @@
       return nil
     if t == :var
       name = ast_get(node, :name)
+      if name.ends_with?("!") && name.size() > 1 && !callable?(name)
+        name = name.slice(0, name.size() - 1)
       if seen[name] == nil && name[0] != "@"
         seen[name] = true
         vars.push(name)

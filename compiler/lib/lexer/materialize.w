@@ -474,6 +474,8 @@
       emit_at(:GT, raw, off)
     elsif raw == "="
       emit_at(:ASSIGN, raw, off)
+    elsif raw == "#"
+      emit_at(:PRIMORIAL, raw, off)
     elsif raw == "!"
       emit_at(:BANG, raw, off)
     elsif raw == "..."

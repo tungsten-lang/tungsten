@@ -521,6 +521,15 @@
           lengths[tc] = out_len
           tc++
           next
+        # Tight postfix primorial; ## above retains type-hint syntax.
+        if pos > 0
+          prev_cp = (lc[pos - 1] >> 11) & cp_mask
+          if (lc[pos - 1] & 0x21) != 0 || (prev_cp >= 65 && prev_cp <= 90) || prev_cp in (41 93 125 33 34 39)
+            pos++
+            tokens[tc] = t_op | (start << 8)
+            lengths[tc] = 1
+            tc++
+            next
         if pos + 1 < count && ((lc[pos + 1] >> 11) & cp_mask) == :-[
           pos += 2
           start = pos

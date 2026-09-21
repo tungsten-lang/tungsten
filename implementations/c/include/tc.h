@@ -265,6 +265,7 @@ typedef enum {
   TC_K_GT,
   TC_K_ASSIGN,
   TC_K_BANG,
+  TC_K_PRIMORIAL,
   TC_K_DOTDOTDOT,
   TC_K_DOTDOT,
   TC_K_DOT_PLUS,

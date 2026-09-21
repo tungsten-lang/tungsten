@@ -123,6 +123,10 @@
   if !is_ast_node?(node)
     return true
   kind = ast_kind(node)
+  # A variable spelling n! can dispatch factorial after name resolution.
+  # Its negative-input exception must retain the enclosing rescue frame.
+  if kind == :var && node.name.ends_with?("!")
+    return false
   if kind == :raise
     return false
   if kind == :call

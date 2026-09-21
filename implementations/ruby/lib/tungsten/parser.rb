@@ -859,7 +859,20 @@ module Tungsten
     end
 
     def parse_atomic_with_method
+      primary_type = @token.type
       atomic = parse_atomic
+      product_receiver = primary_type == :"(" ||
+        (%i[INT ID IVAR CVAR GLOBAL PARG CONSTANT].include?(primary_type) &&
+         [Int, Var, InstanceVar, ClassVar, GlobalVar].include?(atomic.class) &&
+         !(atomic.is_a?(Var) && atomic.name.end_with?("!")))
+      if product_receiver && [:"!", :PRIMORIAL].include?(@token.type) &&
+         !string.byteslice(0, pos - 1).match?(/\s\z/)
+        name = @token.type == :"!" ? "factorial" : "primorial"
+        location = [@token.file, @token.row, @token.col]
+        next_token
+        atomic = Call.new(atomic, name, [])
+        atomic.set_location(*location)
+      end
 
       # Handle: <quantity> of <substance>
       # After parse_atomic, @token is :SP (space after the unit) and scanner pos
@@ -2798,6 +2811,7 @@ module Tungsten
       next_token_skip_whitespace
 
       first = parse_expression
+      skip_whitespace
 
       if @token.type?(:",")
         elements = [first]

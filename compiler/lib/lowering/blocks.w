@@ -268,6 +268,10 @@
   case t
   when :var
     name = ast_get(node, :name)
+    if name.ends_with?("!") && name.size() > 1
+      base = name.slice(0, name.size() - 1)
+      if is_outer_var(base, outer_vars, fn_params, outer_bindings) || block_params[base] != nil
+        name = base
     if is_outer_var(name, outer_vars, fn_params, outer_bindings) && block_params[name] == nil && !captures.include?(name)
       captures.push(name)
     return nil
@@ -487,6 +491,8 @@
   case t
   when :var
     name = ast_get(node, :name)
+    if name.ends_with?("!") && name.size() > 1 && known_calls[name] == nil
+      name = name.slice(0, name.size() - 1)
     # Free if not seen, not in outer scope, not a param, not a known function,
     # not a binding. `item` is special: in a zero-param block it is ALWAYS the
     # implicit element param, even when an outer `item` slot exists (an earlier

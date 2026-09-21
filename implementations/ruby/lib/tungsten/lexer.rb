@@ -313,6 +313,10 @@ module Tungsten
 
         handle_indentation
 
+      # Tight postfix hash; ## remains a type hint.
+      elsif check(/#(?!#)/) && pos.positive? && string.byteslice(0, pos).match?(/[\p{L}\p{N}_)\]}!'"]\z/) && skip_scan(/#(?!#)/)
+        token :PRIMORIAL
+
       elsif skip_scan(/#\[/)
         scan_key_literal
 

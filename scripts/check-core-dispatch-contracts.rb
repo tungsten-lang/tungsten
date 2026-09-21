@@ -245,7 +245,7 @@ RUNTIME_CLASS_CONTRACTS = {
     native_ic: [],
     abstract_declaration: %w[+ prime? prime_12k? prime_30k? to_s],
     source_fallback: %w[
-      bit_length digits divisible_by? each_digit even? factor factorial four?
+      bit_length digits divisible_by? each_digit even? factor factorial primorial four?
       gcd invmod isqrt lcm legendre modpow next odd? pow prev succ three? to_f
       two?
     ]
@@ -258,7 +258,7 @@ RUNTIME_CLASS_CONTRACTS = {
     native_only: %w[abs each prime? prime_12k? prime_30k? sqrt times to_d to_f],
     dual_dispatch: %w[isqrt],
     source_fallback: %w[
-      bit_length chr digits even? factor factorial gcd invmod isqrt lcm legendre
+      bit_length chr digits even? factor factorial primorial gcd invmod isqrt lcm legendre
       modpow negative? next odd? positive? pow prev sq succ to_i to_s zero?
     ]
   }

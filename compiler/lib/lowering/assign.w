@@ -122,6 +122,13 @@
   name = node.name
   wfn = ctx[:func]
 
+  # A tight bang stays in the identifier token for method-name compatibility.
+  # Only a bound variable supplies the receiver of postfix factorial.
+  if name.ends_with?("!") && name.size() > 1
+    base = name.slice(0, name.size() - 1)
+    if wfn[:var_slots][base] != nil || ctx[:bindings][base] != nil || wfn[:params].include?(base) || ctx[:mod][:top_level_vars][base] == true
+      return lower_expression(ctx, Tungsten:AST:Call.new(Tungsten:AST:Var.new(base), "factorial", [], nil))
+
   # Bare zero-argument block-presence query. This must precede ordinary
   # function/implicit-self lookup: the parser represents `block?` as :var.
   if name in ("block?" "block_given?")

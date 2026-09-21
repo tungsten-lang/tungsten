@@ -465,7 +465,7 @@ module Tungsten
       when 35
         prev = @pos > 0 ? @source.getbyte(@pos - 1) : 0
         hash_allowed =
-          color_literal_ahead? || @line_start || @last_significant_token_type.nil? || prev == 32 || prev == 9
+          primorial_ahead? || color_literal_ahead? || @line_start || @last_significant_token_type.nil? || prev == 32 || prev == 9
         unless hash_allowed || byte(1) == 35 || byte(1) == 91
           error "unexpected character: #"
         end
@@ -1075,7 +1075,16 @@ module Tungsten
       end
     end
 
+    def primorial_ahead?
+      !match_bytes?("##") && @pos.positive? &&
+        @source.byteslice(0, @pos).match?(/[\p{L}\p{N}_)\]}!'"]\z/)
+    end
+
     def scan_hash
+      if primorial_ahead?
+        return emit_fixed(:PRIMORIAL, 1)
+      end
+
       if match_bytes?("#[")
         return scan_key_literal
       end
@@ -1550,7 +1559,9 @@ module Tungsten
       start_col = @col
       start = @pos
       advance(prefix_len)
-      scan_ident_bytes
+      # Variable names do not include method punctuation: @n! is @n plus
+      # factorial, matching the reference and packed lexers.
+      advance while ident_continue_byte?(byte)
       if upper_byte?(byte)
         advance while ident_continue_byte?(byte) || upper_byte?(byte)
         mixed = slice(start)

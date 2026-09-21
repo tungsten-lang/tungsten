@@ -123,6 +123,12 @@ Indentation in source files must be two spaces. Lines in the same scope must hav
 
 ## 2.5 Comments
 
+A single `#` attached directly to an integer literal, variable, or the closing
+parenthesis of a grouped expression is the primorial suffix, for example
+`10#`, `n#`, or `(a + b)#`. A trailing comment must be
+separated from the preceding code by whitespace: `n # comment`.
+The `##` type-hint syntax is unchanged.
+
 A comment starts with an unquoted hash character `#` followed by a space or bang, and terminates at the end of the physical line. A comment signifies the end of the logical line unless the implicit line joining rules apply. Comments are ignored by the syntax; they do not emit tokens.
 
     Comment = "#" (SP | "!") { ~ NL } NL .
@@ -1286,7 +1292,7 @@ The three- and four-digit forms are _shorthand_: each nibble is doubled (`#RGB` 
     #FF000080     # => Color [255, 0, 0, 128]   with alpha
     #F008         # => Color [255, 0, 0, 136]   shorthand with alpha
 
-Because a color begins with `#` — the comment character (§2.5) — the two are told apart by what follows: a run of exactly 3, 4, 6, or 8 hexadecimal digits _not_ glued to further word characters is a color; every other `#…` is a comment. Thus `#FF` (two digits) and `#FFFFF` (five) are comments, and `#FF0000abcd` is a comment because the trailing letters run past eight hex digits.
+Because a color begins with `#` — the comment character (§2.5) — the two are told apart by what follows: a run of exactly 3, 4, 6, or 8 hexadecimal digits _not_ glued to further word characters is a color; other `#…` forms in literal position are comments (except key literals and type hints). A hash directly after a number, identifier, or the closing parenthesis of a grouped expression is the primorial suffix (§3.9). Thus `#FF` (two digits) and `#FFFFF` (five) are comments, and `#FF0000abcd` is a comment because the trailing letters run past eight hex digits.
 
 Token: `COLOR`. Runtime type: `Color`.
 

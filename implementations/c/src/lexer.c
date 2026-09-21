@@ -511,6 +511,16 @@ int tc_lex_source(const TcSource *source, TcTokens *tokens, TcError *err) {
     }
 
     if (c == '#') {
+      /* Tight postfix hash; double-hash type hints retain precedence. */
+      if (pos > 0 && !(pos + 1 < count && cp_at(source, pos + 1) == '#')) {
+        uint32_t prev = cp_at(source, pos - 1);
+        if ((source->lc[pos - 1] & 0x21) != 0 || (prev >= 'A' && prev <= 'Z') || prev == ')' || prev == ']' ||
+            prev == '}' || prev == '!' || prev == '"' || prev == 39) {
+          if (!token_push(tokens, token_new(TC_T_OP, pos, pos + 1, 0), err)) return 0;
+          pos++;
+          continue;
+        }
+      }
       size_t color_end = color_literal_end(source, pos, count);
       if (color_end > pos) {
         size_t start = pos;

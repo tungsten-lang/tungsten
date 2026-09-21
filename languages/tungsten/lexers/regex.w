@@ -54,6 +54,12 @@ use regex_base
           @col += 1
         emit(:TYPE_HINT, hint.to_s())
         return nil
+      if @pos > 0
+        prev = @chars[@pos - 1]
+        if is_ident_char?(@lc[@pos - 1]) || is_upper?(@lc[@pos - 1]) || is_digit?(@lc[@pos - 1]) || prev in (")" "]" "}" "!" "\"" "'")
+          @pos += 1
+          emit(:PRIMORIAL, "#")
+          return nil
       # Key literal: #[Enter], #[Ctrl+C]
       if @pos + 1 < @char_count && @chars[@pos + 1] == "\["
         @pos += 2
@@ -181,7 +187,7 @@ use regex_base
     if ch == "@" && @pos + 1 < @char_count && @chars[@pos + 1] == "@" && @pos + 2 < @char_count && is_ident_start?(@lc[@pos + 2])
       start_col = @col
       @pos += 2
-      word = scan_ident()
+      word = scan_ident(false)
       full = "@@" + word
       reject_mixed_case_tail("@@", word, start_col, false)
       push_token({type: :CVAR, value: full, line: @line, col: start_col})
@@ -216,7 +222,7 @@ use regex_base
     if ch == "@" && @pos + 1 < @char_count && is_ident_start?(peek_lc_at(1))
       start_col = @col
       @pos += 1
-      word = scan_ident()
+      word = scan_ident(false)
       full = "@" + word
       reject_mixed_case_tail("@", word, start_col, false)
       push_token({type: :IVAR, value: full, line: @line, col: start_col})
@@ -256,7 +262,7 @@ use regex_base
     if ch == "$" && @pos + 1 < @char_count && is_ident_start?(@lc[@pos + 1])
       start_col = @col
       @pos += 1
-      word = scan_ident()
+      word = scan_ident(false)
       reject_mixed_case_tail("$", word, start_col, false)
       emit(:GLOBAL, "$" + word)
       return nil
@@ -841,11 +847,13 @@ use regex_base
       emit(:STRING, path)
     nil
 
-  -> scan_ident
+  -> scan_ident(allow_suffix = true)
     word = StringBuffer(16)
     while @pos < @char_count && is_ident_char?(@lc[@pos])
       word << @chars[@pos]
       @pos += 1
+    if !allow_suffix
+      return word.to_s()
     # Trailing ? or !
     if @pos < @char_count && @chars[@pos] == "?"
       word << @chars[@pos]

@@ -236,6 +236,9 @@ T_FLOAT_ARRAY     = 167
 # `a ≈ b` — approximate equality (equality precedence; w_approx_eq).
 T_APPROX          = 168
 
+# Tight postfix primorial: product of primes at most the receiver.
+T_PRIMORIAL       = 169
+
 + Token
   # Force-load helper — referencing this from a caller triggers the
   # autoload pass to load core/token.w, which in turn registers Token

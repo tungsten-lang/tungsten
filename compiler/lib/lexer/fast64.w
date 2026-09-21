@@ -596,6 +596,15 @@
           tokens[tc] = t_type_hint | (((pos - start) & 0xFFF) << 26) | (start << 2)
           tc++
           next
+        # A hash attached to a value is primorial; spaced hashes remain
+        # comments. The double-hash type hint above keeps its meaning.
+        if pos > 0
+          prev_cp = (lc[pos - 1] >> 18) & cp_mask
+          if (lc[pos - 1] & 0x21) != 0 || (prev_cp >= 65 && prev_cp <= 90) || prev_cp in (41 93 125 33 34 39)
+            pos++
+            tokens[tc] = t_op | (1 << 26) | (start << 2)
+            tc++
+            next
         if pos + 1 < count && ((lc[pos + 1] >> 18) & cp_mask) == :-[
           pos += 2
           start = pos

@@ -114,6 +114,14 @@
     (2..self).reduce(1) -> (acc, item)
       acc * item
 
+  # n# — product of primes <= n; 0# == 1# == 1. Reduce preserves
+  # automatic BigInt promotion, just like factorial.
+  -> primorial
+    if self < 0
+      raise "Integer#primorial: negative receiver"
+    (2..self).reduce(1) -> (acc, item)
+      item.prime? ? acc * item : acc
+
   # Mirrors Integer#factor for heap BigInt values (BigInt < Int). Keeping the
   # implementation in the shared value object gives both integer towers the
   # same exact semantics and presentation.

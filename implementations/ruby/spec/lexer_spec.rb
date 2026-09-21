@@ -189,10 +189,15 @@ RSpec.shared_examples "a Tungsten lexer" do
   it_lexes_all "line-leading double-hash type hint and method call", "## type: Int\nmethod", *%i[TYPE_HINT NL ID]
   it_lexes_all "bare line-leading double-hash (empty type hint)", "##\nmethod", *%i[NL ID]
 
-  it "does not treat # after code without a leading space as a comment" do
-    lexer = described_class.new("x = 1# note\n")
-    expect { 100.times { lexer.next_token } }.to raise_error(Tungsten::Error)
-  end
+  it_lexes_all "tight hash is primorial, not a comment", "x = 1# note\n", *%i[ID SP = SP INT PRIMORIAL SP ID NL]
+  it_lexes_all "literal factorial", "10!", *%i[INT !]
+  it_lexes_all "instance variable factorial", "@n!", *%i[IVAR !]
+  it_lexes_all "class variable factorial", "@@n!", *%i[CVAR !]
+  it_lexes_all "global variable factorial", "$n!", *%i[GLOBAL !]
+  it_lexes_all "constant primorial", "N#", *%i[CONSTANT PRIMORIAL]
+  it_lexes_all "variable primorial", "n#", *%i[ID PRIMORIAL]
+  it_lexes_all "factorial comparison", "10! != 3", *%i[INT ! SP != SP INT]
+  it_lexes_all "primorial before comment", "10# # comment\n", *%i[INT PRIMORIAL NL]
 
   it "treats ## after code as inline type hint" do
     lexer = described_class.new("x = 1 ## i128\n")

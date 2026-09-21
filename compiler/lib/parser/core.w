@@ -245,6 +245,7 @@
     when 63 then "FAT_ARROW"
     when 64 then "SAFE_NAV"
     when 65 then "BANG"
+    when 169 then "PRIMORIAL"
     when 66 then "QUESTION"
     when 67 then "PIPE_FWD"
     when 68 then "MAP"

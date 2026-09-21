@@ -450,6 +450,14 @@
           tokens[tc] = t_type_hint | ((pos - start) << 28) | (start << 4)
           tc++
           next
+        # Tight postfix primorial; ## above retains type-hint syntax.
+        if pos > 0
+          prev_cp = (lc[pos - 1] >> 11) & cp_mask
+          if (lc[pos - 1] & 0x21) != 0 || (prev_cp >= 65 && prev_cp <= 90) || prev_cp in (41 93 125 33 34 39)
+            pos++
+            tokens[tc] = t_op | (1 << 28) | (start << 4)
+            tc++
+            next
         if pos + 1 < count && ((lc[pos + 1] >> 11) & cp_mask) == :-[
           pos += 2
           start = pos

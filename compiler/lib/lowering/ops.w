@@ -1574,9 +1574,84 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   cache[key] = untouched
   untouched
 
+# Recognize only pure, nonnegative literal factorials. The inline bound keeps
+# the parser's value identical in the bootstrap VM and self-hosted compiler;
+# larger decimal literals can already have wrapped in node.value.
+-> factorial_literal_bound(node)
+  if node == nil || !is_ast_node?(node) || ast_kind(node) != :call
+    return nil
+  if node.name != "factorial" || node.block != nil || (node.args != nil && node.args.size() != 0)
+    return nil
+  recv = node.receiver
+  if recv == nil || !is_ast_node?(recv) || ast_kind(recv) != :int
+    return nil
+  if int_literal_exceeds_i64?(recv) || recv.value < 0 || recv.value > 140737488355327
+    return nil
+  recv.value
+
+# Cancellation assumes the Core implementations all the way through numeric
+# comparison/arithmetic and Range's Enumerable machinery. Conservatively
+# disable it for any user method on those classes, including inherited and
+# overloaded entries. Cache per module, just like core_operator_untouched?.
+-> factorial_quotient_core_untouched?(mod)
+  cached = mod[:factorial_quotient_core_untouched]
+  if cached != nil
+    return cached
+  asts = mod[:class_method_asts]
+  if asts == nil || asts["Int.factorial/0"] == nil || !definition_from_core?(asts["Int.factorial/0"])
+    return false
+  classes = ["BigInt", "Int", "Integer", "Real", "Number", "Object", "Range", "Enumerable"]
+  keys = asts.keys()
+  ki = 0
+  while ki < keys.size()
+    key = keys[ki]
+    # Generated overload gates have no source path. Their cloned source
+    # workers are separate entries below and must all pass the Core check.
+    if !definition_from_core?(asts[key]) && ast_get(asts[key], :overload_dispatcher) != true
+      ci = 0
+      while ci < classes.size()
+        if key.starts_with?(classes[ci] + ".")
+          mod[:factorial_quotient_core_untouched] = false
+          return false
+        ci += 1
+    ki += 1
+  mod[:factorial_quotient_core_untouched] = true
+  true
+
+# n! / m! cancels to the product of m+1..n before either factorial is
+# evaluated. Emit a reduce so its boxed accumulator retains exact BigInt
+# promotion; expanding a tree of literal multiplications would infer machine
+# arithmetic and wrap. Runtime work depends on the surviving interval and
+# code size stays bounded. Variables and reversed quotients stay ordinary
+# calls, preserving evaluation, errors, and integer division semantics.
+-> cancel_literal_factorial_quotient(ctx, node)
+  if node.op != :SLASH || ctx[:overflow_mode] != nil
+    return nil
+  n = factorial_literal_bound(node.left)
+  m = factorial_literal_bound(node.right)
+  if n == nil || m == nil || (n < m && m > 1)
+    return nil
+  if !factorial_quotient_core_untouched?(ctx[:mod])
+    return nil
+  if n == m || n <= 1
+    return Tungsten:AST:Int.new(1)
+  first = m + 1
+  if first < 2
+    first = 2
+  if first == n
+    return Tungsten:AST:Int.new(n)
+  bounds = Tungsten:AST:Range.new(Tungsten:AST:Int.new(first), Tungsten:AST:Int.new(n), false)
+  product = Tungsten:AST:BinaryOp.new(Tungsten:AST:Var.new("__factorial_acc"), :STAR, Tungsten:AST:Var.new("__factorial_item"))
+  block = Tungsten:AST:Block.new(["__factorial_acc", "__factorial_item"], [product])
+  Tungsten:AST:Call.new(bounds, "reduce", [Tungsten:AST:Int.new(1)], block)
+
 -> lower_binary_op(ctx, node)
   wfn = ctx[:func]
   op = node.op
+
+  cancelled = cancel_literal_factorial_quotient(ctx, node)
+  if cancelled != nil
+    return lower_expression(ctx, cancelled)
 
   # `add/2` — a method reference: a bare source-function name over an
   # integer literal denotes the function as a closure of that arity

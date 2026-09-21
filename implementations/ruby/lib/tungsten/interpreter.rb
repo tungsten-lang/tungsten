@@ -2789,6 +2789,9 @@ module Tungsten
       case node
       when AST::Var
         name = node.name.to_s
+        if name.end_with?("!") && name.size > 1 && !(env.defined?(name) && env.get(name).is_a?(AST::Def))
+          name = name.delete_suffix("!")
+        end
         unless seen[name] || node.constant? || name.start_with?("@") || env.defined_locally_or_in_scope?(name)
           seen[name] = true
           vars << name
@@ -4122,6 +4125,13 @@ module Tungsten
     end
 
     def visit_var(node)
+      if node.name.end_with?("!") && node.name.size > 1
+        base = node.name.delete_suffix("!")
+        if @env.defined?(base) && !@env.get(base).is_a?(AST::Def)
+          return evaluate(AST::Call.new(AST::Var.new(base), "factorial", []))
+        end
+      end
+
       # Inline cache hit: same Environment instance → same slot layout
       if (ce = node.cached_env) && ce.equal?(@env)
         value = ce.get_slot(node.cached_slot)
@@ -4693,6 +4703,13 @@ module Tungsten
         recv.is_a?(::Integer) && no_call_args?(arg_nodes) ? recv - 1 : NO_DIRECT_CALL
       when "next", "succ"
         recv.is_a?(::Integer) && no_call_args?(arg_nodes) ? recv + 1 : NO_DIRECT_CALL
+      when "factorial", "primorial"
+        return NO_DIRECT_CALL unless recv.is_a?(::Integer) && no_call_args?(arg_nodes)
+        runtime_error("Int##{name}: negative receiver") if recv.negative?
+
+        (2..recv).reduce(1) do |acc, item|
+          name == "factorial" || tungsten_int_prime?(item) ? acc * item : acc
+        end
       when "prime?"
         recv.is_a?(::Integer) && no_call_args?(arg_nodes) ? tungsten_int_prime?(recv) : NO_DIRECT_CALL
       when "chars"

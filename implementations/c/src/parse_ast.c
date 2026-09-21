@@ -3043,6 +3043,39 @@ static TcAstValue parse_expr_span_ast(TcAstParser *p, size_t start, size_t end, 
   if (p->tokens->items[start].kind == TC_K_MINUS && start + 1 < end) return unary_node_ast(p, "MINUS", start, start + 1, end, err);
   if (p->tokens->items[start].kind == TC_K_STAR && start + 1 < end) return unary_node_ast(p, "DEREF", start, start + 1, end, err);
 
+  int grouped_product = end > start + 3 &&
+      wrapped_span_ast(p, start, end - 1, TC_K_LPAREN, TC_K_RPAREN);
+  int bare_product = end == start + 2 &&
+      (p->tokens->items[start].kind == TC_K_INT || p->tokens->items[start].kind == TC_K_ID ||
+       p->tokens->items[start].kind == TC_K_IVAR || p->tokens->items[start].kind == TC_K_CVAR ||
+       p->tokens->items[start].kind == TC_K_GLOBAL || p->tokens->items[start].kind == TC_K_PARG ||
+       p->tokens->items[start].kind == TC_K_NAME);
+  if ((grouped_product || bare_product) &&
+      tc_token_offset(p->tokens->items[end - 1].packed) ==
+          tc_token_offset(p->tokens->items[end - 2].packed) + tc_token_length(p->tokens->items[end - 2].packed) &&
+      (p->tokens->items[end - 1].kind == TC_K_BANG ||
+       p->tokens->items[end - 1].kind == TC_K_PRIMORIAL)) {
+    TcAstValue receiver = parse_expr_span_ast(p, start, end - 1, err);
+    if (receiver.kind == TC_AST_NIL) return receiver;
+    if (!grouped_product && !(ast_node_is(receiver, "int") || ast_node_is(receiver, "var") ||
+          ast_node_is(receiver, "ivar") || ast_node_is(receiver, "cvar") ||
+          ast_node_is(receiver, "gvar") || ast_node_is(receiver, "parg"))) {
+      tc_ast_free(receiver);
+      tc_error_set(err, "postfix products require a literal or variable");
+      return tc_ast_nil();
+    }
+    WValue base_token = p->tokens->items[start].packed;
+    uint32_t base_end = tc_token_offset(base_token) + tc_token_length(base_token);
+    if (!grouped_product && base_end > 0 &&
+        ((p->source->lc[base_end - 1] >> 18) & 0x1FFFFF) == '!') {
+      tc_ast_free(receiver);
+      tc_error_set(err, "postfix products require a literal or variable");
+      return tc_ast_nil();
+    }
+    const char *name = p->tokens->items[end - 1].kind == TC_K_BANG ? "factorial" : "primorial";
+    return call_node_ast(p, start, end - 1, receiver, name, strlen(name), tc_ast_array_new(err), err);
+  }
+
   if (wrapped_span_ast(p, start, end, TC_K_LPAREN, TC_K_RPAREN)) {
     return parse_expr_span_ast(p, start + 1, end - 1, err);
   }

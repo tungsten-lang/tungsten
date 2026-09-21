@@ -31977,8 +31977,11 @@ WValue w_duration_ns(int64_t ns) {
     return domain_heap_alloc(W_DOMAIN_DURATION, ns, 0, 0, 0);
 }
 
-WValue w_duration_months_ms(int16_t months, uint32_t ms) {
-    return w_box_duration_months_ms(months, ms);
+/* Parameters are full i32 words: compiled code declares this constructor as
+ * (i32, i32) (emitter narrow_runtime_param_types), and a definition with a
+ * narrower IR type is a mistyped call under LTO — a trap on WebAssembly. */
+WValue w_duration_months_ms(int32_t months, uint32_t ms) {
+    return w_box_duration_months_ms((int16_t)months, ms);
 }
 
 /* Duration extraction: domain_obj durations are always mode 0 (ns) */
@@ -37828,8 +37831,9 @@ WValue w_color_raw(int64_t r, int64_t g, int64_t b, int64_t a) {
     return w_box_color((uint8_t)r, (uint8_t)g, (uint8_t)b, (uint8_t)a, 0);
 }
 
-WValue w_color(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
-    return w_box_color(r, g, b, a, 0);  /* sRGB default, no flags */
+/* i32 words, matching the (i32 x4) declaration compiled code calls through. */
+WValue w_color(int32_t r, int32_t g, int32_t b, int32_t a) {
+    return w_box_color((uint8_t)r, (uint8_t)g, (uint8_t)b, (uint8_t)a, 0);  /* sRGB default, no flags */
 }
 
 /* Bit-packer only. Validity (catch-up days, leap seconds, tz quantum) is
@@ -37907,9 +37911,11 @@ static WValue make_ipv4_addr(uint32_t addr, int64_t cidr) {
     return w_box_ipv4(addr, normalize_ipv4_prefix(cidr), 0);
 }
 
-WValue w_ipv4(uint8_t a, uint8_t b, uint8_t c, uint8_t d, int cidr) {
-    uint32_t addr = ((uint32_t)a << 24) | ((uint32_t)b << 16) |
-                    ((uint32_t)c << 8) | d;
+/* i32 words, matching the (i32 x5) declaration compiled code calls through;
+ * each octet keeps its low 8 bits exactly as the uint8_t parameters did. */
+WValue w_ipv4(int32_t a, int32_t b, int32_t c, int32_t d, int cidr) {
+    uint32_t addr = ((uint32_t)(uint8_t)a << 24) | ((uint32_t)(uint8_t)b << 16) |
+                    ((uint32_t)(uint8_t)c << 8) | (uint8_t)d;
     return make_ipv4_addr(addr, cidr);
 }
 

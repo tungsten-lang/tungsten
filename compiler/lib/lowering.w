@@ -862,19 +862,7 @@ use lowering/definitions
   if !has_bigint
     return nil
   mod[:require_bigint_sub1_1_src] = true
-  mod[:require_bigint_sub1_2_src] = true
-  mod[:require_bigint_mul1_1_src] = true
-  mod[:require_bigint_sqr2_src] = true
-  mod[:require_bigint_sqr3_src] = true
-  mod[:require_bigint_sqr4_src] = true
-  mod[:require_bigint_sqr5_src] = true
-  mod[:require_bigint_sqr6_src] = true
-  mod[:require_bigint_sqr7_src] = true
-  mod[:require_bigint_sqr8_src] = true
   mod[:require_bigint_sqr16_src] = true
-  mod[:require_bigint_mul2_src] = true
-  mod[:require_bigint_mul3_src] = true
-  mod[:require_bigint_mul4_src] = true
   mod[:require_bigint_mul5_src] = true
   mod[:require_bigint_mul6_src] = true
   mod[:require_bigint_mul7_src] = true
@@ -885,6 +873,31 @@ use lowering/definitions
   mod[:require_bigint_mul17_src] = true
   mod[:require_bigint_mul21_src] = true
   mod[:require_bigint_mul24_src] = true
+  mod[:require_bigint_mul1_16_src] = true
+  mod[:require_bigint_mul1_24_src] = true
+  mod[:require_bigint_mul1_32_src] = true
+  mod[:require_bigint_mul1_40_src] = true
+  mod[:require_bigint_mul1_48_src] = true
+  mod[:require_bigint_mul1_64_src] = true
+  # The remaining seams wrap whole-function AArch64 kernels that exist only
+  # under `on macos && arm64` in big_int.w. Every other target (Linux, x86_64,
+  # wasm32-wasi) has no source worker to require and correctly binds the
+  # runtime's exact-C default.
+  target = detect_target()
+  if target[:os] != "macos" || target[:arch] != "arm64"
+    return nil
+  mod[:require_bigint_sub1_2_src] = true
+  mod[:require_bigint_mul1_1_src] = true
+  mod[:require_bigint_sqr2_src] = true
+  mod[:require_bigint_sqr3_src] = true
+  mod[:require_bigint_sqr4_src] = true
+  mod[:require_bigint_sqr5_src] = true
+  mod[:require_bigint_sqr6_src] = true
+  mod[:require_bigint_sqr7_src] = true
+  mod[:require_bigint_sqr8_src] = true
+  mod[:require_bigint_mul2_src] = true
+  mod[:require_bigint_mul3_src] = true
+  mod[:require_bigint_mul4_src] = true
   mod[:require_bigint_mul1_2_src] = true
   mod[:require_bigint_mul1_3_src] = true
   mod[:require_bigint_mul1_4_src] = true
@@ -892,12 +905,6 @@ use lowering/definitions
   mod[:require_bigint_mul1_6_src] = true
   mod[:require_bigint_mul1_7_src] = true
   mod[:require_bigint_mul1_8_src] = true
-  mod[:require_bigint_mul1_16_src] = true
-  mod[:require_bigint_mul1_24_src] = true
-  mod[:require_bigint_mul1_32_src] = true
-  mod[:require_bigint_mul1_40_src] = true
-  mod[:require_bigint_mul1_48_src] = true
-  mod[:require_bigint_mul1_64_src] = true
   nil
 
 -> lower_ast(ast, source_path, verbose = false, fast_mode = false, build_defines = nil, math_mode = :precise, no_static_slab = false, source_manifest = nil, release_mode = false)

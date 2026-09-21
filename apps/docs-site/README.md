@@ -60,8 +60,8 @@ unambiguous.
 ## The REPL engine
 
 `tungsten.wasm` + `tungsten.fs` + `wasi_shim.js` come from the wasm32-wasi port
-(`wasm/` in the `worktree-agent-a4163fbcdb9be146e` worktree; its README has the
-build, every stub and the host contract). One fresh `WebAssembly.Instance` per
+in `wasm/` (`wasm/build.sh`; its README has the build, every stub and the host
+contract). Copy the three files into `site/` after a build. One fresh `WebAssembly.Instance` per
 request; the stdlib bundle is fetched once per isolate through `env.FILES`.
 yaks.app gives a worker 50 ms of CPU per request: `<< 1 + 1` is ~3 ms, a class
 ~13 ms, `[1,2,3].map` ~25 ms (it re-parses the autoloaded core files each run).

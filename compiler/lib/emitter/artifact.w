@@ -426,6 +426,15 @@
         << "error: invalid reserved native consumed BigInt bitwise helper " + bmname
         exit(1)
 
+  # WebAssembly has no varargs-tolerant C ABI, so clang mangles a two-argument
+  # C `main` to `__main_argc_argv` and wasi-libc's crt1 calls that name. Give
+  # the module entry the same public spelling on wasm targets.
+  if emit_target_is_wasm(mod)
+    fn_out << "define i32 @__main_argc_argv(i32 %argc, ptr %argv) nounwind {\n"
+    fn_out << "  %r = call i32 @main(i32 %argc, ptr %argv)\n"
+    fn_out << "  ret i32 %r\n"
+    fn_out << "}\n\n"
+
   # A strong marker distinguishes the complete immutable raw-helper family
   # from older binaries whose same-named operator seams wrapped only partial
   # class workers. Consumed seams fail closed independently above.
@@ -976,6 +985,10 @@
   if triple == nil
     return true
   triple.index("arm64") != nil || triple.index("aarch64") != nil
+
+-> emit_target_is_wasm(mod)
+  triple = mod[:llvm_triple]
+  triple != nil && triple.starts_with?("wasm")
 
 -> emit_target_is_windows(mod)
   triple = mod[:llvm_triple]

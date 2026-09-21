@@ -66,7 +66,12 @@ WValue w_str_append(WValue str, WValue suffix);
 /* ---- String slab (mode 6: interned strings, permanent, identity by index) ---- */
 
 #define W_SLAB_SLOT_SIZE     32
+/* The slab RESERVES address space for every slot up front. Hosts without
+ * demand-paged virtual memory (wasm32 linear memory) shrink the reservation
+ * with -DW_SLAB_MAX_SLOTS=…; a full slab falls back to heap strings. */
+#ifndef W_SLAB_MAX_SLOTS
 #define W_SLAB_MAX_SLOTS     (1 << 24)  /* 16.7M slots, 24-bit index */
+#endif
 #define W_SLAB_TOTAL_SIZE    ((size_t)W_SLAB_SLOT_SIZE * W_SLAB_MAX_SLOTS)  /* 512MB virtual */
 #define W_SLAB_HEADER_SIZE       2   /* primary slot: flags(1) + length(1) */
 #define W_SLAB_DATA_OFFSET       2   /* primary slot string data starts at byte 2 */
@@ -612,7 +617,7 @@ WValue w_quantity_equivalent(WValue quantity, WValue target_unit, WValue equival
 
 /* ---- Duration constructors (0xFFFF tag) ---- */
 WValue w_duration_ns(int64_t ns);
-WValue w_duration_months_ms(int16_t months, uint32_t ms);
+WValue w_duration_months_ms(int32_t months, uint32_t ms);
 WValue w_duration_add(WValue a, WValue b);
 WValue w_duration_sub(WValue a, WValue b);
 
@@ -680,13 +685,13 @@ void w_vec2f_unpack(WValue v, double *x, double *y);
 void w_vec3f_unpack(WValue v, double *x, double *y, double *z);
 
 /* ---- Packed types (0xFFFE tag) ---- */
-WValue w_color(uint8_t r, uint8_t g, uint8_t b, uint8_t a);
+WValue w_color(int32_t r, int32_t g, int32_t b, int32_t a);
 WValue w_date(int year, int month, int day, int hour, int min, int sec, int tz);
 WValue w_date_new_w(WValue year, WValue month, WValue day, WValue hour,
                     WValue min, WValue sec, WValue tz);
 WValue w_date_from_ordinal(WValue year, WValue day_of_year);
 WValue w_date_today(void);
-WValue w_ipv4(uint8_t a, uint8_t b, uint8_t c, uint8_t d, int cidr);
+WValue w_ipv4(int32_t a, int32_t b, int32_t c, int32_t d, int cidr);
 WValue w_ipv4_parse(WValue str_v);
 WValue w_ipv4_from_octets(WValue a, WValue b, WValue c, WValue d, WValue prefix_v);
 WValue w_ipv4_in_cidr(WValue ip, WValue cidr);
@@ -1988,7 +1993,10 @@ _Static_assert(offsetof(WArray, start) == 4,  "WArray start offset");
 _Static_assert(offsetof(WArray, size)  == 8,  "WArray size offset (was length)");
 _Static_assert(offsetof(WArray, cap)   == 12, "WArray cap offset (was cap)");
 _Static_assert(offsetof(WArray, slots) == 16, "WArray slots offset (was items)");
-_Static_assert(sizeof(WArray)          == 24, "WArray header size locked at 24 bytes (i32 demote — was 40)");
+/* The IR bakes the field OFFSETS above; the header's total size is only ever
+ * taken by C (sizeof), so it follows the target's pointer width: 24 bytes on
+ * LP64, 20 on ILP32 (wasm32) where the trailing `slots` pointer is 4 bytes. */
+_Static_assert(sizeof(WArray)          == 16 + sizeof(void *), "WArray header size locked at 16 + one pointer (24 bytes on LP64; i32 demote — was 40)");
 
 /* ---- Big Array ---- *
  * Same shape as WArray but with i64 start/size/cap so the runtime can

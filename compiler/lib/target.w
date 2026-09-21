@@ -272,6 +272,14 @@ detect_target_memo = {}
   cached = detect_target_memo[:target]
   if cached != nil
     return cached
+  # Cross-compilation: `on` guards, embedded-asm selection and the link recipe
+  # describe the code-generation TARGET, so a `--target=<triple>` build reads
+  # os/arch from the triple instead of asking the host. The same variable is
+  # how an image that cannot spawn `uname` (wasm32-wasi) names itself.
+  cross = env("TUNGSTEN_TARGET")
+  if cross != nil && cross != ""
+    detect_target_memo[:target] = target_from_triple(cross)
+    return detect_target_memo[:target]
   os_raw = capture("uname -s").strip()
   arch_raw = capture("uname -m").strip()
 
@@ -296,6 +304,37 @@ detect_target_memo = {}
   features = detect_features(os, arch)
   detect_target_memo[:target] = { os: os, arch: arch, features: features }
   detect_target_memo[:target]
+
+# os/arch designators for an LLVM triple (`x86_64-apple-darwin`,
+# `aarch64-unknown-linux-gnu`, `wasm32-wasi`, …). The arch is the first
+# component; the os is recognised anywhere after it because the vendor
+# component is optional.
+-> target_from_triple(triple)
+  parts = triple.split("-")
+  arch = "unknown"
+  case parts[0]
+  when "x86_64", "amd64"
+    arch = "x86_64"
+  when "arm64", "aarch64", "arm64e"
+    arch = "arm64"
+  when "wasm32", "wasm64"
+    arch = parts[0]
+
+  os = "unknown"
+  i = 1
+  while i < parts.size()
+    part = parts[i]
+    if part.starts_with?("darwin") || part.starts_with?("macos")
+      os = "macos"
+    elsif part.starts_with?("linux")
+      os = "linux"
+    elsif part.starts_with?("freebsd")
+      os = "freebsd"
+    elsif part.starts_with?("wasi")
+      os = "wasi"
+    i += 1
+
+  { os: os, arch: arch, features: detect_features(os, arch) }
 
 -> detect_features(os, arch)
   features = []

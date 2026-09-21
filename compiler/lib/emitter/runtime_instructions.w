@@ -378,8 +378,15 @@
         parts << "\n  store i64 " + t + ".fz, ptr " + t + ".gep, align 8"
         parts << "\n  " + t + " = add i64 " + t + ".fz, 0"
       return parts.to_s()
-    args_str = render_call_args(wire_get(inst, :args), wire_get(inst, :arg_types))
-    base = wire_get(inst, :temp) + " = " + call_prefix(inst) + " i64 @" + wire_get(inst, :name) + "(" + args_str + ")" + known_call_range_metadata_suffix(inst, "i64")
+    narrowed = render_narrowed_call_args(inst)
+    narrow_setup = ""
+    args_str = nil
+    if narrowed != nil
+      narrow_setup = narrowed[0]
+      args_str = narrowed[1]
+    else
+      args_str = render_call_args(wire_get(inst, :args), wire_get(inst, :arg_types))
+    base = narrow_setup + wire_get(inst, :temp) + " = " + call_prefix(inst) + " i64 @" + wire_get(inst, :name) + "(" + args_str + ")" + known_call_range_metadata_suffix(inst, "i64")
     if wire_get(inst, :src_line) != nil && wire_get(inst, :loc_site_id) != nil
       ret_lbl = "csd." + wire_get(inst, :loc_site_id).to_s() + ".ret"
       base + "\n  br label %" + ret_lbl + "\n" + ret_lbl + ":"
@@ -1609,6 +1616,40 @@
     "; UNKNOWN WIRE OP: " + op.to_s()
 
 # -- Helpers --
+
+# An untyped `ccall` to a narrow-parameter constructor (see
+# narrow_runtime_param_types): truncate each i64 word to the declared width,
+# then call with the declared types. Returns [setup_text, args_text], or nil
+# when the call needs no narrowing.
+-> render_narrowed_call_args(inst)
+  param_types = narrow_runtime_param_types(wire_get(inst, :name))
+  args = wire_get(inst, :args)
+  if param_types == nil || wire_sequence_size(args) != param_types.size()
+    return nil
+  # `ccall` records every operand as an i64 word; anything else is a call site
+  # that already chose its own operand types.
+  operand_types = wire_get(inst, :arg_types)
+  if operand_types != nil
+    ti = 0
+    while ti < wire_sequence_size(operand_types)
+      operand_type = wire_sequence_get(operand_types, ti)
+      if operand_type != nil && operand_type != "i64"
+        return nil
+      ti += 1
+  t = wire_get(inst, :temp)
+  out = StringBuffer(64 + param_types.size() * 48)
+  rendered = []
+  i = 0
+  while i < param_types.size()
+    arg = wire_sequence_get(args, i)
+    if param_types[i] == "i64"
+      rendered.push("i64 " + arg)
+    else
+      narrow = t + ".n" + i.to_s()
+      out << narrow + " = trunc i64 " + arg + " to " + param_types[i] + "\n  "
+      rendered.push(param_types[i] + " " + narrow)
+    i += 1
+  [out.to_s(), rendered.join(", ")]
 
 -> render_call_args(args, arg_types = nil)
   parts = []

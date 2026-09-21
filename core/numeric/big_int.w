@@ -494,7 +494,7 @@ on macos && arm64
       .short 0x40e, 0x40c, 0x40a, 0x408, 0x406, 0x404, 0x402, 0x400
     ASM
 
-fn __bigint_mod_42_exact(rp, up, vp) (i64 i64 i64) i64
+  fn __bigint_mod_42_exact(rp, up, vp) (i64 i64 i64) i64
     asm <<~ASM
       ldr	x9, [x2, #8]
       clz	x8, x9
@@ -3759,134 +3759,135 @@ on macos && arm64
 # would box the addresses and re-enter ordinary numeric dispatch.  Allocation,
 # result capacities, top-limb normalization, and demotion match mag_div_42 /
 # mag_mod_42 and their bigint_finish_mag_sub callers.
-fn __bigint_div_42_raw(a, b) (i64 i64) i64
-  result = ccall_nobox("w_bigint_alloc_hot", 3) ## i64
-  rp = (result & 140737488355327) + 16 ## i64
-  ap = (a & 140737488355327) + 16 ## i64
-  bp = (b & 140737488355327) + 16 ## i64
-  __bigint_div_42_exact(rp, ap, bp)
-  outn = 0 ## i64
-  if raw_load_u64(rp, 16) != 0
-    outn = 3
-  elsif raw_load_u64(rp, 8) != 0
-    outn = 2
-  elsif raw_load_u64(rp, 0) != 0
-    outn = 1
-  ccall_nobox("w_bigint_finish_sub_raw", result, outn)
+on macos && arm64
+  fn __bigint_div_42_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot", 3) ## i64
+    rp = (result & 140737488355327) + 16 ## i64
+    ap = (a & 140737488355327) + 16 ## i64
+    bp = (b & 140737488355327) + 16 ## i64
+    __bigint_div_42_exact(rp, ap, bp)
+    outn = 0 ## i64
+    if raw_load_u64(rp, 16) != 0
+      outn = 3
+    elsif raw_load_u64(rp, 8) != 0
+      outn = 2
+    elsif raw_load_u64(rp, 0) != 0
+      outn = 1
+    ccall_nobox("w_bigint_finish_sub_raw", result, outn)
 
-fn __bigint_mod_42_raw(a, b) (i64 i64) i64
-  result = ccall_nobox("w_bigint_alloc_hot", 2) ## i64
-  rp = (result & 140737488355327) + 16 ## i64
-  ap = (a & 140737488355327) + 16 ## i64
-  bp = (b & 140737488355327) + 16 ## i64
-  __bigint_mod_42_exact(rp, ap, bp)
-  outn = 0 ## i64
-  if raw_load_u64(rp, 8) != 0
-    outn = 2
-  elsif raw_load_u64(rp, 0) != 0
-    outn = 1
-  ccall_nobox("w_bigint_finish_sub_raw", result, outn)
+  fn __bigint_mod_42_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot", 2) ## i64
+    rp = (result & 140737488355327) + 16 ## i64
+    ap = (a & 140737488355327) + 16 ## i64
+    bp = (b & 140737488355327) + 16 ## i64
+    __bigint_mod_42_exact(rp, ap, bp)
+    outn = 0 ## i64
+    if raw_load_u64(rp, 8) != 0
+      outn = 2
+    elsif raw_load_u64(rp, 0) != 0
+      outn = 1
+    ccall_nobox("w_bigint_finish_sub_raw", result, outn)
 
-fn __bigint_div_63_raw(a, b) (i64 i64) i64
-  result = ccall_nobox("w_bigint_alloc_hot4_raw") ## i64
-  rp = (result & 140737488355327) + 16 ## i64
-  ap = (a & 140737488355327) + 16 ## i64
-  bp = (b & 140737488355327) + 16 ## i64
-  outn = __bigint_div_63_exact(rp, ap, bp) ## i64
-  if outn < 0
-    ccall_nobox("w_bigint_release_unfinished_raw", result)
-    return ccall_nobox("w_bigint_div_63_after_cert_fail", a, b)
-  ccall_nobox("w_bigint_finish_sub_raw", result, outn)
+  fn __bigint_div_63_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot4_raw") ## i64
+    rp = (result & 140737488355327) + 16 ## i64
+    ap = (a & 140737488355327) + 16 ## i64
+    bp = (b & 140737488355327) + 16 ## i64
+    outn = __bigint_div_63_exact(rp, ap, bp) ## i64
+    if outn < 0
+      ccall_nobox("w_bigint_release_unfinished_raw", result)
+      return ccall_nobox("w_bigint_div_63_after_cert_fail", a, b)
+    ccall_nobox("w_bigint_finish_sub_raw", result, outn)
 
-fn __bigint_div_84_raw(a, b) (i64 i64) i64
-  result = ccall_nobox("w_bigint_alloc_hot", 5) ## i64
-  rp = (result & 140737488355327) + 16 ## i64
-  ap = (a & 140737488355327) + 16 ## i64
-  bp = (b & 140737488355327) + 16 ## i64
-  outn = __bigint_div_84_exact(rp, ap, bp) ## i64
-  if outn < 0
-    ccall_nobox("w_bigint_release_unfinished_raw", result)
-    return ccall_nobox("w_bigint_div_84_after_cert_fail", a, b)
-  ccall_nobox("w_bigint_finish_sub_raw", result, outn)
+  fn __bigint_div_84_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot", 5) ## i64
+    rp = (result & 140737488355327) + 16 ## i64
+    ap = (a & 140737488355327) + 16 ## i64
+    bp = (b & 140737488355327) + 16 ## i64
+    outn = __bigint_div_84_exact(rp, ap, bp) ## i64
+    if outn < 0
+      ccall_nobox("w_bigint_release_unfinished_raw", result)
+      return ccall_nobox("w_bigint_div_84_after_cert_fail", a, b)
+    ccall_nobox("w_bigint_finish_sub_raw", result, outn)
 
-fn __bigint_add1_3_raw(a, b) (i64 i64) i64
-  result = ccall_nobox("w_bigint_alloc_hot", 3) ## i64
-  mask = 140737488355327 ## i64
-  rp = (result & mask) + 16 ## i64
-  ap = (a & mask) + 16 ## i64
-  bp = (b & mask) + 16 ## i64
-  word = raw_load_u64(bp, 0) ## i64
-  carry = __bigint_add1_3_exact(rp, ap, word) ## i64
-  ccall_nobox("w_bigint_add1_3_finish_raw", result, carry)
+  fn __bigint_add1_3_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot", 3) ## i64
+    mask = 140737488355327 ## i64
+    rp = (result & mask) + 16 ## i64
+    ap = (a & mask) + 16 ## i64
+    bp = (b & mask) + 16 ## i64
+    word = raw_load_u64(bp, 0) ## i64
+    carry = __bigint_add1_3_exact(rp, ap, word) ## i64
+    ccall_nobox("w_bigint_add1_3_finish_raw", result, carry)
 
-fn __bigint_add3_equal_raw(a, b) (i64 i64) i64
-  result = ccall_nobox("w_bigint_alloc_hot4_raw") ## i64
-  mask = 140737488355327 ## i64
-  rp = (result & mask) + 16 ## i64
-  ap = (a & mask) + 16 ## i64
-  bp = (b & mask) + 16 ## i64
-  carry = __bigint_add3_equal_exact(rp, ap, bp) ## i64
-  ccall_nobox("w_bigint_add3_equal_finish_raw", result, carry)
+  fn __bigint_add3_equal_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot4_raw") ## i64
+    mask = 140737488355327 ## i64
+    rp = (result & mask) + 16 ## i64
+    ap = (a & mask) + 16 ## i64
+    bp = (b & mask) + 16 ## i64
+    carry = __bigint_add3_equal_exact(rp, ap, bp) ## i64
+    ccall_nobox("w_bigint_add3_equal_finish_raw", result, carry)
 
-# Exact C-shaped positive equal-width add@4: bigint_add_equal_fast takes the
-# hot buffer in the power-of-two class of 4+1 limbs, runs the fixed kernel,
-# publishes the carry limb unconditionally, and sizes the result 4 or 5.
-fn __bigint_add4_equal_raw(a, b) (i64 i64) i64
-  result = ccall_nobox("w_bigint_alloc_hot8_raw") ## i64
-  mask = 140737488355327 ## i64
-  rp = (result & mask) + 16 ## i64
-  ap = (a & mask) + 16 ## i64
-  bp = (b & mask) + 16 ## i64
-  carry = __bigint_add4_equal_exact(rp, ap, bp) ## i64
-  ccall_nobox("w_bigint_add4_equal_finish_raw", result, carry)
+  # Exact C-shaped positive equal-width add@4: bigint_add_equal_fast takes the
+  # hot buffer in the power-of-two class of 4+1 limbs, runs the fixed kernel,
+  # publishes the carry limb unconditionally, and sizes the result 4 or 5.
+  fn __bigint_add4_equal_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot8_raw") ## i64
+    mask = 140737488355327 ## i64
+    rp = (result & mask) + 16 ## i64
+    ap = (a & mask) + 16 ## i64
+    bp = (b & mask) + 16 ## i64
+    carry = __bigint_add4_equal_exact(rp, ap, bp) ## i64
+    ccall_nobox("w_bigint_add4_equal_finish_raw", result, carry)
 
-# Exact C-shaped positive equal-width add@8: bigint_add_equal_fast takes the
-# hot buffer in the power-of-two class of 8+1 limbs, runs the fixed kernel,
-# publishes the carry limb unconditionally, and sizes the result 8 or 9.
-fn __bigint_add8_equal_raw(a, b) (i64 i64) i64
-  result = ccall_nobox("w_bigint_alloc_hot16_raw") ## i64
-  mask = 140737488355327 ## i64
-  rp = (result & mask) + 16 ## i64
-  ap = (a & mask) + 16 ## i64
-  bp = (b & mask) + 16 ## i64
-  carry = __bigint_add8_equal_exact(rp, ap, bp) ## i64
-  ccall_nobox("w_bigint_add8_equal_finish_raw", result, carry)
+  # Exact C-shaped positive equal-width add@8: bigint_add_equal_fast takes the
+  # hot buffer in the power-of-two class of 8+1 limbs, runs the fixed kernel,
+  # publishes the carry limb unconditionally, and sizes the result 8 or 9.
+  fn __bigint_add8_equal_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot16_raw") ## i64
+    mask = 140737488355327 ## i64
+    rp = (result & mask) + 16 ## i64
+    ap = (a & mask) + 16 ## i64
+    bp = (b & mask) + 16 ## i64
+    carry = __bigint_add8_equal_exact(rp, ap, bp) ## i64
+    ccall_nobox("w_bigint_add8_equal_finish_raw", result, carry)
 
-# Exact C-shaped positive equal-width add@16: bigint_add_equal_fast takes the
-# hot buffer in the power-of-two class of 16+1 limbs, runs the fixed kernel,
-# publishes the carry limb unconditionally, and sizes the result 16 or 17.
-fn __bigint_add16_equal_raw(a, b) (i64 i64) i64
-  result = ccall_nobox("w_bigint_alloc_hot32_exact_raw") ## i64
-  mask = 140737488355327 ## i64
-  rp = (result & mask) + 16 ## i64
-  ap = (a & mask) + 16 ## i64
-  bp = (b & mask) + 16 ## i64
-  carry = __bigint_add16_equal_exact(rp, ap, bp) ## i64
-  ccall_nobox("w_bigint_add16_equal_finish_raw", result, carry)
+  # Exact C-shaped positive equal-width add@16: bigint_add_equal_fast takes the
+  # hot buffer in the power-of-two class of 16+1 limbs, runs the fixed kernel,
+  # publishes the carry limb unconditionally, and sizes the result 16 or 17.
+  fn __bigint_add16_equal_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot32_exact_raw") ## i64
+    mask = 140737488355327 ## i64
+    rp = (result & mask) + 16 ## i64
+    ap = (a & mask) + 16 ## i64
+    bp = (b & mask) + 16 ## i64
+    carry = __bigint_add16_equal_exact(rp, ap, bp) ## i64
+    ccall_nobox("w_bigint_add16_equal_finish_raw", result, carry)
 
-# Exact C-shaped positive equal-width add@24: the hot buffer in the
-# power-of-two class of 25 limbs (32), the fixed kernel, the unconditional
-# carry-limb store, and a normalized size of 24 or 25.
-fn __bigint_add24_equal_raw(a, b) (i64 i64) i64
-  result = ccall_nobox("w_bigint_alloc_hot32_exact_raw") ## i64
-  mask = 140737488355327 ## i64
-  rp = (result & mask) + 16 ## i64
-  ap = (a & mask) + 16 ## i64
-  bp = (b & mask) + 16 ## i64
-  carry = __bigint_add24_equal_exact(rp, ap, bp) ## i64
-  ccall_nobox("w_bigint_add24_equal_finish_raw", result, carry)
+  # Exact C-shaped positive equal-width add@24: the hot buffer in the
+  # power-of-two class of 25 limbs (32), the fixed kernel, the unconditional
+  # carry-limb store, and a normalized size of 24 or 25.
+  fn __bigint_add24_equal_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot32_exact_raw") ## i64
+    mask = 140737488355327 ## i64
+    rp = (result & mask) + 16 ## i64
+    ap = (a & mask) + 16 ## i64
+    bp = (b & mask) + 16 ## i64
+    carry = __bigint_add24_equal_exact(rp, ap, bp) ## i64
+    ccall_nobox("w_bigint_add24_equal_finish_raw", result, carry)
 
-# Exact C-shaped positive add@2 (bigint_add_two_limb_magnitudes, same-sign
-# arm): the exact hot class-four take, two limb sums, and the unconditional
-# third-limb publication with size two or three.
-fn __bigint_add2_equal_raw(a, b) (i64 i64) i64
-  result = ccall_nobox("w_bigint_alloc_hot4_raw") ## i64
-  mask = 140737488355327 ## i64
-  rp = (result & mask) + 16 ## i64
-  ap = (a & mask) + 16 ## i64
-  bp = (b & mask) + 16 ## i64
-  carry = __bigint_add2_equal_exact(rp, ap, bp) ## i64
-  ccall_nobox("w_bigint_add2_equal_finish_raw", result, carry)
+  # Exact C-shaped positive add@2 (bigint_add_two_limb_magnitudes, same-sign
+  # arm): the exact hot class-four take, two limb sums, and the unconditional
+  # third-limb publication with size two or three.
+  fn __bigint_add2_equal_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot4_raw") ## i64
+    mask = 140737488355327 ## i64
+    rp = (result & mask) + 16 ## i64
+    ap = (a & mask) + 16 ## i64
+    bp = (b & mask) + 16 ## i64
+    carry = __bigint_add2_equal_exact(rp, ap, bp) ## i64
+    ccall_nobox("w_bigint_add2_equal_finish_raw", result, carry)
 
 # Positive equal-width magnitude compare, exactly as C's boxed subtract
 # entry orders it: the top limbs decide when they differ, otherwise the full
@@ -3918,156 +3919,157 @@ fn __bigint_equal_compare_raw(ap, bp, n) (i64 i64 i64) i64
 # route into bigint_sub_equal_fast): compare, the hot take in 3's
 # smallest-fit class, the fixed kernel over larger minus smaller, then C's
 # exact top-limb publication or trim-and-demote finisher.
-fn __bigint_sub3_equal_raw(a, b) (i64 i64) i64
-  mask = 140737488355327 ## i64
-  ap = (a & mask) + 16 ## i64
-  bp = (b & mask) + 16 ## i64
-  compare = __bigint_equal_compare_raw(ap, bp, 3) ## i64
-  if compare == 0
-    return ccall_nobox("w_int", 0)
-  lp = ap
-  sp = bp
-  negative = 0 ## i64
-  if compare < 0
-    lp = bp
-    sp = ap
-    negative = 1
-  result = ccall_nobox("w_bigint_alloc_hot4_raw") ## i64
-  rp = (result & mask) + 16 ## i64
-  __bigint_sub3_equal_exact(rp, lp, sp)
-  ccall_nobox("w_bigint_sub_equal_finish_raw", result, 3, negative)
+on macos && arm64
+  fn __bigint_sub3_equal_raw(a, b) (i64 i64) i64
+    mask = 140737488355327 ## i64
+    ap = (a & mask) + 16 ## i64
+    bp = (b & mask) + 16 ## i64
+    compare = __bigint_equal_compare_raw(ap, bp, 3) ## i64
+    if compare == 0
+      return ccall_nobox("w_int", 0)
+    lp = ap
+    sp = bp
+    negative = 0 ## i64
+    if compare < 0
+      lp = bp
+      sp = ap
+      negative = 1
+    result = ccall_nobox("w_bigint_alloc_hot4_raw") ## i64
+    rp = (result & mask) + 16 ## i64
+    __bigint_sub3_equal_exact(rp, lp, sp)
+    ccall_nobox("w_bigint_sub_equal_finish_raw", result, 3, negative)
 
-# Exact C-shaped positive equal-width sub@4 (bigint_sub_any's boxed equal
-# route into bigint_sub_equal_fast): compare, the hot take in 4's
-# smallest-fit class, the fixed kernel over larger minus smaller, then C's
-# exact top-limb publication or trim-and-demote finisher.
-fn __bigint_sub4_equal_raw(a, b) (i64 i64) i64
-  mask = 140737488355327 ## i64
-  ap = (a & mask) + 16 ## i64
-  bp = (b & mask) + 16 ## i64
-  compare = __bigint_equal_compare_raw(ap, bp, 4) ## i64
-  if compare == 0
-    return ccall_nobox("w_int", 0)
-  lp = ap
-  sp = bp
-  negative = 0 ## i64
-  if compare < 0
-    lp = bp
-    sp = ap
-    negative = 1
-  result = ccall_nobox("w_bigint_alloc_hot4_raw") ## i64
-  rp = (result & mask) + 16 ## i64
-  __bigint_sub4_equal_exact(rp, lp, sp)
-  ccall_nobox("w_bigint_sub_equal_finish_raw", result, 4, negative)
+  # Exact C-shaped positive equal-width sub@4 (bigint_sub_any's boxed equal
+  # route into bigint_sub_equal_fast): compare, the hot take in 4's
+  # smallest-fit class, the fixed kernel over larger minus smaller, then C's
+  # exact top-limb publication or trim-and-demote finisher.
+  fn __bigint_sub4_equal_raw(a, b) (i64 i64) i64
+    mask = 140737488355327 ## i64
+    ap = (a & mask) + 16 ## i64
+    bp = (b & mask) + 16 ## i64
+    compare = __bigint_equal_compare_raw(ap, bp, 4) ## i64
+    if compare == 0
+      return ccall_nobox("w_int", 0)
+    lp = ap
+    sp = bp
+    negative = 0 ## i64
+    if compare < 0
+      lp = bp
+      sp = ap
+      negative = 1
+    result = ccall_nobox("w_bigint_alloc_hot4_raw") ## i64
+    rp = (result & mask) + 16 ## i64
+    __bigint_sub4_equal_exact(rp, lp, sp)
+    ccall_nobox("w_bigint_sub_equal_finish_raw", result, 4, negative)
 
-# Exact C-shaped positive equal-width sub@8 (bigint_sub_any's boxed equal
-# route into bigint_sub_equal_fast): compare, the hot take in 8's
-# smallest-fit class, the fixed kernel over larger minus smaller, then C's
-# exact top-limb publication or trim-and-demote finisher.
-fn __bigint_sub8_equal_raw(a, b) (i64 i64) i64
-  mask = 140737488355327 ## i64
-  ap = (a & mask) + 16 ## i64
-  bp = (b & mask) + 16 ## i64
-  compare = __bigint_equal_compare_raw(ap, bp, 8) ## i64
-  if compare == 0
-    return ccall_nobox("w_int", 0)
-  lp = ap
-  sp = bp
-  negative = 0 ## i64
-  if compare < 0
-    lp = bp
-    sp = ap
-    negative = 1
-  result = ccall_nobox("w_bigint_alloc_hot8_raw") ## i64
-  rp = (result & mask) + 16 ## i64
-  __bigint_sub8_equal_exact(rp, lp, sp)
-  ccall_nobox("w_bigint_sub_equal_finish_raw", result, 8, negative)
+  # Exact C-shaped positive equal-width sub@8 (bigint_sub_any's boxed equal
+  # route into bigint_sub_equal_fast): compare, the hot take in 8's
+  # smallest-fit class, the fixed kernel over larger minus smaller, then C's
+  # exact top-limb publication or trim-and-demote finisher.
+  fn __bigint_sub8_equal_raw(a, b) (i64 i64) i64
+    mask = 140737488355327 ## i64
+    ap = (a & mask) + 16 ## i64
+    bp = (b & mask) + 16 ## i64
+    compare = __bigint_equal_compare_raw(ap, bp, 8) ## i64
+    if compare == 0
+      return ccall_nobox("w_int", 0)
+    lp = ap
+    sp = bp
+    negative = 0 ## i64
+    if compare < 0
+      lp = bp
+      sp = ap
+      negative = 1
+    result = ccall_nobox("w_bigint_alloc_hot8_raw") ## i64
+    rp = (result & mask) + 16 ## i64
+    __bigint_sub8_equal_exact(rp, lp, sp)
+    ccall_nobox("w_bigint_sub_equal_finish_raw", result, 8, negative)
 
-# Exact C-shaped positive equal-width sub@16 (bigint_sub_any's boxed equal
-# route into bigint_sub_equal_fast): compare, the hot take in 16's
-# smallest-fit class, the fixed kernel over larger minus smaller, then C's
-# exact top-limb publication or trim-and-demote finisher.
-fn __bigint_sub16_equal_raw(a, b) (i64 i64) i64
-  mask = 140737488355327 ## i64
-  ap = (a & mask) + 16 ## i64
-  bp = (b & mask) + 16 ## i64
-  compare = __bigint_equal_compare_raw(ap, bp, 16) ## i64
-  if compare == 0
-    return ccall_nobox("w_int", 0)
-  lp = ap
-  sp = bp
-  negative = 0 ## i64
-  if compare < 0
-    lp = bp
-    sp = ap
-    negative = 1
-  result = ccall_nobox("w_bigint_alloc_hot16_raw") ## i64
-  rp = (result & mask) + 16 ## i64
-  __bigint_sub16_equal_exact(rp, lp, sp)
-  ccall_nobox("w_bigint_sub_equal_finish_raw", result, 16, negative)
+  # Exact C-shaped positive equal-width sub@16 (bigint_sub_any's boxed equal
+  # route into bigint_sub_equal_fast): compare, the hot take in 16's
+  # smallest-fit class, the fixed kernel over larger minus smaller, then C's
+  # exact top-limb publication or trim-and-demote finisher.
+  fn __bigint_sub16_equal_raw(a, b) (i64 i64) i64
+    mask = 140737488355327 ## i64
+    ap = (a & mask) + 16 ## i64
+    bp = (b & mask) + 16 ## i64
+    compare = __bigint_equal_compare_raw(ap, bp, 16) ## i64
+    if compare == 0
+      return ccall_nobox("w_int", 0)
+    lp = ap
+    sp = bp
+    negative = 0 ## i64
+    if compare < 0
+      lp = bp
+      sp = ap
+      negative = 1
+    result = ccall_nobox("w_bigint_alloc_hot16_raw") ## i64
+    rp = (result & mask) + 16 ## i64
+    __bigint_sub16_equal_exact(rp, lp, sp)
+    ccall_nobox("w_bigint_sub_equal_finish_raw", result, 16, negative)
 
-# Exact C-shaped positive equal-width sub@24 (bigint_sub_any's boxed equal
-# route into bigint_sub_equal_fast): compare, the hot take in 24's
-# smallest-fit class, the fixed kernel over larger minus smaller, then C's
-# exact top-limb publication or trim-and-demote finisher.
-fn __bigint_sub24_equal_raw(a, b) (i64 i64) i64
-  mask = 140737488355327 ## i64
-  ap = (a & mask) + 16 ## i64
-  bp = (b & mask) + 16 ## i64
-  compare = __bigint_equal_compare_raw(ap, bp, 24) ## i64
-  if compare == 0
-    return ccall_nobox("w_int", 0)
-  lp = ap
-  sp = bp
-  negative = 0 ## i64
-  if compare < 0
-    lp = bp
-    sp = ap
-    negative = 1
-  result = ccall_nobox("w_bigint_alloc_hot32_exact_raw") ## i64
-  rp = (result & mask) + 16 ## i64
-  __bigint_sub24_equal_exact(rp, lp, sp)
-  ccall_nobox("w_bigint_sub_equal_finish_raw", result, 24, negative)
+  # Exact C-shaped positive equal-width sub@24 (bigint_sub_any's boxed equal
+  # route into bigint_sub_equal_fast): compare, the hot take in 24's
+  # smallest-fit class, the fixed kernel over larger minus smaller, then C's
+  # exact top-limb publication or trim-and-demote finisher.
+  fn __bigint_sub24_equal_raw(a, b) (i64 i64) i64
+    mask = 140737488355327 ## i64
+    ap = (a & mask) + 16 ## i64
+    bp = (b & mask) + 16 ## i64
+    compare = __bigint_equal_compare_raw(ap, bp, 24) ## i64
+    if compare == 0
+      return ccall_nobox("w_int", 0)
+    lp = ap
+    sp = bp
+    negative = 0 ## i64
+    if compare < 0
+      lp = bp
+      sp = ap
+      negative = 1
+    result = ccall_nobox("w_bigint_alloc_hot32_exact_raw") ## i64
+    rp = (result & mask) + 16 ## i64
+    __bigint_sub24_equal_exact(rp, lp, sp)
+    ccall_nobox("w_bigint_sub_equal_finish_raw", result, 24, negative)
 
-# Exact C-shaped positive sub@2 (bigint_add_two_limb_magnitudes,
-# opposite-sign arm): the two-limb compare, larger minus smaller, then C's
-# one-limb demotion or exact two-limb publication.
-fn __bigint_sub2_equal_raw(a, b) (i64 i64) i64
-  mask = 140737488355327 ## i64
-  ap = (a & mask) + 16 ## i64
-  bp = (b & mask) + 16 ## i64
-  a1 = raw_load_u64(ap, 8) ## u64
-  b1 = raw_load_u64(bp, 8) ## u64
-  compare = 0 ## i64
-  if a1 != b1
-    if a1 > b1
-      compare = 1
-    else
-      compare = 0 - 1
-  else
-    a0 = raw_load_u64(ap, 0) ## u64
-    b0 = raw_load_u64(bp, 0) ## u64
-    if a0 > b0
-      compare = 1
-    else
-      if a0 < b0
+  # Exact C-shaped positive sub@2 (bigint_add_two_limb_magnitudes,
+  # opposite-sign arm): the two-limb compare, larger minus smaller, then C's
+  # one-limb demotion or exact two-limb publication.
+  fn __bigint_sub2_equal_raw(a, b) (i64 i64) i64
+    mask = 140737488355327 ## i64
+    ap = (a & mask) + 16 ## i64
+    bp = (b & mask) + 16 ## i64
+    a1 = raw_load_u64(ap, 8) ## u64
+    b1 = raw_load_u64(bp, 8) ## u64
+    compare = 0 ## i64
+    if a1 != b1
+      if a1 > b1
+        compare = 1
+      else
         compare = 0 - 1
-  if compare == 0
-    return ccall_nobox("w_int", 0)
-  lp = ap
-  sp = bp
-  negative = 0 ## i64
-  if compare < 0
-    lp = bp
-    sp = ap
-    negative = 1
-  pair = __bigint_sub2_equal_magnitude(lp, sp) ## u128
-  low = pair ## u64
-  high_wide = pair >> 64 ## u128
-  high = high_wide ## u64
-  ccall_nobox(
-    "w_bigint_sub2_equal_finish_raw", low ## i64, high ## i64, negative
-  )
+    else
+      a0 = raw_load_u64(ap, 0) ## u64
+      b0 = raw_load_u64(bp, 0) ## u64
+      if a0 > b0
+        compare = 1
+      else
+        if a0 < b0
+          compare = 0 - 1
+    if compare == 0
+      return ccall_nobox("w_int", 0)
+    lp = ap
+    sp = bp
+    negative = 0 ## i64
+    if compare < 0
+      lp = bp
+      sp = ap
+      negative = 1
+    pair = __bigint_sub2_equal_magnitude(lp, sp) ## u128
+    low = pair ## u64
+    high_wide = pair >> 64 ## u128
+    high = high_wide ## u64
+    ccall_nobox(
+      "w_bigint_sub2_equal_finish_raw", low ## i64, high ## i64, negative
+    )
 
 # Hot take in C's capacity class for an equal-width result: the power of two
 # above n (bigint_alloc_capacity rounds n+1 up; the subtract path's
@@ -4095,44 +4097,45 @@ fn __bigint_add_equal_generic_raw(a, b, n) (i64 i64 i64) i64
 # Positive equal-width subtract at the same widths: C's boxed equal route
 # (top-limb compare with the full scan on a tie, bn_sub_n over larger minus
 # smaller, then top-limb publication or the trim-and-demote finisher).
-fn __bigint_sub_equal_generic_raw(a, b, n) (i64 i64 i64) i64
-  mask = 140737488355327 ## i64
-  ap = (a & mask) + 16 ## i64
-  bp = (b & mask) + 16 ## i64
-  compare = __bigint_equal_compare_raw(ap, bp, n) ## i64
-  if compare == 0
-    return ccall_nobox("w_int", 0)
-  lp = ap
-  sp = bp
-  negative = 0 ## i64
-  if compare < 0
-    lp = bp
-    sp = ap
-    negative = 1
-  result = __bigint_equal_class_alloc_raw(n) ## i64
-  rp = (result & mask) + 16 ## i64
-  # The quad loop holds parity through 15 limbs; from 17 its per-iteration
-  # overhead measured 5-8% behind C's blocked loop, so those widths take
-  # straight-line chains.
-  if n >= 17
-    case n
-      17 =>
-        __bigint_sub17_equal_exact(rp, lp, sp)
-      18 =>
-        __bigint_sub18_equal_exact(rp, lp, sp)
-      19 =>
-        __bigint_sub19_equal_exact(rp, lp, sp)
-      20 =>
-        __bigint_sub20_equal_exact(rp, lp, sp)
-      21 =>
-        __bigint_sub21_equal_exact(rp, lp, sp)
-      22 =>
-        __bigint_sub22_equal_exact(rp, lp, sp)
-      23 =>
-        __bigint_sub23_equal_exact(rp, lp, sp)
-  else
-    asm_sub_no(rp, 0, lp, 0, sp, 0, n)
-  ccall_nobox("w_bigint_sub_equal_finish_raw", result, n, negative)
+on macos && arm64
+  fn __bigint_sub_equal_generic_raw(a, b, n) (i64 i64 i64) i64
+    mask = 140737488355327 ## i64
+    ap = (a & mask) + 16 ## i64
+    bp = (b & mask) + 16 ## i64
+    compare = __bigint_equal_compare_raw(ap, bp, n) ## i64
+    if compare == 0
+      return ccall_nobox("w_int", 0)
+    lp = ap
+    sp = bp
+    negative = 0 ## i64
+    if compare < 0
+      lp = bp
+      sp = ap
+      negative = 1
+    result = __bigint_equal_class_alloc_raw(n) ## i64
+    rp = (result & mask) + 16 ## i64
+    # The quad loop holds parity through 15 limbs; from 17 its per-iteration
+    # overhead measured 5-8% behind C's blocked loop, so those widths take
+    # straight-line chains.
+    if n >= 17
+      case n
+        17 =>
+          __bigint_sub17_equal_exact(rp, lp, sp)
+        18 =>
+          __bigint_sub18_equal_exact(rp, lp, sp)
+        19 =>
+          __bigint_sub19_equal_exact(rp, lp, sp)
+        20 =>
+          __bigint_sub20_equal_exact(rp, lp, sp)
+        21 =>
+          __bigint_sub21_equal_exact(rp, lp, sp)
+        22 =>
+          __bigint_sub22_equal_exact(rp, lp, sp)
+        23 =>
+          __bigint_sub23_equal_exact(rp, lp, sp)
+    else
+      asm_sub_no(rp, 0, lp, 0, sp, 0, n)
+    ccall_nobox("w_bigint_sub_equal_finish_raw", result, n, negative)
 
 # Out-of-line generic body shared by BigInt#+ and BigInt#-: unequal
 # widths, mixed signs, and the over-band bail. `an`/`bn` are the operands'
@@ -4253,65 +4256,66 @@ fn __bigint_times_general_raw(a, b, an, bn) (i64 i64 i64 i64) i64
     signed_total = 0 - total
   ccall_nobox("w_bigint_seal_raw", result, signed_total)
 
-fn __bigint_add1_2_raw(a, b) (i64 i64) i64
-  result = ccall_nobox("w_bigint_alloc_hot", 2) ## i64
-  mask = 140737488355327 ## i64
-  rp = (result & mask) + 16 ## i64
-  ap = (a & mask) + 16 ## i64
-  bp = (b & mask) + 16 ## i64
-  word = raw_load_u64(bp, 0) ## i64
-  carry = __bigint_add1_2_exact(rp, ap, word) ## i64
-  ccall_nobox("w_bigint_add1_2_finish_raw", result, carry)
+on macos && arm64
+  fn __bigint_add1_2_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot", 2) ## i64
+    mask = 140737488355327 ## i64
+    rp = (result & mask) + 16 ## i64
+    ap = (a & mask) + 16 ## i64
+    bp = (b & mask) + 16 ## i64
+    word = raw_load_u64(bp, 0) ## i64
+    carry = __bigint_add1_2_exact(rp, ap, word) ## i64
+    ccall_nobox("w_bigint_add1_2_finish_raw", result, carry)
 
-fn __bigint_add1_4_raw(a, b) (i64 i64) i64
-  result = ccall_nobox("w_bigint_alloc_hot", 4) ## i64
-  mask = 140737488355327 ## i64
-  rp = (result & mask) + 16 ## i64
-  ap = (a & mask) + 16 ## i64
-  bp = (b & mask) + 16 ## i64
-  word = raw_load_u64(bp, 0) ## i64
-  carry = __bigint_add1_4_exact(rp, ap, word) ## i64
-  ccall_nobox("w_bigint_add1_4_finish_raw", result, carry)
+  fn __bigint_add1_4_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot", 4) ## i64
+    mask = 140737488355327 ## i64
+    rp = (result & mask) + 16 ## i64
+    ap = (a & mask) + 16 ## i64
+    bp = (b & mask) + 16 ## i64
+    word = raw_load_u64(bp, 0) ## i64
+    carry = __bigint_add1_4_exact(rp, ap, word) ## i64
+    ccall_nobox("w_bigint_add1_4_finish_raw", result, carry)
 
-fn __bigint_add1_5_raw(a, b) (i64 i64) i64
-  result = ccall_nobox("w_bigint_alloc_hot", 5) ## i64
-  mask = 140737488355327 ## i64
-  rp = (result & mask) + 16 ## i64
-  ap = (a & mask) + 16 ## i64
-  bp = (b & mask) + 16 ## i64
-  word = raw_load_u64(bp, 0) ## i64
-  carry = __bigint_add1_5_exact(rp, ap, word) ## i64
-  ccall_nobox("w_bigint_add1_5_finish_raw", result, carry)
+  fn __bigint_add1_5_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot", 5) ## i64
+    mask = 140737488355327 ## i64
+    rp = (result & mask) + 16 ## i64
+    ap = (a & mask) + 16 ## i64
+    bp = (b & mask) + 16 ## i64
+    word = raw_load_u64(bp, 0) ## i64
+    carry = __bigint_add1_5_exact(rp, ap, word) ## i64
+    ccall_nobox("w_bigint_add1_5_finish_raw", result, carry)
 
-fn __bigint_add1_6_raw(a, b) (i64 i64) i64
-  result = ccall_nobox("w_bigint_alloc_hot", 6) ## i64
-  mask = 140737488355327 ## i64
-  rp = (result & mask) + 16 ## i64
-  ap = (a & mask) + 16 ## i64
-  bp = (b & mask) + 16 ## i64
-  word = raw_load_u64(bp, 0) ## i64
-  carry = __bigint_add1_6_exact(rp, ap, word) ## i64
-  ccall_nobox("w_bigint_add1_6_finish_raw", result, carry)
+  fn __bigint_add1_6_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot", 6) ## i64
+    mask = 140737488355327 ## i64
+    rp = (result & mask) + 16 ## i64
+    ap = (a & mask) + 16 ## i64
+    bp = (b & mask) + 16 ## i64
+    word = raw_load_u64(bp, 0) ## i64
+    carry = __bigint_add1_6_exact(rp, ap, word) ## i64
+    ccall_nobox("w_bigint_add1_6_finish_raw", result, carry)
 
-fn __bigint_add1_7_raw(a, b) (i64 i64) i64
-  result = ccall_nobox("w_bigint_alloc_hot", 7) ## i64
-  mask = 140737488355327 ## i64
-  rp = (result & mask) + 16 ## i64
-  ap = (a & mask) + 16 ## i64
-  bp = (b & mask) + 16 ## i64
-  word = raw_load_u64(bp, 0) ## i64
-  carry = __bigint_add1_7_exact(rp, ap, word) ## i64
-  ccall_nobox("w_bigint_add1_7_finish_raw", result, carry)
+  fn __bigint_add1_7_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot", 7) ## i64
+    mask = 140737488355327 ## i64
+    rp = (result & mask) + 16 ## i64
+    ap = (a & mask) + 16 ## i64
+    bp = (b & mask) + 16 ## i64
+    word = raw_load_u64(bp, 0) ## i64
+    carry = __bigint_add1_7_exact(rp, ap, word) ## i64
+    ccall_nobox("w_bigint_add1_7_finish_raw", result, carry)
 
-fn __bigint_add1_8_raw(a, b) (i64 i64) i64
-  result = ccall_nobox("w_bigint_alloc_hot", 8) ## i64
-  mask = 140737488355327 ## i64
-  rp = (result & mask) + 16 ## i64
-  ap = (a & mask) + 16 ## i64
-  bp = (b & mask) + 16 ## i64
-  word = raw_load_u64(bp, 0) ## i64
-  carry = __bigint_add1_8_exact(rp, ap, word) ## i64
-  ccall_nobox("w_bigint_add1_8_finish_raw", result, carry)
+  fn __bigint_add1_8_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot", 8) ## i64
+    mask = 140737488355327 ## i64
+    rp = (result & mask) + 16 ## i64
+    ap = (a & mask) + 16 ## i64
+    bp = (b & mask) + 16 ## i64
+    word = raw_load_u64(bp, 0) ## i64
+    carry = __bigint_add1_8_exact(rp, ap, word) ## i64
+    ccall_nobox("w_bigint_add1_8_finish_raw", result, carry)
 
 # Exact positive one-limb subtract-word leaf.  Arithmetic stays in native
 # source; the raw finisher retains C's i48 demotion and bit-48 exact-cap-one
@@ -4347,92 +4351,93 @@ fn __bigint_sub1_1_raw(a, b) (i64 i64) i64
 # BigInt worker have already proved either a distinct positive one-limb pair
 # or C's raw-positive-header one-limb square; this raw worker performs only
 # the C leaf's limb loads, 64x64 product, and identical result finishing.
-fn __bigint_mul1_1_raw(a, b) (i64 i64) i64
-  product = __bigint_mul1_1_product(a, b) ## u128
-  low = product ## u64
-  high_wide = product >> 64 ## u128
-  high = high_wide ## u64
-  ccall_nobox(
-    "w_bigint_mul1_1_finish_raw", low ## i64, high ## i64
-  )
+on macos && arm64
+  fn __bigint_mul1_1_raw(a, b) (i64 i64) i64
+    product = __bigint_mul1_1_product(a, b) ## u128
+    low = product ## u64
+    high_wide = product >> 64 ## u128
+    high = high_wide ## u64
+    ccall_nobox(
+      "w_bigint_mul1_1_finish_raw", low ## i64, high ## i64
+    )
 
-# Exact pointer-identical positive two-limb square. The runtime gate has
-# already matched C's raw positive-header identity shape. Reproduce its exact
-# hot capacity-4 allocation, fixed kernel, and unconditional +3/+4 header.
-fn __bigint_sqr2_raw(a, b) (i64 i64) i64
-  result = ccall_nobox("w_bigint_alloc_hot4_raw") ## i64
-  mask = 140737488355327 ## i64
-  rp = (result & mask) + 16 ## i64
-  ap = (a & mask) + 16 ## i64
-  size = __bigint_sqr2_exact(rp ## i64, ap ## i64) ## i64
-  ccall_nobox("w_bigint_sqr2_finish_raw", result, size)
+  # Exact pointer-identical positive two-limb square. The runtime gate has
+  # already matched C's raw positive-header identity shape. Reproduce its exact
+  # hot capacity-4 allocation, fixed kernel, and unconditional +3/+4 header.
+  fn __bigint_sqr2_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot4_raw") ## i64
+    mask = 140737488355327 ## i64
+    rp = (result & mask) + 16 ## i64
+    ap = (a & mask) + 16 ## i64
+    size = __bigint_sqr2_exact(rp ## i64, ap ## i64) ## i64
+    ccall_nobox("w_bigint_sqr2_finish_raw", result, size)
 
-# Exact pointer-identical positive three-limb square. The runtime gate has
-# already matched C's raw positive-header identity shape. Reproduce its exact
-# hot capacity-8 allocation, fixed kernel, and unconditional +5/+6 header.
-fn __bigint_sqr3_raw(a, b) (i64 i64) i64
-  result = ccall_nobox("w_bigint_alloc_hot8_raw") ## i64
-  mask = 140737488355327 ## i64
-  rp = (result & mask) + 16 ## i64
-  ap = (a & mask) + 16 ## i64
-  size = __bigint_sqr3_exact(rp ## i64, ap ## i64) ## i64
-  ccall_nobox("w_bigint_sqr3_finish_raw", result, size)
+  # Exact pointer-identical positive three-limb square. The runtime gate has
+  # already matched C's raw positive-header identity shape. Reproduce its exact
+  # hot capacity-8 allocation, fixed kernel, and unconditional +5/+6 header.
+  fn __bigint_sqr3_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot8_raw") ## i64
+    mask = 140737488355327 ## i64
+    rp = (result & mask) + 16 ## i64
+    ap = (a & mask) + 16 ## i64
+    size = __bigint_sqr3_exact(rp ## i64, ap ## i64) ## i64
+    ccall_nobox("w_bigint_sqr3_finish_raw", result, size)
 
-# Exact pointer-identical positive four-limb square. The runtime gate has
-# already matched C's raw positive-header identity shape. Reproduce its exact
-# hot capacity-8 allocation, fixed kernel, and unconditional +7/+8 header.
-fn __bigint_sqr4_raw(a, b) (i64 i64) i64
-  result = ccall_nobox("w_bigint_alloc_hot8_raw") ## i64
-  mask = 140737488355327 ## i64
-  rp = (result & mask) + 16 ## i64
-  ap = (a & mask) + 16 ## i64
-  size = __bigint_sqr4_exact(rp ## i64, ap ## i64) ## i64
-  ccall_nobox("w_bigint_sqr4_finish_raw", result, size)
+  # Exact pointer-identical positive four-limb square. The runtime gate has
+  # already matched C's raw positive-header identity shape. Reproduce its exact
+  # hot capacity-8 allocation, fixed kernel, and unconditional +7/+8 header.
+  fn __bigint_sqr4_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot8_raw") ## i64
+    mask = 140737488355327 ## i64
+    rp = (result & mask) + 16 ## i64
+    ap = (a & mask) + 16 ## i64
+    size = __bigint_sqr4_exact(rp ## i64, ap ## i64) ## i64
+    ccall_nobox("w_bigint_sqr4_finish_raw", result, size)
 
-# Exact pointer-identical positive five-limb square. The runtime gate has
-# already matched C's raw positive-header identity shape. Reproduce its exact
-# capacity-16 allocation, fixed leaf schedule, and +9/+10 header. The native
-# follow-up inlines that schedule only after the exact noinline checkpoint.
-fn __bigint_sqr5_raw(a, b) (i64 i64) i64
-  result = ccall_nobox("w_bigint_alloc_hot16_raw") ## i64
-  mask = 140737488355327 ## i64
-  rp = (result & mask) + 16 ## i64
-  ap = (a & mask) + 16 ## i64
-  size = __bigint_sqr5_exact(rp ## i64, ap ## i64) ## i64
-  ccall_nobox("w_bigint_sqr5_finish_raw", result, size)
+  # Exact pointer-identical positive five-limb square. The runtime gate has
+  # already matched C's raw positive-header identity shape. Reproduce its exact
+  # capacity-16 allocation, fixed leaf schedule, and +9/+10 header. The native
+  # follow-up inlines that schedule only after the exact noinline checkpoint.
+  fn __bigint_sqr5_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot16_raw") ## i64
+    mask = 140737488355327 ## i64
+    rp = (result & mask) + 16 ## i64
+    ap = (a & mask) + 16 ## i64
+    size = __bigint_sqr5_exact(rp ## i64, ap ## i64) ## i64
+    ccall_nobox("w_bigint_sqr5_finish_raw", result, size)
 
-# Exact pointer-identical positive six-limb square. The runtime gate has
-# already matched C's raw positive-header identity shape. Reproduce its exact
-# capacity-16 allocation, fixed noinline leaf schedule, and +11/+12 header.
-fn __bigint_sqr6_raw(a, b) (i64 i64) i64
-  result = ccall_nobox("w_bigint_alloc_hot16_raw") ## i64
-  mask = 140737488355327 ## i64
-  rp = (result & mask) + 16 ## i64
-  ap = (a & mask) + 16 ## i64
-  size = __bigint_sqr6_exact(rp ## i64, ap ## i64) ## i64
-  ccall_nobox("w_bigint_sqr6_finish_raw", result, size)
+  # Exact pointer-identical positive six-limb square. The runtime gate has
+  # already matched C's raw positive-header identity shape. Reproduce its exact
+  # capacity-16 allocation, fixed noinline leaf schedule, and +11/+12 header.
+  fn __bigint_sqr6_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot16_raw") ## i64
+    mask = 140737488355327 ## i64
+    rp = (result & mask) + 16 ## i64
+    ap = (a & mask) + 16 ## i64
+    size = __bigint_sqr6_exact(rp ## i64, ap ## i64) ## i64
+    ccall_nobox("w_bigint_sqr6_finish_raw", result, size)
 
-# Exact pointer-identical positive seven-limb square. The runtime gate has
-# already matched C's raw positive-header identity shape. Reproduce its exact
-# capacity-16 allocation, fixed noinline leaf schedule, and +13/+14 header.
-fn __bigint_sqr7_raw(a, b) (i64 i64) i64
-  result = ccall_nobox("w_bigint_alloc_hot16_raw") ## i64
-  mask = 140737488355327 ## i64
-  rp = (result & mask) + 16 ## i64
-  ap = (a & mask) + 16 ## i64
-  size = __bigint_sqr7_exact(rp ## i64, ap ## i64) ## i64
-  ccall_nobox("w_bigint_sqr7_finish_raw", result, size)
+  # Exact pointer-identical positive seven-limb square. The runtime gate has
+  # already matched C's raw positive-header identity shape. Reproduce its exact
+  # capacity-16 allocation, fixed noinline leaf schedule, and +13/+14 header.
+  fn __bigint_sqr7_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot16_raw") ## i64
+    mask = 140737488355327 ## i64
+    rp = (result & mask) + 16 ## i64
+    ap = (a & mask) + 16 ## i64
+    size = __bigint_sqr7_exact(rp ## i64, ap ## i64) ## i64
+    ccall_nobox("w_bigint_sqr7_finish_raw", result, size)
 
-# Exact pointer-identical positive eight-limb square. The runtime gate has
-# already matched C's raw positive-header identity shape. Reproduce its exact
-# capacity-16 allocation, inlined fixed leaf schedule, and +15/+16 header.
-fn __bigint_sqr8_raw(a, b) (i64 i64) i64
-  result = ccall_nobox("w_bigint_alloc_hot16_raw") ## i64
-  mask = 140737488355327 ## i64
-  rp = (result & mask) + 16 ## i64
-  ap = (a & mask) + 16 ## i64
-  size = __bigint_sqr8_exact(rp ## i64, ap ## i64) ## i64
-  ccall_nobox("w_bigint_sqr8_finish_raw", result, size)
+  # Exact pointer-identical positive eight-limb square. The runtime gate has
+  # already matched C's raw positive-header identity shape. Reproduce its exact
+  # capacity-16 allocation, inlined fixed leaf schedule, and +15/+16 header.
+  fn __bigint_sqr8_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot16_raw") ## i64
+    mask = 140737488355327 ## i64
+    rp = (result & mask) + 16 ## i64
+    ap = (a & mask) + 16 ## i64
+    size = __bigint_sqr8_exact(rp ## i64, ap ## i64) ## i64
+    ccall_nobox("w_bigint_sqr8_finish_raw", result, size)
 
 # Exact pointer-identical positive sixteen-limb split square. Preserve C's
 # capacity-32 allocation, bn_sqr16_split kernel call, and +31/+32 publication.
@@ -4447,40 +4452,41 @@ fn __bigint_sqr16_raw(a, b) (i64 i64) i64
 # Exact distinct positive two-by-two-limb multiplication. The runtime gate
 # has already matched C's raw-positive-header shape and excluded identity.
 # Reproduce its capacity-4 allocation, fixed kernel, and +3/+4 publication.
-fn __bigint_mul2_raw(a, b) (i64 i64) i64
-  result = ccall_nobox("w_bigint_alloc_hot4_raw") ## i64
-  mask = 140737488355327 ## i64
-  rp = (result & mask) + 16 ## i64
-  ap = (a & mask) + 16 ## i64
-  bp = (b & mask) + 16 ## i64
-  size = __bigint_mul2_exact(rp ## i64, ap ## i64, bp ## i64) ## i64
-  ccall_nobox("w_bigint_mul2_finish_raw", result, size)
+on macos && arm64
+  fn __bigint_mul2_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot4_raw") ## i64
+    mask = 140737488355327 ## i64
+    rp = (result & mask) + 16 ## i64
+    ap = (a & mask) + 16 ## i64
+    bp = (b & mask) + 16 ## i64
+    size = __bigint_mul2_exact(rp ## i64, ap ## i64, bp ## i64) ## i64
+    ccall_nobox("w_bigint_mul2_finish_raw", result, size)
 
-# Exact distinct positive three-by-three-limb multiplication. The runtime gate
-# has already matched C's raw-positive-header shape and excluded identity.
-fn __bigint_mul3_raw(a, b) (i64 i64) i64
-  result = ccall_nobox("w_bigint_alloc_hot8_raw") ## i64
-  mask = 140737488355327 ## i64
-  rp = (result & mask) + 16 ## i64
-  ap = (a & mask) + 16 ## i64
-  bp = (b & mask) + 16 ## i64
-  size = __bigint_mul3_exact(rp ## i64, ap ## i64, bp ## i64) ## i64
-  ccall_nobox("w_bigint_mul3_finish_raw", result, size)
+  # Exact distinct positive three-by-three-limb multiplication. The runtime gate
+  # has already matched C's raw-positive-header shape and excluded identity.
+  fn __bigint_mul3_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot8_raw") ## i64
+    mask = 140737488355327 ## i64
+    rp = (result & mask) + 16 ## i64
+    ap = (a & mask) + 16 ## i64
+    bp = (b & mask) + 16 ## i64
+    size = __bigint_mul3_exact(rp ## i64, ap ## i64, bp ## i64) ## i64
+    ccall_nobox("w_bigint_mul3_finish_raw", result, size)
 
-# Exact distinct positive four-by-four-limb multiplication. Preserve C's
-# tuned general mul_1 call for row zero, then execute its literal inlined
-# addmul remainder from native Tungsten.
-fn __bigint_mul4_raw(a, b) (i64 i64) i64
-  result = ccall_nobox("w_bigint_alloc_hot8_raw") ## i64
-  mask = 140737488355327 ## i64
-  rp = (result & mask) + 16 ## i64
-  ap = (a & mask) + 16 ## i64
-  bp = (b & mask) + 16 ## i64
-  row0_carry = ccall_nobox("w_bigint_mul4_first_row_raw", rp, bp, ap) ## i64
-  size = __bigint_mul4_addrows_exact(
-    rp ## i64, ap ## i64, bp ## i64, row0_carry
-  ) ## i64
-  ccall_nobox("w_bigint_mul4_finish_raw", result, size)
+  # Exact distinct positive four-by-four-limb multiplication. Preserve C's
+  # tuned general mul_1 call for row zero, then execute its literal inlined
+  # addmul remainder from native Tungsten.
+  fn __bigint_mul4_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot8_raw") ## i64
+    mask = 140737488355327 ## i64
+    rp = (result & mask) + 16 ## i64
+    ap = (a & mask) + 16 ## i64
+    bp = (b & mask) + 16 ## i64
+    row0_carry = ccall_nobox("w_bigint_mul4_first_row_raw", rp, bp, ap) ## i64
+    size = __bigint_mul4_addrows_exact(
+      rp ## i64, ap ## i64, bp ## i64, row0_carry
+    ) ## i64
+    ccall_nobox("w_bigint_mul4_finish_raw", result, size)
 
 # Exact distinct positive five-by-five-limb multiplication. C has no fixed
 # five-limb arithmetic leaf: preserve its generic schoolbook decomposition
@@ -4630,135 +4636,136 @@ fn __bigint_mul24_raw(a, b) (i64 i64) i64
 # Exact positive two-limb-by-one-limb scalar-word arm. Preserve receiver
 # order at the operator seam, then orient only the raw magnitudes after the
 # shape gate has proved that exactly one operand has two limbs.
-fn __bigint_mul1_2_raw(a, b) (i64 i64) i64
-  mask = 140737488355327 ## i64
-  abase = a & mask
-  bbase = b & mask
-  asize = raw_load_u32(abase, 4) ## i64
-  wide = abase ## i64
-  word_box = bbase ## i64
-  if asize != 2
-    wide = bbase ## i64
-    word_box = abase ## i64
-  result = ccall_nobox("w_bigint_alloc_hot4_raw") ## i64
-  rp = (result & mask) + 16 ## i64
-  ap = wide + 16 ## i64
-  word = raw_load_u64(word_box, 16) ## i64
-  size = __bigint_mul1_2_exact(rp ## i64, ap ## i64, word) ## i64
-  ccall_nobox("w_bigint_mul1_2_finish_raw", result, size)
+on macos && arm64
+  fn __bigint_mul1_2_raw(a, b) (i64 i64) i64
+    mask = 140737488355327 ## i64
+    abase = a & mask
+    bbase = b & mask
+    asize = raw_load_u32(abase, 4) ## i64
+    wide = abase ## i64
+    word_box = bbase ## i64
+    if asize != 2
+      wide = bbase ## i64
+      word_box = abase ## i64
+    result = ccall_nobox("w_bigint_alloc_hot4_raw") ## i64
+    rp = (result & mask) + 16 ## i64
+    ap = wide + 16 ## i64
+    word = raw_load_u64(word_box, 16) ## i64
+    size = __bigint_mul1_2_exact(rp ## i64, ap ## i64, word) ## i64
+    ccall_nobox("w_bigint_mul1_2_finish_raw", result, size)
 
-# Exact positive three-limb-by-one-limb scalar-word arm. The shape gate keeps
-# receiver order observable, then this worker performs the same cap-four
-# allocation, serial C carry schedule, top write, and size publication.
-fn __bigint_mul1_3_raw(a, b) (i64 i64) i64
-  mask = 140737488355327 ## i64
-  abase = a & mask
-  bbase = b & mask
-  asize = raw_load_u32(abase, 4) ## i64
-  wide = abase ## i64
-  word_box = bbase ## i64
-  if asize != 3
-    wide = bbase ## i64
-    word_box = abase ## i64
-  result = ccall_nobox("w_bigint_alloc_hot4_raw") ## i64
-  rp = (result & mask) + 16 ## i64
-  ap = wide + 16 ## i64
-  word = raw_load_u64(word_box, 16) ## i64
-  size = __bigint_mul1_3_exact(rp ## i64, ap ## i64, word) ## i64
-  ccall_nobox("w_bigint_mul1_3_finish_raw", result, size)
+  # Exact positive three-limb-by-one-limb scalar-word arm. The shape gate keeps
+  # receiver order observable, then this worker performs the same cap-four
+  # allocation, serial C carry schedule, top write, and size publication.
+  fn __bigint_mul1_3_raw(a, b) (i64 i64) i64
+    mask = 140737488355327 ## i64
+    abase = a & mask
+    bbase = b & mask
+    asize = raw_load_u32(abase, 4) ## i64
+    wide = abase ## i64
+    word_box = bbase ## i64
+    if asize != 3
+      wide = bbase ## i64
+      word_box = abase ## i64
+    result = ccall_nobox("w_bigint_alloc_hot4_raw") ## i64
+    rp = (result & mask) + 16 ## i64
+    ap = wide + 16 ## i64
+    word = raw_load_u64(word_box, 16) ## i64
+    size = __bigint_mul1_3_exact(rp ## i64, ap ## i64, word) ## i64
+    ccall_nobox("w_bigint_mul1_3_finish_raw", result, size)
 
-# Exact positive four-limb-by-one-limb scalar-word arm. Preserve receiver
-# order at the source seam, then reproduce C's capacity-eight allocation,
-# literal carry schedule, top write, and header publication.
-fn __bigint_mul1_4_raw(a, b) (i64 i64) i64
-  mask = 140737488355327 ## i64
-  abase = a & mask
-  bbase = b & mask
-  asize = raw_load_u32(abase, 4) ## i64
-  wide = abase ## i64
-  word_box = bbase ## i64
-  if asize != 4
-    wide = bbase ## i64
-    word_box = abase ## i64
-  result = ccall_nobox("w_bigint_alloc_hot8_raw") ## i64
-  rp = (result & mask) + 16 ## i64
-  ap = wide + 16 ## i64
-  word = raw_load_u64(word_box, 16) ## i64
-  size = __bigint_mul1_4_exact(rp ## i64, ap ## i64, word) ## i64
-  ccall_nobox("w_bigint_mul1_4_finish_raw", result, size)
+  # Exact positive four-limb-by-one-limb scalar-word arm. Preserve receiver
+  # order at the source seam, then reproduce C's capacity-eight allocation,
+  # literal carry schedule, top write, and header publication.
+  fn __bigint_mul1_4_raw(a, b) (i64 i64) i64
+    mask = 140737488355327 ## i64
+    abase = a & mask
+    bbase = b & mask
+    asize = raw_load_u32(abase, 4) ## i64
+    wide = abase ## i64
+    word_box = bbase ## i64
+    if asize != 4
+      wide = bbase ## i64
+      word_box = abase ## i64
+    result = ccall_nobox("w_bigint_alloc_hot8_raw") ## i64
+    rp = (result & mask) + 16 ## i64
+    ap = wide + 16 ## i64
+    word = raw_load_u64(word_box, 16) ## i64
+    size = __bigint_mul1_4_exact(rp ## i64, ap ## i64, word) ## i64
+    ccall_nobox("w_bigint_mul1_4_finish_raw", result, size)
 
-# Exact positive five-limb-by-one-limb scalar-word arm. Preserve receiver
-# order, capacity-eight allocation, serial carry recurrence, and size 5/6.
-fn __bigint_mul1_5_raw(a, b) (i64 i64) i64
-  mask = 140737488355327 ## i64
-  abase = a & mask
-  bbase = b & mask
-  asize = raw_load_u32(abase, 4) ## i64
-  wide = abase ## i64
-  word_box = bbase ## i64
-  if asize != 5
-    wide = bbase ## i64
-    word_box = abase ## i64
-  result = ccall_nobox("w_bigint_alloc_hot8_raw") ## i64
-  rp = (result & mask) + 16 ## i64
-  ap = wide + 16 ## i64
-  word = raw_load_u64(word_box, 16) ## i64
-  size = __bigint_mul1_5_exact(rp ## i64, ap ## i64, word) ## i64
-  ccall_nobox("w_bigint_mul1_5_finish_raw", result, size)
+  # Exact positive five-limb-by-one-limb scalar-word arm. Preserve receiver
+  # order, capacity-eight allocation, serial carry recurrence, and size 5/6.
+  fn __bigint_mul1_5_raw(a, b) (i64 i64) i64
+    mask = 140737488355327 ## i64
+    abase = a & mask
+    bbase = b & mask
+    asize = raw_load_u32(abase, 4) ## i64
+    wide = abase ## i64
+    word_box = bbase ## i64
+    if asize != 5
+      wide = bbase ## i64
+      word_box = abase ## i64
+    result = ccall_nobox("w_bigint_alloc_hot8_raw") ## i64
+    rp = (result & mask) + 16 ## i64
+    ap = wide + 16 ## i64
+    word = raw_load_u64(word_box, 16) ## i64
+    size = __bigint_mul1_5_exact(rp ## i64, ap ## i64, word) ## i64
+    ccall_nobox("w_bigint_mul1_5_finish_raw", result, size)
 
-# Exact positive six-limb-by-one-limb scalar-word arm.
-fn __bigint_mul1_6_raw(a, b) (i64 i64) i64
-  mask = 140737488355327 ## i64
-  abase = a & mask
-  bbase = b & mask
-  asize = raw_load_u32(abase, 4) ## i64
-  wide = abase ## i64
-  word_box = bbase ## i64
-  if asize != 6
-    wide = bbase ## i64
-    word_box = abase ## i64
-  result = ccall_nobox("w_bigint_alloc_hot8_raw") ## i64
-  rp = (result & mask) + 16 ## i64
-  ap = wide + 16 ## i64
-  word = raw_load_u64(word_box, 16) ## i64
-  size = __bigint_mul1_6_exact(rp ## i64, ap ## i64, word) ## i64
-  ccall_nobox("w_bigint_mul1_6_finish_raw", result, size)
+  # Exact positive six-limb-by-one-limb scalar-word arm.
+  fn __bigint_mul1_6_raw(a, b) (i64 i64) i64
+    mask = 140737488355327 ## i64
+    abase = a & mask
+    bbase = b & mask
+    asize = raw_load_u32(abase, 4) ## i64
+    wide = abase ## i64
+    word_box = bbase ## i64
+    if asize != 6
+      wide = bbase ## i64
+      word_box = abase ## i64
+    result = ccall_nobox("w_bigint_alloc_hot8_raw") ## i64
+    rp = (result & mask) + 16 ## i64
+    ap = wide + 16 ## i64
+    word = raw_load_u64(word_box, 16) ## i64
+    size = __bigint_mul1_6_exact(rp ## i64, ap ## i64, word) ## i64
+    ccall_nobox("w_bigint_mul1_6_finish_raw", result, size)
 
-# Exact positive seven-limb-by-one-limb scalar-word arm.
-fn __bigint_mul1_7_raw(a, b) (i64 i64) i64
-  mask = 140737488355327 ## i64
-  abase = a & mask
-  bbase = b & mask
-  asize = raw_load_u32(abase, 4) ## i64
-  wide = abase ## i64
-  word_box = bbase ## i64
-  if asize != 7
-    wide = bbase ## i64
-    word_box = abase ## i64
-  result = ccall_nobox("w_bigint_alloc_hot8_raw") ## i64
-  rp = (result & mask) + 16 ## i64
-  ap = wide + 16 ## i64
-  word = raw_load_u64(word_box, 16) ## i64
-  size = __bigint_mul1_7_exact(rp ## i64, ap ## i64, word) ## i64
-  ccall_nobox("w_bigint_mul1_7_finish_raw", result, size)
+  # Exact positive seven-limb-by-one-limb scalar-word arm.
+  fn __bigint_mul1_7_raw(a, b) (i64 i64) i64
+    mask = 140737488355327 ## i64
+    abase = a & mask
+    bbase = b & mask
+    asize = raw_load_u32(abase, 4) ## i64
+    wide = abase ## i64
+    word_box = bbase ## i64
+    if asize != 7
+      wide = bbase ## i64
+      word_box = abase ## i64
+    result = ccall_nobox("w_bigint_alloc_hot8_raw") ## i64
+    rp = (result & mask) + 16 ## i64
+    ap = wide + 16 ## i64
+    word = raw_load_u64(word_box, 16) ## i64
+    size = __bigint_mul1_7_exact(rp ## i64, ap ## i64, word) ## i64
+    ccall_nobox("w_bigint_mul1_7_finish_raw", result, size)
 
-# Exact positive eight-limb-by-one-limb fixed scalar-word arm.
-fn __bigint_mul1_8_raw(a, b) (i64 i64) i64
-  mask = 140737488355327 ## i64
-  abase = a & mask
-  bbase = b & mask
-  asize = raw_load_u32(abase, 4) ## i64
-  wide = abase ## i64
-  word_box = bbase ## i64
-  if asize != 8
-    wide = bbase ## i64
-    word_box = abase ## i64
-  result = ccall_nobox("w_bigint_alloc_hot16_raw") ## i64
-  rp = (result & mask) + 16 ## i64
-  ap = wide + 16 ## i64
-  word = raw_load_u64(word_box, 16) ## i64
-  size = __bigint_mul1_8_exact(rp ## i64, ap ## i64, word) ## i64
-  ccall_nobox("w_bigint_mul1_8_finish_raw", result, size)
+  # Exact positive eight-limb-by-one-limb fixed scalar-word arm.
+  fn __bigint_mul1_8_raw(a, b) (i64 i64) i64
+    mask = 140737488355327 ## i64
+    abase = a & mask
+    bbase = b & mask
+    asize = raw_load_u32(abase, 4) ## i64
+    wide = abase ## i64
+    word_box = bbase ## i64
+    if asize != 8
+      wide = bbase ## i64
+      word_box = abase ## i64
+    result = ccall_nobox("w_bigint_alloc_hot16_raw") ## i64
+    rp = (result & mask) + 16 ## i64
+    ap = wide + 16 ## i64
+    word = raw_load_u64(word_box, 16) ## i64
+    size = __bigint_mul1_8_exact(rp ## i64, ap ## i64, word) ## i64
+    ccall_nobox("w_bigint_mul1_8_finish_raw", result, size)
 
 # Exact positive sixteen-limb-by-one-limb fixed scalar-word arm. Preserve
 # C's cap-32 allocation, unchanged bn_mul_1_f16 kernel, carry store, and
@@ -4883,84 +4890,85 @@ fn __bigint_mul1_64_raw(a, b) (i64 i64) i64
 # Exact positive two-limb minus positive one-limb C arm.  Allocation, the
 # fixed AArch64 schedule, top-limb shrink, and possible i48 demotion remain
 # separate steps in the same order as bigint_sub_ui_any.
-fn __bigint_sub1_2_raw(a, b) (i64 i64) i64
-  result = ccall_nobox("w_bigint_sub1_2_alloc_hot_raw") ## i64
-  mask = 140737488355327 ## i64
-  rp = (result & mask) + 16 ## i64
-  ap = (a & mask) + 16 ## i64
-  bp = (b & mask) + 16 ## i64
-  word = raw_load_u64(bp, 0) ## i64
-  borrow = __bigint_sub1_2_exact(rp, ap, word) ## i64
-  ccall_nobox("w_bigint_sub1_2_finish_raw", result)
+on macos && arm64
+  fn __bigint_sub1_2_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_sub1_2_alloc_hot_raw") ## i64
+    mask = 140737488355327 ## i64
+    rp = (result & mask) + 16 ## i64
+    ap = (a & mask) + 16 ## i64
+    bp = (b & mask) + 16 ## i64
+    word = raw_load_u64(bp, 0) ## i64
+    borrow = __bigint_sub1_2_exact(rp, ap, word) ## i64
+    ccall_nobox("w_bigint_sub1_2_finish_raw", result)
 
-# Exact positive three-limb minus positive one-limb C arm.  The fixed leaf
-# publishes every limb before the retained shrink-by-one result policy runs.
-fn __bigint_sub1_3_raw(a, b) (i64 i64) i64
-  result = ccall_nobox("w_bigint_alloc_hot", 3) ## i64
-  mask = 140737488355327 ## i64
-  rp = (result & mask) + 16 ## i64
-  ap = (a & mask) + 16 ## i64
-  bp = (b & mask) + 16 ## i64
-  word = raw_load_u64(bp, 0) ## i64
-  borrow = __bigint_sub1_3_exact(rp, ap, word) ## i64
-  ccall_nobox("w_bigint_sub1_3_finish_raw", result)
+  # Exact positive three-limb minus positive one-limb C arm.  The fixed leaf
+  # publishes every limb before the retained shrink-by-one result policy runs.
+  fn __bigint_sub1_3_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot", 3) ## i64
+    mask = 140737488355327 ## i64
+    rp = (result & mask) + 16 ## i64
+    ap = (a & mask) + 16 ## i64
+    bp = (b & mask) + 16 ## i64
+    word = raw_load_u64(bp, 0) ## i64
+    borrow = __bigint_sub1_3_exact(rp, ap, word) ## i64
+    ccall_nobox("w_bigint_sub1_3_finish_raw", result)
 
-# Exact positive four-limb minus positive one-limb C arm.  The generic cap-four
-# hot allocation and shrink-by-one finisher deliberately remain separate, in
-# the same order as bigint_sub_ui_any.
-fn __bigint_sub1_4_raw(a, b) (i64 i64) i64
-  result = ccall_nobox("w_bigint_alloc_hot", 4) ## i64
-  mask = 140737488355327 ## i64
-  rp = (result & mask) + 16 ## i64
-  ap = (a & mask) + 16 ## i64
-  bp = (b & mask) + 16 ## i64
-  word = raw_load_u64(bp, 0) ## i64
-  borrow = __bigint_sub1_4_exact(rp, ap, word) ## i64
-  ccall_nobox("w_bigint_sub1_4_finish_raw", result)
+  # Exact positive four-limb minus positive one-limb C arm.  The generic cap-four
+  # hot allocation and shrink-by-one finisher deliberately remain separate, in
+  # the same order as bigint_sub_ui_any.
+  fn __bigint_sub1_4_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot", 4) ## i64
+    mask = 140737488355327 ## i64
+    rp = (result & mask) + 16 ## i64
+    ap = (a & mask) + 16 ## i64
+    bp = (b & mask) + 16 ## i64
+    word = raw_load_u64(bp, 0) ## i64
+    borrow = __bigint_sub1_4_exact(rp, ap, word) ## i64
+    ccall_nobox("w_bigint_sub1_4_finish_raw", result)
 
-# Exact positive five-limb minus positive one-limb C arm.
-fn __bigint_sub1_5_raw(a, b) (i64 i64) i64
-  result = ccall_nobox("w_bigint_alloc_hot", 5) ## i64
-  mask = 140737488355327 ## i64
-  rp = (result & mask) + 16 ## i64
-  ap = (a & mask) + 16 ## i64
-  bp = (b & mask) + 16 ## i64
-  word = raw_load_u64(bp, 0) ## i64
-  borrow = __bigint_sub1_5_exact(rp, ap, word) ## i64
-  ccall_nobox("w_bigint_sub1_5_finish_raw", result)
+  # Exact positive five-limb minus positive one-limb C arm.
+  fn __bigint_sub1_5_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot", 5) ## i64
+    mask = 140737488355327 ## i64
+    rp = (result & mask) + 16 ## i64
+    ap = (a & mask) + 16 ## i64
+    bp = (b & mask) + 16 ## i64
+    word = raw_load_u64(bp, 0) ## i64
+    borrow = __bigint_sub1_5_exact(rp, ap, word) ## i64
+    ccall_nobox("w_bigint_sub1_5_finish_raw", result)
 
-# Exact positive six-limb minus positive one-limb C arm.
-fn __bigint_sub1_6_raw(a, b) (i64 i64) i64
-  result = ccall_nobox("w_bigint_alloc_hot", 6) ## i64
-  mask = 140737488355327 ## i64
-  rp = (result & mask) + 16 ## i64
-  ap = (a & mask) + 16 ## i64
-  bp = (b & mask) + 16 ## i64
-  word = raw_load_u64(bp, 0) ## i64
-  borrow = __bigint_sub1_6_exact(rp, ap, word) ## i64
-  ccall_nobox("w_bigint_sub1_6_finish_raw", result)
+  # Exact positive six-limb minus positive one-limb C arm.
+  fn __bigint_sub1_6_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot", 6) ## i64
+    mask = 140737488355327 ## i64
+    rp = (result & mask) + 16 ## i64
+    ap = (a & mask) + 16 ## i64
+    bp = (b & mask) + 16 ## i64
+    word = raw_load_u64(bp, 0) ## i64
+    borrow = __bigint_sub1_6_exact(rp, ap, word) ## i64
+    ccall_nobox("w_bigint_sub1_6_finish_raw", result)
 
-# Exact positive seven-limb minus positive one-limb C arm.
-fn __bigint_sub1_7_raw(a, b) (i64 i64) i64
-  result = ccall_nobox("w_bigint_alloc_hot", 7) ## i64
-  mask = 140737488355327 ## i64
-  rp = (result & mask) + 16 ## i64
-  ap = (a & mask) + 16 ## i64
-  bp = (b & mask) + 16 ## i64
-  word = raw_load_u64(bp, 0) ## i64
-  borrow = __bigint_sub1_7_exact(rp, ap, word) ## i64
-  ccall_nobox("w_bigint_sub1_7_finish_raw", result)
+  # Exact positive seven-limb minus positive one-limb C arm.
+  fn __bigint_sub1_7_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot", 7) ## i64
+    mask = 140737488355327 ## i64
+    rp = (result & mask) + 16 ## i64
+    ap = (a & mask) + 16 ## i64
+    bp = (b & mask) + 16 ## i64
+    word = raw_load_u64(bp, 0) ## i64
+    borrow = __bigint_sub1_7_exact(rp, ap, word) ## i64
+    ccall_nobox("w_bigint_sub1_7_finish_raw", result)
 
-# Exact positive eight-limb minus positive one-limb C arm.
-fn __bigint_sub1_8_raw(a, b) (i64 i64) i64
-  result = ccall_nobox("w_bigint_alloc_hot", 8) ## i64
-  mask = 140737488355327 ## i64
-  rp = (result & mask) + 16 ## i64
-  ap = (a & mask) + 16 ## i64
-  bp = (b & mask) + 16 ## i64
-  word = raw_load_u64(bp, 0) ## i64
-  borrow = __bigint_sub1_8_borrow_death(rp, ap, word) ## i64
-  ccall_nobox("w_bigint_sub1_8_finish_raw", result)
+  # Exact positive eight-limb minus positive one-limb C arm.
+  fn __bigint_sub1_8_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot", 8) ## i64
+    mask = 140737488355327 ## i64
+    rp = (result & mask) + 16 ## i64
+    ap = (a & mask) + 16 ## i64
+    bp = (b & mask) + 16 ## i64
+    word = raw_load_u64(bp, 0) ## i64
+    borrow = __bigint_sub1_8_borrow_death(rp, ap, word) ## i64
+    ccall_nobox("w_bigint_sub1_8_finish_raw", result)
 
 # Exact floor square root for one machine-word magnitude. A hardware f64
 # square root supplies a 32-bit seed; integer correction makes the result

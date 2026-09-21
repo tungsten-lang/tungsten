@@ -259,7 +259,7 @@
   # hand-inlining (miscompile risk on the encoding) and it isn't called via
   # @w_float in practice (float boxing lowers inline). Drop the dead alwaysinline.
   out << declare_fn_attrs("w_float", wv, "double", "nounwind willreturn memory(none) speculatable")
-  out << declare_fn("w_decimal", wv, "i64, i32")
+  out << declare_fn("w_decimal", wv, narrow_runtime_param_types("w_decimal").join(", "))
   out << declare_fn("w_decimal_from_digits", wv, wv3)
   out << declare_fn("w_bigint_literal_cached", wv, "ptr, ptr")
   # Numeric->raw-double coercion for ensure_raw_f64's fallback: converts a boxed
@@ -269,20 +269,20 @@
   out << declare_fn_attrs("w_num_to_f64", "double", wv, "nounwind memory(read)")
 
   # Domain type constructors
-  out << declare_fn("w_currency", wv, "i32, i64, i32")
-  out << declare_fn("w_quantity", wv, "i32, i64, i32")
+  out << declare_fn("w_currency", wv, narrow_runtime_param_types("w_currency").join(", "))
+  out << declare_fn("w_quantity", wv, narrow_runtime_param_types("w_quantity").join(", "))
   out << declare_fn("w_duration_ns", wv, "i64")
-  out << declare_fn("w_duration_months_ms", wv, "i32, i32")
-  out << declare_fn("w_date", wv, "i32, i32, i32, i32, i32, i32, i32")
-  out << declare_fn("w_ipv4", wv, "i32, i32, i32, i32, i32")
+  out << declare_fn("w_duration_months_ms", wv, narrow_runtime_param_types("w_duration_months_ms").join(", "))
+  out << declare_fn("w_date", wv, narrow_runtime_param_types("w_date").join(", "))
+  out << declare_fn("w_ipv4", wv, narrow_runtime_param_types("w_ipv4").join(", "))
   out << declare_fn("w_uuid_from_hex", wv, "ptr")
   out << declare_fn("w_ipv6_from_string", wv, "ptr, i32")
-  out << declare_fn("w_rational", wv, "i32, i32")
+  out << declare_fn("w_rational", wv, narrow_runtime_param_types("w_rational").join(", "))
   out << declare_fn("w_rational_new", wv, wv2)
   out << declare_fn("w_rational_numerator", wv, wv)
   out << declare_fn("w_rational_denominator", wv, wv)
   out << declare_fn("w_box_char", wv, "i32")
-  out << declare_fn("w_color", wv, "i32, i32, i32, i32")
+  out << declare_fn("w_color", wv, narrow_runtime_param_types("w_color").join(", "))
   out << declare_fn("w_register_unit", "void", "i32, ptr")
   out << declare_fn("w_register_unit_wv", "void", i32_wv)
 
@@ -762,6 +762,30 @@
   out << declare_fn("__w_file_unlink_strict", wv, wv)
 
   out.to_s()
+
+# Domain-literal constructors whose C parameters are narrower than a WValue
+# word. The literal lowering calls them with typed operands, but source code
+# (the tree walker evaluating the same literals) also reaches them through a
+# plain `ccall`, which passes i64 words. This table is the ONE definition of
+# their signature: the declarations above are rendered from it, and
+# render_narrowed_call_args truncates i64 words to it — exactly what the
+# native C ABI does implicitly with a wider register, made explicit so the
+# call is well-typed IR (WebAssembly traps on a mistyped call).
+-> narrow_runtime_param_types(name)
+  case name
+  when "w_decimal"
+    return ["i64", "i32"]
+  when "w_currency", "w_quantity"
+    return ["i32", "i64", "i32"]
+  when "w_duration_months_ms", "w_rational"
+    return ["i32", "i32"]
+  when "w_color"
+    return ["i32", "i32", "i32", "i32"]
+  when "w_ipv4"
+    return ["i32", "i32", "i32", "i32", "i32"]
+  when "w_date"
+    return ["i32", "i32", "i32", "i32", "i32", "i32", "i32"]
+  nil
 
 -> declare_fn(name, ret_type, arg_types_str)
   declare_fn_attrs(name, ret_type, arg_types_str, "nounwind")

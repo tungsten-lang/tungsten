@@ -47,6 +47,9 @@
     name = wire_get(inst, :name)
     if name in ("w_node_kind_extern" "w_is_node_extern" "w_node_alloc" "w_node_field_load" "w_node_field_store")
       return false
+    # Narrow-parameter constructors need operand truncation (ordinary renderer).
+    if narrow_runtime_param_types(name) != nil
+      return false
     out << wire_get(inst, :temp)
     out << " = "
     out << call_prefix(inst)

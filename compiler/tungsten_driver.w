@@ -410,9 +410,16 @@ if cpu_explicit
 elsif cross_target != ""
   # A cross target with no explicit CPU uses clang's baseline for that target;
   # never leak the local apple-m5/native configuration into it.
+  # TUNGSTEN_TARGET_MARCH_ARGS names feature flags FOR that target (wasm32
+  # needs `-mexception-handling` before setjmp-based rescue can be lowered);
+  # they stamp emitted functions the same way they stamp the target's runtime.
   cpu_target_mode = "target-default"
-  configured_march = ""
-  ccall("w_setenv", "TUNGSTEN_MARCH_ARGS", "")
+  configured_march = env("TUNGSTEN_TARGET_MARCH_ARGS")
+  if configured_march == nil
+    configured_march = ""
+  if configured_march != ""
+    cpu_target_mode = "target-custom"
+  ccall("w_setenv", "TUNGSTEN_MARCH_ARGS", configured_march)
 elsif configured_march != nil && configured_march != ""
   cpu_target_mode = "custom"
 else

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tungsten — the standard library, illuminated</title>
+<meta name="description" content="Searchable reference for every class, trait and method in the Tungsten standard library, with source, examples from the spec suite, and a live WebAssembly REPL.">
+<meta name="theme-color" content="#0d0b09">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..700;1,9..144,400..700&family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css?v=6">
+<script>try { document.documentElement.dataset.theme = sessionStorage.getItem('theme') || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') } catch (e) {}</script>
+</head>
+<body>
+<header id="top">
+  <button class="iconbtn" id="menu" aria-label="Classes"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 4.5h14M2 9h14M2 13.5h14"/></svg></button>
+  <a class="brand" href="#/"><span class="tile">W</span><span>Tungsten</span><small>core docs</small></a>
+  <nav>
+    <a href="#/" data-nav="home">Overview</a>
+    <a href="#/browse" data-nav="browse">Classes</a>
+    <a href="#/tree" data-nav="tree">Hierarchy</a>
+    <a href="#/functions" data-nav="functions">Functions</a>
+    <a href="#/examples" data-nav="examples">Examples</a>
+    <a href="#/repl" data-nav="repl">REPL</a>
+  </nav>
+  <button class="searchbtn" id="opensearch"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="7" cy="7" r="4.6"/><path d="m10.6 10.6 3.4 3.4"/></svg><span>Search classes, methods, docs…</span><kbd>⌘K</kbd></button>
+  <button class="iconbtn" id="theme" aria-label="Toggle theme" title="Toggle theme (t)"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></svg></button>
+</header>
+<aside id="side">
+  <nav class="sidenav"><a href="#/">Overview</a><a href="#/browse">Classes</a><a href="#/tree">Hierarchy</a><a href="#/functions">Functions</a><a href="#/examples">Examples</a><a href="#/repl">REPL</a></nav>
+  <div class="filter"><input id="sidefilter" placeholder="Filter 950 classes…" autocomplete="off" spellcheck="false"></div>
+  <div id="classlist" class="scroll"></div>
+</aside>
+<main id="view"><div class="wrap"><div class="skel" style="height:220px;margin-bottom:16px"></div><div class="skel"></div></div></main>
+<div id="pal" role="dialog" aria-label="Search">
+  <div class="palbox">
+    <div class="palin"><svg width="19" height="19" viewBox="0 0 16 16" fill="none" stroke="var(--hot)" stroke-width="1.8" stroke-linecap="round"><circle cx="7" cy="7" r="4.6"/><path d="m10.6 10.6 3.4 3.4"/></svg><input id="palq" placeholder="String#upcase · gcd · “grapheme clusters” · kind:trait" autocomplete="off" spellcheck="false"><kbd>esc</kbd></div>
+    <div id="palres" class="scroll"></div>
+    <div class="palfoot"><span><kbd>↑</kbd> <kbd>↓</kbd> navigate</span><span><kbd>↵</kbd> open</span><span><kbd>⇧↵</kbd> all results</span><span class="r">try <code>Class#method</code>, <code>kind:trait</code>, <code>in:algebra</code></span></div>
+  </div>
+</div>
+<script type="module" src="./app.js?v=6"></script>
+</body>
+</html>

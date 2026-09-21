@@ -6,8 +6,7 @@
 + Bag
   -> new
     @items = [10, 20, 30]
-  -> items
-    @items
+  ro :items
   -> n
     4
 

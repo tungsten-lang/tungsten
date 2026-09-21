@@ -13,17 +13,7 @@ use core/algebra/local_intersection
          @projection_intersection, @milnor_number)
     @verified_cache = nil
 
-  -> normalization
-    @normalization
-
-  -> polar_intersection
-    @polar_intersection
-
-  -> projection_intersection
-    @projection_intersection
-
-  -> milnor_number
-    @milnor_number
+  ro :normalization, :polar_intersection, :projection_intersection, :milnor_number
 
   -> theorem
     "for a reduced characteristic-zero plane germ, I(f,f_y)=mu+I(f,x)-1"
@@ -120,17 +110,7 @@ use core/algebra/local_intersection
          @derivative_resultant, @valuation)
     @verified_cache = nil
 
-  -> local_polynomial
-    @local_polynomial
-
-  -> weierstrass_degree
-    @weierstrass_degree
-
-  -> derivative_resultant
-    @derivative_resultant
-
-  -> valuation
-    @valuation
+  ro :local_polynomial, :weierstrass_degree, :derivative_resultant, :valuation
 
   -> proof_kind
     :exact_bareiss_resultant
@@ -177,8 +157,7 @@ use core/algebra/local_intersection
          @milnor_number, @delta)
     @verified_cache = nil
 
-  -> normalization
-    @normalization
+  ro :normalization
 
   -> discriminant_certificate
     return @milnor_certificate if (
@@ -192,14 +171,7 @@ use core/algebra/local_intersection
       "PlaneCurveLocalPolarCertificate")
     nil
 
-  -> milnor_certificate
-    @milnor_certificate
-
-  -> milnor_number
-    @milnor_number
-
-  -> delta
-    @delta
+  ro :milnor_certificate, :milnor_number, :delta
 
   -> theorem
     ("for a reduced characteristic-zero plane germ, " +
@@ -345,44 +317,18 @@ use core/algebra/local_intersection
     if !@certificate.verified?
       raise "local delta certificate did not verify"
 
-  -> normalization
-    @normalization
-
-  -> weierstrass_degree
-    @weierstrass_degree
+  ro :normalization, :weierstrass_degree
 
   -> computation_method
     @method
 
-  -> derivative_resultant
-    @derivative_resultant
-
-  -> discriminant_valuation
-    @discriminant_valuation
+  ro :derivative_resultant, :discriminant_valuation
 
   -> branch_count
     @normalization.geometric_branch_count
 
-  -> milnor_number
-    @milnor_number
-
-  -> delta
-    @delta
-
-  -> discriminant_certificate
-    @discriminant_certificate
-
-  -> polar_intersection
-    @polar_intersection
-
-  -> projection_intersection
-    @projection_intersection
-
-  -> polar_certificate
-    @polar_certificate
-
-  -> certificate
-    @certificate
+  ro :milnor_number, :delta, :discriminant_certificate, :polar_intersection
+  ro :projection_intersection, :polar_certificate, :certificate
 
   -> to_s
     ("PlaneCurveLocalDeltaInvariant(delta=" +

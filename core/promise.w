@@ -5,8 +5,7 @@
     @state = FutureState.new()
     @future = Future.new(@state)
 
-  -> future
-    @future
+  ro :future
 
   -> fulfill(value)
     @state.fulfill(value)

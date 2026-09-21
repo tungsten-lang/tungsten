@@ -11,14 +11,7 @@
       raise "projective chart index out of range"
     @equation = @projective_curve.equation.dehomogenize(@index)
 
-  -> projective_curve
-    @projective_curve
-
-  -> index
-    @index
-
-  -> equation
-    @equation
+  ro :projective_curve, :index, :equation
 
   -> space
     @projective_curve.space
@@ -81,11 +74,7 @@
     @nonsingular_cache = nil
     @jacobian_cache = nil
 
-  -> space
-    @space
-
-  -> equation
-    @equation
+  ro :space, :equation
 
   -> field
     @space.field
@@ -214,8 +203,7 @@
 + Jacobian
   -> new(@curve)
 
-  -> curve
-    @curve
+  ro :curve
 
   -> dimension
     @curve.genus
@@ -237,14 +225,7 @@
 + EllipticPoint
   -> new(@curve, @x, @y, @at_infinity = false)
 
-  -> curve
-    @curve
-
-  -> x
-    @x
-
-  -> y
-    @y
+  ro :curve, :x, :y
 
   -> identity?
     @at_infinity
@@ -327,25 +308,13 @@
     @identity = EllipticPoint.new(self, nil, nil, true)
     @jacobian_view = EllipticJacobian.new(self)
 
-  -> space
-    @space
-
-  -> equation
-    @equation
+  ro :space, :equation
 
   # The underlying plane cubic. Callers that need Curve APIs use this
   # explicitly rather than treating EllipticCurve as a Curve subclass.
-  -> curve
-    @curve
+  ro :curve
 
-  -> a
-    @a
-
-  -> b
-    @b
-
-  -> identity
-    @identity
+  ro :a, :b, :identity
 
   -> field
     @space.field
@@ -444,8 +413,7 @@
 + EllipticJacobian
   -> new(@curve)
 
-  -> curve
-    @curve
+  ro :curve
 
   -> dimension
     1
@@ -472,8 +440,7 @@
       raise "the model y^2 = f(x) is not supported in characteristic 2"
     @jacobian_cache = nil
 
-  -> polynomial
-    @polynomial
+  ro :polynomial
 
   -> field
     @polynomial.ring.field
@@ -514,14 +481,7 @@
     if @u.degree > @jacobian.dimension
       raise "Mumford divisor is not reduced"
 
-  -> jacobian
-    @jacobian
-
-  -> u
-    @u
-
-  -> v
-    @v
+  ro :jacobian, :u, :v
 
   -> identity?
     @u.one? && @v.zero?
@@ -595,11 +555,7 @@
       @scaled_polynomial = poly
     @identity = MumfordDivisor.new(self, poly.ring.one, poly.ring.zero)
 
-  -> curve
-    @curve
-
-  -> identity
-    @identity
+  ro :curve, :identity
 
   -> dimension
     @curve.genus
@@ -660,11 +616,7 @@
 + GaloisGroup
   -> new(@name, @order)
 
-  -> name
-    @name
-
-  -> order
-    @order
+  ro :name, :order
 
   -> certified?
     true
@@ -750,8 +702,7 @@
     if @polynomial.ring.arity != 1 || @polynomial.degree != 3
       raise "a Weil cubic must be univariate of degree 3"
 
-  -> polynomial
-    @polynomial
+  ro :polynomial
 
   -> field
     @polynomial.ring.field

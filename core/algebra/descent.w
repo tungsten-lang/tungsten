@@ -110,11 +110,7 @@
     @system = F2LinearSystem.new(@width)
     @system.add_equations(matrix, right_hand_side)
 
-  -> name
-    @name
-
-  -> width
-    @width
+  ro :name, :width
 
   -> matrix
     @system.matrix
@@ -125,8 +121,7 @@
   -> finite_certificate
     @system.certificate
 
-  -> arithmetic_certificate
-    @arithmetic_certificate
+  ro :arithmetic_certificate
 
   -> arithmetic_certified?
     return false if @arithmetic_certificate == nil
@@ -165,16 +160,14 @@
       system.add_equations(block.matrix, right)
     @linear_certificate = system.certificate
 
-  -> width
-    @width
+  ro :width
 
   -> blocks
     out = []
     @blocks.each -> out.push(item)
     out
 
-  -> linear_certificate
-    @linear_certificate
+  ro :linear_certificate
 
   -> finite_certified?
     @linear_certificate.certified?
@@ -219,8 +212,7 @@
       raise "Selmer ambient dimension must be a nonnegative integer"
     @blocks = []
 
-  -> width
-    @width
+  ro :width
 
   -> blocks
     out = []
@@ -248,8 +240,7 @@
 + SmoothPlaneQuarticCertificate
   -> new(@curve)
 
-  -> curve
-    @curve
+  ro :curve
 
   -> verified?
     return false if @curve.class_name != "Curve"
@@ -275,8 +266,7 @@
 + SmoothPlaneQuarticBitangentCountCertificate
   -> new(@curve)
 
-  -> curve
-    @curve
+  ro :curve
 
   -> geometric_count
     28
@@ -324,17 +314,12 @@
       @intersection = nil
       @place = nil
 
-  -> curve
-    @curve
-
-  -> line
-    @line
+  ro :curve, :line
 
   -> point
     @place == nil ? nil : @place.point
 
-  -> place
-    @place
+  ro :place
 
   -> intersection_divisor
     @intersection
@@ -392,20 +377,12 @@
     @incidence_ideal = nil
     @line_ideal = nil
 
-  -> curve
-    @curve
-
-  -> pivot
-    @pivot
+  ro :curve, :pivot
 
   -> free_indices
     F2LinearAlgebra.copy_vector(@free_indices)
 
-  -> workspace_ring
-    @workspace_ring
-
-  -> line_ring
-    @line_ring
+  ro :workspace_ring, :line_ring
 
   -> .binomial(n, k)
     return 0 if k < 0 || k > n
@@ -620,11 +597,7 @@
         [@eliminant.ring.names[1]], @eliminant.ring.field, :lex)
       @univariate_eliminant = @eliminant.drop_variables(1, ring)
 
-  -> chart
-    @chart
-
-  -> relation
-    @relation
+  ro :chart, :relation
 
   -> eliminant
     @univariate_eliminant
@@ -692,8 +665,7 @@
     @verified_cache = nil
     @verified_fingerprint = nil
 
-  -> chart
-    @chart
+  ro :chart
 
   -> factor
     Polynomial.new(@factor.ring, @factor.terms)
@@ -847,8 +819,7 @@
     @verified_cache = nil
     @verified_fingerprint = nil
 
-  -> chart
-    @chart
+  ro :chart
 
   -> eliminant
     Polynomial.new(@projection.ring, @projection.terms)
@@ -1068,17 +1039,7 @@
     if @status == "complete" && @certificate == nil
       raise "completed descent requirements need a certificate"
 
-  -> name
-    @name
-
-  -> status
-    @status
-
-  -> explanation
-    @explanation
-
-  -> certificate
-    @certificate
+  ro :name, :status, :explanation, :certificate
 
   -> complete?
     return false if @status != "complete"
@@ -1122,8 +1083,7 @@
     @theta_subdegree_certificate = nil
     @theta_galois_certificate = nil
 
-  -> curve
-    @curve
+  ro :curve
 
   -> jacobian
     @curve.jacobian
@@ -1192,8 +1152,7 @@
     @theta_galois_certificate = nil
     @bitangent_scheme_certificate
 
-  -> bitangent_scheme_certificate
-    @bitangent_scheme_certificate
+  ro :bitangent_scheme_certificate
 
   -> certify_integral_product_order
     if @bitangent_scheme_certificate == nil
@@ -1211,8 +1170,7 @@
       raise "bitangent integral product order failed certification"
     @integral_product_order
 
-  -> integral_product_order
-    @integral_product_order
+  ro :integral_product_order
 
   -> certify_archimedean_data(search_limit = 250_000)
     if @integral_product_order == nil
@@ -1223,8 +1181,7 @@
       raise "bitangent archimedean place data failed certification"
     @archimedean_data
 
-  -> archimedean_data
-    @archimedean_data
+  ro :archimedean_data
 
   -> archimedean_certificate
     return nil if @archimedean_data == nil
@@ -1250,8 +1207,7 @@
     return nil if @maximal_product_order_computation == nil
     @maximal_product_order_computation.order
 
-  -> maximal_product_order_computation
-    @maximal_product_order_computation
+  ro :maximal_product_order_computation
 
   -> maximal_product_order_certificate
     return nil if @maximal_product_order_computation == nil
@@ -1278,8 +1234,7 @@
       raise "bitangent S-prime data failed certification"
     @s_prime_data
 
-  -> s_prime_data
-    @s_prime_data
+  ro :s_prime_data
 
   -> s_prime_certificate
     return nil if @s_prime_data == nil
@@ -1304,8 +1259,7 @@
       raise "bitangent product S-class 2-torsion proof failed"
     @s_class_two_torsion_proof
 
-  -> s_class_two_torsion_proof
-    @s_class_two_torsion_proof
+  ro :s_class_two_torsion_proof
 
   -> s_class_two_torsion_certificate
     return nil if @s_class_two_torsion_proof == nil
@@ -1329,8 +1283,7 @@
       raise "bitangent product S-unit space failed certification"
     @s_unit_square_class_space
 
-  -> s_unit_square_class_space
-    @s_unit_square_class_space
+  ro :s_unit_square_class_space
 
   -> s_unit_square_class_space_certificate
     return nil if @s_unit_square_class_space == nil
@@ -1509,20 +1462,7 @@
     @count_certificate = SmoothPlaneQuarticBitangentCountCertificate.new(
       @setup.curve)
 
-  -> setup
-    @setup
-
-  -> primary_chart
-    @primary_chart
-
-  -> boundary_chart
-    @boundary_chart
-
-  -> primary_certificate
-    @primary_certificate
-
-  -> count_certificate
-    @count_certificate
+  ro :setup, :primary_chart, :boundary_chart, :primary_certificate, :count_certificate
 
   -> projection_polynomial
     @primary_certificate.eliminant

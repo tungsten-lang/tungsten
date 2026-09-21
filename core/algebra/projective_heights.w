@@ -104,16 +104,14 @@ use core/algebra/projective
     if !@certificate_cache.verified?
       raise "projective homogeneous map failed certification"
 
-  -> space
-    @space
+  ro :space
 
   -> coordinate_polynomials
     answer = []
     @coordinate_polynomials.each -> answer.push(item)
     answer
 
-  -> degree
-    @degree
+  ro :degree
 
   -> image(point)
     raise "point belongs to a different projective space" if point.space != @space
@@ -233,14 +231,7 @@ use core/algebra/projective
     if !@certificate_cache.verified?
       raise "Mordell-Weil height/index bound failed certification"
 
-  -> point_height
-    @point_height
-
-  -> nontorsion_height_lower_bound
-    @nontorsion_height_lower_bound
-
-  -> maximum_multiplier
-    @maximum_multiplier
+  ro :point_height, :nontorsion_height_lower_bound, :maximum_multiplier
 
   -> odd_prime_candidates
     answer = []
@@ -349,14 +340,7 @@ use core/algebra/projective
     if !@certificate_cache.verified?
       raise "projective height-defect identity failed certification"
 
-  -> map
-    @map
-
-  -> identity_scalar
-    @identity_scalar
-
-  -> identity_degree
-    @identity_degree
+  ro :map, :identity_scalar, :identity_degree
 
   -> witnesses
     answer = []
@@ -366,14 +350,7 @@ use core/algebra/projective
       answer.push(copied)
     answer
 
-  -> forward_coefficient_bound
-    @forward_coefficient_bound
-
-  -> reverse_coefficient_bound
-    @reverse_coefficient_bound
-
-  -> defect_coefficient_bound
-    @defect_coefficient_bound
+  ro :forward_coefficient_bound, :reverse_coefficient_bound, :defect_coefficient_bound
 
   -> log_bound(tolerance = nil)
     Calculus.certified_log(@defect_coefficient_bound, tolerance)
@@ -464,31 +441,14 @@ use core/algebra/projective
     if !@certificate_cache.verified?
       raise "projective canonical-height enclosure failed certification"
 
-  -> map
-    @map
-
-  -> defect_bound
-    @defect_bound
-
-  -> point
-    @point
-
-  -> iterations
-    @iterations
-
-  -> tolerance
-    @tolerance
+  ro :map, :defect_bound, :point, :iterations, :tolerance
 
   -> orbit
     answer = []
     @orbit.each -> answer.push(item)
     answer
 
-  -> final_naive_height
-    @final_naive_height
-
-  -> interval
-    @interval
+  ro :final_naive_height, :interval
 
   -> lower_bound
     @interval.lower_bound

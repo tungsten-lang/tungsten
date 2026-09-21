@@ -43,8 +43,7 @@
         right += 1
       left += 1
 
-  -> length
-    @length
+  ro :length
 
   -> size
     @words.size
@@ -130,11 +129,7 @@
 + BinaryCodeDistanceCertificate
   -> new(@code, @claimed_minimum_distance)
 
-  -> code
-    @code
-
-  -> claimed_minimum_distance
-    @claimed_minimum_distance
+  ro :code, :claimed_minimum_distance
 
   -> proof_kind
     :exact_pairwise_hamming_replay
@@ -174,11 +169,7 @@
   -> size
     @vectors.size
 
-  -> dimension
-    @dimension
-
-  -> norm_squared
-    @norm_squared
+  ro :dimension, :norm_squared
 
   -> constant_norm?
     @vectors.each -> (vector)

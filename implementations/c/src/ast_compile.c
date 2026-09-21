@@ -1873,6 +1873,74 @@ static int compile_function_def(TcAstValue node, const char *prefix, size_t pref
          tc_emit_op(chunk, TC_OP_RETURN, err);
 }
 
+// Class-body `ro :a, :b` / `rw :c`. The parser keeps these as plain call
+// nodes (same canonical AST as the self-hosted parser); like lowering's
+// lower_accessors, synthesize `-> field; @field` and, for rw,
+// `-> field=(value); @field = value`, then compile them as ordinary methods.
+static int ast_is_accessor_decl(TcAstValue expr) {
+  if (!ast_node_is(expr, "call")) return 0;
+  TcAstValue *receiver = ast_get(expr, "receiver");
+  TcAstValue *name = ast_get(expr, "name");
+  if ((receiver && receiver->kind != TC_AST_NIL) || !name) return 0;
+  return ast_text_eq(*name, "ro") || ast_text_eq(*name, "rw");
+}
+
+static TcAstValue accessor_node(const char *kind, const char *name, size_t name_len, TcError *err) {
+  TcAstValue node = tc_ast_hash_new(err);
+  tc_ast_hash_set(node, "node", tc_ast_symbol_copy(kind, strlen(kind), err), err);
+  tc_ast_hash_set(node, "name", tc_ast_string_copy(name, name_len, err), err);
+  return node;
+}
+
+static int compile_accessor_decl(TcAstValue expr, const char *prefix, size_t prefix_len,
+                                 TcChunk *chunk, TcError *err) {
+  TcAstValue *args = ast_get(expr, "args");
+  if (!args || args->kind != TC_AST_ARRAY) return 1;
+  int writable = ast_text_eq(*ast_get(expr, "name"), "rw");
+
+  for (size_t i = 0; i < args->as.array->count; i++) {
+    TcAstValue *field = ast_get(args->as.array->items[i], "value");
+    if (!field || (field->kind != TC_AST_STRING && field->kind != TC_AST_SYMBOL) ||
+        field->as.string.len == 0 || field->as.string.len > 200) {
+      tc_error_set(err, "ro/rw expects symbol field names");
+      return 0;
+    }
+    char ivar[256];
+    size_t ivar_len = field->as.string.len + 1;
+    ivar[0] = '@';
+    memcpy(ivar + 1, field->as.string.bytes, field->as.string.len);
+
+    TcAstValue getter = accessor_node("method_def", field->as.string.bytes, field->as.string.len, err);
+    TcAstValue getter_body = tc_ast_array_new(err);
+    tc_ast_array_push(getter_body, accessor_node("ivar", ivar, ivar_len, err), err);
+    tc_ast_hash_set(getter, "params", tc_ast_array_new(err), err);
+    tc_ast_hash_set(getter, "body", getter_body, err);
+    int ok = compile_function_def(getter, prefix, prefix_len, chunk, err);
+    tc_ast_free(getter);
+    if (!ok) return 0;
+    if (!writable) continue;
+
+    char setter_name[256];
+    memcpy(setter_name, field->as.string.bytes, field->as.string.len);
+    setter_name[field->as.string.len] = '=';
+    TcAstValue setter = accessor_node("method_def", setter_name, field->as.string.len + 1, err);
+    TcAstValue params = tc_ast_array_new(err);
+    tc_ast_array_push(params, accessor_node("param", "value", 5, err), err);
+    TcAstValue assign = tc_ast_hash_new(err);
+    tc_ast_hash_set(assign, "node", tc_ast_symbol_copy("assign", 6, err), err);
+    tc_ast_hash_set(assign, "target", accessor_node("ivar", ivar, ivar_len, err), err);
+    tc_ast_hash_set(assign, "value", accessor_node("var", "value", 5, err), err);
+    TcAstValue setter_body = tc_ast_array_new(err);
+    tc_ast_array_push(setter_body, assign, err);
+    tc_ast_hash_set(setter, "params", params, err);
+    tc_ast_hash_set(setter, "body", setter_body, err);
+    ok = compile_function_def(setter, prefix, prefix_len, chunk, err);
+    tc_ast_free(setter);
+    if (!ok) return 0;
+  }
+  return 1;
+}
+
 static int compile_trait_methods_for_class(TcAstValue expressions, TcAstValue include,
                                            const char *prefix, size_t prefix_len,
                                            TcChunk *chunk, int depth, TcError *err) {
@@ -1911,6 +1979,10 @@ static int compile_trait_methods_for_class(TcAstValue expressions, TcAstValue in
       TcAstValue expr = trait_body->as.array->items[j];
       if ((ast_node_is(expr, "method_def") || ast_node_is(expr, "fn_def")) &&
           !compile_function_def(expr, prefix, prefix_len, chunk, err)) {
+        return 0;
+      }
+      if (ast_is_accessor_decl(expr) &&
+          !compile_accessor_decl(expr, prefix, prefix_len, chunk, err)) {
         return 0;
       }
     }
@@ -1977,6 +2049,11 @@ static int compile_class_definitions(TcAstValue node, TcAstValue expressions,
     TcAstValue expr = body->as.array->items[i];
     if ((ast_node_is(expr, "method_def") || ast_node_is(expr, "fn_def")) &&
         !compile_function_def(expr, prefix, prefix_len, chunk, err)) {
+      free(prefix);
+      return 0;
+    }
+    if (ast_is_accessor_decl(expr) &&
+        !compile_accessor_decl(expr, prefix, prefix_len, chunk, err)) {
       free(prefix);
       return 0;
     }

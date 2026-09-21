@@ -172,9 +172,19 @@ d = Dog.new("Rex", "lab")
 << d.breed
 d.name = "Max"
 
-# Standalone accessor declarations also exist (compiled):
-#   ro :name    rw :breed
+# Standalone declarations work anywhere in a class or trait body, on every
+# engine, several names to a line:
++ Certificate
+  ro :proof, :level
+  rw :note
+
+  -> new(@proof, @level)
+    @note = ""
 ```
+
+Never hand-write a trivial accessor. `-> proof` with the body `@proof` is
+Ruby; in Tungsten it is `ro :proof` (and a getter plus `-> note=(v)` /
+`@note = v` is `rw :note`). They expand to the identical methods.
 
 Classes construct without `.new` too: `Dog("Rex", "lab")`.
 
@@ -278,8 +288,9 @@ ensure
 6. Bare decimals are exact; floats are opt-in with `~`
 7. `fn` for pure, memoized functions
 8. Built-in currency, units, dates, quantities
-9. Trailing `ro`/`rw` on the constructor for accessors (not
-   `attr_reader`/`attr_accessor`)
+9. `ro :field` / `rw :field` (or a trailing `ro`/`rw` on the constructor) for
+   accessors — not `attr_reader`/`attr_accessor`, and never a hand-written
+   `-> field` / `@field` getter
 
 ## Engines
 

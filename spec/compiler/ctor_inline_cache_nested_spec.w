@@ -6,15 +6,13 @@
 
 + Inner
   -> new(@a)
-  -> a
-    @a
+  ro :a
 
 + Outer
   -> new(v)
     @inner = Inner.new(v + 1)
     @val = v
-  -> val
-    @val
+  ro :val
   -> inner_a
     @inner.a
 

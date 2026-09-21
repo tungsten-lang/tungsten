@@ -19,20 +19,7 @@ fn safetensors_byte_to_str(b)
   ccall("w_string_from_byte", b)
 
 + Safetensors
-  # Workaround: `rw :foo` triggers an emitter bug — undefined symbol for the
-  # generated rw accessor functions. Expanding manually.
-  -> mmap
-    @mmap
-  -> mmap=(value)
-    @mmap = value
-  -> tensors
-    @tensors
-  -> tensors=(value)
-    @tensors = value
-  -> data_offset
-    @data_offset
-  -> data_offset=(value)
-    @data_offset = value
+  rw :mmap, :tensors, :data_offset
 
   -> new(path)
     @mmap = File.mmap(path)

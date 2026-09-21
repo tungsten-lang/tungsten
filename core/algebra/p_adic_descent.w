@@ -296,14 +296,7 @@
     if !@certificate_cache.verified?
       raise "implicit BPS disk value failed certification"
 
-  -> function_data
-    @function_data
-
-  -> local_map
-    @local_map
-
-  -> implicit_disk
-    @implicit_disk
+  ro :function_data, :local_map, :implicit_disk
 
   -> vector
     F2LinearAlgebra.copy_vector(@vector)
@@ -457,11 +450,7 @@
     if !@certificate_cache.verified?
       raise "implicit BPS local image failed certification"
 
-  -> function_data
-    @function_data
-
-  -> local_map
-    @local_map
+  ro :function_data, :local_map
 
   -> rational_prime
     @local_map.rational_prime
@@ -482,8 +471,7 @@
   -> target_dimension
     @local_map.target_dimension
 
-  -> span_certificate
-    @span_certificate
+  ro :span_certificate
 
   -> dimension
     @span_certificate.rank
@@ -717,14 +705,7 @@
     if !@certificate_cache.verified?
       raise "BPS Hensel-disk value failed certification"
 
-  -> function_data
-    @function_data
-
-  -> local_map
-    @local_map
-
-  -> disk
-    @disk
+  ro :function_data, :local_map, :disk
 
   -> vector
     F2LinearAlgebra.copy_vector(@vector)
@@ -865,11 +846,7 @@
     if !@certificate_cache.verified?
       raise "BPS Hensel local image failed certification"
 
-  -> function_data
-    @function_data
-
-  -> local_map
-    @local_map
+  ro :function_data, :local_map
 
   -> rational_prime
     @local_map.rational_prime
@@ -890,8 +867,7 @@
   -> target_dimension
     @local_map.target_dimension
 
-  -> span_certificate
-    @span_certificate
+  ro :span_certificate
 
   -> dimension
     @span_certificate.rank
@@ -1078,17 +1054,12 @@
     if !@certificate_cache.verified?
       raise "BPS local disk image failed certification"
 
-  -> function_data
-    @function_data
-
-  -> local_map
-    @local_map
+  ro :function_data, :local_map
 
   -> rational_prime
     @local_map.rational_prime
 
-  -> dimension_certificate
-    @dimension_certificate
+  ro :dimension_certificate
 
   -> disk_entries
     out = []
@@ -1114,8 +1085,7 @@
   -> target_dimension
     @local_map.target_dimension
 
-  -> span_certificate
-    @span_certificate
+  ro :span_certificate
 
   -> dimension
     @span_certificate.rank
@@ -1324,17 +1294,7 @@
     if !@certificate_cache.verified?
       raise "good-reduction BPS local image failed certification"
 
-  -> function_data
-    @function_data
-
-  -> local_map
-    @local_map
-
-  -> theta_fiber
-    @theta_fiber
-
-  -> cover
-    @cover
+  ro :function_data, :local_map, :theta_fiber, :cover
 
   -> rational_prime
     @cover.prime
@@ -1353,8 +1313,7 @@
       count += 1 if item[1] != nil
     count
 
-  -> base_disk
-    @base_disk
+  ro :base_disk
 
   -> vectors
     F2LinearAlgebra.copy_matrix(@vectors)
@@ -1362,14 +1321,12 @@
   -> target_dimension
     @local_map.target_dimension
 
-  -> span_certificate
-    @span_certificate
+  ro :span_certificate
 
   -> dimension
     @span_certificate.rank
 
-  -> expected_dimension
-    @expected_dimension
+  ro :expected_dimension
 
   -> image_basis
     @span_certificate.rref.copy(
@@ -1596,17 +1553,7 @@
     if !@certificate_cache.verified?
       raise "smooth-locus BPS local image failed certification"
 
-  -> function_data
-    @function_data
-
-  -> local_map
-    @local_map
-
-  -> cover
-    @cover
-
-  -> dimension_certificate
-    @dimension_certificate
+  ro :function_data, :local_map, :cover, :dimension_certificate
 
   -> rational_prime
     @cover.prime
@@ -1625,8 +1572,7 @@
       count += 1 if item[1] != nil
     count
 
-  -> base_disk
-    @base_disk
+  ro :base_disk
 
   -> vectors
     F2LinearAlgebra.copy_matrix(@vectors)
@@ -1634,14 +1580,12 @@
   -> target_dimension
     @local_map.target_dimension
 
-  -> span_certificate
-    @span_certificate
+  ro :span_certificate
 
   -> dimension
     @span_certificate.rank
 
-  -> dimension_upper_bound
-    @dimension_upper_bound
+  ro :dimension_upper_bound
 
   -> image_basis
     @span_certificate.rref.copy(
@@ -1836,17 +1780,7 @@
     if !@certificate_cache.verified?
       raise "local BPS image constraint failed certification"
 
-  -> local_image
-    @local_image
-
-  -> source
-    @source
-
-  -> rational_prime
-    @rational_prime
-
-  -> annihilator_certificate
-    @annihilator_certificate
+  ro :local_image, :source, :rational_prime, :annihilator_certificate
 
   -> matrix
     F2LinearAlgebra.copy_matrix(@matrix)

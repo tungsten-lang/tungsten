@@ -80,8 +80,7 @@
     if !@certificate_cache.verified?
       raise "matrix does not preserve the symplectic F2 pairing"
 
-  -> space
-    @space
+  ro :space
 
   -> matrix
     F2LinearAlgebra.copy_matrix(@matrix)
@@ -272,23 +271,7 @@
     if !@certificate_cache.verified?
       raise "symplectic conjugacy test failed certification"
 
-  -> left
-    @left
-
-  -> right
-    @right
-
-  -> linear_certificate
-    @linear_certificate
-
-  -> kernel_dimension
-    @kernel_dimension
-
-  -> candidate_count
-    @candidate_count
-
-  -> conjugator
-    @conjugator
+  ro :left, :right, :linear_certificate, :kernel_dimension, :candidate_count, :conjugator
 
   -> conjugate?
     @conjugator != nil
@@ -447,11 +430,7 @@
     if !@certificate_cache.verified?
       raise "symplectic map did not induce a theta-incidence permutation"
 
-  -> incidence
-    @incidence
-
-  -> transformation
-    @transformation
+  ro :incidence, :transformation
 
   -> permutation
     F2LinearAlgebra.copy_vector(@permutation)
@@ -683,8 +662,7 @@
     if !@certificate_cache.verified?
       raise "theta permutation action failed certification"
 
-  -> incidence
-    @incidence
+  ro :incidence
 
   -> generators
     out = []
@@ -844,19 +822,14 @@
     if !@certificate_cache.verified?
       raise "theta subgroup fixed-space certificate failed"
 
-  -> incidence
-    @incidence
-
-  -> subgroup
-    @subgroup
+  ro :incidence, :subgroup
 
   -> generator_lifts
     out = []
     @generator_lifts.each -> out.push(item)
     out
 
-  -> linear_certificate
-    @linear_certificate
+  ro :linear_certificate
 
   -> dimension
     @linear_certificate.kernel_dimension
@@ -976,25 +949,14 @@
     if !@certificate_cache.verified?
       raise "theta permutation has the wrong Frobenius cycle type"
 
-  -> scheme_certificate
-    @scheme_certificate
-
-  -> prime
-    @prime
-
-  -> theta_permutation
-    @theta_permutation
-
-  -> distinguished_theta_index
-    @distinguished_theta_index
+  ro :scheme_certificate, :prime, :theta_permutation, :distinguished_theta_index
 
   -> reduced_projection
     Polynomial.new(
       @reduced_projection.ring,
       @reduced_projection.terms)
 
-  -> factorization
-    @factorization
+  ro :factorization
 
   -> factor_degrees
     out = []

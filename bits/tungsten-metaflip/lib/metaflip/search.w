@@ -221,11 +221,7 @@
     @archive_rejects = 0
     @best_improvements = 0
 
-  -> capacity
-    @capacity
-
-  -> iterations
-    @iterations
+  ro :capacity, :iterations
 
   -> archive_size
     @states.size()
@@ -241,11 +237,7 @@
     return nil if @best_scores == nil
     metaflip_search_copy_values(@best_scores)
 
-  -> best_descriptor
-    @best_descriptor
-
-  -> best_identity
-    @best_identity
+  ro :best_descriptor, :best_identity
 
   -> __find_descriptor(descriptor)
     i = 0

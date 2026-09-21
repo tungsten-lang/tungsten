@@ -144,8 +144,7 @@ check("escape.hash_size", kh.size(), "2000")
 + Holder
   -> new(@label)
     self
-  -> label
-    @label
+  ro :label
 -> hold(i)
   Holder.new(i.to_s() + PAD)
 holders = []

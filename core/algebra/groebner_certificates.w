@@ -16,17 +16,7 @@ use core/algebra/groebner
   -> new(@dividend, @divisors, @quotients, @remainder)
     @verified_cache = nil
 
-  -> dividend
-    @dividend
-
-  -> divisors
-    @divisors
-
-  -> quotients
-    @quotients
-
-  -> remainder
-    @remainder
+  ro :dividend, :divisors, :quotients, :remainder
 
   -> verified?
     return @verified_cache if @verified_cache != nil
@@ -73,14 +63,7 @@ use core/algebra/groebner
   -> new(@polynomial, @generators, @multipliers)
     @verified_cache = nil
 
-  -> polynomial
-    @polynomial
-
-  -> generators
-    @generators
-
-  -> multipliers
-    @multipliers
+  ro :polynomial, :generators, :multipliers
 
   -> verified?
     return @verified_cache if @verified_cache != nil
@@ -213,20 +196,7 @@ use core/algebra/groebner
          @s_pair_reductions)
     @verified_cache = nil
 
-  -> source_generators
-    @source_generators
-
-  -> basis
-    @basis
-
-  -> basis_representations
-    @basis_representations
-
-  -> source_reductions
-    @source_reductions
-
-  -> s_pair_reductions
-    @s_pair_reductions
+  ro :source_generators, :basis, :basis_representations, :source_reductions, :s_pair_reductions
 
   -> theorem
     "Buchberger's S-pair criterion characterizes Groebner bases"
@@ -501,23 +471,17 @@ use core/algebra/groebner
       index += 1
     [polynomial, representation]
 
-  -> ring
-    @ring
-
-  -> source_generators
-    @source_generators
+  ro :ring, :source_generators
 
   -> polynomials
     @basis
 
-  -> basis
-    @basis
+  ro :basis
 
   -> representations
     @basis_representations
 
-  -> certificate
-    @certificate
+  ro :certificate
 
   -> certified?
     @certificate.verified?

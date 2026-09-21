@@ -18,14 +18,7 @@
 + IntegralGeneratorTransformCertificate
   -> new(@source_polynomial, @integral_polynomial, @scale)
 
-  -> source_polynomial
-    @source_polynomial
-
-  -> integral_polynomial
-    @integral_polynomial
-
-  -> scale
-    @scale
+  ro :source_polynomial, :integral_polynomial, :scale
 
   -> verified?
     return false if @source_polynomial.class_name != "Polynomial"
@@ -53,8 +46,7 @@
 + MonogenicOrderCertificate
   -> new(@order)
 
-  -> order
-    @order
+  ro :order
 
   -> verified?
     return false if @order.class_name != "MonogenicOrder"
@@ -91,11 +83,7 @@
     @index_obstruction = nil
     @index_prime_to_p = nil
 
-  -> order
-    @order
-
-  -> prime
-    @prime
+  ro :order, :prime
 
   -> factorization
     verify! if @factorization == nil
@@ -208,8 +196,7 @@
     @discriminant_factors = nil
     @local_certificates = nil
 
-  -> order
-    @order
+  ro :order
 
   -> discriminant_factors
     build if @discriminant_factors == nil
@@ -342,17 +329,7 @@
     terms.push([Rational.new(1), [degree]])
     [scale, Polynomial.new(ring, terms)]
 
-  -> source_polynomial
-    @source_polynomial
-
-  -> integral_polynomial
-    @integral_polynomial
-
-  -> generator_scale
-    @generator_scale
-
-  -> algebra
-    @algebra
+  ro :source_polynomial, :integral_polynomial, :generator_scale, :algebra
 
   -> generator
     @algebra.generator
@@ -570,8 +547,7 @@
       @components.push(component_orders[i].coerce(values[i]))
       i += 1
 
-  -> order
-    @order
+  ro :order
 
   -> components
     out = []

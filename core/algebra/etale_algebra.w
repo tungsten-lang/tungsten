@@ -21,8 +21,7 @@
     @coefficients = @algebra.reduce_coefficients(coefficients, raw)
     self
 
-  -> algebra
-    @algebra
+  ro :algebra
 
   -> coefficients
     out = []
@@ -124,16 +123,14 @@
     @verified_cache = nil
     self
 
-  -> polynomial
-    @polynomial
+  ro :polynomial
 
   -> components
     out = []
     @components.each -> out.push(item)
     out
 
-  -> source_certificate
-    @source_certificate
+  ro :source_certificate
 
   -> verified?
     return @verified_cache if @verified_cache != nil
@@ -202,8 +199,7 @@
   -> new(@algebra)
     @verified_cache = nil
 
-  -> algebra
-    @algebra
+  ro :algebra
 
   -> verified?
     return @verified_cache if @verified_cache != nil
@@ -294,20 +290,12 @@
     @decomposition_certificate_cache = nil
     self
 
-  -> base_field
-    @base_field
-
-  -> defining_polynomial
-    @defining_polynomial
-
-  -> dimension
-    @dimension
+  ro :base_field, :defining_polynomial, :dimension
 
   -> degree
     @dimension
 
-  -> generator
-    @generator
+  ro :generator
 
   -> component_polynomials
     out = []

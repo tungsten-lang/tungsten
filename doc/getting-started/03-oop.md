@@ -34,18 +34,38 @@ d.name = "Max"
 | `ro` | Read-only accessors for the `@` fields in that constructor |
 | `rw` | Read-write accessors |
 
-Standalone accessor declarations also exist *(compiled)*:
+Standalone declarations do the same for any field, on every engine — several
+names to a line, anywhere in the class (or trait) body:
 
 ```tungsten
 + Animal
-  ro :name
-  ro :sound
+  ro :name, :sound
+  rw :mood
 
   -> new(@name, @sound)
+    @mood = "calm"
 
   -> speak
     << "[self.name] says [self.sound]"
 ```
+
+**Tungsten is not Ruby: never hand-write a getter or setter.** A method whose
+whole body is its own field is a declaration, not a method:
+
+```tungsten
+# no                         # yes
+-> certificate               ro :certificate
+  @certificate
+
+-> note                      rw :note
+  @note
+-> note=(value)
+  @note = value
+```
+
+`ro`/`rw` expand to exactly those methods, so nothing is lost — only the
+noise. Keep a real `->` for anything that computes (`-> area` / `@w * @h`) or
+that exposes a field under another name (`-> to_a` / `@items`).
 
 ---
 

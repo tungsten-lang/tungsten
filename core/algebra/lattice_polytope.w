@@ -153,8 +153,7 @@ use core/algebra/integer_lattice
     @dimension = dimension
     raise "simplex vertices must be affinely independent" if normalized_volume == 0
 
-  -> dimension
-    @dimension
+  ro :dimension
 
   -> vertices
     LatticeCombinatorics.copy_matrix(@vertices)
@@ -270,8 +269,7 @@ use core/algebra/integer_lattice
     @dimension = LatticeCombinatorics.positive_integer(
       dimension, "centered simplex dimension")
 
-  -> dimension
-    @dimension
+  ro :dimension
 
   -> vertices
     base = []
@@ -331,8 +329,7 @@ use core/algebra/integer_lattice
     if @shell_dimension < 2
       raise "diagonal shell polytope needs shell dimension at least two"
 
-  -> shell_dimension
-    @shell_dimension
+  ro :shell_dimension
 
   -> dimension
     @shell_dimension - 1
@@ -461,8 +458,7 @@ use core/algebra/integer_lattice
       seen[key] = true
       @exponents.push(copied)
 
-  -> dimension
-    @dimension
+  ro :dimension
 
   -> exponents
     LatticeCombinatorics.copy_matrix(@exponents)

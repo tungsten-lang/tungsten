@@ -23,8 +23,7 @@ in Tungsten:AST
     @size += 1
     self
 
-  -> size
-    @size
+  ro :size
 
   -> finish
     result = ccall_nobox("w_ast_body_builder_finish", @storage, @size)

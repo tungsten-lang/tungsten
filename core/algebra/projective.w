@@ -11,11 +11,7 @@
       raise "wrong projective coordinate count: expected " + @space.coordinate_count.to_s + ", got " + coordinates.size.to_s
     @coordinates = @space.field.normalize_projective_coordinates(coordinates)
 
-  -> space
-    @space
-
-  -> coordinates
-    @coordinates
+  ro :space, :coordinates
 
   -> []/1
     @coordinates[@1]
@@ -100,23 +96,12 @@
       i += 1
     names
 
-  -> dimension
-    @dimension
+  ro :dimension
 
   -> coordinate_count
     @dimension + 1
 
-  -> coordinate_names
-    @coordinate_names
-
-  -> field
-    @field
-
-  -> ring
-    @ring
-
-  -> coords
-    @coords
+  ro :coordinate_names, :field, :ring, :coords
 
   -> with_coords(names)
     raise "projective coordinate names must be an Array" if names.class_name != "Array"

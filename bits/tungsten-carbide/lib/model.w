@@ -785,8 +785,7 @@
 
   # {attr => [old, new]} that the most recent successful save persisted — for
   # after-save logic ("did the email change on this save?").
-  -> previous_changes
-    @previous_changes
+  ro :previous_changes
 
   # Did this attribute change on the most recent successful save?
   -> attribute_previously_changed?(name)

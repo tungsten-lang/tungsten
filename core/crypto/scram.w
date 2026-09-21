@@ -54,8 +54,7 @@ in Crypto
     wo_proof + ",p=" + Base64.encode(proof)
 
   # Expected server signature (base64), available after client_final.
-  -> server_signature
-    @server_signature
+  ro :server_signature
 
   # True iff the server-final-message ("v=...") carries the signature only
   # the real server (holder of the stored credentials) could compute.

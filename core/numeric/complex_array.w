@@ -31,11 +31,7 @@
     @data = backing
     self
 
-  -> size
-    @size
-
-  -> data
-    @data
+  ro :size, :data
 
   -> [](i)
     Complex.new(@data[2 * i], @data[2 * i + 1])

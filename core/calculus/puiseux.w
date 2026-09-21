@@ -118,20 +118,7 @@ use core/calculus/laurent
   -> variable
     @variable_text.to_sym
 
-  -> variable_text
-    @variable_text
-
-  -> center
-    @center
-
-  -> ramification_index
-    @ramification_index
-
-  -> minimum_index
-    @minimum_index
-
-  -> maximum_index
-    @maximum_index
+  ro :variable_text, :center, :ramification_index, :minimum_index, :maximum_index
 
   -> minimum_exponent
     Rational.new(@minimum_index, @ramification_index)

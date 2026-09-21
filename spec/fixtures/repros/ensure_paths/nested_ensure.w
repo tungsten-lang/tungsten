@@ -12,8 +12,7 @@
     ensure
       @journal = @journal + "O"
 
-  -> journal
-    @journal
+  ro :journal
 
 n = Nest.new
 << "result:" + n.run().to_s()

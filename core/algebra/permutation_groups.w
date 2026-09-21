@@ -227,8 +227,7 @@
     if !@certificate_cache.verified?
       raise "finite permutation group failed closure certification"
 
-  -> degree
-    @degree
+  ro :degree
 
   -> generators
     out = []
@@ -440,8 +439,7 @@
     if !@certificate_cache.verified?
       raise "finite permutation subgroup enumeration failed certification"
 
-  -> parent
-    @parent
+  ro :parent
 
   -> subgroups
     out = []

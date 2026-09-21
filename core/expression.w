@@ -23,8 +23,7 @@ use core/special
     arguments.each -> (argument)
       @arguments.push(argument)
 
-  -> operation
-    @operation
+  ro :operation
 
   -> arguments
     out = []

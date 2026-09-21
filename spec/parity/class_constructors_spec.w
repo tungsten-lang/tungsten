@@ -60,8 +60,7 @@ s.push(1).push(2).push(3)
   -> new(name, opts = {})
     @name = name
     @opts = opts
-  -> name
-    @name
+  ro :name
   -> opt(k)
     @opts[k]
 
@@ -72,8 +71,7 @@ cfg = Config.new("svc", {port: 80})
   -> .freezing
     Temp.new(0)
   -> new(@deg)
-  -> deg
-    @deg
+  ro :deg
 
 << "class.method [Temp.freezing.deg]"
 q = p

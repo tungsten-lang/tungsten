@@ -398,8 +398,7 @@
       r += 1
     matrices
 
-  -> prime
-    @prime
+  ro :prime
 
   -> matrices
     out = []
@@ -419,8 +418,7 @@
       ])
     out
 
-  -> certificate
-    @certificate
+  ro :certificate
 
   -> certified?
     @certificate.verified?
@@ -449,11 +447,7 @@
     if !@certificate.verified?
       raise "composite Hecke operator certificate failed"
 
-  -> space
-    @space
-
-  -> index
-    @index
+  ro :space, :index
 
   -> prime_power_matrix(prime, exponent, cuspidal)
     dimension = cuspidal ? @space.cuspidal_dimension : @space.relative_dimension
@@ -497,17 +491,12 @@
   -> cuspidal_matrix
     ModularSymbolsLinearAlgebra.copy_matrix(@cuspidal_matrix)
 
-  -> relative_characteristic_polynomial
-    @relative_characteristic_polynomial
+  ro :relative_characteristic_polynomial
 
   -> characteristic_polynomial
     @cuspidal_characteristic_polynomial
 
-  -> cuspidal_characteristic_polynomial
-    @cuspidal_characteristic_polynomial
-
-  -> certificate
-    @certificate
+  ro :cuspidal_characteristic_polynomial, :certificate
 
   -> certified?
     @certificate.verified?
@@ -524,8 +513,7 @@
   -> new(@operator)
     @verified_cache = nil
 
-  -> operator
-    @operator
+  ro :operator
 
   -> theorem
     "weight-two Hecke multiplicativity and prime-power recurrences"
@@ -586,8 +574,7 @@
   -> new(@producer)
     @verified_cache = nil
 
-  -> producer
-    @producer
+  ro :producer
 
   -> theorem
     "Cremona's continued-fraction Heilbronn matrix construction"
@@ -663,14 +650,7 @@
     @certificate = WeightTwoHeckeOperatorCertificate.new(self)
     raise "weight-two Hecke operator certificate failed" if !@certificate.verified?
 
-  -> space
-    @space
-
-  -> prime
-    @prime
-
-  -> heilbronn
-    @heilbronn
+  ro :space, :prime, :heilbronn
 
   -> image_index(pair)
     c = pair[0]
@@ -715,17 +695,12 @@
   -> cuspidal_matrix
     ModularSymbolsLinearAlgebra.copy_matrix(@cuspidal_matrix)
 
-  -> relative_characteristic_polynomial
-    @relative_characteristic_polynomial
+  ro :relative_characteristic_polynomial
 
   -> characteristic_polynomial
     @cuspidal_characteristic_polynomial
 
-  -> cuspidal_characteristic_polynomial
-    @cuspidal_characteristic_polynomial
-
-  -> certificate
-    @certificate
+  ro :cuspidal_characteristic_polynomial, :certificate
 
   -> certified?
     @certificate.verified?
@@ -742,8 +717,7 @@
   -> new(@operator)
     @verified_cache = nil
 
-  -> operator
-    @operator
+  ro :operator
 
   -> theorem
     "Heilbronn matrix action realizes T_p on weight-two Manin symbols"

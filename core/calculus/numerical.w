@@ -21,28 +21,8 @@
 
   -> derivative
     @value
-  -> value
-    @value
-  -> error_estimate
-    @error_estimate
-  -> step
-    @step
-  -> evaluations
-    @evaluations
-  -> levels
-    @levels
-  -> attempts
-    @attempts
-  -> order
-    @order
-  -> scheme
-    @scheme
-  -> status
-    @status
-  -> cancellation_indicator
-    @cancellation_indicator
-  -> resolution_floor
-    @resolution_floor
+  ro :value, :error_estimate, :step, :evaluations, :levels, :attempts, :order, :scheme, :status
+  ro :cancellation_indicator, :resolution_floor
   -> estimate_available?
     @estimate_available
   -> converged?

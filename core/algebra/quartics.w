@@ -43,8 +43,7 @@
     @equation = polynomial_from_coefficients(@coefficients)
     initialize_parameterization
 
-  -> space
-    @space
+  ro :space
 
   -> field
     @space.field
@@ -54,11 +53,7 @@
     @coefficients.each -> out.push(item)
     out
 
-  -> equation
-    @equation
-
-  -> parameter_ring
-    @parameter_ring
+  ro :equation, :parameter_ring
 
   -> parameterization
     out = []
@@ -202,20 +197,7 @@
   -> new(@curve, @line, @divisor, @factorization,
          @parameter_chart = 1)
 
-  -> curve
-    @curve
-
-  -> line
-    @line
-
-  -> divisor
-    @divisor
-
-  -> factorization
-    @factorization
-
-  -> parameter_chart
-    @parameter_chart
+  ro :curve, :line, :divisor, :factorization, :parameter_chart
 
   -> verified?
     return false if @curve.class_name != "Curve"
@@ -251,20 +233,7 @@
     if !certificate.verified?
       raise "line-intersection certificate failed"
 
-  -> curve
-    @curve
-
-  -> line
-    @line
-
-  -> divisor
-    @divisor
-
-  -> factorization
-    @factorization
-
-  -> parameter_chart
-    @parameter_chart
+  ro :curve, :line, :divisor, :factorization, :parameter_chart
 
   -> certificate
     LineIntersectionCertificate.new(

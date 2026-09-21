@@ -27,12 +27,7 @@
 
   -> component_results
     @rank == 1 ? Calculus.copy_vector(@components) : Calculus.copy_matrix(@components)
-  -> status
-    @status
-  -> evaluations
-    @evaluations
-  -> rank
-    @rank
+  ro :status, :evaluations, :rank
   -> converged?
     @status == :converged
   -> estimate_available?

@@ -25,8 +25,7 @@
 + Holder
   -> new(@label)
     self
-  -> label
-    @label
+  ro :label
 check("ctor.binds_field", Holder.new("hello").label, "hello")
 
 + Pair
@@ -40,8 +39,7 @@ check("ctor.two_fields", Pair.new(2, 3).sum, "5")
 + Base
   -> new(@v)
     self
-  -> v
-    @v
+  ro :v
 + Derived < Base
 check("ctor.inherited", Derived.new("inherited").v, "inherited")
 
@@ -60,8 +58,7 @@ check("ctor.ro_zero_args_ok", WithField.new.unset?, "true")
 # --- arguments with no constructor raise, naming the fix ---
 + InitHook
   -> init(@label)
-  -> label
-    @label
+  ro :label
 raised = ""
 begin
   ih = InitHook.new("hello")
@@ -74,8 +71,7 @@ check("ctor.error_says_init_not_hook", raised.include?("not constructor hooks"),
 
 + InitializeHook
   -> initialize(@label)
-  -> label
-    @label
+  ro :label
 raised2 = ""
 begin
   InitializeHook.new("hello")

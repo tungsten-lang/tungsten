@@ -5,8 +5,7 @@
     if @ads_radius.to_f <= ~0.0
       raise "bulk null-return certificate requires positive AdS radius"
 
-  -> ads_radius
-    @ads_radius
+  ro :ads_radius
 
   -> curvature_scale
     ~1.0 / @ads_radius.to_f
@@ -49,14 +48,7 @@
     if !Expression.integer?(@sample_count) || @sample_count < 2
       raise "bulk chord needs an integer sample count of at least two"
 
-  -> ads_radius
-    @ads_radius
-
-  -> brane_z
-    @brane_z
-
-  -> separation
-    @separation
+  ro :ads_radius, :brane_z, :separation
 
   -> euclidean_radius
     half = @separation.to_f / ~2.0
@@ -114,17 +106,7 @@
       [zero, zero, zero, zero, scale]
     ], [-1, 1, 1, 1, 1])
 
-  -> ads_radius
-    @ads_radius
-
-  -> brane_z
-    @brane_z
-
-  -> chart
-    @chart
-
-  -> metric
-    @metric
+  ro :ads_radius, :brane_z, :chart, :metric
 
   -> curvature
     @metric.curvature

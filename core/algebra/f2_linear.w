@@ -308,8 +308,7 @@
     @particular = F2LinearAlgebra.copy_vector(reduction["particular"])
     @kernel_basis = F2LinearAlgebra.copy_matrix(reduction["kernel_basis"])
 
-  -> width
-    @width
+  ro :width
 
   -> matrix
     F2LinearAlgebra.copy_matrix(@matrix)
@@ -465,8 +464,7 @@
       raise "F2 solutions need an F2LinearSystemCertificate"
     raise "F2 solution needs a verified row-reduction certificate" if !@certificate.verified?
 
-  -> certificate
-    @certificate
+  ro :certificate
 
   -> certified?
     @certificate.certified?
@@ -516,8 +514,7 @@
     @right_hand_side = []
     @labels = []
 
-  -> width
-    @width
+  ro :width
 
   -> row_count
     @matrix.size

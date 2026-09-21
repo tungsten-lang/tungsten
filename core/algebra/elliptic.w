@@ -9,17 +9,7 @@
 + WeierstrassInvariantsCertificate
   -> new(@coefficients, @b_invariants, @c_invariants, @discriminant)
 
-  -> coefficients
-    @coefficients
-
-  -> b_invariants
-    @b_invariants
-
-  -> c_invariants
-    @c_invariants
-
-  -> discriminant
-    @discriminant
+  ro :coefficients, :b_invariants, :c_invariants, :discriminant
 
   -> verified?
     answer = false
@@ -139,20 +129,7 @@
     @space_cache = nil
     @curve_cache = nil
 
-  -> a1
-    @a1
-
-  -> a2
-    @a2
-
-  -> a3
-    @a3
-
-  -> a4
-    @a4
-
-  -> a6
-    @a6
+  ro :a1, :a2, :a3, :a4, :a6
 
   -> coefficients
     [@a1, @a2, @a3, @a4, @a6]
@@ -313,23 +290,7 @@
 + IntegralWeierstrassTransformationCertificate
   -> new(@source, @target, @u, @r, @s, @t)
 
-  -> source
-    @source
-
-  -> target
-    @target
-
-  -> u
-    @u
-
-  -> r
-    @r
-
-  -> s
-    @s
-
-  -> t
-    @t
+  ro :source, :target, :u, :r, :s, :t
 
   -> verified?
     answer = false
@@ -383,26 +344,7 @@
       @source, @target, @u, @r, @s, @t)
     raise "Weierstrass transformation certificate failed" if !@certificate.verified?
 
-  -> source
-    @source
-
-  -> target
-    @target
-
-  -> u
-    @u
-
-  -> r
-    @r
-
-  -> s
-    @s
-
-  -> t
-    @t
-
-  -> certificate
-    @certificate
+  ro :source, :target, :u, :r, :s, :t, :certificate
 
   -> certified?
     @certificate.verified?
@@ -417,17 +359,7 @@
 + EllipticLocalMinimalModelCertificate
   -> new(@source, @prime, @model, @transformations)
 
-  -> source
-    @source
-
-  -> prime
-    @prime
-
-  -> model
-    @model
-
-  -> transformations
-    @transformations
+  ro :source, :prime, :model, :transformations
 
   -> verified?
     answer = false
@@ -485,20 +417,7 @@
     if !@certificate.verified?
       raise "local Weierstrass minimization certificate failed"
 
-  -> source
-    @source
-
-  -> prime
-    @prime
-
-  -> model
-    @model
-
-  -> transformations
-    @transformations
-
-  -> certificate
-    @certificate
+  ro :source, :prime, :model, :transformations, :certificate
 
   -> certified?
     @certificate.verified?
@@ -575,20 +494,7 @@
       @source, @model, @factorization, @local_computations)
     raise "global minimal-model certificate failed" if !@certificate.verified?
 
-  -> source
-    @source
-
-  -> model
-    @model
-
-  -> factorization
-    @factorization
-
-  -> local_computations
-    @local_computations
-
-  -> certificate
-    @certificate
+  ro :source, :model, :factorization, :local_computations, :certificate
 
   -> certified?
     @certificate.verified?
@@ -675,20 +581,7 @@
       @minimality_certificate, @tate_data)
     raise "local reduction certificate failed" if !@certificate.verified?
 
-  -> model
-    @model
-
-  -> prime
-    @prime
-
-  -> kind
-    @kind
-
-  -> delta_valuation
-    @delta_valuation
-
-  -> c4_valuation
-    @c4_valuation
+  ro :model, :prime, :kind, :delta_valuation, :c4_valuation
 
   -> good?
     @kind == :good
@@ -702,8 +595,7 @@
   -> semistable?
     good? || multiplicative?
 
-  -> conductor_exponent
-    @conductor_exponent
+  ro :conductor_exponent
 
   -> known_conductor_exponent
     @conductor_exponent
@@ -723,8 +615,7 @@
   -> split?
     tate_data.split?
 
-  -> certificate
-    @certificate
+  ro :certificate
 
   -> certified?
     @certificate.verified?
@@ -805,26 +696,8 @@
       @local_reductions, @conductor)
     raise "elliptic conductor certificate failed" if !@certificate.verified?
 
-  -> source
-    @source
-
-  -> model
-    @model
-
-  -> minimal_model_computation
-    @minimal_model_computation
-
-  -> factorization
-    @factorization
-
-  -> local_reductions
-    @local_reductions
-
-  -> conductor
-    @conductor
-
-  -> certificate
-    @certificate
+  ro :source, :model, :minimal_model_computation, :factorization, :local_reductions, :conductor
+  ro :certificate
 
   -> certified?
     @certificate.verified?
@@ -921,29 +794,12 @@
       @a, @b, @exponent, @model, @c)
     raise "Frey curve certificate failed" if !@certificate.verified?
 
-  -> a
-    @a
-
-  -> b
-    @b
-
-  -> c
-    @c
-
-  -> exponent
-    @exponent
-
-  -> a_power
-    @a_power
-
-  -> b_power
-    @b_power
+  ro :a, :b, :c, :exponent, :a_power, :b_power
 
   -> fermat_sum
     @sum
 
-  -> model
-    @model
+  ro :model
 
   -> curve
     @model.projective_curve
@@ -957,8 +813,7 @@
   -> c4
     @model.c4
 
-  -> certificate
-    @certificate
+  ro :certificate
 
   -> fermat_solution?(candidate_c)
     return false if !IntegralWeierstrassModel.integer?(candidate_c)

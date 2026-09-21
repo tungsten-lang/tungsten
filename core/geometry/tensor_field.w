@@ -11,11 +11,7 @@
   -> .contravariant(label = nil)
     TensorIndex.new(:contravariant, label)
 
-  -> variance
-    @variance
-
-  -> label
-    @label
+  ro :variance, :label
 
   -> covariant?
     @variance == :covariant
@@ -45,8 +41,7 @@
     @components = Geometry.wrap_tensor(
       components, @chart.dimension, @indices.size)
 
-  -> chart
-    @chart
+  ro :chart
 
   -> dimension
     @chart.dimension

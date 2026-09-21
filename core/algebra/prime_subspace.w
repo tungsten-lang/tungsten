@@ -118,11 +118,7 @@
       index += 1
     out
 
-  -> prime
-    @prime
-
-  -> ambient_dimension
-    @ambient_dimension
+  ro :prime, :ambient_dimension
 
   -> dimension
     @basis.size

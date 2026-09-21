@@ -14,11 +14,7 @@ use core/combinatorics/support
     @payload = record[1]
     @inputs = Combinatorics.copy_vector(record[2])
 
-  -> kind
-    @kind
-
-  -> payload
-    @payload
+  ro :kind, :payload
 
   -> inputs
     Combinatorics.copy_vector(@inputs)
@@ -46,8 +42,7 @@ use core/combinatorics/support
   -> node_count
     @nodes.size
 
-  -> output_index
-    @output_index
+  ro :output_index
 
   -> node(index)
     require_node(index)
@@ -522,8 +517,7 @@ use core/combinatorics/support
     @claimed_value = record[1]
     @output_index = record[2]
 
-  -> circuit
-    @circuit
+  ro :circuit
 
   -> assignments
     copy = {}
@@ -531,11 +525,7 @@ use core/combinatorics/support
       copy[name] = value
     copy
 
-  -> claimed_value
-    @claimed_value
-
-  -> output_index
-    @output_index
+  ro :claimed_value, :output_index
 
   -> proof_kind
     :exact_point_evaluation_replay

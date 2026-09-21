@@ -16,14 +16,12 @@
     @elements = elements
     @dimension = elements[0].size
 
-  -> elements
-    @elements
+  ro :elements
 
   -> order
     @elements.size
 
-  -> dimension
-    @dimension
+  ro :dimension
 
   -> .multiply(a, b)
     n = a.size

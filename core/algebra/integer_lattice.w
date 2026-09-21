@@ -293,11 +293,7 @@
     @basis_inverse = ExactRationalLinearAlgebra.inverse(@basis_matrix)
     @determinant = nil
 
-  -> algebra
-    @algebra
-
-  -> rank
-    @rank
+  ro :algebra, :rank
 
   -> basis_vectors
     out = []

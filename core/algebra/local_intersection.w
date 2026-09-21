@@ -23,17 +23,7 @@ use core/algebra/local_normalization
          @residual_coefficients, @valuation)
     @verified_cache = nil
 
-  -> parametrization
-    @parametrization
-
-  -> target_local_polynomial
-    @target_local_polynomial
-
-  -> residual_coefficients
-    @residual_coefficients
-
-  -> valuation
-    @valuation
+  ro :parametrization, :target_local_polynomial, :residual_coefficients, :valuation
 
   -> proof_kind
     :exact_parameter_substitution
@@ -106,24 +96,13 @@ use core/algebra/local_normalization
     if !@certificate.verified?
       raise "local parameter-intersection certificate did not verify"
 
-  -> parametrization
-    @parametrization
-
-  -> target_local_polynomial
-    @target_local_polynomial
-
-  -> residual_coefficients
-    @residual_coefficients
-
-  -> valuation
-    @valuation
+  ro :parametrization, :target_local_polynomial, :residual_coefficients, :valuation
 
   -> geometric_contribution
     (@parametrization.geometric_branch_weight*
      Rational.new(@valuation))
 
-  -> certificate
-    @certificate
+  ro :certificate
 
   -> to_s
     ("LocalPlaneParametrizationIntersection(valuation=" +
@@ -139,17 +118,7 @@ use core/algebra/local_normalization
          @packet_intersections, @multiplicity)
     @verified_cache = nil
 
-  -> normalization
-    @normalization
-
-  -> target_local_polynomial
-    @target_local_polynomial
-
-  -> packet_intersections
-    @packet_intersections
-
-  -> multiplicity
-    @multiplicity
+  ro :normalization, :target_local_polynomial, :packet_intersections, :multiplicity
 
   -> theorem
     ("local intersection multiplicity is the sum of target-function " +
@@ -239,32 +208,22 @@ use core/algebra/local_normalization
     if !@certificate.verified?
       raise "local intersection certificate did not verify"
 
-  -> normalization
-    @normalization
+  ro :normalization
 
   -> source_polynomial
     @normalization.source_polynomial
 
-  -> target_polynomial
-    @target_polynomial
-
-  -> target_local_polynomial
-    @target_local_polynomial
+  ro :target_polynomial, :target_local_polynomial
 
   -> point
     @normalization.point
 
-  -> packet_intersections
-    @packet_intersections
-
-  -> multiplicity
-    @multiplicity
+  ro :packet_intersections, :multiplicity
 
   -> intersection_multiplicity
     @multiplicity
 
-  -> certificate
-    @certificate
+  ro :certificate
 
   -> to_s
     ("PlaneCurveLocalIntersection(multiplicity=" +

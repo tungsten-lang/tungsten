@@ -1665,7 +1665,7 @@ module Tungsten
             runtime_error("unknown trait '#{expr.trait_name}'", node: expr) unless trait
             w_class.include_trait(trait)
           when Tungsten::AST::Call
-            if expr.obj.nil? && %w[ro rw].include?(expr.name.to_s) && expr.args&.first.is_a?(Tungsten::AST::Symbol)
+            if accessor_declaration?(expr)
               define_accessor(w_class, expr)
             else
               evaluate(expr)
@@ -1744,6 +1744,12 @@ module Tungsten
       else
         false
       end
+    end
+
+    # A standalone class- or trait-body `ro :name` / `rw :name, :other`.
+    def accessor_declaration?(expr)
+      expr.is_a?(Tungsten::AST::Call) && expr.obj.nil? && %w[ro rw].include?(expr.name.to_s) &&
+        expr.args&.first.is_a?(Tungsten::AST::Symbol)
     end
 
     def define_accessor(w_class, expr)
@@ -4260,6 +4266,8 @@ module Tungsten
         if expr.is_a?(Tungsten::AST::Def)
           w_method = Runtime::WMethod.new(expr.name, expr.args, expr.body, w_trait, splat_index: expr.splat_index)
           w_trait.define_method(expr.name.to_s, w_method)
+        elsif accessor_declaration?(expr)
+          define_accessor(w_trait, expr)
         end
       end
 

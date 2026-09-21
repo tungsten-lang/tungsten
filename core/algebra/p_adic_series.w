@@ -456,24 +456,13 @@ use core/algebra/p_adic
   -> buffer(length)
     i64[length]
 
-  -> ninv
-    @ninv
-
-  -> r2
-    @r2
+  ro :ninv, :r2
 
   # Montgomery form of 1, i.e. R mod N.
   -> mont_one
     @one
 
-  -> prime_ninv
-    @prime_ninv
-
-  -> prime_r2
-    @prime_r2
-
-  -> prime_one
-    @prime_one
+  ro :prime_ninv, :prime_r2, :prime_one
 
   -> to_mont(value)
     padic_mont_mul(normalize(value), @r2, @modulus, @ninv)
@@ -489,17 +478,7 @@ use core/algebra/p_adic
   -> from_mont_prime(value)
     padic_mont_mul(value, 1, @prime, @prime_ninv)
 
-  -> prime
-    @prime
-
-  -> precision
-    @precision
-
-  -> length
-    @length
-
-  -> modulus
-    @modulus
+  ro :prime, :precision, :length, :modulus
 
   -> normalize(value)
     out = value % @modulus
@@ -580,11 +559,7 @@ use core/algebra/p_adic
     @known_digits = @ring.precision if @known_digits > @ring.precision
     raise "p-adic series has no trustworthy digits left" if @known_digits < 1
 
-  -> ring
-    @ring
-
-  -> known_digits
-    @known_digits
+  ro :ring, :known_digits
 
   -> length
     @ring.length
@@ -1268,11 +1243,7 @@ use core/algebra/p_adic
       @original.push(copy)
     eliminate(matrix)
 
-  -> ring
-    @ring
-
-  -> width
-    @width
+  ro :ring, :width
 
   -> rank
     @pivot_columns.size
@@ -1285,8 +1256,7 @@ use core/algebra/p_adic
     @pivot_valuations.each -> out.push(item)
     out
 
-  -> lost_digits
-    @lost_digits
+  ro :lost_digits
 
   -> known_digits
     @ring.precision - @lost_digits

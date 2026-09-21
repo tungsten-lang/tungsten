@@ -28,11 +28,7 @@
       hi = a
     Interval.new(lo, hi)
 
-  -> lo
-    @lo
-
-  -> hi
-    @hi
+  ro :lo, :hi
 
   -> mid
     (~0.5) * (@lo + @hi)

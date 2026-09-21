@@ -195,20 +195,7 @@
     if !@certificate_cache.verified?
       raise "finite plane-quartic theta labeling failed certification"
 
-  -> scheme_certificate
-    @scheme_certificate
-
-  -> prime
-    @prime
-
-  -> extension_degree
-    @extension_degree
-
-  -> splitting_field
-    @splitting_field
-
-  -> incidence
-    @incidence
+  ro :scheme_certificate, :prime, :extension_degree, :splitting_field, :incidence
 
   -> roots
     out = []
@@ -219,8 +206,7 @@
   -> theta_labels
     F2LinearAlgebra.copy_vector(@theta_labels)
 
-  -> theta_permutation
-    @theta_permutation
+  ro :theta_permutation
 
   -> distinguished_theta_label
     @theta_labels[27]

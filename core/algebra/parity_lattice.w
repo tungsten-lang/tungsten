@@ -141,8 +141,7 @@ use core/algebra/integer_lattice
     @basis = build_basis
     @certificate = ParityLiftCertificate.new(self)
 
-  -> dimension
-    @dimension
+  ro :dimension
 
   -> rank
     @pivots.size
@@ -162,8 +161,7 @@ use core/algebra/integer_lattice
   -> particular_solution
     LatticeCombinatorics.copy_vector(@particular)
 
-  -> certificate
-    @certificate
+  ro :certificate
 
   -> certified?
     @certificate.verified?

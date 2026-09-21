@@ -487,20 +487,7 @@ use core/calculus/puiseux
     @valuation = Rational.new(dx, dy)
     @characteristic_polynomial = build_characteristic_polynomial
 
-  -> polynomial
-    @polynomial
-
-  -> left
-    @left
-
-  -> right
-    @right
-
-  -> valuation
-    @valuation
-
-  -> characteristic_polynomial
-    @characteristic_polynomial
+  ro :polynomial, :left, :right, :valuation, :characteristic_polynomial
 
   -> weight(exponents)
     (@valuation.denominator*exponents[0] +
@@ -639,11 +626,7 @@ use core/calculus/puiseux
 + NewtonPolygonCertificate
   -> new(@polynomial, @edges)
 
-  -> polynomial
-    @polynomial
-
-  -> edges
-    @edges
+  ro :polynomial, :edges
 
   -> verified?
     expected = NewtonPolygon.edge_endpoints(@polynomial)
@@ -723,14 +706,7 @@ use core/calculus/puiseux
       @polynomial, @edges)
     raise "internal Newton-polygon certificate failure" if !@certificate.verified?
 
-  -> polynomial
-    @polynomial
-
-  -> edges
-    @edges
-
-  -> certificate
-    @certificate
+  ro :polynomial, :edges, :certificate
 
   -> valuations
     out = []
@@ -759,29 +735,8 @@ use core/calculus/puiseux
     else
       @defining_factor = defining_factor.monic
 
-  -> local_polynomial
-    @local_polynomial
-
-  -> edge
-    @edge
-
-  -> leading_coefficient
-    @leading_coefficient
-
-  -> coordinate_series
-    @coordinate_series
-
-  -> displacement_series
-    @displacement_series
-
-  -> maximum_power
-    @maximum_power
-
-  -> coefficient_field
-    @coefficient_field
-
-  -> defining_factor
-    @defining_factor
+  ro :local_polynomial, :edge, :leading_coefficient, :coordinate_series, :displacement_series
+  ro :maximum_power, :coefficient_field, :defining_factor
 
   -> residue_degree
     @defining_factor.degree
@@ -828,35 +783,8 @@ use core/calculus/puiseux
          @displacement_series, @maximum_power)
     @coefficient_field = @recursive_branch.coefficient_field
 
-  -> local_polynomial
-    @local_polynomial
-
-  -> edge
-    @edge
-
-  -> initial_factor
-    @initial_factor
-
-  -> initial_root
-    @initial_root
-
-  -> transformed_polynomial
-    @transformed_polynomial
-
-  -> recursive_branch
-    @recursive_branch
-
-  -> coordinate_series
-    @coordinate_series
-
-  -> displacement_series
-    @displacement_series
-
-  -> maximum_power
-    @maximum_power
-
-  -> coefficient_field
-    @coefficient_field
+  ro :local_polynomial, :edge, :initial_factor, :initial_root, :transformed_polynomial
+  ro :recursive_branch, :coordinate_series, :displacement_series, :maximum_power, :coefficient_field
 
   -> defining_factor
     @recursive_branch.defining_factor
@@ -934,47 +862,9 @@ use core/calculus/puiseux
       @certificate = supplied_certificate
     raise "local branch certificate did not verify" if !@certificate.verified?
 
-  -> source_polynomial
-    @source_polynomial
-
-  -> local_polynomial
-    @local_polynomial
-
-  -> x_variable
-    @x_variable
-
-  -> y_variable
-    @y_variable
-
-  -> center_x
-    @center_x
-
-  -> center_y
-    @center_y
-
-  -> edge
-    @edge
-
-  -> leading_coefficient
-    @leading_coefficient
-
-  -> coordinate_series
-    @coordinate_series
-
-  -> displacement_series
-    @displacement_series
-
-  -> series
-    @series
-
-  -> maximum_power
-    @maximum_power
-
-  -> certificate
-    @certificate
-
-  -> coefficient_field
-    @coefficient_field
+  ro :source_polynomial, :local_polynomial, :x_variable, :y_variable, :center_x, :center_y, :edge
+  ro :leading_coefficient, :coordinate_series, :displacement_series, :series, :maximum_power
+  ro :certificate, :coefficient_field
 
   -> defining_factor
     @certificate.defining_factor
@@ -1019,11 +909,7 @@ use core/calculus/puiseux
   -> .vertical(multiplicity = 1)
     PlaneTangentDirection.new(nil, multiplicity, true)
 
-  -> defining_factor
-    @defining_factor
-
-  -> multiplicity
-    @multiplicity
+  ro :defining_factor, :multiplicity
 
   -> vertical?
     @vertical
@@ -1118,8 +1004,7 @@ use core/calculus/puiseux
 + OrdinaryPlanePointDeltaCertificate
   -> new(@singularity)
 
-  -> singularity
-    @singularity
+  ro :singularity
 
   -> delta
     multiplicity = @singularity.multiplicity
@@ -1200,23 +1085,7 @@ use core/calculus/puiseux
     if !@certificate.verified?
       raise "local singularity certificate did not verify"
 
-  -> source_polynomial
-    @source_polynomial
-
-  -> point
-    @point
-
-  -> local_polynomial
-    @local_polynomial
-
-  -> multiplicity
-    @multiplicity
-
-  -> tangent_cone
-    @tangent_cone
-
-  -> slope_polynomial
-    @slope_polynomial
+  ro :source_polynomial, :point, :local_polynomial, :multiplicity, :tangent_cone, :slope_polynomial
 
   -> vertical_tangent_multiplicity
     @vertical_multiplicity
@@ -1224,8 +1093,7 @@ use core/calculus/puiseux
   -> tangent_directions
     @directions
 
-  -> certificate
-    @certificate
+  ro :certificate
 
   -> smooth?
     @multiplicity == 1

@@ -97,6 +97,27 @@ RSpec.describe "language sugar" do
     end
   end
 
+  describe "accessor declarations in traits" do
+    it "defines ro/rw accessors declared in a trait body on the including class" do
+      expect(output(<<~CODE)).to eq("T\n42")
+        trait Tagged
+          ro :tag
+          rw :weight
+
+        + Crate
+          is Tagged
+
+          -> new(@tag)
+            @weight = 1
+
+        c = Crate.new("T")
+        c.weight = 42
+        << c.tag
+        << c.weight
+      CODE
+    end
+  end
+
   describe "constructor-call sugar" do
     it "treats ClassName(args) as ClassName.new(args)" do
       expect(output(<<~CODE)).to eq("3")

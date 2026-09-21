@@ -14,8 +14,7 @@
     coefficients.each -> (coefficient)
       @coefficients.push(@coefficient_field.coerce(coefficient))
 
-  -> coefficient_field
-    @coefficient_field
+  ro :coefficient_field
 
   -> precision
     @coefficients.size
@@ -417,17 +416,7 @@
   -> new(@kind, @group, @weight, @q_expansion)
     @verified_cache = nil
 
-  -> kind
-    @kind
-
-  -> group
-    @group
-
-  -> weight
-    @weight
-
-  -> q_expansion
-    @q_expansion
+  ro :kind, :group, :weight, :q_expansion
 
   -> theorem
     if @kind == :Delta
@@ -508,26 +497,17 @@
     if !@certificate.verified?
       raise "classical modular-form certificate failed"
 
-  -> kind
-    @kind
+  ro :kind
 
   -> name
     @kind.to_s
 
-  -> group
-    @group
+  ro :group
 
   -> level
     1
 
-  -> weight
-    @weight
-
-  -> precision
-    @precision
-
-  -> q_expansion
-    @q_expansion
+  ro :weight, :precision, :q_expansion
 
   -> coefficient(index)
     @q_expansion.coefficient(index)
@@ -535,8 +515,7 @@
   -> [](index)
     coefficient(index)
 
-  -> certificate
-    @certificate
+  ro :certificate
 
   -> certified?
     @certificate.verified?

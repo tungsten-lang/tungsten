@@ -53,8 +53,7 @@
         @radius_expression * @radius_expression)]
     ])
 
-  -> shrink_law
-    @shrink_law
+  ro :shrink_law
 
   -> shrink_law_label
     return "f(t) = r0 exp(-rate t)" if @shrink_law == :exponential
@@ -62,17 +61,12 @@
       return "f(t) = r0 / (1 + rate t)^exponent"
     "f(t) = r0 - slope t"
 
-  -> initial_radius
-    @initial_radius
-
-  -> rate
-    @rate
+  ro :initial_radius, :rate
 
   -> slope
     @rate
 
-  -> exponent
-    @exponent
+  ro :exponent
 
   -> ideal_apex?
     @shrink_law != :linear
@@ -100,11 +94,7 @@
       return "0 <= t < infinity"
     "0 <= t < " + self.finite_apex_height.to_s + " (regular metric)"
 
-  -> chart
-    @chart
-
-  -> metric
-    @metric
+  ro :chart, :metric
 
   # Curves with theta constant and affine parameter t have unit tangent and
   # zero acceleration: both Gamma^t_tt and Gamma^theta_tt vanish identically.
@@ -114,8 +104,7 @@
     angular = Geometry.zero_scalar?(connection.component(1, 0, 0))
     radial && angular
 
-  -> radius_expression
-    @radius_expression
+  ro :radius_expression
 
   -> gaussian_curvature_expression
     @curvature_expression

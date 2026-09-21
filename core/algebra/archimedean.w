@@ -11,14 +11,7 @@
     if !verified?
       raise "invalid archimedean place"
 
-  -> field
-    @field
-
-  -> kind
-    @kind
-
-  -> index
-    @index
+  ro :field, :kind, :index
 
   -> embedding
     if !real?
@@ -77,8 +70,7 @@
 + NumberFieldArchimedeanDataCertificate
   -> new(@data)
 
-  -> data
-    @data
+  ro :data
 
   -> proof_kind
     :exact_sturm_replay
@@ -160,8 +152,7 @@
     if !@certificate_cache.verified?
       raise "archimedean place data failed certification"
 
-  -> field
-    @field
+  ro :field
 
   -> signature
     [@real_places.size, @complex_places.size]
@@ -226,17 +217,7 @@
     if !verified?
       raise "invalid etale-product archimedean place"
 
-  -> order
-    @order
-
-  -> component_index
-    @component_index
-
-  -> index
-    @index
-
-  -> kind
-    @kind
+  ro :order, :component_index, :index, :kind
 
   -> real?
     @kind == :real
@@ -501,8 +482,7 @@
     if !@certificate_cache.verified?
       raise "etale-product archimedean data failed certification"
 
-  -> order
-    @order
+  ro :order
 
   -> component_signatures
     out = []

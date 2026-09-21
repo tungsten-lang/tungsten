@@ -4,8 +4,7 @@ fn library_cache_double(x)
 + LibraryCacheBox
   -> new(@value)
 
-  -> value
-    @value
+  ro :value
 
   -> plus(x)
     @value + x

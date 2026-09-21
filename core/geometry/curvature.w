@@ -18,8 +18,7 @@
     @lowered_cache = nil
     @kretschmann_cache = nil
 
-  -> connection
-    @connection
+  ro :connection
 
   -> metric
     @connection.metric

@@ -25,8 +25,7 @@
     @coefficients = []
     coefficients.each -> @coefficients.push(item)
 
-  -> prime
-    @prime
+  ro :prime
 
   -> degree
     @coefficients.size - 1
@@ -58,50 +57,10 @@
          @individual_characteristic, @pair_characteristic,
          @quadratic_product)
 
-  -> q
-    @q
-
-  -> real_weil_cubic
-    @real_weil_cubic
-
-  -> real_cubic_group
-    @real_cubic_group
-
-  -> real_cubic_discriminant
-    @real_cubic_discriminant
-
-  -> sextic_irreducibility
-    @sextic_irreducibility
-
-  -> cubic_irreducibility
-    @cubic_irreducibility
-
-  -> individual_square
-    @individual_square
-
-  -> pair_square
-    @pair_square
-
-  -> product_square
-    @product_square
-
-  -> kummer_rank
-    @kummer_rank
-
-  -> individual_witness
-    @individual_witness
-
-  -> pair_witness
-    @pair_witness
-
-  -> individual_characteristic
-    @individual_characteristic
-
-  -> pair_characteristic
-    @pair_characteristic
-
-  -> quadratic_product
-    @quadratic_product
+  ro :q, :real_weil_cubic, :real_cubic_group, :real_cubic_discriminant, :sextic_irreducibility
+  ro :cubic_irreducibility, :individual_square, :pair_square, :product_square, :kummer_rank
+  ro :individual_witness, :pair_witness, :individual_characteristic, :pair_characteristic
+  ro :quadratic_product
 
   -> relation_dimension
     3 - @kummer_rank
@@ -148,14 +107,7 @@
 + WeilSexticGaloisGroup < GaloisGroup
   -> new(@name, @order, @certificate)
 
-  -> name
-    @name
-
-  -> order
-    @order
-
-  -> certificate
-    @certificate
+  ro :name, :order, :certificate
 
   -> certified?
     @certificate.certified?

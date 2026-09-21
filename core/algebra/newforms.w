@@ -29,8 +29,7 @@
     if !@certificate.verified?
       raise "weight-two Hecke eigenpacket certificate failed"
 
-  -> group
-    @group
+  ro :group
 
   -> level
     @group.level
@@ -38,17 +37,12 @@
   -> weight
     2
 
-  -> search_limit
-    @search_limit
-
-  -> symbols
-    @symbols
+  ro :search_limit, :symbols
 
   -> old_new_decomposition
     @old_new
 
-  -> sturm_bound
-    @sturm_bound
+  ro :sturm_bound
 
   -> new_dimension
     @old_new.new_dimension
@@ -165,8 +159,7 @@
       out.push(packet) if packet.rational?
     out
 
-  -> certificate
-    @certificate
+  ro :certificate
 
   -> certified?
     @certificate.verified?
@@ -188,8 +181,7 @@
     @eigenvalues = {}
     @eigenvalue_certificates = {}
 
-  -> decomposition
-    @decomposition
+  ro :decomposition
 
   -> group
     @decomposition.group
@@ -212,8 +204,7 @@
   -> rational?
     coefficient_field_degree == 1
 
-  -> separator_polynomial
-    @separator_polynomial
+  ro :separator_polynomial
 
   -> separator_action
     ModularSymbolsLinearAlgebra.copy_matrix(@separator_action)
@@ -313,11 +304,7 @@
   -> new(@packet, @index)
     @verified_cache = nil
 
-  -> packet
-    @packet
-
-  -> index
-    @index
+  ro :packet, :index
 
   -> theorem
     "normalized newform coefficient is the T_n eigenvalue"
@@ -393,14 +380,7 @@
   -> new(@packet, @precision, @q_expansion)
     @verified_cache = nil
 
-  -> packet
-    @packet
-
-  -> precision
-    @precision
-
-  -> q_expansion
-    @q_expansion
+  ro :packet, :precision, :q_expansion
 
   -> theorem
     "normalized newform q-expansion from exact Hecke eigenvalues"
@@ -465,8 +445,7 @@
   -> new(@decomposition)
     @verified_cache = nil
 
-  -> decomposition
-    @decomposition
+  ro :decomposition
 
   -> theorem
     "simultaneous weight-two newform decomposition through the Sturm bound"
@@ -590,8 +569,7 @@
     @certificate = RationalWeightTwoNewformCertificate.new(self)
     raise "rational weight-two newform certificate failed" if !@certificate.verified?
 
-  -> group
-    @group
+  ro :group
 
   -> level
     @group.level
@@ -599,11 +577,7 @@
   -> weight
     2
 
-  -> precision
-    @precision
-
-  -> symbols
-    @symbols
+  ro :precision, :symbols
 
   -> old_new_decomposition
     @old_new
@@ -662,11 +636,7 @@
       n += 1
     QExpansion.new(coefficients)
 
-  -> q_expansion
-    @q_expansion
-
-  -> certificate
-    @certificate
+  ro :q_expansion, :certificate
 
   -> certified?
     @certificate.verified?
@@ -683,8 +653,7 @@
   -> new(@newform)
     @verified_cache = nil
 
-  -> newform
-    @newform
+  ro :newform
 
   -> theorem
     "normalized eigenform coefficients from Hecke eigenvalues and Euler factors"

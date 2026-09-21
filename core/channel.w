@@ -9,8 +9,7 @@
 + ChannelReceiveResult
   -> new(@value, @received)
 
-  -> value
-    @value
+  ro :value
 
   -> received?
     @received
@@ -29,8 +28,7 @@
 
   -> new(@value, @status)
 
-  -> value
-    @value
+  ro :value
 
   -> received?
     @status == RECEIVED
@@ -58,8 +56,7 @@
 
   -> new(@value, @status)
 
-  -> value
-    @value
+  ro :value
 
   -> sent?
     @status == SENT

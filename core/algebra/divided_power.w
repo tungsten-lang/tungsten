@@ -19,8 +19,7 @@ use core/algebra/integer_lattice
         j += 1
       i += 1
 
-  -> dimension
-    @dimension
+  ro :dimension
 
   -> divided_dimension
     @basis_pairs.size
@@ -267,8 +266,7 @@ use core/algebra/integer_lattice
   -> divided_dimension
     @space.divided_dimension
 
-  -> space
-    @space
+  ro :space
 
   -> element(linear, quadratic = nil)
     q = quadratic

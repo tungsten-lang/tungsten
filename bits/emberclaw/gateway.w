@@ -11,6 +11,3 @@
   -> stop
     @status = "stopped"
     "Gateway stopped"
-
-  -> status
-    @status

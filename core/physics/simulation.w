@@ -186,20 +186,12 @@
     @extra_meta[key] = "[value]"
     self
 
-  -> fv
-    @fv
+  ro :fv
 
   -> frames
     @frames.dup
 
-  -> mode
-    @mode
-
-  -> dim
-    @dim
-
-  -> title
-    @title
+  ro :mode, :dim, :title
 
   # -- run -------------------------------------------------------------------
 

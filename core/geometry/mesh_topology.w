@@ -306,14 +306,7 @@ use core/integer
     source.each -> (group) out.push(group.dup)
     out
 
-  -> vertex_count
-    @vertex_count
-
-  -> face_count
-    @face_count
-
-  -> edge_count
-    @edge_count
+  ro :vertex_count, :face_count, :edge_count
 
   -> edge(index)
     index = __index(index, @edge_count, "edge")
@@ -418,14 +411,7 @@ use core/integer
   -> nonmanifold_vertices
     @nonmanifold_vertices.dup
 
-  -> connected_component_count
-    @connected_component_count
-
-  -> surface_component_count
-    @surface_component_count
-
-  -> euler_characteristic
-    @euler_characteristic
+  ro :connected_component_count, :surface_component_count, :euler_characteristic
 
   -> boundary_loops
     __groups(@boundary_loops)

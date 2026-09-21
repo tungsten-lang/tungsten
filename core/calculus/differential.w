@@ -31,8 +31,7 @@
     gradient[index] = ~1.0
     Differential.new(value, gradient, Calculus.zero_matrix(dimension))
 
-  -> value
-    @value
+  ro :value
 
   -> dimension
     @gradient.size

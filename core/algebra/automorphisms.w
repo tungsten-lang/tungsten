@@ -27,11 +27,7 @@
     if !@certificate.certified?
       raise "geometric automorphism group needs a verified certificate"
 
-  -> curve
-    @curve
-
-  -> certificate
-    @certificate
+  ro :curve, :certificate
 
   -> order
     1
@@ -59,23 +55,8 @@
     if !stabilizer_is_identity?
       raise "normalized hyperflex stabilizer is not certified trivial"
 
-  -> curve
-    @curve
-
-  -> hyperflex
-    @hyperflex
-
-  -> tangent
-    @tangent
-
-  -> affine_hyperflex_ideal
-    @affine_hyperflex_ideal
-
-  -> stabilizer_ideal
-    @stabilizer_ideal
-
-  -> stabilizer_groebner_basis
-    @stabilizer_groebner_basis
+  ro :curve, :hyperflex, :tangent, :affine_hyperflex_ideal, :stabilizer_ideal
+  ro :stabilizer_groebner_basis
 
   -> stabilizer_basis
     out = []

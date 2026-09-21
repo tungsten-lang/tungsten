@@ -56,11 +56,7 @@
       raise "symplectic F2 genus must be positive"
     @dimension = 2 * @genus
 
-  -> genus
-    @genus
-
-  -> dimension
-    @dimension
+  ro :genus, :dimension
 
   -> vector(encoded)
     if !F2LinearAlgebra.integer?(encoded)
@@ -112,8 +108,7 @@
     @space.validate(@characteristic)
     @certificate_cache = ThetaQuadraticFormCertificate.new(self)
 
-  -> space
-    @space
+  ro :space
 
   -> characteristic
     F2LinearAlgebra.copy_vector(@characteristic)
@@ -239,8 +234,7 @@
       out.push(mask)
     out
 
-  -> rank
-    @rank
+  ro :rank
 
   -> compute_rank
     pivots = []
@@ -319,8 +313,7 @@
     if !@certificate_cache.verified?
       raise "canonical genus-three theta incidence failed certification"
 
-  -> space
-    @space
+  ro :space
 
   -> odd_characteristics
     out = []

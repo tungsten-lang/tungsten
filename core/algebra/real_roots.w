@@ -274,8 +274,7 @@
     @lower = Rational.coerce(lower)
     @upper = Rational.coerce(upper)
 
-  -> polynomial
-    @polynomial
+  ro :polynomial
 
   -> lower_bound
     @lower
@@ -286,8 +285,7 @@
   -> interval
     [@lower, @upper]
 
-  -> root_index
-    @root_index
+  ro :root_index
 
   -> verified?
     return false if @polynomial.class_name != "Polynomial"
@@ -339,8 +337,7 @@
     if @root_index < 0
       raise "algebraic-real root index must be nonnegative"
 
-  -> defining_polynomial
-    @defining_polynomial
+  ro :defining_polynomial
 
   -> minimal_polynomial(search_limit = 250_000)
     selected = nil
@@ -354,8 +351,7 @@
       raise "algebraic-real interval selected no irreducible factor"
     selected
 
-  -> root_index
-    @root_index
+  ro :root_index
 
   -> lower_bound
     @lower
@@ -531,8 +527,7 @@
     roots.each -> (root)
       @roots.push(root)
 
-  -> polynomial
-    @polynomial
+  ro :polynomial
 
   -> roots
     out = []

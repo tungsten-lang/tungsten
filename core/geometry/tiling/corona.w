@@ -257,8 +257,7 @@
 # makes `HeeschNumber.new(shape, k)` a fast "find a k-corona witness". The search is exhaustive — and `hc` exact —
 # only when no limit was hit, which `exhaustive?` reports honestly.
 + HeeschNumber
-  -> shape
-    @shape
+  ro :shape
 
   -> new(shape, max_level = 6, cover_limit = 20000, node_limit = 5000)
     raise "Heesch numbers are defined for hole-free shapes" if !shape.hole_free?

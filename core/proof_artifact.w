@@ -69,20 +69,7 @@ use core/digest
       if dependency.class_name != "ProofArtifactBundle"
         raise "proof artifact dependency has the wrong type"
 
-  -> artifact_id
-    @artifact_id
-
-  -> format
-    @format
-
-  -> producer
-    @producer
-
-  -> producer_version
-    @producer_version
-
-  -> expected_sha256
-    @expected_sha256
+  ro :artifact_id, :format, :producer, :producer_version, :expected_sha256
 
   -> actual_sha256
     Digest.sha256(@payload)

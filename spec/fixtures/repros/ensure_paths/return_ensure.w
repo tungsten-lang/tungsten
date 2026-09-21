@@ -25,8 +25,7 @@
     ensure
       v = 99
 
-  -> journal
-    @journal
+  ro :journal
 
 p = Probe.new
 << "result:" + p.run().to_s()

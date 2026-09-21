@@ -353,11 +353,7 @@
   -> result
     AlgebraicRealArithmetic.copy_operand(@result)
 
-  -> operation
-    @operation
-
-  -> elimination_polynomial
-    @elimination_polynomial
+  ro :operation, :elimination_polynomial
 
   -> interval
     [@lower, @upper]
@@ -431,11 +427,7 @@
   -> right
     AlgebraicRealArithmetic.copy_operand(@right)
 
-  -> operation
-    @operation
-
-  -> elimination_polynomial
-    @elimination_polynomial
+  ro :operation, :elimination_polynomial
 
   -> interval
     [@lower, @upper]

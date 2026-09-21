@@ -28,41 +28,12 @@ WRATB_MAGIC_SIZE = 6
 
 # Shared read-only accessors consumed by WratChecker#check_stream.
 + WratProofScanner
-  -> format
-    @format
-
-  -> version
-    @version
-
-  -> kind
-    @kind
-
-  -> id
-    @id
-
-  -> lits
-    @lits
-
-  -> hints
-    @hints
-
-  -> records
-    @records
+  ro :format, :version, :kind, :id, :lits, :hints, :records
 
   -> bytesize
     @size
 
-  -> peak_record_literals
-    @peak_record_literals
-
-  -> peak_record_hints
-    @peak_record_hints
-
-  -> literal_tokens
-    @literal_tokens
-
-  -> hint_tokens
-    @hint_tokens
+  ro :peak_record_literals, :peak_record_hints, :literal_tokens, :hint_tokens
 
   -> hinted?
     @format != "drat"

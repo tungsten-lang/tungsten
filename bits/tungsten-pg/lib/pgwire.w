@@ -566,22 +566,13 @@
     self.consume_results()
     @command_tag
 
-  -> command_tag
-    @command_tag
+  ro :command_tag
 
   # Which authentication path the server demanded during startup:
   # "trust" | "cleartext" | "md5" | "scram-sha-256".
-  -> auth_method
-    @auth_method
+  ro :auth_method
 
-  -> notices
-    @notices
-
-  -> in_txn
-    @in_txn
-
-  -> last_error
-    @last_error
+  ro :notices, :in_txn, :last_error
 
   -> param_status(name)
     @params[name]

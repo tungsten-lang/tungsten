@@ -6,8 +6,7 @@
 + Box<T>
   with T in (Integer Float String)
   -> new(@value)
-  -> value
-    @value
+  ro :value
   -> describe
     "Box([@value])"
 

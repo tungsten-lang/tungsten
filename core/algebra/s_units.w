@@ -36,8 +36,7 @@
     if !verified?
       raise "invalid number-field quadratic residue character"
 
-  -> prime_ideal
-    @prime_ideal
+  ro :prime_ideal
 
   -> field
     @prime_ideal.field
@@ -94,8 +93,7 @@
   -> new(@basis)
     @verified_cache = nil
 
-  -> basis
-    @basis
+  ro :basis
 
   -> theorem
     "Dirichlet S-unit theorem: dim_F2(O_K,S^*/O_K,S^{*2}) = r1+r2+|S|"
@@ -253,8 +251,7 @@
     if !@certificate_cache.verified?
       raise "S-unit square-class basis failed certification"
 
-  -> field
-    @field
+  ro :field
 
   -> s_primes
     out = []
@@ -274,8 +271,7 @@
       out.push(character)
     out
 
-  -> archimedean_data
-    @archimedean_data
+  ro :archimedean_data
 
   -> expected_dimension
     signature = @field.signature
@@ -374,8 +370,7 @@
       system.add_equation(row)
     system.certificate
 
-  -> rank_certificate
-    @rank_certificate
+  ro :rank_certificate
 
   # Unique coordinates of an S-unit class modulo squares.  Full column rank
   # makes the local signature map injective on the certified basis, while
@@ -506,20 +501,12 @@
     if !@certificate_cache.verified?
       raise "S-unit coordinates failed certification"
 
-  -> basis
-    @basis
+  ro :basis
 
   -> field
     @basis.field
 
-  -> value
-    @value
-
-  -> principal_computation
-    @principal_computation
-
-  -> fractional_ideal
-    @fractional_ideal
+  ro :value, :principal_computation, :fractional_ideal
 
   -> vector
     F2LinearAlgebra.copy_vector(@vector)
@@ -684,8 +671,7 @@
     message += matrix_rank(@local_rows).to_s
     raise message + " of " + target.to_s
 
-  -> field
-    @field
+  ro :field
 
   -> s_primes
     out = []
@@ -708,8 +694,7 @@
   -> local_rows
     F2LinearAlgebra.copy_matrix(@local_rows)
 
-  -> basis
-    @basis
+  ro :basis
 
   -> result
     @basis
@@ -725,8 +710,7 @@
   -> new(@basis)
     @verified_cache = nil
 
-  -> basis
-    @basis
+  ro :basis
 
   -> theorem
     "field isomorphisms preserve localized unit square classes"
@@ -837,17 +821,12 @@
     if !@certificate_cache.verified?
       raise "isomorphic S-unit square-class transfer failed certification"
 
-  -> source_field
-    @source_field
+  ro :source_field
 
   -> field
     @source_field
 
-  -> model_field
-    @model_field
-
-  -> model_basis
-    @model_basis
+  ro :model_field, :model_basis
 
   -> rational_primes
     out = []
@@ -966,17 +945,12 @@
     if !@certificate_cache.verified?
       raise "isomorphic S-unit coordinates failed certification"
 
-  -> basis
-    @basis
+  ro :basis
 
   -> field
     @basis.field
 
-  -> value
-    @value
-
-  -> model_coordinates
-    @model_coordinates
+  ro :value, :model_coordinates
 
   -> vector
     F2LinearAlgebra.copy_vector(@vector)
@@ -995,8 +969,7 @@
   -> new(@space)
     @verified_cache = nil
 
-  -> space
-    @space
+  ro :space
 
   -> theorem
     "S-unit square classes commute with finite products"
@@ -1156,8 +1129,7 @@
     if !@certificate_cache.verified?
       raise "product S-unit square-class space failed certification"
 
-  -> order
-    @order
+  ro :order
 
   -> rational_primes
     out = []
@@ -1183,8 +1155,7 @@
   -> ambient_dimension
     @dimension
 
-  -> dimension
-    @dimension
+  ro :dimension
 
   -> coordinates(vector)
     F2LinearAlgebra.validate_vector(vector, @dimension)
@@ -1214,8 +1185,7 @@
   -> new(@quotient)
     @verified_cache = nil
 
-  -> quotient
-    @quotient
+  ro :quotient
 
   -> theorem
     "S-unit square classes commute with finite products, modulo diagonal rational S-units"
@@ -1385,8 +1355,7 @@
     if !@certificate_cache.verified?
       raise "product S-unit square-class quotient failed certification"
 
-  -> order
-    @order
+  ro :order
 
   -> rational_primes
     out = []
@@ -1409,8 +1378,7 @@
       out.push(basis)
     out
 
-  -> ambient_dimension
-    @ambient_dimension
+  ro :ambient_dimension
 
   -> diagonal_generators
     generators = [-1]
@@ -1433,14 +1401,12 @@
   -> diagonal_matrix
     F2LinearAlgebra.copy_matrix(@diagonal_matrix)
 
-  -> diagonal_rank_certificate
-    @diagonal_rank_certificate
+  ro :diagonal_rank_certificate
 
   -> diagonal_rank
     @diagonal_rank_certificate.rank
 
-  -> dimension
-    @dimension
+  ro :dimension
 
   -> reduce_ambient_coordinates(vector)
     F2LinearAlgebra.validate_vector(

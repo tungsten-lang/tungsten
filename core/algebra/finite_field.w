@@ -737,8 +737,7 @@
     @modulus = []
     modulus.each -> @modulus.push(item)
 
-  -> characteristic
-    @characteristic
+  ro :characteristic
 
   -> modulus
     out = []
@@ -776,14 +775,7 @@
   -> new(@field, element, @polynomial)
     @element = @field.normalize_element(element)
 
-  -> field
-    @field
-
-  -> element
-    @element
-
-  -> polynomial
-    @polynomial
+  ro :field, :element, :polynomial
 
   -> verified?
     return false if @field.class_name != "FiniteField"

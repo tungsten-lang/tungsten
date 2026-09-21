@@ -87,23 +87,7 @@ use core/algebra/local_geometry
          @parameter_order, @x_series, @y_series)
     @verified_cache = nil
 
-  -> sheet
-    @sheet
-
-  -> x_series
-    @x_series
-
-  -> y_series
-    @y_series
-
-  -> parameter_divisor
-    @parameter_divisor
-
-  -> ramification_index
-    @ramification_index
-
-  -> parameter_order
-    @parameter_order
+  ro :sheet, :x_series, :y_series, :parameter_divisor, :ramification_index, :parameter_order
 
   -> residual_coefficients
     data = PlaneLocalGeometry.local_parameter_data(
@@ -164,8 +148,7 @@ use core/algebra/local_geometry
     if !@certificate.verified?
       raise "local parameterization certificate did not verify"
 
-  -> sheet
-    @sheet
+  ro :sheet
 
   -> source_polynomial
     @sheet.source_polynomial
@@ -176,26 +159,12 @@ use core/algebra/local_geometry
   -> residue_degree
     @sheet.residue_degree
 
-  -> parameter_divisor
-    @parameter_divisor
-
-  -> ramification_index
-    @ramification_index
-
-  -> parameter_order
-    @parameter_order
+  ro :parameter_divisor, :ramification_index, :parameter_order
 
   -> parameter
     @x_series.variable
 
-  -> x_series
-    @x_series
-
-  -> y_series
-    @y_series
-
-  -> certificate
-    @certificate
+  ro :x_series, :y_series, :certificate
 
   -> primitive?
     divisor = @ramification_index
@@ -226,11 +195,7 @@ use core/algebra/local_geometry
   -> new(@local_polynomial, @sheets)
     @verified_cache = nil
 
-  -> local_polynomial
-    @local_polynomial
-
-  -> sheets
-    @sheets
+  ro :local_polynomial, :sheets
 
   -> verified?
     return @verified_cache if @verified_cache != nil
@@ -297,20 +262,7 @@ use core/algebra/local_geometry
          @sheet_cover_certificate, @branch_weight)
     @verified_cache = nil
 
-  -> local_polynomial
-    @local_polynomial
-
-  -> sheets
-    @sheets
-
-  -> parametrizations
-    @parametrizations
-
-  -> sheet_cover_certificate
-    @sheet_cover_certificate
-
-  -> branch_weight
-    @branch_weight
+  ro :local_polynomial, :sheets, :parametrizations, :sheet_cover_certificate, :branch_weight
 
   -> theorem
     ("Newton-Puiseux root-of-unity orbits identify primitive " +
@@ -396,38 +348,17 @@ use core/algebra/local_geometry
       @x_variable, @y_variable, @point)
     @local_delta_invariant = nil
 
-  -> source_polynomial
-    @source_polynomial
-
-  -> local_polynomial
-    @local_polynomial
-
-  -> point
-    @point
-
-  -> x_variable
-    @x_variable
-
-  -> y_variable
-    @y_variable
+  ro :source_polynomial, :local_polynomial, :point, :x_variable, :y_variable
 
   -> projection_sheets
     @sheets
 
-  -> parametrizations
-    @parametrizations
+  ro :parametrizations
 
   -> parameterization_packets
     @parametrizations
 
-  -> sheet_cover_certificate
-    @sheet_cover_certificate
-
-  -> certificate
-    @certificate
-
-  -> singularity
-    @singularity
+  ro :sheet_cover_certificate, :certificate, :singularity
 
   -> geometric_branch_count
     @certificate.geometric_branch_count

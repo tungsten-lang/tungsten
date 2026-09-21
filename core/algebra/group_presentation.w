@@ -55,11 +55,7 @@
 
   # --- structure ---
 
-  -> generator_count
-    @generator_count
-
-  -> relators
-    @relators
+  ro :generator_count, :relators
 
   -> relator_count
     @relators.size
@@ -161,11 +157,7 @@
   -> .poincare_sphere
     SeifertFibration.new(0 - 1, [[2, 1], [3, 1], [5, 1]])
 
-  -> obstruction
-    @obstruction
-
-  -> invariants
-    @invariants
+  ro :obstruction, :invariants
 
   -> exceptional_fibre_count
     @invariants.size

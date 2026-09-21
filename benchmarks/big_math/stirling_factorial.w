@@ -16,10 +16,7 @@
 + BF                          # a value = @m * 10^@e, @m kept to K=40 sig digits
   -> new(@m, @e)
 
-  -> m
-    @m
-  -> e
-    @e
+  ro :m, :e
 
   # 10^@1 as a bigint
   -> pow10/1

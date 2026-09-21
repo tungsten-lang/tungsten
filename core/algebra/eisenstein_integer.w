@@ -52,11 +52,7 @@
      EisensteinInteger.new(0, 1), EisensteinInteger.new(0 - 1, 0),
      EisensteinInteger.new(0 - 1, 0 - 1), EisensteinInteger.new(0, 0 - 1)]
 
-  -> a
-    @a
-
-  -> b
-    @b
+  ro :a, :b
 
   -> zero?
     @a == 0 && @b == 0

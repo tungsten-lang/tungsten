@@ -123,8 +123,7 @@
   -> new(@group)
     @verified_cache = nil
 
-  -> group
-    @group
+  ro :group
 
   -> theorem
     "classical index, cusp, elliptic-point, and genus formulas for Gamma_0(N)"
@@ -202,26 +201,8 @@
     @certificate = Gamma0InvariantsCertificate.new(self)
     raise "Gamma0 invariant certificate failed" if !@certificate.verified?
 
-  -> level
-    @level
-
-  -> factorization
-    @factorization
-
-  -> index
-    @index
-
-  -> number_of_cusps
-    @number_of_cusps
-
-  -> order_two_elliptic_points
-    @order_two_elliptic_points
-
-  -> order_three_elliptic_points
-    @order_three_elliptic_points
-
-  -> genus
-    @genus
+  ro :level, :factorization, :index, :number_of_cusps, :order_two_elliptic_points
+  ro :order_three_elliptic_points, :genus
 
   -> modular_curve
     ModularCurveX0.new(self)
@@ -238,8 +219,7 @@
   -> sturm_bound(weight = 2)
     self.sturm(weight).bound
 
-  -> certificate
-    @certificate
+  ro :certificate
 
   -> certified?
     @certificate.verified?
@@ -261,8 +241,7 @@
   -> new(group)
     @group = group.class_name == "Gamma0" ? group : Gamma0.new(group)
 
-  -> group
-    @group
+  ro :group
 
   -> level
     @group.level
@@ -293,8 +272,7 @@
   -> new(@space)
     @verified_cache = nil
 
-  -> space
-    @space
+  ro :space
 
   -> theorem
     "Riemann-Roch dimension formula for even-weight modular forms on Gamma_0(N)"
@@ -359,17 +337,12 @@
     if !@dimension_certificate.verified?
       raise "cusp-form dimension certificate failed"
 
-  -> group
-    @group
+  ro :group
 
   -> level
     @group.level
 
-  -> weight
-    @weight
-
-  -> dimension
-    @dimension
+  ro :weight, :dimension
 
   -> zero?
     @dimension == 0
@@ -383,8 +356,7 @@
   -> q_expansion_precision
     self.sturm.precision
 
-  -> dimension_certificate
-    @dimension_certificate
+  ro :dimension_certificate
 
   -> certified?
     @dimension_certificate.verified?
@@ -408,17 +380,12 @@
     if !@dimension_certificate.verified?
       raise "modular-form dimension certificate failed"
 
-  -> group
-    @group
+  ro :group
 
   -> level
     @group.level
 
-  -> weight
-    @weight
-
-  -> dimension
-    @dimension
+  ro :weight, :dimension
 
   -> cusp_dimension
     ModularFormsArithmetic.cusp_dimension(@group, @weight)
@@ -438,8 +405,7 @@
   -> q_expansion_precision
     self.sturm.precision
 
-  -> dimension_certificate
-    @dimension_certificate
+  ro :dimension_certificate
 
   -> certified?
     @dimension_certificate.verified?
@@ -457,14 +423,7 @@
   -> new(@group, @weight, @bound)
     @verified_cache = nil
 
-  -> group
-    @group
-
-  -> weight
-    @weight
-
-  -> bound
-    @bound
+  ro :group, :weight, :bound
 
   -> theorem
     "Sturm coefficient bound for modular forms on Gamma_0(N)"
@@ -520,24 +479,18 @@
       @group, @weight, @bound)
     raise "Sturm-bound certificate failed" if !@certificate.verified?
 
-  -> group
-    @group
+  ro :group
 
   -> level
     @group.level
 
-  -> weight
-    @weight
-
-  -> bound
-    @bound
+  ro :weight, :bound
 
   # Coefficients a_0 through a_B occupy B+1 array slots.
   -> precision
     @bound + 1
 
-  -> certificate
-    @certificate
+  ro :certificate
 
   -> certified?
     @certificate.verified?

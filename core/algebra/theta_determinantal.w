@@ -12,8 +12,7 @@
   -> new(@fixed_set)
     @verified_cache = nil
 
-  -> fixed_set
-    @fixed_set
+  ro :fixed_set
 
   -> verified?
     return @verified_cache if @verified_cache != nil
@@ -119,11 +118,7 @@
     if !@certificate_cache.verified?
       raise "determinantal fixed-set certificate failed"
 
-  -> incidence
-    @incidence
-
-  -> subgroup
-    @subgroup
+  ro :incidence, :subgroup
 
   -> generator_lifts
     out = []

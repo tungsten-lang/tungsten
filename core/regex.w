@@ -74,8 +74,7 @@
     @subj_key = nil             # last subject decoded into @subj (decode cache)
     compute_prefilter()         # first-char prefilter (depends only on the program)
 
-  -> source
-    @source
+  ro :source
 
   # The untagged payload of a single Char: codepoint in bits 25-45 and \d\w\s
   # flags at the LSB. It fits in an inline i64 rather than promoting to BigInt.

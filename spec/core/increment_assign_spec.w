@@ -55,10 +55,7 @@ check("array variable index -=", a[1], 22)
 + Counter
   -> new
     @n = 0
-  -> n
-    @n
-  -> n=(v)
-    @n = v
+  rw :n
 
 c = Counter.new
 c.n += 7

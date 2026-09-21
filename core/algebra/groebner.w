@@ -8,11 +8,7 @@
   -> source_generators
     @generators
 
-  -> generators
-    @generators
-
-  -> polynomials
-    @polynomials
+  ro :generators, :polynomials
 
   -> size
     @polynomials.size
@@ -284,14 +280,12 @@
       @generators.push(item)
     @basis_cache = nil
 
-  -> ring
-    @ring
+  ro :ring
 
   -> source_generators
     @generators
 
-  -> generators
-    @generators
+  ro :generators
 
   -> fresh_auxiliary_name(stem)
     candidate = stem.to_sym

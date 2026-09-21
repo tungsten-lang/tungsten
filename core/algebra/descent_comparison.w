@@ -266,8 +266,7 @@
         out.push(candidate)
     out
 
-  -> width
-    @width
+  ro :width
 
   -> subspace_basis
     F2LinearAlgebra.copy_matrix(@subspace_basis)
@@ -275,17 +274,8 @@
   -> action_matrices
     F2LinearAlgebra.copy_matrix(@action_matrices)
 
-  -> subspace_span_certificate
-    @subspace_span_certificate
-
-  -> ambient_fixed_certificate
-    @ambient_fixed_certificate
-
-  -> subspace_fixed_certificate
-    @subspace_fixed_certificate
-
-  -> quotient_fixed_preimage_certificate
-    @quotient_fixed_preimage_certificate
+  ro :subspace_span_certificate, :ambient_fixed_certificate, :subspace_fixed_certificate
+  ro :quotient_fixed_preimage_certificate
 
   -> subspace_dimension
     @subspace_span_certificate.rank
@@ -485,14 +475,7 @@
       out.push(matrix)
     out
 
-  -> theta_galois_certificate
-    @theta_galois_certificate
-
-  -> candidate
-    @candidate
-
-  -> distinguished_theta_index
-    @distinguished_theta_index
+  ro :theta_galois_certificate, :candidate, :distinguished_theta_index
 
   -> true_theta_indices
     F2LinearAlgebra.copy_vector(@true_theta_indices)
@@ -509,8 +492,7 @@
   -> action_matrices
     F2LinearAlgebra.copy_matrix(@action_matrices)
 
-  -> finite_computation
-    @finite_computation
+  ro :finite_computation
 
   -> finite_computation_for_subgroup(subgroup)
     finite_computation_for_theta_subgroup(
@@ -761,14 +743,7 @@
       raise "global BPS kernel representative is not locally fixed"
     local_computation.zero_class?(representative) ? 0 : 1
 
-  -> global_comparison
-    @global_comparison
-
-  -> local_theta_dimension
-    @local_theta_dimension
-
-  -> local_image
-    @local_image
+  ro :global_comparison, :local_theta_dimension, :local_image
 
   -> rational_prime
     @local_theta_dimension.rational_prime
@@ -782,14 +757,7 @@
     F2LinearAlgebra.copy_vector(
       @possible_kernel_dimensions)
 
-  -> local_comparison_kernel_dimension
-    @local_comparison_kernel_dimension
-
-  -> kummer_kernel_dimension
-    @kummer_kernel_dimension
-
-  -> w_v_dimension
-    @w_v_dimension
+  ro :local_comparison_kernel_dimension, :kummer_kernel_dimension, :w_v_dimension
 
   -> w_v_zero?
     @w_v_dimension == 0
@@ -798,8 +766,7 @@
     F2LinearAlgebra.copy_vector(
       @possible_global_localization_ranks)
 
-  -> global_localization_rank
-    @global_localization_rank
+  ro :global_localization_rank
 
   -> global_kernel_killed?
     zero_kummer_kernel = @kummer_kernel_dimension == 0
@@ -918,35 +885,17 @@
     if !@certificate_cache.verified?
       raise "good-reduction local BPS comparison failed certification"
 
-  -> global_comparison
-    @global_comparison
-
-  -> theta_fiber
-    @theta_fiber
-
-  -> local_image
-    @local_image
+  ro :global_comparison, :theta_fiber, :local_image
 
   -> rational_prime
     @theta_fiber.prime
 
-  -> decomposition_group
-    @decomposition_group
-
-  -> finite_computation
-    @finite_computation
+  ro :decomposition_group, :finite_computation
 
   -> local_comparison_kernel_dimension
     @finite_computation.dimension
 
-  -> local_kummer_dimension
-    @local_kummer_dimension
-
-  -> kummer_kernel_dimension
-    @kummer_kernel_dimension
-
-  -> w_v_dimension
-    @w_v_dimension
+  ro :local_kummer_dimension, :kummer_kernel_dimension, :w_v_dimension
 
   -> w_v_zero?
     @w_v_dimension == 0
@@ -1051,20 +1000,8 @@
     if !@certificate_cache.verified?
       raise "BPS rank upper bound failed certification"
 
-  -> global_comparison
-    @global_comparison
-
-  -> explicit_intersection
-    @explicit_intersection
-
-  -> kernel_killing_local_comparison
-    @kernel_killing_local_comparison
-
-  -> selmer_dimension_upper_bound
-    @selmer_dimension_upper_bound
-
-  -> rank_upper_bound
-    @rank_upper_bound
+  ro :global_comparison, :explicit_intersection, :kernel_killing_local_comparison
+  ro :selmer_dimension_upper_bound, :rank_upper_bound
 
   -> chabauty_eligible?
     @rank_upper_bound < 3
@@ -1207,34 +1144,19 @@
     if !@certificate_cache.verified?
       raise "mod-two saturation certificate failed"
 
-  -> rank_bound
-    @rank_bound
+  ro :rank_bound
 
   -> descent_values
     out = []
     @descent_values.each -> out.push(item)
     out
 
-  -> space
-    @space
-
-  -> image_span_certificate
-    @image_span_certificate
+  ro :space, :image_span_certificate
 
   -> image_span_dimension
     @image_span_certificate.rank
 
-  -> mod_two_dimension
-    @mod_two_dimension
-
-  -> exact_rank
-    @exact_rank
-
-  -> selmer_dimension
-    @selmer_dimension
-
-  -> sha_two_dimension
-    @sha_two_dimension
+  ro :mod_two_dimension, :exact_rank, :selmer_dimension, :sha_two_dimension
 
   -> odd_index?
     true

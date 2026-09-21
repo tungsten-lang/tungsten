@@ -128,14 +128,7 @@
     if !@certificate_cache.verified?
       raise "theta Cayley-octad labeling failed certification"
 
-  -> incidence
-    @incidence
-
-  -> even_characteristic
-    @even_characteristic
-
-  -> even_label
-    @even_label
+  ro :incidence, :even_characteristic, :even_label
 
   -> rows
     F2LinearAlgebra.copy_matrix(@rows)
@@ -335,11 +328,7 @@
     if !@certificate_cache.verified?
       raise "theta Cayley-octad action failed certification"
 
-  -> labeling
-    @labeling
-
-  -> source_group
-    @source_group
+  ro :labeling, :source_group
 
   -> generator_lifts
     out = []
@@ -351,8 +340,7 @@
     @generator_permutations.each -> out.push(item)
     out
 
-  -> group
-    @group
+  ro :group
 
   -> orbit_sizes
     @group.orbit_sizes
@@ -655,14 +643,7 @@
     if !@certificate_cache.verified?
       raise "octad Frobenius class test failed certification"
 
-  -> action
-    @action
-
-  -> frobenius_map
-    @frobenius_map
-
-  -> local_theta_permutation
-    @local_theta_permutation
+  ro :action, :frobenius_map, :local_theta_permutation
 
   -> matching_tests
     out = []
@@ -764,11 +745,7 @@
     if !@certificate_cache.verified?
       raise "octad subfield profile failed certification"
 
-  -> action
-    @action
-
-  -> subgroup_enumeration
-    @subgroup_enumeration
+  ro :action, :subgroup_enumeration
 
   -> index_two_subgroups
     out = []
@@ -807,14 +784,8 @@
       count += 1 if subgroup_contains_all?(subgroup, elements)
     count
 
-  -> pair_quadratic_subfield_count
-    @pair_quadratic_subfield_count
-
-  -> sextic_quadratic_subfield_count
-    @sextic_quadratic_subfield_count
-
-  -> degree_twelve_quadratic_subfield_count
-    @degree_twelve_quadratic_subfield_count
+  ro :pair_quadratic_subfield_count, :sextic_quadratic_subfield_count
+  ro :degree_twelve_quadratic_subfield_count
 
   -> certificate
     @certificate_cache

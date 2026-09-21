@@ -110,8 +110,7 @@
       PrimeFieldSubspace.zero(
         field.characteristic, space.dimension))
 
-  -> space
-    @space
+  ro :space
 
   -> model
     @space.model
@@ -122,8 +121,7 @@
   -> codimension
     @coordinate_subspace.codimension
 
-  -> coordinate_subspace
-    @coordinate_subspace
+  ro :coordinate_subspace
 
   -> basis_vectors
     @coordinate_subspace.basis
@@ -332,8 +330,7 @@
     if !@certificate_cache.verified?
       raise "C_ab evaluation kernel failed certification"
 
-  -> space
-    @space
+  ro :space
 
   -> points
     out = []
@@ -356,8 +353,7 @@
       index += 1
     out
 
-  -> subspace
-    @subspace
+  ro :subspace
 
   -> dimension
     @subspace.dimension
@@ -495,14 +491,7 @@
     if !@certificate_cache.verified?
       raise "C_ab multiplier preimage failed certification"
 
-  -> target_subspace
-    @target_subspace
-
-  -> multiplier_subspace
-    @multiplier_subspace
-
-  -> candidate_space
-    @candidate_space
+  ro :target_subspace, :multiplier_subspace, :candidate_space
 
   -> constraint_matrix
     out = []
@@ -517,8 +506,7 @@
       row += 1
     out
 
-  -> subspace
-    @subspace
+  ro :subspace
 
   -> dimension
     @subspace.dimension
@@ -600,11 +588,7 @@
     if !@certificate_cache.verified?
       raise "C_ab Riemann-Roch space failed certification"
 
-  -> model
-    @model
-
-  -> bound
-    @bound
+  ro :model, :bound
 
   -> exponents
     out = []
@@ -785,44 +769,8 @@
       terms.push([term[0], powers])
     Polynomial.new(@ring, terms)
 
-  -> curve
-    @curve
-
-  -> field
-    @field
-
-  -> ring
-    @ring
-
-  -> x
-    @x
-
-  -> y
-    @y
-
-  -> x_index
-    @x_index
-
-  -> y_index
-    @y_index
-
-  -> infinity_index
-    @infinity_index
-
-  -> x_pole_order
-    @x_pole_order
-
-  -> y_pole_order
-    @y_pole_order
-
-  -> genus
-    @genus
-
-  -> affine_equation
-    @affine_equation
-
-  -> relation_rhs
-    @relation_rhs
+  ro :curve, :field, :ring, :x, :y, :x_index, :y_index, :infinity_index, :x_pole_order
+  ro :y_pole_order, :genus, :affine_equation, :relation_rhs
 
   -> infinity_point
     coordinates = [

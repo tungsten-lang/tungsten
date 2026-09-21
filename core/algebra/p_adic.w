@@ -135,8 +135,7 @@
     if !@certificate_cache.verified?
       raise "p-adic square-class computation failed certification"
 
-  -> element
-    @element
+  ro :element
 
   -> field
     @element.field
@@ -209,8 +208,7 @@
       raise "p-adic rational element needs a PadicField"
     @value = Rational.coerce(value)
 
-  -> field
-    @field
+  ro :field
 
   -> exact_value
     @value
@@ -365,19 +363,14 @@
     if !@certificate_cache.verified?
       raise "simple-root Hensel lift failed certification"
 
-  -> field
-    @field
-
-  -> polynomial
-    @polynomial
+  ro :field, :polynomial
 
   -> integer_coefficients
     out = []
     @integer_coefficients.each -> out.push(item)
     out
 
-  -> starting_residue
-    @starting_residue
+  ro :starting_residue
 
   -> precision
     @field.precision
@@ -385,8 +378,7 @@
   -> modulus
     @field.prime**precision
 
-  -> residue
-    @residue
+  ro :residue
 
   -> lift
     prime = @field.prime
@@ -448,11 +440,7 @@
     if !PadicArithmetic.integer?(@precision) || @precision < 1
       raise "p-adic precision must be positive"
 
-  -> prime
-    @prime
-
-  -> precision
-    @precision
+  ro :prime, :precision
 
   -> coerce(value)
     if value.class_name == "PadicRationalElement"

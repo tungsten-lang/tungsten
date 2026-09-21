@@ -11,8 +11,7 @@
 + RationalSUnitSquareClassSpaceCertificate
   -> new(@space)
 
-  -> space
-    @space
+  ro :space
 
   -> proof_kind
     :exact_rational_square_classes
@@ -74,8 +73,7 @@
       out.push(prime)
     out
 
-  -> dimension
-    @dimension
+  ro :dimension
 
   -> generator_coordinates
     out = []
@@ -164,8 +162,7 @@
   -> new(@norm_map)
     @verified_cache = nil
 
-  -> norm_map
-    @norm_map
+  ro :norm_map
 
   -> proof_kind
     :exact_norm_matrix
@@ -233,17 +230,12 @@
     if !@certificate_cache.verified?
       raise "S-unit norm map failed certification"
 
-  -> source
-    @source
-
-  -> target
-    @target
+  ro :source, :target
 
   -> matrix
     F2LinearAlgebra.copy_matrix(@matrix)
 
-  -> kernel_certificate
-    @kernel_certificate
+  ro :kernel_certificate
 
   -> kernel_dimension
     @kernel_certificate.kernel_dimension
@@ -275,8 +267,7 @@
   -> new(@constraint)
     @verified_cache = nil
 
-  -> constraint
-    @constraint
+  ro :constraint
 
   -> theorem
     "the true plane-quartic descent image lies in the norm-one square classes"
@@ -378,17 +369,7 @@
       raise "plane-quartic BPS norm constraint failed certification"
     self
 
-  -> setup
-    @setup
-
-  -> source
-    @source
-
-  -> s_class_two_torsion_proof
-    @s_class_two_torsion_proof
-
-  -> norm_map
-    @norm_map
+  ro :setup, :source, :s_class_two_torsion_proof, :norm_map
 
   -> matrix
     @norm_map.matrix
@@ -427,8 +408,7 @@
     @global_norm_constraint = PlaneQuarticBPSNormConstraint.new(self)
     @global_norm_constraint
 
-  -> global_norm_constraint
-    @global_norm_constraint
+  ro :global_norm_constraint
 
   # Bind a certified isomorphic presentation of the bitangent fields.  This
   # is needed when local BPS function evaluation uses the raw bitangent

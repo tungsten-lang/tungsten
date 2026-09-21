@@ -16,20 +16,7 @@
     if !verified?
       raise "theta subgroup candidate failed exact replay"
 
-  -> class_id
-    @class_id
-
-  -> expected_order
-    @expected_order
-
-  -> reported_structure
-    @reported_structure
-
-  -> incidence
-    @incidence
-
-  -> group
-    @group
+  ro :class_id, :expected_order, :reported_structure, :incidence, :group
 
   -> preserves_incidence?(permutation)
     blocks = @incidence.syzygetic_quadruples
@@ -115,17 +102,7 @@
     @candidates_cache = nil
     @verified_cache = nil
 
-  -> ambient_group
-    @ambient_group
-
-  -> total_class_count
-    @total_class_count
-
-  -> source
-    @source
-
-  -> filter
-    @filter
+  ro :ambient_group, :total_class_count, :source, :filter
 
   -> records
     out = []
@@ -253,8 +230,7 @@
     @survivors_cache = nil
     @verified_cache = nil
 
-  -> table
-    @table
+  ro :table
 
   -> orbit_signature
     F2LinearAlgebra.copy_vector(@orbit_signature)

@@ -1,8 +1,7 @@
 + Pt
   -> new(@x, @y)
     self
-  -> x
-    @x
+  ro :x
 
 -> new_object_churn(n)
   chk = 0 ## i64

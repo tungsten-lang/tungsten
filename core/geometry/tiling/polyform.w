@@ -48,11 +48,7 @@
       i += 2
     Polyform.new(grid, cells)
 
-  -> grid
-    @grid
-
-  -> cells
-    @cells
+  ro :grid, :cells
 
   -> size
     @cells.size

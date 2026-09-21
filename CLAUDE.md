@@ -145,7 +145,10 @@ Editing `core/` or `compiler/` requires the surface forms:
   declare fields.
 
 Conventions: 2-space indent, double-quoted strings, snake_case methods,
-PascalCase classes, blocks closed by dedent.
+PascalCase classes, blocks closed by dedent. Tungsten is not Ruby: never
+hand-write a trivial accessor (`-> name` with the body `@name`) — declare it at
+class level with `ro :name` (or `rw :name` for a getter + setter). They expand
+to the identical methods on every engine.
 
 ## Standard library: the autoload manifest
 

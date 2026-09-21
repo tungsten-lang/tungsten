@@ -100,10 +100,22 @@ A trailing `ro` or `rw` on the constructor requests generation of accessors:
 * `ro` — read-only getter (`obj.name`)
 * `rw` — getter and setter (`obj.name`, `obj.name = value`)
 
-Standalone declarations in the class body are also recognized:
+Standalone declarations in a class or trait body are also recognized, and may
+name several fields:
 
-    ro :name
+    ro :name, :sound
     rw :breed
+
+Each declared field `f` defines the method `f` whose body is `@f`; `rw`
+additionally defines `f=(value)` whose body is `@f = value`. These are ordinary
+methods: they are inherited, may be overridden, satisfy trait requirements, and
+are defined at the position of the declaration. An implementation **must**
+treat a declaration and the equivalent hand-written methods identically.
+
+Because the two forms are identical, a method whose entire body is its own
+field **should** be written as a declaration. Hand-written accessors are
+reserved for methods that compute, validate, or expose a field under a
+different name.
 
 ### 5.3.3 `self` inside instance methods
 

@@ -21,8 +21,7 @@
   -> .of(items)
     Tuple.new(items)
 
-  -> items
-    @items
+  ro :items
 
   # Index-based iteration: mode 1 lets map/select use [] + size directly; the
   # single-yield `each` below backs the combinators that go through

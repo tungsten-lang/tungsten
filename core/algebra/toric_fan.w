@@ -79,8 +79,7 @@
       i += 1
     true
 
-  -> rays
-    @rays
+  ro :rays
 
   -> ray_count
     @rays.size
@@ -224,8 +223,7 @@
       i += 1
     true
 
-  -> star
-    @star
+  ro :star
 
   -> star_fan
     @fan

@@ -138,11 +138,9 @@
 
   # Greatest number of qubits simultaneously allocated. `width - peak_live`
   # is pure fragmentation: ids that were charged for but never reused.
-  -> peak_live
-    @peak_live
+  ro :peak_live
 
-  -> live
-    @live
+  ro :live
 
   # The standard reversible-circuit objective: Toffoli count times width.
   # Lower is better.
@@ -350,11 +348,7 @@
       i += 1
     @phase = 0
 
-  -> width
-    @width
-
-  -> bits
-    @bits
+  ro :width, :bits
 
   -> bit(i)
     @bits[i]
@@ -364,8 +358,7 @@
     self
 
   # Phase in units of pi/4, modulo 8.
-  -> phase
-    @phase
+  ro :phase
 
   -> phase_clean?
     @phase == 0
@@ -478,8 +471,7 @@
     # Start in |0...0>.
     @re[0] = 1.0
 
-  -> width
-    @width
+  ro :width
 
   -> dimension
     @dim

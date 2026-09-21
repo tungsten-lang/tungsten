@@ -42,11 +42,7 @@ use core/expression
   -> variable
     @variable_text.to_sym
 
-  -> variable_text
-    @variable_text
-
-  -> center
-    @center
+  ro :variable_text, :center
 
   -> order
     @coefficients.size - 1

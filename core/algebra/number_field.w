@@ -23,8 +23,7 @@
   -> new(@field, coefficients)
     @coefficients = @field.reduce_coefficients(coefficients)
 
-  -> field
-    @field
+  ro :field
 
   -> coefficients
     out = []
@@ -112,14 +111,12 @@
   -> new(@field, element, @polynomial)
     @element = @field.coerce(element)
 
-  -> field
-    @field
+  ro :field
 
   -> element
     @field.coerce(@element)
 
-  -> polynomial
-    @polynomial
+  ro :polynomial
 
   # Replay both halves of minimality: the displayed monic polynomial
   # annihilates the element, and no shorter Krylov prefix is dependent.
@@ -157,8 +154,7 @@
     if !verified?
       raise "invalid certified real embedding of a number field"
 
-  -> field
-    @field
+  ro :field
 
   -> root
     @root.refined(0)
@@ -263,11 +259,7 @@
 + NumberFieldModularIrreducibilityCertificate
   -> new(@polynomial, @prime)
 
-  -> polynomial
-    @polynomial
-
-  -> prime
-    @prime
+  ro :polynomial, :prime
 
   -> reduced_polynomial
     if @polynomial.class_name != "Polynomial"
@@ -337,8 +329,7 @@
     factorizations.each -> (factorization)
       @factorizations.push(factorization)
 
-  -> polynomial
-    @polynomial
+  ro :polynomial
 
   -> primes
     out = []
@@ -473,11 +464,7 @@
     @reduced_polynomial_cache = nil
     @verified_cache = nil
 
-  -> polynomial
-    @polynomial
-
-  -> prime_ideal
-    @prime_ideal
+  ro :polynomial, :prime_ideal
 
   -> reduced_polynomial
     if @reduced_polynomial_cache == nil
@@ -596,14 +583,7 @@
     if !@certificate_cache.verified?
       raise "power-basis prime reduction failed certification"
 
-  -> field
-    @field
-
-  -> prime
-    @prime
-
-  -> root
-    @root
+  ro :field, :prime, :root
 
   -> residue_field
     @finite_field
@@ -676,8 +656,7 @@
           @factor_search_limit))
     @verified_cache = nil
 
-  -> polynomial
-    @polynomial
+  ro :polynomial
 
   -> reductions
     out = []
@@ -802,14 +781,7 @@
     @primitive_element_determinant_cache = nil
     @verified_cache = nil
 
-  -> polynomial
-    @polynomial
-
-  -> relative_polynomial
-    @relative_polynomial
-
-  -> relative_certificate
-    @relative_certificate
+  ro :polynomial, :relative_polynomial, :relative_certificate
 
   -> base_field
     @relative_polynomial.ring.field
@@ -916,17 +888,7 @@
     @root_cache = nil
     @verified_cache = nil
 
-  -> polynomial
-    @polynomial
-
-  -> model_polynomial
-    @model_polynomial
-
-  -> root_expression
-    @root_expression
-
-  -> model_certificate
-    @model_certificate
+  ro :polynomial, :model_polynomial, :root_expression, :model_certificate
 
   -> model_field
     if @model_field_cache == nil
@@ -1177,8 +1139,7 @@
       return out
     generic_integral_basis
 
-  -> degree
-    @degree
+  ro :degree
 
   -> characteristic
     0
@@ -1201,8 +1162,7 @@
       @defining_polynomial,
       @irreducibility_certificate)
 
-  -> irreducibility_certificate
-    @irreducibility_certificate
+  ro :irreducibility_certificate
 
   -> field_discriminant_certified?
     cubic? || @generic_maximal_order_computation != nil

@@ -104,17 +104,7 @@
     if name == nil || name.to_s.size == 0
       raise "observable name cannot be empty"
 
-  -> name
-    @name
-
-  -> unit
-    @unit
-
-  -> symbol
-    @symbol
-
-  -> description
-    @description
+  ro :name, :unit, :symbol, :description
 
   -> compatible?(other)
     (other.class_name == "PhysicalObservable" &&
@@ -147,17 +137,7 @@
     else
       raise "observation metadata must be a Hash"
 
-  -> observable
-    @observable
-
-  -> measurement
-    @measurement
-
-  -> run_id
-    @run_id
-
-  -> captured_at
-    @captured_at
+  ro :observable, :measurement, :run_id, :captured_at
 
   -> metadata
     Physics.copy_hash(@metadata)
@@ -188,11 +168,7 @@
          @degrees_of_freedom, @sample_size, @method,
          @covariance_source, @assumptions)
 
-  -> observable
-    @observable
-
-  -> measurement
-    @measurement
+  ro :observable, :measurement
 
   -> value
     measurement.value
@@ -206,20 +182,7 @@
   -> unit
     observable.unit
 
-  -> chi_square
-    @chi_square
-
-  -> degrees_of_freedom
-    @degrees_of_freedom
-
-  -> sample_size
-    @sample_size
-
-  -> method
-    @method
-
-  -> covariance_source
-    @covariance_source
+  ro :chi_square, :degrees_of_freedom, :sample_size, :method, :covariance_source
 
   -> assumptions
     @assumptions.dup
@@ -287,8 +250,7 @@
       i += 1
     covariance
 
-  -> observable
-    @observable
+  ro :observable
 
   -> observations
     @observations.dup
@@ -296,8 +258,7 @@
   -> covariance
     Physics.copy_matrix(@covariance)
 
-  -> covariance_source
-    @covariance_source
+  ro :covariance_source
 
   -> size
     @observations.size

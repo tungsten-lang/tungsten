@@ -2,8 +2,7 @@
 + BoundedSetting
   -> new
     @value = ~1.0
-  -> value
-    @value
+  ro :value
   -> value=(value)
     raise "positive setting required" if value <= ~0.0
     @value = value

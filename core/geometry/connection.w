@@ -8,8 +8,7 @@
       raise "Levi-Civita connection needs a Metric"
     @components_cache = nil
 
-  -> metric
-    @metric
+  ro :metric
 
   -> chart
     @metric.chart

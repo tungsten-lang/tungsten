@@ -36,8 +36,7 @@
   -> .exec(argv)
     ccall("__w_proc_exec", argv)
 
-  -> pid
-    @pid
+  ro :pid
 
   # Non-blocking: nil while running, else the exit code (256+signal when
   # signal-terminated). The code is cached; later calls return it again.

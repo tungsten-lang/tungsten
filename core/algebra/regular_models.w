@@ -61,8 +61,7 @@
     @verified_cache = nil
     @diagnostic_stage = :not_started
 
-  -> diagnostic_stage
-    @diagnostic_stage
+  ro :diagnostic_stage
 
   -> theorem
     "a regular irreducible cuspidal special fiber bounds the odd local 2-quotient by the 2-primary order of its normalization Jacobian"
@@ -302,31 +301,14 @@
       raise ("cuspidal regular-model certificate did not verify at " +
              @certificate_cache.diagnostic_stage.to_s)
 
-  -> curve
-    @curve
-
-  -> prime
-    @prime
-
-  -> reduction_curve
-    @reduction_curve
-
-  -> singular_point
-    @singular_point
-
-  -> chart
-    @chart
+  ro :curve, :prime, :reduction_curve, :singular_point, :chart
 
   -> local_coordinate_indices
     out = []
     @local_coordinate_indices.each -> out.push(item)
     out
 
-  -> local_singularity
-    @local_singularity
-
-  -> tangent_variable_index
-    @tangent_variable_index
+  ro :local_singularity, :tangent_variable_index
 
   -> empty_complement_certificates
     out = []
@@ -338,20 +320,12 @@
     @support_certificates.each -> out.push(item)
     out
 
-  -> source_value
-    @source_value
-
-  -> source_value_valuation
-    @source_value_valuation
+  ro :source_value, :source_value_valuation
 
   -> normalization_genus
     2
 
-  -> normalization_point_count
-    @normalization_point_count
-
-  -> normalization_extension_point_count
-    @normalization_extension_point_count
+  ro :normalization_point_count, :normalization_extension_point_count
 
   -> normalization_zeta_coefficients
     out = []
@@ -362,11 +336,7 @@
     IntegerPolynomial.new(
       @normalization_zeta_coefficients)
 
-  -> normalization_jacobian_order
-    @normalization_jacobian_order
-
-  -> dimension_upper_bound
-    @dimension_upper_bound
+  ro :normalization_jacobian_order, :dimension_upper_bound
 
   -> rational_prime
     @prime

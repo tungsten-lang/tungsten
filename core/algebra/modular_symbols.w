@@ -210,11 +210,7 @@
     return true if left[0] < right[0]
     left[0] == right[0] && left[1] < right[1]
 
-  -> group
-    @group
-
-  -> level
-    @level
+  ro :group, :level
 
   -> units
     out = []
@@ -251,8 +247,7 @@
     source = @pairs[index]
     [source[0], source[1]]
 
-  -> certificate
-    @certificate
+  ro :certificate
 
   -> certified?
     @certificate.verified?
@@ -268,8 +263,7 @@
   -> new(@line)
     @verified_cache = nil
 
-  -> line
-    @line
+  ro :line
 
   -> theorem
     "Gamma_0(N) right cosets are P^1(Z/NZ)"
@@ -339,14 +333,7 @@
     if modulus > 1 && @residue.gcd(modulus) != 1
       raise "Gamma0 cusp residue must be a unit"
 
-  -> group
-    @group
-
-  -> denominator_class
-    @denominator_class
-
-  -> residue
-    @residue
+  ro :group, :denominator_class, :residue
 
   -> residue_modulus
     @denominator_class.gcd(
@@ -379,17 +366,7 @@
     @c = pair[0]
     @d = pair[1]
 
-  -> space
-    @space
-
-  -> index
-    @index
-
-  -> c
-    @c
-
-  -> d
-    @d
+  ro :space, :index, :c, :d
 
   -> pair
     [@c, @d]
@@ -580,17 +557,12 @@
       i += 1
     [cusps, boundaries, matrix]
 
-  -> group
-    @group
+  ro :group
 
   -> level
     @group.level
 
-  -> weight
-    @weight
-
-  -> projective_line
-    @projective_line
+  ro :weight, :projective_line
 
   -> symbols
     out = []
@@ -610,11 +582,7 @@
       out.push(copied)
     out
 
-  -> relation_rank
-    @relation_rank
-
-  -> relative_dimension
-    @relative_dimension
+  ro :relation_rank, :relative_dimension
 
   -> cusps
     out = []
@@ -629,14 +597,7 @@
   -> boundary_matrix
     ModularSymbolsLinearAlgebra.copy_matrix(@boundary_matrix)
 
-  -> boundary_rank
-    @boundary_rank
-
-  -> cuspidal_dimension
-    @cuspidal_dimension
-
-  -> search_limit
-    @search_limit
+  ro :boundary_rank, :cuspidal_dimension, :search_limit
 
   # Compute the exact quotient map from the raw P^1(Z/NZ) generators to a
   # rational basis of the Manin quotient.  The rows of generators_to_basis
@@ -768,8 +729,7 @@
   -> cuspidal_hecke_matrix(index)
     hecke_operator(index).cuspidal_matrix
 
-  -> certificate
-    @certificate
+  ro :certificate
 
   -> certified?
     @certificate.verified?
@@ -787,8 +747,7 @@
   -> new(@space)
     @verified_cache = nil
 
-  -> space
-    @space
+  ro :space
 
   -> theorem
     "Manin presentation of weight-two modular symbols for Gamma_0(N)"

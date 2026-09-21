@@ -11,23 +11,7 @@
   -> new(@kind, @before, @difference_profile,
          @coefficient_residue, @payload, @after)
 
-  -> kind
-    @kind
-
-  -> before
-    @before
-
-  -> difference_profile
-    @difference_profile
-
-  -> coefficient_residue
-    @coefficient_residue
-
-  -> payload
-    @payload
-
-  -> after
-    @after
+  ro :kind, :before, :difference_profile, :coefficient_residue, :payload, :after
 
 
 + NumberFieldDyadicSquareClassArithmetic
@@ -328,20 +312,12 @@
          @tail_profile, @vector, @final_unit)
     @verified_cache = nil
 
-  -> prime_ideal
-    @prime_ideal
-
-  -> value
-    @value
-
-  -> valuation_profile
-    @valuation_profile
+  ro :prime_ideal, :value, :valuation_profile
 
   -> vector
     F2LinearAlgebra.copy_vector(@vector)
 
-  -> final_unit
-    @final_unit
+  ro :final_unit
 
   -> steps
     out = []
@@ -748,20 +724,17 @@
     if !@certificate_cache.verified?
       raise "dyadic local square class failed certification"
 
-  -> prime_ideal
-    @prime_ideal
+  ro :prime_ideal
 
   -> field
     @prime_ideal.field
 
-  -> value
-    @value
+  ro :value
 
   -> valuation
     @valuation_profile.at(@prime_ideal)
 
-  -> valuation_profile
-    @valuation_profile
+  ro :valuation_profile
 
   -> vector
     F2LinearAlgebra.copy_vector(@vector)
@@ -769,11 +742,7 @@
   -> dimension
     @vector.size
 
-  -> final_unit
-    @final_unit
-
-  -> replay_certificate
-    @replay_certificate
+  ro :final_unit, :replay_certificate
 
   -> representatives
     out = []
@@ -913,8 +882,7 @@
     if !@certificate_cache.verified?
       raise "dyadic local square-class map failed certification"
 
-  -> prime_ideal
-    @prime_ideal
+  ro :prime_ideal
 
   -> generators
     out = []
@@ -931,8 +899,7 @@
     @square_classes.each -> out.push(item)
     out
 
-  -> target_dimension
-    @target_dimension
+  ro :target_dimension
 
   -> matrix
     F2LinearAlgebra.copy_matrix(@matrix)
@@ -946,8 +913,7 @@
   -> kernel_basis
     @kernel_certificate.kernel_basis
 
-  -> kernel_certificate
-    @kernel_certificate
+  ro :kernel_certificate
 
   -> apply(vector)
     F2LinearAlgebra.validate_vector(
@@ -1179,8 +1145,7 @@
     if !@certificate_cache.verified?
       raise "product dyadic localization failed certification"
 
-  -> source
-    @source
+  ro :source
 
   -> rational_prime
     2
@@ -1218,8 +1183,7 @@
   -> kernel_basis
     @kernel_certificate.kernel_basis
 
-  -> kernel_certificate
-    @kernel_certificate
+  ro :kernel_certificate
 
   -> apply(vector)
     F2LinearAlgebra.validate_vector(

@@ -496,38 +496,13 @@
   -> certified?
     verified?
 
-  -> source
-    @source
-
-  -> prime
-    @prime
-
-  -> minimality_certificate
-    @minimality_certificate
-
-  -> kind
-    @kind
-
-  -> conductor_exponent
-    @conductor_exponent
-
-  -> kodaira_symbol
-    @kodaira_symbol
-
-  -> tamagawa_number
-    @tamagawa_number
+  ro :source, :prime, :minimality_certificate, :kind, :conductor_exponent, :kodaira_symbol
+  ro :tamagawa_number
 
   -> split?
     @split
 
-  -> transformations
-    @transformations
-
-  -> final_model
-    @final_model
-
-  -> search_limit
-    @search_limit
+  ro :transformations, :final_model, :search_limit
 
   -> to_s
     ("EllipticTateLocalDataCertificate(p=" + @prime.to_s +
@@ -556,38 +531,12 @@
       @final_model, @search_limit)
     raise "Tate local-data certificate failed" if !@certificate.verified?
 
-  -> source
-    @source
-
-  -> prime
-    @prime
-
-  -> kind
-    @kind
-
-  -> conductor_exponent
-    @conductor_exponent
-
-  -> kodaira_symbol
-    @kodaira_symbol
-
-  -> tamagawa_number
-    @tamagawa_number
+  ro :source, :prime, :kind, :conductor_exponent, :kodaira_symbol, :tamagawa_number
 
   -> split?
     @split
 
-  -> transformations
-    @transformations
-
-  -> final_model
-    @final_model
-
-  -> certificate
-    @certificate
-
-  -> minimality_certificate
-    @minimality_certificate
+  ro :transformations, :final_model, :certificate, :minimality_certificate
 
   -> certified?
     @certificate.verified?

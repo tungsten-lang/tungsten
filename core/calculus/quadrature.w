@@ -35,42 +35,18 @@
     if @converged && (!@estimate_available || !@complete_coverage)
       raise "converged quadrature requires a complete estimate"
 
-  -> value
-    @value
-
-  -> error_estimate
-    @error_estimate
-
-  -> evaluations
-    @evaluations
-
-  -> intervals
-    @intervals
+  ro :value, :error_estimate, :evaluations, :intervals
 
   -> converged?
     @converged
 
-  -> status
-    @status
-
-  -> algorithm
-    @algorithm
-
-  -> error_model
-    @error_model
-
-  -> absolute_integral_estimate
-    @absolute_integral_estimate
+  ro :status, :algorithm, :error_model, :absolute_integral_estimate
 
   -> worst_interval
     return nil if @worst_interval == nil
     [@worst_interval[0], @worst_interval[1]]
 
-  -> worst_error
-    @worst_error
-
-  -> companion_value
-    @companion_value
+  ro :worst_error, :companion_value
 
   -> estimate_available?
     @estimate_available

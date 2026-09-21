@@ -159,11 +159,7 @@
   -> order
     @cells.size
 
-  -> width
-    @width
-
-  -> height
-    @height
+  ro :width, :height
 
   -> bounding_area
     @width * @height

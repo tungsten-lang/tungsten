@@ -188,8 +188,7 @@
   -> new(@producer)
     @verified_cache = nil
 
-  -> producer
-    @producer
+  ro :producer
 
   -> verified?
     return @verified_cache if @verified_cache != nil
@@ -264,8 +263,7 @@
     build if valid_input_shape?
     @certificate_cache = PlaneQuarticDixonRepresentationCertificate.new(self)
 
-  -> curve
-    @curve
+  ro :curve
 
   -> lines
     out = []
@@ -282,8 +280,7 @@
     @contact_cubics.each -> out.push(item)
     out
 
-  -> contact_space_dimension
-    @contact_space_dimension
+  ro :contact_space_dimension
 
   -> relation_certificates
     out = []
@@ -293,14 +290,12 @@
   -> cubic_matrix
     copy_matrix(@cubic_matrix)
 
-  -> cubic_matrix_determinant
-    @cubic_matrix_determinant
+  ro :cubic_matrix_determinant
 
   -> linear_matrix
     copy_matrix(@linear_matrix)
 
-  -> representation
-    @representation
+  ro :representation
 
   -> certificate
     @certificate_cache
@@ -659,38 +654,22 @@
     if !@certificate_cache.verified?
       raise "finite determinantal Frobenius descent failed certification"
 
-  -> fiber
-    @fiber
-
-  -> field
-    @field
-
-  -> source_representation
-    @source_representation
-
-  -> representation
-    @representation
-
-  -> intertwiner_kernel_dimension
-    @intertwiner_kernel_dimension
+  ro :fiber, :field, :source_representation, :representation, :intertwiner_kernel_dimension
 
   -> intertwiner
     copy_matrix(@intertwiner)
 
-  -> frobenius_scalar
-    @frobenius_scalar
+  ro :frobenius_scalar
 
   -> normalized_intertwiner
     copy_matrix(@normalized_intertwiner)
 
-  -> normalized_scalar
-    @normalized_scalar
+  ro :normalized_scalar
 
   -> fixed_change_of_basis
     copy_matrix(@fixed_change_of_basis)
 
-  -> descent_scalar
-    @descent_scalar
+  ro :descent_scalar
 
   -> certificate
     @certificate_cache

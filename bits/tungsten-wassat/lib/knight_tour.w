@@ -995,14 +995,7 @@ WASSAT_KNIGHT_HASH_PRIME = 2147483647
       v += 1
     result
 
-  -> conflicts
-    @conflicts
-
-  -> decisions
-    @decisions
-
-  -> props
-    @props
+  ro :conflicts, :decisions, :props
 
   -> bounded?
     @bounded

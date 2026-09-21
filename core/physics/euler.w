@@ -21,11 +21,7 @@
     number = value.to_f()
     !number.nan? && !number.infinite?
 
-  -> dim
-    @dim
-
-  -> nstate
-    @nstate
+  ro :dim, :nstate
 
   -> state_shape_valid?(u)
     u.class_name == "Array" && u.size == @nstate
@@ -103,8 +99,7 @@
     if !self.params_valid?
       raise "CompressibleEuler: gas gamma must be finite and greater than one"
 
-  -> gas_gamma
-    @gas_gamma
+  ro :gas_gamma
 
   -> name
     "compressible_euler_[@dim]d"
@@ -207,8 +202,7 @@
     if !self.params_valid?
       raise "IsothermalEuler: thermal velocity must be positive and finite"
 
-  -> vt
-    @vt
+  ro :vt
 
   -> name
     "isothermal_euler_[@dim]d"

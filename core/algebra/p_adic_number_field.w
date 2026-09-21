@@ -94,23 +94,8 @@
     if !@certificate_cache.verified?
       raise "number-field local valuation failed certification"
 
-  -> prime_ideal
-    @prime_ideal
-
-  -> element
-    @element
-
-  -> clearing_denominator
-    @clearing_denominator
-
-  -> scaled_algebra_element
-    @scaled_algebra_element
-
-  -> integral_valuation_computation
-    @integral_valuation_computation
-
-  -> value
-    @value
+  ro :prime_ideal, :element, :clearing_denominator, :scaled_algebra_element
+  ro :integral_valuation_computation, :value
 
   -> certificate
     @certificate_cache
@@ -235,14 +220,7 @@
     if !@certificate_cache.verified?
       raise "odd-prime valuation profile failed certification"
 
-  -> field
-    @field
-
-  -> value
-    @value
-
-  -> rational_prime
-    @rational_prime
+  ro :field, :value, :rational_prime
 
   -> primes
     @field.prime_ideals_above(@rational_prime)
@@ -262,11 +240,7 @@
   -> uses_certified_principal_ideal?
     @fractional_ideal != nil
 
-  -> fractional_ideal
-    @fractional_ideal
-
-  -> principal_computation
-    @principal_computation
+  ro :fractional_ideal, :principal_computation
 
   -> direct_computations
     out = []
@@ -354,8 +328,7 @@
     if !@certificate_cache.verified?
       raise "uniformizer-adjusted valuation profile failed certification"
 
-  -> source
-    @source
+  ro :source
 
   -> field
     @source.field
@@ -366,17 +339,7 @@
   -> primes
     @source.primes
 
-  -> prime_ideal
-    @prime_ideal
-
-  -> uniformizer
-    @uniformizer
-
-  -> exponent
-    @exponent
-
-  -> value
-    @value
+  ro :prime_ideal, :uniformizer, :exponent, :value
 
   -> values
     F2LinearAlgebra.copy_vector(@values)
@@ -455,14 +418,12 @@
     if !@certificate_cache.verified?
       raise "number-field local uniformizer failed certification"
 
-  -> prime_ideal
-    @prime_ideal
+  ro :prime_ideal
 
   -> field
     @prime_ideal.field
 
-  -> element
-    @element
+  ro :element
 
   -> valuation_computations
     out = []
@@ -559,8 +520,7 @@
     if !@prime_ideal.certificate.verified?
       raise "local residue reduction has an uncertified prime"
 
-  -> prime_ideal
-    @prime_ideal
+  ro :prime_ideal
 
   -> field
     @prime_ideal.field
@@ -735,14 +695,7 @@
     if !@certificate_cache.verified?
       raise "number-field local unit residue failed certification"
 
-  -> prime_ideal
-    @prime_ideal
-
-  -> value
-    @value
-
-  -> valuation_profile
-    @valuation_profile
+  ro :prime_ideal, :value, :valuation_profile
 
   -> adjustments
     out = []
@@ -751,14 +704,7 @@
         adjustment[0], adjustment[1], adjustment[2]])
     out
 
-  -> numerator
-    @numerator
-
-  -> denominator
-    @denominator
-
-  -> residue
-    @residue
+  ro :numerator, :denominator, :residue
 
   -> certificate
     @certificate_cache
@@ -867,29 +813,12 @@
     if !@certificate_cache.verified?
       raise "number-field local square class failed certification"
 
-  -> prime_ideal
-    @prime_ideal
+  ro :prime_ideal
 
   -> field
     @prime_ideal.field
 
-  -> value
-    @value
-
-  -> valuation
-    @valuation
-
-  -> valuation_profile
-    @valuation_profile
-
-  -> unit_valuation_profile
-    @unit_valuation_profile
-
-  -> uniformizer
-    @uniformizer
-
-  -> unit_residue
-    @unit_residue
+  ro :value, :valuation, :valuation_profile, :unit_valuation_profile, :uniformizer, :unit_residue
 
   -> vector
     F2LinearAlgebra.copy_vector(@vector)
@@ -995,8 +924,7 @@
     if !@certificate_cache.verified?
       raise "odd local square-class map failed certification"
 
-  -> prime_ideal
-    @prime_ideal
+  ro :prime_ideal
 
   -> generators
     out = []
@@ -1243,11 +1171,7 @@
     if !@certificate_cache.verified?
       raise "product odd localization failed certification"
 
-  -> source
-    @source
-
-  -> rational_prime
-    @rational_prime
+  ro :source, :rational_prime
 
   -> local_maps
     out = []
@@ -1282,8 +1206,7 @@
   -> kernel_basis
     @kernel_certificate.kernel_basis
 
-  -> kernel_certificate
-    @kernel_certificate
+  ro :kernel_certificate
 
   -> apply(vector)
     F2LinearAlgebra.validate_vector(

@@ -24,17 +24,7 @@ use ../../tungsten-wrat/lib/wrat
     @variable_names = []
     variable_names.each -> @variable_names.push(item)
 
-  -> base_cnf
-    @base_cnf
-
-  -> query_cnf
-    @query_cnf
-
-  -> proof_text
-    @proof_text
-
-  -> labels_text
-    @labels_text
+  ro :base_cnf, :query_cnf, :proof_text, :labels_text
 
   -> claim_literals
     out = []
@@ -181,8 +171,7 @@ use ../../tungsten-wrat/lib/wrat
     @variable_ids[key] = @variable_names.size
     @variable_names.size
 
-  -> primary_variable_count
-    @primary_variable_count
+  ro :primary_variable_count
 
   -> variable_count
     @variable_names.size

@@ -227,26 +227,22 @@
     if !@certificate_cache.verified?
       raise "local theta dimension certificate failed"
 
-  -> function_data
-    @function_data
+  ro :function_data
 
   -> curve
     @function_data.curve
 
-  -> local_map
-    @local_map
+  ro :local_map
 
   -> rational_prime
     @local_map.rational_prime
 
-  -> global_theta_certificate
-    @global_theta_certificate
+  ro :global_theta_certificate
 
   -> orbit_signature
     F2LinearAlgebra.copy_vector(@orbit_signature)
 
-  -> subgroup_enumeration
-    @subgroup_enumeration
+  ro :subgroup_enumeration
 
   -> compatible_subgroups
     out = []
@@ -269,14 +265,7 @@
     F2LinearAlgebra.copy_vector(
       @possible_torsion_dimensions)
 
-  -> torsion_dimension
-    @torsion_dimension
-
-  -> analytic_dimension
-    @analytic_dimension
-
-  -> dimension
-    @dimension
+  ro :torsion_dimension, :analytic_dimension, :dimension
 
   -> dimension_upper_bound
     @dimension

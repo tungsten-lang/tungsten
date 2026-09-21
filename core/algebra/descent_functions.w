@@ -49,8 +49,7 @@
   -> new(@contact)
     @verified_cache = nil
 
-  -> contact
-    @contact
+  ro :contact
 
   -> verified?
     answer = false
@@ -201,17 +200,12 @@
     if !@certificate_cache.verified?
       raise "bitangent contact component failed certification"
 
-  -> chart
-    @chart
+  ro :chart
 
   -> curve
     @chart.curve
 
-  -> source_component
-    @source_component
-
-  -> algebra
-    @algebra
+  ro :source_component, :algebra
 
   -> degree
     @algebra.dimension
@@ -234,8 +228,7 @@
     @contact_quadratic.each -> out.push(item)
     out
 
-  -> scale
-    @scale
+  ro :scale
 
   -> relative_degree
     2
@@ -260,8 +253,7 @@
 + PlaneQuarticBPSTrueDivisorComponentCertificate
   -> new(@divisor)
 
-  -> divisor
-    @divisor
+  ro :divisor
 
   -> verified?
     expected_class = "PlaneQuarticBPSTrueDivisorComponent"
@@ -302,14 +294,12 @@
     if !@certificate_cache.verified?
       raise "BPS true divisor component failed certification"
 
-  -> contact
-    @contact
+  ro :contact
 
   -> positive_contact
     @contact
 
-  -> distinguished_certificate
-    @distinguished_certificate
+  ro :distinguished_certificate
 
   -> negative_contact
     @distinguished_certificate.half_intersection
@@ -340,8 +330,7 @@
 + PlaneQuarticBPSFunctionComponentCertificate
   -> new(@function)
 
-  -> function
-    @function
+  ro :function
 
   -> theorem
     "divisor of a ratio of nonzero sections of the same line bundle"
@@ -413,17 +402,12 @@
     if !@certificate_cache.verified?
       raise "BPS line-ratio function failed certification"
 
-  -> contact
-    @contact
-
-  -> beta_prime
-    @beta_prime
+  ro :contact, :beta_prime
 
   -> algebra
     @contact.algebra
 
-  -> distinguished_certificate
-    @distinguished_certificate
+  ro :distinguished_certificate
 
   -> numerator_coefficients
     out = []
@@ -487,8 +471,7 @@
   -> new(@data)
     @verified_cache = nil
 
-  -> data
-    @data
+  ro :data
 
   -> theorem
     "BPS section 6.5: a rational member converts the bitangent fake setup to a true setup"
@@ -614,8 +597,7 @@
     if !@certificate_cache.verified?
       raise "BPS divisor and function data failed certification"
 
-  -> setup
-    @setup
+  ro :setup
 
   -> curve
     @setup.curve
@@ -623,8 +605,7 @@
   -> exponent
     2
 
-  -> etale_algebra
-    @etale_algebra
+  ro :etale_algebra
 
   -> etale_degree
     @etale_algebra.dimension
@@ -717,8 +698,7 @@
   -> divisor_function_data
     @bps_function_data
 
-  -> bps_function_data
-    @bps_function_data
+  ro :bps_function_data
 
   -> true_setup?
     return false if @bps_function_data == nil

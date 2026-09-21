@@ -104,8 +104,7 @@
   -> new(@computation)
     @verified_cache = nil
 
-  -> computation
-    @computation
+  ro :computation
 
   -> verified?
     answer = false
@@ -311,8 +310,7 @@
       @basis_combinations.push(combinations[i])
       i += 1
 
-  -> rank
-    @rank
+  ro :rank
 
   -> generator_rows
     IntegerLinearAlgebra.copy_matrix(
@@ -352,17 +350,7 @@
   -> new(@operation, @left, @right, @result)
     @verified_cache = nil
 
-  -> operation
-    @operation
-
-  -> left
-    @left
-
-  -> right
-    @right
-
-  -> result
-    @result
+  ro :operation, :left, :right, :result
 
   -> verified?
     answer = false
@@ -427,23 +415,12 @@
     if !@certificate.verified?
       raise "ideal computation failed certification"
 
-  -> operation
-    @operation
-
-  -> left
-    @left
-
-  -> right
-    @right
-
-  -> ideal
-    @ideal
+  ro :operation, :left, :right, :ideal
 
   -> result
     @ideal
 
-  -> certificate
-    @certificate
+  ro :certificate
 
   -> certified?
     @certificate.verified?
@@ -704,8 +681,7 @@
   -> new(@computation)
     @verified_cache = nil
 
-  -> computation
-    @computation
+  ro :computation
 
   -> verified?
     answer = false
@@ -825,20 +801,7 @@
       return @prime_ideal.contains?(@target)
     @prime_ideal.as_ideal.contains_ideal?(@target)
 
-  -> prime_ideal
-    @prime_ideal
-
-  -> order
-    @order
-
-  -> target
-    @target
-
-  -> target_kind
-    @target_kind
-
-  -> value
-    @value
+  ro :prime_ideal, :order, :target, :target_kind, :value
 
   -> infinite?
     @value == :infinity
@@ -882,8 +845,7 @@
   -> new(@factorization)
     @verified_cache = nil
 
-  -> factorization
-    @factorization
+  ro :factorization
 
   -> verified?
     answer = false
@@ -978,8 +940,7 @@
     if !@certificate_cache.verified?
       raise "ideal factorization failed certification"
 
-  -> ideal
-    @ideal
+  ro :ideal
 
   -> rational_norm_factors
     out = []
@@ -1079,11 +1040,7 @@
     if !certificate.verified?
       raise "number-field ideal failed certification"
 
-  -> field
-    @field
-
-  -> algebra_ideal
-    @algebra_ideal
+  ro :field, :algebra_ideal
 
   -> order
     @algebra_ideal.order
@@ -1184,8 +1141,7 @@
         factor[1]
       ])
 
-  -> ideal
-    @ideal
+  ro :ideal
 
   -> factors
     out = []
@@ -1280,8 +1236,7 @@
   -> new(@ideal)
     @verified_cache = nil
 
-  -> ideal
-    @ideal
+  ro :ideal
 
   -> verified?
     answer = false
@@ -1390,8 +1345,7 @@
     AlgebraFractionalIdeal.new(
       ideal.order, factorization.factors)
 
-  -> order
-    @order
+  ro :order
 
   -> factors
     out = []
@@ -1600,23 +1554,7 @@
     if !@certificate_cache.verified?
       raise "principal fractional ideal failed certification"
 
-  -> order
-    @order
-
-  -> value
-    @value
-
-  -> denominator
-    @denominator
-
-  -> factor_search_limit
-    @factor_search_limit
-
-  -> valuation_step_limit
-    @valuation_step_limit
-
-  -> ideal
-    @ideal
+  ro :order, :value, :denominator, :factor_search_limit, :valuation_step_limit, :ideal
 
   -> result
     @ideal
@@ -1697,11 +1635,7 @@
     if !certificate.verified?
       raise "number-field fractional ideal failed certification"
 
-  -> field
-    @field
-
-  -> algebra_fractional_ideal
-    @algebra_fractional_ideal
+  ro :field, :algebra_fractional_ideal
 
   -> norm
     @algebra_fractional_ideal.norm

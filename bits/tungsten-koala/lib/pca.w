@@ -335,8 +335,7 @@
     @mean.size
 
   # The names of those features, in fit order.
-  -> feature_names
-    @feature_names
+  ro :feature_names
 
   # --- Tunable contract (see lib/estimator_base.w) ---
 

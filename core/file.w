@@ -4,8 +4,7 @@ use core/mmap
 + FileStat
   -> new(@path, @data)
 
-  -> path
-    @path
+  ro :path
 
   -> dev
     @data[0]
@@ -366,8 +365,7 @@ use core/mmap
     else
       tempfile
 
-  -> path
-    @path
+  ro :path
 
   -> write(data)
     raise "closed tempfile" if @closed

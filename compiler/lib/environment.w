@@ -56,5 +56,4 @@
       return false
     @parent.defined_locally_or_in_scope?(name)
 
-  -> parent
-    @parent
+  ro :parent

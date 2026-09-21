@@ -221,20 +221,7 @@
     if !@certificate_cache.verified?
       raise "BPS point-difference descent value failed certification"
 
-  -> function_data
-    @function_data
-
-  -> space
-    @space
-
-  -> positive_point
-    @positive_point
-
-  -> negative_point
-    @negative_point
-
-  -> etale_value
-    @etale_value
+  ro :function_data, :space, :positive_point, :negative_point, :etale_value
 
   -> coordinate_certificates
     out = []
@@ -555,20 +542,7 @@
     if !@certificate_cache.verified?
       raise "closed-place BPS descent value failed certification"
 
-  -> function_data
-    @function_data
-
-  -> space
-    @space
-
-  -> s_class_two_torsion_proof
-    @s_class_two_torsion_proof
-
-  -> positive_place
-    @positive_place
-
-  -> negative_place
-    @negative_place
+  ro :function_data, :space, :s_class_two_torsion_proof, :positive_place, :negative_place
 
   -> component_values
     out = []
@@ -713,8 +687,7 @@
     if !@certificate_cache.verified?
       raise "known local image failed certification"
 
-  -> local_map
-    @local_map
+  ro :local_map
 
   -> rational_prime
     @local_map.rational_prime
@@ -740,8 +713,7 @@
       index += 1
     out
 
-  -> span_certificate
-    @span_certificate
+  ro :span_certificate
 
   -> lower_bound_only?
     true

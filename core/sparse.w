@@ -187,10 +187,7 @@ use core/numeric/float
     @data_typed = nil
     self
 
-  -> rows
-    @rows
-  -> cols
-    @cols
+  ro :rows, :cols
   -> format
     @fmt
   -> nnz
@@ -311,12 +308,7 @@ use core/numeric/float
     @data_typed = dv
     self
 
-  -> indptr_typed
-    @indptr_typed
-  -> indices_typed
-    @indices_typed
-  -> data_typed
-    @data_typed
+  ro :indptr_typed, :indices_typed, :data_typed
 
   -> indptr_at(i)
     @indptr[i]

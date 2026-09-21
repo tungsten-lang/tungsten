@@ -736,11 +736,7 @@
       torsion.push(d) if d > 1
     FinitelyGeneratedAbelianGroup.new(matrix.size - factors.size, torsion)
 
-  -> free_rank
-    @free_rank
-
-  -> torsion
-    @torsion
+  ro :free_rank, :torsion
 
   -> rank
     @free_rank
@@ -808,32 +804,7 @@
       @rank += 1
     @certificate = nil
 
-  -> matrix
-    @matrix
-
-  -> diagonal
-    @diagonal
-
-  -> left
-    @left
-
-  -> right
-    @right
-
-  -> left_inverse
-    @left_inverse
-
-  -> right_inverse
-    @right_inverse
-
-  -> rows
-    @rows
-
-  -> cols
-    @cols
-
-  -> rank
-    @rank
+  ro :matrix, :diagonal, :left, :right, :left_inverse, :right_inverse, :rows, :cols, :rank
 
   -> invariant_factors
     out = []
@@ -992,8 +963,7 @@
   -> new(@decomposition)
     @verified_cache = nil
 
-  -> decomposition
-    @decomposition
+  ro :decomposition
 
   -> proof_kind
     :smith_normal_form_replay

@@ -99,16 +99,14 @@
     @counts = []
     @numerator = build_numerator
 
-  -> curve
-    @curve
+  ro :curve
 
   -> counts
     out = []
     @counts.each -> out.push(item)
     out
 
-  -> numerator
-    @numerator
+  ro :numerator
 
   -> denominator
     q = @curve.field.order

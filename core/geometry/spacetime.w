@@ -4,20 +4,7 @@
   -> new(@kind, @coordinate, @radius, @generator = nil,
          @description = nil)
 
-  -> kind
-    @kind
-
-  -> coordinate
-    @coordinate
-
-  -> radius
-    @radius
-
-  -> generator
-    @generator
-
-  -> description
-    @description
+  ro :kind, :coordinate, :radius, :generator, :description
 
   -> contains?(point, tolerance = ~1.0e-12)
     value = point
@@ -89,14 +76,7 @@
         "Schwarzschild Killing horizon; in the maximal extension this is the event horizon")
     ])
 
-  -> mass
-    @mass
-
-  -> chart
-    @chart
-
-  -> metric
-    @metric
+  ro :mass, :chart, :metric
 
   -> curvature
     @metric.curvature
@@ -107,8 +87,7 @@
   -> kretschmann_scalar
     self.curvature.kretschmann_scalar
 
-  -> horizons
-    @horizons
+  ro :horizons
 
   -> horizon_radius
     2 * @mass

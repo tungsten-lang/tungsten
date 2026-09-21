@@ -46,14 +46,12 @@ use core/algebra/zeta
     @y_series = coordinate_series[1]
     @antiderivatives = nil
 
-  -> antiderivatives
-    @antiderivatives
+  ro :antiderivatives
 
   -> set_antiderivatives(list)
     @antiderivatives = list
 
-  -> name
-    @name
+  ro :name
 
   # Residue disk identity: shifted centers share the key of their disk.
   -> residue_key
@@ -64,38 +62,17 @@ use core/algebra/zeta
   # :x_chart  parameter t = x - x_0, y a series in t
   # :y_chart  parameter t = y - y_0, x a series in t
   # :infinity parameter sigma = x/y at the hyperflex
-  -> kind
-    @kind
+  ro :kind
 
   -> infinity?
     @kind == :infinity
 
-  -> center_x
-    @center_x
-
-  -> center_y
-    @center_y
-
-  -> x_series
-    @x_series
-
-  -> y_series
-    @y_series
-
-  -> omega
-    @omega
-
-  -> columns
-    @columns
-
-  -> known_index
-    @known_index
+  ro :center_x, :center_y, :x_series, :y_series, :omega, :columns, :known_index
 
   -> known?
     @known_index != nil
 
-  -> zeta_tilde
-    @zeta_tilde
+  ro :zeta_tilde
 
   # Affine coordinates of the point at parameter value t (affine disks only).
   -> point_at(t)
@@ -161,17 +138,7 @@ use core/algebra/zeta
     ccall("w_eputs", "coleman: " + message) if flag != nil && flag != ""
     nil
 
-  -> model
-    @model
-
-  -> prime
-    @prime
-
-  -> precision
-    @precision
-
-  -> jacobian_order
-    @jacobian_order
+  ro :model, :prime, :precision, :jacobian_order
 
   -> pole_bound
     @w
@@ -184,8 +151,7 @@ use core/algebra/zeta
     @disks.each -> out.push(item)
     out
 
-  -> report
-    @report
+  ro :report
 
   # ---------------------------------------------------------------- terms --
 

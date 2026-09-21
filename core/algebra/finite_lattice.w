@@ -77,8 +77,7 @@
   -> size
     @elements.size
 
-  -> elements
-    @elements
+  ro :elements
 
   -> bottom
     @elements[@bottom_index]

@@ -62,17 +62,7 @@ use core/calculus/series
   -> variable
     @variable_text.to_sym
 
-  -> variable_text
-    @variable_text
-
-  -> center
-    @center
-
-  -> minimum_power
-    @minimum_power
-
-  -> maximum_power
-    @maximum_power
+  ro :variable_text, :center, :minimum_power, :maximum_power
 
   -> order
     @maximum_power

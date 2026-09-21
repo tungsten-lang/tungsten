@@ -5,8 +5,7 @@
 + GeodesicTrajectory
   -> new(@system, @raw)
 
-  -> system
-    @system
+  ro :system
 
   -> chart
     @system.metric.chart
@@ -63,8 +62,7 @@
     if @metric.class_name != "Metric"
       raise "geodesic system needs a Metric"
 
-  -> metric
-    @metric
+  ro :metric
 
   -> dimension
     @metric.dimension

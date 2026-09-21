@@ -32,8 +32,7 @@
         j += 1
       i += 1
 
-  -> order
-    @order
+  ro :order
 
   -> size
     @order
@@ -213,11 +212,7 @@
     @ordering = Combinatorics.copy_vector(ordering)
     @witness_vertices = Combinatorics.copy_vector(witness_vertices)
 
-  -> graph
-    @graph
-
-  -> claimed_degeneracy
-    @claimed_degeneracy
+  ro :graph, :claimed_degeneracy
 
   -> ordering
     Combinatorics.copy_vector(@ordering)
@@ -293,11 +288,7 @@
     if !Combinatorics.integer?(@color_count) || @color_count < inferred
       raise "color count does not cover the edge colors"
 
-  -> order
-    @order
-
-  -> color_count
-    @color_count
+  ro :order, :color_count
 
   -> color(left, right)
     @colors[left][right]

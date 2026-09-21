@@ -12,8 +12,7 @@
     ensure
       @journal = @journal + "E"
 
-  -> journal
-    @journal
+  ro :journal
 
 r = R.new
 << "result:" + r.run().to_s()

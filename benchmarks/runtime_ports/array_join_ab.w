@@ -30,8 +30,7 @@ WARMUP_ITERS = 1_000
   -> new(@label, @log, @bad_call)
     @calls = 0
 
-  -> calls
-    @calls
+  ro :calls
 
   -> to_s
     @calls = @calls + 1
@@ -45,8 +44,7 @@ WARMUP_ITERS = 1_000
   -> new(@holder, @log)
     @calls = 0
 
-  -> calls
-    @calls
+  ro :calls
 
   -> to_s
     @calls = @calls + 1

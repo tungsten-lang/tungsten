@@ -24,11 +24,7 @@
   -> certified?
     true
 
-  -> theorem
-    @theorem
-
-  -> explanation
-    @explanation
+  ro :theorem, :explanation
 
   -> to_s
     status = @principal ? "principal" : "nonprincipal"
@@ -58,14 +54,12 @@
       raise "point is not on the curve"
     @point = point
 
-  -> curve
-    @curve
+  ro :curve
 
   -> space
     @curve.space
 
-  -> point
-    @point
+  ro :point
 
   -> coordinates
     @point.coordinates
@@ -144,17 +138,12 @@
     if !certified?
       raise "closed-place presentation failed certification"
 
-  -> line
-    @line
-
-  -> curve
-    @curve
+  ro :line, :curve
 
   -> space
     @curve.space
 
-  -> parameter_chart
-    @parameter_chart
+  ro :parameter_chart
 
   -> defining_polynomial
     @factor
@@ -162,8 +151,7 @@
   -> residue_polynomial
     @factor
 
-  -> factorization
-    @factorization
+  ro :factorization
 
   -> factorization_certificate
     @factorization.certificate
@@ -425,23 +413,7 @@
     if !@certificate_cache.verified?
       raise "closed-place reduction failed certification"
 
-  -> source_place
-    @source_place
-
-  -> target_curve
-    @target_curve
-
-  -> reduced_line
-    @reduced_line
-
-  -> reduced_factor
-    @reduced_factor
-
-  -> factorization
-    @factorization
-
-  -> divisor
-    @divisor
+  ro :source_place, :target_curve, :reduced_line, :reduced_factor, :factorization, :divisor
 
   -> certificate
     @certificate_cache
@@ -453,8 +425,7 @@
 + ClosedPlaceResidueCertificate
   -> new(@place)
 
-  -> place
-    @place
+  ro :place
 
   -> field
     @place.residue_field
@@ -518,8 +489,7 @@
       term_index += 1
     compact_zero_terms
 
-  -> curve
-    @curve
+  ro :curve
 
   -> terms
     out = []

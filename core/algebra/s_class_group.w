@@ -13,8 +13,7 @@
 + NumberFieldIdealGeneratorCertificate
   -> new(@search)
 
-  -> search
-    @search
+  ro :search
 
   -> proof_kind
     :exact_principal_ideal
@@ -96,35 +95,9 @@
     if !supported
       raise "principal-generator reduction must be exact or approximate"
 
-  -> coefficient_bound
-    @coefficient_bound
-
-  -> element_limit
-    @element_limit
-
-  -> odd_power_limit
-    @odd_power_limit
-
-  -> reduction_producer
-    @reduction_producer
-
-  -> ideal_attempt_limit
-    @ideal_attempt_limit
-
-  -> total_element_limit
-    @total_element_limit
-
-  -> prime_start_index
-    @prime_start_index
-
-  -> prime_count
-    @prime_count
-
-  -> relation_anchor_index
-    @relation_anchor_index
-
-  -> minimum_odd_power
-    @minimum_odd_power
+  ro :coefficient_bound, :element_limit, :odd_power_limit, :reduction_producer, :ideal_attempt_limit
+  ro :total_element_limit, :prime_start_index, :prime_count, :relation_anchor_index
+  ro :minimum_odd_power
 
   -> use_anchored_relations?
     @use_anchored_relations
@@ -151,23 +124,12 @@
     @certificate_cache = NumberFieldIdealGeneratorCertificate.new(
       self)
 
-  -> ideal
-    @ideal
-
-  -> field
-    @field
-
-  -> generator
-    @generator
+  ro :ideal, :field, :generator
 
   -> found?
     @generator != nil
 
-  -> tested_elements
-    @tested_elements
-
-  -> reduction_producer
-    @reduction_producer
+  ro :tested_elements, :reduction_producer
 
   -> primitive_oriented_vector?(vector)
     divisor = 0
@@ -305,8 +267,7 @@
   -> new(@slice)
     @verified_cache = nil
 
-  -> slice
-    @slice
+  ro :slice
 
   -> theorem
     "Dedekind-Kummer correspondence between linear factors and degree-one primes"
@@ -488,17 +449,7 @@
       i -= 1
     value == 0
 
-  -> field
-    @field
-
-  -> prime
-    @prime
-
-  -> bound
-    @bound
-
-  -> reduced_polynomial
-    @reduced_polynomial
+  ro :field, :prime, :bound, :reduced_polynomial
 
   -> roots
     out = []
@@ -535,8 +486,7 @@
   -> new(@factor_base)
     @verified_cache = nil
 
-  -> factor_base
-    @factor_base
+  ro :factor_base
 
   -> theorem
     "Minkowski ideal-class theorem"
@@ -665,17 +615,7 @@
     if !@certificate_cache.verified?
       raise "Minkowski factor base failed certification"
 
-  -> field
-    @field
-
-  -> rational_prime_limit
-    @rational_prime_limit
-
-  -> factor_search_limit
-    @factor_search_limit
-
-  -> generator_search_limit
-    @generator_search_limit
+  ro :field, :rational_prime_limit, :factor_search_limit, :generator_search_limit
 
   -> compute_bound
     degree = @field.degree
@@ -690,8 +630,7 @@
     quotient += 1 if numerator % denominator != 0
     quotient < 1 ? 1 : quotient
 
-  -> bound
-    @bound
+  ro :bound
 
   -> enumerate_minkowski_primes
     if @minkowski_primes != nil
@@ -792,14 +731,12 @@
     if !@verified_cache
       raise "principal ideal is not supported on the displayed factor base"
 
-  -> factor_base
-    @factor_base
+  ro :factor_base
 
   -> field
     @factor_base.field
 
-  -> element
-    @element
+  ro :element
 
   -> fractional_ideal
     field.principal_fractional_ideal(@element)
@@ -896,8 +833,7 @@
   -> new(@proof)
     @verified_cache = nil
 
-  -> proof
-    @proof
+  ro :proof
 
   -> theorem
     "Minkowski generation plus an odd relation-lattice quotient"
@@ -991,8 +927,7 @@
   -> field
     @factor_base.field
 
-  -> factor_base
-    @factor_base
+  ro :factor_base
 
   -> s_primes
     @factor_base.s_primes
@@ -1030,8 +965,7 @@
       system.add_equation(row)
     system.certificate
 
-  -> rank_certificate
-    @rank_certificate
+  ro :rank_certificate
 
   -> two_torsion_trivial?
     certificate.verified?
@@ -1054,8 +988,7 @@
   -> new(@proof)
     @verified_cache = nil
 
-  -> proof
-    @proof
+  ro :proof
 
   -> theorem
     "field isomorphisms preserve localized ideal class groups"
@@ -1180,17 +1113,12 @@
     if !@certificate_cache.verified?
       raise "isomorphic S-class 2-torsion transfer failed certification"
 
-  -> source_field
-    @source_field
+  ro :source_field
 
   -> field
     @source_field
 
-  -> model_field
-    @model_field
-
-  -> model_proof
-    @model_proof
+  ro :model_field, :model_proof
 
   -> rational_primes
     out = []
@@ -1417,26 +1345,13 @@
       index += 1
     true
 
-  -> basis
-    @basis
+  ro :basis
 
   -> field
     @basis.field
 
-  -> s_class_two_torsion_proof
-    @s_class_two_torsion_proof
-
-  -> value
-    @value
-
-  -> principal_computation
-    @principal_computation
-
-  -> fractional_ideal
-    @fractional_ideal
-
-  -> coordinate_basis
-    @coordinate_basis
+  ro :s_class_two_torsion_proof, :value, :principal_computation, :fractional_ideal
+  ro :coordinate_basis
 
   -> vector
     F2LinearAlgebra.copy_vector(@vector)
@@ -1537,20 +1452,12 @@
     if !@certificate_cache.verified?
       raise "isomorphic L(2,S) coordinates failed certification"
 
-  -> basis
-    @basis
+  ro :basis
 
   -> field
     @basis.field
 
-  -> s_class_two_torsion_proof
-    @s_class_two_torsion_proof
-
-  -> value
-    @value
-
-  -> model_coordinates
-    @model_coordinates
+  ro :s_class_two_torsion_proof, :value, :model_coordinates
 
   -> vector
     F2LinearAlgebra.copy_vector(@vector)
@@ -1659,11 +1566,7 @@
       message += @tested_ideals.to_s + " ideal searches; "
       raise message + "2-torsion remains unknown"
 
-  -> field
-    @field
-
-  -> factor_base
-    @factor_base
+  ro :field, :factor_base
 
   -> relation_elements
     out = []
@@ -1684,8 +1587,7 @@
       out.push(coefficients)
     out
 
-  -> rank
-    @rank
+  ro :rank
 
   -> complete?
     @proof != nil
@@ -1693,14 +1595,7 @@
   -> require_complete?
     @require_complete
 
-  -> tested_elements
-    @tested_elements
-
-  -> tested_ideal_elements
-    @tested_ideal_elements
-
-  -> tested_ideals
-    @tested_ideals
+  ro :tested_elements, :tested_ideal_elements, :tested_ideals
 
   -> attempted_factor_base_indices
     out = []
@@ -1714,8 +1609,7 @@
       out.push(index)
     out
 
-  -> principal_relation_anchor_index
-    @principal_relation_anchor_index
+  ro :principal_relation_anchor_index
 
   -> unresolved_factor_base_indices
     out = []
@@ -2151,8 +2045,7 @@
       height += 1
     nil
 
-  -> proof
-    @proof
+  ro :proof
 
   -> result
     @proof
@@ -2178,8 +2071,7 @@
   -> new(@proof)
     @verified_cache = nil
 
-  -> proof
-    @proof
+  ro :proof
 
   -> theorem
     "class groups and S-class groups commute with finite products"
@@ -2321,8 +2213,7 @@
     if !@certificate_cache.verified?
       raise "product S-class 2-torsion proof failed certification"
 
-  -> order
-    @order
+  ro :order
 
   -> rational_primes
     out = []

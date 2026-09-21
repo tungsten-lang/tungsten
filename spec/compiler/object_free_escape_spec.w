@@ -121,8 +121,7 @@ registry = []
 + Tracked
   -> new(@id)
     registry.push(self)
-  -> id
-    @id
+  ro :id
 
 -> tracked_churn(n)
   i = 0 ## i64

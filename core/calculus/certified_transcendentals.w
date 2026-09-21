@@ -132,22 +132,14 @@ use core/numeric/rational
     if !@certificate.verified?
       raise "certified transcendental enclosure failed replay"
 
-  -> function
-    @function
+  ro :function
 
   -> arguments
     out = []
     @arguments.each -> out.push(item)
     out
 
-  -> tolerance
-    @tolerance
-
-  -> term_limit
-    @term_limit
-
-  -> interval
-    @interval
+  ro :tolerance, :term_limit, :interval
 
   -> lower_bound
     @interval.lower_bound
@@ -167,8 +159,7 @@ use core/numeric/rational
   -> approximate
     midpoint.to_f
 
-  -> certificate
-    @certificate
+  ro :certificate
 
   -> certified?
     @certificate.verified?
@@ -492,8 +483,7 @@ use core/numeric/rational
   -> new(@value)
     @verified_cache = nil
 
-  -> value
-    @value
+  ro :value
 
   -> theorem
     "exact rational transcendental enclosure with explicit series remainder"

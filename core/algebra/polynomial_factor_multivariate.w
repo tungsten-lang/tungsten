@@ -924,8 +924,7 @@
       @entries.push([entry[0], entry[1]])
     @verified_cache = nil
 
-  -> polynomial
-    @polynomial
+  ro :polynomial
 
   -> entries
     out = []

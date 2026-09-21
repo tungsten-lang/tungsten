@@ -290,20 +290,7 @@
     if !@certificate_cache.verified?
       raise "p-adic plane cell failed certification"
 
-  -> curve
-    @curve
-
-  -> prime
-    @prime
-
-  -> depth
-    @depth
-
-  -> step
-    @step
-
-  -> pivot_coordinate_index
-    @pivot_coordinate_index
+  ro :curve, :prime, :depth, :step, :pivot_coordinate_index
 
   -> local_coordinate_indices
     out = []
@@ -315,17 +302,7 @@
     @center_coordinates.each -> out.push(item)
     out
 
-  -> raw_polynomial
-    @raw_polynomial
-
-  -> primitive_polynomial
-    @primitive_polynomial
-
-  -> content_valuation
-    @content_valuation
-
-  -> reduction_polynomial
-    @reduction_polynomial
+  ro :raw_polynomial, :primitive_polynomial, :content_valuation, :reduction_polynomial
 
   -> residue_points
     out = []
@@ -483,8 +460,7 @@
     if !@certificate_cache.verified?
       raise "p-adic plane-cell refinement failed certification"
 
-  -> parent
-    @parent
+  ro :parent
 
   -> entries
     out = []
@@ -613,11 +589,7 @@
     if !@certificate_cache.verified?
       raise "p-adic plane Hensel disk failed certification"
 
-  -> parent_cell
-    @parent_cell
-
-  -> child_cell
-    @child_cell
+  ro :parent_cell, :child_cell
 
   -> curve
     @parent_cell.curve

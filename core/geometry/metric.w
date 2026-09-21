@@ -69,14 +69,12 @@
     @connection_cache = nil
     @curvature_cache = nil
 
-  -> chart
-    @chart
+  ro :chart
 
   -> dimension
     @chart.dimension
 
-  -> signature
-    @signature
+  ro :signature
 
   -> components
     Geometry.deep_copy(@components)

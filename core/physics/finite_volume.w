@@ -95,17 +95,7 @@
     @steps = 0
     @last_reconstruction_fallbacks = 0
 
-  -> sys
-    @sys
-
-  -> time
-    @time
-
-  -> steps
-    @steps
-
-  -> last_reconstruction_fallbacks
-    @last_reconstruction_fallbacks
+  ro :sys, :time, :steps, :last_reconstruction_fallbacks
 
   -> cells
     @cells.dup
@@ -117,8 +107,7 @@
     @sys.validate_direction(dir)
     @dx[dir]
 
-  -> cfl
-    @cfl
+  ro :cfl
 
   -> cfl=(value)
     next_cfl = Physics.dimensionless(value)

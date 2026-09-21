@@ -15,8 +15,7 @@
   -> new(@order)
     @verified_cache = nil
 
-  -> order
-    @order
+  ro :order
 
   -> verified?
     answer = false
@@ -61,11 +60,7 @@
       @computations.push(computation)
     @verified_cache = nil
 
-  -> source
-    @source
-
-  -> result
-    @result
+  ro :source, :result
 
   -> computations
     out = []
@@ -154,11 +149,7 @@
     if !@certificate.verified?
       raise "product maximal order failed certification"
 
-  -> source
-    @source
-
-  -> order
-    @order
+  ro :source, :order
 
   -> result
     @order
@@ -172,8 +163,7 @@
       out.push(computation)
     out
 
-  -> certificate
-    @certificate
+  ro :certificate
 
   -> certified?
     @certificate.verified?
@@ -236,20 +226,12 @@
     if !@certificate_cache.verified?
       raise "order ideal failed certification"
 
-  -> order
-    @order
+  ro :order
 
   -> algebra
     @order.algebra
 
-  -> lattice
-    @lattice
-
-  -> kind
-    @kind
-
-  -> prime
-    @prime
+  ro :lattice, :kind, :prime
 
   -> basis_vectors
     @lattice.basis_vectors
@@ -321,11 +303,7 @@
       i += 1
     AlgebraOrder.new(monogenic_order.algebra, basis)
 
-  -> algebra
-    @algebra
-
-  -> lattice
-    @lattice
+  ro :algebra, :lattice
 
   -> rank
     @lattice.rank
@@ -723,17 +701,7 @@
   -> new(@source, @prime, @radical, @result)
     @verified_cache = nil
 
-  -> source
-    @source
-
-  -> prime
-    @prime
-
-  -> radical
-    @radical
-
-  -> result
-    @result
+  ro :source, :prime, :radical, :result
 
   -> verified?
     answer = false
@@ -793,14 +761,7 @@
   -> new(@source, @prime, @result)
     @verified_cache = nil
 
-  -> source
-    @source
-
-  -> prime
-    @prime
-
-  -> result
-    @result
+  ro :source, :prime, :result
 
   -> verified?
     answer = false
@@ -893,14 +854,7 @@
     if verify_certificate && !@certificate.verified?
       raise "p-maximal order failed certification"
 
-  -> source
-    @source
-
-  -> prime
-    @prime
-
-  -> order
-    @order
+  ro :source, :prime, :order
 
   -> result
     @order
@@ -919,8 +873,7 @@
   -> step_count
     @step_indices.size
 
-  -> certificate
-    @certificate
+  ro :certificate
 
   -> certified?
     @certificate.verified?
@@ -944,14 +897,7 @@
       @local_computations.push(computation)
     @verified_cache = nil
 
-  -> source
-    @source
-
-  -> result
-    @result
-
-  -> initial_order
-    @initial_order
+  ro :source, :result, :initial_order
 
   -> factors
     out = []
@@ -1093,11 +1039,7 @@
     if !@certificate.verified?
       raise "maximal order failed certification"
 
-  -> source
-    @source
-
-  -> order
-    @order
+  ro :source, :order
 
   -> result
     @order
@@ -1117,8 +1059,7 @@
       out.push(computation)
     out
 
-  -> certificate
-    @certificate
+  ro :certificate
 
   -> certified?
     @certificate.verified?

@@ -327,8 +327,7 @@ TENSOR_EW = {}
 
   # Unit annotation (nil = untyped). Set at zeros_unit / zeros_like; views
   # and reshape/permute/slice carry the same unit string.
-  -> unit
-    @unit
+  ro :unit
   -> unit=(u)
     @unit = u
     self

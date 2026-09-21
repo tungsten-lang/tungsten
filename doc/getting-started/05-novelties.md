@@ -181,7 +181,9 @@ This is why the Point examples in the README look like notebook math.
   -> new(@x, @y) ro          # readers only
 ```
 
-Standalone `ro :name` / `rw :breed` also exist *(compiled)*.
+Standalone `ro :name, :sound` / `rw :breed` declare accessors for any field, on
+every engine. Never hand-write `-> name` / `@name` — that is Ruby, and `ro :name`
+is the same method.
 
 ---
 

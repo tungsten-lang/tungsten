@@ -12,8 +12,7 @@ use ../../core/string_buffer
   -> new(@label, @log)
     @calls = 0
 
-  -> calls
-    @calls
+  ro :calls
 
   -> to_s
     @calls += 1
@@ -25,8 +24,7 @@ use ../../core/string_buffer
   -> new(@holder, @log)
     @calls = 0
 
-  -> calls
-    @calls
+  ro :calls
 
   -> to_s
     @calls += 1

@@ -247,8 +247,7 @@
     factors.each -> @factors.push(item)
     @verified_cache = nil
 
-  -> polynomial
-    @polynomial
+  ro :polynomial
 
   -> factors
     out = []
@@ -314,8 +313,7 @@
     if !@certificate_cache.verified?
       raise "polynomial factorization certificate failed"
 
-  -> polynomial
-    @polynomial
+  ro :polynomial
 
   -> factors
     out = []

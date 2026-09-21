@@ -49,17 +49,12 @@
         mode*(mode + 1)/(@radius*@radius) -
         mass*6/(@radius*@radius*@radius)))
 
-  -> mass
-    @mass
-
-  -> angular_mode
-    @angular_mode
+  ro :mass, :angular_mode
 
   -> horizon_radius
     2 * @mass
 
-  -> expression
-    @expression
+  ro :expression
 
   -> potential_expression
     @expression

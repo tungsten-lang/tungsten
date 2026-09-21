@@ -82,8 +82,7 @@
     if !@certificate_cache.verified?
       raise "C_ab effective point divisor failed certification"
 
-  -> model
-    @model
+  ro :model
 
   -> points
     out = []
@@ -284,11 +283,7 @@
     if !@certificate_cache.verified?
       raise "C_ab effective place divisor failed certification"
 
-  -> model
-    @model
-
-  -> formal_divisor
-    @formal_divisor
+  ro :model, :formal_divisor
 
   -> places
     out = []
@@ -407,11 +402,7 @@
     if !@certificate_cache.verified?
       raise "C_ab place evaluation kernel failed certification"
 
-  -> space
-    @space
-
-  -> divisor
-    @divisor
+  ro :space, :divisor
 
   -> evaluation_matrix
     out = []
@@ -426,8 +417,7 @@
       row += 1
     out
 
-  -> subspace
-    @subspace
+  ro :subspace
 
   -> dimension
     @subspace.dimension
@@ -501,17 +491,7 @@
     if !@certificate_cache.verified?
       raise "C_ab place divisor space failed certification"
 
-  -> space
-    @space
-
-  -> divisor
-    @divisor
-
-  -> evaluation_kernel
-    @evaluation_kernel
-
-  -> function_subspace
-    @function_subspace
+  ro :space, :divisor, :evaluation_kernel, :function_subspace
 
   -> dimension
     @function_subspace.dimension
@@ -596,17 +576,7 @@
     if !@certificate_cache.verified?
       raise "C_ab divisor space failed certification"
 
-  -> space
-    @space
-
-  -> divisor
-    @divisor
-
-  -> evaluation_kernel
-    @evaluation_kernel
-
-  -> function_subspace
-    @function_subspace
+  ro :space, :divisor, :evaluation_kernel, :function_subspace
 
   -> dimension
     @function_subspace.dimension
@@ -711,17 +681,7 @@
     if !@certificate_cache.verified?
       raise "Khuri-Makdisi representative failed certification"
 
-  -> model
-    @model
-
-  -> divisor
-    @divisor
-
-  -> base_degree
-    @base_degree
-
-  -> divisor_space
-    @divisor_space
+  ro :model, :divisor, :base_degree, :divisor_space
 
   -> function_subspace
     @divisor_space.function_subspace
@@ -820,20 +780,7 @@
     if !@certificate_cache.verified?
       raise "Khuri-Makdisi product did not fill the expected divisor space"
 
-  -> left
-    @left
-
-  -> right
-    @right
-
-  -> combined_divisor
-    @combined_divisor
-
-  -> function_subspace
-    @function_subspace
-
-  -> expected_divisor_space
-    @expected_divisor_space
+  ro :left, :right, :combined_divisor, :function_subspace, :expected_divisor_space
 
   -> dimension
     @function_subspace.dimension
@@ -912,14 +859,7 @@
     if !@certificate_cache.verified?
       raise "Khuri-Makdisi zero representation failed certification"
 
-  -> model
-    @model
-
-  -> base_degree
-    @base_degree
-
-  -> function_subspace
-    @function_subspace
+  ro :model, :base_degree, :function_subspace
 
   -> dimension
     @function_subspace.dimension
@@ -1083,23 +1023,7 @@
     if !@certificate_cache.verified?
       raise "affine Khuri-Makdisi zero failed certification"
 
-  -> model
-    @model
-
-  -> base_degree
-    @base_degree
-
-  -> principal_function
-    @principal_function
-
-  -> divisor
-    @divisor
-
-  -> representative
-    @representative
-
-  -> function_subspace
-    @function_subspace
+  ro :model, :base_degree, :principal_function, :divisor, :representative, :function_subspace
 
   -> dimension
     @function_subspace.dimension
@@ -1236,11 +1160,7 @@
   -> valid_input?(candidate)
     CAbKhuriMakdisiArithmetic.affine_element?(candidate)
 
-  -> left
-    @left
-
-  -> right
-    @right
+  ro :left, :right
 
   -> model
     @left.model
@@ -1248,23 +1168,8 @@
   -> base_degree
     @left.base_degree
 
-  -> product_subspace
-    @product_subspace
-
-  -> section_subspace
-    @section_subspace
-
-  -> chosen_section
-    @chosen_section
-
-  -> section_multiple_subspace
-    @section_multiple_subspace
-
-  -> division
-    @division
-
-  -> function_subspace
-    @function_subspace
+  ro :product_subspace, :section_subspace, :chosen_section, :section_multiple_subspace, :division
+  ro :function_subspace
 
   -> dimension
     @function_subspace.dimension
@@ -1371,23 +1276,7 @@
     if !@certificate_cache.verified?
       raise "Khuri-Makdisi difference failed certification"
 
-  -> left
-    @left
-
-  -> right
-    @right
-
-  -> affine_zero
-    @affine_zero
-
-  -> negative_right
-    @negative_right
-
-  -> negative_difference
-    @negative_difference
-
-  -> result
-    @result
+  ro :left, :right, :affine_zero, :negative_right, :negative_difference, :result
 
   -> model
     @left.model
@@ -1509,35 +1398,8 @@
     if !@certificate_cache.verified?
       raise "padded Khuri-Makdisi place difference failed certification"
 
-  -> model
-    @model
-
-  -> positive_divisor
-    @positive_divisor
-
-  -> negative_divisor
-    @negative_divisor
-
-  -> padding_divisor
-    @padding_divisor
-
-  -> affine_zero
-    @affine_zero
-
-  -> left_divisor
-    @left_divisor
-
-  -> right_divisor
-    @right_divisor
-
-  -> left_representative
-    @left_representative
-
-  -> right_representative
-    @right_representative
-
-  -> difference
-    @difference
+  ro :model, :positive_divisor, :negative_divisor, :padding_divisor, :affine_zero, :left_divisor
+  ro :right_divisor, :left_representative, :right_representative, :difference
 
   -> function_subspace
     @difference.function_subspace
@@ -1648,20 +1510,7 @@
     if !@certificate_cache.verified?
       raise "Khuri-Makdisi sum failed certification"
 
-  -> left
-    @left
-
-  -> right
-    @right
-
-  -> affine_zero
-    @affine_zero
-
-  -> negative_sum
-    @negative_sum
-
-  -> result
-    @result
+  ro :left, :right, :affine_zero, :negative_sum, :result
 
   -> model
     @left.model
@@ -1756,11 +1605,7 @@
     if !@certificate_cache.verified?
       raise "Khuri-Makdisi zero test failed certification"
 
-  -> element
-    @element
-
-  -> witness_subspace
-    @witness_subspace
+  ro :element, :witness_subspace
 
   -> witness
     return nil if !@zero
@@ -1833,17 +1678,7 @@
     if !@certificate_cache.verified?
       raise "Khuri-Makdisi equality failed certification"
 
-  -> left
-    @left
-
-  -> right
-    @right
-
-  -> difference
-    @difference
-
-  -> zero_test
-    @zero_test
+  ro :left, :right, :difference, :zero_test
 
   -> equal?
     @equal
@@ -1987,14 +1822,7 @@
     if !@certificate_cache.verified?
       raise "Khuri-Makdisi scalar multiplication failed certification"
 
-  -> element
-    @element
-
-  -> scalar
-    @scalar
-
-  -> affine_zero
-    @affine_zero
+  ro :element, :scalar, :affine_zero
 
   -> trace
     out = []
@@ -2007,8 +1835,7 @@
       index += 1
     out
 
-  -> result
-    @result
+  ro :result
 
   -> model
     @element.model
@@ -2148,20 +1975,7 @@
     if !@certificate_cache.verified?
       raise "Khuri-Makdisi order failed certification"
 
-  -> element
-    @element
-
-  -> affine_zero
-    @affine_zero
-
-  -> group_order
-    @group_order
-
-  -> order
-    @order
-
-  -> annihilator
-    @annihilator
+  ro :element, :affine_zero, :group_order, :order, :annihilator
 
   -> minimality_witnesses
     out = []
@@ -2265,8 +2079,7 @@
     if !@certificate_cache.verified?
       raise "finite KM nondivisibility failed certification"
 
-  -> order_computation
-    @order_computation
+  ro :order_computation
 
   -> primes
     out = []

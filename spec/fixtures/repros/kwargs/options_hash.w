@@ -7,8 +7,7 @@
     @tls_config = {enabled: true, auto: false}
   -> tls(options = {})
     @tls_config = {enabled: true}.merge(options)
-  -> tls_config
-    @tls_config
+  ro :tls_config
 
 c = Config.new
 c.tls(auto: true)

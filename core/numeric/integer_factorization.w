@@ -15,11 +15,7 @@
     raise "PrimePower: base must be prime" if !@prime.prime?
     raise "PrimePower: exponent must be positive" if @exponent < 1
 
-  -> prime
-    @prime
-
-  -> exponent
-    @exponent
+  ro :prime, :exponent
 
   -> value
     @prime ** @exponent
@@ -78,11 +74,7 @@
     @factors.push(PrimePower.new(prime, exponent))
     remaining
 
-  -> number
-    @number
-
-  -> sign
-    @sign
+  ro :number, :sign
 
   -> size
     @factors.size

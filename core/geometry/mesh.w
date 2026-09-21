@@ -94,8 +94,7 @@ use core/geometry/mesh_topology
   -> __face_corner(face, corner)
     @faces[face][corner]
 
-  -> dimension
-    @dimension
+  ro :dimension
 
   -> vertex_count
     @vertices.size

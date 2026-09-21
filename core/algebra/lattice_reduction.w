@@ -196,8 +196,7 @@
   -> new(@reduction)
     @verified_cache = nil
 
-  -> reduction
-    @reduction
+  ro :reduction
 
   -> proof_kind
     :exact_lll
@@ -445,11 +444,7 @@
   -> transformation
     copy_integer_matrix(@transformation)
 
-  -> delta
-    @delta
-
-  -> producer
-    @producer
+  ro :delta, :producer
 
   -> gram_schmidt_coefficients
     copy_rational_matrix(@gram_schmidt_coefficients)
@@ -755,11 +750,7 @@
   -> completed?
     @completed
 
-  -> step_limit
-    @step_limit
-
-  -> steps
-    @steps
+  ro :step_limit, :steps
 
   -> reduced_basis
     out = []

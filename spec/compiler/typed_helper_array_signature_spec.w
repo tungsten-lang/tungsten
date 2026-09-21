@@ -8,8 +8,7 @@
   -> new(value)
     @value = value
 
-  -> value
-    @value
+  ro :value
 
 -> typed_signature_target(box, values, leaves) (TypedSignatureBox i64[] Array) i64
   box.value() + values[0] + leaves[0]

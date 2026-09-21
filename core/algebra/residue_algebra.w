@@ -169,14 +169,7 @@
       column += 1
     @dimension = @free_columns.size
 
-  -> ambient_dimension
-    @ambient_dimension
-
-  -> prime
-    @prime
-
-  -> dimension
-    @dimension
+  ro :ambient_dimension, :prime, :dimension
 
   -> pivots
     out = []
@@ -269,8 +262,7 @@
   -> new(@residue_algebra)
     @verified_cache = nil
 
-  -> residue_algebra
-    @residue_algebra
+  ro :residue_algebra
 
   -> verified?
     answer = false
@@ -386,17 +378,7 @@
     if !@certificate_cache.verified?
       raise "reduced residue algebra failed certification"
 
-  -> order
-    @order
-
-  -> prime
-    @prime
-
-  -> radical
-    @radical
-
-  -> quotient
-    @quotient
+  ro :order, :prime, :radical, :quotient
 
   -> dimension
     @quotient.dimension

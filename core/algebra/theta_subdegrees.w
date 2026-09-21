@@ -18,14 +18,7 @@
     if !verified?
       raise "shell-width theta subdegree certificate failed"
 
-  -> scheme_certificate
-    @scheme_certificate
-
-  -> base_field
-    @base_field
-
-  -> relative_projection
-    @relative_projection
+  ro :scheme_certificate, :base_field, :relative_projection
 
   -> relative_factors
     out = []
@@ -341,8 +334,7 @@
   -> subdegree_certificate
     @subdegrees
 
-  -> identification
-    @identification
+  ro :identification
 
   -> identified_candidate
     @identification.identified_candidate
@@ -397,8 +389,7 @@
       @bitangent_scheme_certificate)
     @theta_subdegree_certificate
 
-  -> theta_subdegree_certificate
-    @theta_subdegree_certificate
+  ro :theta_subdegree_certificate
 
   -> certify_theta_galois_subgroup
     if @theta_subdegree_certificate == nil
@@ -407,5 +398,4 @@
       @theta_subdegree_certificate)
     @theta_galois_certificate
 
-  -> theta_galois_certificate
-    @theta_galois_certificate
+  ro :theta_galois_certificate

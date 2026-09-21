@@ -20,11 +20,7 @@
   -> .var(v)
     Dual.new(v, ~1.0)
 
-  -> value
-    @value
-
-  -> eps
-    @eps
+  ro :value, :eps
 
   -> +(other)
     if other.class_name == "Dual"
@@ -371,10 +367,7 @@
     if @index < 0 || @index >= @tape.size
       raise "TapeValue index out of range"
     self
-  -> tape
-    @tape
-  -> index
-    @index
+  ro :tape, :index
   -> value
     @tape.value(@index)
   -> coerce(other)

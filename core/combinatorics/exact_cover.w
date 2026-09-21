@@ -62,11 +62,7 @@
     @right[previous] = 0
     @left[0] = previous
 
-  -> column_count
-    @column_count
-
-  -> row_count
-    @row_count
+  ro :column_count, :row_count
 
   # Append a row covering the given column indices (1-based). Returns the
   # row id, which is what `solve` reports back.

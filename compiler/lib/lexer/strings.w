@@ -591,40 +591,28 @@
   # (compiler/lib/parser.w) reads this as its second arg so token-
   # method-migrated parser sites can dispatch on tok.type integer
   # ids instead of hash subscripts.
-  -> packed_tokens
-    @packed_tokens
+  ro :packed_tokens
 
   # Accessor for the parallel values Array — the pre-parsed value field
   # (mirroring the hash's :value slot). Parser.new takes this as its
   # 4th arg so AST-construction sites can read @values[idx] instead of
   # reaching through the hash.
-  -> values
-    @values
+  ro :values
 
   # Token count populated by tokenize() — Parser.new takes this as
   # its first arg in place of the legacy `tokens` Array.
-  -> token_count
-    @token_count
+  ro :token_count
 
-  -> source
-    @source
-
-  -> file
-    @file
+  ro :source, :file
 
   # @chars is the source split into a codepoint Array (UTF-8 aware).
   # The packed token's `off` bits index into this array, NOT into the
   # raw byte source. Parser.tok_equal? walks @chars[off..off+len] to
   # do codepoint-correct comparison; @source.slice would use byte
   # indices and skew on multi-byte characters (e.g. em-dashes).
-  -> chars
-    @chars
+  ro :chars
 
-  -> line_at
-    @line_at
-
-  -> col_at
-    @col_at
+  ro :line_at, :col_at
 
   -> tokenize
     @packed_tokens = []

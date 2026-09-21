@@ -69,8 +69,7 @@
   -> top_degree
     @dimensions.size - 1
 
-  -> dimensions
-    @dimensions
+  ro :dimensions
 
   -> dimension(k)
     return 0 if k < 0 || k > top_degree
@@ -231,8 +230,7 @@
   -> new(@complex)
     @verified_cache = nil
 
-  -> complex
-    @complex
+  ro :complex
 
   -> proof_kind
     :smith_normal_form_homology

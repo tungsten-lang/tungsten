@@ -32,14 +32,7 @@
     raise "projective pair has no SL2 lift" if bezout[0] != 1
     [bezout[2], 0 - bezout[1], lift[0], lift[1]]
 
-  -> source_group
-    @source_group
-
-  -> target_group
-    @target_group
-
-  -> target_line
-    @target_line
+  ro :source_group, :target_group, :target_line
 
   -> matrices
     out = []
@@ -55,8 +48,7 @@
   -> size
     @matrices.size
 
-  -> certificate
-    @certificate
+  ro :certificate
 
   -> certified?
     @certificate.verified?
@@ -74,8 +66,7 @@
   -> new(@cosets)
     @verified_cache = nil
 
-  -> cosets
-    @cosets
+  ro :cosets
 
   -> theorem
     "Gamma_0(N) cosets in Gamma_0(M) are constrained projective rows"
@@ -154,17 +145,7 @@
     @certificate = WeightTwoDegeneracyMapCertificate.new(self)
     raise "weight-two degeneracy-map certificate failed" if !@certificate.verified?
 
-  -> source
-    @source
-
-  -> target
-    @target
-
-  -> prime
-    @prime
-
-  -> cosets
-    @cosets
+  ro :source, :target, :prime, :cosets
 
   -> produce_relative_one
     target_generators = @target.manin_generators_to_basis
@@ -223,8 +204,7 @@
   -> cuspidal_matrix_prime
     ModularSymbolsLinearAlgebra.copy_matrix(@cuspidal_prime)
 
-  -> certificate
-    @certificate
+  ro :certificate
 
   -> certified?
     @certificate.verified?
@@ -241,8 +221,7 @@
   -> new(@map)
     @verified_cache = nil
 
-  -> map
-    @map
+  ro :map
 
   -> theorem
     "the two prime-level degeneracy maps on weight-two modular symbols"
@@ -318,8 +297,7 @@
     @certificate = WeightTwoOldNewCertificate.new(self)
     raise "weight-two old/new certificate failed" if !@certificate.verified?
 
-  -> space
-    @space
+  ro :space
 
   -> degeneracy_maps
     out = []
@@ -372,8 +350,7 @@
       raise "old/new Hecke characteristic polynomials do not compose"
     polynomial
 
-  -> certificate
-    @certificate
+  ro :certificate
 
   -> certified?
     @certificate.verified?
@@ -391,8 +368,7 @@
   -> new(@decomposition)
     @verified_cache = nil
 
-  -> decomposition
-    @decomposition
+  ro :decomposition
 
   -> theorem
     "Atkin-Lehner-Li old/new decomposition over Q"

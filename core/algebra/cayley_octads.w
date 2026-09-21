@@ -60,8 +60,7 @@
   -> new(@representation)
     @verified_cache = nil
 
-  -> representation
-    @representation
+  ro :representation
 
   -> verified?
     return @verified_cache if @verified_cache != nil
@@ -132,8 +131,7 @@
     @determinant_scalar_cache = nil
     @certificate_cache = PlaneQuarticSymmetricDeterminantalRepresentationCertificate.new(self)
 
-  -> curve
-    @curve
+  ro :curve
 
   -> matrices
     out = []
@@ -228,8 +226,7 @@
   -> new(@bitangent_matrix)
     @verified_cache = nil
 
-  -> bitangent_matrix
-    @bitangent_matrix
+  ro :bitangent_matrix
 
   -> verified?
     return @verified_cache if @verified_cache != nil
@@ -293,8 +290,7 @@
     @bitangent_matrix_cache = nil
     @certificate_cache = CayleyOctadBitangentMatrixCertificate.new(self)
 
-  -> representation
-    @representation
+  ro :representation
 
   -> curve
     @representation.curve
@@ -550,8 +546,7 @@
   -> new(@net)
     @verified_cache = nil
 
-  -> net
-    @net
+  ro :net
 
   -> verified?
     return @verified_cache if @verified_cache != nil
@@ -608,8 +603,7 @@
     @points.each -> out.push(item)
     out
 
-  -> parameter_space
-    @parameter_space
+  ro :parameter_space
 
   -> field
     @parameter_space.field
@@ -812,14 +806,7 @@
     @representation_cache = nil
     @certificate_cache = TraceZeroEtaleCayleyOctadCertificate.new(self)
 
-  -> polynomial
-    @polynomial
-
-  -> parameter_space
-    @parameter_space
-
-  -> etale_algebra
-    @etale_algebra
+  ro :polynomial, :parameter_space, :etale_algebra
 
   -> components
     out = []

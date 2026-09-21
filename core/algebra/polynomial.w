@@ -18,17 +18,7 @@
 
   -> new(@name, @split, @left, @right)
 
-  -> name
-    @name
-
-  -> split
-    @split
-
-  -> left
-    @left
-
-  -> right
-    @right
+  ro :name, :split, :left, :right
 
   -> .named(value)
     return MonomialOrder.new("grevlex") if value == nil
@@ -231,8 +221,7 @@
       i += 1
     nil
 
-  -> pf_workspace
-    @pf_workspace
+  ro :pf_workspace
 
   -> pf_workspace_store(ws)
     @pf_workspace = ws
@@ -1119,8 +1108,7 @@
   # Packed-form cache for the typed reduction lane (nil = not converted,
   # false = not encodable, otherwise the cached form). Sound because
   # polynomials are immutable.
-  -> pf_cache
-    @pf_cache
+  ro :pf_cache
 
   -> pf_cache_store(v)
     @pf_cache = v

@@ -294,8 +294,7 @@
     if !@certificate_cache.verified?
       raise "implicit p-adic residue disk failed certification"
 
-  -> residue_disk
-    @residue_disk
+  ro :residue_disk
 
   -> curve
     @residue_disk.curve
@@ -314,40 +313,15 @@
     @center_coordinates.each -> out.push(item)
     out
 
-  -> pivot_coordinate_index
-    @pivot_coordinate_index
-
-  -> solved_coordinate_index
-    @solved_coordinate_index
-
-  -> free_coordinate_index
-    @free_coordinate_index
+  ro :pivot_coordinate_index, :solved_coordinate_index, :free_coordinate_index
 
   -> free_digits
     out = []
     @free_digits.each -> out.push(item)
     out
 
-  -> depth
-    @depth
-
-  -> free_step
-    @free_step
-
-  -> source_value
-    @source_value
-
-  -> solved_derivative
-    @solved_derivative
-
-  -> free_variation_polynomial
-    @free_variation_polynomial
-
-  -> solved_valuation
-    @solved_valuation
-
-  -> solved_unit_residue
-    @solved_unit_residue
+  ro :depth, :free_step, :source_value, :solved_derivative, :free_variation_polynomial
+  ro :solved_valuation, :solved_unit_residue
 
   -> certificate
     @certificate_cache
@@ -380,11 +354,7 @@
     if !@reduction_curve.contains?(@reduction_point)
       raise "p-adic residue point is not on the reduced curve"
 
-  -> curve
-    @curve
-
-  -> padic_field
-    @padic_field
+  ro :curve, :padic_field
 
   -> prime
     @padic_field.prime
@@ -392,11 +362,7 @@
   -> precision
     @padic_field.precision
 
-  -> reduction_curve
-    @reduction_curve
-
-  -> reduction_point
-    @reduction_point
+  ro :reduction_curve, :reduction_point
 
   -> coordinates
     @reduction_point.coordinates
@@ -495,20 +461,7 @@
     if !@certificate_cache.verified?
       raise "p-adic residue-disk cover failed certification"
 
-  -> curve
-    @curve
-
-  -> prime
-    @prime
-
-  -> precision
-    @precision
-
-  -> padic_field
-    @padic_field
-
-  -> reduction_curve
-    @reduction_curve
+  ro :curve, :prime, :precision, :padic_field, :reduction_curve
 
   -> disks
     out = []
@@ -543,8 +496,7 @@
     @failure_reason = reason
     false
 
-  -> failure_reason
-    @failure_reason
+  ro :failure_reason
 
   -> theorem
     "every smooth special-fiber point defines a nonempty p-adic residue disk"
@@ -657,20 +609,7 @@
       raise ("p-adic smooth-locus cover failed certification: " +
              @certificate_cache.failure_reason.to_s)
 
-  -> curve
-    @curve
-
-  -> prime
-    @prime
-
-  -> precision
-    @precision
-
-  -> padic_field
-    @padic_field
-
-  -> reduction_curve
-    @reduction_curve
+  ro :curve, :prime, :precision, :padic_field, :reduction_curve
 
   -> special_fiber_points
     out = []

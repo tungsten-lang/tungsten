@@ -184,11 +184,7 @@ use ../search
       @points.push(value)
       i += 1
 
-  -> prime
-    @prime
-
-  -> target_fibre
-    @target_fibre
+  ro :prime, :target_fibre
 
   -> points
     metaflip_search_copy_values(@points)

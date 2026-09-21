@@ -246,8 +246,7 @@
 + PartialDixmierOhnoInvariants
   -> new(@i27)
 
-  -> i27
-    @i27
+  ro :i27
 
   -> last
     @i27

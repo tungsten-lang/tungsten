@@ -110,8 +110,7 @@ check("generic empty true", EachOnly.new([]).empty?)
   -> new(@items)
     @visits = 0
 
-  -> visits
-    @visits
+  ro :visits
 
   -> each(&block)
     index = 0
@@ -168,8 +167,7 @@ check("source empty visits", counting.visits == 1)
   -> new(@pairs)
     @visits = 0
 
-  -> visits
-    @visits
+  ro :visits
 
   -> __enumerable_iteration_mode
     2
@@ -210,8 +208,7 @@ check("pair source take visits", pair_source.visits == 2)
   -> new
     @visits = 0
 
-  -> visits
-    @visits
+  ro :visits
 
   -> each(&block)
     item = 0

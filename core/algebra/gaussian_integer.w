@@ -51,11 +51,7 @@
     [GaussianInteger.new(1, 0), GaussianInteger.new(0, 1),
      GaussianInteger.new(0 - 1, 0), GaussianInteger.new(0, 0 - 1)]
 
-  -> re
-    @re
-
-  -> im
-    @im
+  ro :re, :im
 
   -> zero?
     @re == 0 && @im == 0

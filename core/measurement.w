@@ -67,44 +67,19 @@
 
   # Explicit readers are intentional: `rw` data declarations describe the
   # layout but are not accessor generation in every Tungsten engine.
-  -> value
-    @value
+  ro :value
 
-  -> uncertainty
-    @uncertainty
+  ro :uncertainty
 
   -> standard_uncertainty
     @uncertainty
 
-  -> lower_uncertainty
-    @lower_uncertainty
-
-  -> upper_uncertainty
-    @upper_uncertainty
-
-  -> coverage_factor
-    @coverage_factor
-
-  -> confidence
-    @confidence
-
-  -> degrees_of_freedom
-    @degrees_of_freedom
+  ro :lower_uncertainty, :upper_uncertainty, :coverage_factor, :confidence, :degrees_of_freedom
 
   -> provenance
     @provenance.dup
 
-  -> random_uncertainty
-    @random_uncertainty
-
-  -> systematic_uncertainty
-    @systematic_uncertainty
-
-  -> correlation_peer
-    @correlation_peer
-
-  -> correlation_coefficient
-    @correlation_coefficient
+  ro :random_uncertainty, :systematic_uncertainty, :correlation_peer, :correlation_coefficient
 
   -> .measurement?(value)
     value.class_name == "Measurement"

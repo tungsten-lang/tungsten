@@ -14,8 +14,7 @@
   -> new(@residue_map)
     @verified_cache = nil
 
-  -> residue_map
-    @residue_map
+  ro :residue_map
 
   -> verified?
     answer = false
@@ -137,14 +136,7 @@
     if !@certificate_cache.verified?
       raise "residue-field map failed certification"
 
-  -> residue_algebra
-    @residue_algebra
-
-  -> order
-    @order
-
-  -> prime
-    @prime
+  ro :residue_algebra, :order, :prime
 
   -> idempotent
     out = []
@@ -152,11 +144,7 @@
       out.push(entry)
     out
 
-  -> residue_degree
-    @residue_degree
-
-  -> field
-    @field
+  ro :residue_degree, :field
 
   -> generator
     out = []
@@ -164,8 +152,7 @@
       out.push(entry)
     out
 
-  -> minimal_polynomial
-    @minimal_polynomial
+  ro :minimal_polynomial
 
   -> component_basis
     out = []
@@ -341,20 +328,7 @@
       finite_ring).monic
     @factor = finite_ring.generator(0) - @root
 
-  -> maximal_order_computation
-    @maximal_order_computation
-
-  -> prime
-    @prime
-
-  -> root
-    @root
-
-  -> polynomial
-    @polynomial
-
-  -> factor
-    @factor
+  ro :maximal_order_computation, :prime, :root, :polynomial, :factor
 
   -> polynomial_zero_at_root?
     coefficients = @polynomial.coefficients
@@ -400,8 +374,7 @@
   -> new(@residue_map)
     @verified_cache = nil
 
-  -> residue_map
-    @residue_map
+  ro :residue_map
 
   -> verified?
     answer = false
@@ -588,35 +561,8 @@
     if !@certificate_cache.verified?
       raise "Dedekind residue-field map failed certification"
 
-  -> maximal_order_computation
-    @maximal_order_computation
-
-  -> order
-    @order
-
-  -> source_order
-    @source_order
-
-  -> prime
-    @prime
-
-  -> factor
-    @factor
-
-  -> factorization
-    @factorization
-
-  -> root_certificate
-    @root_certificate
-
-  -> residue_degree
-    @residue_degree
-
-  -> field
-    @field
-
-  -> root
-    @root
+  ro :maximal_order_computation, :order, :source_order, :prime, :factor, :factorization
+  ro :root_certificate, :residue_degree, :field, :root
 
   -> rational_mod_prime(value)
     rational = Rational.coerce(value)
@@ -744,8 +690,7 @@
   -> new(@prime_ideal)
     @verified_cache = nil
 
-  -> prime_ideal
-    @prime_ideal
+  ro :prime_ideal
 
   -> verified?
     answer = false
@@ -814,17 +759,12 @@
     if !@certificate_cache.verified?
       raise "prime ideal failed certification"
 
-  -> order
-    @order
+  ro :order
 
   -> algebra
     @order.algebra
 
-  -> residue_map
-    @residue_map
-
-  -> lattice
-    @lattice
+  ro :residue_map, :lattice
 
   -> rational_prime
     @residue_map.prime
@@ -835,8 +775,7 @@
   -> residue_degree
     @residue_map.residue_degree
 
-  -> ramification_index
-    @ramification_index
+  ro :ramification_index
 
   -> norm
     residue_field.order
@@ -908,8 +847,7 @@
   -> new(@decomposition)
     @verified_cache = nil
 
-  -> decomposition
-    @decomposition
+  ro :decomposition
 
   -> theorem
     "Dedekind factorization theorem away from the power-order index"
@@ -1067,17 +1005,7 @@
     if @distinct_factors.size == 0
       raise "Dedekind factorization has no nonconstant factors"
 
-  -> maximal_order_computation
-    @maximal_order_computation
-
-  -> order
-    @order
-
-  -> prime
-    @prime
-
-  -> factorization
-    @factorization
+  ro :maximal_order_computation, :order, :prime, :factorization
 
   -> distinct_factors
     out = []
@@ -1145,8 +1073,7 @@
   -> new(@decomposition)
     @verified_cache = nil
 
-  -> decomposition
-    @decomposition
+  ro :decomposition
 
   -> verified?
     answer = false
@@ -1240,17 +1167,7 @@
     if !@certificate_cache.verified?
       raise "prime decomposition failed certification"
 
-  -> order
-    @order
-
-  -> prime
-    @prime
-
-  -> p_maximality_certificate
-    @p_maximality_certificate
-
-  -> residue_algebra
-    @residue_algebra
+  ro :order, :prime, :p_maximality_certificate, :residue_algebra
 
   -> prime_ideals
     out = []
@@ -1388,11 +1305,7 @@
     if !@certificate_cache.verified?
       raise "number-field prime ideal failed certification"
 
-  -> field
-    @field
-
-  -> algebra_prime_ideal
-    @algebra_prime_ideal
+  ro :field, :algebra_prime_ideal
 
   -> rational_prime
     @algebra_prime_ideal.rational_prime
@@ -1476,14 +1389,12 @@
     if !certified?
       raise "number-field prime decomposition failed certification"
 
-  -> field
-    @field
+  ro :field
 
   -> prime
     @algebra_decomposition.prime
 
-  -> algebra_decomposition
-    @algebra_decomposition
+  ro :algebra_decomposition
 
   -> prime_ideals
     out = []
@@ -1646,14 +1557,7 @@
     if !certificate.verified?
       raise "product prime ideal failed certification"
 
-  -> order
-    @order
-
-  -> component_index
-    @component_index
-
-  -> component_prime_ideal
-    @component_prime_ideal
+  ro :order, :component_index, :component_prime_ideal
 
   -> rational_prime
     @component_prime_ideal.rational_prime
@@ -1791,11 +1695,7 @@
     if !certificate.verified?
       raise "product prime decomposition failed certification"
 
-  -> order
-    @order
-
-  -> prime
-    @prime
+  ro :order, :prime
 
   -> component_decompositions
     out = []
@@ -1932,8 +1832,7 @@
     if !certificate.verified?
       raise "S-prime data failed certification"
 
-  -> order
-    @order
+  ro :order
 
   -> rational_primes
     out = []

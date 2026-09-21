@@ -37,8 +37,7 @@
     @coefficients = @field.reduce_coefficients(coefficients, raw)
     self
 
-  -> field
-    @field
+  ro :field
 
   -> coefficients
     out = []
@@ -120,14 +119,7 @@
 + SimpleExtensionModulusCertificate
   -> new(@base_field, @polynomial, @factorization)
 
-  -> base_field
-    @base_field
-
-  -> polynomial
-    @polynomial
-
-  -> factorization
-    @factorization
+  ro :base_field, :polynomial, :factorization
 
   -> verified?
     return false if !Field.supported?(@base_field)
@@ -231,8 +223,7 @@
   -> characteristic
     @base_field.characteristic
 
-  -> degree
-    @degree
+  ro :degree
 
   -> relative_degree
     @degree
@@ -247,17 +238,7 @@
       raise "an infinite simple extension has no finite order"
     @base_field.order ** @degree
 
-  -> base_field
-    @base_field
-
-  -> name
-    @name
-
-  -> defining_polynomial
-    @defining_polynomial
-
-  -> generator
-    @generator
+  ro :base_field, :name, :defining_polynomial, :generator
 
   -> irreducible?
     true
@@ -265,8 +246,7 @@
   -> irreducibility_certified?
     true
 
-  -> modulus_certificate
-    @modulus_certificate
+  ro :modulus_certificate
 
   -> factorization_certificate
     return nil if @modulus_factorization == nil

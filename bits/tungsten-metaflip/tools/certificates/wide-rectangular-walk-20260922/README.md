@@ -29,18 +29,26 @@ text so the repository need not carry the full-width archive verbatim.
 Two exact coordinate projections of these retained tensors, followed by
 GF(2) duplicate cancellation and shared-factor compression, improve further
 rectangles. Deleting coordinate 19 (zero-based) of the output axis of the
-12x10x20 certificate gives `12x10x19-r1421.mfw.gz.b64`, SHA-256
-`552ab55c7b9d66d47ae90a1283bf3f3588ecebe2719407b05a4587717ef480ac`,
-density 69949. The pinned catalog plus compact-parent portfolio priced that
+12x10x20 certificate gives a rank-1421 tensor. Two exact same-rank refactors
+(axis 0 forward, then axis 1 forward) give the retained
+`12x10x19-r1421.mfw.gz.b64`, SHA-256
+`a184dc5aeb7a90d5e88af72a4ec4eb73f58888ea9ce0caa5159b533ed0724de5`,
+density 69756. The pinned catalog plus compact-parent portfolio priced that
 shape at 1451. Deleting coordinate 27 of the middle axis of the 16x28x25
 certificate gives an exact rank-6129 seed. A directed 10-million-move walk
 with nonce 19071, then four 50-million-move continuations with nonces
-19072 through 19075, reached `16x27x25-r6080.mfw.gz.b64`, SHA-256
-`50db7d99cb61d7b2b48253d4bd6502f717836f95ba72a3062d2899086d493529`,
-density 242250; the previous finite composition price was 6195. Both tensors
+19072 through 19075, reached rank 6080. Two exact same-rank refactors
+(axis 0 reverse, then axis 2 forward) give the retained
+`16x27x25-r6080.mfw.gz.b64`, SHA-256
+`7d6bdd7c300602617ad8f9c52b3638210391699394e69c55d7b86dc12bfd2ce3`,
+density 231672; the previous finite composition price was 6195. Both tensors
 were separately expanded by the Ruby verifier and the independent Python
 certificate test. These are exact GF(2) decompositions, not global record or
 optimality claims.
+For context, the Université de Lille pages consulted on 2026-09-22 list
+[10x12x19:1434](https://fmm.univ-lille.fr/10x12x19.html) and
+[16x25x27:6108](https://fmm.univ-lille.fr/16x25x27.html). Beating those listed
+upper bounds does not by itself establish the best bound across all sources.
 
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with

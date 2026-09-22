@@ -1,0 +1,471 @@
+{
+  "schema": 1,
+  "field": "GF(2)",
+  "record_claim": false,
+  "parent": {
+    "path": "inputs/2x4x5-7ea0a6fc1773b13d5223b2c87bac373241a61f67a76c764214e20b01fec1770a.txt",
+    "shape": [
+      2,
+      4,
+      5
+    ],
+    "sha256": "7ea0a6fc1773b13d5223b2c87bac373241a61f67a76c764214e20b01fec1770a"
+  },
+  "scale": [
+    2,
+    3,
+    5
+  ],
+  "groups": [
+    {
+      "axis": 2,
+      "indices": [
+        0
+      ],
+      "leaf": {
+        "path": "leaves/2x3x5-48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7.txt",
+        "shape": [
+          2,
+          3,
+          5
+        ],
+        "sha256": "48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7"
+      }
+    },
+    {
+      "axis": 2,
+      "indices": [
+        1,
+        9
+      ],
+      "leaf": {
+        "path": "leaves/2x6x5-1bf26ac6fdeb61e5d0bc75b7679a750496df15013ddf93ec1e33f787d9ff2399.txt",
+        "shape": [
+          2,
+          6,
+          5
+        ],
+        "sha256": "1bf26ac6fdeb61e5d0bc75b7679a750496df15013ddf93ec1e33f787d9ff2399"
+      }
+    },
+    {
+      "axis": 2,
+      "indices": [
+        2,
+        32
+      ],
+      "leaf": {
+        "path": "leaves/2x6x5-1bf26ac6fdeb61e5d0bc75b7679a750496df15013ddf93ec1e33f787d9ff2399.txt",
+        "shape": [
+          2,
+          6,
+          5
+        ],
+        "sha256": "1bf26ac6fdeb61e5d0bc75b7679a750496df15013ddf93ec1e33f787d9ff2399"
+      }
+    },
+    {
+      "axis": 2,
+      "indices": [
+        3
+      ],
+      "leaf": {
+        "path": "leaves/2x3x5-48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7.txt",
+        "shape": [
+          2,
+          3,
+          5
+        ],
+        "sha256": "48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7"
+      }
+    },
+    {
+      "axis": 2,
+      "indices": [
+        4,
+        26
+      ],
+      "leaf": {
+        "path": "leaves/2x6x5-1bf26ac6fdeb61e5d0bc75b7679a750496df15013ddf93ec1e33f787d9ff2399.txt",
+        "shape": [
+          2,
+          6,
+          5
+        ],
+        "sha256": "1bf26ac6fdeb61e5d0bc75b7679a750496df15013ddf93ec1e33f787d9ff2399"
+      }
+    },
+    {
+      "axis": 2,
+      "indices": [
+        5
+      ],
+      "leaf": {
+        "path": "leaves/2x3x5-48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7.txt",
+        "shape": [
+          2,
+          3,
+          5
+        ],
+        "sha256": "48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7"
+      }
+    },
+    {
+      "axis": 2,
+      "indices": [
+        6
+      ],
+      "leaf": {
+        "path": "leaves/2x3x5-48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7.txt",
+        "shape": [
+          2,
+          3,
+          5
+        ],
+        "sha256": "48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7"
+      }
+    },
+    {
+      "axis": 2,
+      "indices": [
+        7
+      ],
+      "leaf": {
+        "path": "leaves/2x3x5-48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7.txt",
+        "shape": [
+          2,
+          3,
+          5
+        ],
+        "sha256": "48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7"
+      }
+    },
+    {
+      "axis": 2,
+      "indices": [
+        8,
+        17
+      ],
+      "leaf": {
+        "path": "leaves/2x6x5-1bf26ac6fdeb61e5d0bc75b7679a750496df15013ddf93ec1e33f787d9ff2399.txt",
+        "shape": [
+          2,
+          6,
+          5
+        ],
+        "sha256": "1bf26ac6fdeb61e5d0bc75b7679a750496df15013ddf93ec1e33f787d9ff2399"
+      }
+    },
+    {
+      "axis": 2,
+      "indices": [
+        10
+      ],
+      "leaf": {
+        "path": "leaves/2x3x5-48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7.txt",
+        "shape": [
+          2,
+          3,
+          5
+        ],
+        "sha256": "48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7"
+      }
+    },
+    {
+      "axis": 2,
+      "indices": [
+        11
+      ],
+      "leaf": {
+        "path": "leaves/2x3x5-48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7.txt",
+        "shape": [
+          2,
+          3,
+          5
+        ],
+        "sha256": "48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7"
+      }
+    },
+    {
+      "axis": 2,
+      "indices": [
+        12
+      ],
+      "leaf": {
+        "path": "leaves/2x3x5-48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7.txt",
+        "shape": [
+          2,
+          3,
+          5
+        ],
+        "sha256": "48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7"
+      }
+    },
+    {
+      "axis": 2,
+      "indices": [
+        13
+      ],
+      "leaf": {
+        "path": "leaves/2x3x5-48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7.txt",
+        "shape": [
+          2,
+          3,
+          5
+        ],
+        "sha256": "48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7"
+      }
+    },
+    {
+      "axis": 2,
+      "indices": [
+        14
+      ],
+      "leaf": {
+        "path": "leaves/2x3x5-48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7.txt",
+        "shape": [
+          2,
+          3,
+          5
+        ],
+        "sha256": "48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7"
+      }
+    },
+    {
+      "axis": 2,
+      "indices": [
+        15
+      ],
+      "leaf": {
+        "path": "leaves/2x3x5-48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7.txt",
+        "shape": [
+          2,
+          3,
+          5
+        ],
+        "sha256": "48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7"
+      }
+    },
+    {
+      "axis": 2,
+      "indices": [
+        16
+      ],
+      "leaf": {
+        "path": "leaves/2x3x5-48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7.txt",
+        "shape": [
+          2,
+          3,
+          5
+        ],
+        "sha256": "48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7"
+      }
+    },
+    {
+      "axis": 2,
+      "indices": [
+        18
+      ],
+      "leaf": {
+        "path": "leaves/2x3x5-48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7.txt",
+        "shape": [
+          2,
+          3,
+          5
+        ],
+        "sha256": "48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7"
+      }
+    },
+    {
+      "axis": 2,
+      "indices": [
+        19
+      ],
+      "leaf": {
+        "path": "leaves/2x3x5-48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7.txt",
+        "shape": [
+          2,
+          3,
+          5
+        ],
+        "sha256": "48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7"
+      }
+    },
+    {
+      "axis": 2,
+      "indices": [
+        20
+      ],
+      "leaf": {
+        "path": "leaves/2x3x5-48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7.txt",
+        "shape": [
+          2,
+          3,
+          5
+        ],
+        "sha256": "48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7"
+      }
+    },
+    {
+      "axis": 2,
+      "indices": [
+        21
+      ],
+      "leaf": {
+        "path": "leaves/2x3x5-48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7.txt",
+        "shape": [
+          2,
+          3,
+          5
+        ],
+        "sha256": "48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7"
+      }
+    },
+    {
+      "axis": 2,
+      "indices": [
+        22
+      ],
+      "leaf": {
+        "path": "leaves/2x3x5-48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7.txt",
+        "shape": [
+          2,
+          3,
+          5
+        ],
+        "sha256": "48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7"
+      }
+    },
+    {
+      "axis": 2,
+      "indices": [
+        23
+      ],
+      "leaf": {
+        "path": "leaves/2x3x5-48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7.txt",
+        "shape": [
+          2,
+          3,
+          5
+        ],
+        "sha256": "48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7"
+      }
+    },
+    {
+      "axis": 2,
+      "indices": [
+        24
+      ],
+      "leaf": {
+        "path": "leaves/2x3x5-48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7.txt",
+        "shape": [
+          2,
+          3,
+          5
+        ],
+        "sha256": "48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7"
+      }
+    },
+    {
+      "axis": 2,
+      "indices": [
+        25
+      ],
+      "leaf": {
+        "path": "leaves/2x3x5-48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7.txt",
+        "shape": [
+          2,
+          3,
+          5
+        ],
+        "sha256": "48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7"
+      }
+    },
+    {
+      "axis": 2,
+      "indices": [
+        27
+      ],
+      "leaf": {
+        "path": "leaves/2x3x5-48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7.txt",
+        "shape": [
+          2,
+          3,
+          5
+        ],
+        "sha256": "48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7"
+      }
+    },
+    {
+      "axis": 2,
+      "indices": [
+        28
+      ],
+      "leaf": {
+        "path": "leaves/2x3x5-48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7.txt",
+        "shape": [
+          2,
+          3,
+          5
+        ],
+        "sha256": "48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7"
+      }
+    },
+    {
+      "axis": 2,
+      "indices": [
+        29
+      ],
+      "leaf": {
+        "path": "leaves/2x3x5-48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7.txt",
+        "shape": [
+          2,
+          3,
+          5
+        ],
+        "sha256": "48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7"
+      }
+    },
+    {
+      "axis": 2,
+      "indices": [
+        30
+      ],
+      "leaf": {
+        "path": "leaves/2x3x5-48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7.txt",
+        "shape": [
+          2,
+          3,
+          5
+        ],
+        "sha256": "48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7"
+      }
+    },
+    {
+      "axis": 2,
+      "indices": [
+        31
+      ],
+      "leaf": {
+        "path": "leaves/2x3x5-48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7.txt",
+        "shape": [
+          2,
+          3,
+          5
+        ],
+        "sha256": "48f567ce264b996cb6f1d9ce88296e1830b8a4261830ca3d03fc0a04b04e7be7"
+      }
+    }
+  ],
+  "result": {
+    "path": "candidates/4x12x25-0b8e7633030577b5b92caf31ea1f62e075a71a1ddfdef03fd96e27c75defbdc4.txt",
+    "shape": [
+      4,
+      12,
+      25
+    ],
+    "sha256": "0b8e7633030577b5b92caf31ea1f62e075a71a1ddfdef03fd96e27c75defbdc4"
+  },
+  "formula_rank": 813,
+  "exact_rank": 813
+}

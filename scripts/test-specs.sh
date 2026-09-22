@@ -808,7 +808,48 @@ fi
 run_parallel compiled "${compiled_specs[@]}"
 run_parallel compiled-reject "${compiled_reject_specs[@]}"
 
+# ── Interpreter launch from any cwd ──────────────────────────────────────
+# `run --interpret` given a BARE filename must resolve that file's `use`
+# lines against the cwd (a bare `main.w` has no directory; joining onto ""
+# used to make `use lib/box` look for /lib/box.w), and it must find the repl
+# compiler image whatever cache a run selects — an isolated
+# TUNGSTEN_CACHE_DIR, or a cwd inside a bit that owns its own build/cache —
+# because images belong to the checkout that built the compiler.
+interp_launch_step() {
+  local label="$1"
+  local dir="$2"
+  local output
+  local status
+  shift 2
+  set +e
+  output="$(cd "$dir" && "$@" 2>&1)"
+  status=$?
+  set -e
+  if [[ "$status" -ne 0 || "$output" != "42" ]]; then
+    echo "FAIL [interp_launch] $label: exited $status" >&2
+    printf '%s\n' "$output" >&2
+    fail=1
+  else
+    echo "PASS [interp_launch] $label"
+  fi
+}
+
+run_interp_launch_test() {
+  local dir="$TMP_ROOT/interp-launch"
+  mkdir -p "$dir/lib"
+  printf '+ Box\n  ro :value\n  -> new(@value)\n' > "$dir/lib/box.w"
+  printf 'use lib/box\n<< Box.new(42).value\n' > "$dir/main.w"
+  echo "interpreter launch test"
+  interp_launch_step "bare filename resolves use against cwd" "$dir" \
+    "$TUNGSTEN" run --interpret main.w
+  interp_launch_step "isolated TUNGSTEN_CACHE_DIR finds the repl image" "$dir" \
+    env TUNGSTEN_CACHE_DIR="$dir/cache" "$TUNGSTEN" run --interpret main.w
+  interp_launch_step "cwd inside a bit finds the repl image" "$ROOT/bits/tungsten-wassat" \
+    "$TUNGSTEN" run --interpret "$dir/main.w"
+}
+
 run_cache_lifecycle_test
+run_interp_launch_test
 
 run_parallel cuda "${cuda_emit_specs[@]}"
 run_parallel wgsl "${wgsl_emit_specs[@]}"

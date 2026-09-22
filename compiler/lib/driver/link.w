@@ -490,12 +490,19 @@
     exit 1
   root
 
+# Images are owned by the checkout that holds the compiler executable, not by
+# the cache a run selects: TUNGSTEN_CACHE_DIR isolates one run's incremental
+# artifacts (the spec and parity suites each take their own), and a bit's
+# cwd owns its own build/cache, but neither ever builds an image. Every
+# launch therefore resolves to the one image `bin/tungsten build` produced.
 -> compiler_image_dir(kind)
-  cache = compiler_cache_dir()
-  if cache == nil || cache == ""
-    ccall("w_eputs", "could not select a cache directory for the " + kind + " compiler image")
+  root = env("TUNGSTEN_ROOT")
+  if root == nil || root == ""
+    root = capture("cd " + dev_runtime_shell_quote(resolve_runtime_dir + "/..") + " && pwd -P 2>/dev/null").strip()
+  if root == ""
+    ccall("w_eputs", "could not locate the checkout that owns the " + kind + " compiler image")
     exit 1
-  cache + "/compiler-images"
+  root + "/build/cache/compiler-images"
 
 -> compiler_image_path(kind)
   compiler_image_dir(kind) + "/tungsten-" + kind

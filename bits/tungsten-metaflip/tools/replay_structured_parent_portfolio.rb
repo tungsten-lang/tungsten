@@ -37,7 +37,7 @@ module MetaflipStructuredParentPortfolio
       raise 'parent hash mismatch' unless Digest::SHA256.hexdigest(B.text(parent.terms)) == row.fetch('parent_sha256')
       scale = row.fetch('scale')
       shape = row.fetch('shape')
-      raise 'invalid scale or shape' unless scale.is_a?(Array) && scale.length == 3 && scale.all? { |n| n.is_a?(Integer) && n.between?(1, 6) } &&
+      raise 'invalid scale or shape' unless scale.is_a?(Array) && scale.length == 3 && scale.all? { |n| n.is_a?(Integer) && n.between?(1, 8) } &&
                                            shape == parent.shape.zip(scale).map { |a, b| a * b }.sort
       groups = B.partitions(parent, scale, library, trials: 0)
       price = B.score(groups, scale, library)

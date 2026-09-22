@@ -1566,6 +1566,226 @@
         25
       ],
       "result_sha256": "959efcd2b4c821e622fcc3beda8c8b8f97b5313e57aaf18be10887b353b26278"
+    },
+    {
+      "shape": [
+        18,
+        21,
+        25
+      ],
+      "rank": 5308,
+      "catalog_recursive_bound": 5372,
+      "parent": "matmul_3x5x6_rank68_catalog_gf2.txt",
+      "parent_sha256": "a13b7d5b172f85b8e1283fcb5d4912b5bd561e4debea79a029a0877a5bdb26ca",
+      "scale": [
+        7,
+        5,
+        3
+      ],
+      "result_shape": [
+        21,
+        25,
+        18
+      ],
+      "result_sha256": "6543dad8a89b67bf90c1999b4da16f9270553bcf82a1de044df3a5beb81b0782"
+    },
+    {
+      "shape": [
+        15,
+        20,
+        28
+      ],
+      "rank": 4700,
+      "catalog_recursive_bound": 4740,
+      "parent": "matmul_4x4x5_rank60_d628_gl_frontier_gf2.txt",
+      "parent_sha256": "ea5474eecf79c21daccaf29069064f4ed65e9af069a333efc44cf9f18539a66c",
+      "scale": [
+        5,
+        7,
+        3
+      ],
+      "result_shape": [
+        20,
+        28,
+        15
+      ],
+      "result_sha256": "813e0c83ec4f02c01ec883a61b5e6005698b75577c41808a07d40db12bcb39a2"
+    },
+    {
+      "shape": [
+        15,
+        21,
+        25
+      ],
+      "rank": 4534,
+      "catalog_recursive_bound": 4572,
+      "parent": "matmul_3x5x5_rank58_d613_perminov_2026_serendipitous_506f8f6eb3_gf2.txt",
+      "parent_sha256": "44c2a007495c84509628d54db9c6f500b2e0edfaa90e245797508f0c378175eb",
+      "scale": [
+        7,
+        5,
+        3
+      ],
+      "result_shape": [
+        21,
+        25,
+        15
+      ],
+      "result_sha256": "ccfd9d662981d998be13f0bac8e6f93f247d9b514afeaa6823fa8d1e5e5fdcc6"
+    },
+    {
+      "shape": [
+        12,
+        25,
+        28
+      ],
+      "rank": 4708,
+      "catalog_recursive_bound": 4740,
+      "parent": "matmul_4x4x5_rank60_d628_gl_frontier_gf2.txt",
+      "parent_sha256": "ea5474eecf79c21daccaf29069064f4ed65e9af069a333efc44cf9f18539a66c",
+      "scale": [
+        3,
+        7,
+        5
+      ],
+      "result_shape": [
+        12,
+        28,
+        25
+      ],
+      "result_sha256": "3529cc0fb4289be0c3fac556f13f57aa40a6c4edcb045bc71180b1e6de82b727"
+    },
+    {
+      "shape": [
+        15,
+        16,
+        28
+      ],
+      "rank": 3815,
+      "catalog_recursive_bound": 3840,
+      "parent": "matmul_4x4x5_rank60_d628_gl_frontier_gf2.txt",
+      "parent_sha256": "ea5474eecf79c21daccaf29069064f4ed65e9af069a333efc44cf9f18539a66c",
+      "scale": [
+        4,
+        7,
+        3
+      ],
+      "result_shape": [
+        16,
+        28,
+        15
+      ],
+      "result_sha256": "96fd3500cb6ae09ec5c94fac3624f92e0617d95decd4572f5162bc2cf9ea6978"
+    },
+    {
+      "shape": [
+        16,
+        25,
+        32
+      ],
+      "rank": 7055,
+      "catalog_recursive_bound": 7080,
+      "parent": "matmul_4x4x5_rank60_d628_gl_frontier_gf2.txt",
+      "parent_sha256": "ea5474eecf79c21daccaf29069064f4ed65e9af069a333efc44cf9f18539a66c",
+      "scale": [
+        4,
+        8,
+        5
+      ],
+      "result_shape": [
+        16,
+        32,
+        25
+      ],
+      "result_sha256": "16e8a0a3a0c9e62636b0b7ed4c8eebd7d8d19c0df2f690e68baa4b4dfcb7d492"
+    },
+    {
+      "shape": [
+        14,
+        18,
+        20
+      ],
+      "rank": 2988,
+      "catalog_recursive_bound": 3000,
+      "parent": "matmul_2x5x6_rank47_d763_perminov_2026_serendipitous_5ec0a82ac7_gf2.txt",
+      "parent_sha256": "b24e8c97ce7f3e542d404878e6d26160bc061599b50c9f503689314a456b1828",
+      "scale": [
+        7,
+        4,
+        3
+      ],
+      "result_shape": [
+        14,
+        20,
+        18
+      ],
+      "result_sha256": "af25b9638d9290ed12f2202b7c2c5ec651109e3369df98c2ce35ee81e6aafa92"
+    },
+    {
+      "shape": [
+        14,
+        18,
+        25
+      ],
+      "rank": 3681,
+      "catalog_recursive_bound": 3691,
+      "parent": "matmul_2x5x6_rank47_d763_perminov_2026_serendipitous_5ec0a82ac7_gf2.txt",
+      "parent_sha256": "b24e8c97ce7f3e542d404878e6d26160bc061599b50c9f503689314a456b1828",
+      "scale": [
+        7,
+        5,
+        3
+      ],
+      "result_shape": [
+        14,
+        25,
+        18
+      ],
+      "result_sha256": "9a3f53a85c48b8c8505ae5c807e22fd08adb25fd1eaa9274ccafa6048eb08e8c"
+    },
+    {
+      "shape": [
+        14,
+        24,
+        25
+      ],
+      "rank": 4884,
+      "catalog_recursive_bound": 4888,
+      "parent": "matmul_2x5x6_rank47_d763_perminov_2026_serendipitous_5ec0a82ac7_gf2.txt",
+      "parent_sha256": "b24e8c97ce7f3e542d404878e6d26160bc061599b50c9f503689314a456b1828",
+      "scale": [
+        7,
+        5,
+        4
+      ],
+      "result_shape": [
+        14,
+        25,
+        24
+      ],
+      "result_sha256": "8ed212baadcc1cfe0ce04951834b303fdccb35599ecf81c4b7306214b68d8adf"
+    },
+    {
+      "shape": [
+        16,
+        25,
+        28
+      ],
+      "rank": 6225,
+      "catalog_recursive_bound": 6229,
+      "parent": "matmul_4x4x5_rank60_d628_gl_frontier_gf2.txt",
+      "parent_sha256": "ea5474eecf79c21daccaf29069064f4ed65e9af069a333efc44cf9f18539a66c",
+      "scale": [
+        4,
+        7,
+        5
+      ],
+      "result_shape": [
+        16,
+        28,
+        25
+      ],
+      "result_sha256": "465bb56acf4c7aa1171da566ebb462a9ce0aa94993ca9ef516c1053cb12ab381"
     }
   ]
 }

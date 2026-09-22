@@ -37,7 +37,7 @@ class StructuredParentPortfolioTest(unittest.TestCase):
 
     def test_all_exact_tensors(self):
         manifest = json.loads(MANIFEST.read_text())
-        self.assertEqual((manifest['schema'], manifest['field'], len(manifest['rows'])), (1, 'GF(2)', 71))
+        self.assertEqual((manifest['schema'], manifest['field'], len(manifest['rows'])), (1, 'GF(2)', 81))
         with tempfile.TemporaryDirectory(prefix='metaflip-structured-portfolio-') as tmp:
             output = Path(tmp) / 'output'
             replay = subprocess.run(['ruby', str(TOOL), '--output', str(output)], capture_output=True, text=True)

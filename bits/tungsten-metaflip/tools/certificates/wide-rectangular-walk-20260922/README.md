@@ -69,12 +69,24 @@ rank candidate: the pinned GF(2) catalog already has rank 6690 for 16x25x30.
 Both retained tensors were independently expanded by the Ruby verifier and
 the focused Python certificate test.
 
+Replaying the `8x20x30` structured-parent row yields rank 2803. Deleting
+coordinate 14 of its middle axis, cancelling equal GF(2) terms, and applying
+exact shared-factor compression yields `8x19x30` at rank 2743. Two exact
+refactors lower it to 2729. Bounded walks of 50 million moves (nonce 19073)
+and 100 million moves (nonce 19077) lower it to 2724 and 2723, respectively.
+The retained same-rank refactor is `8x19x30-r2723.mfw.gz.b64`, SHA-256
+`519e99587c73888bbc011a5a11c7342fcae631e79d591b077e52d3749772fc7a`,
+density 84555. The prior pinned GF(2) catalog-plus-portfolio composition price
+was 2766. This certificate is checked by both full-tensor verifiers; the
+finite walk is not an optimality proof.
+
 For context, the [Université de Lille full table](https://fmm.univ-lille.fr/algo_32.html)
 consulted on 2026-09-22 lists 10x12x19:1434, 10x12x25:1856,
-16x25x27:6048, 16x25x28:6344, 16x25x29:6573, and 16x25x31:6973. The
-retained 12x10x19 rank 1421, 12x10x25 rank 1836, 16x28x25 rank 6223,
-16x29x25 rank 6534, and 16x31x25 rank 6916 beat their corresponding table
-entries; 16x27x25 rank 6080 does not. Some
+16x25x27:6048, 16x25x28:6344, 16x25x29:6573, 16x25x31:6973, and
+8x19x30:2778. The retained 12x10x19 rank 1421, 12x10x25 rank 1836,
+16x28x25 rank 6223,
+16x29x25 rank 6534, 16x31x25 rank 6916, and 8x19x30 rank 2723 beat
+their corresponding table entries; 16x27x25 rank 6080 does not. Some
 individual shape pages show older, weaker bounds, so those pages should not
 be used alone for record comparisons. These exact GF(2) certificates are not
 claims of global novelty across every source or field.
@@ -101,10 +113,10 @@ certificates are independently expanded by
 MetaFlip package and certificate directory as appropriate).
 
 The pinned-catalog closure comparison is replayable with
-`python3 tools/check_wide_rectangular_closure.py CATALOG.json`. It reports 22
-rank-price improvements totaling 711 terms among shapes with coordinates 2
-through 32; those are composition prices, not 17 separately materialized
-certificates. No square shape improves in this finite closure.
+`python3 tools/check_wide_rectangular_closure.py CATALOG.json`. It reports 25
+rank-price improvements totaling 808 terms among shapes with coordinates 2
+through 32; those are composition prices, not separate materialized
+certificates for every improved shape. No square shape improves in this finite closure.
 Another 100 million moves from the retained rank-623 seed, and three further
 100-million-move continuations from distinct rank-623 seeds, found no rank-622
 result. This finite search is not a lower-bound proof.

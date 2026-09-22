@@ -18,7 +18,9 @@ Two representative constructions are 5×9×20 at rank 624 (catalog GF(2)
 recursive closure: 629) and 10×24×25 at rank 3,500 (closure: 3,564). Ten
 additional scale-7/8 constructions were checked after the original 71; all
 ten remain below the catalog closure even after adding the earlier portfolio
-and verified local checkpoints. Every generated tensor was also checked by
+and verified local checkpoints. They lower the pinned catalog-plus-earlier
+portfolio closure on 32 shapes through dimension 32 (aggregate rank gain 788),
+but no square shape. Every generated tensor was also checked by
 the separate Python full-parity verifier, with no tensor mismatch.
 
 Five of the new GF(2) ranks are numerically below the [Lille table](https://fmm.univ-lille.fr/)

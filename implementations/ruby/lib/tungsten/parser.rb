@@ -583,7 +583,7 @@ module Tungsten
     end
 
     def parse_pipeline
-      left = parse_or
+      left = parse_composition
 
       loop do
         next_token while @token.type?(:SP)
@@ -593,6 +593,40 @@ module Tungsten
       end
 
       left
+    end
+
+    def parse_composition
+      left = parse_or
+      next_token while @token.type?(:SP)
+      return left unless @token.type?(:∘)
+      next_token_skip_whitespace
+      right = parse_composition
+      argument = Var.new("__composition#arg")
+      Def.new(nil, [Arg.new(argument.name)], composition_call(left, composition_call(right, argument)))
+    end
+
+    def composition_call(operand, argument)
+      case operand
+      when Var
+        Call.new(nil, operand.name, [argument])
+      when Call
+        if operand.obj && operand.args.empty? && !operand.block
+          return Call.new(operand.obj, operand.name, [argument])
+        end
+        error("composition requires callable names, method references, or closures")
+      when Def, Block, BinaryOp
+        Call.new(operand, "call", [argument])
+      else
+        error("composition requires callable names, method references, or closures")
+      end
+    end
+
+    def mathematical_binary(left, operator, right)
+      case operator
+      when :↑↑ then Call.new(left, "tetrate", [right])
+      when :∩ then Call.new(left, "intersect", [right])
+      else BinaryOp.new(left, operator, right)
+      end
     end
 
     def parse_pipeline_tail(left)
@@ -634,7 +668,7 @@ module Tungsten
         if node
           node
         else
-          "BinaryOp.new(left, operator, right)"
+          "mathematical_binary(left, operator, right)"
         end
 
       class_eval %Q[
@@ -715,9 +749,44 @@ module Tungsten
       AST::InTest.new(left, elements)
     end
 
-    parse_operator :cmp,         :eql,         nil,                   %i[< <= >= > <=>]
+    def parse_cmp
+      left = parse_eql
+      chain = []
+      loop do
+        next_token while @token.type?(:SP)
+        break unless %i[< <= > >= <=> ∈ ∉ ⊆].include?(@token.type)
+        operator = @token.type
+        hidden = "__comparison##{@token.row}_#{@token.col}"
+        next_token_skip_whitespace
+        right = parse_eql
+        next_token while @token.type?(:SP)
+        if operator == :<=>
+          left = BinaryOp.new(left, operator, right)
+          next
+        end
+        continues = %i[< <= > >= ∈ ∉ ⊆].include?(@token.type)
+        saved = continues ? Assign.new(Var.new(hidden), right) : right
+        comparison = case operator
+                     when :∈, :∉
+                       element = Var.new(hidden + "_element")
+                       test = Call.new(saved, "include?", [element])
+                       test = Not.new(test) if operator == :∉
+                       Begin.new([Assign.new(element, left), test])
+                     when :⊆ then Call.new(left, "subset?", [saved])
+                     else BinaryOp.new(left, operator, saved)
+                     end
+        if continues
+          chain << comparison
+          left = Var.new(hidden)
+        else
+          left = chain.reverse_each.reduce(comparison) { |rest, test| And.new(test, rest) }
+          chain = []
+        end
+      end
+      left
+    end
     parse_operator :eql,         :logical_or,  nil,                   %i[== != =~ ≈]
-    parse_operator :logical_and, :shift,       nil,                   %i[& .&]
+    parse_operator :logical_and, :shift,       nil,                   %i[& .& ∩]
 
     # Override parse_shift: << at the start of a new line is Print (puts), not binary shift.
     # "<<" is puts anytime it is the first thing on a line; append requires a left-hand side on the same line.
@@ -763,7 +832,7 @@ module Tungsten
     # (Julia convention).
     parse_operator :add_or_sub,  :mul_or_div,  nil,                   %i[+ - %+ %- .+ .- ±]
     parse_operator :mul_or_div,  :pow,         nil,                   %i[* / // % %* .* ./]
-    parse_operator :pow,         :unary,       nil,                   %i[** %**], right_assoc: true
+    parse_operator :pow,         :unary,       nil,                   %i[** %** ↑↑], right_assoc: true
 
     # Override parse_logical_or to handle | and » with compound unit scanning.
     # After | or », we try scanning a UNIT_STRING (e.g. m/s, kg·m/s²) directly
@@ -776,6 +845,9 @@ module Tungsten
         case @token.type
         when :SP
           next_token
+        when :∪
+          next_token_skip_whitespace
+          left = Call.new(left, "union", [parse_logical_and])
         when :|, :"»"
           check_void_value(left)
           method = @token.type

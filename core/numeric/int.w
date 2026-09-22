@@ -307,6 +307,18 @@
   -> .prime_pi(x)
     PrimeSieve.pi(x)
 
+  # Finite right-associated power tower. Height zero is the empty tower 1.
+  # The reduce accumulator remains a promoting integer (including BigInt).
+  -> tetrate(height)
+    if !height.is_a?(Integer) || height < 0
+      raise "tetration height must be a nonnegative integer"
+    if self < 0
+      raise "tetration base must be a nonnegative integer"
+    return 1 if height == 0 || self == 1
+    if self == 0
+      return height.even? ? 1 : 0
+    (1..height).reduce(1) -> (acc, item) self ** acc
+
   -> factorial
     if self < 0
       raise "Int#factorial: negative receiver"

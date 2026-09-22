@@ -1056,6 +1056,9 @@ static int top_level_any_ast(TcAstParser *p, size_t start, size_t end, const TcK
     if (paren == 0 && bracket == 0 && brace == 0) {
       for (size_t k = 0; k < kind_count; k++) {
         if (cur == kinds[k]) {
+          /* A signed tower height belongs to the power operand. */
+          if (cur == TC_K_MINUS && pos > start &&
+              p->tokens->items[pos - 1].kind == TC_K_TETRATE) continue;
           *pos_out = pos;
           return 1;
         }
@@ -1313,6 +1316,13 @@ static TcAstValue binary_node_ast(TcAstParser *p, size_t start, size_t end, size
      * if the expression is ever actually compiled, ast_compile.c reports
      * `unsupported AST node` with the source text and line. */
     return raw_node(p, "expr", start, end, err);
+  }
+  TcKind kind = p->tokens->items[op_pos].kind;
+  if (kind == TC_K_UNION || kind == TC_K_INTERSECTION || kind == TC_K_TETRATE) {
+    const char *name = kind == TC_K_UNION ? "union" : kind == TC_K_INTERSECTION ? "intersect" : "tetrate";
+    TcAstValue args = tc_ast_array_new(err);
+    if (!tc_ast_array_push(args, right, err)) return tc_ast_nil();
+    return call_node_ast(p, start, (size_t)-1, left, name, strlen(name), args, err);
   }
   TcAstValue node = node_hash(p, "binary_op", op_pos, err);
   if (node.kind != TC_AST_HASH) {
@@ -1977,6 +1987,144 @@ static TcAstValue block_node_ast(TcAstParser *p, size_t start, TcAstValue params
     return tc_ast_nil();
   }
   return block;
+}
+
+static TcAstValue math_var_ast(TcAstParser *p, size_t pos, const char *name, TcError *err) {
+  TcAstValue node = node_hash(p, "var", pos, err);
+  if (!tc_ast_hash_set(node, "name", tc_ast_string_copy(name, strlen(name), err), err)) return tc_ast_nil();
+  return node;
+}
+
+static TcAstValue math_assign_ast(TcAstParser *p, size_t pos, const char *name, TcAstValue value, TcError *err) {
+  TcAstValue node = node_hash(p, "assign", pos, err);
+  if (!tc_ast_hash_set(node, "target", math_var_ast(p, pos, name, err), err) ||
+      !tc_ast_hash_set(node, "value", value, err) ||
+      !tc_ast_hash_set(node, "type_hint", tc_ast_nil(), err)) return tc_ast_nil();
+  return node;
+}
+
+/* Turn callable syntax into a call inside the composition's closure body.
+ * Neither operand is invoked when the composition is constructed. */
+static TcAstValue composition_call_ast(TcAstParser *p, size_t pos, TcAstValue operand,
+                                       TcAstValue argument, TcError *err) {
+  TcAstValue args = tc_ast_array_new(err);
+  if (!tc_ast_array_push(args, argument, err)) return tc_ast_nil();
+  TcAstValue *name = hash_value_ast(operand, "name");
+  if (ast_node_is(operand, "var") && name) {
+    return call_node_ast(p, pos, (size_t)-1, tc_ast_nil(), name->as.string.bytes, name->as.string.len, args, err);
+  }
+  if (ast_node_is(operand, "call")) {
+    TcAstValue *receiver = hash_value_ast(operand, "receiver");
+    TcAstValue *old_args = hash_value_ast(operand, "args");
+    TcAstValue *block = hash_value_ast(operand, "block");
+    if (name && receiver && receiver->kind != TC_AST_NIL && old_args &&
+        old_args->kind == TC_AST_ARRAY && old_args->as.array->count == 0 &&
+        (!block || block->kind == TC_AST_NIL)) {
+      return call_node_ast(p, pos, (size_t)-1, *receiver, name->as.string.bytes, name->as.string.len, args, err);
+    }
+  }
+  if (ast_node_is(operand, "block") || ast_node_is(operand, "lambda_arity") || ast_node_is(operand, "binary_op")) {
+    return call_node_ast(p, pos, (size_t)-1, operand, "call", 4, args, err);
+  }
+  tc_error_set(err, "composition requires callable names, method references, or closures");
+  return tc_ast_nil();
+}
+
+static TcAstValue composition_node_ast(TcAstParser *p, size_t start, size_t end, size_t pos, TcError *err) {
+  TcAstValue left = parse_expr_span_ast(p, start, pos, err);
+  TcAstValue right = parse_expr_span_ast(p, pos + 1, end, err);
+  if (left.kind == TC_AST_NIL || right.kind == TC_AST_NIL) return tc_ast_nil();
+  TcAstValue arg = math_var_ast(p, pos, "__composition#arg", err);
+  TcAstValue inner = composition_call_ast(p, pos, right, arg, err);
+  if (inner.kind == TC_AST_NIL) return inner;
+  TcAstValue outer = composition_call_ast(p, pos, left, inner, err);
+  if (outer.kind == TC_AST_NIL) return outer;
+  TcAstValue params = tc_ast_array_new(err);
+  TcAstValue body = tc_ast_array_new(err);
+  if (!tc_ast_array_push(params, tc_ast_string_copy("__composition#arg", 17, err), err) ||
+      !tc_ast_array_push(body, outer, err)) return tc_ast_nil();
+  return block_node_ast(p, pos, params, body, err);
+}
+
+static TcAstValue comparison_node_ast(TcAstParser *p, size_t pos, TcAstValue left,
+                                      TcAstValue right, const char *hidden, TcError *err) {
+  TcKind kind = p->tokens->items[pos].kind;
+  if (kind == TC_K_MEMBER || kind == TC_K_NOT_MEMBER || kind == TC_K_SUBSET) {
+    TcAstValue args = tc_ast_array_new(err);
+    if (kind == TC_K_SUBSET) {
+      if (!tc_ast_array_push(args, right, err)) return tc_ast_nil();
+      return call_node_ast(p, pos, (size_t)-1, left, "subset?", 7, args, err);
+    }
+    char element[96];
+    snprintf(element, sizeof(element), "%s_element", hidden);
+    TcAstValue save = math_assign_ast(p, pos, element, left, err);
+    if (!tc_ast_array_push(args, math_var_ast(p, pos, element, err), err)) return tc_ast_nil();
+    TcAstValue test = call_node_ast(p, pos, (size_t)-1, right, "include?", 8, args, err);
+    if (kind == TC_K_NOT_MEMBER) {
+      TcAstValue negated = node_hash(p, "not", pos, err);
+      if (!tc_ast_hash_set(negated, "operand", test, err)) return tc_ast_nil();
+      test = negated;
+    }
+    TcAstValue body = tc_ast_array_new(err);
+    if (!tc_ast_array_push(body, save, err) || !tc_ast_array_push(body, test, err)) return tc_ast_nil();
+    TcAstValue node = node_hash(p, "begin", pos, err);
+    if (!tc_ast_hash_set(node, "body", body, err) ||
+        !tc_ast_hash_set(node, "rescue_var", tc_ast_nil(), err) ||
+        !tc_ast_hash_set(node, "rescue_body", tc_ast_nil(), err) ||
+        !tc_ast_hash_set(node, "ensure_body", tc_ast_nil(), err)) return tc_ast_nil();
+    return node;
+  }
+  TcAstValue node = node_hash(p, "binary_op", pos, err);
+  const char *op = tc_kind_name(kind);
+  if (!tc_ast_hash_set(node, "left", left, err) ||
+      !tc_ast_hash_set(node, "op", tc_ast_symbol_copy(op, strlen(op), err), err) ||
+      !tc_ast_hash_set(node, "right", right, err)) return tc_ast_nil();
+  return node;
+}
+
+static const TcKind comparison_ops_ast[] = {
+    TC_K_LT, TC_K_LTE, TC_K_GT, TC_K_GTE, TC_K_MEMBER, TC_K_NOT_MEMBER, TC_K_SUBSET};
+
+static int first_comparison_ast(TcAstParser *p, size_t start, size_t end, size_t *out) {
+  size_t pos;
+  int found = 0;
+  while (top_level_any_ast(p, start, end, comparison_ops_ast,
+                          sizeof(comparison_ops_ast) / sizeof(comparison_ops_ast[0]), &pos)) {
+    *out = pos;
+    found = 1;
+    end = pos;
+  }
+  return found;
+}
+
+static TcAstValue comparison_chain_ast(TcAstParser *p, size_t start, size_t end, TcError *err) {
+  size_t pos;
+  if (!first_comparison_ast(p, start, end, &pos)) return tc_ast_nil();
+  TcAstValue left = parse_expr_span_ast(p, start, pos, err);
+  TcAstValue chain = tc_ast_array_new(err);
+  for (;;) {
+    size_t next = end;
+    int continues = first_comparison_ast(p, pos + 1, end, &next);
+    TcAstValue right = parse_expr_span_ast(p, pos + 1, next, err);
+    if (left.kind == TC_AST_NIL || right.kind == TC_AST_NIL) {
+      return err->message ? tc_ast_nil() : raw_node(p, "expr", start, end, err);
+    }
+    uint32_t offset = tc_token_offset(p->tokens->items[pos].packed);
+    char hidden[80];
+    snprintf(hidden, sizeof(hidden), "__comparison#%u_%u",
+             token_line_ast(p->source, p->tokens->items[pos].packed), p->source->cp_cols[offset]);
+    if (continues) right = math_assign_ast(p, pos, hidden, right, err);
+    TcAstValue test = comparison_node_ast(p, pos, left, right, hidden, err);
+    if (!continues) {
+      for (size_t i = chain.as.array->count; i > 0; i--) {
+        test = and_node_ast(p, pos, chain.as.array->items[i - 1], test, err);
+      }
+      return test;
+    }
+    if (!tc_ast_array_push(chain, test, err)) return tc_ast_nil();
+    left = math_var_ast(p, pos, hidden, err);
+    pos = next;
+  }
 }
 
 static TcAstValue parse_lambda_span_ast(TcAstParser *p, size_t arrow_pos, size_t end, TcError *err) {
@@ -2994,25 +3142,27 @@ static TcAstValue parse_expr_span_ast(TcAstParser *p, size_t start, size_t end, 
   // ops bind TIGHTER than comparisons (the 2025 precedence ruling), so
   // `(x >> 48) & 65535 == 65530` is `((x >> 48) & 65535) == 65530` —
   // the old merged/reversed order compared the two literals instead.
-  static const TcKind rel_ops[] = {TC_K_LT, TC_K_LTE, TC_K_GT, TC_K_GTE};
   static const TcKind eq_ops[] = {TC_K_EQ, TC_K_NEQ, TC_K_MATCH};
-  static const TcKind bitwise_or_ops[] = {TC_K_PIPE, TC_K_DOT_PIPE};
+  static const TcKind bitwise_or_ops[] = {TC_K_PIPE, TC_K_DOT_PIPE, TC_K_UNION};
   static const TcKind bitwise_xor_ops[] = {TC_K_CARET, TC_K_DOT_CARET};
-  static const TcKind bitwise_and_ops[] = {TC_K_AMPERSAND, TC_K_DOT_AMP};
+  static const TcKind bitwise_and_ops[] = {TC_K_AMPERSAND, TC_K_DOT_AMP, TC_K_INTERSECTION};
   static const TcKind add_ops[] = {TC_K_PLUS, TC_K_MINUS, TC_K_DOT_PLUS, TC_K_DOT_MINUS};
   static const TcKind shift_ops[] = {TC_K_LSHIFT, TC_K_RSHIFT, TC_K_DOT_LSHIFT, TC_K_DOT_RSHIFT};
   static const TcKind mul_ops[] = {
       TC_K_STAR, TC_K_SLASH, TC_K_PERCENT, TC_K_DOT_STAR, TC_K_DOT_SLASH, TC_K_DOT_PRODUCT, TC_K_CROSS_PRODUCT};
-  static const TcKind pow_ops[] = {TC_K_POW};
+  static const TcKind pow_ops[] = {TC_K_POW, TC_K_TETRATE};
   size_t op_pos = 0;
+  if (top_level_token_ast(p, start, end, TC_K_COMPOSE, &op_pos, 0)) {
+    return composition_node_ast(p, start, end, op_pos, err);
+  }
   if (top_level_any_ast(p, start, end, low_ops, sizeof(low_ops) / sizeof(low_ops[0]), &op_pos)) {
     return logical_node_ast(p, start, end, op_pos, err);
   }
   if (top_level_keyword_ast(p, start, end, "in", &op_pos, 1)) {
     return parse_in_test_ast(p, start, end, op_pos, err);
   }
-  if (top_level_any_ast(p, start, end, rel_ops, sizeof(rel_ops) / sizeof(rel_ops[0]), &op_pos)) {
-    return binary_node_ast(p, start, end, op_pos, err);
+  if (first_comparison_ast(p, start, end, &op_pos)) {
+    return comparison_chain_ast(p, start, end, err);
   }
   if (top_level_any_ast(p, start, end, eq_ops, sizeof(eq_ops) / sizeof(eq_ops[0]), &op_pos)) {
     return binary_node_ast(p, start, end, op_pos, err);
@@ -3036,6 +3186,8 @@ static TcAstValue parse_expr_span_ast(TcAstParser *p, size_t start, size_t end, 
     return binary_node_ast(p, start, end, op_pos, err);
   }
   if (top_level_any_ast(p, start, end, pow_ops, sizeof(pow_ops) / sizeof(pow_ops[0]), &op_pos) && op_pos > start) {
+    size_t earlier;
+    while (top_level_any_ast(p, start, op_pos, pow_ops, sizeof(pow_ops) / sizeof(pow_ops[0]), &earlier)) op_pos = earlier;
     return binary_node_ast(p, start, end, op_pos, err);
   }
 

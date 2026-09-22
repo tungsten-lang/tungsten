@@ -323,16 +323,17 @@ Expressions form a precedence hierarchy. From lowest binding power to highest (s
 | Message chain / call | `.name`, bare calls, blocks |
 | Range | `..`, `...` |
 | Pipeline | `/` as pipeline (where applicable), chained continuation |
+| Function composition | `∘` (right associative) |
 | Boolean or | `or`, `\|\|` (implementation-dependent spellings) |
 | Boolean and | `and`, `&&` |
 | Membership | `in` |
-| Comparison | `<`, `<=`, `>`, `>=`, `<=>` |
+| Comparison | `<`, `<=`, `>`, `>=`, `<=>`, `∈`, `∉`, `⊆` |
 | Equality | `==`, `!=`, `=~` |
-| Bitwise or / xor / and | `\|`, `^`, `&` (and dotted forms) |
+| Bitwise or / xor / and | `\|`, `^`, `&` (and dotted forms); `∪` at or precedence, `∩` at and precedence |
 | Shift | `<<`, `>>` |
 | Add / subtract | `+`, `-` (and elementwise `.+`, `.-`) |
 | Multiply / divide / remainder | `*`, `/`, `%`, `·`, and related product operators |
-| Power | `**`, superscript exponents (`x⁷`) |
+| Power | `**`, `↑↑` (right associative), superscript exponents (`x⁷`) |
 | Unary | `!`, `-`, `√`, … |
 | Tight postfix | `expr!`, `expr#`, `.name`, indexing |
 | Primary | literals, `self`, `super`, groups, collections, calls |
@@ -413,6 +414,28 @@ Most operators are method sends on the left operand. Writing `a + b` is equivale
 
 Notable special cases:
 
+* `f ∘ g` constructs a unary closure equivalent to `->(x) f(g(x))`.
+  Neither operand is invoked during construction. Operands may be bare
+  function or closure names, receiver method references such as `obj.normalize`,
+  or parenthesized closures. Calls with arguments are not composition operands.
+  `f ∘ g ∘ h` applies `h`, then `g`, then `f`. Name lookup and capture follow
+  ordinary closure rules; receiver expressions run when the closure is called.
+* Ordered comparisons chain: `0 <= x < n` tests both adjacent pairs,
+  evaluates each operand once from left to right, and stops at the first
+  false comparison. The later operands are not evaluated. Parentheses break
+  a chain; `<=>` is not a chaining comparison. Equality keeps its existing
+  precedence and is not included in comparison chains.
+* `base ↑↑ height` calls `base.tetrate(height)`. For nonnegative integer
+  bases and heights this is the finite right-associated power tower:
+  `2 ↑↑ 4 == 2 ** (2 ** (2 ** 2)) == 65536`.
+  Height zero gives 1, including `0 ↑↑ 0`; this agrees with `0 ** 0 == 1`.
+  Results promote to BigInt. Negative bases and negative or noninteger
+  heights are rejected. Even modest heights can require enormous results.
+* `x ∈ s` calls `s.include?(x)` and `x ∉ s` negates it, preserving
+  left-to-right operand evaluation. `a ∪ b`, `a ∩ b`, and `a ⊆ b` call
+  `union`, `intersect`, and `subset?`, respectively. Membership and subset
+  comparisons can chain, as in `x ∈ a ⊆ b`. Intersection binds more tightly
+  than union. Construct sets with `Set.of([1, 2, 3])` or `Set.empty`.
 * `<=>` is always a method call (`left.<=>(right)`).
 * Superscript digits after an expression desugar to exponentiation (`x⁷` ⇒ `x ** 7`).
 * `√expr` desugars to a unary square-root send.

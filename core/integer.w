@@ -105,6 +105,18 @@
 
   ## Number-theoretic.
 
+  # Finite right-associated power tower. Height zero is the empty tower 1.
+  # The reduce accumulator remains a promoting integer (including BigInt).
+  -> tetrate(height)
+    if !height.is_a?(Integer) || height < 0
+      raise "tetration height must be a nonnegative integer"
+    if self < 0
+      raise "tetration base must be a nonnegative integer"
+    return 1 if height == 0 || self == 1
+    if self == 0
+      return height.even? ? 1 : 0
+    (1..height).reduce(1) -> (acc, item) self ** acc
+
   # n! — product of 1..n. 0! = 1! = 1. Keep the accumulator in the
   # ordinary reduce block form so both bootstrap parsers lower this method
   # identically and multiplication can promote through Int into BigInt.

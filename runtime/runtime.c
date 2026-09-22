@@ -44428,6 +44428,12 @@ int64_t bigint_bitwise_source_complete_seam(void) {
 static WValue bit_binop(char op, WValue a, WValue b) {
     if (w_is_int(a) && w_is_int(b))
         return w_box_int_checked((int64_t)apply_bitop(op, (uint64_t)w_as_int(a), (uint64_t)w_as_int(b)));
+    /* Source-defined operators (including Set) own their dispatch before
+     * numeric coercion, just as they do for arithmetic operators. */
+    if (w_is_instance(a)) {
+        const char *selector = op == '&' ? "&" : op == '|' ? "|" : "^";
+        return w_method_call_fast(a, w_string(selector), &b, 1);
+    }
     if (!w_is_bigint(a) && !w_is_bigint(b))
         return w_box_int_checked((int64_t)apply_bitop(op, (uint64_t)coerce_bitwise_i64(a), (uint64_t)coerce_bitwise_i64(b)));
     {

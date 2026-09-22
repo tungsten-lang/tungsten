@@ -120,6 +120,16 @@
     v = lc[pos]
     c = (v >> 18) & cp_mask
 
+    # Explicit mathematical tokens, independent of Unicode identifier flags.
+    if c in (0x2218 0x2191 0x2208 0x2209 0x222A 0x2229 0x2286)
+      start = pos
+      pos++
+      if c == 0x2191 && pos < count && ((lc[pos] >> 18) & cp_mask) == 0x2191
+        pos++
+      tokens[tc] = t_op | ((pos - start) << 26) | (start << 2)
+      tc++
+      next
+
     case v & 0xD7
     when 0x10
       # Run of one or more space/tab characters mid-line. Emit a single

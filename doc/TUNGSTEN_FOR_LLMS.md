@@ -38,6 +38,12 @@ x = 42
 double = ->(x) x * 2
 << double.call(21)
 
+# Unary composition: construction does not invoke either operand.
+inc = ->(x) x + 1
+h = double ∘ inc
+<< h.call(3)                 # 8, equivalent to double(inc(3))
+# Named functions and receiver methods also work: f ∘ obj.normalize.
+
 # Partial application: a bare `_` argument is a placeholder
 inc = add(1, _)              # ->(x) add(1, x)
 << inc.call(41)              # 42
@@ -241,6 +247,24 @@ ensure
 ```
 
 ## Built-in Types
+
+Mathematical operators:
+
+```tungsten
+<< (0 <= x < 10)            # short circuits; evaluates x once
+<< (2 ↑↑ 4)                 # 65536; finite tetration, height zero gives 1
+a = Set.of([1, 2, 3])
+b = Set.of([3, 4])
+<< (2 ∈ a)                  # membership
+<< (4 ∉ a)                  # nonmembership
+<< (a ∪ b).to_a.sort        # [1, 2, 3, 4], union
+<< (a ∩ b).to_a.sort        # [3], intersection
+<< (Set.of([1, 2]) ⊆ a)     # subset, including equality
+```
+
+`↑↑` accepts nonnegative integer bases and heights and promotes to BigInt.
+It shares power precedence and associates to the right. `∩` binds more
+tightly than `∪`. Set operations produce new sets.
 
 - **Decimal**: `3.14` — bare fractional literals are **exact decimals**
   (`0.1 + 0.2 == 0.3` is `true`)

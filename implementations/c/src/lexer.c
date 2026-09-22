@@ -491,6 +491,14 @@ int tc_lex_source(const TcSource *source, TcTokens *tokens, TcError *err) {
     uint32_t c = (uint32_t)((v >> 18) & TC_CP_MASK);
     int f = (int)(v & 0xFF);
 
+    if (c == 0x2218 || c == 0x2191 || c == 0x2208 || c == 0x2209 ||
+        c == 0x222A || c == 0x2229 || c == 0x2286) {
+      uint32_t start = pos++;
+      if (c == 0x2191 && pos < count && cp_at(source, pos) == c) pos++;
+      if (!token_push(tokens, token_new(TC_T_OP, start, pos, 0), err)) return 0;
+      continue;
+    }
+
     if ((f & TC_F_WHITESPACE) && c != '\n' && c != '\r') {
       pos++;
       while (pos < count) {

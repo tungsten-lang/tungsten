@@ -496,6 +496,7 @@ compiled_specs=(
   spec/compiler/factorial_quotient_override_spec.w
   spec/compiler/factorial_quotient_spec.w
   spec/compiler/postfix_products_parser_spec.w
+  spec/compiler/math_operators_parser_spec.w
   spec/core/calendar_spec.w
   spec/core/hash_freeze_spec.w
 )
@@ -936,6 +937,7 @@ parity_specs=(
   spec/parity/integer_to_i_bignum_spec.w
   spec/parity/accessor_declarations_spec.w
   spec/parity/postfix_products_spec.w
+  spec/parity/math_operators_spec.w
   spec/parity/autoload_toplevel_fn_spec.w
   spec/parity/class_body_on_guard_spec.w
 )

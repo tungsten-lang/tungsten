@@ -1174,6 +1174,18 @@
         cap = args[0]
       return ccall("w_strbuf_new", cap)
 
+    # Lexically bound callables take priority over implicit method/builtin
+    # lookup, matching compiled calls. This also lets compositions capture
+    # parameters named first, last, etc. without invoking a builtin on nil.
+    if env.defined?(name) || @env.defined?(name)
+      v = nil
+      if env.defined?(name)
+        v = env.get(name)
+      else
+        v = @env.get(name)
+      if type(v) == "Array" && v.size() == 2 && is_ast_node?(v[1]) && ast_kind(v[1]) == :block
+        return call_block(v, args)
+
     # Method on current self — checked before the generic builtin table so a
     # user's own method (or top-level function, below) wins over a same-named
     # builtin that expects a real receiver (e.g. a top-level `-> max(arr)`
@@ -1213,19 +1225,5 @@
     # Class constructor
     if @classes.has_key?(name)
       return instantiate(@classes[name], args, env)
-
-    # A local/top-level variable holding a closure, invoked directly:
-    # `f = -> x ...; f(21)`. A block evaluates to an [env, node] pair (see the
-    # :block arm of evaluate); invoke it through call_block. Checked last so
-    # real methods/builtins keep priority — this only fires where dispatch
-    # would otherwise raise.
-    if env.defined?(name) || @env.defined?(name)
-      v = nil
-      if env.defined?(name)
-        v = env.get(name)
-      else
-        v = @env.get(name)
-      if type(v) == "Array" && v.size() == 2 && is_ast_node?(v[1]) && ast_kind(v[1]) == :block
-        return call_block(v, args)
 
     raise_typed("NoMethodError", "Undefined method '[name]'")

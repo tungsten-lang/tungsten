@@ -29,6 +29,7 @@ module Tungsten
 
     alias_method :union, :|
     alias_method :intersection, :&
+    alias_method :intersect, :&
     alias_method :difference, :-
 
     def subset?(other)      = @elements.subset?(coerce_other(other))

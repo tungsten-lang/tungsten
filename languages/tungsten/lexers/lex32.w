@@ -120,6 +120,16 @@
     v = lc[pos]
     c = (v >> 11) & cp_mask
 
+    # Explicit mathematical tokens, independent of Unicode identifier flags.
+    if c in (0x2218 0x2191 0x2208 0x2209 0x222A 0x2229 0x2286)
+      start = pos
+      pos++
+      if c == 0x2191 && pos < count && ((lc[pos] >> 11) & cp_mask) == 0x2191
+        pos++
+      tokens[tc] = t_op | ((pos - start) << 28) | (start << 4)
+      tc++
+      next
+
     case v & 0xD7
     when 0x10
       pos = ccall_nobox("w_lex32_scan_flag", data_ptr, count, pos, 0x10)

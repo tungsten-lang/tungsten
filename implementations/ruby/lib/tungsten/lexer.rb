@@ -649,11 +649,13 @@ module Tungsten
       elsif (text = scan(%r[(?<=^|\s)((?://|\|\||&&|\*\*|%%|~~|<<|>>)=)(?=\s|$)]))
         token text.to_sym
 
+      elsif (text = scan(/↑↑|[∘∈∉∪∩⊆]/))
+        token text.to_sym
+
       # math operators
       # ± is the uncertainty/measurement operator: `5.0 ± 0.1` builds a
       # Measurement(5.0, 0.1). It's a binary infix that returns a value
       # carrying both a magnitude and a Gaussian sigma.
-      # @todo add ∘ for function composition (U+2218)
       elsif (text = scan(%r[(?<=^|\s)([&|^%*/+~′″‴»±-])(?=\s|$)]))
         token text.to_sym
 

@@ -300,6 +300,13 @@
     when 157 then "CIDR6"
     when 159 then "PLUS_MINUS"
     when 168 then "APPROX"
+    when 170 then "COMPOSE"
+    when 171 then "TETRATE"
+    when 172 then "MEMBER"
+    when 173 then "NOT_MEMBER"
+    when 174 then "UNION"
+    when 175 then "INTERSECTION"
+    when 176 then "SUBSET"
     when 160 then "POW_EQ"
     when 161 then "AMP_EQ"
     when 162 then "PIPE_EQ"
@@ -1320,10 +1327,32 @@
     left
 
   -> parse_pipeline
-    left = parse_or()
+    left = parse_composition()
     while at_type?(T_PIPE_FWD)
       left = parse_pipeline_tail(left)
     left
+
+  # Composition creates a unary closure. Its operands are callable syntax:
+  # a bare function/closure name, a method reference, or a closure expression.
+  # Neither function is invoked until the resulting closure is called.
+  -> parse_composition
+    left = parse_or()
+    if at_type?(T_COMPOSE)
+      advance()
+      right = parse_composition()
+      arg = Tungsten:AST:Var.new("__composition#arg")
+      body = composition_call(left, composition_call(right, arg))
+      return Tungsten:AST:Block.new(["__composition#arg"], [body])
+    left
+
+  -> composition_call(operand, argument)
+    if ast_kind(operand) == :var
+      return Tungsten:AST:Call.new(nil, operand.name, [argument])
+    if ast_kind(operand) == :call && operand.receiver != nil && operand.args.size() == 0 && operand.block == nil
+      return Tungsten:AST:Call.new(operand.receiver, operand.name, [argument])
+    if ast_kind(operand) == :block || ast_kind(operand) == :lambda_arity || ast_kind(operand) == :binary_op
+      return Tungsten:AST:Call.new(operand, "call", [argument])
+    raise compile_error_at(:E_PARSE_COMPOSITION_OPERAND, "composition requires callable names, method references, or closures")
 
   -> parse_pipeline_tail(left)
     advance()
@@ -1421,10 +1450,14 @@
   -> parse_bitwise_or
     left = parse_bitwise_xor()
     # Dot-prefix: `.|` shares bitwise-or precedence with `|`.
-    while at_type?(T_PIPE) || at_type?(T_DOT_PIPE)
+    while at_type?(T_PIPE) || at_type?(T_DOT_PIPE) || at_type?(T_UNION)
+      set_union = at_type?(T_UNION)
       op = advance_op_sym()
       right = parse_bitwise_xor()
-      left = Tungsten:AST:BinaryOp.new(left, op, right)
+      if set_union
+        left = Tungsten:AST:Call.new(left, "union", [right])
+      else
+        left = Tungsten:AST:BinaryOp.new(left, op, right)
     left
 
   -> parse_bitwise_xor
@@ -1439,25 +1472,59 @@
   -> parse_bitwise_and
     left = parse_addition()
     # Dot-prefix: `.&` shares bitwise-and precedence with `&`.
-    while at_type?(T_AMPERSAND) || at_type?(T_DOT_AMP)
+    while at_type?(T_AMPERSAND) || at_type?(T_DOT_AMP) || at_type?(T_INTERSECTION)
+      set_intersection = at_type?(T_INTERSECTION)
       op = advance_op_sym()
       right = parse_addition()
-      left = Tungsten:AST:BinaryOp.new(left, op, right)
+      if set_intersection
+        left = Tungsten:AST:Call.new(left, "intersect", [right])
+      else
+        left = Tungsten:AST:BinaryOp.new(left, op, right)
     left
 
   -> parse_comparison
     left = parse_equality()
-    while parser_tok_type(@current_packed) in (T_LT T_LTE T_GT T_GTE T_SPACESHIP)
+    chain = []
+    while parser_tok_type(@current_packed) in (T_LT T_LTE T_GT T_GTE T_SPACESHIP T_MEMBER T_NOT_MEMBER T_SUBSET)
+      token_type = parser_tok_type(@current_packed)
+      hidden = "__comparison#" + current_line().to_s() + "_" + current_col().to_s()
       op = advance_op_sym()
       right = parse_equality()
-      if op == :SPACESHIP
-        # `<=>` has no runtime primitive — it is an ordinary polymorphic
-        # method (defined per class via `-> <=>/1`). Lower it as a direct
-        # method call so the receiver's own `<=>` runs.
+      if token_type == T_SPACESHIP
         left = Tungsten:AST:Call.new(left, "<=>", [right])
       else
-        left = Tungsten:AST:BinaryOp.new(left, op, right)
+        continues = parser_tok_type(@current_packed) in (T_LT T_LTE T_GT T_GTE T_MEMBER T_NOT_MEMBER T_SUBSET)
+        saved = right
+        if continues
+          saved = Tungsten:AST:Assign.new(Tungsten:AST:Var.new(hidden), right)
+        comparison = comparison_node(left, token_type, op, saved, hidden)
+        if continues
+          chain.push(comparison)
+          left = Tungsten:AST:Var.new(hidden)
+        else
+          # Nest the remaining comparisons on the RHS so every saved
+          # operand dominates its uses in the generated control flow.
+          left = comparison
+          i = chain.size() - 1
+          while i >= 0
+            left = Tungsten:AST:And.new(chain[i], left)
+            i -= 1
+          chain = []
     left
+
+  -> comparison_node(left, token_type, op, right, hidden)
+    if token_type == T_MEMBER || token_type == T_NOT_MEMBER
+      # Membership sends to the RHS collection, but operand evaluation
+      # remains left-to-right. Internal names cannot occur in source.
+      name = hidden + "_element"
+      save = Tungsten:AST:Assign.new(Tungsten:AST:Var.new(name), left)
+      test = Tungsten:AST:Call.new(right, "include?", [Tungsten:AST:Var.new(name)])
+      if token_type == T_NOT_MEMBER
+        test = Tungsten:AST:Not.new(test)
+      return Tungsten:AST:Begin.new([save, test])
+    if token_type == T_SUBSET
+      return Tungsten:AST:Call.new(left, "subset?", [right])
+    Tungsten:AST:BinaryOp.new(left, op, right)
 
   -> parse_equality
     left = parse_bitwise_or()
@@ -1519,6 +1586,10 @@
       advance()
       exp_lit = Tungsten:AST:Int.new(parse_int_value(exp_raw), nil, exp_raw)
       return Tungsten:AST:BinaryOp.new(left, :POW, exp_lit)
+    if at_type?(T_TETRATE)
+      advance()
+      right = parse_power()
+      return Tungsten:AST:Call.new(left, "tetrate", [right])
     if at_type?(T_POW)
       op = advance_op_sym()
       right = parse_power()

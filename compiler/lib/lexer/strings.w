@@ -857,6 +857,13 @@
     when :AMP_EQ then 161
     when :PIPE_EQ then 162
     when :APPROX then 168
+    when :COMPOSE then 170
+    when :TETRATE then 171
+    when :MEMBER then 172
+    when :NOT_MEMBER then 173
+    when :UNION then 174
+    when :INTERSECTION then 175
+    when :SUBSET then 176
     when :CARET_EQ then 163
     when :LSHIFT_EQ then 164
     when :RSHIFT_EQ then 165

@@ -576,6 +576,9 @@
   -> unit_alpha_at?(pos)
     return false if pos < 0 || pos >= @chars.size()
     cp = lc_cp(@lc[pos])
+    # Mathematical operators end a numeric literal even without whitespace.
+    # They must not be consumed as a Unicode unit suffix (e.g. 2↑↑3 or 2∈s).
+    return false if cp in (0x2218 0x2191 0x2208 0x2209 0x222A 0x2229 0x2286)
     is_alpha?(@lc[pos]) || cp >= 128
 
   # Longest registered phrase after a number and a space. This covers Ruby's

@@ -466,6 +466,20 @@
       # as a method name (`-> ≈(other)`) via the parser's operator-method
       # list, like == and <=>.
       emit_at(:APPROX, raw, off)
+    elsif raw == "∘"
+      emit_at(:COMPOSE, raw, off)
+    elsif raw == "↑↑"
+      emit_at(:TETRATE, raw, off)
+    elsif raw == "∈"
+      emit_at(:MEMBER, raw, off)
+    elsif raw == "∉"
+      emit_at(:NOT_MEMBER, raw, off)
+    elsif raw == "∪"
+      emit_at(:UNION, raw, off)
+    elsif raw == "∩"
+      emit_at(:INTERSECTION, raw, off)
+    elsif raw == "⊆"
+      emit_at(:SUBSET, raw, off)
     elsif raw == "%"
       emit_at(:PERCENT, raw, off)
     elsif raw == "<"

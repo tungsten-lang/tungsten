@@ -239,6 +239,15 @@ T_APPROX          = 168
 # Tight postfix primorial: product of primes at most the receiver.
 T_PRIMORIAL       = 169
 
+# Mathematical composition, tetration, and set notation.
+T_COMPOSE         = 170
+T_TETRATE         = 171
+T_MEMBER          = 172
+T_NOT_MEMBER      = 173
+T_UNION           = 174
+T_INTERSECTION    = 175
+T_SUBSET          = 176
+
 + Token
   # Force-load helper — referencing this from a caller triggers the
   # autoload pass to load core/token.w, which in turn registers Token

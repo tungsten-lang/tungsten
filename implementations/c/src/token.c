@@ -173,6 +173,13 @@ static TcKind classify_op(const TcSource *source, WValue token, TcKind last_kind
   if (token_text_is(source, token, "/")) return TC_K_SLASH;
   if (token_text_is(source, token, "·") || token_text_is(source, token, "⋅")) return TC_K_DOT_PRODUCT;
   if (token_text_is(source, token, "×")) return TC_K_CROSS_PRODUCT;
+  if (token_text_is(source, token, "∘")) return TC_K_COMPOSE;
+  if (token_text_is(source, token, "↑↑")) return TC_K_TETRATE;
+  if (token_text_is(source, token, "∈")) return TC_K_MEMBER;
+  if (token_text_is(source, token, "∉")) return TC_K_NOT_MEMBER;
+  if (token_text_is(source, token, "∪")) return TC_K_UNION;
+  if (token_text_is(source, token, "∩")) return TC_K_INTERSECTION;
+  if (token_text_is(source, token, "⊆")) return TC_K_SUBSET;
   if (token_text_is(source, token, "%")) return TC_K_PERCENT;
   if (token_text_is(source, token, "<")) return TC_K_LT;
   if (token_text_is(source, token, ">")) return TC_K_GT;
@@ -261,6 +268,8 @@ const char *tc_kind_name(TcKind kind) {
     TC_KIND_CASE(SLASH_EQ); TC_KIND_CASE(PERCENT_EQ); TC_KIND_CASE(MINUS); TC_KIND_CASE(STAR);
     TC_KIND_CASE(SLASH); TC_KIND_CASE(DOT_PRODUCT); TC_KIND_CASE(CROSS_PRODUCT); TC_KIND_CASE(PERCENT);
     TC_KIND_CASE(LT); TC_KIND_CASE(GT); TC_KIND_CASE(ASSIGN); TC_KIND_CASE(BANG); TC_KIND_CASE(PRIMORIAL);
+    TC_KIND_CASE(COMPOSE); TC_KIND_CASE(TETRATE); TC_KIND_CASE(MEMBER); TC_KIND_CASE(NOT_MEMBER);
+    TC_KIND_CASE(UNION); TC_KIND_CASE(INTERSECTION); TC_KIND_CASE(SUBSET);
     TC_KIND_CASE(DOTDOTDOT); TC_KIND_CASE(DOTDOT); TC_KIND_CASE(DOT_PLUS); TC_KIND_CASE(DOT_MINUS);
     TC_KIND_CASE(DOT_STAR); TC_KIND_CASE(DOT_SLASH); TC_KIND_CASE(DOT_PIPE); TC_KIND_CASE(DOT_AMP);
     TC_KIND_CASE(DOT_CARET); TC_KIND_CASE(DOT_LSHIFT); TC_KIND_CASE(DOT_RSHIFT); TC_KIND_CASE(DOT);

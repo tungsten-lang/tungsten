@@ -679,6 +679,41 @@ use regex_base
       emit(:MAGIC_DIR, "__DIR__")
       return nil
 
+    if ch == "↑" && @pos + 1 < @char_count && @chars[@pos + 1] == "↑"
+      @pos += 2
+      emit(:TETRATE, "↑↑")
+      return nil
+
+    if ch == "∘"
+      @pos += 1
+      emit(:COMPOSE, ch)
+      return nil
+
+    if ch == "∈"
+      @pos += 1
+      emit(:MEMBER, ch)
+      return nil
+
+    if ch == "∉"
+      @pos += 1
+      emit(:NOT_MEMBER, ch)
+      return nil
+
+    if ch == "∪"
+      @pos += 1
+      emit(:UNION, ch)
+      return nil
+
+    if ch == "∩"
+      @pos += 1
+      emit(:INTERSECTION, ch)
+      return nil
+
+    if ch == "⊆"
+      @pos += 1
+      emit(:SUBSET, ch)
+      return nil
+
     # Greek/math symbols as identifiers: π, τ, ∞, etc.
     if ch == "±"
       @pos += 1

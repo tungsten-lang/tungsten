@@ -2371,7 +2371,13 @@ module Tungsten
 
     def scan_unicode_operator
       start_col = @col
-      if match_bytes?("√")
+      if match_bytes?("↑↑")
+        2.times { advance_utf8_char }
+        set_token(:"↑↑", nil, @row, start_col)
+      elsif (operator = %w[∘ ∈ ∉ ∪ ∩ ⊆].find { |op| match_bytes?(op) })
+        advance_utf8_char
+        set_token(operator.to_sym, nil, @row, start_col)
+      elsif match_bytes?("√")
         # Prefix square root: √expr ⇒ expr.sqrt (parser desugars).
         advance_utf8_char
         set_token(:"√", nil, @row, start_col)

@@ -1273,15 +1273,18 @@ module Tungsten
 
       right = evaluate(node.right)
 
-      # Source-defined objects own their arithmetic operators just as they do
+      # Source-defined objects own their arithmetic and set operators as they do
       # in the self-hosted interpreter and native lowering. Ruby cannot apply
       # primitive arithmetic directly to Runtime::WObject.
       if left.is_a?(Runtime::WObject)
         operator_name = {
-          :+ => "+", :- => "-", :* => "*", :/ => "/", :** => "**", :% => "%"
+          :+ => "+", :- => "-", :* => "*", :/ => "/", :** => "**", :% => "%",
+          :| => "|", :& => "&", :^ => "^", :== => "==", :!= => "==",
+          :<=> => "<=>", :< => "<", :<= => "<=", :> => ">", :>= => ">="
         }[node.operator]
         if operator_name && (method = left.w_class.lookup_method(operator_name))
-          return call_w_method(left, method, [right], call_node: node)
+          result = call_w_method(left, method, [right], call_node: node)
+          return node.operator == :!= ? !truthy?(result) : result
         end
       end
 
@@ -4711,6 +4714,16 @@ module Tungsten
         recv.is_a?(::Integer) && no_call_args?(arg_nodes) ? recv - 1 : NO_DIRECT_CALL
       when "next", "succ"
         recv.is_a?(::Integer) && no_call_args?(arg_nodes) ? recv + 1 : NO_DIRECT_CALL
+      when "tetrate"
+        arg = one_call_arg_node(arg_nodes)
+        return NO_DIRECT_CALL unless recv.is_a?(::Integer) && arg
+        height = direct_arg_value(arg)
+        runtime_error("tetration height must be a nonnegative integer") unless height.is_a?(::Integer) && height >= 0
+        runtime_error("tetration base must be a nonnegative integer") if recv.negative?
+        return 1 if height.zero? || recv == 1
+        return height.even? ? 1 : 0 if recv.zero?
+
+        height.times.reduce(1) { |tower, _| recv ** tower }
       when "factorial", "primorial"
         return NO_DIRECT_CALL unless recv.is_a?(::Integer) && no_call_args?(arg_nodes)
         runtime_error("Int##{name}: negative receiver") if recv.negative?

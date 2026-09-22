@@ -503,7 +503,10 @@ use known_units
 
   -> unit_alpha_at?(pos)
     return false if pos < 0 || pos >= @chars.size()
-    is_alpha?(@lc[pos]) || lc_cp(@lc[pos]) >= 128
+    cp = lc_cp(@lc[pos])
+    # Mathematical operators are not unit suffixes, including without spaces.
+    return false if cp in (0x2218 0x2191 0x2208 0x2209 0x222A 0x2229 0x2286)
+    is_alpha?(@lc[pos]) || cp >= 128
 
   -> next_nonspace_is_lparen?
     p = @pos

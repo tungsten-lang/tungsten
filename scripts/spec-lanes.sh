@@ -490,8 +490,14 @@ compiled_specs=(
   spec/numeric/trigintaduonion_spec.w
   spec/core/instant_spec.w
   spec/core/time_spec.w
-  spec/compiler/rescue_bare_method_call_spec.w
   spec/compiler/accessor_declaration_loc_spec.w
+  spec/compiler/rescue_bare_method_call_spec.w
+  spec/compiler/factorial_quotient_enumeration_override_spec.w
+  spec/compiler/factorial_quotient_override_spec.w
+  spec/compiler/factorial_quotient_spec.w
+  spec/compiler/postfix_products_parser_spec.w
+  spec/core/calendar_spec.w
+  spec/core/hash_freeze_spec.w
 )
 compiled_priority_specs=(
   spec/core/algebra_c_ab_divisors_spec.w
@@ -754,6 +760,7 @@ interpreter_specs=(
   spec/numeric/sedenion_spec.w
   spec/numeric/sexagintaquatronion_spec.w
   spec/numeric/trigintaduonion_spec.w
+  spec/core/hash_freeze_spec.w
 )
 interpreter_reject_specs=(
   spec/compiler/date_invalid_constructor.w
@@ -927,6 +934,8 @@ parity_specs=(
   spec/parity/units_unary_minus_spec.w
   spec/parity/integer_inference_pins_spec.w
   spec/parity/integer_to_i_bignum_spec.w
+  spec/parity/accessor_declarations_spec.w
+  spec/parity/postfix_products_spec.w
   spec/parity/autoload_toplevel_fn_spec.w
 )
 exclude_specs=(

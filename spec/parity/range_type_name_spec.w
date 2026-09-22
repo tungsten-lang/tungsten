@@ -1,5 +1,6 @@
-## parity xfail type(1..2) is "Hash" interpreted (ranges are hash-backed in interpreter.w) but "Range" compiled
-# Ranges: the runtime type name of a range value.
+# Ranges: type() reports Range for inclusive and exclusive ranges.
+# The interpreter stores a range as a tagged hash; type() still
+# reports the language class.
 #
 # Cross-engine parity spec (scripts/parity.sh).
 

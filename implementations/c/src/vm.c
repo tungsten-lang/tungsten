@@ -214,6 +214,19 @@ static int hash_has_key_text(TcRuntimeHash *hash, const char *text) {
   return 0;
 }
 
+/* Bootstrap ranges are hashes: {__range__: true, from, to, exclusive}
+ * or the interpreter shape {rt: :range}. type() reports Range. */
+static int hash_is_range(TcRuntimeHash *hash) {
+  if (!hash) return 0;
+  if (hash_has_key_text(hash, "__range__")) return 1;
+  for (uint32_t i = 0; i < hash->used; i++) {
+    TcValue k = hash->keys[i];
+    if (k == TC_HASH_TOMBSTONE) continue;
+    if (value_text_eq(k, "rt") && value_text_eq(hash->values[i], "range")) return 1;
+  }
+  return 0;
+}
+
 static int object_is_class(TcRuntimeObject *object, const char *class_name, size_t class_name_len) {
   // class_name on the object is always an interned bytes pointer
   // (see runtime_object_new), so callers passing the matching interned
@@ -1950,7 +1963,9 @@ static const char *value_type_name(TcValue value) {
     case TC_VAL_STRING: return "String";
     case TC_VAL_SYMBOL: return "Symbol";
     case TC_VAL_ARRAY: return "Array";
-    case TC_VAL_HASH: return "Hash";
+    case TC_VAL_HASH:
+      if (hash_is_range(tc_as_hash(value))) return "Range";
+      return "Hash";
     case TC_VAL_OBJECT: return tc_as_object(value) ? tc_as_object(value)->class_name : "Object";
     case TC_VAL_AST:
       if (tc_as_ast_ptr(&value)->kind == TC_AST_ARRAY) return "Array";

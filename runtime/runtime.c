@@ -24178,6 +24178,7 @@ static int is_currency_any(WValue v);
 static int is_quantity_any(WValue v);
 static int is_duration_any(WValue v);
 static int is_decimal_any(WValue v);
+static int double_to_sig_scale(double d, int64_t *sig, int *scale);
 #define W_DECFLAG_BIGSIG 1
 static int decimal_is_bigsig(WValue v);
 static WValue decimal_big_add(WValue a, WValue b, int subtract);
@@ -24638,6 +24639,35 @@ WValue w_currency_mul_scalar(WValue currency, WValue scalar) {
         die("cannot multiply currency by non-numeric");
     }
     return w_currency(sym, (int64_t)c_sig, c_scale);
+}
+
+/* currency / scalar keeps the currency. The quotient uses the same
+ * decimal digit rule as quantity / scalar. currency / currency of the
+ * same symbol is a unitless decimal ratio. */
+WValue w_currency_div_scalar(WValue currency, WValue scalar) {
+    int sym;
+    int64_t c_sig64;
+    int c_scale;
+    currency_extract(currency, &sym, &c_sig64, &c_scale);
+    int64_t s_sig; int s_scale;
+    if (w_is_int(scalar)) {
+        s_sig = w_as_int(scalar);
+        s_scale = 0;
+    } else if (is_decimal_any(scalar)) {
+        decimal_extract(scalar, &s_sig, &s_scale);
+    } else if (w_is_double(scalar)) {
+        if (!double_to_sig_scale(w_as_double(scalar), &s_sig, &s_scale))
+            die("cannot divide currency by non-finite float");
+    } else {
+        die("cannot divide currency by non-numeric");
+        return W_NIL;
+    }
+    if (s_sig == 0) die_as("ZeroDivisionError", "division by zero");
+    int64_t result_sig;
+    int result_scale = c_scale - s_scale;
+    if (!decimal_quotient_i128(c_sig64, s_sig, 0, &result_sig, &result_scale))
+        die("currency overflow dividing by scalar");
+    return w_currency(sym, result_sig, result_scale);
 }
 
 /* ---- Quantity ---- */
@@ -42658,10 +42688,27 @@ WValue w_div(WValue a, WValue b) {
         if (w_try_reverse_binop(a, b, "/", &reversed)) return reversed;
     }
     if (w_is_double(a) || w_is_double(b)) {
-        double bv = as_numeric_double(b);
-        if (bv == 0.0) die_as("ZeroDivisionError", "division by zero");
-        return w_float(as_numeric_double(a) / bv);
+        /* IEEE 754: divide-by-zero is signed infinity, 0/0 is NaN. */
+        return w_float(as_numeric_double(a) / as_numeric_double(b));
     }
+    if (is_currency_any(a) && is_currency_any(b)) {
+        int sym_a, sym_b;
+        int64_t a_sig, b_sig;
+        int a_scale, b_scale;
+        currency_extract(a, &sym_a, &a_sig, &a_scale);
+        currency_extract(b, &sym_b, &b_sig, &b_scale);
+        if (sym_a != sym_b) {
+            dief("cannot divide %s by %s", currency_symbols[sym_a], currency_symbols[sym_b]);
+        }
+        int64_t result_sig;
+        int result_scale = a_scale - b_scale;
+        if (b_sig == 0) die_as("ZeroDivisionError", "division by zero");
+        if (!decimal_quotient_i128(a_sig, b_sig, 0, &result_sig, &result_scale))
+            die("currency overflow dividing currencies");
+        return w_decimal(result_sig, result_scale);
+    }
+    if (is_currency_any(a) && (w_is_int(b) || is_decimal_any(b) || w_is_double(b)))
+        return w_currency_div_scalar(a, b);
     if (w_both_ints(a, b)) {
         int64_t bv = w_as_int(b);
         if (bv == 0) die_as("ZeroDivisionError", "division by zero");
@@ -42750,9 +42797,8 @@ WValue w_mod(WValue a, WValue b) {
     if (w_is_instance(a))
         return w_method_call_fast(a, w_string("%"), &b, 1);
     if (w_is_double(a) || w_is_double(b)) {
-        double bv = as_numeric_double(b);
-        if (bv == 0.0) die("modulo by zero");
-        return w_float(fmod(as_numeric_double(a), bv));
+        /* IEEE remainder: a zero divisor is NaN, not a language error. */
+        return w_float(fmod(as_numeric_double(a), as_numeric_double(b)));
     }
     if (w_both_ints(a, b)) {
         int64_t bv = w_as_int(b);
@@ -45432,6 +45478,11 @@ WValue w_lt(WValue a, WValue b) {
     if (w_is_instant(a) && w_is_instant(b))
         return w_bool(w_unbox_instant(a) < w_unbox_instant(b));
 
+    /* Date is year-major in the packed word, so the raw bits are the
+     * BitOrdered order of the civil tuple. */
+    if (w_is_date(a) && w_is_date(b))
+        return w_bool(a < b);
+
     if (is_decimal_any(a) && is_decimal_any(b))
         return w_bool(decimal_compare(a, b) < 0);
 
@@ -45499,6 +45550,8 @@ WValue w_spaceship(WValue a, WValue b) {
         int64_t x = w_unbox_instant(a), y = w_unbox_instant(b);
         return w_int(x < y ? -1 : (x > y ? 1 : 0));
     }
+    if (w_is_date(a) && w_is_date(b))
+        return w_int(a < b ? -1 : (a > b ? 1 : 0));
     if (is_decimal_any(a) && is_decimal_any(b)) {
         int c = decimal_compare(a, b);
         return w_int(c < 0 ? -1 : (c > 0 ? 1 : 0));
@@ -45555,6 +45608,9 @@ WValue w_gt(WValue a, WValue b) {
     if (w_is_instant(a) && w_is_instant(b))
         return w_bool(w_unbox_instant(a) > w_unbox_instant(b));
 
+    if (w_is_date(a) && w_is_date(b))
+        return w_bool(a > b);
+
     if (is_decimal_any(a) && is_decimal_any(b))
         return w_bool(decimal_compare(a, b) > 0);
 
@@ -45606,6 +45662,9 @@ WValue w_lte(WValue a, WValue b) {
     if (w_is_instant(a) && w_is_instant(b))
         return w_bool(w_unbox_instant(a) <= w_unbox_instant(b));
 
+    if (w_is_date(a) && w_is_date(b))
+        return w_bool(a <= b);
+
     if (is_decimal_any(a) && is_decimal_any(b))
         return w_bool(decimal_compare(a, b) <= 0);
 
@@ -45656,6 +45715,9 @@ WValue w_gte(WValue a, WValue b) {
 
     if (w_is_instant(a) && w_is_instant(b))
         return w_bool(w_unbox_instant(a) >= w_unbox_instant(b));
+
+    if (w_is_date(a) && w_is_date(b))
+        return w_bool(a >= b);
 
     if (is_decimal_any(a) && is_decimal_any(b))
         return w_bool(decimal_compare(a, b) >= 0);

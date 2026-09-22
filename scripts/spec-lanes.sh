@@ -875,6 +875,8 @@ parity_specs=(
   spec/parity/class_constructors_spec.w
   spec/parity/class_generics_spec.w
   spec/parity/class_inheritance_traits_spec.w
+  spec/parity/currency_quantity_div_spec.w
+  spec/parity/date_order_spec.w
   spec/parity/closures_lambdas_spec.w
   spec/parity/container_string_quoting_spec.w
   spec/parity/control_begin_rescue_spec.w
@@ -910,6 +912,7 @@ parity_specs=(
   spec/parity/range_type_name_spec.w
   spec/parity/string_esc_bracket_spec.w
   spec/parity/string_interpolation_spec.w
+  spec/parity/super_value_spec.w
   spec/parity/string_methods_spec.w
   spec/parity/string_padding_spec.w
   spec/parity/string_range_index_spec.w

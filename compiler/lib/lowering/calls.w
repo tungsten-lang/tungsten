@@ -128,6 +128,16 @@
   if receiver == nil && name in ("block?" "block_given?") && args != nil && args.size() == 0 && node.block == nil
     return lower_block_present(ctx)
 
+  # Prefix Σ(f, range) is the same sum as (range)/Σ(f). The parser has
+  # already turned a polynomial body into a one-parameter block; the
+  # pipeline lowering owns both the Faulhaber closed form and the loop
+  # fallback. One argument is the same bounds error the interpreter raises.
+  if receiver == nil && name == "Σ" && node.block == nil
+    if args == nil || args.size() != 2 || !is_ast_node?(args[0]) || ast_kind(args[0]) != :block
+      raise compile_error_for_node(:E_LOWER_UNKNOWN_FN, "Σ needs bounds: Σ(2x² + x, 1..10) or (1..10)/Σ(2x² + x)", ctx[:source_path], node)
+    pipe = Tungsten:AST:Calc.new("sum", Tungsten:AST:Map.new(args[1], args[0], :map), :auto)
+    return lower_pipeline(ctx, pipe)
+
   # Compiler-generated typed-overload dispatch. These calls never appear in
   # user AST: definitions.w synthesizes them only after it has selected the
   # exact worker set for a class. Keep both operations out of dynamic method

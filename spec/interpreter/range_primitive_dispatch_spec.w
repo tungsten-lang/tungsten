@@ -9,8 +9,9 @@
 # The fix must return EARLY from primitive_runtime_class for a range-tagged
 # hash — merely leaving class_name nil is not enough, because the
 # `class_name == nil` fallback re-derives the class from w_type_name, which
-# reports plain "Hash" for this value. So `size` regressing to 4 here means
-# that early return was lost or bypassed again.
+# reports "Range" and would run the packed Range methods on this hash.
+# So `size` regressing to 4 here means that early return was lost or
+# bypassed again.
 #
 # Every expectation below is verified to match the COMPILED engine too, with
 # ONE exception called out at its check: `Range#length` is interpreter-only —

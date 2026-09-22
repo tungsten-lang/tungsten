@@ -1,7 +1,7 @@
-## parity xfail one function called with two different arities: interpreter drops/nils the extras at each site; compiled fails at lowering with "WIRE call contract mismatch" (i64(i64,i64) in @main vs i64(i64,i64,i64) in @main)
-# Arity: the same method called with different argument counts in one
-# program (a single wrong-arity call site compiles fine — see
-# arity_extra_args_named_spec).
+## parity xfail both engines reject a second call of the same function with a different arity; compiled reports E_LOWER_ARITY before any output, the interpreter prints the earlier exact call and then raises at the extra-argument call
+# Arity: one function called at two argument counts. The extra call is
+# rejected. The compiled engine reports it at compile time; the
+# interpreter reports it when that call runs.
 #
 # Cross-engine parity spec (scripts/parity.sh).
 

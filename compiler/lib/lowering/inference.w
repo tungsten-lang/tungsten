@@ -14,11 +14,12 @@
 #   closed-form — the result type follows from the operand types by the
 #                 language's own rules (int ⊕ int, float ⊕ float, `.size`
 #                 of an array is a machine int, string ⊕ string is text).
-# Name-based guesses about an UNKNOWN receiver are not evidence: `x.to_i`
-# typed :i64 unboxes the BigInt that `"99999999999999999999".to_i`
-# legitimately returns and `x + 1` prints 7766279631452241920. Two such
-# arms remain (`to_i`, `to_s`; see their comment) because the compiler's
-# own sources depend on them; the divergence is pinned in spec/parity.
+# Name-based guesses about an UNKNOWN receiver are not evidence. A receiver
+# known to be a String is the exception for `to_i`: the runtime returns a
+# heap BigInt past i64, so the result is the boxed promotable type :int.
+# Typing that :i64 unboxes the pointer (`s.to_i * 3`). `to_i` on any other
+# receiver, and `to_s`, still answer by name (see their comment) because
+# the compiler's own sources depend on them.
 #
 # TUNGSTEN_INFER=boxed is the reference oracle: every untyped decimal
 # integer literal answers :int and integer arithmetic never picks a machine
@@ -243,20 +244,16 @@
           return :small_array
     if node.name == "lchs"
       return infer_lchs_return_type(node.args)
-    if node.name == "to_i" && node.args != nil && node.args.size() == 0
-      return :i64
     # to_s always yields text (both the bare and radix forms). Every builtin
     # returns a string and user to_s methods that don't would already break
     # interpolation, so downstream sites — `.size()`, `s + x.to_s()` — may
     # take the typed-string direct routes instead of IC dispatch.
-    # KNOWN GUESSES (see the evidence policy above): both arms answer for an
-    # unknown receiver by NAME. They cannot be retired in isolation because
-    # the compiler's own sources are written against them (e.g. the emitter
-    # computes NaN-box constants from `raw.to_s().to_i()` and hands the raw
-    # i64 to a bit formatter); gating them changes how the compiler compiles
-    # itself. Retiring them means annotating those sites first. The one
-    # unsound consequence — String#to_i past i64 typed as a machine int — is
-    # pinned in spec/parity/integer_to_i_bignum_spec.w.
+    # KNOWN GUESS (see the evidence policy above): this arm answers for an
+    # unknown receiver by NAME. It cannot be retired in isolation because
+    # the compiler's own sources are written against it; gating it changes
+    # how the compiler compiles itself. Retiring it means annotating those
+    # sites first. `raw.to_s().to_i()` is not one of them: to_s is :string,
+    # and String#to_i is the :int arm below.
     if node.name == "to_s" && node.args != nil && node.args.size() <= 1
       return :string
     # Math.* compiler intrinsics always yield a float: the w_math_*
@@ -271,6 +268,14 @@
       if math_intrinsic_runtime_name(node.name, node.args.size()) != nil
         return :float
     recv_t = infer_type(node.receiver, var_types, fn_return_types, infer_maps)
+    if node.name == "to_i" && node.args != nil && node.args.size() == 0
+      # String#to_i is an arbitrary-precision Int. A known String receiver
+      # (literal, string local, or to_s) stays :int so the next arithmetic
+      # promotes instead of unboxing a heap BigInt. Any other receiver keeps
+      # the name-based :i64 guess.
+      if recv_t == :string
+        return :int
+      return :i64
     # bool_array is its own legacy type and not in is_array_type?, so name it
      # explicitly: arr[i] returns :bool, lining up with `id_bool(x) (bool) bool`
      # typed-overload dispatch.
@@ -406,8 +411,12 @@
     return :bool
   when :unary_op
     op = node.op
-    if op in (:PLUS :MINUS) && node.operand != nil && ast_kind(node.operand) == :int
-      return infer_type(node.operand, var_types, fn_return_types, infer_maps)
+    if op in (:PLUS :MINUS) && node.operand != nil
+      # A float operand stays a float, so `-~1.0 / ~0.0` takes the same
+      # IEEE fdiv as `~1.0 / ~0.0`. An int operand keeps its own type.
+      ot = infer_type(node.operand, var_types, fn_return_types, infer_maps)
+      if ot == :float || ot == :f64 || ast_kind(node.operand) == :int
+        return ot
   else
     nil
 

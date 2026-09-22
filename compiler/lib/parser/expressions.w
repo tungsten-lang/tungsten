@@ -208,8 +208,8 @@
   # Σ(expr[, range]) / ∫(expr[, range]) called as plain functions rather than
   # pipeline stages: rewrite the polynomial body into a real lambda Block,
   # exactly as the pipeline Σ does (implicit-mult quantities like 2x⁷ become
-  # 2*x**7). The interpreter provides the Σ/∫ builtins; bounds come from the
-  # optional range argument (the REPL inspector defaults Σ's when omitted).
+  # 2*x**7). Prefix Σ(block, range) lowers as (range)/Σ(block). ∫ stays an
+  # interpreter builtin. The REPL inspector defaults Σ's bounds when omitted.
   -> math_fn_rewrite(name, args)
     if !(name in ("Σ" "∫"))
       return args

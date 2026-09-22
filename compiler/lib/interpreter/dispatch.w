@@ -528,7 +528,8 @@
     # size/length/to_a directly and materializes to an array for every other
     # Enumerable name. This must return EARLY, not merely leave class_name
     # nil: the `class_name == nil` fallback below re-derives the class from
-    # w_type_name, which reports plain "Hash" for this value.
+    # w_type_name, which reports "Range" and would autoload the packed
+    # Range class onto this hash record.
     if t == "Hash" && recv.has_key?(:rt) && recv[:rt] == :range
       return nil
     if t == "Array"
@@ -671,6 +672,10 @@
         return value[:name]
       if value[:rt] == :object
         return value[:w_class][:name]
+      # `(1..2)` is stored as {rt: :range, ...}. type() reports the
+      # language class, matching the runtime's g_tn_range.
+      if value[:rt] == :range
+        return "Range"
     t
 
   # Resolve the .w source FILE that defines `class_name` (REPL introspection,
@@ -1090,6 +1095,10 @@
     method_env.define("__block__", nil)
     @self_stack.push(recv)
     @method_stack.push(method)
+    fid = @next_return_frame
+    @next_return_frame += 1
+    @return_frames.push(fid)
+    method_env.define("__return_frame_id__", fid)
     result = nil
     pending_error = nil
     begin
@@ -1188,9 +1197,10 @@
       begin
         result = evaluate_body(ast_get(method, :body), method_env)
       rescue err
-        if err == "__SIGNAL__" && @signal[:type] == :return
+        if err == "__SIGNAL__" && @signal[:type] == :return && @signal[:frame_id] == fid
           result = @signal[:value]
           @signal[:type] = nil
+          @signal[:frame_id] = nil
         else
           # Defer the re-raise until the method's rescue frame has been fully
           # popped. Re-raising from inside this rescue could target the same
@@ -1200,6 +1210,7 @@
     ensure
       @method_stack.pop()
       @self_stack.pop()
+      @return_frames.pop()
     if pending_error != nil
       raise pending_error
     result
@@ -1344,7 +1355,7 @@
       params = ast_get(blk_node, :params)
       i = 0
       while i < params.size()
-        block_env.define(params[i], nil)
+        bind_block_param(block_env, params[i], nil)
         i += 1
       captured_self = current_self()
       if blk_env.defined?("__block_self__")
@@ -1365,6 +1376,10 @@
         raise pending_error
       return result
     nil
+
+  -> bind_block_param(block_env, name, value)
+    block_env.define(name, value)
+    block_env.set_hint(name, "int")
 
   # Scalar one-argument block invocation. This preserves call_block's implicit
   # parameter and destructuring rules without allocating an `[arg]` Array.
@@ -1390,18 +1405,18 @@
         while i < free_vars.size() && !bound
           candidate = free_vars[i]
           if !blk_env.defined_locally_or_in_scope?(candidate)
-            block_env.define(candidate, arg)
+            bind_block_param(block_env, candidate, arg)
             bound = true
           i += 1
       elsif params.size() > 1 && type(arg) == "Array"
         i = 0
         while i < params.size()
-          block_env.define(params[i], i < arg.size() ? arg[i] : nil)
+          bind_block_param(block_env, params[i], i < arg.size() ? arg[i] : nil)
           i += 1
       else
         i = 0
         while i < params.size()
-          block_env.define(params[i], i == 0 ? arg : nil)
+          bind_block_param(block_env, params[i], i == 0 ? arg : nil)
           i += 1
       captured_self = current_self()
       if blk_env.defined?("__block_self__")
@@ -1447,7 +1462,7 @@
         while i < free_vars.size() && argi < args.size()
           candidate = free_vars[i]
           if !blk_env.defined_locally_or_in_scope?(candidate)
-            block_env.define(candidate, args[argi])
+            bind_block_param(block_env, candidate, args[argi])
             argi += 1
           i += 1
       else
@@ -1459,9 +1474,9 @@
         i = 0
         while i < params.size()
           if i < eff_args.size()
-            block_env.define(params[i], eff_args[i])
+            bind_block_param(block_env, params[i], eff_args[i])
           else
-            block_env.define(params[i], nil)
+            bind_block_param(block_env, params[i], nil)
           i += 1
       # Evaluate the body under the closure's captured self (see the :block
       # arm of evaluate). Interpreter-built [env, node] pairs carry no

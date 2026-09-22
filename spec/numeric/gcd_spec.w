@@ -49,12 +49,6 @@ gcd_check(
 gcd_check("gcd.big_pow3", (3**200).gcd(3**150), "369988485035126972924700782451696644186473100389722973815184405301748249")
 # Products of distinct Mersenne primes sharing exactly 2^89-1:
 # (2^89-1)(2^107-1) vs (2^89-1)(2^127-1).
-# TODO(compiler bug): building BOTH operands via "literal".to_i miscompiles —
-# String#to_i infers :int, the inlined Integer#gcd then runs raw-i64
-# arithmetic on unboxed BigInt pointer bits and returns 1 (interpreter is
-# correct; one to_i operand mixed with a **-built one is also correct).
-# Same family as the 35a03fe :int-raw-unbox fixes. Until that is fixed the
-# products are built with ** so this case asserts real multi-limb gcd.
 pq = (2**89 - 1) * (2**107 - 1)
 pr = (2**89 - 1) * (2**127 - 1)
 gcd_check("gcd.big_shared_prime", pq.gcd(pr), "618970019642690137449562111")
@@ -62,6 +56,10 @@ gcd_check("gcd.big_shared_prime", pq.gcd(pr), "618970019642690137449562111")
 pr_toi = "105312291668557186697918027513529248857806893649219117400977309697".to_i
 gcd_check("gcd.big_shared_prime_toi_arg", pq.gcd(pr_toi), "618970019642690137449562111")
 gcd_check("gcd.big_shared_prime_toi_recv", pr_toi.gcd(pq), "618970019642690137449562111")
+# Both operands from String#to_i. The result is a boxed :int, so gcd must
+# not unbox the heap pointers.
+pq_toi = "100433627766186892221372630609062766858404681029709092356097".to_i
+gcd_check("gcd.big_shared_prime_both_toi", pq_toi.gcd(pr_toi), "618970019642690137449562111")
 # 2^300+1 vs 2^150+1 are coprime (2^300+1 = 2 mod any divisor of 2^150+1).
 gcd_check("gcd.big_coprime", (2**300 + 1).gcd(2**150 + 1), "1")
 

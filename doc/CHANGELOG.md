@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Float division by zero is IEEE** — `~1.0 / ~0.0` is `inf`, `-~1.0 / ~0.0` is `-inf`, and `~0.0 / ~0.0` is `nan` on both engines. A unary minus of a float stays a float, so the negated form takes the same `fdiv`.
+- **Currency and quantity division** — `$10.00 / 3` stays currency, `10 m / 2` stays a quantity, and `$10.00 / $2.00` is a decimal ratio.
+- **Date ordering** — `<`, `>`, `<=`, `>=`, and `<=>` compare the packed civil word. `Date` includes `BitOrdered`, whose bit order is that same word.
+- **Interpreter `super`** calls the superclass method of the same name and returns its value, so `super + "!"` in an override is the parent's text plus `"!"`.
+- **Prefix `Σ(expr, range)` compiles** — `Σ(2x⁷ + 3x², 1..10)` lowers as the same ranged sum as `(1..10)/Σ(2x⁷ + 3x²)`, including the closed form. A call without bounds is still an error. Pinned in `spec/parity/range_closed_form_sums_spec.w`.
+- **`type` of a range is `Range` on both engines** — the interpreter still stores `1..2` as a tagged hash, and `type()` now reports `Range` for that record, the same name the runtime already returns. Pinned in `spec/parity/range_type_name_spec.w`.
+- **`String#to_i` past i64 stays a BigInt under arithmetic** — a receiver known to be a String infers `:int`, and the direct conversion returns that boxed value, so `s.to_i * 3` promotes instead of unboxing the heap pointer as a machine int. `to_i` on an unknown receiver is still a name-based `:i64` guess. Pinned in `spec/parity/integer_to_i_bignum_spec.w`.
 - **One date scene for every host** — the `? date` inspection (header,
   season rail, calendar grid, holiday names and artwork, history panels)
   now lives in `compiler/lib/wit/scenes/date.w` as `DateScene`, a pure function of civil
@@ -164,9 +171,9 @@
   documents which arms rest on declared, literal, or closed-form evidence,
   and `TUNGSTEN_INFER=boxed` is a reference oracle that routes all untyped
   integer arithmetic through the guarded, promoting runtime path so a
-  program's output can be diffed against the default lowering. The remaining
-  name-based guess (`String#to_i` past i64 typed as a machine int) is pinned
-  as a known divergence in `spec/parity/integer_to_i_bignum_spec.w`.
+  program's output can be diffed against the default lowering. Unknown-receiver
+  `to_i` remains a name-based `:i64` guess. A receiver known to be a String is
+  typed `:int`, so a value past i64 stays a BigInt.
 - **Cross-engine parity suite** — `spec/parity/` runs each spec through the
   native interpreter and the compiled path and diffs the transcripts
   (`make parity`, `scripts/parity.sh`, `doc/PARITY.md`; a default stage of

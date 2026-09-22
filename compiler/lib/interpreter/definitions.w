@@ -668,11 +668,24 @@
     super_class = w_class[:superclass]
     if super_class == nil
       raise "no superclass"
-    args = ast_get(node, :args).map -> (a)
-      evaluate(a, env)
-    constructor = lookup_method(super_class, "new", args.size(), false, args)
-    if constructor != nil
-      call_w_method(obj, constructor, args, nil, env)
+    raw_args = ast_get(node, :args)
+    if raw_args == nil
+      raw_args = []
+    args = []
+    i = 0
+    while i < raw_args.size()
+      args.push(evaluate(raw_args[i], env))
+      i += 1
+    # The method being executed, not "new". A value-returning override
+    # such as `super + "!"` has to call the parent's method of the same name.
+    current = @method_stack.last()
+    mname = "new"
+    if current != nil && current[:name] != nil
+      mname = current[:name]
+    target = lookup_method(super_class, mname, args.size(), false, args)
+    if target == nil
+      raise "super: " + super_class[:name] + " has no " + mname + "/" + args.size().to_s()
+    call_w_method(obj, target, args, nil, env)
 
   # -- Use --
 
@@ -734,7 +747,10 @@
           return root_candidate
 
     path = use_path
-    if !path.starts_with?("/")
+    # A bare `main.w` has no directory: its base is the cwd, so the relative
+    # path stays relative (loader.w does the same). Joining onto "" made it
+    # absolute — `use lib/box` from `main.w` looked for /lib/box.w.
+    if !path.starts_with?("/") && base_dir != ""
       full_path = StringBuffer(base_dir.size() + path.size() + 1)
       full_path << base_dir
       full_path << "/"

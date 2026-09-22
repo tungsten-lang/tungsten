@@ -1,9 +1,8 @@
 # Ranges: sums over ranges, including the closed-form (Σ polynomial) path
 # that both engines implement separately (interpreter.w sigma_* vs
 # lowering/poly_sum.w). Large bounds only finish quickly when the closed
-# form is taken. The prefix form Σ(expr, a..b) is interpreter-only today
-# (compiled: unknown function Σ) and is left out because `tungsten -c`
-# rejects it; see DIVERGENCES.md.
+# form is taken. Prefix Σ(expr, a..b) lowers as the same pipeline as
+# (a..b)/Σ(expr).
 #
 # Cross-engine parity spec (scripts/parity.sh).
 
@@ -17,6 +16,10 @@
   r = (1..n)
   r/Σ(5x² - 3x + 1)
 << "sigma.var [via_var(100)] [via_var(10**9)]"
+<< "sigma.prefix [Σ(2x⁷ + 3x², 1..10)]"
+<< "sigma.prefix.poly [Σ(5x² - 3x + 1, 1..100)]"
+<< "sigma.prefix.big [Σ(x³, 1..1000000000)]"
+<< "sigma.prefix.excl [Σ(x, 1...5)]"
 -> plain_sum(n)
   (1..n).sum
 << "sum.var [plain_sum(100)] [plain_sum(10**6)]"

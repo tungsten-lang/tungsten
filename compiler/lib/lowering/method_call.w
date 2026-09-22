@@ -1512,6 +1512,10 @@
     receiver_reg = ensure_i64_value(wfn, receiver_val)
     temp = next_temp(wfn)
     emit_wire_call_direct_i64(wfn, nil, [receiver_reg], nil, nil, "w_string_" + method_name + "_direct", nil, nil, temp)
+    # w_string_to_i_direct returns a boxed Int that is a heap BigInt past
+    # i64. :i64 here would authorize the next arithmetic to unbox it.
+    if method_name == "to_i"
+      return typed_value(:int, temp)
     return typed_value(:i64, temp)
 
   if recv_node != nil && node.block == nil && (node.args == nil || node.args.size() == 0) && method_name == "size" && recv_type == :string

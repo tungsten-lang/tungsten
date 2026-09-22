@@ -284,6 +284,14 @@ module Tungsten
     end
 
     def succ = shift_civil_days(1)
+
+    # Operators must not fall through Literal#method_missing onto the wrapped
+    # ::Date, which refuses a Tungsten::Date as the other side.
+    def <(other) = (self <=> other) < 0
+    def <=(other) = (self <=> other) <= 0
+    def >(other) = (self <=> other) > 0
+    def >=(other) = (self <=> other) >= 0
+
     def <=>(other)
       mine = [year, month, day, hour, minute, second, tz]
       theirs =

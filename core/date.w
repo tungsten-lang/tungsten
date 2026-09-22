@@ -13,6 +13,7 @@
 # offset: 15-minute steps, with Amsterdam +00:20 as a spare-code singleton.
 + Date
   is Enumerable
+  is BitOrdered
 
   DAYS        = %w[Sun Mon Tue Wed Thu Fri Sat]
   DAY_NAMES   = %w[Sunday Monday Tuesday Wednesday Thursday Friday Saturday]
@@ -76,6 +77,11 @@
 
   -> .tomorrow
     Date.today + 1
+
+  # Year sits above month, day, and clock in the packed word, so the raw
+  # bits order civil dates. BitOrdered's <=> compares these words.
+  -> wvalue_bits
+    $value
 
   # Date is packed directly into a WValue. `$value` exposes the raw bits to
   # compiled Tungsten, keeping these leaf accessors and calendar calculations

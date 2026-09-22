@@ -45,10 +45,13 @@ density 231672; the previous finite composition price was 6195. Both tensors
 were separately expanded by the Ruby verifier and the independent Python
 certificate test. These are exact GF(2) decompositions, not global record or
 optimality claims.
-For context, the Université de Lille pages consulted on 2026-09-22 list
-[10x12x19:1434](https://fmm.univ-lille.fr/10x12x19.html) and
-[16x25x27:6108](https://fmm.univ-lille.fr/16x25x27.html). Beating those listed
-upper bounds does not by itself establish the best bound across all sources.
+For context, the [Université de Lille full table](https://fmm.univ-lille.fr/algo_32.html)
+consulted on 2026-09-22 lists 10x12x19:1434, 16x25x27:6048, and
+16x25x28:6344. The retained 12x10x19 rank 1421 and 16x28x25 rank 6223
+beat their corresponding table entries; 16x27x25 rank 6080 does not. Some
+individual shape pages show older, weaker bounds, so those pages should not
+be used alone for record comparisons. These exact GF(2) certificates are not
+claims of global novelty across every source or field.
 
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with

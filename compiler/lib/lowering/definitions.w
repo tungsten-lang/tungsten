@@ -1805,6 +1805,17 @@
   emit_wire_load_class(main_fn, cname, cls_reload)
   emit_wire_class_add_static_method(main_fn, arity, cls_reload, method_fn_name, mbyte_len, mstr_id, min_arity, method_splat_index(node))
 
+# Accessor methods synthesized from `ro :x` / `rw :x` (a class-body
+# declaration or the constructor's trailing marker) carry the declaration's
+# span, so the function map, backtraces and error locations name the `ro`
+# line instead of line 0.
+-> accessor_method_def(name, params, body, at)
+  mdef = Tungsten:AST:MethodDef.new(name, params, body, nil, false, at.loc, at.loc_end)
+  source_path = ast_get(at, :source_path)
+  if source_path != nil
+    mdef.source_path = source_path
+  mdef
+
 # `-> new(@x, @y) ro` — a bare ro/rw as a body statement of an @-binding
 # method marks those params for accessor generation, mirroring a class-body
 # `ro :x, :y`. Generates the getters (and setters for rw) and returns a
@@ -1834,13 +1845,22 @@
     if ast_get(p, :ivar_assign) == true
       field = ast_get(p, :name)
       ivar = "@" + field
-      getter = Tungsten:AST:MethodDef.new(field, [], [Tungsten:AST:Ivar.new(ivar)])
+      getter = accessor_method_def(field, [], [Tungsten:AST:Ivar.new(ivar)], mdef)
       lower_class_method(ctx, class_name, getter)
       if writable
-        setter = Tungsten:AST:MethodDef.new(field + "=", [Tungsten:AST:Param.new("value", nil, false)], [Tungsten:AST:Assign.new(Tungsten:AST:Ivar.new(ivar), Tungsten:AST:Var.new("value"))])
+        setter = accessor_method_def(field + "=", [Tungsten:AST:Param.new("value", nil, false)], [Tungsten:AST:Assign.new(Tungsten:AST:Ivar.new(ivar), Tungsten:AST:Var.new("value"))], mdef)
         lower_class_method(ctx, class_name, setter)
     i += 1
-  Tungsten:AST:MethodDef.new(mdef.name, params, kept)
+  # The constructor itself, minus the marker: keep its span, file and
+  # signature annotations so it does not become a line-0 method either.
+  stripped = Tungsten:AST:MethodDef.new(mdef.name, params, kept, mdef.type_hints, mdef.is_class_method, mdef.loc, mdef.loc_end)
+  if ast_get(mdef, :source_path) != nil
+    stripped.source_path = mdef.source_path
+  if mdef.param_types != nil
+    stripped.param_types = mdef.param_types
+  if mdef.return_type != nil
+    stripped.return_type = mdef.return_type
+  stripped
 
 -> lower_accessors(ctx, class_name, expr)
   writable = expr.name == "rw"
@@ -1858,12 +1878,12 @@
       getter_body = [default_check, Tungsten:AST:Ivar.new(ivar)]
 
     # Getter: -> field; @field
-    getter = Tungsten:AST:MethodDef.new(field, [], getter_body)
+    getter = accessor_method_def(field, [], getter_body, expr)
     lower_class_method(ctx, class_name, getter)
 
     if writable
       # Setter: -> field=(value); @field = value
-      setter = Tungsten:AST:MethodDef.new(field + "=", [Tungsten:AST:Param.new("value", nil, false)], [Tungsten:AST:Assign.new(Tungsten:AST:Ivar.new(ivar), Tungsten:AST:Var.new("value"))])
+      setter = accessor_method_def(field + "=", [Tungsten:AST:Param.new("value", nil, false)], [Tungsten:AST:Assign.new(Tungsten:AST:Ivar.new(ivar), Tungsten:AST:Var.new("value"))], expr)
       lower_class_method(ctx, class_name, setter)
     i += 1
 
@@ -1883,10 +1903,10 @@
       default_check = Tungsten:AST:If.new(Tungsten:AST:BinaryOp.new(Tungsten:AST:Ivar.new(ivar), :EQ, Tungsten:AST:Nil.new), [Tungsten:AST:Assign.new(Tungsten:AST:Ivar.new(ivar), default_expr)], [], nil)
       getter_body = [default_check, Tungsten:AST:Ivar.new(ivar)]
 
-    out.push(Tungsten:AST:MethodDef.new(field, [], getter_body))
+    out.push(accessor_method_def(field, [], getter_body, expr))
 
     if writable
-      setter = Tungsten:AST:MethodDef.new(field + "=", [Tungsten:AST:Param.new("value", nil, false)], [Tungsten:AST:Assign.new(Tungsten:AST:Ivar.new(ivar), Tungsten:AST:Var.new("value"))])
+      setter = accessor_method_def(field + "=", [Tungsten:AST:Param.new("value", nil, false)], [Tungsten:AST:Assign.new(Tungsten:AST:Ivar.new(ivar), Tungsten:AST:Var.new("value"))], expr)
       out.push(setter)
     i += 1
   out

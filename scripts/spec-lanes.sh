@@ -491,6 +491,7 @@ compiled_specs=(
   spec/core/instant_spec.w
   spec/core/time_spec.w
   spec/compiler/rescue_bare_method_call_spec.w
+  spec/compiler/accessor_declaration_loc_spec.w
 )
 compiled_priority_specs=(
   spec/core/algebra_c_ab_divisors_spec.w

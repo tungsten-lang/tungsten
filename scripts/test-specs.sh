@@ -848,8 +848,27 @@ run_interp_launch_test() {
     "$TUNGSTEN" run --interpret "$dir/main.w"
 }
 
+# ── The Tungsten-written CLI compiles ────────────────────────────────────
+# bin/tungsten builds bin/tungsten.w on demand and falls back to the Ruby CLI
+# when that fails. The fallback is now loud, but a CLI that does not compile
+# must also fail the suite: an interpolation-escape slip in a JSON literal
+# left every `tungsten` command on the Ruby CLI for five weeks.
+run_cli_build_test() {
+  local out="$TMP_ROOT/cli/tungsten.wc"
+  local log="$TMP_ROOT/cli/build.log"
+  mkdir -p "$TMP_ROOT/cli"
+  if BIT_HOME="$ROOT/bits" "$COMPILER" compile "$ROOT/bin/tungsten.w" --out "$out" --no-lto >"$log" 2>&1; then
+    echo "PASS [cli_build] bin/tungsten.w compiles"
+  else
+    echo "FAIL [cli_build] bin/tungsten.w does not compile" >&2
+    sed -n '/error/{p;q;}' "$log" >&2
+    fail=1
+  fi
+}
+
 run_cache_lifecycle_test
 run_interp_launch_test
+run_cli_build_test
 
 run_parallel cuda "${cuda_emit_specs[@]}"
 run_parallel wgsl "${wgsl_emit_specs[@]}"

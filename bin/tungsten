@@ -630,9 +630,16 @@ if [ -x "$COMPILER" ]; then
   # rebuilds $COMPILER, so comparing against it captures the dependency
   # transitively for one stat call.
   if [ ! -x "$WC" ] || [ "$ROOT/bin/tungsten.w" -nt "$WC" ] || [ "$COMPILER" -nt "$WC" ]; then
-    BIT_HOME="$ROOT/bits" \
-      "$COMPILER" compile "$ROOT/bin/tungsten.w" --out "$WC" --no-lto >/dev/null 2>&1 \
-      || exec "$RUBY" "$RUBY_CLI" "$@"
+    # A CLI that fails to compile must SAY so: this fallback ran silently
+    # for five weeks while bin/tungsten.w did not lex, and every `tungsten`
+    # invocation was the Ruby CLI without anyone noticing.
+    WC_LOG="${TMPDIR:-/tmp}/tungsten-cli-build.log"
+    if ! BIT_HOME="$ROOT/bits" \
+        "$COMPILER" compile "$ROOT/bin/tungsten.w" --out "$WC" --no-lto >"$WC_LOG" 2>&1; then
+      echo "tungsten: bin/tungsten.w failed to compile; running the Ruby CLI instead (see $WC_LOG)" >&2
+      sed -n '/error/{p;q;}' "$WC_LOG" >&2
+      exec "$RUBY" "$RUBY_CLI" "$@"
+    fi
     # Ad-hoc codesign on macOS so a freshly linked CLI is launchable.
     if [ "$(uname -s)" = "Darwin" ]; then
       codesign --force -s - "$WC" >/dev/null 2>&1 || true

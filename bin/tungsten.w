@@ -294,7 +294,7 @@ MANPAGE = manpage_lines.join("\n")
     i = i + 1
 
   if json_diag
-    << "{\"status\":\"ok\",\"agent_support\":true,\"diagnostics_format\":\"json\",\"capabilities\":[\"diagnostics\",\"code_frame\",\"agent_payload\",\"spirv_emitter\",\"mutate_if_unique\"]}"
+    << "{\"status\":\"ok\",\"agent_support\":true,\"diagnostics_format\":\"json\",\"capabilities\":\[\"diagnostics\",\"code_frame\",\"agent_payload\",\"spirv_emitter\",\"mutate_if_unique\"\]}"
     exit(0)
 
   if agent
@@ -486,7 +486,7 @@ when "bit"
   run_bit_binary("tungsten-bit", "bit", tool_argv_after_command("bit"))
 
 when "agent-json"
-  << "{\"status\":\"ok\",\"agent_support\":true,\"diagnostics_format\":\"json\",\"capabilities\":[\"diagnostics\",\"code_frame\",\"agent_payload\",\"spirv_emitter\",\"mutate_if_unique\"]}"
+  << "{\"status\":\"ok\",\"agent_support\":true,\"diagnostics_format\":\"json\",\"capabilities\":\[\"diagnostics\",\"code_frame\",\"agent_payload\",\"spirv_emitter\",\"mutate_if_unique\"\]}"
   exit(0)
 
 when nil

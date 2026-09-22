@@ -79,6 +79,16 @@ class WideRectangularCertificateTest(unittest.TestCase):
                                '7d6bdd7c300602617ad8f9c52b3638210391699394e69c55d7b86dc12bfd2ce3',
                                (16, 25, 28), 6225, 6229, compressed=True)
 
+    def test_16x31x25_rank_6916(self):
+        self.check_certificate((16, 31, 25), 6916,
+                               'a31cfc6638245c110fcba943c4ed948889915210be74ced9d2c8f12b057e4e41',
+                               (16, 25, 32), 7055, 7080, compressed=True)
+
+    def test_16x29x25_rank_6534(self):
+        self.check_certificate((16, 29, 25), 6534,
+                               'bb01d2f6b1516808bc22a9edfd3ca2a0b36da9ea9c440a46846a07a22c0cad78',
+                               (16, 25, 32), 7055, 7080, compressed=True)
+
 
 if __name__ == '__main__':
     unittest.main()

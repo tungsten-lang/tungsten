@@ -55,10 +55,25 @@ density 231672; the previous finite composition price was 6195. Both tensors
 were separately expanded by the Ruby verifier and the independent Python
 certificate test. These are exact GF(2) decompositions, not global record or
 optimality claims.
+
+Replaying the `16x25x32` structured-parent row produces an exact rank-7055
+tensor in factor order `U(16x32) V(32x25) W(16x25)`. Coordinate projection,
+exact shared-factor refactors, and bounded directed walks produce
+`16x31x25-r6916.mfw.gz.b64`, canonical SHA-256
+`a31cfc6638245c110fcba943c4ed948889915210be74ced9d2c8f12b057e4e41`,
+density 267253. Continuing through a projected 16x30x25 intermediate produces
+`16x29x25-r6534.mfw.gz.b64`, canonical SHA-256
+`bb01d2f6b1516808bc22a9edfd3ca2a0b36da9ea9c440a46846a07a22c0cad78`,
+density 254205. The intermediate reached rank 6745, but is not retained as a
+rank candidate: the pinned GF(2) catalog already has rank 6690 for 16x25x30.
+Both retained tensors were independently expanded by the Ruby verifier and
+the focused Python certificate test.
+
 For context, the [Université de Lille full table](https://fmm.univ-lille.fr/algo_32.html)
 consulted on 2026-09-22 lists 10x12x19:1434, 10x12x25:1856,
-16x25x27:6048, and 16x25x28:6344. The retained 12x10x19 rank 1421,
-12x10x25 rank 1836, and 16x28x25 rank 6223 beat their corresponding table
+16x25x27:6048, 16x25x28:6344, 16x25x29:6573, and 16x25x31:6973. The
+retained 12x10x19 rank 1421, 12x10x25 rank 1836, 16x28x25 rank 6223,
+16x29x25 rank 6534, and 16x31x25 rank 6916 beat their corresponding table
 entries; 16x27x25 rank 6080 does not. Some
 individual shape pages show older, weaker bounds, so those pages should not
 be used alone for record comparisons. These exact GF(2) certificates are not
@@ -86,8 +101,8 @@ certificates are independently expanded by
 MetaFlip package and certificate directory as appropriate).
 
 The pinned-catalog closure comparison is replayable with
-`python3 tools/check_wide_rectangular_closure.py CATALOG.json`. It reports 17
-rank-price improvements totaling 272 terms among shapes with coordinates 2
+`python3 tools/check_wide_rectangular_closure.py CATALOG.json`. It reports 22
+rank-price improvements totaling 711 terms among shapes with coordinates 2
 through 32; those are composition prices, not 17 separately materialized
 certificates. No square shape improves in this finite closure.
 Another 100 million moves from the retained rank-623 seed, and three further

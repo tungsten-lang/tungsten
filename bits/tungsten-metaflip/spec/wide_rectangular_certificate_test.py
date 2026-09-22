@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Independently expand retained rectangular GF(2) tensor certificates."""
+import base64
+import gzip
 import hashlib
 import importlib.util
 import json
@@ -17,9 +19,13 @@ VERIFIER = ROOT / 'benchmarks/matmul/metaflip/verify_block_composition_records.p
 
 
 class WideRectangularCertificateTest(unittest.TestCase):
-    def check_certificate(self, shape, rank, digest, portfolio_shape, parent_rank, catalog_bound):
+    def check_certificate(self, shape, rank, digest, portfolio_shape, parent_rank, catalog_bound,
+                          compressed=False):
         name = 'x'.join(map(str, shape))
-        raw = (CERTS / f'{name}-r{rank}.mfw').read_bytes()
+        suffix = '.mfw.gz.b64' if compressed else '.mfw'
+        raw = (CERTS / f'{name}-r{rank}{suffix}').read_bytes()
+        if compressed:
+            raw = gzip.decompress(base64.b64decode(raw.replace(b'\n', b''), validate=True))
         self.assertEqual(hashlib.sha256(raw).hexdigest(), digest)
         lines = raw.decode('ascii').splitlines()
         self.assertEqual(lines.pop(0), f'MFW1 {" ".join(map(str, shape))} {rank}')
@@ -52,6 +58,11 @@ class WideRectangularCertificateTest(unittest.TestCase):
         self.check_certificate((12, 10, 20), 1448,
                                'ce1223857ec1c7bf2215b248a5cbeb42c4171df2c648ee7d752fd9f822741df8',
                                (10, 12, 20), 1464, 1500)
+
+    def test_16x28x25_rank_6223(self):
+        self.check_certificate((16, 28, 25), 6223,
+                               '049d2676a8f0e9c560026c5ad511faadc14debd415cc5d6d6c97e3407f3e3923',
+                               (16, 25, 28), 6225, 6229, compressed=True)
 
 
 if __name__ == '__main__':

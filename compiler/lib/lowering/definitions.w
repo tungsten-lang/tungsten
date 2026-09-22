@@ -1524,7 +1524,10 @@
     body = prepared_body
   else
     # Fallback for callers that lower an isolated class node without running
-    # lower_ast's module-wide registration prepass first.
+    # lower_ast's module-wide registration prepass first. Same order as the
+    # prepass: guards, then traits, accessors and overload dispatchers.
+    if body != nil
+      body = expand_on_guards(body, detect_target())
     body = expand_class_traits(mod, body)
     body = expand_class_body_accessors(body)
     body = synthesize_overload_dispatchers(mod, class_name, body)

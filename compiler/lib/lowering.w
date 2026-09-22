@@ -568,7 +568,15 @@ use lowering/definitions
       ivar_state = processed_classes[cname]
       ivar_offsets = ivar_state[:ivar_offsets]
       offset = ivar_state[:offset]
-      class_body = expand_class_traits(mod, expr.body)
+      # Platform guards first: a class-body `on arm64` holds method_defs and
+      # accessors that must be registered here like any other member. This
+      # walk used to see the raw body, so a guarded method was lowered (by
+      # lower_class_def's own expand_on_guards) but never added to the class
+      # — undefined at runtime, and invisible to bare-call resolution.
+      class_body = expr.body
+      if class_body != nil
+        class_body = expand_on_guards(class_body, detect_target())
+      class_body = expand_class_traits(mod, class_body)
       class_body = expand_class_body_accessors(class_body)
       # Apply the same typed-overload rewrite lower_class_def uses, so the
       # synthesized worker methods (`*__ovl_Vec3`, …) and the dispatcher get

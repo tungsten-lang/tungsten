@@ -937,6 +937,7 @@ parity_specs=(
   spec/parity/accessor_declarations_spec.w
   spec/parity/postfix_products_spec.w
   spec/parity/autoload_toplevel_fn_spec.w
+  spec/parity/class_body_on_guard_spec.w
 )
 exclude_specs=(
   spec/compiler/bigint_add3_equal_reopen_source_seam_spec.w

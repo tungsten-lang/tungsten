@@ -1991,6 +1991,34 @@ static int compile_trait_methods_for_class(TcAstValue expressions, TcAstValue in
   return 1;
 }
 
+// True when a matching class-body `on` guard defines a member with the same
+// name as `def`: `def` is then the platform fallback that guard replaces.
+static int class_body_guard_overrides(TcAstValue *body, TcAstValue def) {
+  TcAstValue *def_name = ast_get(def, "name");
+  if (!def_name || def_name->kind != TC_AST_STRING) return 0;
+  for (size_t i = 0; i < body->as.array->count; i++) {
+    TcAstValue expr = body->as.array->items[i];
+    if (!ast_node_is(expr, "on_guard")) continue;
+    TcAstValue *predicate = ast_get(expr, "predicate");
+    TcAstValue *guarded = ast_get(expr, "body");
+    if (!predicate || !guarded || guarded->kind != TC_AST_ARRAY ||
+        !target_predicate_matches(*predicate)) {
+      continue;
+    }
+    for (size_t j = 0; j < guarded->as.array->count; j++) {
+      TcAstValue member = guarded->as.array->items[j];
+      if (!ast_node_is(member, "method_def") && !ast_node_is(member, "fn_def")) continue;
+      TcAstValue *member_name = ast_get(member, "name");
+      if (member_name && member_name->kind == TC_AST_STRING &&
+          member_name->as.string.len == def_name->as.string.len &&
+          memcmp(member_name->as.string.bytes, def_name->as.string.bytes, def_name->as.string.len) == 0) {
+        return 1;
+      }
+    }
+  }
+  return 0;
+}
+
 static int compile_class_definitions(TcAstValue node, TcAstValue expressions,
                                      TcChunk *chunk, TcError *err) {
   TcAstValue *name = ast_get(node, "name");
@@ -2045,17 +2073,43 @@ static int compile_class_definitions(TcAstValue node, TcAstValue expressions,
     }
   }
 
+  // Class-body platform guards (`on arm64` / `on macos && arm64`) hold
+  // members of THIS class. Mirror target.w's expand_on_guards: a member of a
+  // matching guard is compiled like any other, and an unguarded definition
+  // of the same name is the fallback it replaces, so it is dropped.
   for (size_t i = 0; i < body->as.array->count; i++) {
     TcAstValue expr = body->as.array->items[i];
-    if ((ast_node_is(expr, "method_def") || ast_node_is(expr, "fn_def")) &&
-        !compile_function_def(expr, prefix, prefix_len, chunk, err)) {
-      free(prefix);
-      return 0;
-    }
-    if (ast_is_accessor_decl(expr) &&
-        !compile_accessor_decl(expr, prefix, prefix_len, chunk, err)) {
-      free(prefix);
-      return 0;
+    if (ast_node_is(expr, "method_def") || ast_node_is(expr, "fn_def")) {
+      if (class_body_guard_overrides(body, expr)) continue;
+      if (!compile_function_def(expr, prefix, prefix_len, chunk, err)) {
+        free(prefix);
+        return 0;
+      }
+    } else if (ast_is_accessor_decl(expr)) {
+      if (!compile_accessor_decl(expr, prefix, prefix_len, chunk, err)) {
+        free(prefix);
+        return 0;
+      }
+    } else if (ast_node_is(expr, "on_guard")) {
+      TcAstValue *predicate = ast_get(expr, "predicate");
+      TcAstValue *guarded = ast_get(expr, "body");
+      if (!predicate || !guarded || guarded->kind != TC_AST_ARRAY ||
+          !target_predicate_matches(*predicate)) {
+        continue;
+      }
+      for (size_t j = 0; j < guarded->as.array->count; j++) {
+        TcAstValue member = guarded->as.array->items[j];
+        if ((ast_node_is(member, "method_def") || ast_node_is(member, "fn_def")) &&
+            !compile_function_def(member, prefix, prefix_len, chunk, err)) {
+          free(prefix);
+          return 0;
+        }
+        if (ast_is_accessor_decl(member) &&
+            !compile_accessor_decl(member, prefix, prefix_len, chunk, err)) {
+          free(prefix);
+          return 0;
+        }
+      }
     }
   }
   free(prefix);

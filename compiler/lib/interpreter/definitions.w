@@ -219,7 +219,14 @@
     if w_class[:cvars] == nil
       w_class[:cvars] = {}
     pending_aliases = []
-    expand_trait_includes(ast_get(node, :body)).each -> (entry)
+    # A class-body `on arm64` block holds members of THIS class. Expand the
+    # matching guards into the body before the walk (the compiled prepass
+    # does the same); evaluating the guard as a statement instead defined
+    # its methods as global functions.
+    class_body = ast_get(node, :body)
+    if class_body != nil
+      class_body = expand_on_guards(class_body, detect_target())
+    expand_trait_includes(class_body).each -> (entry)
       expr = entry[0]
       from_trait = entry[1]
       if ast_kind(expr) == :method_def

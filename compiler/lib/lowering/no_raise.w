@@ -131,12 +131,13 @@
     return false
   if kind == :call
     return no_raise_call_safe?(mod, node, class_name, var_types, dependencies)
-  # A bare identifier that names a source function is a zero-argument CALL
-  # (lowering resolves it that way); treating it as a plain variable read
-  # summarized `begin boom0 rescue ...` as no-raise and let the raise escape
-  # the landing pad. Locals shadow functions, so a name with a recorded
-  # local type stays a read.
-  if kind == :var && mod[:known_calls] != nil && mod[:known_calls][node.name] != nil && (var_types == nil || var_types[node.name] == nil)
+  # A bare identifier that names a source function, or an instance method of
+  # the enclosing class hierarchy (implicit `self.name`), is a zero-argument
+  # CALL (lower_var resolves it that way); treating it as a plain variable
+  # read summarized `begin boom0 rescue ...` and `begin verify! rescue ...`
+  # as no-raise and let the raise escape the landing pad. Locals shadow both,
+  # so a name with a recorded local type stays a read.
+  if kind == :var && (var_types == nil || var_types[node.name] == nil) && ((mod[:known_calls] != nil && mod[:known_calls][node.name] != nil) || class_has_instance_method?(mod, class_name, node.name))
     synthetic_call = Tungsten:AST:Call.new(nil, node.name, [], nil)
     return no_raise_call_safe?(mod, synthetic_call, class_name, var_types, dependencies)
   if kind == :binary_op

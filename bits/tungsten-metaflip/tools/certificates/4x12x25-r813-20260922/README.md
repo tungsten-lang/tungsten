@@ -19,4 +19,9 @@ An independent full GF(2) check of the 813 output terms found exactly the
 4×12×25 matrix-multiplication tensor (28,577 input-pair XORs). The output
 file's SHA-256 is
 `0b8e7633030577b5b92caf31ea1f62e075a71a1ddfdef03fd96e27c75defbdc4`.
-External best-known status is not established by this certificate.
+
+This rank **ties** a field-valid recursive bound in
+[matmulcatalog revision 54fa5d24](https://github.com/solven-eu/matmulcatalog/tree/54fa5d24f2b26299574bb044bd3e4b2c676cadf6):
+split the 25-side into 9+16 and use GF(2) ranks 300 for 4×9×12 and 513
+for 4×12×16. Thus 300+513=813. The certificate contributes a different
+exact representation, not a lower known rank or a world-record claim.

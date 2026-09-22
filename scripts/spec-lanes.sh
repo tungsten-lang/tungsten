@@ -927,6 +927,7 @@ parity_specs=(
   spec/parity/units_unary_minus_spec.w
   spec/parity/integer_inference_pins_spec.w
   spec/parity/integer_to_i_bignum_spec.w
+  spec/parity/autoload_toplevel_fn_spec.w
 )
 exclude_specs=(
   spec/compiler/bigint_add3_equal_reopen_source_seam_spec.w

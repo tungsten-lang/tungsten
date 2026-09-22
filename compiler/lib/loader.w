@@ -1626,37 +1626,31 @@ loader_parse_cache_state = {
       if found != nil
         return found
 
-    # Standard library: project_root/core/<path>.w first (new canonical
-    # location), then project_root/lib/<path>.w as backward-compat
-    # fallback during the lib/ → core/ migration.
-    if project_root != ""
-      core_candidate = project_root + "/core/" + path + ".w"
-      if file?(core_candidate)
-        return normalize_load_path(core_candidate)
-      lib_candidate = project_root + "/lib/" + path + ".w"
-      if file?(lib_candidate)
-        return normalize_load_path(lib_candidate)
-
-    # Stdlib fallback anchored on the install root rather than the caller's
-    # ancestry. `project_root` above is Bitfile-anchored, so it is empty for
-    # any program outside a Tungsten project — a script in ~/math, say — and
-    # then falls back to "." only when the *current working directory*
-    # happens to hold a Bitfile. That made `use algebra` succeed or fail
-    # depending on where the shell was sitting, with the failure surfacing
-    # far downstream as `undefined method 'starts_with?' for nil`.
-    #
-    # find_core_root is anchored on core/tungsten.w and already carries the
-    # TUNGSTEN_ROOT fallback that bin/tungsten exports, so consulting it here
-    # gives the intended split: local project files resolve against the
-    # program's own root, core files against the install root.
+    # Standard library: the NEAREST ancestor holding core/tungsten.w first,
+    # then the Bitfile-anchored project root. find_core_root already carries
+    # the TUNGSTEN_ROOT fallback bin/tungsten exports, so a script outside any
+    # checkout (~/math/foo.w) still finds the installed core; find_project_root
+    # keeps the SHALLOWEST Bitfile so bits reach past their own, which from a
+    # checkout nested inside another (a git worktree under .claude/worktrees/)
+    # names the OUTER repo — consulted first, it loaded the outer core/ next
+    # to the inner one and every shared fn became a duplicate definition.
+    # core/<path>.w is the canonical location; lib/<path>.w is the
+    # backward-compat fallback from the lib/ → core/ migration.
     core_root = find_core_root(base_dir)
-    if core_root != "" && core_root != project_root
-      core_candidate = core_root + "/core/" + path + ".w"
-      if file?(core_candidate)
-        return normalize_load_path(core_candidate)
-      lib_candidate = core_root + "/lib/" + path + ".w"
-      if file?(lib_candidate)
-        return normalize_load_path(lib_candidate)
+    roots = [core_root]
+    if project_root != "" && project_root != core_root
+      roots.push(project_root)
+    ri = 0
+    while ri < roots.size()
+      root = roots[ri]
+      if root != ""
+        core_candidate = root + "/core/" + path + ".w"
+        if file?(core_candidate)
+          return normalize_load_path(core_candidate)
+        lib_candidate = root + "/lib/" + path + ".w"
+        if file?(lib_candidate)
+          return normalize_load_path(lib_candidate)
+      ri += 1
 
     resolved
 

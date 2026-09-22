@@ -393,15 +393,17 @@
           accessor = {rt: :method, name: fname, params: [], body: [Tungsten:AST:Ivar.new("@" + fname)], w_class: w_class, data_field: true}
           register_instance_method(w_class, accessor)
 
+  # A `-> name` outside a class body is a global function (spec 3.1: "top-level
+  # expressions and method definitions are ordinary statements of the file's
+  # global scope"; the compiled engine hoists a def nested in a method body the
+  # same way). Class-body methods never reach here — eval_class_def registers
+  # them on the class directly. This used to consult current_self() and attach
+  # the def to whatever object happened to be active, so a core file autoloaded
+  # from inside a method (Polynomial#normal_form → PolyFast → core/algebra/poly_fast.w)
+  # registered its top-level `-> pf_run` as an instance method of that caller's
+  # class and every later bare call raised "Undefined method 'pf_run'".
   -> eval_method_def(node, env)
-    s = current_self()
-    if s != nil && type(s) == "Hash" && s.has_key?(:rt) && s[:rt] == :object
-      w_method = {rt: :method, name: ast_get(node, :name), params: ast_get(node, :params), body: ast_get(node, :body), w_class: s[:w_class], param_types: ast_get(node, :param_types)}
-      register_instance_method(s[:w_class], w_method)
-    else
-      w_method = {rt: :method, name: ast_get(node, :name), params: ast_get(node, :params), body: ast_get(node, :body), param_types: ast_get(node, :param_types)}
-      register_global_method(w_method)
-    ast_get(node, :name)
+    eval_fn_def(node, env)
 
   # `fn name(args) ...` — pure/memoized at compile time; the tree-walker
   # registers the same global method table entry as `-> name` without memo
@@ -798,31 +800,27 @@
       if found != nil
         return found
 
-    # Standard library: project_root/core/<path>.w first, then
-    # project_root/lib/<path>.w for backward compat during migration.
-    if project_root != ""
-      core_candidate = project_root + "/core/" + use_path + ".w"
-      if read_file(core_candidate) != nil
-        return core_candidate
-      lib_candidate = project_root + "/lib/" + use_path + ".w"
-      if read_file(lib_candidate) != nil
-        return lib_candidate
-
-    # Standard library anchored on the install root rather than the caller's
-    # ancestry. `find_use_project_root` is Bitfile-anchored, so it is "" for
-    # any program outside a Tungsten project -- a script in ~/math, say -- and
-    # then every stdlib branch above is skipped, resolution falls through to a
-    # nonexistent sibling path, and read_file returns nil. The failure only
-    # surfaces later in parse_source/strip_bash_shebang as
-    # `undefined method 'starts_with?' for nil`.
+    # Standard library: the NEAREST ancestor holding core/tungsten.w first
+    # (a nested worktree's own core/, or the install root bin/tungsten exports
+    # as TUNGSTEN_ROOT for a script outside any checkout), then the
+    # Bitfile-anchored project root, which keeps the shallowest Bitfile and so
+    # points at the OUTER repo from inside a nested checkout. core/<path>.w is
+    # the canonical location; lib/<path>.w is the backward-compat fallback.
     core_root = find_use_core_root(base_dir)
-    if core_root != "" && core_root != project_root
-      core_candidate = core_root + "/core/" + use_path + ".w"
-      if read_file(core_candidate) != nil
-        return core_candidate
-      lib_candidate = core_root + "/lib/" + use_path + ".w"
-      if read_file(lib_candidate) != nil
-        return lib_candidate
+    roots = [core_root]
+    if project_root != "" && project_root != core_root
+      roots.push(project_root)
+    ri = 0
+    while ri < roots.size()
+      root = roots[ri]
+      if root != ""
+        core_candidate = root + "/core/" + use_path + ".w"
+        if read_file(core_candidate) != nil
+          return core_candidate
+        lib_candidate = root + "/lib/" + use_path + ".w"
+        if read_file(lib_candidate) != nil
+          return lib_candidate
+      ri += 1
 
     path
 
@@ -927,18 +925,18 @@
   # TUNGSTEN_ROOT. Mirrors loader.w:find_core_root so the interpreter and the
   # compiled loader resolve the standard library identically: local project
   # files against the program's own root, core files against the install root.
+  # The NEAREST ancestor wins, as there: a checkout nested inside another (a
+  # git worktree under .claude/worktrees/) must run its own core/, not the
+  # outer repo's.
   -> find_use_core_root(dir)
     if dir != ""
       parts = dir.split("/")
-      result = ""
       i = parts.size()
       while i > 0
         candidate = parts[0...i].join("/")
         if file?(candidate + "/core/tungsten.w")
-          result = candidate
+          return candidate
         i -= 1
-      if result != ""
-        return result
     if file?("core/tungsten.w")
       return "."
     root = env("TUNGSTEN_ROOT")

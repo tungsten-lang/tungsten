@@ -26,6 +26,10 @@ CANDIDATES = (
      'ce1223857ec1c7bf2215b248a5cbeb42c4171df2c648ee7d752fd9f822741df8', False),
     ((16, 25, 28), '16x28x25', 6223,
      '049d2676a8f0e9c560026c5ad511faadc14debd415cc5d6d6c97e3407f3e3923', True),
+    ((10, 12, 19), '12x10x19', 1421,
+     '552ab55c7b9d66d47ae90a1283bf3f3588ecebe2719407b05a4587717ef480ac', True),
+    ((16, 25, 27), '16x27x25', 6129,
+     '47c296c1c5c3a8ab2dd6aa825c5e2fb0275eddf5a3299e591da13c7700b440b7', True),
 )
 
 
@@ -63,12 +67,12 @@ def main():
     original = module.solver(seeds)
     with_new = dict(seeds)
     for key, _, rank, _, _ in CANDIDATES:
-        with_new[key] = min(with_new[key], rank)
+        with_new[key] = min(with_new.get(key, rank), rank)
     improved = module.solver(with_new)
     gains = [{'shape': shape, 'before': original(shape), 'after': improved(shape)}
              for shape in itertools.combinations_with_replacement(range(2, 33), 3)
              if improved(shape) < original(shape)]
-    if len(gains) != 14 or sum(row['before'] - row['after'] for row in gains) != 61:
+    if len(gains) != 17 or sum(row['before'] - row['after'] for row in gains) != 174:
         raise ValueError('downstream impact changed')
     print(json.dumps({'field': 'GF(2)', 'record_claim': False,
                       'catalog_sha256': manifest['catalog_sha256'],

@@ -26,6 +26,20 @@ W(16x25)`. It improves the rank-6225 structured-parent candidate by two
 terms. The 1.77 MB MFW1 text is stored as about 186 KB of encoded compressed
 text so the repository need not carry the full-width archive verbatim.
 
+Two exact coordinate projections of these retained tensors, followed by
+GF(2) duplicate cancellation and shared-factor compression, improve further
+rectangles. Deleting coordinate 19 (zero-based) of the output axis of the
+12x10x20 certificate gives `12x10x19-r1421.mfw.gz.b64`, SHA-256
+`552ab55c7b9d66d47ae90a1283bf3f3588ecebe2719407b05a4587717ef480ac`,
+density 69949. The pinned catalog plus compact-parent portfolio priced that
+shape at 1451. Deleting coordinate 27 of the middle axis of the 16x28x25
+certificate gives `16x27x25-r6129.mfw.gz.b64`, SHA-256
+`47c296c1c5c3a8ab2dd6aa825c5e2fb0275eddf5a3299e591da13c7700b440b7`,
+density 240141; the previous finite composition price was 6195. Both tensors
+were separately expanded by the Ruby verifier and the independent Python
+certificate test. These are exact GF(2) decompositions, not global record or
+optimality claims.
+
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with
 `tools/replay_structured_parent_portfolio.rb --output DIR --only 5x9x20`.
@@ -48,9 +62,9 @@ certificates are independently expanded by
 MetaFlip package and certificate directory as appropriate).
 
 The pinned-catalog closure comparison is replayable with
-`python3 tools/check_wide_rectangular_closure.py CATALOG.json`. It reports 14
-rank-price improvements totaling 61 terms among shapes with coordinates 2
-through 32; those are composition prices, not 14 separately materialized
+`python3 tools/check_wide_rectangular_closure.py CATALOG.json`. It reports 17
+rank-price improvements totaling 174 terms among shapes with coordinates 2
+through 32; those are composition prices, not 17 separately materialized
 certificates. No square shape improves in this finite closure.
 Another 100 million moves from the retained rank-623 seed, and three further
 100-million-move continuations from distinct rank-623 seeds, found no rank-622

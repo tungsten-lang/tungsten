@@ -26,6 +26,16 @@ W(16x25)`. It improves the rank-6225 structured-parent candidate by two
 terms. The 1.77 MB MFW1 text is stored as about 186 KB of encoded compressed
 text so the repository need not carry the full-width archive verbatim.
 
+`12x10x25-r1836.mfw.gz.b64` retains a complete 1836-term tensor, canonical
+SHA-256 `9f6e46e1cbbf99417ab2f1ae3c36a92260809ef313e6540eabcaa065baab7c58`,
+in factor order `U(12x10) V(10x25) W(12x25)`. It comes from exact replay of the
+`10x12x25` structured-parent row followed by an axis-0 reverse shared-factor
+refactor. The refactor preserves rank and lowers density from 92102 to 91648;
+density was an archive tie-break, not a search acceptance gate. Matched 50
+million-move walks from both the original and refactored seeds, plus two
+20-million-move walks from other refactors, found no lower rank in those
+finite budgets.
+
 Two exact coordinate projections of these retained tensors, followed by
 GF(2) duplicate cancellation and shared-factor compression, improve further
 rectangles. Deleting coordinate 19 (zero-based) of the output axis of the
@@ -46,9 +56,10 @@ were separately expanded by the Ruby verifier and the independent Python
 certificate test. These are exact GF(2) decompositions, not global record or
 optimality claims.
 For context, the [Université de Lille full table](https://fmm.univ-lille.fr/algo_32.html)
-consulted on 2026-09-22 lists 10x12x19:1434, 16x25x27:6048, and
-16x25x28:6344. The retained 12x10x19 rank 1421 and 16x28x25 rank 6223
-beat their corresponding table entries; 16x27x25 rank 6080 does not. Some
+consulted on 2026-09-22 lists 10x12x19:1434, 10x12x25:1856,
+16x25x27:6048, and 16x25x28:6344. The retained 12x10x19 rank 1421,
+12x10x25 rank 1836, and 16x28x25 rank 6223 beat their corresponding table
+entries; 16x27x25 rank 6080 does not. Some
 individual shape pages show older, weaker bounds, so those pages should not
 be used alone for record comparisons. These exact GF(2) certificates are not
 claims of global novelty across every source or field.

@@ -24,6 +24,8 @@ CANDIDATES = (
      '04deeee17b7cd975f233aa9d952d988409266d2b91d60f44252df940925f0df5', False),
     ((10, 12, 20), '12x10x20', 1448,
      'ce1223857ec1c7bf2215b248a5cbeb42c4171df2c648ee7d752fd9f822741df8', False),
+    ((10, 12, 25), '12x10x25', 1836,
+     '9f6e46e1cbbf99417ab2f1ae3c36a92260809ef313e6540eabcaa065baab7c58', True),
     ((16, 25, 28), '16x28x25', 6223,
      '049d2676a8f0e9c560026c5ad511faadc14debd415cc5d6d6c97e3407f3e3923', True),
     ((10, 12, 19), '12x10x19', 1421,

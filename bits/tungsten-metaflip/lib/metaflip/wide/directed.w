@@ -161,7 +161,7 @@ use scheme
   stride=st[1] ## i64
   slot=st[st[16]+((ffws_rand(st)*st[4]) >> 31)] ## i64
   axis=(ffws_rand(st)*3) >> 31 ## i64
-  bit=(ffws_rand(st)*st[0]*st[0]) >> 31 ## i64
+  bit=(ffws_rand(st)*st[24+axis]) >> 31 ## i64
   c[23]=0
   z=ffwd_touch(c,st,st[14]+slot*3*stride,stride) ## i64
   h1=c[4] ^ ffwd_term(st,st[14]+slot*3*stride,stride,2166136261) ## i64

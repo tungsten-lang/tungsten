@@ -56,6 +56,7 @@ spec/seven_by_seven_shoulder_test.w timeout  # 120s+ interpreted
 spec/square_campaign_nonce_diversity_test.w timeout  # 120s+ interpreted
 spec/wide_matrix_cleanup_test.w timeout  # 120s+ interpreted
 spec/wide_square_test.w native  # packed live worker and all nine large-square tensor gates
+spec/wide_rectangular_test.w native  # multiword rectangular pair walks and exact tensor gates
 spec/wide_directed_test.w native  # directed bucket index, history, rollback and packed tensor gates
 spec/wide_density_neutral_test.w native  # density-independent walks and archive-before-history rejection
 spec/wide_tui_test.w native  # native packed telemetry and dashboard renderer

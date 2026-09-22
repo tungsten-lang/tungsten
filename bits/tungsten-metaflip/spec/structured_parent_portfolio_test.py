@@ -55,6 +55,10 @@ class StructuredParentPortfolioTest(unittest.TestCase):
                 lines = raw.decode('ascii').splitlines()
                 self.assertEqual(int(lines.pop(0)), row['rank'])
                 self.assertEqual(len(lines), row['rank'])
+                wide = (recipe_path.parent / ('x'.join(map(str, row['result_shape'])) + '.mfw')).read_text().splitlines()
+                self.assertEqual(wide.pop(0), 'MFW1 ' + ' '.join(map(str, row['result_shape'])) + ' ' + str(row['rank']))
+                self.assertEqual([[int(factor, 16) for factor in line.split()] for line in wide],
+                                 [[int(factor) for factor in line.split()] for line in lines])
                 body = ''.join(('R ' + line.removeprefix('R ') + '\n') for line in lines)
                 name = 'x'.join(map(str, shape)) + '.txt'
                 (certificates / name).write_text(body)

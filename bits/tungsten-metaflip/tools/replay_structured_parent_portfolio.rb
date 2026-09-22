@@ -46,6 +46,9 @@ module MetaflipStructuredParentPortfolio
       raise 'result mismatch' unless result.shape == row.fetch('result_shape') && result.rank == price &&
                                      result.audit[:sha256] == row.fetch('result_sha256')
       raise 'recipe replay mismatch' unless B.replay(recipe) == result.audit
+      wide = (["MFW1 #{result.shape.join(' ')} #{result.rank}"] +
+              result.terms.map { |term| term.map { |factor| factor.to_s(16) }.join(' ') }).join("\n") + "\n"
+      File.binwrite(File.join(File.dirname(recipe), "#{result.shape.join('x')}.mfw"), wide)
       puts "#{shape.join('x')} GF(2) #{result.rank} < #{row.fetch('catalog_recursive_bound')} #{result.audit[:sha256]}"
     end
   end

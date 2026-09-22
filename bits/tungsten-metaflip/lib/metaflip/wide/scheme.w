@@ -9,6 +9,9 @@ use ../scheme
 -> ffws_words(n, cap) (i64 i64) i64
   32 + 6*ffpk_stride(n,n,n)*cap + 12*cap + 3*ffw_hash_capacity(cap)
 
+-> ffws_words_rect(n, m, p, cap) (i64 i64 i64 i64) i64
+  32 + 6*ffpk_stride(n,m,p)*cap + 12*cap + 3*ffw_hash_capacity(cap)
+
 -> ffws_hash(data, offset, stride) (i64[] i64 i64) i64
   h = 2166136261 ## i64
   i = 0 ## i64
@@ -125,11 +128,16 @@ use ../scheme
   1
 
 -> ffws_init(st, n, cap, data, rank, seed) (i64[] i64 i64 i64[] i64 i64) i64
-  if n < 8 || n > 16 || rank < 1 || cap < rank+2 || cap > 8192
+  if n < 8 || n > 16
     return 0
-  stride = ffpk_stride(n,n,n) ## i64
+  ffws_init_rect(st,n,n,n,cap,data,rank,seed)
+
+-> ffws_init_rect(st, n, m, p, cap, data, rank, seed) (i64[] i64 i64 i64 i64 i64[] i64 i64) i64
+  stride = ffpk_stride(n,m,p) ## i64
+  if n < 2 || m < 2 || p < 2 || stride == 0 || rank < 1 || cap < rank+2 || cap > 8192 || ffpk_valid(data,data.size(),rank,n,m,p) != 1
+    return 0
   hc = ffw_hash_capacity(cap) ## i64
-  words = ffws_words(n,cap) ## i64
+  words = ffws_words_rect(n,m,p,cap) ## i64
   i = 0 ## i64
   while i < words
     st[i] = 0
@@ -150,6 +158,11 @@ use ../scheme
   st[20]=st[19]+3*hc
   st[21]=st[20]+3*cap
   st[22]=st[21]+3*cap
+  st[24]=n*m
+  st[25]=m*p
+  st[26]=n*p
+  st[27]=m
+  st[28]=p
   i = 0
   while i < cap
     st[st[18]+i]=cap-1-i
@@ -259,7 +272,7 @@ use ../scheme
   stride = st[1] ## i64
   slot = st[st[16]+((ffws_rand(st)*st[4]) >> 31)] ## i64
   axis = (ffws_rand(st)*3) >> 31 ## i64
-  bit = (ffws_rand(st)*st[0]*st[0]) >> 31 ## i64
+  bit = (ffws_rand(st)*st[24+axis]) >> 31 ## i64
   i = 0 ## i64
   while i < 3*stride
     value = st[st[14]+slot*3*stride+i] ## i64

@@ -33,9 +33,11 @@ rectangles. Deleting coordinate 19 (zero-based) of the output axis of the
 `552ab55c7b9d66d47ae90a1283bf3f3588ecebe2719407b05a4587717ef480ac`,
 density 69949. The pinned catalog plus compact-parent portfolio priced that
 shape at 1451. Deleting coordinate 27 of the middle axis of the 16x28x25
-certificate gives `16x27x25-r6129.mfw.gz.b64`, SHA-256
-`47c296c1c5c3a8ab2dd6aa825c5e2fb0275eddf5a3299e591da13c7700b440b7`,
-density 240141; the previous finite composition price was 6195. Both tensors
+certificate gives an exact rank-6129 seed. A directed 10-million-move walk
+with nonce 19071, then four 50-million-move continuations with nonces
+19072 through 19075, reached `16x27x25-r6080.mfw.gz.b64`, SHA-256
+`50db7d99cb61d7b2b48253d4bd6502f717836f95ba72a3062d2899086d493529`,
+density 242250; the previous finite composition price was 6195. Both tensors
 were separately expanded by the Ruby verifier and the independent Python
 certificate test. These are exact GF(2) decompositions, not global record or
 optimality claims.
@@ -63,7 +65,7 @@ MetaFlip package and certificate directory as appropriate).
 
 The pinned-catalog closure comparison is replayable with
 `python3 tools/check_wide_rectangular_closure.py CATALOG.json`. It reports 17
-rank-price improvements totaling 174 terms among shapes with coordinates 2
+rank-price improvements totaling 272 terms among shapes with coordinates 2
 through 32; those are composition prices, not 17 separately materialized
 certificates. No square shape improves in this finite closure.
 Another 100 million moves from the retained rank-623 seed, and three further

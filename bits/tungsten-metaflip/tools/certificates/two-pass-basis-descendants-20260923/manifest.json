@@ -1,0 +1,105 @@
+{
+  "schema": 1,
+  "field": "GF(2)",
+  "record_claim": false,
+  "comparison_scope": "Exact GF(2) upper bounds numerically below the cited Lille index; no optimality, cross-field, or worldwide novelty claim.",
+  "source": "https://fmm.univ-lille.fr/",
+  "source_created_at": "2026-09-18T17:17:29",
+  "source_sha256": "a77c4286cd7ad9b5212b679d9e1e21672c7519a41124a3d71079d68bf0878213",
+  "parent_set": "first-generation",
+  "initial_parent_count": 15,
+  "counts": {
+    "parents": 15,
+    "modes": 180,
+    "projections": 9708
+  },
+  "third_generation_probe": {
+    "parents": 3,
+    "modes": 36,
+    "projections": 2028,
+    "improvements": 0
+  },
+  "rows": [
+    {
+      "shape": [
+        14,
+        16,
+        27
+      ],
+      "oriented_shape": [
+        16,
+        27,
+        14
+      ],
+      "rank": 3562,
+      "local_baseline_rank": 3565,
+      "public_rank": 3604,
+      "source_shape": [
+        16,
+        27,
+        14
+      ],
+      "source_rank": 3565,
+      "source_sha256": "008561a824896d594a6cd3b2b14c63846e468c434af077d5c671065df05a5fae",
+      "mode": 10,
+      "kind": "basis",
+      "basis_rank": 3562,
+      "basis_sha256": "cbaae48d7142334272ee749e25485c7405a97b31a180f6adce95def980559648",
+      "sha256": "cbaae48d7142334272ee749e25485c7405a97b31a180f6adce95def980559648"
+    },
+    {
+      "shape": [
+        15,
+        16,
+        27
+      ],
+      "oriented_shape": [
+        16,
+        27,
+        15
+      ],
+      "rank": 3753,
+      "local_baseline_rank": 3754,
+      "public_rank": 3787,
+      "source_shape": [
+        16,
+        27,
+        15
+      ],
+      "source_rank": 3754,
+      "source_sha256": "092b0cba8a3ffd456205169b08e57d7208003e0213f87d7b8373c20872838ede",
+      "mode": 8,
+      "kind": "basis",
+      "basis_rank": 3753,
+      "basis_sha256": "02c62b43725787873c5e6dd041afb3b3d691603d2089dcb80d6bbbd2555a2dcd",
+      "sha256": "02c62b43725787873c5e6dd041afb3b3d691603d2089dcb80d6bbbd2555a2dcd"
+    },
+    {
+      "shape": [
+        15,
+        19,
+        20
+      ],
+      "oriented_shape": [
+        15,
+        19,
+        20
+      ],
+      "rank": 3393,
+      "local_baseline_rank": 3395,
+      "public_rank": 3409,
+      "source_shape": [
+        15,
+        19,
+        20
+      ],
+      "source_rank": 3395,
+      "source_sha256": "2fe4494ed59e631d739d3c23291e84b073434cb20f13cd90462c59a071bb675e",
+      "mode": 7,
+      "kind": "basis",
+      "basis_rank": 3393,
+      "basis_sha256": "91c8dacb301521ce71539d85c9e7c3c96ecd38f036d5ead871868664b7370817",
+      "sha256": "91c8dacb301521ce71539d85c9e7c3c96ecd38f036d5ead871868664b7370817"
+    }
+  ]
+}

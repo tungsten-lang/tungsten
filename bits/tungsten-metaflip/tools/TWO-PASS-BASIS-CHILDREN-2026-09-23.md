@@ -3,7 +3,8 @@
 The native wide transform queue already has twelve two-pass, three-axis basis
 contexts (modes 6–17). The earlier offline structured-parent screen tested only
 six one-axis contexts. Screening the existing twelve modes on all 24 certified
-structured-projection parents gives these exact GF(2) upper bounds:
+structured-projection parents, then sweeping the improved children once more,
+gives these exact GF(2) upper bounds:
 
 | Shape | Previous local | New rank | Dated Lille index |
 | --- | ---: | ---: | ---: |
@@ -16,26 +17,31 @@ structured-projection parents gives these exact GF(2) upper bounds:
 | 10×20×22 | 2671 | 2663 | 2673 |
 | 10×20×23 | 2743 | 2737 | 2775 |
 | 12×16×29 | 3164 | 3160 | 3216 |
-| 14×16×27 | 3576 | 3565 | 3604 |
+| 14×16×27 | 3576 | 3562 | 3604 |
 | 14×16×28 | 3634 | 3630 | 3674 |
-| 15×16×27 | 3758 | 3754 | 3787 |
+| 15×16×27 | 3758 | 3753 | 3787 |
 | 15×16×29 | 4005 | 4002 | 4044 |
 | 15×17×20 | 3039 | 3037 | 3069 |
-| 15×19×20 | 3399 | 3395 | 3409 |
+| 15×19×20 | 3399 | 3393 | 3409 |
 
-The finite screen covers 288 basis contexts and 14,928 one-coordinate
-projections; no native basis context exhausted its algebra-work cap. The
-15 retained results are best-per-shape selections, not 15 independent
-search strategies. Adding them as seeds decreases 94 prices in the local
-block/Kronecker closure over sorted triples in `[2,32]³`; none of those
-additional price decreases newly crosses the dated Lille table. These
-composition prices are **not** independently expanded tensor artifacts.
+The first finite screen covers 288 basis contexts and 14,928 one-coordinate
+projections. Fifteen retained tensors seed a second screen of 180 contexts and
+9,708 projections, which improves three of the fifteen shapes again. A third
+screen of those three tensors checks 36 contexts and 2,028 projections with no
+further gain. No native context exhausted its algebra-work cap. These are
+best-per-shape selections, not independent search strategies. Adding both
+generations as seeds decreases 94 prices in the local block/Kronecker closure
+over sorted triples in `[2,32]³`; the second generation improves 14 of those
+prices further. None of the additional price decreases newly crosses the dated
+Lille table. Composition prices are **not** independently expanded tensors.
 
-The [manifest](certificates/two-pass-basis-children-20260923/manifest.json)
-pins each parent, basis, and output digest. Replay rebuilds the 24 parents
-from their certified source schemes, applies an independent integer-row
-two-pass implementation, checks every retained full tensor in Python and Ruby,
-and optionally checks that the native queue's basis mode yields the same bytes.
+The [first-generation manifest](certificates/two-pass-basis-children-20260923/manifest.json)
+and [second-generation manifest](certificates/two-pass-basis-descendants-20260923/manifest.json)
+pin each parent, basis, and output digest. Replay rebuilds the 24 original
+parents from their certified source schemes, applies an independent integer-row
+two-pass implementation, checks all 18 retained full tensors in Python and
+Ruby, and optionally checks that the native queue's basis mode yields the same
+bytes.
 Large `.mfw` outputs are generated outside the repository. The pinned Lille
 digest was created 2026-09-18T17:17:29 and has SHA-256
 `a77c4286cd7ad9b5212b679d9e1e21672c7519a41124a3d71079d68bf0878213`.
@@ -49,12 +55,20 @@ From the repository root (choose a fresh output directory for each replay):
 python3 -B bits/tungsten-metaflip/tools/screen_two_pass_basis_children.py \
   --replay-manifest bits/tungsten-metaflip/tools/certificates/two-pass-basis-children-20260923/manifest.json \
   --output-dir /tmp/metaflip-two-pass-replay
+python3 -B bits/tungsten-metaflip/tools/screen_two_pass_basis_children.py \
+  --replay-manifest bits/tungsten-metaflip/tools/certificates/two-pass-basis-descendants-20260923/manifest.json \
+  --output-dir /tmp/metaflip-two-pass-descendants
 tungsten compile bits/tungsten-metaflip/spec/wide_transform_queue_test.w \
   --out /tmp/metaflip-two-pass-native-test --release --native
 python3 -B bits/tungsten-metaflip/spec/two_pass_basis_children_test.py \
   --native /tmp/metaflip-two-pass-native-test
 python3 -B bits/tungsten-metaflip/tools/screen_two_pass_basis_children.py \
   --digest PATH/TO/fmm_sota.json --output-dir /tmp/metaflip-two-pass-full-screen
+python3 -B bits/tungsten-metaflip/tools/screen_two_pass_basis_children.py \
+  --digest PATH/TO/fmm_sota.json --parent-set first-generation \
+  --output-dir /tmp/metaflip-two-pass-second-screen
+python3 -B bits/tungsten-metaflip/tools/screen_two_pass_basis_children.py \
+  --digest PATH/TO/fmm_sota.json --parent-set second-generation
 ```
 
 No new runtime strategy was added: the productive modes are already offered

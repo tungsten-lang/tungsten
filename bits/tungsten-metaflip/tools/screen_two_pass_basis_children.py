@@ -18,11 +18,18 @@ HERE = Path(__file__).resolve().parent
 ONE_PASS = HERE / 'certificates/structured-neutral-children-20260923/manifest.json'
 PARENT = HERE / 'certificates/structured-parent-projections-20260923/manifest.json'
 COMPOSED = HERE / 'certificates/neutral-basis-children-20260923/manifest.json'
+FIRST = HERE / 'certificates/two-pass-basis-children-20260923/manifest.json'
+SECOND = HERE / 'certificates/two-pass-basis-descendants-20260923/manifest.json'
 
 
-def baseline_seeds():
+def baseline_seeds(parent_set='structured-projections'):
     seeds = top.initial_seeds()
-    for path in (PARENT, COMPOSED, ONE_PASS):
+    paths = [PARENT, COMPOSED, ONE_PASS]
+    if parent_set in ('first-generation', 'second-generation'):
+        paths.append(FIRST)
+    if parent_set == 'second-generation':
+        paths.append(SECOND)
+    for path in paths:
         data = json.loads(path.read_text())
         for row in data['rows'] + data.get('extensions', []) + data.get('descendants', []):
             key = tuple(row['shape'])
@@ -58,9 +65,9 @@ def source_row(parent):
     return shape, terms, digest
 
 
-def screen(parents, digest):
+def screen(parents, digest, parent_set='structured-projections'):
     public = top.comparison(digest)
-    baseline = top.solver(baseline_seeds())
+    baseline = top.solver(baseline_seeds(parent_set))
     best = {}
     counts = dict(parents=len(parents), modes=0, projections=0)
     for parent in parents:
@@ -103,7 +110,7 @@ def screen(parents, digest):
                                                raw_rank=len(raw_child),
                                                cleanup_steps=len(history)))
     return dict(schema=1, field='GF(2)', record_claim=False,
-                parent_set='structured-projections', counts=counts,
+                parent_set=parent_set, counts=counts,
                 rows=sorted(best.values(), key=lambda row: row['shape']))
 
 
@@ -157,19 +164,38 @@ def materialize(row, parents, output_dir):
     return dict(row, output=str(path))
 
 
+def build_parents(root, parent_set):
+    parents = neutral.build_structured_parents(root / 'structured')
+    if parent_set == 'structured-projections':
+        return parents
+    first = json.loads(FIRST.read_text())
+    parents = [materialize(row, parents, root / 'first') for row in first['rows']]
+    if parent_set == 'first-generation':
+        return parents
+    second = json.loads(SECOND.read_text())
+    return [materialize(row, parents, root / 'second') for row in second['rows']]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument('--digest', type=Path)
     group.add_argument('--replay-manifest', type=Path)
+    parser.add_argument('--parent-set', choices=('structured-projections',
+                                                  'first-generation',
+                                                  'second-generation'))
     parser.add_argument('--output-dir', type=Path)
     args = parser.parse_args()
     if args.replay_manifest and args.output_dir is None:
         parser.error('--replay-manifest requires --output-dir')
+    replay = json.loads(args.replay_manifest.read_text()) if args.replay_manifest else None
+    parent_set = args.parent_set or (replay or {}).get('parent_set', 'structured-projections')
+    if replay and parent_set != replay['parent_set']:
+        parser.error('parent set conflicts with replay manifest')
     with tempfile.TemporaryDirectory(prefix='metaflip-two-pass-children-') as temp:
-        parents = neutral.build_structured_parents(Path(temp) / 'parents')
-        data = (json.loads(args.replay_manifest.read_text()) if args.replay_manifest
-                else screen(parents, json.loads(args.digest.read_text())))
+        parents = build_parents(Path(temp) / 'parents', parent_set)
+        data = replay if replay else screen(parents, json.loads(args.digest.read_text()),
+                                           parent_set)
         if args.output_dir:
             args.output_dir.mkdir(exist_ok=False)
             data = dict(data, rows=[materialize(row, parents, args.output_dir)

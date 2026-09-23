@@ -152,6 +152,26 @@ two sweeps reach 2566, and a 50-million-move walk (nonce 19151) reaches rank
 The prior pinned GF(2) composition prices were 4077, 4076, 3735, and 2590.
 All four decompositions are retained in factor order and independently checked.
 
+Scanning all 232 one-coordinate projections of those four certificates yields
+five more improvements on the pinned closure. The retained factor-order ranks
+are `19x26x13:3874`, `20x25x13:3890`, `20x27x11:3545`, `7x19x28:2384`,
+and `8x19x27:2464`, with SHA-256 respectively
+`36a042fbf9a75a2910694a46343a9ffa5b79af5aace59d9d9562365e065ca3f0`,
+`6a709719b5fe039baea4e1b97da45a2cd022c5d4a63345dec56da478dd6bcd59`,
+`86d8bac9048e7fd74c7a9dd9cf8dc029c555e32cba44622c7803ec3dcb96433c`,
+`91f691c6acbf09d16ecc819c77d1f7dce5fc8bd14cae307d17a14fbcde4d9e3a`,
+and `0acee2a6eebe372fb9f395a6b7f91b88361dfc51efcce955b467ba8aaa2c9072`.
+The source projections remove, respectively, middle coordinate 4 from
+`19x27x13`, middle coordinate 16 from `20x26x13`, last coordinate 1 from
+`20x27x12`, first coordinate 6 from `8x19x28`, and last coordinate 13 from
+`8x19x28` (all zero-based). Exact shared-factor compression gives ranks 3905,
+3919, 3555, 2414, and 2485; two bounded basis sweeps give 3899, 3915, 3550,
+2403, and 2477. A 50-million-move walk each (nonces 19153 through 19161,
+step 2), then a 100-million-move continuation each (nonces 19163 through
+19171, step 2), gives the retained ranks. The pinned composition prices before
+these five additions were 3964, 3936, 3559, 2442, and 2516. Every saved
+certificate passes the Ruby and independent Python full-tensor checks.
+
 Replaying the `20x20x25` structured-parent row yields rank 5566. Deleting
 coordinate 18 of its middle axis, cancelling equal GF(2) terms, and applying
 exact shared-factor compression yields `20x19x25` at rank 5439. Repeated
@@ -162,19 +182,24 @@ SHA-256 `c11d3a775ed89031462c126f1707f63cd600c611d268878f165a838b9a8eb2a6`
 and density 339443. The prior pinned GF(2) catalog-plus-portfolio price
 was 5583. The exact tensor is checked by both independent verifiers.
 
-For context, the [Université de Lille full table](https://fmm.univ-lille.fr/algo_32.html)
+For context, the [Université de Lille full table](https://fmm.univ-lille.fr/)
 (served version `2b71762f906bef43f0ce25d31a9b8e5ad28a23db`, consulted on
 2026-09-22) lists 10x12x19:1434, 10x12x25:1844,
 16x25x27:6048, 16x25x28:6307, 16x25x29:6507, 16x25x31:6914,
 8x19x30:2775, 13x20x28:4271, 15x19x28:4663, 14x20x28:4556,
 and 19x20x25:5276. The same table lists 13x19x27:3989,
-13x20x26:4016, 12x20x27:3740, and 8x19x28:2590.
+13x20x26:4016, 12x20x27:3740, and 8x19x28:2590. Its further entries are
+13x19x26:3838, 13x20x25:3858, 11x20x27:3559, 7x19x28:2362, and
+8x19x27:2516.
 The retained 12x10x19 rank 1421, 12x10x25 rank 1836, 16x28x25 rank 6223,
 8x19x30 rank 2723,
 13x20x28 rank 4167, 15x19x28 rank 4576, 14x20x28 rank 4484,
 13x19x28 rank 4068, 13x20x27 rank 4092, and 8x19x29 rank 2642 beat their
 corresponding table entries. The four further descendants at ranks 3969,
 3991, 3699, and 2554 also beat their corresponding entries. The retained
+11x20x27 rank 3545 and 8x19x27 rank 2464 also beat their table entries;
+13x19x26 rank 3874, 13x20x25 rank 3890, and 7x19x28 rank 2384 improve the
+pinned finite closure but not the table. The retained
 16x27x25 rank 6080, 16x29x25 rank 6534,
 16x31x25 rank 6916, 19x20x25 rank 5403, and 15x19x27 rank 4488 do not.
 Some individual
@@ -204,8 +229,8 @@ certificates are independently expanded by
 MetaFlip package and certificate directory as appropriate).
 
 The pinned-catalog closure comparison is replayable with
-`python3 tools/check_wide_rectangular_closure.py CATALOG.json`. It reports 89
-rank-price improvements totaling 4279 terms among shapes with coordinates 2
+`python3 tools/check_wide_rectangular_closure.py CATALOG.json`. It reports 102
+rank-price improvements totaling 4674 terms among shapes with coordinates 2
 through 32; those are composition prices, not separate materialized
 certificates for every improved shape. No square shape improves in this finite closure.
 Another 100 million moves from the retained rank-623 seed, and three further

@@ -144,9 +144,25 @@ class WideRectangularCertificateTest(unittest.TestCase):
                 self.check_certificate(shape, rank, digest, compressed=True)
 
     def test_16x13x19_projected_descendant_walk(self):
+        self.check_certificate((16, 13, 19), 2394,
+                               '7dfda0b767f2aee40e62d9a6c0b5a75ac7237bf283f7d5b85f6a44f7f8592ff0',
+                               compressed=True)
         self.check_certificate((16, 13, 19), 2393,
                                '8db2f6ec9aa370435baab43cbeccfe04c34559469f9c1f8d675464e307352760',
                                compressed=True)
+
+    def test_16x13x18_to_16_projected_lineage(self):
+        cases = (
+            ((16, 13, 18), 2282,
+             '035c03235caebbbf4439fb91fa35454d9b87544f0d75b870fccb3a1f7f32812e'),
+            ((16, 13, 17), 2153,
+             '16fe801ea9e6a84af469ecea800e853703987260ebbce0f24495705a642b57ad'),
+            ((16, 13, 16), 1994,
+             'b6a4b68adf6f4cd3abb66f97dd834280db3de91ef6bdf1dbf323788d60df0ccc'),
+        )
+        for shape, rank, digest in cases:
+            with self.subTest(shape=shape):
+                self.check_certificate(shape, rank, digest, compressed=True)
 
     def test_12x10x20_rank_1448(self):
         self.check_certificate((12, 10, 20), 1448,

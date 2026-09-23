@@ -950,6 +950,29 @@ The new seed improves three more shapes and saves 50 rank units against the
 prior retained closure, giving 587 shapes and 32628 saved units cumulatively;
 the same marginal gain holds against the local formula-aware baseline.
 
+The same chain yields two more retained tensors. From the support-only
+`16x13x19:2394` walk endpoint, archived for lineage with decoded SHA-256
+`7dfda0b767f2aee40e62d9a6c0b5a75ac7237bf283f7d5b85f6a44f7f8592ff0`,
+a projection and 100-million-move walk
+(nonce 21703) gave the exact support-only `16x13x18:2282` seed, archived here
+for lineage but excluded from the closure because Lille listed 2276. Its
+decoded SHA-256 is
+`035c03235caebbbf4439fb91fa35454d9b87544f0d75b870fccb3a1f7f32812e`.
+Basis/projection cleanup of that seed gave `16x13x17:2183`; a 100-million-
+move walk (nonce 21711) reached retained rank 2153, decoded SHA-256
+`16fe801ea9e6a84af469ecea800e853703987260ebbce0f24495705a642b57ad`.
+Another basis/projection cleanup gave `16x13x16:2010`, and a 100-million-
+move walk (nonce 21715) reached retained rank 1994, decoded SHA-256
+`b6a4b68adf6f4cd3abb66f97dd834280db3de91ef6bdf1dbf323788d60df0ccc`.
+Independent full-tensor checks pass for all three archive files. Lille listed
+`13x16x17:2164` and `13x16x16:2022` on 2026-09-23, numerical differences of
+11 and 28. One further 100-million-move continuation of rank 2153 tied.
+These two retained tensors improve eight more shapes and save 366 rank units
+against the pinned catalog-plus-retained closure, reaching 595 improved
+shapes and 32994 saved units cumulatively. Against the stronger local
+formula-aware baseline, their marginal effect is six shapes and 275 units;
+none changes a square price.
+
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with
 `tools/replay_structured_parent_portfolio.rb --output DIR --only 5x9x20`.

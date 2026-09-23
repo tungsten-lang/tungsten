@@ -67,10 +67,38 @@ def projection_oracle_tests():
     return checked
 
 
+def productive_postbasis(binary):
+    package=Path(__file__).resolve().parents[1]
+    replay=package/'tools/replay_structured_parent_portfolio.rb'
+    with tempfile.TemporaryDirectory(prefix='metaflip-postbasis-productivity-') as directory:
+        root=Path(directory)
+        subprocess.run(['ruby',str(replay),'--output',str(root/'parent'),
+                        '--only','20x20x25'],check=True,capture_output=True,text=True,timeout=30)
+        shape,terms=read_blob((root/'parent/20x20x25/20x20x25.mfw').read_bytes())
+        assert shape==(20,20,25)
+        projected=project_coordinate(shape,terms,1,18)
+        reduced,_=compress_shared(projected,max_bits=max(shape[0]*shape[1],
+                                                        shape[1]*shape[2],shape[0]*shape[2]))
+        assert len(reduced)==5439
+        source=root/'projected.mfw'; source.write_bytes(blob((20,19,25),reduced))
+        first=root/'postbasis-first.mfw'
+        result=subprocess.run([binary,'--postbasis-scan',str(source),str(first)],check=True,
+                              capture_output=True,text=True,timeout=30)
+        fields=dict(item.split('=',1) for item in result.stdout.split()[1:])
+        assert result.stdout.startswith('POSTBASIS ') and int(fields['before'])==5439
+        assert int(fields['best'])<=5422
+        result2=subprocess.run([binary,'--postbasis-scan',str(first)],check=True,
+                               capture_output=True,text=True,timeout=30)
+        fields2=dict(item.split('=',1) for item in result2.stdout.split()[1:])
+        assert result2.stdout.startswith('POSTBASIS ')
+        assert int(fields2['before'])==int(fields['best']) and int(fields2['best'])<=5418
+        print('PASS native projected-basis productivity: 5439 ->',fields['best'],'->',fields2['best'])
+
+
 def audit(root, progress=None):
     q=root/'composition/transforms'; objects=root/'composition/objects'
     done=count(q/'consumed'); submitted=count(q/'submitted')
-    verified=set(); seen=set(); counts=dict(contexts=done,basis=0,project=0,neutral=0,limited=0)
+    verified=set(); seen=set(); counts=dict(contexts=done,basis=0,project=0,postbasis=0,neutral=0,limited=0)
     @lru_cache(maxsize=64)
     def load(h):
         raw=(objects/f'{h}.tensor').read_bytes(); assert sha256(raw).hexdigest()==h
@@ -82,7 +110,9 @@ def audit(root, progress=None):
         raw=read_record(q,'tasks',ticket); tag,h,mode=raw.decode().split(); mode=int(mode)
         assert tag=='MFT_TASK1' and raw==f'MFT_TASK1 {h} {mode}\n'.encode()
         assert (h,mode) not in seen; seen.add((h,mode))
-        kind='basis' if mode<18 else 'project'; ordinal=mode+1 if mode<18 else mode-17
+        if mode<18: kind,ordinal='basis',mode+1
+        elif mode>=3090: kind,ordinal='postbasis',mode-3089
+        else: kind,ordinal='project',mode-17
         assert read_record(q/'index'/h,kind,ordinal)==f'{ticket}\n'.encode()
         if ticket>done: continue
         shape,terms=load(h); width=max(shape[0]*shape[1],shape[1]*shape[2],shape[0]*shape[2])
@@ -92,11 +122,12 @@ def audit(root, progress=None):
         assert before==len(terms) and 1<=proposed<=before and status in (1,2,3) and 0<=work<=140000000
         assert record==(' '.join(fields)+'\n').encode()
         expected=terms; dims=shape
-        if mode<18:
-            order=[mode//2] if mode<6 else list(permutations(range(3)))[(mode-6)//2]
-            for _ in range(1 if mode<6 else 2):
+        basis_mode=mode if mode<18 else (mode-3090)%18 if mode>=3090 else None
+        if basis_mode is not None:
+            order=[basis_mode//2] if basis_mode<6 else list(permutations(range(3)))[(basis_mode-6)//2]
+            for _ in range(1 if basis_mode<6 else 2):
                 for axis in order:
-                    expected,_=refactor_shared(expected,axis,max_bits=width,reverse_columns=bool(mode%2))
+                    expected,_=refactor_shared(expected,axis,max_bits=width,reverse_columns=bool(basis_mode%2))
                 if sorted(expected)==terms: break
         else:
             index=mode-18; coordinate=None
@@ -128,6 +159,7 @@ def audit(root, progress=None):
 def check(binary, retained=None, public=None):
     binary=str(Path(binary).resolve())
     print('PASS row-block projection oracle:',projection_oracle_tests(),'dense/sparse grid comparisons')
+    productive_postbasis(binary)
     with tempfile.TemporaryDirectory(prefix='metaflip-wide-queue-') as temp:
         root=Path(temp) if retained is None else Path(retained)
         if retained is not None: assert not root.exists(); root.mkdir()
@@ -172,11 +204,12 @@ def check(binary, retained=None, public=None):
         for _ in range(100):
             if count(q/'consumed')==count(q/'submitted'): break
             run(['--drain',root,4])
-        assert count(q/'consumed')==count(q/'submitted')==169
+        assert count(q/'consumed')==count(q/'submitted')==241
         checked=audit(root)
         feedback=audit_feedback(root)
         assert feedback['submitted']>0 and feedback['consumed']==0
-        assert checked['basis']==36 and checked['project']==133 and checked['neutral']>0 and checked['limited']==0
+        assert checked['basis']==36 and checked['project']==133 and checked['postbasis']==72
+        assert checked['neutral']>0 and checked['limited']==0
         # Full-term identity retains the useful rank tie, not just one rank.
         assert len(list((root/'composition/by-shape/1x1x65').iterdir()))==2
         # Compact pages, not one global/index file per context.

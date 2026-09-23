@@ -1,5 +1,6 @@
 # One native cold child owns this FIFO. A task is one bounded basis context
-# or one coordinate projection, not an entire recursive tensor campaign.
+# or one coordinate projection. The best projection of each axis gets two
+# terminal basis sweeps; terminal results do not schedule more projections.
 # Successors go to the tail. Index pages bind full source identity + context;
 # no rank-only filter and no individual task/index file per coordinate.
 use counters
@@ -24,18 +25,22 @@ use feedback
   if fields.size() != 3 || fields[0] != "MFT_TASK1" || ffrf_hash_valid(fields[1]) != 1
     return 0-1
   mode = ffpk_decimal(fields[2]) ## i64
-  if mode < 0 || mode >= 3090 || raw != "MFT_TASK1 " + fields[1] + " " + mode.to_s() + "\n"
+  if mode < 0 || mode >= 3126 || raw != "MFT_TASK1 " + fields[1] + " " + mode.to_s() + "\n"
     return 0-1
   mode
 
 -> ffxt_index_kind(mode) (i64)
   if mode < 18
     return "basis"
+  if mode >= 3090
+    return "postbasis"
   "project"
 
 -> ffxt_index_ordinal(mode) (i64) i64
   if mode < 18
     return mode+1
+  if mode >= 3090
+    return mode-3089
   mode-17
 
 -> ffxt_bind(queue, raw, ticket) (String String i64) i64
@@ -73,7 +78,7 @@ use feedback
   if File.exists?(root + "/stop")
     return 0-1
   queue = root + "/composition/transforms/"
-  if ffrf_hash_valid(identity) != 1 || mode < 0 || mode >= 3090
+  if ffrf_hash_valid(identity) != 1 || mode < 0 || mode >= 3126
     return 0
   names = ["tasks-pages", "results-pages", "index"]
   i = 0 ## i64
@@ -150,7 +155,12 @@ use feedback
   meta[3] = 0
   meta[4] = 0
   rank = before ## i64
-  if mode < 18
+  basis_mode = mode ## i64
+  if mode >= 3090
+    basis_mode -= 3090
+    if basis_mode >= 18
+      basis_mode -= 18
+  if basis_mode < 18
     i = 0 ## i64
     while i < 3*stride*before
       out[i] = source[i]
@@ -158,10 +168,10 @@ use feedback
     passes = 1 ## i64
     axes = 1 ## i64
     permutation = 0 ## i64
-    if mode >= 6
+    if basis_mode >= 6
       passes = 2
       axes = 3
-      permutation = (mode-6)/2
+      permutation = (basis_mode-6)/2
     orders = [0, 1, 2, 0, 2, 1, 1, 0, 2, 1, 2, 0, 2, 0, 1, 2, 1, 0]
     pass = 0 ## i64
     while pass < passes
@@ -169,10 +179,10 @@ use feedback
       while i < axes
         if File.exists?(root + "/stop")
           return 0-1
-        axis = mode/2 ## i64
-        if mode >= 6
+        axis = basis_mode/2 ## i64
+        if basis_mode >= 6
           axis = orders[3*permutation+i]
-        rank = ffwm_refactor(out, 3*32*16384, rank, n, m, p, scratch, words, axis, mode%2, 20000000, stats, 6)
+        rank = ffwm_refactor(out, 3*32*16384, rank, n, m, p, scratch, words, axis, basis_mode%2, 20000000, stats, 6)
         if rank < 1
           return 0
         meta[3] += stats[0]
@@ -223,7 +233,7 @@ use feedback
   info = i64[4]
   meta = i64[5]
   before = ffpk_parse(blob, source, 3*32*16384, info, 4) ## i64
-  if before < 1 || mode >= 18+ffxt_coordinates(info[0], info[1], info[2])
+  if before < 1 || (mode >= 18 && mode < 3090 && mode >= 18+ffxt_coordinates(info[0], info[1], info[2]))
     return 0
   checked = ffpk_exact(source, 3*32*16384, before, info[0], info[1], info[2], parity, 32768, 20000000) ## i64
   if checked != 1
@@ -255,7 +265,7 @@ use feedback
   # Offer at most two continuations. Paged per-source indexes make a replay
   # idempotent even if other producers append after an interrupted task.
   successor = 0 ## i64
-  if mode < 17 || (mode >= 18 && mode+1 < 18+ffxt_coordinates(info[0], info[1], info[2]))
+  if mode < 17 || (mode >= 18 && mode < 3090 && mode+1 < 18+ffxt_coordinates(info[0], info[1], info[2])) || (mode >= 3090 && mode < 3107) || (mode >= 3108 && mode < 3125)
     successor = ffxt_offer(root, identity, mode+1)
     if successor != 1
       return successor
@@ -263,6 +273,36 @@ use feedback
     successor = ffxt_offer(root, result, 18)
     if successor != 1
       return successor
+  if mode == 3107
+    shape = info[0].to_s() + "x" + info[1].to_s() + "x" + info[2].to_s()
+    best = File.read_prefix(root + "/composition/best/" + shape, 100)
+    if best != nil
+      parts = best.strip().split(" ")
+      if parts.size() != 2 || ffpk_decimal(parts[0]) < 1 || ffrf_hash_valid(parts[1]) != 1 || best != parts[0] + " " + parts[1] + "\n"
+        return 0
+      successor = ffxt_offer(root, parts[1], 3108)
+      if successor != 1
+        return successor
+  if mode >= 18 && mode < 3090
+    coordinate = mode-18 ## i64
+    axis = 0 ## i64
+    while axis < 3
+      size = info[axis] ## i64
+      if size > 1
+        if coordinate < size
+          if coordinate == size-1
+            shape = meta[0].to_s() + "x" + meta[1].to_s() + "x" + meta[2].to_s()
+            best = File.read_prefix(root + "/composition/best/" + shape, 100)
+            if best != nil
+              parts = best.strip().split(" ")
+              if parts.size() != 2 || ffpk_decimal(parts[0]) < 1 || ffrf_hash_valid(parts[1]) != 1 || best != parts[0] + " " + parts[1] + "\n"
+                return 0
+              successor = ffxt_offer(root, parts[1], 3090)
+              if successor != 1
+                return successor
+          break
+        coordinate -= size
+      axis += 1
   record = "MFT_RESULT1 " + Crypto:SHA256.hexdigest(raw) + " " + result + " " + meta[0].to_s() + " " + meta[1].to_s() + " " + meta[2].to_s() + " " + before.to_s() + " " + rank.to_s() + " " + admitted.to_s() + " " + status.to_s() + " " + meta[3].to_s() + "\n"
   if File.exists?(root + "/stop")
     return 0-1

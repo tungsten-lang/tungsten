@@ -1135,6 +1135,18 @@ shape, reports the digest's creation time, and fails if a retained shape is
 missing. No external digest is bundled here; the pinned composition
 catalog and a dated public rank table answer different questions.
 
+The retained `15x22x13:2622` seed admits a further 100-million-move directed
+walk (nonce 21857) to exact rank **2621**. A second 100-million-move
+continuation (nonce 21859) ties rank and lowers density from 86053 to 86006;
+that representation is saved as `15x22x13-r2621.mfw.gz.b64` (decoded SHA-256
+`ecb5be702cc5118362a8063b858d2bc0af5eeba0ebbf22e1f2c613d4304642b1`).
+It passes the independent full-tensor checker. Its one-coordinate projections
+do not improve current local closure prices. The pinned finite closure stays
+at 616 improved shapes and rises by two units to 33566 saved rank units.
+The dated Lille digest lists 2628 for the canonical `13x15x22` shape, so
+this is a stronger GF(2) rank
+than that public table entry, not an optimality or worldwide-novelty proof.
+
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with
 `tools/replay_structured_parent_portfolio.rb --output DIR --only 5x9x20`.

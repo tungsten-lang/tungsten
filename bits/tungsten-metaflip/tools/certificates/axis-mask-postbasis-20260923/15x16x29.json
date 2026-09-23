@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "field": "GF(2)",
+  "record_claim": false,
+  "source": {
+    "kind": "structured-portfolio",
+    "portfolio_shape": [15, 16, 30],
+    "oriented_shape": [16, 15, 30],
+    "rank": 4050,
+    "scheme_sha256": "10496e0cefa1e2d2aaa8e5c3a9ec2908a147d49099dc469ee5d243acbebc5837",
+    "mfw_sha256": "9396bb49085382999d483ec21843e710ce440288d278218d06ed596079029794"
+  },
+  "steps": [
+    {
+      "axis": 2,
+      "deleted_coordinate": 3,
+      "shear_mask": 16,
+      "raw_rank": 4034,
+      "cleanup_steps": 30,
+      "oriented_shape": [16, 15, 29],
+      "rank": 4004,
+      "sha256": "446ddc797cfbfaf427143cf10819d27461486983fa71ed7d26691b507511d3c4"
+    }
+  ]
+}

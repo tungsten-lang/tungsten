@@ -1115,6 +1115,26 @@ Lille table's 1959 for `7x19x23`; the pinned closure remains at 616
 improved shapes and rises to 33562 saved units. Both the rank-1957
 lineage witness and the rank-1955 best witness remain checked.
 
+Using the dated Lille rank digest to screen retained certificates exposed
+`11x16x18:1950` as a nearby but non-record GF(2) seed. A 100-million-move
+walk (nonce 21853) reaches exact rank 1949, SHA-256
+`1747eff302faa0b61007e0b4ff22101c7e45eb4a5a396674dd5e18b11b054593`;
+a 200-million-move continuation (nonce 21855) ties. The rank-1949 tensor
+passes independent full GF(2) verification and lowers the local archive
+price for `11x16x18` and `11x18x18` by one each. It remains above Lille's
+listed 1944, so it is not a general-field record claim. A matched
+100-million-move walk from `19x27x15:4488` (nonce 21851) also ties. The
+pinned closure remains at 616 improved shapes and rises to 33564 saved
+units.
+
+For a fresh public-rank comparison, pass `fmm_sota.json` from
+`https://github.com/sedoglavic/fmm_digest` to
+`python3 tools/screen_wide_lille_digest.py PATH/TO/fmm_sota.json --mode above --limit 20`.
+The screen sorts shapes canonically, uses the best retained GF(2) rank per
+shape, reports the digest's creation time, and fails if a retained shape is
+missing. No external digest is bundled here; the pinned composition
+catalog and a dated public rank table answer different questions.
+
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with
 `tools/replay_structured_parent_portfolio.rb --output DIR --only 5x9x20`.

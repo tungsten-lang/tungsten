@@ -1,0 +1,51 @@
+{
+  "schema": 1,
+  "field": "GF(2)",
+  "record_claim": false,
+  "comparison_scope": "Exact GF(2) upper bounds numerically below a dated Lille table; no optimality, cross-field or worldwide novelty claim.",
+  "source": "https://fmm.univ-lille.fr/",
+  "source_created_at": "2026-09-18T17:17:29",
+  "source_sha256": "a77c4286cd7ad9b5212b679d9e1e21672c7519a41124a3d71079d68bf0878213",
+  "initial_parent_count": 3,
+  "max_depth": 3,
+  "basis_variants": 36,
+  "projections": 2574,
+  "rows": [
+    {
+      "shape": [16, 24, 31], "rank": 6487, "raw_rank": 6499,
+      "cleanup_steps": 12, "public_rank": 6549, "local_baseline_rank": 6499,
+      "source_shape": [16, 25, 31], "source_rank": 6905,
+      "source_sha256": "2e520b3ffa196dbf1eb26b40c6a56abb8fa9d4c627d7885e31484520740103f1",
+      "fixed_axis": 1, "reverse": true, "basis_rank": 6905,
+      "basis_changed_groups": 148,
+      "basis_sha256": "92ef98878789820abce954dd1cc7988d3303559008aefcc029f658a2798c1b8c",
+      "axis": 1, "deleted_coordinate": 12,
+      "sha256": "925328e02a1bb9a92abea9328f2448a02eddf5d1306f2df8f449bbf9b46b8e07",
+      "depth": 1
+    },
+    {
+      "shape": [16, 25, 31], "rank": 6903, "raw_rank": 6940,
+      "cleanup_steps": 34, "public_rank": 6914, "local_baseline_rank": 6905,
+      "source_shape": [16, 25, 32], "source_rank": 6996,
+      "source_sha256": "bd450f2b30e79834ff7ead205c657268069eda90b8c247a6c0a1bdc603b20cf8",
+      "fixed_axis": 0, "reverse": false, "basis_rank": 6996,
+      "basis_changed_groups": 80,
+      "basis_sha256": "e307f12edd0483f8be7d175b31c5860bac245d2eaf9dc24df9a4e5722779cc8f",
+      "axis": 2, "deleted_coordinate": 22,
+      "sha256": "11876c283902b1551bb74fd39c00a1d1e6e4e2d46d7e53e424c91755e9cca094",
+      "depth": 1
+    },
+    {
+      "shape": [16, 23, 31], "rank": 6381, "raw_rank": 6461,
+      "cleanup_steps": 53, "public_rank": 6384, "local_baseline_rank": 6488,
+      "source_shape": [16, 24, 31], "source_rank": 6487,
+      "source_sha256": "925328e02a1bb9a92abea9328f2448a02eddf5d1306f2df8f449bbf9b46b8e07",
+      "fixed_axis": 2, "reverse": false, "basis_rank": 6487,
+      "basis_changed_groups": 65,
+      "basis_sha256": "e32c7cb3295cb6c160628a2459d45cdb91f74bbb66bee40247683dd77d3fb477",
+      "axis": 1, "deleted_coordinate": 18,
+      "sha256": "05e4756c8fc62831563847ff748c2d4056bf7c48c0cc0f2516813af8d5e62671",
+      "depth": 2
+    }
+  ]
+}

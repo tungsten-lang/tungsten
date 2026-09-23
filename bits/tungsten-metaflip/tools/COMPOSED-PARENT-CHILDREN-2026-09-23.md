@@ -35,7 +35,9 @@ The comparison digest was created 2026-09-18T17:17:29 with SHA-256
 `a77c4286cd7ad9b5212b679d9e1e21672c7519a41124a3d71079d68bf0878213`.
 These are exact GF(2) upper bounds, not claims of optimality, cross-field
 validity, or worldwide novelty. The screen is bounded by the four pinned
-initial tensors and one-coordinate deletions through depth six.
+initial tensors and one-coordinate deletions through depth six. Neutral
+basis rewrites before deletion yield a further three-step
+[exact improvement chain](NEUTRAL-BASIS-CHILDREN-2026-09-23.md).
 
 From the repository root:
 

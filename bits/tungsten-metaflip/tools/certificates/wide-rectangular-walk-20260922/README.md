@@ -835,10 +835,30 @@ rank-3089 variants reached 3087 and 3088 (nonces 21591 and 21593). The
 rank-3084 tensor is five terms below the previously audited block formula;
 that five-term drop saves 55 units across the pinned finite closure. The
 whole rank-3084 certificate adds ten improved shapes and 269 saved units
-against the previous retained closure, bringing the cumulative totals to
+against the previous retained closure, bringing that checkpoint's totals to
 524 shapes and 28855 units with no further square-price change. The pinned
 catalog price for this shape is 3138. This is an exact GF(2) upper bound,
 not a completed worldwide/cross-field prior-art audit.
+
+The adjacent `14x16x23:2997` cross-audit formula (row 299) has source
+orientation `14x23x16` and uses the same outer/leaf family as the
+`16x14x22` construction, with allocations `(3,4,4,3)`, `(6,6,6,5)`, and
+`(4,4,4,4)`. The new generic `flipfleet_block_replay_47.w` materialized its
+full tensor from the exact d450 outer and d386/d488/d628/d690 leaves; all
+48 available same-rank leaf combinations also gave rank 2997. The parent
+certificate is `14x23x16-r2997.mfw.gz.b64` (decoded SHA-256
+`701a651fc95664d8aadc245cbc82c067714137a30b3ad5f06ad4da9728a3f59d`).
+A 100-million-move walk (nonce 21601) reached exact rank 2994, retained as
+`14x23x16-r2994.mfw.gz.b64` (decoded SHA-256
+`6cdd65727d4d9bc22d38061347ffcebc7a5e81763cf3e16e88011de13de5cd80`).
+A second leaf variant also reached 2994 (nonce 21603), a third tied at 2997
+(21605), and a 100-million-move continuation from 2994 tied (21607). The
+three-term walk improvement saves 42 rank units across the pinned closure;
+the complete rank-2994 certificate saves 119 units against the preceding
+retained closure. The pinned catalog price for the sorted shape is 3071.
+The cumulative finite closure now has 526 improved shapes and 28974 saved
+units, with no further square-price change. These are verified GF(2) upper
+bounds, not audited worldwide record claims.
 
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with

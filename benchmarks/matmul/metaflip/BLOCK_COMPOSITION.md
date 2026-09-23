@@ -80,6 +80,14 @@ leaf shape is reported as unsupported instead of silently padding it.
 orientations, allowing a target-order scan to publish its best construction
 under a canonical shape.
 
+For a cross-audit formula whose leaves are explicit files, compile
+`flipfleet_block_replay_47.w` and run it as
+`replay-47 ALLOC-N ALLOC-M ALLOC-P OUTER OUTPUT [N M P LEAF]...`.
+Each allocation is four comma-separated positive block sizes. The replay
+tool verifies the outer and every leaf, selects exact S3 leaf orientations,
+then writes only a fully verified composition. Its focused regression is
+`python3 benchmarks/matmul/metaflip/test_flipfleet_block_replay_47.py`.
+
 ## Saved exact constructions
 
 The machine-readable recipes and hashes are in

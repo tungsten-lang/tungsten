@@ -649,6 +649,24 @@ They improve two pinned composition prices by nine rank units, taking the
 finite closure to 485 shapes and 27416 units. This is a local closure gain,
 not a new claim against the published Lille entries for these two shapes.
 
+Reorienting the exact `15x23x12:2442` tensor cyclically gives a distinct
+`23x12x15:2442` walk basin. Three 100M walks (21305/21309/21311) reached
+2440, 2438, and 2437; a fourth (21315) tied 2437 with lower density.
+The retained SHA-256 is
+`a7af1a539601bae02849288d47d6278c6e00deaae66b805b874a211f969a43f4`.
+A 19-context exact projection of the rank-2438 representation seeded
+`22x12x15:2378`; five 100M walks (21313/21317/21319/21321/21323)
+reached 2371/2367/2366/2365 and a lower-density rank-2365 tie. Its
+retained SHA-256 is
+`f91fa05589503471be59319e4efd9c679cff94a0b8460cffbf78c47b58097ae7`.
+Both full GF(2) tensors pass the independent Ruby and Python identity tests.
+They improve six finite composition prices by 35 units, taking the closure
+to 485 shapes and 27451 units. Lille currently lists 2440 for `12x15x23`,
+so the explicit rank 2437 is three lower than that table entry; the pinned
+catalog also contains an unprovenanced lower numeric entry, so this is not
+an audited worldwide best-known claim. The rotated `7x19x27:2298` control
+walk tied rank, as did a fresh walk in its original orientation.
+
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with
 `tools/replay_structured_parent_portfolio.rb --output DIR --only 5x9x20`.

@@ -104,6 +104,11 @@ class WideRectangularCertificateTest(unittest.TestCase):
                                '10b966b8ceeb69bdf506007eb026df28df0aed4d6c118a5593e991a915ce8091',
                                (15, 20, 28), 4700, 4740, compressed=True)
 
+    def test_20x19x25_rank_5403(self):
+        self.check_certificate((20, 19, 25), 5403,
+                               'c11d3a775ed89031462c126f1707f63cd600c611d268878f165a838b9a8eb2a6',
+                               (20, 20, 25), 5566, 5570, compressed=True)
+
 
 if __name__ == '__main__':
     unittest.main()

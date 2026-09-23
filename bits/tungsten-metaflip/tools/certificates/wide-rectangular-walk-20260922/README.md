@@ -1147,6 +1147,11 @@ The dated Lille digest lists 2628 for the canonical `13x15x22` shape, so
 this is a stronger GF(2) rank
 than that public table entry, not an optimality or worldwide-novelty proof.
 
+The certificate-only one-step block-extension screen also materializes 14
+larger exact GF(2) tensors below the dated Lille numerical entries, led by
+`13x16x25:3050`. Its recipes, independent checks, and reproduction command
+are in [CERTIFIED-BLOCK-EXTENSIONS-2026-09-23.md](../../CERTIFIED-BLOCK-EXTENSIONS-2026-09-23.md).
+
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with
 `tools/replay_structured_parent_portfolio.rb --output DIR --only 5x9x20`.

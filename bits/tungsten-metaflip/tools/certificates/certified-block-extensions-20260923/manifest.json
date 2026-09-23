@@ -1,0 +1,318 @@
+{
+  "schema": 1,
+  "field": "GF(2)",
+  "record_claim": false,
+  "source": "https://fmm.univ-lille.fr/",
+  "created_at": "2026-09-18T17:17:29",
+  "source_digest_sha256": "a77c4286cd7ad9b5212b679d9e1e21672c7519a41124a3d71079d68bf0878213",
+  "rows": [
+    {
+      "shape": [
+        13,
+        16,
+        25
+      ],
+      "rank": 3050,
+      "public_rank": 3102,
+      "gap": 52,
+      "operation": "append",
+      "orientation": [
+        13,
+        16,
+        24
+      ],
+      "axis": 2,
+      "seed_shape": "13x16x24",
+      "seed_rank": 2842,
+      "seed_sha256": "cad0bbc3685789992aed5d490035e698e6e5c1e5dc272f05dd86742b01364014",
+      "compressed": true,
+      "sha256": "46abb4fb714eb0d56f38f5ce0f87c8e15e5e1d834405b8ef42ff0c3b693133f2"
+    },
+    {
+      "shape": [
+        11,
+        24,
+        32
+      ],
+      "rank": 4866,
+      "public_rank": 4909,
+      "gap": 43,
+      "operation": "double",
+      "orientation": [
+        11,
+        16,
+        24
+      ],
+      "axis": 1,
+      "seed_shape": "11x16x24",
+      "seed_rank": 2433,
+      "seed_sha256": "81169d6204bab77f43369bd309114dcbff710cebe53275b7d2ef9c1cfc603400",
+      "compressed": true,
+      "sha256": "f20c71567e7286c9ce3f543cb3dadf4e7846e5ad1df3042d2c7e5255a132d01c"
+    },
+    {
+      "shape": [
+        13,
+        24,
+        32
+      ],
+      "rank": 5684,
+      "public_rank": 5712,
+      "gap": 28,
+      "operation": "double",
+      "orientation": [
+        13,
+        16,
+        24
+      ],
+      "axis": 1,
+      "seed_shape": "13x16x24",
+      "seed_rank": 2842,
+      "seed_sha256": "cad0bbc3685789992aed5d490035e698e6e5c1e5dc272f05dd86742b01364014",
+      "compressed": true,
+      "sha256": "2d84b9b6e94fefd1862f85680eabdb9da57fecc688816648b068b48f621f77db"
+    },
+    {
+      "shape": [
+        15,
+        17,
+        20
+      ],
+      "rank": 3054,
+      "public_rank": 3069,
+      "gap": 15,
+      "operation": "append",
+      "orientation": [
+        15,
+        16,
+        20
+      ],
+      "axis": 1,
+      "seed_shape": "16x15x20",
+      "seed_rank": 2754,
+      "seed_sha256": "395b86c5e82d25cc92b0b77fb22d5f2a1a595e2cd556979ca8d823a29881b5a9",
+      "compressed": true,
+      "sha256": "a9939cb034ffae48cc7c12d63f2d8ed80e51cf4a49950cc4500db6666007880c"
+    },
+    {
+      "shape": [
+        13,
+        17,
+        22
+      ],
+      "rank": 2954,
+      "public_rank": 2967,
+      "gap": 13,
+      "operation": "append",
+      "orientation": [
+        13,
+        16,
+        22
+      ],
+      "axis": 1,
+      "seed_shape": "16x13x22",
+      "seed_rank": 2668,
+      "seed_sha256": "d1adac5120482d848fb002060b64cff7791dfc993bb5b596ee8acaaae1ef25a2",
+      "compressed": true,
+      "sha256": "fcab1447893990662336f05900436af061d18b9eee68f6051fd686201a234dad"
+    },
+    {
+      "shape": [
+        13,
+        23,
+        32
+      ],
+      "rank": 5542,
+      "public_rank": 5552,
+      "gap": 10,
+      "operation": "double",
+      "orientation": [
+        13,
+        16,
+        23
+      ],
+      "axis": 1,
+      "seed_shape": "16x23x13",
+      "seed_rank": 2771,
+      "seed_sha256": "dd751044ffa403031547ed59cd9f363df1204ea6ca12349710960374323dabfa",
+      "compressed": true,
+      "sha256": "5f1f7d49e013192de5bea1fc0f34ae278edf3478505b6b32ffbeb183b836dc85"
+    },
+    {
+      "shape": [
+        16,
+        17,
+        21
+      ],
+      "rank": 3364,
+      "public_rank": 3374,
+      "gap": 10,
+      "operation": "append",
+      "orientation": [
+        16,
+        16,
+        21
+      ],
+      "axis": 0,
+      "seed_shape": "16x16x21",
+      "seed_rank": 3028,
+      "seed_sha256": "5b595c64964da9148de365108450e11231e167e05fef80ae662bf93b3e526ad6",
+      "compressed": true,
+      "sha256": "1093df68b5cd0de3b6410013444e16a46e6a28d5e0e4fa61681c65c852862e46"
+    },
+    {
+      "shape": [
+        13,
+        20,
+        29
+      ],
+      "rank": 4427,
+      "public_rank": 4435,
+      "gap": 8,
+      "operation": "append",
+      "orientation": [
+        13,
+        20,
+        28
+      ],
+      "axis": 2,
+      "seed_shape": "20x28x13",
+      "seed_rank": 4167,
+      "seed_sha256": "dbbcfd9d67a9c7a51927f6b0e7cdf72f2df419fb136e2a9cde04743d6749e986",
+      "compressed": true,
+      "sha256": "7319337e74a5bfbc8f82f8e82c91667fca3511e276d81849e0cbc87c90d196b1"
+    },
+    {
+      "shape": [
+        11,
+        16,
+        31
+      ],
+      "rank": 3281,
+      "public_rank": 3288,
+      "gap": 7,
+      "operation": "append",
+      "orientation": [
+        11,
+        16,
+        30
+      ],
+      "axis": 2,
+      "seed_shape": "11x16x30",
+      "seed_rank": 3105,
+      "seed_sha256": "a01d95f4586ef8d0532c066ad4b36d74b1269184b866cbd592fa85da6d3e6ea9",
+      "compressed": true,
+      "sha256": "5c79d19b6d267e353b1f4ecc24e876d1b91a98d5684c9270d63a00a48ce90f6e"
+    },
+    {
+      "shape": [
+        8,
+        19,
+        31
+      ],
+      "rank": 2875,
+      "public_rank": 2879,
+      "gap": 4,
+      "operation": "append",
+      "orientation": [
+        8,
+        19,
+        30
+      ],
+      "axis": 2,
+      "seed_shape": "8x19x30",
+      "seed_rank": 2723,
+      "seed_sha256": "519e99587c73888bbc011a5a11c7342fcae631e79d591b077e52d3749772fc7a",
+      "compressed": true,
+      "sha256": "769b99592237a0dd85fa39dadb2e5b5ba44dc3f13eeba9ff9d5eab82b274ec62"
+    },
+    {
+      "shape": [
+        11,
+        17,
+        24
+      ],
+      "rank": 2697,
+      "public_rank": 2701,
+      "gap": 4,
+      "operation": "append",
+      "orientation": [
+        11,
+        16,
+        24
+      ],
+      "axis": 1,
+      "seed_shape": "11x16x24",
+      "seed_rank": 2433,
+      "seed_sha256": "81169d6204bab77f43369bd309114dcbff710cebe53275b7d2ef9c1cfc603400",
+      "compressed": true,
+      "sha256": "39d507a127913351cd228e192449a1c7a029c27738e7a5db1a4ebc4e78a9d7a1"
+    },
+    {
+      "shape": [
+        13,
+        22,
+        32
+      ],
+      "rank": 5336,
+      "public_rank": 5340,
+      "gap": 4,
+      "operation": "double",
+      "orientation": [
+        13,
+        16,
+        22
+      ],
+      "axis": 1,
+      "seed_shape": "16x13x22",
+      "seed_rank": 2668,
+      "seed_sha256": "d1adac5120482d848fb002060b64cff7791dfc993bb5b596ee8acaaae1ef25a2",
+      "compressed": true,
+      "sha256": "16b9cabbe279e514b5bb01cf9ae3db2fda25c252abfceb5526a3aa39f3f8dfbe"
+    },
+    {
+      "shape": [
+        8,
+        21,
+        29
+      ],
+      "rank": 2956,
+      "public_rank": 2958,
+      "gap": 2,
+      "operation": "append",
+      "orientation": [
+        8,
+        20,
+        29
+      ],
+      "axis": 1,
+      "seed_shape": "8x20x29",
+      "seed_rank": 2724,
+      "seed_sha256": "b1f26cb283b84ba01d699007abe162318569afa6e9c3fdcdb02fbf44577e0a16",
+      "compressed": true,
+      "sha256": "02f23e26e1c55ac63b4a4e2a8354af63142f3d5d369090da1f1da39de2c37783"
+    },
+    {
+      "shape": [
+        13,
+        17,
+        23
+      ],
+      "rank": 3070,
+      "public_rank": 3072,
+      "gap": 2,
+      "operation": "append",
+      "orientation": [
+        13,
+        16,
+        23
+      ],
+      "axis": 1,
+      "seed_shape": "16x23x13",
+      "seed_rank": 2771,
+      "seed_sha256": "dd751044ffa403031547ed59cd9f363df1204ea6ca12349710960374323dabfa",
+      "compressed": true,
+      "sha256": "f98add07f2fc442e8274540fa425ac8421f060d3ebcf26b40acd8d44381c2e1c"
+    }
+  ]
+}

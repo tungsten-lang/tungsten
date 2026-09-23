@@ -1065,6 +1065,28 @@ improve four shapes by 33 rank units, with no square-price change.
 The pinned catalog-plus-retained closure reaches 614 improved shapes and
 33484 saved units, four shapes and 50 units beyond the preceding closure.
 
+One-coordinate projections of the retained `8x17x26:2162` give exact
+`8x17x25:2082` (remove Z coordinate 12) and `8x16x26:2026` (remove Y
+coordinate 16). Independent 100-million-move walks with nonces 21815 and
+21817 reduce them to retained ranks 2074 and 2021. The rank-2074 parent
+then projects to `8x16x25:1940` (remove Y coordinate 16) and
+`8x17x24:1962` (remove Z coordinate 12). A final 100-million-move walk
+with nonce 21819 reaches retained `8x16x25:1938`; a matched 100-million
+walk on `8x17x24` ties at 1962, so the exact projection is retained.
+Decoded SHA-256 digests for `8x17x25`, `8x16x26`, `8x16x25`, and
+`8x17x24` are respectively
+`8dcf1b1419932ab5f538986d7fe50de7ffb70572a1d7184845c7202b06136a6e`,
+`7fc1986092b4d40faf339a8af2af76e30f411ebd25f6facb508fd6855ad27bf0`,
+`bda54cf125f87b7d3d79514bc9b87920685ada522297be4d67f90a0aac1a6689`,
+and `a3185651e019fc10ff0e2aade0dd20acf0ce45d8906d61a2f5b06c56c8b352e5`.
+All four pass independent full-tensor checks. The 2026-09-23 Lille table
+lists ranks 2116, 2046, 1949, and 2012 for the respective shapes;
+these are numerical catalog comparisons, not exhaustive novelty claims.
+The four certificates improve six local formula-aware composition prices
+by 63 rank units, without a square-price change.
+The pinned catalog-plus-retained closure reaches 616 improved shapes and
+33547 saved units, two shapes and 63 units beyond the preceding closure.
+
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with
 `tools/replay_structured_parent_portfolio.rb --output DIR --only 5x9x20`.

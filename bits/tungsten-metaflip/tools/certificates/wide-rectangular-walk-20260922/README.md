@@ -132,6 +132,26 @@ for 13x19x28 (4096), 13x20x27 (4160), and 8x19x29 (2696). All four
 certificates are checked by the Ruby and independent Python full-tensor
 verifiers; finite walks are not optimality proofs.
 
+A further scan of 237 one-coordinate projections from those descendants
+produced four retained certificates. Projecting middle-axis coordinate 25 of
+`19x28x13` gives `19x27x13` at rank 4001; two bounded basis sweeps reach 3988,
+and a 50-million-move walk (nonce 19145) reaches rank 3969, SHA-256
+`ac2739d03b5231470050263c8677bfb25e283daebccdb5a6d9c7a180360d75d8`.
+Projecting middle-axis coordinate 19 of `20x27x13` gives `20x26x13` at rank
+4002; two basis sweeps reach 3999, and a 50-million-move walk (nonce 19147)
+reaches rank 3991, SHA-256
+`f115d6847bd5bd894ca59183e527a286e03f5ae4383f3dc38e24fca51ef56490`.
+Projecting last-axis coordinate 6 of the same parent gives `20x27x12` at rank
+3715; two sweeps reach 3711, and a 50-million-move walk (nonce 19149) reaches
+rank 3699, SHA-256
+`21e6b32af7808c961b33afa0357113cc019ef482e3caa8ca4d1710360ccece48`.
+Projecting last-axis coordinate 15 of `8x19x29` gives `8x19x28` at rank 2579;
+two sweeps reach 2566, and a 50-million-move walk (nonce 19151) reaches rank
+2554, SHA-256
+`bb5dc75988081487d8818f0199bda6cd424022a0ce07eaad1278f93143704da5`.
+The prior pinned GF(2) composition prices were 4077, 4076, 3735, and 2590.
+All four decompositions are retained in factor order and independently checked.
+
 Replaying the `20x20x25` structured-parent row yields rank 5566. Deleting
 coordinate 18 of its middle axis, cancelling equal GF(2) terms, and applying
 exact shared-factor compression yields `20x19x25` at rank 5439. Repeated
@@ -147,12 +167,15 @@ For context, the [Université de Lille full table](https://fmm.univ-lille.fr/alg
 2026-09-22) lists 10x12x19:1434, 10x12x25:1844,
 16x25x27:6048, 16x25x28:6307, 16x25x29:6507, 16x25x31:6914,
 8x19x30:2775, 13x20x28:4271, 15x19x28:4663, 14x20x28:4556,
-and 19x20x25:5276.
+and 19x20x25:5276. The same table lists 13x19x27:3989,
+13x20x26:4016, 12x20x27:3740, and 8x19x28:2590.
 The retained 12x10x19 rank 1421, 12x10x25 rank 1836, 16x28x25 rank 6223,
 8x19x30 rank 2723,
 13x20x28 rank 4167, 15x19x28 rank 4576, 14x20x28 rank 4484,
 13x19x28 rank 4068, 13x20x27 rank 4092, and 8x19x29 rank 2642 beat their
-corresponding table entries; 16x27x25 rank 6080, 16x29x25 rank 6534,
+corresponding table entries. The four further descendants at ranks 3969,
+3991, 3699, and 2554 also beat their corresponding entries. The retained
+16x27x25 rank 6080, 16x29x25 rank 6534,
 16x31x25 rank 6916, 19x20x25 rank 5403, and 15x19x27 rank 4488 do not.
 Some individual
 shape pages show older, weaker bounds, so those pages should not
@@ -181,8 +204,8 @@ certificates are independently expanded by
 MetaFlip package and certificate directory as appropriate).
 
 The pinned-catalog closure comparison is replayable with
-`python3 tools/check_wide_rectangular_closure.py CATALOG.json`. It reports 81
-rank-price improvements totaling 3824 terms among shapes with coordinates 2
+`python3 tools/check_wide_rectangular_closure.py CATALOG.json`. It reports 89
+rank-price improvements totaling 4279 terms among shapes with coordinates 2
 through 32; those are composition prices, not separate materialized
 certificates for every improved shape. No square shape improves in this finite closure.
 Another 100 million moves from the retained rank-623 seed, and three further

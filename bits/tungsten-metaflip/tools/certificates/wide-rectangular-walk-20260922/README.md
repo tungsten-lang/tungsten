@@ -682,6 +682,19 @@ by 53 rank units, raising the cumulative impact to 487 shapes and 27504
 rank units. The pinned catalog has a lower unprovenanced numeric entry
 for this shape, so this is not an audited worldwide-best claim.
 
+The archived `16x31x25:6916` tensor was cyclically reoriented twice to
+`25x16x31:6916`. A 100M directed walk (nonce 21451) reached rank 6915;
+two more 100M walks (21455/21457) tied. A matched history-mode probe also
+tied, and a 19-context exact basis/projection screen found no lower child.
+The retained `25x16x31-r6915.mfw.gz.b64` has SHA-256
+`4bb5ddcd2362333bcd4a8864f7728ba5dc28a90b3868a92a7017e40fe770732f`
+and density 280070. The standalone walker and independent Ruby verifier
+check the full GF(2) identity; the focused Python test expands it again.
+Against the current pinned certificate-backed closure (not an older
+numerical cross-audit), this lowers four prices by one rank each and raises
+the cumulative saved rank units to 27508 across 487 shapes. Lille lists
+rank 6914 for `16x25x31`, so rank 6915 is not a record claim.
+
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with
 `tools/replay_structured_parent_portfolio.rb --output DIR --only 5x9x20`.

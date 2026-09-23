@@ -250,7 +250,7 @@ version `2b71762f906bef43f0ce25d31a9b8e5ad28a23db` on 2026-09-22:
 | 8x19x23 | 2099 | 2145 |
 | 8x18x24 | 2059 | 2100 |
 | 8x19x22 | 2034 | 2057 |
-| 8x17x24 | 1972 | 2012 |
+| 8x17x24 | 1965 | 2012 |
 | 8x17x23 | 1923 | 1946 |
 
 The new `7x19x23:1980` improves the pinned GF(2) closure price of 2015 but
@@ -271,9 +271,17 @@ the pinned composition closure even in the presence of the other eight.
 The new `8x18x23:2016` and `8x16x23:1792` beat Lille's listed 2025 and
 1824; the new 7-row and `8x17x22` witnesses do not beat that table.
 
+A 19-context basis sweep of `8x18x24:2059` exposed `8x17x24:1970`;
+a 50-million-move walk (nonce 19221) lowered it to 1965. A projection
+gave `7x17x24:1856`, and another basis sweep lowered that to 1853. Deleting
+middle-axis coordinate 4 gave the exact `7x16x24:1730` witness. Separate
+50-million-move walks on the latter two (nonces 19223 and 19225) tied their
+seeds. All three retained tensors pass independent full GF(2) verification.
+The two 7-row ranks improve the pinned closure but not Lille's listings.
+
 Across all retained rectangular certificates, the pinned
-catalog-plus-portfolio closure now improves 161 shapes by 6489 total rank
-units (previously 148 shapes by 6258). Those downstream prices are not 161
+catalog-plus-portfolio closure now improves 163 shapes by 6563 total rank
+units (previously 161 shapes by 6489). Those downstream prices are not 163
 separately materialized tensor certificates. The table comparison is not a
 complete worldwide novelty audit or an optimality claim.
 

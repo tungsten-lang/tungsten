@@ -485,6 +485,16 @@ found no lower-priced projection. The exact new tensor improves three
 pinned composition prices by 86 rank units, moving the finite closure to
 456 shapes and 25539 units. It does not establish worldwide novelty.
 
+Returning to the higher-leverage `16x23x13:2772` parent, two exact
+same-rank basis restarts each received 100 million directed moves. Mode 0
+(nonce 19583) tied, while mode 13 (nonce 19585) reached the retained rank
+2771; another 100 million moves (19587) tied. A 19-context sweep of the
+new endpoint found no lower-priced projection. The exact parent lowers 39
+pinned downstream prices by 40 further rank units; the finite closure is
+456 shapes and 25579 units. The two matched restarts show why same-rank
+tensor representations are retained, but do not establish a worldwide
+record.
+
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with
 `tools/replay_structured_parent_portfolio.rb --output DIR --only 5x9x20`.

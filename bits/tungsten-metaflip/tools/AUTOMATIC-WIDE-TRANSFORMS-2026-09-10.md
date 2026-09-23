@@ -34,6 +34,29 @@ eligible 63-bit outputs through an explicit full-checked handoff to narrow
 refinement/composition and the existing supported-shape seed policy. Larger
 wide outputs still remain archives.
 
+## September 22 bounded projection continuation
+
+The later rectangular certificate chain showed that the terminal basis
+results can have valuable projected children. After modes 3107 and 3125, the
+queue now offers the current full-checked best tensor's projection family only
+if its rank is strictly below that sweep source's rank. It does not fan out
+from every intermediate sweep context. Source/context indexing deduplicates a
+reoffered best, and each such continuation lowers both rank and a dimension;
+same-rank representations remain archived but do not recursively fan out from
+this new edge. The single low-priority child and existing high-water throttle
+remain unchanged.
+
+The same audit exposed an ordering bug: mode 3107 could try to offer mode 3108
+for a newer best tensor whose first sweep had not reached mode 3107. That
+stopped a matched exact replay at task 422. The handoff now offers that best's
+mode 3090 first; its own mode 3107 offers the second family later. The focused
+regression reproduces the handoff with a verified rank-5439 `20x19x25` tensor,
+checks that its best reaches rank at most 5422, and checks both first-sweep and
+projection offers. A separate exact projection comparison found 63 coordinates
+where the rank-5422 basis result's compressed projection beats the rank-5439
+source's corresponding projection. These are finite efficacy checks, not a
+claim of an additional published record or of bounded total queue size.
+
 ## Scheduling, persistence and limits
 
 The existing single low-priority native child owns all writes. A transform is

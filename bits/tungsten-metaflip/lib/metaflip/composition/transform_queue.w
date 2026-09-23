@@ -1,6 +1,7 @@
 # One native cold child owns this FIFO. A task is one bounded basis context
 # or one coordinate projection. The best projection of each axis gets two
-# terminal basis sweeps; terminal results do not schedule more projections.
+# terminal basis sweeps. A strict rank drop in the best result at either sweep
+# boundary schedules its projections, so productive chains can continue.
 # Successors go to the tail. Index pages bind full source identity + context;
 # no rank-only filter and no individual task/index file per coordinate.
 use counters
@@ -117,6 +118,14 @@ use feedback
   if p > 1
     count += p
   count
+
+# Only a strict best-rank drop at a sweep boundary starts another projection
+# generation. Projected dimensions and rank both decrease along this edge;
+# intermediate contexts cannot each fan out into their own projection family.
+-> ffxt_reproject(mode, before, after, coordinates) (i64 i64 i64 i64) i64
+  if (mode == 3107 || mode == 3125) && after > 0 && after < before && coordinates > 0
+    return 1
+  0
 
 # Called only after original and cleanup gates. Project the verified cleanup
 # result, never the unadmitted slab left by a verification-limited cleanup.
@@ -273,16 +282,26 @@ use feedback
     successor = ffxt_offer(root, result, 18)
     if successor != 1
       return successor
-  if mode == 3107
+  if mode == 3107 || mode == 3125
     shape = info[0].to_s() + "x" + info[1].to_s() + "x" + info[2].to_s()
     best = File.read_prefix(root + "/composition/best/" + shape, 100)
     if best != nil
       parts = best.strip().split(" ")
       if parts.size() != 2 || ffpk_decimal(parts[0]) < 1 || ffrf_hash_valid(parts[1]) != 1 || best != parts[0] + " " + parts[1] + "\n"
         return 0
-      successor = ffxt_offer(root, parts[1], 3108)
-      if successor != 1
-        return successor
+      if mode == 3107
+        # The best may have changed while this source's first sweep was
+        # queued. Start its first family if its last context is not offered.
+        next_mode = 3108 ## i64
+        if ffbq_read(queue + "index/" + parts[1] + "/", "postbasis", 18) == nil
+          next_mode = 3090
+        successor = ffxt_offer(root, parts[1], next_mode)
+        if successor != 1
+          return successor
+      if ffxt_reproject(mode, before, ffpk_decimal(parts[0]), ffxt_coordinates(meta[0], meta[1], meta[2])) == 1
+        successor = ffxt_offer(root, parts[1], 18)
+        if successor != 1
+          return successor
   if mode >= 18 && mode < 3090
     coordinate = mode-18 ## i64
     axis = 0 ## i64

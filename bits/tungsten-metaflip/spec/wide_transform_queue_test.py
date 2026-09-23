@@ -87,11 +87,39 @@ def productive_postbasis(binary):
         fields=dict(item.split('=',1) for item in result.stdout.split()[1:])
         assert result.stdout.startswith('POSTBASIS ') and int(fields['before'])==5439
         assert int(fields['best'])<=5422
+        basis_shape,basis_terms=read_blob(first.read_bytes())
+        assert basis_shape==(20,19,25)
+        old_child,_=compress_shared(project_coordinate(basis_shape,reduced,0,2),
+                                    max_bits=max(shape[0]*shape[1],shape[1]*shape[2],shape[0]*shape[2]))
+        new_child,_=compress_shared(project_coordinate(basis_shape,basis_terms,0,2),
+                                    max_bits=max(shape[0]*shape[1],shape[1]*shape[2],shape[0]*shape[2]))
+        assert len(new_child)<len(old_child)
         result2=subprocess.run([binary,'--postbasis-scan',str(first)],check=True,
                                capture_output=True,text=True,timeout=30)
         fields2=dict(item.split('=',1) for item in result2.stdout.split()[1:])
         assert result2.stdout.startswith('POSTBASIS ')
         assert int(fields2['before'])==int(fields['best']) and int(fields2['best'])<=5418
+        # A better tensor found in this source's first sweep has not itself
+        # completed that sweep. Its first family must be offered before mode
+        # 3108; offering the second family directly used to stop the queue.
+        handoff=root/'handoff'; handoff.mkdir()
+        subprocess.run([binary,'--offer-postbasis-file',str(handoff),str(source)],check=True,
+                       capture_output=True,text=True,timeout=30)
+        queue=handoff/'composition/transforms'
+        source_id=sha256(source.read_bytes()).hexdigest()
+        for _ in range(80):
+            p=subprocess.run([binary,'--drain',str(handoff),'4'],capture_output=True,
+                             text=True,timeout=30)
+            assert p.returncode==0,(p.stdout,p.stderr)
+            terminal=read_record(queue/'index'/source_id,'postbasis',18)
+            if terminal is not None and count(queue/'consumed')>=int(terminal): break
+        assert terminal is not None and count(queue/'consumed')>=int(terminal)
+        assert read_record(queue,'tasks',int(terminal)).decode().split()[2]=='3107'
+        best=(handoff/'composition/best/20x19x25').read_text().split()
+        assert int(best[0])<=5422 and best[1]!=source_id
+        assert read_record(queue/'index'/best[1],'postbasis',1) is not None
+        assert read_record(queue/'index'/best[1],'project',1) is not None
+        assert not (queue/'error').exists()
         print('PASS native projected-basis productivity: 5439 ->',fields['best'],'->',fields2['best'])
 
 

@@ -1,0 +1,34 @@
+{
+  "schema": 1,
+  "field": "GF(2)",
+  "record_claim": false,
+  "source": {
+    "kind": "structured-portfolio",
+    "portfolio_shape": [15, 20, 20],
+    "oriented_shape": [15, 20, 20],
+    "rank": 3468,
+    "scheme_sha256": "2d8bffeb89c59e6d6f85679363734e6553002d6f9ef7888e6ab9350899ce056c",
+    "mfw_sha256": "6f56436e6e3e39ca7cc9106cf3a26357cd1bd465c2eb016b048d932f7f7cab2c"
+  },
+  "steps": [
+    {
+      "axis": 2,
+      "deleted_coordinate": 6,
+      "shear_mask": 1024,
+      "raw_rank": 3445,
+      "cleanup_steps": 38,
+      "oriented_shape": [15, 20, 19],
+      "rank": 3402,
+      "sha256": "52ce7578b8da8c0b0fb095250c5aac8cd28978ceb11f162d54ed1a503267b415"
+    },
+    {
+      "operation": "basis",
+      "mode": 6,
+      "raw_rank": 3393,
+      "cleanup_steps": 1,
+      "oriented_shape": [15, 20, 19],
+      "rank": 3392,
+      "sha256": "22701270e6811ae7bad5385f718cb978fd59f4988f791311d31883613ba4adee"
+    }
+  ]
+}

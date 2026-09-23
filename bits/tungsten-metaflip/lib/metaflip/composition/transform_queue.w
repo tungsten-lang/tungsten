@@ -442,6 +442,13 @@ use feedback
     successor = ffxt_offer(root, result, 18)
     if successor != 1
       return successor
+    # A masked child can still have removable shared-factor rows. The ordinary
+    # postbasis sweep found certified strict drops after three axis masks;
+    # one-dimensional tensors already meet their flattening rank bound.
+    if meta[0] > 1 && meta[1] > 1 && meta[2] > 1
+      successor = ffxt_offer(root, result, 3090)
+      if successor != 1
+        return successor
   if mode >= 18 && mode < 3090
     coordinate = mode-18 ## i64
     axis = 0 ## i64

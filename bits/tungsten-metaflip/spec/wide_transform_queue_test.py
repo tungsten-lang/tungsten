@@ -163,6 +163,7 @@ def productive_middle_mask(binary):
                                    check=True,capture_output=True,text=True,timeout=60)
             assert 'done=3' in drained.stdout
             assert read_record(workspace/'composition/transforms/index'/identity,'mask',1)==b'3\n'
+            assert read_record(workspace/'composition/transforms/index'/digest,'postbasis',1) is not None
             result=(workspace/'composition/best'/'x'.join(map(str,shape))).read_text().split()
             assert result==[str(rank),digest]
             source=workspace/'composition/objects'/f'{digest}.tensor'
@@ -240,12 +241,46 @@ def productive_axis_masks(binary):
             assert 'done=3' in drained.stdout
             queue=workspace/'composition/transforms'
             assert read_record(queue/'index'/identity,kind,1)==b'3\n'
+            assert read_record(queue/'index'/digest,'postbasis',1) is not None
             assert (workspace/'composition/best'/'x'.join(map(str,shape))).read_text().split()==[
                 str(rank),digest]
             actual_shape,terms=read_blob((workspace/'composition/objects'/f'{digest}.tensor').read_bytes())
             assert actual_shape==shape and len(terms)==rank
             exact(shape,terms)
     print('PASS native first/last axis masks: 8x17x30 r2472; 10x11x20 r1397')
+
+
+def productive_postmask_basis(binary):
+    package=Path(__file__).resolve().parents[1]
+    replay=package/'tools/replay_structured_parent_portfolio.rb'
+    with tempfile.TemporaryDirectory(prefix='metaflip-postmask-basis-') as directory:
+        root=Path(directory)
+        subprocess.run(['ruby',str(replay),'--output',str(root/'parent'),
+                        '--only','8x15x20'],check=True,capture_output=True,text=True,timeout=30)
+        source=root/'parent/8x15x20/8x20x15.mfw'
+        workspace=root/'queue'; workspace.mkdir()
+        offered=subprocess.run([binary,'--offer-file',str(workspace),str(source)],
+                               check=True,capture_output=True,text=True,timeout=30)
+        identity=offered.stdout.split()[1]
+        subprocess.run([binary,'--offer-task',str(workspace),identity,'3128'],
+                       check=True,capture_output=True,text=True,timeout=30)
+        queue=workspace/'composition/transforms'
+        subprocess.run([binary,'--drain',str(workspace),'3'],check=True,
+                       capture_output=True,text=True,timeout=30)
+        best=workspace/'composition/best/8x20x14'
+        assert int(best.read_text().split()[0])==1409
+        child=best.read_text().split()[1]
+        assert read_record(queue/'index'/child,'postbasis',1) is not None
+        for _ in range(20):
+            subprocess.run([binary,'--drain',str(workspace),'4'],check=True,
+                           capture_output=True,text=True,timeout=30)
+            if best.read_text().split()[0]=='1406': break
+        rank,digest=best.read_text().split()
+        assert (rank,digest)==('1406','b324ebd3fdb3ca4eb894b418509cacc4dadbe7e8cfb59c52d033d1ce75d98513')
+        shape,terms=read_blob((workspace/'composition/objects'/f'{digest}.tensor').read_bytes())
+        assert shape==(8,20,14) and len(terms)==1406
+        exact(shape,terms)
+    print('PASS automatic postmask basis: 8x14x20 r1409 -> r1406')
 
 
 def audit(root, progress=None):
@@ -329,6 +364,7 @@ def check(binary, retained=None, public=None):
     productive_postbasis(binary)
     productive_middle_mask(binary)
     productive_axis_masks(binary)
+    productive_postmask_basis(binary)
     with tempfile.TemporaryDirectory(prefix='metaflip-wide-queue-') as temp:
         root=Path(temp) if retained is None else Path(retained)
         if retained is not None: assert not root.exists(); root.mkdir()

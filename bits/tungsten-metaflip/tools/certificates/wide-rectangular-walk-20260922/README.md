@@ -1087,6 +1087,23 @@ by 63 rank units, without a square-price change.
 The pinned catalog-plus-retained closure reaches 616 improved shapes and
 33547 saved units, two shapes and 63 units beyond the preceding closure.
 
+The retained `7x19x24:2002` tensor projects to `7x19x23:1967` after
+deleting Z coordinate 13 and exact shared-factor cleanup. Consecutive
+finite walks of 100 million moves (nonce 21823), 200 million moves (nonce
+21827), and 300 million moves (nonce 21831) reach ranks 1961, 1960, and
+the retained 1957. Deleting Z coordinate 1 from the rank-1960 state and
+cleaning gives `7x19x22:1914`; a 200-million-move walk (nonce 21833)
+reaches the retained rank 1902. The decoded SHA-256 digests are
+`04e3d132317eb915d04c4c8ca12ad56eff8630d9ec504596630b3631bec5d4ec`
+for `7x19x23:1957` and
+`082af6026e587b46f6fddd464ea944690bcad0c0e7d29638a18261aedbd02993`
+for `7x19x22:1902`. Both pass independent full GF(2) tensor expansion.
+The 2026-09-23 Lille table lists 1959 and 1913, respectively; these are
+numerical catalog comparisons, not exhaustive worldwide novelty claims.
+Against the stronger local formula-aware closure, the direct prices improve
+by 2 and 11 units. In the pinned closure, the count remains 616 improved
+shapes and the total rises from 33547 to 33560 saved units.
+
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with
 `tools/replay_structured_parent_portfolio.rb --output DIR --only 5x9x20`.

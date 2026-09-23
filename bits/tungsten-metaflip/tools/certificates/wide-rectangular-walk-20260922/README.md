@@ -208,6 +208,16 @@ numerically below Lille's 2847 and 2744 entries at this audit. A further
 four retained tensors were included, so it was not archived. No worldwide,
 cross-field, or optimality claim follows from this finite comparison.
 
+Continuing the 11-row branch, 19 exact basis contexts of `11x16x26:2701`
+expose a `11x16x25:2598` projection. A 50-million-move directed walk
+(nonce 19489) reaches the retained complete tensor `11x16x25:2582`, checked
+by both independent full GF(2) verifiers. Against the preceding pinned
+closure it affects 14 shapes and saves 602 rank units, raising cumulative
+impact to 385 shapes and 20595 rank units. Its rank is numerically below
+Lille's 2643 entry at this audit; no worldwide or cross-field novelty is
+claimed. A separate 19-context scan of `20x25x13:3890` found only a
+one-unit same-shape cleanup, which was not retained.
+
 Replaying the `15x20x28` structured-parent row yields a rank-4700 tensor in
 factor order `20x28x15`. Deleting coordinate 13 of the first axis and applying
 exact GF(2) cancellation/compression yields `19x28x15` at rank 4600; exact

@@ -695,6 +695,33 @@ numerical cross-audit), this lowers four prices by one rank each and raises
 the cumulative saved rank units to 27508 across 487 shapes. Lille lists
 rank 6914 for `16x25x31`, so rank 6915 is not a record claim.
 
+A further exact projection-and-walk chain starts with retained
+`11x16x25:2582`. Deleting coordinate 12 of its last axis gives
+`11x16x24:2444`; 100M directed moves (nonce 21501) reach the retained
+rank 2433, and nonce 21503 ties. Deleting coordinate 4 of its first axis
+gives `10x16x24:2304`; 100M moves (21505) reach retained rank 2277, and
+21507 ties. A checked shared-factor basis change followed by deletion of
+last-axis coordinate 7 gives `10x16x23:2242`; 100M moves (21509) reach
+retained rank 2227, and 21511 ties. Another checked basis change and
+last-axis coordinate-7 deletion gives `10x16x22:2159`. The first basis
+change applies `refactor_shared` across axes `(0,1,2)` with reversed
+columns for up to two passes; the second uses axes `(1,2,0)` without
+reversal. Each is followed by `compress_shared`. Successive walks of
+100M, 100M, 100M, and 300M moves (21513, 21515, 21517, 21519)
+reach ranks 2143, 2141, 2139, and the retained 2138. All four retained
+full tensors pass the standalone exact walker, independent Ruby verifier,
+and focused Python expansion. Their canonical SHA-256 values, in order,
+are `81169d6204bab77f43369bd309114dcbff710cebe53275b7d2ef9c1cfc603400`,
+`017dc79856b9ec66d415a5702c3b7736d6c8f8490b3576922b0ef831b6f7f9e0`,
+`9879bcf0741dc71fa87bcab68cc123b1ed70df6b99afd13ec07de1f3d4a5231c`,
+and `9073c669a185d4ac7475f2b5917415ca26a77839e376626764544f23791cb630`.
+The pinned finite closure improves by 108 further rank units across six
+additional shapes, to 493 shapes and 27616 units. Its square price is
+unchanged. A 19-context scan of the final rank-2138 representation found
+no better projected price; its closest child remained 28 terms high. These
+are explicit GF(2) upper bounds and finite composition prices, not an
+audited worldwide novelty or optimality claim.
+
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with
 `tools/replay_structured_parent_portfolio.rb --output DIR --only 5x9x20`.

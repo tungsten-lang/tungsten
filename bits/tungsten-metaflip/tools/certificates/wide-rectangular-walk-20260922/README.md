@@ -107,6 +107,31 @@ The pinned GF(2) catalog-plus-portfolio price was 4271. The other two
 one-coordinate projections of the same parent that were tested here are
 exact, but the pinned catalog already derives lower ranks for their shapes.
 
+A follow-up scan tested all 749 one-coordinate projections of the 13 retained
+rectangular certificates, using exact cancellation and shared-factor
+compression. Four projected shapes improved the pinned GF(2) composition
+prices. From `20x28x13`, first-axis coordinate 3 gives `19x28x13` at rank
+4093; two bounded basis sweeps reach 4071 and a 50-million-move walk (nonce
+19125) reaches the retained rank 4068, SHA-256
+`15e461d7172163885bc5a51485d6de238e42ca783f02adc786bb9c85947c53e5`.
+From the same parent, middle-axis coordinate 15 gives `20x27x13` at rank
+4105; two basis sweeps reach 4097 and a 50-million-move walk (nonce 19131)
+reaches the retained rank 4092, SHA-256
+`23a9d6e38925bfaecdccf3f3dc9f400dfd68b2f66f3fb4ab8e5aa1b032e4cc3d`.
+From `8x19x30`, last-axis coordinate 16 gives `8x19x29` at rank 2663; two
+basis sweeps reach 2654, then 50-million and 100-million-move walks (nonces
+19129 and 19137) reach the retained rank 2642, SHA-256
+`cf97d17f4b857e83df6e97541938e545f4a3ad03ce981d828a189df90099c633`.
+From `19x28x15`, middle-axis coordinate 21 gives `19x27x15` at rank 4507;
+two basis sweeps reach 4495 and a 50-million-move walk (nonce 19141) reaches
+the retained rank 4488, SHA-256
+`6547c40d267aed101dae2f3a2d91e5d3ded8198e586a5a4ea1f46af701b41feb`.
+The latter improves the pinned GF(2) composition price but not the currently
+served Lille table entry of 4485. The other three beat that table's entries
+for 13x19x28 (4096), 13x20x27 (4160), and 8x19x29 (2696). All four
+certificates are checked by the Ruby and independent Python full-tensor
+verifiers; finite walks are not optimality proofs.
+
 Replaying the `20x20x25` structured-parent row yields rank 5566. Deleting
 coordinate 18 of its middle axis, cancelling equal GF(2) terms, and applying
 exact shared-factor compression yields `20x19x25` at rank 5439. Repeated
@@ -118,15 +143,18 @@ and density 339443. The prior pinned GF(2) catalog-plus-portfolio price
 was 5583. The exact tensor is checked by both independent verifiers.
 
 For context, the [Université de Lille full table](https://fmm.univ-lille.fr/algo_32.html)
-consulted on 2026-09-22 lists 10x12x19:1434, 10x12x25:1856,
-16x25x27:6048, 16x25x28:6344, 16x25x29:6573, 16x25x31:6973,
-8x19x30:2778, 13x20x28:4271, 15x19x28:4665, 14x20x28:4571,
-and 19x20x25:5424.
+(served version `2b71762f906bef43f0ce25d31a9b8e5ad28a23db`, consulted on
+2026-09-22) lists 10x12x19:1434, 10x12x25:1844,
+16x25x27:6048, 16x25x28:6307, 16x25x29:6507, 16x25x31:6914,
+8x19x30:2775, 13x20x28:4271, 15x19x28:4663, 14x20x28:4556,
+and 19x20x25:5276.
 The retained 12x10x19 rank 1421, 12x10x25 rank 1836, 16x28x25 rank 6223,
-16x29x25 rank 6534, 16x31x25 rank 6916, 8x19x30 rank 2723,
+8x19x30 rank 2723,
 13x20x28 rank 4167, 15x19x28 rank 4576, 14x20x28 rank 4484,
-and 19x20x25 rank 5403 beat their
-corresponding table entries; 16x27x25 rank 6080 does not. Some individual
+13x19x28 rank 4068, 13x20x27 rank 4092, and 8x19x29 rank 2642 beat their
+corresponding table entries; 16x27x25 rank 6080, 16x29x25 rank 6534,
+16x31x25 rank 6916, 19x20x25 rank 5403, and 15x19x27 rank 4488 do not.
+Some individual
 shape pages show older, weaker bounds, so those pages should not
 be used alone for record comparisons. These exact GF(2) certificates are not
 claims of global novelty across every source or field.
@@ -153,8 +181,8 @@ certificates are independently expanded by
 MetaFlip package and certificate directory as appropriate).
 
 The pinned-catalog closure comparison is replayable with
-`python3 tools/check_wide_rectangular_closure.py CATALOG.json`. It reports 64
-rank-price improvements totaling 2829 terms among shapes with coordinates 2
+`python3 tools/check_wide_rectangular_closure.py CATALOG.json`. It reports 81
+rank-price improvements totaling 3824 terms among shapes with coordinates 2
 through 32; those are composition prices, not separate materialized
 certificates for every improved shape. No square shape improves in this finite closure.
 Another 100 million moves from the retained rank-623 seed, and three further

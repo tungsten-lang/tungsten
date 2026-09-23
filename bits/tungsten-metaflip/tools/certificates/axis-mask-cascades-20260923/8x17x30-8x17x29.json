@@ -30,6 +30,15 @@
       "oriented_shape": [8, 29, 17],
       "rank": 2438,
       "sha256": "72153849fa2fb53f59c9b6014ac6710d8a33f79b0d6bb5a269c1c433aa440e61"
+    },
+    {
+      "operation": "basis",
+      "mode": 6,
+      "raw_rank": 2436,
+      "cleanup_steps": 0,
+      "oriented_shape": [8, 29, 17],
+      "rank": 2436,
+      "sha256": "9f01b5ab344fcb50bb6f7f5dd044abe6572a791dd80ad8ebc29b7b4d39bccc6d"
     }
   ]
 }

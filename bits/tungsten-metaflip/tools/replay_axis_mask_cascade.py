@@ -2,6 +2,7 @@
 """Replay pinned GF(2) axis-mask descendants and verify every whole tensor."""
 import argparse
 import hashlib
+from itertools import permutations
 import json
 from pathlib import Path
 import subprocess
@@ -10,6 +11,7 @@ import tempfile
 import replay_middle_mask_cascade as source_replay
 import screen_neutral_basis_children as neutral
 import screen_top_two_projection_children as top
+from verify_cofactor_mergers import refactor_shared
 from wide_matrix_cleanup_parity_test import read_blob
 
 HERE = Path(__file__).resolve().parent
@@ -57,6 +59,23 @@ def child(shape, terms, axis, removed, mask):
     return target, raw, cleaned, history
 
 
+def basis_child(shape, terms, mode):
+    if not 0 <= mode < 18:
+        raise ValueError('invalid basis mode')
+    width = max(shape[0] * shape[1], shape[1] * shape[2], shape[0] * shape[2])
+    order = (mode // 2,) if mode < 6 else tuple(permutations(range(3)))[(mode - 6) // 2]
+    raw = terms
+    for _ in range(1 if mode < 6 else 2):
+        for axis in order:
+            raw, _ = refactor_shared(raw, axis, max_bits=width,
+                                     reverse_columns=bool(mode % 2))
+        if raw == terms:
+            break
+    cleaned, history = top.compress_shared(raw, max_bits=width)
+    top.exact(shape, cleaned)
+    return shape, raw, cleaned, history
+
+
 def replay(manifest, output_dir=None):
     if (manifest.get('schema') != 1 or manifest.get('field') != 'GF(2)' or
             manifest.get('record_claim') is not False or
@@ -76,8 +95,11 @@ def replay(manifest, output_dir=None):
             output_dir.mkdir(parents=True, exist_ok=False)
         results = []
         for step in manifest['steps']:
-            target, raw, cleaned, history = child(
-                shape, terms, step['axis'], step['deleted_coordinate'], step['shear_mask'])
+            if step.get('operation') == 'basis':
+                target, raw, cleaned, history = basis_child(shape, terms, step['mode'])
+            else:
+                target, raw, cleaned, history = child(
+                    shape, terms, step['axis'], step['deleted_coordinate'], step['shear_mask'])
             payload = top.blob(target, cleaned)
             digest = hashlib.sha256(payload).hexdigest()
             if (list(target) != step['oriented_shape'] or

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Independently verify three materialized block-47 GF(2) tensors."""
+"""Independently verify retained block-47 GF(2) tensors."""
 import argparse
 import base64
 import csv
@@ -35,7 +35,7 @@ def decode(path, expected_sha256):
     return payload
 
 
-def check(replay_walk=None, replay_compose=None, leaf_root=None):
+def check(replay_walk=None, replay_compose=None, leaf_root=None, only=()):
     manifest = json.loads(MANIFEST.read_text())
     if (manifest['schema'] != 1 or manifest['field'] != 'GF(2)' or
             manifest['record_claim'] is not False):
@@ -51,6 +51,8 @@ def check(replay_walk=None, replay_compose=None, leaf_root=None):
         for row in manifest['rows']:
             shape = tuple(row['shape'])
             name = 'x'.join(map(str, shape))
+            if only and name not in only:
+                continue
             formula = formulas[name]
             if (int(formula['formula_rank']) != row['formula_rank'] or
                     int(formula['live_fmm']) != row['listed_rank'] or
@@ -84,7 +86,7 @@ def check(replay_walk=None, replay_compose=None, leaf_root=None):
                 if hashlib.sha256(composed_payload).hexdigest() != expected:
                     raise ValueError(f'composition replay mismatch: {name}')
                 exact(shape, composed_terms)
-            if 'walk_nonce' in row:
+            if 'walk_nonce' in row or 'walks' in row:
                 parent_path = CERTS / f'{name}-r{row["composed_exact_rank"]}-parent.mfw.gz.b64'
                 parent = decode(parent_path, row['composed_mfw_sha256'])
                 parent_shape, parent_terms = read_blob(parent)
@@ -93,17 +95,41 @@ def check(replay_walk=None, replay_compose=None, leaf_root=None):
                 exact(shape, parent_terms)
                 parent_decoded = Path(temp) / f'{name}-parent.mfw'
                 parent_decoded.write_bytes(parent)
+                parent_verified = json.loads(subprocess.check_output(
+                    ['ruby', str(HERE / 'verify_tensor.rb'), '--shape', name,
+                     str(parent_decoded)], text=True))[0]
+                if (not parent_verified['exact'] or
+                        parent_verified['rank'] != row['composed_exact_rank'] or
+                        parent_verified['sha256'] != row['composed_mfw_sha256']):
+                    raise ValueError(f'independent walk-parent check failed: {name}')
                 if replay_walk is not None:
-                    replayed = Path(temp) / f'{name}-replayed.mfw'
-                    subprocess.run([str(replay_walk), name, str(parent_decoded),
-                                    str(replayed), str(row['walk_steps']),
-                                    str(row['walk_nonce'])], check=True, capture_output=True,
-                                   text=True)
-                    if replayed.read_bytes() != payload:
+                    walks = row.get('walks', [{
+                        'steps': row.get('walk_steps'),
+                        'nonce': row.get('walk_nonce'),
+                        'rank': row['rank'],
+                        'sha256': row['mfw_sha256'],
+                    }])
+                    current = parent_decoded
+                    for i, walk in enumerate(walks):
+                        replayed = Path(temp) / f'{name}-replayed-{i}.mfw'
+                        subprocess.run([str(replay_walk), name, str(current),
+                                        str(replayed), str(walk['steps']),
+                                        str(walk['nonce'])], check=True,
+                                       capture_output=True, text=True)
+                        intermediate = replayed.read_bytes()
+                        actual_shape, actual_terms = read_blob(intermediate)
+                        if (actual_shape != shape or len(actual_terms) != walk['rank'] or
+                                hashlib.sha256(intermediate).hexdigest() != walk['sha256']):
+                            raise ValueError(f'walk step {i} mismatch: {name}')
+                        exact(shape, actual_terms)
+                        current = replayed
+                    if current.read_bytes() != payload:
                         raise ValueError(f'walk replay mismatch: {name}')
             results.append({'shape': name, 'rank': row['rank'],
                             'listed_rank': row['listed_rank'],
                             'sha256': row['mfw_sha256']})
+    if only and {row['shape'] for row in results} != set(only):
+        raise ValueError('unknown --only shape')
     return results
 
 
@@ -112,9 +138,10 @@ if __name__ == '__main__':
     parser.add_argument('--replay-walk', type=Path)
     parser.add_argument('--replay-compose', type=Path)
     parser.add_argument('--leaf-root', type=Path)
+    parser.add_argument('--only', action='append', default=[])
     args = parser.parse_args()
     if (args.replay_compose is None) != (args.leaf_root is None):
         parser.error('--replay-compose and --leaf-root must be given together')
     print(json.dumps({'field': 'GF(2)', 'record_claim': False,
                       'verified': check(args.replay_walk, args.replay_compose,
-                                        args.leaf_root)}, indent=2))
+                                        args.leaf_root, args.only)}, indent=2))

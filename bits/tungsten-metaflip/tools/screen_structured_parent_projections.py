@@ -259,7 +259,8 @@ def local_seeds():
         key, rank = tuple(entry['shape']), entry['rank']
         seeds[key] = min(seeds.get(key, rank), rank)
     for name in ('certified-block-extensions-20260923',
-                 'certified-portfolio-extensions-20260923'):
+                 'certified-portfolio-extensions-20260923',
+                 'block47-exact-20260923'):
         path = CERTIFICATES / name / 'manifest.json'
         for entry in json.loads(path.read_text())['rows']:
             key, rank = tuple(entry['shape']), entry['rank']

@@ -90,6 +90,16 @@ the current Lille table lists 2800. Direct and 19-context basis projection
 screens of the retained tensor found no further closure improvement in their
 bounded runs.
 
+A different projection of the same exact `8x20x30` parent gives a verified
+`7x20x30:2638` seed. A 50-million-move directed walk (nonce 19237) reaches
+the retained `7x20x30:2623`, canonical SHA-256
+`a24918391dc371cb03ad1abf1d282b300d323fd7e220b264e52caf45e1091874`,
+density 92548. Its full GF(2) expansion is independently checked. The pinned
+composition price was 2629; adding this witness improves six prices by 31
+rank units. An exhaustive one-coordinate projection screen found no further
+positive descendant in the current closure. This finite walk is not an
+optimality or worldwide novelty claim.
+
 Replaying the `15x20x28` structured-parent row yields a rank-4700 tensor in
 factor order `20x28x15`. Deleting coordinate 13 of the first axis and applying
 exact GF(2) cancellation/compression yields `19x28x15` at rank 4600; exact
@@ -290,7 +300,7 @@ seeds. All three retained tensors pass independent full GF(2) verification.
 The two 7-row ranks improve the pinned closure but not Lille's listings.
 
 Across all retained rectangular certificates, the pinned
-catalog-plus-portfolio closure now improves 171 shapes by 6700 total rank
+catalog-plus-portfolio closure now improves 177 shapes by 6731 total rank
 units (previously 163 shapes by 6563). Those downstream prices are not 171
 separately materialized tensor certificates. The table comparison is not a
 complete worldwide novelty audit or an optimality claim.
@@ -355,8 +365,8 @@ certificates are independently expanded by
 MetaFlip package and certificate directory as appropriate).
 
 The pinned-catalog closure comparison is replayable with
-`python3 tools/check_wide_rectangular_closure.py CATALOG.json`. It reports 147
-rank-price improvements totaling 6171 terms among shapes with coordinates 2
+`python3 tools/check_wide_rectangular_closure.py CATALOG.json`. It reports 177
+rank-price improvements totaling 6731 terms among shapes with coordinates 2
 through 32; those are composition prices, not separate materialized
 certificates for every improved shape. No square shape improves in this finite closure.
 Another 100 million moves from the retained rank-623 seed, and three further

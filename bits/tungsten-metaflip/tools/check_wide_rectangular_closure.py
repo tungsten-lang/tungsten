@@ -40,6 +40,8 @@ CANDIDATES = (
      '519e99587c73888bbc011a5a11c7342fcae631e79d591b077e52d3749772fc7a', True),
     ((8, 20, 29), '8x20x29', 2724,
      'b1f26cb283b84ba01d699007abe162318569afa6e9c3fdcdb02fbf44577e0a16', True),
+    ((7, 20, 30), '7x20x30', 2623,
+     'a24918391dc371cb03ad1abf1d282b300d323fd7e220b264e52caf45e1091874', True),
     ((15, 19, 28), '19x28x15', 4576,
      '20554ab7fe74e6a977ad7612274843926e79b18bbd2f3f168bf103b0cbc2ca86', True),
     ((14, 20, 28), '20x28x14', 4484,
@@ -162,7 +164,7 @@ def main():
     gains = [{'shape': shape, 'before': original(shape), 'after': improved(shape)}
              for shape in itertools.combinations_with_replacement(range(2, 33), 3)
              if improved(shape) < original(shape)]
-    if len(gains) != 171 or sum(row['before'] - row['after'] for row in gains) != 6700:
+    if len(gains) != 177 or sum(row['before'] - row['after'] for row in gains) != 6731:
         raise ValueError(f'downstream impact changed: {len(gains)} shapes, '
                          f'{sum(row["before"] - row["after"] for row in gains)} terms')
     print(json.dumps({'field': 'GF(2)', 'record_claim': False,

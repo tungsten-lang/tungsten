@@ -565,6 +565,14 @@ the cumulative closure is now 479 shapes and 26906 units. The pinned external
 index lists 2472 for this shape. This is a finite comparison, not an audited
 worldwide or cross-field record claim.
 
+The adjacent `11x16x23:2386` tensor has a separate productive neighborhood:
+50M/100M directed moves (21125/21127) lower it to the retained rank 2382,
+SHA-256 `4830bdcfd9aa8a4420c26e1a521f61f0952afc9977c67f9ae405d6d5bbb6171f`.
+Its 19 exact basis contexts do not lower rank further. Replacing the old
+certificate improves 23 pinned prices by 98 rank units, taking the cumulative
+finite closure to 480 shapes and 27004 units. This remains an exact GF(2)
+result, not an audited worldwide record claim.
+
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with
 `tools/replay_structured_parent_portfolio.rb --output DIR --only 5x9x20`.

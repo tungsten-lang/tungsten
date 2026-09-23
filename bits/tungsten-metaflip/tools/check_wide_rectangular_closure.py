@@ -134,8 +134,8 @@ CANDIDATES = (
      'fd6aa2d8ef29561c6ce6fd3095eb12f3bc4a93280e5b7b0c27b16f5d679b1532', True),
     ((11, 15, 24), '11x15x24', 2360,
      'e95846648003bac847ceb898be485b4b656c5099aedeb29c43c8ecb130f970de', True),
-    ((11, 16, 23), '11x16x23', 2386,
-     '295506e7fd6bbb73efb3f6486f5feb073f8f65a93628675ccb8c69403ad41b81', True),
+    ((11, 16, 23), '11x16x23', 2382,
+     '4830bdcfd9aa8a4420c26e1a521f61f0952afc9977c67f9ae405d6d5bbb6171f', True),
     ((11, 14, 24), '11x14x24', 2230,
      'c48c2fe496bc07d8e56594b6372a1fba8aea0e1e8c668448834b62cea4a87e18', True),
     ((11, 16, 22), '11x16x22', 2302,
@@ -300,7 +300,7 @@ def main():
     gains = [{'shape': shape, 'before': original(shape), 'after': improved(shape)}
              for shape in itertools.combinations_with_replacement(range(2, 33), 3)
              if improved(shape) < original(shape)]
-    if len(gains) != 479 or sum(row['before'] - row['after'] for row in gains) != 26906:
+    if len(gains) != 480 or sum(row['before'] - row['after'] for row in gains) != 27004:
         raise ValueError(f'downstream impact changed: {len(gains)} shapes, '
                          f'{sum(row["before"] - row["after"] for row in gains)} terms')
     square_gains = [row for row in gains if len(set(row['shape'])) == 1]

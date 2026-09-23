@@ -205,15 +205,16 @@ class WideRectangularCertificateTest(unittest.TestCase):
                                (8, 20, 30), 2803, 2820, compressed=True)
 
     def test_next_rectangular_projection_chain(self):
-        # All ten witnesses descend from the exact 8x20x30 portfolio tensor;
+        # All eleven witnesses descend from the exact 8x20x30 portfolio tensor;
         # a full GF(2) expansion, not the projection recipe, is the authority.
         rows = (
             ((8, 19, 25), 2267, 'bbc407c145ef69bbe150bf85c6e6c445b182bc9907a5457af92043c200a264c1'),
             ((7, 19, 26), 2209, 'f8528ab7ca06290912260b0a0b8001efb944fa9bd0525b8f9df3f9e157560ef4'),
-            ((8, 19, 24), 2143, 'a96c3f75af3dc89f47a6b2d99697b4f79b41175ba40b027781e3984e440985b4'),
+            ((8, 19, 24), 2140, 'de9376f13a929162887d33fa4167b4ed8322c325c43d31816057ccf18792d758'),
             ((7, 19, 25), 2122, '408505b79f9a5dac4cfc2c05cf81491a92cf840246a6c5e81d1f5198445ce43a'),
             ((7, 19, 24), 2010, '22daa861e41e1065711bc1f131d5bc1d9985be81a0d53fe0f577378239091eda'),
-            ((8, 19, 23), 2104, '866292f6dad1c40934cc25170e5761d1c6f286376ce774b9e4b9358ec36f0790'),
+            ((8, 19, 23), 2099, 'f3f4942a48d9e9a56e1f7ebdef06a13a7f4d9bf963ccd4c2e3d6bbf48985f45c'),
+            ((7, 19, 23), 1980, 'd0cbe7d7c8257d13a22168325c18631180da81deddebefc2922dad926d5dcf41'),
             ((8, 18, 24), 2073, '1eff548ddb9085fb6f7deb1919120311b4b84938540d36c687827a2bd7b4029a'),
             ((8, 19, 22), 2034, '95e4cefd3c35ac44e7b11a115e5202e455aca43da75c9e5b0517cbb9b19b044c'),
             ((8, 17, 24), 1973, '3001999ab7d04bcb8d001441fbc117da06b1d1f4866ba7cff843f070ea0fbe97'),

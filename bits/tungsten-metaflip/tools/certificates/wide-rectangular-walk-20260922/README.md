@@ -226,8 +226,17 @@ and `8x18x24:2079`; a second basis sweep of the latter reached the retained
 `8x18x24:2073`. First basis sweeps also lowered `8x17x24` to 1973 and
 `8x17x23` to 1934. All changed tensors pass independent full GF(2) checks.
 
-These ten witnesses have independently checked canonical MFW1 hashes in the
-focused Python certificate test and the closure checker. All ten beat entries in
+Three 50-million-move continuations from that chain yielded further exact
+witnesses. The `8x19x24:2143` tensor reached `8x19x24:2140` (nonce 19203).
+Projecting its last-axis coordinate 20 and compressing gave `8x19x23:2101`;
+a walk reached `8x19x23:2099` (nonce 19205). Projecting first-axis coordinate
+1 of that result gave `7x19x23:1983`; a walk reached `7x19x23:1980` (nonce
+19207). Each saved output passed independent full GF(2) tensor expansion.
+The 17- and 19-context basis/projection follow-ups found no better child than
+the corresponding walks in their bounded screens.
+
+These eleven witnesses have independently checked canonical MFW1 hashes in the
+focused Python certificate test and the closure checker. Ten beat entries in
 the current [Université de Lille table](https://fmm.univ-lille.fr/), served
 version `2b71762f906bef43f0ce25d31a9b8e5ad28a23db` on 2026-09-22:
 
@@ -235,18 +244,21 @@ version `2b71762f906bef43f0ce25d31a9b8e5ad28a23db` on 2026-09-22:
 | --- | ---: | ---: |
 | 8x19x25 | 2267 | 2330 |
 | 7x19x26 | 2209 | 2215 |
-| 8x19x24 | 2143 | 2216 |
+| 8x19x24 | 2140 | 2216 |
 | 7x19x25 | 2122 | 2127 |
 | 7x19x24 | 2010 | 2025 |
-| 8x19x23 | 2104 | 2145 |
+| 8x19x23 | 2099 | 2145 |
 | 8x18x24 | 2073 | 2100 |
 | 8x19x22 | 2034 | 2057 |
 | 8x17x24 | 1973 | 2012 |
 | 8x17x23 | 1934 | 1946 |
 
+The new `7x19x23:1980` improves the pinned GF(2) closure price of 2015 but
+does not beat Lille's listed rank 1959 for that shape.
+
 Across all retained rectangular certificates, the pinned
-catalog-plus-portfolio closure now improves 147 shapes by 6171 total rank
-units (previously 111 shapes by 5003). Those downstream prices are not 147
+catalog-plus-portfolio closure now improves 148 shapes by 6258 total rank
+units (previously 147 shapes by 6171). Those downstream prices are not 148
 separately materialized tensor certificates. The table comparison is not a
 complete worldwide novelty audit or an optimality claim.
 

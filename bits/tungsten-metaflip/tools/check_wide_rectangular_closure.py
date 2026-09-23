@@ -86,14 +86,16 @@ CANDIDATES = (
      'bbc407c145ef69bbe150bf85c6e6c445b182bc9907a5457af92043c200a264c1', True),
     ((7, 19, 26), '7x19x26', 2209,
      'f8528ab7ca06290912260b0a0b8001efb944fa9bd0525b8f9df3f9e157560ef4', True),
-    ((8, 19, 24), '8x19x24', 2143,
-     'a96c3f75af3dc89f47a6b2d99697b4f79b41175ba40b027781e3984e440985b4', True),
+    ((8, 19, 24), '8x19x24', 2140,
+     'de9376f13a929162887d33fa4167b4ed8322c325c43d31816057ccf18792d758', True),
     ((7, 19, 25), '7x19x25', 2122,
      '408505b79f9a5dac4cfc2c05cf81491a92cf840246a6c5e81d1f5198445ce43a', True),
     ((7, 19, 24), '7x19x24', 2010,
      '22daa861e41e1065711bc1f131d5bc1d9985be81a0d53fe0f577378239091eda', True),
-    ((8, 19, 23), '8x19x23', 2104,
-     '866292f6dad1c40934cc25170e5761d1c6f286376ce774b9e4b9358ec36f0790', True),
+    ((8, 19, 23), '8x19x23', 2099,
+     'f3f4942a48d9e9a56e1f7ebdef06a13a7f4d9bf963ccd4c2e3d6bbf48985f45c', True),
+    ((7, 19, 23), '7x19x23', 1980,
+     'd0cbe7d7c8257d13a22168325c18631180da81deddebefc2922dad926d5dcf41', True),
     ((8, 18, 24), '8x18x24', 2073,
      '1eff548ddb9085fb6f7deb1919120311b4b84938540d36c687827a2bd7b4029a', True),
     ((8, 19, 22), '8x19x22', 2034,
@@ -144,7 +146,7 @@ def main():
     gains = [{'shape': shape, 'before': original(shape), 'after': improved(shape)}
              for shape in itertools.combinations_with_replacement(range(2, 33), 3)
              if improved(shape) < original(shape)]
-    if len(gains) != 147 or sum(row['before'] - row['after'] for row in gains) != 6171:
+    if len(gains) != 148 or sum(row['before'] - row['after'] for row in gains) != 6258:
         raise ValueError(f'downstream impact changed: {len(gains)} shapes, '
                          f'{sum(row["before"] - row["after"] for row in gains)} terms')
     print(json.dumps({'field': 'GF(2)', 'record_claim': False,

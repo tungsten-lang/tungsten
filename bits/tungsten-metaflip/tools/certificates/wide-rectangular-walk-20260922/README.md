@@ -149,6 +149,20 @@ for the retained shapes `11x25x28`, `15x16x23`, `11x16x30`, `11x25x27`,
 certificates are numerically lower. This is not an audited worldwide or
 cross-field novelty claim.
 
+Continuing those exact tensors through one more 19-context basis/projection
+generation gives eight retained descendants. From `16x23x14:3003`, the
+`16x23x13` projection reaches 2795 and a 50-million-move walk (nonce 19441)
+reaches 2776; `16x22x14` similarly goes 2929→2922 (nonce 19443). From
+`11x16x29:3034` comes `11x16x28:2946`, while `11x27x25:4426` yields
+`11x26x25:4327` and `11x27x24:4327`. Finally, the rank-2776 tensor yields
+`16x23x12:2533→2511` (nonce 19447), `16x22x13:2713→2692` (nonce 19449),
+and `15x23x13:2718`. Each saved tensor passes independent full GF(2)
+expansion. This tranche affects 86 shapes and saves 5253 further rank units
+against the preceding pinned closure. Its `13x16x23:2776`,
+`14x16x22:2922`, `12x16x23:2511`, and `13x16x22:2692` ranks are
+numerically below Lille's listed 2863, 2961, 2552, and 2757, respectively;
+that comparison is not a worldwide or cross-field novelty claim.
+
 Replaying the `15x20x28` structured-parent row yields a rank-4700 tensor in
 factor order `20x28x15`. Deleting coordinate 13 of the first axis and applying
 exact GF(2) cancellation/compression yields `19x28x15` at rank 4600; exact
@@ -349,8 +363,8 @@ seeds. All three retained tensors pass independent full GF(2) verification.
 The two 7-row ranks improve the pinned closure but not Lille's listings.
 
 Across all retained rectangular certificates, the pinned
-catalog-plus-portfolio closure now improves 258 shapes by 11954 total rank
-units (previously 224 shapes by 10043). Those downstream prices are not 258
+catalog-plus-portfolio closure now improves 329 shapes by 17207 total rank
+units (previously 258 shapes by 11954). Those downstream prices are not 329
 separately materialized tensor certificates. The table comparison is not a
 complete worldwide novelty audit or an optimality claim.
 
@@ -414,8 +428,8 @@ certificates are independently expanded by
 MetaFlip package and certificate directory as appropriate).
 
 The pinned-catalog closure comparison is replayable with
-`python3 tools/check_wide_rectangular_closure.py CATALOG.json`. It reports 258
-rank-price improvements totaling 11954 terms among shapes with coordinates 2
+`python3 tools/check_wide_rectangular_closure.py CATALOG.json`. It reports 329
+rank-price improvements totaling 17207 terms among shapes with coordinates 2
 through 32; those are composition prices, not separate materialized
 certificates for every improved shape. The sole square-price change is
 `23x23x23:7328→7263`; it is a composition price, not a materialized square

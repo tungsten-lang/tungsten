@@ -615,16 +615,23 @@ worldwide or cross-field novelty audit.
 
 An explicit `11x15x26` tensor was obtained by projecting axis 1 coordinate
 10 from the verified `11x16x26:2701`, then exact shared-factor compression
-to rank 2646. A 19-context basis/projection scan found no lower child.
-One 100M directed walk (nonce 21177) reached rank 2611; a second (21179)
-tied that rank with lower density. The retained full tensor has SHA-256
-`118257680675462cfdeeeb9c61a2ca0fc2b9c945efb87b287dac3a1eb77d6ce7`
-and passes independent Ruby and Python GF(2) identity checks. It replaces
-the prior computed closure price 2612, which depended on an external leaf,
-with a materialized certificate. The cumulative finite closure is now 484
-shapes and 27371 rank units. The [current Lille table](https://fmm.univ-lille.fr/)
-lists 2617 for `11x15x26`; the exact GF(2) rank 2611 is lower, without a
-complete worldwide or cross-field novelty audit.
+to rank 2646. A 100M directed walk (nonce 21177) reached 2611 and a second
+(21179) tied it with lower density. Three more 100M walks (21181/21183/21187)
+reached 2609, 2608, and 2607; the last (21191) tied 2607 with lower density.
+Its retained SHA-256 is
+`06f7ff537ec99bcf6bb2a52e60ad69b079053c061f7b06f2625f4da5add48b20`.
+The rank-2609 representation, after 19 exact basis contexts, projects to
+`11x15x25:2510`; four 100M walks (21185/21189/21193/21195) reach
+2504/2502/2500 and a lower-density rank-2500 tie. That retained tensor has
+SHA-256 `e22687d372b8100dcf44501bc481f5f3d90abe9861a53b38d6872500cfcb77af`.
+Both full tensors pass independent Ruby and Python GF(2) identity checks;
+19-context basis/projection scans of the final representations found no
+further improved child. They replace computed closure prices 2612 and 2514
+with materialized certificates and improve four current prices by 36 units.
+The cumulative finite closure is now 485 shapes and 27407 rank units.
+The [current Lille table](https://fmm.univ-lille.fr/) lists 2617 and 2514;
+the exact GF(2) ranks 2607 and 2500 are lower, without a complete worldwide
+or cross-field novelty audit.
 
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with

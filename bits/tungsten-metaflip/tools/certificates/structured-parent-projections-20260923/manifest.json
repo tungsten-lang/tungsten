@@ -1,0 +1,451 @@
+{
+  "schema": 1,
+  "field": "GF(2)",
+  "record_claim": false,
+  "comparison_scope": "Exact GF(2) upper bounds compared numerically with the dated Lille table; no optimality, cross-field or worldwide novelty claim.",
+  "source": "https://fmm.univ-lille.fr/",
+  "source_created_at": "2026-09-18T17:17:29",
+  "source_sha256": "a77c4286cd7ad9b5212b679d9e1e21672c7519a41124a3d71079d68bf0878213",
+  "source_parents": 81,
+  "projections": 4279,
+  "rows": [
+    {
+      "shape": [
+        14,
+        16,
+        24
+      ],
+      "rank": 3078,
+      "raw_rank": 3148,
+      "cleanup_steps": 57,
+      "public_rank": 3138,
+      "local_baseline_rank": 3084,
+      "dimension": 2,
+      "deleted_coordinate": 7,
+      "source_portfolio_shape": [
+        15,
+        16,
+        24
+      ],
+      "source_shape": [
+        16,
+        24,
+        15
+      ],
+      "source_scheme_sha256": "7a0efe015d8230afc08c08a2ebfd7e2b116a6a68bc4e3c226458bdea4515fc78",
+      "sha256": "e9d158162bd0f28f5e6b299c342dfbf26bcf66ef3102419155c30fc5d9c2349d"
+    },
+    {
+      "shape": [
+        12,
+        16,
+        29
+      ],
+      "rank": 3164,
+      "raw_rank": 3192,
+      "cleanup_steps": 28,
+      "public_rank": 3216,
+      "local_baseline_rank": 3200,
+      "dimension": 2,
+      "deleted_coordinate": 13,
+      "source_portfolio_shape": [
+        12,
+        16,
+        30
+      ],
+      "source_shape": [
+        12,
+        16,
+        30
+      ],
+      "source_scheme_sha256": "89e76a9bd6f4095f9349906964f881da26c92d5c7f2c8783915dd98bf309b428",
+      "sha256": "2b1df503800ca793223475d92a4ff8f8cf52b59af91e4b8c2142de009861a16d"
+    },
+    {
+      "shape": [
+        14,
+        16,
+        28
+      ],
+      "rank": 3634,
+      "raw_rank": 3714,
+      "cleanup_steps": 57,
+      "public_rank": 3674,
+      "local_baseline_rank": 3716,
+      "dimension": 2,
+      "deleted_coordinate": 8,
+      "source_portfolio_shape": [
+        15,
+        16,
+        28
+      ],
+      "source_shape": [
+        16,
+        28,
+        15
+      ],
+      "source_scheme_sha256": "96fd3500cb6ae09ec5c94fac3624f92e0617d95decd4572f5162bc2cf9ea6978",
+      "sha256": "f294493254743cfdffab28f734fa53705294fd29c537b08ddca968da523b8fde"
+    },
+    {
+      "shape": [
+        15,
+        16,
+        29
+      ],
+      "rank": 4005,
+      "raw_rank": 4029,
+      "cleanup_steps": 24,
+      "public_rank": 4044,
+      "local_baseline_rank": 4055,
+      "dimension": 2,
+      "deleted_coordinate": 1,
+      "source_portfolio_shape": [
+        15,
+        16,
+        30
+      ],
+      "source_shape": [
+        16,
+        15,
+        30
+      ],
+      "source_scheme_sha256": "10496e0cefa1e2d2aaa8e5c3a9ec2908a147d49099dc469ee5d243acbebc5837",
+      "sha256": "e9b701ff3f984d5ffa308ba91e2169460f6b88336d7e1ad2c7065f1b763fa2ed"
+    },
+    {
+      "shape": [
+        10,
+        20,
+        23
+      ],
+      "rank": 2743,
+      "raw_rank": 2768,
+      "cleanup_steps": 25,
+      "public_rank": 2775,
+      "local_baseline_rank": 2879,
+      "dimension": 1,
+      "deleted_coordinate": 22,
+      "source_portfolio_shape": [
+        10,
+        20,
+        24
+      ],
+      "source_shape": [
+        20,
+        24,
+        10
+      ],
+      "source_scheme_sha256": "41103e915a305eabcc50ac9bae57e6ee7cd3276e4cb5d13d39b45c2acb9427d8",
+      "sha256": "7627fffb3d4dccf5fee8dce71a32eb70b5b2e4b9a982e8972b32ef133b4f8546"
+    },
+    {
+      "shape": [
+        15,
+        17,
+        20
+      ],
+      "rank": 3039,
+      "raw_rank": 3076,
+      "cleanup_steps": 36,
+      "public_rank": 3069,
+      "local_baseline_rank": 3054,
+      "dimension": 0,
+      "deleted_coordinate": 4,
+      "source_portfolio_shape": [
+        15,
+        18,
+        20
+      ],
+      "source_shape": [
+        18,
+        20,
+        15
+      ],
+      "source_scheme_sha256": "2aef2e2d4b7cb020dac76739a3003876303bde24cd8f8b01b6a2f96adfca08cc",
+      "sha256": "0322c779894005d4d40261d2e9a0dc7b0da4066d679596dd285a3bc5fe2645c5"
+    },
+    {
+      "shape": [
+        15,
+        16,
+        27
+      ],
+      "rank": 3758,
+      "raw_rank": 3786,
+      "cleanup_steps": 25,
+      "public_rank": 3787,
+      "local_baseline_rank": 3768,
+      "dimension": 1,
+      "deleted_coordinate": 14,
+      "source_portfolio_shape": [
+        15,
+        16,
+        28
+      ],
+      "source_shape": [
+        16,
+        28,
+        15
+      ],
+      "source_scheme_sha256": "96fd3500cb6ae09ec5c94fac3624f92e0617d95decd4572f5162bc2cf9ea6978",
+      "sha256": "8c313e505de85b53bbf50fd39f8d39f5763046aaa5562c65bafd2d811fc27fe2"
+    },
+    {
+      "shape": [
+        8,
+        23,
+        25
+      ],
+      "rank": 2752,
+      "raw_rank": 2774,
+      "cleanup_steps": 19,
+      "public_rank": 2779,
+      "local_baseline_rank": 2821,
+      "dimension": 1,
+      "deleted_coordinate": 21,
+      "source_portfolio_shape": [
+        8,
+        24,
+        25
+      ],
+      "source_shape": [
+        8,
+        24,
+        25
+      ],
+      "source_scheme_sha256": "f3b66b00584a2e4a5d50ddf903b9dd6f4fb0017b1bdf320abcb049bf7c39e25c",
+      "sha256": "d3e2e59a05a900fadc922b7fbd8c22e0f7a3e490bd35c67183bec5288b357e16"
+    },
+    {
+      "shape": [
+        10,
+        19,
+        24
+      ],
+      "rank": 2735,
+      "raw_rank": 2782,
+      "cleanup_steps": 40,
+      "public_rank": 2754,
+      "local_baseline_rank": 2817,
+      "dimension": 0,
+      "deleted_coordinate": 14,
+      "source_portfolio_shape": [
+        10,
+        20,
+        24
+      ],
+      "source_shape": [
+        20,
+        24,
+        10
+      ],
+      "source_scheme_sha256": "41103e915a305eabcc50ac9bae57e6ee7cd3276e4cb5d13d39b45c2acb9427d8",
+      "sha256": "c2993abc887271a59f7eb0364ba82c93a548979f4bc02c8a34ecfbf424dcd919"
+    },
+    {
+      "shape": [
+        10,
+        19,
+        30
+      ],
+      "rank": 3417,
+      "raw_rank": 3454,
+      "cleanup_steps": 37,
+      "public_rank": 3433,
+      "local_baseline_rank": 3496,
+      "dimension": 0,
+      "deleted_coordinate": 4,
+      "source_portfolio_shape": [
+        10,
+        20,
+        30
+      ],
+      "source_shape": [
+        20,
+        10,
+        30
+      ],
+      "source_scheme_sha256": "0d2b60db7a6aede21a8049be0a9e1755d4374f5006cd33715fe3005dcc92906f",
+      "sha256": "88b931fd6f2c67b7644746f421ee1f55350bf42646d5605fa85111f81f8f4cdb"
+    },
+    {
+      "shape": [
+        8,
+        17,
+        30
+      ],
+      "rank": 2496,
+      "raw_rank": 2514,
+      "cleanup_steps": 18,
+      "public_rank": 2509,
+      "local_baseline_rank": 2518,
+      "dimension": 2,
+      "deleted_coordinate": 3,
+      "source_portfolio_shape": [
+        8,
+        18,
+        30
+      ],
+      "source_shape": [
+        8,
+        30,
+        18
+      ],
+      "source_scheme_sha256": "3a17e2be7ea10c0d70ab627da12cc38f1da1b1cbd7f0b2d8192d32d748c900ea",
+      "sha256": "7d9c3c8021168af0cb9c1223ab78b0cf26aac931f6078b056ef8bb78008d2d05"
+    },
+    {
+      "shape": [
+        15,
+        19,
+        20
+      ],
+      "rank": 3399,
+      "raw_rank": 3434,
+      "cleanup_steps": 33,
+      "public_rank": 3409,
+      "local_baseline_rank": 3414,
+      "dimension": 1,
+      "deleted_coordinate": 6,
+      "source_portfolio_shape": [
+        15,
+        20,
+        20
+      ],
+      "source_shape": [
+        15,
+        20,
+        20
+      ],
+      "source_scheme_sha256": "2d8bffeb89c59e6d6f85679363734e6553002d6f9ef7888e6ab9350899ce056c",
+      "sha256": "3d62a01c876fa5b10194c90228041465df06dcad4615b1238435b09ae1fd6783"
+    },
+    {
+      "shape": [
+        9,
+        16,
+        17
+      ],
+      "rank": 1515,
+      "raw_rank": 1538,
+      "cleanup_steps": 22,
+      "public_rank": 1524,
+      "local_baseline_rank": 1588,
+      "dimension": 1,
+      "deleted_coordinate": 14,
+      "source_portfolio_shape": [
+        9,
+        16,
+        18
+      ],
+      "source_shape": [
+        9,
+        18,
+        16
+      ],
+      "source_scheme_sha256": "d7b2f08a542eaa63b947eebeb3d008d61b45ad8b8d2c93baf4900b3cdcc95385",
+      "sha256": "f7d0a8dbbbf28c678c7eaf6a57f23487dd6a853bff7f8828476f8e5b40672c6b"
+    },
+    {
+      "shape": [
+        9,
+        16,
+        29
+      ],
+      "rank": 2495,
+      "raw_rank": 2517,
+      "cleanup_steps": 22,
+      "public_rank": 2502,
+      "local_baseline_rank": 2576,
+      "dimension": 2,
+      "deleted_coordinate": 13,
+      "source_portfolio_shape": [
+        9,
+        16,
+        30
+      ],
+      "source_shape": [
+        9,
+        16,
+        30
+      ],
+      "source_scheme_sha256": "f5892005ffa83d0b00d9efbf38ac972dca7c03b026a3ce76f60cf2894af2afc1",
+      "sha256": "3354e39a6026e7067065371c62ccd29b7ed35fbb3f5b8531af15fcf58d5c4d48"
+    },
+    {
+      "shape": [
+        3,
+        18,
+        25
+      ],
+      "rank": 999,
+      "raw_rank": 1029,
+      "cleanup_steps": 30,
+      "public_rank": 1002,
+      "local_baseline_rank": 1014,
+      "dimension": 0,
+      "deleted_coordinate": 0,
+      "source_portfolio_shape": [
+        4,
+        18,
+        25
+      ],
+      "source_shape": [
+        4,
+        25,
+        18
+      ],
+      "source_scheme_sha256": "a00e8eef25a561cb7a8202379a58f363a640f37eb40e460caaa3a9297bb90074",
+      "sha256": "7089d34ff940a11e2876c2c8bd85e62c95e9ec6c0413dbb7944345083725e705"
+    },
+    {
+      "shape": [
+        8,
+        14,
+        20
+      ],
+      "rank": 1411,
+      "raw_rank": 1432,
+      "cleanup_steps": 20,
+      "public_rank": 1414,
+      "local_baseline_rank": 1433,
+      "dimension": 2,
+      "deleted_coordinate": 7,
+      "source_portfolio_shape": [
+        8,
+        15,
+        20
+      ],
+      "source_shape": [
+        8,
+        20,
+        15
+      ],
+      "source_scheme_sha256": "45cc382a469cd422863f1a04f3b510146eff129e829b3fa66d88bbdb7f671314",
+      "sha256": "5510a01490e3a72ad9a568c04ca65430a4a5861499cf306cf546b58984eb979d"
+    }
+  ],
+  "extensions": [
+    {
+      "shape": [3, 18, 29],
+      "rank": 1161,
+      "cleanup_steps": 0,
+      "public_rank": 1162,
+      "small_source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_3x4x6_rank54_d488_gl_frontier_gf2.txt",
+      "small_source_sha256": "948ee56484fef065ebf0e90775d9dc8e76c714a9139ac167ebbc766efab1b470",
+      "small_shape": [3, 4, 6],
+      "small_rank": 54,
+      "repeat_axis": 2,
+      "repeat_count": 3,
+      "repeat_orientation": [3, 18, 4],
+      "large_projection_shape": [3, 25, 18],
+      "large_projection_rank": 999,
+      "large_projection_sha256": "7089d34ff940a11e2876c2c8bd85e62c95e9ec6c0413dbb7944345083725e705",
+      "large_orientation": [3, 18, 25],
+      "target_orientation": [3, 18, 29],
+      "block_axis": 2,
+      "sha256": "8fb4fec984f1e4d7ad30db2eca24aac98e4fbe0e9ee261c5b44815e16cb6b0b1"
+    }
+  ]
+}

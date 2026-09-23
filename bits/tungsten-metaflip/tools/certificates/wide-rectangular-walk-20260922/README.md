@@ -545,11 +545,16 @@ coordinate 10 for `17x24x13:3200`; 20M moves (20343) reached 3193, another
 50M (20345) tied, and basis cleanup reached the retained 3190. A raw
 projection of the rank-3193 intermediate removed first-axis coordinate 7 for
 `16x24x13:2920`; walks of 20M/50M moves (20347/20349) reached 2894.
+Two 100M-move continuations (20709/20711) lowered that verified tensor to
+the retained `16x24x13:2888`, SHA-256
+`642f7d379bc69acfa7f14b9982505840add8d47d9e243146473575303cfe395f`.
 Every retained endpoint is independently
-expanded and checked over GF(2). These ten certificates add 14 improved
-pinned composition prices and 1020 rank units, for a cumulative closure of
-477 shapes and 26753 units. None of those derived prices is an audited
-worldwide record.
+expanded and checked over GF(2). These ten certificates add 15 improved
+pinned composition prices and 1072 rank units, for a cumulative closure of
+478 shapes and 26805 units. The [live Lille table](https://fmm.univ-lille.fr/index.html)
+lists 2942 for this shape,
+while the pinned external index lists 2930; this certificate is lower than
+both, without establishing a worldwide or cross-field record.
 
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with

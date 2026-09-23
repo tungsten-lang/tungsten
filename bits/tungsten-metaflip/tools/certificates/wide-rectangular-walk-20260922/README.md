@@ -118,12 +118,28 @@ Middle-axis coordinate 0 of the parent gives retained `8x29x18:2498`, SHA-256
 `deb90236cda251a21c9576d17eebb647755f3dac5490529f2cd9899c288f9d89`;
 its 50-million-move walk (nonce 19349) ties. A basis projection of the
 rank-2374 child gives `7x29x18:2350`, and a 50-million-move walk (nonce
-19351) reaches retained rank 2341, SHA-256
-`d6245d9592b31e6e5b97e159306fe65d2e9c5638e52f21d66c3c8ff6ca17e42f`.
+19351) reaches rank 2341. A separate middle-axis coordinate-3 projection
+of the rank-2374 child gives rank 2352; a 50-million-move walk followed by
+a 100-million-move continuation (nonce 19377) reaches retained rank 2340,
+SHA-256
+`614a99ac97e54556895bcf7aa22dae1462f9bab4a1e3c05e570a72be4fab7773`.
 All three pass independent full GF(2) verification. The pinned composition
 prices were 2467, 2550, and 2390; the current Lille table lists 2375, 2535,
 and 2317. Thus the first two numerical ranks beat that table, not a complete
 worldwide or cross-field novelty audit.
+
+An exact one-coordinate projection scan over 4486 structured-parent portfolio
+cases produced candidates below the pinned closure in 70 distinct shapes.
+Three retained representatives are `11x28x25:4533` (from the `12x25x28`
+parent, SHA-256
+`4394b12d452224af97cc96970a95ba4100b11e3351a4d9ffb7a4e2938f86bb5f`),
+`16x23x15:3168` (from `15x16x24`, SHA-256
+`ade755538726ec52f3b2bcf27f7511c47bbea7623b5d132fb7cbb9ec43ab7f4a`),
+and `11x16x30:3107` (from `12x16x30`, SHA-256
+`b58a2167331102c657a5a979d2985ef528ce875e78612bf98c82853f7141ddda`).
+Each passes independent full GF(2) expansion. Their pinned closure prices
+were 4725, 3320, and 3258. The current Lille table lists 4572, 3238, and
+3126; this is a numerical comparison, not an audited worldwide novelty claim.
 
 Replaying the `15x20x28` structured-parent row yields a rank-4700 tensor in
 factor order `20x28x15`. Deleting coordinate 13 of the first axis and applying
@@ -325,8 +341,8 @@ seeds. All three retained tensors pass independent full GF(2) verification.
 The two 7-row ranks improve the pinned closure but not Lille's listings.
 
 Across all retained rectangular certificates, the pinned
-catalog-plus-portfolio closure now improves 180 shapes by 7163 total rank
-units (previously 163 shapes by 6563). Those downstream prices are not 171
+catalog-plus-portfolio closure now improves 224 shapes by 10043 total rank
+units (previously 180 shapes by 7163). Those downstream prices are not 224
 separately materialized tensor certificates. The table comparison is not a
 complete worldwide novelty audit or an optimality claim.
 
@@ -390,8 +406,8 @@ certificates are independently expanded by
 MetaFlip package and certificate directory as appropriate).
 
 The pinned-catalog closure comparison is replayable with
-`python3 tools/check_wide_rectangular_closure.py CATALOG.json`. It reports 180
-rank-price improvements totaling 7163 terms among shapes with coordinates 2
+`python3 tools/check_wide_rectangular_closure.py CATALOG.json`. It reports 224
+rank-price improvements totaling 10043 terms among shapes with coordinates 2
 through 32; those are composition prices, not separate materialized
 certificates for every improved shape. No square shape improves in this finite closure.
 Another 100 million moves from the retained rank-623 seed, and three further

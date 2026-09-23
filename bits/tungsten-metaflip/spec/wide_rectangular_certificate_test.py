@@ -240,12 +240,29 @@ class WideRectangularCertificateTest(unittest.TestCase):
         rows = (
             ((7, 30, 18), 2374, '0645becb3abaf003bbe7fe60d3b139ff0079f7345e4367ce41accd8ac364dd76'),
             ((8, 29, 18), 2498, 'deb90236cda251a21c9576d17eebb647755f3dac5490529f2cd9899c288f9d89'),
-            ((7, 29, 18), 2341, 'd6245d9592b31e6e5b97e159306fe65d2e9c5638e52f21d66c3c8ff6ca17e42f'),
+            ((7, 29, 18), 2340, '614a99ac97e54556895bcf7aa22dae1462f9bab4a1e3c05e570a72be4fab7773'),
         )
         for shape, rank, digest in rows:
             with self.subTest(shape=shape):
                 self.check_certificate(shape, rank, digest, (8, 18, 30),
                                        2526, 2538, compressed=True)
+
+    def test_portfolio_wide_projection_records(self):
+        rows = (
+            ((11, 28, 25), 4533,
+             '4394b12d452224af97cc96970a95ba4100b11e3351a4d9ffb7a4e2938f86bb5f',
+             (12, 25, 28), 4708, 4740),
+            ((16, 23, 15), 3168,
+             'ade755538726ec52f3b2bcf27f7511c47bbea7623b5d132fb7cbb9ec43ab7f4a',
+             (15, 16, 24), 3225, 3240),
+            ((11, 16, 30), 3107,
+             'b58a2167331102c657a5a979d2985ef528ce875e78612bf98c82853f7141ddda',
+             (12, 16, 30), 3228, 3240),
+        )
+        for shape, rank, digest, parent_shape, parent_rank, catalog_bound in rows:
+            with self.subTest(shape=shape):
+                self.check_certificate(shape, rank, digest, parent_shape,
+                                       parent_rank, catalog_bound, compressed=True)
 
 
 if __name__ == '__main__':

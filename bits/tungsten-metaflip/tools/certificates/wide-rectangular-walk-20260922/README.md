@@ -747,6 +747,25 @@ the preceding snapshot, giving 506 improved shapes and 28177 saved units in
 total. There is no additional square-price change. These are verified upper
 bounds, not an audited world-record claim.
 
+A second archive projection sweep found four more exact descendants. Direct
+coordinate deletion and shared-factor compression gave `8x28x18:2452` from
+`8x29x18:2498` (axis 1, coordinate 1), `15x23x15:3097` from
+`16x23x15:3164` (axis 0, coordinate 14), `16x22x14:2924` from
+`16x22x15:3071` (axis 2, coordinate 7), and `7x18x23:1902` from
+`7x19x23:1959` (axis 1, coordinate 18). The retained 100M-move directed
+walks reach ranks 2448 (nonce 21541), 3081 (21543), 2918 (21545), and
+1881 (21549 then 21551). Additional 100M walks from ranks 2448 and 2918
+(nonces 21547 and 21553) tied. Independent exact expansion and SHA-256 checks
+are required by the focused test and closure checker. These four tensors lower
+six more finite composition prices by 61 rank units, bringing the cumulative
+effect to 507 shapes and 28238 units, with no new square-price change.
+
+The GF(2) `16x22x14:2918` tensor is numerically below both the pinned
+catalog's unprovenanced 2932 entry and Lille's listed [2961](https://fmm.univ-lille.fr/).
+The `8x28x18:2448` tensor is below Lille's listed [2450](https://fmm.univ-lille.fr/8x18x28.html),
+but the pinned catalog already contains an unprovenanced 2400 entry. Field
+and provenance audits remain necessary before claiming any world record.
+
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with
 `tools/replay_structured_parent_portfolio.rb --output DIR --only 5x9x20`.

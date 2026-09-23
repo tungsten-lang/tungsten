@@ -336,6 +336,20 @@ CANDIDATES = (
      'cad0bbc3685789992aed5d490035e698e6e5c1e5dc272f05dd86742b01364014', True),
     ((15, 16, 21), '16x15x21', 2900,
      '53bb587f14397bfc0bc48e2c54f92d12774aa9560910841c37d45ed849ac4743', True),
+    ((11, 16, 21), '11x16x21', 2221,
+     'a614f4a52993a8e2c7904fb93693f14bbc682a72f28e41ce5c9a7eb10b33d460', True),
+    ((15, 16, 20), '16x15x20', 2754,
+     '395b86c5e82d25cc92b0b77fb22d5f2a1a595e2cd556979ca8d823a29881b5a9', True),
+    ((15, 16, 19), '16x15x19', 2688,
+     '9cc0898f47aafe56ce224b1bfd3d2a2c2595c40ac7a7ba1f4d6fa4954603b01e', True),
+    ((14, 16, 20), '16x14x20', 2628,
+     'e91b78ea8bb12891b1eb058e8ed4dcb6733c283678b69a73fd7d6fb7a821401c', True),
+    ((11, 16, 20), '11x16x20', 2119,
+     '51d0a6cf286903a3bf81e9d45a717486a010324b1e1217b1bc3442dfa2b4d958', True),
+    ((14, 16, 19), '16x14x19', 2548,
+     '2d8a2bf936c521ced29f6ab88a0a05f529568237cf0b607464a9d97277d03d20', True),
+    ((13, 16, 20), '16x13x20', 2464,
+     '8ac38959e5d1d35b045e56af68917c2db00169270611bd939b6cd3bd28b852bb', True),
 )
 
 
@@ -378,7 +392,7 @@ def main():
     gains = [{'shape': shape, 'before': original(shape), 'after': improved(shape)}
              for shape in itertools.combinations_with_replacement(range(2, 33), 3)
              if improved(shape) < original(shape)]
-    if len(gains) != 562 or sum(row['before'] - row['after'] for row in gains) != 31586:
+    if len(gains) != 584 or sum(row['before'] - row['after'] for row in gains) != 32578:
         raise ValueError(f'downstream impact changed: {len(gains)} shapes, '
                          f'{sum(row["before"] - row["after"] for row in gains)} terms')
     square_gains = [row for row in gains if len(set(row['shape'])) == 1]

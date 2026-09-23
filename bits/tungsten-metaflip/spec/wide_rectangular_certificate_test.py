@@ -122,6 +122,27 @@ class WideRectangularCertificateTest(unittest.TestCase):
                 self.assertLess(rank, comparator)
                 self.check_certificate(shape, rank, digest, compressed=True)
 
+    def test_projected_rank47_formula_descendants(self):
+        cases = (
+            ((11, 16, 21), 2221,
+             'a614f4a52993a8e2c7904fb93693f14bbc682a72f28e41ce5c9a7eb10b33d460'),
+            ((16, 15, 20), 2754,
+             '395b86c5e82d25cc92b0b77fb22d5f2a1a595e2cd556979ca8d823a29881b5a9'),
+            ((16, 15, 19), 2688,
+             '9cc0898f47aafe56ce224b1bfd3d2a2c2595c40ac7a7ba1f4d6fa4954603b01e'),
+            ((16, 14, 20), 2628,
+             'e91b78ea8bb12891b1eb058e8ed4dcb6733c283678b69a73fd7d6fb7a821401c'),
+            ((11, 16, 20), 2119,
+             '51d0a6cf286903a3bf81e9d45a717486a010324b1e1217b1bc3442dfa2b4d958'),
+            ((16, 14, 19), 2548,
+             '2d8a2bf936c521ced29f6ab88a0a05f529568237cf0b607464a9d97277d03d20'),
+            ((16, 13, 20), 2464,
+             '8ac38959e5d1d35b045e56af68917c2db00169270611bd939b6cd3bd28b852bb'),
+        )
+        for shape, rank, digest in cases:
+            with self.subTest(shape=shape):
+                self.check_certificate(shape, rank, digest, compressed=True)
+
     def test_12x10x20_rank_1448(self):
         self.check_certificate((12, 10, 20), 1448,
                                'ce1223857ec1c7bf2215b248a5cbeb42c4171df2c648ee7d752fd9f822741df8',

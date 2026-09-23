@@ -905,6 +905,36 @@ retained closure from 545 shapes/29710 saved rank units to 562/31586. The
 square-price change is unchanged. The comparator differences are finite
 catalog evidence, not audited worldwide or cross-field record claims.
 
+Exact coordinate projection of those parents, shared-factor matrix cleanup,
+and bounded directed walks give seven further retained GF(2) tensors. The
+steps are in source orientation; each arrow after cleanup is one 100-million-
+move walk with the shown nonce:
+
+| certificate | exact provenance | rank | Lille table, 2026-09-23 |
+|---|---|---:|---:|
+| `11x16x21-r2221.mfw.gz.b64` | `12x16x21:2321` projection/cleanup → 2230 → 2221 (21641) | 2221 | 2274 |
+| `16x15x20-r2754.mfw.gz.b64` | `16x15x21:2900` projection 2800, cleanup 2768 → 2754 (21637) | 2754 | 2834 |
+| `16x15x19-r2688.mfw.gz.b64` | `16x15x20:2754` basis/projection/cleanup 2699 → 2688 (21645) | 2688 | 2747 |
+| `16x14x20-r2628.mfw.gz.b64` | `16x15x20:2754` basis/projection/cleanup 2652 → 2628 (21647) | 2628 | 2695 |
+| `11x16x20-r2119.mfw.gz.b64` | `11x16x21:2221` basis/projection/cleanup 2121 → 2119 (21653) | 2119 | 2160 |
+| `16x14x19-r2548.mfw.gz.b64` | `16x14x20:2628` basis/projection/cleanup 2584 → 2548 (21655) | 2548 | 2581 |
+| `16x13x20-r2464.mfw.gz.b64` | `16x14x20:2628` basis/projection/cleanup 2487 → 2464 (21657) | 2464 | 2521 |
+
+Every retained endpoint passes both full-tensor verifiers, with decoded
+SHA-256 digests pinned in `check_wide_rectangular_closure.py` and the focused
+certificate test. One further continuation from `11x16x21:2221`,
+`15x16x20:2754`, `15x16x19:2688`, and `14x16x20:2628` tied. The bounded
+next-generation basis/projection screen found no further improving child.
+`15x15x19:2615` was exact but not retained: the
+[Lille table](https://fmm.univ-lille.fr/) already lists rank 2545.
+
+Against the pinned catalog-plus-retained closure, these seven descendants
+improve 22 more shapes and save 992 additional rank units, giving cumulative
+totals 584 and 32578; the square-price change is still unchanged. Against a
+stronger baseline that also includes every local cross-audit formula, they
+improve 24 shapes and save 808 units. The Lille comparisons are numerical
+snapshots, not an exhaustive GF(2), cross-field, or unpublished-result audit.
+
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with
 `tools/replay_structured_parent_portfolio.rb --output DIR --only 5x9x20`.

@@ -97,12 +97,18 @@ rank 2623; a 100-million-move continuation (nonce 19239) reaches the retained
 `2321df5be27cdd71032b79a94adbf7a6b7e08d9e6e99128dab599de57963b223`,
 density 93225. A basis sweep of the rank-2623 representation exposes an exact
 `7x19x30:2562` projection; a 50-million-move walk (nonce 19241) lowers it to
-the retained rank 2541, SHA-256
-`257839eda0e2cf6223333b5b5c939a6e2c1128c64a2eb613551b64b33798d833`.
-Its 100-million-move continuation (nonce 19243) tied that rank. Both retained
-tensors pass independent full GF(2) verification. Their pinned composition
-prices were 2629 and 2563, respectively. They do not establish optimality or
-worldwide novelty; the Lille table currently lists 2532 for `7x19x30`.
+rank 2541. A different exact same-rank refactor (mode 10) ties 2541 in 50
+million moves (nonce 19253), then 100-million-move continuations (nonces
+19259 and 19261) lower it to the retained rank 2538, SHA-256
+`005b9d101f493eb6cd6386479099ad10c106940d682ab7c2e7d6302ff5a59d13`.
+A basis projection from the intermediate rank-2539 tensor gives an exact
+`7x18x30:2465` seed; two 50-million-move walks (nonces 19265 and 19269)
+reach the retained rank 2453, SHA-256
+`5616655755d1f43b24988a916822817fbb6ec6a790a66c69c557232ba8fcedcf`.
+All three retained tensors pass independent full GF(2) verification. Their
+pinned composition prices were 2629, 2563, and 2467, respectively. They do
+not establish optimality or worldwide novelty; the Lille table currently
+lists 2532 for `7x19x30` and 2375 for `7x18x30`.
 
 Replaying the `15x20x28` structured-parent row yields a rank-4700 tensor in
 factor order `20x28x15`. Deleting coordinate 13 of the first axis and applying
@@ -304,7 +310,7 @@ seeds. All three retained tensors pass independent full GF(2) verification.
 The two 7-row ranks improve the pinned closure but not Lille's listings.
 
 Across all retained rectangular certificates, the pinned
-catalog-plus-portfolio closure now improves 177 shapes by 6759 total rank
+catalog-plus-portfolio closure now improves 177 shapes by 6776 total rank
 units (previously 163 shapes by 6563). Those downstream prices are not 171
 separately materialized tensor certificates. The table comparison is not a
 complete worldwide novelty audit or an optimality claim.
@@ -370,7 +376,7 @@ MetaFlip package and certificate directory as appropriate).
 
 The pinned-catalog closure comparison is replayable with
 `python3 tools/check_wide_rectangular_closure.py CATALOG.json`. It reports 177
-rank-price improvements totaling 6759 terms among shapes with coordinates 2
+rank-price improvements totaling 6776 terms among shapes with coordinates 2
 through 32; those are composition prices, not separate materialized
 certificates for every improved shape. No square shape improves in this finite closure.
 Another 100 million moves from the retained rank-623 seed, and three further

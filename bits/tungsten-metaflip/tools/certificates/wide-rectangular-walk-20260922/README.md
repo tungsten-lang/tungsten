@@ -193,6 +193,21 @@ closure, raising the cumulative retained impact to 367 shapes and 19045
 rank units. The oriented `12x16x21:2379` is numerically below Lille's 2385
 entry at this audit; no worldwide or cross-field novelty is claimed.
 
+A distinct 11-row branch starts from retained `11x16x28:2946`: its 19-context
+basis sweep reaches rank 2934, and a 50-million-move walk (nonce 19483)
+reaches retained `11x16x28:2929`. A projection in that same basis sweep
+gives `11x16x27:2842`; its 50-million-move walk (nonce 19481) reaches 2825.
+That child projects to `11x16x26:2722`, walked to 2701 (nonce 19487).
+Separately, retained `20x27x11:3545` projects to `19x27x11:3471`, walked to
+3448 (nonce 19485). All four results pass both independent full-tensor
+verifiers. Their finite composition effect is 19 shapes and 948 saved rank
+units against the preceding closure, raising cumulative impact to 378 shapes
+and 19993 rank units. The oriented `11x16x27:2825` and `11x16x26:2701` are
+numerically below Lille's 2847 and 2744 entries at this audit. A further
+`19x26x11:3377` projection was exact but added no closure benefit once the
+four retained tensors were included, so it was not archived. No worldwide,
+cross-field, or optimality claim follows from this finite comparison.
+
 Replaying the `15x20x28` structured-parent row yields a rank-4700 tensor in
 factor order `20x28x15`. Deleting coordinate 13 of the first axis and applying
 exact GF(2) cancellation/compression yields `19x28x15` at rank 4600; exact

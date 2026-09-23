@@ -585,13 +585,16 @@ are retained with SHA-256
 `c87c9189813fd3e00b1fc60b371d166cbc49a9e7a4b129b182025f2270bb8eee`
 and `348ee2f33d1037f9556466d3101d7a78a83539f90eaa923552ca754d116ad9ae`.
 The 2057 representation projects to exact `11x13x22:2008` and
-`11x12x23:1922`, SHA-256
-`905eb17fd4fc31fd10d2d38e32be8fd2e72feecf9118ee37f791a1594160de8b`
-and `232106b1a5d7e580c845bb95381c6a9c7ff9f6e0f6fb511a3a69ad27254299fb`.
+`11x12x23:1922`. Their 50M walks (21157/21159) reach 2001 and 1905.
+Further 100M moves (21161) tie 2001 with lower density, while 100M moves
+(21163) lower 1905 to 1903. The retained certificates have SHA-256
+`2d9b87ef40fc88f8ed1fba0c9f259e283673f61ff8a95fd9df39c2f66bbc4787`
+and `5d6cd2b54321b588f3a12f8f3635d312f0434671fa7b971cf58703c1ad037d42`.
+Their 19-context basis scans found no further improved children in this pass.
 All five retained full tensors pass the Ruby and independent Python GF(2)
 identity checks. Together they improve nine pinned composition prices by
-209 rank units, taking the cumulative finite closure to 484 shapes and
-27213 units. The [current Lille table](https://fmm.univ-lille.fr/) lists
+254 rank units, taking the cumulative finite closure to 484 shapes and
+27258 units. The [current Lille table](https://fmm.univ-lille.fr/) lists
 2176 for `11x14x23`; the exact GF(2) rank 2173 is lower, without a
 complete worldwide or cross-field novelty audit.
 

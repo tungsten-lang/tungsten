@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Independently expand retained rectangular GF(2) tensor certificates."""
 import base64
+import csv
 import gzip
 import hashlib
 import importlib.util
@@ -97,6 +98,29 @@ class WideRectangularCertificateTest(unittest.TestCase):
         self.check_certificate((16, 23, 16), 3324,
                                'cb1ca4f93f7ae1649aabfe97aa94d6e7a3099aeb643c307131e0006d3b74a0aa',
                                compressed=True)
+
+    def test_materialized_rank47_block_formulas(self):
+        audit = ROOT / 'benchmarks/matmul/metaflip/block_composition_cross_audit.tsv'
+        with audit.open() as source:
+            rows = {row['target']: row for row in csv.DictReader(source, delimiter='\t')}
+        cases = (
+            ('12x16x21', (12, 16, 21), 2321, 2384,
+             '3adbea2e79d3a4b8c7ac2df5f6044fabf53980fb0b4a33263d517cf9705c609c'),
+            ('13x16x22', (16, 13, 22), 2668, 2757,
+             'd1adac5120482d848fb002060b64cff7791dfc993bb5b596ee8acaaae1ef25a2'),
+            ('13x16x24', (13, 16, 24), 2842, 2930,
+             'cad0bbc3685789992aed5d490035e698e6e5c1e5dc272f05dd86742b01364014'),
+            ('15x16x21', (16, 15, 21), 2900, 2960,
+             '53bb587f14397bfc0bc48e2c54f92d12774aa9560910841c37d45ed849ac4743'),
+        )
+        for target, shape, rank, comparator, digest in cases:
+            with self.subTest(target=target):
+                row = rows[target]
+                self.assertEqual((row['source'], int(row['formula_rank']),
+                                  int(row['strongest_rank'])),
+                                 ('x'.join(map(str, shape)), rank, comparator))
+                self.assertLess(rank, comparator)
+                self.check_certificate(shape, rank, digest, compressed=True)
 
     def test_12x10x20_rank_1448(self):
         self.check_certificate((12, 10, 20), 1448,

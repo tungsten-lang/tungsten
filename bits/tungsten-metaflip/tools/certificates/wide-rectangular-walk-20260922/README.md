@@ -883,6 +883,28 @@ the cumulative totals are 545 improved shapes and 29710 units. The sole
 square-price change remains `23x23x23:7328→7263`. No worldwide-record or
 optimality claim is inferred from this finite audit.
 
+Four more rows of `block_composition_cross_audit.tsv` have now been
+materialized as complete exact GF(2) tensors. Their sorted shapes, source
+orientations, ranks, and decoded SHA-256 digests are:
+
+| sorted shape | source certificate | rank | pinned external comparator | SHA-256 |
+|---|---|---:|---:|---|
+| 12x16x21 | `12x16x21-r2321.mfw.gz.b64` | 2321 | 2384 | `3adbea2e79d3a4b8c7ac2df5f6044fabf53980fb0b4a33263d517cf9705c609c` |
+| 13x16x22 | `16x13x22-r2668.mfw.gz.b64` | 2668 | 2757 | `d1adac5120482d848fb002060b64cff7791dfc993bb5b596ee8acaaae1ef25a2` |
+| 13x16x24 | `13x16x24-r2842.mfw.gz.b64` | 2842 | 2930 | `cad0bbc3685789992aed5d490035e698e6e5c1e5dc272f05dd86742b01364014` |
+| 15x16x21 | `16x15x21-r2900.mfw.gz.b64` | 2900 | 2960 | `53bb587f14397bfc0bc48e2c54f92d12774aa9560910841c37d45ed849ac4743` |
+
+These ranks equal formulas already recorded in the local cross-audit; their
+novelty here is exact, reusable materialization, not a new formula. Each
+passes the independent full-tensor verifier. Across all four shapes, 48
+same-rank leaf portfolios per shape and both low- and high-density
+100-million-move walks tied the starting ranks. A second rank-47 outer
+presentation was worse on every tested portfolio; bounded outer-basis
+descent also found no lower rank. Adding these four seeds changes the pinned
+retained closure from 545 shapes/29710 saved rank units to 562/31586. The
+square-price change is unchanged. The comparator differences are finite
+catalog evidence, not audited worldwide or cross-field record claims.
+
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with
 `tools/replay_structured_parent_portfolio.rb --output DIR --only 5x9x20`.

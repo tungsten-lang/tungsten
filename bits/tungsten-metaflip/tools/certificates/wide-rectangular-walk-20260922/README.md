@@ -510,6 +510,19 @@ moving the cumulative count to 458 shapes and 25714 units. This is not an
 audited worldwide record claim. The short-walk result is evidence for a
 possible automatic background arm, not yet a production integration.
 
+Two further parent screens tested that idea against fresh tensors. All 62
+one-coordinate projections of `20x28x14:4484` received one million moves;
+none beat its existing child prices. The nearest `20x28x13` branch reached
+4171 after 20M more moves and tied at 4171 after another 50M, above the
+retained 4167. From `19x28x15:4576`, only the 12 projections within 32 ranks
+of their current prices received one million moves; none won immediately.
+Removing final-axis coordinate 8 gave a `19x28x14:4390` seed that reached
+4361 in the short walk, 4357 after 20M moves (nonce 20091), and the retained
+4356 after 50M (nonce 20095). Its full GF(2) identity is checked independently.
+This adds five downstream price improvements worth 19 rank units, moving the
+pinned closure to 463 shapes and 25733 units. These mixed results do not yet
+justify an unconditionally eager short-walk arm for every projection.
+
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with
 `tools/replay_structured_parent_portfolio.rb --output DIR --only 5x9x20`.

@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "field": "GF(2)",
+  "record_claim": false,
+  "parent_set": "composed-descendants",
+  "selected_deleted": 12,
+  "max_mix_rows": 3,
+  "contexts": 2577,
+  "row": {
+    "source_shape": [
+      16,
+      24,
+      31
+    ],
+    "source_rank": 6484,
+    "source_sha256": "011e5a1d36803c97824958c95a5dd9aab4ee6768824d244fcc65af3a7f10b34f",
+    "shear_mask": 262209,
+    "mix_rows": [
+      0,
+      6,
+      18
+    ],
+    "axis": 1,
+    "deleted_coordinate": 12,
+    "raw_rank": 6457,
+    "cleanup_steps": 55,
+    "oriented_shape": [
+      16,
+      23,
+      31
+    ],
+    "shape": [
+      16,
+      23,
+      31
+    ],
+    "rank": 6376,
+    "sha256": "04867c5f5a06a2a914b622c81e9b422e54bdce8cfc43e5c2eaf17e447957f577"
+  }
+}

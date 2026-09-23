@@ -195,6 +195,48 @@ lowest checked density, 73408. The prior pinned composition prices for these
 five shapes were 3828, 2419, 2347, 3533, and 2316. Every saved tensor is
 independently verified; the finite walks are not lower-bound proofs.
 
+A further one-coordinate scan of those five certificates tested 273 exact
+projections. It produced `8x19x25` at rank 2273 by deleting last-axis
+coordinate 13 of the retained `8x19x26`; a 50-million-move directed walk
+(nonce 19193) reached the retained **rank 2267**. Deleting last-axis
+coordinate 13 of `7x19x27` gave `7x19x26` at rank 2231. The next bounded
+generation projected these witnesses to `8x19x24:2144` and `7x19x25:2126`
+by deleting last-axis coordinate 12 from each. Further exact projections gave
+`7x19x24:2010` (last-axis 12 from `7x19x25`), `8x19x23:2105` (last-axis 20
+from `8x19x24`), and `8x18x24:2080` (middle-axis 9 from `8x19x24`). From
+`8x19x23`, deleting last-axis coordinate 21 gave rank 2053 at `8x19x22`;
+another 50-million-move walk (nonce 19197) reached the retained **rank 2034**.
+Finally, deleting middle-axis coordinate 4 of `8x18x24` gave `8x17x24:1975`,
+and deleting its last-axis coordinate 20 gave `8x17x23:1936`. Every
+projection used GF(2) cancellation and exact shared-factor compression; the
+two walks independently verified both their input and output tensors. Another
+100 million moves from the rank-2267 `8x19x25` witness did not lower rank.
+
+These ten witnesses have independently checked canonical MFW1 hashes in the
+focused Python certificate test and the closure checker. Nine beat entries in
+the current [Université de Lille table](https://fmm.univ-lille.fr/), served
+version `2b71762f906bef43f0ce25d31a9b8e5ad28a23db` on 2026-09-22:
+
+| Shape | Retained GF(2) rank | Lille table rank |
+| --- | ---: | ---: |
+| 8x19x25 | 2267 | 2330 |
+| 8x19x24 | 2144 | 2216 |
+| 7x19x25 | 2126 | 2127 |
+| 7x19x24 | 2010 | 2025 |
+| 8x19x23 | 2105 | 2145 |
+| 8x18x24 | 2080 | 2100 |
+| 8x19x22 | 2034 | 2057 |
+| 8x17x24 | 1975 | 2012 |
+| 8x17x23 | 1936 | 1946 |
+
+The tenth witness, `7x19x26:2231`, improves the pinned finite GF(2) closure
+but not the table's rank 2215; it is retained as the exact source of the
+`7x19x25` child. Across all retained rectangular certificates, the pinned
+catalog-plus-portfolio closure now improves 147 shapes by 6117 total rank
+units (previously 111 shapes by 5003). Those downstream prices are not 147
+separately materialized tensor certificates. The table comparison is not a
+complete worldwide novelty audit or an optimality claim.
+
 Replaying the `20x20x25` structured-parent row yields rank 5566. Deleting
 coordinate 18 of its middle axis, cancelling equal GF(2) terms, and applying
 exact shared-factor compression yields `20x19x25` at rank 5439. Repeated
@@ -255,8 +297,8 @@ certificates are independently expanded by
 MetaFlip package and certificate directory as appropriate).
 
 The pinned-catalog closure comparison is replayable with
-`python3 tools/check_wide_rectangular_closure.py CATALOG.json`. It reports 111
-rank-price improvements totaling 5003 terms among shapes with coordinates 2
+`python3 tools/check_wide_rectangular_closure.py CATALOG.json`. It reports 147
+rank-price improvements totaling 6117 terms among shapes with coordinates 2
 through 32; those are composition prices, not separate materialized
 certificates for every improved shape. No square shape improves in this finite closure.
 Another 100 million moves from the retained rank-623 seed, and three further

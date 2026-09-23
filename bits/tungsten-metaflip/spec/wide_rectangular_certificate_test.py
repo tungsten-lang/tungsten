@@ -204,6 +204,26 @@ class WideRectangularCertificateTest(unittest.TestCase):
                                '72d219a018cb0713080e7e384b1f7ca2215043537c93dccb81f5a154c21b1ebb',
                                (8, 20, 30), 2803, 2820, compressed=True)
 
+    def test_next_rectangular_projection_chain(self):
+        # All ten witnesses descend from the exact 8x20x30 portfolio tensor;
+        # a full GF(2) expansion, not the projection recipe, is the authority.
+        rows = (
+            ((8, 19, 25), 2267, 'bbc407c145ef69bbe150bf85c6e6c445b182bc9907a5457af92043c200a264c1'),
+            ((7, 19, 26), 2231, 'd97039bf3ec9e88c712837496e92d82f20d8a6b9c312562467d7664fc3cb026e'),
+            ((8, 19, 24), 2144, '247fa75e0cf04ee686d182ea8d828da90462a58a2e0798624bfcc6442d659ac4'),
+            ((7, 19, 25), 2126, '25469df3cf474c3047746d082ebbfb7e9c772adcc510020b28175c3fe8b66be0'),
+            ((7, 19, 24), 2010, '22daa861e41e1065711bc1f131d5bc1d9985be81a0d53fe0f577378239091eda'),
+            ((8, 19, 23), 2105, 'aab0886745246e9c8375217b067de4c20e71dae451b466fa7ca7b06bef3dbe26'),
+            ((8, 18, 24), 2080, '6ef8734aea7776db9a5f9d6895cebcdc8c31749579dbcb5fc93dc23d784fcd7b'),
+            ((8, 19, 22), 2034, '95e4cefd3c35ac44e7b11a115e5202e455aca43da75c9e5b0517cbb9b19b044c'),
+            ((8, 17, 24), 1975, '76d93a7e72e423ab90051644d218dbc8343d496cb41c62fb8d94d902dde35c69'),
+            ((8, 17, 23), 1936, '7a8c76d1b2ab221e7a56bc1ce2a0f4c9eaaece18afa6e4306642ea37f9faa70e'),
+        )
+        for shape, rank, digest in rows:
+            with self.subTest(shape=shape):
+                self.check_certificate(shape, rank, digest, (8, 20, 30),
+                                       2803, 2820, compressed=True)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -82,6 +82,26 @@ CANDIDATES = (
      '748e38f85e567644c495f46706ba4aeb2fdc9d1d25f46fb997557e1eb8d7103a', True),
     ((7, 18, 28), '7x18x28', 2287,
      '72d219a018cb0713080e7e384b1f7ca2215043537c93dccb81f5a154c21b1ebb', True),
+    ((8, 19, 25), '8x19x25', 2267,
+     'bbc407c145ef69bbe150bf85c6e6c445b182bc9907a5457af92043c200a264c1', True),
+    ((7, 19, 26), '7x19x26', 2231,
+     'd97039bf3ec9e88c712837496e92d82f20d8a6b9c312562467d7664fc3cb026e', True),
+    ((8, 19, 24), '8x19x24', 2144,
+     '247fa75e0cf04ee686d182ea8d828da90462a58a2e0798624bfcc6442d659ac4', True),
+    ((7, 19, 25), '7x19x25', 2126,
+     '25469df3cf474c3047746d082ebbfb7e9c772adcc510020b28175c3fe8b66be0', True),
+    ((7, 19, 24), '7x19x24', 2010,
+     '22daa861e41e1065711bc1f131d5bc1d9985be81a0d53fe0f577378239091eda', True),
+    ((8, 19, 23), '8x19x23', 2105,
+     'aab0886745246e9c8375217b067de4c20e71dae451b466fa7ca7b06bef3dbe26', True),
+    ((8, 18, 24), '8x18x24', 2080,
+     '6ef8734aea7776db9a5f9d6895cebcdc8c31749579dbcb5fc93dc23d784fcd7b', True),
+    ((8, 19, 22), '8x19x22', 2034,
+     '95e4cefd3c35ac44e7b11a115e5202e455aca43da75c9e5b0517cbb9b19b044c', True),
+    ((8, 17, 24), '8x17x24', 1975,
+     '76d93a7e72e423ab90051644d218dbc8343d496cb41c62fb8d94d902dde35c69', True),
+    ((8, 17, 23), '8x17x23', 1936,
+     '7a8c76d1b2ab221e7a56bc1ce2a0f4c9eaaece18afa6e4306642ea37f9faa70e', True),
 )
 
 
@@ -124,8 +144,9 @@ def main():
     gains = [{'shape': shape, 'before': original(shape), 'after': improved(shape)}
              for shape in itertools.combinations_with_replacement(range(2, 33), 3)
              if improved(shape) < original(shape)]
-    if len(gains) != 111 or sum(row['before'] - row['after'] for row in gains) != 5003:
-        raise ValueError('downstream impact changed')
+    if len(gains) != 147 or sum(row['before'] - row['after'] for row in gains) != 6117:
+        raise ValueError(f'downstream impact changed: {len(gains)} shapes, '
+                         f'{sum(row["before"] - row["after"] for row in gains)} terms')
     print(json.dumps({'field': 'GF(2)', 'record_claim': False,
                       'catalog_sha256': manifest['catalog_sha256'],
                       'candidate_sha256': {shape: digest for _, shape, _, digest, _ in CANDIDATES},

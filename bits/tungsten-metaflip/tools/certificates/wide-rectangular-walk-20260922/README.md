@@ -667,6 +667,21 @@ catalog also contains an unprovenanced lower numeric entry, so this is not
 an audited worldwide best-known claim. The rotated `7x19x27:2298` control
 walk tied rank, as did a fresh walk in its original orientation.
 
+The retained `16x22x12:2444` tensor was cyclically reoriented to
+`22x12x16:2444`. Two 100M directed walks (nonces 21325/21329) reached
+2443/2440. An exact coordinate-0 deletion on axis 0 projected the latter
+to `21x12x16:2370`; three more 100M walks (21403/21405/21407) reached
+2361/2360/2359, and a fourth (21409) tied. The retained certificate
+`21x12x16-r2359.mfw.gz.b64` has SHA-256
+`ecf55266c71d56e1536010d1a45496062b4990a6b64dced5a4ed79bfb4b1b3dd`
+and density 67189. The standalone walker and independent Ruby verifier
+both check the full GF(2) tensor identity; the focused Python certificate
+test also expands it independently. A final 19-context basis/projection
+screen found no improved child. This lowers four finite composition prices
+by 53 rank units, raising the cumulative impact to 487 shapes and 27504
+rank units. The pinned catalog has a lower unprovenanced numeric entry
+for this shape, so this is not an audited worldwide-best claim.
+
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with
 `tools/replay_structured_parent_portfolio.rb --output DIR --only 5x9x20`.

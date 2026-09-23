@@ -85,6 +85,19 @@ class WideRectangularCertificateTest(unittest.TestCase):
                                '6cdd65727d4d9bc22d38061347ffcebc7a5e81763cf3e16e88011de13de5cd80',
                                compressed=True)
 
+    def test_16x16x21_materialized_block_formula(self):
+        self.check_certificate((16, 16, 21), 3028,
+                               '5b595c64964da9148de365108450e11231e167e05fef80ae662bf93b3e526ad6',
+                               compressed=True)
+
+    def test_16x23x16_block_composition_and_walk(self):
+        self.check_certificate((16, 23, 16), 3327,
+                               '1eb30526e1b3a5bfdb5e97e8bf42e554b678cc300a20e9c52fbaf9c058918e9a',
+                               compressed=True)
+        self.check_certificate((16, 23, 16), 3324,
+                               'cb1ca4f93f7ae1649aabfe97aa94d6e7a3099aeb643c307131e0006d3b74a0aa',
+                               compressed=True)
+
     def test_12x10x20_rank_1448(self):
         self.check_certificate((12, 10, 20), 1448,
                                'ce1223857ec1c7bf2215b248a5cbeb42c4171df2c648ee7d752fd9f822741df8',

@@ -856,9 +856,32 @@ A second leaf variant also reached 2994 (nonce 21603), a third tied at 2997
 three-term walk improvement saves 42 rank units across the pinned closure;
 the complete rank-2994 certificate saves 119 units against the preceding
 retained closure. The pinned catalog price for the sorted shape is 3071.
-The cumulative finite closure now has 526 improved shapes and 28974 saved
-units, with no further square-price change. These are verified GF(2) upper
-bounds, not audited worldwide record claims.
+At that checkpoint the cumulative finite closure had 526 improved shapes
+and 28974 saved units, with no further square-price change. These are
+verified GF(2) upper bounds, not audited worldwide record claims.
+
+Two further exact rank-47 formulas with only `4x4x5:60` and `4x4x6:73`
+leaves were materialized from cross-audit rows 476 and 478. At
+`16x16x21`, the allocations `(4,4,4,4)`, `(4,4,4,4)`, `(5,6,5,5)` produce
+rank 3028, retained as `16x16x21-r3028.mfw.gz.b64` (decoded SHA-256
+`5b595c64964da9148de365108450e11231e167e05fef80ae662bf93b3e526ad6`).
+Two 100-million-move walks from distinct leaf variants (nonces 21613 and
+21615) tied. At source orientation `16x23x16`, allocations `(4,4,4,4)`,
+`(6,6,6,5)`, `(4,4,4,4)` produce rank 3327, retained as
+`16x23x16-r3327.mfw.gz.b64` (decoded SHA-256
+`1eb30526e1b3a5bfdb5e97e8bf42e554b678cc300a20e9c52fbaf9c058918e9a`).
+All twelve same-rank `4x4x5`/`4x4x6` leaf combinations produce the audited
+formula rank for each shape. A 100-million-move walk from the d628/d690
+parent (nonce 21611) reached exact rank 3324, retained as
+`16x23x16-r3324.mfw.gz.b64` (decoded SHA-256
+`cb1ca4f93f7ae1649aabfe97aa94d6e7a3099aeb643c307131e0006d3b74a0aa`).
+A high-density variant reached 3326 (nonce 21617), and a continuation from
+3324 tied (nonce 21619). The three-term drop from the rank-3327 formula
+saves 45 units across the pinned finite closure. Both retained shapes
+together lower 28 prices and save 736 units against the preceding closure;
+the cumulative totals are 545 improved shapes and 29710 units. The sole
+square-price change remains `23x23x23:7328→7263`. No worldwide-record or
+optimality claim is inferred from this finite audit.
 
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with

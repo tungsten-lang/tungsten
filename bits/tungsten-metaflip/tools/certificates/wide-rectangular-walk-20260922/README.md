@@ -163,6 +163,24 @@ against the preceding pinned closure. Its `13x16x23:2776`,
 numerically below Lille's listed 2863, 2961, 2552, and 2757, respectively;
 that comparison is not a worldwide or cross-field novelty claim.
 
+The next bounded generation projects those retained exact tensors and checks
+19 same-rank shared-factor basis contexts per parent. From `16x23x12:2511`,
+projection gives `16x23x11:2430`, walked to the retained rank 2412 (50 million
+moves, nonce 19451); a further 100-million-move continuation tied. The same
+parent gives `16x22x12:2451`, walked to 2444 (nonce 19459), and
+`15x23x12:2452`, walked to 2443 then 2442 (nonces 19461 and 19463); a further
+100-million-move continuation tied. Projecting `16x22x13:2692` gives
+`16x21x13:2627`, walked to 2616 (nonce 19455). Projecting the rank-2412
+tensor gives `16x22x11:2353`, walked to 2342 (nonce 19465). Finally,
+`11x26x25:4327` projects to `11x25x25:4227`, walked to 4205 (nonce 19457).
+The six retained complete GF(2) tensors are independently expanded by both
+verifiers. They affect 42 shapes and save 1673 further rank units against the
+preceding pinned closure; total retained closure impact is 363 shapes and
+18880 rank units. The 11x16x23, 13x16x21, 12x16x22, and 11x16x22 oriented
+ranks (2412, 2616, 2444, 2342) are numerically below the Lille table's
+2434, 2657, 2499, and 2360 entries at this audit. This is neither a
+worldwide/cross-field novelty claim nor an optimality proof.
+
 Replaying the `15x20x28` structured-parent row yields a rank-4700 tensor in
 factor order `20x28x15`. Deleting coordinate 13 of the first axis and applying
 exact GF(2) cancellation/compression yields `19x28x15` at rank 4600; exact

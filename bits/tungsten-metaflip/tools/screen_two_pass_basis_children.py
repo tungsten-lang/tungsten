@@ -18,6 +18,8 @@ HERE = Path(__file__).resolve().parent
 ONE_PASS = HERE / 'certificates/structured-neutral-children-20260923/manifest.json'
 PARENT = HERE / 'certificates/structured-parent-projections-20260923/manifest.json'
 COMPOSED = HERE / 'certificates/neutral-basis-children-20260923/manifest.json'
+CHAIN = HERE / 'certificates/composed-parent-children-20260923/manifest.json'
+COMPOSED_TWO = HERE / 'certificates/two-pass-composed-children-20260923/manifest.json'
 FIRST = HERE / 'certificates/two-pass-basis-children-20260923/manifest.json'
 SECOND = HERE / 'certificates/two-pass-basis-descendants-20260923/manifest.json'
 
@@ -25,6 +27,10 @@ SECOND = HERE / 'certificates/two-pass-basis-descendants-20260923/manifest.json'
 def baseline_seeds(parent_set='structured-projections'):
     seeds = top.initial_seeds()
     paths = [PARENT, COMPOSED, ONE_PASS]
+    if parent_set in ('composed-chain', 'composed-descendants'):
+        paths.extend((CHAIN, FIRST, SECOND))
+    if parent_set == 'composed-descendants':
+        paths.append(COMPOSED_TWO)
     if parent_set in ('first-generation', 'second-generation'):
         paths.append(FIRST)
     if parent_set == 'second-generation':
@@ -165,6 +171,15 @@ def materialize(row, parents, output_dir):
 
 
 def build_parents(root, parent_set):
+    if parent_set == 'composed-descendants':
+        parents = build_parents(root / 'sources', 'composed-chain')
+        return [materialize(row, parents, root / 'first')
+                for row in json.loads(COMPOSED_TWO.read_text())['rows']]
+    if parent_set == 'composed-chain':
+        parents = neutral.build_parents(root / 'composed')
+        for row in json.loads(COMPOSED.read_text())['rows']:
+            parents.append(neutral.materialize(row, parents, root / 'neutral'))
+        return parents
     parents = neutral.build_structured_parents(root / 'structured')
     if parent_set == 'structured-projections':
         return parents
@@ -183,11 +198,16 @@ def main():
     group.add_argument('--replay-manifest', type=Path)
     parser.add_argument('--parent-set', choices=('structured-projections',
                                                   'first-generation',
-                                                  'second-generation'))
+                                                  'second-generation',
+                                                  'composed-chain',
+                                                  'composed-descendants'))
     parser.add_argument('--output-dir', type=Path)
+    parser.add_argument('--manifest-path', type=Path)
     args = parser.parse_args()
     if args.replay_manifest and args.output_dir is None:
         parser.error('--replay-manifest requires --output-dir')
+    if args.replay_manifest and args.manifest_path:
+        parser.error('--manifest-path requires --digest')
     replay = json.loads(args.replay_manifest.read_text()) if args.replay_manifest else None
     parent_set = args.parent_set or (replay or {}).get('parent_set', 'structured-projections')
     if replay and parent_set != replay['parent_set']:
@@ -196,10 +216,14 @@ def main():
         parents = build_parents(Path(temp) / 'parents', parent_set)
         data = replay if replay else screen(parents, json.loads(args.digest.read_text()),
                                            parent_set)
+        manifest_data = data
         if args.output_dir:
             args.output_dir.mkdir(exist_ok=False)
             data = dict(data, rows=[materialize(row, parents, args.output_dir)
                                     for row in data['rows']])
+        if args.manifest_path:
+            args.manifest_path.parent.mkdir(parents=True, exist_ok=True)
+            args.manifest_path.write_text(json.dumps(manifest_data, indent=2) + '\n')
         print(json.dumps(data, indent=2))
 
 

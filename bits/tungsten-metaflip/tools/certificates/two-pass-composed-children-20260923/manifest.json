@@ -1,0 +1,98 @@
+{
+  "schema": 1,
+  "field": "GF(2)",
+  "record_claim": false,
+  "parent_set": "composed-chain",
+  "counts": {
+    "parents": 6,
+    "modes": 72,
+    "projections": 5148
+  },
+  "rows": [
+    {
+      "shape": [
+        16,
+        23,
+        31
+      ],
+      "oriented_shape": [
+        16,
+        23,
+        31
+      ],
+      "rank": 6380,
+      "local_baseline_rank": 6381,
+      "public_rank": 6384,
+      "sha256": "2272b66a12e19d764cb77dfa7bdc67611996d938344782caebdb2c5d4b3361a7",
+      "source_shape": [
+        16,
+        23,
+        31
+      ],
+      "source_rank": 6381,
+      "source_sha256": "05e4756c8fc62831563847ff748c2d4056bf7c48c0cc0f2516813af8d5e62671",
+      "mode": 17,
+      "basis_rank": 6380,
+      "basis_sha256": "2272b66a12e19d764cb77dfa7bdc67611996d938344782caebdb2c5d4b3361a7",
+      "kind": "basis"
+    },
+    {
+      "shape": [
+        16,
+        24,
+        31
+      ],
+      "oriented_shape": [
+        16,
+        24,
+        31
+      ],
+      "rank": 6484,
+      "local_baseline_rank": 6487,
+      "public_rank": 6549,
+      "sha256": "011e5a1d36803c97824958c95a5dd9aab4ee6768824d244fcc65af3a7f10b34f",
+      "source_shape": [
+        16,
+        25,
+        31
+      ],
+      "source_rank": 6905,
+      "source_sha256": "2e520b3ffa196dbf1eb26b40c6a56abb8fa9d4c627d7885e31484520740103f1",
+      "mode": 12,
+      "basis_rank": 6888,
+      "basis_sha256": "1b09a02f8d2ed8e4e9f201d7b66566044408d9cd201f88cefcf1a8cc319b80a7",
+      "kind": "projection",
+      "axis": 1,
+      "deleted_coordinate": 12,
+      "raw_rank": 6484,
+      "cleanup_steps": 0
+    },
+    {
+      "shape": [
+        16,
+        25,
+        31
+      ],
+      "oriented_shape": [
+        16,
+        25,
+        31
+      ],
+      "rank": 6888,
+      "local_baseline_rank": 6903,
+      "public_rank": 6914,
+      "sha256": "1b09a02f8d2ed8e4e9f201d7b66566044408d9cd201f88cefcf1a8cc319b80a7",
+      "source_shape": [
+        16,
+        25,
+        31
+      ],
+      "source_rank": 6905,
+      "source_sha256": "2e520b3ffa196dbf1eb26b40c6a56abb8fa9d4c627d7885e31484520740103f1",
+      "mode": 12,
+      "basis_rank": 6888,
+      "basis_sha256": "1b09a02f8d2ed8e4e9f201d7b66566044408d9cd201f88cefcf1a8cc319b80a7",
+      "kind": "basis"
+    }
+  ]
+}

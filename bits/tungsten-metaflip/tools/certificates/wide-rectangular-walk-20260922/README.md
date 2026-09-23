@@ -477,6 +477,14 @@ units to 454 shapes and 25453 units. The `13x15x23:2696` and
 [2628](https://fmm.univ-lille.fr/13x15x22.html), respectively; this is not
 a worldwide novelty or cross-field optimality claim.
 
+In the next bounded generation, a 19-context basis/projection sweep of
+`13x23x13:2446` produced `13x23x12:2219`. A 50-million-move walk (nonce
+19579) reached 2206 and a 100-million-move continuation (nonce 19581)
+reached the retained rank 2203; the companion sweep of `14x22x13:2501`
+found no lower-priced projection. The exact new tensor improves three
+pinned composition prices by 86 rank units, moving the finite closure to
+456 shapes and 25539 units. It does not establish worldwide novelty.
+
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with
 `tools/replay_structured_parent_portfolio.rb --output DIR --only 5x9x20`.

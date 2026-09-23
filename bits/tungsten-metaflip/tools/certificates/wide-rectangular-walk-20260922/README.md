@@ -766,6 +766,41 @@ The `8x28x18:2448` tensor is below Lille's listed [2450](https://fmm.univ-lille.
 but the pinned catalog already contains an unprovenanced 2400 entry. Field
 and provenance audits remain necessary before claiming any world record.
 
+The previously persisted `block_composition_cross_audit.tsv` also contains a
+stronger, then-unmaterialized `14x16x22:2891` formula (row 298). Its source
+orientation is `16x14x22`: the exact rank-47 `4x4x4` outer tensor uses axis
+allocations `(4,4,4,4)`, `(4,4,3,3)`, and `(5,6,6,5)`. The four leaf tensors
+have shapes/ranks `4x3x5:47`, `4x3x6:54`, `4x4x5:60`, `4x4x6:73`, selected
+6, 12, 12, and 17 times respectively, giving nominal rank 2891. The first
+two leaves are transpose/rotation images of the archived `3x4x5:47` and
+`3x4x6:54` seeds; the other two are existing `4x4x5:60` and `4x4x6:73`
+seeds. Specifically, the source filenames under `lib/metaflip/seeds/gf2/`
+are `matmul_4x4_rank47_d450_gf2.txt` for the outer tensor and
+`matmul_3x4x5_rank47_d386_gf2.txt`,
+`matmul_3x4x6_rank54_d488_gl_frontier_gf2.txt`,
+`matmul_4x4x5_rank60_d628_gl_frontier_gf2.txt`, and
+`matmul_4x4x6_rank73_d690_gl_frontier_gf2.txt` for the leaves. All leaves
+and the composed tensor were independently expanded over
+GF(2). The complete composition is retained as `16x14x22-r2891.mfw.gz.b64`
+(decoded SHA-256
+`a7ffebbbd6f43402b17b1ac27622d0fbf9b3f4af2499af503b9e63e9d4221445`).
+
+A directed 100-million-move walk from that explicit parent (nonce 21571)
+reached rank 2888, independently verified and retained as
+`16x14x22-r2888.mfw.gz.b64` (decoded SHA-256
+`62274d25943783170a4713c6e6194a98d491ac5275d8593ce812bd3dbd138dfb`).
+The 100-million-move continuation (nonce 21573) tied. All 48 combinations
+of the available same-rank leaf variants composed to rank 2891; one other
+variant's 100-million-move walk (nonce 21579) independently reached a
+different exact rank-2888 tensor, but its density was higher (92778 versus
+83766) and it was not retained. The new certificate is below the pinned
+catalog's rank-2932 GF(2) entry. Against the preceding retained closure,
+rank 2888 improves one additional shape and saves 79 rank units overall;
+the final 2891-to-2888 walk accounts for nine of those units. The cumulative
+finite closure is 508 improved shapes and 28317 saved units, with no new
+square-price change. These are exact upper bounds, not an audited worldwide
+record or optimality claim.
+
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with
 `tools/replay_structured_parent_portfolio.rb --output DIR --only 5x9x20`.

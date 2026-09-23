@@ -19,7 +19,7 @@ VERIFIER = ROOT / 'benchmarks/matmul/metaflip/verify_block_composition_records.p
 
 
 class WideRectangularCertificateTest(unittest.TestCase):
-    def check_certificate(self, shape, rank, digest, portfolio_shape, parent_rank, catalog_bound,
+    def check_certificate(self, shape, rank, digest, portfolio_shape=None, parent_rank=None, catalog_bound=None,
                           compressed=False):
         name = 'x'.join(map(str, shape))
         suffix = '.mfw.gz.b64' if compressed else '.mfw'
@@ -30,9 +30,11 @@ class WideRectangularCertificateTest(unittest.TestCase):
         lines = raw.decode('ascii').splitlines()
         self.assertEqual(lines.pop(0), f'MFW1 {" ".join(map(str, shape))} {rank}')
         self.assertEqual(len(lines), rank)
-        manifest = json.loads(PORTFOLIO.read_text())
-        parent = next(row for row in manifest['rows'] if row['shape'] == list(portfolio_shape))
-        self.assertEqual((parent['rank'], parent['catalog_recursive_bound']), (parent_rank, catalog_bound))
+        if portfolio_shape is not None:
+            manifest = json.loads(PORTFOLIO.read_text())
+            parent = next(row for row in manifest['rows'] if row['shape'] == list(portfolio_shape))
+            self.assertEqual((parent['rank'], parent['catalog_recursive_bound']),
+                             (parent_rank, catalog_bound))
 
         spec = importlib.util.spec_from_file_location('wide_rectangular_independent', VERIFIER)
         module = importlib.util.module_from_spec(spec)
@@ -53,6 +55,14 @@ class WideRectangularCertificateTest(unittest.TestCase):
         self.check_certificate((9, 5, 20), 623,
                                '04deeee17b7cd975f233aa9d952d988409266d2b91d60f44252df940925f0df5',
                                (5, 9, 20), 624, 629)
+
+    def test_16x14x22_block_composition_and_walk(self):
+        self.check_certificate((16, 14, 22), 2891,
+                               'a7ffebbbd6f43402b17b1ac27622d0fbf9b3f4af2499af503b9e63e9d4221445',
+                               compressed=True)
+        self.check_certificate((16, 14, 22), 2888,
+                               '62274d25943783170a4713c6e6194a98d491ac5275d8593ce812bd3dbd138dfb',
+                               compressed=True)
 
     def test_12x10x20_rank_1448(self):
         self.check_certificate((12, 10, 20), 1448,

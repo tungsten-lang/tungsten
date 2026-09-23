@@ -573,6 +573,28 @@ certificate improves 23 pinned prices by 98 rank units, taking the cumulative
 finite closure to 480 shapes and 27004 units. This remains an exact GF(2)
 result, not an audited worldwide record claim.
 
+The retained `11x14x23:2183` tensor yielded a productive independent walk:
+100M-move continuations (21137/21139/21141/21143/21145) reached ranks
+2181/2178/2177/2175/2173. A final 100M moves (21147) tied rank 2173 with
+lower density; that exact representation is retained with SHA-256
+`032a67316a0ad47457fd0d3cb940d0b9ba3d61c694c69c7d6b4a9a8234708a08`.
+Its 19-context exact basis/projection scan yielded `11x14x22:2122` and
+`11x13x23:2084`. Their 50M walks (21149/21151) reached 2112 and 2057;
+100M continuations (21153/21155) tied those ranks with lower density and
+are retained with SHA-256
+`c87c9189813fd3e00b1fc60b371d166cbc49a9e7a4b129b182025f2270bb8eee`
+and `348ee2f33d1037f9556466d3101d7a78a83539f90eaa923552ca754d116ad9ae`.
+The 2057 representation projects to exact `11x13x22:2008` and
+`11x12x23:1922`, SHA-256
+`905eb17fd4fc31fd10d2d38e32be8fd2e72feecf9118ee37f791a1594160de8b`
+and `232106b1a5d7e580c845bb95381c6a9c7ff9f6e0f6fb511a3a69ad27254299fb`.
+All five retained full tensors pass the Ruby and independent Python GF(2)
+identity checks. Together they improve nine pinned composition prices by
+209 rank units, taking the cumulative finite closure to 484 shapes and
+27213 units. The [current Lille table](https://fmm.univ-lille.fr/) lists
+2176 for `11x14x23`; the exact GF(2) rank 2173 is lower, without a
+complete worldwide or cross-field novelty audit.
+
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with
 `tools/replay_structured_parent_portfolio.rb --output DIR --only 5x9x20`.

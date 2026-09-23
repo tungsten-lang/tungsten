@@ -973,6 +973,28 @@ shapes and 32994 saved units cumulatively. Against the stronger local
 formula-aware baseline, their marginal effect is six shapes and 275 units;
 none changes a square price.
 
+A second projection chain starts at the retained `16x14x19:2548` tensor.
+Basis/projection cleanup gave `16x14x18:2450`; directed 100-million-move
+walks with nonces 21721 and 21723 reached the retained rank 2421 tensor
+(decoded SHA-256
+`40eacc2084db719852905e7b89f3940ec7f4ad39e048b57dcef821b18bc2ad3d`).
+Its basis/projection cleanup gave `16x14x17:2295`; nonce 21725 reached
+retained rank 2280 (SHA-256
+`5134fa9399ada2e273df202aa40487a858515793a2711741d077ee4c8b97f0b5`).
+The next projection gave `16x14x16:2116`; nonce 21729 reached retained
+rank 2100 (SHA-256
+`3d533ac15e361697914f113f1d3209ac700468ad234c4a0429329123e80bd14f`).
+Each endpoint passes two independent full-tensor verifiers. On 2026-09-23,
+[Lille](https://fmm.univ-lille.fr/) listed respective numerical ranks
+2428, 2306, and 2128. The sibling `11x16x19:2071` walk was not retained:
+although below Lille's 2074, the existing local GF(2) closure priced it at
+2065. Similarly, the sibling `16x13x18:2284` did not beat Lille's 2276.
+The three retained tensors improve twelve additional shapes and save 309
+rank units against the pinned catalog-plus-retained closure, giving cumulative
+totals of 607 shapes and 33303 units. Against the stronger local formula-aware
+baseline, their marginal effect is six shapes and 197 units; no square price
+changes.
+
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with
 `tools/replay_structured_parent_portfolio.rb --output DIR --only 5x9x20`.

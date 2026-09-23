@@ -96,6 +96,17 @@ retained same-rank refactor `20x28x14-r4484.mfw.gz.b64` has SHA-256
 and density 144255. Prior pinned GF(2) catalog-plus-portfolio prices were
 4682 and 4530 for the two projected shapes.
 
+Projecting output-axis coordinate 7 (zero-based) of the verified
+`20x28x14` tensor and applying exact GF(2) shared-factor compression gives
+`20x28x13` at rank 4188. Two bounded basis sweeps reduce it to 4180; directed
+walks of 50 million, then 100 million, then 100 million moves (nonces 19115,
+19117, 19119) reduce it to 4172, 4168, and 4167. The retained
+`20x28x13-r4167.mfw.gz.b64` has SHA-256
+`dbbcfd9d67a9c7a51927f6b0e7cdf72f2df419fb136e2a9cde04743d6749e986`.
+The pinned GF(2) catalog-plus-portfolio price was 4271. The other two
+one-coordinate projections of the same parent that were tested here are
+exact, but the pinned catalog already derives lower ranks for their shapes.
+
 Replaying the `20x20x25` structured-parent row yields rank 5566. Deleting
 coordinate 18 of its middle axis, cancelling equal GF(2) terms, and applying
 exact shared-factor compression yields `20x19x25` at rank 5439. Repeated
@@ -109,10 +120,12 @@ was 5583. The exact tensor is checked by both independent verifiers.
 For context, the [Université de Lille full table](https://fmm.univ-lille.fr/algo_32.html)
 consulted on 2026-09-22 lists 10x12x19:1434, 10x12x25:1856,
 16x25x27:6048, 16x25x28:6344, 16x25x29:6573, 16x25x31:6973,
-8x19x30:2778, 15x19x28:4665, 14x20x28:4571, and 19x20x25:5424.
+8x19x30:2778, 13x20x28:4271, 15x19x28:4665, 14x20x28:4571,
+and 19x20x25:5424.
 The retained 12x10x19 rank 1421, 12x10x25 rank 1836, 16x28x25 rank 6223,
 16x29x25 rank 6534, 16x31x25 rank 6916, 8x19x30 rank 2723,
-15x19x28 rank 4576, 14x20x28 rank 4484, and 19x20x25 rank 5403 beat their
+13x20x28 rank 4167, 15x19x28 rank 4576, 14x20x28 rank 4484,
+and 19x20x25 rank 5403 beat their
 corresponding table entries; 16x27x25 rank 6080 does not. Some individual
 shape pages show older, weaker bounds, so those pages should not
 be used alone for record comparisons. These exact GF(2) certificates are not
@@ -140,8 +153,8 @@ certificates are independently expanded by
 MetaFlip package and certificate directory as appropriate).
 
 The pinned-catalog closure comparison is replayable with
-`python3 tools/check_wide_rectangular_closure.py CATALOG.json`. It reports 48
-rank-price improvements totaling 2062 terms among shapes with coordinates 2
+`python3 tools/check_wide_rectangular_closure.py CATALOG.json`. It reports 64
+rank-price improvements totaling 2829 terms among shapes with coordinates 2
 through 32; those are composition prices, not separate materialized
 certificates for every improved shape. No square shape improves in this finite closure.
 Another 100 million moves from the retained rank-623 seed, and three further

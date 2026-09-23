@@ -461,6 +461,22 @@ shape pages show older, weaker bounds, so those pages should not
 be used alone for record comparisons. These exact GF(2) certificates are not
 claims of global novelty across every source or field.
 
+A bounded 19-context basis/projection sweep of the retained
+`16x23x13:2772` tensor produced `15x23x13:2711`. Walks of 50 million and
+100 million moves (nonces 19561 and 19563) lowered it to 2696; a further
+100 million moves (nonce 19565) tied. Basis projections of that endpoint,
+followed by 50-million and 100-million-move walks, retained
+`14x23x13:2565` (nonces 19567, 19571) and `15x22x13:2622` (19569,
+19573). One more bounded basis/projection generation and 50-million-move
+walks retained `14x22x13:2501` (19575) and `13x23x13:2446` (19577).
+All five complete GF(2) tensors pass both exact verifiers. Together they
+change the pinned finite closure from 445 improved shapes and 24993 rank
+units to 454 shapes and 25453 units. The `13x15x23:2696` and
+`13x15x22:2622` ranks are numerically below Lille's listed
+[2724](https://fmm.univ-lille.fr/13x15x23.html) and
+[2628](https://fmm.univ-lille.fr/13x15x22.html), respectively; this is not
+a worldwide novelty or cross-field optimality claim.
+
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with
 `tools/replay_structured_parent_portfolio.rb --output DIR --only 5x9x20`.

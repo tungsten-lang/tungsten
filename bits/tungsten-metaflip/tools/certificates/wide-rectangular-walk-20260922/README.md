@@ -172,6 +172,29 @@ step 2), then a 100-million-move continuation each (nonces 19163 through
 these five additions were 3964, 3936, 3559, 2442, and 2516. Every saved
 certificate passes the Ruby and independent Python full-tensor checks.
 
+Scanning all 282 one-coordinate projections of those five certificates yields
+another five improvements on the pinned closure. The retained factor-order
+ranks are `19x25x13:3766`, `8x19x26:2366`, `7x19x27:2298`,
+`19x26x12:3493`, and `7x18x28:2287`, with SHA-256 respectively
+`79e591467c80ba62f290c8613da4320706707a5847da568737e177de3a47b5de`,
+`bbade19dd1133fe2bca1ec529ce7787ab59b1f6d76360786c48aa0b81581e5d3`,
+`0cc954e1b7f0e5455cf29df9e20b45ab12505a3ca0dd1c3b976f5591882d18e7`,
+`748e38f85e567644c495f46706ba4aeb2fdc9d1d25f46fb997557e1eb8d7103a`,
+and `72d219a018cb0713080e7e384b1f7ca2215043537c93dccb81f5a154c21b1ebb`.
+The source projections remove, respectively, middle coordinate 17 from
+`19x26x13`, last coordinate 13 from `8x19x27`, first coordinate 6 from
+`8x19x27`, last coordinate 6 from `19x26x13`, and middle coordinate 18 from
+`7x19x28` (all zero-based). Exact compression gives ranks 3785, 2385, 2324,
+3523, and 2310; two bounded basis sweeps give 3777, 2374, 2316, 3519,
+and 2301. A 50-million-move walk each (nonces 19173 through 19181, step 2)
+gives 3766, 2368, 2300, 3497, and 2287. The second, third, and fourth
+receive 100-million-move continuations (nonces 19183, 19185, 19187), giving
+2366, 2298, and 3493. Two further 100-million-move 7x19x27 walks (nonces
+19189 and 19191) do not lower rank; the retained nonce-19191 tie has the
+lowest checked density, 73408. The prior pinned composition prices for these
+five shapes were 3828, 2419, 2347, 3533, and 2316. Every saved tensor is
+independently verified; the finite walks are not lower-bound proofs.
+
 Replaying the `20x20x25` structured-parent row yields rank 5566. Deleting
 coordinate 18 of its middle axis, cancelling equal GF(2) terms, and applying
 exact shared-factor compression yields `20x19x25` at rank 5439. Repeated
@@ -190,7 +213,8 @@ For context, the [Université de Lille full table](https://fmm.univ-lille.fr/)
 and 19x20x25:5276. The same table lists 13x19x27:3989,
 13x20x26:4016, 12x20x27:3740, and 8x19x28:2590. Its further entries are
 13x19x26:3838, 13x20x25:3858, 11x20x27:3559, 7x19x28:2362, and
-8x19x27:2516.
+8x19x27:2516. The next descendants have entries 13x19x25:3705,
+8x19x26:2419, 7x19x27:2295, 12x19x26:3484, and 7x18x28:2228.
 The retained 12x10x19 rank 1421, 12x10x25 rank 1836, 16x28x25 rank 6223,
 8x19x30 rank 2723,
 13x20x28 rank 4167, 15x19x28 rank 4576, 14x20x28 rank 4484,
@@ -199,7 +223,9 @@ corresponding table entries. The four further descendants at ranks 3969,
 3991, 3699, and 2554 also beat their corresponding entries. The retained
 11x20x27 rank 3545 and 8x19x27 rank 2464 also beat their table entries;
 13x19x26 rank 3874, 13x20x25 rank 3890, and 7x19x28 rank 2384 improve the
-pinned finite closure but not the table. The retained
+pinned finite closure but not the table. Of the next five, 8x19x26 rank 2366
+beats the table, while 13x19x25 rank 3766, 7x19x27 rank 2298,
+12x19x26 rank 3493, and 7x18x28 rank 2287 do not. The retained
 16x27x25 rank 6080, 16x29x25 rank 6534,
 16x31x25 rank 6916, 19x20x25 rank 5403, and 15x19x27 rank 4488 do not.
 Some individual
@@ -229,8 +255,8 @@ certificates are independently expanded by
 MetaFlip package and certificate directory as appropriate).
 
 The pinned-catalog closure comparison is replayable with
-`python3 tools/check_wide_rectangular_closure.py CATALOG.json`. It reports 102
-rank-price improvements totaling 4674 terms among shapes with coordinates 2
+`python3 tools/check_wide_rectangular_closure.py CATALOG.json`. It reports 111
+rank-price improvements totaling 5003 terms among shapes with coordinates 2
 through 32; those are composition prices, not separate materialized
 certificates for every improved shape. No square shape improves in this finite closure.
 Another 100 million moves from the retained rank-623 seed, and three further

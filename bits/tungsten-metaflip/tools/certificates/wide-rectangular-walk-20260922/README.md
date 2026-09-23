@@ -813,9 +813,32 @@ Three 100-million-move walks from distinct rank-2746 variants (nonces
 running two further walks reached only rank 2793, so neither supersedes the
 rank-2746 formula. Materializing the formula lowers six additional prices
 and saves 269 more units against the immediately preceding retained closure.
-The cumulative finite closure is now 514 improved shapes and 28586 saved
-units; the sole square-price change remains `23x23x23:7328→7263`. This is a
-verified construction already present as a formula, not a new rank discovery.
+At that checkpoint the cumulative finite closure was 514 improved shapes and
+28586 saved units; the sole square-price change remained
+`23x23x23:7328→7263`. This is a verified construction already present as a
+formula, not a new rank discovery.
+
+At `14x16x24`, `block_composition_cross_audit.tsv` row 300 gives an
+unmaterialized rank-3089 formula. The exact rank-47 outer uses allocations
+`(3,4,4,3)`, `(4,4,4,4)`, `(6,6,6,6)` and `3x4x6:54` / `4x4x6:73`
+leaves. All eight combinations of the available same-rank leaf variants
+materialized at 3089. The retained walk parent uses
+`matmul_3x4x6_rank54_catalog_gf2.txt` and
+`matmul_4x4x6_rank73_d1406_perminov_2026_serendipitous_fb4e63f7bf_gf2.txt`;
+its full tensor is `14x16x24-r3089.mfw.gz.b64` (decoded SHA-256
+`130f99a939d1286e1010ac67cfd63287ceab7897aed86ede7d6f9c1f096dbe3d`).
+Its 100-million-move walk (nonce 21595) reached independently verified rank
+3084, retained as `14x16x24-r3084.mfw.gz.b64` (decoded SHA-256
+`d7d5939b20617e064873d1089bf1b56e170b64bb833889d338a957b83cf6d66c`).
+A 100-million-move continuation (nonce 21597) tied. Walks from two other
+rank-3089 variants reached 3087 and 3088 (nonces 21591 and 21593). The
+rank-3084 tensor is five terms below the previously audited block formula;
+that five-term drop saves 55 units across the pinned finite closure. The
+whole rank-3084 certificate adds ten improved shapes and 269 saved units
+against the previous retained closure, bringing the cumulative totals to
+524 shapes and 28855 units with no further square-price change. The pinned
+catalog price for this shape is 3138. This is an exact GF(2) upper bound,
+not a completed worldwide/cross-field prior-art audit.
 
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with

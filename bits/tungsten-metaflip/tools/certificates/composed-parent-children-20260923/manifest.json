@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "field": "GF(2)",
+  "record_claim": false,
+  "comparison_scope": "Exact GF(2) upper bounds numerically below a dated Lille table; no optimality, cross-field or worldwide novelty claim.",
+  "source": "https://fmm.univ-lille.fr/",
+  "source_created_at": "2026-09-18T17:17:29",
+  "source_sha256": "a77c4286cd7ad9b5212b679d9e1e21672c7519a41124a3d71079d68bf0878213",
+  "source_parent_count": 4,
+  "max_depth": 6,
+  "projections": 441,
+  "rows": [
+    {
+      "shape": [16, 25, 32], "rank": 6996, "raw_rank": 7076,
+      "cleanup_steps": 40, "public_rank": 7096, "local_baseline_rank": 7055,
+      "source_shape": [16, 26, 32], "source_rank": 7308,
+      "source_sha256": "ad85724e72c9a2da59733ac77ad770dc11227fc597c2474b5be9645239516c9f",
+      "axis": 1, "deleted_coordinate": 13,
+      "sha256": "bd450f2b30e79834ff7ead205c657268069eda90b8c247a6c0a1bdc603b20cf8",
+      "depth": 1
+    },
+    {
+      "shape": [16, 25, 31], "rank": 6905, "raw_rank": 6942,
+      "cleanup_steps": 36, "public_rank": 6914, "local_baseline_rank": 6915,
+      "source_shape": [16, 25, 32], "source_rank": 6996,
+      "source_sha256": "bd450f2b30e79834ff7ead205c657268069eda90b8c247a6c0a1bdc603b20cf8",
+      "axis": 2, "deleted_coordinate": 18,
+      "sha256": "2e520b3ffa196dbf1eb26b40c6a56abb8fa9d4c627d7885e31484520740103f1",
+      "depth": 2
+    },
+    {
+      "shape": [16, 24, 31], "rank": 6499, "raw_rank": 6499,
+      "cleanup_steps": 0, "public_rank": 6549, "local_baseline_rank": 6645,
+      "source_shape": [16, 25, 31], "source_rank": 6905,
+      "source_sha256": "2e520b3ffa196dbf1eb26b40c6a56abb8fa9d4c627d7885e31484520740103f1",
+      "axis": 1, "deleted_coordinate": 12,
+      "sha256": "dc1e59737c6409f82bb78d4da65b14f076668e671a7d8d8afdd827a5f3ac3d17",
+      "depth": 3
+    }
+  ]
+}

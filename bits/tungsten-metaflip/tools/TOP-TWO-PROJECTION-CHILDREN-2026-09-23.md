@@ -55,3 +55,5 @@ python3 bits/tungsten-metaflip/spec/top_two_projection_children_test.py
 
 An additional 151 one-coordinate projections of the three improved direct
 tensors found no further below-table child under the current local closure.
+Projecting the *composed* 16×26×32 tensor did yield a further three-step
+[exact chain](COMPOSED-PARENT-CHILDREN-2026-09-23.md).

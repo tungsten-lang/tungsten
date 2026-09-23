@@ -633,6 +633,22 @@ The [current Lille table](https://fmm.univ-lille.fr/) lists 2617 and 2514;
 the exact GF(2) ranks 2607 and 2500 are lower, without a complete worldwide
 or cross-field novelty audit.
 
+A bounded basis-restart pilot from `11x15x25:2500` tested 19 exact-equivalent
+representations for 5M moves each (95M moves total) and found no rank drop.
+The next 19-context near-miss projection screen was more useful:
+`11x14x25:2402` fell to 2374 and 2373 in 100M walks (21243/21247), then
+tied 2373 with lower density (21249/21255). Its retained SHA-256 is
+`878f00f002391a3e411c1409a6ff350360b60d914bcb4d1a6cbc9dcb1b51eab0`.
+The other close projection, `11x15x24:2368`, reached 2364 but did not beat
+the retained 2357. A new 19-context projection of the rank-2373 tensor
+gave `11x13x25:2264`; a 100M walk (21257) reached 2251 and another
+(21259) tied it with lower density. Its retained SHA-256 is
+`7e0d887a8b03b9bb944430533dcca92d600f7ca7f30806efa62ef69132c7890c`.
+Both full tensors pass the independent Ruby and Python GF(2) identity tests.
+They improve two pinned composition prices by nine rank units, taking the
+finite closure to 485 shapes and 27416 units. This is a local closure gain,
+not a new claim against the published Lille entries for these two shapes.
+
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with
 `tools/replay_structured_parent_portfolio.rb --output DIR --only 5x9x20`.

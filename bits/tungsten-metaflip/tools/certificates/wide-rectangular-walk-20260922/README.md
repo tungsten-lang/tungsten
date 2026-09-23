@@ -495,6 +495,21 @@ pinned downstream prices by 40 further rank units; the finite closure is
 tensor representations are retained, but do not establish a worldwide
 record.
 
+The `20x28x13:4167` parent gave no cheaper direct projection in its
+19-context basis sweep. A separate exact screen projected all 61 individual
+coordinates, compressed each tensor, and gave each result one million directed
+moves. Two middle-axis projections beat the pinned `20x27x13:4092` price;
+removing coordinate 21 gave a rank-4122 seed, then nonces 19685 (1M moves),
+19699 (20M), 19705 (30M), and 19707 (50M) reached the retained rank 4075.
+Another 50M moves (19709) tied. Its 19-context basis/projection sweep found
+one cheaper child: mode 4, middle coordinate 14, `20x26x13:3990`. Walks of
+20M moves (19711) and 50M moves (19715) reached the retained rank 3984.
+Both new tensors pass independent full GF(2) expansion. In the pinned finite
+closure they improve nine composition prices by 135 rank units in total,
+moving the cumulative count to 458 shapes and 25714 units. This is not an
+audited worldwide record claim. The short-walk result is evidence for a
+possible automatic background arm, not yet a production integration.
+
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with
 `tools/replay_structured_parent_portfolio.rb --output DIR --only 5x9x20`.

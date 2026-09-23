@@ -11,12 +11,15 @@ import sys
 import tempfile
 import random
 
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
+
 from composition_queue_test import read_record
 from wide_matrix_cleanup_parity_test import blob, read_blob
 from packed_composition_parity_test import exact, naive
 from verify_cofactor_mergers import refactor_shared, compress_shared
 from verify_coordinate_projections import project_grid
 from wide_feedback_test import audit as audit_feedback
+import screen_middle_shear_children as middle
 
 
 def count(path):
@@ -123,10 +126,80 @@ def productive_postbasis(binary):
         print('PASS native projected-basis productivity: 5439 ->',fields['best'],'->',fields2['best'])
 
 
+def productive_middle_mask(binary):
+    package=Path(__file__).resolve().parents[1]
+    replay=package/'tools/replay_structured_parent_portfolio.rb'
+    with tempfile.TemporaryDirectory(prefix='metaflip-middle-mask-queue-') as directory:
+        root=Path(directory)
+        subprocess.run(['ruby',str(replay),'--output',str(root/'parent'),
+                        '--only','8x18x30'],check=True,capture_output=True,text=True,timeout=30)
+        source=root/'parent/8x18x30/8x30x18.mfw'
+        for index,(shape,rank,digest) in enumerate((
+                ((8,29,18),2493,'6265b61d6591f662e1765ddafcbf3d269e622d14089d440aaa191bb6cf98889d'),
+                ((8,28,18),2436,'e122208719fddbd814d079d2b52169f662018786f9b180b024387de0ab248688'))):
+            workspace=root/f'pass{index}'; workspace.mkdir()
+            offered=subprocess.run([binary,'--offer-file',str(workspace),str(source)],
+                                   check=True,capture_output=True,text=True,timeout=30)
+            identity=offered.stdout.split()[1]
+            subprocess.run([binary,'--offer-task',str(workspace),identity,'3126'],
+                           check=True,capture_output=True,text=True,timeout=30)
+            drained=subprocess.run([binary,'--drain',str(workspace),'3'],
+                                   check=True,capture_output=True,text=True,timeout=60)
+            assert 'done=3' in drained.stdout
+            assert read_record(workspace/'composition/transforms/index'/identity,'mask',1)==b'3\n'
+            result=(workspace/'composition/best'/'x'.join(map(str,shape))).read_text().split()
+            assert result==[str(rank),digest]
+            source=workspace/'composition/objects'/f'{digest}.tensor'
+            child_shape,child_terms=read_blob(source.read_bytes())
+            assert child_shape==shape and len(child_terms)==rank
+            exact(shape,child_terms)
+
+        # A completed second postbasis sweep schedules the same search arm
+        # without a user flag or an explicit mask task offer.
+        tiny=root/'tiny'; tiny.mkdir()
+        source=tiny/'source.mfw'; source.write_bytes(blob((2,3,2),naive((2,3,2))))
+        subprocess.run([binary,'--offer-postbasis-file',str(tiny),str(source)],
+                       check=True,capture_output=True,text=True,timeout=30)
+        queue=tiny/'composition/transforms'
+        mask_ticket=None
+        for _ in range(80):
+            subprocess.run([binary,'--drain',str(tiny),'4'],check=True,
+                           capture_output=True,text=True,timeout=30)
+            for ticket in range(1,count(queue/'submitted')+1):
+                if read_record(queue,'tasks',ticket).decode().split()[2]=='3126':
+                    mask_ticket=ticket; break
+            if mask_ticket is not None and count(queue/'consumed')>=mask_ticket:
+                break
+        assert mask_ticket is not None and count(queue/'consumed')>=mask_ticket
+        checked=audit(tiny)
+        assert checked['mask']>=1 and checked['limited']==0
+
+        roots=tiny/'root'; roots.mkdir()
+        subprocess.run([binary,'--offer-file',str(roots),str(source)],
+                       check=True,capture_output=True,text=True,timeout=30)
+        queue=roots/'composition/transforms'
+        parent_mask=None
+        for _ in range(150):
+            subprocess.run([binary,'--drain',str(roots),'4'],check=True,
+                           capture_output=True,text=True,timeout=30)
+            for ticket in range(1,count(queue/'submitted')+1):
+                raw=read_record(queue,'tasks',ticket).decode().split()
+                if raw[2]!='3126': continue
+                shape,_=read_blob((roots/'composition/objects'/f'{raw[1]}.tensor').read_bytes())
+                if shape==(2,3,2): parent_mask=ticket; break
+            if parent_mask is not None and count(queue/'consumed')>=parent_mask:
+                break
+        assert parent_mask is not None and count(queue/'consumed')>=parent_mask
+        checked=audit(roots)
+        assert checked['mask']>=1 and checked['limited']==0
+        print('PASS automatic middle-mask cascade: 2526 -> 2493 -> 2436; '
+              'postbasis mask task',mask_ticket,'root mask task',parent_mask)
+
+
 def audit(root, progress=None):
     q=root/'composition/transforms'; objects=root/'composition/objects'
     done=count(q/'consumed'); submitted=count(q/'submitted')
-    verified=set(); seen=set(); counts=dict(contexts=done,basis=0,project=0,postbasis=0,neutral=0,limited=0)
+    verified=set(); seen=set(); counts=dict(contexts=done,basis=0,project=0,postbasis=0,mask=0,neutral=0,limited=0)
     @lru_cache(maxsize=64)
     def load(h):
         raw=(objects/f'{h}.tensor').read_bytes(); assert sha256(raw).hexdigest()==h
@@ -139,6 +212,7 @@ def audit(root, progress=None):
         assert tag=='MFT_TASK1' and raw==f'MFT_TASK1 {h} {mode}\n'.encode()
         assert (h,mode) not in seen; seen.add((h,mode))
         if mode<18: kind,ordinal='basis',mode+1
+        elif mode==3126: kind,ordinal='mask',1
         elif mode>=3090: kind,ordinal='postbasis',mode-3089
         else: kind,ordinal='project',mode-17
         assert read_record(q/'index'/h,kind,ordinal)==f'{ticket}\n'.encode()
@@ -147,16 +221,23 @@ def audit(root, progress=None):
         record=read_record(q,'results',ticket); fields=record.decode().split()
         assert len(fields)==11 and fields[0]=='MFT_RESULT1' and fields[1]==sha256(raw).hexdigest()
         n,m,p,before,proposed,admitted,status,work=map(int,fields[3:])
-        assert before==len(terms) and 1<=proposed<=before and status in (1,2,3) and 0<=work<=140000000
+        work_bound=150000000000 if mode==3126 else 140000000
+        assert before==len(terms) and 1<=proposed<=before and status in (1,2,3) and 0<=work<=work_bound
         assert record==(' '.join(fields)+'\n').encode()
         expected=terms; dims=shape
-        basis_mode=mode if mode<18 else (mode-3090)%18 if mode>=3090 else None
+        basis_mode=mode if mode<18 else (mode-3090)%18 if 3090<=mode<=3125 else None
         if basis_mode is not None:
             order=[basis_mode//2] if basis_mode<6 else list(permutations(range(3)))[(basis_mode-6)//2]
             for _ in range(1 if basis_mode<6 else 2):
                 for axis in order:
                     expected,_=refactor_shared(expected,axis,max_bits=width,reverse_columns=bool(basis_mode%2))
                 if sorted(expected)==terms: break
+        elif mode==3126:
+            assert shape[1]>=2
+            dims=(shape[0],shape[1]-1,shape[2])
+            expected=None
+            if status==1:
+                assert proposed==middle.screen(shape,terms,h)['row']['rank']
         else:
             index=mode-18; coordinate=None
             for axis,size in enumerate(shape):
@@ -168,13 +249,14 @@ def audit(root, progress=None):
             axis,index=coordinate; coords=[list(range(d)) for d in shape]; coords[axis].remove(index)
             expected=project_coordinate(shape,terms,axis,index); dims=tuple(map(len,coords))
         assert (n,m,p)==dims
-        expected,_=compress_shared(expected,max_bits=width)
+        if expected is not None:
+            expected,_=compress_shared(expected,max_bits=width)
         if status==3:
             assert fields[2]=='-' and admitted==0
         else:
             assert admitted==proposed
             result_shape,result=load(fields[2]); assert result_shape==dims and len(result)==admitted
-            if status==1: assert result==sorted(expected)
+            if status==1 and expected is not None: assert result==sorted(expected)
             assert (root/f'composition/by-shape/{n}x{m}x{p}'/fields[2]).is_file()
             counts['neutral']+=mode<18 and h!=fields[2] and admitted==before
         counts[kind]+=1; counts['limited']+=status!=1
@@ -188,6 +270,7 @@ def check(binary, retained=None, public=None):
     binary=str(Path(binary).resolve())
     print('PASS row-block projection oracle:',projection_oracle_tests(),'dense/sparse grid comparisons')
     productive_postbasis(binary)
+    productive_middle_mask(binary)
     with tempfile.TemporaryDirectory(prefix='metaflip-wide-queue-') as temp:
         root=Path(temp) if retained is None else Path(retained)
         if retained is not None: assert not root.exists(); root.mkdir()

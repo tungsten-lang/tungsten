@@ -1016,6 +1016,18 @@ numerical catalog comparisons, not exhaustive worldwide-record claims.
 The pinned catalog-plus-retained closure improves one additional shape and
 saves 34 rank units, reaching 608 shapes and 33337 saved units cumulatively.
 
+The next bounded near-neighbor test projected retained `8x18x24:2059` by
+deleting Z coordinate 3. Exact shared-factor cleanup gave `8x18x23:2026`;
+100 million directed moves with nonce 21761 reached rank 2015. A second
+100-million-move continuation with nonce 21763 tied at 2015. The retained
+`8x18x23-r2015.mfw.gz.b64` has decoded SHA-256
+`8ab2bb95dbda71fac09c58451e708248c33a122c93439e98e000efce314c1e1d`
+and passes the independent full-tensor checks. It is one below the stronger
+local formula-aware rank 2016 and ten below the 2026-09-22 Lille snapshot rank
+2025. Its marginal composition effect is only this direct shape: the pinned
+catalog-plus-retained closure remains at 608 improved shapes and rises to
+33338 saved units.
+
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with
 `tools/replay_structured_parent_portfolio.rb --output DIR --only 5x9x20`.

@@ -32,10 +32,31 @@ claims of optimality, cross-field validity, or worldwide novelty.
 
 The rank-999 `3×18×25` result composes with three block copies of the
 packaged rank-54 `3×4×6` tensor to give a full `3×18×29` tensor of rank
-1161, one below the listed 1162. The
+1161, one below the listed 1162. A recursive coordinate-deletion pass over
+these 17 full tensors then produced seven more exact results:
+
+| Shape | New GF(2) rank | Lille entry | Previous local rank |
+| --- | ---: | ---: | ---: |
+| 8×13×20 | 1305 | 1330 | 1335 |
+| 8×22×25 | 2679 | 2686 | 2692 |
+| 10×20×22 | 2672 | 2673 | 2750 |
+| 13×16×28 | 3389 | 3439 | 3430 |
+| 14×16×27 | 3576 | 3604 | 3584 |
+| 8×13×19 | 1267 | 1273 | 1304 |
+| 8×12×19 | 1143 | 1159 | 1156 |
+
+The recursive generations screened 903, 262, 40, and 39 projections,
+respectively. The last found no further candidate below both the current
+local closure and the comparison table when projecting the retained
+best-rank representation per shape. The recursive screen does not retain
+rank-tied alternate representations or above-table intermediates; either
+could lead to a different later projection.
+Across both passes, this is 24 verified full tensors: 17 cross their Lille
+entries for the first time in the local closure, and seven strengthen existing
+below-table local constructions. The
 [manifest](certificates/structured-parent-projections-20260923/manifest.json)
 pins the source schemes, deletion coordinates, cleanup counts, output hashes,
-and that additional block construction. The full tensors are deliberately
+the block construction, and all seven recursive parent chains. The full tensors are deliberately
 not vendored: focused replay reconstructs every one from the pinned recipes.
 
 Verification includes an independent bit-grid coordinate projector, exact
@@ -46,12 +67,14 @@ verifier on each materialized output. The comparison digest is external
 the Lille page was checked again on 2026-09-23. A fresh digest may give a
 different numerical comparison without changing the tensor certificates.
 
-From the repository root, repeat the finite screen with a local digest, or
-replay the pinned witnesses into a new output directory:
+From the repository root, repeat the finite screen and recursive pass with a
+local digest (about two minutes), or replay the pinned witnesses into a new
+output directory:
 
 ```sh
 python3 bits/tungsten-metaflip/tools/screen_structured_parent_projections.py \
-  --digest PATH/TO/fmm_sota.json
+  --digest PATH/TO/fmm_sota.json \
+  --output-dir /tmp/metaflip-projection-screen
 python3 bits/tungsten-metaflip/tools/screen_structured_parent_projections.py \
   --replay-manifest bits/tungsten-metaflip/tools/certificates/structured-parent-projections-20260923/manifest.json \
   --output-dir /tmp/metaflip-projection-replay

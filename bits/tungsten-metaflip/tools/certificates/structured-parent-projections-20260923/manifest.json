@@ -8,6 +8,7 @@
   "source_sha256": "a77c4286cd7ad9b5212b679d9e1e21672c7519a41124a3d71079d68bf0878213",
   "source_parents": 81,
   "projections": 4279,
+  "recursive_scans": [903, 262, 40, 39],
   "rows": [
     {
       "shape": [
@@ -446,6 +447,71 @@
       "target_orientation": [3, 18, 29],
       "block_axis": 2,
       "sha256": "8fb4fec984f1e4d7ad30db2eca24aac98e4fbe0e9ee261c5b44815e16cb6b0b1"
+    }
+  ],
+  "descendants": [
+    {
+      "generation": 2, "shape": [8, 13, 20], "rank": 1305,
+      "raw_rank": 1325, "cleanup_steps": 17,
+      "public_rank": 1330, "local_baseline_rank": 1335,
+      "dimension": 2, "deleted_coordinate": 7,
+      "parent_shape": [8, 20, 14], "parent_rank": 1411,
+      "parent_sha256": "5510a01490e3a72ad9a568c04ca65430a4a5861499cf306cf546b58984eb979d",
+      "sha256": "745528a0e5822de8df8ad56844ffb0e3cdddf5adf0022312a50de5833a3a5d8e"
+    },
+    {
+      "generation": 2, "shape": [8, 22, 25], "rank": 2679,
+      "raw_rank": 2702, "cleanup_steps": 19,
+      "public_rank": 2686, "local_baseline_rank": 2692,
+      "dimension": 1, "deleted_coordinate": 19,
+      "parent_shape": [8, 23, 25], "parent_rank": 2752,
+      "parent_sha256": "d3e2e59a05a900fadc922b7fbd8c22e0f7a3e490bd35c67183bec5288b357e16",
+      "sha256": "877a4f35e397f6b19013dca4bb8c8d5d01af2222c3342e6888dbc444062954ce"
+    },
+    {
+      "generation": 2, "shape": [10, 20, 22], "rank": 2672,
+      "raw_rank": 2705, "cleanup_steps": 28,
+      "public_rank": 2673, "local_baseline_rank": 2750,
+      "dimension": 1, "deleted_coordinate": 16,
+      "parent_shape": [20, 23, 10], "parent_rank": 2743,
+      "parent_sha256": "7627fffb3d4dccf5fee8dce71a32eb70b5b2e4b9a982e8972b32ef133b4f8546",
+      "sha256": "dd081e552f732c9cec011ba39a20739b7bf5fc19612cc2025e053eae90fe73c3"
+    },
+    {
+      "generation": 2, "shape": [13, 16, 28], "rank": 3389,
+      "raw_rank": 3429, "cleanup_steps": 31,
+      "public_rank": 3439, "local_baseline_rank": 3430,
+      "dimension": 2, "deleted_coordinate": 7,
+      "parent_shape": [16, 28, 14], "parent_rank": 3634,
+      "parent_sha256": "f294493254743cfdffab28f734fa53705294fd29c537b08ddca968da523b8fde",
+      "sha256": "ad589604a0b2b6fc57da3ce82bf3797baca757de32ad06a81539836ca5f930a7"
+    },
+    {
+      "generation": 2, "shape": [14, 16, 27], "rank": 3576,
+      "raw_rank": 3604, "cleanup_steps": 22,
+      "public_rank": 3604, "local_baseline_rank": 3584,
+      "dimension": 1, "deleted_coordinate": 22,
+      "parent_shape": [16, 28, 14], "parent_rank": 3634,
+      "parent_sha256": "f294493254743cfdffab28f734fa53705294fd29c537b08ddca968da523b8fde",
+      "sha256": "dbd95ea88913ef01182b9924155d2643448c56597da3874d7c00530274fa2e05"
+    },
+    {
+      "generation": 3, "shape": [8, 13, 19], "rank": 1267,
+      "raw_rank": 1285, "cleanup_steps": 17,
+      "public_rank": 1273, "local_baseline_rank": 1304,
+      "dimension": 1, "deleted_coordinate": 14,
+      "parent_shape": [8, 20, 13], "parent_rank": 1305,
+      "parent_sha256": "745528a0e5822de8df8ad56844ffb0e3cdddf5adf0022312a50de5833a3a5d8e",
+      "sha256": "45c50b3a282a9f035c394a8dc864e23955e3f3b3a428a460a96b6e02a256b621"
+    },
+    {
+      "generation": 4, "shape": [8, 12, 19], "rank": 1143,
+      "raw_rank": 1143, "cleanup_steps": 0,
+      "public_rank": 1159, "local_baseline_rank": 1156,
+      "dimension": 2, "deleted_coordinate": 6,
+      "parent_shape": [8, 19, 13], "parent_rank": 1267,
+      "parent_sha256": "45c50b3a282a9f035c394a8dc864e23955e3f3b3a428a460a96b6e02a256b621",
+      "sha256": "2f39596f08acc16678676f5622cde9f51c428bbf9a8fa87353f524818fca5a25"
     }
   ]
 }

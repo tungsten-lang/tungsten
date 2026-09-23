@@ -33,9 +33,13 @@ class StructuredParentProjectionsTest(unittest.TestCase):
         data = json.loads(MANIFEST.read_text())
         self.assertEqual((data['schema'], data['field'], data['record_claim'],
                           data['source_parents'], data['projections'],
-                          len(data['rows']), len(data['extensions'])),
-                         (1, 'GF(2)', False, 81, 4279, 16, 1))
+                          len(data['rows']), len(data['extensions']),
+                          len(data['descendants'])),
+                         (1, 'GF(2)', False, 81, 4279, 16, 1, 7))
         self.assertEqual(len({tuple(row['shape']) for row in data['rows']}), 16)
+        self.assertEqual(data['recursive_scans'], [903, 262, 40, 39])
+        self.assertEqual([row['generation'] for row in data['descendants']],
+                         [2, 2, 2, 2, 2, 3, 4])
         with tempfile.TemporaryDirectory(prefix='metaflip-structured-projection-') as tmp:
             sources, outputs = Path(tmp) / 'sources', Path(tmp) / 'outputs'
             MODULE.replay_sources(sources, (row['source_portfolio_shape'] for row in data['rows']))
@@ -47,6 +51,11 @@ class StructuredParentProjectionsTest(unittest.TestCase):
             for row in data['extensions']:
                 with self.subTest(extension=row['shape']):
                     result = MODULE.materialize_extension(row, outputs, outputs)
+                    self.assertEqual((result['rank'], result['sha256']),
+                                     (row['rank'], row['sha256']))
+            for row in data['descendants']:
+                with self.subTest(descendant=row['shape']):
+                    result = MODULE.materialize_descendant(row, outputs, outputs)
                     self.assertEqual((result['rank'], result['sha256']),
                                      (row['rank'], row['sha256']))
 

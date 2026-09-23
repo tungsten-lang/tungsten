@@ -31,6 +31,7 @@ from wide_matrix_cleanup_parity_test import blob, read_blob
 
 EDGES = ((0, 1), (1, 2), (0, 2))
 CERTIFICATES = HERE / 'certificates'
+KNOWN_PROJECTIONS = CERTIFICATES / 'structured-parent-projections-20260923/manifest.json'
 
 
 def drop_matrix(word, rows, cols, dimension, coordinate):
@@ -191,6 +192,46 @@ def materialize_extension(row, projection_dir, output_dir):
     return dict(row, output=str(output))
 
 
+def materialize_descendant(row, parent_dir, output_dir):
+    parent_shape = tuple(row['parent_shape'])
+    filename = 'x'.join(map(str, parent_shape)) + f'-r{row["parent_rank"]}.mfw'
+    parent_path = parent_dir / filename
+    parent_raw = parent_path.read_bytes()
+    if hashlib.sha256(parent_raw).hexdigest() != row['parent_sha256']:
+        raise ValueError('descendant parent digest mismatch')
+    shape, terms = read_blob(parent_raw)
+    if shape != parent_shape or len(terms) != row['parent_rank']:
+        raise ValueError('descendant parent shape/rank mismatch')
+    exact(shape, terms)
+    dimension, coordinate = row['dimension'], row['deleted_coordinate']
+    target, projected = project(shape, terms, dimension, coordinate)
+    keep = [list(range(n)) for n in shape]
+    keep[dimension].pop(coordinate)
+    if projected != project_grid(shape, terms, keep):
+        raise ValueError('independent descendant projection mismatch')
+    if tuple(sorted(target)) != tuple(row['shape']) or len(projected) != row['raw_rank']:
+        raise ValueError('descendant shape/raw rank mismatch')
+    width = max(target[0] * target[1], target[1] * target[2], target[0] * target[2])
+    cleaned, history = compress_shared(projected, max_bits=width)
+    if len(cleaned) != row['rank'] or len(history) != row['cleanup_steps']:
+        raise ValueError('descendant cleanup mismatch')
+    exact(target, cleaned)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output = output_dir / ('x'.join(map(str, target)) + f'-r{len(cleaned)}.mfw')
+    if output.exists():
+        raise FileExistsError(output)
+    output.write_bytes(blob(target, cleaned))
+    digest = hashlib.sha256(output.read_bytes()).hexdigest()
+    if 'sha256' in row and digest != row['sha256']:
+        raise ValueError('descendant tensor digest mismatch')
+    checked = json.loads(subprocess.check_output(
+        ['ruby', str(HERE / 'verify_tensor.rb'), '--shape',
+         'x'.join(map(str, target)), str(output)], text=True))[0]
+    if not checked['exact'] or checked['rank'] != len(cleaned) or checked['sha256'] != digest:
+        raise ValueError('independent descendant tensor verification failed')
+    return dict(row, sha256=digest, output=str(output))
+
+
 def replay_sources(source_root, shapes):
     command = ['ruby', str(HERE / 'replay_structured_parent_portfolio.rb'),
                '--output', str(source_root)]
@@ -265,6 +306,58 @@ def screen(digest, source_root):
                 source_parents=len(json.loads(MANIFEST.read_text())['rows']), rows=rows)
 
 
+def screen_descendants(digest, output_dir, rows, extensions):
+    public = {tuple(sorted(entry['format'])): entry['rank'] for entry in digest['entries']}
+    seeds = local_seeds()
+    frontier = []
+    for row in list(rows) + list(extensions):
+        key = tuple(row['shape'])
+        seeds[key] = min(seeds.get(key, row['rank']), row['rank'])
+        frontier.append(Path(row['output']))
+    descendants = []
+    scans = []
+    generation = 2
+    while frontier:
+        baseline = solver(dict(seeds))
+        best = {}
+        projection_count = 0
+        for parent_path in frontier:
+            parent_raw = parent_path.read_bytes()
+            parent_shape, terms = read_blob(parent_raw)
+            parent_sha256 = hashlib.sha256(parent_raw).hexdigest()
+            for dimension, extent in enumerate(parent_shape):
+                for coordinate in range(extent):
+                    projection_count += 1
+                    target, projected = project(parent_shape, terms, dimension, coordinate)
+                    key = tuple(sorted(target))
+                    if key not in public:
+                        continue
+                    width = max(target[0] * target[1], target[1] * target[2], target[0] * target[2])
+                    cleaned, history = compress_shared(projected, max_bits=width)
+                    rank = len(cleaned)
+                    if rank >= min(public[key], baseline(key)):
+                        continue
+                    row = dict(generation=generation, shape=list(key), rank=rank,
+                               raw_rank=len(projected), cleanup_steps=len(history),
+                               public_rank=public[key], local_baseline_rank=baseline(key),
+                               dimension=dimension, deleted_coordinate=coordinate,
+                               parent_shape=list(parent_shape), parent_rank=len(terms),
+                               parent_sha256=parent_sha256)
+                    choice = (rank, parent_sha256, dimension, coordinate)
+                    if key not in best or choice < best[key][0]:
+                        best[key] = choice, row
+        scans.append(projection_count)
+        frontier = []
+        for _, row in sorted(best.values(), key=lambda pair: pair[1]['shape']):
+            result = materialize_descendant(row, output_dir, output_dir)
+            descendants.append(result)
+            key = tuple(row['shape'])
+            seeds[key] = min(seeds.get(key, row['rank']), row['rank'])
+            frontier.append(Path(result['output']))
+        generation += 1
+    return descendants, scans
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     group = parser.add_mutually_exclusive_group(required=True)
@@ -288,11 +381,32 @@ def main():
         if args.output_dir:
             args.output_dir.mkdir(parents=True, exist_ok=False)
             rows = [materialize(row, source_root, args.output_dir) for row in rows]
+            if args.replay_manifest:
+                selected_extensions = data.get('extensions', ())
+            else:
+                available = {row['sha256'] for row in rows}
+                public = {tuple(sorted(entry['format'])): entry['rank']
+                          for entry in digest['entries']}
+                selected_extensions = [row for row in json.loads(KNOWN_PROJECTIONS.read_text())['extensions']
+                                       if row['large_projection_sha256'] in available and
+                                       row['rank'] < public.get(tuple(row['shape']), row['rank'])]
             extensions = [materialize_extension(row, args.output_dir, args.output_dir)
-                          for row in data.get('extensions', ())]
+                          for row in selected_extensions]
+            if args.replay_manifest:
+                descendants = [materialize_descendant(row, args.output_dir, args.output_dir)
+                               for row in sorted(data.get('descendants', ()),
+                                                 key=lambda row: row['generation'])]
+                recursive_scans = data.get('recursive_scans', ())
+            else:
+                descendants, recursive_scans = screen_descendants(
+                    digest, args.output_dir, rows, extensions)
         else:
             extensions = data.get('extensions', ())
-        print(json.dumps(dict(data, rows=rows, extensions=extensions), indent=2))
+            descendants = data.get('descendants', ())
+            recursive_scans = data.get('recursive_scans', ())
+        print(json.dumps(dict(data, rows=rows, extensions=extensions,
+                              descendants=descendants,
+                              recursive_scans=recursive_scans), indent=2))
 
 
 if __name__ == '__main__':

@@ -248,17 +248,32 @@ version `2b71762f906bef43f0ce25d31a9b8e5ad28a23db` on 2026-09-22:
 | 7x19x25 | 2122 | 2127 |
 | 7x19x24 | 2010 | 2025 |
 | 8x19x23 | 2099 | 2145 |
-| 8x18x24 | 2073 | 2100 |
+| 8x18x24 | 2059 | 2100 |
 | 8x19x22 | 2034 | 2057 |
-| 8x17x24 | 1973 | 2012 |
-| 8x17x23 | 1934 | 1946 |
+| 8x17x24 | 1972 | 2012 |
+| 8x17x23 | 1923 | 1946 |
 
 The new `7x19x23:1980` improves the pinned GF(2) closure price of 2015 but
 does not beat Lille's listed rank 1959 for that shape.
 
+A second directed branch began at the retained `8x18x24:2073` tensor. A
+50-million-move walk (nonce 19211) reached rank 2059. Exact one-coordinate
+projections and compression gave `7x18x24:1947`, `8x18x23:2020`, and
+`8x17x24:1972`; 50-million-move walks on the first two (nonces 19213 and
+19215) reached 1942 and 2016. Projecting the latter gave `8x17x23:1928`
+and `7x18x23:1904`; a 50-million-move walk (nonce 19217) lowered the first
+to 1923. Further exact projections gave `7x17x24:1862`, `8x17x22:1876`,
+and `8x16x23:1793`; a final 50-million-move walk (nonce 19219) lowered the
+last to 1792. A separate 50-million-move `8x19x22` walk (nonce 19209) tied
+its seed and was not retained. All nine changed or added tensor witnesses
+pass independent full GF(2) verification. Each contributes positively to
+the pinned composition closure even in the presence of the other eight.
+The new `8x18x23:2016` and `8x16x23:1792` beat Lille's listed 2025 and
+1824; the new 7-row and `8x17x22` witnesses do not beat that table.
+
 Across all retained rectangular certificates, the pinned
-catalog-plus-portfolio closure now improves 148 shapes by 6258 total rank
-units (previously 147 shapes by 6171). Those downstream prices are not 148
+catalog-plus-portfolio closure now improves 161 shapes by 6489 total rank
+units (previously 148 shapes by 6258). Those downstream prices are not 161
 separately materialized tensor certificates. The table comparison is not a
 complete worldwide novelty audit or an optimality claim.
 

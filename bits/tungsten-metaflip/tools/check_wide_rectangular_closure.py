@@ -96,14 +96,26 @@ CANDIDATES = (
      'f3f4942a48d9e9a56e1f7ebdef06a13a7f4d9bf963ccd4c2e3d6bbf48985f45c', True),
     ((7, 19, 23), '7x19x23', 1980,
      'd0cbe7d7c8257d13a22168325c18631180da81deddebefc2922dad926d5dcf41', True),
-    ((8, 18, 24), '8x18x24', 2073,
-     '1eff548ddb9085fb6f7deb1919120311b4b84938540d36c687827a2bd7b4029a', True),
+    ((8, 18, 24), '8x18x24', 2059,
+     'df40e51fc739f0414f5d5596be3c934cb51d18da3dad3ee4065166c5b394e91b', True),
     ((8, 19, 22), '8x19x22', 2034,
      '95e4cefd3c35ac44e7b11a115e5202e455aca43da75c9e5b0517cbb9b19b044c', True),
-    ((8, 17, 24), '8x17x24', 1973,
-     '3001999ab7d04bcb8d001441fbc117da06b1d1f4866ba7cff843f070ea0fbe97', True),
-    ((8, 17, 23), '8x17x23', 1934,
-     '7af84cea7140e0dd32a4db9aac7c8b0f1badf13a03aa9a6cfe0a3c6bc61ad045', True),
+    ((8, 17, 24), '8x17x24', 1972,
+     '67e288aa5a1b993bdf193522077f2f194c1737c4e73f65f0c3cd517fdd8fe1e9', True),
+    ((8, 17, 23), '8x17x23', 1923,
+     '0f01b41327bcb556369308e3fea771e9b707cb689c8dfa4cea8f43a82c79a47f', True),
+    ((7, 18, 24), '7x18x24', 1942,
+     'e8c708c655e01a70f46f3058efe869d50583b5b29e3b9c20e90176278197ae4a', True),
+    ((8, 18, 23), '8x18x23', 2016,
+     '1d001c874df14a88f01e0ced8afdb2c1b20690bf2826810a6ed22d1b89c2cbae', True),
+    ((7, 18, 23), '7x18x23', 1904,
+     '8e8418b34ed6c26ad022e36850db8f9daefd376c3fd9056cb720ac0c3cccac55', True),
+    ((7, 17, 24), '7x17x24', 1862,
+     'dc71de47dfda619c7bfa14a0b3957f4e44ba1dfab7411fa99c0879a1174b36a6', True),
+    ((8, 17, 22), '8x17x22', 1876,
+     '95f4fd9516a94f5fa0e55bbf5a57969f2f8ac7ab945089061b575ca8efce6fff', True),
+    ((8, 16, 23), '8x16x23', 1792,
+     '54ef1bd730637c116c34b789b0bf0d370c2d4f94d1e99ab27a60c20c1e14f471', True),
 )
 
 
@@ -146,7 +158,7 @@ def main():
     gains = [{'shape': shape, 'before': original(shape), 'after': improved(shape)}
              for shape in itertools.combinations_with_replacement(range(2, 33), 3)
              if improved(shape) < original(shape)]
-    if len(gains) != 148 or sum(row['before'] - row['after'] for row in gains) != 6258:
+    if len(gains) != 161 or sum(row['before'] - row['after'] for row in gains) != 6489:
         raise ValueError(f'downstream impact changed: {len(gains)} shapes, '
                          f'{sum(row["before"] - row["after"] for row in gains)} terms')
     print(json.dumps({'field': 'GF(2)', 'record_claim': False,

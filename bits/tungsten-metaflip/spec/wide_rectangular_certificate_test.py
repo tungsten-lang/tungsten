@@ -205,7 +205,7 @@ class WideRectangularCertificateTest(unittest.TestCase):
                                (8, 20, 30), 2803, 2820, compressed=True)
 
     def test_next_rectangular_projection_chain(self):
-        # All eleven witnesses descend from the exact 8x20x30 portfolio tensor;
+        # All seventeen witnesses descend from the exact 8x20x30 portfolio tensor;
         # a full GF(2) expansion, not the projection recipe, is the authority.
         rows = (
             ((8, 19, 25), 2267, 'bbc407c145ef69bbe150bf85c6e6c445b182bc9907a5457af92043c200a264c1'),
@@ -215,10 +215,16 @@ class WideRectangularCertificateTest(unittest.TestCase):
             ((7, 19, 24), 2010, '22daa861e41e1065711bc1f131d5bc1d9985be81a0d53fe0f577378239091eda'),
             ((8, 19, 23), 2099, 'f3f4942a48d9e9a56e1f7ebdef06a13a7f4d9bf963ccd4c2e3d6bbf48985f45c'),
             ((7, 19, 23), 1980, 'd0cbe7d7c8257d13a22168325c18631180da81deddebefc2922dad926d5dcf41'),
-            ((8, 18, 24), 2073, '1eff548ddb9085fb6f7deb1919120311b4b84938540d36c687827a2bd7b4029a'),
+            ((8, 18, 24), 2059, 'df40e51fc739f0414f5d5596be3c934cb51d18da3dad3ee4065166c5b394e91b'),
             ((8, 19, 22), 2034, '95e4cefd3c35ac44e7b11a115e5202e455aca43da75c9e5b0517cbb9b19b044c'),
-            ((8, 17, 24), 1973, '3001999ab7d04bcb8d001441fbc117da06b1d1f4866ba7cff843f070ea0fbe97'),
-            ((8, 17, 23), 1934, '7af84cea7140e0dd32a4db9aac7c8b0f1badf13a03aa9a6cfe0a3c6bc61ad045'),
+            ((8, 17, 24), 1972, '67e288aa5a1b993bdf193522077f2f194c1737c4e73f65f0c3cd517fdd8fe1e9'),
+            ((8, 17, 23), 1923, '0f01b41327bcb556369308e3fea771e9b707cb689c8dfa4cea8f43a82c79a47f'),
+            ((7, 18, 24), 1942, 'e8c708c655e01a70f46f3058efe869d50583b5b29e3b9c20e90176278197ae4a'),
+            ((8, 18, 23), 2016, '1d001c874df14a88f01e0ced8afdb2c1b20690bf2826810a6ed22d1b89c2cbae'),
+            ((7, 18, 23), 1904, '8e8418b34ed6c26ad022e36850db8f9daefd376c3fd9056cb720ac0c3cccac55'),
+            ((7, 17, 24), 1862, 'dc71de47dfda619c7bfa14a0b3957f4e44ba1dfab7411fa99c0879a1174b36a6'),
+            ((8, 17, 22), 1876, '95f4fd9516a94f5fa0e55bbf5a57969f2f8ac7ab945089061b575ca8efce6fff'),
+            ((8, 16, 23), 1792, '54ef1bd730637c116c34b789b0bf0d370c2d4f94d1e99ab27a60c20c1e14f471'),
         )
         for shape, rank, digest in rows:
             with self.subTest(shape=shape):

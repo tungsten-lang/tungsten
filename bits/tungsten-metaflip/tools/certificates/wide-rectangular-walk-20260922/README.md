@@ -995,6 +995,27 @@ totals of 607 shapes and 33303 units. Against the stronger local formula-aware
 baseline, their marginal effect is six shapes and 197 units; no square price
 changes.
 
+A bounded direct-projection screen of 90 retained parents examined 4405
+one-coordinate views and applied exact shared-factor matrix cleanup to 498
+nearby views. Two outcomes survive the stronger local formula-aware prices:
+
+| retained certificate | exact route | rank | Lille 2026-09-23 |
+|---|---|---:|---:|
+| `16x14x20-r2626.mfw.gz.b64` | `16x14x21:2746`, remove Z coordinate 10, cleanup | 2626 | 2695 |
+| `11x15x23-r2307.mfw.gz.b64` | `11x15x24:2357`, remove Z coordinate 1, cleanup to 2323, 100M walks nonces 21749 and 21751 | 2307 | 2317 |
+
+Decoded SHA-256 digests are
+`c8e7450e2163c15b84a11dbbd956b20d38070f8cb8f33703e63fcb75e4e2ae63`
+and `20824fafe74e2772b20255f43b1e28d16ad8e94e2ea2afdaee5928c9d6a81d05`
+respectively. Both pass the independent full-tensor check. Rank 2626
+supersedes the previously retained rank-2628 representation for the same
+shape, but the older representation remains a useful projection parent.
+Against the stronger local formula-aware baseline, the two additions improve
+four shapes and save 24 rank units; no square price changes. These are
+numerical catalog comparisons, not exhaustive worldwide-record claims.
+The pinned catalog-plus-retained closure improves one additional shape and
+saves 34 rank units, reaching 608 shapes and 33337 saved units cumulatively.
+
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with
 `tools/replay_structured_parent_portfolio.rb --output DIR --only 5x9x20`.

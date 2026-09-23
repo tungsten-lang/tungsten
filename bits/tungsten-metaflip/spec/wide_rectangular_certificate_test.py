@@ -177,6 +177,14 @@ class WideRectangularCertificateTest(unittest.TestCase):
             with self.subTest(shape=shape):
                 self.check_certificate(shape, rank, digest, compressed=True)
 
+    def test_archive_wide_projection_followups(self):
+        self.check_certificate((16, 14, 20), 2626,
+                               'c8e7450e2163c15b84a11dbbd956b20d38070f8cb8f33703e63fcb75e4e2ae63',
+                               compressed=True)
+        self.check_certificate((11, 15, 23), 2307,
+                               '20824fafe74e2772b20255f43b1e28d16ad8e94e2ea2afdaee5928c9d6a81d05',
+                               compressed=True)
+
     def test_12x10x20_rank_1448(self):
         self.check_certificate((12, 10, 20), 1448,
                                'ce1223857ec1c7bf2215b248a5cbeb42c4171df2c648ee7d752fd9f822741df8',

@@ -130,16 +130,24 @@ worldwide or cross-field novelty audit.
 
 An exact one-coordinate projection scan over 4486 structured-parent portfolio
 cases produced candidates below the pinned closure in 70 distinct shapes.
-Three retained representatives are `11x28x25:4533` (from the `12x25x28`
-parent, SHA-256
-`4394b12d452224af97cc96970a95ba4100b11e3351a4d9ffb7a4e2938f86bb5f`),
-`16x23x15:3168` (from `15x16x24`, SHA-256
-`ade755538726ec52f3b2bcf27f7511c47bbea7623b5d132fb7cbb9ec43ab7f4a`),
-and `11x16x30:3107` (from `12x16x30`, SHA-256
-`b58a2167331102c657a5a979d2985ef528ce875e78612bf98c82853f7141ddda`).
-Each passes independent full GF(2) expansion. Their pinned closure prices
-were 4725, 3320, and 3258. The current Lille table lists 4572, 3238, and
-3126; this is a numerical comparison, not an audited worldwide novelty claim.
+Three projected parents were retained and then improved by a 19-context exact
+shared-factor basis sweep followed by matched 50-million-move walks:
+`11x28x25:4533→4527→4518` (from `12x25x28`, nonce 19411),
+`16x23x15:3168→3165→3164` (from `15x16x24`, nonce 19413), and
+`11x16x30:3107→3106→3105` (from `12x16x30`, nonce 19417).
+The rank-4518 tensor projects to `11x27x25:4443`, walked to 4426 (nonce
+19429), and `11x28x24:4425`. The rank-3164 tensor projects to
+`16x23x14:3017`, walked to 3003 (nonce 19423), `16x22x15:3083`, walked
+to 3071 (nonce 19431), and `15x23x15:3095`. The 11-row family also retains
+`11x16x29:3045`, walked to 3034 (nonce 19427), and `11x15x30:3041`.
+All ten retained tensors pass independent full GF(2) expansion. Relative to
+the previously retained rank-4533, rank-3168, and rank-3107 parent seeds,
+these refinements affect 84 shapes and save 1911 further rank units. Lille's
+current table entries are 4572, 3238, 3126, 4431, 3071, 3168, and 3067
+for the retained shapes `11x25x28`, `15x16x23`, `11x16x30`, `11x25x27`,
+`14x16x23`, `15x16x22`, and `11x16x29`, respectively; the corresponding
+certificates are numerically lower. This is not an audited worldwide or
+cross-field novelty claim.
 
 Replaying the `15x20x28` structured-parent row yields a rank-4700 tensor in
 factor order `20x28x15`. Deleting coordinate 13 of the first axis and applying
@@ -341,8 +349,8 @@ seeds. All three retained tensors pass independent full GF(2) verification.
 The two 7-row ranks improve the pinned closure but not Lille's listings.
 
 Across all retained rectangular certificates, the pinned
-catalog-plus-portfolio closure now improves 224 shapes by 10043 total rank
-units (previously 180 shapes by 7163). Those downstream prices are not 224
+catalog-plus-portfolio closure now improves 258 shapes by 11954 total rank
+units (previously 224 shapes by 10043). Those downstream prices are not 258
 separately materialized tensor certificates. The table comparison is not a
 complete worldwide novelty audit or an optimality claim.
 
@@ -406,10 +414,12 @@ certificates are independently expanded by
 MetaFlip package and certificate directory as appropriate).
 
 The pinned-catalog closure comparison is replayable with
-`python3 tools/check_wide_rectangular_closure.py CATALOG.json`. It reports 224
-rank-price improvements totaling 10043 terms among shapes with coordinates 2
+`python3 tools/check_wide_rectangular_closure.py CATALOG.json`. It reports 258
+rank-price improvements totaling 11954 terms among shapes with coordinates 2
 through 32; those are composition prices, not separate materialized
-certificates for every improved shape. No square shape improves in this finite closure.
+certificates for every improved shape. The sole square-price change is
+`23x23x23:7328→7263`; it is a composition price, not a materialized square
+certificate, and remains above Lille's listed rank 6504.
 Another 100 million moves from the retained rank-623 seed, and three further
 100-million-move continuations from distinct rank-623 seeds, found no rank-622
 result. This finite search is not a lower-bound proof.

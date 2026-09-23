@@ -50,12 +50,26 @@ CANDIDATES = (
      'deb90236cda251a21c9576d17eebb647755f3dac5490529f2cd9899c288f9d89', True),
     ((7, 18, 29), '7x29x18', 2340,
      '614a99ac97e54556895bcf7aa22dae1462f9bab4a1e3c05e570a72be4fab7773', True),
-    ((11, 25, 28), '11x28x25', 4533,
-     '4394b12d452224af97cc96970a95ba4100b11e3351a4d9ffb7a4e2938f86bb5f', True),
-    ((15, 16, 23), '16x23x15', 3168,
-     'ade755538726ec52f3b2bcf27f7511c47bbea7623b5d132fb7cbb9ec43ab7f4a', True),
-    ((11, 16, 30), '11x16x30', 3107,
-     'b58a2167331102c657a5a979d2985ef528ce875e78612bf98c82853f7141ddda', True),
+    ((11, 25, 28), '11x28x25', 4518,
+     'caea0fb4703ba25f9e5b45ef6dad82dbef2f22b2abfe94947de56026b6037c06', True),
+    ((15, 16, 23), '16x23x15', 3164,
+     '2ea6b00e3f5d9e7e6cb55ccff11f61ab8c5008f8fc16e9824bad41293feb688c', True),
+    ((11, 16, 30), '11x16x30', 3105,
+     'a01d95f4586ef8d0532c066ad4b36d74b1269184b866cbd592fa85da6d3e6ea9', True),
+    ((14, 16, 23), '16x23x14', 3003,
+     'aa3930d46ff5a8db62806e07c98d88b962ab7ad90775e840e18dc9ac1fad1cb4', True),
+    ((15, 16, 22), '16x22x15', 3071,
+     'ecb1db7e0192b7db2e3be600772fe5c688362094dbc89490d71b333ce8bb8034', True),
+    ((15, 15, 23), '15x23x15', 3095,
+     'd8ac3afc4e9d71d0ff5f92b563ae79b72a68d2dbe8505821503b9eb245ba7967', True),
+    ((11, 16, 29), '11x16x29', 3034,
+     '54e1d91cc371af992ba0f04495852cc429c01ab08f2b744de9addb860bed072f', True),
+    ((11, 15, 30), '11x15x30', 3041,
+     'ac78b3d3bf24c8cd4bbe3f7263b97f180b2bdd86f179e2f9dc26995269144f86', True),
+    ((11, 25, 27), '11x27x25', 4426,
+     'bd78c00de2ab4756d60a523ac4c5f9a2a4b95aa7d928e43363232854e10c15c4', True),
+    ((11, 24, 28), '11x28x24', 4425,
+     'a35380512b90f02fdafe6821e2ad8bd48462237914aac13adc90463b5fb1900d', True),
     ((15, 19, 28), '19x28x15', 4576,
      '20554ab7fe74e6a977ad7612274843926e79b18bbd2f3f168bf103b0cbc2ca86', True),
     ((14, 20, 28), '20x28x14', 4484,
@@ -178,9 +192,12 @@ def main():
     gains = [{'shape': shape, 'before': original(shape), 'after': improved(shape)}
              for shape in itertools.combinations_with_replacement(range(2, 33), 3)
              if improved(shape) < original(shape)]
-    if len(gains) != 224 or sum(row['before'] - row['after'] for row in gains) != 10043:
+    if len(gains) != 258 or sum(row['before'] - row['after'] for row in gains) != 11954:
         raise ValueError(f'downstream impact changed: {len(gains)} shapes, '
                          f'{sum(row["before"] - row["after"] for row in gains)} terms')
+    square_gains = [row for row in gains if len(set(row['shape'])) == 1]
+    if square_gains != [{'shape': (23, 23, 23), 'before': 7328, 'after': 7263}]:
+        raise ValueError(f'square composition impact changed: {square_gains}')
     print(json.dumps({'field': 'GF(2)', 'record_claim': False,
                       'catalog_sha256': manifest['catalog_sha256'],
                       'candidate_sha256': {shape: digest for _, shape, _, digest, _ in CANDIDATES},

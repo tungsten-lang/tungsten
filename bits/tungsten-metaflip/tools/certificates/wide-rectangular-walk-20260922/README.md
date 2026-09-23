@@ -523,6 +523,34 @@ This adds five downstream price improvements worth 19 rank units, moving the
 pinned closure to 463 shapes and 25733 units. These mixed results do not yet
 justify an unconditionally eager short-walk arm for every projection.
 
+The retained `19x28x14:4356` parent has a productive final-axis projection
+chain. Removing coordinate 6 and applying exact shared-factor compression
+gave `19x28x13:4092`; a 1M walk reached 4062, then 20M/50M/50M moves
+(nonces 20301/20307/20311) reached the retained 4052. Its rank-4053
+intermediate had two cheaper basis/projection children: mode 13 removed
+first-axis coordinate 3 for `18x28x13:3906`, and mode 2 removed final-axis
+coordinate 6 for `19x28x12:3689`. The former reached 3899 after 20M/50M
+moves (20313/20317); the latter reached 3660 (20315/20319). Further exact
+basis sweeps found `19x28x11:3520` from the 3660 tensor (mode 0, final
+coordinate 1), refined to 3510 (20321/20323), and `17x28x13:3740` from
+the 3899 tensor (mode 6, first coordinate 16), refined to 3719
+(20325/20327). The latter yielded `17x27x13:3641` (mode 11, middle
+coordinate 25), refined to 3618 (20329/20331). Its mode-4 sweep removed
+middle coordinate 4 for `17x26x13:3527`; 20M moves (20333) reached 3513,
+and 50M more (20335) tied with lower density. Its basis cleanup reached the
+retained 3507, while mode 8 removed middle coordinate 17 for
+`17x25x13:3400`. Walks of 20M/50M moves (20339/20341) reached 3376, then
+basis cleanup reached the retained 3374. That sweep's mode 7 removed middle
+coordinate 10 for `17x24x13:3200`; 20M moves (20343) reached 3193, another
+50M (20345) tied, and basis cleanup reached the retained 3190. A raw
+projection of the rank-3193 intermediate removed first-axis coordinate 7 for
+`16x24x13:2920`; walks of 20M/50M moves (20347/20349) reached 2894.
+Every retained endpoint is independently
+expanded and checked over GF(2). These ten certificates add 14 improved
+pinned composition prices and 1020 rank units, for a cumulative closure of
+477 shapes and 26753 units. None of those derived prices is an audited
+worldwide record.
+
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with
 `tools/replay_structured_parent_portfolio.rb --output DIR --only 5x9x20`.

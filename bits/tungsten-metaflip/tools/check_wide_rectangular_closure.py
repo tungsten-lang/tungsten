@@ -162,6 +162,26 @@ CANDIDATES = (
      'dbbcfd9d67a9c7a51927f6b0e7cdf72f2df419fb136e2a9cde04743d6749e986', True),
     ((13, 19, 28), '19x28x13', 4068,
      '15e461d7172163885bc5a51485d6de238e42ca783f02adc786bb9c85947c53e5', True),
+    ((13, 19, 28), '19x28x13', 4052,
+     '47e7b4a2430f49b0053c67d3b816915747883a1ed42426c1b97005a2ea84b86f', True),
+    ((13, 18, 28), '18x28x13', 3899,
+     'd840227f15653981fc9a534ca49324489ebf5461b30d35985c5f2f7636bd3662', True),
+    ((13, 17, 28), '17x28x13', 3719,
+     'dc2f1a9c5309847e91798046a86f731a1a3d93cba88175549e6536f34f3e8b58', True),
+    ((13, 17, 27), '17x27x13', 3618,
+     '9208b368e0bcfa990144932092668f7212433730958c0d572db47e12c6e464ca', True),
+    ((13, 17, 26), '17x26x13', 3507,
+     '20c9d248347c23bd61a3a9fc5ddf56ffcb19c311fc8c1c64c87d8e29ab30ea70', True),
+    ((13, 17, 25), '17x25x13', 3374,
+     '035448244e6ad628f42390b754576c567a1418bff0edc000caf49ec30aa71b86', True),
+    ((13, 17, 24), '17x24x13', 3190,
+     'a499fc371e9e02fa7897e6040289fca376e000613b2156a4ad5f6b3a69121cd1', True),
+    ((13, 16, 24), '16x24x13', 2894,
+     '219353fe8836f6c754c1f8053f63ba45b045af785b48415cde2557271bebdbb1', True),
+    ((12, 19, 28), '19x28x12', 3660,
+     '39830073726a389a76b272ec1ac69eb05608bd6221673a67bc503c3c0f0a685c', True),
+    ((11, 19, 28), '19x28x11', 3510,
+     'e0048430ddbec15981eb03d53d411fab7b3d781452e7bad494c47a7b296a40b5', True),
     ((15, 19, 27), '19x27x15', 4488,
      '6547c40d267aed101dae2f3a2d91e5d3ded8198e586a5a4ea1f46af701b41feb', True),
     ((8, 19, 29), '8x19x29', 2642,
@@ -280,7 +300,7 @@ def main():
     gains = [{'shape': shape, 'before': original(shape), 'after': improved(shape)}
              for shape in itertools.combinations_with_replacement(range(2, 33), 3)
              if improved(shape) < original(shape)]
-    if len(gains) != 463 or sum(row['before'] - row['after'] for row in gains) != 25733:
+    if len(gains) != 477 or sum(row['before'] - row['after'] for row in gains) != 26753:
         raise ValueError(f'downstream impact changed: {len(gains)} shapes, '
                          f'{sum(row["before"] - row["after"] for row in gains)} terms')
     square_gains = [row for row in gains if len(set(row['shape'])) == 1]

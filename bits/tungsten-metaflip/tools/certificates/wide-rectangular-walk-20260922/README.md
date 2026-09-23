@@ -613,6 +613,19 @@ The [current Lille table](https://fmm.univ-lille.fr/) lists 2232 for
 `11x14x24`; the exact GF(2) rank 2225 is lower, without a complete
 worldwide or cross-field novelty audit.
 
+An explicit `11x15x26` tensor was obtained by projecting axis 1 coordinate
+10 from the verified `11x16x26:2701`, then exact shared-factor compression
+to rank 2646. A 19-context basis/projection scan found no lower child.
+One 100M directed walk (nonce 21177) reached rank 2611; a second (21179)
+tied that rank with lower density. The retained full tensor has SHA-256
+`118257680675462cfdeeeb9c61a2ca0fc2b9c945efb87b287dac3a1eb77d6ce7`
+and passes independent Ruby and Python GF(2) identity checks. It replaces
+the prior computed closure price 2612, which depended on an external leaf,
+with a materialized certificate. The cumulative finite closure is now 484
+shapes and 27371 rank units. The [current Lille table](https://fmm.univ-lille.fr/)
+lists 2617 for `11x15x26`; the exact GF(2) rank 2611 is lower, without a
+complete worldwide or cross-field novelty audit.
+
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with
 `tools/replay_structured_parent_portfolio.rb --output DIR --only 5x9x20`.

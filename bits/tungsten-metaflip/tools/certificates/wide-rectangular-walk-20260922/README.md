@@ -722,6 +722,31 @@ no better projected price; its closest child remained 28 terms high. These
 are explicit GF(2) upper bounds and finite composition prices, not an
 audited worldwide novelty or optimality claim.
 
+An archive-wide direct-coordinate projection sweep over 135 retained parents
+identified nine further useful seeds. Exact shared-factor compression supplied
+the projected ranks; bounded directed walks improved seven of them. The
+retained certificates and independent exact ranks are:
+
+| Tensor | Rank | Source | Walk nonce(s) |
+| --- | ---: | --- | --- |
+| `16x21x15` | 2982 | `16x22x15:3071` | 21521 |
+| `15x24x13` | 2808 | `16x24x13:2888` | 21523 |
+| `14x24x13` | 2691 | `15x24x13:2808`, checked basis/projection | 21527 |
+| `14x24x12` | 2389 | `14x24x13:2691`, checked basis/projection | 21531 |
+| `20x25x13` | 3880 | `20x26x13:3984` | none |
+| `7x19x22` | 1913 | `8x19x22:2034` | 21525 |
+| `7x18x25` | 2060 | `7x19x25:2122` | none |
+| `7x19x23` | 1959 | `7x19x24:2010` | 21533; 21537 tied |
+| `19x19x25` | 5297 | `20x19x25:5403` | 21529, 21535 |
+
+Each walk listed above used 100 million moves. The compressed certificate
+archive, focused Python test, and closure checker retain SHA-256 hashes and
+independently expand every GF(2) tensor. In the pinned finite composition
+closure, these nine representations lower 20 prices by 561 rank units beyond
+the preceding snapshot, giving 506 improved shapes and 28177 saved units in
+total. There is no additional square-price change. These are verified upper
+bounds, not an audited world-record claim.
+
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with
 `tools/replay_structured_parent_portfolio.rb --output DIR --only 5x9x20`.

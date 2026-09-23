@@ -1095,11 +1095,25 @@ the retained 1957. Its decoded SHA-256 digest is
 `04e3d132317eb915d04c4c8ca12ad56eff8630d9ec504596630b3631bec5d4ec`,
 and it passes independent full GF(2) tensor expansion. The 2026-09-23
 Lille table lists 1959; this is a numerical catalog comparison, not an
-exhaustive worldwide novelty claim. In the pinned closure, the count
-remains 616 improved shapes and the total rises from 33547 to 33549 saved
-units. A projected `7x19x22:1902` tensor was also verified locally but
-not retained: the live Lille table lists 1879, which the pinned catalog
-snapshot missed.
+exhaustive worldwide novelty claim. Deleting Z coordinate 1 from the
+rank-1960 state and cleaning gives `7x19x22:1914`; a 200-million-move
+walk (nonce 21833) reaches the retained exact GF(2) rank 1902 with
+decoded SHA-256
+`082af6026e587b46f6fddd464ea944690bcad0c0e7d29638a18261aedbd02993`.
+This improves the local GF(2) archive's rank 1913, but is **not** a
+general-field catalog improvement: the live Lille table lists 1879,
+which the pinned catalog snapshot missed. In the pinned closure, the
+count remains 616 improved shapes and the total rises from 33547 to
+33560 saved units.
+
+A further 300-million-move continuation from `7x19x23:1957` (nonce
+21843) reaches exact rank 1955; the decoded SHA-256 is
+`99e7b364b232c88e29ee4f499fd40c9522a8a41e8f2f696f5bbdf17dd375c281`.
+The parallel 300-million-move continuation from `7x19x24:2002`
+(nonce 21845) found no lower rank. Rank 1955 is four below the live
+Lille table's 1959 for `7x19x23`; the pinned closure remains at 616
+improved shapes and rises to 33562 saved units. Both the rank-1957
+lineage witness and the rank-1955 best witness remain checked.
 
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with

@@ -80,6 +80,16 @@ density 84555. The prior pinned GF(2) catalog-plus-portfolio composition price
 was 2766. This certificate is checked by both full-tensor verifiers; the
 finite walk is not an optimality proof.
 
+Deleting last-axis coordinate 16 from the same exact `8x20x30` parent and
+compressing equal GF(2) terms gives `8x20x29:2744`. A 50-million-move walk
+(nonce 19233) lowers this to 2726, and a 100-million-move continuation
+(nonce 19235) reaches the retained `8x20x29:2724`, SHA-256
+`b1f26cb283b84ba01d699007abe162318569afa6e9c3fdcdb02fbf44577e0a16`.
+Both full-tensor verifiers accept it. The prior pinned closure price was 2745;
+the current Lille table lists 2800. Direct and 19-context basis projection
+screens of the retained tensor found no further closure improvement in their
+bounded runs.
+
 Replaying the `15x20x28` structured-parent row yields a rank-4700 tensor in
 factor order `20x28x15`. Deleting coordinate 13 of the first axis and applying
 exact GF(2) cancellation/compression yields `19x28x15` at rank 4600; exact
@@ -280,8 +290,8 @@ seeds. All three retained tensors pass independent full GF(2) verification.
 The two 7-row ranks improve the pinned closure but not Lille's listings.
 
 Across all retained rectangular certificates, the pinned
-catalog-plus-portfolio closure now improves 163 shapes by 6563 total rank
-units (previously 161 shapes by 6489). Those downstream prices are not 163
+catalog-plus-portfolio closure now improves 171 shapes by 6700 total rank
+units (previously 163 shapes by 6563). Those downstream prices are not 171
 separately materialized tensor certificates. The table comparison is not a
 complete worldwide novelty audit or an optimality claim.
 

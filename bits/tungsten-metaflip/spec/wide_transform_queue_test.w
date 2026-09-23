@@ -1,5 +1,24 @@
 use ../lib/metaflip/composition/transform_queue
 
+if ARGV.size() == 4 && ARGV[0] == "--basis-mode"
+  mode = ffpk_decimal(ARGV[3]) ## i64
+  raw = File.read_prefix(ARGV[1], 12632129)
+  if mode < 0 || mode >= 18 || raw == nil
+    exit(2)
+  source = i64[3*32*16384]
+  out = i64[3*32*16384]
+  parity = i64[32768]
+  info = i64[4]
+  meta = i64[5]
+  before = ffpk_parse(raw, source, 3*32*16384, info, 4) ## i64
+  if before < 1 || ffpk_exact(source, 3*32*16384, before, info[0], info[1], info[2], parity, 32768, 20000000) != 1
+    exit(1)
+  rank = ffxt_propose(ARGV[1], source, out, before, info[0], info[1], info[2], mode, meta) ## i64
+  if rank < 1 || rank > before || ffpk_exact(out, 3*32*16384, rank, info[0], info[1], info[2], parity, 32768, 20000000) != 1 || !write_file(ARGV[2], ffpk_blob(out, rank, info[0], info[1], info[2]))
+    exit(1)
+  << "BASIS_MODE " + before.to_s() + " " + rank.to_s() + " " + meta[3].to_s() + " " + meta[4].to_s()
+  exit(0)
+
 if (ARGV.size() == 2 || ARGV.size() == 3) && ARGV[0] == "--postbasis-scan"
   raw = File.read_prefix(ARGV[1], 12632129)
   if raw == nil

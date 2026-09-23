@@ -1,0 +1,181 @@
+#!/usr/bin/env python3
+"""Screen exact two-pass basis rewrites and their coordinate projections."""
+import argparse
+import hashlib
+from itertools import permutations
+import json
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import screen_neutral_basis_children as neutral
+import screen_top_two_projection_children as top
+from verify_cofactor_mergers import refactor_shared
+
+HERE = Path(__file__).resolve().parent
+ONE_PASS = HERE / 'certificates/structured-neutral-children-20260923/manifest.json'
+PARENT = HERE / 'certificates/structured-parent-projections-20260923/manifest.json'
+COMPOSED = HERE / 'certificates/neutral-basis-children-20260923/manifest.json'
+
+
+def baseline_seeds():
+    seeds = top.initial_seeds()
+    for path in (PARENT, COMPOSED, ONE_PASS):
+        data = json.loads(path.read_text())
+        for row in data['rows'] + data.get('extensions', []) + data.get('descendants', []):
+            key = tuple(row['shape'])
+            seeds[key] = min(seeds.get(key, row['rank']), row['rank'])
+    return seeds
+
+
+def two_pass(terms, shape, mode):
+    if not 6 <= mode < 18:
+        raise ValueError('two-pass mode outside 6..17')
+    width = max(shape[0] * shape[1], shape[1] * shape[2], shape[0] * shape[2])
+    order = tuple(permutations(range(3)))[(mode - 6) // 2]
+    current = terms
+    for _ in range(2):
+        for axis in order:
+            current, _ = refactor_shared(current, axis, max_bits=width,
+                                         reverse_columns=bool(mode % 2))
+        if current == terms:
+            break
+    result, _ = top.compress_shared(current, max_bits=width)
+    return result
+
+
+def source_row(parent):
+    raw = Path(parent['output']).read_bytes()
+    digest = hashlib.sha256(raw).hexdigest()
+    if digest != parent['sha256']:
+        raise ValueError('parent digest mismatch')
+    shape, terms = top.read_blob(raw)
+    if tuple(sorted(shape)) != tuple(parent['shape']) or len(terms) != parent['rank']:
+        raise ValueError('parent shape/rank mismatch')
+    top.exact(shape, terms)
+    return shape, terms, digest
+
+
+def screen(parents, digest):
+    public = top.comparison(digest)
+    baseline = top.solver(baseline_seeds())
+    best = {}
+    counts = dict(parents=len(parents), modes=0, projections=0)
+    for parent in parents:
+        shape, terms, source_hash = source_row(parent)
+        for mode in range(6, 18):
+            basis = two_pass(terms, shape, mode)
+            top.exact(shape, basis)
+            basis_hash = hashlib.sha256(top.blob(shape, basis)).hexdigest()
+            counts['modes'] += 1
+            common = dict(source_shape=list(shape), source_rank=len(terms),
+                          source_sha256=source_hash, mode=mode,
+                          basis_rank=len(basis), basis_sha256=basis_hash)
+
+            def retain(target, result, details):
+                key = tuple(sorted(target))
+                if len(result) >= min(public.get(key, 10**18), baseline(key)):
+                    return
+                raw = top.blob(target, result)
+                candidate = dict(shape=list(key), oriented_shape=list(target),
+                                 rank=len(result),
+                                 local_baseline_rank=baseline(key),
+                                 public_rank=public.get(key),
+                                 sha256=hashlib.sha256(raw).hexdigest(),
+                                 **common, **details)
+                if key not in best or (candidate['rank'], candidate['sha256']) < (
+                        best[key]['rank'], best[key]['sha256']):
+                    top.exact(target, result)
+                    best[key] = candidate
+
+            retain(shape, basis, dict(kind='basis'))
+            for axis, extent in enumerate(shape):
+                for coordinate in range(extent):
+                    counts['projections'] += 1
+                    target, raw_child = top.project(shape, basis, axis, coordinate)
+                    width = max(target[0] * target[1], target[1] * target[2],
+                                target[0] * target[2])
+                    child, history = top.compress_shared(raw_child, max_bits=width)
+                    retain(target, child, dict(kind='projection', axis=axis,
+                                               deleted_coordinate=coordinate,
+                                               raw_rank=len(raw_child),
+                                               cleanup_steps=len(history)))
+    return dict(schema=1, field='GF(2)', record_claim=False,
+                parent_set='structured-projections', counts=counts,
+                rows=sorted(best.values(), key=lambda row: row['shape']))
+
+
+def materialize(row, parents, output_dir):
+    matches = [p for p in parents if p['sha256'] == row['source_sha256']]
+    if len(matches) != 1:
+        raise ValueError('missing or ambiguous source')
+    shape, terms, _ = source_row(matches[0])
+    if list(shape) != row['source_shape'] or len(terms) != row['source_rank']:
+        raise ValueError('source fields mismatch')
+    basis = two_pass(terms, shape, row['mode'])
+    expected_basis_rank = row.get('basis_rank', row['rank'] if row['kind'] == 'basis' else None)
+    if len(basis) != expected_basis_rank or hashlib.sha256(
+            top.blob(shape, basis)).hexdigest() != row['basis_sha256']:
+        raise ValueError('basis mismatch')
+    top.exact(shape, basis)
+    if row['kind'] == 'basis':
+        target, result = shape, basis
+    elif row['kind'] == 'projection':
+        axis, coordinate = row['axis'], row['deleted_coordinate']
+        target, raw_child = top.project(shape, basis, axis, coordinate)
+        keep = [list(range(n)) for n in shape]
+        keep[axis].pop(coordinate)
+        if raw_child != neutral.project_grid(shape, basis, keep):
+            raise ValueError('independent projection mismatch')
+        width = max(target[0] * target[1], target[1] * target[2],
+                    target[0] * target[2])
+        result, history = top.compress_shared(raw_child, max_bits=width)
+        if len(raw_child) != row['raw_rank'] or len(history) != row['cleanup_steps']:
+            raise ValueError('cleanup metadata mismatch')
+    else:
+        raise ValueError('unknown result kind')
+    raw = top.blob(target, result)
+    if (list(target) != row['oriented_shape'] or
+            tuple(sorted(target)) != tuple(row['shape']) or
+            len(result) != row['rank'] or
+            hashlib.sha256(raw).hexdigest() != row['sha256']):
+        raise ValueError('result mismatch')
+    top.exact(target, result)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / ('x'.join(map(str, target)) +
+                         f'-r{len(result)}-{row["sha256"][:12]}.mfw')
+    if path.exists():
+        raise FileExistsError(path)
+    path.write_bytes(raw)
+    checked = json.loads(subprocess.check_output(
+        ['ruby', str(HERE / 'verify_tensor.rb'), '--shape',
+         'x'.join(map(str, target)), str(path)], text=True))[0]
+    if not checked['exact'] or checked['rank'] != len(result) or checked['sha256'] != row['sha256']:
+        raise ValueError('independent full-tensor verification failed')
+    return dict(row, output=str(path))
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument('--digest', type=Path)
+    group.add_argument('--replay-manifest', type=Path)
+    parser.add_argument('--output-dir', type=Path)
+    args = parser.parse_args()
+    if args.replay_manifest and args.output_dir is None:
+        parser.error('--replay-manifest requires --output-dir')
+    with tempfile.TemporaryDirectory(prefix='metaflip-two-pass-children-') as temp:
+        parents = neutral.build_structured_parents(Path(temp) / 'parents')
+        data = (json.loads(args.replay_manifest.read_text()) if args.replay_manifest
+                else screen(parents, json.loads(args.digest.read_text())))
+        if args.output_dir:
+            args.output_dir.mkdir(exist_ok=False)
+            data = dict(data, rows=[materialize(row, parents, args.output_dir)
+                                    for row in data['rows']])
+        print(json.dumps(data, indent=2))
+
+
+if __name__ == '__main__':
+    main()

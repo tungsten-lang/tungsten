@@ -1,0 +1,423 @@
+{
+  "schema": 1,
+  "field": "GF(2)",
+  "record_claim": false,
+  "comparison_scope": "Exact GF(2) upper bounds numerically below the cited Lille index; no optimality, cross-field, or worldwide novelty claim.",
+  "source": "https://fmm.univ-lille.fr/",
+  "source_created_at": "2026-09-18T17:17:29",
+  "source_sha256": "a77c4286cd7ad9b5212b679d9e1e21672c7519a41124a3d71079d68bf0878213",
+  "parent_set": "structured-projections",
+  "initial_parent_count": 24,
+  "counts": {
+    "parents": 24,
+    "modes": 288,
+    "projections": 14928
+  },
+  "rows": [
+    {
+      "shape": [
+        8,
+        14,
+        20
+      ],
+      "oriented_shape": [
+        8,
+        20,
+        14
+      ],
+      "rank": 1407,
+      "local_baseline_rank": 1411,
+      "public_rank": 1414,
+      "source_shape": [
+        8,
+        20,
+        14
+      ],
+      "source_rank": 1411,
+      "source_sha256": "5510a01490e3a72ad9a568c04ca65430a4a5861499cf306cf546b58984eb979d",
+      "mode": 16,
+      "kind": "basis",
+      "basis_rank": 1407,
+      "basis_sha256": "0ca2d28f495691276e7ec0f9acff0125f998aa57cc31af0224c1a0dd7081baff",
+      "sha256": "0ca2d28f495691276e7ec0f9acff0125f998aa57cc31af0224c1a0dd7081baff"
+    },
+    {
+      "shape": [
+        8,
+        22,
+        25
+      ],
+      "oriented_shape": [
+        8,
+        22,
+        25
+      ],
+      "rank": 2675,
+      "local_baseline_rank": 2676,
+      "public_rank": 2686,
+      "source_shape": [
+        8,
+        22,
+        25
+      ],
+      "source_rank": 2679,
+      "source_sha256": "877a4f35e397f6b19013dca4bb8c8d5d01af2222c3342e6888dbc444062954ce",
+      "mode": 8,
+      "kind": "basis",
+      "basis_rank": 2675,
+      "basis_sha256": "0ac4897185fdad7f898d435f1fc27a0e2c9facdb0e9138c9bf5df1bd42d44b81",
+      "sha256": "0ac4897185fdad7f898d435f1fc27a0e2c9facdb0e9138c9bf5df1bd42d44b81"
+    },
+    {
+      "shape": [
+        8,
+        23,
+        25
+      ],
+      "oriented_shape": [
+        8,
+        23,
+        25
+      ],
+      "rank": 2746,
+      "local_baseline_rank": 2752,
+      "public_rank": 2779,
+      "source_shape": [
+        8,
+        23,
+        25
+      ],
+      "source_rank": 2752,
+      "source_sha256": "d3e2e59a05a900fadc922b7fbd8c22e0f7a3e490bd35c67183bec5288b357e16",
+      "mode": 7,
+      "kind": "basis",
+      "basis_rank": 2746,
+      "basis_sha256": "17b6d6dd39f1100644763bfccfa3b5800beca76cf0d5b934497646c3dc37b54b",
+      "sha256": "17b6d6dd39f1100644763bfccfa3b5800beca76cf0d5b934497646c3dc37b54b"
+    },
+    {
+      "shape": [
+        9,
+        16,
+        17
+      ],
+      "oriented_shape": [
+        9,
+        17,
+        16
+      ],
+      "rank": 1514,
+      "local_baseline_rank": 1515,
+      "public_rank": 1524,
+      "source_shape": [
+        9,
+        17,
+        16
+      ],
+      "source_rank": 1515,
+      "source_sha256": "f7d0a8dbbbf28c678c7eaf6a57f23487dd6a853bff7f8828476f8e5b40672c6b",
+      "mode": 12,
+      "kind": "basis",
+      "basis_rank": 1514,
+      "basis_sha256": "0e7ff707d991ff02c59095d6b789af8a69657b1d2c47b5189118c9bbbf163a2b",
+      "sha256": "0e7ff707d991ff02c59095d6b789af8a69657b1d2c47b5189118c9bbbf163a2b"
+    },
+    {
+      "shape": [
+        9,
+        16,
+        29
+      ],
+      "oriented_shape": [
+        9,
+        16,
+        29
+      ],
+      "rank": 2494,
+      "local_baseline_rank": 2495,
+      "public_rank": 2502,
+      "source_shape": [
+        9,
+        16,
+        29
+      ],
+      "source_rank": 2495,
+      "source_sha256": "3354e39a6026e7067065371c62ccd29b7ed35fbb3f5b8531af15fcf58d5c4d48",
+      "mode": 15,
+      "kind": "basis",
+      "basis_rank": 2494,
+      "basis_sha256": "061ba9407dede8fb7219cd4eaffe4ce7f5945682a7d0cb59c821e0011ae785e9",
+      "sha256": "061ba9407dede8fb7219cd4eaffe4ce7f5945682a7d0cb59c821e0011ae785e9"
+    },
+    {
+      "shape": [
+        10,
+        19,
+        30
+      ],
+      "oriented_shape": [
+        19,
+        10,
+        30
+      ],
+      "rank": 3413,
+      "local_baseline_rank": 3417,
+      "public_rank": 3433,
+      "source_shape": [
+        19,
+        10,
+        30
+      ],
+      "source_rank": 3417,
+      "source_sha256": "88b931fd6f2c67b7644746f421ee1f55350bf42646d5605fa85111f81f8f4cdb",
+      "mode": 6,
+      "kind": "basis",
+      "basis_rank": 3413,
+      "basis_sha256": "07af3d8aeb24d12417935175a64852937feb4f67a41477339b7718544d987d30",
+      "sha256": "07af3d8aeb24d12417935175a64852937feb4f67a41477339b7718544d987d30"
+    },
+    {
+      "shape": [
+        10,
+        20,
+        22
+      ],
+      "oriented_shape": [
+        20,
+        22,
+        10
+      ],
+      "rank": 2663,
+      "local_baseline_rank": 2671,
+      "public_rank": 2673,
+      "source_shape": [
+        20,
+        22,
+        10
+      ],
+      "source_rank": 2672,
+      "source_sha256": "dd081e552f732c9cec011ba39a20739b7bf5fc19612cc2025e053eae90fe73c3",
+      "mode": 13,
+      "kind": "basis",
+      "basis_rank": 2663,
+      "basis_sha256": "10d6554ea93283b20561346564593b34be5396090d3227788f0ce51a196dc8b1",
+      "sha256": "10d6554ea93283b20561346564593b34be5396090d3227788f0ce51a196dc8b1"
+    },
+    {
+      "shape": [
+        10,
+        20,
+        23
+      ],
+      "oriented_shape": [
+        20,
+        23,
+        10
+      ],
+      "rank": 2737,
+      "local_baseline_rank": 2743,
+      "public_rank": 2775,
+      "source_shape": [
+        20,
+        23,
+        10
+      ],
+      "source_rank": 2743,
+      "source_sha256": "7627fffb3d4dccf5fee8dce71a32eb70b5b2e4b9a982e8972b32ef133b4f8546",
+      "mode": 13,
+      "kind": "basis",
+      "basis_rank": 2737,
+      "basis_sha256": "494a66ae7f3a3dbbd50ae95a90183dc6a204e6d79c2169a38d5820afaa04c800",
+      "sha256": "494a66ae7f3a3dbbd50ae95a90183dc6a204e6d79c2169a38d5820afaa04c800"
+    },
+    {
+      "shape": [
+        12,
+        16,
+        29
+      ],
+      "oriented_shape": [
+        12,
+        16,
+        29
+      ],
+      "rank": 3160,
+      "local_baseline_rank": 3164,
+      "public_rank": 3216,
+      "source_shape": [
+        12,
+        16,
+        29
+      ],
+      "source_rank": 3164,
+      "source_sha256": "2b1df503800ca793223475d92a4ff8f8cf52b59af91e4b8c2142de009861a16d",
+      "mode": 12,
+      "kind": "basis",
+      "basis_rank": 3160,
+      "basis_sha256": "431a28a44cde563a10721639064d80f308a7df095f817d7e8262379f865e8f29",
+      "sha256": "431a28a44cde563a10721639064d80f308a7df095f817d7e8262379f865e8f29"
+    },
+    {
+      "shape": [
+        14,
+        16,
+        27
+      ],
+      "oriented_shape": [
+        16,
+        27,
+        14
+      ],
+      "rank": 3565,
+      "local_baseline_rank": 3576,
+      "public_rank": 3604,
+      "source_shape": [
+        16,
+        27,
+        14
+      ],
+      "source_rank": 3576,
+      "source_sha256": "dbd95ea88913ef01182b9924155d2643448c56597da3874d7c00530274fa2e05",
+      "mode": 9,
+      "kind": "basis",
+      "basis_rank": 3565,
+      "basis_sha256": "008561a824896d594a6cd3b2b14c63846e468c434af077d5c671065df05a5fae",
+      "sha256": "008561a824896d594a6cd3b2b14c63846e468c434af077d5c671065df05a5fae"
+    },
+    {
+      "shape": [
+        14,
+        16,
+        28
+      ],
+      "oriented_shape": [
+        16,
+        28,
+        14
+      ],
+      "rank": 3630,
+      "local_baseline_rank": 3634,
+      "public_rank": 3674,
+      "source_shape": [
+        16,
+        28,
+        14
+      ],
+      "source_rank": 3634,
+      "source_sha256": "f294493254743cfdffab28f734fa53705294fd29c537b08ddca968da523b8fde",
+      "mode": 15,
+      "kind": "basis",
+      "basis_rank": 3630,
+      "basis_sha256": "0186cb75eb7ca205fdd6deea6e88b45aa09f5be574cc8016698046339b847d64",
+      "sha256": "0186cb75eb7ca205fdd6deea6e88b45aa09f5be574cc8016698046339b847d64"
+    },
+    {
+      "shape": [
+        15,
+        16,
+        27
+      ],
+      "oriented_shape": [
+        16,
+        27,
+        15
+      ],
+      "rank": 3754,
+      "local_baseline_rank": 3758,
+      "public_rank": 3787,
+      "source_shape": [
+        16,
+        27,
+        15
+      ],
+      "source_rank": 3758,
+      "source_sha256": "8c313e505de85b53bbf50fd39f8d39f5763046aaa5562c65bafd2d811fc27fe2",
+      "mode": 17,
+      "kind": "basis",
+      "basis_rank": 3754,
+      "basis_sha256": "092b0cba8a3ffd456205169b08e57d7208003e0213f87d7b8373c20872838ede",
+      "sha256": "092b0cba8a3ffd456205169b08e57d7208003e0213f87d7b8373c20872838ede"
+    },
+    {
+      "shape": [
+        15,
+        16,
+        29
+      ],
+      "oriented_shape": [
+        16,
+        15,
+        29
+      ],
+      "rank": 4002,
+      "local_baseline_rank": 4005,
+      "public_rank": 4044,
+      "source_shape": [
+        16,
+        15,
+        29
+      ],
+      "source_rank": 4005,
+      "source_sha256": "e9b701ff3f984d5ffa308ba91e2169460f6b88336d7e1ad2c7065f1b763fa2ed",
+      "mode": 11,
+      "kind": "basis",
+      "basis_rank": 4002,
+      "basis_sha256": "18c4787fa746887ed72f41d8306b097850e567a06b27c1987254588f3900c329",
+      "sha256": "18c4787fa746887ed72f41d8306b097850e567a06b27c1987254588f3900c329"
+    },
+    {
+      "shape": [
+        15,
+        17,
+        20
+      ],
+      "oriented_shape": [
+        17,
+        20,
+        15
+      ],
+      "rank": 3037,
+      "local_baseline_rank": 3039,
+      "public_rank": 3069,
+      "source_shape": [
+        17,
+        20,
+        15
+      ],
+      "source_rank": 3039,
+      "source_sha256": "0322c779894005d4d40261d2e9a0dc7b0da4066d679596dd285a3bc5fe2645c5",
+      "mode": 13,
+      "kind": "basis",
+      "basis_rank": 3037,
+      "basis_sha256": "1951ff10376f14ff5d61caaa1a06f187b4c515c686f6c69722d587aeb26693a6",
+      "sha256": "1951ff10376f14ff5d61caaa1a06f187b4c515c686f6c69722d587aeb26693a6"
+    },
+    {
+      "shape": [
+        15,
+        19,
+        20
+      ],
+      "oriented_shape": [
+        15,
+        19,
+        20
+      ],
+      "rank": 3395,
+      "local_baseline_rank": 3399,
+      "public_rank": 3409,
+      "source_shape": [
+        15,
+        19,
+        20
+      ],
+      "source_rank": 3399,
+      "source_sha256": "3d62a01c876fa5b10194c90228041465df06dcad4615b1238435b09ae1fd6783",
+      "mode": 16,
+      "kind": "basis",
+      "basis_rank": 3395,
+      "basis_sha256": "2fe4494ed59e631d739d3c23291e84b073434cb20f13cd90462c59a071bb675e",
+      "sha256": "2fe4494ed59e631d739d3c23291e84b073434cb20f13cd90462c59a071bb675e"
+    }
+  ]
+}

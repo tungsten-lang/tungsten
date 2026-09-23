@@ -20,6 +20,7 @@ PARENT = HERE / 'certificates/structured-parent-projections-20260923/manifest.js
 COMPOSED = HERE / 'certificates/neutral-basis-children-20260923/manifest.json'
 CHAIN = HERE / 'certificates/composed-parent-children-20260923/manifest.json'
 COMPOSED_TWO = HERE / 'certificates/two-pass-composed-children-20260923/manifest.json'
+MIDDLE_SHEAR = HERE / 'certificates/middle-shear-children-20260923/manifest.json'
 FIRST = HERE / 'certificates/two-pass-basis-children-20260923/manifest.json'
 SECOND = HERE / 'certificates/two-pass-basis-descendants-20260923/manifest.json'
 
@@ -40,6 +41,10 @@ def baseline_seeds(parent_set='structured-projections'):
         for row in data['rows'] + data.get('extensions', []) + data.get('descendants', []):
             key = tuple(row['shape'])
             seeds[key] = min(seeds.get(key, row['rank']), row['rank'])
+    if parent_set == 'composed-descendants':
+        row = json.loads(MIDDLE_SHEAR.read_text())['row']
+        key = tuple(row['shape'])
+        seeds[key] = min(seeds.get(key, row['rank']), row['rank'])
     return seeds
 
 

@@ -7,9 +7,14 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 import screen_middle_shear_children as shear
 import screen_top_two_projection_children as top
+import screen_two_pass_basis_children as two_pass
 
 
 class MiddleShearChildrenTest(unittest.TestCase):
+    def test_descendant_baseline_includes_checked_rank(self):
+        self.assertEqual(two_pass.baseline_seeds('composed-descendants')[(16, 23, 31)],
+                         6376)
+
     def test_all_elementary_shears_of_naive_tensor(self):
         shape = 2, 3, 2
         n, m, p = shape

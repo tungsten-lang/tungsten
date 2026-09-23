@@ -28,9 +28,10 @@ are generated outside the repository.
 Adding this rank to the local block/Kronecker price library lowers 15 prices
 on sorted triples in `[2,32]³`. None of the other price drops newly crosses
 the Lille index, and those prices are not separate expanded certificates.
-The shear screen currently runs as an offline exact tool, not the live native
-transform queue; automatic runtime scheduling needs a matched cost/benefit
-check on more parents.
+The composed-descendant screen baseline reads this certificate, so subsequent
+screens do not rediscover the superseded rank 6,380. The shear screen currently
+runs as an offline exact tool, not the live native transform queue; automatic
+runtime scheduling needs a matched cost/benefit check on more parents.
 
 From the repository root, use fresh output directories:
 

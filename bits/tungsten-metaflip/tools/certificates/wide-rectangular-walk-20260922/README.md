@@ -796,10 +796,26 @@ different exact rank-2888 tensor, but its density was higher (92778 versus
 83766) and it was not retained. The new certificate is below the pinned
 catalog's rank-2932 GF(2) entry. Against the preceding retained closure,
 rank 2888 improves one additional shape and saves 79 rank units overall;
-the final 2891-to-2888 walk accounts for nine of those units. The cumulative
-finite closure is 508 improved shapes and 28317 saved units, with no new
-square-price change. These are exact upper bounds, not an audited worldwide
-record or optimality claim.
+the final 2891-to-2888 walk accounts for nine of those units. At that
+checkpoint the finite closure was 508 improved shapes and 28317 saved units,
+with no new square-price change. These are exact upper bounds, not an audited
+worldwide record or optimality claim.
+
+The adjacent `14x16x21:2746` block formula was likewise already recorded in
+`block_composition_cross_audit.tsv` (row 297), but not retained as a full
+tensor. It has source orientation `16x14x21`, the same exact outer and four
+leaves as above, with allocations `(4,4,4,4)`, `(4,4,3,3)`, and `(5,6,5,5)`.
+All 48 available same-rank leaf combinations materialized at rank 2746. The
+lowest-density one is retained as `16x14x21-r2746.mfw.gz.b64` (decoded
+SHA-256 `0a92fa2e2a5af38f7b35b44f1540b97acab960db73088362136e1b3a9a0ffdfd`).
+Three 100-million-move walks from distinct rank-2746 variants (nonces
+21585, 21587, 21589) tied. Directly projecting the rank-2888 parent and
+running two further walks reached only rank 2793, so neither supersedes the
+rank-2746 formula. Materializing the formula lowers six additional prices
+and saves 269 more units against the immediately preceding retained closure.
+The cumulative finite closure is now 514 improved shapes and 28586 saved
+units; the sole square-price change remains `23x23x23:7328→7263`. This is a
+verified construction already present as a formula, not a new rank discovery.
 
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with

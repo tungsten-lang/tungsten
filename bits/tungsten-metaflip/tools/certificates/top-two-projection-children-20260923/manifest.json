@@ -1,0 +1,71 @@
+{
+  "schema": 1,
+  "field": "GF(2)",
+  "record_claim": false,
+  "comparison_scope": "Exact GF(2) upper bounds numerically below a dated Lille table; no optimality, cross-field or worldwide novelty claim.",
+  "source": "https://fmm.univ-lille.fr/",
+  "source_created_at": "2026-09-18T17:17:29",
+  "source_sha256": "a77c4286cd7ad9b5212b679d9e1e21672c7519a41124a3d71079d68bf0878213",
+  "first_projections": 4279,
+  "first_shapes": 229,
+  "per_shape": 2,
+  "rank_slack": 50,
+  "selected_intermediates": 211,
+  "child_projections": 10521,
+  "rows": [
+    {
+      "shape": [8, 13, 16], "rank": 1044,
+      "raw_rank": 1066, "cleanup_steps": 14,
+      "public_rank": 1054, "local_baseline_rank": 1068,
+      "source_portfolio_shape": [8, 15, 16],
+      "source_shape": [8, 16, 15],
+      "source_scheme_sha256": "c69a05f44ac7015d325ae9f12096a4007af87586ecfe8d4416c980168146565d",
+      "first_dimension": 2, "first_deleted_coordinate": 7,
+      "middle_shape": [8, 16, 14], "middle_raw_rank": 1148,
+      "middle_rank": 1129, "middle_cleanup_steps": 19,
+      "middle_sha256": "e74616f34448e150e5911e06149a61aa78e1992114f59ec2a91a27c013607798",
+      "second_dimension": 2, "second_deleted_coordinate": 6,
+      "sha256": "31ef26e94b119be4480111ced60d70fb41b3bc69aae4cd1fe1cb7be493e013a0"
+    },
+    {
+      "shape": [14, 20, 27], "rank": 4423,
+      "raw_rank": 4460, "cleanup_steps": 32,
+      "public_rank": 4454, "local_baseline_rank": 4551,
+      "source_portfolio_shape": [15, 20, 28],
+      "source_shape": [20, 28, 15],
+      "source_scheme_sha256": "813e0c83ec4f02c01ec883a61b5e6005698b75577c41808a07d40db12bcb39a2",
+      "first_dimension": 2, "first_deleted_coordinate": 8,
+      "middle_shape": [20, 28, 14], "middle_raw_rank": 4567,
+      "middle_rank": 4506, "middle_cleanup_steps": 48,
+      "middle_sha256": "9a38284cc211261f56e3c8ef473675ad59ff1eb06f99bb6232e7ba3d7afe6d13",
+      "second_dimension": 1, "second_deleted_coordinate": 15,
+      "sha256": "8746e5b96ab6b9d3caff4b1111772d4f64321e9f381c7e47d84c22f97dc84480"
+    },
+    {
+      "shape": [15, 16, 22], "rank": 3069,
+      "raw_rank": 3100, "cleanup_steps": 27,
+      "public_rank": 3168, "local_baseline_rank": 3071,
+      "source_portfolio_shape": [15, 16, 24],
+      "source_shape": [16, 24, 15],
+      "source_scheme_sha256": "7a0efe015d8230afc08c08a2ebfd7e2b116a6a68bc4e3c226458bdea4515fc78",
+      "first_dimension": 1, "first_deleted_coordinate": 15,
+      "middle_shape": [16, 23, 15], "middle_raw_rank": 3197,
+      "middle_rank": 3168, "middle_cleanup_steps": 26,
+      "middle_sha256": "0752dcbde78b7b44587ed225438df3d99e504de25f1bf784c67fd83682029652",
+      "second_dimension": 1, "second_deleted_coordinate": 16,
+      "sha256": "61fa49cd24af8b7de78f8e75e393090243bbaa4d69bfa908b28217ab1f77f2e9"
+    }
+  ],
+  "extensions": [
+    {
+      "shape": [16, 26, 32], "rank": 7308,
+      "public_rank": 7378, "local_baseline_rank": 7388,
+      "large_source_sha256": "31ef26e94b119be4480111ced60d70fb41b3bc69aae4cd1fe1cb7be493e013a0",
+      "large_source_rank": 1044, "large_orientation": [8, 13, 16],
+      "small_source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x2_rank7_strassen_gf2.txt",
+      "small_source_sha256": "9e0afd23436703e74eae1fc8faa10e391ffd725bbc5bedc44f14337279dc5c33",
+      "small_shape": [2, 2, 2], "small_rank": 7,
+      "sha256": "ad85724e72c9a2da59733ac77ad770dc11227fc597c2474b5be9645239516c9f"
+    }
+  ]
+}

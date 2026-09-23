@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "field": "GF(2)",
+  "record_claim": false,
+  "source": {
+    "kind": "middle-shear",
+    "manifest_sha256": "841015ac8e944e2f1af86f1faaff78e100e3787572b04d8dd6846e3c38cd07a6",
+    "oriented_shape": [16, 23, 31],
+    "rank": 6376,
+    "mfw_sha256": "04867c5f5a06a2a914b622c81e9b422e54bdce8cfc43e5c2eaf17e447957f577"
+  },
+  "steps": [
+    {
+      "axis": 1,
+      "deleted_coordinate": 12,
+      "shear_mask": 262274,
+      "raw_rank": 6322,
+      "cleanup_steps": 101,
+      "oriented_shape": [16, 22, 31],
+      "rank": 6189,
+      "sha256": "51b5424b8d532f706a623259a4cdafa9df3572c7a6226742faa682bfee1fa42b"
+    }
+  ]
+}

@@ -598,6 +598,21 @@ identity checks. Together they improve nine pinned composition prices by
 2176 for `11x14x23`; the exact GF(2) rank 2173 is lower, without a
 complete worldwide or cross-field novelty audit.
 
+Two neighboring retained tensors also improved. `11x15x24:2360` reached
+2357 in 100M directed moves (21165); a further 100M (21167) tied with
+lower density. Its retained SHA-256 is
+`31885ab4e8152ef759b1f0657ac9cab06405c8b881f45a1834c4c5390d2f96ba`.
+`11x14x24:2230` reached 2228/2226/2225 in three 100M walks
+(21169/21171/21173), with retained SHA-256
+`a2a344c79253a35cf36457825bb336fe9df826c856b0d93bd673735f5714ebf4`.
+Both complete tensors pass the Ruby and independent Python GF(2) checks;
+their 19-context basis scans found no improved children in this pass.
+Together they improve 28 pinned composition prices by 111 rank units,
+bringing the cumulative finite closure to 484 shapes and 27369 units.
+The [current Lille table](https://fmm.univ-lille.fr/) lists 2232 for
+`11x14x24`; the exact GF(2) rank 2225 is lower, without a complete
+worldwide or cross-field novelty audit.
+
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with
 `tools/replay_structured_parent_portfolio.rb --output DIR --only 5x9x20`.

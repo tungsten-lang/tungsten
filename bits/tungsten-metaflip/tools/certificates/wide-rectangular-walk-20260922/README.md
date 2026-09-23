@@ -483,9 +483,9 @@ certificates are independently expanded by
 MetaFlip package and certificate directory as appropriate).
 
 The pinned-catalog closure comparison is replayable with
-`python3 tools/check_wide_rectangular_closure.py CATALOG.json`. It reports 329
-rank-price improvements totaling 17207 terms among shapes with coordinates 2
-through 32; those are composition prices, not separate materialized
+`python3 tools/check_wide_rectangular_closure.py CATALOG.json`. The checker
+recomputes the pinned expected totals among shapes with coordinates 2 through
+32; those are composition prices, not separate materialized
 certificates for every improved shape. The sole square-price change is
 `23x23x23:7328→7263`; it is a composition price, not a materialized square
 certificate, and remains above Lille's listed rank 6504.

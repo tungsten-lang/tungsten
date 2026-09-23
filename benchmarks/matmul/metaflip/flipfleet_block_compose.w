@@ -4,13 +4,14 @@ use flipfleet_block_composer
 #
 #   flipfleet-block-compose 13x13 OUT
 #   flipfleet-block-compose 12x16x17 OUT 3,3,3,3 4,4,4,4 4,4,4,5
+#   flipfleet-block-compose 13x15x27 OUT --leaf-root /path/to/leaf-bank
 #
 # `NxN` is the square-tensor shorthand for <N,N,N>.  With no explicit
 # allocations the CLI scans every balanced 4-way placement and S3 ordering,
 # then materialises every minimum-formula tie to select the lowest exact rank.
 
 -> ffbc_cli_usage() i64
-  << "usage: flipfleet-block-compose NxN|NxMxP OUTPUT; optional: ALLOC-N ALLOC-M ALLOC-P"
+  << "usage: flipfleet-block-compose NxN|NxMxP OUTPUT; optional ALLOC-N ALLOC-M ALLOC-P; optional --leaf-root DIR"
   << "       allocations are four comma-separated nonnegative integers"
   0 - 1
 
@@ -73,7 +74,11 @@ use flipfleet_block_composer
   1
 
 av = argv()
-if av.size() != 2 && av.size() != 5
+if av.size() != 2 && av.size() != 4 && av.size() != 5 && av.size() != 7
+  exit(ffbc_cli_usage())
+explicit_alloc = av.size() == 5 || av.size() == 7
+external_root = av.size() == 4 || av.size() == 7
+if external_root && av[av.size()-2] != "--leaf-root"
   exit(ffbc_cli_usage())
 
 dims = i64[3]
@@ -82,6 +87,8 @@ if ffbc_cli_parse_target(av[0], dims) != 1
   exit(ffbc_cli_usage())
 output_path = av[1]
 root = "benchmarks/matmul/metaflip/"
+if external_root
+  root = av[av.size()-1] + "/"
 
 outer_path = root + "matmul_4x4_rank47_d450_gf2.txt"
 outer = ffbc_load_exact(outer_path, 4, 4, 4, 128)
@@ -199,7 +206,7 @@ source_m = dims[1] ## i64
 source_p = dims[2] ## i64
 orientation = 0 ## i64
 recipe = nil
-if av.size() == 5
+if explicit_alloc
   alloc_n = ffbc_cli_parse_allocation(av[2], outer.n(), dims[0])
   alloc_m = ffbc_cli_parse_allocation(av[3], outer.m(), dims[1])
   alloc_p = ffbc_cli_parse_allocation(av[4], outer.p(), dims[2])
@@ -231,7 +238,7 @@ if orientation != 0
 << "allocation " + alloc_n.join(",") + " | " + alloc_m.join(",") + " | " + alloc_p.join(",")
 << "formula rank " + nominal.to_s()
 
-if av.size() == 5
+if explicit_alloc
   result = ffbc_compose(outer, alloc_n, alloc_m, alloc_p, leaves)
 else
   result = ffbc_compose_oriented_recipe(outer, dims[0], dims[1], dims[2], leaves, recipe)

@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "field": "GF(2)",
+  "record_claim": false,
+  "formula_audit_sha256": "3155fb6198d83f5ec00e3d4c7190a59f961b9256cc028c7102c4cbbadcefe5aa",
+  "formula_source_revisions_sha256": "25f3c092e158914c9afc2850d89f886cdbc450b3d74496f369068bc92774a62d",
+  "comparison_source": "https://fmm.univ-lille.fr/",
+  "comparison_date": "2026-09-23",
+  "rows": [
+    {
+      "shape": [13, 15, 27],
+      "formula_rank": 3131,
+      "composed_exact_rank": 3129,
+      "composed_mfw_sha256": "09389e2f55d25637e83cffdc6b15d6eb67372b978e9cab286f4e9c55e66483c4",
+      "walk_steps": 100000000,
+      "walk_nonce": 21907,
+      "rank": 3126,
+      "listed_rank": 3191,
+      "mfw_sha256": "d538ac9cc146f6cfc2f66b41f5d6fe09a010699eea5546d1ca3e03fcddabb158"
+    },
+    {
+      "shape": [13, 16, 26],
+      "formula_rank": 3148,
+      "composed_exact_rank": 3148,
+      "rank": 3148,
+      "listed_rank": 3226,
+      "mfw_sha256": "2876afe774d34a0316185bf1cff17ac3ba1d83dfbcda38d0c9afd0991ebcffa4"
+    },
+    {
+      "shape": [13, 16, 27],
+      "formula_rank": 3256,
+      "composed_exact_rank": 3256,
+      "rank": 3256,
+      "listed_rank": 3346,
+      "mfw_sha256": "4998454ed751775a9c8ed61236fa56254c7fa3830936c5f697ef2ef124896cec"
+    }
+  ]
+}

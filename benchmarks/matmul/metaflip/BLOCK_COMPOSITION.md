@@ -60,6 +60,15 @@ winner under the requested dimensions and exact-verifies it:
 /tmp/flipfleet-block-compose 19x19 /tmp/r19.txt
 ```
 
+If the exact leaf bank is stored outside the checkout, append
+`--leaf-root DIR` after the output path or explicit allocations. The directory
+must contain the rank-47 outer tensor and the needed leaf files under their
+usual filenames. For example:
+
+```sh
+/tmp/flipfleet-block-compose 13x15x27 /tmp/r13x15x27.txt --leaf-root /path/to/leaf-bank
+```
+
 `NxN` means the square tensor `<N,N,N>`.  Rectangular tensor notation is
 `NxMxP`.  For example, the default 15x16x17 scan selects source 16x15x17 at
 formula and exact rank 2329, then applies S3 code 4 to emit the requested
@@ -267,6 +276,11 @@ The complete 840-row comparison is persisted in
 [`block_composition_cross_audit.tsv`](block_composition_cross_audit.tsv), with
 the exact source revisions and artifact digest in
 [`block_composition_cross_audit_sources.tsv`](block_composition_cross_audit_sources.tsv).
+Three later exact materializations are pinned in
+[`block47-exact-20260923`](../../../bits/tungsten-metaflip/tools/certificates/block47-exact-20260923/README.md):
+the audited 13x15x27 formula rank 3131 becomes 3129 after cancellation and
+3126 after a bounded directed walk. These are verified GF(2) tensors, not a
+claim that the Lille table is an exhaustive worldwide frontier.
 
 The follow-up bounded pass removes the balanced-allocation restriction.  It
 enumerates every ordered four-part allocation with entries in 3--8 and every

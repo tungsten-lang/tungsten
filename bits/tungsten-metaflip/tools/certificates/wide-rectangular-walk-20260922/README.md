@@ -181,6 +181,18 @@ ranks (2412, 2616, 2444, 2342) are numerically below the Lille table's
 2434, 2657, 2499, and 2360 entries at this audit. This is neither a
 worldwide/cross-field novelty claim nor an optimality proof.
 
+One further bounded projection generation retains three complete tensors.
+`15x23x12:2442` projects to `14x23x12:2348`, walked to 2326 and 2323
+(50 million and 100 million moves, nonces 19469 and 19475), and to
+`15x22x12:2381`, walked to 2375 (nonce 19471); its 100-million-move
+continuation (nonce 19477) tied. `16x21x13:2616` projects to
+`16x21x12:2396`, walked to 2380 and 2379 (nonces 19473 and 19479).
+All three retained results pass both independent full-tensor verifiers. They
+affect five shapes and save 165 further rank units against the preceding
+closure, raising the cumulative retained impact to 367 shapes and 19045
+rank units. The oriented `12x16x21:2379` is numerically below Lille's 2385
+entry at this audit; no worldwide or cross-field novelty is claimed.
+
 Replaying the `15x20x28` structured-parent row yields a rank-4700 tensor in
 factor order `20x28x15`. Deleting coordinate 13 of the first axis and applying
 exact GF(2) cancellation/compression yields `19x28x15` at rank 4600; exact

@@ -321,6 +321,15 @@ class WideRectangularCertificateTest(unittest.TestCase):
             ((16, 22, 11), 2342,
              'c1b99f74ec4d2b678ba62cba1d6ae80fd711e55eccb963b001af5b8b8e63a1df',
              (15, 16, 24), 3225, 3240),
+            ((14, 23, 12), 2323,
+             '67d498c2543e671dfb8d947482f9cd00144047fd5df986770f0f40a75bf6096f',
+             (15, 16, 24), 3225, 3240),
+            ((15, 22, 12), 2375,
+             '609101b2e7b4a2eab6614cb9293aee81e00eb5a9183db21386875a11771b93ef',
+             (15, 16, 24), 3225, 3240),
+            ((16, 21, 12), 2379,
+             '96de2756ea2332b32d17b10bc078f6f150842dde6b56197d0e6f4c2e6d5a728a',
+             (15, 16, 24), 3225, 3240),
         )
         for shape, rank, digest, parent_shape, parent_rank, catalog_bound in rows:
             with self.subTest(shape=shape):

@@ -14,6 +14,7 @@ import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import screen_composed_parent_children as chain
+import screen_structured_parent_projections as structured
 import screen_top_two_projection_children as top
 from screen_structured_parent_projections import project_grid
 from verify_cofactor_mergers import refactor_shared
@@ -30,6 +31,22 @@ def build_parents(root):
         parents.append(verified)
         children.append(verified)
     return children
+
+
+def build_structured_parents(root):
+    data = json.loads(structured.KNOWN_PROJECTIONS.read_text())
+    sources, outputs = root / 'sources', root / 'outputs'
+    structured.replay_sources(sources,
+                              (row['source_portfolio_shape'] for row in data['rows']))
+    outputs.mkdir(parents=True)
+    parents = [structured.materialize(row, sources, outputs)
+               for row in data['rows']]
+    parents.extend(structured.materialize_extension(row, outputs, outputs)
+                   for row in data['extensions'])
+    parents.extend(structured.materialize_descendant(row, outputs, outputs)
+                   for row in sorted(data['descendants'],
+                                     key=lambda row: row['generation']))
+    return parents
 
 
 def initial_seeds(parents):
@@ -185,16 +202,24 @@ def main():
     group.add_argument('--digest', type=Path)
     group.add_argument('--replay-manifest', type=Path)
     parser.add_argument('--depth', type=int, default=1)
+    parser.add_argument('--parent-set', choices=('composed-chain', 'structured-projections'))
     parser.add_argument('--output-dir', type=Path)
     args = parser.parse_args()
     if args.replay_manifest and args.output_dir is None:
         parser.error('--replay-manifest requires --output-dir')
     with tempfile.TemporaryDirectory(prefix='metaflip-neutral-basis-child-') as tmp:
         root = Path(tmp)
-        parents = build_parents(root / 'parents')
-        data = (json.loads(args.replay_manifest.read_text()) if args.replay_manifest
-                else screen_recursive(json.loads(args.digest.read_text()), parents,
-                                      root / 'search', args.depth))
+        replay = (json.loads(args.replay_manifest.read_text())
+                  if args.replay_manifest else None)
+        parent_set = args.parent_set or (replay or {}).get('parent_set', 'composed-chain')
+        if replay and parent_set != replay.get('parent_set', 'composed-chain'):
+            parser.error('parent set conflicts with replay manifest')
+        parents = (build_structured_parents(root / 'parents')
+                   if parent_set == 'structured-projections'
+                   else build_parents(root / 'parents'))
+        data = replay if replay else dict(
+            screen_recursive(json.loads(args.digest.read_text()), parents,
+                             root / 'search', args.depth), parent_set=parent_set)
         if args.output_dir:
             args.output_dir.mkdir(parents=True, exist_ok=False)
             rows = []

@@ -935,6 +935,21 @@ stronger baseline that also includes every local cross-audit formula, they
 improve 24 shapes and save 808 units. The Lille comparisons are numerical
 snapshots, not an exhaustive GF(2), cross-field, or unpublished-result audit.
 
+One additional exact descendant came from the near-miss projection of
+`16x14x19:2548`: basis refactoring and matrix cleanup yielded
+`16x13x19:2417`, and two directed 100-million-move walks (nonces 21701 and
+21707) reached ranks 2394 and 2393. The retained
+`16x13x19-r2393.mfw.gz.b64` has decoded SHA-256
+`8db2f6ec9aa370435baab43cbeccfe04c34559469f9c1f8d675464e307352760`.
+Both independent full-tensor verifiers pass. The [Lille table](https://fmm.univ-lille.fr/)
+listed `13x16x19:2414` on 2026-09-23, a numerical difference of 21. A
+projected `16x13x18` child reached verified rank 2282, but was not retained:
+Lille already listed rank 2276. These are bounded-search observations, not
+optimality or exhaustive worldwide-record claims.
+The new seed improves three more shapes and saves 50 rank units against the
+prior retained closure, giving 587 shapes and 32628 saved units cumulatively;
+the same marginal gain holds against the local formula-aware baseline.
+
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with
 `tools/replay_structured_parent_portfolio.rb --output DIR --only 5x9x20`.

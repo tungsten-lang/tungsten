@@ -1,5 +1,5 @@
 # One native cold child owns this FIFO. A task is one bounded basis context,
-# coordinate projection, or middle-mask projection family. The best projection
+# coordinate projection, or axis-mask projection family. The best projection
 # of each axis gets two terminal basis sweeps. A strict rank drop at either
 # sweep or mask boundary schedules projections, so productive chains continue.
 # Successors go to the tail. Index pages bind full source identity + context;
@@ -26,7 +26,7 @@ use feedback
   if fields.size() != 3 || fields[0] != "MFT_TASK1" || ffrf_hash_valid(fields[1]) != 1
     return 0-1
   mode = ffpk_decimal(fields[2]) ## i64
-  if mode < 0 || mode >= 3127 || raw != "MFT_TASK1 " + fields[1] + " " + mode.to_s() + "\n"
+  if mode < 0 || mode >= 3129 || raw != "MFT_TASK1 " + fields[1] + " " + mode.to_s() + "\n"
     return 0-1
   mode
 
@@ -35,6 +35,10 @@ use feedback
     return "basis"
   if mode == 3126
     return "mask"
+  if mode == 3127
+    return "mask-first"
+  if mode == 3128
+    return "mask-last"
   if mode >= 3090
     return "postbasis"
   "project"
@@ -42,7 +46,7 @@ use feedback
 -> ffxt_index_ordinal(mode) (i64) i64
   if mode < 18
     return mode+1
-  if mode == 3126
+  if mode >= 3126
     return 1
   if mode >= 3090
     return mode-3089
@@ -83,7 +87,7 @@ use feedback
   if File.exists?(root + "/stop")
     return 0-1
   queue = root + "/composition/transforms/"
-  if ffrf_hash_valid(identity) != 1 || mode < 0 || mode >= 3127
+  if ffrf_hash_valid(identity) != 1 || mode < 0 || mode >= 3129
     return 0
   names = ["tasks-pages", "results-pages", "index"]
   i = 0 ## i64
@@ -112,6 +116,15 @@ use feedback
   if submitted >= 999999999999 || ffbq_put(queue, "tasks", submitted+1, raw) != 1 || ffxt_bind(queue, raw, submitted+1) != 1
     return 0
   ffrf_atomic(queue + "submitted", (submitted+1).to_s() + "\n", "wide-transform")
+
+-> ffxt_offer_masks(root, identity, n, m, p) (String String i64 i64 i64) i64
+  if m >= 2 && m <= 32 && ffxt_offer(root, identity, 3126) != 1
+    return 0
+  if n >= 2 && n <= 32 && ffxt_offer(root, identity, 3127) != 1
+    return 0
+  if p >= 2 && p <= 32 && ffxt_offer(root, identity, 3128) != 1
+    return 0
+  1
 
 -> ffxt_coordinates(n, m, p) (i64 i64 i64) i64
   count = 0 ## i64
@@ -155,14 +168,23 @@ use feedback
     i += 1
   1
 
-# One exact middle shear/projection/cleanup context. The paired A-row change
-# vanishes with the deleted coordinate; projection.w materializes the B-row
-# XORs. Every published winner still passes the whole-tensor gate in task().
--> ffxt_mask_rank(source, before, n, m, p, removed, mask, scratch, words, out, stats, meta) (i64[] i64 i64 i64 i64 i64 i64 i64[] i64 i64[] i64[] i64[]) i64
-  projected = ffwp_middle_mask_project(source, 3*32*16384, before, n, m, p, removed, mask, scratch, words, out, 3*32*16384) ## i64
+# One exact axis shear/projection/cleanup context. The changed first-factor
+# coordinate vanishes under projection; projection.w materializes the opposite
+# incident factor's XORs. Published winners pass the whole-tensor gate.
+-> ffxt_mask_rank(source, before, n, m, p, axis, removed, mask, scratch, words, out, stats, meta) (i64[] i64 i64 i64 i64 i64 i64 i64 i64[] i64 i64[] i64[] i64[]) i64
+  projected = ffwp_axis_mask_project(source, 3*32*16384, before, n, m, p, axis, removed, mask, scratch, words, out, 3*32*16384) ## i64
   if projected < 1
     return 0
-  rank = ffwm_reduce(out, 3*32*16384, projected, n, m-1, p, scratch, words, 20000000, stats, 6) ## i64
+  nn = n ## i64
+  mm = m ## i64
+  pp = p ## i64
+  if axis == 0
+    nn -= 1
+  elsif axis == 1
+    mm -= 1
+  else
+    pp -= 1
+  rank = ffwm_reduce(out, 3*32*16384, projected, nn, mm, pp, scratch, words, 20000000, stats, 6) ## i64
   if rank < 1
     return 0
   meta[3] += stats[0]
@@ -170,24 +192,29 @@ use feedback
     meta[4] = 1
   rank
 
-# Bounded context family: all single-row shears choose a deletion coordinate,
-# then empty/two/three-row masks are evaluated only at that coordinate. This
-# is a search heuristic, not a claim that other middle bases are dominated.
--> ffxt_mask_scan(root, source, before, n, m, p, scratch, words, out, meta) (String i64[] i64 i64 i64 i64 i64[] i64 i64[] i64[]) i64
-  if m < 2 || m > 32
+# Bounded context family: all one-coordinate shears choose a deletion coordinate,
+# then empty/two/three-coordinate masks are evaluated there. This is a search
+# heuristic, not a claim that other bases are dominated.
+-> ffxt_mask_scan(root, source, before, n, m, p, axis, scratch, words, out, meta, selection) (String i64[] i64 i64 i64 i64 i64 i64[] i64 i64[] i64[] i64[]) i64
+  size = n ## i64
+  if axis == 1
+    size = m
+  elsif axis == 2
+    size = p
+  if axis < 0 || axis > 2 || size < 2 || size > 32
     return 0
   stats = i64[6]
   best = before+1 ## i64
   selected = 0-1 ## i64
   winner = 0 ## i64
   a = 0 ## i64
-  while a < m
+  while a < size
     b = 0 ## i64
-    while b < m
+    while b < size
       if File.exists?(root + "/stop")
         return 0-1
       if a != b
-        rank = ffxt_mask_rank(source, before, n, m, p, a, 1 << b, scratch, words, out, stats, meta) ## i64
+        rank = ffxt_mask_rank(source, before, n, m, p, axis, a, 1 << b, scratch, words, out, stats, meta) ## i64
         if rank < 1
           return 0
         if rank < best
@@ -197,32 +224,32 @@ use feedback
       b += 1
     a += 1
   a = selected
-  rank = ffxt_mask_rank(source, before, n, m, p, a, 0, scratch, words, out, stats, meta) ## i64
+  rank = ffxt_mask_rank(source, before, n, m, p, axis, a, 0, scratch, words, out, stats, meta) ## i64
   if rank < 1
     return 0
   if rank < best
     best = rank
     winner = 0
   b = 0 ## i64
-  while b < m
+  while b < size
     if b != a
       c = b+1 ## i64
-      while c < m
+      while c < size
         if c != a
           mask = (1 << b) | (1 << c) ## i64
-          rank = ffxt_mask_rank(source, before, n, m, p, a, mask, scratch, words, out, stats, meta) ## i64
+          rank = ffxt_mask_rank(source, before, n, m, p, axis, a, mask, scratch, words, out, stats, meta) ## i64
           if rank < 1
             return 0
           if rank < best
             best = rank
             winner = mask
           d = c+1 ## i64
-          while d < m
+          while d < size
             if File.exists?(root + "/stop")
               return 0-1
             if d != a
               mask = (1 << b) | (1 << c) | (1 << d) ## i64
-              rank = ffxt_mask_rank(source, before, n, m, p, a, mask, scratch, words, out, stats, meta) ## i64
+              rank = ffxt_mask_rank(source, before, n, m, p, axis, a, mask, scratch, words, out, stats, meta) ## i64
               if rank < 1
                 return 0
               if rank < best
@@ -233,9 +260,11 @@ use feedback
     b += 1
   if File.exists?(root + "/stop")
     return 0-1
-  rank = ffxt_mask_rank(source, before, n, m, p, a, winner, scratch, words, out, stats, meta) ## i64
+  rank = ffxt_mask_rank(source, before, n, m, p, axis, a, winner, scratch, words, out, stats, meta) ## i64
   if rank != best
     return 0
+  selection[0] = a
+  selection[1] = winner
   rank
 
 # Returns rank; result meta = n,m,p,charged work,work-limited. A basis task
@@ -251,10 +280,16 @@ use feedback
   meta[3] = 0
   meta[4] = 0
   rank = before ## i64
-  if mode == 3126
-    rank = ffxt_mask_scan(root, source, before, n, m, p, scratch, words, out, meta)
+  if mode >= 3126 && mode <= 3128
+    axis = 1 ## i64
+    if mode == 3127
+      axis = 0
+    if mode == 3128
+      axis = 2
+    chosen = i64[2]
+    rank = ffxt_mask_scan(root, source, before, n, m, p, axis, scratch, words, out, meta, chosen)
     if rank > 0
-      meta[1] = m-1
+      meta[axis] -= 1
     return rank
   basis_mode = mode ## i64
   if mode >= 3090
@@ -334,7 +369,12 @@ use feedback
   info = i64[4]
   meta = i64[5]
   before = ffpk_parse(blob, source, 3*32*16384, info, 4) ## i64
-  if before < 1 || (mode >= 18 && mode < 3090 && mode >= 18+ffxt_coordinates(info[0], info[1], info[2])) || (mode == 3126 && info[1] < 2)
+  mask_axis = 1 ## i64
+  if mode == 3127
+    mask_axis = 0
+  if mode == 3128
+    mask_axis = 2
+  if before < 1 || (mode >= 18 && mode < 3090 && mode >= 18+ffxt_coordinates(info[0], info[1], info[2])) || (mode >= 3126 && (info[mask_axis] < 2 || info[mask_axis] > 32))
     return 0
   checked = ffpk_exact(source, 3*32*16384, before, info[0], info[1], info[2], parity, 32768, 20000000) ## i64
   if checked != 1
@@ -363,7 +403,7 @@ use feedback
     if offered != 1
       return offered
     admitted = rank
-  # Offer at most two continuations. Paged per-source indexes make a replay
+  # Offer bounded continuations. Paged per-source indexes make a replay
   # idempotent even if other producers append after an interrupted task.
   successor = 0 ## i64
   if mode < 17 || (mode >= 18 && mode < 3090 && mode+1 < 18+ffxt_coordinates(info[0], info[1], info[2])) || (mode >= 3090 && mode < 3107) || (mode >= 3108 && mode < 3125)
@@ -394,11 +434,11 @@ use feedback
         successor = ffxt_offer(root, parts[1], 18)
         if successor != 1
           return successor
-      if mode == 3125 && info[1] > 1
-        successor = ffxt_offer(root, parts[1], 3126)
+      if mode == 3125
+        successor = ffxt_offer_masks(root, parts[1], info[0], info[1], info[2])
         if successor != 1
           return successor
-  if mode == 3126 && admitted > 0 && rank < before && ffxt_coordinates(meta[0], meta[1], meta[2]) > 0
+  if mode >= 3126 && mode <= 3128 && admitted > 0 && rank < before && ffxt_coordinates(meta[0], meta[1], meta[2]) > 0
     successor = ffxt_offer(root, result, 18)
     if successor != 1
       return successor
@@ -422,14 +462,14 @@ use feedback
           break
         coordinate -= size
       axis += 1
-    if info[1] > 1 && mode == 17+ffxt_coordinates(info[0], info[1], info[2])
+    if mode == 17+ffxt_coordinates(info[0], info[1], info[2])
       shape = info[0].to_s() + "x" + info[1].to_s() + "x" + info[2].to_s()
       best = File.read_prefix(root + "/composition/best/" + shape, 100)
       if best != nil
         parts = best.strip().split(" ")
         if parts.size() != 2 || ffpk_decimal(parts[0]) < 1 || ffrf_hash_valid(parts[1]) != 1 || best != parts[0] + " " + parts[1] + "\n"
           return 0
-        successor = ffxt_offer(root, parts[1], 3126)
+        successor = ffxt_offer_masks(root, parts[1], info[0], info[1], info[2])
         if successor != 1
           return successor
   record = "MFT_RESULT1 " + Crypto:SHA256.hexdigest(raw) + " " + result + " " + meta[0].to_s() + " " + meta[1].to_s() + " " + meta[2].to_s() + " " + before.to_s() + " " + rank.to_s() + " " + admitted.to_s() + " " + status.to_s() + " " + meta[3].to_s() + "\n"

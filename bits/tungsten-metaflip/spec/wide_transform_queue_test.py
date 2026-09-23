@@ -3,7 +3,7 @@
 from hashlib import sha256
 from collections import Counter
 from functools import lru_cache
-from itertools import permutations
+from itertools import combinations, permutations
 from pathlib import Path
 import os
 import subprocess
@@ -20,6 +20,7 @@ from verify_cofactor_mergers import refactor_shared, compress_shared
 from verify_coordinate_projections import project_grid
 from wide_feedback_test import audit as audit_feedback
 import screen_middle_shear_children as middle
+import replay_axis_mask_cascade as axis_mask
 
 
 def count(path):
@@ -50,6 +51,21 @@ def project_coordinate(shape, terms, axis, removed):
             row.append(maps[k][word])
         if all(row): result[tuple(row)]^=1
     return sorted(t for t,odd in result.items() if odd)
+
+
+def axis_mask_best_rank(shape, terms, axis):
+    size=shape[axis]; best=len(terms)+1; selected=None
+    for removed in range(size):
+        for bit in range(size):
+            if bit==removed: continue
+            rank=len(axis_mask.child(shape,terms,axis,removed,1<<bit)[2])
+            if rank<best: best,selected=rank,removed
+    for weight in (0,2,3):
+        for bits in combinations((b for b in range(size) if b!=selected),weight):
+            rank=len(axis_mask.child(shape,terms,axis,selected,
+                                     sum(1<<b for b in bits))[2])
+            if rank<best: best=rank
+    return best
 
 
 def projection_oracle_tests():
@@ -171,6 +187,9 @@ def productive_middle_mask(binary):
             if mask_ticket is not None and count(queue/'consumed')>=mask_ticket:
                 break
         assert mask_ticket is not None and count(queue/'consumed')>=mask_ticket
+        offered_modes={int(read_record(queue,'tasks',ticket).decode().split()[2])
+                       for ticket in range(1,count(queue/'submitted')+1)}
+        assert {3126,3127,3128}<=offered_modes
         checked=audit(tiny)
         assert checked['mask']>=1 and checked['limited']==0
 
@@ -196,10 +215,44 @@ def productive_middle_mask(binary):
               'postbasis mask task',mask_ticket,'root mask task',parent_mask)
 
 
+def productive_axis_masks(binary):
+    package=Path(__file__).resolve().parents[1]
+    replay=package/'tools/replay_structured_parent_portfolio.rb'
+    cases=(('8x18x30','8x30x18',3128,'mask-last',(8,30,17),2472,
+            'a9c1ec3aa769d51ed46418ed112924f0e9abf9d352ad0c14351cf4fe0829146e'),
+           ('10x12x20','12x10x20',3127,'mask-first',(11,10,20),1397,
+            '35aead2549cb29e21236dff425e10e657f5248acc9b8987473c07fdb29228d49'))
+    with tempfile.TemporaryDirectory(prefix='metaflip-axis-mask-queue-') as directory:
+        root=Path(directory)
+        for index,(portfolio,oriented,mode,kind,shape,rank,digest) in enumerate(cases):
+            parent=root/f'parent{index}'
+            subprocess.run(['ruby',str(replay),'--output',str(parent),'--only',portfolio],
+                           check=True,capture_output=True,text=True,timeout=30)
+            source=parent/portfolio/f'{oriented}.mfw'
+            workspace=root/f'pass{index}'; workspace.mkdir()
+            offered=subprocess.run([binary,'--offer-file',str(workspace),str(source)],
+                                   check=True,capture_output=True,text=True,timeout=30)
+            identity=offered.stdout.split()[1]
+            subprocess.run([binary,'--offer-task',str(workspace),identity,str(mode)],
+                           check=True,capture_output=True,text=True,timeout=30)
+            drained=subprocess.run([binary,'--drain',str(workspace),'3'],
+                                   check=True,capture_output=True,text=True,timeout=60)
+            assert 'done=3' in drained.stdout
+            queue=workspace/'composition/transforms'
+            assert read_record(queue/'index'/identity,kind,1)==b'3\n'
+            assert (workspace/'composition/best'/'x'.join(map(str,shape))).read_text().split()==[
+                str(rank),digest]
+            actual_shape,terms=read_blob((workspace/'composition/objects'/f'{digest}.tensor').read_bytes())
+            assert actual_shape==shape and len(terms)==rank
+            exact(shape,terms)
+    print('PASS native first/last axis masks: 8x17x30 r2472; 10x11x20 r1397')
+
+
 def audit(root, progress=None):
     q=root/'composition/transforms'; objects=root/'composition/objects'
     done=count(q/'consumed'); submitted=count(q/'submitted')
-    verified=set(); seen=set(); counts=dict(contexts=done,basis=0,project=0,postbasis=0,mask=0,neutral=0,limited=0)
+    verified=set(); seen=set(); counts=dict(contexts=done,basis=0,project=0,postbasis=0,
+                                            mask=0,mask_first=0,mask_last=0,neutral=0,limited=0)
     @lru_cache(maxsize=64)
     def load(h):
         raw=(objects/f'{h}.tensor').read_bytes(); assert sha256(raw).hexdigest()==h
@@ -213,6 +266,8 @@ def audit(root, progress=None):
         assert (h,mode) not in seen; seen.add((h,mode))
         if mode<18: kind,ordinal='basis',mode+1
         elif mode==3126: kind,ordinal='mask',1
+        elif mode==3127: kind,ordinal='mask-first',1
+        elif mode==3128: kind,ordinal='mask-last',1
         elif mode>=3090: kind,ordinal='postbasis',mode-3089
         else: kind,ordinal='project',mode-17
         assert read_record(q/'index'/h,kind,ordinal)==f'{ticket}\n'.encode()
@@ -221,7 +276,7 @@ def audit(root, progress=None):
         record=read_record(q,'results',ticket); fields=record.decode().split()
         assert len(fields)==11 and fields[0]=='MFT_RESULT1' and fields[1]==sha256(raw).hexdigest()
         n,m,p,before,proposed,admitted,status,work=map(int,fields[3:])
-        work_bound=150000000000 if mode==3126 else 140000000
+        work_bound=150000000000 if mode>=3126 else 140000000
         assert before==len(terms) and 1<=proposed<=before and status in (1,2,3) and 0<=work<=work_bound
         assert record==(' '.join(fields)+'\n').encode()
         expected=terms; dims=shape
@@ -232,12 +287,14 @@ def audit(root, progress=None):
                 for axis in order:
                     expected,_=refactor_shared(expected,axis,max_bits=width,reverse_columns=bool(basis_mode%2))
                 if sorted(expected)==terms: break
-        elif mode==3126:
-            assert shape[1]>=2
-            dims=(shape[0],shape[1]-1,shape[2])
+        elif mode>=3126:
+            axis={3126:1,3127:0,3128:2}[mode]
+            assert 2<=shape[axis]<=32
+            dims=tuple(size-(i==axis) for i,size in enumerate(shape))
             expected=None
             if status==1:
-                assert proposed==middle.screen(shape,terms,h)['row']['rank']
+                assert proposed==(middle.screen(shape,terms,h)['row']['rank'] if axis==1
+                                  else axis_mask_best_rank(shape,terms,axis))
         else:
             index=mode-18; coordinate=None
             for axis,size in enumerate(shape):
@@ -259,7 +316,7 @@ def audit(root, progress=None):
             if status==1 and expected is not None: assert result==sorted(expected)
             assert (root/f'composition/by-shape/{n}x{m}x{p}'/fields[2]).is_file()
             counts['neutral']+=mode<18 and h!=fields[2] and admitted==before
-        counts[kind]+=1; counts['limited']+=status!=1
+        counts[kind.replace('-','_')]+=1; counts['limited']+=status!=1
         if progress is not None and ticket%100==0:
             progress(dict(counts,ticket=ticket,full_tensors=len(verified)))
     counts['full_tensors']=len(verified)
@@ -271,6 +328,7 @@ def check(binary, retained=None, public=None):
     print('PASS row-block projection oracle:',projection_oracle_tests(),'dense/sparse grid comparisons')
     productive_postbasis(binary)
     productive_middle_mask(binary)
+    productive_axis_masks(binary)
     with tempfile.TemporaryDirectory(prefix='metaflip-wide-queue-') as temp:
         root=Path(temp) if retained is None else Path(retained)
         if retained is not None: assert not root.exists(); root.mkdir()
@@ -315,11 +373,12 @@ def check(binary, retained=None, public=None):
         for _ in range(100):
             if count(q/'consumed')==count(q/'submitted'): break
             run(['--drain',root,4])
-        assert count(q/'consumed')==count(q/'submitted')==241
+        assert count(q/'consumed')==count(q/'submitted')==281
         checked=audit(root)
         feedback=audit_feedback(root)
         assert feedback['submitted']>0 and feedback['consumed']==0
-        assert checked['basis']==36 and checked['project']==133 and checked['postbasis']==72
+        assert (checked['basis'],checked['project'],checked['postbasis'],
+                checked['mask_last'])==(36,135,108,2)
         assert checked['neutral']>0 and checked['limited']==0
         # Full-term identity retains the useful rank tie, not just one rank.
         assert len(list((root/'composition/by-shape/1x1x65').iterdir()))==2

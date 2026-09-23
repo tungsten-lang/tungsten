@@ -38,6 +38,28 @@ if ARGV.size() == 5 && ARGV[0] == "--middle-mask"
     exit(1)
   << "WIDE_MIDDLE_MASK " + rank.to_s() + " " + reduced.to_s()
   exit(0)
+if ARGV.size() == 6 && ARGV[0] == "--axis-mask"
+  raw = File.read_prefix(ARGV[1], 12632129)
+  if raw == nil
+    exit(2)
+  source = i64[3*32*16384]
+  work = i64[3*32*16384]
+  target = i64[3*32*16384]
+  meta = i64[4]
+  rank = ffpk_parse(raw, source, 3*32*16384, meta, 4) ## i64
+  if rank < 1
+    exit(2)
+  axis = ffpk_decimal(ARGV[3]) ## i64
+  removed = ffpk_decimal(ARGV[4]) ## i64
+  mask = ffpk_decimal(ARGV[5]) ## i64
+  reduced = ffwp_axis_mask_project(source, 3*32*16384, rank, meta[0], meta[1], meta[2], axis, removed, mask, work, 3*32*16384, target, 3*32*16384) ## i64
+  if reduced < 0
+    exit(2)
+  meta[axis] -= 1
+  if !write_file(ARGV[2], ffpk_blob(target, reduced, meta[0], meta[1], meta[2]))
+    exit(1)
+  << "WIDE_AXIS_MASK " + rank.to_s() + " " + reduced.to_s()
+  exit(0)
 if ARGV.size() == 5 && ARGV[0] == "--project"
   raw = File.read_prefix(ARGV[1], 12632129)
   if raw == nil

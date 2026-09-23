@@ -1,5 +1,36 @@
 use ../lib/metaflip/composition/transform_queue
 
+if ARGV.size() == 4 && ARGV[0] == "--axis-mask-scan"
+  raw = File.read_prefix(ARGV[1], 12632129)
+  if raw == nil
+    exit(2)
+  source = i64[3*32*16384]
+  out = i64[3*32*16384]
+  parity = i64[32768]
+  info = i64[4]
+  meta = i64[5]
+  choice = i64[2]
+  before = ffpk_parse(raw, source, 3*32*16384, info, 4) ## i64
+  axis = ffpk_decimal(ARGV[3]) ## i64
+  if before < 1 || axis < 0 || axis > 2 || ffpk_exact(source, 3*32*16384, before, info[0], info[1], info[2], parity, 32768, 20000000) != 1
+    exit(1)
+  stride = ffpk_stride(info[0], info[1], info[2]) ## i64
+  words = ffwm_scratch_words(before, stride) ## i64
+  scratch = i64[words]
+  meta[0] = info[0]
+  meta[1] = info[1]
+  meta[2] = info[2]
+  meta[3] = 0
+  meta[4] = 0
+  rank = ffxt_mask_scan("/private/tmp/metaflip-axis-mask-scan-nostop-20260923", source, before, info[0], info[1], info[2], axis, scratch, words, out, meta, choice) ## i64
+  if rank < 1
+    exit(1)
+  meta[axis] -= 1
+  if ffpk_exact(out, 3*32*16384, rank, meta[0], meta[1], meta[2], parity, 32768, 20000000) != 1 || !write_file(ARGV[2], ffpk_blob(out, rank, meta[0], meta[1], meta[2]))
+    exit(1)
+  << "AXIS_MASK_SCAN " + axis.to_s() + " " + before.to_s() + " " + rank.to_s() + " " + choice[0].to_s() + " " + choice[1].to_s() + " " + meta[3].to_s()
+  exit(0)
+
 -> ffms_rank(source, before, n, m, p, removed, mask, scratch, words, out, stats) (i64[] i64 i64 i64 i64 i64 i64 i64[] i64 i64[] i64[]) i64
   projected = ffwp_middle_mask_project(source, 3*32*16384, before, n, m, p, removed, mask, scratch, words, out, 3*32*16384) ## i64
   if projected < 1

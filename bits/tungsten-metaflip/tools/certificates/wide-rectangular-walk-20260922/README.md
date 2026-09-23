@@ -1043,6 +1043,28 @@ Against the pinned catalog plus retained candidates, the cumulative closure
 is 610 improved shapes and 33434 saved units, two shapes and 96 units beyond
 the preceding closure.
 
+An independent restart of the exact projection `8x19x26:2366` →
+`8x18x26:2295` (remove Y coordinate 9) reached rank 2275 after 100 million
+moves with nonce 21801, then rank 2274 after 100 million more with nonce
+21805. The latter parent has two useful exact projections: remove Z
+coordinate 12 and clean to `8x18x25:2185`; remove Y coordinate 4 and clean
+to `8x17x26:2171`. A related projection from the rank-2275 parent reached
+`8x18x25:2188` after removing Z coordinate 13; 100 million moves with
+nonce 21807 reduced that child to the retained rank 2180. From the
+rank-2171 sibling, 100 million moves with nonce 21811 reached 2164 and
+another 100 million with nonce 21813 reached the retained rank 2162.
+The retained parent and children have decoded SHA-256 digests, respectively,
+`b395d94bf89b72a0e539cf98098e029c0da5eb200aa014bb46baa85c882f98c5`,
+`8e149658f726da96e5a88c510fb67cc27f756e6ede7df797e80279d5c77da26e`,
+and `7124f60fd896eceabe1b978482319c099ef2889c52b075a7aa878148628df8f3`.
+All three pass independent full-tensor checks. The 2026-09-23 Lille table
+lists 2275, 2200, and 2191 for these shapes; the ranks here are exact GF(2)
+constructions and numerical table comparisons, not exhaustive worldwide
+novelty claims. Against the stronger local formula-aware closure, they
+improve four shapes by 33 rank units, with no square-price change.
+The pinned catalog-plus-retained closure reaches 614 improved shapes and
+33484 saved units, four shapes and 50 units beyond the preceding closure.
+
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with
 `tools/replay_structured_parent_portfolio.rb --output DIR --only 5x9x20`.

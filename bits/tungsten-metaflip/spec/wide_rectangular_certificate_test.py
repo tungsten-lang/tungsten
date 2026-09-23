@@ -190,6 +190,15 @@ class WideRectangularCertificateTest(unittest.TestCase):
         self.check_certificate((7, 19, 24), 2002,
                                'a80e6ec2507b7f166f025651b630f9e3f5855b486c2b1f845858b3a14d75a463',
                                compressed=True)
+        self.check_certificate((8, 18, 26), 2274,
+                               'b395d94bf89b72a0e539cf98098e029c0da5eb200aa014bb46baa85c882f98c5',
+                               compressed=True)
+        self.check_certificate((8, 18, 25), 2180,
+                               '8e149658f726da96e5a88c510fb67cc27f756e6ede7df797e80279d5c77da26e',
+                               compressed=True)
+        self.check_certificate((8, 17, 26), 2162,
+                               '7124f60fd896eceabe1b978482319c099ef2889c52b075a7aa878148628df8f3',
+                               compressed=True)
 
     def test_12x10x20_rank_1448(self):
         self.check_certificate((12, 10, 20), 1448,

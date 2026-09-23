@@ -1,0 +1,165 @@
+{
+  "schema": 1,
+  "field": "GF(2)",
+  "source": "https://fmm.univ-lille.fr/",
+  "source_created_at": "2026-09-18T17:17:29",
+  "source_sha256": "a77c4286cd7ad9b5212b679d9e1e21672c7519a41124a3d71079d68bf0878213",
+  "record_claim": false,
+  "rows": [
+    {
+      "shape": [
+        15,
+        16,
+        25
+      ],
+      "rank": 3465,
+      "public_rank": 3500,
+      "gap": 35,
+      "operation": "append",
+      "orientation": [
+        15,
+        16,
+        24
+      ],
+      "axis": 2,
+      "seed_shape": "16x24x15",
+      "seed_rank": 3225,
+      "seed_sha256": "7a0efe015d8230afc08c08a2ebfd7e2b116a6a68bc4e3c226458bdea4515fc78",
+      "compressed": false,
+      "seed_source": "portfolio",
+      "portfolio_shape": [
+        15,
+        16,
+        24
+      ],
+      "sha256": "3ad812ab888885e66c57e9f1f8be649ac57d8490a7ec95001336c61e763a3961"
+    },
+    {
+      "shape": [
+        12,
+        16,
+        31
+      ],
+      "rank": 3420,
+      "public_rank": 3452,
+      "gap": 32,
+      "operation": "append",
+      "orientation": [
+        12,
+        16,
+        30
+      ],
+      "axis": 2,
+      "seed_shape": "12x16x30",
+      "seed_rank": 3228,
+      "seed_sha256": "89e76a9bd6f4095f9349906964f881da26c92d5c7f2c8783915dd98bf309b428",
+      "compressed": false,
+      "seed_source": "portfolio",
+      "portfolio_shape": [
+        12,
+        16,
+        30
+      ],
+      "sha256": "643938055f66860279e5f2640dfe1f4c37cc9e15953be0e256133352f865ef9b"
+    },
+    {
+      "shape": [
+        8,
+        20,
+        31
+      ],
+      "rank": 2963,
+      "public_rank": 2992,
+      "gap": 29,
+      "operation": "append",
+      "orientation": [
+        8,
+        20,
+        30
+      ],
+      "axis": 2,
+      "seed_shape": "8x20x30",
+      "seed_rank": 2803,
+      "seed_sha256": "a80cb4eaf39ade4a7aa6c6e79270f68a798f33ffe89543d7e28113f7d9ced938",
+      "compressed": false,
+      "seed_source": "portfolio",
+      "portfolio_shape": [
+        8,
+        20,
+        30
+      ],
+      "sha256": "f10506de663c6af0bc1ba488cadfc2a8c8e68f7200dd252b9af76417b7b4e071"
+    },
+    {
+      "shape": [
+        8,
+        18,
+        31
+      ],
+      "rank": 2670,
+      "public_rank": 2679,
+      "gap": 9,
+      "operation": "append",
+      "orientation": [
+        8,
+        18,
+        30
+      ],
+      "axis": 2,
+      "seed_shape": "8x30x18",
+      "seed_rank": 2526,
+      "seed_sha256": "3a17e2be7ea10c0d70ab627da12cc38f1da1b1cbd7f0b2d8192d32d748c900ea",
+      "compressed": false,
+      "seed_source": "portfolio",
+      "portfolio_shape": [
+        8,
+        18,
+        30
+      ],
+      "sha256": "7d2298926538ffea6f9aa84d105edb8a5124822bbaf5462bc46f90714c56369f"
+    },
+    {
+      "shape": [
+        15,
+        16,
+        32
+      ],
+      "rank": 4413,
+      "public_rank": 4418,
+      "gap": 5,
+      "operation": "pair",
+      "orientation": [
+        8,
+        15,
+        16
+      ],
+      "right_orientation": [
+        24,
+        15,
+        16
+      ],
+      "axis": 0,
+      "seed_shape": "8x16x15",
+      "seed_rank": 1188,
+      "seed_sha256": "c69a05f44ac7015d325ae9f12096a4007af87586ecfe8d4416c980168146565d",
+      "compressed": false,
+      "right_seed_shape": "16x24x15",
+      "right_seed_rank": 3225,
+      "right_seed_sha256": "7a0efe015d8230afc08c08a2ebfd7e2b116a6a68bc4e3c226458bdea4515fc78",
+      "right_compressed": false,
+      "seed_source": "portfolio",
+      "portfolio_shape": [
+        8,
+        15,
+        16
+      ],
+      "right_seed_source": "portfolio",
+      "right_portfolio_shape": [
+        15,
+        16,
+        24
+      ],
+      "sha256": "adf6523cb48f66b4c3bfdd536b9c80ef9712736a4f29318cf02c03c84c2280b6"
+    }
+  ]
+}

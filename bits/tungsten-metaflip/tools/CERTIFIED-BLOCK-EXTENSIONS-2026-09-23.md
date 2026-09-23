@@ -50,6 +50,26 @@ python3 tools/screen_certified_block_extensions.py PATH/TO/fmm_sota.json \
 python3 spec/certified_block_extensions_test.py
 ```
 
+An exact replay of the [structured-parent portfolio](certificates/structured-parent-portfolio-20260922/manifest.json)
+adds five more below-table block constructions. Four append one ordinary
+slice to a portfolio parent; the last joins two distinct certified parents.
+The [portfolio-extension manifest](certificates/certified-portfolio-extensions-20260923/manifest.json)
+pins the parent schemes, ranks, orientations, and hashes of all five full
+GF(2) tensors. The focused test rebuilds and independently verifies them.
+
+| Shape | GF(2) rank | Lille entry | Construction |
+| --- | ---: | ---: | --- |
+| 8×18×31 | 2670 | 2679 | 8×18×30:2526 + one slice (144) |
+| 8×20×31 | 2963 | 2992 | 8×20×30:2803 + one slice (160) |
+| 12×16×31 | 3420 | 3452 | 12×16×30:3228 + one slice (192) |
+| 15×16×25 | 3465 | 3500 | 15×16×24:3225 + one slice (240) |
+| 15×16×32 | 4413 | 4418 | 8×15×16:1188 + 15×16×24:3225 |
+
+Run the combined certificate and portfolio screen with `--include-portfolio`.
+With `--output-dir`, it replays only the necessary portfolio parents and
+independently verifies each materialized child. These remain field-specific
+upper bounds, not optimality or worldwide record claims.
+
 The rank-3050 `13×16×25` MFW1 tensor has SHA-256
 `46abb4fb714eb0d56f38f5ce0f87c8e15e5e1d834405b8ef42ff0c3b693133f2`;
 the rank-4866 `11×24×32` tensor has SHA-256

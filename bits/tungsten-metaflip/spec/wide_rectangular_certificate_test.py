@@ -212,7 +212,6 @@ class WideRectangularCertificateTest(unittest.TestCase):
             ((8, 20, 29), 2724, 'b1f26cb283b84ba01d699007abe162318569afa6e9c3fdcdb02fbf44577e0a16'),
             ((7, 20, 30), 2622, '2321df5be27cdd71032b79a94adbf7a6b7e08d9e6e99128dab599de57963b223'),
             ((7, 19, 30), 2538, '005b9d101f493eb6cd6386479099ad10c106940d682ab7c2e7d6302ff5a59d13'),
-            ((7, 18, 30), 2453, '5616655755d1f43b24988a916822817fbb6ec6a790a66c69c557232ba8fcedcf'),
             ((7, 19, 26), 2209, 'f8528ab7ca06290912260b0a0b8001efb944fa9bd0525b8f9df3f9e157560ef4'),
             ((8, 19, 24), 2140, 'de9376f13a929162887d33fa4167b4ed8322c325c43d31816057ccf18792d758'),
             ((7, 19, 25), 2122, '408505b79f9a5dac4cfc2c05cf81491a92cf840246a6c5e81d1f5198445ce43a'),
@@ -235,6 +234,18 @@ class WideRectangularCertificateTest(unittest.TestCase):
             with self.subTest(shape=shape):
                 self.check_certificate(shape, rank, digest, (8, 20, 30),
                                        2803, 2820, compressed=True)
+
+    def test_eight_by_eighteen_projection_chain(self):
+        # Independently expand each oriented MFW1 tensor from the 8x18x30 parent.
+        rows = (
+            ((7, 30, 18), 2374, '0645becb3abaf003bbe7fe60d3b139ff0079f7345e4367ce41accd8ac364dd76'),
+            ((8, 29, 18), 2498, 'deb90236cda251a21c9576d17eebb647755f3dac5490529f2cd9899c288f9d89'),
+            ((7, 29, 18), 2341, 'd6245d9592b31e6e5b97e159306fe65d2e9c5638e52f21d66c3c8ff6ca17e42f'),
+        )
+        for shape, rank, digest in rows:
+            with self.subTest(shape=shape):
+                self.check_certificate(shape, rank, digest, (8, 18, 30),
+                                       2526, 2538, compressed=True)
 
 
 if __name__ == '__main__':

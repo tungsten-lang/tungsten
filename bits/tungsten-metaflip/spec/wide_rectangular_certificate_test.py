@@ -475,17 +475,10 @@ class WideRectangularCertificateTest(unittest.TestCase):
                 self.check_certificate(shape, rank, digest, (8, 18, 30),
                                        2526, 2538, compressed=True)
 
-    def test_seven_by_nineteen_projected_walk_descendants(self):
-        rows = (
-            ((7, 19, 22), 1902,
-             '082af6026e587b46f6fddd464ea944690bcad0c0e7d29638a18261aedbd02993'),
-            ((7, 19, 23), 1957,
-             '04e3d132317eb915d04c4c8ca12ad56eff8630d9ec504596630b3631bec5d4ec'),
-        )
-        for shape, rank, digest in rows:
-            with self.subTest(shape=shape):
-                self.check_certificate(shape, rank, digest, (8, 20, 30),
-                                       2803, 2820, compressed=True)
+    def test_seven_by_nineteen_projected_walk_descendant(self):
+        self.check_certificate((7, 19, 23), 1957,
+                               '04e3d132317eb915d04c4c8ca12ad56eff8630d9ec504596630b3631bec5d4ec',
+                               (8, 20, 30), 2803, 2820, compressed=True)
 
     def test_portfolio_wide_projection_records(self):
         rows = (

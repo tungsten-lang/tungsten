@@ -1028,6 +1028,21 @@ local formula-aware rank 2016 and ten below the 2026-09-22 Lille snapshot rank
 catalog-plus-retained closure remains at 608 improved shapes and rises to
 33338 saved units.
 
+Another projected representation came from `7x19x25:2122` by removing Z
+coordinate 12. Exact cleanup reached `7x19x24:2010`; 100 million directed
+moves with nonce 21779 reached rank 2002. A 100-million-move continuation
+with nonce 21781 tied at 2002. The retained `7x19x24-r2002.mfw.gz.b64` has
+decoded SHA-256
+`a80e6ec2507b7f166f025651b630f9e3f5855b486c2b1f845858b3a14d75a463`
+and passes independent full-tensor checks. It is eight ranks below the prior
+local formula-aware price and improves 14 downstream composition prices by
+98 rank units, with no square-price change. The two-coordinate projection
+screen of five retained parent representations examined 5,978 views and found no direct improvement
+below the formula-aware closure.
+Against the pinned catalog plus retained candidates, the cumulative closure
+is 610 improved shapes and 33434 saved units, two shapes and 96 units beyond
+the preceding closure.
+
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with
 `tools/replay_structured_parent_portfolio.rb --output DIR --only 5x9x20`.

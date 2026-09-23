@@ -556,6 +556,15 @@ lists 2942 for this shape,
 while the pinned external index lists 2930; this certificate is lower than
 both, without establishing a worldwide or cross-field record.
 
+From the previously retained `11x16x24:2437` tensor, 50M and 100M directed moves
+(nonces 21121/21123) reached the exact retained rank 2434, SHA-256
+`fd6aa2d8ef29561c6ce6fd3095eb12f3bc4a93280e5b7b0c27b16f5d679b1532`.
+Nineteen bounded exact basis contexts gave no further direct rank drop. The
+replacement lowers 32 pinned composition prices by 101 total rank units;
+the cumulative closure is now 479 shapes and 26906 units. The pinned external
+index lists 2472 for this shape. This is a finite comparison, not an audited
+worldwide or cross-field record claim.
+
 Reproduction: replay the `5x9x20` row of
 `../structured-parent-portfolio-20260922/manifest.json` with
 `tools/replay_structured_parent_portfolio.rb --output DIR --only 5x9x20`.

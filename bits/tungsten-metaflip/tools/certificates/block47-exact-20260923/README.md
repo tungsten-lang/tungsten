@@ -279,3 +279,23 @@ Two later baseline continuations of each new winner held rank but lowered
 factor-bit density to 132065 for 12x22x23 and 194984 for 12x23x25. Their
 exact hashes and nonces are retained in the manifest; density did not steer
 the walk or count as another rank gain.
+The next bounded screen materialized six impact/size-priority parents, four
+adjacent 12x22/12x23 parents, and five higher-headroom 13x parents. All
+fifteen passed full-tensor verification at their formula ranks with zero
+construction-time cancellation, and one 100-million-move directed walk per
+parent found no strict rank drop. Two-pass neutral-basis compression over the
+first ten of those plus the preceding five mixed-screen parents also found no
+direct rank reduction. From the two retained 12x22x23 and 12x23x25 winners,
+an exact two-coordinate screen considered 1,596 and 1,770 projections;
+their best raw children missed the current bounded/local comparison by 136
+and 197 terms. Exact cleanup of those two closest children still missed by
+100 and 160 terms. These are finite search results, not lower bounds; further
+identical block-47 first walks are deprioritized until the parent construction
+or move family changes.
+Two-pass basis rewrites followed by one-coordinate projection of the two
+retained winners still missed the current comparison bounds by at least 42
+and 54 terms. Exact middle-coordinate shear screens over up to three mixed
+rows also missed: the 12x23x25-to-12x22x25 child reached 3895 versus the
+local 3802 bound; rotated 12x22x23 screens reached 3434 versus 3372 after
+deleting a 23-coordinate, and 3407 versus 3354 after deleting a 12-coordinate.
+These bounded screens do not exclude denser shears or different parents.

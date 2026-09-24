@@ -1,0 +1,101 @@
+{
+  "schema": 1,
+  "field": "GF(2)",
+  "record_claim": false,
+  "source": {
+    "file": "../top-two-directed-20260924/12x8x15-r899.mfw.gz.b64",
+    "shape": [12, 8, 15],
+    "rank": 899,
+    "sha256": "b27c611ec87d3f811d6ef06ff9b88cd98135f3ce50bfc1e5a170b0e142988221"
+  },
+  "stages": [
+    {
+      "basis_mode": 6,
+      "project_axis": 2,
+      "deleted_coordinate": 11,
+      "seed_shape": [12, 8, 14],
+      "seed_rank": 864,
+      "seed_sha256": "4e25237bc3a8a913de14d33b62c7b83d0521d43e9cdda964dc045941460295bc",
+      "walk_steps": 100000000,
+      "walk_nonce": 2026092781,
+      "walk_sha256": "b098ef5e8d9eb3da335d26fe03b303fd806c750130a5434a78bf40c6c3d3dfda",
+      "post_basis_mode": 7,
+      "retained": {
+        "file": "../wide-rectangular-walk-20260922/12x8x14-r849.mfw.gz.b64",
+        "shape": [12, 8, 14],
+        "rank": 849,
+        "density": 18929,
+        "sha256": "3ee62bb2c7c3176e2dfc6b8818b52d4b41e6430b727a5518d9c1343829fd677d"
+      }
+    },
+    {
+      "basis_mode": 7,
+      "project_axis": 2,
+      "deleted_coordinate": 0,
+      "seed_shape": [12, 8, 13],
+      "seed_rank": 801,
+      "seed_sha256": "2b781d0cf8d94f2b32d751489290b0f20b585d5ed4726d7ad051849bde8afbfc",
+      "walk_steps": 100000000,
+      "walk_nonce": 2026092787,
+      "walk_sha256": "4f3992ba1a6b37ff6c4954a4a0046df9850635f0be64ef96f170ed4d4731a624",
+      "post_basis_mode": 17,
+      "retained": {
+        "file": "../wide-rectangular-walk-20260922/12x8x13-r786.mfw.gz.b64",
+        "shape": [12, 8, 13],
+        "rank": 786,
+        "density": 17302,
+        "sha256": "e81e47cfe8f569567fb2d88472b1f28c0b859f9069180c0d45c9c323bd42d611"
+      }
+    },
+    {
+      "basis_mode": 6,
+      "project_axis": 2,
+      "deleted_coordinate": 3,
+      "seed_shape": [12, 8, 12],
+      "seed_rank": 722,
+      "seed_sha256": "d7fc65e5f440a2051d8ec64591c3a14082cefbb431aabeb55048c41cc367a27b",
+      "walk_steps": 100000000,
+      "walk_nonce": 2026092799,
+      "walk_sha256": "0be68ec10697f580a1569338e00a7f26b933c1de09e195bcfa3f46bfe8872359",
+      "post_basis_mode": null,
+      "retained": {
+        "file": "../wide-rectangular-walk-20260922/12x8x12-r705.mfw.gz.b64",
+        "shape": [12, 8, 12],
+        "rank": 705,
+        "density": 16440,
+        "sha256": "0be68ec10697f580a1569338e00a7f26b933c1de09e195bcfa3f46bfe8872359"
+      }
+    },
+    {
+      "basis_mode": null,
+      "project_axis": 2,
+      "deleted_coordinate": 8,
+      "seed_shape": [12, 8, 11],
+      "seed_rank": 673,
+      "seed_sha256": "15c5e2e9ad31f8e842fc6a73106cf7c1ace9eddb793ccc86369936e7c72b118f",
+      "walk_steps": null,
+      "walk_nonce": null,
+      "walk_sha256": null,
+      "post_basis_mode": null,
+      "retained": {
+        "file": "../wide-rectangular-walk-20260922/12x8x11-r673.mfw.gz.b64",
+        "shape": [12, 8, 11],
+        "rank": 673,
+        "density": 14526,
+        "sha256": "15c5e2e9ad31f8e842fc6a73106cf7c1ace9eddb793ccc86369936e7c72b118f"
+      }
+    }
+  ],
+  "product": {
+    "left_orientation": [8, 11, 12],
+    "right_seed": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x2_rank7_strassen_gf2.txt",
+    "right_seed_sha256": "9e0afd23436703e74eae1fc8faa10e391ffd725bbc5bedc44f14337279dc5c33",
+    "retained": {
+      "file": "../wide-rectangular-walk-20260922/16x22x24-r4711.mfw.gz.b64",
+      "shape": [16, 22, 24],
+      "rank": 4711,
+      "density": 174312,
+      "sha256": "d88d49524aa9f76b9b311b1854c2f093c6ca855760f057983604aff651e20663"
+    }
+  }
+}

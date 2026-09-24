@@ -62,6 +62,23 @@ class WideRectangularCertificateTest(unittest.TestCase):
                                'd7e9b78873521d3d6b5309b95248560c41cc8edd45b08932adb6de048f96f02a',
                                compressed=True)
 
+    def test_nested_directed_8x12_family_and_product(self):
+        cases = (
+            ((12, 8, 14), 849,
+             '3ee62bb2c7c3176e2dfc6b8818b52d4b41e6430b727a5518d9c1343829fd677d'),
+            ((12, 8, 13), 786,
+             'e81e47cfe8f569567fb2d88472b1f28c0b859f9069180c0d45c9c323bd42d611'),
+            ((12, 8, 12), 705,
+             '0be68ec10697f580a1569338e00a7f26b933c1de09e195bcfa3f46bfe8872359'),
+            ((12, 8, 11), 673,
+             '15c5e2e9ad31f8e842fc6a73106cf7c1ace9eddb793ccc86369936e7c72b118f'),
+            ((16, 22, 24), 4711,
+             'd88d49524aa9f76b9b311b1854c2f093c6ca855760f057983604aff651e20663'),
+        )
+        for shape, rank, digest in cases:
+            with self.subTest(shape=shape):
+                self.check_certificate(shape, rank, digest, compressed=True)
+
     def test_16x14x22_block_composition_and_walk(self):
         self.check_certificate((16, 14, 22), 2891,
                                'a7ffebbbd6f43402b17b1ac27622d0fbf9b3f4af2499af503b9e63e9d4221445',

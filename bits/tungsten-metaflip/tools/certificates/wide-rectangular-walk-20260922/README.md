@@ -1198,3 +1198,28 @@ A further 100M continuation and a distinct basis/orientation walk held
 rank. This candidate improves eight finite closure prices by 43 rank units;
 the full retained closure now improves 617 shapes by 33609 units. Neither
 the tie nor the numerical closure prices prove a new worldwide record.
+
+The exact `12x8x15-r899` parent also yields a nested directed chain. A
+two-pass basis rewrite, coordinate projection, and 100M walk reach
+`12x8x14-r849`; repeating this on the retained representation reaches
+`12x8x13-r786`. A third projected 100M walk reaches `12x8x12-r705`, whose
+exact projection gives `12x8x11-r673`. The final two-pass representations
+of r849 and r786 have densities 18929 and 17302. All four tensors pass
+independent full GF(2) verification. Strassen composition of r673 is the
+materialized `16x22x24-r4711` tensor, independently verified as well.
+The [nested-chain manifest](../nested-directed-20260924/manifest.json) and
+`tools/check_nested_directed_20260924.py` check the basis/projection steps,
+certificates, and product; `--replay-walk BINARY` additionally replays all
+three 100M walks byte-for-byte. Two rank-786 basis/orientation restarts and
+one 200M restart held rank; the tested 7×12×14 and 8×11×14 siblings also
+did not beat their dated public comparisons.
+
+The [Lille 8×12×12 page](https://fmm.univ-lille.fr/8x12x12.html) lists 720,
+its dated digest and the current external tracker list 676 for 8×11×12,
+and the [Lille 16×22×24 page](https://fmm.univ-lille.fr/16x22x24.html)
+lists 4732. The exact GF(2) ranks 705, 673, and 4711 are numerically below
+those entries; the tables span other coefficient fields, and this is not a
+worldwide-novelty or optimality audit. Against the pinned finite closure,
+the new retained certificates lower 50 prices by 658 rank units. The full
+closure now improves 662 shapes by 34267 units; the sole changed square
+price remains 23×23×23/r7263, still above its public comparison.

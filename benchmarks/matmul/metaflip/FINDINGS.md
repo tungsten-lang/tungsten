@@ -3755,3 +3755,15 @@ replays pass. A final basis change retains rank at density 97138. This
 ties, but does not beat, the dated Lille numerical rank. The exact
 certificate improves eight finite composition prices by 43 units; the
 replayed closure totals are 617 shapes and 33609 rank units saved.
+The retained 8×12×15/r899 tensor then supplied three further exact
+projection-plus-directed-walk steps: 8×12×14/r849, 8×12×13/r786, and
+8×12×12/r705. A final exact projection gives 8×11×12/r673; its verified
+Strassen product gives 16×22×24/r4711. The three walks replay byte-for-byte,
+and independent full-tensor verifiers accept all five retained certificates.
+The last three primitive/product ranks are numerically below the dated Lille
+comparison values 720, 676, and 4732, respectively, but GF(2) and the
+catalog's other coefficient fields must not be conflated. This adds 50
+improved prices and 658 saved rank units to the pinned finite closure, for
+662 shapes and 34267 units total. The replay manifest and checker are under
+`bits/tungsten-metaflip/tools/certificates/nested-directed-20260924/` and
+`bits/tungsten-metaflip/tools/check_nested_directed_20260924.py`.

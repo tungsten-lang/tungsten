@@ -3,8 +3,10 @@
 
 This cold campaign is separate from the live fleet. Public ranks schedule
 walks only; independent full-tensor checks gate every retained result.
+Shared-factor pairs route rank ties; density is reported, never routed on.
 """
 import argparse
+from collections import Counter
 import hashlib
 import json
 from pathlib import Path
@@ -20,6 +22,12 @@ from screen_two_pass_basis_children import two_pass  # noqa: E402
 
 def digest(raw):
     return hashlib.sha256(raw).hexdigest()
+
+
+def shared_pair_counts(terms):
+    """Per-axis disjoint-pair capacity; a scheduling proxy, not a rank bound."""
+    return [sum(size // 2 for size in Counter(term[axis] for term in terms).values())
+            for axis in range(3)]
 
 
 def verify_file(path):
@@ -58,18 +66,24 @@ def proposals(shape, terms, public, per_shape=2):
                             child_shape[0] * child_shape[2])
                 result, _ = top.compress_shared(projected, max_bits=width)
                 raw = top.blob(child_shape, result)
+                pairs = shared_pair_counts(result)
                 row = dict(shape=child_shape, rank=len(result), mode=mode,
                            axis=axis, coordinate=coordinate, sha256=digest(raw),
-                           public_rank=public[key], terms=result, raw=raw)
+                           public_rank=public[key], pair_counts=pairs,
+                           density=sum(factor.bit_count() for term in result
+                                       for factor in term), terms=result, raw=raw)
                 bucket = best.setdefault(key, [])
                 if row["sha256"] not in {old["sha256"] for old in bucket}:
                     bucket.append(row)
-                    bucket.sort(key=lambda entry: (entry["rank"], entry["sha256"]))
+                    bucket.sort(key=lambda entry: (
+                        entry["rank"], -max(entry["pair_counts"]),
+                        -sum(entry["pair_counts"]), entry["sha256"]))
                     del bucket[per_shape:]
     return sorted((row for bucket in best.values() for row in bucket),
                   key=lambda row: (row["rank"] - row["public_rank"],
                                    row["rank"], tuple(sorted(row["shape"])),
-                                   row["sha256"]))
+                                   -max(row["pair_counts"]),
+                                   -sum(row["pair_counts"]), row["sha256"]))
 
 
 def select(rows, beam):
@@ -97,7 +111,8 @@ def public_comparison(path):
 
 def summary(row):
     return {key: row[key] for key in (
-        "shape", "rank", "mode", "axis", "coordinate", "sha256", "public_rank")}
+        "shape", "rank", "mode", "axis", "coordinate", "sha256", "public_rank",
+        "pair_counts", "density")}
 
 
 def run(args):

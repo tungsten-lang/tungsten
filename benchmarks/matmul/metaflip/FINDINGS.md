@@ -3779,3 +3779,15 @@ beats the respective dated comparison ranks 641, 624, and 618. This remains
 an offline campaign, not automatic live-fleet refinement or a new record. A
 second two-walk screen from r705 tied r673 on 8×11×12 and r663 on 7×12×12;
 both results were exact but neither lowered its seed rank.
+
+A follow-up screen from the r673 branch reached 8×10×11/r601 after two
+projections and 200M total directed moves, still above the dated r588
+comparison; the next projections had wider gaps. The other r899 axis gave
+8×11×15/r857 after 300M moves and an exact basis change, nine above the
+dated r848 comparison. Another 1B moves from its lowest-density basis seed
+returned the seed unchanged. The cold scheduler now prefers rank ties with
+more shared-factor pair capacity, while merely recording density. A 100M
+walk from the newly selected r673 representation held rank but raised one
+axis's pair capacity from 28 to 30; this reduced an exact local composition
+formula from 2665 to 2662, still worse than the existing GF(2) closure for
+that target. None of these screens is a new record.

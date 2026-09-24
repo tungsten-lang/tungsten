@@ -11,6 +11,8 @@ ROOT = Path(__file__).resolve().parents[3]
 TOOL = ROOT / "bits/tungsten-metaflip/tools/search_wide_projection_walks.py"
 SOURCE = (ROOT / "bits/tungsten-metaflip/tools/certificates/"
           "wide-rectangular-walk-20260922/12x8x13-r786.mfw.gz.b64")
+TIED_SOURCE = (ROOT / "bits/tungsten-metaflip/tools/certificates/"
+               "wide-rectangular-walk-20260922/12x8x12-r705.mfw.gz.b64")
 SPEC = importlib.util.spec_from_file_location("wide_projection_walk_search", TOOL)
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
@@ -43,6 +45,16 @@ class WideProjectionWalkSearchTest(unittest.TestCase):
                           "d7fc65e5f440a2051d8ec64591c3a14082cefbb431aabeb55048c41cc367a27b"))
         self.assertNotEqual(rows[0]["sha256"], rows[1]["sha256"])
         self.assertEqual(MODULE.select(rows, 1), rows[:1])
+
+    def test_rank_ties_prefer_shared_factor_opportunity(self):
+        raw = gzip.decompress(base64.b64decode(TIED_SOURCE.read_bytes()))
+        shape, terms = MODULE.top.read_blob(raw)
+        MODULE.top.exact(shape, terms)
+        rows = MODULE.proposals(shape, terms, {(8, 11, 12): 676})
+        self.assertEqual((rows[0]["rank"], rows[0]["coordinate"],
+                          rows[0]["pair_counts"]), (673, 5, [0, 28, 20]))
+        self.assertEqual((rows[1]["rank"], rows[1]["coordinate"],
+                          rows[1]["pair_counts"]), (673, 8, [0, 27, 22]))
 
 
 if __name__ == "__main__":

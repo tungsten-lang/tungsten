@@ -49,6 +49,7 @@ Ruby full-tensor verifiers.
 | 12x14x27 | 2664 | 2664 | 2663 | 2712 |
 | 12x23x24 | 3742 | 3742 | 3736 | 3790 |
 | 12x22x22 | 3374 | 3374 | 3372 | 3430 |
+| 16x27x29 | 6872 | 6872 | 6871 | 6984 |
 
 The four additional 13x rows came from materializing 20 unarchived audited
 formulas with `screen_block47_cancellations.py`. Four had strict exact
@@ -229,3 +230,11 @@ and the exact parent are pinned above. Walks on 12x16x27, 12x12x28,
 16x23x24, and 16x23x23 held their parent ranks and are not retained here.
 The next bounded priority screen materialized 12x23x28 and 12x26x28 exactly;
 their first 100-million-move walks also held rank and are not retained.
+Five further fresh composition-priority parents had no construction-time
+cancellations. A first 100-million-move walk lowered 16x27x29 from 6872 to
+6871; a continuation tied rank with 89 fewer factor bits. Both walks and the
+parent are pinned above. First walks on 12x12x21, 16x24x28, 16x24x24, and
+16x25x25 held rank and are not retained.
+The 16x27x29 gain lowers six prices in the bounded numeric composition
+closure, including its own. The other five remain above current Lille
+listings, so they are not materialized tensor certificates.

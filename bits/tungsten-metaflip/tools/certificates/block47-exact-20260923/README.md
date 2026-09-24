@@ -41,6 +41,7 @@ Ruby full-tensor verifiers.
 | 20x23x30 | 7428 | 7428 | 7427 | 7638 |
 | 20x24x26 | 6690 | 6690 | 6684 | 6760 |
 | 20x22x32 | 7522 | 7522 | 7513 | 7706 |
+| 20x23x26 | 6512 | 6512 | 6508 | 6598 |
 
 The four additional 13x rows came from materializing 20 unarchived audited
 formulas with `screen_block47_cancellations.py`. Four had strict exact
@@ -118,6 +119,12 @@ factor bits. A second walk lowered 20x24x26 again to 6684. The other
 continuations tied rank with lower density, so their exact endpoints are
 retained. The live Lille entries for 20x24x26 and 20x22x32 are 6760 and
 7706, lower than the historical audit's 6930 and 7766.
+Another five formulas were materialized without construction-time
+cancellations. Matched 100-million-move walks left four ranks unchanged,
+while 20x23x26 fell from 6512 to 6509. Its second walk reached 6508; a third
+tied rank with lower factor-bit density. The final exact tensor and all three
+walk nonces are retained. Lille currently lists 6598 for the shape, versus
+the historical audit's 6732.
 
 From the repository root, run:
 
@@ -128,7 +135,7 @@ python3 bits/tungsten-metaflip/tools/check_block47_exact_20260923.py
 Optionally compile `bits/tungsten-metaflip/tools/wide_rect_walk.w` and pass its
 binary as `--replay-walk BINARY` to reproduce the retained directed walk byte
 for byte. `--replay-compose BINARY --leaf-root DIR` also re-materializes all
-thirty-two block formulas with `flipfleet_block_compose.w` and verifies their exact
+thirty-three block formulas with `flipfleet_block_compose.w` and verifies their exact
 canonical hashes. The tensors beat the numeric ranks in the Lille table as
 checked on 2026-09-24. This finite comparison is not a worldwide-record or
 optimality claim. With the historical formula bounds included, the first five
@@ -169,3 +176,6 @@ their own ranks plus 21x23x30 (8118 to 8117), 23x30x32 (12178 to 12177),
 21x24x26 (7314 to 7308), 21x22x32 (8226 to 8217), and 22x32x32
 (12274 to 12265). None of these five downstream prices beats its saved
 public comparison; they are not additional tensor witnesses.
+The 20x23x26 gain lowers only its source and 21x23x26 in the same finite
+formula-bounded closure: 6512 to 6508 and 7110 to 7106, respectively.
+The latter remains above Lille's listed 6875 and is not materialized here.

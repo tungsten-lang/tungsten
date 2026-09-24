@@ -55,9 +55,11 @@ def check(replay_walk=None, replay_compose=None, leaf_root=None, only=()):
                 continue
             formula = formulas[name]
             if (int(formula['formula_rank']) != row['formula_rank'] or
-                    int(formula['live_fmm']) != row['listed_rank'] or
+                    int(formula['live_fmm']) != row.get('historical_listed_rank',
+                                                       row['listed_rank']) or
                     row['rank'] > row['composed_exact_rank'] or
                     row['composed_exact_rank'] > row['formula_rank'] or
+                    row['rank'] >= row['listed_rank'] or
                     row['rank'] >= int(formula['strongest_rank'])):
                 raise ValueError(f'formula/comparator mismatch: {name}')
             path = CERTS / f'{name}-r{row["rank"]}.mfw.gz.b64'

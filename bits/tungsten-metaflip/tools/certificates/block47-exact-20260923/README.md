@@ -30,6 +30,9 @@ Ruby full-tensor verifiers.
 | 16x22x24 | 4665 | 4665 | 4665 | 4732 |
 | 16x22x25 | 4921 | 4921 | 4921 | 5028 |
 | 16x22x26 | 5139 | 5138 | 5136 | 5250 |
+| 20x23x29 | 7174 | 7174 | 7173 | 7360 |
+| 20x23x32 | 7782 | 7782 | 7774 | 8040 |
+| 20x24x31 | 7830 | 7830 | 7827 | 8070 |
 
 The four additional 13x rows came from materializing 20 unarchived audited
 formulas with `screen_block47_cancellations.py`. Four had strict exact
@@ -56,6 +59,12 @@ block-47 formula. The projections were not retained in this package. We
 materialized and independently verified those five stronger formulas instead.
 One 100-million-move walk improved 16x20x26 by two terms; matched walks on the
 other four tied their formula ranks.
+Ten adjacent 16x/17x block compositions and eleven rank-93 5x5 leaf
+variants produced no further exact cancellation. We instead materialized
+three high-gain 20x block formulas as exact tensors; one 100-million-move
+directed walk per shape reduced their ranks by 1, 8, and 3 respectively.
+The 20x23x29 historical cross-audit listed Lille rank 7421; the current
+catalogue lists 7360, which is the comparison used in the table.
 
 From the repository root, run:
 
@@ -66,7 +75,7 @@ python3 bits/tungsten-metaflip/tools/check_block47_exact_20260923.py
 Optionally compile `bits/tungsten-metaflip/tools/wide_rect_walk.w` and pass its
 binary as `--replay-walk BINARY` to reproduce the retained directed walk byte
 for byte. `--replay-compose BINARY --leaf-root DIR` also re-materializes all
-twenty-one block formulas with `flipfleet_block_compose.w` and verifies their exact
+twenty-four block formulas with `flipfleet_block_compose.w` and verifies their exact
 canonical hashes. The tensors beat the numeric ranks in the Lille table as
 checked on 2026-09-24. This finite comparison is not a worldwide-record or
 optimality claim. With the historical formula bounds included, the first five
@@ -81,3 +90,7 @@ to 6038, still worse than Lille's listed 5771. Among the six new retained
 rows, only 16x20x26 and 16x22x26 lower the already audited block-formula
 numeric closure over sorted dimensions 2--32; the four other rows turn prior
 formula estimates into full exact tensor witnesses.
+Adding the three 20x witnesses changes 19 entries in that finite numeric
+direct-sum/product closure, including the three source shapes. Those downstream
+entries are arithmetic bounds, not materialized tensor certificates in this
+package; sampled Lille comparisons do not establish further record candidates.

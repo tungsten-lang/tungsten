@@ -130,7 +130,5 @@ if __name__ == '__main__':
     args = parser.parse_args()
     if not args.target and (args.limit is None or args.limit < 1):
         parser.error('provide --target or a positive --limit')
-    if args.retain_all and not args.target:
-        parser.error('--retain-all requires explicit --target shapes')
     scan(args.composer, args.leaf_root, args.output_dir, args.target, args.limit,
          args.retain_all)

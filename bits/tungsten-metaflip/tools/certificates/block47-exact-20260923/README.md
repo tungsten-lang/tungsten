@@ -224,6 +224,8 @@ prices, not additional tensor certificates; sampled current Lille listings
 for these downstream shapes are lower still.
 The next five composition-priority parents had no construction-time
 cancellations. One 100-million-move walk lowered 12x22x22 from 3374 to 3372;
-a second tied rank with lower factor-bit density. Both walks and the exact
-parent are pinned above. Walks on 12x16x27, 12x12x28, 16x23x24, and
-16x23x23 held their parent ranks and are not retained here.
+a second and third tied rank with lower factor-bit density. All three walks
+and the exact parent are pinned above. Walks on 12x16x27, 12x12x28,
+16x23x24, and 16x23x23 held their parent ranks and are not retained here.
+The next bounded priority screen materialized 12x23x28 and 12x26x28 exactly;
+their first 100-million-move walks also held rank and are not retained.

@@ -3727,3 +3727,15 @@ basis refinement held rank but lowered density from 27114 to 25016. Six
 100-million-move orientation walks and two more basis walks from rank 1037
 found no further rank drop. This is a bounded local search result, not an
 optimality claim.
+Projecting away one coordinate of the 8×16×13/r1037 tensor and applying
+exact shared-factor compression gives 8×13×15/r1006. One 100-million-move
+directed walk lowered this to r990; a second axis orientation and walk
+lowered it to r989. An exact two-pass basis rewrite retained r989 at
+density 23418. Both walks replay byte-for-byte, and independent Ruby
+full-tensor checks pass. The r989 tensor composes exactly to 8×13×31/r2026
+by a block sum with its parent and 16×26×30/r6923 by Strassen. A pinned
+Lille digest and a separate tracker list r991 for 8×13×15 (the individual
+Lille page still displays r1005), but these are cross-field numerical
+comparisons, not a worldwide-record or optimality
+certificate. The projection/walk/descendant chain is in the same replay
+archive.

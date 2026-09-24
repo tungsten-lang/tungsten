@@ -157,9 +157,67 @@
       "sha256": "45c2a50d078b3ec9461ca27c366bab818dfe7846129800a28b294b671ecf2138"
     }
   ],
+  "projection_directed": {
+    "parent_shape": [8, 16, 13],
+    "parent_rank": 1037,
+    "parent_sha256": "cc1a52ed2378d1174e6604d39f67d3e2a5e0842959291bf6c44366baa2526378",
+    "deleted_axis": 1,
+    "deleted_coordinate": 8,
+    "raw_rank": 1016,
+    "cleanup_steps": 10,
+    "projected": {
+      "shape": [8, 15, 13],
+      "rank": 1006,
+      "density": 23149,
+      "sha256": "555ca88298ec0f8b532e1f2af28eb046c641b0cb77a707705177438e86c95967"
+    },
+    "first_walk": {
+      "steps": 100000000,
+      "nonce": 2026092561,
+      "retained": {
+        "file": "8x15x13-r990.mfw.gz.b64",
+        "shape": [8, 15, 13],
+        "rank": 990,
+        "density": 24912,
+        "sha256": "36d0cde2c02d83408637c7b576fd0f1121b975f97964be2359cdb4d4e7795f5e"
+      }
+    },
+    "second_orientation": [13, 8, 15],
+    "second_input_sha256": "8727f9a967653d86857bb0b73d7125930b54e986a4b75561306fdfc795a54524",
+    "second_walk": {
+      "steps": 100000000,
+      "nonce": 2026092589,
+      "raw_sha256": "e35fe03f11ee412fb64bba13202d15fa1e685d1e5e494b1f911bb8791296f491",
+      "basis_mode": 13,
+      "retained": {
+        "file": "13x8x15-r989.mfw.gz.b64",
+        "shape": [13, 8, 15],
+        "rank": 989,
+        "density": 23418,
+        "sha256": "a514a59a46e236fface562c6ab38e80bae551ce884c2ebc2b1c96bf0e11ecae9"
+      }
+    }
+  },
+  "projected_descendants": [
+    {
+      "construction": "strassen-product",
+      "shape": [16, 26, 30],
+      "rank": 6923,
+      "density": 281016,
+      "sha256": "5069f23c5a8d46280927667ce1aa8a12ff3500600da3c961c1689fe28957eecf"
+    },
+    {
+      "construction": "block-with-parent",
+      "shape": [8, 13, 31],
+      "rank": 2026,
+      "density": 48434,
+      "sha256": "558aff99b05a98c8554cadcff0f08681a225bd4f45bd6427a77c6be8e1657ff8"
+    }
+  ],
   "dated_lille_comparison": {
     "source_created_at": "2026-09-18T17:17:29",
     "source_sha256": "a77c4286cd7ad9b5212b679d9e1e21672c7519a41124a3d71079d68bf0878213",
+    "8x13x15": 991,
     "8x13x16": 1054,
     "8x13x17": 1144,
     "13x16x31": 3810,

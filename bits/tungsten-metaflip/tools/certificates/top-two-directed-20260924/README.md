@@ -19,6 +19,16 @@ naive layer. Only the primitive certificates are stored; larger tensors are
 generated and checked during replay. Earlier descendants remain checked as
 provenance.
 
+Deleting coordinate 8 of the rank-1037 tensor's middle axis and exactly
+compressing the projection gives 8×13×15/r1006. A 100-million-move walk
+(nonce 2026092561) reaches rank 990. Reorienting to 13×8×15 and walking
+another 100 million moves (nonce 2026092589) reaches rank **989**; a
+two-pass basis rewrite (mode 13) retains that rank at density 23418. The
+checker verifies the projected tensor, both retained walk certificates,
+and two larger constructions: 8×13×31/r2026 by a block sum with the
+rank-1037 parent, and 16×26×30/r6923 by Strassen composition. Walk replay
+is optional but reproduces both outputs byte for byte.
+
 Run from the repository root:
 
 ```sh
@@ -30,6 +40,8 @@ To reproduce the walks byte for byte, compile
 `bin/tungsten compile ... --release --native` and pass its binary as
 `--replay-walk PATH`.
 
-These ranks are exact GF(2) upper bounds. The manifest's Lille comparisons
-are from a dated digest, not a proof of current worldwide novelty or
-optimality.
+These ranks are exact GF(2) upper bounds. The dated Lille rank digest pinned
+in the manifest and a [separate tracker](https://github.com/dronperminov/FastMatrixMultiplication)
+list 991 for 8×13×15; the [individual Lille page](https://fmm.univ-lille.fr/8x13x15.html)
+still displays 1005. Those comparisons concern possibly different fields
+and are not a proof of current worldwide novelty or optimality.

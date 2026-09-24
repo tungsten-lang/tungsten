@@ -29,7 +29,8 @@ def verify(shape, terms, expected, directory):
     raw = top.blob(shape, terms)
     if digest(raw) != expected["sha256"]:
         raise ValueError("scheme digest mismatch")
-    path = directory / ("x".join(map(str, shape)) + ".mfw")
+    path = directory / ("x".join(map(str, shape)) +
+                        f"-r{len(terms)}-{expected['sha256'][:12]}.mfw")
     path.write_bytes(raw)
     checked = json.loads(subprocess.check_output(
         ["ruby", str(HERE / "verify_tensor.rb"), "--shape",
@@ -212,7 +213,87 @@ def main():
                 raise ValueError("final basis replay mismatch")
         verify_descendants(final_shape, final_terms,
                            manifest["final_descendants"], directory)
-    print("PASS top-two directed ranks 1040..1037 with exact descendants")
+
+        projection = manifest["projection_directed"]
+        if (list(final_shape) != projection["parent_shape"] or
+                len(final_terms) != projection["parent_rank"] or
+                digest(final_path.read_bytes()) != projection["parent_sha256"]):
+            raise ValueError("projection parent mismatch")
+        projected_shape, projected_raw = top.project(
+            final_shape, final_terms, projection["deleted_axis"],
+            projection["deleted_coordinate"])
+        width = max(projected_shape[0] * projected_shape[1],
+                    projected_shape[1] * projected_shape[2],
+                    projected_shape[0] * projected_shape[2])
+        projected_terms, cleanup = top.compress_shared(projected_raw,
+                                                        max_bits=width)
+        if (len(projected_raw) != projection["raw_rank"] or
+                len(cleanup) != projection["cleanup_steps"]):
+            raise ValueError("projection cleanup mismatch")
+        projected_path = verify(projected_shape, projected_terms,
+                                projection["projected"], directory)
+
+        first = projection["first_walk"]
+        first_shape, first_terms, first_path = load_cert(first["retained"],
+                                                         directory)
+        if args.replay_walk:
+            output = directory / "projection-walk.mfw"
+            subprocess.run(
+                [str(args.replay_walk), "x".join(map(str, projected_shape)),
+                 str(projected_path), str(output), str(first["steps"]),
+                 str(first["nonce"])], check=True, stdout=subprocess.PIPE,
+                text=True)
+            if output.read_bytes() != first_path.read_bytes():
+                raise ValueError("projection walk replay mismatch")
+
+        second_shape = tuple(projection["second_orientation"])
+        second_terms = top.orient(first_shape, first_terms, second_shape)
+        second_raw = top.blob(second_shape, second_terms)
+        if digest(second_raw) != projection["second_input_sha256"]:
+            raise ValueError("second walk input mismatch")
+        second = projection["second_walk"]
+        second_final_shape, second_final_terms, second_path = load_cert(
+            second["retained"], directory)
+        if args.replay_walk:
+            source = directory / "second-input.mfw"
+            source.write_bytes(second_raw)
+            output = directory / "second-walk.mfw"
+            subprocess.run(
+                [str(args.replay_walk), "x".join(map(str, second_shape)),
+                 str(source), str(output), str(second["steps"]),
+                 str(second["nonce"])], check=True, stdout=subprocess.PIPE,
+                text=True)
+            raw_output = output.read_bytes()
+            if digest(raw_output) != second["raw_sha256"]:
+                raise ValueError("second walk replay mismatch")
+            raw_shape, raw_terms = top.read_blob(raw_output)
+            refined = basis.two_pass(raw_terms, raw_shape,
+                                     second["basis_mode"])
+            if top.blob(raw_shape, refined) != second_path.read_bytes():
+                raise ValueError("second basis replay mismatch")
+        if tuple(second_final_shape) != second_shape:
+            raise ValueError("second walk final shape mismatch")
+
+        descendants = {row["construction"]: row for row in
+                       manifest["projected_descendants"]}
+        left = top.orient(second_final_shape, second_final_terms, (8, 13, 15))
+        strassen = HERE.parent / "lib/metaflip/seeds/gf2/matmul_2x2_rank7_strassen_gf2.txt"
+        right = top.parse_terms(strassen.read_bytes(), 7)
+        top.exact((2, 2, 2), right)
+        product = top.kronecker((8, 13, 15), left, (2, 2, 2), right)
+        verify((16, 26, 30), product, descendants["strassen-product"],
+               directory)
+
+        parent_terms = top.orient(final_shape, final_terms, (8, 13, 16))
+        target = (8, 13, 31)
+        combined = (blocks.block((8, 13, 15), left, target, (0, 0, 0)) +
+                    blocks.block((8, 13, 16), parent_terms, target,
+                                 (0, 0, 15)))
+        cleaned, history = blocks.compress_shared(combined, max_bits=403)
+        if history:
+            raise ValueError("unexpected projected block cleanup")
+        verify(target, cleaned, descendants["block-with-parent"], directory)
+    print("PASS top-two directed ranks 1040..1037 and projected rank 989")
 
 
 if __name__ == "__main__":

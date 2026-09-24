@@ -31,9 +31,9 @@ Ruby full-tensor verifiers.
 | 16x22x25 | 4921 | 4921 | 4921 | 5028 |
 | 16x22x26 | 5139 | 5138 | 5136 | 5250 |
 | 20x23x29 | 7174 | 7174 | 7173 | 7360 |
-| 20x23x32 | 7782 | 7782 | 7774 | 8040 |
+| 20x23x32 | 7782 | 7782 | 7772 | 8040 |
 | 20x24x31 | 7830 | 7830 | 7827 | 8070 |
-| 20x23x27 | 6729 | 6729 | 6725 | 6956 |
+| 20x23x27 | 6729 | 6729 | 6724 | 6956 |
 | 20x23x28 | 6866 | 6866 | 6863 | 7100 |
 | 20x22x28 | 6636 | 6636 | 6635 | 6774 |
 
@@ -66,6 +66,10 @@ Ten adjacent 16x/17x block compositions and eleven rank-93 5x5 leaf
 variants produced no further exact cancellation. We instead materialized
 three high-gain 20x block formulas as exact tensors; one 100-million-move
 directed walk per shape reduced their ranks by 1, 8, and 3 respectively.
+Continuing the verified 20x23x32 result for another 100 million moves reduced
+it from 7774 to 7772. A third 100-million-move continuation tied rank with
+ten fewer factor bits, and that lower-density tensor is retained. All three
+walk hashes and nonces are pinned in the manifest.
 The 20x23x29 historical cross-audit listed Lille rank 7421; the current
 catalogue lists 7360, which is the comparison used in the table.
 Eight further unmaterialized high-gain formulas had no exact cancellations.
@@ -74,6 +78,9 @@ given one 100-million-move directed walk: 20x23x27 fell by four terms,
 20x23x28 by three, and 20x24x29 stayed at 7370. Only the two gains are
 retained. The historical audit lists 6962 for 20x23x27; the current
 catalogue lists 6956.
+Continuing 20x23x27 for another 100 million moves reduced rank 6725 to
+6724. Its third walk tied rank with 34 fewer factor bits; that lower-density
+tensor is retained, with all three nonces and hashes pinned.
 A further matched 100-million-move batch kept 20x21x32 at 7184, lowered
 20x22x28 from 6636 to 6635, and kept 20x25x31 at 8342. After widening the
 standalone walker's capacity to match the 16384-term MFW1 reader, 20x28x29
@@ -109,8 +116,11 @@ Adding the three 20x witnesses changes 19 entries in that finite numeric
 direct-sum/product closure, including the three source shapes. Those downstream
 entries are arithmetic bounds, not materialized tensor certificates in this
 package; sampled Lille comparisons do not establish further record candidates.
+The later 20x23x32 continuation lowers three numeric closure entries again:
+20x23x32 (7774 to 7772), 21x23x32 (8510 to 8508), and 23x32x32
+(12706 to 12704). The two downstream prices remain above Lille's listings.
 In the same formula-bounded closure, the two adjacent 20x23 gains lower five
-numeric entries including their source shapes: 21x23x27 (7350 to 7346),
+numeric entries including their source shapes: 21x23x27 (7350 to 7345),
 21x23x28 (7510 to 7507), and 23x28x32 (11242 to 11239) are the three
 downstream entries. Each remains above its current Lille-listed rank, so no
 downstream tensor was materialized for this batch.

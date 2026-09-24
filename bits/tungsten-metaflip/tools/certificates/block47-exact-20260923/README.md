@@ -46,6 +46,8 @@ Ruby full-tensor verifiers.
 | 20x21x27 | 6189 | 6189 | 6188 | 6290 |
 | 20x24x27 | 6890 | 6890 | 6883 | 7056 |
 | 20x26x27 | 7608 | 7608 | 7606 | 7766 |
+| 12x14x27 | 2664 | 2664 | 2663 | 2712 |
+| 12x23x24 | 3742 | 3742 | 3736 | 3790 |
 
 The four additional 13x rows came from materializing 20 unarchived audited
 formulas with `screen_block47_cancellations.py`. Four had strict exact
@@ -141,6 +143,17 @@ All materialized without construction-time cancellations. Directed walks
 lowered 20x24x27 from 6890 to 6883 and 20x26x27 from 7608 to 7607, then
 7606 on continuation. Their final same-rank continuations have lower
 factor-bit density. The other three shapes held their formula ranks.
+A counterfactual one-rank composition scan over 803 unarchived audited
+formulas prioritized five smaller upstream shapes. All five exact
+compositions had no cancellations. First 100-million-move walks lowered
+12x14x27 from 2664 to 2663 and 12x23x24 from 3742 to 3736; their
+continuations tied rank with lower factor-bit density. First walks on
+12x13x24, 12x16x24, and 12x14x24 held rank. A second independent stream
+on the high-fanout 12x13x24 parent also held rank.
+The no-target screener now uses that finite one-rank downstream count for
+default ordering and records completed screens in its output directory for
+resume without repeating no-gain trials. This scheduling proxy does not
+alter exact tensor admission or replace a fresh public-catalogue check.
 
 From the repository root, run:
 
@@ -151,7 +164,7 @@ python3 bits/tungsten-metaflip/tools/check_block47_exact_20260923.py
 Optionally compile `bits/tungsten-metaflip/tools/wide_rect_walk.w` and pass its
 binary as `--replay-walk BINARY` to reproduce the retained directed walk byte
 for byte. `--replay-compose BINARY --leaf-root DIR` also re-materializes all
-thirty-seven block formulas with `flipfleet_block_compose.w` and verifies their exact
+thirty-nine block formulas with `flipfleet_block_compose.w` and verifies their exact
 canonical hashes. The tensors beat the numeric ranks in the Lille table as
 checked on 2026-09-24. This finite comparison is not a worldwide-record or
 optimality claim. With the historical formula bounds included, the first five
@@ -203,3 +216,8 @@ The 20x24x27 and 20x26x27 gains lower five numeric entries in that closure:
 their two source ranks, 21x24x27 (7538 to 7531), 24x27x32 (11378 to 11371),
 and 21x26x27 (8310 to 8308). The three downstream prices are not materialized
 tensor certificates.
+The two upstream gains lower 19 numeric entries in that closure, including
+their source ranks. Notable downstream changes are 12x24x24 (4030 to 4024),
+23x24x24 (7484 to 7472), and 24x24x24 (8060 to 8048). These are arithmetic
+prices, not additional tensor certificates; sampled current Lille listings
+for these downstream shapes are lower still.

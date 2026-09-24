@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Materialize audited block-47 formulas and retain exact cancellations."""
+"""Screen block-47 formulas in downstream-impact order and retain exact gains."""
 import argparse
 import csv
 import hashlib
@@ -19,23 +19,59 @@ sys.path[:0] = [str(ROOT / 'bits/tungsten-metaflip/spec'),
                 str(ROOT / 'benchmarks/matmul/metaflip')]
 from wide_matrix_cleanup_parity_test import blob  # noqa: E402
 from verify_representation_portfolio import parse_terms  # noqa: E402
+from composition_impact import CompositionImpact  # noqa: E402
+
+
+def prioritize_formulas(formulas, materialized, exact_ranks, limit, maximum=32):
+    """Rank unbuilt formulas by the reach of a hypothetical one-term gain.
+
+    These are scheduling estimates, not tensor certificates. The exact
+    composition and full-tensor checks in scan remain the admission gates.
+    """
+    seeds = {tuple(map(int, row['target'].split('x'))): int(row['formula_rank'])
+             for row in formulas}
+    for name, rank in exact_ranks.items():
+        shape = tuple(map(int, name.split('x')))
+        seeds[shape] = min(seeds.get(shape, rank), rank)
+    candidates = [row for row in formulas if row['target'] not in materialized
+                  and int(row['audited_gain']) > 0]
+    if not candidates:
+        return []
+    hypotheses = [(tuple(map(int, row['target'].split('x'))),
+                   int(row['formula_rank']) - 1) for row in candidates]
+    values = CompositionImpact(seeds, maximum=maximum).solve(hypotheses)['values']
+    ranked = []
+    for column, row in enumerate(candidates, 1):
+        impact = int((values[:, column] < values[:, 0]).sum())
+        ranked.append(dict(row, priority_downstream=impact))
+    return sorted(ranked, key=lambda row: (-row['priority_downstream'],
+                                          -int(row['audited_gain']),
+                                          row['target']))[:limit]
+
+
+def screened_shapes(path):
+    if not path.exists():
+        return set()
+    return {json.loads(line)['shape'] for line in path.read_text().splitlines()
+            if line.strip()}
 
 
 def scan(composer, leaf_root, output_dir, targets=(), limit=None,
          retain_all=False):
     formulas = list(csv.DictReader(AUDIT.open(), delimiter='\t'))
     by_target = {row['target']: row for row in formulas}
+    output_dir.mkdir(parents=True, exist_ok=True)
+    history = output_dir / 'screen-results.jsonl'
     if targets:
         rows = [by_target[target] for target in targets]
     else:
-        materialized = {row['target'] for row in csv.DictReader(
-            RECORDS.open(), delimiter='\t')}
-        materialized.update('x'.join(map(str, row['shape'])) for row in
-                            json.loads(CERTS.read_text())['rows'])
-        rows = sorted((row for row in formulas if row['target'] not in materialized
-                       and int(row['audited_gain']) > 0),
-                      key=lambda row: (-int(row['audited_gain']), row['target']))[:limit]
-    output_dir.mkdir(parents=True, exist_ok=True)
+        existing = list(csv.DictReader(RECORDS.open(), delimiter='\t'))
+        certified = json.loads(CERTS.read_text())['rows']
+        exact_ranks = {row['target']: int(row['exact_rank']) for row in existing}
+        exact_ranks.update({'x'.join(map(str, row['shape'])): row['rank']
+                            for row in certified})
+        rows = prioritize_formulas(formulas, set(exact_ranks) | screened_shapes(history),
+                                   exact_ranks, limit)
     retained = []
     for row in rows:
         shape = row['target']
@@ -51,6 +87,8 @@ def scan(composer, leaf_root, output_dir, targets=(), limit=None,
         rank = int(exact_match.group(1))
         report = {'shape': shape, 'formula_rank': int(row['formula_rank']),
                   'exact_rank': rank, 'cancellations': int(row['formula_rank']) - rank}
+        if 'priority_downstream' in row:
+            report['priority_downstream'] = row['priority_downstream']
         if rank < int(row['formula_rank']) or retain_all:
             verified = json.loads(subprocess.check_output(
                 ['ruby', str(HERE / 'verify_tensor.rb'), '--shape', shape,
@@ -74,6 +112,8 @@ def scan(composer, leaf_root, output_dir, targets=(), limit=None,
             retained.append(report)
         text_path.unlink()
         print(json.dumps(report), flush=True)
+        with history.open('a') as stream:
+            stream.write(json.dumps(report) + '\n')
     return retained
 
 
@@ -81,7 +121,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--composer', required=True, type=Path)
     parser.add_argument('--leaf-root', required=True, type=Path)
-    parser.add_argument('--output-dir', required=True, type=Path)
+    parser.add_argument('--output-dir', required=True, type=Path,
+                        help='persists screen-results.jsonl so resumed batches skip prior trials')
     parser.add_argument('--target', action='append', default=[])
     parser.add_argument('--limit', type=int)
     parser.add_argument('--retain-all', action='store_true',

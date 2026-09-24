@@ -1185,3 +1185,16 @@ Another 100 million moves from the retained rank-623 seed, and three further
 result. This finite search is not a lower-bound proof.
 Five 100-million-move continuations from rank-1448 seeds found no lower rank.
 One further 100-million-move continuation from rank 6223 found no lower rank.
+
+The retained `15x24x13-r2800.mfw.gz.b64` is an exact GF(2) tie with the
+dated Lille rank for canonical shape 13×15×24. Starting from the archived
+rank-2808 tensor, a 100M directed walk (nonce 2026092741) reaches rank
+2802. Two-pass basis mode 12 and an axis permutation lead to a second 100M
+walk (nonce 2026092769) reaching rank 2800. Two-pass basis mode 7 gives the
+retained density-97138 representation. Independent Ruby verification and
+byte-identical walk replays pass via
+`python3 tools/check_13x15x24_directed_20260924.py --replay-walk BINARY`.
+A further 100M continuation and a distinct basis/orientation walk held
+rank. This candidate improves eight finite closure prices by 43 rank units;
+the full retained closure now improves 617 shapes by 33609 units. Neither
+the tie nor the numerical closure prices prove a new worldwide record.

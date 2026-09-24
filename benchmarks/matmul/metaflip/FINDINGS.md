@@ -3748,3 +3748,10 @@ Strassen product is exactly 16×24×30/r6293. The pinned Lille digest and
 the external tracker list r904 for 8×12×15; this remains a cross-field
 numerical comparison, not an optimality or global-novelty proof. The
 nested projection and product are checked in the same archive.
+The 13×15×24 archived GF(2) candidate at rank 2808 underwent two 100M
+directed walks with an exact basis/orientation change between them, reaching
+rank 2800. Independent full-tensor verification and byte-identical walk
+replays pass. A final basis change retains rank at density 97138. This
+ties, but does not beat, the dated Lille numerical rank. The exact
+certificate improves eight finite composition prices by 43 units; the
+replayed closure totals are 617 shapes and 33609 rank units saved.

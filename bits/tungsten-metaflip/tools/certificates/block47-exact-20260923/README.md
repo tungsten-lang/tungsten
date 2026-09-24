@@ -267,3 +267,15 @@ One walk lowered 12x23x25 from 3954 to 3952; two continuations tied rank and
 lowered factor bits by 177 total. These gains lower seven and five bounded
 numeric composition prices including their source shapes. The downstream
 prices are scheduling leads, not additional tensor certificates.
+Ten subsequent exact block-47 parents (six impact-ranked and four adjacent
+12x22/12x23 shapes) had no construction-time cancellation or first-walk rank
+drop. Same-rank basis rewrites followed by one-coordinate projection of the
+two new winners did not beat the existing local bounds. A 100-million-move
+neutral-basis restart on 12x23x26 also held rank. In a matched three-seed
+ablation, changing the directed escape interval from 2,000 to 500 or 100
+moves produced no better first-walk rank; the two intervals did worse on the
+12x15x28 seed. Production cadence and rank acceptance remain unchanged.
+Two later baseline continuations of each new winner held rank but lowered
+factor-bit density to 132065 for 12x22x23 and 194984 for 12x23x25. Their
+exact hashes and nonces are retained in the manifest; density did not steer
+the walk or count as another rank gain.

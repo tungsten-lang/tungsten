@@ -547,11 +547,13 @@
       "walks": [
         {"steps": 100000000, "nonce": 2026092442, "rank": 3497, "sha256": "e807138d13b112cfd23c2a7bbd6f06cf583208cb0ad40b735fe98643a6ada8ce"},
         {"steps": 100000000, "nonce": 2026092444, "rank": 3496, "sha256": "8d4029304cc77f9844fbc064a32c2d7aff1b9de98960597d39a3e76f22d4b3ca"},
-        {"steps": 100000000, "nonce": 2026092448, "rank": 3496, "sha256": "648db8a53d1db7bf55f6fa4a7c613cb2bbead02687560f116bdf2ba4c32398af"}
+        {"steps": 100000000, "nonce": 2026092448, "rank": 3496, "sha256": "648db8a53d1db7bf55f6fa4a7c613cb2bbead02687560f116bdf2ba4c32398af"},
+        {"steps": 100000000, "nonce": 2026092461, "rank": 3496, "sha256": "e9846cd3af63c26504cee59e29296339ad213c60715aec2a3c469486e94f18a6"},
+        {"steps": 100000000, "nonce": 2026092463, "rank": 3496, "sha256": "25a79e913b9a139698d3959ced76e2ce4f0313e36b508daf262fc4b4103b657c"}
       ],
       "rank": 3496,
       "listed_rank": 3554,
-      "mfw_sha256": "648db8a53d1db7bf55f6fa4a7c613cb2bbead02687560f116bdf2ba4c32398af"
+      "mfw_sha256": "25a79e913b9a139698d3959ced76e2ce4f0313e36b508daf262fc4b4103b657c"
     },
     {
       "shape": [12, 23, 25],
@@ -561,11 +563,13 @@
       "walks": [
         {"steps": 100000000, "nonce": 2026092445, "rank": 3952, "sha256": "467fc517f539c894381aaed32e830e8330f02580afe22a951d41407065f4a780"},
         {"steps": 100000000, "nonce": 2026092446, "rank": 3952, "sha256": "556c2b5eb56953e9932d094945a01366204dcfd053bef92e51e3a8ac01a9e759"},
-        {"steps": 100000000, "nonce": 2026092449, "rank": 3952, "sha256": "13520dd12d70db8a1344fcb0c448c5be0b284603f9b072c745d35f758c3180db"}
+        {"steps": 100000000, "nonce": 2026092449, "rank": 3952, "sha256": "13520dd12d70db8a1344fcb0c448c5be0b284603f9b072c745d35f758c3180db"},
+        {"steps": 100000000, "nonce": 2026092462, "rank": 3952, "sha256": "35b9809418264ba310708fede00727819e993ef50b1ffbfbf9a326c5e7fc1d57"},
+        {"steps": 100000000, "nonce": 2026092464, "rank": 3952, "sha256": "ebf1b7fb2363d92e65a22705906674ea110ea79e171b2a7d1f77a2c98154fab1"}
       ],
       "rank": 3952,
       "listed_rank": 4019,
-      "mfw_sha256": "13520dd12d70db8a1344fcb0c448c5be0b284603f9b072c745d35f758c3180db"
+      "mfw_sha256": "ebf1b7fb2363d92e65a22705906674ea110ea79e171b2a7d1f77a2c98154fab1"
     }
   ]
 }

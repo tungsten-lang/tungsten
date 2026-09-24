@@ -33,6 +33,8 @@ Ruby full-tensor verifiers.
 | 20x23x29 | 7174 | 7174 | 7173 | 7360 |
 | 20x23x32 | 7782 | 7782 | 7774 | 8040 |
 | 20x24x31 | 7830 | 7830 | 7827 | 8070 |
+| 20x23x27 | 6729 | 6729 | 6725 | 6956 |
+| 20x23x28 | 6866 | 6866 | 6863 | 7100 |
 
 The four additional 13x rows came from materializing 20 unarchived audited
 formulas with `screen_block47_cancellations.py`. Four had strict exact
@@ -65,6 +67,12 @@ three high-gain 20x block formulas as exact tensors; one 100-million-move
 directed walk per shape reduced their ranks by 1, 8, and 3 respectively.
 The 20x23x29 historical cross-audit listed Lille rank 7421; the current
 catalogue lists 7360, which is the comparison used in the table.
+Eight further unmaterialized high-gain formulas had no exact cancellations.
+Three previously audited adjacent formula parents were materialized and each
+given one 100-million-move directed walk: 20x23x27 fell by four terms,
+20x23x28 by three, and 20x24x29 stayed at 7370. Only the two gains are
+retained. The historical audit lists 6962 for 20x23x27; the current
+catalogue lists 6956.
 
 From the repository root, run:
 
@@ -75,7 +83,7 @@ python3 bits/tungsten-metaflip/tools/check_block47_exact_20260923.py
 Optionally compile `bits/tungsten-metaflip/tools/wide_rect_walk.w` and pass its
 binary as `--replay-walk BINARY` to reproduce the retained directed walk byte
 for byte. `--replay-compose BINARY --leaf-root DIR` also re-materializes all
-twenty-four block formulas with `flipfleet_block_compose.w` and verifies their exact
+twenty-six block formulas with `flipfleet_block_compose.w` and verifies their exact
 canonical hashes. The tensors beat the numeric ranks in the Lille table as
 checked on 2026-09-24. This finite comparison is not a worldwide-record or
 optimality claim. With the historical formula bounds included, the first five
@@ -94,3 +102,8 @@ Adding the three 20x witnesses changes 19 entries in that finite numeric
 direct-sum/product closure, including the three source shapes. Those downstream
 entries are arithmetic bounds, not materialized tensor certificates in this
 package; sampled Lille comparisons do not establish further record candidates.
+In the same formula-bounded closure, the two adjacent 20x23 gains lower five
+numeric entries including their source shapes: 21x23x27 (7350 to 7346),
+21x23x28 (7510 to 7507), and 23x28x32 (11242 to 11239) are the three
+downstream entries. Each remains above its current Lille-listed rank, so no
+downstream tensor was materialized for this batch.

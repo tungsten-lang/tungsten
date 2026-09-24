@@ -5,7 +5,7 @@
   "formula_audit_sha256": "3155fb6198d83f5ec00e3d4c7190a59f961b9256cc028c7102c4cbbadcefe5aa",
   "formula_source_revisions_sha256": "25f3c092e158914c9afc2850d89f886cdbc450b3d74496f369068bc92774a62d",
   "comparison_source": "https://fmm.univ-lille.fr/",
-  "comparison_date": "2026-09-23",
+  "comparison_date": "2026-09-24",
   "rows": [
     {
       "shape": [13, 15, 23],
@@ -98,6 +98,74 @@
       "rank": 3407,
       "listed_rank": 3472,
       "mfw_sha256": "ca1b74d0c3e6030f3939cfee43e3a803a08c007218de2503d501c29aa47eeb8d"
+    },
+    {
+      "shape": [15, 19, 29],
+      "formula_rank": 4768,
+      "composed_exact_rank": 4766,
+      "rank": 4766,
+      "listed_rank": 4835,
+      "mfw_sha256": "16fad47e6ba67c94f4b7c83fb331ef06a25560d055c04563b5b9ddf000ff0f4b"
+    },
+    {
+      "shape": [15, 19, 31],
+      "formula_rank": 5089,
+      "composed_exact_rank": 5083,
+      "rank": 5083,
+      "listed_rank": 5131,
+      "mfw_sha256": "05fb7b6257750c8b7303de9ca02f7467ceab764533fce21a15460fcef0796ec3"
+    },
+    {
+      "shape": [15, 22, 25],
+      "formula_rank": 4732,
+      "composed_exact_rank": 4731,
+      "rank": 4731,
+      "listed_rank": 4787,
+      "mfw_sha256": "462c61f183ba0cc2c1e46c018401c9781c4c721f7b4e3f3f570041d29c0bbad4"
+    },
+    {
+      "shape": [15, 22, 26],
+      "formula_rank": 4938,
+      "composed_exact_rank": 4936,
+      "rank": 4936,
+      "listed_rank": 4974,
+      "mfw_sha256": "891194e28fc2bd1558998d6e7970cd979f11f84e96953dabe13dcfc86ae2f66c"
+    },
+    {
+      "shape": [15, 22, 27],
+      "formula_rank": 5124,
+      "composed_exact_rank": 5120,
+      "composed_mfw_sha256": "21c99f9aaeb88213f5ee3c4e9d8bbef2710ca39ee6ea448398b9c9424a68decb",
+      "walks": [
+        {"steps": 100000000, "nonce": 21941, "rank": 5116, "sha256": "ed4c067757e44131afa2b1defbe2be71c51cbe0b4df49a2e3487a6a768c5d756"},
+        {"steps": 100000000, "nonce": 21945, "rank": 5115, "sha256": "03fceb74e1bb5b7d6b67f2c8488373f82a3c9d2a52c1b845b78a18c629a001a5"},
+        {"steps": 100000000, "nonce": 21949, "rank": 5115, "sha256": "702acefbb019a662c4c612c9e0482ead7c9c12cf4076aaac426adf572a10953e"}
+      ],
+      "rank": 5115,
+      "listed_rank": 5148,
+      "mfw_sha256": "702acefbb019a662c4c612c9e0482ead7c9c12cf4076aaac426adf572a10953e"
+    },
+    {
+      "shape": [15, 23, 25],
+      "formula_rank": 4915,
+      "composed_exact_rank": 4913,
+      "rank": 4913,
+      "listed_rank": 4968,
+      "mfw_sha256": "cd74410039dabf12917852efdfb8f8a59373e52361dcadfef92c365c33b8adf3"
+    },
+    {
+      "shape": [15, 23, 26],
+      "formula_rank": 5137,
+      "composed_exact_rank": 5133,
+      "composed_mfw_sha256": "ff637860ccd94c4805c9d3a70af06b64cf106ff9b9c1fe158b3393b312b654e3",
+      "walks": [
+        {"steps": 100000000, "nonce": 21943, "rank": 5131, "sha256": "e77b56cfb9a445a882df017c026a9a13a65d914669cf84998e1ec6939b0a575a"},
+        {"steps": 100000000, "nonce": 21947, "rank": 5130, "sha256": "913622b8a2c462286cd6969854fa1b5d389c492e23668b4eb201135b14eb7dfa"},
+        {"steps": 100000000, "nonce": 21951, "rank": 5129, "sha256": "5a5288a2e44035b4ae96c94167490231252b9b7ee171ff5b5c8a1dfacea60df1"}
+      ],
+      "rank": 5129,
+      "listed_rank": 5167,
+      "mfw_sha256": "5a5288a2e44035b4ae96c94167490231252b9b7ee171ff5b5c8a1dfacea60df1"
     }
   ]
 }

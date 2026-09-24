@@ -17,6 +17,13 @@ Ruby full-tensor verifiers.
 | 13x19x26 | 3764 | 3762 | 3761 | 3838 |
 | 13x19x27 | 3898 | 3894 | 3893 | 3989 |
 | 14x16x26 | 3413 | 3412 | 3407 | 3472 |
+| 15x19x29 | 4768 | 4766 | 4766 | 4835 |
+| 15x19x31 | 5089 | 5083 | 5083 | 5131 |
+| 15x22x25 | 4732 | 4731 | 4731 | 4787 |
+| 15x22x26 | 4938 | 4936 | 4936 | 4974 |
+| 15x22x27 | 5124 | 5120 | 5115 | 5148 |
+| 15x23x25 | 4915 | 4913 | 4913 | 4968 |
+| 15x23x26 | 5137 | 5133 | 5129 | 5167 |
 
 The four additional 13x rows came from materializing 20 unarchived audited
 formulas with `screen_block47_cancellations.py`. Four had strict exact
@@ -27,6 +34,12 @@ rank with lower density, so the lower-density tensors are retained. Their
 exact-composition parents and both walk nonces are pinned in the manifest.
 The earlier 13x15x27 composition and walk are retained unchanged. Bounded
 postbasis scans of 13x15x23 and 13x15x26 tied their current ranks.
+An 18-shape 14x/15x sweep found three more exact cancellations at 15x19x29,
+15x22x25, and 15x23x25. Their 100-million-move walks returned the exact
+composition parents unchanged, so no walk outcome is needed to replay them.
+An adjacent 11-shape sweep found four further cancellations. The walks on
+15x19x31 and 15x22x26 returned their composition parents unchanged; the
+retained walks on 15x22x27 and 15x23x26 lower them to 5115 and 5129.
 
 From the repository root, run:
 
@@ -37,10 +50,13 @@ python3 bits/tungsten-metaflip/tools/check_block47_exact_20260923.py
 Optionally compile `bits/tungsten-metaflip/tools/wide_rect_walk.w` and pass its
 binary as `--replay-walk BINARY` to reproduce the retained directed walk byte
 for byte. `--replay-compose BINARY --leaf-root DIR` also re-materializes all
-eight block formulas with `flipfleet_block_compose.w` and verifies their exact
+fifteen block formulas with `flipfleet_block_compose.w` and verifies their exact
 canonical hashes. The tensors beat the numeric ranks in the Lille table as
-checked on 2026-09-23. This finite comparison is not a worldwide-record or
-optimality claim. Against the existing cross-audit formula bounds, the five
-new materializations improved their target shapes but produced no additional
-downstream gain in the current direct-sum/product closure over sorted
-dimensions 2--32; no universal composition claim is made.
+checked on 2026-09-24. This finite comparison is not a worldwide-record or
+optimality claim. With the historical formula bounds included, the first five
+new materializations improve only their target shapes in the direct-sum/product
+closure over sorted dimensions 2--32. The three later shapes also reduce the
+numeric closure at 23x25x31 from 10002 to 10000, but that remains worse than
+Lille's listed 9585. No additional record candidate or universal composition
+claim follows from that finite scan. The four adjacent-sweep tensors improve
+only their own shapes against the same formula-bounded closure.

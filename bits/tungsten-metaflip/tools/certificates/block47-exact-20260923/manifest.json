@@ -331,6 +331,48 @@
       "rank": 8010,
       "listed_rank": 8231,
       "mfw_sha256": "6b1dc8e17b48c54e0452eaa5a73d9170f1a93609879c2e763e0321a073979608"
+    },
+    {
+      "shape": [20, 23, 30],
+      "formula_rank": 7428,
+      "composed_exact_rank": 7428,
+      "composed_mfw_sha256": "411732cc5fbfa38f8188ef0b782fa71cf89f9e135a68d6100845161d5590c895",
+      "walks": [
+        {"steps": 100000000, "nonce": 22630, "rank": 7427, "sha256": "e5dea08b8cbbf0712bf2236e118e59a35a59874a5f4ce6770ec53e3783521a1d"},
+        {"steps": 100000000, "nonce": 22631, "rank": 7427, "sha256": "ae98bacfa32a83356e0b7ea5cd38e925bf13e831cf37903552a7e7de337a8632"}
+      ],
+      "rank": 7427,
+      "listed_rank": 7638,
+      "mfw_sha256": "ae98bacfa32a83356e0b7ea5cd38e925bf13e831cf37903552a7e7de337a8632"
+    },
+    {
+      "shape": [20, 24, 26],
+      "formula_rank": 6690,
+      "composed_exact_rank": 6690,
+      "composed_mfw_sha256": "3536e31700ceb6895115c2685974ba5ad460003246da1c41d1f0e26483823276",
+      "walks": [
+        {"steps": 100000000, "nonce": 22626, "rank": 6688, "sha256": "fbed969a80d6ca6483e48d74ef592dbe61b1437c3bbad5c0678d07afdcfb9394"},
+        {"steps": 100000000, "nonce": 22627, "rank": 6684, "sha256": "4287794b21c3ad7d6fca1b487e5f9157699611e36199a5734037a831c0782433"},
+        {"steps": 100000000, "nonce": 22634, "rank": 6684, "sha256": "3beb61c086406c42da68c34dbe8748f1f1fae8af7916d11c02edf23b00dad141"}
+      ],
+      "rank": 6684,
+      "listed_rank": 6760,
+      "historical_listed_rank": 6930,
+      "mfw_sha256": "3beb61c086406c42da68c34dbe8748f1f1fae8af7916d11c02edf23b00dad141"
+    },
+    {
+      "shape": [20, 22, 32],
+      "formula_rank": 7522,
+      "composed_exact_rank": 7522,
+      "composed_mfw_sha256": "b6aaa86245f21a57b02903cd4ff309566113d5d9265efb7e49d895b45f839d0e",
+      "walks": [
+        {"steps": 100000000, "nonce": 22632, "rank": 7513, "sha256": "facacc13b635a8db462165db6a81f84ec8223d6164249d41a1a5e95e6928e33b"},
+        {"steps": 100000000, "nonce": 22633, "rank": 7513, "sha256": "8d12898a501324f272a3b104511cd52a6136d62fb5425b5f46837bfb88b51243"}
+      ],
+      "rank": 7513,
+      "listed_rank": 7706,
+      "historical_listed_rank": 7766,
+      "mfw_sha256": "8d12898a501324f272a3b104511cd52a6136d62fb5425b5f46837bfb88b51243"
     }
   ]
 }

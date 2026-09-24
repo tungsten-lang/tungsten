@@ -38,6 +38,9 @@ Ruby full-tensor verifiers.
 | 20x22x28 | 6636 | 6636 | 6635 | 6774 |
 | 20x23x31 | 7645 | 7645 | 7636 | 7862 |
 | 19x28x28 | 8016 | 8016 | 8010 | 8231 |
+| 20x23x30 | 7428 | 7428 | 7427 | 7638 |
+| 20x24x26 | 6690 | 6690 | 6684 | 6760 |
+| 20x22x32 | 7522 | 7522 | 7513 | 7706 |
 
 The four additional 13x rows came from materializing 20 unarchived audited
 formulas with `screen_block47_cancellations.py`. Four had strict exact
@@ -107,6 +110,14 @@ lowered 20x23x31 from 7645 to 7638 and 19x28x28 from 8016 to 8010;
 A second walk lowered 20x23x31 again to 7636; the second 19x28x28 walk
 tied rank 8010 with 116 fewer factor bits. Both final tensors and their
 parent constructions are retained with every walk nonce and hash.
+Another five audited formulas were materialized and independently verified.
+They had no construction-time cancellations. First 100-million-move walks
+lowered 20x23x30 by one term, 20x24x26 by two, and 20x22x32 by nine;
+20x22x29 returned its input, while 20x25x28 tied rank with nine fewer
+factor bits. A second walk lowered 20x24x26 again to 6684. The other
+continuations tied rank with lower density, so their exact endpoints are
+retained. The live Lille entries for 20x24x26 and 20x22x32 are 6760 and
+7706, lower than the historical audit's 6930 and 7766.
 
 From the repository root, run:
 
@@ -117,7 +128,7 @@ python3 bits/tungsten-metaflip/tools/check_block47_exact_20260923.py
 Optionally compile `bits/tungsten-metaflip/tools/wide_rect_walk.w` and pass its
 binary as `--replay-walk BINARY` to reproduce the retained directed walk byte
 for byte. `--replay-compose BINARY --leaf-root DIR` also re-materializes all
-twenty-nine block formulas with `flipfleet_block_compose.w` and verifies their exact
+thirty-two block formulas with `flipfleet_block_compose.w` and verifies their exact
 canonical hashes. The tensors beat the numeric ranks in the Lille table as
 checked on 2026-09-24. This finite comparison is not a worldwide-record or
 optimality claim. With the historical formula bounds included, the first five
@@ -153,3 +164,8 @@ The two latest gains lower five entries in that finite numeric closure:
 12485), 19x28x28 (8016 to 8010), and 28x28x31 (13233 to 13227).
 The three downstream prices remain above saved public comparisons and are
 not materialized here.
+The three newest gains lower eight entries in the same finite numeric closure:
+their own ranks plus 21x23x30 (8118 to 8117), 23x30x32 (12178 to 12177),
+21x24x26 (7314 to 7308), 21x22x32 (8226 to 8217), and 22x32x32
+(12274 to 12265). None of these five downstream prices beats its saved
+public comparison; they are not additional tensor witnesses.

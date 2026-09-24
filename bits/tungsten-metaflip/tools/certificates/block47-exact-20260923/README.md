@@ -36,6 +36,8 @@ Ruby full-tensor verifiers.
 | 20x23x27 | 6729 | 6729 | 6724 | 6956 |
 | 20x23x28 | 6866 | 6866 | 6863 | 7100 |
 | 20x22x28 | 6636 | 6636 | 6635 | 6774 |
+| 20x23x31 | 7645 | 7645 | 7636 | 7862 |
+| 19x28x28 | 8016 | 8016 | 8010 | 8231 |
 
 The four additional 13x rows came from materializing 20 unarchived audited
 formulas with `screen_block47_cancellations.py`. Four had strict exact
@@ -98,6 +100,13 @@ lowering factor-bit density from 329009 to 328752 in total. The final exact
 tensor is retained, with both continuation nonces and hashes in the manifest.
 The matched 20x23x28 continuation returned its input byte-for-byte and was
 not retained.
+Five further high-headroom formulas were materialized as full exact tensors.
+None had construction-time cancellations. Matched 100-million-move walks
+lowered 20x23x31 from 7645 to 7638 and 19x28x28 from 8016 to 8010;
+20x25x27, 20x20x31 and 20x21x31 returned their exact input tensors.
+A second walk lowered 20x23x31 again to 7636; the second 19x28x28 walk
+tied rank 8010 with 116 fewer factor bits. Both final tensors and their
+parent constructions are retained with every walk nonce and hash.
 
 From the repository root, run:
 
@@ -108,7 +117,7 @@ python3 bits/tungsten-metaflip/tools/check_block47_exact_20260923.py
 Optionally compile `bits/tungsten-metaflip/tools/wide_rect_walk.w` and pass its
 binary as `--replay-walk BINARY` to reproduce the retained directed walk byte
 for byte. `--replay-compose BINARY --leaf-root DIR` also re-materializes all
-twenty-seven block formulas with `flipfleet_block_compose.w` and verifies their exact
+twenty-nine block formulas with `flipfleet_block_compose.w` and verifies their exact
 canonical hashes. The tensors beat the numeric ranks in the Lille table as
 checked on 2026-09-24. This finite comparison is not a worldwide-record or
 optimality claim. With the historical formula bounds included, the first five
@@ -139,3 +148,8 @@ The 20x22x28 gain lowers three entries in the same finite numeric closure:
 its own rank and the arithmetic prices for 21x22x28 (7252 to 7251) and
 22x28x32 (10842 to 10841). The latter two remain above their Lille listings;
 they are not additional tensor certificates.
+The two latest gains lower five entries in that finite numeric closure:
+20x23x31 (7645 to 7636), 21x23x31 (8358 to 8349), 23x31x32 (12494 to
+12485), 19x28x28 (8016 to 8010), and 28x28x31 (13233 to 13227).
+The three downstream prices remain above saved public comparisons and are
+not materialized here.

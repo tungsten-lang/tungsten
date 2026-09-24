@@ -56,6 +56,11 @@ best = ffws_export(st,seed,1)
 if best > rank || ffpk_exact(seed,seed.size(),best,n,m,p,parity,parity.size(),0) != 1
   << "FAIL rectangular directed best"
   exit(1)
+wide_cap = 8200 ## i64
+wide_st = i64[ffws_words_rect(n,m,p,wide_cap)]
+if ffws_init_rect(wide_st,n,m,p,wide_cap,seed,best,19073) != 1
+  << "FAIL rectangular rank-over-8192 capacity"
+  exit(1)
 seed[0] = seed[0] | (1 << 6)
 if ffws_init_rect(st,n,m,p,cap,seed,best,19073) != 0
   << "FAIL rectangular width gate"

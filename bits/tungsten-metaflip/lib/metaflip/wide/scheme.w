@@ -134,7 +134,7 @@ use ../scheme
 
 -> ffws_init_rect(st, n, m, p, cap, data, rank, seed) (i64[] i64 i64 i64 i64 i64[] i64 i64) i64
   stride = ffpk_stride(n,m,p) ## i64
-  if n < 2 || m < 2 || p < 2 || stride == 0 || rank < 1 || cap < rank+2 || cap > 8192 || ffpk_valid(data,data.size(),rank,n,m,p) != 1
+  if n < 2 || m < 2 || p < 2 || stride == 0 || rank < 1 || cap < rank+2 || cap > 16384 || ffpk_valid(data,data.size(),rank,n,m,p) != 1
     return 0
   hc = ffw_hash_capacity(cap) ## i64
   words = ffws_words_rect(n,m,p,cap) ## i64

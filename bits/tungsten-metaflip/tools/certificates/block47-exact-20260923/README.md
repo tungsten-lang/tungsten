@@ -35,6 +35,7 @@ Ruby full-tensor verifiers.
 | 20x24x31 | 7830 | 7830 | 7827 | 8070 |
 | 20x23x27 | 6729 | 6729 | 6725 | 6956 |
 | 20x23x28 | 6866 | 6866 | 6863 | 7100 |
+| 20x22x28 | 6636 | 6636 | 6635 | 6774 |
 
 The four additional 13x rows came from materializing 20 unarchived audited
 formulas with `screen_block47_cancellations.py`. Four had strict exact
@@ -73,6 +74,12 @@ given one 100-million-move directed walk: 20x23x27 fell by four terms,
 20x23x28 by three, and 20x24x29 stayed at 7370. Only the two gains are
 retained. The historical audit lists 6962 for 20x23x27; the current
 catalogue lists 6956.
+A further matched 100-million-move batch kept 20x21x32 at 7184, lowered
+20x22x28 from 6636 to 6635, and kept 20x25x31 at 8342. After widening the
+standalone walker's capacity to match the 16384-term MFW1 reader, 20x28x29
+also stayed at 8720. The live fleet retains its separate 8192-term cap.
+Only the 20x22x28 gain is retained; its historical audit listed Lille rank
+6867, versus the current catalogue's 6774.
 
 From the repository root, run:
 
@@ -83,7 +90,7 @@ python3 bits/tungsten-metaflip/tools/check_block47_exact_20260923.py
 Optionally compile `bits/tungsten-metaflip/tools/wide_rect_walk.w` and pass its
 binary as `--replay-walk BINARY` to reproduce the retained directed walk byte
 for byte. `--replay-compose BINARY --leaf-root DIR` also re-materializes all
-twenty-six block formulas with `flipfleet_block_compose.w` and verifies their exact
+twenty-seven block formulas with `flipfleet_block_compose.w` and verifies their exact
 canonical hashes. The tensors beat the numeric ranks in the Lille table as
 checked on 2026-09-24. This finite comparison is not a worldwide-record or
 optimality claim. With the historical formula bounds included, the first five
@@ -107,3 +114,7 @@ numeric entries including their source shapes: 21x23x27 (7350 to 7346),
 21x23x28 (7510 to 7507), and 23x28x32 (11242 to 11239) are the three
 downstream entries. Each remains above its current Lille-listed rank, so no
 downstream tensor was materialized for this batch.
+The 20x22x28 gain lowers three entries in the same finite numeric closure:
+its own rank and the arithmetic prices for 21x22x28 (7252 to 7251) and
+22x28x32 (10842 to 10841). The latter two remain above their Lille listings;
+they are not additional tensor certificates.

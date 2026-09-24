@@ -26,10 +26,11 @@ raw = read_file(args[1])
 if raw == nil
   << "missing seed"
   exit(2)
-data = i64[3*stride*8192]
+# Match the MFW1 reader's rank limit; the live fleet keeps its smaller cap.
+data = i64[3*stride*16384]
 meta = i64[4]
 rank = ffpk_parse(raw,data,data.size(),meta,4) ## i64
-if rank < 1 || meta[0] != n || meta[1] != m || meta[2] != p || rank+64 > 8192
+if rank < 1 || meta[0] != n || meta[1] != m || meta[2] != p || rank+64 > 16384
   << "invalid MFW1 seed"
   exit(2)
 parity = i64[m*p*((n*p+31)/32)]

@@ -280,6 +280,18 @@
       "rank": 6863,
       "listed_rank": 7100,
       "mfw_sha256": "16b51915c875e456e4e827685c6fec4a100a957f8a5c01f944c0671619c437a7"
+    },
+    {
+      "shape": [20, 22, 28],
+      "formula_rank": 6636,
+      "composed_exact_rank": 6636,
+      "composed_mfw_sha256": "6f2a1caa7a17956cf6cb5f6fe4caea808ee052aea6a866d65f5831d241754a84",
+      "walk_steps": 100000000,
+      "walk_nonce": 22228,
+      "rank": 6635,
+      "listed_rank": 6774,
+      "historical_listed_rank": 6867,
+      "mfw_sha256": "d453ef1050fd86cb633b8bab3cd029dd5dfb757a70b1abe9f46495106d0fb817"
     }
   ]
 }

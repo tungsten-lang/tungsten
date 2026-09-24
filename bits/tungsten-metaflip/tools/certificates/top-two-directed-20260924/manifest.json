@@ -1,0 +1,60 @@
+{
+  "schema": 1,
+  "field": "GF(2)",
+  "record_claim": false,
+  "parent_manifest": "../top-two-projection-children-20260923/manifest.json",
+  "parent_shape": [8, 16, 13],
+  "parent_rank": 1044,
+  "parent_sha256": "31ef26e94b119be4480111ced60d70fb41b3bc69aae4cd1fe1cb7be493e013a0",
+  "walk_steps_each": 100000000,
+  "walks": [
+    {
+      "nonce": 2026092473,
+      "rank": 1040,
+      "sha256": "e2fc600621b1d8275ccc4e4bf3e98548c46b8b2ed0f3dc0424abc16b06bc6c6c"
+    },
+    {
+      "nonce": 2026092474,
+      "rank": 1040,
+      "sha256": "2185d9e55e71518485a5e6b33b962a86b1d8e2decf0c22d79be39879b7fe5f26"
+    },
+    {
+      "nonce": 2026092475,
+      "rank": 1040,
+      "sha256": "b4f4786eb3ddead06a71726f1851d48570019cbb6bb7fe813dc5d73d80ef4efe"
+    }
+  ],
+  "retained": {
+    "file": "8x16x13-r1040.mfw.gz.b64",
+    "shape": [8, 16, 13],
+    "rank": 1040,
+    "density": 26654,
+    "sha256": "b4f4786eb3ddead06a71726f1851d48570019cbb6bb7fe813dc5d73d80ef4efe"
+  },
+  "descendants": [
+    {
+      "construction": "strassen-product",
+      "shape": [16, 26, 32],
+      "rank": 7280,
+      "density": 319848,
+      "sha256": "b7b114c4566b48cf3fb9fe1dc80ef3a81349be325020619694beff70b4e12830"
+    },
+    {
+      "construction": "certified-block-pair",
+      "shape": [32, 13, 16],
+      "rank": 3882,
+      "density": 107968,
+      "right_shape": [13, 16, 24],
+      "right_rank": 2842,
+      "right_sha256": "cad0bbc3685789992aed5d490035e698e6e5c1e5dc272f05dd86742b01364014",
+      "sha256": "c14329f3ae7000b8405917b94e98f377873e8282538211ddf139c64fedb0d044"
+    }
+  ],
+  "dated_lille_comparison": {
+    "source_created_at": "2026-09-18T17:17:29",
+    "source_sha256": "a77c4286cd7ad9b5212b679d9e1e21672c7519a41124a3d71079d68bf0878213",
+    "8x13x16": 1054,
+    "13x16x32": 3922,
+    "16x26x32": 7378
+  }
+}

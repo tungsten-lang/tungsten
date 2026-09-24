@@ -3691,3 +3691,22 @@ reproducer is `flipfleet_wassat_psi_bench.w`; it constructs the exact quotient,
 solves with Wassat, pins any returned model through the independent `ffcdcl`
 encoding, decodes it, and exhaustively reconstructs the tensor before accepting
 a SAT result.  The four balanced rank-17 ψ cells remain open.
+
+## 2026-09-24: top-two projection directed descendant
+
+A certified 8×16×13/r1044 top-two projection parent yielded an exact
+GF(2) rank-1040 tensor after a 100-million-move directed walk. A second
+replay with the same nonce reproduced the canonical bytes. Two continuation
+walks retained rank 1040 and lowered density to 26654; the next continuation
+was unchanged. Independent full-tensor checks pass. The retained tensor
+composes with Strassen to 16×26×32/r7280 and with a certified
+13×16×24/r2842 block to 13×16×32/r3882. Both descendants pass independent
+full-tensor checks. The source, exact digests, compact tensor certificate,
+and replay checker are in
+`bits/tungsten-metaflip/tools/certificates/top-two-directed-20260924/`.
+The dated Lille table lists 1054, 7378, and 3922 for those respective
+shapes; these are comparison values, not optimality or worldwide-novelty
+proofs. Three different certified block-extension parents each held rank
+over a 100-million-move first walk, and their two-pass basis/projection
+children did not beat the current local comparison bounds. Direct
+projections of the new rank-1040 tensor also did not beat those bounds.

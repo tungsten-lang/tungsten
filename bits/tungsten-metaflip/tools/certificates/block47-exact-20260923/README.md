@@ -66,6 +66,9 @@ Ten adjacent 16x/17x block compositions and eleven rank-93 5x5 leaf
 variants produced no further exact cancellation. We instead materialized
 three high-gain 20x block formulas as exact tensors; one 100-million-move
 directed walk per shape reduced their ranks by 1, 8, and 3 respectively.
+Another 100-million-move continuation of 20x24x31 tied rank 7827 but lowered
+factor-bit density from 399026 to 398980. The lower-density exact tensor is
+retained in the archive; density was not used as a walk acceptance objective.
 Continuing the verified 20x23x32 result for another 100 million moves reduced
 it from 7774 to 7772. A third 100-million-move continuation tied rank with
 ten fewer factor bits, and that lower-density tensor is retained. All three
@@ -87,6 +90,11 @@ standalone walker's capacity to match the 16384-term MFW1 reader, 20x28x29
 also stayed at 8720. The live fleet retains its separate 8192-term cap.
 Only the 20x22x28 gain is retained; its historical audit listed Lille rank
 6867, versus the current catalogue's 6774.
+Two further 100-million-move continuations of 20x22x28 both tied rank 6635,
+lowering factor-bit density from 329009 to 328752 in total. The final exact
+tensor is retained, with both continuation nonces and hashes in the manifest.
+The matched 20x23x28 continuation returned its input byte-for-byte and was
+not retained.
 
 From the repository root, run:
 

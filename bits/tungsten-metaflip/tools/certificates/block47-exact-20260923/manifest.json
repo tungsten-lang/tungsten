@@ -229,12 +229,14 @@
       "formula_rank": 7174,
       "composed_exact_rank": 7174,
       "composed_mfw_sha256": "c7245260805f560a8bceb28fe56fd102f8ff1c87e92702e24f343209bbb5c181",
-      "walk_steps": 100000000,
-      "walk_nonce": 21981,
+      "walks": [
+        {"steps": 100000000, "nonce": 21981, "rank": 7173, "sha256": "342c0b66594c4d396f2ea692a4982d2f043007760552095ba79941f6196c6738"},
+        {"steps": 100000000, "nonce": 22429, "rank": 7173, "sha256": "e60d6f08a13f36741399fa63d41501beb7dcd510cd3370398cf3da7624ef1180"}
+      ],
       "rank": 7173,
       "listed_rank": 7360,
       "historical_listed_rank": 7421,
-      "mfw_sha256": "342c0b66594c4d396f2ea692a4982d2f043007760552095ba79941f6196c6738"
+      "mfw_sha256": "e60d6f08a13f36741399fa63d41501beb7dcd510cd3370398cf3da7624ef1180"
     },
     {
       "shape": [20, 23, 32],

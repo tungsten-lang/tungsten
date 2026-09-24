@@ -75,6 +75,9 @@ ten fewer factor bits, and that lower-density tensor is retained. All three
 walk hashes and nonces are pinned in the manifest.
 The 20x23x29 historical cross-audit listed Lille rank 7421; the current
 catalogue lists 7360, which is the comparison used in the table.
+A second 100-million-move walk on 20x23x29 tied rank 7173 and reduced
+factor-bit density from 355122 to 355118; the exact lower-density tensor is
+retained without treating density as a search objective.
 Eight further unmaterialized high-gain formulas had no exact cancellations.
 Three previously audited adjacent formula parents were materialized and each
 given one 100-million-move directed walk: 20x23x27 fell by four terms,

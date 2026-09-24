@@ -24,6 +24,12 @@ Ruby full-tensor verifiers.
 | 15x22x27 | 5124 | 5120 | 5115 | 5148 |
 | 15x23x25 | 4915 | 4913 | 4913 | 4968 |
 | 15x23x26 | 5137 | 5133 | 5129 | 5167 |
+| 16x20x26 | 4636 | 4636 | 4634 | 4802 |
+| 16x21x25 | 4710 | 4710 | 4710 | 4836 |
+| 16x21x26 | 4908 | 4908 | 4908 | 5041 |
+| 16x22x24 | 4665 | 4665 | 4665 | 4732 |
+| 16x22x25 | 4921 | 4921 | 4921 | 5028 |
+| 16x22x26 | 5139 | 5138 | 5136 | 5250 |
 
 The four additional 13x rows came from materializing 20 unarchived audited
 formulas with `screen_block47_cancellations.py`. Four had strict exact
@@ -40,6 +46,16 @@ composition parents unchanged, so no walk outcome is needed to replay them.
 An adjacent 11-shape sweep found four further cancellations. The walks on
 15x19x31 and 15x22x26 returned their composition parents unchanged; the
 retained walks on 15x22x27 and 15x23x26 lower them to 5115 and 5129.
+A further six-shape 15x/16x allocation-boundary sweep found one cancellation,
+at 16x22x26. Its first 100-million-move directed walk reduced rank 5138 to
+5136; the next two tied rank while lowering density. All three nonces and the
+exact-composition parent are pinned in the manifest.
+Its coordinate projections gave five independently exact tensors below the
+Lille-listed ranks, but each was numerically dominated by an already audited
+block-47 formula. The projections were not retained in this package. We
+materialized and independently verified those five stronger formulas instead.
+One 100-million-move walk improved 16x20x26 by two terms; matched walks on the
+other four tied their formula ranks.
 
 From the repository root, run:
 
@@ -50,7 +66,7 @@ python3 bits/tungsten-metaflip/tools/check_block47_exact_20260923.py
 Optionally compile `bits/tungsten-metaflip/tools/wide_rect_walk.w` and pass its
 binary as `--replay-walk BINARY` to reproduce the retained directed walk byte
 for byte. `--replay-compose BINARY --leaf-root DIR` also re-materializes all
-fifteen block formulas with `flipfleet_block_compose.w` and verifies their exact
+twenty-one block formulas with `flipfleet_block_compose.w` and verifies their exact
 canonical hashes. The tensors beat the numeric ranks in the Lille table as
 checked on 2026-09-24. This finite comparison is not a worldwide-record or
 optimality claim. With the historical formula bounds included, the first five
@@ -59,4 +75,9 @@ closure over sorted dimensions 2--32. The three later shapes also reduce the
 numeric closure at 23x25x31 from 10002 to 10000, but that remains worse than
 Lille's listed 9585. No additional record candidate or universal composition
 claim follows from that finite scan. The four adjacent-sweep tensors improve
-only their own shapes against the same formula-bounded closure.
+only their own shapes against the same formula-bounded closure. The new
+16x22x26 tensor also lowers the finite numeric closure at 18x22x26 from 6041
+to 6038, still worse than Lille's listed 5771. Among the six new retained
+rows, only 16x20x26 and 16x22x26 lower the already audited block-formula
+numeric closure over sorted dimensions 2--32; the four other rows turn prior
+formula estimates into full exact tensor witnesses.

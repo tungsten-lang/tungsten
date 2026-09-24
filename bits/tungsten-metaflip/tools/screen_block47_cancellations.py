@@ -21,7 +21,8 @@ from wide_matrix_cleanup_parity_test import blob  # noqa: E402
 from verify_representation_portfolio import parse_terms  # noqa: E402
 
 
-def scan(composer, leaf_root, output_dir, targets=(), limit=None):
+def scan(composer, leaf_root, output_dir, targets=(), limit=None,
+         retain_all=False):
     formulas = list(csv.DictReader(AUDIT.open(), delimiter='\t'))
     by_target = {row['target']: row for row in formulas}
     if targets:
@@ -50,7 +51,7 @@ def scan(composer, leaf_root, output_dir, targets=(), limit=None):
         rank = int(exact_match.group(1))
         report = {'shape': shape, 'formula_rank': int(row['formula_rank']),
                   'exact_rank': rank, 'cancellations': int(row['formula_rank']) - rank}
-        if rank < int(row['formula_rank']):
+        if rank < int(row['formula_rank']) or retain_all:
             verified = json.loads(subprocess.check_output(
                 ['ruby', str(HERE / 'verify_tensor.rb'), '--shape', shape,
                  str(text_path)], text=True))[0]
@@ -83,7 +84,12 @@ if __name__ == '__main__':
     parser.add_argument('--output-dir', required=True, type=Path)
     parser.add_argument('--target', action='append', default=[])
     parser.add_argument('--limit', type=int)
+    parser.add_argument('--retain-all', action='store_true',
+                        help='retain verified formula tensors even without cancellation')
     args = parser.parse_args()
     if not args.target and (args.limit is None or args.limit < 1):
         parser.error('provide --target or a positive --limit')
-    scan(args.composer, args.leaf_root, args.output_dir, args.target, args.limit)
+    if args.retain_all and not args.target:
+        parser.error('--retain-all requires explicit --target shapes')
+    scan(args.composer, args.leaf_root, args.output_dir, args.target, args.limit,
+         args.retain_all)

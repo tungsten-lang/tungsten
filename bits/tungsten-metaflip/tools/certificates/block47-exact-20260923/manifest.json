@@ -166,6 +166,63 @@
       "rank": 5129,
       "listed_rank": 5167,
       "mfw_sha256": "5a5288a2e44035b4ae96c94167490231252b9b7ee171ff5b5c8a1dfacea60df1"
+    },
+    {
+      "shape": [16, 22, 26],
+      "formula_rank": 5139,
+      "composed_exact_rank": 5138,
+      "composed_mfw_sha256": "e00493fe9479cf34e3eebd806447f77e44187a02aff5399144116e2e217d292c",
+      "walks": [
+        {"steps": 100000000, "nonce": 21953, "rank": 5136, "sha256": "83044491ed2a6a18e17c742f0efe7be2d05c556eca78c9c8422218de009b3e07"},
+        {"steps": 100000000, "nonce": 21955, "rank": 5136, "sha256": "c498b18d27b7d5f417cb292c555d2fd2ccd803bcf902997325fc70e286d01680"},
+        {"steps": 100000000, "nonce": 21957, "rank": 5136, "sha256": "4506fd3c37b541e9991c319c610694eec6c4acd9b6407fa4ac56122cd72dfd3d"}
+      ],
+      "rank": 5136,
+      "listed_rank": 5250,
+      "mfw_sha256": "4506fd3c37b541e9991c319c610694eec6c4acd9b6407fa4ac56122cd72dfd3d"
+    },
+    {
+      "shape": [16, 20, 26],
+      "formula_rank": 4636,
+      "composed_exact_rank": 4636,
+      "composed_mfw_sha256": "2a2ded5a82ab71add4b9d9ada7984df201cb86e8896cb2b9dabaebb938ff04eb",
+      "walk_steps": 100000000,
+      "walk_nonce": 21973,
+      "rank": 4634,
+      "listed_rank": 4802,
+      "mfw_sha256": "bae86a1951d1d672f0be10ccd02de4ce98c1cd171aae1f26a4bd8fea42a2b558"
+    },
+    {
+      "shape": [16, 21, 25],
+      "formula_rank": 4710,
+      "composed_exact_rank": 4710,
+      "rank": 4710,
+      "listed_rank": 4836,
+      "mfw_sha256": "0af7e52fadd0463f1924fe496fdb9b32a41815b0e88e2772d0597ea6a3b48009"
+    },
+    {
+      "shape": [16, 21, 26],
+      "formula_rank": 4908,
+      "composed_exact_rank": 4908,
+      "rank": 4908,
+      "listed_rank": 5041,
+      "mfw_sha256": "57f4113bd4f74cce849d02b1ca04c362d2f68810ecc375d07dce42d5a33aa9fd"
+    },
+    {
+      "shape": [16, 22, 24],
+      "formula_rank": 4665,
+      "composed_exact_rank": 4665,
+      "rank": 4665,
+      "listed_rank": 4732,
+      "mfw_sha256": "35cdefd236392bef043140f84e09586bff547ecfa72f851df29fb29c26c2710a"
+    },
+    {
+      "shape": [16, 22, 25],
+      "formula_rank": 4921,
+      "composed_exact_rank": 4921,
+      "rank": 4921,
+      "listed_rank": 5028,
+      "mfw_sha256": "8976adc3a6e06517dd2fe0915f6b1643b3993a22d44e787d07dd266f1e7460cb"
     }
   ]
 }

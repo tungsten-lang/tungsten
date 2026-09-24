@@ -31,6 +31,51 @@
     "density": 26654,
     "sha256": "b4f4786eb3ddead06a71726f1851d48570019cbb6bb7fe813dc5d73d80ef4efe"
   },
+  "symmetric_walk": {
+    "input_shape": [16, 13, 8],
+    "input_rank": 1040,
+    "input_sha256": "5eb47cc6e36b4643906dbabed072e75ebd4dfacebff955efe5f812fb085c74e2",
+    "steps": 100000000,
+    "nonce": 2026092479,
+    "retained": {
+      "file": "16x13x8-r1039.mfw.gz.b64",
+      "shape": [16, 13, 8],
+      "rank": 1039,
+      "density": 27010,
+      "sha256": "e16b34db4acd4957a6480cba8b390a445f23f00fc0b0c0686931d1fbdd7f8a10"
+    }
+  },
+  "basis_walk": {
+    "mode": 6,
+    "input_shape": [16, 13, 8],
+    "input_rank": 1039,
+    "input_sha256": "ab1ec14d8533ada18420ab82c59bd0513a0bd4c4475d7a18af1b94d30838b18c",
+    "steps": 100000000,
+    "nonce": 2026092496,
+    "retained": {
+      "file": "16x13x8-r1038.mfw.gz.b64",
+      "shape": [16, 13, 8],
+      "rank": 1038,
+      "density": 27046,
+      "sha256": "357946b512aabc5fd7ab1e4f8be08d865faf3897a46d7b5211a27f3fefed9d65"
+    }
+  },
+  "final_walk": {
+    "input_shape": [8, 16, 13],
+    "input_rank": 1038,
+    "input_sha256": "f207c0e5e6e9363cc149801e32b6a445ab1947a2e7ecc0b59e959f329ca307a8",
+    "steps": 100000000,
+    "nonce": 2026092516,
+    "raw_sha256": "931b8e62e2e5ded7c3d8043fa6da37b62f36bd19b75526beb054c3e26280c29b",
+    "basis_mode": 6,
+    "retained": {
+      "file": "8x16x13-r1037.mfw.gz.b64",
+      "shape": [8, 16, 13],
+      "rank": 1037,
+      "density": 25016,
+      "sha256": "cc1a52ed2378d1174e6604d39f67d3e2a5e0842959291bf6c44366baa2526378"
+    }
+  },
   "descendants": [
     {
       "construction": "strassen-product",
@@ -50,10 +95,74 @@
       "sha256": "c14329f3ae7000b8405917b94e98f377873e8282538211ddf139c64fedb0d044"
     }
   ],
+  "stronger_descendants": [
+    {
+      "construction": "strassen-product",
+      "shape": [16, 26, 32],
+      "rank": 7273,
+      "density": 324120,
+      "sha256": "084ae21b4f9c21e00ddff4c3f997fe3cbda7cc549c6ae3ded92427aa3a6eabd2"
+    },
+    {
+      "construction": "certified-block-pair",
+      "shape": [32, 13, 16],
+      "rank": 3881,
+      "density": 108324,
+      "right_shape": [13, 16, 24],
+      "right_rank": 2842,
+      "right_sha256": "cad0bbc3685789992aed5d490035e698e6e5c1e5dc272f05dd86742b01364014",
+      "sha256": "fd83ffa66ff16cdc5f579339668b9c4ebf3af40e05548d319a0138f4df745f00"
+    },
+    {
+      "construction": "naive-append",
+      "shape": [8, 13, 17],
+      "rank": 1143,
+      "density": 27322,
+      "sha256": "07a0b8f9f9f3885a622e7a4ba10327453b4e26bf6a621cb86a95a83380ef762f"
+    }
+  ],
+  "final_descendants": [
+    {
+      "construction": "strassen-product",
+      "shape": [16, 26, 32],
+      "rank": 7259,
+      "density": 300192,
+      "sha256": "b1979066932a4cfd2c087c7f3fb37d05679de7c1bc02713e9b3bd0be8d17e66a"
+    },
+    {
+      "construction": "certified-block-pair",
+      "shape": [32, 13, 16],
+      "rank": 3879,
+      "density": 106330,
+      "right_shape": [13, 16, 24],
+      "right_rank": 2842,
+      "right_sha256": "cad0bbc3685789992aed5d490035e698e6e5c1e5dc272f05dd86742b01364014",
+      "sha256": "19fee8b7a5f0cfd2258cdd368373d4a5743b5e98cb37f4e64589ed3ff4e20003"
+    },
+    {
+      "construction": "certified-block-pair-23",
+      "shape": [31, 13, 16],
+      "rank": 3808,
+      "density": 119690,
+      "right_shape": [16, 23, 13],
+      "right_rank": 2771,
+      "right_sha256": "dd751044ffa403031547ed59cd9f363df1204ea6ca12349710960374323dabfa",
+      "sha256": "3b5c2ad39142e8795d019c71aeca6d335a6ee0d4caa70a06562e243509acf015"
+    },
+    {
+      "construction": "naive-append",
+      "shape": [8, 13, 17],
+      "rank": 1141,
+      "density": 25328,
+      "sha256": "45c2a50d078b3ec9461ca27c366bab818dfe7846129800a28b294b671ecf2138"
+    }
+  ],
   "dated_lille_comparison": {
     "source_created_at": "2026-09-18T17:17:29",
     "source_sha256": "a77c4286cd7ad9b5212b679d9e1e21672c7519a41124a3d71079d68bf0878213",
     "8x13x16": 1054,
+    "8x13x17": 1144,
+    "13x16x31": 3810,
     "13x16x32": 3922,
     "16x26x32": 7378
   }

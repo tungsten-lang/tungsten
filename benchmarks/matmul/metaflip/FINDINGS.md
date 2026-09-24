@@ -3710,3 +3710,20 @@ proofs. Three different certified block-extension parents each held rank
 over a 100-million-move first walk, and their two-pass basis/projection
 children did not beat the current local comparison bounds. Direct
 projections of the new rank-1040 tensor also did not beat those bounds.
+An axis permutation to 16×13×8 exposed a different directed neighborhood:
+another 100-million-move walk reached rank 1039, reproduced byte-for-byte
+on a fresh run. Independent tensor checks verify the primitive and its
+8×13×17/r1143 append, 13×16×32/r3881 block pair, and
+16×26×32/r7273 Strassen product. Six further rank-1039 orientation walks
+did not lower rank. Two-pass basis changes and 216 two-coordinate
+projections of the rank-1039 representation found no child below the
+local/public comparison bounds. The rank-1039 certificate and all three
+derived checks extend the same replay archive. A subsequent two-pass basis
+change followed by a directed walk through another axis orientation
+lowered the primitive first to rank 1038, then to rank 1037. Exact tensor
+checks confirm four rank-1037 descendants: 8×13×17/r1141,
+13×16×31/r3808, 13×16×32/r3879, and 16×26×32/r7259. A further two-pass
+basis refinement held rank but lowered density from 27114 to 25016. Six
+100-million-move orientation walks and two more basis walks from rank 1037
+found no further rank drop. This is a bounded local search result, not an
+optimality claim.

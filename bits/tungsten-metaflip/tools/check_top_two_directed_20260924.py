@@ -15,6 +15,7 @@ CERT = HERE / "certificates/top-two-directed-20260924"
 sys.path.insert(0, str(HERE))
 import screen_certified_block_extensions as blocks  # noqa: E402
 import screen_top_two_projection_children as top  # noqa: E402
+import screen_two_pass_basis_children as basis  # noqa: E402
 
 
 def digest(raw):
@@ -40,6 +41,17 @@ def verify(shape, terms, expected, directory):
     return path
 
 
+def load_cert(row, directory):
+    raw = gzip.decompress(base64.b64decode(
+        (CERT / row["file"]).read_bytes().replace(b"\n", b""),
+        validate=True))
+    if digest(raw) != row["sha256"]:
+        raise ValueError("retained certificate digest mismatch")
+    shape, terms = top.read_blob(raw)
+    path = verify(shape, terms, row, directory)
+    return shape, terms, path
+
+
 def replay_parent(manifest, directory):
     parent_manifest = json.loads((CERT / manifest["parent_manifest"]).read_text())
     matches = [row for row in parent_manifest["rows"]
@@ -60,6 +72,47 @@ def replay_parent(manifest, directory):
     return Path(parent["output"])
 
 
+def verify_descendants(shape, terms, rows, directory):
+    by_kind = {row["construction"]: row for row in rows}
+    left = top.orient(shape, terms, (8, 13, 16))
+    strassen = HERE.parent / "lib/metaflip/seeds/gf2/matmul_2x2_rank7_strassen_gf2.txt"
+    right = top.parse_terms(strassen.read_bytes(), 7)
+    top.exact((2, 2, 2), right)
+    product = top.kronecker((8, 13, 16), left, (2, 2, 2), right)
+    verify((16, 26, 32), product, by_kind["strassen-product"], directory)
+
+    for pair_row in rows:
+        if not pair_row["construction"].startswith("certified-block-pair"):
+            continue
+        source = pair_row["right_shape"]
+        seed = {"right_seed_shape": "x".join(map(str, source)),
+                "right_seed_rank": pair_row["right_rank"],
+                "right_seed_sha256": pair_row["right_sha256"],
+                "right_compressed": True}
+        right_shape, right_terms = blocks.load_seed(seed, None, "right_")
+        target = tuple(pair_row["shape"])
+        right_orientation = (target[0] - 8, 13, 16)
+        right = blocks.orient(right_shape, right_terms, right_orientation)
+        combined = (blocks.block((8, 13, 16), left, target, (0, 0, 0)) +
+                    blocks.block(right_orientation, right, target, (8, 0, 0)))
+        width = max(target[0] * target[1], target[1] * target[2],
+                    target[0] * target[2])
+        cleaned, history = blocks.compress_shared(combined, max_bits=width)
+        if history:
+            raise ValueError("unexpected block-pair cleanup")
+        verify(target, cleaned, pair_row, directory)
+
+    if "naive-append" in by_kind:
+        target = (8, 13, 17)
+        combined = (blocks.block((8, 13, 16), left, target, (0, 0, 0)) +
+                    blocks.block((8, 13, 1), blocks.naive((8, 13, 1)),
+                                 target, (0, 0, 16)))
+        cleaned, history = blocks.compress_shared(combined, max_bits=221)
+        if history:
+            raise ValueError("unexpected append cleanup")
+        verify(target, cleaned, by_kind["naive-append"], directory)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--replay-walk", type=Path,
@@ -69,13 +122,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="metaflip-top-two-directed-") as tmp:
         directory = Path(tmp)
         parent = replay_parent(manifest, directory)
-        raw = gzip.decompress(base64.b64decode(
-            (CERT / manifest["retained"]["file"]).read_bytes().replace(b"\n", b""),
-            validate=True))
-        shape, terms = top.read_blob(raw)
-        if digest(raw) != manifest["retained"]["sha256"]:
-            raise ValueError("retained certificate digest mismatch")
-        retained = verify(shape, terms, manifest["retained"], directory)
+        shape, terms, retained = load_cert(manifest["retained"], directory)
 
         if args.replay_walk:
             source = parent
@@ -91,31 +138,81 @@ def main():
             if source.read_bytes() != retained.read_bytes():
                 raise ValueError("final walk bytes differ from retained certificate")
 
-        left = top.orient(shape, terms, (8, 13, 16))
-        strassen = HERE.parent / "lib/metaflip/seeds/gf2/matmul_2x2_rank7_strassen_gf2.txt"
-        right = top.parse_terms(strassen.read_bytes(), 7)
-        top.exact((2, 2, 2), right)
-        product = top.kronecker((8, 13, 16), left, (2, 2, 2), right)
-        product_row = next(row for row in manifest["descendants"]
-                           if row["construction"] == "strassen-product")
-        verify((16, 26, 32), product, product_row, directory)
+        verify_descendants(shape, terms, manifest["descendants"], directory)
 
-        pair_row = next(row for row in manifest["descendants"]
-                        if row["construction"] == "certified-block-pair")
-        seed = {"right_seed_shape": "13x16x24",
-                "right_seed_rank": pair_row["right_rank"],
-                "right_seed_sha256": pair_row["right_sha256"],
-                "right_compressed": True}
-        right_shape, right_terms = blocks.load_seed(seed, None, "right_")
-        right = blocks.orient(right_shape, right_terms, (24, 13, 16))
-        target = (32, 13, 16)
-        combined = (blocks.block((8, 13, 16), left, target, (0, 0, 0)) +
-                    blocks.block((24, 13, 16), right, target, (8, 0, 0)))
-        cleaned, history = blocks.compress_shared(combined, max_bits=512)
-        if history:
-            raise ValueError("unexpected block-pair cleanup")
-        verify(target, cleaned, pair_row, directory)
-    print("PASS top-two directed rank 1040 and exact descendants 7280, 3882")
+        symmetric = manifest["symmetric_walk"]
+        orientation = tuple(symmetric["input_shape"])
+        sym_terms = top.orient(shape, terms, orientation)
+        sym_raw = top.blob(orientation, sym_terms)
+        if (len(sym_terms) != symmetric["input_rank"] or
+                digest(sym_raw) != symmetric["input_sha256"]):
+            raise ValueError("symmetric input mismatch")
+        strong_shape, strong_terms, strong_path = load_cert(
+            symmetric["retained"], directory)
+
+        if args.replay_walk:
+            sym_input = directory / "sym-input.mfw"
+            sym_input.write_bytes(sym_raw)
+            output = directory / "sym-walk.mfw"
+            subprocess.run(
+                [str(args.replay_walk), "16x13x8", str(sym_input), str(output),
+                 str(symmetric["steps"]), str(symmetric["nonce"])],
+                check=True, stdout=subprocess.PIPE, text=True)
+            if output.read_bytes() != strong_path.read_bytes():
+                raise ValueError("symmetric walk replay mismatch")
+
+        verify_descendants(strong_shape, strong_terms,
+                           manifest["stronger_descendants"], directory)
+
+        basis_walk = manifest["basis_walk"]
+        basis_input = basis.two_pass(
+            strong_terms, strong_shape, basis_walk["mode"])
+        basis_raw = top.blob(strong_shape, basis_input)
+        if (list(strong_shape) != basis_walk["input_shape"] or
+                len(basis_input) != basis_walk["input_rank"] or
+                digest(basis_raw) != basis_walk["input_sha256"]):
+            raise ValueError("basis input mismatch")
+        middle_shape, middle_terms, middle_path = load_cert(
+            basis_walk["retained"], directory)
+        if args.replay_walk:
+            source = directory / "basis-input.mfw"
+            source.write_bytes(basis_raw)
+            output = directory / "basis-walk.mfw"
+            subprocess.run(
+                [str(args.replay_walk), "16x13x8", str(source), str(output),
+                 str(basis_walk["steps"]), str(basis_walk["nonce"])],
+                check=True, stdout=subprocess.PIPE, text=True)
+            if output.read_bytes() != middle_path.read_bytes():
+                raise ValueError("basis walk replay mismatch")
+
+        final_walk = manifest["final_walk"]
+        final_orientation = tuple(final_walk["input_shape"])
+        final_input = top.orient(middle_shape, middle_terms, final_orientation)
+        final_raw = top.blob(final_orientation, final_input)
+        if (len(final_input) != final_walk["input_rank"] or
+                digest(final_raw) != final_walk["input_sha256"]):
+            raise ValueError("final walk input mismatch")
+        final_shape, final_terms, final_path = load_cert(
+            final_walk["retained"], directory)
+        if args.replay_walk:
+            source = directory / "final-input.mfw"
+            source.write_bytes(final_raw)
+            output = directory / "final-walk.mfw"
+            subprocess.run(
+                [str(args.replay_walk), "8x16x13", str(source), str(output),
+                 str(final_walk["steps"]), str(final_walk["nonce"])],
+                check=True, stdout=subprocess.PIPE, text=True)
+            raw_output = output.read_bytes()
+            if digest(raw_output) != final_walk["raw_sha256"]:
+                raise ValueError("final walk replay mismatch")
+            raw_shape, raw_terms = top.read_blob(raw_output)
+            refined = basis.two_pass(raw_terms, raw_shape,
+                                     final_walk["basis_mode"])
+            if top.blob(raw_shape, refined) != final_path.read_bytes():
+                raise ValueError("final basis replay mismatch")
+        verify_descendants(final_shape, final_terms,
+                           manifest["final_descendants"], directory)
+    print("PASS top-two directed ranks 1040..1037 with exact descendants")
 
 
 if __name__ == "__main__":

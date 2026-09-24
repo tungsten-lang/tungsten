@@ -3767,3 +3767,15 @@ improved prices and 658 saved rank units to the pinned finite closure, for
 662 shapes and 34267 units total. The replay manifest and checker are under
 `bits/tungsten-metaflip/tools/certificates/nested-directed-20260924/` and
 `bits/tungsten-metaflip/tools/check_nested_directed_20260924.py`.
+
+The cold `search_wide_projection_walks.py` scheduler now exact-checks a
+multiword source, two-pass basis projections, and native-walk results, while
+retaining distinct same-rank representations and prioritizing by a dated
+public comparison only. A focused test reconstructs the r786→r722 projection;
+a bounded 100M walk reproduced the archived r705 output byte-for-byte. A
+separate three-walk, 100M-per-shape screen from r673 reached r645 for
+8×11×11, r633 for 8×10×12, and r630 for 7×11×12. All verified, but none
+beats the respective dated comparison ranks 641, 624, and 618. This remains
+an offline campaign, not automatic live-fleet refinement or a new record. A
+second two-walk screen from r705 tied r673 on 8×11×12 and r663 on 7×12×12;
+both results were exact but neither lowered its seed rank.

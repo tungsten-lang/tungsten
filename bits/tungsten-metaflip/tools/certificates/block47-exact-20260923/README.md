@@ -53,6 +53,8 @@ Ruby full-tensor verifiers.
 | 12x23x23 | 3648 | 3648 | 3642 | 3694 |
 | 12x15x28 | 2888 | 2888 | 2881 | 2920 |
 | 12x22x24 | 3602 | 3602 | 3601 | 3632 |
+| 12x22x23 | 3498 | 3498 | 3496 | 3554 |
+| 12x23x25 | 3954 | 3954 | 3952 | 4019 |
 
 The four additional 13x rows came from materializing 20 unarchived audited
 formulas with `screen_block47_cancellations.py`. Four had strict exact
@@ -258,3 +260,10 @@ from 3602 to 3601; a second tied rank with 21 fewer factor bits. All retained
 walks and both exact parents are pinned above. The two gains lower seven and
 six bounded numeric composition prices respectively, but those downstream
 prices are not additional tensor certificates.
+The following eleven-parent screen found no construction-time cancellations.
+First 100-million-move walks on nine parents held rank. Two walks lowered
+12x22x23 from 3498 to 3496; a third tied rank with 21 fewer factor bits.
+One walk lowered 12x23x25 from 3954 to 3952; two continuations tied rank and
+lowered factor bits by 177 total. These gains lower seven and five bounded
+numeric composition prices including their source shapes. The downstream
+prices are scheduling leads, not additional tensor certificates.

@@ -44,6 +44,8 @@ Ruby full-tensor verifiers.
 | 20x23x26 | 6512 | 6512 | 6508 | 6598 |
 | 20x26x26 | 7372 | 7371 | 7370 | 7421 |
 | 20x21x27 | 6189 | 6189 | 6188 | 6290 |
+| 20x24x27 | 6890 | 6890 | 6883 | 7056 |
+| 20x26x27 | 7608 | 7608 | 7606 | 7766 |
 
 The four additional 13x rows came from materializing 20 unarchived audited
 formulas with `screen_block47_cancellations.py`. Four had strict exact
@@ -134,6 +136,11 @@ lowered 20x21x27 from 6189 to 6188, and its continuation tied rank with
 lower density. The other two formula parents stayed at their ranks. A walk
 lowered 20x20x23 from 5034 to 5028, but Lille currently lists 4898 there,
 so it is not retained as a competitive certificate in this package.
+Five more formulas were screened against the live catalogue before walking.
+All materialized without construction-time cancellations. Directed walks
+lowered 20x24x27 from 6890 to 6883 and 20x26x27 from 7608 to 7607, then
+7606 on continuation. Their final same-rank continuations have lower
+factor-bit density. The other three shapes held their formula ranks.
 
 From the repository root, run:
 
@@ -144,7 +151,7 @@ python3 bits/tungsten-metaflip/tools/check_block47_exact_20260923.py
 Optionally compile `bits/tungsten-metaflip/tools/wide_rect_walk.w` and pass its
 binary as `--replay-walk BINARY` to reproduce the retained directed walk byte
 for byte. `--replay-compose BINARY --leaf-root DIR` also re-materializes all
-thirty-five block formulas with `flipfleet_block_compose.w` and verifies their exact
+thirty-seven block formulas with `flipfleet_block_compose.w` and verifies their exact
 canonical hashes. The tensors beat the numeric ranks in the Lille table as
 checked on 2026-09-24. This finite comparison is not a worldwide-record or
 optimality claim. With the historical formula bounds included, the first five
@@ -192,3 +199,7 @@ The 20x26x26 and 20x21x27 gains lower six numeric entries in that closure:
 their two source ranks, 21x26x26 (8048 to 8046), 22x26x26 (8724 to 8722),
 21x21x27 (6756 to 6755), and 21x27x32 (10074 to 10073). The four downstream
 prices are not materialized tensor certificates.
+The 20x24x27 and 20x26x27 gains lower five numeric entries in that closure:
+their two source ranks, 21x24x27 (7538 to 7531), 24x27x32 (11378 to 11371),
+and 21x26x27 (8310 to 8308). The three downstream prices are not materialized
+tensor certificates.

@@ -3739,3 +3739,12 @@ Lille page still displays r1005), but these are cross-field numerical
 comparisons, not a worldwide-record or optimality
 certificate. The projection/walk/descendant chain is in the same replay
 archive.
+The retained r989 tensor has a second useful projection. Removing one
+coordinate of its 13-axis and applying exact cleanup gives 8×12×15/r909.
+A 100-million-move directed walk (nonce 2026092643) lowered it to r899;
+two-pass basis mode 6 held rank and reduced density to 20324. Independent
+full-tensor verification and a fresh byte-identical walk replay pass. Its
+Strassen product is exactly 16×24×30/r6293. The pinned Lille digest and
+the external tracker list r904 for 8×12×15; this remains a cross-field
+numerical comparison, not an optimality or global-novelty proof. The
+nested projection and product are checked in the same archive.

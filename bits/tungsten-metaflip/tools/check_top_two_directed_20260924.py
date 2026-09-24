@@ -293,7 +293,50 @@ def main():
         if history:
             raise ValueError("unexpected projected block cleanup")
         verify(target, cleaned, descendants["block-with-parent"], directory)
-    print("PASS top-two directed ranks 1040..1037 and projected rank 989")
+
+        nested = manifest["nested_projection_directed"]
+        if (list(second_final_shape) != nested["parent_shape"] or
+                len(second_final_terms) != nested["parent_rank"] or
+                digest(second_path.read_bytes()) != nested["parent_sha256"]):
+            raise ValueError("nested projection parent mismatch")
+        nested_shape, nested_raw = top.project(
+            second_final_shape, second_final_terms, nested["deleted_axis"],
+            nested["deleted_coordinate"])
+        width = max(nested_shape[0] * nested_shape[1],
+                    nested_shape[1] * nested_shape[2],
+                    nested_shape[0] * nested_shape[2])
+        nested_terms, nested_cleanup = top.compress_shared(nested_raw,
+                                                              max_bits=width)
+        if (len(nested_raw) != nested["raw_rank"] or
+                len(nested_cleanup) != nested["cleanup_steps"]):
+            raise ValueError("nested projection cleanup mismatch")
+        nested_path = verify(nested_shape, nested_terms, nested["projected"],
+                             directory)
+        nested_walk = nested["walk"]
+        nested_final_shape, nested_final_terms, nested_final_path = load_cert(
+            nested_walk["retained"], directory)
+        if args.replay_walk:
+            output = directory / "nested-walk.mfw"
+            subprocess.run(
+                [str(args.replay_walk), "x".join(map(str, nested_shape)),
+                 str(nested_path), str(output), str(nested_walk["steps"]),
+                 str(nested_walk["nonce"])], check=True,
+                stdout=subprocess.PIPE, text=True)
+            raw_output = output.read_bytes()
+            if digest(raw_output) != nested_walk["raw_sha256"]:
+                raise ValueError("nested walk replay mismatch")
+            raw_shape, raw_terms = top.read_blob(raw_output)
+            refined = basis.two_pass(raw_terms, raw_shape,
+                                     nested_walk["basis_mode"])
+            if top.blob(raw_shape, refined) != nested_final_path.read_bytes():
+                raise ValueError("nested basis replay mismatch")
+        if tuple(nested_final_shape) != tuple(nested_shape):
+            raise ValueError("nested final shape mismatch")
+        left = top.orient(nested_final_shape, nested_final_terms, (8, 12, 15))
+        product = top.kronecker((8, 12, 15), left, (2, 2, 2), right)
+        verify((16, 24, 30), product, manifest["nested_descendants"][0],
+               directory)
+    print("PASS top-two directed ranks 1040..1037 and projections 989, 899")
 
 
 if __name__ == "__main__":

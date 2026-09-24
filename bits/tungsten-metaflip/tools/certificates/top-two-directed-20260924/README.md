@@ -29,6 +29,13 @@ and two larger constructions: 8×13×31/r2026 by a block sum with the
 rank-1037 parent, and 16×26×30/r6923 by Strassen composition. Walk replay
 is optional but reproduces both outputs byte for byte.
 
+A second projection from the retained rank-989 tensor removes coordinate 6
+of its first axis. Exact cleanup gives 8×12×15/r909; a 100-million-move
+walk (nonce 2026092643) reaches rank **899**. A two-pass basis rewrite
+(mode 6) retains that rank at density 20324. Strassen composition gives
+16×24×30/r6293. The checker verifies this nested chain and its product;
+optional walk replay reproduces the raw rank-899 tensor byte for byte.
+
 Run from the repository root:
 
 ```sh
@@ -42,6 +49,7 @@ To reproduce the walks byte for byte, compile
 
 These ranks are exact GF(2) upper bounds. The dated Lille rank digest pinned
 in the manifest and a [separate tracker](https://github.com/dronperminov/FastMatrixMultiplication)
-list 991 for 8×13×15; the [individual Lille page](https://fmm.univ-lille.fr/8x13x15.html)
-still displays 1005. Those comparisons concern possibly different fields
-and are not a proof of current worldwide novelty or optimality.
+list 991 for 8×13×15 and 904 for 8×12×15. The [individual Lille page](https://fmm.univ-lille.fr/8x13x15.html)
+still displays 1005 for the former. Those comparisons concern possibly
+different fields and are not a proof of current worldwide novelty or
+optimality.

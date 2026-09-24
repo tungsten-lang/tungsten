@@ -214,9 +214,47 @@
       "sha256": "558aff99b05a98c8554cadcff0f08681a225bd4f45bd6427a77c6be8e1657ff8"
     }
   ],
+  "nested_projection_directed": {
+    "parent_shape": [13, 8, 15],
+    "parent_rank": 989,
+    "parent_sha256": "a514a59a46e236fface562c6ab38e80bae551ce884c2ebc2b1c96bf0e11ecae9",
+    "deleted_axis": 0,
+    "deleted_coordinate": 6,
+    "raw_rank": 913,
+    "cleanup_steps": 4,
+    "projected": {
+      "shape": [12, 8, 15],
+      "rank": 909,
+      "density": 20474,
+      "sha256": "95294e5b7f356902341be4bab44a5c41158d00c76073758d3b2d7599d1c4e905"
+    },
+    "walk": {
+      "steps": 100000000,
+      "nonce": 2026092643,
+      "raw_sha256": "61ec0e8f1a812889af1452bf315764aa6ffdab1a514ce28a3d8a5de42c588946",
+      "basis_mode": 6,
+      "retained": {
+        "file": "12x8x15-r899.mfw.gz.b64",
+        "shape": [12, 8, 15],
+        "rank": 899,
+        "density": 20324,
+        "sha256": "b27c611ec87d3f811d6ef06ff9b88cd98135f3ce50bfc1e5a170b0e142988221"
+      }
+    }
+  },
+  "nested_descendants": [
+    {
+      "construction": "strassen-product",
+      "shape": [16, 24, 30],
+      "rank": 6293,
+      "density": 243888,
+      "sha256": "48a00d43075ca873b7efb8adab5e2c32e366e1de682313441791a82b283ecd12"
+    }
+  ],
   "dated_lille_comparison": {
     "source_created_at": "2026-09-18T17:17:29",
     "source_sha256": "a77c4286cd7ad9b5212b679d9e1e21672c7519a41124a3d71079d68bf0878213",
+    "8x12x15": 904,
     "8x13x15": 991,
     "8x13x16": 1054,
     "8x13x17": 1144,

@@ -48,6 +48,7 @@ Ruby full-tensor verifiers.
 | 20x26x27 | 7608 | 7608 | 7606 | 7766 |
 | 12x14x27 | 2664 | 2664 | 2663 | 2712 |
 | 12x23x24 | 3742 | 3742 | 3736 | 3790 |
+| 12x22x22 | 3374 | 3374 | 3372 | 3430 |
 
 The four additional 13x rows came from materializing 20 unarchived audited
 formulas with `screen_block47_cancellations.py`. Four had strict exact
@@ -221,3 +222,8 @@ their source ranks. Notable downstream changes are 12x24x24 (4030 to 4024),
 23x24x24 (7484 to 7472), and 24x24x24 (8060 to 8048). These are arithmetic
 prices, not additional tensor certificates; sampled current Lille listings
 for these downstream shapes are lower still.
+The next five composition-priority parents had no construction-time
+cancellations. One 100-million-move walk lowered 12x22x22 from 3374 to 3372;
+a second tied rank with lower factor-bit density. Both walks and the exact
+parent are pinned above. Walks on 12x16x27, 12x12x28, 16x23x24, and
+16x23x23 held their parent ranks and are not retained here.

@@ -135,9 +135,9 @@ class CofactorChecks(unittest.TestCase):
         self.assertEqual(matrix_factors([(1<<4095,1<<4095)]*2,max_bits=4096),[])
 
     def test_rhs_only_coordinate_is_not_silently_dropped(self):
-        # Even an incorrect upstream rank oracle must fail the independent
+        # Even an incorrect upstream column selector must fail the independent
         # row system rather than silently ignoring nonzero RHS coordinates.
-        with patch('verify_cofactor_mergers.rank',return_value=0):
+        with patch('verify_cofactor_mergers.column_basis',return_value=[]):
             with self.assertRaisesRegex(AssertionError,'inconsistent matrix coordinate system'):
                 matrix_factors([(1<<1000,1)],max_bits=1024)
 

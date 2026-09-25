@@ -57,6 +57,14 @@ class WideProjectionWalkSearchTest(unittest.TestCase):
         self.assertEqual((rows[1]["rank"], rows[1]["coordinate"],
                           rows[1]["pair_counts"]), (673, 8, [0, 27, 22]))
 
+    def test_duplicate_basis_modes_do_not_repeat_projections(self):
+        shape, terms = MODULE.top.read_blob(
+            gzip.decompress(base64.b64decode(SOURCE.read_bytes())))
+        with mock.patch.object(MODULE, "two_pass", return_value=terms), \
+             mock.patch.object(MODULE.top, "project", wraps=MODULE.top.project) as project:
+            rows = MODULE.proposals(shape, terms, {(8, 12, 12): 720})
+        self.assertEqual(project.call_count, shape[2] + len(rows))
+
     def test_retained_projection_rejects_independent_mismatch(self):
         shape, terms = MODULE.top.read_blob(
             gzip.decompress(base64.b64decode(SOURCE.read_bytes())))

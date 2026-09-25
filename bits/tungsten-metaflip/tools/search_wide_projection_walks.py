@@ -47,18 +47,26 @@ def proposals(shape, terms, public, per_shape=2):
     """Retain distinct full representations, including rank ties."""
     best = {}
     bases = {}
+    seen_bases = set()
     for mode in (None, *range(6, 18)):
         basis = terms if mode is None else two_pass(terms, shape, mode)
+        basis_key = tuple(basis)
+        if basis_key in seen_bases:
+            continue
+        seen_bases.add(basis_key)
         top.exact(shape, basis)
         bases[mode] = basis
         for axis, extent in enumerate(shape):
             if extent <= 1:
                 continue
+            child_shape = tuple(value - (i == axis) for i, value in enumerate(shape))
+            key = tuple(sorted(child_shape))
+            if key not in public:
+                continue
             for coordinate in range(extent):
-                child_shape, projected = top.project(shape, basis, axis, coordinate)
-                key = tuple(sorted(child_shape))
-                if key not in public:
-                    continue
+                projected_shape, projected = top.project(shape, basis, axis, coordinate)
+                if projected_shape != child_shape:
+                    raise ValueError("projection shape mismatch")
                 width = max(child_shape[0] * child_shape[1],
                             child_shape[1] * child_shape[2],
                             child_shape[0] * child_shape[2])

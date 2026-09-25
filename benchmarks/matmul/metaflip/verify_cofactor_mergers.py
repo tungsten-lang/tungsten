@@ -19,7 +19,7 @@ import sys
 import tempfile
 
 from verify_representation_portfolio import apply_word, contained, identity, parse_terms
-from verify_matrix_pockets import EDGES, image_report, positions, rank
+from verify_matrix_pockets import EDGES, image_report, positions
 
 
 def parity(terms):
@@ -48,11 +48,27 @@ def materialize(table, axis):
     return result
 
 
+def column_basis(columns, reverse_columns=False):
+    """Keep the first independent columns in the requested deterministic order."""
+    basis, pivots = [], {}
+    for j in sorted(columns, reverse=reverse_columns):
+        word = columns[j]
+        while word:
+            pivot = word.bit_length()
+            if pivot in pivots:
+                word ^= pivots[pivot]
+            else:
+                pivots[pivot] = word
+                basis.append(columns[j])
+                break
+    return basis
+
+
 def matrix_factors(pairs, *, max_bits=256, reverse_columns=False):
     """Canonical column basis, independently solved by row equations.
 
     Ruby incrementally encodes each column during elimination. Here basis
-    selection uses rank tests, then a separate low-pivot row system solves
+    selection uses incremental pivots, then a separate low-pivot row system solves
     all right factors simultaneously. Sparse transposition skips identically
     zero coordinate rows; their ascending order is otherwise unchanged.
     Every output matrix is reconstructed.
@@ -64,10 +80,7 @@ def matrix_factors(pairs, *, max_bits=256, reverse_columns=False):
         assert all(type(v) is int and 0 <= v < 1 << max_bits for v in (left, right))
         for j in positions(right):
             columns[j] ^= left
-    basis = []
-    for j in sorted(columns, reverse=reverse_columns):
-        if rank(basis + [columns[j]]) > len(basis):
-            basis.append(columns[j])
+    basis = column_basis(columns, reverse_columns)
     coefficient_rows, right_rows = defaultdict(int), defaultdict(int)
     for i, value in enumerate(basis):
         for coordinate in positions(value):

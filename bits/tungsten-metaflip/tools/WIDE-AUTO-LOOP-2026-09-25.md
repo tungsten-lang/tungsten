@@ -35,10 +35,12 @@ price-gap order and round-robin, and a valid basis seed remains eligible for
 the next round even when its walk returns the same state. Thus a wide first
 beam or one descendant cannot consume the whole feedback budget.
 Every retained projection that strictly improves its shape's round-start
-price is now independently verified, archived, composed, and offered to the
-next frontier without consuming a walk slot. Distinct tied representations
-remain eligible for walks; the projection beam still bounds how many are
-walked. This is automatic within the offline campaign, not in `bin/metaflip`.
+price and is no worse than its current live price is now independently
+verified, archived, composed, and offered to the next frontier without
+consuming a walk slot. Distinct tied representations remain eligible for walks;
+superseded projections are skipped, and the projection beam still bounds how
+many are walked. This is automatic within the offline campaign, not in
+`bin/metaflip`.
 
 Matched control: the earlier projection-first schedule recovered the certified
 r872 witness from the packaged `7×16×12/r873` source in three 100M walks. With
@@ -73,3 +75,14 @@ walk seeds. A two-round, two-walk replay chose a projected 8×13×8 child of
 an exact composed parent for the second walk, establishing actual feedback;
 it found no rank improvement. Live-fleet integration needs matched yield and responsiveness
 evidence, plus multiword parent support in the native composition intake.
+
+A later two-round control from the checked-in 19×25×27/r7144 parent admitted
+19×24×27/r6871 as an exact projection, walked it to r6841, projected that
+state to 19×24×26/r6725, and walked again to r6683. A separate 100M-step
+continuation of r6841 reached an independently checked 19×24×27/r6827;
+another 100M-step continuation found no further drop. The five retained
+witnesses and their projection lineage are replayable in
+`certificates/impact-grandchildren-20260925/`. This run exposed a scheduler
+edge case: a later source could offer a projection below the *round-start*
+price but above a new *live* price. The admission gate now skips such
+superseded projections while preserving equal-rank alternative representations.

@@ -132,6 +132,13 @@ def ordered_choices(projected, basis, price):
     return projected[:1] + basis[:2] + projected[1:] + basis[2:]
 
 
+def projection_admission_kind(rank, round_price, live_price):
+    """Keep new gains and tied representations, not superseded projections."""
+    if rank >= round_price or rank > live_price:
+        return None
+    return "projection-improvement" if rank < live_price else "projection-tie"
+
+
 def frontier_priority(state, current_price):
     return (len(state["terms"]) - current_price(tuple(sorted(state["shape"]))),
             len(state["terms"]), state["sha256"])
@@ -302,9 +309,13 @@ def run(args):
             # Use the round-start price so tied representations from the same
             # improved shape remain available as different neighborhoods.
             for row in rows:
-                if row["rank"] >= current_price(tuple(sorted(row["shape"]))):
+                canonical = tuple(sorted(row["shape"]))
+                kind = projection_admission_kind(row["rank"],
+                                                 current_price(canonical),
+                                                 price()(canonical))
+                if kind is None:
                     continue
-                child = admit(row["raw"], "projection-improvement",
+                child = admit(row["raw"], kind,
                               state["sha256"], {k: row[k] for k in
                               ("mode", "axis", "coordinate")})
                 if child is not None:

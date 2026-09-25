@@ -56,6 +56,13 @@ class WideAutoLoopTest(unittest.TestCase):
         self.assertEqual([state["sha256"] for state in states],
                          ["basis", "projected"])
 
+    def test_projection_admission_uses_live_price_without_losing_ties(self):
+        gate = loop.projection_admission_kind
+        self.assertEqual(gate(6871, 7128, 7128), "projection-improvement")
+        self.assertEqual(gate(6871, 7128, 6871), "projection-tie")
+        self.assertIsNone(gate(6736, 6878, 6725))
+        self.assertIsNone(gate(7128, 7128, 7128))
+
     def test_checked_certificates_update_prices_and_reject_false_improvements(self):
         source = loop.STRASSEN.read_bytes()
         terms = top.parse_terms(source, 7)
@@ -81,6 +88,11 @@ class WideAutoLoopTest(unittest.TestCase):
         root = TOOLS / "certificates/impact-projection-children-20260925"
         seeds = loop.certificate_minima({(12, 13, 23): 2203}, root)
         self.assertEqual(seeds[(12, 13, 23)], 2142)
+
+    def test_multiround_certificate_keeps_best_continuation(self):
+        root = TOOLS / "certificates/impact-grandchildren-20260925"
+        seeds = loop.certificate_minima({(19, 24, 27): 7128}, root)
+        self.assertEqual(seeds[(19, 24, 27)], 6827)
 
     def test_bounded_frontier_preserves_composition_continuation(self):
         walked = [dict(shape=(2, 2, 2), terms=[0] * 7, sha256="walk-a"),

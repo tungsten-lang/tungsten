@@ -27,6 +27,7 @@ from search_wide_projection_walks import (  # noqa: E402
     proposals, select, shared_pair_counts, verify_file,
 )
 from verify_recursive_portfolio import catalog_minima, solver  # noqa: E402
+from wide_pair_composition import compose_pairs  # noqa: E402
 
 STRASSEN = HERE.parent / "lib/metaflip/seeds/gf2/matmul_2x2_rank7_strassen_gf2.txt"
 CERTIFICATES = HERE / "certificates"
@@ -139,7 +140,11 @@ def frontier_priority(state, current_price):
 def select_frontier(walked, composed, cap, current_price):
     """Keep one composed continuation when the bounded beam has room for both."""
     priority = lambda state: frontier_priority(state, current_price)
-    ordered_composed = sorted(composed, key=priority)
+    ordered_composed = sorted({s["sha256"]: s for s in composed}.values(),
+                              key=priority)
+    composed_ids = {s["sha256"] for s in ordered_composed}
+    walked = list({s["sha256"]: s for s in walked
+                   if s["sha256"] not in composed_ids}.values())
     if cap == 1 or not ordered_composed:
         return sorted([*walked, *composed], key=priority)[:cap]
     retained = ordered_composed[:1]
@@ -211,38 +216,72 @@ def run(args):
         manifest["rows"].append(row)
         save()
         print(json.dumps(row), flush=True)
-        return dict(shape=shape, terms=terms, raw=raw, sha256=sha,
+        return dict(kind=kind, shape=shape, terms=terms, raw=raw, sha256=sha,
                     price_improved=bool(gains))
 
     def compose(state):
         shape = state["shape"]
+        outputs = []
         target = tuple(2 * d for d in shape)
         rank = 7 * len(state["terms"])
-        if (max(target) > 32 or rank > args.max_composed_rank or
-                rank > price()(tuple(sorted(target)))):
-            return None
-        terms = top.kronecker(shape, state["terms"], (2, 2, 2), right)
-        top.exact(target, terms)
-        return admit(top.blob(target, terms), "strassen-product",
-                     state["sha256"], dict(partner="2x2x2-r7"))
+        current_price = price()
+        if (max(target) <= 32 and rank <= args.max_composed_rank and
+                rank <= current_price(tuple(sorted(target)))):
+            terms = top.kronecker(shape, state["terms"], (2, 2, 2), right)
+            top.exact(target, terms)
+            result = admit(top.blob(target, terms), "strassen-product",
+                           state["sha256"], dict(partner="2x2x2-r7"))
+            if result is not None:
+                outputs.append(result)
+        for axis, pairs in enumerate(shared_pair_counts(state["terms"])):
+            if not pairs:
+                continue
+            scale = tuple(1 if i == (2, 0, 1)[axis] else 3 for i in range(3))
+            target = tuple(d * k for d, k in zip(shape, scale))
+            predicted = 9 * len(state["terms"]) - 3 * pairs
+            if max(target) > 32 or predicted > args.max_composed_rank:
+                continue
+            built = compose_pairs(shape, state["terms"], axis,
+                                  max_rank=args.max_composed_rank)
+            if built is None:
+                continue
+            target, terms, actual_pairs, raw_rank = built
+            if actual_pairs != pairs or raw_rank != predicted:
+                raise ValueError("pair composition prediction mismatch")
+            width = max(target[0] * target[1], target[1] * target[2],
+                        target[0] * target[2])
+            terms, _ = top.compress_shared(terms, max_bits=width)
+            top.exact(target, terms)
+            if len(terms) > current_price(tuple(sorted(target))):
+                continue
+            result = admit(top.blob(target, terms), "shared-pair-product",
+                           state["sha256"], dict(axis=axis, pairs=pairs,
+                                                 leaf="2x3x3-r15",
+                                                 raw_rank=raw_rank))
+            if result is not None:
+                outputs.append(result)
+        return outputs
 
     save()
     source = admit(source_raw, "source")
     if source is None:
         raise ValueError("duplicate source")
     frontier = [source]
-    initial_product = compose(source)
-    if (initial_product is not None and
-            len(initial_product["terms"]) <= args.max_search_rank):
-        frontier.append(initial_product)
+    frontier.extend(product for product in compose(source)
+                    if len(product["terms"]) <= args.max_search_rank)
     walks = 0
     for level in range(args.rounds):
         # Reserve walk slots for descendants. Without this, a wide first
         # frontier consumes max_walks and --rounds never feeds anything back.
         level_limit = round_walk_limit(walks, args.max_walks, level, args.rounds)
-        next_frontier, composed = [], []
+        next_frontier = []
+        composed = [state for state in frontier if state["kind"] in
+                    ("strassen-product", "shared-pair-product")]
         current_price = price()
-        frontier.sort(key=lambda state: frontier_priority(state, current_price))
+        frontier.sort(key=lambda state: (
+            0 if level and state["kind"] in
+            ("strassen-product", "shared-pair-product") else 1,
+            frontier_priority(state, current_price)))
         prepared = []
         for state in frontier:
             shape, terms = state["shape"], state["terms"]
@@ -274,10 +313,8 @@ def run(args):
                              ("mode", "axis", "coordinate") if k in choice})
                 if seed is None:
                     continue
-                seed_product = compose(seed)
-                if (seed_product is not None and
-                        len(seed_product["terms"]) <= args.max_search_rank):
-                    composed.append(seed_product)
+                composed.extend(product for product in compose(seed)
+                                if len(product["terms"]) <= args.max_search_rank)
                 nonce = args.nonce_base + walks
                 output = args.output_dir / f"walk-{walks}.mfw"
                 subprocess.run([str(args.walker), "x".join(map(str, seed["shape"])),
@@ -292,10 +329,8 @@ def run(args):
                 # round, rather than silently collapsing the feedback loop.
                 next_frontier.append(result if result is not None else seed)
                 if result is not None:
-                    product = compose(result)
-                    if (product is not None and
-                            len(product["terms"]) <= args.max_search_rank):
-                        composed.append(product)
+                    composed.extend(product for product in compose(result)
+                                    if len(product["terms"]) <= args.max_search_rank)
             if walks >= level_limit:
                 break
         frontier = select_frontier(next_frontier, composed,

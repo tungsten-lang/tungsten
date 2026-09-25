@@ -2,9 +2,9 @@
 
 `search_wide_auto_loop.py` closes the offline handoff that was previously
 manual: verified parent → basis/projection candidates → native directed walks
-→ exact admission and GF(2) closure repricing → Strassen composition → queued
-descendants for another bounded round. It retains different full-term
-representations, including useful rank ties. Each queued tensor is checked by
+→ exact admission and GF(2) closure repricing → Strassen and shared-factor
+pair composition → queued descendants for another bounded round. It retains
+different full-term representations, including useful rank ties. Each queued tensor is checked by
 the Python exact gate and an independent Ruby full-tensor reconstruction;
 pricing and public comparison tables never substitute for those gates.
 
@@ -56,6 +56,15 @@ materialized its 14×24×32/r6097 Strassen product. These are local scheduling
 checks, not new records.
 
 This is **not** a live `bin/metaflip` arm. It currently composes only with the
-exact GF(2) 2×2×2/r7 partner, not arbitrary block sums or the entire parent
-portfolio. Those extensions need matched yield and responsiveness evidence
-before automatic live-fleet integration.
+exact GF(2) 2×2×2/r7 partner or the projected 2×3×3/r15 pair leaf, not
+arbitrary block sums or the entire parent portfolio. The pair arm uses all
+three shared-factor axes, full multiword factors and exact tensor admission.
+It replays the archived 4×7×4/r85 parent to 12×7×12/r651 with 38 shared
+pairs; a one-step walk control found no new rank. A rank-only screen of 301
+checked-in wide certificates and 4,326 local scratch MFW files found no
+strictly better current pair price in the 2..32 shape range. That finite
+screen is not a stopping theorem: equal-rank descendants may still be useful
+walk seeds. A two-round, two-walk replay chose a projected 8×13×8 child of
+an exact composed parent for the second walk, establishing actual feedback;
+it found no rank improvement. Live-fleet integration needs matched yield and responsiveness
+evidence, plus multiword parent support in the native composition intake.

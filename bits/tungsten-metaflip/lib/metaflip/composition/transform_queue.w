@@ -9,6 +9,7 @@ use pages
 use projection
 use refinement
 use feedback
+use ../wide/directed
 
 # Stop creating fresh wide roots while this lane is above its high-water
 # mark. Existing finite continuations still run; this is not a disk quota.
@@ -26,7 +27,7 @@ use feedback
   if fields.size() != 3 || fields[0] != "MFT_TASK1" || ffrf_hash_valid(fields[1]) != 1
     return 0-1
   mode = ffpk_decimal(fields[2]) ## i64
-  if mode < 0 || mode >= 3129 || raw != "MFT_TASK1 " + fields[1] + " " + mode.to_s() + "\n"
+  if mode < 0 || mode >= 3131 || raw != "MFT_TASK1 " + fields[1] + " " + mode.to_s() + "\n"
     return 0-1
   mode
 
@@ -39,6 +40,10 @@ use feedback
     return "mask-first"
   if mode == 3128
     return "mask-last"
+  if mode == 3129
+    return "walk"
+  if mode == 3130
+    return "walk-continue"
   if mode >= 3090
     return "postbasis"
   "project"
@@ -87,7 +92,7 @@ use feedback
   if File.exists?(root + "/stop")
     return 0-1
   queue = root + "/composition/transforms/"
-  if ffrf_hash_valid(identity) != 1 || mode < 0 || mode >= 3129
+  if ffrf_hash_valid(identity) != 1 || mode < 0 || mode >= 3131
     return 0
   names = ["tasks-pages", "results-pages", "index"]
   i = 0 ## i64
@@ -136,6 +141,14 @@ use feedback
     count += p
   count
 
+# A short probe is cheap on newly admitted multiword tensors; a longer
+# continuation is offered only after a strict rank drop. The same cold child
+# owns both modes, so live CPU/GPU islands are never blocked by a walk.
+-> ffxt_walkable(n, m, p, rank) (i64 i64 i64 i64) i64
+  if n < 2 || m < 2 || p < 2 || n > 32 || m > 32 || p > 32 || rank < 2 || rank > 8000
+    return 0
+  1
+
 # Only a strict best-rank drop at a sweep boundary starts another projection
 # generation. Projected dimensions and rank both decrease along this edge;
 # intermediate contexts cannot each fan out into their own projection family.
@@ -158,7 +171,14 @@ use feedback
   offered = ffxt_offer(root, fields[2], 0) ## i64
   if offered != 1 || ffxt_coordinates(n, m, p) == 0
     return offered
-  ffxt_offer(root, fields[2], 18)
+  offered = ffxt_offer(root, fields[2], 18)
+  if offered != 1
+    return offered
+  rank = ffpk_decimal(fields[6]) ## i64
+  best = File.read_prefix(root + "/composition/best/" + n.to_s() + "x" + m.to_s() + "x" + p.to_s(), 100)
+  if ffxt_walkable(n, m, p, rank) == 1 && best == rank.to_s() + " " + fields[2] + "\n"
+    return ffxt_offer(root, fields[2], 3129)
+  1
 
 -> ffxt_same(left, right, words) (i64[] i64[] i64) i64
   i = 0 ## i64
@@ -352,6 +372,42 @@ use feedback
     meta[4] = 1
   rank
 
+-> ffxt_walk(root, source, out, before, n, m, p, mode, sequence, meta) (String i64[] i64[] i64 i64 i64 i64 i64 i64 i64[]) i64
+  if ffxt_walkable(n, m, p, before) != 1 || (mode != 3129 && mode != 3130)
+    return 0
+  stride = ffpk_stride(n, m, p) ## i64
+  cap = before+64 ## i64
+  state = i64[ffws_words_rect(n, m, p, cap)]
+  nonce = 25000000+sequence%1000000000 ## i64
+  if ffws_init_rect(state, n, m, p, cap, source, before, nonce) != 1
+    return 0
+  control = i64[ffwd_words(state, 4096)]
+  if ffwd_init(state, control, 2, 4096) != 1
+    return 0
+  scratch = i64[12*stride]
+  stop = i64[1]
+  remaining = 1000000 ## i64
+  if mode == 3130
+    remaining = 10000000
+  while remaining > 0
+    if File.exists?(root + "/stop")
+      return 0-1
+    batch = remaining ## i64
+    if batch > 100000
+      batch = 100000
+    if ffwd_work(state, scratch, control, batch, stop, 8) < 0
+      return 0
+    remaining -= batch
+  rank = ffws_export(state, out, 1) ## i64
+  if rank < 1 || rank > before || ffpk_canonicalize(out, out.size(), rank, stride) != rank
+    return 0
+  meta[0] = n
+  meta[1] = m
+  meta[2] = p
+  meta[3] = state[7]
+  meta[4] = 0
+  rank
+
 -> ffxt_task(root, sequence) (String i64) i64
   queue = root + "/composition/transforms/"
   raw = ffbq_read(queue, "tasks", sequence)
@@ -379,7 +435,11 @@ use feedback
   checked = ffpk_exact(source, 3*32*16384, before, info[0], info[1], info[2], parity, 32768, 20000000) ## i64
   if checked != 1
     return 0
-  rank = ffxt_propose(root, source, out, before, info[0], info[1], info[2], mode, meta) ## i64
+  rank = 0 ## i64
+  if mode >= 3129
+    rank = ffxt_walk(root, source, out, before, info[0], info[1], info[2], mode, sequence, meta)
+  else
+    rank = ffxt_propose(root, source, out, before, info[0], info[1], info[2], mode, meta)
   if rank <= 0
     return rank
   if rank > before
@@ -392,16 +452,33 @@ use feedback
   status = 1+meta[4] ## i64
   result = "-"
   admitted = 0 ## i64
+  new_best = 0 ## i64
   if checked == 0-1
     status = 3
   else
     output = ffpk_blob(out, rank, meta[0], meta[1], meta[2])
     result = Crypto:SHA256.hexdigest(output)
+    shape = meta[0].to_s() + "x" + meta[1].to_s() + "x" + meta[2].to_s()
+    previous = File.read_prefix(root + "/composition/best/" + shape, 100)
+    prior_rank = 16385 ## i64
+    if previous != nil
+      parts = previous.strip().split(" ")
+      if parts.size() != 2 || ffrf_hash_valid(parts[1]) != 1
+        return 0
+      prior_rank = ffpk_decimal(parts[0])
+      if prior_rank < 1 || prior_rank > 16384 || previous != prior_rank.to_s() + " " + parts[1] + "\n"
+        return 0
+    if rank < prior_rank
+      new_best = 1
     if ffwc_index_kind(root, result, output, rank, meta[0], meta[1], meta[2], identity, "MFW_TRANSFORM1") != 1
       return 0
     offered = ffwf_publish(root, result, output, rank, meta[0], meta[1], meta[2]) ## i64
     if offered != 1
       return offered
+    if mode < 3129 && new_best == 1 && ffxt_walkable(meta[0], meta[1], meta[2], rank) == 1
+      offered = ffxt_offer(root, result, 3129)
+      if offered != 1
+        return offered
     admitted = rank
   # Offer bounded continuations. Paged per-source indexes make a replay
   # idempotent even if other producers append after an interrupted task.
@@ -447,6 +524,14 @@ use feedback
     # one-dimensional tensors already meet their flattening rank bound.
     if meta[0] > 1 && meta[1] > 1 && meta[2] > 1
       successor = ffxt_offer(root, result, 3090)
+      if successor != 1
+        return successor
+  if (mode == 3129 || mode == 3130) && admitted > 0 && result != identity
+    successor = ffxt_offer(root, result, 18)
+    if successor != 1
+      return successor
+    if mode == 3129 && rank < before
+      successor = ffxt_offer(root, result, 3130)
       if successor != 1
         return successor
   if mode >= 18 && mode < 3090

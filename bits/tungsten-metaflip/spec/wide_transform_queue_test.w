@@ -237,6 +237,22 @@ if ARGV.size() == 3 && ARGV[0] == "--task"
   if result != 1
     exit(1)
   exit(0)
+if ARGV.size() == 3 && ARGV[0] == "--intake-file"
+  root = ARGV[1]
+  raw = File.read_prefix(ARGV[2], 12632129)
+  if raw == nil || File.exists?(root + "/stop")
+    exit(1)
+  out = i64[3*32*16384]
+  meta = i64[4]
+  parity = i64[32768]
+  rank = ffpk_parse(raw, out, 3*32*16384, meta, 4) ## i64
+  if rank < 1 || ffpk_exact(out, 3*32*16384, rank, meta[0], meta[1], meta[2], parity, 32768, 20000000) != 1
+    exit(1)
+  identity = Crypto:SHA256.hexdigest(raw)
+  if !File.mkdir_p(root + "/composition/objects") || !File.mkdir_p(root + "/composition/best") || ffwc_index_kind(root, identity, raw, rank, meta[0], meta[1], meta[2], identity, "MFW_TEST1") != 1 || ffwc_refine(root, identity, rank, meta[0], meta[1], meta[2], out, parity) != 1 || ffxt_intake(root, identity, meta[0], meta[1], meta[2]) != 1
+    exit(1)
+  << "WIDE_INTAKE " + identity
+  exit(0)
 if ARGV.size() == 3 && ARGV[0] == "--offer-file"
   root = ARGV[1]
   raw = File.read_prefix(ARGV[2], 12632129)

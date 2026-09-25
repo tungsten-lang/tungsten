@@ -5,6 +5,8 @@ from collections import Counter
 from functools import lru_cache
 from itertools import combinations, permutations
 from pathlib import Path
+import base64
+import gzip
 import os
 import subprocess
 import sys
@@ -21,6 +23,7 @@ from verify_coordinate_projections import project_grid
 from wide_feedback_test import audit as audit_feedback
 import screen_middle_shear_children as middle
 import replay_axis_mask_cascade as axis_mask
+from screen_two_pass_basis_children import two_pass
 
 
 def count(path):
@@ -271,23 +274,62 @@ def productive_postmask_basis(binary):
         assert int(best.read_text().split()[0])==1409
         child=best.read_text().split()[1]
         assert read_record(queue/'index'/child,'postbasis',1) is not None
-        for _ in range(20):
+        # Rank-improving walk tickets can interleave with the postmask basis
+        # family; wait for the exact best rather than assuming its old ordinal.
+        for _ in range(100):
             subprocess.run([binary,'--drain',str(workspace),'4'],check=True,
                            capture_output=True,text=True,timeout=30)
-            if best.read_text().split()[0]=='1406': break
+            if int(best.read_text().split()[0])<=1406: break
         rank,digest=best.read_text().split()
-        assert (rank,digest)==('1406','b324ebd3fdb3ca4eb894b418509cacc4dadbe7e8cfb59c52d033d1ce75d98513')
+        assert int(rank)<=1406,(rank,digest)
         shape,terms=read_blob((workspace/'composition/objects'/f'{digest}.tensor').read_bytes())
-        assert shape==(8,20,14) and len(terms)==1406
+        assert shape==(8,20,14) and len(terms)==int(rank)
         exact(shape,terms)
-    print('PASS automatic postmask basis: 8x14x20 r1409 -> r1406')
+    print('PASS automatic postmask continuation: 8x14x20 r1409 -> r'+rank)
+
+
+def productive_walk_feedback(binary):
+    package=Path(__file__).resolve().parents[1]
+    cert=package/'tools/certificates/7x13x16-directed-20260924/8x16x13-r1037.mfw.gz.b64'
+    shape,terms=read_blob(gzip.decompress(base64.b64decode(cert.read_bytes())))
+    basis=two_pass(terms,shape,7)
+    child=project_coordinate(shape,basis,0,6)
+    projected,_=compress_shared(child,max_bits=208)
+    seed=blob((7,16,13),projected)
+    assert len(projected)==974
+    assert sha256(seed).hexdigest()=='372dbca86ad0fc2f6d553ea51b0e9f3f6a79d680981b4981b642321b902be524'
+    with tempfile.TemporaryDirectory(prefix='metaflip-wide-walk-') as temp:
+        root=Path(temp); source=root/'source.tensor'; source.write_bytes(seed)
+        def run(*args):
+            p=subprocess.run([str(Path(binary).resolve()),*map(str,args)],
+                             capture_output=True,text=True,timeout=30)
+            assert p.returncode==0,(args,p.returncode,p.stdout,p.stderr)
+        run('--intake-file',root,source)
+        q=root/'composition/transforms'
+        assert read_record(q/'index'/sha256(seed).hexdigest(),'walk',1) is not None
+        submitted=count(q/'submitted')
+        run('--intake-file',root,source)
+        assert count(q/'submitted')==submitted
+        for _ in range(3): run('--drain',root,4)
+        rows=[]
+        for ticket in range(1,count(q/'consumed')+1):
+            mode=int(read_record(q,'tasks',ticket).decode().split()[2])
+            if mode in (3129,3130):
+                fields=read_record(q,'results',ticket).decode().split()
+                rows.append((mode,int(fields[6]),int(fields[7]),int(fields[10])))
+        assert (3129,974,968,1000000) in rows,rows
+        assert (3130,968,963,10000000) in rows,rows
+        checked=audit(root)
+        assert checked['walk']>=1 and checked['walk_continue']>=1
+    print('PASS automatic wide walk: 7x16x13 r974 -> r968 -> r963')
 
 
 def audit(root, progress=None):
     q=root/'composition/transforms'; objects=root/'composition/objects'
     done=count(q/'consumed'); submitted=count(q/'submitted')
     verified=set(); seen=set(); counts=dict(contexts=done,basis=0,project=0,postbasis=0,
-                                            mask=0,mask_first=0,mask_last=0,neutral=0,limited=0)
+                                            mask=0,mask_first=0,mask_last=0,
+                                            walk=0,walk_continue=0,neutral=0,limited=0)
     @lru_cache(maxsize=64)
     def load(h):
         raw=(objects/f'{h}.tensor').read_bytes(); assert sha256(raw).hexdigest()==h
@@ -303,6 +345,8 @@ def audit(root, progress=None):
         elif mode==3126: kind,ordinal='mask',1
         elif mode==3127: kind,ordinal='mask-first',1
         elif mode==3128: kind,ordinal='mask-last',1
+        elif mode==3129: kind,ordinal='walk',1
+        elif mode==3130: kind,ordinal='walk-continue',1
         elif mode>=3090: kind,ordinal='postbasis',mode-3089
         else: kind,ordinal='project',mode-17
         assert read_record(q/'index'/h,kind,ordinal)==f'{ticket}\n'.encode()
@@ -322,6 +366,10 @@ def audit(root, progress=None):
                 for axis in order:
                     expected,_=refactor_shared(expected,axis,max_bits=width,reverse_columns=bool(basis_mode%2))
                 if sorted(expected)==terms: break
+        elif mode>=3129:
+            assert min(shape)>=2 and max(shape)<=32 and before<=8000
+            assert status!=1 or work==(1000000 if mode==3129 else 10000000)
+            expected=None
         elif mode>=3126:
             axis={3126:1,3127:0,3128:2}[mode]
             assert 2<=shape[axis]<=32
@@ -361,6 +409,7 @@ def audit(root, progress=None):
 def check(binary, retained=None, public=None):
     binary=str(Path(binary).resolve())
     print('PASS row-block projection oracle:',projection_oracle_tests(),'dense/sparse grid comparisons')
+    productive_walk_feedback(binary)
     productive_postbasis(binary)
     productive_middle_mask(binary)
     productive_axis_masks(binary)

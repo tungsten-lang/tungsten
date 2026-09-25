@@ -14,16 +14,19 @@ retained here.
 parent and independently checks every full tensor in Python and Ruby. Walk
 counts and nonces record provenance, not deterministic replay of every move.
 
-| Shape | Retained rank | Prior local price | Lille table, 2026-09-25 |
+| Shape | Retained rank | Prior local price | Pinned external best |
 | --- | ---: | ---: | ---: |
-| 20×22×23 | 5702 | 5940 | 5722 |
+| 20×22×23 | 5702 | 5940 | 5596 |
 | 19×22×23 | 5551 | 5748 | not established here |
 | 20×21×23 | 5463 | 5654 | not established here |
 
 These tensor witnesses lower six rank-only prices in the pinned 2..32 GF(2)
 composition calculation, by 862 summed rank units. The other three prices
 are 19×22×29: 7187→7143, 21×21×23: 6027→5946, and 21×22×23: 6310→6199.
-Those prices are not materialized tensors. The 20×22×23 rank is numerically 20 below the
-[Université de Lille catalogue](https://fmm.univ-lille.fr/20x22x23.html)
-entry checked on 2026-09-25. It is not a confirmed global world-record claim
-and none of these ranks is an optimality claim.
+Those prices are not materialized tensors. The search-indexed
+[Université de Lille detail page](https://fmm.univ-lille.fr/20x22x23.html)
+displays 5722, but the pinned 2026-09-22 catalogue snapshot (SHA-256
+`1a43aedc346bae47458dafe053fcff6ec78934ffc7124b8c046960b9891a2719`)
+records a Lille best of 5596 for the same shape. Until that discrepancy is
+resolved, r5702 must **not** be described as beating Lille or as a world
+record. None of these ranks is an optimality claim.

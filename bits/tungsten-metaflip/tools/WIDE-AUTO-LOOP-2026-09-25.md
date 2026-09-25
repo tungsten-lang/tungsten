@@ -173,3 +173,13 @@ and Ruby and reconstructs its basis/projection edges. The result lowers the
 prior local 16×17×21 GF(2) price 3364 by 43 and is numerically 53 below the
 Lille catalogue entry checked on 2026-09-25. This is an exact upper bound,
 not a global novelty or optimality claim.
+
+Using that retained r3321 witness as the next source, a completed two-round,
+eight-walk campaign reached 16×17×20/r3138 and then 16×17×19/r3045 through
+two exact projections and two 50-million-move directed walks. Its five-state
+lineage is retained in `certificates/16x17x19-auto-loop-20260925/`.
+`verify_retained_wide_auto_loop.py` now checks compact loop bundles with
+independent Python/Ruby tensor reconstruction plus source, projection, basis,
+Strassen, and shared-pair lineage replay. The two new GF(2) ranks are
+numerically 71 and 21 below the Lille catalogue entries checked on
+2026-09-25, but global novelty and optimality remain unclaimed.

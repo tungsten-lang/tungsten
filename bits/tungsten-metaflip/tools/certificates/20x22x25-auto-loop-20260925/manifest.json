@@ -178,6 +178,45 @@
       "external_best_source": "fmm-lille",
       "external_gap": 14,
       "file": "19x21x25-r5689-0ae6e57b.mfw.gz.b64"
+    },
+    {
+      "kind": "basis",
+      "parent": "0ae6e57b463ed0b3a68918c21c1bfd225f84f7e79ce31bec0c262f06bd772869",
+      "details": {"mode": 6},
+      "shape": [19, 21, 25],
+      "rank": 5689,
+      "sha256": "26d5f733c7ad677e002eeb547cb5d4b0d89b0a6ad71967bfd6d5edc162fe8abd",
+      "old_price": 5689,
+      "external_best_rank": 5675,
+      "external_best_source": "fmm-lille",
+      "external_gap": 14,
+      "file": "19x21x25-r5689-basis6-26d5f733.mfw.gz.b64"
+    },
+    {
+      "kind": "walk",
+      "parent": "26d5f733c7ad677e002eeb547cb5d4b0d89b0a6ad71967bfd6d5edc162fe8abd",
+      "details": {"steps": 50000000, "nonce": 25092606},
+      "shape": [19, 21, 25],
+      "rank": 5685,
+      "sha256": "da44e9ed3bb416a4cc9a800f256441b302e2c9af78c7b5ae95905c1e1912c446",
+      "old_price": 5689,
+      "external_best_rank": 5675,
+      "external_best_source": "fmm-lille",
+      "external_gap": 10,
+      "file": "19x21x25-r5685-da44e9ed.mfw.gz.b64"
+    },
+    {
+      "kind": "walk",
+      "parent": "da44e9ed3bb416a4cc9a800f256441b302e2c9af78c7b5ae95905c1e1912c446",
+      "details": {"steps": 100000000, "nonce": 25092616},
+      "shape": [19, 21, 25],
+      "rank": 5683,
+      "sha256": "ebfa53c18b97a9825949897363dda6370071259cb84db191313ab4715d7a17e3",
+      "old_price": 5685,
+      "external_best_rank": 5675,
+      "external_best_source": "fmm-lille",
+      "external_gap": 8,
+      "file": "19x21x25-r5683-ebfa53c1.mfw.gz.b64"
     }
   ]
 }

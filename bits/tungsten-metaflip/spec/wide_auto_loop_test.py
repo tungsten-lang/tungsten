@@ -180,7 +180,7 @@ class WideAutoLoopTest(unittest.TestCase):
                                         (19, 22, 24): 5829}, root)
         self.assertEqual(seeds[(19, 22, 25)], 5954)
         self.assertEqual(seeds[(20, 21, 25)], 5875)
-        self.assertEqual(seeds[(19, 21, 25)], 5689)
+        self.assertEqual(seeds[(19, 21, 25)], 5683)
         self.assertEqual(seeds[(19, 22, 24)], 5733)
 
     def test_bounded_frontier_preserves_composition_continuation(self):

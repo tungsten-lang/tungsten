@@ -113,9 +113,12 @@ The loop now accepts compressed checked-in certificates directly as seeds.
 their parent chain from a completed campaign, checking every tensor again in
 Python and Ruby. A two-round, two-walk replay from 20×22×25/r6076 retained
 four improved child shapes, led by 19×21×25/r5718. Two additional direct
-continuations reached r5689, then a third 100M walk tied; the compact under-2-MB
-replay is in `certificates/20x22x25-auto-loop-20260925/`. Every retained child remains
-above the pinned external comparison, so this is a local-price gain only.
-A final finite 2..32 GF(2) rank-only closure scan shows 10 improved prices,
-811 summed rank units, and no new pinned-external crossing. The six derived
-price changes still need exact materialization before being tensor witnesses.
+continuations reached r5689, then a third 100M walk tied.
+An exact mode-6 neutral basis rewrite of the r5689 child reopened the walk:
+50M and 100M moves reached r5685 and r5683. Other tested basis orders and
+continuations tied. The compact replay in
+`certificates/20x22x25-auto-loop-20260925/` contains 12 checked tensors
+under 2.5 MB. A final finite 2..32 GF(2) rank-only closure scan shows 10
+improved prices and 835 summed rank units. The six derived price changes still
+need exact materialization before being tensor witnesses; no retained child
+crosses its pinned external comparison.

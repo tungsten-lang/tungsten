@@ -40,7 +40,10 @@ for row in report["rows"]:
                         child_shape[0] * child_shape[2])
             compressed, _ = top.compress_shared(projected, max_bits=width)
             assert top.blob(child_shape, compressed) == raw
+        elif row["kind"] == "basis":
+            basis = two_pass(parent_terms, parent_shape, row["details"]["mode"])
+            assert top.blob(parent_shape, basis) == raw
     parents[row["sha256"]] = shape, terms
 
-assert len(parents) == 9
-print("PASS nine exact GF(2) tensors; projection lineage and Ruby full-tensor checks")
+assert len(parents) == 12
+print("PASS twelve exact GF(2) tensors; basis/projection lineage and Ruby full-tensor checks")

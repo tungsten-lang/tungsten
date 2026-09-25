@@ -121,13 +121,13 @@ def round_walk_limit(walks, max_walks, level, rounds):
 
 
 def ordered_choices(projected, basis, price):
-    # Keep both arms in the first three slots, but lead with basis variants
-    # when the best projection starts farther above its current shape price.
+    # Keep both arms in the first two slots. A two-walk round previously spent
+    # both walks on basis variants and never tested a projection child.
     def gap(row):
         return row["rank"] - price(tuple(sorted(row["shape"])))
 
     if projected and basis and gap(basis[0]) < gap(projected[0]):
-        return basis[:2] + projected[:1] + basis[2:] + projected[1:]
+        return basis[:1] + projected[:1] + basis[1:] + projected[1:]
     return projected[:1] + basis[:2] + projected[1:] + basis[2:]
 
 
@@ -153,6 +153,9 @@ def run(args):
         raise ValueError("output directory already exists")
     if not args.walker.is_file():
         raise ValueError("missing native walker")
+    source_raw = args.seed.read_bytes()
+    source_shape, source_terms = top.read_blob(source_raw)
+    top.exact(source_shape, source_terms)
     seeds = initial_seeds(args.catalog)
     right = top.parse_terms(STRASSEN.read_bytes(), 7)
     top.exact((2, 2, 2), right)
@@ -224,7 +227,7 @@ def run(args):
                      state["sha256"], dict(partner="2x2x2-r7"))
 
     save()
-    source = admit(args.seed.read_bytes(), "source")
+    source = admit(source_raw, "source")
     if source is None:
         raise ValueError("duplicate source")
     frontier = [source]

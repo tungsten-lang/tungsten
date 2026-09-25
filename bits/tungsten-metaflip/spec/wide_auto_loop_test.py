@@ -42,7 +42,7 @@ class WideAutoLoopTest(unittest.TestCase):
         order = loop.ordered_choices(projected, basis,
                                      lambda shape: prices[shape])
         self.assertEqual([row["mode"] for row in order],
-                         ["b6", "b12", "p0", "b7", "b13", "p1"])
+                         ["b6", "p0", "b12", "b7", "b13", "p1"])
         prices[(7, 11, 16)] = 835
         order = loop.ordered_choices(projected, basis,
                                      lambda shape: prices[shape])
@@ -144,6 +144,18 @@ class WideAutoLoopTest(unittest.TestCase):
                 self.assertEqual((list(shape), len(terms)),
                                  (row["shape"], row["rank"]))
                 top.exact(shape, terms)
+
+    def test_missing_seed_does_not_create_campaign(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            walker = root / "walker"
+            walker.write_text("#!/bin/sh\n")
+            args = argparse.Namespace(seed=root / "absent.mfw",
+                                      walker=walker,
+                                      output_dir=root / "output")
+            with self.assertRaises(FileNotFoundError):
+                loop.run(args)
+            self.assertFalse(args.output_dir.exists())
 
 
 if __name__ == "__main__":

@@ -29,7 +29,8 @@ above rank 3000 is materialized and checked but not queued for another walk;
 The walk budget is divided across requested rounds, reserving slots for
 descendants. Within a round, the first projection and two independent basis
 orders precede extra variants; if that projection is farther above its shape's
-current price, the basis pair goes first. Frontier states are visited in
+current price, one basis order leads, but the projection still receives the
+second slot. Frontier states are visited in
 price-gap order and round-robin, and a valid basis seed remains eligible for
 the next round even when its walk returns the same state. Thus a wide first
 beam or one descendant cannot consume the whole feedback budget.
@@ -44,6 +45,15 @@ one-coordinate projections also remain above their current prices. The first
 basis beam spans distinct axis orders so reverse variants cannot consume both
 slots. Focused tests check exact admission, two-round feedback, projection,
 composition, and ordering.
+
+Four-walk scheduling control (two 20M-walk rounds, same seed and nonce base):
+the former basis-first ordering spent both first-round slots on basis variants
+of the exact 11×8×15/r857 seed. Interleaving admitted and walked a verified
+11×8×14/r825 projection in the second slot. It remained 21 above that child's
+local price and neither schedule found a further rank drop. The known
+7×16×12/r873 mode-6 control still reached exact r871 in one 100M walk and
+materialized its 14×24×32/r6097 Strassen product. These are local scheduling
+checks, not new records.
 
 This is **not** a live `bin/metaflip` arm. It currently composes only with the
 exact GF(2) 2×2×2/r7 partner, not arbitrary block sums or the entire parent

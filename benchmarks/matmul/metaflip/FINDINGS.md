@@ -3835,3 +3835,19 @@ control from the r873 certificate rediscovered the r872 witness and built
 14×24×32/r6104 without manual handoff. This is offline automation, not a
 live-fleet feature or a general block-composition closure; its behavior and
 limits are recorded in `bits/tungsten-metaflip/tools/WIDE-AUTO-LOOP-2026-09-25.md`.
+
+A further exact mode-6 walk from the r872 witness reached r871. Modes 7 and
+13 independently reached distinct r871 representations over their own 100M
+walks; Python and Ruby full-tensor checks accept all three. The mode-6 and
+mode-7 forms both project to `7×16×11/r835` seeds, two below the prior r872
+projection seed, though still above the dated r822 comparison. A direct 100M
+continuation and a mode-12 restart held at r871/r872 respectively. The
+rank-871 certificate adds 22 improved shapes and 30 rank units to the pinned
+GF(2) closure beyond r872, bringing the three-witness chain to 39 shapes and
+214 units. The complete source/walk/closure replay is
+`bits/tungsten-metaflip/tools/check_7x12x16_r871_directed_20260925.py`.
+As a negative composition screen, the verified 14×24×32/r6104 Strassen
+product's nearest one-coordinate projection was 127 above the dated
+comparison; the 7×16×25 block sum of r962+r872 stayed at r1834 through all
+12 two-pass cleanups, above the existing r1831 GF(2) price. No world-record
+or cross-field novelty claim follows from these bounded checks.

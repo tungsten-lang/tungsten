@@ -349,6 +349,7 @@ def productive_pair_feedback(binary):
             row=read_record(q,'results',modes[mode]).decode().split()
             expected=compose_pairs(*read_blob(source.read_bytes()),mode-3131)
             assert int(row[7])==len(expected[1]) and int(row[10])==expected[2],(mode,row,expected[2:])
+            assert read_record(q/'index'/row[2],'walk',1) is not None,(mode,row)
         submitted=count(q/'submitted')
         run('--task',root,modes[3131])
         assert count(q/'submitted')==submitted

@@ -506,7 +506,7 @@ use wide_pairs
     offered = ffwf_publish(root, result, output, rank, meta[0], meta[1], meta[2]) ## i64
     if offered != 1
       return offered
-    if mode < 3129 && new_best == 1 && ffxt_walkable(meta[0], meta[1], meta[2], rank) == 1
+    if (mode < 3129 || mode >= 3131) && new_best == 1 && ffxt_walkable(meta[0], meta[1], meta[2], rank) == 1
       offered = ffxt_offer(root, result, 3129)
       if offered != 1
         return offered

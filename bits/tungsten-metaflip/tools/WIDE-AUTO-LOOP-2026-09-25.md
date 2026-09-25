@@ -35,8 +35,9 @@ The walk budget is divided across requested rounds, reserving slots for
 descendants. Within a round, the first projection and two independent basis
 orders precede extra variants; if that projection is farther above its shape's
 current price, one basis order leads, but the projection still receives the
-second slot. Frontier states are visited in
-price-gap order and round-robin, and a valid basis seed remains eligible for
+second slot. Round zero visits the original source first; later frontier
+states use price-gap order with composed states ahead. Walk slots are assigned
+round-robin, and a valid basis seed remains eligible for
 the next round even when its walk returns the same state. Thus a wide first
 beam or one descendant cannot consume the whole feedback budget.
 Every retained projection that strictly improves its shape's round-start
@@ -46,6 +47,18 @@ consuming a walk slot. Distinct tied representations remain eligible for walks;
 superseded projections are skipped, and the projection beam still bounds how
 many are walked. This is automatic within the offline campaign, not in
 `bin/metaflip`.
+
+Newly composed frontier states now offer one direct native walk before their
+projection and basis neighborhoods. The scheduler reserves at most one such
+walk per round, never directly walks the original source by this rule, and
+starts round zero with the source's first projection/basis choice. Each exact
+composed representation gets at most one direct walk within a campaign; a
+new rank or representation can be offered again as a new state. This closes a
+gap in the cold loop without spending every slot on direct continuations.
+Matched source controls tied at 8×16×13/r1037, 7×13×16/r962, and
+20×22×25/r6076, while the archived 13×15×23/r2662 exact composition has a
+first direct-walk drop to r2659. These observations justify provenance-aware
+scheduling, not a claim that direct walks usually win.
 
 Matched control: the earlier projection-first schedule recovered the certified
 r872 witness from the packaged `7×16×12/r873` source in three 100M walks. With

@@ -107,6 +107,17 @@ class WideAutoLoopTest(unittest.TestCase):
         self.assertEqual([row["mode"] for row in order][:2],
                          ["basis", "child-a"])
 
+    def test_direct_walk_is_reserved_only_for_composed_states(self):
+        state = dict(kind="source", shape=(2, 2, 2), terms=[0] * 7,
+                     raw=b"source", sha256="source")
+        self.assertIsNone(loop.composed_direct_choice(state))
+        state["kind"] = "strassen-product"
+        choice = loop.composed_direct_choice(state)
+        self.assertEqual((choice["kind"], choice["raw"], choice["sha256"]),
+                         ("composed-direct", b"source", "source"))
+        state["kind"] = "shared-pair-product"
+        self.assertIsNotNone(loop.composed_direct_choice(state))
+
     def test_checked_certificates_update_prices_and_reject_false_improvements(self):
         source = loop.STRASSEN.read_bytes()
         terms = top.parse_terms(source, 7)
@@ -268,6 +279,42 @@ class WideAutoLoopTest(unittest.TestCase):
                 self.assertEqual((list(shape), len(terms)),
                                  (row["shape"], row["rank"]))
                 top.exact(shape, terms)
+
+    def test_composed_parent_gets_direct_walk_without_displacing_source(self):
+        terms = top.parse_terms(loop.STRASSEN.read_bytes(), 7)
+        raw = top.blob((2, 2, 2), terms)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            seed = root / "seed.mfw"
+            seed.write_bytes(raw)
+            catalog = root / "catalog.json"
+            catalog.write_text('{"schemes": []}')
+            walker = root / "copy-walker"
+            calls = root / "walker-calls"
+            walker.write_text("#!/usr/bin/env python3\nimport shutil, sys\n"
+                              f"with open({str(calls)!r}, 'a') as log:\n"
+                              "    log.write(sys.argv[2] + '\\n')\n"
+                              "shutil.copyfile(sys.argv[2], sys.argv[3])\n")
+            walker.chmod(0o755)
+            output = root / "output"
+            args = argparse.Namespace(seed=seed, catalog=catalog, walker=walker,
+                                      output_dir=output, rounds=1, max_walks=2,
+                                      steps=1, projection_beam=1, basis_beam=1,
+                                      frontier_cap=2, max_composed_rank=100,
+                                      max_search_rank=100, nonce_base=25001)
+            with patch.object(loop, "initial_seeds", return_value={
+                    (2, 2, 2): 7, (4, 4, 4): 49}):
+                with redirect_stdout(io.StringIO()):
+                    loop.run(args)
+            rows = json.loads((output / "manifest.json").read_text())["rows"]
+            by_sha = {row["sha256"]: row for row in rows}
+            walked = [by_sha[Path(path).stem]["kind"]
+                      for path in calls.read_text().splitlines()]
+            self.assertEqual(len(walked), 2)
+            self.assertNotIn(walked[0],
+                             ("strassen-product", "shared-pair-product"))
+            self.assertIn(walked[1],
+                          ("strassen-product", "shared-pair-product"))
 
     def test_missing_seed_does_not_create_campaign(self):
         with tempfile.TemporaryDirectory() as tmp:

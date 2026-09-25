@@ -101,6 +101,15 @@ class WideAutoLoopTest(unittest.TestCase):
         self.assertEqual(seeds[(19, 24, 28)], 6990)
         self.assertEqual(seeds[(16, 22, 23)], 4618)
 
+    def test_20x23x23_catalogue_lead_updates_price(self):
+        root = TOOLS / "certificates/20x23x23-catalogue-lead-20260925"
+        seeds = loop.certificate_minima({(20, 23, 23): 6095,
+                                        (20, 22, 24): 5902,
+                                        (19, 23, 24): 6032}, root)
+        self.assertEqual(seeds[(20, 23, 23)], 5883)
+        self.assertEqual(seeds[(20, 22, 24)], 5851)
+        self.assertEqual(seeds[(19, 23, 24)], 5894)
+
     def test_bounded_frontier_preserves_composition_continuation(self):
         walked = [dict(shape=(2, 2, 2), terms=[0] * 7, sha256="walk-a"),
                   dict(shape=(2, 2, 2), terms=[0] * 7, sha256="walk-b")]

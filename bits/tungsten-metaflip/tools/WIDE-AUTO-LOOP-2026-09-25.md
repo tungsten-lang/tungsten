@@ -95,3 +95,10 @@ The five retained witnesses are replayable under
 `certificates/catalogue-projection-leads-20260925/`. The two final GF(2)
 ranks are numerically below the Lille catalogue entries checked on
 2026-09-25, but no cross-field or global record claim is made.
+
+The next bounded campaign took 20×23×24/r6005 through an exact
+20×23×23/r5924 projection, a 50M-step walk to r5885, and a 100M-step
+continuation to r5883. The stronger 20×22×24/r5851 and 19×23×24/r5894
+projections were retained from other checked-in parents. Their complete
+witnesses and replay are under
+`certificates/20x23x23-catalogue-lead-20260925/`.

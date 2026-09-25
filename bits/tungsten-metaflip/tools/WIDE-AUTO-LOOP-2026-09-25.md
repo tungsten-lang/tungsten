@@ -189,3 +189,9 @@ A further completed eight-walk campaign from 16×17×19/r3045 projected
 price but 30 above the Lille comparison. The three-state witness is retained
 under `certificates/15x17x19-auto-loop-20260925/`. The other walks tied;
 this finite result does not close the family.
+
+A separate completed six-walk campaign from the checked-in 16×23×22/r4618
+parent projected 16×23×21/r4517, walked to r4501, changed basis, and walked
+to r4497. The exact five-state lineage is under
+`certificates/16x21x23-auto-loop-20260925/`. This lowers the local price
+4542 by 45 but remains 28 above the Lille entry checked on 2026-09-25.

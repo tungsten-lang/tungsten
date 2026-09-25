@@ -217,6 +217,32 @@
       "external_best_source": "fmm-lille",
       "external_gap": 8,
       "file": "19x21x25-r5683-ebfa53c1.mfw.gz.b64"
+    },
+    {
+      "kind": "basis",
+      "parent": "ebfa53c18b97a9825949897363dda6370071259cb84db191313ab4715d7a17e3",
+      "details": {"mode": 10},
+      "shape": [19, 21, 25],
+      "rank": 5683,
+      "sha256": "6cd02e5518af768623be9c93b664bf4d22eac373cb68a04d43a07606bccbc225",
+      "old_price": 5683,
+      "external_best_rank": 5675,
+      "external_best_source": "fmm-lille",
+      "external_gap": 8,
+      "file": "19x21x25-r5683-basis10-6cd02e55.mfw.gz.b64"
+    },
+    {
+      "kind": "walk",
+      "parent": "6cd02e5518af768623be9c93b664bf4d22eac373cb68a04d43a07606bccbc225",
+      "details": {"steps": 50000000, "nonce": 25092640},
+      "shape": [19, 21, 25],
+      "rank": 5682,
+      "sha256": "d505e8c79193a786a2951bda9077b45a578a6231fae493528efba8b7f8b3d624",
+      "old_price": 5683,
+      "external_best_rank": 5675,
+      "external_best_source": "fmm-lille",
+      "external_gap": 7,
+      "file": "19x21x25-r5682-d505e8c7.mfw.gz.b64"
     }
   ]
 }

@@ -45,5 +45,5 @@ for row in report["rows"]:
             assert top.blob(parent_shape, basis) == raw
     parents[row["sha256"]] = shape, terms
 
-assert len(parents) == 12
-print("PASS twelve exact GF(2) tensors; basis/projection lineage and Ruby full-tensor checks")
+assert len(parents) == 14
+print("PASS fourteen exact GF(2) tensors; basis/projection lineage and Ruby full-tensor checks")

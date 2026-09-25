@@ -116,9 +116,10 @@ four improved child shapes, led by 19×21×25/r5718. Two additional direct
 continuations reached r5689, then a third 100M walk tied.
 An exact mode-6 neutral basis rewrite of the r5689 child reopened the walk:
 50M and 100M moves reached r5685 and r5683. Other tested basis orders and
-continuations tied. The compact replay in
-`certificates/20x22x25-auto-loop-20260925/` contains 12 checked tensors
-under 2.5 MB. A final finite 2..32 GF(2) rank-only closure scan shows 10
-improved prices and 835 summed rank units. The six derived price changes still
+continuations tied. A mode-10 rewrite of r5683 followed by 50M moves reached
+r5682; other tested orders tied. The compact replay in
+`certificates/20x22x25-auto-loop-20260925/` contains 14 checked tensors
+under 3 MB. A final finite 2..32 GF(2) rank-only closure scan shows 10
+improved prices and 839 summed rank units. The six derived price changes still
 need exact materialization before being tensor witnesses; no retained child
 crosses its pinned external comparison.

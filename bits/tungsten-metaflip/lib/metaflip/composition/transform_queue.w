@@ -1,5 +1,6 @@
 # One native cold child owns this FIFO. A task is one bounded basis context,
-# coordinate projection, or axis-mask projection family. The best projection
+# coordinate projection, axis-mask family, walk, or shared-factor composition.
+# The best projection
 # of each axis gets two terminal basis sweeps. A strict rank drop at either
 # sweep or mask boundary schedules projections, so productive chains continue.
 # Successors go to the tail. Index pages bind full source identity + context;
@@ -10,6 +11,7 @@ use projection
 use refinement
 use feedback
 use ../wide/directed
+use wide_pairs
 
 # Stop creating fresh wide roots while this lane is above its high-water
 # mark. Existing finite continuations still run; this is not a disk quota.
@@ -27,7 +29,7 @@ use ../wide/directed
   if fields.size() != 3 || fields[0] != "MFT_TASK1" || ffrf_hash_valid(fields[1]) != 1
     return 0-1
   mode = ffpk_decimal(fields[2]) ## i64
-  if mode < 0 || mode >= 3131 || raw != "MFT_TASK1 " + fields[1] + " " + mode.to_s() + "\n"
+  if mode < 0 || mode >= 3134 || raw != "MFT_TASK1 " + fields[1] + " " + mode.to_s() + "\n"
     return 0-1
   mode
 
@@ -44,6 +46,12 @@ use ../wide/directed
     return "walk"
   if mode == 3130
     return "walk-continue"
+  if mode == 3131
+    return "compose-first"
+  if mode == 3132
+    return "compose-middle"
+  if mode == 3133
+    return "compose-last"
   if mode >= 3090
     return "postbasis"
   "project"
@@ -92,7 +100,7 @@ use ../wide/directed
   if File.exists?(root + "/stop")
     return 0-1
   queue = root + "/composition/transforms/"
-  if ffrf_hash_valid(identity) != 1 || mode < 0 || mode >= 3131
+  if ffrf_hash_valid(identity) != 1 || mode < 0 || mode >= 3134
     return 0
   names = ["tasks-pages", "results-pages", "index"]
   i = 0 ## i64
@@ -149,6 +157,23 @@ use ../wide/directed
     return 0
   1
 
+-> ffxt_offer_pairs(root, identity, n, m, p, rank) (String String i64 i64 i64 i64) i64
+  if rank < 1 || rank > 900 || n < 2 || m < 2 || p < 2 || n > 32 || m > 32 || p > 32
+    return 1
+  blob = File.read_prefix(root + "/composition/objects/" + identity + ".tensor", 12632129)
+  if blob == nil || Crypto:SHA256.hexdigest(blob) != identity
+    return 0
+  source = i64[3*32*900]
+  info = i64[4]
+  if ffpk_parse(blob,source,source.size(),info,4) != rank || info[0] != n || info[1] != m || info[2] != p
+    return 0
+  axis = 0 ## i64
+  while axis < 3
+    if pair_profile(source,rank,n,m,p,axis) >= 4 && ffxt_offer(root,identity,3131+axis) != 1
+      return 0
+    axis += 1
+  1
+
 # Only a strict best-rank drop at a sweep boundary starts another projection
 # generation. Projected dimensions and rank both decrease along this edge;
 # intermediate contexts cannot each fan out into their own projection family.
@@ -177,7 +202,11 @@ use ../wide/directed
   rank = ffpk_decimal(fields[6]) ## i64
   best = File.read_prefix(root + "/composition/best/" + n.to_s() + "x" + m.to_s() + "x" + p.to_s(), 100)
   if ffxt_walkable(n, m, p, rank) == 1 && best == rank.to_s() + " " + fields[2] + "\n"
-    return ffxt_offer(root, fields[2], 3129)
+    offered = ffxt_offer(root, fields[2], 3129)
+    if offered != 1
+      return offered
+  if best == rank.to_s() + " " + fields[2] + "\n"
+    return ffxt_offer_pairs(root,fields[2],n,m,p,rank)
   1
 
 -> ffxt_same(left, right, words) (i64[] i64[] i64) i64
@@ -436,13 +465,15 @@ use ../wide/directed
   if checked != 1
     return 0
   rank = 0 ## i64
-  if mode >= 3129
+  if mode >= 3131
+    rank = pair_compose(source,before,info[0],info[1],info[2],mode-3131,out,meta)
+  elsif mode >= 3129
     rank = ffxt_walk(root, source, out, before, info[0], info[1], info[2], mode, sequence, meta)
   else
     rank = ffxt_propose(root, source, out, before, info[0], info[1], info[2], mode, meta)
   if rank <= 0
     return rank
-  if rank > before
+  if rank > before && mode < 3131
     return 0
   checked = ffpk_exact(out, 3*32*16384, rank, meta[0], meta[1], meta[2], parity, 32768, 20000000)
   if checked != 1 && checked != 0-1
@@ -479,6 +510,8 @@ use ../wide/directed
       offered = ffxt_offer(root, result, 3129)
       if offered != 1
         return offered
+    if new_best == 1 && ffxt_offer_pairs(root,result,meta[0],meta[1],meta[2],rank) != 1
+      return 0
     admitted = rank
   # Offer bounded continuations. Paged per-source indexes make a replay
   # idempotent even if other producers append after an interrupted task.
@@ -534,6 +567,13 @@ use ../wide/directed
       successor = ffxt_offer(root, result, 3130)
       if successor != 1
         return successor
+  if mode >= 3131 && admitted > 0 && new_best == 1
+    successor = ffxt_offer(root,result,0)
+    if successor != 1
+      return successor
+    successor = ffxt_offer(root,result,18)
+    if successor != 1
+      return successor
   if mode >= 18 && mode < 3090
     coordinate = mode-18 ## i64
     axis = 0 ## i64
@@ -570,7 +610,7 @@ use ../wide/directed
   if ffbq_put(queue, "results", sequence, record) != 1
     return 0
   delta = 0 ## i64
-  if admitted > 0
+  if admitted > 0 && admitted < before
     delta = before-admitted
   ffrf_atomic(queue + "last", status.to_s() + " " + delta.to_s() + "\n", "wide-transform")
 

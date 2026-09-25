@@ -24,6 +24,8 @@ from wide_feedback_test import audit as audit_feedback
 import screen_middle_shear_children as middle
 import replay_axis_mask_cascade as axis_mask
 from screen_two_pass_basis_children import two_pass
+from wide_pair_composition import compose_pairs
+from wide_pair_native_test import control as multiword_pair_control
 
 
 def count(path):
@@ -324,12 +326,46 @@ def productive_walk_feedback(binary):
     print('PASS automatic wide walk: 7x16x13 r974 -> r968 -> r963')
 
 
+def productive_pair_feedback(binary):
+    shape,terms=multiword_pair_control()
+    with tempfile.TemporaryDirectory(prefix='metaflip-wide-pair-feedback-') as temp:
+        root=Path(temp); source=root/'source.tensor'
+        source.write_bytes(blob(shape,terms))
+        identity=sha256(source.read_bytes()).hexdigest()
+        def run(*args):
+            p=subprocess.run([str(Path(binary).resolve()),*map(str,args)],
+                             capture_output=True,text=True,timeout=30)
+            assert p.returncode==0,(args,p.returncode,p.stdout,p.stderr)
+        run('--intake-file',root,source)
+        q=root/'composition/transforms'
+        for kind in ('compose-first','compose-middle','compose-last'):
+            assert read_record(q/'index'/identity,kind,1) is not None
+        run('--drain',root,4); run('--drain',root,4)
+        modes={int(parts[2]):ticket
+               for ticket in range(1,count(q/'consumed')+1)
+               if (parts:=read_record(q,'tasks',ticket).decode().split())[1]==identity}
+        assert all(mode in modes for mode in (3131,3132,3133)),modes
+        for mode in (3131,3132,3133):
+            row=read_record(q,'results',modes[mode]).decode().split()
+            expected=compose_pairs(*read_blob(source.read_bytes()),mode-3131)
+            assert int(row[7])==len(expected[1]) and int(row[10])==expected[2],(mode,row,expected[2:])
+        submitted=count(q/'submitted')
+        run('--task',root,modes[3131])
+        assert count(q/'submitted')==submitted
+        checked=audit(root)
+        assert all(checked[kind]>=1 for kind in
+                   ('compose_first','compose_middle','compose_last'))
+    print('PASS automatic multiword pair feedback: all axes, exact recursive intake')
+
+
 def audit(root, progress=None):
     q=root/'composition/transforms'; objects=root/'composition/objects'
     done=count(q/'consumed'); submitted=count(q/'submitted')
     verified=set(); seen=set(); counts=dict(contexts=done,basis=0,project=0,postbasis=0,
                                             mask=0,mask_first=0,mask_last=0,
-                                            walk=0,walk_continue=0,neutral=0,limited=0)
+                                            walk=0,walk_continue=0,
+                                            compose_first=0,compose_middle=0,compose_last=0,
+                                            neutral=0,limited=0)
     @lru_cache(maxsize=64)
     def load(h):
         raw=(objects/f'{h}.tensor').read_bytes(); assert sha256(raw).hexdigest()==h
@@ -347,6 +383,9 @@ def audit(root, progress=None):
         elif mode==3128: kind,ordinal='mask-last',1
         elif mode==3129: kind,ordinal='walk',1
         elif mode==3130: kind,ordinal='walk-continue',1
+        elif mode==3131: kind,ordinal='compose-first',1
+        elif mode==3132: kind,ordinal='compose-middle',1
+        elif mode==3133: kind,ordinal='compose-last',1
         elif mode>=3090: kind,ordinal='postbasis',mode-3089
         else: kind,ordinal='project',mode-17
         assert read_record(q/'index'/h,kind,ordinal)==f'{ticket}\n'.encode()
@@ -356,7 +395,8 @@ def audit(root, progress=None):
         assert len(fields)==11 and fields[0]=='MFT_RESULT1' and fields[1]==sha256(raw).hexdigest()
         n,m,p,before,proposed,admitted,status,work=map(int,fields[3:])
         work_bound=150000000000 if mode>=3126 else 140000000
-        assert before==len(terms) and 1<=proposed<=before and status in (1,2,3) and 0<=work<=work_bound
+        cap=8000 if mode>=3131 else before
+        assert before==len(terms) and 1<=proposed<=cap and status in (1,2,3) and 0<=work<=work_bound
         assert record==(' '.join(fields)+'\n').encode()
         expected=terms; dims=shape
         basis_mode=mode if mode<18 else (mode-3090)%18 if 3090<=mode<=3125 else None
@@ -366,6 +406,10 @@ def audit(root, progress=None):
                 for axis in order:
                     expected,_=refactor_shared(expected,axis,max_bits=width,reverse_columns=bool(basis_mode%2))
                 if sorted(expected)==terms: break
+        elif mode>=3131:
+            composed=compose_pairs(shape,terms,mode-3131,max_rank=8000)
+            assert composed is not None and work==composed[2]
+            dims=composed[0]; expected=composed[1]
         elif mode>=3129:
             assert min(shape)>=2 and max(shape)<=32 and before<=8000
             assert status!=1 or work==(1000000 if mode==3129 else 10000000)
@@ -389,7 +433,7 @@ def audit(root, progress=None):
             axis,index=coordinate; coords=[list(range(d)) for d in shape]; coords[axis].remove(index)
             expected=project_coordinate(shape,terms,axis,index); dims=tuple(map(len,coords))
         assert (n,m,p)==dims
-        if expected is not None:
+        if expected is not None and mode<3131:
             expected,_=compress_shared(expected,max_bits=width)
         if status==3:
             assert fields[2]=='-' and admitted==0
@@ -410,6 +454,7 @@ def check(binary, retained=None, public=None):
     binary=str(Path(binary).resolve())
     print('PASS row-block projection oracle:',projection_oracle_tests(),'dense/sparse grid comparisons')
     productive_walk_feedback(binary)
+    productive_pair_feedback(binary)
     productive_postbasis(binary)
     productive_middle_mask(binary)
     productive_axis_masks(binary)

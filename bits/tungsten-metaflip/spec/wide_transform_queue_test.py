@@ -345,11 +345,18 @@ def productive_pair_feedback(binary):
                for ticket in range(1,count(q/'consumed')+1)
                if (parts:=read_record(q,'tasks',ticket).decode().split())[1]==identity}
         assert all(mode in modes for mode in (3131,3132,3133)),modes
+        pair_cleanup_savings=0
         for mode in (3131,3132,3133):
             row=read_record(q,'results',modes[mode]).decode().split()
             expected=compose_pairs(*read_blob(source.read_bytes()),mode-3131)
-            assert int(row[7])==len(expected[1]) and int(row[10])==expected[2],(mode,row,expected[2:])
+            width=max(expected[0][0]*expected[0][1],
+                      expected[0][1]*expected[0][2],
+                      expected[0][0]*expected[0][2])
+            reduced,_=compress_shared(expected[1],max_bits=width)
+            pair_cleanup_savings+=len(expected[1])-len(reduced)
+            assert int(row[7])==len(reduced) and int(row[10])==expected[2],(mode,row,expected[2:])
             assert read_record(q/'index'/row[2],'walk',1) is not None,(mode,row)
+        assert pair_cleanup_savings>0
         submitted=count(q/'submitted')
         run('--task',root,modes[3131])
         assert count(q/'submitted')==submitted
@@ -410,7 +417,9 @@ def audit(root, progress=None):
         elif mode>=3131:
             composed=compose_pairs(shape,terms,mode-3131,max_rank=8000)
             assert composed is not None and work==composed[2]
-            dims=composed[0]; expected=composed[1]
+            dims=composed[0]
+            width=max(dims[0]*dims[1],dims[1]*dims[2],dims[0]*dims[2])
+            expected,_=compress_shared(composed[1],max_bits=width)
         elif mode>=3129:
             assert min(shape)>=2 and max(shape)<=32 and before<=8000
             assert status!=1 or work==(1000000 if mode==3129 else 10000000)

@@ -467,6 +467,17 @@ use wide_pairs
   rank = 0 ## i64
   if mode >= 3131
     rank = pair_compose(source,before,info[0],info[1],info[2],mode-3131,out,meta)
+    if rank > 0
+      # The leaf product can expose new shared-factor matrices. Walk the
+      # bounded, reduced tensor rather than its larger raw composition.
+      words = ffwm_scratch_words(rank,ffpk_stride(meta[0],meta[1],meta[2])) ## i64
+      if words == 0
+        return 0
+      scratch = i64[words]
+      stats = i64[6]
+      rank = ffwm_reduce(out,out.size(),rank,meta[0],meta[1],meta[2],scratch,words,20000000,stats,6)
+      if stats[2] != 0
+        meta[4] = 1
   elsif mode >= 3129
     rank = ffxt_walk(root, source, out, before, info[0], info[1], info[2], mode, sequence, meta)
   else

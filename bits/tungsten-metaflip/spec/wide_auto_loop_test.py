@@ -4,6 +4,7 @@ import argparse
 import base64
 from contextlib import redirect_stdout
 import gzip
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -54,6 +55,43 @@ class WideAutoLoopTest(unittest.TestCase):
             state, lambda shape: prices[shape]))
         self.assertEqual([state["sha256"] for state in states],
                          ["basis", "projected"])
+
+    def test_checked_certificates_update_prices_and_reject_false_improvements(self):
+        source = loop.STRASSEN.read_bytes()
+        terms = top.parse_terms(source, 7)
+        top.exact((2, 2, 2), terms)
+        valid = top.blob((2, 2, 2), terms)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "rank7.mfw.gz.b64").write_bytes(
+                base64.b64encode(gzip.compress(valid)))
+            self.assertEqual(loop.certificate_minima({(2, 2, 2): 8}, root)
+                             [(2, 2, 2)], 7)
+            (root / "false-rank1.mfw").write_bytes(
+                top.blob((2, 2, 2), [(1, 1, 1)]))
+            with self.assertRaises(AssertionError):
+                loop.certificate_minima({(2, 2, 2): 8}, root)
+
+    def test_latest_checked_in_certificate_updates_price(self):
+        seeds = loop.certificate_minima({(7, 12, 16): 876},
+                                        CERT.parent.parent / "7x12x16-r871-directed-20260925")
+        self.assertEqual(seeds[(7, 12, 16)], 871)
+
+    def test_archived_incumbent_prevents_stale_price(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            catalog = root / "catalog.json"
+            catalog.write_text('{"schemes": []}')
+            manifest = root / "manifest.json"
+            manifest.write_text(json.dumps({
+                "catalog_sha256": hashlib.sha256(catalog.read_bytes()).hexdigest(),
+                "rows": []}))
+            with patch.object(loop.old, "MANIFEST", manifest), \
+                 patch.object(loop.old, "CANDIDATES", []), \
+                 patch.object(loop.top, "initial_seeds", return_value={}), \
+                 patch.object(loop, "certificate_minima", side_effect=lambda s: s):
+                seeds = loop.initial_seeds(catalog)
+            self.assertEqual(seeds[(7, 12, 12)], 651)
 
     def test_projection_walk_composition_handoff(self):
         with tempfile.TemporaryDirectory() as tmp:

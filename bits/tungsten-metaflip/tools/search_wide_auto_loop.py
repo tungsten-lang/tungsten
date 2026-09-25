@@ -3,14 +3,20 @@
 
 This is a cold campaign, not a live-fleet arm or a world-record oracle. Every
 queued tensor is checked independently; price calculations never certify it.
+Current checked-in witnesses and pinned archived bounds price the frontier.
 """
 import argparse
+import base64
+import gzip
 import hashlib
 import itertools
 import json
 from pathlib import Path
 import subprocess
 import sys
+
+if not __debug__:
+    raise RuntimeError("wide auto loop requires Python assertions for tensor checks")
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -23,10 +29,38 @@ from search_wide_projection_walks import (  # noqa: E402
 from verify_recursive_portfolio import catalog_minima, solver  # noqa: E402
 
 STRASSEN = HERE.parent / "lib/metaflip/seeds/gf2/matmul_2x2_rank7_strassen_gf2.txt"
+CERTIFICATES = HERE / "certificates"
+
+# The rank-651 tensor is independently checked in the compact-parent archive,
+# not redistributed with the runtime seeds. This is a price, not a candidate
+# admitted by the loop. The full witness is the object below in release
+# tungsten-lang/metaflip-archives/evidence-2026-09-11, asset
+# 2026-09-08-compact-parent-projections.tar.gz (SHA-256
+# 0b1ff65ba2519b0cff17a46073899ecacbe0cf4ac2f251f1b041fe34f8f13030),
+# object 9f0ef7323c1170600b8301f74335f9b92c9183f6b115a2d7c47c95f1479b2ab5.
+ARCHIVED_EXACT_BOUNDS = {(7, 12, 12): 651}
 
 
 def digest(raw):
     return hashlib.sha256(raw).hexdigest()
+
+
+def certificate_minima(seeds, root=CERTIFICATES):
+    """Price from checked-in tensor witnesses, never from a claimed rank alone."""
+    prices = dict(seeds)
+    baseline = solver(dict(prices))
+    files = sorted((*root.rglob("*.mfw"), *root.rglob("*.mfw.gz.b64")))
+    for path in files:
+        encoded = path.read_bytes()
+        raw = (gzip.decompress(base64.b64decode(encoded.replace(b"\n", b""), validate=True))
+               if path.name.endswith(".mfw.gz.b64") else encoded)
+        shape, terms = top.read_blob(raw)
+        key = tuple(sorted(shape))
+        if len(terms) >= min(prices.get(key, len(terms) + 1), baseline(key)):
+            continue
+        top.exact(shape, terms)
+        prices[key] = min(prices.get(key, len(terms)), len(terms))
+    return prices
 
 
 def initial_seeds(catalog):
@@ -40,7 +74,11 @@ def initial_seeds(catalog):
         seeds[key] = min(seeds.get(key, row["rank"]), row["rank"])
     for key, _, rank, _, _ in old.CANDIDATES:
         seeds[key] = min(seeds.get(key, rank), rank)
-    return seeds
+    for key, rank in top.initial_seeds().items():
+        seeds[key] = min(seeds.get(key, rank), rank)
+    for key, rank in ARCHIVED_EXACT_BOUNDS.items():
+        seeds[key] = min(seeds.get(key, rank), rank)
+    return certificate_minima(seeds)
 
 
 def basis_proposals(shape, terms, limit):

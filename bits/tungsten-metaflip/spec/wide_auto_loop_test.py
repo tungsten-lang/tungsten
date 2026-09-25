@@ -77,6 +77,17 @@ class WideAutoLoopTest(unittest.TestCase):
                                         CERT.parent.parent / "7x12x16-r871-directed-20260925")
         self.assertEqual(seeds[(7, 12, 16)], 871)
 
+    def test_bounded_frontier_preserves_composition_continuation(self):
+        walked = [dict(shape=(2, 2, 2), terms=[0] * 7, sha256="walk-a"),
+                  dict(shape=(2, 2, 2), terms=[0] * 7, sha256="walk-b")]
+        composed = [dict(shape=(4, 4, 4), terms=[0] * 49, sha256="product")]
+        price = lambda shape: {(2, 2, 2): 7, (4, 4, 4): 49}[shape]
+        frontier = loop.select_frontier(walked, composed, 2, price)
+        self.assertEqual({state["sha256"] for state in frontier},
+                         {"walk-a", "product"})
+        self.assertEqual(loop.select_frontier(walked, composed, 1, price)[0]
+                         ["sha256"], "walk-a")
+
     def test_archived_incumbent_prevents_stale_price(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

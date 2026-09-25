@@ -123,6 +123,18 @@ def frontier_priority(state, current_price):
             len(state["terms"]), state["sha256"])
 
 
+def select_frontier(walked, composed, cap, current_price):
+    """Keep one composed continuation when the bounded beam has room for both."""
+    priority = lambda state: frontier_priority(state, current_price)
+    ordered_composed = sorted(composed, key=priority)
+    if cap == 1 or not ordered_composed:
+        return sorted([*walked, *composed], key=priority)[:cap]
+    retained = ordered_composed[:1]
+    retained.extend(sorted([*walked, *ordered_composed[1:]],
+                           key=priority)[:cap - 1])
+    return retained
+
+
 def run(args):
     if args.output_dir.exists():
         raise ValueError("output directory already exists")
@@ -269,7 +281,8 @@ def run(args):
                         composed.append(product)
             if walks >= level_limit:
                 break
-        frontier = (next_frontier + composed)[:args.frontier_cap]
+        frontier = select_frontier(next_frontier, composed,
+                                   args.frontier_cap, price())
         if not frontier or walks >= args.max_walks:
             break
     manifest["status"] = "complete"

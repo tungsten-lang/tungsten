@@ -172,13 +172,26 @@ class WideAutoLoopTest(unittest.TestCase):
             self.assertEqual(seeds[(7, 12, 12)], 651)
             self.assertEqual(seeds[(12, 14, 16)], 1601)
 
+    def test_external_best_is_not_scheme_rank_or_tensor_price(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            catalog = Path(tmp) / "catalog.json"
+            catalog.write_text(json.dumps({"schemes": [
+                {"format": [20, 22, 23], "rank": 5722,
+                 "external_best_rank": 5596,
+                 "external_best_source": "fmm-lille"}]}))
+            self.assertEqual(loop.external_minima(catalog)[(20, 22, 23)],
+                             (5596, "fmm-lille"))
+
     def test_projection_walk_composition_handoff(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             source = root / "seed.mfw"
             source.write_bytes(self.source())
             catalog = root / "catalog.json"
-            catalog.write_text("{}")
+            catalog.write_text(json.dumps({"schemes": [
+                {"format": [7, 12, 16], "rank": 876,
+                 "external_best_rank": 870,
+                 "external_best_source": "fmm-lille"}]}))
             walker = root / "copy-walker"
             walker.write_text("#!/usr/bin/env python3\nimport shutil, sys\n"
                               "shutil.copyfile(sys.argv[2], sys.argv[3])\n")
@@ -206,6 +219,10 @@ class WideAutoLoopTest(unittest.TestCase):
             source_row = next(row for row in report["rows"] if row["kind"] == "source")
             self.assertEqual((source_row["old_price"], source_row["rank"]),
                              (876, 873))
+            self.assertEqual((source_row["external_best_rank"],
+                              source_row["external_best_source"],
+                              source_row["external_gap"]),
+                             (870, "fmm-lille", 3))
             for row in report["rows"]:
                 path = output / row["path"]
                 shape, terms = top.read_blob(path.read_bytes())

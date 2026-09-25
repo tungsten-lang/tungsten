@@ -38,6 +38,23 @@ def digest(raw):
     return hashlib.sha256(raw).hexdigest()
 
 
+def external_minima(catalog):
+    """Comparison bounds only; never use cross-field ranks as GF(2) witnesses."""
+    bounds = {}
+    for scheme in json.loads(catalog.read_bytes()).get("schemes", []):
+        shape = tuple(sorted(scheme.get("format", [])))
+        rank = scheme.get("external_best_rank")
+        source = scheme.get("external_best_source")
+        if (len(shape) != 3 or min(shape) < 2 or max(shape) > 32 or
+                not isinstance(rank, int) or rank < 1 or
+                not isinstance(source, str) or not source):
+            continue
+        candidate = (rank, source)
+        if shape not in bounds or candidate < bounds[shape]:
+            bounds[shape] = candidate
+    return bounds
+
+
 def archived_price_minima(path=ARCHIVED_PRICE_INDEX):
     """Load audited rank-only prices; tensor admission still needs full checks."""
     index = json.loads(path.read_text())
@@ -176,6 +193,7 @@ def run(args):
     source_shape, source_terms = top.read_blob(source_raw)
     top.exact(source_shape, source_terms)
     seeds = initial_seeds(args.catalog)
+    external = external_minima(args.catalog)
     right = top.parse_terms(STRASSEN.read_bytes(), 7)
     top.exact((2, 2, 2), right)
     args.output_dir.mkdir(parents=True)
@@ -228,6 +246,10 @@ def run(args):
                    old_price=old_price,
                    closure_improved=len(gains),
                    closure_saved=sum(g["before"] - g["after"] for g in gains))
+        comparison = external.get(canonical)
+        row["external_best_rank"] = comparison[0] if comparison else None
+        row["external_best_source"] = comparison[1] if comparison else None
+        row["external_gap"] = len(terms) - comparison[0] if comparison else None
         manifest["rows"].append(row)
         save()
         print(json.dumps(row), flush=True)

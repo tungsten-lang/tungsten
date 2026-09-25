@@ -26,6 +26,10 @@ delta. A running/interrupted manifest is not a negative result or a completed
 certificate. `record_claim` is always false. By default, a composed tensor
 above rank 3000 is materialized and checked but not queued for another walk;
 `--max-search-rank` raises that workload cap explicitly.
+Admission rows also record the pinned catalog's `external_best_rank`, source,
+and signed rank gap when available. These are comparison metadata only: the
+external rank may be over another field and neither certifies a GF(2) tensor
+nor establishes a world record. The campaign never uses it as its GF(2) price.
 The walk budget is divided across requested rounds, reserving slots for
 descendants. Within a round, the first projection and two independent basis
 orders precede extra variants; if that projection is farther above its shape's

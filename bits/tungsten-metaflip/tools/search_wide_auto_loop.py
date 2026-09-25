@@ -30,19 +30,32 @@ from verify_recursive_portfolio import catalog_minima, solver  # noqa: E402
 
 STRASSEN = HERE.parent / "lib/metaflip/seeds/gf2/matmul_2x2_rank7_strassen_gf2.txt"
 CERTIFICATES = HERE / "certificates"
-
-# The rank-651 tensor is independently checked in the compact-parent archive,
-# not redistributed with the runtime seeds. This is a price, not a candidate
-# admitted by the loop. The full witness is the object below in release
-# tungsten-lang/metaflip-archives/evidence-2026-09-11, asset
-# 2026-09-08-compact-parent-projections.tar.gz (SHA-256
-# 0b1ff65ba2519b0cff17a46073899ecacbe0cf4ac2f251f1b041fe34f8f13030),
-# object 9f0ef7323c1170600b8301f74335f9b92c9183f6b115a2d7c47c95f1479b2ab5.
-ARCHIVED_EXACT_BOUNDS = {(7, 12, 12): 651}
+ARCHIVED_PRICE_INDEX = CERTIFICATES / "archived-exact-prices.json"
 
 
 def digest(raw):
     return hashlib.sha256(raw).hexdigest()
+
+
+def archived_price_minima(path=ARCHIVED_PRICE_INDEX):
+    """Load audited rank-only prices; tensor admission still needs full checks."""
+    index = json.loads(path.read_text())
+    if (index.get("schema") != 1 or index.get("field") != "GF(2)" or
+            index.get("record_claim") is not False):
+        raise ValueError("invalid archived price index")
+    prices = {}
+    for row in index["bounds"]:
+        shape = tuple(row["shape"])
+        if (len(shape) != 3 or tuple(sorted(shape)) != shape or
+                tuple(sorted(row["witness_shape"])) != shape or
+                min(shape) < 2 or max(shape) > 32 or row["rank"] < 1 or
+                row["source"] not in index["sources"] or
+                len(row["sha256"]) != 64 or
+                row["member"].startswith("/") or ".." in Path(row["member"]).parts or
+                shape in prices):
+            raise ValueError("invalid archived price row")
+        prices[shape] = row["rank"]
+    return prices
 
 
 def certificate_minima(seeds, root=CERTIFICATES):
@@ -76,7 +89,7 @@ def initial_seeds(catalog):
         seeds[key] = min(seeds.get(key, rank), rank)
     for key, rank in top.initial_seeds().items():
         seeds[key] = min(seeds.get(key, rank), rank)
-    for key, rank in ARCHIVED_EXACT_BOUNDS.items():
+    for key, rank in archived_price_minima().items():
         seeds[key] = min(seeds.get(key, rank), rank)
     return certificate_minima(seeds)
 
@@ -149,6 +162,7 @@ def run(args):
     manifest = dict(schema=1, field="GF(2)", record_claim=False,
                     status="running", source=str(args.seed),
                     catalog_sha256=digest(args.catalog.read_bytes()),
+                    archived_price_index_sha256=digest(ARCHIVED_PRICE_INDEX.read_bytes()),
                     steps_per_walk=args.steps, rows=[])
     seen = set()
 

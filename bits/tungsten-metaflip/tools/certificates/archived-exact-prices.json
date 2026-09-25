@@ -1,0 +1,57 @@
+{
+  "schema": 1,
+  "field": "GF(2)",
+  "record_claim": false,
+  "sources": {
+    "compact-parent-20260908": {
+      "asset": "2026-09-08-compact-parent-projections.tar.gz",
+      "sha256": "0b1ff65ba2519b0cff17a46073899ecacbe0cf4ac2f251f1b041fe34f8f13030"
+    },
+    "catalog-parent-20260906": {
+      "asset": "2026-09-11-checkout-audits-2026-09-06.tar.gz",
+      "sha256": "853e1e0fddd44bd8f2e6c3418dd252538b0ebbf5c3056d180815ba6490ea3bd8"
+    }
+  },
+  "bounds": [
+    {
+      "shape": [7, 12, 12],
+      "witness_shape": [7, 12, 12],
+      "rank": 651,
+      "source": "compact-parent-20260908",
+      "member": "objects/9f0ef7323c1170600b8301f74335f9b92c9183f6b115a2d7c47c95f1479b2ab5",
+      "sha256": "9f0ef7323c1170600b8301f74335f9b92c9183f6b115a2d7c47c95f1479b2ab5"
+    },
+    {
+      "shape": [3, 12, 12],
+      "witness_shape": [3, 12, 12],
+      "rank": 323,
+      "source": "catalog-parent-20260906",
+      "member": "benchmarks/matmul/metaflip/catalog_parent_search_2026_09_06/products/3x12x12/candidates/3x12x12-8bded90e8a011d25da4034c7a7e17a2ffd379406010291c4fb1da89ec22d601c.txt",
+      "sha256": "8bded90e8a011d25da4034c7a7e17a2ffd379406010291c4fb1da89ec22d601c"
+    },
+    {
+      "shape": [8, 10, 16],
+      "witness_shape": [8, 16, 10],
+      "rank": 812,
+      "source": "catalog-parent-20260906",
+      "member": "benchmarks/matmul/metaflip/catalog_parent_search_2026_09_06/products/8x10x16/candidates/8x16x10-617b7429ce77022d00bf11f72bb29e447d267fe688918d7ddd36783715fd7c21.txt",
+      "sha256": "617b7429ce77022d00bf11f72bb29e447d267fe688918d7ddd36783715fd7c21"
+    },
+    {
+      "shape": [10, 12, 16],
+      "witness_shape": [12, 16, 10],
+      "rank": 1158,
+      "source": "catalog-parent-20260906",
+      "member": "benchmarks/matmul/metaflip/catalog_parent_search_2026_09_06/products/10x12x16/candidates/12x16x10-f52e0da9b6e39f5a164eb0b14e3336f6ba68a1d5f248ef2750c718de17f88b0b.txt",
+      "sha256": "f52e0da9b6e39f5a164eb0b14e3336f6ba68a1d5f248ef2750c718de17f88b0b"
+    },
+    {
+      "shape": [12, 14, 16],
+      "witness_shape": [12, 16, 14],
+      "rank": 1601,
+      "source": "catalog-parent-20260906",
+      "member": "benchmarks/matmul/metaflip/catalog_parent_search_2026_09_06/products/12x14x16/candidates/12x16x14-b3c82c25c549bcc22343d69800c3448ef80f405ed25d76b1aa7eaf6ea1a1a1f3.txt",
+      "sha256": "b3c82c25c549bcc22343d69800c3448ef80f405ed25d76b1aa7eaf6ea1a1a1f3"
+    }
+  ]
+}

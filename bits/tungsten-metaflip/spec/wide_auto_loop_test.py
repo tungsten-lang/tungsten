@@ -103,6 +103,7 @@ class WideAutoLoopTest(unittest.TestCase):
                  patch.object(loop, "certificate_minima", side_effect=lambda s: s):
                 seeds = loop.initial_seeds(catalog)
             self.assertEqual(seeds[(7, 12, 12)], 651)
+            self.assertEqual(seeds[(12, 14, 16)], 1601)
 
     def test_projection_walk_composition_handoff(self):
         with tempfile.TemporaryDirectory() as tmp:

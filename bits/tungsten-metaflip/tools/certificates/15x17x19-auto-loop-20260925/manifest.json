@@ -1,0 +1,68 @@
+{
+  "schema": 1,
+  "field": "GF(2)",
+  "record_claim": false,
+  "source": "bits/tungsten-metaflip/tools/certificates/16x17x19-auto-loop-20260925/16x17x19-r3045-935c59b1.mfw.gz.b64",
+  "catalog_sha256": "1a43aedc346bae47458dafe053fcff6ec78934ffc7124b8c046960b9891a2719",
+  "steps_per_walk": 50000000,
+  "rows": [
+    {
+      "kind": "source",
+      "parent": null,
+      "details": {},
+      "shape": [
+        16,
+        17,
+        19
+      ],
+      "rank": 3045,
+      "sha256": "935c59b12c05823d0fa032a827b312f4941922fbe54263a84385b480a4549d88",
+      "old_price": 3045,
+      "external_best_rank": 3066,
+      "external_best_source": "fmm-lille",
+      "external_gap": -21,
+      "file": "16x17x19-r3045-935c59b1.mfw.gz.b64"
+    },
+    {
+      "kind": "projection-seed",
+      "parent": "935c59b12c05823d0fa032a827b312f4941922fbe54263a84385b480a4549d88",
+      "details": {
+        "mode": 7,
+        "axis": 0,
+        "coordinate": 2
+      },
+      "shape": [
+        15,
+        17,
+        19
+      ],
+      "rank": 2987,
+      "sha256": "2089d08d11c7f049970b3b0a76f1619efde776acb19cb1b4b60a7e2d45e14402",
+      "old_price": 2973,
+      "external_best_rank": 2934,
+      "external_best_source": "fmm-lille",
+      "external_gap": 53,
+      "file": "15x17x19-r2987-2089d08d.mfw.gz.b64"
+    },
+    {
+      "kind": "walk",
+      "parent": "2089d08d11c7f049970b3b0a76f1619efde776acb19cb1b4b60a7e2d45e14402",
+      "details": {
+        "steps": 50000000,
+        "nonce": 251401
+      },
+      "shape": [
+        15,
+        17,
+        19
+      ],
+      "rank": 2964,
+      "sha256": "1b64d62ed193a800b6462909e0c80126cffe716043b16143b92f2753e2d53ec6",
+      "old_price": 2973,
+      "external_best_rank": 2934,
+      "external_best_source": "fmm-lille",
+      "external_gap": 30,
+      "file": "15x17x19-r2964-1b64d62e.mfw.gz.b64"
+    }
+  ]
+}

@@ -183,3 +183,9 @@ independent Python/Ruby tensor reconstruction plus source, projection, basis,
 Strassen, and shared-pair lineage replay. The two new GF(2) ranks are
 numerically 71 and 21 below the Lille catalogue entries checked on
 2026-09-25, but global novelty and optimality remain unclaimed.
+
+A further completed eight-walk campaign from 16×17×19/r3045 projected
+15×17×19/r2987 and walked it to r2964, nine below the previous local GF(2)
+price but 30 above the Lille comparison. The three-state witness is retained
+under `certificates/15x17x19-auto-loop-20260925/`. The other walks tied;
+this finite result does not close the family.

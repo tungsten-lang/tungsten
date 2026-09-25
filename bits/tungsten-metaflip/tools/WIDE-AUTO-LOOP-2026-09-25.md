@@ -163,3 +163,13 @@ under 3 MB. A final finite 2..32 GF(2) rank-only closure scan shows 10
 improved prices and 839 summed rank units. The six derived price changes still
 need exact materialization before being tensor witnesses; no retained child
 crosses its pinned external comparison.
+
+A two-round campaign from the checked-in 16×17×22/r3475 witness projected a
+16×17×21/r3352 child and walked through r3326 to r3322. A 50-million-move
+continuation reached r3321; a further 100-million-move continuation tied.
+The nine-state compact lineage in
+`certificates/16x17x21-auto-loop-20260925/` replays every tensor in Python
+and Ruby and reconstructs its basis/projection edges. The result lowers the
+prior local 16×17×21 GF(2) price 3364 by 43 and is numerically 53 below the
+Lille catalogue entry checked on 2026-09-25. This is an exact upper bound,
+not a global novelty or optimality claim.

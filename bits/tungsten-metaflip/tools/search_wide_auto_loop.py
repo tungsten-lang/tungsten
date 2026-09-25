@@ -122,11 +122,18 @@ def round_walk_limit(walks, max_walks, level, rounds):
 
 
 def ordered_choices(projected, basis, price):
-    # Keep both arms in the first two slots. A two-walk round previously spent
-    # both walks on basis variants and never tested a projection child.
+    # Prefer two distinct improving child shapes to a weaker parent-basis tie.
+    # Otherwise keep both arms in the first two slots: an earlier two-walk
+    # round spent both walks on basis variants and missed projection entirely.
     def gap(row):
         return row["rank"] - price(tuple(sorted(row["shape"])))
 
+    if (len(projected) >= 2 and
+            tuple(sorted(projected[0]["shape"])) !=
+            tuple(sorted(projected[1]["shape"])) and
+            gap(projected[0]) < 0 and gap(projected[1]) < 0 and
+            (not basis or gap(projected[1]) < gap(basis[0]))):
+        return projected[:2] + basis + projected[2:]
     if projected and basis and gap(basis[0]) < gap(projected[0]):
         return basis[:1] + projected[:1] + basis[1:] + projected[1:]
     return projected[:1] + basis[:2] + projected[1:] + basis[2:]

@@ -63,6 +63,22 @@ class WideAutoLoopTest(unittest.TestCase):
         self.assertIsNone(gate(6736, 6878, 6725))
         self.assertIsNone(gate(7128, 7128, 7128))
 
+    def test_two_strong_child_shapes_precede_parent_basis_tie(self):
+        projected = [dict(shape=(19, 22, 23), rank=5583, mode="child-a"),
+                     dict(shape=(20, 21, 23), rank=5502, mode="child-b")]
+        basis = [dict(shape=(20, 22, 23), rank=5702, mode="basis")]
+        prices = {(19, 22, 23): 5748, (20, 21, 23): 5654,
+                  (20, 22, 23): 5702}
+        order = loop.ordered_choices(projected, basis,
+                                     lambda shape: prices[shape])
+        self.assertEqual([row["mode"] for row in order],
+                         ["child-a", "child-b", "basis"])
+        prices[(20, 22, 23)] = 6000
+        order = loop.ordered_choices(projected, basis,
+                                     lambda shape: prices[shape])
+        self.assertEqual([row["mode"] for row in order][:2],
+                         ["basis", "child-a"])
+
     def test_checked_certificates_update_prices_and_reject_false_improvements(self):
         source = loop.STRASSEN.read_bytes()
         terms = top.parse_terms(source, 7)
@@ -109,6 +125,15 @@ class WideAutoLoopTest(unittest.TestCase):
         self.assertEqual(seeds[(20, 23, 23)], 5883)
         self.assertEqual(seeds[(20, 22, 24)], 5851)
         self.assertEqual(seeds[(19, 23, 24)], 5894)
+
+    def test_wide_auto_loop_descendants_update_prices(self):
+        root = TOOLS / "certificates/20x22x23-auto-loop-20260925"
+        seeds = loop.certificate_minima({(20, 22, 23): 5940,
+                                        (19, 22, 23): 5748,
+                                        (20, 21, 23): 5654}, root)
+        self.assertEqual(seeds[(20, 22, 23)], 5702)
+        self.assertEqual(seeds[(19, 22, 23)], 5551)
+        self.assertEqual(seeds[(20, 21, 23)], 5463)
 
     def test_bounded_frontier_preserves_composition_continuation(self):
         walked = [dict(shape=(2, 2, 2), terms=[0] * 7, sha256="walk-a"),

@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "field": "GF(2)",
+  "record_claim": false,
+  "rows": [
+    {"file": "20x22x23-r5702.mfw.gz.b64", "shape": [20, 22, 23], "rank": 5702, "sha256": "9d22e660a5b2db026afd3caa6f0424b21e40eed857242e910b235c809ca97db5", "parent": "../20x23x23-catalogue-lead-20260925/20x23x23-r5883.mfw.gz.b64", "mode": 10, "axis": 1, "coordinate": 11, "projection_rank": 5740, "projection_sha256": "efc990065adffc18a8c94035a65c920cf00975d4f1422b7431b75be6d03c4006", "walks": [[50000000, 24091]]},
+    {"file": "19x22x23-r5583.mfw.gz.b64", "shape": [19, 22, 23], "rank": 5583, "sha256": "b993d621654a8958ef029c136473c996857897686434130d1447cc4e3c059bf1", "parent": "20x22x23-r5702.mfw.gz.b64", "mode": 12, "axis": 0, "coordinate": 2, "projection_rank": 5583, "projection_sha256": "b993d621654a8958ef029c136473c996857897686434130d1447cc4e3c059bf1", "walks": []},
+    {"file": "19x22x23-r5551.mfw.gz.b64", "shape": [19, 22, 23], "rank": 5551, "sha256": "4c39556d772cfe83a773768df00de33e12472ad41ed4c35c9062665be44ad4e8", "parent": "19x22x23-r5583.mfw.gz.b64", "operation": "continuation", "projection_rank": 5583, "projection_sha256": "b993d621654a8958ef029c136473c996857897686434130d1447cc4e3c059bf1", "walks": [[50000000, 24101]]},
+    {"file": "20x21x23-r5502.mfw.gz.b64", "shape": [20, 21, 23], "rank": 5502, "sha256": "31ff702a940513976006030edf75211b4688c0c7e91d036611002741c643894e", "parent": "20x22x23-r5702.mfw.gz.b64", "mode": 12, "axis": 1, "coordinate": 5, "projection_rank": 5502, "projection_sha256": "31ff702a940513976006030edf75211b4688c0c7e91d036611002741c643894e", "walks": []},
+    {"file": "20x21x23-r5463.mfw.gz.b64", "shape": [20, 21, 23], "rank": 5463, "sha256": "4c5998c72510d11bde81553a4cddaa5789e1d1f558d5159d15e934a881daaa13", "parent": "20x21x23-r5502.mfw.gz.b64", "operation": "continuation", "projection_rank": 5502, "projection_sha256": "31ff702a940513976006030edf75211b4688c0c7e91d036611002741c643894e", "walks": [[50000000, 24103]]}
+  ]
+}

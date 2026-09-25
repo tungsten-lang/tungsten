@@ -3813,3 +3813,17 @@ selected identities were unchanged. A deliberate retained-projection
 mismatch is rejected by the focused test. The r2800 screen's closest child
 remained 31 above its dated comparison, and four independent 100M restarts
 from r2800 held rank, so that direct basin was deprioritized.
+
+The r962 representation also yielded a rank-880 `7×16×12` projection after
+mode-6 basis cleanup. A 100M directed walk reached r873; a distinct mode-12
+basis rewrite and another 100M walk reached r872. Independent Python and Ruby
+full-tensor checks pass; the two new walks replay byte-for-byte. The pinned
+GF(2) composition closure's previous price for `7×12×16` was 876. Adding
+this witness and its r962 parent improves 37 finite shapes by 184 rank units;
+the new child accounts for 20 shapes and 103 units beyond the parent alone.
+The [public tracker](https://github.com/dronperminov/FastMatrixMultiplication)
+listed 878 for `7×12×16` on 2026-09-25. This is a new exact GF(2) upper bound
+relative to those comparison sources, not a claim of worldwide novelty,
+integer/rational validity, or optimality. The source chain and finite closure
+are checked by `bits/tungsten-metaflip/tools/check_7x12x16_directed_20260925.py`
+using the adjacent `7x12x16-directed-20260925` certificate archive.

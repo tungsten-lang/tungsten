@@ -1,0 +1,51 @@
+{
+  "schema": 1,
+  "field": "GF(2)",
+  "record_claim": false,
+  "parent_certificate": "../7x13x16-directed-20260924/manifest.json",
+  "parent_sha256": "7b44f3a6402e5d9a3c0e82c80215fa99ee0a964354d8a3c06885d924d3b7a4ca",
+  "projection": {
+    "basis_mode": 6,
+    "axis": 2,
+    "coordinate": 6,
+    "shape": [7, 16, 12],
+    "rank": 880,
+    "sha256": "388bc505f1eddba8775e4820f8093a880acb6b6032aaca2d7f32209e86601653"
+  },
+  "walks": [
+    {
+      "steps": 100000000,
+      "nonce": 2026092501,
+      "result": {
+        "file": "7x16x12-r873.mfw.gz.b64",
+        "shape": [7, 16, 12],
+        "rank": 873,
+        "density": 20758,
+        "sha256": "1c95fe6e03f61d03d4e969902d03602e9661f117fd08b4421fbb0725b416acf9"
+      }
+    },
+    {
+      "basis_mode": 12,
+      "seed_rank": 873,
+      "seed_sha256": "35d7ef7c85362e95b9a987895da843b82fb7b8fc6ef9d41d71e7cd9ed180b55e",
+      "steps": 100000000,
+      "nonce": 2026092504,
+      "result": {
+        "file": "7x16x12-r872.mfw.gz.b64",
+        "shape": [7, 16, 12],
+        "rank": 872,
+        "density": 20768,
+        "sha256": "8117a6eab7d35eefae49e4ca4165b3ca329e2880ddd91581443ea5caafc93fe8"
+      }
+    }
+  ],
+  "closure": {
+    "catalog_sha256": "1a43aedc346bae47458dafe053fcff6ec78934ffc7124b8c046960b9891a2719",
+    "baseline_rank": 876,
+    "retained_rank": 872,
+    "improved_shapes": 37,
+    "saved_rank_units": 184,
+    "incremental_shapes": 20,
+    "incremental_saved_rank_units": 103
+  }
+}

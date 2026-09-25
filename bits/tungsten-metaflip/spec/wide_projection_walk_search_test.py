@@ -6,6 +6,7 @@ import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[3]
 TOOL = ROOT / "bits/tungsten-metaflip/tools/search_wide_projection_walks.py"
@@ -55,6 +56,13 @@ class WideProjectionWalkSearchTest(unittest.TestCase):
                           rows[0]["pair_counts"]), (673, 5, [0, 28, 20]))
         self.assertEqual((rows[1]["rank"], rows[1]["coordinate"],
                           rows[1]["pair_counts"]), (673, 8, [0, 27, 22]))
+
+    def test_retained_projection_rejects_independent_mismatch(self):
+        shape, terms = MODULE.top.read_blob(
+            gzip.decompress(base64.b64decode(SOURCE.read_bytes())))
+        with mock.patch.object(MODULE.neutral, "project_grid", return_value=[]):
+            with self.assertRaisesRegex(ValueError, "independent projection mismatch"):
+                MODULE.proposals(shape, terms, {(8, 12, 12): 720})
 
 
 if __name__ == "__main__":

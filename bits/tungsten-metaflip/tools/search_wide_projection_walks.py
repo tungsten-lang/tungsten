@@ -46,9 +46,11 @@ def verify_file(path):
 def proposals(shape, terms, public, per_shape=2):
     """Retain distinct full representations, including rank ties."""
     best = {}
+    bases = {}
     for mode in (None, *range(6, 18)):
         basis = terms if mode is None else two_pass(terms, shape, mode)
         top.exact(shape, basis)
+        bases[mode] = basis
         for axis, extent in enumerate(shape):
             if extent <= 1:
                 continue
@@ -57,10 +59,6 @@ def proposals(shape, terms, public, per_shape=2):
                 key = tuple(sorted(child_shape))
                 if key not in public:
                     continue
-                keep = [list(range(value)) for value in shape]
-                keep[axis].pop(coordinate)
-                if projected != neutral.project_grid(shape, basis, keep):
-                    raise ValueError("independent projection mismatch")
                 width = max(child_shape[0] * child_shape[1],
                             child_shape[1] * child_shape[2],
                             child_shape[0] * child_shape[2])
@@ -79,11 +77,20 @@ def proposals(shape, terms, public, per_shape=2):
                         entry["rank"], -max(entry["pair_counts"]),
                         -sum(entry["pair_counts"]), entry["sha256"]))
                     del bucket[per_shape:]
-    return sorted((row for bucket in best.values() for row in bucket),
+    rows = sorted((row for bucket in best.values() for row in bucket),
                   key=lambda row: (row["rank"] - row["public_rank"],
                                    row["rank"], tuple(sorted(row["shape"])),
                                    -max(row["pair_counts"]),
                                    -sum(row["pair_counts"]), row["sha256"]))
+    for row in rows:
+        keep = [list(range(value)) for value in shape]
+        keep[row["axis"]].pop(row["coordinate"])
+        projected = top.project(shape, bases[row["mode"]], row["axis"],
+                                row["coordinate"])[1]
+        if projected != neutral.project_grid(shape, bases[row["mode"]], keep):
+            raise ValueError("independent projection mismatch")
+        top.exact(row["shape"], row["terms"])
+    return rows
 
 
 def select(rows, beam):

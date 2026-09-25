@@ -3791,3 +3791,25 @@ walk from the newly selected r673 representation held rank but raised one
 axis's pair capacity from 28 to 30; this reduced an exact local composition
 formula from 2665 to 2662, still worse than the existing GF(2) closure for
 that target. None of these screens is a new record.
+
+The next multiword screen used the retained 8×16×13/r1037 parent. An exact
+mode-7 projection produced 7×16×13/r974; one 100M directed walk reached
+r964, a mode-12 basis rewrite preserved rank, and a second 100M walk reached
+r962. The two walks replay byte-for-byte, and independent Python and Ruby
+full-tensor checks accept the retained scheme. Against the pinned GF(2)
+closure, this replaces r966 and improves 17 shapes by 81 total rank units.
+The [public tracker](https://github.com/dronperminov/FastMatrixMultiplication)
+listed r962 on 2026-09-24, so this is a tie, not a new
+world-record claim. Eight distinct r962 basis restarts (100M each) did not
+drop further. Certificate and checker:
+`bits/tungsten-metaflip/tools/certificates/7x13x16-directed-20260924/`
+and `bits/tungsten-metaflip/tools/check_7x13x16_directed_20260924.py`.
+
+Profiling the cold projection-walk scheduler showed 12.2 of 15.7 seconds
+inside independent projection checks for 403 candidates, most immediately
+discarded. Deferring that check to the retained beam kept its exact admission
+gate and cut a matched r2800 screen from about 135 seconds to 31 seconds;
+selected identities were unchanged. A deliberate retained-projection
+mismatch is rejected by the focused test. The r2800 screen's closest child
+remained 31 above its dated comparison, and four independent 100M restarts
+from r2800 held rank, so that direct basin was deprioritized.

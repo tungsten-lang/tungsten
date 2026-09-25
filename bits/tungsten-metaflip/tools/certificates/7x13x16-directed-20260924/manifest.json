@@ -1,0 +1,54 @@
+{
+  "schema": 1,
+  "field": "GF(2)",
+  "record_claim": false,
+  "source": {
+    "file": "8x16x13-r1037.mfw.gz.b64",
+    "shape": [8, 16, 13],
+    "rank": 1037,
+    "density": 25178,
+    "sha256": "1deada55fa56e6cd9412f74d47511b77b91e99c737af2c9c1f46cc437bd58160"
+  },
+  "projection": {
+    "basis_mode": 7,
+    "axis": 0,
+    "coordinate": 6,
+    "shape": [7, 16, 13],
+    "rank": 974,
+    "sha256": "372dbca86ad0fc2f6d553ea51b0e9f3f6a79d680981b4981b642321b902be524"
+  },
+  "walks": [
+    {
+      "steps": 100000000,
+      "nonce": 2026092918,
+      "result": {
+        "file": "7x16x13-r964.mfw.gz.b64",
+        "shape": [7, 16, 13],
+        "rank": 964,
+        "density": 24058,
+        "sha256": "bd9f5c15f14bc2140323d90756b454dac9f2543e49e8b82a66cbbd79821ee543"
+      }
+    },
+    {
+      "basis_mode": 12,
+      "seed_rank": 964,
+      "seed_sha256": "d840cab17334b9a1fe319af2d69851dc3ff41a4fb8f86e819cc175e98b07650a",
+      "steps": 100000000,
+      "nonce": 2026092924,
+      "result": {
+        "file": "7x16x13-r962.mfw.gz.b64",
+        "shape": [7, 16, 13],
+        "rank": 962,
+        "density": 24255,
+        "sha256": "7b44f3a6402e5d9a3c0e82c80215fa99ee0a964354d8a3c06885d924d3b7a4ca"
+      }
+    }
+  ],
+  "closure": {
+    "catalog_sha256": "1a43aedc346bae47458dafe053fcff6ec78934ffc7124b8c046960b9891a2719",
+    "baseline_rank": 966,
+    "retained_rank": 962,
+    "improved_shapes": 17,
+    "saved_rank_units": 81
+  }
+}

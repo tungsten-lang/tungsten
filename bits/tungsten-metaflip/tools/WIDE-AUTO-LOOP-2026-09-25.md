@@ -116,3 +116,6 @@ four improved child shapes, led by 19×21×25/r5718. Two additional direct
 continuations reached r5689, then a third 100M walk tied; the compact under-2-MB
 replay is in `certificates/20x22x25-auto-loop-20260925/`. Every retained child remains
 above the pinned external comparison, so this is a local-price gain only.
+A final finite 2..32 GF(2) rank-only closure scan shows 10 improved prices,
+811 summed rank units, and no new pinned-external crossing. The six derived
+price changes still need exact materialization before being tensor witnesses.

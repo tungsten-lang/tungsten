@@ -18,7 +18,11 @@ shape and every ancestor needed to trace it back to the source. It is under
 The four direct local reductions sum to 462 rank units. During the two-round
 campaign, repricing the finite 2..32 GF(2) composition table after each
 admission saved 695 units across affected shapes; this excludes the later 29
-rank units from the two direct continuations. The external numbers come from the pinned catalog digest in
+rank units from the two direct continuations. A final rank-only closure scan
+with all four retained best children changes 10 local prices by 811 summed
+rank units relative to the four prior local prices. The six derived prices
+are recipes, not materialized tensors. None crosses its pinned external
+comparison. The external numbers come from the pinned catalog digest in
 `manifest.json`; they are comparison metadata, possibly over other fields.
 **None of these tensors beats its pinned external comparison, and no world
 record is claimed.**

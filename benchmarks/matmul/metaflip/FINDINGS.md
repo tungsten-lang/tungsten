@@ -3827,3 +3827,11 @@ relative to those comparison sources, not a claim of worldwide novelty,
 integer/rational validity, or optimality. The source chain and finite closure
 are checked by `bits/tungsten-metaflip/tools/check_7x12x16_directed_20260925.py`
 using the adjacent `7x12x16-directed-20260925` certificate archive.
+
+The cold `search_wide_auto_loop.py` now connects exact projection/basis
+selection, bounded native walks, GF(2) closure repricing, and independently
+verified Strassen composition in one queued campaign. A matched three-walk
+control from the r873 certificate rediscovered the r872 witness and built
+14×24×32/r6104 without manual handoff. This is offline automation, not a
+live-fleet feature or a general block-composition closure; its behavior and
+limits are recorded in `bits/tungsten-metaflip/tools/WIDE-AUTO-LOOP-2026-09-25.md`.

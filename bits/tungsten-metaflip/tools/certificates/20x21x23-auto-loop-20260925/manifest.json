@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "field": "GF(2)",
+  "record_claim": false,
+  "rows": [
+    {"file": "19x21x23-r5347.mfw.gz.b64", "shape": [19, 21, 23], "rank": 5347, "sha256": "26122bef2a76a69c06d16aa5038c26bc8f8790c0369ac1a090b458978da9ab1f", "parent": "../20x22x23-auto-loop-20260925/20x21x23-r5463.mfw.gz.b64", "mode": 14, "axis": 0, "coordinate": 2, "projection_rank": 5347, "projection_sha256": "26122bef2a76a69c06d16aa5038c26bc8f8790c0369ac1a090b458978da9ab1f", "walks": []},
+    {"file": "19x21x23-r5316.mfw.gz.b64", "shape": [19, 21, 23], "rank": 5316, "sha256": "ff7662ec00ee819e3835774ca9c6c332cca348a602d2cf7c3c9d9344fc0a96dd", "parent": "19x21x23-r5347.mfw.gz.b64", "operation": "continuation", "projection_rank": 5347, "projection_sha256": "26122bef2a76a69c06d16aa5038c26bc8f8790c0369ac1a090b458978da9ab1f", "walks": [[50000000, 24111]]},
+    {"file": "20x20x23-r5211.mfw.gz.b64", "shape": [20, 20, 23], "rank": 5211, "sha256": "bc7c0bb107aeab36d6e6971c3dc72ac2349608fb460c946bdf3a7ed48c2df1b5", "parent": "../20x22x23-auto-loop-20260925/20x21x23-r5463.mfw.gz.b64", "mode": 12, "axis": 1, "coordinate": 15, "projection_rank": 5211, "projection_sha256": "bc7c0bb107aeab36d6e6971c3dc72ac2349608fb460c946bdf3a7ed48c2df1b5", "walks": []},
+    {"file": "20x20x23-r5146.mfw.gz.b64", "shape": [20, 20, 23], "rank": 5146, "sha256": "ca2d3b0884cdb1583b02466f413a10655af31930f4208703cd41b5bc40147459", "parent": "20x20x23-r5211.mfw.gz.b64", "operation": "continuation", "projection_rank": 5211, "projection_sha256": "bc7c0bb107aeab36d6e6971c3dc72ac2349608fb460c946bdf3a7ed48c2df1b5", "walks": [[50000000, 24112]]},
+    {"file": "20x21x22-r5345.mfw.gz.b64", "shape": [20, 21, 22], "rank": 5345, "sha256": "0627d234ff7c7e89c14f1481b45d7b346c6b7296b85535deb77946853709a843", "parent": "../20x22x23-auto-loop-20260925/20x21x23-r5463.mfw.gz.b64", "mode": 7, "axis": 2, "coordinate": 16, "projection_rank": 5345, "projection_sha256": "0627d234ff7c7e89c14f1481b45d7b346c6b7296b85535deb77946853709a843", "walks": []}
+  ]
+}

@@ -29,7 +29,7 @@ use wide_pairs
   if fields.size() != 3 || fields[0] != "MFT_TASK1" || ffrf_hash_valid(fields[1]) != 1
     return 0-1
   mode = ffpk_decimal(fields[2]) ## i64
-  if mode < 0 || mode >= 3134 || raw != "MFT_TASK1 " + fields[1] + " " + mode.to_s() + "\n"
+  if mode < 0 || mode >= 3135 || raw != "MFT_TASK1 " + fields[1] + " " + mode.to_s() + "\n"
     return 0-1
   mode
 
@@ -46,6 +46,8 @@ use wide_pairs
     return "walk"
   if mode == 3130
     return "walk-continue"
+  if mode == 3134
+    return "walk-deep"
   if mode == 3131
     return "compose-first"
   if mode == 3132
@@ -100,7 +102,7 @@ use wide_pairs
   if File.exists?(root + "/stop")
     return 0-1
   queue = root + "/composition/transforms/"
-  if ffrf_hash_valid(identity) != 1 || mode < 0 || mode >= 3134
+  if ffrf_hash_valid(identity) != 1 || mode < 0 || mode >= 3135
     return 0
   names = ["tasks-pages", "results-pages", "index"]
   i = 0 ## i64
@@ -149,9 +151,9 @@ use wide_pairs
     count += p
   count
 
-# A short probe is cheap on newly admitted multiword tensors; a longer
-# continuation is offered only after a strict rank drop. The same cold child
-# owns both modes, so live CPU/GPU islands are never blocked by a walk.
+# A short probe is cheap on newly admitted multiword tensors; later bounded
+# continuations require strict rank drops. The same cold child owns all modes,
+# so live CPU/GPU islands are never blocked by a walk.
 -> ffxt_walkable(n, m, p, rank) (i64 i64 i64 i64) i64
   if n < 2 || m < 2 || p < 2 || n > 32 || m > 32 || p > 32 || rank < 2 || rank > 8000
     return 0
@@ -402,7 +404,7 @@ use wide_pairs
   rank
 
 -> ffxt_walk(root, source, out, before, n, m, p, mode, sequence, meta) (String i64[] i64[] i64 i64 i64 i64 i64 i64 i64[]) i64
-  if ffxt_walkable(n, m, p, before) != 1 || (mode != 3129 && mode != 3130)
+  if ffxt_walkable(n, m, p, before) != 1 || (mode != 3129 && mode != 3130 && mode != 3134)
     return 0
   stride = ffpk_stride(n, m, p) ## i64
   cap = before+64 ## i64
@@ -418,6 +420,8 @@ use wide_pairs
   remaining = 1000000 ## i64
   if mode == 3130
     remaining = 10000000
+  if mode == 3134
+    remaining = 30000000
   while remaining > 0
     if File.exists?(root + "/stop")
       return 0-1
@@ -465,7 +469,7 @@ use wide_pairs
   if checked != 1
     return 0
   rank = 0 ## i64
-  if mode >= 3131
+  if mode >= 3131 && mode <= 3133
     rank = pair_compose(source,before,info[0],info[1],info[2],mode-3131,out,meta)
     if rank > 0
       # The leaf product can expose new shared-factor matrices. Walk the
@@ -478,13 +482,13 @@ use wide_pairs
       rank = ffwm_reduce(out,out.size(),rank,meta[0],meta[1],meta[2],scratch,words,20000000,stats,6)
       if stats[2] != 0
         meta[4] = 1
-  elsif mode >= 3129
+  elsif mode == 3129 || mode == 3130 || mode == 3134
     rank = ffxt_walk(root, source, out, before, info[0], info[1], info[2], mode, sequence, meta)
   else
     rank = ffxt_propose(root, source, out, before, info[0], info[1], info[2], mode, meta)
   if rank <= 0
     return rank
-  if rank > before && mode < 3131
+  if rank > before && (mode < 3131 || mode > 3133)
     return 0
   checked = ffpk_exact(out, 3*32*16384, rank, meta[0], meta[1], meta[2], parity, 32768, 20000000)
   if checked != 1 && checked != 0-1
@@ -517,7 +521,7 @@ use wide_pairs
     offered = ffwf_publish(root, result, output, rank, meta[0], meta[1], meta[2]) ## i64
     if offered != 1
       return offered
-    if (mode < 3129 || mode >= 3131) && new_best == 1 && ffxt_walkable(meta[0], meta[1], meta[2], rank) == 1
+    if (mode < 3129 || (mode >= 3131 && mode <= 3133)) && new_best == 1 && ffxt_walkable(meta[0], meta[1], meta[2], rank) == 1
       offered = ffxt_offer(root, result, 3129)
       if offered != 1
         return offered
@@ -570,7 +574,7 @@ use wide_pairs
       successor = ffxt_offer(root, result, 3090)
       if successor != 1
         return successor
-  if (mode == 3129 || mode == 3130) && admitted > 0 && result != identity
+  if (mode == 3129 || mode == 3130 || mode == 3134) && admitted > 0 && result != identity
     successor = ffxt_offer(root, result, 18)
     if successor != 1
       return successor
@@ -578,7 +582,11 @@ use wide_pairs
       successor = ffxt_offer(root, result, 3130)
       if successor != 1
         return successor
-  if mode >= 3131 && admitted > 0 && new_best == 1
+    if mode == 3130 && rank < before && new_best == 1
+      successor = ffxt_offer(root, result, 3134)
+      if successor != 1
+        return successor
+  if mode >= 3131 && mode <= 3133 && admitted > 0 && new_best == 1
     successor = ffxt_offer(root,result,0)
     if successor != 1
       return successor

@@ -316,14 +316,26 @@ def productive_walk_feedback(binary):
         rows=[]
         for ticket in range(1,count(q/'consumed')+1):
             mode=int(read_record(q,'tasks',ticket).decode().split()[2])
-            if mode in (3129,3130):
+            if mode in (3129,3130,3134):
                 fields=read_record(q,'results',ticket).decode().split()
                 rows.append((mode,int(fields[6]),int(fields[7]),int(fields[10])))
         assert (3129,974,968,1000000) in rows,rows
         assert (3130,968,963,10000000) in rows,rows
+        child=next(read_record(q,'results',ticket).decode().split()[2]
+                   for ticket in range(1,count(q/'consumed')+1)
+                   if int(read_record(q,'tasks',ticket).decode().split()[2])==3130
+                   and int(read_record(q,'results',ticket).decode().split()[7])==963)
+        deep_ticket=int(read_record(q/'index'/child,'walk-deep',1))
+        while count(q/'consumed')<deep_ticket:
+            run('--drain',root,4)
+        deep=read_record(q,'results',deep_ticket).decode().split()
+        assert int(deep[6])==963 and int(deep[7])==962 and int(deep[10])==30000000,deep
+        deep_shape,deep_terms=read_blob((root/'composition/objects'/f'{deep[2]}.tensor').read_bytes())
+        assert deep_shape==(7,16,13) and len(deep_terms)==int(deep[7])
+        exact(deep_shape,deep_terms)
         checked=audit(root)
-        assert checked['walk']>=1 and checked['walk_continue']>=1
-    print('PASS automatic wide walk: 7x16x13 r974 -> r968 -> r963')
+        assert checked['walk']>=1 and checked['walk_continue']>=1 and checked['walk_deep']>=1
+    print('PASS automatic wide walk: 7x16x13 r974 -> r968 -> r963 -> r962')
 
 
 def productive_pair_feedback(binary):
@@ -371,7 +383,7 @@ def audit(root, progress=None):
     done=count(q/'consumed'); submitted=count(q/'submitted')
     verified=set(); seen=set(); counts=dict(contexts=done,basis=0,project=0,postbasis=0,
                                             mask=0,mask_first=0,mask_last=0,
-                                            walk=0,walk_continue=0,
+                                            walk=0,walk_continue=0,walk_deep=0,
                                             compose_first=0,compose_middle=0,compose_last=0,
                                             neutral=0,limited=0)
     @lru_cache(maxsize=64)
@@ -394,6 +406,7 @@ def audit(root, progress=None):
         elif mode==3131: kind,ordinal='compose-first',1
         elif mode==3132: kind,ordinal='compose-middle',1
         elif mode==3133: kind,ordinal='compose-last',1
+        elif mode==3134: kind,ordinal='walk-deep',1
         elif mode>=3090: kind,ordinal='postbasis',mode-3089
         else: kind,ordinal='project',mode-17
         assert read_record(q/'index'/h,kind,ordinal)==f'{ticket}\n'.encode()
@@ -403,7 +416,7 @@ def audit(root, progress=None):
         assert len(fields)==11 and fields[0]=='MFT_RESULT1' and fields[1]==sha256(raw).hexdigest()
         n,m,p,before,proposed,admitted,status,work=map(int,fields[3:])
         work_bound=150000000000 if mode>=3126 else 140000000
-        cap=8000 if mode>=3131 else before
+        cap=8000 if 3131<=mode<=3133 else before
         assert before==len(terms) and 1<=proposed<=cap and status in (1,2,3) and 0<=work<=work_bound
         assert record==(' '.join(fields)+'\n').encode()
         expected=terms; dims=shape
@@ -414,7 +427,7 @@ def audit(root, progress=None):
                 for axis in order:
                     expected,_=refactor_shared(expected,axis,max_bits=width,reverse_columns=bool(basis_mode%2))
                 if sorted(expected)==terms: break
-        elif mode>=3131:
+        elif 3131<=mode<=3133:
             composed=compose_pairs(shape,terms,mode-3131,max_rank=8000)
             assert composed is not None and work==composed[2]
             dims=composed[0]
@@ -422,7 +435,7 @@ def audit(root, progress=None):
             expected,_=compress_shared(composed[1],max_bits=width)
         elif mode>=3129:
             assert min(shape)>=2 and max(shape)<=32 and before<=8000
-            assert status!=1 or work==(1000000 if mode==3129 else 10000000)
+            assert status!=1 or work==({3129:1000000,3130:10000000,3134:30000000}[mode])
             expected=None
         elif mode>=3126:
             axis={3126:1,3127:0,3128:2}[mode]
@@ -443,7 +456,7 @@ def audit(root, progress=None):
             axis,index=coordinate; coords=[list(range(d)) for d in shape]; coords[axis].remove(index)
             expected=project_coordinate(shape,terms,axis,index); dims=tuple(map(len,coords))
         assert (n,m,p)==dims
-        if expected is not None and mode<3131:
+        if expected is not None and not 3131<=mode<=3133:
             expected,_=compress_shared(expected,max_bits=width)
         if status==3:
             assert fields[2]=='-' and admitted==0

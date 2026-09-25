@@ -18,12 +18,16 @@
       ]
     },
     {
-      "file": "19x20x24-r5104-a01f8d14.mfw.gz.b64",
+      "file": "19x20x24-r5102-1fb73973.mfw.gz.b64",
       "shape": [19, 20, 24],
-      "rank": 5104,
-      "sha256": "a01f8d141b6d1c1cd8add45e6d19544024281cc1f9194214eb3c0e8c96074caf",
+      "rank": 5102,
+      "sha256": "1fb7397348b846b9036c9b05281ac2e107d27b6693519c95502fed28fb7aa24e",
       "projection": {"axis": 1, "coordinate": 10, "rank": 5153, "sha256": "7ed22724f87c7ab807369fac28178e825c5932b3c32c087623bf878cd4ea1147"},
-      "walks": [{"steps": 100000000, "nonce": 250928}]
+      "walks": [
+        {"steps": 1000000, "nonce": 250928},
+        {"steps": 10000000, "nonce": 250929},
+        {"steps": 100000000, "nonce": 250930}
+      ]
     }
   ]
 }

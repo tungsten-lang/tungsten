@@ -91,8 +91,35 @@ strictly better current pair price in the 2..32 shape range. That finite
 screen is not a stopping theorem: equal-rank descendants may still be useful
 walk seeds. A two-round, two-walk replay chose a projected 8×13×8 child of
 an exact composed parent for the second walk, establishing actual feedback;
-it found no rank improvement. Live-fleet integration needs matched yield and responsiveness
-evidence, plus multiword parent support in the native composition intake.
+it found no rank improvement. Folding this entire portfolio loop into the live
+fleet still needs matched yield and responsiveness evidence and broader partner
+support than the native queue's existing bounded multiword pair arm.
+
+The separate native cold transform queue already runs bounded basis, projection,
+walk, and eligible pair-composition tasks, though not this archive-wide portfolio
+loop. It now offers verified rank ties to pair composition, not just the single
+best-rank identity. A matched replay used two exact 4×7×4/r85 representations:
+one had 32 shared pairs on the useful axis and composed to exact 12×7×12/r669;
+the other had 38 pairs and composed to exact r651. The native r651 output was
+independently checked in Python and Ruby. Its source is the SHA-256 object
+`8b3e5862d6400aab50874bf928abe42bd7b962d95143e0d0e51db0bc81c3c8be`
+in the `2026-09-08-compact-parent-projections.tar.gz` release asset, whose
+manifest says `redistribution_cleared: false`; no source tensor is bundled here.
+This validates downstream utility for that tie, not a general yield claim.
+
+A completed two-round, six-walk cold campaign from the same verified r651
+composition projected an exact 12×7×11/r620 child and walked a basis rewrite
+to r619, improving that shape's local GF(2) price from r624. The final
+admission reduced 14 finite-closure prices; the compact four-state lineage is
+retained outside the repository because its source archive is not cleared for
+redistribution. Direct and ten distinct basis-neighborhood continuations of
+r619 found no further drop in their stated finite budgets. Neither result is
+claimed as a world record.
+
+The replay path is parent object `8b3e5862…`, native pair axis 2 to
+12×7×12/r651 (`fa204838…`), mode-7 projection of axis 2 coordinate 10 to
+12×7×11/r620 (`31d91e61…`), mode-6 basis rewrite (`31456734…`), and a
+10,000,000-move directed walk with nonce 251112 to r619 (`444d5d8f…`).
 
 A later two-round control from the checked-in 19×25×27/r7144 parent admitted
 19×24×27/r6871 as an exact projection, walked it to r6841, projected that

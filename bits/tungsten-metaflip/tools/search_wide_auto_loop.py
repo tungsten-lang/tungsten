@@ -38,6 +38,13 @@ def digest(raw):
     return hashlib.sha256(raw).hexdigest()
 
 
+def read_seed(path):
+    raw = path.read_bytes()
+    if path.name.endswith(".mfw.gz.b64"):
+        raw = gzip.decompress(base64.b64decode(raw.replace(b"\n", b""), validate=True))
+    return raw
+
+
 def external_minima(catalog):
     """Comparison bounds only; never use cross-field ranks as GF(2) witnesses."""
     bounds = {}
@@ -82,9 +89,7 @@ def certificate_minima(seeds, root=CERTIFICATES):
     baseline = solver(dict(prices))
     files = sorted((*root.rglob("*.mfw"), *root.rglob("*.mfw.gz.b64")))
     for path in files:
-        encoded = path.read_bytes()
-        raw = (gzip.decompress(base64.b64decode(encoded.replace(b"\n", b""), validate=True))
-               if path.name.endswith(".mfw.gz.b64") else encoded)
+        raw = read_seed(path)
         shape, terms = top.read_blob(raw)
         key = tuple(sorted(shape))
         if len(terms) >= min(prices.get(key, len(terms) + 1), baseline(key)):
@@ -189,7 +194,7 @@ def run(args):
         raise ValueError("output directory already exists")
     if not args.walker.is_file():
         raise ValueError("missing native walker")
-    source_raw = args.seed.read_bytes()
+    source_raw = read_seed(args.seed)
     source_shape, source_terms = top.read_blob(source_raw)
     top.exact(source_shape, source_terms)
     seeds = initial_seeds(args.catalog)

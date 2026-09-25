@@ -8,7 +8,8 @@ different full-term representations, including useful rank ties. Each queued ten
 the Python exact gate and an independent Ruby full-tensor reconstruction;
 pricing and public comparison tables never substitute for those gates.
 
-The loop requires an exact MFW seed, a pinned GF(2) catalog, and a compiled
+The loop requires an exact MFW seed (raw `.mfw` or a checked-in
+`.mfw.gz.b64` certificate), a pinned GF(2) catalog, and a compiled
 `tools/wide_rect_walk.w` binary. Example:
 
 ```
@@ -106,3 +107,12 @@ continuation to r5883. The stronger 20×22×24/r5851 and 19×23×24/r5894
 projections were retained from other checked-in parents. Their complete
 witnesses and replay are under
 `certificates/20x23x23-catalogue-lead-20260925/`.
+
+The loop now accepts compressed checked-in certificates directly as seeds.
+`retain_wide_auto_loop.py` exports only the best improved shape states and
+their parent chain from a completed campaign, checking every tensor again in
+Python and Ruby. A two-round, two-walk replay from 20×22×25/r6076 retained
+four improved child shapes, led by 19×21×25/r5718. Two additional direct
+continuations reached r5689, then a third 100M walk tied; the compact under-2-MB
+replay is in `certificates/20x22x25-auto-loop-20260925/`. Every retained child remains
+above the pinned external comparison, so this is a local-price gain only.

@@ -1,0 +1,183 @@
+{
+  "schema": 1,
+  "field": "GF(2)",
+  "record_claim": false,
+  "source": "bits/tungsten-metaflip/tools/certificates/impact-projection-children-20260925/20x22x25-r6076.mfw.gz.b64",
+  "catalog_sha256": "1a43aedc346bae47458dafe053fcff6ec78934ffc7124b8c046960b9891a2719",
+  "steps_per_walk": 5000000,
+  "rows": [
+    {
+      "kind": "source",
+      "parent": null,
+      "details": {},
+      "shape": [
+        20,
+        22,
+        25
+      ],
+      "rank": 6076,
+      "sha256": "fb2208a3c64ec4ff7343112456982b0268239ce2182e48fd8983e8e7f7c3dbff",
+      "old_price": 6076,
+      "external_best_rank": 6075,
+      "external_best_source": "fmm-lille",
+      "external_gap": 1,
+      "file": "20x22x25-r6076-fb2208a3.mfw.gz.b64"
+    },
+    {
+      "kind": "projection-improvement",
+      "parent": "fb2208a3c64ec4ff7343112456982b0268239ce2182e48fd8983e8e7f7c3dbff",
+      "details": {
+        "mode": 13,
+        "axis": 0,
+        "coordinate": 1
+      },
+      "shape": [
+        19,
+        22,
+        25
+      ],
+      "rank": 5985,
+      "sha256": "1aed37b6b1f0194399992fdae1bd6e32680bace03ab7a1ac72382c4c06b0db2b",
+      "old_price": 6128,
+      "external_best_rank": 5912,
+      "external_best_source": "fmm-lille",
+      "external_gap": 73,
+      "file": "19x22x25-r5985-1aed37b6.mfw.gz.b64"
+    },
+    {
+      "kind": "projection-improvement",
+      "parent": "fb2208a3c64ec4ff7343112456982b0268239ce2182e48fd8983e8e7f7c3dbff",
+      "details": {
+        "mode": 10,
+        "axis": 1,
+        "coordinate": 16
+      },
+      "shape": [
+        20,
+        21,
+        25
+      ],
+      "rank": 5875,
+      "sha256": "1a165dbbb0a9d5980c4131610297d0c5c164043c5f66e0bc877dc7d5f299135f",
+      "old_price": 5923,
+      "external_best_rank": 5802,
+      "external_best_source": "fmm-lille",
+      "external_gap": 73,
+      "file": "20x21x25-r5875-1a165dbb.mfw.gz.b64"
+    },
+    {
+      "kind": "walk",
+      "parent": "1aed37b6b1f0194399992fdae1bd6e32680bace03ab7a1ac72382c4c06b0db2b",
+      "details": {
+        "steps": 5000000,
+        "nonce": 25092601
+      },
+      "shape": [
+        19,
+        22,
+        25
+      ],
+      "rank": 5954,
+      "sha256": "ef80eb4998023f7554076b13c11ab0cc9230a002548cf58069b362b9efb142fb",
+      "old_price": 5985,
+      "external_best_rank": 5912,
+      "external_best_source": "fmm-lille",
+      "external_gap": 42,
+      "file": "19x22x25-r5954-ef80eb49.mfw.gz.b64"
+    },
+    {
+      "kind": "projection-improvement",
+      "parent": "1a165dbbb0a9d5980c4131610297d0c5c164043c5f66e0bc877dc7d5f299135f",
+      "details": {
+        "mode": 13,
+        "axis": 0,
+        "coordinate": 2
+      },
+      "shape": [
+        19,
+        21,
+        25
+      ],
+      "rank": 5765,
+      "sha256": "1a94b55f10065cc4f4886f0769718f87ed1d9850c80a75e0db0b7be5788ce1bf",
+      "old_price": 5833,
+      "external_best_rank": 5675,
+      "external_best_source": "fmm-lille",
+      "external_gap": 90,
+      "file": "19x21x25-r5765-1a94b55f.mfw.gz.b64"
+    },
+    {
+      "kind": "projection-improvement",
+      "parent": "ef80eb4998023f7554076b13c11ab0cc9230a002548cf58069b362b9efb142fb",
+      "details": {
+        "mode": 15,
+        "axis": 2,
+        "coordinate": 12
+      },
+      "shape": [
+        19,
+        22,
+        24
+      ],
+      "rank": 5733,
+      "sha256": "b9243eceec870771fb9243e89702b2b0870d957c6438314bbf3dd26494bf2a28",
+      "old_price": 5829,
+      "external_best_rank": 5610,
+      "external_best_source": "fmm-lille",
+      "external_gap": 123,
+      "file": "19x22x24-r5733-b9243ece.mfw.gz.b64"
+    },
+    {
+      "kind": "walk",
+      "parent": "1a94b55f10065cc4f4886f0769718f87ed1d9850c80a75e0db0b7be5788ce1bf",
+      "details": {
+        "steps": 5000000,
+        "nonce": 25092602
+      },
+      "shape": [
+        19,
+        21,
+        25
+      ],
+      "rank": 5718,
+      "sha256": "e7bdb9db5ac36a62b4d19d598d66f76d806d6d6bb93ca2439fb4cc0ac65954ec",
+      "old_price": 5759,
+      "external_best_rank": 5675,
+      "external_best_source": "fmm-lille",
+      "external_gap": 43,
+      "file": "19x21x25-r5718-e7bdb9db.mfw.gz.b64"
+    },
+    {
+      "kind": "walk",
+      "parent": "e7bdb9db5ac36a62b4d19d598d66f76d806d6d6bb93ca2439fb4cc0ac65954ec",
+      "details": {
+        "steps": 50000000,
+        "nonce": 25092603
+      },
+      "shape": [19, 21, 25],
+      "rank": 5697,
+      "sha256": "addcc4621c072399ff4e9eb69489c2ebfb566eb9d97f453fa5b03a8bfeca7a0d",
+      "old_price": 5718,
+      "external_best_rank": 5675,
+      "external_best_source": "fmm-lille",
+      "external_gap": 22,
+      "file": "19x21x25-r5697-addcc462.mfw.gz.b64"
+    },
+    {
+      "kind": "walk",
+      "parent": "addcc4621c072399ff4e9eb69489c2ebfb566eb9d97f453fa5b03a8bfeca7a0d",
+      "details": {
+        "steps": 100000000,
+        "nonce": 25092604
+      },
+      "shape": [19, 21, 25],
+      "rank": 5689,
+      "sha256": "0ae6e57b463ed0b3a68918c21c1bfd225f84f7e79ce31bec0c262f06bd772869",
+      "old_price": 5697,
+      "external_best_rank": 5675,
+      "external_best_source": "fmm-lille",
+      "external_gap": 14,
+      "file": "19x21x25-r5689-0ae6e57b.mfw.gz.b64"
+    }
+  ]
+}

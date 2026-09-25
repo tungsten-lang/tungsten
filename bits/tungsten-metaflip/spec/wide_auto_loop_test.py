@@ -17,6 +17,7 @@ TOOLS = Path(__file__).resolve().parents[1] / "tools"
 sys.path.insert(0, str(TOOLS))
 import screen_top_two_projection_children as top  # noqa: E402
 import search_wide_auto_loop as loop  # noqa: E402
+import retain_wide_auto_loop as retain  # noqa: E402
 
 CERT = TOOLS / "certificates/7x12x16-directed-20260925/7x16x12-r873.mfw.gz.b64"
 
@@ -24,6 +25,33 @@ CERT = TOOLS / "certificates/7x12x16-directed-20260925/7x16x12-r873.mfw.gz.b64"
 class WideAutoLoopTest(unittest.TestCase):
     def source(self):
         return gzip.decompress(base64.b64decode(CERT.read_bytes()))
+
+    def test_compressed_certificate_is_direct_seed(self):
+        self.assertEqual(loop.read_seed(CERT), self.source())
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = Path(tmp) / "seed.mfw"
+            raw.write_bytes(self.source())
+            self.assertEqual(loop.read_seed(raw), self.source())
+            corrupt = Path(tmp) / "bad.mfw.gz.b64"
+            corrupt.write_text("not base64")
+            with self.assertRaises(ValueError):
+                loop.read_seed(corrupt)
+
+    def test_retained_lineage_keeps_best_and_ancestors(self):
+        def row(shape, rank, old_price, sha, parent=None):
+            return dict(shape=shape, rank=rank, old_price=old_price,
+                        sha256=sha, parent=parent)
+        manifest = dict(schema=1, field="GF(2)", record_claim=False,
+                        status="complete", rows=[
+                            row([3, 3, 3], 25, 25, "source"),
+                            row([2, 3, 3], 20, 22, "projection", "source"),
+                            row([2, 3, 3], 19, 20, "walk", "projection"),
+                            row([2, 2, 3], 19, 19, "tie", "source")])
+        self.assertEqual([r["sha256"] for r in retain.retained_rows(manifest)],
+                         ["source", "projection", "walk"])
+        manifest["status"] = "running"
+        with self.assertRaises(ValueError):
+            retain.retained_rows(manifest)
 
     def test_basis_beam_covers_distinct_axis_orders(self):
         shape, terms = top.read_blob(self.source())
@@ -143,6 +171,17 @@ class WideAutoLoopTest(unittest.TestCase):
         self.assertEqual(seeds[(19, 21, 23)], 5316)
         self.assertEqual(seeds[(20, 20, 23)], 5146)
         self.assertEqual(seeds[(20, 21, 22)], 5345)
+
+    def test_20x22x25_feedback_continuations_update_prices(self):
+        root = TOOLS / "certificates/20x22x25-auto-loop-20260925"
+        seeds = loop.certificate_minima({(19, 22, 25): 6128,
+                                        (20, 21, 25): 5923,
+                                        (19, 21, 25): 5833,
+                                        (19, 22, 24): 5829}, root)
+        self.assertEqual(seeds[(19, 22, 25)], 5954)
+        self.assertEqual(seeds[(20, 21, 25)], 5875)
+        self.assertEqual(seeds[(19, 21, 25)], 5689)
+        self.assertEqual(seeds[(19, 22, 24)], 5733)
 
     def test_bounded_frontier_preserves_composition_continuation(self):
         walked = [dict(shape=(2, 2, 2), terms=[0] * 7, sha256="walk-a"),

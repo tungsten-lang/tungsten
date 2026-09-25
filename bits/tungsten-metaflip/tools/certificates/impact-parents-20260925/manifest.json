@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "field": "GF(2)",
+  "record_claim": false,
+  "witnesses": [
+    {"file": "16x23x24-r4815.mfw.gz.b64", "shape": [16, 23, 24], "rank": 4815, "sha256": "8b0ac3b71b69d3711aea51d2737702b7f12fa33ca4e1d5d28abf91d60559c228"},
+    {"file": "12x13x24-r2166.mfw.gz.b64", "shape": [12, 13, 24], "rank": 2166, "sha256": "823618a2650a3c83a3882f9bc5dc83468611b95b59b5412f77c5cdc951e4fff0"},
+    {"file": "20x24x29-r7370.mfw.gz.b64", "shape": [20, 24, 29], "rank": 7370, "sha256": "d103c57bd15f866cb90528c1376189fa0fb5c8071c0ab5aba54a2a936822df51"},
+    {"file": "16x17x23-r3595.mfw.gz.b64", "shape": [16, 17, 23], "rank": 3595, "sha256": "1eca7bef5edfabf49c04d1b480e975a27baa9dd28b38698e25975a8140a00462"},
+    {"file": "20x23x25-r6258.mfw.gz.b64", "shape": [20, 23, 25], "rank": 6258, "sha256": "f2436bd3812672a2bc738d375eae3d6b2e84ea1aca795a791f7fd7b6d9b3b008"},
+    {"file": "20x25x27-r7282.mfw.gz.b64", "shape": [20, 25, 27], "rank": 7282, "sha256": "17b9b2a06e5d009f012473248e69988acf44d1bfaaf2b339e245b3535a2430d3"}
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "field": "GF(2)",
+  "record_claim": false,
+  "rows": [
+    {"file": "19x24x28-r6994.mfw.gz.b64", "shape": [19, 24, 28], "rank": 6994, "sha256": "217b8247ef5efea2aa656044445bf5dc0117b08451a4526f8a47fd180f50ff6e", "parent": "../impact-projection-children-20260925/19x24x29-r7236.mfw.gz.b64", "mode": 8, "axis": 2, "coordinate": 14, "projection_rank": 7005, "projection_sha256": "1fe638435bda8fe21dffcdcbfff24a6fd8c3423ae45d1ae74e7f65a1eb5f4628", "walks": [[50000000, 25092701]]},
+    {"file": "19x24x28-r6990.mfw.gz.b64", "shape": [19, 24, 28], "rank": 6990, "sha256": "8d5cb6b6d2fa1d41b5d99f57fa3d734010fe5f1c3306304b52bbcb0a22fabc31", "parent": "19x24x28-r6994.mfw.gz.b64", "operation": "continuation", "projection_rank": 6994, "projection_sha256": "217b8247ef5efea2aa656044445bf5dc0117b08451a4526f8a47fd180f50ff6e", "walks": [[100000000, 25092703]]},
+    {"file": "19x23x29-r7113.mfw.gz.b64", "shape": [19, 23, 29], "rank": 7113, "sha256": "69a4ca46188f8293536d89647ec7e5ff0ae5c3dfa67bd8b7ec23ee96ea6eb2da", "parent": "../impact-projection-children-20260925/19x24x29-r7236.mfw.gz.b64", "mode": 11, "axis": 1, "coordinate": 11, "projection_rank": 7113, "projection_sha256": "69a4ca46188f8293536d89647ec7e5ff0ae5c3dfa67bd8b7ec23ee96ea6eb2da", "walks": []},
+    {"file": "16x23x22-r4618.mfw.gz.b64", "shape": [16, 23, 22], "rank": 4618, "sha256": "4bd17d242d9fea0a649e91de3a1b1dea1f793c24f5fad4966815050185cad728", "parent": "../impact-projection-children-20260925/16x23x23-r4743.mfw.gz.b64", "mode": 9, "axis": 2, "coordinate": 4, "projection_rank": 4625, "projection_sha256": "79ef3c8710fdeb5a4419df27f1a8e599653a74a77618abad2c9d7e3b2f80f3a6", "walks": [[50000000, 25092702]]},
+    {"file": "15x23x23-r4635.mfw.gz.b64", "shape": [15, 23, 23], "rank": 4635, "sha256": "0788751f7fe4fd8560ca2c3e77965203cb0451e0e3273ba459d88e7aa451005c", "parent": "../impact-projection-children-20260925/16x23x23-r4743.mfw.gz.b64", "mode": 6, "axis": 0, "coordinate": 0, "projection_rank": 4635, "projection_sha256": "0788751f7fe4fd8560ca2c3e77965203cb0451e0e3273ba459d88e7aa451005c", "walks": []}
+  ]
+}

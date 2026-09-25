@@ -86,3 +86,12 @@ witnesses and their projection lineage are replayable in
 edge case: a later source could offer a projection below the *round-start*
 price but above a new *live* price. The admission gate now skips such
 superseded projections while preserving equal-rank alternative representations.
+
+Two further one-round controls followed the public-bound leads: the exact
+19×24×29/r7236 parent projected to 19×24×28/r7005, walked to r6994 and
+continued to r6990; the 16×23×23/r4743 parent projected to 16×22×23/r4625
+and walked to r4618. A 100M-step continuation of the latter did not drop.
+The five retained witnesses are replayable under
+`certificates/catalogue-projection-leads-20260925/`. The two final GF(2)
+ranks are numerically below the Lille catalogue entries checked on
+2026-09-25, but no cross-field or global record claim is made.

@@ -203,11 +203,20 @@ use wide_pairs
     return offered
   rank = ffpk_decimal(fields[6]) ## i64
   best = File.read_prefix(root + "/composition/best/" + n.to_s() + "x" + m.to_s() + "x" + p.to_s(), 100)
+  best_rank = 0-1 ## i64
+  if best != nil
+    parts = best.strip().split(" ")
+    if parts.size() != 2 || ffrf_hash_valid(parts[1]) != 1
+      return 0
+    best_rank = ffpk_decimal(parts[0])
+    if best_rank < 1 || best_rank > 16384 || best != best_rank.to_s() + " " + parts[1] + "\n"
+      return 0
   if ffxt_walkable(n, m, p, rank) == 1 && best == rank.to_s() + " " + fields[2] + "\n"
     offered = ffxt_offer(root, fields[2], 3129)
     if offered != 1
       return offered
-  if best == rank.to_s() + " " + fields[2] + "\n"
+  # A different rank tie can have more shared-factor pairs than the best ID.
+  if best_rank == rank
     return ffxt_offer_pairs(root,fields[2],n,m,p,rank)
   1
 
@@ -525,7 +534,7 @@ use wide_pairs
       offered = ffxt_offer(root, result, 3129)
       if offered != 1
         return offered
-    if new_best == 1 && ffxt_offer_pairs(root,result,meta[0],meta[1],meta[2],rank) != 1
+    if rank <= prior_rank && ffxt_offer_pairs(root,result,meta[0],meta[1],meta[2],rank) != 1
       return 0
     admitted = rank
   # Offer bounded continuations. Paged per-source indexes make a replay

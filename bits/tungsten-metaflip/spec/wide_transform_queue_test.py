@@ -378,6 +378,41 @@ def productive_pair_feedback(binary):
     print('PASS automatic multiword pair feedback: all axes, exact recursive intake')
 
 
+def tied_pair_feedback(binary):
+    shape, terms = multiword_pair_control()
+    def swap_rows(word, columns):
+        mask = (1 << columns) - 1
+        first, second = word & mask, (word >> columns) & mask
+        return word ^ first ^ (second << columns) ^ (first << columns) ^ second
+    tied = [(swap_rows(a, shape[1]), b, swap_rows(c, shape[2]))
+            for a, b, c in terms]
+    exact(shape, tied)
+    with tempfile.TemporaryDirectory(prefix='metaflip-wide-pair-tie-') as temp:
+        root = Path(temp)
+        first, second = root/'first.tensor', root/'second.tensor'
+        first.write_bytes(blob(shape, terms))
+        second.write_bytes(blob(shape, tied))
+        first_id = sha256(first.read_bytes()).hexdigest()
+        second_id = sha256(second.read_bytes()).hexdigest()
+        assert first_id != second_id
+        for source in (first, second):
+            run = subprocess.run([str(Path(binary).resolve()), '--intake-file',
+                                  str(root), str(source)], capture_output=True,
+                                 text=True, timeout=30)
+            assert run.returncode == 0, (source, run.stdout, run.stderr)
+        best = (root/'composition/best'/('x'.join(map(str, shape)))).read_text()
+        assert best == f'{len(terms)} {first_id}\n', best
+        queue = root/'composition/transforms'
+        for kind in ('compose-first', 'compose-middle', 'compose-last'):
+            assert read_record(queue/'index'/second_id, kind, 1) is not None, kind
+        submitted = count(queue/'submitted')
+        run = subprocess.run([str(Path(binary).resolve()), '--intake-file',
+                              str(root), str(second)], capture_output=True,
+                             text=True, timeout=30)
+        assert run.returncode == 0 and count(queue/'submitted') == submitted
+    print('PASS same-rank alternative feeds all exact pair-composition axes')
+
+
 def audit(root, progress=None):
     q=root/'composition/transforms'; objects=root/'composition/objects'
     done=count(q/'consumed'); submitted=count(q/'submitted')
@@ -478,6 +513,7 @@ def check(binary, retained=None, public=None):
     print('PASS row-block projection oracle:',projection_oracle_tests(),'dense/sparse grid comparisons')
     productive_walk_feedback(binary)
     productive_pair_feedback(binary)
+    tied_pair_feedback(binary)
     productive_postbasis(binary)
     productive_middle_mask(binary)
     productive_axis_masks(binary)

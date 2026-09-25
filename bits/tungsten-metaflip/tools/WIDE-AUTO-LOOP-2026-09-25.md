@@ -34,6 +34,11 @@ second slot. Frontier states are visited in
 price-gap order and round-robin, and a valid basis seed remains eligible for
 the next round even when its walk returns the same state. Thus a wide first
 beam or one descendant cannot consume the whole feedback budget.
+Every retained projection that strictly improves its shape's round-start
+price is now independently verified, archived, composed, and offered to the
+next frontier without consuming a walk slot. Distinct tied representations
+remain eligible for walks; the projection beam still bounds how many are
+walked. This is automatic within the offline campaign, not in `bin/metaflip`.
 
 Matched control: the earlier projection-first schedule recovered the certified
 r872 witness from the packaged `7×16×12/r873` source in three 100M walks. With

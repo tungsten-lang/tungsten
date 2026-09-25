@@ -77,6 +77,11 @@ class WideAutoLoopTest(unittest.TestCase):
                                         CERT.parent.parent / "7x12x16-r871-directed-20260925")
         self.assertEqual(seeds[(7, 12, 16)], 871)
 
+    def test_projected_walk_certificate_updates_price(self):
+        root = TOOLS / "certificates/impact-projection-children-20260925"
+        seeds = loop.certificate_minima({(12, 13, 23): 2203}, root)
+        self.assertEqual(seeds[(12, 13, 23)], 2142)
+
     def test_bounded_frontier_preserves_composition_continuation(self):
         walked = [dict(shape=(2, 2, 2), terms=[0] * 7, sha256="walk-a"),
                   dict(shape=(2, 2, 2), terms=[0] * 7, sha256="walk-b")]
@@ -134,7 +139,8 @@ class WideAutoLoopTest(unittest.TestCase):
             self.assertEqual((report["status"], report["walks"],
                               report["record_claim"]), ("complete", 2, False))
             kinds = {row["kind"] for row in report["rows"]}
-            self.assertTrue({"source", "projection-seed", "strassen-product"} <= kinds)
+            self.assertTrue({"source", "projection-improvement",
+                             "strassen-product"} <= kinds)
             source_row = next(row for row in report["rows"] if row["kind"] == "source")
             self.assertEqual((source_row["old_price"], source_row["rank"]),
                              (876, 873))

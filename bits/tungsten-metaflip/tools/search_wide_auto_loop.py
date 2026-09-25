@@ -173,6 +173,7 @@ def run(args):
                     archived_price_index_sha256=digest(ARCHIVED_PRICE_INDEX.read_bytes()),
                     steps_per_walk=args.steps, rows=[])
     seen = set()
+    states_by_sha = {}
 
     def save():
         target = args.output_dir / "manifest.json"
@@ -216,8 +217,10 @@ def run(args):
         manifest["rows"].append(row)
         save()
         print(json.dumps(row), flush=True)
-        return dict(kind=kind, shape=shape, terms=terms, raw=raw, sha256=sha,
-                    price_improved=bool(gains))
+        state = dict(kind=kind, shape=shape, terms=terms, raw=raw, sha256=sha,
+                     price_improved=bool(gains))
+        states_by_sha[sha] = state
+        return state
 
     def compose(state):
         shape = state["shape"]
@@ -295,6 +298,19 @@ def run(args):
             rows = proposals(shape, terms, choices_prices)
             rows.sort(key=lambda r: (r["rank"] - current_price(tuple(sorted(r["shape"]))),
                                      r["rank"], r["sha256"]))
+            # Exact projections do not need a walk slot to enter the archive.
+            # Use the round-start price so tied representations from the same
+            # improved shape remain available as different neighborhoods.
+            for row in rows:
+                if row["rank"] >= current_price(tuple(sorted(row["shape"]))):
+                    continue
+                child = admit(row["raw"], "projection-improvement",
+                              state["sha256"], {k: row[k] for k in
+                              ("mode", "axis", "coordinate")})
+                if child is not None:
+                    next_frontier.append(child)
+                    composed.extend(product for product in compose(child)
+                                    if len(product["terms"]) <= args.max_search_rank)
             projected = select(rows, args.projection_beam)
             basis = basis_proposals(shape, terms, args.basis_beam)
             prepared.append((state, ordered_choices(projected, basis,
@@ -311,6 +327,8 @@ def run(args):
                 seed = admit(choice["raw"], choice.get("kind", "projection-seed"),
                              state["sha256"], {k: choice[k] for k in
                              ("mode", "axis", "coordinate") if k in choice})
+                if seed is None:
+                    seed = states_by_sha.get(choice["sha256"])
                 if seed is None:
                     continue
                 composed.extend(product for product in compose(seed)

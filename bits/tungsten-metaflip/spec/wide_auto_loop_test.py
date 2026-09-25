@@ -30,6 +30,31 @@ class WideAutoLoopTest(unittest.TestCase):
         self.assertEqual([row["mode"] for row in rows], [6, 12])
         self.assertEqual([row["rank"] for row in rows], [873, 873])
 
+    def test_round_budget_keeps_descendant_slots_and_both_basis_orders(self):
+        self.assertEqual(loop.round_walk_limit(0, 6, 0, 2), 3)
+        self.assertEqual(loop.round_walk_limit(3, 6, 1, 2), 6)
+        projected = [dict(shape=(7, 16, 11), rank=835, mode="p0"),
+                     dict(shape=(7, 16, 11), rank=836, mode="p1")]
+        basis = [dict(shape=(7, 16, 12), rank=871, mode=mode)
+                 for mode in ("b6", "b12", "b7", "b13")]
+        prices = {(7, 11, 16): 822, (7, 12, 16): 871}
+        order = loop.ordered_choices(projected, basis,
+                                     lambda shape: prices[shape])
+        self.assertEqual([row["mode"] for row in order],
+                         ["b6", "b12", "p0", "b7", "b13", "p1"])
+        prices[(7, 11, 16)] = 835
+        order = loop.ordered_choices(projected, basis,
+                                     lambda shape: prices[shape])
+        self.assertEqual([row["mode"] for row in order][:3],
+                         ["p0", "b6", "b12"])
+        states = [dict(shape=(7, 16, 11), terms=[0] * 833, sha256="projected"),
+                  dict(shape=(7, 16, 12), terms=[0] * 871, sha256="basis")]
+        prices[(7, 11, 16)] = 822
+        states.sort(key=lambda state: loop.frontier_priority(
+            state, lambda shape: prices[shape]))
+        self.assertEqual([state["sha256"] for state in states],
+                         ["basis", "projected"])
+
     def test_projection_walk_composition_handoff(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -44,8 +69,8 @@ class WideAutoLoopTest(unittest.TestCase):
             output = root / "output"
             args = argparse.Namespace(seed=source, catalog=catalog,
                                       walker=walker,
-                                      output_dir=output, rounds=1,
-                                      max_walks=1, steps=1,
+                                      output_dir=output, rounds=2,
+                                      max_walks=2, steps=1,
                                       projection_beam=1, basis_beam=2,
                                       frontier_cap=4,
                                       max_composed_rank=8000,
@@ -57,7 +82,7 @@ class WideAutoLoopTest(unittest.TestCase):
                     loop.run(args)
             report = json.loads((output / "manifest.json").read_text())
             self.assertEqual((report["status"], report["walks"],
-                              report["record_claim"]), ("complete", 1, False))
+                              report["record_claim"]), ("complete", 2, False))
             kinds = {row["kind"] for row in report["rows"]}
             self.assertTrue({"source", "projection-seed", "strassen-product"} <= kinds)
             source_row = next(row for row in report["rows"] if row["kind"] == "source")

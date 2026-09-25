@@ -26,15 +26,24 @@ delta. A running/interrupted manifest is not a negative result or a completed
 certificate. `record_claim` is always false. By default, a composed tensor
 above rank 3000 is materialized and checked but not queued for another walk;
 `--max-search-rank` raises that workload cap explicitly.
+The walk budget is divided across requested rounds, reserving slots for
+descendants. Within a round, the first projection and two independent basis
+orders precede extra variants; if that projection is farther above its shape's
+current price, the basis pair goes first. Frontier states are visited in
+price-gap order and round-robin, and a valid basis seed remains eligible for
+the next round even when its walk returns the same state. Thus a wide first
+beam or one descendant cannot consume the whole feedback budget.
 
-Matched control: starting from the packaged `7×16×12/r873` witness, with
-three 100M walks and nonce base `2026092502`, the loop independently recovered
-the certified r872 witness (SHA-256
-`8117a6eab7d35eefae49e4ca4165b3ca329e2880ddd91581443ea5caafc93fe8`)
-and materialized its exact 14×24×32/r6104 Strassen product. The first basis
-beam spans distinct axis orders; otherwise two reverse variants consume both
-slots and the successful mode-12 neighborhood is skipped. A focused fake-walk
-test checks exact admission, projection, composition, and this basis ordering.
+Matched control: the earlier projection-first schedule recovered the certified
+r872 witness from the packaged `7×16×12/r873` source in three 100M walks. With
+price-gap ordering, the same source and nonce base `2026092502` reached a
+different exact r871 representation on its first mode-6 walk and materialized
+the 14×24×32/r6097 Strassen product. This scratch representation does not
+improve the price beyond the three archived r871 witnesses; its best
+one-coordinate projections also remain above their current prices. The first
+basis beam spans distinct axis orders so reverse variants cannot consume both
+slots. Focused tests check exact admission, two-round feedback, projection,
+composition, and ordering.
 
 This is **not** a live `bin/metaflip` arm. It currently composes only with the
 exact GF(2) 2×2×2/r7 partner, not arbitrary block sums or the entire parent

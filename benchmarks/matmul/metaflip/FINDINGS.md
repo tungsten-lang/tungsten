@@ -3851,3 +3851,18 @@ product's nearest one-coordinate projection was 127 above the dated
 comparison; the 7×16×25 block sum of r962+r872 stayed at r1834 through all
 12 two-pass cleanups, above the existing r1831 GF(2) price. No world-record
 or cross-field novelty claim follows from these bounded checks.
+
+The first six-walk offline loop from the r871 mode-7 witness exhausted its
+budget in the first round despite `--rounds 2`. A matched follow-up reserved
+three walks for descendants, then exposed first-child starvation and discarded
+same-rank seeds when their walk returned unchanged. The loop now budgets by
+round, visits frontier siblings fairly, retains unchanged verified seeds, and
+leads with basis variants when the best projection is farther above its
+current shape price. Focused tests and a six-walk/100M-each native run exercise
+the two-round handoff. That bounded run did not lower the r871 parent or any
+pinned GF(2) price; its best projected child was r833 versus price r822.
+On the prior r873 control, the price-aware order instead found a distinct
+exact r871 representation in its first 100M basis walk, whereas the old order
+first reached r872 on walk three. Its best projections and pair counts did not
+beat the archived r871 portfolio, and a further 100M continuation held r871;
+the scratch tie was not promoted as another certificate.

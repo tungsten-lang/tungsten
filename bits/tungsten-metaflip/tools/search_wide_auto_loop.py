@@ -62,6 +62,29 @@ def basis_proposals(shape, terms, limit):
     return result
 
 
+def round_walk_limit(walks, max_walks, level, rounds):
+    remaining = max_walks - walks
+    remaining_rounds = rounds - level
+    return walks + (remaining if remaining_rounds == 1 else
+                    max(1, remaining // remaining_rounds))
+
+
+def ordered_choices(projected, basis, price):
+    # Keep both arms in the first three slots, but lead with basis variants
+    # when the best projection starts farther above its current shape price.
+    def gap(row):
+        return row["rank"] - price(tuple(sorted(row["shape"])))
+
+    if projected and basis and gap(basis[0]) < gap(projected[0]):
+        return basis[:2] + projected[:1] + basis[2:] + projected[1:]
+    return projected[:1] + basis[:2] + projected[1:] + basis[2:]
+
+
+def frontier_priority(state, current_price):
+    return (len(state["terms"]) - current_price(tuple(sorted(state["shape"]))),
+            len(state["terms"]), state["sha256"])
+
+
 def run(args):
     if args.output_dir.exists():
         raise ValueError("output directory already exists")
@@ -147,13 +170,16 @@ def run(args):
         frontier.append(initial_product)
     walks = 0
     for level in range(args.rounds):
+        # Reserve walk slots for descendants. Without this, a wide first
+        # frontier consumes max_walks and --rounds never feeds anything back.
+        level_limit = round_walk_limit(walks, args.max_walks, level, args.rounds)
         next_frontier, composed = [], []
+        current_price = price()
+        frontier.sort(key=lambda state: frontier_priority(state, current_price))
+        prepared = []
         for state in frontier:
-            if walks >= args.max_walks:
-                break
             shape, terms = state["shape"], state["terms"]
             choices_prices = {}
-            current_price = price()
             for axis, extent in enumerate(shape):
                 if extent > 1:
                     child = list(shape)
@@ -163,11 +189,19 @@ def run(args):
             rows = proposals(shape, terms, choices_prices)
             rows.sort(key=lambda r: (r["rank"] - current_price(tuple(sorted(r["shape"]))),
                                      r["rank"], r["sha256"]))
-            choices = select(rows, args.projection_beam)
-            choices.extend(basis_proposals(shape, terms, args.basis_beam))
-            for choice in choices:
-                if walks >= args.max_walks:
+            projected = select(rows, args.projection_beam)
+            basis = basis_proposals(shape, terms, args.basis_beam)
+            prepared.append((state, ordered_choices(projected, basis,
+                                                    current_price)))
+        # Round-robin the frontier; otherwise the first descendant can use
+        # every reserved walk while equally promising siblings are ignored.
+        for turn in range(max((len(choices) for _, choices in prepared), default=0)):
+            for state, choices in prepared:
+                if walks >= level_limit:
                     break
+                if turn >= len(choices):
+                    continue
+                choice = choices[turn]
                 seed = admit(choice["raw"], choice.get("kind", "projection-seed"),
                              state["sha256"], {k: choice[k] for k in
                              ("mode", "axis", "coordinate") if k in choice})
@@ -186,12 +220,17 @@ def run(args):
                 walks += 1
                 result = admit(output.read_bytes(), "walk", seed["sha256"],
                                dict(steps=args.steps, nonce=nonce))
+                # A walk may return its exact seed. The basis variant is
+                # still a distinct neighborhood worth feeding to the next
+                # round, rather than silently collapsing the feedback loop.
+                next_frontier.append(result if result is not None else seed)
                 if result is not None:
-                    next_frontier.append(result)
                     product = compose(result)
                     if (product is not None and
                             len(product["terms"]) <= args.max_search_rank):
                         composed.append(product)
+            if walks >= level_limit:
+                break
         frontier = (next_frontier + composed)[:args.frontier_cap]
         if not frontier or walks >= args.max_walks:
             break

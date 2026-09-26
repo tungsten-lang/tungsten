@@ -305,6 +305,7 @@ compiled_specs=(
   spec/compiler/bigint_compare_native_support_spec.w
   spec/compiler/uuid_byte_revisit_autoload_spec.w
   spec/compiler/autoload_walker_fields_spec.w
+  spec/compiler/generic_class_ref_positions_spec.w
   spec/compiler/view_field_var_spec.w
   spec/compiler/zero_arg_cached_dispatch_spec.w
   spec/compiler/regex_capture_storage_spec.w

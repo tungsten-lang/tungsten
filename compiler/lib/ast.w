@@ -614,8 +614,10 @@ in Tungsten:AST
     i += 1
   node
 
-# Compatibility collector for callers that need indexing or child count.
--> ast_children(node)
+# Collect a node's AST children in schema field order. Child lists are
+# flattened one level; with `nested`, lists inside a child list are descended
+# too (see ast_children_nested).
+-> ast_collect_children(node, nested)
   out = []
   if node == nil
     return out
@@ -649,9 +651,39 @@ in Tungsten:AST
           elt = v[j]
           if is_ast_node?(elt)
             out.push(elt)
+          elsif nested && type(elt) == "Array"
+            ast_push_nested_nodes(elt, out)
           j += 1
     i += 1
   out
+
+# Append every AST node in `list`, descending nested lists.
+-> ast_push_nested_nodes(list, out)
+  j = 0
+  while j < list.size()
+    elt = list[j]
+    if is_ast_node?(elt)
+      out.push(elt)
+    elsif type(elt) == "Array"
+      ast_push_nested_nodes(elt, out)
+    j += 1
+  out
+
+# Compatibility collector for callers that need indexing or child count.
+-> ast_children(node)
+  ast_collect_children(node, false)
+
+# ast_children plus the nodes held further down inside a child list. Several
+# `ast` fields nest lists within their list: if.elsif_clauses holds
+# [condition, body] pairs, hash_literal.entries [key, value] pairs,
+# string_interp.parts [tag, expr] pairs, with.bindings [var, collection]
+# pairs. ast_children flattens only the outer list, so a walker built on it
+# never sees a node stored in one of those containers — a generic class
+# named only in an elsif arm, a hash value, or an interpolation was never
+# specialized and resolved to nil at runtime. Walkers that must reach every
+# node (class-reference discovery, call-site rewrites) use this.
+-> ast_children_nested(node)
+  ast_collect_children(node, true)
 
 # Render a slab AST node as an indented tree for `--ast`. Each node prints
 # its kind plus inline `key=value` scalar fields on one line, then recurses

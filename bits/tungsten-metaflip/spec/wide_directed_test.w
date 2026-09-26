@@ -4,6 +4,13 @@ use ../lib/metaflip/wide/seeds
 -> directed_consistent(st,c) (i64[] i64[]) i64
   if c[4]!=ffwd_fingerprint(st,2166136261) || c[5]!=ffwd_fingerprint(st,7809847782465536322)
     return 0
+  i=0 ## i64
+  while i<st[4]
+    slot=st[st[16]+i] ## i64
+    at=st[14]+slot*3*st[1] ## i64
+    if c[c[30]+slot]!=ffwd_term(st,at,st[1],2166136261) || c[c[31]+slot]!=ffwd_term(st,at,st[1],7809847782465536322)
+      return 0
+    i+=1
   count=0 ## i64
   id=0 ## i64
   while id<3*c[1]
@@ -27,6 +34,30 @@ use ../lib/metaflip/wide/seeds
   if count!=c[2]
     return 0
   1
+
+# The fused result equals the legacy hashes through every supported width,
+# including a zero factor after earlier nonzero axes have already been read.
+data=i64[96]
+pair=i64[64]
+width=1 ## i64
+while width<=32
+  zero=0-1 ## i64
+  while zero<3
+    i=0 ## i64
+    while i<3*width
+      data[i]=(1664525*(i+width)+1013904223) & 4294967295
+      i+=1
+    if zero>=0
+      i=0
+      while i<width
+        data[zero*width+i]=0
+        i+=1
+    z=ffwd_term_pair(data,0,width,pair) ## i64
+    if pair[44]!=ffwd_term(data,0,width,2166136261) || pair[45]!=ffwd_term(data,0,width,7809847782465536322)
+      << "FAIL fused directed fingerprint"
+      exit(1)
+    zero+=1
+  width+=1
 
 root=__DIR__+"/../lib/metaflip"
 n=8 ## i64

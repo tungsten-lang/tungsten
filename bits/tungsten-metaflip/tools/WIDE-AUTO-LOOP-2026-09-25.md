@@ -38,6 +38,13 @@ claimed green. The working tree's ignored generated GPU sidecars also make
 its physical-layout check fail; the manifest-only package excludes those
 artifacts without deleting unrelated local files.
 
+Follow-up on 2026-09-26: the directed term-fingerprint cache makes the
+previously timing-out `productive_postbasis` control pass its original
+30-second subprocess limits and full FIFO handoff (r5439→r5422→r5418).
+See `DIRECTED-HASH-CACHE-2026-09-26.md` for matched exact replay and timing.
+This is a focused regression result, not a claim that the entire queue suite
+or record-finding yield has been qualified.
+
 This connects the live packed backend to the **existing bounded native**
 portfolio, including its eligible shared-pair arm. It does not transplant all
 of the richer offline block/Kronecker closure materializer described below.

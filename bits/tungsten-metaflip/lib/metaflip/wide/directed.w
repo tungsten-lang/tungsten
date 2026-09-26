@@ -1,4 +1,4 @@
-# Bounded directed-search experiment for packed squares. Private per-worker
+# Bounded directed search for packed multiword tensors. Private per-worker
 # state: a legal-bucket index and two 63-bit term-order-independent hashes.
 # History is a bounded direct-mapped heuristic, NOT an exact visited set.
 # Hash collisions can reject a valid neighbor; the full tensor gate, never
@@ -9,10 +9,12 @@ use scheme
 # Header: mode,hc,active,history-cap,h1,h2,prev1,prev2,prev-valid,
 # legal,inverse-blocked,history-blocked,cache-misses,cache-hits,
 # rank-rejects,rank-aspirations,no-edge,escapes,history-resets,stalled.
-# Offsets 24..29: active IDs, reverse positions, pair witness, hash1/hash2/used.
+# Offsets 24..31: active IDs, reverse positions, pair witness, history hashes/
+# used, then two term-fingerprint caches indexed by stable live slot.
 # Dirty bucket IDs are kept in header 32..43; length is header[23].
+# Header 44/45 is scratch for the fused fingerprint calculation.
 -> ffwd_words(st, history) (i64[] i64) i64
-  64+9*(st[3]+1)+3*history
+  64+9*(st[3]+1)+3*history+2*st[2]
 
 -> ffwd_term(data, at, stride, salt) (i64[] i64 i64 i64) i64
   axis=0 ## i64
@@ -30,6 +32,44 @@ use scheme
       return 0
     axis+=1
   h
+
+# Preserve both legacy hashes exactly, but load/validate each limb once.
+-> ffwd_term_pair(data, at, stride, c) (i64[] i64 i64 i64[]) i64
+  h1=2166136261 ## i64
+  h2=7809847782465536322 ## i64
+  axis=0 ## i64
+  while axis<3
+    nonzero=0 ## i64
+    i=0 ## i64
+    while i<stride
+      v=data[at+axis*stride+i] ## i64
+      nonzero=nonzero | v
+      h1=((h1 ^ v)*6364136223846793005+1442695040888963407) & 9223372036854775807
+      h2=((h2 ^ v)*6364136223846793005+1442695040888963407) & 9223372036854775807
+      h1=h1 ^ (h1 >> 29)
+      h2=h2 ^ (h2 >> 29)
+      i+=1
+    if nonzero==0
+      c[44]=0
+      c[45]=0
+      return 1
+    axis+=1
+  c[44]=h1
+  c[45]=h2
+  1
+
+# A toggle either inserts one slot, removes one slot, or ignores a zero
+# factor. Only insertion needs a cache write; inactive slots may be stale.
+# This wrapper also handles cancellations against a third live term and
+# rollback insertions, not just the two original proposal slots.
+-> ffwd_toggle(st, data, at, c, h1, h2) (i64[] i64[] i64 i64[] i64 i64) i64
+  free=st[12] ## i64
+  result=ffws_toggle(st,data,at) ## i64
+  if result==1 && st[12]==free-1
+    slot=st[st[16]+st[4]-1] ## i64
+    c[c[30]+slot]=h1
+    c[c[31]+slot]=h2
+  result
 
 -> ffwd_fingerprint(st, salt) (i64[] i64) i64
   h=0 ## i64
@@ -140,6 +180,8 @@ use scheme
   c[27]=c[26]+3*c[1]
   c[28]=c[27]+history
   c[29]=c[28]+history
+  c[30]=c[29]+history
+  c[31]=c[30]+st[2]
   i=0
   while i<3*c[1]
     c[c[25]+i]=0-1
@@ -148,8 +190,15 @@ use scheme
   while i<3*c[1]
     z=ffwd_refresh(st,c,i) ## i64
     i+=1
-  c[4]=ffwd_fingerprint(st,2166136261)
-  c[5]=ffwd_fingerprint(st,7809847782465536322)
+  i=0
+  while i<st[4]
+    slot=st[st[16]+i] ## i64
+    z=ffwd_term_pair(st,st[14]+slot*3*st[1],st[1],c) ## i64
+    c[c[30]+slot]=c[44]
+    c[c[31]+slot]=c[45]
+    c[4]=c[4] ^ c[44]
+    c[5]=c[5] ^ c[45]
+    i+=1
   z=ffwd_remember(c) ## i64
   1
 
@@ -164,8 +213,8 @@ use scheme
   bit=(ffws_rand(st)*st[24+axis]) >> 31 ## i64
   c[23]=0
   z=ffwd_touch(c,st,st[14]+slot*3*stride,stride) ## i64
-  h1=c[4] ^ ffwd_term(st,st[14]+slot*3*stride,stride,2166136261) ## i64
-  h2=c[5] ^ ffwd_term(st,st[14]+slot*3*stride,stride,7809847782465536322) ## i64
+  h1=c[4] ^ c[c[30]+slot] ## i64
+  h2=c[5] ^ c[c[31]+slot] ## i64
   i=0 ## i64
   while i<3*stride
     v=st[st[14]+slot*3*stride+i] ## i64
@@ -179,11 +228,17 @@ use scheme
     i+=1
   z=ffwd_touch(c,scratch,0,stride)
   z=ffwd_touch(c,scratch,3*stride,stride)
+  z=ffwd_term_pair(scratch,0,stride,c)
+  new11=c[44] ## i64
+  new12=c[45] ## i64
+  z=ffwd_term_pair(scratch,3*stride,stride,c)
+  new21=c[44] ## i64
+  new22=c[45] ## i64
   z=ffws_remove(st,slot)
-  z=ffws_toggle(st,scratch,0)
-  z=ffws_toggle(st,scratch,3*stride)
-  c[4]=h1 ^ ffwd_term(scratch,0,stride,2166136261) ^ ffwd_term(scratch,3*stride,stride,2166136261)
-  c[5]=h2 ^ ffwd_term(scratch,0,stride,7809847782465536322) ^ ffwd_term(scratch,3*stride,stride,7809847782465536322)
+  z=ffwd_toggle(st,scratch,0,c,new11,new12)
+  z=ffwd_toggle(st,scratch,3*stride,c,new21,new22)
+  c[4]=h1 ^ new11 ^ new21
+  c[5]=h2 ^ new12 ^ new22
   c[8]=0
   c[17]+=1
   z=ffwd_remember(c)
@@ -238,19 +293,27 @@ use scheme
     scratch[9*stride+left*stride+i]=scratch[left*stride+i] ^ scratch[3*stride+left*stride+i]
     i+=1
   c[23]=0
-  h1=c[4] ## i64
-  h2=c[5] ## i64
+  old11=c[c[30]+first] ## i64
+  old12=c[c[31]+first] ## i64
+  old21=c[c[30]+second] ## i64
+  old22=c[c[31]+second] ## i64
   i=0
   while i<4
     z=ffwd_touch(c,scratch,i*3*stride,stride) ## i64
-    h1=h1 ^ ffwd_term(scratch,i*3*stride,stride,2166136261)
-    h2=h2 ^ ffwd_term(scratch,i*3*stride,stride,7809847782465536322)
     i+=1
+  z=ffwd_term_pair(scratch,6*stride,stride,c) ## i64
+  new11=c[44] ## i64
+  new12=c[45] ## i64
+  z=ffwd_term_pair(scratch,9*stride,stride,c)
+  new21=c[44] ## i64
+  new22=c[45] ## i64
+  h1=c[4] ^ old11 ^ old21 ^ new11 ^ new21 ## i64
+  h2=c[5] ^ old12 ^ old22 ^ new12 ^ new22 ## i64
   old_rank=st[4] ## i64
   z=ffws_remove(st,first) ## i64
   z=ffws_remove(st,second)
-  z=ffws_toggle(st,scratch,6*stride)
-  z=ffws_toggle(st,scratch,9*stride)
+  z=ffwd_toggle(st,scratch,6*stride,c,new11,new12)
+  z=ffwd_toggle(st,scratch,9*stride,c,new21,new22)
   accept=0 ## i64
   if st[4]<=old_rank
     accept=1
@@ -283,10 +346,10 @@ use scheme
     z=ffwd_remember(c)
     z=ffwd_refresh_dirty(st,c)
     return 1
-  z=ffws_toggle(st,scratch,6*stride)
-  z=ffws_toggle(st,scratch,9*stride)
-  z=ffws_toggle(st,scratch,0)
-  z=ffws_toggle(st,scratch,3*stride)
+  z=ffwd_toggle(st,scratch,6*stride,c,new11,new12)
+  z=ffwd_toggle(st,scratch,9*stride,c,new21,new22)
+  z=ffwd_toggle(st,scratch,0,c,old11,old12)
+  z=ffwd_toggle(st,scratch,3*stride,c,old21,old22)
   z=ffwd_refresh_dirty(st,c)
   st[9]+=1
   c[19]+=1

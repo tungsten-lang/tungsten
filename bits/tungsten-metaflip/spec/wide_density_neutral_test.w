@@ -16,7 +16,10 @@ use ../lib/metaflip/wide/seeds
   rank=ffws_export(source,out,0) ## i64
   st=i64[ffws_words(n,rank+64)]
   before=i64[st.size()]
-  c=i64[ffwd_words(source,256)]
+  # Size the context for the actual trial, not the source's older capacity.
+  if ffws_init(st,n,rank+64,out,rank,777)!=1
+    return 0
+  c=i64[ffwd_words(st,256)]
   saved=i64[c.size()]
   scratch=i64[12*stride]
   attempt=0 ## i64

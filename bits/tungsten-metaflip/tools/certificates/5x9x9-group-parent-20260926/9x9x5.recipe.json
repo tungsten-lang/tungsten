@@ -1,0 +1,350 @@
+{
+  "schema": 1,
+  "field": "GF(2)",
+  "record_claim": false,
+  "parent": {
+    "path": "inputs/3x3x5-8d77e11626b09930411147a75615e2f20db3da5e3fc844f476e3b328c074f2e3.txt",
+    "shape": [
+      3,
+      3,
+      5
+    ],
+    "sha256": "8d77e11626b09930411147a75615e2f20db3da5e3fc844f476e3b328c074f2e3"
+  },
+  "scale": [
+    3,
+    3,
+    1
+  ],
+  "groups": [
+    {
+      "axis": 0,
+      "indices": [
+        0,
+        1
+      ],
+      "leaf": {
+        "path": "leaves/3x3x2-fcc1e0b4c0bf76e6eec021ccce4a0f05295162c140222040d6c59aacc32e85c0.txt",
+        "shape": [
+          3,
+          3,
+          2
+        ],
+        "sha256": "fcc1e0b4c0bf76e6eec021ccce4a0f05295162c140222040d6c59aacc32e85c0"
+      }
+    },
+    {
+      "axis": 0,
+      "indices": [
+        2,
+        3
+      ],
+      "leaf": {
+        "path": "leaves/3x3x2-fcc1e0b4c0bf76e6eec021ccce4a0f05295162c140222040d6c59aacc32e85c0.txt",
+        "shape": [
+          3,
+          3,
+          2
+        ],
+        "sha256": "fcc1e0b4c0bf76e6eec021ccce4a0f05295162c140222040d6c59aacc32e85c0"
+      }
+    },
+    {
+      "axis": 0,
+      "indices": [
+        4,
+        5,
+        6
+      ],
+      "leaf": {
+        "path": "leaves/3x3x3-f39be3589e70bde754fb3a5db6c0eda48f0d8e5eb968ce8caa368b23a2131745.txt",
+        "shape": [
+          3,
+          3,
+          3
+        ],
+        "sha256": "f39be3589e70bde754fb3a5db6c0eda48f0d8e5eb968ce8caa368b23a2131745"
+      }
+    },
+    {
+      "axis": 0,
+      "indices": [
+        7,
+        8
+      ],
+      "leaf": {
+        "path": "leaves/3x3x2-fcc1e0b4c0bf76e6eec021ccce4a0f05295162c140222040d6c59aacc32e85c0.txt",
+        "shape": [
+          3,
+          3,
+          2
+        ],
+        "sha256": "fcc1e0b4c0bf76e6eec021ccce4a0f05295162c140222040d6c59aacc32e85c0"
+      }
+    },
+    {
+      "axis": 0,
+      "indices": [
+        9,
+        10
+      ],
+      "leaf": {
+        "path": "leaves/3x3x2-fcc1e0b4c0bf76e6eec021ccce4a0f05295162c140222040d6c59aacc32e85c0.txt",
+        "shape": [
+          3,
+          3,
+          2
+        ],
+        "sha256": "fcc1e0b4c0bf76e6eec021ccce4a0f05295162c140222040d6c59aacc32e85c0"
+      }
+    },
+    {
+      "axis": 0,
+      "indices": [
+        11,
+        12
+      ],
+      "leaf": {
+        "path": "leaves/3x3x2-fcc1e0b4c0bf76e6eec021ccce4a0f05295162c140222040d6c59aacc32e85c0.txt",
+        "shape": [
+          3,
+          3,
+          2
+        ],
+        "sha256": "fcc1e0b4c0bf76e6eec021ccce4a0f05295162c140222040d6c59aacc32e85c0"
+      }
+    },
+    {
+      "axis": 0,
+      "indices": [
+        13
+      ],
+      "leaf": {
+        "path": "leaves/3x3x1-d7c766ef216d80a4f016f4c9c045bfb2602744e012e1faf675d8cf24cf829048.txt",
+        "shape": [
+          3,
+          3,
+          1
+        ],
+        "sha256": "d7c766ef216d80a4f016f4c9c045bfb2602744e012e1faf675d8cf24cf829048"
+      }
+    },
+    {
+      "axis": 0,
+      "indices": [
+        14,
+        15
+      ],
+      "leaf": {
+        "path": "leaves/3x3x2-fcc1e0b4c0bf76e6eec021ccce4a0f05295162c140222040d6c59aacc32e85c0.txt",
+        "shape": [
+          3,
+          3,
+          2
+        ],
+        "sha256": "fcc1e0b4c0bf76e6eec021ccce4a0f05295162c140222040d6c59aacc32e85c0"
+      }
+    },
+    {
+      "axis": 0,
+      "indices": [
+        16,
+        17,
+        18
+      ],
+      "leaf": {
+        "path": "leaves/3x3x3-f39be3589e70bde754fb3a5db6c0eda48f0d8e5eb968ce8caa368b23a2131745.txt",
+        "shape": [
+          3,
+          3,
+          3
+        ],
+        "sha256": "f39be3589e70bde754fb3a5db6c0eda48f0d8e5eb968ce8caa368b23a2131745"
+      }
+    },
+    {
+      "axis": 0,
+      "indices": [
+        19,
+        20
+      ],
+      "leaf": {
+        "path": "leaves/3x3x2-fcc1e0b4c0bf76e6eec021ccce4a0f05295162c140222040d6c59aacc32e85c0.txt",
+        "shape": [
+          3,
+          3,
+          2
+        ],
+        "sha256": "fcc1e0b4c0bf76e6eec021ccce4a0f05295162c140222040d6c59aacc32e85c0"
+      }
+    },
+    {
+      "axis": 0,
+      "indices": [
+        21,
+        22
+      ],
+      "leaf": {
+        "path": "leaves/3x3x2-fcc1e0b4c0bf76e6eec021ccce4a0f05295162c140222040d6c59aacc32e85c0.txt",
+        "shape": [
+          3,
+          3,
+          2
+        ],
+        "sha256": "fcc1e0b4c0bf76e6eec021ccce4a0f05295162c140222040d6c59aacc32e85c0"
+      }
+    },
+    {
+      "axis": 0,
+      "indices": [
+        23
+      ],
+      "leaf": {
+        "path": "leaves/3x3x1-d7c766ef216d80a4f016f4c9c045bfb2602744e012e1faf675d8cf24cf829048.txt",
+        "shape": [
+          3,
+          3,
+          1
+        ],
+        "sha256": "d7c766ef216d80a4f016f4c9c045bfb2602744e012e1faf675d8cf24cf829048"
+      }
+    },
+    {
+      "axis": 0,
+      "indices": [
+        24,
+        25
+      ],
+      "leaf": {
+        "path": "leaves/3x3x2-fcc1e0b4c0bf76e6eec021ccce4a0f05295162c140222040d6c59aacc32e85c0.txt",
+        "shape": [
+          3,
+          3,
+          2
+        ],
+        "sha256": "fcc1e0b4c0bf76e6eec021ccce4a0f05295162c140222040d6c59aacc32e85c0"
+      }
+    },
+    {
+      "axis": 0,
+      "indices": [
+        26,
+        27,
+        28
+      ],
+      "leaf": {
+        "path": "leaves/3x3x3-f39be3589e70bde754fb3a5db6c0eda48f0d8e5eb968ce8caa368b23a2131745.txt",
+        "shape": [
+          3,
+          3,
+          3
+        ],
+        "sha256": "f39be3589e70bde754fb3a5db6c0eda48f0d8e5eb968ce8caa368b23a2131745"
+      }
+    },
+    {
+      "axis": 0,
+      "indices": [
+        29,
+        30
+      ],
+      "leaf": {
+        "path": "leaves/3x3x2-fcc1e0b4c0bf76e6eec021ccce4a0f05295162c140222040d6c59aacc32e85c0.txt",
+        "shape": [
+          3,
+          3,
+          2
+        ],
+        "sha256": "fcc1e0b4c0bf76e6eec021ccce4a0f05295162c140222040d6c59aacc32e85c0"
+      }
+    },
+    {
+      "axis": 0,
+      "indices": [
+        31
+      ],
+      "leaf": {
+        "path": "leaves/3x3x1-d7c766ef216d80a4f016f4c9c045bfb2602744e012e1faf675d8cf24cf829048.txt",
+        "shape": [
+          3,
+          3,
+          1
+        ],
+        "sha256": "d7c766ef216d80a4f016f4c9c045bfb2602744e012e1faf675d8cf24cf829048"
+      }
+    },
+    {
+      "axis": 0,
+      "indices": [
+        32,
+        33
+      ],
+      "leaf": {
+        "path": "leaves/3x3x2-fcc1e0b4c0bf76e6eec021ccce4a0f05295162c140222040d6c59aacc32e85c0.txt",
+        "shape": [
+          3,
+          3,
+          2
+        ],
+        "sha256": "fcc1e0b4c0bf76e6eec021ccce4a0f05295162c140222040d6c59aacc32e85c0"
+      }
+    },
+    {
+      "axis": 0,
+      "indices": [
+        34
+      ],
+      "leaf": {
+        "path": "leaves/3x3x1-d7c766ef216d80a4f016f4c9c045bfb2602744e012e1faf675d8cf24cf829048.txt",
+        "shape": [
+          3,
+          3,
+          1
+        ],
+        "sha256": "d7c766ef216d80a4f016f4c9c045bfb2602744e012e1faf675d8cf24cf829048"
+      }
+    },
+    {
+      "axis": 0,
+      "indices": [
+        35,
+        36
+      ],
+      "leaf": {
+        "path": "leaves/3x3x2-fcc1e0b4c0bf76e6eec021ccce4a0f05295162c140222040d6c59aacc32e85c0.txt",
+        "shape": [
+          3,
+          3,
+          2
+        ],
+        "sha256": "fcc1e0b4c0bf76e6eec021ccce4a0f05295162c140222040d6c59aacc32e85c0"
+      }
+    },
+    {
+      "axis": 0,
+      "indices": [
+        37
+      ],
+      "leaf": {
+        "path": "leaves/3x3x1-d7c766ef216d80a4f016f4c9c045bfb2602744e012e1faf675d8cf24cf829048.txt",
+        "shape": [
+          3,
+          3,
+          1
+        ],
+        "sha256": "d7c766ef216d80a4f016f4c9c045bfb2602744e012e1faf675d8cf24cf829048"
+      }
+    }
+  ],
+  "result": {
+    "path": "candidates/9x9x5-b6942a61f4c569e74bd793130b29a64356bd8d0d4d6782a871517aa1507ed412.txt",
+    "shape": [
+      9,
+      9,
+      5
+    ],
+    "sha256": "b6942a61f4c569e74bd793130b29a64356bd8d0d4d6782a871517aa1507ed412"
+  },
+  "formula_rank": 294,
+  "exact_rank": 294
+}

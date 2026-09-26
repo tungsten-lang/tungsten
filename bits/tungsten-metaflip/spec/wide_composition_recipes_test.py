@@ -118,6 +118,19 @@ class WideCompositionRecipesTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             replay_recipe(wrong)
 
+    def test_checked_group_parent_is_automatically_usable(self):
+        library = CompositionLibrary.from_repository()
+        terms, recipe = library.materialize((5, 9, 9))
+        self.assertEqual(len(terms), 294)
+        self.assertEqual(recipe["kind"], "seed")
+        self.assertIn("5x9x9-group-parent-20260926", recipe["source"])
+        loop.top.exact((5, 9, 9), terms)
+        choice = cheaper_parent(library, [dict(shape=(5, 9, 9), rank=301)],
+                                lambda _: 293, 301)
+        self.assertEqual(choice["rank"], 294)
+        self.assertIsNone(cheaper_parent(library, [dict(shape=(5, 9, 9), rank=301)],
+                                       lambda _: 293, 293))
+
     def test_multi_parent_retention_and_full_recipe_replay(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

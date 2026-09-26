@@ -319,3 +319,49 @@ complete tensors in Python and Ruby. No new closure-composition state was
 retained in this campaign; its rank gains do not establish a matched yield
 advantage for the new materializer. Pinned external metadata remains
 comparison-only, and no world-record claim is made.
+
+## Larger-group and leaf-presentation controls (2026-09-26)
+
+A finite screen tested 553 distinct full-term-set/axis contexts from
+packaged and checked-in bodies plus one historical private parent. Scale-three
+targets had dimensions at most 32 and parents at most 3000 terms. Pure-axis
+bucket DP used actual available leaf costs for groups of size 1..32; a price
+still was not a tensor witness. Of these contexts, 172 beat the raw pair
+formula, but none of those estimates beat the current local price.
+
+Twelve unique shape/axis leads were materialized and checked independently in
+Python and Ruby. After exact matrix cleanup, ten beat their pair controls,
+one tied, and one was worse. The last case is important: the lower group
+formula at 3×9×12 became rank 260, whereas the pair control became rank 259.
+Raw formula minimization cannot substitute for full construction/cleanup.
+All twelve remained at or above their local prices.
+
+The existing independent Ruby group/grid packer also completed all twelve
+contexts within its stated model (leaf dimensions at most 32, 2×2 elementary
+grids, 24-vertex exact components, 50K state/candidate limits). No selected
+plan used a grid or lowered the formula. Equal-formula partitions sometimes
+gave different post-substitution ranks; the packer's formula optimum is not
+an optimum of the final cleaned tensor rank.
+
+Five matched 100M-move controls used nonce 254100 at 6×6×8 and 254101 at
+9×9×5. Group, pair and available-incumbent starts at 6×6×8 ended at ranks
+203, 210 and 203. At 9×9×5, the group start tied at 294 and the pair start
+dropped from 297 to 294; the local comparison was 293. A separate beam kept
+16 distinct endpoints per shape while varying at most eight exact leaf
+presentations per group. Its 618 prefix expansions and 32 fully verified
+endpoints found no rank below 203 or 294. These are finite negatives, not
+exhaustion or optimality claims, and do not justify a new live strategy arm.
+
+The useful retained output is an **available-body** improvement: the general
+checked library previously materialized 5×9×9 at rank 301; the group parent
+now supplies rank 294. Its compact, self-contained construction and pinned
+static leaf replay are under `certificates/5x9x9-group-parent-20260926/`.
+The existing cold-loop materializer discovers it automatically and may use it
+before a weaker projected walk seed. It does not lower the local price 293,
+and no world-record or general yield advantage is claimed.
+
+Private completed reports remain under `/private/tmp/metaflip-group-*20260926*`,
+`metaflip-mixed-group-control-20260926/` and `metaflip-leaf-beam-control-20260926/`.
+Their manifests record full ranks, source/result identities, recipes and
+finite budgets. No bulk search archive, native runtime change, new strategy
+flag or GPU campaign was added to the repository.

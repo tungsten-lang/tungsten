@@ -1,0 +1,88 @@
+{
+  "schema": 1,
+  "field": "GF(2)",
+  "record_claim": false,
+  "source": "bits/tungsten-metaflip/tools/certificates/20x22x25-direct-20260925/20x22x25-r6073-a18d7b8c.mfw.gz.b64",
+  "catalog_sha256": "1a43aedc346bae47458dafe053fcff6ec78934ffc7124b8c046960b9891a2719",
+  "steps_per_walk": 50000000,
+  "rows": [
+    {
+      "kind": "source",
+      "parent": null,
+      "details": {},
+      "shape": [
+        20,
+        22,
+        25
+      ],
+      "rank": 6073,
+      "sha256": "a18d7b8c7c4fcffc3028e12eb363e05bf356a28768eb2a9b1af20866227535ce",
+      "old_price": 6073,
+      "external_best_rank": 6062,
+      "external_best_source": "fmm-lille",
+      "external_gap": 11,
+      "file": "20x22x25-r6073-a18d7b8c.mfw.gz.b64"
+    },
+    {
+      "kind": "walk",
+      "parent": "a18d7b8c7c4fcffc3028e12eb363e05bf356a28768eb2a9b1af20866227535ce",
+      "details": {
+        "steps": 100000000,
+        "nonce": 251701
+      },
+      "shape": [
+        20,
+        22,
+        25
+      ],
+      "rank": 6073,
+      "sha256": "c1ff324ef6a98df6ef69027cf772808ed6f1cdc6ea75d25b245b6a88fc253504",
+      "old_price": 6073,
+      "external_best_rank": 6062,
+      "external_best_source": "fmm-lille",
+      "external_gap": 11,
+      "file": "20x22x25-r6073-c1ff324e.mfw.gz.b64"
+    },
+    {
+      "kind": "projection-seed",
+      "parent": "c1ff324ef6a98df6ef69027cf772808ed6f1cdc6ea75d25b245b6a88fc253504",
+      "details": {
+        "mode": 12,
+        "axis": 1,
+        "coordinate": 16
+      },
+      "shape": [
+        20,
+        21,
+        25
+      ],
+      "rank": 5874,
+      "sha256": "6fa36309beecc476cf7424f822cfbdc3e89a97a2630bb38abd861101e0619338",
+      "old_price": 5830,
+      "external_best_rank": 5789,
+      "external_best_source": "fmm-lille",
+      "external_gap": 85,
+      "file": "20x21x25-r5874-6fa36309.mfw.gz.b64"
+    },
+    {
+      "kind": "walk",
+      "parent": "6fa36309beecc476cf7424f822cfbdc3e89a97a2630bb38abd861101e0619338",
+      "details": {
+        "steps": 50000000,
+        "nonce": 251900
+      },
+      "shape": [
+        20,
+        21,
+        25
+      ],
+      "rank": 5829,
+      "sha256": "cc17e69d83fa8caaf8c01f0d07c9224e09b4dc888671a04aefb9619e0d6cd748",
+      "old_price": 5830,
+      "external_best_rank": 5789,
+      "external_best_source": "fmm-lille",
+      "external_gap": 40,
+      "file": "20x21x25-r5829-cc17e69d.mfw.gz.b64"
+    }
+  ]
+}

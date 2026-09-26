@@ -64,7 +64,9 @@ def verify_bundle(bundle, root=ROOT):
                 check(shape == parent_shape and top.blob(shape, expected) == raw,
                       "basis lineage mismatch")
             elif kind.startswith("projection"):
-                basis = two_pass(parent_terms, parent_shape, details["mode"])
+                mode = details["mode"]
+                basis = (parent_terms if mode is None else
+                         two_pass(parent_terms, parent_shape, mode))
                 child_shape, projected = top.project(parent_shape, basis,
                                                      details["axis"], details["coordinate"])
                 width = max(child_shape[0] * child_shape[1],

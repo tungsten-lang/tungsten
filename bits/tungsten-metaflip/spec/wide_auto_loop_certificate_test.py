@@ -38,6 +38,13 @@ class WideAutoLoopCertificateTest(unittest.TestCase):
 
             source = add("source", shape, terms)
             (root / "seed.mfw").write_bytes(top.blob(shape, terms))
+            projected_shape, projected_terms = top.project(shape, terms, 0, 1)
+            width = max(projected_shape[0] * projected_shape[1],
+                        projected_shape[1] * projected_shape[2],
+                        projected_shape[0] * projected_shape[2])
+            projected_terms, _ = top.compress_shared(projected_terms, max_bits=width)
+            projection = add("projection-improvement", projected_shape, projected_terms,
+                             source["sha256"], {"mode": None, "axis": 0, "coordinate": 1})
             strassen = top.parse_terms(loop.STRASSEN.read_bytes(), 7)
             product = top.kronecker(shape, terms, shape, strassen)
             child = add("strassen-product", (4, 4, 4), product,
@@ -51,13 +58,18 @@ class WideAutoLoopCertificateTest(unittest.TestCase):
                        source["sha256"], {"axis": 0, "pairs": pairs,
                                              "raw_rank": raw_rank})
             report = dict(schema=1, field="GF(2)", record_claim=False,
-                          source="seed.mfw", rows=[source, child, pair])
+                          source="seed.mfw", rows=[source, projection, child, pair])
             (bundle / "manifest.json").write_text(json.dumps(report))
             result = verify_bundle(bundle, root=root)
-            self.assertEqual(result["tensors"], 3)
+            self.assertEqual(result["tensors"], 4)
             report["rows"][-1]["details"]["pairs"] += 1
             (bundle / "manifest.json").write_text(json.dumps(report))
             with self.assertRaisesRegex(ValueError, "shared-pair lineage mismatch"):
+                verify_bundle(bundle, root=root)
+            report["rows"][-1]["details"]["pairs"] -= 1
+            report["rows"][1]["details"]["axis"] = 1
+            (bundle / "manifest.json").write_text(json.dumps(report))
+            with self.assertRaisesRegex(ValueError, "projection lineage mismatch"):
                 verify_bundle(bundle, root=root)
 
 

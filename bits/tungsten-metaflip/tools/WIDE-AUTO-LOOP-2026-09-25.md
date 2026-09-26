@@ -211,3 +211,57 @@ A completed two-round, six-walk follow-up from r4497 found no new local price.
 Its 16×23×20 projection walked from r4335 to r4310, still above the exact
 local price 4282, and the tested parent/basis continuations tied. This records
 the finite negative budget rather than an exhaustion or optimality claim.
+
+An all-axis follow-up from 16×17×19/r3045 tested five 50M walks in one
+round (three child shapes, one basis context, and the source itself). The
+15×17×19 projection reached r2963 with nonce 251801, one below the previous
+checked price. Its three-state exact lineage is retained in
+`certificates/15x17x19-r2963-all-axes-20260925/`. The other children reached
+r2928 at 16×17×18 and r2843 at 16×16×19, both above their local prices;
+the parent/basis walks tied. The live Lille comparison for 15×17×19 remained
+2934, so the gain is local, not a record claim.
+
+Certificate replay now handles a plain coordinate deletion (`mode=null`) as
+well as the two-pass basis modes. A focused four-tensor regression checks
+plain projection, Strassen and shared-pair composition; wrong-axis projection
+metadata and altered pair counts are rejected. This fixes a proof-replay gap
+for valid projections that the candidate generator already emits.
+
+## Rank-tied parent control
+
+The 20×22×25/r6073 witness (`a18d7b8c…`) and its independently checked
+100M-step, nonce-251701 continuation (`c1ff324e…`) have equal rank but
+different complete term sets. The same 13-context basis/projection family
+(unmodified parent plus modes 6..17, all coordinate deletions) produced:
+
+| Child shape | Original parent best | Tied parent best |
+| --- | ---: | ---: |
+| 20×21×25 | 5876 | 5874 |
+| 20×22×24 | 5851 | 5855 |
+| 19×22×25 | 5982 | 5981 |
+
+The best 20×21×25 child from each parent then received a 50M-step walk with
+the same nonce 251900: the original-parent branch reached r5830 and the
+alternative branch reached **r5829**. Every source, child and result was
+independently reconstructed in Python and Ruby. The winning four-state
+lineage is retained in `certificates/20x21x25-rank-tie-feedback-20260925/`;
+the other branch is comparison evidence, not another record claim.
+
+This is a local price gain of 46 from r5875, still 40 above the live Lille
+comparison 5789 checked on 2026-09-25. The control demonstrates concrete
+projection-and-walk utility of one same-rank representation; it does not
+establish a general yield advantage, optimality, or tensor-rank lower bound.
+Density was recorded but did not select or reject any walk transition.
+
+## Materialized composition-parent control
+
+The rank-only closure planner can price a parent without supplying its tensor
+body. A separate control materialized block/Kronecker plans from all 183
+packaged GF(2) schemes using the existing exact `bud_products.rb` library.
+Its 16×16×19 parent had rank 2787, below the r2892 projection seed above
+but still seven above the current local price 2780. A 50M-move native walk
+with nonce 252200 returned that identical tensor; both input and output were
+independently checked in Python and Ruby. The other three materialized
+parents did not improve their local prices. This finite negative control
+leaves a real integration gap: cheaper closure recipes are not automatically
+materialized as parents by the offline loop, and pricing alone is not admission.

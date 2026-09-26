@@ -26,6 +26,7 @@ import replay_axis_mask_cascade as axis_mask
 from screen_two_pass_basis_children import two_pass
 from wide_pair_composition import compose_pairs
 from wide_pair_native_test import control as multiword_pair_control
+from wide_closure_test import replay_native_recipe
 
 
 def count(path):
@@ -320,22 +321,24 @@ def productive_walk_feedback(binary):
                 fields=read_record(q,'results',ticket).decode().split()
                 rows.append((mode,int(fields[6]),int(fields[7]),int(fields[10])))
         assert (3129,974,968,1000000) in rows,rows
-        assert (3130,968,963,10000000) in rows,rows
+        # Closure tickets precede walk tickets. The expanded deterministic
+        # queue therefore uses a different nonce than the old walk-only path.
+        assert (3130,968,965,10000000) in rows,rows
         child=next(read_record(q,'results',ticket).decode().split()[2]
                    for ticket in range(1,count(q/'consumed')+1)
                    if int(read_record(q,'tasks',ticket).decode().split()[2])==3130
-                   and int(read_record(q,'results',ticket).decode().split()[7])==963)
+                   and int(read_record(q,'results',ticket).decode().split()[7])==965)
         deep_ticket=int(read_record(q/'index'/child,'walk-deep',1))
         while count(q/'consumed')<deep_ticket:
             run('--drain',root,4)
         deep=read_record(q,'results',deep_ticket).decode().split()
-        assert int(deep[6])==963 and int(deep[7])==962 and int(deep[10])==30000000,deep
+        assert int(deep[6])==965 and int(deep[7])==963 and int(deep[10])==30000000,deep
         deep_shape,deep_terms=read_blob((root/'composition/objects'/f'{deep[2]}.tensor').read_bytes())
         assert deep_shape==(7,16,13) and len(deep_terms)==int(deep[7])
         exact(deep_shape,deep_terms)
         checked=audit(root)
         assert checked['walk']>=1 and checked['walk_continue']>=1 and checked['walk_deep']>=1
-    print('PASS automatic wide walk: 7x16x13 r974 -> r968 -> r963 -> r962')
+    print('PASS automatic wide walk: 7x16x13 r974 -> r968 -> r965 -> r963')
 
 
 def productive_pair_feedback(binary):
@@ -420,7 +423,7 @@ def audit(root, progress=None):
                                             mask=0,mask_first=0,mask_last=0,
                                             walk=0,walk_continue=0,walk_deep=0,
                                             compose_first=0,compose_middle=0,compose_last=0,
-                                            neutral=0,limited=0)
+                                            closure=0,neutral=0,limited=0)
     @lru_cache(maxsize=64)
     def load(h):
         raw=(objects/f'{h}.tensor').read_bytes(); assert sha256(raw).hexdigest()==h
@@ -442,6 +445,7 @@ def audit(root, progress=None):
         elif mode==3132: kind,ordinal='compose-middle',1
         elif mode==3133: kind,ordinal='compose-last',1
         elif mode==3134: kind,ordinal='walk-deep',1
+        elif mode==3136: kind,ordinal='closure',1
         elif mode>=3090: kind,ordinal='postbasis',mode-3089
         else: kind,ordinal='project',mode-17
         assert read_record(q/'index'/h,kind,ordinal)==f'{ticket}\n'.encode()
@@ -468,6 +472,14 @@ def audit(root, progress=None):
             dims=composed[0]
             width=max(dims[0]*dims[1],dims[1]*dims[2],dims[0]*dims[2])
             expected,_=compress_shared(composed[1],max_bits=width)
+        elif mode==3136:
+            replay = replay_native_recipe(root,h)
+            if replay is None:
+                assert fields[2]=='-' and proposed==before and admitted==work==0 and status==1
+                counts['closure']+=1
+                continue
+            dims,expected=replay
+            assert dims==shape and len(expected)<before and work==len(expected)
         elif mode>=3129:
             assert min(shape)>=2 and max(shape)<=32 and before<=8000
             assert status!=1 or work==({3129:1000000,3130:10000000,3134:30000000}[mode])

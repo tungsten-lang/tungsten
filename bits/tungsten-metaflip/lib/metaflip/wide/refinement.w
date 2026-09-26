@@ -44,10 +44,11 @@ use ../composition/worker
 + MetaflipPackedRefinement
   ro :failures, :seed_uses, :last_identity
 
-  -> new(root, executable, state_root)
+  -> new(root, executable, state_root, runtime = "")
     @root = root
     @executable = executable
     @state_root = state_root
+    @runtime = runtime
     @thread = nil
     @next_poll = 0
     @next_read = 0
@@ -133,7 +134,7 @@ use ../composition/worker
       @enabled = 0
       return 0
     if @thread == nil && (@intake_submitted > @intake_completed || @transform_submitted > @transform_completed)
-      command = "exec nice -n 10 " + ffls_shell_quote(@executable) + " --compose-batch " + ffls_shell_quote(@root) + " 4 > " + ffls_shell_quote(@root + "/worker.log") + " 2>&1"
+      command = "exec nice -n 10 " + ffls_shell_quote(@executable) + " --compose-batch " + ffls_shell_quote(@root) + " 4 " + ffls_shell_quote(@runtime) + " > " + ffls_shell_quote(@root + "/worker.log") + " 2>&1"
       @thread = Thread.new ->
         system(command)
     1

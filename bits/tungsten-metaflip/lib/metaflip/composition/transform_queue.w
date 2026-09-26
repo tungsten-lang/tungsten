@@ -29,7 +29,7 @@ use wide_pairs
   if fields.size() != 3 || fields[0] != "MFT_TASK1" || ffrf_hash_valid(fields[1]) != 1
     return 0-1
   mode = ffpk_decimal(fields[2]) ## i64
-  if mode < 0 || mode >= 3136 || raw != "MFT_TASK1 " + fields[1] + " " + mode.to_s() + "\n"
+  if mode < 0 || mode >= 3137 || raw != "MFT_TASK1 " + fields[1] + " " + mode.to_s() + "\n"
     return 0-1
   mode
 
@@ -38,6 +38,8 @@ use wide_pairs
     return "basis"
   if mode == 3135
     return "packed-intake"
+  if mode == 3136
+    return "closure"
   if mode == 3126
     return "mask"
   if mode == 3127
@@ -104,7 +106,7 @@ use wide_pairs
   if File.exists?(root + "/stop")
     return 0-1
   queue = root + "/composition/transforms/"
-  if ffrf_hash_valid(identity) != 1 || mode < 0 || mode >= 3136
+  if ffrf_hash_valid(identity) != 1 || mode < 0 || mode >= 3137
     return 0
   names = ["tasks-pages", "results-pages", "index"]
   i = 0 ## i64
@@ -232,6 +234,9 @@ use wide_pairs
     if best_rank < 1 || best_rank > 16384 || best != best_rank.to_s() + " " + parts[1] + "\n"
       return 0
   if ffxt_walkable(n, m, p, rank) == 1 && best == rank.to_s() + " " + fields[2] + "\n"
+    offered = ffxt_offer(root, fields[2], 3136)
+    if offered != 1
+      return offered
     offered = ffxt_offer(root, fields[2], 3129)
     if offered != 1
       return offered
@@ -492,7 +497,7 @@ use wide_pairs
     mask_axis = 0
   if mode == 3128
     mask_axis = 2
-  if before < 1 || (mode >= 18 && mode < 3090 && mode >= 18+ffxt_coordinates(info[0], info[1], info[2])) || (mode >= 3126 && (info[mask_axis] < 2 || info[mask_axis] > 32))
+  if before < 1 || (mode >= 18 && mode < 3090 && mode >= 18+ffxt_coordinates(info[0], info[1], info[2])) || (mode >= 3126 && mode <= 3128 && (info[mask_axis] < 2 || info[mask_axis] > 32))
     return 0
   checked = ffpk_exact(source, 3*32*16384, before, info[0], info[1], info[2], parity, 32768, 20000000) ## i64
   if mode == 3135 && checked == 0-1
@@ -523,7 +528,26 @@ use wide_pairs
     record = "MFT_RESULT1 " + Crypto:SHA256.hexdigest(raw) + " " + f[2] + " " + info[0].to_s() + " " + info[1].to_s() + " " + info[2].to_s() + " " + before.to_s() + " " + after.to_s() + " " + after.to_s() + " " + f[7] + " " + f[8] + "\n"
     return ffbq_put(queue,"results",sequence,record)
   rank = 0 ## i64
-  if mode >= 3131 && mode <= 3133
+  if mode == 3136
+    plan = ffcl_plan(root,identity,info[0],info[1],info[2],before)
+    rank = ffcl_replay(root,identity,plan,out,meta)
+    if rank == 0 || rank == 0-2
+      status = 1 ## i64
+      if rank == 0-2
+        status = 3
+      record = "MFT_RESULT1 " + Crypto:SHA256.hexdigest(raw) + " - " + info[0].to_s() + " " + info[1].to_s() + " " + info[2].to_s() + " " + before.to_s() + " " + before.to_s() + " 0 " + status.to_s() + " 0\n"
+      return ffbq_put(queue,"results",sequence,record)
+    if rank < 1 || rank >= before || meta[0] != info[0] || meta[1] != info[1] || meta[2] != info[2]
+      return 0
+    # Bounded exact cleanup can expose cancellations between block/product
+    # terms; the complete result gate below is still mandatory.
+    words = ffwm_scratch_words(rank,ffpk_stride(meta[0],meta[1],meta[2])) ## i64
+    scratch = i64[words]
+    stats = i64[6]
+    rank = ffwm_reduce(out,out.size(),rank,meta[0],meta[1],meta[2],scratch,words,20000000,stats,6)
+    if stats[2] != 0
+      meta[4] = 1
+  elsif mode >= 3131 && mode <= 3133
     rank = pair_compose(source,before,info[0],info[1],info[2],mode-3131,out,meta)
     if rank > 0
       # The leaf product can expose new shared-factor matrices. Walk the
@@ -575,7 +599,11 @@ use wide_pairs
     offered = ffwf_publish(root, result, output, rank, meta[0], meta[1], meta[2]) ## i64
     if offered != 1
       return offered
-    if (mode < 3129 || (mode >= 3131 && mode <= 3133)) && new_best == 1 && ffxt_walkable(meta[0], meta[1], meta[2], rank) == 1
+    if new_best == 1 && ffxt_walkable(meta[0],meta[1],meta[2],rank) == 1
+      offered = ffxt_offer(root,result,3136)
+      if offered != 1
+        return offered
+    if (mode < 3129 || (mode >= 3131 && mode <= 3133) || mode == 3136) && new_best == 1 && ffxt_walkable(meta[0], meta[1], meta[2], rank) == 1
       offered = ffxt_offer(root, result, 3129)
       if offered != 1
         return offered
@@ -640,7 +668,7 @@ use wide_pairs
       successor = ffxt_offer(root, result, 3134)
       if successor != 1
         return successor
-  if mode >= 3131 && mode <= 3133 && admitted > 0 && new_best == 1
+  if ((mode >= 3131 && mode <= 3133) || mode == 3136) && admitted > 0 && new_best == 1
     successor = ffxt_offer(root,result,0)
     if successor != 1
       return successor

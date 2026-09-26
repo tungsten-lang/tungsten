@@ -1859,6 +1859,8 @@ if av.size() == 5 && av[0] == "--refine-batch"
   exit(ffrf_batch_with_composition(av[1], ffw_parse_decimal_i64(av[2]), ffw_parse_decimal_i64(av[3]), av[4]))
 if av.size() == 3 && av[0] == "--compose-batch"
   exit(ffbc_drain(av[1], ffw_parse_decimal_i64(av[2])))
+if av.size() == 4 && av[0] == "--compose-batch"
+  exit(ffbc_drain_with_catalog(av[1], ffw_parse_decimal_i64(av[2]), av[3]))
 value_options = ["--tensor", "--rect-shapes", "--rect-epoch-rounds", "--rect-restart-nonce", "--rect-door-ticket", "-J", "--walkers", "--steps", "--rounds", "--secs", "-d", "--density", "--cycles", "--seed", "--seed-nonce", "--record", "--gpu-walkers", "--gpu-policy", "--gpu-steps", "--gpu-epoch-rounds", "--gpu-binary", "--gpu-novelty-size", "--runtime-root", "--asset-root", "--repo-root", "--state-dir", "--strategy", "--migrate", "--archive-size", "--cpu-near-size", "--cpu-near-signature-quota", "--cpu-symmetry-seeds", "--cpu-work-moves", "--cpu-wander-moves", "--status", "--best", "--run-tag", "--near-dir"]
 switch_options = ["--rect", "--rect-portfolio-child", "--rebuild-gpu", "--no-gpu", "--gpu", "--no-tui", "--tui", "--quiet", "--stop-on-record", "--self-test", "--naive", "--help", "-h"]
 value_options.push("--coreml-model")

@@ -154,7 +154,7 @@ use refinement
   refinement_root = status_path + ".refinement"
   if naive != 0
     refinement_root = refinement_root + "-naive-" + start.to_s()
-  refinement = MetaflipPackedRefinement.new(refinement_root,System.executable_path(),state_root)
+  refinement = MetaflipPackedRefinement.new(refinement_root,System.executable_path(),state_root,root)
   lane = 0
   while lane < starts.size()
     z = refinement.submit(starts[lane],words,start_ranks[lane],n,n,n)

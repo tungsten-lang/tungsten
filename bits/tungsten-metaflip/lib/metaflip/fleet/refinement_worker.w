@@ -131,7 +131,7 @@ use refinement_budget
     if runtime != "" && !File.exists?(root + "/composition/error") && !File.exists?(root + "/composition/mixed/error")
       # Refinement manifests and composition completion have separate cursors.
       # At most two expansions per input; overflow is served by idle batches.
-      z = ffbc_drain(root, 2) ## i64
+      z = ffbc_drain_with_catalog(root, 2, runtime) ## i64
     sequence += 1
   0
 

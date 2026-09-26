@@ -279,7 +279,7 @@ use core/system
       @retry_at = now_ms + 100
     elsif @thread == nil && @runtime != "" && @stopped == 0 && (@budget_blocked != 0 || @completed >= @submitted) && (@compose_completed < @compose_submitted || @compose_deferred != 0 || (@transform_enabled != 0 && @transform_completed < @transform_submitted && !File.exists?(@root + "/composition/transforms/error"))) && now_ms >= @retry_at && !File.exists?(@root + "/composition/error") && !File.exists?(@root + "/composition/mixed/error")
       @composing = 1
-      command = "exec nice -n 10 " + ffls_shell_quote(@executable) + " --compose-batch " + ffls_shell_quote(@root) + " 4 > " + ffls_shell_quote(@root + "/worker.log") + " 2>&1"
+      command = "exec nice -n 10 " + ffls_shell_quote(@executable) + " --compose-batch " + ffls_shell_quote(@root) + " 4 " + ffls_shell_quote(@runtime) + " > " + ffls_shell_quote(@root + "/worker.log") + " 2>&1"
       @thread = Thread.new ->
         system(command)
       @retry_at = now_ms + 1000

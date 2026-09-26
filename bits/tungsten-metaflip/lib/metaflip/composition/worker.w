@@ -411,6 +411,18 @@ use transform_queue
 
 # Wide work normally gets one in three turns; above its high-water mark it
 # drains before creating more roots. Fixed/mixed alternation is unchanged.
+-> ffbc_drain_with_catalog(root, limit, runtime) (String i64 String) i64
+  if limit < 1 || limit > 4
+    return 2
+  if File.exists?(root + "/stop")
+    return 0
+  catalog = ffcl_catalog(root,runtime) ## i64
+  if catalog == 0-1
+    return 0
+  if catalog != 1
+    return ffbc_failure(root + "/composition/transforms/",0,0,0-8)
+  ffbc_drain(root,limit)
+
 -> ffbc_drain(root, limit) (String i64) i64
   if limit < 1 || limit > 4
     return 2

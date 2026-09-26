@@ -4,6 +4,7 @@
 use matrix_cleanup
 use ../fleet/refinement_artifacts
 use utility
+use wide_closure
 
 -> ffwc_index_kind(root, identity, blob, rank, n, m, p, source, kind) (String String String i64 i64 i64 i64 String String) i64
   archive = root + "/composition/"
@@ -26,6 +27,8 @@ use utility
     if fields.size() == 2 && ffrf_hash_valid(fields[1]) == 1
       best = ffpk_decimal(fields[0])
   if rank < best && ffrf_atomic(archive + "best/" + shape, rank.to_s() + " " + identity + "\n", "wide-cleanup") != 1
+    return 0
+  if ffcl_register(root,identity,rank,n,m,p) != 1
     return 0
   ffcu_record(root, identity, rank, n, m, p)
 

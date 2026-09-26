@@ -65,6 +65,14 @@ Metaflip executable:
   limit; originals remain queued while composition drains. This is not a
   disk-byte quota. This first family
   is not recursive wide search or automatic cross-shape fleet dispatch.
+- `composition/wide_binary.w` and `wide_closure.w` add bounded general block
+  sums/Kronecker products from verified actual bodies. Eligible best tensors
+  receive an on-demand same-shape closure ticket; its immutable recipe pins
+  every leaf and full-checks inputs/output before admission. Checked results
+  return to the native projection/basis/walk queue and packed live reseeding.
+  The runtime catalogue is explicitly supplied and relocatable. Rank-only
+  tables never become witnesses, and full-term ties stay in the main archive.
+  This does not globally reprice every larger target after each leaf change.
 - `strategies/rect_catalyst_lift2.w` and
   `strategies/macro_double_annihilation.w` retain the exact target-directed
   setup/trigger/cleanup compilers. They are bounded offline scouts, not default

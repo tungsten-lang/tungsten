@@ -45,10 +45,13 @@ See `DIRECTED-HASH-CACHE-2026-09-26.md` for matched exact replay and timing.
 This is a focused regression result, not a claim that the entire queue suite
 or record-finding yield has been qualified.
 
-This connects the live packed backend to the **existing bounded native**
-portfolio, including its eligible shared-pair arm. It does not transplant all
-of the richer offline block/Kronecker closure materializer described below.
-That integration and exposure-matched search-yield measurements remain work.
+This connects the live packed backend to the **bounded native** portfolio.
+Follow-up on 2026-09-26 adds witness-backed, on-demand general block/Kronecker
+composition: eligible sources can be replaced by a cheaper exact recipe for
+their own shape, then returned to walks/projections and live reseeding.
+See `NATIVE-WIDE-CLOSURE-2026-09-26.md` for immutable replay and public-launch
+tests. Global affected-target repricing, the full offline leaf portfolio, and
+exposure-matched search-yield measurements remain work.
 
 `search_wide_auto_loop.py` closes the offline handoff that was previously
 manual: verified parent → basis/projection candidates → native directed walks

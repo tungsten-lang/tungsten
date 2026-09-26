@@ -1,0 +1,310 @@
+{
+ "schema": 1,
+ "field": "GF(2)",
+ "record_claim": false,
+ "walker": "bits/tungsten-metaflip/tools/wide_rect_walk.w",
+ "rows": [
+  {
+   "kind": "public-mod2",
+   "parent": null,
+   "shape": "8x11x16",
+   "rank": 909,
+   "details": {
+    "repository": "https://github.com/MerlijnW70/fmm-schemes",
+    "revision": "e2f5c2e",
+    "license": "CC-BY-4.0",
+    "attribution": "MerlijnW70 (fmm-schemes v1.0)",
+    "path": "schemes/8x11x16_m909_ZT.json",
+    "source_sha256": "d466beb28edea6094371a9535b5d66ebbe2dad4dbd03ed2c49be2f8068835a06",
+    "source_rank": 909
+   },
+   "sha256": "d27254789ffc6090647af3e7dc2f2f9b24ac60f95dcf555441bcb2bb86cfd22d",
+   "file": "8x11x16-r909-d2725478.mfw.gz.b64"
+  },
+  {
+   "kind": "walk",
+   "parent": "d27254789ffc6090647af3e7dc2f2f9b24ac60f95dcf555441bcb2bb86cfd22d",
+   "shape": "8x11x16",
+   "rank": 906,
+   "details": {
+    "steps": 100000000,
+    "nonce": 616080
+   },
+   "sha256": "58b2a56a2759793067b0551938163a7cfb743a7ac3ac28c23db6b0f773172552",
+   "file": "8x11x16-r906-58b2a56a.mfw.gz.b64"
+  },
+  {
+   "kind": "public-mod2",
+   "parent": null,
+   "shape": "9x9x9",
+   "rank": 486,
+   "details": {
+    "repository": "https://github.com/dronperminov/FastMatrixMultiplication",
+    "revision": "b28490ca14c884c339a9fc69a3bdcba1f6e2c5da",
+    "license": "MIT",
+    "attribution": "Andrew I. Perminov and cited algorithm authors",
+    "path": "schemes/results/ZT/9x9x9_m486_ZT.json",
+    "source_sha256": "6f8ee5d7e89221d2a63c702c0e42444387644c70e08a905bebab172f1033a2b6",
+    "source_rank": 486
+   },
+   "sha256": "0e70df03b47827c346cbe22d8ded0af56ab0362f7e88e2ddf6325a38cc345843",
+   "file": "9x9x9-r486-0e70df03.mfw.gz.b64"
+  },
+  {
+   "kind": "walk",
+   "parent": "0e70df03b47827c346cbe22d8ded0af56ab0362f7e88e2ddf6325a38cc345843",
+   "shape": "9x9x9",
+   "rank": 482,
+   "details": {
+    "steps": 40000000,
+    "nonce": 261937
+   },
+   "sha256": "cff1051ad4652148e8d5bb150bd3594e63baa038223a50c9ad150d8602ceb0e5",
+   "file": "9x9x9-r482-cff1051a.mfw.gz.b64"
+  },
+  {
+   "kind": "public-mod2",
+   "parent": null,
+   "shape": "9x10x14",
+   "rank": 820,
+   "details": {
+    "repository": "https://github.com/dronperminov/FastMatrixMultiplication",
+    "revision": "b28490ca14c884c339a9fc69a3bdcba1f6e2c5da",
+    "license": "MIT",
+    "attribution": "Andrew I. Perminov and cited algorithm authors",
+    "path": "schemes/results/ZT/9x10x14_m820_ZT.json",
+    "source_sha256": "fad49023cde5dfd792d5ab08d392ba0d896b27fc03e1ddcf3d4e27d99031b3b8",
+    "source_rank": 820
+   },
+   "sha256": "d419bbeec38a105f0bdbc68d26a41aed56d4c1be80e42f1e2d54970673ae3eca",
+   "file": "9x10x14-r820-d419bbee.mfw.gz.b64"
+  },
+  {
+   "kind": "walk",
+   "parent": "d419bbeec38a105f0bdbc68d26a41aed56d4c1be80e42f1e2d54970673ae3eca",
+   "shape": "9x10x14",
+   "rank": 819,
+   "details": {
+    "steps": 40000000,
+    "nonce": 427093
+   },
+   "sha256": "823e62eb71889d8f6396275ad21e3de06372be17b55640a13b96a00e7091c713",
+   "file": "9x10x14-r819-823e62eb.mfw.gz.b64"
+  },
+  {
+   "kind": "public-mod2",
+   "parent": null,
+   "shape": "9x11x13",
+   "rank": 840,
+   "details": {
+    "repository": "https://github.com/MerlijnW70/fmm-schemes",
+    "revision": "e2f5c2e",
+    "license": "CC-BY-4.0",
+    "attribution": "MerlijnW70 (fmm-schemes v1.0)",
+    "path": "schemes/9x11x13_m840_ZT.json",
+    "source_sha256": "49bf82adf12cd6549b6b0be57249fbac756c80c655beedf196ffbdf39cb9c906",
+    "source_rank": 840
+   },
+   "sha256": "74015061ace1d49aa2db7dd487e127505e17b6e786b4a7d726d45c47495ac3a2",
+   "file": "9x11x13-r840-74015061.mfw.gz.b64"
+  },
+  {
+   "kind": "walk",
+   "parent": "74015061ace1d49aa2db7dd487e127505e17b6e786b4a7d726d45c47495ac3a2",
+   "shape": "9x11x13",
+   "rank": 839,
+   "details": {
+    "steps": 100000000,
+    "nonce": 68900
+   },
+   "sha256": "13722135f326acf453612dd69cc18de6629bfa5626cd8fc21626df63e4770db8",
+   "file": "9x11x13-r839-13722135.mfw.gz.b64"
+  },
+  {
+   "kind": "public-mod2",
+   "parent": null,
+   "shape": "9x14x16",
+   "rank": 1269,
+   "details": {
+    "repository": "https://github.com/MerlijnW70/fmm-schemes",
+    "revision": "e2f5c2e",
+    "license": "CC-BY-4.0",
+    "attribution": "MerlijnW70 (fmm-schemes v1.0)",
+    "path": "schemes/9x14x16_m1269_ZT.json",
+    "source_sha256": "0079c23b6e7a9b2f173201bad962e8cc4ae92bd8615a8c58337858fe0513a171",
+    "source_rank": 1269
+   },
+   "sha256": "cb1b7c999208228b241ee3edc341178bb1b54ddae37b74badf5872fb346c0d4e",
+   "file": "9x14x16-r1269-cb1b7c99.mfw.gz.b64"
+  },
+  {
+   "kind": "walk",
+   "parent": "cb1b7c999208228b241ee3edc341178bb1b54ddae37b74badf5872fb346c0d4e",
+   "shape": "9x14x16",
+   "rank": 1267,
+   "details": {
+    "steps": 100000000,
+    "nonce": 423543
+   },
+   "sha256": "9ef7f80bc36fd983aeebc07f28f707a00b8930902ddbf1bd4a583654a2739497",
+   "file": "9x14x16-r1267-9ef7f80b.mfw.gz.b64"
+  },
+  {
+   "kind": "public-mod2",
+   "parent": null,
+   "shape": "10x13x14",
+   "rank": 1152,
+   "details": {
+    "repository": "https://github.com/dronperminov/FastMatrixMultiplication",
+    "revision": "b28490ca14c884c339a9fc69a3bdcba1f6e2c5da",
+    "license": "MIT",
+    "attribution": "Andrew I. Perminov and cited algorithm authors",
+    "path": "schemes/results/ZT/10x13x14_m1152_ZT.json",
+    "source_sha256": "23f467a8f42aa7d278af61504b200c6806a150adef045425604f70f934fb7d8f",
+    "source_rank": 1152
+   },
+   "sha256": "c93bfb63cd4856d9227dd78f7dc3e65f8c4f9ca16a88153a2c6a08e75236d587",
+   "file": "10x13x14-r1152-c93bfb63.mfw.gz.b64"
+  },
+  {
+   "kind": "walk",
+   "parent": "c93bfb63cd4856d9227dd78f7dc3e65f8c4f9ca16a88153a2c6a08e75236d587",
+   "shape": "10x13x14",
+   "rank": 1150,
+   "details": {
+    "steps": 40000000,
+    "nonce": 975447
+   },
+   "sha256": "e13485abb86ef661c5d19760a9a80e2c5c90260495151f588e115cf55024a150",
+   "file": "10x13x14-r1150-e13485ab.mfw.gz.b64"
+  },
+  {
+   "kind": "public-mod2",
+   "parent": null,
+   "shape": "11x13x15",
+   "rank": 1364,
+   "details": {
+    "repository": "https://github.com/MerlijnW70/fmm-schemes",
+    "revision": "e2f5c2e",
+    "license": "CC-BY-4.0",
+    "attribution": "MerlijnW70 (fmm-schemes v1.0)",
+    "path": "schemes/11x13x15_m1364_ZT.json",
+    "source_sha256": "20d01fa3fde6128bc039d13d282eba0475eaf3984053252c8bc1659bbcc89815",
+    "source_rank": 1364
+   },
+   "sha256": "31bd055993a2cf58fe6b89e28d0d459ae63bcb31af76bbc52cf72fdc9992ab17",
+   "file": "11x13x15-r1364-31bd0559.mfw.gz.b64"
+  },
+  {
+   "kind": "walk",
+   "parent": "31bd055993a2cf58fe6b89e28d0d459ae63bcb31af76bbc52cf72fdc9992ab17",
+   "shape": "11x13x15",
+   "rank": 1363,
+   "details": {
+    "steps": 100000000,
+    "nonce": 786239
+   },
+   "sha256": "a5b6f7419d3b1c47cc88c3114e84cd3b97f71d93f269aee4fbd8c81412193c29",
+   "file": "11x13x15-r1363-a5b6f741.mfw.gz.b64"
+  },
+  {
+   "kind": "public-mod2",
+   "parent": null,
+   "shape": "11x15x15",
+   "rank": 1548,
+   "details": {
+    "repository": "https://github.com/dronperminov/FastMatrixMultiplication",
+    "revision": "b28490ca14c884c339a9fc69a3bdcba1f6e2c5da",
+    "license": "MIT",
+    "attribution": "Andrew I. Perminov and cited algorithm authors",
+    "path": "schemes/results/ZT/11x15x15_m1548_ZT.json",
+    "source_sha256": "2f5d645f78f43a71254536c69d263ac9be8bae58556db9cd37e996e3dff85aec",
+    "source_rank": 1548
+   },
+   "sha256": "709555da5a9d8cc333b777377f59ecb24c134bc6c0adae006c2f9491c0fd7184",
+   "file": "11x15x15-r1548-709555da.mfw.gz.b64"
+  },
+  {
+   "kind": "walk",
+   "parent": "709555da5a9d8cc333b777377f59ecb24c134bc6c0adae006c2f9491c0fd7184",
+   "shape": "11x15x15",
+   "rank": 1547,
+   "details": {
+    "steps": 40000000,
+    "nonce": 296124
+   },
+   "sha256": "144368b67f809488e2a9428c9732d2bb8dc78f98272711d72c1e69f960825da9",
+   "file": "11x15x15-r1547-144368b6.mfw.gz.b64"
+  },
+  {
+   "kind": "public-mod2",
+   "parent": null,
+   "shape": "11x16x16",
+   "rank": 1752,
+   "details": {
+    "repository": "https://github.com/dronperminov/FastMatrixMultiplication",
+    "revision": "b28490ca14c884c339a9fc69a3bdcba1f6e2c5da",
+    "license": "MIT",
+    "attribution": "Andrew I. Perminov and cited algorithm authors",
+    "path": "schemes/results/ZT/11x16x16_m1752_ZT.json",
+    "source_sha256": "4a27302b2cb72cf880d1525234f198c1536b9406102cf2849b335d2af13839cf",
+    "source_rank": 1752
+   },
+   "sha256": "550bcce2ce6d422c5d1c71b1c6be05a7c4c47ef22c47928a03a5763eeffb2973",
+   "file": "11x16x16-r1752-550bcce2.mfw.gz.b64"
+  },
+  {
+   "kind": "walk",
+   "parent": "550bcce2ce6d422c5d1c71b1c6be05a7c4c47ef22c47928a03a5763eeffb2973",
+   "shape": "11x16x16",
+   "rank": 1750,
+   "details": {
+    "steps": 40000000,
+    "nonce": 679596
+   },
+   "sha256": "3dc077af3dc59e7005ee61fe144b162772b6f7e5b24a6d78166124ff861bfadd",
+   "file": "11x16x16-r1750-3dc077af.mfw.gz.b64"
+  },
+  {
+   "kind": "walk",
+   "parent": "3dc077af3dc59e7005ee61fe144b162772b6f7e5b24a6d78166124ff861bfadd",
+   "shape": "11x16x16",
+   "rank": 1748,
+   "details": {
+    "steps": 200000000,
+    "nonce": 681597
+   },
+   "sha256": "7cc898ef30716230069cdaf2c61be0034449cae79235217fc96414eac5666e69",
+   "file": "11x16x16-r1748-7cc898ef.mfw.gz.b64"
+  },
+  {
+   "kind": "public-mod2",
+   "parent": null,
+   "shape": "13x14x16",
+   "rank": 1811,
+   "details": {
+    "repository": "https://github.com/MerlijnW70/fmm-schemes",
+    "revision": "e2f5c2e",
+    "license": "CC-BY-4.0",
+    "attribution": "MerlijnW70 (fmm-schemes v1.0)",
+    "path": "schemes/13x14x16_m1811_ZT.json",
+    "source_sha256": "732678c8888dd0fe20ae021df11596d88bef9bc61290322913c4b8e299142e85",
+    "source_rank": 1811
+   },
+   "sha256": "00e97fde5d54fc1926c90b4712da93defab07b42ae4d3feae99de251d943dcbf",
+   "file": "13x14x16-r1811-00e97fde.mfw.gz.b64"
+  },
+  {
+   "kind": "walk",
+   "parent": "00e97fde5d54fc1926c90b4712da93defab07b42ae4d3feae99de251d943dcbf",
+   "shape": "13x14x16",
+   "rank": 1807,
+   "details": {
+    "steps": 100000000,
+    "nonce": 368701
+   },
+   "sha256": "dd0fded4b5a9883a21959fbc17a649eec10bafec6735afed3d4802e8bc4852b3",
+   "file": "13x14x16-r1807-dd0fded4.mfw.gz.b64"
+  }
+ ]
+}

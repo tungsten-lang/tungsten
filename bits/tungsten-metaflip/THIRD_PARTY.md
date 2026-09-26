@@ -224,6 +224,24 @@ Strassen and AlphaTensor rank-47 4x4 seeds, which improve on the published
 ternary starts without asserting a new record. Alternative compositions are
 presentations of those known constructions, not independent discoveries.
 
+### Public ternary GF(2) walk certificates (2026-09-26)
+
+`tools/certificates/public-ternary-gf2-walks-20260926/` holds GF(2)
+reductions of public schemes and the directed-walk descendants derived from
+them. `manifest.json` records each seed's upstream path, revision and source
+SHA-256.
+
+- [`dronperminov/FastMatrixMultiplication`](https://github.com/dronperminov/FastMatrixMultiplication)
+  at `b28490ca14c884c339a9fc69a3bdcba1f6e2c5da`: MIT License, copyright
+  Andrew Perminov (2025); schemes by Andrew I. Perminov and the authors the
+  upstream catalog cites.
+- [`MerlijnW70/fmm-schemes`](https://github.com/MerlijnW70/fmm-schemes) at
+  `e2f5c2e` (v1.0, 2026-09-24):
+  [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), by MerlijnW70.
+  Changes: coefficients reduced modulo two, the output factor transposed to
+  Metaflip `(i,k)` order, and the resulting tensors transformed by GF(2) flip
+  walks. The seed files are the unmodified reductions.
+
 ## Release rule
 
 Keep an imported scheme outside the bit when its redistribution status is not

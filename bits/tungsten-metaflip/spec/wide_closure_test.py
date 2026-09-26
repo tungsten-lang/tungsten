@@ -17,10 +17,10 @@ from verify_composition_targets import block
 from wide_composition_recipes import CompositionLibrary, read_leaf, PAIR_SOURCE
 
 
-def replay_native_recipe(root, identity):
+def replay_native_recipe(root, identity, context=None):
     """Independent replay of every frozen leaf, orientation and binary step."""
     base = Path(root) / 'composition/closure'
-    pin = (base / 'plans' / identity).read_text().strip()
+    pin = (base / 'plans' / (context or identity)).read_text().strip()
     raw = (base / 'recipes' / pin).read_bytes()
     assert sha256(raw).hexdigest() == pin
     rows = raw.decode().splitlines()

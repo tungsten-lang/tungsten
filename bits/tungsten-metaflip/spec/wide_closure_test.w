@@ -2,6 +2,16 @@ use ../lib/metaflip/composition/transform_queue
 Tungsten.PROTECT_THE_CORE!
 Tungsten.LOCK_THE_DOORS!
 
+if ARGV.size() == 2 && ARGV[0] == "--sweep"
+  exit(1-ffxt_sweep(ARGV[1]))
+
+if ARGV.size() == 2 && ARGV[0] == "--pending"
+  << ffcl_pending(ARGV[1]).to_s()
+  exit(0)
+
+if ARGV.size() == 3 && ARGV[0] == "--task-at"
+  exit(1-ffxt_task(ARGV[1],ffpk_decimal(ARGV[2])))
+
 if ARGV.size() == 4 && ARGV[0] == "--task"
   root = ARGV[1]
   identity = ARGV[2]

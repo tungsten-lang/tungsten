@@ -133,7 +133,7 @@ use ../composition/worker
       @failures += 1
       @enabled = 0
       return 0
-    if @thread == nil && (@intake_submitted > @intake_completed || @transform_submitted > @transform_completed)
+    if @thread == nil && (@intake_submitted > @intake_completed || @transform_submitted > @transform_completed || (@runtime != "" && ffcl_pending(@root) == 1))
       command = "exec nice -n 10 " + ffls_shell_quote(@executable) + " --compose-batch " + ffls_shell_quote(@root) + " 4 " + ffls_shell_quote(@runtime) + " > " + ffls_shell_quote(@root + "/worker.log") + " 2>&1"
       @thread = Thread.new ->
         system(command)

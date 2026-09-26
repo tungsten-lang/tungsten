@@ -29,7 +29,7 @@ use wide_pairs
   if fields.size() != 3 || fields[0] != "MFT_TASK1" || ffrf_hash_valid(fields[1]) != 1
     return 0-1
   mode = ffpk_decimal(fields[2]) ## i64
-  if mode < 0 || mode >= 3137 || raw != "MFT_TASK1 " + fields[1] + " " + mode.to_s() + "\n"
+  if mode < 0 || mode >= 3138 || raw != "MFT_TASK1 " + fields[1] + " " + mode.to_s() + "\n"
     return 0-1
   mode
 
@@ -40,6 +40,8 @@ use wide_pairs
     return "packed-intake"
   if mode == 3136
     return "closure"
+  if mode == 3137
+    return "closure-reprice"
   if mode == 3126
     return "mask"
   if mode == 3127
@@ -106,7 +108,7 @@ use wide_pairs
   if File.exists?(root + "/stop")
     return 0-1
   queue = root + "/composition/transforms/"
-  if ffrf_hash_valid(identity) != 1 || mode < 0 || mode >= 3137
+  if ffrf_hash_valid(identity) != 1 || mode < 0 || mode >= 3138
     return 0
   names = ["tasks-pages", "results-pages", "index"]
   i = 0 ## i64
@@ -135,6 +137,78 @@ use wide_pairs
   if submitted >= 999999999999 || ffbq_put(queue, "tasks", submitted+1, raw) != 1 || ffxt_bind(queue, raw, submitted+1) != 1
     return 0
   ffrf_atomic(queue + "submitted", (submitted+1).to_s() + "\n", "wide-transform")
+
+# At most twelve indexed shapes and one new recipe per cold batch. Each sweep
+# finishes its immutable snapshot before coalescing newer, monotone leaf
+# improvements. Queue backpressure never acknowledges a deferred row.
+-> ffxt_sweep(root) (String) i64
+  if File.exists?(root + "/stop")
+    return 0-1
+  if env("METAFLIP_WIDE_TRANSFORMS") == "0"
+    return 1
+  queue = root + "/composition/transforms/"
+  if ffmd_count(queue + "submitted")-ffmd_count(queue + "consumed") >= 256
+    return 1
+  current = File.read_prefix(root + "/composition/closure/leaves",1048577)
+  if current == nil
+    return 1
+  if current.size() > 1048576 || !current.ends_with?("\n")
+    return 0
+  latest = Crypto:SHA256.hexdigest(current)
+  pin = latest
+  cursor = 1 ## i64
+  state = File.read_prefix(root + "/composition/closure/sweep",96)
+  raw = current
+  if state != nil
+    f = state.strip().split(" ")
+    if f.size() != 3 || f[0] != "MFW_SWEEP1" || ffrf_hash_valid(f[1]) != 1
+      return 0
+    cursor = ffpk_decimal(f[2])
+    if cursor < 1 || cursor > 5985 || state != "MFW_SWEEP1 " + f[1] + " " + cursor.to_s() + "\n"
+      return 0
+    pin = f[1]
+    raw = ffcl_library(root,pin)
+    if raw == ""
+      return 0
+    if cursor > raw.strip().split("\n").size()
+      return 0
+    if cursor >= raw.strip().split("\n").size()
+      if pin == latest
+        return 1
+      pin = latest
+      raw = current
+      cursor = 1
+  if !File.mkdir_p(root + "/composition/closure/libraries") || !File.mkdir_p(root + "/composition/closure/contexts") || ffrf_atomic(root + "/composition/closure/libraries/" + pin,raw,"closure-sweep") != 1
+    return 0
+  leaves = raw.strip().split("\n")
+  ranks = i64[35937]
+  kinds = i64[35937]
+  first = i64[35937]
+  second = i64[35937]
+  done = i64[35937]
+  if ffcl_tables(leaves,ranks,kinds,first) != 1 || cursor > leaves.size()
+    return 0
+  scanned = 0 ## i64
+  while cursor < leaves.size() && scanned < 12
+    if File.exists?(root + "/stop")
+      return 0-1
+    f = ffcl_fields(leaves[cursor])
+    before = ffpk_decimal(f[2]) ## i64
+    n = ffpk_decimal(f[3]) ## i64
+    m = ffpk_decimal(f[4]) ## i64
+    p = ffpk_decimal(f[5]) ## i64
+    price = ffcl_price(n,m,p,ranks,kinds,first,second,done,0) ## i64
+    if price < before && ffxt_walkable(n,m,p,price) == 1
+      context = "MFW_AFFECT1 " + f[1] + " " + pin + "\n"
+      identity = Crypto:SHA256.hexdigest(context)
+      plan = ffcl_plan_from(root,f[1],n,m,p,before,identity,raw)
+      if plan == "" || ffrf_atomic(root + "/composition/closure/contexts/" + identity,context,"closure-sweep") != 1 || ffxt_offer(root,identity,3137) != 1
+        return 0
+      cursor += 1
+      break
+    cursor += 1
+    scanned += 1
+  ffrf_atomic(root + "/composition/closure/sweep","MFW_SWEEP1 " + pin + " " + cursor.to_s() + "\n","closure-sweep")
 
 -> ffxt_offer_masks(root, identity, n, m, p) (String String i64 i64 i64) i64
   if m >= 2 && m <= 32 && ffxt_offer(root, identity, 3126) != 1
@@ -483,6 +557,15 @@ use wide_pairs
     return 0
   fields = raw.strip().split(" ")
   identity = fields[1]
+  library = ""
+  if mode == 3137
+    context = ffcl_context(root,identity)
+    if context.size() != 3
+      return 0
+    identity = context[1]
+    library = ffcl_library(root,context[2])
+    if library == ""
+      return 0
   blob = File.read_prefix(root + "/composition/objects/" + identity + ".tensor", 12632129)
   if blob == nil || Crypto:SHA256.hexdigest(blob) != identity
     return 0
@@ -528,8 +611,12 @@ use wide_pairs
     record = "MFT_RESULT1 " + Crypto:SHA256.hexdigest(raw) + " " + f[2] + " " + info[0].to_s() + " " + info[1].to_s() + " " + info[2].to_s() + " " + before.to_s() + " " + after.to_s() + " " + after.to_s() + " " + f[7] + " " + f[8] + "\n"
     return ffbq_put(queue,"results",sequence,record)
   rank = 0 ## i64
-  if mode == 3136
-    plan = ffcl_plan(root,identity,info[0],info[1],info[2],before)
+  if mode == 3136 || mode == 3137
+    plan = ""
+    if mode == 3137
+      plan = ffcl_plan_from(root,identity,info[0],info[1],info[2],before,fields[1],library)
+    else
+      plan = ffcl_plan(root,identity,info[0],info[1],info[2],before)
     rank = ffcl_replay(root,identity,plan,out,meta)
     if rank == 0 || rank == 0-2
       status = 1 ## i64
@@ -603,7 +690,7 @@ use wide_pairs
       offered = ffxt_offer(root,result,3136)
       if offered != 1
         return offered
-    if (mode < 3129 || (mode >= 3131 && mode <= 3133) || mode == 3136) && new_best == 1 && ffxt_walkable(meta[0], meta[1], meta[2], rank) == 1
+    if (mode < 3129 || (mode >= 3131 && mode <= 3133) || mode == 3136 || mode == 3137) && new_best == 1 && ffxt_walkable(meta[0], meta[1], meta[2], rank) == 1
       offered = ffxt_offer(root, result, 3129)
       if offered != 1
         return offered
@@ -668,7 +755,7 @@ use wide_pairs
       successor = ffxt_offer(root, result, 3134)
       if successor != 1
         return successor
-  if ((mode >= 3131 && mode <= 3133) || mode == 3136) && admitted > 0 && new_best == 1
+  if ((mode >= 3131 && mode <= 3133) || mode == 3136 || mode == 3137) && admitted > 0 && new_best == 1
     successor = ffxt_offer(root,result,0)
     if successor != 1
       return successor

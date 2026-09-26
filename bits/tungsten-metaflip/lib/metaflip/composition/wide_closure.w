@@ -260,13 +260,29 @@ use ../compose
     records.push("B " + prefix + " " + (kinds[key]-1).to_s() + " " + left.to_s() + " " + right.to_s())
   records.size()
 
-# A single source ticket freezes its plan BEFORE constructing/admitting it.
-# Replay never replans from mutable library heads. A zero-node plan explicitly
-# records that this source had no cheaper available body in this snapshot.
--> ffcl_plan(root, identity, n, m, p, before) (String String i64 i64 i64 i64)
-  if ffrf_hash_valid(identity) != 1 || before < 1 || before > 16384 || !File.mkdir_p(root + "/composition/closure/plans")
+-> ffcl_tables(leaves, ranks, kinds, first) (Array i64[] i64[] i64[]) i64
+  if leaves.size() < 1 || leaves.size() > 5985 || leaves[0] != "MFW_LIBRARY1"
+    return 0
+  i = 1 ## i64
+  while i < leaves.size()
+    f = ffcl_fields(leaves[i])
+    if f.size() != 6
+      return 0
+    key = ffcl_key(ffpk_decimal(f[3]),ffpk_decimal(f[4]),ffpk_decimal(f[5])) ## i64
+    rank = ffpk_decimal(f[2]) ## i64
+    if rank <= (key/1089)*((key/33)%33)*(key%33) && (ranks[key] == 0 || rank < ranks[key])
+      ranks[key] = rank
+      kinds[key] = 5
+      first[key] = i
+    i += 1
+  1
+
+# A context freezes its plan BEFORE constructing/admitting it. Legacy source
+# tickets keep their original cache key; repricing pins source AND library.
+-> ffcl_plan_from(root, identity, n, m, p, before, context, raw) (String String i64 i64 i64 i64 String String)
+  if ffrf_hash_valid(identity) != 1 || ffrf_hash_valid(context) != 1 || before < 1 || before > 16384 || !File.mkdir_p(root + "/composition/closure/plans")
     return ""
-  path = root + "/composition/closure/plans/" + identity
+  path = root + "/composition/closure/plans/" + context
   old = File.read_prefix(path,66)
   if old != nil
     if old.size() != 65 || !old.ends_with?("\n") || ffrf_hash_valid(old.strip()) != 1
@@ -275,7 +291,6 @@ use ../compose
     if plan == nil || Crypto:SHA256.hexdigest(plan) != old.strip()
       return ""
     return plan
-  raw = File.read_prefix(root + "/composition/closure/leaves",1048577)
   if raw == nil || raw.size() > 1048576 || !raw.ends_with?("\n")
     return ""
   leaves = raw.strip().split("\n")
@@ -286,18 +301,8 @@ use ../compose
   first = i64[35937]
   second = i64[35937]
   done = i64[35937]
-  i = 1 ## i64
-  while i < leaves.size()
-    f = ffcl_fields(leaves[i])
-    if f.size() != 6
-      return ""
-    key = ffcl_key(ffpk_decimal(f[3]),ffpk_decimal(f[4]),ffpk_decimal(f[5])) ## i64
-    rank = ffpk_decimal(f[2]) ## i64
-    if rank <= (key/1089)*((key/33)%33)*(key%33) && (ranks[key] == 0 || rank < ranks[key])
-      ranks[key] = rank
-      kinds[key] = 5
-      first[key] = i
-    i += 1
+  if ffcl_tables(leaves,ranks,kinds,first) != 1
+    return ""
   price = ffcl_price(n,m,p,ranks,kinds,first,second,done,0) ## i64
   rows = []
   count = 0 ## i64
@@ -307,7 +312,7 @@ use ../compose
       return ""
   text = StringBuffer(128+128*count) ## recycle
   text.append("MFW_PLAN1 " + identity + " " + n.to_s() + " " + m.to_s() + " " + p.to_s() + " " + count.to_s() + "\n")
-  i = 0
+  i = 0 ## i64
   while i < rows.size()
     text.append(rows[i] + "\n")
     i += 1
@@ -316,6 +321,51 @@ use ../compose
   if File.exists?(root + "/stop") || !File.mkdir_p(root + "/composition/closure/recipes") || ffrf_atomic(root + "/composition/closure/recipes/" + pin,plan,"closure-plan") != 1 || ffrf_atomic(path,pin + "\n","closure-plan") != 1
     return ""
   plan
+
+-> ffcl_plan(root, identity, n, m, p, before) (String String i64 i64 i64 i64)
+  raw = File.read_prefix(root + "/composition/closure/leaves",1048577)
+  ffcl_plan_from(root,identity,n,m,p,before,identity,raw)
+
+# Context identities are not tensor identities. The context pins the actual
+# source body and immutable library snapshot; both hashes are checked on use.
+-> ffcl_context(root, identity) (String String)
+  raw = File.read_prefix(root + "/composition/closure/contexts/" + identity,143)
+  if raw == nil || Crypto:SHA256.hexdigest(raw) != identity
+    return []
+  f = raw.strip().split(" ")
+  if f.size() != 3 || f[0] != "MFW_AFFECT1" || ffrf_hash_valid(f[1]) != 1 || ffrf_hash_valid(f[2]) != 1 || raw != "MFW_AFFECT1 " + f[1] + " " + f[2] + "\n"
+    return []
+  f
+
+-> ffcl_library(root, pin) (String String)
+  if ffrf_hash_valid(pin) != 1
+    return ""
+  raw = File.read_prefix(root + "/composition/closure/libraries/" + pin,1048577)
+  if raw == nil || raw.size() > 1048576 || !raw.ends_with?("\n") || Crypto:SHA256.hexdigest(raw) != pin
+    return ""
+  raw
+
+# Coordinator-only wakeup hint. The cold child validates the whole state.
+-> ffcl_pending(root) (String) i64
+  if env("METAFLIP_WIDE_TRANSFORMS") == "0"
+    return 0
+  raw = File.read_prefix(root + "/composition/closure/leaves",1048577)
+  if raw == nil
+    return 0
+  pin = Crypto:SHA256.hexdigest(raw)
+  state = File.read_prefix(root + "/composition/closure/sweep",96)
+  if state == nil
+    return 1
+  f = state.strip().split(" ")
+  if f.size() != 3 || f[0] != "MFW_SWEEP1" || f[1] != pin
+    return 1
+  cursor = ffpk_decimal(f[2]) ## i64
+  size = raw.strip().split("\n").size() ## i64
+  if cursor < 1 || cursor > size || state != "MFW_SWEEP1 " + pin + " " + cursor.to_s() + "\n"
+    return 1
+  if cursor == size
+    return 0
+  1
 
 -> ffcl_orient(source, rank, a, b, out) (i64[] i64 i64[] i64[] i64[]) i64
   order = i64[3]

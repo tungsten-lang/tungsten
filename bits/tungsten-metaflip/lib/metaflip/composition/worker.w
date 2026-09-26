@@ -421,6 +421,11 @@ use transform_queue
     return 0
   if catalog != 1
     return ffbc_failure(root + "/composition/transforms/",0,0,0-8)
+  sweep = ffxt_sweep(root) ## i64
+  if sweep == 0-1
+    return 0
+  if sweep != 1
+    return ffbc_failure(root + "/composition/transforms/",0,0,0-9)
   ffbc_drain(root,limit)
 
 -> ffbc_drain(root, limit) (String i64) i64

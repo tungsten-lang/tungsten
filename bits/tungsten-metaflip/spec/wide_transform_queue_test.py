@@ -178,9 +178,10 @@ def productive_middle_mask(binary):
             exact(shape,child_terms)
 
         # A completed second postbasis sweep schedules the same search arm
-        # without a user flag or an explicit mask task offer.
+        # without a user flag or an explicit mask task offer. A flat tensor
+        # isolates this hook from recursive walk/pair branches (tested above).
         tiny=root/'tiny'; tiny.mkdir()
-        source=tiny/'source.mfw'; source.write_bytes(blob((2,3,2),naive((2,3,2))))
+        source=tiny/'source.mfw'; source.write_bytes(blob((1,3,2),naive((1,3,2))))
         subprocess.run([binary,'--offer-postbasis-file',str(tiny),str(source)],
                        check=True,capture_output=True,text=True,timeout=30)
         queue=tiny/'composition/transforms'
@@ -196,7 +197,7 @@ def productive_middle_mask(binary):
         assert mask_ticket is not None and count(queue/'consumed')>=mask_ticket
         offered_modes={int(read_record(queue,'tasks',ticket).decode().split()[2])
                        for ticket in range(1,count(queue/'submitted')+1)}
-        assert {3126,3127,3128}<=offered_modes
+        assert {3126,3128}<=offered_modes and 3127 not in offered_modes
         checked=audit(tiny)
         assert checked['mask']>=1 and checked['limited']==0
 
@@ -212,7 +213,7 @@ def productive_middle_mask(binary):
                 raw=read_record(queue,'tasks',ticket).decode().split()
                 if raw[2]!='3126': continue
                 shape,_=read_blob((roots/'composition/objects'/f'{raw[1]}.tensor').read_bytes())
-                if shape==(2,3,2): parent_mask=ticket; break
+                if shape==(1,3,2): parent_mask=ticket; break
             if parent_mask is not None and count(queue/'consumed')>=parent_mask:
                 break
         assert parent_mask is not None and count(queue/'consumed')>=parent_mask
@@ -423,7 +424,7 @@ def audit(root, progress=None):
                                             mask=0,mask_first=0,mask_last=0,
                                             walk=0,walk_continue=0,walk_deep=0,
                                             compose_first=0,compose_middle=0,compose_last=0,
-                                            closure=0,neutral=0,limited=0)
+                                            closure=0,closure_reprice=0,neutral=0,limited=0)
     @lru_cache(maxsize=64)
     def load(h):
         raw=(objects/f'{h}.tensor').read_bytes(); assert sha256(raw).hexdigest()==h
@@ -446,10 +447,20 @@ def audit(root, progress=None):
         elif mode==3133: kind,ordinal='compose-last',1
         elif mode==3134: kind,ordinal='walk-deep',1
         elif mode==3136: kind,ordinal='closure',1
+        elif mode==3137: kind,ordinal='closure-reprice',1
         elif mode>=3090: kind,ordinal='postbasis',mode-3089
         else: kind,ordinal='project',mode-17
         assert read_record(q/'index'/h,kind,ordinal)==f'{ticket}\n'.encode()
         if ticket>done: continue
+        context=h
+        if mode==3137:
+            base=root/'composition/closure'
+            binding=(base/'contexts'/context).read_bytes()
+            assert sha256(binding).hexdigest()==context
+            tag,h,pin=binding.decode().split()
+            assert tag=='MFW_AFFECT1' and binding==f'MFW_AFFECT1 {h} {pin}\n'.encode()
+            snapshot=(base/'libraries'/pin).read_bytes()
+            assert sha256(snapshot).hexdigest()==pin
         shape,terms=load(h); width=max(shape[0]*shape[1],shape[1]*shape[2],shape[0]*shape[2])
         record=read_record(q,'results',ticket); fields=record.decode().split()
         assert len(fields)==11 and fields[0]=='MFT_RESULT1' and fields[1]==sha256(raw).hexdigest()
@@ -472,11 +483,11 @@ def audit(root, progress=None):
             dims=composed[0]
             width=max(dims[0]*dims[1],dims[1]*dims[2],dims[0]*dims[2])
             expected,_=compress_shared(composed[1],max_bits=width)
-        elif mode==3136:
-            replay = replay_native_recipe(root,h)
+        elif mode in (3136,3137):
+            replay = replay_native_recipe(root,h,context)
             if replay is None:
                 assert fields[2]=='-' and proposed==before and admitted==work==0 and status==1
-                counts['closure']+=1
+                counts[kind.replace('-','_')]+=1
                 continue
             dims,expected=replay
             assert dims==shape and len(expected)<before and work==len(expected)
@@ -520,7 +531,7 @@ def audit(root, progress=None):
     return counts
 
 
-def check(binary, retained=None, public=None):
+def check_portfolio(binary):
     binary=str(Path(binary).resolve())
     print('PASS row-block projection oracle:',projection_oracle_tests(),'dense/sparse grid comparisons')
     productive_walk_feedback(binary)
@@ -530,6 +541,10 @@ def check(binary, retained=None, public=None):
     productive_middle_mask(binary)
     productive_axis_masks(binary)
     productive_postmask_basis(binary)
+
+
+def check_queue(binary, retained=None, public=None):
+    binary=str(Path(binary).resolve())
     with tempfile.TemporaryDirectory(prefix='metaflip-wide-queue-') as temp:
         root=Path(temp) if retained is None else Path(retained)
         if retained is not None: assert not root.exists(); root.mkdir()
@@ -615,6 +630,11 @@ def check(binary, retained=None, public=None):
             feedback=audit_feedback(cold)
             assert feedback['submitted']>0
             print('PASS public four-context batch:',audit(cold),'feedback:',feedback)
+
+
+def check(binary, retained=None, public=None):
+    check_portfolio(binary)
+    check_queue(binary,retained,public)
 
 
 if __name__=='__main__':

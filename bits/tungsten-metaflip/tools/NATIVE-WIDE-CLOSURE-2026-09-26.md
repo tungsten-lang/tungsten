@@ -16,6 +16,16 @@ with every leaf's full-body SHA-256 and original orientation. A zero-node
 recipe records a completed no-op. Replaying a ticket never silently replans
 against later library heads.
 
+A changed best-body library also wakes a bounded upstream sweep, even when
+the ordinary queues are empty. It reprices indexed shapes against an immutable
+library snapshot, examining at most twelve rows and offering at most one new
+recipe per cold batch. A cheaper candidate gets a separate source+library
+context, so an older completed no-op cannot suppress its new opportunity or
+change its pinned recipe. Queue high-water deferral leaves the cursor in
+place; replay after an interrupted offer is idempotent. Each sweep finishes
+its snapshot before coalescing newer library heads. Rank ties remain archive
+inputs for structure-sensitive arms, not repeated ordinary price revisions.
+
 The renderer checks pinned input bytes and complete tensor identities,
 materializes and orients each constructor, performs bounded matrix cleanup,
 and full-checks the result before archive/publication. A completed checked
@@ -45,6 +55,13 @@ research certificates are not imported as tensor bodies.
 - Actual native task: 8x8x8 naive rank 512 becomes verified rank 329, is
   archived/published, and schedules feedback. Repeating it creates no duplicate
   successor tickets.
+- `wide_upstream_test.py`: adding an exact 2x2x2/r7 leaf automatically
+  reprices an already-indexed naive 4x4x4/r64 to r49; the public cold batch
+  full-checks, archives and publishes feedback. Its earlier zero-node plan
+  stays unchanged. Snapshot/context mutation, crash-cursor replay, queue
+  high-water deferral, invalid cursors, disabled-control idle behavior and
+  stop checks pass. This fixture verifies propagation,
+  not a new rank bound.
 - Public six-second/two-lane fixture: rank 329 is adopted while flips continue;
   completed closure recipes include projected and pair-composed descendants.
   All public outputs are checked independently. Stop joins the child.
@@ -52,6 +69,12 @@ research certificates are not imported as tensor bodies.
   lifecycle controls pass. The expanded deterministic queue changes walk
   nonces: its checked 7x16x13 chain is now 974 -> 968 -> 965 -> 963 at
   1M/10M/30M moves. Multiword pair and same-rank pair controls pass.
+- The automatic mask-hook control uses a flat 1x3x2 tensor to isolate that
+  hook from recursive pair/walk branches. It completes in ten postbasis
+  batches or four ordinary root batches. Dense middle/first/last masks and
+  productive postmask continuation remain separately checked. The former
+  2x3x2 control also exceeded its old 320-task bound in the previous binary;
+  replacing the fixture does not relax the exact tensor or receipt gates.
 - Public 8..16 exact CLI/restart/cycle checks pass, as do real 3/8/16 square
   terminal resize/quit checks. A clean index-backed package passes its layout
   gate and all 404 runtime-file hashes; unrelated working-tree edits are not
@@ -63,9 +86,10 @@ research certificates are not imported as tensor bodies.
 
 ## Remaining scope
 
-This is an on-demand replacement of each eligible source's own shape, not
-an exhaustive global repricing of all upstream targets after every small
-leaf change. An already frozen source recipe stays frozen. Private certified
-offline leaves and the full offline portfolio are not transplanted. The
-offline recursive loop still has broader upstream propagation. No new world
-record or general search-yield improvement is claimed by these plumbing tests.
+Both same-shape replacement and upstream repricing now run automatically
+inside a campaign. Upstream targets are indexed actual bodies, not every
+arbitrary shape or every rank-only catalogue entry. An already frozen source
+recipe stays frozen; a new library revision gets a new context. Private
+certified offline leaves and the full offline portfolio are not transplanted.
+No new world record or general search-yield improvement is claimed by these
+plumbing tests.

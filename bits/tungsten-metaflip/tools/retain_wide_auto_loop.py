@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from search_wide_projection_walks import verify_file
+from wide_composition_recipes import recipe_dependencies
 
 
 def retained_rows(manifest):
@@ -32,13 +33,19 @@ def retained_rows(manifest):
     for shape, row in best.items():
         if row["rank"] >= initial_price[shape]:
             continue
-        current = row
-        while current is not None and current["sha256"] not in selected:
-            selected.add(current["sha256"])
-            parent = current["parent"]
-            if parent is not None and parent not in by_sha:
+        pending = [row["sha256"]]
+        while pending:
+            sha = pending.pop()
+            if sha in selected:
+                continue
+            if sha not in by_sha:
                 raise ValueError("missing campaign parent")
-            current = by_sha.get(parent)
+            current = by_sha[sha]
+            selected.add(sha)
+            if current["parent"] is not None:
+                pending.append(current["parent"])
+            if current.get("kind") == "closure-composition":
+                pending.extend(recipe_dependencies(current["details"]["recipe"]))
     return [row for row in rows if row["sha256"] in selected]
 
 

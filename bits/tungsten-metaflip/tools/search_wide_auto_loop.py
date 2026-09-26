@@ -28,10 +28,14 @@ from search_wide_projection_walks import (  # noqa: E402
 )
 from verify_recursive_portfolio import catalog_minima, solver  # noqa: E402
 from wide_pair_composition import compose_pairs  # noqa: E402
+from wide_composition_recipes import (  # noqa: E402
+    CompositionLibrary, cheaper_parent, recipe_dependencies,
+)
 
 STRASSEN = HERE.parent / "lib/metaflip/seeds/gf2/matmul_2x2_rank7_strassen_gf2.txt"
 CERTIFICATES = HERE / "certificates"
 ARCHIVED_PRICE_INDEX = CERTIFICATES / "archived-exact-prices.json"
+COMPOSED_KINDS = ("strassen-product", "shared-pair-product", "closure-composition")
 
 
 def digest(raw):
@@ -163,7 +167,8 @@ def ordered_choices(projected, basis, price):
 
 def composed_direct_choice(state):
     """Walk a newly composed parent once before its projection neighborhoods."""
-    if state["kind"] not in ("strassen-product", "shared-pair-product"):
+    if (state["kind"] not in COMPOSED_KINDS or
+            not native_walkable(state["shape"], len(state["terms"]))):
         return None
     return dict(kind="composed-direct", shape=state["shape"],
                 rank=len(state["terms"]), raw=state["raw"],
@@ -186,6 +191,12 @@ def projection_admission_kind(rank, round_price, live_price):
     if rank >= round_price or rank > live_price:
         return None
     return "projection-improvement" if rank < live_price else "projection-tie"
+
+
+def native_walkable(shape, rank):
+    """Match the standalone walker's dimension and escape-capacity contract."""
+    width = max(shape[0] * shape[1], shape[1] * shape[2], shape[0] * shape[2])
+    return min(shape) >= 2 and max(shape) <= 1024 and width <= 1024 and 1 <= rank <= 16384 - 64
 
 
 def frontier_priority(state, current_price):
@@ -231,6 +242,16 @@ def run(args):
                     steps_per_walk=args.steps, rows=[])
     seen = set()
     states_by_sha = {}
+    composition_library = None
+    closure_offered = set()
+
+    def library():
+        nonlocal composition_library
+        if composition_library is None:
+            composition_library = CompositionLibrary.from_repository()
+            for state in states_by_sha.values():
+                composition_library.add_state(state)
+        return composition_library
 
     def save():
         target = args.output_dir / "manifest.json"
@@ -279,8 +300,10 @@ def run(args):
         save()
         print(json.dumps(row), flush=True)
         state = dict(kind=kind, shape=shape, terms=terms, raw=raw, sha256=sha,
-                     price_improved=bool(gains))
+                     price_improved=bool(gains), closure_gains=gains)
         states_by_sha[sha] = state
+        if composition_library is not None:
+            composition_library.add_state(state)
         return state
 
     def compose(state):
@@ -324,6 +347,28 @@ def run(args):
                                                  raw_rank=raw_rank))
             if result is not None:
                 outputs.append(result)
+        # Materialize one affected block/Kronecker price, never a rank-only
+        # leaf. Full recipes preserve every dependency for independent replay.
+        available = state["closure_gains"] if state["sha256"] not in closure_offered else []
+        gains = sorted(available, key=lambda g: (
+            g["after"] - g["before"], g["after"], g["shape"]))
+        for gain in gains:
+            target = gain["shape"]
+            if target == tuple(sorted(shape)) or gain["after"] > args.max_composed_rank:
+                continue
+            plan = library().recipe(target)
+            if (plan["rank"] > gain["after"] or
+                    state["sha256"] not in recipe_dependencies(plan)):
+                continue
+            closure_offered.add(state["sha256"])
+            terms, plan = library().materialize(target)
+            result = admit(top.blob(target, terms), "closure-composition",
+                           state["sha256"], dict(recipe=plan))
+            if result is not None:
+                outputs.append(result)
+            # A duplicate consumes this bounded attempt too; do not rebuild
+            # every affected price each time the same state is reconsidered.
+            break
         return outputs
 
     save()
@@ -340,13 +385,11 @@ def run(args):
         # frontier consumes max_walks and --rounds never feeds anything back.
         level_limit = round_walk_limit(walks, args.max_walks, level, args.rounds)
         next_frontier = []
-        composed = [state for state in frontier if state["kind"] in
-                    ("strassen-product", "shared-pair-product")]
+        composed = [state for state in frontier if state["kind"] in COMPOSED_KINDS]
         current_price = price()
         frontier.sort(key=lambda state: (
             0 if (level == 0 and state["kind"] == "source") or
-            (level > 0 and state["kind"] in
-             ("strassen-product", "shared-pair-product")) else 1,
+            (level > 0 and state["kind"] in COMPOSED_KINDS) else 1,
             frontier_priority(state, current_price)))
         prepared = []
         direct_reserved = False
@@ -379,9 +422,17 @@ def run(args):
                     next_frontier.append(child)
                     composed.extend(product for product in compose(child)
                                     if len(product["terms"]) <= args.max_search_rank)
-            projected = select(rows, args.projection_beam)
+            projected = select([r for r in rows if native_walkable(r["shape"], r["rank"])],
+                               args.projection_beam)
             basis = basis_proposals(shape, terms, args.basis_beam)
             choices = ordered_choices(projected, basis, current_price)
+            if any(max(row["shape"]) <= 32 for row in projected):
+                replacement = cheaper_parent(library(), projected, current_price,
+                                             min(args.max_search_rank, args.max_composed_rank))
+                if replacement is not None and replacement["sha256"] not in direct_walked:
+                    position = next(i for i, choice in enumerate(choices)
+                                    if choice in projected)
+                    choices.insert(position, replacement)
             if state["sha256"] not in direct_walked:
                 choices = include_incumbent_source_walk(state, choices, current_price)
             # A direct walk helped several exact block-composition parents,
@@ -393,6 +444,10 @@ def run(args):
                 if direct is not None:
                     choices.insert(0, direct)
                     direct_reserved = True
+            # A transform-only parent may still yield eligible descendants.
+            # Apply the native contract to every walk arm, not just projections.
+            choices = [choice for choice in choices
+                       if native_walkable(choice["shape"], choice["rank"])]
             prepared.append((state, choices))
         # Round-robin the frontier; otherwise the first descendant can use
         # every reserved walk while equally promising siblings are ignored.
@@ -405,12 +460,12 @@ def run(args):
                 choice = choices[turn]
                 seed = admit(choice["raw"], choice.get("kind", "projection-seed"),
                              state["sha256"], {k: choice[k] for k in
-                             ("mode", "axis", "coordinate") if k in choice})
+                             ("mode", "axis", "coordinate", "recipe") if k in choice})
                 if seed is None:
                     seed = states_by_sha.get(choice["sha256"])
                 if seed is None:
                     continue
-                if choice.get("kind") in ("composed-direct", "source-direct"):
+                if choice.get("kind") in ("composed-direct", "source-direct", "closure-composition"):
                     direct_walked.add(seed["sha256"])
                 composed.extend(product for product in compose(seed)
                                 if len(product["terms"]) <= args.max_search_rank)

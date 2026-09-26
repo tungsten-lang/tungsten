@@ -91,9 +91,11 @@ local price and neither schedule found a further rank drop. The known
 materialized its 14×24×32/r6097 Strassen product. These are local scheduling
 checks, not new records.
 
-This is **not** a live `bin/metaflip` arm. It currently composes only with the
-exact GF(2) 2×2×2/r7 partner or the projected 2×3×3/r15 pair leaf, not
-arbitrary block sums or the entire parent portfolio. The pair arm uses all
+This is **not** a live `bin/metaflip` arm. Its explicit pair arms compose with
+the exact GF(2) 2×2×2/r7 partner or the projected 2×3×3/r15 pair leaf. The
+witness-backed closure arm described below also materializes block sums and
+Kronecker products from available packaged/certified tensor bodies, not the
+rank-only catalogue or uncleared external archives. The pair arm uses all
 three shared-factor axes, full multiword factors and exact tensor admission.
 It replays the archived 4×7×4/r85 parent to 12×7×12/r651 with 38 shared
 pairs; a one-step walk control found no new rank. A rank-only screen of 301
@@ -263,5 +265,57 @@ but still seven above the current local price 2780. A 50M-move native walk
 with nonce 252200 returned that identical tensor; both input and output were
 independently checked in Python and Ruby. The other three materialized
 parents did not improve their local prices. This finite negative control
-leaves a real integration gap: cheaper closure recipes are not automatically
-materialized as parents by the offline loop, and pricing alone is not admission.
+exposed the missing materialization step in the offline loop; pricing alone
+is not admission.
+
+## Witness-backed closure materialization
+
+`wide_composition_recipes.py` now supplies actual block/Kronecker parents to
+the cold loop automatically, without a new strategy flag. Its finite library
+uses packaged GF(2) schemes and checked-in MFW witnesses; rank-only prices
+never supply a leaf. It also exposes the existing pair arm's exact 2×3×3/r15
+leaf as a replayable two-coordinate projection of the packaged 2×3×5/r26
+scheme, rather than leaving the general planner at its available r17 leaf.
+Planning is advisory. Every used leaf is independently
+reconstructed, the recipe is replayed with orientations and offsets, and the
+complete result passes both tensor gates before admission.
+
+At most one cheaper actual parent is offered before a weaker selected
+projection per frontier state; the original projection remains eligible.
+This can be worthwhile even when the best rank-only price has no available
+body. At most one affected closure price is materialized per admission and
+offered to a subsequent bounded round, subject to the existing rank caps.
+Retained recipes include every campaign-state dependency, not just the
+triggering parent, and pin static leaves by their source-file hashes.
+
+A matched 16×17×18 control used 50M moves and nonce 253100 per branch.
+The r2953 projection reached r2928; the materialized r2895 parent tied at
+r2895. All four tensors passed independent Python/Ruby reconstruction.
+Neither branch improves the local price 2882. This supports filling the
+missing witness/materialization path, not a general yield or record claim.
+An initial real-corpus replay exposed noncanonical decimal leaf term order;
+normalizing that boundary fixed the mismatch without changing tensor values.
+Focused checks cover block/product orientation, multiple-parent retention,
+real seed parsing, invalid leaves, hash/cut/reference mutation rejection, and
+automatic search admission. The packed live backend remains separate.
+Dimension-one constructions remain eligible as leaves/transform parents, but
+are not sent to the native walker. Every selected walk seed is checked against
+its actual 1024-bit factor and rank-plus-64 escape-capacity limits; wider valid
+rectangles are not excluded merely because closure recipes use the 2..32 grid.
+
+Exact matrix cleanup of the four materialized-parent controls did not lower
+any rank (2787, 2895, 5897, 6032). That finite negative is not a reason to
+assume all composed tensors are already minimal, nor evidence for a new arm.
+
+A completed two-round, four-walk campaign from 20×21×25/r5829 reached
+20×21×24/r5563, 20×20×25/r5507, and 19×20×25/r5364. Their preceding
+local GF(2) prices were 5616, 5566, and 5403, respectively. Each walk used
+100M moves (nonces 253300..253303). The second round consumed a projection
+of the first round's r5507 result and a basis rewrite of its r5567 sibling,
+so this is actual multi-round feedback, not just a list of independent walks.
+The nine-state lineage is retained under
+`certificates/20x21x25-materialized-feedback-20260926/` and replays the
+complete tensors in Python and Ruby. No new closure-composition state was
+retained in this campaign; its rank gains do not establish a matched yield
+advantage for the new materializer. Pinned external metadata remains
+comparison-only, and no world-record claim is made.

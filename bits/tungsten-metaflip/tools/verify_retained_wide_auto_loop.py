@@ -13,6 +13,7 @@ import screen_top_two_projection_children as top
 from screen_two_pass_basis_children import two_pass
 from search_wide_projection_walks import verify_file
 from wide_pair_composition import compose_pairs
+from wide_composition_recipes import replay_recipe
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -46,6 +47,7 @@ def verify_bundle(bundle, root=ROOT):
     source_raw = loop.read_seed(root / source)
     strassen = top.parse_terms(loop.STRASSEN.read_bytes(), 7)
     checked = {}
+    composition_leaves = {}
     for row in report["rows"]:
         file = Path(row["file"])
         check(file.name == row["file"] and file.suffixes[-3:] ==
@@ -95,6 +97,11 @@ def verify_bundle(bundle, root=ROOT):
                 check(shape == target and top.blob(target, cleaned) == raw and
                       pairs == details["pairs"] and raw_rank == details["raw_rank"],
                       "shared-pair lineage mismatch")
+            elif kind == "closure-composition":
+                plan = details["recipe"]
+                expected = replay_recipe(plan, root, checked, composition_leaves)
+                check(list(shape) == plan["shape"] and top.blob(shape, expected) == raw,
+                      "closure-composition lineage mismatch")
             else:
                 raise ValueError(f"unknown lineage kind: {kind}")
         checked[sha] = shape, terms

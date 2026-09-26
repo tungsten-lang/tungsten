@@ -60,6 +60,17 @@ Matched source controls tied at 8×16×13/r1037, 7×13×16/r962, and
 first direct-walk drop to r2659. These observations justify provenance-aware
 scheduling, not a claim that direct walks usually win.
 
+The original source now receives one direct-walk opportunity if its rank is
+no worse than the current exact local price. It follows the first two
+projection/basis choices, preserving their access, and is offered at most once
+per campaign. Superseded sources receive no such slot. This is automatic in
+the cold scheduler, not another switch or a live fleet arm. A matched
+100M-move control at 20×22×25/r6076 reached r6073 directly while the mode-8
+basis rewrite tied at r6076 with the same nonce. The compact exact source and
+result are in `certificates/20x22x25-direct-20260925/`. The pinned external
+comparison 6075 was stale: the live Lille table recheck listed 6062, so this
+is a local improvement rather than a catalogue-beating result.
+
 Matched control: the earlier projection-first schedule recovered the certified
 r872 witness from the packaged `7×16×12/r873` source in three 100M walks. With
 price-gap ordering, the same source and nonce base `2026092502` reached a
@@ -195,3 +206,8 @@ parent projected 16×23×21/r4517, walked to r4501, changed basis, and walked
 to r4497. The exact five-state lineage is under
 `certificates/16x21x23-auto-loop-20260925/`. This lowers the local price
 4542 by 45 but remains 28 above the Lille entry checked on 2026-09-25.
+
+A completed two-round, six-walk follow-up from r4497 found no new local price.
+Its 16×23×20 projection walked from r4335 to r4310, still above the exact
+local price 4282, and the tested parent/basis continuations tied. This records
+the finite negative budget rather than an exhaustion or optimality claim.

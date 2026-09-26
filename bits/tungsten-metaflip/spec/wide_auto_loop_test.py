@@ -107,7 +107,7 @@ class WideAutoLoopTest(unittest.TestCase):
         self.assertEqual([row["mode"] for row in order][:2],
                          ["basis", "child-a"])
 
-    def test_direct_walk_is_reserved_only_for_composed_states(self):
+    def test_composed_direct_choice_excludes_sources(self):
         state = dict(kind="source", shape=(2, 2, 2), terms=[0] * 7,
                      raw=b"source", sha256="source")
         self.assertIsNone(loop.composed_direct_choice(state))
@@ -117,6 +117,49 @@ class WideAutoLoopTest(unittest.TestCase):
                          ("composed-direct", b"source", "source"))
         state["kind"] = "shared-pair-product"
         self.assertIsNotNone(loop.composed_direct_choice(state))
+
+    def test_incumbent_source_walk_follows_first_two_neighborhoods(self):
+        state = dict(kind="source", shape=(2, 2, 2), terms=[0] * 7,
+                     raw=b"source", sha256="source")
+        choices = [dict(kind="projection", mode="p"),
+                   dict(kind="basis", mode="b0"),
+                   dict(kind="basis", mode="b1")]
+        result = loop.include_incumbent_source_walk(state, choices, lambda _: 7)
+        self.assertEqual([row["kind"] for row in result],
+                         ["projection", "basis", "source-direct", "basis"])
+        self.assertEqual(result[2]["sha256"], "source")
+        self.assertEqual(choices, result[:2] + result[3:])
+        self.assertIs(loop.include_incumbent_source_walk(state, choices,
+                                                        lambda _: 6), choices)
+        state["kind"] = "basis"
+        self.assertIs(loop.include_incumbent_source_walk(state, choices,
+                                                        lambda _: 7), choices)
+
+    def test_incumbent_direct_walk_is_consumed_once_across_rounds(self):
+        terms = top.parse_terms(loop.STRASSEN.read_bytes(), 7)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            seed = root / "seed.mfw"
+            seed.write_bytes(top.blob((2, 2, 2), terms))
+            catalog = root / "catalog.json"
+            catalog.write_text('{"schemes": []}')
+            walker = root / "copy-walker"
+            walker.write_text("#!/usr/bin/env python3\nimport shutil, sys\n"
+                              "shutil.copyfile(sys.argv[2], sys.argv[3])\n")
+            walker.chmod(0o755)
+            args = argparse.Namespace(
+                seed=seed, catalog=catalog, walker=walker,
+                output_dir=root / "output", rounds=2, max_walks=2,
+                steps=1, projection_beam=1, basis_beam=1,
+                frontier_cap=1, max_composed_rank=1, max_search_rank=10,
+                nonce_base=25001)
+            with patch.object(loop, "initial_seeds", return_value={(2, 2, 2): 7}), \
+                 patch.object(loop, "proposals", return_value=[]), \
+                 patch.object(loop, "basis_proposals", return_value=[]), \
+                 redirect_stdout(io.StringIO()):
+                loop.run(args)
+            report = json.loads((args.output_dir / "manifest.json").read_text())
+            self.assertEqual((report["status"], report["walks"]), ("complete", 1))
 
     def test_checked_certificates_update_prices_and_reject_false_improvements(self):
         source = loop.STRASSEN.read_bytes()

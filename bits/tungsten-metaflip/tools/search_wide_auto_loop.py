@@ -170,6 +170,17 @@ def composed_direct_choice(state):
                 sha256=state["sha256"])
 
 
+def include_incumbent_source_walk(state, choices, current_price):
+    """Give an unsuperseded source one direct walk after two neighborhood slots."""
+    if (state["kind"] != "source" or
+            len(state["terms"]) > current_price(tuple(sorted(state["shape"])))):
+        return choices
+    direct = dict(kind="source-direct", shape=state["shape"],
+                  rank=len(state["terms"]), raw=state["raw"],
+                  sha256=state["sha256"])
+    return choices[:2] + [direct] + choices[2:]
+
+
 def projection_admission_kind(rank, round_price, live_price):
     """Keep new gains and tied representations, not superseded projections."""
     if rank >= round_price or rank > live_price:
@@ -371,6 +382,8 @@ def run(args):
             projected = select(rows, args.projection_beam)
             basis = basis_proposals(shape, terms, args.basis_beam)
             choices = ordered_choices(projected, basis, current_price)
+            if state["sha256"] not in direct_walked:
+                choices = include_incumbent_source_walk(state, choices, current_price)
             # A direct walk helped several exact block-composition parents,
             # whereas matched direct walks on projection-rich source tensors
             # tied. Reserve at most one composed parent per round so it cannot
@@ -397,7 +410,7 @@ def run(args):
                     seed = states_by_sha.get(choice["sha256"])
                 if seed is None:
                     continue
-                if choice.get("kind") == "composed-direct":
+                if choice.get("kind") in ("composed-direct", "source-direct"):
                     direct_walked.add(seed["sha256"])
                 composed.extend(product for product in compose(seed)
                                 if len(product["terms"]) <= args.max_search_rank)

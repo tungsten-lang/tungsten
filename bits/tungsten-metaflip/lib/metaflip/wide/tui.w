@@ -5,7 +5,7 @@ use ../tui
 # Each lane is a joined-worker snapshot: best rank, current rank, moves,
 # moves/sec, last improvement ms, snapshot ms, best density, accepts, rejects.
 # Never inspect a worker's mutable tensor or counters from the render loop.
--> ffws_frame_rows(n, rank, density, moves, workers, round, elapsed_s, gpu, failures, sequence, last_status_ms, now_ms, drops, ties, accepted, rejected, no_pair, lanes, rank_levels, rank_ticks, rank_count, bits_levels, bits_ticks, bits_count, timeline_times, timeline_ranks, timeline_count, cycle_caption, width, reference, seeds)
+-> ffws_frame_rows(n, rank, density, moves, workers, round, elapsed_s, gpu, failures, sequence, last_status_ms, now_ms, drops, ties, accepted, rejected, no_pair, lanes, rank_levels, rank_ticks, rank_count, bits_levels, bits_ticks, bits_count, timeline_times, timeline_ranks, timeline_count, cycle_caption, width, reference, seeds, refinement_row = "refinement idle")
   inner = width - 2 ## i64
   rows = []
   state = ff_tui_health(failures, 0, 0, 0, last_status_ms, now_ms, 5000)
@@ -63,7 +63,7 @@ use ../tui
   rows.push("")
   rows.push(ff_tui_paint(ff_tui_rule("Diversity", width), "36"))
   rows.push("  " + ff_tui_clip(seeds.to_s()+" verified seeds; "+workers.to_s() + " RNG streams; term-set distance not collected", inner))
-  rows.push("  " + ff_tui_dim(ff_tui_clip("Frontier/shoulder archives and refinement: unavailable on packed backend", inner)))
+  rows.push("  " + ff_tui_dim(ff_tui_clip(refinement_row, inner)))
 
   rows.push("")
   rows.push(ff_tui_paint(ff_tui_rule("Effectiveness (exposure-normalized)", width), "36"))

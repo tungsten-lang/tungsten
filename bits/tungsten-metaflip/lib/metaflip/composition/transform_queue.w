@@ -29,13 +29,15 @@ use wide_pairs
   if fields.size() != 3 || fields[0] != "MFT_TASK1" || ffrf_hash_valid(fields[1]) != 1
     return 0-1
   mode = ffpk_decimal(fields[2]) ## i64
-  if mode < 0 || mode >= 3135 || raw != "MFT_TASK1 " + fields[1] + " " + mode.to_s() + "\n"
+  if mode < 0 || mode >= 3136 || raw != "MFT_TASK1 " + fields[1] + " " + mode.to_s() + "\n"
     return 0-1
   mode
 
 -> ffxt_index_kind(mode) (i64)
   if mode < 18
     return "basis"
+  if mode == 3135
+    return "packed-intake"
   if mode == 3126
     return "mask"
   if mode == 3127
@@ -102,7 +104,7 @@ use wide_pairs
   if File.exists?(root + "/stop")
     return 0-1
   queue = root + "/composition/transforms/"
-  if ffrf_hash_valid(identity) != 1 || mode < 0 || mode >= 3135
+  if ffrf_hash_valid(identity) != 1 || mode < 0 || mode >= 3136
     return 0
   names = ["tasks-pages", "results-pages", "index"]
   i = 0 ## i64
@@ -140,6 +142,24 @@ use wide_pairs
   if p >= 2 && p <= 32 && ffxt_offer(root, identity, 3128) != 1
     return 0
   1
+
+# Input tickets remain durable above the transform high-water mark. Admit at
+# most one fresh root per drain turn; existing finite continuations go first.
+-> ffxt_packed_intake(root) (String) i64
+  queue = root + "/composition/packed-intake/"
+  submitted = ffmd_count(queue + "submitted") ## i64
+  consumed = ffmd_count(queue + "consumed") ## i64
+  if submitted < 0 || consumed < 0 || consumed > submitted
+    return 0
+  if submitted == consumed || ffbc_counter(root + "/composition/transforms/submitted")-ffbc_counter(root + "/composition/transforms/consumed") >= 256
+    return 1
+  raw = ffbq_read(queue,"tasks",consumed+1)
+  if ffpf_valid(raw) != 1
+    return 0
+  f = raw.strip().split(" ")
+  if ffxt_offer(root,f[1],3135) != 1
+    return 0
+  ffrf_atomic(queue + "consumed",(consumed+1).to_s() + "\n","packed-intake")
 
 -> ffxt_coordinates(n, m, p) (i64 i64 i64) i64
   count = 0 ## i64
@@ -475,8 +495,33 @@ use wide_pairs
   if before < 1 || (mode >= 18 && mode < 3090 && mode >= 18+ffxt_coordinates(info[0], info[1], info[2])) || (mode >= 3126 && (info[mask_axis] < 2 || info[mask_axis] > 32))
     return 0
   checked = ffpk_exact(source, 3*32*16384, before, info[0], info[1], info[2], parity, 32768, 20000000) ## i64
+  if mode == 3135 && checked == 0-1
+    # Explicit verification-limited completion, with no admission/children.
+    record = "MFT_RESULT1 " + Crypto:SHA256.hexdigest(raw) + " - " + info[0].to_s() + " " + info[1].to_s() + " " + info[2].to_s() + " " + before.to_s() + " " + before.to_s() + " 0 3 0\n"
+    return ffbq_put(queue,"results",sequence,record)
   if checked != 1
     return 0
+  if mode == 3135
+    if ffwc_index_kind(root,identity,blob,before,info[0],info[1],info[2],identity,"MFW_PACKED1") != 1
+      return 0
+    i = 0 ## i64
+    while i < before*3*ffpk_stride(info[0],info[1],info[2])
+      out[i] = source[i]
+      i += 1
+    cleaned = ffwc_refine(root,identity,before,info[0],info[1],info[2],out,parity) ## i64
+    if cleaned != 1
+      return cleaned
+    if ffwf_cleanup(root,identity,info[0],info[1],info[2]) != 1 || ffxt_intake(root,identity,info[0],info[1],info[2]) != 1
+      return 0
+    result = File.read_prefix(root + "/composition/cleanup/results/" + identity,320)
+    if result == nil
+      return 0
+    f = result.strip().split(" ")
+    if f.size() != 12
+      return 0
+    after = ffpk_decimal(f[6]) ## i64
+    record = "MFT_RESULT1 " + Crypto:SHA256.hexdigest(raw) + " " + f[2] + " " + info[0].to_s() + " " + info[1].to_s() + " " + info[2].to_s() + " " + before.to_s() + " " + after.to_s() + " " + after.to_s() + " " + f[7] + " " + f[8] + "\n"
+    return ffbq_put(queue,"results",sequence,record)
   rank = 0 ## i64
   if mode >= 3131 && mode <= 3133
     rank = pair_compose(source,before,info[0],info[1],info[2],mode-3131,out,meta)

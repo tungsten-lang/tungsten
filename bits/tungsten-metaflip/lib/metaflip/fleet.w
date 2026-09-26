@@ -2339,7 +2339,7 @@ if N >= 8
   if GPU_BINARY != "" || RECORD_OVERRIDE != 0 || STOP_ON_RECORD != 0 || STRATEGY != "islands" || CPU_WORK_SPEC != "" || CPU_WANDER_SPEC != ""
     << "metaflip: packed squares currently support CPU islands, not GPU binaries, record targets or narrow CPU portfolios"
     exit(2)
-  result = ffws_run(N, RUNTIME_ROOT, SEED_PATH, BEST_PATH, STATUS_PATH, J, STEPS, MAX_ROUNDS, MAX_SECS, SEED_NAIVE, SEED_NONCE, DSLACK, QUIET, TUI, GPU, CYCLE_FIELDS, CYCLE_CAPTION, CYCLE_DEADLINE_MS) ## i64
+  result = ffws_run(N, RUNTIME_ROOT, SEED_PATH, BEST_PATH, STATUS_PATH, J, STEPS, MAX_ROUNDS, MAX_SECS, SEED_NAIVE, SEED_NONCE, DSLACK, QUIET, TUI, GPU, CYCLE_FIELDS, CYCLE_CAPTION, CYCLE_DEADLINE_MS, STATE_DIR) ## i64
   if CYCLE_MODE != 0 && result == 0
     cycle_status = read_file(STATUS_PATH)
     if ffrpo_status_i64(cycle_status, "stop_requested", 1) == 0

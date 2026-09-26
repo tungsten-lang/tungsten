@@ -419,6 +419,8 @@ use transform_queue
   queue = root + "/composition/"
   mixed = queue + "mixed/"
   transforms = queue + "transforms/"
+  if ffxt_packed_intake(root) != 1
+    return ffbc_failure(transforms,0,0,0-7)
   if ffmd_admit(root, 27) != 1
     return ffbc_failure(mixed, 0, ffmd_count(mixed + "context"), 0-6)
   done = 0 ## i64

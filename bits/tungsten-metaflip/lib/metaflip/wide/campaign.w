@@ -2,6 +2,7 @@ use seeds
 use directed
 use tui
 use ../rect/campaign
+use refinement
 
 -> ffws_thread(st, scratch, steps, stop, slack, elapsed, lane)
   Thread.new ->
@@ -29,7 +30,7 @@ use ../rect/campaign
 # Large factors have no current Metal kernel. Keep GPU capability explicit;
 # every requested CPU lane gets a private state and scratch. Checkpoints use
 # MFW1, never truncated integer masks. Only the coordinator writes them.
--> ffws_run(n, root, seed_path, best_path, status_path, workers, steps, rounds, seconds, naive, nonce, slack, quiet, tui, gpu, cycle_fields, cycle_caption, cycle_deadline) (i64 String String String String i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 String String i64) i64
+-> ffws_run(n, root, seed_path, best_path, status_path, workers, steps, rounds, seconds, naive, nonce, slack, quiet, tui, gpu, cycle_fields, cycle_caption, cycle_deadline, state_root) (i64 String String String String i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 String String i64 String) i64
   directed_mode=0 ## i64
   directed_option=Env.get("METAFLIP_WIDE_DIRECTED")
   if directed_option!=nil && directed_option!="" && directed_option!="0"
@@ -73,6 +74,28 @@ use ../rect/campaign
   starts = [best]
   start_ranks = i64[4]
   start_ranks[0]=rank
+  feedback_loaded = 0 ## i64
+  if naive == 0 && state_root != ""
+    slot = 0 ## i64
+    while slot < 4
+      data = i64[words]
+      candidate = ffws_checked_load(ffpr_seed_path(state_root,n,slot),data,words,n,parity) ## i64
+      if candidate < 0
+        << "metaflip: packed feedback seed failed full tensor verification"
+        return 2
+      if candidate > 0
+        feedback_loaded += 1
+        if candidate < rank
+          rank = candidate
+          i = 0 ## i64
+          while i < rank*3*stride
+            best[i] = data[i]
+            i += 1
+          density = ffws_bits(best,rank*3*stride)
+          start_ranks[0] = rank
+        else
+          z = ffws_bank_add(starts,start_ranks,data,candidate,stride,rank)
+      slot += 1
   if naive == 0 && seed_path == "" && workers > 1
     paths = ffws_packaged_paths(root,n)
     p = 0 ## i64
@@ -128,6 +151,17 @@ use ../rect/campaign
     << "metaflip: cannot write large-square checkpoint"
     return 2
   stop = i64[1]
+  refinement_root = status_path + ".refinement"
+  if naive != 0
+    refinement_root = refinement_root + "-naive-" + start.to_s()
+  refinement = MetaflipPackedRefinement.new(refinement_root,System.executable_path(),state_root)
+  lane = 0
+  while lane < starts.size()
+    z = refinement.submit(starts[lane],words,start_ranks[lane],n,n,n)
+    lane += 1
+  last_intake = start ## i64
+  intake_lane = 0 ## i64
+  feedback_lane = 0 ## i64
   # Only joined workers feed the presentation snapshots. The render path
   # never races a worker mutating its packed tensor, ranks or counters.
   lanes = i64[workers*9]
@@ -175,7 +209,7 @@ use ../rect/campaign
   if directed_lane>=0
     directed_caption=" directed w"+directed_lane.to_s()+"="+directed_option
   tensor = n.to_s()+"x"+n.to_s()
-  seed_fields = " seed_count="+starts.size().to_s()+" reference_rank="+ffws_reference_rank(n).to_s()+" walk_density=unrestricted"
+  seed_fields = " seed_count="+starts.size().to_s()+" reference_rank="+ffws_reference_rank(n).to_s()+" walk_density=unrestricted packed_feedback_loaded="+feedback_loaded.to_s()
   if tui != 0
     z = ccall("w_term_raw_enable")
     << "\e[2J\e[H"
@@ -202,6 +236,7 @@ use ../rect/campaign
           alive = 1
         lane += 1
       now = ccall("__w_clock_ms")
+      z = refinement.poll(now)
       if ccall("__w_interrupted") != 0
         stop_requested = 1
         stop[0]=1
@@ -218,7 +253,7 @@ use ../rect/campaign
       if now-last_render >= 1000
         last_render=now
         sequence += 1
-        status = "mode=wide-cpu tensor="+tensor+" backend=packed-cpu rank="+rank.to_s()+" bits="+density.to_s()+" cpu_lanes="+workers.to_s()+" cpu_moves="+moves.to_s()+" gpu_requested="+gpu.to_s()+" gpu_supported=0 gpu_moves=0 round="+round.to_s()+" producer_state=running stop_requested="+stop_requested.to_s()+seed_fields+directed_fields+walk_fields+cycle_fields+"\n"
+        status = "mode=wide-cpu tensor="+tensor+" backend=packed-cpu rank="+rank.to_s()+" bits="+density.to_s()+" cpu_lanes="+workers.to_s()+" cpu_moves="+moves.to_s()+" gpu_requested="+gpu.to_s()+" gpu_supported=0 gpu_moves=0 round="+round.to_s()+" producer_state=running stop_requested="+stop_requested.to_s()+seed_fields+directed_fields+walk_fields+refinement.status_fields()+cycle_fields+"\n"
         if ffrf_atomic(status_path,status,"wide") != 1
           failure=1
           stop[0]=1
@@ -230,7 +265,7 @@ use ../rect/campaign
           width=ccall("w_term_cols") ## i64
           if width < 40
             width=40
-          rows=ffws_frame_rows(n,rank,density,moves,workers,round,(now-start) / 1000,gpu,failure,sequence,last_status,now,drops,ties,accepted,rejected,no_pair,lanes,rank_levels,rank_ticks,rank_count,bits_levels,bits_ticks,bits_count,timeline_times,timeline_ranks,timeline_count,cycle_caption+directed_caption,width,ffws_reference_rank(n),starts.size())
+          rows=ffws_frame_rows(n,rank,density,moves,workers,round,(now-start) / 1000,gpu,failure,sequence,last_status,now,drops,ties,accepted,rejected,no_pair,lanes,rank_levels,rank_ticks,rank_count,bits_levels,bits_ticks,bits_count,timeline_times,timeline_ranks,timeline_count,cycle_caption+directed_caption,width,ffws_reference_rank(n),starts.size(),refinement.status_row())
           z = ffrc_render(rows)
         elsif quiet == 0
           << "WIDE_STATUS "+status.strip()
@@ -285,6 +320,54 @@ use ../rect/campaign
             i += 1
           changed=1
       lane += 1
+    # Sample joined representations fairly, including equal-rank states with
+    # greater density. Never read a slab while its worker is mutating it.
+    now = ccall("__w_clock_ms")
+    if now-last_intake >= 1000 && stop[0] == 0
+      last_intake = now
+      state = states[intake_lane]
+      intake_lane = (intake_lane+1)%workers
+      proposed = ffws_export(state,trial,0) ## i64
+      if proposed > rank+24
+        proposed = ffws_export(state,trial,1)
+      proposed = ffpk_canonicalize(trial,words,proposed,stride)
+      if proposed > 0
+        z = refinement.submit(trial,words,proposed,n,n,n)
+    refined = refinement.take_into(trial,words,n,parity) ## i64
+    if refined > 0 && refined <= rank+24 && stop[0] == 0
+      state = states[feedback_lane]
+      if refined+2 <= state[2]
+        old_moves = state[7] ## i64
+        old_accepts = state[8] ## i64
+        old_rejects = state[9] ## i64
+        old_no_pair = state[23] ## i64
+        if ffws_init(state,n,state[2],trial,refined,19071+nonce+round*104729+feedback_lane) != 1
+          failure = 1
+          stop[0] = 1
+        else
+          state[7] = old_moves
+          state[8] = old_accepts
+          state[9] = old_rejects
+          state[23] = old_no_pair
+          if feedback_lane == directed_lane && ffwd_init(state,contexts[feedback_lane],directed_mode,65536) != 1
+            failure = 1
+            stop[0] = 1
+          z = refinement.seed_used()
+          feedback_lane = (feedback_lane+1)%workers
+      refined_bits = ffws_bits(trial,refined*3*stride) ## i64
+      if refined < rank || (refined == rank && refined_bits < density)
+        if refined < rank
+          drops += 1
+        else
+          ties += 1
+        rank = refined
+        density = refined_bits
+        i = 0 ## i64
+        while i < rank*3*stride
+          best[i] = trial[i]
+          i += 1
+        timeline_count = ffrc_timeline_push(timeline_times,timeline_ranks,timeline_count,(now-start) / 1000,rank)
+        changed = 1
     walk_fields=" cpu_accepts="+accepted.to_s()+" cpu_no_pair="+no_pair.to_s()+" cpu_blocked="+(rejected-no_pair).to_s()
     # Read experimental counters only after every worker has joined. Match
     # its next epoch to baseline worker time instead of making the cohort
@@ -314,15 +397,19 @@ use ../rect/campaign
         if directed_steps>steps
           directed_steps=steps
       directed_fields=ffws_directed_fields(contexts,directed_lane,directed_steps)
-    if changed != 0 && ffrf_atomic(best_path,ffpk_blob(best,rank,n,n,n),"wide") != 1
-      failure=1
-      stop[0]=1
+    if changed != 0
+      z = refinement.submit(best,words,rank,n,n,n)
+      if ffrf_atomic(best_path,ffpk_blob(best,rank,n,n,n),"wide") != 1
+        failure=1
+        stop[0]=1
     round += 1
   if ccall("__w_interrupted") != 0
     stop_requested=1
   if tui != 0
     z=ccall("w_term_raw_disable")
-  status="mode=wide-cpu tensor="+tensor+" backend=packed-cpu rank="+rank.to_s()+" bits="+density.to_s()+" cpu_lanes="+workers.to_s()+" cpu_moves="+moves.to_s()+" gpu_supported=0 gpu_moves=0 round="+round.to_s()+" producer_state=stopped stop_requested="+stop_requested.to_s()+" next_requested="+next_requested.to_s()+" exact_rejects="+failure.to_s()+seed_fields+directed_fields+walk_fields+cycle_fields+"\n"
+  if refinement.stop() != 1
+    failure = 1
+  status="mode=wide-cpu tensor="+tensor+" backend=packed-cpu rank="+rank.to_s()+" bits="+density.to_s()+" cpu_lanes="+workers.to_s()+" cpu_moves="+moves.to_s()+" gpu_supported=0 gpu_moves=0 round="+round.to_s()+" producer_state=stopped stop_requested="+stop_requested.to_s()+" next_requested="+next_requested.to_s()+" exact_rejects="+failure.to_s()+seed_fields+directed_fields+walk_fields+refinement.status_fields()+cycle_fields+"\n"
   if ffrf_atomic(status_path,status,"wide") != 1
     failure=1
   if quiet == 0

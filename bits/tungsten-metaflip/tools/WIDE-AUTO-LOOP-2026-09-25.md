@@ -1,5 +1,48 @@
 # Bounded exact wide-tensor feedback loop
 
+## Live packed bridge (2026-09-26)
+
+The 8×8–16×16 square campaign now connects automatically to the native cold
+transform queue. Initial seeds, strict leader improvements, and one fair
+joined-island sample per second enter a durable MFW intake. Samples include
+equal-rank representations regardless of density; the complete canonical
+term set, not a rank or hull signature, is the deduplication identity. Intake
+is not admission: the child must verify the full tensor before cleanup,
+projection/basis/walk/composition successors, or archive credit.
+
+One low-priority native child executes at most four existing queue tasks per
+batch. Above 256 pending transforms, fresh roots remain in the durable intake
+queue rather than being acknowledged and lost. Checked same-shape outputs
+can reseed one joined island; cumulative move/accept/reject counters survive
+that replacement. Other live packed squares receive up to four distinct MFW
+seed offers for their next campaign, and smaller eligible descendants use the
+existing narrow feedback bank. Every seed crosses its complete tensor check
+again before use. A verification budget exhaustion is an explicit non-admission.
+Stop/next-shape requests stop and join the child as well as the CPU islands.
+The TUI keeps its layout and replaces the old “refinement unavailable” row
+with queue/output/seed/failure counters. There is no new public switch.
+
+Focused evidence: native fixture cleanup 8×8×8/r513→r512 and checked reseeding;
+different rank-512 presentations retained; order-invariant dedup; high-water
+deferral and crash replay; cross-shape offers; rejection of an inexact object
+even with internally consistent hashes; and a four-second, two-lane public
+run that adopted one exact rank tie while flipping continued. The disabled
+control created no queue. Real 8×8 and 16×16 terminal tests passed resize and
+quit, and the clean manifest-based package passes layout and all 402 runtime
+file checks. These fixtures establish plumbing, not records or improved yield.
+
+The existing native walk/pair/tied-pair controls still pass. The large
+projected-basis control reaches its 30-second harness timeout with both packed
+publication enabled and disabled; the full wide queue suite is therefore not
+claimed green. The working tree's ignored generated GPU sidecars also make
+its physical-layout check fail; the manifest-only package excludes those
+artifacts without deleting unrelated local files.
+
+This connects the live packed backend to the **existing bounded native**
+portfolio, including its eligible shared-pair arm. It does not transplant all
+of the richer offline block/Kronecker closure materializer described below.
+That integration and exposure-matched search-yield measurements remain work.
+
 `search_wide_auto_loop.py` closes the offline handoff that was previously
 manual: verified parent → basis/projection candidates → native directed walks
 → exact admission and GF(2) closure repricing → Strassen and shared-factor

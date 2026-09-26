@@ -4,6 +4,7 @@
 use packed
 use pages
 use counters
+use packed_feedback
 
 -> ffwf_valid_record(raw) (String) i64
   if raw == nil || raw == ""
@@ -79,6 +80,8 @@ use counters
     return 0-1
   if rank < 1 || rank > 16384 || ffpk_stride(n, m, p) == 0
     return 0
+  if ffrf_shape_valid(n,m,p) != 1
+    return ffpf_offer(root,"packed-feedback",identity,blob,rank,n,m,p)
   if rank > ffrf_capacity() || ffrf_shape_valid(n, m, p) != 1
     return 1
   if ffrf_hash_valid(identity) != 1 || Crypto:SHA256.hexdigest(blob) != identity
@@ -115,7 +118,7 @@ use counters
   ffrf_atomic(queue + "submitted", (submitted+1).to_s() + "\n", "feedback")
 
 -> ffwf_cleanup(root, source, n, m, p) (String String i64 i64 i64) i64
-  if env("METAFLIP_WIDE_FEEDBACK") == "0" || ffrf_shape_valid(n, m, p) != 1
+  if env("METAFLIP_WIDE_FEEDBACK") == "0"
     return 1
   raw = File.read_prefix(root + "/composition/cleanup/results/" + source, 320)
   if raw == nil

@@ -176,7 +176,7 @@ def walk(args):
             done.add((row['seed'], row['nonce'], row['steps']))
     work = []
     for repeat in range(args.repeats):
-        for seed in sorted(rows, key=lambda row: row['gf2_rank']):
+        for seed in sorted(rows, key=lambda row: row['gf2_rank'], reverse=args.largest_first):
             nonce = args.nonce_base + 7919 * repeat + zlib.crc32(seed['shape'].encode()) % 1000003
             if (seed['mfw'], nonce, args.steps) not in done:
                 work.append((seed, nonce))
@@ -220,6 +220,7 @@ def main(argv=None):
     w.add_argument('--repeats', type=int, default=1, help='independent nonces per seed')
     w.add_argument('--nonce-base', type=int, default=1)
     w.add_argument('--min-rank', type=int, default=0)
+    w.add_argument('--largest-first', action='store_true', help='queue high-rank seeds first')
     w.set_defaults(func=walk)
     args = parser.parse_args(argv)
     return args.func(args)

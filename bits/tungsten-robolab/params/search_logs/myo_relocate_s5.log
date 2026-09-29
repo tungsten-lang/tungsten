@@ -1,0 +1,77 @@
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+search myo_relocate: 49 tunables ['servo_i', 'servo_lim', 'pron_i', 'pron_lim', 'kv', 'ox', 'oy', 'z_above', 'z_grasp', 'k_touch', 'z_lift', 'z_clear', 'cx', 'cy', 'z_carry', 'z_low', 'r_reach', 'r_xy', 'r_drop', 't_retry', 'd_lost', 'grip_th', 't_reach', 't_desc', 't_close', 't_lift', 't_carry', 't_low', 'to_close', 'to_lift', 'to_carry', 't_hold', 'kp_arm', 'kp_hand', 'kp_pron', 'stiff_grip', 'f_open', 'thabd_open', 'thflex_open', 'f_close', 'pip_close', 'dip_close', 'thabd_close', 'thflex_close', 'dps', 'dflex', 'dps_carry', 'dflex_carry', 'squeeze'], pop 16, k=16 (fixed seeds), workers 2
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+gen 1 best 0.4837 gen-best 0.4837 gen-mean 0.2778 sigma 0.094 (33s) succ 0.1875 eff 0.23964 {'success_lift': 0.125, 'max_held_z': 0.95297, 'pinch_err': 0.0291, 'touch_max': 59.06188}
+gen 2 best 0.4837 gen-best 0.3544 gen-mean 0.2398 sigma 0.090 (66s) succ 0.125 eff 0.25908 {'success_lift': 0.0625, 'max_held_z': 0.93181, 'pinch_err': 0.03311, 'touch_max': 46.115}
+gen 3 best 0.4837 gen-best 0.2515 gen-mean 0.1989 sigma 0.087 (96s) succ 0.0625 eff 0.23984 {'success_lift': 0.0, 'max_held_z': 0.92683, 'pinch_err': 0.04215, 'touch_max': 74.22625}
+gen 4 best 0.4837 gen-best 0.2479 gen-mean 0.2042 sigma 0.085 (127s) succ 0.0625 eff 0.2617 {'success_lift': 0.0, 'max_held_z': 0.93873, 'pinch_err': 0.06085, 'touch_max': 67.595}
+gen 5 best 0.4837 gen-best 0.2706 gen-mean 0.2081 sigma 0.083 (158s) succ 0.0625 eff 0.22995 {'success_lift': 0.0, 'max_held_z': 0.95332, 'pinch_err': 0.05258, 'touch_max': 111.63062}
+gen 6 best 0.4837 gen-best 0.3639 gen-mean 0.2136 sigma 0.082 (189s) succ 0.125 eff 0.20522 {'success_lift': 0.0625, 'max_held_z': 0.94283, 'pinch_err': 0.04173, 'touch_max': 61.61813}
+gen 7 best 0.4837 gen-best 0.3890 gen-mean 0.2161 sigma 0.082 (220s) succ 0.125 eff 0.25448 {'success_lift': 0.0625, 'max_held_z': 0.97172, 'pinch_err': 0.07111, 'touch_max': 101.65937}
+gen 8 best 0.4837 gen-best 0.2467 gen-mean 0.2008 sigma 0.082 (252s) succ 0.0 eff 0.2682 {'success_lift': 0.0, 'max_held_z': 0.95148, 'pinch_err': 0.05959, 'touch_max': 68.62063}
+gen 9 best 0.4837 gen-best 0.2759 gen-mean 0.2117 sigma 0.082 (284s) succ 0.0625 eff 0.24774 {'success_lift': 0.0, 'max_held_z': 0.95553, 'pinch_err': 0.07002, 'touch_max': 118.13625}
+gen 10 best 0.4837 gen-best 0.2677 gen-mean 0.2194 sigma 0.082 (315s) succ 0.0625 eff 0.28443 {'success_lift': 0.0, 'max_held_z': 0.94046, 'pinch_err': 0.05533, 'touch_max': 80.02188}
+gen 11 best 0.4837 gen-best 0.3085 gen-mean 0.2188 sigma 0.081 (347s) succ 0.125 eff 0.26968 {'success_lift': 0.0, 'max_held_z': 0.97571, 'pinch_err': 0.07772, 'touch_max': 158.6025}
+gen 12 best 0.4837 gen-best 0.2481 gen-mean 0.2158 sigma 0.081 (378s) succ 0.0 eff 0.28814 {'success_lift': 0.0, 'max_held_z': 0.94633, 'pinch_err': 0.069, 'touch_max': 91.84313}
+gen 13 best 0.4837 gen-best 0.2558 gen-mean 0.2180 sigma 0.081 (407s) succ 0.125 eff 0.2733 {'success_lift': 0.0, 'max_held_z': 0.95386, 'pinch_err': 0.05757, 'touch_max': 57.96187}
+gen 14 best 0.4837 gen-best 0.2614 gen-mean 0.2238 sigma 0.081 (439s) succ 0.125 eff 0.30762 {'success_lift': 0.0, 'max_held_z': 0.9564, 'pinch_err': 0.06484, 'touch_max': 81.82563}
+gen 15 best 0.4837 gen-best 0.3637 gen-mean 0.2201 sigma 0.081 (473s) succ 0.125 eff 0.30845 {'success_lift': 0.0625, 'max_held_z': 0.95914, 'pinch_err': 0.07429, 'touch_max': 80.72062}
+gen 16 best 0.4837 gen-best 0.2994 gen-mean 0.2329 sigma 0.082 (506s) succ 0.0 eff 0.27636 {'success_lift': 0.0, 'max_held_z': 0.95195, 'pinch_err': 0.06903, 'touch_max': 58.25812}
+gen 17 best 0.4837 gen-best 0.2648 gen-mean 0.2277 sigma 0.082 (537s) succ 0.0625 eff 0.25916 {'success_lift': 0.0, 'max_held_z': 0.95518, 'pinch_err': 0.06808, 'touch_max': 78.78187}
+gen 18 best 0.4837 gen-best 0.2989 gen-mean 0.2367 sigma 0.083 (568s) succ 0.125 eff 0.25354 {'success_lift': 0.0625, 'max_held_z': 0.93675, 'pinch_err': 0.07472, 'touch_max': 110.26687}
+gen 19 best 0.4837 gen-best 0.2784 gen-mean 0.2326 sigma 0.083 (601s) succ 0.0625 eff 0.25254 {'success_lift': 0.0, 'max_held_z': 0.95057, 'pinch_err': 0.07708, 'touch_max': 111.43688}
+gen 20 best 0.4837 gen-best 0.2569 gen-mean 0.2119 sigma 0.082 (633s) succ 0.0625 eff 0.24775 {'success_lift': 0.0, 'max_held_z': 0.94085, 'pinch_err': 0.07621, 'touch_max': 65.30125}
+gen 21 best 0.4837 gen-best 0.2408 gen-mean 0.2101 sigma 0.082 (664s) succ 0.0625 eff 0.21661 {'success_lift': 0.0, 'max_held_z': 0.94667, 'pinch_err': 0.08173, 'touch_max': 64.43562}
+gen 22 best 0.4837 gen-best 0.2594 gen-mean 0.2083 sigma 0.082 (696s) succ 0.125 eff 0.22818 {'success_lift': 0.0, 'max_held_z': 0.93721, 'pinch_err': 0.0605, 'touch_max': 114.69187}
+gen 23 best 0.4837 gen-best 0.2720 gen-mean 0.2288 sigma 0.082 (726s) succ 0.0625 eff 0.22632 {'success_lift': 0.0, 'max_held_z': 0.94309, 'pinch_err': 0.04657, 'touch_max': 80.30437}
+gen 24 best 0.4837 gen-best 0.2901 gen-mean 0.2395 sigma 0.081 (757s) succ 0.0625 eff 0.21371 {'success_lift': 0.0625, 'max_held_z': 0.94269, 'pinch_err': 0.0794, 'touch_max': 104.88375}
+gen 25 best 0.4837 gen-best 0.3721 gen-mean 0.2281 sigma 0.081 (784s) succ 0.1875 eff 0.20089 {'success_lift': 0.0625, 'max_held_z': 0.95086, 'pinch_err': 0.04585, 'touch_max': 132.26438}
+gen 26 best 0.4837 gen-best 0.2528 gen-mean 0.2245 sigma 0.080 (812s) succ 0.0625 eff 0.19849 {'success_lift': 0.0, 'max_held_z': 0.94961, 'pinch_err': 0.06771, 'touch_max': 80.13438}
+gen 27 best 0.4837 gen-best 0.2688 gen-mean 0.2312 sigma 0.079 (839s) succ 0.0625 eff 0.24095 {'success_lift': 0.0, 'max_held_z': 0.94012, 'pinch_err': 0.04238, 'touch_max': 77.46437}
+gen 28 best 0.4837 gen-best 0.2700 gen-mean 0.2276 sigma 0.077 (867s) succ 0.0625 eff 0.25491 {'success_lift': 0.0, 'max_held_z': 0.95298, 'pinch_err': 0.06714, 'touch_max': 87.57375}
+gen 29 best 0.4837 gen-best 0.2806 gen-mean 0.2266 sigma 0.076 (895s) succ 0.125 eff 0.2314 {'success_lift': 0.0, 'max_held_z': 0.94219, 'pinch_err': 0.05198, 'touch_max': 60.39312}
+gen 30 best 0.4837 gen-best 0.3243 gen-mean 0.2220 sigma 0.074 (923s) succ 0.125 eff 0.25252 {'success_lift': 0.0625, 'max_held_z': 0.93644, 'pinch_err': 0.05006, 'touch_max': 72.3825}
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 0.6080.
+
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 0.5780.
+
+WARNING: Nan, Inf or huge value in CTRL at ACTUATOR 37. The simulation is unstable. Time = 1.0800.
+
+WARNING: Nan, Inf or huge value in QACC at DOF 0. The simulation is unstable. Time = 1.0800.
+
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 0.7500.
+
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 1.3920.
+
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 1.1800.
+
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 1.0000.
+
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 1.2720.
+
+done 0.48366093750000005 {'episodes': 16, 'errors': 0, 'steps': 149.125, 'time': 1.49125, 'solved': 0.1875, 'solved_final': 0.125, 'sparse_sum': -603.77541, 'dense_sum': -3491.05482, 'effort': 0.26249, 'success': 0.1875, 'solved_steps': 5.75, 'success_lift': 0.125, 'min_dist_lift': 0.88165, 'min_dist': 0.17129, 'final_dist': 0.20401, 'max_obj_z': 0.95498, 'max_held_z': 0.95297, 'effort_official': 0.06126, 'act_sq': 0.23964, 'pinch_err': 0.0291, 'pinch_z': 0.942, 'touch_max': 59.06188, 'seed': 3007.5, 'success_ci95': [0.0659, 0.4301]}

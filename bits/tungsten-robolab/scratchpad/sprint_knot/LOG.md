@@ -51,3 +51,20 @@ All campaign state lives in the repo (scratchpad/sprint_knot/, out/, params/). N
   Killed p2 (sep_cma robust, best 645.13, saved p2_snap.txt); h2 = hsearch ES from p2_snap (30 s x seeds 31-36, sigma 0.02, lam 24, budget 2400).
   Also: try.py knot stance seeded from the v4 P95 ideal (9 m/s) on the 6.6 m/s extended gait falls (TD knee comes out 0.81 not 0.54): knots do not work out of the box on v4 either.
   NOTE zsh: unquoted $FILES does not word-split (screen.py got one file name); use arrays.
+- 02:32 (clock) ARENA sprint_top_speed_v4: a2 (params/run_ri_v4_avg_a2.txt, run_ri-v4base) PROMOTED over v4r1: 5.875 m/s on 11/12 (seed 226 falls again), paired diff +1.125, p 0.001.
+  72 % of the 8.2 average-body ceiling (was 56.7 %). Held-out 51-62: 1 fall (seed 61). NOTE arena test: a challenger that only rescues a fall (giant paired diff) cannot win
+  (p ~0.2): the champion's own fall on 226 is protected unless a later challenger is faster on ~all 11 other seeds.
+  Machine load average 140-150 (other agents), my rollouts run at ~8 % CPU: ~0.2 rollouts/s per 4 workers, i.e. ~700 rollouts/hour per search. Prune everything.
+  screen.py over all 66 older runner param files: nothing beats the new P95/avg results; all old v3 P95/elite files FALL on v4 P95; ri2_init.txt (old avg RunRI) gives 5.41 on avg v4 without tuning.
+- 02:55 (clock) FALL DIAGNOSIS on P95 (crouched gait p2_snap = sep-CMA robust stage output, 7.05 m/s): 14/40 fresh seeds (71-110) fall, 7/24 of (51-62 + arena seeds), all LATE
+  (13-30 s) except a few 5 s tumbles. Mechanism = swing-foot TRIP (scuffs 4/s, foot clearance ~0); k_clear/clear_h/heel_tuck fix most of it at no speed cost:
+  hard seeds 79,83,85,87,88,90,94,96 (p2_snap falls 8/8): k_clear 2 -> 4/8 falls; clear_h 0.16 + k_clear 2 -> 1/8; + heel_tuck 0.6 -> 0/8 (peak 7.01). Written as p2a.txt.
+  But p2a on 64 seeds (40 fresh + 24) still falls 15/64 (early trunk tumble at 5 s on seeds 101/57/221/225, late falls 15-28 s): not enough alone.
+  h2 (ES, seeds 31-36, all survivors: no signal) reached 655.6 but was killed (snap h2_snap.txt). h3 = ES robust stage on MINED HARD SEEDS 101,93,104,76,102,82 (+ passing 75,88), 30 s, from p2a.
+  Held-out 51-62 and the arena seeds are never trained on.
+  p1_snap1 (extended-knee 6.6 m/s gait): 13/24 fall (early, acceleration phase): not a candidate.
+  Flying starts do not work for this gait: fly_entry with the champion's OWN snapshots falls in 0.7 s (controller state mismatch): dropped.
+- 03:05 (clock) e1 (elite2 speed stage from a2; sep-CMA) stalled at 499.7 (peak 6.42, steady 6.29, 69 % of the elite2 ceiling 9.28) since gen 7; killed, saved e1_snap.txt.
+  a2 (avg) on 40 fresh seeds 71-110: 4 falls, ALL at 4-5 s (seeds 84, 89, 90, 105): a start-phase problem, not trips.
+  hsearch gained GATE seeds ("84g10" = run 10 s and count only if the candidate falls) and sprint_touch_v4 gained the practice attribute start_noise (default 1.0 = arena).
+  a3 = avg robust stage: ES from a2, gates 84,89,90,105 (10 s) + full seeds 31-34 (30 s), objective 2, budget 3000.

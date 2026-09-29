@@ -46,3 +46,35 @@ All campaign state lives in the repo: scratchpad/soccer4/, params/, out/. Nothin
   holds the right leg about as well as the left, so the stork blocker of phase 2 was the parent's run-up shift/lift, not the leg.
 - 02:14 features (scan/feat_90200.json, 120 seeds): fail predictors in the first 2 s: roll_max AUC 0.79 (0.84 for early falls), foot yaw
   drift 0.85 (early), yaw_max 0.73-0.80, min foot load in the set 0.80 (inverted). Base pass 105/120.
+- 02:20 120 training seeds (90000-90119), 8 s, lift params, pass = standing to 8 s with >= 3 s on one leg (scratchpad/soccer4/cmp_scans.py):
+  baseline 100/120 (83.3 %); b_g_set 2.0 (bgset) 80/120 (66.7 %, z -3.0: the 10-seed 8/10 was luck); **bramp b_t_ramp 0.2: 110/120
+  (91.7 %, z +1.95, fixed 12 / broke 2)**. Seeds are partly persistent (not pure re-rolls). Retry+catch (bretry/bcout) rescued 0 of
+  11 failing seeds (an outward roll runaway is lost by the time the swing foot is down: a second foot on the inner side does not
+  stop an outward fall). cp_kh -6 vs -13.86 on 7 hold-failing + 6 passing training seeds (paired: pre-lift identical): 11/13, fixed 5
+  of the 7 hold failures, broke none of the 6 controls.
+- 02:22 failing shifts (90041, 90085, 89117): the COM drifts backward 0.1-0.6 m over ~2 s while both ankles sit at their dorsiflexion
+  limit (+0.524) and the lateral shift stalls at 0.7/0.3 load; new opt-in switches dsx (double-support sagittal hip strategy) and dsi
+  (lateral integral of the weight shift), controllers soccer6-f (dsx), soccer6-g (+dsi). Scans queued/running.
+- 02:40 120 training seeds, 8 s (cmp_scans.py): baseline 100/120 (83.3 %); bramp b_t_ramp 0.2: 110 (91.7 %); **b_t_ramp 0.15: 113 (94.2 %, fixed 14, broke 1,
+  z +2.66)**; b_t_ramp 0.2 + cp_kh -6: 108; dsx (k 3, lim 0.05): 100 (fixed 3 broke 3); dsx k 8 lim 0.04: 94 (worse). The set chunk's ramp
+  from the reset posture (hip +0.15) to the stance (-0.26) wants to be FAST (0.45, 0.8 s were worse than 0.3). Queued b_t_ramp 0.1 and 0.05.
+- 02:36 P2: p1trace/p1probe data: the phase-1 kick under joint noise x0.1 (+-0.002 rad): the plant lands 30 ms later, the snap fires
+  at the same toe-ball distance (0.49-0.59 m) but the toe's LATERAL offset from the ball at the snap grows from 2 cm to 8-21 cm and
+  the ball leaves at 2-7 m/s; k_ky (lateral aim servo) 1.24 -> 6 changes nothing. New V4 switches: sd (snap fired by toe-ball
+  distance; likely inert: the distance is consistent), k6 (the routine's set/shift/lift/hold on the RIGHT leg -> the parent's reach,
+  plant, kick; the hold is an attractor so the reach starts from a repeatable state). soccer6-i replays the balance routine and the
+  phase-1 champion exactly (6/6 12.29 m/s at the exact start). k6 untuned: reach fails (falls 2.45 s at noise 0; hold reached in 6/6
+  noise-1 seeds at 2.2-2.9 s).
+- 02:54 start ramp sweep (120 training seeds, 8 s): b_t_ramp 0.3 83.3 % | 0.2 91.7 | 0.15 94.2 | 0.1 96.7 | 0.05 97.5 % (z +3.7, fixed 19 broke 2). Monotone:
+  the faster the reset posture is replaced by the stance the better. NOTE the ramp change also shortens the set's minimum time by the
+  same amount (the hold is b_t_set + ramp - 0.3): queued 0.05 + b_t_set 0.86 (total min set time kept at 0.61), 0.02 and 0.02 + b_t_set 0.89.
+- 03:10 confound check (120 training seeds, 8 s): ramp 0.05 97.5 % | ramp 0.05 + b_t_set 0.86 (set min time kept) 95.0 % | ramp 0.02 97.5 % | ramp 0.02 + b_t_set 0.89
+  93.3 %: the ramp is the main effect, a shorter total set adds ~2 %. Remaining failures with the fast ramp are all at ~2.5-3 s in
+  b_down_l (lift falls caught by the put-down: 90012, 90042, 90100 at 0.05); the shift failures are gone.
+  Arena: params/myo_soccer_single_leg_310_ramp.txt (lift params + bramp 1, b_t_ramp 0.05) + bin/challengers/soccer6-i evaluating on
+  soccer_single_leg_310_40 since 02:55 (arena_310_40_ramp.out); the lift challenger's eval (02:13) is at 23/40 rollouts.
+  Validation (fresh seeds 91000-91119, 20 s): scan/val20_ramp.out vs scan/val20_lift.out started 03:10.
+- 03:07 P2 stage A (k6 + reach, noise 1, P1 position): the search (p2/A.txt, 4 min/generation) is at plant7 score 4.3 (of ~13); the reach never lands the
+  left foot within its 1.2 s timeout: from the routine's centred right-leg hold the plant spot is 0.75 m ahead, and the parent's run-up
+  gets there dynamically (COM leaning ahead at the lift: shift_x/d_go/x_step). A second search A2 (rk4 1: the routine's terms in the reach)
+  runs in parallel (p2/A2.out).

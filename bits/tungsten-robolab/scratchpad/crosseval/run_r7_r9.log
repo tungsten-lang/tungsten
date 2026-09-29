@@ -1,0 +1,23 @@
+== search_jump_robust_legal Tue Sep 29 02:02:18 EDT 2026
+search_jump_robust_legal: mark = 1.3397 ± 0.0043 over 32 seeds (7s)
+challenger WINS champion (1.3153, P6 convolutional keyframe policy: quintic knots (c, cdot, cddot per muscle) + residual causal TCN (1302 weights, zero-init head) on the legal champion, joint sep-CMA-ES 3200 rollouts (0.003 rad training starts, strict scoring)): mean paired diff +0.0243, p = 0.000
+promoted to champion
+== done search_jump_robust_legal rc=0 Tue Sep 29 02:02:25 EDT 2026
+== search_jump_legal Tue Sep 29 02:02:25 EDT 2026
+search_jump_legal: mark = 1.3490 ± 0.0056 over 8 seeds (2s)
+challenger does not beat champion (1.3630, gpt: recovery tcn; matched-budget winner (Codex, worktree robolab-challengers; approved by Erik 9/27)): mean paired diff -0.0140, p = 1.000
+== done search_jump_legal rc=0 Tue Sep 29 02:02:27 EDT 2026
+== dribble_crossover_25 Tue Sep 29 02:02:27 EDT 2026
+dribble_crossover_25: x_ok = 9.0800 ± 0.7239 over 25 seeds (52s)
+challenger WINS champion (7.5200, gpt: dribble tcn; matched-budget campaign winner (Codex, worktree robolab-challengers; approved by Erik 9/27)): mean paired diff +1.5600, p = 0.006
+promoted to champion
+== done dribble_crossover_25 rc=0 Tue Sep 29 02:03:19 EDT 2026
+== dribble_crossover Tue Sep 29 02:03:19 EDT 2026
+dribble_crossover: x_ok = 9.4000 ± 1.7087 over 10 seeds (23s)
+challenger does not beat champion (7.3000, gpt: dribble tcn (the dribble_crossover_25 winner) (Codex, worktree robolab-challengers; approved by Erik 9/27)): mean paired diff +2.1000, p = 0.092
+== done dribble_crossover rc=0 Tue Sep 29 02:03:42 EDT 2026
+== dribble_arms_only Tue Sep 29 02:03:42 EDT 2026
+dribble_arms_only: trunk_share_if_dribbling = 0.2039 ± 0.1734 over 10 seeds (23s)
+challenger does not beat champion (0.1823, round 1: right-hand dribble with trunk pump (v1 body)): mean paired diff -0.0216, p = 0.502
+== done dribble_arms_only rc=0 Tue Sep 29 02:04:05 EDT 2026
+ALL DONE Tue Sep 29 02:04:05 EDT 2026

@@ -1,0 +1,42 @@
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+opt myo_relocate sep_cma: 46 tunables, k=8 (fresh seeds), budget 6000, workers 2
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+1208 rollouts best 0.6244 ask-best 0.4306 (150s) {'success': 0.25, 'success_lift': 0.125, 'max_held_z': 0.99541, 'pinch_err': 0.02325} {'sigma': 0.07916218074956412, 'cond': 1.6521900279628585}
+2408 rollouts best 0.7554 ask-best 0.7554 (308s) {'success': 0.25, 'success_lift': 0.125, 'max_held_z': 1.02473, 'pinch_err': 0.02206} {'sigma': 0.06777149928102982, 'cond': 2.155563994882148}
+3608 rollouts best 0.9694 ask-best 0.6194 (464s) {'success': 0.375, 'success_lift': 0.375, 'max_held_z': 1.03046, 'pinch_err': 0.03443} {'sigma': 0.05787310194085177, 'cond': 2.786715871446515}
+4808 rollouts best 0.9694 ask-best 0.6987 (640s) {'success': 0.375, 'success_lift': 0.375, 'max_held_z': 1.03046, 'pinch_err': 0.03443} {'sigma': 0.04828041157980584, 'cond': 3.1750830620280195}
+6008 rollouts best 1.0233 ask-best 0.4874 (815s) {'success': 0.625, 'success_lift': 0.375, 'max_held_z': 1.00873, 'pinch_err': 0.01562} {'sigma': 0.04653624763204355, 'cond': 3.741455141752078}
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 1.3520.
+
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 0.7880.
+
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 1.0880.
+
+WARNING: Nan, Inf or huge value in QACC at DOF 0. The simulation is unstable. Time = 1.1860.
+
+done 1.023315625 {'episodes': 8, 'errors': 0, 'steps': 148.25, 'time': 1.4825, 'solved': 0.625, 'solved_final': 0.5, 'sparse_sum': -628.00767, 'dense_sum': -3447.74193, 'effort': 0.27081, 'success': 0.625, 'solved_steps': 21.125, 'success_lift': 0.375, 'min_dist_lift': 0.55614, 'min_dist': 0.12315, 'final_dist': 0.1552, 'max_obj_z': 1.01134, 'max_held_z': 1.00873, 'effort_official': 0.06193, 'act_sq': 0.24528, 'pinch_err': 0.01562, 'pinch_z': 0.94196, 'touch_max': 75.17125, 'seed': 633818.75, 'success_ci95': [0.3057, 0.8632]}

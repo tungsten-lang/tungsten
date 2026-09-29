@@ -1,0 +1,44 @@
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+opt myo_baoding sep_cma: 62 tunables, k=8 (fresh seeds), budget 4000, workers 3
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+648 rollouts best 0.4714 ask-best 0.4277 (45s) {'score': 0.06375, 'held_frac': 1.0, 'mean_err': 0.03205} {'sigma': 0.025768917222306252, 'cond': 1.2541345223174212}
+1288 rollouts best 0.5340 ask-best 0.5340 (94s) {'score': 0.12125, 'held_frac': 0.97437, 'mean_err': 0.02942} {'sigma': 0.024822430643375894, 'cond': 1.9248522099185585}
+1928 rollouts best 0.6224 ask-best 0.4774 (145s) {'score': 0.21938, 'held_frac': 0.95, 'mean_err': 0.02996} {'sigma': 0.02302864575953999, 'cond': 2.1055577001723864}
+2568 rollouts best 0.6224 ask-best 0.5598 (193s) {'score': 0.21938, 'held_frac': 0.95, 'mean_err': 0.02996} {'sigma': 0.021361558306015528, 'cond': 2.0676825146110507}
+3208 rollouts best 0.6224 ask-best 0.5478 (239s) {'score': 0.21938, 'held_frac': 0.95, 'mean_err': 0.02996} {'sigma': 0.019581268460624558, 'cond': 2.0223457732833774}
+3848 rollouts best 0.6224 ask-best 0.4028 (287s) {'score': 0.21938, 'held_frac': 0.95, 'mean_err': 0.02996} {'sigma': 0.01898016103246374, 'cond': 2.2959526591405996}
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+done 0.7198765 {'episodes': 8, 'errors': 0, 'steps': 196.375, 'time': 4.90937, 'solved': 0.875, 'solved_final': 0.375, 'sparse_sum': -10.83076, 'dense_sum': -54.15381, 'effort': 0.05801, 'score': 0.29313, 'solved_steps': 58.625, 'held_frac': 0.98188, 'mean_err': 0.02756, 'turn': -0.10975, 'mid_err': 0.00402, 'effort_official': 0.03699, 'act_sq': 0.05696, 'seed': 431915.0}

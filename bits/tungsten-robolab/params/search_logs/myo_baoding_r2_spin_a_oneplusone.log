@@ -1,0 +1,39 @@
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+opt myo_baoding_spin oneplusone: 72 tunables, k=4 (fixed seeds), budget 800, workers 1
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+44 rollouts best 1.0318 ask-best 0.4108 (116s) {'turn': -0.11775, 'held_frac': 1.0, 'mid_err': 0.00328} {'sigma': 0.1869329130942503, 'accepts': 0}
+84 rollouts best 1.1130 ask-best 0.4831 (146s) {'turn': -0.0495, 'held_frac': 1.0, 'mid_err': 0.0088} {'sigma': 0.18072309811619092, 'accepts': 1}
+124 rollouts best 1.1130 ask-best 0.2653 (456s) {'turn': -0.0495, 'held_frac': 1.0, 'mid_err': 0.0088} {'sigma': 0.16891547597138792, 'accepts': 1}
+164 rollouts best 1.1130 ask-best 0.4868 (466s) {'turn': -0.0495, 'held_frac': 1.0, 'mid_err': 0.0088} {'sigma': 0.15787930995016694, 'accepts': 1}
+204 rollouts best 1.1130 ask-best 0.5993 (754s) {'turn': -0.0495, 'held_frac': 1.0, 'mid_err': 0.0088} {'sigma': 0.14756419663147383, 'accepts': 1}
+244 rollouts best 1.1130 ask-best 1.0416 (764s) {'turn': -0.0495, 'held_frac': 1.0, 'mid_err': 0.0088} {'sigma': 0.13792302572367077, 'accepts': 1}
+284 rollouts best 1.1130 ask-best 0.6823 (782s) {'turn': -0.0495, 'held_frac': 1.0, 'mid_err': 0.0088} {'sigma': 0.12891176490649497, 'accepts': 1}
+324 rollouts best 1.1130 ask-best 0.7656 (981s) {'turn': -0.0495, 'held_frac': 1.0, 'mid_err': 0.0088} {'sigma': 0.12048925873046126, 'accepts': 1}
+364 rollouts best 1.1130 ask-best 0.4453 (985s) {'turn': -0.0495, 'held_frac': 1.0, 'mid_err': 0.0088} {'sigma': 0.11261704065525979, 'accepts': 1}
+404 rollouts best 1.1130 ask-best 0.8698 (989s) {'turn': -0.0495, 'held_frac': 1.0, 'mid_err': 0.0088} {'sigma': 0.10525915736870667, 'accepts': 1}
+444 rollouts best 1.1130 ask-best 0.5037 (993s) {'turn': -0.0495, 'held_frac': 1.0, 'mid_err': 0.0088} {'sigma': 0.0983820045838923, 'accepts': 1}
+484 rollouts best 1.1130 ask-best 1.0288 (1006s) {'turn': -0.0495, 'held_frac': 1.0, 'mid_err': 0.0088} {'sigma': 0.09195417356459436, 'accepts': 1}
+524 rollouts best 1.1130 ask-best 0.7504 (1011s) {'turn': -0.0495, 'held_frac': 1.0, 'mid_err': 0.0088} {'sigma': 0.08594630767801964, 'accepts': 1}
+564 rollouts best 1.1130 ask-best 0.7711 (1107s) {'turn': -0.0495, 'held_frac': 1.0, 'mid_err': 0.0088} {'sigma': 0.08033096831973473, 'accepts': 1}
+604 rollouts best 1.1130 ask-best 1.0573 (1114s) {'turn': -0.0495, 'held_frac': 1.0, 'mid_err': 0.0088} {'sigma': 0.07508250959844974, 'accepts': 1}
+644 rollouts best 1.1130 ask-best 0.8693 (1175s) {'turn': -0.0495, 'held_frac': 1.0, 'mid_err': 0.0088} {'sigma': 0.07017696120832612, 'accepts': 1}
+684 rollouts best 1.1233 ask-best 0.9481 (1315s) {'turn': 0.0205, 'held_frac': 0.95417, 'mid_err': 0.01123} {'sigma': 0.06784571874485242, 'accepts': 2}
+724 rollouts best 1.1363 ask-best 0.8913 (1435s) {'turn': 0.01775, 'held_frac': 0.97293, 'mid_err': 0.01305} {'sigma': 0.06559191895387304, 'accepts': 3}
+764 rollouts best 1.1363 ask-best 0.8997 (1708s) {'turn': 0.01775, 'held_frac': 0.97293, 'mid_err': 0.01305} {'sigma': 0.06130644242744729, 'accepts': 3}
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+done 1.1362711049539702 {'episodes': 4, 'errors': 0, 'steps': 116.75, 'time': 2.91875, 'solved': 0.75, 'solved_final': 0.0, 'sparse_sum': -6.65307, 'dense_sum': -33.26548, 'effort': 0.0348, 'score': 0.075, 'solved_steps': 9.0, 'held_frac': 0.97293, 'mean_err': 0.02885, 'turn': 0.01775, 'mid_err': 0.01305, 'effort_official': 0.02791, 'act_sq': 0.03624, 'spin': 1.0, 'seed': 1001.5}

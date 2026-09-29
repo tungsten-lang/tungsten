@@ -1,0 +1,114 @@
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+search myo_relocate: 44 tunables ['servo_i', 'servo_lim', 'pron_i', 'pron_lim', 'ox', 'oy', 'z_above', 'z_grasp', 'k_touch', 'z_lift', 'z_clear', 'cx', 'cy', 'z_carry', 'z_low', 'r_reach', 'r_xy', 't_retry', 'd_lost', 'grip_th', 't_reach', 't_desc', 't_close', 't_lift', 't_carry', 't_low', 'to_close', 'kp_arm', 'kp_hand', 'kp_pron', 'stiff_grip', 'f_open', 'thabd_open', 'thflex_open', 'f_close', 'pip_close', 'dip_close', 'thabd_close', 'thflex_close', 'dps', 'dflex', 'dps_carry', 'dflex_carry', 'squeeze'], pop 20, k=10 (fixed seeds), workers 2
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+gen 1 best 0.2233 gen-best 0.2233 gen-mean 0.1861 sigma 0.110 (34s) succ 0.0 eff 0.23794 {'success_lift': 0.0, 'max_held_z': 0.90185, 'pinch_err': 0.03758, 'touch_max': 55.34}
+gen 2 best 0.2775 gen-best 0.2775 gen-mean 0.2046 sigma 0.104 (78s) succ 0.0 eff 0.19599 {'success_lift': 0.0, 'max_held_z': 0.93385, 'pinch_err': 0.03814, 'touch_max': 35.401}
+gen 3 best 0.2775 gen-best 0.2163 gen-mean 0.1776 sigma 0.101 (114s) succ 0.2 eff 0.22798 {'success_lift': 0.0, 'max_held_z': 0.9, 'pinch_err': 0.0475, 'touch_max': 47.138}
+gen 4 best 0.2775 gen-best 0.2374 gen-mean 0.1758 sigma 0.098 (147s) succ 0.0 eff 0.18615 {'success_lift': 0.0, 'max_held_z': 0.91977, 'pinch_err': 0.05199, 'touch_max': 75.985}
+gen 5 best 0.3913 gen-best 0.3913 gen-mean 0.1960 sigma 0.096 (176s) succ 0.1 eff 0.19346 {'success_lift': 0.0, 'max_held_z': 0.97319, 'pinch_err': 0.04021, 'touch_max': 68.378}
+gen 6 best 0.3913 gen-best 0.2575 gen-mean 0.1820 sigma 0.095 (207s) succ 0.1 eff 0.19671 {'success_lift': 0.0, 'max_held_z': 0.92569, 'pinch_err': 0.04455, 'touch_max': 51.837}
+gen 7 best 0.3913 gen-best 0.2597 gen-mean 0.1855 sigma 0.094 (237s) succ 0.1 eff 0.19196 {'success_lift': 0.0, 'max_held_z': 0.9265, 'pinch_err': 0.05556, 'touch_max': 73.173}
+gen 8 best 0.3913 gen-best 0.2895 gen-mean 0.1977 sigma 0.093 (267s) succ 0.1 eff 0.21965 {'success_lift': 0.1, 'max_held_z': 0.9, 'pinch_err': 0.05855, 'touch_max': 44.474}
+gen 9 best 0.3913 gen-best 0.1948 gen-mean 0.1782 sigma 0.090 (302s) succ 0.1 eff 0.27212 {'success_lift': 0.0, 'max_held_z': 0.9, 'pinch_err': 0.07061, 'touch_max': 77.978}
+gen 10 best 0.3913 gen-best 0.2554 gen-mean 0.1798 sigma 0.087 (337s) succ 0.0 eff 0.21274 {'success_lift': 0.0, 'max_held_z': 0.92486, 'pinch_err': 0.03841, 'touch_max': 28.478}
+gen 11 best 0.3913 gen-best 0.2438 gen-mean 0.1857 sigma 0.087 (374s) succ 0.0 eff 0.20591 {'success_lift': 0.0, 'max_held_z': 0.93244, 'pinch_err': 0.04293, 'touch_max': 30.675}
+gen 12 best 0.3913 gen-best 0.2479 gen-mean 0.1944 sigma 0.087 (409s) succ 0.0 eff 0.22204 {'success_lift': 0.0, 'max_held_z': 0.93169, 'pinch_err': 0.06406, 'touch_max': 51.724}
+Process SpawnPoolWorker-2:
+Traceback (most recent call last):
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/pool.py", line 131, in worker
+    put((job, i, result))
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/queues.py", line 399, in put
+    self._writer.send_bytes(obj)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 200, in send_bytes
+    self._send_bytes(m[offset:offset + size])
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 427, in _send_bytes
+    self._send(header + buf)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 384, in _send
+    n = write(self._handle, buf)
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+BrokenPipeError: [Errno 32] Broken pipe
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/pool.py", line 136, in worker
+    put((job, i, (False, wrapped)))
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/queues.py", line 399, in put
+    self._writer.send_bytes(obj)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 200, in send_bytes
+    self._send_bytes(m[offset:offset + size])
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 427, in _send_bytes
+    self._send(header + buf)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 384, in _send
+    n = write(self._handle, buf)
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+BrokenPipeError: [Errno 32] Broken pipe
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 0.6480.
+
+Process SpawnPoolWorker-1:
+Traceback (most recent call last):
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/pool.py", line 131, in worker
+    put((job, i, result))
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/queues.py", line 399, in put
+    self._writer.send_bytes(obj)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 200, in send_bytes
+    self._send_bytes(m[offset:offset + size])
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 427, in _send_bytes
+    self._send(header + buf)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 384, in _send
+    n = write(self._handle, buf)
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+BrokenPipeError: [Errno 32] Broken pipe
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/pool.py", line 136, in worker
+    put((job, i, (False, wrapped)))
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/queues.py", line 399, in put
+    self._writer.send_bytes(obj)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 200, in send_bytes
+    self._send_bytes(m[offset:offset + size])
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 427, in _send_bytes
+    self._send(header + buf)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 384, in _send
+    n = write(self._handle, buf)
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+BrokenPipeError: [Errno 32] Broken pipe
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 1.0400.
+
+/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/resource_tracker.py:279: UserWarning: resource_tracker: There appear to be 6 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '

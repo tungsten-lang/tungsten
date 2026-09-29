@@ -1,0 +1,50 @@
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+opt myo_relocate sep_cma: 26 tunables, k=8 (fresh seeds), budget 3000, workers 3
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+1048 rollouts best 0.7813 ask-best 0.6482 (120s) {'success': 0.25, 'success_lift': 0.125, 'max_held_z': 1.03609, 'pinch_err_true': 0.02451} {'sigma': 0.05255374171832148, 'cond': 1.7693874915635766}
+2088 rollouts best 0.8148 ask-best 0.7191 (238s) {'success': 0.375, 'success_lift': 0.125, 'max_held_z': 1.07012, 'pinch_err_true': 0.03339} {'sigma': 0.05395095036716509, 'cond': 3.3419425251285744}
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 0.7040.
+
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 0.7360.
+
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 0.8020.
+
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 0.8740.
+
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 1.3020.
+
+done 0.8147906250000001 {'episodes': 8, 'errors': 0, 'steps': 150.0, 'time': 1.5, 'solved': 0.5, 'solved_final': 0.375, 'sparse_sum': -498.24294, 'dense_sum': -3197.47307, 'effort': 0.27591, 'success': 0.375, 'solved_steps': 21.25, 'success_lift': 0.125, 'min_dist_lift': 0.44289, 'min_dist': 0.12335, 'final_dist': 0.15246, 'max_obj_z': 1.0715, 'max_held_z': 1.07012, 'effort_official': 0.06228, 'act_sq': 0.24919, 'pinch_err': 0.03691, 'pinch_z': 0.93744, 'pinch_err_true': 0.03339, 'site_offset': 0.00666, 'touch_max': 96.92625, 'seed': 400247.5, 'success_ci95': [0.1368, 0.6943]}

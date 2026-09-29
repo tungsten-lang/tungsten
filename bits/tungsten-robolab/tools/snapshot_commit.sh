@@ -8,6 +8,9 @@
 #
 #   tools/snapshot_commit.sh --dry-run                # what would be committed
 #   tools/snapshot_commit.sh -m "robolab: <what changed>"
+#   tools/snapshot_commit.sh --only tools requirements README.md -m "..."   # just these paths (a partial snapshot;
+#       paths relative to the repo root or to bits/tungsten-robolab; directories are walked). Use it while agents are
+#       mid-edit in lib/ and playground/, so unverified sources do not ride along.
 #
 # Included: every file under bits/tungsten-robolab that is tracked or untracked
 # and not ignored (.gitignore already keeps out the venvs, out/, bin/robolab*,
@@ -20,9 +23,11 @@ set -euo pipefail
 BR=robolab-campaign-2026-09
 DRY=0
 MSG=""
+ONLY=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY=1 ;;
+    --only) shift; while [ $# -gt 0 ] && [ "${1#-}" = "$1" ]; do ONLY+=("$1"); shift; done; continue ;;
     -m) MSG="$2"; shift ;;
     --branch) BR="$2"; shift ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
@@ -39,11 +44,47 @@ git rev-parse --verify -q "refs/heads/$BR" >/dev/null || { echo "branch $BR does
 OLD=$(git rev-parse "refs/heads/$BR")
 
 LIST=$(mktemp /tmp/robolab_snapshot_files.XXXXXX)
+FORCE=$(mktemp /tmp/robolab_snapshot_force.XXXXXX)
 IDX=$(mktemp -u /tmp/robolab_snapshot_index.XXXXXX)
-trap 'rm -f "$LIST" "$IDX"' EXIT
+trap 'rm -f "$LIST" "$FORCE" "$IDX"' EXIT
 
-git ls-files -co --exclude-standard -z -- "$rel" | python3 -c '
+MODE=all
+if [ "${#ONLY[@]}" -gt 0 ]; then
+  MODE=only
+  : > "$FORCE"
+  printf '%s\0' "${ONLY[@]}" | python3 -c '
 import os, sys
+rel = "bits/tungsten-robolab"
+args = [a for a in sys.stdin.buffer.read().decode().split("\0") if a]
+found = []
+for a in args:
+    p = a if os.path.exists(a) else os.path.join(rel, a)
+    if os.path.isdir(p):
+        for d, _, fs in os.walk(p):
+            found += [os.path.join(d, f) for f in fs]
+    elif os.path.isfile(p):
+        found.append(p)
+    else:
+        sys.stderr.write("only: no such path %s\n" % a)
+keep = []
+for f in sorted(set(found)):
+    b = os.path.basename(f)
+    ext = b.rsplit(".", 1)[-1].lower() if "." in b else ""
+    if f.endswith("playground/arena/.lock") or ".dSYM" in f or "__pycache__" in f or ext == "pyc":
+        continue
+    if "/scratchpad/" in f and (ext in ("gif", "mp4", "png", "pid", "sidemap", "o", "dylib") or "." not in b):
+        continue
+    if os.path.getsize(f) > 2_000_000:
+        sys.stderr.write("only: skipped over 2 MB: %s\n" % f)
+        continue
+    keep.append(f)
+sys.stderr.write("snapshot (only): %d files\n" % len(keep))
+sys.stdout.buffer.write("\0".join(keep).encode())
+' > "$LIST"
+else
+# Erik's global ~/.gitignore drops *.log, so the practice logs the docs cite are added with -f (FORCE list).
+git ls-files -co --exclude-standard -z -- "$rel" | FORCE_OUT="$FORCE" python3 -c '
+import glob, os, sys
 files = [f for f in sys.stdin.buffer.read().decode().split("\0") if f and os.path.isfile(f)]
 keep, big = [], []
 for f in files:
@@ -58,15 +99,27 @@ for f in files:
         big.append(f)
         continue
     keep.append(f)
-sys.stderr.write("snapshot: %d files, %.1f MB; skipped over 2 MB: %s\n" % (
-    len(keep), sum(os.path.getsize(f) for f in keep) / 1e6, big or "none"))
+force = []
+for pat in ("bits/tungsten-robolab/playground/search_results/**/*.log", "bits/tungsten-robolab/params/search_logs/*.log"):
+    for f in glob.glob(pat, recursive=True):
+        if os.path.isfile(f) and os.path.getsize(f) <= 2_000_000 and f not in keep:
+            force.append(f)
+open(os.environ["FORCE_OUT"], "wb").write("\0".join(force).encode())
+sys.stderr.write("snapshot: %d files (+%d forced logs), %.1f MB; skipped over 2 MB: %s\n" % (
+    len(keep), len(force), sum(os.path.getsize(f) for f in keep) / 1e6, big or "none"))
 sys.stdout.buffer.write("\0".join(keep).encode())
 ' > "$LIST"
+fi
 
 export GIT_INDEX_FILE="$IDX"
 git read-tree "$OLD"
-git rm -r -q -f --cached --ignore-unmatch -- "$rel"
-git add --pathspec-from-file="$LIST" --pathspec-file-nul
+if [ "$MODE" = only ]; then
+  [ -s "$LIST" ] && git add -f --pathspec-from-file="$LIST" --pathspec-file-nul
+else
+  git rm -r -q -f --cached --ignore-unmatch -- "$rel"
+  git add --pathspec-from-file="$LIST" --pathspec-file-nul
+  [ -s "$FORCE" ] && git add -f --pathspec-from-file="$FORCE" --pathspec-file-nul
+fi
 TREE=$(git write-tree)
 unset GIT_INDEX_FILE
 

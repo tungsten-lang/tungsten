@@ -1,0 +1,64 @@
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+search myo_baoding_spin: 17 tunables ['sector', 't_step', 'to_step', 'b_amp_deviation', 'b_amp_flexion', 'b_amp_cmc_abduction', 'b_amp_cmc_flexion', 'b_amp_mp_flexion', 'b_amp_ip_flexion', 'b_amp_f2', 'b_amp_p2', 'b_amp_f3', 'b_amp_p3', 'b_amp_f4', 'b_amp_p4', 'b_amp_f5', 'b_amp_p5'], pop 20, k=4 (fresh seeds), workers 2
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+gen 1 best 0.8480 gen-best 0.8480 gen-mean 0.6726 sigma 0.230 (9s) succ 0.2025 eff 0.0512 {'turn': -0.1015, 'held_frac': 1.0, 'mid_err': 0.00535}
+gen 2 best 0.8480 gen-best 0.8061 gen-mean 0.5167 sigma 0.219 (15s) succ 0.04875 eff 0.06405 {'turn': -0.133, 'held_frac': 0.89875, 'mid_err': 0.00507}
+gen 3 best 0.8480 gen-best 0.7863 gen-mean 0.5951 sigma 0.207 (22s) succ 0.01375 eff 0.05845 {'turn': -0.1525, 'held_frac': 0.88125, 'mid_err': 0.00847}
+gen 4 best 0.8480 gen-best 0.8205 gen-mean 0.5486 sigma 0.198 (29s) succ 0.0325 eff 0.04722 {'turn': -0.089, 'held_frac': 1.0, 'mid_err': 0.00685}
+gen 5 best 0.8762 gen-best 0.8762 gen-mean 0.7122 sigma 0.199 (38s) succ 0.23125 eff 0.04575 {'turn': -0.10975, 'held_frac': 1.0, 'mid_err': 0.00335}
+gen 6 best 0.8762 gen-best 0.8468 gen-mean 0.5927 sigma 0.191 (44s) succ 0.02625 eff 0.04453 {'turn': -0.08575, 'held_frac': 1.0, 'mid_err': 0.0039}
+gen 7 best 0.8762 gen-best 0.8567 gen-mean 0.6920 sigma 0.189 (53s) succ 0.04125 eff 0.05033 {'turn': -0.09175, 'held_frac': 1.0, 'mid_err': 0.0035}
+gen 8 best 0.8762 gen-best 0.8647 gen-mean 0.7189 sigma 0.190 (62s) succ 0.0175 eff 0.04055 {'turn': -0.10075, 'held_frac': 1.0, 'mid_err': 0.0036}
+gen 9 best 0.8905 gen-best 0.8905 gen-mean 0.7148 sigma 0.172 (71s) succ 0.00125 eff 0.04264 {'turn': -0.12975, 'held_frac': 0.99375, 'mid_err': 0.00345}
+gen 10 best 0.8905 gen-best 0.8616 gen-mean 0.7320 sigma 0.162 (82s) succ 0.0575 eff 0.04064 {'turn': -0.13875, 'held_frac': 0.975, 'mid_err': 0.00595}
+gen 11 best 0.8905 gen-best 0.8672 gen-mean 0.7330 sigma 0.160 (93s) succ 0.115 eff 0.04605 {'turn': -0.10275, 'held_frac': 1.0, 'mid_err': 0.00355}
+gen 12 best 0.8982 gen-best 0.8982 gen-mean 0.8224 sigma 0.157 (105s) succ 0.0475 eff 0.04192 {'turn': -0.1225, 'held_frac': 1.0, 'mid_err': 0.00243}
+gen 13 best 0.8982 gen-best 0.8598 gen-mean 0.6403 sigma 0.157 (115s) succ 0.0 eff 0.04004 {'turn': -0.1115, 'held_frac': 1.0, 'mid_err': 0.00518}
+gen 14 best 0.8982 gen-best 0.8530 gen-mean 0.8073 sigma 0.155 (129s) succ 0.03 eff 0.04094 {'turn': -0.0975, 'held_frac': 1.0, 'mid_err': 0.00445}
+gen 15 best 0.8982 gen-best 0.8678 gen-mean 0.7848 sigma 0.153 (141s) succ 0.045 eff 0.04406 {'turn': -0.105, 'held_frac': 1.0, 'mid_err': 0.00373}
+gen 16 best 0.8982 gen-best 0.8645 gen-mean 0.7297 sigma 0.153 (152s) succ 0.09375 eff 0.03994 {'turn': -0.0995, 'held_frac': 1.0, 'mid_err': 0.0035}
+gen 17 best 0.8982 gen-best 0.8740 gen-mean 0.7685 sigma 0.152 (164s) succ 0.03375 eff 0.04628 {'turn': -0.10675, 'held_frac': 1.0, 'mid_err': 0.00327}
+gen 18 best 0.8982 gen-best 0.8592 gen-mean 0.7940 sigma 0.152 (176s) succ 0.015 eff 0.04299 {'turn': -0.1025, 'held_frac': 1.0, 'mid_err': 0.00432}
+gen 19 best 0.8982 gen-best 0.7591 gen-mean 0.6148 sigma 0.151 (185s) succ 0.00875 eff 0.04157 {'turn': -0.1445, 'held_frac': 0.8525, 'mid_err': 0.0083}
+gen 20 best 0.8982 gen-best 0.8960 gen-mean 0.7910 sigma 0.146 (198s) succ 0.0 eff 0.04572 {'turn': -0.13225, 'held_frac': 1.0, 'mid_err': 0.00362}
+gen 21 best 0.8982 gen-best 0.7788 gen-mean 0.7143 sigma 0.144 (210s) succ 0.12625 eff 0.0442 {'turn': -0.1305, 'held_frac': 0.8425, 'mid_err': 0.0037}
+gen 22 best 0.8982 gen-best 0.8762 gen-mean 0.8369 sigma 0.134 (225s) succ 0.05 eff 0.04259 {'turn': -0.10825, 'held_frac': 1.0, 'mid_err': 0.0032}
+gen 23 best 0.8982 gen-best 0.8670 gen-mean 0.7769 sigma 0.127 (237s) succ 0.07125 eff 0.04132 {'turn': -0.1065, 'held_frac': 1.0, 'mid_err': 0.00395}
+gen 24 best 0.8982 gen-best 0.7455 gen-mean 0.7081 sigma 0.127 (248s) succ 0.0075 eff 0.0412 {'turn': -0.13025, 'held_frac': 0.83625, 'mid_err': 0.00792}
+gen 25 best 0.8982 gen-best 0.8446 gen-mean 0.7393 sigma 0.121 (261s) succ 0.0525 eff 0.04172 {'turn': -0.135, 'held_frac': 0.95125, 'mid_err': 0.00537}
+gen 26 best 0.8982 gen-best 0.8730 gen-mean 0.8182 sigma 0.114 (274s) succ 0.03875 eff 0.042 {'turn': -0.11425, 'held_frac': 1.0, 'mid_err': 0.00413}
+gen 27 best 0.8982 gen-best 0.7439 gen-mean 0.6892 sigma 0.114 (286s) succ 0.08 eff 0.04719 {'turn': -0.131, 'held_frac': 0.81625, 'mid_err': 0.00723}
+gen 28 best 0.8982 gen-best 0.8740 gen-mean 0.8305 sigma 0.119 (301s) succ 0.285 eff 0.04479 {'turn': -0.10525, 'held_frac': 1.0, 'mid_err': 0.00313}
+gen 29 best 0.8982 gen-best 0.8564 gen-mean 0.7310 sigma 0.111 (313s) succ 0.07625 eff 0.04281 {'turn': -0.16775, 'held_frac': 0.91625, 'mid_err': 0.00528}
+gen 30 best 0.8982 gen-best 0.8922 gen-mean 0.8260 sigma 0.109 (328s) succ 0.23125 eff 0.04531 {'turn': -0.124, 'held_frac': 1.0, 'mid_err': 0.00317}
+gen 31 best 0.8982 gen-best 0.8658 gen-mean 0.8293 sigma 0.106 (344s) succ 0.345 eff 0.05539 {'turn': -0.1085, 'held_frac': 1.0, 'mid_err': 0.00428}
+gen 32 best 0.8982 gen-best 0.8695 gen-mean 0.7614 sigma 0.098 (359s) succ 0.24125 eff 0.04684 {'turn': -0.11975, 'held_frac': 0.985, 'mid_err': 0.0039}
+gen 33 best 0.8982 gen-best 0.6793 gen-mean 0.6179 sigma 0.099 (371s) succ 0.0 eff 0.04814 {'turn': -0.16375, 'held_frac': 0.6875, 'mid_err': 0.00568}
+gen 34 best 0.8982 gen-best 0.8545 gen-mean 0.8233 sigma 0.091 (391s) succ 0.27375 eff 0.04234 {'turn': -0.11075, 'held_frac': 1.0, 'mid_err': 0.00562}
+gen 35 best 0.8982 gen-best 0.8553 gen-mean 0.8449 sigma 0.090 (409s) succ 0.08375 eff 0.04444 {'turn': -0.0955, 'held_frac': 1.0, 'mid_err': 0.00402}
+gen 36 best 0.8982 gen-best 0.8760 gen-mean 0.8584 sigma 0.091 (428s) succ 0.04125 eff 0.04916 {'turn': -0.1085, 'held_frac': 1.0, 'mid_err': 0.00325}
+gen 37 best 0.8982 gen-best 0.7935 gen-mean 0.6959 sigma 0.093 (438s) succ 0.07625 eff 0.04052 {'turn': -0.1575, 'held_frac': 0.8675, 'mid_err': 0.00643}
+gen 38 best 0.8982 gen-best 0.8607 gen-mean 0.7713 sigma 0.094 (452s) succ 0.0 eff 0.05239 {'turn': -0.10125, 'held_frac': 1.0, 'mid_err': 0.00405}
+gen 39 best 0.8982 gen-best 0.8863 gen-mean 0.7469 sigma 0.094 (466s) succ 0.0125 eff 0.04154 {'turn': -0.1565, 'held_frac': 0.98375, 'mid_err': 0.00585}
+gen 40 best 0.8982 gen-best 0.8717 gen-mean 0.8253 sigma 0.093 (481s) succ 0.09625 eff 0.05099 {'turn': -0.11225, 'held_frac': 1.0, 'mid_err': 0.00405}
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+done 0.89825 {'episodes': 4, 'errors': 0, 'steps': 200.0, 'time': 5.0, 'solved': 0.25, 'solved_final': 0.0, 'sparse_sum': -13.76648, 'dense_sum': -68.83237, 'effort': 0.04465, 'score': 0.0475, 'solved_steps': 9.5, 'held_frac': 1.0, 'mean_err': 0.0344, 'turn': -0.1225, 'mid_err': 0.00243, 'effort_official': 0.03215, 'act_sq': 0.04192, 'spin': -1.0, 'seed': 598412.5}

@@ -1,0 +1,75 @@
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+search myo_die: 106 tunables ['kp', 'kd', 'stiff', 'cup_dev', 'cup_flex', 'cup_cabd', 'cup_cflex', 'cup_mp', 'cup_ip', 'cup_f2', 'cup_p2', 'cup_f3', 'cup_p3', 'cup_f4', 'cup_p4', 'cup_f5', 'cup_p5', 'flip_min', 'flip_done', 't_flip', 'to_flip', 't_cup', 'flip_xp_dev', 'flip_xp_flex', 'flip_xp_cabd', 'flip_xp_cflex', 'flip_xp_mp', 'flip_xp_ip', 'flip_xp_f2', 'flip_xp_p2', 'flip_xp_f3', 'flip_xp_p3', 'flip_xp_f4', 'flip_xp_p4', 'flip_xp_f5', 'flip_xp_p5', 'flip_xn_dev', 'flip_xn_flex', 'flip_xn_cabd', 'flip_xn_cflex', 'flip_xn_mp', 'flip_xn_ip', 'flip_xn_f2', 'flip_xn_p2', 'flip_xn_f3', 'flip_xn_p3', 'flip_xn_f4', 'flip_xn_p4', 'flip_xn_f5', 'flip_xn_p5', 'flip_yp_dev', 'flip_yp_flex', 'flip_yp_cabd', 'flip_yp_cflex', 'flip_yp_mp', 'flip_yp_ip', 'flip_yp_f2', 'flip_yp_p2', 'flip_yp_f3', 'flip_yp_p3', 'flip_yp_f4', 'flip_yp_p4', 'flip_yp_f5', 'flip_yp_p5', 'flip_yn_dev', 'flip_yn_flex', 'flip_yn_cabd', 'flip_yn_cflex', 'flip_yn_mp', 'flip_yn_ip', 'flip_yn_f2', 'flip_yn_p2', 'flip_yn_f3', 'flip_yn_p3', 'flip_yn_f4', 'flip_yn_p4', 'flip_yn_f5', 'flip_yn_p5', 'flip_zp_dev', 'flip_zp_flex', 'flip_zp_cabd', 'flip_zp_cflex', 'flip_zp_mp', 'flip_zp_ip', 'flip_zp_f2', 'flip_zp_p2', 'flip_zp_f3', 'flip_zp_p3', 'flip_zp_f4', 'flip_zp_p4', 'flip_zp_f5', 'flip_zp_p5', 'flip_zn_dev', 'flip_zn_flex', 'flip_zn_cabd', 'flip_zn_cflex', 'flip_zn_mp', 'flip_zn_ip', 'flip_zn_f2', 'flip_zn_p2', 'flip_zn_f3', 'flip_zn_p3', 'flip_zn_f4', 'flip_zn_p4', 'flip_zn_f5', 'flip_zn_p5'], pop 24, k=6 (fresh seeds), workers 2
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+gen 1 best 0.2359 gen-best 0.2359 gen-mean 0.1175 sigma 0.190 (9s) succ 0.0 eff 0.05488 {'success': 0.0, 'min_angle': 1.81875, 'final_angle': 2.02098, 'held': 1.0}
+gen 2 best 0.2359 gen-best 0.2215 gen-mean 0.1177 sigma 0.182 (19s) succ 0.0 eff 0.01788 {'success': 0.0, 'min_angle': 2.06557, 'final_angle': 2.15245, 'held': 1.0}
+gen 3 best 0.2379 gen-best 0.2379 gen-mean 0.1153 sigma 0.176 (27s) succ 0.0 eff 0.05543 {'success': 0.0, 'min_angle': 1.47382, 'final_angle': 1.64943, 'held': 0.83333}
+gen 4 best 0.2379 gen-best 0.1883 gen-mean 0.0620 sigma 0.173 (35s) succ 0.0 eff 0.14197 {'success': 0.0, 'min_angle': 1.63827, 'final_angle': 2.35085, 'held': 0.83333}
+gen 5 best 0.2379 gen-best 0.1632 gen-mean 0.0765 sigma 0.170 (43s) succ 0.0 eff 0.07653 {'success': 0.0, 'min_angle': 1.64262, 'final_angle': 1.89362, 'held': 0.5}
+gen 6 best 0.2379 gen-best 0.2004 gen-mean 0.0712 sigma 0.167 (50s) succ 0.0 eff 0.07469 {'success': 0.0, 'min_angle': 1.57842, 'final_angle': 1.98477, 'held': 0.83333}
+gen 7 best 0.2379 gen-best 0.1884 gen-mean 0.0714 sigma 0.164 (57s) succ 0.0 eff 0.08821 {'success': 0.0, 'min_angle': 1.51492, 'final_angle': 1.98873, 'held': 0.66667}
+gen 8 best 0.2379 gen-best 0.2156 gen-mean 0.0997 sigma 0.160 (66s) succ 0.0 eff 0.0799 {'success': 0.0, 'min_angle': 1.77683, 'final_angle': 2.01013, 'held': 0.83333}
+gen 9 best 0.2379 gen-best 0.1243 gen-mean 0.0641 sigma 0.157 (72s) succ 0.0 eff 0.13079 {'success': 0.0, 'min_angle': 1.58303, 'final_angle': 2.19925, 'held': 0.33333}
+gen 10 best 0.2379 gen-best 0.1851 gen-mean 0.0769 sigma 0.155 (79s) succ 0.0 eff 0.0063 {'success': 0.0, 'min_angle': 1.50432, 'final_angle': 1.90837, 'held': 0.66667}
+gen 11 best 0.2379 gen-best 0.1817 gen-mean 0.0656 sigma 0.152 (85s) succ 0.0 eff 0.03784 {'success': 0.0, 'min_angle': 1.59733, 'final_angle': 1.98625, 'held': 0.66667}
+gen 12 best 0.2429 gen-best 0.2429 gen-mean 0.1204 sigma 0.150 (94s) succ 0.0 eff 0.04526 {'success': 0.0, 'min_angle': 1.70692, 'final_angle': 2.13398, 'held': 1.0}
+gen 13 best 0.2429 gen-best 0.1692 gen-mean 0.0699 sigma 0.148 (101s) succ 0.0 eff 0.04277 {'success': 0.0, 'min_angle': 1.69463, 'final_angle': 2.72058, 'held': 0.83333}
+gen 14 best 0.2429 gen-best 0.2331 gen-mean 0.1348 sigma 0.146 (110s) succ 0.0 eff 0.04656 {'success': 0.0, 'min_angle': 1.53642, 'final_angle': 1.89703, 'held': 0.83333}
+gen 15 best 0.2429 gen-best 0.1825 gen-mean 0.1073 sigma 0.144 (118s) succ 0.0 eff 0.01879 {'success': 0.0, 'min_angle': 1.76802, 'final_angle': 2.08445, 'held': 0.83333}
+gen 16 best 0.2429 gen-best 0.2110 gen-mean 0.1040 sigma 0.142 (126s) succ 0.0 eff 0.12701 {'success': 0.0, 'min_angle': 1.99653, 'final_angle': 2.35963, 'held': 0.83333}
+gen 17 best 0.2429 gen-best 0.2233 gen-mean 0.1586 sigma 0.140 (136s) succ 0.0 eff 0.08514 {'success': 0.0, 'min_angle': 1.96178, 'final_angle': 2.56907, 'held': 1.0}
+gen 18 best 0.2429 gen-best 0.1599 gen-mean 0.1061 sigma 0.138 (146s) succ 0.0 eff 0.14309 {'success': 0.0, 'min_angle': 1.40082, 'final_angle': 1.9519, 'held': 0.66667}
+gen 19 best 0.2806 gen-best 0.2806 gen-mean 0.2274 sigma 0.136 (161s) succ 0.0 eff 0.11994 {'success': 0.0, 'min_angle': 1.55242, 'final_angle': 1.62507, 'held': 1.0}
+gen 20 best 0.2806 gen-best 0.1521 gen-mean 0.0767 sigma 0.133 (169s) succ 0.0 eff 0.03475 {'success': 0.0, 'min_angle': 1.3401, 'final_angle': 2.09563, 'held': 0.5}
+gen 21 best 0.2806 gen-best 0.2253 gen-mean 0.1793 sigma 0.131 (180s) succ 0.0 eff 0.08591 {'success': 0.0, 'min_angle': 1.7815, 'final_angle': 2.33885, 'held': 1.0}
+gen 22 best 0.2806 gen-best 0.2229 gen-mean 0.1009 sigma 0.129 (188s) succ 0.0 eff 0.05284 {'success': 0.0, 'min_angle': 1.70082, 'final_angle': 2.00945, 'held': 0.83333}
+gen 23 best 0.2806 gen-best 0.2419 gen-mean 0.1707 sigma 0.127 (197s) succ 0.0 eff 0.05212 {'success': 0.0, 'min_angle': 1.2422, 'final_angle': 1.38162, 'held': 0.83333}
+gen 24 best 0.2806 gen-best 0.2358 gen-mean 0.1736 sigma 0.125 (208s) succ 0.0 eff 0.00812 {'success': 0.0, 'min_angle': 2.02015, 'final_angle': 2.13473, 'held': 1.0}
+gen 25 best 0.4031 gen-best 0.4031 gen-mean 0.2102 sigma 0.123 (220s) succ 0.16667 eff 0.01519 {'success': 0.16667, 'min_angle': 1.50977, 'final_angle': 1.5791, 'held': 1.0}
+gen 26 best 0.4031 gen-best 0.2319 gen-mean 0.1631 sigma 0.121 (231s) succ 0.0 eff 0.04671 {'success': 0.0, 'min_angle': 1.51115, 'final_angle': 1.96175, 'held': 1.0}
+gen 27 best 0.4031 gen-best 0.2624 gen-mean 0.1707 sigma 0.119 (242s) succ 0.0 eff 0.02269 {'success': 0.0, 'min_angle': 1.65707, 'final_angle': 1.9943, 'held': 1.0}
+gen 28 best 0.4031 gen-best 0.2515 gen-mean 0.2007 sigma 0.118 (254s) succ 0.0 eff 0.06278 {'success': 0.0, 'min_angle': 1.64453, 'final_angle': 1.91587, 'held': 1.0}
+gen 29 best 0.4159 gen-best 0.4159 gen-mean 0.2313 sigma 0.116 (267s) succ 0.16667 eff 0.02302 {'success': 0.16667, 'min_angle': 1.53637, 'final_angle': 1.61638, 'held': 1.0}
+gen 30 best 0.4159 gen-best 0.2540 gen-mean 0.2011 sigma 0.116 (279s) succ 0.0 eff 0.05086 {'success': 0.0, 'min_angle': 1.94253, 'final_angle': 2.07052, 'held': 1.0}
+gen 31 best 0.4159 gen-best 0.2304 gen-mean 0.1619 sigma 0.115 (291s) succ 0.0 eff 0.07657 {'success': 0.0, 'min_angle': 1.76515, 'final_angle': 1.96985, 'held': 1.0}
+gen 32 best 0.4159 gen-best 0.2515 gen-mean 0.1799 sigma 0.114 (303s) succ 0.0 eff 0.09435 {'success': 0.0, 'min_angle': 1.81758, 'final_angle': 1.96957, 'held': 1.0}
+gen 33 best 0.4159 gen-best 0.2291 gen-mean 0.1899 sigma 0.114 (316s) succ 0.0 eff 0.00577 {'success': 0.0, 'min_angle': 1.3694, 'final_angle': 1.38315, 'held': 1.0}
+gen 34 best 0.4159 gen-best 0.2577 gen-mean 0.1801 sigma 0.113 (327s) succ 0.0 eff 0.08482 {'success': 0.0, 'min_angle': 1.59123, 'final_angle': 1.68713, 'held': 1.0}
+gen 35 best 0.4159 gen-best 0.2400 gen-mean 0.1499 sigma 0.112 (338s) succ 0.0 eff 0.07571 {'success': 0.0, 'min_angle': 1.1765, 'final_angle': 1.75775, 'held': 1.0}
+gen 36 best 0.4159 gen-best 0.2308 gen-mean 0.1793 sigma 0.111 (350s) succ 0.0 eff 0.05794 {'success': 0.0, 'min_angle': 1.16025, 'final_angle': 1.31243, 'held': 1.0}
+gen 37 best 0.4159 gen-best 0.2545 gen-mean 0.2058 sigma 0.111 (363s) succ 0.0 eff 0.1277 {'success': 0.0, 'min_angle': 1.65965, 'final_angle': 1.72015, 'held': 1.0}
+gen 38 best 0.4159 gen-best 0.2616 gen-mean 0.1896 sigma 0.111 (375s) succ 0.0 eff 0.21103 {'success': 0.0, 'min_angle': 1.7624, 'final_angle': 1.93643, 'held': 1.0}
+gen 39 best 0.4159 gen-best 0.2341 gen-mean 0.1805 sigma 0.111 (388s) succ 0.0 eff 0.06622 {'success': 0.0, 'min_angle': 1.61668, 'final_angle': 2.14407, 'held': 1.0}
+gen 40 best 0.4159 gen-best 0.2479 gen-mean 0.2171 sigma 0.110 (401s) succ 0.0 eff 0.08266 {'success': 0.0, 'min_angle': 1.70583, 'final_angle': 2.01328, 'held': 1.0}
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+WARNING: Nan, Inf or huge value in QACC at DOF 0. The simulation is unstable. Time = 1.3280.
+
+WARNING: Nan, Inf or huge value in QACC at DOF 26. The simulation is unstable. Time = 1.2940.
+
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+WARNING: Nan, Inf or huge value in QACC at DOF 26. The simulation is unstable. Time = 1.3120.
+
+done 0.41593785394905564 {'episodes': 6, 'errors': 0, 'steps': 150.0, 'time': 1.5, 'solved': 0.16667, 'solved_final': 0.0, 'sparse_sum': -404.44575, 'dense_sum': -898.49455, 'effort': 0.02285, 'success': 0.16667, 'solved_steps': 2.0, 'min_rot_dist': 2.10035, 'final_pos_dist': 0.0458, 'start_angle': 2.07552, 'min_angle': 1.53637, 'final_angle': 1.61638, 'held': 1.0, 'effort_official': 0.02095, 'act_sq': 0.02302, 'seed': 458763.66667, 'success_ci95': [0.0301, 0.5635]}

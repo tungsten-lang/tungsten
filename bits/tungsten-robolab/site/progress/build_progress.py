@@ -663,7 +663,7 @@ def build():
     myo_cards = [
         small("Relocate", [chip("scored")], vid("relocate_v6.mp4", out("relocate_v6.mp4"), "Relocate, round 6",
                                                "A 295 g object from the far left, carried and held inside the box."),
-              f"Official score {V('relocate_p2eval_official', 3)} on the evaluation environment (was 0.210), genuine lifts {V('relocate_p2eval_lift', 3)}. On the easier phase-2 environment, lifts {V('relocate_p2_300', 3)}. MyoSuite 2.12.2 steps a second copy of the scene whose receptacle sits at the random target, invisible to the observation, while the visible box has no walls. Scores here are not comparable to the 2023 winner's 0.343."),
+              f"Official score {V('relocate_p2eval_official', 3)} on the evaluation environment (was 0.210), genuine lifts {V('relocate_p2eval_lift', 3)}. On the easier phase-2 environment, lifts {V('relocate_p2_300', 3)}. MyoSuite 2.12.2 steps a second copy of the scene whose receptacle sits at the random target, invisible to the observation, while the visible box has no walls. Scores here are not comparable to the 2023 winner's 0.343. Reported upstream as MyoHub/myosuite issue 416."),
         small("Chase tag", [chip("scored")], vid("myo_chase_v2.mp4", out("myo_chase_v2.mp4"), "Chase tag", "Two leg tracks with turning."),
               f"Phase 1 {V('chase_p1', 3)}; phase 2 {V('chase_p2', 2)} against the 2023 winner's 0.666 on the final evaluation. Each leg loops stance, push, lift and reach on its own sensed events; a step-turn loop turns toward an opponent behind."),
         small("Walking on the myoLeg", [chip("scored")], vid("myo_walk_v2.mp4", out("myo_walk_v2.mp4"), "MyoLeg walking with the longer stride", "The 80-muscle leg model with the step-length champion: 0.46 m steps at 1.44 m/s, until it reaches the arena edge."),
@@ -711,10 +711,12 @@ def build():
             ["Balance and soccer (agent O)", "New 40-start trial `soccer_single_leg_310_40` is seeding. The lift challenger holds 20 s on 35 of 40; five fail (details under One-leg balance).", "Ablations of the hip strategy on the failing seeds"],
             ["Table tennis above 90% (agent T)", "Started 29 Sep after your go-ahead.", "Long practice of the tracked arm; inverse posture map"],
             ["Compiler fixes", "Being ported onto today's main in an isolated worktree, with the stage-identity check and the spec suite, then merged.", "Land on main"],
-            ["Landing robolab on main", "Follows the cross-evaluations. Includes a build-and-run check.", "Land on main"],
-            ["MyoSuite relocate bug report", "Drafting with a minimal reproduction.", "File upstream"],
+            ["Landing robolab on main", "Done: main fast-forwarded to 3c5c513e4 (1,761 files, all under bits/tungsten-robolab) after a check from a fresh worktree: 8 controllers built in full, the other 47 through the compiler front end with no errors, byte-identical rebuilds, arena rollouts equal to the recorded scores, SDK spec 90 of 90.", "Later work lands on request"],
+            ["MyoSuite relocate bug report", "Filed: github.com/MyoHub/myosuite/issues/416, with a minimal reproduction and a two-line fix that removes the mismatch (0 of 300 starts overlapping the invisible receptacle after it, 87 of 300 before).", "Watch for a reply"],
             ["Dribble through the legs, bat speed, runner, hurdles, relocate", "Written up in the handoff for Codex to pick up (bits/tungsten-robolab/HANDOFF_20260929.md)", "Codex chooses"],
         ], wide=True)
+
+    working = working.replace("github.com/MyoHub/myosuite/issues/416", '<a href="https://github.com/MyoHub/myosuite/issues/416">github.com/MyoHub/myosuite/issues/416</a>')
 
     # ------------------------------------------------------------ requests -----------
     requests = table(
@@ -793,7 +795,7 @@ def build():
 
   {section("Bodies", "The bodies the results run on", "Each card names its body. Bodies are opt-in, and the older ones reproduce exactly.", bodies)}
   {section("Independent challengers · Codex", "A second team's results", "Codex runs its own matched-budget challenger campaign in a separate worktree. The middle column is its own report; the right column is what this arena did with it.", codex)}
-  {section("Working now", "What is running", "The Codex jump and crossover champions ran here on 29 Sep and were promoted (see the Codex table). The rest of what you approved is in progress.", working)}
+  {section("Working now", "What is running", "The Codex jump and crossover champions ran here on 29 Sep and were promoted (see the Codex table), and robolab is on main. The compiler merge, table tennis and the four campaign agents are in progress.", working)}
   {section("Your requests", "Every request and where it stands", "", requests)}
   {section("Search methods · finished", "Genetic, random walk, or something else?", "Thirteen optimizers behind one interface, equal rollout budgets, several seeds and held-out re-checks, on a jump, push-recovery balance on the 80-muscle leg, and refining the run.", search)}
   {section("Under the hood", "", "", hood)}

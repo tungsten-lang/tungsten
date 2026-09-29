@@ -1,0 +1,59 @@
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+search myo_baoding: 21 tunables ['synp_f2', 'synp_p2', 'synp_f3', 'synp_p3', 'synp_f4', 'synp_p4', 'synp_f5', 'synp_p5', 'synn_f2', 'synn_p2', 'synn_f3', 'synn_p3', 'synn_f4', 'synn_p4', 'synn_f5', 'synn_p5', 'k_rot', 'rot_lim', 'syn_spring', 'lead', 'hold_tol'], pop 20, k=8 (fresh seeds), workers 2
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+gen 1 best 0.5089 gen-best 0.5089 gen-mean 0.2947 sigma 0.183 (29s) succ 0.09625 eff 0.04421 {'score': 0.09625, 'held_frac': 1.0, 'mean_err': 0.03122}
+gen 2 best 0.5089 gen-best 0.3705 gen-mean 0.1630 sigma 0.173 (46s) succ 0.02875 eff 0.06212 {'score': 0.02875, 'held_frac': 0.87375, 'mean_err': 0.03599}
+gen 3 best 0.5127 gen-best 0.5127 gen-mean 0.2246 sigma 0.166 (64s) succ 0.12625 eff 0.06198 {'score': 0.12625, 'held_frac': 0.8975, 'mean_err': 0.03018}
+gen 4 best 0.5271 gen-best 0.5271 gen-mean 0.2124 sigma 0.159 (81s) succ 0.15938 eff 0.04712 {'score': 0.15938, 'held_frac': 0.89813, 'mean_err': 0.03141}
+gen 5 best 0.5271 gen-best 0.4410 gen-mean 0.2659 sigma 0.151 (103s) succ 0.06563 eff 0.04735 {'score': 0.06563, 'held_frac': 0.90312, 'mean_err': 0.03085}
+gen 6 best 0.5271 gen-best 0.4763 gen-mean 0.3864 sigma 0.157 (135s) succ 0.05625 eff 0.04457 {'score': 0.05625, 'held_frac': 1.0, 'mean_err': 0.03}
+gen 7 best 0.5726 gen-best 0.5726 gen-mean 0.4771 sigma 0.164 (163s) succ 0.16187 eff 0.04496 {'score': 0.16187, 'held_frac': 0.99875, 'mean_err': 0.03146}
+gen 8 best 0.5726 gen-best 0.4923 gen-mean 0.3964 sigma 0.169 (192s) succ 0.09625 eff 0.04401 {'score': 0.09625, 'held_frac': 1.0, 'mean_err': 0.03399}
+gen 9 best 0.5726 gen-best 0.4997 gen-mean 0.4349 sigma 0.166 (224s) succ 0.08438 eff 0.04689 {'score': 0.08438, 'held_frac': 1.0, 'mean_err': 0.03079}
+gen 10 best 0.5726 gen-best 0.4990 gen-mean 0.3837 sigma 0.166 (253s) succ 0.11875 eff 0.05988 {'score': 0.11875, 'held_frac': 0.89438, 'mean_err': 0.03101}
+gen 11 best 0.5726 gen-best 0.4720 gen-mean 0.4169 sigma 0.169 (288s) succ 0.0725 eff 0.0438 {'score': 0.0725, 'held_frac': 1.0, 'mean_err': 0.03341}
+gen 12 best 0.5726 gen-best 0.5428 gen-mean 0.4518 sigma 0.164 (323s) succ 0.11125 eff 0.04791 {'score': 0.11125, 'held_frac': 1.0, 'mean_err': 0.02807}
+gen 13 best 0.5726 gen-best 0.5332 gen-mean 0.4977 sigma 0.164 (357s) succ 0.11125 eff 0.07203 {'score': 0.11125, 'held_frac': 1.0, 'mean_err': 0.02967}
+gen 14 best 0.5726 gen-best 0.4576 gen-mean 0.4160 sigma 0.163 (388s) succ 0.05812 eff 0.04646 {'score': 0.05812, 'held_frac': 1.0, 'mean_err': 0.03349}
+gen 15 best 0.5726 gen-best 0.4430 gen-mean 0.3717 sigma 0.164 (416s) succ 0.02813 eff 0.05211 {'score': 0.02813, 'held_frac': 1.0, 'mean_err': 0.03085}
+gen 16 best 0.5726 gen-best 0.5007 gen-mean 0.4304 sigma 0.163 (447s) succ 0.1 eff 0.04712 {'score': 0.1, 'held_frac': 1.0, 'mean_err': 0.03321}
+gen 17 best 0.5726 gen-best 0.3642 gen-mean 0.3122 sigma 0.160 (471s) succ 0.06687 eff 0.04887 {'score': 0.06687, 'held_frac': 0.76875, 'mean_err': 0.03864}
+gen 18 best 0.5726 gen-best 0.4895 gen-mean 0.4354 sigma 0.150 (501s) succ 0.07875 eff 0.05962 {'score': 0.07875, 'held_frac': 1.0, 'mean_err': 0.03155}
+gen 19 best 0.5726 gen-best 0.5358 gen-mean 0.4621 sigma 0.140 (532s) succ 0.1325 eff 0.04387 {'score': 0.1325, 'held_frac': 0.93437, 'mean_err': 0.02844}
+gen 20 best 0.5726 gen-best 0.5608 gen-mean 0.4929 sigma 0.130 (562s) succ 0.1525 eff 0.04369 {'score': 0.1525, 'held_frac': 1.0, 'mean_err': 0.03195}
+gen 21 best 0.5726 gen-best 0.5532 gen-mean 0.5014 sigma 0.128 (591s) succ 0.13562 eff 0.04228 {'score': 0.13562, 'held_frac': 1.0, 'mean_err': 0.03041}
+gen 22 best 0.5726 gen-best 0.4822 gen-mean 0.4202 sigma 0.123 (620s) succ 0.0625 eff 0.04404 {'score': 0.0625, 'held_frac': 0.9925, 'mean_err': 0.02945}
+gen 23 best 0.5726 gen-best 0.5111 gen-mean 0.4389 sigma 0.121 (651s) succ 0.0925 eff 0.04435 {'score': 0.0925, 'held_frac': 1.0, 'mean_err': 0.03022}
+gen 24 best 0.5726 gen-best 0.4718 gen-mean 0.4213 sigma 0.112 (679s) succ 0.06875 eff 0.04351 {'score': 0.06875, 'held_frac': 0.96937, 'mean_err': 0.03081}
+gen 25 best 0.5863 gen-best 0.5863 gen-mean 0.5248 sigma 0.107 (713s) succ 0.16625 eff 0.04476 {'score': 0.16625, 'held_frac': 1.0, 'mean_err': 0.02999}
+gen 26 best 0.5863 gen-best 0.5812 gen-mean 0.5039 sigma 0.106 (739s) succ 0.15625 eff 0.07481 {'score': 0.15625, 'held_frac': 1.0, 'mean_err': 0.02917}
+gen 27 best 0.5863 gen-best 0.3974 gen-mean 0.3690 sigma 0.102 (763s) succ 0.01438 eff 0.0571 {'score': 0.01438, 'held_frac': 1.0, 'mean_err': 0.03616}
+gen 28 best 0.5863 gen-best 0.5496 gen-mean 0.4147 sigma 0.100 (782s) succ 0.125 eff 0.04578 {'score': 0.125, 'held_frac': 1.0, 'mean_err': 0.02924}
+gen 29 best 0.5863 gen-best 0.4829 gen-mean 0.4558 sigma 0.101 (803s) succ 0.08625 eff 0.0458 {'score': 0.08625, 'held_frac': 1.0, 'mean_err': 0.03389}
+gen 30 best 0.5863 gen-best 0.4618 gen-mean 0.4034 sigma 0.097 (824s) succ 0.0475 eff 0.04452 {'score': 0.0475, 'held_frac': 1.0, 'mean_err': 0.03095}
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+done 0.586325 {'episodes': 8, 'errors': 0, 'steps': 200.0, 'time': 5.0, 'solved': 0.5, 'solved_final': 0.25, 'sparse_sum': -11.98813, 'dense_sum': -59.94065, 'effort': 0.04713, 'score': 0.16625, 'solved_steps': 33.25, 'held_frac': 1.0, 'mean_err': 0.02999, 'turn': -0.09737, 'mid_err': 0.00481, 'effort_official': 0.03334, 'act_sq': 0.04476, 'seed': 568282.25}

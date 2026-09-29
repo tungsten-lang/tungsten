@@ -1,0 +1,122 @@
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+search myo_relocate: 40 tunables ['servo_i', 'ox', 'oy', 'z_above', 'z_grasp', 'k_touch', 'z_lift', 'z_clear', 'cx', 'cy', 'z_carry', 'z_low', 'r_reach', 'r_xy', 'grip_th', 't_reach', 't_desc', 't_close', 't_lift', 't_carry', 't_low', 'to_reach', 'to_desc', 'to_close', 'kp_arm', 'kp_hand', 'stiff_open', 'stiff_grip', 'f_open', 'thabd_open', 'thflex_open', 'thmp_open', 'f_close', 'pip_close', 'dip_close', 'thabd_close', 'thflex_close', 'dps', 'dflex', 'squeeze'], pop 16, k=8 (fresh seeds), workers 2
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+gen 1 best 0.3466 gen-best 0.3466 gen-mean 0.2118 sigma 0.137 (30s) succ 0.0 eff 0.07467 {'success_lift': 0.0, 'max_obj_z': 0.9744, 'pinch_err': 0.0333, 'pinch_z': 0.9403, 'touch_max': 58.36375}
+gen 2 best 0.3466 gen-best 0.2801 gen-mean 0.2070 sigma 0.130 (58s) succ 0.125 eff 0.13314 {'success_lift': 0.0, 'max_obj_z': 0.90653, 'pinch_err': 0.02535, 'pinch_z': 0.94559, 'touch_max': 34.095}
+gen 3 best 0.3466 gen-best 0.3123 gen-mean 0.2598 sigma 0.124 (102s) succ 0.25 eff 0.1239 {'success_lift': 0.0, 'max_obj_z': 0.90686, 'pinch_err': 0.03824, 'pinch_z': 0.92969, 'touch_max': 63.08625}
+gen 4 best 0.3466 gen-best 0.3243 gen-mean 0.1987 sigma 0.121 (151s) succ 0.25 eff 0.1449 {'success_lift': 0.0, 'max_obj_z': 0.9097, 'pinch_err': 0.03598, 'pinch_z': 0.9272, 'touch_max': 38.28625}
+gen 5 best 0.3466 gen-best 0.2880 gen-mean 0.2064 sigma 0.118 (197s) succ 0.125 eff 0.18702 {'success_lift': 0.0, 'max_obj_z': 0.9181, 'pinch_err': 0.03935, 'pinch_z': 0.93866, 'touch_max': 54.785}
+gen 6 best 0.3466 gen-best 0.2936 gen-mean 0.2123 sigma 0.115 (244s) succ 0.0 eff 0.13454 {'success_lift': 0.0, 'max_obj_z': 0.93995, 'pinch_err': 0.03325, 'pinch_z': 0.94125, 'touch_max': 67.1025}
+gen 7 best 0.3466 gen-best 0.2680 gen-mean 0.1887 sigma 0.113 (286s) succ 0.125 eff 0.23597 {'success_lift': 0.0, 'max_obj_z': 0.93684, 'pinch_err': 0.04923, 'pinch_z': 0.95796, 'touch_max': 40.45125}
+gen 8 best 0.3466 gen-best 0.2360 gen-mean 0.1138 sigma 0.111 (328s) succ 0.25 eff 0.20981 {'success_lift': 0.0, 'max_obj_z': 0.90577, 'pinch_err': 0.06099, 'pinch_z': 0.96055, 'touch_max': 52.2}
+gen 9 best 0.3466 gen-best 0.3034 gen-mean 0.1993 sigma 0.108 (369s) succ 0.375 eff 0.24989 {'success_lift': 0.0, 'max_obj_z': 0.90592, 'pinch_err': 0.04358, 'pinch_z': 0.95319, 'touch_max': 77.25625}
+gen 10 best 0.3466 gen-best 0.2895 gen-mean 0.1860 sigma 0.107 (412s) succ 0.125 eff 0.15101 {'success_lift': 0.0, 'max_obj_z': 0.90979, 'pinch_err': 0.02849, 'pinch_z': 0.93625, 'touch_max': 45.14875}
+gen 11 best 0.3575 gen-best 0.3575 gen-mean 0.2409 sigma 0.104 (455s) succ 0.25 eff 0.25114 {'success_lift': 0.0, 'max_obj_z': 0.94824, 'pinch_err': 0.03513, 'pinch_z': 0.93274, 'touch_max': 48.78625}
+gen 12 best 0.3575 gen-best 0.2967 gen-mean 0.2092 sigma 0.101 (499s) succ 0.25 eff 0.16344 {'success_lift': 0.0, 'max_obj_z': 0.90786, 'pinch_err': 0.03322, 'pinch_z': 0.94799, 'touch_max': 45.51625}
+gen 13 best 0.3575 gen-best 0.2540 gen-mean 0.1873 sigma 0.097 (542s) succ 0.0 eff 0.20026 {'success_lift': 0.0, 'max_obj_z': 0.95827, 'pinch_err': 0.0575, 'pinch_z': 0.93629, 'touch_max': 143.7725}
+gen 14 best 0.3575 gen-best 0.2843 gen-mean 0.2359 sigma 0.095 (585s) succ 0.0 eff 0.20947 {'success_lift': 0.0, 'max_obj_z': 0.99579, 'pinch_err': 0.03901, 'pinch_z': 0.93271, 'touch_max': 66.75375}
+gen 15 best 0.3845 gen-best 0.3845 gen-mean 0.2313 sigma 0.093 (625s) succ 0.125 eff 0.27436 {'success_lift': 0.125, 'max_obj_z': 0.99096, 'pinch_err': 0.05735, 'pinch_z': 0.9433, 'touch_max': 45.18875}
+gen 16 best 0.3845 gen-best 0.2263 gen-mean 0.1658 sigma 0.092 (668s) succ 0.0 eff 0.24334 {'success_lift': 0.0, 'max_obj_z': 0.93956, 'pinch_err': 0.05625, 'pinch_z': 0.93545, 'touch_max': 23.68125}
+gen 17 best 0.3845 gen-best 0.2333 gen-mean 0.1616 sigma 0.090 (697s) succ 0.25 eff 0.22705 {'success_lift': 0.0, 'max_obj_z': 0.90795, 'pinch_err': 0.05035, 'pinch_z': 0.93829, 'touch_max': 12.77}
+gen 18 best 0.3845 gen-best 0.2993 gen-mean 0.2064 sigma 0.090 (721s) succ 0.375 eff 0.19367 {'success_lift': 0.0, 'max_obj_z': 0.90635, 'pinch_err': 0.0362, 'pinch_z': 0.94312, 'touch_max': 35.6175}
+gen 19 best 0.3845 gen-best 0.2837 gen-mean 0.1861 sigma 0.088 (744s) succ 0.0 eff 0.22852 {'success_lift': 0.0, 'max_obj_z': 1.02941, 'pinch_err': 0.05275, 'pinch_z': 0.95709, 'touch_max': 28.98}
+gen 20 best 0.3845 gen-best 0.3346 gen-mean 0.1794 sigma 0.086 (765s) succ 0.125 eff 0.26453 {'success_lift': 0.0, 'max_obj_z': 1.09849, 'pinch_err': 0.06166, 'pinch_z': 0.94359, 'touch_max': 52.215}
+gen 21 best 0.3845 gen-best 0.2556 gen-mean 0.1790 sigma 0.084 (786s) succ 0.125 eff 0.23194 {'success_lift': 0.0, 'max_obj_z': 0.94661, 'pinch_err': 0.04874, 'pinch_z': 0.9548, 'touch_max': 28.65625}
+gen 22 best 0.3845 gen-best 0.3060 gen-mean 0.2160 sigma 0.083 (810s) succ 0.0 eff 0.21281 {'success_lift': 0.0, 'max_obj_z': 1.04438, 'pinch_err': 0.04351, 'pinch_z': 0.93731, 'touch_max': 54.735}
+gen 23 best 0.3845 gen-best 0.2948 gen-mean 0.2073 sigma 0.081 (836s) succ 0.125 eff 0.20833 {'success_lift': 0.0, 'max_obj_z': 0.94623, 'pinch_err': 0.04782, 'pinch_z': 0.94106, 'touch_max': 39.59875}
+gen 24 best 0.3845 gen-best 0.3474 gen-mean 0.2188 sigma 0.080 (860s) succ 0.375 eff 0.21776 {'success_lift': 0.0, 'max_obj_z': 0.90909, 'pinch_err': 0.02684, 'pinch_z': 0.95011, 'touch_max': 28.5375}
+gen 25 best 0.3845 gen-best 0.2365 gen-mean 0.1871 sigma 0.079 (887s) succ 0.125 eff 0.20306 {'success_lift': 0.0, 'max_obj_z': 0.91331, 'pinch_err': 0.04021, 'pinch_z': 0.95571, 'touch_max': 49.76625}
+gen 26 best 0.3845 gen-best 0.2870 gen-mean 0.2067 sigma 0.079 (909s) succ 0.25 eff 0.2004 {'success_lift': 0.0, 'max_obj_z': 0.9067, 'pinch_err': 0.03874, 'pinch_z': 0.9451, 'touch_max': 30.73}
+gen 27 best 0.3845 gen-best 0.3656 gen-mean 0.2353 sigma 0.077 (932s) succ 0.125 eff 0.19517 {'success_lift': 0.0, 'max_obj_z': 0.93407, 'pinch_err': 0.02326, 'pinch_z': 0.93326, 'touch_max': 55.33125}
+gen 28 best 0.5414 gen-best 0.5414 gen-mean 0.3202 sigma 0.075 (957s) succ 0.25 eff 0.2383 {'success_lift': 0.125, 'max_obj_z': 1.02422, 'pinch_err': 0.06426, 'pinch_z': 0.91446, 'touch_max': 120.09625}
+gen 29 best 0.5414 gen-best 0.3614 gen-mean 0.2810 sigma 0.074 (984s) succ 0.375 eff 0.16074 {'success_lift': 0.0, 'max_obj_z': 0.90464, 'pinch_err': 0.02173, 'pinch_z': 0.94174, 'touch_max': 41.60875}
+gen 30 best 0.5414 gen-best 0.2888 gen-mean 0.2020 sigma 0.073 (1008s) succ 0.0 eff 0.1539 {'success_lift': 0.0, 'max_obj_z': 0.94096, 'pinch_err': 0.0367, 'pinch_z': 0.94424, 'touch_max': 91.76125}
+gen 31 best 0.5414 gen-best 0.4388 gen-mean 0.3112 sigma 0.073 (1035s) succ 0.375 eff 0.14553 {'success_lift': 0.0, 'max_obj_z': 0.92836, 'pinch_err': 0.0153, 'pinch_z': 0.93917, 'touch_max': 95.2925}
+gen 32 best 0.5414 gen-best 0.3003 gen-mean 0.2377 sigma 0.071 (1062s) succ 0.25 eff 0.18304 {'success_lift': 0.0, 'max_obj_z': 0.90644, 'pinch_err': 0.02647, 'pinch_z': 0.94605, 'touch_max': 74.4175}
+gen 33 best 0.5414 gen-best 0.3597 gen-mean 0.2559 sigma 0.069 (1088s) succ 0.125 eff 0.19654 {'success_lift': 0.0, 'max_obj_z': 0.92824, 'pinch_err': 0.02538, 'pinch_z': 0.9436, 'touch_max': 49.415}
+gen 34 best 0.5414 gen-best 0.3912 gen-mean 0.3100 sigma 0.067 (1115s) succ 0.375 eff 0.18936 {'success_lift': 0.0, 'max_obj_z': 0.90752, 'pinch_err': 0.01844, 'pinch_z': 0.93495, 'touch_max': 62.58375}
+gen 35 best 0.5414 gen-best 0.3254 gen-mean 0.2416 sigma 0.066 (1143s) succ 0.375 eff 0.1812 {'success_lift': 0.0, 'max_obj_z': 0.90476, 'pinch_err': 0.02959, 'pinch_z': 0.94836, 'touch_max': 35.02875}
+gen 36 best 0.5414 gen-best 0.3900 gen-mean 0.2952 sigma 0.064 (1171s) succ 0.25 eff 0.20049 {'success_lift': 0.0, 'max_obj_z': 0.94335, 'pinch_err': 0.02388, 'pinch_z': 0.93845, 'touch_max': 78.75625}
+gen 37 best 0.5414 gen-best 0.3313 gen-mean 0.2443 sigma 0.063 (1198s) succ 0.0 eff 0.19234 {'success_lift': 0.0, 'max_obj_z': 0.97118, 'pinch_err': 0.03296, 'pinch_z': 0.94007, 'touch_max': 50.27}
+gen 38 best 0.5414 gen-best 0.3703 gen-mean 0.3005 sigma 0.061 (1226s) succ 0.375 eff 0.22097 {'success_lift': 0.0, 'max_obj_z': 0.90671, 'pinch_err': 0.02025, 'pinch_z': 0.95727, 'touch_max': 76.7575}
+gen 39 best 0.5414 gen-best 0.2719 gen-mean 0.2219 sigma 0.059 (1253s) succ 0.0 eff 0.23584 {'success_lift': 0.0, 'max_obj_z': 0.92112, 'pinch_err': 0.03673, 'pinch_z': 0.93302, 'touch_max': 50.40375}
+gen 40 best 0.5414 gen-best 0.3978 gen-mean 0.3021 sigma 0.057 (1281s) succ 0.125 eff 0.19252 {'success_lift': 0.0, 'max_obj_z': 0.95295, 'pinch_err': 0.02418, 'pinch_z': 0.93573, 'touch_max': 66.0675}
+gen 41 best 0.5414 gen-best 0.2905 gen-mean 0.2348 sigma 0.056 (1310s) succ 0.0 eff 0.20341 {'success_lift': 0.0, 'max_obj_z': 0.93334, 'pinch_err': 0.03604, 'pinch_z': 0.92538, 'touch_max': 53.80125}
+gen 42 best 0.5414 gen-best 0.3753 gen-mean 0.2760 sigma 0.054 (1337s) succ 0.375 eff 0.1942 {'success_lift': 0.0, 'max_obj_z': 0.91078, 'pinch_err': 0.02781, 'pinch_z': 0.93956, 'touch_max': 41.1875}
+gen 43 best 0.5414 gen-best 0.4214 gen-mean 0.3048 sigma 0.052 (1365s) succ 0.375 eff 0.19058 {'success_lift': 0.0, 'max_obj_z': 0.93148, 'pinch_err': 0.03041, 'pinch_z': 0.9343, 'touch_max': 79.6725}
+gen 44 best 0.5414 gen-best 0.4321 gen-mean 0.3632 sigma 0.050 (1391s) succ 0.625 eff 0.18901 {'success_lift': 0.0, 'max_obj_z': 0.90824, 'pinch_err': 0.02719, 'pinch_z': 0.93221, 'touch_max': 43.7025}
+gen 45 best 0.5414 gen-best 0.3330 gen-mean 0.2762 sigma 0.050 (1416s) succ 0.25 eff 0.20658 {'success_lift': 0.0, 'max_obj_z': 0.90664, 'pinch_err': 0.02211, 'pinch_z': 0.93807, 'touch_max': 84.05375}
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 0.9160.
+
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 0.3660.
+
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 0.3660.
+
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 0.3660.
+
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 0.3660.
+
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 0.3660.
+
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 0.3660.
+
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 0.3660.
+
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 0.3660.
+
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 0.3660.
+
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 0.3660.
+
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 0.3660.
+
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 0.3660.
+
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 0.3660.
+
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 0.8020.
+
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 0.6940.
+
+WARNING: Nan, Inf or huge value in QACC at DOF 0. The simulation is unstable. Time = 0.2780.
+
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 0.6340.
+
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 1.1900.
+
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 0.3660.
+
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 0.3660.
+
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 0.3660.
+
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 0.8980.
+
+WARNING: Nan, Inf or huge value in QACC at DOF 41. The simulation is unstable. Time = 0.7520.
+
+done 0.54144375 {'episodes': 8, 'errors': 0, 'steps': 139.5, 'time': 1.34925, 'solved': 0.25, 'solved_final': 0.0, 'sparse_sum': -570.15918, 'dense_sum': -3203.03007, 'effort': 0.2608, 'success': 0.25, 'solved_steps': 8.25, 'success_lift': 0.125, 'min_dist_lift': 0.77664, 'min_dist': 0.15156, 'final_dist': 0.30707, 'max_obj_z': 1.02422, 'effort_official': 0.06094, 'act_sq': 0.2383, 'pinch_err': 0.06426, 'pinch_z': 0.91446, 'touch_max': 120.09625, 'seed': 447203.375, 'success_ci95': [0.0715, 0.5907]}

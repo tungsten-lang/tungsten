@@ -164,11 +164,11 @@
   -> bal_params
     @b_t_set = param("b_t_set", ~0.4, ~0.1, ~1.5)
     @b_t_shift = param("b_t_shift", ~0.6, ~0.2, ~1.2)
-    @b_unload = param("b_unload", ~0.1, ~0.02, ~0.4)
+    @b_unload = param("b_unload", ~0.1, ~0.02, ~0.7)
     @b_t_lift = param("b_t_lift", ~0.25, ~0.1, ~0.6)
     @b_hold = param("b_hold", ~2.9, ~2.0, ~4.0)
     @b_t_down = param("b_t_down", ~0.3, ~0.1, ~0.8)
-    @b_load = param("b_load", ~0.2, ~0.05, ~0.5)
+    @b_load = param("b_load", ~0.2, ~0.02, ~0.5)
     @b_t_mid = param("b_t_mid", ~0.5, ~0.2, ~1.2)
     @b_shift_add = param("b_shift_add", ~0.1, ~-0.1, ~0.3)
     # the lift waits for the COM's capture point (position + velocity x
@@ -178,11 +178,11 @@
     # adducted b_add (pelvis over the foot); swing thigh, knee, ankle and
     # adduction
     @b_st_hip = param("b_st_hip", ~0.0, ~-0.4, ~0.4)
-    @b_st_knee = param("b_st_knee", ~0.0, ~-0.3, ~0.5)
+    @b_st_knee = param("b_st_knee", ~0.0, ~-0.6, ~0.5)
     @b_st_ankle = param("b_st_ankle", ~0.0, ~-0.3, ~0.3)
     @b_add = param("b_add", ~0.08, ~-0.2, ~0.3)
     @b_sw_th = param("b_sw_th", ~0.2, ~-0.3, ~0.9)
-    @b_sw_knee = param("b_sw_knee", ~1.0, ~0.3, ~1.8)
+    @b_sw_knee = param("b_sw_knee", ~1.0, ~0.3, ~2.1)
     @b_sw_ankle = param("b_sw_ankle", ~0.1, ~-0.4, ~0.4)
     @b_sw_add = param("b_sw_add", ~0.0, ~-0.3, ~0.3)
     self

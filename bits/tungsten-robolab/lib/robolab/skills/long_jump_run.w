@@ -203,6 +203,19 @@
       @ik_pen_min = ~0.0
       @ik_pen_min = @params["ik_pen_min"] if @params.key?("ik_pen_min")
       @ik_kdc = param("j_ik_kdc", ~1.0, ~0.0, ~1.0)
+      # the plant foot's contact force (body weights) that counts as its
+      # touchdown (0.05: any touch; a swing foot's scuff stays under 1)
+      @ik_fmin = ~0.05
+      @ik_fmin = @params["ik_fmin"] if @params.key?("ik_fmin")
+      # rotation feedback (ik_pr<k>, ik_kp_<role>, ik_kd_<role>) and the
+      # swing-foot clearance reflex (ik_clz, ik_clt, ik_kc_<role>), see
+      # ik_feedback; both zero / absent = the program alone
+      @ik_fb = @params.key?("ik_pr0")
+      @ik_cl = @params.key?("ik_clz")
+      if @ik_cl
+        @ik_clz = @params["ik_clz"]
+        @ik_clt = ~0.04
+        @ik_clt = @params["ik_clt"] if @params.key?("ik_clt")
     # the landing program (`j_il 1`, playground/long_jump_limits.py landing):
     # after the take-off program, knots on its own clock latched on the sand
     @il = @ik && @params.key?("j_il") && @params["j_il"] > ~0.5
@@ -564,7 +577,21 @@
 
   -> ik_tables
     @ik_tab = prog_tables("ik_", @ik_n, ["c", "v", "a", "e", "g"])
+    if @ik_fb
+      @ik_pr = (0...@ik_n).map ->(k) pget("ik_pr" + k.to_s)
+      @ik_kp = role_gains("ik_kp_")
+      @ik_kd = role_gains("ik_kd_")
+    @ik_kc = role_gains("ik_kc_") if @ik_cl
     self
+
+  # Per take-off side, a per-muscle gain vector from the params file
+  # (<prefix><role>; missing entries are 0).
+  -> role_gains(prefix)
+    out = {}
+    ["l_", "r_"].each ->(t)
+      fr = other(t)
+      out[t] = (0...body.size).map ->(m) pget(prefix + ik_role(body.muscle(m).name, t, fr))
+    out
 
   -> il_tables
     @il_tab = prog_tables("il_", @il_n, ["c", "v", "a", "e"])
@@ -672,7 +699,7 @@
     t = @ik_side
     s = ik_clock(frame)
     if !@ik_td_seen
-      down = frame.get(t + "foot_contact") > ~0.05
+      down = frame.get(t + "foot_contact") > @ik_fmin
       @ik_lifted = true if !down
       if down && @ik_lifted && s > ~0.03
         @ik_td_seen = true
@@ -687,6 +714,46 @@
     g = ~0.0 if @ik_first
     @ik_first = false
     prog_apply(ctl, @ik_tab[t], @ik_h, @ik_n, s, g, @ik_kdc, @ik_gap_err, true)
+    ik_feedback(frame, ctl, t, s) if @ik_fb || @ik_cl
+    self
+
+  # Residuals on the take-off program, learned around it (zero = none).
+  # Rotation: the torso pitch's error against the reference knots ik_pr<k> and
+  # its rate, times per-muscle gains, added to the drive. Clearance: before the
+  # plant (the program is still more than ik_clt s before its ideal
+  # touchdown), the lower of the plant foot's toe and heel below ik_clz metres
+  # adds per-muscle gain x (ik_clz - height) to the drive: a swing foot
+  # dragging along the runway lifts (a scuff there tips the whole take-off).
+  -> ik_feedback(frame, ctl, t, s)
+    if @ik_fb
+      j = (s / @ik_h).floor
+      j = 0 if j < 0
+      j = @ik_n - 2 if j > @ik_n - 2
+      u = clamp((s - @ik_h * j) / @ik_h, ~0.0, ~1.0)
+      err = frame.torso_pitch - (@ik_pr[j] + (@ik_pr[j + 1] - @ik_pr[j]) * u)
+      rate = frame.torso_pitch_rate
+      kp = @ik_kp[t]
+      kd = @ik_kd[t]
+      m = 0
+      while m < body.size
+        ctl.add_drive(m, kp[m] * err + kd[m] * rate)
+        m += 1
+    if @ik_cl && !@ik_td_seen && s < @ik_td - @ik_clt
+      zi = 1
+      zh = 5
+      if t == "r_"
+        zi = 3
+        zh = 7
+      z = frame.at("toes", zi)
+      z = frame.at("toes", zh) if frame.at("toes", zh) < z
+      if z < @ik_clz
+        e = @ik_clz - z
+        kc = @ik_kc[t]
+        m = 0
+        while m < body.size
+          ctl.add_drive(m, kc[m] * e)
+          m += 1
+    self
 
   # The landing program: its clock starts at the handover, waits at il_ld
   # until the first sand contact (the task's pit contact flag) and is set to

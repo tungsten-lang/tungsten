@@ -15,13 +15,14 @@ import json
 import os
 import re
 import sys
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 CHAMPS = json.load(open(os.path.join(ROOT, "playground/arena/champions.json")))
 CODEX = "/Users/erik/.codex/worktrees/robolab-challengers/tungsten/bits/tungsten-robolab/results-page/dist/assets/"
 
-UPDATED = "29 Sep 2026, 1 am"
+UPDATED = time.strftime("%-d %b %Y, %-I:%M %p").replace("AM", "am").replace("PM", "pm")
 
 
 def F(trial):
@@ -266,7 +267,7 @@ a.slot:focus-visible, .crow:focus-visible, .tbtn:focus-visible, video:focus-visi
 .chip.study { color: var(--info); background: var(--info-soft); }
 .chip.prov { color: var(--muted); background: transparent; box-shadow: inset 0 0 0 1px var(--muted); }
 .skill { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 22px; align-items: start; padding-top: 22px; border-top: 1px solid var(--rule); scroll-margin-top: 16px; }
-@media (max-width: 820px) { .skill { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .skill { grid-template-columns: 1fr; } }
 .mediacol { display: grid; gap: 12px; min-width: 0; }
 .media { margin: 0; display: grid; gap: 6px; min-width: 0; }
 .media figcaption { font-size: 12.5px; color: var(--muted); }
@@ -283,6 +284,8 @@ td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space
 tr.ours td { color: var(--accent); font-weight: 500; }
 tr:last-child td { border-bottom: 0; }
 .wide { min-width: 640px; }
+.side table { font-size: 13px; }
+.side th, .side td { padding: 7px 8px; }
 .model { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 18px; display: grid; gap: 10px; align-content: start; min-width: 0; }
 .mono { font-family: var(--mono); font-size: 13px; }
 .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; }
@@ -389,7 +392,7 @@ def build():
         ("standing", "Standing jump", "done", f"{V('search_jump_legal', 3)} m legal"),
         ("hurdles", "Hurdles", "stuck", "0.762 m: 4 of 8 clear hurdle 1"),
         ("bat", "Baseball swing", "run", "21 m/s with reflexes on"),
-        ("dribble", "Dribble", "run", "3 through-the-legs passes in a row"),
+        ("dribble", "Dribble", "run", "streak of 3 through the legs on 1–2 of 32 starts"),
         ("tt", "Table tennis", "stuck", f"P2 {100 * F('tt_p2_300'):.0f}% · P1 100%"),
         ("balance", "One-leg balance", "run", "12 of 20 hold 5 minutes"),
         ("soccer", "Penalty kick", "stuck", "P1 100% · P2 0%"),
@@ -412,17 +415,17 @@ def build():
              "MLB average about 32 m/s",
              "The reflex-on swing reaches 82–85% of the ceiling swing. Trunk and arms turn at 50–65% of MLB rates."],
             ["Dribble through the legs",
-             "3 legal passes in a row on an unseen start. First pass 92%, return 42%.",
+             "A streak of 3 through-the-legs passes on 1 to 2 of 32 fresh starts (mean longest streak 1.28 in 15 s). On 24 fresh 8 s runs the first pass is complete on 92% and the return on 42%.",
              "Target: several in a row",
              "The receiving hand cannot stop a fast, low ball and send it back up; arms lag the plan by 5–10 cm."],
             ["Exceed 10 m/s in the sprint",
              f"{V('sprint_top_speed_p95')} m/s (95th-percentile body). The first runner on the calibrated v4 body (average) is entered at {V('sprint_top_speed_v4')} m/s.",
              "Ceiling with perfect control on v4: 10.45 (95th pct.). Untrained men 7.8, trained sprinters 9.9.",
-             "No v4 sprinter is entered yet. 10 m/s needs 96% of the v4 ceiling."],
+             "Only the average body has a v4 runner so far. 10 m/s needs 96% of the 95th-percentile v4 ceiling."],
             ["Long jump with the best runner, then beyond human",
              f"4.90 m on the 95th-percentile body (one start). Robust means: {V('long_jump_p95_robust')} m (95th pct.), {V('long_jump_elite2_robust')} m (elite), {V('long_jump_robust')} m (average).",
              "Untrained men 4.95 m, high school 6.07–6.65 m, world record 8.95 m",
-             "About 4 of 32 approaches still roll over on landing. With the 7.0 m/s runner the ideal take-off ceiling is 4.93 m, so passing 4.95 needs a faster runner."],
+             "In the landing search, 3 of 30 captured take-offs still roll over while the other 27 land at 4.6 to 4.95 m. With the 7.0 m/s runner the ideal take-off ceiling is 4.93 m, so passing 4.95 needs a faster runner."],
             ["Table tennis phase 2 above 90%",
              f"{100 * F('tt_p2_300'):.0f}% over 300 serves ({100 * F('tt_p2'):.0f}% over 100)",
              "Winner 64%, 80.3% after the challenge",
@@ -511,11 +514,11 @@ def build():
                   "12 s of the current runner. The literature gait curves are ghosted at the current stride phase.")],
              ["Contraction keyframes at touchdown, mid-stance and toe-off from human running data, eased through and latched on the feet. The latest version adds a knot at each gait event (a contraction, a velocity and an acceleration for every muscle), fitted to the target by least squares and then improved from stride-by-stride error curves (iterative learning control).",
               "Against the literature curves it is now **7.3°** from human running on the 12-start trial, down from 9.1° and better on every start that stayed up. On the harder 48-start trial it is 7.2° with 13 falls against 17, which is not significant. Against motion-capture running (Fukuchi 2017) it is 10.1° and falls on 11 of 48 fresh starts where the earlier runner fell on 17. Against your keyframe set 3, dropping the heel-rise keyframe at 30% of the stride cut the falls from 9 to 1 in 48 starts, with the pose 2.2° further from your set."],
-             table(["Target", "Before", "Now", "Fresh starts"],
-                   [["Literature curves", "#1 fall, 9.13°", "#1 fall, 7.29°", "#12 · p 0.0005"],
-                    ["Literature curves, harder trial", "#17 falls, 9.22°", "#13 falls, 7.22°", "#48 · p 0.17, not promoted"],
-                    ["Motion capture", "#17 falls, 11.0°", "#11 falls, 10.09°", "#48 · p 0.0498"],
-                    ["Your set 3, heel-rise keyframe dropped", "#9 falls, 17.56°", "#1 fall, 19.78°", "#48 · p 0.0095"]]),
+             table(["Target (fresh starts, paired p)", "Before", "Now"],
+                   [["Literature curves (12, p 0.0005)", "#1 fall, 9.13°", "#1 fall, 7.29°"],
+                    ["Literature curves, harder trial (48, p 0.17, not promoted)", "#17 falls, 9.22°", "#13 falls, 7.22°"],
+                    ["Motion capture (48, p 0.0498)", "#17 falls, 11.0°", "#11 falls, 10.09°"],
+                    ["Your set 3, heel-rise keyframe dropped (48, p 0.0095)", "#9 falls, 17.56°", "#1 fall, 19.78°"]]),
              "Train the small learned correction (a convolutional network on proprioception) for the literature and set-3 runners, where the knots alone fall on 8 and 7 of 48 held-out starts. On the mocap runner it cut held-out falls from 14 to 4 in 48."),
         card("sprint", "Sprint", [chip("run"), chip("study", "v4 body: first runner in")],
              [vid("sprint_p95_ri.mp4", out("sprint_p95_ri.mp4"), "Sprinter on the 95th-percentile body, 7 m/s",
@@ -553,11 +556,11 @@ def build():
                     ["95th percentile", f"#{V('long_jump_p95', 3)}", f"#{V('long_jump_p95_robust')}", "#4.93"],
                     ["Elite, literature", f"#{V('long_jump_elite2')}", f"#{V('long_jump_elite2_robust')}", "#4.25"],
                     ["Elite, old profile (provisional)", f"#{V('long_jump_elite')}", f"#{V('long_jump_elite_robust')}", "#–"]]),
-             "Find why about 4 of 32 approaches still roll over on landing. Then build the same jump on the v4 sprinter, which is the only way to pass the untrained man's 4.95 m."),
+             "Find why 3 of 30 captured take-offs still roll over on landing. Then build the same jump on the v4 sprinter, which is the only way to pass the untrained man's 4.95 m."),
         card("standing", "Standing broad jump", [chip("done"), chip("study", "Codex policy")],
              [vid("codex_standing_jump.mp4", CODEX + "competitor_jump_round2__video_search_jump_legal_tcn.mp4", "Standing jump champion, 1.363 m",
-                  "Codex's champion for the legal-distance trial. It lands, settles into a crouch and holds it for 20 s.")],
-             [f"Contraction keyframes with take-off and landing latched on the centre of mass. The legal-distance champion is Codex's recovery policy at **{V('search_jump_legal', 3)} m** (8 starts), which lands earlier and settles into a balanced crouch. On 32 larger nudges the champion is our convolutional keyframe policy: **{V('search_jump_robust_legal', 3)} m** with 32 of 32 landing.",
+                  "Codex's champion for the legal-distance trial: it lands and stays on its feet.")],
+             [f"Contraction keyframes with take-off and landing latched on the centre of mass. The legal-distance champion is Codex's temporal recovery policy at **{V('search_jump_legal', 3)} m** (8 starts): a small learned correction after landing that keeps the jumper on its feet. On 32 larger nudges the champion is our convolutional keyframe policy: **{V('search_jump_robust_legal', 3)} m** with 32 of 32 landing.",
               "Codex reports a newer robustness champion of 1.3397 m in its own worktree. It has not been run in this arena yet."],
              None, None),
         card("hurdles", "Hurdles", [chip("stuck", "Waiting on run-up")],
@@ -583,10 +586,10 @@ def build():
              "Train the knots directly on fresh continuous pitches, add more programs to blend, and shorten the pre-swing pause."),
         card("dribble", "Dribbling", [chip("run")],
              [vid("dribble_btl.mp4", out("dribble_btl.mp4"), "Three passes through the legs in a row",
-                  "Through the legs: three passes in a row on a start the search never saw. Slow-motion replay at 3×."),
+                  "Through the legs: three passes in a row on a start the search never saw, with a slow-motion replay of the pass."),
               vid("codex_crossover.mp4", CODEX + "competitor_20260927__video_dribble_crossover_25_tcn.mp4", "Crossover dribble, Codex champion",
                   "Crossovers: Codex's champion, 7.52 per 15 s run. The ball is eventually lost on every run.")],
-             ["**Through the legs.** A stance planner picked a staggered lunge with the trunk twisted toward the lead leg, and catch spots that both hands can reach from behind the ball. The first pass is legal on 92% of 24 fresh starts, the return on 42%, and 54% of passes overall. The longest streak is 3. The earlier \"between the legs\" video was a low crossover in front of the body: a check that the ball passes under the crotch scores it 0 of 35.",
+             ["**Through the legs.** A stance planner picked a staggered lunge with the trunk twisted toward the lead leg, and catch spots that both hands can reach from behind the ball. On 24 fresh 8 s runs the first pass is complete on 22 (92%), the return on 10 (42%), and 33 of 61 passes are good (54%). A streak of 3 shows up on only 1 or 2 of 32 fresh starts. The earlier \"between the legs\" video was a low crossover in front of the lead foot: the ball never went through the gap, and the arena's leg-gate count for it is 0 on all 25 starts.",
               "**Crossovers.** Codex's small learned correction from the recent ball motion doubled the count to 7.52 per run. The trunk still pumps and the hands are still paddles."],
              table(["Trial", "Champion", "Was"],
                    [["Through the legs, 25 starts (good passes per attempt, at least 10)", f"#{V('dribble_btl_25', 3)}", "#0.000"],
@@ -627,8 +630,8 @@ def build():
               f"Official score {V('relocate_p2eval_official', 3)} on the evaluation environment (was 0.210), genuine lifts {V('relocate_p2eval_lift', 3)}. On the easier phase-2 environment, lifts {V('relocate_p2_300', 3)}. MyoSuite 2.12.2 steps a second copy of the scene whose receptacle sits at the random target, invisible to the observation, while the visible box has no walls. Scores here are not comparable to the 2023 winner's 0.343."),
         small("Chase tag", [chip("scored")], vid("myo_chase_v2.mp4", out("myo_chase_v2.mp4"), "Chase tag", "Two leg tracks with turning."),
               f"Phase 1 {V('chase_p1', 3)} (winner 0.666), phase 2 {V('chase_p2', 2)}. Each leg loops stance, push, lift and reach on its own sensed events; a step-turn loop turns toward an opponent behind."),
-        small("Walking on the myoLeg", [chip("scored")], vid("myo_walk.mp4", out("myo_walk.mp4"), "MyoLeg walking", "The 80-muscle leg model."),
-              f"Step length {V('walk_stride', 2)} m (was 0.36, people about 0.7), at 1.2–1.4 m/s. Standing pushes of 60–80 N are survived."),
+        small("Walking on the myoLeg", [chip("scored")], vid("myo_walk_v2.mp4", out("myo_walk_v2.mp4"), "MyoLeg walking with the longer stride", "The 80-muscle leg model with the step-length champion: 0.46 m steps at 1.44 m/s, until it reaches the arena edge."),
+              f"Step length {V('walk_stride', 2)} m (was 0.36, people about 0.7), at 1.2 to 1.5 m/s. The longer-stride gait trades pace control for step length. Quiet standing survives pushes of 60 to 80 N."),
         small("Baoding balls", [chip("scored")], vid("myo_baoding_v3.mp4", out("myo_baoding_v3.mp4"), "Baoding balls", "Palm tilt and roll tied to the ball angle."),
               f"Score {V('baoding_p2', 3)} against the winner's 0.55. It holds both balls and nudges them but never found a rolling gait."),
         small("Die reorientation", [chip("stuck")], vid("myo_die_v3.mp4", out("myo_die_v3.mp4"), "Die", "Finger flips plus palm tilt and roll."),
@@ -642,8 +645,8 @@ def build():
         ["Body", "What it is", "Sprint ceiling, torso free", "Used for"],
         [
             ["Average (v2, v3)", "Average adult. v3 adds elastic Achilles and quadriceps tendons.", "6.89 m/s on v3", "All the older results"],
-            ["95th percentile", "Strength ×1.32, muscle speed ×1.2, tendon stiffness ×1.5, activation ×0.87 (inferred; there is no population data).", "9.69 m/s on v3", "Sprint, blocks, long jump"],
-            ["Elite, old profile", "Hip extensors ×1.5 and several parts set too strong (iliopsoas, quadriceps, calves).", "unverified", "Results marked provisional"],
+            ["95th percentile", "Strength ×1.32, muscle speed ×1.2 and tendon stiffness ×1.5 (each a 95th percentile of published data), activation time constants ×0.87 (inferred; no population distribution exists).", "9.69 m/s on v3", "Sprint, blocks, long jump"],
+            ["Elite, old profile", "Strengths set per muscle from memory of the papers (hip extensors ×1.6, vasti ×1.3, speed ×1.3). A check on 28 Sep found iliopsoas, vasti, soleus, gastrocnemius, the quadriceps tendon and activation set too strong.", "unverified", "Results marked provisional"],
             ["Elite, literature (elite2)", "Every part cited. Elite knee and ankle extensors sit near the untrained mean.", "8.5 on v3, 9.28 on v4", "New trials"],
             ["v4, calibrated", "v3 with two literature-backed changes: quadriceps series stiffness 250 to 1000 N/mm, hip speeds 15 to 18.5 (extension) and 29 (flexion) rad/s.", "8.2 average, 10.45 95th pct., 9.28 elite2", "Sprinters being tuned now"],
         ], wide=True)
@@ -652,7 +655,7 @@ def build():
     codex = table(
         ["Result", "Codex reports", "In this arena"],
         [
-            ["Standing jump, legal distance", "1.363 m (temporal recovery)", "Champion here (run 28 Sep)"],
+            ["Standing jump, legal distance", "1.363 m (temporal recovery)", "Champion here (run 27 Sep)"],
             ["Crossovers, 25 starts", "7.52, later 9.08 (R9)", "7.52 is the champion here; 9.08 not yet run"],
             ["Standing jump, robustness (32 starts)", "1.3397 m, 32 of 32 (R7)", "Ours 1.3153. Not yet run here"],
             ["Bat power", "14.72 m/s, pause before and after contact kept", "Superseded by the reflex-on swing above"],
@@ -664,7 +667,7 @@ def build():
         ["Workstream", "Where it stands", "Next"],
         [
             ["Sprint on the v4 body", f"Restarted 1 am 29 Sep. The average-body runner is entered at {V('sprint_top_speed_v4')} m/s; searches for a better stance and the 95th-percentile body are running.", "Then the elite body"],
-            ["Long jump", "Restarted 1 am. Landing searches plateaued with about 4 of 32 roll-overs.", "Diagnose the roll-overs; a v4 family after a v4 sprinter"],
+            ["Long jump", "Restarted 1 am. The landing search had plateaued with 3 of 30 captured take-offs rolling over.", "Diagnose the roll-overs; a v4 family after a v4 sprinter"],
             ["Soccer balance and phase 2", "Restarted 1 am.", "A 40-start 310 s trial; the staged kick curriculum"],
             ["Dribble through the legs, bat speed, table tennis, runner, hurdles, relocate", "Written up in the handoff for Codex to pick up (bits/tungsten-robolab/HANDOFF_20260929.md)", "Codex chooses"],
         ], wide=True)
@@ -672,7 +675,7 @@ def build():
         ["Waiting for you", "Detail"],
         [
             ["Run Codex's newer champions here", "Jump robustness 1.3397 m and crossovers 9.08, the same way as the first three."],
-            ["Land the robolab branch on main", "All robolab work is committed on branch robolab-campaign-2026-09 (about 1,700 files, 37 MB, nothing over 2 MB; the frozen binaries and videos stay out). Main is untouched."],
+            ["Land the robolab branch on main", "All robolab work is committed on branch robolab-campaign-2026-09 (about 1,700 files, 40 MB, nothing over 2 MB; the frozen binaries and videos stay out). Main is untouched."],
             ["Review two compiler fixes", "Methods with more than 8 parameters (branch worktree-agent-a2c3280fe1aeba8ae) and parameters named t0 or t1 colliding with LLVM temporaries, which also fixed a use-after-free (branch worktree-agent-aecbbb4851919b588)."],
             ["Report the MyoSuite relocate bug upstream", "Confirmed: the physics steps a second copy of the scene with an invisible receptacle."],
         ], wide=True)
@@ -681,19 +684,19 @@ def build():
     requests = table(
         ["You asked", "Where it stands"],
         [
-            ["A natural runner: power leg extended, other knee and arm up", "Done: 7.3° from human running."],
-            ["Batter hitch, before and after contact", "Fixed. The stall was the wrist and the pelvis hitting their joint limits."],
-            ["Dribble: a visible crossover, less back, more elbow, fingers", "Crossover 7.52 per run. The trunk still pumps. Fingers built, no measurable effect."],
+            ["A natural runner: power leg extended, other knee and arm up", "Built and improved: 7.3° from human running (was 9.1°) on the 12-start trial."],
+            ["Batter hitch, before and after contact", "After contact: fixed (the stall was the wrist and the pelvis hitting their joint limits). Before the swing: a 50 ms pause remains in the reflex-on swing."],
+            ["Dribble: a visible crossover, less back, more elbow, fingers", "Crossover 7.52 per 15 s run. The trunk still pumps. The fingered hand is built (opt-in); Codex's fingered-hand search is running."],
             ["A better long-jump run and take-off", "4.9 m on one start; the sprinter is the run-up."],
             ["Hurdles at high-school height", "0.762 m: 4 of 8 clear hurdle 1. Waiting on run-up speed."],
-            ["Table tennis backhand, wrist flick, chop, low scoop", "Backhand 23% of backhand serves. Strokes measured; the chop and flick now work at real speed, none reliably lands."],
+            ["Table tennis backhand, wrist flick, chop, low scoop", "The backhand exists (23% of backhand serves solved). Chop, flick and scoop were measured with real ball spin: the best chop lands 3 of 11, the flick 0 of 20, the scoop 2 of 20."],
             ["Soccer kick with the inside of the foot", "Not yet: the best attempt strikes with the toes."],
             ["MyoLeg longer strides", f"{V('walk_stride', 2)} m (was 0.36; people about 0.7)."],
             ["Toe-touch and toe-off keyframes only, alternating legs", "As a whole controller it falls. As corrections mid-stance follows; the leg pair moves as negatives of each other (gain about 1.0), the arms do not."],
             ["One toe-off keyframe too many", "Drop the one at 30% of the stride, keep toe-off: 1 fall in 48 starts."],
             ["A 95th-percentile body", "Done, and a v4 body calibrated to human data."],
             ["Running motion-capture data", "Fukuchi 2017 treadmill running, in the trial run_natural_mocap."],
-            ["Bolt's mechanics from blocks", "Done: 30 m in 6.72 s."],
+            ["Bolt's mechanics from blocks", "Keyframes built and used. The runner takes 6.72 s to 30 m against Bolt's 3.78 s."],
             ["A drag-the-joints keyframe editor", 'Done: <a href="https://claude.ai/artifact/HvFRzvSmo8esj7A2ELnxng">Keyframe Bench</a>.'],
             ["Demos on yaks.app", "thecompanygardener.yaks.app/robolab, last refreshed 27 Sep. The videos above are newer."],
         ], wide=True)
@@ -738,7 +741,7 @@ def build():
   <header class="head">
     <div class="eyebrow">Progress · updated {UPDATED}</div>
     <h1>Robolab, ability by ability</h1>
-    <p class="lede">Each ability below shows its current champion, its newest video and where it stands against people or the challenge winner. Every score comes from the champion-versus-challenger arena: {n_trials} trials, each on fixed held-out starts, and a challenger takes over only when it wins a paired test. Results marked provisional or ceiling study are labelled where they appear.</p>
+    <p class="lede">Each ability below shows its current champion, its newest video and where it stands against people or the challenge winner. Every score comes from the champion-versus-challenger arena: {n_trials} trials, each on fixed held-out starts, and a challenger takes over only when it beats the champion on the same starts (a paired test where a trial has several starts). Results marked provisional or ceiling study are labelled where they appear.</p>
     <div class="board" aria-label="Abilities">{board}</div>
   </header>
 
@@ -766,18 +769,49 @@ def build():
     return page
 
 
+def local_sources():
+    """Published name -> source path relative to bits/tungsten-robolab; other worktrees' files are copied in."""
+    import shutil
+    assets = os.path.join(ROOT, "scratchpad", "abilities", "assets")
+    out_map = {}
+    for name, src in VIDEOS.items():
+        if not os.path.isfile(src):
+            continue
+        if not os.path.abspath(src).startswith(ROOT + os.sep):
+            os.makedirs(assets, exist_ok=True)
+            dst = os.path.join(assets, name)
+            if not os.path.isfile(dst) or os.path.getsize(dst) != os.path.getsize(src):
+                shutil.copyfile(src, dst)
+            src = dst
+        out_map[name] = os.path.relpath(src, ROOT)
+    return out_map
+
+
+# Publish limit: 64 MB per call, so the videos go up in two batches (the page reloads with each).
+BATCH_A = ["run_knots.mp4", "sprint_p95_ri.mp4", "sprint_blocks.mp4", "sprint_touch.mp4", "long_jump_v5_p95.mp4",
+           "codex_standing_jump.mp4", "hurdle_hs_076.mp4", "bat_v6_knots.mp4", "bat_v6.mp4", "dribble_btl.mp4",
+           "codex_crossover.mp4"]
+
+
 def main():
     page = build()
     path = os.path.join(HERE, "progress.html")
     open(path, "w").write(page)
-    missing = [(k, v) for k, v in VIDEOS.items() if not os.path.isfile(v)]
-    total = sum(os.path.getsize(v) for v in VIDEOS.values() if os.path.isfile(v))
+    files = local_sources()
+    missing = [k for k in VIDEOS if k not in files]
+    total = sum(os.path.getsize(os.path.join(ROOT, v)) for v in files.values())
     print(f"wrote {path} ({len(page) / 1024:.0f} KB); {len(VIDEOS)} videos, {total / 1e6:.1f} MB", file=sys.stderr)
-    for k, v in missing:
-        print("MISSING", k, v, file=sys.stderr)
+    for k in missing:
+        print("MISSING", k, VIDEOS[k], file=sys.stderr)
     if "--files" in sys.argv:
-        files = {k: v for k, v in VIDEOS.items() if os.path.isfile(v)}
         print(json.dumps(files, indent=0))
+    if "--batches" in sys.argv:
+        a = {k: files[k] for k in BATCH_A if k in files}
+        b = {k: v for k, v in files.items() if k not in a}
+        for label, batch in (("A", a), ("B", b)):
+            size = sum(os.path.getsize(os.path.join(ROOT, v)) for v in batch.values())
+            print(f"batch {label}: {len(batch)} files, {size / 1e6:.1f} MB", file=sys.stderr)
+            print(json.dumps(batch, indent=0))
 
 
 if __name__ == "__main__":

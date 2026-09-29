@@ -331,8 +331,8 @@
     # give thigh angles in the world frame, hip flexion = thigh - tilt0
     @tilt0 = param("tilt0", ~-0.45, ~-0.8, ~-0.1)
     # reflexes: kp per metre of length error
-    @k_trunk = param("k_trunk", ~46.0, ~5.0, ~120.0)
-    @k_leg = param("k_leg", ~74.0, ~30.0, ~400.0)
+    @k_trunk = param("k_trunk", ~46.0, ~5.0, ~180.0)
+    @k_leg = param("k_leg", ~74.0, ~10.0, ~400.0)
     @kd_ratio = param("kd_ratio", ~0.02, ~0.0, ~0.1)
     @g_psoas = param("g_psoas", ~1.0, ~0.0, ~1.5)
     @kd_leg = param("kd_leg", ~0.02, ~0.0, ~0.3)
@@ -358,7 +358,7 @@
     @kf_ref = ~0.0
     @kf_ref = @params["kf_ref"] if @params.key?("kf_ref")
     # postural tone of the back extensors, trimmed by thorax pitch
-    @tone0 = param("tone0", ~0.51, ~0.0, ~1.0)
+    @tone0 = param("tone0", ~0.51, ~0.0, ~1.6)
     @k_tone = param("k_tone", ~0.73, ~0.0, ~5.0)
     @pitch_des = param("pitch_des", ~0.25, ~-0.3, ~0.5)
     # trunk servo on the lumbar spine; hip strategy on the stance hip(s)
@@ -383,7 +383,7 @@
     @k_lb = param("k_lb", ~0.0, ~-3.0, ~3.0)
     @k_pr = param("k_pr", ~1.5, ~0.0, ~4.0)
     @k_prd = param("k_prd", ~0.1, ~0.0, ~0.6)
-    @spring = param("spring", ~0.03, ~0.005, ~0.15)
+    @spring = param("spring", ~0.03, ~0.002, ~0.15)
     # weight shift onto the right foot and forward lean
     @t_set = param("t_set", ~0.3, ~0.05, ~1.0)
     @t_shift = param("t_shift", ~0.3, ~0.1, ~0.8)

@@ -257,6 +257,10 @@
     # the set's minimum time is extended by the same amount)
     @b_t_ramp = ~0.3
     @b_t_ramp = param("b_t_ramp", ~0.3, ~0.15, ~1.5) if switch_on("bramp")
+    # bgset 1: the set chunk's reflex gain multiplier (b_g_set; stiffer legs
+    # while the reset's posture becomes the stance)
+    @b_g_set = ~1.0
+    @b_g_set = param("b_g_set", ~1.0, ~0.5, ~3.0) if switch_on("bgset")
     # bfore 1: the lift also waits for the COM's fore-aft capture point to be
     # within b_fx_tol of the stance foot's target (sb_x): the lateral latch
     # alone let a slow fore-aft drift (the COM 0.19 m behind the stance foot)
@@ -299,7 +303,7 @@
     @cp_x = param("cp_x", ~0.02, ~-0.05, ~0.08)
     @cp_y = param("cp_y", ~0.0, ~-0.03, ~0.03)
     @cp_ks = param("cp_ks", ~6.0, ~0.0, ~30.0)
-    @cp_ksf = param("cp_ksf", ~3.0, ~0.0, ~20.0)
+    @cp_ksf = param("cp_ksf", ~3.0, ~0.0, ~40.0)
     @cp_ka = param("cp_ka", ~4.0, ~0.0, ~30.0)
     @cp_kaf = param("cp_kaf", ~2.0, ~0.0, ~20.0)
     @cp_kh = param("cp_kh", ~-10.0, ~-60.0, ~15.0)
@@ -315,8 +319,8 @@
     @cp_ksw = ~0.0
     @cp_klb = ~0.0
     if switch_on("cp_more")
-      @cp_ksw = param("cp_ksw", ~0.0, ~0.0, ~8.0)
-      @cp_klb = param("cp_klb", ~0.0, ~0.0, ~8.0)
+      @cp_ksw = param("cp_ksw", ~0.0, ~-8.0, ~8.0)
+      @cp_klb = param("cp_klb", ~0.0, ~-8.0, ~8.0)
     @cp_rf = ~0.0
     @cp_ro = ~0.0
     self
@@ -758,8 +762,8 @@
     return super if !@bcatch
     mv = Movement.new("bal")
     ramp_extra = @b_t_ramp - ~0.3
-    ch = chunk("b_set", @b_t_ramp, stance, :b_set, :both, :mid).hold_until(Latch.after(@b_t_set + ramp_extra))
-    ch = chunk("b_set", @b_t_ramp, stance, :b_set, :both, :mid).hold_until(settled.after_min(@b_t_set + ramp_extra), @b_t_set + ramp_extra + @bs_tmax) if @bsettle
+    ch = chunk("b_set", @b_t_ramp, stance, :b_set, :both, :mid).hold_until(Latch.after(@b_t_set + ramp_extra)).gain(@b_g_set)
+    ch = chunk("b_set", @b_t_ramp, stance, :b_set, :both, :mid).hold_until(settled.after_min(@b_t_set + ramp_extra), @b_t_set + ramp_extra + @bs_tmax).gain(@b_g_set) if @bsettle
     ch.branch(->(f, c) next_leg(f))
     mv.add(ch)
     add_catch_leg(mv, "l")

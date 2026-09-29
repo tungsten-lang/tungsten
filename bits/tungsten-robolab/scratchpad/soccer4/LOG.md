@@ -20,3 +20,13 @@ All campaign state lives in the repo: scratchpad/soccer4/, params/, out/. Nothin
   transient but is positive feedback for a slow outward drift (the trunk lean moves the COM the same way).
 - 01:30 running ablations on the 5 failing + 5 passing seeds: scan/variants1.sh (cp_kh 0 / -6 / +6, sb_kha 4) then variants2.sh
   (tl_kp 0 / 10, tl_wfoot 1, tl_kp+tl_kd 0).
+- 01:47 ablations (10 seeds: 5 failing + 5 passing of the lift challenger, 20 s): base 5/10; cp_kh -6 7/10; cp_kh 0 6/10; cp_kh +6 2/10
+  (the round-4 hip-strategy sign is right for the transient, its size -13.9 is too big for slow drifts); tl_kp 0 or 10, tl_wfoot 1,
+  tl_kp+tl_kd 0: 3-4/10 (the heading hold matters); sb_kha inert (cp4 zeroes the round-3 sb_kax/sb_kst/sb_kha/sb_ki);
+  bramp (slower set ramp 0.8 / 1.2 s) 4/10, 3/10 (WORSE: the tuned 0.3 s lurch is part of the routine; falls at 0.4-1.5 s);
+  bfore (fore-aft readiness) inert: 89117's fore-aft drift (COM 0.19 m behind the left foot) does not recover by waiting.
+- 01:50 code (opt-in, bit-identical replay verified on 89117): lib/robolab/skills/myo_soccer_v4.w gained bramp/b_t_ramp, bgset/b_g_set,
+  bfore/b_fx_tol, cp_more/cp_ksw/cp_klb (backup of the pre-edit files in scratchpad/soccer4/backup/). Controllers frozen as
+  bin/challengers/soccer6-a (bramp, bfore, cp_more) and soccer6-b (+ bgset).
+- 01:50 training scan of the lift challenger on fresh seeds 90000-90119 (12 s): scan/train_lift.out (the hard-seed pool for search5.py).
+  Rule for the balance work from here on: choose variants on training seeds (90000+), never on the trial seeds 89000-89139.

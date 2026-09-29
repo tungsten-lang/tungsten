@@ -668,6 +668,14 @@ def read_ik(path, names, plant, nk=None):
             role = role_of(nm, plant)
             for q in tab:
                 tab[q][k, i] = p.get(f"ik_{key[q]}{k}_{role}", 0.0)
+    tab["fmin"] = p.get("ik_fmin", 0.05)
+    if "ik_pr0" in p:
+        tab["pr"] = np.array([p.get(f"ik_pr{k}", 0.0) for k in range(n)])
+        tab["fkp"] = np.array([p.get(f"ik_kp_{role_of(nm, plant)}", 0.0) for nm in names])
+        tab["fkd"] = np.array([p.get(f"ik_kd_{role_of(nm, plant)}", 0.0) for nm in names])
+    if "ik_clz" in p:
+        tab["clz"], tab["clt"] = p["ik_clz"], p.get("ik_clt", 0.04)
+        tab["ckc"] = np.array([p.get(f"ik_kc_{role_of(nm, plant)}", 0.0) for nm in names])
     return p, tab
 
 
@@ -711,10 +719,21 @@ def seen_site_x(body, site):
 
 
 class IKProgram:
+    """LongJumpRunSkill#ik_apply. Optional extras in `tab` (all off when absent):
+    fmin  the plant foot's contact force (body weights) that counts as its
+          touchdown (0.05: any touch; a scuff of the swing foot is < 1)
+    pr / fkp / fkd  rotation feedback: torso pitch reference knots (rad, every
+          h s) and per-muscle gains on the pitch error and the pitch rate
+    ckc / clz / clt  swing-foot clearance reflex: before the plant, while the
+          lower of the plant foot's toe and heel is below clz (m) and the
+          program is more than clt s before the ideal touchdown, every muscle's
+          drive gets ckc x (clz - height)"""
+
     def __init__(self, tab, h, td, g, kdc, kp, kd, gap0, end=None):
         self.tab, self.h, self.td, self.g, self.kdc, self.kp, self.kd, self.gap0 = tab, h, td, g, kdc, kp, kd, gap0
         self.nk = tab["c"].shape[0]
         self.end = end   # program time (s) at which the skill hands over to the hang
+        self.fmin = tab.get("fmin", 0.05)
 
     def start(self, body, cap):
         m, d = body.m, body.d
@@ -727,6 +746,8 @@ class IKProgram:
         self.weight = float(sum(m.body_mass[1:])) * G
         self.plant_geoms = {g for g, f in body.feet.items() if f == cap["plant"]}
         self.f6 = np.zeros(6)
+        self.site_toe = m.site(f"{cap['plant']}_toe").id
+        self.site_heel = m.site(f"{cap['plant']}_heel").id
 
     def foot_force(self, body):
         m, d = body.m, body.d
@@ -742,7 +763,7 @@ class IKProgram:
         d = body.d
         s = t + self.shift
         if not self.td_seen:
-            down = self.foot_force(body) > 0.05
+            down = self.foot_force(body) > self.fmin
             if not down:
                 self.lifted = True
             if down and self.lifted and s > 0.03:
@@ -752,12 +773,26 @@ class IKProgram:
             elif s > self.td:
                 self.shift -= s - self.td
                 s = self.td
+        self.s = s
         ids = body.act_ids
         c = (self.hi - d.actuator_length[ids]) / self.span
         cd = -d.actuator_velocity[ids] / self.span
         cs, vs, e, e1 = quintic_eval(self.tab, s, self.h, self.nk)
         g = self.g if k > 0 else 0.0  # (the skill's first program tick runs without feedback)
-        return e + self.gap_err * e1 + self.kdc * g * self.kd * vs + g * (self.kp * (cs - c) - self.kd * cd)
+        out = e + self.gap_err * e1 + self.kdc * g * self.kd * vs + g * (self.kp * (cs - c) - self.kd * cd)
+        tab = self.tab
+        if "pr" in tab:
+            # rotation feedback (LongJumpRunSkill#ik_feedback)
+            j = min(max(int(s / self.h), 0), self.nk - 2)
+            u = min(max((s - self.h * j) / self.h, 0.0), 1.0)
+            pr = tab["pr"]
+            err = body.torso_pitch() - (pr[j] + (pr[j + 1] - pr[j]) * u)
+            out = out + tab["fkp"] * err + tab["fkd"] * torso_rate(body)
+        if "ckc" in tab and not self.td_seen and s < self.td - tab["clt"]:
+            z = min(float(d.site_xpos[self.site_toe][2]), float(d.site_xpos[self.site_heel][2]))
+            if z < tab["clz"]:
+                out = out + tab["ckc"] * (tab["clz"] - z)
+        return out
 
 
 def simulate_prog(body, cap, prog):

@@ -18,10 +18,12 @@ neither class is a novelty or optimality claim.
 """
 import argparse
 import base64
+import concurrent.futures
 import gzip
 import hashlib
 import itertools
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -83,25 +85,56 @@ def witness_files(roots):
                 yield from root.rglob(pattern)
 
 
-def witnesses(roots, cache):
-    best = {}
-    for path in sorted(set(witness_files(roots))):
-        try:
-            raw = load(path)
-        except (OSError, ValueError):
+_WORKER_CACHE = {}
+
+
+def _init_worker(cache):
+    global _WORKER_CACHE
+    _WORKER_CACHE = cache
+
+
+def _check(path_str):
+    """(path, sha256, [shape, rank] | None, freshly verified?) for one witness file."""
+    path = Path(path_str)
+    try:
+        raw = load(path)
+    except (OSError, ValueError):
+        return path_str, None, None, False
+    digest = hashlib.sha256(raw).hexdigest()
+    if digest in _WORKER_CACHE:
+        return path_str, digest, _WORKER_CACHE[digest], False
+    try:
+        shape, terms = decode(path, raw)
+        return path_str, digest, [list(shape), len(terms)], True
+    except (AssertionError, ValueError, IndexError):
+        return path_str, digest, None, True
+
+
+def witnesses(roots, cache, jobs=1):
+    """Best verified witness per canonical shape; new tensors are checked in parallel."""
+    paths = sorted({str(p) for p in witness_files(roots)})
+    if jobs > 1:
+        pool = concurrent.futures.ProcessPoolExecutor(jobs, initializer=_init_worker,
+                                                      initargs=(dict(cache),))
+        results = pool.map(_check, paths, chunksize=16)
+    else:
+        _init_worker(cache)
+        pool, results = None, map(_check, paths)
+    best, fresh = {}, 0
+    for path, digest, verdict, checked in results:
+        if digest is None:
             continue
-        digest = hashlib.sha256(raw).hexdigest()
-        if digest not in cache:
-            try:
-                shape, terms = decode(path, raw)
-                cache[digest] = [list(shape), len(terms)]
-            except (AssertionError, ValueError, IndexError):
-                cache[digest] = None
-        if cache[digest]:
-            shape, rank = cache[digest]
+        if checked:
+            cache[digest] = verdict
+            fresh += 1
+        if verdict:
+            shape, rank = verdict
             key = tuple(sorted(shape))
             if key not in best or rank < best[key][0]:
-                best[key] = (rank, str(path))
+                best[key] = (rank, path)
+    if pool is not None:
+        pool.shutdown()
+    print(f'{len(paths)} witness files; {fresh} newly verified', file=sys.stderr)
     return best
 
 
@@ -158,11 +191,13 @@ def main(argv=None):
     parser.add_argument('--extra-repo', action='append', default=[])
     parser.add_argument('--witness', action='append', required=True, help='file or directory (repeatable)')
     parser.add_argument('--cache', help='JSON verification cache keyed by SHA-256')
+    parser.add_argument('--jobs', type=int, default=max(1, min(8, (os.cpu_count() or 2) - 2)),
+                        help='processes for verifying new witness files')
     parser.add_argument('--json', help='write every row here')
     parser.add_argument('-v', '--verbose', action='store_true')
     args = parser.parse_args(argv)
     cache = json.loads(Path(args.cache).read_text()) if args.cache and Path(args.cache).exists() else {}
-    ours = witnesses(args.witness, cache)
+    ours = witnesses(args.witness, cache, args.jobs)
     if args.cache:
         Path(args.cache).write_text(json.dumps(cache))
     lille, any_ring, gf2 = public_tables(args)

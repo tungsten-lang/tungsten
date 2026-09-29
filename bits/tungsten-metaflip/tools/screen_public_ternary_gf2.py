@@ -173,12 +173,13 @@ def walk(args):
     if log.exists():
         for line in log.read_text().splitlines():
             row = json.loads(line)
-            done.add((row['seed'], row['nonce'], row['steps']))
+            # Content hash first: a regenerated seed directory must not repeat finished walks.
+            done.add((row.get('seed_sha256') or row['seed'], row['nonce'], row['steps']))
     work = []
     for repeat in range(args.repeats):
         for seed in sorted(rows, key=lambda row: row['gf2_rank'], reverse=args.largest_first):
             nonce = args.nonce_base + 7919 * repeat + zlib.crc32(seed['shape'].encode()) % 1000003
-            if (seed['mfw'], nonce, args.steps) not in done:
+            if (seed.get('mfw_sha256') or seed['mfw'], nonce, args.steps) not in done:
                 work.append((seed, nonce))
     print(f'{len(work)} walks queued', flush=True)
     with open(log, 'a') as sink, concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:

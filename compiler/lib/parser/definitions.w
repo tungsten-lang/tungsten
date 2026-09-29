@@ -973,6 +973,16 @@
           params.push(expect_identifier_name_value())
         match_type?(T_COMMA)
       expect_type(T_RPAREN)
+    fold_hint = nil
+    if at_type?(T_TYPE_HINT) && fold_hint_text?(current_value())
+      fold_hint = current_value()
+      comment_pos = fold_hint.index("#")
+      if comment_pos != nil
+        fold_hint = fold_hint.slice(0, comment_pos)
+      fold_hint = fold_hint.strip()
+      if params.size() > 0
+        raise compile_error_at(:E_PARSE_FOLD_PARAMS, "`-> ## fold` cannot take parameters")
+      advance()
     skip_newlines()
     body = nil
     if at_type?(T_INDENT)
@@ -987,7 +997,10 @@
       expect_type(T_RBRACE)
     else
       body = [parse_expression(false)]
-    Tungsten:AST:Block.new(params, body)
+    block = Tungsten:AST:Block.new(params, body)
+    if fold_hint != nil
+      return Tungsten:AST:TypeAscription.new(block, fold_hint)
+    block
 
   -> parse_call_args_and_block(allow_block_without_args = false, call_line = nil, call_col = nil, call_name = nil, paren_open = false)
     args = nil

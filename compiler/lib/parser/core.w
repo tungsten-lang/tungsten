@@ -1100,7 +1100,12 @@
         advance()
         # Memory hints attach to the RHS allocation node, not to the assign
         # as a type annotation. Lowering reads :reuse_safe from the literal.
-        if hint == "reuse"
+        if fold_hint_text?(hint)
+          value = Tungsten:AST:TypeAscription.new(value, hint)
+          hint = fold_hint_rest_type(hint)
+        if hint == nil
+          nil
+        elsif hint == "reuse"
           if value != nil
             value.reuse_safe = true
           hint = nil

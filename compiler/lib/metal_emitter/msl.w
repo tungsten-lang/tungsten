@@ -1068,6 +1068,14 @@
     "(" + emit_expr(ctx, node.left) + " || " + emit_expr(ctx, node.right) + ")"
   elsif t == :not
     "(!" + emit_expr(ctx, node.operand) + ")"
+  elsif t == :type_ascription
+    # Occurrence-local `expr ## T` is a real scalar conversion in compiled
+    # Tungsten. Keep that meaning in the C++ GPU dialects instead of treating
+    # the wrapper as an unsupported AST node (or merely discarding it).
+    scalar = msl_scalar_type(node.type_hint)
+    if scalar == nil
+      gpu_kernel_error(ctx[:node], "unsupported expression ascription type `" + node.type_hint.to_s() + "`")
+    scalar + "(" + emit_expr(ctx, node.expression) + ")"
   elsif t == :call
     emit_call(ctx, node)
   elsif t == :if && gpu_is_ternary?(node)
@@ -1445,6 +1453,8 @@
     :i32
   elsif t in (:float :decimal)
     :f32
+  elsif t == :type_ascription
+    gpu_hint_type(node.type_hint)
   elsif t == :var
     ctx[:var_types][node.name]
   elsif t == :call && node.name == "\[]"

@@ -279,6 +279,9 @@
     wgsl_collect_atomic_buffers(node.target, found)
     wgsl_collect_atomic_buffers(node.value, found)
     return nil
+  if t == :type_ascription
+    wgsl_collect_atomic_buffers(node.expression, found)
+    return nil
   if t in (:binary_op :and :or)
     wgsl_collect_atomic_buffers(node.left, found)
     wgsl_collect_atomic_buffers(node.right, found)
@@ -333,6 +336,12 @@
     name = "" + node.name
     renamed = ctx[:renames][name]
     return renamed == nil ? name : renamed
+  if t == :type_ascription
+    scalar = wgsl_scalar(node.type_hint)
+    value = wgsl_expr(ctx, node.expression)
+    if scalar == nil || value == nil
+      return nil
+    return scalar + "(" + value + ")"
   if t == :binary_op
     l = wgsl_expr(ctx, node.left)
     r = wgsl_expr(ctx, node.right)

@@ -810,9 +810,12 @@
     if at_type?(T_KEYWORD)
       return parse_keyword()
 
-    # Arrow -> lambda (no name) or method definition
+    # Arrow -> lambda (no name) or method definition.
+    # `-> ## fold` is a zero-arg fold block, not a method def.
     if at_type?(T_ARROW)
       if peek_type() == T_LPAREN
+        return parse_lambda()
+      if peek_type() == T_TYPE_HINT && fold_hint_text?(peek_value())
         return parse_lambda()
       return parse_method_def()
 
@@ -1222,12 +1225,59 @@
       hint = hint.slice(0, comment_pos)
     validate_type_hint_spelling(hint)
     advance()
-    Tungsten:AST:TypeAscription.new(expr, hint.strip())
+    hint = hint.strip()
+    # `## fold` names a value, never `<<` / `<-`. Bind it to the printed
+    # expression (the last one when `<< a, b ## fold`).
+    if fold_hint_text?(hint)
+      k = ast_kind(expr)
+      if k == :puts
+        vals = expr.value
+        if vals != nil && vals.size() > 0
+          out = []
+          last = vals.size() - 1
+          i = 0
+          while i < vals.size()
+            v = vals[i]
+            if i == last
+              v = Tungsten:AST:TypeAscription.new(v, hint)
+            out.push(v)
+            i += 1
+          return Tungsten:AST:Puts.new(out)
+      if k == :print
+        return Tungsten:AST:Print.new(Tungsten:AST:TypeAscription.new(expr.value, hint))
+    Tungsten:AST:TypeAscription.new(expr, hint)
 
   # `str` is a common Python/Ruby translation slip, but it has never been a
   # Tungsten type. Reject it where the source still has a precise span instead
   # of letting lowering intern :str as an unknown pseudo-type. Internal
   # interpolation tuples use :str as a storage tag; they never enter here.
+  -> fold_hint_text?(text)
+    if text == nil
+      return false
+    s = ("" + text.to_s()).strip()
+    comment_pos = s.index("#")
+    if comment_pos != nil
+      s = s.slice(0, comment_pos).strip()
+    if s == "fold"
+      return true
+    s.starts_with?("fold ")
+
+  -> fold_hint_rest_type(text)
+    if text == nil
+      return nil
+    s = ("" + text.to_s()).strip()
+    comment_pos = s.index("#")
+    if comment_pos != nil
+      s = s.slice(0, comment_pos).strip()
+    if s == "fold"
+      return nil
+    if !s.starts_with?("fold ")
+      return nil
+    rest = s.slice(5, s.size() - 5).strip()
+    if rest.size() == 0
+      return nil
+    rest
+
   -> validate_type_hint_spelling(hint)
     text = hint.to_s().strip()
     colon = text.index(":")

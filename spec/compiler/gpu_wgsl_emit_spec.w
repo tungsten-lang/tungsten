@@ -26,6 +26,10 @@
 ## f32[]: output
 @gpu fn wgsl_secondary(output)
   i = gpu.thread_position_in_grid.x ## i32
+  # Exercise the portable expression wrapper too; the outer assignment hint
+  # remains canonical Assign metadata while the parenthesized hint is an AST
+  # TypeAscription consumed by wgsl_expr.
+  unsigned_i = (i ## u32) ## u32
   output[i] = 1.0
 
 wgsl = read_file("spec/compiler/gpu_wgsl_emit_spec.wgsl")
@@ -57,6 +61,7 @@ expect_marker(wgsl, "barrier", "workgroupBarrier();")
 expect_marker(wgsl, "return", "return;")
 expect_marker(wgsl, "compound", "i += 256;")
 expect_marker(wgsl, "second_kernel", "fn wgsl_secondary")
+expect_marker(wgsl, "expression_ascription", "var unsigned_i = u32(i);")
 expect_marker(wgsl, "unique_binding", "@group(0) @binding(3) var<storage, read_write> tungsten_internal_bind_wgsl_secondary_output")
 
 << "gpu_wgsl_emit_spec: all checks passed"

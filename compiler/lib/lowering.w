@@ -28,6 +28,7 @@ use content_hash
 use lowering/pass_registry
 use lowering/signatures
 use lowering/types
+use lowering/fold
 use lowering/program_index
 use lowering/inference
 use lowering/analysis

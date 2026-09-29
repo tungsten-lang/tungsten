@@ -254,6 +254,8 @@
     lower_statement(ctx, node.expression)
     return lower_expression(ctx, node.value)
   when :type_ascription
+    if fold_type_hint?(node.type_hint)
+      return lower_fold_ascription(ctx, node)
     hint = normalize_type_symbol(node.type_hint)
     if is_machine_int_type(hint) && ast_kind(node.expression) == :if && node.expression.else_body != nil && node.expression.else_body.size() > 0
       materialize_bindings(ctx)

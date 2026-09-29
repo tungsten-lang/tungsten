@@ -14,6 +14,9 @@
 ## i32: n
 @gpu fn add_one(x, y, n)
   i = gpu.thread_position_in_grid.x ## i32
+  # Parenthesized occurrence-local hints stay on the expression AST. They
+  # must emit a GPU scalar conversion, not trip the unsupported-node guard.
+  wide_i = (i ## i64) ## i64
   if i < n
     y[i] = x[i] + 1.0
 
@@ -78,6 +81,7 @@ expect_marker(cu, "builtin.blockDim", "blockDim")
 
 # Body should lower the add.
 expect_marker(cu, "body.add", "+")
+expect_marker(cu, "body.expression_ascription", "long wide_i = long(i);")
 
 # Short-circuit logic emits native C++ operators, not nested ifs.
 expect_marker(cu, "sig.logic_ops", "logic_ops")

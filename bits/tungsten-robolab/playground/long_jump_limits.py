@@ -940,6 +940,12 @@ class LandingProgram:
         # contact sensor lags the physics by up to a tick)
         self.lead, self.delay = lead, delay
         self.lz = tab.get("lz", 9.0) if isinstance(tab, dict) else 9.0   # the latch's COM height (m)
+        # the ballistic-time clock (il_tg > 0, LongJumpRunSkill#il_apply): until
+        # the sand the program time is tg - (the COM's ballistic time to fall to
+        # zl), so the legs' tuck and reach are locked to the predicted landing
+        # instead of to the hand-over (a low or short flight lands earlier)
+        self.tg = tab.get("tg", 0.0) if isinstance(tab, dict) else 0.0
+        self.zl = tab.get("zl", LAND_Z) if isinstance(tab, dict) else LAND_Z
 
     def start(self, body):
         m = body.m
@@ -947,19 +953,37 @@ class LandingProgram:
         self.hi, self.span = lr[:, 1], lr[:, 1] - lr[:, 0]
         self.shift, self.landed = self.lead, False
         self.seen = 0
+        self.s_prev = -1e9
+
+    def time_to_land(self, body):
+        d = body.d
+        mujoco.mj_subtreeVel(body.m, d)
+        z = float(d.subtree_com[body.pelvis][2]) - self.zl
+        vz = float(d.subtree_linvel[body.pelvis][2])
+        if z <= 0.0:
+            return 0.0
+        return (vz + math.sqrt(vz * vz + 2.0 * G * z)) / G
 
     def __call__(self, body, t, k):
         d = body.d
         s = t + self.shift
         if not self.landed:
+            if self.tg > 0.0:
+                # never runs backward (a foot grazing the sand makes the ballistic estimate meaningless)
+                s = max(self.s_prev, self.tg - self.time_to_land(body) + self.lead)
+                self.s_prev = s
             if sand_touch(body) and float(d.subtree_com[body.pelvis][2]) < self.lz:
                 self.seen += 1
             if self.seen > self.delay:   # (the skill reads the task's pit contact flag, set by the same contacts)
                 self.landed = True
-                self.shift += self.ld - s
+                if self.tg > 0.0:
+                    self.shift = self.ld - t   # the real-time clock continues from il_ld
+                else:
+                    self.shift += self.ld - s
                 s = self.ld
             elif s > self.ld:
-                self.shift -= s - self.ld
+                if self.tg <= 0.0:
+                    self.shift -= s - self.ld
                 s = self.ld
         ids = body.act_ids
         c = (self.hi - d.actuator_length[ids]) / self.span
@@ -1160,7 +1184,8 @@ def _ldecode(x, base, nk, n):
     E = np.clip(x[:k].reshape(nk, n), 0.0, 1.0)
     dC = (x[k:2 * k].reshape(nk, n) - 0.5) * 0.3
     g = float(np.clip(x[2 * k], 0.0, 1.0)) * 1.5
-    tab = {"c": base["c"] + dC, "v": base["v"], "a": base["a"], "e": E, "e1": np.zeros_like(E), "lz": base.get("lz", 9.0)}
+    tab = {"c": base["c"] + dC, "v": base["v"], "a": base["a"], "e": E, "e1": np.zeros_like(E), "lz": base.get("lz", 9.0),
+           "tg": base.get("tg", 0.0), "zl": base.get("zl", LAND_Z)}
     if len(x) > 2 * k + 1:
         # rotation feedback: pitch reference knots (rad), per-muscle gains
         o = 2 * k + 1
@@ -1201,6 +1226,11 @@ def landing(a):
     ld = float(rec["t_land"]) if a.ld is None else a.ld
     base = landing_base(rec, mus, c0["plant"], a.h, a.nk, ld)
     base["lz"] = a.lz
+    if a.tg:
+        # the ballistic-time clock (il_tg): the time-to-land at the design's hand-over; the COM height it falls to is
+        # the take-off program's j_land_z (the skill's time_to_land)
+        base["tg"] = a.tg
+        base["zl"] = float(json.loads(c0["params"]).get("j_land_z", LAND_Z))
     meta = {"nk": a.nk, "h": a.h, "ld": ld, "kp": kp, "kd": kd, "risk": a.risk, "seconds": a.seconds,
             "jitter": a.jitter}
     n = len(mus)
@@ -1271,6 +1301,8 @@ def read_il(path, names, plant, nk):
             for q in ("c", "v", "a", "e"):
                 tab[q][k, i] = p.get(f"il_{q}{k}_{role}", 0.0)
     tab["lz"] = p.get("il_lz", 9.0)
+    tab["tg"] = p.get("il_tg", 0.0)
+    tab["zl"] = p.get("il_zl", LAND_Z)
     if "il_pr0" in p:
         tab["pr"] = np.array([p.get(f"il_pr{k}", 0.0) for k in range(nk)])
         tab["fkp"] = np.array([p.get(f"il_kp_{role_of(nm, plant)}", 0.0) for nm in names])
@@ -1285,6 +1317,8 @@ def write_landing(path, best, base, meta, n, mus, plant):
              "j_il 1", f"il_h {meta['h']!r}", f"il_n {meta['nk']}", f"il_ld {meta['ld']!r}", f"j_il_g {g!r}",
              f"il_lz {float(tab.get('lz', 9.0))!r}",
              "j_il_kdc 1.0"]
+    if tab.get("tg", 0.0) > 0.0:
+        lines += [f"il_tg {float(tab['tg'])!r}", f"il_zl {float(tab['zl'])!r}"]
     for k in range(meta["nk"]):
         for i, nm in enumerate(mus):
             role = role_of(nm, plant)
@@ -1397,6 +1431,8 @@ def main():
     la.add_argument("--g0", type=float, default=0.3)
     la.add_argument("--init")
     la.add_argument("--lz", type=float, default=9.0, help="the landing latch needs the COM below this (m)")
+    la.add_argument("--tg", type=float, default=0.0, help="the ballistic-time clock: the design's time-to-land at the "
+                    "hand-over (s); 0 = the clock runs from the hand-over")
     la.add_argument("--feedback", action="store_true", help="add the rotation feedback (pitch reference knots, per-muscle pitch / rate gains)")
     la.add_argument("--jitter", action="store_true", help="timing jitter per hand-over (clock lead 0/4/8 ms, sand latch 0/1 tick late)")
     la.add_argument("--out", required=True)

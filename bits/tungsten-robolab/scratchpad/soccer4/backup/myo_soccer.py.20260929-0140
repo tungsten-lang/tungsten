@@ -1,0 +1,1276 @@
+"""MyoChallenge 2025 soccer penalty kick (myoLeg + myoTorso, 290 muscles).
+
+The official environment decides everything that is scored: reset (P1: the
+key-frame stance, root at x=39, ball at x=40; P2: +-0.02 rad joint noise and
+the root anywhere in x [38, 39], y [-1, 1]), the goalkeeper (P1 stationary at
+a random y; P2 block_ball / random / stationary with p = 0.1 / 0.3 / 0.6), the
+fall test (pelvis below 0.2 m ends the episode), pain (joint-limit torque on
+the hip, knee and ankle joints) and the goal (ball centre past x = 50 with
+|y| <= 3.3 and 0 <= z <= 2.2). This task only adds sensors for the
+controller, a behind-the-kicker camera and metrics.
+
+    MYO_SOCCER_ENV=myoChallengeSoccerP2-v0   selects phase 2 (default P1)
+
+Extra sensor blocks (besides the bridge's standard ones and env_<obs key>):
+    ball_vel      ball linear velocity (world)
+    thorax_up     the torso body's up axis (MyoSuite frames are y-up, so the
+                  bridge's torso_up, the z axis, points sideways)
+    pelvis_upv    the pelvis body's up axis (y), pelvis_fwd is x already
+    l_toe_pos / r_toe_pos   toes body positions
+    l_ankle_pos / r_ankle_pos, l_hip_pos / r_hip_pos   talus and femur origins
+                  (ankle and hip joint centres)
+    r_toe_vel / l_toe_vel   toes body linear velocity (world)
+    ball_touch    1 once any player geom has touched the ball
+"""
+
+import json
+import math
+import os
+import sys
+
+import mujoco
+import numpy as np
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from myo_bridge import MyoTask  # noqa: E402
+
+GOAL_X = 50.0
+GOAL_Y = 3.3
+GOAL_Z = 2.2
+BAL_CAP = 3.0  # soccer_single_leg: seconds counted per leg
+
+
+class MyoSoccerTask(MyoTask):
+    name = "myo_soccer"
+    env_id = os.environ.get("MYO_SOCCER_ENV", "myoChallengeSoccerP1-v0")
+    seconds = None  # the environment's own horizon (10 s) unless --seconds
+    coupled_geometry = os.environ.get("MYO_SOCCER_COUPLED", "1") == "1"  # knee patella/translations and lumbar vertebrae follow their leaders
+    # MYO_SOCCER_MAX_TIME=T lengthens the episode past the official 10 s
+    # (max_time_sec and the step limit; contact and everything scored are
+    # untouched): the long-balance trial soccer_single_leg_300
+    env_kwargs = ({"max_time_sec": float(os.environ["MYO_SOCCER_MAX_TIME"]),
+                   "max_episode_steps": int(float(os.environ["MYO_SOCCER_MAX_TIME"]) * 100) + 10}
+                  if os.environ.get("MYO_SOCCER_MAX_TIME") else {})
+    forward_keys = ["ball_pos", "goalkeeper_pos", "grf", "torso_angle", "pelvis_angle",
+                    "model_root_pos", "model_root_vel"]
+
+    def __init__(self):
+        self.reset_stats()
+
+    def reset_stats(self):
+        self.touch_t = None
+        self.touch_body = None
+        self.strike = []
+        self.speed_max = 0.0
+        self.yaw_touch = None
+        self.rmed_touch = None
+        self.yaw_swing = None
+        self.yaw_plant = None
+        self.plant_st = None
+        for k in ("ap_err", "ap_t", "ap_steps", "ap_best_stand"):
+            if hasattr(self, k):
+                delattr(self, k)
+        self.speed_off = None
+        self.ball_trace = []
+        self.pain = []
+        self.act_reg = []
+        self.pelvis_min = 9.0
+        self.goal_t = None
+        self.cross = None
+        self.keeper_y0 = None
+        self.keeper_trace = []
+        self.fell_t = None
+        self.events = []
+        self.last_label = None
+        self.l_heel_max = -1e9
+        self.com_x_max = -1e9
+        self.r_toe_ball_min = 9.0
+        self.up_time = 0.0
+        self.single_r = 0.0
+        self.single_l = 0.0
+        self.upright_run = True
+        self.stand_run = True
+        self.stand_l = 0.0
+        self.stand_r = 0.0
+        self.stand_t = 0.0
+        # soccer_single_leg_300: the current and longest continuous run on one
+        # leg (while standing), the leg, and the time the stance-load test last
+        # held (dropouts of the stance foot's load up to 0.1 s are bridged; a
+        # touch-down of the other foot ends the run)
+        self.run1 = 0.0
+        self.run1_side = ""
+        self.run1_best = 0.0
+        self.run1_ok_t = -1.0
+        self.l_load_min = 9.0
+        self.ap_start = None
+        self.ap_best = 9.0
+        # the walking approach (MyoSoccerWalkSkill): the pelvis's distance to
+        # its spot (params ap_dx, ap_dy from the ball) at the start and at
+        # best while standing
+        self.walk_d0 = None
+        self.walk_best = 9.0
+        self.walk_t_arrive = None
+        self.up_after = None
+        self.pz_after_min = 9.0
+        self._ids = None
+
+    # ---- ids ---------------------------------------------------------------
+
+    def ids(self, m):
+        if self._ids is None:
+            ball = m.body("soccer_ball").id
+            jnt = m.body_jntadr[ball]
+            player = set()
+            root = m.body("root").id
+            for b in range(m.nbody):
+                p = b
+                while p > 0 and p != root:
+                    p = m.body_parentid[p]
+                if p == root and b != root:
+                    player.add(b)
+            self._ids = {
+                "ball": ball, "bq": m.jnt_qposadr[jnt], "bv": m.jnt_dofadr[jnt],
+                "ball_geom": m.body_geomadr[ball], "player": player,
+                "torso": m.body("torso").id, "pelvis": m.body("pelvis").id,
+                "toes_l": m.body("toes_l").id, "toes_r": m.body("toes_r").id,
+                "talus_l": m.body("talus_l").id, "talus_r": m.body("talus_r").id,
+                "femur_l": m.body("femur_l").id, "femur_r": m.body("femur_r").id,
+            }
+        return self._ids
+
+    # ---- sensors -------------------------------------------------------------
+
+    def body_vel(self, m, d, b):
+        v = np.zeros(6)
+        mujoco.mj_objectVelocity(m, d, mujoco.mjtObj.mjOBJ_BODY, b, v, 0)
+        return v[3:]
+
+    def episode(self, sim):
+        """The bridge reuses one task object across episodes: reset per sim."""
+        if getattr(self, "_sim", None) is not sim:
+            self.reset_stats()
+            self._sim = sim
+            self.root_start = [round(float(v), 3) for v in sim.d.qpos[7:10]]
+
+    def body_angvel(self, m, d, b):
+        v = np.zeros(6)
+        mujoco.mj_objectVelocity(m, d, mujoco.mjtObj.mjOBJ_BODY, b, v, 0)
+        return v[:3]
+
+    def extra_sensors(self, sim):
+        self.episode(sim)
+        m, d = sim.m, sim.d
+        i = self.ids(m)
+        tor = d.xmat[i["torso"]].reshape(3, 3)
+        pel = d.xmat[i["pelvis"]].reshape(3, 3)
+        return [
+            ("ball_vel", d.qvel[i["bv"]:i["bv"] + 3].copy()),
+            ("thorax_up", tor[:, 1].copy()),
+            ("pelvis_upv", pel[:, 1].copy()),
+            ("pelvis_angvel", self.body_angvel(m, d, i["pelvis"])),
+            ("l_toe_pos", d.xpos[i["toes_l"]].copy()),
+            ("r_toe_pos", d.xpos[i["toes_r"]].copy()),
+            ("l_toe_vel", self.body_vel(m, d, i["toes_l"])),
+            ("r_toe_vel", self.body_vel(m, d, i["toes_r"])),
+            ("l_ankle_pos", d.xpos[i["talus_l"]].copy()),
+            ("r_ankle_pos", d.xpos[i["talus_r"]].copy()),
+            ("l_hip_pos", d.xpos[i["femur_l"]].copy()),
+            ("r_hip_pos", d.xpos[i["femur_r"]].copy()),
+            ("ball_touch", [1.0 if self.touch_t is not None else 0.0]),
+        ] + self.arm_sensors(sim) + self.walk_consts(sim)
+
+    def walk_consts(self, sim):
+        """Opt-in (params `walk_consts 1`): each muscle's peak force and length
+        range as constant blocks, for the chase-tag walker's hip torque map
+        (MyoWalkHip) on this body (MyoSoccerWalkSkill)."""
+        if not sim.params.get("walk_consts", 0) > 0.5:
+            return []
+        fmax = sim.m.actuator_gainprm[sim.muscle_ids, 2]
+        rng = sim.lr[:, 1] - sim.lr[:, 0]
+        return [("muscle_fmax", fmax), ("muscle_range", rng)]
+
+    ARM_JOINTS = ("hip_flexion_l", "hip_adduction_l", "hip_rotation_l",
+                  "hip_flexion_r", "hip_adduction_r", "hip_rotation_r")
+
+    def arm_sensors(self, sim):
+        """Opt-in (params `sense_arms 1`, so older controllers see the same
+        handshake): the live moment arms (MuJoCo d length / d q at the current
+        posture) of the muscles crossing each hip joint (flexion, adduction,
+        rotation), as blocks arm_<joint> with the muscles' indices in
+        arm_<joint>_ids. The controller's geometry is additive (each joint
+        swept alone at the reference), so it cannot see how the hip's posture
+        flips the gluteal arms: measured on the model, glmed1's rotation
+        torque per activation runs from -29 to +37 N m over the stance range,
+        glmax1/2 from -58 to +23, and in the one-leg stance's corner (hip
+        extended to its limit, adducted, turned out) glmed1, glmin1 and TFL
+        extend the hip."""
+        if not sim.params.get("sense_arms", 0) > 0.5:
+            return []
+        m, d = sim.m, sim.d
+        mom = np.zeros((m.nu, m.nv))
+        mujoco.mju_sparse2dense(mom, d.actuator_moment, d.moment_rownnz, d.moment_rowadr, d.moment_colind)
+        if getattr(self, "_arm_sim", None) is not sim:
+            # the muscles (bridge indices) crossing each joint: any nonzero arm
+            # at the reset posture, fixed for the episode (block widths are
+            # declared once, in the handshake)
+            self._arm_sim = sim
+            self._arm_ids = {}
+            for jn in self.ARM_JOINTS:
+                dof = m.jnt_dofadr[m.joint(jn).id]
+                self._arm_ids[jn] = [k for k, a in enumerate(sim.muscle_ids) if abs(mom[a, dof]) > 1e-6]
+        out = []
+        for jn in self.ARM_JOINTS:
+            dof = m.jnt_dofadr[m.joint(jn).id]
+            ids = self._arm_ids[jn]
+            out.append(("arm_" + jn + "_ids", [float(k) for k in ids]))
+            out.append(("arm_" + jn, [float(mom[sim.muscle_ids[k], dof]) for k in ids]))
+        out.append(("grip_cap", self.grip_caps(sim)))
+        out.append(("foot_cop", self.foot_cops(sim)))
+        return out
+
+    def foot_cops(self, sim):
+        """Each foot's centre of pressure on the ground in its own frame, from
+        the foot centre (midway between the calcn and toes origins): [left
+        forward, left outward, right forward, right outward] (m, outward = the
+        lateral side; zeros without ground contact). What the sole's pressure
+        distribution tells a person (sense_arms opt-in)."""
+        m, d = sim.m, sim.d
+        out = []
+        f6 = np.zeros(6)
+        for sd in "lr":
+            cid, tid = m.body("calcn_" + sd).id, m.body("toes_" + sd).id
+            bodies = {cid, tid}
+            pts, ns = [], []
+            for k in range(d.ncon):
+                c = d.contact[k]
+                b1, b2 = m.geom_bodyid[c.geom1], m.geom_bodyid[c.geom2]
+                if (b1 in bodies and b2 == 0) or (b2 in bodies and b1 == 0):
+                    mujoco.mj_contactForce(m, d, k, f6)
+                    pts.append(np.array(c.pos))
+                    ns.append(abs(float(f6[0])))
+            if not pts or sum(ns) <= 0:
+                out += [0.0, 0.0]
+                continue
+            P, N = np.array(pts), np.array(ns)
+            cop = (N @ P) / N.sum()
+            # horizontal, along the foot's heading (heel to toes origin, as the
+            # controller measures it) and across it
+            rel = cop - 0.5 * (d.xpos[cid] + d.xpos[tid])
+            ax = d.xpos[tid] - d.xpos[cid]
+            h = math.atan2(ax[1], ax[0])
+            fwd = rel[0] * math.cos(h) + rel[1] * math.sin(h)
+            left = -rel[0] * math.sin(h) + rel[1] * math.cos(h)
+            out += [float(fwd), float(left if sd == "l" else -left)]
+        return out
+
+    def grip_caps(self, sim):
+        """Each foot's torsional grip (N m, [left, right]): how much twist the
+        ground can take before the foot spins, sum_i mu_i N_i |r_i - cop| over
+        its ground contacts (condim-3 contacts have no torsional friction of
+        their own, so a foot on one point, e.g. its toes, has none). What the
+        sole's pressure distribution tells a person (sense_arms opt-in)."""
+        m, d = sim.m, sim.d
+        out = []
+        f6 = np.zeros(6)
+        for sd in "lr":
+            bodies = {m.body("calcn_" + sd).id, m.body("toes_" + sd).id}
+            pts, ns, mus = [], [], []
+            for k in range(d.ncon):
+                c = d.contact[k]
+                b1, b2 = m.geom_bodyid[c.geom1], m.geom_bodyid[c.geom2]
+                if (b1 in bodies and b2 == 0) or (b2 in bodies and b1 == 0):
+                    mujoco.mj_contactForce(m, d, k, f6)
+                    pts.append(np.array(c.pos[:2]))
+                    ns.append(abs(float(f6[0])))
+                    mus.append(float(c.friction[0]))
+            if not pts or sum(ns) <= 0:
+                out.append(0.0)
+                continue
+            P, N = np.array(pts), np.array(ns)
+            cop = (N @ P) / N.sum()
+            out.append(float(np.sum(np.array(mus) * N * np.linalg.norm(P - cop, axis=1))))
+        return out
+
+    # ---- per step -------------------------------------------------------------
+
+    def touching(self, m, d):
+        i = self.ids(m)
+        g = i["ball_geom"]
+        for k in range(d.ncon):
+            c = d.contact[k]
+            if c.geom1 == g or c.geom2 == g:
+                other = c.geom2 if c.geom1 == g else c.geom1
+                if m.geom_bodyid[other] in i["player"]:
+                    return m.body(m.geom_bodyid[other]).name
+        return None
+
+    def strike_contacts(self, m, d):
+        """Ball-foot contacts this step, in the foot's frame: (side, part,
+        normal force, point, normal). The calcn body frame is x forward (heel
+        to toes), y up, z toward the body's right for both feet, so the medial
+        side is -z on the right foot and +z on the left. Contacts with the
+        toes body are expressed in the calcn frame too. part = the dominant
+        axis of the contact normal (foot -> ball): toe (front), heel (back),
+        instep (top), sole, inside (medial), outside (lateral)."""
+        i = self.ids(m)
+        g = i["ball_geom"]
+        out = []
+        force = np.zeros(6)
+        for k in range(d.ncon):
+            c = d.contact[k]
+            if c.geom1 != g and c.geom2 != g:
+                continue
+            other = c.geom2 if c.geom1 == g else c.geom1
+            bname = m.body(m.geom_bodyid[other]).name
+            if not (bname.startswith("calcn_") or bname.startswith("toes_")):
+                continue
+            side = bname[-1]
+            mujoco.mj_contactForce(m, d, k, force)
+            n = np.array(c.frame[:3])
+            if c.geom1 == g:  # MuJoCo's normal points geom1 -> geom2: make it foot -> ball
+                n = -n
+            cid = m.body("calcn_" + side).id
+            R = d.xmat[cid].reshape(3, 3)
+            pl = R.T @ (np.array(c.pos) - d.xpos[cid])
+            nl = R.T @ n
+            ax = int(np.argmax(np.abs(nl)))
+            if ax == 0:
+                part = "toe" if nl[0] > 0 else "heel"
+            elif ax == 1:
+                part = "instep" if nl[1] > 0 else "sole"
+            else:
+                medial = nl[2] < 0 if side == "r" else nl[2] > 0
+                part = "inside" if medial else "outside"
+            out.append((side, part, abs(float(force[0])), pl, nl))
+        return out
+
+    def on_step(self, sim, obs, reward, info):
+        self.episode(sim)
+        m, d = sim.m, sim.d
+        i = self.ids(m)
+        t = float(d.time)
+        if self.keeper_y0 is None:
+            self.keeper_y0 = float(d.mocap_pos[0, 1])
+            self.keeper_policy = getattr(sim.u.goalkeeper, "goalkeeper_policy", "?")
+            self.keeper_speed = float(getattr(sim.u.goalkeeper, "block_velocity", 0.0))
+        self.keeper_trace.append(float(d.mocap_pos[0, 1]))
+        self.l_heel_max = max(self.l_heel_max, float(d.xpos[m.body("calcn_l").id][0]))
+        if self.upright_run:
+            self.com_x_max = max(self.com_x_max, float(d.subtree_com[m.body("root").id][0]))
+        self.r_toe_ball_min = min(self.r_toe_ball_min, float(np.linalg.norm(d.xpos[i["toes_r"]] - d.xpos[i["ball"]])))
+        # after the touch: how long the kicker stays upright (pelvis above
+        # 0.6 m, thorax within ~57 deg of vertical), and the pelvis minimum
+        if self.touch_t is not None:
+            tor_ = d.xmat[i["torso"]].reshape(3, 3)
+            pz_ = float(d.xpos[i["pelvis"]][2])
+            self.pz_after_min = min(self.pz_after_min, pz_)
+            if self.up_after is None and (pz_ < 0.6 or tor_[2, 1] < 0.55):
+                self.up_after = t - self.touch_t
+        # upright bookkeeping (practice objectives): pelvis high, thorax
+        # within ~35 deg of vertical; time on each single leg while upright
+        tor = d.xmat[i["torso"]].reshape(3, 3)
+        pitch = math.atan2(tor[0, 1], tor[2, 1])
+        pel = d.xmat[i["pelvis"]].reshape(3, 3)
+        up = (float(d.xpos[i["pelvis"]][2]) > 0.75 and abs(pitch) < 0.6
+              and tor[2, 1] > 0.8 and pel[2, 1] > 0.8)
+        self.upright_run = self.upright_run and up
+        # soccer_single_leg bookkeeping: standing (pelvis above 0.7 m, thorax
+        # within ~45 deg of vertical) continuously since the start, and the
+        # time on each leg alone meanwhile (the other foot below 5 % of body
+        # weight, the stance foot above 30 %)
+        self.stand_run = self.stand_run and float(d.xpos[i["pelvis"]][2]) > 0.7 and tor[2, 1] > 0.7
+        if self.stand_run:
+            ct_ = sim.foot_contacts()
+            dt_ = float(sim.u.dt)
+            self.stand_t += dt_
+            if ct_["l"] < 0.05 and ct_["r"] > 0.3:
+                self.stand_r += dt_
+            if ct_["r"] < 0.05 and ct_["l"] > 0.3:
+                self.stand_l += dt_
+            self.one_leg_run(t, dt_, ct_)
+        elif self.run1 > 0.0:
+            self.run1 = 0.0
+        if self.upright_run:
+            ct = sim.foot_contacts()
+            dt = float(sim.u.dt)
+            if t > 0.2:
+                self.l_load_min = min(self.l_load_min, ct["l"])
+            self.up_time += dt
+            if ct["l"] < 0.05 and ct["r"] > 0.3:
+                self.single_r += dt
+            if ct["r"] < 0.05 and ct["l"] > 0.3:
+                self.single_l += dt
+        lab = sim.label.split(":")[-1] if sim.label else ""
+        # approach progress: the larger of the two feet's distances to their
+        # stance spots (phase-1 key-frame feet relative to the ball), at the
+        # start and at best while still upright
+        ball_ = d.xpos[i["ball"]]
+        fc_ = {sd: 0.5 * (d.xpos[m.body("calcn_" + sd).id] + d.xpos[m.body("toes_" + sd).id]) for sd in "lr"}
+        e_ = max(np.hypot(fc_["l"][0] - (ball_[0] - 1.077), fc_["l"][1] - (ball_[1] + 0.0895)),
+                 np.hypot(fc_["r"][0] - (ball_[0] - 1.0775), fc_["r"][1] - (ball_[1] - 0.0925)))
+        pel_xy = d.xpos[i["pelvis"]][:2]
+        wd = float(np.hypot(pel_xy[0] - (ball_[0] + sim.params.get("ap_dx", -1.0)),
+                            pel_xy[1] - (ball_[1] + sim.params.get("ap_dy", 0.0))))
+        if self.walk_d0 is None:
+            self.walk_d0 = wd
+        if self.stand_run:
+            self.walk_best = min(self.walk_best, wd)
+            if self.walk_t_arrive is None and wd < 0.1:
+                self.walk_t_arrive = t
+        if self.ap_start is None:
+            self.ap_start = float(e_)
+        if self.upright_run and self.touch_t is None:
+            self.ap_best = min(self.ap_best, float(e_))
+        if self.stand_run and self.touch_t is None:
+            self.ap_best_stand = min(getattr(self, "ap_best_stand", 9.0), float(e_))
+        if lab != self.last_label and lab == "set" and not hasattr(self, "ap_err"):
+            # the approach is done: how far each foot centre is from its
+            # stance spot (the phase-1 key-frame feet, relative to the ball)
+            ball = d.xpos[i["ball"]]
+            fc = {sd: 0.5 * (d.xpos[m.body("calcn_" + sd).id] + d.xpos[m.body("toes_" + sd).id]) for sd in "lr"}
+            el = np.hypot(fc["l"][0] - (ball[0] - 1.077), fc["l"][1] - (ball[1] + 0.0895))
+            er = np.hypot(fc["r"][0] - (ball[0] - 1.0775), fc["r"][1] - (ball[1] - 0.0925))
+            self.ap_err = float(max(el, er))
+            self.ap_t = t
+            self.ap_steps = sum(1 for e in self.events if e[1].endswith(("_settle", "_s3mid")))
+        if lab != self.last_label and lab in ("lunge", "swing", "in_swing") and getattr(self, "yaw_plant", None) is None:
+            pel_ = d.xmat[i["pelvis"]].reshape(3, 3)
+            self.yaw_plant = math.degrees(math.atan2(pel_[1, 0], pel_[0, 0]))
+        if lab != self.last_label and lab in ("swing", "hold") and getattr(self, "plant_st", None) is None:
+            self.plant_st = self.plant_state(sim)
+        if lab != self.last_label and lab in ("in_swing", "swing") and getattr(self, "yaw_swing", None) is None:
+            pel_ = d.xmat[i["pelvis"]].reshape(3, 3)
+            self.yaw_swing = math.degrees(math.atan2(pel_[1, 0], pel_[0, 0]))
+        if lab != self.last_label:
+            heel = d.xpos[m.body("calcn_l").id]
+            com = d.subtree_com[m.body("root").id]
+            self.events.append((round(t, 3), lab, round(float(heel[0]), 3), round(float(heel[1]), 3),
+                                round(float(com[0]), 3), round(float(com[1]), 3),
+                                round(float(d.xpos[i["pelvis"]][2]), 3)))
+            self.last_label = lab
+        pos = d.qpos[i["bq"]:i["bq"] + 3].copy()
+        vel = d.qvel[i["bv"]:i["bv"] + 3].copy()
+        sp = float(np.linalg.norm(vel))
+        if self.touch_t is None:
+            who = self.touching(m, d)
+            if who is not None:
+                self.touch_t = t
+                self.touch_body = who
+                # the heading of the pelvis and of the kicking (right) foot's
+                # inside (its medial normal, -z of calcn_r) at the touch,
+                # degrees from +x (the goal)
+                pel_ = d.xmat[i["pelvis"]].reshape(3, 3)
+                rc_ = d.xmat[m.body("calcn_r").id].reshape(3, 3)
+                self.yaw_touch = math.degrees(math.atan2(pel_[1, 0], pel_[0, 0]))
+                self.rmed_touch = math.degrees(math.atan2(-rc_[1, 2], -rc_[0, 2]))
+        if self.touch_t is not None and t - self.touch_t <= 0.15:
+            self.speed_off = max(self.speed_off or 0.0, sp)
+        if self.touch_t is not None and t - self.touch_t <= 0.1:
+            self.strike += self.strike_contacts(m, d)
+        self.speed_max = max(self.speed_max, sp)
+        if self.ball_trace and self.cross is None and pos[0] >= GOAL_X > self.ball_trace[-1][1]:
+            p0 = self.ball_trace[-1]
+            u = (GOAL_X - p0[1]) / max(pos[0] - p0[1], 1e-9)
+            self.cross = (t, p0[2] + u * (pos[1] - p0[2]), p0[3] + u * (pos[2] - p0[3]))
+        self.ball_trace.append((t, *pos, *vel))
+        rd = info.get("rwd_dict", {})
+        self.pain.append(float(np.asarray(rd.get("pain", 0.0)).ravel()[0]))
+        self.act_reg.append(float(np.asarray(rd.get("act_reg", 0.0)).ravel()[0]))
+        pz = float(d.xpos[i["pelvis"]][2])
+        self.pelvis_min = min(self.pelvis_min, pz)
+        if pz < 0.2 and self.fell_t is None:
+            self.fell_t = t
+        if self.goal_t is None and float(info.get("solved", 0.0)) > 0:
+            self.goal_t = t
+
+    def one_leg_run(self, t, dt, ct):
+        """soccer_single_leg_300 bookkeeping: continuous time on one leg alone
+        (the other foot below 5 % of body weight throughout, the stance foot
+        above 30 % except for dropouts of at most 0.1 s)."""
+        side = ""
+        for sd, ot in (("l", "r"), ("r", "l")):
+            if ct[ot] < 0.05 and ct[sd] > 0.3:
+                side = sd
+        if side:
+            self.run1_ok_t = t
+        free = {sd: ct["r" if sd == "l" else "l"] < 0.05 for sd in "lr"}
+        if self.run1_side and free[self.run1_side] and (side == self.run1_side or t - self.run1_ok_t <= 0.1):
+            self.run1 += dt
+        elif side:
+            self.run1_side = side
+            self.run1 = dt
+        else:
+            self.run1_side = ""
+            self.run1 = 0.0
+        self.run1_best = max(self.run1_best, self.run1)
+
+    PLANT_JOINTS = ("flex_extension", "lat_bending", "hip_flexion_l", "hip_adduction_l", "hip_rotation_l",
+                    "knee_angle_l", "ankle_angle_l", "hip_flexion_r", "hip_adduction_r", "hip_rotation_r",
+                    "knee_angle_r", "ankle_angle_r")
+
+    def plant_state(self, sim):
+        """The body's state at the plant: joint angles, the pelvis's height
+        and orientation, the COM relative to the ball and its velocity."""
+        m, d = sim.m, sim.d
+        i = self.ids(m)
+        pel = d.xmat[i["pelvis"]].reshape(3, 3)
+        com = d.subtree_com[m.body("root").id]
+        ball = d.xpos[i["ball"]]
+        mujoco.mj_subtreeVel(m, d)
+        v = d.subtree_linvel[m.body("root").id]
+        return {"q": [float(d.qpos[m.jnt_qposadr[m.joint(j).id]]) for j in self.PLANT_JOINTS],
+                "pz": float(d.xpos[i["pelvis"]][2]),
+                "yaw": math.atan2(pel[1, 0], pel[0, 0]), "pitch": math.atan2(pel[0, 1], pel[2, 1]),
+                "roll": math.atan2(-pel[1, 1], pel[2, 1]) if False else float(pel[1, 1]),
+                "com": [float(com[0] - ball[0]), float(com[1] - ball[1]), float(com[2])],
+                "vcom": [float(x) for x in v]}
+
+    PLANT_REF = None
+
+    def plant_err(self, st):
+        """Distance of a plant state from the phase-1 champion's (data/
+        soccer_plant_ref.json): joint angles (rad), 5 x COM position (m),
+        COM velocity (m/s), 2 x pelvis yaw, pitch."""
+        if MyoSoccerTask.PLANT_REF is None:
+            path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "soccer_plant_ref.json")
+            MyoSoccerTask.PLANT_REF = json.load(open(path)) if os.path.exists(path) else {}
+        r = MyoSoccerTask.PLANT_REF
+        if not r:
+            return None
+        e = float(np.sum(np.abs(np.array(st["q"]) - np.array(r["q"]))))
+        e += 5.0 * float(np.sum(np.abs(np.array(st["com"][:2]) - np.array(r["com"][:2]))))
+        e += 5.0 * abs(st["com"][2] - r["com"][2])
+        e += float(np.sum(np.abs(np.array(st["vcom"]) - np.array(r["vcom"]))))
+        e += 2.0 * abs(math.atan2(math.sin(st["yaw"] - r["yaw"]), math.cos(st["yaw"] - r["yaw"])))
+        e += 2.0 * abs(st["pitch"] - r["pitch"])
+        return e
+
+    # ---- outcome ----------------------------------------------------------------
+
+    def predicted_cross(self):
+        """Where the ball would cross x = 50 (y, z, t) if it kept rolling: the
+        last recorded state extrapolated with a 2.8 m/s^2 rolling deceleration
+        (measured: 8 m/s from x = 40 just reaches the line in 2 s)."""
+        if not self.ball_trace:
+            return None
+        t, x, y, z, vx, vy, vz = self.ball_trace[-1]
+        if self.cross is not None:
+            return self.cross[1], self.cross[2], self.cross[0], 0.0
+        sp = math.hypot(vx, vy)
+        dist = (GOAL_X - x)
+        if vx <= 0.05:
+            return None
+        a = 2.8
+        reach = sp * sp / (2 * a)
+        along = dist * sp / vx  # path length to the line
+        short = max(0.0, along - reach)
+        yc = y + vy / vx * dist
+        return yc, z, None, short
+
+    def metrics(self, sim, log):
+        m, d = sim.m, sim.d
+        t_end_ = float(d.time)
+        solved = self.goal_t is not None
+        out = {
+            "goal": 1.0 if solved else 0.0,
+            "t_goal": round(self.goal_t, 3) if solved else None,
+            "t_touch": round(self.touch_t, 3) if self.touch_t is not None else None,
+            "touch_body": getattr(self, "touch_body", None),
+            "ball_speed": round(self.speed_off or 0.0, 3),
+            "ball_speed_max": round(self.speed_max, 3),
+            "fallen": self.fell_t is not None,
+            "t_fall": round(self.fell_t, 3) if self.fell_t is not None else None,
+            "pelvis_min": round(self.pelvis_min, 3),
+            "pain_sum": round(float(np.sum(self.pain)), 4),
+            "pain_mean": round(float(np.mean(self.pain)) if self.pain else 0.0, 5),
+            "act_reg": round(float(np.mean(self.act_reg)) if self.act_reg else 0.0, 4),
+            "keeper_y": round(self.keeper_y0 if self.keeper_y0 is not None else 0.0, 3),
+            "keeper_policy": getattr(self, "keeper_policy", "?"),
+            "keeper_speed": round(getattr(self, "keeper_speed", 0.0), 3),
+            "root_start": getattr(self, "root_start", None),
+        }
+        out["events"] = self.events
+        if getattr(self, "yaw_swing", None) is not None:
+            out["yaw_swing_deg"] = round(self.yaw_swing, 1)
+        if getattr(self, "yaw_plant", None) is not None:
+            out["yaw_plant_deg"] = round(self.yaw_plant, 1)
+        if getattr(self, "plant_st", None) is not None:
+            pe = self.plant_err(self.plant_st)
+            if pe is not None:
+                out["plant_err"] = round(pe, 3)
+        if getattr(self, "yaw_touch", None) is not None:
+            out["yaw_touch_deg"] = round(self.yaw_touch, 1)
+            out["rmed_touch_deg"] = round(self.rmed_touch, 1)
+        if self.strike:
+            # the strike: the foot part carrying the largest summed normal force
+            # over the first 0.1 s of ball contact, and its force-weighted
+            # contact point and normal in the calcn frame
+            tot = {}
+            for side, part, f, pl, nl in self.strike:
+                tot[(side, part)] = tot.get((side, part), 0.0) + f
+            key = max(tot, key=tot.get)
+            w = np.array([f for sd, pt, f, _, _ in self.strike if (sd, pt) == key]) + 1e-9
+            pts = np.array([pl for sd, pt, f, pl, _ in self.strike if (sd, pt) == key])
+            nls = np.array([nl for sd, pt, f, _, nl in self.strike if (sd, pt) == key])
+            out["strike_foot"] = key[0]
+            out["strike_part"] = key[1]
+            out["strike_share"] = round(tot[key] / max(sum(tot.values()), 1e-9), 3)
+            out["strike_point"] = [round(float(v), 3) for v in (w @ pts) / w.sum()]
+            nm = (w @ nls) / w.sum()
+            out["strike_normal"] = [round(float(v), 3) for v in nm / max(np.linalg.norm(nm), 1e-9)]
+            out["strike_parts"] = {f"{sd}:{pt}": round(v, 1) for (sd, pt), v in tot.items()}
+            # the zone of the foot the ball was struck with, from the
+            # force-weighted contact point (calcn frame: x heel -> toes, y up,
+            # z to the body's right): toe (x >= 0.17: ball of the foot and
+            # toes), inside / outside (the medial / lateral side, |z| >= 0.025
+            # between heel and ball of the foot), instep (top, y >= 0.03),
+            # else sole
+            sd = key[0]
+            pts_all = np.array([pl for s_, _, f, pl, _ in self.strike if s_ == sd])
+            w_all = np.array([f for s_, _, f, _, _ in self.strike if s_ == sd]) + 1e-9
+            cp = (w_all @ pts_all) / w_all.sum()
+            med = -cp[2] if sd == "r" else cp[2]
+            if cp[0] >= 0.17:
+                zone = "toe"
+            elif med >= 0.025:
+                zone = "inside"
+            elif med <= -0.025:
+                zone = "outside"
+            elif cp[1] >= 0.03:
+                zone = "instep"
+            else:
+                zone = "sole"
+            out["strike_zone"] = zone
+            out["strike_zone_foot"] = sd
+            out["strike_point_all"] = [round(float(v), 3) for v in cp]
+            out["strike_medial_m"] = round(float(med), 4)
+        # soccer_p1_inside: a goal struck with the inside of the kicking
+        # (right) foot, the medial side between the heel and the ball of the
+        # foot (strike_zone "inside" on the right foot)
+        out["goal_inside"] = 1.0 if (solved and out.get("strike_zone") == "inside"
+                                     and out.get("strike_zone_foot") == "r") else 0.0
+        if hasattr(self, "ap_err"):
+            out["ap_err"] = round(self.ap_err, 3)
+            out["ap_t"] = round(self.ap_t, 3)
+            out["ap_steps"] = self.ap_steps
+        out["n_steps"] = sum(1 for e in self.events if e[1].endswith(("_settle", "_s3mid")))
+        if self.ap_start is not None:
+            out["ap_start"] = round(self.ap_start, 3)
+            out["ap_best"] = round(min(self.ap_best, self.ap_start), 3)
+            out["ap_best_stand"] = round(min(getattr(self, "ap_best_stand", 9.0), self.ap_start), 3)
+        out["l_heel_max"] = round(self.l_heel_max, 3)
+        out["com_x_max"] = round(self.com_x_max, 3)
+        out["r_toe_ball_min"] = round(self.r_toe_ball_min, 3)
+        out["up_time"] = round(self.up_time, 3)
+        out["single_r"] = round(self.single_r, 3)
+        out["single_l"] = round(self.single_l, 3)
+        # soccer_single_leg: seconds standing on each leg alone while the
+        # kicker has stayed standing since the start, up to BAL_CAP each
+        out["bal_l"] = round(min(self.stand_l, BAL_CAP), 3)
+        out["bal_r"] = round(min(self.stand_r, BAL_CAP), 3)
+        out["bal_s"] = round(out["bal_l"] + out["bal_r"], 3)
+        out["stand_time"] = round(self.stand_t, 3)
+        # soccer_single_leg_300: the longest continuous run on one leg (300 s
+        # cap) and the uncapped totals on each leg
+        out["bal1_s"] = round(min(self.run1_best, 300.0), 3)
+        if self.walk_d0 is not None:
+            out["walk_d0"] = round(self.walk_d0, 3)
+            out["walk_closed"] = round(max(0.0, self.walk_d0 - self.walk_best), 3)
+            out["walk_best"] = round(self.walk_best, 3)
+            out["walk_t_arrive"] = round(self.walk_t_arrive, 3) if self.walk_t_arrive is not None else None
+        # soccer_single_leg_310: the hold itself must pass five minutes (the
+        # longest run uncapped, and 1 when it reaches 300 s)
+        out["bal1_raw"] = round(self.run1_best, 3)
+        out["bal1_300"] = 1.0 if self.run1_best >= 300.0 else 0.0
+        out["bal_l_tot"] = round(self.stand_l, 3)
+        out["bal_r_tot"] = round(self.stand_r, 3)
+        out["l_load_min"] = round(self.l_load_min, 3)
+        if self.touch_t is not None:
+            out["up_after_touch"] = round(self.up_after if self.up_after is not None else t_end_ - self.touch_t, 3)
+            out["pelvis_min_after_touch"] = round(self.pz_after_min, 3)
+        # the plant: the left foot's landing, i.e. the chunk after "reach"
+        for e in self.events:
+            if e[1] == "swing":
+                out["swing_t"] = e[0]
+                break
+        for a, b in zip(self.events, self.events[1:]):
+            if a[1] in ("reach", "k_reach"):
+                out["t_plant"] = b[0]
+                out["plant_heel"] = [b[2], b[3]]
+                out["plant_com"] = [b[4], b[5]]
+                out["plant_pz"] = b[6]
+                break
+        if self.ball_trace:
+            last = self.ball_trace[-1]
+            out["ball_end"] = [round(v, 3) for v in last[1:4]]
+        if self.cross is not None:
+            if self.touch_t is not None:
+                out["travel_s"] = round(self.cross[0] - self.touch_t, 3)
+            out["cross_y"] = round(self.cross[1], 3)
+            out["cross_z"] = round(self.cross[2], 3)
+            out["t_cross"] = round(self.cross[0], 3)
+        pc = self.predicted_cross()
+        if pc is not None:
+            out["pred_y"] = round(pc[0], 3)
+            out["pred_short"] = round(pc[3], 3)
+        if self.ball_trace and self.touch_t is not None:
+            # launch direction: ball velocity 0.1 s after the first touch
+            for row in self.ball_trace:
+                if row[0] >= self.touch_t + 0.1:
+                    out["launch_deg"] = round(math.degrees(math.atan2(row[5], row[4])), 2)
+                    out["launch_elev_deg"] = round(math.degrees(math.atan2(row[6], math.hypot(row[4], row[5]))), 2)
+                    break
+        return out
+
+    def score(self, metrics):
+        """Objective for practice.py / search.py: one of the staged practice
+        objectives below, chosen by MYO_SOCCER_STAGE (default "full": stay up,
+        step, plant, touch, ball speed, crossing, stay up until it arrives,
+        goal)."""
+        return practice_score(metrics, os.environ.get("MYO_SOCCER_STAGE", "full"))
+
+    # ---- view --------------------------------------------------------------------
+
+    def camera(self, m, d, cam):
+        """Behind the kicker, slightly to his right, looking down the pitch at
+        the goal (x = 50). MYO_SOCCER_CAM=side: a close side view."""
+        ball = d.xpos[self.ids(m)["ball"]]
+        view = os.environ.get("MYO_SOCCER_CAM")
+        if view in ("side", "front"):
+            root = d.xpos[m.body("pelvis").id]
+            cam.lookat[:] = [root[0] + 0.3, root[1], 0.6]
+            cam.distance = 3.2
+            cam.azimuth = 90 if view == "side" else 180
+            cam.elevation = -8
+            return
+        root = d.xpos[m.body("pelvis").id]
+        # frame the kicker and the ball together: look between them and
+        # back off as the ball runs toward the goal
+        bx = min(ball[0], GOAL_X)
+        sep = max(bx - root[0], 1.0)
+        cam.lookat[:] = [0.5 * (root[0] + bx) + 1.2, 0.5 * (root[1] + ball[1]), 0.6]
+        cam.distance = 4.8 + 0.55 * sep
+        cam.azimuth = 14
+        cam.elevation = -12
+
+    def hud_text(self, m, d):
+        i = self.ids(m)
+        v = d.qvel[i["bv"]:i["bv"] + 3]
+        return (f"ball {np.linalg.norm(v):5.1f} m/s  x {d.qpos[i['bq']]:5.2f}  "
+                f"keeper y {d.mocap_pos[0, 1]:+.2f}")
+
+    def title(self):
+        return f"robolab penalty kick: {self.env_id}"
+
+
+TASK = MyoSoccerTask
+
+
+# ---- practice and evaluation tooling --------------------------------------------
+#
+#   .venv-myo/bin/python playground/tasks/myo_soccer.py search --stage kick \
+#       --init params/myo_soccer.txt --out /tmp/k.txt --only drv_hip,drv_knee,... --seeds 0,1
+#   .venv-myo/bin/python playground/tasks/myo_soccer.py summary out/x.json out/myo_soccer_metrics.json
+#
+# `search` is CMA-ES (playground/practice.py's CMA) over a subset of the
+# skill's tunables with one of the staged objectives below; every candidate
+# is a full official-environment rollout. `summary` turns myo_bridge --json
+# episode results into goal rate (Wilson 95% interval), ball speed, time to
+# goal, falls, pain and effort.
+
+PLANT = (39.52, 0.12)  # target left heel (x, y) for the plant step
+
+
+def travel_time(v0, dist=10.0, decel=2.8):
+    """Seconds for a ball launched at v0 m/s to roll dist metres (slide then
+    roll, measured on the pitch: ~2.8 m/s^2 mean deceleration); 3 s if it
+    would stop short."""
+    disc = v0 * v0 - 2.0 * decel * dist
+    if v0 <= 0.0 or disc <= 0.0:
+        return 3.0
+    return (v0 - math.sqrt(disc)) / decel
+
+
+def practice_score(m, stage):
+    """Staged practice objectives (higher is better)."""
+    if m.get("error"):
+        return -1e9
+    t = m.get("time", 0.0)
+    t_fall = m.get("t_fall") or t
+    ph = m.get("plant_heel")
+    if stage == "bal":
+        # soccer_single_leg practice: the trial's metric (seconds on each leg
+        # alone, 3 s each) plus shaping: upright time and staying up
+        return (2.0 * m.get("bal_s", 0.0) + 0.3 * min(m.get("stand_time", 0.0), 10.0)
+                + (1.0 if not m.get("fallen") else 0.0))
+    if stage == "bal300":
+        # soccer_single_leg_300 practice: the longest continuous stretch on one
+        # leg (the trial's metric, up to the episode's length) plus staying up
+        return 2.0 * m.get("bal1_s", 0.0) + 0.2 * m.get("stand_time", 0.0) + 0.3 * (
+            m.get("bal_l_tot", 0.0) + m.get("bal_r_tot", 0.0))
+    if stage == "p2":
+        # the phase-2 pipeline (approach + kick, MyoSoccerV4Skill k4): the
+        # walking terms toward the pelvis spot (params ap_dx, ap_dy), then the
+        # touch, ball speed toward the goal, a crossing inside the goal, and
+        # the goal itself
+        s = practice_score(m, "walk")
+        if m.get("t_touch") is None:
+            return s - 2.0 * min(m.get("r_toe_ball_min", 1.0), 1.0)
+        s += 4.0 + 0.4 * min(m.get("ball_speed", 0.0), 15.0)
+        yc = m.get("cross_y", m.get("pred_y"))
+        if yc is not None:
+            s += 3.0 * max(0.0, 1.0 - max(0.0, abs(yc) - 2.9) / 2.0)
+            s -= 0.3 * min(m.get("pred_short", 0.0), 10.0)
+        return s + (20.0 if m.get("goal") else 0.0)
+    if stage == "plant7":
+        # round-8 curriculum, stage 2: the plant (MyoSoccerV4Skill ks5, stage
+        # 1): plant5 plus the plant state's distance from the phase-1
+        # champion's (plant_err) as shaping
+        s = practice_score(m, "plant5")
+        pe = m.get("plant_err")
+        if pe is not None:
+            s += 4.0 * max(0.0, 1.0 - pe / 10.0)
+        return s
+    if stage == "clone":
+        # the plant cloned: reach the phase-1 champion's body state at its
+        # plant (plant_err: joints, COM relative to the ball and its velocity,
+        # pelvis yaw and pitch; data/soccer_plant_ref.json) from wherever the
+        # run-up starts, so the champion's swing follows; then the kick terms
+        s = 0.5 * min(m.get("stand_time", 0.0), 3.0)
+        pe = m.get("plant_err")
+        if pe is not None:
+            s += 4.0 + 8.0 * max(0.0, 1.0 - pe / 10.0)
+        if m.get("t_touch") is not None:
+            s += 2.0 + 0.3 * min(m.get("ball_speed", 0.0), 15.0)
+            yc = m.get("cross_y", m.get("pred_y"))
+            if yc is not None:
+                s += 2.0 * max(0.0, 1.0 - max(0.0, abs(yc) - 2.9) / 2.0)
+        return s + (15.0 if m.get("goal") else 0.0)
+    if stage == "step":
+        # the approach's steps (round 7): standing the whole episode, steps
+        # completed (each a step's mid-stance entered), the distance to the
+        # kick spots closed while standing, and standing at the end
+        up = min(m.get("stand_time", 0.0), 10.0)
+        whole = (not m.get("fallen")) and m.get("stand_time", 0.0) >= m.get("time", 0.0) - 0.05
+        a0 = m.get("ap_start", 0.0)
+        prog = max(0.0, a0 - m.get("ap_best_stand", a0))
+        return up + 3.0 * min(m.get("n_steps", 0), 4) + 10.0 * prog + (5.0 if whole else 0.0)
+    if stage == "plant5":
+        # the round-7 plant (MyoSoccerV4Skill ks5, direct 0, stage 1): from the
+        # settled stance the run-up's plant step lands beside the ball (the
+        # phase-1 plant heel, 39.62, 0.03) and the body stands on it with the
+        # kicking leg wound back
+        s = 0.6 * min(m.get("stand_time", 0.0), 6.0) + 4.0 * min(m.get("single_l", 0.0), 1.5) / 1.5
+        if ph is not None:
+            s += 3.0 * max(0.0, 1.0 - math.hypot(ph[0] - 39.62, ph[1] - 0.03) / 0.3)
+        yp = m.get("yaw_plant_deg")
+        if yp is not None:
+            s += 3.0 * max(0.0, 1.0 - abs(yp) / 45.0)
+        return s
+    if stage == "walk2":
+        # the walking approach, stricter: the distance closed counts fully only
+        # when the walker is still standing at the end of the episode (a
+        # controlled fall forward also closes distance)
+        up = min(m.get("stand_time", 0.0), 12.0)
+        whole = (not m.get("fallen")) and m.get("stand_time", 0.0) >= m.get("time", 0.0) - 0.05
+        closed = m.get("walk_closed", 0.0) * (1.0 if whole else 0.25)
+        s = 0.6 * up + 10.0 * closed
+        ta = m.get("walk_t_arrive")
+        if ta is not None and whole:
+            s += 5.0 + 0.5 * max(0.0, 10.0 - ta)
+        return s
+    if stage == "walk":
+        # the walking approach (MyoSoccerWalkSkill): standing time, the
+        # distance closed to the pelvis's spot while standing, arriving (within
+        # 0.1 m) early, and still standing afterwards
+        up = min(m.get("stand_time", 0.0), 10.0)
+        s = 0.5 * up + 8.0 * m.get("walk_closed", 0.0)
+        ta = m.get("walk_t_arrive")
+        if ta is not None:
+            s += 4.0 + 0.5 * max(0.0, 10.0 - ta) + 0.5 * max(0.0, up - ta)
+        return s
+    if stage == "stork":
+        return (2.0 * m.get("single_r", 0.0) + m.get("up_time", 0.0) + 0.3 * min(t_fall, 4.0)
+                + 1.0 * (1.0 - min(m.get("l_load_min", 1.0), 1.0)))
+    if stage == "full":
+        # a curriculum in one number: stay upright, move forward, plant the
+        # left foot beside the ball, stand on it, touch the ball, send it fast
+        # toward the goal, stay up until it arrives, score
+        s = 0.5 * min(m.get("up_time", 0.0), 3.5)
+        s += 3.0 * min(max(m.get("com_x_max", 38.94) - 38.94, 0.0), 0.6)
+        if ph is not None:
+            s += 3.0 * max(0.0, 1.0 - (abs(ph[0] - PLANT[0]) + abs(ph[1] - PLANT[1])) / 0.4)
+        s += 4.0 * min(m.get("single_l", 0.0), 0.5) / 0.5
+        if m.get("t_touch") is not None:
+            s += 1.0 + 0.3 * min(m.get("ball_speed", 0.0), 15.0)
+            t_end = m.get("t_fall") or t
+            s += 2.0 * min(max(t_end - m["t_touch"], 0.0), 1.2) / 1.2
+            yc = m.get("cross_y", m.get("pred_y"))
+            if yc is not None:
+                s += 2.0 * max(0.0, 1.0 - max(0.0, abs(yc) - 2.5) / 4.0)
+                s -= 0.2 * min(m.get("pred_short", 0.0), 10.0)
+        return s + (10.0 if m.get("goal") else 0.0)
+    if stage == "onefoot":
+        # one-leg stance in the approach's lift posture: time on one foot
+        # while upright, and upright time
+        return 3.0 * (m.get("single_l", 0.0) + m.get("single_r", 0.0)) + m.get("up_time", 0.0)
+    if stage == "ap3":
+        # the round-3 quasi-static approach (MyoSoccerV3Skill ap3): standing
+        # time (the lenient standing test of soccer_single_leg), how much of
+        # the start's foot-to-spot distance was closed while standing
+        # (ap_best), steps taken, both feet on their spots (ap_err) and
+        # standing there, the kick's touch and goal
+        up = min(m.get("stand_time", 0.0), 8.0)
+        a0 = m.get("ap_start", 0.0)
+        prog = max(0.0, a0 - m.get("ap_best_stand", a0))
+        s = up + 20.0 * prog + 0.5 * min(m.get("n_steps", 0), 8)
+        if m.get("ap_err") is not None:
+            s += 4.0 + 6.0 * max(0.0, 1.0 - m["ap_err"] / 0.2)
+            s += 2.0 * max(0.0, 8.0 - m["ap_t"]) / 8.0
+        if m.get("t_touch") is not None:
+            s += 2.0 + 0.2 * min(m.get("ball_speed", 0.0), 15.0)
+        return s + (10.0 if m.get("goal") else 0.0)
+    if stage == "approach2":
+        # phase-2 approach, progress-based: upright time, how much of the
+        # start's foot-to-spot distance was closed while upright (ap_best),
+        # both feet on their spots (ap_err) soon, then standing still there
+        up = min(m.get("up_time", 0.0), 7.0)
+        a0 = m.get("ap_start", 0.0)
+        prog = max(0.0, a0 - m.get("ap_best", a0))
+        s = up + 30.0 * prog + 0.2 * min(m.get("n_steps", 0), 6)
+        if m.get("ap_err") is not None:
+            s += 4.0 + 6.0 * max(0.0, 1.0 - m["ap_err"] / 0.2)
+            s += 2.0 * max(0.0, 7.0 - m["ap_t"]) / 7.0
+            s += 3.0 * min(max(up - m["ap_t"], 0.0), 1.5) / 1.5
+        return s
+    if stage == "approach":
+        # phase-2 approach: upright the whole time, steps completed, both
+        # feet on their stance spots (ap_err) soon, then standing still there
+        up = min(m.get("up_time", 0.0), 6.0)
+        s = up + 1.0 * min(m.get("n_steps", 0), 6)
+        if m.get("ap_err") is not None:
+            s += 4.0 + 6.0 * max(0.0, 1.0 - m["ap_err"] / 0.2)
+            s += 2.0 * max(0.0, 6.0 - m["ap_t"]) / 6.0
+            s += 3.0 * min(max(up - m["ap_t"], 0.0), 1.5) / 1.5
+        return s
+    if stage == "speed":
+        # raw kick power: ball speed off the foot toward the goal (launch
+        # within +-12 deg, not skied), touched with the kicking foot
+        if m.get("t_touch") is None:
+            return -2.0 - 2.0 * min(m.get("r_toe_ball_min", 1.0), 1.0)
+        sp = min(m.get("ball_speed", 0.0), 25.0)
+        ang = abs(m.get("launch_deg") or 90.0)
+        el = m.get("launch_elev_deg") or 0.0
+        dirw = max(0.0, 1.0 - max(0.0, ang - 12.0) / 25.0) * max(0.0, 1.0 - max(0.0, el - 15.0) / 20.0)
+        kicker = 1.0 if str(m.get("touch_body", "")).endswith("_r") else 0.3
+        return 2.0 + kicker * sp * (0.3 + 0.7 * dirw)
+    if stage == "upright":
+        # the kick fixed: score, and stay upright after the touch at least
+        # until the ball can have arrived (not just above the 0.2 m line)
+        if m.get("t_touch") is None:
+            return -5.0
+        up = m.get("up_after_touch", 0.0)
+        s = 6.0 * min(up / travel_time(m.get("ball_speed", 0.0)), 1.0) + 2.0 * min(up, 2.0)
+        s += 2.0 * min(max(m.get("pelvis_min_after_touch", 0.0) - 0.2, 0.0), 0.6)
+        return s + (10.0 if m.get("goal") else 0.0)
+    if stage == "kick2":
+        # the kick from perturbed (phase-2-like) starts, shaped: upright
+        # until the touch, the left foot lifted (single support on the right),
+        # the plant heel landing where the practised kick plants it (ball is
+        # fixed at (40, 0): heel at (39.64, -0.03)), then touch, speed, a
+        # crossing inside the goal away from the keeper, staying up, goal
+        s = 0.5 * min(m.get("up_time", 0.0), 2.0) + 3.0 * min(m.get("single_r", 0.0), 0.4) / 0.4
+        if ph is not None:
+            s += 3.0 * max(0.0, 1.0 - math.hypot(ph[0] - 39.64, ph[1] + 0.03) / 0.3)
+        if m.get("t_touch") is None:
+            return s - 2.0 * min(m.get("r_toe_ball_min", 1.0), 1.0)
+        s += 2.0 + 0.4 * min(m.get("ball_speed", 0.0), 16.0)
+        yc = m.get("cross_y", m.get("pred_y"))
+        if yc is not None:
+            inside = max(0.0, 1.0 - max(0.0, abs(yc) - 2.9) / 2.0)
+            clear = min(1.0, abs(yc - m.get("keeper_y", 0.0)) / 0.8)
+            s += 3.0 * inside * clear
+            s -= 0.3 * min(m.get("pred_short", 0.0), 10.0)
+        t_end = m.get("t_fall") or m.get("time", 0.0)
+        s += 3.0 * min(max(t_end - m["t_touch"], 0.0) / travel_time(m.get("ball_speed", 0.0)), 1.0)
+        return s + (10.0 if m.get("goal") else 0.0)
+    if stage == "stand":
+        # quiet stance from a perturbed start: upright the whole time
+        return 2.0 * m.get("up_time", 0.0) + (2.0 if not m.get("fallen") else 0.0)
+    if stage == "plant2":
+        # kv2 practice stage 1: the plant step lands the left heel at
+        # (39.76, 0.16) (plant foot centre ~0.15 m behind and 0.18 m left of
+        # the ball), the weight moves onto it and the body stands on it with
+        # the kicking leg wound back
+        s = 0.5 * min(m.get("up_time", 0.0), 4.0)
+        if ph is not None:
+            s += 4.0 * max(0.0, 1.0 - math.hypot(ph[0] - 39.76, ph[1] - 0.16) / 0.3)
+        return s + 3.0 * min(m.get("single_l", 0.0), 1.0)
+    if stage == "kv2":
+        # the kv2 kick (approach-style plant step, then the swing): upright,
+        # the swing reached (the plant step landed), then as "kick2"
+        s = 0.5 * min(m.get("up_time", 0.0), 3.0)
+        if m.get("swing_t") is not None:
+            s += 2.0
+        if m.get("t_touch") is None:
+            return s - 2.0 * min(m.get("r_toe_ball_min", 1.0), 1.0)
+        s += 2.0 + 0.4 * min(m.get("ball_speed", 0.0), 16.0)
+        yc = m.get("cross_y", m.get("pred_y"))
+        if yc is not None:
+            inside = max(0.0, 1.0 - max(0.0, abs(yc) - 2.9) / 2.0)
+            clear = min(1.0, abs(yc - m.get("keeper_y", 0.0)) / 0.8)
+            s += 3.0 * inside * clear
+            s -= 0.3 * min(m.get("pred_short", 0.0), 10.0)
+        t_end = m.get("t_fall") or m.get("time", 0.0)
+        s += 3.0 * min(max(t_end - m["t_touch"], 0.0) / travel_time(m.get("ball_speed", 0.0)), 1.0)
+        return s + (10.0 if m.get("goal") else 0.0)
+    if stage == "inside":
+        # soccer_p1_inside practice: the inside-of-the-foot kick. Shaped:
+        # the swing reached with the pelvis turned toward the kicking side
+        # (yaw at the swing start, degrees, negative = right), the touch, the
+        # contact on the right foot's medial side behind the ball of the foot
+        # (continuous: medial offset, distance ahead of the heel), the foot's
+        # inside facing the goal at the touch, ball speed, a crossing inside
+        # the goal away from the keeper, staying up, and the goal (full value
+        # only with an inside contact)
+        s = 0.5 * min(m.get("stand_time", 0.0), 4.0)
+        ys = m.get("yaw_swing_deg")
+        if ys is not None:
+            s += 2.0 + 2.0 * max(0.0, min(1.0, (20.0 - ys) / 45.0))
+        if m.get("t_touch") is None:
+            return s - 2.0 * min(m.get("r_toe_ball_min", 1.0), 1.0)
+        right = m.get("strike_zone_foot") == "r"
+        med = m.get("strike_medial_m", -0.05) if right else -0.05
+        cx = (m.get("strike_point_all") or [0.3])[0] if right else 0.3
+        inside = m.get("strike_zone") == "inside" and right
+        s += 2.0 + (1.0 if right else 0.0) + 60.0 * max(-0.05, min(med, 0.05)) - 30.0 * min(max(cx - 0.15, 0.0), 0.15)
+        s += 4.0 if inside else 0.0
+        yt = m.get("yaw_touch_deg")
+        if yt is not None:
+            s += 1.5 * max(0.0, min(1.0, (20.0 - yt) / 45.0))
+        rm = m.get("rmed_touch_deg")
+        if rm is not None and right:
+            s += 1.5 * max(0.0, 1.0 - abs(rm) / 60.0)
+        s += 0.3 * min(m.get("ball_speed", 0.0), 15.0)
+        yc = m.get("cross_y", m.get("pred_y"))
+        if yc is not None:
+            inside_goal = max(0.0, 1.0 - max(0.0, abs(yc) - 2.9) / 2.0)
+            clear = min(1.0, abs(yc - m.get("keeper_y", 0.0)) / 0.8)
+            s += 3.0 * inside_goal * clear
+            s -= 0.3 * min(m.get("pred_short", 0.0), 10.0)
+        t_end = m.get("t_fall") or m.get("time", 0.0)
+        s += 2.0 * min(max(t_end - m["t_touch"], 0.0) / travel_time(m.get("ball_speed", 0.0)), 1.0)
+        if m.get("goal"):
+            s += 10.0 if inside else 2.0
+        return s
+    if stage == "inside4":
+        # the round-4 angled approach and standing inside kick (MyoSoccerV4Skill
+        # in4): the "inside" objective plus the approach's steps taken while
+        # standing and how close the kicking toe came to the ball
+        s = practice_score(m, "inside") + 0.5 * min(m.get("n_steps", 0), 8)
+        if m.get("t_touch") is None:
+            s += 2.0 * max(0.0, 1.0 - min(m.get("r_toe_ball_min", 1.0), 1.0))
+        return s
+    if stage == "side":
+        # the side-foot (inside of the foot) kick: touch, a strike with the
+        # medial side of the foot (continuous: the medial component of the
+        # contact normal in the foot frame; +3 when it is the dominant one),
+        # ball speed, a crossing inside the goal away from the keeper, staying
+        # up until the ball can have arrived, goal (full value only when
+        # struck with the inside)
+        if m.get("t_touch") is None:
+            return -2.0 - 2.0 * min(m.get("r_toe_ball_min", 1.0), 1.0)
+        # the contact point's medial offset on the kicking foot (metres; the
+        # plant foot scores as no inside), and the zone
+        med = m.get("strike_medial_m", -0.05) if m.get("strike_zone_foot") == "r" else -0.05
+        inside = m.get("strike_zone") == "inside" and m.get("strike_zone_foot") == "r"
+        cx = (m.get("strike_point_all") or [0.3])[0] if m.get("strike_zone_foot") == "r" else 0.3
+        s = (2.0 + 80.0 * max(-0.05, min(med, 0.05)) - 40.0 * min(max(cx - 0.15, 0.0), 0.15)
+             + (4.0 if inside else 0.0) + 0.4 * min(m.get("ball_speed", 0.0), 15.0))
+        yc = m.get("cross_y", m.get("pred_y"))
+        if yc is not None:
+            inside_goal = max(0.0, 1.0 - max(0.0, abs(yc) - 2.9) / 2.0)
+            clear = min(1.0, abs(yc - m.get("keeper_y", 0.0)) / 0.8)
+            s += 3.0 * inside_goal * clear
+            s -= 0.3 * min(m.get("pred_short", 0.0), 10.0)
+        t_end = m.get("t_fall") or m.get("time", 0.0)
+        s += 4.0 * min(max(t_end - m["t_touch"], 0.0) / travel_time(m.get("ball_speed", 0.0)), 1.0)
+        if m.get("goal"):
+            s += 10.0 if inside else 0.0
+        return s
+    if stage == "kick":
+        # the step is fixed; score the kick: touch, ball speed, a crossing
+        # inside the goal away from the keeper, staying up until it arrives
+        if m.get("t_touch") is None:
+            return -2.0 - 2.0 * min(m.get("r_toe_ball_min", 1.0), 1.0)
+        s = 2.0 + 0.5 * min(m.get("ball_speed", 0.0), 16.0)
+        yc = m.get("cross_y", m.get("pred_y"))
+        if yc is not None:
+            inside = max(0.0, 1.0 - max(0.0, abs(yc) - 2.9) / 2.0)
+            clear = min(1.0, abs(yc - m.get("keeper_y", 0.0)) / 0.8)
+            s += 3.0 * inside * clear
+            s -= 0.3 * min(m.get("pred_short", 0.0), 10.0)
+        # stay up until the ball can have arrived (rolling-decel estimate of
+        # the travel time to the line for this launch speed)
+        t_end = m.get("t_fall") or m.get("time", 0.0)
+        s += 4.0 * min(max(t_end - m["t_touch"], 0.0) / travel_time(m.get("ball_speed", 0.0)), 1.0)
+        return s + (10.0 if m.get("goal") else 0.0)
+    raise ValueError(f"unknown stage {stage}")
+
+
+def wilson(k, n, z=1.96):
+    if n == 0:
+        return (0.0, 0.0)
+    p = k / n
+    den = 1 + z * z / n
+    c = (p + z * z / (2 * n)) / den
+    h = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / den
+    return (max(0.0, c - h), min(1.0, c + h))
+
+
+def summarize(rows):
+    n = len(rows)
+    goals = [r for r in rows if r.get("goal")]
+    k = len(goals)
+    lo, hi = wilson(k, n)
+
+    def stat(key, sel=None):
+        v = [r[key] for r in (rows if sel is None else sel) if r.get(key) is not None]
+        if not v:
+            return None
+        return {"mean": round(float(np.mean(v)), 4), "median": round(float(np.median(v)), 4),
+                "min": round(float(np.min(v)), 4), "max": round(float(np.max(v)), 4), "n": len(v)}
+
+    out = {
+        "episodes": n, "goals": k, "goal_rate": round(k / n, 4) if n else 0.0,
+        "goal_rate_ci95_wilson": [round(lo, 4), round(hi, 4)],
+        "touched": sum(1 for r in rows if r.get("t_touch") is not None),
+        "falls": sum(1 for r in rows if r.get("fallen")),
+        "falls_before_ball_arrived": sum(1 for r in rows if r.get("fallen") and not r.get("goal")
+                                         and (r.get("t_cross") is None or r["t_fall"] < r["t_cross"])),
+        "ball_speed_off_foot_mps": stat("ball_speed"),
+        "time_to_goal_s": stat("t_goal", goals),
+        "time_of_contact_s": stat("t_touch"),
+        "ball_travel_to_line_s": stat("travel_s", goals),
+        "launch_deg": stat("launch_deg"),
+        "launch_elev_deg": stat("launch_elev_deg"),
+        "cross_y_m": stat("cross_y"),
+        "cross_z_m": stat("cross_z"),
+        "pain_sum": stat("pain_sum"),
+        "pain_mean_per_step": stat("pain_mean"),
+        "effort_mean_sq_activation": stat("act_reg"),
+        "episode_time_s": stat("time"),
+    }
+    by = {}
+    for r in rows:
+        by.setdefault(r.get("keeper_policy", "?"), []).append(r)
+    out["by_keeper_policy"] = {p: {"episodes": len(v), "goals": sum(1 for r in v if r.get("goal")),
+                                   "rate": round(sum(1 for r in v if r.get("goal")) / len(v), 4)}
+                               for p, v in by.items()}
+    misses = {}
+    for r in rows:
+        if r.get("goal"):
+            continue
+        if r.get("t_touch") is None:
+            why = "no_touch"
+        elif r.get("fallen") and r.get("t_cross") is None:
+            why = "fell_before_ball_arrived_or_short"
+        elif r.get("cross_y") is not None and abs(r["cross_y"]) > 3.3:
+            why = "wide"
+        elif r.get("cross_z") is not None and r["cross_z"] > 2.2:
+            why = "high"
+        elif r.get("cross_y") is None:
+            why = "short_or_blocked"
+        else:
+            why = "other"
+        misses[why] = misses.get(why, 0) + 1
+    out["misses"] = misses
+    return out
+
+
+def _search(argv):
+    import argparse
+    import multiprocessing as mp
+    import time
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, here)
+    from practice import CMA, describe, read_params
+
+    ap = argparse.ArgumentParser(prog="myo_soccer.py search")
+    ap.add_argument("--only", required=True)
+    ap.add_argument("--init")
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--stage", default="kick")
+    ap.add_argument("--seconds", type=float, default=4.0)
+    ap.add_argument("--gens", type=int, default=100)
+    ap.add_argument("--pop", type=int, default=0)
+    ap.add_argument("--sigma", type=float, default=0.15)
+    ap.add_argument("--workers", type=int, default=2)
+    ap.add_argument("--seeds", default="0")
+    ap.add_argument("--rseed", type=int, default=1)
+    a = ap.parse_args(argv)
+    tun = {t[0]: t for t in describe("myo_soccer")}
+    names = [n for n in a.only.split(",") if n in tun]
+    init = read_params(a.init)
+    lo = np.array([tun[n][2] for n in names])
+    hi = np.array([tun[n][3] for n in names])
+    x0 = np.array([(init.get(n, tun[n][1]) - tun[n][2]) / (tun[n][3] - tun[n][2]) for n in names]).clip(0, 1)
+    seeds = [int(v) for v in a.seeds.split(",")]
+
+    def to_params(x):
+        p = dict(init)
+        p.update({n: float(l + (h - l) * v) for n, l, h, v in zip(names, lo, hi, np.clip(x, 0, 1))})
+        return p
+
+    es = CMA(x0, a.sigma, a.pop or None, seed=a.rseed)
+    best = -1e18
+    t0 = time.time()
+    with mp.Pool(a.workers) as pool:
+        for g in range(a.gens):
+            xs = es.ask()
+            if g == 0:
+                xs[0] = x0
+            jobs = [(to_params(x), a.seconds, sd, a.stage) for x in xs for sd in seeds]
+            res = pool.map(_evaluate, jobs)
+            k = len(seeds)
+            sc = [float(np.mean([res[i * k + j][0] for j in range(k)])) for i in range(len(xs))]
+            es.tell(xs, [s - 5.0 * float(np.sum(np.maximum(0, x - 1) + np.maximum(0, -x))) for s, x in zip(sc, xs)])
+            i = int(np.argmax(sc))
+            if sc[i] > best:
+                best = sc[i]
+                with open(a.out, "w") as f:
+                    f.write(f"# myo_soccer practice ({a.stage}, seeds {seeds}): score {best:.4f}\n")
+                    for j in range(k):
+                        mm = {kk: v for kk, v in res[i * k + j][1].items() if kk != "events"}
+                        f.write(f"# seed {seeds[j]}: {mm}\n")
+                    p = to_params(xs[i])
+                    for n in sorted(p):
+                        f.write(f"{n} {float(p[n])!r}\n")
+            print(f"gen {g + 1} best {best:.3f} gen {sc[i]:.3f} sigma {es.sigma:.3f} ({time.time() - t0:.0f}s)", flush=True)
+
+
+def _evaluate(job):
+    params, seconds, seed, stage = job
+    from myo_bridge import MyoSim
+    task = MyoSoccerTask()
+    try:
+        m = MyoSim(task, params=params, seed=seed).run(seconds)
+        return practice_score(m, stage), m
+    except Exception as e:  # a crashing candidate scores worst
+        return -1e9, {"error": str(e)[:300]}
+
+
+if __name__ == "__main__":
+    import json
+    import sys
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, here)
+    if len(sys.argv) > 1 and sys.argv[1] == "summary":
+        s = summarize(json.load(open(sys.argv[2])))
+        print(json.dumps(s, indent=1))
+        if len(sys.argv) > 3:
+            json.dump(s, open(sys.argv[3], "w"), indent=1)
+    elif len(sys.argv) > 1 and sys.argv[1] == "search":
+        _search(sys.argv[2:])
+    else:
+        print(__doc__)

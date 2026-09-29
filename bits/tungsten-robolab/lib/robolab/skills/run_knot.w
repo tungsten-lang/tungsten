@@ -52,23 +52,24 @@
 + RunKnotSkill < RunRISkill
   -> start(frame, ctl)
     super(frame, ctl)
-    return self if !@knots
+    return self if !@knots && !@fly_entry
     tr = ctl.track("body")
     mv = tr.movement
-    # RunSkill's loop wraps at the end of the movement: its last chunk now
-    # names the loop start, since the knot chunks are appended after it
-    mv[mv.size - 1].followed_by(mv[mv.loop_start].name)
-    ["l_", "r_"].each ->(st)
-      sw = "r_"
-      sw = "l_" if st == "r_"
-      mv.add(kland_chunk(st, sw))
-      mv.add(kpush_chunk(st, sw))
-      mv.add(kflight_chunk(st, sw))
-    mv.chunks.each ->(ch)
-      if ch.name == "l_flight" || ch.name == "l_kflight"
-        ch.branch(->(f, c) knot_next("r_"))
-      elsif ch.name == "r_flight" || ch.name == "r_kflight"
-        ch.branch(->(f, c) knot_next("l_"))
+    if @knots
+      # RunSkill's loop wraps at the end of the movement: its last chunk now
+      # names the loop start, since the knot chunks are appended after it
+      mv[mv.size - 1].followed_by(mv[mv.loop_start].name)
+      ["l_", "r_"].each ->(st)
+        sw = "r_"
+        sw = "l_" if st == "r_"
+        mv.add(kland_chunk(st, sw))
+        mv.add(kpush_chunk(st, sw))
+        mv.add(kflight_chunk(st, sw))
+      mv.chunks.each ->(ch)
+        if ch.name == "l_flight" || ch.name == "l_kflight"
+          ch.branch(->(f, c) knot_next("r_"))
+        elsif ch.name == "r_flight" || ch.name == "r_kflight"
+          ch.branch(->(f, c) knot_next("l_"))
     if frame.com_vx > ~1.0
       # (the speed plan fully ramped, as a steadily running controller's is:
       # the acceleration lean and the push drives follow v_des / v_top)
@@ -78,12 +79,13 @@
       @t_go = frame.t
       @v_des = @v_top
       nm = "l_flight"
-      nm = "l_kflight" if frame.com_vx >= @kn_v_on
+      knot_td = @knots && frame.com_vx >= @kn_v_on
+      nm = "l_kflight" if knot_td
       # the command starts on the flight's pose (as a running controller's
       # would be), not on the sensed posture: a command equal to the sensed
       # contraction leaves the stretch reflexes no tone at the landing
       p = flight_pose("l_", "r_")
-      knot_leg(p, "r_", @kn_td_thigh, @kn_td_knee, @kn_td_ankle) if frame.com_vx >= @kn_v_on
+      knot_leg(p, "r_", @kn_td_thigh, @kn_td_knee, @kn_td_ankle) if knot_td
       c = p.apply(body, ctl.command)
       cmd = ctl.command
       i = 0
@@ -102,6 +104,11 @@
 
   -> read_params
     super
+    # fly_entry 1 (a params-file switch): a body that starts already running (a
+    # flying start: tasks/sprint_touch.py fly_touch 2) enters RunSkill's stride
+    # loop at the left flight with the speed plan ramped, as `knots 1` does;
+    # without knots the stride is RunRISkill's exactly
+    @fly_entry = @params.key?("fly_entry") && @params["fly_entry"] > ~0.5
     @knots = @params.key?("knots") && @params["knots"] > ~0.5
     @knot_stance = false
     return self if !@knots

@@ -123,6 +123,10 @@ springs so nothing ever steps.
 | `playground/search.py`, `playground/SEARCH.md` | 13 search methods (CMA-ES, sep-CMA, IPOP, GA, (1+1)-ES, random, CEM, DE, OpenAI-ES, Nelder-Mead, pattern, BO, MAP-Elites) behind one ask/tell interface with rollout budgets and robust multi-seed scoring; SEARCH.md benchmarks them and recommends a method and a representation per kind of problem |
 | `playground/tasks/<task>.py` | scene, sensors, metrics, score and camera per task |
 | `params/<task>.txt` | practised parameters (`--params params/<task>.txt`) |
+| `playground/arena.py`, `playground/arena/` | the champion-challenger arena: `trials.json`, `champions.json`, `history.jsonl`; rules in `playground/arena/README.md` |
+| `tools/` | `snapshot_commit.sh` (commit this directory to the branch `robolab-campaign-2026-09` without touching the shared checkout), `arena_board_md.py` (the board with each champion's frozen artifacts), `check_doc_paths.py` (checks the backticked paths of a Markdown file) |
+| `site/progress/` | generator of the progress page (`build_progress.py` writes `progress.html`; numbers come from `champions.json`) |
+| `HANDOFF_20260929.md`, `HANDOFF_20260929_board.md` | where everything stands on 29 Sep, who owns which workstream, next steps and traps |
 
 ## Setup
 

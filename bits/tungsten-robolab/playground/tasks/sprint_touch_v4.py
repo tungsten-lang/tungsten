@@ -14,7 +14,9 @@ from tasks.sprint_touch import SprintTouchTask  # noqa: E402
 class SprintTouchV4Task(SprintTouchTask):
     name = "sprint_touch_v4"
     timestep = TIMESTEP
-    snap = "run_v4"
+    # the flying start's snapshot set (fly_touch 2): playground/cache/sprint_touch_<snap>[_acc][_s<ver>].npz;
+    # ROBOLAB_SNAP names another body's (e.g. run_v3_p95: the v3 P95 champion at 6.9 m/s, fibre states included)
+    snap = os.environ.get("ROBOLAB_SNAP", "run_v4")
     body_note = "v4 anatomy (calibrated), planar root, 1 ms physics"
 
     def builder(self):

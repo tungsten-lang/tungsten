@@ -5149,33 +5149,39 @@
  },
  "sprint_top_speed_v4": {
   "controller": "/Users/erik/tungsten/bits/tungsten-robolab/bin/challengers/run_ri-v4base",
-  "frozen_controller": "bin/champions/sprint_top_speed_v4-20260928-155240",
-  "frozen_params": "playground/arena/params/sprint_top_speed_v4-20260928-155240.txt",
-  "note": "baseline: the sprint_top_speed champion's params (RunSkill, v3-tuned) unchanged on the v4 body (run on RunRISkill without ri = RunSkill)",
-  "params": "params/run_v3.txt",
-  "result": "seeded",
+  "frozen_controller": "bin/champions/sprint_top_speed_v4-20260929-011607",
+  "frozen_params": "playground/arena/params/sprint_top_speed_v4-20260929-011607.txt",
+  "note": "v4 average body: RunRI re-tuned from the v3 params (v4s2 then v4r1 robustness stage)",
+  "params": "scratchpad/sprint_knot/v4r1.txt",
+  "result": "promoted",
   "scores": [
+   4.646,
+   4.643,
+   4.646,
+   4.65,
+   4.661,
    -1000000000.0,
-   -1000000000.0,
-   -1000000000.0,
-   -1000000000.0,
-   -1000000000.0,
-   -1000000000.0,
-   -1000000000.0,
-   -1000000000.0,
-   -1000000000.0,
-   -1000000000.0,
-   -1000000000.0,
-   -1000000000.0
+   4.637,
+   4.666,
+   4.641,
+   4.648,
+   4.645,
+   4.65
   ],
   "summary": {
-   "ci95": 0.0,
-   "mean": -1000000000.0,
+   "ci95": 163333334.09258088,
+   "mean": -83333329.07225,
    "n": 12
   },
   "task": "run_v4",
-  "time": "2026-09-28 15:52:40",
-  "trial": "sprint_top_speed_v4"
+  "time": "2026-09-29 01:16:07",
+  "trial": "sprint_top_speed_v4",
+  "vs_champion": {
+   "mean_diff": 916666670.92775,
+   "n": 12,
+   "p": 0.0005,
+   "wins": true
+  }
  },
  "sprint_top_speed_v4_elite2": {
   "controller": "/Users/erik/tungsten/bits/tungsten-robolab/bin/challengers/run_ri-v4base",

@@ -213,6 +213,12 @@
       @il_g = param("j_il_g", ~0.3, ~0.0, ~2.0)
       @il_lz = ~9.0
       @il_lz = @params["il_lz"] if @params.key?("il_lz")
+      # the ballistic-time clock (il_tg > 0, see il_apply); il_zl: the COM height
+      # the time is to (0 = j_land_z, the chunks' own)
+      @il_tg = ~0.0
+      @il_tg = @params["il_tg"] if @params.key?("il_tg")
+      @il_zl = ~0.0
+      @il_zl = @params["il_zl"] if @params.key?("il_zl")
       @il_kdc = param("j_il_kdc", ~1.0, ~0.0, ~1.0)
     # hitch-kick (`j_hk` 1 or 2, a params-file switch; 0 = the hang); its
     # tunables are declared only when it is on
@@ -619,8 +625,13 @@
       ch.followed_by("hang")
     mv
 
+  # The take-off is announced (the task counts a jump that falls short of the
+  # sand from here on) when the program starts at the plant flight, and only at
+  # the plant's touchdown when it starts at the penultimate touchdown (ik_from
+  # 1): announced earlier, the penultimate stance's own 0.17 s flight counted as
+  # a take-off that landed short.
   -> ik_entered(f, ctl, t, fr)
-    ctl.emit("jump:takeoff")
+    ctl.emit("jump:takeoff") if @ik_at == "flight"
     enter(f, t, fr, :ik)
 
   # The plant flight has just begun (this tick): cancel the drive the track
@@ -665,6 +676,7 @@
       @ik_lifted = true if !down
       if down && @ik_lifted && s > ~0.03
         @ik_td_seen = true
+        ctl.emit("jump:takeoff") if @ik_at == "land"
         @ik_shift = @ik_shift + @ik_td - s
         s = @ik_td
       elsif s > @ik_td
@@ -691,19 +703,37 @@
     @il_shift = ~0.0
     @il_landed = false
     @il_first = true
+    @il_s_prev = ~-99.0
     enter(f, t, fr, :il)
 
+  # With `il_tg` > 0 the program time before the sand is il_tg minus the
+  # COM's ballistic time to fall to the landing height (a flight is ballistic
+  # whatever the limbs do), not the time since the hand-over: the legs' tuck and
+  # reach are then locked to the predicted landing, so a lower or shorter flight
+  # (the same take-off program from a slightly different approach) brings them
+  # up in time instead of touching the sand with the legs still hanging down
+  # (which vaults the body over the feet). The clock never runs backward, holds
+  # at il_ld until the sand, and runs in real time from il_ld after it.
   -> il_apply(frame, ctl)
     s = frame.t - @il_t0 + @il_shift
     if !@il_landed
+      if @il_tg > ~0.0
+        zl = @il_zl
+        zl = @land_z if zl <= ~0.0
+        s = @il_tg - time_to_z(frame, zl)
+        s = @il_s_prev if s < @il_s_prev
+        @il_s_prev = s
       # the landing: sand contact with the COM low (a foot grazing the sand
       # early in a low flight must not start the landing motion in the air)
       if frame.at("pit", 1) > ~0.5 && frame.at("com_pos", 2) < @il_lz
         @il_landed = true
-        @il_shift = @il_shift + @il_ld - s
+        if @il_tg > ~0.0
+          @il_shift = @il_ld - (frame.t - @il_t0)
+        else
+          @il_shift = @il_shift + @il_ld - s
         s = @il_ld
       elsif s > @il_ld
-        @il_shift = @il_shift - (s - @il_ld)
+        @il_shift = @il_shift - (s - @il_ld) if @il_tg <= ~0.0
         s = @il_ld
     g = @il_g
     g = ~0.0 if @il_first
@@ -895,6 +925,13 @@
   # Seconds until the COM falls to its landing height on a ballistic arc.
   -> time_to_land(f)
     z = f.at("com_pos", 2) - @land_z
+    vz = f.at("com_vel", 2)
+    return ~0.0 if z <= ~0.0
+    (vz + Math.sqrt(vz * vz + ~19.62 * z)) / ~9.81
+
+  # ... to the height zl.
+  -> time_to_z(f, zl)
+    z = f.at("com_pos", 2) - zl
     vz = f.at("com_vel", 2)
     return ~0.0 if z <= ~0.0
     (vz + Math.sqrt(vz * vz + ~19.62 * z)) / ~9.81

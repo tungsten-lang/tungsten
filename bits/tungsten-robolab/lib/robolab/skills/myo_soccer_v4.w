@@ -250,6 +250,20 @@
     @b_vlat = param("b_vlat", ~0.03, ~0.005, ~0.2) if @blv
     @bc_out = ~1.0
     @bc_out = param("bc_out", ~0.05, ~0.01, ~0.2) if switch_on("bcout")
+    # bramp 1: the set's ramp from the reset posture to the stance takes
+    # b_t_ramp seconds instead of 0.3 (the reset's posture is hip flexed +0.15,
+    # the stance extends it to -0.26: at 0.3 s that is a 1.4 rad/s lurch that
+    # rocks the body from foot to foot and spins the feet in the first second;
+    # the set's minimum time is extended by the same amount)
+    @b_t_ramp = ~0.3
+    @b_t_ramp = param("b_t_ramp", ~0.3, ~0.15, ~1.5) if switch_on("bramp")
+    # bfore 1: the lift also waits for the COM's fore-aft capture point to be
+    # within b_fx_tol of the stance foot's target (sb_x): the lateral latch
+    # alone let a slow fore-aft drift (the COM 0.19 m behind the stance foot)
+    # into the lift
+    @bfore = switch_on("bfore")
+    @b_fx_tol = ~1.0
+    @b_fx_tol = param("b_fx_tol", ~0.06, ~0.02, ~0.2) if @bfore
     @bal_acc = {"l" => ~0.0, "r" => ~0.0}
     @bal_last = ""
     # (bc_first 1: the right leg first)
@@ -292,6 +306,17 @@
     @cp_ki = param("cp_ki", ~0.0, ~-3.0, ~3.0)
     @cp_h = param("cp_h", ~0.95, ~0.7, ~1.1)
     @cp_khf = param("cp_khf", ~0.0, ~-10.0, ~10.0)
+    # cp_more 1: what the sole cannot take also goes to the swing hip (its
+    # abduction, cp_ksw per metre: the leg as a counterweight) and to the
+    # trunk's lateral bend toward the swing side (cp_klb per metre): the
+    # stance hip's own strategy (cp_kh) throws the trunk into the fall, which
+    # is right for a fast excess but positive feedback for a slow outward
+    # drift (measured: pelvis roll 0.1 -> 0.9 while the hip abducts to -0.9)
+    @cp_ksw = ~0.0
+    @cp_klb = ~0.0
+    if switch_on("cp_more")
+      @cp_ksw = param("cp_ksw", ~0.0, ~0.0, ~8.0)
+      @cp_klb = param("cp_klb", ~0.0, ~0.0, ~8.0)
     @cp_rf = ~0.0
     @cp_ro = ~0.0
     self
@@ -732,8 +757,9 @@
   -> bal_movement
     return super if !@bcatch
     mv = Movement.new("bal")
-    ch = chunk("b_set", ~0.3, stance, :b_set, :both, :mid).hold_until(Latch.after(@b_t_set))
-    ch = chunk("b_set", ~0.3, stance, :b_set, :both, :mid).hold_until(settled.after_min(@b_t_set), @b_t_set + @bs_tmax) if @bsettle
+    ramp_extra = @b_t_ramp - ~0.3
+    ch = chunk("b_set", @b_t_ramp, stance, :b_set, :both, :mid).hold_until(Latch.after(@b_t_set + ramp_extra))
+    ch = chunk("b_set", @b_t_ramp, stance, :b_set, :both, :mid).hold_until(settled.after_min(@b_t_set + ramp_extra), @b_t_set + ramp_extra + @bs_tmax) if @bsettle
     ch.branch(->(f, c) next_leg(f))
     mv.add(ch)
     add_catch_leg(mv, "l")
@@ -763,7 +789,7 @@
     p = stance
     p.set("hip_adduction_" + st, p.get("hip_adduction_" + st) + @b_shift_add)
     p.set("hip_adduction_" + sw, p.get("hip_adduction_" + sw) - @b_shift_add)
-    unl = Latch.test(st + "_bunl", ->(f, e, c) foot_load(sw) < @b_unload && captured?(f, st) && lat_still?(f, st))
+    unl = Latch.test(st + "_bunl", ->(f, e, c) foot_load(sw) < @b_unload && captured?(f, st) && lat_still?(f, st) && fore_ok?(f, st))
     mv.add(chunk("b_shift_" + st, @b_t_shift, p, :b_shift, :both, ss).hold_until(unl.after_min(@b_t_shift * ~0.5), @b_t_shift + @bc_tmax))
     p = one_leg_posture(st)
     mv.add(chunk("b_lift_" + st, @b_t_lift, p, :b_lift, ss, ss).hold_until(Latch.after(@b_t_lift)))
@@ -783,6 +809,17 @@
     return true if !@blv
     h = foot_yaw(f, st)
     (f.at("com_vel", 1) * Math.cos(h) - f.at("com_vel", 0) * Math.sin(h)).abs < @b_vlat
+
+  # (bfore) the COM's fore-aft capture point (COM + velocity x sqrt(h / g)
+  # along the stance foot's heading) within b_fx_tol of the foot's target
+  # sb_x ahead of its centre.
+  -> fore_ok?(f, st)
+    return true if !@bfore
+    fc = foot_center(f, st)
+    h = foot_yaw(f, st)
+    dx = f.at("com_pos", 0) + f.at("com_vel", 0) * ~0.311 - fc[0]
+    dy = f.at("com_pos", 1) + f.at("com_vel", 1) * ~0.311 - fc[1]
+    (dx * Math.cos(h) + dy * Math.sin(h) - @sb_x).abs < @b_fx_tol
 
   # Still, square double stance (bsettle).
   -> settled
@@ -880,6 +917,10 @@
     joint_offset(off, "subtalar_angle_" + st, @cp_ks * (dso - copo) + @cp_ksf * dso)
     joint_offset(off, "ankle_angle_" + st, ~0.0 - (@cp_ka * (dsf - copf) + @cp_kaf * dsf))
     joint_offset(off, "hip_adduction_" + st, @cp_kh * (wo - dso))
+    # (cp_more: the swing leg abducted and the trunk bent toward the swing
+    # side by the same excess, whatever its sign)
+    joint_offset(off, "hip_adduction_" + sw, ~0.0 - @cp_ksw * (wo - dso)) if @cp_ksw != ~0.0
+    joint_offset(off, "lat_bending", sg * @cp_klb * (wo - dso)) if @cp_klb != ~0.0
     # (and the fore-aft excess to the stance hip's flexion: the sagittal hip
     # strategy, sign and size by practice)
     joint_offset(off, "hip_flexion_" + st, @cp_khf * (wf - dsf)) if @cp_khf != ~0.0

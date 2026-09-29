@@ -1,0 +1,22 @@
+# soccer4 campaign log (9/29 continuation)
+
+All campaign state lives in the repo: scratchpad/soccer4/, params/, out/. Nothing in /private/tmp.
+
+- 01:16 9/29 restart after the 9/28 18:10 reboot. Nothing of mine running. The machine is NOT idle now (load avg ~50-58 on 18
+  cores: codex/other agents run dribble + sprint + metaflip jobs), so wall times run 2-3x slower than the 9/28 logs.
+- 01:16 added trial soccer_single_leg_310_40 (arena lock, scratchpad/soccer4/add_trial_310_40.py): seeds 89100-89139, the
+  soccer_single_leg_310 env/metric/report, "seconds" 310. Seeding it with the soccer_single_leg_310 champion
+  (bin/champions/soccer_single_leg_310-20260928-025604 + its params; == soccer4-bal300 + params/myo_soccer_single_leg_310_cp4.txt):
+  scratchpad/soccer4/arena_310_40_seed.out, pid in scratchpad/soccer4/pids/seed310_40.pid.
+- 01:22 failscan.py (20 s per seed, per-seed phase log) on the 40 new seeds 89100-89139 with the lift challenger
+  (bin/challengers/soccer5-lift + params/myo_soccer_single_leg_310_lift.txt): 35/40 hold >= 20 s (scan/lift_89100.out).
+  The 5 that fail: 89110 (hold falls at 6.7 s), 89115 (6.9 s), 89117 (lift falls at 2.6 s), 89130 (set/shift falls at 1.5 s),
+  89133 (hold falls at 3.2 s). The champion's 20-start rate was 12/20, so the 40-start trial should separate them.
+- 01:27 diagnosis of the late-hold falls (89110, 89115; traces scratchpad/soccer4/tr/lift_*.json): the pelvis yaw sits at the
+  stance hip's external stop (-0.7 rad to the foot) in EVERY seed after the lift (89000 too, that seed holds); in the failing
+  holds the yaw goes into a 0.75 s limit cycle (-1.18 <-> -0.46) and then the frontal plane runs away: capture point +0.03..+0.04
+  beyond the 2.1 cm sole limit, cp4's hip strategy abducts (cp_kh -13.9), pelvis roll climbs 0.1 -> 0.9 with the hip at -0.9
+  (its abduction limit), cpo -> 1.3 m. The round-4 sign of the hip strategy (throw the trunk into the fall) helps the fast
+  transient but is positive feedback for a slow outward drift (the trunk lean moves the COM the same way).
+- 01:30 running ablations on the 5 failing + 5 passing seeds: scan/variants1.sh (cp_kh 0 / -6 / +6, sb_kha 4) then variants2.sh
+  (tl_kp 0 / 10, tl_wfoot 1, tl_kp+tl_kd 0).

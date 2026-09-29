@@ -1124,6 +1124,8 @@ def main():
     ap.add_argument("--only", help="tunables to search (names, or prefixes ending in *)")
     ap.add_argument("--exclude")
     ap.add_argument("--attrs", help="task attribute overrides for training rollouts, name=value,... (e.g. noise=0.001)")
+    ap.add_argument("--box", help="widen or move tunables' search boxes, name=lo:hi,... (a skill does not clamp a params-file value; "
+                                  "only the search's box does)")
     ap.add_argument("--out", required=True)
     ap.add_argument("--log")
     a = ap.parse_args()
@@ -1134,6 +1136,12 @@ def main():
             fixed[k] = float(v)
     init = read_params(a.init)
     tun = describe(a.task, {**init, **fixed})
+    if a.box:
+        box = {kv.split("=")[0]: tuple(float(x) for x in kv.split("=")[1].split(":")) for kv in a.box.split(",")}
+        unknown = sorted(set(box) - {t[0] for t in tun})
+        if unknown:
+            raise SystemExit(f"--box names no tunable: {', '.join(unknown)}")
+        tun = [(t[0], t[1], *box.get(t[0], (t[2], t[3]))) for t in tun]
     rep = BoxRep.from_tunables(tun, parse_list(a.only), parse_list(a.exclude), init, fixed)
     seeds = parse_list(a.seeds, int) or [None]
     attrs = {kv.split("=")[0]: float(kv.split("=")[1]) for kv in (a.attrs or "").split(",") if kv}

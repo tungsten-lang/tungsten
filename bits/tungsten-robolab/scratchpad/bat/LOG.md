@@ -223,3 +223,27 @@ Round-2 practice seeds: TRAIN 3000+ (fresh pitches), VALIDATION 4000-4047, none 
   hit speed 31.29, flow 2.428 max 2.779, fair 32, launch 18 deg. On the calibration pitches 5000-5047: 48/48, 31.53, flow 2.42.
 - **Arena `bat_power_fresh_rep_p95` seeded** with it (`arena.py seed ... --workers 4`): **27.12 m/s, 21/24 hits** (misses 1105 (x +0.04, z 0.96), 1106 (x +0.15, z 0.69), 1123 (x +0.11, z 0.96): outside pitches whose contact falls beyond the tip),
   hit speed 31.0, flow 2.43, fair 62 %, quality 0.27. A k_in scan on the calibration pitches (k_in 0.04/0.07/0.10 with prog_trig moved to keep the centre timing) made it no better (48 / 46 / 47 / 40 hits).
+- **S5 result (Codex-architecture residual, tres_conv 1: fixed conv features of BatConvResidual, 20 readout weights tc0-tc19 zero at the start, bound 0.16 rad on [spine rotation, spine flexion, both elbows, both wrists' flexion],
+  sep-CMA sigma 0.15, 24 random fresh pitches 7100-7123, 8 generations of 14 = 2376 rollouts, controller bat_r2-t8, start = S2c gen 6)**: training objective 25.01 -> 25.19 (gen 2), no gain in gens 3-8. Validation seeds 4000-4047 vs the same swing
+  without the residual (paired): speed 26.028 vs 26.147 (**-0.119**, better on 14 of 48, worse on 33, sign-flip p < 0.001), flow 2.512 vs 2.316 (**+0.196**, worse on 33). A trained zero-initialised conv residual does NOT help
+  the knots swing: the +0.18 on the 24 training pitches did not carry (params/search/bat_r2_s5.txt kept as the record). Stopped at gen 8 (pid 22136).
+
+## 2026-09-29 13:20 arena challenges of the balanced swing (params/bat_r2_s2c.txt, bat_r2-t5; each with S3 paused by paused.sh 35477)
+
+- `bat_power_fresh_rep`: **25.956 m/s, 24/24 hits**, fair 100 %, quality 0.440, flow 2.334: does NOT beat the S2b champion (26.204; speed only), logged as a loss. (S2b: 26.204, fair 67 %, quality 0.178, flow 2.478.)
+- The four ORACLE-held trials, all WON and promoted (the champion of each is now an in-representation swing with the reflexes on): `bat_power` (18 grid pitches) **26.234** vs the oracle's 25.171; `bat_power_clean` 26.234 (flow 2.331);
+  `bat_power_fresh` (24 held-out pitches, seeds 1000-1023) **26.205** vs 25.241; `bat_power_fresh_clean` 26.205. `bat_quality` (mean fair-ball quality on the grid): 0.315 vs the oracle's 0.416: does not beat, the oracle keeps it.
+- S3 (dshape: the drive's time profile per joint group, 30 weights dw0-dw29 zero at the start, 36 random pitches 7100-7135, controller bat_r2-t8, pid 35477, 4 workers, sigma 0.15): gen 1 = the S2c swing alone = 24.23.
+
+## 2026-09-29 13:45 S3 (the drive time profile) works and is entered
+
+- S3 (dshape, 30 weights zero at the start, sigma 0.15, 36 random fresh pitches 7100-7135, controller bat_r2-t8, pid 35477, 4 workers, 7 generations of 14 = 2592 rollouts): training objective 24.23 -> 24.74 (gen 2) -> 24.85 -> 25.46 -> **25.61 (gen 5, best)**, none after.
+  Learned profile (rows: pelvis yaw, spine, shoulders, elbows, wrists; bumps at 30, 70, 110, 150, 190, 230 ms after the fire; dshape_b 0.5):
+  pelvis +0.34 +0.40 +0.32 +1.00 +0.50 -0.34; spine +0.20 -0.23 +0.26 +0.43 +0.62 -0.32; shoulders +0.36 +0.10 -0.44 +0.44 +0.54 +0.07; elbows 0.00 +0.57 0.00 +0.38 -0.04 -0.06; wrists +0.21 +0.04 -0.21 +0.07 -0.01 -0.21:
+  more drive in the middle of the swing (110-190 ms; the diagnosis said the pelvis is at >= 0.9 activation only 43 % of its power phase), less at the very end.
+  **Validation seeds 4000-4047 (never used), paired against S2c g6**: power 26.571 vs 26.147 (**+0.424, better on 48 of 48 pitches**, sign-flip p < 0.001), flow 2.314 vs 2.316 (max 2.645), 48/48 hits, fair 46, launch 19.9 deg, quality 0.405.
+  A zero-initialised temporal residual on the knots' DRIVE generalises (+0.42 m/s on every held-out pitch); the same recipe on the reflex targets (S5, Codex's conv features) made things worse.
+- Arena, all with params/bat_r2_s3.txt + bin/challengers/bat_r2-t8, `--promote`, all WON: `bat_power_fresh_rep` **26.399 m/s, 24/24** (fair 100 %, quality 0.416, flow 2.324; S2b 26.204), `bat_power_fresh_rep_clean` 26.399,
+  `bat_power` 26.521 (18 grid pitches; oracle 25.171), `bat_power_clean` 26.521, `bat_power_fresh` **26.669** (oracle 25.241), `bat_power_fresh_clean` 26.669.
+- **S3b launched** (13:47; continues S3 from params/bat_r2_s3.txt on 36 NEW random pitches 7200-7235: dims dw0-29 + dshape_b + train_drv + train_lead + prog_trig + train_end + train_gain (36), sigma 0.1, pop 16, 4 workers, budget 3500;
+  `ROBOLAB_CONTROLLER=$PWD/bin/challengers/bat_r2-t8 BATREP_FLOW=4 BATREP_FLOW_CAP=2.5 BATREP_LAUNCH=0.04 BAT_BODY=athlete .venv/bin/python playground/search.py bat_rep --method sep_cma --budget 3500 --workers 4 --sigma 0.1 --pop 16 --risk 0.25 --seconds 4.3 --seeds 7200,...,7235 --init params/bat_r2_s3.txt --only "dw*,dshape_b,train_drv,train_lead,prog_trig,train_end,train_gain" --box "..." --out params/search/bat_r2_s3b.txt --log out/bat_r2/s3b.jsonl`).

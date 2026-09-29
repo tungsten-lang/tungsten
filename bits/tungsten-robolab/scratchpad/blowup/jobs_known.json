@@ -1,0 +1,8 @@
+[
+ {"tag": "89103-shc", "seed": 89103, "params": "params/myo_soccer_single_leg_310_shc.txt", "controller": "bin/challengers/soccer6-p", "seconds": 290},
+ {"tag": "89106-lift", "seed": 89106, "params": "params/myo_soccer_single_leg_310_lift.txt", "controller": "bin/challengers/soccer5-lift", "seconds": 260},
+ {"tag": "89130-shc", "seed": 89130, "params": "params/myo_soccer_single_leg_310_shc.txt", "controller": "bin/challengers/soccer6-p", "seconds": 175},
+ {"tag": "89134-shc", "seed": 89134, "params": "params/myo_soccer_single_leg_310_shc.txt", "controller": "bin/challengers/soccer6-p", "seconds": 170},
+ {"tag": "89135-shc", "seed": 89135, "params": "params/myo_soccer_single_leg_310_shc.txt", "controller": "bin/challengers/soccer6-p", "seconds": 165},
+ {"tag": "89122-shc", "seed": 89122, "params": "params/myo_soccer_single_leg_310_shc.txt", "controller": "bin/challengers/soccer6-p", "seconds": 50}
+]

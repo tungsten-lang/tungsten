@@ -103,7 +103,7 @@ Same three controllers, same starts; the guarded runs are bit-identical to the o
 | round-6 set ramp | 38 / 40 (1 NaN) | 39 / 40 |
 | ramp + shift capture-point brake | 35 / 40 (5 NaN) | 40 / 40 |
 
-The other failures (lift: 89110, 89115, 89117, 89130, 89133; ramp: 89133) are real balance falls and reproduce identically. Twenty-second holds, 120 other fresh starts: lift 102, ramp 113, brake 118 of 120 (one NaN event each in the lift and brake runs, none in the ramp's; the lift's, a trunk tendon at 2.12 s, would officially have counted as a fall).
+The other failures (lift: 89110, 89115, 89117, 89130, 89133; ramp: 89133) are real balance falls and reproduce identically. A supplementary scan of the brake at 310 s on 69 fresh starts (seeds 96000-96038, 96060-96089): 68 / 69 hold 300 s guarded (the one fall is a real early one), and 15 NaN events in 6 of the starts, all `recfem_r_tendon` and all survived (first events at 14.3, 25.1, 31.4, 50.2, 191.1 and 282.7 s: each would have ended that hold in the official environment, 62 / 69 there); pooled with the 40 starts above, 108 / 109 guarded against 97 / 109 official. Over both sets, 284 states of that muscle fell into the sliver (263 survived, 21 NaN) where the exact-1-dot table predicts 22.1 NaN. Twenty-second holds, 120 other fresh starts: lift 102, ramp 113, brake 118 of 120 (one NaN event each in the lift and brake runs, none in the ramp's; the lift's, a trunk tendon at 2.12 s, would officially have counted as a fall).
 
 ### Side note
 

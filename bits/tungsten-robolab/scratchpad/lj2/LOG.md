@@ -187,3 +187,28 @@ Greedy swing-foot lag feedback (greedyfb --channels kf on the a4 captures, 94 tr
 The harness-invalid class (8 of 125 a4 captures): no cheap detector: swing toe height at the penultimate touchdown does not separate them; 5 of 8 are 'late stride phase' states (COM 0.905-0.926 m vs 0.985, trunk +0.07..+0.19 rad, swing foot 0.52-0.62 m behind the COM), 3 are far gaps (2.16-2.27).
 One-start landing: hand-overs of the nom1 take-off program (nominal + 4 execution-noise variants, D_board 4.79-4.89, vz 2.95-3.13; out/long_jump_limits/hogp_handover.npz), the recorded chunk landing (sand 0.716 s after the hand-over; official 5.065, the HEAD marks, the jumper falls back) as the base;
  scratchpad/lj2/land_gp1.sh: landing search, tg 0.73, nk 34, h 0.08, 4 workers (5-min load 24), 25k sims -> out/long_jump_limits/land_gp1.txt.
+
+## 2026-09-29 13:25 ARENA: long_jump_v4_p95 (one start) 5.065 -> 5.166 m (promoted)
+
+params/long_jump_v4_gear_nom2.txt = params/long_jump_v4_gear_nom1.txt + out/long_jump_limits/land_gp1.txt (landing search land_gp1.sh: 180 generations / 24.3k sims, harness marks 5.00-5.15 over the nominal hand-over + 4 variants), controller long_jump_run-c3.
+Official 5.166 m (effective 5.363 from the foot, ballistic 5.049), take-off vx 6.177 vz 3.030, foot 0.197 m behind the line. The chunk landing's 5.065 was a HEAD mark (fell back); the table lands 0.117 m beyond the ballistic point.
+A check-mark scan (j_board_shift + 0.05 / 0.10 / 0.15: the aim closer to the line) breaks the run: the one-start program has no gap knots and is tuned to the nominal pen state; the moved aim changes that state (somersaults). Not used.
+
+## 2026-09-29 13:45 runner at 30-45 m check marks (approach only, 17 starts None + 401-416, 0 falls in every cell; scratchpad/lj2/runner_table.sh, controller c3)
+
+last-5-m speed v5 (m/s):  check mark | RunRI p2a (round 2) | two-gear, switch 6.5 (as frozen) | two-gear, switch 5.0
+  30 m: 6.02 | 6.02 | 6.22
+  35 m: 6.28 | 6.28 | 6.48
+  40 m: 6.47 | 6.47 | 6.69
+  44 m: 6.59 | 6.62 | 6.83
+  45 m: 6.62 | 6.67 | 6.86
+(the gear switch at 6.5 m/s comes at ~40 m, so the frozen two-gear runner equals RunRI up to 40 m.) Stride phase at the board: uniform over one step (1.6 m) across starts; the steered penultimate gap has sd 0.13-0.17 m (see 06:50 and 10:05).
+What-ifs so far (ideal-control, nominal A2_m495 state, 60k evals, init lean_m495_ideal, foot-based D, lmax -1.5): base 5.033 (vx 6.56, vz 2.70) | whole body +0.4 m/s at the penultimate touchdown: 5.222 (vx 6.42, vz 3.09) | +0.8 m/s: 5.517 (vx 6.67, vz 3.18):
+ ~0.5-0.6 m of ballistic distance per m/s (L's fit: 0.88 x t_air ~ 0.7). The first strength what-if did nothing (the v4 jump tasks' `strength` is 1.0 and ROBOLAB_LJ_STRENGTH does not reach them): replaced by ROBOLAB_LJ_FSCALE (peak isometric force of every muscle), whatif2.sh.
+
+## 2026-09-29 13:55 landing stage 2 (all 117 hand-overs); strength what-ifs; 16-start with the check-mark shift
+
+Landing stage 2 (land_a4b.sh, 4 workers while the 5-min load was < 30; stopped at generation 30 when the load rose to 51/37): x0 (the gen-60 table on all 117 hand-overs of the 125 a4 captures, both sides) mean 4.314, min -4.62, 3-4 of 117 rolling over;
+ after 30 generations best 3.597 -> 3.621, mean 4.463 -> 4.479 (snapshot scratchpad/lj2/land_a4b_g30.txt). The landing of the gen-60 table already generalised (only 3 of 117 hand-overs roll over): the somersaults of the full rollouts (6-7 %) are mostly not the landing table's.
+Strength what-ifs (ROBOLAB_LJ_FSCALE, muscle peak force x1.2 / x1.4, nominal A2_m495 state, 60k evals from the same init): D 5.427 (vz 3.31) / 5.910 (vz 3.57, vx 6.57) against 5.033: +0.39 m per +20 % force, +0.88 m per +40 %.
+16 arena starts with the shifted check mark (a4_l60 + j_board_shift 1.08 / ik_gap0 1.876777, chosen on the unused seeds 7001-7096): 12 of 16 legal, mean 3.375 (legal mean 4.50; fell-in-run 404, somersault 407 and 416, foul 409 by 27 mm); the champion is 2.1452.

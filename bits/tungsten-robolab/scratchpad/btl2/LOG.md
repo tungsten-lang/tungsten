@@ -193,3 +193,27 @@ the same as `oracle_multi.py --lead 32`.
   Per start (chain.py 1101-1133, 15 s, log runs/chain_pgLR_b_fresh32.log): streaks [3,3, 2 x16, 1 x10, 0 x4] (mean 1.50, >=2 on 18, >=3 on 2); pass 1 28/32 ok, pass 2 18/29 (62%),
   pass 3 2/21 (10%: 19 x bounces_or_wrong_hand, rise apex 0.55), pass 4 0/2. The right hand's return stage (pass 3) is the weak link of pgLR_b: it was fitted to the wrong arrivals.
 - gs_left_c gen 29: full-set J 1.81 good 26/60, validation J 1.24 good 11/19.
+- gs_left_c stopped at gen 139 (13:03): best mean-vector J 0.900 (gen 109; saved as runs/gs_left_c_g109.npz), full-set good 27-31/60, validation J 0.78 good 8/19. `diag_gs.py` (per-start replay diagnosis of a gs stage):
+  of the 60 starts, 8 are HARD failures (gate/body/apex: the incoming ball arrives at y > 0.47, u_y > +1.5 sigma, out of the left hand's reach: it releases the ball toward -x) and 32 are 'arrival' misses
+  (gate crossed, apex >= 0.6, the ball reaches the right hand 5-15 cm off the target); 70% of the J sum is the 8 hard failures. So the launch's arrival spread at the left hand is the tail problem.
+- REPLAY vs CLOSED LOOP for the launch stage (`check_m1.py`, `act_check.py`, `dbg_pg.py`): same trigger tick (307, t 1.535), same features u (to 1e-3), the arm muscles get EXACTLY the table (max 2e-5), yet the closed loop's ball arrives at the
+  left hand (x, y) = (-0.090, 0.382) +- (0.040, 0.046) vs the replay's (-0.133, 0.361) +- (0.027, 0.034) (mean diff (+0.042, +0.021), per start up to (+0.085, +0.07), largest for u_y > +1, where the closed-loop release velocity
+  differs by (+0.25, +0.13) m/s, vz identical). The cause is not the arm: it is the REST of the body, which replays A4's recorded activations while in the closed loop the trunk/legs/other arm react to the new stroke.
+  Fix = closed-loop iterative refit (ILC over the fit): record the chain WITH THE STAGE'S OWN PROGRAM in the loop, refit from it (the replay then reproduces the closed loop for the current program), repeat.
+  Every stage so far was fitted on records that contain the EARLIER stages but not its own program.
+- gs_pass0_b (started 13:05, 2 workers, 5-min load 31): stage -1 ILC iteration 1: `oracle_gs.py --seeds 801..880 --val 881..900 --params scratchpad/btl2/params/pgP0.txt --ctl bin/challengers/btl2-b11 --hand r --muscles right_arm --bounce-no 1 --t-lo 1.35 --t-hi 1.75 --t-end 2.5
+  --init scratchpad/btl2/runs/gs_pass0_g10.npz --gens 80 --pop 48 --batch 12 --sigma 0.02 --gsigma 0.02 --gmax 1.0 --ujit 0.10 --pos-dz 0.02 --vel-dz 0.12 --target=-0.13,0.34 --vt=-1.5,1.45 --no-pre --cache scratchpad/btl2/runs/rec_m1v2 --out scratchpad/btl2/runs/gs_pass0_b.npz`
+- Stage -1 ILC (13:1x-13:25; `oracle_gs.py` with the stage's own program in the loop, records rec_m1v2 / rec_m1v3, init renormalised when the feature nominal/spread differ (`--no-renorm` to disable)):
+  iteration 1 (gs_pass0_b, 80 gens, 4 workers): replay-with-its-own-program-in-the-loop J 0.234 -> 0.037 (validation 0.058, good 80/80 and 20/20); saved gs_pass0_b_g79.npz, params pgP0b.txt.
+  Iteration 2's records (pgP0b in the loop) start at J 0.057 (so the replay now predicts the closed loop: 0.037 vs 0.057; before ILC 0.161 vs 0.234).
+  Closed-loop ARRIVAL at the left hand (pass_log arrive_xy, 87-90 starts): before (pgP0) mean (-0.103, 0.387) sd (0.039, 0.042), y 0.29..0.505; after ILC-1 (pgP0b) mean (-0.167, 0.348) sd (0.030, 0.026), y 0.29..0.43
+  (no more arrivals at y > 0.43: the hard-failure tail of the left stage is gone); arrival velocity at z 0.62 (-1.56, +1.48, +1.59) sd (0.14, 0.09, 0.26) m/s. Iteration 2 stopped at gen 0 (load).
+  => stage 1 (the right return) gets the target (-0.165, 0.349) / vt (-1.56, 1.48): its output must look like the launch's so the 2-cycle closes.
+- gs_left_d (started 13:25, 2 workers): stage 0 ILC-1: `oracle_gs.py --params scratchpad/btl2/params/pgP0Lb.txt (A4 + gs_pass0_b g79 + gs_left_c g109) --ctl bin/challengers/btl2-b11 --hand l --muscles left_arm --bounce-no 2 --t-lo 1.70
+  --t-hi 2.40 --t-end 3.0 --require 1 --init scratchpad/btl2/runs/gs_left_c_g109.npz --gens 120 --pop 48 --batch 12 --sigma 0.03 --gsigma 0.03 --gmax 1.0 --ujit 0.10 --pos-dz 0.03 --vel-dz 0.15 --target=0.45,-0.25 --vt=1.5,-1.5
+  --cache scratchpad/btl2/runs/rec_s0v3 --out scratchpad/btl2/runs/gs_left_d.npz`
+- Stage 0 fit gs_left_d/e on the ILC-1 launch (arrival mean (-0.166, 0.35) sd (0.029, 0.030)) stopped at gen ~30 (J 5.46 -> 2.54, good 15/79): the old left program (fitted for arrivals at x -0.11) does not carry over to x -0.17 (the edge of the left hand's reach);
+  so stage -1 ILC-2 moves the launch's arrival toward the left hand's comfortable spot: target (-0.09, 0.35) / vt (-1.5, 1.45) (gs_pass0_c, 4 workers, 80 gens, records rec_m1v3): replay J 0.113 -> 0.030 (validation 0.048, good 80/80, 20/20);
+  saved gs_pass0_c_g79.npz, params pgP0c.txt (A4 + stage -1) and pgP0Lc.txt (+ gs_left_c g109 as stage 0).
+- gs_left_f (started 13:38, 4 workers, 5-min load 25): stage 0 on records with the ILC-2 launch and the stage's own (old) program in the loop (rec_s0v4), init gs_left_c_g109 (renormalised): same command as gs_left_c otherwise,
+  --params scratchpad/btl2/params/pgP0Lc.txt --init scratchpad/btl2/runs/gs_left_c_g109.npz --out scratchpad/btl2/runs/gs_left_f.npz.

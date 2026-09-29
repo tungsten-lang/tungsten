@@ -10,6 +10,11 @@ Rows form chains (`parent` is the parent row's SHA-256). What is checked, by row
                  --source NAME=CLONE the recipe is replayed over GF(2) (mmc_gf2_replay) and must
                  give the same bytes when the row is marked rederivable
   closure        block-sum/Kronecker recipe with consistent rank arithmetic
+  retained       a tensor already kept in a committed certificate; with --repo-root ROOT the
+                 recorded repo-relative file must decode to the same tensor
+  archived       a certificate recovered from git history (repository, revision, path,
+                 source_sha256); with --source NAME=CLONE it is re-read at that revision and
+                 must decode to the same tensor
   basis          two-pass basis rewrite of the parent reproduces the row
   projection     basis rewrite (optional), coordinate deletion and shared-factor compression of
                  the parent reproduce the row
@@ -36,13 +41,17 @@ if not __debug__:
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import gf2_record_board as grb  # noqa: E402
 import screen_top_two_projection_children as top  # noqa: E402
 from screen_two_pass_basis_children import two_pass  # noqa: E402
 from search_wide_projection_walks import verify_file  # noqa: E402
 from screen_public_ternary_gf2 import reduce_mod2  # noqa: E402
 
 PROVENANCE = {"public-mod2": ("repository", "revision", "path", "source_sha256", "source_rank"),
-              "recipe-replay": ("repository", "revision", "file", "lineage")}
+              "recipe-replay": ("repository", "revision", "file", "lineage"),
+              "retained": ("path",),
+              "archived": ("repository", "revision", "path", "source_sha256")}
+SEED_KINDS = ("public-mod2", "recipe-replay", "closure", "retained", "archived")
 
 
 def decode(bundle, name):
@@ -87,6 +96,7 @@ def main(argv=None):
     parser.add_argument("--replay-walk", help="compiled tools/wide_rect_walk.w")
     parser.add_argument("--source", action="append", default=[], help="NAME=CLONE for re-derivation")
     parser.add_argument("--cache-dir", default="mmc-cache", help="matmulcatalog replay cache")
+    parser.add_argument("--repo-root", type=Path, help="checkout root for `retained` rows")
     parser.add_argument("--no-ruby", action="store_true", help="skip the independent Ruby check")
     args = parser.parse_args(argv)
     sources = dict(item.split("=", 1) for item in args.source)
@@ -109,8 +119,26 @@ def main(argv=None):
         for key in PROVENANCE.get(kind, ()):
             assert details.get(key) not in (None, ""), f"{row['file']}: missing provenance {key}"
         checked = kind
-        if kind in ("public-mod2", "recipe-replay"):
-            assert row["parent"] is None
+        assert (row["parent"] is None) == (kind in SEED_KINDS), f"{row['file']}: parent link disagrees with kind"
+        if kind in ("retained", "archived"):
+            if kind == "retained" and args.repo_root is None:
+                notes.append(f"{row['file']}: not checked against the committed certificate (no --repo-root)")
+            elif kind == "retained":
+                kept = args.repo_root / details["path"]
+                kept_shape, kept_terms = grb.decode(kept, grb.load(kept))
+                assert top.blob(kept_shape, kept_terms) == raw, f"retained tensor differs: {details['path']}"
+                checked += "+matched"
+            else:
+                clone = find_source(sources, details)
+                if clone is None:
+                    notes.append(f"{row['file']}: not re-read from history (no --source for {details['repository']})")
+                else:
+                    original = upstream_file(clone, details)
+                    assert hashlib.sha256(original).hexdigest() == details["source_sha256"]
+                    old_shape, old_terms = grb.decode(Path(details["path"]), original)
+                    assert top.blob(old_shape, old_terms) == raw, f"archived tensor differs: {details['path']}"
+                    checked += "+rederived"
+        elif kind in ("public-mod2", "recipe-replay"):
             clone = find_source(sources, details)
             if clone is None:
                 notes.append(f"{row['file']}: not re-derived (no --source for {details['repository']})")
@@ -130,7 +158,7 @@ def main(argv=None):
             else:
                 notes.append(f"{row['file']}: recipe-replay seed is an equal-rank variant; not re-derived")
         elif kind == "closure":
-            assert row["parent"] is None and recipe_rank(details["recipe"]) == row["rank"]
+            assert recipe_rank(details["recipe"]) == row["rank"]
         else:
             parent_shape, parent_terms, parent_raw = states[row["parent"]]
             if kind == "basis":

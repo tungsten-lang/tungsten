@@ -26,7 +26,7 @@ sys.path.insert(0, str(HERE))
 import gf2_record_board as grb  # noqa: E402
 import screen_top_two_projection_children as top  # noqa: E402
 
-SEED_KINDS = ("public-mod2", "recipe-replay", "closure")
+SEED_KINDS = ("public-mod2", "recipe-replay", "closure", "retained", "archived")
 
 
 def build(spec, out):

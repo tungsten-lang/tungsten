@@ -7,6 +7,7 @@ import hashlib
 import json
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 import tempfile
 
@@ -138,4 +139,54 @@ with tempfile.TemporaryDirectory() as tmp:
         rows_[0]["kind"] = "public-mod2"
         rows_[0]["details"] = dict(repository="https://example.org/x")
     rejects(missing_provenance, "provenance")
-print("PASS verify_gf2_lineage: closure, basis, projection, walk rows; tampering rejected")
+
+# `retained` (a committed certificate) and `archived` (re-read from git history) seed rows.
+REPO = SEED.parents[3]
+with tempfile.TemporaryDirectory() as tmp:
+    shape, seed_terms = grb.decode(SEED, grb.load(SEED))
+    base = sorted(seed_terms)
+    kept = Path(tmp) / "retained"
+    kept.mkdir()
+    rows = []
+    add_row(kept, rows, base, shape, "retained", None, dict(path=str(SEED.relative_to(REPO))))
+    write_manifest(kept, rows)
+    assert V.main([str(kept), "--no-ruby", "--repo-root", str(REPO)]) == 0
+    other = SEED.with_name("matmul_3x3x4_rank29_gf2.txt")   # a different rank-29 tensor of the same shape
+    assert other.exists() and other != SEED
+    bad = json.loads((kept / "manifest.json").read_text())
+    bad["rows"][0]["details"]["path"] = str(other.relative_to(REPO))
+    (kept / "manifest.json").write_text(json.dumps(bad))
+    try:
+        V.main([str(kept), "--no-ruby", "--repo-root", str(REPO)])
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("retained mismatch accepted")
+
+    history = Path(tmp) / "history"
+    (history / "benchmarks").mkdir(parents=True)
+    old_name = "benchmarks/matmul_3x3x4_rank29_archive_gf2.txt"
+    (history / old_name).write_bytes(SEED.read_bytes())
+    git = ["git", "-C", str(history), "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run(git[:3] + ["init", "-q"], check=True)
+    subprocess.run(git + ["add", "-f", "."], check=True)
+    subprocess.run(git + ["commit", "-qm", "certificate"], check=True)
+    revision = subprocess.check_output(git + ["rev-parse", "HEAD"], text=True).strip()
+    details = dict(repository="https://example.org/tungsten-history", revision=revision, path=old_name,
+                   source_sha256=hashlib.sha256(SEED.read_bytes()).hexdigest())
+    archived = Path(tmp) / "archived"
+    archived.mkdir()
+    rows = []
+    add_row(archived, rows, base, shape, "archived", None, details)
+    write_manifest(archived, rows)
+    assert V.main([str(archived), "--no-ruby", "--source", f"tungsten-history={history}"]) == 0
+    bad = json.loads((archived / "manifest.json").read_text())
+    bad["rows"][0]["details"]["source_sha256"] = "0" * 64
+    (archived / "manifest.json").write_text(json.dumps(bad))
+    try:
+        V.main([str(archived), "--no-ruby", "--source", f"tungsten-history={history}"])
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("archived digest mismatch accepted")
+print("PASS verify_gf2_lineage: closure, basis, projection, walk, retained, archived rows; tampering rejected")

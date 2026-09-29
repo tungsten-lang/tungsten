@@ -1,0 +1,171 @@
+group    kind       impl            same%  ulp/ctl   ulp/ex      nrm/ex
+inv4     well       copy*           100.0        0       59        1.85
+inv4     well       core            100.0        0       59        1.85
+inv4     well       base            100.0        0       59        1.85
+inv4     well       recip            75.7        1       58           2
+inv4     well       nn              100.0        0       59        1.85
+inv4     well       fast             75.7        1       58           2
+inv4     well       into_inplace     75.7        1       58           2
+inv4     well       into_nn_inplace  100.0        0       59        1.85
+inv4     near-sing  copy*           100.0        05405132934    2.88e+09
+inv4     near-sing  core            100.0        05405132934    2.88e+09
+inv4     near-sing  base            100.0        05405132934    2.88e+09
+inv4     near-sing  recip            70.8        15405132933    2.88e+09
+inv4     near-sing  nn              100.0        05405132934    2.88e+09
+inv4     near-sing  fast             70.8        15405132933    2.88e+09
+inv4     near-sing  into_inplace     70.8        15405132933    2.88e+09
+inv4     near-sing  into_nn_inplace  100.0        05405132934    2.88e+09
+inv4     affine     copy*           100.0        0       55        1.76
+inv4     affine     core            100.0        0       55        1.76
+inv4     affine     base            100.0        0       55        1.76
+inv4     affine     recip            81.8        1       55        1.66
+inv4     affine     nn              100.0        0       55        1.76
+inv4     affine     fast             81.8        1       55        1.66
+inv4     affine     into_inplace     81.8        1       55        1.66
+inv4     affine     into_nn_inplace  100.0        0       55        1.76
+inv4     affine     copy*           100.0        0       55        1.76
+inv4     affine     affine           53.8      182      222        1.68
+mul4     well       copy*           100.0        0      113         1.1
+mul4     well       core            100.0        0      113         1.1
+mul4     well       base            100.0        0      113         1.1
+mul4     well       fast            100.0        0      113         1.1
+mul4     well       into_copy       100.0        0      113         1.1
+mul4     well       into_fast       100.0        0      113         1.1
+mul4     well       into_alias_a    100.0        0      113         1.1
+mul4     well       into_alias_b    100.0        0      113         1.1
+mul4     near-sing  copy*           100.0        0       58       0.914
+mul4     near-sing  core            100.0        0       58       0.914
+mul4     near-sing  base            100.0        0       58       0.914
+mul4     near-sing  fast            100.0        0       58       0.914
+mul4     near-sing  into_copy       100.0        0       58       0.914
+mul4     near-sing  into_fast       100.0        0       58       0.914
+mul4     near-sing  into_alias_a    100.0        0       58       0.914
+mul4     near-sing  into_alias_b    100.0        0       58       0.914
+mul4     affine     copy*           100.0        0     3923       0.477
+mul4     affine     core            100.0        0     3923       0.477
+mul4     affine     base            100.0        0     3923       0.477
+mul4     affine     fast            100.0        0     3923       0.477
+mul4     affine     into_copy       100.0        0     3923       0.477
+mul4     affine     into_fast       100.0        0     3923       0.477
+mul4     affine     into_alias_a    100.0        0     3923       0.477
+mul4     affine     into_alias_b    100.0        0     3923       0.477
+mv4      well       copy*           100.0        0       13       0.991
+mv4      well       core            100.0        0       13       0.991
+mv4      well       fast             73.8        8       11       0.991
+mv4      well       into             73.8        8       11       0.991
+mv4      near-sing  copy*           100.0        0      377        2.09
+mv4      near-sing  core            100.0        0      377        2.09
+mv4      near-sing  fast             65.0      165      212         1.3
+mv4      near-sing  into             65.0      165      212         1.3
+mv4      affine     copy*           100.0        0       28       0.959
+mv4      affine     core            100.0        0       28       0.959
+mv4      affine     fast             77.0        8       29       0.873
+mv4      affine     into             77.0        8       29       0.873
+tp       well       user*           100.0        0      262        5.48
+tp       well       plain           100.0        0      262        5.48
+tp       well       fast             82.7      134      128        5.48
+tp       near-sing  user*           100.0        0       41        6.25
+tp       near-sing  plain           100.0        0       41        6.25
+tp       near-sing  fast             71.0       41       14        6.25
+tp       affine     user*           100.0        0       17       0.711
+tp       affine     plain           100.0        0       17       0.711
+tp       affine     fast             93.3        4       17       0.711
+td       well       user*           100.0        0       14       0.995
+td       well       fast             82.7        4       12       0.995
+td       near-sing  user*           100.0        0       61        1.12
+td       near-sing  fast             78.0       50       14        1.02
+td       affine     user*           100.0        0      114       0.916
+td       affine     fast             81.3       37       77       0.916
+tr4      well       copy*           100.0        0        0           0
+tr4      well       into_inplace    100.0        0        0           0
+tr4      near-sing  copy*           100.0        0        0           0
+tr4      near-sing  into_inplace    100.0        0        0           0
+tr4      affine     copy*           100.0        0        0           0
+tr4      affine     into_inplace    100.0        0        0           0
+inv3     well       copy*           100.0        0       50        1.69
+inv3     well       core            100.0        0       50        1.69
+inv3     well       base            100.0        0       50        1.69
+inv3     well       recip            73.3        1       50        1.69
+inv3     well       nn              100.0        0       50        1.69
+inv3     well       fast             73.3        1       50        1.69
+inv3     well       into_inplace     73.3        1       50        1.69
+inv3     well       into_nn_inplace  100.0        0       50        1.69
+inv3     near-sing  copy*           100.0        031008774115     2.1e+10
+inv3     near-sing  core            100.0        031008774115     2.1e+10
+inv3     near-sing  base            100.0        031008774115     2.1e+10
+inv3     near-sing  recip            76.7        131008774115     2.1e+10
+inv3     near-sing  nn              100.0        031008774115     2.1e+10
+inv3     near-sing  fast             76.7        131008774115     2.1e+10
+inv3     near-sing  into_inplace     76.7        131008774115     2.1e+10
+inv3     near-sing  into_nn_inplace  100.0        031008774115     2.1e+10
+inv3     affine     copy*           100.0        0      271        1.21
+inv3     affine     core            100.0        0      271        1.21
+inv3     affine     base            100.0        0      271        1.21
+inv3     affine     recip            80.2        1      271        1.26
+inv3     affine     nn               95.4        0      271        1.21
+inv3     affine     fast             75.7        1      271        1.26
+inv3     affine     into_inplace     75.7        1      271        1.26
+inv3     affine     into_nn_inplace   95.4        0      271        1.21
+mul3     well       copy*           100.0        0      654        1.01
+mul3     well       core            100.0        0      654        1.01
+mul3     well       fast            100.0        0      654        1.01
+mul3     well       into_copy       100.0        0      654        1.01
+mul3     well       into_alias_a    100.0        0      654        1.01
+mul3     well       into_alias_b    100.0        0      654        1.01
+mul3     near-sing  copy*           100.0        0       74        1.19
+mul3     near-sing  core            100.0        0       74        1.19
+mul3     near-sing  fast            100.0        0       74        1.19
+mul3     near-sing  into_copy       100.0        0       74        1.19
+mul3     near-sing  into_alias_a    100.0        0       74        1.19
+mul3     near-sing  into_alias_b    100.0        0       74        1.19
+mul3     affine     copy*           100.0        0       59       0.484
+mul3     affine     core            100.0        0       59       0.484
+mul3     affine     fast            100.0        0       59       0.484
+mul3     affine     into_copy       100.0        0       59       0.484
+mul3     affine     into_alias_a    100.0        0       59       0.484
+mul3     affine     into_alias_b    100.0        0       59       0.484
+det3     well       copy*           100.0        0        2        1.14
+det3     well       core            100.0        0        2        1.14
+det3     well       fast            100.0        0        2        1.14
+det3     near-sing  copy*           100.0        028345019978     2.1e+10
+det3     near-sing  core            100.0        028345019978     2.1e+10
+det3     near-sing  fast            100.0        028345019978     2.1e+10
+det3     affine     copy*           100.0        0        1         0.8
+det3     affine     core            100.0        0        1         0.8
+det3     affine     fast            100.0        0        1         0.8
+mv3      well       copy*           100.0        0       26       0.768
+mv3      well       core            100.0        0       26       0.768
+mv3      well       fast             83.7        8       18       0.744
+mv3      well       into             83.7        8       18       0.744
+mv3      near-sing  copy*           100.0        0       25        4.27
+mv3      near-sing  core            100.0        0       25        4.27
+mv3      near-sing  fast             74.7       45       70        2.13
+mv3      near-sing  into             74.7       45       70        2.13
+mv3      affine     copy*           100.0        0      470         1.1
+mv3      affine     core            100.0        0      470         1.1
+mv3      affine     fast             78.0       95      375        1.26
+mv3      affine     into             78.0       95      375        1.26
+inv2     well       copy*           100.0        0        2         1.1
+inv2     well       core            100.0        0        2         1.1
+inv2     well       base            100.0        0        2         1.1
+inv2     well       recip            70.0        1        2        1.24
+inv2     well       nn              100.0        0        2         1.1
+inv2     well       fast             70.0        1        2        1.24
+inv2     near-sing  copy*           100.0        04075776572    2.15e+09
+inv2     near-sing  core            100.0        04075776572    2.15e+09
+inv2     near-sing  base            100.0        04075776572    2.15e+09
+inv2     near-sing  recip            70.8        14075776571    2.15e+09
+inv2     near-sing  nn              100.0        04075776572    2.15e+09
+inv2     near-sing  fast             70.8        14075776571    2.15e+09
+inv2     affine     copy*           100.0        0        2       0.894
+inv2     affine     core            100.0        0        2       0.894
+inv2     affine     base            100.0        0        2       0.894
+inv2     affine     recip            74.8        1        2        1.08
+inv2     affine     nn              100.0        0        2       0.894
+inv2     affine     fast             74.8        1        2        1.08
+compose  q-nonunit  user*           100.0        0     1508         1.1
+compose  q-nonunit  fast             66.7     3229     1961        1.22
+compose  q-nonunit  fast_metal       66.7     3229     1961        1.22
+compose  q-unit     user*           100.0        0     1710        1.07
+compose  q-unit     fast             76.8      882      828       0.751
+compose  q-unit     fast_metal       76.8      882      828       0.751

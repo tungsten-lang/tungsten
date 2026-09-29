@@ -108,3 +108,12 @@ All campaign state lives in the repo (scratchpad/sprint_knot/, out/, params/). N
   as a standing-start two-gear controller (gear 1 p2b, switch 6.5 m/s; gear_p95_b.txt): 6/6 survive 30 s, peak 7.61 steady 7.56 (+0.6 m/s over p2b);
   on 40 unseen seeds 8/40 fall (18-28 s), survivors mean peak 7.601 (min 7.523). Hazard 20 % (p2b: 12.5 %). g2p = gear-2 ES on a 16-seed flying cascade to bring the hazard down.
   N-GEAR generalisation built: `gears N`, twins g2_X..gN_X (default previous gear), gN_v_on; verified identical to the 2-gear runs and (g3 = g2) identical to 2 gears.
+- 05:40 (clock) g2p (gear-2 ES on 16 flying seeds x 24 s, sigma 0.02, ES with combination + extrapolation) found in generation 1 a gear 2 that survives all 16 (peak 7.45): as a standing-start
+  two-gear controller (gear_p95_c.txt = params/run_gear_v4_p95_c.txt, switch 6.5): 40 unseen seeds: 2 falls (5 %), mean peak 7.449 (min 7.408): hazard 20 % (g1p, 4 seeds) -> 5 % (16 seeds).
+  ARENA sprint_top_speed_v4_p95: two-gear p95_c PROMOTED: 7.449 +- 0.013 on 12/12 (no falls), p 0.000 vs p2b. 71.3 % of the P95 ceiling.
+- 05:50 (clock) gear 3 for P95: snapshots of the two-gear champion at 7.3-7.45 m/s (playground/cache/sprint_touch_run_v4_p95g.npz, 13); RunGear got `gear0 K` (a flying start begins in gear K's stride;
+  bin/challengers/run_gear-v4c); g3p = ES over the g3_ twins (default = gear 2), 12-seed flying cascade x 24 s, from gear_p95_fly3. Baseline (gear-2 values as gear 3) falls 2/6 in flying practice
+  (the flying entry is harsher than the standing-start validation: 5 % in 30 s). g2e (elite2 gear 2, 8 seeds) is running.
+- 05:47 (clock) g2e (elite2 gear 2, 8 flying seeds x 24 s): best 283.5-286.8 (first seed peak 6.62 steady 6.52); as a standing-start two-gear controller (gear_e2_b.txt, switch 6.0):
+  40 unseen seeds: 2 falls (5 %), mean peak 6.614 (min 6.546). ARENA sprint_top_speed_v4_elite2: two-gear PROMOTED: 6.61 on 11/12 (fall on 231), p 0.001. 71.3 % of the elite2 ceiling.
+  g2a = avg gear-2 cascade (12 flying seeds x 24 s from a2v twins) started; g3p (P95 gear 3) running.

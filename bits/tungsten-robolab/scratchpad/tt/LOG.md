@@ -203,3 +203,37 @@ plan is ~45 %, it plays 30-33 %. 90 % needs pitch <= 4 deg, pad velocity <= 0.25
 - Bit-identity check (job chk_r10i, `TT_ENV=P2 .venv-myo/bin/python playground/tt_eval.py --params params/myo_tt_p2_r5_bhprac.txt --controller bin/challengers/myo_tt_r10-i --seeds 710000:710060 --out out/tt_r10/chk_r10i.jsonl --workers 3`, all v11 options off):
   60/60 episodes identical to the champion's baseline rows on every metric except the diagnostics added after the baseline (`pelvis_vel`, `l8`, `pv`, `feat`).
 - v_ysw00 (champion binary, `--set y_switch=0.0`, seeds 710000:710300): 86/300 vs champion 84/300 (diff +0.007 +- 0.007, p 0.31; 4 flips): the side boundary between 0.0 and 0.1 is flat.
+
+## 05:35 Servo bounce-tick artifact (found from the every-third-tick aim log), bk option
+
+- The aim log (`aim:` rows every third tick) shows, in 50 of 150 champion serves, one row at the tick of the table bounce with the servo's height error eh = -0.3 .. -1.6 m
+  and the aim normal's z = -0.45 .. -0.75 (neighbours: eh -0.1, nz -0.1). Cause: on the tick the table-contact flag is first set the ball's velocity is mid-reversal (vz -3.24 / +1.38 / -2.78
+  m/s in three serves: the bounce's sub-tick timing), `before` sets `@bounced` first and then predicts the plane crossing from that velocity as a post-bounce state
+  (MyoTTBall.intercept with bounced = true), so the plan's crossing height and vz for ONE tick are off by 0.3-1.6 m; the servo (an integrator on eh and the normal) and the
+  height matching's at_height (pelvis goal to the ball's own x) both consume it. Present in every serve (1/3 of serves show it at the sampled tick).
+- Fix (`bk 1`, v11): on that tick the plan and the height matching's ball are the previous tick's state carried through the model's bounce (e 0.99), less one tick.
+  The parent got two hooks (`plan_ball(p, v, f)`, `height_ball(p, v, zt)`; default = the old expressions; r10-j with bk 0 replays the champion on 40/40 serves: chk_r10j) and `bh_p_z`
+  (backhand proportional height gain; default 0 = the old hard-coded 0; r10-k).
+- r10-j `bk=1`, champion params, first 120 serves of each side pool (pools_740000.json):
+  forehand 50/120 vs champion 54 (p 0.81; hit 0.900 -> 0.958, pad-below-ball misses 11 -> 4, ball-minus-pad z at contact +4.2 -> +1.8 cm, pad velocity along the normal +0.46 -> +0.27, exit speed 5.18 -> 5.42);
+  backhand 34/120 vs champion 31 (p 0.32; hit 0.767 -> 0.808, pad velocity along the normal -0.16 -> -0.48 +- 0.35 (was +-0.46), exit speed 6.05 -> 6.36).
+  So the guard raises the hit rate 4-6 points on both sides and the extra hits land out: the artifact had been giving the pelvis an accidental retreat (0.2-0.3 m/s) that slowed the returns;
+  the champion's calibration (z_bias, retreat, aim) was practised around it.
+- Also measured: a linear map of the serve's launch state (crossing t, y, z, vx, vy, vz at x = 1.8) predicts the forehand's face-pitch error to the aim to R2 0.76 (CV; residual 4.9 of 9.9 deg;
+  0.90 with the contact time), the backhand's only 0.37 (residual 8.5 of 10.7 deg); the ball-pad height offset at contact is unpredictable on the forehand (R2 0.05; sd 5.4 cm), 0.26-0.46 on the backhand.
+  (an50/an51/an52 in scratchpad/tt.)
+- rsm_run1.sh (pid 34741) killed while it only waited; the RSM is redone on the bk regime (r10-k).
+
+## 06:15 Live tracking (round 9 `lt`) re-examined with the fast harness, and set aside
+
+- r10-j (bk 0) with the round-9 live-tracking params (`params/myo_tt_p2_r9_lt_fh.txt` / `_lt_bh.txt`), first 120 serves of each side pool (jobs lt_fh120 / lt_bh120):
+  forehand 5/120 solved, hit 0.358: the face FOLLOWS the aim (pitch error to the aim -0.2 +- 2.8 deg against the champion's -2.4 +- 9.8) but the pad is 20-40 cm too high all the way in
+  (servo error eh -0.25..-0.45 m from t 0.31 s: ready pad z 1.358 +- 0.029 against a ball crossing at 1.21) and 86 % of the misses are "pad above the ball"; backhand 12/120, hit 0.642
+  (pitch error +3.5 +- 7.9 against +5.8 +- 11.8).
+- z_bias -0.14 / -0.18 / -0.22 on that forehand: hit 0.375 / 0.425 / 0.442, solved 4 / 6 / 9 of 120. Servo gain probes (z_bias -0.05): k_z 12: 10/120 (hit 0.44); k_z 20: 1/120 (hit 0.47, pad-below 23);
+  t_servo 0.15 with k_z 12 / 20: hit 0.50 / 0.59 but 2 / 1 solved: the fast servo moves the pad at contact (pad velocity along the normal -0.3 +- 0.9..1.0 m/s, exit speed sd 1.8).
+- LS posture identification in the lt regime (id3_*: +0.1 rad on each of the 7 forehand posture parameters, 60 serves each, ready pose at t = 0.25 s; per +0.1 rad pitch / yaw deg, pad z m):
+  elv -1.5/-1.1/0.000, sh_elv -0.3/0.0/0.018, sh_rot 2.6/4.3/-0.003, elbow -3.9/1.2/0.027, pro_sup 1.3/0.1/0.001, dev -5.6/3.3/0.011, wflex -1.7/4.3/0.002.
+  One LS step to (pitch -4.5, yaw 15.3, z 1.21) (lt1: sh_elv 0.70 -> 0.43, elbow 1.28 -> 0.95, small others): ready pose (-6.8, 18.6, 1.189), hit rate 0.30 -> 0.83, but 1/60 solved: 47 of the 50
+  hits went out (67 % wide: exit y-velocity -1.5 +- 1.7 m/s, the face yaw 4.5 +- 5.1 deg past the aim where the champion's forehand yaw follows to 0.3 +- 2.4). The lt regime needs the aim law re-calibrated as well
+  (yaw follow, e_pad, the pad-velocity expectation) and its servo re-tuned: round 9's conclusion stands. Not pursued further in round 10.

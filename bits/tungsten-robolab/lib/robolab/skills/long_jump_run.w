@@ -59,7 +59,30 @@
 #
 # `j_ik 1` (a params-file switch plus the distilled ik_* knot table) replaces
 # the plant flight, plant and drive with the ideal take-off program (see "the
-# ideal take-off program" below).
+# ideal take-off program" below). Opt-in refinements of that program, all off
+# unless their params are present (defaults are bit-identical):
+#   ik_from 1     the program starts at the PENULTIMATE touchdown (the task is
+#                 told of the take-off at the plant touchdown, not before)
+#   ik_fmin       the plant foot's contact force (body weights) that counts as
+#                 its touchdown: 1.5 ignores a scuffing swing foot (< 1 BW)
+#   ik_pr*, ik_kp_*, ik_kd_*, ik_fbclip, ik_fbmax
+#                 rotation feedback: the torso pitch's error against the
+#                 program's own average trajectory (a forward lean beyond it
+#                 only, with ik_fbclip 1) times per-muscle gains
+#   ik_fx*, ik_kf_*, ik_fxmax
+#                 swing-foot lag feedback: the plant-side foot behind the COM
+#                 by more than its average trajectory times per-muscle gains
+#   ik_clz, ik_clt, ik_kc_*
+#                 swing-foot clearance reflex: a toe or heel below ik_clz
+#                 metres before the plant lifts the foot
+# `j_il 1` adds the landing program (il_* knots on their own clock, latched on
+# the first sand contact). With `il_tg` the clock before the sand is the
+# BALLISTIC-TIME clock (tg minus the COM's time to fall to il_zl): the legs'
+# tuck and reach are locked to the predicted landing, so a lower or shorter
+# flight does not strike the sand with the legs still hanging; `il_ctau`,
+# `il_clt`, `il_kc_*` add a time-to-strike reflex before the designed landing.
+# Both tables are open-loop excitation programs (ORACLE-class), the residuals
+# on them zero-initialised sensed feedback.
 #
 # `j_run 1` (a params-file switch) never takes off: the approach alone.
 
@@ -215,6 +238,14 @@
       # program's own average only (-1: on a backward one only; 0: both)
       @ik_fbclip = ~0.0
       @ik_fbclip = @params["ik_fbclip"] if @params.key?("ik_fbclip")
+      # the pitch error is clipped to +- ik_fbmax rad (a residual, not a takeover)
+      @ik_fbmax = ~9.0
+      @ik_fbmax = @params["ik_fbmax"] if @params.key?("ik_fbmax")
+      # swing-foot lag feedback (ik_fx<k> reference knots, ik_fxmax, ik_kf_<role>)
+      @ik_fx = @params.key?("ik_fx0")
+      if @ik_fx
+        @ik_fxmax = ~0.3
+        @ik_fxmax = @params["ik_fxmax"] if @params.key?("ik_fxmax")
       @ik_cl = @params.key?("ik_clz")
       if @ik_cl
         @ik_clz = @params["ik_clz"]
@@ -592,6 +623,9 @@
       @ik_kp = role_gains("ik_kp_")
       @ik_kd = role_gains("ik_kd_")
     @ik_kc = role_gains("ik_kc_") if @ik_cl
+    if @ik_fx
+      @ik_fxr = (0...@ik_n).map ->(k) pget("ik_fx" + k.to_s)
+      @ik_kf = role_gains("ik_kf_")
     self
 
   # Per take-off side, a per-muscle gain vector from the params file
@@ -725,7 +759,7 @@
     g = ~0.0 if @ik_first
     @ik_first = false
     prog_apply(ctl, @ik_tab[t], @ik_h, @ik_n, s, g, @ik_kdc, @ik_gap_err, true)
-    ik_feedback(frame, ctl, t, s) if @ik_fb || @ik_cl
+    ik_feedback(frame, ctl, t, s) if @ik_fb || @ik_cl || @ik_fx
     self
 
   # Residuals on the take-off program, learned around it (zero = none).
@@ -744,6 +778,8 @@
       err = frame.torso_pitch - (@ik_pr[j] + (@ik_pr[j + 1] - @ik_pr[j]) * u)
       err = ~0.0 if @ik_fbclip > ~0.5 && err < ~0.0
       err = ~0.0 if @ik_fbclip < ~-0.5 && err > ~0.0
+      err = @ik_fbmax if err > @ik_fbmax
+      err = ~0.0 - @ik_fbmax if err < ~0.0 - @ik_fbmax
       rate = frame.torso_pitch_rate
       kp = @ik_kp[t]
       kd = @ik_kd[t]
@@ -751,6 +787,23 @@
       while m < body.size
         ctl.add_drive(m, kp[m] * err + kd[m] * rate)
         m += 1
+    if @ik_fx && !@ik_td_seen
+      # swing-foot lag: the plant-side foot behind the COM by more than the
+      # program's own average trajectory (ik_fx knots), per-muscle gain x the lag
+      j = (s / @ik_h).floor
+      j = 0 if j < 0
+      j = @ik_n - 2 if j > @ik_n - 2
+      u = clamp((s - @ik_h * j) / @ik_h, ~0.0, ~1.0)
+      fxp = frame.at(t + "foot_pos", 0)
+      lag = @ik_fxr[j] + (@ik_fxr[j + 1] - @ik_fxr[j]) * u - (fxp - frame.at("com_pos", 0))
+      lag = ~0.0 if lag < ~0.0
+      lag = @ik_fxmax if lag > @ik_fxmax
+      if lag > ~0.0
+        kf = @ik_kf[t]
+        m = 0
+        while m < body.size
+          ctl.add_drive(m, kf[m] * lag)
+          m += 1
     if @ik_cl && !@ik_td_seen && s < @ik_td - @ik_clt
       zi = 1
       zh = 5

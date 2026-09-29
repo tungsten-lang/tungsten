@@ -113,7 +113,7 @@ COLS = ["t", "com_x", "com_z", "vx", "vz", "Ly", "torso", "pelvis", "torso_rate"
 _S = {}
 
 
-def _scan_init(handover, capture, program):
+def _scan_init(handover, capture, program, zl=None, norm=0):
     from search import read_params
     hos = [h for nm in handover.split(",") for h in L.load_handover(nm)]
     c0 = L.load_capture(capture)
@@ -122,8 +122,9 @@ def _scan_init(handover, capture, program):
     p = read_params(program)
     nk = int(round(p["il_n"]))
     tab = L.read_il(program, body.muscles, c0["plant"], nk)
+    _S.update(norm=norm)
     _S.update(hos=hos, body=body, kp=kp, kd=kd, p=p, tab=tab,
-              zl=float(json.loads(c0["params"]).get("j_land_z", L.LAND_Z)))
+              zl=float(json.loads(c0["params"]).get("j_land_z", L.LAND_Z)) if zl is None else zl)
 
 
 def _scan_one(job):
@@ -132,6 +133,7 @@ def _scan_one(job):
     tab = dict(_S["tab"])
     tab["tg"] = tg
     tab["zl"] = _S["zl"]
+    tab["norm"] = _S.get("norm", 0)
     if lz is not None:
         tab["lz"] = lz
     ho = hos[i]
@@ -147,7 +149,7 @@ def scan(a):
     import multiprocessing as mp
     tgs = [float(x) for x in a.tgs.split(",")]
     hos = [h for nm in a.handover.split(",") for h in L.load_handover(nm)]
-    with mp.Pool(a.workers, initializer=_scan_init, initargs=(a.handover, a.capture, a.program)) as pool:
+    with mp.Pool(a.workers, initializer=_scan_init, initargs=(a.handover, a.capture, a.program, a.zl, 1 if a.norm else 0)) as pool:
         for tg in tgs:
             res = pool.map(_scan_one, [(i, tg, a.lz) for i in range(len(hos))], chunksize=1)
             sc = np.array([r[0] for r in res])
@@ -182,6 +184,8 @@ def main():
     ap.add_argument("--tgs", help="scan: comma list of ballistic-clock references (s); with --idx scan")
     ap.add_argument("--workers", type=int, default=3)
     ap.add_argument("--lz", type=float, default=None)
+    ap.add_argument("--norm", action="store_true", help="scan: the phase-normalised clock (tg only marks it on)")
+    ap.add_argument("--zl", type=float, default=None, help="scan: the COM height the ballistic clock's time is to (default: the capture's j_land_z)")
     ap.add_argument("--tg", type=float, default=0.0, help="the ballistic-time clock reference for the table run")
     ap.add_argument("--split", help="split this hand-over set into <name>_train / <name>_val (every --every-th held out) and exit")
     ap.add_argument("--every", type=int, default=4)

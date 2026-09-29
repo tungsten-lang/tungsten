@@ -442,9 +442,9 @@ def build():
              "Ceiling with perfect control on v4: 10.45 (95th pct.). Recreationally active adults 7.8, trained sprinters 9.9.",
              "The v4 95th-percentile runner is at 67% of its ceiling; 10 m/s needs 96%. A two-gear controller in the sprint agent's log reaches 7.6 m/s (73%) and is not in the arena yet."],
             ["Long jump with the best runner, then beyond human",
-             f"One start: {V('long_jump_p95', 2)} m on the 95th-percentile body (oracle-class landing, overfit to that start). 16 perturbed starts: {V('long_jump_p95_robust')} m (near-open-loop take-off and landing programs; 96 fresh starts average 4.23 m, 87 legal). First v4 long jump: 4.63 m on one start.",
+             f"One start: {V('long_jump_p95', 2)} m on the 95th-percentile body (oracle-class landing, overfit to that start; 103% of the untrained-man mean). 16 perturbed starts: {V('long_jump_p95_robust')} m; 96 fresh starts: {V('long_jump_p95_robust96')} m (89 of 96 legal). Near-open-loop take-off and landing programs (oracle-class). First v4 jump: {V('long_jump_v4_p95', 3)} m on one start, not robust yet (2.85 m on 32 fresh starts, 25 legal).",
              "Untrained men 4.95 m, high-school qualifiers 6.07–6.65 m, world record 8.95 m",
-             "Robustness: 9 of 96 fresh starts are illegal (fouls and roll-overs). The v4 jump is not robust yet (3 of 4 arena starts legal at 3.3–3.5 m). The ideal take-off from the 7.02 m/s runner's approach is 4.93 m; the landing adds to it."],
+             "Speed is what is missing: by the agent's fit, 5.5 m robustly needs 7.3 m/s at the board and 6.07 m needs 8.2–9.0 m/s; the v4 95th-percentile runner peaks at 7.0 m/s. About 2% of fresh starts somersault and 2% stumble in the run-up."],
             ["Table tennis phase 2 above 90%",
              f"{100 * F('tt_p2_300'):.0f}% over 300 serves ({100 * F('tt_p2'):.0f}% over 100)",
              "Winner 64% (2025); 80.3% in a Mar 2026 preprint",
@@ -498,10 +498,14 @@ def build():
                  tip="Near-open-loop take-off and landing programs (oracle-class). On 96 fresh starts never used in practice: mean 4.23 m, 87 legal."),
             dict(label="95th pct., one start", sub="7.02 m/s runner", value=F("long_jump_p95"), ceiling=4.93, kind="ours", nd=3,
                  tip="The start its take-off and landing were designed from (ideal take-off 4.93 m; the landing reaches forward, so the mark can pass it). Oracle-class, overfit to this start."),
-            dict(label="95th pct., v4 body, one start", sub="first v4 jump", value=F("long_jump_v4_p95"), ceiling=4.89, kind="ours",
-                 tip="Ideal take-off from the v4 runner's own plant-flight state: 4.89 m. Oracle-class near open loop; 3 of 4 arena starts legal at 3.3–3.5 m."),
+            dict(label="95th pct., 96 fresh starts", sub="7.02 m/s runner", value=F("long_jump_p95_robust96"), ceiling=4.93, kind="ours",
+                 tip="Starts no search or practice ever used: 89 of 96 legal. A separate check of 384 fresh starts: 95.8% legal, 2.3% somersaults, mean 4.48 m."),
+            dict(label="95th pct., v4 body, one start", sub="first v4 jump", value=F("long_jump_v4_p95"), ceiling=4.89, kind="ours", nd=3,
+                 tip="Ideal take-off from the v4 runner's own plant-flight state: 4.89 m. Oracle-class near open loop; the pelvis marks (5.05 m from the take-off foot). Not robust: 2.85 m on 32 fresh starts, 25 legal."),
             dict(label="Elite, literature", sub="16 perturbed starts", value=F("long_jump_elite2_robust"), ceiling=4.25, kind="ours",
                  tip="One-start champion 4.01 m. Ceiling 4.25 m from its 6.6 m/s approach."),
+            dict(label="Elite, literature", sub="32 fresh starts", value=F("long_jump_elite2_robust32"), ceiling=4.25, kind="ours",
+                 tip="Starts never used in practice: 31 of 32 legal. The 16-start champion scores 3.0–3.2 m on fresh starts."),
             dict(label="Elite, old profile", sub="16 starts, provisional", value=F("long_jump_elite_robust"), kind="ours",
                  tip="Uses the elite profile whose muscle strengths were set too high, with the older take-off practice."),
             dict(label="Untrained women", sub="reference", value=3.57, kind="ref", tip="3.57 ± 0.54 m (Romdhani et al. 2026)"),
@@ -603,23 +607,31 @@ def build():
     else:
         lj_videos.append(vid("long_jump_v6_p95.mp4", out("long_jump_v6_p95.mp4"), "Long jump on the 95th-percentile body, 4.96 m",
                              lj_caption("long_jump_v6_p95_metrics.json", "The one-start champion of the morning of 29 Sep:")))
+    if os.path.isfile(out("long_jump_v5_v4p95.mp4")):
+        v4_video = vid("long_jump_v5_v4p95.mp4", out("long_jump_v5_v4p95.mp4"), "First long jump on the calibrated v4 body",
+                       lj_caption("long_jump_v5_v4p95_metrics.json", "The first jump on the calibrated v4 body (one start, not robust):"))
+    else:
+        v4_video = None
     if os.path.isfile(out("long_jump_v7_p95_robust.mp4")):
         lj_videos.append(vid("long_jump_v7_p95_robust.mp4", out("long_jump_v7_p95_robust.mp4"), "Long jump, robust champion, start 401",
                              lj_caption("long_jump_v7_p95_robust_metrics.json", "The robust champion on one of its 16 arena starts (seed 401):")))
+    if v4_video:
+        lj_videos.append(v4_video)
 
     jump_cards = [
         card("longjump", "Long jump", [chip("run"), chip("study", "Oracle-class programs")],
              lj_videos,
              ["The run-up is the sprint champion itself. World Athletics rules are in the score: foul line on every tick of the stance, no somersault past 120° until landing is over, no touching the runway after landing, and the mark is the nearest break in the sand by any body part. The take-off comes from an ideal-control analysis of the runner's own approach, distilled into contraction knots latched on the plant touchdown.",
               f"That took the 95th-percentile body from 3.68 m to 4.895 m on one start (99% of that start's 4.93 m ideal take-off; the 7.02 m/s runner). A landing program learned for that one start then took it to **{V('long_jump_p95', 3)} m**, with the mark 0.37 m beyond the centre of mass's ballistic 4.75 m. That landing is an open-loop excitation table on a clock locked to the predicted landing, so it is oracle-class and overfit to the start by construction.",
-              f"The robust champion, over 16 perturbed starts, went from 3.22 m to 3.92 m and now to **{V('long_jump_p95_robust')} m**: an ideal-control take-off launched from the penultimate touchdown, a plant latch at 1.5 body weights, and a landing program learned on 32 hand-overs, again on the ballistic-time clock. Both programs are near open loop (reflex gain 0.03), so this one is oracle-class too. On 96 fresh starts never used in practice it averages 4.23 m with 87 legal (the other 9 foul or roll over). The first jump on the calibrated v4 body (95th-percentile runner, ideal take-off 4.89 m) is {V('long_jump_v4_p95', 2)} m on one start and is not robust yet: 3 of 4 arena starts are legal, at 3.3 to 3.5 m. The average body reaches {V('long_jump_robust')} m robust and 2.47 m on one start."],
+              f"The robust champion, over 16 perturbed starts, went from 3.22 m to 3.92 m and now to **{V('long_jump_p95_robust')} m**: an ideal-control take-off launched from the penultimate touchdown, a plant latch at 1.5 body weights, a swing-foot lag feedback, and a landing program learned on 32 hand-overs, on a ballistic-time clock (the landing program's clock used to start at the hand-over, so a slightly lower or slower flight landed 30 to 50 ms early with the legs still hanging and the body vaulted over its feet). Both programs are near open loop (reflex gain 0.03), so this one is oracle-class too. On starts no search ever used it scores {V('long_jump_p95_robust32')} m over 32 (31 legal) and {V('long_jump_p95_robust96')} m over 96 (89 legal); a separate check of 384 fresh starts gave 95.8% legal, 2.3% somersaults and a 4.48 m mean, and the 28 Sep champion scored 3.27 m on the first 96. The literature elite body reaches {V('long_jump_elite2_robust32')} m over 32 fresh starts (31 legal), up from 3.01 m.",
+              f"The first jump on the calibrated v4 body (95th-percentile runner, ideal take-off 4.89 m) is {V('long_jump_v4_p95', 3)} m on one start (the pelvis marks; 5.05 m from the take-off foot). It is not robust yet: {V('long_jump_v4_p95_robust')} m over 16 starts (9 legal) and {V('long_jump_v4_p95_robust32')} m over 32 fresh starts (25 legal), because the take-off foot lands with a spread of 0.5 m around the line. The average body reaches {V('long_jump_robust')} m robust and 2.47 m on one start."],
              table(["Body", "One start", "16 starts", "Ideal take-off"],
                    [["Average", "#2.47", f"#{V('long_jump_robust')}", "#–"],
                     ["95th percentile", f"#{V('long_jump_p95', 3)}", f"#{V('long_jump_p95_robust')}", "#4.93"],
-                    ["95th percentile, v4", f"#{V('long_jump_v4_p95', 3)}", "#not yet", "#4.89"],
+                    ["95th percentile, v4", f"#{V('long_jump_v4_p95', 3)}", f"#{V('long_jump_v4_p95_robust')} (provisional)", "#4.89"],
                     ["Elite, literature", f"#{V('long_jump_elite2')}", f"#{V('long_jump_elite2_robust')}", "#4.25"],
                     ["Elite, old profile (provisional)", f"#{V('long_jump_elite')}", f"#{V('long_jump_elite_robust')}", "#–"]]),
-             "Make the v4 jump robust (its run-up planner is v3's and untuned for the crouched gait: foot placement varies by 0.47 m, so 15 of 32 fresh starts foul), and take the same near-open-loop programs to the elite body. The fresh-start mean of 4.23 m is still below the untrained-men mean of 4.95 m; the 5.12 m is a fitted start.",
+             "Against people: the one-start 5.12 m is 103% of the untrained-man mean; the robust jump is 87 to 92% of it on fresh starts and sits inside the speed-matched elite range (4.33–4.77 m from 6.1–6.6 m/s, Bridgett & Linthorne 2006). Nobody reaches the high-school state level: the take-off vertical speed is already 3.0 m/s, so speed is what is missing. Next: a robust stage for the elite body over its 159 mined plant-flight states, the v4 take-off foot within 0.05 m of the line, and run-up speed.",
              body="v3 anatomy, 95th percentile (elite variants: the elite and elite2 profiles); the calibrated v4 anatomy for the new v4 jump."),
         card("standing", "Standing broad jump", [chip("done"), chip("study", "Codex policies")],
              [vid("codex_standing_jump.mp4", CODEX + "competitor_jump_round2__video_search_jump_legal_tcn.mp4", "Standing jump champion, 1.363 m",
@@ -745,7 +757,7 @@ def build():
         ["Workstream", "Where it stands", "Next"],
         [
             ["Sprint on the v4 body (agent S)", f"In the arena: 95th percentile {v4p95 or '–'} m/s, elite {v4e2 or '–'}, average {V('sprint_top_speed_v4')}. A two-gear controller in the log reaches 7.6 m/s peak on the 95th-percentile body (8 of 40 unseen starts fall); it is being made more robust.", "Enter it; bring the fall rate down"],
-            ["Long jump (agent L)", f"One start {V('long_jump_p95', 2)} m and 16 starts {V('long_jump_p95_robust')} m in the arena (both oracle-class); first v4 jump {V('long_jump_v4_p95', 2)} m. The v4 run-up planner is untuned: foot placement varies by 0.47 m.", "Practise the v4 planner; elite body"],
+            ["Long jump (agent L, finished)", f"Round 2 done: one start {V('long_jump_p95', 2)} m, 16 starts {V('long_jump_p95_robust')} m, 96 fresh starts {V('long_jump_p95_robust96')} m (all oracle-class programs); first v4 jump {V('long_jump_v4_p95', 3)} m but not robust. Unowned again.", "Elite robust stage; v4 take-off foot; run-up speed"],
             ["Balance and soccer (agent O)", f"The 40-start strict trial's champion holds {bal40_hold} of {bal40_n}. Phase 2: the reach still does not land the left foot within its timeout from the centred hold; two searches are running.", "Swing-leg contact at the lift; phase 2 reach"],
             ["Table tennis above 90% (agent T)", "Baseline dataset of 600 champion serves collected. The face error is a late-servo overshoot and return: yaw and pitch swing through the contact instead of settling. Success depends strongly on where the ball crosses (8% on the far left, 61% near the centre, 33% on the far right). Predictive-pelvis variants are being tested.", "Cut the overshoot at contact"],
             ["Compiler fixes", "Done: merged into main (032bab4e5) after a full compiler build, the stage-identity check against a baseline (the same 988 differing lines as unmodified main, identical after normalising hashes) and the spec lanes with no regression. It also fixed a use-after-free with unicode parameter names.", "Rebuild the shared compiler (bin/tungsten build) to activate them"],
@@ -763,7 +775,7 @@ def build():
             ["A natural runner: power leg extended, other knee and arm up", "Built and improved: 7.3° from human running (was 9.1°) on the 12-start trial."],
             ["Batter hitch, before and after contact", "After contact: fixed for the 13.9 m/s v5 swing (the stall was the wrist and the pelvis hitting their joint limits). The 21.6 m/s knots swing has a pause before the swing again (50 ms; it fails the guard-clean trial on 2 of 24 pitches)."],
             ["Dribble: a visible crossover, less back, more elbow, fingers", "Crossover 7.52 per 15 s run. The trunk still pumps. The fingered hand is built (opt-in); no evidence of a gain yet, and Codex's fingered-hand search is running."],
-            ["A better long-jump run and take-off", f"{V('long_jump_p95', 2)} m on one start and {V('long_jump_p95_robust')} m over 16 perturbed starts (both oracle-class; 4.23 m on 96 fresh starts). The sprinter is the run-up."],
+            ["A better long-jump run and take-off", f"{V('long_jump_p95', 2)} m on one start and {V('long_jump_p95_robust')} m over 16 perturbed starts (both oracle-class; {V('long_jump_p95_robust96')} m on 96 fresh starts). The sprinter is the run-up."],
             ["Hurdles at high-school height", "At 0.991 m: the lead leg clears and the trail leg catches at the first hurdle. At 0.762 m: hurdle 1 cleared on 4 of 8 starts. Waiting on run-up speed."],
             ["Table tennis backhand, wrist flick, chop, low scoop", "The backhand exists (23% of backhand serves solved). Chop, flick and scoop were measured with real ball spin: the best chop lands 3 of 11, the flick 0 of 20, the scoop 2 of 20."],
             ["Soccer kick with the inside of the foot", "Not yet: the best attempt strikes with the toes."],

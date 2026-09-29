@@ -21,7 +21,7 @@ guide: <https://learn.microsoft.com/windows/wsl/install>.
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y git clang llvm lld make pkg-config libonig-dev libzstd-dev
+sudo apt-get install -y git clang llvm lld make pkg-config libonig-dev libzstd-dev libopenblas-dev
 ```
 
 `lld` matters: Tungsten links Linux binaries with `-fuse-ld=lld` (GNU `ld` can't

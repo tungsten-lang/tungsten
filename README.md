@@ -150,7 +150,7 @@ Tungsten is an object-oriented language that reads like the pseudocode in your n
 
 ## Usage
 
-**Prerequisites:** `git`, `clang`, `LLVM`, `make` (and `lld` + `libzstd` headers). LLVM/Clang 22 or newer is recommended.
+**Prerequisites:** `git`, `clang`, `LLVM`, `make` (and `lld` + `libzstd` headers; on Linux also the OpenBLAS headers, e.g. `libopenblas-dev`). LLVM/Clang 22 or newer is recommended.
 
 To check your toolchain:
 

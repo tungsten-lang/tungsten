@@ -103,6 +103,19 @@ llvm_install_hint() {
   esac
 }
 
+openblas_install_hint() {
+  local distro=""
+  if [ -r /etc/os-release ]; then
+    distro="$(. /etc/os-release; printf '%s' "${ID:-}")"
+  fi
+  case "$distro" in
+    ubuntu|debian) printf '%s' 'sudo apt-get install libopenblas-dev' ;;
+    fedora|rhel|centos) printf '%s' 'sudo dnf install openblas-devel' ;;
+    arch|manjaro) printf '%s' 'sudo pacman -S openblas' ;;
+    *) printf '%s' 'install the OpenBLAS development files (cblas.h, libopenblas) with your package manager' ;;
+  esac
+}
+
 cpu_flag() {
   local cpu="${1:-native}"
   case "$cpu" in
@@ -233,11 +246,13 @@ else
   check "libzstd (optional)" "not found — compressed string slabs disabled" 1
 fi
 
-# Linux native links compile runtime/openblas_bridge.c only when IR needs BLAS
-# (@w_blas_*). Probe the exact header/library spelling used by the compiler;
-# OpenBLAS is optional for an ordinary bootstrap but required by those numeric
-# programs. macOS uses Accelerate instead.
-if [ "$(uname -s)" = Linux ]; then
+# `tungsten build` links every compiler image, and the REPL image references
+# the @w_blas_* ccalls, so on Linux even an ordinary bootstrap compiles
+# runtime/openblas_bridge.c against cblas.h and links -lopenblas. Without them
+# the build used to fail only at its very last step ("failed to build the repl
+# compiler image"), after every stage had already been built. macOS uses
+# Accelerate instead. Probe the exact header/library spelling the compiler uses.
+if [ "$(uname -s)" = Linux ] && tool_ok "$DOCTOR_CC"; then
   cblas_tmp="/tmp/tungsten-cblas-check-$$"
   if printf '#include <cblas.h>\nint main(void){return cblas_sdot(0, 0, 1, 0, 1) != 0.0f;}\n' \
        | "$DOCTOR_CC" -x c - -lopenblas -o "$cblas_tmp" \
@@ -247,9 +262,9 @@ if [ "$(uname -s)" = Linux ]; then
   else
     rm -f "$cblas_tmp"
     if printf '#include <cblas.h>\n' | "$DOCTOR_CC" -E -x c - >/dev/null 2>&1; then
-      check "OpenBLAS (optional)" "header found, -lopenblas unavailable" 1
+      check "OpenBLAS (-lopenblas)" "cblas.h found but libopenblas does not link — $(openblas_install_hint)" 0
     else
-      check "OpenBLAS (optional)" "not installed — BLAS programs need libopenblas-dev" 1
+      check "OpenBLAS (cblas.h)" "not found — $(openblas_install_hint)" 0
     fi
   fi
 fi

@@ -105,7 +105,7 @@ jobs:
         run: >-
           sudo apt-get update &&
           sudo apt-get install -y
-          clang llvm lld pkg-config libonig-dev libzstd-dev
+          clang llvm lld pkg-config libonig-dev libzstd-dev libopenblas-dev
 
       - name: Install macOS runtime dependencies
         if: runner.os == 'macOS'

@@ -1,0 +1,21 @@
+66 files x 2 seeds
+score    558.4 peak  7.06 steady  7.02 falls 0/2  scratchpad/sprint_knot/p1_final.txt
+score    558.4 peak  7.06 steady  7.02 falls 0/2  scratchpad/sprint_knot/p1.txt
+score    556.1 peak  7.00 steady  6.96 falls 0/2  scratchpad/sprint_knot/p2.txt
+score    521.8 peak  6.60 steady  6.45 falls 0/2  scratchpad/sprint_knot/p1_snap1.txt
+score    328.3 peak  6.59 steady  6.06 falls 2/2  scratchpad/sprint_knot/a2.txt
+score    301.9 peak  3.81 steady  3.50 falls 0/2  scratchpad/sprint_knot/a1.txt
+score    280.3 peak  5.87 steady  3.50 falls 2/2  scratchpad/sprint_knot/hs_test.txt
+score    214.5 peak  3.76 steady  3.28 falls 1/2  scratchpad/sprint_knot/v4r1.txt
+score    156.1 peak  5.69 steady  1.92 falls 2/2  scratchpad/sprint_knot/h1_init.txt
+score    132.7 peak  4.87 steady  2.03 falls 2/2  params/run_full_p95_control.txt
+score    132.7 peak  4.87 steady  2.03 falls 2/2  scratchpad/sprint_touch/c1.txt
+score    110.7 peak  5.72 steady  0.00 falls 2/2  params/run_ri_elite2.txt
+score    110.7 peak  5.72 steady  0.00 falls 2/2  scratchpad/sprint_knot/e2b.txt
+score    110.7 peak  5.72 steady  0.00 falls 2/2  scratchpad/sprint_knot/v4e_init.txt
+score    102.7 peak  3.99 steady  1.36 falls 2/2  scratchpad/sprint_knot/v4r1_init.txt
+score    102.7 peak  3.99 steady  1.36 falls 2/2  scratchpad/sprint_knot/v4s2.txt
+score    101.6 peak  5.51 steady  0.00 falls 2/2  scratchpad/sprint_knot/e2a.txt
+score    100.2 peak  5.20 steady  0.00 falls 2/2  params/run_ri_p95_h1.txt
+score    100.2 peak  5.20 steady  0.00 falls 2/2  scratchpad/sprint_knot/h1.txt
+score    100.2 peak  5.20 steady  0.00 falls 2/2  scratchpad/sprint_knot/tc1.txt

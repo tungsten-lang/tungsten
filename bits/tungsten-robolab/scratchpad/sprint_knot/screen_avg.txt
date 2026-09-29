@@ -1,0 +1,21 @@
+66 files x 2 seeds
+score    467.8 peak  5.74 steady  5.69 falls 0/2  scratchpad/sprint_knot/a2.txt
+score    435.8 peak  5.41 steady  5.33 falls 0/2  scratchpad/sprint_touch/ri2_init.txt
+score    380.5 peak  4.72 steady  4.64 falls 0/2  scratchpad/sprint_knot/a1.txt
+score    378.1 peak  4.64 steady  4.60 falls 0/2  scratchpad/sprint_knot/v4r1.txt
+score    371.6 peak  4.67 steady  4.57 falls 0/2  scratchpad/sprint_knot/v4r1_init.txt
+score    371.6 peak  4.67 steady  4.57 falls 0/2  scratchpad/sprint_knot/v4s2.txt
+score    313.7 peak  3.90 steady  3.76 falls 0/2  scratchpad/sprint_knot/v4s1.txt
+score    266.5 peak  4.82 steady  2.90 falls 1/2  scratchpad/sprint_knot/p1_snap1.txt
+score    204.9 peak  4.81 steady  4.48 falls 2/2  params/run_ri_elite.txt
+score    204.9 peak  4.81 steady  4.48 falls 2/2  scratchpad/sprint_touch/el2.txt
+score    204.9 peak  4.81 steady  4.48 falls 2/2  scratchpad/sprint_touch/el3.txt
+score    204.9 peak  4.81 steady  4.48 falls 2/2  scratchpad/sprint_touch/el4.txt
+score    204.9 peak  4.81 steady  4.48 falls 2/2  scratchpad/sprint_knot/e2_init.txt
+score    105.0 peak  3.66 steady  2.04 falls 2/2  params/run_v2.txt
+score     83.0 peak  4.90 steady  0.00 falls 2/2  params/run_v3_rigid1ms_s2.txt
+score     67.3 peak  4.01 steady  0.00 falls 2/2  scratchpad/sprint_touch/ri1.txt
+score     66.3 peak  4.19 steady  0.00 falls 2/2  scratchpad/sprint_knot/tc2.txt
+score     58.4 peak  3.90 steady  0.00 falls 2/2  params/run_ri_p95_sp2.txt
+score     58.4 peak  3.90 steady  0.00 falls 2/2  scratchpad/sprint_touch/sp2.txt
+score     58.4 peak  3.90 steady  0.00 falls 2/2  scratchpad/sprint_knot/k1_init.txt

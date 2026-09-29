@@ -1,0 +1,193 @@
+"""hsearch: search.py's rollouts, representation and optimizers, driven by SUCCESSIVE-SEED PRUNING.
+
+A candidate is scored by its worst rollout (risk 1.0: min over the training seeds). That makes the
+seeds a cascade: a candidate whose first rollout already scores below the incumbent cannot beat it, so
+its remaining seeds are never run. Every generation runs the first seed for all candidates, then the
+next seed only for those still at or above the incumbent's score, and so on. With a fragile incumbent
+(most offspring fall or slow down) that is 3-5x more generations per rollout than search.py.
+A pruned candidate is told to the optimizer with its partial score (an upper bound of its true one).
+
+Methods: `sep_cma` (search.SepCMA, restarted around the incumbent with a smaller step after `--stall`
+generations without an improvement) and `es` ((1+lambda)-ES around the incumbent: every offspring
+mutates a random subset of about `--mut` coordinates by N(0, sigma^2), sigma follows the success rate).
+
+    python playground/hsearch.py sprint_touch_v4 --method es --budget 2400 --workers 4 --sigma 0.02 --seconds 30 \\
+        --seeds 31,32,33,34,35,36 --attrs objective=2 --init params.txt --exclude drv_knee,... --out out.txt \\
+        --log log.jsonl --archive arch.npz
+
+The incumbent is written to --out at every improvement; --archive (npz) holds every candidate with its
+score and the number of seeds it survived, for a validation pass on fresh seeds (scratchpad/sprint_knot/select.py).
+"""
+
+import argparse
+import json
+import math
+import multiprocessing as mp
+import os
+import sys
+import time
+
+import numpy as np
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+from search import BoxRep, SepCMA, describe, jsonable, parse_list, rollout, write_params  # noqa: E402
+from practice import read_params  # noqa: E402
+
+
+class Cascade:
+    def __init__(self, pool, rep, task, seeds, seconds, attrs):
+        self.pool, self.rep, self.task, self.seeds, self.seconds, self.attrs = pool, rep, task, seeds, seconds, attrs
+
+    def job(self, x, seed):
+        p = self.rep.decode(np.clip(x, 0, 1))
+        return (self.task, p, seed, self.seconds) + ((self.attrs,) if self.attrs else ())
+
+    def evaluate(self, X, bar):
+        """Scores (min over the seeds each candidate survived to), seeds run, rollouts used, metrics of the
+        first seed. A candidate stays in the cascade while its running minimum is >= bar."""
+        n = len(X)
+        score = np.full(n, np.inf)
+        ran = np.zeros(n, int)
+        met = [None] * n
+        alive = list(range(n))
+        used = 0
+        for si, seed in enumerate(self.seeds):
+            res = self.pool.map(rollout, [self.job(X[i], seed) for i in alive], chunksize=1)
+            used += len(alive)
+            for i, (s, m, _) in zip(alive, res):
+                score[i] = min(score[i], s)
+                ran[i] += 1
+                if met[i] is None:
+                    met[i] = m
+            alive = [i for i in alive if score[i] >= bar]
+            if not alive:
+                break
+        return score, ran, used, met
+
+
+class ES:
+    """(1+lambda)-ES around the incumbent with sparse mutations and a success-rate step size."""
+
+    def __init__(self, x0, sigma0, seed, lam=24, mut=6, scales=None):
+        self.x = np.asarray(x0, float).copy()
+        self.n = len(self.x)
+        self.sigma, self.lam, self.mut = sigma0, lam, mut
+        self.rng = np.random.default_rng(seed)
+        self.scales = np.ones(self.n) if scales is None else np.asarray(scales, float)
+        self.hist = []
+
+    def ask(self):
+        q = min(1.0, self.mut / self.n)
+        X = []
+        for _ in range(self.lam):
+            mask = self.rng.random(self.n) < q
+            if not mask.any():
+                mask[self.rng.integers(self.n)] = True
+            X.append(np.clip(self.x + mask * self.sigma * self.scales * self.rng.standard_normal(self.n), 0, 1))
+        return np.array(X)
+
+    def tell(self, X, f, improved):
+        if improved is not None:
+            self.x = np.asarray(X[improved], float).copy()
+        self.hist.append(improved is not None)
+        self.hist = self.hist[-8:]
+        rate = sum(self.hist) / len(self.hist)
+        self.sigma = float(np.clip(self.sigma * (1.15 if improved is not None else 0.93 if rate < 0.25 else 0.97), 0.002, 0.2))
+
+    def info(self):
+        return {"sigma": self.sigma, "rate": sum(self.hist) / max(1, len(self.hist))}
+
+
+def main():
+    ap = argparse.ArgumentParser(description="successive-seed pruning search")
+    ap.add_argument("task")
+    ap.add_argument("--method", default="es", choices=["es", "sep_cma"])
+    ap.add_argument("--budget", type=int, default=2000, help="rollouts")
+    ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--sigma", type=float, default=0.02)
+    ap.add_argument("--lam", type=int, default=0, help="offspring per generation (es 24, sep_cma its default)")
+    ap.add_argument("--mut", type=float, default=6.0, help="es: expected coordinates mutated per offspring")
+    ap.add_argument("--stall", type=int, default=10, help="sep_cma: generations without an improvement before a restart")
+    ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--seeds", required=True, help="training seeds in cascade order (None = clean start)")
+    ap.add_argument("--seconds", type=float, default=0)
+    ap.add_argument("--init")
+    ap.add_argument("--fixed")
+    ap.add_argument("--only")
+    ap.add_argument("--exclude")
+    ap.add_argument("--attrs")
+    ap.add_argument("--box")
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--log")
+    ap.add_argument("--archive")
+    a = ap.parse_args()
+    fixed = {kv.split("=")[0]: float(kv.split("=")[1]) for kv in (a.fixed or "").split(",") if kv}
+    init = read_params(a.init) if a.init else {}
+    tun = describe(a.task, {**init, **fixed})
+    if a.box:
+        box = {kv.split("=")[0]: tuple(float(x) for x in kv.split("=")[1].split(":")) for kv in a.box.split(",")}
+        unknown = sorted(set(box) - {t[0] for t in tun})
+        if unknown:
+            raise SystemExit(f"--box names no tunable: {', '.join(unknown)}")
+        tun = [(t[0], t[1], *box.get(t[0], (t[2], t[3]))) for t in tun]
+    rep = BoxRep.from_tunables(tun, parse_list(a.only), parse_list(a.exclude), init, fixed)
+    seeds = parse_list(a.seeds, int) or [None]
+    attrs = {kv.split("=")[0]: float(kv.split("=")[1]) for kv in (a.attrs or "").split(",") if kv}
+    print(f"hsearch {a.task}: {a.method}, {rep.n} tunables, budget {a.budget} rollouts, seeds {seeds}", flush=True)
+    log = open(a.log, "w") if a.log else None
+    t0 = time.time()
+    X_all, F_all, R_all = [], [], []
+    with mp.Pool(a.workers) as pool:
+        cas = Cascade(pool, rep, a.task, seeds, a.seconds, attrs)
+        # the incumbent: the start, every seed
+        s, ran, used, met = cas.evaluate(np.array([rep.x0]), -np.inf)
+        best_f, best_x, best_m = float(s[0]), rep.x0.copy(), met[0]
+        X_all.append(rep.x0.copy()); F_all.append(best_f); R_all.append(int(ran[0]))
+        write_params(a.out, "hsearch", rep.decode(best_x), best_f, [best_m])
+        print(f"start {best_f:.3f} ({used} rollouts)", flush=True)
+        if a.method == "es":
+            opt = ES(rep.x0, a.sigma, a.seed, lam=a.lam or 24, mut=a.mut)
+        else:
+            opt = SepCMA(rep.x0, sigma0=a.sigma, seed=a.seed, popsize=a.lam or None)
+        gen, last_imp, restarts = 0, 0, 0
+        while used < a.budget:
+            gen += 1
+            X = np.atleast_2d(opt.ask())
+            X = np.clip(X, 0, 1)
+            s, ran, u, met = cas.evaluate(X, best_f)
+            used += u
+            k = int(np.argmax(s))
+            improved = k if s[k] > best_f and ran[k] == len(seeds) else None
+            if improved is not None:
+                best_f, best_x, best_m = float(s[k]), X[k].copy(), met[k]
+                write_params(a.out, "hsearch", rep.decode(best_x), best_f, [best_m])
+                last_imp = gen
+            for i in range(len(X)):
+                X_all.append(X[i].copy()); F_all.append(float(s[i])); R_all.append(int(ran[i]))
+            if a.method == "es":
+                opt.tell(X, s, improved)
+            else:
+                opt.tell(X, s)
+                if gen - last_imp >= a.stall:  # restart around the incumbent with a smaller step
+                    restarts += 1
+                    sig = max(0.003, opt.sigma * 0.6)
+                    opt = SepCMA(best_x, sigma0=sig, seed=a.seed + restarts, popsize=a.lam or None)
+                    last_imp = gen
+            info = opt.info()
+            print(f"gen {gen} used {used} best {best_f:.3f} gen_best {float(np.max(s)):.2f} alive_full {int((ran == len(seeds)).sum())}/{len(X)} "
+                  f"({time.time() - t0:.0f}s) {info}", flush=True)
+            if log:
+                log.write(json.dumps(jsonable({"gen": gen, "used": used, "best": best_f, "gen_best": float(np.max(s)), "full": int((ran == len(seeds)).sum()),
+                                               "n": len(X), "wall": round(time.time() - t0, 1), "info": info})) + "\n")
+                log.flush()
+    if a.archive:
+        os.makedirs(os.path.dirname(a.archive) or ".", exist_ok=True)
+        np.savez_compressed(a.archive, X=np.array(X_all), F=np.array(F_all), ran=np.array(R_all), names=np.array(rep.names),
+                            lo=rep.lo, hi=rep.hi, v0=rep.v0, x0=rep.x0, fixed=json.dumps(rep.fixed),
+                            seeds=np.array([-1 if s is None else s for s in seeds]))
+    print("best", best_f, best_m)
+
+
+if __name__ == "__main__":
+    main()

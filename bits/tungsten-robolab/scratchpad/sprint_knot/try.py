@@ -27,7 +27,7 @@ def main():
     jobs = []
     for v in variants:
         p = dict(base)
-        for kv in v.split(","):
+        for kv in v.split("::")[-1].split(","):
             if kv:
                 k, x = kv.split("="); p[k] = float(x)
         for s in seeds:
@@ -41,7 +41,10 @@ def main():
             xs = [m.get(key) for _, m, _ in rr if m.get(key) is not None]
             return float(np.mean(xs)) if xs else float("nan")
         falls = sum(1 for _, m, _ in rr if m.get("fell"))
-        print(f"{v or 'BASE':38s} score {np.mean([s for s,_,_ in rr]):8.2f} peak {mean('peak_speed_1s'):5.2f} steady {mean('steady_speed'):5.2f} "
+        lab = (v or 'BASE')
+        if '::' in lab:
+            lab = lab.split('::')[0]
+        print(f"{lab[:38]:38s} score {np.mean([s for s,_,_ in rr]):8.2f} peak {mean('peak_speed_1s'):5.2f} steady {mean('steady_speed'):5.2f} "
               f"falls {falls}/{k} tc {mean('contact_time'):.3f} fl {mean('flight_time'):.3f} thTD {mean('thigh_td'):5.2f} thLO {mean('thigh_lo'):5.2f} "
               f"knTD {mean('knee_td'):4.2f} knMax {mean('knee_max'):4.2f} fz {mean('stance_fz'):4.2f} pkGRF {mean('peak_grf'):5.2f}")
 

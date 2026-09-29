@@ -1,0 +1,61 @@
+base score 559.02 peak 7.063 steady 7.024 fell False
+leg_kd         - v=  0.3951 [0.05,0.60] d= -508.67 peak=3.671 steady=0.0 fell=True
+fall_lean      + v=  0.0180 [0.00,0.45] d= -498.16 peak=4.067 steady=0.0 fell=True
+knee_lift      + v=  0.0280 [0.00,0.70] d= -496.95 peak=4.036 steady=0.0 fell=True
+lean           + v=  0.2175 [-0.10,0.40] d= -494.60 peak=4.258 steady=0.0 fell=True
+k0             + v=  1.2020 [0.30,2.30] d= -493.98 peak=4.322 steady=0.0 fell=True
+psi0           - v=  0.4479 [0.20,1.20] d= -490.77 peak=4.33 steady=0.0 fell=True
+t_land         + v=  0.0196 [0.01,0.25] d= -484.75 peak=4.527 steady=0.0 fell=True
+stiff_st       - v=  0.0879 [0.00,0.35] d= -483.22 peak=4.609 steady=0.0 fell=True
+z_ref          + v=  0.8080 [0.80,1.00] d= -482.33 peak=4.656 steady=0.0 fell=True
+psi_to         - v= -0.2499 [-0.80,0.00] d= -482.25 peak=4.674 steady=0.0 fell=True
+pre_knee       + v=  0.3204 [0.00,0.50] d= -482.20 peak=4.669 steady=0.0 fell=True
+v_top          - v=  9.4628 [2.50,10.00] d= -482.01 peak=4.65 steady=0.0 fell=True
+t_flight       + v=  0.1581 [0.03,0.35] d= -481.96 peak=4.624 steady=0.0 fell=True
+k_vd           + v=  0.0491 [0.00,1.00] d= -481.87 peak=4.684 steady=0.0 fell=True
+drv_floor      - v=  0.0296 [0.00,1.00] d= -481.59 peak=4.657 steady=0.0 fell=True
+k_z            - v=  3.0811 [0.00,12.00] d= -481.59 peak=4.67 steady=0.0 fell=True
+a_land         - v=  0.1740 [-0.30,0.50] d= -481.57 peak=4.691 steady=0.0 fell=True
+stiff_st       + v=  0.1159 [0.00,0.35] d= -480.98 peak=4.7 steady=0.0 fell=True
+drv_rf         + v=  0.7970 [0.00,1.00] d= -480.16 peak=4.749 steady=0.0 fell=True
+k_fly          + v=  1.4165 [0.00,1.50] d= -479.72 peak=4.746 steady=0.0 fell=True
+lean_acc       + v=  0.2326 [0.00,0.60] d= -479.52 peak=4.744 steady=0.0 fell=True
+k_fly_d        - v=  0.2512 [0.00,0.40] d= -479.51 peak=4.716 steady=0.0 fell=True
+g_kl           - v=  1.4440 [0.10,1.50] d= -477.84 peak=4.824 steady=0.0 fell=True
+v_tau          + v=  0.2863 [0.02,0.50] d= -476.28 peak=4.837 steady=0.0 fell=True
+drv_rf         - v=  0.7170 [0.00,1.00] d= -475.72 peak=4.889 steady=0.0 fell=True
+t_push         - v=  0.0235 [0.03,0.25] BEYOND d= -475.45 peak=4.845 steady=0.0 fell=True
+k_reach        + v=  0.5567 [0.10,0.80] d= -474.86 peak=4.858 steady=0.0 fell=True
+k_swc          + v=  1.0632 [0.00,1.50] d= -464.79 peak=5.158 steady=0.0 fell=True
+k_vd           - v= -0.0309 [0.00,1.00] BEYOND d= -461.46 peak=5.299 steady=0.0 fell=True
+psi0           + v=  0.5279 [0.20,1.20] d= -460.43 peak=5.156 steady=0.0 fell=True
+toe_land       + v=  0.0784 [-0.60,0.40] d= -458.06 peak=5.436 steady=0.0 fell=True
+psi_reach      - v=  0.0631 [-0.30,0.60] d= -457.15 peak=5.41 steady=0.0 fell=True
+psi_late       + v=  1.1444 [0.30,1.30] d= -382.88 peak=5.293 steady=3.727 fell=True
+stiff_up       + v=  0.0433 [0.00,0.35] d= -358.89 peak=5.817 steady=4.092 fell=True
+k_clear        + v=  0.4800 [0.00,12.00] d= -358.04 peak=5.861 steady=4.084 fell=True
+fall_ankle     - v= -0.0160 [0.00,0.40] BEYOND d= -354.98 peak=5.921 steady=4.115 fell=True
+heel_tuck      - v=  0.4946 [0.00,0.80] d= -352.70 peak=5.741 steady=4.707 fell=True
+k_late         - v=  2.1240 [0.30,2.20] d= -341.31 peak=5.752 steady=4.802 fell=True
+psi_v          - v=  0.0379 [0.00,0.25] d= -192.19 peak=6.862 steady=6.656 fell=True
+t_absorb       + v=  0.0060 [0.00,0.15] d=  -51.35 peak=7.047 steady=6.902 fell=True
+psi_v          + v=  0.0579 [0.00,0.25] d=  -50.00 peak=7.037 steady=6.973 fell=True
+gait_spring    - v=  0.0024 [0.01,0.20] BEYOND d=  -33.08 peak=6.78 steady=6.672 fell=False
+t_push_max     + v=  0.0888 [0.08,0.30] d=  -15.54 peak=6.901 steady=6.821 fell=False
+leg_kd         + v=  0.4391 [0.05,0.60] d=  -14.56 peak=6.971 steady=6.885 fell=False
+lean           - v=  0.1775 [-0.10,0.40] d=  -11.60 peak=6.996 steady=6.943 fell=False
+gait_spring    + v=  0.0176 [0.01,0.20] d=  -11.20 peak=6.964 steady=6.914 fell=False
+a_reach        + v= -0.0239 [-0.30,0.60] d=  -10.75 peak=7.003 steady=6.945 fell=False
+fall_lean      - v= -0.0180 [0.00,0.45] BEYOND d=  -10.23 peak=7.022 steady=6.991 fell=False
+stiff          + v=  0.1033 [0.00,0.30] d=   -9.87 peak=7.055 steady=7.014 fell=False
+leg_kp         - v=  9.1623 [3.00,12.00] d=   -9.68 peak=6.952 steady=6.912 fell=False
+cv             + v=  0.0160 [0.00,0.40] d=   -9.57 peak=6.967 steady=6.921 fell=False
+k_late         + v=  2.2760 [0.30,2.20] BEYOND d=   -9.55 peak=6.925 steady=6.889 fell=False
+t_push         + v=  0.0411 [0.03,0.25] d=   -8.94 peak=7.017 steady=6.966 fell=False
+t_flight       - v=  0.1325 [0.03,0.35] d=   -8.71 peak=7.112 steady=7.06 fell=False
+psi_fo         - v=  0.0150 [-0.30,0.90] d=   -8.68 peak=7.035 steady=6.983 fell=False
+k_fo           + v=  1.3072 [0.60,2.40] d=   -8.11 peak=7.026 steady=6.98 fell=False
+drv_floor      + v=  0.1096 [0.00,1.00] d=   -7.77 peak=6.992 steady=6.942 fell=False
+psi_late       - v=  1.0644 [0.30,1.30] d=   -7.76 peak=6.959 steady=6.92 fell=False
+comp_fly       + v=  0.7184 [0.00,1.00] d=   -7.29 peak=7.049 steady=6.993 fell=False
+g_kl           + v=  1.5560 [0.10,1.50] BEYOND d=   -6.86 peak=7.042 steady=7.012 fell=False

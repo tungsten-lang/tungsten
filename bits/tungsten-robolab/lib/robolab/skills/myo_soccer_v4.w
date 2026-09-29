@@ -261,6 +261,31 @@
     # while the reset's posture becomes the stance)
     @b_g_set = ~1.0
     @b_g_set = param("b_g_set", ~1.0, ~0.5, ~3.0) if switch_on("bgset")
+    # dsx 1: double support's sagittal hip strategy: what the ankles cannot
+    # take of the COM's fore-aft capture-point error (beyond dsx_lim) goes to
+    # both hips' flexion (dsx_k rad per m: a COM behind the target flexes the
+    # hips, the trunk leans forward). Measured: in the failing shifts the COM
+    # drifts 0.1-0.6 m behind the feet over ~2 s while both ankles sit at their
+    # dorsiflexion limit (+0.524), where the ankle strategy has no authority
+    @dsx = switch_on("dsx")
+    @dsx_k = ~0.0
+    @dsx_lim = ~0.05
+    if @dsx
+      @dsx_k = param("dsx_k", ~3.0, ~0.0, ~20.0)
+      @dsx_lim = param("dsx_lim", ~0.05, ~0.0, ~0.12)
+    # dsi 1: the weight shift's lateral integral: while the swing foot has not
+    # unloaded, the COM's lateral error from the shift's target is integrated
+    # (dsi_k rad per m s, at most dsi_lim rad) into the hips' adduction
+    # (stance +, swing -) like the routine's feed-forward b_shift_add. Measured:
+    # in the stuck shifts the loads stall at 0.7 / 0.3 with the COM 5-12 cm
+    # from the stance foot for seconds while the body drifts back
+    @dsi = switch_on("dsi")
+    @dsi_k = ~0.0
+    @dsi_lim = ~0.0
+    @dsi_int = ~0.0
+    if @dsi
+      @dsi_k = param("dsi_k", ~1.0, ~0.0, ~6.0)
+      @dsi_lim = param("dsi_lim", ~0.15, ~0.0, ~0.35)
     # bfore 1: the lift also waits for the COM's fore-aft capture point to be
     # within b_fx_tol of the stance foot's target (sb_x): the lateral latch
     # alone let a slow fore-aft drift (the COM 0.19 m behind the stance foot)
@@ -268,6 +293,22 @@
     @bfore = switch_on("bfore")
     @b_fx_tol = ~1.0
     @b_fx_tol = param("b_fx_tol", ~0.06, ~0.02, ~0.2) if @bfore
+    # bretry 1: a hold that the fall catch ends within bc_short seconds is
+    # retried on the same leg (at most bc_retry times) instead of switching to
+    # the other one: the strict five-minute trial needs one 300 s stretch on
+    # either leg, and a caught early fall leaves time for another attempt.
+    # With bcout the outward excess (bc_out) is caught only during the first
+    # bc_arm seconds of a hold: a hold that has lasted longer is trusted
+    @bretry = switch_on("bretry")
+    @bc_retry = ~0.0
+    @bc_short = ~0.0
+    @bc_arm = ~1000000.0
+    if @bretry
+      @bc_retry = param("bc_retry", ~2.0, ~0.0, ~4.0)
+      @bc_short = param("bc_short", ~20.0, ~5.0, ~60.0)
+      @bc_arm = param("bc_arm", ~12.0, ~2.0, ~40.0)
+    @bc_tries = ~0.0
+    @att_acc = ~0.0
     @bal_acc = {"l" => ~0.0, "r" => ~0.0}
     @bal_last = ""
     # (bc_first 1: the right leg first)
@@ -316,6 +357,19 @@
     # stance hip's own strategy (cp_kh) throws the trunk into the fall, which
     # is right for a fast excess but positive feedback for a slow outward
     # drift (measured: pelvis roll 0.1 -> 0.9 while the hip abducts to -0.9)
+    # cp_wash 1: the hip strategy with a washout: the fast part of the excess
+    # goes through cp_kh (throw the trunk into the fall), the part that
+    # persists (the excess low-passed with time constant cp_tau) through cp_khs
+    # instead (positive: the stance hip adducts, the trunk leans back over the
+    # foot), so a slow outward drift is fought by the static effect of the
+    # lean, not fed by it
+    @cp_wash = switch_on("cp_wash")
+    @cp_khs = ~0.0
+    @cp_tau = ~1.0
+    @cp_slow = ~0.0
+    if @cp_wash
+      @cp_khs = param("cp_khs", ~4.0, ~-30.0, ~30.0)
+      @cp_tau = param("cp_tau", ~0.6, ~0.1, ~3.0)
     @cp_ksw = ~0.0
     @cp_klb = ~0.0
     if switch_on("cp_more")
@@ -470,12 +524,39 @@
   -> balance(f, ctl)
     off = super(f, ctl)
     kp = kick_phase? || (@rk4 && rk_kick_phase?)
+    dsx_hip(f, off) if @dsx && v4_phase?
+    dsi_hip(f, off, ctl) if @dsi && @phase == :b_shift
     return off if !v4_phase? && !(@in4 && kick_phase?) && !(@rk4 && rk_phase?)
     tlh(f, off, ctl) if @tlh
     swing_yaw(f, off) if @fyaw && !kp
     hip_guard(f, off) if @hg
     cp4(f, off, ctl) if @cp4
     catch_place(f, off) if @bplace && @phase == :b_down
+    off
+
+  # (dsx) In double support (no foot unloaded below sb_ds_load) the COM's
+  # fore-aft capture point beyond dsx_lim of the routine's target flexes both
+  # hips.
+  -> dsx_hip(f, off)
+    st = b_stance_side
+    return off if st != "" && foot_load(other_side(st)) < @sb_ds_load
+    return off if @phase != :b_set && @phase != :b_shift && @phase != :b_mid && @phase != :b_down
+    tg = b_target(f)
+    e = f.at("com_pos", 0) + f.at("com_vel", 0) * ~0.311 - tg[0]
+    ex = ~0.0
+    ex = e - @dsx_lim if e > @dsx_lim
+    ex = e + @dsx_lim if e < ~0.0 - @dsx_lim
+    joint_offset(off, "hip_flexion_l", ~0.0 - @dsx_k * ex)
+    joint_offset(off, "hip_flexion_r", ~0.0 - @dsx_k * ex)
+    off
+
+  # (dsi) the shift's lateral integral (see read_params).
+  -> dsi_hip(f, off, ctl)
+    tg = b_target(f)
+    ey = f.at("com_pos", 1) - tg[1]
+    @dsi_int = clamp(@dsi_int - @dsi_k * ey * ctl.dt, ~0.0 - @dsi_lim, @dsi_lim)
+    joint_offset(off, "hip_adduction_l", @dsi_int)
+    joint_offset(off, "hip_adduction_r", ~0.0 - @dsi_int)
     off
 
   # The stance hip kept off its extension limit: a flexion offset hg_k per
@@ -781,6 +862,13 @@
     st = "r" if @bal_last == "l"
     st = "r" if l
     st = "l" if r
+    # (bretry: a short hold is retried on the same leg)
+    if @bretry && @bal_last != ""
+      held = @bal_acc[@bal_last] - @att_acc
+      if held < @bc_short && @bc_tries < @bc_retry && @bal_acc[@bal_last] < @bc_cap
+        st = @bal_last
+        @bc_tries = @bc_tries + ~1.0
+    @att_acc = @bal_acc[st]
     @bal_last = st
     "b_shift_" + st
 
@@ -797,7 +885,7 @@
     mv.add(chunk("b_shift_" + st, @b_t_shift, p, :b_shift, :both, ss).hold_until(unl.after_min(@b_t_shift * ~0.5), @b_t_shift + @bc_tmax))
     p = one_leg_posture(st)
     mv.add(chunk("b_lift_" + st, @b_t_lift, p, :b_lift, ss, ss).hold_until(Latch.after(@b_t_lift)))
-    stop = Latch.test(st + "_bfall", ->(f, e, c) @bal_acc[st] >= @bc_cap || ~0.0 - cp_lateral(f, st) > @bc_in || cp_lateral(f, st) > @bc_out)
+    stop = Latch.test(st + "_bfall", ->(f, e, c) @bal_acc[st] >= @bc_cap || ~0.0 - cp_lateral(f, st) > @bc_in || (cp_lateral(f, st) > @bc_out && e < @bc_arm))
     mv.add(chunk("b_hold_" + st, ~0.2, p, :b_hold, ss, ss).hold_until(Latch.any([Latch.after(@b_hold), stop]), @b_hold))
     down = Latch.test(st + "_bdown", ->(f, e, c) foot_load(sw) > @b_load)
     mv.add(chunk("b_down_" + st, @b_t_down, stance, :b_down, ss, ss).hold_until(down.after_min(@b_t_down * ~0.5), ~1.0))
@@ -880,9 +968,11 @@
     if phase == :s3_reach && @s4set
       @s4_from = [f.at(@step_side + "_ankle_pos", 0), f.at(@step_side + "_ankle_pos", 1)]
       @s4_t0 = f.t
+    @dsi_int = ~0.0 if phase == :b_shift
     if @cp4 && phase == :b_shift
       @cp_ro = ~0.0
       @cp_rf = ~0.0
+      @cp_slow = ~0.0
     self
 
   # The stance foot's capture point in its own frame [forward, outward] from
@@ -920,7 +1010,11 @@
     dsf = clamp(wf, ~0.0 - @cp_limf, @cp_limf)
     joint_offset(off, "subtalar_angle_" + st, @cp_ks * (dso - copo) + @cp_ksf * dso)
     joint_offset(off, "ankle_angle_" + st, ~0.0 - (@cp_ka * (dsf - copf) + @cp_kaf * dsf))
-    joint_offset(off, "hip_adduction_" + st, @cp_kh * (wo - dso))
+    hipoff = @cp_kh * (wo - dso)
+    if @cp_wash
+      @cp_slow = @cp_slow + ((wo - dso) - @cp_slow) * ctl.dt / @cp_tau
+      hipoff = @cp_kh * ((wo - dso) - @cp_slow) + @cp_khs * @cp_slow
+    joint_offset(off, "hip_adduction_" + st, hipoff)
     # (cp_more: the swing leg abducted and the trunk bent toward the swing
     # side by the same excess, whatever its sign)
     joint_offset(off, "hip_adduction_" + sw, ~0.0 - @cp_ksw * (wo - dso)) if @cp_ksw != ~0.0

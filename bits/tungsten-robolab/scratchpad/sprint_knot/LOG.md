@@ -34,3 +34,20 @@ All campaign state lives in the repo (scratchpad/sprint_knot/, out/, params/). N
   p1's params on the AVERAGE v4 body: peak 4.92 but falls 2/3, bent-knee. => a2 = average body from p1_snap1.txt (objective 2, 2400 rollouts, sigma 0.06).
 - built run_knot with opt-in fly_entry (flying start without knots; default identical: knots 0 + fly_entry 0 reproduces run_ri-v4base exactly);
   frozen bin/challengers/run_knot-v4b. sprint_touch_v4.py: snap = ROBOLAB_SNAP env (default run_v4 unchanged).
+- 01:52 p1 DONE (2400 rollouts, 29 min): P95 v4 peak 7.049 steady 7.01 (20 s, 4 rollouts: None,31-33). NEW GAIT MODE: crouched high-cadence bounce
+  (step 4.0/s, contact 0.108, flight 0.054, TD knee 0.83, knee max 1.0, torso upright 0.11 rad, irregular stride std 0.076 s, scuffs 4/s): 67 % of the P95 ceiling.
+  The earlier p1 snapshot (gen 25, 6.60 m/s) was the ideal-like extended-knee mode: TD thigh 0.54 knee 0.55 (ideal 0.47/0.54), knee max 0.75, LO knee 0.21.
+  Saved: p1_snap1.txt (6.60, ideal-like), p1_final.txt (7.05, crouched).
+  a2 (avg from p1_snap1) at gen 9: peak 5.67 steady 5.61 (69 % of 8.2) vs v4r1 4.65 => the P95-derived basin is better for the avg body too.
+  try.py on p1_snap1: drv_hip 0.6 no effect; torso_kp 0.6 +; ri 0.7 falls, ri 0 -0.4; drv_ham<1 falls; stiff_up 0.3 worse.
+  Added playground/search.py --box name=lo:hi (opt-in) since t_push_max, k_land, t_land, hip_lead, g_kl, torso_kp, vz_push, a_push, k_late sit on their bounds.
+- 01:53 LAUNCHED p2 = robust stage of p1_final (30 s x 6 seeds 31-36, risk 1.0, sigma 0.025, 1800 rollouts).
+- 02:20 sep-CMA stalls on fragile optima: a2 flat at 459.5 from gen 9 to 27, p2 640.6 -> 645. sens.py on p1_final (crouched P95 gait): a 4 %-of-box move
+  of 41/188 single parameters makes seed 31 FALL (knife edge); held-out check of p1_final: 17/24 seeds survive 30 s (falls at 3.8-7.7 s and 27-29 s).
+  Diagnosis: sigma 0.04 in 94 dims = 0.4 L2 step, far above the ~4 % safe move of ~40 critical parameters, and CMA's CSA never shrinks sigma on repeated failure.
+  => NEW playground/hsearch.py (own tool, opt-in): successive-seed pruning (min-over-seeds scoring: a candidate below the incumbent after seed 1 is never run on the others,
+  3-5x more generations per rollout), methods es ((1+lambda) sparse-mutation ES with success-rate sigma) and sep_cma with restarts around the incumbent; --archive for a
+  validation pass (scratchpad/sprint_knot/select.py: top archive entries on 12 fresh seeds, ranked by falls then mean peak).
+  Killed p2 (sep_cma robust, best 645.13, saved p2_snap.txt); h2 = hsearch ES from p2_snap (30 s x seeds 31-36, sigma 0.02, lam 24, budget 2400).
+  Also: try.py knot stance seeded from the v4 P95 ideal (9 m/s) on the 6.6 m/s extended gait falls (TD knee comes out 0.81 not 0.54): knots do not work out of the box on v4 either.
+  NOTE zsh: unquoted $FILES does not word-split (screen.py got one file name); use arrays.

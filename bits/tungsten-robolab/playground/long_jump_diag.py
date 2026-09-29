@@ -156,11 +156,25 @@ def scan(a):
                   f"marks {np.round(sc, 2).tolist()}", flush=True)
 
 
+def split_handover(a):
+    """Write a hand-over set as a training set and a held-out set (every k-th)."""
+    hos = L.load_handover(a.split)
+    k = a.every
+    for lab, sel in (("train", [h for i, h in enumerate(hos) if i % k != k - 1]),
+                     ("val", [h for i, h in enumerate(hos) if i % k == k - 1])):
+        names = [h["name"] for h in sel]
+        np.savez(os.path.join(L.OUT, f"{a.split}_{lab}_handover.npz"), names=json.dumps(names),
+                 **{f"state_{i}": h["state"] for i, h in enumerate(sel)},
+                 meta=json.dumps({h["name"]: {kk: vv for kk, vv in h.items() if kk not in ("state", "name")} for h in sel},
+                                 default=float))
+        print("wrote", f"{a.split}_{lab}", len(sel))
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("handover")
-    ap.add_argument("program", help="a params file with the il_* landing program")
-    ap.add_argument("--capture", required=True)
+    ap.add_argument("handover", nargs="?")
+    ap.add_argument("program", nargs="?", help="a params file with the il_* landing program")
+    ap.add_argument("--capture")
     ap.add_argument("--idx", default="0", help="comma list of hand-over indices or names")
     ap.add_argument("--table", type=float, default=0.08, help="table row spacing (s)")
     ap.add_argument("--nojitter", action="store_true")
@@ -169,7 +183,11 @@ def main():
     ap.add_argument("--workers", type=int, default=3)
     ap.add_argument("--lz", type=float, default=None)
     ap.add_argument("--tg", type=float, default=0.0, help="the ballistic-time clock reference for the table run")
+    ap.add_argument("--split", help="split this hand-over set into <name>_train / <name>_val (every --every-th held out) and exit")
+    ap.add_argument("--every", type=int, default=4)
     a = ap.parse_args()
+    if a.split:
+        return split_handover(a)
     if a.tgs:
         return scan(a)
     hos = [h for nm in a.handover.split(",") for h in L.load_handover(nm)]

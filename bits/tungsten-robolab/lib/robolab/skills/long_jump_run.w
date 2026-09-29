@@ -211,6 +211,10 @@
       # swing-foot clearance reflex (ik_clz, ik_clt, ik_kc_<role>), see
       # ik_feedback; both zero / absent = the program alone
       @ik_fb = @params.key?("ik_pr0")
+      # ik_fbclip 1: the pitch feedback acts on a forward lean beyond the
+      # program's own average only (-1: on a backward one only; 0: both)
+      @ik_fbclip = ~0.0
+      @ik_fbclip = @params["ik_fbclip"] if @params.key?("ik_fbclip")
       @ik_cl = @params.key?("ik_clz")
       if @ik_cl
         @ik_clz = @params["ik_clz"]
@@ -232,6 +236,12 @@
       @il_tg = @params["il_tg"] if @params.key?("il_tg")
       @il_zl = ~0.0
       @il_zl = @params["il_zl"] if @params.key?("il_zl")
+      # the time-to-strike reflex (il_ctau, il_clt, il_kc_<role>; il_clearance)
+      @il_cl = @params.key?("il_ctau")
+      if @il_cl
+        @il_ctau = @params["il_ctau"]
+        @il_clt = ~0.10
+        @il_clt = @params["il_clt"] if @params.key?("il_clt")
       @il_kdc = param("j_il_kdc", ~1.0, ~0.0, ~1.0)
     # hitch-kick (`j_hk` 1 or 2, a params-file switch; 0 = the hang); its
     # tunables are declared only when it is on
@@ -606,6 +616,7 @@
       fr = other(t)
       @il_kp[t] = (0...body.size).map ->(m) pget("il_kp_" + ik_role(body.muscle(m).name, t, fr))
       @il_kd[t] = (0...body.size).map ->(m) pget("il_kd_" + ik_role(body.muscle(m).name, t, fr))
+    @il_kc = role_gains("il_kc_") if @il_cl
     self
 
   -> pget(key)
@@ -731,6 +742,8 @@
       j = @ik_n - 2 if j > @ik_n - 2
       u = clamp((s - @ik_h * j) / @ik_h, ~0.0, ~1.0)
       err = frame.torso_pitch - (@ik_pr[j] + (@ik_pr[j + 1] - @ik_pr[j]) * u)
+      err = ~0.0 if @ik_fbclip > ~0.5 && err < ~0.0
+      err = ~0.0 if @ik_fbclip < ~-0.5 && err > ~0.0
       rate = frame.torso_pitch_rate
       kp = @ik_kp[t]
       kd = @ik_kd[t]
@@ -771,6 +784,7 @@
     @il_landed = false
     @il_first = true
     @il_s_prev = ~-99.0
+    @il_zf = ~-99.0
     enter(f, t, fr, :il)
 
   # With `il_tg` > 0 the program time before the sand is il_tg minus the
@@ -819,6 +833,36 @@
     while m < body.size
       ctl.add_drive(m, kp[m] * err + kd[m] * rate)
       m += 1
+    il_clearance(frame, ctl, s) if @il_cl
+    self
+
+  # Time-to-strike reflex: before the designed landing (the program is more
+  # than il_clt s from il_ld) a foot closing on the sand with less than il_ctau
+  # s to go (the lowest of the four toe / heel points' height over its fall
+  # speed, from the last tick's height) adds per-muscle gain x (il_ctau - time)
+  # to the drive: in a short flight the feet come up instead of striking the
+  # sand with the legs hanging down.
+  -> il_clearance(frame, ctl, s)
+    z = frame.at("toes", 1)
+    z = frame.at("toes", 3) if frame.at("toes", 3) < z
+    z = frame.at("toes", 5) if frame.at("toes", 5) < z
+    z = frame.at("toes", 7) if frame.at("toes", 7) < z
+    zp = z
+    zp = @il_zf if @il_zf > ~-90.0
+    @il_zf = z
+    if !@il_landed && s < @il_ld - @il_clt
+      vzf = (z - zp) / ctl.dt
+      if vzf < ~-0.3
+        zz = z
+        zz = ~0.0 if zz < ~0.0
+        tau = zz / (~0.0 - vzf)
+        if tau < @il_ctau
+          e = @il_ctau - tau
+          kc = @il_kc[@st]
+          m = 0
+          while m < body.size
+            ctl.add_drive(m, kc[m] * e)
+            m += 1
     self
 
   # One tick of a knot program at program time s: every muscle's target is the

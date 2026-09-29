@@ -25,15 +25,13 @@ def run(job):
 
     def make2(*a, **k):
         env = orig_make(*a, **k)
-        orig_reset = env.reset
+        u = env.unwrapped
+        orig_grs = u._get_reset_state
 
-        def reset2(*ra, **rk):
-            out = orig_reset(*ra, **rk)
-            u = env.unwrapped
-            d, m = u.mj_data, u.mj_model
+        def grs():
+            qn, qv = orig_grs()          # the env's own randomized state (noise drawn from its seeded rng)
+            m = u.mj_model
             q = q_p1.copy()
-            qn = d.qpos.copy()
-            # P2 noise on every non-root coordinate, scaled
             for j in range(m.njnt):
                 if m.jnt_type[j] in (2, 3):
                     adr = m.jnt_qposadr[j]
@@ -41,11 +39,8 @@ def run(job):
             ra = m.jnt_qposadr[m.joint("root").id]
             q[ra] = q_p1[ra] + dx
             q[ra + 1] = q_p1[ra + 1] + dy
-            d.qpos[:] = q
-            d.qvel[:] = 0
-            mujoco.mj_forward(m, d)
-            return out
-        env.reset = reset2
+            return q, np.zeros_like(qv)
+        u._get_reset_state = grs
         return env
     mgym.make = make2
     try:

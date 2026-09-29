@@ -669,6 +669,7 @@ def read_ik(path, names, plant, nk=None):
             for q in tab:
                 tab[q][k, i] = p.get(f"ik_{key[q]}{k}_{role}", 0.0)
     tab["fmin"] = p.get("ik_fmin", 0.05)
+    tab["fbclip"] = int(round(p.get("ik_fbclip", 0.0)))
     if "ik_pr0" in p:
         tab["pr"] = np.array([p.get(f"ik_pr{k}", 0.0) for k in range(n)])
         tab["fkp"] = np.array([p.get(f"ik_kp_{role_of(nm, plant)}", 0.0) for nm in names])
@@ -787,6 +788,11 @@ class IKProgram:
             u = min(max((s - self.h * j) / self.h, 0.0), 1.0)
             pr = tab["pr"]
             err = body.torso_pitch() - (pr[j] + (pr[j + 1] - pr[j]) * u)
+            fbc = tab.get("fbclip", 0)
+            if fbc > 0:
+                err = max(err, 0.0)   # leaning more forward than the program's own average only
+            elif fbc < 0:
+                err = min(err, 0.0)
             out = out + tab["fkp"] * err + tab["fkd"] * torso_rate(body)
         if "ckc" in tab and not self.td_seen and s < self.td - tab["clt"]:
             z = min(float(d.site_xpos[self.site_toe][2]), float(d.site_xpos[self.site_heel][2]))
@@ -936,6 +942,297 @@ def write_program(path, x, base, meta, n, mus, plant, pfile, best, gaps):
 
 
 # ---------------------------------------------------------------------------
+# residuals learned around a fixed take-off program (`robustfb`)
+#
+# The program's knots stay as they are; on top of it (LongJumpRunSkill#ik_feedback)
+# a zero-initialised feedback: per-muscle gains on the torso pitch's error against
+# the program's own average pitch trajectory and on its rate (the approach's trunk
+# lean sets how strong the take-off is: vz falls ~4 m/s per rad of pitch at the
+# penultimate touchdown), and per-muscle gains on the swing foot's clearance
+# deficit (a foot dragging along the runway before the plant scuffs the whole
+# take-off). Trained on many captured approaches; the score is the board-relative
+# ballistic distance (board_score) with the check-mark shift `delta`, tail-weighted.
+
+KP_SCALE, KD_SCALE, KC_SCALE = 16.0, 2.0, 60.0   # x in [0, 1], 0.5 = zero gain
+
+
+class RecProg(IKProgram):
+    """IKProgram that records (program time, torso pitch) every tick."""
+
+    def start(self, body, cap):
+        super().start(body, cap)
+        self.rec = []
+
+    def __call__(self, body, t, k):
+        out = super().__call__(body, t, k)
+        self.rec.append((self.s, body.torso_pitch()))
+        return out
+
+
+def nominal_pitch(body, caps, base, meta):
+    """The torso pitch at each program knot, averaged over the captured starts."""
+    ks = meta["h"] * np.arange(meta["nk"])
+    acc = []
+    for cap in caps:
+        prog = RecProg(base, meta["h"], meta["td"], meta["g"], meta["kdc"], meta["kp"], meta["kd"], meta["gap0"], meta["end"])
+        r = simulate_prog(body, cap, prog)
+        if not r["valid"]:
+            continue
+        s = np.array([x[0] for x in prog.rec])
+        pt = np.array([x[1] for x in prog.rec])
+        keep = np.r_[True, np.diff(s) > 1e-9]   # (the clock waits at the ideal touchdown: keep the first tick)
+        acc.append(np.interp(ks, s[keep], pt[keep]))
+    return np.mean(acc, axis=0)
+
+
+def board_score2(r, cap, lmax, delta, vzmin=0.0, vzw=0.0):
+    """board_score with the foul line `delta` m farther than the capture's (a
+    check mark moved back: the program's own gap feedback is unchanged), and a
+    penalty vzw per m/s of take-off vz below vzmin (a low, short flight lands
+    with the legs still hanging: the landings that roll over are the weak
+    take-offs)."""
+    if not r["valid"]:
+        return -5.0 + r.get("t", 0.0) + 0.5 * r.get("progress", 0.0)
+    board = cap["board_x"] + delta
+    s = r["D"] - (board - r["toe_max"])
+    if r["toe_max"] > board:
+        s = -1.0 - 4.0 * (r["toe_max"] - board)
+    s -= 0.1 * r["other_foot"]
+    if r["L"] > lmax:
+        s -= 0.2 * (r["L"] - lmax)
+    p = r["torso_pitch"]
+    s -= 2.0 * (max(0.0, p - 0.8) + max(0.0, -0.5 - p))
+    if vzw > 0.0:
+        s -= vzw * max(0.0, vzmin - r["vz"])
+    return s
+
+
+def _fbdecode(x, base, pr, nk, n):
+    tab = dict(base)
+    tab["pr"] = pr
+    tab["fkp"] = (x[:n] - 0.5) * KP_SCALE
+    tab["fkd"] = (x[n:2 * n] - 0.5) * KD_SCALE
+    tab["ckc"] = (x[2 * n:3 * n] - 0.5) * KC_SCALE
+    tab["clz"] = 0.02 + 0.10 * float(x[3 * n])
+    tab["clt"] = 0.04
+    tab["fmin"] = 0.05 + 1.45 * float(np.round(x[3 * n + 1]))   # a switch: 0.05 (any touch) or 1.5 BW
+    return tab
+
+
+def _fbeval(job):
+    x, base, pr, meta = job
+    body, caps = _R["body"], _R["caps"]
+    n = len(body.muscles)
+    tab = _fbdecode(np.asarray(x), base, pr, meta["nk"], n)
+    prog = IKProgram(tab, meta["h"], meta["td"], meta["g"], meta["kdc"], meta["kp"], meta["kd"], meta["gap0"], meta["end"])
+    sc = np.array([board_score2(simulate_prog(body, cap, prog), cap, meta["lmax"], meta["delta"], meta["vzmin"], meta["vzw"])
+                   for cap in caps])
+    return tail_score(sc, meta), {"mean": float(sc.mean()), "min": float(sc.min()), "scores": sc.tolist()}
+
+
+def tail_score(sc, meta):
+    q = max(1, int(round(meta["tail_q"] * len(sc))))
+    worst = np.sort(sc)[:q].mean()
+    return float((1.0 - meta["tail_w"]) * sc.mean() + meta["tail_w"] * worst)
+
+
+def _fbworker(names):
+    _rworker(names)
+
+
+def fb_capture_names(a):
+    import glob
+    names = sorted(os.path.basename(p)[:-len("_capture.npz")] for p in glob.glob(os.path.join(OUT, f"{a.prefix}_s*_capture.npz")))
+    hold = [n for i, n in enumerate(names) if a.holdout and i % a.holdout == a.holdout - 1]
+    train = [n for n in names if n not in hold]
+    return train, hold
+
+
+def write_fb(path, base_file, tab, pr, plant, mus):
+    """base program file + the feedback lines."""
+    keep = []
+    for line in open(base_file):
+        k = line.split()[0] if line.split() else ""
+        if k.startswith(("ik_pr", "ik_kp_", "ik_kd_", "ik_kc_")) or k in ("ik_clz", "ik_clt", "ik_fmin", "ik_fbclip"):
+            continue
+        keep.append(line.rstrip("\n"))
+    lines = keep + ["ik_fmin %r" % float(tab["fmin"]), "ik_clz %r" % float(tab["clz"]), "ik_clt %r" % float(tab["clt"]),
+                    "ik_fbclip %r" % float(tab.get("fbclip", 0))]
+    lines += [f"ik_pr{k} {float(v)!r}" for k, v in enumerate(pr)]
+    for i, nm in enumerate(mus):
+        role = role_of(nm, plant)
+        lines += [f"ik_kp_{role} {float(tab['fkp'][i])!r}", f"ik_kd_{role} {float(tab['fkd'][i])!r}",
+                  f"ik_kc_{role} {float(tab['ckc'][i])!r}"]
+    with open(path, "w") as f:
+        f.write("\n".join(lines) + "\n")
+
+
+def summarise(scores, label):
+    sc = np.array(scores)
+    return (f"{label}: n {len(sc)} mean {sc.mean():.3f} min {sc.min():.2f} invalid {int((sc < -3).sum())} "
+            f"foul {int(((sc < 0) & (sc > -3)).sum())} weak(<4.2) {int(((sc >= 0) & (sc < 4.2)).sum())}")
+
+
+def _gtab(g, base, pr, meta):
+    tab = dict(base)
+    tab["pr"] = pr
+    tab["fbclip"] = meta["fbclip"]
+    tab["fkp"], tab["fkd"], tab["ckc"] = g["kp"], g["kd"], g["kc"]
+    tab["clz"], tab["clt"], tab["fmin"] = meta["clz"], meta["clt"], meta["fmin"]
+    return tab
+
+
+def _geval(job):
+    g, base, pr, meta = job
+    body, caps = _R["body"], _R["caps"]
+    prog = IKProgram(_gtab(g, base, pr, meta), meta["h"], meta["td"], meta["g"], meta["kdc"], meta["kp"], meta["kd"],
+                     meta["gap0"], meta["end"])
+    sc = np.array([board_score2(simulate_prog(body, cap, prog), cap, meta["lmax"], meta["delta"], meta["vzmin"], meta["vzw"])
+                   for cap in caps])
+    return tail_score(sc, meta), {"mean": float(sc.mean()), "min": float(sc.min()), "scores": sc.tolist()}
+
+
+def greedyfb(a):
+    """Forward selection of feedback gains around the fixed take-off program: each round every single-channel move
+    (a per-muscle pitch-feedback gain kp / kd, a per-muscle clearance-reflex gain kc) is tried on all the training
+    starts and the best one kept; stops when no move improves the tail-weighted score by --eps."""
+    from search import read_params
+    train, hold = fb_capture_names(a)
+    caps = [load_capture(n) for n in train]
+    body = Body(caps[0]["task"], caps[0]["board_x"], json.loads(caps[0]["env"]))
+    mus = body.muscles
+    n = len(mus)
+    plant = caps[0]["plant"]
+    kp, kd = reflex_gains(mus, json.loads(caps[0]["params"]))
+    pfile, base = read_ik(a.ik, mus, plant)
+    nk = int(round(pfile["ik_n"]))
+    meta = {"nk": nk, "h": pfile["ik_h"], "td": pfile["ik_td"], "g": pfile["j_ik_g"], "kdc": pfile.get("j_ik_kdc", 1.0),
+            "kp": kp, "kd": kd, "gap0": pfile["ik_gap0"], "end": pfile["ik_end"], "lmax": float(a.lmax), "delta": a.delta,
+            "tail_q": a.tail_q, "tail_w": a.tail_w, "vzmin": a.vzmin, "vzw": a.vzw, "fbclip": a.fbclip, "clz": a.clz,
+            "clt": a.clt, "fmin": 1.5 if a.fmin_on else 0.05}
+    pr = nominal_pitch(body, caps, base, meta)
+    g = {"kp": np.zeros(n), "kd": np.zeros(n), "kc": np.zeros(n)}
+    if a.init:
+        pi = read_params(a.init)
+        for key, pre in (("kp", "ik_kp_"), ("kd", "ik_kd_"), ("kc", "ik_kc_")):
+            g[key] = np.array([pi.get(pre + role_of(m_, plant), 0.0) for m_ in mus])
+    steps = {"kp": [float(x) for x in a.kp_steps.split(",")], "kd": [float(x) for x in a.kd_steps.split(",")],
+             "kc": [float(x) for x in a.kc_steps.split(",")]}
+    channels = [c for c in a.channels.split(",") if c]
+    muscles = [i for i, m_ in enumerate(mus) if not a.only or any(sub in m_ for sub in a.only.split(","))]
+    hold_caps = [load_capture(nm) for nm in hold]
+
+    def hold_eval(gg):
+        prog = IKProgram(_gtab(gg, base, pr, meta), meta["h"], meta["td"], meta["g"], meta["kdc"], kp, kd, meta["gap0"], meta["end"])
+        return [board_score2(simulate_prog(body, cap, prog), cap, meta["lmax"], meta["delta"], meta["vzmin"], meta["vzw"])
+                for cap in hold_caps]
+
+    t0 = time.time()
+    with mp.Pool(a.workers, initializer=_fbworker, initargs=(train,)) as pool:
+        f_cur, m_cur = pool.apply(_geval, ((g, base, pr, meta),))
+        print(f"start (no feedback, plant latch {meta['fmin']}): tail {f_cur:.3f} " + summarise(m_cur["scores"], "train"), flush=True)
+        if hold_caps:
+            print("   " + summarise(hold_eval(g), "held out"), flush=True)
+        for rnd in range(a.rounds):
+            cands, labels = [], []
+            for ch in channels:
+                for i in muscles:
+                    for st in steps[ch]:
+                        g2 = {k: v.copy() for k, v in g.items()}
+                        g2[ch][i] += st
+                        cands.append((g2, base, pr, meta))
+                        labels.append((ch, mus[i], st))
+            res = pool.map(_geval, cands, chunksize=1)
+            f = np.array([r[0] for r in res])
+            j = int(np.argmax(f))
+            print(f"round {rnd + 1}: {len(cands)} moves ({time.time() - t0:.0f}s); best {labels[j]} -> tail {f[j]:.3f} "
+                  f"(was {f_cur:.3f}); next best " + ", ".join(f"{labels[k]} {f[k]:.3f}" for k in np.argsort(-f)[1:4]), flush=True)
+            if f[j] < f_cur + a.eps:
+                print("no move improves the score; stopping")
+                break
+            g, f_cur, m_cur = cands[j][0], float(f[j]), res[j][1]
+            print("   " + summarise(m_cur["scores"], "train"), flush=True)
+            if hold_caps:
+                print("   " + summarise(hold_eval(g), "held out"), flush=True)
+            write_fb(a.out, a.ik, _gtab(g, base, pr, meta), pr, plant, mus)
+    write_fb(a.out, a.ik, _gtab(g, base, pr, meta), pr, plant, mus)
+    print("gains: " + ", ".join(f"{ch}[{mus[i]}]={g[ch][i]:+.1f}" for ch in ("kp", "kd", "kc") for i in range(n) if g[ch][i] != 0.0))
+
+
+def robustfb(a):
+    from search import make_optimizer, read_params
+    train, hold = fb_capture_names(a)
+    caps = [load_capture(n) for n in train]
+    body = Body(caps[0]["task"], caps[0]["board_x"], json.loads(caps[0]["env"]))
+    mus = body.muscles
+    n = len(mus)
+    params = json.loads(caps[0]["params"])
+    kp, kd = reflex_gains(mus, params)
+    pfile, base = read_ik(a.ik, mus, caps[0]["plant"])
+    nk = int(round(pfile["ik_n"]))
+    meta = {"nk": nk, "h": pfile["ik_h"], "td": pfile["ik_td"], "g": pfile["j_ik_g"], "kdc": pfile.get("j_ik_kdc", 1.0),
+            "kp": kp, "kd": kd, "gap0": pfile["ik_gap0"], "end": pfile["ik_end"], "lmax": float(a.lmax), "delta": a.delta,
+            "tail_q": a.tail_q, "tail_w": a.tail_w, "vzmin": a.vzmin, "vzw": a.vzw}
+    pr = nominal_pitch(body, caps, base, meta)
+    print(f"robustfb: {len(caps)} training starts, {len(hold)} held out; nominal pitch by knot {np.round(pr, 2).tolist()}", flush=True)
+    x0 = np.concatenate([np.full(3 * n, 0.5), [0.3, 0.0]])
+    if a.init:
+        # resume: an earlier robustfb file's gains
+        pi = read_params(a.init)
+        x0[:n] = [pi.get(f"ik_kp_{role_of(m_, caps[0]['plant'])}", 0.0) / KP_SCALE + 0.5 for m_ in mus]
+        x0[n:2 * n] = [pi.get(f"ik_kd_{role_of(m_, caps[0]['plant'])}", 0.0) / KD_SCALE + 0.5 for m_ in mus]
+        x0[2 * n:3 * n] = [pi.get(f"ik_kc_{role_of(m_, caps[0]['plant'])}", 0.0) / KC_SCALE + 0.5 for m_ in mus]
+        x0[3 * n] = (pi.get("ik_clz", 0.05) - 0.02) / 0.10
+        x0[3 * n + 1] = 1.0 if pi.get("ik_fmin", 0.05) > 0.5 else 0.0
+        x0 = np.clip(x0, 0.0, 1.0)
+    if a.fmin_on:
+        x0[3 * n + 1] = 1.0
+    opt = make_optimizer(a.method, x0, sigma0=a.sigma, seed=a.seed, **({"popsize": a.pop} if a.pop else {}))
+    t0 = time.time()
+    used, gen = 0, 0
+    hold_caps = [load_capture(nm) for nm in hold]
+
+    def hold_eval(x):
+        tab = _fbdecode(np.asarray(x), base, pr, nk, n)
+        prog = IKProgram(tab, meta["h"], meta["td"], meta["g"], meta["kdc"], meta["kp"], meta["kd"], meta["gap0"], meta["end"])
+        return [board_score2(simulate_prog(body, cap, prog), cap, meta["lmax"], meta["delta"], meta["vzmin"], meta["vzw"])
+                for cap in hold_caps]
+
+    with mp.Pool(a.workers, initializer=_fbworker, initargs=(train,)) as pool:
+        f0, m0 = pool.apply(_fbeval, ((x0, base, pr, meta),))
+        # the unmodified program on the same starts, for reference
+        xz = np.concatenate([np.full(3 * n, 0.5), [0.3, 0.0]])
+        fz, mz = pool.apply(_fbeval, ((xz, base, pr, meta),))
+        print("base program  ", summarise(mz["scores"], "train"), f"tail-score {fz:.3f}", flush=True)
+        if hold_caps:
+            print("base program  ", summarise(hold_eval(xz), "held out"), flush=True)
+        best = (f0, x0.copy(), m0)
+        print("start         ", summarise(m0["scores"], "train"), f"tail-score {f0:.3f}", flush=True)
+        while used < a.evals:
+            X = np.clip(np.atleast_2d(opt.ask()), 0.0, 1.0)
+            res = pool.map(_fbeval, [(x, base, pr, meta) for x in X], chunksize=1)
+            f = np.array([r[0] for r in res])
+            opt.tell(X, f, [r[1] for r in res])
+            used += len(X) * len(caps)
+            gen += 1
+            i = int(np.argmax(f))
+            if f[i] > best[0]:
+                best = (float(f[i]), X[i].copy(), res[i][1])
+            if gen % a.report == 0:
+                print(f"gen {gen} sims {used} ({time.time() - t0:.0f}s) best {best[0]:.3f} " +
+                      summarise(best[2]["scores"], "train"), flush=True)
+                tabb = _fbdecode(best[1], base, pr, nk, n)
+                write_fb(a.out, a.ik, tabb, pr, caps[0]["plant"], mus)
+                if hold_caps and gen % (a.report * 3) == 0:
+                    print("             ", summarise(hold_eval(best[1]), "held out"), flush=True)
+    tabb = _fbdecode(best[1], base, pr, nk, n)
+    write_fb(a.out, a.ik, tabb, pr, caps[0]["plant"], mus)
+    print("done", summarise(best[2]["scores"], "train"))
+    if hold_caps:
+        print(summarise(hold_eval(best[1]), "held out"))
+
+
+# ---------------------------------------------------------------------------
 # the landing program (`landing`): from the take-off program's handover to
 # the end of the landing, latched on the first sand contact
 #
@@ -966,6 +1263,9 @@ def torso_rate(body):
     return float(v[1])
 
 
+CKC_L = 20.0   # the landing's time-to-strike gains: (x - 0.5) x 20 drive per second of deficit
+
+
 class LandingProgram:
     def __init__(self, tab, h, ld, g, kdc, kp, kd, lead=0.0, delay=0):
         self.tab, self.h, self.ld, self.g, self.kdc, self.kp, self.kd = tab, h, ld, g, kdc, kp, kd
@@ -981,6 +1281,10 @@ class LandingProgram:
         # instead of to the hand-over (a low or short flight lands earlier)
         self.tg = tab.get("tg", 0.0) if isinstance(tab, dict) else 0.0
         self.zl = tab.get("zl", LAND_Z) if isinstance(tab, dict) else LAND_Z
+        # the time-to-strike reflex (il_ctau, il_clt, il_kc_*; LongJumpRunSkill#il_clearance)
+        self.ck = tab.get("ckc") if isinstance(tab, dict) else None
+        self.ctau = tab.get("ctau", 0.2) if isinstance(tab, dict) else 0.2
+        self.clt = tab.get("clt", 0.10) if isinstance(tab, dict) else 0.10
 
     def start(self, body):
         m = body.m
@@ -989,6 +1293,8 @@ class LandingProgram:
         self.shift, self.landed = self.lead, False
         self.seen = 0
         self.s_prev = -1e9
+        self.sites = [m.site(n).id for n in ("l_toe", "l_heel", "r_toe", "r_heel")]
+        self.zf_prev = None
 
     def time_to_land(self, body):
         d = body.d
@@ -1033,6 +1339,19 @@ class LandingProgram:
             pr = self.tab["pr"]
             err = body.torso_pitch() - (pr[j] + (pr[j + 1] - pr[j]) * u)
             out = out + self.tab["fkp"] * err + self.tab["fkd"] * torso_rate(body)
+        if self.ck is not None:
+            # time-to-strike reflex: before the designed landing (the program is more than clt s from il_ld) a foot
+            # closing on the sand with less than ctau s to go (its lowest point's height over its fall speed, from
+            # the last tick's height) adds gain x (ctau - time) to the drive: the feet come up in a short flight
+            z = min(float(d.site_xpos[i][2]) for i in self.sites)
+            zp = z if self.zf_prev is None else self.zf_prev
+            self.zf_prev = z
+            if not self.landed and s < self.ld - self.clt:
+                vzf = (z - zp) / body.dt_ctl
+                if vzf < -0.3:
+                    tau = max(z, 0.0) / (-vzf)
+                    if tau < self.ctau:
+                        out = out + self.ck * (self.ctau - tau)
         return out
 
 
@@ -1208,8 +1527,22 @@ def landing_base(rec, names, plant, h, nk, ld):
 _L = {}
 
 
-def _lworker(ho_name, cap_name):
-    _L["hos"] = [h for nm in ho_name.split(",") for h in load_handover(nm)]
+def keep_handovers(hos, ignore_foul):
+    """The hand-overs a landing search trains on: a take-off that is invalid
+    (a scuff, no take-off) has no flight to land; a foul is the take-off's
+    business, its flight is a legal flight for the landing."""
+    out = []
+    for h in hos:
+        if not h["valid"]:
+            continue
+        if ignore_foul:
+            h = dict(h, foul=False)
+        out.append(h)
+    return out
+
+
+def _lworker(ho_name, cap_name, ignore_foul=False):
+    _L["hos"] = keep_handovers([h for nm in ho_name.split(",") for h in load_handover(nm)], ignore_foul)
     c0 = load_capture(cap_name)
     _L["body"] = Body(c0["task"], c0["board_x"], json.loads(c0["env"]))
 
@@ -1221,12 +1554,17 @@ def _ldecode(x, base, nk, n):
     g = float(np.clip(x[2 * k], 0.0, 1.0)) * 1.5
     tab = {"c": base["c"] + dC, "v": base["v"], "a": base["a"], "e": E, "e1": np.zeros_like(E), "lz": base.get("lz", 9.0),
            "tg": base.get("tg", 0.0), "zl": base.get("zl", LAND_Z)}
-    if len(x) > 2 * k + 1:
+    cl = n + 1 if base.get("cl") else 0   # the time-to-strike reflex's dims come last: n gains and the time horizon
+    if len(x) - cl > 2 * k + 1:
         # rotation feedback: pitch reference knots (rad), per-muscle gains
         o = 2 * k + 1
         tab["pr"] = (x[o:o + nk] - 0.5) * 4.0
         tab["fkp"] = (x[o + nk:o + nk + n] - 0.5) * 4.0
         tab["fkd"] = (x[o + nk + n:o + nk + 2 * n] - 0.5) * 1.0
+    if cl:
+        tab["ckc"] = (x[-n - 1:-1] - 0.5) * CKC_L
+        tab["ctau"] = 0.05 + 0.25 * float(x[-1])
+        tab["clt"] = base.get("clt", 0.10)
     return tab, g
 
 
@@ -1246,12 +1584,18 @@ def _leval(job):
         marks.append(r.get("mark"))
     sc = np.array(sc)
     mean = float(sc.mean())
-    return mean - meta["risk"] * (mean - float(sc.min())), {"mean": mean, "min": float(sc.min()), "scores": sc.tolist()}
+    if meta.get("tail_q", 0.0) > 0.0:
+        # the mean of the worst tail_q of the starts instead of the single worst
+        q = max(1, int(round(meta["tail_q"] * len(sc))))
+        worst = float(np.sort(sc)[:q].mean())
+    else:
+        worst = float(sc.min())
+    return mean - meta["risk"] * (mean - worst), {"mean": mean, "min": float(sc.min()), "scores": sc.tolist()}
 
 
 def landing(a):
     from search import make_optimizer, read_params
-    hos = [h for nm in a.handover.split(",") for h in load_handover(nm)]
+    hos = keep_handovers([h for nm in a.handover.split(",") for h in load_handover(nm)], a.ignore_foul)
     c0 = load_capture(a.capture)
     body = Body(c0["task"], c0["board_x"], json.loads(c0["env"]))
     mus = body.muscles
@@ -1261,13 +1605,15 @@ def landing(a):
     ld = float(rec["t_land"]) if a.ld is None else a.ld
     base = landing_base(rec, mus, c0["plant"], a.h, a.nk, ld)
     base["lz"] = a.lz
+    base["cl"] = bool(a.clearance)
+    base["clt"] = a.clt
     if a.tg:
         # the ballistic-time clock (il_tg): the time-to-land at the design's hand-over; the COM height it falls to is
         # the take-off program's j_land_z (the skill's time_to_land)
         base["tg"] = a.tg
         base["zl"] = float(json.loads(c0["params"]).get("j_land_z", LAND_Z))
     meta = {"nk": a.nk, "h": a.h, "ld": ld, "kp": kp, "kd": kd, "risk": a.risk, "seconds": a.seconds,
-            "jitter": a.jitter}
+            "jitter": a.jitter, "tail_q": a.tail_q}
     n = len(mus)
     x0 = np.concatenate([np.clip(base["e"], 0, 1).ravel(), np.full(a.nk * n, 0.5), [a.g0 / 1.5]])
     if a.init:
@@ -1300,10 +1646,19 @@ def landing(a):
             fb[a.nk:a.nk + n] = [pi.get(f"il_kp_{role_of(m_, c0['plant'])}", 0.0) / 4.0 + 0.5 for m_ in mus]
             fb[a.nk + n:] = [pi.get(f"il_kd_{role_of(m_, c0['plant'])}", 0.0) / 1.0 + 0.5 for m_ in mus]
         x0 = np.concatenate([x0, fb])
+    if a.clearance:
+        # the time-to-strike reflex starts at zero gain; an init that has it keeps it
+        kc0 = np.full(n, 0.5)
+        ct0 = 0.6
+        if a.init and "il_ctau" in read_params(a.init):
+            pi = read_params(a.init)
+            kc0 = np.array([pi.get(f"il_kc_{role_of(m_, c0['plant'])}", 0.0) / CKC_L + 0.5 for m_ in mus])
+            ct0 = (pi["il_ctau"] - 0.05) / 0.25
+        x0 = np.concatenate([x0, np.clip(kc0, 0.0, 1.0), [float(np.clip(ct0, 0.0, 1.0))]])
     opt = make_optimizer(a.method, x0, sigma0=a.sigma, seed=a.seed, **({"popsize": a.pop} if a.pop else {}))
     t0 = time.time()
     used, gen = 0, 0
-    with mp.Pool(a.workers, initializer=_lworker, initargs=(a.handover, a.capture)) as pool:  # (_lworker splits the names)
+    with mp.Pool(a.workers, initializer=_lworker, initargs=(a.handover, a.capture, a.ignore_foul)) as pool:  # (_lworker splits the names)
         f0, m0 = pool.apply(_leval, ((x0, base, meta),))
         best = (f0, x0.copy(), m0)
         print(f"landing: {len(hos)} starts, sand at {ld:.3f} s after the handover, {len(x0)} dims; x0 {f0:.3f} "
@@ -1338,6 +1693,9 @@ def read_il(path, names, plant, nk):
     tab["lz"] = p.get("il_lz", 9.0)
     tab["tg"] = p.get("il_tg", 0.0)
     tab["zl"] = p.get("il_zl", LAND_Z)
+    if "il_ctau" in p:
+        tab["ctau"], tab["clt"] = p["il_ctau"], p.get("il_clt", 0.10)
+        tab["ckc"] = np.array([p.get(f"il_kc_{role_of(nm, plant)}", 0.0) for nm in names])
     if "il_pr0" in p:
         tab["pr"] = np.array([p.get(f"il_pr{k}", 0.0) for k in range(nk)])
         tab["fkp"] = np.array([p.get(f"il_kp_{role_of(nm, plant)}", 0.0) for nm in names])
@@ -1359,6 +1717,9 @@ def write_landing(path, best, base, meta, n, mus, plant):
             role = role_of(nm, plant)
             for q in ("c", "v", "a", "e"):
                 lines.append(f"il_{q}{k}_{role} {float(tab[q][k, i])!r}")
+    if "ckc" in tab:
+        lines += [f"il_ctau {float(tab['ctau'])!r}", f"il_clt {float(tab['clt'])!r}"]
+        lines += [f"il_kc_{role_of(nm, plant)} {float(tab['ckc'][i])!r}" for i, nm in enumerate(mus)]
     if "pr" in tab:
         lines += [f"il_pr{k} {float(tab['pr'][k])!r}" for k in range(meta["nk"])]
         for i, nm in enumerate(mus):
@@ -1468,15 +1829,66 @@ def main():
     la.add_argument("--lz", type=float, default=9.0, help="the landing latch needs the COM below this (m)")
     la.add_argument("--tg", type=float, default=0.0, help="the ballistic-time clock: the design's time-to-land at the "
                     "hand-over (s); 0 = the clock runs from the hand-over")
+    la.add_argument("--clearance", action="store_true", help="add the time-to-strike reflex (per-muscle gains, time horizon)")
+    la.add_argument("--clt", type=float, default=0.10, help="the reflex is off within this many s of the designed sand contact")
+    la.add_argument("--ignore-foul", dest="ignore_foul", action="store_true",
+                    help="score a hand-over whose take-off fouled as a legal flight (invalid take-offs are always skipped)")
+    la.add_argument("--tail-q", dest="tail_q", type=float, default=0.0,
+                    help="risk term on the mean of the worst fraction of the starts instead of the single worst")
     la.add_argument("--feedback", action="store_true", help="add the rotation feedback (pitch reference knots, per-muscle pitch / rate gains)")
     la.add_argument("--jitter", action="store_true", help="timing jitter per hand-over (clock lead 0/4/8 ms, sand latch 0/1 tick late)")
     la.add_argument("--out", required=True)
+    fb = sub.add_parser("robustfb", help="learn feedback residuals around a fixed take-off program")
+    fb.add_argument("ik", help="the take-off program (a params file with the ik tables)")
+    fb.add_argument("--prefix", required=True, help="capture name prefix (p95mn -> p95mn_s*_capture.npz)")
+    fb.add_argument("--holdout", type=int, default=4, help="every k-th capture is held out (0 = none)")
+    fb.add_argument("--evals", type=int, default=100000, help="simulations (candidates x starts)")
+    fb.add_argument("--workers", type=int, default=4)
+    fb.add_argument("--method", default="sep_cma")
+    fb.add_argument("--sigma", type=float, default=0.06)
+    fb.add_argument("--pop", type=int, default=0)
+    fb.add_argument("--seed", type=int, default=1)
+    fb.add_argument("--lmax", default="2")
+    fb.add_argument("--delta", type=float, default=0.0, help="the foul line's shift (m): the check mark moved back")
+    fb.add_argument("--vzmin", type=float, default=2.55, help="take-off vz (m/s) below which the score is penalised")
+    fb.add_argument("--vzw", type=float, default=3.0, help="... by this per m/s")
+    fb.add_argument("--tail-q", dest="tail_q", type=float, default=0.1)
+    fb.add_argument("--tail-w", dest="tail_w", type=float, default=0.5)
+    fb.add_argument("--fmin-on", dest="fmin_on", action="store_true", help="start with the plant-latch force switch on")
+    fb.add_argument("--report", type=int, default=5)
+    fb.add_argument("--init")
+    fb.add_argument("--out", required=True)
+    gf = sub.add_parser("greedyfb", help="forward selection of feedback gains around a fixed take-off program")
+    gf.add_argument("ik")
+    gf.add_argument("--prefix", required=True)
+    gf.add_argument("--holdout", type=int, default=4)
+    gf.add_argument("--workers", type=int, default=4)
+    gf.add_argument("--rounds", type=int, default=8)
+    gf.add_argument("--eps", type=float, default=0.005)
+    gf.add_argument("--channels", default="kp", help="comma list of kp,kd,kc")
+    gf.add_argument("--only", default="", help="comma list of muscle name prefixes to try (e.g. 'l_ham,r_ham,spine'), '' = all")
+    gf.add_argument("--kp-steps", dest="kp_steps", default="-8,8")
+    gf.add_argument("--kd-steps", dest="kd_steps", default="-1,1")
+    gf.add_argument("--kc-steps", dest="kc_steps", default="15,40")
+    gf.add_argument("--fbclip", type=int, default=1)
+    gf.add_argument("--clz", type=float, default=0.06)
+    gf.add_argument("--clt", type=float, default=0.04)
+    gf.add_argument("--fmin-on", dest="fmin_on", action="store_true")
+    gf.add_argument("--lmax", default="2")
+    gf.add_argument("--delta", type=float, default=0.05)
+    gf.add_argument("--vzmin", type=float, default=2.55)
+    gf.add_argument("--vzw", type=float, default=3.0)
+    gf.add_argument("--tail-q", dest="tail_q", type=float, default=0.1)
+    gf.add_argument("--tail-w", dest="tail_w", type=float, default=0.3)
+    gf.add_argument("--init")
+    gf.add_argument("--out", required=True)
     p = sub.add_parser("report")
     p.add_argument("names")
     p.add_argument("--tags", default="ideal,free")
     a = ap.parse_args()
     {"capture": capture, "replay": replay, "optimise": optimise, "distil": distil, "robust": robust,
-     "handover": handover, "record": record_landing, "landing": landing, "report": report}[a.cmd](a)
+     "handover": handover, "record": record_landing, "landing": landing, "report": report,
+     "robustfb": robustfb, "greedyfb": greedyfb}[a.cmd](a)
 
 
 if __name__ == "__main__":

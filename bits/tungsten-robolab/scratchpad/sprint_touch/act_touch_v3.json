@@ -1,0 +1,104 @@
+{
+ "label": "touch-only, average v3 body, no RI (r2)",
+ "time": 16.004,
+ "fell": false,
+ "steady_speed": 4.646,
+ "peak_speed_1s": 4.731,
+ "groups": {
+  "hip extensors (glut.)": {
+   "peak": 1.0,
+   "pct90": 29.0,
+   "mean": 0.47,
+   "stance_pct90": 53.5,
+   "stance_mean": 0.83,
+   "swing_pct90": 18.7,
+   "swing_mean": 0.32
+  },
+  "hip flexors (iliops.)": {
+   "peak": 1.0,
+   "pct90": 40.8,
+   "mean": 0.55,
+   "stance_pct90": 0.0,
+   "stance_mean": 0.23,
+   "swing_pct90": 57.9,
+   "swing_mean": 0.69
+  },
+  "hamstrings": {
+   "peak": 1.0,
+   "pct90": 12.6,
+   "mean": 0.42,
+   "stance_pct90": 2.8,
+   "stance_mean": 0.62,
+   "swing_pct90": 16.7,
+   "swing_mean": 0.34
+  },
+  "rectus femoris": {
+   "peak": 0.64,
+   "pct90": 0.0,
+   "mean": 0.32,
+   "stance_pct90": 0.0,
+   "stance_mean": 0.5,
+   "swing_pct90": 0.0,
+   "swing_mean": 0.24
+  },
+  "vasti": {
+   "peak": 1.0,
+   "pct90": 20.2,
+   "mean": 0.41,
+   "stance_pct90": 67.2,
+   "stance_mean": 0.86,
+   "swing_pct90": 0.5,
+   "swing_mean": 0.23
+  },
+  "knee flexors (mono)": {
+   "peak": 1.0,
+   "pct90": 40.1,
+   "mean": 0.59,
+   "stance_pct90": 0.0,
+   "stance_mean": 0.19,
+   "swing_pct90": 56.9,
+   "swing_mean": 0.75
+  },
+  "soleus": {
+   "peak": 1.0,
+   "pct90": 11.8,
+   "mean": 0.3,
+   "stance_pct90": 39.5,
+   "stance_mean": 0.72,
+   "swing_pct90": 0.2,
+   "swing_mean": 0.12
+  },
+  "gastrocnemius": {
+   "peak": 1.0,
+   "pct90": 10.8,
+   "mean": 0.32,
+   "stance_pct90": 36.5,
+   "stance_mean": 0.67,
+   "swing_pct90": 0.0,
+   "swing_mean": 0.17
+  },
+  "dorsiflexors": {
+   "peak": 1.0,
+   "pct90": 13.9,
+   "mean": 0.58,
+   "stance_pct90": 0.0,
+   "stance_mean": 0.26,
+   "swing_pct90": 19.7,
+   "swing_mean": 0.71
+  }
+ },
+ "cci": {
+  "all:hip": 0.25,
+  "all:knee": 0.321,
+  "all:ankle": 0.309,
+  "all:ham/rf": 0.618,
+  "stance:hip": 0.367,
+  "stance:knee": 0.315,
+  "stance:ankle": 0.366,
+  "stance:ham/rf": 0.827,
+  "swing:hip": 0.198,
+  "swing:knee": 0.324,
+  "swing:ankle": 0.28,
+  "swing:ham/rf": 0.448
+ }
+}

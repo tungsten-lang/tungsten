@@ -1,0 +1,45 @@
+# Natural run (right stance; the left step is the mirror): keyframe targets (degrees), from Keyframe Bench
+# https://claude.ai/artifact/HvFRzvSmo8esj7A2ELnxng, pulled 2026-09-27. Touchdown = the runner's achieved pose
+# ("Start from runner now"); mid-stance and toe-off = the human reference, unchanged.
+ref_td_st_hip 32.7
+ref_td_st_knee 35.8
+ref_td_st_ankle -22.2
+ref_td_st_toe 2.0
+ref_td_sw_hip -24.1
+ref_td_sw_knee 44.9
+ref_td_sw_ankle 27.8
+ref_td_sw_toe -8.6
+ref_td_st_shoulder -28.7
+ref_td_st_elbow 80.0
+ref_td_sw_shoulder 35.1
+ref_td_sw_elbow 87.6
+ref_td_spine -6.2
+ref_td_pelvis 7.0
+ref_ms_st_hip 12.0
+ref_ms_st_knee 40.0
+ref_ms_st_ankle -20.0
+ref_ms_st_toe 0.0
+ref_ms_sw_hip 20.0
+ref_ms_sw_knee 110.0
+ref_ms_sw_ankle -5.0
+ref_ms_sw_toe 0.0
+ref_ms_st_shoulder 24.3
+ref_ms_st_elbow 87.4
+ref_ms_sw_shoulder -14.3
+ref_ms_sw_elbow 82.6
+ref_ms_spine 5.9
+ref_ms_pelvis 3.0
+ref_to_st_hip -12.0
+ref_to_st_knee 15.0
+ref_to_st_ankle 25.0
+ref_to_st_toe -30.0
+ref_to_sw_hip 55.0
+ref_to_sw_knee 90.0
+ref_to_sw_ankle -2.0
+ref_to_sw_toe 0.0
+ref_to_st_shoulder 44.9
+ref_to_st_elbow 90.0
+ref_to_sw_shoulder -34.9
+ref_to_sw_elbow 80.0
+ref_to_spine 3.1
+ref_to_pelvis 3.0

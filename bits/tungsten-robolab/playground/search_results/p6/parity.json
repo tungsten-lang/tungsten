@@ -1,0 +1,39 @@
+{
+ "ok": true,
+ "weights": 1302,
+ "seeds": {
+  "0": {
+   "ticks": 751,
+   "inputs_differing": 0,
+   "outputs_differing": 0,
+   "max_input_diff": 0.0,
+   "max_output_diff": 0.0,
+   "vectorised_max_diff": 7.355227538141662e-16,
+   "clamped_fraction": 0.302,
+   "mark": -1.789,
+   "fallen": true
+  },
+  "6001": {
+   "ticks": 751,
+   "inputs_differing": 0,
+   "outputs_differing": 0,
+   "max_input_diff": 0.0,
+   "max_output_diff": 0.0,
+   "vectorised_max_diff": 6.661338147750939e-16,
+   "clamped_fraction": 0.343,
+   "mark": -0.805,
+   "fallen": true
+  },
+  "101": {
+   "ticks": 751,
+   "inputs_differing": 0,
+   "outputs_differing": 0,
+   "max_input_diff": 0.0,
+   "max_output_diff": 0.0,
+   "vectorised_max_diff": 6.800116025829084e-16,
+   "clamped_fraction": 0.311,
+   "mark": 0.0,
+   "fallen": true
+  }
+ }
+}

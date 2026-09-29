@@ -1,0 +1,7 @@
+b2_base|||5.0
+b2_hip_omega30||omega={"hip_flex": 30}|5.0
+b2_ankle_omega27||omega={"ankle": 27}|5.0
+b2_quad_x4||tendon_scale={"quadriceps": 4.0}|5.0
+b2_fvmax1.6||fvmax=1.6|5.0
+b2_solref0.01||foot_solref=[0.01, 1]|5.0
+b2_v4cand||omega={"hip_flex": 30, "ankle": 27};tendon_scale={"quadriceps": 4.0};fvmax=1.6;foot_solref=[0.01, 1]|5.0

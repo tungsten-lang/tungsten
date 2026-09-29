@@ -1,0 +1,2100 @@
+# MyoTT: MyoChallenge 2025 table tennis (myoChallengeTableTennisP1/P2-v0) on
+# the official myoArm + myoTorso body: 273 muscles on wrapped tendons plus
+# the environment's two pelvis position actuators. The paddle is a free body
+# held only by the hand's contacts; the serve comes from the far end,
+# bounces once on our half, and the return must land on the opponent's half.
+#
+# Three tracks on disjoint muscle masks, plus the pelvis motors:
+#
+#   trunk  the 210 torso muscles:
+#            brace  a feed-forward burst on the back extensors while the
+#                   reflexes recruit (the heavy trunk would otherwise fold
+#                   forward in the first tenths of a second and stall there,
+#                   extensors saturated against gravity and the abdominals'
+#                   passive pull)
+#            hold   upright, leaning back trunk_fe (where gravity and that
+#                   passive pull nearly balance)
+#   arm    the 32 shoulder, elbow and wrist muscles:
+#            ready  ease to the ready posture (joint space: a forehand block
+#                   posture, IK offline, then practised as a feed-forward
+#                   command with the servo off), hold while the corrections
+#                   aim the pad; LATCHED on the ball's predicted time to the
+#                   pad's plane falling to t_swing
+#            stroke the stroke: goal = ready + d_push along the push vector
+#                   (the joint change moving the pad along -x with its
+#                   normal held, from the Jacobian model at the pad's
+#                   measured pose), feed-forward burst on the muscles it
+#                   shortens; the corrections freeze; LATCHED on the paddle
+#                   feeling the ball (touching_info) or t_push
+#            follow hold the stroke's goal through the contact
+#            hold   stay (no second touch)
+#   hand   the 31 finger and thumb muscles: the grip, an equilibrium set
+#          inside the paddle (each finger group's thresholds shifted from the
+#          contractions it had when handed the paddle; practised on how
+#          little the pad's normal drifts), eased in over grip_ramp
+#   pelvis the two position actuators: a critically damped reference eased
+#          toward the goal (acceleration capped at pel_amax), plus the force
+#          that reference needs, (m a + c v) / kp, so the 139 kg slide
+#          follows it
+#
+# Seeing and aiming (`before`, every 10 ms). The ball's flight (gravity, one
+# bounce on our half; bounce fitted to the simulator) gives when and where
+# it will cross the pad's plane. The pelvis carries the pad's measured
+# lateral offset onto that crossing (as far as its slide reaches; the trunk
+# leans into the slide, k_lean). The aim law turns a landing point into a
+# pad normal through an impact model fitted to the simulator (normal
+# restitution, a grippy face, the pad's own velocity); the landing point is
+# the one the pad's current normal would give, pulled toward (land_x,
+# land_y) by land_pull and kept in a safe box: the least correction that
+# still lands. Two spring-eased corrections then move the pad, both through
+# damped least squares on the pad's Jacobian (the hand's Jacobians, solved
+# offline at the ready posture, crossed with the pad's measured offset from
+# the palm and its measured normal, so they hold for whatever grasp the
+# hand ends up with; the paddle twists in the fingers in the first 0.2 s):
+#   anticipation  from the plan alone, the joint change that takes the pad
+#                 from its nominal contact state (height, normal) to what
+#                 this serve needs (g_ff)
+#   servo         after t_servo (once the ready movement and the grip have
+#                 settled), a PI loop on the measured pad height, lateral
+#                 error and normal, frozen t_lock before contact
+# The joint corrections become contraction offsets (Skill#joint_offset,
+# equality-slaved joints moved with their masters) on the arm and the
+# trunk's rotation; the reflex layer (lambda model) holds everything.
+#
+# For the randomised phase-2 serve (all opt-in; the phase-1 parameters leave
+# them off, so phase 1 runs exactly as described above):
+#   backhand family  side_mode 0 chooses the side from the predicted crossing
+#                    (Chunk#branch): the forehand `brace`, `ready` and `grip`
+#                    chunks carry a latch that fires on a backhand choice and
+#                    branch into bh_brace / bh_ready (its own posture,
+#                    Jacobians and nominal pad offset) / bh_grip (a harder
+#                    squeeze). The forehand runs unchanged.
+#   anticipation     g_ffz / g_ffn: the joint change (nominal Jacobian) that
+#                    takes the pad from its phase-1 contact height / normal
+#                    to what this serve needs, from the first frame
+#   learned map      lff: joint offsets = W * serve features, W practised by
+#                    iterative learning (the servo's residual corrections)
+#   min-jerk slides  pel_mj: the pelvis moves on a minimum-jerk path re-planned
+#                    on the ball's time to go, arriving slide_margin early
+#   height matching  g_hx: the pelvis slides fore-aft so the rising ball
+#                    crosses the pad's plane at the pad's height
+#   stroke-aware aim k_vs: the aim law expects the stroke's own velocity
+#   spin             spin_mode: the ball's spin estimated from the table bounce
+#                    (MyoTTSpin; the serve's own spin from the opponent's paddle
+#                    model, zero from the challenge's launcher), its push on the
+#                    return in the aim law
+#   stroke families  fam_mode: block / over / chop / give, each a contact
+#                    solution (the paddle's velocity at contact and the face
+#                    the aim law then needs), chosen per serve by robust
+#                    landing margin (Chunk#branch out of `ready`) and struck as
+#                    a Chunk#via keyframe at the contact pose
+#   robust aim       aim_robust: the landing target with the widest margin
+#                    under a face error, instead of the least correction
+#   arm APA, ff      k_apa_arm: shoulder offsets anticipating the pelvis
+#                    slide; ff: internal-model gravity feed-forward
+#   inverse dynamics id_mode: the inertial load of the pelvis slide on the arm
+#                    and trunk joints (the bridge's mass-matrix columns of the
+#                    slide joints times the slide's acceleration) as drive on
+#                    the muscles able to supply it (id_alloc: allocated jointly
+#                    over the coupled shoulder and spine)
+#   fly-by slide     pel_fly: the forehand's lateral slide passes its goal at
+#                    contact still moving and brakes after the ball has gone
+#                    (the braking whips the arm down and across); its
+#                    reference is held to pel_vcap, its goal trimmed by y_trim
+#   sag model        hx_sag: the height matched drops with the planned left
+#                    slide, so the pelvis meets the ball where the sagging
+#                    pad will be
+#   live Jacobians   jac_live: the hand's Jacobians at the measured posture
+#                    (the task's hand_jac sensor) instead of the constants
+#   backhand depth   give (bh_dd_push, bh_dt_swing), aim (bh_dnz, bh_box_dx),
+#                    a serve-timed swing (bh_tdur), later contact (bh_dz_hit,
+#                    bh_dx_hi): all screened worse than the round-3 backhand
+#   backhand, round 5 (all screened worse than re-practising the backhand
+#                    with live Jacobians, except where noted): its own reflex
+#                    gain (bh_gain) and co-contraction (bh_stiff), postural
+#                    tone once it arrives (bh_ki), its own servo start
+#                    (bh_t_servo; bh_arr: at the timed arrival), a pulse-step
+#                    swing (bh_ps: overshoot, then the posture to hold),
+#                    a swing started a fixed lead before contact (bh_lead),
+#                    the learned map on one side only (lff_side), its own
+#                    stroke families (bh_fam_mode)
+#   strokes, round 5 the backhand topspin flick (flick_mode: a late wrist snap
+#                    chosen while its landing margin holds), the low scoop
+#                    (scoop_mode, forehand, balls crossing low), the
+#                    near-vertical chop (chop_down: the pad moving down)
+
++ MyoTTKin
+  # Joints that equality constraints slave to another joint: [dependent,
+  # independent, coefficient] (dependent = coefficient * independent).
+  -> .couplings
+    [["Abs_r3", "flex_extension", ~0.6429], ["L4_L5_FE", "flex_extension", ~0.185], ["L3_L4_FE", "flex_extension", ~0.204], ["L2_L3_FE", "flex_extension", ~0.231], ["L1_L2_FE", "flex_extension", ~0.255], ["L4_L5_LB", "lat_bending", ~0.1811], ["L3_L4_LB", "lat_bending", ~0.2453], ["L2_L3_LB", "lat_bending", ~0.2501], ["L1_L2_LB", "lat_bending", ~0.188], ["L4_L5_AR", "axial_rotation", ~0.0378], ["L3_L4_AR", "axial_rotation", ~0.0378], ["L2_L3_AR", "axial_rotation", ~0.0311], ["L1_L2_AR", "axial_rotation", ~0.0289], ["sternoclavicular_r2", "shoulder_elv", ~-0.242], ["sternoclavicular_r3", "shoulder_elv", ~0.1025], ["unrotscap_r2", "shoulder_elv", ~0.242], ["unrotscap_r3", "shoulder_elv", ~-0.1025], ["acromioclavicular_r1", "shoulder_elv", ~0.178], ["acromioclavicular_r2", "shoulder_elv", ~-0.049], ["acromioclavicular_r3", "shoulder_elv", ~0.396], ["unrothum_r1", "shoulder_elv", ~-0.178], ["unrothum_r2", "shoulder_elv", ~0.049], ["unrothum_r3", "shoulder_elv", ~-0.396], ["shoulder1_r2", "elv_angle", ~-1.0]]
+
+  -> .trunk_joints
+    ["flex_extension", "lat_bending", "axial_rotation"]
+
+  -> .arm_joints
+    ["elv_angle", "shoulder_elv", "shoulder_rot", "elbow_flexion", "pro_sup", "deviation", "flexion"]
+
+  -> .arm_muscles
+    ["DELT1", "DELT2", "DELT3", "SUPSP", "INFSP", "SUBSC", "TMIN", "TMAJ", "PECM1", "PECM2", "PECM3", "LAT1", "LAT2", "LAT3", "CORB", "TRIlong", "TRIlat", "TRImed", "ANC", "SUP", "BIClong", "BICshort", "BRA", "BRD", "ECRL", "ECRB", "ECU", "FCR", "FCU", "PL", "PT", "PQ"]
+
+  -> .hand_muscles
+    ["FDS5", "FDS4", "FDS3", "FDS2", "FDP5", "FDP4", "FDP3", "FDP2", "EDC5", "EDC4", "EDC3", "EDC2", "EDM", "EIP", "EPL", "EPB", "FPL", "APL", "OP", "RI2", "LU_RB2", "UI_UB2", "RI3", "LU_RB3", "UI_UB3", "RI4", "LU_RB4", "UI_UB4", "RI5", "LU_RB5", "UI_UB5"]
+
+  -> .shoulder_muscles
+    ["DELT1", "DELT2", "DELT3", "SUPSP", "INFSP", "SUBSC", "TMIN", "TMAJ", "PECM1", "PECM2", "PECM3", "LAT1", "LAT2", "LAT3", "CORB"]
+
+  # The hand's Jacobians at the ready posture (the S_grasp site on the
+  # palm; offline, the task's model with the equality-slaved joints moving
+  # with their masters): world linear (m/rad) and angular (rad/rad)
+  # velocity per servo joint, 3 x 8 row-major. With the pad's measured offset
+  # from the palm and its measured normal they give the pad's Jacobian for
+  # whatever grasp the hand ends up with.
+  -> .jv
+    [~-0.220, ~-0.009, ~-0.152, ~-0.099, ~-0.008, ~-0.030, ~-0.056, ~-0.619, ~-0.174, ~0.255, ~-0.186, ~-0.104, ~-0.010, ~-0.020, ~-0.055, ~-0.383, ~0.129, ~0.535, ~-0.030, ~0.308, ~0.009, ~0.076, ~-0.040, ~0.079]
+
+  -> .jw
+    [~-0.278, ~0.830, ~0.497, ~0.427, ~0.812, ~0.403, ~-0.439, ~0.144, ~0.560, ~0.517, ~-0.517, ~0.807, ~-0.577, ~0.832, ~-0.190, ~0.000, ~0.278, ~-0.209, ~0.696, ~0.408, ~0.087, ~0.382, ~0.878, ~1.126]
+
+  # The same at the backhand ready posture (its achieved angles on the
+  # phase-1 serve: plane of elevation 0.38, elevation 0.31, rotation 0.80,
+  # elbow 1.60, forearm 0.18, deviation -0.18, wrist 0.02, trunk turn 0.19).
+  -> .jv_bh
+    [~-0.072, ~-0.165, ~0.299, ~0.059, ~-0.010, ~0.019, ~0.086, ~0.074, ~-0.074, ~0.252, ~-0.142, ~-0.110, ~0.017, ~-0.037, ~0.004, ~-0.270, ~0.080, ~-0.030, ~-0.078, ~0.309, ~-0.049, ~0.068, ~-0.017, ~-0.016]
+
+  -> .jw_bh
+    [~-0.186, ~0.791, ~0.092, ~-0.859, ~0.549, ~-0.846, ~0.192, ~-0.059, ~0.235, ~0.598, ~-0.326, ~0.407, ~0.816, ~0.330, ~-0.545, ~-0.081, ~0.051, ~0.130, ~0.941, ~0.309, ~0.181, ~0.419, ~0.816, ~1.131]
+
+  # The servo's joints: the arm's seven and the trunk's axial rotation (the
+  # whole upper body turning about the spine yaws the paddle).
+  -> .servo_joints
+    ["elv_angle", "shoulder_elv", "shoulder_rot", "elbow_flexion", "pro_sup", "deviation", "flexion", "axial_rotation"]
+
++ MyoTTMath
+  # Solve a x = b for a symmetric positive definite n x n matrix (flat,
+  # row-major); Gaussian elimination without pivoting. Clobbers a and b.
+  -> .solve_spd(a, b, n)
+    i = 0
+    while i < n
+      d = a[n * i + i]
+      k = i + 1
+      while k < n
+        f = a[n * k + i] / d
+        j = i
+        while j < n
+          a[n * k + j] = a[n * k + j] - f * a[n * i + j]
+          j += 1
+        b[k] = b[k] - f * b[i]
+        k += 1
+      i += 1
+    x = (0...n).map -> ~0.0
+    i = n - 1
+    while i >= 0
+      acc = b[i]
+      j = i + 1
+      while j < n
+        acc = acc - a[n * i + j] * x[j]
+        j += 1
+      x[i] = acc / a[n * i + i]
+      i -= 1
+    x
+
+# Ball flight: gravity only (the challenge has no air drag), one bounce on
+# our half of the table (restitution and horizontal loss fitted to the
+# simulator: e 0.99, 0.996; bounce plane 0.805 m, the ball's centre on the
+# table top).
++ MyoTTBall
+  # [t, y, z, vx, vy, vz] when the ball's centre crosses the plane x = xh
+  # (t from now), bouncing first if it has not; nil if it never will.
+  -> .intercept(p, v, xh, bounced)
+    px = p[0]
+    py = p[1]
+    pz = p[2]
+    vx = v[0]
+    vy = v[1]
+    vz = v[2]
+    t0 = ~0.0
+    if !bounced
+      c = pz - ~0.805
+      disc = vz * vz + ~2.0 * ~9.81 * c
+      return nil if disc < ~0.0
+      tb = (vz + Math.sqrt(disc)) / ~9.81
+      px = px + vx * tb
+      py = py + vy * tb
+      vz = ~0.0 - (vz - ~9.81 * tb) * ~0.99
+      vx = vx * ~0.996
+      vy = vy * ~0.996
+      pz = ~0.805
+      t0 = tb
+    return nil if vx < ~0.5
+    th = (xh - px) / vx
+    return nil if th < ~0.0
+    [t0 + th, py + vy * th, pz + vz * th - ~4.905 * th * th, vx, vy, vz - ~9.81 * th]
+
+  # x where the ball, after its bounce on our half, rises through height zt
+  # (its apex x if it never gets that high); nil when no bounce is coming.
+  -> .at_height(p, v, zt, bounced)
+    px = p[0]
+    pz = p[2]
+    vx = v[0]
+    vz = v[2]
+    if !bounced
+      c = pz - ~0.805
+      disc = vz * vz + ~2.0 * ~9.81 * c
+      return nil if disc < ~0.0
+      tb = (vz + Math.sqrt(disc)) / ~9.81
+      px = px + vx * tb
+      vz = ~0.0 - (vz - ~9.81 * tb) * ~0.99
+      vx = vx * ~0.996
+      pz = ~0.805
+    return nil if vx < ~0.5
+    d = vz * vz - ~2.0 * ~9.81 * (zt - pz)
+    t = vz / ~9.81
+    t = (vz - Math.sqrt(d)) / ~9.81 if d > ~0.0
+    t = ~0.0 if t < ~0.0
+    px + vx * t
+
+# Spin: what the ball carries and what it does to the return. One linear
+# friction model for every contact (the opponent's paddle, the table, our
+# pad): a contact removes the fraction k of the slip of the ball's surface
+# over the other surface (u_t + w x (-r n), u the ball's velocity relative
+# to it, n the contact normal toward the ball), and the friction impulse
+# spins the ball by c k (n x slip), c = r m / I. At our pad the slip shows
+# up in the return as k (u_t) lost plus ks r (w x n) gained (topspin
+# jumps up off a still face: close it; backspin drops: open it).
+#
+# Fitted to MyoSuite 2.12.2's own contacts (offline, the privileged
+# angular velocity used only for the fit): table bounce, spin change
+# = cb (dv_t x z) with cb 0.432 (1.5% error); our pad, k 0.011, ks 0.0075,
+# restitution 0.97. The simulator's compiler clamps every body's inertia to
+# 1e-4 kg m^2 (boundinertia), 139 times the shell's 7.2e-7, so the table
+# spins the ball to only ~0.02 rad/s and spin moves the return by under a
+# millimetre per second: the model is exact here, the compensation tiny.
++ MyoTTSpin
+  # Spin a paddle stroke imparts to a spinless ball: face normal n (toward
+  # the ball), paddle velocity vp, ball velocity v.
+  -> .from_paddle(n, vp, v, k, c)
+    u = [v[0] - vp[0], v[1] - vp[1], v[2] - vp[2]]
+    un = u[0] * n[0] + u[1] * n[1] + u[2] * n[2]
+    t = [u[0] - un * n[0], u[1] - un * n[1], u[2] - un * n[2]]
+    g = c * k
+    [g * (n[1] * t[2] - n[2] * t[1]), g * (n[2] * t[0] - n[0] * t[2]), g * (n[0] * t[1] - n[1] * t[0])]
+
+  # Spin change at the table bounce from the observed change of the ball's
+  # horizontal velocity across it: cb (dv x z).
+  -> .from_bounce(dv, cb)
+    [cb * dv[1], ~0.0 - cb * dv[0], ~0.0]
+
+  # What the spin adds to the return off a face with normal n: ks r (w x n).
+  -> .kick(w, n, ks)
+    g = ks * ~0.02
+    [g * (w[1] * n[2] - w[2] * n[1]), g * (w[2] * n[0] - w[0] * n[2]), g * (w[0] * n[1] - w[1] * n[0])]
+
++ MyoTTSkill < Skill
+  -> start(frame, ctl)
+    @ctl = ctl
+    @dt = ctl.dt
+    read_params
+    @arm_mask = names_mask(MyoTTKin.arm_muscles)
+    @hand_mask = names_mask(MyoTTKin.hand_muscles)
+    inside = {}
+    @arm_mask.each ->(k) inside[k] = true
+    @hand_mask.each ->(k) inside[k] = true
+    @trunk_mask = []
+    (0...body.size).each ->(k)
+      @trunk_mask.push(k) if !inside.key?(k)
+    ctl.reflex.set_gains(@trunk_mask, @trunk_kp, @trunk_kd)
+    ctl.reflex.set_gains(@arm_mask, @arm_kp, @arm_kd)
+    ctl.reflex.set_gains(names_mask(MyoTTKin.shoulder_muscles), @sh_kp, @arm_kd)
+    ctl.reflex.set_gains(@hand_mask, @hand_kp, @hand_kd)
+    # optional postural tone adaptation (the reflex layer's clamped integral)
+    ctl.reflex.set_integral(@arm_mask, @ki_musc, @ki_lim) if @ki_musc > ~0.0
+    ctl.reflex.set_integral(@trunk_mask, @ki_trunk_musc, @ki_lim) if @ki_trunk_musc > ~0.0
+    # optional internal-model feed-forward (gravity + Coriolis split over the
+    # muscles able to supply it) on the arm and on the trunk, so the arm
+    # does not sag while the pelvis whips the body sideways
+    # and the inverse-dynamics feed-forward (id_mode): the inertial load
+    # the pelvis slide puts on the arm and the trunk, from the bridge's
+    # mass-matrix columns of the slide joints, on the same muscles
+    @id_on = @id_mode > ~0.5 && frame.has?("mcol_pelvis_y")
+    if @ff > ~0.0 || @id_on
+      ff_mask = []
+      @arm_mask.each ->(k) ff_mask.push(k) if @ff > ~0.0 || @id_arm > ~0.0
+      @trunk_mask.each ->(k) ff_mask.push(k) if @ff_trunk > ~0.5 || (@id_on && @id_trunk > ~0.0)
+      ctl.enable_feedforward(ff_mask, @ff)
+    id_setup if @id_on
+    trunk = [@trunk_fe, @trunk_lb, @trunk_ar]
+    @q_ready = [@elv, @sh_elv, @sh_rot, @elbow, @pro_sup, @dev, @wflex]
+    p_ready = posture(trunk, @q_ready, @stiff)
+    @trunk_bh = [@trunk_fe, @trunk_lb, @bh_trunk_ar]
+    @q_bh = [@bh_elv, @bh_sh_elv, @bh_sh_rot, @bh_elbow, @bh_pro_sup, @bh_dev, @bh_wflex]
+    p_bh = posture(@trunk_bh, @q_bh, @stiff)
+    # the arm's backhand chunks: their own co-contraction (bh_stiff; the
+    # shared stiff otherwise)
+    @bs = @stiff
+    @bs = @bh_stiff if @bh_stiff >= ~0.0
+    p_bha = posture(@trunk_bh, @q_bh, @bs)
+    # Forehand or backhand: decided once, when the ball is first seen (the
+    # predicted crossing's side), by `choose_side`; the forehand chunks carry
+    # a latch that fires on a backhand choice and a branch into the backhand
+    # family, so a forehand runs exactly as it would without them.
+    @side = 0
+    @jv = MyoTTKin.jv
+    @jw = MyoTTKin.jw
+    backhand = Latch.test("backhand", ->(f, e, c) choose_side(f) == 2)
+    to_bh_brace = ->(f, c) side_branch("bh_brace")
+    to_bh_ready = ->(f, c) ready_branch
+    aim = ->(f, c) servo_offsets(f)
+    # The trunk: brace (a feed-forward burst on the back extensors while the
+    # reflexes are still recruiting, so the heavy trunk does not fold
+    # forward in the first tenths of a second), then hold, leaning back.
+    brace = zeros
+    @trunk_mask.each ->(k)
+      nm = body.muscle(k).name
+      brace[k] = @trunk_brace if nm.starts_with?("IL_") || nm.starts_with?("LTp") || nm.starts_with?("MF_")
+    mv = Movement.new("trunk")
+    mv.add(Chunk.new("brace", @t_brace).pose(p_ready).drive(brace).hold_until(Latch.any([Latch.after(@t_brace), backhand])).branch(to_bh_brace).correct(aim, @spring))
+    mv.add(Chunk.new("hold", ~0.05).pose(p_ready).hold_until(Latch.after(~100.0)).correct(aim, @spring))
+    mv.add(Chunk.new("bh_brace", @t_brace).pose(p_bh).drive(brace).correct(aim, @spring))
+    mv.add(Chunk.new("bh_hold", ~0.05).pose(p_bh).hold_until(Latch.after(~100.0)).correct(aim, @spring))
+    ctl.add_track(Track.new("trunk", mv, @trunk_mask))
+    @trunk_q = trunk
+    # The arm: ready (the servo aims the pad) -> stroke, LATCHED on the
+    # ball's predicted time to the pad falling to t_swing (the stroke's goal
+    # and feed-forward burst are set as it fires, from the pad's measured
+    # pose) -> follow, LATCHED on the paddle feeling the ball -> hold.
+    due = Latch.test("due", ->(f, e, c) stroke_due(f))
+    felt = Latch.test("felt", ->(f, e, c) f.at("env_touching_info", 0) > ~0.5)
+    mv2 = Movement.new("arm")
+    # (bh_lead > 0: the arm's backhand swing waits until bh_lead s before
+    # the predicted contact, so every backhand swing is the same movement at
+    # the same phase when the ball arrives; the trunk and grip switch at once)
+    arm_bh = backhand
+    arm_bh = Latch.test("bh_go", ->(f, e, c) bh_go(f)) if @bh_lead > ~0.0
+    mv2.add(Chunk.new("ready", @dur_ready).pose(p_ready).hold_until(Latch.any([due, arm_bh]), ~2.5).branch(to_bh_ready).correct(aim, @spring))
+    @stroke = mv2.add(Chunk.new("stroke", @t_push).pose(p_ready).ease(:min_jerk).hold_until(Latch.any([felt, Latch.after(@t_push)])).correct(aim, @spring))
+    @follow = mv2.add(Chunk.new("follow", @t_follow).pose(p_ready).correct(aim, @spring))
+    mv2.add(Chunk.new("hold", ~0.2).pose(p_ready).hold_until(Latch.after(~100.0)).correct(aim, @spring))
+    # the backhand family: the same chunks from the backhand ready posture
+    # (bh_gain: the backhand arm's reflex gain multiplier, a stiffer arm)
+    # (bh_ps: a pulse-step backhand, see bh_set below: the ready movement
+    # toward the backhand posture is only the pulse, cut off at bh_pulse)
+    bh_latch = due
+    bh_latch = Latch.any([due, Latch.after(@bh_pulse)]) if @bh_ps > ~0.5
+    @bh_ready_c = mv2.add(Chunk.new("bh_ready", @bh_dur).pose(p_bha).gain(@bh_gain).hold_until(bh_latch, ~2.5).correct(aim, @spring))
+    @stroke_bh = mv2.add(Chunk.new("bh_stroke", @t_push).pose(p_bha).gain(@bh_gain).ease(:min_jerk).hold_until(Latch.any([felt, Latch.after(@t_push)])).correct(aim, @spring))
+    @follow_bh = mv2.add(Chunk.new("bh_follow", @t_follow).pose(p_bha).gain(@bh_gain).correct(aim, @spring))
+    mv2.add(Chunk.new("bh_hold", ~0.2).pose(p_bha).gain(@bh_gain).hold_until(Latch.after(~100.0)).correct(aim, @spring))
+    # the stroke families (fam_mode > 0): ready branches into the chosen
+    # family's stroke, a via keyframe at the contact pose t_hit after the
+    # latch (passed with the velocity toward the follow-through, so the pad
+    # is still moving along the solved direction at contact; the Hermite
+    # from rest draws the backswing), then its follow-through
+    @fam_strokes = []
+    @fam_follows = []
+    ["block", "over", "chop", "give"].each ->(nm)
+      @fam_strokes.push(mv2.add(Chunk.new("s_" + nm, @t_hit).pose(p_ready).via.followed_by("f_" + nm).correct(aim, @spring)))
+      @fam_follows.push(mv2.add(Chunk.new("f_" + nm, @t_fol).pose(p_ready).followed_by("hold").correct(aim, @spring)))
+    # the backhand's stroke families (bh_fam_mode > 0): the same keyframed
+    # strokes from the backhand posture, bh_ready branching into them
+    @bh_fam_strokes = []
+    @bh_fam_follows = []
+    if @bh_fam_mode > ~0.5 || (@flick_mode > ~0.5 && @fl_side > ~1.5)
+      @bh_ready_c.branch(->(f, c) bh_fam_branch)
+      ["block", "over", "chop", "give"].each ->(nm)
+        @bh_fam_strokes.push(mv2.add(Chunk.new("sb_" + nm, @t_hit).pose(p_bha).gain(@bh_gain).via.followed_by("fb_" + nm).correct(aim, @spring)))
+        @bh_fam_follows.push(mv2.add(Chunk.new("fb_" + nm, @t_fol).pose(p_bha).gain(@bh_gain).followed_by("bh_hold").correct(aim, @spring)))
+    # the flick (flick_mode > 0): a late wrist snap from the contact pose,
+    # a via keyframe fl_t after it fires (passed with the snap's velocity),
+    # then its follow-through; family 5 on either side
+    @fl_strokes = [nil, nil]
+    @fl_follows = [nil, nil]
+    if @flick_mode > ~0.5
+      @fl_strokes = [mv2.add(Chunk.new("s_flick", @fl_t).pose(p_ready).via.followed_by("f_flick").correct(aim, @spring)), mv2.add(Chunk.new("sb_flick", @fl_t).pose(p_bha).gain(@bh_gain).via.followed_by("fb_flick").correct(aim, @spring))]
+      @fl_follows = [mv2.add(Chunk.new("f_flick", @fl_fol).pose(p_ready).followed_by("hold").correct(aim, @spring)), mv2.add(Chunk.new("fb_flick", @fl_fol).pose(p_bha).gain(@bh_gain).followed_by("bh_hold").correct(aim, @spring))]
+    # the pulse-step backhand (bh_ps 1): the arm is slow to cross the body
+    # (a commanded posture is reached 0.2-0.3 s after the command gets there),
+    # so the backhand posture above is an overshoot pulse that carries the
+    # arm across fast, and at bh_pulse the command steps to the posture the
+    # pad should hold at contact (bh2_*: where the arm can stay, the face
+    # still), eased over bh_set_dur, held until the stroke fires
+    # the low scoop (scoop_mode > 0; forehand): family 6, the same keyframed
+    # stroke from the forehand posture
+    @sc_stroke = nil
+    @sc_follow = nil
+    if @scoop_mode > ~0.5
+      @sc_stroke = mv2.add(Chunk.new("s_scoop", @t_hit).pose(p_ready).via.followed_by("f_scoop").correct(aim, @spring))
+      @sc_follow = mv2.add(Chunk.new("f_scoop", @t_fol).pose(p_ready).followed_by("hold").correct(aim, @spring))
+    @q_set = @q_bh
+    if @bh_ps > ~0.5
+      @q_set = [@bh2_elv, @bh2_sh_elv, @bh2_sh_rot, @bh2_elbow, @bh2_pro_sup, @bh2_dev, @bh2_wflex]
+      p_set = posture(@trunk_bh, @q_set, @bs)
+      mv2.add(Chunk.new("bh_set", @bh_set_dur).pose(p_set).gain(@bh_gain).hold_until(due, ~2.5).branch(->(f, c) bh_fam_branch).followed_by("bh_stroke").correct(aim, @spring))
+      @bh_ready_c.branch(->(f, c) ps_branch)
+    ctl.add_track(Track.new("arm", mv2, @arm_mask))
+    # The grip: the hand holds the paddle as it was handed over (the measured
+    # contractions at the start), each finger's flexors' thresholds
+    # shortened (an equilibrium inside the paddle, so they keep squeezing)
+    # and the extensors' lengthened so they do not fight them; eased in over
+    # grip_ramp.
+    cg = Contraction.measured(frame)
+    gdrive = zeros
+    grip_group(cg, gdrive, ["FPL"], @g_fpl)
+    grip_group(cg, gdrive, ["OP"], @g_op)
+    grip_group(cg, gdrive, ["EPL", "EPB", "APL"], @g_text)
+    grip_group(cg, gdrive, ["FDS2", "FDP2"], @g_idx)
+    grip_group(cg, gdrive, ["RI2", "LU_RB2", "UI_UB2"], @g_idx_int)
+    grip_group(cg, gdrive, ["FDS3", "FDP3", "RI3", "LU_RB3", "UI_UB3"], @g_mid)
+    grip_group(cg, gdrive, ["FDS4", "FDP4", "RI4", "LU_RB4", "UI_UB4", "FDS5", "FDP5", "RI5", "LU_RB5", "UI_UB5"], @g_ring)
+    grip_group(cg, gdrive, ["EDC5", "EDC4", "EDC3", "EDC2", "EDM", "EIP"], @g_fext)
+    # the backhand swings the paddle across the body: its grip squeezes
+    # harder (bh_grip more on every flexor group, bh_grip_drive tonic drive)
+    cb = Contraction.measured(frame)
+    bdrive = zeros
+    grip_group(cb, bdrive, ["FPL"], @g_fpl + @bh_grip)
+    grip_group(cb, bdrive, ["OP"], @g_op + @bh_grip)
+    grip_group(cb, bdrive, ["EPL", "EPB", "APL"], @g_text)
+    grip_group(cb, bdrive, ["FDS2", "FDP2"], @g_idx + @bh_grip)
+    grip_group(cb, bdrive, ["RI2", "LU_RB2", "UI_UB2"], @g_idx_int + @bh_grip)
+    grip_group(cb, bdrive, ["FDS3", "FDP3", "RI3", "LU_RB3", "UI_UB3"], @g_mid + @bh_grip)
+    grip_group(cb, bdrive, ["FDS4", "FDP4", "RI4", "LU_RB4", "UI_UB4", "FDS5", "FDP5", "RI5", "LU_RB5", "UI_UB5"], @g_ring + @bh_grip)
+    grip_group(cb, bdrive, ["EDC5", "EDC4", "EDC3", "EDC2", "EDM", "EIP"], @g_fext)
+    flexors = ["FPL", "OP", "FDS2", "FDP2", "RI2", "LU_RB2", "UI_UB2", "FDS3", "FDP3", "RI3", "LU_RB3", "UI_UB3", "FDS4", "FDP4", "RI4", "LU_RB4", "UI_UB4", "FDS5", "FDP5", "RI5", "LU_RB5", "UI_UB5"]
+    names_mask(flexors).each ->(k)
+      bdrive[k] = clamp(bdrive[k] + @bh_grip_drive, ~0.0, ~1.0)
+    to_bh_grip = ->(f, c) side_branch("bh_grip")
+    mv3 = Movement.new("hand")
+    mv3.add(Chunk.new("grip", @grip_ramp).to(cg).drive(gdrive).hold_until(Latch.any([Latch.after(~100.0), backhand])).branch(to_bh_grip))
+    mv3.add(Chunk.new("bh_grip", @grip_ramp).to(cb).drive(bdrive).hold_until(Latch.after(~100.0)))
+    ctl.add_track(Track.new("hand", mv3, @hand_mask))
+    # pelvis reference (joint coordinates), the plan, the servo's state
+    @rx = pelvis_qx(frame)
+    @ry = pelvis_qy(frame)
+    @ry0 = @ry
+    @rvx = ~0.0
+    @rvy = ~0.0
+    @rax = ~0.0
+    @ray = ~0.0
+    @gx = @rx
+    @gx0 = @rx
+    @gy = @ry
+    @off = pad_center(frame)[1] - frame.at("env_pelvis_pos", 1)
+    @py_start = frame.at("env_pelvis_pos", 1)
+    @xp = pad_center(frame)[0]
+    @bounced = false
+    @hit = false
+    @locked = false
+    @plan = nil
+    @q_corr = MyoTTKin.servo_joints.map -> ~0.0
+    @q_int = MyoTTKin.servo_joints.map -> ~0.0
+    @q_ff = MyoTTKin.servo_joints.map -> ~0.0
+    @q_fb = MyoTTKin.servo_joints.map -> ~0.0
+    @q_lf = MyoTTKin.servo_joints.map -> ~0.0
+    @feat = [~1.0, ~0.0, ~0.0, ~0.0, ~0.0, ~0.0]
+    @off_cache = nil
+    @off_tick = ~-1.0
+    @ticks = 0
+    @vp = [~0.0, ~0.0, ~0.0]
+    @t_int = [~0.0, ~0.0]
+    @t_off = [~0.0, ~0.0]
+    @ref_ax = ~0.0
+    @ref_ay = ~0.0
+    @tx = @land_x
+    @ty = @land_y
+    set_pelvis(@rx, @ry, ~0.0, ~0.0, ~0.0, ~0.0)
+    # spin estimate (from the serve's source, then the table bounce) and
+    # the stroke family (0 undecided, 1 block, 2 over, 3 chop, 4 give)
+    @spin_src = serve_spin
+    @spin = @spin_src.map -> item
+    @spin_kick = [~0.0, ~0.0, ~0.0]
+    @p_prev = nil
+    @t_prev = ~0.0
+    @v_pre = nil
+    @p_after = nil
+    @t_after = ~0.0
+    @n_after = 0
+    @spin_done = false
+    @fam_on = @fam_mode > ~0.5
+    @fam = 0
+    @fam_locked = false
+    @fam_dir = [~-1.0, ~0.0, ~0.0]
+    @fam_d = ~0.0
+    @fam_vp = [~0.0, ~0.0, ~0.0]
+    @servo_frozen = false
+    @bh_ki_on = false
+    @fl_locked = false
+    @fired = false
+    @fl_m = ~0.0
+    @aim_raw = false
+    @t_side = ~0.0
+    @bh_arrive = @bh_dur
+
+  -> read_params
+    @stiff = param("stiff", ~0.0, ~0.0, ~0.3)
+    @trunk_kp = param("trunk_kp", ~9.676251068581026, ~1.0, ~40.0)
+    @trunk_kd = param("trunk_kd", ~0.7482973699125286, ~0.0, ~2.0)
+    @trunk_fe = param("trunk_fe", ~0.052306174798249006, ~-0.3, ~0.4)
+    @trunk_lb = param("trunk_lb", ~0.0, ~-0.4, ~0.4)
+    @trunk_ar = param("trunk_ar", ~0.0, ~-0.75, ~0.75)
+    @trunk_brace = param("trunk_brace", ~0.7407927730076269, ~0.0, ~1.0)
+    @ki_musc = param("ki_musc", ~0.0, ~0.0, ~40.0)
+    @ki_trunk_musc = param("ki_trunk_musc", ~0.0, ~0.0, ~40.0)
+    @ki_lim = param("ki_lim", ~0.02, ~0.0, ~0.2)
+    @t_brace = param("t_brace", ~0.2902223291852454, ~0.02, ~0.6)
+    @arm_kp = param("arm_kp", ~18.241099254007892, ~1.0, ~40.0)
+    @sh_kp = param("sh_kp", ~12.251379549325046, ~1.0, ~60.0)
+    @arm_kd = param("arm_kd", ~0.6042670961605582, ~0.0, ~2.0)
+    @hand_kp = param("hand_kp", ~9.512017571399207, ~1.0, ~30.0)
+    @hand_kd = param("hand_kd", ~0.1, ~0.0, ~2.0)
+    # grip: threshold shifts per finger group (+ = squeeze), ramp time
+    @g_fpl = param("g_fpl", ~0.4143729852943104, ~-0.2, ~0.6)
+    @g_op = param("g_op", ~-0.07096436470973186, ~-0.2, ~0.6)
+    @g_text = param("g_text", ~-0.2442731507209766, ~-0.5, ~0.3)
+    @g_idx = param("g_idx", ~0.3731127748172343, ~-0.2, ~0.6)
+    @g_idx_int = param("g_idx_int", ~0.46703479923222285, ~-0.2, ~0.6)
+    @g_mid = param("g_mid", ~0.39822942673814893, ~-0.2, ~0.6)
+    @g_ring = param("g_ring", ~0.10142299236219549, ~-0.2, ~0.6)
+    @g_fext = param("g_fext", ~0.16524870378534495, ~-0.5, ~0.3)
+    @grip_drive = param("grip_drive", ~0.12015292466861005, ~0.0, ~2.0)
+    @grip_ramp = param("grip_ramp", ~0.09572354787920621, ~0.01, ~0.3)
+    @spring = param("spring", ~0.057350695319937514, ~0.01, ~0.2)
+    # ready posture (arm joints; IK: pad centre at the P1 crossing, the
+    # normal for a block that lands on the far half)
+    @elv = param("elv", ~0.35953952564978364, ~-0.5, ~1.5)
+    @sh_elv = param("sh_elv", ~0.48699680831687925, ~0.0, ~2.0)
+    @sh_rot = param("sh_rot", ~-1.2943407499943336, ~-1.5, ~1.5)
+    @elbow = param("elbow", ~1.2216884121334566, ~0.0, ~2.2)
+    @pro_sup = param("pro_sup", ~1.2032828287927808, ~-1.5, ~1.5)
+    @dev = param("dev", ~-0.17, ~-0.17, ~0.43)
+    @wflex = param("wflex", ~-0.7689318034824016, ~-0.78, ~0.78)
+    # the backhand: its ready posture (arm joints and trunk rotation), how
+    # long it takes to get there, the pad's nominal offset from the pelvis
+    # there; side_mode 0 = choose by the crossing (backhand when it is left
+    # of y_switch), 1 = always forehand, 2 = always backhand
+    @side_mode = param("side_mode", ~1.0, ~0.0, ~2.0)
+    @y_switch = param("y_switch", ~0.1, ~-0.6, ~0.6)
+    @bh_elv = param("bh_elv", ~-0.1, ~-1.6, ~2.2)
+    @bh_sh_elv = param("bh_sh_elv", ~0.73, ~0.0, ~2.5)
+    @bh_sh_rot = param("bh_sh_rot", ~0.33, ~-1.5, ~2.0)
+    @bh_elbow = param("bh_elbow", ~1.36, ~0.0, ~2.2)
+    @bh_pro_sup = param("bh_pro_sup", ~-0.46, ~-1.5, ~1.5)
+    @bh_dev = param("bh_dev", ~0.09, ~-0.17, ~0.43)
+    @bh_wflex = param("bh_wflex", ~0.33, ~-0.78, ~0.78)
+    @bh_trunk_ar = param("bh_trunk_ar", ~0.59, ~-0.75, ~0.75)
+    # the backhand's own servo gains (its arm is posed far from where the
+    # forehand's gains were practised)
+    @bh_k_z = param("bh_k_z", ~0.0, ~0.0, ~30.0)
+    @bh_k_n = param("bh_k_n", ~0.0, ~0.0, ~30.0)
+    @bh_p_n = param("bh_p_n", ~0.0, ~0.0, ~1.5)
+    @bh_grip = param("bh_grip", ~0.0, ~-0.2, ~0.4)
+    @bh_grip_drive = param("bh_grip_drive", ~0.0, ~0.0, ~0.8)
+    @bh_dur = param("bh_dur", ~0.25, ~0.05, ~0.5)
+    @bh_off = param("bh_off", ~-0.05, ~-0.5, ~0.5)
+    @t_offm = param("t_offm", ~0.3, ~0.0, ~0.6)
+    @dur_ready = param("dur_ready", ~0.25, ~0.05, ~0.5)
+    # the stroke: starts t_swing before the predicted crossing, carries the
+    # pad d_push forward (along -x, normal held) over t_push with a
+    # feed-forward burst drv_push on the muscles it shortens; k_vp is the
+    # share of the stroke's peak speed the aim law expects at contact
+    @t_swing = param("t_swing", ~0.030207816446399, ~0.0, ~0.3)
+    @d_push = param("d_push", ~-0.1, ~-0.4, ~0.3)
+    @t_push = param("t_push", ~0.13885413476509534, ~0.04, ~0.3)
+    @drv_push = param("drv_push", ~0.19016082900544873, ~0.0, ~1.0)
+    @k_vp = param("k_vp", ~0.6, ~0.0, ~1.5)
+    @k_vs = param("k_vs", ~0.0, ~0.0, ~1.5)
+    @k_vpm = param("k_vpm", ~0.0, ~0.0, ~1.5)
+    @t_follow = param("t_follow", ~0.2, ~0.05, ~0.5)
+    # aim: where the return should land, the paddle's restitution
+    @land_x = param("land_x", ~-0.85, ~-1.3, ~-0.2)
+    @land_y = param("land_y", ~0.1, ~-0.6, ~0.6)
+    # the safe landing box (the far half is x -1.37..0, y -0.72..0.80) and
+    # how strongly the aim is pulled to (land_x, land_y) from the landing
+    # the pad's current normal would give (0 = least correction)
+    @land_pull = param("land_pull", ~0.0, ~0.0, ~1.0)
+    @box_x0 = param("box_x0", ~-1.2, ~-1.3, ~-0.6)
+    @box_x1 = param("box_x1", ~-0.7, ~-0.8, ~-0.15)
+    @box_y0 = param("box_y0", ~-0.5, ~-0.7, ~0.0)
+    @box_y1 = param("box_y1", ~0.6, ~0.0, ~0.78)
+    @e_pad = param("e_pad", ~1.0, ~0.7, ~1.1)
+    @mu_t = param("mu_t", ~0.0, ~0.0, ~0.9)
+    @kick_z = param("kick_z", ~0.0, ~-0.5, ~1.5)
+    @nz_bias = param("nz_bias", ~-0.07, ~-0.15, ~0.15)
+    # paddle servo: integral gains on height and normal, clamp, lock time
+    @k_z = param("k_z", ~6.0, ~0.0, ~30.0)
+    @k_n = param("k_n", ~5.0, ~0.0, ~30.0)
+    @corr_lim = param("corr_lim", ~0.5883571227846839, ~0.0, ~1.2)
+    @t_lock = param("t_lock", ~0.04794338300233167, ~0.0, ~0.2)
+    # the servo waits for the ready movement and the grip to settle (the
+    # feed-forward posture does the bulk of the aiming)
+    @t_servo = param("t_servo", ~0.3, ~0.0, ~0.5)
+    # anticipation: the pad's nominal state at contact on the phase-1 serve
+    # (height, normal, offset from the palm), and its gain
+    # learned feed-forward (practised across serves: the servo's corrections
+    # consolidated into a map from the serve to joint offsets): lff gain,
+    # weights lff0..lff47 (servo joint j, feature k at 6 j + k)
+    @lff = param("lff", ~0.0, ~0.0, ~1.5)
+    # the side the learned map plays on (0 both, 1 forehand, 2 backhand)
+    @lff_side = param("lff_side", ~0.0, ~0.0, ~2.0)
+    @wl = []
+    (0...48).each ->(i)
+      @wl.push(param("lff[i]", ~0.0, ~-3.0, ~3.0))
+    @g_ffz = param("g_ffz", ~0.0, ~0.0, ~2.5)
+    @g_ffn = param("g_ffn", ~0.0, ~0.0, ~2.5)
+    @g_ff = param("g_ff", ~0.0, ~0.0, ~1.5)
+    @ff_z = param("ff_z", ~1.273, ~1.0, ~1.5)
+    @ff_nx = param("ff_nx", ~0.973, ~0.8, ~1.0)
+    @ff_ny = param("ff_ny", ~0.211, ~-0.5, ~0.5)
+    @ff_nz = param("ff_nz", ~0.09, ~-0.3, ~0.3)
+    @ff_rx = param("ff_rx", ~-0.036, ~-0.2, ~0.2)
+    @ff_ry = param("ff_ry", ~0.029, ~-0.2, ~0.2)
+    @ff_rz = param("ff_rz", ~0.132, ~-0.1, ~0.3)
+    @p_z = param("p_z", ~0.0, ~0.0, ~1.5)
+    @p_n = param("p_n", ~0.5, ~0.0, ~1.5)
+    @z_bias = param("z_bias", ~-0.07351484111238753, ~-0.1, ~0.1)
+    @w_z = param("w_z", ~6.198062445392274, ~0.0, ~10.0)
+    @lam = param("lam", ~0.001, ~0.001, ~1.0)
+    @w_y = param("w_y", ~0.0, ~0.0, ~10.0)
+    @trunk_reg = param("trunk_reg", ~4.162649224068151, ~0.1, ~100.0)
+    @trunk_lim = param("trunk_lim", ~0.0, ~0.0, ~0.75)
+    # per-joint damping weights (servo_joints order): the slow, heavy joints
+    # (the shoulder's plane and elevation) can be made to give way to the
+    # fast ones (elbow, forearm, wrist)
+    @reg = [param("reg_elv", ~1.0, ~0.1, ~20.0), param("reg_sh", ~1.0, ~0.1, ~20.0), param("reg_rot", ~1.0, ~0.1, ~20.0), param("reg_elbow", ~1.0, ~0.1, ~20.0), param("reg_pro", ~1.0, ~0.1, ~20.0), param("reg_dev", ~1.0, ~0.1, ~20.0), param("reg_flex", ~1.0, ~0.1, ~20.0), @trunk_reg]
+    # pelvis: reference filter bandwidth, plant model for the feed-forward
+    @pel_w = param("pel_w", ~17.092522004719168, ~4.0, ~30.0)
+    @pel_m = param("pel_m", ~139.0, ~50.0, ~250.0)
+    @pel_fb = param("pel_fb", ~0.5, ~0.0, ~3.0)
+    # pel_mj 1: min-jerk slides timed on the ball (arrive slide_margin s
+    # before contact, at rest, with the least peak acceleration)
+    @pel_mj = param("pel_mj", ~0.0, ~0.0, ~1.0)
+    @slide_margin = param("slide_margin", ~0.08, ~0.0, ~0.3)
+    @pel_amax = param("pel_amax", ~200.0, ~2.0, ~200.0)
+    @pel_vmax = param("pel_vmax", ~100.0, ~0.5, ~100.0)
+    # pel_mj_min: min-jerk only for slides at least this long (m); shorter
+    # ones keep the fast critically damped reference
+    @pel_mj_min = param("pel_mj_min", ~0.0, ~0.0, ~1.0)
+    # pel_fly > 0 (with pel_mj): the lateral slide passes its goal at the
+    # ball's contact (fly_margin s before it) still moving, at pel_fly times
+    # the average speed the rest of the slide needs, coasts through the last
+    # fly_tmin s and brakes after the ball has gone, so the braking that
+    # whips the arm down and across comes after contact
+    @pel_fly = param("pel_fly", ~0.0, ~0.0, ~1.5)
+    # the backhand's own fly-by factor (pel_fly is the forehand's)
+    @bh_pel_fly = param("bh_pel_fly", ~0.0, ~0.0, ~1.5)
+    @fly_margin = param("fly_margin", ~0.0, ~-0.1, ~0.2)
+    @fly_tmin = param("fly_tmin", ~0.05, ~0.01, ~0.2)
+    # the fly-by's lateral reference is held to pel_vcap m/s (the slide's
+    # actuator tops out near 2.2 m/s: a reference that runs ahead of it
+    # reaches the goal first and the servo then brakes the lagging pelvis
+    # hard just before contact)
+    @pel_vcap = param("pel_vcap", ~100.0, ~0.5, ~100.0)
+    # the slide's lateral goal: y_trim (forehand) / bh_y_trim (backhand) m
+    # added to where the pelvis is sent; off_fix > 0 plans the forehand
+    # slide on this fixed pad offset from the pelvis instead of the measured
+    # one (which swings 10-20 cm as the arm lags the slide and then
+    # overtakes it, and the goal would chase that swing)
+    @y_trim = param("y_trim", ~0.0, ~-0.15, ~0.15)
+    @bh_y_trim = param("bh_y_trim", ~0.0, ~-0.15, ~0.15)
+    @off_fix = param("off_fix", ~0.0, ~0.0, ~0.9)
+    # the backhand's depth: its stroke starts bh_dt_swing s earlier and
+    # pushes bh_dd_push m further than the forehand's (negative: a give, the
+    # pad moving back with the ball at contact takes speed off the return),
+    # its pitch trim adds bh_dnz to nz_bias, and its safe landing box moves
+    # bh_box_dx toward the net
+    @bh_dt_swing = param("bh_dt_swing", ~0.0, ~0.0, ~0.2)
+    @bh_dd_push = param("bh_dd_push", ~0.0, ~-0.3, ~0.2)
+    @bh_dnz = param("bh_dnz", ~0.0, ~-0.3, ~0.3)
+    @bh_box_dx = param("bh_box_dx", ~0.0, ~0.0, ~0.5)
+    # jac_live: the servo, anticipation and push use the hand's Jacobians at
+    # the measured posture, every tick (the task's hand_jac sensor: forward
+    # kinematics of the model at the observed joint angles, slaved joints
+    # folded onto their masters) instead of the constants above, which hold
+    # only at the posture they were taken at (the backhand's round-3 posture
+    # is far from it: several columns change sign); 1 both sides, 2 the
+    # backhand only
+    @jac_live = param("jac_live", ~0.0, ~0.0, ~2.0)
+    # bh_tdur > 0: the backhand's ready movement is timed on the serve, its
+    # ease ending bh_tdur s before the predicted contact (at least bh_dmin s
+    # long), so every backhand meets the ball at the same phase of its swing
+    # (with a fixed bh_dur an early ball finds the arm mid-swing, face open)
+    @bh_tdur = param("bh_tdur", ~0.0, ~0.0, ~0.3)
+    @bh_dmin = param("bh_dmin", ~0.2, ~0.05, ~0.5)
+    # a settled backhand (a block rather than a swing that is still turning
+    # the face at contact): bh_gain multiplies the backhand arm's reflex
+    # gains (a stiffer arm sags and drifts less off its commanded posture);
+    # bh_ki > 0 turns on the arm's postural tone (the reflex integral,
+    # clamped to bh_ki_lim) at bh_ki_t s, once the swing has arrived, so the
+    # held posture loses its steady-state sag; bh_t_servo >= 0 starts the
+    # backhand's servo then instead of at t_servo (a servo integrating
+    # through the swing winds up on errors the swing itself makes)
+    @bh_gain = param("bh_gain", ~1.0, ~0.2, ~3.0)
+    # bh_stiff >= 0: the backhand arm's own co-contraction (the shared stiff,
+    # 0.11 in the P2 params, adds stiff / 2 to every posed muscle's
+    # threshold: with the reflex gain that alone saturates most of the arm,
+    # so the posture is set by the balance of maximal forces and the servo's
+    # corrections barely act)
+    @bh_stiff = param("bh_stiff", ~-1.0, ~-1.0, ~0.3)
+    @bh_ki = param("bh_ki", ~0.0, ~0.0, ~60.0)
+    @bh_ki_lim = param("bh_ki_lim", ~0.02, ~0.0, ~0.2)
+    @bh_ki_t = param("bh_ki_t", ~0.3, ~0.0, ~0.6)
+    @bh_t_servo = param("bh_t_servo", ~-1.0, ~-1.0, ~0.6)
+    # bh_arr 1 (with bh_tdur): the backhand's servo and postural tone start
+    # bh_arr_lag s after its serve-timed ready movement arrives, so every
+    # backhand is aimed from a settled arm for the same time before contact
+    @bh_arr = param("bh_arr", ~0.0, ~0.0, ~1.0)
+    # the contact-timed backhand (bh_lead > 0): the arm's swing starts when
+    # the ball is bh_lead s from the pad (at once when it is already closer),
+    # a fixed movement at a fixed phase of it at contact (the face turns at
+    # ~120 deg/s near contact, so a swing started at the serve met early
+    # balls 11 deg open and late ones closed)
+    @bh_lead = param("bh_lead", ~0.0, ~0.0, ~0.8)
+    # the pulse-step backhand (bh_ps 1): pulse until bh_pulse s into the
+    # backhand's ready movement, then the set posture bh2_* over bh_set_dur
+    @bh_ps = param("bh_ps", ~0.0, ~0.0, ~1.0)
+    @bh_pulse = param("bh_pulse", ~0.2, ~0.05, ~0.5)
+    @bh_set_dur = param("bh_set_dur", ~0.1, ~0.02, ~0.4)
+    @bh2_elv = param("bh2_elv", ~0.3, ~-1.6, ~2.2)
+    @bh2_sh_elv = param("bh2_sh_elv", ~0.5, ~0.0, ~2.5)
+    @bh2_sh_rot = param("bh2_sh_rot", ~0.6, ~-1.5, ~2.0)
+    @bh2_elbow = param("bh2_elbow", ~1.8, ~0.0, ~2.2)
+    @bh2_pro_sup = param("bh2_pro_sup", ~0.4, ~-1.5, ~1.5)
+    @bh2_dev = param("bh2_dev", ~-0.1, ~-0.17, ~0.43)
+    @bh2_wflex = param("bh2_wflex", ~0.0, ~-0.78, ~0.78)
+    @bh_arr_lag = param("bh_arr_lag", ~0.0, ~-0.1, ~0.2)
+    # visuomotor delay stand-in: the ball is ignored until react s after the
+    # serve (0 = the controller sees it from the first frame)
+    @react = param("react", ~0.0, ~0.0, ~0.3)
+    # fore-aft height matching: the pad's plane goes where the ball rises
+    # through z_hit, within [x_lo, x_hi] (g_hx 0 = stay)
+    @g_hx = param("g_hx", ~0.0, ~0.0, ~1.0)
+    @z_hit = param("z_hit", ~1.25, ~1.0, ~1.5)
+    @x_lo = param("x_lo", ~1.45, ~1.2, ~1.8)
+    @x_hi = param("x_hi", ~2.0, ~1.7, ~2.2)
+    @hx_pad = param("hx_pad", ~0.0, ~0.0, ~1.0)
+    # hx_sag: the height matched drops hx_sag m per m of planned slide to
+    # the left beyond hx_s0 (a sag model fitted from rollouts: the long left
+    # slides leave the pad that much lower at contact), so the ball is met
+    # earlier on its rise, at the height the pad will have
+    @hx_sag = param("hx_sag", ~0.0, ~0.0, ~1.0)
+    @hx_s0 = param("hx_s0", ~0.0, ~0.0, ~0.6)
+    # the backhand meets the ball later: its height-matching target is
+    # bh_dz_hit m higher and its plane may go bh_dx_hi m further back (a
+    # ball met near its apex leaves an open face flatter than a rising one,
+    # and the backhand's face is least open late in its swing)
+    @bh_dz_hit = param("bh_dz_hit", ~0.0, ~-0.2, ~0.4)
+    @bh_dx_hi = param("bh_dx_hi", ~0.0, ~0.0, ~0.4)
+    # trunk postural servo (PI on flexion and side bend) and the anticipatory
+    # lean per m/s^2 of the pelvis reference's world acceleration
+    @k_tp = param("k_tp", ~0.0, ~0.0, ~10.0)
+    @k_ti = param("k_ti", ~0.0, ~0.0, ~10.0)
+    @k_apa = param("k_apa", ~0.0, ~-0.06, ~0.06)
+    @k_apx = param("k_apx", ~0.0, ~-0.06, ~0.06)
+    @k_lean = param("k_lean", ~0.0, ~-0.5, ~0.5)
+    # internal-model feed-forward gain (0 = off) on the arm, and on the
+    # trunk too when ff_trunk is 1
+    @ff = param("ff", ~0.0, ~0.0, ~1.5)
+    @ff_trunk = param("ff_trunk", ~0.0, ~0.0, ~1.0)
+    # spin (MyoTTSpin; spin_mode 0 = off, the aim law as before): fitted
+    # coefficients (table bounce cb, our pad's tangential coupling k and
+    # spin kick ks, r m / I for a paddle's spin), the serve's source
+    # (opp_mode 0 = the launcher, no spin; 1 = an opponent's paddle at face
+    # pitch opp_pitch moving at opp_swing along opp_dir above the
+    # horizontal), and spin_oracle 1 = use the simulator's true spin (the
+    # oracle_spin sensor, privileged: upper-bound comparison only)
+    @spin_mode = param("spin_mode", ~0.0, ~0.0, ~1.0)
+    @spin_cb = param("spin_cb", ~0.432, ~0.0, ~1.0)
+    @spin_k = param("spin_k", ~0.011, ~0.0, ~0.6)
+    @spin_ks = param("spin_ks", ~0.0075, ~0.0, ~0.6)
+    @spin_c = param("spin_c", ~0.54, ~0.0, ~100.0)
+    @opp_mode = param("opp_mode", ~0.0, ~0.0, ~1.0)
+    @opp_pitch = param("opp_pitch", ~0.0, ~-1.2, ~1.2)
+    @opp_swing = param("opp_swing", ~0.0, ~0.0, ~20.0)
+    @opp_dir = param("opp_dir", ~0.0, ~-1.5, ~1.5)
+    @spin_oracle = param("spin_oracle", ~0.0, ~0.0, ~1.0)
+    # stroke families (fam_mode 0 = off: the single stroke above; 1 = chosen
+    # per serve; 2..5 = always block / over / chop / give): the paddle's
+    # direction at contact (over: forward and up at fam_over_a, face
+    # closed; chop: forward and down at fam_chop_a, face open; give: back
+    # with the ball; block: still), its commanded follow-through distance
+    # (d_over, d_chop, d_give, d_block), k_ach the share of the commanded
+    # contact speed the pad achieves; the stroke is a via keyframe at the
+    # contact pose t_hit after it fires (t_lead before the predicted
+    # contact), then a follow-through over t_fol
+    @fam_mode = param("fam_mode", ~0.0, ~0.0, ~5.0)
+    # the backhand's own family mode (the same codes; 0 = its single stroke)
+    @bh_fam_mode = param("bh_fam_mode", ~0.0, ~0.0, ~5.0)
+    # the flick (family 5; flick_mode 1 = chosen per serve when safe, 2 =
+    # always; with the side's single stroke): the arm sets the pad at the
+    # contact point, then a late, fast wrist snap (forearm rotation, wrist
+    # deviation and flexion only) fires fl_t (+ t_lead) before the predicted
+    # contact: a via keyframe at the contact pose, passed with the velocity
+    # toward the snap's goal, fl_d m of pad travel along the target line
+    # (fl_a above the horizontal), the face held with weight fl_wn (0: the
+    # snap closes it freely), a burst fl_drv on the muscles it shortens,
+    # then the follow-through over fl_fol. The aim law expects fl_ach of the
+    # commanded contact speed and a pitch trim fl_dnz. Chosen while its
+    # robust landing margin (the return at the flick's speed, face off by
+    # fl_sig, net clearance included) is at least fl_margin m; fl_side 1
+    # forehand, 2 backhand, 3 both
+    @flick_mode = param("flick_mode", ~0.0, ~0.0, ~2.0)
+    @fl_side = param("fl_side", ~2.0, ~1.0, ~3.0)
+    @fl_d = param("fl_d", ~0.2, ~0.0, ~0.8)
+    @fl_a = param("fl_a", ~0.9, ~-0.6, ~1.4)
+    @fl_t = param("fl_t", ~0.05, ~0.02, ~0.15)
+    @fl_fol = param("fl_fol", ~0.08, ~0.03, ~0.3)
+    @fl_ach = param("fl_ach", ~0.5, ~0.0, ~1.5)
+    @fl_wn = param("fl_wn", ~0.3, ~0.0, ~3.0)
+    @fl_drv = param("fl_drv", ~0.3, ~0.0, ~1.0)
+    @fl_margin = param("fl_margin", ~0.1, ~-0.3, ~0.6)
+    @fl_sig = param("fl_sig", ~0.05, ~0.0, ~0.3)
+    @fl_dnz = param("fl_dnz", ~0.0, ~-0.3, ~0.3)
+    # the near-vertical chop (chop_down > 0; Erik's backspin chop): the chop
+    # family's pad moves chop_down rad below the horizontal (1.3: mostly
+    # down, the face near vertical) instead of fam_chop_a's forward-down
+    # with an open face
+    @chop_down = param("chop_down", ~0.0, ~0.0, ~1.5)
+    # the low scoop (family 6, forehand; scoop_mode 1 = chosen when the
+    # ball crosses the pad's plane below sc_z, i.e. its bounce carries it
+    # low past the table's end): the pad meets it near table height, face
+    # open to ~10-15 deg from horizontal (the aim law's face for the
+    # scoop's pad velocity), moving up and back toward the player, sc_b rad
+    # back from vertical, sc_d m of follow-through (topspin under friction)
+    @scoop_mode = param("scoop_mode", ~0.0, ~0.0, ~2.0)
+    @sc_z = param("sc_z", ~0.95, ~0.8, ~1.3)
+    @sc_b = param("sc_b", ~0.35, ~-0.8, ~1.2)
+    @sc_d = param("sc_d", ~0.2, ~0.0, ~0.8)
+    @fam_over_a = param("fam_over_a", ~0.8, ~0.0, ~1.4)
+    @fam_chop_a = param("fam_chop_a", ~0.6, ~0.0, ~1.4)
+    @d_over = param("d_over", ~0.15, ~0.0, ~1.0)
+    @d_chop = param("d_chop", ~0.15, ~0.0, ~1.0)
+    @d_give = param("d_give", ~0.1, ~0.0, ~1.0)
+    @d_block = param("d_block", ~0.0, ~-0.2, ~0.2)
+    @k_ach = param("k_ach", ~0.5, ~0.0, ~1.5)
+    @t_hit = param("t_hit", ~0.1, ~0.03, ~0.3)
+    @t_lead = param("t_lead", ~0.03, ~-0.1, ~0.15)
+    @t_fol = param("t_fol", ~0.12, ~0.03, ~0.4)
+    # the choice: robust landing margin (the landing's worst case over pad
+    # normals fam_sig off, net clearance included) less fam_turn per rad of
+    # face turn from the block's face; locked fam_lock s before contact
+    @fam_sig = param("fam_sig", ~0.08, ~0.0, ~0.3)
+    @fam_turn = param("fam_turn", ~0.5, ~0.0, ~5.0)
+    @fam_lock = param("fam_lock", ~0.15, ~0.0, ~0.5)
+    # the family stroke's weight on holding the pad's lateral position
+    # (the single stroke leaves it free)
+    @fam_wy = param("fam_wy", ~1.0, ~0.0, ~3.0)
+    # robust aim (aim_robust 1): the landing target chosen for the widest
+    # margin under a face error rob_sig (rad), less rob_turn per rad of turn
+    @aim_robust = param("aim_robust", ~0.0, ~0.0, ~1.0)
+    @rob_sig = param("rob_sig", ~0.08, ~0.0, ~0.3)
+    @rob_turn = param("rob_turn", ~0.3, ~0.0, ~5.0)
+    # the arm's anticipatory postural adjustment for the pelvis slide
+    # (k_apa_arm 1): shoulder elevation and plane of elevation offsets per
+    # m/s^2 and per m/s of the slide reference (world y), plus a symmetric
+    # shoulder raise per m/s of slide speed
+    @k_apa_arm = param("k_apa_arm", ~0.0, ~0.0, ~1.0)
+    @k_se_a = param("k_se_a", ~0.0, ~-0.05, ~0.05)
+    @k_se_v = param("k_se_v", ~0.0, ~-0.5, ~0.5)
+    @k_se_s = param("k_se_s", ~0.0, ~-0.5, ~0.5)
+    @k_ea_a = param("k_ea_a", ~0.0, ~-0.05, ~0.05)
+    @k_ea_v = param("k_ea_v", ~0.0, ~-0.5, ~0.5)
+    # inverse-dynamics feed-forward (id_mode 1): the torque M[j, pelvis]
+    # a_pelvis the slide's acceleration needs at every arm joint (gain
+    # id_arm) and trunk joint (id_trunk) to leave them unaccelerated, as
+    # drive on the muscles able to supply it; the acceleration is the one
+    # the pelvis command about to be sent will produce (the actuator model)
+    # blended with the measured one by id_meas, extrapolated id_lead s
+    @id_mode = param("id_mode", ~0.0, ~0.0, ~1.0)
+    @id_arm = param("id_arm", ~1.0, ~0.0, ~2.0)
+    @id_trunk = param("id_trunk", ~1.0, ~0.0, ~2.0)
+    @id_meas = param("id_meas", ~0.0, ~0.0, ~1.0)
+    @id_lead = param("id_lead", ~0.0, ~0.0, ~0.05)
+    # id_alloc 1: the arm's joints (and the trunk's) allocated jointly over
+    # the coupled motion (Controller#set_feedforward_allocation) instead of
+    # each joint's torque split on its own
+    @id_alloc = param("id_alloc", ~0.0, ~0.0, ~1.0)
+    @w_py = ~0.0
+
+  # Shift a finger group's thresholds by dc (+ shorter, - longer) with a
+  # proportional feed-forward share.
+  -> grip_group(cg, gdrive, names, dc)
+    names_mask(names).each ->(k)
+      cg[k] = cg[k] + dc
+      gdrive[k] = clamp(@grip_drive * dc, ~0.0, ~1.0)
+    nil
+
+  -> names_mask(names)
+    out = []
+    names.each ->(nm)
+      out.push(body.index(nm)) if body.has?(nm)
+    out
+
+  # A whole-body posture: trunk and arm joints (independent coordinates),
+  # every equality-slaved joint set consistently.
+  -> posture(trunk, arm, stiff)
+    p = Pose.new
+    val = {}
+    names = MyoTTKin.trunk_joints
+    i = 0
+    while i < names.size
+      val[names[i]] = trunk[i]
+      p.set(names[i], trunk[i], stiff)
+      i += 1
+    names = MyoTTKin.arm_joints
+    i = 0
+    while i < names.size
+      val[names[i]] = arm[i]
+      p.set(names[i], arm[i], stiff)
+      i += 1
+    MyoTTKin.couplings.each ->(c)
+      p.set(c[0], c[2] * val[c[1]], stiff)
+    p.set("Abs_t1", ~0.0, stiff)
+    p.set("Abs_t2", ~0.0, stiff)
+    p
+
+  # Move an independent joint by dq, its equality-slaved joints with it.
+  -> joint_move(off, name, dq)
+    joint_offset(off, name, dq)
+    MyoTTKin.couplings.each ->(c)
+      joint_offset(off, c[0], c[2] * dq) if c[1] == name
+    off
+
+  # ---- the paddle, felt through the hand ---------------------------------------
+  # paddle_ori is the paddle body's quaternion (w x y z); the pad (the blade,
+  # a disc) is its z axis, its centre 1 cm past the paddle site along -x.
+
+  -> pad_normal(f)
+    w = f.at("env_paddle_ori", 0)
+    x = f.at("env_paddle_ori", 1)
+    y = f.at("env_paddle_ori", 2)
+    z = f.at("env_paddle_ori", 3)
+    n = [~2.0 * (x * z + w * y), ~2.0 * (y * z - w * x), ~1.0 - ~2.0 * (x * x + y * y)]
+    return [~0.0 - n[0], ~0.0 - n[1], ~0.0 - n[2]] if n[0] < ~0.0
+    n
+
+  -> pad_center(f)
+    w = f.at("env_paddle_ori", 0)
+    x = f.at("env_paddle_ori", 1)
+    y = f.at("env_paddle_ori", 2)
+    z = f.at("env_paddle_ori", 3)
+    ax = [~1.0 - ~2.0 * (y * y + z * z), ~2.0 * (x * y + w * z), ~2.0 * (x * z - w * y)]
+    [f.at("env_paddle_pos", 0) - ~0.01 * ax[0], f.at("env_paddle_pos", 1) - ~0.01 * ax[1], f.at("env_paddle_pos", 2) - ~0.01 * ax[2]]
+
+  -> paddle_velocity(f)
+    w = f.at("env_paddle_ori", 0)
+    x = f.at("env_paddle_ori", 1)
+    y = f.at("env_paddle_ori", 2)
+    z = f.at("env_paddle_ori", 3)
+    a = f.at("env_paddle_vel", 0)
+    b = f.at("env_paddle_vel", 1)
+    c = f.at("env_paddle_vel", 2)
+    r00 = ~1.0 - ~2.0 * (y * y + z * z)
+    r01 = ~2.0 * (x * y - w * z)
+    r02 = ~2.0 * (x * z + w * y)
+    r10 = ~2.0 * (x * y + w * z)
+    r11 = ~1.0 - ~2.0 * (x * x + z * z)
+    r12 = ~2.0 * (y * z - w * x)
+    r20 = ~2.0 * (x * z - w * y)
+    r21 = ~2.0 * (y * z + w * x)
+    r22 = ~1.0 - ~2.0 * (x * x + y * y)
+    [r00 * a + r01 * b + r02 * c, r10 * a + r11 * b + r12 * c, r20 * a + r21 * b + r22 * c]
+
+  # ---- forehand or backhand ------------------------------------------------------
+
+  # 1 forehand, 2 backhand, 0 not yet (the ball not yet seen). Decided once.
+  -> choose_side(f)
+    return @side if @side != 0
+    return 0 if @plan == nil
+    @t_side = f.t
+    side = 1
+    side = 2 if @side_mode > ~1.5
+    side = 2 if @side_mode < ~0.5 && @plan[1] < @y_switch
+    set_side(side)
+    @side
+
+  -> set_side(side)
+    @side = side
+    @ctl.emit("side:[side]")
+    if side == 2
+      @jv = MyoTTKin.jv_bh
+      @jw = MyoTTKin.jw_bh
+      @off = @bh_off
+      @bh_arrive = @t_side + @bh_dur
+      if @bh_tdur > ~0.0 && @plan != nil
+        dur = clamp(@plan[0] - @bh_tdur, @bh_dmin, ~0.8)
+        @bh_ready_c.stagger(@arm_mask, ~0.0, nil, dur)
+        @bh_arrive = @t_side + dur
+    nil
+
+  # The contact-timed backhand's go (bh_lead): the side is the backhand and
+  # the ball is at most bh_lead s (the swing's lead) from the pad's plane.
+  -> bh_go(f)
+    return false if choose_side(f) != 2
+    return true if @plan == nil
+    @plan[0] <= @bh_lead
+
+  -> side_branch(name)
+    return name if @side == 2
+    nil
+
+  # Where the ready chunk goes when it fires: the backhand family, the
+  # chosen stroke family's stroke, or (families off) the single stroke.
+  -> ready_branch
+    return "bh_ready" if @side == 2
+    return "s_" + fam_name(@fam) if (@fam_on && @fam > 0) || @fam >= 5
+    nil
+
+  # Where bh_ready goes when it fires (bh_fam_mode > 0): the chosen family's
+  # backhand stroke (nil: the single backhand stroke).
+  -> bh_fam_branch
+    return "sb_" + fam_name(@fam) if @side == 2 && @fam > 0
+    nil
+
+  # The pulse's end (bh_ps): on to the set posture, or, when the ball came
+  # first, straight into the stroke.
+  -> ps_branch
+    return bh_fam_branch if @fired
+    "bh_set"
+
+  # The flick's side filter (fl_side 1 forehand, 2 backhand, 3 both) and
+  # only with the side's single stroke (not the stroke families).
+  -> flick_side_ok
+    return false if @side == 0 || fam_side_on
+    return @fl_side > ~1.5 if @side == 2
+    @fl_side < ~1.5 || @fl_side > ~2.5
+
+  # Choose the flick for this serve while it is safe: with the flick's pad
+  # velocity the aim law solves the face for the target, and the return
+  # off it must clear the net and land with at least fl_margin m to spare
+  # with the face fl_sig off in pitch or yaw (a fast, flat return only lands
+  # from a high enough contact: the simulation has no air). Re-chosen each
+  # tick until fam_lock s before contact; flick_mode 2 always flicks.
+  -> choose_flick(f)
+    set_family(5)
+    if @flick_mode < ~1.5
+      choose_target(@plan, pad_normal(f))
+      @aim_raw = true
+      nt = aim_normal(@plan)
+      @aim_raw = false
+      m = margin_robust(@plan, nt, @fl_sig)
+      @fl_m = m
+      @fam = 0 if m < @fl_margin
+    if @plan[0] < @fam_lock
+      @fl_locked = true
+      fk = @fam
+      fm = @fl_m
+      @ctl.emit("fam:[fk]")
+      @ctl.emit("flm:[fm]")
+    nil
+
+  # The low scoop for this serve (forehand): the ball crosses the pad's
+  # plane below sc_z (scoop_mode 2: always); re-chosen until fam_lock s
+  # before contact.
+  -> choose_scoop
+    @fam = 0
+    set_family(6) if @scoop_mode > ~1.5 || @plan[2] < @sc_z
+    if @plan[0] < @fam_lock
+      @fl_locked = true
+      fk = @fam
+      @ctl.emit("fam:[fk]")
+    nil
+
+  # Whether this serve's stroke is a family stroke: the forehand's
+  # (fam_mode) or the backhand's (bh_fam_mode).
+  -> fam_side_on
+    return @bh_fam_mode > ~0.5 if @side == 2
+    @fam_on
+
+  -> fam_name(k)
+    return "flick" if k == 5
+    return "scoop" if k == 6
+    return "over" if k == 2
+    return "chop" if k == 3
+    return "give" if k == 4
+    "block"
+
+  # ---- spin ----------------------------------------------------------------------
+
+  # The serve's spin at launch: none from the launcher (opp_mode 0); from an
+  # opponent's paddle stroke (face pitch, swing speed and direction) with
+  # opp_mode 1, the ball taken at rest relative to the table (a toss).
+  -> serve_spin
+    return [~0.0, ~0.0, ~0.0] if @opp_mode < ~0.5
+    n = [Math.cos(@opp_pitch), ~0.0, Math.sin(@opp_pitch)]
+    vp = [@opp_swing * Math.cos(@opp_dir), ~0.0, @opp_swing * Math.sin(@opp_dir)]
+    MyoTTSpin.from_paddle(n, vp, [~0.0, ~0.0, ~0.0], @spin_k, @spin_c)
+
+  # The spin estimate, from what is seen (the ball's positions every frame):
+  # the horizontal velocity just before the table bounce and just after it
+  # (position differences on each side, so neither the bounce frame nor a
+  # sensor turning with the ball enters), their change giving the friction
+  # impulse and so the spin it put on. spin_oracle reads the simulator's
+  # true spin instead (privileged; the upper-bound comparison).
+  -> track_spin(f, p)
+    if @spin_oracle > ~0.5 && f.has?("oracle_spin")
+      @spin = [f.at("oracle_spin", 0), f.at("oracle_spin", 1), f.at("oracle_spin", 2)]
+    elsif !@bounced
+      @v_pre = [(p[0] - @p_prev[0]) / (f.t - @t_prev), (p[1] - @p_prev[1]) / (f.t - @t_prev)] if @p_prev != nil && f.t > @t_prev
+    elsif !@spin_done && @v_pre != nil
+      @n_after = @n_after + 1
+      if @n_after == 2
+        @p_after = p
+        @t_after = f.t
+      elsif @n_after == 3 && f.t > @t_after
+        dv = [(p[0] - @p_after[0]) / (f.t - @t_after) - @v_pre[0], (p[1] - @p_after[1]) / (f.t - @t_after) - @v_pre[1]]
+        db = MyoTTSpin.from_bounce(dv, @spin_cb)
+        @spin = [@spin_src[0] + db[0], @spin_src[1] + db[1], @spin_src[2] + db[2]]
+        @spin_done = true
+        w0 = @spin[0]
+        w1 = @spin[1]
+        w2 = @spin[2]
+        @ctl.emit("spin:[w0]:[w1]:[w2]")
+    @p_prev = p
+    @t_prev = f.t
+    nil
+
+  # The spin's push on the return, for a face whose normal (either sign,
+  # as the aim law keeps it) is n: the contact normal points at the ball.
+  -> update_spin_kick(n)
+    s = ~1.0
+    s = ~-1.0 if n[0] > ~0.0
+    @spin_kick = MyoTTSpin.kick(@spin, [s * n[0], s * n[1], s * n[2]], @spin_ks)
+    nil
+
+  # ---- stroke families -----------------------------------------------------------
+
+  # Family k's paddle velocity at contact (what the aim law expects): the
+  # commanded contact speed d / (t_hit + t_fol) along the family's
+  # direction, times k_ach, plus the pad's measured drift (k_vpm).
+  -> set_family(k)
+    @fam = k
+    d = @d_block
+    dir = [~-1.0, ~0.0, ~0.0]
+    if k == 2
+      d = @d_over
+      dir = [~0.0 - Math.cos(@fam_over_a), ~0.0, Math.sin(@fam_over_a)]
+    elsif k == 3
+      d = @d_chop
+      dir = [~0.0 - Math.cos(@fam_chop_a), ~0.0, ~0.0 - Math.sin(@fam_chop_a)]
+    elsif k == 4
+      d = @d_give
+      dir = [~1.0, ~0.0, ~0.0]
+    ach = @k_ach
+    tt = @t_hit + @t_fol
+    if k == 5
+      d = @fl_d
+      dir = [~0.0 - Math.cos(@fl_a), ~0.0, Math.sin(@fl_a)]
+      ach = @fl_ach
+      tt = @fl_t + @fl_fol
+    if k == 6
+      d = @sc_d
+      dir = [Math.sin(@sc_b), ~0.0, Math.cos(@sc_b)]
+    if k == 3 && @chop_down > ~0.0
+      dir = [~0.0 - Math.cos(@chop_down), ~0.0, ~0.0 - Math.sin(@chop_down)]
+    @fam_dir = dir
+    @fam_d = d
+    sp = ach * d / tt
+    @fam_vp = [sp * dir[0] + @vp[0], sp * dir[1] + @vp[1], sp * dir[2] + @vp[2]]
+    nil
+
+  # Choose the stroke family for this serve: each family's contact solution
+  # (its paddle velocity, then the face the aim law needs for the same
+  # target, the spin's push included) is scored by its robust landing
+  # margin (the worst landing over pad normals fam_sig off in pitch and
+  # yaw, net clearance included) less fam_turn per rad of face turn from
+  # the block's face. fam_mode 2..5 forces one family.
+  -> choose_family(plan, n)
+    fm = @fam_mode
+    fm = @bh_fam_mode if @side == 2
+    if fm > ~1.5
+      k = 1
+      k = 2 if fm > ~2.5
+      k = 3 if fm > ~3.5
+      k = 4 if fm > ~4.5
+      set_family(k)
+      return k
+    set_family(1)
+    choose_target(plan, n)
+    nb = aim_normal(plan)
+    best = 1
+    best_s = margin_robust(plan, nb, @fam_sig)
+    k = 2
+    while k <= 4
+      set_family(k)
+      nt = aim_normal(plan)
+      c = (nt[0] * nb[0] + nt[1] * nb[1] + nt[2] * nb[2]).abs
+      c = ~1.0 if c > ~1.0
+      sc = margin_robust(plan, nt, @fam_sig) - @fam_turn * Math.acos(c)
+      if sc > best_s
+        best_s = sc
+        best = k
+      k += 1
+    set_family(best)
+    best
+
+  # The landing's worst margin over the face turned fam_sig either way in
+  # pitch and in yaw (and not at all).
+  -> margin_robust(plan, n, sig)
+    nn = Math.sqrt(n[0] * n[0] + n[1] * n[1])
+    ey = [~0.0 - n[1] / nn, n[0] / nn, ~0.0]
+    ep = [n[1] * ey[2] - n[2] * ey[1], n[2] * ey[0] - n[0] * ey[2], n[0] * ey[1] - n[1] * ey[0]]
+    worst = land_margin(plan, n)
+    i = 0
+    while i < 4
+      e = ey
+      e = ep if i >= 2
+      a = sig
+      a = ~0.0 - sig if i % 2 == 1
+      m = [n[0] + a * e[0], n[1] + a * e[1], n[2] + a * e[2]]
+      r = Math.sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2])
+      v = land_margin(plan, [m[0] / r, m[1] / r, m[2] / r])
+      worst = v if v < worst
+      i += 1
+    worst
+
+  # How far inside the opponent's half (x -1.37..0, y -0.76..0.76) the
+  # return off face n lands, and how far above the net's top (0.1525 m over
+  # the table, plus the ball's radius) it passes: the least of the five, m.
+  -> land_margin(plan, n)
+    vp = pad_vel_expected
+    u = [plan[3] - vp[0], plan[4] - vp[1], plan[5] - vp[2]]
+    un = u[0] * n[0] + u[1] * n[1] + u[2] * n[2]
+    a = ~1.0 - @mu_t
+    b = ~1.0 + @e_pad - @mu_t
+    ox = vp[0] + a * u[0] - b * un * n[0] + @spin_kick[0]
+    oy = vp[1] + a * u[1] - b * un * n[1] + @spin_kick[1]
+    oz = vp[2] + a * u[2] - b * un * n[2] + @kick_z + @spin_kick[2]
+    return ~-9.0 if ox > ~-0.5
+    h = plan[2] - ~0.815
+    t = (oz + Math.sqrt(clamp(oz * oz + ~2.0 * ~9.81 * h, ~0.0, ~1000.0))) / ~9.81
+    lx = @xp + ox * t
+    ly = plan[1] + oy * t
+    tn = (~0.0 - @xp) / ox
+    zn = plan[2] + oz * tn - ~4.905 * tn * tn - ~0.9575
+    m = lx + ~1.37
+    m = ~0.0 - lx if ~0.0 - lx < m
+    m = ly + ~0.76 if ly + ~0.76 < m
+    m = ~0.76 - ly if ~0.76 - ly < m
+    m = zn if zn < m
+    m
+
+  # ---- seeing the ball -----------------------------------------------------------
+
+  -> before(f, ctl)
+    @bounced = true if f.at("env_touching_info", 1) > ~0.5
+    @hit = true if f.at("env_touching_info", 0) > ~0.5
+    pc = pad_center(f)
+    py = f.at("env_pelvis_pos", 1)
+    # the pad's offset from the pelvis and the plane it guards, smoothed
+    @off = @off + (pc[1] - py - @off) * ~0.2 if @side != 2 || f.t >= @t_offm
+    @off = @off_fix if @off_fix > ~0.0 && @side != 2
+    @xp = @xp + (pc[0] - @xp) * ~0.2
+    p = [f.at("env_ball_pos", 0), f.at("env_ball_pos", 1), f.at("env_ball_pos", 2)]
+    v = [f.at("env_ball_vel", 0), f.at("env_ball_vel", 1), f.at("env_ball_vel", 2)]
+    # the paddle's own velocity (the env's paddle_vel is a velocimeter in
+    # the paddle's frame: rotate it into the world), smoothed; the aim law
+    # expects the pad to carry it into the contact
+    vw = paddle_velocity(f)
+    i = 0
+    while i < 3
+      @vp[i] = @vp[i] + (vw[i] * @k_vpm - @vp[i]) * ~0.3
+      i += 1
+    live_jacobians(f) if @jac_live > ~0.5 && f.has?("hand_jac") && (@jac_live < ~1.5 || @side == 2)
+    @plan = nil
+    @plan = MyoTTBall.intercept(p, v, @xp, @bounced) if !@hit && f.t >= @react
+    track_spin(f, p) if @spin_mode > ~0.5
+    # the fly-by is per side: decide the side as soon as the ball is seen
+    choose_side(f) if @plan != nil && (@pel_fly > ~0.0 || @bh_pel_fly > ~0.0)
+    if @plan != nil
+      # the spin's push on the return (off the pad's current face), and the
+      # stroke family, re-chosen until fam_lock s before contact
+      update_spin_kick(pad_normal(f)) if @spin_mode > ~0.5
+      choose_flick(f) if @flick_mode > ~0.5 && !@fl_locked && flick_side_ok
+      choose_scoop if @scoop_mode > ~0.5 && !@fl_locked && @side == 1 && !fam_side_on
+      if fam_side_on && !@fam_locked
+        choose_family(@plan, pad_normal(f))
+        if @plan[0] < @fam_lock
+          @fam_locked = true
+          fk = @fam
+          @ctl.emit("fam:[fk]")
+      lock_now(ctl) if !@locked && @plan[0] < @t_lock
+      if !@locked && @g_hx > ~0.0
+        # fore and aft: the pelvis carries the pad's plane to where the
+        # rising ball passes the pad's nominal height, so the arm need not
+        # reach up or down for it
+        # hx_pad: the height matched follows the pad's measured height (a
+        # sagging arm is met by the ball lower on its rise, the strong
+        # pelvis slide doing what the weak shoulder cannot)
+        zt = @z_hit + @hx_pad * (pc[2] - @z_hit)
+        zt = zt - @hx_sag * clamp(@gy - @ry0 - @hx_s0, ~0.0, ~1.0) if @hx_sag > ~0.0 && @side != 2
+        xhi = @x_hi
+        if @side == 2
+          zt = zt + @bh_dz_hit
+          xhi = @x_hi + @bh_dx_hi
+        xh = MyoTTBall.at_height(p, v, zt, @bounced)
+        if xh != nil
+          xw = clamp(xh, @x_lo, xhi)
+          pel_x = f.at("env_pelvis_pos", 0)
+          want_x = pel_x + (xw - @xp)
+          @gx = @gx0 + @g_hx * (~1.6 - want_x - @gx0)
+      if !@locked
+        # the pelvis carries the pad's plane onto the ball's path, as far as
+        # its slide reaches; the arm takes the rest
+        trim = @y_trim
+        trim = @bh_y_trim if @side == 2
+        want = ~0.0 - (@plan[1] - @off + trim) - ~0.00067
+        @gy = clamp(want, ~-0.97, ~0.97)
+        anticipate(@plan, want - @gy) if @side != 2 && (@g_ff > ~0.0 || @g_ffz > ~0.0 || @g_ffn > ~0.0)
+        learned_ff(f, p, v, want - @gy) if @lff > ~0.0 && (@lff_side < ~0.5 || (@lff_side - @side.to_f).abs < ~0.5)
+        servo(f, pc, @plan, want - @gy) if f.t >= servo_start && !@servo_frozen
+        total_corr
+    backhand_tone(f) if @bh_ki > ~0.0 && @side == 2 && !@bh_ki_on
+    trunk_posture(f)
+    drive_pelvis(f)
+    id_feedforward(f) if @id_on
+    nil
+
+  # When the servo starts: t_servo, or the backhand's own bh_t_servo.
+  -> servo_start
+    return @bh_t_servo if @side == 2 && @bh_t_servo >= ~0.0
+    return @bh_arrive + @bh_arr_lag if @side == 2 && @bh_arr > ~0.5
+    @t_servo
+
+  # The backhand arm's postural tone (bh_ki), switched on once at bh_ki_t:
+  # the reflex integral on the arm's muscles, so the held posture settles
+  # on its command instead of sagging and drifting off it.
+  -> backhand_tone(f)
+    t_on = @bh_ki_t
+    t_on = @bh_arrive + @bh_arr_lag if @bh_arr > ~0.5
+    return nil if f.t < t_on
+    @ctl.reflex.set_integral(@arm_mask, @bh_ki, @bh_ki_lim)
+    @bh_ki_on = true
+    nil
+
+  # The hand's Jacobians at the measured posture (jac_live): the task's
+  # hand_jac sensor, linear then angular, each 3 x 8 row-major over the
+  # servo joints.
+  -> live_jacobians(f)
+    @jv = (0...24).map ->(i) f.at("hand_jac", i)
+    @jw = (0...24).map ->(i) f.at("hand_jac", 24 + i)
+    nil
+
+  # The pad's Jacobian rows over the servo joints for a pad at offset r from
+  # the palm with normal n: [lateral, height, normal x, normal y, normal z],
+  # each a list of 8 (the hand's Jacobians crossed with r and n, so it holds
+  # for whatever grasp the hand ends up with).
+  -> pad_rows(r, n)
+    jv = @jv
+    jw = @jw
+    m = 8
+    ry = []
+    rz = []
+    rnx = []
+    rny = []
+    rnz = []
+    j = 0
+    while j < m
+      wx = jw[j]
+      wy = jw[m + j]
+      wz = jw[2 * m + j]
+      ry.push(jv[m + j] + wz * r[0] - wx * r[2])
+      rz.push(jv[2 * m + j] + wx * r[1] - wy * r[0])
+      rnx.push(wy * n[2] - wz * n[1])
+      rny.push(wz * n[0] - wx * n[2])
+      rnz.push(wx * n[1] - wy * n[0])
+      j += 1
+    [ry, rz, rnx, rny, rnz]
+
+  # Damped least squares: [joint change removing the position errors (ey
+  # lateral, eh height), joint change turning the normal by en].
+  -> dls(rows, ey, eh, en)
+    m = 8
+    ry = rows[0]
+    rz = rows[1]
+    rnx = rows[2]
+    rny = rows[3]
+    rnz = rows[4]
+    mat = (0...(m * m)).map -> ~0.0
+    rp = (0...m).map -> ~0.0
+    rn = (0...m).map -> ~0.0
+    i = 0
+    while i < m
+      k = 0
+      while k < m
+        mat[m * i + k] = @w_z * rz[i] * rz[k] + @w_y * ry[i] * ry[k] + rnx[i] * rnx[k] + rny[i] * rny[k] + rnz[i] * rnz[k]
+        k += 1
+      mat[m * i + i] = mat[m * i + i] + @lam * @reg[i]
+      rp[i] = @w_z * rz[i] * eh + @w_y * ry[i] * ey
+      rn[i] = rnx[i] * en[0] + rny[i] * en[1] + rnz[i] * en[2]
+      i += 1
+    mat2 = mat.map -> item
+    [MyoTTMath.solve_spd(mat, rp, m), MyoTTMath.solve_spd(mat2, rn, m)]
+
+  # The part of a normal change a pad with normal n can make (it can only
+  # turn: the component along n is dropped).
+  -> turn(nt, n)
+    ex = nt[0] - n[0]
+    ey = nt[1] - n[1]
+    ez = nt[2] - n[2]
+    dn = ex * n[0] + ey * n[1] + ez * n[2]
+    [ex - dn * n[0], ey - dn * n[1], ez - dn * n[2]]
+
+  # Anticipation (feed-forward, from the plan alone): the ready posture puts
+  # the pad at the nominal height with the nominal normal (what it does on
+  # the phase-1 serve); a serve that needs another height, another normal
+  # or more reach than the pelvis has gets the joint change the nominal
+  # Jacobian says makes the difference, recomputed as the prediction
+  # sharpens and eased in through the springs.
+  -> anticipate(plan, ey)
+    nn = [@ff_nx, @ff_ny, @ff_nz]
+    choose_target(plan, nn)
+    nt = aim_normal(plan)
+    rows = pad_rows([@ff_rx, @ff_ry, @ff_rz], nn)
+    sol = dls(rows, ey, plan[2] + @z_bias - @ff_z, turn(nt, nn))
+    i = 0
+    while i < 8
+      @q_ff[i] = @g_ff * (sol[0][i] + sol[1][i]) + @g_ffz * sol[0][i] + @g_ffn * sol[1][i]
+      i += 1
+    nil
+
+  # Feedback (after t_servo, once the ready movement and the grip have
+  # settled): a PI servo on the measured pad, its height to the ball's
+  # predicted crossing (plus the lateral error the pelvis cannot take out)
+  # and its normal to the aim law's.
+  -> servo(f, pc, plan, ey)
+    n = pad_normal(f)
+    choose_target(plan, n)
+    nt = aim_normal(plan)
+    r = [pc[0] - f.at("env_palm_pos", 0), pc[1] - f.at("env_palm_pos", 1), pc[2] - f.at("env_palm_pos", 2)]
+    eh = plan[2] + @z_bias - pc[2]
+    sol = dls(pad_rows(r, n), ey, eh, turn(nt, n))
+    dp = sol[0]
+    dnq = sol[1]
+    @ticks = @ticks + 1
+    if @ticks % 3 == 0
+      a0 = nt[0]
+      a1 = nt[1]
+      a2 = nt[2]
+      @ctl.emit("aim:[a0]:[a1]:[a2]:[eh]")
+    kz = @k_z
+    kn = @k_n
+    pz = @p_z
+    pn = @p_n
+    if @side == 2
+      kz = @bh_k_z
+      kn = @bh_k_n
+      pz = ~0.0
+      pn = @bh_p_n
+    i = 0
+    while i < 8
+      lim = @corr_lim
+      lim = @trunk_lim if i == 7
+      @q_int[i] = clamp(@q_int[i] + (kz * dp[i] + kn * dnq[i]) * @dt, ~0.0 - lim, lim)
+      @q_fb[i] = pz * dp[i] + pn * dnq[i]
+      i += 1
+    nil
+
+  -> total_corr
+    i = 0
+    while i < 8
+      lim = @corr_lim
+      lim = @trunk_lim if i == 7
+      @q_corr[i] = clamp(@q_ff[i] + @q_lf[i] + @q_int[i] + @q_fb[i], ~0.0 - lim, lim)
+      i += 1
+    nil
+
+  # The servo's joint corrections as contraction offsets (computed once per
+  # tick, shared by the arm and trunk tracks).
+  -> servo_offsets(f)
+    return @off_cache if @off_tick == f.t
+    off = zeros
+    names = MyoTTKin.servo_joints
+    i = 0
+    while i < names.size
+      joint_move(off, names[i], @q_corr[i])
+      i += 1
+    joint_move(off, "flex_extension", @t_off[0])
+    joint_move(off, "lat_bending", @t_off[1])
+    # the arm's anticipatory postural adjustment: the pelvis slide whips the
+    # arm (the shoulder drops, the plane of elevation swings), so the
+    # shoulder is raised and turned in proportion to the slide reference's
+    # lateral acceleration and velocity, set before the arm lags
+    if @k_apa_arm > ~0.5
+      ay = ~0.0 - @ray
+      vy = ~0.0 - @rvy
+      joint_move(off, "shoulder_elv", @k_se_a * ay + @k_se_v * vy + @k_se_s * vy.abs)
+      joint_move(off, "elv_angle", @k_ea_a * ay + @k_ea_v * vy)
+    @off_cache = off
+    @off_tick = f.t
+    off
+
+  # The corrections freeze t_lock before contact (or when the stroke fires)
+  # and are reported (qc:...), so practice can fold them into the ready
+  # posture (consolidating corrections into the feed-forward command).
+  -> lock_now(ctl)
+    @locked = true
+    q = @q_corr.map -> item.to_s
+    ctl.emit("qc:" + q.join(":"))
+    qs = (0...8).map ->(i) (@q_int[i] + @q_fb[i]).to_s
+    ctl.emit("qs:" + qs.join(":"))
+    fs = @feat.map -> item.to_s
+    ctl.emit("feat:" + fs.join(":"))
+    nil
+
+  # Learned feed-forward: features of this serve, from the ball's flight
+  # alone (its crossing height and velocity at the nominal plane x = 1.8,
+  # when it crosses, the lateral reach the pelvis lacks), times the
+  # practised weights, eased in through the springs like any correction.
+  -> learned_ff(f, p, v, lat)
+    c = MyoTTBall.intercept(p, v, ~1.8, @bounced)
+    return nil if c == nil
+    @feat = [~1.0, c[2] - ~1.27, c[4], c[5] - ~2.0, c[0] + f.t - ~0.54, lat]
+    i = 0
+    while i < 8
+      acc = ~0.0
+      k = 0
+      while k < 6
+        acc = acc + @wl[6 * i + k] * @feat[k]
+        k += 1
+      @q_lf[i] = @lff * acc
+      i += 1
+    nil
+
+  # The stroke's latch. When the ball is t_swing from the pad's plane the
+  # stroke's goal is set: the ready posture plus d_push along the push
+  # vector (the joint change that moves the pad centre 1 m along -x with its
+  # normal and height held, from the same Jacobian model; the frozen
+  # corrections ride on top through the springs), with a feed-forward burst
+  # on the muscles that push shortens.
+  -> stroke_due(f)
+    return false if @plan == nil || @hit
+    fams = (fam_side_on && @fam > 0) || @fam >= 5
+    tsw = @t_swing
+    tsw = @t_swing + @bh_dt_swing if @side == 2
+    tsw = @t_hit + @t_lead if fams
+    tsw = @fl_t + @t_lead if @fam == 5
+    return false if @plan[0] > tsw
+    return fam_stroke(f) if fams
+    lock_now(@ctl) if !@locked
+    side_q = @q_ready
+    side_trunk = @trunk_q
+    stroke = @stroke
+    follow = @follow
+    dpush = @d_push
+    if @side == 2
+      side_q = @q_set
+      side_trunk = @trunk_bh
+      stroke = @stroke_bh
+      follow = @follow_bh
+      dpush = @d_push + @bh_dd_push
+    pv = push_vector(f)
+    q = []
+    i = 0
+    while i < 7
+      q.push(side_q[i] + pv[i] * dpush)
+      i += 1
+    st = @stiff
+    st = @bs if @side == 2
+    goal = posture(side_trunk, q, st)
+    stroke.pose(goal)
+    follow.pose(goal)
+    off = zeros
+    names = MyoTTKin.arm_joints
+    i = 0
+    while i < 7
+      joint_move(off, names[i], pv[i] * dpush)
+      i += 1
+    drv = zeros
+    @arm_mask.each ->(k)
+      drv[k] = clamp(@drv_push * off[k] / ~0.05, ~0.0, @drv_push) if off[k] > ~0.0
+    stroke.drive(drv)
+    @fired = true
+    @ctl.emit("stroke")
+    true
+
+  # A stroke family's stroke, set as the ready chunk fires (t_hit + t_lead
+  # before the predicted contact): its via keyframe is the contact pose
+  # (the ready posture; the corrections ride on top), passed with the
+  # command's velocity toward the follow-through goal, the ready posture
+  # plus d along the family's direction (the joint change moving the pad
+  # along it with its normal held); a feed-forward burst on the muscles the
+  # follow-through shortens.
+  -> fam_stroke(f)
+    k = @fam
+    @fam_locked = true
+    @w_py = @fam_wy
+    # the servo's corrections hold from here (they would fight the stroke's
+    # own motion); the pelvis keeps tracking the ball until t_lock
+    @servo_frozen = true
+    dir = @fam_dir
+    pv = push_vector_dir(f, dir[0], dir[2])
+    pv = push_vector_wrist(f, dir[0], dir[2]) if k == 5
+    side_q = @q_ready
+    side_trunk = @trunk_q
+    strokes = @fam_strokes
+    follows = @fam_follows
+    if @side == 2
+      side_q = @q_set
+      side_trunk = @trunk_bh
+      strokes = @bh_fam_strokes
+      follows = @bh_fam_follows
+    fstroke = nil
+    fi = 0
+    fi = 1 if @side == 2
+    fstroke = @fl_strokes[fi] if k == 5
+    fstroke = @sc_stroke if k == 6
+    q = []
+    i = 0
+    while i < 7
+      q.push(side_q[i] + pv[i] * @fam_d)
+      i += 1
+    st = @stiff
+    st = @bs if @side == 2
+    if k == 5
+      @fl_follows[fi].pose(posture(side_trunk, q, st))
+    elsif k == 6
+      @sc_follow.pose(posture(side_trunk, q, st))
+    else
+      follows[k - 1].pose(posture(side_trunk, q, st))
+    off = zeros
+    names = MyoTTKin.arm_joints
+    i = 0
+    while i < 7
+      joint_move(off, names[i], pv[i] * @fam_d)
+      i += 1
+    drv = zeros
+    burst = @drv_push
+    burst = @fl_drv if k == 5
+    @arm_mask.each ->(m)
+      drv[m] = clamp(burst * off[m] / ~0.05, ~0.0, burst) if off[m] > ~0.0
+    if k >= 5
+      fstroke.drive(drv)
+    else
+      strokes[k - 1].drive(drv)
+    d0 = dir[0]
+    d2 = dir[2]
+    e0 = @fam_vp[0]
+    e1 = @fam_vp[1]
+    e2 = @fam_vp[2]
+    @fired = true
+    @ctl.emit("stroke")
+    @ctl.emit("famdir:[k]:[d0]:[d2]:[e0]:[e1]:[e2]")
+    true
+
+  -> push_vector(f)
+    push_vector_dir(f, ~-1.0, ~0.0)
+
+  # The flick's joint change: the pad centre 1 m along (dx, 0, dz) from the
+  # forearm's rotation, the wrist's deviation and its flexion alone (the
+  # arm's first four joints stay), the normal held with weight fl_wn (damped
+  # least squares on the Jacobian model at the pad's measured pose).
+  -> push_vector_wrist(f, dx, dz)
+    pc = pad_center(f)
+    n = pad_normal(f)
+    r = [pc[0] - f.at("env_palm_pos", 0), pc[1] - f.at("env_palm_pos", 1), pc[2] - f.at("env_palm_pos", 2)]
+    jv = @jv
+    jw = @jw
+    rows = []
+    j = 4
+    while j < 7
+      wx = jw[j]
+      wy = jw[8 + j]
+      wz = jw[16 + j]
+      rows.push([jv[j] + wy * r[2] - wz * r[1], jv[16 + j] + wx * r[1] - wy * r[0], @fl_wn * (wy * n[2] - wz * n[1]), @fl_wn * (wz * n[0] - wx * n[2]), @fl_wn * (wx * n[1] - wy * n[0])])
+      j += 1
+    tgt = [dx, dz, ~0.0, ~0.0, ~0.0]
+    m = 3
+    mat = (0...(m * m)).map -> ~0.0
+    rhs = (0...m).map -> ~0.0
+    i = 0
+    while i < m
+      k = 0
+      while k < m
+        acc = ~0.0
+        c = 0
+        while c < 5
+          acc = acc + rows[i][c] * rows[k][c]
+          c += 1
+        mat[m * i + k] = acc
+        k += 1
+      mat[m * i + i] = mat[m * i + i] + @lam
+      acc = ~0.0
+      c = 0
+      while c < 5
+        acc = acc + rows[i][c] * tgt[c]
+        c += 1
+      rhs[i] = acc
+      i += 1
+    sol = MyoTTMath.solve_spd(mat, rhs, m)
+    [~0.0, ~0.0, ~0.0, ~0.0, sol[0], sol[1], sol[2]]
+
+  # The joint change (arm joints) moving the pad centre 1 m along (dx, 0,
+  # dz), its normal held and (weight w_py; the families use it) its lateral
+  # position held (damped least squares on the Jacobian model at the pad's
+  # measured pose).
+  -> push_vector_dir(f, dx, dz)
+    pc = pad_center(f)
+    n = pad_normal(f)
+    r = [pc[0] - f.at("env_palm_pos", 0), pc[1] - f.at("env_palm_pos", 1), pc[2] - f.at("env_palm_pos", 2)]
+    jv = @jv
+    jw = @jw
+    m = 7
+    rows = []
+    j = 0
+    while j < m
+      wx = jw[j]
+      wy = jw[8 + j]
+      wz = jw[16 + j]
+      rows.push([jv[j] + wy * r[2] - wz * r[1], jv[16 + j] + wx * r[1] - wy * r[0], wy * n[2] - wz * n[1], wz * n[0] - wx * n[2], wx * n[1] - wy * n[0], @w_py * (jv[8 + j] + wz * r[0] - wx * r[2])])
+      j += 1
+    tgt = [dx, dz, ~0.0, ~0.0, ~0.0, ~0.0]
+    mat = (0...(m * m)).map -> ~0.0
+    rhs = (0...m).map -> ~0.0
+    i = 0
+    while i < m
+      k = 0
+      while k < m
+        acc = ~0.0
+        c = 0
+        while c < 6
+          acc = acc + rows[i][c] * rows[k][c]
+          c += 1
+        mat[m * i + k] = acc
+        k += 1
+      mat[m * i + i] = mat[m * i + i] + @lam
+      acc = ~0.0
+      c = 0
+      while c < 6
+        acc = acc + rows[i][c] * tgt[c]
+        c += 1
+      rhs[i] = acc
+      i += 1
+    MyoTTMath.solve_spd(mat, rhs, m)
+
+  # Where to send it: the landing the pad's current normal would give (the
+  # impact model below, then the flight), pulled toward (land_x, land_y) by
+  # land_pull and kept inside the safe box on the opponent's half. The
+  # least correction that still lands, like a player who goes with the
+  # angle he has and only turns the bat when it would miss.
+  -> choose_target(plan, n)
+    return robust_target(plan, n) if @aim_robust > ~0.5
+    lp = landing(plan, n)
+    x = lp[0] + (@land_x - lp[0]) * @land_pull
+    y = lp[1] + (@land_y - lp[1]) * @land_pull
+    dx = ~0.0
+    dx = @bh_box_dx if @side == 2
+    @tx = clamp(x, @box_x0 + dx, @box_x1 + dx)
+    @ty = clamp(y, @box_y0, @box_y1)
+    nil
+
+  # The robust target (aim_robust 1): of a grid of landing points on the
+  # opponent's half, the one whose solved face keeps the return legal with
+  # the widest margin when the face is off by rob_sig (margin_robust), less
+  # rob_turn per rad the face must turn from where it is (n): a player who
+  # plays the safe ball rather than a fixed spot.
+  -> robust_target(plan, n)
+    best = ~-1000.0
+    bx = @land_x
+    by = @land_y
+    xs = [~-1.15, ~-0.95, ~-0.75, ~-0.55, ~-0.35]
+    ys = [~-0.45, ~-0.15, ~0.15, ~0.45]
+    i = 0
+    while i < 5
+      j = 0
+      while j < 4
+        @tx = xs[i]
+        @ty = ys[j]
+        nt = aim_normal(plan)
+        c = (nt[0] * n[0] + nt[1] * n[1] + nt[2] * n[2]).abs
+        c = ~1.0 if c > ~1.0
+        sc = margin_robust(plan, nt, @rob_sig) - @rob_turn * Math.acos(c)
+        if sc > best
+          best = sc
+          bx = xs[i]
+          by = ys[j]
+        j += 1
+      i += 1
+    @tx = bx
+    @ty = by
+    nil
+
+  -> landing(plan, n)
+    vp = pad_vel_expected
+    u = [plan[3] - vp[0], plan[4] - vp[1], plan[5] - vp[2]]
+    un = u[0] * n[0] + u[1] * n[1] + u[2] * n[2]
+    a = ~1.0 - @mu_t
+    b = ~1.0 + @e_pad - @mu_t
+    ox = vp[0] + a * u[0] - b * un * n[0] + @spin_kick[0]
+    oy = vp[1] + a * u[1] - b * un * n[1] + @spin_kick[1]
+    oz = vp[2] + a * u[2] - b * un * n[2] + @kick_z + @spin_kick[2]
+    return [~9.0, plan[1]] if ox > ~-0.5
+    h = plan[2] - ~0.815
+    t = (oz + Math.sqrt(clamp(oz * oz + ~2.0 * ~9.81 * h, ~0.0, ~1000.0))) / ~9.81
+    [@xp + ox * t, plan[1] + oy * t]
+
+  # The aim law. The paddle is a nearly elastic, grippy wall: fitted to
+  # the simulator's impacts, the ball leaves with its normal velocity
+  # reversed times e_pad, its velocity along the face cut by mu_t, and a
+  # small upward kick kick_z:
+  #   v_out = vp + (1 - mu) u - (1 + e - mu) (u . n) n + kick ez,  u = v - vp
+  # (vp the pad's velocity), so for the outgoing velocity that lands on
+  # (land_x, land_y) the normal is explicit, n = w / |w| with
+  # w = vp + (1 - mu) u + kick ez - v_out, and the outgoing speed s must make
+  # |w|^2 = (1 + e - mu) (u . w): a few secant steps on s, each with the
+  # flatter ballistic arc to the target at speed s.
+  -> aim_normal(plan)
+    v = [plan[3], plan[4], plan[5]]
+    s0 = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]) * @e_pad + ~2.0 * @k_vp * ~1.875 * @d_push / @t_push
+    s1 = s0 * ~0.9
+    f0 = aim_residual(plan, v, s0)
+    f1 = aim_residual(plan, v, s1)
+    it = 0
+    while it < 6 && (f1 - f0).abs > ~0.000001
+      s2 = clamp(s1 - f1 * (s1 - s0) / (f1 - f0), ~1.5, ~15.0)
+      s0 = s1
+      f0 = f1
+      s1 = s2
+      f1 = aim_residual(plan, v, s1)
+      it += 1
+    w = aim_w(plan, v, s1)
+    nn = Math.sqrt(w[0] * w[0] + w[1] * w[1] + w[2] * w[2])
+    # nz_bias: a learned pitch trim (the servo's residual pitch at contact);
+    # @aim_raw leaves the trims off (the face the impact model itself solves,
+    # for judging a landing margin with that same model)
+    nz = w[2] / nn
+    if !@aim_raw
+      nz = nz + @nz_bias
+      nz = nz + @bh_dnz if @side == 2
+      nz = nz + @fl_dnz if @fam == 5
+    nn2 = Math.sqrt(w[0] * w[0] / (nn * nn) + w[1] * w[1] / (nn * nn) + nz * nz)
+    [w[0] / nn / nn2, w[1] / nn / nn2, nz / nn2]
+
+  # w for an outgoing speed s (see aim_normal).
+  # The pad's velocity the aim law expects at contact: the measured one
+  # (k_vpm) plus k_vp of the stroke's peak speed along -x (a give-back
+  # stroke, d_push < 0, carries the pad toward the ball's direction).
+  -> pad_vel_expected
+    return @fam_vp if (fam_side_on && @fam > 0) || @fam >= 5
+    vs = ~0.0 - @k_vs * ~1.875 * @d_push / @t_push
+    [@vp[0] + vs, @vp[1], @vp[2]]
+
+  -> aim_w(plan, v, s)
+    dx = @tx - @xp
+    dy = @ty - plan[1]
+    dd = Math.sqrt(dx * dx + dy * dy)
+    dz = ~0.815 - plan[2]
+    g = ~9.81
+    disc = s * s * s * s - g * (g * dd * dd + ~2.0 * dz * s * s)
+    th = ~0.6
+    th = Math.atan((s * s - Math.sqrt(disc)) / (g * dd)) if disc > ~0.0
+    h = s * Math.cos(th)
+    k = ~1.0 - @mu_t
+    vp = pad_vel_expected
+    sk = @spin_kick
+    [k * (v[0] - vp[0]) + vp[0] + sk[0] - h * dx / dd, k * (v[1] - vp[1]) + vp[1] + sk[1] - h * dy / dd, k * (v[2] - vp[2]) + vp[2] + @kick_z + sk[2] - s * Math.sin(th)]
+
+  -> aim_residual(plan, v, s)
+    w = aim_w(plan, v, s)
+    vp = pad_vel_expected
+    w[0] * w[0] + w[1] * w[1] + w[2] * w[2] - (~1.0 + @e_pad - @mu_t) * ((v[0] - vp[0]) * w[0] + (v[1] - vp[1]) * w[1] + (v[2] - vp[2]) * w[2])
+
+  # ---- the trunk's posture ------------------------------------------------------
+  # The torso is heavy and its muscles weak around upright, and the pelvis
+  # slides it sideways at up to ~1 m in half a second, so the stance gets a
+  # postural servo on the trunk's measured flexion and side bend (PI in
+  # joint space, through the contraction offsets) plus an anticipatory
+  # postural adjustment: a side bend proportional to the pelvis reference's
+  # lateral acceleration, set before the body lags (k_apa).
+  -> trunk_posture(f)
+    efe = @trunk_fe - f.q(body, "flex_extension")
+    elb = @trunk_lb - f.q(body, "lat_bending")
+    @t_int[0] = clamp(@t_int[0] + @k_ti * efe * @dt, ~-0.4, ~0.4)
+    @t_int[1] = clamp(@t_int[1] + @k_ti * elb * @dt, ~-0.4, ~0.4)
+    @t_off[0] = @t_int[0] + @k_tp * efe + @k_apx * @ref_ax
+    # lean into the slide: a side bend proportional to how far the pelvis
+    # is being sent (world y), set from the plan before the body lags
+    lean = @k_lean * (@py_start - (~0.0 - @gy - ~0.00067))
+    @t_off[1] = @t_int[1] + @k_tp * elb + @k_apa * @ref_ay + lean
+    nil
+
+  # ---- pelvis (two position actuators, env action units in [-1, 1]) ----------
+  # The joints point opposite to the world axes: pelvis_x q = 1.6 - x,
+  # pelvis_y q = -y (- 0.00067). Actuators: kp 3500 N/m, joint damping
+  # 1000 N s/m, 139 kg moved (body plus armature); ctrl x = -0.475 + 0.525 a,
+  # ctrl y = a. A critically damped reference eases toward the goal and the
+  # command adds the force that reference needs, (m a + c v) / kp, so the
+  # heavy slide follows a smooth, fast profile.
+
+  -> pelvis_qx(f)
+    ~1.6 - f.at("env_pelvis_pos", 0)
+
+  -> pelvis_qy(f)
+    ~0.0 - f.at("env_pelvis_pos", 1) - ~0.00067
+
+  -> drive_pelvis(f)
+    return drive_pelvis_fly(f) if fly_factor > ~0.0 && @pel_mj > ~0.5 && @plan != nil
+    return drive_pelvis_mj(f) if @pel_mj > ~0.5 && @plan != nil && @plan[0] - @slide_margin > ~0.1 && mj_feasible && (@gy - @ry0).abs >= @pel_mj_min
+    w = @pel_w
+    ax = clamp(w * w * (@gx - @rx) - ~2.0 * w * @rvx, ~0.0 - @pel_amax, @pel_amax)
+    ay = clamp(w * w * (@gy - @ry) - ~2.0 * w * @rvy, ~0.0 - @pel_amax, @pel_amax)
+    @rvx = @rvx + ax * @dt
+    @rvy = @rvy + ay * @dt
+    @rx = @rx + @rvx * @dt
+    @ry = @ry + @rvy * @dt
+    @ref_ax = ~0.0 - ax
+    @ref_ay = ~0.0 - ay
+    @rax = ax
+    @ray = ay
+    ex = @rx - pelvis_qx(f)
+    ey = @ry - pelvis_qy(f)
+    set_pelvis(@rx + @pel_fb * ex, @ry + @pel_fb * ey, @rvx, @rvy, ax, ay)
+
+  # A min-jerk slide of distance d over tg peaks at 1.875 d / tg; when that
+  # is beyond pel_vmax (the slide the actuator can make) the pelvis goes
+  # flat out on the critically damped reference instead, since any gentler
+  # profile arrives later still.
+  -> mj_feasible
+    tg = @plan[0] - @slide_margin
+    d = (@gy - @ry).abs
+    d = (@gx - @rx).abs if (@gx - @rx).abs > d
+    ~1.875 * d <= @pel_vmax * tg
+
+  # Min-jerk slide on time-to-go tg (the ball's time to the pad less the
+  # margin): jerk = 60 (g - x) / tg^3 - 36 v / tg^2 - 9 a / tg per axis (the
+  # minimum-jerk path to the goal at rest, re-planned every tick), its
+  # acceleration capped at pel_amax.
+  -> drive_pelvis_mj(f)
+    tg = @plan[0] - @slide_margin
+    jx = ~60.0 * (@gx - @rx) / (tg * tg * tg) - ~36.0 * @rvx / (tg * tg) - ~9.0 * @rax / tg
+    jy = ~60.0 * (@gy - @ry) / (tg * tg * tg) - ~36.0 * @rvy / (tg * tg) - ~9.0 * @ray / tg
+    @rax = clamp(@rax + jx * @dt, ~0.0 - @pel_amax, @pel_amax)
+    @ray = clamp(@ray + jy * @dt, ~0.0 - @pel_amax, @pel_amax)
+    @rvx = @rvx + @rax * @dt
+    @rvy = @rvy + @ray * @dt
+    @rx = @rx + @rvx * @dt
+    @ry = @ry + @rvy * @dt
+    @ref_ax = ~0.0 - @rax
+    @ref_ay = ~0.0 - @ray
+    ex = @rx - pelvis_qx(f)
+    ey = @ry - pelvis_qy(f)
+    set_pelvis(@rx + @pel_fb * ex, @ry + @pel_fb * ey, @rvx, @rvy, @rax, @ray)
+
+  # The fly-by slide (pel_fly): fore-aft as drive_pelvis_mj; laterally the
+  # minimum-jerk path to the goal reached at time-to-go ty with velocity
+  # vf = pel_fly (goal - x) / ty and no acceleration (initial jerk
+  # 60 d / ty^3 - (36 v + 24 vf) / ty^2 - 9 a / ty), re-planned every tick;
+  # inside fly_tmin of contact it coasts, and it brakes once the ball is
+  # gone (drive_pelvis's critically damped reference).
+  -> fly_factor
+    return @bh_pel_fly if @side == 2
+    @pel_fly
+
+  -> drive_pelvis_fly(f)
+    tg = @plan[0] - @slide_margin
+    if tg > ~0.1
+      jx = ~60.0 * (@gx - @rx) / (tg * tg * tg) - ~36.0 * @rvx / (tg * tg) - ~9.0 * @rax / tg
+      @rax = clamp(@rax + jx * @dt, ~0.0 - @pel_amax, @pel_amax)
+    else
+      w = @pel_w
+      @rax = clamp(w * w * (@gx - @rx) - ~2.0 * w * @rvx, ~0.0 - @pel_amax, @pel_amax)
+    ty = @plan[0] - @fly_margin
+    if ty > @fly_tmin
+      d = @gy - @ry
+      vf = fly_factor * d / ty
+      jy = ~60.0 * d / (ty * ty * ty) - (~36.0 * @rvy + ~24.0 * vf) / (ty * ty) - ~9.0 * @ray / ty
+      @ray = clamp(@ray + jy * @dt, ~0.0 - @pel_amax, @pel_amax)
+    else
+      @ray = ~0.0
+    @rvx = @rvx + @rax * @dt
+    @rvy = @rvy + @ray * @dt
+    if @rvy.abs > @pel_vcap
+      @rvy = clamp(@rvy, ~0.0 - @pel_vcap, @pel_vcap)
+      @ray = ~0.0
+    @rx = @rx + @rvx * @dt
+    @ry = @ry + @rvy * @dt
+    @ref_ax = ~0.0 - @rax
+    @ref_ay = ~0.0 - @ray
+    ex = @rx - pelvis_qx(f)
+    ey = @ry - pelvis_qy(f)
+    set_pelvis(@rx + @pel_fb * ex, @ry + @pel_fb * ey, @rvx, @rvy, @rax, @ray)
+
+  -> set_pelvis(qx, qy, vx, vy, ax, ay)
+    ux = qx + (@pel_m * ax + ~1000.0 * vx) / ~3500.0
+    uy = qy + (@pel_m * ay + ~1000.0 * vy) / ~3500.0
+    @ctl.motor("pelvis_x", clamp((ux + ~0.475) / ~0.525, ~-1.0, ~1.0))
+    @ctl.motor("pelvis_y", clamp(uy, ~-1.0, ~1.0))
+    @u_pel = [clamp(ux, ~-1.0, ~0.05), clamp(uy, ~-1.0, ~1.0)]
+    nil
+
+  # ---- inverse-dynamics feed-forward (id_mode) ------------------------------
+  # The slide joints' mass-matrix columns (mcol_pelvis_x, mcol_pelvis_y: the
+  # generalised force at every joint per unit slide acceleration) times the
+  # slide's acceleration is the torque each joint needs to stay
+  # unaccelerated while the 139 kg pelvis whips the body: the inertial
+  # coupling the gravity feed-forward (qfrc_bias) does not carry. It is
+  # projected onto the independent joints (an equality-slaved joint's torque
+  # moves to its master, times the coupling coefficient), kept on the arm's
+  # joints (id_arm) and the trunk's (id_trunk), and handed to the
+  # controller's feed-forward, which splits it over the muscles able to
+  # supply it.
+
+  -> id_setup
+    g = body.geometry
+    @id_gain = (0...g.joint_count).map -> ~0.0
+    MyoTTKin.arm_joints.each ->(nm)
+      j = g.joint(nm)
+      @id_gain[j] = @id_arm if j != nil
+    MyoTTKin.trunk_joints.each ->(nm)
+      j = g.joint(nm)
+      @id_gain[j] = @id_trunk if j != nil
+    @id_pairs = []
+    MyoTTKin.couplings.each ->(c)
+      a = g.joint(c[0])
+      b = g.joint(c[1])
+      @id_pairs.push([a, b, c[2]]) if a != nil && b != nil
+    if @id_alloc > ~0.5
+      # the controller folds the slaved joints onto their masters: they
+      # carry their master's gain
+      @id_pairs.each ->(pr) @id_gain[pr[0]] = @id_gain[pr[1]]
+      groups = [names_joints(MyoTTKin.arm_joints)]
+      groups.push(names_joints(MyoTTKin.trunk_joints)) if @id_trunk > ~0.0
+      @ctl.set_feedforward_allocation(groups, @id_pairs.map ->(pr) [pr[0], pr[1], pr[2]])
+    @id_prev = nil
+    @id_acc_prev = [~0.0, ~0.0]
+    @u_pel = nil
+    nil
+
+  -> names_joints(names)
+    g = body.geometry
+    out = []
+    names.each ->(nm)
+      j = g.joint(nm)
+      out.push(j) if j != nil
+    out
+
+  -> id_feedforward(f)
+    g = body.geometry
+    q = [pelvis_qx(f), pelvis_qy(f)]
+    v = [~0.0, ~0.0]
+    v = [(q[0] - @id_prev[0]) / @dt, (q[1] - @id_prev[1]) / @dt] if @id_prev != nil
+    @id_prev = q
+    # the acceleration the command about to be sent produces (actuator kp
+    # 3500 N/m on the control, joint damping 1000 N s/m, pel_m moved), and
+    # the measured one over the last step
+    acc = [f.at("cacc", 0), f.at("cacc", 1)]
+    if @u_pel != nil
+      i = 0
+      while i < 2
+        am = (~3500.0 * (@u_pel[i] - q[i]) - ~1000.0 * v[i]) / @pel_m
+        acc[i] = am + (acc[i] - am) * @id_meas
+        i += 1
+    a = [acc[0] + (acc[0] - @id_acc_prev[0]) * @id_lead / @dt, acc[1] + (acc[1] - @id_acc_prev[1]) * @id_lead / @dt]
+    @id_acc_prev = acc
+    n = g.joint_count
+    tau = (0...n).map ->(j) f.at("mcol_pelvis_x", j) * a[0] + f.at("mcol_pelvis_y", j) * a[1]
+    if @id_alloc < ~0.5
+      @id_pairs.each ->(p)
+        tau[p[1]] = tau[p[1]] + p[2] * tau[p[0]]
+        tau[p[0]] = ~0.0
+    out = (0...n).map ->(j) @id_gain[j] * tau[j]
+    @ctl.set_feedforward_torque(out)
+    nil

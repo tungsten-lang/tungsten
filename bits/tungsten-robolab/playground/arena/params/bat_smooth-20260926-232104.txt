@@ -1,0 +1,51 @@
+# robolab practice result for bat: score 32.2172
+# metrics {'time': 17.505, 'pitches': [{'pitch': 1, 'speed_mph': 82.8, 'target_x': 0.0, 'target_z': 0.8, 't_release': 2.9, 'hit': True, 'closest': 0.002, 't_release_hand': 3.77, 't_swing': 3.11, 't_aim': 2.905, 't_aim_lock': 3.315, 'zone_min_cm': 2.2, 'aim_pred': [0.458, 0.0, 0.769], 'aim_attack_deg': 15.0, 'intercept_err_cm': 14.0, 'closest_s': 0.584, 't_closest': 3.352, 'attack_deg': 7.6, 'approach_deg': -7.1, 'plane_tilt_deg': 35.1, 'bat_speed': 12.73, 'bat_speed_mph': 28.5, 'time_in_zone_ms': 13.5, 'aim_lock_pred': [0.048, 0.0, 0.802], 'aim_lock_attack_deg': 14.6, 't_contact': 3.3519, 'pitch_at_contact': 33.78, 'impact_from_end': 0.275, 'contact_y': -0.358, 'contact_z': 0.847, 'exit_speed': 23.21, 'exit_mph': 51.9, 'launch_deg': 22.9, 'spray_deg': 13.7, 'fair': True, 'carry_m': 36.1, 'hand_release_after_contact_ms': 418.0, 'swing_to_contact_ms': 242.0, 'aim_engaged_before_contact_ms': 447.0, 'aim_locked_before_contact_ms': 37.0, 't_windup': 2.0, 't_lift': 2.247, 'lift_before_release_ms': 653.0, 'lift_height_cm': np.float64(14.0), 't_plant': 2.9, 'stride_m': 0.346, 'plant_after_release_ms': 0.0, 'plant_to_contact_ms': 451.0, 'pelvis_shift_m': 0.15}, {'pitch': 2, 'speed_mph': 89.5, 'target_x': -0.14, 'target_z': 1.0, 't_release': 7.24, 'hit': True, 'closest': 0.001, 't_release_hand': 8.06, 't_swing': 7.4, 't_aim': 7.245, 't_aim_lock': 7.625, 'zone_min_cm': 1.5, 'aim_pred': [0.423, -0.14, 0.972], 'aim_attack_deg': 13.7, 'intercept_err_cm': 10.3, 'closest_s': 0.628, 't_closest': 7.654, 'attack_deg': 8.3, 'approach_deg': -5.8, 'plane_tilt_deg': 22.7, 'bat_speed': 12.87, 'bat_speed_mph': 28.8, 'time_in_zone_ms': 64.5, 'aim_lock_pred': [0.043, -0.14, 1.0], 'aim_lock_attack_deg': 13.4, 't_contact': 7.6545, 'pitch_at_contact': 36.46, 'impact_from_end': 0.232, 'contact_y': -0.493, 'contact_z': 1.051, 'exit_speed': 25.92, 'exit_mph': 58.0, 'launch_deg': 23.3, 'spray_deg': 15.9, 'fair': True, 'carry_m': 44.1, 'hand_release_after_contact_ms': 405.0, 'swing_to_contact_ms': 255.0, 'aim_engaged_before_contact_ms': 410.0, 'aim_locked_before_contact_ms': 30.0, 't_windup': 6.34, 't_lift': 6.586, 'lift_before_release_ms': 654.0, 'lift_height_cm': np.float64(14.0), 't_plant': 7.241, 'stride_m': 0.333, 'plant_after_release_ms': 1.0, 'plant_to_contact_ms': 414.0, 'pelvis_shift_m': 0.168}, {'pitch': 3, 'speed_mph': 76.1, 'target_x': 0.15, 'target_z': 0.62, 't_release': 11.54, 'hit': True, 'closest': 0.002, 't_release_hand': 12.48, 't_swing': 11.805, 't_aim': 11.545, 't_aim_lock': 12.0, 'zone_min_cm': 4.1, 'aim_pred': [0.498, 0.15, 0.584], 'aim_attack_deg': 16.3, 'intercept_err_cm': 8.3, 'closest_s': 0.658, 't_closest': 12.039, 'attack_deg': 3.1, 'approach_deg': -8.5, 'plane_tilt_deg': 42.8, 'bat_speed': 11.71, 'bat_speed_mph': 26.2, 'aim_lock_pred': [0.043, 0.15, 0.623], 'aim_lock_attack_deg': 15.9, 'time_in_zone_ms': 20.0, 't_contact': 12.0394, 'pitch_at_contact': 31.09, 'impact_from_end': 0.201, 'contact_y': -0.123, 'contact_z': 0.642, 'exit_speed': 21.71, 'exit_mph': 48.6, 'launch_deg': 24.3, 'spray_deg': -98.4, 'fair': False, 'carry_m': 32.7, 'cross_x': 0.971, 'cross_z': 1.006, 'hand_release_after_contact_ms': 441.0, 'swing_to_contact_ms': 234.0, 'aim_engaged_before_contact_ms': 494.0, 'aim_locked_before_contact_ms': 39.0, 't_windup': 10.64, 't_lift': 10.886, 'lift_before_release_ms': 654.0, 'lift_height_cm': np.float64(14.0), 't_plant': 11.541, 'stride_m': 0.332, 'plant_after_release_ms': 1.0, 'plant_to_contact_ms': 498.0, 'pelvis_shift_m': 0.139}, {'pitch': 4, 'speed_mph': 86.1, 'target_x': -0.06, 'target_z': 0.68, 't_release': 15.97, 'hit': True, 'closest': -0.002, 't_release_hand': 16.82, 't_swing': 16.155, 't_aim': 15.975, 't_aim_lock': 16.37, 'zone_min_cm': 4.0, 'aim_pred': [0.44, -0.06, 0.651], 'aim_attack_deg': 15.1, 'intercept_err_cm': 16.1, 'closest_s': 0.559, 't_closest': 16.403, 'attack_deg': 9.3, 'approach_deg': -7.2, 'plane_tilt_deg': 38.2, 'bat_speed': 11.98, 'bat_speed_mph': 26.8, 'aim_lock_pred': [0.045, -0.06, 0.681], 'aim_lock_attack_deg': 14.7, 't_contact': 16.4032, 'pitch_at_contact': 35.16, 'impact_from_end': 0.301, 'contact_y': -0.402, 'contact_z': 0.733, 'exit_speed': 25.42, 'exit_mph': 56.9, 'launch_deg': -36.1, 'spray_deg': 33.9, 'fair': True, 'carry_m': 1.5, 'time_in_zone_ms': 17.5, 'hand_release_after_contact_ms': 417.0, 'swing_to_contact_ms': 248.0, 'aim_engaged_before_contact_ms': 428.0, 'aim_locked_before_contact_ms': 33.0, 't_windup': 15.07, 't_lift': 15.316, 'lift_before_release_ms': 654.0, 'lift_height_cm': np.float64(14.0), 't_plant': 15.971, 'stride_m': 0.333, 'plant_after_release_ms': 1.0, 'plant_to_contact_ms': 432.0, 'pelvis_shift_m': 0.138}], 'thrown': 4, 'hits': 4, 'fair': 3, 'grip_events': [(3.77, 0), (5.635, 1), (8.06, 0), (9.93, 1), (12.48, 0), (14.36, 1), (16.82, 0)], 'effort': 0.0805, 'fell': False}
+# t_lock set by hand from the practised 0.048 s to 0.15 s (a human visuomotor delay); 18-pitch sweep unchanged (15/18 contacts, 9 fair)
+arm_gain 0.2627128026178707
+arm_kd 0.23115414628713482
+arm_kp 7.96549391877535
+arm_swing_kd 0.0875071910579822
+arm_swing_kp 11.245361184279531
+att_bias 0.1288261280972093
+drv_arms 0.35416657153870484
+drv_hips 0.5414681753583942
+drv_stride 0.5280918882952595
+drv_torso 0.7619101552530982
+drv_whip 1.0
+dur_drive 0.08172039550583121
+dur_hips 0.22997863376348118
+dur_leglift 0.24654864278900215
+dur_mid 0.08951212871575243
+dur_slot 0.02
+dur_stride 0.3278039539401736
+dur_torso 0.35877475863247
+dur_whip 0.07971423799756534
+g_att 0.8450232969968987
+g_x 0.21633819198154614
+g_z 0.9329447880743118
+k_in 0.11212014265410415
+k_sep 0.253855361850446
+lag_arms 0.03742249378822372
+lag_torso 0.0
+leg_kp 10.0
+leg_swing_kp 2.6680746446451247
+lift_at 0.11178887222596848
+over 0.6831523437617175
+over_arms 0.14217288750623136
+sep_max 0.20560934655445706
+stiff 0.055289420682952006
+stride_at 0.4732415567324453
+swing_gain 0.7735179015808766
+swing_kd 0.0
+swing_kp 7.936003513368865
+t_lock 0.15
+t_trigger 0.27366324131697156
+trunk_kd 0.8827940644668051
+trunk_kp 7.929366224186598
+wrist_kp 2.1807070168441154
+wrist_rel_kd 0.058485347187379945
+wrist_rel_kp 2.204785044100463
+x_nom 0.6526642133837612
+z_nom 0.7499850798550556
+# flow 0: the ease-then-hold load and per-chunk easings these params were practised with (the skill defaults to flow 1 since 2026-09-26)
+flow 0.0

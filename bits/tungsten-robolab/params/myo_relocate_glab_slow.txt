@@ -1,0 +1,12 @@
+t_reach 0.5
+to_reach 0.9
+r_reach 0.012
+t_desc 0.35
+to_desc 0.7
+r_xy 0.01
+t_close 0.25
+to_close 0.4
+t_lift 0.45
+to_lift 0.6
+t_retry 0.0
+kv 1.0

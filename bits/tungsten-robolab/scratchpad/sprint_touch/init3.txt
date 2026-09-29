@@ -1,0 +1,11 @@
+td_sw_knee 120.0
+td_sw_hip 30.0
+td_st_knee 25.0
+g_swk 0.1
+d_sw 0.35
+o_claw 0.06
+d_claw 0.2
+t_hold 0.15
+g_stk 1.4
+g_sw 0.1
+b_rf 0.0

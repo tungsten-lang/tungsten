@@ -1,0 +1,11 @@
+.venv/
+out/
+bin/robolab
+bin/*.dSYM
+bin/*.sidemap
+__pycache__/
+.venv-myo/
+playground/cache/
+.venv-pose/
+# copyrighted reference footage and anything cut from it stays local (playground/refs/*/SOURCES.md lists it)
+playground/refs/*/clips/

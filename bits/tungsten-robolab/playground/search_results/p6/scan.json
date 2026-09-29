@@ -1,0 +1,272 @@
+[
+ {
+  "group": "champ",
+  "dims": 126,
+  "sigma": 0.001,
+  "mean": 1.2509166666666667,
+  "falls": 0,
+  "n": 12,
+  "legal_mark": 1.2509166666666667
+ },
+ {
+  "group": "champ",
+  "dims": 126,
+  "sigma": 0.002,
+  "mean": 1.18625,
+  "falls": 0,
+  "n": 12,
+  "legal_mark": 1.18625
+ },
+ {
+  "group": "champ",
+  "dims": 126,
+  "sigma": 0.005,
+  "mean": 0.7181666666666667,
+  "falls": 4,
+  "n": 12,
+  "legal_mark": 1.1793750000000003
+ },
+ {
+  "group": "champ",
+  "dims": 126,
+  "sigma": 0.01,
+  "mean": 0.31072916666666667,
+  "falls": 7,
+  "n": 12,
+  "legal_mark": 1.1476000000000002
+ },
+ {
+  "group": "champ",
+  "dims": 126,
+  "sigma": 0.02,
+  "mean": -0.19956249999999998,
+  "falls": 11,
+  "n": 12,
+  "legal_mark": 1.016
+ },
+ {
+  "group": "kf_c",
+  "dims": 88,
+  "sigma": 0.001,
+  "mean": 1.2481666666666666,
+  "falls": 0,
+  "n": 12,
+  "legal_mark": 1.2481666666666666
+ },
+ {
+  "group": "kf_c",
+  "dims": 88,
+  "sigma": 0.002,
+  "mean": 1.2485833333333332,
+  "falls": 0,
+  "n": 12,
+  "legal_mark": 1.2485833333333332
+ },
+ {
+  "group": "kf_c",
+  "dims": 88,
+  "sigma": 0.005,
+  "mean": 0.9404166666666668,
+  "falls": 2,
+  "n": 12,
+  "legal_mark": 1.1681000000000001
+ },
+ {
+  "group": "kf_c",
+  "dims": 88,
+  "sigma": 0.01,
+  "mean": 0.69525,
+  "falls": 4,
+  "n": 12,
+  "legal_mark": 1.16
+ },
+ {
+  "group": "kf_c",
+  "dims": 88,
+  "sigma": 0.02,
+  "mean": 0.17585416666666664,
+  "falls": 8,
+  "n": 12,
+  "legal_mark": 1.05925
+ },
+ {
+  "group": "kf_v",
+  "dims": 66,
+  "sigma": 0.001,
+  "mean": 1.2256666666666665,
+  "falls": 0,
+  "n": 12,
+  "legal_mark": 1.2256666666666665
+ },
+ {
+  "group": "kf_v",
+  "dims": 66,
+  "sigma": 0.002,
+  "mean": 1.2248333333333332,
+  "falls": 0,
+  "n": 12,
+  "legal_mark": 1.2248333333333332
+ },
+ {
+  "group": "kf_v",
+  "dims": 66,
+  "sigma": 0.005,
+  "mean": 1.1330208333333334,
+  "falls": 1,
+  "n": 12,
+  "legal_mark": 1.2537272727272726
+ },
+ {
+  "group": "kf_v",
+  "dims": 66,
+  "sigma": 0.01,
+  "mean": 0.7449791666666666,
+  "falls": 4,
+  "n": 12,
+  "legal_mark": 1.22325
+ },
+ {
+  "group": "kf_v",
+  "dims": 66,
+  "sigma": 0.02,
+  "mean": 0.4448958333333333,
+  "falls": 6,
+  "n": 12,
+  "legal_mark": 1.1168333333333333
+ },
+ {
+  "group": "kf_a",
+  "dims": 66,
+  "sigma": 0.001,
+  "mean": 1.2551666666666665,
+  "falls": 0,
+  "n": 12,
+  "legal_mark": 1.2551666666666665
+ },
+ {
+  "group": "kf_a",
+  "dims": 66,
+  "sigma": 0.002,
+  "mean": 1.2434166666666664,
+  "falls": 0,
+  "n": 12,
+  "legal_mark": 1.2434166666666664
+ },
+ {
+  "group": "kf_a",
+  "dims": 66,
+  "sigma": 0.005,
+  "mean": 1.1396041666666665,
+  "falls": 1,
+  "n": 12,
+  "legal_mark": 1.2599999999999998
+ },
+ {
+  "group": "kf_a",
+  "dims": 66,
+  "sigma": 0.01,
+  "mean": 1.1286666666666665,
+  "falls": 1,
+  "n": 12,
+  "legal_mark": 1.248181818181818
+ },
+ {
+  "group": "kf_a",
+  "dims": 66,
+  "sigma": 0.02,
+  "mean": 0.9347291666666666,
+  "falls": 2,
+  "n": 12,
+  "legal_mark": 1.1625
+ },
+ {
+  "group": "head",
+  "dims": 198,
+  "sigma": 0.001,
+  "mean": 1.2365833333333334,
+  "falls": 0,
+  "n": 12,
+  "legal_mark": 1.2365833333333334
+ },
+ {
+  "group": "head",
+  "dims": 198,
+  "sigma": 0.002,
+  "mean": 1.0755833333333331,
+  "falls": 1,
+  "n": 12,
+  "legal_mark": 1.1906363636363635
+ },
+ {
+  "group": "head",
+  "dims": 198,
+  "sigma": 0.005,
+  "mean": 0.2058333333333333,
+  "falls": 7,
+  "n": 12,
+  "legal_mark": 1.4062000000000001
+ },
+ {
+  "group": "head",
+  "dims": 198,
+  "sigma": 0.01,
+  "mean": -0.3524375,
+  "falls": 12,
+  "n": 12,
+  "legal_mark": null
+ },
+ {
+  "group": "head",
+  "dims": 198,
+  "sigma": 0.02,
+  "mean": -0.3995208333333334,
+  "falls": 11,
+  "n": 12,
+  "legal_mark": 0.787
+ },
+ {
+  "group": "tcn",
+  "dims": 1302,
+  "sigma": 0.001,
+  "mean": 1.2041666666666666,
+  "falls": 0,
+  "n": 12,
+  "legal_mark": 1.2041666666666666
+ },
+ {
+  "group": "tcn",
+  "dims": 1302,
+  "sigma": 0.002,
+  "mean": 0.5745208333333333,
+  "falls": 5,
+  "n": 12,
+  "legal_mark": 1.1591428571428573
+ },
+ {
+  "group": "tcn",
+  "dims": 1302,
+  "sigma": 0.005,
+  "mean": 0.15497916666666664,
+  "falls": 7,
+  "n": 12,
+  "legal_mark": 0.7819999999999999
+ },
+ {
+  "group": "tcn",
+  "dims": 1302,
+  "sigma": 0.01,
+  "mean": -0.17054166666666667,
+  "falls": 10,
+  "n": 12,
+  "legal_mark": 0.8185
+ },
+ {
+  "group": "tcn",
+  "dims": 1302,
+  "sigma": 0.02,
+  "mean": -0.5213333333333333,
+  "falls": 12,
+  "n": 12,
+  "legal_mark": null
+ }
+]

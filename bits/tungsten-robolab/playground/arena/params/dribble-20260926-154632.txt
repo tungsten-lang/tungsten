@@ -1,0 +1,34 @@
+# robolab practice result for dribble (CMA-ES over 3-4 seeded starts per candidate, 8 s rollouts)
+# 15 s check over 10 seeds: dribbles [26, 26, 26, 26, 26, 17, 26, 26, 26, 26], 1.92 Hz, apex 0.95 m, drift 0.067 m
+arm_kd 0.869321
+arm_kp 12.7808
+carry_track 0.00194387
+drive_el 0.845244
+drive_sh 0.612706
+drive_sp 0.362039
+drive_wr 0.336699
+dx_cock 0.0742365
+dx_low 0.120593
+dz_max 0.4
+hand_fb 0.777312
+hand_vfb 0.0412902
+pitch_cock 0.350067
+pitch_low -0.527818
+pump 0.275916
+push_ease 0.199064
+push_gain 1.46886
+reach 0.238713
+release_thr 0.376099
+spine 0.439989
+spring 0.01
+t_home 0.419634
+t_lead 0.0683927
+t_push 0.0838488
+t_rec 0.264904
+tilt_ki 0.258509
+tilt_kv 0.275569
+touch_thr 0.353
+z_cock 1.13036
+z_hit 1.05001
+z_low 0.710137
+z_rel 1.02181

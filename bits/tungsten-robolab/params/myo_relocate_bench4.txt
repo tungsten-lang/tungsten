@@ -1,0 +1,18 @@
+# robolab myo_manip search result for myo_relocate_bench: score -0.3038
+# {'gen': 29, 'summary': {'episodes': 1, 'errors': 0, 'steps': 480.0, 'time': 4.8, 'solved': 0.0, 'solved_final': 0.0, 'sparse_sum': -3219.9216, 'dense_sum': -15293.171, 'effort': 0.0842, 'success': 0.0, 'solved_steps': 0.0, 'success_lift': 0.0, 'min_dist_lift': 1.0, 'min_dist': 0.2507, 'final_dist': 0.2805, 'max_obj_z': 0.9051, 'effort_official': 0.03556, 'act_sq': 0.08313, 'track_err': 0.0707, 'settle_err': 0.0774, 'max_err': 0.2305, 'ps_err': 0.1482, 'seed': 1000.0, 'success_ci95': [0.0, 0.7935]}}
+bench 1.0
+ddev 0.11569812822497666
+dflex -0.044032992079824806
+dps -0.5331582934720152
+kd_arm 0.9377282616109109
+kd_pron 0.7984909616323902
+kp_arm 4.108218449972428
+kp_pron 5.855162833281833
+pron_i 8.953992324434164
+pron_lim 0.19411821392059603
+servo_i 13.169816044288142
+servo_leak 0.9185699572480834
+servo_lim 0.048385504666406065
+servo_p 0.5182513242448014
+spring 0.04365351704925652
+stiff_arm 0.01918169625575334

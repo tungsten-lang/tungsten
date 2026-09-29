@@ -1,0 +1,74 @@
+{
+ "name": "elite2",
+ "about": "ELITE MALE SPRINTER, literature-based (supersedes profiles/elite.json, whose magnitudes were set from memory and are kept only because trial sprint_top_speed_elite was scored on them). Values are per unit body mass relative to the average untrained body (p50), from the sources checked on 2026-09-28 (see each part's evidence and verified flags). Strength is force ~ PCSA = volume / fascicle length: where sprinters' longer fascicles are measured (vasti, gastrocnemius) the volume gain is divided by them, since the speed part already carries fascicle length (counting it in both would count it twice). Muscles with no sprinter data stay at 1.0.",
+ "population": "elite male sprinters (100 m ~10.0-10.2 s) vs untrained young men",
+ "parts": {
+  "strength": {
+   "multiplier": 1.0,
+   "groups": {
+    "hip_flex_neg": 1.5,
+    "ham": 1.4,
+    "knee_pos": 1.3,
+    "hip_flex_pos": 1.2,
+    "rf": 1.35,
+    "knee_neg": 1.1,
+    "ankle_pos": 1.1,
+    "gas": 1.05,
+    "ankle_neg": 1.0
+   },
+   "stat": "peak isometric force per kg body mass, per muscle (hip_flex_neg = hip extensors / gluteus maximus, ham = biarticular hamstrings, knee_pos = the mono knee flexor / biceps femoris short head, hip_flex_pos = iliopsoas, rf = rectus femoris, knee_neg = vasti, ankle_pos = soleus, gas = gastrocnemius, ankle_neg = dorsiflexors); every other muscle 1.0 (no source)",
+   "evidence": [
+    "Miller R, Balshaw TG, Massey GJ, Maeo S, Lanza MB, Johnston M, Allen SJ, Folland JP (2021) The muscle morphology of elite sprint running. Med Sci Sports Exerc 53:804-815 (accepted manuscript, Loughborough figshare 13078007): 5 elite sprinters (season's best 10.10 s, 1.83 m, 86.4 kg) vs 11 untrained; volume per kg: hip extensors x1.54 (gluteus maximus x1.67), biarticular hamstrings x1.42, biceps femoris short head x1.33, iliopsoas x1.20, rectus femoris x1.37, vasti x1.26, soleus x1.18, gastrocnemius x1.09 (plantarflexor group x1.13 n.s.), anterior compartment x0.90; isometric torque per kg: hip extension +48 %, hip flexion +40 %, knee flexion +49 %, knee extension ~+7 % (n.s.), plantarflexion ~+18 % (n.s.)",
+    "Handsfield GG et al. (2017) Scand J Med Sci Sports 27:1050-1060 and Handsfield's 2014 thesis (doi:10.18130/V37Z6D, same study, collegiate sprinters): gluteus maximus +31 % volume / +29 % PCSA per kg, semitendinosus +54 / +47, rectus femoris +40 / +34, vasti +26-30 / +20-28, psoas +19 / +25, iliacus +6 / +5, gastrocnemius +4-7 / +9-10, soleus +6 / -1, tibialis anterior +2 / 0",
+    "Abe T, Kumagai K, Brechue WF (2000) Med Sci Sports Exerc 32:1125-1129: sprinters' fascicles vastus lateralis 8.83 vs 7.13 cm (+24 %), medial gastrocnemius +17 %, lateral gastrocnemius +12 % (n.s.) vs untrained: vasti PCSA ~x1.26 / 1.24 ~ 1.0-1.1 -> 1.1; gastrocnemius ~x1.09 / 1.15 ~ 1.0 -> 1.05"
+   ],
+   "verified": true,
+   "note": "Hip extensors 1.5 (between Miller's torque +48 % and volume x1.54-1.67; Handsfield's collegiate sprinters x1.3); hamstrings 1.4 (Miller's volume; fascicle length not measured); soleus 1.1 (Miller x1.18 n.s., Handsfield x1.0). Hip flexor torque +40 % includes rectus femoris, sartorius and TFL, which the model's hip_flex_pos does not separate."
+  },
+  "speed": {
+   "multiplier": 1.3,
+   "stat": "maximum joint angular velocity = fibre shortening velocity (fibre-type mix) x fascicle length",
+   "evidence": [
+    "Trappe S et al. (2015) J Appl Physiol 118:1460-1466 (PMC4469925; one world-class hurdler): vastus lateralis 29 % type I, 34 % IIa, 24 % IIx, hybrids 13 %; unloaded velocity IIa x3.37, IIx x5.04 type I",
+    "fast fraction ~73 % in elite sprinters' gastrocnemius vs ~50 % in non-athletes (Marino, Sibson & Lieberman 2022, J Comp Physiol B, PMC9197885, citing Costill 1976 and others; Costill's own numbers not reached)",
+    "fascicle length +12-24 % (Abe et al. 2000, above); Kumagai K et al. (2000) J Appl Physiol 88:811-816: faster sprinters' fascicles +16-23 %, r = -0.40 to -0.57 with 100 m time",
+    "area-weighted Vmax of that fibre mix ~x1.2-1.3 the average mix, times ~x1.1-1.2 fascicle length: ~x1.3-1.5; 1.3 is taken"
+   ],
+   "verified": "derived",
+   "note": "One multiplier for every joint (sprinters' fibre mix is measured in vastus lateralis and gastrocnemius only)."
+  },
+  "tendon": {
+   "multiplier": 1.0,
+   "groups": {
+    "achilles": 1.3,
+    "quadriceps": 1.0
+   },
+   "stat": "in vivo tendon stiffness per unit body size",
+   "evidence": [
+    "Arampatzis A et al. (2007) J Biomech 40:1946-1952 (abstract): of 28 sprinters, 28 endurance runners and 10 inactive men only the sprinters had higher normalised triceps-surae tendon-aponeurosis stiffness; ~+70 % in a secondary summary (Fujimori & Sado 2025, Physiol Rep 13:e70370), normalisation unclear",
+    "Kubo K et al. (2020) Physiol Rep 8:e14583 (PMC7547534): no difference in medial gastrocnemius tendon stiffness between 15 sprinters and 18 untrained men; Kubo 2000 / 2011: sprinters' knee-extensor tendons more compliant"
+   ],
+   "verified": "partly",
+   "note": "Achilles 1.3 is a middle value of conflicting evidence (x1.0 to ~x1.7); quadriceps 1.0 (no support for stiffer)."
+  },
+  "activation": {
+   "act": 1.0,
+   "deact": 1.0,
+   "stat": "activation and deactivation time constants unchanged",
+   "evidence": [
+    "Tillin NA, Jimenez-Reyes P, Pain MTG, Folland JP (2010) Med Sci Sports Exerc 42:781-790 (abstract): power athletes' knee-extensor rate of force development over the first 50 ms x2, but twitch and normalised tetanic RFD did not differ: the faster onset is neural (a controller property), not the muscle's"
+   ],
+   "verified": true
+  },
+  "anthro": {
+   "length": 1.03,
+   "mass": 1.14,
+   "stat": "height and mass of world-class male 100 m sprinters vs the model's 1.75 m / 67.5 kg",
+   "evidence": [
+    "Uth N (2005) Anthropometric comparison of world-class sprinters and normal populations. J Sports Sci Med 4:608-616 (PMC3899678): 42 of the all-time top-50 100 m men, 1.80 +- 0.06 m, 77.0 +- 6.6 kg"
+   ],
+   "verified": true,
+   "note": "Not applied by default (anthro is asked for by name)."
+  }
+ }
+}

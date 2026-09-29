@@ -1,0 +1,104 @@
+{
+ "label": "P95 champion (RunSkill)",
+ "time": 16.004,
+ "fell": false,
+ "steady_speed": 5.872,
+ "peak_speed_1s": 5.937,
+ "groups": {
+  "hip extensors (glut.)": {
+   "peak": 1.0,
+   "pct90": 40.4,
+   "mean": 0.53,
+   "stance_pct90": 89.9,
+   "stance_mean": 0.97,
+   "swing_pct90": 25.0,
+   "swing_mean": 0.39
+  },
+  "hip flexors (iliops.)": {
+   "peak": 1.0,
+   "pct90": 42.0,
+   "mean": 0.64,
+   "stance_pct90": 6.3,
+   "stance_mean": 0.24,
+   "swing_pct90": 53.1,
+   "swing_mean": 0.77
+  },
+  "hamstrings": {
+   "peak": 1.0,
+   "pct90": 33.3,
+   "mean": 0.55,
+   "stance_pct90": 67.8,
+   "stance_mean": 0.91,
+   "swing_pct90": 22.6,
+   "swing_mean": 0.43
+  },
+  "rectus femoris": {
+   "peak": 0.99,
+   "pct90": 3.1,
+   "mean": 0.4,
+   "stance_pct90": 0.0,
+   "stance_mean": 0.32,
+   "swing_pct90": 4.1,
+   "swing_mean": 0.42
+  },
+  "vasti": {
+   "peak": 1.0,
+   "pct90": 23.8,
+   "mean": 0.4,
+   "stance_pct90": 79.0,
+   "stance_mean": 0.93,
+   "swing_pct90": 6.7,
+   "swing_mean": 0.24
+  },
+  "knee flexors (mono)": {
+   "peak": 1.0,
+   "pct90": 64.8,
+   "mean": 0.77,
+   "stance_pct90": 8.3,
+   "stance_mean": 0.31,
+   "swing_pct90": 82.3,
+   "swing_mean": 0.92
+  },
+  "soleus": {
+   "peak": 1.0,
+   "pct90": 12.9,
+   "mean": 0.25,
+   "stance_pct90": 52.5,
+   "stance_mean": 0.71,
+   "swing_pct90": 0.6,
+   "swing_mean": 0.1
+  },
+  "gastrocnemius": {
+   "peak": 1.0,
+   "pct90": 9.1,
+   "mean": 0.33,
+   "stance_pct90": 38.2,
+   "stance_mean": 0.69,
+   "swing_pct90": 0.1,
+   "swing_mean": 0.22
+  },
+  "dorsiflexors": {
+   "peak": 1.0,
+   "pct90": 28.7,
+   "mean": 0.64,
+   "stance_pct90": 16.2,
+   "stance_mean": 0.38,
+   "swing_pct90": 32.6,
+   "swing_mean": 0.72
+  }
+ },
+ "cci": {
+  "all:hip": 0.391,
+  "all:knee": 0.364,
+  "all:ankle": 0.28,
+  "all:ham/rf": 0.499,
+  "stance:hip": 0.374,
+  "stance:knee": 0.437,
+  "stance:ankle": 0.374,
+  "stance:ham/rf": 0.525,
+  "swing:hip": 0.397,
+  "swing:knee": 0.34,
+  "swing:ankle": 0.241,
+  "swing:ham/rf": 0.488
+ }
+}

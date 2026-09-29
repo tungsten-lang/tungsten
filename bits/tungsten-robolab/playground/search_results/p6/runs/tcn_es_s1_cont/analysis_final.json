@@ -1,0 +1,403 @@
+{
+ "run": "out/search/p6/tcn_es_s1_cont",
+ "which": "final",
+ "arm": "tcn",
+ "method": "es",
+ "command_change": {
+  "set": {
+   "mean": 0.0071081840572082165,
+   "top": [
+    [
+     "r_ankle_neg",
+     0.019
+    ],
+    [
+     "l_knee_pos",
+     0.0176
+    ],
+    [
+     "l_ankle_neg",
+     0.0119
+    ],
+    [
+     "spine_flex_pos",
+     0.0112
+    ]
+   ]
+  },
+  "crouch": {
+   "mean": 0.007561352260229941,
+   "top": [
+    [
+     "r_ankle_neg",
+     0.0174
+    ],
+    [
+     "l_ankle_neg",
+     0.0157
+    ],
+    [
+     "spine_flex_pos",
+     0.0128
+    ],
+    [
+     "l_ankle_pos",
+     0.0121
+    ]
+   ]
+  },
+  "extend": {
+   "mean": 0.01081795628241124,
+   "top": [
+    [
+     "r_knee_pos",
+     0.0198
+    ],
+    [
+     "l_hip_flex_pos",
+     0.0191
+    ],
+    [
+     "r_knee_neg",
+     0.019
+    ],
+    [
+     "l_knee_pos",
+     0.0163
+    ]
+   ]
+  },
+  "flight": {
+   "mean": 0.012224730619161087,
+   "top": [
+    [
+     "l_knee_neg",
+     0.0224
+    ],
+    [
+     "l_hip_flex_pos",
+     0.0165
+    ],
+    [
+     "r_knee_pos",
+     0.0162
+    ],
+    [
+     "r_shoulder_flex_pos",
+     0.0161
+    ]
+   ]
+  },
+  "land": {
+   "mean": 0.012468366580098506,
+   "top": [
+    [
+     "spine_flex_neg",
+     0.0319
+    ],
+    [
+     "r_knee_neg",
+     0.0209
+    ],
+    [
+     "l_knee_neg",
+     0.0184
+    ],
+    [
+     "l_hip_flex_pos",
+     0.0167
+    ]
+   ]
+  }
+ },
+ "marks": {
+  "trained": [
+   1.317,
+   1.313,
+   1.327,
+   1.31,
+   1.329,
+   1.324
+  ],
+  "champion": [
+   1.201,
+   1.186,
+   1.266,
+   1.267,
+   1.27,
+   1.271
+  ],
+  "trained_fallen": [
+   false,
+   false,
+   false,
+   false,
+   false,
+   false
+  ]
+ },
+ "tcn": {
+  "weights": 1302,
+  "head_norm": 0.047814911905117524,
+  "hidden_change_norm": 1.2438989446756892,
+  "sensitivity": [
+   [
+    "cdot r_ankle",
+    0.00348
+   ],
+   [
+    "torso pitch",
+    0.00301
+   ],
+   [
+    "cdot r_shoulder_flex",
+    0.00253
+   ],
+   [
+    "cdot r_knee",
+    0.00221
+   ],
+   [
+    "c l_hip_flex",
+    0.00219
+   ],
+   [
+    "c r_elbow",
+    0.00219
+   ],
+   [
+    "c r_shoulder_flex",
+    0.00214
+   ],
+   [
+    "cdot l_shoulder_flex",
+    0.00212
+   ],
+   [
+    "c r_hip_flex",
+    0.00202
+   ],
+   [
+    "c l_elbow",
+    0.00201
+   ],
+   [
+    "cdot spine_flex",
+    0.00189
+   ],
+   [
+    "com vx",
+    0.00184
+   ],
+   [
+    "torso pitch rate",
+    0.00181
+   ],
+   [
+    "c l_ankle",
+    0.00172
+   ],
+   [
+    "cdot r_hip_flex",
+    0.00159
+   ],
+   [
+    "l_foot_contact",
+    0.00156
+   ],
+   [
+    "com vz",
+    0.00152
+   ],
+   [
+    "cdot l_elbow",
+    0.00152
+   ],
+   [
+    "c r_ankle",
+    0.00141
+   ],
+   [
+    "c l_knee",
+    0.00137
+   ],
+   [
+    "cdot r_elbow",
+    0.00127
+   ],
+   [
+    "cdot l_ankle",
+    0.00125
+   ],
+   [
+    "cdot l_knee",
+    0.00124
+   ],
+   [
+    "cdot l_hip_flex",
+    0.00122
+   ],
+   [
+    "r_foot_contact",
+    0.00121
+   ],
+   [
+    "com z",
+    0.00118
+   ],
+   [
+    "c l_shoulder_flex",
+    0.00114
+   ],
+   [
+    "c spine_flex",
+    0.00087
+   ],
+   [
+    "c r_knee",
+    0.00071
+   ]
+  ],
+  "first_layer_change": [
+   [
+    "c r_knee",
+    0.2181
+   ],
+   [
+    "c spine_flex",
+    0.2154
+   ],
+   [
+    "cdot l_ankle",
+    0.2151
+   ],
+   [
+    "c l_elbow",
+    0.2145
+   ],
+   [
+    "c l_hip_flex",
+    0.2143
+   ],
+   [
+    "c r_hip_flex",
+    0.2129
+   ],
+   [
+    "cdot r_ankle",
+    0.2115
+   ],
+   [
+    "l_foot_contact",
+    0.2058
+   ]
+  ],
+  "offset_by_phase": {
+   "set": {
+    "mean": 0.006621940434396444,
+    "top": [
+     [
+      "l_knee_pos",
+      0.0176
+     ],
+     [
+      "r_ankle_neg",
+      0.0121
+     ],
+     [
+      "spine_flex_pos",
+      0.0112
+     ],
+     [
+      "l_shoulder_flex_neg",
+      0.0109
+     ]
+    ]
+   },
+   "crouch": {
+    "mean": 0.006339317173265576,
+    "top": [
+     [
+      "spine_flex_pos",
+      0.0128
+     ],
+     [
+      "r_ankle_neg",
+      0.0122
+     ],
+     [
+      "l_knee_pos",
+      0.0112
+     ],
+     [
+      "r_shoulder_flex_neg",
+      0.0089
+     ]
+    ]
+   },
+   "extend": {
+    "mean": 0.010698360686348567,
+    "top": [
+     [
+      "r_knee_pos",
+      0.0198
+     ],
+     [
+      "l_hip_flex_pos",
+      0.0191
+     ],
+     [
+      "r_knee_neg",
+      0.019
+     ],
+     [
+      "l_knee_pos",
+      0.0163
+     ]
+    ]
+   },
+   "flight": {
+    "mean": 0.008805951765223355,
+    "top": [
+     [
+      "l_knee_neg",
+      0.0173
+     ],
+     [
+      "r_hip_flex_pos",
+      0.0127
+     ],
+     [
+      "r_knee_neg",
+      0.0123
+     ],
+     [
+      "r_knee_pos",
+      0.0116
+     ]
+    ]
+   },
+   "land": {
+    "mean": 0.006681689870271523,
+    "top": [
+     [
+      "r_ankle_pos",
+      0.014
+     ],
+     [
+      "spine_flex_neg",
+      0.013
+     ],
+     [
+      "r_hip_flex_neg",
+      0.0111
+     ],
+     [
+      "r_knee_neg",
+      0.011
+     ]
+    ]
+   }
+  }
+ }
+}

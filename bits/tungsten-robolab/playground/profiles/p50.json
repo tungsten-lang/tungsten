@@ -1,0 +1,31 @@
+{
+ "name": "p50",
+ "about": "The average adult man the robolab bodies already model (body.py): every multiplier 1.0, so ROBOLAB_PROFILE=p50 builds byte-identical XML to no profile. Listed so a percentile profile has an explicit reference, and so the reference's own calibration and its known departures from population means are written down in one place.",
+ "population": "healthy young adult men (the body.py calibration)",
+ "parts": {
+  "strength": {
+   "multiplier": 1.0,
+   "stat": "peak isometric joint torque of the average young man (body.py LEG_JOINTS / V2_MONO_PEAKS / V2_BIARTICULAR peaks, strength 1.0)",
+   "note": "Per-joint peaks: knee extension 230 + 0.8 x 150 = 350 N m (vasti + rectus femoris), plantarflexion 150 + 180 = 330 N m, hip extension 100 + 200 = 300 N m (v2). These sit at the high end of isometric means for young men (knee extension ~250-300 N m) because the model's peaks are MuJoCo peak isometric forces at optimal length, not dynamometer values."
+  },
+  "speed": {
+   "multiplier": 1.0,
+   "stat": "unloaded peak joint angular velocity (body.py V2_OMEGA: hip 15, knee 25, ankle 20 rad/s ...)"
+  },
+  "tendon": {
+   "multiplier": 1.0,
+   "stat": "v3 series-elastic tendons: Achilles 200 N/mm at 5.0 cm, quadriceps 250 N/mm at 4.5 cm (body.py V3_TENDONS)"
+  },
+  "activation": {
+   "act": 1.0,
+   "deact": 1.0,
+   "stat": "MuJoCo muscle timeconst 10 ms activation / 40 ms deactivation"
+  },
+  "anthro": {
+   "length": 1.0,
+   "mass": 1.0,
+   "stat": "1.75 m stature, 67.5 kg (segment lengths and masses after Winter's tables)",
+   "note": "1.75 m is the young-adult male mean stature (ANSUR II / NHANES ~1.75-1.76 m). 67.5 kg (BMI 22) is a lean build, below the current US male mean mass (~85-90 kg, BMI ~27-29); the percentile profiles scale this lean build at constant BMI rather than adopting the population's mean mass."
+  }
+ }
+}

@@ -1,0 +1,66 @@
+# robolab dribble v3, the elbow set: the crossover set's strokes practised again (mode 0,
+# 4 seeds x 8 s) with sh_reg 0.3 / drive_sh 0.05 and the upper arm's swing penalised above 25% of
+# the push's positive work (DRIBBLE_SHOULDER_WEIGHT=10): the push is ~63% elbow. Its crossover law
+# is the crossover set's, not re-practised for this stroke (mode 2 is weaker: see
+# out/dribble_v3_metrics.json).
+# robolab practice result for dribble: score 11.8995
+# metrics {'seeds': [0, 1, 2, 3], 'dribbles': [9, 8, 10, 9]}
+arm_kd 0.45401438872789474
+arm_kp 12.458401251697033
+c_kv 0.07740261575993157
+c_tmax 0.549680939993515
+carry_track 0.00194387
+drive_el 0.8717302417932496
+drive_f 0.5012024996515515
+drive_sh 0.05
+drive_sp 0.362039
+drive_wr 0.07965220562165769
+dx_cock 0.08995666881476105
+dx_low 0.12439610993663602
+dz_max 0.4
+f_flick 0.11212099252803889
+f_kp 2.481039923776674
+f_open 0.1529412996775878
+hand_fb 0.9496723558865412
+hand_vfb 0.010327633848038491
+mode 0.0
+pitch_cock 0.290590894722227
+pitch_low -0.17379541713001656
+pump 0.275916
+push_ease 0.199064
+push_gain 0.7535210476995705
+reach 0.3
+release_thr 0.376099
+rot0 -0.7423947146858636
+sa0 0.05719220075224246
+sf0 0.5162192714790441
+sh_reg 0.3
+spine 0.439989
+spring 0.01
+t_carry 0.07891308997637514
+t_home 0.7881762852237018
+t_lead 0.03669334139792806
+t_push 0.06474088386448115
+t_rec 0.22239369479945076
+tilt_ki 0.5375656105993448
+tilt_kv 0.27134354963621365
+tilt_max 0.3315345134147514
+touch_thr 0.353
+use_via 1.0
+x_dx 0.10263557234389534
+x_dxc 0.15
+x_dxl 0.17471878599279328
+x_dyl 0.1621771779897841
+x_kv 0.4274153127647656
+x_lead 0.13228743601741147
+x_roll 0.0
+x_steer 0.06118779662918621
+x_t 0.6100620828732835
+x_tmax 0.7339456866213306
+x_y -0.24937047518433772
+x_zc 1.25
+x_zh 1.0718571362072717
+z_cock 1.208032433546136
+z_hit 1.090182272633637
+z_low 0.8175077248794229
+z_rel 1.0366784861644573

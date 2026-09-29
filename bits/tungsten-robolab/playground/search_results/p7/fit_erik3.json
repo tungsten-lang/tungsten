@@ -1,0 +1,79 @@
+{
+ "target": "erik3",
+ "knots": [
+  "td",
+  "ms",
+  "hr",
+  "to",
+  "kl"
+ ],
+ "period": 0.714,
+ "ridge": 0.001,
+ "ridges": [
+  {
+   "ridge": 1e-06,
+   "rms_c": 0.0019301612996970707,
+   "deg": {
+    "hip": 0.146,
+    "knee": 0.571,
+    "ankle": 0.185,
+    "spine": 0.094,
+    "shoulder": 0.224,
+    "elbow": 0.253,
+    "toe": 0.072
+   }
+  },
+  {
+   "ridge": 0.001,
+   "rms_c": 0.001930171661434281,
+   "deg": {
+    "hip": 0.146,
+    "knee": 0.571,
+    "ankle": 0.185,
+    "spine": 0.094,
+    "shoulder": 0.224,
+    "elbow": 0.253,
+    "toe": 0.072
+   }
+  },
+  {
+   "ridge": 0.1,
+   "rms_c": 0.0019768057442740754,
+   "deg": {
+    "hip": 0.15,
+    "knee": 0.583,
+    "ankle": 0.189,
+    "spine": 0.096,
+    "shoulder": 0.227,
+    "elbow": 0.264,
+    "toe": 0.076
+   }
+  }
+ ],
+ "quintic": {
+  "rms_c": 0.001930171661434281,
+  "deg": {
+   "hip": 0.146,
+   "knee": 0.571,
+   "ankle": 0.185,
+   "spine": 0.094,
+   "shoulder": 0.224,
+   "elbow": 0.253,
+   "toe": 0.072
+  }
+ },
+ "minjerk": {
+  "rms_c": 0.01714394939997908,
+  "deg": {
+   "hip": 2.166,
+   "knee": 3.88,
+   "ankle": 1.994,
+   "spine": 0.406,
+   "shoulder": 3.164,
+   "elbow": 0.629,
+   "toe": 1.539
+  }
+ },
+ "n_unknowns": 480,
+ "n_rows": 7680
+}

@@ -1,0 +1,77 @@
+{
+ "target": "mocap",
+ "knots": [
+  "td",
+  "ms",
+  "to"
+ ],
+ "period": 0.714,
+ "ridge": 0.001,
+ "ridges": [
+  {
+   "ridge": 1e-06,
+   "rms_c": 0.001059262540778901,
+   "deg": {
+    "hip": 0.029,
+    "knee": 0.077,
+    "ankle": 0.079,
+    "spine": 0.0,
+    "shoulder": 0.0,
+    "elbow": 0.0,
+    "toe": 0.191
+   }
+  },
+  {
+   "ridge": 0.001,
+   "rms_c": 0.001059264546570254,
+   "deg": {
+    "hip": 0.029,
+    "knee": 0.077,
+    "ankle": 0.079,
+    "spine": 0.0,
+    "shoulder": 0.0,
+    "elbow": 0.0,
+    "toe": 0.191
+   }
+  },
+  {
+   "ridge": 0.1,
+   "rms_c": 0.0010779322187891831,
+   "deg": {
+    "hip": 0.033,
+    "knee": 0.086,
+    "ankle": 0.08,
+    "spine": 0.002,
+    "shoulder": 0.021,
+    "elbow": 0.003,
+    "toe": 0.193
+   }
+  }
+ ],
+ "quintic": {
+  "rms_c": 0.001059264546570254,
+  "deg": {
+   "hip": 0.029,
+   "knee": 0.077,
+   "ankle": 0.079,
+   "spine": 0.0,
+   "shoulder": 0.0,
+   "elbow": 0.0,
+   "toe": 0.191
+  }
+ },
+ "minjerk": {
+  "rms_c": 0.02789933412037776,
+  "deg": {
+   "hip": 3.654,
+   "knee": 6.886,
+   "ankle": 3.713,
+   "spine": 0.455,
+   "shoulder": 3.69,
+   "elbow": 0.461,
+   "toe": 1.251
+  }
+ },
+ "n_unknowns": 288,
+ "n_rows": 4608
+}

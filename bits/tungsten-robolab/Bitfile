@@ -1,0 +1,8 @@
+tungsten "tungsten-0.0.1"
+
+name        "tungsten-robolab"
+version     "0.1.0"
+summary     "Muscle-contraction control plane for simulated and real bodies"
+description "robolab drives a body with muscle contraction vectors: chunked, eased contraction-rate movements latched on sensation, with spring-eased real-time corrections and an equilibrium-point reflex layer. Ships a MuJoCo playground (muscle humanoid, practice optimizer, renderer)."
+license     "MIT OR Apache-2.0"
+authors     ["Tungsten Language Project"]

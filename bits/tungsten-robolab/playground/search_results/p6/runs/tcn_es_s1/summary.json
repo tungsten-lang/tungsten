@@ -1,0 +1,43 @@
+{
+ "arm": "tcn",
+ "method": "es",
+ "seed": 1,
+ "budget": 3200,
+ "n": 1302,
+ "groups": {
+  "tcn": 1302
+ },
+ "sigma": 0.0015,
+ "attrs": {
+  "noise": 0.003,
+  "pitch_noise": 0.0015,
+  "strict": true
+ },
+ "probe_seeds": [
+  6001,
+  6002,
+  6003,
+  6004,
+  6005,
+  6006,
+  6007,
+  6008,
+  6009,
+  6010,
+  6011,
+  6012,
+  6013,
+  6014,
+  6015,
+  6016
+ ],
+ "base": null,
+ "lr": 0.0002,
+ "pairs": 16,
+ "shaping": "raw",
+ "starts_per_pair": 1,
+ "used": 3200,
+ "best_probe": 1.2730625,
+ "best_probe_at": 3200,
+ "wall": 654.7889947891235
+}

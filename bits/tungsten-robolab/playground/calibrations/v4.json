@@ -1,0 +1,250 @@
+{
+ "name": "v4",
+ "about": "Calibration of the v4 body (HumanoidV4Builder in body.py): the v3 body (average young man, 1.75 m / 67.5 kg, series-elastic Achilles and quadriceps) with the parameters the literature check of 2026-09-28 found unrealistic changed to literature values. Every value was set from its sources before any speed was measured on it; none is tuned to reach a speed. Only changes with verified or derived evidence are applied; parameters the check found realistic or generous stay at their v3 values (`kept`), and changes resting on modelling convention or weak evidence are recorded but not applied (`uncertain_not_applied`, with their measured effect on the ideal-control ceiling). `verified`: the numbers were read in the source (true), derived from verified numbers ('derived'), or rest on modelling convention or weak evidence ('uncertain').",
+ "params": {
+  "tendon_scale": {
+   "value": {
+    "quadriceps": 4.0
+   },
+   "v3": {
+    "quadriceps": 1.0
+   },
+   "unit": "multiplier on the v3 quadriceps series stiffness (250 N/mm at 4.5 cm): 4.0 = 1000 N/mm",
+   "evidence": [
+    "whole vasti series elasticity in OpenSim models, from the model files: ~976 N/mm (gait2392), ~927 N/mm (Rajagopal 2016)",
+    "patellar tendon stiffness in vivo: 1076 N/mm (O'Brien et al. 2010), 2826 (Helland et al. 2013), 3185-3269 (Bojsen-Moller et al. 2007), 3622 (Couppe et al. 2012), 4334 (Hansen et al. 2006); the whole muscle-tendon series (tendon plus aponeurosis) is more compliant than the free tendon, so the models' ~1000 N/mm is taken",
+    "Achilles kept at 200 N/mm (188 +- 43 in hopping, Lichtwark & Wilson 2005; 306-319, Rosager et al. 2002)"
+   ],
+   "verified": true
+  },
+  "omega_muscle": {
+   "value": {
+    "hip_flex_neg": 18.5,
+    "hip_flex_pos": 29
+   },
+   "v3": {
+    "hip_flex_neg": 15,
+    "hip_flex_pos": 15
+   },
+   "unit": "unloaded joint angular velocity of one muscle direction, rad/s (hip_flex_neg = hip extensors: gluteus maximus and, through their hip action, the hamstrings; hip_flex_pos = hip flexors: iliopsoas and, through its hip action, rectus femoris); MuJoCo vmax = omega * 0.3 / joint range",
+   "evidence": [
+    "w0 = fibre vmax x optimal fibre length / moment arm with the standard models' fibre vmax of 10 L0/s (OpenSim Thelen2003 default, gait2392, Hamner 2010, Rajagopal 2016; Arnold & Delp 2011) and Ward et al. 2009's fibre lengths: PCSA-weighted hip extensors ~18.5 rad/s, hip flexors ~29 rad/s (at 15 L0/s, the high-speed models' value: ~28 and ~44); the standard 10 L0/s values are taken",
+    "the v3 value (15 for both) is below what sprinting needs: 79 sprinters at 9.9 m/s reach hip extension 850 +- 73 deg/s (14.8 rad/s) in stance and thigh lift 792 deg/s (13.8 rad/s) in swing (Miyashiro et al. 2019, PMC7739839), where a w0 of 15 leaves the muscles ~0 % of their force"
+   ],
+   "verified": "derived (fibre vmax and fibre lengths verified in the model files and Ward 2009; hip moment arms typical values)"
+  }
+ },
+ "kept": {
+  "peak torques": "the v3 isometric capacities are 1.4-2.9x young men's voluntary maxima (Anderson et al. 2007; Maden-Wilkinson et al. 2020; Krantz et al. 2020), as in common modelling practice (Rajagopal 2016 notes models exceed voluntary maxima; sprint simulations double Fmax): kept, not raised",
+  "force-velocity shape": "MuJoCo's quadratic keeps more force at every velocity than Hill (a/F0 0.25-0.30) or De Groote 2016 curves: generous, kept",
+  "force-length": "0.75-1.05 of L0 over the joint range with lmin 0.5 keeps 50 % at the short end where human muscles keep 10-35 % (Anderson 2007; Maganaris 2001, 2003): generous, kept",
+  "activation": "10 / 40 ms (Millard 2013, OpenSim defaults; 10 / 30 in sprint simulations, Chumanov et al. 2011): kept",
+  "segments": "masses match Dempster / Winter (de Leva 1996's thigh includes the buttock); joint-to-joint lengths hip-knee 0.43 m and knee-ankle 0.43 m match de Leva scaled to 1.75 m (0.424 / 0.436): kept",
+  "friction and planarity": "foot friction 1.2 adequate; arm swing mainly cancels vertical-axis angular momentum (Hinrichs 1987) and folding the arms slows a 30 m sprint by 1.6 % (Brooks, Weyand & Clark 2022): the planar model loses a few percent at most, kept",
+  "not modelled yet": "series elasticity of the hamstrings, rectus femoris and gastrocnemius separately from the Achilles group (tendon slack / fibre length 3-7 in Delp / Rajagopal models; Rajagopal makes them compliant)",
+  "joint speeds": {
+   "ankle": "NOT changed (20 rad/s kept): the soleus's fibres alone give ~9-13 rad/s at 10-15 L0/s, so the v3 plantarflexor fibres (20) are already fast; the observed 17.6 rad/s plantarflexion (Miyashiro 2019) comes with tendon recoil (~26 rad/s unloaded with a pre-loaded tendon, Beaumatin et al. 2018), which v3's elastic Achilles models",
+   "knee": "NOT changed (25 kept): vasti w0 20-25 rad/s at 10 L0/s; fitted knee-extension w0 17.5 +- 8.5 rad/s (Hauraix et al. 2017)"
+  }
+ },
+ "human_targets": {
+  "how": "every number read in the source (verified), read off a plotted figure (fig-read), or calculated from verified numbers (derived); sources fetched directly (Europe PMC / PMC full texts, Wayback copies of J Appl Physiol, the World Athletics London 2017 report)",
+  "average untrained young man": {
+   "top speed": {
+    "value": "~7.8 m/s (accept 7.3-8.3)",
+    "from": "Lazarczuk et al. 2025 (PMC12552802): 7.77 +- 0.86 SD, recreationally active, radar; Clark, Meng & Stearne 2020 (Biol Open, Table 2): 8.23 +- 0.13 SEM, slower half of 20 active males",
+    "verified": true
+   },
+   "contact / aerial": {
+    "value": "0.130 / 0.109 s (Clark 2020); 0.120 / 0.124 s from Weyand et al. 2000's regressions at 8.0 m/s",
+    "verified": "verified / derived"
+   },
+   "step": {
+    "value": "1.96 m at 4.21 /s (Clark 2020); 2.00 m at 3.96 /s (Weyand 2000 at 8.0 m/s)",
+    "verified": "verified / derived"
+   },
+   "mean vertical force in contact": {
+    "value": "2.07 body weights at 8.0 m/s (Weyand 2000: 1.26 + 0.101 v); 1.99 in athlete non-sprinters (Clark & Weyand 2014)",
+    "verified": "derived / verified"
+   },
+   "peak vertical force": {
+    "value": "~3.2 body weights (athlete non-sprinters' averaged waveform, Clark & Weyand 2014 Fig. 7A); no direct untrained measurement",
+    "verified": "fig-read (weakly sourced)"
+   },
+   "swing": {
+    "value": "0.34-0.38 s (Weyand 2000: 0.373 +- 0.03; Clark 2020 derived 0.345)",
+    "verified": "verified / derived"
+   }
+  },
+  "95th-percentile untrained man": {
+   "top speed": {
+    "value": "~8.8-9.2 m/s",
+    "from": "mean + 1.645 SD with the observed SDs 0.4-0.9 m/s (Lazarczuk 2025, Clark 2020, Lenthall et al. 2024)",
+    "verified": "derived"
+   },
+   "contact": {
+    "value": "0.105-0.112 s",
+    "verified": "derived"
+   }
+  },
+  "trained sprinters (the size of the model)": {
+   "top speed": {
+    "value": "9.90 +- 0.46 m/s; contact 0.103-0.105 s, flight 0.112-0.115 s, step 2.15 m at 4.60 /s, swing 0.330 s; hip extension 850 +- 73 deg/s in stance, thigh lift 792 deg/s",
+    "from": "Miyashiro et al. 2019 (PMC7739839): 79 sprinters, 1.75 m / 66.6 kg",
+    "verified": true
+   },
+   "forces": {
+    "value": "mean 2.30, peak 3.93 +- 0.51 body weights at 10.8 m/s",
+    "from": "Weyand et al. 2009, Table 1",
+    "verified": true
+   }
+  },
+  "elite sprinter": {
+   "top speed": {
+    "value": "11.5-12.3 m/s (Bolt 12.26 over 60-80 m; 2009 finalists 11.80 +- 0.23; ~11.6-11.8 for a 1.75 m athlete)",
+    "from": "Krzysztof & Mero 2013 (PMC3661886); Bissas et al. 2018 World Athletics report",
+    "verified": true
+   },
+   "contact / flight": {
+    "value": "0.084-0.104 / 0.104-0.136 s",
+    "from": "World Athletics 2017 report",
+    "verified": true
+   },
+   "forces": {
+    "value": "mean 2.3-2.45, peak ~3.8-4.5 body weights",
+    "from": "Clark & Weyand 2014 Fig. 7A; Weyand 2009",
+    "verified": "fig-read / derived"
+   }
+  }
+ },
+ "uncertain_not_applied": {
+  "fvmax": {
+   "value": 1.6,
+   "v3": 1.2,
+   "unit": "eccentric force plateau (x isometric), MuJoCo muscle fvmax",
+   "evidence": [
+    "muscle models use 1.4 (Millard et al. 2013, Rajagopal 2016) to 1.79-1.8 (De Groote et al. 2016 source; Thelen Flen in gait2392); 1.6 is the middle",
+    "a small lever for speed: Miller, Umberger & Caldwell 2012 found 6.23-6.70 m/s over the eccentric plateau's range"
+   ],
+   "verified": "uncertain (modelling convention; no direct human measurement of the whole-muscle plateau)",
+   "applied": false,
+   "probe": "average body, pitch-free ideal-control ceiling: +1.0 m/s on the margin probe (~8.2-8.5 against 7.0-7.35), +0.9 and +0.2 on the two stance-budget screens: among the larger levers, and the least grounded; kept at the v3 value until human whole-muscle eccentric capacity in vivo is pinned down"
+  },
+  "foot_solref": {
+   "value": [
+    0.01,
+    1
+   ],
+   "v3": "MuJoCo default [0.02, 1]",
+   "unit": "MuJoCo contact solref on the feet: [time constant s, damping ratio]",
+   "evidence": [
+    "MuJoCo's default contact is critically damped with a 20 ms time constant, ~20 % of a 0.10 s sprint stance, i.e. a very soft foot-ground interface (whole-body effective stiffness ~170 kN/m); human heel pad ~150 kN/m in vivo (Aerts et al. 1995) and 32-212 N/mm in walking (Wearing et al. 2014), sprint surfaces 75-946 kN/m (Kerdok et al. 2002); the suggested range is 0.005-0.01 s, checked against the force rise and a peak near 3.5-4 body weights at top speed (Weyand et al. 2010: 3.6; Weyand et al. 2009: 3.93 +- 0.51)",
+    "0.01 is the soft end of that range (twice the 1 ms timestep's 2x floor)"
+   ],
+   "verified": "uncertain (validated below by the peak force, not by a direct measurement of contact softness)",
+   "applied": false,
+   "probe": "0.01 s: -0.6 m/s on the margin probe, -0.2 and -1.2 on the two stance-budget screens (stiffer contact raises the impact peaks the analysis caps at 5 body weights); kept at MuJoCo's default"
+  }
+ },
+ "probe": {
+  "method": "sprint_limits.py speeds --pitch-free (no pitch stabiliser in stance), chained upward from 5 m/s in 0.5 m/s steps from one warm start. Two ceilings: (1) margin: the fastest speed whose swing-time margin tc + 2 taer - t_sw stays positive (the better of two optimisations per speed, two chains); (2) stance budget: where the best penalised stance budget tc + 2 taer falls to a human swing time of 0.35 s (Weyand et al. 2000: 0.373 +- 0.03; sprinters 0.33-0.36), which needs no swing optimisation and is steadier. Single points carry +-0.3-0.5 m/s.",
+  "reading": "what bounds the ideal-control top speed is the vertical impulse a short stance can deliver: the knee- and ankle-extensor strength move the ceiling most (+2 m/s for x1.5), then the force-length width, while hip speed, the quadriceps tendon and friction give +0.4-0.6 each and a stiffer foot contact costs speed (impact peaks against the analysis's 5 body-weight cap). Only the hip speeds and the quadriceps stiffness have literature support for a change: the model's knee and ankle extensor capacities are already 1.5-3x young men's voluntary maxima (Anderson et al. 2007; Maden-Wilkinson et al. 2020) and its force-length curve is already generous at short lengths (0.5 of isometric at the short end, 0.1-0.35 measured: Anderson 2007; Maganaris 2001, 2003), so neither is raised.",
+  "not probed": "the planar constraint (the analysis is planar by construction; the literature puts the arms' and pelvis rotation's contribution at a few percent: Hinrichs 1987; Brooks, Weyand & Clark 2022) and the foot's geometry (the MTP joint is modelled; Stefanyshyn & Nigg 1997 find it absorbs energy in sprinting and generates almost none)",
+  "screen": {
+   "how": "average body, one change at a time on v3; stance-budget ceiling at t_sw 0.35 (m/s); ONE chain with one optimisation per speed, so a row carries about +-0.5-0.7 m/s (v4b on one chain: 7.46; on two: 8.2). Two screens were run (b2: 2026-09-28 morning; s5: after v4b was fixed); only the strength and force-length rows stand clear of that noise.",
+   "s5": {
+    "v3": 6.89,
+    "hip speeds 18.5 / 29 (v4's)": 7.33,
+    "quadriceps x4 (v4's)": 7.11,
+    "both (v4)": 7.46,
+    "fvmax 1.6": 7.1,
+    "force-length 0.85-1.15": 7.72,
+    "activation x0.5": 6.26,
+    "leg mass x0.85": "chain broke at 5.5 (unreliable)",
+    "hip flexors x1.5": "chain broke at 5.0 (unreliable)",
+    "hip extensors x1.5": 7.32,
+    "plantarflexors x1.5": 9.1,
+    "vasti x1.5": 8.91,
+    "Achilles x2": 7.33,
+    "foot friction 2.0": 7.5,
+    "foot contact solref 0.01": 5.68
+   },
+   "b2": {
+    "v3": 6.89,
+    "fvmax 1.6": 7.75,
+    "foot contact solref 0.01": 6.72,
+    "quadriceps x4": 6.78,
+    "hip speed 30 (v4a)": 6.89,
+    "ankle speed 27 (v4a)": 7.05,
+    "v4a (all four)": 8.61
+   },
+   "two chains, best of both": {
+    "v3 average": 6.89,
+    "v3 P95": 9.69,
+    "v3 elite2": 8.5,
+    "v4a average": 8.35,
+    "v4a P95": 10.95,
+    "v4a elite2": 9.39,
+    "v4 average": 8.2,
+    "v4 P95": 10.45,
+    "v4 elite2": 9.28
+   }
+  }
+ },
+ "superseded": {
+  "omega": {
+   "value": {
+    "hip_flex": 30,
+    "ankle": 27
+   },
+   "why": "a first reading of the literature check (hip 30 for both directions, ankle 27) took the high-speed models' 15 L0/s end for the hip and the recoil-assisted plantarflexion speed for the fibres; its average-body ceiling was ~9.0-9.7 m/s on the better of two chains. Replaced by the standard-model values above before any sprinter was tuned on it."
+  }
+ },
+ "validation": {
+  "average body (v4)": {
+   "stance-budget ceiling": "8.2 m/s (t_sw 0.35; 7.9-8.6 for t_sw 0.37-0.33)",
+   "margin chains": "positive to 8.5 and to 6.5 m/s (two chains)",
+   "at 8.0 m/s": {
+    "contact": 0.124,
+    "aerial": 0.146,
+    "step": 2.16,
+    "step rate": 3.71,
+    "mean vertical force": 2.18,
+    "peak vertical force": 4.81
+   },
+   "human, untrained men": {
+    "top speed": "7.8 (7.3-8.3)",
+    "at ~8 m/s": "contact 0.120-0.130, aerial 0.109-0.124, step 1.96-2.00 m, rate 3.96-4.21 /s, mean force 2.07, peak ~2.8-3.6 (Clark, Meng & Stearne 2020; Weyand et al. 2000 regressions; Clark & Weyand 2014)"
+   },
+   "verdict": "top speed and contact time in the human range; the ideal-control gait flies ~25 % longer, steps ~10 % longer at ~10 % lower rate, with ~6 % more mean and ~40 % more peak vertical force than humans (the optimiser uses the 5 body-weight cap the analysis allows)"
+  },
+  "P95 (v4)": {
+   "stance-budget ceiling": "10.45 m/s",
+   "margin chains": "positive to 10.0 and 10.5",
+   "at 10.0 m/s": {
+    "contact": 0.1,
+    "aerial": 0.161,
+    "step": 2.61,
+    "step rate": 3.83,
+    "mean vertical force": 2.61,
+    "peak": 5.06
+   },
+   "human": "untrained 95th percentile ~8.8-9.2 m/s (mean + 1.645 SD); trained sprinters 9.90 +- 0.46 (Miyashiro et al. 2019: contact 0.103, flight 0.113, step 2.15 m at 4.60 /s)",
+   "verdict": "above the untrained 95th percentile, near trained sprinters; the p95 profile is a composite (every part at its own 95th percentile at once)"
+  },
+  "elite2 (v4)": {
+   "stance-budget ceiling": "9.28 m/s",
+   "margin chains": "positive to 8.0 and 8.5",
+   "at 9.0 m/s": {
+    "contact": 0.112,
+    "aerial": 0.169,
+    "step": 2.53,
+    "step rate": 3.56,
+    "mean vertical force": 2.51,
+    "peak": 4.79
+   },
+   "human": "elite sprinters 11.5-12.3 m/s (1.75 m athletes ~11.6-11.8)",
+   "verdict": "far below elite sprinters, and below v4 P95: elite2 keeps knee and ankle extensors per kg near the untrained mean (the literature), and those are what the ceiling is most sensitive to; what else makes elites fast is not in this model (candidate: stance technique or tendon properties beyond the Achilles)"
+  }
+ }
+}

@@ -1,0 +1,22 @@
+# robolab practice result for myo_stand: score 27.3118
+# metrics {"scores": [25.99, 29.965, 29.946], "first": {"steps": 888, "time": 8.88, "solved": 0.0, "solved_final": 0.0, "sparse_sum": 0.0, "dense_sum": -1689.2595, "terminated": true, "effort": 0.0181, "sway": 0.1226, "sway_max": 0.807, "pelvis_z": 0.938, "fallen": true, "pushes": 2, "fell": false}}
+d_ank 1.3073166296185752
+d_lat 1.111582423403085
+k_ank 2.024251752755221
+k_lat 1.2064810619827488
+kd 0.2958527744178415
+kp 2.0
+pitch_des -0.04803919430869069
+r_kd 0.0
+r_kp 0.0
+s_add -0.12146771847393702
+s_ankle 0.03557567484329385
+s_com 0.04352078575282701
+s_hip 0.02629702068481113
+s_knee 0.01082613435406522
+s_stiff 0.04317944344341247
+spring 0.01
+t_kd 0.20215289371261141
+t_kp 4.925198393517173
+y_kd 0.43527766015443675
+y_kp 0.848007240110622

@@ -1,0 +1,21 @@
+# robolab myo_manip search result for myo_baoding_cup: score 1.5592
+# {'gen': 3, 'summary': {'episodes': 6, 'errors': 0, 'steps': 200.0, 'time': 5.0, 'solved': 0.83333, 'solved_final': 0.0, 'sparse_sum': -12.04298, 'dense_sum': -60.21495, 'effort': 0.04995, 'score': 0.10333, 'solved_steps': 20.66667, 'held_frac': 1.0, 'mean_err': 0.0301, 'turn': -0.103, 'mid_err': 0.00265, 'effort_official': 0.03439, 'act_sq': 0.04756, 'seed': 512302.66667}}
+cup_cabd 0.2861916384749482
+cup_cflex 0.23695888856176328
+cup_dev 0.149091736771181
+cup_f2 0.8251524590268668
+cup_f3 0.1523381565532525
+cup_f4 0.08068757789646722
+cup_f5 0.5588443318743203
+cup_flex -0.78
+cup_ip 0.3259793317957873
+cup_mp 0.2084541931055114
+cup_p2 0.30835623039026233
+cup_p3 0.7547537730872161
+cup_p4 0.5563780814440268
+cup_p5 0.525798538495552
+kd 0.38772720614248335
+kd_wrist 0.05813603496794606
+kp 21.202288786647244
+kp_wrist 14.96651995144203
+stiff 0.04158498382340648

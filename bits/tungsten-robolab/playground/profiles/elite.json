@@ -1,0 +1,156 @@
+{
+ "name": "elite",
+ "about": "ELITE MALE SPRINTER (world-class 100 m population), relative to the average untrained body the robolab bodies model (p50). A separate, clearly labelled body, not a population percentile: it stands for the muscle morphology and fibre make-up measured in elite sprinters, so it is stronger in the hip extensors, hamstrings and hip flexors than in the knee and ankle muscles (non-uniform hypertrophy), with faster fibres. Strength and tendon stiffness are per unit of body size, as in p95 (the anthro part scales with body mass on top). IMPORTANT: the numbers below were set on 2026-09-27 from the sources as recalled. They were checked against the papers on 2026-09-28 (the `literature` block of each part): the pattern holds, but several magnitudes are too high. These numbers are kept unchanged because trial sprint_top_speed_elite's champion was scored on them; the literature-based body is profiles/elite2.json (trial sprint_top_speed_elite2).",
+ "population": "world-class male sprinters (100 m ~9.8-10.2 s); comparison group untrained young men",
+ "parts": {
+  "strength": {
+   "multiplier": 1.3,
+   "groups": {
+    "hip_flex_neg": 1.6,
+    "ham": 1.55,
+    "hip_flex_pos": 1.45,
+    "rf": 1.35,
+    "knee_neg": 1.3,
+    "ankle_pos": 1.25,
+    "gas": 1.3
+   },
+   "stat": "peak isometric force per kg, per muscle: force ~ PCSA = muscle volume / fascicle length. Group keys are the model's muscles: hip_flex_neg = hip extensors (gluteus maximus), ham = biarticular hamstrings, hip_flex_pos = hip flexors (iliopsoas), rf = rectus femoris, knee_neg = vasti, ankle_pos = soleus, gas = gastrocnemius; every other muscle takes `multiplier`",
+   "evidence": [
+    "Handsfield, Knaus, Fiorentino, Meyer, Hart & Blemker 2017, Scand J Med Sci Sports 27:1050-1060, doi:10.1111/sms.12723 ('Adding muscle where you need it: non-uniform hypertrophy patterns in elite sprinters'): MRI of the lower-limb muscles of elite sprinters vs untrained controls; larger muscles overall, with the largest differences in the hip muscles (gluteus maximus, iliopsoas, tensor fasciae latae, sartorius, gracilis) and semitendinosus, smaller ones in the vasti and plantarflexors (as recalled: hip muscles roughly +30-60 %, knee and ankle roughly +10-25 %)",
+    "Miller, Balshaw, Massey, Maeo, Lanza, Johnston, Allen & Folland 2021, Med Sci Sports Exerc 53:804-815, doi:10.1249/MSS.0000000000002522 ('The muscle morphology of elite sprint running'): elite sprinters vs untrained men, much larger hip extensor (gluteus maximus) and hamstring volumes and larger hip flexors; hip extensor size related to sprint performance",
+    "Abe, Kumagai & Brechue 2000, Med Sci Sports Exerc 32:1125-1129 and Kumagai et al. 2000, J Appl Physiol 88:811-816: sprinters have longer fascicles (vastus lateralis, gastrocnemius) than distance runners and controls, and faster sprinters longer ones; so the force (PCSA) gain is taken below the volume gain",
+    "Maden-Wilkinson et al. 2020 (see p95): 4-yr strength-trained men had knee-extension torque x1.58 the untrained mean, an upper bound for the knee muscles"
+   ],
+   "verified": "partly",
+   "note": "Magnitudes are this profile's choice within the recalled ranges (hip extensors / hamstrings x1.55-1.6 > hip flexors x1.45 > knee and ankle x1.25-1.35), not a fitted statistic. Upper body and dorsiflexors take the default x1.3.",
+   "literature": {
+    "verified": "partly",
+    "per_muscle": {
+     "hip_flex_neg": {
+      "value": 1.6,
+      "literature": 1.5,
+      "verified": "mostly",
+      "basis": "Miller et al. 2021 (MSSE 53:804; 5 elite, 10.10 s): hip-extensor volume/kg x1.54, gluteus maximus x1.67, hip-extension torque/kg +48%; Handsfield et al. 2017 (collegiate sprinters): gluteus maximus +31% volume, +29% PCSA/kg"
+     },
+     "ham": {
+      "value": 1.55,
+      "literature": 1.4,
+      "verified": "no (high)",
+      "basis": "Miller 2021: biarticular hamstrings volume/kg x1.42 (semitendinosus 1.78, biceps femoris long head 1.33, semimembranosus 1.19); knee-flexion torque/kg +49%; Handsfield: x1.31 volume, x1.21 PCSA"
+     },
+     "hip_flex_pos": {
+      "value": 1.45,
+      "literature": 1.2,
+      "verified": "no",
+      "basis": "Miller 2021: iliopsoas volume/kg x1.20 (the +40% hip-flexion torque includes rectus femoris, sartorius, TFL); Handsfield: psoas +19%, iliacus +6% volume"
+     },
+     "rf": {
+      "value": 1.35,
+      "literature": 1.35,
+      "verified": "yes",
+      "basis": "Miller 2021: x1.37 volume/kg; Handsfield: +40% volume, +34% PCSA/kg"
+     },
+     "knee_neg": {
+      "value": 1.3,
+      "literature": 1.1,
+      "verified": "no",
+      "basis": "vasti volume/kg x1.26 (Miller), but vastus lateralis fascicles +24% longer (Abe et al. 2000) -> PCSA ~x1.0-1.1; knee-extension torque/kg ~+7%, n.s. (Miller)"
+     },
+     "ankle_pos": {
+      "value": 1.25,
+      "literature": 1.1,
+      "verified": "no",
+      "basis": "Miller 2021: soleus x1.18 volume/kg (plantarflexor group x1.13, n.s.); Handsfield: soleus +6% volume, -1% PCSA"
+     },
+     "gas": {
+      "value": 1.3,
+      "literature": 1.05,
+      "verified": "no",
+      "basis": "Miller 2021: gastrocnemius x1.09; Handsfield +4-7% volume; fascicles +12-17% (Abe 2000); plantarflexion torque/kg n.s."
+     },
+     "other": {
+      "value": 1.3,
+      "literature": 1.0,
+      "verified": "no",
+      "basis": "dorsiflexors (anterior compartment x0.90, Miller) and gluteus medius/minimus ~1.0; upper body: no source"
+     }
+    }
+   }
+  },
+  "speed": {
+   "multiplier": 1.3,
+   "stat": "maximum joint angular velocity = fibre shortening velocity (fibre-type mix) x fascicle length / moment arm",
+   "evidence": [
+    "Costill, Daniels, Evans, Fink, Krahenbuhl & Saltin 1976, J Appl Physiol 40:149-154: male sprinters' gastrocnemius ~76 % fast-twitch vs ~40-50 % in untrained men",
+    "Trappe, Luden, Minchev, Raue, Jemiolo & Trappe 2015, J Appl Physiol 118:1460-1466 ('Skeletal muscle signature of a champion sprint runner'): a world-class sprinter's vastus lateralis mostly type II with a large IIx share; single-fibre Vo IIa ~3.4x and IIx ~5x type I (the p95 profile's values)",
+    "area-weighted Vmax of a ~70-75 % fast mix with ~20-25 % IIx: ~x1.15-1.2 the average mix; with ~10-15 % longer fascicles (Abe et al. 2000; Kumagai et al. 2000): ~x1.3"
+   ],
+   "verified": "derived, plausible",
+   "note": "One multiplier for every joint; sprinters' fibre mix is not measured for every muscle.",
+   "literature": {
+    "value": 1.3,
+    "literature": "1.3 (1.3-1.4)",
+    "verified": "derived, plausible",
+    "basis": "Trappe et al. 2015 (J Appl Physiol 118:1460; one world-class hurdler): 71% fast fibres, IIa x3.37 and IIx x5.04 type I unloaded velocity (verified); fast fraction ~73% vs ~50% in non-athletes (secondary, Marino et al. 2022, citing Costill 1976 and others; Costill's own numbers not reached); fascicles +12-24% (Abe 2000: vastus lateralis +24%, medial gastrocnemius +17%). The multiplier is this profile's derivation from those."
+   }
+  },
+  "tendon": {
+   "multiplier": 1.3,
+   "stat": "in vivo tendon stiffness per unit body size",
+   "evidence": [
+    "Arampatzis, Karamanidis, Morey-Klapsing, De Monte & Stafilidis 2007, J Biomech 40:1946-1952: sprinters had higher normalised Achilles tendon-aponeurosis stiffness than endurance runners and inactive men",
+    "Kubo et al. 2000 and 2020 (see p95): no sprinter difference at high forces in other samples, so the multiplier is kept below p95's x1.5"
+   ],
+   "verified": "Achilles partly; quadriceps no",
+   "note": "Applied to both v3 groups (Achilles, quadriceps), fibre mass scaled with it as in p95.",
+   "literature": {
+    "value": 1.3,
+    "literature": {
+     "achilles": 1.3,
+     "quadriceps": 1.0
+    },
+    "verified": "Achilles partly; quadriceps no",
+    "basis": "Arampatzis et al. 2007 (abstract): only sprinters had higher normalised triceps-surae stiffness (group values not reached; +69.9% in a secondary summary); Kubo et al. 2020: no sprinter difference in gastrocnemius tendon stiffness; Kubo 2000/2011: sprinters' knee-extensor tendons MORE compliant"
+   }
+  },
+  "activation": {
+   "act": 0.8,
+   "deact": 0.8,
+   "stat": "activation and deactivation time constants x0.8 (10 -> 8 ms, 40 -> 32 ms)",
+   "evidence": [
+    "inferred from the fast fibre mix (type II twitch and relaxation ~2x faster than type I) and sprinters' rapid force development; no population distribution of the time constants exists (as for p95)"
+   ],
+   "verified": false,
+   "note": "The least grounded part; test it alone with ROBOLAB_PROFILE_PARTS=activation.",
+   "literature": {
+    "value": 0.8,
+    "literature": 1.0,
+    "verified": "no",
+    "basis": "Tillin et al. 2010 (MSSE 42:781): power athletes' early rate of force development x2, but twitch and normalised tetanic RFD did not differ: the difference is neural (the controller's), not the muscle's time constants"
+   }
+  },
+  "anthro": {
+   "length": 1.03,
+   "mass": 1.15,
+   "stat": "world-class male sprinters ~1.80-1.85 m and ~77-80 kg vs the model's 1.75 m / 67.5 kg (a leaner-than-mass-scaling, more muscular build)",
+   "evidence": [
+    "anthropometry of World Championship / Olympic 100 m finalists (height ~1.8-1.85 m, mass ~75-85 kg), e.g. the biomechanical reports cited in playground/refs/bolt/bolt_keyframes.json (DLV09, L17, W18)"
+   ],
+   "verified": "yes",
+   "note": "Not applied by default (anthro is asked for by name, as for p95).",
+   "literature": {
+    "value": {
+     "length": 1.03,
+     "mass": 1.15
+    },
+    "literature": {
+     "length": 1.03,
+     "mass": 1.14
+    },
+    "verified": "yes",
+    "basis": "Uth 2005 (J Sports Sci Med 4:608): 42 of the all-time top-50 100 m men, 1.80 +- 0.06 m, 77.0 +- 6.6 kg"
+   }
+  }
+ },
+ "literature_check": "2026-09-28, abstracts and full texts where reachable (Miller 2021 accepted manuscript; Trappe 2015, Uth 2005, Abe 2000, Kumagai 2000 full text; Handsfield 2017 per-muscle values from Handsfield's 2014 thesis, doi:10.18130/V37Z6D, the same study; Costill 1976, Arampatzis 2007, Tillin 2010 abstracts only)"
+}

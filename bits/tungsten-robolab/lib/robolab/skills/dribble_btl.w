@@ -1,0 +1,1290 @@
+# Dribble between the legs: DribbleV3Skill (skills/dribble_v3.w: the arms
+# dribble, the trunk leans quietly, strokes are via-chained, the receiving
+# hand waits where the rising ball will cross its strike height) with a
+# lunge the ball can pass under and a through-the-legs pass on every push.
+#
+#   stance  a staggered lunge, the lead leg's foot forward (st_fx, st_fy) and
+#           the back foot back (st_bx, st_by), both solved on the controller's
+#           own leg model (DribbleBtlLeg) for a flat front foot on the floor
+#           under the fixed-height pelvis. The feet step into it while the
+#           ball is still held, before the launch. The ball passes under the
+#           lead leg's thigh, between the front shin and the back knee.
+#   spots   each hand dribbles from its own spot: the hand on the back leg's
+#           side (right, for a left lead) out in front of its hip (bt_fx,
+#           bt_fy), the other behind the lead leg's hip (bt_bx, bt_by). A
+#           straight line between the spots passes under the crotch, so a
+#           push aimed from one spot to the other bounces between the feet.
+#   move    every push is a between-the-legs pass to the other hand (mode 6):
+#           the pushing hand rolls over the ball's outer top (the crossover
+#           cycle, x_*), its palm tilted toward the horizontal velocity that
+#           carries the ball to the other spot in bt_t seconds (bt_kv,
+#           bt_tmax; bt_steer sweeps the palm along it); the other hand runs
+#           the receiving cycle from its spot, its palm moved over the point
+#           where the rising ball will cross its strike height, and strikes
+#           when the ball is bt_lead seconds from it.
+#   plan    (bt_plan 1) the pass as a planned contact: once the ball rises
+#           from its bounce (ball_rise predicts the crossing to ~1 mm), the
+#           contact is planned where its centre reaches bt_kzc (or bt_kph
+#           past its apex): a quintic knot (k_strike, retimed to the
+#           predicted time less bt_klead) ends with the palm on the ball's
+#           far top at a prescribed palm velocity (joint rates from the arm
+#           model's Jacobian), from a backswing hover bt_khov back along that
+#           path; a second knot (k_push) carries it on to rest. The plain
+#           reflex damps absolute contraction velocity and so brakes a fast
+#           knot; bt_vref switches the arms to the SDK's velocity-referenced
+#           damping (Reflex#set_velocity_reference), which damps about the
+#           commanded velocity. bt_kilt / bt_kila learn each hand's timing
+#           lead and aim from its touches (lateness, palm miss).
+#   receive (bt_rplan 1) the absorbing receive of a pass: planned when the
+#           incoming ball rises from its bounce, the palm meets its leading
+#           side (bt_rb above the equator, bt_rin inside) at bt_rmatch of
+#           its velocity (r_meet), rides on with it decelerating to rest over
+#           bt_rt (r_absorb), then pushes it back through the legs (r_push)
+#           and rests (r_follow) until it leaves.
+#   rotate  (bt_rotl / bt_rotr nonzero) the trunk turns into the catch: when a
+#           pass leaves the hand, spine rotation joins the trunk's track; it
+#           waits bt_rotd s, then twists by bt_rotl (the lead leg's hand
+#           catching) or bt_rotr (the other) from the lunge's twist over
+#           bt_rott, carrying the catching hand along with the ball, and
+#           twists back over bt_rotb when a catch dribble's push releases.
+#   learn   (bt_ilc > 0) iterative learning across repetitions: after each
+#           pass the receiving hand measures where the ball actually rose
+#           (its position as it crossed the strike height) against the spot
+#           it was sent to, and the next push from the same hand aims that
+#           much the other way (per hand, gain bt_ilc, bounded by bt_ilc_max).
+#
+# Modes 0-5 are DribbleV3Skill's, unchanged.
+
+# The controller's model of one leg: hip 0.09 m either side of the pelvis
+# centre, thigh and shin 0.43 m, joints hip flex / abd / rot, knee, ankle
+# (axes as playground/body.py). `fk` gives the ankle and the foot's up axis;
+# `solve` places the ankle on a point with the foot flat, near a seed.
++ DribbleBtlLeg
+  ro :side
+  ro :joints
+  -> new(@body, @side)
+    s = @side
+    b = @body
+    @joints = ["hip_flex", "hip_abd", "hip_rot", "knee", "ankle"].map -> s + "_" + item
+    @ls = s == "r" ? ~-1.0 : ~1.0
+    @lo = @joints.map -> b.muscle(b.pos_index(item)).qmin + ~0.01
+    @hi = @joints.map -> b.muscle(b.pos_index(item)).qmax - ~0.01
+
+  -> fk(h, q)
+    r = DribbleV3Math.ry(~0.0 - q[0])
+    r = DribbleV3Math.mul(r, DribbleV3Math.rx(@ls * q[1]))
+    r = DribbleV3Math.mul(r, DribbleV3Math.rz(~0.0 - @ls * q[2]))
+    p = DribbleV3Math.move([~0.0, ~0.09 * @ls, h], r, ~0.0, ~0.0, ~-0.43)
+    r = DribbleV3Math.mul(r, DribbleV3Math.ry(q[3]))
+    p = DribbleV3Math.move(p, r, ~0.0, ~0.0, ~-0.43)
+    r = DribbleV3Math.mul(r, DribbleV3Math.ry(q[4]))
+    [p[0], p[1], p[2], r[2], r[5]]
+
+  -> residual(h, q, target)
+    a = fk(h, q)
+    [a[0] - target[0], a[1] - target[1], a[2] - target[2], ~0.3 * a[3], ~0.3 * a[4]]
+
+  # Damped Gauss-Newton (numeric Jacobian) from `seed`, lightly regularised
+  # toward it, clamped to the joint ranges.
+  -> solve(h, seed, target)
+    q = seed.map -> item
+    eps = ~0.0001
+    k = 0
+    while k < 60
+      r = residual(h, q, target)
+      jac = (0...25).map -> ~0.0
+      c = 0
+      while c < 5
+        q2 = q.map -> item
+        q2[c] = q2[c] + eps
+        r2 = residual(h, q2, target)
+        m = 0
+        while m < 5
+          jac[5 * m + c] = (r2[m] - r[m]) / eps
+          m += 1
+        c += 1
+      a = (0...25).map -> ~0.0
+      g = (0...5).map -> ~0.0
+      i = 0
+      while i < 5
+        j = 0
+        while j < 5
+          s = ~0.0
+          m = 0
+          while m < 5
+            s = s + jac[5 * m + i] * jac[5 * m + j]
+            m += 1
+          a[5 * i + j] = s
+          j += 1
+        a[6 * i] = a[6 * i] + ~0.001
+        s = ~0.0
+        m = 0
+        while m < 5
+          s = s + jac[5 * m + i] * r[m]
+          m += 1
+        g[i] = ~0.0 - s - ~0.001 * (q[i] - seed[i])
+        i += 1
+      dq = DribbleV3Math.solve_spd(a, g, 5)
+      i = 0
+      while i < 5
+        q[i] = DribbleV3Math.clamp(q[i] + dq[i], @lo[i], @hi[i])
+        i += 1
+      k += 1
+    q
+
+# A chunk whose duration is set when it is planned (a contact knot is timed
+# to the predicted contact).
++ BtlChunk < Chunk
+  -> retime(seconds)
+    @duration = seconds
+    self
+
++ DribbleBtlSkill < DribbleV3Skill
+  -> read_params
+    super
+    # stance (authored for a left lead: + y is the lead side)
+    @st_lead = param("st_lead", ~0.0, ~0.0, ~1.0)
+    @st_fx = param("st_fx", ~0.35, ~0.15, ~0.55)
+    @st_fy = param("st_fy", ~0.17, ~0.08, ~0.35)
+    @st_bx = param("st_bx", ~-0.4, ~-0.55, ~-0.1)
+    @st_by = param("st_by", ~-0.24, ~-0.4, ~-0.1)
+    # a step: each of its chunks (lift, place, lift the other, place) takes
+    # st_step seconds; a lifted leg flexes st_lhip at the hip, st_lknee at the knee
+    @st_step = param("st_step", ~0.4, ~0.12, ~0.6)
+    @st_lhip = param("st_lhip", ~0.5, ~0.1, ~0.8)
+    @st_lknee = param("st_lknee", ~1.0, ~0.2, ~1.4)
+    @st_hold = param("st_hold", ~0.8, ~0.3, ~3.0)
+    # the trunk's twist toward the lead leg (spine rotation, authored for a
+    # left lead): the back leg's shoulder comes forward and the lead leg's
+    # shoulder back, so both hands reach the ball where a pass between the
+    # legs starts and ends
+    @st_twist = param("st_twist", ~0.0, ~-0.8, ~0.8)
+    @twist = ly(@st_twist)
+    # (rotate) the trunk's turn into the catch, authored for a left lead
+    @bt_rotl = param("bt_rotl", ~0.0, ~-0.6, ~0.6)
+    @bt_rotr = param("bt_rotr", ~0.0, ~-0.6, ~0.6)
+    @bt_rotd = param("bt_rotd", ~0.1, ~0.02, ~0.4)
+    @bt_rott = param("bt_rott", ~0.25, ~0.06, ~0.5)
+    @bt_rotb = param("bt_rotb", ~0.3, ~0.06, ~0.6)
+    # 1: step from the athletic crouch into the lunge (lift and place each
+    # foot); 0: the task starts the body in the lunge, which is held
+    @st_stepin = param("st_stepin", ~0.0, ~0.0, ~1.0)
+    # the hands' spots (authored for a left lead: the front spot is the back
+    # leg's hand, out in front of its hip; the back spot the lead leg's hand,
+    # behind the lead hip)
+    @bt_fx = param("bt_fx", ~0.35, ~0.1, ~0.6)
+    @bt_fy = param("bt_fy", ~-0.4, ~-0.5, ~-0.2)
+    @bt_bx = param("bt_bx", ~-0.15, ~-0.3, ~0.2)
+    @bt_by = param("bt_by", ~0.44, ~0.25, ~0.55)
+    # the pass: tilt gain, flight time, tilt limit, palm sweep; the strike's
+    # lead on the rising ball; ILC gain and bound
+    @bt_kv = param("bt_kv", ~0.43, ~0.0, ~1.0)
+    @bt_t = param("bt_t", ~0.45, ~0.2, ~1.0)
+    @bt_tmax = param("bt_tmax", ~0.73, ~0.0, ~0.9)
+    @bt_steer = param("bt_steer", ~0.06, ~0.0, ~0.2)
+    @bt_lead = param("bt_lead", ~0.13, ~0.0, ~0.25)
+    # what starts the pass stroke's swing: 0 the rising ball is bt_lead s
+    # from the strike height (DribbleV3Skill's predictive latch); 1 its centre
+    # rises within bt_lz of the strike height; 2 it has slowed below bt_lvz
+    # m/s on its way up (near the apex)
+    @bt_latch = param("bt_latch", ~0.0, ~0.0, ~2.0)
+    @bt_lz = param("bt_lz", ~0.1, ~0.0, ~0.3)
+    @bt_lvz = param("bt_lvz", ~1.5, ~0.2, ~3.0)
+    # 1: a pass aims from where the ball will be met: the palm normal's
+    # horizontal part turns from the spot-to-spot direction to the direction
+    # from the predicted meeting point to the target (the stroke's tilt kept)
+    @bt_aim = param("bt_aim", ~0.0, ~0.0, ~1.0)
+    # static aim offsets of each hand's passes (added to the other spot, x
+    # and y authored for a left lead): where the ball should be sent so it
+    # arrives where the other hand can reach it
+    @bt_ax = param("bt_ax", ~0.0, ~-0.3, ~0.3)
+    @bt_ay = param("bt_ay", ~0.0, ~-0.3, ~0.3)
+    @bl_ax = param("bl_ax", ~0.0, ~-0.3, ~0.3)
+    @bl_ay = param("bl_ay", ~0.0, ~-0.3, ~0.3)
+    # adaptive strike height (bt_dzup > 0): the pass stroke meets the ball
+    # bt_aoff below its predicted apex (ball top), so the palm reaches it at
+    # the same phase of its rise whatever the bounce gave it: the stroke may
+    # rise up to bt_dzup above its planned strike height (DribbleV3Skill's
+    # correction only lowers it, for a ball that will not rise that far)
+    @bt_dzup = param("bt_dzup", ~0.0, ~0.0, ~0.2)
+    @bt_aoff = param("bt_aoff", ~0.03, ~0.0, ~0.15)
+    # planned contact (bt_plan 1): the pass stroke is a quintic knot planned
+    # when the predicted time to contact falls to bt_kt: the palm on the
+    # ball's far top (normal tilted bt_knt from straight down toward the
+    # pass's target) where the ball will be bt_kph s past its apex, moving at
+    # bt_kspd m/s tilted bt_kang from straight down toward the target; the
+    # knot reaches it bt_klead s early (the servo lags), then a second knot
+    # carries the palm bt_kfd on along its path to rest over bt_kpt and holds
+    # until the ball leaves it. bt_kdrv scales the feed-forward burst.
+    @bt_plan = param("bt_plan", ~0.0, ~0.0, ~1.0)
+    @bt_kt = param("bt_kt", ~0.12, ~0.05, ~0.3)
+    @bt_kph = param("bt_kph", ~0.03, ~-0.1, ~0.15)
+    @bt_kspd = param("bt_kspd", ~1.5, ~0.0, ~4.0)
+    @bt_kang = param("bt_kang", ~0.5, ~0.0, ~1.3)
+    @bt_knt = param("bt_knt", ~0.8, ~0.0, ~1.4)
+    @bt_kfd = param("bt_kfd", ~0.12, ~0.0, ~0.3)
+    @bt_kpt = param("bt_kpt", ~0.08, ~0.03, ~0.25)
+    @bt_kdrv = param("bt_kdrv", ~0.5, ~0.0, ~1.0)
+    @bt_klead = param("bt_klead", ~0.02, ~0.0, ~0.1)
+    # during a planned knot (k_*, r_* chunks) the arm's reflexes damp about
+    # the commanded velocity (weight bt_vref, the SDK's opt-in
+    # Reflex#set_velocity_reference) instead of braking every fast
+    # movement: the knot's planned velocity is tracked; elsewhere (the
+    # launch, recoveries, waits) they damp as usual
+    @bt_vref = param("bt_vref", ~0.0, ~0.0, ~1.0)
+    # the absorbing receive (bt_rplan 1, a hand receiving a pass): planned
+    # once the ball rises from its bounce, where its centre reaches bt_rh:
+    # the palm on the ball's leading side (bt_rb above its equator) arriving
+    # at bt_rmatch of the ball's velocity (knot r_meet, bt_rlead early, from
+    # a hover bt_rpre ahead of the receive point); moving on with the ball it
+    # decelerates to rest over bt_rt (r_absorb; bt_rabs x the distance a
+    # linear deceleration takes), then pushes the ball back through the legs
+    # (r_push: the palm turned bt_rnt toward the other spot, reaching bt_rspd
+    # tilted bt_rang from straight down over bt_rpd along that line in
+    # bt_rpt) and comes to rest (r_follow) until the ball leaves it
+    @bt_rplan = param("bt_rplan", ~0.0, ~0.0, ~1.0)
+    # which hands use the absorbing receive: 0 both, 1 only the back-leg
+    # side's (the catch of the return), 2 only the lead leg's
+    @bt_rside = param("bt_rside", ~0.0, ~0.0, ~2.0)
+    @bt_rh = param("bt_rh", ~0.62, ~0.45, ~0.85)
+    @bt_rb = param("bt_rb", ~0.35, ~0.0, ~1.0)
+    # the palm planned bt_rin inside the ball's surface (the arm lags its
+    # plan; the contact must happen)
+    @bt_rin = param("bt_rin", ~0.03, ~0.0, ~0.1)
+    @bt_rmatch = param("bt_rmatch", ~0.8, ~0.0, ~1.2)
+    @bt_rpre = param("bt_rpre", ~0.06, ~0.0, ~0.2)
+    @bt_rlead = param("bt_rlead", ~0.03, ~0.0, ~0.1)
+    @bt_rt1 = param("bt_rt1", ~0.18, ~0.06, ~0.3)
+    @bt_rt = param("bt_rt", ~0.15, ~0.05, ~0.25)
+    @bt_rabs = param("bt_rabs", ~1.0, ~0.3, ~1.5)
+    @bt_rnt = param("bt_rnt", ~0.9, ~0.0, ~1.4)
+    @bt_rspd = param("bt_rspd", ~2.5, ~0.0, ~4.5)
+    @bt_rang = param("bt_rang", ~0.8, ~0.0, ~1.3)
+    @bt_rpd = param("bt_rpd", ~0.12, ~0.02, ~0.3)
+    @bt_rpt = param("bt_rpt", ~0.08, ~0.03, ~0.2)
+    # while it waits, the hand hovers bt_khov back along its path from the
+    # planned contact point (its backswing), aimed past its measured miss by
+    # hand_fb
+    @bt_khov = param("bt_khov", ~0.12, ~0.0, ~0.3)
+    # bt_kzc > 0: the contact is planned where the rising ball's centre
+    # reaches bt_kzc (its apex, if it will not rise so far) instead of by
+    # bt_kph (the forearm hangs over a ball that rises to its apex)
+    @bt_kzc = param("bt_kzc", ~0.0, ~0.0, ~0.9)
+    # iterative learning across repetitions on the planned contact: per
+    # hand, the touch's lateness moves the knot's lead (gain bt_kilt,
+    # bounded 0.08 s) and the palm's miss at the touch against the plan
+    # moves the aim (gain bt_kila, bounded 0.1 m)
+    @bt_kilt = param("bt_kilt", ~0.0, ~0.0, ~1.0)
+    @bt_kila = param("bt_kila", ~0.0, ~0.0, ~1.0)
+    @bt_ilc = param("bt_ilc", ~0.0, ~0.0, ~1.0)
+    @bt_ilc_max = param("bt_ilc_max", ~0.12, ~0.0, ~0.25)
+    # the stroke along the pass: the palm normal tilted bt_angc (cocked) and
+    # bt_angl (low end) from straight down toward the other spot, the palm on
+    # the ball's far top bt_dzc above the strike height bt_zh, meeting it at
+    # bt_zh, sweeping bt_sweep along the pass to bt_dzl below it (heights of
+    # the ball's top: its centre plus its radius)
+    # (these are the back leg's hand's; the lead leg's hand has its own,
+    # bl_*, defaulting to the same). The stroke's poses are solved from an
+    # arm posture seed (shoulder flexion, abduction, rotation, elbow: bt_s*
+    # and bl_s*), which picks the posture branch; a hand beside the hip
+    # meets the ball from its outer side (a large tilt) with the arm hanging
+    @bt_angc = param("bt_angc", ~0.35, ~0.0, ~1.5)
+    @bt_angl = param("bt_angl", ~0.55, ~0.0, ~1.5)
+    @bt_zh = param("bt_zh", ~0.8, ~0.6, ~1.2)
+    @bt_zc = @bt_zh + param("bt_dzc", ~0.15, ~0.03, ~0.35)
+    @bt_zl = @bt_zh - param("bt_dzl", ~0.25, ~0.05, ~0.45)
+    @bt_sweep = param("bt_sweep", ~0.12, ~0.0, ~0.3)
+    @bt_sf = param("bt_sf", @sf0, ~-0.6, ~1.8)
+    @bt_sa = param("bt_sa", @sa0, ~-0.3, ~1.4)
+    @bt_sr = param("bt_sr", @rot0, ~-1.4, ~1.4)
+    @bt_se = param("bt_se", ~1.4, ~0.0, ~2.5)
+    @bl_angc = param("bl_angc", @bt_angc, ~0.0, ~1.5)
+    @bl_angl = param("bl_angl", @bt_angl, ~0.0, ~1.5)
+    @bl_zh = param("bl_zh", @bt_zh, ~0.6, ~1.2)
+    @bl_zc = @bl_zh + param("bl_dzc", @bt_zc - @bt_zh, ~0.03, ~0.35)
+    @bl_zl = @bl_zh - param("bl_dzl", @bt_zh - @bt_zl, ~0.05, ~0.45)
+    @bl_sweep = param("bl_sweep", @bt_sweep, ~0.0, ~0.3)
+    # the lead leg's hand's pass law and swing lead (it meets a ball coming
+    # at it fast from the other side, and sends it back)
+    @bl_kv = param("bl_kv", @bt_kv, ~0.0, ~1.0)
+    @bl_t = param("bl_t", @bt_t, ~0.2, ~1.0)
+    @bl_tmax = param("bl_tmax", @bt_tmax, ~0.0, ~0.9)
+    @bl_steer = param("bl_steer", @bt_steer, ~0.0, ~0.2)
+    @bl_lead = param("bl_lead", @bt_lead, ~0.0, ~0.25)
+    # (bt_ychain 1) the back-leg side's hand has a second pass stroke and
+    # law, br_*, for the passes it makes after catching one (a ball arriving
+    # with the return's sideways speed, not the launch's rebound); they
+    # default to the first pass's
+    @bt_ychain = param("bt_ychain", ~0.0, ~0.0, ~1.0)
+    # (mode 8) the reset dribble after a caught return: 1 on the catch stroke
+    # (y chain, br_* law), 0 on DribbleV3Skill's dribble stroke at the spot
+    # with its catch law (c_kv, c_tmax; stroke heights z_cock, z_hit, z_low)
+    @bt_dy = param("bt_dy", ~1.0, ~0.0, ~1.0)
+    @br_angc = param("br_angc", @bt_angc, ~0.0, ~1.5)
+    @br_angl = param("br_angl", @bt_angl, ~0.0, ~1.5)
+    @br_zh = param("br_zh", @bt_zh, ~0.6, ~1.2)
+    @br_zc = @br_zh + param("br_dzc", @bt_zc - @bt_zh, ~0.03, ~0.35)
+    @br_zl = @br_zh - param("br_dzl", @bt_zh - @bt_zl, ~0.05, ~0.45)
+    @br_sweep = param("br_sweep", @bt_sweep, ~0.0, ~0.3)
+    @br_kv = param("br_kv", @bt_kv, ~0.0, ~1.0)
+    @br_t = param("br_t", @bt_t, ~0.2, ~1.0)
+    @br_tmax = param("br_tmax", @bt_tmax, ~0.0, ~0.9)
+    @br_steer = param("br_steer", @bt_steer, ~0.0, ~0.2)
+    @br_lead = param("br_lead", @bt_lead, ~0.0, ~0.25)
+    @br_ax = param("br_ax", @bt_ax, ~-0.3, ~0.3)
+    @br_ay = param("br_ay", @bt_ay, ~-0.3, ~0.3)
+    # the feed-forward drive of the lead leg's hand's pass stroke and of the
+    # back-leg side's pass after a catch, as multiples of the first pass's
+    @bl_drv = param("bl_drv", ~1.0, ~0.0, ~2.5)
+    # the lead leg's hand's dribble stroke (its catch of a pass, received
+    # rising and struck from above: DribbleV3Skill's cycle with the catch
+    # law), overriding the shared z_cock, dx_cock, pitch_cock, z_hit, z_low,
+    # dx_low, pitch_low at its spot
+    @dl_zcock = param("dl_zcock", @z_cock, ~0.5, ~1.3)
+    @dl_dxc = param("dl_dxc", @dx_cock, ~-0.2, ~0.2)
+    @dl_pc = param("dl_pc", @pitch_cock, ~-0.8, ~0.8)
+    @dl_zhit = param("dl_zhit", @z_hit, ~0.5, ~1.2)
+    @dl_zlow = param("dl_zlow", @z_low, ~0.3, ~0.95)
+    @dl_dxl = param("dl_dxl", @dx_low, ~-0.2, ~0.2)
+    @dl_pl = param("dl_pl", @pitch_low, ~-0.8, ~0.8)
+    @br_drv = param("br_drv", ~1.0, ~0.0, ~2.5)
+    @bl_sf = param("bl_sf", @bt_sf, ~-0.6, ~1.8)
+    @bl_sa = param("bl_sa", @bt_sa, ~-0.3, ~1.4)
+    @bl_sr = param("bl_sr", @bt_sr, ~-1.4, ~1.4)
+    @bl_se = param("bl_se", @bt_se, ~0.0, ~2.5)
+    # 1: the pass stroke keeps the offset it took while meeting the ball, so
+    # the stroke's own shape (behind the ball, sweeping along the pass) does
+    # the push; 0: DribbleV3Skill's stroke correction (re-aimed at the ball)
+    @bt_hold = param("bt_hold", ~1.0, ~0.0, ~1.0)
+    # plain dribbles after the launch before the first pass (the launch's
+    # drift is caught and the ball walked to the right hand's spot)
+    @bt_settle = param("bt_settle", ~0.0, ~0.0, ~3.0)
+    # 1: in BTL mode a plain dribble (mode 7's catch after a pass) uses the
+    # pass stroke from the outer side of the ball, its palm tilt aimed by the
+    # catch law (c_kv, c_tmax) at the hand's own spot; 0: DribbleV3Skill's
+    # dribble stroke at the spot
+    @bt_dside = param("bt_dside", ~1.0, ~0.0, ~1.0)
+    # the launch: the ball thrown straight down at the right hand's spot,
+    # the palm level, from bt_lzc to bt_lzl (the grip opens at z_rel)
+    @bt_lzc = param("bt_lzc", ~1.15, ~0.8, ~1.3)
+    @bt_lzl = param("bt_lzl", ~0.8, ~0.45, ~0.95)
+    @bt_lt = param("bt_lt", ~0.15, ~0.05, ~0.3)
+    @bt_ldrv = param("bt_ldrv", ~0.0, ~0.0, ~1.0)
+    # where the throw's palm is aimed, from the spot: held and cocked at
+    # (bt_lhx, bt_lhy), thrown down to (bt_ldx, bt_ldy) (the arm droops and
+    # lags its model, so the aim is practised)
+    @bt_lhx = param("bt_lhx", ~0.0, ~-0.2, ~0.2)
+    @bt_lhy = param("bt_lhy", ~0.0, ~-0.2, ~0.2)
+    @bt_ldx = param("bt_ldx", ~0.0, ~-0.2, ~0.2)
+    @bt_ldy = param("bt_ldy", ~0.0, ~-0.2, ~0.2)
+    # 1: while the launch holds, lifts and throws the ball, a hand-space
+    # correction keeps the palm over the spot (the arm lags and droops, and a
+    # joint-space stroke curves), so the ball is thrown straight down
+    @bt_lfix = param("bt_lfix", ~0.0, ~0.0, ~1.0)
+    # 1: the launch drops the ball instead of throwing it: the hand lifts it
+    # to bt_lzc over the spot (plus the launch aim), holds still bt_lset s,
+    # and opens (a drop from rest is reproducible; the rebound's apex is set
+    # by the height)
+    @bt_ldrop = param("bt_ldrop", ~0.0, ~0.0, ~1.0)
+    @bt_lset = param("bt_lset", ~0.25, ~0.05, ~0.6)
+
+  -> btl?
+    @mode > ~5.5
+
+  -> rotating?
+    btl? && (@bt_rotl != ~0.0 || @bt_rotr != ~0.0)
+
+  # 6: a pass between the legs on every push; 7: a pass, then one dribble
+  # by the receiving hand; 8: a pass and its return, then one dribble by
+  # the first hand (it resets the ball to the full-height rebound its pass
+  # is made from)
+  -> token(k)
+    return "D" if btl? && k < @bt_settle.round
+    super(k)
+
+  # (9: a pass, then the receiving hand's catch and one more dribble, back
+  # to full height, before its own pass)
+  -> script_for(mode)
+    return "B D D" if mode > ~8.5
+    return "B B D" if mode > ~7.5
+    return "B D" if mode > ~6.5
+    return "B" if mode > ~5.5
+    super(mode)
+
+  # Lead side "l" or "r"; y of a spot authored for a left lead, for this lead.
+  -> lead_side
+    @st_lead > ~0.5 ? "r" : "l"
+
+  -> ly(y)
+    return y if lead_side == "l"
+    ~0.0 - y
+
+  # A hand's spot: the back leg's hand in front, the lead leg's hand behind.
+  -> spot_of(side)
+    return [@bt_bx, ly(@bt_by)] if side == lead_side
+    [@bt_fx, ly(@bt_fy)]
+
+  -> start(frame, ctl)
+    read_params
+    @radius = ~0.12
+    @g = ~9.81
+    @pelvis = [frame.at("pelvis_pos", 0), frame.at("pelvis_pos", 1), frame.at("pelvis_pos", 2)]
+    home = [frame.at("ball_home", 0), frame.at("ball_home", 1)]
+    rhome = home
+    lhome = [home[0], ~0.0 - home[1]]
+    if btl?
+      rhome = spot_of("r")
+      lhome = spot_of("l")
+      solve_stance
+    @right = DribbleV3Hand.new(body, "r", rhome)
+    @left = DribbleV3Hand.new(body, "l", lhome)
+    @ilc = {"r" => [~0.0, ~0.0], "l" => [~0.0, ~0.0]}
+    @kch = {}
+    @rch = {}
+    @kplan = {"r" => nil, "l" => nil}
+    @ktouch = {"r" => false, "l" => false}
+    @kplanned = {"r" => false, "l" => false}
+    @kil = {"r" => [~0.0, ~0.0, ~0.0, ~0.0], "l" => [~0.0, ~0.0, ~0.0, ~0.0]}
+    @sent = nil
+    @fingers = body.has_joint?("r_finger_mcp")
+    @reg = [@sh_reg, @sh_reg, @rot_reg, ~0.002, ~0.002, ~0.002]
+    @meet_reg = [@m_reg, @m_reg, @m_reg, @m_reg, @m_reg, @m_reg]
+    @pose_reg = [~0.002, ~0.002, ~0.002, ~0.002, ~0.002, ~0.002]
+    @script = script_for(@mode).split(" ")
+    @step = 0
+    @active = @right
+    @move = "D"
+    @target = rhome
+    @stance = "a"
+    @stance_pending = ""
+    @hold_stance = false
+    @setup = false
+    @trunk_low = false
+    arms_r = body.mask(["r_shoulder", "r_elbow", "r_wrist", "r_finger"])
+    arms_l = body.mask(["l_shoulder", "l_elbow", "l_wrist", "l_finger"])
+    trunk = body.mask(["spine_flex"])
+    trunk = body.mask(["spine_flex", "spine_rot"]) if rotating?
+    ctl.reflex.set_gains(arms_r, @arm_kp, @arm_kd)
+    ctl.reflex.set_gains(arms_l, @arm_kp, @arm_kd) if @mode > ~0.5
+    ctl.reflex.set_gains(body.mask(["r_finger", "l_finger"]), @f_kp, @f_kd) if @fingers
+    ctl.reflex.set_gains(body.mask(["l_hip", "r_hip", "l_knee", "r_knee", "l_ankle", "r_ankle"]), @leg_kp, @leg_kd) if @mode > ~0.5
+    used = []
+    arms_r.each -> used.push(item)
+    arms_l.each -> used.push(item)
+    trunk.each -> used.push(item)
+    ctl.add_track(Track.new("stance", stance_movement, rest_of(used)))
+    ctl.add_track(Track.new("trunk", trunk_movement, trunk))
+    ctl.add_track(Track.new("right", hand_movement(@right), arms_r))
+    ctl.add_track(Track.new("left", hand_movement(@left), arms_l))
+    @arm_mask = {"r" => arms_r, "l" => arms_l}
+    if btl?
+      # step into the lunge while the ball is still held, or hold the one the
+      # body starts in
+      if @st_stepin > ~0.5
+        set_stance(frame, ctl, lead_side)
+      else
+        ctl.track("stance").jump(ctl, frame, lead_side + "_lead")
+        @stance = lead_side
+      ctl.emit(@stance_note)
+    choose(frame, ctl, @right)
+
+  # The lunge's leg angles on the controller's leg model: the lead foot at
+  # (st_fx, st_fy), the back foot at (st_bx, st_by), ankles 0.078 m up.
+  -> solve_stance
+    h = @pelvis[2]
+    ls = lead_side
+    bs = ls == "l" ? "r" : "l"
+    lead = DribbleBtlLeg.new(body, ls)
+    back = DribbleBtlLeg.new(body, bs)
+    @front_q = lead.solve(h, [~0.8, ~0.1, ~0.0, ~0.7, ~0.1], [@st_fx, ly(@st_fy), ~0.078])
+    @back_q = back.solve(h, [~-0.3, ~0.1, ~0.05, ~0.3, ~-0.59], [@st_bx, ly(@st_by), ~0.078])
+    fq = @front_q.map -> item.to_s
+    bq = @back_q.map -> item.to_s
+    @stance_note = "stance_q:" + fq.join(",") + ":" + bq.join(",")
+    nil
+
+  # DribbleV3Skill's stance chunks with this lunge's legs.
+  -> leg(kind, lifted)
+    return super(kind, lifted) if !btl?
+    q = [~0.57, ~0.1, ~0.0, ~1.14, ~-0.57]
+    if kind == "front"
+      q = @front_q.map -> item
+    elsif kind == "back"
+      q = @back_q.map -> item
+    if lifted
+      q[0] = q[0] + @st_lhip
+      q[3] = q[3] + @st_lknee
+    q
+
+  -> stance_movement
+    @t_step = @st_step if btl?
+    super
+
+  -> twist_pose(flex, rot)
+    p = spine_pose(flex)
+    p.set("spine_rot", rot, @t_stiff)
+    p
+
+  # (rotate) DribbleV3Skill's quiet lean holding the lunge's twist, plus the
+  # turn into each hand's catch (rot_l / rot_r: the wait, then into_l /
+  # into_r) and back.
+  -> trunk_movement
+    return super if !rotating?
+    never = Latch.test("never", ->(f, e, c) false)
+    hold = twist_pose(@spine, @twist)
+    mv = Movement.new("trunk")
+    mv.add(Chunk.new("hold", ~0.3).pose(hold).hold_until(never))
+    mv.add(Chunk.new("b_up", @t_rec).pose(twist_pose(@b_spine, @twist)).hold_until(never))
+    mv.add(Chunk.new("up", @t_rec).pose(hold).hold_until(never))
+    mv.add(Chunk.new("rot_l", @bt_rotd).pose(hold).followed_by("into_l"))
+    mv.add(Chunk.new("into_l", @bt_rott).pose(twist_pose(@spine, @twist + ly(@bt_rotl))).hold_until(never))
+    mv.add(Chunk.new("rot_r", @bt_rotd).pose(hold).followed_by("into_r"))
+    mv.add(Chunk.new("into_r", @bt_rott).pose(twist_pose(@spine, @twist + ly(@bt_rotr))).hold_until(never))
+    mv.add(Chunk.new("back", @bt_rotb).pose(hold).hold_until(never))
+    mv
+
+  # The arm model's base for planned poses: the pelvis, the trunk's lean
+  # and (BTL mode) its twist.
+  -> pose_base(spine)
+    tw = ~0.0
+    tw = @twist if btl?
+    [@pelvis[0], @pelvis[1], @pelvis[2], ~0.0, spine, ~0.0, tw]
+
+  -> arm_solve_reg(hand, x, y, z, pitch, roll, spine, reg)
+    seed = [@sf0, @sa0, @rot0, ~1.4, ~-0.05, ~0.1]
+    normal = DribbleV3Math.unit(Math.sin(pitch), hand.ys(Math.sin(roll)), ~0.0 - Math.cos(pitch) * Math.cos(roll))
+    hand.arm.solve(pose_base(spine), seed, [x, y, z], normal, 40, reg)
+
+  -> stroke_low(hand, q_cock, x, y, z, pitch, roll, spine)
+    normal = DribbleV3Math.unit(Math.sin(pitch), hand.ys(Math.sin(roll)), ~0.0 - Math.cos(pitch) * Math.cos(roll))
+    hand.arm.solve(pose_base(spine), q_cock, [x, y, z], normal, 40, @reg)
+
+  -> palm_at(hand, q, spine)
+    hand.arm.fk(pose_base(spine), q)
+
+  # DribbleV3Skill's stance pose with the trunk twisted (BTL mode).
+  -> stance_pose(lq, rq)
+    return super(lq, rq) if !btl?
+    p = Pose.new
+    names = ["hip_flex", "hip_abd", "hip_rot", "knee", "ankle"]
+    i = 0
+    while i < 5
+      p.set("l_" + names[i], lq[i], @stiff)
+      p.set("r_" + names[i], rq[i], @stiff)
+      i += 1
+    p.set("pelvis_yaw", ~0.0, @stiff)
+    p.set("spine_lat", ~0.0, @t_stiff)
+    p.set("spine_rot", @twist, @t_stiff)
+    p
+
+  # Arm angles with the palm contact point at (x, y, z) facing `normal`.
+  -> arm_solve_n(hand, seed, x, y, z, normal, reg)
+    hand.arm.solve(pose_base(@spine), seed, [x, y, z], normal, 40, reg)
+
+  # The palm normal tilted `a` from straight down toward (ux, uy).
+  -> tilted(ux, uy, a)
+    DribbleV3Math.unit(ux * Math.sin(a), uy * Math.sin(a), ~0.0 - Math.cos(a))
+
+  # BTL mode: each hand dribbles from its own spot, and its pass stroke runs
+  # along the line to the other spot: cocked with the palm on the far top of
+  # a ball at the spot (behind it, seen along the pass), the low end bt_sweep
+  # further along the pass, the palm tilted toward it. The right hand also
+  # launches the ball: held over its spot until the feet are set (st_hold),
+  # thrown straight down, and its first stroke is a pass. A plain dribble
+  # (mode 7) is DribbleV3Skill's stroke at the hand's spot.
+  -> hand_movement(hand)
+    return super(hand) if !btl?
+    @t_hold = @st_hold
+    hx = hand.home[0]
+    hy = hand.home[1]
+    sp = @spine
+    ot = spot_of(hand.side == "r" ? "l" : "r")
+    dl = Math.sqrt((ot[0] - hx) * (ot[0] - hx) + (ot[1] - hy) * (ot[1] - hy))
+    ux = (ot[0] - hx) / dl
+    uy = (ot[1] - hy) / dl
+    lh = hand.side == lead_side
+    if lh
+      q_cock = arm_solve(hand, hx + @dl_dxc, hy, @dl_zcock, @dl_pc, ~0.0, sp)
+      q_low = stroke_low(hand, q_cock, hx + @dl_dxl, hy, @dl_zlow, @dl_pl, ~0.0, sp)
+    else
+      q_cock = arm_solve(hand, hx + @dx_cock, hy, @z_cock, @pitch_cock, ~0.0, sp)
+      q_low = stroke_low(hand, q_cock, hx + @dx_low, hy, @z_low, @pitch_low, ~0.0, sp)
+    angc = lh ? @bl_angc : @bt_angc
+    angl = lh ? @bl_angl : @bt_angl
+    zc = lh ? @bl_zc : @bt_zc
+    zl = lh ? @bl_zl : @bt_zl
+    sw = lh ? @bl_sweep : @bt_sweep
+    seed = lh ? [@bl_sf, @bl_sa, @bl_sr, @bl_se, ~0.0, ~0.0] : [@bt_sf, @bt_sa, @bt_sr, @bt_se, ~0.0, ~0.0]
+    nc = tilted(ux, uy, angc)
+    nl = tilted(ux, uy, angl)
+    r = @radius
+    q_bc = arm_solve_n(hand, seed, hx - r * nc[0], hy - r * nc[1], zc - r * nc[2] - r, nc, @pose_reg)
+    q_bl = arm_solve_n(hand, q_bc, hx + sw * ux - r * nl[0], hy + sw * uy - r * nl[1], zl - r * nl[2] - r, nl, @reg)
+    fo = @f_open
+    ff = @f_flick
+    cock = hand_pose(hand, q_cock, @arm_stiff, fo)
+    low = hand_pose(hand, q_low, @push_stiff, ff)
+    bcock = hand_pose(hand, q_bc, @arm_stiff, fo)
+    blow = hand_pose(hand, q_bl, @push_stiff, ff)
+    drv = burst(hand, q_cock, q_low, fo, ff)
+    bdrv = burst(hand, q_bc, q_bl, fo, ff)
+    if lh && @bl_drv != ~1.0
+      bk = @bl_drv
+      bdrv = bdrv.map -> item * bk
+    meet = ->(f, c) hand_fix(f, c, hand, :meet)
+    carry = ->(f, c) hand_fix(f, c, hand, :carry)
+    idle = ->(f, c) nil
+    over = ->(f, c) handoff(f, c, hand)
+    k = hand.touch_k
+    touch = Latch.above("ball_touch", k, @touch_thr)
+    released = Latch.below("ball_touch", k, @release_thr).after_min(@push_min)
+    arrive = Latch.test("arrive", ->(f, e, c) arrival(f, hand) < lead(hand))
+    strike = Latch.test("strike", ->(f, e, c) strike_now?(f, hand))
+    never = Latch.test("never", ->(f, e, c) false)
+    zh = lh ? @dl_zhit : @z_hit
+    bzh = lh ? @bl_zh : @bt_zh
+    tp = @t_push
+    tc = @t_carry
+    g = @push_gain
+    pm = @push_max
+    mv = Movement.new(hand.name)
+    if hand.side == "r"
+      q_hold = arm_solve(hand, hx + @bt_lhx, hy + @bt_lhy, @pelvis[2] + ~0.19, ~0.0, ~0.0, sp)
+      q_lc = arm_solve(hand, hx + @bt_lhx, hy + @bt_lhy, @bt_lzc, ~0.0, ~0.0, sp)
+      q_ll = arm_solve_n(hand, q_lc, hx + @bt_ldx, hy + @bt_ldy, @bt_lzl, [~0.0, ~0.0, ~-1.0], @pose_reg)
+      hold = hand_pose(hand, q_hold, @arm_stiff, fo)
+      lcock = hand_pose(hand, q_lc, @arm_stiff, ~0.0)
+      llow = hand_pose(hand, q_ll, @push_stiff, ~0.0)
+      ld = @bt_ldrv
+      ldrv = burst(hand, q_lc, q_ll, ~0.0, ~0.0).map -> item * ld
+      held = ->(f, c) launch_fix(f, c, hand, false)
+      launch = ->(f, c) launch_fix(f, c, hand, true)
+      mv.add(Chunk.new("hold", ~0.3).pose(hold).hold_until(Latch.after(@t_hold)).correct(held, @spring))
+      mv.add(Chunk.new("lift", @t_lift).pose(lcock).correct(held, @spring))
+      lt = @bt_lt
+      if @bt_ldrop > ~0.5
+        mv.add(Chunk.new("settle", @bt_lset).pose(lcock).correct(held, @spring))
+        mv.add(Chunk.new("let_go", ~0.08).pose(lcock).on_enter(->(f, c) let_go(f, c, hand)).correct(held, @spring).branch(->(f, c) entry_for(hand)))
+      else
+        mv.add(Chunk.new("throw", lt).pose(llow).drive(ldrv).gain(g).hold_until(Latch.below("r_hand_pos", 2, @z_rel), lt * ~2.0).correct(launch, @spring))
+        mv.add(Chunk.new("let_go", lt).pose(llow).drive(ldrv).gain(g).on_enter(->(f, c) let_go(f, c, hand)).correct(launch, @spring).branch(->(f, c) entry_for(hand)))
+    else
+      mv.add(Chunk.new("rest", ~0.3).pose(bcock).hold_until(never).correct(idle, @spring))
+    # the plain dribble at the spot
+    mv.add(Chunk.new("recover", @t_rec).pose(cock).correct(meet, @spring).on_enter(->(f, c) entering(f, c, hand, zh)))
+    mv.add(Chunk.new("wait", ~0.05).pose(cock).hold_until(arrive, ~1.5).correct(meet, @spring))
+    mv.add(shape(Chunk.new("swing", tp).pose(low).drive(drv).gain(g).hold_until(touch, pm).correct(carry, @spring).on_enter(->(f, c) striking(f, c, hand, false))))
+    mv.add(shape(Chunk.new("carry", tc).pose(low).drive(drv).gain(g).hold_until(released, pm).correct(carry, @spring).followed_by("recover").branch(over)))
+    # the pass between the legs
+    if @bt_plan > ~0.5
+      # (planned: the contact may be planned while the hand is still
+      # recovering, going straight to its knot)
+      plan_early = Latch.test("plan_early", ->(f, e, c) e >= @t_rec || plan_ready?(f, c, hand))
+      mv.add(Chunk.new("x_recover", @t_rec).pose(bcock).hold_until(plan_early, ~1.5).correct(meet, @spring).on_enter(->(f, c) entering(f, c, hand, bzh)).branch(->(f, c) planned_next(hand)))
+    else
+      mv.add(Chunk.new("x_recover", @t_rec).pose(bcock).correct(meet, @spring).on_enter(->(f, c) entering(f, c, hand, bzh)))
+    if @bt_plan > ~0.5
+      plan = Latch.test("plan", ->(f, e, c) plan_ready?(f, c, hand))
+      mv.add(Chunk.new("x_wait", ~0.05).pose(bcock).hold_until(plan, ~1.5).correct(meet, @spring).followed_by("k_strike"))
+    else
+      mv.add(Chunk.new("x_wait", ~0.05).pose(bcock).hold_until(strike, ~1.5).correct(meet, @spring))
+    mv.add(shape(Chunk.new("x_swing", tp).pose(blow).drive(bdrv).gain(g).hold_until(touch, pm).correct(carry, @spring).on_enter(->(f, c) striking(f, c, hand, false))))
+    mv.add(shape(Chunk.new("x_carry", tc).pose(blow).drive(bdrv).gain(g).hold_until(released, pm).correct(carry, @spring).followed_by("idle").branch(over)))
+    mv.add(Chunk.new("idle", @t_rec).pose(bcock).hold_until(never).correct(idle, @spring))
+    if !lh
+      # the pass after a catch (bt_ychain): the same cycle on the br_* stroke
+      ync = tilted(ux, uy, @br_angc)
+      ynl = tilted(ux, uy, @br_angl)
+      bsw = @br_sweep
+      q_yc = arm_solve_n(hand, seed, hx - r * ync[0], hy - r * ync[1], @br_zc - r * ync[2] - r, ync, @pose_reg)
+      q_yl = arm_solve_n(hand, q_yc, hx + bsw * ux - r * ynl[0], hy + bsw * uy - r * ynl[1], @br_zl - r * ynl[2] - r, ynl, @reg)
+      ycock = hand_pose(hand, q_yc, @arm_stiff, fo)
+      ylow = hand_pose(hand, q_yl, @push_stiff, ff)
+      yk = @br_drv
+      ydrv = burst(hand, q_yc, q_yl, fo, ff).map -> item * yk
+      yzh = @br_zh
+      mv.add(Chunk.new("y_recover", @t_rec).pose(ycock).correct(meet, @spring).on_enter(->(f, c) entering(f, c, hand, yzh)))
+      mv.add(Chunk.new("y_wait", ~0.05).pose(ycock).hold_until(strike, ~1.5).correct(meet, @spring))
+      mv.add(shape(Chunk.new("y_swing", tp).pose(ylow).drive(ydrv).gain(g).hold_until(touch, pm).correct(carry, @spring).on_enter(->(f, c) striking(f, c, hand, false))))
+      mv.add(shape(Chunk.new("y_carry", tc).pose(ylow).drive(ydrv).gain(g).hold_until(released, pm).correct(carry, @spring).followed_by("idle").branch(over)))
+    # the planned contact (bt_plan): knots set by plan_strike
+    kdone = Latch.test("k_released", ->(f, e, c) k_released?(f, hand))
+    ks = BtlChunk.new("k_strike", @bt_kt).pose(bcock).knot(zeros, nil).via.drive(zeros).gain(g).correct(carry, @spring).on_enter(->(f, c) striking(f, c, hand, false))
+    kp = BtlChunk.new("k_push", @bt_kpt).pose(blow).knot(zeros, nil).gain(g).hold_until(kdone, pm).correct(carry, @spring).followed_by("idle").branch(over)
+    mv.add(ks)
+    mv.add(kp)
+    @kch[hand.side] = [ks, kp]
+    # the absorbing receive (bt_rplan): knots set by plan_receive
+    rready = Latch.test("r_plan", ->(f, e, c) receive_ready?(f, c, hand))
+    rhover = ->(f, c) receive_hover(f, c, hand)
+    mv.add(Chunk.new("r_recover", @t_rec).pose(bcock).hold_until(rready, ~1.5).correct(rhover, @spring).on_enter(->(f, c) entering(f, c, hand, bzh)))
+    r1 = BtlChunk.new("r_meet", @bt_rt1).pose(bcock).knot(zeros, nil).via.gain(g).correct(carry, @spring)
+    r2 = BtlChunk.new("r_absorb", @bt_rt).pose(bcock).knot(zeros, nil).via.gain(g).correct(carry, @spring)
+    r3 = BtlChunk.new("r_push", @bt_rpt).pose(bcock).knot(zeros, nil).via.drive(zeros).gain(g).correct(carry, @spring).on_enter(->(f, c) striking(f, c, hand, false))
+    r4 = BtlChunk.new("r_follow", @bt_kpt).pose(blow).knot(zeros, nil).gain(g).hold_until(kdone, pm).correct(carry, @spring).followed_by("idle").branch(over)
+    mv.add(r1)
+    mv.add(r2)
+    mv.add(r3)
+    mv.add(r4)
+    @rch[hand.side] = [r1, r2, r3, r4]
+    mv
+
+  -> choose(f, ctl, hand)
+    return super(f, ctl, hand) if !btl?
+    @move = token(@step)
+    @step += 1
+    @setup = false
+    ctl.emit("plan:" + @move + ":" + hand.label)
+    if @move == "D"
+      @target = hand.home
+      return nil
+    other = other_of(hand)
+    sp = other.home
+    off = @ilc[hand.side]
+    ax = hand.side == lead_side ? @bl_ax : @bt_ax
+    ay = hand.side == lead_side ? ly(@bl_ay) : ly(@bt_ay)
+    if ychain?(hand)
+      ax = @br_ax
+      ay = ly(@br_ay)
+    @target = [sp[0] + off[0] + ax, sp[1] + off[1] + ay]
+    @sent = [hand.side, sp[0], sp[1]]
+    nil
+
+  # DribbleV3Skill's :meet correction (see its hand_fix) with the adaptive
+  # strike height: hand.dz follows the predicted apex, bt_aoff below it,
+  # between -dz_max and +bt_dzup.
+  -> meet_fix(f, ctl, hand)
+    return nil if f.get("ball_held") > ~0.5
+    base = base_now(f)
+    q = arm_command(ctl, hand)
+    h = hand.arm.fk(base, q)
+    hand.dz = DribbleV3Math.clamp(f.at("ball_apex", 2) + @radius - @bt_aoff - hand.zh, ~0.0 - @dz_max, @bt_dzup)
+    aim = meet_point(f, hand.zh - @radius + hand.dz)
+    bx = aim[0]
+    by = aim[1]
+    law = move_law(hand)
+    hand.ix = hand.ix + (f.at("ball_pos", 0) - law[0]) * ctl.dt
+    hand.iy = hand.iy + (f.at("ball_pos", 1) - law[1]) * ctl.dt
+    tilt = palm_tilt(f, hand, law)
+    n = DribbleV3Math.unit(h[3] + tilt[0], h[4] + tilt[1], h[5])
+    m = hand.arm.fk(base, arm_measured(f, hand))
+    hand.palm_prev = m
+    tx = bx - @radius * n[0]
+    ty = by - @radius * n[1]
+    tx = tx + @hand_fb * (tx - m[0])
+    ty = ty + @hand_fb * (ty - m[1])
+    tx = DribbleV3Math.clamp(tx, h[0] - @reach, h[0] + @reach)
+    ty = DribbleV3Math.clamp(ty, h[1] - @reach, h[1] + @reach)
+    hand.aim = [tx, ty]
+    qd = hand.arm.solve(base, q, [tx, ty, h[2] + hand.dz], n, 2, @meet_reg)
+    hand.qoff = (0...6).map ->(i) qd[i] - q[i]
+    off = zeros
+    i = 0
+    while i < 6
+      joint_offset(off, hand.arm.joints[i], qd[i] - q[i])
+      i += 1
+    off
+
+  # The launch's correction (bt_lfix): the palm held over the spot plus the
+  # launch aim (bt_lhx, bt_lhy) while it holds and lifts the ball; through
+  # the throw it follows the straight line down to (bt_ldx, bt_ldy) from the
+  # spot, by the commanded palm height; aimed past the measured miss by
+  # hand_fb, facing down. The aim's offset sets the throw's drift.
+  -> launch_fix(f, ctl, hand, throwing)
+    return nil if @bt_lfix < ~0.5
+    base = base_now(f)
+    q = arm_command(ctl, hand)
+    h = hand.arm.fk(base, q)
+    m = hand.arm.fk(base, arm_measured(f, hand))
+    tx = hand.home[0] + @bt_lhx
+    ty = hand.home[1] + @bt_lhy
+    if throwing
+      fr = DribbleV3Math.clamp((@bt_lzc - h[2]) / (@bt_lzc - @bt_lzl), ~0.0, ~1.0)
+      tx = tx + fr * (@bt_ldx - @bt_lhx)
+      ty = ty + fr * (@bt_ldy - @bt_lhy)
+    tx = tx + @hand_fb * (tx - m[0])
+    ty = ty + @hand_fb * (ty - m[1])
+    tx = DribbleV3Math.clamp(tx, h[0] - @reach, h[0] + @reach)
+    ty = DribbleV3Math.clamp(ty, h[1] - @reach, h[1] + @reach)
+    qd = hand.arm.solve(base, q, [tx, ty, h[2]], [~0.0, ~0.0, ~-1.0], 2, @meet_reg)
+    off = zeros
+    i = 0
+    while i < 6
+      joint_offset(off, hand.arm.joints[i], qd[i] - q[i])
+      i += 1
+    off
+
+  # BTL stroke (bt_hold): through the swing and the carry the arm keeps the
+  # offset the meeting correction took, so the palm comes down along the
+  # stroke from behind the ball instead of being pulled back onto its top.
+  -> hand_fix(f, ctl, hand, mode)
+    # (the reset dribble on DribbleV3Skill's stroke keeps its corrections)
+    return super(f, ctl, hand, mode) if @move == "D" && btl? && @bt_dy < ~0.5 && active?(hand) && hand.fresh
+    return hover_fix(f, ctl, hand) if mode == :meet && btl? && @bt_plan > ~0.5 && active?(hand) && @move == "B"
+    return meet_fix(f, ctl, hand) if mode == :meet && btl? && @bt_dzup > ~0.0 && active?(hand) && @move == "B"
+    return super(f, ctl, hand, mode) if !btl? || @bt_hold < ~0.5 || mode != :carry || !active?(hand)
+    return super(f, ctl, hand, mode) if @move != "B" && @bt_dside < ~0.5 && !(@bt_rplan > ~0.5 && hand.fresh)
+    return nil if f.get("ball_held") > ~0.5
+    off = zeros
+    qo = hand.qoff
+    i = 0
+    while i < 6
+      joint_offset(off, hand.arm.joints[i], qo[i])
+      i += 1
+    off
+
+  # The absorbing receive's hands (bt_rside).
+  -> rplan_hand?(hand)
+    return true if @bt_rside < ~0.5
+    return hand.side != lead_side if @bt_rside < ~1.5
+    hand.side == lead_side
+
+  # A back-leg-side hand passing a ball it has just caught (bt_ychain).
+  -> ychain?(hand)
+    btl? && @bt_ychain > ~0.5 && hand.fresh && hand.side != lead_side
+
+  -> entry_for(hand)
+    return "y_recover" if @move == "B" && ychain?(hand)
+    return "y_recover" if @move == "D" && ychain?(hand) && @bt_dy > ~0.5
+    return "recover" if @move == "D" && btl? && hand.fresh && @bt_dy < ~0.5
+    return "r_recover" if btl? && @bt_rplan > ~0.5 && (@move == "B" || @move == "D") && hand.fresh && rplan_hand?(hand)
+    return "x_recover" if btl? && (@move == "B" || @bt_dside > ~0.5)
+    super(hand)
+
+  # The end of a carry: the other hand starts its receiving cycle (the
+  # crossover's, from its own spot).
+  -> handoff(f, ctl, hand)
+    return super(f, ctl, hand) if !btl?
+    return "idle" if !active?(hand)
+    hand.fresh = false
+    if @move == "D"
+      ctl.track("trunk").jump(ctl, f, "back") if rotating?
+      choose(f, ctl, hand)
+      return entry_for(hand)
+    other = other_of(hand)
+    ctl.track("trunk").jump(ctl, f, other.side == lead_side ? "rot_l" : "rot_r") if rotating?
+    @active = other
+    other.ix = ~0.0
+    other.iy = ~0.0
+    other.aim = nil
+    other.fresh = true
+    choose(f, ctl, other)
+    ctl.track(other.name).jump(ctl, f, entry_for(other))
+    "idle"
+
+  -> entering(f, ctl, hand, zh)
+    @kplanned[hand.side] = false if btl?
+    super(f, ctl, hand, zh)
+
+  -> striking(f, ctl, hand, redirect)
+    return super(f, ctl, hand, redirect) if !btl?
+    ctl.emit("move:" + @move + ":" + hand.label) if active?(hand)
+    nil
+
+  # Pass aiming (bt_aim): the law's tilt plus the turn of the commanded palm
+  # normal's horizontal part onto the line from the predicted meeting point
+  # to the pass's target.
+  -> palm_tilt(f, hand, law)
+    t = super(f, hand, law)
+    return t if !btl? || @bt_aim < ~0.5 || !active?(hand) || @move != "B" || @ctl_now == nil
+    h = hand.arm.fk(base_now(f), arm_command(@ctl_now, hand))
+    aim = meet_point(f, hand.zh - @radius + hand.dz)
+    dx = law[0] - aim[0]
+    dy = law[1] - aim[1]
+    dl = Math.sqrt(dx * dx + dy * dy)
+    return t if dl < ~0.01
+    mh = Math.sqrt(h[3] * h[3] + h[4] * h[4])
+    [t[0] + mh * dx / dl - h[3], t[1] + mh * dy / dl - h[4]]
+
+  # ---- the planned contact (bt_plan) -------------------------------------------
+
+  # The ball at the planned contact, bt_kph s past the apex of its next rise:
+  # [seconds from now, x, y, z, vx, vy, vz], or nil (a ball that will not rise).
+  -> contact_state(f)
+    return nil if !f.has?("ball_rise")
+    vz = f.at("ball_rise", 5)
+    return nil if vz <= ~0.5
+    tr = f.at("ball_rise", 6)
+    vx = f.at("ball_rise", 3)
+    vy = f.at("ball_rise", 4)
+    s = vz / @g + @bt_kph
+    if @bt_kzc > ~0.0
+      disc = vz * vz - ~2.0 * @g * (@bt_kzc - f.at("ball_rise", 2))
+      s = vz / @g
+      s = (vz - Math.sqrt(disc)) / @g if disc > ~0.0
+    [tr + s, f.at("ball_rise", 0) + vx * s, f.at("ball_rise", 1) + vy * s, f.at("ball_rise", 2) + vz * s - ~0.5 * @g * s * s, vx, vy, vz - @g * s]
+
+  # The plan latch: once the ball rises from its bounce (an exact
+  # prediction), when the predicted contact is bt_kt away (less the hand's
+  # lead), plan the knots and go.
+  -> plan_ready?(f, ctl, hand)
+    return false if f.at("ball_vel", 2) <= ~0.0
+    c = contact_state(f)
+    return false if c == nil
+    return false if c[0] - @bt_klead - @kil[hand.side][0] > @bt_kt
+    plan_strike(f, ctl, hand, c)
+    true
+
+  # Joint rates (rad/s) that move the palm point at `v` (m/s) from arm angles
+  # q: damped least squares on the position Jacobian of the arm model.
+  -> joint_rates(hand, base, q, v)
+    h0 = hand.arm.fk(base, q)
+    eps = ~0.0001
+    jac = (0...18).map -> ~0.0
+    c = 0
+    while c < 6
+      q2 = q.map -> item
+      q2[c] = q2[c] + eps
+      h = hand.arm.fk(base, q2)
+      m = 0
+      while m < 3
+        jac[6 * m + c] = (h[m] - h0[m]) / eps
+        m += 1
+      c += 1
+    a = (0...36).map -> ~0.0
+    g = (0...6).map -> ~0.0
+    i = 0
+    while i < 6
+      j = 0
+      while j < 6
+        sm = ~0.0
+        m = 0
+        while m < 3
+          sm = sm + jac[6 * m + i] * jac[6 * m + j]
+          m += 1
+        a[6 * i + j] = sm
+        j += 1
+      a[7 * i] = a[7 * i] + ~0.01
+      sm = ~0.0
+      m = 0
+      while m < 3
+        sm = sm + jac[6 * m + i] * v[m]
+        m += 1
+      g[i] = sm
+      i += 1
+    DribbleV3Math.solve_spd(a, g, 6)
+
+  # The planned palm contact for the ball state c: [x, y, z, normal, hand
+  # velocity direction], the palm on the ball's far top toward the target,
+  # plus the hand's learned aim.
+  -> contact_palm(c, hand)
+    kl = @kil[hand.side]
+    dx = @target[0] - c[1]
+    dy = @target[1] - c[2]
+    dl = Math.sqrt(dx * dx + dy * dy)
+    dl = ~0.001 if dl < ~0.001
+    ux = dx / dl
+    uy = dy / dl
+    n = tilted(ux, uy, @bt_knt)
+    w = tilted(ux, uy, @bt_kang)
+    r = @radius
+    [c[1] - r * n[0] + kl[1], c[2] - r * n[1] + kl[2], c[3] - r * n[2] + kl[3], n, w]
+
+  # The wait before a planned contact: the palm hovers bt_khov above the
+  # planned contact point, facing as it will at contact (the offset is kept
+  # through the knots, see hand_fix).
+  -> hover_fix(f, ctl, hand)
+    return nil if f.get("ball_held") > ~0.5
+    base = base_now(f)
+    q = arm_command(ctl, hand)
+    c = contact_state(f)
+    if c != nil
+      cp = contact_palm(c, hand)
+      m = hand.arm.fk(base, arm_measured(f, hand))
+      # the backswing: bt_khov back along the hand's path at contact
+      w = cp[4]
+      tx = cp[0] - @bt_khov * w[0]
+      ty = cp[1] - @bt_khov * w[1]
+      tz = cp[2] - @bt_khov * w[2]
+      tx = tx + @hand_fb * (tx - m[0])
+      ty = ty + @hand_fb * (ty - m[1])
+      qd = hand.arm.solve(base, q, [tx, ty, tz], cp[3], 2, @meet_reg)
+      hand.qoff = (0...6).map ->(i) qd[i] - q[i]
+    off = zeros
+    i = 0
+    while i < 6
+      joint_offset(off, hand.arm.joints[i], hand.qoff[i])
+      i += 1
+    off
+
+  # Plan the contact knot and the push knot for the ball state c.
+  -> plan_strike(f, ctl, hand, c)
+    side = hand.side
+    dur = DribbleV3Math.clamp(c[0] - @bt_klead - @kil[side][0], ~0.03, @bt_kt + ~0.05)
+    cp = contact_palm(c, hand)
+    px = cp[0]
+    py = cp[1]
+    pz = cp[2]
+    n = cp[3]
+    w = cp[4]
+    base = base_now(f)
+    q = arm_command(ctl, hand)
+    qo = hand.qoff
+    qn = (0...6).map ->(i) q[i] + qo[i]
+    qc = hand.arm.solve(base, qn, [px, py, pz], n, 30, @pose_reg)
+    sp = @bt_kspd
+    qd = joint_rates(hand, base, qc, [sp * w[0], sp * w[1], sp * w[2]])
+    fd = @bt_kfd
+    qp = hand.arm.solve(base, qc, [px + fd * w[0], py + fd * w[1], pz + fd * w[2]], n, 20, @reg)
+    g1 = (0...6).map ->(i) qc[i] - qo[i]
+    g2 = (0...6).map ->(i) qp[i] - qo[i]
+    kv = zeros
+    i = 0
+    while i < 6
+      joint_offset(kv, hand.arm.joints[i], qd[i])
+      i += 1
+    kd = @bt_kdrv
+    ch = @kch[side]
+    ch[0].retime(dur)
+    ch[0].pose(hand_pose(hand, g1, @push_stiff, @f_flick))
+    ch[0].knot(kv, nil)
+    ch[0].drive(rate_burst(hand, qd, kd))
+    ch[1].pose(hand_pose(hand, g2, @push_stiff, @f_flick))
+    ch[1].knot(zeros, nil)
+    @kplan[side] = [f.t + c[0], px, py, pz]
+    @ktouch[side] = false
+    @kplanned[side] = true
+    nil
+
+  # Feed-forward burst for a planned knot: each arm joint's shortening muscle
+  # gets its group's drive level (drive_sh, drive_el, drive_wr) scaled by the
+  # joint rate the contact needs (full at 6 rad/s), times kd.
+  -> rate_burst(hand, qd, kd)
+    levels = [@drive_sh, @drive_sh, @drive_sh, @drive_el, @drive_wr, @drive_wr]
+    drv = zeros
+    i = 0
+    while i < 6
+      j = hand.arm.joints[i]
+      k = body.pos_index(j)
+      k = body.neg_index(j) if qd[i] < ~0.0
+      drv[k] = kd * levels[i] * DribbleV3Math.clamp(qd[i].abs / ~6.0, ~0.0, ~1.0)
+      i += 1
+    drv
+
+  # ---- the absorbing receive (bt_rplan) ------------------------------------------
+
+  # The incoming ball where its rising centre reaches bt_rh (its apex if it
+  # will not rise so far): [seconds from now, x, y, z, vx, vy, vz], or nil.
+  -> receive_state(f)
+    return nil if !f.has?("ball_rise")
+    vz = f.at("ball_rise", 5)
+    return nil if vz <= ~0.5
+    disc = vz * vz - ~2.0 * @g * (@bt_rh - f.at("ball_rise", 2))
+    s = vz / @g
+    s = (vz - Math.sqrt(disc)) / @g if disc > ~0.0
+    vx = f.at("ball_rise", 3)
+    vy = f.at("ball_rise", 4)
+    [f.at("ball_rise", 6) + s, f.at("ball_rise", 0) + vx * s, f.at("ball_rise", 1) + vy * s, f.at("ball_rise", 2) + vz * s - ~0.5 * @g * s * s, vx, vy, vz - @g * s]
+
+  # The receive geometry for ball state c: [palm x, y, z, normal, d (the
+  # ball's horizontal heading)]: the palm on the ball's leading side, bt_rb
+  # above its equator and bt_rin inside its surface, facing it.
+  -> receive_palm(c, hand)
+    vx = c[4]
+    vy = c[5]
+    vh = Math.sqrt(vx * vx + vy * vy)
+    if vh < ~0.3
+      o = other_of(hand).home
+      vx = hand.home[0] - o[0]
+      vy = hand.home[1] - o[1]
+      vh = Math.sqrt(vx * vx + vy * vy)
+    dx = vx / vh
+    dy = vy / vh
+    b = @bt_rb
+    lx = dx * Math.cos(b)
+    ly_ = dy * Math.cos(b)
+    lz = Math.sin(b)
+    r = @radius - @bt_rin
+    [c[1] + r * lx, c[2] + r * ly_, c[3] + r * lz, [~0.0 - lx, ~0.0 - ly_, ~0.0 - lz], [dx, dy]]
+
+  # While the pass comes: the palm hovers bt_rpre ahead of the receive
+  # point, facing the incoming ball.
+  -> receive_hover(f, ctl, hand)
+    return nil if f.get("ball_held") > ~0.5
+    base = base_now(f)
+    q = arm_command(ctl, hand)
+    c = receive_state(f)
+    if c != nil
+      rp = receive_palm(c, hand)
+      m = hand.arm.fk(base, arm_measured(f, hand))
+      d = rp[4]
+      tx = rp[0] + @bt_rpre * d[0]
+      ty = rp[1] + @bt_rpre * d[1]
+      tx = tx + @hand_fb * (tx - m[0])
+      ty = ty + @hand_fb * (ty - m[1])
+      qd = hand.arm.solve(base, q, [tx, ty, rp[2]], rp[3], 2, @meet_reg)
+      hand.qoff = (0...6).map ->(i) qd[i] - q[i]
+    off = zeros
+    i = 0
+    while i < 6
+      joint_offset(off, hand.arm.joints[i], hand.qoff[i])
+      i += 1
+    off
+
+  -> receive_ready?(f, ctl, hand)
+    return false if f.at("ball_vel", 2) <= ~0.0
+    c = receive_state(f)
+    return false if c == nil
+    return false if c[0] - @bt_rlead > @bt_rt1
+    plan_receive(f, ctl, hand, c)
+    true
+
+  # Contraction rates of arm joint rates qd.
+  -> knot_rates(hand, qd)
+    kv = zeros
+    i = 0
+    while i < 6
+      joint_offset(kv, hand.arm.joints[i], qd[i])
+      i += 1
+    kv
+
+  # Plan the receive's four knots for the incoming ball state c: meet (at
+  # bt_rmatch of its velocity), absorb (on with it to rest over bt_rt), push
+  # (back toward the other spot at bt_rspd) and follow (to rest).
+  -> plan_receive(f, ctl, hand, c)
+    side = hand.side
+    base = base_now(f)
+    q = arm_command(ctl, hand)
+    qo = hand.qoff
+    qn = (0...6).map ->(i) q[i] + qo[i]
+    rp = receive_palm(c, hand)
+    d = rp[4]
+    n1 = rp[3]
+    mt = @bt_rmatch
+    v1 = [mt * c[4], mt * c[5], mt * c[6]]
+    q1 = hand.arm.solve(base, qn, [rp[0], rp[1], rp[2]], n1, 30, @pose_reg)
+    qd1 = joint_rates(hand, base, q1, v1)
+    tt = @bt_rt
+    vh = Math.sqrt(c[4] * c[4] + c[5] * c[5])
+    run = @bt_rabs * vh * tt * ~0.5
+    dz = c[6] * tt - ~0.5 * @g * tt * tt
+    p2 = [rp[0] + run * d[0], rp[1] + run * d[1], rp[2] + dz]
+    q2 = hand.arm.solve(base, q1, p2, n1, 20, @reg)
+    bx = p2[0] - @radius * n1[0]
+    by = p2[1] - @radius * n1[1]
+    ux = @target[0] - bx
+    uy = @target[1] - by
+    ul = Math.sqrt(ux * ux + uy * uy)
+    ul = ~0.001 if ul < ~0.001
+    ux = ux / ul
+    uy = uy / ul
+    n3 = tilted(ux, uy, @bt_rnt)
+    w3 = tilted(ux, uy, @bt_rang)
+    bz = p2[2] - @radius * n1[2]
+    p3s = [bx - @radius * n3[0], by - @radius * n3[1], bz - @radius * n3[2]]
+    pd = @bt_rpd
+    p3 = [p3s[0] + pd * w3[0], p3s[1] + pd * w3[1], p3s[2] + pd * w3[2]]
+    q3 = hand.arm.solve(base, q2, p3, n3, 20, @reg)
+    sp = @bt_rspd
+    qd3 = joint_rates(hand, base, q3, [sp * w3[0], sp * w3[1], sp * w3[2]])
+    fd = @bt_kfd
+    q4 = hand.arm.solve(base, q3, [p3[0] + fd * w3[0], p3[1] + fd * w3[1], p3[2] + fd * w3[2]], n3, 20, @reg)
+    ch = @rch[side]
+    g1 = (0...6).map ->(i) q1[i] - qo[i]
+    g2 = (0...6).map ->(i) q2[i] - qo[i]
+    g3 = (0...6).map ->(i) q3[i] - qo[i]
+    g4 = (0...6).map ->(i) q4[i] - qo[i]
+    ch[0].retime(DribbleV3Math.clamp(c[0] - @bt_rlead, ~0.03, @bt_rt1 + ~0.05))
+    ch[0].pose(hand_pose(hand, g1, @push_stiff, @f_open))
+    ch[0].knot(knot_rates(hand, qd1), nil)
+    ch[1].retime(tt)
+    ch[1].pose(hand_pose(hand, g2, @push_stiff, @f_open))
+    ch[1].knot(zeros, nil)
+    ch[2].pose(hand_pose(hand, g3, @push_stiff, @f_flick))
+    ch[2].knot(knot_rates(hand, qd3), nil)
+    ch[2].drive(rate_burst(hand, qd3, @bt_kdrv))
+    ch[3].pose(hand_pose(hand, g4, @push_stiff, @f_flick))
+    ch[3].knot(zeros, nil)
+    @kplan[side] = [f.t + c[0], rp[0], rp[1], rp[2]]
+    @ktouch[side] = false
+    nil
+
+  # After the recovery: to the contact knot if it was planned meanwhile.
+  -> planned_next(hand)
+    return "k_strike" if @kplanned[hand.side]
+    "x_wait"
+
+  # The push knot holds until the ball, touched, leaves the palm.
+  -> k_released?(f, hand)
+    return false if !@ktouch[hand.side]
+    f.at("ball_touch", hand.touch_k) < @release_thr
+
+  # Each tick of a planned stroke: the first touch closes the plan; its
+  # lateness and the palm's miss (the arm model on the measured angles)
+  # update that hand's learned lead and aim (bt_kilt, bt_kila).
+  -> watch_contact(f, ctl, hand)
+    side = hand.side
+    return nil if @kplan[side] == nil || @ktouch[side]
+    name = ctl.track(hand.name).chunk_name
+    return nil if name != "k_strike" && name != "k_push" && !name.starts_with?("r_")
+    return nil if f.at("ball_touch", hand.touch_k) < @touch_thr
+    @ktouch[side] = true
+    if name.starts_with?("r_")
+      ctl.emit("ktouch:" + side + ":" + (f.t - @kplan[side][0]).to_s + ":0:0:0")
+      return nil
+    pl = @kplan[side]
+    m = hand.arm.fk(base_now(f), arm_measured(f, hand))
+    kl = @kil[side]
+    et = f.t - pl[0]
+    kl[0] = DribbleV3Math.clamp(kl[0] + @bt_kilt * et, ~-0.08, ~0.08)
+    kl[1] = DribbleV3Math.clamp(kl[1] - @bt_kila * (m[0] - pl[1]), ~-0.1, ~0.1)
+    kl[2] = DribbleV3Math.clamp(kl[2] - @bt_kila * (m[1] - pl[2]), ~-0.1, ~0.1)
+    kl[3] = DribbleV3Math.clamp(kl[3] - @bt_kila * (m[2] - pl[3]), ~-0.1, ~0.1)
+    ctl.emit("ktouch:" + side + ":" + et.to_s + ":" + (m[0] - pl[1]).to_s + ":" + (m[1] - pl[2]).to_s + ":" + (m[2] - pl[3]).to_s)
+    nil
+
+  # The pass stroke's swing latch (bt_latch).
+  -> strike_now?(f, hand)
+    return arrival(f, hand) < lead(hand) if @bt_latch < ~0.5
+    vz = f.at("ball_vel", 2)
+    return false if vz <= ~0.0
+    return f.at("ball_pos", 2) > hand.zh - @radius + hand.dz - @bt_lz if @bt_latch < ~1.5
+    vz < @bt_lvz && f.at("ball_pos", 2) > ~0.3
+
+  -> lead(hand)
+    return @br_lead if active?(hand) && @move == "D" && ychain?(hand) && @bt_dy > ~0.5
+    if btl? && active?(hand) && @move == "B"
+      return @bl_lead if hand.side == lead_side
+      return @br_lead if ychain?(hand)
+      return @bt_lead
+    super(hand)
+
+  -> move_law(hand)
+    # (a caught ball's reset dribble, mode 8: the catch stroke's law, aimed
+    # at the hand's own spot)
+    if active?(hand) && @move == "D" && ychain?(hand) && @bt_dy > ~0.5
+      return [@target[0], @target[1], @br_kv, @br_t, @br_tmax, @br_steer, ~0.0, ~1.0]
+    if btl? && active?(hand) && @move == "B"
+      return [@target[0], @target[1], @bl_kv, @bl_t, @bl_tmax, @bl_steer, ~0.0, ~1.0] if hand.side == lead_side
+      return [@target[0], @target[1], @br_kv, @br_t, @br_tmax, @br_steer, ~0.0, ~1.0] if ychain?(hand)
+      return [@target[0], @target[1], @bt_kv, @bt_t, @bt_tmax, @bt_steer, ~0.0, ~1.0]
+    super(hand)
+
+  # ILC: as the ball rises through the receiving hand's strike height after a
+  # pass, the miss against the spot it was sent to corrects the sender's next
+  # aim (per hand).
+  -> before(frame, ctl)
+    @ctl_now = ctl
+    super(frame, ctl)
+    if btl? && @bt_vref > ~0.0
+      [@right, @left].each ->(hand)
+        nm = ctl.track(hand.name).chunk_name
+        w = ~0.0
+        w = @bt_vref if nm.starts_with?("k_") || nm.starts_with?("r_m") || nm.starts_with?("r_a") || nm.starts_with?("r_p") || nm.starts_with?("r_f")
+        ctl.reflex.set_velocity_reference(@arm_mask[hand.side], w)
+    if btl? && @bt_plan > ~0.5
+      watch_contact(frame, ctl, @right)
+      watch_contact(frame, ctl, @left)
+    return nil if !btl? || @bt_ilc <= ~0.0 || @sent == nil
+    return nil if frame.at("ball_vel", 2) <= ~0.0
+    zc = @active.zh - @radius + @active.dz
+    return nil if frame.at("ball_pos", 2) < zc
+    s = @sent
+    @sent = nil
+    return nil if s[0] == @active.side
+    off = @ilc[s[0]]
+    ex = frame.at("ball_pos", 0) - s[1]
+    ey = frame.at("ball_pos", 1) - s[2]
+    m = @bt_ilc_max
+    @ilc[s[0]] = [DribbleV3Math.clamp(off[0] - @bt_ilc * ex, ~0.0 - m, m), DribbleV3Math.clamp(off[1] - @bt_ilc * ey, ~0.0 - m, m)]
+    nil

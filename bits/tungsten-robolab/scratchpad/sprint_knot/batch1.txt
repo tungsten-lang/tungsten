@@ -1,0 +1,17 @@
+omega_all_x1.5||omega_scale={"all": 1.5}|5.0
+omega_hip_x1.5||omega_scale={"hip_flex": 1.5}|5.0
+omega_knee_ankle_x1.5||omega_scale={"knee": 1.5, "ankle": 1.5, "toe": 1.5}|5.0
+fl_range_0.85_1.15||fl_range=[0.85, 1.15]|5.0
+fl_range_0.6_1.2||fl_range=[0.6, 1.2]|5.0
+fvmax_1.8||fvmax=1.8|5.0
+achilles_x0.5||tendon_scale={"achilles": 0.5}|5.0
+tendons_x3||tendon_scale={"achilles": 3.0, "quadriceps": 3.0}|5.0
+hipflex_x1.5||peaks={"hip_flex_pos": 150, "rf": 225}|5.0
+ham_glut_x1.5||peaks={"hip_flex_neg": 180, "ham": 300}|5.0
+plantar_x1.5||peaks={"ankle_pos": 225, "gas": 270}|5.0
+vasti_x1.5||peaks={"knee_neg": 345}|5.0
+legs_mass_x0.85||mass={"thigh": 5.95, "shin": 2.7625, "foot": 0.68, "toes": 0.17}|5.0
+timeconst_x0.5||timeconst=[0.005, 0.02]|5.0
+foot_friction_2||foot_friction=2.0|5.0
+contact_stiff||foot_solref=[0.005, 1]|5.0
+contact_soft||foot_solref=[0.05, 1]|5.0

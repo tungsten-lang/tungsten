@@ -1,0 +1,110 @@
+{"probe": {"mean": 1.2546875, "falls": 0, "n": 16, "legal_mark": 1.2546875}, "rollouts": 0, "gen": 0, "tag": "periodic", "wall": 3.0}
+{"gen": 1, "rollouts": 32, "f_mean": 1.17453125, "f_max": 1.297, "falls": 1, "wall": 7.5, "step": {"champ": 0.0022449944306392328}}
+{"gen": 2, "rollouts": 64, "f_mean": 1.128328125, "f_max": 1.295, "falls": 2, "wall": 12.6, "step": {"champ": 0.0036833488298736823}}
+{"gen": 3, "rollouts": 96, "f_mean": 1.23584375, "f_max": 1.294, "falls": 0, "wall": 17.4, "step": {"champ": 0.0045813278059706}}
+{"gen": 4, "rollouts": 128, "f_mean": 1.23315625, "f_max": 1.291, "falls": 0, "wall": 21.9, "step": {"champ": 0.005220653636475373}}
+{"gen": 5, "rollouts": 160, "f_mean": 1.2334375, "f_max": 1.283, "falls": 0, "wall": 27.2, "step": {"champ": 0.005854206125191764}}
+{"gen": 6, "rollouts": 192, "f_mean": 1.177953125, "f_max": 1.295, "falls": 1, "wall": 31.4, "step": {"champ": 0.00644695840690205}}
+{"gen": 7, "rollouts": 224, "f_mean": 1.1873046875, "f_max": 1.291, "falls": 1, "wall": 36.3, "step": {"champ": 0.007051844042116882}}
+{"gen": 8, "rollouts": 256, "f_mean": 1.2541562499999999, "f_max": 1.292, "falls": 0, "wall": 41.1, "step": {"champ": 0.00759912624558279}}
+{"gen": 9, "rollouts": 288, "f_mean": 1.2493125, "f_max": 1.3, "falls": 0, "wall": 45.6, "step": {"champ": 0.00811234061004117}}
+{"gen": 10, "rollouts": 320, "f_mean": 1.222875, "f_max": 1.294, "falls": 0, "wall": 50.9, "step": {"champ": 0.00864553843223561}}
+{"gen": 11, "rollouts": 352, "f_mean": 1.1640937500000001, "f_max": 1.297, "falls": 2, "wall": 55.7, "step": {"champ": 0.009152218571563585}}
+{"gen": 12, "rollouts": 384, "f_mean": 1.1995, "f_max": 1.295, "falls": 1, "wall": 60.8, "step": {"champ": 0.009620551197656495}}
+{"gen": 13, "rollouts": 416, "f_mean": 1.24515625, "f_max": 1.289, "falls": 0, "wall": 65.9, "step": {"champ": 0.010059076870808897}}
+{"probe": {"mean": 1.2553125, "falls": 0, "n": 16, "legal_mark": 1.2553125}, "rollouts": 416, "gen": 13, "tag": "periodic", "wall": 68.9}
+{"gen": 14, "rollouts": 448, "f_mean": 1.1902656249999999, "f_max": 1.289, "falls": 1, "wall": 74.2, "step": {"champ": 0.010493246216157485}}
+{"gen": 15, "rollouts": 480, "f_mean": 1.2694375, "f_max": 1.312, "falls": 0, "wall": 79.3, "step": {"champ": 0.010894181181409305}}
+{"gen": 16, "rollouts": 512, "f_mean": 1.24871875, "f_max": 1.307, "falls": 0, "wall": 84.3, "step": {"champ": 0.01121787212123616}}
+{"gen": 17, "rollouts": 544, "f_mean": 1.00965625, "f_max": 1.307, "falls": 5, "wall": 88.6, "step": {"champ": 0.011537997279068712}}
+{"gen": 18, "rollouts": 576, "f_mean": 1.2053281249999999, "f_max": 1.302, "falls": 1, "wall": 93.0, "step": {"champ": 0.011865907795615199}}
+{"gen": 19, "rollouts": 608, "f_mean": 1.1770078124999999, "f_max": 1.294, "falls": 1, "wall": 97.8, "step": {"champ": 0.01218586157353084}}
+{"gen": 20, "rollouts": 640, "f_mean": 1.1066953125, "f_max": 1.293, "falls": 3, "wall": 103.0, "step": {"champ": 0.012493662093381609}}
+{"gen": 21, "rollouts": 672, "f_mean": 1.11671875, "f_max": 1.305, "falls": 3, "wall": 108.0, "step": {"champ": 0.01279511302274728}}
+{"gen": 22, "rollouts": 704, "f_mean": 1.24496875, "f_max": 1.3, "falls": 0, "wall": 112.7, "step": {"champ": 0.013065223062499253}}
+{"gen": 23, "rollouts": 736, "f_mean": 1.148, "f_max": 1.3, "falls": 2, "wall": 117.7, "step": {"champ": 0.013319613639407687}}
+{"gen": 24, "rollouts": 768, "f_mean": 1.24271875, "f_max": 1.312, "falls": 0, "wall": 122.5, "step": {"champ": 0.013566792539214771}}
+{"gen": 25, "rollouts": 800, "f_mean": 1.2131015625, "f_max": 1.307, "falls": 1, "wall": 126.9, "step": {"champ": 0.013800822943991396}}
+{"probe": {"mean": 1.1577968749999998, "falls": 1, "n": 16, "legal_mark": 1.2516666666666665}, "rollouts": 800, "gen": 25, "tag": "periodic", "wall": 129.5}
+{"gen": 26, "rollouts": 832, "f_mean": 1.2030937499999999, "f_max": 1.294, "falls": 1, "wall": 134.1, "step": {"champ": 0.013949772648460418}}
+{"gen": 27, "rollouts": 864, "f_mean": 1.20125, "f_max": 1.308, "falls": 1, "wall": 138.7, "step": {"champ": 0.014078181195235843}}
+{"gen": 28, "rollouts": 896, "f_mean": 1.0641328125, "f_max": 1.312, "falls": 4, "wall": 143.1, "step": {"champ": 0.014209822028233928}}
+{"gen": 29, "rollouts": 928, "f_mean": 1.23709375, "f_max": 1.306, "falls": 0, "wall": 148.8, "step": {"champ": 0.014336398035332588}}
+{"gen": 30, "rollouts": 960, "f_mean": 1.1965703125, "f_max": 1.303, "falls": 1, "wall": 154.5, "step": {"champ": 0.014413236379679775}}
+{"gen": 31, "rollouts": 992, "f_mean": 1.1415390625000001, "f_max": 1.299, "falls": 2, "wall": 159.7, "step": {"champ": 0.014478175158453106}}
+{"gen": 32, "rollouts": 1024, "f_mean": 1.2137031249999999, "f_max": 1.31, "falls": 1, "wall": 164.8, "step": {"champ": 0.014553507281075925}}
+{"gen": 33, "rollouts": 1056, "f_mean": 1.2712812500000001, "f_max": 1.302, "falls": 0, "wall": 169.8, "step": {"champ": 0.014638111709087624}}
+{"gen": 34, "rollouts": 1088, "f_mean": 1.1405078125, "f_max": 1.297, "falls": 2, "wall": 175.0, "step": {"champ": 0.014743468516598674}}
+{"gen": 35, "rollouts": 1120, "f_mean": 1.2358125, "f_max": 1.305, "falls": 0, "wall": 179.9, "step": {"champ": 0.014861122199995382}}
+{"gen": 36, "rollouts": 1152, "f_mean": 1.25509375, "f_max": 1.297, "falls": 0, "wall": 184.8, "step": {"champ": 0.015008992064490044}}
+{"gen": 37, "rollouts": 1184, "f_mean": 1.26153125, "f_max": 1.295, "falls": 0, "wall": 190.6, "step": {"champ": 0.015174889359255768}}
+{"gen": 38, "rollouts": 1216, "f_mean": 1.1854453125, "f_max": 1.296, "falls": 1, "wall": 195.5, "step": {"champ": 0.01534929738500162}}
+{"probe": {"mean": 1.2451875000000001, "falls": 0, "n": 16, "legal_mark": 1.2451875000000001}, "rollouts": 1216, "gen": 38, "tag": "periodic", "wall": 198.3}
+{"gen": 39, "rollouts": 1248, "f_mean": 1.26765625, "f_max": 1.299, "falls": 0, "wall": 203.3, "step": {"champ": 0.015513361026616684}}
+{"gen": 40, "rollouts": 1280, "f_mean": 1.1258984375, "f_max": 1.306, "falls": 3, "wall": 208.8, "step": {"champ": 0.015668474302584633}}
+{"gen": 41, "rollouts": 1312, "f_mean": 1.25784375, "f_max": 1.296, "falls": 0, "wall": 214.8, "step": {"champ": 0.015804970000105254}}
+{"gen": 42, "rollouts": 1344, "f_mean": 1.26471875, "f_max": 1.3, "falls": 0, "wall": 219.9, "step": {"champ": 0.015959747374488454}}
+{"gen": 43, "rollouts": 1376, "f_mean": 1.1776796875, "f_max": 1.308, "falls": 2, "wall": 225.3, "step": {"champ": 0.01611184853905305}}
+{"gen": 44, "rollouts": 1408, "f_mean": 1.1594453125, "f_max": 1.308, "falls": 2, "wall": 230.2, "step": {"champ": 0.016225632614081165}}
+{"gen": 45, "rollouts": 1440, "f_mean": 1.054734375, "f_max": 1.306, "falls": 4, "wall": 236.2, "step": {"champ": 0.016315047310910716}}
+{"gen": 46, "rollouts": 1472, "f_mean": 1.2734999999999999, "f_max": 1.318, "falls": 0, "wall": 242.9, "step": {"champ": 0.016445482930282317}}
+{"gen": 47, "rollouts": 1504, "f_mean": 1.1600390625, "f_max": 1.307, "falls": 2, "wall": 249.0, "step": {"champ": 0.0165775437879741}}
+{"gen": 48, "rollouts": 1536, "f_mean": 1.2020312499999999, "f_max": 1.304, "falls": 1, "wall": 255.6, "step": {"champ": 0.016706752488059674}}
+{"gen": 49, "rollouts": 1568, "f_mean": 1.210203125, "f_max": 1.316, "falls": 1, "wall": 261.5, "step": {"champ": 0.016859105063252514}}
+{"gen": 50, "rollouts": 1600, "f_mean": 1.23228125, "f_max": 1.311, "falls": 0, "wall": 265.7, "step": {"champ": 0.01702552330634588}}
+{"probe": {"mean": 1.169875, "falls": 1, "n": 16, "legal_mark": 1.2642666666666666}, "rollouts": 1600, "gen": 50, "tag": "periodic", "wall": 268.0}
+{"gen": 51, "rollouts": 1632, "f_mean": 1.2828750000000002, "f_max": 1.315, "falls": 0, "wall": 273.0, "step": {"champ": 0.017224921500237307}}
+{"gen": 52, "rollouts": 1664, "f_mean": 1.263, "f_max": 1.303, "falls": 0, "wall": 277.5, "step": {"champ": 0.017396654272046938}}
+{"gen": 53, "rollouts": 1696, "f_mean": 0.9923046875, "f_max": 1.305, "falls": 6, "wall": 281.6, "step": {"champ": 0.01759119501617732}}
+{"gen": 54, "rollouts": 1728, "f_mean": 1.1309140625, "f_max": 1.315, "falls": 3, "wall": 284.9, "step": {"champ": 0.017763341016708022}}
+{"gen": 55, "rollouts": 1760, "f_mean": 1.27478125, "f_max": 1.313, "falls": 0, "wall": 289.7, "step": {"champ": 0.017966878892230493}}
+{"gen": 56, "rollouts": 1792, "f_mean": 1.1631640625, "f_max": 1.318, "falls": 2, "wall": 292.9, "step": {"champ": 0.018162447273273912}}
+{"gen": 57, "rollouts": 1824, "f_mean": 1.27803125, "f_max": 1.314, "falls": 0, "wall": 296.7, "step": {"champ": 0.018382318237118615}}
+{"gen": 58, "rollouts": 1856, "f_mean": 1.2585937500000002, "f_max": 1.315, "falls": 0, "wall": 300.5, "step": {"champ": 0.018596522901839236}}
+{"gen": 59, "rollouts": 1888, "f_mean": 1.019890625, "f_max": 1.314, "falls": 5, "wall": 303.4, "step": {"champ": 0.018814094922678676}}
+{"gen": 60, "rollouts": 1920, "f_mean": 1.1837187500000002, "f_max": 1.327, "falls": 2, "wall": 308.5, "step": {"champ": 0.019020365281408384}}
+{"gen": 61, "rollouts": 1952, "f_mean": 1.24840625, "f_max": 1.311, "falls": 0, "wall": 312.2, "step": {"champ": 0.019182870685468548}}
+{"gen": 62, "rollouts": 1984, "f_mean": 1.25684375, "f_max": 1.318, "falls": 0, "wall": 318.1, "step": {"champ": 0.01936012805756669}}
+{"gen": 63, "rollouts": 2016, "f_mean": 1.27203125, "f_max": 1.325, "falls": 0, "wall": 322.3, "step": {"champ": 0.01948658714628003}}
+{"probe": {"mean": 1.1666249999999998, "falls": 1, "n": 16, "legal_mark": 1.2606}, "rollouts": 2016, "gen": 63, "tag": "periodic", "wall": 324.8}
+{"gen": 64, "rollouts": 2048, "f_mean": 1.1948515625, "f_max": 1.311, "falls": 2, "wall": 330.9, "step": {"champ": 0.019613447561033937}}
+{"gen": 65, "rollouts": 2080, "f_mean": 1.0899609375, "f_max": 1.317, "falls": 4, "wall": 336.7, "step": {"champ": 0.019788114848483973}}
+{"gen": 66, "rollouts": 2112, "f_mean": 1.2348828125, "f_max": 1.322, "falls": 1, "wall": 341.2, "step": {"champ": 0.01997126265369876}}
+{"gen": 67, "rollouts": 2144, "f_mean": 1.27290625, "f_max": 1.328, "falls": 0, "wall": 346.2, "step": {"champ": 0.02017700563826672}}
+{"gen": 68, "rollouts": 2176, "f_mean": 1.283, "f_max": 1.331, "falls": 0, "wall": 352.4, "step": {"champ": 0.020373302207359174}}
+{"gen": 69, "rollouts": 2208, "f_mean": 1.236390625, "f_max": 1.319, "falls": 1, "wall": 358.2, "step": {"champ": 0.020563676411693366}}
+{"gen": 70, "rollouts": 2240, "f_mean": 1.215390625, "f_max": 1.334, "falls": 1, "wall": 363.3, "step": {"champ": 0.020759561021888372}}
+{"gen": 71, "rollouts": 2272, "f_mean": 1.22509375, "f_max": 1.323, "falls": 1, "wall": 368.7, "step": {"champ": 0.020975462220534452}}
+{"gen": 72, "rollouts": 2304, "f_mean": 1.229484375, "f_max": 1.326, "falls": 1, "wall": 374.7, "step": {"champ": 0.02116487253955981}}
+{"gen": 73, "rollouts": 2336, "f_mean": 1.1160390625, "f_max": 1.318, "falls": 3, "wall": 380.9, "step": {"champ": 0.021328594706389127}}
+{"gen": 74, "rollouts": 2368, "f_mean": 1.0502734375, "f_max": 1.311, "falls": 4, "wall": 385.5, "step": {"champ": 0.0214909414329699}}
+{"gen": 75, "rollouts": 2400, "f_mean": 1.1285390625, "f_max": 1.318, "falls": 3, "wall": 390.4, "step": {"champ": 0.02165474326821335}}
+{"probe": {"mean": 1.170671875, "falls": 1, "n": 16, "legal_mark": 1.265}, "rollouts": 2400, "gen": 75, "tag": "periodic", "wall": 392.8}
+{"gen": 76, "rollouts": 2432, "f_mean": 1.2303984374999999, "f_max": 1.314, "falls": 1, "wall": 398.3, "step": {"champ": 0.021803406353083213}}
+{"gen": 77, "rollouts": 2464, "f_mean": 1.20321875, "f_max": 1.315, "falls": 1, "wall": 403.2, "step": {"champ": 0.021983063896672247}}
+{"gen": 78, "rollouts": 2496, "f_mean": 1.27315625, "f_max": 1.319, "falls": 0, "wall": 408.1, "step": {"champ": 0.022155390386142594}}
+{"gen": 79, "rollouts": 2528, "f_mean": 1.1728125, "f_max": 1.328, "falls": 2, "wall": 415.1, "step": {"champ": 0.022324596981940528}}
+{"gen": 80, "rollouts": 2560, "f_mean": 1.1655078125, "f_max": 1.322, "falls": 2, "wall": 421.1, "step": {"champ": 0.022466144007998193}}
+{"gen": 81, "rollouts": 2592, "f_mean": 1.2294453125, "f_max": 1.328, "falls": 1, "wall": 427.2, "step": {"champ": 0.022598869013009185}}
+{"gen": 82, "rollouts": 2624, "f_mean": 1.0756562500000002, "f_max": 1.318, "falls": 4, "wall": 432.9, "step": {"champ": 0.02272855547397355}}
+{"gen": 83, "rollouts": 2656, "f_mean": 1.2196640625000001, "f_max": 1.322, "falls": 1, "wall": 438.3, "step": {"champ": 0.02284131334706932}}
+{"gen": 84, "rollouts": 2688, "f_mean": 1.1843984375, "f_max": 1.325, "falls": 2, "wall": 443.7, "step": {"champ": 0.022931512616600164}}
+{"gen": 85, "rollouts": 2720, "f_mean": 1.2734999999999999, "f_max": 1.318, "falls": 0, "wall": 448.5, "step": {"champ": 0.023018731223791816}}
+{"gen": 86, "rollouts": 2752, "f_mean": 0.9970625000000001, "f_max": 1.314, "falls": 6, "wall": 453.3, "step": {"champ": 0.023089075808588825}}
+{"gen": 87, "rollouts": 2784, "f_mean": 1.27840625, "f_max": 1.317, "falls": 0, "wall": 458.4, "step": {"champ": 0.02316506774009467}}
+{"gen": 88, "rollouts": 2816, "f_mean": 0.987328125, "f_max": 1.323, "falls": 6, "wall": 463.1, "step": {"champ": 0.023251518955721695}}
+{"probe": {"mean": 1.2764375, "falls": 0, "n": 16, "legal_mark": 1.2764375}, "rollouts": 2816, "gen": 88, "tag": "periodic", "wall": 466.2}
+{"gen": 89, "rollouts": 2848, "f_mean": 1.2747499999999998, "f_max": 1.322, "falls": 0, "wall": 472.0, "step": {"champ": 0.023348229331717724}}
+{"gen": 90, "rollouts": 2880, "f_mean": 1.119375, "f_max": 1.315, "falls": 3, "wall": 477.9, "step": {"champ": 0.023459211993678505}}
+{"gen": 91, "rollouts": 2912, "f_mean": 1.26790625, "f_max": 1.315, "falls": 0, "wall": 482.8, "step": {"champ": 0.023584716941792934}}
+{"gen": 92, "rollouts": 2944, "f_mean": 1.26875, "f_max": 1.315, "falls": 0, "wall": 488.4, "step": {"champ": 0.02370730120401527}}
+{"gen": 93, "rollouts": 2976, "f_mean": 1.2178828125, "f_max": 1.326, "falls": 1, "wall": 493.6, "step": {"champ": 0.023815604963505266}}
+{"gen": 94, "rollouts": 3008, "f_mean": 1.2820624999999999, "f_max": 1.326, "falls": 0, "wall": 498.5, "step": {"champ": 0.02394869933189913}}
+{"gen": 95, "rollouts": 3040, "f_mean": 1.08653125, "f_max": 1.312, "falls": 4, "wall": 504.1, "step": {"champ": 0.02408484282718996}}
+{"gen": 96, "rollouts": 3072, "f_mean": 1.28175, "f_max": 1.325, "falls": 0, "wall": 508.9, "step": {"champ": 0.024220528099996606}}
+{"gen": 97, "rollouts": 3104, "f_mean": 1.1712109375000002, "f_max": 1.321, "falls": 2, "wall": 514.7, "step": {"champ": 0.024380102511791502}}
+{"gen": 98, "rollouts": 3136, "f_mean": 1.2657500000000002, "f_max": 1.319, "falls": 0, "wall": 520.4, "step": {"champ": 0.024541591915809794}}
+{"gen": 99, "rollouts": 3168, "f_mean": 1.1781875, "f_max": 1.323, "falls": 2, "wall": 526.8, "step": {"champ": 0.0246985699955003}}
+{"gen": 100, "rollouts": 3200, "f_mean": 1.124671875, "f_max": 1.321, "falls": 3, "wall": 533.1, "step": {"champ": 0.024857704172077194}}
+{"probe": {"mean": 1.2473125, "falls": 0, "n": 16, "legal_mark": 1.2473125}, "rollouts": 3200, "gen": 100, "tag": "periodic", "wall": 535.8}
+{"probe": {"mean": 1.2473125, "falls": 0, "n": 16, "legal_mark": 1.2473125}, "rollouts": 3200, "gen": 100, "tag": "final", "wall": 538.2}

@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Robolab demos</title>
+<meta name="description" content="Muscle-driven simulated athletes: running, batting, dribbling, hurdling and the MyoChallenge tasks, controlled by eased muscle-contraction keyframes.">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+:root {
+  --bg: #F2F4F6; --surface: #FFFFFF; --ink: #17202A; --muted: #5A6774; --rule: #D6DCE2;
+  --accent: #C9432C; --ok: #2E7A4E; --ok-soft: #DDEFE4; --run: #9A6512; --run-soft: #F5EAD4;
+  --display: "Barlow Semi Condensed", "Arial Narrow", system-ui, sans-serif;
+  --body: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg: #0F151B; --surface: #172029; --ink: #E5EBF0; --muted: #94A2AF; --rule: #2A3642;
+    --accent: #EF6A4E; --ok: #62C28E; --ok-soft: #173327; --run: #E3AE52; --run-soft: #362A15;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 var(--body); padding-inline: 16px; padding-block: max(24px, env(safe-area-inset-top)) max(48px, env(safe-area-inset-bottom)); }
+.wrap { max-width: 1120px; margin: 0 auto; display: grid; gap: 36px; }
+h1, h2, h3 { font-family: var(--display); font-weight: 700; letter-spacing: 0.01em; margin: 0; line-height: 1.1; text-wrap: balance; }
+h1 { font-size: clamp(32px, 5.5vw, 48px); }
+h2 { font-size: clamp(22px, 3vw, 28px); }
+h3 { font-size: 20px; }
+p { margin: 0; max-width: 68ch; }
+.lede { color: var(--muted); font-size: 16px; }
+.eyebrow { font: 600 12px/1 var(--body); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+header, section { display: grid; gap: 14px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 16px; }
+.card { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; display: grid; grid-template-rows: auto 1fr; }
+.card video, .card img { width: 100%; max-width: 100%; aspect-ratio: 960 / 544; display: block; background: #0b0f13; object-fit: contain; }
+.card .txt { padding: 12px 14px 14px; display: grid; gap: 6px; align-content: start; }
+.card p { font-size: 14px; color: var(--muted); }
+.num { font: 500 13px/1.4 var(--mono); color: var(--ink); font-variant-numeric: tabular-nums; }
+.chip { justify-self: start; font: 600 11px/1 var(--body); letter-spacing: 0.08em; text-transform: uppercase; padding: 5px 8px; border-radius: 999px; }
+.chip.ok { color: var(--ok); background: var(--ok-soft); }
+.chip.wip { color: var(--run); background: var(--run-soft); }
+.how { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 16px 18px; display: grid; gap: 8px; }
+.how p { font-size: 14px; }
+footer { color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Robolab · muscle-driven simulated athletes · September 2026</div>
+    <h1>Robolab demos</h1>
+    <p class="lede">Every movement here is a sequence of muscle-contraction targets, eased from one keyframe to the next and switched on sensed events (a foot touching down, the bat coming round). A spinal-reflex layer turns the targets into muscle activations; nothing commands joint torques. The controllers are written in Tungsten and run the bodies in MuJoCo and MyoSuite. Colour on the bodies is muscle activation.</p>
+  </header>
+
+  <section>
+    <div class="eyebrow">Running</div>
+    <div class="grid">
+      <article class="card">
+        <video src="v/96ab07f400c9417908b9d724f861b11dabe8b026dc941af18c1489c69a0ada0d.mp4" controls muted loop playsinline preload="metadata"></video>
+        <div class="txt"><span class="chip ok">Champion</span><h3>Natural running from human keyframes</h3>
+          <p>Touchdown, mid-stance and toe-off poses from human gait data, eased through and latched on the feet. Within 9° of human running on average.</p>
+          <span class="num">3.4 m/s · 11 of 12 perturbed starts</span></div>
+      </article>
+      <article class="card">
+        <video src="v/197fd772b05b445ad78ebab9cb4f5457dd83ae24c2c1410a9b854e951ce30263.mp4" controls muted loop playsinline preload="metadata"></video>
+        <div class="txt"><span class="chip ok">Champion</span><h3>Sprint with elastic tendons</h3>
+          <p>Series-elastic Achilles and patellar tendons store the landing and return it at push-off, 48% of the ankle's positive work, as in people.</p>
+          <span class="num">5.00 m/s steady · 100 m in 22.6 s from standing</span></div>
+      </article>
+      <article class="card">
+        <video src="v/c1ebf75378029ff38a7c0addb64ed17ba3ac5ef3da3bba3ec91b2910c5c572b1.mp4" controls muted loop playsinline preload="metadata"></video>
+        <div class="txt"><span class="chip ok">Champion</span><h3>Sprint from starting blocks</h3>
+          <p>Set, rear push latched on block force, front push, drive phase, then a max-velocity cycle keyframed on Usain Bolt's mechanics (his pose ghosted over the runner). The body is a 95th-percentile adult: stronger, faster muscles and stiffer tendons.</p>
+          <span class="num">30 m in 6.72 s · 100 m in 19.08 s · 11 of 12 starts</span></div>
+      </article>
+      <article class="card">
+        <img src="run_natural_keyframes.png" alt="Human reference keyframes above; the runner at the same gait events below with the reference ghosted in blue" loading="lazy">
+        <div class="txt"><h3>Keyframes against the human reference</h3>
+          <p>Top: the human pose at each gait event. Bottom: the runner at the same event, with the reference ghosted in blue.</p></div>
+      </article>
+      <article class="card">
+        <video src="v/45c9f18915e671e483200fb546857507dcd007e64fe420d5b202cec94dde5af3.mp4" controls muted loop playsinline preload="metadata"></video>
+        <div class="txt"><span class="chip wip">In progress</span><h3>A hand-edited keyframe set</h3>
+          <p>A forefoot, long-reach running style set in the keyframe editor, with the target poses ghosted in blue. The body is still being re-tuned toward it.</p></div>
+      </article>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">Ball skills</div>
+    <div class="grid">
+      <article class="card">
+        <video src="v/3423c518df9a1e2012e2708293ebc6f103f5be0c5ba547a5fd0b41514d2a4c22.mp4" controls muted loop playsinline preload="metadata"></video>
+        <div class="txt"><span class="chip ok">Champion</span><h3>Baseball swing</h3>
+          <p>Leg lift and stride with the pitcher's delivery, then one continuous swing. Contact is planned: the bat is sent to the predicted ball with a set velocity instead of passing a via point, and it brakes before the wrist and hips reach their limits, so nothing stops between contact and the finish. The top hand lets go in the follow-through.</p>
+          <span class="num">13.1 m/s bat speed at contact · 18 of 18 pitches hit</span></div>
+      </article>
+      <article class="card">
+        <video src="v/b614f74e2b7eb63751e67eded88052c24f54df8fa3098ae1328ccdb482a700e7.mp4" controls muted loop playsinline preload="metadata"></video>
+        <div class="txt"><span class="chip wip">In progress</span><h3>Crossover dribble</h3>
+          <p>The hand rolls over the ball's outer top and pushes it low across; it bounces between the feet into the other hand. Back muscles do 4–7% of the work, down from 18%.</p>
+          <span class="num">84% per crossover · up to 15 in a row</span></div>
+      </article>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">Track and field</div>
+    <div class="grid">
+      <article class="card">
+        <video src="v/f0cb4e098a0d1387b378e8ba5c80107a0ddd056ddf654ce5ab3e3d54a6dba4d9.mp4" controls muted loop playsinline preload="metadata"></video>
+        <div class="txt"><span class="chip wip">In progress</span><h3>Hurdle at 0.762 m</h3>
+          <p>Lead knee driven up and extended over the bar; the trail leg lifted out to the side and turned out so its knee comes around. Clears the first hurdle on 4 of 8 starts, then falls.</p></div>
+      </article>
+      <article class="card">
+        <video src="v/52834e6eec181890a7ee57dd256fd119ef63d3040bea76a901a00a695296df72.mp4" controls muted loop playsinline preload="metadata"></video>
+        <div class="txt"><span class="chip wip">In progress</span><h3>High-school height, 0.991 m</h3>
+          <p>The lead leg clears; the trail leg catches. The run-up reaches about 4 m/s where a high-school hurdler arrives near 7, which is the limit being worked on.</p></div>
+      </article>
+      <article class="card">
+        <video src="v/6dbf9bd3898d7f7cf408f8ece51f470cad9e72603151756810af4636f696f059.mp4" controls muted loop playsinline preload="metadata"></video>
+        <div class="txt"><span class="chip ok">Champion</span><h3>Long jump</h3>
+          <p>Approach, lowered penultimate step, take-off on the board, hang and reach. Normal strength, human-calibrated muscle speeds.</p>
+          <span class="num">1.88 m legal</span></div>
+      </article>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">MyoChallenge · official MyoSuite bodies and scoring</div>
+    <div class="grid">
+      <article class="card">
+        <video src="v/ab5f4fdfb4bda3e60992ecfdefc106eacccd6d2b01b22a9416d5cd1c2966edc2.mp4" controls muted loop playsinline preload="metadata"></video>
+        <div class="txt"><span class="chip ok">Champion</span><h3>Table tennis, phase 2</h3>
+          <p>273 muscles. The pelvis slides to the ball and brakes after contact, so the arm isn't flung; the paddle face comes from an aim law. Five consecutive returns.</p>
+          <span class="num">phase 2: 33% of 300 serves · phase 1: 100% · winner 64%</span></div>
+      </article>
+      <article class="card">
+        <video src="v/a1f3ef73a33de5f03e8742715fbb5da69077213d44edc7bb6e4c5f511f3f4bd8.mp4" controls muted loop playsinline preload="metadata"></video>
+        <div class="txt"><span class="chip wip">In progress</span><h3>Table tennis backhand</h3>
+          <p>Serves to the backhand side. Its target posture is at the edge of the arm's reach, so the muscles sit near their limits with little room to correct, and the paddle turns in the grip by contact.</p>
+          <span class="num">23% of backhand serves · forehand 36–46%</span></div>
+      </article>
+      <article class="card">
+        <video src="v/19b25e3e397ebc84322edc3442d23832027acd1bbdfa31b239ab65d5a29cdc7d.mp4" controls muted loop playsinline preload="metadata"></video>
+        <div class="txt"><span class="chip wip">In progress</span><h3>Chop, flick and scoop</h3>
+          <p>With the ball's real spin physics switched on: a near-vertical chop moving down for backspin, a backhand wrist flick and a low forehand scoop for topspin. The chop's spin is right; the paddle is still too slow at contact for the strokes to land.</p></div>
+      </article>
+      <article class="card">
+        <video src="v/abcbaad7db15150f3d9718fd773038f8c0190cc70f1a37605376e1b95b06ef0b.mp4" controls muted loop playsinline preload="metadata"></video>
+        <div class="txt"><span class="chip ok">Champion</span><h3>Soccer penalty, phase 1</h3>
+          <p>290 muscles. Weight shift, step, plant beside the ball, kick latched on ball contact, aimed away from the keeper.</p>
+          <span class="num">100% phase 1 · phase 2 0% (winner 32%)</span></div>
+      </article>
+      <article class="card">
+        <video src="v/e68dfa99527bf06f9ecfbc99f628aadbcb5efa5506a25a0026fadcadac385f26.mp4" controls muted loop playsinline preload="metadata"></video>
+        <div class="txt"><span class="chip wip">In progress</span><h3>Standing on one leg</h3>
+          <p>The balance needed to walk up to a moving ball. The standing foot has almost no grip against twisting, so the pelvis turns on it and the body falls; co-contracting the hip's rotators holds it longer.</p>
+          <span class="num">1.96 s on average · the best starts hold the full 3 s</span></div>
+      </article>
+      <article class="card">
+        <video src="v/c9c5efc47c82c442d694dd03883e2a747a59e9c2c5b7c542dda9632bd1483258.mp4" controls muted loop playsinline preload="metadata"></video>
+        <div class="txt"><span class="chip ok">Champion</span><h3>Chase tag</h3>
+          <p>80-muscle legs. Each leg loops stance, push, lift and reach on its own sensed events; a step-turn loop turns toward an opponent behind.</p>
+          <span class="num">0.595 on 100 fresh seeds (phase 1) · winner 0.666</span></div>
+      </article>
+      <article class="card">
+        <video src="v/ec106542e4be1af20a981f00d29bfdaaa93e560f676d11167c84a99a946e2c64.mp4" controls muted loop playsinline preload="metadata"></video>
+        <div class="txt"><h3>Walking</h3>
+          <p>The same leg loops walking straight at 1.2–1.4 m/s, a human's preferred speed.</p></div>
+      </article>
+      <article class="card">
+        <video src="v/b313b53b389ed234f76c8bba6fa8c1c44977708bdb98a4d01453eaa3640b1c63.mp4" controls muted loop playsinline preload="metadata"></video>
+        <div class="txt"><span class="chip ok">Champion</span><h3>Relocate</h3>
+          <p>63 muscles. Reach, pinch, lift, and a controlled carry that holds the object inside the box before letting go. (MyoSuite's object–box contact is unreliable: the object sinks into the box's base in the clip.)</p>
+          <span class="num">genuine lifts 35% of 300 starts · official evaluation env 0.21 · winner 0.343</span></div>
+      </article>
+      <article class="card">
+        <video src="v/2ae633a07e86a2ec75aeee61ac7c3944d5c6636dac283b08a8e8dacb7e8a746e.mp4" controls muted loop playsinline preload="metadata"></video>
+        <div class="txt"><span class="chip wip">In progress</span><h3>Bimanual handover</h3>
+          <p>The arm holds the box out steadily at the handover point; the prosthetic hand still stalls about 6 cm below it.</p></div>
+      </article>
+    </div>
+  </section>
+
+  <section class="how">
+    <h2>How it works</h2>
+    <p>A movement is a list of chunks. Each chunk eases the muscles' contraction targets from where they are to a goal (a posture or a contraction vector), may pass through it without stopping, and ends on a sensed event. Corrections nudge the targets in real time (the bat toward the predicted ball, a foot toward where the body is heading). Every change is a challenger against a frozen champion on the same held-out starts, and takes over only if it wins a paired test.</p>
+  </section>
+
+  <footer>All videos are renders of our own simulations. Running reference data: Fukuchi, Fukuchi &amp; Duarte (2017), PeerJ 5:e3298, CC BY 4.0.</footer>
+</div>
+</body>
+</html>

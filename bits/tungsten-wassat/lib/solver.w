@@ -3254,8 +3254,11 @@ WASSAT_PROOF_DRAT = 2
 
 # Write a clause header into the arena: (clause index << 32) | length.
 # Native because a boxed `ci << 32` leaves the small-int range.
--> wassat_hdr_put(ar, at, ci, n) (i64[] i64 i64 i64)
-  ar[at] = (ci << 32) | n
+# Keep packed temporaries explicitly i64, including at inlined call sites:
+# typed array parameters alone still allowed BigInt allocation per word.
+fn wassat_hdr_put(ar, at, ci, n) (i64[] i64 i64 i64) i64
+  word = (ci << 32) | n ## i64
+  ar[at] = word
   0
 
 # Append one binary implication to a literal's block, relocating the block
@@ -3263,7 +3266,7 @@ WASSAT_PROOF_DRAT = 2
 # exhaustion — the caller repacks via rebuild_binaries. `oli` is already a
 # lit index; the packing lives here because a boxed `ci << 32` leaves the
 # small-int range.
--> wassat_bl_add(bd, blp, blst, li, ci, oli) (i64[] i64[] i64[] i64 i64 i64)
+fn wassat_bl_add(bd, blp, blst, li, ci, oli) (i64[] i64[] i64[] i64 i64 i64) i64
   d = li << 2
   n = bd[d + 1]
   if n >= bd[d + 2]
@@ -3276,12 +3279,14 @@ WASSAT_PROOF_DRAT = 2
     src = bd[d]
     q = 0
     while q < n
-      blp[top + q] = blp[src + q]
+      word = blp[src + q] ## i64
+      blp[top + q] = word
       q += 1
     bd[d] = top
     bd[d + 2] = need
     blst[0] = top + need
-  blp[bd[d] + n] = (ci << 32) | oli
+  word = (ci << 32) | oli ## i64
+  blp[bd[d] + n] = word
   bd[d + 1] = n + 1
   0
 
@@ -3289,7 +3294,7 @@ WASSAT_PROOF_DRAT = 2
 # (count, fill) with +1 slack per literal, mirroring wassat_ws_rebuild.
 # Always fits: 2*binaries + nlits is far below the pool's 2*ccap sizing.
 # Never allocates.
--> wassat_bl_rebuild(cm, alive, ar, bd, blp, blst, ncl, nlits) (i64[] i64[] i64[] i64[] i64[] i64[] i64 i64)
+fn wassat_bl_rebuild(cm, alive, ar, bd, blp, blst, ncl, nlits) (i64[] i64[] i64[] i64[] i64[] i64[] i64 i64) i64
   li = 0
   while li < nlits
     bd[(li << 2) + 1] = 0
@@ -3341,9 +3346,11 @@ WASSAT_PROOF_DRAT = 2
         lb = ((0 - bq) << 1) + 1
       da = la << 2
       db = lb << 2
-      blp[bd[da] + bd[da + 1]] = (ci << 32) | lb
+      wa = (ci << 32) | lb ## i64
+      wb = (ci << 32) | la ## i64
+      blp[bd[da] + bd[da + 1]] = wa
       bd[da + 1] = bd[da + 1] + 1
-      blp[bd[db] + bd[db + 1]] = (ci << 32) | la
+      blp[bd[db] + bd[db + 1]] = wb
       bd[db + 1] = bd[db + 1] + 1
     ci += 1
   0
@@ -4207,7 +4214,8 @@ WASSAT_PROOF_DRAT = 2
   pm[6] = visits
   0
 
--> wassat_propagate(ar, asg, lasg, lvl, rsn, phs, wd, wp, wst, tr, st, dl, bd, blp) (i64[] i8[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[] i64[])
+fn wassat_propagate(ar, asg, lasg, lvl, rsn, phs, wd, wp, wst, tr, st, dl, bd, blp) (i64[] i8[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[] i64[]) i64
+  word_mask = 4294967295 ## i64
   qhead = st[0]
   tsize = st[1]
   conflict = -1
@@ -4238,14 +4246,14 @@ WASSAT_PROOF_DRAT = 2
     blo = bd[bdi]
     b = blo + bd[bdi + 1] - 1
     while b >= blo && conflict < 0
-      pay = blp[b]
+      pay = blp[b] ## i64
       b -= 1
       # the other literal is stored as a LIT INDEX, so its truth is one byte
       # load with no sign handling — and consecutive entries are contiguous,
       # so these probes all issue together instead of chaining. Scanned
       # BACKWARD over an ascending fill: that is exactly the order the
       # prepend-built linked list produced (newest implication first).
-      oli = pay & 4294967295
+      oli = pay & word_mask ## i64
       ov = lasg[oli]
       if ov < 0
         conflict = pay >> 32
@@ -4275,10 +4283,10 @@ WASSAT_PROOF_DRAT = 2
     lo = wd[wdi]
     j = lo + wd[wdi + 1] - 1
     while j >= lo && conflict < 0 && bail == 0
-      e = wp[j]
+      e = wp[j] ## i64
       # entries carry the blocker's LIT-INDEX (always positive), so one
       # byte load answers "is the blocker true?" — no sign handling at all
-      bv = lasg[e & 4294967295]
+      bv = lasg[e & word_mask]
       # skip run of satisfied blockers in a store-free inner loop: nothing
       # in here writes memory, so the wp/lasg descriptor loads hoist out
       # instead of being re-fetched per entry (stores on the clause-inspect
@@ -4286,7 +4294,7 @@ WASSAT_PROOF_DRAT = 2
       while bv > 0 && j > lo
         j -= 1
         e = wp[j]
-        bv = lasg[e & 4294967295]
+        bv = lasg[e & word_mask]
       if bv > 0
         j -= 1
       else
@@ -4295,10 +4303,10 @@ WASSAT_PROOF_DRAT = 2
         # same cache line as the literals we are about to read. One
         # dependent miss per inspected clause instead of two, and no
         # clause-table descriptor on this path at all.
-        stx = e >> 32
-        hdr = ar[stx - 1]
-        n = hdr & 4294967295
-        cbase = stx << 32
+        stx = e >> 32 ## i64
+        hdr = ar[stx - 1] ## i64
+        n = hdr & word_mask ## i64
+        cbase = stx << 32 ## i64
         if ar[stx] == neg
           ar[stx] = ar[stx + 1]
           ar[stx + 1] = neg
@@ -4407,7 +4415,7 @@ WASSAT_PROOF_DRAT = 2
 # Append one watch entry to a literal's block, relocating the block to the
 # pool top (capacity doubling) when full. Sets wst[2] and returns -1 when
 # the pool itself is exhausted — the caller repacks via rebuild_watches.
--> wassat_ws_add(wd, wp, wst, li, stx, blk) (i64[] i64[] i64[] i64 i64 i64)
+fn wassat_ws_add(wd, wp, wst, li, stx, blk) (i64[] i64[] i64[] i64 i64 i64) i64
   d = li << 2
   n = wd[d + 1]
   if n >= wd[d + 2]
@@ -4420,14 +4428,16 @@ WASSAT_PROOF_DRAT = 2
     src = wd[d]
     q = 0
     while q < n
-      wp[top + q] = wp[src + q]
+      word = wp[src + q] ## i64
+      wp[top + q] = word
       q += 1
     wd[d] = top
     wd[d + 2] = need
     wst[0] = top + need
   bli = blk << 1
   bli = ((0 - blk) << 1) + 1 if blk < 0
-  wp[wd[d] + n] = (stx << 32) | bli
+  word = (stx << 32) | bli ## i64
+  wp[wd[d] + n] = word
   wd[d + 1] = n + 1
   0
 
@@ -4435,7 +4445,7 @@ WASSAT_PROOF_DRAT = 2
 # (count, fill) with +1 slack per literal so the first later append per
 # literal does not immediately relocate. Always fits: 2*live + nlits is
 # far below the pool's 4*ccap sizing. Never allocates.
--> wassat_ws_rebuild(cm, alive, ar, wd, wp, wst, ncl, nlits) (i64[] i64[] i64[] i64[] i64[] i64[] i64 i64)
+fn wassat_ws_rebuild(cm, alive, ar, wd, wp, wst, ncl, nlits) (i64[] i64[] i64[] i64[] i64[] i64[] i64 i64) i64
   li = 0
   while li < nlits
     wd[(li << 2) + 1] = 0
@@ -4489,9 +4499,11 @@ WASSAT_PROOF_DRAT = 2
         lb = ((0 - bq) << 1) + 1
       da = la << 2
       db = lb << 2
-      wp[wd[da] + wd[da + 1]] = (stx << 32) | lb
+      wa = (stx << 32) | lb ## i64
+      wb = (stx << 32) | la ## i64
+      wp[wd[da] + wd[da + 1]] = wa
       wd[da + 1] = wd[da + 1] + 1
-      wp[wd[db] + wd[db + 1]] = (stx << 32) | la
+      wp[wd[db] + wd[db + 1]] = wb
       wd[db + 1] = wd[db + 1] + 1
     ci += 1
   0

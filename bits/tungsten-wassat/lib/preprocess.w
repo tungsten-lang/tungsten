@@ -1703,7 +1703,9 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     # the portfolio artifact writer; on big trusted-path formulas every
     # downstream consumer reads the flat mirrors, and materializing 300k
     # lazy clauses here would undo the lazy-truth win — twice per run.
-    want_boxed = !@lazy_lits || @ncl <= 50000
+    # Proof callers construct the logical clause database from this mirror;
+    # its entries must stay aligned with gids even above the lazy threshold.
+    want_boxed = @proof_mode != WASSAT_PROOF_NONE || !@lazy_lits || @ncl <= 50000
     clauses = []
     gids = []
     ci = 0

@@ -9,7 +9,7 @@
 #   tools/snapshot_commit.sh --dry-run                # what would be committed
 #   tools/snapshot_commit.sh -m "robolab: <what changed>"
 #   tools/snapshot_commit.sh --only tools requirements README.md -m "..."   # just these paths (a partial snapshot;
-#       paths relative to the repo root or to bits/tungsten-robolab; directories are walked). Use it while agents are
+#       paths relative to bits/tungsten-robolab first, then to the repo root; directories are walked). Use it while agents are
 #       mid-edit in lib/ and playground/, so unverified sources do not ride along.
 #
 # Included: every file under bits/tungsten-robolab that is tracked or untracked
@@ -66,7 +66,8 @@ rel = "bits/tungsten-robolab"
 args = [a for a in sys.stdin.buffer.read().decode().split("\0") if a]
 found = []
 for a in args:
-    p = a if os.path.exists(a) else os.path.join(rel, a)
+    # bit-relative first: a bare README.md or .gitignore must mean the file of this bit, not of the repo root
+    p = os.path.join(rel, a) if os.path.exists(os.path.join(rel, a)) else a
     if os.path.isdir(p):
         for d, _, fs in os.walk(p):
             found += [os.path.join(d, f) for f in fs]

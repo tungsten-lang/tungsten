@@ -45,8 +45,8 @@ lineage bundle; the tensors now live in the archive release asset
 `evidence-2026-09-29`), not in this package. On 2026-09-26 three were below every listed rank in
 any ring (**9×9×9/482, 10×13×14/1150, 11×13×15/1363**) and seven were below every listed
 GF(2)-valid scheme while a rational scheme with even denominators was lower. fmm-schemes release
-1.1 (2026-09-27) has since lowered or tied five of them; `RECORD-HUNT-2026-09-26.md` has the
-current standing. These are apparent upper bounds under `RECORD_POLICY.md`, not optimality or
+1.1 (2026-09-27) has since lowered or tied four of the ten (13×14×16 and 9×14×16 lowered, 8×11×16
+and 11×15×15 tied); `RECORD-HUNT-2026-09-26.md` has the current standing. These are apparent upper bounds under `RECORD_POLICY.md`, not optimality or
 completed-novelty claims.
 
 ## Comparator pitfalls found

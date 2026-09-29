@@ -8,11 +8,13 @@ repository, tag `evidence-2026-09-29` (see "Where the tensors are"). This packag
 search and verification tools and this write-up.
 
 Every counted tensor was expanded against the complete matrix-multiplication tensor by the
-package gate. A stratified sample of 15 new records (three per way of finding them, including the
-largest margins) was also checked by the independent Ruby reconstruction
-(`tools/verify_tensor.rb`); all 15 were exact. Comparison ranks are comparison data, not
-certificates. Nothing here is an optimality claim or a completed novelty audit: under
-`RECORD_POLICY.md` these are **apparent** GF(2) upper bounds.
+package gate. The independent Ruby reconstruction (`tools/verify_tensor.rb`) then re-expanded
+all 691 record tensors held in the archive assets and all 661 chain heads of the four lineage
+bundles (the last tensor of each chain), plus the four live-fleet checkpoints: every one exact, at
+the indexed rank. The other 102 record tensors are certificates already committed under
+`tools/certificates/`. Comparison ranks are comparison data, not certificates. Nothing here is an
+optimality claim or a completed novelty audit: under `RECORD_POLICY.md` these are **apparent**
+GF(2) upper bounds.
 
 ## Standing on 2026-09-29
 
@@ -70,12 +72,13 @@ replayable public-seed lineage.
 ## The public tables moved under the search
 
 All four sources changed between 2026-09-26 and 2026-09-29. fmm-schemes release 1.1 lowered
-13x14x16 to 1806, 9x14x16 to 1260 and 11x15x16 to 1641 and tied 8x11x16 (906) and 11x15x15 (1547),
-which took away or tied five of the ten shapes in the first bundle of this campaign (kept in the
-archive as history). Re-walking each new public ternary release in GF(2) re-took some of them:
-9x11x13 at 836 (840 listed), 11x14x14 at 1372 (1373), 12x13x15 at 1462 (1464), 13x14x16 at 1805
-(1806), 11x16x16 at 1748 (1749). The comparison is a race: rescore against fresh tables before
-quoting any of these.
+13x14x16 to 1806, 9x14x16 to 1260 and 11x15x16 to 1641 and tied 8x11x16 (906) and 11x15x15 (1547).
+Four of the ten shapes in the first bundle of this campaign (13x14x16, 9x14x16, 8x11x16, 11x15x15)
+therefore stopped being GF(2)-valid records in that bundle's form; the bundle is kept in the archive
+as history. Two of the four have better witnesses from later chains (8x11x16 at 889, 13x14x16 at
+1763 from a July certificate); 9x14x16 (1260) and 11x15x15 (1547) only tie. One 200M-move walk
+from a fmm-schemes seed took 11x14x14 from 1373 to 1372 and 9x11x13 from 840 to 836. The
+comparison is a race: rescore against fresh tables before quoting any of these.
 
 ## Tools added
 
@@ -129,10 +132,12 @@ second pass at the 2026-09-29 revision replayed 979 targets into 835 exact tenso
 | `2026-09-29-gf2-closure-products.tar.gz` | The 203 closure-product records, each with its recipe |
 | `2026-07-block47-certificates.tar.gz` | The 186 July block-composition certificates removed from this tree in `47ad44dc5`, as `archived` rows re-derivable from git history |
 | `2026-09-26-gf2-public-ternary-walks.tar.gz` | The ten-shape bundle from the first day of the campaign, kept as history |
-| `2026-09-29-gf2-campaign-records.tar.gz` | `records.tsv` (every record shape and the asset that holds its tensor), scoreboards, comparator revisions, walk logs, seed manifests, campaign scripts, fleet checkpoints |
+| `2026-09-29-gf2-campaign-records.tar.gz` | `records.tsv` (every record shape and the asset that holds its tensor), scoreboards, comparator revisions, walk logs, seed manifests, campaign scripts, fleet checkpoints, and a snapshot of this package (`metaflip-tools-<commit>/`, without `tools/certificates/`) |
 
 Verify a bundle with `python3 tools/verify_gf2_lineage.py BUNDLE --source NAME=CLONE ...`; see the
-docstring for which rows re-derive from which source.
+docstring for which rows re-derive from which source. The snapshot in the campaign-records asset
+runs the verifier without this branch; `retained` rows additionally need a checkout that has
+`tools/certificates/` (`--repo-root`).
 
 ## Attribution
 

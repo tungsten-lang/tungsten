@@ -237,3 +237,101 @@ plan is ~45 %, it plays 30-33 %. 90 % needs pitch <= 4 deg, pad velocity <= 0.25
   One LS step to (pitch -4.5, yaw 15.3, z 1.21) (lt1: sh_elv 0.70 -> 0.43, elbow 1.28 -> 0.95, small others): ready pose (-6.8, 18.6, 1.189), hit rate 0.30 -> 0.83, but 1/60 solved: 47 of the 50
   hits went out (67 % wide: exit y-velocity -1.5 +- 1.7 m/s, the face yaw 4.5 +- 5.1 deg past the aim where the champion's forehand yaw follows to 0.3 +- 2.4). The lt regime needs the aim law re-calibrated as well
   (yaw follow, e_pad, the pad-velocity expectation) and its servo re-tuned: round 9's conclusion stands. Not pursued further in round 10.
+
+## 06:20 Backhand posture LS (bk + kk regime), and the RSM restarted on narrower ranges
+
+- Backhand contact-time errors in the bk=1, kk=1 (kk_m2 -0.48) regime on the first 60 backhand-pool serves (bhid_b0; TT_SAVE_LOG; r10-k): pitch error to the aim +11.7 +- 11.6 deg (the face 11.7 deg more
+  closed than its aim: the champion regime's +5.4), yaw error +1.2 +- 6.4, ball-minus-pad z +3.1 cm, hit 0.867, solved 16/60. Jacobian by finite differences (+0.06 rad on each of the 8 backhand posture
+  parameters, 60 serves each; per +0.1 rad pitch err / yaw err / dz (cm)): bh_elv -0.6/-0.5/-0.2, bh_sh_elv -3.7/0.0/+0.8, bh_sh_rot 0/0/0, bh_elbow -4.0/-4.5/-2.2, bh_pro_sup -0.3/0/0, bh_dev -3.6/-2.3/-1.4,
+  bh_wflex +1.9/+2.2/+0.3 (solved -22 points: very sensitive), bh_trunk_ar +0.6/+0.6/+0.1. LS steps (side_solve.py; targets pitch error +6 / +3, yaw 0, dz +1 cm; no wflex; max step 0.15): realised pitch change -4.9 / -7.5 deg
+  (predicted -5.7 / -8.7: the linear model holds) but hit 0.867 -> 0.767 / 0.717 and solved 16 -> 9 / 9 of 60: removing the face's closed bias moves the swing's arrival and the pad's place. Not adopted.
+- Contact time is not a separate driver: within speed terciles, success by early/late contact is flat (backhand 0.54 / 0.24 / 0.12 by speed tercile of hits; forehand 0.64 / 0.37 / 0.41).
+- rsm_bh2 (wide ranges) killed after its second run (corner 0: 3 % solved, hit 0.77); rsm_bh3 = same design with narrower ranges on the CMA-tuned backhand parameters (out/tt_r10/rsm_bh3, rsm_run3.sh, seed 21):
+  baseline (bk 1, kk_amp 0) 27 % solved, hit 0.82, score 0.442; run 0 25 %.
+
+## 07:15 Backhand RSM (rsm_bh3) and its validation on independent serves
+
+- `bash scratchpad/tt/rsm_run3.sh` (r10-k, champion params + `bk=1,kk=1,kk_amp=0,kk_m1=0.27,kk_m2=-0.48,lc=1,lt_arms=0`, seed 21, 17 factors, 32 runs + baseline, the first 100 backhand-pool serves, 3 workers, 06:07-07:00):
+  baseline (bk 1, no kick) score 0.442 solved 27 % hit 0.82; the 32 design runs: mean 0.306, sd 0.115, best 0.581 (run 21: 35 %); residual sd of the linear fit 0.086 (strongly nonlinear).
+  Main effects (score, +-se, t): **bh_gain (0.92 -> 1.05) -0.177 +- 0.042 (t -4.2)** (hit 0.80 at 0.92 against 0.53 at 1.05 over the 16 runs each), kk_amp (0 -> 1) +0.070 (t 1.8),
+  kk_v0 +0.037, kk_k -0.033, bh_dur -0.039, bh_p_n +0.034, bh_k_z -0.031, bh_k_n +0.032, the rest |t| < 0.8.
+  The three best runs (21, 27, 11) and run 5 share kk_amp 1, kk_k 0.3, kk_v0 5.2, bh_gain 0.92, bh_p_n 0.3.
+- Validation on 200 other backhand-pool serves (pool bh[100:300], seeds in scratchpad/tt/bh_val200.txt; scratchpad/tt/bhval1.sh; frozen r10-k for the challengers):
+  | run | solved | hit | vs champion (paired) |
+  | --- | --- | --- | --- |
+  | champion (bin/champions/tt_p2_300-...) | 49/200 = 24.5 % | 0.81 | |
+  | bk only (`bk=1`) | 50/200 = 25.0 % | 0.87 | |
+  | C1 = bk + kk_amp 1, kk_k 0.3, kk_v0 5.2, bh_gain 0.92, bh_p_n 0.3 | 62/200 = 31.0 % | 0.82 | +0.065 +- 0.039, p 0.065 |
+  | C2 = C1 with bh_gain 0.88 | 38/200 = 19.0 % | 0.80 | -0.055, p 0.96 (the gain has a peak near 0.92-0.95) |
+  | **RSM run 21 exactly** (params/myo_tt_p2_r10_bh_run21.txt) | **69/200 = 34.5 %** | 0.83 | **+0.100 +- 0.038, p 0.0073** (flips 40 / 20) |
+- Run 21's levels: kk_amp 1, kk_k 0.3, kk_v0 5.2, kk_m2 -0.65, bh_t_servo 0.30, lc16 -0.03, bh_k_z 1.6, bh_k_n 2.9, bh_p_z 0, bh_p_n 0.3, bh_dnz -0.03, box_x0 -1.3, box_x1 -0.8, bh_gain 0.92, bh_dur 0.47,
+  ns_k +0.05, k_vpm 0.5.
+- Forehand RSM (rsm_fh3, narrower ranges, seed 22) started 07:15 (scratchpad/tt/rsm_run5.sh).
+
+## 08:10 Forehand RSM (rsm_fh3)
+
+- `bash scratchpad/tt/rsm_run5.sh` (r10-k, champion params + `bk=1,kk=1,kk_amp=0,kk_m1=0.27,kk_m2=-0.48,lc=1,lt_arms=0`, seed 22, 17 factors on narrower ranges, 32 runs + baseline, the first 100 forehand-pool serves, 07:15-08:07):
+  baseline (bk 1, no kick) score 0.663, 41 % solved, hit 0.96; design runs mean 0.616 sd 0.097, best 0.750 (run 16: 48 %), residual sd of the linear fit 0.061.
+  Main effects (score, t): kk_m1 (0.1 -> 0.4) -0.106 (-3.6), t_lock (0.02 -> 0.035) -0.067 (-2.5), kk_amp (0 -> 1) -0.069 (-2.4), lc0 (-0.02 -> 0.02) -0.073 (-2.3), t_servo (0.26 -> 0.30) +0.059 (2.2),
+  kk_v0 (4.8 -> 5.4) -0.054 (-2.2), p_z (0 -> 0.3) -0.056 (-1.8), box_x1 (-0.75 -> -0.65) +0.038 (1.4), the rest |t| < 1.
+  The forehand does NOT want the kick: the 16 runs with the kick off average 0.657 (41.2 % solved, hit 0.92), the 16 with it on 0.575 (33.9 %); within the kick-on half a bigger kick (low kk_v0, low kk_m1) is better.
+  Best runs: 16 (0.750), 1 (0.727), 8 (0.706), 29 (0.701). Linear step (min_t 1): kick off, t_servo 0.30, lc0 -0.02, p_z 0, box_x1 -0.65, t_lock 0.02 (params/myo_tt_p2_r10_fh_step1.txt; half step: _step05).
+- Validation on 200 other forehand-pool serves (fh[100:300]) running: scratchpad/tt/fhval1.sh (champion, bk only, step1, step05, runs 16 and 1; frozen r10-n).
+- r10-k -> r10-l (side-specific kick: kk2_amp/kk2_k/kk2_v0) -> r10-m (ns_k2, k_vpm2, bh_box_dx may be negative; 30/30 serves identical to r10-k on run-21 params) -> r10-n (`bk` 2 = backhand only, 3 = forehand only).
+  playground/tt_r10_compose.py builds a candidate from a backhand RSM run and a forehand run/step file (the backhand's values go to its own names).
+
+## 08:35 Forehand validation on 200 independent serves (pool fh[100:300]; scratchpad/tt/fhval1.sh; r10-n)
+
+| run | solved of 200 | hit | vs champion (paired) |
+| --- | --- | --- | --- |
+| champion | 79 (39.5 %) | 0.840 | |
+| bk only | 85 (42.5 %) | 0.905 | +0.030, p 0.26 |
+| **linear step (step1: kick off, t_servo 0.30, lc0 -0.02, p_z 0, box_x1 -0.65, t_lock 0.02)** | **90 (45.0 %)** | 0.910 | +0.055 +- 0.039, p 0.097 |
+| half step | 89 (44.5 %) | 0.920 | +0.050, p 0.12 |
+| best design run 16 (in-sample 48 %) | 74 (37.0 %) | 0.905 | -0.025 (winner's curse) |
+| design run 1 (in-sample 46 %) | 80 (40.0 %) | 0.915 | +0.005 |
+
+- The forehand's design surface is flat (in-sample gains are winner's curse); the linear step generalises (+5.5 points, +2.5 over bk alone); the backhand's best design run generalised (+10 points), its consensus C1 less (+6.5).
+- Candidate c1 = backhand run 21 (its own names) + forehand step1, `bk 1`: params/myo_tt_p2_r10_c1.txt (playground/tt_r10_compose.py). Mixed-pool run mix_c1 (710000:710600) started 08:32.
+
+## 08:55 Candidate c1 on 600 fresh serves and the arena
+
+- mix_c1 (`scratchpad/tt/mixval.sh mix_c1 params/myo_tt_p2_r10_c1.txt`: `TT_ENV=P2 .venv-myo/bin/python playground/tt_eval.py --params params/myo_tt_p2_r10_c1.txt --controller bin/challengers/myo_tt_r10-n --seeds 710000:710600 --workers 3`),
+  paired against champ_710000: solved 213/600 = 35.5 % against 182 = 30.3 % (+0.052 +- 0.022, p 0.0132; flips 107 / 76), hit 0.858 against 0.802, forehand 118/290 = 40.7 % (+0.028, p 0.23; hit 0.807 -> 0.921),
+  backhand 95/310 = 30.6 % (+0.074, p 0.010). By crossing y: gains at -0.8..-0.4 (0.15 -> 0.29), -0.4..0 (0.36 -> 0.46) and > 0.8 (0.22 -> 0.30); < -0.8 worse (0.07 -> 0.02, hit 0.33 -> 0.20).
+  The forehand's extra hits are mostly rim hits (in-plane offset >= 9 cm: 17 % of its hits against 9 %, solved 7 %).
+- tt_fast.py check on c1 (98000-98005): 6/6 identical to the standard path.
+- BH stage 2 (rsm_bh4: 16 factors around run 21, fresh serves bh[400:500], 28 runs planned) stopped after 13 design runs: the baseline (run 21) scored 0.501 (28 %) and only run 9 (0.535) beat it: run 21 sits at a local peak.
+- Arena: `.venv-myo/bin/python playground/arena.py eval tt_p2_300 --params params/myo_tt_p2_r10_c1.txt --controller /Users/erik/tungsten/bits/tungsten-robolab/bin/challengers/myo_tt_r10-n --note "..." --promote`
+  started 08:55 (log out/tt_r10/arena_tt_p2_300_c1.log; pid 96596). The champion on these seeds: 99/300 = 33.0 % (forehand 60/156 = 38.5 %, backhand 39/144 = 27.1 % by the side rule; out/tt_r10/pools_98000.json).
+
+## 09:03 Arena result for c1
+
+- `arena.py eval tt_p2_300 --params params/myo_tt_p2_r10_c1.txt --controller .../bin/challengers/myo_tt_r10-n --promote` (427 s): **tt_p2_300 = 0.3533 +- 0.0542 (106/300)** against the champion's 0.3300 (99/300):
+  mean paired diff +0.0233, p = 0.257: "does not beat champion", NOT promoted (history line written by the arena). The champion's rate on these seeds (33.0 %) is 2.7 points above its 30.3 % / 30.0 % on the two fresh blocks
+  (710000:710600, 720000:720300), c1's (35.3 %) is at its fresh-block rate (35.5 %), so the arena's 300 seeds favour the champion by chance or by the selection that promoted it.
+- Next: mix2_c1 (720000:720300, c1 against the champion's 90/300), tt_p1 with the round-10 binary and P1 params, tt_p2_backhand with c1 (reported only): scratchpad/tt/final_checks1.sh (started 09:04).
+
+## 09:15 Final checks of c1, and c2 (backhand of c1, forehand = the champion's)
+
+- mix2_c1 (720000:720300, second fresh block): c1 110/300 = 36.7 % against the champion's 90/300 = 30.0 % (+0.067 +- 0.030, p 0.0174; flips 51 / 31), hit 0.88 against 0.81; forehand 38.8 % against 43.3 % (-0.045, p 0.86),
+  backhand 34.9 % against 19.3 % (+0.157, p < 0.001).
+- Over both blocks (900 serves): c1 323 (35.9 %) against 272 (30.2 %); backhand 153/476 = 32.1 % against 104/476 = 21.8 % (+10.3 points), forehand 170/424 = 40.1 % against 168/424 = 39.6 % (+0.5: the forehand's bk + step is neutral).
+- arena tt_p1 with the round-10 binary and params/myo_tt.txt: 50/50 = 100 % (no regression). arena tt_p2_backhand (131 serves) with c1: 35.9 % +- 8.3 against the champion's 22.9 %: WINS (+0.130, p 0.001); run without --promote.
+- c2 = params/myo_tt_p2_r10_c2.txt (playground/tt_r10_compose.py --bh out/tt_r10/rsm_bh3:21 --set bk=2): the backhand of run 21 and the champion's forehand exactly (`bk 2` guards the bounce tick on the backhand only; the forehand's
+  kick amplitude, ns_k, k_vpm, box, servo and lock values are the champion's): 30/30 forehand serves identical to the champion's on every metric (chk_c2fh). Rationale: the forehand change is worth nothing measurable, and a
+  candidate identical to the champion wherever it has no gain has fewer flips, so the paired sign-flip test has less noise. Blocks running: scratchpad/tt/c2_blocks.sh (mix_c2, mix2_c2), 09:15.
+
+## 09:20 c2 on both fresh blocks (identical forehand, backhand of run 21)
+
+- mix_c2 (710000:710600): 206/600 = 34.3 % against the champion's 182 (30.3 %): +0.040 +- 0.016, p 0.0069 (flips 56 / 32); forehand identical (0.379, +0.000), backhand 31.0 % against 23.2 % (+0.077, p 0.007); hit 0.803 (0.802).
+- mix2_c2 (720000:720300): 117/300 = 39.0 % against 90 (30.0 %): +0.090 +- 0.021, p < 0.0001 (flips 35 / 8); forehand identical, backhand 35.5 % against 19.3 % (+0.163).
+- Together 323/900 = 35.9 % against 272/900 = 30.2 % (+5.7 points), all of it from the backhand: 155/476 = 32.6 % against 104/476 = 21.8 % (+10.7 points). r10-o adds `ts_lead` / `bh_ts_lead` (servo start timed on the predicted contact);
+  scans scratchpad/tt/tsl.sh (forehand ts_lead 0.20 / 0.235 / 0.27 on fh_val200, backhand bh_ts_lead 0.20 / 0.23 / 0.26 on bh_val200, c2 params) started 09:20.
+
+## 09:35 Contact-timed starts do not help; y_switch with c2
+
+- Servo start timed on the predicted contact (r10-o, params c2, 200 independent pool serves each): forehand `ts_lead` 0.20 / 0.235 / 0.27: 64 / 74 / 74 solved against the champion's 79 (p 0.986 / 0.82 / 0.85 for "not better");
+  backhand `bh_ts_lead` 0.20 / 0.23 / 0.26: 55 / 62 / 65 against run 21's 69 (all worse). The absolute t_servo / bh_t_servo are at least as good.
+- Contact-timed backhand swing `bh_lead` (round 5's option) on run 21's backhand: 0.42 / 0.47 / 0.52: 1 / 8 / 16 of 200 solved against 69 (the whole backhand set is tuned for the absolute timing).
+- y_switch 0.25 / 0.4 with c2 on 710000:710600 (paired against mix_c2): scratchpad/tt/ysw.sh, started 09:35.

@@ -128,12 +128,44 @@ fl_collapse_sample = opts.flag?("collapse_sample")
 fl_collapse_dtrace = opts.flag?("collapse_dtrace")
 fl_collapse_recursion = opts.flag?("collapse_recursion")
 fl_speedscope  = opts.flag?("speedscope")
+fl_folded_in   = opts.get("folded")
+fl_sidemap_in  = opts.get("sidemap")
 fl_trace_event = opts.flag?("trace_event")
 fl_split       = opts.flag?("split")
 fl_files       = opts.args
 fl_passthrough = opts.passthrough
 
 # Mode dispatch.
+
+# Folded-input mode: render an already-collected folded profile
+# (`flame --folded prof.folded -o out.svg`, `--speedscope`, or the plain
+# analyzer breakdown). This is how profiles captured outside the internal
+# sampler reach the same views: `wasm/scripts/profile.mjs` samples a Tungsten
+# program compiled to WebAssembly under V8 (node or Chrome DevTools) and emits
+# folded text; --sidemap rewrites the compiler's `__wy_<hash>` symbols to real
+# names when the converter could not. Pure text — no compile, no profiling.
+if fl_folded_in != nil && fl_folded_in != ""
+  folded_in = read_file(fl_folded_in)
+  if folded_in == nil
+    << "tungsten flame --folded: cannot read " + fl_folded_in
+    exit(1)
+  if fl_sidemap_in != nil && fl_sidemap_in != ""
+    folded_in = Tungsten:Flame:Sidemap.rewrite_folded(folded_in, Tungsten:Flame:Sidemap.load(fl_sidemap_in))
+  in_name = Tungsten:Flame:Sampler.basename_noext(fl_folded_in)
+  if fl_speedscope
+    ss_path = (fl_output != "") ? fl_output : ("flame_" + in_name + ".speedscope.json")
+    write_file(ss_path, Tungsten:Flame:Speedscope.export(folded_in, in_name))
+    if !fl_silent
+      << "wrote speedscope profile: " + ss_path
+      << "open at https://www.speedscope.app"
+  elsif fl_output != ""
+    write_file(fl_output, Tungsten:Flame:FlameSvg.render(folded_in, "Flame Graph — " + in_name))
+    if !fl_silent
+      << "wrote flame graph: " + fl_output
+  folded_tmp = Tungsten:Flame:Sampler.mktmpdir + "/" + in_name + ".folded"
+  write_file(folded_tmp, folded_in)
+  Tungsten:Flame:FlameAnalyzer.display_metric(folded_tmp, fl_top, "general", fl_focus, !fl_silent, "samples")
+  exit(0)
 
 # Differential mode: compare two already-collected folded profiles
 # (`flame --diff BEFORE.folded AFTER.folded`). Operates purely on folded

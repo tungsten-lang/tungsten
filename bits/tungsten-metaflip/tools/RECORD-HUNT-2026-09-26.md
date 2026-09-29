@@ -25,7 +25,7 @@ commutative entries excluded), FastMatrixMultiplication `613599b` (2026-09-28) a
 | Class (best verified local witness per shape) | Shapes |
 |---|---:|
 | Below every listed rank in any ring | **733** |
-| Below every listed GF(2)-valid scheme, but a lower rational scheme exists (denominators 2, 4, 8) | **62** |
+| Below every listed GF(2)-valid scheme, but an equal or lower rank is listed for another ring or an unspecified field | **62** |
 | Tie the best listed rank | 1,413 |
 | Above it | 1,454 |
 | Shapes with a verified witness (of 5,456 with every side at most 32) | 3,662 |
@@ -35,6 +35,13 @@ lost, and 49 earlier records lowered further. 734 of the 795 have a side above 1
 ranks are mostly composition-based; a large margin there says the listed number is weak, not that
 the walk found something deep. Of the 235 new ones, 200 are below every listed rank (margin 1 to
 138, median 11; 60 by at most 3 and 30 by at least 50) and 35 are GF(2)-valid-only records.
+
+For 458 of the 733 no GF(2)-valid scheme is listed at all, so the any-ring rank (usually the Lille
+digest's, which gives a rank and format but not the field) is the only comparator. Of the 62
+GF(2)-valid-only records, 55 are matched or beaten by a rank the Lille digest lists for an
+unspecified field and 7 by a matmulcatalog scheme over another field. For 17 of the 62 a Perminov
+rational scheme sits at or below our rank; all 17 use even denominators (1/2, 1/4, 1/8), so none
+reduces mod 2.
 
 ### How the records were reached
 
@@ -111,16 +118,20 @@ second pass at the 2026-09-29 revision replayed 979 targets into 835 exact tenso
 
 ## Finite negatives
 
-- All 243 rational schemes in FastMatrixMultiplication use even denominators; none reduces to GF(2).
+- Of the 298 rational (`_Q`) schemes in FastMatrixMultiplication `613599b`, 278 use an even
+  denominator (1/2, 1/4, 1/8) and do not reduce to GF(2). The other 20 use odd denominators only
+  (19 small `serendipitous_base` shapes and 9x14x15/1182 with denominator 3) and would reduce mod 2,
+  but none is below our witness for its shape (ties, or ours is lower).
 - Walking 801 replayed matmulcatalog seeds that sit exactly at the listed rank dropped 38 of them
   (5%) at 40M moves; the rest tied.
-- Closure products of rank below about 2,000 never dropped under walks (0 of about 500); the drops
-  come from the larger ones.
-- Projection of the newest 118 parents produced 306 child shapes, of which 4 were worth walking:
-  the projection cascade has converged on this witness set.
+- Walks of closure products at 40M moves: 2 of 433 from seeds below rank 2,000 dropped (10x12x23
+  1718 to 1717, 3x27x31 1843 to 1842), against 27 of 261 from larger ones.
+- Projection of the newest 118 parents produced 345 children over 316 distinct shapes, of which 4
+  were worth walking: the projection cascade has converged on this witness set.
 - The live fleet's baseline packed walker also reaches 9x9x9/482 from Perminov's 486 within 90 s,
   so that basin does not favour the directed walker.
-- 162 alternative best-plus-one Perminov seeds produced only ties.
+- 162 alternative Perminov schemes for 123 shapes (the same rank as the best, or one or two above),
+  100M moves each: 3 walked down to the best public rank and none below it.
 
 ## Where the tensors are
 

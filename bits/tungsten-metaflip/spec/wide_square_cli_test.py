@@ -10,9 +10,9 @@ import time
 
 BINARY = Path(os.environ.get('METAFLIP_TEST_BINARY', Path(__file__).resolve().parents[1] / 'bin/metaflip')).resolve()
 RUNTIME = Path(__file__).resolve().parents[1] / 'lib/metaflip'
-REFERENCES = dict(zip(range(8, 17), (329, 486, 651, 873, 1068, 1402, 1725, 2058, 2209)))
+REFERENCES = dict(zip(range(8, 17), (329, 486, 651, 873, 1068, 1402, 1725, 2006, 2209)))
 # A known reference need not be distributable as a bundled starting tensor.
-DEFAULT_RANKS = {**REFERENCES, 13: 1426}
+DEFAULT_RANKS = {**REFERENCES, 13: 1426, 15: 2058}
 
 
 def read_blob(raw):

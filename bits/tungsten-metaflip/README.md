@@ -140,7 +140,9 @@ The 2026-09-12 large-square refresh adds 12 literal-distinct published
 certificates (1,316,280 bytes total), with exact upstream hashes and MIT
 attribution in `lib/metaflip/manifests/wide-seeds.tsv`. A normal launch needs
 no download and no Python. Default GF(2) reference ranks for 8..16 are
-**329, 486, 651, 873, 1068, 1426, 1725, 2058, 2209**. The TUI says
+**329, 486, 651, 873, 1068, 1402, 1725, 2006, 2209**. The 13x13 and
+15x15 references include verified local witnesses; clean-install bundled
+starts remain 1426 and 2058, respectively. The TUI says
 "reference", not "proved optimal"; characteristic-zero-only and commutative
 catalog results are not GF(2) tensor records.
 

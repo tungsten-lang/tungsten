@@ -47,6 +47,17 @@ does not redistribute the local witness or claim that 1402 is optimal.
 A resumed rank-1402 search therefore ties the reference rather than appearing
 to have newly beaten 1426 by 24. Reference and seed availability are separate.
 
+### 2026-09-13: 15x15 local reference update
+
+The user's live `15x15x15/best.txt` checkpoint was independently expanded by
+`MetaflipTensorVerifier.verify_text` and passes the full GF(2) tensor identity
+at rank **2006**, density 51,594. Verified snapshot SHA256:
+`ded6548917a92d1fa3d0430e69696ca9d05fc8ddea67f2c9c5995e05ee98c501`.
+The reference is now 2006; the packaged starting rank remains 2058. No new
+coefficient redistribution or public-world-record claim accompanies this
+display update. The live process retains its compiled reference until rebuilt
+and restarted; its checkpoint is not modified by this change.
+
 ## Sources and field exclusions
 
 - [Perminov catalog, pinned revision](https://github.com/dronperminov/FastMatrixMultiplication/tree/db560ca5811bc38d5a6d5c0a3ec4315937ceabce):

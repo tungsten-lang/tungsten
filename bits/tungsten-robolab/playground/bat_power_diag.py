@@ -67,9 +67,11 @@ def load_params(path):
 
 
 def rollout(job):
-    params, controller, seed, seconds = job
+    params, controller, seed, seconds = job[:4]
+    fresh = len(job) > 4 and job[4]
     os.environ.setdefault("BAT_BODY", "athlete")
-    os.environ["BAT_SEEDED_PITCH"] = "1"
+    os.environ["BAT_SEEDED_PITCH"] = "0" if fresh else "1"
+    os.environ["BAT_FRESH_PITCH"] = "1" if fresh else "0"
     sys.path.insert(0, HERE)
     sys.path.insert(0, os.path.join(HERE, "tasks"))
     import mujoco
@@ -166,10 +168,14 @@ def analyse(res, names, ranges, vm, t, labels, act, c, ex, dt):
                 continue
             lim = vm[i] / 0.3 * rng
             kk = int(np.argmax(np.abs(qd)))
+            cs = c[kw0 - 1:kc + 1, i]          # the pos muscle's contraction = the joint's place in its range (0..1)
+            margin = np.minimum(cs, 1.0 - cs)  # distance to the nearer end of the range, as a fraction of the range
             joints[j] = {"peak_radps": round(float(abs(qd[kk])), 2), "limit_radps": round(lim, 1),
                          "frac": round(float(abs(qd[kk])) / lim, 3),
                          "ms_before": round(1000 * (tc - t[kw0 + kk]), 0),
-                         "at_contact": round(float(qd[-1]), 2)}
+                         "at_contact": round(float(qd[-1]), 2),
+                         "min_margin": round(float(margin.min()), 3),
+                         "pct_near_limit": round(100.0 * float(np.mean(margin < 0.03)), 1)}
         r["joints"] = joints
         # activation over each group's power phase
         acts = {}
@@ -225,7 +231,8 @@ def summarise(rows):
                   for k in rows[0]["chain"]}
     js = rows[0]["joints"].keys()
     s["joints"] = {j: {f: mean([r["joints"][j][f] for r in rows if j in r["joints"]])
-                       for f in ("peak_radps", "limit_radps", "frac", "ms_before", "at_contact")} for j in js}
+                       for f in ("peak_radps", "limit_radps", "frac", "ms_before", "at_contact", "min_margin", "pct_near_limit")}
+                   for j in js}
     gs = [g for g in GROUPS if any(g in r["activation"] for r in rows)]
     s["activation"] = {g: {f: mean([r["activation"][g][f] for r in rows if g in r["activation"]])
                            for f in ("phase_ms", "pm_hi_pct", "ag_hi_pct", "pm_mean", "ant_mean", "cci", "peak")} for g in gs}
@@ -238,11 +245,13 @@ def print_summary(s, label=""):
     print("chain (peak, ms before contact, at contact):")
     for k, v in s["chain"].items():
         print(f"  {k:7s} {v['peak']:7.2f} {v['ms_before']:6.0f} ms  {v['at_contact']:7.2f}")
-    print("joints (peak rad/s, limit, frac, ms before contact, at contact):")
+    print("joints (peak rad/s, unloaded limit, frac, ms before contact, at contact, range margin: closest approach to an end of the "
+          "range as a fraction of it, % of the swing within 3 % of an end):")
     for j, v in s["joints"].items():
         if v["peak_radps"] is None:
             continue
-        print(f"  {j:18s} {v['peak_radps']:6.2f} / {v['limit_radps']:5.1f}  {v['frac']:.2f}  {v['ms_before']:6.0f} ms  {v['at_contact']:6.2f}")
+        print(f"  {j:18s} {v['peak_radps']:6.2f} / {v['limit_radps']:5.1f}  {v['frac']:.2f}  {v['ms_before']:6.0f} ms  {v['at_contact']:6.2f}"
+              f"   margin {v['min_margin']:.3f}  near limit {v['pct_near_limit']:4.1f} %")
     print("activation over each group's power phase (% of it at >= 0.9: prime movers of the net motion, the "
           "instantaneous agonist; pm mean, antagonist mean, CCI):")
     for g, v in s["activation"].items():
@@ -256,6 +265,7 @@ def main():
     ap.add_argument("--controller")
     ap.add_argument("--set", action="append", default=[], help="k=v param override (repeatable)")
     ap.add_argument("--seeds", default="0-17")
+    ap.add_argument("--fresh", action="store_true", help="each seed draws a fresh continuous pitch (BAT_FRESH_PITCH) instead of a grid pitch")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--seconds", type=float, default=7.8)
     ap.add_argument("--json")
@@ -269,7 +279,7 @@ def main():
     seeds = list(range(int(lo), int(hi or lo) + 1))
     ctl = os.path.abspath(a.controller) if a.controller else None
     with mp.get_context("spawn").Pool(a.workers) as pool:
-        per = pool.map(rollout, [(prm, ctl, s, a.seconds) for s in seeds])
+        per = pool.map(rollout, [(prm, ctl, s, a.seconds, a.fresh) for s in seeds])
     rows = [r for rs in per for r in rs]
     s = summarise(rows)
     print_summary(s, a.label or os.path.basename(a.params or "defaults"))

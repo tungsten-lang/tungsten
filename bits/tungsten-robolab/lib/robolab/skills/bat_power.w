@@ -81,6 +81,80 @@
     @train_drv = param("train_drv", ~1.0, ~0.0, ~1.5)
     @train_end = param("train_end", ~0.005, ~-0.03, ~0.03)
     @train_legs = param("train_legs", ~1.2, ~0.6, ~2.0)
+    # train_first: the first knot segment lasts this many times the others (the command's velocity step at the swing's
+    # start, from the load's velocity to the program's, spreads over a longer segment); 1 = evenly spaced knots
+    @train_first = param("train_first", ~1.0, ~0.5, ~4.0)
+    # train_legs_ease: the legs' swing easing is (1 - e) x the v5 hips swing's cubic_out (fastest at the swing's start, a
+    # velocity step from the plant's stillness) + e x a smoothstep (starts at rest); 0 = cubic_out
+    @train_legs_ease = param("train_legs_ease", ~0.0, ~0.0, ~1.0)
+    # train_ext: see train_disp (s; 0 = the program's table as it is)
+    @train_ext = param("train_ext", ~0.0, ~0.0, ~0.08)
+    @train_tc = ~0.0
+    # dshape (batting round 2): a time profile on the feed-forward drive per joint group (pelvis yaw, spine, shoulders, elbows,
+    # wrists): the drive of a knot segment is scaled by 1 + dshape_b * clip(sum_k dw[6 g + k] g_k(t), -1, 1) with g_k the same 6 gaussian
+    # bumps (30, 70, .. 230 ms after the fire, width 30 ms) as tres; all weights 0 = the drive as it is
+    @dshape_b = param("dshape_b", ~0.5, ~0.0, ~1.0)
+    @dshape_w = []
+    ti = 0
+    while ti < 30
+      @dshape_w.push(param("dw[ti]", ~0.0, ~-1.0, ~1.0))
+      ti += 1
+    @dshape_on = false
+    ti = 0
+    while ti < 30
+      @dshape_on = true if @dshape_w[ti] != ~0.0
+      ti += 1
+    @dshape_group = nil
+    # train_lead / train_dlead (s): the reflex targets (angle, rate, acceleration) / the feed-forward drive are read from the
+    # program this much later than the keyframe's time (positive: the targets lead the drive, or the drive the targets)
+    @train_lead = param("train_lead", ~0.0, ~-0.03, ~0.05)
+    @train_dlead = param("train_dlead", ~0.0, ~-0.03, ~0.05)
+    # taim (batting round 2): the first-order aim correction of the blended program (see aim_correction)
+    @taim_z = param("taim_z", ~0.0, ~-4.0, ~4.0)
+    @taim_x = param("taim_x", ~0.0, ~-4.0, ~4.0)
+    @taim_z0 = param("taim_z0", ~0.0, ~-0.1, ~0.1)
+    @taim_x0 = param("taim_x0", ~0.0, ~-0.1, ~0.1)
+    @taim_ramp = param("taim_ramp", ~0.8, ~0.2, ~1.2)
+    @taim_on = @taim_z != ~0.0 || @taim_x != ~0.0 || @taim_z0 != ~0.0 || @taim_x0 != ~0.0
+    @taim_c = nil
+    @taim_idx = nil
+    # tres (batting round 2): a zero-initialised temporal residual on the reflex target (see temporal_residual)
+    @tres_b = param("tres_b", ~0.1, ~0.0, ~0.3)
+    @tres_w = []
+    @tres_v = []
+    ti = 0
+    while ti < 24
+      @tres_w.push(param("tw[ti]", ~0.0, ~-1.0, ~1.0))
+      ti += 1
+    ti = 0
+    while ti < 16
+      @tres_v.push(param("tv[ti]", ~0.0, ~-1.0, ~1.0))
+      ti += 1
+    # tres_conv: also the five fixed convolutional features of the Codex residual (bat_residual.w) through the readout tc0-tc19
+    @tres_conv = param("tres_conv", ~0.0, ~0.0, ~1.0) > ~0.5
+    @tres_c = []
+    ti = 0
+    while ti < 20
+      @tres_c.push(param("tc[ti]", ~0.0, ~-1.0, ~1.0))
+      ti += 1
+    @tres_on = false
+    ti = 0
+    while ti < 24
+      @tres_on = true if @tres_w[ti] != ~0.0
+      ti += 1
+    ti = 0
+    while ti < 16
+      @tres_on = true if @tres_v[ti] != ~0.0
+      ti += 1
+    ti = 0
+    while ti < 20
+      @tres_on = true if @tres_conv && @tres_c[ti] != ~0.0
+      ti += 1
+    @tres_t0 = ~-1.0
+    @tres_fade = ~1.0
+    @tres_pf = nil
+    @tres_lp = [~0.0, ~0.0, ~0.0, ~0.0]
+    @conv = nil
     @trains = []
     @train_holds = {}
     @train_tick = 0
@@ -96,6 +170,8 @@
     @frame = frame
     setup_reciprocal(ctl) if @ri > ~0.0
     @prog_t0 = ~-1.0
+    @tres_t0 = ~-1.0
+    @tres_fade = ~1.0
     load_program if @prog > ~0.0 && @pj == nil
     self
 
@@ -140,7 +216,73 @@
     # @hips_fired: the program starts on the same tick)
     start_program(f, ctl) if @prog > ~0.0
     run_program(f, ctl) if @prog > ~0.0 && @prog_t0 >= ~0.0
+    temporal_residual(f, ctl) if @tres_on
     @prev_cmd = cmd.copy
+    nil
+
+  # tres (batting round 2): the Codex recipe's zero-initialised readout on fixed features, on the knots swing. Four
+  # joint-group offsets (spine rotation, spine flexion, both elbows, both wrists' flexion), each
+  #   bound * clip(sum_k tw[6 o + k] g_k(tau) + sum_p tv[4 o + p] x_p, -1, 1)   radians on the reflex target,
+  # g_k the 6 gaussian bumps (centres 30, 70, ..., 230 ms after the hips fire, width 30 ms: the temporal basis)
+  # and x = [1, height, crossing, speed] of the pitch (predicted when the hips fire, scaled to about +-1). All weights 0
+  # = the knots swing exactly. The offsets start through a 40 ms smoothstep window and stop at contact through a 30 ms
+  # fade (no step in the command).
+  -> temporal_residual(f, ctl)
+    if !@hips_fired
+      @tres_t0 = ~-1.0
+      @tres_fade = ~1.0
+      return nil
+    @tres_fade = @tres_fade - ctl.dt / ~0.03 if @contacted
+    return nil if @tres_fade <= ~0.0
+    p = predict(f)
+    if @tres_t0 < ~0.0
+      @tres_t0 = f.t
+      @tres_pf = [~1.0, clamp((p[2] - ~0.81) / ~0.19, ~-1.5, ~1.5), clamp((p[1] - @plate_x) / ~0.15, ~-1.5, ~1.5), clamp((plate_speed(f) - ~33.0) / ~3.3, ~-1.5, ~1.5)]
+      @tres_lp = [~0.0, ~0.0, ~0.0, ~0.0]
+      if @tres_conv
+        @conv = BatConvResidual.new if @conv == nil
+        @conv.reset
+    tau = f.t - @tres_t0
+    # (a 40 ms smoothstep window from the fire: a constant term does not step the command)
+    win = clamp(tau / ~0.04, ~0.0, ~1.0)
+    win = win * win * (~3.0 - ~2.0 * win)
+    cf = nil
+    if @tres_conv
+      @conv.update(f, [p[0] / ~0.25, (p[1] - @plate_x) / ~0.15, (p[2] - ~0.81) / ~0.19, f.torso_pitch, f.torso_pitch_rate / ~5.0, tau / ~0.25])
+      cf = @conv.feats
+    lp = ctl.dt / (~0.03 + ctl.dt)
+    out = [~0.0, ~0.0, ~0.0, ~0.0]
+    o = 0
+    while o < 4
+      acc = ~0.0
+      k = 0
+      while k < 6
+        dd = (tau - (~0.03 + ~0.04 * k)) / ~0.03
+        acc = acc + @tres_w[o * 6 + k] * Math.exp(~-0.5 * dd * dd)
+        k += 1
+      k = 0
+      while k < 4
+        acc = acc + @tres_v[o * 4 + k] * @tres_pf[k]
+        k += 1
+      if cf != nil
+        k = 0
+        while k < 5
+          acc = acc + @tres_c[o * 5 + k] * cf[k]
+          k += 1
+      @tres_lp[o] = @tres_lp[o] + (@tres_b * win * clamp(acc, ~-1.0, ~1.0) - @tres_lp[o]) * lp
+      out[o] = @tres_fade * @tres_lp[o]
+      o += 1
+    off = zeros
+    joint_offset(off, "spine_rot", out[0])
+    joint_offset(off, "spine_flex", out[1])
+    joint_offset(off, "l_elbow", out[2])
+    joint_offset(off, "r_elbow", out[2])
+    joint_offset(off, "l_wrist_flex", out[3])
+    joint_offset(off, "r_wrist_flex", out[3])
+    i = 0
+    while i < off.size
+      ctl.add_offset(i, off[i]) if off[i] != ~0.0
+      i += 1
     nil
 
   # A track's power phase: from its swing to the drive (the arms) or the end
@@ -265,7 +407,38 @@
     @poff = @pj.map ->(j) ~0.0
     @pw = (0...@pn).map ->(i) ~0.0
     @pw[0] = ~1.0
+    @taim_idx = @pj.map ->(j) taim_index(j)
+    @taim_c = @pj.map ->(j) ~0.0
+    @dshape_group = @pj.map ->(j) dshape_group_of(j)
     self
+
+  # dshape's joint groups: 0 pelvis yaw, 1 spine, 2 shoulders, 3 elbows, 4 wrists
+  -> dshape_group_of(name)
+    return 0 if name == "pelvis_yaw"
+    return 1 if name.starts_with?("spine")
+    return 3 if name.include?("elbow")
+    return 4 if name.include?("wrist")
+    2
+
+  # The drive's scale for program joint jj over a segment centred at train time tm (see dshape).
+  -> drive_factor(jj, tm)
+    g = @dshape_group[jj]
+    acc = ~0.0
+    k = 0
+    while k < 6
+      dd = (tm - (~0.03 + ~0.04 * k)) / ~0.03
+      acc = acc + @dshape_w[g * 6 + k] * Math.exp(~-0.5 * dd * dd)
+      k += 1
+    ~1.0 + @dshape_b * clamp(acc, ~-1.0, ~1.0)
+
+  # A program joint's place in the aim sensitivity vectors (BatPostures.k_joints), -1 if it has none.
+  -> taim_index(name)
+    names = BatPostures.k_joints
+    i = 0
+    while i < names.size
+      return i if names[i] == name
+      i += 1
+    -1
 
   # The command's joint angle (from the pos muscle's contraction).
   -> cmd_angle(ctl, k)
@@ -478,10 +651,22 @@
     while i < @pn
       q0 = q0 + @pw[i] * @pqs[i * @pj.size + k]
       i += 1
-    a = prog_disp(k, t - h)
-    b = prog_disp(k, t)
-    c = prog_disp(k, t + h)
+    a = train_disp(k, t - h)
+    b = train_disp(k, t)
+    c = train_disp(k, t + h)
     [q0 + b, (c - a) / (~2.0 * h), (c - ~2.0 * b + a) / (h * h)]
+
+  # train_ext (batting round 2): the program's table after its own contact time is the CMA rollout WITH the ball's
+  # impact in it (the wrists' rates collapse within 10 ms), which a swing that meets the ball a little later than the
+  # program did would take as its target and brake against. With train_ext > 0 the plan past the program's contact
+  # is instead the pre-contact motion carried on at its contact velocity, slowing linearly to rest over train_ext s.
+  -> train_disp(k, t)
+    return prog_disp(k, t) if @train_ext <= ~0.0 || t <= @train_tc
+    tc = @train_tc
+    vc = (prog_disp(k, tc) - prog_disp(k, tc - ~0.01)) / ~0.01
+    d = t - tc
+    d = @train_ext if d > @train_ext
+    prog_disp(k, tc) + vc * d - ~0.5 * vc * d * d / @train_ext
 
   # The program's mean excitation of joint k over (ta, tb]: [pos, neg].
   # TODO: the bounds were t0/t1; a compiled local named `t<N>` collides with
@@ -502,6 +687,52 @@
     return [~0.0, ~0.0] if m == 0
     [sp / m, sn / m]
 
+  # taim (batting round 2): the first-order aim correction of the blended program. The programs
+  # are blended by inverse squared distance to the predicted crossing (program_weights), which is exact at a
+  # program's own pitch but has no slope there: between programs the blend's swing meets the pitch's location
+  # only as well as sum_i w_i loc_i does, and the miss (perpendicular to the swing plane at contact) is
+  # linear in that location mismatch (measured: bat_rep aim_n = -3.2 + 152 dz + 35 dx cm, R2 0.88 on 144 fresh
+  # pitches, dz, dx in m). The correction is the v5 aim law's own machinery, applied to the mismatch:
+  #   joint offset_j = taim_z * k_z_u[j] * (z_pred - z_blend + taim_z0) + taim_x * k_x_u[j] * (x_pred - x_blend + taim_x0)
+  # (k_z_u, k_x_u: the joint change that moves the sweet spot 1 m up / out with the top hand on the handle,
+  # BatPostures), ramped in over taim_ramp of the train by a quintic smoothstep and added to every keyframe's
+  # angle, rate and acceleration. At a program's own pitch the mismatch is 0, so the program is unchanged there.
+  -> aim_correction(p)
+    xe = ~0.0
+    ze = ~0.0
+    i = 0
+    while i < @pn
+      xe = xe + @pw[i] * @plocs[3 * i]
+      ze = ze + @pw[i] * @plocs[3 * i + 1]
+      i += 1
+    dz = p[2] - ze + @taim_z0
+    dx = (p[1] - @plate_x) - xe + @taim_x0
+    kz = BatPostures.k_z_u
+    kx = BatPostures.k_x_u
+    j = 0
+    while j < @pj.size
+      idx = @taim_idx[j]
+      @taim_c[j] = ~0.0
+      @taim_c[j] = @taim_z * kz[idx] * dz + @taim_x * kx[idx] * dx if idx >= 0
+      j += 1
+    nil
+
+  # The correction's ramp at train time t: [w, dw/dt, d2w/dt2] (quintic smoothstep over taim_ramp x the train).
+  -> aim_ramp(t, big_t)
+    tr = @taim_ramp * big_t
+    s = t / tr
+    return [~1.0, ~0.0, ~0.0] if s >= ~1.0
+    return [~0.0, ~0.0, ~0.0] if s <= ~0.0
+    s2 = s * s
+    om = ~1.0 - s
+    [s2 * s * (~10.0 - ~15.0 * s + ~6.0 * s2), ~30.0 * s2 * om * om / tr, ~60.0 * s * om * (~1.0 - ~2.0 * s) / (tr * tr)]
+
+  -> corrected_state(jj, st, ramp, mu)
+    c = @taim_c[jj]
+    return st if c == ~0.0
+    q = clamp(st[0] + ramp[0] * c, mu.qmin + ~0.02, mu.qmax - ~0.02)
+    [q, st[1] + ramp[1] * c, st[2] + ramp[2] * c]
+
   -> update_train(f)
     return nil if @hips_fired
     p = predict(f)
@@ -515,8 +746,15 @@
       tc = tc + @pw[i] * @ptcs[i]
       i += 1
     big_t = tc - @train_end
+    @train_tc = tc
     n = @train_n
     dk = big_t / n
+    tf = dk
+    dr = dk
+    if @train_first != ~1.0 && n > 1
+      tf = dk * @train_first
+      dr = (big_t - tf) / (n - 1)
+    aim_correction(p) if @taim_on
     @trains.each ->(tr)
       inside = tr[1]
       chunks = tr[2]
@@ -527,17 +765,26 @@
       k = 1
       while k <= n
         t = dk * k
+        t_prev = t - dk
+        dur = dk
+        if @train_first != ~1.0 && n > 1
+          t = tf + dr * (k - 1)
+          t_prev = ~0.0
+          t_prev = t - dr if k > 1
+          dur = t - t_prev
         goal = zeros
         vel = zeros
         acc = zeros
         drv = zeros
+        ramp = aim_ramp(t, big_t)
         jj = 0
         while jj < @pj.size
           pp = @ppos[jj]
           if inside.key?(pp)
             nn = @pneg[jj]
-            st = train_state(jj, t)
+            st = train_state(jj, t + @train_lead)
             mu = body.muscle(pp)
+            st = corrected_state(jj, st, ramp, mu) if @taim_on
             r = mu.qmax - mu.qmin
             goal[pp] = mu.contraction_at(st[0]) - hold[pp]
             goal[nn] = body.muscle(nn).contraction_at(st[0]) - hold[nn]
@@ -545,9 +792,11 @@
             vel[nn] = ~0.0 - st[1] / r
             acc[pp] = st[2] / r
             acc[nn] = ~0.0 - st[2] / r
-            d = train_drive(jj, t - dk, t)
-            drv[pp] = @train_drv * d[0]
-            drv[nn] = @train_drv * d[1]
+            d = train_drive(jj, t_prev + @train_dlead, t + @train_dlead)
+            dg = ~1.0
+            dg = drive_factor(jj, ~0.5 * (t_prev + t)) if @dshape_on
+            drv[pp] = @train_drv * d[0] * dg
+            drv[nn] = @train_drv * d[1] * dg
           jj += 1
         # the legs on the v5 hips swing's easing (cubic_out), stretched over
         # the whole train (train_legs x its length) so they are still moving
@@ -558,6 +807,13 @@
         e0 = ~1.0 - om * om * om
         e1 = ~3.0 * om * om / dl
         e2 = ~-6.0 * om / (dl * dl)
+        if @train_legs_ease > ~0.0
+          le = @train_legs_ease
+          e0 = (~1.0 - le) * e0 + le * sl * sl * (~3.0 - ~2.0 * sl)
+          e1 = (~1.0 - le) * e1 + le * ~6.0 * sl * om / dl
+          sm2 = ~0.0
+          sm2 = (~6.0 - ~12.0 * sl) / (dl * dl) if sl < ~1.0
+          e2 = (~1.0 - le) * e2 + le * sm2
         BatPostures.leg_joints.each ->(j)
           [body.pos_index(j), body.neg_index(j)].each ->(m)
             if inside.key?(m)
@@ -565,7 +821,7 @@
               vel[m] = (lb[m] - la[m]) * e1
               acc[m] = (lb[m] - la[m]) * e2
         ch = chunks[k - 1]
-        ch.retime(dk)
+        ch.retime(dur)
         ch.to(goal)
         ch.knot(vel, acc)
         ch.drive(drv)

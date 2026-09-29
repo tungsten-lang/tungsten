@@ -1,0 +1,12 @@
+[
+ {
+  "trial": "bat_power_fresh_rep",
+  "time": "2026-09-29 09:58:29",
+  "note": "IN-REPRESENTATION (not an oracle; contraction knots + reflexes ON, ri 1; knot content distilled from the ideal-control programs at the 6 grid locations): S1 (v6 knots + taim aim correction + arm reflex damping 0 + earlier fire) plus a second as-run sep-CMA on 32 tunables (taim gains 5.30 / 3.38 with z0 +0.073 m; train_lead +18 ms: the reflex targets read 18 ms ahead of the drive; prog_trig 0.2412 (fire 11 ms earlier than v6); train 28 ms longer with the plan carried on past the program's contact (train_ext 13 ms); first knot segment 1.19x; arm damping 0), objective = bat speed - aim-plane and contact-position-along-the-bat margins - bat_flow beyond 2.5, 16 FRESH training pitches (seeds 3009-3143, never an arena seed); params/bat_r2_s2b_g5.txt, controller bin/challengers/bat_r2-t5. Validation on 48 other fresh pitches (seeds 4000-4047): 48/48 hits, 26.37 m/s, bat_flow 2.44 (max 2.91). NOTE: this swing launches the balls at a mean 49 deg (fair 29 of 48, quality 0.21): the speed was bought with a steep uppercut; the balanced S2c swing (params/bat_r2_s2c.txt) prices that. (Note text corrected 29 Sep 14:10: the command-line note had quoted the S2 values for the taim gains, prog_trig, train_end and train_first.)"
+ },
+ {
+  "trial": "bat_power_fresh_rep_clean",
+  "time": "2026-09-29 09:59:15",
+  "note": "IN-REPRESENTATION (not an oracle), hitch-free guard twin (bat_flow <= 3.0 on every pitch): the same S2b swing as bat_power_fresh_rep (v6 knots + taim + as-run sep-CMA on fresh practice pitches: arm reflex damping 0, fire 11 ms earlier, targets read 18 ms ahead of the drive, train 28 ms longer with the plan carried on past the program's contact); params/bat_r2_s2b_g5.txt, controller bin/challengers/bat_r2-t5. Launch angle 49 deg on average (quality 0.21). (Note text corrected 29 Sep 14:10.)"
+ }
+]

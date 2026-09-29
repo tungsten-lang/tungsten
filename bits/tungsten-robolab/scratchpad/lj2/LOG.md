@@ -180,7 +180,7 @@ Landing search land_a4 (62 hand-overs) stopped by me (pid 88001) after generatio
 Full rollouts with it (params/long_jump_v4_gear_a4_l60.txt = A4c + rob_a4_final + scratchpad/lj2/land_a4_g60.txt; c3): 16 arena starts 2.323 (8 legal; foul 3, somersault 1, fell-in-run 4), 32 fresh 3.934 (27 legal), 96 fresh 3.483 (72 legal; fell-in-run 9, foul 8, somersault 7), mean of the legal 4.65:
 identical counts to generation 40 (2.309 / 3.913 / 3.463): the landing is done; what is left is (1) the fell-in-run class (9 %, the take-off's invalid states: late stride phase, trunk forward, free foot behind), (2) mm-scale fouls (8 %), (3) somersaults after weak short flights (7 %).
 
-## 2026-09-29 13:10 check mark, greedy feedback, one-start landing
+## 2026-09-29 12:55 check mark, greedy feedback, one-start landing
 
 Check-mark shift (j_board_shift -d, ik_gap0 +d: the planner aims d further back, the program sees the same gap error), params a4_l60 on the UNUSED seeds 7001-7096: d 0: 3.150 (66 legal), 0.02: 3.488 (74; foul 4, somersault 6, fell-in-run 12), 0.03: 3.625 (77), 0.04: 3.495 (74; foul 0, somersault 12, fell 10), 0.05: 3.411 (72). Plateau 0.02-0.05, peak 0.03: d = 0.03 (j_board_shift 1.08, ik_gap0 1.876777).
 Greedy swing-foot lag feedback (greedyfb --channels kf on the a4 captures, 94 train / 31 held out; out/long_jump_limits/fb_a4.txt): NOT adopted: the harness objective's weak-take-off penalty (vzmin 2.55) is v3's and the A family's vz is 1.5-2.4; the invalid count did not fall (train 3 -> 5, held out 2 -> 2).
@@ -188,13 +188,13 @@ The harness-invalid class (8 of 125 a4 captures): no cheap detector: swing toe h
 One-start landing: hand-overs of the nom1 take-off program (nominal + 4 execution-noise variants, D_board 4.79-4.89, vz 2.95-3.13; out/long_jump_limits/hogp_handover.npz), the recorded chunk landing (sand 0.716 s after the hand-over; official 5.065, the HEAD marks, the jumper falls back) as the base;
  scratchpad/lj2/land_gp1.sh: landing search, tg 0.73, nk 34, h 0.08, 4 workers (5-min load 24), 25k sims -> out/long_jump_limits/land_gp1.txt.
 
-## 2026-09-29 13:25 ARENA: long_jump_v4_p95 (one start) 5.065 -> 5.166 m (promoted)
+## 2026-09-29 13:00 ARENA: long_jump_v4_p95 (one start) 5.065 -> 5.166 m (promoted)
 
 params/long_jump_v4_gear_nom2.txt = params/long_jump_v4_gear_nom1.txt + out/long_jump_limits/land_gp1.txt (landing search land_gp1.sh: 180 generations / 24.3k sims, harness marks 5.00-5.15 over the nominal hand-over + 4 variants), controller long_jump_run-c3.
 Official 5.166 m (effective 5.363 from the foot, ballistic 5.049), take-off vx 6.177 vz 3.030, foot 0.197 m behind the line. The chunk landing's 5.065 was a HEAD mark (fell back); the table lands 0.117 m beyond the ballistic point.
 A check-mark scan (j_board_shift + 0.05 / 0.10 / 0.15: the aim closer to the line) breaks the run: the one-start program has no gap knots and is tuned to the nominal pen state; the moved aim changes that state (somersaults). Not used.
 
-## 2026-09-29 13:45 runner at 30-45 m check marks (approach only, 17 starts None + 401-416, 0 falls in every cell; scratchpad/lj2/runner_table.sh, controller c3)
+## 2026-09-29 13:15 runner at 30-45 m check marks (approach only, 17 starts None + 401-416, 0 falls in every cell; scratchpad/lj2/runner_table.sh, controller c3)
 
 last-5-m speed v5 (m/s):  check mark | RunRI p2a (round 2) | two-gear, switch 6.5 (as frozen) | two-gear, switch 5.0
   30 m: 6.02 | 6.02 | 6.22
@@ -206,9 +206,86 @@ last-5-m speed v5 (m/s):  check mark | RunRI p2a (round 2) | two-gear, switch 6.
 What-ifs so far (ideal-control, nominal A2_m495 state, 60k evals, init lean_m495_ideal, foot-based D, lmax -1.5): base 5.033 (vx 6.56, vz 2.70) | whole body +0.4 m/s at the penultimate touchdown: 5.222 (vx 6.42, vz 3.09) | +0.8 m/s: 5.517 (vx 6.67, vz 3.18):
  ~0.5-0.6 m of ballistic distance per m/s (L's fit: 0.88 x t_air ~ 0.7). The first strength what-if did nothing (the v4 jump tasks' `strength` is 1.0 and ROBOLAB_LJ_STRENGTH does not reach them): replaced by ROBOLAB_LJ_FSCALE (peak isometric force of every muscle), whatif2.sh.
 
-## 2026-09-29 13:55 landing stage 2 (all 117 hand-overs); strength what-ifs; 16-start with the check-mark shift
+## 2026-09-29 13:52 landing stage 2 (all 117 hand-overs); strength what-ifs; 16-start with the check-mark shift
 
 Landing stage 2 (land_a4b.sh, 4 workers while the 5-min load was < 30; stopped at generation 30 when the load rose to 51/37): x0 (the gen-60 table on all 117 hand-overs of the 125 a4 captures, both sides) mean 4.314, min -4.62, 3-4 of 117 rolling over;
  after 30 generations best 3.597 -> 3.621, mean 4.463 -> 4.479 (snapshot scratchpad/lj2/land_a4b_g30.txt). The landing of the gen-60 table already generalised (only 3 of 117 hand-overs roll over): the somersaults of the full rollouts (6-7 %) are mostly not the landing table's.
 Strength what-ifs (ROBOLAB_LJ_FSCALE, muscle peak force x1.2 / x1.4, nominal A2_m495 state, 60k evals from the same init): D 5.427 (vz 3.31) / 5.910 (vz 3.57, vx 6.57) against 5.033: +0.39 m per +20 % force, +0.88 m per +40 %.
 16 arena starts with the shifted check mark (a4_l60 + j_board_shift 1.08 / ik_gap0 1.876777, chosen on the unused seeds 7001-7096): 12 of 16 legal, mean 3.375 (legal mean 4.50; fell-in-run 404, somersault 407 and 416, foul 409 by 27 mm); the champion is 2.1452.
+
+## 2026-09-29 14:02 ARENA with the final take-off, landing stage 2 and the 0.03 check-mark shift (params/long_jump_v4_gear_final1.txt, controller c3)
+
+params/long_jump_v4_gear_final1.txt = A4c (runner + planner) + rob_a4_final (take-off) + land_a4b_g30 (landing, stage 2 over 117 hand-overs) + j_board_shift 1.08 / ik_gap0 1.876777 (the 0.03 m check-mark shift, chosen on 7001-7096: 3.15 -> 3.73).
+On the unused seeds 7001-7096 (96 starts): 3.726 m, 79 legal (fell-in-run 12, somersault 4, foul 1), mean of the legal 4.53.
+ long_jump_v4_p95_robust (16 arena starts): 3.412 (12 legal: fell-in-run 1, somersault 2, foul 1; legal mean 4.549) vs 2.1452: PROMOTED.
+ long_jump_v4_p95_robust32 (32 fresh): 4.501 (31 legal, 1 somersault; legal mean 4.646) vs 3.9231: PROMOTED.
+ long_jump_v4_p95_robust96 (96 fresh): 3.659 (76 legal: foul 2, somersault 6, fell-in-run 12; legal mean 4.622) vs the champion M1's 3.4708: mean +0.19 but the paired test does not confirm it: NOT promoted (the 96-start champion stays M1).
+The 12 fell-in-run starts of 7001-7096 do not fall in an approach-only run without steering (runup.py: 0 of 12) and the chunk take-off does not save them either (1 of 12 legal): the failure is the approach state the steering hands the take-off (late stride phase), not the take-off program;
+ other steering settings give more harness-invalid or foul starts (scan_steer2.sh on 125 captures each, fixed program: w 0.4 / max 0.2: legal mean 3.74; 0.5 / 0.15 / n 6: 3.48; 0.3 / 0.25: 3.47; current 0.5 / 0.25 / 5: 4.02).
+
+## 2026-09-29 14:15 board-relative one-start ideal and its landing (in progress)
+
+Board-relative ideal for the nominal start of the A1 approach (ROBOLAB_LJ_BOARD=1, margin 3 cm, init gp_nom_ideal; scratchpad/lj2/ideal_gp_board.sh, 150k evals): D 5.161 from the foot with the foot 0.035 m behind the line (5.126 from the line; the foot-based ideal was 5.219 with the foot 0.17 behind = 5.05 from the line);
+ distilled out/long_jump_limits/ik_gp_bd.txt; params/long_jump_v4_gear_nom3.txt = A1 + ik_gp_bd: full rollout with the CHUNK landing: official 5.209 m (feet mark, no fall-back; ballistic 5.035, take-off vx 5.94 vz 3.26 at 28.7 deg, contact 0.091 s, foot 0.07 m behind the line, front 2.2 cm behind it).
+ hand-overs (nominal + 4 variants) D_board 4.92-4.99; recorded landing sand at 0.760 s; landing search scratchpad/lj2/land_gp3.sh (tg 0.773, 2 workers) -> out/long_jump_limits/land_gp3.txt.
+
+## 2026-09-29 14:30 ARENA: long_jump_v4_p95 (one start) 5.166 -> 5.209 m (promoted)
+
+params/long_jump_v4_gear_nom3.txt (= A1 + ik_gp_bd, the board-relative ideal of the nominal start; chunk landing) with c3: official 5.209 m, ballistic 5.035, take-off vx 5.94 vz 3.26 (28.7 deg), contact 0.091 s, foot 0.070 m behind the line (front 2.2 cm behind it), the feet mark (no fall-back).
+A learned landing table for it (land_gp3.sh, 180 generations, harness marks 5.17-5.22 over the nominal + 4 variants; params nom4) marks 5.167 in the full rollout: the chunk landing's feet mark (0.17 m beyond the ballistic point) is better; nom4 not entered.
+
+## 2026-09-29 14:32 aim and gap-reference scans, steering scans, final2 (aim 1.04) and its arena results
+
+Aim scan (final1 params, `--set j_board_shift=x`, controller c3, unused seeds 7001-7096; ik_gap0 unchanged at 1.876777, the program sees the same gap error): 0.96: 3.528 (74 legal; fell-in-run 18, somersault 4) | 1.00: 3.759 (79; fell 16, somersault 1) | 1.04: 3.958 (83; fell 9, somersault 4) | 1.08 (final1): 3.726 (79; fell 12, somersault 4, foul 1). Files scratchpad/lj2/eval_aim_*.json.
+Gap-reference scan (final2, `--set ik_gap0=x`): 1.80: 1.347 (56 fouls: the program plants too far forward) | 1.877: 3.958 | 1.95: 3.461 (74 legal, 14 somersaults). Not moved.
+Independent check of the aim on the never-used seeds 9129-9224: final1 4.050 (84 legal: fell 7, foul 2, somersault 3, legal mean 4.629) -> final2 4.230 (87 legal: fell 6, somersault 3, legal mean 4.667, median 4.72).
+final2 = final1 + j_board_shift 1.04 (params/long_jump_v4_gear_final2.txt, made by scratchpad/lj2/assemble.py).
+Steering scans on 125 captured approaches each (scan_steer3.sh, scan_steer4.sh: A4c + one override, captured with c3 over seeds 8001-8128, harness_eval of the fixed program rob_a4_final; the chosen 0.5/0.25/5/0.75 has legal mean 4.02):
+ j_st_max 0.30: valid 114, fouls 9, legal mean 3.717 | 0.35: valid 110, fouls 11, 3.509 | 0.40: valid 110, fouls 6, 3.676 | j_st_rnd 0.9: valid 109, fouls 3, 3.757 | 1.0: valid 92, 3.175. More authority makes the gap sd smaller (0.131/0.117/0.110 against 0.15) and the program's legal mean smaller: rejected.
+Hop-height steering (scan_zk.sh): j_st_zk 1.0/2.0 with no hip steering leaves the plant offset at -1.01 x gap error (gap sd 0.48 m); with j_st_w 0.3 added 0.215: not a steering handle. Not used.
+ARENA (c3, task long_jump_v4_p95b): long_jump_v4_p95_robust96: final2 3.724 (77 legal) vs the champion M1 3.471: +0.253, p = 0.039, PROMOTED (14:29:44). long_jump_v4_p95_robust32: final2 4.514 (31 legal) vs the champion final1 4.501: +0.013, p = 0.32, not promoted.
+ long_jump_v4_p95_robust (16 arena starts): final2 is worse than the champion final1 (2.887, 10 legal, against 3.412, 12 legal: starts 406 and 415 changed from legal to failed), not entered.
+
+## 2026-09-29 16:07 (resumed after the second watchdog stall, ~14:45-16:06; nothing of mine was running, everything below was checked against the files)
+
+State: lib/robolab/skills/long_jump_run.w md5 a40a3113 (the c3 build's source), bin/robolab_long_jump_run == bin/challengers/long_jump_run-c3 (identical md5 c6da27b4); playground/long_jump_limits.py (mixed-plant-side patch present, single-side runs identical to HEAD); no long-jump process of mine alive (ps). 5-min load 11-13: 4 workers.
+Replay of EVERY long-jump champion with the c3 controller and the champion's frozen params (scratchpad/lj2/replay_all.py, out scratchpad/lj2/replay_all_c3.txt, 4 workers): all 17 replay per seed bit-identically (differ 0 of every start):
+ long_jump_p95 5.1220, long_jump_p95_robust 4.6305 (16), _robust32 4.5458, _robust96 4.3173, long_jump_elite 4.0750, _elite2 4.0090, _elite2_robust 3.9358, _elite2_robust32 3.5915, _elite_robust 3.6566, long_jump_robust 1.8518, long_jump_v2 2.4730,
+ long_jump_v4_elite2 0.0 and _robust 0.4499 (the seeded baselines), long_jump_v4_p95 5.2090, _robust 3.4118, _robust32 4.5012, _robust96 3.7238.
+ik_fmin 1.5 (the plant-touchdown latch at 1.5 body weights, round 2's v3 champion has it; the a4 take-off program was trained with the default): params/long_jump_v4_gear_final3.txt = final2 + ik_fmin 1.5.
+ seeds 7001-7096: 3.958 -> 3.997 (84 legal; fell 9 -> 7) | 9129-9224: 4.230 -> 4.269 (88 legal; fell 6 -> 5) | arena 96: 3.724 -> 3.850 (80 legal: fell 8, somersault 6, foul 2; 5 starts differ, 4 up 1 down, p = 0.123) | arena 32 and 16: no start changes (4.514, 2.887).
+ Pooled over the 336 starts: +0.059 m with 12 starts changed (8 up, 4 down): not significant, NOT adopted (kept as a params file, not entered in the arena: with 5 differing starts the paired test cannot reach p < 0.05).
+final1 against final2 (the aim shift 1.08 -> 1.04), paired over the same starts (final1: the champions' scores and out/long_jump_run/round3_final1_per_start.txt; final2: scratchpad/lj2/eval_final2_*.json, eval_aim_1.04.json, eval_aim1.04_9129.json):
+ 16 arena starts: 3.412 -> 2.887 (p 0.42) | 32: 4.501 -> 4.514 (0.65) | 96: 3.659 -> 3.724 (0.54) | 7001-7096 (where the aim was chosen): 3.726 -> 3.958 (0.17) | 9129-9224: 4.050 -> 4.230 (0.125).
+ All 336: 3.858 -> 3.971 (+0.112, p = 0.12); the 240 starts not used for the choice: 3.911 -> 3.976 (+0.064, p = 0.44). The aim shift is within noise; final2 is the 96 champion by path (it beat M1, p 0.039, where final1 did not, p 0.14), final1 the 16 and 32 champion.
+Next: a 480-start sample of never-used seeds (10001-10480) for final2, final1 and final3 (scratchpad/lj2/big_eval.sh, one evaluation at a time, 4 workers, started 16:10, wrapper pid in scratchpad/lj2/big_eval.pid), the honest robust number.
+
+## 2026-09-29 16:20 480 never-used starts (seeds 10001-10480) for the final programs (scratchpad/lj2/big_eval.sh, controller c3, task long_jump_v4_p95b, 4 workers; 3.5 min each; summaries by scratchpad/lj2/big_report.py)
+
+The 5-min load average touched 30.4 for a moment while these 4 workers ran (other agents' jobs; 1-min load 30-50): the evaluation had already finished when the guard fired, nothing else was launched.
+ final2: mean 4.001 (+-0.144, 95 %), legal 415 of 480 (86.5 %): fell in the run 54, somersault 10, foul 1; legal marks mean 4.628, median 4.698, p10 4.378, p90 4.833, best 4.922 (one 1.09 m hop); per block of 96: 3.84 3.87 4.15 4.12 4.03.
+ final1: mean 3.956 (+-0.146), legal 411 (85.6 %): fell 49, somersault 17, foul 3; legal marks median 4.680, p10 4.336, p90 4.823, best 4.928.
+ final3 (final2 + ik_fmin 1.5): mean 4.026 (+-0.140), legal 419 (87.3 %): fell 45, somersault 15, foul 1; legal marks median 4.697, p10 4.367, p90 4.833, best 4.922.
+ Paired (sign-flip): final2 - final1 +0.045 m (428 starts differ, p = 0.42); final3 - final2 +0.025 (16 differ, 9 up 7 down, p = 0.10); final3 - final1 +0.070 (p = 0.20). All within noise; per-start files scratchpad/lj2/eval_big_*.json/.txt.
+ So the honest robust number is 4.0 m over fresh starts (86.5 % legal, one start in nine falls in the run, one in fifty somersaults); if the fell-in-run starts jumped like the rest the mean would be the legal mean 4.63 m.
+ final1 without the check-mark shift (`--set j_board_shift=1.11,ik_gap0=1.8467767930952128`, the original A4c values; eval_big_shift0.json): mean 3.603 (+-0.175), legal 371 (77.3 %): fell in the run 47, somersault 14, FOUL 48; legal marks median 4.729, p10 4.404, p90 4.855, best 4.946.
+ final1 - shift0: +0.353 m (418 starts differ, 183 up 235 down, sign-flip p < 0.0001): the 0.03 m check-mark shift is real (fouls 48 -> 3; the legal marks give up 0.04 m); it was chosen on 7001-7096 where it gave 3.15 -> 3.73, on these never-used starts it gives +0.35.
+
+## 2026-09-29 16:29 replays of round 2's superseded v4 champions with the round-3 build (scratchpad/lj2/replay_round2.py, 2 workers; out scratchpad/lj2/replay_round2_c3.txt)
+
+Each round-2 champion's frozen params (playground/arena/params/long_jump_v4_p95*-20260929-05*/09* copies) run with its FROZEN binary (b20x / b20w) and with the c3 build, every start of its trial:
+ long_jump_v4_p95 (1 start) 4.9450 | 4.9450 | long_jump_v4_p95_robust (16) 2.1452 | 2.1452 | _robust32 2.8508 | 2.8508 | _robust96 2.5355 | 2.5355: 145 starts, 0 differ. Together with the 17 current champions (16:07 entry) every older params file still replays exactly.
+
+## 2026-09-29 16:37 steering horizon j_st_n with the FROZEN final2 program (scratchpad/lj2/scan_stn.sh: `--set j_st_n=k`, controller c3, 4 workers; files scratchpad/lj2/eval_stn_*.json; the recheck of all 17 champions finished OK at 16:32, recheck_final.txt)
+
+j_st_n = how many steps before the penultimate touchdown the planner starts nudging (5 = final2). Seeds 7001-7096 (the selection set; final2: 3.958, fell 9, foul 0, somersault 4, 83 legal):
+ j_st_n 6: 3.476 (72 legal: fell 3, foul 9, somersault 12) | 7: 2.801 (58: fell 17, foul 18, somersault 3) | 8: 2.316 (48: fell 29, foul 13, somersault 6) | 10: 1.513 (32: fell 43, foul 13, somersault 8).
+ j_st_n 6 on 9033-9128: 3.542 (73 legal: fell 3, foul 10, somersault 10; final2 3.724: fell 11, foul 2, somersault 6) and on 9129-9224: 3.873 (80 legal: fell 3, foul 7, somersault 6; final2 4.230: fell 6, foul 0, somersault 3).
+ The stumbles fall by two thirds with a one-step longer horizon (fell-in-run 26 -> 9 of 288 starts) and the fixed take-off program pays for it in fouls and somersaults (its pen states are not the ones it was trained on): a horizon of 6 is worth re-tuning the aim for (and retraining), longer horizons only add falls.
+ Aim scan at j_st_n 6 (frozen program, 7001-7096; j_board_shift 1.04 is final2's: 3.476, fell 3, foul 9, somersault 12): 1.00: 3.360 (70 legal: fell 6, foul 11, somersault 9) | 0.96: 3.439 (73: fell 4, foul 5, somersault 14) | 0.92: 3.509 (78: fell 3, foul 3, somersault 12, legal mean 4.319): the marks shrink as fast as the fouls go.
+ Captures with j_st_n 6 (A6.txt = A4c + `j_st_n 6`, capture_set.sh, seeds 8001-8128, c3): 125 states; penultimate gap mean 1.863 sd 0.240 (range 1.37-2.75, 88 % within 1.55-2.15) against the n=5 states' 1.891 sd 0.159 (range 1.52-2.27, 94 %): the longer horizon steers the runner more gently but the gap control is worse and biased 0.03 m short.
+ The frozen rob_a4_final program on the a6 states (harness_eval.py): valid 120 of 125, fouls 29, D_board mean 4.340 (a4 states: 86 of 93 valid, 3 fouls, 4.39): the fouls are the 0.03 m bias (foot offset mean -0.037, sd 0.048).
+
+## 2026-09-29 16:42 time-boxed attempt: retrain the take-off program on the j_st_n 6 states (scratchpad/lj2/rob_a6.sh, select_train.py a6: 32 gap-stratified states, 26 plant-l 6 plant-r, gaps 1.37-2.05, warm start rob_a4_final, 200k sims, out out/long_jump_limits/rob_a6.txt, log rob_a6.log)
+
+First launch with 4 workers at 16:41 (pid 49589 and children) was stopped at 16:42 because the 5-min load average passed 30 (own pids only); relaunched with 2 workers at 16:42 (wrapper pid 49957, scratchpad/lj2/rob_a6.pid). Plan: assemble A6 + rob_a6 + the frozen landing table (land_a4b_g30) + shifts, evaluate on 7001-7096 (selection), 9129-9224 and 9033-9128; adopt only if it clearly beats final2 there and on a fresh sample; stop at 17:20 whatever the state.

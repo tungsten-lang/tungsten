@@ -157,7 +157,7 @@ WRIST_DEV = (-0.35, 0.75)   # radial 20 deg, ulnar 43 deg (body.py: +-0.5)
 # fibres shorten at about 10 optimal lengths per second over roughly 0.6 of
 # an optimal length across a joint's range, i.e. 10-17x the range per
 # second; 3.0 (10x) is the batter's fast-twitch swing muscles, disclosed.
-MUSCLE_VMAX = None if HUMAN else 3.0   # human body: body.py's per-joint calibration instead
+MUSCLE_VMAX = None if HUMAN else float(os.environ.get("BAT_VMAX", "3.0"))   # human body: body.py's per-joint calibration instead
 GRIP_CLOSE = 0.035
 ZONE_R = 0.05               # time in the zone: bat head within this of the pitch's path          # the top hand closes on the handle within this distance
 CONTACT_SOLREF = "0.001 0.25"
@@ -364,6 +364,39 @@ def aim(speed, target):
     return v
 
 
+# Opt-in body sensitivity (batting round 2; every default leaves the body exactly as it was): BAT_STRENGTH and BAT_VMAX
+# replace the athlete's 1.5 and 3.0; BAT_GROUP_STRENGTH / BAT_GROUP_VMAX ("pelvis_yaw=1.5,spine_=1.5") multiply the
+# peak force / vmax of every muscle whose name starts with a prefix (pelvis_yaw, spine_, l_shoulder, r_elbow, ...).
+# Used only by the ideal-control ceiling studies of a changed body (playground/bat_ceiling.py); no arena trial sets them.
+def _group_env(name):
+    out = {}
+    for kv in os.environ.get(name, "").split(","):
+        if kv.strip():
+            k, v = kv.split("=")
+            out[k.strip()] = float(v)
+    return out
+
+
+GROUP_STRENGTH = _group_env("BAT_GROUP_STRENGTH")
+GROUP_VMAX = _group_env("BAT_GROUP_VMAX")
+
+
+def group_scale(xml):
+    if not GROUP_STRENGTH and not GROUP_VMAX:
+        return xml
+    import re
+
+    def one(m):
+        line, name = m.group(0), m.group(1)
+        for table, attr in ((GROUP_STRENGTH, "force"), (GROUP_VMAX, "vmax")):
+            for prefix, mult in table.items():
+                if name.startswith(prefix):
+                    line = re.sub(r'(\s' + attr + r'=")([^"]*)(")', lambda q: q.group(1) + f"{float(q.group(2)) * mult:g}" + q.group(3),
+                                  line, count=1)
+        return line
+    return re.sub(r'<muscle name="([^"]*)"[^>]*/>', one, xml)
+
+
 _BASE = HumanoidV2Builder if HUMAN else HumanoidBuilder
 
 
@@ -411,7 +444,7 @@ class BatBuilder(_BASE):
     def actuators_xml(self):
         xml = super().actuators_xml()
         if HUMAN:
-            return xml    # per-joint human calibration (body.py V2_OMEGA)
+            return group_scale(xml)    # per-joint human calibration (body.py V2_OMEGA)
         assert 'vmax="1.5"' in xml, "BatBuilder: body.py muscle vmax changed"
         vmax = MUSCLE_VMAX
         # a population profile's muscle speed (body_profile.py `speed`: fibre
@@ -420,7 +453,7 @@ class BatBuilder(_BASE):
         # which this body replaces)
         if self.profile is not None and "speed" in self.profile.parts:
             vmax *= self.profile.speed("")
-        return xml.replace('vmax="1.5"', f'vmax="{vmax:g}"')
+        return group_scale(xml.replace('vmax="1.5"', f'vmax="{vmax:g}"'))
 
     def _arm(self, side):
         xml = super()._arm(side)
@@ -474,7 +507,7 @@ class BatTask(Task):
     control_dt = 0.005
     seconds = 17.5
     pelvis_height = PELVIS_H
-    strength = 1.0 if HUMAN else 1.5   # athlete / v1: 1.5x the body.py peak muscle forces
+    strength = 1.0 if HUMAN else float(os.environ.get("BAT_STRENGTH", "1.5"))   # athlete / v1: 1.5x the body.py peak muscle forces
     pitches = PITCHES
     windup = 0.7 if V1 else 0.9   # s of pitcher's delivery, from the batter's `ready` to the release
     # practice: weight of bat speed (at contact, or at closest approach) in

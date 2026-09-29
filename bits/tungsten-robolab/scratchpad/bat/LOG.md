@@ -247,3 +247,123 @@ Round-2 practice seeds: TRAIN 3000+ (fresh pitches), VALIDATION 4000-4047, none 
   `bat_power` 26.521 (18 grid pitches; oracle 25.171), `bat_power_clean` 26.521, `bat_power_fresh` **26.669** (oracle 25.241), `bat_power_fresh_clean` 26.669.
 - **S3b launched** (13:47; continues S3 from params/bat_r2_s3.txt on 36 NEW random pitches 7200-7235: dims dw0-29 + dshape_b + train_drv + train_lead + prog_trig + train_end + train_gain (36), sigma 0.1, pop 16, 4 workers, budget 3500;
   `ROBOLAB_CONTROLLER=$PWD/bin/challengers/bat_r2-t8 BATREP_FLOW=4 BATREP_FLOW_CAP=2.5 BATREP_LAUNCH=0.04 BAT_BODY=athlete .venv/bin/python playground/search.py bat_rep --method sep_cma --budget 3500 --workers 4 --sigma 0.1 --pop 16 --risk 0.25 --seconds 4.3 --seeds 7200,...,7235 --init params/bat_r2_s3.txt --only "dw*,dshape_b,train_drv,train_lead,prog_trig,train_end,train_gain" --box "..." --out params/search/bat_r2_s3b.txt --log out/bat_r2/s3b.jsonl`).
+- S3b (pid 47333, stopped after gen 4 of 3500: 1764 rollouts): 25.488 (the S3 swing alone on the new pitches 7200-7235) -> 25.542 (gen 2), no more in gens 3-4: the drive profile has plateaued; S3 (params/bat_r2_s3.txt) is the result.
+- v6 knots on the validation seeds 4000-4047 (the stage table's first row): **17.61 m/s, 36/48 hits** (misses 4012 4013 4016 4020 4027 4033 4035 4036 4043 4044 4045 4046), hit speed 23.49, fair 22, launch -7.5 deg, quality 0.108,
+  flow 2.79 (max 3.11), valley lift/pre/post/cmd 0.594/0.846/0.732/0.615, stall before the swing 31 ms, plant->hips-fire 51 ms.
+  Stage table on seeds 4000-4047, as run (power, hits, fair, mean launch, quality, flow mean/max, pre-swing stall, plant->swing):
+    v6 knots        17.61  36  22   -7.5  0.108  2.79/3.11  31 ms  51 ms
+    taim1           23.12  48  42    8.3  0.432  2.80/3.06  31 ms  51 ms
+    S1              25.83  48  46    7.9  0.388  2.61/2.96  27 ms  46 ms
+    S2b             26.37  48  29   49.3  0.213  2.44/2.91  18 ms  33 ms
+    S2c (balanced)  26.15  48  46   12.8  0.447  2.32/2.67   8 ms  18 ms
+    S3 (+ drive profile) 26.57 48 46 19.9  0.405  2.31/2.65   7 ms  18 ms
+- S3's drive profile carried over to the P95 body unchanged (params/bat_r2_p95_s7_dw.txt = S7 + dw0-29 + dshape_b; validation 4000-4047, ROBOLAB_PROFILE=p95): **hit speed 32.37 m/s** (S7: 31.29) but 6 misses of 48 (4006 4014 4021 4025 4029 4031; power 28.33 as run): the profile speeds the swing up and shifts its aim.
+- **S8 launched** (13:58, pid printed above; P95 body, 2 workers because the load is 34, controller bat_r2-t8, start params/bat_r2_p95_s7_dw.txt, 24 pitches 5000-5023, dims dw0-29 + dshape_b + taim_z/x/z0/x0/ramp + prog_trig + train_end + train_lead + k_in + train_drv (41), sigma 0.06, pop 16, budget 2400).
+
+## 2026-09-29 14:05 final evaluation on the untouched validation seeds 6000-6047 (athlete body, as run; S8 paused by paused.sh 55670 for these)
+
+    stage            power   hits     fair  flow mean / max
+    v6 knots         17.70   36/48    21    2.80 / 3.00   (misses 6004 6006 6011 6012 6016 6021 6023 6025 6028 6036 6038 6044)
+    taim1            23.14   48/48    40    2.80 / 2.96
+    S1               25.87   48/48    47    2.63 / 2.97
+    S2b              26.45   48/48    35    2.47 / 2.94
+    S2c (balanced)   26.29   48/48    43    2.37 / 2.72
+    S3 (+ drive profile) **26.70**  48/48  44  2.37 / 2.70
+  S3 on the other sets (`final_eval.sh`, identical to the arena's numbers): arena seeds 1100-1123 26.399 (24/24, fair 24, flow 2.324 max 2.674), old fresh 1000-1023 26.669 (24/24, flow 2.263 max 2.482), grid 18 pitches 26.521 (18/18, flow 2.324 max 2.581).
+- Diagnostics of the S3 champion (`paused.sh 55670 -- bat_power_diag.py --params params/bat_r2_s3.txt --controller bin/challengers/bat_r2-t8 --seeds 4000-4015 --fresh --json out/bat_r2/diag_s3.json`): power 26.62, flow 2.287, swing->contact 228 ms.
+  Chain (peak, ms before contact): pelvis yaw 7.63 rad/s = 437 deg/s at 127 ms; torso 9.90 rad/s = 567 deg/s at 160 ms; hands 6.7 m/s at 64 ms; bat 37.8 rad/s = 2164 deg/s and sweet spot 26.5 m/s at contact.
+  Joint peaks / unloaded limit: pelvis yaw 0.32, spine flexion 0.39, spine rotation 0.25, shoulders 0.22-0.45, elbows 0.49 (top-hand side 12.8 rad/s = 732 deg/s, 30 ms before contact) and 0.70 (bottom-hand side, 18.2 rad/s = 1042 deg/s,
+  125 ms before contact), wrist flexion 0.21-0.49, bottom wrist deviation 1.69 (18.6 rad/s = 1065 deg/s at contact).
+  Range: pelvis yaw closest to its end 4.8 % of the range (0.3 % of the swing within 3 %); spine_lat 17 %, l_wrist_dev 25 %, r_wrist_dev 11 %, l_hip_rot 29 % of the swing within 3 % of an end.
+  Activation >= 0.9, share of the 220 ms power phase (agonist): pelvis 46 %, trunk 51 %, shoulders 51 %, elbows 48 %, wrists 26 % (S1: 43 / 34 / 34 / 33 / 13); CCI 0.02-0.05.
+- (about 14:04) corrected the two S2b history notes (09:58:29 `bat_power_fresh_rep`, 09:59:15 `_clean`) with scratchpad/bat/fix_notes.py under the arena lock (the typed notes had quoted S2 values; scratchpad/bat/notes_fix1.json): 2 history records changed, nothing else.
+- 14:04 demo video of the S3 champion on the 4 bridge demo pitches (athlete body, `BAT_BODY=athlete ROBOLAB_CONTROLLER=bin/challengers/bat_r2-t8 paused.sh 55670 -- playground/bridge.py bat --params params/bat_r2_s3.txt --seconds 17.5 --video out/bat_r2.mp4 --sheet out/bat_r2_sheet.png`; S8 paused for the 16 s):
+  files `out/bat_r2.mp4` (1051 frames), `out/bat_r2_sheet.png`; per-pitch numbers re-run without video into `out/bat_r2/demo_s3.txt`.
+  Pitches 1-4 (82.8 / 89.5 / 76.1 / 86.1 mph): bat sweet-spot speed 26.78 / 25.92 / 25.72 / 27.33 m/s (59.9 / 58.0 / 57.5 / 61.1 mph, mean 26.44), **4 of 4 fair**, exit 75.3 / 86.6 / 81.0 / 79.3 mph,
+  launch -13.3 / -2.3 / +14.5 / -8.0 deg, flow 2.27 / 2.12 / 2.38 / 2.09 (whole run 2.377, valleys lift/pre/post/cmd 0.61/0.83/0.56/0.54, `flow_ok`), swing->contact 228 / 229 / 225 / 230 ms,
+  plant->swing 16 / -14 / 56 / -5 ms, pre-swing stall 35 ms (whole run), quality 0.285. Pitch 3 (outside, low, 76 mph) is contacted 0.9 cm from the barrel end (impact_from_end 0.009).
+  For comparison the v6 oracle on the same 4 pitches (README v6 section): 25.6 / 24.9 / 24.3 / 25.8 m/s, 3 fair.
+- **S8 restarted as S8b with 4 workers** (load 13.5 / 5-min 18.3): the 2-worker S8 (pid 55670, tree killed by PID) had completed gen 2 (objective 16.98 -> 18.58, best saved as params/search/bat_r2_s8_gen2.txt); the search is resumable so S8b continues from that best.
+  Command (pid 61060, 4 workers, cwd = robolab root), env `ROBOLAB_CONTROLLER=$PWD/bin/challengers/bat_r2-t8 BATREP_FLOW=4 BATREP_FLOW_CAP=2.5 BATREP_LAUNCH=0.04 ROBOLAB_PROFILE=p95 BAT_BODY=athlete`:
+  `.venv/bin/python playground/search.py bat_rep --method sep_cma --budget 2000 --workers 4 --sigma 0.05 --pop 16 --risk 0.25 --seconds 4.3 --seeds 5000..5023 --init params/search/bat_r2_s8_gen2.txt --only 'dw*,dshape_b,taim_z,taim_x,taim_z0,taim_x0,taim_ramp,prog_trig,train_end,train_lead,k_in,train_drv' --box dshape_b=0.2:1.0,taim_z=2:9,taim_x=0:5,taim_z0=-0.05:0.2,taim_x0=-0.1:0.1,taim_ramp=0.5:1.1,prog_trig=0.2:0.26,train_end=-0.04:0.0,train_lead=0:0.035,k_in=0:0.12,train_drv=0.9:1.3 --out params/search/bat_r2_s8b.txt --log out/bat_r2/s8b.jsonl`
+
+## 2026-09-29 14:25 S8b result (P95 body): 32.4 m/s, 48/48, at the MLB average; the ball-quality cost is large
+
+- S8b (pid 61060, 4 workers, 7 generations, 1992 rollouts, 764 s, log out/bat_r2/s8b.log, best params/search/bat_r2_s8b.txt): objective 18.58 (its start, the gen-2 best of S8) -> 19.89 (gen 2) -> **29.68 (gen 3: the last training-pitch miss gone)** -> 31.04 -> 31.18 (gen 5), no more in gens 6-7.
+  Best saved as params/bat_r2_p95_s8.txt (header with the numbers below; same 120 values as the search file).
+- Validation (P95 body, `ROBOLAB_PROFILE=p95 BAT_BODY=athlete bat_rep.py eval --params params/bat_r2_p95_s8.txt --controller bin/challengers/bat_r2-t8 --seeds A:B --seconds 4.3 --workers 4 --quiet`):
+    seeds 4000-4047 (used before to pick candidates): **32.377 m/s, 48/48 hits**, fair 35, flow 2.441 (max 2.764), aim_s 0.70-0.89 m, bat speed 31.16-33.33; launch mean 30.1 deg (median 36.8), 19 % of hits above 60 deg   (S7: 30.64, 47/48, fair 32, launch mean 18.1)
+    seeds 6000-6047 (never used for the P95 body): **32.430 m/s, 48/48 hits**, fair 36, flow 2.449 (max 2.847), aim_s 0.69-0.89, bat speed 30.96-33.35; launch mean 39.2 deg (median 42.6), 27 % above 60 deg
+  The speed is at the MLB average (32.0 m/s) but bought with steep launches: fair 35-36 of 48 (S3 on the athlete: 44-46), quality 0.165 on the arena pitches.
+- Arena `bat_power_fresh_rep_p95` (`arena.py eval ... --params params/bat_r2_p95_s8.txt --controller bin/challengers/bat_r2-t8 --workers 4 --promote`): **30.847 m/s, 23/24 hits** (S7 seed: 27.123, 21/24), hit speed 32.19, fair 0.75, quality 0.165, flow 2.440 (max 2.644): PROMOTED.
+  The one miss is 1123 (x +0.105, z 0.964; aim_n +3.9 cm, contact 0.889 m along the bat, beyond the sweet spot toward the tip); fouls 1105, 1106, 1112, 1116, 1122 and 1123; per-pitch in out/bat_r2/s8b_arena1100.json.
+- 14:26 **ideal-control ("sweet") ceilings launched** (pid 68100 = `sh scratchpad/bat/ceil_sweet.sh 300 s3 p95`, 4 workers, load 7 / 5-min 13, log out/bat_r2/ceil_sweet.log, results out/bat_ceiling/r2sw_s3.json and r2sw_p95.json):
+  `bat_ceiling.py --target sweet` (open loop, reflex off, 16 upper-body joints, CMA over a net excitation every 40 ms, ball moved away, score = sweet-spot speed at the closest approach to where the practised swing met the ball, contact time free; the round-1 "27.6 m/s through the v5 contact point" mode)
+  on the centre pitch (34.0 m/s, x 0.0, z 0.80), captured 20 ms before the hips fire: s3 = athlete body with params/bat_r2_s3.txt / bat_r2-t8; p95 = ROBOLAB_PROFILE=p95 with params/bat_r2_p95_s8.txt / bat_r2-t8.
+  (The earlier `--ball` mode runs from the S2c capture could not improve on the practised swing, the landscape being needle-like.)
+- 14:28 sweet ceilings done (80-90 s each, 300 generations, `out/bat_r2/ceil_sweet.log`): **the open-loop CMA is BELOW the closed-loop swing on both bodies**.
+    athlete S3: practised swing 27.19 m/s (contact 227 ms after the hips fire); the open-loop replay of its net excitations misses the contact point by 11.8 cm (26.29 m/s at 0.255 s); CMA best through P within 2.5 cm: 22.67 m/s (no gain after gen ~40).
+    P95 S8b: practised swing 32.74 m/s; replay misses P by 7.9 cm (31.82); CMA best within 4 cm of P: 28.03 m/s (gain only in the first 50 generations).
+  => the reflex layer's feedback does work the open loop cannot reproduce (needle-like landscape), so under this tool the in-representation swing is its own ceiling estimate. Round 1's comparable ceilings (oracle program capture,
+  `--ball`, 400 generations, centre pitch) are re-run for both bodies as `ceil.sh ... prog_athlete prog_p95` (pid printed in the next entry; CEIL_WORKERS=4; results out/bat_ceiling/r2_prog_athlete.json / r2_prog_p95.json, log out/bat_r2/ceil_prog.log).
+- 14:36 **ideal-control ceilings, round-1 recipe (ORACLE program capture params/bat_v6_prog.txt + bin/challengers/bat_v6-prog1, `bat_ceiling.py --ball --lead 0 --pitch 34.0,0.0,0.8`, centre pitch) on both bodies** (`ceil.sh ... prog_athlete prog_p95`, CEIL_WORKERS=4, out/bat_r2/ceil_prog.log; P95 continued 600 more generations from its best with `--init_json out/bat_ceiling/r2_prog_p95.json --sigma 0.1 --name r2_prog_p95b`):
+    athlete body: practised program swing 25.50 m/s; open-loop replay 25.45 (fair, launch 18 deg); the CMA finds nothing more in 400 generations (the program library is already the product of round 1's CMA iterations; round 1's ball_s0 got 25.69 from a first-generation capture).
+    P95 body: the program swing (31.94 m/s at the capture) misses when replayed (4.1 cm), gen 0 28.27; CMA 400 generations: 30.83 m/s (launch 5.5 deg, fair); 1000 generations (r2_prog_p95b): **32.87 m/s** (fair, but launch 75 deg: the ball-mode score has only a fair bonus and no launch term), sigma collapsed to 0.006, still creeping up (+0.13 per 100 generations).
+    => ideal-control ceiling at the centre pitch: athlete 25.5-25.7, P95 >= 32.9 (+7.3 m/s, +28 %).
+  The in-representation swings on the same pitch (`bat_rep.py eval --pitch 34.0,0.0,0.8 --seeds 0:1`, out/bat_r2/centre_s3.json, centre_p95_s8.json): athlete S3 **27.19 m/s** (hit, flow 2.32), P95 S8b **32.74 m/s** (hit, flow 2.50):
+  the athlete's closed-loop swing is 1.5-1.7 m/s ABOVE the open-loop ceiling of round 1, the P95 swing is at the open-loop CMA's 1000-generation value.
+- 14:36 **S9 launched (balanced P95 swing)**: `sh scratchpad/bat/s9.sh 4 2000` (4 workers, load 17.5 / 5-min 19; log out/bat_r2/s9.log, search file params/search/bat_r2_s9.txt, jsonl out/bat_r2/s9.jsonl). Why: S8b's launch angle ~ 36 + 11.5 x aim_n deg (corr 0.85-0.91 on P95, 0.89-0.99 on the athlete: 10-13 deg per cm), aim_n std 2.3-2.6 cm,
+  so the balls leave at a mean 30-39 deg with 19-27 % of the hits above 60 deg. S9 = same 41 tunables from S8b's best, launch cost 0.10/deg beyond 8 off 20 (S8b: 0.04 beyond 10), aim margin 1.0 per cm beyond 1.5 cm (S8b: 0.5 beyond 3), flow term as before, new training pitches seeds 7300-7323.
+
+## 2026-09-29 16:10 after the second harness stall (14:53 -> 16:06): S9 result and arena entry
+
+- State at 16:06: nothing of mine was running (S9 had finished at 14:53:42; the S9 validation job b5aufqcj2 was killed by the stall, no s9_val*.json existed); the other processes on the machine were another agent's btl2 search. Load 6.9 (5-min 11), 6 workers allowed.
+- **S9 (balanced P95 swing)** finished all 7 generations (1992 rollouts, ~1100 s incl. a slow stretch, log out/bat_r2/s9.log): objective 28.09 (S8b's start under the stricter objective) -> 28.29 (gen 2) -> 28.69 (gen 5) -> 28.77 (gen 7). Best = params/search/bat_r2_s9.txt, saved as params/bat_r2_p95_s9.txt (header with the numbers below).
+  Changes vs S8b: taim_z0 0.088 -> 0.078 (the mean aim moves down by ~1.3 cm), the drive profile weights re-balanced (dw0-29), prog_trig 0.2247 -> 0.2239, everything else within 3 %.
+- Validation (P95 body, `ROBOLAB_PROFILE=p95 BAT_BODY=athlete bat_rep.py eval --params params/search/bat_r2_s9.txt --controller bin/challengers/bat_r2-t8 --seeds A:B --seconds 4.3 --workers 6 --quiet`), S9 against S8b:
+    seeds 4000-4047: S9 32.346 m/s 48/48, fair 37, launch mean 19.5 deg (S8b 30.1), >60 deg 8 % (19 %), 10-45 deg 44 % (29 %), aim mean -1.39 cm sd 2.34, flow 2.433 max 2.741   | S8b 32.377, fair 35
+    seeds 6000-6047 (untouched): S9 32.412 m/s 48/48, fair 44, launch mean 25.5 (39.2), >60 deg 21 % (27 %), aim sd 2.26, flow 2.455 max 2.849   | S8b 32.430, fair 36
+    arena seeds 1100-1123: S9 32.134 m/s **24/24**, fair 20, launch mean 34.1 (42.4), flow 2.465 max 2.728, quality 0.291 | S8b 30.847, 23/24, fair 18, quality 0.165
+  Same speed on the hits (-0.02 to -0.03 m/s), the arena miss (1123) gone, more fair balls and a launch mean nearer 20 deg, the launch SPREAD unchanged (sd 29-32 deg): the launch angle is ~10-14 deg per cm of aim offset and the aim offset scatters by 2.3 cm.
+- Arena `bat_power_fresh_rep_p95` `arena.py eval ... --params params/bat_r2_p95_s9.txt --controller bin/challengers/bat_r2-t8 --workers 6 --promote`: 32.134 +- 0.205, 24/24 hits, fair 0.833, quality 0.291, flow 2.465;
+  **NOT promoted: mean diff +1.287, p = 0.4705** (the sign-flip test cannot see a swing that only converts the one miss 1123; on the 23 pitches both hit S9 differs from S8b by -0.43 .. +0.23 m/s, mean -0.05, better on 8 of 23; on the validation sets the paired mean difference is -0.03 / -0.02 m/s, S9 better on 18 / 19 of 48). History record `lose`. The P95 champion stays S8b (30.847, 23/24);
+  S9 is the better controller by every other measure and is the one to use (params/bat_r2_p95_s9.txt).
+- Why the aim scatter is not fixable by a pitch feature (`scratchpad/bat/`-style analysis on S3's 96 validation pitches, athlete body): aim_n sd 1.9-2.3 cm; regressing it on (dz, dx), release speed, x, z, quadratic terms, the plant-to-swing gap, stride or plant time
+  brings the cross-set residual only from 1.9-2.3 to 1.75-2.1 cm (the taim1 swing before the searches had 1.2 cm; the searches' objective leaves +-3 cm of aim free, which is consistent with them spending it). Correlations of aim_n with launch 0.85-0.99, with attack angle -0.58.
+- 16:14 **leg / stride / hip scan around S3** (athlete body, 16 practice pitches 3008,3049,3050,3060,3064,3073,3074,3091,3092,3102,3107,3108,3115,3118,3127,3138, calibrated-aim evaluator, 4 workers, 220 s; `BAT_BODY=athlete BATREP_FLOW=4 BATREP_FLOW_CAP=2.5 BATREP_LAUNCH=0.04 .venv/bin/python scratchpad/bat/evalcal.py --params params/bat_r2_s3.txt --controller bin/challengers/bat_r2-t8 --seeds <16> --sets "<...>" --workers 4 --name legscan1`, raw table out/bat_r2/legscan1.json):
+    base: speed 26.524, flow 2.348 (max 2.639), calibrated objective 26.060, 16/16 hits.
+    NO EFFECT AT ALL (bit-identical): drv_hips 0.45 / 0.9, dur_hips 0.14 / 0.22, dur_leglift 0.2 / 0.3, hips_lead -0.02 / 0.02 (leg_follow 0.2 changes only flow +0.013; lift_at only flow).
+    train_legs 0.9: speed 26.602 (+0.08) | 1.4: 26.459;  train_legs_ease 0.0: 26.540 (+0.02) | 0.15: 26.491
+    drv_stride 0.3: flow 2.405 | 0.8: speed 26.550, flow 2.305 (-0.04)          lift_at 0.09: flow 2.379 | 0.14: flow 2.292 (-0.06), speed unchanged
+    leg_swing_kp 0.5: 26.374 | 2: 26.718 (+0.19), flow 2.436 (+0.09, max 2.846)      leg_swing_kd 0.04: 26.716 (+0.19), flow 2.402 | 0.16: 26.159
+    stride_at 0.40: speed 26.721 (+0.20), calibrated obj 26.308, flow 2.489 (+0.14), aim shift az +17 ax -26 | 0.55: 4/16 hits     dur_stride 0.28: 15/16 hits, aim shift a0 -2.7 | 0.38: 6/16 hits
+    step_delay 0.17: speed 26.566, aim shift a0 -2.2 | 0.195: 12/16 hits
+  => a few leg parameters buy 0.1-0.2 m/s each and cost flow 0.05-0.14; lift_at and drv_stride lower the flow. Not searched in S1-S9.
+- 16:14 **S10 launched (athlete, S3 retune incl. leg/stride parameters)**: `sh scratchpad/bat/s10.sh 4 2000` (4 workers; load 5-min 24 / 1-min 29 = other agents; log out/bat_r2/s10.log, search file params/search/bat_r2_s10.txt).
+  50 tunables = S8's 41 + leg_swing_kp, leg_swing_kd, stride_at, train_legs, train_legs_ease, drv_stride, lift_at, step_delay, dur_stride; objective as S9 (launch 0.10/deg beyond 8 off 20, aim 1.0/cm beyond 1.5) with the flow term anchored at S3's own flow (cap 2.35, weight 4); training pitches seeds 7400-7423; start params/bat_r2_s3.txt.
+- 16:15 machine load jumped (1-min 46, 5-min 30: other agents' long_jump / run_gear / a 4-worker search at 2.2 cores per worker); S10 had only just started (gen 1, 24 evaluations), so I stopped its 4-worker tree by PID
+  (log kept as out/bat_r2/s10_w4_aborted.log) and restarted the identical search with 2 workers per the cap: `sh scratchpad/bat/s10.sh 2 2000` (pid 86339, log out/bat_r2/s10.log). Nothing else of mine is running.
+- 16:21 S10 (2 workers) reached gen 2: objective 21.69 (S3 under the S10 objective) -> 22.67 (316 s per generation); load then fell (1-min 16, 5-min 21) so I stopped that tree by PID (86339 + children), snapshot the best as params/search/bat_r2_s10_gen2.txt and resumed with 4 workers:
+  `sh scratchpad/bat/s10.sh 4 1700 params/search/bat_r2_s10_gen2.txt s10b` (pid 91501, log out/bat_r2/s10b.log, search file params/search/bat_r2_s10b.txt, jsonl out/bat_r2/s10b.jsonl). Same env / tunables / seeds 7400-7423 as S10.
+
+## 2026-09-29 16:40 S10 result (athlete): +0.10-0.18 m/s over S3, promoted on all six athlete trials; ball quality slightly worse
+
+- S10/S10b: 50 tunables (S8's 41 + 9 leg/stride parameters), athlete body, S9-style objective with the flow term anchored at 2.35; S10 (2 workers) 2 generations 21.69 -> 22.67, S10b (resumed from that best, 4 workers, 1680 rollouts, 912 s, log out/bat_r2/s10b.log) 22.67 -> 23.55 (gen 3), then no gain in gens 4-6.
+  Best = params/search/bat_r2_s10b.txt, saved as params/bat_r2_s10.txt. Changes vs S3: drv_stride 0.528 -> 0.649, leg_swing_kd 0.084 -> 0.069, leg_swing_kp 1 -> 0.85, prog_trig 0.2437 -> 0.2478 (fires 4 ms earlier), train_drv 1.096 -> 1.115, train_lead 0.0201 -> 0.0171,
+  taim_z 5.13 -> 4.95, taim_x 3.50 -> 3.30, taim_z0 0.0828 -> 0.0743, train_legs 1.161 -> 1.195, train_legs_ease 0.048 -> 0.032, k_in 0.0149 -> 0.0182, dshape_b 0.5 -> 0.465; drive-profile weights moved by up to 0.29; stride_at, lift_at, step_delay, dur_stride within 0.5 %.
+- Validation against S3 (athlete body, as run, paired): seeds 4000-4047 **26.712 vs 26.571** (+0.14, better on 44 of 48, sign-flip p < 1e-4), hits 48/48, fair 41 (S3 46), flow 2.296 max 2.639 (2.314 / 2.645), launch mean 14.3 (19.9);
+  untouched seeds 6000-6047 **26.829 vs 26.699** (+0.13, better on 40 of 48), fair 44 (44), flow 2.341 max 2.658 (2.366 / 2.703); arena seeds 1100-1123 **26.500 vs 26.399** (+0.10, better on 18 of 24, p = 0.0006), fair 22 (24), flow 2.320 max 2.639.
+  Hitch terms on 6000-6047 (S3 -> S10): valley lift 0.607 -> 0.579, pre 0.687 -> 0.689, post 0.531 -> 0.540, stall before the swing 10.2 -> 10.3 ms, plant->hips fire 19.4 -> 18.2 ms, swing->contact 227.7 -> 229.6 ms (`out/bat_r2/s10_val6000.json`, `s3_val6000.json`).
+- Arena (`arena.py eval <trial> --params params/bat_r2_s10.txt --controller bin/challengers/bat_r2-t8 --workers 4 --promote`, all WON and PROMOTED, 16:38-16:39): bat_power_fresh_rep 26.4996 (24/24, fair 0.917, quality 0.347, flow 2.320; S3 26.399), bat_power_fresh_rep_clean (same),
+  bat_power 26.698 (18/18; S3 26.521), bat_power_clean (flow 2.293, quality 0.177; S3 0.276), bat_power_fresh 26.862 (24/24, fair 0.958, quality 0.407, flow 2.244; S3 26.669), bat_power_fresh_clean (same).
+- **Ball quality is slightly worse than S3's**: fair balls 143 of 162 over the five athlete sets against S3's 153 (4000-4047 41 vs 46, 6000-6047 44 vs 44, arena 22 vs 24, 1000-1023 23 vs 23, grid 13/18 vs 16/18: `BATREP_GRID=1 bat_rep.py eval --seeds 0:18`, out/bat_r2/s3_grid_q.json, s10_grid_q.json),
+  quality 0.35 / 0.41 / 0.18 against 0.42 / 0.44 / 0.28 (fresh_rep / fresh / grid). My first arena note said "about equal" from the validation sets alone; after the grid result I corrected the six notes and champion entries under the arena lock
+  (`scratchpad/bat/fix_notes.py scratchpad/bat/notes_fix2.json`, originals in notes_s10_orig.json; 6 history records and 6 champions changed, only `note`) and the params header. S3 stays the fair-ball-friendlier swing.
+
+## 2026-09-29 16:55 final state
+
+- README: the section `### Batting round 2 (29 Sep 2026): bat speed in robolab's own representation` (238 lines, draft scratchpad/bat/README_round2_draft.md) was inserted at README.md line 3858, right after the v6 batting section and before another agent's
+  `## Dribble through the legs, round 2` section (the README had grown from 3749 to 3907 lines while I worked; the insertion was one read-modify-write with os.replace and the line count checked: 3907 + 239 = 4146).
+- Champions now (arena, athlete body): bat_power_fresh_rep 26.500 (24/24), _clean 26.500, bat_power 26.698, bat_power_clean 26.698, bat_power_fresh 26.862, _clean 26.862 (all params/bat_r2_s10.txt + bin/challengers/bat_r2-t8);
+  bat_power_fresh_rep_p95 30.847 (23/24, params/bat_r2_p95_s8.txt; S9 = params/bat_r2_p95_s9.txt scores 32.134, 24/24 but lost the paired test, p 0.47). Not beaten: bat_quality (oracle 0.416), bat_flow (v5, 2.048).
+- Nothing of mine is running. No commits. Files touched are listed in the final report.

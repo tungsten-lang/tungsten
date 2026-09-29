@@ -1,0 +1,111 @@
+{
+ "name": "p95_whatif_rf_1.25",
+ "about": "DIAGNOSTIC what-if (sprint round 2): the p95 profile with ONE muscle group's strength scaled by 1.25; not a population body",
+ "population": "healthy young adult men (untrained; trained sprinters noted where known)",
+ "parts": {
+  "strength": {
+   "multiplier": 1.32,
+   "stat": "P95 of peak isometric joint torque per kg body mass; normalised CV ~18-22 % (1 + 1.645 x 0.195)",
+   "evidence": [
+    "Maden-Wilkinson, Balshaw, Massey & Folland 2020, J Appl Physiol 128:1000-1011, doi:10.1152/japplphysiol.00224.2019: 52 untrained young men, isometric knee-extension MVT 245 +- 43 N m (CV 17.6 %, P95 x1.29); 4-yr strength-trained men 388 +- 70 N m (x1.58 the untrained mean)",
+    "NHANES 1999-2002 isokinetic knee extension (60 deg/s), men 50-59 (the only ages tested), n = 473, survey-weighted: torque CV 23.8 % (empirical P95 x1.40), torque per kg CV 22.1 % (empirical P95 x1.34)",
+    "Fujimori & Sado 2025, Physiol Rep 13:e70370, doi:10.14814/phy2.70370: plantarflexion MVT in untrained men 103.6 +- 18.9 N m (CV 18 %, P95 x1.30)",
+    "Harbo, Brincks & Andersen 2012, Eur J Appl Physiol 112:267-275, doi:10.1007/s00421-011-1975-3: age, height and mass explain only ~25 % of strength variance in men, so size-normalised SD ~0.87 of the raw SD",
+    "Jaric 2002, Sports Med 32:615-631: joint moments scale with body mass^1 under geometric similarity (used by the anthro part)"
+   ],
+   "verified": true,
+   "note": "Hip-extension spread in young men not found (unverified; assumed like the knee and ankle). Applied to every muscle group alike.",
+   "groups": {
+    "rf": 1.65
+   }
+  },
+  "speed": {
+   "multiplier": 1.2,
+   "stat": "P95 of maximum joint angular velocity = fibre shortening velocity (fibre-type mix) x fascicle length / moment arm",
+   "evidence": [
+    "Staron et al. 2000, J Histochem Cytochem 48:623-629, doi:10.1177/002215540004800506: 95 young men and women, vastus lateralis ~41 % type I (men 17.6-65.6 %: SD ~10 points)",
+    "Simoneau & Bouchard 1989, Am J Physiol 257:E567: 418 biopsies, type I 15-85 %, CV ~30 % (SD ~12 points around 41 %); a P95 'fast' man has ~21-25 % type I",
+    "Trappe et al. 2015, J Appl Physiol 118:1460, PMC4469925: single-fibre Vo at 15 C, fibre lengths/s: I 1.20, IIa 4.04, IIa/x 5.75, IIx 6.05 (IIa ~3.4x, IIx ~5.0x type I); a world-class sprinter's mix gives ~x1.23-1.31 the average",
+    "area-weighted whole-muscle Vmax for the P95 fibre mix with IIa/I 2.5-3.4: x1.15-1.20",
+    "Maden-Wilkinson et al. 2020 (above): vastus lateralis fascicle length 111.1 +- 11.5 mm (CV 10.4 %, P95 x1.17); sprinters have longer fascicles (Abe et al. 2000, MSSE 32:1125; Kumagai et al. 2000, J Appl Physiol 88:811)",
+    "fibre mix and fascicle length combined (independent CVs ~0.10 and ~0.09): joint-velocity P95 ~x1.22; 1.20 is taken"
+   ],
+   "verified": true,
+   "note": "Applies to the human-calibrated v2/v3 muscle speeds (V2_OMEGA); v1's uniform placeholder vmax 1.5 is not scaled."
+  },
+  "tendon": {
+   "multiplier": 1.5,
+   "stat": "P95 of in vivo tendon stiffness; measured CV ~30-35 %, ~31 % after removing ~9-10 % measurement error (1 + 1.645 x 0.31)",
+   "evidence": [
+    "Fujimori & Sado 2025 (above): Achilles tendon stiffness in untrained men 258 +- 86 N/mm (CV 33 %); typical untrained range 180-280 N/mm",
+    "Lichtwark & Wilson 2005, J Exp Biol 208:4715: 10 men, interquartile range 145-231 N/mm (CV ~34 %)",
+    "Alegre et al. 2016, PMC5020126: patellar tendon 2189 +- 551 N/mm (CV 25 %); Murtagh et al. 2018, PMC6060780: soccer players CV ~46 %; Hansen et al. 2006: typical measurement error ~9-10 % (absolute patellar values differ ~3x between labs, so only CVs are used)",
+    "Arampatzis et al. 2007, J Biomech 40:1946: sprinters had higher normalised tendon stiffness than endurance runners and inactive men; Kubo et al. 2000 and 2020 (PMC7547534) found no sprinter difference at high force"
+   ],
+   "verified": true,
+   "note": "Applied to both v3 groups (Achilles, quadriceps); the fibre mass scales with it so the fibre-tendon mode (the v3 numerics) is unchanged. Whether stiffer is better for sprinting is a result, not an assumption."
+  },
+  "activation": {
+   "act": 0.87,
+   "deact": 0.87,
+   "stat": "activation and deactivation time constants x0.87 (10 -> 8.7 ms, 40 -> 34.8 ms)",
+   "evidence": [
+    "model defaults: OpenSim Millard2012 / FirstOrderActivation 10 / 40 ms (the robolab value), Thelen 2003 15 / 50 ms, DeGroote-Fregly 2016 15 / 60 ms",
+    "no population distribution of the time constants exists; proxies: Tillin et al. 2010, MSSE 42:781: normalised RFD 0-50 ms 2.81 +- 1.20 MVC/s (CV 43 %) in controls vs 4.86 +- 1.46 in power athletes; Folland et al. 2014: force at 50 ms varied 13-fold among 40 untrained people (mostly neural); Harridge et al. 1996: MHC mix relates to whole-muscle twitch timing",
+    "inference: type II twitches are ~2x faster than type I, so the P95 fibre mix (~22 % vs ~41 % type I) shortens whole-muscle twitch timing by ~13 %"
+   ],
+   "verified": false,
+   "note": "UNVERIFIED: inferred from the fibre-type result, not a measured percentile. Ablate with ROBOLAB_PROFILE_PARTS=strength,speed,tendon."
+  },
+  "anthro": {
+   "length": 1.065,
+   "mass": 1.134,
+   "stat": "stature P95 / mean (every segment length scaled with it); mass x length^2, i.e. the lean p50 build at constant BMI",
+   "evidence": [
+    "ANSUR II (2012) US Army men, n = 4082: stature 1756 +- 68.6 mm, P95 1870 mm (x1.065); mass 85.5 +- 14.2 kg, P95 110.7 kg (x1.29)",
+    "NHANES 2015-2018 men aged 20-39, weighted, n = 1607: stature 176.0 +- 7.4 cm, P95 187.7 cm (x1.066); mass 89.8 +- 23.3 kg, P95 134 kg (x1.49)",
+    "ANSUR II segment lengths (knee height, trochanter height, crotch height, foot length) CV 5.4-5.7 %, P95 ~x1.09 on their own; their ratio to stature varies ~3 % between people (r ~0.86), so scaling every segment with stature is the P95-stature body, not P95 legs"
+   ],
+   "verified": true,
+   "note": "Population P95 mass (x1.29-1.49) is mostly fat mass and is not used; the p50 body (67.5 kg, BMI 22) is itself a lean build, ~P10 of ANSUR II mass."
+  }
+ },
+ "not_applied": {
+  "rom": {
+   "stat": "passive joint range of motion, men 20-44 (CDC Normal Joint ROM study, Soucie et al. 2011, Haemophilia 17:500; n = 114, goniometry): mean +- SD, empirical P95",
+   "hip_extension_deg": [
+    17.4,
+    5.9,
+    27.5
+   ],
+   "hip_flexion_deg": [
+    130.4,
+    7.5,
+    141.5
+   ],
+   "knee_flexion_deg": [
+    137.7,
+    6.5,
+    147.0
+   ],
+   "ankle_dorsiflexion_deg": [
+    12.7,
+    5.9,
+    23.0
+   ],
+   "ankle_plantarflexion_deg": [
+    54.6,
+    7.7,
+    67.5
+   ],
+   "model_deg": {
+    "hip_extension": 34,
+    "hip_flexion": 126,
+    "knee_flexion": 143,
+    "ankle_dorsiflexion": 34,
+    "ankle_plantarflexion": 52
+   },
+   "why_not": "the model's sprint-relevant ranges (hip extension 34 deg, dorsiflexion 34 deg) already exceed the P95 passive range (they stand for dynamic, weight-bearing ranges); changing ranges also changes every muscle's length range and the geometry tables the skills are practised on"
+  }
+ }
+}

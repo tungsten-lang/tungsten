@@ -1,0 +1,131 @@
+hsearch sprint_touch_v4x: es, 78 tunables, budget 5000 rollouts, seeds [(15, None), (13, None), (2, None), (0, None), (1, None), (3, None), (4, None), (5, None)]
+start 285.666 (8 rollouts)
+gen 1 used 59 best 285.666 gen_best 284.84 alive_full 1/16 (22s) {'sigma': 0.018600000000000002, 'rate': 0.0}
+gen 2 used 115 best 285.666 gen_best 283.99 alive_full 2/16 (40s) {'sigma': 0.017298000000000004, 'rate': 0.0}
+gen 3 used 166 best 285.666 gen_best 285.53 alive_full 2/16 (55s) {'sigma': 0.016087140000000003, 'rate': 0.0}
+gen 4 used 224 best 285.666 gen_best 283.33 alive_full 3/16 (71s) {'sigma': 0.014961040200000005, 'rate': 0.0}
+gen 5 used 277 best 285.666 gen_best -28.73 alive_full 0/16 (85s) {'sigma': 0.013913767386000005, 'rate': 0.0}
+gen 6 used 352 best 285.666 gen_best 283.69 alive_full 4/16 (105s) {'sigma': 0.012939803668980005, 'rate': 0.0}
+gen 7 used 407 best 285.666 gen_best 279.26 alive_full 1/16 (121s) {'sigma': 0.012034017412151404, 'rate': 0.0}
+gen 8 used 462 best 285.666 gen_best 283.79 alive_full 1/16 (137s) {'sigma': 0.011191636193300807, 'rate': 0.0}
+gen 9 used 527 best 285.666 gen_best 283.82 alive_full 2/16 (156s) {'sigma': 0.010408221659769751, 'rate': 0.0}
+gen 10 used 593 best 285.666 gen_best 283.77 alive_full 1/16 (176s) {'sigma': 0.009679646143585869, 'rate': 0.0}
+gen 11 used 644 best 285.666 gen_best -26.10 alive_full 0/16 (191s) {'sigma': 0.009002070913534858, 'rate': 0.0}
+gen 12 used 692 best 285.666 gen_best 285.45 alive_full 2/16 (205s) {'sigma': 0.008371925949587418, 'rate': 0.0}
+gen 13 used 753 best 285.666 gen_best 285.67 alive_full 3/16 (223s) {'sigma': 0.007785891133116299, 'rate': 0.0}
+gen 14 used 809 best 285.666 gen_best 285.17 alive_full 2/16 (241s) {'sigma': 0.0072408787537981585, 'rate': 0.0}
+gen 15 used 871 best 285.666 gen_best 284.37 alive_full 1/16 (260s) {'sigma': 0.006734017241032288, 'rate': 0.0}
+gen 16 used 955 best 285.666 gen_best 285.19 alive_full 4/16 (283s) {'sigma': 0.006262636034160028, 'rate': 0.0}
+gen 17 used 1027 best 285.666 gen_best 285.22 alive_full 2/16 (305s) {'sigma': 0.005824251511768827, 'rate': 0.0}
+gen 18 used 1076 best 285.666 gen_best 283.74 alive_full 1/16 (320s) {'sigma': 0.005416553905945009, 'rate': 0.0}
+gen 19 used 1132 best 285.666 gen_best -42.79 alive_full 0/16 (335s) {'sigma': 0.005037395132528859, 'rate': 0.0}
+gen 20 used 1186 best 285.666 gen_best 283.60 alive_full 1/16 (351s) {'sigma': 0.004684777473251839, 'rate': 0.0}
+gen 21 used 1243 best 285.666 gen_best 282.74 alive_full 2/16 (369s) {'sigma': 0.00435684305012421, 'rate': 0.0}
+gen 22 used 1306 best 285.666 gen_best -30.25 alive_full 0/16 (386s) {'sigma': 0.004051864036615516, 'rate': 0.0}
+gen 23 used 1368 best 285.666 gen_best 285.29 alive_full 2/16 (405s) {'sigma': 0.00376823355405243, 'rate': 0.0}
+gen 24 used 1437 best 286.318 gen_best 286.32 alive_full 4/16 (427s) {'sigma': 0.004333468587160294, 'rate': 0.125}
+gen 25 used 1495 best 286.318 gen_best 282.85 alive_full 1/16 (443s) {'sigma': 0.004030125786059074, 'rate': 0.125}
+Process SpawnPoolWorker-1:
+Traceback (most recent call last):
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/pool.py", line 131, in worker
+    put((job, i, result))
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/queues.py", line 399, in put
+    self._writer.send_bytes(obj)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 200, in send_bytes
+    self._send_bytes(m[offset:offset + size])
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 420, in _send_bytes
+    self._send(header)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 384, in _send
+    n = write(self._handle, buf)
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+BrokenPipeError: [Errno 32] Broken pipe
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/pool.py", line 136, in worker
+    put((job, i, (False, wrapped)))
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/queues.py", line 399, in put
+    self._writer.send_bytes(obj)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 200, in send_bytes
+    self._send_bytes(m[offset:offset + size])
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 427, in _send_bytes
+    self._send(header + buf)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 384, in _send
+    n = write(self._handle, buf)
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+BrokenPipeError: [Errno 32] Broken pipe
+Process SpawnPoolWorker-4:
+Traceback (most recent call last):
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/pool.py", line 131, in worker
+    put((job, i, result))
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/queues.py", line 399, in put
+    self._writer.send_bytes(obj)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 200, in send_bytes
+    self._send_bytes(m[offset:offset + size])
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 420, in _send_bytes
+    self._send(header)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 384, in _send
+    n = write(self._handle, buf)
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+BrokenPipeError: [Errno 32] Broken pipe
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/pool.py", line 136, in worker
+    put((job, i, (False, wrapped)))
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/queues.py", line 399, in put
+    self._writer.send_bytes(obj)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 200, in send_bytes
+    self._send_bytes(m[offset:offset + size])
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 427, in _send_bytes
+    self._send(header + buf)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 384, in _send
+    n = write(self._handle, buf)
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+BrokenPipeError: [Errno 32] Broken pipe
+Process SpawnPoolWorker-3:
+Traceback (most recent call last):
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/pool.py", line 131, in worker
+    put((job, i, result))
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/queues.py", line 399, in put
+    self._writer.send_bytes(obj)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 200, in send_bytes
+    self._send_bytes(m[offset:offset + size])
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 420, in _send_bytes
+    self._send(header)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 384, in _send
+    n = write(self._handle, buf)
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+BrokenPipeError: [Errno 32] Broken pipe
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/pool.py", line 136, in worker
+    put((job, i, (False, wrapped)))
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/queues.py", line 399, in put
+    self._writer.send_bytes(obj)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 200, in send_bytes
+    self._send_bytes(m[offset:offset + size])
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 427, in _send_bytes
+    self._send(header + buf)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 384, in _send
+    n = write(self._handle, buf)
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+BrokenPipeError: [Errno 32] Broken pipe
+/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/resource_tracker.py:279: UserWarning: resource_tracker: There appear to be 6 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '

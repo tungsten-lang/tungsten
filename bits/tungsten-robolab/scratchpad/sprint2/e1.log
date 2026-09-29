@@ -1,0 +1,7 @@
+hsearch sprint_touch_v4x: es, 73 tunables, budget 2400 rollouts, seeds [(15, None), (13, None), (2, None), (0, None), (1, None), (3, None), (4, None), (5, None), (6, None), (7, None), (8, None), (9, None), (10, None), (11, None), (12, None), (14, None), (16, None), (17, None), (18, None)]
+start -369.658 (19 rollouts)
+gen 1 used 370 best -354.864 gen_best -354.86 alive_full 16/24 (105s) {'sigma': 0.023, 'rate': 1.0}
+gen 2 used 575 best -353.894 gen_best -353.89 alive_full 3/24 (155s) {'sigma': 0.026449999999999998, 'rate': 1.0}
+gen 3 used 799 best -349.547 gen_best -349.55 alive_full 7/24 (243s) {'sigma': 0.030417499999999997, 'rate': 1.0}
+/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/resource_tracker.py:279: UserWarning: resource_tracker: There appear to be 6 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '

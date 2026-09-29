@@ -1,0 +1,18 @@
+#!/bin/sh
+# es.sh NAME INIT SEEDS BUDGET WORKERS ATTRS [SIGMA] [SECONDS]  -- ES on the gear-5 twins (flying starts of the snapshot set in $ROBOLAB_SNAP), resumable via --init
+# Outputs scratchpad/sprint2/NAME.{log,txt,jsonl,npz,pid}. Controller: $ROBOLAB_CONTROLLER (default the frozen run_gear-v4c). Env of the body: scratchpad/sprint2/env.sh.
+cd /Users/erik/tungsten/bits/tungsten-robolab || exit 1
+. scratchpad/sprint2/env.sh
+NAME=$1; INIT=$2; SEEDS=$3; BUDGET=$4; WORKERS=$5; ATTRS=$6; SIGMA=${7:-0.02}; SECS=${8:-24}
+export RUN_NATURAL_START=${RUN_NATURAL_START:-flying}
+export ROBOLAB_CONTROLLER=${ROBOLAB_CONTROLLER:-bin/challengers/run_gear-v4c}
+G=${GEAR:-5}
+EXCL="g${G}_v0,g${G}_accel,g${G}_d_go,g${G}_drv0_knee,g${G}_drv0_ankle,g${G}_drv0_hip,g${G}_psi0,g${G}_k0,g${G}_t0_max,g${G}_v_tau,g${G}_lean_acc,g${G}_drv_floor,g${G}_drv_knee,g${G}_drv_ankle,g${G}_drv_gas,g${G}_drv_ham,g${G}_drv_hip,g${G}_drv_swh,g${G}_psi_drive,g${G}_k_drive,g${G}_t_drive,g${G}_t_soft,g${G}_t_stance,g${G}_t_swing,g${G}_t_kext,g${G}_t_kdur,g${G}_t_step_min,g${G}_k_syn,g${G}_k_trail"
+BOX="g${G}_z_ref=0.6:1.0,g${G}_k_land=-0.2:0.9,g${G}_t_push_max=0.03:0.3,g${G}_a_push=0.2:1.3,g${G}_k_late=0.3:3.0,g${G}_g_kl=0.1:2.5,g${G}_hip_lead=0:0.3,g${G}_vz_push=-0.8:0.4,g${G}_k_fly=0:3,g${G}_elbow=0.3:3.0,g${G}_psi_to=-1.0:0.2,g${G}_k_push=0:0.8,g${G}_psi_reach=-0.3:0.9,g${G}_k_reach=0:0.9"
+[ -n "$EXTRA_BOX" ] && BOX="$BOX,$EXTRA_BOX"
+EXCL_EXTRA=${EXCL_EXTRA:+,$EXCL_EXTRA}
+nohup .venv/bin/python -u playground/hsearch.py sprint_touch_v4x --method es --agg ${AGG:-min} --lam ${LAM:-0} --budget $BUDGET --workers $WORKERS --sigma $SIGMA --seconds $SECS \
+  --seeds $SEEDS --attrs "$ATTRS" --init $INIT --only "g${G}_*" --exclude "$EXCL$EXCL_EXTRA" --box "$BOX" \
+  --out scratchpad/sprint2/$NAME.txt --log scratchpad/sprint2/$NAME.jsonl --archive scratchpad/sprint2/$NAME.npz > scratchpad/sprint2/$NAME.log 2>&1 &
+echo $! > scratchpad/sprint2/$NAME.pid
+echo "started $NAME pid $(cat scratchpad/sprint2/$NAME.pid)"

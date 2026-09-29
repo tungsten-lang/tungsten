@@ -40,12 +40,28 @@ def cascade_job(job):
     below `bar` (it can no longer beat the incumbent). A seed spec is (seed, gate_seconds): a plain seed runs the
     full horizon and its score enters the minimum; a GATE runs a short horizon (gate_seconds) and only counts if
     the candidate falls in it (then its low score is the candidate's score): a cheap screen for known hard starts.
-    Returns (score, seeds run, metrics of the first full rollout)."""
-    task, params, specs, seconds, attrs, bar = job
+    Returns (score, seeds run, metrics of the first full rollout).
+
+    agg == "mean" (opt-in; `--agg mean`): the candidate's score is the MEAN of its seeds' scores, and a candidate stops
+    (score = that rollout's score, far below any survivor's) at its first fall. A min over many seeds is a noisy
+    statistic when every seed survives (the worst of 18 seeds moves by luck with every small mutation, so a sparse
+    mutation of a good gait almost never passes); the mean moves smoothly and the fall rule keeps the robustness."""
+    task, params, specs, seconds, attrs, bar = job[:6]
+    agg = job[6] if len(job) > 6 else "min"
     score, first, ran = np.inf, None, 0
+    total, count = 0.0, 0
     for seed, gate in specs:
         s, m, _ = rollout((task, params, seed, gate or seconds) + ((attrs,) if attrs else ()))
         ran += 1
+        if agg == "mean":
+            if m.get("fell"):
+                return float(s), ran, first if first is not None else m
+            if not gate:
+                total += s
+                count += 1
+                if first is None:
+                    first = m
+            continue
         if gate:
             if m.get("fell"):
                 score = min(score, s)
@@ -55,17 +71,20 @@ def cascade_job(job):
                 first = m
         if score < bar:
             break
+    if agg == "mean":
+        return float(total / max(1, count)), ran, first
     return float(score), ran, first
 
 
 class Cascade:
-    def __init__(self, pool, rep, task, seeds, seconds, attrs):
+    def __init__(self, pool, rep, task, seeds, seconds, attrs, agg="min"):
         self.pool, self.rep, self.task, self.seeds, self.seconds, self.attrs = pool, rep, task, seeds, seconds, attrs
+        self.agg = agg
 
     def evaluate(self, X, bar):
         """Scores (min over the seeds each candidate survived to), seeds run, rollouts used, metrics of the
         first seed. Each candidate runs its seeds in one worker and stops when its running minimum is < bar."""
-        jobs = [(self.task, self.rep.decode(np.clip(x, 0, 1)), self.seeds, self.seconds, self.attrs, bar) for x in X]
+        jobs = [(self.task, self.rep.decode(np.clip(x, 0, 1)), self.seeds, self.seconds, self.attrs, bar, self.agg) for x in X]
         res = self.pool.map(cascade_job, jobs, chunksize=1)
         score = np.array([r[0] for r in res])
         ran = np.array([r[1] for r in res])
@@ -141,6 +160,7 @@ def main():
     ap.add_argument("--exclude")
     ap.add_argument("--attrs")
     ap.add_argument("--box")
+    ap.add_argument("--agg", default="min", choices=["min", "mean"], help="min: worst seed with pruning (default); mean: mean score, a candidate dies at its first fall")
     ap.add_argument("--out", required=True)
     ap.add_argument("--log")
     ap.add_argument("--archive")
@@ -170,7 +190,7 @@ def main():
     t0 = time.time()
     X_all, F_all, R_all = [], [], []
     with mp.Pool(a.workers) as pool:
-        cas = Cascade(pool, rep, a.task, seeds, a.seconds, attrs)
+        cas = Cascade(pool, rep, a.task, seeds, a.seconds, attrs, a.agg)
         nfull = len(seeds)
         # the incumbent: the start, every seed
         s, ran, used, met = cas.evaluate(np.array([rep.x0]), -np.inf)

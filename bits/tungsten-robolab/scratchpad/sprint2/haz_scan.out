@@ -1,0 +1,10 @@
+=== x5a (params/run_gearx_v4_p95_x5a.txt) seeds 251-330
+seeds 251-290: falls 3/40 [(255, 26.544), (259, 22.248), (262, 21.616)]
+  peak mean 8.301 min 8.147 max 8.341
+seeds 291-330: falls 0/40 []
+  peak mean 8.309 min 8.249 max 8.359
+=== x5c = x5a with g5_a_reach -0.33, seeds 251-330
+seeds 251-290: falls 2/40 [(255, 21.488), (262, 21.616)]
+  peak mean 8.366 min 8.256 max 8.403
+seeds 291-330: falls 4/40 [(293, 21.744), (298, 28.072), (311, 21.42), (316, 25.548)]
+  peak mean 8.366 min 8.239 max 8.435

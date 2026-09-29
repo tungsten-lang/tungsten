@@ -1986,18 +1986,18 @@
   }
  },
  "long_jump_p95": {
-  "controller": "/Users/erik/tungsten/bits/tungsten-robolab/bin/challengers/long_jump_run-b9",
-  "frozen_controller": "bin/champions/long_jump_p95-20260928-064328",
-  "frozen_params": "playground/arena/params/long_jump_p95-20260928-064328.txt",
-  "note": "ideal-control take-off distilled into knots on the 7.02 m/s p95 runner (sprint_top_speed_p95 champion 03:53): long_jump_limits.py ideal from this runner's own approach state (4.93 m ballistic ceiling, vx 6.27 vz 2.89 contact 0.112 s), distilled into quintic contraction + drive knots latched on the plant touchdown (j_ik), robust closed-loop re-optimisation over 12 captured perturbed approaches (450k simulations, mean 4.66 m ballistic from the board), the hang/reach chunk landing; run-up steering j_st_w 1.5, check mark 37.49 m (task long_jump_p95e, j_board_shift 1.11)",
-  "params": "params/long_jump_p95_ik3.txt",
+  "controller": "/Users/erik/tungsten/bits/tungsten-robolab/bin/challengers/long_jump_run-b19c",
+  "frozen_controller": "bin/champions/long_jump_p95-20260929-032249",
+  "frozen_params": "playground/arena/params/long_jump_p95-20260929-032249.txt",
+  "note": "long_jump_p95 champion's take-off (ideal-control knots j_ik from the 7.02 m/s runner's own approach state, 4.93 m ballistic ceiling, params ik3) with a LANDING program learned for THIS start: il_* excitation-knot table (ORACLE-class, open-loop), sep-CMA on the nominal hand-over plus 4 noisy variants (20 generations, 2700 simulations), on a ballistic-time clock (il_tg 0.679: the program time before the sand is tg minus the COM's ballistic time to fall to 0.444 m, so the legs' tuck and reach are locked to the predicted landing instead of to the hand-over); one deterministic start, overfit to it by construction",
+  "params": "params/long_jump_p95_ik9.txt",
   "report": {
    "approach_speed": 6.787,
    "board_offset_m": -0.083,
    "contact_time_s": 0.13,
-   "effective_m": 4.978,
+   "effective_m": 5.041,
    "failed": 0.0,
-   "flight_s": 0.748,
+   "flight_s": 0.764,
    "foul_max_x": -0.072,
    "peak_speed_1s_run": 6.732,
    "speed_5m": 6.745,
@@ -2008,18 +2008,18 @@
   },
   "result": "promoted",
   "scores": [
-   4.895
+   4.958
   ],
   "summary": {
    "ci95": 0.0,
-   "mean": 4.895,
+   "mean": 4.958,
    "n": 1
   },
   "task": "long_jump_p95e",
-  "time": "2026-09-28 06:43:28",
+  "time": "2026-09-29 03:22:49",
   "trial": "long_jump_p95",
   "vs_champion": {
-   "mean_diff": 1.2129999999999996,
+   "mean_diff": 0.06300000000000061,
    "n": 1,
    "p": null,
    "wins": true

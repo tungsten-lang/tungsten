@@ -104,3 +104,14 @@ Load on the machine: ~50-100 (18 cores); at most 3 rollout workers, one search a
   tracking (pelvis retreats to cancel the arm's forward reach), hit rate -7 points.
 - job queue: scratchpad/tt/qd.py + jobs.jsonl (daemon pid see out/tt_r10/qd.out, waits for queue1.sh pid 68293). Queue1 = vc_pv2, batch3 (v_ffz, v_ffzn, v_consol, v_tservo20),
   v_zb03_600; then jobs.jsonl: v_wf55/40/25 (forehand ready wrist flexion), v_hxpad05/10/10_xhi22.
+
+## Batch 3 (champion binary, params only; seeds 710000:710120; playground/tt_summ.py summaries)
+
+- v_ffz (`g_ffz=1,ff_z=1.32,ff_n=(0.91,0.21,-0.36)`, height anticipation from the first plan): 26/120 (fh 12/48 vs 20; bh unchanged). Pad ends lower (z at contact 1.148 vs 1.197): worse.
+- v_ffzn (+ `g_ffn=1`, normal anticipation): 29/120 (fh 15/48). Forehand pitch error to the aim improves (+2.0 +- 7.1 vs -3.4 +- 8.9 deg) but the ball meets the pad 7.9 cm above its
+  centre (champion 4.4): the anticipation lowers the pad; would need z_bias re-centring.
+- Forehand pose time course (champion; 63 serves): pitch -34 (0.1 s), -22.6 (0.2), -21 (0.3), -16.8 +- 7.5 (0.4), -15.5 +- 10.5 (0.45), -10 +- 12 (contact): the
+  spread is created in the last 0.15 s by the servo's late sweep (face rate 70 +- 55 deg/s at contact). Backhand: yaw +59 (0.2 s) -> -70 (0.3) -> -22 (0.4) -> -5 +- 14 (contact),
+  pitch -8 -> -15 -> -19 -> +1.5 +- 12.8, face rates 103 +- 120 / 58 +- 77 deg/s at contact: an overshoot-and-return transient, phase-dependent.
+- Success by crossing y (at x = 1.75): far left (< -0.5, n 95) 8 % solved (18 % pad below the ball), y 0.3..0.5 (n 67) 61 %, far right (> 0.5, n 129) 33 % (21 % below the ball).
+- v11d (r10-d): pv 3 (predictive pelvis: arm-relative velocity carried to contact; pelvis terminal velocity so the PAD's velocity along its normal is u).

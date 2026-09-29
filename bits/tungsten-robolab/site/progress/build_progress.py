@@ -402,7 +402,7 @@ def build():
         ("run-natural", "Natural running", "done", "7.3° from human running, 12 starts"),
         ("sprint", "Sprint", "run", f"{V('sprint_top_speed_p95')} m/s, 95th pct."),
         ("blocks", "Sprint from blocks", "done", f"30 m in {V('sprint_blocks_30')} s · Bolt 3.78"),
-        ("longjump", "Long jump", "run", f"4.90 m best · {V('long_jump_p95_robust')} m robust"),
+        ("longjump", "Long jump", "run", f"{V('long_jump_p95', 2)} m best (one start) · {V('long_jump_p95_robust')} m robust"),
         ("standing", "Standing jump", "done", f"{V('search_jump_legal', 3)} m legal · {V('search_jump_robust_legal', 3)} robust"),
         ("hurdles", "Hurdles", "stuck", "0.762 m: 4 of 8 clear hurdle 1"),
         ("bat", "Baseball swing", "run", "21.6 m/s, reflexes on, athlete body"),
@@ -437,7 +437,7 @@ def build():
              "Ceiling with perfect control on v4: 10.45 (95th pct.). Recreationally active adults 7.8, trained sprinters 9.9.",
              "Only the average body has a v4 runner so far. 10 m/s needs 96% of the 95th-percentile v4 ceiling."],
             ["Long jump with the best runner, then beyond human",
-             f"4.90 m on one start, the start its take-off was designed from (95th-percentile body, 7.02 m/s runner). Over 16 perturbed starts: {V('long_jump_p95_robust')} m (95th pct., 6.94 m/s runner), {V('long_jump_elite2_robust')} m (elite), {V('long_jump_robust')} m (average). The jumper flips over after landing; the mark is legal.",
+             f"{V('long_jump_p95', 2)} m on one start, the start its take-off and landing were designed from (95th-percentile body, 7.02 m/s runner; oracle-class, overfit to that start). Over 16 perturbed starts: {V('long_jump_p95_robust')} m (95th pct., 6.94 m/s runner), {V('long_jump_elite2_robust')} m (elite), {V('long_jump_robust')} m (average); on 96 fresh starts the robust champion averages 3.27 m.",
              "Untrained men 4.95 m, high-school qualifiers 6.07–6.65 m, world record 8.95 m",
              "In a landing search on a program not yet entered, 3 of 32 captured take-offs roll over and 2 foul (a timing problem, diagnosed 01:30). The ideal take-off from the 7.02 m/s runner's approach reaches 4.93 m."],
             ["Table tennis phase 2 above 90%",
@@ -453,7 +453,7 @@ def build():
              "2025 winner 32% on phase 2",
              "The kick fails from a settled stance, and this body cannot walk upright: its spine folds."],
             ["Improve robolab",
-             f"{n_trials} arena trials ({n_champs} with a champion), a calibrated v4 body, a MyoSuite relocate bug found, two compiler fixes being merged.",
+             f"{n_trials} arena trials ({n_champs} with a champion), a calibrated v4 body, a MyoSuite relocate bug found, two compiler fixes merged into main.",
              "–",
              "See what is running, near the end."],
         ], wide=True)
@@ -463,7 +463,7 @@ def build():
         "c-sprint", "Sprint speed", "m/s", 15, [0, 3, 6, 9, 12],
         [
             dict(label="Average body", sub="best on the v3 body", value=F("sprint_top_speed"), ceiling=8.2, kind="ours",
-                 tip="Ceiling with perfect control and a free torso: 6.89 on the v3 body, 8.2 on v4. A first v4 runner is in the arena at 4.65."),
+                 tip=f"Ceiling with perfect control and a free torso: 6.89 on the v3 body, 8.2 on v4. The v4 runner in the arena is at {V('sprint_top_speed_v4')} m/s."),
             dict(label="95th percentile", sub="best on the v3 body", value=F("sprint_top_speed_p95"), ceiling=10.45, kind="ours",
                  tip="Ceiling with perfect control and a free torso: 9.69 on the v3 body, 10.45 on v4."),
             dict(label="Elite, literature", sub="best on the v3 body", value=F("sprint_top_speed_elite2"), ceiling=9.28, kind="ours",
@@ -484,7 +484,7 @@ def build():
             dict(label="95th pct., 16 starts", sub="6.94 m/s runner", value=F("long_jump_p95_robust"), ceiling=4.61, kind="ours",
                  tip="Ceiling 4.61 m is the ideal take-off from this runner's own approach."),
             dict(label="95th pct., one start", sub="7.02 m/s runner", value=F("long_jump_p95"), ceiling=4.93, kind="ours", nd=3,
-                 tip="The start its take-off was designed from (ideal take-off 4.93 m). The jumper flips over after landing; the mark is legal."),
+                 tip="The start its take-off and landing were designed from (ideal take-off 4.93 m; the landing reaches forward, so the mark can pass it). Oracle-class, overfit to this start."),
             dict(label="Elite, literature", sub="16 perturbed starts", value=F("long_jump_elite2_robust"), ceiling=4.25, kind="ours",
                  tip="One-start champion 4.01 m. Ceiling 4.25 m from its 6.6 m/s approach."),
             dict(label="Elite, old profile", sub="16 starts, provisional", value=F("long_jump_elite_robust"), kind="ours",
@@ -547,7 +547,7 @@ def build():
                   "The champion on the 95th-percentile body from a standing start.")],
              [f"Full drive on the prime movers, with the opposing muscles scaled down as their partners fire (reciprocal inhibition, k 0.5), latched on each foot. **{V('sprint_top_speed_p95')} m/s** on the 95th-percentile body, {V('sprint_top_speed_elite2')} on the literature elite body, {V('sprint_top_speed')} on the average body. The inhibition is worth +0.12 m/s on every start, and without it the gait falls in 4.4 to 5.6 seconds.",
               "An earlier ceiling of about 10.2 m/s for the 95th-percentile body rested on an ideal torso stabiliser that applies up to 3.9 kN·m in a 0.12 s stance, where the stance hip's muscles give at most 185 N·m. Ceilings are now computed with the torso free. On the original body that put the average runner's ceiling at 6.89 m/s, below the 7.8 of recreationally active adults, so the body model was calibrated against published data (the v4 body, below). On v4 the ceilings are 8.2, 10.45 and 9.28 m/s.",
-              f"The first v4 runner (average body) is in the arena at **{V('sprint_top_speed_v4')} m/s** on {passes('sprint_top_speed_v4')} starts, {100 * F('sprint_top_speed_v4') / 8.2:.0f}% of its ceiling. It lands on a nearly straight leg, and on some starts it settles into a slower gait."],
+              f"The v4 runner (average body) is in the arena at **{V('sprint_top_speed_v4')} m/s** on {passes('sprint_top_speed_v4')} starts, {100 * F('sprint_top_speed_v4') / 8.2:.0f}% of its ceiling. It is a bent-knee gait found by starting the search from the 95th-percentile v4 gait, and it replaced a straight-leg gait that stopped at 4.65 m/s (57%). 22 of 24 held-out and arena starts survive 30 s."],
              table(["Body", "Best on v3", "v3 ceiling", "v4 runner", "v4 ceiling"],
                    [["Average", f"#{V('sprint_top_speed')}", "#6.89", f"#{V('sprint_top_speed_v4')}", "#8.2"],
                     ["95th percentile", f"#{V('sprint_top_speed_p95')}", "#9.69", "#" + (V('sprint_top_speed_v4_p95') if scores_ok('sprint_top_speed_v4_p95') else "–"), "#10.45"],
@@ -571,11 +571,11 @@ def build():
     ]
 
     jump_cards = [
-        card("longjump", "Long jump", [chip("run")],
-             [vid("long_jump_v5_p95.mp4", out("long_jump_v5_p95.mp4"), "Long jump on the 95th-percentile body, 4.9 m",
-                  "The one-start champion: 4.895 m, the start its take-off was designed from. The mark is the left foot and is legal, but the jumper flips over after landing. Take-off, flight and landing play at quarter speed.")],
+        card("longjump", "Long jump", [chip("run"), chip("study", "One start is oracle-class")],
+             [vid("long_jump_v6_p95.mp4", out("long_jump_v6_p95.mp4"), "Long jump on the 95th-percentile body, 4.96 m",
+                  "The one-start champion since 29 Sep: 4.958 m (was 4.895). The nearest mark is the right hand and the jumper falls over backwards after landing; the mark is legal under the rules as scored. Take-off, flight and landing play at quarter speed.")],
              ["The run-up is the sprint champion itself. World Athletics rules are in the score: foul line on every tick of the stance, no somersault past 120° until landing is over, no touching the runway after landing, and the mark is the nearest break in the sand by any body part. The take-off comes from an ideal-control analysis of the runner's own approach, distilled into contraction knots latched on the plant touchdown.",
-              f"That took the 95th-percentile body from 3.68 to **4.895 m** on one start (99% of that start's 4.93 m ideal take-off; the 7.02 m/s runner) and from 3.22 to **{V('long_jump_p95_robust')} m** on 16 perturbed starts (a slightly slower 6.94 m/s runner, ideal take-off 4.61 m). The average body reaches {V('long_jump_robust')} m robust and 2.47 m on one start."],
+              f"That took the 95th-percentile body from 3.68 to 4.895 m on one start (99% of that start's 4.93 m ideal take-off; the 7.02 m/s runner). A landing program learned for that one start, on a clock locked to the predicted landing, then took it to **{V('long_jump_p95', 3)} m**. That landing is an open-loop excitation table, so it is oracle-class and overfit to the start by construction: on 96 fresh starts the robust champion averages 3.27 m (90 of 96 legal). On 16 perturbed starts the 95th-percentile body went from 3.22 to **{V('long_jump_p95_robust')} m** (a slightly slower 6.94 m/s runner, ideal take-off 4.61 m). The average body reaches {V('long_jump_robust')} m robust and 2.47 m on one start."],
              table(["Body", "One start", "16 starts", "Ideal take-off"],
                    [["Average", "#2.47", f"#{V('long_jump_robust')}", "#–"],
                     ["95th percentile", f"#{V('long_jump_p95', 3)}", f"#{V('long_jump_p95_robust')}", "#4.93 / 4.61"],
@@ -710,7 +710,7 @@ def build():
             ["Long jump (agent L)", "A landing search on a program not yet entered: 3 of 32 captured take-offs roll over and 2 foul. Diagnosed at 01:30 as a timing problem of a fixed-time landing program; a ballistic-time clock scan gives 0 roll-overs on the 30 legal take-offs, with marks of 4.6 to 4.98 m.", "Enter it on the 16-start trial; a v4 family after a v4 sprinter"],
             ["Balance and soccer (agent O)", "New 40-start trial `soccer_single_leg_310_40` is seeding. The lift challenger holds 20 s on 35 of 40; five fail (details under One-leg balance).", "Ablations of the hip strategy on the failing seeds"],
             ["Table tennis above 90% (agent T)", "Started 29 Sep after your go-ahead.", "Long practice of the tracked arm; inverse posture map"],
-            ["Compiler fixes", "Being ported onto today's main in an isolated worktree, with the stage-identity check and the spec suite, then merged.", "Land on main"],
+            ["Compiler fixes", "Done: merged into main (032bab4e5) after a full compiler build, the stage-identity check against a baseline (the same 988 differing lines as unmodified main, identical after normalising hashes) and the spec lanes with no regression. It also fixed a use-after-free with unicode parameter names.", "Rebuild the shared compiler (bin/tungsten build) to activate them"],
             ["Landing robolab on main", "Done: main fast-forwarded to 3c5c513e4 (1,761 files, all under bits/tungsten-robolab) after a check from a fresh worktree: 8 controllers built in full, the other 47 through the compiler front end with no errors, byte-identical rebuilds, arena rollouts equal to the recorded scores, SDK spec 90 of 90.", "Later work lands on request"],
             ["MyoSuite relocate bug report", "Filed: github.com/MyoHub/myosuite/issues/416, with a minimal reproduction and a two-line fix that removes the mismatch (0 of 300 starts overlapping the invisible receptacle after it, 87 of 300 before).", "Watch for a reply"],
             ["Dribble through the legs, bat speed, runner, hurdles, relocate", "Written up in the handoff for Codex to pick up (bits/tungsten-robolab/HANDOFF_20260929.md)", "Codex chooses"],
@@ -725,7 +725,7 @@ def build():
             ["A natural runner: power leg extended, other knee and arm up", "Built and improved: 7.3° from human running (was 9.1°) on the 12-start trial."],
             ["Batter hitch, before and after contact", "After contact: fixed for the 13.9 m/s v5 swing (the stall was the wrist and the pelvis hitting their joint limits). The 21.6 m/s knots swing has a pause before the swing again (50 ms; it fails the guard-clean trial on 2 of 24 pitches)."],
             ["Dribble: a visible crossover, less back, more elbow, fingers", "Crossover 7.52 per 15 s run. The trunk still pumps. The fingered hand is built (opt-in); no evidence of a gain yet, and Codex's fingered-hand search is running."],
-            ["A better long-jump run and take-off", "4.9 m on one start; the sprinter is the run-up."],
+            ["A better long-jump run and take-off", "4.96 m on one start (oracle-class, overfit to that start); 3.92 m over 16 perturbed starts. The sprinter is the run-up."],
             ["Hurdles at high-school height", "At 0.991 m: the lead leg clears and the trail leg catches at the first hurdle. At 0.762 m: hurdle 1 cleared on 4 of 8 starts. Waiting on run-up speed."],
             ["Table tennis backhand, wrist flick, chop, low scoop", "The backhand exists (23% of backhand serves solved). Chop, flick and scoop were measured with real ball spin: the best chop lands 3 of 11, the flick 0 of 20, the scoop 2 of 20."],
             ["Soccer kick with the inside of the foot", "Not yet: the best attempt strikes with the toes."],
@@ -763,7 +763,7 @@ def build():
         '<li>Chunk spring times, joint corrections at limits and a dead tuning parameter were fixed in the SDK; <span class="mono">branch</span>, <span class="mono">followed_by</span>, <span class="mono">stagger</span> and <span class="mono">via</span> keyframes were added.</li>'
         '<li>Internal-model gravity feed-forward, a clamped reflex integral (postural tone), exact posture-to-contraction geometry for coupled joints and optional articulated fingers.</li>'
         '<li>Knot trains (<span class="mono">RunKnotsSkill</span>): a stride as quintic knots at its gait events, fitted with zero rollouts to 0.1 to 0.6° and 20 to 90 times better than min-jerk keyframes at the same events.</li>'
-        '<li>Two compiler fixes are being ported onto the current main and merged: methods with more than 8 parameters, and parameters named t0 or t1 colliding with LLVM temporaries (which also fixed a use-after-free).</li>'
+        '<li>Two compiler fixes are merged into main: methods with more than 8 parameters, and parameters named t0 or t1 colliding with LLVM temporaries (which also fixed a use-after-free).</li>'
         '</ul></div></div>')
 
     # ------------------------------------------------------------ assemble -----------
@@ -795,7 +795,7 @@ def build():
 
   {section("Bodies", "The bodies the results run on", "Each card names its body. Bodies are opt-in, and the older ones reproduce exactly.", bodies)}
   {section("Independent challengers · Codex", "A second team's results", "Codex runs its own matched-budget challenger campaign in a separate worktree. The middle column is its own report; the right column is what this arena did with it.", codex)}
-  {section("Working now", "What is running", "The Codex jump and crossover champions ran here on 29 Sep and were promoted (see the Codex table), and robolab is on main. The compiler merge, table tennis and the four campaign agents are in progress.", working)}
+  {section("Working now", "What is running", "The Codex jump and crossover champions ran here on 29 Sep and were promoted (see the Codex table), robolab is on main, and the compiler fixes are merged. Table tennis and the three campaign agents are still running.", working)}
   {section("Your requests", "Every request and where it stands", "", requests)}
   {section("Search methods · finished", "Genetic, random walk, or something else?", "Thirteen optimizers behind one interface, equal rollout budgets, several seeds and held-out re-checks, on a jump, push-recovery balance on the 80-muscle leg, and refining the run.", search)}
   {section("Under the hood", "", "", hood)}
@@ -826,7 +826,7 @@ def local_sources():
 
 
 # Publish limit: 64 MB per call, so the videos go up in two batches (the page reloads with each).
-BATCH_A = ["codex_jump_robust_r7.mp4", "run_knots.mp4", "sprint_p95_ri.mp4", "sprint_blocks.mp4", "sprint_touch.mp4", "long_jump_v5_p95.mp4",
+BATCH_A = ["codex_jump_robust_r7.mp4", "run_knots.mp4", "sprint_p95_ri.mp4", "sprint_blocks.mp4", "sprint_touch.mp4", "long_jump_v6_p95.mp4",
            "codex_standing_jump.mp4", "hurdle_hs_076.mp4", "bat_v6_knots.mp4", "bat_v6.mp4", "dribble_btl.mp4",
            "codex_crossover.mp4"]
 

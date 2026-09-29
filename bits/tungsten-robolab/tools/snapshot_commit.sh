@@ -42,6 +42,14 @@ rel=bits/tungsten-robolab
 
 git rev-parse --verify -q "refs/heads/$BR" >/dev/null || { echo "branch $BR does not exist" >&2; exit 1; }
 OLD=$(git rev-parse "refs/heads/$BR")
+# Other sessions commit to main. When main has moved on from the branch tip (the branch tip is its ancestor), build the
+# snapshot on main's tip so the branch stays a fast-forward of main and landing is a fast-forward too.
+BASE=$OLD
+MAIN=$(git rev-parse -q --verify refs/heads/main || true)
+if [ -n "$MAIN" ] && [ "$MAIN" != "$OLD" ] && git merge-base --is-ancestor "$OLD" "$MAIN"; then
+  BASE=$MAIN
+  echo "building on main ($MAIN), which is ahead of $BR"
+fi
 
 LIST=$(mktemp /tmp/robolab_snapshot_files.XXXXXX)
 FORCE=$(mktemp /tmp/robolab_snapshot_force.XXXXXX)
@@ -112,7 +120,7 @@ sys.stdout.buffer.write("\0".join(keep).encode())
 fi
 
 export GIT_INDEX_FILE="$IDX"
-git read-tree "$OLD"
+git read-tree "$BASE"
 if [ "$MODE" = only ]; then
   [ -s "$LIST" ] && git add -f --pathspec-from-file="$LIST" --pathspec-file-nul
 else
@@ -123,18 +131,22 @@ fi
 TREE=$(git write-tree)
 unset GIT_INDEX_FILE
 
-if [ "$TREE" = "$(git rev-parse "$OLD^{tree}")" ]; then
-  echo "nothing new to snapshot (tree equals $BR)"
+if [ "$TREE" = "$(git rev-parse "$BASE^{tree}")" ]; then
+  if [ "$BASE" != "$OLD" ] && [ "$DRY" != 1 ]; then
+    git update-ref "refs/heads/$BR" "$BASE" "$OLD"
+    echo "$BR fast-forwarded to main"
+  fi
+  echo "nothing new to snapshot (tree equals ${BASE:0:9})"
   exit 0
 fi
-git diff-tree --stat -r --no-color "$OLD" "$TREE" | tail -1
+git diff-tree --stat -r --no-color "$BASE" "$TREE" | tail -1
 if [ "$DRY" = 1 ]; then
   echo "dry run: nothing written"
   exit 0
 fi
 
 [ -n "$MSG" ] || MSG="robolab: snapshot $(date '+%Y-%m-%d %H:%M')"
-NEW=$(git commit-tree "$TREE" -p "$OLD" -m "$MSG")
+NEW=$(git commit-tree "$TREE" -p "$BASE" -m "$MSG")
 git update-ref "refs/heads/$BR" "$NEW" "$OLD"
 echo "$BR: $OLD -> $NEW"
 git log --oneline -1 "$BR"

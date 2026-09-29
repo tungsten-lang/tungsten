@@ -68,3 +68,8 @@ All campaign state lives in the repo (scratchpad/sprint_knot/, out/, params/). N
   a2 (avg) on 40 fresh seeds 71-110: 4 falls, ALL at 4-5 s (seeds 84, 89, 90, 105): a start-phase problem, not trips.
   hsearch gained GATE seeds ("84g10" = run 10 s and count only if the candidate falls) and sprint_touch_v4 gained the practice attribute start_noise (default 1.0 = arena).
   a3 = avg robust stage: ES from a2, gates 84,89,90,105 (10 s) + full seeds 31-34 (30 s), objective 2, budget 3000.
+- 03:32 (clock) h3/a3 (ES + gates) both found survivors of all their hard seeds within 2 generations (h3 641, a3 548), then crawl (+3-10 points per 10 min).
+  ES improved (hsearch.py): combination of several improving offspring + one extrapolation step evaluated first next generation; archive written every 3 generations.
+  Restarted both from their bests as h4 (P95, from h3_snap 656.3, peak 7.2 on the first seed) and a4 (avg, from a3_snap 551.4).
+  elite2 e1_snap gait: 7/24 falls on 51-62 + arena seeds, 10/40 on fresh 71-110 (fall times 4,4,4,4,8,9,17,21,24,27 s): mined for a later gated stage:
+  gates 77,79,90,94 (4 s falls) 10 s; 88,93 (8-9 s) 14 s; full seeds 95,97,99,102 (late falls).

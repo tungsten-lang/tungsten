@@ -1,4 +1,3 @@
-## parity xfail `## i64` locals wrap on overflow compiled but promote to bignum interpreted (b + 1 at i64 max, d << 62)
 # Integers: `## i64` annotated locals at the i64 boundary.
 #
 # Cross-engine parity spec (scripts/parity.sh).

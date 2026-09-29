@@ -1,4 +1,3 @@
-## parity xfail block pass-through (trailing block on a block-less method iterates the result) is compiled-only; the interpreter drops the block and the counters stay 0
 # Blocks: a trailing block on a block-less method iterates the result.
 #
 # Cross-engine parity spec (scripts/parity.sh).

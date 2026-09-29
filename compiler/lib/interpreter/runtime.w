@@ -16,7 +16,15 @@
     @function_overloads = {}
     @self_stack = [nil]
     @method_stack = [nil]
-    @signal = {type: nil, value: nil}
+    # Parallel to @method_stack: each call_w_method frame gets a unique id
+    # so `return` inside a block unwinds to the method that created the
+    # block, not the iterator that invoked it (compiled non-local return).
+    @return_frames = [0]
+    @next_return_frame = 1
+    @signal = {type: nil, value: nil, frame_id: nil, has_value: false}
+    # `Math.promote` / `Math.trap` / `Math.wrap` lexical overflow mode.
+    # nil is the compiled default: wrapping i64 +/-/*, promoting untyped <<.
+    @overflow_mode = nil
     @loaded_files = []
     @current_file = nil
     @autoload_registry = nil
@@ -321,7 +329,15 @@
     result = nil
     i = 0
     while i < ast_get(program, :expressions).size()
-      result = evaluate(ast_get(program, :expressions)[i], @env)
+      begin
+        result = evaluate(ast_get(program, :expressions)[i], @env)
+      rescue err
+        if err == "__SIGNAL__" && @signal[:type] == :return && @signal[:frame_id] == 0
+          result = @signal[:value]
+          @signal[:type] = nil
+          @signal[:frame_id] = nil
+        else
+          raise err
       i += 1
     result
 
@@ -362,6 +378,11 @@
     # Assignments must coerce before storing (eval_assign owns that boundary),
     # so do not apply their hint a second time on the returned value.
     return value if hint == nil || ast_kind(node) == :assign
+    if fold_hint_text?(hint)
+      rest = fold_hint_rest_type(hint)
+      if rest == nil
+        return value
+      return apply_type_hint(value, rest)
     apply_type_hint(value, hint)
 
   -> evaluate_node(node, env)
@@ -537,9 +558,11 @@
       evaluate(ast_get(node, :expression), env)
       return evaluate(ast_get(node, :value), env)
     if t == :type_ascription
-      # evaluate() applies this wrapper's type_hint after the underlying
-      # expression has produced its ordinary value.
-      return evaluate(ast_get(node, :expression), env)
+      hint = ast_get(node, :type_hint)
+      expr = ast_get(node, :expression)
+      if fold_hint_text?(hint) && ast_kind(expr) == :block
+        return evaluate_body(ast_get(expr, :body), env)
+      return evaluate(expr, env)
     if t == :if
       return eval_if(node, env)
     if t == :while
@@ -584,13 +607,17 @@
       # its established [env, node] pair shape.
       benv = Environment.new(env)
       benv.define("__block_self__", current_self())
+      benv.define("__return_frame_id__", @return_frames.last())
       return [benv, node]
     if t == :puts
       return eval_puts(node, env)
     if t == :print
       return eval_print(node, env)
     if t == :return
-      return signal_return(evaluate_or_nil(ast_get(node, :value), env))
+      target = @return_frames.last()
+      if env.defined?("__return_frame_id__")
+        target = env.get("__return_frame_id__")
+      return signal_return(evaluate_or_nil(ast_get(node, :value), env), target)
     if t == :break
       return signal_break()
     if t == :next
@@ -660,18 +687,18 @@
       return nil
 
     # @fastmath / @strictmath scoped blocks. The tree-walker does direct
-    # floating-point arithmetic with no FMA contraction or fast-math license,
-    # so the math mode is a no-op here: the block is just a transparent scoped
-    # body. Evaluate its statements and return the last value (mirrors the
-    # compiled lower_mathmode_block, which reads node[:body] by subscript —
-    # these are plain hash nodes, not slab nodes).
-    # `Math.promote / trap / wrap` overflow-mode blocks are a transparent scoped
-    # body in the tree-walker: the interpreter does arbitrary-precision integer
-    # arithmetic, so :promote is implicit and :wrap/:trap are not yet enforced
-    # here (a known interp-vs-compiled divergence — the compiled lowering
-    # applies the mode). See [[project_math_wrap_fix]].
-    if t in (:fastmath_block :strictmath_block :overflow_block)
+    # floating-point arithmetic with no FMA contraction, so the math mode is
+    # a no-op: the block is a transparent scoped body.
+    if t in (:fastmath_block :strictmath_block)
       return evaluate_body(ast_get(node, :body), env)
+    if t == :overflow_block
+      saved_mode = @overflow_mode
+      @overflow_mode = ast_get(node, :mode)
+      begin
+        result = evaluate_body(ast_get(node, :body), env)
+      ensure
+        @overflow_mode = saved_mode
+      return result
 
     # `go -> …` spawns a goroutine. The tree-walker has no preemptive
     # scheduler, so queue the body (with its captured env) and drain it at
@@ -1123,12 +1150,33 @@
 
   # -- Helpers --
 
+  -> fold_hint_text?(text)
+    if text == nil
+      return false
+    s = ("" + text.to_s()).strip()
+    if s == "fold"
+      return true
+    s.starts_with?("fold ")
+
+  -> fold_hint_rest_type(text)
+    if text == nil
+      return nil
+    s = ("" + text.to_s()).strip()
+    if s == "fold"
+      return nil
+    if !s.starts_with?("fold ")
+      return nil
+    rest = s.slice(5, s.size() - 5).strip()
+    if rest.size() == 0
+      return nil
+    rest
+
   -> truthy?(value)
     value != nil && value != false
 
   -> w_to_s(value)
     if value == nil
-      return "nil"
+      return ""
     if value == true
       return "true"
     if value == false
@@ -1142,7 +1190,7 @@
       return value.to_s()
     if t == "Array"
       items = value.map -> (v)
-        w_inspect(v)
+        w_to_s(v)
       return "\[" + items.join(", ") + "]"
     if t == "Hash" && value.has_key?(:rt) && value[:rt] == :range
       op = value[:exclusive] ? "..." : ".."
@@ -1160,7 +1208,7 @@
             return call_w_method(value, m, [], nil, @env)
           return obj_class[:name] + " instance"
       entries = value.keys().map -> (k)
-        w_inspect(k) + ": " + w_inspect(value[k])
+        w_to_s(k) + ": " + w_to_s(value[k])
       return "{" + entries.join(", ") + "}"
     value.to_s()
 
@@ -1205,9 +1253,10 @@
 
   # -- Control flow signals --
 
-  -> signal_return(value)
+  -> signal_return(value, frame_id = nil)
     @signal[:type] = :return
     @signal[:value] = value
+    @signal[:frame_id] = frame_id
     raise "__SIGNAL__"
 
   -> signal_break

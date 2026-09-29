@@ -1,4 +1,3 @@
-## parity xfail interpreter raises "expected int, got numeric" on unary minus of a Quantity; compiled prints -3 m
 # Units and quantities: unary minus on a quantity.
 #
 # Cross-engine parity spec (scripts/parity.sh).

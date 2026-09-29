@@ -261,6 +261,7 @@
   out << declare_fn_attrs("w_float", wv, "double", "nounwind willreturn memory(none) speculatable")
   out << declare_fn("w_decimal", wv, narrow_runtime_param_types("w_decimal").join(", "))
   out << declare_fn("w_decimal_from_digits", wv, wv3)
+  out << declare_fn("w_decimal_round", wv, wv2)
   out << declare_fn("w_bigint_literal_cached", wv, "ptr, ptr")
   # Numeric->raw-double coercion for ensure_raw_f64's fallback: converts a boxed
   # double/Decimal/Int correctly (a plain bitcast-unbox only works for a genuine
@@ -274,6 +275,7 @@
   out << declare_fn("w_duration_ns", wv, "i64")
   out << declare_fn("w_duration_months_ms", wv, narrow_runtime_param_types("w_duration_months_ms").join(", "))
   out << declare_fn("w_date", wv, narrow_runtime_param_types("w_date").join(", "))
+  out << declare_fn("w_date_from_ordinal", wv, wv2)
   out << declare_fn("w_ipv4", wv, narrow_runtime_param_types("w_ipv4").join(", "))
   out << declare_fn("w_uuid_from_hex", wv, "ptr")
   out << declare_fn("w_ipv6_from_string", wv, "ptr, i32")

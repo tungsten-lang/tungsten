@@ -391,7 +391,12 @@ module Tungsten
           # explicit node so the interpreter can apply identical wrapping.
           hint = @token.value
           next_token
-          exp = TypeHint.new(exp, hint).at(exp)
+          # `## fold` names a value, never `<<` / `<-`.
+          if fold_hint_text?(hint) && (exp.is_a?(Print) || exp.is_a?(Write)) && exp.args.any?
+            exp.args[-1] = TypeHint.new(exp.args[-1], hint).at(exp.args[-1])
+          else
+            exp = TypeHint.new(exp, hint).at(exp)
+          end
         when :"="
           # Typed-target assignment: `x ## i64 = 0`. The lexer ends the hint
           # at "=", so the target arrives wrapped in TypeHint; fold the hint
@@ -1030,18 +1035,23 @@ module Tungsten
           # /method     → .map { |__x| __x.method }
           # /method(a)  → .map { |__x| __x.method(a) }
           # /method:op  → .map { |__x| __x.method }.reduce { |__a, __x| __a op __x }
+          # /Σ(poly)    → Σ(x -> poly, source)  (closed-form sum)
           next_token # consume MAP
           name = @token.value.to_s
           next_token
 
           args = parse_call_args
-          x_var = Var.new("__x")
-          body = args ? Call.new(x_var, name, args) : Call.new(x_var, name)
-          map_block = Block.new([Arg.new("__x")], body)
-          atomic = Call.new(atomic, "map", [], map_block)
+          if name == "Σ" || name == "∫"
+            atomic = rewrite_math_pipeline(atomic, name, args)
+          else
+            x_var = Var.new("__x")
+            body = args ? Call.new(x_var, name, args) : Call.new(x_var, name)
+            map_block = Block.new([Arg.new("__x")], body)
+            atomic = Call.new(atomic, "map", [], map_block)
+          end
 
           # Check for :reduce suffix
-          if @token.type?(:SYMBOL)
+          if name != "Σ" && name != "∫" && @token.type?(:SYMBOL)
             op = AST.intern_name_without_prefix(@token.value, ":")
             next_token
             a_var = Var.new("__a")
@@ -1312,6 +1322,8 @@ module Tungsten
           parse_on_guard
         when :raise
           parse_raise
+        when :recase
+          parse_recase
         when :return
           parse_return
         when :super
@@ -2210,10 +2222,17 @@ module Tungsten
         consume :"->"
       end
 
-      # Space is optional before ( for anonymous lambdas: ->(x) body
+      consumed_space = false
       if @token.type?(:SP)
         next_token
-      elsif !@token.type?(:"(")
+        consumed_space = true
+      end
+      if @token.type?(:TYPE_HINT) && fold_hint_text?(@token.value)
+        return parse_fold_block_lambda
+      end
+
+      # Space is optional before ( for anonymous lambdas: ->(x) body
+      if !consumed_space && !@token.type?(:"(")
         error "expected space or '(' after '->'"
       end
 
@@ -2535,6 +2554,36 @@ module Tungsten
       result = ch == ":" || ch == "\n" || ch == ";" || ch.nil?
       self.pos = saved_pos
       result
+    end
+
+    def fold_hint_text?(text)
+      s = text.to_s.strip
+      s == "fold" || s.start_with?("fold ")
+    end
+
+    def fold_hint_rest_type(text)
+      s = text.to_s.strip
+      return nil if s == "fold"
+      return nil unless s.start_with?("fold ")
+      rest = s[5..].strip
+      rest.empty? ? nil : rest
+    end
+
+    # tables = -> ## fold
+    #   expr1
+    #   expr2
+    def parse_fold_block_lambda
+      hint = @token.value
+      next_token
+      skip_whitespace
+      body = if @token.type?(:INDENT)
+               with_indent { parse_body }
+             else
+               parse_assignment_no_control
+             end
+      @nested_methods -= 1
+      node = Def.new(nil, nil, body)
+      TypeHint.new(node, hint).at(node)
     end
 
     # -> (a, b) a + b    anonymous lambda with named args
@@ -2962,6 +3011,10 @@ module Tungsten
         block = (@suppress_block || (is_var && !args && !@last_call_parens)) ? nil : parse_block
       end
 
+      if (name == "Σ" || name == "∫") && args
+        args = math_fn_rewrite(name, args)
+      end
+
       node = if block
                Call.new(nil, name, args || [], block, parens: @last_call_parens)
              elsif args
@@ -3310,6 +3363,16 @@ module Tungsten
       end
     end
 
+    def parse_recase
+      next_token
+      if @token.type?(:NL) || @token.type?(:EOF) || @token.type?(:DEDENT)
+        Recase.new(nil)
+      else
+        skip_space
+        @token.suffix? ? Recase.new(nil) : Recase.new(parse_assignment_no_control)
+      end
+    end
+
     def parse_break
       next_token
       if @token.type?(:NL) || @token.type?(:EOF) || @token.type?(:DEDENT)
@@ -3587,6 +3650,107 @@ module Tungsten
       yield
     ensure
       @scopes.pop
+    end
+
+    SIGMA_SUP = {
+      "⁰" => 0, "¹" => 1, "²" => 2, "³" => 3, "⁴" => 4,
+      "⁵" => 5, "⁶" => 6, "⁷" => 7, "⁸" => 8, "⁹" => 9
+    }.freeze
+
+    def rewrite_math_pipeline(source, name, args)
+      body = args && args[0]
+      lam = math_fn_lambda(body)
+      Call.new(nil, name, [lam, source].compact)
+    end
+
+    def math_fn_rewrite(name, args)
+      return args unless args.is_a?(::Array) && args.length.between?(1, 2)
+      body = args[0]
+      return args if body.is_a?(Block)
+      lam = math_fn_lambda(body)
+      out = [lam]
+      out << args[1] if args.length == 2
+      out
+    end
+
+    def math_fn_lambda(body)
+      return body if body.nil? || body.is_a?(Block)
+      bases = []
+      sigma_collect_var_bases(body, bases)
+      svar = bases.length == 1 ? bases[0] : "x"
+      rbody = sigma_rewrite(body, svar)
+      Block.new([Arg.new(svar)], rbody)
+    end
+
+    def sigma_decode_unit(unit)
+      chars = unit.to_s.chars
+      i = 0
+      i += 1 while i < chars.length && !SIGMA_SUP.key?(chars[i])
+      base = chars[0...i].join
+      return nil if base.empty?
+      exp = 1
+      if i < chars.length
+        exp = 0
+        while i < chars.length
+          d = SIGMA_SUP[chars[i]]
+          return nil unless d
+          exp = exp * 10 + d
+          i += 1
+        end
+      end
+      [base, exp]
+    end
+
+    def sigma_collect_var_bases(node, acc)
+      case node
+      when Var
+        name = node.name.to_s
+        acc << name unless acc.include?(name)
+      when QuantityLiteral
+        dec = sigma_decode_unit(node.unit_string)
+        acc << dec[0] if dec && !acc.include?(dec[0])
+      when BinaryOp
+        sigma_collect_var_bases(node.left, acc)
+        sigma_collect_var_bases(node.right, acc)
+      when UnaryOp
+        sigma_collect_var_bases(node.right, acc)
+      when UnaryExpression
+        sigma_collect_var_bases(node.exp, acc)
+      when Call
+        sigma_collect_var_bases(node.obj, acc) if node.obj
+        Array(node.args).each { |a| sigma_collect_var_bases(a, acc) }
+      end
+      acc
+    end
+
+    def sigma_rewrite(node, svar)
+      case node
+      when QuantityLiteral
+        dec = sigma_decode_unit(node.unit_string)
+        if dec && dec[0] == svar
+          vref = Var.new(svar)
+          coeff = node.number
+          return BinaryOp.new(coeff, :*, vref) if dec[1] == 1
+          return BinaryOp.new(coeff, :*, BinaryOp.new(vref, :**, Int.new(dec[1])))
+        end
+        node
+      when BinaryOp
+        node.left = sigma_rewrite(node.left, svar)
+        node.right = sigma_rewrite(node.right, svar)
+        node
+      when UnaryOp
+        node.right = sigma_rewrite(node.right, svar)
+        node
+      when UnaryExpression
+        node.exp = sigma_rewrite(node.exp, svar)
+        node
+      when Call
+        node.obj = sigma_rewrite(node.obj, svar) if node.obj
+        node.args = Array(node.args).map { |a| sigma_rewrite(a, svar) } if node.args
+        node
+      else
+        node
+      end
     end
   end
 end

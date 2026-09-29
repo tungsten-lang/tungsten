@@ -57,6 +57,7 @@ module Tungsten
     autoload :Raise,           "tungsten/ast/keywords/raise"
     autoload :Redo,            "tungsten/ast/keywords/redo"
     autoload :Retry,           "tungsten/ast/keywords/retry"
+    autoload :Recase,          "tungsten/ast/keywords/recase"
     autoload :Return,          "tungsten/ast/keywords/return"
     autoload :Super,           "tungsten/ast/keywords/super"
     autoload :TargetAnd,       "tungsten/ast/keywords/target_and"

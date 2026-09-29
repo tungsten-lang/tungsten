@@ -206,8 +206,8 @@ RUNTIME_CLASS_CONTRACTS = {
       center characters chars codepoints constantize contains? dasherize
       delete downcase each_byte each_character each_codepoint
       each_grapheme each_line empty? graphemes humanize includes? length
-      levenshtein lines lowercase lpad nfc nfd nfkc nfkd normalize
-      parameterize reverse rpad scan size snakecase squeeze swapcase
+      levenshtein lines ljust lowercase lpad nfc nfd nfkc nfkd normalize
+      parameterize reverse rjust rpad scan size snakecase squeeze swapcase
       to_regex to_s tr transliterate underscore upcase uppercase
     ]
   },

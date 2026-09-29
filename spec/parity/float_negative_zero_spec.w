@@ -1,4 +1,3 @@
-## parity xfail -~0.0 prints "0" interpreted but "-0" compiled
 # Floats: negative zero.
 #
 # Cross-engine parity spec (scripts/parity.sh).

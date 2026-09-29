@@ -8,7 +8,11 @@
     target = ast_get(node, :target)
 
     if ast_kind(target) == :var
-      env.set(ast_get(target, :name), value)
+      name = ast_get(target, :name)
+      hint = ast_get(node, :type_hint)
+      if hint != nil
+        env.set_hint(name, hint)
+      env.set(name, value)
       return value
 
     if ast_kind(target) == :gvar
@@ -97,6 +101,7 @@
     if ast_kind(target) == :var
       old = env.get(ast_get(target, :name))
       result = apply_compound_op(op, old, new_val)
+      result = maybe_wrap_int_arith(op, result, old, new_val, target, ast_get(node, :value), env)
       env.set(ast_get(target, :name), result)
       return result
 
@@ -403,7 +408,7 @@
         star_rv = eval_var(star_r, env, true)
       else
         star_rv = evaluate(star_r, env)
-      return apply_binary_op(node_op, star_lv, star_rv)
+      return maybe_wrap_int_arith(node_op, apply_binary_op(node_op, star_lv, star_rv), star_lv, star_rv, star_l, star_r, env)
     if node_op == :LSHIFT && ast_get(node, :left) != nil && ast_kind(ast_get(node, :left)) == :var
       left = evaluate(ast_get(node, :left), env)
       if type(left) == "String"
@@ -434,7 +439,7 @@
         if node_op == :NEQ
           return !eq_r
         return eq_r
-    apply_binary_op(node_op, left, right)
+    maybe_wrap_int_arith(node_op, apply_binary_op(node_op, left, right), left, right, ast_get(node, :left), ast_get(node, :right), env)
 
   -> apply_binary_op(op, left, right)
     # Ordered user values compare through their polymorphic `<=>`. Dispatching
@@ -618,17 +623,15 @@
     if ast_get(node, :op) == :MINUS
       # A user object negates through its own `-@` operator method (which the
       # numeric tower aliases to `negate`), mirroring the compiled path's
-      # w_neg -> `-@` instance dispatch. Primitives keep the `0 - x` arm.
+      # w_neg -> `-@` instance dispatch.
       if type(operand) == "Hash" && operand.has_key?(:rt) && operand[:rt] == :object
         return dispatch_method(operand, "-@", [], nil, nil)
-      # BigInt negation must reach the runtime's w_neg, not the `0 - x`
-      # subtraction: w_neg is the tag-sign flip (encoding v4) — a zero-copy
-      # LINKED VIEW whose bang-mutation semantics both engines must share.
-      # `0 - x` would mint an independent copy and the engines would
-      # diverge exactly where the tag-sign spec pins them together.
-      if type(operand) == "BigInt"
-        return ccall("w_neg", operand)
-      return 0 - operand
+      # Packed numerics (Quantity, Decimal, Currency, Float, BigInt) and
+      # inline Int all go through w_neg. `0 - x` is host subtraction: it
+      # rejects Quantity ("expected int, got numeric"), copies BigInt
+      # instead of the tag-sign view, and turns IEEE -0.0 into +0.0.
+      result = ccall("w_neg", operand)
+      return maybe_wrap_int_arith(:MINUS, result, 0, operand, nil, ast_get(node, :operand), env)
     raise "Unknown unary operator"
 
   -> apply_type_hint(value, hint)
@@ -727,6 +730,74 @@
     while i < bits
       result = result * 2
       i += 1
+    result
+
+  -> integer_value?(value)
+    t = type(value)
+    t == "Int" || t == "BigInt"
+
+  -> integer_fits_i64?(value)
+    if type(value) == "Int"
+      return true
+    if type(value) != "BigInt"
+      return false
+    wrap_signed_bits(value, 64) == value
+
+  -> promote_int_hint?(hint)
+    if hint == nil
+      return false
+    h = "" + hint.to_s()
+    h == "int" || h == "bigint" || h == "Int" || h == "BigInt" || h == "Integer"
+
+  -> explicit_i64_hint?(hint)
+    if hint == nil
+      return false
+    h = "" + hint.to_s()
+    h == "i64" || h == "u64" || h == "i32" || h == "u32" || h == "i16" || h == "u16" || h == "i8" || h == "u8"
+
+  -> operand_promotes?(node, env)
+    if node == nil || !is_ast_node?(node)
+      return false
+    k = ast_kind(node)
+    if k == :var
+      return promote_int_hint?(env.get_hint(ast_get(node, :name)))
+    if k == :int
+      return interp_decimal_exceeds_i64?(ast_get(node, :raw))
+    if k == :type_ascription
+      return operand_promotes?(ast_get(node, :expression), env) || promote_int_hint?(ast_get(node, :type_hint))
+    if k == :binary_op && ast_get(node, :op) == :POW
+      return true
+    false
+
+  -> wrap_i64_operand?(node, env)
+    if node == nil || !is_ast_node?(node) || ast_kind(node) != :var
+      return false
+    explicit_i64_hint?(env.get_hint(ast_get(node, :name)))
+
+  # Match compiled integer policy: untyped +/-/ * wrap at signed i64;
+  # `## int` / block params / Math.promote keep BigInt; untyped << promotes
+  # unless the left side is explicitly `## i64`.
+  -> maybe_wrap_int_arith(op, result, left, right, left_node, right_node, env)
+    if !integer_value?(result)
+      return result
+    if @overflow_mode == :promote
+      return result
+    if @overflow_mode == :trap
+      if integer_fits_i64?(result)
+        return result
+      raise "integer overflow"
+    if op == :LSHIFT || op == :RSHIFT
+      if @overflow_mode == :wrap || wrap_i64_operand?(left_node, env)
+        return wrap_signed_bits(result, 64)
+      return result
+    if op == :PLUS || op == :MINUS || op == :STAR
+      if @overflow_mode == :wrap
+        return wrap_signed_bits(result, 64)
+      if operand_promotes?(left_node, env) || operand_promotes?(right_node, env)
+        return result
+      if integer_value?(left) && integer_value?(right) && integer_fits_i64?(left) && integer_fits_i64?(right)
+        return wrap_signed_bits(result, 64)
+      return result
     result
 
   -> eval_and(node, env)
@@ -843,6 +914,16 @@
       pat_node = ast_get(arm, :pattern)
       pattern = evaluate(pat_node, env)
       matched = pattern == subject
+      if !matched && type(pattern) == "Hash" && pattern.has_key?(:rt) && pattern[:rt] == :range
+        # Compiled lowering rewrites `when 3..9` to bound checks, not `==`.
+        from = pattern[:from]
+        to = pattern[:to]
+        if to == nil
+          matched = subject >= from
+        elsif pattern[:exclusive] == true
+          matched = subject >= from && subject < to
+        else
+          matched = subject >= from && subject <= to
       if !matched && pat_node != nil && is_ast_node?(pat_node) && ast_kind(pat_node) in (:int :decimal)
         # when-literals get the same exactness-gated adaptation as ==:
         # `case ~x when 2` hits when x is exactly 2.0.
@@ -900,13 +981,16 @@
       block = evaluate(ast_get(node, :block), env)
     args = ast_get(node, :args).map -> (a)
       evaluate(a, env)
+    method_name = ast_get(node, :name)
+    passthrough = block != nil && interpreter_method_takes_no_block?(method_name)
+    call_block = passthrough ? nil : block
 
     if ast_get(node, :receiver) != nil
       # `$bytes[i]` on WNetAddr/UUID is an inline fixed-array load in compiled
       # methods. Route the interpreted equivalent through the corresponding
       # narrow storage boundary without materializing a temporary byte array.
       recv_node = ast_get(node, :receiver)
-      if ast_get(node, :name) in ("\[]" "[]") && ast_kind(recv_node) == :gvar && ast_get(recv_node, :name) == "$bytes"
+      if method_name in ("\[]" "[]") && ast_kind(recv_node) == :gvar && ast_get(recv_node, :name) == "$bytes"
         current_method = @method_stack.last()
         if current_method != nil && current_method[:w_class] != nil && current_method[:w_class][:name] == "UUID"
           return ccall("w_uuid_byte", current_self(), args[0])
@@ -944,17 +1028,36 @@
         previous_type_args = recv[:active_type_args]
         recv[:active_type_args] = call_type_args
         begin
-          result = dispatch_method(recv, ast_get(node, :name), args, block, env)
+          result = dispatch_method(recv, method_name, args, call_block, env)
         ensure
           recv[:active_type_args] = previous_type_args
       else
-        result = dispatch_method(recv, ast_get(node, :name), args, block, env)
+        result = dispatch_method(recv, method_name, args, call_block, env)
       if ast_kind(ast_get(node, :receiver)) == :var && type(recv) == "String"
-        if ast_get(node, :name) in ("concat" "append" "prepend" "<<" "<</1")
+        if method_name in ("concat" "append" "prepend" "<<" "<</1")
           env.set(ast_get(ast_get(node, :receiver), :name), result)
+      if passthrough
+        return dispatch_method(result, "each", [], block, env)
       return result
 
-    dispatch_bare_call(ast_get(node, :name), args, block, env)
+    result = dispatch_bare_call(method_name, args, call_block, env)
+    if passthrough
+      return dispatch_method(result, "each", [], block, env)
+    result
+
+  # Trailing block on a method that declares no block of its own iterates
+  # the call's RESULT (implicit `.each`). Mirrors lowering/method_call.w.
+  -> interpreter_method_takes_no_block?(mname)
+    if mname == nil
+      return false
+    c0 = mname[0]
+    if !((c0 >= "a" && c0 <= "z") || c0 == "_")
+      return false
+    if mname == "new"
+      return false
+    if mname in ("each" "map" "select" "reject" "filter" "filter_map" "find" "find_index" "detect" "all?" "any?" "none?" "count" "reduce" "inject" "flat_map" "each_with_index" "map_with_index" "group_by" "partition" "each_slice" "each_cons" "each_with_object" "chunk_while" "take_while" "drop_while" "sort" "sort_by" "min_by" "max_by" "sum" "zip" "times" "upto" "downto" "step" "cycle" "tap" "then" "loop" "serve_http")
+      return false
+    true
 
   -> dispatch_bare_call(name, args, block, env)
     if name == "ccall"
@@ -1227,3 +1330,17 @@
       return instantiate(@classes[name], args, env)
 
     raise_typed("NoMethodError", "Undefined method '[name]'")
+
+  # Trailing block on a method that declares no block of its own iterates
+  # the call's RESULT (implicit `.each`). Mirrors lowering/method_call.w.
+  -> interpreter_method_takes_no_block?(mname)
+    if mname == nil
+      return false
+    c0 = mname[0]
+    if !((c0 >= "a" && c0 <= "z") || c0 == "_")
+      return false
+    if mname == "new"
+      return false
+    if mname in ("each" "map" "select" "reject" "filter" "filter_map" "find" "find_index" "detect" "all?" "any?" "none?" "count" "reduce" "inject" "flat_map" "each_with_index" "map_with_index" "group_by" "partition" "each_slice" "each_cons" "each_with_object" "chunk_while" "take_while" "drop_while" "sort" "sort_by" "min_by" "max_by" "sum" "zip" "times" "upto" "downto" "step" "cycle" "tap" "then" "loop" "serve_http")
+      return false
+    true

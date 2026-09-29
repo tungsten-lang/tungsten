@@ -303,6 +303,23 @@
     pr_fill = (pad * pr_need).slice(0, pr_need)
     to_s + pr_fill
 
+  # Ruby aliases: ljust pads on the right, rjust on the left.
+  -> ljust(width, pad = " ")
+    plj_n = size
+    if plj_n >= width
+      return to_s
+    plj_need = width - plj_n
+    plj_fill = (pad * plj_need).slice(0, plj_need)
+    to_s + plj_fill
+
+  -> rjust(width, pad = " ")
+    prj_n = size
+    if prj_n >= width
+      return to_s
+    prj_need = width - prj_n
+    prj_fill = (pad * prj_need).slice(0, prj_need)
+    prj_fill + to_s
+
   # Center within `width`; when the total padding is odd the extra byte goes
   # on the right, matching Ruby String#center.
   -> center(width, pad = " ")

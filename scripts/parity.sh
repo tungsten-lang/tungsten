@@ -232,6 +232,23 @@ fi
 
 cd "$ROOT"
 
+# `run --interpret` executes the repl compiler image, which lives in the
+# cache's compiler-images/ and is built only by `bin/tungsten build` (never on
+# launch). The parity cache is isolated, so point its compiler-images/ at the
+# build's: the interp engine then runs exactly the image the build produced
+# rather than a private copy that goes stale.
+IMAGES="${TUNGSTEN_CACHE_DIR:-$ROOT/build/cache}/compiler-images"
+case " ${engines[*]} " in
+  *" interp "*)
+    [[ -x "$IMAGES/tungsten-repl" ]] || die "no repl compiler image at $IMAGES; run bin/tungsten build first."
+    mkdir -p "$PARITY_CACHE_ROOT"
+    if [[ ! -L "$PARITY_CACHE_ROOT/compiler-images" ]]; then
+      rm -rf "$PARITY_CACHE_ROOT/compiler-images"
+      ln -s "$IMAGES" "$PARITY_CACHE_ROOT/compiler-images"
+    fi
+    ;;
+esac
+
 # Spec discovery: every spec/parity/*_spec.w on disk (tracked or not — the
 # suite is the directory), or the --files list. Bare names resolve under
 # spec/parity/ with or without the _spec.w suffix.

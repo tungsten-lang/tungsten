@@ -970,6 +970,12 @@ module Tungsten
           ::Digest::SHA256.hexdigest(args[0].to_s)[0, 16]
         end
 
+        interpreter.define_builtin("alias_method") do |_recv, _args, _block|
+          # core/date.w aliases to_s/1 to strftime/1. Ruby Date#to_s already
+          # accepts a format string, so the alias is a no-op here.
+          nil
+        end
+
         interpreter.define_builtin("type") do |_recv, args, _block|
           value = args[0]
           case value
@@ -978,7 +984,7 @@ module Tungsten
           when Tungsten::CharValue then "Char"
           when Tungsten::StringBuffer then "StringBuffer"
           when Tungsten::PathValue then "Path"
-          when Integer   then "Int"
+          when Integer then value.abs > 140_737_488_355_327 ? "BigInt" : "Int"
           when Float     then "Float"
           when String    then "String"
           when Tungsten::SmallArrayValue then "SmallArray"
@@ -990,11 +996,15 @@ module Tungsten
           when Range     then "Range"
           when BigDecimal then "Decimal"
           when Tungsten::Currency then "Currency"
-          when Tungsten::Percentage then "Percentage"
+          when Tungsten::Percentage then "Quantity"
           when Tungsten::Duration then "Duration"
           when Tungsten::Quantity then "Quantity"
           when Tungsten::Key then "Key"
-          else value.class.name
+          when Tungsten::IP4, Tungsten::CIDR4 then "IPv4"
+          when Tungsten::IP6, Tungsten::CIDR6 then "IPv6"
+          when Tungsten::DateTime then "Date"
+          else
+            value.class.name.to_s.delete_prefix("Tungsten::")
           end
         end
 
@@ -1249,7 +1259,7 @@ module Tungsten
           when Tungsten::CharValue then "Char"
           when Tungsten::StringBuffer then "StringBuffer"
           when Tungsten::PathValue then "Path"
-          when Integer   then "Int"
+          when Integer then recv.abs > 140_737_488_355_327 ? "BigInt" : "Int"
           when Float     then "Float"
           when String    then "String"
           when Tungsten::SmallArrayValue then "SmallArray"
@@ -1261,11 +1271,14 @@ module Tungsten
           when Range     then "Range"
           when BigDecimal then "Decimal"
           when Tungsten::Currency then "Currency"
-          when Tungsten::Percentage then "Percentage"
+          when Tungsten::Percentage then "Quantity"
           when Tungsten::Duration then "Duration"
           when Tungsten::Quantity then "Quantity"
           when Tungsten::Key then "Key"
-          else recv.class.name
+          when Tungsten::IP4, Tungsten::CIDR4 then "IPv4"
+          when Tungsten::IP6, Tungsten::CIDR6 then "IPv6"
+          when Tungsten::DateTime then "Date"
+          else recv.class.name.to_s.delete_prefix("Tungsten::")
           end
         end
 
@@ -1418,7 +1431,14 @@ module Tungsten
         end
 
         interpreter.define_method_builtin("empty?") do |recv, _args, _block|
-          recv.empty?
+          if recv.is_a?(Range)
+            b = recv.begin
+            e = recv.end
+            next false if b.nil? || e.nil?
+            recv.exclude_end? ? b >= e : b > e
+          else
+            recv.empty?
+          end
         end
 
         interpreter.define_method_builtin("ascii?") do |recv, _args, _block|
@@ -1431,6 +1451,10 @@ module Tungsten
 
         interpreter.define_method_builtin("chars") do |recv, _args, _block|
           recv.chars
+        end
+
+        interpreter.define_method_builtin("graphemes") do |recv, _args, _block|
+          recv.to_s.each_grapheme_cluster.to_a
         end
 
         interpreter.define_method_builtin("codes") do |recv, _args, _block|
@@ -1547,7 +1571,7 @@ module Tungsten
         end
 
         interpreter.define_method_builtin("upcase") do |recv, _args, _block|
-          recv.upcase
+          recv.to_s.upcase(:ascii)
         end
 
         interpreter.define_method_builtin("downcase") do |recv, _args, _block|
@@ -1606,9 +1630,11 @@ module Tungsten
           recv.to_f
         end
 
-        interpreter.define_method_builtin("to_s") do |recv, _args, _block|
-          if recv.is_a?(Integer) && !_args.empty?
-            recv.to_s(_args[0].to_i)
+        interpreter.define_method_builtin("to_s") do |recv, args, _block|
+          if recv.is_a?(Integer) && !args.empty?
+            recv.to_s(args[0].to_i)
+          elsif !args.empty?
+            recv.to_s(*args)
           else
             recv.to_s
           end
@@ -1785,9 +1811,11 @@ module Tungsten
           # default `0` initial doesn't trip `Integer + Quantity` errors.
           if !args.empty?
             recv.inject(args[0]) { |a, b| a + b }
-          elsif recv.empty?
+          elsif recv.is_a?(Range)
+            recv.sum
+          elsif recv.respond_to?(:empty?) && recv.empty?
             0
-          elsif recv.first.is_a?(Tungsten::Quantity)
+          elsif recv.respond_to?(:first) && recv.first.is_a?(Tungsten::Quantity)
             recv[1..].inject(recv.first) { |a, b| a + b }
           else
             recv.sum
@@ -1862,11 +1890,17 @@ module Tungsten
         end
 
         interpreter.define_method_builtin("has_key?") do |recv, args, _block|
-          recv.key?(args[0])
+          key = args[0]
+          recv.key?(key) ||
+            (key.is_a?(::Symbol) && recv.key?(key.name)) ||
+            (key.is_a?(String) && recv.key?(key.to_sym))
         end
 
         interpreter.define_method_builtin("key?") do |recv, args, _block|
-          recv.key?(args[0])
+          key = args[0]
+          recv.key?(key) ||
+            (key.is_a?(::Symbol) && recv.key?(key.name)) ||
+            (key.is_a?(String) && recv.key?(key.to_sym))
         end
 
         interpreter.define_method_builtin("merge") do |recv, args, _block|

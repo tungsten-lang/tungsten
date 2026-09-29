@@ -1,4 +1,3 @@
-## parity xfail `return` inside a block returns only from the block interpreted (method continues, -1) but from the enclosing method compiled (4)
 # Control flow: non-local return from a block inside a method.
 #
 # Cross-engine parity spec (scripts/parity.sh).

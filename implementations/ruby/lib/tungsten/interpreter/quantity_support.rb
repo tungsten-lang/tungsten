@@ -122,7 +122,7 @@ module Tungsten
         case node.operator
         when :/  then "#{left}/#{right}"
         when :*  then "#{left}*#{right}"
-        when :** then "#{left}^#{right}"
+        when :** then "#{left}#{Units.exponent_to_superscript(right.to_i)}"
         else raise Tungsten::Error, "invalid unit expression"
         end
       when AST::Call

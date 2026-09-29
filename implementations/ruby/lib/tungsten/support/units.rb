@@ -84,10 +84,12 @@ module Tungsten
       def /(other)
         return self if other.dimensionless?
 
-        merged_customs = customs.dup
-        other.customs.each do |k, e|
-          merged_customs[k] = (merged_customs[k] || 0) - e
-          merged_customs.delete(k) if merged_customs[k].zero?
+        # A fresh Hash, as in #*: `customs` may be the registry's UniqueObject,
+        # which raises on reassigning a key (`1 rad / 1 rad`).
+        merged_customs = {}
+        (customs.keys | other.customs.keys).each do |k|
+          diff = customs.fetch(k, 0) - other.customs.fetch(k, 0)
+          merged_customs[k] = diff unless diff.zero?
         end
 
         result = self.class.new(
@@ -251,14 +253,10 @@ module Tungsten
       end
 
       def self.simplify(compound)
-        return compound if compound.components.size == 1 && compound.components.values.first == 1
-        # A pure power of a single SI base unit (m², m³, s²…) is already its
-        # canonical form. Don't rename it to a same-factor alias such as "sqm"
-        # (square metre) or "stere" (m³), which would shadow the natural m²/m³.
-        # Prefixed/non-SI single bases (cm³ → mL) still simplify normally.
-        if compound.components.size == 1 && Units.si_base_unit?(compound.components.keys.first)
-          return compound
-        end
+        # A single named component is already its display form: `m`, `ft²`,
+        # `cm³`. Native keeps the operand unit rather than renaming to an
+        # alias (sqft, mL) or an obscure same-dimension unit (zhang).
+        return compound if compound.components.size == 1
         candidates = SIMPLIFICATION_TABLE[compound.dimension]
         return compound unless candidates
         candidates.each do |sym, factor|

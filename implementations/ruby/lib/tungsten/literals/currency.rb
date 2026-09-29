@@ -131,6 +131,8 @@ module Tungsten
       approx, digits = format_value
       if SUFFIX_SYMBOLS.include?(@symbol)
         "#{approx}#{digits}#{@symbol}"
+      elsif @value.negative?
+        "#{approx}-#{@symbol}#{digits.sub(/\A-/, "")}"
       else
         "#{approx}#{@symbol}#{digits}"
       end
@@ -196,7 +198,6 @@ module Tungsten
 
     def format_value
       places = DECIMAL_PLACES[@symbol] || 2
-      places = 0 if places > 0 && @value.abs >= 1000
       rounded = @value.round(places)
       approx = rounded != @value ? "≈" : ""
 

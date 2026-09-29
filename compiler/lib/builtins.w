@@ -499,20 +499,36 @@
   when "ljust"
     s = recv
     width = args[0]
+    fill = args.size() > 1 ? args[1] : " "
     cur = s.size()
     if cur >= width
       return s
-    pad = " " * (width - cur)
+    pad = (fill * (width - cur)).slice(0, width - cur)
     s + pad
 
   when "rjust"
     s = recv
     width = args[0]
+    fill = args.size() > 1 ? args[1] : " "
     cur = s.size()
     if cur >= width
       return s
-    pad = " " * (width - cur)
+    pad = (fill * (width - cur)).slice(0, width - cur)
     pad + s
+
+  when "center"
+    s = recv
+    width = args[0]
+    fill = args.size() > 1 ? args[1] : " "
+    cur = s.size()
+    if cur >= width
+      return s
+    total = width - cur
+    left = total / 2
+    right = total - left
+    lf = (fill * left).slice(0, left)
+    rf = (fill * right).slice(0, right)
+    lf + s + rf
 
   when "round"
     if args.empty?()
@@ -537,7 +553,7 @@ builtin_names = [
   "reject", "reduce", "each_with_index", "map_with_index", "zip", "any?", "all?",
   "find", "count", "sum", "times", "keys", "values", "has_key?", "abs", "max", "min",
   "respond_to?", "is_a?", "freeze", "frozen?", "argv", "clock", "clock_ms", "runtime_identity", "digest_string64",
-  "capture", "system", "env", "ljust", "rjust", "round", "gets", "freeze_slab",
+  "capture", "system", "env", "ljust", "rjust", "center", "round", "gets", "freeze_slab",
   "cpu_count", "l1d_cache_bytes", "l2_cache_bytes", "cpus_per_l2", "write_file_bytes_n", "file_rm"
 ]
 

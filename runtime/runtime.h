@@ -583,6 +583,7 @@ WValue w_decimal_add(WValue a, WValue b);
 WValue w_decimal_sub(WValue a, WValue b);
 WValue w_decimal_mul(WValue a, WValue b);
 WValue w_decimal_div(WValue a, WValue b);
+WValue w_decimal_round(WValue value, WValue digits);
 
 /* ---- Currency constructors (0xFFFD subtype 01) ---- */
 WValue w_currency(int symbol_id, int64_t sig, int scale);

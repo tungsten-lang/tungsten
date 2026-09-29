@@ -113,6 +113,8 @@ module Tungsten
                when Duration
                  ensure_time_dimension!("add a Duration")
                  self + duration_as_seconds_quantity(other)
+               when Date, DateTime
+                 other + self
                else
                  raise DimensionError, "cannot add #{other.class} to Quantity"
                end
@@ -168,6 +170,7 @@ module Tungsten
                when Quantity
                  new_unit = @unit * other.unit
                  new_value, new_unit = self.class.normalize_prefix_factor(@value * other.value, new_unit)
+                 return self.class.dimensionless_scalar(new_value, new_unit) if new_unit.dimensionless?
                  Quantity.new(new_value, new_unit).rescale
                when Numeric
                  copy_with(value: @value * other).rescale
@@ -197,6 +200,7 @@ module Tungsten
                  new_value = coerce_division(@value, other.value)
                  new_unit = @unit / other.unit
                  new_value, new_unit = self.class.normalize_prefix_factor(new_value, new_unit)
+                 return self.class.dimensionless_scalar(new_value, new_unit) if new_unit.dimensionless?
                  Quantity.new(new_value, new_unit).rescale
                when Numeric
                  new_value = coerce_division(@value, other)
@@ -225,6 +229,19 @@ module Tungsten
       )
       copy_with(value: @value**exp, unit: new_unit,
                 role: exp == 1 ? @role : nil, origin: exp == 1 ? @origin : nil)
+    end
+
+    # A product or quotient whose dimensions all cancel (`(1 m/s) / (2 m/s)`,
+    # `(1 km) / (1 m)`) is a plain number, as on the compiled engine, which
+    # returns a Decimal there: `1 + ratio` must work. Custom tags (cycle,
+    # angle, π) are not dimensionless and keep the Quantity. The residual
+    # unit factor (km over m) folds into the value; an inexact Rational
+    # becomes a Decimal the way Decimal division does on this engine.
+    def self.dimensionless_scalar(value, unit)
+      scalar = value * unit.factor
+      return scalar unless scalar.is_a?(Rational)
+      return scalar.numerator if scalar.denominator == 1
+      BigDecimal(scalar.numerator) / BigDecimal(scalar.denominator)
     end
 
     # After multiplication or division, the unit's stored factor can carry
@@ -308,7 +325,13 @@ module Tungsten
       end
       si_value = @value * @unit.factor + @unit.offset
       new_value = (si_value - target.offset) / target.factor
-      copy_with(value: new_value, unit: target)
+      result = copy_with(value: new_value, unit: target)
+      # Keep the requested spelling (`km/h` not `kph`).
+      if target_str && result.unit.canonical_symbol != target_str
+        result.unit.instance_variable_set(:@canonical_symbol, target_str)
+        result.unit.instance_variable_set(:@canonical_components, result.unit.components.dup)
+      end
+      result
     end
 
     # Convert through an explicitly named physical equivalence. These are
@@ -481,6 +504,9 @@ module Tungsten
       # Skip rescale on Measurement-valued Quantities — rescale's integer-rounding
       # heuristic would drop uncertainty.
       return self if @value.is_a?(Measurement)
+      # A single named component is already canonical (50 m, 100 ft², 1 cm³).
+      # Searching every same-dimension unit would pick 15 zhang for 50 m.
+      return self if @unit.components.size == 1
       candidates = Units::SIMPLIFICATION_TABLE[@unit.dimension]
       return self unless candidates && !candidates.empty?
       si_value = @value * @unit.factor
@@ -631,21 +657,21 @@ module Tungsten
     end
 
     def format_value(v)
+      fv = v.to_f
+      if fv.finite? && fv != 0 && (fv.abs >= 1_000_000_000 || fv.abs < 1e-4)
+        exp = Math.log10(fv.abs).floor
+        coeff = fv / (10.0**exp)
+        rounded = coeff.round(3)
+        rounded = rounded == rounded.to_i ? rounded.to_i : rounded
+        sign = fv.negative? ? "-" : ""
+        return "#{sign}#{rounded.abs}×10#{Units.exponent_to_superscript(exp)}"
+      end
       if v.is_a?(Rational)
         return v.to_i.to_s if v.denominator == 1
         return format_rational(v)
       end
       if v == v.to_i
-        int = v.to_i
-        if int.abs >= 1_000_000_000
-          exp = Math.log10(int.abs).floor
-          coeff = int.to_f / 10**exp
-          rounded = coeff.round(3)
-          rounded = rounded == rounded.to_i ? rounded.to_i : rounded
-          "≈#{rounded}×10#{Units.exponent_to_superscript(exp)}"
-        else
-          int.to_s
-        end
+        v.to_i.to_s
       else
         v.is_a?(BigDecimal) ? v.to_s("F") : v.to_s
       end

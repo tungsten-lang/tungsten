@@ -3,6 +3,10 @@
 + Environment
   -> new(@parent = nil, @barrier = false)
     @bindings = {}
+    # Per-name integer policy for the tree walker: "int"/"bigint" promote,
+    # "i64"/"u64" wrap. Missing means the compiled default (wrap +/-/*,
+    # promote untyped <<).
+    @hints = {}
 
   -> get(name)
     if @bindings.has_key?(name)
@@ -22,11 +26,29 @@
   -> define(name, value)
     @bindings[name] = value
 
+  -> set_hint(name, hint)
+    if @bindings.has_key?(name)
+      @hints[name] = hint
+    elsif !@barrier && @parent != nil && @parent.defined?(name)
+      @parent.set_hint(name, hint)
+    else
+      @hints[name] = hint
+
+  -> get_hint(name)
+    if @bindings.has_key?(name)
+      if @hints.has_key?(name)
+        return @hints[name]
+      return nil
+    if @parent != nil
+      return @parent.get_hint(name)
+    nil
+
   # Reuse one invocation scope when the interpreter has proved that no nested
   # closure can retain it. The runtime reset preserves the table allocation,
   # while making block locals fresh exactly as Environment.new would.
   -> clear_bindings
     ccall("w_hash_clear_reuse", @bindings)
+    @hints = {}
     self
 
   -> defined?(name)

@@ -1,5 +1,4 @@
-## parity xfail to_s of an array/hash quotes string elements interpreted (["a", "b"], {name: "Alice"}) but not compiled ([a, b], {name: Alice})
-# Printing: string elements inside arrays and hashes.
+# Printing: string elements inside arrays and hashes (`<<` uses #to_s).
 #
 # Cross-engine parity spec (scripts/parity.sh).
 

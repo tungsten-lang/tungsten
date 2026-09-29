@@ -8,6 +8,7 @@ module Tungsten
   BREAK_SIGNAL  = :w_break
   NEXT_SIGNAL   = :w_next
   RETURN_SIGNAL = :w_return
+  RECASE_SIGNAL = :w_recase
 
   # Ruby-host adapter for the structured Core RegexMatch contract. Keep this
   # separate from ::MatchData so embedding Tungsten does not monkeypatch Ruby's
@@ -550,13 +551,14 @@ module Tungsten
       when klass == AST::Symbol        then return cached_symbol_value(node)
       when klass == AST::If            then return visit_if(node)
       when klass == AST::Assign        then return visit_assign(node)
-      when klass == AST::TypeHint      then return apply_type_hint(evaluate(node.value), node.hint)
+      when klass == AST::TypeHint      then return visit_type_hint(node)
       when klass == AST::StringLiteral then return node.value
       when klass == AST::Nil           then return nil
       when klass == AST::InstanceVar   then return @self_stack.last.instance_vars[node.name]
       when klass == AST::AssignOp      then return visit_assign_op(node)
       when klass == AST::And           then return visit_and(node)
       when klass == AST::Return        then return visit_return(node)
+      when klass == AST::Recase        then return visit_recase(node)
       when klass == AST::Boolean       then return node.value
       when klass == AST::Or            then return visit_or(node)
       when klass == AST::InTest        then return visit_in_test(node)
@@ -1257,6 +1259,68 @@ module Tungsten
       (a - b).abs <= 1e-12 * [1.0, a.abs, b.abs].max
     end
 
+    # Native integer `/` and `%` truncate toward zero (C remainder, sign of
+    # the dividend). Ruby's `/` and `%` on Integer are floor-div. `**` of a
+    # negative exponent is a Float on the native engines, not a Rational.
+    def tungsten_div(left, right)
+      if integer_value?(left) && integer_value?(right)
+        a = left.to_i
+        b = right.to_i
+        q = a / b
+        q += 1 if a.negative? != b.negative? && !a.modulo(b).zero?
+        q
+      else
+        left / right
+      end
+    end
+
+    def tungsten_mod(left, right)
+      if integer_value?(left) && integer_value?(right)
+        a = left.to_i
+        b = right.to_i
+        a - (tungsten_div(a, b) * b)
+      else
+        left % right
+      end
+    end
+
+    def tungsten_pow(left, right)
+      if integer_value?(left) && integer_value?(right) && right.to_i.negative?
+        left.to_f**right.to_i
+      else
+        left**right
+      end
+    end
+
+    def integer_value?(value)
+      value.is_a?(Integer)
+    end
+
+    def percent_value?(value)
+      return true if value.is_a?(Tungsten::Percentage)
+      value.is_a?(Tungsten::Quantity) && value.unit_name == "%"
+    rescue
+      false
+    end
+
+    def percent_fraction(pct)
+      if pct.is_a?(Tungsten::Percentage)
+        return pct.value / BigDecimal("100")
+      end
+      pct.value / BigDecimal("100")
+    end
+
+    def apply_percent_ruby(base, pct, mode)
+      frac = percent_fraction(pct)
+      factor = mode == 0 ? frac : (mode > 0 ? (1 + frac) : (1 - frac))
+      if base.is_a?(Tungsten::Quantity) || base.is_a?(Tungsten::Currency)
+        return base * factor
+      end
+      prod = base * factor
+      prod = prod.to_i if prod.is_a?(Numeric) && prod == prod.to_i
+      prod
+    end
+
     def visit_binary_op(node)
       @profile_binary_ops[node.operator] += 1 if @profile_enabled
       left = evaluate(node.left)
@@ -1265,6 +1329,24 @@ module Tungsten
       when :|
         if left.is_a?(Quantity)
           return convert_quantity_pipe(left, node.right)
+        end
+        if left.is_a?(Numeric) && !node.right.is_a?(AST::Int)
+          load_quantity_support
+          rhs = node.right
+          fmt = nil
+          unit_str = nil
+          if rhs.is_a?(AST::Call) && rhs.obj.nil? && rhs.args.size == 1 && rhs.args[0].is_a?(AST::Int)
+            fmt = rhs.args[0].value
+            unit_str = rhs.name
+          else
+            unit_str = ast_to_unit_string(rhs)
+          end
+          unit = Tungsten::Units.parse(unit_str) rescue nil
+          if unit
+            qty = Tungsten::Quantity.new(left, unit)
+            qty.display_format = fmt if fmt
+            return qty
+          end
         end
       when :"»"
         runtime_error("» requires a Quantity on the left", node: node) unless left.is_a?(Quantity)
@@ -1304,6 +1386,11 @@ module Tungsten
         end
         !!match
       when :+
+        if percent_value?(right) && !percent_value?(left)
+          return apply_percent_ruby(left, right, +1)
+        elsif percent_value?(left) && !percent_value?(right)
+          return apply_percent_ruby(right, left, +1)
+        end
         # char + int → shift codepoint
         if left.is_a?(String) && left.length == 1 && right.is_a?(Integer)
           return [left.ord + right].pack("U")
@@ -1312,7 +1399,13 @@ module Tungsten
           return [left + right.ord].pack("U")
         end
         left + right
-      when :*   then left * right
+      when :*
+        if percent_value?(right) && !percent_value?(left)
+          return apply_percent_ruby(left, right, 0)
+        elsif percent_value?(left) && !percent_value?(right)
+          return apply_percent_ruby(right, left, 0)
+        end
+        left * right
       when :<<  then left << right
       when :±
         # `5.0 ± 0.1` → Measurement(5.0, 0.1).
@@ -1322,6 +1415,9 @@ module Tungsten
         r_val = right.is_a?(Tungsten::Measurement) ? right.value : right
         Tungsten::Measurement.new(l_val, r_val.abs)
       when :-
+        if percent_value?(right) && !percent_value?(left)
+          return apply_percent_ruby(left, right, -1)
+        end
         # char - int → shift codepoint, char - char → int difference
         if left.is_a?(String) && left.length == 1 && right.is_a?(Integer)
           return [left.ord - right].pack("U")
@@ -1330,9 +1426,9 @@ module Tungsten
           return left.ord - right.ord
         end
         left - right
-      when :/   then left / right
-      when :%   then left % right
-      when :**  then left ** right
+      when :/   then tungsten_div(left, right)
+      when :%   then tungsten_mod(left, right)
+      when :**  then tungsten_pow(left, right)
       when :<=  then left <= right
       when :>   then left > right
       when :>=  then left >= right
@@ -1431,6 +1527,34 @@ module Tungsten
       value
     end
 
+    def fold_hint_text?(text)
+      s = text.to_s.strip
+      s == "fold" || s.start_with?("fold ")
+    end
+
+    def fold_hint_rest_type(text)
+      s = text.to_s.strip
+      return nil if s == "fold"
+      return nil unless s.start_with?("fold ")
+      rest = s[5..].strip
+      rest.empty? ? nil : rest
+    end
+
+    def visit_type_hint(node)
+      hint = node.hint
+      inner = node.value
+      value = if fold_hint_text?(hint) && inner.is_a?(AST::Def) && inner.name.nil?
+                evaluate(inner.body)
+              else
+                evaluate(inner)
+              end
+      if fold_hint_text?(hint)
+        rest = fold_hint_rest_type(hint)
+        return rest ? apply_type_hint(value, rest) : value
+      end
+      apply_type_hint(value, hint)
+    end
+
     def apply_type_hint(value, hint)
       return value unless hint
 
@@ -1518,9 +1642,9 @@ module Tungsten
                  when :+  then current + right
                  when :-  then current - right
                  when :*  then current * right
-                 when :/  then current / right
-                 when :%  then current % right
-                 when :** then current ** right
+                 when :/  then tungsten_div(current, right)
+                 when :%  then tungsten_mod(current, right)
+                 when :** then tungsten_pow(current, right)
                  else runtime_error("unknown compound operator: #{node.operator}", node: node)
                  end
         @env.set_slot(slot, result)
@@ -1534,9 +1658,9 @@ module Tungsten
                  when :+  then current + right
                  when :-  then current - right
                  when :*  then current * right
-                 when :/  then current / right
-                 when :%  then current % right
-                 when :** then current ** right
+                 when :/  then tungsten_div(current, right)
+                 when :%  then tungsten_mod(current, right)
+                 when :** then tungsten_pow(current, right)
                  else runtime_error("unknown compound operator: #{node.operator}", node: node)
                  end
         ce.set_slot(slot, result)
@@ -1573,9 +1697,9 @@ module Tungsten
                when :+  then current + right
                when :-  then current - right
                when :*  then current * right
-               when :/  then current / right
-               when :%  then current % right
-               when :** then current ** right
+               when :/  then tungsten_div(current, right)
+               when :%  then tungsten_mod(current, right)
+               when :** then tungsten_pow(current, right)
                else runtime_error("unknown compound operator: #{node.operator}", node: node)
                end
 
@@ -1829,6 +1953,151 @@ module Tungsten
       node
     end
 
+    def eval_sigma(node)
+      runtime_error("Σ needs bounds: Σ(2x² + x, 1..10) or (1..10)/Σ(2x² + x)", node: node) unless node.args && node.args.size == 2
+      f = node.args[0]
+      r = evaluate(node.args[1])
+      lo, hi = sigma_range_bounds(r, node)
+      f.closure_env = @env if f.is_a?(AST::Block)
+      terms = sigma_poly_extract(f)
+      return sigma_terms_sum(terms, lo, hi) if terms
+      acc = 0
+      x = lo
+      while x <= hi
+        acc += invoke_block(f, [x])
+        x += 1
+      end
+      acc
+    end
+
+    def sigma_range_bounds(r, node)
+      runtime_error("Σ(f, range): the second argument must be a range, e.g. Σ(2x² + x, 1..10)", node: node) unless r.is_a?(Range)
+      lo = r.begin
+      hi = r.end
+      hi -= 1 if r.exclude_end?
+      [lo, hi]
+    end
+
+    def sigma_poly_extract(f)
+      return nil unless f.is_a?(AST::Block)
+      params = f.args
+      return nil unless params && params.size == 1
+      body = f.body
+      stmts = body.is_a?(AST::List) ? body.list : Array(body)
+      return nil unless stmts.size == 1
+      vn = params[0].is_a?(AST::Arg) ? params[0].name.to_s : params[0].to_s
+      terms = []
+      sigma_poly_terms(stmts[0], vn, 1, terms) ? terms : nil
+    end
+
+    def sigma_terms_sum(terms, lo, hi)
+      acc = 0
+      terms.each do |coeff, power|
+        acc += coeff * sigma_range_pow_sum(lo, hi, power)
+      end
+      acc
+    end
+
+    def sigma_range_pow_sum(lo, hi, power)
+      return 0 if hi < lo
+      total = 0
+      if lo <= -1
+        b = hi < -1 ? hi : -1
+        s = sigma_faulhaber(-lo, power) - sigma_faulhaber(-b - 1, power)
+        total += power.even? ? s : -s
+      end
+      total += 1 if power == 0 && lo <= 0 && hi >= 0
+      if hi >= 1
+        a = lo > 1 ? lo : 1
+        total += sigma_faulhaber(hi, power) - sigma_faulhaber(a - 1, power)
+      end
+      total
+    end
+
+    def sigma_faulhaber(n, p)
+      return 0 if n <= 0
+      s = Array.new(p + 1)
+      s[0] = n
+      (1..p).each do |q|
+        mp1 = n + 1
+        term = 1
+        (0..q).each { term *= mp1 }
+        term -= 1
+        (0...q).each { |j| term -= sigma_binom(q + 1, j) * s[j] }
+        s[q] = term / (q + 1)
+      end
+      s[p]
+    end
+
+    def sigma_binom(n, k)
+      return 0 if k < 0 || k > n
+      k = n - k if k > n - k
+      r = 1
+      k.times { |i| r = r * (n - i) / (i + 1) }
+      r
+    end
+
+    def sigma_poly_terms(node, vn, sign, terms)
+      case node
+      when AST::Int
+        terms << [sign * node.value, 0]
+        true
+      when AST::Var
+        return false unless node.name.to_s == vn
+        terms << [sign, 1]
+        true
+      when AST::UnaryOp
+        return false unless node.operator == :-
+        sigma_poly_terms(node.right, vn, -sign, terms)
+      when AST::Call
+        if node.name.to_s == "-" && (node.args.nil? || node.args.empty?) && node.obj
+          return sigma_poly_terms(node.obj, vn, -sign, terms)
+        end
+        false
+      when AST::BinaryOp
+        op = node.operator
+        if op == :+ || op == :PLUS
+          sigma_poly_terms(node.left, vn, sign, terms) && sigma_poly_terms(node.right, vn, sign, terms)
+        elsif op == :- || op == :MINUS
+          sigma_poly_terms(node.left, vn, sign, terms) && sigma_poly_terms(node.right, vn, -sign, terms)
+        elsif op == :** || op == :POW
+          p = sigma_pow_of(node, vn)
+          return false if p < 0
+          terms << [sign, p]
+          true
+        elsif op == :* || op == :STAR
+          c = nil
+          powed = nil
+          if node.left.is_a?(AST::Int)
+            c = node.left.value
+            powed = node.right
+          elsif node.right.is_a?(AST::Int)
+            c = node.right.value
+            powed = node.left
+          else
+            return false
+          end
+          p = sigma_pow_of(powed, vn)
+          return false if p < 0
+          terms << [sign * c, p]
+          true
+        else
+          false
+        end
+      else
+        false
+      end
+    end
+
+    def sigma_pow_of(node, vn)
+      return 1 if node.is_a?(AST::Var) && node.name.to_s == vn
+      if node.is_a?(AST::BinaryOp) && (node.operator == :** || node.operator == :POW) &&
+         node.left.is_a?(AST::Var) && node.left.name.to_s == vn && node.right.is_a?(AST::Int)
+        return node.right.value
+      end
+      -1
+    end
+
     def visit_call(node)
       if node.obj
         recv = evaluate(node.obj)
@@ -2064,6 +2333,9 @@ module Tungsten
         name = node.name.to_s
         if name == "ccall"
           return dispatch_interpreted_ccall(evaluate_args(node.args), node)
+        end
+        if name == "Σ"
+          return eval_sigma(node)
         end
 
         # Class constructor call: Dog("Rex") → Dog.new("Rex")
@@ -3346,9 +3618,27 @@ module Tungsten
       end
     end
 
+    def visit_recase(node)
+      throw RECASE_SIGNAL, node.value
+    end
+
     def visit_case_expr(node)
-      if node.receiver
-        receiver_val = evaluate(node.receiver)
+      subject = node.receiver ? evaluate(node.receiver) : :no_subject
+      loop do
+        recase_expr = catch(RECASE_SIGNAL) do
+          return visit_case_expr_dispatch(node, subject)
+        end
+        if recase_expr.nil?
+          subject = node.receiver ? evaluate(node.receiver) : :no_subject
+        else
+          subject = evaluate(recase_expr)
+        end
+      end
+    end
+
+    def visit_case_expr_dispatch(node, subject)
+      if subject != :no_subject
+        receiver_val = subject
         if (lookup = cached_literal_case_lookup(node))
           exact_matches = lookup[receiver_val.class]
           if exact_matches&.key?(receiver_val)
@@ -5563,6 +5853,8 @@ module Tungsten
         return r.denominator == 1 ? r.numerator : r
       end
       return key.numerator if key.is_a?(::Rational) && key.denominator == 1
+      # Native hashes fold string and symbol keys into one spelling.
+      return key.name if key.is_a?(::Symbol)
       key
     end
 
@@ -5690,7 +5982,7 @@ module Tungsten
       when Tungsten::Quantity     then "Quantity"
       when Tungsten::Currency     then "Currency"
       when Tungsten::Duration     then "Duration"
-      when Tungsten::Percentage   then "Percentage"
+      when Tungsten::Percentage   then "Quantity"
       when Tungsten::Key          then "Key"
       else TUNGSTEN_TYPE_NAMES[recv.class] || recv.class.name.split("::").last
       end
@@ -5833,7 +6125,36 @@ module Tungsten
         # plain form to match the compiled path (1.5, 0.3), with whole values as
         # integers (100.0 -> "100"). Guard non-finite so #to_i can't raise.
         value.finite? && value.frac.zero? ? value.to_i.to_s : value.to_s("F")
+      when Float
+        s = format("%.17g", value)
+        s = s.sub(/\.0+$/, "") if s.include?(".")
+        s
+      when Array
+        "[" + value.map { |v| container_elem_s(v) }.join(", ") + "]"
+      when Hash
+        inner = value.map { |k, v| hash_pair_s(k, v) }.join(", ")
+        "{#{inner}}"
+      when Runtime::WObject
+        method = value.w_class.lookup_method("to_s")
+        method ? call_w_method(value, method, [], call_node: nil).to_s : value.to_s
       else value.to_s
+      end
+    end
+
+    def container_elem_s(value)
+      case value
+      when String then value
+      when Symbol then value.to_s
+      else w_to_s(value)
+      end
+    end
+
+    def hash_pair_s(key, value)
+      ks = key.is_a?(Symbol) ? key.name : key.to_s
+      if ks.match?(/\A[A-Za-z_][A-Za-z0-9_]*\z/)
+        "#{ks}: #{container_elem_s(value)}"
+      else
+        "#{ks}: #{container_elem_s(value)}"
       end
     end
 

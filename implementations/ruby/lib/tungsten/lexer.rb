@@ -597,7 +597,7 @@ module Tungsten
         token :ID, text
 
       # Unicode identifiers (Greek letters, math symbols, with optional subscripts)
-      elsif (text = scan(/[πτϕφℯℇ∞ℎℏσεμµ][₀₁₂₃₄₅₆₇₈₉ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓₔ]*/))
+      elsif (text = scan(/[πτϕφℯℇ∞ℎℏσεμµΣ∫][₀₁₂₃₄₅₆₇₈₉ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓₔ]*/))
         token :ID, text
 
       # Δ-prefixed identifier (delta notation: an undefined Δx reads as
@@ -717,7 +717,7 @@ module Tungsten
         token :/
 
       # map operator: /method (no space before slash, identifier after)
-      elsif skip_scan(%r{/(?=[a-z_])})
+      elsif skip_scan(%r{/(?=[a-z_Σ∫πτϕφℯℇ∞ℎℏσεμµΔ°])})
         token :MAP
 
       # Superscript digits → SUPERSCRIPT
@@ -1065,7 +1065,7 @@ module Tungsten
     # Unit string: identifier optionally followed by compound operators (/, *, ^, ·)
     # and more identifiers. e.g. "m", "kg", "m/s", "m/s^2", "kg·m/s^2"
     # The unit is NOT consumed if followed by `(` (function call).
-    UNIT_KEYWORDS = %w[if unless while until rescue ensure else elsif when then begin case class module return break next on yield super use with alias raise true false nil].freeze
+    UNIT_KEYWORDS = %w[if unless while until rescue ensure else elsif when then begin case class module return recase break next on yield super use with alias raise true false nil].freeze
     # Subscript digits (No) and superscript minus/plus (Sm) aren't \p{L}, so they have to be
     # listed explicitly. Subscript letters are mostly Lm and already covered by \p{L}, but listing
     # them keeps the unit-token alphabet co-located with the identifier alphabet at line 489/493.
@@ -1336,7 +1336,7 @@ module Tungsten
       module
       next
       on
-      raise redo rescue retry return
+      raise recase redo rescue retry return
       super
       then trait
       unless until use
@@ -1366,7 +1366,7 @@ module Tungsten
     # exception hints.) The compiled lexer takes ANY `## ` run as a hint,
     # but doc/examples' `## expect ...` expectation comments rely on
     # unknown words staying comments here.
-    TYPE_HINT_WORDS = (TYPE_NAMES + %w[big recycle reuse no_raise]).freeze
+    TYPE_HINT_WORDS = (TYPE_NAMES + %w[big recycle reuse no_raise fold]).freeze
     TYPE_HINT_START = /## +(?=(?:#{TYPE_HINT_WORDS.join("|")})\b|[a-z]\w*:)/
 
     SIGN = /[+−-]/

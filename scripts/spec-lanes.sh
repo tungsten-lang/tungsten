@@ -206,6 +206,7 @@ compiled_specs=(
   spec/compiler/bigint_to_i_autoload_spec.w
   spec/compiler/block_passthrough_spec.w
   spec/compiler/block_presence_parity_spec.w
+  spec/compiler/fold_spec.w
   spec/compiler/carry_intrinsics_parity_spec.w
   spec/compiler/cfg_ssa_pruning_spec.w
   spec/compiler/elementwise_fusion_spec.w
@@ -283,6 +284,7 @@ compiled_specs=(
   spec/compiler/string_buffer_dynamic_receiver_spec.w
   spec/compiler/quantity_control_flow_parity_spec.w
   spec/core/quantity_dispatch_spec.w
+  spec/core/quantity_scalar_division_spec.w
   spec/compiler/static_method_block_dispatch_spec.w
   spec/compiler/static_method_overload_spec.w
   spec/compiler/splat_parameter_parity_spec.w
@@ -552,6 +554,7 @@ interpreter_specs=(
   # identically interpreted (compiled-only verification has missed clobbered
   # interpreter.w hunks before).
   spec/compiler/block_presence_parity_spec.w
+  spec/compiler/fold_spec.w
   spec/compiler/array_constructor_parity_spec.w
   spec/compiler/array_dynamic_receiver_spec.w
   spec/compiler/heredoc_opaque_lexer_spec.w
@@ -567,6 +570,7 @@ interpreter_specs=(
   spec/compiler/string_dynamic_dispatch_spec.w
   spec/compiler/quantity_control_flow_parity_spec.w
   spec/core/quantity_dispatch_spec.w
+  spec/core/quantity_scalar_division_spec.w
   spec/compiler/static_method_block_dispatch_spec.w
   spec/compiler/static_method_overload_spec.w
   spec/core/blas_f64_spec.w

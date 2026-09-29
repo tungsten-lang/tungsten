@@ -49,7 +49,7 @@ module Tungsten
     SUBSCRIPT_TAIL = /[₀₁₂₃₄₅₆₇₈₉ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓₔ]+/.freeze
     SUPERSCRIPT_DIGITS = /[⁰¹²³⁴⁵⁶⁷⁸⁹]+/.freeze
     # Δ[ident] is the delta notation (an undefined Δx reads as `x - x'`).
-    UNICODE_IDENTIFIER = /[πτϕφℯℇ∞ℎℏσεμµ][₀₁₂₃₄₅₆₇₈₉ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓₔ]*|Δ[a-z0-9_]*|°[\p{L}]+/.freeze
+    UNICODE_IDENTIFIER = /[πτϕφℯℇ∞ℎℏσεμµΣ∫][₀₁₂₃₄₅₆₇₈₉ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓₔ]*|Δ[a-z0-9_]*|°[\p{L}]+/.freeze
     BYTE_ARRAY_BINARY = /0b([01](?:_?[01])*)/.freeze
     BYTE_ARRAY_OCTAL = /0o([0-7](?:_?[0-7])*)/.freeze
     BYTE_ARRAY_DECIMAL = /0d(\d(?:_?\d)*)/.freeze
@@ -2045,7 +2045,7 @@ module Tungsten
     end
 
     def scan_slash_or_operator
-      if ident_start_byte?(byte(1))
+      if ident_start_byte?(byte(1)) || match_regex_at(UNICODE_IDENTIFIER, @pos + 1)
         return emit_fixed(:MAP, 1)
       end
 

@@ -1,0 +1,16 @@
+74 training, 15 validation starts (skipped 0) recorded in 32s
+arrival feature nominal [0.426, -0.27, 0.805, -0.59, 0.655] spread [0.069, 0.067, 0.068, 0.141, 0.174]
+init re-expressed in this run's feature units: shift [0.0, 0.0, 0.0, 0.0, 0.0] scale [1.0, 1.0, 1.0, 1.0, 1.0]
+muscles 16 knots 17 dims 1632
+start full-set J 1.203 good 52/74
+gen 0 gen-best 1.593 sigma 0.015 (6s)
+gen 5 gen-best 1.312 sigma 0.014 (34s)
+gen 9 mean-vector full-set J 1.233 good 51/74 (best 1.203)
+   validation J 3.831 good 9/15
+gen 10 gen-best 1.334 sigma 0.014 (62s)
+gen 15 gen-best 1.366 sigma 0.013 (85s)
+gen 19 mean-vector full-set J 1.289 good 50/74 (best 1.203)
+   validation J 3.831 good 9/15
+gen 20 gen-best 1.268 sigma 0.013 (108s)
+/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/resource_tracker.py:279: UserWarning: resource_tracker: There appear to be 6 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '

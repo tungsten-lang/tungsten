@@ -1,0 +1,25 @@
+skipped (no rising crossing after bounce 3 in the window): [801, 802, 803, 804, 805, 806, 808, 811, 812, 814, 815, 818, 822, 825, 826, 830, 831, 832, 834, 836, 837, 838, 839, 840, 841, 842, 843, 844, 848, 849, 851, 853, 856, 858, 859, 862, 863, 864, 865, 866, 867, 869, 870, 871, 872, 873, 875, 876, 878, 879, 880, 881, 882]
+kept 22 training and 6 validation starts with passes 1..2 received [809, 813, 816, 817, 819, 820, 821, 823, 827, 828, 829, 833, 835, 845, 846, 847, 850, 852, 854, 855, 857, 860] [861, 868, 874, 877, 883, 884]
+recorded 31 starts in 0s; start ticks [483, 486, 483, 484, 484, 485, 487, 483, 483, 487, 480, 483, 484, 500, 484, 481, 485, 483, 483, 483, 482, 485]
+muscles 16 knots 17 dims 272
+init from scratchpad/btl2/runs/oracle_809_right.npz
+start mean J 9.251; good 3/22
+gen 0 best 9.251 gen-best 8.094 good 0/8 sigma 0.097 (15s)
+gen 5 best 9.251 gen-best 7.587 good 0/8 sigma 0.088 (88s)
+gen 9 mean-vector full-set J 6.020 good 1/22 (best 6.020)
+gen 10 best 6.020 gen-best 4.671 good 0/8 sigma 0.085 (159s)
+gen 15 best 6.020 gen-best 3.572 good 1/8 sigma 0.083 (229s)
+gen 19 mean-vector full-set J 3.953 good 3/22 (best 3.953)
+gen 20 best 3.953 gen-best 4.212 good 1/8 sigma 0.084 (305s)
+   validation mean J 5.358 good 0/6
+gen 25 best 3.953 gen-best 4.754 good 0/8 sigma 0.085 (380s)
+gen 29 mean-vector full-set J 3.599 good 3/22 (best 3.599)
+gen 30 best 3.599 gen-best 3.519 good 2/8 sigma 0.087 (455s)
+gen 35 best 3.599 gen-best 3.167 good 1/8 sigma 0.089 (533s)
+gen 39 mean-vector full-set J 3.070 good 0/22 (best 3.070)
+gen 40 best 3.070 gen-best 2.290 good 0/8 sigma 0.091 (610s)
+gen 45 best 3.070 gen-best 2.563 good 2/8 sigma 0.094 (678s)
+gen 49 mean-vector full-set J 3.222 good 0/22 (best 3.070)
+   validation mean J 0.995 good 0/6
+/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/resource_tracker.py:279: UserWarning: resource_tracker: There appear to be 6 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '

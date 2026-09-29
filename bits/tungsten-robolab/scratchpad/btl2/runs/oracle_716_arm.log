@@ -1,0 +1,6 @@
+muscles 16 knots 17 dims 272 ticks 160
+start score 5.839 {'touch': True, 'bounced': True, 'rel_t': 2.21, 'p': [-0.09, 0.39, 0.58], 'v': [1.07, 0.11, -1.36], 'vh': 1.08, 'bounce': (0.12653112181368809, 0.4079136968929898), 'bgd': 0.299, 'apex': 0.437, 'arrive': [0.38, 0.4], 'arrive_z': 0.438, 'gate': 0, 'body': 0, 'va': [0.94, -0.02, -0.02]}
+gen 0 best 1.513 v [0.76, -1.33, -1.5] vh 1.53 apex 0.45 bounce [0.08, 0.06] bgd 0.00 gate 1 arrive [0.27, -0.19] z 0.43 body 0 sigma 0.145 (6s)
+gen 10 best 0.745 v [1.51, -1.77, -2.63] vh 2.33 apex 0.56 bounce [0.1, 0.08] bgd 0.00 gate 1 arrive [0.38, -0.23] z 0.49 body 0 sigma 0.122 (61s)
+gen 20 best 0.098 v [1.86, -1.85, -3.36] vh 2.62 apex 0.68 bounce [0.08, 0.15] bgd 0.08 gate 1 arrive [0.42, -0.18] z 0.57 body 0 sigma 0.120 (112s)
+gen 30 best 0.008 v [2.07, -1.98, -3.27] vh 2.87 apex 0.68 bounce [0.14, 0.11] bgd 0.02 gate 1 arrive [0.49, -0.21] z 0.54 body 0 sigma 0.120 (162s)

@@ -1,0 +1,131 @@
+75 training, 19 validation starts (skipped 6) recorded in 0s
+arrival feature nominal [-0.129, 0.334] spread [0.03, 0.065]
+muscles 16 knots 17 dims 816
+start full-set J 2.180 good 22/75
+gen 0 gen-best 2.377 sigma 0.039 (24s)
+gen 5 gen-best 1.566 sigma 0.037 (136s)
+gen 9 mean-vector full-set J 1.699 good 23/75 (best 1.699)
+   validation J 0.931 good 6/19
+gen 10 gen-best 2.292 sigma 0.036 (244s)
+gen 15 gen-best 1.716 sigma 0.034 (296s)
+gen 19 mean-vector full-set J 1.633 good 35/75 (best 1.633)
+   validation J 0.975 good 12/19
+gen 20 gen-best 0.392 sigma 0.034 (325s)
+gen 25 gen-best 2.897 sigma 0.033 (353s)
+gen 29 mean-vector full-set J 1.546 good 36/75 (best 1.546)
+   validation J 0.515 good 13/19
+gen 30 gen-best 1.688 sigma 0.032 (381s)
+gen 35 gen-best 1.553 sigma 0.032 (411s)
+gen 39 mean-vector full-set J 1.559 good 44/75 (best 1.546)
+   validation J 0.515 good 13/19
+gen 40 gen-best 0.311 sigma 0.032 (443s)
+gen 45 gen-best 1.725 sigma 0.031 (473s)
+gen 49 mean-vector full-set J 1.507 good 40/75 (best 1.507)
+   validation J 0.400 good 12/19
+gen 50 gen-best 1.124 sigma 0.031 (502s)
+gen 55 gen-best 2.551 sigma 0.031 (529s)
+gen 59 mean-vector full-set J 1.402 good 40/75 (best 1.402)
+   validation J 0.366 good 11/19
+gen 60 gen-best 1.485 sigma 0.031 (559s)
+gen 65 gen-best 0.336 sigma 0.031 (588s)
+gen 69 mean-vector full-set J 1.610 good 40/75 (best 1.402)
+   validation J 0.366 good 11/19
+gen 70 gen-best 0.415 sigma 0.031 (619s)
+gen 75 gen-best 0.810 sigma 0.031 (648s)
+gen 79 mean-vector full-set J 1.438 good 43/75 (best 1.402)
+   validation J 0.366 good 11/19
+gen 80 gen-best 2.052 sigma 0.031 (678s)
+gen 85 gen-best 0.258 sigma 0.030 (707s)
+gen 89 mean-vector full-set J 1.544 good 42/75 (best 1.402)
+   validation J 0.366 good 11/19
+gen 90 gen-best 0.333 sigma 0.030 (737s)
+gen 95 gen-best 0.472 sigma 0.030 (765s)
+gen 99 mean-vector full-set J 1.431 good 45/75 (best 1.402)
+   validation J 0.366 good 11/19
+gen 100 gen-best 0.190 sigma 0.030 (793s)
+gen 105 gen-best 1.096 sigma 0.030 (821s)
+gen 109 mean-vector full-set J 1.353 good 47/75 (best 1.353)
+   validation J 0.560 good 12/19
+gen 110 gen-best 0.271 sigma 0.030 (850s)
+gen 115 gen-best 0.265 sigma 0.030 (879s)
+gen 119 mean-vector full-set J 1.439 good 42/75 (best 1.353)
+   validation J 0.560 good 12/19
+gen 120 gen-best 2.335 sigma 0.030 (908s)
+gen 125 gen-best 1.600 sigma 0.030 (936s)
+gen 129 mean-vector full-set J 1.517 good 47/75 (best 1.353)
+   validation J 0.560 good 12/19
+gen 130 gen-best 0.639 sigma 0.030 (965s)
+gen 135 gen-best 1.214 sigma 0.029 (995s)
+gen 139 mean-vector full-set J 1.356 good 43/75 (best 1.353)
+   validation J 0.560 good 12/19
+gen 140 gen-best 1.192 sigma 0.029 (1025s)
+gen 145 gen-best 1.238 sigma 0.029 (1054s)
+gen 149 mean-vector full-set J 1.401 good 45/75 (best 1.353)
+   validation J 0.560 good 12/19
+gen 150 gen-best 1.023 sigma 0.029 (1084s)
+gen 155 gen-best 0.860 sigma 0.029 (1111s)
+gen 159 mean-vector full-set J 1.359 good 44/75 (best 1.353)
+   validation J 0.560 good 12/19
+gen 160 gen-best 0.212 sigma 0.029 (1141s)
+gen 165 gen-best 0.275 sigma 0.029 (1170s)
+gen 169 mean-vector full-set J 1.607 good 50/75 (best 1.353)
+   validation J 0.560 good 12/19
+gen 170 gen-best 1.576 sigma 0.029 (1199s)
+gen 175 gen-best 0.850 sigma 0.029 (1227s)
+gen 179 mean-vector full-set J 1.232 good 45/75 (best 1.232)
+   validation J 0.648 good 10/19
+gen 180 gen-best 2.597 sigma 0.029 (1255s)
+gen 185 gen-best 0.211 sigma 0.029 (1281s)
+gen 189 mean-vector full-set J 1.273 good 49/75 (best 1.232)
+   validation J 0.648 good 10/19
+gen 190 gen-best 1.536 sigma 0.029 (1308s)
+gen 195 gen-best 0.211 sigma 0.028 (1334s)
+gen 199 mean-vector full-set J 1.418 good 50/75 (best 1.232)
+   validation J 0.648 good 10/19
+gen 200 gen-best 0.237 sigma 0.028 (1360s)
+gen 205 gen-best 1.284 sigma 0.028 (1385s)
+gen 209 mean-vector full-set J 1.177 good 50/75 (best 1.177)
+   validation J 0.448 good 12/19
+gen 210 gen-best 0.226 sigma 0.028 (1411s)
+gen 215 gen-best 1.795 sigma 0.028 (1435s)
+gen 219 mean-vector full-set J 1.402 good 50/75 (best 1.177)
+   validation J 0.448 good 12/19
+gen 220 gen-best 2.130 sigma 0.028 (1463s)
+gen 225 gen-best 0.297 sigma 0.028 (1492s)
+gen 229 mean-vector full-set J 1.173 good 47/75 (best 1.173)
+   validation J 0.486 good 14/19
+gen 230 gen-best 1.451 sigma 0.028 (1523s)
+gen 235 gen-best 0.872 sigma 0.028 (1550s)
+gen 239 mean-vector full-set J 1.241 good 47/75 (best 1.173)
+   validation J 0.486 good 14/19
+gen 240 gen-best 0.203 sigma 0.027 (1578s)
+gen 245 gen-best 2.516 sigma 0.027 (1605s)
+gen 249 mean-vector full-set J 1.363 good 54/75 (best 1.173)
+   validation J 0.486 good 14/19
+gen 250 gen-best 3.087 sigma 0.027 (1633s)
+gen 255 gen-best 2.509 sigma 0.027 (1661s)
+gen 259 mean-vector full-set J 1.191 good 47/75 (best 1.173)
+   validation J 0.486 good 14/19
+gen 260 gen-best 2.189 sigma 0.027 (1688s)
+gen 265 gen-best 0.161 sigma 0.027 (1715s)
+gen 269 mean-vector full-set J 1.134 good 50/75 (best 1.134)
+   validation J 0.219 good 12/19
+gen 270 gen-best 2.349 sigma 0.027 (1743s)
+gen 275 gen-best 0.237 sigma 0.027 (1768s)
+gen 279 mean-vector full-set J 1.317 good 44/75 (best 1.134)
+   validation J 0.219 good 12/19
+gen 280 gen-best 0.354 sigma 0.026 (1790s)
+gen 285 gen-best 1.142 sigma 0.026 (1814s)
+gen 289 mean-vector full-set J 1.297 good 44/75 (best 1.134)
+   validation J 0.219 good 12/19
+gen 290 gen-best 2.125 sigma 0.026 (1840s)
+gen 295 gen-best 1.365 sigma 0.026 (1869s)
+gen 299 mean-vector full-set J 1.355 good 51/75 (best 1.134)
+   validation J 0.219 good 12/19
+gen 300 gen-best 0.169 sigma 0.026 (1897s)
+gen 305 gen-best 0.724 sigma 0.026 (1924s)
+gen 309 mean-vector full-set J 1.186 good 55/75 (best 1.134)
+   validation J 0.219 good 12/19
+gen 310 gen-best 0.757 sigma 0.026 (1952s)
+/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/resource_tracker.py:279: UserWarning: resource_tracker: There appear to be 6 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '

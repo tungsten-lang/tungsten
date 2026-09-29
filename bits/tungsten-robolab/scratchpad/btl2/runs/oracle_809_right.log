@@ -1,0 +1,16 @@
+muscles 16 knots 17 dims 272 ticks 160
+start score 1.308 {'touch': True, 'bounced': True, 'rel_t': 2.65, 'p': [0.32, -0.09, 0.54], 'v': [-2.1, 1.0, -2.44], 'vh': 2.327, 'bounce': (0.03526247566076967, 0.04884971702755226), 'bgd': 0.022, 'apex': 0.55, 'arrive': [-0.51, 0.34], 'arrive_z': 0.552, 'gate': 1, 'body': 0, 'va': [-1.72, 0.92, -0.04]}
+gen 0 best 0.825 v [-1.5, 1.28, -2.31] vh 1.97 apex 0.54 bounce [0.15, 0.1] bgd 0.03 gate 1 arrive [-0.21, 0.43] z 0.54 body 0 sigma 0.144 (5s)
+gen 10 best 0.350 v [-1.14, 1.14, -2.64] vh 1.61 apex 0.61 bounce [0.21, 0.05] bgd 0.04 gate 1 arrive [-0.13, 0.35] z 0.59 body 0 sigma 0.121 (54s)
+gen 20 best 0.000 v [-1.73, 1.35, -3.33] vh 2.20 apex 0.70 bounce [0.19, 0.06] bgd 0.03 gate 1 arrive [-0.13, 0.32] z 0.60 body 0 sigma 0.119 (106s)
+gen 30 best 0.000 v [-1.73, 1.35, -3.33] vh 2.20 apex 0.70 bounce [0.19, 0.06] bgd 0.03 gate 1 arrive [-0.13, 0.32] z 0.60 body 0 sigma 0.122 (159s)
+gen 40 best 0.000 v [-1.73, 1.35, -3.33] vh 2.20 apex 0.70 bounce [0.19, 0.06] bgd 0.03 gate 1 arrive [-0.13, 0.32] z 0.60 body 0 sigma 0.121 (213s)
+gen 50 best 0.000 v [-1.73, 1.35, -3.33] vh 2.20 apex 0.70 bounce [0.19, 0.06] bgd 0.03 gate 1 arrive [-0.13, 0.32] z 0.60 body 0 sigma 0.123 (265s)
+gen 60 best 0.000 v [-1.73, 1.35, -3.33] vh 2.20 apex 0.70 bounce [0.19, 0.06] bgd 0.03 gate 1 arrive [-0.13, 0.32] z 0.60 body 0 sigma 0.129 (319s)
+gen 70 best 0.000 v [-1.73, 1.35, -3.33] vh 2.20 apex 0.70 bounce [0.19, 0.06] bgd 0.03 gate 1 arrive [-0.13, 0.32] z 0.60 body 0 sigma 0.133 (377s)
+gen 80 best 0.000 v [-1.73, 1.35, -3.33] vh 2.20 apex 0.70 bounce [0.19, 0.06] bgd 0.03 gate 1 arrive [-0.13, 0.32] z 0.60 body 0 sigma 0.136 (437s)
+gen 90 best 0.000 v [-1.73, 1.35, -3.33] vh 2.20 apex 0.70 bounce [0.19, 0.06] bgd 0.03 gate 1 arrive [-0.13, 0.32] z 0.60 body 0 sigma 0.136 (496s)
+gen 100 best 0.000 v [-1.73, 1.35, -3.33] vh 2.20 apex 0.70 bounce [0.19, 0.06] bgd 0.03 gate 1 arrive [-0.13, 0.32] z 0.60 body 0 sigma 0.137 (552s)
+gen 110 best 0.000 v [-1.73, 1.35, -3.33] vh 2.20 apex 0.70 bounce [0.19, 0.06] bgd 0.03 gate 1 arrive [-0.13, 0.32] z 0.60 body 0 sigma 0.138 (607s)
+gen 119 best 0.000 v [-1.73, 1.35, -3.33] vh 2.20 apex 0.70 bounce [0.19, 0.06] bgd 0.03 gate 1 arrive [-0.13, 0.32] z 0.60 body 0 sigma 0.141 (656s)
+done

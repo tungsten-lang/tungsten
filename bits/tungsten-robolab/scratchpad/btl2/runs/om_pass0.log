@@ -1,0 +1,50 @@
+recorded 100 starts in 118s; start ticks [305, 304, 306, 306, 306, 304, 307, 304, 306, 304, 307, 305, 306, 304, 305, 306, 306, 304, 306, 306, 305, 305, 306, 305, 306, 306, 305, 304, 304, 306, 304, 306, 304, 305, 306, 305, 306, 306, 306, 306, 304, 306, 305, 304, 305, 306, 306, 305, 305, 305, 307, 306, 305, 306, 306, 306, 306, 306, 307, 306, 306, 307, 306, 306, 306, 304, 305, 306, 307, 306, 307, 306, 306, 305, 305, 304, 307, 304, 307, 304]
+muscles 16 knots 17 dims 272
+start mean J 3.494; good 45/80
+gen 0 best 3.494 gen-best 0.454 good 7/10 sigma 0.097 (12s)
+gen 5 best 3.494 gen-best 0.208 good 10/10 sigma 0.087 (82s)
+gen 9 mean-vector full-set J 0.339 good 69/80 (best 0.339)
+gen 10 best 0.339 gen-best 0.236 good 10/10 sigma 0.081 (149s)
+gen 15 best 0.339 gen-best 0.263 good 9/10 sigma 0.079 (210s)
+gen 19 mean-vector full-set J 0.213 good 74/80 (best 0.213)
+gen 20 best 0.213 gen-best 0.127 good 10/10 sigma 0.077 (267s)
+   validation mean J 0.129 good 19/20
+gen 25 best 0.213 gen-best 0.138 good 10/10 sigma 0.076 (323s)
+gen 29 mean-vector full-set J 0.164 good 75/80 (best 0.164)
+gen 30 best 0.164 gen-best 0.136 good 10/10 sigma 0.076 (376s)
+gen 35 best 0.164 gen-best 0.146 good 10/10 sigma 0.075 (413s)
+gen 39 mean-vector full-set J 0.200 good 76/80 (best 0.164)
+gen 40 best 0.164 gen-best 0.148 good 10/10 sigma 0.074 (440s)
+gen 45 best 0.164 gen-best 0.151 good 10/10 sigma 0.073 (466s)
+gen 49 mean-vector full-set J 0.188 good 73/80 (best 0.164)
+   validation mean J 0.167 good 19/20
+gen 50 best 0.164 gen-best 0.136 good 10/10 sigma 0.073 (492s)
+gen 55 best 0.164 gen-best 0.196 good 9/10 sigma 0.074 (517s)
+gen 59 mean-vector full-set J 0.208 good 65/80 (best 0.164)
+gen 60 best 0.164 gen-best 0.153 good 10/10 sigma 0.073 (543s)
+gen 65 best 0.164 gen-best 0.190 good 10/10 sigma 0.073 (569s)
+gen 69 mean-vector full-set J 0.171 good 64/80 (best 0.164)
+gen 70 best 0.164 gen-best 0.132 good 10/10 sigma 0.074 (596s)
+   validation mean J 0.167 good 19/20
+gen 75 best 0.164 gen-best 0.155 good 9/10 sigma 0.075 (623s)
+gen 79 mean-vector full-set J 0.177 good 67/80 (best 0.164)
+gen 80 best 0.164 gen-best 0.097 good 10/10 sigma 0.075 (650s)
+gen 85 best 0.164 gen-best 0.161 good 10/10 sigma 0.075 (678s)
+gen 89 mean-vector full-set J 0.168 good 66/80 (best 0.164)
+gen 90 best 0.164 gen-best 0.136 good 9/10 sigma 0.076 (706s)
+gen 95 best 0.164 gen-best 0.099 good 10/10 sigma 0.075 (733s)
+gen 99 mean-vector full-set J 0.184 good 66/80 (best 0.164)
+   validation mean J 0.167 good 19/20
+gen 100 best 0.164 gen-best 0.107 good 10/10 sigma 0.075 (761s)
+gen 105 best 0.164 gen-best 0.099 good 10/10 sigma 0.075 (787s)
+gen 109 mean-vector full-set J 0.152 good 78/80 (best 0.152)
+gen 110 best 0.152 gen-best 0.103 good 10/10 sigma 0.076 (814s)
+gen 115 best 0.152 gen-best 0.160 good 10/10 sigma 0.077 (840s)
+gen 119 mean-vector full-set J 0.131 good 80/80 (best 0.131)
+gen 120 best 0.131 gen-best 0.127 good 10/10 sigma 0.078 (890s)
+   validation mean J 0.128 good 20/20
+gen 125 best 0.131 gen-best 0.090 good 9/10 sigma 0.078 (938s)
+gen 129 mean-vector full-set J 0.109 good 78/80 (best 0.109)
+gen 130 best 0.109 gen-best 0.086 good 10/10 sigma 0.078 (968s)
+/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/resource_tracker.py:279: UserWarning: resource_tracker: There appear to be 6 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '

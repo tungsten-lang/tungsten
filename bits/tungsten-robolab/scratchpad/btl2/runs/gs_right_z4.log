@@ -1,0 +1,44 @@
+127 training, 15 validation starts (skipped 0) recorded in 99s
+arrival feature nominal [0.426, -0.268, 0.801, -0.587, 0.649] spread [0.072, 0.07, 0.089, 0.15, 0.187]
+init re-expressed in this run's feature units: shift [-0.0, 0.04, -0.07, 0.02, -0.03] scale [1.06, 1.04, 1.3, 1.06, 1.08]
+muscles 16 knots 17 dims 1632
+start full-set J 1.838 good 84/127
+gen 0 gen-best 1.679 sigma 0.020 (8s)
+gen 5 gen-best 2.581 sigma 0.019 (40s)
+gen 9 mean-vector full-set J 1.729 good 82/127 (best 1.729)
+   validation J 3.514 good 7/15
+gen 10 gen-best 1.778 sigma 0.018 (75s)
+gen 15 gen-best 1.987 sigma 0.018 (108s)
+gen 19 mean-vector full-set J 1.736 good 74/127 (best 1.729)
+   validation J 3.514 good 7/15
+gen 20 gen-best 1.267 sigma 0.018 (144s)
+gen 25 gen-best 2.011 sigma 0.017 (186s)
+gen 29 mean-vector full-set J 1.738 good 72/127 (best 1.729)
+   validation J 3.514 good 7/15
+gen 30 gen-best 1.573 sigma 0.017 (234s)
+gen 35 gen-best 1.826 sigma 0.017 (268s)
+gen 39 mean-vector full-set J 1.680 good 79/127 (best 1.680)
+   validation J 2.993 good 8/15
+gen 40 gen-best 1.227 sigma 0.017 (301s)
+gen 45 gen-best 2.118 sigma 0.016 (333s)
+gen 49 mean-vector full-set J 1.578 good 83/127 (best 1.578)
+   validation J 2.803 good 7/15
+gen 50 gen-best 1.175 sigma 0.016 (367s)
+gen 55 gen-best 2.000 sigma 0.016 (400s)
+gen 59 mean-vector full-set J 1.663 good 73/127 (best 1.578)
+   validation J 2.803 good 7/15
+gen 60 gen-best 1.211 sigma 0.016 (434s)
+gen 65 gen-best 1.781 sigma 0.016 (470s)
+gen 69 mean-vector full-set J 1.640 good 74/127 (best 1.578)
+   validation J 2.803 good 7/15
+gen 70 gen-best 1.216 sigma 0.016 (508s)
+gen 75 gen-best 1.369 sigma 0.016 (544s)
+gen 79 mean-vector full-set J 1.597 good 82/127 (best 1.578)
+   validation J 2.803 good 7/15
+gen 80 gen-best 1.491 sigma 0.016 (584s)
+gen 85 gen-best 1.812 sigma 0.016 (622s)
+gen 89 mean-vector full-set J 1.514 good 85/127 (best 1.514)
+   validation J 3.377 good 8/15
+gen 90 gen-best 1.866 sigma 0.015 (659s)
+/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/resource_tracker.py:279: UserWarning: resource_tracker: There appear to be 6 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '

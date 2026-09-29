@@ -1,0 +1,38 @@
+901 streak 3 ok 3 / 4 +0.66 +0.65 +0.54 -0.47 | two floor bounces without a touch
+902 streak 1 ok 1 / 2 +0.67 -0.42 | two floor bounces without a touch
+903 streak 2 ok 2 / 3 +0.66 +0.66 -0.58 | two floor bounces without a touch
+904 streak 2 ok 2 / 3 +0.64 +0.64 -0.44 | two floor bounces without a touch
+905 streak 1 ok 1 / 2 +0.68 -0.41 | two floor bounces without a touch
+906 streak 0 ok 0 / 1 -0.67 | two floor bounces without a touch
+907 streak 2 ok 2 / 3 +0.66 +0.64 -0.56 | two floor bounces without a touch
+908 streak 3 ok 3 / 4 +0.65 +0.66 +0.54 -0.34 | two floor bounces without a touch
+909 streak 1 ok 1 / 4 +0.68 -0.65 -0.67 -0.20 | two floor bounces without a touch
+910 streak 2 ok 2 / 3 +0.63 +0.60 -? | two floor bounces without a touch
+911 streak 2 ok 2 / 3 +0.62 +0.54 -? | two floor bounces without a touch
+912 streak 1 ok 1 / 2 +0.66 -0.42 | two floor bounces without a touch
+913 streak 2 ok 2 / 3 +0.66 +0.65 -0.70 | two floor bounces without a touch
+914 streak 1 ok 1 / 2 +0.69 -0.55 | two floor bounces without a touch
+915 streak 2 ok 2 / 3 +0.68 +0.56 -? | two floor bounces without a touch
+916 streak 3 ok 3 / 4 +0.65 +0.65 +0.54 -0.46 | two floor bounces without a touch
+917 streak 1 ok 1 / 2 +0.64 -0.42 | two floor bounces without a touch
+918 streak 2 ok 2 / 3 +0.64 +0.57 -? | two floor bounces without a touch
+919 streak 4 ok 4 / 5 +0.66 +0.66 +0.67 +0.49 -0.51 | two floor bounces without a touch
+920 streak 1 ok 1 / 3 +0.68 -0.53 -? | two floor bounces without a touch
+921 streak 1 ok 1 / 2 +0.64 -0.47 | two floor bounces without a touch
+922 streak 0 ok 0 / 1 -0.70 | two floor bounces without a touch
+923 streak 2 ok 2 / 3 +0.65 +0.65 -0.55 | two floor bounces without a touch
+924 streak 1 ok 1 / 2 +0.67 -0.42 | two floor bounces without a touch
+925 streak 2 ok 2 / 3 +0.66 +0.65 -0.59 | two floor bounces without a touch
+926 streak 1 ok 1 / 2 +0.63 -0.43 | two floor bounces without a touch
+927 streak 1 ok 1 / 2 +0.67 -0.42 | two floor bounces without a touch
+928 streak 2 ok 2 / 3 +0.66 +0.59 -? | two floor bounces without a touch
+929 streak 0 ok 0 / 2 -0.62 -? | bounced 0.60 m from home
+930 streak 1 ok 1 / 2 +0.68 -0.41 | two floor bounces without a touch
+931 streak 3 ok 3 / 4 +0.66 +0.65 +0.64 -0.45 | two floor bounces without a touch
+932 streak 1 ok 1 / 3 +0.65 -0.65 -0.69 | two floor bounces without a touch
+pass 1: n 32 ok 29 (91%) {'ok': 29, 'bounces_or_wrong_hand': 2, 'lost_after': 1} apex 0.66 vh 2.18
+pass 2: n 30 ok 16 (53%) {'ok': 16, 'bounces_or_wrong_hand': 11, 'body': 3} apex 0.56 vh 1.76
+pass 3: n 19 ok 5 (26%) {'ok': 5, 'bounces_or_wrong_hand': 13, 'body': 1} apex 0.59 vh 2.10
+pass 4: n 6 ok 1 (17%) {'bounces_or_wrong_hand': 5, 'ok': 1} apex 0.40 vh 1.12
+pass 5: n 1 ok 0 (0%) {'bounces_or_wrong_hand': 1} apex 0.51 vh 2.53
+streaks [4, 3, 3, 3, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0] mean 1.594 max 4 >=1: 29 >=2: 16 >=3: 5

@@ -1,0 +1,38 @@
+80 training, 20 validation starts (skipped 0) recorded in 32s
+arrival feature nominal [0.52, -0.308] spread [0.02, 0.021]
+init re-expressed in this run's feature units: shift [0.0, 0.0] scale [1.0, 1.0]
+muscles 16 knots 17 dims 816
+start full-set J 0.113 good 80/80
+gen 0 gen-best 0.084 sigma 0.020 (4s)
+gen 5 gen-best 0.058 sigma 0.019 (21s)
+gen 9 mean-vector full-set J 0.047 good 80/80 (best 0.047)
+   validation J 0.054 good 20/20
+gen 10 gen-best 0.066 sigma 0.018 (37s)
+gen 15 gen-best 0.049 sigma 0.017 (52s)
+gen 19 mean-vector full-set J 0.042 good 80/80 (best 0.042)
+   validation J 0.073 good 20/20
+gen 20 gen-best 0.079 sigma 0.017 (69s)
+gen 25 gen-best 0.051 sigma 0.016 (85s)
+gen 29 mean-vector full-set J 0.039 good 80/80 (best 0.039)
+   validation J 0.057 good 20/20
+gen 30 gen-best 0.041 sigma 0.016 (101s)
+gen 35 gen-best 0.033 sigma 0.016 (118s)
+gen 39 mean-vector full-set J 0.035 good 80/80 (best 0.035)
+   validation J 0.056 good 20/20
+gen 40 gen-best 0.046 sigma 0.016 (134s)
+gen 45 gen-best 0.049 sigma 0.016 (150s)
+gen 49 mean-vector full-set J 0.037 good 80/80 (best 0.035)
+   validation J 0.056 good 20/20
+gen 50 gen-best 0.040 sigma 0.015 (167s)
+gen 55 gen-best 0.054 sigma 0.015 (183s)
+gen 59 mean-vector full-set J 0.040 good 80/80 (best 0.035)
+   validation J 0.056 good 20/20
+gen 60 gen-best 0.053 sigma 0.015 (199s)
+gen 65 gen-best 0.056 sigma 0.015 (216s)
+gen 69 mean-vector full-set J 0.043 good 80/80 (best 0.035)
+   validation J 0.056 good 20/20
+gen 70 gen-best 0.022 sigma 0.015 (233s)
+gen 75 gen-best 0.044 sigma 0.015 (249s)
+gen 79 mean-vector full-set J 0.030 good 80/80 (best 0.030)
+   validation J 0.048 good 20/20
+done

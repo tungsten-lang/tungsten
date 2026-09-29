@@ -47,6 +47,18 @@
 #           catching) or bt_rotr (the other) from the lunge's twist over
 #           bt_rott, carrying the catching hand along with the ball, and
 #           twists back over bt_rotb when a catch dribble's push releases.
+#   program (pg_on 1, ORACLE class) a pass's stroke replayed from a table of arm
+#           activations found by a muscle-level trajectory search
+#           (scratchpad/btl2/oracle_*.py): pass pg_first + p (p = 0..pg_n - 1)
+#           starts pg_lead s before the ball's predicted rising crossing of bt_rh
+#           and plays pg{p}_{m}_{k} (16 arm muscles, a knot every pg_dk s) as the
+#           hand's activations (reflex gain pg_gain, 0: the program alone); the
+#           hand's touch and release hand the ball over as ever. Everything
+#           else (the launch, the waits, the other passes) is the reflex controller.
+#           pg_gs 1: each table is T0 + ux Tx + uy Ty, u the predicted crossing
+#           position's offset from the stage's nominal (pgc, pgs), knot values
+#           bounded to [0, 1] and the gains to +-pg_gmax; pg_first 0 programs the
+#           launch pass too; pg_stages / pg_per cycle the last tables.
 #   learn   (bt_ilc > 0) iterative learning across repetitions: after each
 #           pass the receiving hand measures where the ball actually rose
 #           (its position as it crossed the strike height) against the spot
@@ -217,6 +229,9 @@
     # carries the palm bt_kfd on along its path to rest over bt_kpt and holds
     # until the ball leaves it. bt_kdrv scales the feed-forward burst.
     @bt_plan = param("bt_plan", ~0.0, ~0.0, ~1.0)
+    # which hands use the planned contact: 0 both, 1 only the lead leg's hand
+    # (the return of a pass), 2 only the other hand
+    @bt_pside = param("bt_pside", ~0.0, ~0.0, ~2.0)
     @bt_kt = param("bt_kt", ~0.12, ~0.05, ~0.3)
     @bt_kph = param("bt_kph", ~0.03, ~-0.1, ~0.15)
     @bt_kspd = param("bt_kspd", ~1.5, ~0.0, ~4.0)
@@ -387,12 +402,103 @@
     # by the height)
     @bt_ldrop = param("bt_ldrop", ~0.0, ~0.0, ~1.0)
     @bt_lset = param("bt_lset", ~0.25, ~0.05, ~0.6)
+    # (program) see the header
+    @pg_on = param("pg_on", ~0.0, ~0.0, ~1.0)
+    @pg_first = param("pg_first", ~1.0, ~0.0, ~8.0).round
+    @pg_n = param("pg_n", ~1.0, ~0.0, ~40.0).round
+    # the tables hold pg_stages stages; a longer run cycles through the last pg_per of them (0: the reflex controller
+    # takes over after the last stage)
+    @pg_stages = param("pg_stages", @pg_n * ~1.0, ~0.0, ~8.0).round
+    @pg_per = param("pg_per", ~0.0, ~0.0, ~8.0).round
+    @pg_nk = param("pg_nk", ~17.0, ~2.0, ~40.0).round
+    @pg_dk = param("pg_dk", ~0.025, ~0.005, ~0.1)
+    @pg_lead = param("pg_lead", ~0.165, ~0.0, ~0.5)
+    @pg_gain = param("pg_gain", ~0.0, ~0.0, ~1.0)
+    @pg_dbg = param("pg_dbg", ~0.0, ~0.0, ~1.0)
+    # gain-scheduled program (pg_gs 1): each stage's table is T0 + ux Tx + uy Ty, u the predicted crossing position's
+    # offset from the stage's nominal (pgc<p>x, pgc<p>y) in units of pgs<p>x, pgs<p>y
+    @pg_gs = param("pg_gs", ~0.0, ~0.0, ~1.0)
+    @pg_gmax = param("pg_gmax", ~1000.0, ~0.0, ~1000.0)
+    # pg_nz posture features: the stroking arm's joint pgzj<i> (0 shoulder flex, 1 abd, 2 rot, 3 elbow, 4 wrist flex, 5 dev,
+    # 6 finger mcp, 7 pip) as its muscle pair's contraction difference at the trigger, (q - pgzn) / pgzs per stage, each with its own
+    # gain block pgz<p>_<i>_<m>_<k> (the body's state before the stroke moves what the same stroke does)
+    @pg_nz = param("pg_nz", ~0.0, ~0.0, ~4.0).round
+    @pg_zj = []
+    zi = 0
+    while zi < @pg_nz
+      @pg_zj.push(param("pgzj" + zi.to_s, ~4.0, ~0.0, ~7.0).round)
+      zi += 1
+    @pg_tz = []
+    @pg_zn = []
+    @pg_tx = []
+    @pg_ty = []
+    @pg_nom = []
+    @pg_tab = []
+    if @pg_on > ~0.5
+      pp = 0
+      while pp < @pg_stages
+        rows = []
+        mm = 0
+        while mm < 16
+          row = []
+          kk = 0
+          while kk < @pg_nk
+            row.push(param("pg" + pp.to_s + "_" + mm.to_s + "_" + kk.to_s, ~0.0, ~0.0, ~1.0))
+            kk += 1
+          rows.push(row)
+          mm += 1
+        @pg_tab.push(rows)
+        if @pg_gs > ~0.5
+          rx = []
+          ry = []
+          mm = 0
+          while mm < 16
+            cx = []
+            cy = []
+            kk = 0
+            while kk < @pg_nk
+              cx.push(param("pgx" + pp.to_s + "_" + mm.to_s + "_" + kk.to_s, ~0.0, ~-1.0, ~1.0))
+              cy.push(param("pgy" + pp.to_s + "_" + mm.to_s + "_" + kk.to_s, ~0.0, ~-1.0, ~1.0))
+              kk += 1
+            rx.push(cx)
+            ry.push(cy)
+            mm += 1
+          @pg_tx.push(rx)
+          @pg_ty.push(ry)
+          @pg_nom.push([param("pgc" + pp.to_s + "x", ~0.0, ~-1.0, ~1.0), param("pgc" + pp.to_s + "y", ~0.0, ~-1.0, ~1.0), param("pgs" + pp.to_s + "x", ~0.05, ~0.005, ~0.3), param("pgs" + pp.to_s + "y", ~0.05, ~0.005, ~0.3)])
+          rz = []
+          zn = []
+          zi = 0
+          while zi < @pg_nz
+            zrows = []
+            mm = 0
+            while mm < 16
+              cz = []
+              kk = 0
+              while kk < @pg_nk
+                cz.push(param("pgz" + pp.to_s + "_" + zi.to_s + "_" + mm.to_s + "_" + kk.to_s, ~0.0, ~-1.0, ~1.0))
+                kk += 1
+              zrows.push(cz)
+              mm += 1
+            rz.push(zrows)
+            zn.push([param("pgzn" + pp.to_s + "_" + zi.to_s, ~0.0, ~-2.0, ~2.0), param("pgzs" + pp.to_s + "_" + zi.to_s, ~0.05, ~0.002, ~1.0)])
+            zi += 1
+          @pg_tz.push(rz)
+          @pg_zn.push(zn)
+        pp += 1
 
   -> btl?
     @mode > ~5.5
 
   -> rotating?
     btl? && (@bt_rotl != ~0.0 || @bt_rotr != ~0.0)
+
+  # The planned contact (bt_plan) for this hand (bt_pside).
+  -> planned?(hand)
+    return false if @bt_plan < ~0.5
+    return true if @bt_pside < ~0.5
+    return hand.side == lead_side if @bt_pside < ~1.5
+    hand.side != lead_side
 
   # 6: a pass between the legs on every push; 7: a pass, then one dribble
   # by the receiving hand; 8: a pass and its return, then one dribble by
@@ -444,6 +550,16 @@
     @kplan = {"r" => nil, "l" => nil}
     @ktouch = {"r" => false, "l" => false}
     @kplanned = {"r" => false, "l" => false}
+    @pass_no = 0
+    @pg_state = {"r" => nil, "l" => nil}
+    @pg_mus = {}
+    if @pg_on > ~0.5
+      ["r", "l"].each ->(sd)
+        idx = []
+        ["shoulder_flex", "shoulder_abd", "shoulder_rot", "elbow", "wrist_flex", "wrist_dev", "finger_mcp", "finger_pip"].each ->(j)
+          idx.push(body.pos_index(sd + "_" + j))
+          idx.push(body.neg_index(sd + "_" + j))
+        @pg_mus[sd] = idx
     @kil = {"r" => [~0.0, ~0.0, ~0.0, ~0.0], "l" => [~0.0, ~0.0, ~0.0, ~0.0]}
     @sent = nil
     @fingers = body.has_joint?("r_finger_mcp")
@@ -676,14 +792,14 @@
     mv.add(shape(Chunk.new("swing", tp).pose(low).drive(drv).gain(g).hold_until(touch, pm).correct(carry, @spring).on_enter(->(f, c) striking(f, c, hand, false))))
     mv.add(shape(Chunk.new("carry", tc).pose(low).drive(drv).gain(g).hold_until(released, pm).correct(carry, @spring).followed_by("recover").branch(over)))
     # the pass between the legs
-    if @bt_plan > ~0.5
+    if planned?(hand)
       # (planned: the contact may be planned while the hand is still
       # recovering, going straight to its knot)
       plan_early = Latch.test("plan_early", ->(f, e, c) e >= @t_rec || plan_ready?(f, c, hand))
       mv.add(Chunk.new("x_recover", @t_rec).pose(bcock).hold_until(plan_early, ~1.5).correct(meet, @spring).on_enter(->(f, c) entering(f, c, hand, bzh)).branch(->(f, c) planned_next(hand)))
     else
       mv.add(Chunk.new("x_recover", @t_rec).pose(bcock).correct(meet, @spring).on_enter(->(f, c) entering(f, c, hand, bzh)))
-    if @bt_plan > ~0.5
+    if planned?(hand)
       plan = Latch.test("plan", ->(f, e, c) plan_ready?(f, c, hand))
       mv.add(Chunk.new("x_wait", ~0.05).pose(bcock).hold_until(plan, ~1.5).correct(meet, @spring).followed_by("k_strike"))
     else
@@ -727,6 +843,9 @@
     mv.add(r3)
     mv.add(r4)
     @rch[hand.side] = [r1, r2, r3, r4]
+    # the muscle program's stroke: the reflexes off (pg_gain), the table's activations added as drive by `before`
+    if @pg_on > ~0.5
+      mv.add(Chunk.new("g_run", @pg_dk * ((@pg_nk - 1) * ~1.0)).pose(bcock).gain(@pg_gain).on_enter(->(f, c) striking(f, c, hand, false)).followed_by("idle"))
     mv
 
   -> choose(f, ctl, hand)
@@ -820,7 +939,7 @@
   -> hand_fix(f, ctl, hand, mode)
     # (the reset dribble on DribbleV3Skill's stroke keeps its corrections)
     return super(f, ctl, hand, mode) if @move == "D" && btl? && @bt_dy < ~0.5 && active?(hand) && hand.fresh
-    return hover_fix(f, ctl, hand) if mode == :meet && btl? && @bt_plan > ~0.5 && active?(hand) && @move == "B"
+    return hover_fix(f, ctl, hand) if mode == :meet && btl? && planned?(hand) && active?(hand) && @move == "B"
     return meet_fix(f, ctl, hand) if mode == :meet && btl? && @bt_dzup > ~0.0 && active?(hand) && @move == "B"
     return super(f, ctl, hand, mode) if !btl? || @bt_hold < ~0.5 || mode != :carry || !active?(hand)
     return super(f, ctl, hand, mode) if @move != "B" && @bt_dside < ~0.5 && !(@bt_rplan > ~0.5 && hand.fresh)
@@ -862,6 +981,7 @@
       choose(f, ctl, hand)
       return entry_for(hand)
     other = other_of(hand)
+    @pass_no = @pass_no + 1
     ctl.track("trunk").jump(ctl, f, other.side == lead_side ? "rot_l" : "rot_r") if rotating?
     @active = other
     other.ix = ~0.0
@@ -1260,11 +1380,121 @@
       return [@target[0], @target[1], @bt_kv, @bt_t, @bt_tmax, @bt_steer, ~0.0, ~1.0]
     super(hand)
 
+  # ---- the muscle program (pg_on) ------------------------------------------------
+
+  # The programmed stroke of the pass about to be made (pass number @pass_no, 0 the launch), or -1.
+  -> pg_ordinal
+    return -1 if @pg_on < ~0.5
+    p = @pass_no - @pg_first
+    return -1 if p < 0 || p >= @pg_n
+    if p >= @pg_stages
+      return -1 if @pg_per < 1
+      while p >= @pg_stages
+        p = p - @pg_per
+    p
+
+  # Start the program for the receiving hand once the ball's predicted rising crossing of bt_rh is pg_lead away.
+  -> pg_trigger(f, ctl)
+    return nil if (@pass_no < 1 && @pg_first > 0) || @pg_state[@active.side] != nil
+    return nil if f.get("ball_held") > ~0.5
+    o = pg_ordinal
+    return nil if o < 0
+    return nil if @move != "B"
+    # (the sensors' prediction is not to be trusted while the ball is on the floor: its velocity ramps up)
+    return nil if f.at("ball_pos", 2) < ~0.14
+    c = receive_state(f)
+    ctl.emit("dbg:pgc:" + (c == nil ? "nil" : c[0].to_s)) if @pg_dbg > ~0.5
+    return nil if c == nil || c[0] > @pg_lead
+    hand = @active
+    ux = ~0.0
+    uy = ~0.0
+    if @pg_gs > ~0.5
+      nm = @pg_nom[o]
+      ux = DribbleV3Math.clamp((c[1] - nm[0]) / nm[2], ~-2.5, ~2.5)
+      uy = DribbleV3Math.clamp((c[2] - nm[1]) / nm[3], ~-2.5, ~2.5)
+    zs = []
+    if @pg_gs > ~0.5 && @pg_nz > 0
+      mus = @pg_mus[hand.side]
+      zi = 0
+      while zi < @pg_nz
+        j = @pg_zj[zi]
+        zq = f.c(mus[2 * j]) - f.c(mus[2 * j + 1])
+        zp = @pg_zn[o][zi]
+        zs.push(DribbleV3Math.clamp((zq - zp[0]) / zp[1], ~-2.5, ~2.5))
+        zi += 1
+    @pg_state[hand.side] = [f.t, o, false, false, ux, uy, zs]
+    ctl.emit("dbg:pgu:" + ux.to_s + ":" + uy.to_s + ":" + zs.join(":")) if @pg_dbg > ~0.5
+    ctl.track(hand.name).jump(ctl, f, "g_run")
+    nil
+
+  # Each tick of a running program: its activations as drive, the release hands the ball over.
+  -> pg_step(f, ctl, hand)
+    st = @pg_state[hand.side]
+    return nil if st == nil
+    tt = f.t - st[0]
+    tab = @pg_tab[st[1]]
+    nk = @pg_nk
+    x = tt / @pg_dk
+    if x >= (nk - 1) * ~1.0
+      @pg_state[hand.side] = nil
+      return nil
+    i = x.floor
+    w = x - i * ~1.0
+    mus = @pg_mus[hand.side]
+    m = 0
+    while m < 16
+      row = tab[m]
+      v = row[i] + (row[i + 1] - row[i]) * w
+      if @pg_gs > ~0.5
+        # (the table's knot values T0 + ux Tx + uy Ty are formed and bounded at the knots, then interpolated)
+        rx = @pg_tx[st[1]][m]
+        ry = @pg_ty[st[1]][m]
+        gm = @pg_gmax
+        a0 = row[i] + st[4] * DribbleV3Math.clamp(rx[i], ~0.0 - gm, gm) + st[5] * DribbleV3Math.clamp(ry[i], ~0.0 - gm, gm)
+        a1 = row[i + 1] + st[4] * DribbleV3Math.clamp(rx[i + 1], ~0.0 - gm, gm) + st[5] * DribbleV3Math.clamp(ry[i + 1], ~0.0 - gm, gm)
+        zi = 0
+        while zi < @pg_nz
+          rzz = @pg_tz[st[1]][zi][m]
+          a0 = a0 + st[6][zi] * DribbleV3Math.clamp(rzz[i], ~0.0 - gm, gm)
+          a1 = a1 + st[6][zi] * DribbleV3Math.clamp(rzz[i + 1], ~0.0 - gm, gm)
+          zi += 1
+        a0 = DribbleV3Math.clamp(a0, ~0.0, ~1.0)
+        a1 = DribbleV3Math.clamp(a1, ~0.0, ~1.0)
+        v = a0 + (a1 - a0) * w
+      ctl.add_drive(mus[m], v)
+      m += 1
+    k = hand.touch_k
+    fk = f.at("ball_touch", k)
+    st[2] = true if fk >= @touch_thr
+    if st[2] && !st[3] && fk < @release_thr && tt > @push_min
+      st[3] = true
+      handoff_prog(f, ctl, hand)
+    nil
+
+  # The release of a programmed pass: the other hand starts its receiving (as `handoff`, the hand itself carries on
+  # with the program's follow-through).
+  -> handoff_prog(f, ctl, hand)
+    hand.fresh = false
+    other = other_of(hand)
+    @pass_no = @pass_no + 1
+    @active = other
+    other.ix = ~0.0
+    other.iy = ~0.0
+    other.aim = nil
+    other.fresh = true
+    choose(f, ctl, other)
+    ctl.track(other.name).jump(ctl, f, entry_for(other))
+    nil
+
   # ILC: as the ball rises through the receiving hand's strike height after a
   # pass, the miss against the spot it was sent to corrects the sender's next
   # aim (per hand).
   -> before(frame, ctl)
     @ctl_now = ctl
+    if btl? && @pg_on > ~0.5
+      pg_trigger(frame, ctl)
+      pg_step(frame, ctl, @right)
+      pg_step(frame, ctl, @left)
     super(frame, ctl)
     if btl? && @bt_vref > ~0.0
       [@right, @left].each ->(hand)

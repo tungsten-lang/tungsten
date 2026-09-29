@@ -1,0 +1,126 @@
+65 training, 16 validation starts (skipped 1) recorded in 26s
+arrival feature nominal [0.401, -0.269] spread [0.085, 0.067]
+init re-expressed in this run's feature units: shift [-0.71, -0.09] scale [1.0, 0.84]
+muscles 16 knots 17 dims 816
+start full-set J 3.019 good 18/65
+gen 0 gen-best 2.986 sigma 0.030 (3s)
+gen 5 gen-best 0.621 sigma 0.028 (17s)
+gen 9 mean-vector full-set J 2.473 good 26/65 (best 2.473)
+   validation J 3.603 good 4/16
+gen 10 gen-best 2.402 sigma 0.027 (31s)
+gen 15 gen-best 2.635 sigma 0.026 (45s)
+gen 19 mean-vector full-set J 2.189 good 21/65 (best 2.189)
+   validation J 3.465 good 5/16
+gen 20 gen-best 1.181 sigma 0.025 (59s)
+gen 25 gen-best 1.755 sigma 0.025 (73s)
+gen 29 mean-vector full-set J 1.824 good 32/65 (best 1.824)
+   validation J 3.294 good 5/16
+gen 30 gen-best 1.171 sigma 0.024 (88s)
+gen 35 gen-best 2.036 sigma 0.024 (102s)
+gen 39 mean-vector full-set J 1.559 good 33/65 (best 1.559)
+   validation J 3.346 good 5/16
+gen 40 gen-best 0.666 sigma 0.024 (115s)
+gen 45 gen-best 1.914 sigma 0.023 (129s)
+gen 49 mean-vector full-set J 1.580 good 30/65 (best 1.559)
+   validation J 3.346 good 5/16
+gen 50 gen-best 2.004 sigma 0.023 (143s)
+gen 55 gen-best 1.810 sigma 0.023 (156s)
+gen 59 mean-vector full-set J 1.259 good 31/65 (best 1.259)
+   validation J 3.814 good 5/16
+gen 60 gen-best 0.932 sigma 0.023 (170s)
+gen 65 gen-best 0.513 sigma 0.023 (182s)
+gen 69 mean-vector full-set J 1.281 good 35/65 (best 1.259)
+   validation J 3.814 good 5/16
+gen 70 gen-best 1.475 sigma 0.023 (195s)
+gen 75 gen-best 0.635 sigma 0.023 (207s)
+gen 79 mean-vector full-set J 1.248 good 33/65 (best 1.248)
+   validation J 3.821 good 6/16
+gen 80 gen-best 1.770 sigma 0.023 (220s)
+gen 85 gen-best 0.723 sigma 0.023 (233s)
+gen 89 mean-vector full-set J 1.177 good 26/65 (best 1.177)
+   validation J 4.073 good 5/16
+gen 90 gen-best 0.564 sigma 0.023 (246s)
+gen 95 gen-best 0.961 sigma 0.023 (258s)
+gen 99 mean-vector full-set J 1.179 good 36/65 (best 1.177)
+   validation J 4.073 good 5/16
+gen 100 gen-best 1.144 sigma 0.023 (270s)
+gen 105 gen-best 0.599 sigma 0.023 (283s)
+gen 109 mean-vector full-set J 1.082 good 36/65 (best 1.082)
+   validation J 3.414 good 5/16
+gen 110 gen-best 1.056 sigma 0.023 (296s)
+gen 115 gen-best 1.720 sigma 0.023 (309s)
+gen 119 mean-vector full-set J 1.132 good 37/65 (best 1.082)
+   validation J 3.414 good 5/16
+gen 120 gen-best 0.969 sigma 0.023 (324s)
+gen 125 gen-best 0.504 sigma 0.023 (339s)
+gen 129 mean-vector full-set J 1.085 good 29/65 (best 1.082)
+   validation J 3.414 good 5/16
+gen 130 gen-best 1.152 sigma 0.023 (355s)
+gen 135 gen-best 1.912 sigma 0.023 (370s)
+gen 139 mean-vector full-set J 0.992 good 35/65 (best 0.992)
+   validation J 3.347 good 6/16
+gen 140 gen-best 1.226 sigma 0.023 (382s)
+gen 145 gen-best 1.333 sigma 0.023 (394s)
+gen 149 mean-vector full-set J 0.930 good 36/65 (best 0.930)
+   validation J 3.391 good 5/16
+gen 150 gen-best 1.145 sigma 0.023 (406s)
+gen 155 gen-best 0.912 sigma 0.023 (419s)
+gen 159 mean-vector full-set J 0.922 good 38/65 (best 0.922)
+   validation J 3.342 good 5/16
+gen 160 gen-best 1.381 sigma 0.023 (433s)
+gen 165 gen-best 1.473 sigma 0.023 (449s)
+gen 169 mean-vector full-set J 0.924 good 36/65 (best 0.922)
+   validation J 3.342 good 5/16
+gen 170 gen-best 0.472 sigma 0.023 (468s)
+gen 175 gen-best 1.545 sigma 0.023 (483s)
+gen 179 mean-vector full-set J 0.909 good 38/65 (best 0.909)
+   validation J 3.254 good 5/16
+gen 180 gen-best 0.877 sigma 0.023 (497s)
+gen 185 gen-best 1.110 sigma 0.023 (510s)
+gen 189 mean-vector full-set J 1.100 good 31/65 (best 0.909)
+   validation J 3.254 good 5/16
+gen 190 gen-best 1.134 sigma 0.023 (523s)
+gen 195 gen-best 0.422 sigma 0.023 (536s)
+gen 199 mean-vector full-set J 0.925 good 37/65 (best 0.909)
+   validation J 3.254 good 5/16
+gen 200 gen-best 1.025 sigma 0.023 (549s)
+gen 205 gen-best 1.087 sigma 0.023 (562s)
+gen 209 mean-vector full-set J 1.018 good 39/65 (best 0.909)
+   validation J 3.254 good 5/16
+gen 210 gen-best 1.000 sigma 0.023 (579s)
+gen 215 gen-best 1.004 sigma 0.023 (595s)
+gen 219 mean-vector full-set J 0.916 good 38/65 (best 0.909)
+   validation J 3.254 good 5/16
+gen 220 gen-best 0.369 sigma 0.023 (610s)
+gen 225 gen-best 0.975 sigma 0.023 (624s)
+gen 229 mean-vector full-set J 0.930 good 37/65 (best 0.909)
+   validation J 3.254 good 5/16
+gen 230 gen-best 1.207 sigma 0.023 (640s)
+gen 235 gen-best 0.401 sigma 0.023 (657s)
+gen 239 mean-vector full-set J 1.027 good 38/65 (best 0.909)
+   validation J 3.254 good 5/16
+gen 240 gen-best 0.947 sigma 0.023 (671s)
+gen 245 gen-best 0.359 sigma 0.023 (684s)
+gen 249 mean-vector full-set J 1.036 good 35/65 (best 0.909)
+   validation J 3.254 good 5/16
+gen 250 gen-best 0.874 sigma 0.023 (698s)
+gen 255 gen-best 0.590 sigma 0.023 (715s)
+gen 259 mean-vector full-set J 0.984 good 40/65 (best 0.909)
+   validation J 3.254 good 5/16
+gen 260 gen-best 0.221 sigma 0.022 (731s)
+gen 265 gen-best 0.640 sigma 0.022 (744s)
+gen 269 mean-vector full-set J 0.930 good 36/65 (best 0.909)
+   validation J 3.254 good 5/16
+gen 270 gen-best 1.001 sigma 0.022 (758s)
+gen 275 gen-best 1.104 sigma 0.022 (772s)
+gen 279 mean-vector full-set J 0.997 good 38/65 (best 0.909)
+   validation J 3.254 good 5/16
+gen 280 gen-best 0.799 sigma 0.022 (786s)
+gen 285 gen-best 0.389 sigma 0.022 (800s)
+gen 289 mean-vector full-set J 0.952 good 39/65 (best 0.909)
+   validation J 3.254 good 5/16
+gen 290 gen-best 1.574 sigma 0.022 (813s)
+gen 295 gen-best 1.086 sigma 0.022 (827s)
+gen 299 mean-vector full-set J 0.916 good 38/65 (best 0.909)
+   validation J 3.254 good 5/16
+done

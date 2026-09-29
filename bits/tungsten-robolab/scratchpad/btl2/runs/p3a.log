@@ -1,0 +1,6 @@
+# 2026-09-29 07:10:56 tune {'ctl': 'bin/challengers/btl2-b1', 'init': 'params/dribble_btl_a4.txt', 'fixed': 'bt_ychain=1', 'only': 'br_angc,br_angl,br_zh,br_dzc,br_dzl,br_sweep,br_kv,br_t,br_tmax,br_steer,br_lead,br_ax,br_ay,br_drv', 'bounds': 'br_zh=0.4:1.0,br_dzc=0.03:0.5,br_dzl=0.05:0.6,br_sweep=0.0:0.4,br_angc=0.0:1.5,br_angl=0.0:1.5,br_drv=0.0:2.5,br_ax=-0.3:0.3,br_ay=-0.3:0.3', 'seeds': '801,809,813,816,817,819,820,821,822,823,828,829', 'secs': 3.6, 'objective': 'p3', 'gens': 30, 'pop': 12, 'workers': 2, 'sigma': 0.2, 'cma_seed': 7, 'out': 'scratchpad/btl2/params/p3a.txt', 'log': 'scratchpad/btl2/runs/p3a.log'}
+gen 0 score 0.237 ok1-4 [12, 12, 0, 0] streaks [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2]
+gen 1 best 0.307 [12, 12, 0, 0] gen-best 0.307 [12, 12, 0, 0] streaks [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2] sigma 0.181 (199s)
+gen 2 best 0.440 [12, 11, 1, 0] gen-best 0.440 [12, 11, 1, 0] streaks [2, 2, 2, 2, 2, 3, 2, 2, 2, 2, 2, 1] sigma 0.168 (386s)
+gen 3 best 0.671 [12, 12, 0, 0] gen-best 0.671 [12, 12, 0, 0] streaks [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2] sigma 0.159 (571s)
+gen 4 best 0.671 [12, 12, 0, 0] gen-best 0.426 [12, 12, 0, 0] streaks [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2] sigma 0.152 (748s)

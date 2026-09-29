@@ -2,8 +2,8 @@
 
 A candidate is scored by its worst rollout (risk 1.0: min over the training seeds). That makes the
 seeds a cascade: a candidate whose first rollout already scores below the incumbent cannot beat it, so
-its remaining seeds are never run. Every generation runs the first seed for all candidates, then the
-next seed only for those still at or above the incumbent's score, and so on. With a fragile incumbent
+its remaining seeds are never run. Each candidate runs its seeds in order inside one worker and stops at
+the first score below the incumbent's (workers never wait for one another). With a fragile incumbent
 (most offspring fall or slow down) that is 3-5x more generations per rollout than search.py.
 A pruned candidate is told to the optimizer with its partial score (an upper bound of its true one).
 
@@ -35,35 +35,41 @@ from search import BoxRep, SepCMA, describe, jsonable, parse_list, rollout, writ
 from practice import read_params  # noqa: E402
 
 
+def cascade_job(job):
+    """One candidate's cascade inside one worker: run the seeds in order, stop as soon as the running minimum is
+    below `bar` (it can no longer beat the incumbent). A seed spec is (seed, gate_seconds): a plain seed runs the
+    full horizon and its score enters the minimum; a GATE runs a short horizon (gate_seconds) and only counts if
+    the candidate falls in it (then its low score is the candidate's score): a cheap screen for known hard starts.
+    Returns (score, seeds run, metrics of the first full rollout)."""
+    task, params, specs, seconds, attrs, bar = job
+    score, first, ran = np.inf, None, 0
+    for seed, gate in specs:
+        s, m, _ = rollout((task, params, seed, gate or seconds) + ((attrs,) if attrs else ()))
+        ran += 1
+        if gate:
+            if m.get("fell"):
+                score = min(score, s)
+        else:
+            score = min(score, s)
+            if first is None:
+                first = m
+        if score < bar:
+            break
+    return float(score), ran, first
+
+
 class Cascade:
     def __init__(self, pool, rep, task, seeds, seconds, attrs):
         self.pool, self.rep, self.task, self.seeds, self.seconds, self.attrs = pool, rep, task, seeds, seconds, attrs
 
-    def job(self, x, seed):
-        p = self.rep.decode(np.clip(x, 0, 1))
-        return (self.task, p, seed, self.seconds) + ((self.attrs,) if self.attrs else ())
-
     def evaluate(self, X, bar):
         """Scores (min over the seeds each candidate survived to), seeds run, rollouts used, metrics of the
-        first seed. A candidate stays in the cascade while its running minimum is >= bar."""
-        n = len(X)
-        score = np.full(n, np.inf)
-        ran = np.zeros(n, int)
-        met = [None] * n
-        alive = list(range(n))
-        used = 0
-        for si, seed in enumerate(self.seeds):
-            res = self.pool.map(rollout, [self.job(X[i], seed) for i in alive], chunksize=1)
-            used += len(alive)
-            for i, (s, m, _) in zip(alive, res):
-                score[i] = min(score[i], s)
-                ran[i] += 1
-                if met[i] is None:
-                    met[i] = m
-            alive = [i for i in alive if score[i] >= bar]
-            if not alive:
-                break
-        return score, ran, used, met
+        first seed. Each candidate runs its seeds in one worker and stops when its running minimum is < bar."""
+        jobs = [(self.task, self.rep.decode(np.clip(x, 0, 1)), self.seeds, self.seconds, self.attrs, bar) for x in X]
+        res = self.pool.map(cascade_job, jobs, chunksize=1)
+        score = np.array([r[0] for r in res])
+        ran = np.array([r[1] for r in res])
+        return score, ran, int(ran.sum()), [r[2] for r in res]
 
 
 class ES:
@@ -76,6 +82,8 @@ class ES:
         self.rng = np.random.default_rng(seed)
         self.scales = np.ones(self.n) if scales is None else np.asarray(scales, float)
         self.hist = []
+        self.pending = []  # candidates evaluated first next generation: a combination of several improving offspring
+                           # (sparse mutations often touch different coordinates) and the extrapolation of the move
 
     def ask(self):
         q = min(1.0, self.mut / self.n)
@@ -85,11 +93,18 @@ class ES:
             if not mask.any():
                 mask[self.rng.integers(self.n)] = True
             X.append(np.clip(self.x + mask * self.sigma * self.scales * self.rng.standard_normal(self.n), 0, 1))
+        for i, c in enumerate(self.pending[:len(X)]):
+            X[i] = c
+        self.pending = []
         return np.array(X)
 
-    def tell(self, X, f, improved):
+    def tell(self, X, f, improved, improvers=()):
+        if len(improvers) >= 2:  # try the improving moves all together
+            self.pending.append(np.clip(self.x + sum(np.asarray(X[i], float) - self.x for i in improvers), 0, 1))
         if improved is not None:
+            old = self.x
             self.x = np.asarray(X[improved], float).copy()
+            self.pending.append(np.clip(self.x + (self.x - old), 0, 1))  # and one more step the same way
         self.hist.append(improved is not None)
         self.hist = self.hist[-8:]
         rate = sum(self.hist) / len(self.hist)
@@ -97,6 +112,14 @@ class ES:
 
     def info(self):
         return {"sigma": self.sigma, "rate": sum(self.hist) / max(1, len(self.hist))}
+
+
+def save_archive(path, rep, seeds, X_all, F_all, R_all):
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    np.savez_compressed(path + ".tmp.npz", X=np.array(X_all), F=np.array(F_all), ran=np.array(R_all), names=np.array(rep.names),
+                        lo=rep.lo, hi=rep.hi, v0=rep.v0, x0=rep.x0, fixed=json.dumps(rep.fixed),
+                        seeds=np.array([-1 if s[0] is None else s[0] for s in seeds]))
+    os.replace(path + ".tmp.npz", path)
 
 
 def main():
@@ -132,7 +155,15 @@ def main():
             raise SystemExit(f"--box names no tunable: {', '.join(unknown)}")
         tun = [(t[0], t[1], *box.get(t[0], (t[2], t[3]))) for t in tun]
     rep = BoxRep.from_tunables(tun, parse_list(a.only), parse_list(a.exclude), init, fixed)
-    seeds = parse_list(a.seeds, int) or [None]
+    # seeds: "31,32" or with gates "84g8,89g8,31,32" (a gate runs 8 s and counts only if the candidate falls)
+    specs = []
+    for tok in a.seeds.split(","):
+        gate = None
+        if "g" in tok:
+            tok, g = tok.split("g")
+            gate = float(g)
+        specs.append((None if tok in ("None", "none") else int(tok), gate))
+    seeds = specs
     attrs = {kv.split("=")[0]: float(kv.split("=")[1]) for kv in (a.attrs or "").split(",") if kv}
     print(f"hsearch {a.task}: {a.method}, {rep.n} tunables, budget {a.budget} rollouts, seeds {seeds}", flush=True)
     log = open(a.log, "w") if a.log else None
@@ -140,6 +171,7 @@ def main():
     X_all, F_all, R_all = [], [], []
     with mp.Pool(a.workers) as pool:
         cas = Cascade(pool, rep, a.task, seeds, a.seconds, attrs)
+        nfull = len(seeds)
         # the incumbent: the start, every seed
         s, ran, used, met = cas.evaluate(np.array([rep.x0]), -np.inf)
         best_f, best_x, best_m = float(s[0]), rep.x0.copy(), met[0]
@@ -158,7 +190,8 @@ def main():
             s, ran, u, met = cas.evaluate(X, best_f)
             used += u
             k = int(np.argmax(s))
-            improved = k if s[k] > best_f and ran[k] == len(seeds) else None
+            improved = k if s[k] > best_f and ran[k] == nfull else None
+            improvers = [i for i in range(len(X)) if s[i] > best_f and ran[i] == nfull]
             if improved is not None:
                 best_f, best_x, best_m = float(s[k]), X[k].copy(), met[k]
                 write_params(a.out, "hsearch", rep.decode(best_x), best_f, [best_m])
@@ -166,7 +199,7 @@ def main():
             for i in range(len(X)):
                 X_all.append(X[i].copy()); F_all.append(float(s[i])); R_all.append(int(ran[i]))
             if a.method == "es":
-                opt.tell(X, s, improved)
+                opt.tell(X, s, improved, improvers)
             else:
                 opt.tell(X, s)
                 if gen - last_imp >= a.stall:  # restart around the incumbent with a smaller step
@@ -175,17 +208,16 @@ def main():
                     opt = SepCMA(best_x, sigma0=sig, seed=a.seed + restarts, popsize=a.lam or None)
                     last_imp = gen
             info = opt.info()
-            print(f"gen {gen} used {used} best {best_f:.3f} gen_best {float(np.max(s)):.2f} alive_full {int((ran == len(seeds)).sum())}/{len(X)} "
+            print(f"gen {gen} used {used} best {best_f:.3f} gen_best {float(np.max(s)):.2f} alive_full {int((ran == nfull).sum())}/{len(X)} "
                   f"({time.time() - t0:.0f}s) {info}", flush=True)
+            if a.archive and gen % 3 == 0:
+                save_archive(a.archive, rep, seeds, X_all, F_all, R_all)
             if log:
-                log.write(json.dumps(jsonable({"gen": gen, "used": used, "best": best_f, "gen_best": float(np.max(s)), "full": int((ran == len(seeds)).sum()),
+                log.write(json.dumps(jsonable({"gen": gen, "used": used, "best": best_f, "gen_best": float(np.max(s)), "full": int((ran == nfull).sum()),
                                                "n": len(X), "wall": round(time.time() - t0, 1), "info": info})) + "\n")
                 log.flush()
     if a.archive:
-        os.makedirs(os.path.dirname(a.archive) or ".", exist_ok=True)
-        np.savez_compressed(a.archive, X=np.array(X_all), F=np.array(F_all), ran=np.array(R_all), names=np.array(rep.names),
-                            lo=rep.lo, hi=rep.hi, v0=rep.v0, x0=rep.x0, fixed=json.dumps(rep.fixed),
-                            seeds=np.array([-1 if s is None else s for s in seeds]))
+        save_archive(a.archive, rep, seeds, X_all, F_all, R_all)
     print("best", best_f, best_m)
 
 

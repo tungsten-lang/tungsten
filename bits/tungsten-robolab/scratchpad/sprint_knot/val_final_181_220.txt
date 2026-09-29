@@ -1,0 +1,4 @@
+gear_avg_c 181-220: n 40 falls 5 fall seeds [(181, 5), (187, 25), (205, 7), (207, 5), (216, 5)] mean peak 6.169 min 6.161
+gear_p95_e 181-220: n 40 falls 1 fall seeds [(202, 21)] mean peak 7.86 min 7.834
+gear_e2_c 181-220: n 40 falls 2 fall seeds [(187, 12), (202, 5)] mean peak 6.784 min 6.756
+gear_p95_g 181-220: n 40 falls 1 fall seeds [(193, 20)] mean peak 7.923 min 7.889

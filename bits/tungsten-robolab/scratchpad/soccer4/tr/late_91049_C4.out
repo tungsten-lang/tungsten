@@ -1,0 +1,50 @@
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `reset()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `step()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+result: {'bal1_s': 14.9, 'stand_time': 16.86, 'fallen': True}
+     t phase         roll     yaw    fyaw     cpo     cpf     vo     vf    ll    lr    pz
+  0.01 b_set       +0.002  -0.002  -0.020  -0.091  +0.042  -0.00  +0.00  0.34  0.00  0.92
+  0.51 b_set       +0.027  -0.009  +0.245  -0.086  +0.046  +0.01  -0.03  0.40  0.63  0.93
+  1.02 b_shift_l   -0.023  +0.060  -0.002  -0.075  +0.020  +0.06  +0.01  0.41  0.58  0.93
+  1.53 b_lift_l    -0.002  +0.033  -0.003  -0.010  +0.029  +0.12  +0.01  0.70  0.25  0.93
+  2.04 b_hold_l    -0.062  -0.542  -0.041  -0.000  +0.028  +0.02  +0.01  1.28  0.00  0.93
+  2.55 b_hold_l    -0.016  -0.360  -0.059  -0.009  +0.031  +0.00  +0.01  1.07  0.00  0.94
+  3.06 b_hold_l    +0.004  -0.187  -0.043  +0.000  +0.024  -0.02  +0.00  1.09  0.00  0.94
+  3.57 b_hold_l    -0.008  +0.138  -0.048  +0.005  +0.030  +0.01  +0.00  1.00  0.00  0.95
+  4.08 b_hold_l    -0.039  +0.297  -0.047  -0.010  +0.038  -0.02  +0.01  1.00  0.00  0.94
+  4.58 b_hold_l    -0.058  +0.402  -0.046  -0.004  +0.041  +0.00  +0.01  1.00  0.00  0.94
+  5.08 b_hold_l    -0.061  +0.395  -0.045  -0.004  +0.041  +0.00  +0.00  1.00  0.00  0.94
+  5.58 b_hold_l    -0.058  +0.401  -0.045  -0.001  +0.040  +0.00  -0.00  1.00  0.00  0.94
+  6.08 b_hold_l    -0.057  +0.397  -0.045  -0.001  +0.040  +0.00  -0.00  1.00  0.00  0.94
+  6.58 b_hold_l    -0.056  +0.397  -0.045  -0.001  +0.040  +0.00  +0.00  1.00  0.00  0.94
+  7.08 b_hold_l    -0.056  +0.398  -0.045  -0.000  +0.040  +0.00  -0.00  1.00  0.00  0.94
+  7.58 b_hold_l    -0.056  +0.397  -0.045  -0.000  +0.040  +0.00  +0.00  1.00  0.00  0.94
+  8.08 b_hold_l    -0.056  +0.397  -0.045  -0.000  +0.040  +0.00  -0.00  1.00  0.00  0.94
+  8.59 b_hold_l    -0.056  +0.397  -0.045  -0.000  +0.040  +0.00  -0.00  1.00  0.00  0.94
+  9.10 b_hold_l    -0.056  +0.397  -0.045  +0.000  +0.040  +0.00  -0.00  1.00  0.00  0.94
+  9.61 b_hold_l    -0.056  +0.397  -0.045  +0.000  +0.040  +0.00  -0.00  1.00  0.00  0.94
+ 10.12 b_hold_l    -0.056  +0.397  -0.045  +0.000  +0.040  +0.00  -0.00  1.00  0.00  0.94
+ 10.63 b_hold_l    -0.056  +0.397  -0.045  +0.000  +0.040  +0.00  -0.00  1.00  0.00  0.94
+ 11.14 b_hold_l    -0.056  +0.397  -0.045  +0.000  +0.040  +0.00  +0.00  1.00  0.00  0.94
+ 11.65 b_hold_l    -0.056  +0.397  -0.045  +0.000  +0.040  +0.00  -0.00  1.00  0.00  0.94
+ 12.16 b_hold_l    -0.056  +0.397  -0.045  +0.000  +0.040  -0.00  -0.00  1.00  0.00  0.94
+ 12.67 b_hold_l    -0.056  +0.397  -0.045  +0.000  +0.040  +0.00  +0.00  1.00  0.00  0.94
+ 13.18 b_hold_l    -0.056  +0.397  -0.045  +0.000  +0.040  +0.00  +0.00  1.00  0.00  0.94
+ 13.69 b_hold_l    -0.056  +0.397  -0.045  +0.000  +0.040  +0.00  -0.00  1.00  0.00  0.94
+ 14.20 b_hold_l    -0.056  +0.397  -0.045  +0.000  +0.040  -0.00  -0.00  1.00  0.00  0.94
+ 14.71 b_hold_l    -0.056  +0.397  -0.045  +0.000  +0.040  +0.00  +0.00  1.00  0.00  0.94
+ 15.22 b_hold_l    -0.056  +0.397  -0.045  +0.000  +0.040  +0.00  +0.00  1.00  0.00  0.94
+ 15.73 b_hold_l    -0.056  +0.397  -0.045  +0.000  +0.040  -0.00  -0.00  1.00  0.00  0.94
+ 16.23 b_hold_l    -0.056  +0.397  -0.045  +0.000  +0.040  +0.00  -0.00  1.00  0.00  0.94
+WARNING: Nan, Inf or huge value in QACC at DOF 6. The simulation is unstable. Time = 16.5170.
+

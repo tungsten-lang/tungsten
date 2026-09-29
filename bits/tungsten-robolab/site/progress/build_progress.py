@@ -401,6 +401,7 @@ def build():
     bal40_n = len(CHAMPS["soccer_single_leg_310_40"].get("scores", [])) or len(bal40)
     v4p95 = V("sprint_top_speed_v4_p95") if scores_ok("sprint_top_speed_v4_p95") else None
     v4e2 = V("sprint_top_speed_v4_elite2") if scores_ok("sprint_top_speed_v4_elite2") else None
+    v4p95_pct = round(100 * F("sprint_top_speed_v4_p95") / 10.45) if v4p95 else None
 
     # ------------------------------------------------------------ board -------------
     board_items = [
@@ -440,11 +441,11 @@ def build():
             ["Exceed 10 m/s in the sprint",
              f"95th-percentile body: {V('sprint_top_speed_p95')} m/s on v3 and " + (f"{v4p95} m/s on the calibrated v4 body ({passes('sprint_top_speed_v4_p95')} starts)" if v4p95 else "no v4 runner yet") + f". Elite (literature) v4: {v4e2 or '–'}; average v4: {V('sprint_top_speed_v4')}.",
              "Ceiling with perfect control on v4: 10.45 (95th pct.). Recreationally active adults 7.8, trained sprinters 9.9.",
-             "The v4 95th-percentile runner is at 67% of its ceiling; 10 m/s needs 96%. A two-gear controller in the sprint agent's log reaches 7.6 m/s (73%) and is not in the arena yet."],
+             (f"The v4 95th-percentile runner is at {v4p95_pct}% of its ceiling; 10 m/s needs 96%. It runs in two gears (a crouched start, then a rebuilt stride above 6.5 m/s) and falls on 2 of 40 unseen starts." if v4p95 else "10 m/s on v4 needs 96% of the 95th-percentile ceiling.")],
             ["Long jump with the best runner, then beyond human",
              f"One start: {V('long_jump_p95', 2)} m on the 95th-percentile body (oracle-class landing, overfit to that start; 103% of the untrained-man mean). 16 perturbed starts: {V('long_jump_p95_robust')} m; 96 fresh starts: {V('long_jump_p95_robust96')} m (89 of 96 legal). Near-open-loop take-off and landing programs (oracle-class). First v4 jump: {V('long_jump_v4_p95', 3)} m on one start, not robust yet (2.85 m on 32 fresh starts, 25 legal).",
              "Untrained men 4.95 m, high-school qualifiers 6.07–6.65 m, world record 8.95 m",
-             "Speed is what is missing: by the agent's fit, 5.5 m robustly needs 7.3 m/s at the board and 6.07 m needs 8.2–9.0 m/s; the v4 95th-percentile runner peaks at 7.0 m/s. About 2% of fresh starts somersault and 2% stumble in the run-up."],
+             f"Speed is what is missing: by the agent's fit, 5.5 m robustly needs 7.3 m/s at the board and 6.07 m needs 8.2–9.0 m/s. The v4 95th-percentile runner now peaks at {v4p95 or 'about 7'} m/s (7.0 when the v4 jump was built), and a long-jump agent is putting it under the jump. About 2% of fresh starts somersault and 2% stumble in the run-up."],
             ["Table tennis phase 2 above 90%",
              f"{100 * F('tt_p2_300'):.0f}% over 300 serves ({100 * F('tt_p2'):.0f}% over 100)",
              "Winner 64% (2025); 80.3% in a Mar 2026 preprint",
@@ -467,10 +468,10 @@ def build():
     sprint_rows = []
     if v4p95:
         sprint_rows.append(dict(label="95th pct., v4 body", sub="calibrated body", value=F("sprint_top_speed_v4_p95"), ceiling=10.45, kind="ours",
-                                tip="Ceiling with perfect control and a free torso on v4: 10.45. A crouched, high-cadence gait; 5 of 40 unseen starts fall."))
+                                tip="Ceiling with perfect control and a free torso on v4: 10.45. Two gears: a crouched start, then a rebuilt stride above 6.5 m/s; 2 of 40 unseen starts fall."))
     if v4e2:
         sprint_rows.append(dict(label="Elite (literature), v4", sub="calibrated body", value=F("sprint_top_speed_v4_elite2"), ceiling=9.28, kind="ours",
-                                tip="Ceiling on v4: 9.28. Started from the average-body v4 gait; 5 of 40 unseen starts fall."))
+                                tip="Ceiling on v4: 9.28. The same two gears, the second from 6.0 m/s; 2 of 40 unseen starts fall."))
     sprint_rows.append(dict(label="Average, v4 body", sub="calibrated body", value=F("sprint_top_speed_v4"), ceiling=8.2, kind="ours",
                             tip="Ceiling on v4: 8.2. A bent-knee gait found from the 95th-percentile search; it replaced a straight-leg 4.65 m/s gait."))
     sprint_rows += [
@@ -562,19 +563,22 @@ def build():
              "Train the small learned correction (a convolutional network on proprioception) for the literature and set-3 runners, where the knots alone fall on 8 and 7 of 48 held-out starts. On the mocap runner it cut held-out falls from 14 to 4 of 48 at its best checkpoint (7 at the last).",
              body="v2 anatomy, average adult."),
         card("sprint", "Sprint", [chip("run"), chip("study", "v4: three bodies in")],
-             [vid(*(("sprint_v4_p95.mp4", out("sprint_v4_p95.mp4"), "Sprinter on the calibrated v4 body, 95th percentile",
-                     "The champion on the calibrated v4 body, 95th percentile, from a standing start: a crouched, high-cadence gait.")
+             [vid(*(("sprint_v4_p95_gear.mp4", out("sprint_v4_p95_gear.mp4"), "Two-gear sprinter on the calibrated v4 body, 95th percentile",
+                     "The two-gear champion on the calibrated v4 body, 95th percentile, from a standing start: a crouched, high-cadence start, then a longer stride above 6.5 m/s.")
+                    if os.path.isfile(out("sprint_v4_p95_gear.mp4")) else
+                    ("sprint_v4_p95.mp4", out("sprint_v4_p95.mp4"), "Sprinter on the calibrated v4 body, 95th percentile",
+                     "The earlier one-gear champion on the calibrated v4 body, 95th percentile, from a standing start: a crouched, high-cadence gait.")
                     if os.path.isfile(out("sprint_v4_p95.mp4")) else
                     ("sprint_p95_ri.mp4", out("sprint_p95_ri.mp4"), "Sprinter on the 95th-percentile body, 7 m/s",
                      "The champion on the 95th-percentile v3 body from a standing start.")))],
-             [f"Full drive on the prime movers, with the opposing muscles scaled down as their partners fire (reciprocal inhibition, k 0.5), latched on each foot. On the calibrated v4 body the 95th-percentile runner reaches **{v4p95 or '–'} m/s** ({passes('sprint_top_speed_v4_p95') if v4p95 else 'not entered'}; 5 of 40 unseen starts fall) with a crouched, high-cadence gait, the literature elite body {v4e2 or '–'} and the average body {V('sprint_top_speed_v4')}. On the older v3 body the same design reaches {V('sprint_top_speed_p95')}, {V('sprint_top_speed_elite2')} and {V('sprint_top_speed')}. The inhibition is worth +0.12 m/s on every start (v3, 95th percentile), and without it the gait falls in 4.4 to 5.6 seconds.",
+             [f"Full drive on the prime movers, with the opposing muscles scaled down as their partners fire (reciprocal inhibition, k 0.5), latched on each foot. On the calibrated v4 body the 95th-percentile runner reaches **{v4p95 or '–'} m/s** ({passes('sprint_top_speed_v4_p95') if v4p95 else 'not entered'}; 2 of 40 unseen starts fall) with two gears, the literature elite body {v4e2 or '–'} and the average body {V('sprint_top_speed_v4')}. On the older v3 body the same design reaches {V('sprint_top_speed_p95')}, {V('sprint_top_speed_elite2')} and {V('sprint_top_speed')}. The inhibition is worth +0.12 m/s on every start (v3, 95th percentile), and without it the gait falls in 4.4 to 5.6 seconds.",
               "An earlier ceiling of about 10.2 m/s for the 95th-percentile body rested on an ideal torso stabiliser that applies up to 3.9 kN·m in a 0.12 s stance, where the stance hip's muscles give at most 185 N·m. Ceilings are now computed with the torso free. On the original body that put the average runner's ceiling at 6.89 m/s, below the 7.8 of recreationally active adults, so the body model was calibrated against published data (the v4 body, below). On v4 the ceilings are 8.2, 10.45 and 9.28 m/s.",
-              (f"The v4 95th-percentile runner is at {100 * F('sprint_top_speed_v4_p95') / 10.45:.0f}% of its ceiling and the average-body runner at {100 * F('sprint_top_speed_v4') / 8.2:.0f}%. The average-body gait was found by starting the search from the 95th-percentile gait (it replaced a straight-leg 4.65 m/s gait), and the elite runner started from the average-body gait. " if v4p95 else "") + "A two-gear controller in the sprint agent's log (a standing-start gear and a top-speed gear, switched at 6.5 m/s) reaches 7.6 m/s peak on the v4 95th-percentile body, and 8 of 40 unseen starts fall; it is not in the arena yet."],
+              (f"The v4 95th-percentile runner is at {100 * F('sprint_top_speed_v4_p95') / 10.45:.0f}% of its ceiling and the average-body runner at {100 * F('sprint_top_speed_v4') / 8.2:.0f}%. The average-body gait was found by starting the search from the 95th-percentile gait (it replaced a straight-leg 4.65 m/s gait), and the elite runner started from the average-body gait. " if v4p95 else "") + "The 95th-percentile and elite runners have two gears because one parameter set cannot both accelerate a standing body and cruise (the cruising gait falls from a standing start). Gear 1 is the earlier crouched, high-cadence gait for the start and the acceleration. Above 6.5 m/s the stride is rebuilt from a second parameter set searched from flying starts at 7 m/s; the elite body switches at 6.0 m/s. The elite runner's 40-start check also had 2 falls."],
              table(["Body", "Best on v3", "v3 ceiling", "v4 runner", "v4 ceiling"],
                    [["Average", f"#{V('sprint_top_speed')}", "#6.89", f"#{V('sprint_top_speed_v4')}", "#8.2"],
                     ["95th percentile", f"#{V('sprint_top_speed_p95')}", "#9.69", "#" + (v4p95 or "–"), "#10.45"],
                     ["Elite, literature", f"#{V('sprint_top_speed_elite2')}", "#8.5", "#" + (v4e2 or "–"), "#9.28"]]),
-             "Enter the two-gear controller and bring its fall rate down. 10 m/s on v4 needs 96% of the 95th-percentile ceiling.",
+             "The average body gets the same second gear next (in the sprint agent's log). 10 m/s on v4 needs 96% of the 95th-percentile ceiling.",
              body="Average, 95th percentile and literature elite bodies: the calibrated v4 body for the newest runners, the v3 anatomy for the older ones."),
         card("blocks", "Sprint from blocks, keyframed on Usain Bolt", [chip("done", "Champion"), chip("study", "About 2x Bolt's time")],
              [vid("sprint_blocks.mp4", out("sprint_blocks.mp4"), "Start from blocks with Bolt's pose ghosted",
@@ -756,14 +760,16 @@ def build():
     working = table(
         ["Workstream", "Where it stands", "Next"],
         [
-            ["Sprint on the v4 body (agent S)", f"In the arena: 95th percentile {v4p95 or '–'} m/s, elite {v4e2 or '–'}, average {V('sprint_top_speed_v4')}. A two-gear controller in the log reaches 7.6 m/s peak on the 95th-percentile body (8 of 40 unseen starts fall); it is being made more robust.", "Enter it; bring the fall rate down"],
-            ["Long jump (agent L, finished)", f"Round 2 done: one start {V('long_jump_p95', 2)} m, 16 starts {V('long_jump_p95_robust')} m, 96 fresh starts {V('long_jump_p95_robust96')} m (all oracle-class programs); first v4 jump {V('long_jump_v4_p95', 3)} m but not robust. Unowned again.", "Elite robust stage; v4 take-off foot; run-up speed"],
+            ["Sprint on the v4 body (agent S)", f"In the arena: 95th percentile {v4p95 or '–'} m/s and elite {v4e2 or '–'}, both with the two-gear runner (no fall on the 95th-percentile arena starts, one on the elite ones); average {V('sprint_top_speed_v4')}, one gear. Checked on 40 unseen starts each: 2 falls.", "Second gear for the average body; fewer falls"],
+            ["Long jump (agent L2, round 3)", f"Running: the two-gear runner ({v4p95 or '–'} m/s peak on the v4 95th-percentile body) under the v4 jump, then the ceiling at that speed. So far the v4 jump is {V('long_jump_v4_p95', 3)} m on one start with a 7.0 m/s runner. Round 2 left one start {V('long_jump_p95', 2)} m, 16 starts {V('long_jump_p95_robust')} m and 96 fresh starts {V('long_jump_p95_robust96')} m on v3 (all oracle-class programs).", "Retarget the take-off and landing to the new runner; robust starts"],
             ["Balance and soccer (agent O)", f"The 40-start strict trial's champion holds {bal40_hold} of {bal40_n}. Phase 2: the reach still does not land the left foot within its timeout from the centred hold; two searches are running.", "Swing-leg contact at the lift; phase 2 reach"],
             ["Table tennis above 90% (agent T)", "Baseline dataset of 600 champion serves collected. The face error is a late-servo overshoot and return: yaw and pitch swing through the contact instead of settling. Success depends strongly on where the ball crosses (8% on the far left, 61% near the centre, 33% on the far right). Predictive-pelvis variants are being tested.", "Cut the overshoot at contact"],
             ["Compiler fixes", "Done: merged into main (032bab4e5) after a full compiler build, the stage-identity check against a baseline (the same 988 differing lines as unmodified main, identical after normalising hashes) and the spec lanes with no regression. It also fixed a use-after-free with unicode parameter names.", "Rebuild the shared compiler (bin/tungsten build) to activate them"],
             ["Landing robolab on main", "Done: main fast-forwarded to 3c5c513e4 (1,761 files, all under bits/tungsten-robolab) after a check from a fresh worktree: 8 controllers built in full, the other 47 through the compiler front end with no errors, byte-identical rebuilds, arena rollouts equal to the recorded scores, SDK spec 90 of 90.", "Later work lands on request"],
             ["MyoSuite relocate bug report", "Filed: github.com/MyoHub/myosuite/issues/416, with a minimal reproduction and a two-line fix that removes the mismatch (0 of 300 starts overlapping the invisible receptacle after it, 87 of 300 before).", "Watch for a reply"],
-            ["Dribble through the legs, bat speed, runner, hurdles, relocate", "Written up in the handoff for Codex to pick up (bits/tungsten-robolab/HANDOFF_20260929.md)", "Codex chooses"],
+            ["Bat speed in robolab's own representation (agent B)", "Running. The swing that keeps the reflex layer scores 21.57 m/s on 24 fresh pitches (the 25.24 m/s oracle is open-loop and stays the ceiling). Plan: a new held-out trial, knots trained on fresh continuous pitches, a zero-initialised temporal residual, a shorter pre-swing pause.", "Beat 21.57 on new held-out pitches, without a hitch"],
+            ["Dribble through the legs (agent D)", f"Running. Mean longest streak {V('dribble_btl_streak_25', 2)} in 15 s, at most {streak_max}, on 25 starts. The wall is the return pass. Plan: a trunk turn into the catch, closer catch spots, catching the ball while it rises.", "Several passes in a row on held-out starts"],
+            ["Natural runner, hurdles, relocate", "Written up in the handoff for Codex to pick up (bits/tungsten-robolab/HANDOFF_20260929.md)", "Codex chooses"],
         ], wide=True)
 
     working = working.replace("github.com/MyoHub/myosuite/issues/416", '<a href="https://github.com/MyoHub/myosuite/issues/416">github.com/MyoHub/myosuite/issues/416</a>')

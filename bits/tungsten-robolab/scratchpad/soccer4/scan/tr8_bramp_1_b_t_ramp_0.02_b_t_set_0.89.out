@@ -1,0 +1,155 @@
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `reset()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `reset()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `reset()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `step()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `step()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `step()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+90000 OK  bal1   6.22 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.6 b_lift_l@1.6 b_hold_l@1.9
+90001 OK  bal1   6.16 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.7 b_hold_l@2.0
+90002 OK  bal1   5.92 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.9 b_hold_l@2.2
+90003 OK  bal1   6.03 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.8 b_hold_l@2.1
+90004 OK  bal1   6.13 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.7 b_hold_l@2.0
+90005 OK  bal1   6.01 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.9 b_lift_l@1.8 b_hold_l@2.1
+90006 OK  bal1   6.02 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.8 b_hold_l@2.1
+90007 OK  bal1   5.68 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@1.0 b_lift_l@2.1 b_hold_l@2.4
+90008 OK  bal1   6.00 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.9 b_lift_l@1.9 b_hold_l@2.2
+90009 OK  bal1   6.38 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.6 b_lift_l@1.5 b_hold_l@1.8
+90010 OK  bal1   6.17 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.7 b_hold_l@2.0
+90011 OK  bal1   6.00 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.8 b_hold_l@2.1
+90012 BAD bal1   2.34 stand   4.19 fallen 1 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.7 b_hold_l@2.0 b_down_l@5.5
+90013 OK  bal1   6.05 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.8 b_hold_l@2.1
+90014 OK  bal1   6.13 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.7 b_hold_l@2.0
+90015 OK  bal1   6.09 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.8 b_hold_l@2.1
+90016 OK  bal1   6.20 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.6 b_hold_l@2.0
+90017 OK  bal1   6.09 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.8 b_hold_l@2.1
+90018 BAD bal1   1.41 stand   3.19 fallen 1 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.6 b_hold_l@2.0 b_down_l@4.5
+90019 OK  bal1   6.02 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.8 b_hold_l@2.1
+90020 OK  bal1   6.00 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.9 b_lift_l@1.9 b_hold_l@2.2
+90021 OK  bal1   5.49 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.9 b_lift_l@2.3 b_hold_l@2.6
+90022 OK  bal1   5.78 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@1.1 b_lift_l@2.0 b_hold_l@2.4
+90023 OK  bal1   6.20 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.7 b_hold_l@2.0
+90024 OK  bal1   6.20 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.7 b_hold_l@2.0
+90025 OK  bal1   6.20 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.7 b_hold_l@2.0
+90026 OK  bal1   6.05 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.8 b_hold_l@2.1
+90027 OK  bal1   6.18 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.7 b_hold_l@2.0
+90028 OK  bal1   6.19 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.6 b_hold_l@1.9
+90029 OK  bal1   5.99 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.9 b_lift_l@1.9 b_hold_l@2.2
+90030 OK  bal1   5.93 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.9 b_lift_l@1.9 b_hold_l@2.2
+90031 OK  bal1   6.07 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.8 b_hold_l@2.1
+90032 OK  bal1   6.18 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.7 b_hold_l@2.0
+90033 OK  bal1   5.98 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.8 b_hold_l@2.1
+90034 OK  bal1   6.03 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.8 b_hold_l@2.1
+90035 OK  bal1   5.93 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.9 b_lift_l@1.9 b_hold_l@2.2
+90036 OK  bal1   5.88 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.9 b_lift_l@2.0 b_hold_l@2.3
+90037 OK  bal1   5.65 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@1.1 b_lift_l@2.2 b_hold_l@2.5
+90038 OK  bal1   6.09 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.9 b_lift_l@1.8 b_hold_l@2.1
+90039 OK  bal1   6.20 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.6 b_hold_l@2.0
+90040 OK  bal1   5.91 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.9 b_hold_l@2.3
+90041 OK  bal1   5.63 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.9 b_lift_l@2.1 b_hold_l@2.5
+90042 OK  bal1   6.31 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.6 b_lift_l@1.6 b_hold_l@1.9
+90043 OK  bal1   6.27 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.6 b_hold_l@1.9
+90044 OK  bal1   6.37 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.5 b_hold_l@1.8
+90045 OK  bal1   6.07 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.8 b_hold_l@2.1
+90046 OK  bal1   6.08 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.8 b_hold_l@2.1
+90047 OK  bal1   6.18 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.6 b_hold_l@2.0
+90048 OK  bal1   6.37 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.6 b_lift_l@1.5 b_hold_l@1.8
+90049 OK  bal1   6.11 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.7 b_hold_l@2.1
+90050 OK  bal1   5.93 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.9 b_hold_l@2.2
+90051 OK  bal1   6.31 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.5 b_hold_l@1.9
+90052 OK  bal1   5.67 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@2.1 b_hold_l@2.4
+90053 OK  bal1   6.43 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.6 b_lift_l@1.4 b_hold_l@1.7
+90054 OK  bal1   5.93 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.9 b_lift_l@1.9 b_hold_l@2.2
+90055 OK  bal1   6.34 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.6 b_lift_l@1.5 b_hold_l@1.8
+90056 OK  bal1   5.77 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@1.2 b_lift_l@2.0 b_hold_l@2.3
+90057 OK  bal1   6.15 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.7 b_hold_l@2.0
+90058 OK  bal1   5.91 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.9 b_hold_l@2.2
+90059 OK  bal1   6.12 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.7 b_hold_l@2.0
+90060 OK  bal1   5.93 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.9 b_lift_l@1.9 b_hold_l@2.2
+90061 OK  bal1   6.18 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.7 b_hold_l@2.0
+90062 OK  bal1   6.21 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.6 b_hold_l@1.9
+90063 OK  bal1   6.08 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.8 b_hold_l@2.1
+90064 OK  bal1   5.96 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.9 b_hold_l@2.2
+90065 OK  bal1   5.93 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.9 b_lift_l@1.9 b_hold_l@2.2
+90066 OK  bal1   6.19 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.6 b_hold_l@2.0
+90067 OK  bal1   6.10 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.7 b_hold_l@2.0
+90068 OK  bal1   6.51 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.3 b_hold_l@1.7
+90069 OK  bal1   6.01 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.8 b_hold_l@2.2
+90070 OK  bal1   6.31 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.6 b_hold_l@1.9
+90071 OK  bal1   6.07 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.8 b_hold_l@2.1
+90072 OK  bal1   6.02 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.8 b_hold_l@2.1
+90073 OK  bal1   6.16 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.7 b_hold_l@2.0
+90074 OK  bal1   6.12 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.7 b_hold_l@2.0
+90075 OK  bal1   6.10 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.8 b_hold_l@2.1
+90076 OK  bal1   6.08 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.7 b_hold_l@2.0
+90077 BAD bal1   0.84 stand   3.17 fallen 1 last_label b_hold_l   | b_set@0.0 b_shift_l@1.1 b_lift_l@2.2 b_hold_l@2.5 b_down_l@4.4
+90078 OK  bal1   5.86 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@1.1 b_lift_l@2.0 b_hold_l@2.3
+90079 OK  bal1   6.13 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.7 b_hold_l@2.0
+90080 OK  bal1   5.96 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.9 b_lift_l@1.9 b_hold_l@2.2
+90081 OK  bal1   6.16 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.6 b_lift_l@1.6 b_hold_l@1.9
+90082 OK  bal1   5.99 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.9 b_lift_l@1.9 b_hold_l@2.2
+90083 OK  bal1   6.28 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.6 b_hold_l@1.9
+90084 OK  bal1   6.16 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.7 b_hold_l@2.0
+90085 OK  bal1   5.82 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.9 b_hold_l@2.3
+90086 OK  bal1   5.99 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.9 b_hold_l@2.2
+90087 OK  bal1   5.90 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.9 b_hold_l@2.2
+90088 OK  bal1   6.14 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.7 b_hold_l@2.0
+90089 OK  bal1   6.01 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.8 b_hold_l@2.1
+90090 OK  bal1   6.18 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.6 b_lift_l@1.6 b_hold_l@1.9
+90091 OK  bal1   6.22 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.6 b_hold_l@1.9
+90092 BAD bal1   0.84 stand   2.74 fallen 1 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.8 b_hold_l@2.1 b_down_l@3.9
+90093 OK  bal1   6.02 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.8 b_hold_l@2.1
+90094 OK  bal1   5.89 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.9 b_hold_l@2.2
+90095 BAD bal1   1.29 stand   3.18 fallen 1 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.7 b_hold_l@2.0 b_down_l@4.3
+90096 OK  bal1   6.29 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.5 b_hold_l@1.9
+90097 OK  bal1   5.92 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.9 b_lift_l@1.9 b_hold_l@2.2
+90098 OK  bal1   6.06 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.9 b_lift_l@1.8 b_hold_l@2.1
+90099 OK  bal1   6.17 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.6 b_hold_l@1.9
+90100 BAD bal1   1.46 stand   3.44 fallen 1 last_label b_hold_l   | b_set@0.0 b_shift_l@0.9 b_lift_l@1.9 b_hold_l@2.2 b_down_l@4.8
+90101 BAD bal1   2.84 stand   5.12 fallen 1 last_label b_hold_l   | b_set@0.0 b_shift_l@1.0 b_lift_l@2.1 b_hold_l@2.5 b_down_l@6.5
+90102 OK  bal1   6.06 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.8 b_hold_l@2.1
+90103 OK  bal1   5.70 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@2.1 b_hold_l@2.4
+90104 OK  bal1   6.00 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.9 b_lift_l@1.9 b_hold_l@2.2
+90105 OK  bal1   5.94 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.9 b_hold_l@2.2
+90106 OK  bal1   6.17 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.7 b_hold_l@2.0
+90107 BAD bal1   1.20 stand   3.80 fallen 1 last_label b_hold_l   | b_set@0.0 b_shift_l@1.3 b_lift_l@2.5 b_hold_l@2.8 b_down_l@5.0
+90108 OK  bal1   5.94 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.9 b_lift_l@1.8 b_hold_l@2.2
+90109 OK  bal1   5.85 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@1.0 b_lift_l@2.0 b_hold_l@2.3
+90110 OK  bal1   6.22 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.6 b_hold_l@1.9
+90111 OK  bal1   5.98 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.8 b_hold_l@2.1
+90112 OK  bal1   6.20 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.7 b_hold_l@2.0
+90113 OK  bal1   6.06 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.8 b_hold_l@2.1
+90114 OK  bal1   6.15 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.7 b_hold_l@2.0
+90115 OK  bal1   5.75 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@1.1 b_lift_l@2.1 b_hold_l@2.4
+90116 OK  bal1   6.36 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.6 b_lift_l@1.5 b_hold_l@1.8
+90117 OK  bal1   5.87 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.9 b_hold_l@2.2
+90118 OK  bal1   6.02 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.8 b_hold_l@2.1
+90119 OK  bal1   6.13 stand   8.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@1.7 b_hold_l@2.0
+112/120 hold to 8 s

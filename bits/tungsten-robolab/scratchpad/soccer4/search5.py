@@ -36,15 +36,46 @@ def hold_score(m, seconds):
 
 
 def worker(job):
-    params, seed, env, controller, seconds, maxt = job
+    params, seed, env, controller, seconds, maxt, leg_w, leg_thr = job
     os.environ["MYO_SOCCER_ENV"] = env
     os.environ["MYO_SOCCER_MAX_TIME"] = maxt
+    import numpy as np
+    import mujoco
     from myo_bridge import MyoSim
     from tasks.myo_soccer import MyoSoccerTask
+    acc = {"n": 0, "sum": 0.0, "ids": None}
+
+    class Tk(MyoSoccerTask):
+        def on_step(self, sim, obs, reward, info):
+            super().on_step(sim, obs, reward, info)
+            m, d = sim.m, sim.d
+            if acc["ids"] is None:
+                acc["ids"] = ({m.body(n).id for n in m.names.decode().split("\0") if False}, )
+                L, R = set(), set()
+                for b in range(m.nbody):
+                    nm = m.body(b).name
+                    if nm.endswith("_l"): L.add(b)
+                    elif nm.endswith("_r"): R.add(b)
+                acc["ids"] = (L, R)
+            if float(d.time) < 3.0:
+                return
+            L, R = acc["ids"]
+            tot = 0.0
+            f6 = np.zeros(6)
+            for i in range(d.ncon):
+                c = d.contact[i]
+                b1, b2 = m.geom_bodyid[c.geom1], m.geom_bodyid[c.geom2]
+                if (b1 in L and b2 in R) or (b1 in R and b2 in L):
+                    mujoco.mj_contactForce(m, d, i, f6)
+                    tot += abs(f6[0])
+            acc["n"] += 1
+            acc["sum"] += tot
     try:
-        m = MyoSim(MyoSoccerTask(), params=params, controller=controller, seed=seed).run(seconds)
+        m = MyoSim(Tk(), params=params, controller=controller, seed=seed).run(seconds)
         m.pop("events", None)
-        return hold_score(m, seconds), {k: m.get(k) for k in ("bal1_s", "stand_time", "fallen")}
+        mean_force = acc["sum"] / max(acc["n"], 1)
+        sc = hold_score(m, seconds) - leg_w * max(0.0, mean_force - leg_thr)
+        return sc, {"bal1_s": m.get("bal1_s"), "stand_time": m.get("stand_time"), "fallen": m.get("fallen"), "leg_force": round(mean_force, 1)}
     except Exception as e:
         return -1e3, {"error": str(e)[:300]}
 
@@ -68,6 +99,8 @@ def main():
     ap.add_argument("--sigma", type=float, default=0.1)
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--rseed", type=int, default=1)
+    ap.add_argument("--leg_w", type=float, default=0.0, help="score penalty per N of mean inter-leg contact force above --leg_thr (0 = off)")
+    ap.add_argument("--leg_thr", type=float, default=40.0)
     ap.add_argument("--resume", action="store_true")
     ap.add_argument("--note", default="")
     a = ap.parse_args()
@@ -119,7 +152,7 @@ def main():
             X = es.ask()
             if g == 0:
                 X[0] = x0
-            jobs = [(to_params(x), sd, a.env, ctl, a.seconds, maxt) for x in X for sd in seeds]
+            jobs = [(to_params(x), sd, a.env, ctl, a.seconds, maxt, a.leg_w, a.leg_thr) for x in X for sd in seeds]
             res = pool.map(worker, jobs)
             k = len(seeds)
             sc = np.array([np.mean([res[i * k + j][0] for j in range(k)]) for i in range(len(X))])
@@ -133,7 +166,7 @@ def main():
             np.savez(state_path, mean=es.mean, sigma=es.sigma, C=es.C, pc=es.pc, ps=es.ps, gen=es.gen, g=g + 1, best=best)
             line = {"gen": g + 1, "t": round(time.time() - t0), "best": round(best, 3), "gen_best": round(float(sc[i]), 3),
                     "gen_mean": round(float(np.mean(sc)), 3), "x0_score": round(float(sc[0]), 3) if g == 0 else None,
-                    "fails_best": f"{fails[i]}/{k}", "fails_mean": round(float(np.mean(fails)), 2), "fails_x0": f"{fails[0]}/{k}" if g == 0 else None,
+                    "fails_best": f"{fails[i]}/{k}", "leg_force_best": round(float(np.mean([res[i * k + j][1].get("leg_force") or 0 for j in range(k)])), 1), "fails_mean": round(float(np.mean(fails)), 2), "fails_x0": f"{fails[0]}/{k}" if g == 0 else None,
                     "sigma": round(float(es.sigma), 4)}
             print(json.dumps(line), flush=True)
             log.write(json.dumps(line) + "\n")

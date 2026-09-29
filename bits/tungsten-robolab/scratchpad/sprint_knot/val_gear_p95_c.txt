@@ -1,0 +1,1 @@
+gear_p95_c: n 40 falls 2 fall seeds [(142, 29), (150, 25)] mean peak 7.449 min 7.408

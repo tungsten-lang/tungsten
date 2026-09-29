@@ -1,0 +1,83 @@
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `reset()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `reset()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `reset()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `reset()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `reset()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `step()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `step()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `step()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `step()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+{"gen": 1, "t": 77, "best": 4.729, "gen_best": 4.729, "gen_mean": 3.611, "sigma": 0.1362, "x0_score": 3.683, "summ": {"walk_closed": 0.017, "walk_t_arrive": 0.01, "bal1_s": 0.272, "bal_l_tot": 0.045, "bal_r_tot": 0.291, "bal_s": 0.336, "bal_l": 0.045, "bal_r": 0.291, "stand_time": 2.284, "goal": 0.0, "goal_inside": 0.0, "ball_speed": 0.805, "n_steps": 0.0, "ap_best_stand": 0.026, "yaw_touch_deg": 36.487, "t_touch": 1.591, "fallen": 0.875, "zones": [null, null, null, null, null, null, null, null]}}
+{"gen": 2, "t": 151, "best": 4.729, "gen_best": 4.25, "gen_mean": 3.268, "sigma": 0.1258, "summ": {"walk_closed": 0.026, "walk_t_arrive": 0.01, "bal1_s": 0.39, "bal_l_tot": 0.092, "bal_r_tot": 0.394, "bal_s": 0.486, "bal_l": 0.092, "bal_r": 0.394, "stand_time": 2.018, "goal": 0.0, "goal_inside": 0.0, "strike_zone": 0.0, "strike_medial_m": 0.008, "ball_speed": 0.795, "n_steps": 0.0, "ap_best_stand": 0.066, "yaw_touch_deg": 33.6, "t_touch": 1.011, "fallen": 1.0, "zones": [null, null, null, "toe", "toe", null, null, null]}}
+{"gen": 3, "t": 227, "best": 4.729, "gen_best": 4.024, "gen_mean": 3.591, "sigma": 0.1162, "summ": {"walk_closed": 0.026, "walk_t_arrive": 0.01, "bal1_s": 0.28, "bal_l_tot": 0.026, "bal_r_tot": 0.259, "bal_s": 0.285, "bal_l": 0.026, "bal_r": 0.259, "stand_time": 2.315, "goal": 0.0, "goal_inside": 0.0, "ball_speed": 0.862, "n_steps": 0.0, "ap_best_stand": 0.068, "yaw_touch_deg": 26.95, "t_touch": 1.66, "fallen": 1.0, "zones": [null, null, null, null, null, null, null, null]}}
+{"gen": 4, "t": 314, "best": 4.729, "gen_best": 4.596, "gen_mean": 3.897, "sigma": 0.1099, "summ": {"walk_closed": 0.047, "walk_t_arrive": 0.01, "bal1_s": 0.329, "bal_l_tot": 0.018, "bal_r_tot": 0.302, "bal_s": 0.32, "bal_l": 0.018, "bal_r": 0.302, "stand_time": 2.365, "goal": 0.0, "goal_inside": 0.0, "strike_zone": 0.0, "strike_medial_m": 0.013, "ball_speed": 0.35, "n_steps": 0.0, "ap_best_stand": 0.066, "yaw_touch_deg": 18.0, "t_touch": 0.909, "fallen": 1.0, "zones": [null, null, null, "toe", "toe", "toe", null, null]}}
+{"gen": 5, "t": 409, "best": 4.862, "gen_best": 4.862, "gen_mean": 3.794, "sigma": 0.1056, "summ": {"walk_closed": 0.034, "walk_t_arrive": 0.186, "bal1_s": 0.376, "bal_l_tot": 0.02, "bal_r_tot": 0.416, "bal_s": 0.436, "bal_l": 0.02, "bal_r": 0.416, "stand_time": 2.405, "goal": 0.0, "goal_inside": 0.0, "ball_speed": 0.326, "n_steps": 0.0, "ap_best_stand": 0.088, "yaw_touch_deg": 13.425, "t_touch": 1.095, "fallen": 1.0, "zones": [null, null, null, null, null, null, null, null]}}
+{"gen": 6, "t": 499, "best": 4.904, "gen_best": 4.904, "gen_mean": 4.011, "sigma": 0.1037, "summ": {"walk_closed": 0.048, "walk_t_arrive": 0.988, "bal1_s": 0.347, "bal_l_tot": 0.013, "bal_r_tot": 0.355, "bal_s": 0.368, "bal_l": 0.013, "bal_r": 0.355, "stand_time": 2.469, "goal": 0.0, "goal_inside": 0.0, "ball_speed": 0.91, "n_steps": 0.0, "ap_best_stand": 0.089, "yaw_touch_deg": 30.125, "t_touch": 2.22, "fallen": 1.0, "zones": [null, null, null, null, null, null, null, null]}}
+{"gen": 7, "t": 575, "best": 4.904, "gen_best": 4.766, "gen_mean": 3.871, "sigma": 0.1025, "summ": {"walk_closed": 0.015, "walk_t_arrive": 0.63, "bal1_s": 0.494, "bal_l_tot": 0.026, "bal_r_tot": 0.487, "bal_s": 0.514, "bal_l": 0.026, "bal_r": 0.487, "stand_time": 2.388, "goal": 0.0, "goal_inside": 0.0, "strike_zone": 0.0, "strike_medial_m": 0.004, "ball_speed": 1.407, "n_steps": 0.0, "ap_best_stand": 0.111, "yaw_touch_deg": 14.938, "t_touch": 1.671, "fallen": 1.0, "zones": [null, null, "toe", "toe", null, null, null, null]}}
+{"gen": 8, "t": 651, "best": 4.904, "gen_best": 4.648, "gen_mean": 4.219, "sigma": 0.1006, "summ": {"walk_closed": 0.039, "walk_t_arrive": 0.634, "bal1_s": 0.817, "bal_l_tot": 0.055, "bal_r_tot": 0.858, "bal_s": 0.912, "bal_l": 0.055, "bal_r": 0.858, "stand_time": 2.104, "goal": 0.0, "goal_inside": 0.0, "ball_speed": 0.613, "n_steps": 0.0, "ap_best_stand": 0.117, "yaw_touch_deg": -17.45, "t_touch": 1.235, "fallen": 1.0, "zones": [null, null, null, null, null, null, null, null]}}
+{"gen": 9, "t": 721, "best": 4.904, "gen_best": 4.722, "gen_mean": 3.804, "sigma": 0.0972, "summ": {"walk_closed": 0.044, "walk_t_arrive": 0.369, "bal1_s": 0.679, "bal_l_tot": 0.048, "bal_r_tot": 0.676, "bal_s": 0.724, "bal_l": 0.048, "bal_r": 0.676, "stand_time": 2.123, "goal": 0.0, "goal_inside": 0.0, "ball_speed": 0.756, "n_steps": 0.0, "ap_best_stand": 0.123, "yaw_touch_deg": -8.088, "t_touch": 1.825, "fallen": 1.0, "zones": [null, null, null, null, null, null, null, null]}}
+{"gen": 10, "t": 787, "best": 4.904, "gen_best": 4.765, "gen_mean": 4.124, "sigma": 0.0949, "summ": {"walk_closed": 0.061, "walk_t_arrive": 0.805, "bal1_s": 0.61, "bal_l_tot": 0.133, "bal_r_tot": 0.639, "bal_s": 0.771, "bal_l": 0.133, "bal_r": 0.639, "stand_time": 2.234, "goal": 0.0, "goal_inside": 0.0, "ball_speed": 1.04, "n_steps": 0.0, "ap_best_stand": 0.12, "yaw_touch_deg": 15.412, "t_touch": 1.911, "fallen": 0.75, "zones": [null, null, null, null, null, null, null, null]}}
+{"gen": 11, "t": 863, "best": 5.405, "gen_best": 5.405, "gen_mean": 4.243, "sigma": 0.0917, "summ": {"walk_closed": 0.07, "walk_t_arrive": 1.002, "bal1_s": 0.828, "bal_l_tot": 0.066, "bal_r_tot": 0.83, "bal_s": 0.896, "bal_l": 0.066, "bal_r": 0.83, "stand_time": 2.194, "goal": 0.0, "goal_inside": 0.0, "ball_speed": 0.628, "n_steps": 0.0, "ap_best_stand": 0.131, "yaw_touch_deg": 1.013, "t_touch": 1.538, "fallen": 0.875, "zones": [null, null, null, null, null, null, null, null]}}
+{"gen": 12, "t": 930, "best": 5.627, "gen_best": 5.627, "gen_mean": 4.537, "sigma": 0.0893, "summ": {"walk_closed": 0.081, "walk_t_arrive": 0.844, "bal1_s": 1.0, "bal_l_tot": 0.054, "bal_r_tot": 1.093, "bal_s": 1.146, "bal_l": 0.054, "bal_r": 1.093, "stand_time": 2.572, "goal": 0.0, "goal_inside": 0.0, "strike_zone": 0.0, "strike_medial_m": 0.0, "ball_speed": 1.02, "n_steps": 0.0, "ap_best_stand": 0.13, "yaw_touch_deg": 5.638, "t_touch": 1.046, "fallen": 1.0, "zones": ["toe", null, null, null, null, null, null, null]}}
+{"gen": 13, "t": 979, "best": 5.627, "gen_best": 5.373, "gen_mean": 4.439, "sigma": 0.09, "summ": {"walk_closed": 0.065, "walk_t_arrive": 0.654, "bal1_s": 0.708, "bal_l_tot": 0.085, "bal_r_tot": 0.746, "bal_s": 0.831, "bal_l": 0.085, "bal_r": 0.746, "stand_time": 2.354, "goal": 0.0, "goal_inside": 0.0, "ball_speed": 1.175, "n_steps": 0.0, "ap_best_stand": 0.145, "yaw_touch_deg": 4.713, "t_touch": 2.48, "fallen": 1.0, "zones": [null, null, null, null, null, null, null, null]}}
+{"gen": 14, "t": 1030, "best": 5.627, "gen_best": 5.262, "gen_mean": 4.354, "sigma": 0.0881, "summ": {"walk_closed": 0.07, "walk_t_arrive": 0.728, "bal1_s": 0.615, "bal_l_tot": 0.04, "bal_r_tot": 0.593, "bal_s": 0.633, "bal_l": 0.04, "bal_r": 0.593, "stand_time": 2.465, "goal": 0.0, "goal_inside": 0.0, "ball_speed": 0.897, "n_steps": 0.0, "ap_best_stand": 0.13, "yaw_touch_deg": 4.675, "t_touch": 1.747, "fallen": 1.0, "zones": [null, null, null, null, null, null, null, null]}}
+{"gen": 15, "t": 1082, "best": 5.657, "gen_best": 5.657, "gen_mean": 4.914, "sigma": 0.0862, "summ": {"walk_closed": 0.059, "walk_t_arrive": 0.589, "bal1_s": 0.654, "bal_l_tot": 0.045, "bal_r_tot": 0.711, "bal_s": 0.756, "bal_l": 0.045, "bal_r": 0.711, "stand_time": 2.571, "goal": 0.0, "goal_inside": 0.0, "ball_speed": 0.566, "n_steps": 0.0, "ap_best_stand": 0.152, "yaw_touch_deg": 9.537, "t_touch": 1.491, "fallen": 0.75, "zones": [null, null, null, null, null, null, null, null]}}
+{"gen": 16, "t": 1136, "best": 5.697, "gen_best": 5.697, "gen_mean": 4.669, "sigma": 0.0843, "summ": {"walk_closed": 0.065, "walk_t_arrive": 0.797, "bal1_s": 0.981, "bal_l_tot": 0.05, "bal_r_tot": 1.105, "bal_s": 1.155, "bal_l": 0.05, "bal_r": 1.105, "stand_time": 2.632, "goal": 0.0, "goal_inside": 0.0, "ball_speed": 0.287, "n_steps": 0.0, "ap_best_stand": 0.167, "yaw_touch_deg": -1.0, "t_touch": 0.691, "fallen": 0.875, "zones": [null, null, null, null, null, null, null, null]}}
+{"gen": 17, "t": 1191, "best": 5.697, "gen_best": 5.587, "gen_mean": 5.09, "sigma": 0.0819, "summ": {"walk_closed": 0.147, "walk_t_arrive": 1.35, "bal1_s": 0.611, "bal_l_tot": 0.101, "bal_r_tot": 0.661, "bal_s": 0.762, "bal_l": 0.101, "bal_r": 0.661, "stand_time": 2.405, "goal": 0.0, "goal_inside": 0.0, "ball_speed": 0.386, "n_steps": 0.0, "ap_best_stand": 0.163, "yaw_touch_deg": -10.175, "t_touch": 1.275, "fallen": 0.875, "zones": [null, null, null, null, null, null, null, null]}}
+{"gen": 18, "t": 1246, "best": 5.995, "gen_best": 5.995, "gen_mean": 5.456, "sigma": 0.0795, "summ": {"walk_closed": 0.077, "walk_t_arrive": 0.75, "bal1_s": 1.127, "bal_l_tot": 0.075, "bal_r_tot": 1.171, "bal_s": 1.246, "bal_l": 0.075, "bal_r": 1.171, "stand_time": 2.938, "goal": 0.0, "goal_inside": 0.0, "strike_zone": 0.0, "strike_medial_m": -0.003, "ball_speed": 0.875, "n_steps": 0.0, "ap_best_stand": 0.172, "yaw_touch_deg": 1.888, "t_touch": 2.013, "fallen": 1.0, "zones": [null, null, "toe", null, null, null, null, "toe"]}}
+{"gen": 19, "t": 1302, "best": 6.442, "gen_best": 6.442, "gen_mean": 5.532, "sigma": 0.0796, "summ": {"walk_closed": 0.094, "walk_t_arrive": 1.049, "bal1_s": 0.886, "bal_l_tot": 0.053, "bal_r_tot": 0.93, "bal_s": 0.982, "bal_l": 0.053, "bal_r": 0.93, "stand_time": 2.805, "goal": 0.0, "goal_inside": 0.0, "ball_speed": 0.262, "n_steps": 0.0, "ap_best_stand": 0.162, "yaw_touch_deg": -7.487, "t_touch": 0.771, "fallen": 1.0, "zones": [null, null, null, null, null, null, null, null]}}
+{"gen": 20, "t": 1356, "best": 6.449, "gen_best": 6.449, "gen_mean": 5.506, "sigma": 0.0791, "summ": {"walk_closed": 0.066, "walk_t_arrive": 0.547, "bal1_s": 0.886, "bal_l_tot": 0.069, "bal_r_tot": 0.936, "bal_s": 1.005, "bal_l": 0.069, "bal_r": 0.936, "stand_time": 2.991, "goal": 0.0, "goal_inside": 0.0, "ball_speed": 0.391, "n_steps": 0.0, "ap_best_stand": 0.169, "yaw_touch_deg": -0.425, "t_touch": 1.154, "fallen": 1.0, "zones": [null, null, null, null, null, null, null, null]}}
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    

@@ -1,0 +1,17 @@
+{"start": "02:40:13", "args": {"init": "scratchpad/soccer4/k6_init.txt", "out": "scratchpad/soccer4/p2/A.txt", "only": "k6_t_hold,b_st_hip,b_st_knee,b_sw_th,b_sw_knee,b_sw_ankle,t_reach,reach_dx,reach_dz,reach_pitch,add_reach,push_dx,push_dz,push_pitch,drv_push,fe_step,tilt_step,lean_step,x_plant,plant_dx,plant_dy,k_ik,k_py,reach_lat,plant_load,min_step,k_ax_st,k_ay1,k_st1,k_roll,k_rolld,k_pr,g_st,drv_st,drv_post,x_step,k_comp", "set": "", "controller": "bin/challengers/soccer6-i", "noise": 1.0, "w": 0.0, "k": 6, "gens": 30, "pop": 12, "sigma": 0.1, "workers": 4, "seconds": 6.5, "stage": "plant7", "seed0": 92000, "rseed": 1, "resume": true, "note": "P2 stage A plant: k6 (routine right stance -> reach -> plant), noise 1, P1 position"}, "names": ["k6_t_hold", "b_st_hip", "b_st_knee", "b_sw_th", "b_sw_knee", "b_sw_ankle", "t_reach", "reach_dx", "reach_dz", "reach_pitch", "add_reach", "push_dx", "push_dz", "push_pitch", "drv_push", "fe_step", "tilt_step", "lean_step", "x_plant", "plant_dx", "plant_dy", "k_ik", "k_py", "reach_lat", "plant_load", "min_step", "k_ax_st", "k_ay1", "k_st1", "k_roll", "k_rolld", "k_pr", "g_st", "drv_st", "drv_post", "x_step", "k_comp"]}
+{"gen": 1, "t": 270, "best": 3.188, "gen_best": 3.188, "gen_mean": 2.53, "goals_best": "0/6", "goals_max": 0, "goals_x0": "0/6", "sigma": 0.0922}
+{"gen": 2, "t": 522, "best": 3.598, "gen_best": 3.598, "gen_mean": 2.656, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0884}
+{"gen": 3, "t": 774, "best": 3.598, "gen_best": 3.181, "gen_mean": 2.679, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0845}
+{"gen": 4, "t": 1012, "best": 4.322, "gen_best": 4.322, "gen_mean": 2.935, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0814}
+{"gen": 5, "t": 1264, "best": 4.322, "gen_best": 3.473, "gen_mean": 2.775, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0797}
+{"gen": 6, "t": 1524, "best": 4.322, "gen_best": 3.543, "gen_mean": 2.624, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.078}
+{"gen": 7, "t": 1795, "best": 4.322, "gen_best": 3.986, "gen_mean": 3.138, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0769}
+{"gen": 8, "t": 2038, "best": 4.322, "gen_best": 4.117, "gen_mean": 3.105, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0753}
+{"gen": 9, "t": 2249, "best": 4.322, "gen_best": 3.59, "gen_mean": 2.728, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.075}
+{"gen": 10, "t": 2490, "best": 4.322, "gen_best": 3.717, "gen_mean": 2.806, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0746}
+{"gen": 11, "t": 2736, "best": 4.322, "gen_best": 3.467, "gen_mean": 2.872, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0741}
+{"gen": 12, "t": 2976, "best": 4.322, "gen_best": 3.918, "gen_mean": 3.196, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0738}
+{"gen": 13, "t": 3201, "best": 4.322, "gen_best": 3.998, "gen_mean": 3.32, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0733}
+{"gen": 14, "t": 3402, "best": 4.322, "gen_best": 3.167, "gen_mean": 2.466, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0729}
+{"gen": 15, "t": 3660, "best": 4.322, "gen_best": 3.632, "gen_mean": 3.025, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.072}
+{"gen": 16, "t": 3842, "best": 4.322, "gen_best": 3.594, "gen_mean": 2.883, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0712}

@@ -1,0 +1,56 @@
+[     1s]   capacity v 6.00 gen 10 best +0.4242 sigma 0.101
+[     1s]   capacity v 6.00 gen 20 best +0.5080 sigma 0.094
+[     2s]   capacity v 6.00 gen 30 best +0.5080 sigma 0.089
+[     2s]   capacity v 6.00 gen 40 best +0.5080 sigma 0.088
+[     3s]   capacity v 6.00 gen 50 best +0.5080 sigma 0.087
+[     3s]   capacity v 6.00 gen 60 best +0.5080 sigma 0.081
+[     3s]   swing v 6.00 gen 10 best -0.2739 sigma 0.083
+[     4s]   swing v 6.00 gen 20 best -0.2739 sigma 0.078
+[     4s]   swing v 6.00 gen 30 best -0.2502 sigma 0.085
+[     5s]   swing v 6.00 gen 40 best -0.2502 sigma 0.062
+[     6s]   cycle v 6.00 gen 10 best +0.2578 sigma 0.049
+[     7s]   cycle v 6.00 gen 20 best +0.2578 sigma 0.045
+[     8s]   cycle refinement at v 6.00: +0.2578 -> +0.2578
+[     8s] v 6.00: {'v': 6.0, 'tc': 0.134, 'Lc': 0.788, 'vz_lo': 0.97, 'vz_td': -1.147, 'favg_measured': 2.61, 'taer_sym': 0.1977, 'Favg_W_sym': 2.475, 'f_step': 3.015, 'swing_budget': 0.5294, 't_sw': np.float64(0.2502), 'peak_grf_W': 4.92, 'pitch_impulse': -0.74, 'brake': -0.002, 'thigh_td': 0.235, 'thigh_lo': -0.693, 'knee_td': 0.162, 'knee_lo': -0.117, 'pitch_exc': 0.143, 'dw_pitch': -0.47, 'margin': np.float64(0.2792), 'Favg_W_needed': np.float64(1.434), 'capacity_score': 0.508, 'objective': 0.2578, 't_sw_raw': 0.213, 'swing_deficit': 0.0}
+[     8s]   capacity v 7.00 gen 10 best +0.2092 sigma 0.095
+[     8s]   capacity v 7.00 gen 20 best +0.3376 sigma 0.088
+[     9s]   capacity v 7.00 gen 30 best +0.3376 sigma 0.086
+[     9s]   capacity v 7.00 gen 40 best +0.3376 sigma 0.081
+[    10s]   capacity v 7.00 gen 50 best +0.3709 sigma 0.079
+[    10s]   capacity v 7.00 gen 60 best +0.4161 sigma 0.081
+[    11s]   swing v 7.00 gen 10 best -0.3489 sigma 0.116
+[    12s]   swing v 7.00 gen 20 best -0.3210 sigma 0.079
+[    12s]   swing v 7.00 gen 30 best -0.3110 sigma 0.062
+[    13s]   swing v 7.00 gen 40 best -0.3040 sigma 0.070
+[    14s]   cycle v 7.00 gen 10 best +0.1121 sigma 0.051
+[    16s]   cycle v 7.00 gen 20 best +0.1121 sigma 0.048
+[    16s]   cycle refinement at v 7.00: +0.1121 -> +0.1121
+[    16s] v 7.00: {'v': 7.0, 'tc': 0.137, 'Lc': 0.946, 'vz_lo': 0.684, 'vz_td': -0.791, 'favg_measured': 2.098, 'taer_sym': 0.1395, 'Favg_W_sym': 2.019, 'f_step': 3.616, 'swing_budget': 0.4161, 't_sw': 0.304, 'peak_grf_W': 4.04, 'pitch_impulse': -3.4, 'brake': -0.056, 'thigh_td': 0.456, 'thigh_lo': -0.636, 'knee_td': 0.39, 'knee_lo': 0.136, 'pitch_exc': 0.06, 'dw_pitch': 0.341, 'margin': 0.1121, 'Favg_W_needed': 1.609, 'capacity_score': 0.4161, 'objective': 0.1121, 't_sw_raw': 0.304, 'swing_deficit': 0.0}
+[    17s]   capacity v 8.00 gen 10 best +0.1421 sigma 0.101
+[    17s]   capacity v 8.00 gen 20 best +0.1600 sigma 0.094
+[    18s]   capacity v 8.00 gen 30 best +0.1600 sigma 0.084
+[    18s]   capacity v 8.00 gen 40 best +0.1726 sigma 0.081
+[    18s]   capacity v 8.00 gen 50 best +0.1733 sigma 0.079
+[    19s]   capacity v 8.00 gen 60 best +0.1733 sigma 0.075
+[    20s]   swing v 8.00 gen 10 best -0.4331 sigma 0.115
+[    20s]   swing v 8.00 gen 20 best -0.4075 sigma 0.100
+[    21s]   swing v 8.00 gen 30 best -0.4075 sigma 0.094
+[    21s]   swing v 8.00 gen 40 best -0.4038 sigma 0.059
+[    24s]   cycle v 8.00 gen 10 best -0.1900 sigma 0.047
+[    25s]   cycle v 8.00 gen 20 best -0.1752 sigma 0.045
+[    27s]   cycle refinement at v 8.00: -0.2305 -> -0.1752
+[    27s] v 8.00: {'v': 8.0, 'tc': 0.114, 'Lc': 0.901, 'vz_lo': -1.345, 'vz_td': -1.198, 'favg_measured': 0.869, 'taer_sym': 0.0, 'Favg_W_sym': 1.0, 'f_step': 8.772, 'swing_budget': 0.114, 't_sw': 0.28, 'peak_grf_W': 1.45, 'pitch_impulse': -0.25, 'brake': -0.07, 'thigh_td': 0.546, 'thigh_lo': -0.668, 'knee_td': 1.047, 'knee_lo': 0.541, 'pitch_exc': 0.038, 'dw_pitch': 0.685, 'margin': -0.166, 'Favg_W_needed': 1.728, 'capacity_score': 0.1048, 'objective': -0.1752, 't_sw_raw': 0.28, 'swing_deficit': 0.0}
+[    27s]   capacity v 9.00 gen 10 best +0.0902 sigma 0.101
+[    28s]   capacity v 9.00 gen 20 best +0.1002 sigma 0.102
+[    28s]   capacity v 9.00 gen 30 best +0.1300 sigma 0.090
+[    29s]   capacity v 9.00 gen 40 best +0.1420 sigma 0.084
+[    29s]   capacity v 9.00 gen 50 best +0.1470 sigma 0.081
+[    30s]   capacity v 9.00 gen 60 best +0.1470 sigma 0.080
+[    31s]   swing v 9.00 gen 10 best -0.4030 sigma 0.122
+[    32s]   swing v 9.00 gen 20 best -0.3710 sigma 0.122
+[    33s]   swing v 9.00 gen 30 best -0.3506 sigma 0.096
+[    34s]   swing v 9.00 gen 40 best -0.3470 sigma 0.078
+[    36s]   cycle v 9.00 gen 10 best -0.2000 sigma 0.049
+[    38s]   cycle v 9.00 gen 20 best -0.2000 sigma 0.047
+[    39s]   cycle refinement at v 9.00: -0.2000 -> -0.2000
+[    39s] v 9.00: {'v': 9.0, 'tc': 0.147, 'Lc': 1.317, 'vz_lo': -1.813, 'vz_td': -1.712, 'favg_measured': 0.929, 'taer_sym': 0.0, 'Favg_W_sym': 1.0, 'f_step': 6.803, 'swing_budget': 0.147, 't_sw': 0.347, 'peak_grf_W': 3.41, 'pitch_impulse': -1.5, 'brake': 0.012, 'thigh_td': 0.752, 'thigh_lo': -0.743, 'knee_td': 0.965, 'knee_lo': 0.526, 'pitch_exc': 0.065, 'dw_pitch': -0.303, 'margin': -0.2, 'Favg_W_needed': 1.68, 'capacity_score': 0.147, 'objective': -0.2, 't_sw_raw': 0.347, 'swing_deficit': 0.0}

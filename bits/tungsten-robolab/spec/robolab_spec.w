@@ -465,4 +465,18 @@ check.near("plain damping brakes a target moving at 4 /s", pa[0], ~0.0)
 check.near("velocity reference tracks it (stretch term only)", va[0], ~0.6)
 check.near("the unreferenced antagonist is unchanged", va[1], pa[1])
 
+# Track#set_movement (opt-in; RunGearSkill's gear change hands the stride over to a movement built from
+# another parameter set): the track's movement is swapped, its index and clock untouched.
+gpose = Pose.new
+gpose.set("knee", ~1.0, ~0.0)
+mva = Movement.new("A")
+mva.add(Chunk.new("a", ~0.2).pose(gpose))
+mvb = Movement.new("B")
+mvb.add(Chunk.new("b", ~0.2).pose(gpose))
+gtr = Track.new("leg", mva, b.all)
+check.ok("a track starts on the movement it was given", gtr.movement.name == "A")
+gtr.set_movement(mvb)
+check.ok("set_movement swaps the movement", gtr.movement.name == "B")
+check.ok("set_movement leaves the track before its first chunk", gtr.chunk_name == "-")
+
 check.finish

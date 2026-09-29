@@ -125,12 +125,53 @@
     in4_params if @in4
     @rk4 = switch_on("rk4")
     rk4_params if @rk4
+    # sd 1: the kick's snap (the knee whip) waits until the kicking foot's toes
+    # are sn_d metres or less behind the ball: under joint noise the swing's
+    # timing moves by 0.1 s (measured: the plant lands 30 ms later, the hip
+    # takes 0.12 s longer to reach hip_snap, the ball is struck 0.18 s later
+    # and leaves at 4 m/s instead of 12), and a whip fired by the clock then
+    # meets the ball at the wrong phase; fired by the geometry it meets it
+    # where it was practised
+    @sd = switch_on("sd")
+    @sn_d = ~0.0
+    @sn_d = param("sn_d", ~0.35, ~0.0, ~0.9) if @sd
+    # k6 1 (with bal-style params: bcatch, cp4, tlh, sense_arms): the kick's
+    # run-up from the routine's robust right-leg stance. The phase-1 run-up's
+    # own shift and lift are open loop and amplify the reset's joint noise
+    # (measured: +-0.001 rad halves the goals); the routine's set, shift onto
+    # the right foot, lift and hold converge to the same one-leg state whatever
+    # the noise (the hold is an attractor), and the parent's reach, plant and
+    # swing then start from a repeatable state (see k6_movement)
+    @k6 = switch_on("k6")
+    @k6_t_hold = ~0.3
+    @k6_t_hold = param("k6_t_hold", ~0.3, ~0.05, ~2.0) if @k6
+    # k7 1 (with k6): a lean between the hold and the reach. The phase-1 run-up
+    # reaches with the COM already 0.24 m ahead of the stance foot and falling
+    # (1 m/s forward, 0.86 m/s down at the plant): a controlled fall, initiated
+    # in double support by the COM leaning ahead of the feet. From the centred
+    # hold the reach cannot land the foot 0.75 m ahead. The lean moves cp4's
+    # fore-aft capture-point reference forward to k7_lean metres beyond the
+    # stance foot's centre over k7_t_lean seconds (past the toes the body falls
+    # forward: the sole cannot take it), and the reach starts when the COM is
+    # k7_go ahead of the foot or after k7_t_max
+    @k7 = @k6 && switch_on("k7")
+    @k7_ref = ~0.0
+    if @k7
+      @k7_lean = param("k7_lean", ~0.15, ~0.0, ~0.45)
+      @k7_t_lean = param("k7_t_lean", ~0.3, ~0.05, ~1.0)
+      @k7_go = param("k7_go", ~0.15, ~0.0, ~0.4)
+      @k7_t_max = param("k7_t_max", ~0.8, ~0.2, ~2.0)
     # k4 1 (with ap4, not in4): the approach walks the plant (left) foot to
     # k4_pdx, k4_pdy from the ball and the kicking foot to k4_rdx, k4_rdy,
     # then a standing kick: the weight onto the plant foot, the kicking leg
     # wound back on the one-leg posture (cp4 balances it), and the parent's
     # swing and snap from there (see add_standing_kick)
     @k4 = @ap4 && !@in4 && switch_on("k4")
+    # k4_cp 1 (with k4): the standing kick's swing, snap, follow-through and
+    # landing keep the routine's stance terms (tlh, fyaw, cp4, live arms) on
+    # the plant leg: the parent's own single-support balance (tuned for the
+    # run-up's lunge) lets the standing body fall at the swing
+    @k4_cp = @k4 && switch_on("k4_cp")
     if @k4
       @k4_pdx = param("k4_pdx", ~-0.2, ~-0.6, ~0.1)
       @k4_pdy = param("k4_pdy", ~0.17, ~0.05, ~0.35)
@@ -145,7 +186,7 @@
     # (bsettle's latch), then the parent's run-up (shift, lift, the plant
     # step IK-placed beside the ball) and kick
     @ks5 = @ap3 && switch_on("ks5")
-    bs_params if @ks5
+    bs_params if @ks5 || @k6
     @cp4 = @live && switch_on("cp4")
     if @cp4
       cp4_params
@@ -267,6 +308,22 @@
     # hips, the trunk leans forward). Measured: in the failing shifts the COM
     # drifts 0.1-0.6 m behind the feet over ~2 s while both ankles sit at their
     # dorsiflexion limit (+0.524), where the ankle strategy has no authority
+    # bwide 1: the routine's stance (set, shifts, mids) has both hips abducted
+    # by b_wide rad. Measured on 120 fresh starts: the starts that fail in the
+    # hold whatever the hold's gains have a narrower stance at the lift (feet
+    # 16.4 cm apart against 20.4 cm, z -8) and lift with the capture point
+    # outboard of the stance foot (+0.8 cm against -1.2 cm)
+    @b_wide = ~0.0
+    @b_wide = param("b_wide", ~0.05, ~-0.1, ~0.3) if switch_on("bwide")
+    # swabd 1: a feed-forward drive of sw_drv_abd on the SWING leg's hip
+    # abductors while the other foot carries the body. Measured: in every
+    # hold the swing shank rests on the stance thigh with 190-230 N (the soft
+    # swing leg sags inward: kinematically 0.1 rad more abduction clears it by
+    # 3.6 cm), an outward force on the stance femur that the stance hip's
+    # adductors must resist and that ends one hold in 30 in a MuJoCo
+    # instability
+    @sw_drv_abd = ~0.0
+    @sw_drv_abd = param("sw_drv_abd", ~0.15, ~0.0, ~0.6) if switch_on("swabd")
     @dsx = switch_on("dsx")
     @dsx_k = ~0.0
     @dsx_lim = ~0.05
@@ -293,6 +350,34 @@
     @bfore = switch_on("bfore")
     @b_fx_tol = ~1.0
     @b_fx_tol = param("b_fx_tol", ~0.06, ~0.02, ~0.2) if @bfore
+    # bcpo 1: the lift also waits (at most bc_tmax more seconds) for the COM's
+    # lateral capture point to be inboard of b_cpo_max from the stance foot's
+    # centre (outward +). Measured on 240 starts (ramp base, left leg, lift-time
+    # state): no hold failed when the lift came with the capture point at or
+    # inboard of the foot's centre (0 of 212); 11 of the 28 lifts outboard of it
+    # fell within 4 s, 10 of the 14 beyond +0.5 cm
+    @bcpo = switch_on("bcpo")
+    @b_cpo_max = ~1000000.0
+    @b_cpo_max = param("b_cpo_max", ~0.0, ~-0.03, ~0.03) if @bcpo
+    # (bcpo, measured: waiting is fatal. 36 starts, 20 s: 0 fixed, 13 of the
+    # 17 lifts that had survived now fall in the shift 2.2-3 s in, the cp
+    # outboard and the swing foot lightly on the ground; the lift itself is
+    # what recovers them)
+    # bshc 1: the shift's capture-point brake. While the swing foot has not
+    # unloaded, the stance foot's lateral capture point beyond bsh_ref
+    # (outward) trims the shift's push (the stance hip's adduction down, the
+    # swing hip's up) by bsh_k rad per m of excess, at most bsh_lim: the
+    # feed-forward b_shift_add pushes the COM the same way whatever the stance
+    # width (r = -0.75 between the width and the cp at the lift), and a narrow
+    # stance over-shifts
+    @bshc = switch_on("bshc")
+    @bsh_ref = ~1000000.0
+    @bsh_k = ~0.0
+    @bsh_lim = ~0.0
+    if @bshc
+      @bsh_ref = param("bsh_ref", ~-0.005, ~-0.03, ~0.03)
+      @bsh_k = param("bsh_k", ~2.0, ~0.0, ~10.0)
+      @bsh_lim = param("bsh_lim", ~0.08, ~0.0, ~0.25)
     # bretry 1: a hold that the fall catch ends within bc_short seconds is
     # retried on the same leg (at most bc_retry times) instead of switching to
     # the other one: the strict five-minute trial needs one 300 s stretch on
@@ -307,6 +392,14 @@
       @bc_retry = param("bc_retry", ~2.0, ~0.0, ~4.0)
       @bc_short = param("bc_short", ~20.0, ~5.0, ~60.0)
       @bc_arm = param("bc_arm", ~12.0, ~2.0, ~40.0)
+    # broll 1 (with bretry): the early hold is also ended (the swing foot put
+    # down, then the next attempt) when the pelvis rolls outward past bc_roll
+    # (rad, the pelvis's up axis tilted toward the stance side). Healthy holds
+    # stay within +-0.06 rad; the outward runaway that the capture point
+    # catches too late (cpo > 3 cm) shows as a growing roll oscillation of
+    # +-0.1..0.25 rad from 0.5 s after the lift
+    @bc_roll = ~1000.0
+    @bc_roll = param("bc_roll", ~0.12, ~0.05, ~0.4) if switch_on("broll")
     @bc_tries = ~0.0
     @att_acc = ~0.0
     @bal_acc = {"l" => ~0.0, "r" => ~0.0}
@@ -499,9 +592,24 @@
       i += 1
     off
 
+  # (swabd) the swing leg's hip abductors driven while one foot is unloaded.
+  -> after(frame, ctl)
+    super(frame, ctl)
+    if @sw_drv_abd != nil && @sw_drv_abd > ~0.0 && v4_phase?
+      sw = swing_side
+      if sw != ""
+        abd = @abd_l
+        abd = @abd_r if sw == "r"
+        d6 = @sw_drv_abd
+        abd.each ->(i) ctl.add_drive(i, d6)
+    self
+
   -> before(frame, ctl)
     super(frame, ctl)
     @frame = frame
+    if @k7
+      @k7_ref = ~0.0
+      @k7_ref = @k7_lean * clamp((frame.t - @t_phase) / @k7_t_lean, ~0.0, ~1.0) if @phase == :k7_lean
     if @emit_q != nil
       ctl.emit(@emit_q)
       @emit_q = nil
@@ -526,6 +634,7 @@
     kp = kick_phase? || (@rk4 && rk_kick_phase?)
     dsx_hip(f, off) if @dsx && v4_phase?
     dsi_hip(f, off, ctl) if @dsi && @phase == :b_shift
+    shc_hip(f, off) if @bshc && @phase == :b_shift
     return off if !v4_phase? && !(@in4 && kick_phase?) && !(@rk4 && rk_phase?)
     tlh(f, off, ctl) if @tlh
     swing_yaw(f, off) if @fyaw && !kp
@@ -533,6 +642,14 @@
     cp4(f, off, ctl) if @cp4
     catch_place(f, off) if @bplace && @phase == :b_down
     off
+
+  # The routine's stance with both hips abducted b_wide (bwide).
+  -> stance
+    p = super
+    if @b_wide != nil && @b_wide != ~0.0
+      p.set("hip_adduction_l", p.get("hip_adduction_l") - @b_wide)
+      p.set("hip_adduction_r", p.get("hip_adduction_r") - @b_wide)
+    p
 
   # (dsx) In double support (no foot unloaded below sb_ds_load) the COM's
   # fore-aft capture point beyond dsx_lim of the routine's target flexes both
@@ -559,6 +676,17 @@
     joint_offset(off, "hip_adduction_r", ~0.0 - @dsi_int)
     off
 
+  # (bshc) the shift's capture-point brake (see read_params).
+  -> shc_hip(f, off)
+    st = b_stance_side
+    return off if st == ""
+    ex = cp_lateral(f, st) - @bsh_ref
+    return off if ex <= ~0.0
+    brake = clamp(@bsh_k * ex, ~0.0, @bsh_lim)
+    joint_offset(off, "hip_adduction_" + st, ~0.0 - brake)
+    joint_offset(off, "hip_adduction_" + other_side(st), brake)
+    off
+
   # The stance hip kept off its extension limit: a flexion offset hg_k per
   # radian below hg_min (in single support).
   -> hip_guard(f, off)
@@ -580,7 +708,8 @@
   # Where the round-4 terms act: the single-leg routine and the ap3 approach.
   -> v4_phase?
     return false if kick_phase? || turn_phase?
-    @phase == :b_set || @phase == :b_shift || @phase == :b_lift || @phase == :b_hold || @phase == :b_down || @phase == :b_mid || @phase == :s3_reach
+    return true if @k4_cp && (@phase == :swing || @phase == :snap || @phase == :follow || @phase == :land)
+    @phase == :b_set || @phase == :b_shift || @phase == :b_lift || @phase == :b_hold || @phase == :b_down || @phase == :b_mid || @phase == :s3_reach || @phase == :k7_lean
 
   # A foot's twist budget (N m): with the task's grip_cap sensor (the
   # ground's torsional limit under the foot, sum mu N |r - cop|, zero on a
@@ -881,11 +1010,11 @@
     p = stance
     p.set("hip_adduction_" + st, p.get("hip_adduction_" + st) + @b_shift_add)
     p.set("hip_adduction_" + sw, p.get("hip_adduction_" + sw) - @b_shift_add)
-    unl = Latch.test(st + "_bunl", ->(f, e, c) foot_load(sw) < @b_unload && captured?(f, st) && lat_still?(f, st) && fore_ok?(f, st))
+    unl = Latch.test(st + "_bunl", ->(f, e, c) foot_load(sw) < @b_unload && captured?(f, st) && lat_still?(f, st) && fore_ok?(f, st) && cpo_ok?(f, st))
     mv.add(chunk("b_shift_" + st, @b_t_shift, p, :b_shift, :both, ss).hold_until(unl.after_min(@b_t_shift * ~0.5), @b_t_shift + @bc_tmax))
     p = one_leg_posture(st)
     mv.add(chunk("b_lift_" + st, @b_t_lift, p, :b_lift, ss, ss).hold_until(Latch.after(@b_t_lift)))
-    stop = Latch.test(st + "_bfall", ->(f, e, c) @bal_acc[st] >= @bc_cap || ~0.0 - cp_lateral(f, st) > @bc_in || (cp_lateral(f, st) > @bc_out && e < @bc_arm))
+    stop = Latch.test(st + "_bfall", ->(f, e, c) @bal_acc[st] >= @bc_cap || ~0.0 - cp_lateral(f, st) > @bc_in || (cp_lateral(f, st) > @bc_out && e < @bc_arm) || (roll_out(f, st) > @bc_roll && e < @bc_arm))
     mv.add(chunk("b_hold_" + st, ~0.2, p, :b_hold, ss, ss).hold_until(Latch.any([Latch.after(@b_hold), stop]), @b_hold))
     down = Latch.test(st + "_bdown", ->(f, e, c) foot_load(sw) > @b_load)
     mv.add(chunk("b_down_" + st, @b_t_down, stance, :b_down, ss, ss).hold_until(down.after_min(@b_t_down * ~0.5), ~1.0))
@@ -894,6 +1023,14 @@
     ch.branch(->(f, c) next_leg(f))
     mv.add(ch)
     mv
+
+  # The pelvis's outward tilt (toward the stance side), rad.
+  -> roll_out(f, st)
+    sg = ~1.0
+    sg = ~-1.0 if st == "r"
+    # the z component of the pelvis's lateral axis (its forward axis crossed
+    # with its up axis): sin of the roll, whatever the pelvis's yaw and pitch
+    sg * (f.at("pelvis_fwd", 0) * f.at("pelvis_upv", 1) - f.at("pelvis_fwd", 1) * f.at("pelvis_upv", 0))
 
   # (blv) the COM's velocity across the stance foot below b_vlat: the lift
   # waits for the weight shift to have stopped, not only arrived.
@@ -912,6 +1049,12 @@
     dx = f.at("com_pos", 0) + f.at("com_vel", 0) * ~0.311 - fc[0]
     dy = f.at("com_pos", 1) + f.at("com_vel", 1) * ~0.311 - fc[1]
     (dx * Math.cos(h) + dy * Math.sin(h) - @sb_x).abs < @b_fx_tol
+
+  # (bcpo) the lateral capture point inboard of b_cpo_max from the stance
+  # foot's centre.
+  -> cpo_ok?(f, st)
+    return true if !@bcpo
+    cp_lateral(f, st) < @b_cpo_max
 
   # Still, square double stance (bsettle).
   -> settled
@@ -936,6 +1079,26 @@
     joint_offset(off, "hip_adduction_" + sw, clamp(~0.0 - sg * @bp_k * el, ~-0.5, ~0.5))
     joint_offset(off, "hip_flexion_" + sw, clamp(@bp_kf * ef, ~-0.5, ~0.5))
     off
+
+  # ---- the kick's snap fired by the foot-ball distance (sd) -------------------
+
+  -> add_kick(mv)
+    return super(mv) if !@sd || @side > ~0.5
+    p = kick_stance(base_posture)
+    wleg(p, "r", @th_k1, @knee_k1, @ankle_k)
+    thigh = Latch.test("thigh", ->(f, e, c) f.q(body, "hip_flexion_r") > @hip_snap && f.at("env_ball_pos", 0) - f.at("r_toe_pos", 0) < @sn_d)
+    ch = chunk("swing", @t_swing, p, :swing, :l, :l).hold_until(thigh, @t_swing * ~2.5)
+    ch.drive(drive_on(@hip_flexors_r, @drv_hip))
+    mv.add(ch)
+    p = kick_stance(base_posture)
+    wleg(p, "r", @th_k2, @knee_k2, @ankle_k)
+    hit = Latch.test("touch", ->(f, e, c) f.get("ball_touch") > ~0.5)
+    ch = chunk("snap", @t_snap, p, :snap, :l, :l).hold_until(hit, @t_snap * ~2.5)
+    d = drive_on(@knee_ext_r, @drv_knee)
+    @hip_flexors_r.each ->(i) d[i] = @drv_hip
+    ch.drive(d)
+    mv.add(ch)
+    add_after_touch(mv)
 
   # ---- the side-foot kick waiting for the turn (rk4 + rk_wait) ---------------
 
@@ -999,7 +1162,7 @@
     k = 2 if st == "r"
     copf = f.at("foot_cop", k)
     copo = f.at("foot_cop", k + 1)
-    rf = @cp_x + @cp_rf
+    rf = @cp_x + @cp_rf + @k7_ref
     ro = @cp_y + @cp_ro
     # (bdown: putting the foot down, and until it carries weight, the COM is
     # let fall bd_in toward it)
@@ -1129,8 +1292,46 @@
     mv
 
   -> movement
+    return k6_movement if @k6
     return ks5_movement if @ks5
     super
+
+  # The routine's set, shift onto the right foot, lift and hold, then the
+  # parent's reach (the left foot IK-placed at the plant spot beside the ball
+  # while the right leg pushes), plant and kick.
+  -> k6_movement
+    mv = Movement.new("k6")
+    ramp_extra = @b_t_ramp - ~0.3
+    ch = chunk("b_set", @b_t_ramp, stance, :b_set, :both, :mid).hold_until(settled.after_min(@b_t_set + ramp_extra), @b_t_set + ramp_extra + @bs_tmax).gain(@b_g_set)
+    mv.add(ch)
+    p = stance
+    p.set("hip_adduction_r", p.get("hip_adduction_r") + @b_shift_add)
+    p.set("hip_adduction_l", p.get("hip_adduction_l") - @b_shift_add)
+    unl = Latch.test("r_bunl", ->(f, e, c) foot_load("l") < @b_unload && captured?(f, "r") && lat_still?(f, "r") && fore_ok?(f, "r"))
+    mv.add(chunk("b_shift_r", @b_t_shift, p, :b_shift, :both, :r).hold_until(unl.after_min(@b_t_shift * ~0.5), @b_t_shift + @bc_tmax))
+    p = one_leg_posture("r")
+    mv.add(chunk("b_lift_r", @b_t_lift, p, :b_lift, :r, :r).hold_until(Latch.after(@b_t_lift)))
+    mv.add(chunk("b_hold_r", ~0.2, p, :b_hold, :r, :r).hold_until(Latch.after(@k6_t_hold)))
+    if @k7
+      ahead = Latch.test("k7_ahead", ->(f, e, c) f.at("com_pos", 0) - foot_center(f, "r")[0] > @k7_go)
+      mv.add(chunk("k7_lean", @k7_t_lean, p, :k7_lean, :r, :r).hold_until(ahead.after_min(@k7_t_lean * ~0.5), @k7_t_max))
+    p = base_posture
+    p.set("flex_extension", @fe - @lean_step)
+    fleg(p, "l", @reach_dx, @reach_dz, @reach_pitch)
+    p.set("hip_adduction_l", @add_reach)
+    tleg(p, "r", @push_dx, @push_dz, @push_pitch, @tilt_step)
+    p.set("flex_extension", @fe_step)
+    @reach_posture = p
+    touch = Latch.test("plant", ->(f, e, c) @cl_f > @plant_load && f.at("l_foot_pos", 0) > @heel0 + @min_step)
+    ch = chunk("reach", @t_reach, p, :reach, :r, :r).hold_until(touch.after_min(~0.05), ~1.2)
+    ch.drive(drive_on(@plantar_r, @drv_push))
+    mv.add(ch)
+    if @direct > ~0.5
+      add_kick(mv)
+      return mv
+    add_lunge_plant(mv)
+    add_kick(mv)
+    mv
 
   # (with ap4 and s4set: the approach's steps to the kick spots first, each
   # from a settled stance, then the settle and the kick)

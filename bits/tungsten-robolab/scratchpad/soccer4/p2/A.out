@@ -1,0 +1,61 @@
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `reset()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `reset()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `reset()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `reset()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `reset()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `step()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `step()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `step()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `step()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+{"gen": 1, "t": 270, "best": 3.188, "gen_best": 3.188, "gen_mean": 2.53, "goals_best": "0/6", "goals_max": 0, "goals_x0": "0/6", "sigma": 0.0922}
+{"gen": 2, "t": 522, "best": 3.598, "gen_best": 3.598, "gen_mean": 2.656, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0884}
+{"gen": 3, "t": 774, "best": 3.598, "gen_best": 3.181, "gen_mean": 2.679, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0845}
+{"gen": 4, "t": 1012, "best": 4.322, "gen_best": 4.322, "gen_mean": 2.935, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0814}
+{"gen": 5, "t": 1264, "best": 4.322, "gen_best": 3.473, "gen_mean": 2.775, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0797}
+{"gen": 6, "t": 1524, "best": 4.322, "gen_best": 3.543, "gen_mean": 2.624, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.078}
+{"gen": 7, "t": 1795, "best": 4.322, "gen_best": 3.986, "gen_mean": 3.138, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0769}
+{"gen": 8, "t": 2038, "best": 4.322, "gen_best": 4.117, "gen_mean": 3.105, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0753}
+{"gen": 9, "t": 2249, "best": 4.322, "gen_best": 3.59, "gen_mean": 2.728, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.075}
+{"gen": 10, "t": 2490, "best": 4.322, "gen_best": 3.717, "gen_mean": 2.806, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0746}
+{"gen": 11, "t": 2736, "best": 4.322, "gen_best": 3.467, "gen_mean": 2.872, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0741}
+{"gen": 12, "t": 2976, "best": 4.322, "gen_best": 3.918, "gen_mean": 3.196, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0738}
+{"gen": 13, "t": 3201, "best": 4.322, "gen_best": 3.998, "gen_mean": 3.32, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0733}
+{"gen": 14, "t": 3402, "best": 4.322, "gen_best": 3.167, "gen_mean": 2.466, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0729}
+{"gen": 15, "t": 3660, "best": 4.322, "gen_best": 3.632, "gen_mean": 3.025, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.072}
+{"gen": 16, "t": 3842, "best": 4.322, "gen_best": 3.594, "gen_mean": 2.883, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0712}
+/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/resource_tracker.py:279: UserWarning: resource_tracker: There appear to be 6 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '

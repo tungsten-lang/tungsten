@@ -1,0 +1,145 @@
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `reset()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `step()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+t 221.00 contact tibia_r - femur_l dist -0.0011 force 215.5
+t 221.00 calcn_r z 0.4688 y 0.088 | calcn_l y 0.198 | pz 0.9408
+t 221.01 contact tibia_r - femur_l dist -0.0011 force 216.4
+t 221.02 contact tibia_r - femur_l dist -0.0011 force 216.1
+t 221.03 contact tibia_r - femur_l dist -0.0011 force 215.2
+t 221.04 contact tibia_r - femur_l dist -0.0011 force 215.4
+t 221.05 contact tibia_r - femur_l dist -0.0011 force 216.3
+t 221.05 calcn_r z 0.4687 y 0.088 | calcn_l y 0.198 | pz 0.9408
+t 221.06 contact tibia_r - femur_l dist -0.0011 force 216.0
+t 221.07 contact tibia_r - femur_l dist -0.0011 force 215.3
+t 221.08 contact tibia_r - femur_l dist -0.0011 force 215.4
+t 221.09 contact tibia_r - femur_l dist -0.0011 force 216.2
+t 221.10 contact tibia_r - femur_l dist -0.0011 force 215.9
+t 221.10 calcn_r z 0.4684 y 0.088 | calcn_l y 0.198 | pz 0.9408
+t 221.11 contact tibia_r - femur_l dist -0.0011 force 215.0
+t 221.12 contact tibia_r - femur_l dist -0.0011 force 215.2
+t 221.13 contact tibia_r - femur_l dist -0.0011 force 216.1
+t 221.14 contact tibia_r - femur_l dist -0.0011 force 215.9
+t 221.15 contact tibia_r - femur_l dist -0.0011 force 215.1
+t 221.15 calcn_r z 0.4681 y 0.087 | calcn_l y 0.198 | pz 0.9408
+t 221.16 contact tibia_r - femur_l dist -0.0011 force 215.3
+t 221.17 contact tibia_r - femur_l dist -0.0011 force 216.3
+t 221.18 contact tibia_r - femur_l dist -0.0011 force 216.1
+t 221.19 contact tibia_r - femur_l dist -0.0011 force 215.0
+t 221.20 contact tibia_r - femur_l dist -0.0011 force 215.4
+t 221.20 calcn_r z 0.4681 y 0.087 | calcn_l y 0.198 | pz 0.9408
+t 221.21 contact tibia_r - femur_l dist -0.0011 force 216.4
+t 221.22 contact tibia_r - femur_l dist -0.0011 force 216.6
+t 221.23 contact tibia_r - femur_l dist -0.0011 force 215.6
+t 221.24 contact tibia_r - femur_l dist -0.0011 force 215.7
+t 221.25 contact tibia_r - femur_l dist -0.0011 force 216.5
+t 221.25 calcn_r z 0.4684 y 0.087 | calcn_l y 0.198 | pz 0.9408
+t 221.26 contact tibia_r - femur_l dist -0.0011 force 215.9
+t 221.27 contact tibia_r - femur_l dist -0.0011 force 214.9
+t 221.28 contact tibia_r - femur_l dist -0.0011 force 215.1
+t 221.29 contact tibia_r - femur_l dist -0.0011 force 216.2
+t 221.30 contact tibia_r - femur_l dist -0.0011 force 216.1
+t 221.30 calcn_r z 0.4684 y 0.088 | calcn_l y 0.198 | pz 0.9408
+t 221.31 contact tibia_r - femur_l dist -0.0011 force 215.0
+t 221.32 contact tibia_r - femur_l dist -0.0011 force 215.2
+t 221.33 contact tibia_r - femur_l dist -0.0011 force 216.0
+t 221.34 contact tibia_r - femur_l dist -0.0011 force 216.1
+t 221.35 contact tibia_r - femur_l dist -0.0011 force 215.5
+t 221.35 calcn_r z 0.4682 y 0.088 | calcn_l y 0.198 | pz 0.9408
+t 221.36 contact tibia_r - femur_l dist -0.0011 force 215.7
+t 221.37 contact tibia_r - femur_l dist -0.0011 force 216.6
+t 221.38 contact tibia_r - femur_l dist -0.0011 force 216.1
+t 221.39 contact tibia_r - femur_l dist -0.0011 force 214.8
+t 221.40 contact tibia_r - femur_l dist -0.0011 force 215.2
+t 221.40 calcn_r z 0.4684 y 0.087 | calcn_l y 0.198 | pz 0.9408
+t 221.41 contact tibia_r - femur_l dist -0.0011 force 216.5
+t 221.42 contact tibia_r - femur_l dist -0.0011 force 216.6
+t 221.43 contact tibia_r - femur_l dist -0.0011 force 215.6
+t 221.44 contact tibia_r - femur_l dist -0.0011 force 215.7
+t 221.45 contact tibia_r - femur_l dist -0.0011 force 216.5
+t 221.45 calcn_r z 0.4686 y 0.087 | calcn_l y 0.198 | pz 0.9408
+t 221.46 contact tibia_r - femur_l dist -0.0011 force 216.2
+t 221.47 contact tibia_r - femur_l dist -0.0011 force 215.2
+t 221.48 contact tibia_r - femur_l dist -0.0011 force 215.5
+t 221.49 contact tibia_r - femur_l dist -0.0011 force 216.6
+t 221.50 contact tibia_r - femur_l dist -0.0011 force 216.3
+t 221.50 calcn_r z 0.4686 y 0.088 | calcn_l y 0.198 | pz 0.9408
+t 221.51 contact tibia_r - femur_l dist -0.0011 force 215.2
+t 221.52 contact tibia_r - femur_l dist -0.0011 force 215.4
+t 221.53 contact tibia_r - femur_l dist -0.0011 force 216.4
+t 221.54 contact tibia_r - femur_l dist -0.0011 force 216.2
+t 221.55 contact tibia_r - femur_l dist -0.0011 force 215.4
+t 221.55 calcn_r z 0.4686 y 0.088 | calcn_l y 0.198 | pz 0.9408
+t 221.56 contact tibia_r - femur_l dist -0.0011 force 215.5
+t 221.57 contact tibia_r - femur_l dist -0.0011 force 216.3
+t 221.58 contact tibia_r - femur_l dist -0.0011 force 216.0
+t 221.59 contact tibia_r - femur_l dist -0.0011 force 215.2
+t 221.60 contact tibia_r - femur_l dist -0.0011 force 215.4
+t 221.60 calcn_r z 0.4685 y 0.088 | calcn_l y 0.198 | pz 0.9408
+t 221.61 contact tibia_r - femur_l dist -0.0011 force 216.2
+t 221.62 contact tibia_r - femur_l dist -0.0011 force 215.9
+t 221.63 contact tibia_r - femur_l dist -0.0011 force 215.1
+t 221.64 contact tibia_r - femur_l dist -0.0011 force 215.2
+t 221.65 contact tibia_r - femur_l dist -0.0011 force 216.0
+t 221.65 calcn_r z 0.4682 y 0.087 | calcn_l y 0.198 | pz 0.9408
+t 221.66 contact tibia_r - femur_l dist -0.0011 force 215.9
+t 221.67 contact tibia_r - femur_l dist -0.0011 force 215.0
+t 221.68 contact tibia_r - femur_l dist -0.0011 force 215.2
+t 221.69 contact tibia_r - femur_l dist -0.0011 force 216.1
+t 221.70 contact tibia_r - femur_l dist -0.0011 force 216.0
+t 221.70 calcn_r z 0.4677 y 0.087 | calcn_l y 0.198 | pz 0.9408
+t 221.71 contact tibia_r - femur_l dist -0.0011 force 214.8
+t 221.72 contact tibia_r - femur_l dist -0.0011 force 215.4
+t 221.73 contact tibia_r - femur_l dist -0.0011 force 216.3
+t 221.74 contact tibia_r - femur_l dist -0.0011 force 216.7
+t 221.75 contact tibia_r - femur_l dist -0.0011 force 215.8
+t 221.75 calcn_r z 0.4678 y 0.087 | calcn_l y 0.198 | pz 0.9408
+t 221.76 contact tibia_r - femur_l dist -0.0011 force 215.8
+t 221.77 contact tibia_r - femur_l dist -0.0011 force 216.3
+t 221.78 contact tibia_r - femur_l dist -0.0011 force 215.5
+t 221.79 contact tibia_r - femur_l dist -0.0011 force 214.8
+t 221.80 contact tibia_r - femur_l dist -0.0011 force 214.9
+t 221.80 calcn_r z 0.4680 y 0.087 | calcn_l y 0.198 | pz 0.9408
+t 221.81 contact tibia_r - femur_l dist -0.0011 force 215.7
+t 221.82 contact tibia_r - femur_l dist -0.0011 force 215.6
+t 221.83 contact tibia_r - femur_l dist -0.0011 force 214.8
+t 221.84 contact tibia_r - femur_l dist -0.0010 force 214.8
+t 221.85 contact tibia_r - femur_l dist -0.0010 force 215.3
+t 221.85 calcn_r z 0.4677 y 0.087 | calcn_l y 0.198 | pz 0.9408
+t 221.86 contact tibia_r - femur_l dist -0.0010 force 215.4
+t 221.87 contact tibia_r - femur_l dist -0.0010 force 215.6
+t 221.88 contact tibia_r - femur_l dist -0.0010 force 215.6
+t 221.89 contact tibia_r - femur_l dist -0.0010 force 215.8
+t 221.90 contact tibia_r - femur_l dist -0.0010 force 215.3
+t 221.90 calcn_r z 0.4669 y 0.087 | calcn_l y 0.198 | pz 0.9408
+t 221.91 contact tibia_r - femur_l dist -0.0010 force 214.5
+t 221.92 contact tibia_r - femur_l dist -0.0010 force 214.6
+t 221.93 contact tibia_r - femur_l dist -0.0010 force 215.3
+t 221.94 contact tibia_r - femur_l dist -0.0010 force 215.6
+t 221.95 contact tibia_r - femur_l dist -0.0010 force 215.4
+t 221.95 calcn_r z 0.4662 y 0.087 | calcn_l y 0.198 | pz 0.9408
+t 221.96 contact tibia_r - femur_l dist -0.0010 force 215.4
+t 221.97 contact tibia_r - femur_l dist -0.0010 force 216.0
+t 221.98 contact tibia_r - femur_l dist -0.0010 force 215.6
+t 221.99 contact tibia_r - femur_l dist -0.0010 force 214.1
+t 222.00 contact tibia_r - femur_l dist -0.0010 force 215.2
+t 222.00 calcn_r z 0.4660 y 0.087 | calcn_l y 0.198 | pz 0.9408
+t 222.01 contact tibia_r - femur_l dist -0.0010 force 215.8
+t 222.02 contact tibia_r - femur_l dist -0.0010 force 217.0
+t 222.03 contact tibia_r - femur_l dist -0.0011 force 216.3
+t 222.04 contact tibia_r - femur_l dist -0.0011 force 216.0
+t 222.05 contact tibia_r - femur_l dist -0.0011 force 215.9
+t 222.05 calcn_r z 0.4664 y 0.087 | calcn_l y 0.198 | pz 0.9408
+t 222.06 contact tibia_r - femur_l dist -0.0011 force 214.9
+end 222.41 219.71
+WARNING: Nan, Inf or huge value in QACC at DOF 6. The simulation is unstable. Time = 222.0680.
+

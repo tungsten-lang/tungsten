@@ -81,6 +81,10 @@
       nm = "l_flight"
       knot_td = @knots && frame.com_vx >= @kn_v_on
       nm = "l_kflight" if knot_td
+      # fly_entry 2: enter the right stance chunk itself (the snapshot is a few ms before the right
+      # touchdown, and the flight chunk holds >= 30 ms before it hands over to the landing)
+      nm = "r_land" if @fly_entry2 && !knot_td
+      nm = "r_kland" if @fly_entry2 && knot_td
       # the command starts on the flight's pose (as a running controller's
       # would be), not on the sensed posture: a command equal to the sensed
       # contraction leaves the stretch reflexes no tone at the landing
@@ -109,6 +113,7 @@
     # loop at the left flight with the speed plan ramped, as `knots 1` does;
     # without knots the stride is RunRISkill's exactly
     @fly_entry = @params.key?("fly_entry") && @params["fly_entry"] > ~0.5
+    @fly_entry2 = @params.key?("fly_entry") && @params["fly_entry"] > ~1.5
     @knots = @params.key?("knots") && @params["knots"] > ~0.5
     @knot_stance = false
     return self if !@knots

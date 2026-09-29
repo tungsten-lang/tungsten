@@ -1,0 +1,79 @@
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `reset()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `reset()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `step()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+{"gen": 1, "t": 42, "best": 0.215, "gen_best": 0.215, "gen_mean": 0.175, "sigma": 0.1402, "x0_score": 0.18, "summ": {"walk_closed": 0.0, "walk_t_arrive": 0.0, "bal1_s": 0.19, "bal_l_tot": 0.0, "bal_r_tot": 0.19, "bal_s": 0.19, "bal_l": 0.0, "bal_r": 0.19, "stand_time": 0.43, "goal": 0.0, "goal_inside": 0.0, "ball_speed": 0.0, "n_steps": 0.0, "ap_best_stand": 0.001, "t_touch": 0.0, "fallen": 1.0, "zones": [null]}}
+{"gen": 2, "t": 100, "best": 0.225, "gen_best": 0.225, "gen_mean": 0.174, "sigma": 0.135, "summ": {"walk_closed": 0.0, "walk_t_arrive": 0.0, "bal1_s": 0.02, "bal_l_tot": 0.0, "bal_r_tot": 0.01, "bal_s": 0.01, "bal_l": 0.0, "bal_r": 0.01, "stand_time": 0.45, "goal": 0.0, "goal_inside": 0.0, "ball_speed": 0.0, "n_steps": 0.0, "ap_best_stand": 0.001, "t_touch": 0.0, "fallen": 1.0, "zones": [null]}}
+{"gen": 3, "t": 155, "best": 0.345, "gen_best": 0.345, "gen_mean": 0.185, "sigma": 0.1311, "summ": {"walk_closed": 0.0, "walk_t_arrive": 0.0, "bal1_s": 0.15, "bal_l_tot": 0.0, "bal_r_tot": 0.16, "bal_s": 0.16, "bal_l": 0.0, "bal_r": 0.16, "stand_time": 0.69, "goal": 0.0, "goal_inside": 0.0, "ball_speed": 0.0, "n_steps": 0.0, "ap_best_stand": 0.001, "t_touch": 0.0, "fallen": 1.0, "zones": [null]}}
+{"gen": 4, "t": 203, "best": 0.345, "gen_best": 0.28, "gen_mean": 0.19, "sigma": 0.1274, "summ": {"walk_closed": 0.0, "walk_t_arrive": 0.0, "bal1_s": 0.06, "bal_l_tot": 0.0, "bal_r_tot": 0.07, "bal_s": 0.07, "bal_l": 0.0, "bal_r": 0.07, "stand_time": 0.56, "goal": 0.0, "goal_inside": 0.0, "ball_speed": 0.0, "n_steps": 0.0, "ap_best_stand": 0.001, "t_touch": 0.0, "fallen": 1.0, "zones": [null]}}
+{"gen": 5, "t": 251, "best": 0.345, "gen_best": 0.26, "gen_mean": 0.186, "sigma": 0.1245, "summ": {"walk_closed": 0.0, "walk_t_arrive": 0.0, "bal1_s": 0.0, "bal_l_tot": 0.0, "bal_r_tot": 0.0, "bal_s": 0.0, "bal_l": 0.0, "bal_r": 0.0, "stand_time": 0.52, "goal": 0.0, "goal_inside": 0.0, "ball_speed": 0.0, "n_steps": 0.0, "ap_best_stand": 0.001, "t_touch": 0.0, "fallen": 1.0, "zones": [null]}}
+{"gen": 6, "t": 304, "best": 0.345, "gen_best": 0.225, "gen_mean": 0.17, "sigma": 0.1221, "summ": {"walk_closed": 0.0, "walk_t_arrive": 0.0, "bal1_s": 0.12, "bal_l_tot": 0.0, "bal_r_tot": 0.04, "bal_s": 0.04, "bal_l": 0.0, "bal_r": 0.04, "stand_time": 0.45, "goal": 0.0, "goal_inside": 0.0, "ball_speed": 0.0, "n_steps": 0.0, "ap_best_stand": 0.001, "t_touch": 0.0, "fallen": 1.0, "zones": [null]}}
+{"gen": 7, "t": 356, "best": 0.345, "gen_best": 0.2, "gen_mean": 0.176, "sigma": 0.1202, "summ": {"walk_closed": 0.0, "walk_t_arrive": 0.0, "bal1_s": 0.02, "bal_l_tot": 0.0, "bal_r_tot": 0.02, "bal_s": 0.02, "bal_l": 0.0, "bal_r": 0.02, "stand_time": 0.4, "goal": 0.0, "goal_inside": 0.0, "ball_speed": 0.0, "n_steps": 0.0, "ap_best_stand": 0.001, "t_touch": 0.0, "fallen": 1.0, "zones": [null]}}
+{"gen": 8, "t": 408, "best": 0.345, "gen_best": 0.255, "gen_mean": 0.183, "sigma": 0.1182, "summ": {"walk_closed": 0.0, "walk_t_arrive": 0.0, "bal1_s": 0.0, "bal_l_tot": 0.0, "bal_r_tot": 0.0, "bal_s": 0.0, "bal_l": 0.0, "bal_r": 0.0, "stand_time": 0.51, "goal": 0.0, "goal_inside": 0.0, "ball_speed": 0.0, "n_steps": 0.0, "ap_best_stand": 0.001, "t_touch": 0.0, "fallen": 1.0, "zones": [null]}}
+{"gen": 9, "t": 467, "best": 0.646, "gen_best": 0.646, "gen_mean": 0.207, "sigma": 0.1172, "summ": {"walk_closed": 0.012, "walk_t_arrive": 0.0, "bal1_s": 0.01, "bal_l_tot": 0.01, "bal_r_tot": 0.0, "bal_s": 0.01, "bal_l": 0.01, "bal_r": 0.0, "stand_time": 1.1, "goal": 0.0, "goal_inside": 0.0, "ball_speed": 0.0, "n_steps": 0.0, "ap_best_stand": 0.001, "t_touch": 0.0, "fallen": 1.0, "zones": [null]}}
+{"gen": 10, "t": 523, "best": 0.646, "gen_best": 0.556, "gen_mean": 0.225, "sigma": 0.1162, "summ": {"walk_closed": 0.007, "walk_t_arrive": 0.0, "bal1_s": 0.01, "bal_l_tot": 0.01, "bal_r_tot": 0.0, "bal_s": 0.01, "bal_l": 0.01, "bal_r": 0.0, "stand_time": 1.0, "goal": 0.0, "goal_inside": 0.0, "ball_speed": 0.0, "n_steps": 0.0, "ap_best_stand": 0.001, "t_touch": 0.0, "fallen": 1.0, "zones": [null]}}
+{"gen": 11, "t": 579, "best": 0.646, "gen_best": 0.375, "gen_mean": 0.241, "sigma": 0.115, "summ": {"walk_closed": 0.0, "walk_t_arrive": 0.0, "bal1_s": 0.0, "bal_l_tot": 0.0, "bal_r_tot": 0.0, "bal_s": 0.0, "bal_l": 0.0, "bal_r": 0.0, "stand_time": 0.75, "goal": 0.0, "goal_inside": 0.0, "ball_speed": 0.0, "n_steps": 0.0, "ap_best_stand": 0.001, "t_touch": 0.0, "fallen": 1.0, "zones": [null]}}
+{"gen": 12, "t": 638, "best": 1.456, "gen_best": 1.456, "gen_mean": 0.473, "sigma": 0.1128, "summ": {"walk_closed": 0.137, "walk_t_arrive": 0.0, "bal1_s": 0.03, "bal_l_tot": 0.03, "bal_r_tot": 0.0, "bal_s": 0.03, "bal_l": 0.03, "bal_r": 0.0, "stand_time": 0.72, "goal": 0.0, "goal_inside": 0.0, "ball_speed": 1.024, "n_steps": 0.0, "ap_best_stand": 0.001, "yaw_touch_deg": 71.4, "t_touch": 1.44, "fallen": 1.0, "zones": [null]}}
+{"gen": 13, "t": 707, "best": 1.456, "gen_best": 1.253, "gen_mean": 0.681, "sigma": 0.111, "summ": {"walk_closed": 0.111, "walk_t_arrive": 0.0, "bal1_s": 0.02, "bal_l_tot": 0.01, "bal_r_tot": 0.0, "bal_s": 0.01, "bal_l": 0.01, "bal_r": 0.0, "stand_time": 0.73, "goal": 0.0, "goal_inside": 0.0, "ball_speed": 0.0, "n_steps": 0.0, "ap_best_stand": 0.001, "t_touch": 0.0, "fallen": 1.0, "zones": [null]}}
+{"gen": 14, "t": 783, "best": 4.372, "gen_best": 4.372, "gen_mean": 1.485, "sigma": 0.1103, "summ": {"walk_closed": 0.434, "walk_t_arrive": 0.0, "bal1_s": 0.01, "bal_l_tot": 0.01, "bal_r_tot": 0.0, "bal_s": 0.01, "bal_l": 0.01, "bal_r": 0.0, "stand_time": 1.8, "goal": 0.0, "goal_inside": 0.0, "ball_speed": 0.0, "n_steps": 0.0, "ap_best_stand": 0.001, "t_touch": 0.0, "fallen": 1.0, "zones": [null]}}
+{"gen": 15, "t": 859, "best": 4.372, "gen_best": 3.658, "gen_mean": 1.579, "sigma": 0.1095, "summ": {"walk_closed": 0.386, "walk_t_arrive": 0.0, "bal1_s": 0.03, "bal_l_tot": 0.03, "bal_r_tot": 0.0, "bal_s": 0.03, "bal_l": 0.03, "bal_r": 0.0, "stand_time": 1.14, "goal": 0.0, "goal_inside": 0.0, "ball_speed": 2.099, "n_steps": 0.0, "ap_best_stand": 0.001, "yaw_touch_deg": -21.2, "t_touch": 1.6, "fallen": 1.0, "zones": [null]}}
+{"gen": 16, "t": 924, "best": 4.372, "gen_best": 3.264, "gen_mean": 2.105, "sigma": 0.1087, "summ": {"walk_closed": 0.298, "walk_t_arrive": 0.0, "bal1_s": 0.22, "bal_l_tot": 0.2, "bal_r_tot": 0.03, "bal_s": 0.23, "bal_l": 0.2, "bal_r": 0.03, "stand_time": 1.76, "goal": 0.0, "goal_inside": 0.0, "ball_speed": 0.0, "n_steps": 0.0, "ap_best_stand": 0.001, "t_touch": 0.0, "fallen": 1.0, "zones": [null]}}
+{"gen": 17, "t": 984, "best": 4.372, "gen_best": 3.968, "gen_mean": 2.469, "sigma": 0.1085, "summ": {"walk_closed": 0.406, "walk_t_arrive": 0.0, "bal1_s": 0.02, "bal_l_tot": 0.01, "bal_r_tot": 0.0, "bal_s": 0.01, "bal_l": 0.01, "bal_r": 0.0, "stand_time": 1.44, "goal": 0.0, "goal_inside": 0.0, "ball_speed": 0.0, "n_steps": 0.0, "ap_best_stand": 0.001, "t_touch": 0.0, "fallen": 1.0, "zones": [null]}}
+{"gen": 18, "t": 1597, "best": 4.505, "gen_best": 4.505, "gen_mean": 2.71, "sigma": 0.1075, "summ": {"walk_closed": 0.475, "walk_t_arrive": 0.0, "bal1_s": 0.03, "bal_l_tot": 0.02, "bal_r_tot": 0.0, "bal_s": 0.02, "bal_l": 0.02, "bal_r": 0.0, "stand_time": 1.41, "goal": 0.0, "goal_inside": 0.0, "ball_speed": 2.325, "n_steps": 0.0, "ap_best_stand": 0.001, "yaw_touch_deg": 3.0, "t_touch": 1.55, "fallen": 1.0, "zones": [null]}}
+{"gen": 19, "t": 1659, "best": 13.354, "gen_best": 13.354, "gen_mean": 3.915, "sigma": 0.1058, "summ": {"walk_closed": 0.518, "walk_t_arrive": 1.16, "bal1_s": 0.03, "bal_l_tot": 0.03, "bal_r_tot": 0.0, "bal_s": 0.03, "bal_l": 0.03, "bal_r": 0.0, "stand_time": 1.37, "goal": 0.0, "goal_inside": 0.0, "ball_speed": 2.104, "n_steps": 0.0, "ap_best_stand": 0.001, "yaw_touch_deg": -48.6, "t_touch": 1.55, "fallen": 1.0, "zones": [null]}}
+Process SpawnPoolWorker-1:
+Traceback (most recent call last):
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/pool.py", line 131, in worker
+    put((job, i, result))
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/queues.py", line 399, in put
+    self._writer.send_bytes(obj)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 200, in send_bytes
+    self._send_bytes(m[offset:offset + size])
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 427, in _send_bytes
+    self._send(header + buf)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 384, in _send
+    n = write(self._handle, buf)
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+BrokenPipeError: [Errno 32] Broken pipe
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/pool.py", line 136, in worker
+    put((job, i, (False, wrapped)))
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/queues.py", line 399, in put
+    self._writer.send_bytes(obj)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 200, in send_bytes
+    self._send_bytes(m[offset:offset + size])
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 427, in _send_bytes
+    self._send(header + buf)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 384, in _send
+    n = write(self._handle, buf)
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+BrokenPipeError: [Errno 32] Broken pipe
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/resource_tracker.py:279: UserWarning: resource_tracker: There appear to be 6 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '

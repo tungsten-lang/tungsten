@@ -13,6 +13,13 @@
 # drv_ankle, drv_gas, drv_hip, drv_ham in the push; drv_swh, drv_rf in the
 # swing), set in the params file. Without `ri` it is RunSkill exactly.
 #
+# Spine trunk servo (opt-in tunables, default 0 = RunRISkill exactly): RunSkill holds the spine at
+# a fixed angle to the pelvis, so the trunk's pitch is only ever steered through the hips (the
+# stance hip's torso servo, the trailing leg as reaction mass in flight), and their authority runs
+# out: the runs that fall pitch forward over ~0.5 s. The lumbar spine (spine_flex, 200-250 N m, as
+# strong as a hip) is a second actuator on the trunk: k_sp / k_spd add a spine-angle offset of
+# -k_sp x (torso pitch - torso_des) - k_spd x pitch rate, in every phase.
+#
 # Phase gating (opt-in params-file switches, for the push-through stance of
 # the ideal-control analysis, sprint_limits.py):
 #   gate_push 1   a push chunk ends on its foot's release only (timeout
@@ -61,6 +68,8 @@
       @tcn_joints = ["l_hip_flex", "l_knee", "l_ankle", "r_hip_flex", "r_knee", "r_ankle", "spine_flex"]
       @tcn = ConvPolicy.new(body, @params, @tcn_joints)
       declare_tcn_head
+    @k_sp = param("k_sp", ~0.0, ~0.0, ~3.0)
+    @k_spd = param("k_spd", ~0.0, ~0.0, ~1.0)
     @push_through = @params.key?("push_through") && @params["push_through"] > ~0.5
     return self if !@push_through
     @pt_delay = param("pt_delay", ~0.03, ~0.0, ~0.12)
@@ -103,6 +112,13 @@
       ctl.add_offset(m, off[m])
       m += 1
     self
+
+  # The spine trunk servo (k_sp / k_spd) on top of RunSkill's corrections.
+  -> stride_correction(f, ctl, st, sw, phase)
+    off = super(f, ctl, st, sw, phase)
+    return off if @k_sp <= ~0.0 && @k_spd <= ~0.0
+    joint_offset(off, "spine_flex", ~0.0 - @k_sp * (f.torso_pitch - @torso_des) - @k_spd * f.torso_pitch_rate)
+    off
 
   -> flight_chunk(st, sw, pose)
     ch = super(st, sw, pose)

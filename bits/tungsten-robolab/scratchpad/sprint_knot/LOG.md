@@ -117,3 +117,36 @@ All campaign state lives in the repo (scratchpad/sprint_knot/, out/, params/). N
 - 05:47 (clock) g2e (elite2 gear 2, 8 flying seeds x 24 s): best 283.5-286.8 (first seed peak 6.62 steady 6.52); as a standing-start two-gear controller (gear_e2_b.txt, switch 6.0):
   40 unseen seeds: 2 falls (5 %), mean peak 6.614 (min 6.546). ARENA sprint_top_speed_v4_elite2: two-gear PROMOTED: 6.61 on 11/12 (fall on 231), p 0.001. 71.3 % of the elite2 ceiling.
   g2a = avg gear-2 cascade (12 flying seeds x 24 s from a2v twins) started; g3p (P95 gear 3) running.
+- 06:35 (clock) avg two-gear (g2a_snap1; gear 1 a2v, gear 2 twins from 12 flying seeds x 24 s, switch 5.4): 40 unseen seeds 0 falls, mean peak 6.047 (min 6.032).
+  ARENA sprint_top_speed_v4: two-gear avg_b PROMOTED over a2: 6.045 +- 0.002 on 12/12, p 0.000. 73.7 % of the average ceiling.
+  P95 three gears (g3p_snap1, gear_p95_d.txt: switches 6.5 / 7.25 (7.0 also tested)): 6 standing seeds: peak 7.76-7.78 steady 7.72-7.75, 0-1 falls; search continues.
+  elite2 gear-2 twins do NOT transfer to the avg body (6/8 falls in flying practice).
+- 06:55 (clock) P95 three gears (g3p_snap2 -> gear_p95_e = params/run_gear_v4_p95_e.txt, switches 6.5 / 7.0): 40 unseen seeds 1 fall, mean peak 7.860 (min 7.808).
+  ARENA sprint_top_speed_v4_p95: three-gear PROMOTED over the two-gear: 7.862 +- 0.010 on 12/12, paired +0.4125, p 0.000. 75.2 % of the P95 ceiling.
+  Fourth gear: snapshots of the three-gear runner at 7.82-7.89 m/s (19, run_v4_p95h), g4p = ES over g4_ twins (12 seeds x 24 s flying, fall_pen 300) started.
+  g3a (avg gear 3, 12 seeds) running; snapshots for elite2 gear 3 recorded (run_v4_e2g, 11 at 6.5-6.67).
+- 07:10 (clock) avg three gears (g3a_snap1 -> gear_avg_c = params/run_gear_v4_avg_c.txt, switches 5.4 / 5.9): 40 unseen seeds 0 falls, mean peak 6.168 (min 6.159).
+  ARENA sprint_top_speed_v4: three-gear avg PROMOTED: 6.170 +- 0.003 on 12/12, paired +0.125, p 0.000. 75.2 % of the average ceiling.
+  g3e = elite2 gear 3 (10 seeds x 24 s flying from run_v4_e2g snapshots) started; g4p (P95 gear 4) running.
+- 07:35 (clock) elite2 three gears (g3e_snap1 -> gear_e2_c = params/run_gear_v4_elite2_c.txt, switches 6.0 / 6.4): 40 unseen seeds 1 fall (seed 180 at 5 s), mean peak 6.781 (min 6.724).
+  ARENA sprint_top_speed_v4_elite2: three-gear PROMOTED: 6.78 on 11/12 (seed 231 still falls), paired +0.153, p 0.001. 73.1 % of the elite2 ceiling.
+  recheck run_v2 hurdle long_jump_v2 bat sprint_top_speed_p95: all OK (no drift). SDK spec 93 passed (3 new for Track#set_movement).
+  P95 gear 4 (g4p): 346.29 after 18 gens (first-seed steady 7.91): gear gains shrink 0.45, 0.41, ~0.07.
+- 07:50 (clock) P95 four gears (g4p_snap1 -> gear_p95_f.txt, switches 6.5 / 7.0 / 7.7): 6 standing seeds peak 7.94 steady 7.91, 0 falls; but 40 unseen seeds: 4 falls (10 %; late 20-28 s),
+  mean peak 7.938 (min 7.901) vs the three-gear champion's 1/40 and 7.860: NOT entered (a challenger with a fall loses to a 12/12 champion). g4q = gear-4 ES on a 19-seed flying cascade (sigma 0.015).
+- (clock 08:10) independent validation 181-220: avg three-gear 5 falls (4 at 5-7 s; 0/50 early falls on fresh 251-300 at 12 s, so ~3 % early hazard overall), P95 three-gear 1, elite2 three-gear 2.
+  P95 four gears on a 19-seed cascade (g4q_snap1 -> gear_p95_g = params/run_gear_v4_p95_g.txt): 141-180: 2 falls, 181-220: 1 fall, mean peak 7.92.
+  ARENA sprint_top_speed_v4_p95: four-gear PROMOTED: 7.907 +- 0.019 on 12/12, paired +0.0456, p 0.001. 75.7 % of the P95 ceiling.
+  README section 'Sprinters on v4' written (insert at the old placeholder). g5p = P95 gear 5 (16 seeds x 24 s, snapshots run_v4_p95i at 7.90-7.98) and g4q (gear 4 continued) running.
+- 08:25 (clock, stamps from here are ~+-10 min) g4q (gear 4 continued, 346.365) and g5p (gear 5, 345.71 from 16 snapshots at 7.9-7.98) stalled: killed. The crouched family tops out at 7.9-7.95 on P95.
+  TCN experiment (the parent's step 2 tail): tcn_stats2.py (flying-start normalisation + fixed random hidden layers) -> gear_p95_tcn.txt = the entered four-gear params in gear-4 flying practice + a zero-head TCN
+  (reproduces the base exactly: 347.11); ES over the 63 head weights, 12 seeds x 24 s, sigma 0.03 and 0.006 (tcn_003, tcn_0006).
+- 08:45 (clock, approx) TCN experiment done: both heads (sigma 0.03, 0.006) survive all 12 training flying starts (zero-head baseline: a fall) but on 40 fresh flying starts (seeds 100-139)
+  falls are 3/40 (zero head), 3/40, 5/40; mean peak 7.937 / 7.917 / 7.932: no gain (selection of luck on the training seeds). ILC not run (needs a kinematic target). All my searches stopped.
+
+## FINAL STATE (29 Sep, session end; clock stamps after 04:30 above are approximate, +-15 min)
+Board (arena.py board): sprint_top_speed_v4 6.1701 (12/12, RunGear 3 gears, params/run_gear_v4_avg_c.txt), sprint_top_speed_v4_p95 7.9074 (12/12, RunGear 4 gears,
+params/run_gear_v4_p95_g.txt), sprint_top_speed_v4_elite2 6.7855 on 11/12 (RunGear 3 gears, params/run_gear_v4_elite2_c.txt). Shares of the pitch-free ceilings: 75.2 % / 75.7 % / 73.1 %.
+recheck of the three champions: no drift; recheck run_v2 hurdle long_jump_v2 bat sprint_top_speed_p95: no drift; SDK spec 93 passed.
+Elite2 start-phase hazard on 70 fresh seeds at 14 s: 5/70 (base), v0 1.5 3/70, v0 2.5 10/70, drv_floor 0.1 11/70, 0.2 7/70: nothing beats the base significantly; seed 231 falls at 8.6 s (acceleration).
+All searches stopped; nothing of mine is running. Frozen controllers: bin/challengers/run_ri-v4base, run_knot-v4a..e, run_gear-v4a..c (v4b: P95 two-gear champion, v4c: everything after).

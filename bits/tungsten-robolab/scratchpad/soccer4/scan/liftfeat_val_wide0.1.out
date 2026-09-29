@@ -1,0 +1,107 @@
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `reset()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `reset()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `reset()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `reset()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `step()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `step()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `step()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `step()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+91000 t_lift 1.79 | lift: cpf +0.014 cpo -0.021 comf +0.003 como -0.052 vf +0.04 vo +0.10 ldR 0.33 roll -0.03 yaw -0.18 sep -0.06/+0.23 | +0.5: cpo -0.001 cpf +0.022 roll -0.05 yaw -0.54
+91001 t_lift 1.37 | lift: cpf +0.018 cpo +0.003 comf +0.006 como -0.029 vf +0.04 vo +0.10 ldR 0.36 roll -0.02 yaw +0.03 sep -0.05/+0.16 | +0.5: cpo +0.001 cpf +0.020 roll -0.04 yaw -0.32
+91002 t_lift 1.98 | lift: cpf +0.013 cpo -0.023 comf +0.001 como -0.046 vf +0.04 vo +0.07 ldR 0.22 roll -0.02 yaw -0.21 sep -0.03/+0.28 | +0.5: cpo -0.006 cpf +0.019 roll -0.08 yaw -0.58
+91003 t_lift 1.78 | lift: cpf +0.022 cpo -0.001 comf +0.007 como -0.032 vf +0.05 vo +0.10 ldR 0.35 roll -0.02 yaw +0.04 sep -0.07/+0.17 | +0.5: cpo +0.005 cpf +0.023 roll -0.04 yaw -0.27
+91004 t_lift 1.45 | lift: cpf +0.031 cpo -0.019 comf +0.030 como -0.056 vf +0.00 vo +0.12 ldR 0.26 roll +0.01 yaw +0.05 sep +0.03/+0.23 | +0.5: cpo -0.005 cpf +0.031 roll -0.08 yaw -0.57
+91005 t_lift 1.36 | lift: cpf +0.022 cpo -0.004 comf +0.013 como -0.041 vf +0.03 vo +0.12 ldR 0.34 roll -0.00 yaw +0.15 sep +0.01/+0.17 | +0.5: cpo -0.001 cpf +0.029 roll -0.07 yaw -0.23
+91006 t_lift 1.34 | lift: cpf +0.017 cpo -0.023 comf +0.004 como -0.058 vf +0.04 vo +0.11 ldR 0.31 roll -0.01 yaw +0.05 sep -0.03/+0.22 | +0.5: cpo -0.007 cpf +0.026 roll -0.07 yaw -0.43
+91007 t_lift 1.44 | lift: cpf +0.010 cpo -0.012 comf -0.005 como -0.043 vf +0.05 vo +0.10 ldR 0.37 roll -0.03 yaw -0.05 sep -0.06/+0.19 | +0.5: cpo -0.007 cpf +0.022 roll -0.04 yaw -0.34
+91008 t_lift 1.32 | lift: cpf +0.019 cpo -0.013 comf +0.010 como -0.049 vf +0.03 vo +0.12 ldR 0.29 roll -0.02 yaw -0.03 sep -0.02/+0.21 | +0.5: cpo -0.006 cpf +0.027 roll -0.06 yaw -0.55
+91009 t_lift 1.69 | lift: cpf +0.014 cpo -0.012 comf -0.005 como -0.041 vf +0.06 vo +0.09 ldR 0.36 roll -0.02 yaw +0.03 sep -0.08/+0.18 | +0.5: cpo -0.005 cpf +0.024 roll -0.04 yaw -0.21
+91010 t_lift 1.31 | lift: cpf +0.025 cpo -0.019 comf +0.020 como -0.057 vf +0.02 vo +0.12 ldR 0.25 roll +0.00 yaw +0.05 sep +0.04/+0.24 | +0.5: cpo -0.007 cpf +0.030 roll -0.08 yaw -0.53
+91011 t_lift 1.37 | lift: cpf +0.026 cpo -0.020 comf +0.021 como -0.056 vf +0.02 vo +0.12 ldR 0.27 roll -0.00 yaw -0.01 sep +0.01/+0.24 | +0.5: cpo -0.005 cpf +0.027 roll -0.07 yaw -0.53
+91012 t_lift 1.39 | lift: cpf +0.017 cpo -0.011 comf +0.003 como -0.047 vf +0.04 vo +0.12 ldR 0.33 roll -0.01 yaw -0.00 sep -0.05/+0.18 | +0.5: cpo -0.005 cpf +0.025 roll -0.04 yaw -0.27
+91013 t_lift 1.59 | lift: cpf +0.020 cpo -0.023 comf +0.009 como -0.050 vf +0.03 vo +0.09 ldR 0.32 roll -0.02 yaw -0.15 sep -0.04/+0.25 | +0.5: cpo -0.003 cpf +0.022 roll -0.06 yaw -0.50
+91014 t_lift 1.38 | lift: cpf +0.034 cpo +0.007 comf +0.020 como -0.026 vf +0.04 vo +0.11 ldR 0.33 roll +0.01 yaw +0.16 sep -0.04/+0.14 | +0.5: cpo +0.002 cpf +0.025 roll -0.02 yaw -0.01
+91015 t_lift 1.80 | lift: cpf +0.017 cpo -0.008 comf +0.002 como -0.041 vf +0.05 vo +0.11 ldR 0.35 roll -0.02 yaw +0.02 sep -0.07/+0.16 | +0.5: cpo -0.000 cpf +0.026 roll -0.02 yaw -0.12
+91016 t_lift 1.30 | lift: cpf +0.027 cpo -0.010 comf +0.016 como -0.044 vf +0.04 vo +0.11 ldR 0.34 roll -0.01 yaw +0.14 sep -0.02/+0.19 | +0.5: cpo -0.005 cpf +0.027 roll -0.05 yaw -0.17
+91017 t_lift 1.80 | lift: cpf +0.012 cpo -0.022 comf -0.001 como -0.052 vf +0.04 vo +0.10 ldR 0.32 roll -0.03 yaw -0.16 sep -0.06/+0.23 | +0.5: cpo -0.005 cpf +0.021 roll -0.05 yaw -0.48
+91018 t_lift 1.57 | lift: cpf +0.029 cpo -0.022 comf +0.024 como -0.055 vf +0.01 vo +0.11 ldR 0.27 roll +0.00 yaw -0.03 sep +0.00/+0.24 | +0.5: cpo -0.007 cpf +0.031 roll -0.07 yaw -0.49
+91019 t_lift 1.29 | lift: cpf +0.013 cpo -0.022 comf -0.003 como -0.058 vf +0.05 vo +0.12 ldR 0.33 roll -0.01 yaw +0.12 sep -0.04/+0.20 | +0.5: cpo -0.009 cpf +0.028 roll -0.06 yaw -0.26
+91020 t_lift 1.40 | lift: cpf +0.020 cpo -0.003 comf +0.004 como -0.035 vf +0.05 vo +0.10 ldR 0.36 roll -0.00 yaw +0.11 sep -0.05/+0.16 | +0.5: cpo +0.000 cpf +0.028 roll -0.04 yaw -0.16
+91021 t_lift 1.63 | lift: cpf +0.015 cpo -0.022 comf +0.003 como -0.055 vf +0.04 vo +0.10 ldR 0.38 roll -0.02 yaw -0.02 sep -0.04/+0.21 | +0.5: cpo -0.005 cpf +0.024 roll -0.07 yaw -0.36
+91022 t_lift 1.40 | lift: cpf +0.030 cpo -0.020 comf +0.028 como -0.056 vf +0.01 vo +0.12 ldR 0.31 roll -0.01 yaw +0.04 sep +0.01/+0.22 | +0.5: cpo -0.005 cpf +0.031 roll -0.06 yaw -0.43
+91023 t_lift 1.36 | lift: cpf +0.008 cpo -0.023 comf -0.008 como -0.054 vf +0.05 vo +0.10 ldR 0.27 roll -0.01 yaw -0.00 sep -0.04/+0.22 | +0.5: cpo -0.007 cpf +0.024 roll -0.06 yaw -0.32
+91024 t_lift 1.52 | lift: cpf +0.024 cpo -0.020 comf +0.016 como -0.048 vf +0.02 vo +0.09 ldR 0.26 roll +0.00 yaw -0.16 sep +0.02/+0.26 | +0.5: cpo -0.005 cpf +0.021 roll -0.07 yaw -0.59
+91025 t_lift 1.64 | lift: cpf -0.001 cpo -0.006 comf -0.017 como -0.038 vf +0.05 vo +0.10 ldR 0.21 roll -0.00 yaw -0.12 sep -0.02/+0.22 | +0.5: cpo -0.002 cpf +0.013 roll -0.02 yaw -0.39
+91026 t_lift 1.53 | lift: cpf +0.012 cpo -0.024 comf -0.005 como -0.054 vf +0.05 vo +0.10 ldR 0.36 roll -0.02 yaw +0.05 sep -0.04/+0.22 | +0.5: cpo -0.007 cpf +0.024 roll -0.07 yaw -0.32
+91027 t_lift 1.72 | lift: cpf +0.013 cpo -0.020 comf -0.003 como -0.047 vf +0.05 vo +0.09 ldR 0.36 roll -0.03 yaw -0.05 sep -0.08/+0.21 | +0.5: cpo -0.000 cpf +0.023 roll -0.05 yaw -0.32
+91028 t_lift 1.25 | lift: cpf +0.006 cpo -0.018 comf -0.016 como -0.053 vf +0.07 vo +0.11 ldR 0.29 roll -0.02 yaw +0.02 sep -0.06/+0.21 | +0.5: cpo -0.003 cpf +0.020 roll -0.07 yaw -0.28
+91029 t_lift 1.62 | lift: cpf +0.010 cpo -0.012 comf -0.004 como -0.045 vf +0.04 vo +0.11 ldR 0.34 roll -0.02 yaw -0.03 sep -0.04/+0.19 | +0.5: cpo -0.003 cpf +0.025 roll -0.06 yaw -0.36
+91030 t_lift 1.31 | lift: cpf +0.025 cpo -0.016 comf +0.019 como -0.052 vf +0.02 vo +0.12 ldR 0.34 roll -0.01 yaw +0.03 sep -0.02/+0.20 | +0.5: cpo -0.006 cpf +0.028 roll -0.05 yaw -0.38
+91031 t_lift 1.31 | lift: cpf +0.010 cpo -0.020 comf -0.006 como -0.056 vf +0.05 vo +0.12 ldR 0.34 roll -0.02 yaw +0.02 sep -0.04/+0.20 | +0.5: cpo -0.007 cpf +0.025 roll -0.06 yaw -0.34
+91032 t_lift 1.74 | lift: cpf +0.012 cpo -0.011 comf -0.004 como -0.043 vf +0.05 vo +0.10 ldR 0.38 roll -0.03 yaw -0.17 sep -0.10/+0.19 | +0.5: cpo +0.004 cpf +0.019 roll -0.04 yaw -0.42
+91033 t_lift 1.71 | lift: cpf +0.016 cpo -0.022 comf +0.004 como -0.052 vf +0.04 vo +0.10 ldR 0.38 roll -0.03 yaw -0.07 sep -0.04/+0.21 | +0.5: cpo -0.001 cpf +0.021 roll -0.06 yaw -0.48
+91034 t_lift 1.67 | lift: cpf +0.019 cpo -0.013 comf +0.007 como -0.046 vf +0.04 vo +0.10 ldR 0.34 roll -0.01 yaw +0.07 sep -0.02/+0.19 | +0.5: cpo -0.004 cpf +0.027 roll -0.04 yaw -0.15
+91035 t_lift 1.26 | lift: cpf +0.032 cpo -0.024 comf +0.028 como -0.058 vf +0.01 vo +0.11 ldR 0.35 roll -0.02 yaw +0.14 sep +0.02/+0.22 | +0.5: cpo -0.008 cpf +0.033 roll -0.09 yaw -0.20
+91036 t_lift 1.66 | lift: cpf +0.027 cpo -0.019 comf +0.023 como -0.045 vf +0.01 vo +0.08 ldR 0.25 roll -0.02 yaw -0.20 sep +0.01/+0.27 | +0.5: cpo -0.005 cpf +0.021 roll -0.07 yaw -0.70
+91037 t_lift 1.71 | lift: cpf +0.031 cpo -0.022 comf +0.027 como -0.047 vf +0.01 vo +0.08 ldR 0.25 roll -0.02 yaw -0.05 sep +0.03/+0.27 | +0.5: cpo -0.008 cpf +0.026 roll -0.07 yaw -0.50
+91038 t_lift 1.83 | lift: cpf +0.023 cpo -0.001 comf +0.013 como -0.038 vf +0.03 vo +0.12 ldR 0.33 roll +0.00 yaw +0.13 sep -0.01/+0.16 | +0.5: cpo +0.001 cpf +0.028 roll -0.06 yaw -0.22
+91039 t_lift 1.48 | lift: cpf +0.010 cpo -0.022 comf -0.004 como -0.051 vf +0.05 vo +0.09 ldR 0.33 roll -0.01 yaw -0.09 sep -0.03/+0.24 | +0.5: cpo -0.004 cpf +0.021 roll -0.06 yaw -0.43
+91040 t_lift 1.34 | lift: cpf +0.025 cpo -0.019 comf +0.022 como -0.057 vf +0.01 vo +0.12 ldR 0.32 roll -0.02 yaw +0.01 sep +0.01/+0.21 | +0.5: cpo -0.005 cpf +0.029 roll -0.08 yaw -0.52
+91041 t_lift 1.51 | lift: cpf +0.030 cpo -0.023 comf +0.024 como -0.055 vf +0.02 vo +0.10 ldR 0.27 roll +0.01 yaw +0.01 sep +0.01/+0.24 | +0.5: cpo -0.008 cpf +0.028 roll -0.08 yaw -0.40
+91042 t_lift 1.43 | lift: cpf +0.025 cpo -0.018 comf +0.017 como -0.053 vf +0.03 vo +0.11 ldR 0.35 roll -0.02 yaw +0.09 sep -0.02/+0.20 | +0.5: cpo -0.006 cpf +0.030 roll -0.05 yaw -0.27
+91043 t_lift 1.29 | lift: cpf +0.011 cpo -0.021 comf -0.007 como -0.058 vf +0.06 vo +0.12 ldR 0.26 roll -0.02 yaw -0.07 sep -0.05/+0.22 | +0.5: cpo -0.002 cpf +0.023 roll -0.07 yaw -0.55
+91044 t_lift 1.33 | lift: cpf +0.036 cpo +0.010 comf +0.025 como -0.026 vf +0.03 vo +0.11 ldR 0.33 roll +0.02 yaw +0.17 sep -0.01/+0.15 | +0.5: cpo +0.008 cpf +0.023 roll +0.02 yaw +0.03
+91045 t_lift 1.52 | lift: cpf +0.026 cpo -0.021 comf +0.019 como -0.049 vf +0.02 vo +0.09 ldR 0.29 roll -0.01 yaw +0.04 sep +0.05/+0.25 | +0.5: cpo -0.008 cpf +0.024 roll -0.10 yaw -0.47
+91046 t_lift 1.47 | lift: cpf +0.024 cpo -0.021 comf +0.018 como -0.059 vf +0.02 vo +0.12 ldR 0.29 roll +0.01 yaw +0.07 sep -0.00/+0.22 | +0.5: cpo -0.006 cpf +0.029 roll -0.07 yaw -0.45
+91047 t_lift 1.45 | lift: cpf +0.015 cpo -0.025 comf -0.001 como -0.055 vf +0.05 vo +0.10 ldR 0.32 roll -0.01 yaw +0.03 sep -0.04/+0.22 | +0.5: cpo -0.006 cpf +0.025 roll -0.06 yaw -0.33
+91048 t_lift 1.68 | lift: cpf +0.019 cpo -0.022 comf +0.008 como -0.047 vf +0.03 vo +0.08 ldR 0.30 roll -0.03 yaw -0.15 sep -0.03/+0.25 | +0.5: cpo -0.003 cpf +0.022 roll -0.05 yaw -0.44
+91049 t_lift 1.54 | lift: cpf +0.026 cpo -0.012 comf +0.015 como -0.047 vf +0.04 vo +0.11 ldR 0.33 roll -0.01 yaw +0.05 sep -0.06/+0.18 | +0.5: cpo -0.005 cpf +0.029 roll -0.05 yaw -0.23
+91050 t_lift 1.76 | lift: cpf +0.014 cpo -0.022 comf -0.004 como -0.056 vf +0.06 vo +0.11 ldR 0.33 roll -0.02 yaw +0.09 sep -0.06/+0.20 | +0.5: cpo -0.006 cpf +0.026 roll -0.05 yaw -0.24
+91051 t_lift 1.58 | lift: cpf +0.015 cpo -0.022 comf +0.002 como -0.054 vf +0.04 vo +0.10 ldR 0.38 roll -0.01 yaw +0.06 sep -0.01/+0.21 | +0.5: cpo -0.005 cpf +0.026 roll -0.07 yaw -0.32
+91052 t_lift 1.75 | lift: cpf +0.017 cpo -0.021 comf +0.007 como -0.052 vf +0.03 vo +0.10 ldR 0.34 roll -0.02 yaw -0.05 sep -0.02/+0.23 | +0.5: cpo -0.003 cpf +0.022 roll -0.07 yaw -0.48
+91053 t_lift 1.36 | lift: cpf +0.025 cpo -0.014 comf +0.018 como -0.051 vf +0.02 vo +0.12 ldR 0.30 roll -0.02 yaw +0.06 sep -0.01/+0.20 | +0.5: cpo -0.005 cpf +0.029 roll -0.06 yaw -0.44
+91054 t_lift 1.38 | lift: cpf +0.031 cpo -0.019 comf +0.030 como -0.052 vf +0.01 vo +0.11 ldR 0.27 roll -0.00 yaw -0.03 sep +0.04/+0.25 | +0.5: cpo -0.007 cpf +0.026 roll -0.08 yaw -0.66
+91055 t_lift 2.12 | lift: cpf +0.029 cpo -0.017 comf +0.025 como -0.040 vf +0.01 vo +0.08 ldR 0.23 roll -0.01 yaw -0.15 sep +0.06/+0.27 | +0.5: cpo -0.006 cpf +0.019 roll -0.07 yaw -0.66
+91056 t_lift 1.36 | lift: cpf +0.027 cpo -0.016 comf +0.021 como -0.053 vf +0.02 vo +0.12 ldR 0.34 roll -0.02 yaw +0.04 sep -0.02/+0.19 | +0.5: cpo -0.006 cpf +0.030 roll -0.06 yaw -0.31
+91057 t_lift 1.70 | lift: cpf +0.025 cpo -0.021 comf +0.018 como -0.047 vf +0.02 vo +0.09 ldR 0.33 roll -0.02 yaw -0.12 sep -0.00/+0.25 | +0.5: cpo -0.005 cpf +0.024 roll -0.06 yaw -0.50
+91058 t_lift 1.29 | lift: cpf +0.025 cpo -0.013 comf +0.019 como -0.051 vf +0.02 vo +0.12 ldR 0.30 roll +0.01 yaw +0.01 sep +0.02/+0.21 | +0.5: cpo -0.007 cpf +0.029 roll -0.05 yaw -0.50
+91059 t_lift 1.72 | lift: cpf +0.016 cpo -0.021 comf +0.006 como -0.047 vf +0.03 vo +0.08 ldR 0.21 roll -0.02 yaw -0.19 sep -0.02/+0.28 | +0.5: cpo -0.007 cpf +0.016 roll -0.08 yaw -0.65

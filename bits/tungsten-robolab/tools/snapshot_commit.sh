@@ -125,7 +125,9 @@ if [ "$MODE" = only ]; then
   [ -s "$LIST" ] && git add -f --pathspec-from-file="$LIST" --pathspec-file-nul
 else
   git rm -r -q -f --cached --ignore-unmatch -- "$rel"
-  git add --pathspec-from-file="$LIST" --pathspec-file-nul
+  # -f: the list holds every tracked file, and tracked files that a global ignore rule matches (the cited *.log files)
+  # would otherwise be refused after the rm above; untracked ignored files are not in the list.
+  git add -f --pathspec-from-file="$LIST" --pathspec-file-nul
   [ -s "$FORCE" ] && git add -f --pathspec-from-file="$FORCE" --pathspec-file-nul
 fi
 TREE=$(git write-tree)

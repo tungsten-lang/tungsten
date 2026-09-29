@@ -1,0 +1,5 @@
+{"gen": 1, "used": 336, "best": 345.712, "gen_best": 345.712, "full": 16, "n": 24, "wall": 479.4, "info": {"sigma": 0.023, "rate": 1.0}}
+{"gen": 2, "used": 434, "best": 345.712, "gen_best": 345.685, "full": 0, "n": 24, "wall": 643.1, "info": {"sigma": 0.02231, "rate": 0.5}}
+{"gen": 3, "used": 506, "best": 345.712, "gen_best": 345.649, "full": 0, "n": 24, "wall": 753.2, "info": {"sigma": 0.0216407, "rate": 0.3333333333333333}}
+{"gen": 4, "used": 577, "best": 345.712, "gen_best": 345.631, "full": 0, "n": 24, "wall": 884.6, "info": {"sigma": 0.020991478999999997, "rate": 0.25}}
+{"gen": 5, "used": 646, "best": 345.712, "gen_best": 345.709, "full": 0, "n": 24, "wall": 1074.7, "info": {"sigma": 0.019522075469999997, "rate": 0.2}}

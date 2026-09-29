@@ -1,0 +1,53 @@
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `reset()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `reset()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `reset()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `step()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `step()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `step()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+90000 OK  bal1  17.60 stand  20.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@1.1 b_lift_l@2.3 b_hold_l@2.6
+90001 OK  bal1  17.40 stand  20.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@2.4 b_hold_l@2.7
+90002 OK  bal1  16.83 stand  20.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@1.1 b_lift_l@3.0 b_hold_l@3.3
+90004 OK  bal1  17.85 stand  20.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@2.0 b_hold_l@2.3
+90006 OK  bal1  17.67 stand  20.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@2.1 b_hold_l@2.5
+90008 OK  bal1  17.85 stand  20.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.9 b_lift_l@2.0 b_hold_l@2.3
+90021 BAD bal1   2.42 stand   5.33 fallen 1 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@2.7 b_hold_l@3.0 b_down_l@6.1
+90029 OK  bal1  18.11 stand  20.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@1.3 b_lift_l@1.7 b_hold_l@2.0
+90081 OK  bal1  17.43 stand  20.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@2.3 b_hold_l@2.6
+90094 OK  bal1  17.48 stand  20.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.8 b_lift_l@2.3 b_hold_l@2.6
+90100 BAD bal1   1.65 stand   3.38 fallen 1 last_label b_hold_l   | b_set@0.0 b_shift_l@0.7 b_lift_l@1.6 b_hold_l@1.9 b_down_l@4.2
+90107 OK  bal1  17.93 stand  20.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@0.9 b_lift_l@1.9 b_hold_l@2.2
+90115 OK  bal1  17.79 stand  20.00 fallen 0 last_label b_hold_l   | b_set@0.0 b_shift_l@1.2 b_lift_l@2.0 b_hold_l@2.4
+11/13 hold to 20 s

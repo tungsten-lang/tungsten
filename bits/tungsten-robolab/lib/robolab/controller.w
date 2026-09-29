@@ -32,6 +32,13 @@
     return nil if @index < 0
     @movement[@index]
 
+  # Swap the movement the track runs (opt-in: RunGearSkill's gear change hands the stride over to a
+  # movement built from another parameter set; the track's index and clock carry on, and the caller
+  # jumps to a chunk of the new movement).
+  -> set_movement(mv)
+    @movement = mv
+    self
+
   -> chunk_name
     return "-" if @index < 0
     @movement[@index].name

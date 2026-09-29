@@ -1,0 +1,1 @@
+[{"seed": 91049, "good": true, "bal1_s": 28.34, "bal1_raw": 28.34, "stand_time": 30.0, "fallen": false, "time": 30.0, "bal_l_tot": 28.35, "bal_r_tot": 0.0, "bal1_300": 0.0, "events": [["b_set", 0.01], ["b_shift_l", 0.6], ["b_lift_l", 1.51], ["b_hold_l", 1.83]]}]

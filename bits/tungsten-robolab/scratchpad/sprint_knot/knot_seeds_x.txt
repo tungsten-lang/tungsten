@@ -1,0 +1,22 @@
+run {'time': 8.0, 'fell': False, 'steady_speed': np.float64(6.412), 'peak_speed_1s': np.float64(6.537)}
+# knot seeds distilled from scratchpad/sprint_knot/x_fly.txt (9 stances of the tail)
+kn_td_thigh 0.5082
+kn_td_knee 0.5359
+kn_td_ankle -0.0846
+kn_td_whip -5.786
+kn_td_wknee -1.907
+kn_td_wankle 1.208
+kn_ms_thigh 0.1827
+kn_ms_knee 0.6602
+kn_ms_ankle -0.3469
+kn_ms_whip -5.898
+kn_ms_wknee -5.072
+kn_ms_wankle 5.512
+kn_lo_thigh -0.3907
+kn_lo_knee 0.1528
+kn_lo_ankle 0.5105
+kn_lo_whip -9.776
+kn_lo_wknee -6.023
+kn_lo_wankle 16.643
+kn_t_ms 0.0604
+kn_t_lo 0.0622

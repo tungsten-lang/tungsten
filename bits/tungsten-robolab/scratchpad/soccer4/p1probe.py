@@ -49,7 +49,9 @@ def run(job):
         mgym.make = orig_make
     return {"dx": dx, "dy": dy, "noise": noise, "seed": seed, "goal": m.get("goal"), "ball_speed": m.get("ball_speed"),
             "t_touch": m.get("t_touch"), "stand": m.get("stand_time"), "fallen": m.get("fallen"), "plant_err": m.get("plant_err"),
-            "cross_y": m.get("cross_y", m.get("pred_y"))}
+            "cross_y": m.get("cross_y", m.get("pred_y")),
+            "events": [(e[1].split(":")[-1], e[0]) for e in (m.get("events") or [])][:14],
+            "t_fall": m.get("t_fall"), "touch_body": m.get("touch_body"), "launch": m.get("launch_deg")}
 
 
 if __name__ == "__main__":
@@ -62,10 +64,15 @@ if __name__ == "__main__":
     ap.add_argument("--seeds", default="5000:5004")
     ap.add_argument("--seconds", type=float, default=4.0)
     ap.add_argument("--workers", type=int, default=3)
+    ap.add_argument("--set", default="")
+    ap.add_argument("--verbose", action="store_true")
     a = ap.parse_args()
     lo, hi = a.seeds.split(":")
     seeds = list(range(int(lo), int(hi)))
     p = read_params(a.params)
+    for kv in a.set.split(","):
+        if "=" in kv:
+            k, v = kv.split("="); p[k.strip()] = float(v)
     ctl = os.path.abspath(a.controller)
     jobs = [(p, ctl, float(dx), float(dy), float(nz), s, a.seconds)
             for dx in a.dx.split(",") for dy in a.dy.split(",") for nz in a.noise.split(",") for s in seeds]
@@ -80,4 +87,7 @@ if __name__ == "__main__":
         sp = np.mean([r["ball_speed"] or 0 for r in rs])
         st = np.mean([r["stand"] or 0 for r in rs])
         pe = [r["plant_err"] for r in rs if r["plant_err"] is not None]
-        print(f"dx {k[0]:+.2f} dy {k[1]:+.2f} noise {k[2]:.1f}: goals {g}/{len(rs)} ball {sp:5.2f} m/s stand {st:.2f} plant_err {np.mean(pe) if pe else float('nan'):.2f} fallen {sum(1 for r in rs if r['fallen'])}", flush=True)
+        if a.verbose:
+            for r in rs:
+                print("   seed", r["seed"], "goal", r["goal"], "ball", r["ball_speed"], "touch", r["t_touch"], r["touch_body"], "launch", r["launch"], "stand", r["stand"], "|", " ".join(f"{n}@{t:.2f}" for n, t in r["events"]))
+        print(f"dx {k[0]:+.2f} dy {k[1]:+.2f} noise {k[2]:.2f}: goals {g}/{len(rs)} ball {sp:5.2f} m/s stand {st:.2f} plant_err {np.mean(pe) if pe else float('nan'):.2f} fallen {sum(1 for r in rs if r['fallen'])}", flush=True)

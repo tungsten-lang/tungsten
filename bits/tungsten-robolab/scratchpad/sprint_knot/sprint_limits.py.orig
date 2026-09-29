@@ -1,0 +1,741 @@
+"""sprint_limits: how fast could a robolab body sprint under ideal control?
+
+No skill and no controller: the body's capacities are measured in isolation,
+with open-loop excitations found by CMA-ES, and combined through Weyand et
+al. 2000's top-speed model (J Appl Physiol 89:1991):
+
+    v = f x Lc x Favg/Wb            f = 1 / (tc + taer) step frequency,
+                                    Lc = v tc contact length,
+                                    Favg/Wb = (tc + taer) / tc mean vertical force
+    t_sw = tc + 2 taer              one leg's swing spans the other leg's
+                                    contact and both flights
+
+At speed v a contact lasts tc = Lc / v and the swing leg needs t_sw, so the
+stance must supply Favg/Wb = 0.5 + t_sw / (2 tc): shorter contacts need more
+force. The body's top speed is where that demand meets what its legs supply,
+i.e. where the swing-time margin tc + 2 taer - t_sw crosses zero.
+
+Tests (`python playground/sprint_limits.py <test> [--profile p95 [--parts all]] ...`):
+
+  omega   peak joint angular velocity under full activation of a joint's
+          agonists: the fibre limit (vmax x optimal length: unloaded) and
+          with the limb's own inertia and gravity (pelvis held, every other
+          joint locked, from the far end of the range)
+  speeds  at each speed v:
+          stance  one contact under ideal control: the body lands at v, the
+                  pelvis pitch and the other leg's swing are driven along
+                  parametrised paths by ideal actuators (a pitch ramp; a cubic
+                  swing-hip path), trunk and arms held; the stance leg's 11
+                  muscles follow piecewise-linear excitations (knots every
+                  30 ms from -20 to +190 ms) plus touchdown posture, hip
+                  retraction speed and landing vertical speed. Maximises the
+                  swing-time budget tc + 2 taer of a steady gait (the flight
+                  lands as fast as the take-off left: taer = 2 min(vz_lo,
+                  -vz_td) / g) with stiff penalties on net horizontal braking,
+                  peak vertical force above PEAK_GRF (5 body weights; human
+                  top-speed peaks are ~3.6-4.5) and net pitch impulse from the
+                  ideal stabiliser (a steady gait needs ~0: the champion's
+                  stances carry 0.2-1.2 N m s). `--no-grf-cap` and
+                  `--no-pitch-balance` drop those two.
+          swing   the shortest swing that follows that stance: pelvis held at
+                  lift-off height, bang-bang switching of the swing leg's
+                  flexors and extensors (CMA) from the stance's lift-off state
+                  (joint angles and velocities) to its touchdown posture,
+                  retracting, the foot clear of the floor throughout
+          and the Weyand decomposition (tc, taer, f, Lc, Favg/Wb, the force a
+          steady gait would need at this contact) with the margin.
+
+Validation: replaying a real run_v2-champion stance through the rig's locks
+and drives (exact initial state, recorded trajectories and excitations)
+reproduces its lift-off velocity to 0.005 m/s with a stabiliser impulse of
+0.45 N m s. (MuJoCo computes joint muscles' length ranges at compile time by
+moving each joint; the rig's joint locks would freeze that, so `build` takes
+the ranges from the unlocked model.)
+
+Results go to out/sprint_limits/<name>_<test>.json. Everything is idealised in
+the body's favour (pitch and swing leg driven for free, open-loop timing to
+the millisecond, planar), so the speeds are upper bounds for this body.
+"""
+
+import argparse
+import json
+import math
+import os
+import sys
+import time
+
+os.environ.setdefault("MUJOCO_GL", "cgl")
+import mujoco  # noqa: E402
+import numpy as np  # noqa: E402
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+sys.path.insert(0, HERE)
+from body import HumanoidV2Builder, HumanoidV3Builder, scene_xml, settle_fibers  # noqa: E402
+from practice import CMA  # noqa: E402
+
+G = 9.81
+OUT = os.path.join(ROOT, "out", "sprint_limits")
+UPPER_LOCKS = ["spine_flex", "l_shoulder_flex", "l_elbow", "r_shoulder_flex", "r_elbow"]
+LEFT_LEG = ["l_hip_flex", "l_knee", "l_ankle", "l_toe"]
+RIGHT_LEG = ["r_hip_flex", "r_knee", "r_ankle", "r_toe"]
+STANCE_MUSCLES = ["r_hip_flex_pos", "r_hip_flex_neg", "r_knee_pos", "r_knee_neg", "r_ankle_pos", "r_ankle_neg",
+                  "r_toe_pos", "r_toe_neg", "r_rf", "r_ham", "r_gas"]
+# a sprinter's carriage for the locked segments (rad): trunk slightly forward
+# of the pelvis, arms mid-swing, the other leg's thigh near vertical, knee tucked
+POSE = {"spine_flex": 0.25, "l_shoulder_flex": 0.0, "r_shoulder_flex": 0.0, "l_elbow": 1.6, "r_elbow": 1.6,
+        "l_hip_flex": 0.5, "l_knee": 1.2, "l_ankle": 0.0, "l_toe": 0.0}
+PEAK_GRF = 5.0  # body weights: human top-speed peaks are ~3.6-4.5 (Weyand et al. 2010; Clark & Weyand 2014)
+PITCH = 0.12  # pelvis forward pitch held by the ideal stabiliser (rad); trunk 0.37 rad forward with the spine
+
+
+def build(profile=None, parts=None, rigid=False, locks=()):
+    kw = {"profile": profile or "none", "profile_parts": parts}
+
+    def builder():  # builders are single-use (they collect muscles as they emit XML)
+        return HumanoidV2Builder("planar", **kw) if rigid else HumanoidV3Builder("planar", **kw)
+    b = builder()
+    eq = "\n    ".join(f'<joint name="lock_{j}" joint1="{j}" polycoef="0 0 0 0 0" solref="0.002 1"/>' for j in locks)
+    m = mujoco.MjModel.from_xml_string(scene_xml(b, timestep=0.001, extra_equality=eq))
+    # MuJoCo finds a joint muscle's length range at compile time by moving the
+    # joint through its range; a lock (active at compile time) collapses it and
+    # the muscle's force-length curve with it. Take the ranges from the unlocked
+    # model, which is exactly the task body.
+    free = mujoco.MjModel.from_xml_string(scene_xml(builder(), timestep=0.001))
+    m.actuator_lengthrange[:] = free.actuator_lengthrange
+    return b, m
+
+
+def _addr(m, j):
+    return m.joint(j).qposadr[0], m.joint(j).dofadr[0]
+
+
+def _lock(m, d, locks, values):
+    for j in locks:
+        e = m.equality(f"lock_{j}").id
+        m.eq_data[e][:5] = 0.0
+        m.eq_data[e][0] = values[j]
+        d.eq_active[e] = 1
+
+
+def _box_bottom(m, d, geoms):
+    """Lowest world z over the corners of box / capsule geoms."""
+    zmin = 1e9
+    for g in geoms:
+        pos, R, s = d.geom_xpos[g], d.geom_xmat[g].reshape(3, 3), m.geom_size[g]
+        if m.geom_type[g] == mujoco.mjtGeom.mjGEOM_BOX:
+            for sx in (-1, 1):
+                for sz in (-1, 1):
+                    zmin = min(zmin, pos[2] + R[2] @ np.array([sx * s[0], 0.0, sz * s[2]]))
+        else:
+            zmin = min(zmin, pos[2] - s[0] - abs(R[2, 2]) * s[1])
+    return float(zmin)
+
+
+# ---------------------------------------------------------------------------
+# omega: peak joint speeds
+
+
+OMEGA_TESTS = {  # joint, direction, agonists
+    "hip_flexion": ("r_hip_flex", +1, ["r_hip_flex_pos", "r_rf"]),
+    "hip_extension": ("r_hip_flex", -1, ["r_hip_flex_neg", "r_ham"]),
+    "knee_extension": ("r_knee", -1, ["r_knee_neg", "r_rf"]),
+    "knee_flexion": ("r_knee", +1, ["r_knee_pos", "r_ham", "r_gas"]),
+    "plantarflexion": ("r_ankle", +1, ["r_ankle_pos", "r_gas"]),
+    "dorsiflexion": ("r_ankle", -1, ["r_ankle_neg"]),
+}
+
+
+def omega_test(profile=None, parts=None, rigid=False):
+    """Fibre limit and limb-loaded peak speed for each joint action."""
+    joints = ["root_x", "root_z", "root_pitch"] + UPPER_LOCKS + LEFT_LEG + RIGHT_LEG
+    out = {}
+    for name, (joint, sign, agonists) in OMEGA_TESTS.items():
+        b, m = build(profile, parts, rigid, joints)
+        d = mujoco.MjData(m)
+        vals = {j: 0.0 for j in joints}
+        vals.update(POSE)
+        vals["root_z"] = 0.6  # feet off the floor
+        lo, hi = m.jnt_range[m.joint(joint).id]
+        start = lo + 0.02 * (hi - lo) if sign > 0 else hi - 0.02 * (hi - lo)
+        vals.update({j: 0.0 for j in RIGHT_LEG})
+        vals[joint] = start
+        if joint == "r_ankle":
+            vals["r_knee"] = 0.3
+        if joint == "r_hip_flex":
+            vals["r_knee"] = 1.0  # a swing leg's knee, partly tucked
+        for j, v in vals.items():
+            d.qpos[_addr(m, j)[0]] = v
+        _lock(m, d, [j for j in joints if j != joint], vals)
+        d.eq_active[m.equality(f"lock_{joint}").id] = 0  # the tested joint moves
+        settle_fibers(m, d)
+        ids = [m.actuator(a).id for a in agonists]
+        # fibre limit: vmax (optimal lengths / s) x optimal length, over the
+        # muscle's path coefficient for this joint (joint-equivalent rad/s)
+        fib = []
+        for a in ids:
+            L0 = (m.actuator_lengthrange[a][1] - m.actuator_lengthrange[a][0]) / (m.actuator_gainprm[a][1] - m.actuator_gainprm[a][0])
+            coef = _path_coef(m, b, m.actuator(a).name, joint)
+            fib.append(m.actuator_gainprm[a][6] * L0 / max(coef, 1e-9))
+        d.ctrl[ids] = 1.0
+        qa, va = _addr(m, joint)
+        peak, t_peak, t80 = 0.0, 0.0, None
+        target = start + sign * 0.8 * (hi - lo) * 0.96
+        while d.time < 0.6:
+            mujoco.mj_step(m, d)
+            w = sign * d.qvel[va]
+            if w > peak:
+                peak, t_peak = w, d.time
+            if t80 is None and sign * (d.qpos[qa] - target) >= 0:
+                t80 = d.time
+        out[name] = {"fibre_limit": round(float(min(fib)), 2), "limb_peak": round(float(peak), 2),
+                     "t_peak": round(t_peak, 3), "t_80pct_range": None if t80 is None else round(t80, 3)}
+    return out
+
+
+def _path_coef(m, b, muscle, joint):
+    """|d L_MTU / d q_joint| for a muscle (1 for a joint muscle on its joint)."""
+    for name, joints, *_ in getattr(b, "biarticular", []):
+        if name == muscle:
+            return abs(joints.get(joint, 0.0))
+    return 1.0
+
+
+# ---------------------------------------------------------------------------
+# stance and swing rigs
+
+
+STANCE_BOX = [("hip", 0.0, 1.3), ("knee", 0.0, 1.0), ("ankle", -0.5, 0.7), ("toe", -0.6, 0.4),
+              ("hipv", -14.0, 2.0), ("vz", -1.8, -0.1),
+              # the other leg's swing during this stance, driven kinematically
+              # (an ideal swing hip): at touchdown its hip is at sw0 flexing at
+              # sww (rad/s); a cubic brings it to rest at sw1 after swT seconds
+              ("sw0", -0.6, 0.6), ("sww", 0.0, 16.0), ("sw1", 0.4, 1.9), ("swT", 0.08, 0.4),
+              # the pelvis pitch, driven by the ideal stabiliser along a ramp:
+              # p0 at touchdown, rotating forward at pw (rad/s) through the stance
+              ("p0", -0.1, 0.4), ("pw", -1.0, 3.0)]
+# each stance muscle's excitation is piecewise linear through knots at these
+# times from touchdown (the first one also holds through the flight before it)
+KNOTS = (-0.02, 0.01, 0.04, 0.07, 0.10, 0.13, 0.16, 0.19)
+STANCE_BOX += [(f"k{i}_{mu[2:]}", 0.0, 1.0) for mu in STANCE_MUSCLES for i in range(len(KNOTS))]
+SWING_GROUPS = {  # bang-bang switching: each group is on over [on, off] after toe-off
+    "hipflex": ["r_hip_flex_pos"], "hipext": ["r_hip_flex_neg"], "kneeflex": ["r_knee_pos"],
+    "kneeext": ["r_knee_neg"], "rf": ["r_rf"], "ham": ["r_ham"], "df": ["r_ankle_neg"], "pf": ["r_ankle_pos", "r_gas"],
+}
+SWING_BOX = [(f"{g}_{e}", 0.0, 0.5) for g in SWING_GROUPS for e in ("on", "off")]
+
+
+class Rig:
+    def __init__(self, profile=None, parts=None, rigid=False, quantum=0.0):
+        self.profile, self.parts, self.rigid, self.quantum = profile, parts, rigid, quantum
+        self.st_locks = ["root_pitch"] + UPPER_LOCKS + LEFT_LEG
+        self.b, self.m = build(profile, parts, rigid, self.st_locks + ["root_x", "root_z"])
+        self.d = mujoco.MjData(self.m)
+        m = self.m
+        self.mass = float(sum(m.body_mass[1:]))
+        self.floor = m.geom("floor").id
+        self.r_geoms = {m.geom("r_foot").id, m.geom("r_toes").id}
+        self.leg_geoms = [m.geom(n).id for n in ("r_thigh", "r_shin", "r_foot", "r_toes", "l_thigh", "l_shin", "l_foot", "l_toes")]
+        # the stance rig's swing leg never touches the floor (its clearance is
+        # the swing test's business); the swing rig sets its own collisions
+        for n in ("l_thigh", "l_shin", "l_foot", "l_toes"):
+            m.geom_contype[m.geom(n).id] = 0
+            m.geom_conaffinity[m.geom(n).id] = 0
+        self.mus = {mu: m.actuator(mu).id for mu in STANCE_MUSCLES}
+        self.pelvis = m.body("pelvis").id
+        self.pitch_dof = m.joint("root_pitch").dofadr[0]
+        d = self.d
+        mujoco.mj_forward(m, d)
+        self.leg_length = float(d.body("pelvis").xpos[2] - _box_bottom(m, d, self.r_geoms))  # standing pelvis height
+
+    @staticmethod
+    def _stabiliser(d, eq_id):
+        """Torque of the pitch drive alone (its equality row; qfrc_constraint on
+        the pitch DOF would add the contact forces' moment)."""
+        n = d.nefc
+        rows = np.nonzero((d.efc_type[:n] == mujoco.mjtConstraint.mjCNSTR_EQUALITY) & (d.efc_id[:n] == eq_id))[0]
+        return float(d.efc_force[rows[0]]) if len(rows) else 0.0
+
+    def _q(self, t):
+        return round(t / self.quantum) * self.quantum if self.quantum else t
+
+    def stance(self, p, v, record=False):
+        """One contact from the flight before it to lift-off. p: dict of STANCE_BOX values."""
+        m, d = self.m, self.d
+        mujoco.mj_resetData(m, d)
+        t_pre = 0.02
+        pitch0 = p["p0"] - p["pw"] * t_pre
+        vals = dict(POSE, root_pitch=pitch0, root_x=0.0, root_z=0.0, l_hip_flex=p["sw0"] - p["sww"] * t_pre)
+        _lock(m, d, self.st_locks + ["root_x", "root_z"], vals)
+        for e in ("root_x", "root_z"):
+            d.eq_active[m.equality(f"lock_{e}").id] = 0
+        for j, val in vals.items():
+            d.qpos[_addr(m, j)[0]] = val
+        for j, key in zip(RIGHT_LEG, ("hip", "knee", "ankle", "toe")):
+            d.qpos[_addr(m, j)[0]] = p[key]
+        settle_fibers(m, d)
+        vz0 = p["vz"] + G * t_pre
+        drop = vz0 * t_pre - 0.5 * G * t_pre ** 2  # negative: the fall before touchdown
+        d.qpos[_addr(m, "root_z")[0]] += -_box_bottom(m, d, self.r_geoms) - drop - 0.001
+        d.qvel[_addr(m, "r_hip_flex")[1]] = p["hipv"]
+        d.qvel[self.pitch_dof] = p["pw"]
+        d.qvel[_addr(m, "l_hip_flex")[1]] = p["sww"]
+        # root velocity such that the whole-body COM moves at (v, vz0): the
+        # retracting stance leg carries some momentum of its own
+        d.qvel[_addr(m, "root_x")[1]] = 0.0
+        d.qvel[_addr(m, "root_z")[1]] = 0.0
+        mujoco.mj_forward(m, d)
+        mujoco.mj_subtreeVel(m, d)
+        d.qvel[_addr(m, "root_x")[1]] = v - d.subtree_linvel[self.pelvis][0]
+        d.qvel[_addr(m, "root_z")[1]] = vz0 - d.subtree_linvel[self.pelvis][2]
+        knots = np.array([self._q(k) for k in KNOTS])
+        exc = {a: np.array([p[f"k{i}_{mu[2:]}"] for i in range(len(KNOTS))]) for mu, a in self.mus.items()}
+        for a, e in exc.items():
+            d.ctrl[a] = e[0]
+            d.act[m.actuator_actadr[a]] = e[0]
+        mujoco.mj_forward(m, d)
+        mujoco.mj_subtreeVel(m, d)
+        com0 = (float(d.subtree_com[self.pelvis][0]), float(d.subtree_com[self.pelvis][2]),
+                float(d.subtree_linvel[self.pelvis][0]), float(d.subtree_linvel[self.pelvis][2]))
+        td = lo = None
+        pitch_imp = 0.0
+        grf = 0.0
+        force = np.zeros(6)
+        trace = []
+        bad = False
+        last_on = None
+        e_sw = m.equality("lock_l_hip_flex").id
+        e_p = m.equality("lock_root_pitch").id
+        T = p["swT"]
+        h0, v0, h1 = p["sw0"], p["sww"], p["sw1"]
+
+        def swing_angle(t):  # t from the nominal touchdown (the end of t_pre): cubic Hermite
+            if t <= 0:
+                return h0 + v0 * t
+            u = min(t, T) / T
+            return ((2 * u ** 3 - 3 * u ** 2 + 1) * h0 + (u ** 3 - 2 * u ** 2 + u) * T * v0
+                    + (-2 * u ** 3 + 3 * u ** 2) * h1)
+        while d.time < 0.5:
+            m.eq_data[e_p][0] = pitch0 + p["pw"] * d.time
+            m.eq_data[e_sw][0] = swing_angle(d.time - t_pre)
+            mujoco.mj_step(m, d)
+            on = False
+            fz = 0.0
+            for i in range(d.ncon):
+                c = d.contact[i]
+                if self.floor not in (c.geom1, c.geom2):
+                    continue
+                other = c.geom2 if c.geom1 == self.floor else c.geom1
+                if other in self.r_geoms:
+                    on = True
+                    mujoco.mj_contactForce(m, d, i, force)
+                    fz += force[0]
+                else:
+                    bad = True
+            if td is None and on:
+                # the COM at the start of this step, ballistic from the start
+                # of the flight (the step itself already carries the impact)
+                td = d.time - m.opt.timestep
+                q_td = (float(d.qpos[_addr(m, "r_hip_flex")[0]]), float(d.qpos[_addr(m, "r_knee")[0]]),
+                        float(d.qpos[_addr(m, "root_pitch")[0]]))
+                x0, z0, vx0, vz0 = com0
+                com_td = (x0 + vx0 * td, z0 + vz0 * td - 0.5 * G * td ** 2, vx0, vz0 - G * td)
+            if on:
+                last_on = d.time
+            if td is not None:
+                pitch_imp += self._stabiliser(d, e_p) * m.opt.timestep
+                grf = max(grf, fz)
+                tk = d.time + m.opt.timestep - td  # excitation for the next step
+                for a, e in exc.items():
+                    d.ctrl[a] = np.interp(tk, knots, e)
+                if record:
+                    trace.append((d.time - td, fz / (self.mass * G)))
+                # lift-off: 15 ms without contact (the foot box rocks heel to
+                # toe, so brief gaps inside a stance are not a lift-off)
+                if not on and d.time - last_on >= 0.015 and d.time - td > 0.01:
+                    lo = last_on + m.opt.timestep
+                    break
+            if bad or (td is None and d.time > 0.1) or d.qpos[_addr(m, "root_z")[0]] < -0.5:
+                break
+        if td is None or lo is None or bad:
+            return {"valid": False, "why": "bad contact" if bad else ("no touchdown" if td is None else "no lift-off")}
+        mujoco.mj_subtreeVel(m, d)
+        since = d.time - lo  # ballistic since lift-off
+        x_now, z_now, vx_lo, vz_now = (float(d.subtree_com[self.pelvis][0]), float(d.subtree_com[self.pelvis][2]),
+                                       float(d.subtree_linvel[self.pelvis][0]), float(d.subtree_linvel[self.pelvis][2]))
+        vz_lo = vz_now + G * since
+        z_lo = z_now - vz_lo * since + 0.5 * G * since ** 2
+        x_lo = x_now - vx_lo * since
+        x_td, z_td, vx_td, vz_td = com_td
+        tc = lo - td
+        disc = vz_now ** 2 - 2 * G * (z_td - z_now)
+        out = {"valid": True, "tc": tc, "q_td_hip": q_td[0], "q_td_knee": q_td[1], "pitch_td": q_td[2],
+               "pitch_lo": float(d.qpos[_addr(m, "root_pitch")[0]]), "vx_td": vx_td, "vz_td": vz_td, "z_td": z_td, "vx_lo": vx_lo, "vz_lo": vz_lo,
+               "z_lo": z_lo, "pitch_impulse": pitch_imp, "peak_grf": grf / (self.mass * G),
+               "Lc": x_lo - x_td, "favg": 1.0 + (vz_lo - vz_td) / (G * tc)}
+        if disc < 0:  # the flight peaks below the touchdown height: scored by the shortfall
+            out.update(taer=since + max(vz_now, 0.0) / G, vz_land=0.0, rise_short=-disc / (2 * G))
+        else:
+            out.update(taer=since + (vz_now + math.sqrt(disc)) / G, vz_land=-math.sqrt(disc), rise_short=0.0)
+        out["since_lo"] = since
+        out["q_lo"] = {j: float(d.qpos[_addr(m, j)[0]]) for j in RIGHT_LEG}
+        out["qd_lo"] = {j: float(d.qvel[_addr(m, j)[1]]) for j in RIGHT_LEG}
+        out["pelvis_z_lo"] = float(d.body("pelvis").xpos[2])
+        if record:
+            out["grf_trace"] = trace
+        return out
+
+    def swing(self, q0, qd0, target, s, pelvis_z, record=False, pitch=PITCH, flight=None):
+        """Swing from a toe-off state to the touchdown posture `target` (hip,
+        knee, ankle, hipv) with pelvis held at pelvis_z and PITCH. s: SWING_BOX
+        switch times. Returns the swing time (None if never reached) and the
+        clearance deficit (m)."""
+        m, d = self.m, self.d
+        mujoco.mj_resetData(m, d)
+        vals = dict(POSE, root_pitch=pitch, root_x=0.0, root_z=0.0)
+        _lock(m, d, self.st_locks + ["root_x", "root_z"], vals)
+        for j, val in vals.items():
+            d.qpos[_addr(m, j)[0]] = val
+        for j in RIGHT_LEG:
+            d.qpos[_addr(m, j)[0]] = q0[j]
+            d.qvel[_addr(m, j)[1]] = qd0[j]
+        settle_fibers(m, d)
+        for j in RIGHT_LEG:
+            d.qvel[_addr(m, j)[1]] = qd0[j]
+        mujoco.mj_forward(m, d)
+        dz = pelvis_z - float(d.body("pelvis").xpos[2])
+        e = m.equality("lock_root_z").id
+        z_base = d.qpos[_addr(m, "root_z")[0]] + dz
+        m.eq_data[e][0] = z_base
+        d.qpos[_addr(m, "root_z")[0]] += dz
+        # (since, vz, taer): the pelvis follows the flight after lift-off
+        # (rising at vz, back at lift-off height after taer), then holds
+
+        def rise(t):
+            if flight is None:
+                return 0.0
+            since, vz, taer = flight
+            tt = min(max(t + since, 0.0), taer)
+            return vz * tt - 0.5 * G * tt * tt - (vz * since - 0.5 * G * since * since)
+        saved = (m.geom_contype.copy(), m.geom_conaffinity.copy())
+        m.geom_contype[self.leg_geoms] = 0
+        m.geom_conaffinity[self.leg_geoms] = 0
+        sched = []
+        for g, mus in SWING_GROUPS.items():
+            on, off = self._q(s[f"{g}_on"]), self._q(s[f"{g}_off"])
+            sched.append(([m.actuator(mu).id for mu in mus], on, off))
+        hq, hv = _addr(m, "r_hip_flex")
+        kq = _addr(m, "r_knee")[0]
+        peaked = False
+        hip_max = q0["r_hip_flex"]
+        bottoms = []
+        t_sw = None
+        trace = []
+        try:
+            mujoco.mj_forward(m, d)
+            while d.time < 0.7:
+                m.eq_data[e][0] = z_base + rise(d.time + m.opt.timestep)
+                for ids, on, off in sched:
+                    d.ctrl[ids] = 1.0 if on <= d.time < off else 0.0
+                mujoco.mj_step(m, d)
+                q = d.qpos[hq]
+                hip_max = max(hip_max, q)
+                if d.qvel[hv] < 0 and hip_max > target["hip"] + 0.05:
+                    peaked = True
+                bottoms.append((d.time, _box_bottom(m, d, self.r_geoms)))
+                if record:
+                    trace.append((d.time, float(q), float(d.qpos[kq])))
+                if peaked and q <= target["hip"] and d.qvel[hv] < 0:
+                    t_sw = d.time
+                    break
+        finally:
+            m.geom_contype[:], m.geom_conaffinity[:] = saved
+        # the foot must clear the floor between 20 ms after lift-off and 40 ms
+        # before touchdown (the ends are at floor height by definition)
+        t_end = (t_sw if t_sw is not None else d.time) - 0.04
+        deficit = max([0.0] + [-z for t, z in bottoms if 0.02 <= t <= t_end])
+        res = {"t_sw": t_sw, "deficit": deficit, "hip_max": hip_max}
+        if t_sw is not None:
+            res["knee_err"] = max(0.0, d.qpos[kq] - target["knee"] - 0.1)
+            res["hipv"] = float(d.qvel[hv])
+            res["ankle"] = float(d.qpos[_addr(m, "r_ankle")[0]])
+        if record:
+            res["trace"] = trace
+        return res
+
+    def capacity(self, x, v, flags=None):
+        """Stance-capacity objective (s): the swing-time budget one contact at
+        speed v leaves in a steady gait, tc + 2 taer with the symmetric flight
+        taer = 2 min(vz_lo, -vz_td) / g (a steady flight lands as fast as the
+        take-off left, so only the part of the bounce the stance both takes
+        and returns counts), less penalties for net horizontal braking and,
+        unless switched off in `flags`, for impact spikes above PEAK_GRF and
+        for a net pitch impulse from the ideal stabiliser (a steady gait needs
+        ~0; the champion's stances carry 0.2-1.2 N m s)."""
+        flags = flags or {}
+        st = self.stance(x, v)
+        if not st["valid"]:
+            return -3.0, st
+        vz_sym = max(0.0, min(st["vz_lo"], -st["vz_td"]))
+        # constraints as stiff penalties (s): 0.1 m/s of braking or 0.5 body
+        # weights of excess peak force cost 0.1 s of the ~0.3-0.6 s budget
+        score = st["tc"] + 4.0 * vz_sym / G - 2.0 * max(0.0, st["vx_td"] - st["vx_lo"] - 0.02)
+        if flags.get("grf", True):
+            score -= 0.2 * max(0.0, st["peak_grf"] - PEAK_GRF)
+        if flags.get("pitch", True):
+            score -= 0.01 * max(0.0, abs(st["pitch_impulse"]) - 2.0)
+        st["vz_sym"] = vz_sym
+        return score, st
+
+    def cycle(self, x, v, flags=None):
+        """Joint stance + swing objective (s): the swing-time margin
+        tc + 2 taer - t_sw with the capacity and swing penalties."""
+        cap, st = self.capacity(x, v, flags)
+        if not st["valid"]:
+            return -3.0, {"stance": st}
+        budget = st["tc"] + 4.0 * st["vz_sym"] / G
+        pen_st = budget - cap
+        job = swing_job(x, st)
+        sw_score, sw = self.swing_time(x, job)
+        return cap + sw_score, {"stance": st, "swing": sw, "pen_stance": pen_st, "t_sw_eff": -sw_score}
+
+    def swing_time(self, s, job):
+        """Swing objective: minus the swing time (s), with penalties."""
+        q0, qd0, target, pelvis_z, pitch, since, flight = job
+        sw = self.swing(q0, qd0, target, s, pelvis_z, pitch=pitch, flight=flight)
+        pen = 2.0 * sw["deficit"]
+        if sw["t_sw"] is None:
+            return -1.0 - pen - 0.5 * max(0.0, target["hip"] + 0.05 - sw["hip_max"]), sw
+        sw["t_sw"] += since  # the swing began at lift-off
+        pen += 0.02 * max(0.0, sw["hipv"] - target["hipv"]) + 0.2 * sw["knee_err"]
+        return -sw["t_sw"] - pen, sw
+
+
+def swing_job(x, st):
+    """The swing rig's task after a measured stance: its lift-off state, the
+    touchdown posture it assumed, and the flight between them."""
+    vz = max(0.0, min(st["vz_lo"], -st["vz_td"]))
+    return (st["q_lo"], st["qd_lo"], {"hip": x["hip"], "knee": x["knee"], "hipv": x["hipv"]},
+            st["pelvis_z_lo"], x["p0"], st["since_lo"], (st["since_lo"], st["vz_lo"], 2.0 * vz / G))
+
+
+def unbox(z, box):
+    z = np.clip(z, 0.0, 1.0)
+    return {name: lo + zi * (hi - lo) for zi, (name, lo, hi) in zip(z, box)}
+
+
+def box(x, boxdef):
+    return np.array([np.clip((x[name] - lo) / (hi - lo), 0.0, 1.0) if hi > lo else 0.5 for name, lo, hi in boxdef])
+
+
+def default_x():
+    x = {"hip": 0.55, "knee": 0.35, "ankle": 0.0, "toe": 0.0, "hipv": -4.0, "vz": -0.6,
+         "sw0": -0.3, "sww": 4.0, "sw1": 1.3, "swT": 0.2, "p0": 0.1, "pw": 1.0}
+    for mu in STANCE_MUSCLES:
+        k = mu[2:]
+        ext = k in ("hip_flex_neg", "knee_neg", "ankle_pos", "gas", "ham", "toe_pos")
+        for i, tk in enumerate(KNOTS):
+            x[f"k{i}_{k}"] = (0.3 if tk < 0 else 1.0) if ext else 0.05
+    sw = {"hipflex": (0.0, 0.2), "hipext": (0.2, 0.5), "kneeflex": (0.0, 0.12), "kneeext": (0.15, 0.5),
+          "rf": (0.0, 0.15), "ham": (0.2, 0.5), "df": (0.0, 0.25), "pf": (0.3, 0.3)}
+    for g, (on, off) in sw.items():
+        x[f"{g}_on"], x[f"{g}_off"] = on, off
+    return x
+
+
+_RIGS = {}
+
+
+def _init_rig(profile, parts, rigid, quantum):
+    _RIGS[(profile, parts, rigid, quantum)] = Rig(profile, parts, rigid, quantum)
+
+
+def _eval(args):
+    key, kind, boxdef, z, v, extra = args
+    rig = _RIGS[key]
+    x = unbox(z, boxdef)
+    if kind == "capacity":
+        return rig.capacity(x, v, extra)
+    if kind == "cycle":
+        return rig.cycle(x, v, extra)
+    return rig.swing_time(x, extra)
+
+
+def optimise(key, kind, boxdef, x0, v, extra, gens, pop, sigma, pool=None, seed=1, log=None):
+    """CMA-ES in the normalised box; returns (best score, best x, info)."""
+    if pool is None and key not in _RIGS:
+        _init_rig(*key)
+    ev = (lambda jobs: pool.map(_eval, jobs)) if pool is not None else (lambda jobs: [_eval(j) for j in jobs])
+    z0 = box(x0, boxdef)
+    s0, i0 = ev([(key, kind, boxdef, z0, v, extra)])[0]
+    best = (s0, z0, i0)
+    es = CMA(z0, sigma, popsize=pop, seed=seed)
+    for g in range(gens):
+        Z = es.ask()
+        res = ev([(key, kind, boxdef, np.clip(z, 0, 1), v, extra) for z in Z])
+        scores = [r[0] - 0.05 * float(np.sum(np.maximum(0, -z) + np.maximum(0, z - 1))) for r, z in zip(res, Z)]
+        es.tell(Z, scores)
+        k = int(np.argmax([r[0] for r in res]))
+        if res[k][0] > best[0]:
+            best = (res[k][0], np.clip(Z[k], 0, 1), res[k][1])
+        if log and (g + 1) % 10 == 0:
+            log(f"  {kind} v {v:.2f} gen {g + 1} best {best[0]:+.4f} sigma {es.sigma:.3f}")
+    return best[0], unbox(best[1], boxdef), best[2]
+
+
+def stance_box(vz):
+    """STANCE_BOX with the landing vertical velocity pinned to vz."""
+    return [(n, vz, vz) if n == "vz" else (n, lo, hi) for n, lo, hi in STANCE_BOX]
+
+
+def weyand(v, st, t_sw):
+    """Weyand et al. 2000's decomposition of one measured stance, and the
+    swing-time budget it leaves: steady running needs a flight that lands as
+    the take-off left (taer = 2 vz_sym / g), and t_sw <= tc + 2 taer."""
+    tc = st["tc"]
+    vz = max(0.0, min(st["vz_lo"], -st["vz_td"]))
+    taer = 2.0 * vz / G
+    favg = 1.0 + 2.0 * vz / (G * tc)  # the symmetric part of the measured stance
+    out = {"v": v, "tc": round(tc, 4), "Lc": round(st["Lc"], 3), "vz_lo": round(st["vz_lo"], 3),
+           "vz_td": round(st["vz_td"], 3), "favg_measured": round(st["favg"], 3),
+           "taer_sym": round(taer, 4), "Favg_W_sym": round(favg, 3), "f_step": round(1.0 / (tc + taer), 3),
+           "swing_budget": round(tc + 2 * taer, 4), "t_sw": None if t_sw is None else round(t_sw, 4),
+           "peak_grf_W": round(float(st["peak_grf"]), 2), "pitch_impulse": round(float(st["pitch_impulse"]), 2),
+           "brake": round(st["vx_td"] - st["vx_lo"], 3),
+           "thigh_td": round(st["q_td_hip"] - st["pitch_td"], 3), "thigh_lo": round(st["q_lo"]["r_hip_flex"] - st["pitch_lo"], 3),
+           "knee_td": round(st["q_td_knee"], 3), "knee_lo": round(st["q_lo"]["r_knee"], 3)}
+    if t_sw is not None:
+        out["margin"] = round(tc + 2 * taer - t_sw, 4)
+        # Weyand's demand at this contact: Favg/Wb = 0.5 + t_sw / (2 tc)
+        out["Favg_W_needed"] = round(0.5 + t_sw / (2 * tc), 3)
+    return out
+
+
+def top_speed(runs):
+    """The speed where the swing-time margin crosses zero, from a least-squares
+    line through the grid's margins (each optimisation is good to ~0.03 s, so
+    single grid points are noisy); with its slope (s per m/s)."""
+    pts = np.array(sorted((r["v"], r["weyand"]["margin"]) for r in runs if r["weyand"].get("margin") is not None))
+    if len(pts) < 2:
+        return None, None
+    b, a = np.polyfit(pts[:, 0], pts[:, 1], 1)
+    return (float(-a / b) if b < 0 else None), float(b)
+
+
+def report(paths):
+    runs = []
+    for path in paths:
+        data = json.load(open(path))
+        runs += data["runs"]
+    runs.sort(key=lambda r: r["v"])
+    cols = ["v", "tc", "Lc", "taer_sym", "f_step", "Favg_W_sym", "Favg_W_needed", "peak_grf_W", "swing_budget", "t_sw",
+            "margin", "brake", "pitch_impulse"]
+    print(f"{', '.join(os.path.basename(p) for p in paths)}: mass {data['mass']:.1f} kg, leg {data['leg_length']:.3f} m, "
+          f"flags {data.get('flags')}")
+    print("  ".join(f"{c:>12s}" for c in cols))
+    for r in runs:
+        w = r["weyand"]
+        print("  ".join(f"{w.get(c, float('nan')) if w.get(c) is not None else float('nan'):>12.3f}" for c in cols))
+    v, slope = top_speed(runs)
+    print("ideal-control top speed (fitted margin = 0):", "n/a" if v is None else f"{v:.2f} m/s (slope {slope:+.3f} s per m/s)")
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("test", choices=["omega", "speeds", "report"])
+    ap.add_argument("--profile", default=None, help="profile name (profiles/<name>.json) or path; default: the average body")
+    ap.add_argument("--parts", default=None, help="profile parts (default: strength,speed,tendon,activation; 'all' adds anthro)")
+    ap.add_argument("--rigid", action="store_true", help="the v2 body (rigid tendons) instead of v3")
+    ap.add_argument("--v", type=float, nargs="*", default=[5.0, 6.5, 8.0, 9.5, 11.0])
+    ap.add_argument("--vz", type=float, default=None, help="pin the landing vertical velocity (m/s); default: free")
+    ap.add_argument("--gens", type=int, default=60)
+    ap.add_argument("--pop", type=int, default=24)
+    ap.add_argument("--swing-gens", type=int, default=40)
+    ap.add_argument("--cycle-gens", type=int, default=0, help="joint stance + swing refinement generations")
+    ap.add_argument("--workers", type=int, default=1)
+    ap.add_argument("--quantum", type=float, default=0.0, help="round switch times to this control period (s)")
+    ap.add_argument("--no-grf-cap", action="store_true", help="allow impact spikes above PEAK_GRF")
+    ap.add_argument("--no-pitch-balance", action="store_true", help="let the ideal stabiliser supply net pitch impulse")
+    ap.add_argument("--seed", type=int, default=1, help="CMA seed (repeat a point to measure the optimiser's spread)")
+    ap.add_argument("--name", default=None)
+    ap.add_argument("--init", help="a previous result JSON to warm-start from (its run nearest in speed)")
+    a = ap.parse_args()
+    tag = (a.profile or "p50") + ("_" + a.parts.replace(",", "+") if a.parts else "") + ("_rigid" if a.rigid else "")
+    name = a.name or tag
+    os.makedirs(OUT, exist_ok=True)
+    path = os.path.join(OUT, f"{name}_{a.test}.json")
+    t0 = time.time()
+
+    def log(msg):
+        print(f"[{time.time() - t0:6.0f}s] {msg}", flush=True)
+
+    if a.test == "report":  # --name a,b,...: merge several speed grids
+        report([os.path.join(OUT, f"{n}_speeds.json") for n in name.split(",")])
+        return
+
+    if a.test == "omega":
+        res = omega_test(a.profile, a.parts, a.rigid)
+        for k, r in res.items():
+            print(f"{k:16s} fibre limit {r['fibre_limit']:6.2f} rad/s   with limb inertia {r['limb_peak']:6.2f} rad/s "
+                  f"(t {r['t_peak']:.3f} s; 80% of range in {r['t_80pct_range']})")
+        json.dump(res, open(path, "w"), indent=1)
+        return
+
+    key = (a.profile, a.parts, a.rigid, a.quantum)
+    pool = None
+    if a.workers > 1:
+        import multiprocessing as mp
+        pool = mp.get_context("spawn").Pool(a.workers, initializer=_init_rig, initargs=key)
+    rig = Rig(*key)
+    flags = {"grf": not a.no_grf_cap, "pitch": not a.no_pitch_balance}
+    prev = json.load(open(a.init))["runs"] if a.init else []
+    runs = []
+    x_st, x_sw = default_x(), default_x()
+    for v in a.v:
+        if prev:
+            near = min(prev, key=lambda r: abs(r["v"] - v))
+            x_st, x_sw = near["x_stance"], near["x_swing"]
+        sbox = STANCE_BOX if a.vz is None else stance_box(a.vz)
+        score, x_st, st = optimise(key, "capacity", sbox, x_st if a.vz is None else dict(x_st, vz=a.vz), v, flags,
+                                   a.gens, a.pop, 0.12, pool=pool, seed=a.seed, log=log)
+        t_sw, sw, objective = None, {}, None
+        if st.get("valid"):
+            job = swing_job(x_st, st)
+            sscore, x_sw, sw = optimise(key, "swing", SWING_BOX, x_sw, v, job, a.swing_gens, 16, 0.15, pool=pool,
+                                        seed=a.seed, log=log)
+            objective = score + sscore
+            if a.cycle_gens:
+                # refine stance and swing together for the margin itself (a
+                # long contact buys budget but can cost more in the swing)
+                sep = sscore + score
+                cscore, xc, info = optimise(key, "cycle", STANCE_BOX + SWING_BOX, dict(x_st, **x_sw), v, flags,
+                                            a.cycle_gens, a.pop, 0.06, pool=pool, seed=a.seed, log=log)
+                log(f"  cycle refinement at v {v:.2f}: {sep:+.4f} -> {cscore:+.4f}")
+                if cscore > sep and info.get("swing"):
+                    x_st = {k: xc[k] for k, *_ in STANCE_BOX}
+                    x_sw = {k: xc[k] for k, *_ in SWING_BOX}
+                    st, sw, objective = info["stance"], info["swing"], cscore
+                    score = cscore + info["t_sw_eff"]  # the stance's own part
+                    sscore = -info["t_sw_eff"]
+            # the effective swing time counts its penalties (a swing that
+            # arrives late in knee extension or retraction pays in time)
+            t_sw = -sscore if sscore > -1.0 else None
+        w = weyand(v, st, t_sw) if st.get("valid") else {"v": v, "invalid": st.get("why")}
+        w["capacity_score"] = round(float(score), 4)
+        if objective is not None:  # the margin with every penalty: what was maximised
+            w["objective"] = round(float(objective), 4)
+        if sw.get("t_sw") is not None:
+            w["t_sw_raw"] = round(float(sw["t_sw"]), 4)
+            w["swing_deficit"] = round(float(sw["deficit"]), 4)
+        log(f"v {v:.2f}: {w}")
+        runs.append({"v": v, "weyand": w, "x_stance": x_st, "x_swing": x_sw,
+                     "swing_deficit": round(float(sw.get("deficit", 0.0)), 4) if sw else None})
+        json.dump({"name": name, "profile": a.profile, "parts": a.parts, "rigid": a.rigid, "flags": flags,
+                   "vz_landing": a.vz, "quantum": a.quantum, "mass": rig.mass, "leg_length": rig.leg_length,
+                   "runs": runs}, open(path, "w"), indent=1)
+    if pool is not None:
+        pool.close()
+
+
+if __name__ == "__main__":
+    main()

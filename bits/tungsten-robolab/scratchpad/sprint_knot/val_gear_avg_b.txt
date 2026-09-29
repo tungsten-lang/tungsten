@@ -1,0 +1,1 @@
+gear_avg_b: n 40 falls 0 fall seeds [] mean peak 6.047 min 6.032

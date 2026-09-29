@@ -1,0 +1,67 @@
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `reset()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `reset()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `step()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `step()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+91000 force mean  209.3 max  215.7 contact 100.0 % dmin    -1.0 mm | bal1 6.5 stand 8.0 fallen False
+91001 force mean  229.4 max  239.2 contact 100.0 % dmin    -1.2 mm | bal1 6.5 stand 8.0 fallen False
+91002 force mean  214.5 max  219.5 contact 100.0 % dmin    -1.1 mm | bal1 6.3 stand 8.0 fallen False
+91003 force mean  210.5 max  236.6 contact 100.0 % dmin    -1.1 mm | bal1 5.9 stand 8.0 fallen False
+91004 force mean  208.3 max  223.6 contact 100.0 % dmin    -1.1 mm | bal1 6.1 stand 8.0 fallen False
+91005 force mean  225.4 max  233.4 contact 100.0 % dmin    -1.1 mm | bal1 6.5 stand 8.0 fallen False
+91006 force mean  211.1 max  219.1 contact 100.0 % dmin    -1.1 mm | bal1 6.6 stand 8.0 fallen False
+91007 force mean  216.0 max  231.1 contact 100.0 % dmin    -1.1 mm | bal1 6.6 stand 8.0 fallen False
+91008 force mean  206.4 max  235.2 contact 100.0 % dmin    -1.1 mm | bal1 6.5 stand 8.0 fallen False
+91009 force mean  224.4 max  231.2 contact 100.0 % dmin    -1.1 mm | bal1 6.6 stand 8.0 fallen False
+91010 force mean  221.5 max  230.8 contact 100.0 % dmin    -1.1 mm | bal1 6.6 stand 8.0 fallen False
+91011 force mean  214.6 max  223.4 contact 100.0 % dmin    -1.1 mm | bal1 6.5 stand 8.0 fallen False
+91012 force mean  207.2 max  229.5 contact 100.0 % dmin    -1.1 mm | bal1 6.1 stand 8.0 fallen False
+91013 force mean  205.7 max  214.0 contact 100.0 % dmin    -1.0 mm | bal1 6.4 stand 8.0 fallen False
+91014 force mean  210.8 max  240.4 contact 100.0 % dmin    -1.1 mm | bal1 6.4 stand 8.0 fallen False
+91015 force mean  204.2 max  236.7 contact 100.0 % dmin    -1.1 mm | bal1 6.0 stand 8.0 fallen False
+91016 force mean  216.3 max  238.1 contact 100.0 % dmin    -1.1 mm | bal1 6.6 stand 8.0 fallen False
+91017 force mean  224.3 max  236.2 contact 100.0 % dmin    -1.1 mm | bal1 6.1 stand 8.0 fallen False
+91018 force mean  211.9 max  223.7 contact 100.0 % dmin    -1.1 mm | bal1 6.3 stand 8.0 fallen False
+91019 force mean  221.6 max  228.3 contact 100.0 % dmin    -1.1 mm | bal1 6.6 stand 8.0 fallen False
+91020 force mean  222.2 max  234.1 contact 100.0 % dmin    -1.1 mm | bal1 6.6 stand 8.0 fallen False
+91021 force mean  224.3 max  233.8 contact 100.0 % dmin    -1.1 mm | bal1 6.2 stand 8.0 fallen False
+91022 force mean  213.9 max  222.9 contact 100.0 % dmin    -1.1 mm | bal1 6.5 stand 8.0 fallen False
+91023 force mean  213.2 max  236.1 contact 100.0 % dmin    -1.1 mm | bal1 6.6 stand 8.0 fallen False
+91024 force mean  213.3 max  222.4 contact 100.0 % dmin    -1.1 mm | bal1 6.4 stand 8.0 fallen False
+91025 force mean  224.3 max  237.0 contact 100.0 % dmin    -1.1 mm | bal1 6.6 stand 8.0 fallen False
+91026 force mean  218.9 max  224.3 contact 100.0 % dmin    -1.1 mm | bal1 6.4 stand 8.0 fallen False
+91027 force mean  207.2 max  219.4 contact 100.0 % dmin    -1.1 mm | bal1 6.2 stand 8.0 fallen False
+91028 force mean  235.4 max  244.5 contact 100.0 % dmin    -1.2 mm | bal1 6.6 stand 8.0 fallen False
+91029 force mean  225.0 max  239.9 contact 100.0 % dmin    -1.1 mm | bal1 6.2 stand 8.0 fallen False
+91030 force mean  208.6 max  237.6 contact 100.0 % dmin    -1.0 mm | bal1 6.5 stand 8.0 fallen False
+91031 force mean  224.2 max  232.1 contact 100.0 % dmin    -1.1 mm | bal1 6.6 stand 8.0 fallen False
+91032 force mean  208.9 max  233.9 contact 100.0 % dmin    -1.1 mm | bal1 6.1 stand 8.0 fallen False
+91033 force mean  215.3 max  221.0 contact 100.0 % dmin    -1.1 mm | bal1 6.5 stand 8.0 fallen False
+91034 force mean  209.7 max  232.8 contact 100.0 % dmin    -1.1 mm | bal1 6.6 stand 8.0 fallen False
+91035 force mean  206.8 max  238.1 contact 100.0 % dmin    -1.1 mm | bal1 6.4 stand 8.0 fallen False
+91036 force mean  202.4 max  221.5 contact 100.0 % dmin    -1.0 mm | bal1 6.2 stand 8.0 fallen False
+91037 force mean  210.3 max  225.9 contact 100.0 % dmin    -1.1 mm | bal1 6.4 stand 8.0 fallen False
+91038 force mean  209.3 max  242.1 contact 100.0 % dmin    -1.1 mm | bal1 5.9 stand 8.0 fallen False
+91039 force mean  213.6 max  220.7 contact 100.0 % dmin    -1.1 mm | bal1 6.5 stand 8.0 fallen False
+mean force 215.0 N, worst max 244.5 N, starts with contact 40/40, falls 0/40

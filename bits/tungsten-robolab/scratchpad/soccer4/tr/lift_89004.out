@@ -1,0 +1,14 @@
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `reset()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `step()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+{"time": 4.01, "plant_err": null, "t_plant": null, "plant_heel": null, "yaw_plant_deg": null, "ball_speed": 0.0, "com_x_max": 38.529, "bal1_s": 1.32, "bal_l_tot": 1.35, "bal_r_tot": 0.0, "bal_l": 1.35, "bal_r": 0.0, "bal_s": 1.35, "stand_time": 4.01, "fallen": false, "goal": 0.0, "t_touch": null, "strike_zone": null, "strike_medial_m": null, "yaw_touch_deg": null, "rmed_touch_deg": null, "n_steps": 0, "ap_best_stand": 0.532, "ap_start": 0.534}

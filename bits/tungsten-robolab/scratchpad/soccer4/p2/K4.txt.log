@@ -1,0 +1,25 @@
+{"start": "04:08:04", "args": {"init": "scratchpad/soccer4/k4_init.txt", "out": "scratchpad/soccer4/p2/K4.txt", "only": "th_back,knee_back,ankle_back,th_k1,knee_k1,ankle_k,th_k2,knee_k2,hip_snap,drv_hip,drv_knee,t_swing,t_snap,k4_t_cock,k4_tmax,add_k,k_ky,kick_dy,rot_k,g_kick,ks_dx,ks_dz,ks_pitch,drv_st,k_ay1,k_st1,k_roll,k_rolld,k_pr,k_ax_st,cp_kh,cp_ks,cp_ka,cp_x", "set": "", "controller": "bin/challengers/soccer6-k", "noise": 1.0, "w": 0.0, "dx0": 0.627, "k": 6, "gens": 40, "pop": 12, "sigma": 0.1, "workers": 4, "seconds": 6.5, "stage": "speed", "seed0": 94000, "rseed": 1, "resume": true, "note": "standing kick from the left stance, feet 0.45 m behind the ball, noise 1"}, "names": ["th_back", "knee_back", "ankle_back", "th_k1", "knee_k1", "ankle_k", "th_k2", "knee_k2", "hip_snap", "drv_hip", "drv_knee", "t_swing", "t_snap", "k4_t_cock", "k4_tmax", "add_k", "k_ky", "kick_dy", "rot_k", "g_kick", "ks_dx", "ks_dz", "ks_pitch", "drv_st", "k_ay1", "k_st1", "k_roll", "k_rolld", "k_pr", "k_ax_st", "cp_kh", "cp_ks", "cp_ka", "cp_x"]}
+{"gen": 1, "t": 135, "best": 2.469, "gen_best": 2.469, "gen_mean": 0.926, "goals_best": "0/6", "goals_max": 0, "goals_x0": "0/6", "sigma": 0.0929}
+{"gen": 2, "t": 282, "best": 3.032, "gen_best": 3.032, "gen_mean": 1.057, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.09}
+{"gen": 3, "t": 410, "best": 3.032, "gen_best": 2.314, "gen_mean": 1.238, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0879}
+{"gen": 4, "t": 540, "best": 3.177, "gen_best": 3.177, "gen_mean": 1.799, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0859}
+{"gen": 5, "t": 716, "best": 3.177, "gen_best": 2.826, "gen_mean": 1.326, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0845}
+{"gen": 6, "t": 876, "best": 3.177, "gen_best": 2.923, "gen_mean": 1.539, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0846}
+{"gen": 7, "t": 1028, "best": 3.177, "gen_best": 1.525, "gen_mean": 0.784, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0846}
+{"gen": 8, "t": 1179, "best": 3.177, "gen_best": 2.368, "gen_mean": 1.407, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0838}
+{"gen": 9, "t": 1300, "best": 3.177, "gen_best": 2.997, "gen_mean": 1.717, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0824}
+{"gen": 10, "t": 1405, "best": 3.177, "gen_best": 2.665, "gen_mean": 1.556, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0807}
+{"gen": 11, "t": 1523, "best": 3.177, "gen_best": 2.91, "gen_mean": 2.016, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0799}
+{"gen": 12, "t": 1693, "best": 3.286, "gen_best": 3.286, "gen_mean": 1.719, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0787}
+{"gen": 13, "t": 1839, "best": 3.286, "gen_best": 3.061, "gen_mean": 2.01, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0777}
+{"gen": 14, "t": 1978, "best": 3.286, "gen_best": 3.18, "gen_mean": 1.966, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0766}
+{"gen": 15, "t": 2128, "best": 3.286, "gen_best": 2.477, "gen_mean": 1.299, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0765}
+{"gen": 16, "t": 2306, "best": 3.286, "gen_best": 2.455, "gen_mean": 1.848, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0767}
+{"gen": 17, "t": 2452, "best": 3.286, "gen_best": 3.026, "gen_mean": 1.055, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0773}
+{"gen": 18, "t": 2614, "best": 3.286, "gen_best": 2.476, "gen_mean": 1.326, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0776}
+{"gen": 19, "t": 2786, "best": 3.286, "gen_best": 2.558, "gen_mean": 1.984, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0765}
+{"gen": 20, "t": 2941, "best": 3.468, "gen_best": 3.468, "gen_mean": 1.714, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0755}
+{"gen": 21, "t": 3083, "best": 3.468, "gen_best": 1.905, "gen_mean": 1.0, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0736}
+{"gen": 22, "t": 3231, "best": 3.468, "gen_best": 2.954, "gen_mean": 1.976, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0721}
+{"gen": 23, "t": 3389, "best": 3.468, "gen_best": 2.722, "gen_mean": 1.967, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0714}
+{"gen": 24, "t": 3557, "best": 3.468, "gen_best": 2.372, "gen_mean": 1.658, "goals_best": "0/6", "goals_max": 0, "goals_x0": null, "sigma": 0.0705}

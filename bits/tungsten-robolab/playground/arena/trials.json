@@ -336,6 +336,97 @@
   ],
   "task": "bat"
  },
+ "bat_power_fresh_rep": {
+  "about": "IN-REPRESENTATION PROGRESS TRIAL (batting round 2): the yardstick for controllers that keep robolab's own contraction-knot + reflex representation; the open-loop ORACLE programs of bat_power_fresh (reflex gain 0, 25.24 m/s) are ceiling-class and are NOT this trial's reference (its seed entry is the v6 knots swing). HELD OUT: athlete body, bat_power's metric (sweet-spot bat speed 6 in from the tip at contact, m/s; a miss scores 0), one pitch per seed drawn continuously (BAT_FRESH_PITCH: speed 34-40.5 m/s, crossing x -0.15..0.15 m from the plate centre, height 0.62-1.00 m, uniform; bat.py FRESH_*, the distribution of bat_power_fresh) from NEW seeds 1100-1123 (bat_power_fresh uses 1000-1023), which no swing was trained or tuned on",
+  "env": {
+   "BAT_BODY": "athlete",
+   "BAT_FRESH_PITCH": "1"
+  },
+  "higher": true,
+  "metric": "power",
+  "python": "robolab",
+  "report": [
+   "flow",
+   "quality",
+   "fair",
+   "hits"
+  ],
+  "seconds": 7.8,
+  "seeds": [
+   1100,
+   1101,
+   1102,
+   1103,
+   1104,
+   1105,
+   1106,
+   1107,
+   1108,
+   1109,
+   1110,
+   1111,
+   1112,
+   1113,
+   1114,
+   1115,
+   1116,
+   1117,
+   1118,
+   1119,
+   1120,
+   1121,
+   1122,
+   1123
+  ],
+  "task": "bat"
+ },
+ "bat_power_fresh_rep_clean": {
+  "about": "IN-REPRESENTATION PROGRESS TRIAL (batting round 2): the yardstick for controllers that keep robolab's own contraction-knot + reflex representation; the open-loop ORACLE programs of bat_power_fresh (reflex gain 0, 25.24 m/s) are ceiling-class and are NOT this trial's reference (its seed entry is the v6 knots swing). HELD OUT: athlete body, bat_power's metric (sweet-spot bat speed 6 in from the tip at contact, m/s; a miss scores 0), one pitch per seed drawn continuously (BAT_FRESH_PITCH: speed 34-40.5 m/s, crossing x -0.15..0.15 m from the plate centre, height 0.62-1.00 m, uniform; bat.py FRESH_*, the distribution of bat_power_fresh) from NEW seeds 1100-1123 (bat_power_fresh uses 1000-1023), which no swing was trained or tuned on; plus bat_power_clean's hitch-free guard: on every pitch the swing's bat_flow score must be at most 3.0 (flow_ok)",
+  "env": {
+   "BAT_BODY": "athlete",
+   "BAT_FRESH_PITCH": "1"
+  },
+  "guard": {
+   "flow_ok": true
+  },
+  "higher": true,
+  "metric": "power",
+  "python": "robolab",
+  "report": [
+   "flow",
+   "quality",
+   "fair",
+   "hits"
+  ],
+  "seconds": 7.8,
+  "seeds": [
+   1100,
+   1101,
+   1102,
+   1103,
+   1104,
+   1105,
+   1106,
+   1107,
+   1108,
+   1109,
+   1110,
+   1111,
+   1112,
+   1113,
+   1114,
+   1115,
+   1116,
+   1117,
+   1118,
+   1119,
+   1120,
+   1121,
+   1122,
+   1123
+  ],
+  "task": "bat"
+ },
  "bat_power_human": {
   "about": "human (V2) body: sweet-spot bat speed (6 in from the tip) at contact, m/s, one pitch per seed from the 18-pitch sweep; a miss scores 0",
   "env": {
@@ -1335,6 +1426,60 @@
    723,
    724,
    725
+  ],
+  "task": "dribble_btl"
+ },
+ "dribble_btl_streak_fresh32": {
+  "about": "longest run of consecutive good through-the-legs passes in 15 s on 32 FRESH starts (seeds 1101-1132, never used in any tuning): the same rules and metric as dribble_btl_streak_25 (tasks/dribble_btl.py: between the legs below the crotch, one bounce, caught legally by the other hand, nothing else hit, the dribble goes on); guards: no fall, no carry. v3 challengers run with --task dribble_btl_v3",
+  "guard": {
+   "carried": false,
+   "fell": false
+  },
+  "higher": true,
+  "metric": "btl_streak",
+  "python": "robolab",
+  "report": [
+   "btl_rate",
+   "btl_ok",
+   "btl_tried",
+   "pass_streak",
+   "gate_passes",
+   "body_hits"
+  ],
+  "seconds": 15,
+  "seeds": [
+   1101,
+   1102,
+   1103,
+   1104,
+   1105,
+   1106,
+   1107,
+   1108,
+   1109,
+   1110,
+   1111,
+   1112,
+   1113,
+   1114,
+   1115,
+   1116,
+   1117,
+   1118,
+   1119,
+   1120,
+   1121,
+   1122,
+   1123,
+   1124,
+   1125,
+   1126,
+   1127,
+   1128,
+   1129,
+   1130,
+   1131,
+   1132
   ],
   "task": "dribble_btl"
  },

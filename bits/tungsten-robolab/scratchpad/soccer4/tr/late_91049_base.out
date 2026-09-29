@@ -1,0 +1,55 @@
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `reset()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `step()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+result: {'bal1_s': 18.33, 'stand_time': 20.0, 'fallen': False}
+     t phase         roll     yaw    fyaw     cpo     cpf     vo     vf    ll    lr    pz
+  0.01 b_set       +0.002  -0.002  -0.020  -0.091  +0.042  -0.00  +0.00  0.34  0.00  0.92
+  0.51 b_set       +0.027  -0.009  +0.245  -0.086  +0.046  +0.01  -0.03  0.40  0.63  0.93
+  1.02 b_shift_l   -0.023  +0.060  -0.002  -0.075  +0.020  +0.06  +0.01  0.41  0.58  0.93
+  1.53 b_lift_l    -0.004  +0.035  -0.003  -0.010  +0.030  +0.12  +0.01  0.71  0.26  0.93
+  2.04 b_hold_l    -0.053  -0.495  -0.023  -0.001  +0.031  +0.02  +0.02  1.28  0.00  0.94
+  2.55 b_hold_l    -0.004  -0.262  -0.038  -0.006  +0.033  +0.01  +0.02  1.01  0.00  0.95
+  3.06 b_hold_l    +0.006  -0.177  -0.020  -0.004  +0.024  -0.03  +0.01  1.18  0.00  0.94
+  3.57 b_hold_l    -0.003  +0.135  -0.026  +0.006  +0.029  +0.02  +0.00  0.99  0.00  0.95
+  4.08 b_hold_l    -0.036  +0.302  -0.024  -0.012  +0.038  -0.02  +0.02  1.00  0.00  0.94
+  4.58 b_hold_l    -0.059  +0.418  -0.024  -0.005  +0.041  +0.01  +0.01  1.00  0.00  0.94
+  5.08 b_hold_l    -0.063  +0.414  -0.023  -0.005  +0.042  +0.00  +0.00  1.00  0.00  0.94
+  5.58 b_hold_l    -0.060  +0.427  -0.022  -0.001  +0.040  +0.01  -0.00  1.00  0.00  0.94
+  6.08 b_hold_l    -0.058  +0.417  -0.023  -0.002  +0.040  +0.00  -0.00  1.00  0.00  0.94
+  6.58 b_hold_l    -0.057  +0.421  -0.022  -0.001  +0.040  +0.00  -0.00  1.00  0.00  0.94
+  7.08 b_hold_l    -0.057  +0.420  -0.023  -0.001  +0.040  +0.00  -0.00  1.00  0.00  0.94
+  7.58 b_hold_l    -0.057  +0.419  -0.022  -0.001  +0.040  +0.00  +0.00  1.00  0.00  0.94
+  8.08 b_hold_l    -0.057  +0.420  -0.022  -0.000  +0.040  +0.00  -0.00  1.00  0.00  0.94
+  8.59 b_hold_l    -0.057  +0.419  -0.022  -0.000  +0.040  +0.00  -0.00  1.00  0.00  0.94
+  9.10 b_hold_l    -0.056  +0.420  -0.022  +0.000  +0.040  +0.00  -0.00  1.00  0.00  0.94
+  9.61 b_hold_l    -0.056  +0.419  -0.022  +0.000  +0.040  +0.00  -0.00  1.00  0.00  0.94
+ 10.12 b_hold_l    -0.056  +0.419  -0.022  +0.000  +0.040  +0.00  -0.00  1.00  0.00  0.94
+ 10.63 b_hold_l    -0.056  +0.419  -0.022  +0.000  +0.040  +0.00  -0.00  1.00  0.00  0.94
+ 11.14 b_hold_l    -0.056  +0.419  -0.022  +0.000  +0.040  +0.00  -0.00  1.00  0.00  0.94
+ 11.65 b_hold_l    -0.056  +0.419  -0.022  +0.000  +0.040  +0.00  -0.00  1.00  0.00  0.94
+ 12.16 b_hold_l    -0.056  +0.419  -0.022  +0.000  +0.040  +0.00  -0.00  1.00  0.00  0.94
+ 12.67 b_hold_l    -0.056  +0.419  -0.022  +0.000  +0.040  +0.00  +0.00  1.00  0.00  0.94
+ 13.18 b_hold_l    -0.056  +0.419  -0.022  +0.000  +0.040  +0.00  +0.00  1.00  0.00  0.94
+ 13.69 b_hold_l    -0.056  +0.419  -0.022  +0.000  +0.040  +0.00  -0.00  1.00  0.00  0.94
+ 14.20 b_hold_l    -0.056  +0.419  -0.022  +0.000  +0.040  -0.00  +0.00  1.00  0.00  0.94
+ 14.71 b_hold_l    -0.056  +0.419  -0.022  +0.000  +0.040  +0.00  -0.00  1.00  0.00  0.94
+ 15.22 b_hold_l    -0.056  +0.419  -0.022  +0.000  +0.040  +0.00  +0.00  1.00  0.00  0.94
+ 15.73 b_hold_l    -0.056  +0.419  -0.022  +0.000  +0.040  -0.00  -0.00  1.00  0.00  0.94
+ 16.23 b_hold_l    -0.056  +0.419  -0.022  +0.000  +0.040  +0.00  -0.00  1.00  0.00  0.94
+ 16.73 b_hold_l    -0.056  +0.419  -0.022  +0.000  +0.040  -0.00  -0.00  1.00  0.00  0.94
+ 17.23 b_hold_l    -0.056  +0.419  -0.022  +0.000  +0.040  +0.00  +0.00  1.00  0.00  0.94
+ 17.73 b_hold_l    -0.056  +0.419  -0.022  +0.000  +0.040  -0.00  -0.00  1.00  0.00  0.94
+ 18.23 b_hold_l    -0.056  +0.419  -0.022  +0.000  +0.040  +0.00  -0.00  1.00  0.00  0.94
+ 18.73 b_hold_l    -0.056  +0.419  -0.022  +0.000  +0.040  -0.00  -0.00  1.00  0.00  0.94
+ 19.23 b_hold_l    -0.056  +0.419  -0.022  +0.000  +0.040  +0.00  +0.00  1.00  0.00  0.94
+ 19.73 b_hold_l    -0.056  +0.419  -0.022  +0.000  +0.040  -0.00  -0.00  1.00  0.00  0.94

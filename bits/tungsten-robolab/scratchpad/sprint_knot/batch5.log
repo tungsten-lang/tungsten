@@ -1,0 +1,16 @@
+s5_v3_s1: ceiling (fit) 7.320110171760834, fastest positive margin 7.0
+s5_v4b_s1: ceiling (fit) 6.175182661927334, fastest positive margin 5.5
+s5_hip_omega_ext18.5_flex29_s1: ceiling (fit) 4.914336757481019, fastest positive margin 5.5
+s5_quad_x4_s1: ceiling (fit) 6.830651522322135, fastest positive margin 7.0
+s5_fvmax1.6_s1: ceiling (fit) 6.3566090941135025, fastest positive margin 6.0
+s5_fl_0.85_1.15_s1: ceiling (fit) 8.735429326287978, fastest positive margin 8.0
+s5_timeconst_x0.5_s1: ceiling (fit) 6.43023044819452, fastest positive margin 6.0
+s5_legs_mass_x0.85_s1: ceiling (fit) 5.975961538461539, fastest positive margin 5.5
+s5_hipflex_x1.5_s1: ceiling (fit) None, fastest positive margin None
+s5_hipext_x1.5_s1: ceiling (fit) 7.993607059247253, fastest positive margin 7.5
+s5_plantar_x1.5_s1: ceiling (fit) 7.656583679892097, fastest positive margin 7.0
+s5_vasti_x1.5_s1: ceiling (fit) 7.873003648155652, fastest positive margin 7.5
+s5_achilles_x2_s1: ceiling (fit) 7.096421222559483, fastest positive margin 7.0
+s5_friction2_s1: ceiling (fit) 8.049346984551933, fastest positive margin 8.0
+s5_solref0.01_s1: ceiling (fit) 5.799451553930529, fastest positive margin 5.5
+BATCH DONE

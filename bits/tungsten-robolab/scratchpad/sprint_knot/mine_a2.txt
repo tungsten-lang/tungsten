@@ -1,0 +1,1 @@
+n 40 falls 4 fall seeds [(84, 4), (89, 5), (90, 4), (105, 4)] mean peak 5.87

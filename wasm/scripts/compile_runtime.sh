@@ -3,7 +3,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 source "$ROOT/wasm/scripts/config.sh"
-OUT="$ROOT/wasm/build/rt"
+OUT="${WASM_RT_DIR:-$ROOT/wasm/build/rt}"
 mkdir -p "$OUT"
 OPT="${WASM_OPT_LEVEL:--O2}"
 LTO=""
@@ -21,7 +21,7 @@ SRCS="runtime.c tensor_bridge.c ssmr_witness.c lexchar_tables.c unicode_tables.c
 CFLAGS="--target=$WASM_TRIPLE --sysroot=$WASM_SYSROOT $OPT $LTO $WASM_FEATURE_FLAGS \
   -mllvm -wasm-enable-sjlj \
   -D_WASI_EMULATED_MMAN -D_WASI_EMULATED_SIGNAL -D_WASI_EMULATED_PROCESS_CLOCKS -D_WASI_EMULATED_GETPID \
-  -DTUNGSTEN_RUNTIME_COMPILER_IMAGE=1 -DNDEBUG -DW_SLAB_MAX_SLOTS=262144 \
+  -DTUNGSTEN_RUNTIME_COMPILER_IMAGE=1 -DNDEBUG -DW_SLAB_MAX_SLOTS=${WASM_SLAB_SLOTS:-262144} \
   -I$ROOT/wasm/compat -include $ROOT/wasm/compat/wasi_compat.h -I$ROOT/runtime \
   -fmerge-all-constants -fno-strict-aliasing -Wno-everything"
 

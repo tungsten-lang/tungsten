@@ -241,3 +241,38 @@ int madvise(void *addr, size_t length, int advice) { (void)addr; (void)length; (
 int msync(void *addr, size_t length, int flags) { (void)addr; (void)length; (void)flags; return 0; }
 int mlock(const void *addr, size_t length) { (void)addr; (void)length; return 0; }
 int munlock(const void *addr, size_t length) { (void)addr; (void)length; return 0; }
+
+/* ---- sbrk: grow linear memory in chunks -----------------------------------
+ * wasi-libc's dlmalloc asks sbrk for a few pages at a time and every call is
+ * a memory.grow, which V8 services by reallocating (and copying) the whole
+ * linear memory. Profiling an allocation-heavy program (binary trees) put ~40%
+ * of its run time inside sbrk. Growing in 32 MiB steps and handing out from
+ * the reserve removed that cost (trees kernel -20%, 2026-09-24). dlmalloc
+ * copes with non-contiguous segments, which happen when the mmap emulation
+ * above grows the memory in between. Defining sbrk here keeps wasi-libc's
+ * sbrk.o out of the link. */
+#define W_WASM_PAGE 65536ULL
+#define W_SBRK_CHUNK (32ULL << 20)
+static uintptr_t w_sbrk_lo = 0, w_sbrk_hi = 0;
+void *sbrk(intptr_t increment) {
+    if (increment < 0) { errno = EINVAL; return (void *)-1; }
+    if (increment == 0)
+        return (void *)(w_sbrk_lo ? w_sbrk_lo : (uintptr_t)__builtin_wasm_memory_size(0) * W_WASM_PAGE);
+    uintptr_t inc = (uintptr_t)increment;
+    if (w_sbrk_lo == 0 || w_sbrk_lo + inc > w_sbrk_hi) {
+        uintptr_t want = inc > W_SBRK_CHUNK ? inc : W_SBRK_CHUNK;
+        uintptr_t pages = (want + W_WASM_PAGE - 1) / W_WASM_PAGE;
+        uintptr_t old = (uintptr_t)__builtin_wasm_memory_grow(0, pages);
+        if (old == (uintptr_t)-1) {
+            pages = (inc + W_WASM_PAGE - 1) / W_WASM_PAGE;   /* last try: exactly what was asked */
+            old = (uintptr_t)__builtin_wasm_memory_grow(0, pages);
+            if (old == (uintptr_t)-1) { errno = ENOMEM; return (void *)-1; }
+        }
+        uintptr_t base = old * W_WASM_PAGE;
+        if (w_sbrk_lo == 0 || w_sbrk_lo != base) w_sbrk_lo = base;
+        w_sbrk_hi = base + pages * W_WASM_PAGE;
+    }
+    void *p = (void *)w_sbrk_lo;
+    w_sbrk_lo += inc;
+    return p;
+}

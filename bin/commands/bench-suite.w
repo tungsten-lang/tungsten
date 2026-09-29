@@ -49,6 +49,7 @@ col["go"] = "\e[38;5;44m"
 col["cr"] = "\e[38;5;213m"
 col["rb"] = "\e[38;5;197m"
 col["py"] = "\e[38;5;75m"
+col["jl"] = "\e[38;5;165m"
 
 disp = {}
 disp["w"] = "Tungsten"
@@ -58,8 +59,9 @@ disp["go"] = "Go"
 disp["cr"] = "Crystal"
 disp["rb"] = "Ruby"
 disp["py"] = "Python"
+disp["jl"] = "Julia"
 
-all_langs = ["w", "c", "rs", "go", "cr", "rb", "py"]
+all_langs = ["w", "c", "rs", "go", "cr", "rb", "py", "jl"]
 compiled = ["w", "c", "rs", "go", "cr"]
 
 BLOCK = "█"
@@ -68,7 +70,7 @@ BARW = 24
 
 # ---- benchmark catalogue --------------------------------------------------
 # section "h" = head-to-head (parity story); "t" = throughput baseline.
-benches = ["collatz", "mandelbrot", "julia", "nbody", "decimal_e", "string_scan", "array_sort", "array_fill", "string_build", "bigint_fib", "rational_harmonic"]
+benches = ["collatz", "mandelbrot", "julia", "nbody", "decimal_e", "string_scan", "array_sort", "array_fill", "string_build", "bigint_fib", "rational_harmonic", "linalg_matmul"]
 
 glyph = {}
 title = {}
@@ -153,6 +155,13 @@ desc["rational_harmonic"]  = "exact harmonic sum as a reduced fraction, 3000 ter
 work["rational_harmonic"]  = 3000
 unit["rational_harmonic"]  = "terms"
 section["rational_harmonic"] = "t"
+
+glyph["linalg_matmul"] = "▦"
+title["linalg_matmul"] = "linalg_matmul"
+desc["linalg_matmul"]  = "512×512 f32 GEMM ×8: Tensor/CBLAS/NumPy/Julia vs naive Rust/Go"
+work["linalg_matmul"]  = 1073741824
+unit["linalg_matmul"]  = "fmas"
+section["linalg_matmul"] = "h"
 
 # ---- string + integer helpers (no float division anywhere) ----------------
 -> lj(s, w)
@@ -247,6 +256,12 @@ section["rational_harmonic"] = "t"
     extra = ""
     if bench == "bigint_fib" || bench == "rational_harmonic"
       extra = " -I[gmp]/include -L[gmp]/lib -lgmp"
+    if bench == "linalg_matmul"
+      os = capture("uname -s").strip
+      if os == "Darwin"
+        extra = " -framework Accelerate"
+      else
+        extra = " -lopenblas"
     return "clang -O3 -march=native -flto -DNDEBUG \"[src]\"[extra] -o \"[out]\" >/dev/null 2>&1"
   when "rs"
     return "rustc -O -C target-cpu=native \"[src]\" -o \"[out]\" >/dev/null 2>&1"
@@ -262,6 +277,8 @@ section["rational_harmonic"] = "t"
     base = "ruby --yjit \"[src]\""
   elsif lang == "py"
     base = "python3 \"[src]\""
+  elsif lang == "jl"
+    base = "julia --startup-file=no \"[src]\""
   # timeout_prefix bounds any single run so a pathological program (e.g. a
   # quadratic string scan) can never hang the whole suite.
   timeout_prefix + base
@@ -372,7 +389,9 @@ section["rational_harmonic"] = "t"
       s = "rb"
     elsif s == "python" || s == "py3"
       s = "py"
-    if s == "w" || s == "c" || s == "rs" || s == "go" || s == "cr" || s == "rb" || s == "py"
+    elsif s == "julia"
+      s = "jl"
+    if s == "w" || s == "c" || s == "rs" || s == "go" || s == "cr" || s == "rb" || s == "py" || s == "jl"
       out.push(s)
     i = i + 1
   out
@@ -433,6 +452,7 @@ avail["go"] = have_cmd("go")
 avail["cr"] = have_cmd("crystal")
 avail["rb"] = have_cmd("ruby")
 avail["py"] = have_cmd("python3")
+avail["jl"] = have_cmd("julia")
 
 active = []
 li = 0

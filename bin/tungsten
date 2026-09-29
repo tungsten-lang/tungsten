@@ -195,6 +195,7 @@ case "$1" in
     while [ "$#" -gt 0 ]; do
       case "$1" in
         --suite)     bench_cmd="$ROOT/bin/commands/bench-suite.w" ;;
+        --linalg)    bench_cmd="$ROOT/bin/commands/bench-suite.w"; bench_args+=("linalg_matmul") ;;
         --list)      export BENCH_LIST=1 ;;
         --baseline)  export BENCH_BASELINE=1 ;;
         --compare)   export BENCH_COMPARE=1 ;;
@@ -206,6 +207,7 @@ case "$1" in
         -h|--help)
           echo "Usage: tungsten bench [primitive...] [--compare] [--baseline] [--runs N] [--list]"
           echo "       tungsten bench --suite [benchmark...] [--only LANGS] [--runs N] [--list]"
+          echo "       tungsten bench --linalg [--only LANGS] [--runs N]"
           echo "       tungsten bench bignum [--quick] [--all] [--json]"
           echo
           echo "  Default: Tungsten primitive-op velocity baseline (ops/sec). Each op is"
@@ -220,7 +222,9 @@ case "$1" in
           echo "  --list         list the primitives and exit"
           echo
           echo "  --suite        run the cross-language ALGORITHM suite instead"
-          echo "                 (Tungsten vs C/Rust/Go/Crystal/Ruby/Python)"
+          echo "                 (Tungsten vs C/Rust/Go/Crystal/Ruby/Python/Julia)"
+          echo "  --linalg       512×512 f32 GEMM head-to-head (Tensor/CBLAS/NumPy/Julia;"
+          echo "                 naive Rust/Go). Same suite harness."
           echo "  --only LANGS   (suite) comma list, e.g. w,c,rust,go"
           echo
           echo "  bignum         compare boxed immutable integer operations across Tungsten,"

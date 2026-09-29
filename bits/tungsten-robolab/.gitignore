@@ -1,12 +1,12 @@
-.venv/
+.venv
 out/
 bin/robolab
 bin/*.dSYM
 bin/*.sidemap
 __pycache__/
-.venv-myo/
+.venv-myo
 playground/cache/
-.venv-pose/
+.venv-pose
 # copyrighted reference footage and anything cut from it stays local (playground/refs/*/SOURCES.md lists it)
 playground/refs/*/clips/
 # scratch media, pid files and debug junk (the snapshot script skips the same files)

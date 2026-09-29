@@ -124,7 +124,7 @@ springs so nothing ever steps.
 | `playground/tasks/<task>.py` | scene, sensors, metrics, score and camera per task |
 | `params/<task>.txt` | practised parameters (`--params params/<task>.txt`) |
 | `playground/arena.py`, `playground/arena/` | the champion-challenger arena: `trials.json`, `champions.json`, `history.jsonl`; rules in `playground/arena/README.md` |
-| `tools/` | `snapshot_commit.sh` (commit this directory to the branch `robolab-campaign-2026-09` without touching the shared checkout), `arena_board_md.py` (the board with each champion's frozen artifacts), `check_doc_paths.py` (checks the backticked paths of a Markdown file) |
+| `tools/` | `snapshot_commit.sh` (commit this directory to the branch `robolab-campaign-2026-09` without touching the shared checkout), `land_snapshot.sh` (fast-forward or merge that branch onto `main`, healing the shared index), `arena_board_md.py` (the board with each champion's frozen artifacts), `check_doc_paths.py` (checks the backticked paths of a Markdown file) |
 | `site/progress/` | generator of the progress page (`build_progress.py` writes `progress.html`; numbers come from `champions.json`) |
 | `HANDOFF_20260929.md`, `HANDOFF_20260929_board.md` | where everything stands on 29 Sep, who owns which workstream, next steps and traps |
 
@@ -136,6 +136,11 @@ uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python mujoco n
 ./build.sh
 .venv/bin/python playground/bridge.py stand --video out/stand.mp4
 ```
+
+The recorded arena numbers assume the exact package versions in `requirements/` (MuJoCo 3.14.0 for the robolab
+bodies, MuJoCo 3.6.0 with MyoSuite 2.12.2 for the MyoChallenge tasks); `requirements/README.md` has the pinned install
+commands. Frozen champion binaries (`bin/champions/`, `bin/challengers/`) are not in git: a fresh clone can run
+`arena.py board` and `arena.py eval`, which compare against the recorded scores, but not `arena.py recheck`.
 
 ## Protocol
 
@@ -638,6 +643,329 @@ ROBOLAB_CONTROLLER=bin/challengers/long_jump_run-a8 .venv/bin/python playground/
   --params params/long_jump_run_c.txt --seeds None,1001-1007 --iters 3 --out params/x.txt
 .venv/bin/python playground/long_jump_run_render.py long_jump_elite --params params/long_jump_elite_robust2.txt \
   --controller bin/challengers/long_jump_run-a8 --seed 503 --out out/long_jump_v4
+```
+
+### Long jump, round 2 (28-29 Sep): the ideal take-off, a landing that stops rolling over, and what a fresh start does
+
+The tables above are round 1; the arena board is authoritative. Round 2 replaced the chunk take-off with the
+**ideal-control take-off** of each body's own approach state, added a learned **landing program**, and then spent a
+night finding out why the robust means stayed far below the one-start jumps.
+
+**The method** (`playground/long_jump_limits.py`; the runner's own approach state in, jump out):
+
+1. `capture` a real rollout at the start of the plant flight (`--from pen`: at the penultimate touchdown): position,
+   velocities, muscle activations and tendon fibre states, exactly.
+2. `optimise`: all 32 muscles follow open-loop excitations from that state to the take-off; sep-CMA maximises the ballistic
+   distance from the board. That is the **ideal-control ceiling** of the body from that approach: 4.93 m for the 7.02 m/s
+   p95 runner (vx 6.27, vz 2.89 m/s, contact 0.112 s), 4.25 m for the 6.56 m/s elite2 runner.
+3. `distil` the ideal into quintic contraction knots plus drive knots every 30 ms, latched on the plant touchdown (`j_ik`, `ik_*`;
+   `ik_from 1` starts the program at the penultimate touchdown) and re-optimise it over captured perturbed approaches
+   (`robust`).
+4. `handover` the program on many approaches, then `landing`: a landing program (`j_il`, `il_*`: excitation knots on their own clock,
+   latched on the first sand contact) learned by sep-CMA on the hand-over states. **ORACLE-class**: the landing table is an
+   open-loop excitation program, and so is the p95 take-off (reflex gain 0.03); the residuals added this round are sensed,
+   bounded and zero-initialised.
+
+**Arena** (all promotions paired; `long_jump_p95_robust32`, `_robust96` and `long_jump_elite2_robust32` are new trials on starts
+that no search or practice ever used, seeded with the champion they replaced):
+
+| trial | body | before | champion now | verdict |
+| --- | --- | --- | --- | --- |
+| `long_jump_p95` (1 start) | p95 | 4.895 m | **5.122 m** (feet mark, 0.37 m beyond the ballistic 4.75) | promoted three times (4.958, 5.100, 5.122): a landing program learned for this start; overfit to it by construction |
+| `long_jump_p95_robust` (16) | p95 | 3.924 m | **4.631 m**, 16/16 legal (4.30-4.79) | +0.706, p < 0.001 |
+| `long_jump_p95_robust32` (new, 32 fresh) | p95 | 3.445 m | **4.546 m**, 31/32 legal | +1.10, p < 0.001 |
+| `long_jump_p95_robust96` (new, 96 fresh) | p95 | 4.084 m (the 16-start champion, pn1) | **4.317 m**, 89/96 legal (median of the legal 4.68) | +0.234, p = 0.003 (pn2: swing-foot lag feedback) |
+| `long_jump_elite2_robust32` (new, 32 fresh) | elite2 | 3.011 m | **3.592 m**, 31/32 legal | +0.58, p = 0.001 (run-up steering 0.3, check mark +0.04 m) |
+| `long_jump_elite2_robust` (16) | elite2 | 3.936 m | 3.936 m (kept) | the steered variant scores 3.68 there and does not beat it |
+| `long_jump_v4_p95` (1 start, new) | v4 p95 | 0 (baseline: the default chunk jump) | **4.945 m** (the seat marks; 5.05 m from the take-off foot) | promoted three times (4.632 with the chunk landing; 4.901 and 4.945 with a landing program learned for this start, generations 30 and 50): the ideal-control take-off of the calibrated body's runner (ceiling 4.89 m ballistic), 44 m check mark (`long_jump_v4_p95b`) |
+| `long_jump_v4_p95_robust` (16), `_robust32` (new, 32 fresh) | v4 p95 | 0 | **2.145 m** (9/16 legal), **2.851 m** (25/32 legal) | promoted, PROVISIONAL: the one-start take-off with a practised run-up planner (`params/long_jump_v4_p95_ik2.txt`) |
+| `long_jump_v4_elite2`, `_robust` (new) | v4 elite2 | 0, 0.45 | baseline only | not built |
+
+`long_jump_p95_robust` and `_robust32` hold pn1 (`params/long_jump_p95_pn1.txt`), `_robust96` holds pn2
+(`params/long_jump_p95_pn2.txt`; on the arena's 16 starts pn2 scores 4.38 with one somersault, so pn1 keeps that trial).
+Controller: `bin/challengers/long_jump_run-b20p` / `-b20q` (frozen copies of the skill build b20). One-start jump:
+`params/long_jump_p95_ik11.txt`, `-b20t`.
+
+**A champion's 16 fixed starts hide the failure rate.** The arena scores a champion on the same 16 perturbed starts forever, and
+16 of 16 can be legal by luck: the p95 champion of 28 Sep scored 3.92 m there but 3.27 m on 96 fresh starts (90 legal: 2 stumbled in
+the run-up, 2 somersaulted, 1 fouled, 1 touched the runway after landing) and 3.44 m on 32 others; the elite2 champion scored 3.94
+there and 3.01 on 32 fresh (on 80 starts, 64 fresh and the 16, 5 landed short and 6 fouled). Judge a controller on fresh starts.
+
+**Why the robust means were far below the one-start jumps** (112 fresh starts with the p95 penultimate-touchdown program; the
+harness `handover` reproduces every class on the captured states):
+
+- **The landing rolls over: a timing problem, not a rotation-control problem.** The landing program's knots run on a clock started at
+  the hand-over; the sand only re-syncs it. A flight 0.09 m lower or 0.2 m/s slower than the ones it was learned on lands 30-50 ms
+  earlier than the program expects. The legs are still hanging when the toes touch the sand, the COM 1.0 m up and 0.1-0.2 m behind the toes,
+  and the body vaults over its feet (Ly 0 to 75-110 kg m2/s in 0.1 s, torso pitch through pi). The fix is a **ballistic-time clock**
+  (`il_tg`, `il_zl`): before the sand the program time is tg minus the COM's ballistic time to fall to zl (a flight is ballistic whatever the limbs
+  do), so the legs' tuck and reach are locked to the predicted landing. On the 32 hand-overs of the landing search the 3 roll-overs went to 0
+  for tg 0.58-0.66 (`playground/long_jump_diag.py --tgs`). The program was learned on those 32 hand-overs only and overfits the clock:
+  tg 0.70 makes 48 of 112 fresh starts somersault. On the average body's hand-overs the clock changes nothing (4 of 23 roll over
+  for another reason).
+- **A scuffing swing foot** (4 of 96 fresh starts). The plant-side toe clears the runway by 12 mm in a healthy start (site height 0.032 m; the ground
+  contact is at 0.019 m) and drags for 0.1-0.15 s in a bad one. The plant-touchdown latch (force above 0.05 body weights) fires on the scuff at
+  0.10 s, 0.14 s before the ideal touchdown; the program clock jumps ahead and runs the stance in the air. `ik_fmin 1.5` (the latch needs 1.5
+  body weights; a real plant reads 4 on its first tick, scuffs 0.2-0.94) removes the class.
+- **Weak take-offs** (vz 1.6-2.4 m/s, typical 2.7-3.0): a late stride phase, the swing foot 0.5-0.7 m behind the COM and the trunk 0.15-0.2 rad
+  forward at the penultimate touchdown (0.08 +- 0.03 typical; vz = 3.05 - 4.0 x pitch in the harness), about 10% of starts. The flight is short
+  (0.4-0.6 s) and lands with the legs hanging. A one-sided torso-pitch feedback on the free leg's hamstrings lifts vz (vz < 2.4: 10 to 1 of
+  161 mined starts) but turns those starts into forward-rotating take-offs (L +2 to +23 kg m2/s instead of -5.8 +- 2) that no landing recovers:
+  every somersault of the 112 has L above 1.7 or a take-off pitch of 0.24 rad or more. What helped is a **swing-foot lag feedback** (`ik_fx*`,
+  `ik_kf_*`, found by greedy forward selection on 119 mined approaches under penalties L <= -1.5, pitch <= 0.25, vz >= 2.55): 87 legal of 96 to
+  92 on 7001-7096, 84 to 89 on 9033-9128.
+- **Fouls** (3 of 112, 5-49 mm): the take-off foot's front lands 0.06 +- 0.05 m behind the line. A check mark 0.05 m longer (task
+  `long_jump_p95g`; `j_board_shift` and `ik_gap0` move with the board, so the run-up is identical) removes them for 0.05 m.
+- **The runner's own stumbles** (2-3%): a fall in the acceleration phase (steps of 0.9, 0.9, 0.7 m at 3.5 s); not the jump's.
+- **Elite2 has a different problem**: its run-up cannot be steered (`j_st_w 1.5` makes it fall), so the take-off foot lands 0.2-0.5 m behind
+  the line or well over it. A gentle steering (`j_st_w 0.3`; 0.6 falls) plus a check mark 0.04 m longer (`long_jump_elite2b`) lifts the fresh-start
+  mean by 0.3-0.6 m; 0.08 and 0.12 m of check mark were worse.
+
+Roll-over rates on fresh starts (somersaults per start): the 28 Sep champion 2/96 (2.1%); pn1 16/240 (6.7%: the clock and the latch alone);
+pn2 9/384 (2.3%), with 7/384 stumbles in the run-up and 368/384 legal (95.8%) on four sets of 96 fresh starts (7001-7096, 9033-9128, 9129-9224, 9225-9320:
+4.48, 4.32, 4.53, 4.58 m; mean 4.48 m, 4.67 m of the legal). The pn family jumps 1.2 m farther than the old chunk landing at the same roll-over rate. Six of the seven remaining somersaults of the
+first 192 starts take off with the trunk 0.39-0.9 rad forward (the seventh with L +9.6 kg m2/s). A short-flight landing that survives them is still open: a hand-set time-to-strike reflex
+(`il_ctau`, `il_kc_*`) rescued 2 of 5 weak hand-overs, a learned one 13 to 8 of the 56 hardest (5 to 4 of 75 held out); a pitch feedback aimed at the
+take-off trunk angle (`ik_kp_*`, tried on top of pn2) made fresh starts worse (90 legal of 96 against 93), and a full-dimension landing retrained on 64
+hand-overs of pn2's take-off (marks +0.03 held out in the harness) changed nothing in full rollouts (93 legal of 96, 4.547 m, against 94 and 4.579).
+
+**Against humans** (men; sources and levels as in round 1; D marks a value derived here):
+
+| level | distance | our body |
+| --- | --- | --- |
+| untrained woman | 3.57 +- 0.54 m | elite2: 3.59 m fresh mean, best start 4.1 |
+| untrained man | 4.95 +- 0.55 m | p95: **5.12 m** best (103%; the 62nd percentile), 4.63 m robust on the arena's 16 starts, 4.32-4.53 m on fresh starts (87-92%; the 13th-22nd percentile of untrained men) |
+| speed-matched elite jumper (an 8.30 m jumper from 6.1-6.6 m/s run-ups; Bridgett & Linthorne 2006) | 4.33-4.77 m | p95 at 6.7 m/s: 4.4-4.6 m robust, 5.1 m best: at or above |
+| high-school state qualifying | 6.07-6.65 m from 8.9 m/s | not reached |
+| NCAA D1 finals median, world record | 7.56-7.75 m, 8.95 m | not reached |
+
+Body by body (official marks, metres; "fresh" = starts no search or practice used; the arena board is authoritative):
+
+| body (runner peak) | one start | arena, 16 starts | fresh starts | human level reached |
+| --- | --- | --- | --- | --- |
+| average (p50, 5.0 m/s) | 2.47 (`long_jump_v2`) | 1.85 | not measured (48 starts: 1.86, 3 fouls) | below the untrained woman (3.57 m) |
+| elite2 (literature body, 6.56 m/s) | 4.01 | 3.94 | 3.59 (32) | the untrained woman's mean; 4.1 m on its best start |
+| p95 (v3, 7.02 m/s; 6.7 at the board) | **5.12** | **4.63** | 4.32-4.53 (96 each) | the untrained man's mean (4.95) on one start only; 87-92% of it robustly; inside the speed-matched elite jumper's range (4.33-4.77) |
+| v4 p95 (calibrated, 7.0 m/s; 6.4 at the 44 m board) | **4.945** | 2.15 (provisional) | 2.85 (32, provisional) | the untrained man's mean on one start (99.9%); the family is not robust yet |
+
+The p95 body's take-off (vz 3.0 m/s, contact 0.13 s) equals that of Willwacher et al.'s 7.27 m jumpers (vz 3.01 m/s); what it lacks is speed: 6.7 m/s at
+the board (the runner tops out at 6.9 m/s at 37-45 m and 7.0 m/s at 55 m: a longer run-up adds 0.06 m/s). The fit to the best jump,
+D = 0.88 v t_air(vz) + 0.52 m, with v the run-up speed at the board (a projection, not a measurement), needs for vz 3.0 (the model's own
+take-off) / 3.3 m/s (Bridgett & Linthorne's speed-matched jumper): 4.95 m at 6.5 / 6.1 m/s, 5.5 m at 7.3 / 6.9 m/s, 6.07 m at 8.2 / 7.7 m/s,
+6.65 m at 9.0 / 8.4 m/s, 7.56 m at 10.3 / 9.7 m/s, 8.95 m at 12.4 / 11.6 m/s. So the next level (robustly above the untrained man's mean, 5.5 m) needs a 7.3 m/s run-up at the
+board, high-school state level 8.2-9.0 m/s. The sprint work's v4 P95 body has a 10.45 m/s ideal-control ceiling; its promoted runner (`sprint_top_speed_v4_p95`, a crouched high-cadence gait, 10 of 12
+starts) tops out at 7.0 m/s, no faster than the v3 p95's, and gets 6.4 m/s at 37.5 m, 6.7 at 45 m and 6.8 at 55 m through the long jump skill. The v4
+long-jump family is started: trials `long_jump_v4_p95`, `_p95_robust`, `long_jump_v4_elite2`, `_robust` (env `ROBOLAB_CALIB=v4`, tasks
+`long_jump_v4_p95`, `long_jump_v4_p95b` with the 44 m check mark, `long_jump_v4_elite2`). The ideal-control ceiling of the v4 P95 runner from its own plant-flight
+state is 4.89 m (L <= -1.5; v3 p95: 4.93 m); distilled into knots and closed on that one start, the take-off jumps **4.632 m** in a full rollout
+(`params/long_jump_v4_p95_ik1.txt`; the chunk landing falls back onto the head) and **4.945 m** with a landing program learned for that start
+(`params/long_jump_v4_p95_ik5.txt`, generation 50 of the search, `-b20x`; 4.901 m at generation 30 in `_ik3`; promoted on the one-start trial), so the method transfers to the calibrated body. It is not robust: the run-up planner's parameters are the v3
+gait's and the take-off foot's position relative to the line has a standard deviation of 0.47 m on 32 fresh starts (v3 p95: 0.05), so half of them foul.
+Nine generations of run-up planner practice (`long_jump_run_practice.py`, official score, 12 starts) reach 25 legal of 32 fresh starts at 3.65 m (mean 2.85), with the
+same 0.5 m spread and the foot 0.66 m behind the line on average; that is what the v4 robust trials hold. What is missing is what the v3 pn family
+has: a take-off program that reads the gap to the board (the `robust` stage over many captured v4 approaches, which learns the gap knots), and a landing
+table trained on many hand-overs; the speed is what limits the human level, not the calibration.
+
+**What is next.** (1) The elite2 body: its 159 mined plant-flight states (`out/long_jump_limits/e2m_s*_capture.npz`, hand-overs `e2mh`) show the champion's take-off vz
+following the gap to the board (r = 0.79 in `playground/long_jump_mine.py`: 1.9 to 2.6 m/s), 3.71 m on the 151 legal (3 invalid, 5 fouls, no roll-over), against an
+ideal-control ceiling of 4.25 m; a `robust` stage over 40-60 of them with gap knots and a landing table on their hand-overs is the analogue of what lifted the p95 from
+3.92 to 4.63 on the arena's 16 starts (round 2 did not get to it; the machine ran at a load average above 100 for the last day). (2) The v4 family needs the same two stages plus a run-up that
+puts the foot within 0.05 m of the line. (3) Any level above the untrained man needs run-up speed: 7.3 m/s at the board for 5.5 m, 8.2 to 9.0 m/s for the high-school state
+qualifying level (table above); the v4 P95 runner's 7.0 m/s peak (6.4 to 6.8 m/s at the board) does not reach either.
+
+**Practice and the harness.** `playground/long_jump_diag.py` (a landing tick by tick; `--tgs` scans the clock), `playground/long_jump_mine.py` (approach
+features against outcomes over captured starts) and `playground/long_jump_eval.py` (full rollouts, one line per start, for starts that are not the arena's).
+The harness is not exact: take-off vx and vz differ from the full rollout by 0.2-0.4 m/s on some starts for the base program too, and a
+feedback selected in it screens candidates that full rollouts must decide. A pitfall found on the way: the take-off tables are by muscle role
+(T_ = the plant leg's side), and 4 of 161 mined starts take off with the left foot; a search that reads the tables with the first capture's side
+mirrors them wrongly for those starts (they appeared as failed take-offs). `greedyfb` builds tables and gains per capture side.
+
+```sh
+.venv/bin/python playground/long_jump_limits.py capture long_jump_p95e --params out/long_jump_run/p95pn_approach.txt \
+  --controller bin/challengers/long_jump_run-b20 --seeds 8001,8002 --name p95mn --from pen
+.venv/bin/python playground/long_jump_limits.py handover out/long_jump_run/p95pn_latch.txt --captures p95mn_s8001,p95mn_s8002 --name h
+.venv/bin/python playground/long_jump_mine.py p95mn h out/long_jump_limits/land_p95pn3.txt --tg 0.61
+.venv/bin/python playground/long_jump_limits.py greedyfb out/long_jump_run/p95pn_ik.txt --prefix p95mn --channels kp,kf \
+  --lmax=-1.5 --lw 0.3 --pmax 0.25 --pw 3 --fmin-on --delta 0.05 --out out/long_jump_run/fb.txt
+.venv/bin/python playground/long_jump_eval.py long_jump_p95_robust96 --params params/long_jump_p95_pn2.txt \
+  --controller bin/challengers/long_jump_run-b20q --task long_jump_p95g
+.venv/bin/python playground/long_jump_run_render.py long_jump_p95e --params params/long_jump_p95_ik11.txt \
+  --controller bin/challengers/long_jump_run-b20t --out out/long_jump_v5_p95_5122
+```
+
+Videos: `out/long_jump_v5_p95_5122.mp4` (the 5.12 m one-start jump: take-off, flight and landing at 1/4 speed; the jumper tumbles in the pit but no
+rule is broken; feet mark), `out/long_jump_v5_p95_robust.mp4` (the robust champion on arena start 404, 4.79 m), `out/long_jump_v5_elite2_robust.mp4`
+(the elite2 champion on fresh start 9030, 4.10 m), `out/long_jump_v5_p95_4958.*` (the intermediate 4.958 m; the hand marks), `out/long_jump_v5_p95.*` (the 4.895 m of
+round 2's first champion) and `out/long_jump_v5_v4p95.*` (the calibrated v4 P95 body, 4.945 m, the seat marks); each has a `_sheet.png` and a `_metrics.json`. The run's log is `out/long_jump_run/LOG.md`. New task modules:
+`playground/tasks/long_jump_p95g.py` (check mark 37.54 m), `playground/tasks/long_jump_elite2b.py` (38.89 m), `playground/tasks/long_jump_v4_p95.py`,
+`playground/tasks/long_jump_v4_p95b.py` (44.0 m) and `playground/tasks/long_jump_v4_elite2.py`.
+
+### Long jump, round 3 (29 Sep): the two-gear runner, steered foot placement, a take-off program that survives a fresh start
+
+Erik's goal: the best runner for the long jump, then beyond human ability, legality first (World Athletics TR 29-30). Body: v4 P95 (`ROBOLAB_CALIB=v4`, p95 profile),
+the trials of round 2 (`long_jump_v4_p95`, `_robust` 16 starts, `_robust32` 32 fresh starts) plus the new `long_jump_v4_p95_robust96` (96 fresh starts, seeds 9033-9128).
+The runner is part of the challenger, not of the trial. Label used throughout: ORACLE = open-loop excitation programs and near-open-loop knots (the take-off program's
+reflex gain is 0.46 around its excitation table, the landing table's 0.14); one-start numbers are overfit to that start by construction; only the robust trials count as the jump.
+
+**The runner.** The sprint agent's champion `sprint_top_speed_v4_p95` became RunGearSkill (`lib/robolab/skills/run_gear.w`, RunRI with gears: the stride is rebuilt from `g<k>_`
+twins of every tunable the first flight after the filtered speed reaches `g<k>_v_on`). Frozen copies for the jump: `params/lj_runner_gear_v4_p95.txt` (= `run_gear_v4_p95_c.txt`,
+29 Sep 05:37, 7.449 m/s peak, gears 2), `params/lj_runner_gear3_v4_p95.txt` (= `_e.txt`, 06:45, 7.862) and `params/lj_runner_gear4_v4_p95.txt` (= `_g.txt`, 07:53, 7.907).
+Gears 1 and 2 are identical in all three files, and gear 3 needs the filtered speed to reach 7.0 m/s, which a 44 m run-up does not: the jump reaches 6.6-6.9 m/s at the
+board (the sprint numbers are 20 s / 100 m speeds), and approach-only rollouts of the two- and three-gear params are identical start by start. The jump uses the two-gear file.
+
+**Wiring.** `LongJumpRunSkill < RunGearSkill` (was RunRISkill). `add_jump_chunks(mv)` puts the take-off, ik, il and flight chunks on a movement; it is called from `start` and from a
+`switch_gear` override, because a gear change builds a fresh stride movement (RunGearSkill#switch_gear) and swaps it under the track. Opt-in: the params-file switch `gears N`
+(plus the `g<k>_` twins); without it the run is RunRISkill's exactly. Replays with the final build (c3) are per-seed identical to the stored scores for the frozen params of all 17 current long-jump champions (`scratchpad/lj2/replay_all.py`:
+`long_jump_p95` 5.1220, `long_jump_p95_robust` 4.6305 over 16 starts, the elite and v3 P95 trials, the round-3 v4 champions) and for round 2's superseded v4 champions, start by start against their frozen binaries
+(`replay_round2.py`: one start 4.945, 16 starts 2.1452, 32 starts 2.8508, 96 starts 2.5355; 145 starts, none differs). New opt-in skill options (defaults bit-identical):
+`j_st_rnd` (rounding of the step count in the run-up plan), `j_st_up`, `j_st_zk`. Harness (`playground/long_jump_limits.py`): `robust` and `landing` train on both plant sides
+(`side_perm` / `mirror_tab`), plus `ROBOLAB_LJ_BOARD` / `_TD` / `_MARGIN` / `_DV` / `_FSCALE` options (a board-relative ideal, a fixed plant-touchdown time, a foul margin,
+a faster or stronger body); single-side runs are unchanged (checked against the HEAD version of the file).
+
+**Speed at the board** (approach only, `j_run 1`, last 5 m before the check mark, 17 starts, no falls in any cell):
+
+| check mark | RunRI (round 2's runner) | two-gear as frozen (switch 6.5 m/s) | two-gear, `g2_v_on` 5.0 |
+| --- | --- | --- | --- |
+| 30 m | 6.02 | 6.02 | 6.22 |
+| 35 m | 6.28 | 6.28 | 6.48 |
+| 40 m | 6.47 | 6.47 | 6.69 |
+| 44 m | 6.59 | 6.62 | **6.83** |
+| 45 m | 6.62 | 6.67 | 6.86 |
+
+The frozen switch at 6.5 m/s comes at 40 m, so the two-gear runner is RunRI up to there. Moving it to 5.0 m/s gives +0.22 m/s (4.5: +0.03 more; 4.0: 3 falls in 8). Speed profile with it (5 m windows): 5.1 m/s at 15 m,
+6.0 at 25, 6.6 at 35, 6.9 at 44, 7.05 at 50, 7.25 at 65: a longer run-up adds about 0.1 m/s per 5 m between 45 and 55 m and 0.05 beyond. What the jump does with it: the upright final approach that the take-off needs costs 0.2 m/s
+(torso servo over the last 12.6 m: 6.61 m/s against 6.83 without), so the jump's last-5-m speed is 6.6 m/s.
+
+**Ideal-control ceiling, recomputed for this runner** (`long_jump_limits.py optimise`: open-loop excitations of all 32 muscles from the captured penultimate-touchdown state,
+forward angular momentum at take-off <= -1.5 kg m2/s; ORACLE-class, one start). From the nominal start of the first approach (COM 6.59 m/s at the penultimate touchdown, 120k evaluations):
+**5.219 m ballistic from the take-off foot** (vx 6.32, vz 3.10 m/s, 26.1 deg, contact 0.088 s, foot 0.17 m behind the line: 5.05 m from the line). Round 2's ceiling for the calibrated body was 4.89 m from a
+6.37 m/s state, the v3 P95's 4.93 m from 6.8-6.9 m/s. The estimate moves by about +-0.2 m between neighbouring starts (the search plateaus): 5.03 (upright approach, other steering), 4.96 (natural run), 4.83 (trunk
+forward), so read it as 5.0-5.2 m. Board-relative (foot held 3 cm behind the line) the same state gives 5.13 m from the line. What the ceiling depends on (same state, 60k evaluations from the same start;
+`ROBOLAB_LJ_DV`, `ROBOLAB_LJ_FSCALE`): a body moving 0.4 / 0.8 m/s faster: 5.22 / 5.52 m (vs 5.03: +0.5 to +0.6 m per m/s); muscles 20 / 40 % stronger: 5.43 / 5.91 m (+0.39 / +0.88 m).
+
+**Foot placement was the v4 jump's real problem.** Round 2's planner had `j_st_w` 0.09, i.e. no steering. The plant foot's offset from the line then was -1.01 x (the penultimate toe's gap error) - 0.02
+(residual sd 0.036: the take-off program did not compensate), and the penultimate touchdown's position varies over a full step (1.6 m) from start to start: the stride pattern's phase at 44 m does (the k-th
+touchdown's position has sd 0.4-0.7 m from the second step on; the first foot is left on 28 of 49 starts, right on 21). On 32 fresh starts that was 13 legal, mean 1.58 m. The hip-nudge steering
+(`j_st_w` 0.5, `j_st_max` 0.25, `j_st_n` 5) holds the penultimate gap to sd 0.13-0.17 m; its price is a stumble in 1-3 % of starts. Two things about it: a request to LENGTHEN the next step comes out as a
+shorter one (arena starts 404 and 416: plan 1.83 m against a stride of 1.65, step 1.45 m: a forward reach makes the foot touch down early), shortening works, so the starts that need lengthening ended with the
+penultimate touchdown 0.2-0.5 m too far from the line and no program takes those; `j_st_rnd` 0.75 rounds the number of steps left up, so the plan shortens instead (gap errors on 80 starts -0.38..+0.18 against -0.34..+0.32).
+Options that did not steer: hop height (`j_st_zk`), a speed clamp (`g2_v_cap` with `g2_k_brake`), gentler or longer horizons (`j_st_n` 7-10, caps 0.1-0.15), larger caps. Other steering settings give more invalid or
+foul starts (125 captured approaches each, fixed program, legal mean: 3.2-3.8 m against 4.0 m for the chosen one).
+
+**Take-off program (`j_ik` from the penultimate touchdown; `long_jump_limits.py robust`).** The program is trained over captured approach states (board-relative ballistic distance, fouls and invalid take-offs
+penalised), and the gap knots let it place the plant foot whatever the penultimate gap: on 125 captured approaches its plant offset is -0.05 m with sd 0.05 against a gap sd of 0.15 (slope -0.04..-0.26, was -1).
+Two lessons. (1) The approach decides whether one program is enough. With the natural run (torso servo only after the penultimate touchdown, 6.81 m/s over the last 5 m) 9 of 20 training starts were invalid:
+all the fast ones (COM 6.9-7.1 m/s at the penultimate touchdown, gap 1.64-1.79 m: the plant comes 0.07 s early, the free leg is still down and its toes touch the runway 0.03-0.05 s after the take-off). With the upright final
+approach (torso servo over the last 12.6 m, 6.60 m/s) all 20 were valid. The upright approach costs 0.2 m/s and is what a single program can be robust to. (2) Training on both plant sides (mirrored role tables) and on a
+gap-stratified set (32 of the 125 approaches captured from seeds 8001-8128) took the held-out harness score to 86 valid of 93 (3 fouls), mean 4.39 m board-relative. The price of one program (the first robust program on its nominal start): it takes off with vz 2.4 m/s where
+its own ideal has 3.1 (harness 4.13 m against 4.86 m), and the fast short-gap starts (gap 1.6-1.8 m, COM 6.7-6.9 m/s) get vz 1.4-1.8 m/s: keeping the foot behind the line from a short gap takes a shorter plant step. The harness predicts the
+full rollouts start by start (the harness-invalid starts of the 16 arena starts are the fell-in-run ones; the valid ones jump within -0.1..+0.3 m of their harness distance).
+What did not work: interpolating two ideals (nominal and short gap) into a linear-in-gap program (the short-gap ideal from the foot-based search put the foot 0.45 m over the line, the board-relative one stopped at 3.1 m); a swing-foot lag feedback by
+greedy selection (the v3 recipe: the invalid count did not fall); a chunk take-off as a fallback for the invalid starts (1 of 12 legal).
+
+**Landing.** The landing program (`il_*`, excitation knots on the ballistic-time clock `il_tg`) was learned on 62 hand-overs (32 starts and a variant each), then 30 generations over all 117 valid hand-overs of the captured approaches, both sides: the
+chunk landing rolls over on every short-flight hand-over (vz 1.4-1.9 m/s), the table lands 114-116 of the 117 (marks 4.2-4.9 m from the line in the harness). It took the legal count on 96 fresh starts from 60 to 72 (the take-off unchanged).
+
+**Arena** (all promotions paired; `long_jump_v4_p95_robust96` is new: 96 fresh starts, seeds 9033-9128, seeded with round 2's champion). ORACLE-class programs throughout:
+
+| trial | body | before | champion now | verdict |
+| --- | --- | --- | --- | --- |
+| `long_jump_v4_p95` (1 start) | v4 P95 | 4.945 m | **5.209 m** (feet mark, ballistic 5.035, foot 0.07 m behind the line) | promoted three times: 5.065 (this start's ideal-control program, chunk landing: head mark), 5.166 (+ a learned landing table), 5.209 (a board-relative ideal, chunk landing); overfit to the start by construction |
+| `long_jump_v4_p95_robust` (16) | v4 P95 | 2.145 m (9 legal) | **3.412 m**, 12 of 16 legal (`params/long_jump_v4_gear_final1.txt`) | +1.27, p = 0.047 |
+| `long_jump_v4_p95_robust32` (32 fresh) | v4 P95 | 2.851 m (25 legal) | **4.501 m**, 31 of 32 legal (`final1`) | 3.923 (milestone M1, p = 0.005), then 4.501 (+0.58, p = 0.002) |
+| `long_jump_v4_p95_robust96` (96 fresh, new) | v4 P95 | 2.536 m (baseline) | **3.724 m**, 77 of 96 legal (`params/long_jump_v4_gear_final2.txt`) | 3.471 (M1, p < 0.001), then 3.724 (+0.25, p = 0.039); `final1` scored 3.659 there (p = 0.14) |
+
+Controller for all of them: `bin/challengers/long_jump_run-c3` (skill build c3; the arena froze copies under `bin/champions/`). `arena.py recheck` reproduces every long-jump champion, per seed, with its frozen binary.
+
+**Per start** (official mark in m; a failed jump scores 0; the class of each failure). `final1`, the 16 arena starts (12 legal, mean 3.412; mean of the legal 4.549, 4.10-4.84):
+401 4.25; 402 4.68; 403 4.59; 404 fell in the run; 405 4.84; 406 4.53; 407 somersault; 408 4.77; 409 foul (27 mm); 410 4.61; 411 4.75; 412 4.10; 413 4.48; 414 4.63; 415 4.35; 416 somersault.
+`final1`, the 32 fresh starts (31 legal, mean 4.501; legal mean 4.646, 3.91-4.86): 9001 4.38; 9002 4.50; 9003 4.84; 9004 4.79; 9005 4.74; 9006 4.37; 9007 4.46; 9008 4.68; 9009 4.86; 9010 somersault; 9011 4.85; 9012 4.74; 9013 4.62;
+9014 4.58; 9015 4.85; 9016 4.69; 9017 4.60; 9018 4.86; 9019 4.75; 9020 4.80; 9021 4.07; 9022 4.54; 9023 4.75; 9024 4.82; 9025 4.58; 9026 4.82; 9027 4.58; 9028 4.65; 9029 3.91; 9030 4.81; 9031 4.72; 9032 4.81.
+The 96 fresh starts with `final2` (seeds 9033-9128): 77 legal, mean 3.724, legal mean 4.643; the 19 failures are 11 fell in the run (9033, 9045, 9047, 9054, 9055, 9058, 9060, 9086, 9105, 9119, 9128), 6 somersaults (9064, 9065, 9083, 9093, 9098, 9112) and 2 fouls (9075, 9126). Every start of `final1` on the 16, 32 and 96
+is in `out/long_jump_run/round3_final1_per_start.txt`, of `final2` in `round3_final2_per_start.txt` (same directory).
+More fresh starts (`final1` with the 0.03 shift; the aim shift of `final2` was chosen on the first set, the others were not used in the choice): seeds 7001-7096: 3.726 m (79 legal: fell in run 12, somersault 4, foul 1) with `final1`, 3.958 (83 legal) with `final2`;
+seeds 9129-9224: 4.050 (84 legal: fell 7, foul 2, somersault 3) with `final1`, **4.230 (87 legal: fell 6, somersault 3; legal median 4.70 m, 10th percentile 4.30, best 4.90)** with `final2`.
+`final2` pooled over the 336 starts above: 3.97 m (`final1`: 3.86).
+The aim shift itself is within noise. Paired over the same starts `final2` beats `final1` by +0.11 m on all 336 (p = 0.12) and by +0.06 m on the 240 starts not used to choose it (p = 0.44); per set: 16 arena starts
+2.887 against 3.412 (starts 406 and 415 fail), 32: 4.514 against 4.501 (p = 0.32 in the arena), 96: 3.724 against 3.659 (p = 0.54), 7001-7096 (where the shift was chosen) +0.23, 9129-9224 +0.18 (p = 0.13). `final2` is the 96 champion because it beat
+the previous champion M1 where `final1` did not (p = 0.039 against 0.14); `final1` stays the 16 and 32 champion. `ik_fmin 1.5` (the plant-touchdown latch at 1.5 body weights that round 2's v3 champion has; `params/long_jump_v4_gear_final3.txt` = `final2` + it)
+changes 12 of 288 fresh starts, 8 of them for the better: +0.04 m on each of 7001-7096 and 9129-9224, +0.13 on the arena 96 (80 legal, p = 0.12), nothing on the 16 and 32. Not significant, not adopted.
+
+**480 never-used starts** (seeds 10001-10480, controller c3, nothing was chosen on them; `scratchpad/lj2/big_eval.sh`, per-start files `scratchpad/lj2/eval_big_*.json`):
+
+| params | mean (95 % CI) | legal | fell in the run | somersault | foul | legal marks: median, 10th-90th percentile, best |
+| --- | --- | --- | --- | --- | --- | --- |
+| `final2` (96 champion) | 4.001 +- 0.144 m | 415 (86.5 %) | 54 | 10 | 1 | 4.70 m, 4.38-4.83, 4.92 |
+| `final1` (16 and 32 champion) | 3.956 +- 0.146 m | 411 (85.6 %) | 49 | 17 | 3 | 4.68 m, 4.34-4.82, 4.93 |
+| `final3` (`final2` + `ik_fmin 1.5`, not adopted) | 4.026 +- 0.140 m | 419 (87.3 %) | 45 | 15 | 1 | 4.70 m, 4.37-4.83, 4.92 |
+| `final1` without the check-mark shift (`j_board_shift 1.11`, `ik_gap0 1.847`) | 3.603 +- 0.175 m | 371 (77.3 %) | 47 | 14 | 48 | 4.73 m, 4.40-4.86, 4.95 |
+
+Paired: `final2` against `final1` +0.045 m (p = 0.42), `final3` against `final2` +0.025 m (16 starts differ, p = 0.10): the aim shift and the latch are noise at this sample size. The 0.03 m check-mark shift is not: +0.353 m (`final1` against no shift, p < 0.0001; 48 fouls become 3,
+the legal marks give up 0.04 m). **This is the number to quote for the robust jump: a mean of 4.0 m over fresh starts, 86.5 % of them legal; the legal jumps have median 4.70 m (95 % of the untrained man's mean) and reach 4.92 m; 11 % of the starts fall in the run and 2 % somersault.**
+If the fell-in-run starts jumped like the rest the mean would be the legal mean, 4.63 m.
+
+**What limits the jump, and what would change it.**
+- *Speed at the board.* The jump reaches 6.6 m/s over the last 5 m (6.83 m/s if it did not have to straighten up). Each 1 m/s is worth 0.5-0.6 m of ballistic distance at the ceiling (the what-ifs above; round 2's fit says
+  D = 0.88 v t_air + 0.52 m), so the 7.3 m/s that 5.5 m needs is 0.7 m/s away, and the 8.2-9.0 m/s of the high-school state level (6.07-6.65 m) is 1.6-2.4 m/s away. A longer run-up helps slowly: the runner adds
+  about 0.1 m/s per 5 m from 45 to 55 m and 0.05 beyond (7.05 m/s at 50 m, 7.25 at 65 m), i.e. about +0.05 m of ideal jump per 5 m; the runway rule allows 45 m. The sprint agent's later gears (7.86 / 7.91 m/s) start at 7.0 m/s and are never used in 44 m; what would move the
+  jump is a gear for the 3-7 m/s range (an acceleration gear), not a fourth gear.
+- *The approach state.* The steered penultimate touchdown has a gap sd of 0.15 m; the starts with a late stride phase (COM low, trunk forward, swing foot far behind; step lengths of 1.0-1.4 m where the run has 1.5 m; five of the
+  eight invalid captured approaches have their last three steering nudges pinned at the 0.25 m cap) cannot take off with any program: they are the 6-11 % of fresh starts (per 96) that fall in the run (the same starts do not fall in an unsteered
+  approach, and a chunk take-off saves 1 of 12 of them). More steering authority (caps 0.30-0.40), other gains, rounding 0.9-1.0 all make it worse. One open lever: a one-step longer horizon (`j_st_n` 6 instead of 5) cuts the stumbles
+  from 26 to 9 of 288 fresh starts with the frozen programs (per 96: 9 to 3, 11 to 3, 6 to 3), but its penultimate gaps spread wider (sd 0.24 m against 0.16) and 0.03 m shorter, so the frozen take-off fouls (29 of 125 in the harness) and,
+  retrained on its states (`params/long_jump_v4_gear_n6_d03.txt`, `_d06.txt`: fouls gone, stumbles 4-6 of 96), the frozen landing table somersaults on 20 of 96 (3.39 m against 3.96 on 7001-7096). The landing table needs retraining on those hand-overs
+  (about 1.5 h) before the horizon can pay; not done. Longer horizons (7, 8, 10) only add falls (17, 29, 43 of 96).
+- *One program for all starts.* On the nominal start the robust program takes off with vz 2.4 m/s where its own ideal has 3.1 (harness 4.13 against 4.86 m); the short-gap fast starts get vz 1.4-1.8. The legal jumps of the 336 starts above
+  are 4.07-4.90 m, median 4.66-4.70 m; the ideal for one start is 5.0-5.2 m. Per-gap programs (two tables selected by the gap) would be the next step.
+- *Take-off and landing.* Contact 0.09-0.11 s. The robust take-offs leave at 18-21 deg with vz 2.1-2.4 m/s on average (harness range 1.4-2.8), the one-start jumps at 26-29 deg with vz 3.0-3.3 (a human jumper: 20-23 deg, 3.0-3.7 m/s). The landing marks 0.12-0.17 m beyond the ballistic point on the one-start jumps; the table removes most somersaults of the robust ones.
+- *Body.* At the ceiling a 20 % stronger body jumps 0.4 m farther and a 40 % stronger one 0.9 m (at the same 6.6 m/s): strength and speed are worth about the same per percent, and neither reaches 6 m (next paragraph).
+
+**What a stronger body or a longer run-up would change** (ideal-control what-ifs, ORACLE-class, one start: the nominal penultimate-touchdown state of the upright approach, 60k evaluations of the open-loop 32-muscle program from the same initial guess,
+ballistic distance from the take-off foot; `ROBOLAB_LJ_FSCALE` scales every muscle's peak isometric force, `ROBOLAB_LJ_DV` adds forward speed to the whole body at the penultimate touchdown):
+
+| what-if | ballistic distance | against the base | take-off vz |
+| --- | --- | --- | --- |
+| base (COM 6.6 m/s) | 5.03 m | | 2.70 m/s |
+| +0.4 m/s | 5.22 m | +0.19 m | 3.09 |
+| +0.8 m/s | 5.52 m | +0.48 m | 3.18 |
+| muscles 20 % stronger | 5.43 m | +0.39 m | 3.31 |
+| muscles 40 % stronger | 5.91 m | +0.88 m | 3.57 |
+| run-up 65 m instead of 44 m (the plain run gains about 0.35 m/s, 6.9 to 7.25 m/s; not run through the take-off) | about 5.2 m | about +0.2 m | |
+
+A 20 % stronger body is worth about 0.8 m/s of extra speed (+0.39 m against +0.48 m), and it spends the strength on vertical velocity at the same horizontal speed (vz 2.7 to 3.3 m/s): the model's weak point at the take-off is lift, not speed.
+A longer run-up buys little: a standard runway offers 45 m (TR 29.1: at least 40 m, 45 m where conditions permit), the runner adds 0.05-0.1 m/s per 5 m beyond 45 m, and its fast gears never engage (an acceleration gear for 3-7 m/s
+would move the jump; a fourth gear would not). Neither lever alone gets the ideal past 6 m (the best case here, 40 % more force, is 5.9 m for one start), and none of these numbers is a robust one: the robust take-off program reaches about 90-94 % of
+its ideal's distance on the starts that succeed (legal median 4.66-4.70 m against 5.0-5.2 m) and loses the failed starts on top, and it was trained for this body and this speed, so a stronger or faster body would need the take-off and landing programs retrained before any of this shows up in a fresh-start mean.
+
+**Against humans** (men; sources as in round 1):
+
+| level | distance | this model |
+| --- | --- | --- |
+| untrained man | 4.95 +- 0.55 m | one start (ORACLE, overfit): 5.209 m = 105 %; robust: the legal jumps of fresh starts have median 4.66-4.70 m (94-95 %) but 9-20 % of starts fail (13.5 % on the 480 never-used starts), so the mean over fresh starts is 4.0 m (81 %; 3.7-4.2 m per 96) |
+| high-school state qualifying | 6.07-6.65 m from 8.9 m/s | not reached: 6.1 m needs 8.2-9.0 m/s at the board, the model has 6.6-6.9 |
+| NCAA D1 finals median, world record | 7.56-7.75 m, 8.95 m | not reached |
+
+The jump does not go beyond human ability. The best one-start jump is 0.26 m past the untrained man's mean (0.5 sd); the honest robust number is a mean of 4.0 m over fresh starts (81 % of the untrained man's mean): 4.70 m (95 %) when a start succeeds, and about 1 start in 7 fails. The ceiling for this
+body at this speed is 5.0-5.2 m; getting past 5.5 m robustly needs about 0.7 m/s more at the board (or 20 % more strength plus 0.3 m/s), the high-school level needs the speed of a trained jumper.
+
+**What worked:** the gear switch at 5.0 m/s (+0.22 m/s); hip-nudge steering with the plan rounded toward shortening; training the take-off program on both plant sides over a gap-stratified set of captured approaches (mirrored role tables);
+the landing table on 117 hand-overs; the 0.03 m check-mark shift (chosen on seeds 7001-7096 that the training never saw: 3.15 -> 3.73 m there; on the 480 never-used starts +0.35 m, p < 0.0001, fouls 48 -> 3) and the aim shift (+0.23 m there, +0.18 on the never-used 9129-9224, but +0.06 over the 240 starts not used to choose it, p = 0.44: within noise); the board-relative ideal for the one-start trial. **What did not:** the natural (non-upright) run for one program (9 of 20
+training starts invalid), hop-height steering, speed clamp, more steering authority or other rounding, interpolating two ideals into a linear-in-gap program, greedy swing-foot lag feedback, a chunk take-off fallback, a learned landing table on the board-relative one-start
+program (5.167 against the chunk landing's 5.209), the `ik_fmin 1.5` latch (`final3`, not significant), the strength what-if through `ROBOLAB_LJ_STRENGTH` (the v4 jump tasks ignore it).
+
+**Files.** Skill `lib/robolab/skills/long_jump_run.w` (+ `lib/entry/long_jump_run.w`), harness `playground/long_jump_limits.py`. Params: runners `params/lj_runner_gear_v4_p95.txt`, `lj_runner_gear3_v4_p95.txt`, `lj_runner_gear4_v4_p95.txt`;
+one start `params/long_jump_v4_gear_nom1.txt` (5.065), `_nom2.txt` (5.166), `_nom3.txt` (5.209, champion), `_nom4.txt` (5.167); robust `params/long_jump_v4_gear_a4_m1.txt` (milestone), `_a4_l60.txt`, `_a4_l2.txt`, `_final1.txt` (16 and 32 champion),
+`_final2.txt` (96 champion), `_final3.txt` (`final2` + `ik_fmin 1.5`, not adopted), `_n6_d00.txt` / `_d03.txt` / `_d06.txt` (steering horizon 6 with a retrained take-off, not adopted: somersaults). Pieces: take-off `out/long_jump_limits/rob_a4_final.txt`, landing `scratchpad/lj2/land_a4b_g30.txt`, approach `scratchpad/lj2/A4c.txt`; ideals `out/long_jump_limits/gp_nom_ideal.json`, `gp_nom_bd.json`, `lean_*_ideal.json`, `am_nom_*.json`.
+Log with every command: `scratchpad/lj2/LOG.md`; scripts in `scratchpad/lj2/` (`runup.py`, `ikgap.py`, `harness_eval.py`, `eval_all.sh`, `assemble.py`, `capture_set.sh`, `post_robust.sh`, `rob_*.sh`, `land_*.sh`, `whatif*.sh`, `replay_all.py` (replays every long-jump champion's frozen params with the current build and compares per seed: all 17 identical), `replay_round2.py`, `big_eval.sh`, `big_report.py`, `scan_stn.sh` / `rob_a6.sh` / `select_train.py` / `eval_cands.sh` (the steering-horizon experiment)).
+Per-start results of every evaluation are in `scratchpad/lj2/eval_*.json` / `.txt` (`long_jump_eval.py`), those of `final1` on the arena trials in `out/long_jump_run/round3_final1_per_start.txt`.
+
+```sh
+./build.sh long_jump_run && cp bin/robolab_long_jump_run bin/challengers/long_jump_run-c3
+scratchpad/lj2/capture_set.sh scratchpad/lj2/A4c.txt a4 bin/challengers/long_jump_run-c3 8001 8128 4        # penultimate-touchdown states of 128 starts
+scratchpad/lj2/rob_a4.sh                                                                                       # robust take-off program over 32 of them (both plant sides)
+VARIANTS=1 RECSEED=8039 scratchpad/lj2/post_robust.sh a4 && scratchpad/lj2/land_a4.sh                            # hand-overs, chunk landing record, landing table
+.venv/bin/python scratchpad/lj2/assemble.py params/x.txt scratchpad/lj2/A4c.txt out/long_jump_limits/rob_a4_final.txt scratchpad/lj2/land_a4b_g30.txt j_board_shift=1.04 ik_gap0=1.876777
+.venv/bin/python playground/arena.py eval long_jump_v4_p95_robust96 --params params/long_jump_v4_gear_final2.txt --controller bin/challengers/long_jump_run-c3 --task long_jump_v4_p95b --workers 4
 ```
 
 ## High-school 110 m hurdles
@@ -1209,7 +1537,187 @@ calibration in `playground/calibrations/v4.json`:
   makes elites fast is not in the model. Stance technique and tendon
   properties beyond the Achilles are candidates.
 
-**Sprinters on v4** (trials `sprint_top_speed_v4`, `_v4_p95`, `_v4_elite2`; the old trials and champions are untouched): in progress.
+**Sprinters on v4** (trials `sprint_top_speed_v4`, `_v4_p95`, `_v4_elite2`; the old trials and champions are untouched). Practice task
+`sprint_touch_v4` (objective 2 or the flying-start pace objective 3), controllers `RunRISkill` and, for the final entries, `RunGearSkill`
+(`lib/robolab/skills/run_gear.w`). Ceilings are the pitch-free ideal-control ceilings above (8.2 / 10.45 / 9.28 m/s). P95 and elite2 are the
+literature profiles (`profiles/p95.json`, `elite2.json`); no result of the unverified `elite.json` profile is reported here. The run-by-run log is
+`scratchpad/sprint_knot/LOG.md`.
+
+**Arena** (12 perturbed standing starts, 30 s, a fall scores -1e9; validation = 40 further unseen starts, seeds 141-180, and 40 more, 181-220, never trained on):
+
+| trial | champion (params, controller) | peak 1 s speed | starts surviving | share of the ceiling | unseen seeds: falls in 40 + 40 |
+| --- | --- | --- | --- | --- | --- |
+| `sprint_top_speed_v4` (8.2) | `params/run_gear_v4_avg_c.txt`, RunGear, 3 gears | **6.170 +- 0.003** | 12/12 | 75.2 % | 0 + 5 (4 of them at 5-7 s) |
+| `sprint_top_speed_v4_p95` (10.45) | `params/run_gear_v4_p95_g.txt`, RunGear, 4 gears | **7.907 +- 0.019** | 12/12 | 75.7 % | 2 + 1 (the 3-gear `_e`: 1 + 1) |
+| `sprint_top_speed_v4_elite2` (9.28) | `params/run_gear_v4_elite2_c.txt`, RunGear, 3 gears | **6.78** | 11/12 (seed 231 falls) | 73.1 % | 1 + 2 |
+
+Every entry (eleven promotions, one loss; `playground/arena/history.jsonl`; all paired tests p <= 0.001 except the loss):
+
+| stage (share of the ceiling) | average body | P95 body | elite2 body |
+| --- | --- | --- | --- |
+| the v3 champions' params on v4 | fall (0/12) | fall (0/12) | fall (0/12) |
+| first v4 search (RunRI from the v3 params) | v4s1 3.92 (48 %), v4s2 4.68 (57 %), **v4r1 4.65 (56.7 %, entered, 11/12)** | p1: 6.60 at 1500 rollouts (63 %), 7.05 at 2400 (67.5 %; 17/24 seeds survive) | e1 (from the average-body gait) 6.42 (69 %; 7/24 falls) |
+| + start plan v0 2.0, foot clearance | a2 (from the P95 gait) **5.875 (71.6 %, entered, 11/12)**; a2v 12/12 at 5.873, loses the paired test (p 0.30) | **p2b 7.00 (67 %, entered, 10/12)** | **e1v 6.44 (69 %, entered, 10/12)** |
+| two gears | **6.045 (73.7 %, entered, 12/12)** | **7.449 (71.3 %, entered, 12/12)** | **6.61 (71.3 %, entered, 11/12)** |
+| three gears | **6.170 (75.2 %, entered, 12/12)** | **7.862 (75.2 %, entered, 12/12)** | **6.78 (73.1 %, entered, 11/12)** |
+| four gears | - | **7.907 (75.7 %, entered, 12/12)**; the first four-gear search (4 falls in 40) was not entered, the 19-seed-cascade one was | - |
+
+**What the searches found.**
+
+- *The v3 params fall on v4, and the first v4 gait is a dead end.* Started from the v3 average-body params, sep-CMA (v4s1, v4s2, v4r1: 6600 rollouts) ends in a straight-leg
+  pogo (touchdown knee 0.14, peak 0.14 rad; 60 % of the vertical impulse arrives in the first 35 ms as a 10.6 BW collision, foot vz -2.3 m/s): 4.65 m/s, an isolated basin (almost any
+  change falls; objective 5 with the v4 ideal stance moved its score 350.1 -> 351.4 in 7 generations; `knots 1` seeded from the ideal falls). The same search started from the *P95* v4 gait
+  (a smooth bent-knee stance, peak vGRF 3.8 BW, found from the v3 P95 champion in 1500 rollouts) reached 5.875 m/s on the average body in 600 rollouts. The lesson is the basin, not the
+  budget: try the other bodies' gaits as starts. (The P95 gait is a crouched, ~4 steps/s bounce, knee 0.8-0.9 rad at touchdown, torso upright: not the ideal stance.)
+- *Falls are the score, and the falls were three different things* (traced with `scratchpad/sprint_knot/stridetab.py`, `pitchmax.py`, `alt_growth.py`):
+  (1) the searched **start plan speed `v0` sits at ~0.25 m/s** (the drives scale with v_des / v_top from the first push, so the start has almost no drive): every searched gait falls in 4-9 s on
+  10-25 % of starts, and `v0 = 2.0` (the tunable's box is [0, 2.5]) removes these falls with the stride untouched (average a2: 4/40 -> 0/40; P95 hard seeds 7/8 -> 1/8; elite2 8/8 -> 1/8);
+  (2) **swing-foot trips** in the crouched gaits (4 scuffs / s): `clear_h 0.16, k_clear 2, heel_tuck 0.6` at no speed cost; (3) a residual **late fall** (13-30 s) of the ~4 steps/s bounce, a sudden bad step
+  after an intermittent period-2 burst of the aerial gaps (15-25 ms against 2-4 ms), not a drift: max torso pitch after 5 s is 0.23-0.38 rad on every surviving seed and crosses 0.6 rad only ~0.05 s before the fall,
+  and stride, stance or pitch variability do not predict it. A single-parameter tweak "fixes" a failing seed by chance (any perturbation reshuffles a chaotic outcome): only fresh seeds tell.
+- *Search on few seeds overfits.* Hardening a stride on 8-10 mined hard seeds produced gaits that survive those seeds and fall MORE on fresh ones (average 8/30 against 4/40, P95 9/42 against 15/64,
+  extended-mode P95 10/40 early falls): at a 20 % hazard, passing 8 seeds is luck 17 % of the time. What works is a long cascade: a candidate stops at its first bad rollout, only low-hazard ones run
+  all 12-19 seeds. Gear 2 of the P95 champion trained on 4 seeds fell on 8/40 unseen seeds, on 16 seeds on 2/40.
+- *`playground/hsearch.py`* (new, opt-in): scores a candidate by its worst rollout and runs the seeds as a cascade inside one worker (stop at the first score below the incumbent's; a short "gate" horizon per seed,
+  `84g10`); a (1+lambda)-ES with sparse mutations, a success-rate step size, one combination of the improving offspring and one extrapolation step per generation (or sep-CMA with restarts around the incumbent).
+  sep-CMA stalled on the fragile optima (sigma 0.04 in 94 dimensions is a 0.4 step against ~4 % of a box that breaks ~40 of the parameters); the ES moved 3-5 x faster per rollout. `search.py --box name=lo:hi`
+  widens a search box (a skill does not clamp a params-file value; the searched gaits sit on the bounds of t_push_max, k_land, t_land, z_ref, hip_lead, g_kl, a_push, k_late).
+- *One parameter set cannot both start and cruise; gears.* A flying start (`RunKnotSkill` `fly_entry 2`: enter the right stance chunk from a snapshot of the champion's own steady running,
+  `playground/cache/sprint_touch_run_v4_*.npz`; 8-24 s rollouts, 3-5 x cheaper than a standing start) lets a search tune the cruising gait alone: on P95 it gained 0.5 m/s in 20 minutes
+  (6.95 -> 7.46 steady) and that gait falls from a standing start (6/6 at 4 s). **`RunGearSkill`** (opt-in `gears N`; without it RunKnotSkill exactly, checked to the digit): every tunable X has gear twins
+  g2_X .. gN_X (default: the previous gear's value) and the first flight after the filtered speed reaches `g<k>_v_on` rebuilds the whole stride (chunks, poses, corrections, reflex gains, reciprocal inhibition)
+  from gear k's values; `Track#set_movement` (controller.w, a new method with an SDK spec) swaps the movement under the running track. Gear 1 is the start and the acceleration; each later gear is searched by
+  flying-start ES from snapshots of the gear before it (`gear0 K` starts a practice run in gear K). Gear 2 trained on 4 seeds x 8 s exploited its horizon (fell at ~19 s on 6/6); on 16 seeds x 24 s (`fall_pen 300`) it holds.
+  The gain per gear on P95 is +0.45, +0.41, +0.05 m/s: the crouched family saturates near 8 m/s.
+- *The requested experiments, all opt-in and reported as run.* Objective 5 (above): no gain from the pogo basin. Knots: seeded from the ideal (v4 P95 at 9 m/s, average at 8 m/s) the stance falls (the touchdown knee
+  comes out 0.81 for a commanded 0.54); seeded from the gait's own distilled stance (`knot_seeds.py`; the world thigh has to be shifted by the pelvis pitch, -0.25 rad) it runs (6.29 m/s against 6.45, contact 0.176 s
+  against 0.124), a start for a knot search that was not run because the gears gained more per hour. Spine trunk servo (`k_sp`, `k_spd` in RunRISkill; the lumbar spine has 200-250 N m, as strong as a hip): small gains change
+  nothing measurable, gains from 0.5 break the gait. Residual TCN (`tcn 1`, 63-weight zero head on the P95 four-gear gait, ES over the head from gear-4 flying starts, 12 seeds x 24 s, sigma 0.03 and 0.006): both heads found a candidate
+  that survives all 12 training starts (the zero-head baseline fell on one) and neither generalises: on 40 fresh flying starts the falls are 3/40 (zero head), 3/40 and 5/40, mean peak 7.937 / 7.917 / 7.932; the head selects luck on the
+  training seeds, as the v3 attempt did. ILC was not run: it needs a kinematic target and the only one at hand, the ideal stance, is one the saturated stance cannot follow.
+
+**Why not 10 m/s.** The best controller is at 7.91 m/s on P95 (75.7 % of the 10.45 ceiling), 6.17 on the average body (75 %) and 6.78 on elite2 (73 %). The standing-start searches (CMA, then ES) ended at 67-72 % of the ceilings, the gears lifted every body to 73-76 %, and the knots
+were never run past a reproduction test: nothing passes 76 %. The ideal at the P95 ceiling is contact 0.100 s, flight 0.161 s, 3.83 steps/s, 2.61 m steps, mean / peak force 2.61 / 5.06 BW, touchdown knee 0.54, lift-off thigh -0.66;
+the four-gear runner at 7.9 m/s has contact 0.102 s, flight 0.139 s, ~4.15 steps/s, ~1.9 m steps, 2.35 / 4.5 BW, knee 0.67, thigh -0.41: force and contact are within 10 %, but it flies 14 % less and steps 27 % shorter, so 10 m/s at its cadence would
+need 2.4 m steps. Every search preferred the crouched bounce because the ideal's extended stance (touchdown knee 0.5, lift-off thigh -0.66, a trunk that rocks less than 0.1 rad) cannot be started (60 % of standing starts of the extended gait fall in
+acceleration) and no controller here holds the trunk against the stance hip's hip-extension torque (the trunk pitches 0.36 rad per stance in the extended gait, against the ideal's 0.1). What would still move the numbers: a robust fourth gear
+(the P95 hazard at 7.7+ m/s is the limit), a third-gear-style search for the extended stance from flying starts on top of a crouched acceleration, and a trunk actuator in the stance (the spine servo was too weak alone).
+
+Recipe for one more gear on a body (all in `scratchpad/sprint_knot/`): record snapshots of the champion's steady running (`snapshots2.py`, env `SECS`, `SEED`, `T0`), write a practice file (the champion's
+params + `gears K`, `gear0 K`, `fly_entry 2`, no `g<k>_v_on`), then `RUN_NATURAL_START=flying ROBOLAB_SNAP=<snapshots> playground/hsearch.py sprint_touch_v4 --method es --seconds 24 --seeds <12-19 snapshot indices>
+--attrs objective=3,fly_touch=2,fall_pen=300 --init <practice file> --only "gK_*" --exclude <the gK_ start-phase twins and drives> --box <widened gK_ boxes> --controller bin/challengers/run_gear-v4c`; the standing-start entry drops
+`gear0` and `fly_entry` and sets `g<k>_v_on` a little below the snapshots' speed (`combine_gears.py` writes a two-gear file from two params files; `select.py` ranks candidates on unseen seeds by falls, then speed).
+
+Files: `lib/robolab/skills/run_gear.w` + `lib/entry/run_gear.w` (RunGearSkill); `run_knot.w` (`fly_entry`), `run_ri.w` (`k_sp`, `k_spd`); `controller.w` (`Track#set_movement`); `playground/hsearch.py`, `search.py --box`, `tasks/sprint_touch_v4.py`
+(`start_noise`, `ROBOLAB_SNAP`); champions' params `params/run_ri_v4_*.txt`, `params/run_gear_v4_*.txt`, frozen binaries `bin/challengers/run_ri-v4base`, `run_knot-v4*`, `run_gear-v4*`; diagnostics and every search's params and logs in `scratchpad/sprint_knot/`.
+
+### Sprinters on v4, round 2 (29 Sep): the extended stance held, and what it took
+
+Round 1 ended at 7.907 m/s on P95 (75.7 % of the 10.45 pitch-free ideal-control ceiling) with four crouched gears, and named one untried thing: a gear whose stride is the
+ideal's extended stance, searched from flying starts. **It works.** A fifth gear searched that way lifts the standing-start P95 champion to **8.276 +- 0.049 m/s (79.2 % of the
+ceiling)**, +0.369 m/s on all 12 arena starts (paired p < 0.001, 12/12 survive; `params/run_gearx_v4_p95_x5a.txt`, controller `bin/challengers/run_gearx-a` = RunGearX, promoted in
+`sprint_top_speed_v4_p95`). It is 79 % of a ceiling that is an upper bound built from separate capacity tests under idealised stabilisers, not a demonstrated gait: no muscle-only
+stride at 10 m/s is known to exist, and this one is **not** 10 m/s (2.2 m/s short of the ceiling). Gears 1-4 are round 1's untouched; the entry says "five gears, v4 P95, standing
+start". Log of every run with its command line: `scratchpad/sprint2/LOG.md`.
+
+| per-start peak (m/s), seeds 221-232 | 221 | 222 | 223 | 224 | 225 | 226 | 227 | 228 | 229 | 230 | 231 | 232 | mean |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| four gears (previous champion) | 7.924 | 7.920 | 7.900 | 7.930 | 7.812 | 7.916 | 7.931 | 7.914 | 7.887 | 7.921 | 7.905 | 7.929 | 7.907 |
+| five gears, extended-stance gear 5 (`x5a`) | 8.272 | 8.291 | 8.280 | 8.278 | 8.010 | 8.285 | 8.336 | 8.319 | 8.324 | 8.284 | 8.301 | 8.334 | 8.276 |
+
+Falls (30 s, standing start, never trained on): seeds 141-180 **3/40** (153, 161, 175 at 19.6-25.2 s; survivors' peak 8.302, min 8.163), seeds 181-220 **1/40** (193 at 19.8 s; peak
+8.303, min 8.240); the four-gear champion has 2 + 1 (its 153 and 175 are among the falls here). Flying starts (24 s, the champion's own steady-running snapshots at 7.6-8.0 m/s;
+`playground/cache/sprint_touch_run_v4_p95j.npz` for training, `_p95k.npz`, 42 snapshots of 42 other runs, for validation): the extended gear survives 18/19 training starts and 36/40
+unseen ones (peak 8.330, steady 8.253), the champion's own gear 4 restarted the same way 33/40 (peak 7.939, steady 7.891): the flying-entry transient (falls at 0.8-2.6 s) is
+a property of the protocol, and the extended gear is not worse at it.
+
+**The stride (mean over the steady stances, right foot).** The search did not reach the ideal; it reached its touchdown and its peak force:
+
+| | crouched gear 4 (flying, 40 unseen) | extended, first search (f3c) | extended gear 5 (`x5a`, standing start seed 221) | ideal at 10.0 m/s (P95 v4) |
+| --- | --- | --- | --- | --- |
+| steady speed (m/s) | 7.891 | 7.756 | 8.234 | 10.0 |
+| contact / flight (s) | 0.101 / 0.138 | 0.106 / 0.153 | 0.108 / 0.150 | 0.100 / 0.161 |
+| step length (m) / step rate (1/s) | 1.91 / 4.13 | 2.02 / 3.86 | 2.14 / 3.85 | 2.61 / 3.83 |
+| thigh at touchdown / lift-off (rad, + ahead) | +0.57 / -0.41 | +0.49 / -0.37 | +0.57 / -0.37 | +0.44 / -0.70 |
+| knee at touchdown / stance maximum (rad) | 0.66 / 0.71 | 0.48 / 0.76 | 0.55 / 0.79 | 0.52 / 0.6 |
+| ankle at touchdown (rad, - dorsiflexed) | 0.00 | | -0.21 | -0.44 |
+| mean / peak vertical force (BW) | 2.37 / 4.12 | 2.42 / 4.37 | 2.38 / 4.84 (5.04 flying) | 2.61 / 5.06 |
+| trunk pitch touchdown -> lift-off (rad) | 0.15 -> 0.17 (rock +0.016) | 0.24 -> 0.35 (+0.11) | 0.28 -> 0.37 (+0.09) | rock < 0.1 (penalised) |
+
+So the extended gear lands with the ideal's knee, dorsiflexes the ankle half way to the ideal's, delivers the ideal's peak force in a 0.108 s contact and keeps the trunk inside the
+ideal's 0.1 rad rock. What it still lacks against the ideal: 7 % of the flight, 17 % of the step length (the lift-off thigh is set by geometry, contact time x speed, so it follows
+speed), 9 % of the mean force.
+
+**What the searches were and what worked.**
+
+- *Lab first* (all in `scratchpad/sprint2/`: `lab.py` per-stance table from flying starts, `snap.py` snapshot sets, `mkgear.py` gear-K params files, `scan.py` one-at-a-time moves, `morph.py`
+  / `line.py` interpolation and line search, `mtab.py` muscle-level view, `val.sh` / `standval.sh` validation). Round 1's extended-mode gait (`p1_snap1`, the ideal-like 6.6 m/s gear) run as gear 5 from the 7.9 m/s
+  snapshots falls in 1.2-1.4 s on 8/8: its trunk pitches +0.28..+0.39 rad per stance (torso_kp at its 0.3 floor) and the chain of pitching and a mistimed landing ends in a forward fall.
+  Interpolating only its leg-geometry tunables from the champion's gear 4 (`morph.py`, no re-tuning) lowers the speed monotonically: peak 7.93 / 7.83 / 7.75 / 7.69 / 7.65 / 7.50 / 7.49
+  m/s for alpha 0 / .1 / .2 / .3 / .5 / .75 / 1 while the touchdown knee goes 0.65 -> 0.56, the contact 0.100 -> 0.122 s and the trunk rock +0.02 -> +0.21 rad, at a peak force that stays 4.0-4.2 BW.
+  The alpha 0.5 point survives 18/19 training starts (steady 7.47) and is the start of the search.
+- *The search that failed, and the one that worked.* round 1's `hsearch` scores a candidate by its WORST of 12-19 seeds and prunes on it. From a gait that survives every seed, that statistic
+  moves by luck with every small mutation (the worst of 18 seeds), so sparse mutations of a good stride almost never pass: 5 generations, 0/24 offspring, on the alpha 0.5 start
+  (`f2`, scratchpad log). **`hsearch.py --agg mean`** (new, opt-in; the default is unchanged) scores a candidate by the MEAN of its seeds' scores and stops it at its first fall (fall_pen 300),
+  so small mutations move the score smoothly while robustness stays a hard rule. With it, 8 flying-start seeds x 16 s, (1+16)-ES on the 73 gear-5 twins, from the alpha 0.5 start and the
+  ideal-stance objective 6 (`sprint_touch_v4x.py`: pace less 40 points per rad the touchdown knee misses 0.55, the touchdown thigh 0.5, the lift-off thigh stays ahead of -0.55, the stance knee
+  passes 0.75): 7.47 -> 7.77 steady in ~3900 rollouts (`f3`, `f3b`, `f3c`; validated 37/40 unseen, more robust than the crouched gear's 33/40 but 0.13 m/s slower), then, with the same
+  search continued for 2300 rollouts on RunGearX (`f4`), **8.26 steady**. The moves that carried it (single changes reverted in the lab, 8 seeds x 16 s, peak from 8.32): the landing ankle
+  target `a_reach` -0.13 <- -0.30 (its box floor) costs **0.48 m/s** (3/8 fall), `k_land` 0.209 <- 0.136 costs 0.15 (3/8 fall), `psi_reach` 0.060 <- 0.016 costs 0.14, `toe_land` 0.07; the arm reflex
+  (`k_arm_p` 0.66) and `lean_v` (0.018) found by the same search are NOT the cause: with either or both at 0 the gait runs 8.29-8.31 (1-2 falls in 8 instead of 0). The touchdown posture is the mechanism:
+  a dorsiflexed ankle and a knee near 0.54 at contact, which is the ideal's touchdown.
+
+**The trunk, which round 1 named the blocker.** Measured, the trunk was one of two things that stopped the hand-made extended stances (a forward pitch runaway, and a touchdown placement that a held trunk does not cure);
+the search found an extended stride whose trunk rocks 0.09 rad under the champion's own trunk servo, and no trunk mechanism was needed for it (mechanisms are all opt-in in `RunGearXSkill`,
+`lib/robolab/skills/run_gearx.w`, `bin/robolab_run_gearx`; every tunable defaults to 0 and the P95 champion's 12 arena starts replay to the digit):
+
+- *Where the trunk goes.* The crouched champion's trunk rocks +0.016 rad over a stance. p1_snap1's extended stride rocks +0.36, and a pre-activated one (vasti drive `drv_pre` 0.7 on the alpha 0.5 gear, which
+  produces the ideal's stance in the first strides: contact 0.097 s, flight 0.160, step 2.04 m, touchdown knee 0.47, mean / peak force 2.6 / 4.0 BW) pitches +0.11..+0.30 rad per stance and a further +0.3
+  in flight, cumulatively, and falls forward in 1.3-1.6 s (drv_pre 0.4 / 0.7 / 1.0: 4/8, 5/8, 7/8 falls). The searched extended gear rocks +0.09 (0.28 -> 0.37): the ideal's 0.1 rad.
+- *What a perfect trunk is worth.* `sprint_touch_v4x` opt-in env `ROBOLAB_TRUNK_STAB=kp,kd,limit` applies a DIAGNOSTIC ideal external torque to the torso body (not an actuator the body has). On the crouched
+  gear it is worth +0.10 m/s (300 N m, pitch held to its own slow mean) to +0.17 (100 N m, lean held at 0.3 rad; 200 N m 8.08; 400 N m all 4 fall); on the alpha 0.5 extended gear +0.08 (rock +0.15 -> +0.014),
+  and the pre-activated extended gear still falls with the trunk held (it runs ~10 strides at the ideal's stance and then its touchdown thigh wanders 0.44..0.90 rad and the knee collapses to 1.3-1.8).
+  On the searched extended gear the torque makes it fall 8/8 at 300, 150 and 80 N m: that orbit uses its 0.11 rad rocking.
+- *Real mechanisms* (4 flying seeds, 12 s, on the alpha 0.5 gear): arm counter-rotation `k_arm_p` 8 cuts the stance rock from +0.15 to +0.08..+0.12 (30-50 %) and moves the speed by nothing (1/4 falls);
+  `k_arm_d` 0.3 to +0.11..0.14; swing-hip synergy `k_swh` 0.5 falls 2/4 and 1.5 changes nothing; a lean that grows with speed (`lean_v` 0.05-0.1) falls 3/4. Put in the search as tunables (f4) the search kept
+  `k_arm_p` 0.66 and `lean_v` 0.018 and they are not the source of the 0.5 m/s (ablation above). The spine servo of round 1 stays off (`k_sp` 0.03).
+
+**What limits the stride now** (muscle level, `mtab.py`, crouched gear 4 at 7.9 m/s; force fraction = force / peak isometric at the stance's peak-load quarter, activation 1.0 in all):
+vasti 0.72, soleus 0.83, gastrocnemius 0.80, toe plantarflexors 0.9-1.1 (saturated), hip extensors 0.2-0.3 (they shorten at 3-4 range/s: power-limited). A stronger muscle does not help an untuned gait
+(single group x1.25 on the P95 body, 4 flying seeds, peak from 7.931: gastrocnemius 8.124 with no fall, soleus 7.990 (2/4 fall), toe plantarflexors 7.945, hip extensors 7.935, hamstrings 7.834 (3/4 fall),
+vasti 4/4 fall: the controller is tuned to its vasti), so of the strengths tried the plantarflexors (the gastrocnemius most) are the ones that move the untuned gait, a stronger vastus breaks the tuned knee behaviour, and hip extension is limited by shortening speed
+(force fraction 0.2-0.3), not by strength.
+The one-parameter line search along the search's own direction (alpha 0.5 -> `f3c`) shows the ridge is narrow: 1.5 x the step falls 5/8, 2 x 6/8, with no speed gain in the survivors.
+
+**Refinement, and the fall hazard.** The landing ankle's box floor (-0.3) was still the lever. Single edits of the promoted gear 5, in the standing-start chain (arena starts; falls on unseen standing starts
+141-220 and 251-330; survivors' peak):
+
+| variant | arena starts | unseen falls, 80 + 80 | survivors' peak (unseen) |
+| --- | --- | --- | --- |
+| `x5a` (entered) | 8.276, 12/12 | 4/80 + 3/80 | 8.30 |
+| `a_reach` -0.33 (`scratchpad/sprint2/x5a_ar-0.33_stand.txt`) | 8.373, 12/12 (min 8.341) | 6/80 + 6/80 | 8.36-8.37 |
+| `a_reach` -0.35 | 8.394, 10/12 (223, 224 fall at 20-21 s) | 7/80 | 8.40 |
+| `a_reach` -0.40 and 1400 more ES rollouts (`f7_snap1`, `f7s1_stand.txt`) | 8.48, 11/12 (224 falls) | 11/80 (flying: 9/40) | 8.47-8.48 |
+| `d_push` back to the previous stage's -0.1285 (`x5b_stand.txt`) | 8.337, 12/12 | 8/80 | 8.35 |
+
+Each is +0.06..+0.2 m/s and each has more late falls (all at 19-28 s, 8-15 s after gear 5 is entered): the hazard rises with speed along this ridge, and the searches' 16-24 s flying horizons do not reach
+it. `x5a` (7/160 = 4.4 %) is what round 1 would have entered by its own rule (3/80 for the four-gear champion); the `a_reach` -0.33 variant (12/160 = 7.5 %, Fisher p 0.34 against `x5a`; the -0.40 variant's 11/80 against `x5a`'s 4/80 has p 0.10) is left out for +0.10 m/s. A search on 30 s
+standing-start chain rollouts (or 30 s flying ones) is the next step for those variants.
+
+**Not done / not entered.** A sixth gear (`f6`, `f6b`: 2400 rollouts on snapshots of `x5a`, `sprint_touch_run_v4_p95m.npz` / `_p95n.npz`) does not beat gear 5: a restarted copy of gear 5 falls on 7/19
+flying starts at 8.3 m/s, the search repaired survival (16/19) and not speed (steady 8.21 against 8.26). The recipe was not run on the average and elite2 bodies; the entry speed of gear 5 (7.8 m/s) was not
+searched (the champion's gear 4 is entered at 7.7). What would move the numbers next: the landing ankle towards the ideal's -0.44 with a search that sees 30 s, a longer flight at the same contact (0.150 ->
+0.161 s, 9 % more mean force), and a step length that the lift-off geometry allows only at higher speed.
+
+Recipe (the round-1 recipe with the two changes that mattered: a start inside the extended family, and `--agg mean`): snapshots of the champion's steady running (`scratchpad/sprint2/snap.py PARAMS CONTROLLER OUT.npz
+--seeds 31-50 --t0 20 --t1 29`), a practice file (`mkgear.py PARAMS OUT --gears K --fly`, plus the start's twins), then `RUN_NATURAL_START=flying ROBOLAB_SNAP=<snapshot set>
+hsearch.py sprint_touch_v4x --method es --agg mean --lam 16 --seconds 16 --seeds <8 seeds> --attrs objective=6,fly_touch=2,fall_pen=300,st_ktd=0.55,st_td=0.5,st_lo=-0.55,st_kmax=0.75
+--init <practice file> --only "gK_*" ...` (`scratchpad/sprint2/es.sh`; the ES needs `RUN_NATURAL_START=flying` exported or its rollouts are standing starts, and a start value outside its box is clipped:
+both cost round 2 an hour). Check the search's `start` line is a survivor's score (> 0) before trusting the run. The standing-start entry: `mkgear.py PARAMS OUT --gears K --von <0.1 m/s below the snapshots>`.
+
+Files: `lib/robolab/skills/run_gearx.w`, `lib/entry/run_gearx.w` (RunGearX); `playground/tasks/sprint_touch_v4x.py` (objective 6, the diagnostic torque); `playground/hsearch.py` (`--agg mean`, opt-in);
+`params/run_gearx_v4_p95_x5a.txt` (the champion; frozen binary `bin/challengers/run_gearx-a`, copy in `bin/champions/`); snapshot sets `playground/cache/sprint_touch_run_v4_p95{j,k,m,n}.npz`; every tool,
+practice file, search log and the run-by-run log in `scratchpad/sprint2/`.
 
 ## MyoSuite bodies (MyoChallenge)
 
@@ -1587,6 +2095,404 @@ the phase-1 stance:
 The approach steps (sep-CMA Q, 30 gens on fresh P2 starts): at most two
 steps (1.5-2 s each) before a fall. No soccer_p2 entry this round (0 on
 its most favourable starts).
+
+#### Round 8: 40 strict starts, and what makes the transition fail (9/29)
+
+New trial `soccer_single_leg_310_40` (40 fresh P2 resets, seeds 89100-89139;
+the soccer_single_leg_310 environment, guards and metric; added through the
+arena lock, per-seed rollouts cached under `scratchpad/soccer4/evalcache/`
+by `scratchpad/soccer4/arena_cached.py`, which is `arena.py` with resumable
+rollouts). The round-4 champion holds 300 s on **24 / 40** starts (0.60); the
+round-5 lift challenger (`params/myo_soccer_single_leg_310_lift.txt`) on
+**34 / 40** (0.85, paired diff +0.25, p = 0.006): promoted. The set-ramp challenger
+below (`params/myo_soccer_single_leg_310_ramp.txt`, `bin/challengers/soccer6-i`)
+holds **38 / 40** (0.95; p < 0.001 against the old champion, but the champion had
+changed while it ran; against the promoted 0.85 champion +0.10, p = 0.115: it fixed
+5 starts, broke 1, one fails in both, so it is not promoted). The shift-brake
+challenger (ramp + `bshc`, `params/myo_soccer_single_leg_310_shc.txt`,
+`bin/challengers/soccer6-p`) holds **35 / 40** (0.875, +0.025, p = 0.514, not
+promoted): it fixes 5 of the champion's 6 falls (89106, 89110, 89115, 89117, 89133)
+but 5 of its own 40 runs end in a MuJoCo blow-up inside a motionless hold (89122 at
+15.8 s, 89130 at 141.0 s, 89134 at 134.2 s, 89135 at 130.2 s, 89103 at 255.6 s; the
+champion and the ramp entry had one each), which breaks 4 starts the champion held.
+
+| trial | champion before | challenger | stances holding 300 s | paired diff, p |
+| --- | --- | --- | --- | --- |
+| `soccer_single_leg_310_40` (new, 40 starts) | round-4 cp4 hold 24 / 40 | round-5 lift | **34 / 40** | +0.25, p = 0.006, promoted |
+| `soccer_single_leg_310_40` | round-5 lift 34 / 40 | round-6 set ramp | 38 / 40 | +0.10, p = 0.115, not promoted |
+| `soccer_single_leg_310_40` | round-5 lift 34 / 40 | ramp + shift brake | 35 / 40 | +0.025, p = 0.514, not promoted |
+
+The trial can no longer tell balance controllers apart: the champion's 6 falls are
+the only room for a gain, so a challenger needs 5 fixes and no break (p = 0.031), and
+one blow-up among the 34 starts it must keep is enough to lose (a 6-1 result is
+p = 0.06). Blow-ups hit 7 of the 120 arena runs (lift 1, ramp 1, brake 5: about 6 %).
+
+What the failures are (scans of 120 fresh starts per configuration,
+`scratchpad/soccer4/failscan.py`, `LOG.md`): 17 % of attempts fail within 8 s,
+by last phase: hold 57 %, shift 33 %, lift 10 %. The outcomes are chaotic
+(any change of the first 0.3 s re-draws about half of the failing starts) but
+partly persistent, so variants are compared on 120 starts, not on the failing
+ones. Measured, in the order they were found:
+
+- **The set's ramp.** The chunk that replaces the reset posture (hip flexed
+  +0.15) by the stance (extended -0.26) was a hard-coded 0.3 s and had never
+  been tuned; it lurches the body from foot to foot and spins the feet. V4
+  `bramp` / `b_t_ramp` makes it a tunable: 0.3 s 83.3 % standing with one-leg
+  time (8 s), 0.2 s 91.7, 0.15 s 94.2, 0.1 s 96.7, 0.05 s 97.5 % (z +3.7);
+  slower ramps are worse (0.45 s, 0.8 s). On 120 fresh validation starts
+  (20 s) 0.05 s gives 93.3 % against 87.5 % (fixed 13, broke 6): the honest
+  gain is about +6 %, the rest was selection. With the ramp the failures that
+  remain are the lift's (6 of 8 caught by the put-down at ~3 s), and the
+  right leg first holds as well as the left (111 / 120 at 8 s; the earlier
+  "right leg is poor" was the parent's run-up shift/lift, not the leg).
+- **The hold's hip strategy.** In the failing holds the pelvis rolls 0.1 -> 0.9 rad
+  outward while the stance hip abducts to its -0.87 limit and the capture point
+  runs to 1 m: cp4's hip strategy (throw the trunk into the fall; the sign is
+  right, `cp_kh` +6 fails 8 / 10) is positive feedback for a slow outward drift.
+  A weaker gain (`cp_kh` -6 against -13.9) fixed 5 of 7 hold failures with none
+  broken on paired starts (the pre-lift trajectory is identical, so hold-phase
+  parameters can be compared pairwise); `cp_wash` (fast part `cp_kh`, persistent
+  part `cp_khs` of the opposite sign) and `cp_more` (swing-hip abduction and trunk
+  bend on the excess) are built, untuned.
+- **Drifts in the shift.** In the failing shifts the COM drifts 0.1-0.6 m behind
+  the feet over ~2 s while both ankles sit at their dorsiflexion limit (+0.524)
+  and the lateral shift stalls at 0.7 / 0.3 load. `dsx` (a sagittal hip strategy in
+  double support), `dsi` (a lateral integral in the shift), `bfore` (fore-aft
+  readiness for the lift), `bgset` (a stiffer set: 2.0 -> 66.7 %, worse) did not
+  help; the ramp removed most shift failures by itself.
+- **Catching does not help an outward fall.** `bretry` / `bcout` (catch the fall,
+  retry the same leg) rescued 0 of 11 failing holds: once the roll has started
+  the swing foot on the inner side cannot stop it.
+- **The late failures are a simulator artefact.** One of the 34 holds (89106) stood
+  perfectly still for 220 s and then fell: MuJoCo reports "Nan, Inf or huge value in
+  QACC" at 222.07 s. The set-ramp entry's only late fall (89122, 15.8 s) and the only
+  late fall after the brake (validation 91049: motionless from 4.6 s, roll -0.056,
+  cp 0.000 cm, loads 1.00 / 0.00, then the warning at 16.52 s) carry the same
+  warning. In every hold the swing shank rests on the stance thigh (`tibia_r` -
+  `femur_l`, 1.1 mm penetration) with 190-230 N (12 of 12 starts; a steady
+  period-5-step pattern, no growth before the blow-up); the sustained contact is what
+  the solver blows up on. It is rare and chaotic, not a property of the posture: four
+  cases in ~160 start-runs (89106 at 222 s, 89122 at 15.8 s in the ramp and brake
+  entries alike, 89103 at 255.6 s in the brake entry, validation 91049 at 16.5 s), and
+  shifting any of four hold parameters of 91049 by 0.002 rad removes its blow-up
+  (4 of 4 hold 30 s). The official contact parameters are untouched. Clearance by
+  posture: 0.1 rad more swing-hip abduction clears the thigh by 3.6 cm kinematically,
+  but an abductor drive (`swabd`) leaves 208-219 N, `b_sw_knee` 1.0 gives 140 N (holds
+  8 / 8 at 12 s) and `b_sw_knee` <= 0.8 or `b_sw_th` >= 0.5 fall. sep-CMA M (44 lift and
+  hold parameters, 7 s, 24 random starts a generation, a penalty on the mean inter-leg
+  force above 40 N; `scratchpad/soccer4/search5.py --leg_w`) took the force from
+  ~200 N to 94 N in 7 generations (0 / 24 falls throughout); sep-CMA C2 (12 swing-leg
+  and stance-posture parameters, 5 s, 4 starts a generation, 0.03 per N) to 25 N in
+  18 generations. **Less contact, a less stable hold**: on 120 validation starts (20 s)
+  the brake base holds 119, M's best with the brake 116 and C2's best 111 (each fixes
+  the 91049 blow-up start and breaks 4 and 9 others); a snapshot of C3 (10 N) fell on 4
+  of 8 unseen starts, all four with no inter-leg contact, while the four with 44-73 N
+  stood. The leg contact holds the stance up (or 4-24 training starts are too few to
+  keep the hold while the force is searched down): a clearance that keeps the hold needs
+  16 or more starts per candidate and a re-evaluated elite. `scratchpad/soccer4/legforce.py`
+  measures the inter-leg force and contact fraction of a params file (40 of 40
+  validation starts: 215 N, contact in every step). Anatomy of one blow-up
+  (`blowwarn.py`, a MuJoCo warning callback that dumps the state inside the failing step;
+  91049 at 16.517 s): the 221 N `tibia_r` - `femur_l` contact at 1.07 mm, the stance
+  foot's 125 + 119 N, 13 contacts against 15 a step earlier, and a swing-ankle chatter:
+  `|qacc|` alternates between 5-9 and 83-90 from one control step to the next, all in
+  `ankle_angle_r` (`chatter.py`: rms 62 rad/s^2 against <= 2.5 anywhere else in the
+  body). It is a limit cycle of the leg reflex loop at the 100 Hz control rate: the
+  rms is 60 at `k_leg` 45, 62 at 30, 38 at 28, 14 at 26, 11 at 24, 7 at 22 and none at
+  20 (where the contact drops to 135 N but 2 of 8 starts fall), and 83 with lag-1
+  autocorrelation -0.73 at `kd_leg` 0.2 (0.05 and 0 fall within 3 s). Every hold carries
+  the limit cycle on top of the contact; whether either causes the blow-up (about one
+  start in 40 over 310 s) needs a blow-up rate per arm, which one session cannot take.
+  **Superseded by round 9 below: the cause is a MuJoCo tendon-wrap NaN (a rectus femoris
+  line grazing its wrapping cylinder), not the contact, the solver or the limit cycle;
+  the contact/qacc numbers above were read from MyoSuite's observation mirror `env.mj_data`,
+  not the stepped data.**
+- **The over-shift: what the failing lifts have in common.** The state at the first
+  tick of the lift (240 starts, ramp base, left leg: validation 91000-91119 and
+  training 90000-90119, `scratchpad/soccer4/liftfeat.py`) sorts the failures by one
+  number, the stance foot's lateral capture point (`cpo`, outward +): -1.2 cm +- 0.8
+  in the holds that stand, +0.8 cm in the 8 failing validation starts (z +7.5;
+  training z +5.4). No hold failed with the capture point at or inboard of the
+  foot's centre (0 of 212 lifts); 11 of the 28 lifts outboard of it fell within
+  10 s (10 of 14 beyond +0.5 cm). It is set before the lift: the state at the
+  shift's start predicts it (R2 0.63; the stance width alone r = -0.75, and every
+  outboard lift has a stance narrower than 19 cm), because the shift is
+  feed-forward: `b_shift_add` (0.187 rad) pushes the COM the same way whatever
+  the width. **Waiting is fatal**: V4 `bcpo` (the lift latch also requires
+  cp < b_cpo_max) fixed 0 of 11 and broke 13 of the 17 surviving lifts (36 starts,
+  20 s: they fall in the shift 2.2-3.1 s in; the lift itself is what recovers
+  them). `bshc` closes the loop inside the shift instead: while the swing foot has
+  not unloaded, the stance foot's lateral capture point beyond `bsh_ref` trims the
+  push (the stance hip's adduction down, the swing hip's up) by `bsh_k` rad per
+  m, at most `bsh_lim`. Dose response on the 28 outboard-lift starts plus 8
+  unaffected ones (20 s; a start where the brake stays off is bit-identical to
+  the base, and the default-off build replays the base exactly):
+
+  | brake (`bsh_ref`, `bsh_k`, `bsh_lim`) | of the 11 failing starts | broke (of 25 standing) |
+  | --- | --- | --- |
+  | -0.5 cm, 2 rad/m, 0.08 | 2 fixed | 0 |
+  | -1 cm, 4 rad/m, 0.10 | 7 fixed | 0 |
+  | -1 cm, 8 rad/m, 0.15 | 9 fixed | 1 |
+  | -2 cm, 8 rad/m, 0.15 (`params/myo_soccer_single_leg_310_shc.txt`) | **11 fixed** | 0 |
+
+  The setting was picked on those 36 starts. On all 120 validation starts (20 s) the
+  base's 112 becomes **119** (fixed 8, broke 1; one-sided sign test p = 0.02) and on
+  fresh starts 92000-92119 (the base already holds 117 / 120 there) 117 becomes 119
+  (fixed 3, broke 1). No start falls in the shift or the early hold any more except
+  92027 (2.7 s); what is left is the simulator (next bullet).
+- **New V4 switches this round** (all opt-in, default off replays the older params
+  bit for bit: checked on 36 and 8 starts and the arena's rollouts): `bramp` (`b_t_ramp`),
+  `bgset` (`b_g_set`), `bfore` (`b_fx_tol`), `cp_wash` (`cp_khs`, `cp_tau`), `cp_more`
+  (`cp_ksw`, `cp_klb`), `dsx`, `dsi`, `bretry` (`bc_retry`, `bc_short`, `bc_arm`), `broll`
+  (`bc_roll`), `bwide` (`b_wide`), `swabd` (`sw_drv_abd`), `bcpo` (`b_cpo_max`), `bshc`
+  (`bsh_ref`, `bsh_k`, `bsh_lim`); for phase 2 `sd` (`sn_d`), `k6` (`k6_t_hold`), `k7`
+  (`k7_lean`, `k7_t_lean`, `k7_go`, `k7_t_max`) and `k4_cp`.
+- **No selector for the stance leg.** Left first and right first each hold 112 / 120
+  validation starts (20 s), both hold 106, the best leg per start 118 / 120, so a
+  choice of leg could gain at most 6 starts. At the shift's start "stand on the right
+  leg when the left foot carries more load" picks the better leg on 10 of the 12
+  leg-specific validation starts, but on 6 of 10 on the training starts
+  (left first 117 / 120, the rule 115): a chance fit among the ~8 features looked
+  at (COM offset, stance width, loads, foot yaws, capture point). Dropped.
+- **Phase 2 (the staged curriculum): no goals, no `soccer_p2` entry.** The stork stage
+  is done (the routine holds either leg; the round-5 "right leg is poor" was the
+  run-up's shift, not the leg). The phase-1 champion in the P2 env at the exact
+  phase-1 posture and position scores 6 / 6 (12.3 m/s); joint noise of +-0.001 rad
+  4 / 8, +-0.002 rad 0 / 8, +-0.01 rad 0 / 6; a start 5 cm short still scores, 10 cm
+  short or 10 cm to one side falls at 0.9 s. Under +-0.002 rad the plant lands 30 ms
+  later, the snap fires at the same toe-ball distance but the toe's lateral offset
+  from the ball grows from 2 cm to 8-21 cm (the ball leaves at 2-7 m/s; a 5x
+  stronger lateral aim servo changes nothing): the kick is a knife-edge trajectory,
+  not a skill. From the routine's right-leg hold (V4 `k6`) the plant spot is 0.75 m
+  ahead and the reach never lands the left foot (sep-CMA A, 13 generations, plant
+  score 4.3 of ~13: the parent's reach needs the run-up's forward fall, the COM
+  0.24 m ahead at the lift and 1 m/s forward / 0.86 m/s down at the plant); a
+  standing kick from the robust left stance with the phase-1 swing (`k4`, `k4_cp`,
+  sep-CMA K4, 24 generations) reached a ball speed of 1.7 m/s at best, and a lean
+  phase before the reach (`k7`, A3) lands the foot on 1 of 6 starts. Coverage (a
+  faster approach, a small ES-trained bounded residual) was not started.
+- **Files and tools of this round** (state in the repo, running log
+  `scratchpad/soccer4/LOG.md`): params `params/myo_soccer_single_leg_310_ramp.txt`,
+  `params/myo_soccer_single_leg_310_shc.txt`; frozen challengers
+  `bin/challengers/soccer6-a` ... `soccer6-p` (`-i` ramp, `-p` brake); the trial and
+  champion in `playground/arena/`; in `scratchpad/soccer4/`: `arena_cached.py`
+  (resumable arena), `evalstatus.py` (partial arena results), `failscan.py` (a params
+  file on a seed list, phases and fall times), `cmpscan.py` / `cmpcpo.py` (paired
+  comparisons of two scans), `liftfeat.py` (the state at the lift), `search5.py` /
+  `search6.py` (sep-CMA on the hold with a leg-force term), `legforce.py`,
+  `chatter.py`, `blowwarn.py`, `contactlog.py`, `trace_late.py` (the blow-up tools),
+  `p1probe.py` (the phase-1 kick under start noise), `p2/` (the phase-2 stage bests).
+  Next: (1) a swing posture or gain set that removes the blow-up without the hold's
+  loss (16 or more starts per candidate, a re-evaluated elite, a blow-up rate per arm
+  measured over a few hundred hold-seconds x starts) [not needed: round 9]; (2) a trial that can certify the
+  gain (more starts, or a 20 s metric beside the 300 s one) [done: round 9]; (3) phase 2 needs a
+  closed-loop kick, not another search on the phase-1 trajectory.
+
+#### Soccer round 10: the closed-loop kick (9/29, agent P): no-go, and why
+
+Asked for: the first real phase-2 goals from a closed-loop kick (a toe-to-ball servo in the last 100 ms on the phase-1 trajectory), grown stage by stage, with a
+go/no-go after the noise ladder. **Verdict: no-go.** No closed loop on the phase-1 kick closes even the +-0.002 rad rung (29 % of held-out starts score, from
+96 % without noise), no `soccer_p2` entry was made (0 / 100 goals for every controller, so nothing to promote), and the measurements below say why: the swing is not
+where the noise is decided, and the kick's structure depends on a leg-on-leg contact that the swing-phase controls measured here cannot steer. Everything is in
+`scratchpad/kick/LOG.md` (every run with its command line); tools and the skill are listed at the end.
+
+**Three facts about the environment that change the target** (read from the MyoSuite source and checked on the model)
+
+- *The goalkeeper is a decoy.* MyoSuite steps the physics on `robot.mj_data`; `env.mj_data` (what the bridge and the env's `step` read and write) is a mirror rebuilt from
+  the sensors after every step. The keeper's mocap body is moved on the mirror only, so the OBSERVED keeper (random y; stationary / random / block_ball for 58 / 30 / 12
+  of seeds 5000-5099) never touches the ball, while the PHYSICAL keeper stands still at (50, 0) with a 0.25 m capsule: a 12 m/s ball aimed at y = 0.0 comes back, y = +0.3
+  is deflected, |y| >= 0.5 crosses clean. The scoring window is cross y in +-[0.5, 3.2], a launch angle of +-[2.9, 17.8] deg; the champion's two aims (y +1.1 / -1.8) sit in it.
+  (Consequence for tooling: snapshots of the physics must read and write `robot.mj_data`; an open-loop replay from a saved state with the recorded activations is then
+  bit-identical, and so is a fresh controller re-fed the recorded sensor lines: `scratchpad/kick/kreplay.py`.)
+- *Coverage.* The official starts (seeds 5000-5099) are 0.15 / 0.3 / 0.5 / 0.75 / 1.0 m or less from the phase-1 stance for 2 / 6 / 20 / 42 / 77 of the 100; behind the
+  stance by <= 0.3 m and |dy| <= 0.3 m: 10. A perfect kick that needs the phase-1 stance to +-0.3 m can score at most ~6-10 goals.
+- *The kick needs ~+-2 cm laterally.* Champion, noise 0, root offsets (6 starts each): dx -0.02 / -0.05 m 6 / 6 and 6 / 6, -0.075 / -0.1 m 0 / 6 (the plant lands short and
+  the run-up falls), +0.03 / +0.05 m 3 / 6 and 6 / 6; dy +0.02 m 3 / 6, -0.02 m 0 / 6 (a 11 m/s ball, then a fall), +-0.05 and +-0.075 m 0 / 6.
+
+**The noise ladder** (full rollouts, official metric `goal`, held-out seeds 6000-6047, phase-1 champion `bin/champions/soccer_p1-20260926-151503`; noise scale x the P2 draw of
++-0.02 rad on every joint, root at the phase-1 stance; `scratchpad/kick/kltable.py`, `out/ladder_champion_48.json`)
+
+| rung | noise | plant landed (swing reached) | touched | ball >= 8.5 m/s | inside the window | goals | fell before the touch | fell at all |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 0 | none | 48 | 48 | 48 | 47 | 46 | 0 | 2 |
+| 0.05 | +-0.001 rad | 48 | 48 | 39 | 27 | 18 | 0 | 27 |
+| 0.1 | +-0.002 rad | 48 | 48 | 23 | 15 | 14 | 0 | 28 |
+| 0.25 | +-0.005 rad | 48 | 41 | 9 | 6 | 8 | 5 | 36 |
+| 0.5 | +-0.01 rad | 48 | 34 | 5 | 1 | 0 | 14 | 44 |
+| 1.0 | +-0.02 rad (official noise, phase-1 position) | 47 | 28 | 3 | 1 | 0 | 20 | 46 |
+
+Per stage, all of 48 held-out starts (seeds 6000-6047): the plant lands in every start at every rung, so the failure is not "the run-up falls before the kick" until +-0.005 rad; it is a kick
+that happens and goes slow or sideways (mean ball speed 12.3 / 9.8 / 7.9 / 4.8 / 3.8 / 1.9 m/s) and a body that falls after it (27 of 48 at +-0.001 rad).
+
+(Development set, seeds 5000-5071, `kladder.py`: +-0.001 rad 38 / 72, +-0.002 rad 18 / 72.) On the official reset (`soccer_p2` seeds 5000-5099) the champion, whose default
+`approach` walks quasi-static steps to the stance first, per stage: on its feet at 1.5 s 75 / 100 (median fall 1.68 s), run-up reached the swing 1, touched the ball 1, goal 0
+(within 0.3 m of the stance: 6 / 6 up at 1.5 s, still 1 touch). Agent O's numbers for the other stages stand: plant from the right-leg hold best 4.3 of ~13, standing kick
+1.7 m/s, coverage not started. Mine below.
+
+**What limits the swing-phase closed loop** (each item is a measurement; the tools are in `scratchpad/kick/`)
+
+- *Where the noise grows* (`kdiverge.py`, +-0.001 rad, distance to the noise-0 run of the same seed): joint vector 0.02 rad at 0.3 s, 0.04 at 1.0-1.3 s, 0.10 at the reach, 0.22-0.30
+  at the plant, 0.68 at 2.0 s; the toe's lateral error 1.5 cm at the swing start, 7.4 cm (max 13.6) at the touch. The state at the swing start predicts the contact badly (ridge on 45
+  features: contact y R2 0.3, ball speed 0.7; best single-feature AUC 0.72), yet the swing itself is smooth: +-0.005 rad of joint noise at the swing start moves the contact by
+  0.5-0.9 cm (`klip.py`). The deviation is the large structured one (hip rotation -0.29 vs -0.71 rad) that the run-up leaves.
+- *Oracle headroom* (`khead.py`, replays from the swing start on 48 noisy starts, champion 16 / 48 good): the best of 24 random +-10 % variants of 13 swing parameters, chosen per
+  start, is good on 22 / 48. The failures are set by the state the run-up delivers to the swing (the plant lands in every start, but with a different body); no choice of swing parameters, and so no feedback on them, recovers most of them.
+- *No authority in the aim servo.* The kicking hip's adduction sits on its 0.5236 rad limit from 1.87 s to the touch in every kick (the champion's `k_ky` servo drives it there:
+  5x its gain changed nothing, as O found), and joint-offset targets on the hip rotation go through the reference length tables, which in the swing posture give the wrong sign
+  (`rot_k` +0.3 moved the achieved rotation by -0.07 rad). In torque space (live moment arms, `kauth.py`: 20 N m for 80 ms about one joint of the kicking leg, spread over the muscles
+  that cross it) the contact moves +-3-7 cm at best and the ball loses 1-4 m/s; plant-leg and trunk torques move it 1-3 cm.
+- *The kick is guided by leg-on-leg contact.* Thigh-thigh and shank-shank contact of 1.3-2.6 kN in every phase-1 kick (14-25 ticks in the fast ones; the slow ones stay in contact 17-65 ticks and add foot-foot contact);
+  with the model's 14 explicit contact pairs switched off (diagnostic, `KICK_NOLEGCOL=1`) the champion scores 0 / 16 at noise 0 (16 / 16 with them). Moving the plant foot 5-20 cm
+  sideways (`plant_dy`), which would clear the legs, breaks the kick at noise 0: the run-up, plant and aim are co-tuned.
+- *Which reset noise matters* (`kladder.py --groups`, +-0.002 rad on a subset of the 48 joints, 16 starts, goals): spine only 13, right leg only 5, left leg only 9; right hips 11, right knee
+  13, right feet 13, right SLAVED KNEE JOINTS (the 8 equality-constrained translation/rotation/patella coordinates, given noise of their own = a constraint violation the solver removes
+  with a jolt at t = 0) 7, left slaved knee joints 8. A long settle does not filter it (t_set 1.5 s: the joint-vector deviation is still 0.26 rad after 1.4 s at the official noise, the soft joints keep
+  their angles, the COM is back within 2 cm), and the phase-1 run-up does not start from a settled stance (0 / 8 at noise 0).
+- *The falls after a good kick* (19 % of the +-0.001 rad kicks, 11 % at +-0.002) are a flight, not a loss of balance: 0.2 s after the touch both feet carry 0 % of the weight (straight plant leg,
+  the follow-through's reaction; pelvis 1.00 -> 1.07 m, yaw swings -0.27 -> +0.56 -> +2.1 rad), the plant foot whips 0.7 m across, the landing is rotated. The single-leg routine's stance terms after
+  the touch (`kr`: cp4 + twist-limited heading hold with the hold's parameters) take the noisy good-contact starts that stay up until the goal from 27 to 31 of 40 on the training set and from 18 to 19 of 27 on held-out ones (fixed 3, broke 2), but at noise 0 they
+  break the champion's own follow-through: 6 / 12 goals instead of 12 / 12 (`kltable.py`, seeds 6000-6011). One-parameter scans of the follow-through, landing and plant-leg posture around it move the
+  40-start score by at most +1, and a torque-space brake of the follow-through does nothing.
+- *Landing the plant foot on the capture point* (`kp`, the plant stage: the reach lands its foot on a fixed spot beside the ball while the body is falling onto it): moving the landing spot by the COM's
+  velocity times a gain (`kp_cpx` forward, `kp_cpy` sideways; full rollouts, held-out seeds 6000-6047, goals of 48 at noise 0 / 0.05 / 0.1 / 0.25): champion 46 / 18 / 14 / 8; `kp_cpx` -0.05: 47 / 29 / 11 / 3; -0.1:
+  48 / 20 / 9 / 5; the sideways gain trades one side's lateral tolerance for the other's (`kp_cpy` -0.03: dy -0.02 m 6 / 6 but dy +0.02 m 0 / 6 and noise 0 3 / 6). A mixed picture within the sampling noise
+  of 48 starts (the champion scores 38 / 72 at +-0.001 rad on the development seeds and 18 / 48 on the held-out ones), so not adopted.
+- *The kc terms* (torque-space aim, heading, height and speed channels on the swing): one-at-a-time scans of ten gains by hand on 48 noisy starts (champion 16 / 48 good): +300 / -300 on the rotation
+  channel 12 / 14, adduction 16 / 16 (pinned on its limit), velocity terms 9-17; sep-CMA over 40 swing, aim, recovery and kc parameters (`runE2.sh`, replays from the swing start) and over the 11 kc
+  gains (`runE2b.sh`) stopped after one generation each: x0 stayed the best, and the headroom measurement above says why.
+- *The standing kick* (wind-up on the plant leg, then a swing from rest; the state to start from would be repeatable): with the ball in front of the kicking foot the wound-back foot still ends 0.3 m LEFT of
+  the ball's line, because the pelvis yaws -0.45 .. -1.1 rad on the plant foot during the wind-up (the plant hip's rotation hits its -0.7 stop; the known one-leg heading blocker, README round 3). A torque
+  heading hold on the plant hip (clipped at the foot's ~50 N m grip) moves the yaw at the swing start from -0.56 to -0.45; kicks 0-2 m/s, 0 goals.
+
+**What was built** (opt-in, the champion replays bit for bit with every switch off: checked on noisy dumps for the first and the last build)
+
+- `lib/robolab/skills/myo_kick.w` (+ `lib/entry/myo_kick.w`, `./build.sh myo_kick`; `MyoKickSkill < MyoSoccerV4Skill`): `kc` torque-space channels on the swing (kicking hip rotation / adduction from the toe's
+  lateral error and velocity, plant-hip heading and adduction, knee and hip from the toe's height and speed against the practised path), `kr` (routine stance terms after the touch, plus a plant-leg posture
+  and a torque brake for the follow-through), `kp` (capture-point placement of the plant step), `kw` / `kt` (a standing kick's wind-up and swing as a joint torque servo of the kicking leg, and a torque heading hold), the torque ones through one generic channel
+  (`kc_torque`: a joint torque spread over the muscles by their live moment arms, the way `Controller#split_torque` does with the geometry's). Params `params/myo_kick_base.txt` (champion + `kc 1`,
+  `sense_arms 1`, gains 0), `params/myo_kick_kr0.txt`, `params/myo_kick_kp1.txt` (the best rung-0.05 variant, not adopted), `params/myo_kick_lab0.txt`; frozen `bin/challengers/kick-a0` ... `kick-a9` (a9 is the current `bin/robolab_myo_kick`; with `params/myo_kick_base.txt` it replays the 16 noisy dumps I checked bit for bit and scores 0 / 100 on `soccer_p2` like the champion: entered in the arena for the record, not promoted).
+- The harness (`scratchpad/kick/`): `kcommon.py` (per-tick sensor lines, replies and physics state of a run; controllable reset: the P2 draw x a noise scale, joint groups, root offsets), `kladder.py` /
+  `kltable.py` / `kstages.py` (ladders and stage counts), `kprobe.py` / `kauth.py` / `kfb.py` (open-loop physics probes and authority maps from a saved state), `kreplay.py` (a saved state restored, a
+  fresh controller re-fed the recorded sensors, then live: identity check bit for bit; ~0.5 s per replay), `kbatch.py` / `kscan.py` / `ksearch.py` (batches, one-at-a-time scans and sep-CMA on replays,
+  resumable), `khead.py`, `kdiverge.py`, `kpredict.py`, `kdiscrim.py`, `klip.py`.
+
+**Next, if this line is continued** (none of it is a swing-phase feedback): a kick whose plant foot stands beside the ball, so the swing needs no leg-on-leg contact, re-optimised stage by stage from
+checkpoints with the replay harness (swing from the plant, plant from the lift, ...); a torque-space stance and heading controller for the run-up in place of the offset servos (live moment arms are
+the mechanism that works at the hip); and an approach, which needs a walking gait this body has not shown (the spine folds), since 0.3 m of coverage is at most 6-10 of the 100 starts.
+
+#### Soccer round 9: the hold blow-ups (9/29)
+
+The blow-ups inside motionless one-leg holds ("Nan, Inf or huge value in QACC at DOF 6", 7 of 120 arena runs and validation start 91049)
+are **a MuJoCo 3.6.0 arithmetic bug, not a property of the stance**, and not the 215 N leg contact or the solver. Written up with a minimal
+reproduction, the source location and a one-line fix in `playground/repros/mujoco_wrap_nan.md` (not filed anywhere: Erik decides); the
+arena now has guarded trials that do not lose holds to it.
+
+- **Root cause.** MuJoCo's `length_circle` (`engine_util_misc.c`, tendon wrapping around a cylinder or sphere) computes `acos(dot(p0n, p1n))` of
+  the two normalised tangent points. When a tendon line only grazes the wrapping cylinder (relative margin `(r^2 - d^2) / r^2` under
+  ~6e-8, a line within ~1 nm of the tangent for r = 25 mm) the points are ~2e-8 rad apart, the dot product of two unit vectors
+  rounds above 1.0 in about one case in ten, `acos` returns NaN, and `mju_wrap`'s `wlen < 0` test does not see it: the tendon length,
+  moment arms and muscle force turn NaN, `qacc` goes NaN on the whole tree (DOF 6 is only the root's first dof: dofs 0-5 are the ball's
+  free joint, 6-11 the kicker's), `mj_checkAcc` resets the data and the kicker falls 0.2-0.4 s later. In every hold blow-up the tendon is
+  the same one: `recfem_r_tendon`, the swing leg's right rectus femoris (path pelvis -> cylinder `KnExt_at_fem_r_wrap` -> patella), the only one of the
+  68 wrapped tendon segments that hovers at its tangent in the holds (`ring_segments.py`). It is not specific to that muscle or to holds: the guarded
+  arena runs also caught `IL_L1_r_tendon` (a trunk muscle wrapping `back_cylinder_s`) at 2.12 s of start 96029, a NaN the official environment would have scored as a balance failure.
+- **Evidence.** Deterministic repro (`scratchpad/blowup/capture.py`, 16 s wall, bit-identical MjData over all 1651 control steps on two runs;
+  bit-exact open-loop replay of all 16 500 substeps from the recorded controls): 91049 at 16.517 s, 89122 at 15.811 s, 89134 at 134.214 s, 89135 at 130.209 s,
+  89130 at 141.040 s, and the guarded reruns hit 89103 at 255.550 s and 89106 at 222.068 s at the same instants. At the failing substep exactly one tendon length
+  is NaN and `mj_fwdPosition` (kinematics + tendons: no solver, contact or actuator) already returns it; the state holds no precursor
+  (`precursor_scan.py`: contact count, constraint count, solver iterations, largest constraint force, the leg-contact force, joint
+  limits, muscle forces: no jump into the last substep beyond their ordinary substep-to-substep changes; the Newton solver converges in one iteration throughout).
+  Sweeping one hip angle 2e-6 rad in 1e-10 steps through the failing state (40 001 real `mj_fwdPosition` calls): 272 NaN, all with the wrap active and margin
+  <= 5.5e-8, the NaN fraction following the exact 60-digit `1 - dot` (30 % below 1e-17, 6 % near 1e-16, 0 above 2.5e-16). A standalone C harness of the 3.6.0 wrap code
+  (`playground/repros/mujoco_wrap_nan_harness.c`): 6834 NaN in 40 001 points, all with `dot > 1.0`, and 0 with the dot clamped. A pure-MuJoCo model (`mujoco_wrap_nan_repro.py`, one
+  cylinder, three sites): 859 NaN of 8001 cylinder points, 651 of 8001 sphere points. Upstream `main` (fetched 9/29) has the same four functions byte for byte.
+- **What the bisect excludes** (`scratchpad/blowup/bisect_variants.py`, private model copies): on the bit-exact failing substep the tendon NaN survives every change of
+  timestep (dt/2), solver (CG, PGS), iterations (500, tol 1e-12), cone, impratio, noslip, islands, integrator (implicitfast), Jacobian, warmstart, contacts off, the
+  tibia_r - femur_l pair removed or softened, muscle activation dynamics x2, the wrap's sidesite removed, and swing-ankle damping; only wrap-geometry changes (radius x(1 + 1e-6), x(1 - 1e-3), 0) remove it. From 300 steps earlier only the
+  variants that keep the trajectory bit-identical reproduce the event at 16.517 s; every other change re-rolls the rounding, which is why O's 0.002 rad change of a hold parameter "cured" 91049 4 of 4 times.
+- **Why it looked rare and chaotic.** The sliver is ~1 nm wide and each visit to it is NaN with probability ~0.1, but the parked swing leg keeps returning to it: the captured
+  blow-up holds are strong hoverers (the rectus femoris line within 1e-3 (12 um) of the tangent in 34-94 % of the control steps, 57-335 tangent crossings in 15-20 s; 91049: the margin settles
+  from +7e-4 to ~0 within 4 s and stays at 0 +- 2e-4 while the swing ankle chatters by 4e-3 rad from one control step to the next and the hip by 1e-4 rad), and the line visits `0 < margin < 6e-8` at random:
+  in 91049 twice in 16.5 s (11.236 s survived, 16.517 s NaN). Telemetry of the guarded runs on 120 fresh starts per entry (below) puts the population figure at 0.4-1.4 % of the hold's substeps within 1e-4 of the tangent,
+  and a NaN hazard set by how much of a start's hold sits there, hence ~6 % of the 310 s holds.
+- **What O's tools read.** `env.unwrapped.mj_data` (`MyoSim.d`) is not the stepped data: MyoSuite's `Robot` owns its own `MjData` and steps that; `env.mj_data` is a mirror re-synced
+  once per control step (time, qpos, qvel, act, then `mj_forward`; ctrl 0, no warm start). The contact, qacc and efc numbers of `blowwarn.py`, `contactlog.py`, `chatter.py` and `legforce.py`
+  are the mirror's. The same NaN also reaches the controller through it: a sliver state at a control-step boundary is evaluated by the mirror first, the controller
+  receives a NaN muscle length, MuJoCo answers "CTRL at ACTUATOR 239" and zeroes *all* controls (89103, 89130).
+- **The fix (a labelled variant, not an edit of the official environment).** The bug is in MuJoCo, so the repo cannot fix it; the report proposes the one-line fix
+  (`mju_clip` the cosine in `length_circle`, checked on the C harness: 6834 NaN -> 0). `playground/tasks/myo_soccer_ng.py` (the soccer task with a NaN guard; env
+  `MYO_SOCCER_NANGUARD=0` counts only) advances the stepped `MjData` through a guard: snapshot the integration state, `mj_step` exactly as MyoSuite does, and only when MuJoCo reset
+  the data *and* a tendon length is NaN at the snapshot redo the substep after a deterministic 1e-10 rad nudge of the joint angles (x10 every three tries); any other
+  instability is replayed as MuJoCo produced it (`nan_other`, 0 so far). The mirror (`env.mj_data`) is checked after every control step, because a sliver state at a
+  control-step boundary reaches the controller first (guard v1 without this lost 89103 and 89106 within a second of the event: all controls zeroed). Until a NaN a rollout is
+  bit-identical to the official environment's: 89101 25 s (same final `MjData` hash), the six event-free re-runs of the failing starts of the guarded trial (5 lift falls, the ramp's 89133: every
+  base metric equal to the official row), and the official-vs-guarded identity scan of the 120 hold20 starts (119 of 119 event-free starts identical in every base metric; the 120th, the trunk
+  event of 96029, officially falls and passes guarded). All seven known events reproduce at the official instants and are survived:
+
+  | start | entry | official: NaN at, fall | guarded: events | guarded 310 s run |
+  | --- | --- | --- | --- | --- |
+  | 89106 | lift | 222.068 s, falls 222.4 s | 2 (222.068, 227.74) | holds, bal1 307.6 |
+  | 89122 | ramp, brake | 15.811 s, falls 16.15 s | 2 | holds, 308.5 |
+  | 89130 | brake | 141.040 s, falls 141.24 s | 1 | holds, 308.1 |
+  | 89134 | brake | 134.214 s, falls 134.57 s | 1 | holds, 308.6 |
+  | 89135 | brake | 130.209 s, falls 130.55 s | 1 | holds, 308.1 |
+  | 89103 | brake | 255.550 s, falls 255.75 s | 1 | holds, 308.2 |
+  | 91049 | brake | 16.517 s, falls 16.86 s | 1 | stands to 30 s, bal1 28.3 |
+
+- **New trials** (arena lock, `scratchpad/blowup/add_trials.py`; per-start tables in `scratchpad/blowup/RESULTS.md`; `arena_ng.py` is `arena.py` with a rollout cache keyed by the
+  task source): `soccer_single_leg_310_40_ng` (the 40 starts of `soccer_single_leg_310_40`, 310 s, `bal1_300`) and `soccer_hold20_120_ng` (120 fresh starts, seeds 96000-96119,
+  20 s, `hold20` = standing since the start and on one leg for the last 15 s). Both run `myo_soccer_ng`. The three entries of round 8:
+
+  | entry | `soccer_single_leg_310_40` official | `_ng` (310 s, 40 starts) | `soccer_hold20_120_ng` (20 s, 120 starts) |
+  | --- | --- | --- | --- |
+  | round-5 lift | 34 / 40 | 35 / 40 (seeded) | 102 / 120 (seeded) |
+  | round-6 set ramp | 38 / 40 | 39 / 40, +0.100, p = 0.066: not promoted | 113 / 120, +0.092, **p = 0.006: promoted** (fixed 14, broke 3) |
+  | ramp + shift brake | 35 / 40 | **40 / 40**, +0.125, **p = 0.034: promoted** (fixed 5, broke 0) | 118 / 120, vs ramp +0.042, p = 0.067 (fixed 6, broke 1); vs lift +0.133, p < 1e-4 (fixed 16, broke 0) |
+
+  The guard turns the brake from the entry that lost 5 holds to the blow-up (35 / 40) into the first to hold five minutes on all 40 stances, and reverses the official ranking (lift 34,
+  brake 35, ramp 38 -> lift 35, ramp 39, brake 40). The 310_40_ng trial is now saturated (no room above 40 / 40): early-fall gains are certified on `soccer_hold20_120_ng`
+  (the ramp's gain, +4 starts at p = 0.066 on the 40-start trial, is +11 starts at p = 0.006 there); a five-minute trial with more starts costs about 3 h per entry for 120 (see the scan below).
+  The five real falls of the lift entry (89110, 89115, 89117, 89130, 89133) and the ramp's 89133 reproduce the official rows exactly and had no NaN: they are balance failures.
+  hold20 falls happen at 1.3-11 s standing (the lift, the shift, the first seconds of the hold); the passes hold from ~2 s to 20 s. Failing starts, lift (18): 96023 96033 96039 96043
+  96045 96052 96055 96064 96067 96070 96081 96086 96095 96096 96098 96100 96105 96116; ramp (7): 96011 96055 96059 96095 96098 96103 96116; brake (2): 96023, 96116.
+- **Hazard exposure per entry** (telemetry of the guarded hold20 runs: the right rectus femoris's margin at every substep after 3 s, 120 fresh starts x 20 s per entry, all real runs):
+
+  | entry | substeps within 1e-4 / 1e-5 / 1e-6 of the tangent | starts with > 1 % of the hold within 1e-4 | sliver states (0 < margin < 1e-7), survived + NaN, per 1000 start-seconds |
+  | --- | --- | --- | --- |
+  | round-5 lift | 0.48 % / 0.047 % / 0.005 % | 5 of 116 | 3 + 0 (1.7) |
+  | round-6 set ramp | 1.21 % / 0.119 % / 0.013 % | 25 of 119 | 7 + 0 (3.6) |
+  | ramp + shift brake | 1.41 % / 0.153 % / 0.016 % | 25 of 120 | 21 + 1 (10.9) |
+
+  The ramp family parks the swing leg's rectus femoris at its wrap tangent about 3x more than the lift entry does (per-start paired sign-flip p = 1e-4 for ramp and for brake against lift at 1e-4 and 1e-5, 0.005 and 3e-4 at 1e-6),
+  while brake against ramp is not different (p = 0.31, 0.12, 0.09): the ramp's swing posture is where the hazard lives, and O's "the brake raises the hazard" was that plus a 5-against-1 draw
+  (official counts 1 / 1 / 5 in 10.8 k / 11.8 k / 11.5 k start-seconds; exposure-proportional expectation 0.9 / 2.8 / 3.3).
+- **Blow-up rate per entry** (counts, not impressions). Official runs (each first event ends the hold): lift 1 in 10 783 start-seconds, ramp 1 in 11 799, brake 5 in 11 529, i.e. 0.09 / 0.08 / 0.43 per 1000
+  start-seconds, 7 in 34 111 pooled (1 per 4.9 ks, 6 % of the 310 s holds; brake against the other two, one-sided p = 0.05). Guarded (every event counted, the passing starts identical to the official runs and so event-free):
+  310 s x 40 starts: lift 2 events in 10 876 start-seconds (89106 twice), ramp 2 in 12 095 (89122), brake 6 in 12 400 (0.18 / 0.17 / 0.48 per 1000); 20 s x 120 starts: lift 1 (a trunk tendon) in 2 112 start-seconds,
+  ramp 0 in 2 304, brake 1 in 2 375. All 10 distinct events (8 in the 310 s runs, 89122 counted once; 2 in the 20 s runs) were nudged (`nan_nudged` = `nan_events`); no event went unrecovered and no other reset occurred (`nan_other` 0 in every entry); 4 of the 10 were control-step-boundary (mirror-first) events (89103, the second of 89106, 89130, 96029). Mechanism closure on the brake, all 40 starts of the 310 s trial run for real (`full310.py`: the 35 passing starts re-run for the full 310 s, each identical to its official row in every base metric and event-free, plus the
+  5 re-runs; 12 400 start-seconds, 12.28 M substeps of the right rectus femoris watched): **60 states in the NaN sliver, 54 survived and 6 NaN**; the table of P(NaN | exact 1 - dot) measured on the real library
+  (three geometries) predicts 6.27 events for those 60 states, observed 6 (P(NaN | sliver state) = 0.10, 95 % 0.05-0.20); the exact 1 - dot of the six is 4.6e-19 ... 5.8e-17. The wrap was within 1e-4 / 1e-5 / 1e-6 of the tangent in 1.0 / 0.10 / 0.010 % of the substeps
+  (against 1.4 / 0.15 / 0.016 % in the first 20 s: the exposure per second is lower in the long holds).
+- **The five-minute hold on fresh starts (a supplementary scan, not an arena trial).** The brake at 310 s under the guard on 69 of the 120 fresh hold20 starts (96000-96038 and 96060-96089; the
+  rest was not run, the machine was loaded, and the 120-start trial `soccer_single_leg_310_120_ng` was withdrawn unseeded; `prefill_310_120.py`, `add_trial_310_120.py` and `analyse_120.py` resume it):
+  **68 / 69 hold 300 s**. The one failure is 96023, the hold20 fall at 11.1 s; none of the 68 starts that pass hold20 fails later. 15 NaN events in 6 starts, all `recfem_r_tendon`, all survived (`nan_other` 0):
+  96081 x7 (first at 14.3 s), 96010 x4 (25.1 s), 96088 (31.4 s), 96070 (50.2 s), 96022 (191.1 s), 96080 (282.7 s); in the official environment each of those six holds would have ended at its first event, so it would
+  have held 62 of the 69. Mechanism check on this second set: 224 sliver states (209 survived + 15 NaN), the table predicts 15.8 events, observed 15 (P(NaN | sliver state) = 0.07). Pooled with the 40-start
+  trial: **108 / 109 five-minute holds under the guard** (the one fall is the real hold20 failure 96023) against 97 / 109 in the official environment (11 holds lost to the bug, plus that fall).
+- **Files and tools of this round** (state in the repo, running log `scratchpad/blowup/LOG.md`, per-start tables `scratchpad/blowup/RESULTS.md`). New: `playground/tasks/myo_soccer_ng.py` (the guarded task);
+  `playground/repros/mujoco_wrap_nan.md` with `mujoco_wrap_nan_repro.py`, `mujoco_wrap_nan_harness.c`, `myosuite_soccer_wrap_nan_state.py` and `mujoco_wrap_nan_states/` (five 7.5 KB saved `MjData` states) - self-contained
+  and not filed anywhere; the trials `soccer_single_leg_310_40_ng` and `soccer_hold20_120_ng` in `playground/arena/trials.json` (champions frozen in `bin/champions/`, entries in
+  `history.jsonl`); in `scratchpad/blowup/`: `capture.py` (an arena rollout with a MuJoCo warning callback and a ring of `mj_getState` per control step), `replaylib.py` (bit-exact replays), `wrapdiag.py` / `wrapscan.py`
+  (a port of `wrap_circle`; the margins of all 68 wrapped segments), `hazard_replay.py`, `nan_band_scan.py`, `bisect_variants.py`, `precursor_scan.py`, `knee_map.py`, `ring_segments.py`, `margin_trend.py`,
+  `analyse_fail.py`, `guardscan.py`, `test_guard.py`, `arena_ng.py` (the arena with a resumable rollout cache), `add_trials.py`, `prime_310.py`, `full310.py`, `identity_scan.py`, `analyse_arms.py`, `analyse_mechanism.py`,
+  `analyse_full310.py`, `analyse_120.py`, `prefill_310_120.py`, `add_trial_310_120.py`, `make_tables.py`. Unchanged: `myo_soccer_v4.w`, the bridge, the SDK, the arena code (`playground/arena/README.md` gained a note on the `_ng` trials). Two things to know about the
+  310_40_ng entries: their passing rows were copied from the identical official runs (each cache entry says `primed_from`; 35 of the brake's were then re-run for real and matched), and the `report` means of their
+  `nan_*` keys cover only the re-run starts.
+- **Next.** (1) Erik decides on an upstream report: the repro file has versions (3.2.7 ... 3.14.0 give the same counts), source lines, a minimal reproduction and the one-line fix. (2) Balance work should use the `_ng`
+  trials: `soccer_hold20_120_ng` has room (champion ramp 113 / 120, brake 118 / 120), the 40-start 310 s trial is saturated by the brake. Searches (`search5.py`) still use the unguarded task, where a NaN costs one
+  candidate-start in about 5000 s. (3) The official `soccer_single_leg_310_40` board is unchanged (lift, 34 / 40): its brake and ramp entries lost 5 and 1 holds to the bug. (4) Other bodies: the shared
+  `MUJOCO_LOG.TXT` has late warnings only from the soccer body (the other tasks' QACC / CTRL warnings are all early, under 5 s, candidate instabilities), so no other task is known to be affected, but any MyoSuite model
+  with wrapped tendons can meet the sliver and the guard class is model-agnostic. (5) Phase 2 is unchanged (no goals).
 
 ### Locomotion on the myoLeg (chase-tag)
 
@@ -2486,6 +3392,246 @@ so none was entered in the arena.
 .venv-myo/bin/python playground/arena.py eval tt_p2_300 --params params/myo_tt_p2_r9_lt_bh.txt --controller bin/challengers/myo_tt_r9-a
 ```
 
+### Table tennis: where P2 is lost, a bounce-tick artifact, and a screening design (round 10)
+
+`skills/myo_tt_v11.w` (`MyoTTV11Skill < MyoTTV10Skill`, entry `lib/entry/myo_tt_v11.w`) adds the round-10 options, each off by default: `bk` (a guard for the
+table-bounce tick), `kk` (a late pelvis kick, with the backhand's own `kk2_amp`, `kk2_k`, `kk2_v0`, `ns_k2`, `k_vpm2`), `ns_k` (aim pitch by serve speed), `pv` (a pelvis speed
+governor), `qa` (a yaw-only forehand servo), `sg`, `ts_lead` / `bh_ts_lead` (the servo's start timed on the contact). With every option off it plays the round-5 champion serve for serve (60 of 60 and 40 of 40 P2 serves identical on every metric,
+`out/tt_r10/chk_r10i.jsonl`, `chk_r10j.jsonl`). The parent skill got two hooks (`plan_ball`, `height_ball`), two parameters (`bh_p_z`, the backhand's proportional height gain; `fh_gain`, the forehand's arm reflex gain, the analogue of `bh_gain`) and a
+`bh_box_dx` that may be negative, all defaulting to the old behaviour. Round 10 measured why `tt_p2_300` sits at 33% before it tried to move it: 600 fresh serves of the champion, per-serve time
+series, an offline model of the return, and a fixed-serve screening design.
+
+**Result.** `tt_p2_300` rises from 33.0% to **40.0%** (120 of 300 serves; paired +0.070, p 0.002): the round-10 candidate c3 was promoted to champion (`bin/champions/tt_p2_300-20260929-101727`, `params/myo_tt_p2_r10_c3.txt`,
+built from `bin/challengers/myo_tt_r10-n`). The forehand is the old champion's, serve for serve (60 of 156 = 38.5%); the backhand goes from 39 of 144 (27.1%) to 60 of 144 (41.7%). On 900 serves never used to tune anything the gain is
+30.2% -> 37.7% (backhand 21.8% -> 35.9%; paired p 0.004 and < 0.0001 on the two blocks). `tt_p1` stays 100% (50 of 50); `tt_p2_backhand` goes from 22.9% to 35.9% (p 0.001, promoted there too). A later candidate, c5
+(`params/myo_tt_p2_r10_c5.txt`, same binary), is better on fresh serves (900: 40.9% against c3's 37.7%; backhand 42.0% against 35.9% and the round-5 champion's 21.8%) and scores 121 against c3's 120 in the arena (p 0.51): the arena's 300
+seeds cannot tell them apart. 90% is not within reach of this arm (ceiling table below): the gain came from finding and removing a one-tick artifact in the servo at the table bounce, restoring the backhand's retreat on purpose, and
+re-tuning the backhand's swing gain, kick, fly-by slide, servo and posture together with screening designs on fixed serves; the forehand's response to the same treatment was flat.
+
+**Tools** (`playground/`, all on a fast path that plays the same episodes as the standard one; `tt_fast.py check` compares them):
+
+| tool | what it is |
+| --- | --- |
+| `tt_fast.py` | one env per worker process and a kinematics-only geometry sweep: setup CPU 1.7 s -> 0.13 s per episode, identical metrics |
+| `tt_eval.py`, `tt_cmp.py`, `tt_summ.py` | resumable runs (JSON lines), the arena's paired sign-flip test plus the landing slack, per-side mechanics of a run |
+| `tt_pools.py` | which seeds the side rule sends to each side (agrees with the controller on 600 of 600 seeds) |
+| `tt_impact.py`, `tt_aimlaw.py`, `tt_ceiling.py` | the offline impact + flight model (predicts the outcome of 94% of clean hits), the aim law in Python, the success ceiling against execution noise |
+| `tt_rsm.py`, `tt_rsm_run_params.py`, `tt_r10_compose.py` | a fixed-serve two-level random design regressed on the coded levels (main effects of 17 parameters from 33 runs), one run's parameter set, a candidate composed from a backhand and a forehand result |
+| `tt_practice.py`, `tt_ilc.py`, `tt_cmc.py` | sep-CMA on common serves with a smooth score, the learned feed-forward on the fast path, a computed-muscle-control prototype |
+| `tasks/myo_tt.py` | opt-in diagnostics only (`TT_SAVE_LOG`, `pelvis_vel`, `l8`, `pv`) |
+
+**What the champion loses on** (600 fresh serves, seeds 710000-710599, none used before; `out/tt_r10/champ_710000.jsonl`):
+solved 182 of 600 = 30.3% (forehand 110 of 290 = 37.9%, backhand 72 of 310 = 23.2%), hit 80.2%. Of the serves the pad meets, 62% still fail.
+
+| serve speed quintile (m/s) | 3.7-4.7 | 4.7-5.2 | 5.2-5.7 | 5.7-6.1 | 6.1-7.2 |
+| --- | --- | --- | --- | --- | --- |
+| solved | 43% | 42% | 28% | 17% | 22% |
+| hit | 70% | 85% | 86% | 79% | 81% |
+
+| ball crosses the pad plane at y (m) | serves | hit | solved | solved given a hit |
+| --- | --- | --- | --- | --- |
+| below -0.8 (backhand) | 45 | 0.33 | 0.07 | 0.20 |
+| -0.8 to -0.4 (backhand) | 102 | 0.81 | 0.15 | 0.18 |
+| -0.4 to 0 (backhand) | 123 | 0.90 | 0.36 | 0.40 |
+| 0 to 0.4 (forehand from 0.1) | 111 | 0.87 | 0.41 | 0.46 |
+| 0.4 to 0.8 (forehand) | 120 | 0.91 | 0.44 | 0.49 |
+| above 0.8 (forehand) | 99 | 0.67 | 0.22 | 0.33 |
+
+- Fast serves are hit and come back too fast: a still pad returns ~0.95 of the ball's speed, and above ~5.5 m/s the set of pad pitches
+  whose return clears the net and lands narrows to 8-13 degrees (25 degrees at 5 m/s). Success is 95-97% when the return's exit
+  elevation is within 5 degrees of the centre of the feasible window and 55-60% at 5-15 degrees off; 31% of all hits have no
+  feasible elevation at their exit speed and azimuth (68% of those leave at more than 25 degrees of azimuth: rim deflections).
+- Failure classes (share of serves): forehand solved 37.9, no hit 19.3, net 16.2 (+2.8 rim), long 11.4, wide 6.2, rim-not-toward-net 4.1;
+  backhand solved 23.2, no hit 20.3, wide 13.2, long 11.9, rim-not-toward-net 9.7, net 9.4, own half 4.8.
+- Execution noise at contact (instrumented run, 150 serves, deterministic replay of the same serves): pad pitch 10 degrees (1 sigma) off the aim law's,
+  yaw 2.3 (forehand) / 7.6 (backhand); pad velocity along its normal +0.4 +- 0.5 m/s forehand, -0.2 +- 0.5 backhand (the pelvis alone +0.54 +- 0.26 and
+  -0.52 +- 0.31), every velocity component sd 0.55-0.63 m/s, changing 0.3-0.4 m/s rms over the last 30 ms; the forehand's ball meets the pad 5.4 (height) x
+  2.6 (lateral) cm sd off centre, the median in-plane offset is 5-7 cm of a 9.3 cm radius (round 7's table: hits under 3 cm off solve 67%, 6-9 cm 31%, rim hits 5%).
+- Serve features explain a lot of the face error and little of the height error. A linear map of the serve's launch state (where and when it crosses x = 1.8:
+  t, y, z, vx, vy, vz) predicts the forehand's pitch error to the aim to R^2 0.76 (5-fold CV; 0.90 with the contact time; residual 4.9 of 9.9 degrees), the backhand's to 0.37,
+  the forehand's ball-minus-pad height offset only to 0.05 (0.26-0.46 backhand): the arm's face is set by the serve, its height is not.
+
+**The success ceiling against execution noise** (`tt_ceiling.py`; offline model, best plan per serve, the champion's own contact conditions):
+
+| pitch sd | pad-velocity sd | yaw sd | P(lands given a sweet-area hit) | ceiling P(success) at position sd 5 / 3 / 2 cm |
+| --- | --- | --- | --- | --- |
+| 10 deg | 0.5 m/s | 2.5 deg | 0.59 | 0.45 / 0.58 / 0.59 |
+| 6 | 0.35 | 2.5 | 0.78 | 0.59 / 0.76 / 0.78 |
+| 4 | 0.25 | 2.0 | 0.91 | 0.70 / 0.90 / 0.91 |
+| 3 | 0.2 | 1.5 | 0.98 | 0.75 / 0.96 / 0.97 |
+| 2 | 0.12 | 1.0 | 1.00 | 0.76 / 0.98 / 1.00 |
+
+The champion runs at about 10 degrees, 0.5 m/s and 5 cm: with a perfect plan its ceiling is ~45%, it plays 30-33%. 90% needs the face within 4 degrees,
+the pad's velocity within 0.25 m/s and its place within 3 cm at once: three to four times quieter than this arm (round 9's live tracking gets the forehand's face to
+2.8 degrees of its aim in one probe and loses the height, see below).
+
+**A fast harness** (`tt_fast.py`): one env per worker process and a kinematics-only geometry sweep give bit-identical episodes at 0.13 s of setup instead of 1.7 s
+(`tt_fast.py check`: identical on every metric). A job queue runs 120-300-serve screens in 2-5 minutes; every comparison below is paired on the same serves.
+
+**What did not move the number** (champion binary and params unless noted; first 120 serves of the fixed pools or `710000:710120`; solved of 120 against the champion's on the same serves):
+
+| variant | solved | what it showed |
+| --- | --- | --- |
+| pelvis speed governor `pv 2` (the slide reaches its goal at contact retreating at `0.47 (v - 4.83)` m/s) | 31 vs 34 | forehand pelvis velocity at contact right on average (0.41 +- 0.47 for a planned 0.40) with a larger spread; the parent's dispatch dropped the backhand's plan |
+| `pv 2` on both sides (dispatch fixed, the slide coasts the last 20 ms) | 21 vs 34 | the pelvis now follows its plan (0.08 +- 0.23 forehand, 0.02 +- 0.15 backhand) but the arm adds +0.2 / +0.5 m/s: pad velocity 0.60 / 0.95 for a planned 0.44, returns too slow (exit 4.6 against 5.6 m/s, 41 net hits against 16), hit rate 0.73 against 0.80 |
+| `pv 3` (predictive, arm velocity carried to contact) | 22 vs 34 | hit rate 0.56 (pad below the ball 17): the plane's accuracy is what a governor costs |
+| late pelvis kick `kk` (default law), backhand pool | 28 vs 31 | exit speed normalised (6.05 +- 1.09 -> 5.08 +- 0.68 m/s), "long" 14 -> 1, but "net" 11 -> 31: exit elevation 23 +- 23 deg |
+| `t_lock 0.10` (servo frozen earlier) | 29 vs 34 | forehand pad velocity noise barely lower (0.41 against 0.48 m/s), accuracy lost |
+| no stroke (`d_push 0, drv_push 0`) | 34 vs 34 | identical serve for serve: the stroke fires at contact and does nothing |
+| `t_servo 0.20` | 37 vs 34 | forehand returns better controlled, 11 pad-below-the-ball misses |
+| forehand posture consolidated (the mean servo correction folded into the ready posture) | 29 | forehand pitch error to the aim +2.5 +- 4.1 (was -3.4 +- 8.9) but the ball is met above the pad |
+| `hx_pad 1` / `hx_pad 0.5, z_bias -0.03` | 34 / 38 | height matching from the pad's measured height: no change / +3 (n.s.) |
+| `x_hi 2.3 / 2.6` | 31 / 31 | the pad plane never goes past 2.3 |
+| height / normal anticipation `g_ffz`, `g_ffn` | 26 / 29 | the pad ends 5 cm lower (contact height 1.148 against 1.197 m): consistent with `z_bias -0.0735` being a fudge for a servo that converges about half way |
+| servo and aim from the ball's state at the goal plane `sg` | 27 | the moving-target hypothesis is not supported: the servo simply under-tracks (effective gain 0.25-0.4) |
+| yaw-only forehand servo `qa 3` | 21 vs 54 (forehand pool) | the pitch servo helps; the pitch spread is not made by the servo |
+| `qa 3` with the wrist raised (-0.65 / -0.45 / -0.25) | 24 / 2 / 0 of 120 | pitch sd 8.6 / 6.9 / 4.2 degrees but the pad ends 11 cm low (hit 0.75 / 0.51 / 0.19) |
+| least-squares forehand postures from a finite-difference pose Jacobian (7 joints -> pitch, yaw, height) | 29% / 33% vs 45% (forehand pool) | the pose is reached (pitch -1.8, height +1.4 cm), the pitch sd stays 9 degrees: it is set by the wrist, not the servo |
+| absolute far landing target, or the box 0.1-0.25 m deeper (forehand pool) | 54 vs 54, 49 vs 54 | the aim law's box is not what fails |
+| side boundary `y_switch` 0.0 / 0.2 (300 serves) | 86 / 81 vs 84 | flat |
+| backhand posture steps that remove its closed-face bias (pitch error +11.7 -> +4..+6 degrees as predicted) | 9 / 9 vs 16 of 60 | hit 0.87 -> 0.72-0.77: the swing's arrival and the pad's place move with the posture |
+| servo start timed on the predicted contact (`ts_lead` 0.20 / 0.235 / 0.27 forehand, `bh_ts_lead` 0.20 / 0.23 / 0.26 backhand; 200 serves) | 64 / 74 / 74 vs 79; 55 / 62 / 65 vs 69 | the absolute `t_servo` is at least as good |
+| contact-timed backhand swing `bh_lead` 0.42 / 0.47 / 0.52 on run 21's backhand (200 serves) | 1 / 8 / 16 vs 69 | the whole backhand set is tuned for the absolute timing |
+| round-9 live tracking (`lt`) at its round-9 parameters | 5 / 12 vs 54 / 31 (fh / bh) | see below |
+
+Computed muscle control (`tt_cmc.py`): MuJoCo's own muscle force model (gain and bias per fibre length and velocity) reproduces the model's actuator forces exactly; the arm's seven
+joints have folded inertias 0.003-1.6 kg m^2 and torque capacities +-45-83 N m at the shoulder, +-7-13 N m at the forearm and wrist; a computed-torque law with a bounded
+least-squares allocation over the 32 arm muscles saturates on a 0.5 rad move in 0.3 s (about 100 N m against ~50 at the shoulder) and leaves 0.4-0.6 rad errors on the wrist. Porting it
+to the controller is days of work for a reflex-limited arm; the prototype is the record.
+
+**A one-tick artifact at the table bounce (`bk`).** The skill logs its servo's aim every third tick (`aim:` rows). In 50 of 150 champion serves one row, at
+the tick of the ball's table bounce, shows the height servo's error at -0.3 to -1.6 m and the aim normal's z at -0.45 to -0.75 (its neighbours: -0.1 and -0.1). Every serve has it; one
+tick in three is logged. The table-contact flag is set for exactly one 10 ms tick, and on that tick the ball's velocity is mid-reversal (vertical -3.2, +1.4 and -2.8 m/s in three serves:
+the sub-tick timing of the bounce). `before` sets `@bounced` and then predicts the crossing of the pad's plane from that velocity as a post-bounce state, so for one tick the predicted crossing height
+and vertical speed are wrong by 0.3-1.6 m. The height servo (an integrator, k_z 11) and the normal servo take it in, and the height matching's `at_height` sends the pelvis's goal to the ball's own x.
+`bk 1` replaces that tick's ball by the previous tick's, carried through the model's bounce (restitution 0.99); the parent skill got two hooks for it (`plan_ball`, `height_ball`, defaults
+unchanged, checked serve for serve). Alone it is worth what its mechanism says, not more: paired on 150 champion serves it raises the hit rate 0.80 -> 0.867 and
+solved 41 -> 45 (p 0.27); on the fixed forehand / backhand pools (120 serves each) the hit rate rises 0.90 -> 0.96 and 0.77 -> 0.81 while solved is 50 vs 54 and 34 vs 31. The joints move 0.01-0.03 rad and the pad 1.6 cm higher by contact. It also changes what the champion's
+calibration means: the artifact had given the pelvis an accidental 0.2-0.3 m/s of retreat (forehand pad velocity along the normal +0.46 -> +0.27, backhand -0.16 -> -0.48 +- 0.35, exit speeds
++0.25-0.3 m/s), so the extra hits land out until the retreat is restored on purpose.
+
+**Restoring the retreat: a late pelvis kick (`kk`) and a screening design.** `kk` adds an acceleration along +x to the slide's command in the last `kk_t` 0.12 s, sized so the pad's
+velocity along its normal reaches `kk_k (v - kk_v0)` (the ball's speed at the plane v), less the side's mean (`kk_m1`, `kk_m2`), times `kk_amp`; the aim law expects 0.9 of it. Its
+parameters interact with the aim, the servo gains and the swing (`bh_gain` alone moves the backhand's hit rate from 0.80 to 0.53), and single-parameter screens on 120 serves cannot see
++-3 point effects, so `tt_rsm.py` runs one random two-level design over 17 parameters per side on the same 100 serves (32 runs + the baseline; a run's score is solved + 0.4 x the
+landing margin, smooth, and common random numbers remove the serve-to-serve variance) and reads main effects off a regression. The first design's ranges were too wide (a corner
+collapsed to 3% solved); the second (`rsm_bh3`: +-25% around the CMA-tuned backhand parameters, wide only on the new ones) gave:
+
+| backhand factor (low / high) | effect on the score (t) | | backhand factor (low / high) | effect on the score (t) |
+| --- | --- | --- | --- | --- |
+| **`bh_gain` 0.92 / 1.05** | **-0.177 (-4.2)** | | `bh_dur` 0.42 / 0.47 | -0.039 (-0.9) |
+| `kk_amp` 0 / 1 | +0.070 (1.8) | | `bh_p_n` 0 / 0.3 | +0.034 (0.8) |
+| `kk_v0` 4.4 / 5.2 | +0.037 (1.0) | | `bh_k_n` 2.9 / 4.6 | +0.032 (0.8) |
+| `kk_k` 0.3 / 0.7 | -0.033 (-0.8) | | `bh_k_z` 1.6 / 3.2 | -0.031 (-0.8) |
+| `kk_m2` -0.65 / -0.3 | -0.021 (-0.6) | | `bh_dnz`, `box_x1`, `lc16`, `box_x0`, `bh_p_z`, `ns_k`, `bh_t_servo`, `k_vpm` | |t| < 0.6 |
+
+The baseline (bk on, no kick) scored 0.442 (27% solved); the design's 32 runs 0.306 +- 0.115 (residual sd of the linear fit 0.086: the surface is peaked around the tuned centre, so
+main effects say where to look, not how far to go). The best runs (0.58, 0.57, 0.56, 0.53) all have the kick on, `bh_gain` 0.92 and `bh_p_n` 0.3; three of the four also have the gentle law (`kk_k` 0.3, `kk_v0` 5.2).
+Validation on 200 other backhand-pool serves (paired):
+
+| backhand run | solved of 200 | hit | vs champion |
+| --- | --- | --- | --- |
+| champion | 49 (24.5%) | 0.81 | |
+| `bk` only | 50 (25.0%) | 0.87 | |
+| consensus of the top runs (K1) | 62 (31.0%) | 0.82 | +0.065 +- 0.039, p 0.065 |
+| K1 with `bh_gain` 0.88 | 38 (19.0%) | 0.80 | -0.055, p 0.96 |
+| **design run 21** (`params/myo_tt_p2_r10_bh_run21.txt`) | **69 (34.5%)** | 0.83 | **+0.100 +- 0.038, p 0.007** |
+
+Run 21's backhands: exit speed 5.42 +- 0.67 m/s (champion 5.85 +- 0.88), exit elevation 25 +- 17 degrees (16 +- 23), ball-minus-pad height offset sd 4.5 cm (6.0), yaw error to the aim
+5.1 degrees (6.7), pad velocity along the normal -0.10 +- 0.48; the gain is in the crossings between y -0.8 and -0.25 (solved 0.16 -> 0.43 and 0.20 -> 0.38; the far-left serves stay out of reach).
+
+**Three more screens for the backhand.** Stage 2 (`rsm_bh4`: 16 factors within +-10-40% around run 21, fresh serves bh[400:500], 13 of 28 runs done) found run 21 at a local peak in those directions: it scored 0.501 (28%) and only
+one of 13 design runs beat it. Stage 3 (`rsm_bh5`: the eight posture parameters, the slide offset, lateral trim, grip and two swing offsets, 20 runs on the same fresh serves; baseline 0.501, design mean 0.400) read: `bh_dz_hit` (the
+contact height offset, -0.03 / +0.03) -0.139 (t -2.7), `bh_elbow` (1.98 / 2.04) +0.129 (2.4), `bh_dev` (-0.11 / -0.04) +0.082 (1.6), `bh_dd_push` +0.088 (1.4), `bh_trunk_ar` +0.063 (1.4), the rest |t| < 1. On the 200 validation serves
+its linear half step (`bh_elbow` 2.025, `bh_dev` -0.0575, `bh_dz_hit` -0.015, `bh_dd_push` +0.01: four parameters moved by 0.01-0.03) solved 79 (39.5%) against run 21's 69 (p 0.043), the full step 80, and the two best design runs 58 and 54:
+again the linear step generalised and the winning design runs did not. Stage 4 (`rsm_bh6`: the backhand's own dynamics not yet screened, co-contraction, postural tone, the slide's fly-by, a swing shift, a later contact plane and the lateral trim, plus
+refreshers of the kick, gain and servo values, 14 factors, 24 runs on fresh serves bh[500:600]; baseline 0.577, design mean 0.513, residual sd 0.053) read: `bh_dt_swing` -0.092 (t -3.1), `bh_gain` (0.91 / 0.94) -0.063 (-2.2), `bh_pel_fly`
+(0 / 0.6: the backhand's fly-by slide) +0.071 (2.1), `bh_dx_hi` -0.070 (-2.0), `lc24` +0.048 (1.7), `ns_k2` +0.050 (1.5). This time the top design runs replicated: on the 200 validation serves runs 7 and 18 solved 91 and 95 against
+c3's 79, and on 196 backhand serves nobody had used (`bh[600:796]`) the round-5 champion solved 44 (22.4%), c3 72 (36.7%), the consensus of runs 7 and 18 (c4) 88 (44.9%), run 18 93 (47.4%, +10.7 points over c3, p 0.006), run 7 80. Run 18 =
+the fly-by slide at 0.6, `bh_gain` 0.91, `bh_stiff` 0.13, kick 1.2 with `kk_m2` -0.55, `bh_p_n` 0.2, `bh_dnz` -0.05, `k_vpm2` 0.7, `lc24` -0.02. Its backhands on those 196 serves (round-5 champion / c3 / run 18):
+exit speed 5.93 +- 0.85 / 5.43 +- 0.69 / 4.99 +- 0.57 m/s (5 m/s is where the feasible elevation window is widest), exit elevation 18 +- 25 / 29 +- 18 / 24 +- 15 degrees, ball-minus-pad height offset sd 5.5 / 4.4 / 3.3 cm,
+pad pitch sd 9.9 / 7.6 / 5.9 degrees, hit rate 0.80 / 0.89 / 0.90.
+
+**The forehand's design was flat** (`rsm_fh3`, narrower still: baseline 41% solved, the 32 runs averaged 0.616 against 0.663): with the kick on the forehand loses (16 runs with the kick off: 41.2% solved, hit 0.92; 16 with it on: 33.9%),
+because its pad already retreats (+0.27 m/s once the artifact is gone). Effects (t): `kk_m1` -3.6, `t_lock` (0.02 / 0.035) -2.5, `kk_amp` -2.4, `lc0` (the forehand's height target, -0.02 / +0.02) -2.3, `t_servo` (0.26 / 0.30) +2.2,
+`kk_v0` -2.2, `p_z` -1.8, `box_x1` +1.4. The best design runs did not generalise (run 16: 48% in-sample, 37.0% of 200 new serves against the champion's 39.5%); the linear step (kick off, `t_servo` 0.30, `lc0` -0.02, `p_z` 0,
+`box_x1` -0.65, `t_lock` 0.02) did on those 200 (90 solved, +5.5 points, p 0.097) and then did not on the two fresh blocks below (forehand 118 against 110 of 290 and 52 against 58 of 134): by speed it is far better on the slowest
+fifth of serves (0.78 against 0.49) and worse on the middle (0.34 against 0.53, 0.23 against 0.39). The forehand's change is worth nothing measurable, so the candidates below leave the forehand alone. A last forehand screen (`rsm_fh5`, r10-p) added the forehand's arm reflex gain (`fh_gain`, the analogue of `bh_gain`),
+its seven posture parameters, servo timing and gains and the lateral trim (15 factors, 24 runs on fresh serves fh[400:500]) around the champion's forehand: the design averaged 0.274 against the champion's 0.623 and its best run scored 0.615;
+`fh_gain` alone (0.88 / 1.10) read +0.236 (t 9.9) and scanning it on 200 forehand serves nobody had used solved 80 / 85 / 76 / 68 / 60 at 0.97 / 1.00 / 1.03 / 1.06 / 1.10: the champion's forehand sits on a sharp optimum of every
+parameter screened, which is why only the backhand moved.
+
+**Candidates**, each a parameter file for the frozen `bin/challengers/myo_tt_r10-n`, paired against the round-5 champion on two blocks of fresh serves (none used to tune anything):
+- c1 (`params/myo_tt_p2_r10_c1.txt`): the backhand of run 21 (its kick, aim and swing values under the backhand's own names `kk2_amp`, `kk2_k`, `kk2_v0`, `ns_k2`, `k_vpm2`, `bh_box_dx`) + the forehand's linear step, `bk 1`.
+- c2 (`params/myo_tt_p2_r10_c2.txt`): the same backhand and the champion's forehand exactly (`bk 2`: the bounce-tick guard on the backhand only; 30 of 30 forehand serves identical to the champion's on every metric). A candidate that is
+  the champion wherever it has no gain has no flips there, so the arena's paired sign-flip test has less noise.
+- **c3** (`params/myo_tt_p2_r10_c3.txt`): c2 + the stage-3 half step. This is the promoted champion.
+- c5 (`params/myo_tt_p2_r10_c5.txt`): c3 + stage 4's run 18. Best on fresh serves; not promoted (the arena's 300 seeds cannot tell it from c3).
+
+| | champion | c1 | c3 | c5 |
+| --- | --- | --- | --- | --- |
+| 710000-710599: solved | 182 (30.3%) | 213 (35.5%), p 0.013 | 208 (34.7%), +0.043 +- 0.016, p 0.004 | **237 (39.5%)**, +0.092 +- 0.017, p < 0.0001 (flips 83 / 28) |
+| 710000-710599: forehand / backhand of 290 / 310 | 110 / 72 | 118 / 95 | 110 / 98 | 110 / 127 |
+| 720000-720299: solved | 90 (30.0%) | 110 (36.7%), p 0.017 | 131 (43.7%), +0.137 +- 0.024, p < 0.0001 | **131 (43.7%)**, +0.137 +- 0.023, p < 0.0001 |
+| 720000-720299: forehand / backhand of 134 / 166 | 58 / 32 | 52 / 58 | 58 / 73 | 58 / 73 |
+| both blocks: solved | 272 of 900 (30.2%) | 323 (35.9%) | 339 (37.7%) | **368 (40.9%)** |
+| both blocks: backhand | 104 of 476 (21.8%) | 153 (32.1%) | 171 (35.9%) | **200 (42.0%)** |
+| 196 backhand serves nobody had used | 44 (22.4%) | | 72 (36.7%) | **93 (47.4%)** |
+| `tt_p2_300` (arena, 300 serves) | 99 (33.0%) | 106 (35.3%), +0.023, p 0.26 | **120 (40.0%), +0.070, p 0.002: promoted** | 121 (40.3%) against c3: +0.003, p 0.51 |
+| `tt_p2_300` forehand / backhand of 156 / 144 | 60 / 39 | | 60 / 60 | |
+| `tt_p2_backhand` (131 serves) | 22.9% | 35.9%, +0.130, p 0.001 | 35.9%, +0.130, p 0.001: promoted | 41.2%, +0.053 against c3, p 0.17 |
+| `tt_p2` (the old 100-serve trial) | 36.0% | | 39.0%, +0.030, p 0.30 | 44.0%, +0.080, p 0.040: promoted there |
+| `tt_p1` (50 serves, the P1 params) | 100% | | 100% | |
+
+Pooled over the 900 fresh serves (paired): c3 against the round-5 champion +0.074 +- 0.013 (flips 108 / 41), c5 against the champion +0.107 +- 0.014 (131 / 35), c5 against c3 +0.032 +- 0.013 (p 0.0066; flips 80 / 51). On 200
+more backhand serves nobody had used (pool 750000) the champion solved 46 (23.0%), c3 82 (41.0%), c5 92 (46.0%). A fifth backhand screen around c5 (`rsm_bh7`, +-0.02-0.3 along stage 4's directions) found nothing better: its linear step, half step
+and two best runs scored 81, 92, 73 and 82 there.
+
+The arena's 300 seeds flatter the round-5 champion (33.0% against its 30.3% and 30.0% on the fresh blocks, its backhand 27.1% against 21.8%), which is why c1's +5.2 points on 600 fresh serves showed as +2.3 there;
+c3's forehand is the champion's, so its 60 of 156 is the same 60 and the whole gain is the backhand's 39 -> 60 of 144. c3 and c5 score alike in the arena (120 and 121) and on block 2 (131 and 131), and differ by 29 serves on block 1 and by 21 of 196 backhands on the never-used serves: the arena, with 300
+serves and about +-7 wins of noise on the backhand alone, cannot separate a 6-point backhand difference. The backhand's gain on the validation serves (+10 points for run 21) held on
+the fresh blocks: a design run picked from 32 is still a winner, but not a fluke. By serve speed (backhands of both blocks, 476 serves): solved 0.38 / 0.31 / 0.23 / 0.14 / 0.03 for the champion against 0.48 / 0.45 / 0.23 / 0.21 / 0.24 for c1
+over the speed quintiles: the kick makes the fastest fifth returnable (0.03 -> 0.24) and does nothing for the middle. Where the backhand still fails (share of its hits that do not land, c1): wide 18%, long 13%, both 7%, net or short 17%:
+the lateral spread of its landings is 0.8 m sd (the table is 1.52 m wide) and the exit elevation spread 18 degrees.
+
+**Round 9's live tracking, re-examined on the fast path.** With the round-9 parameters (`lt 1`) on the first 120 serves of each side pool, the forehand's face follows its aim (pitch error to the aim
+-0.2 +- 2.8 degrees against the champion's -2.4 +- 9.8) and the forehand solves 5 of 120: the ready posture puts the pad at 1.36 m against a ball crossing at 1.21 (the servo error stays at -0.25 to -0.45 m from 0.31 s on) and
+86% of the misses pass over the pad. A finite-difference pose Jacobian of the seven forehand posture parameters (ready pose at 0.25 s, per +0.1 rad: elbow pitch -3.9 degrees / pad +2.7 cm, `sh_elv` +1.8 cm,
+`dev` -5.6 degrees, `sh_rot` yaw +4.3 degrees) and one least-squares step to the aim's mean pose raised the forehand's hit rate from 0.30 to 0.83 at once, and 1 of 60 serves solved: the returns went wide
+(exit y-velocity -1.5 +- 1.7 m/s, the face's yaw 4.5 +- 5.1 degrees past the aim where the champion's forehand yaw follows to 0.3 +- 2.4). Faster height servos (`k_z` 12-20, `t_servo` 0.15) raise the hit rate to 0.5-0.6 and solve 1-2 of
+120: the pad is still moving at contact (pad velocity along the normal -0.3 +- 1.0 m/s, exit speed sd 1.8). The live-tracked arm needs its aim law re-calibrated (yaw follow, restitution, the pad-velocity expectation) and its servo
+re-tuned together; that is round 9's conclusion and it stands.
+
+**Where it stands.** `tt_p2_300` 40.0% (120 of 300, promoted; 33.0% before round 10; the winner scored 64%). The round-5 champion's failures were the arm's: the face is 10 degrees (1 sigma) off the aim law's normal on both sides, the pad's velocity along it wanders 0.5 m/s, the ball meets the pad 5 cm off its
+centre, and the success ceiling of a perfect plan at that noise is ~45% (table above). Every plan-level change (pelvis governor, contact-timed starts, aim biases, boxes, side boundary) moved the count by less than the noise. What worked
+was different in kind: finding a defect (the servo's one-tick error at the bounce), restoring the retreat it had been giving by accident, and searching the backhand's parameters jointly on fixed serves (a 17-factor design, then a
+posture and offset design) with validation on other serves every time. Lessons: a design run picked from 32 is a winner's curse unless it is validated on other serves (of nine design runs validated on other serves three survived: backhand runs 21, 7 and 18), the linear step of a
+design generalises better than its best run, and a candidate that is the champion wherever it has no gain (c2, c3: the forehand replays the champion serve for serve) makes the arena's paired test far less noisy than one that also
+moves the forehand by an unmeasurable amount (c1: +5.2 points on 600 fresh serves, +2.3 in the arena; c3: +7.4 on 900, +7.0 in the arena).
+
+Blockers, in order: (1) face authority: the forehand's wrist sits at its extension limit, the pitch servo's follow ratio is 0.4-0.5 and the forehand's pitch error is 76% predictable from the serve, i.e. systematic, but
+posture changes that remove it move the pad's place (the backhand's hit rate fell 0.87 -> 0.72-0.77 for a 5-8 degree change of its bias); (2) the pad's velocity (0.5 m/s: the arm alone 0.33-0.42), which decides the return's speed
+and which the fast half of the serves need to retreat from; (3) the slide's reach for the far-left serves (the pelvis actuator's step response, kp 3500 N/m against 1000 N s/m of damping, ctrl limited to +-1 m, gets it to ~0.85 m in 0.5 s:
+7% of serves cross beyond -0.8 m and are hit 33% of the time); (4) rim hits (12% forehand, 21% backhand). A controller that follows its aim to 4 degrees, 0.25 m/s and 3 cm would reach 70-90% (table above). For reference the
+challenge's winner scored 64% and the best reported result is 80.3% (Diff-Muscle, arXiv 2603.08617).
+
+What is left: the forehand is at a sharp optimum of everything screened (gain, posture, servo timing, lateral trim, kick, aim box); the backhand screens have converged around c5 (a fifth design found nothing better); a trial with
+600 or more fresh serves is needed to tell c5 from c3 in the arena (the pooled 900 fresh serves say c5 by +3.2 points, p 0.007, the 300 arena seeds cannot); beyond that the arm's own noise (blockers above) is the limit.
+
+```sh
+./build.sh myo_tt_v11                         # round-10 build (every option off = the round-5 champion serve for serve); frozen copies bin/challengers/myo_tt_r10-a ... -p
+TT_ENV=P2 .venv-myo/bin/python playground/tt_eval.py --params params/myo_tt_p2_r10_c3.txt --controller bin/challengers/myo_tt_r10-n \
+  --seeds 710000:710600 --out out/tt_r10/mix_c3.jsonl --workers 3          # 600 fresh serves
+.venv-myo/bin/python playground/tt_cmp.py out/tt_r10/champ_710000.jsonl out/tt_r10/mix_c3.jsonl                     # paired against the round-5 champion's baseline
+.venv-myo/bin/python playground/tt_rsm.py design --params params/myo_tt_p2_r5_bhprac.txt --controller bin/challengers/myo_tt_r10-k --pool bh --n 100 --runs 32 \
+  --set "bk=1,kk=1,kk_amp=0,kk_m1=0.27,kk_m2=-0.48,lc=1,lt_arms=0" --out out/tt_r10/rsm_bh3 --factors "kk_amp:0:1,...,bh_gain:0.92:1.05,..."   # scratchpad/tt/rsm_run3.sh
+.venv-myo/bin/python playground/tt_rsm.py analyze --out out/tt_r10/rsm_bh3
+.venv-myo/bin/python playground/tt_r10_compose.py --bh out/tt_r10/rsm_bh3:21 --set bk=2 --write params/myo_tt_p2_r10_c2.txt     # backhand of run 21 + the champion's forehand
+.venv-myo/bin/python playground/arena.py eval tt_p2_300 --params params/myo_tt_p2_r10_c3.txt --controller bin/challengers/myo_tt_r10-n --note "round 10 c3 ..." --promote
+```
+
+Campaign log with every command line, pid and result: `scratchpad/tt/LOG.md`; outputs `out/tt_r10/`; analysis scripts `scratchpad/tt/an*.py`.
+
 ### Relocate: controlled transport, hold-inside placement, far-side arm control (round 5)
 
 `skills/myo_relocate_v5.w` (`MyoRelocateV5Skill < MyoRelocateV4Skill`, entry
@@ -2819,3 +3965,339 @@ reverse, and co-contraction goes to zero.
 
 Video: `out/bat_v6.mp4`, `out/bat_v6.gif`, `out/bat_v6_sheet.png` (the oracle
 on the 4 demo pitches: 25.6, 24.9, 24.3, 25.8 m/s; 3 fair).
+
+### Batting round 2 (29 Sep 2026): bat speed in robolab's own representation
+
+Erik's goal is still "increase the bat speed". Round 1 (v6) raised it to 25.2 m/s with open-loop excitation programs (reflex gain 0,
+ORACLE-class) and to 23.1 (grid) / 21.6 (24 held-out pitches) in robolab's own representation (11 quintic contraction knots per track
+fitted to the programs' joint trajectories, reflexes on, `ri` 1). Round 2 works only in that representation and measures on pitches
+nobody trained on. **Result: 26.5 m/s on 24 held-out pitches, 24 of 24 hit, bat_flow 2.32 (the v6 knots swing on the same pitches: 19.4 m/s, 20 of 24,
+2.83), and 26.8 m/s on 48 pitches nobody looked at (v6 knots: 17.7, 36 of 48). That is above the open-loop oracle (25.2 / 25.2 on its own
+trials, which an in-representation swing now holds: 26.7 on the 18 grid pitches, 26.9 on the 24 oracle-era held-out pitches).** The last 0.1-0.2 m/s
+(S10 over S3) cost some ball quality (fair balls 143 of 162 against S3's 153), so S3 stays the swing to use when fair balls matter. On a
+labelled 95th-percentile body (`ROBOLAB_PROFILE=p95`, its own arena trial) the same swing structure, retuned, reaches 32.4 m/s on 48 pitches nobody looked at (48 of 48 hit;
+the MLB average is 32.0), at a cost in ball quality (fair 35-36 of 48; S9, a second retune that prices the aim harder, 37-44 of 48 at the same speed).
+
+**Yardstick.** Three new arena trials (the ORACLE trials stay as they were):
+
+| trial | pitches | seeded with |
+| --- | --- | --- |
+| `bat_power_fresh_rep` | 24 fresh continuous pitches, seeds 1100-1123 (`BAT_FRESH_PITCH`: the distribution of `bat_power_fresh`, new seeds) | the v6 knots swing: 19.44 m/s, 20/24 hits |
+| `bat_power_fresh_rep_clean` | the same, guard `bat_flow` <= 3.0 on every pitch | the same swing: fails the guard (2 hits above 3.0, and the 4 misses) |
+| `bat_power_fresh_rep_p95` | the same pitches, LABELLED BODY VARIANT: the athlete at `ROBOLAB_PROFILE=p95` | the athlete swing carried to that body and retuned once (S7): 27.12 m/s, 21/24 hits; now held by S8b (30.85, 23/24) |
+
+Seed sets used, never mixed: arena 1100-1123 (and the old 1000-1023) only to score; practice 3000-3143 (S1: 16 maximin pitches, S2: 16 more,
+S2c: 24 of them), 5000-5047 (taim calibration; P95 training), 7000-7323 (random practice), 8000-8015 (body sweep); validation 4000-4047 (looked at
+during the work, as run); untouched final validation 6000-6047.
+
+**Why the knots swing missed (the misses were not "1-3 cm").** A new task, `tasks/bat_rep.py` (every seed one fresh pitch, per-pitch aim
+diagnostics: `aim_n_cm`, the ball's offset from the bat's swing plane at contact or closest approach, a hit needs |aim_n| < ~7 cm; `aim_s`,
+where along the bat the ball is met), and a cheap evaluator, `playground/bat_rep.py` (4.3-4.6 s rollouts, a 2-4 worker pool; it reproduces
+the arena scores exactly), showed on 144 fresh pitches (seeds 3000-3143) 115 hits and aim errors of -7 to -18 cm on the low pitches
+(z < 0.68), +7 to +9 on the highest, -7 to -9 near (x 0.1, z 0.9). The error is not noise: with dz, dx the pitch's crossing minus the
+location the inverse-squared-distance blend of the 6 grid programs stands for (sum_i w_i z_i, sum_i w_i x_i; the blend is exact at a
+program's own pitch but has no slope there), aim_n = -3.2 + 152 dz + 35 dx cm (dz, dx in m; R2 0.88, residual 1.8 cm), against R2 0.28
+for aim_n linear in the pitch itself. The knots swing hits where a program was optimised and misses between them.
+
+**taim: a first-order correction of the blend** (`skills/bat_power.w`, `aim_correction`, opt-in; all gains 0 = the v6 swing exactly).
+The v5 aim law's own sensitivity vectors (`k_z_u`, `k_x_u`: the joint change that moves the sweet spot 1 m up / out with the top hand on
+the handle) are applied to the mismatch and added to every knot's angle, rate and acceleration through a quintic smoothstep ramp
+(`taim_ramp` of the train): offset_j = taim_z k_z[j] (dz + taim_z0) + taim_x k_x[j] (dx + taim_x0). Two unit-gain probes on 48 pitches
+(`scratchpad/bat/probe1.sh`, `an3.py`) measured the plane offset it moves as a nearly perfect linear response (R2 0.99): -59.4 cm per
+m of dz per unit taim_z and -52.4 per m of dx per unit taim_x, so the gains that cancel the blend's 152 / 35 are taim_z 2.56, taim_x
+0.68, and taim_z0 -0.021 m removes the 3.2 cm bias. Nothing else changed: on 48 pitches not used for the fit (seeds 4000-4047) the swing
+hits 48 of 48 at 23.1 m/s (aim residual 1.2 cm), flow unchanged. (The arena's sign-flip test could not promote this fix: it turns 4 misses
+into hits and moves the other 20 pitches by a few tenths, and with 4 dominating differences the smallest possible p is 2^-4; the entry
+stands as a loss, p = 0.061, 22.98 m/s.)
+
+**What limited the speed once the aim was right: the reflex layer's damping and the swing's timing.** Every parameter that changes the
+drive or the damping shifts the aim by a few cm (train_drv 0.8 alone: 10 misses of 16), so a search on hit/miss sees a cliff.
+`playground/bat_search.py` (S1, S2) therefore scored each candidate on the aim it would have after recalibration (per candidate, aim_n
+regressed on (1, dz, dx) over its 16 pitches, the residual scored, the fit's own shift left to the taim gains, `scratchpad/bat/calibrate.py`,
+a Newton step); the later searches (S2b, S2c, S3, S6-S9) are as-run (`playground/search.py bat_rep`): a hit scores its bat speed minus an aim-plane
+margin (0.5 per cm of |aim_n| beyond 3), a contact-position margin (8 per m beyond 0.50-0.80 m along the bat) and, in S2c, a launch-angle
+term (0.04 per degree of |launch - 20| beyond 10); a miss scores -5 - 100 x gap; minus 4 per unit of bat_flow beyond 2.5; the batch's worst
+pitch weighted (mean - 0.25 (mean - min)); sep-CMA-ES from the taim swing over 23-32 tunables, 16-24 fresh training pitches at a time
+(seeds 3000+, never an arena seed). What it found:
+
+- **arm damping**: the arms' reflex velocity term (`arm_swing_kd`, 0.099) braked the swing: 0.03 alone is +1.2 m/s on 16 pitches, 0.0 (the
+  box floor) adds another 0.5 on the pitches it still hits. The swing's speed is set by the excitation drive; the reflex is a position servo on
+  the program's joint trajectory.
+- **timing**: the free swing (fire late so the ball has passed, `scratchpad/bat/freeswing.py`) peaks at 230 ms after the hips fire but the
+  swing met the ball at 217 ms, 13 ms before its own peak, where the sweet spot still gains 0.13 m/s per ms. The search fires 11-15 ms
+  earlier (`prog_trig` 0.230 -> 0.241-0.245), lets the knots read their targets 18-22 ms ahead of the drive (`train_lead`), and runs the train
+  28 ms longer (`train_end`); after the program's own contact its table is the CMA rollout with the ball's impact in it, which the knots braked
+  against, so `train_ext` carries the plan on at contact velocity instead. Contact now comes 225-230 ms after the hips fire, at the swing's peak.
+- **the aim vectors run out of authority**: the search's calibrated-aim objective promised 26.85 m/s and flow 2.37 for the S2 swing; recalibrating
+  its aim to zero cost 0.65 m/s and 0.4 flow and needed taim gains of 6.1 / 3.2 (the k vectors move the sweet spot in the vertical / lateral
+  directions, the wrong ones for the offset a timing shift makes). Two swings then missed because the contact fell beyond the bat's tip.
+  Hence the as-run objective with a contact-position margin.
+
+**Ball quality is not free.** The S2b swing (26.4 m/s) launched the balls at a mean 49 deg (fair 29 of 48; the arena's bat_quality formula 0.21):
+the speed was bought with a steeper uppercut, which nothing in the bat_power metric sees. S2c prices it (0.04 m/s per degree of |launch - 20|
+beyond 10): 26.1 m/s, fair 46 of 48, launch 13 deg, quality 0.45. Both are in the arena (S2b held `bat_power_fresh_rep` for a while).
+
+**Results.** Sweet-spot bat speed at contact, m/s (a miss scores 0), athlete body, athlete controller of each stage, as run, no recalibration.
+Validation seeds 6000-6047 were untouched until the last step; 4000-4047 were used to pick between candidates.
+
+| stage (what changed) | arena `bat_power_fresh_rep` (24) | validation 6000-6047: power, hits | bat_flow mean / max | plant -> hips fire | notes |
+| --- | --- | --- | --- | --- | --- |
+| v6 knots (seed) | 19.44, 20/24 | 17.70, 36/48 | 2.80 / 3.00 | 51 ms | 12 misses of 48 |
+| + taim (aim correction) | 22.98, 24/24 (p 0.061: not promoted) | 23.14, 48/48 | 2.80 / 2.96 | 51 ms | |
+| S1 (+ arm damping 0, fire earlier, train longer) | 25.71, 24/24 | 25.87, 48/48 | 2.63 / 2.97 | 46 ms | |
+| S2b (+ targets lead the drive 18 ms, train_ext, ...) | 26.20, 24/24 | 26.45, 48/48 | 2.47 / 2.94 | 33 ms | launch 49 deg, quality 0.21 |
+| S2c (+ launch term) | 25.96, 24/24 (below S2b: not promoted here; promoted on the four oracle-era trials) | 26.29, 48/48 | 2.37 / 2.72 | 18 ms | fair 43/48, quality 0.45 |
+| S3 (+ drive time profile) | 26.40, 24/24 | 26.70, 48/48 | 2.37 / 2.70 | 18 ms | fair 44/48, quality 0.42 (the fair-ball-friendlier swing) |
+| **S10 (+ leg / stride parameters, aim and launch priced harder)** | **26.50, 24/24** (champion) | **26.83, 48/48** | **2.34 / 2.66** | 18 ms | fair 44/48 (arena 22/24), quality 0.35 |
+
+Same swings on the other sets (arena numbers, S10 / S3): `bat_power_fresh` (24 pitches, seeds 1000-1023) 26.86 / 26.67 against the ORACLE's 25.24 and the v6 knots' 21.57; `bat_power`
+(the 18-pitch grid) 26.70 / 26.52 against 25.17 and 23.12; all hit, bat_flow 2.24-2.32. The four trials the oracle held (`bat_power`, `bat_power_clean`,
+`bat_power_fresh`, `bat_power_fresh_clean`) are now held by this swing, and so are the two new ones: an in-representation controller, reflexes on, is above the open-loop ceiling
+of round 1. The hitch guard twins pass on every pitch (max 2.66 against the 3.0 limit). S10 is the arena champion everywhere, but its lead over S3 is 0.10-0.18 m/s
+(paired on the 48 untouched pitches: +0.13, better on 40 of 48; p < 1e-4) and its balls are worse: fair 143 of 162 over the five athlete sets against S3's 153 (grid 13 of 18 against 16, arena quality
+0.35 / 0.41 / 0.18 against 0.42 / 0.44 / 0.28 on `fresh_rep` / `fresh` / the grid; the oracle's `bat_quality` champion, 0.42 on the grid, is not beaten by either). The launch angle is the
+aim's: see the P95 section for why the launch scatters by +-26-30 deg whatever the price on it.
+
+Per pitch, the arena's 24 pitches (`bat_power_fresh_rep`, seeds 1100-1123: release speed m/s, crossing x m from the plate centre, height m; sweet-spot bat speed at contact, m/s, of S10 (the
+champion), of S3 and of the v6 knots swing on the same pitch; S10 hits all 24 at 25.35-27.25 m/s (mean 26.50), fouls 1121 and 1123; the four pitches the knots swing missed (1104, 1109, 1113, 1121, the low
+ones) are hit at 26.3-27.3 by both):
+
+```
+seed  v     x      z     S10    S3     v6 knots | seed  v     x      z     S10    S3     v6 knots
+1100 38.4 +0.134 0.813  26.15  25.97  23.71    | 1112 34.3 +0.116 0.764  26.02  26.08  23.31
+1101 38.4 +0.056 0.980  26.28  26.08  22.99    | 1113 37.6 -0.088 0.668  27.25  27.32   MISS
+1102 38.0 -0.064 0.896  26.71  26.71  23.82    | 1114 37.8 -0.143 0.766  27.19  27.04  24.38
+1103 36.7 +0.062 0.704  26.08  26.11  23.58    | 1115 35.1 -0.058 0.978  26.72  26.70  23.04
+1104 37.7 +0.000 0.648  26.47  26.51   MISS    | 1116 35.7 +0.137 0.915  26.21  26.15  22.60
+1105 36.2 +0.042 0.960  26.53  26.41  23.05    | 1117 34.3 +0.065 0.894  27.13  26.95  23.10
+1106 35.8 +0.147 0.686  25.35  25.32  22.75    | 1118 37.8 +0.115 0.867  26.30  26.19  23.28
+1107 34.7 -0.062 0.865  26.93  26.86  23.77    | 1119 36.3 +0.064 0.723  25.94  26.05  23.76
+1108 40.1 +0.000 0.852  27.11  26.80  23.64    | 1120 34.2 -0.116 0.968  26.98  26.70  22.72
+1109 35.7 +0.023 0.640  26.43  26.32   MISS    | 1121 36.5 -0.010 0.674  26.61  26.50   MISS
+1110 35.0 -0.039 0.866  27.06  26.86  23.55    | 1122 34.2 +0.133 0.709  25.86  25.74  23.57
+1111 38.3 +0.129 0.700  25.96  25.73  23.50    | 1123 35.0 +0.105 0.964  26.72  26.47  22.40
+```
+
+The slowest pitches are the outside ones (S3: x > 0.1: 25.3-26.5; S10 25.4-26.7): the contact moves toward the bat's tip (0.48 m along the bat per m of x) and the sweet spot has less speed there (the speed falls 4.4 m/s per m of x,
+correlation -0.82; it does not depend on the pitch's release speed).
+
+**The pre-swing pause and the hitches** (Erik's complaint: a stop before and after contact). The bat_flow score is the sum of the deepest dip of the
+measured contraction speed lift -> plant, plant -> contact and contact -> +0.8 s, plus the worst command hold or step; means over 48 pitches:
+
+| stage | valley lift | valley pre | valley post | command | stall before the swing | plant -> hips fire | flow |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| v6 knots | 0.594 | 0.846 | 0.732 | 0.615 | 31 ms | 51 ms | 2.79 |
+| S1 | 0.591 | 0.814 | 0.649 | 0.560 | 27 ms | 46 ms | 2.61 |
+| S2b | 0.591 | 0.761 | 0.593 | 0.498 | 18 ms | 33 ms | 2.44 |
+| S2c / S3 | 0.607 | 0.685-0.688 | 0.526-0.531 | 0.493 | 7-8 ms | 18 ms | 2.31-2.32 |
+| S10 | 0.579 | 0.688 | 0.534 | 0.495 | 8 ms | 17 ms | 2.30 |
+
+The pause between the plant and the hips firing fell from 51 to 17-18 ms (the step landing later, `step_delay`, took the v5 swing from 115 to 50 ms; firing
+earlier takes it to 18) and its stall in the measured speed from 31 to 7 ms; the largest command steps of the v6 knots swing were at the START of the swing
+(15-20 ms after the fire: the first knot segment goes from the load's velocity to the program's within 20 ms), which the earlier, longer swing softens.
+The v5 champion's flow is 2.05, so a lift -> plant dip of 0.58-0.61 (the leg lift's apex) remains: the lift and stride parameters were searched only in S10 (below), which took the lift valley from 0.607 to 0.579.
+
+**A zero-initialised temporal residual on the knots (the Codex recipe).** The recipe is a fixed causal-convolution feature map with a small zero-initialised
+readout trained by ES on fresh random pitches, judged on held-out ones. Three tries on the S2c swing, each starting from exactly the controller (all
+weights 0), trained by as-run sep-CMA on fresh random pitches and judged on the 48 validation pitches, paired:
+
+- **Codex's own architecture** (`bat_residual.w`: its two convolutions and fixed projections reimplemented; 20 readout weights `tc0-tc19`; outputs bounded 0.16 rad
+  on the spine rotation and flexion, both elbows and both wrists' flexion, added to the reflex TARGET): the training objective gained 0.18 in one
+  generation and nothing more in eight; held out it is worse: -0.12 m/s (better on 14 of 48 pitches, worse on 33, p < 0.001) and +0.20 bat_flow.
+- **the same readout on a temporal basis** (`tres`: 6 gaussian bumps after the fire plus the pitch): not run to a result (the drive profile below was ahead).
+- **the readout on the feed-forward DRIVE instead of the targets** (`dshape`: the drive of each joint group scaled by 1 +- 0.5 times a function of time since the
+  hips fire, 30 weights `dw0-dw29` on 6 gaussian bumps, 36 random fresh training pitches, 7 generations of 14): the objective gained 1.4; held out **+0.42 m/s on
+  all 48 pitches** (26.57 against 26.15, p < 0.001) at unchanged bat_flow (2.31): a hit at 110-190 ms is worth more drive (the pelvis' factor rises to 1.5 at 150 ms,
+  the spine's and shoulders' too), the last 40 ms about 15 % less. A second search continuing it on new pitches found nothing more (+0.05).
+  So the drive, not the reflex target, is where a learned time-varying correction pays on this controller; feedback features (Codex's) did not.
+
+**Leg and stride parameters (S10).** A one-at-a-time scan around S3 (16 practice pitches, calibrated-aim evaluator, `evalcal.py --sets`, 29 settings) showed that `drv_hips`, `dur_hips`,
+`dur_leglift` and `hips_lead` do not change a single bit of the run (the train swing replaces the tracks they parametrise), `leg_follow` and `lift_at` change only the flow, and the rest buy 0.1-0.2 m/s
+each at a flow cost or move the aim by centimetres: `leg_swing_kp` 2 +0.19 m/s (flow +0.09), `leg_swing_kd` 0.04 +0.19 (+0.05), `stride_at` 0.40 +0.20 (+0.14, aim shifted), `train_legs` 0.9 +0.08,
+`drv_stride` 0.8 (flow -0.04), `lift_at` 0.14 (flow -0.06 for nothing else), `dur_stride`, `step_delay` and `stride_at` 0.55 break the aim. S10 searched them together with the P95 retune's 41 tunables
+(50 in all, 24 new training pitches, the aim margin and the launch cost as in S9, the flow term anchored at S3's own 2.35): one generation at two workers, then five with four (about 1,700 rollouts), from 21.7 to 23.6 in
+the objective. Held out (paired against S3, as run): **+0.14 m/s on 4000-4047 (better on 44 of 48), +0.13 on the untouched 6000-6047 (40 of 48), +0.10 on the arena's pitches (18 of 24; p 0.0006)**,
+the lift valley 0.607 -> 0.579 and bat_flow 2.31 -> 2.30 (4000-4047); what it moved: `drv_stride` 0.53 -> 0.65, `leg_swing_kd` 0.084 -> 0.069, `leg_swing_kp` 1 -> 0.85, the fire 4 ms earlier
+(`prog_trig` 0.2437 -> 0.2478), the drive profile by up to 0.29. It is the champion of all six athlete trials, and the balls are worse (above).
+
+**What limits the trunk and the elbows** (`playground/bat_power_diag.py --fresh`, S3, 16 fresh pitches; earlier rows of the round-1 tables are v5 / oracle):
+pelvis yaw peaks at 7.6 rad/s (437 deg/s; MLB 714) 127 ms before contact, the torso at 9.9 rad/s (567 deg/s; MLB 937) 160 ms before, the top-arm elbow at 12.8 rad/s
+(732 deg/s) and the bottom-arm elbow at 18.2 rad/s (1042 deg/s; pros 1539, Dowling & Fleisig 2016), the bottom wrist at 18.6 rad/s (1065 deg/s; college 1093 +- 354),
+the bat at 37.8 rad/s (2164 deg/s). Against each joint's unloaded limit (vmax / 0.3 ranges per second): pelvis yaw 0.32, spine 0.25-0.39, shoulders 0.22-0.45, elbows
+0.49 and 0.70 - none is near its speed limit, and none but the wrists is near an end of its range (pelvis yaw stops 4.8 % of its range from the end, 0.3 % of the
+swing within 3 %; the wrist deviations spend 11-25 % of it within 3 % of an end). They are limited by torque x time / inertia and by the chain's sequencing:
+the pelvis yaw's effective inertia in the start posture is 2.3 kg m^2 (its muscles peak at 375 N m), the bottom elbow's 0.53 (105 N m), and the prime movers are at
+>= 0.9 activation for only 46 % (pelvis), 51 % (trunk, shoulders), 48 % (elbows) and 26 % (wrists) of the 220 ms power phase (S1: 43 / 34 / 34 / 33 / 13),
+co-contraction 0.02-0.05. The drive profile added sustained drive and 0.4 m/s; the rest is what a torque and a 0.23 s swing allow. The S10 swing gives the same picture (16 fresh pitches:
+pelvis yaw 7.70 rad/s at 127 ms before contact, torso 9.89 at 161 ms, bottom elbow 17.7, top elbow 12.6, bat 37.96 rad/s; prime movers at >= 0.9 for 45 % (pelvis), 47 % (trunk), 32 % (shoulders),
+24 % (elbows), 14 % (wrists) of the phase, 49-50 % for the instantaneous agonist of trunk, shoulders and elbows, 21 % for the wrists' (`out/bat_r2/diag_s10.json`).
+
+**Would a body change matter? Yes: about +2 m/s per +20 % of strength or of muscle speed, and a labelled P95 body reaches the MLB average.**
+The ideal-control ceiling (`bat_ceiling.py --ball`, round 1's recipe: CMA over open-loop excitations of the 16 upper-body joints, captured from the ORACLE program's swing,
+the 34 m/s centre pitch, `scratchpad/bat/ceil.sh ... prog_athlete prog_p95`) is 25.5 m/s for the athlete (the program library is already round 1's CMA optimum: no gain in 400
+generations; round 1's own run found 25.69) and **at least 32.9 for the P95 body** (400 generations 30.8, 1000 generations 32.9 at a 75 deg popup, still creeping up:
+the ball-mode score has no launch term). The in-representation swings on the same pitch: athlete S3 27.2, P95 S8b 32.7. So the closed-loop athlete swing is 1.5 m/s ABOVE round 1's
+open-loop ceiling, and the tool cannot be used as a ceiling for it any more: started from the S2c or S3 swing's own state the open-loop CMA never gets back to the swing (its replay of the
+net excitations misses the contact point by 8-12 cm; through that point it reaches 22.7 m/s against the swing's 27.2 on the athlete, 28.0 against 32.7 on P95, `--target sweet`,
+`scratchpad/bat/ceil_sweet.sh`): the reflex layer's feedback does work the open loop cannot reproduce. The body question is therefore answered by the controller itself:
+the S2c controller, unchanged, on the athlete body with one change (16 fresh pitches 8000-8015, `scratchpad/bat/bodysweep.sh`; bat speed at contact or closest
+approach with the aim shift re-centred, which the swing needs after a body change; as-run hits in brackets):
+
+| body | bat speed, m/s |
+| --- | --- |
+| athlete (strength x1.5, vmax 3.0) | 26.40 (16/16) |
+| pelvis yaw x2 / trunk (pelvis yaw + spine) x1.5 | 26.86 (16) / 27.68 (15) |
+| elbows x2 / arms (shoulders, elbows, wrists) x1.5 | 27.61 (15) / 28.41 (1) |
+| all strength x1.2 / x1.33 / x1.5 / x2 | 28.71 (12) / 29.58 (3) / 30.36 (0) / 32.22 (0) |
+| muscle speed (vmax) x1.2 / x1.5 / x2 | 27.99 (16) / 29.39 (13) / 30.68 (11) |
+| strength x1.5 and vmax x1.5 | 33.14 (0) |
+| **ROBOLAB_PROFILE=p95: strength x1.32, speed x1.2, activation x0.87** | **30.83 (0)** |
+
+The arms are a bigger lever than the trunk (the wrist whip carries the speed), and the speed of the fibres matters as much as their force (a faster muscle keeps
+more force at the same joint rate). `ROBOLAB_PROFILE=p95` (playground/profiles/p95.json: each multiplier a marginal 95th percentile of healthy young men, with sources; the athlete's
+own x1.5 already stands for strength-trained men, x1.58 in Maden-Wilkinson et al. 2020) is the honest, literature-backed body change; it is labelled, opt-in and its own arena trial,
+`bat_power_fresh_rep_p95`, never to be compared with the athlete trials. The athlete swing does not carry over as it is: the faster swing reaches the ball's plane earlier and met it
+beyond the tip (contact position 0.90 m along a 0.86 m bat), so it needs its fire 12 ms later (`prog_trig`), the taim gains recalibrated (`calibrate.py`, 45 of 48 hits at 29.7) and a search.
+S7 (an as-run sep-CMA on this body with the S2c objective) gave 30.64 m/s, 47 of 48 on the validation pitches, arena 27.12 (21/24); carrying the athlete's drive profile over and retuning it
+with 41 tunables (S8/S8b, 24 training pitches, seeds 5000-5023) gave `params/bat_r2_p95_s8.txt`: **32.38 m/s, 48/48 hits on seeds 4000-4047 and 32.43 m/s, 48/48 on the untouched 6000-6047**
+(bat speeds 31.0-33.4, bat_flow 2.44-2.45, max 2.85), **30.85 m/s, 23/24 on the arena's 24 pitches** (hit speed 32.2; the miss is 1123, the outside high pitch, contact 0.89 m along the bat;
+bat_flow 2.44, max 2.64). The price is ball quality: fair 35-36 of 48 (athlete S3: 44-46), mean launch 30-39 deg, 19-27 % of the hits launched above 60 deg (arena quality 0.17).
+The launch angle is a straight line in the aim: launch = 31-39 + 10-14 x aim_n deg (aim_n, the ball's offset from the swing plane in cm; correlation 0.85-0.99 on
+the validation sets, both bodies), and aim_n has a spread of 1.9-2.6 cm even after the aim correction, so the launch angle scatters by 26-33 deg (1 sd) whatever its mean:
+the price on the launch acts on its mean (S8b's 30-42 deg against S9's 19-34 deg below), its spread is the aim's. S9 (S8b's best, the same 41 tunables, 24 new training pitches, seeds 7300-7323,
+the launch cost raised to 0.10 per degree beyond 8 off 20 and the aim margin to 1.0 per cm beyond 1.5) keeps the speed and gives part of the ball quality back: `params/bat_r2_p95_s9.txt`,
+**32.35 m/s, 48/48 hits (fair 37) on 4000-4047, 32.41 m/s, 48/48 (fair 44) on the untouched 6000-6047 and 32.13 m/s, 24/24 (fair 20, quality 0.29) on the arena's pitches**, mean launch
+19.5-34 deg, 8-21 % of the hits above 60 deg, bat_flow 2.43-2.47 (max 2.85); the aim's mean moved 1.3 cm down, its spread stayed at 2.3 cm. S9 is NOT the arena's champion: against S8b its
+paired test is p = 0.47 (on the 23 pitches both hit it differs by -0.05 m/s, -0.43 .. +0.23; it only converts the one miss), so `bat_power_fresh_rep_p95` is held by S8b (30.85, 23/24); S9 is the P95
+controller to use.
+The body sweep's hooks are env vars of `tasks/bat.py` (BAT_STRENGTH, BAT_VMAX, BAT_GROUP_STRENGTH, BAT_GROUP_VMAX; defaults change nothing).
+
+**What did not work / caveats.** `hip_open` (v5) lowers the speed and worsens the flow; `train_drv` +-20 % breaks the aim (10 and 4 misses of 16); the calibrated-aim objective was
+optimistic (26.85 promised, 26.19 after recalibration, 2 misses on 48 pitches) when the search wandered far; `train_lead` and the earlier fire move the contact toward the bat's tip (misses
+at 0.86-0.92 m), which is why the later searches carry a contact-position margin; the conv residual on the reflex targets hurt; S2b's steep uppercut; the fast S2b swing does not
+generalise its quality. **Ball quality is the open problem**: the launch angle is 10-14 deg per cm of the ball's offset from the swing plane, and that offset scatters by 1.9-2.6 cm after the aim
+correction (1.2 cm right after taim, before the searches, whose objectives leave +-3 cm free) and is not explained by the pitch (regressed on the release speed, the location, the blend's
+mismatch, quadratics of them, the plant-to-swing gap: the residual on the other validation set falls from 1.9-2.3 only to 1.75-2.1 cm), so the launch angle scatters by 26-33 deg (1 sd), fair balls
+are 88-95 % and the quality 0.18-0.45, whatever the price on the launch. The arena's paired test cannot see a swing that only converts one miss (S9 against S8b: p 0.47). The 4-pitch demo is
+kind to S3 (4 of 4 fair) and unkind to S10 (`out/bat_r2_s10.mp4`, `out/bat_r2_s10_sheet.png`: 27.0, 26.3, 25.9, 27.4 m/s, 2 of 4 fair, both grounders; the fouls are the 76 mph outside pitch, met
+1.4 cm beyond the bat's end, and a grounder at -30 deg). Not done: a new program library optimised for the longer swing (the CMA ceiling cannot find one from this state), the `tres` bumps on the reflex targets, a
+better aim law (the source of the scatter), the P95 body with the leg parameters.
+
+**Files.** Controller features (all opt-in, the v6 params replay exactly; each build was checked bit for bit against the last): `lib/robolab/skills/bat_power.w`
+(taim `taim_z/x/z0/x0/ramp`; `train_first`, `train_legs_ease`, `train_ext`, `train_lead`, `train_dlead`; `dshape`/`dw0-29`; `tres`/`tw`/`tv`/`tc`),
+`lib/robolab/skills/bat_residual.w` (`BatConvResidual`), entry `lib/entry/bat_r2.w` -> `./build.sh bat_r2` (`bin/robolab_bat_r2`; frozen copies
+`bin/challengers/bat_r2-t1` .. `-t8`: t1 taim, t5 adds the train_* timing features, t8 everything). Tools: `playground/tasks/bat_rep.py`, `playground/bat_rep.py`,
+`playground/bat_search.py`, `playground/bat_power_diag.py` (`--fresh`, joint range margins), `playground/tasks/bat.py` (body env hooks). Log and scripts: `scratchpad/bat/`
+(`LOG.md` has every run with its command line, seeds, result and pid). Params: `params/bat_r2_taim1.txt` (first fix), `bat_r2_s1.txt`, `bat_r2_s2b_g5.txt` (fastest, steep uppercut),
+`bat_r2_s2c.txt`, `bat_r2_s3.txt` (fair-ball-friendlier), **`bat_r2_s10.txt` (fastest; champion of the six athlete trials)**, P95 body (labelled): `bat_r2_p95_s7.txt`, `bat_r2_p95_s8.txt` (arena champion of `bat_power_fresh_rep_p95`), **`bat_r2_p95_s9.txt` (the one to use)**;
+searches in `params/search/bat_r2_s*.txt`. Evaluations in `out/bat_r2/`, ideal-control runs in `out/bat_ceiling/r2*_*.json`; scripts `scratchpad/bat/ceil.sh` (`--ball` ceilings, variants `prog_athlete`, `prog_p95`),
+`ceil_sweet.sh` (`--target sweet`), `bodysweep.sh`, `s9.sh`, `s10.sh` (resumable: `s10.sh 4 1700 params/search/bat_r2_s10_gen2.txt s10b`).
+
+Video: `out/bat_r2.mp4` and `out/bat_r2_sheet.png` (S3, reflexes on, on the 4 bridge demo pitches of 82.8, 89.5, 76.1 and 86.1 mph: 26.8, 25.9, 25.7 and
+27.3 m/s, 59.9-61.1 mph, all 4 fair, bat_flow 2.09-2.38, 225-230 ms from the hips firing to contact; the v6 oracle on the same pitches: 25.6, 24.9, 24.3, 25.8 m/s, 3 fair;
+the 76 mph outside pitch is met 0.9 cm from the barrel's end); S10 on the same pitches, `out/bat_r2_s10.mp4` / `out/bat_r2_s10_sheet.png`: 27.0, 26.3, 25.9, 27.4 m/s but 2 of 4 fair.
+
+```sh
+.venv/bin/python playground/bat_rep.py eval --params params/bat_r2_s10.txt --controller bin/challengers/bat_r2-t8 --seeds 1100:1124      # = the arena, 25 s
+.venv/bin/python scratchpad/bat/calibrate.py --params P --controller C --seeds 5000:5048 --iters 3 --boost 2 --out params/x.txt           # taim gains after a change
+ROBOLAB_CONTROLLER=$PWD/bin/challengers/bat_r2-t8 BATREP_FLOW=4 BATREP_FLOW_CAP=2.5 BATREP_LAUNCH=0.04 .venv/bin/python playground/search.py bat_rep \
+    --method sep_cma --budget 2600 --workers 4 --sigma 0.15 --pop 14 --risk 0.25 --seconds 4.3 --seeds 7100,7101,... --init params/bat_r2_s2c.txt --only "dw*" --out params/x.txt
+BAT_BODY=athlete ROBOLAB_PROFILE=p95 .venv/bin/python playground/bat_rep.py eval ...                                                        # the labelled P95 body
+```
+
+## Dribble through the legs, round 2 (29 Sep): muscle programs (ORACLE), and where a chain of passes breaks
+
+Goal: several through-the-legs passes in a row, judged by the task's rules on held-out starts (`btl_streak`, the longest run of good
+passes in 15 s; a pass counts only if the ball crosses the leg gate below the crotch, bounces once, is first touched legally by the other
+hand and that hand's push lands a legal bounce). Log: `scratchpad/btl2/LOG.md`, tools: `scratchpad/btl2/`.
+
+**Where A4 (the reflex controller, `params/dribble_btl_a4.txt`, `bin/challengers/dribble_btl-a2`) breaks** (`chain.py`, 25 starts): pass 1
+(the right hand's launch) is complete on 84 %, pass 2 (the left hand's return) on 44 %, pass 3 on 0 of 12; the ball rises 0.63, 0.43, 0.40 m
+after the bounce of passes 1, 2, 3 and meets the receiving hand at 2.15, 1.22, 1.07 m/s. The launch leaves the palm at 3.36 +- 0.12 m/s
+down and 2.62 sideways (repeatable). The left hand's return leaves at 1.5 +- 0.8 down and 1.5 sideways (a full return needs 3.3 and
+2.6): the lead-leg hand sits at the forced back-left spot (x about -0.12, y 0.38, the leg-clearance and gate rules leave no other),
+its arm is at its joint limits there (shoulder rotation -1.34 of -1.40, elbow at 0, wrist flexion 1.0 of 1.2) and the reflex stroke is
+a wrist flick. Nothing in the reflex parameters fixes it (scans of the drive, trunk turn, spot placement, the right hand's low
+stroke: pass 3 stayed 0 of 12 to 16).
+
+**The arm can do it** (`oracle_lib.py`, `oracle_search.py`): record a controller run, replay its recorded activations from a MuJoCo
+snapshot bit-exactly (0.03 s per replay) and replace the 16 arm muscles by a piecewise-linear activation program (a knot every 25 ms,
+values 0..1) searched by CMA-ES. On one start the left arm delivers a full-energy return (score 0.008 after 30 generations: release
+(2.07, -1.98, -3.27) m/s at z 0.54, apex 0.68, gate crossed, bounce near the ankles; A4 releases (1.25, -1.48, -2.08) on the same
+start), and the right arm a full return of the low ball (score 0.000). So the wall is the controller's stroke representation (a reflex
+servo plus pose chunks), not the muscles or the geometry.
+
+**What was built** (all opt-in in `skills/dribble_btl.w`; A4's params replay it bit-identically, `scratchpad/btl/identity.py` on seeds
+601, 705, 716; ORACLE-class: the tables are open-loop arm activations that bypass the reflex layer):
+
+- `pg_on`: a stage starts `pg_lead` = 0.165 s before the ball's predicted rising crossing of the strike height (`receive_state`, exact
+  ballistic), plays a table `pg<p>_<muscle>_<knot>` (16 arm muscles, a knot every 25 ms) as the hand's activations with the reflex gain 0,
+  and the hand's touch and release hand the ball over as ever. `pg_first 0` programs the launch too; `pg_stages` / `pg_per` cycle the last tables.
+- `pg_gs`: the table is T0 + sum u_i T_i, formed and bounded to [0, 1] at the knots (each gain block bounded to +-`pg_gmax` per unit of its
+  feature): u = the predicted crossing (x, y) offset from the stage's nominal, and (`pg_nz`, joints `pgzj<i>`) the stroking arm's posture at
+  the trigger, the contraction difference of a joint's muscle pair from the sensor frame (wrist flexion, shoulder abduction, elbow).
+- fits (`scratchpad/btl2/oracle_gs.py`, sep-CMA on 816 to 1632 knot values, 80 training starts, the replay costs 0.03 s): the stages are fitted
+  in order (launch, left return, right return), each on records of the closed-loop chain with the earlier stages in the loop, to a tight
+  arrival target that the next stage is fitted from (position within 3 cm, velocity within 0.15 m/s of what the next hand works best from),
+  so a stage's output is repeatable and the next stage sees a narrow input.
+
+**Why open-loop stages need three ingredients** (each found by a closed-loop check on unseen starts, `chain.py` / `stage_stats.py`):
+
+1. *The replay must contain the stage's own program.* Replaying the recorded activations of everything but the 16 arm muscles gives a
+   different ball than the closed loop when the stroke changes (the trunk, legs and other arm react): the launch's arrival at the left hand
+   came out 4 cm off the replay's on average (up to 8 cm), the release velocity 0.25 m/s off, although the trigger tick, the features and the arm's
+   activations were identical to 1e-3. Fitting on records made with the current program in the loop (an iterative refit, "ILC over the
+   fit") closes it: the replay's J now predicts the closed loop's (0.037 against 0.057 for the launch, was 0.161 against 0.234) and the
+   launch's arrival at the left hand went from (-0.10, 0.39) +- (0.039, 0.042) to (-0.12, 0.37) +- (0.030, 0.027).
+2. *The ball's position is not enough of a feature.* After the gain schedule on the predicted crossing the outcome scatter of a stage
+   (release velocity, arrival) is explained by the stroking arm's posture at the trigger (leave-one-out R^2 over 95 starts: left release
+   vz 0.65, vx 0.43, arrival x 0.29 with the left arm's joints against 0.24, 0.00, -0.06 with the ball alone; for the right arm, which
+   is still in the launch's follow-through, vy 0.62, arrival y 0.50), so the posture joints are inputs of the gain schedule.
+3. *The objective must price what the next stage needs.* A stage's arrival error of 10 cm cost 0.14 of a J of 0.6, and the closed-loop
+   right stage arrived 10 cm off; the arrival weight from 2 to 8 per m put it on target (pass 2 complete 4 of 23 -> 11 of 23).
+
+**Results** (ORACLE-class: the launch, the left return and the right return are open-loop tables, A4's reflexes drive everything else,
+including the left hand's second stroke; `bin/challengers/btl2-b12` with `scratchpad/btl2/params/pgP0LRz2.txt`, the arena champions
+`bin/champions/dribble_btl_streak_fresh32-*`; each challenge below won on the arena's sign-flip test and was promoted):
+
+| arena trial (15 s) | A4 (reflex) | ORACLE chain | paired difference, p |
+| --- | --- | --- | --- |
+| `dribble_btl_streak_fresh32` mean longest streak, 32 fresh starts (seeds 1101-1132, never used in any fit or scan) | 1.22 +- 0.28 | **1.84 +- 0.32** | +0.63, p 0.003 |
+| `dribble_btl_streak_25` mean longest streak (seeds 701-725) | 1.28 +- 0.29 | **2.12 +- 0.35** | +0.84, p 0.001 |
+| `dribble_btl_25` good passes / attempts | 0.104 +- 0.031 | **0.188 +- 0.036** | +0.084, p < 0.001 |
+| `dribble_btl` (10 starts) good passes / attempts | 0.080 | **0.220 +- 0.070** | +0.14, p 0.009 |
+
+Per pass on 32 unseen starts (901-932, 15 s; the fits used seeds 801-900): the launch is good on 97 %, the left return on 75 %, the
+right return on 42 % (pass 3), then A4's reflex left hand on 14 % (pass 4); streaks [4, 4, 3 x9, 2 x13, 1 x7, 0], mean 2.13, at least 3 on 11
+of 32. On 64 further starts no fit or trial ever used (seeds 1301-1364, `chain.py`, 15 s) the same controller scores 1.95 against A4's
+1.22 on the same starts (paired +0.73 +- 0.22, sign-flip p < 0.001; a streak of 3 or more on 14 of 64, A4 on 0 of 64; passes 1 to 4
+good on 95, 75, 32 and 9 %). The first chain with two programmed returns (`pgLR_b`, before the closed-loop refits and the posture
+features) had 1.50 on the fresh trial (p 0.019).
+
+Per-start streaks of the champion (from `playground/arena/champions.json`): fresh32 (seeds 1101-1132) `[1,2,3,2,2,1,3,0,1,0,4,1,2,2,2,3,3,2,
+2,2,2,3,0,2,1,2,2,1,2,2,2,2]` (a streak of 3 or more on 6 of 32, one 4, three 0); `dribble_btl_streak_25` (seeds 701-725)
+`[3,2,2,2,0,3,1,2,1,3,3,2,2,1,4,2,2,3,2,1,2,2,3,3,2]` (3 or more on 8 of 25). A4 reached 3 on none of the 25 trial starts, the 32 fresh
+starts or the 64 further ones (its best is 2).
+
+**What did not work.** Reflex-parameter probes and a sep-CMA of the right hand's low stroke (pass 3 stayed 0 of 12 to 16); one open-loop
+table for a stage without a gain schedule (fitted to 12 starts J 0.15, on 8 others 0.45; the ball's arrival varies 0.23-0.48 m in y);
+the launch as a replay-fitted table on top of A4's reflex left hand (pass 1 complete 9 of 24 against 21 of 24: the next hand is tuned to
+the arrival it knows, so the stages have to be fitted to each other); a joint search of two stages on a two-stage replay (108 s per
+generation, no gain); cycling the last two tables for the passes after the third (35 % against 42 % on pass 3); and an open-loop
+table for the left hand's second stroke (`--fresh-gains` from the first stroke's table: J 12-16 after 30 generations, no touch on most of
+99 starts: at that moment the arm is still recovering, its wrist flexion scatters over +-0.45 against +-0.07 before the first stroke).
+
+**What limits it.** Not the muscles: the muscle-level optimum gives a full-energy return from either forced spot. The open-loop
+family is the limit: the left stage's release velocity still scatters +-0.27 (vx), +-0.17 (vy), +-0.21 (vz) m/s over its own training starts
+after the ball and posture features (0.39, 0.29, 0.27 with the ball alone), and more on unseen ones
+(the closed-loop pass rates on unseen starts are 97 %, 75 %, 42 %, and 14 % for the reflex left hand's second stroke, so a chain
+of independent passes is expected to end near the measured mean streak of 2 (15 s)), and inputs the left hand cannot reach are lost
+outright: before the launch was refitted 10 % of the arrivals came at y > 0.47 m, where the left hand cannot strike (it sends the ball
+toward -x), and arrivals at x < -0.15 m leave the left hand 0.4 m/s short (the ball lands 0.15-0.3 m before the right hand). More
+than 4 passes would need the stroke to be closed-loop on the palm-ball relation (a feedback stroke that starts from any recovery
+posture), which the table representation cannot express; A4's reflex has the feedback but not the energy.
+
+Files: `lib/robolab/skills/dribble_btl.w` (`pg_*`, `pg_nz`; everything opt-in), `playground/arena/trials.json` (`dribble_btl_streak_fresh32`),
+`scratchpad/btl2/` (`LOG.md`, `oracle_gs.py` fit, `oracle_lib.py` replay, `oracle_to_params.py`, `chain.py`, `stage_stats.py`, `diag_gs.py`,
+`feat_cv.py`; params `params/pgP0LRz2.txt`, programs `runs/gs_pass0_c_g79.npz`, `gs_left_z1_g179.npz`, `gs_right_z2_g109.npz`); frozen builds
+`bin/challengers/btl2-b1` to `btl2-b12`.

@@ -143,7 +143,10 @@ def seeds(args):
 
 
 def walk_one(walker, seed, steps, nonce, outdir):
-    out = outdir / f"{seed['shape']}_r{seed['gf2_rank']}_n{nonce}_s{steps}.mfw"
+    # Several seeds can share shape, rank and nonce (alternative presentations): key the output
+    # by the seed's content hash so concurrent walks never overwrite each other.
+    tag = (seed.get('mfw_sha256') or hashlib.sha256(seed['mfw'].encode()).hexdigest())[:8]
+    out = outdir / f"{seed['shape']}_r{seed['gf2_rank']}_{tag}_n{nonce}_s{steps}.mfw"
     if out.exists():
         out.unlink()
     proc = subprocess.run([walker, seed['shape'], seed['mfw'], str(out), str(steps), str(nonce)],

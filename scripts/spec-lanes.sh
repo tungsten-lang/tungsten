@@ -298,6 +298,7 @@ compiled_specs=(
   spec/compiler/promotion_determinism_spec.w
   spec/compiler/begin_rescue_value_spec.w
   spec/compiler/wide_params_calls_spec.w
+  spec/compiler/wide_arity_dispatch_spec.w
   spec/compiler/typed_array_param_width_spec.w
   spec/compiler/typed_helper_array_signature_spec.w
   spec/compiler/typed_overload_spec.w
@@ -596,6 +597,7 @@ interpreter_specs=(
   spec/core/filesystem_mutation_spec.w
   spec/core/hash_mutation_spec.w
   spec/compiler/splat_parameter_parity_spec.w
+  spec/compiler/wide_arity_dispatch_spec.w
   # JSON.parse was compiled-only until the interpreter learned to resolve bare
   # calls to sibling class methods; pin the interpreted side.
   spec/core/json_parse_spec.w

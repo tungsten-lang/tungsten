@@ -147,6 +147,63 @@
     arity += 1
   arity
 
+# Widest signature the runtime's dynamic dispatch calls through the native
+# spread entry (self + this many arguments) — runtime.h W_METHOD_SPREAD_MAX,
+# which must agree. A wider method registers its argv entry instead (see
+# lower_method_argv_entry), so dynamic dispatch reaches every arity.
+-> method_spread_max
+  8
+
+-> method_needs_argv_entry?(node)
+  method_runtime_arity(node) - 1 > method_spread_max()
+
+-> method_argv_entry_name(fn_name)
+  fn_name + "__argv"
+
+# The function a method def registers in the runtime method table: the method
+# itself, or the boxed wrapper of a raw-ABI class method.
+-> method_dispatch_fn_name(cname, node)
+  if node.is_class_method == true && static_method_raw_abi?(node)
+    return static_method_wrapper_name(cname, node)
+  class_method_function_name(cname, node)
+
+# What the runtime method table holds for a method def: its dispatch function,
+# or that function's argv entry when the method is wider than method_spread_max.
+-> method_table_fn_name(cname, node)
+  fn_name = method_dispatch_fn_name(cname, node)
+  if method_needs_argv_entry?(node)
+    return method_argv_entry_name(fn_name)
+  fn_name
+
+# The argv entry a method wider than method_spread_max registers in place of
+# its native one: `entry(__self, __argv)` loads the bound argument slots from
+# the address __argv carries (the runtime has already nil-padded them and
+# collected any *rest) and calls the method with them.
+-> lower_method_argv_entry(mod, class_name, node, target_fn_name, definition_path)
+  argc = method_runtime_arity(node) - 1
+  entry_fn = build_function(method_argv_entry_name(target_fn_name), ["__self", "__argv"], "i64", false, [])
+  entry_fn[:source_kind] = node.is_class_method == true ? :static_wrapper : :method
+  entry_fn[:source_method] = node.name
+  entry_fn[:source_class] = class_name
+  entry_fn[:source_path] = definition_path
+  entry_fn[:source_line] = node.line
+  replace_or_append_function(mod, entry_fn)
+  slots = next_temp(entry_fn)
+  emit_wire_inttoptr_i64(entry_fn, slots, "%__argv")
+  call_args = ["%__self"]
+  i = 0
+  while i < argc
+    slot_ptr = next_temp(entry_fn)
+    emit_wire_gep_array(entry_fn, slots, argc, i, slot_ptr)
+    arg = next_temp(entry_fn)
+    emit_wire_load_ptr(entry_fn, slot_ptr, arg)
+    call_args.push(arg)
+    i += 1
+  result = next_temp(entry_fn)
+  emit_wire_call_direct_i64(entry_fn, nil, call_args, nil, nil, target_fn_name, nil, nil, result)
+  emit_wire_ret_i64(entry_fn, nil, result)
+  finalize_function(entry_fn)
+
 -> method_splat_index(node)
   if node.params == nil
     return -1
@@ -1687,7 +1744,7 @@
   mbyte_len = utf8_byte_length(mname) + 1
   cls_reload = next_temp(main_fn)
   emit_wire_load_class(main_fn, cname, cls_reload)
-  emit_wire_class_add_method(main_fn, arity, cls_reload, mfn_name, mbyte_len, mstr_id, min_arity, method_splat_index(node))
+  emit_wire_class_add_method(main_fn, arity, cls_reload, method_table_fn_name(cname, node), mbyte_len, mstr_id, min_arity, method_splat_index(node))
   # Stash the method-def AST so specialize_method can clone+re-lower
   # it under a child context with `__self` typed to a concrete variant.
   # Also stash an arity-keyed entry so monomorphization of an OVERLOADED method
@@ -1806,7 +1863,7 @@
   mbyte_len = utf8_byte_length(mname) + 1
   cls_reload = next_temp(main_fn)
   emit_wire_load_class(main_fn, cname, cls_reload)
-  emit_wire_class_add_static_method(main_fn, arity, cls_reload, method_fn_name, mbyte_len, mstr_id, min_arity, method_splat_index(node))
+  emit_wire_class_add_static_method(main_fn, arity, cls_reload, method_table_fn_name(cname, node), mbyte_len, mstr_id, min_arity, method_splat_index(node))
 
 # Accessor methods synthesized from `ro :x` / `rw :x` (a class-body
 # declaration or the constructor's trailing marker) carry the declaration's
@@ -2439,6 +2496,11 @@
   finalize_function(new_fn)
   if raw_abi && wrapper_fn_name != nil && wrapper_fn_name != fn_name
     lower_static_method_boxed_wrapper(ctx, class_name, node, fn_name, wrapper_fn_name, child_var_types)
+  # Specialized variants (override) are direct-call only; the registered
+  # definition of a wide method also needs the argv entry its table slot
+  # names (method_table_fn_name).
+  if override == nil && method_needs_argv_entry?(node)
+    lower_method_argv_entry(mod, class_name, node, method_dispatch_fn_name(class_name, node), definition_path)
   nil
 
 # -- Class variables --

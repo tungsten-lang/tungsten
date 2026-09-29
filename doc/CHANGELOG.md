@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Dynamic method dispatch reaches any arity** — a method with more than
+  eight parameters, reached through runtime dispatch (an untyped receiver,
+  a parent's self-call a subclass overrides, a class held in a variable, a
+  primitive receiver), died with "unsupported method dispatch ... (runtime
+  supports up to 8)"; primitive-receiver methods already failed at eight as
+  "undefined method". Such a method now registers a compiler-emitted argv
+  entry (`name__argv(self, argv)`) in place of its native one, and every
+  runtime dispatcher (instance, class method, constructor, primitive type
+  class) binds arguments through one generic path, `w_method_invoke`.
+  Signatures of up to eight parameters keep their direct native calls and
+  inline caches. Found in robolab (RunKnotsSkill running RunNaturalSkill's
+  nine-argument `step_chunk`). Pinned in
+  `spec/compiler/wide_arity_dispatch_spec.w`.
+
 - **Float division by zero is IEEE** — `~1.0 / ~0.0` is `inf`, `-~1.0 / ~0.0` is `-inf`, and `~0.0 / ~0.0` is `nan` on both engines. A unary minus of a float stays a float, so the negated form takes the same `fdiv`.
 - **Currency and quantity division** — `$10.00 / 3` stays currency, `10 m / 2` stays a quantity, and `$10.00 / $2.00` is a decimal ratio.
 - **Date ordering** — `<`, `>`, `<=`, `>=`, and `<=>` compare the packed civil word. `Date` includes `BitOrdered`, whose bit order is that same word.

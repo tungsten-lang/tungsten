@@ -7,8 +7,8 @@
 # types, Hash-subscript dispatch calls (single and repeated), call-in-arg,
 # annotated locals, and a conditional late-param reassign.
 #
-# Note: DYNAMIC method dispatch (obj.m(...)) supports at most 8 args and
-# raises loudly — that limit is intentional runtime behavior, not this bug.
+# DYNAMIC method dispatch (obj.m(...)) of wide methods is pinned separately
+# by wide_arity_dispatch_spec.w.
 #
 # Run: `bin/tungsten -o /tmp/wpc spec/compiler/wide_params_calls_spec.w && /tmp/wpc`
 

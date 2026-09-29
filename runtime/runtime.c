@@ -39348,14 +39348,6 @@ static void dief(const char *fmt, ...) {
     die(buf);
 }
 
-static void die_method_arity(const char *kind, const char *owner, const char *method, int expected, int supported) {
-    char buf[256];
-    snprintf(buf, sizeof(buf),
-             "unsupported %s dispatch for %s#%s with %d argument%s (runtime supports up to %d)",
-             kind, owner, method, expected, expected == 1 ? "" : "s", supported);
-    die(buf);
-}
-
 extern int main(int, char**);
 
 static const char *w_type_label(WValue v) {
@@ -50406,6 +50398,46 @@ static void w_bind_method_args(WMethod *m, WValue *source, int argc,
     }
 }
 
+/* Call a registered method entry with its `expected` bound argument slots:
+ * the native spread entry up to W_METHOD_SPREAD_MAX, the compiler-emitted
+ * argv entry beyond it (runtime.h). The argv address travels as a WValue so
+ * the entry's physical signature stays all-i64 on every target. */
+static WValue w_method_entry_call(void *fn, WValue self, const WValue *a, int expected) {
+    typedef WValue (*fn0)(WValue);
+    typedef WValue (*fn1)(WValue, WValue);
+    typedef WValue (*fn2)(WValue, WValue, WValue);
+    typedef WValue (*fn3)(WValue, WValue, WValue, WValue);
+    typedef WValue (*fn4)(WValue, WValue, WValue, WValue, WValue);
+    typedef WValue (*fn5)(WValue, WValue, WValue, WValue, WValue, WValue);
+    typedef WValue (*fn6)(WValue, WValue, WValue, WValue, WValue, WValue, WValue);
+    typedef WValue (*fn7)(WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue);
+    typedef WValue (*fn8)(WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue);
+    typedef WValue (*argv_fn)(WValue, WValue);
+    _Static_assert(W_METHOD_SPREAD_MAX == 8, "spread cases below cover 0..W_METHOD_SPREAD_MAX");
+    switch (expected) {
+        case 0: return ((fn0)fn)(self);
+        case 1: return ((fn1)fn)(self, a[0]);
+        case 2: return ((fn2)fn)(self, a[0], a[1]);
+        case 3: return ((fn3)fn)(self, a[0], a[1], a[2]);
+        case 4: return ((fn4)fn)(self, a[0], a[1], a[2], a[3]);
+        case 5: return ((fn5)fn)(self, a[0], a[1], a[2], a[3], a[4]);
+        case 6: return ((fn6)fn)(self, a[0], a[1], a[2], a[3], a[4], a[5]);
+        case 7: return ((fn7)fn)(self, a[0], a[1], a[2], a[3], a[4], a[5], a[6]);
+        case 8: return ((fn8)fn)(self, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]);
+        default: return ((argv_fn)fn)(self, (WValue)(uintptr_t)a);
+    }
+}
+
+/* Bind the call's arguments to m's parameters and invoke it — the one
+ * generic path every dynamic dispatcher (instance, static, constructor,
+ * primitive type class) uses, for any arity. */
+static WValue w_method_invoke(WMethod *m, WValue self, WValue *source, int argc) {
+    int expected = m->arity - 1; /* subtract self */
+    WValue a[expected > 0 ? expected : 1];
+    w_bind_method_args(m, source, argc, a, expected);
+    return w_method_entry_call(m->fn_ptr, self, a, expected);
+}
+
 /* ---- Exceptions ---- */
 
 __thread WExceptionFrame *w_exception_stack = NULL;
@@ -54624,32 +54656,11 @@ static WMethod *w_type_class_method(uint16_t class_id, WValue name, int argc) {
     return m;
 }
 
+/* Wider primitive-receiver methods (e.g. String#astralize's seven style
+ * parameters) stay on this slow path: w_cacheable_type_class_method only
+ * publishes arities up to five. */
 static WValue w_type_class_method_call(WMethod *m, WValue recv, WArray *args) {
-    int expected = m->arity - 1;
-    WValue a[8];
-    w_bind_method_args(m, args->slots, args->size, a, 8);
-    typedef WValue (*fn0)(WValue);
-    typedef WValue (*fn1)(WValue, WValue);
-    typedef WValue (*fn2)(WValue, WValue, WValue);
-    typedef WValue (*fn3)(WValue, WValue, WValue, WValue);
-    typedef WValue (*fn4)(WValue, WValue, WValue, WValue, WValue);
-    typedef WValue (*fn5)(WValue, WValue, WValue, WValue, WValue, WValue);
-    typedef WValue (*fn6)(WValue, WValue, WValue, WValue, WValue, WValue, WValue);
-    typedef WValue (*fn7)(WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue);
-    switch (expected) {
-        case 0: return ((fn0)m->fn_ptr)(recv);
-        case 1: return ((fn1)m->fn_ptr)(recv, a[0]);
-        case 2: return ((fn2)m->fn_ptr)(recv, a[0], a[1]);
-        case 3: return ((fn3)m->fn_ptr)(recv, a[0], a[1], a[2]);
-        case 4: return ((fn4)m->fn_ptr)(recv, a[0], a[1], a[2], a[3]);
-        /* Wider primitive-receiver methods (e.g. String#astralize's seven
-         * style parameters) stay on this slow path — the IC-cacheable cap
-         * below remains at five, so only the trampoline widens. */
-        case 5: return ((fn5)m->fn_ptr)(recv, a[0], a[1], a[2], a[3], a[4]);
-        case 6: return ((fn6)m->fn_ptr)(recv, a[0], a[1], a[2], a[3], a[4], a[5]);
-        case 7: return ((fn7)m->fn_ptr)(recv, a[0], a[1], a[2], a[3], a[4], a[5], a[6]);
-        default: return W_UNDEF;
-    }
+    return w_method_invoke(m, recv, args->slots, args->size);
 }
 
 static WValue w_type_class_dispatch(uint16_t class_id, WValue recv, WValue name, WArray *args) {
@@ -62931,7 +62942,7 @@ WValue w_method_call_slow(WValue recv, WValue name, WValue *args_ptr, int argc,
         WObject *obj = (WObject *)w_as_ptr(recv);
         WMethod *m = w_method_lookup_arity(g_class_table[obj->class_id], name, argc + 1);
         if (!m) m = w_method_lookup(g_class_table[obj->class_id], name);
-        if (m && m->splat_index_plus_one == 0) {
+        if (m && m->splat_index_plus_one == 0 && m->arity - 1 <= W_METHOD_SPREAD_MAX) {
             w_ic_publish(cache, key, m->fn_ptr, m->arity - 1 /* subtract self */);
         }
     } else if (w_is_class(recv) &&
@@ -62943,7 +62954,7 @@ WValue w_method_call_slow(WValue recv, WValue name, WValue *args_ptr, int argc,
         WClass *klass = (WClass *)w_as_ptr(recv);
         WMethod *m = w_static_method_lookup_arity(klass, name, argc + 1);
         if (!m) m = w_static_method_lookup(klass, name);
-        if (m && m->splat_index_plus_one == 0) {
+        if (m && m->splat_index_plus_one == 0 && m->arity - 1 <= W_METHOD_SPREAD_MAX) {
             w_ic_publish(cache, key, m->fn_ptr, m->arity - 1 /* subtract class receiver */);
         }
     } else if (w_is_class(recv)) {
@@ -62955,7 +62966,7 @@ WValue w_method_call_slow(WValue recv, WValue name, WValue *args_ptr, int argc,
          * g_generic_ctor_selected, so builtin specials never publish. */
         WMethod *cm = g_generic_ctor_selected;
         if (cm && cm->splat_index_plus_one == 0 && g_generic_ctor_recv == recv && w_hash_key_eq(name, WN_new) &&
-            cm->arity - 1 == argc && argc <= 8) {
+            cm->arity - 1 == argc && argc <= W_METHOD_SPREAD_MAX) {
             w_ic_publish(cache, key, cm->fn_ptr, -2 - argc);
         }
     }
@@ -63432,29 +63443,7 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
                     return ((ic_fn1)m->fn_ptr)(recv, inst);
                 }
             }
-            WValue a[8];
-            w_bind_method_args(m, args->slots, args->size, a, 8);
-            typedef WValue (*fn0)(WValue);
-            typedef WValue (*fn1)(WValue, WValue);
-            typedef WValue (*fn2)(WValue, WValue, WValue);
-            typedef WValue (*fn3)(WValue, WValue, WValue, WValue);
-            typedef WValue (*fn4)(WValue, WValue, WValue, WValue, WValue);
-            typedef WValue (*fn5)(WValue, WValue, WValue, WValue, WValue, WValue);
-            typedef WValue (*fn6)(WValue, WValue, WValue, WValue, WValue, WValue, WValue);
-            typedef WValue (*fn7)(WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue);
-            typedef WValue (*fn8)(WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue);
-            switch (expected) {
-                case 0: return ((fn0)m->fn_ptr)(recv);
-                case 1: return ((fn1)m->fn_ptr)(recv, a[0]);
-                case 2: return ((fn2)m->fn_ptr)(recv, a[0], a[1]);
-                case 3: return ((fn3)m->fn_ptr)(recv, a[0], a[1], a[2]);
-                case 4: return ((fn4)m->fn_ptr)(recv, a[0], a[1], a[2], a[3]);
-                case 5: return ((fn5)m->fn_ptr)(recv, a[0], a[1], a[2], a[3], a[4]);
-                case 6: return ((fn6)m->fn_ptr)(recv, a[0], a[1], a[2], a[3], a[4], a[5]);
-                case 7: return ((fn7)m->fn_ptr)(recv, a[0], a[1], a[2], a[3], a[4], a[5], a[6]);
-                case 8: return ((fn8)m->fn_ptr)(recv, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]);
-                default: die_method_arity("method", g_class_table[obj->class_id]->name, as_str(m->name), expected, 8); return W_NIL;
-            }
+            return w_method_invoke(m, recv, args->slots, args->size);
         }
         if (name == WN_to_s) return w_to_s(recv);
     }
@@ -63589,46 +63578,7 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
             WMethod *m = w_method_lookup_arity(klass, WN_new, args->size + 1);
             if (!m) m = w_method_lookup(klass, WN_new);
             if (m) {
-                int expected = m->arity - 1;
-                WValue a[16];
-                w_bind_method_args(m, args->slots, args->size, a, 16);
-                typedef WValue (*fn0)(WValue);
-                typedef WValue (*fn1)(WValue, WValue);
-                typedef WValue (*fn2)(WValue, WValue, WValue);
-                typedef WValue (*fn3)(WValue, WValue, WValue, WValue);
-                typedef WValue (*fn4)(WValue, WValue, WValue, WValue, WValue);
-                typedef WValue (*fn5)(WValue, WValue, WValue, WValue, WValue, WValue);
-                typedef WValue (*fn6)(WValue, WValue, WValue, WValue, WValue, WValue, WValue);
-                typedef WValue (*fn7)(WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue);
-                typedef WValue (*fn8)(WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue);
-                typedef WValue (*fn9)(WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue);
-                typedef WValue (*fn10)(WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue);
-                typedef WValue (*fn11)(WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue);
-                typedef WValue (*fn12)(WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue);
-                typedef WValue (*fn13)(WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue);
-                typedef WValue (*fn14)(WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue);
-                typedef WValue (*fn15)(WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue);
-                typedef WValue (*fn16)(WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue);
-                switch (expected) {
-                    case 0: ((fn0)m->fn_ptr)(obj); break;
-                    case 1: ((fn1)m->fn_ptr)(obj, a[0]); break;
-                    case 2: ((fn2)m->fn_ptr)(obj, a[0], a[1]); break;
-                    case 3: ((fn3)m->fn_ptr)(obj, a[0], a[1], a[2]); break;
-                    case 4: ((fn4)m->fn_ptr)(obj, a[0], a[1], a[2], a[3]); break;
-                    case 5: ((fn5)m->fn_ptr)(obj, a[0], a[1], a[2], a[3], a[4]); break;
-                    case 6: ((fn6)m->fn_ptr)(obj, a[0], a[1], a[2], a[3], a[4], a[5]); break;
-                    case 7: ((fn7)m->fn_ptr)(obj, a[0], a[1], a[2], a[3], a[4], a[5], a[6]); break;
-                    case 8: ((fn8)m->fn_ptr)(obj, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]); break;
-                    case 9: ((fn9)m->fn_ptr)(obj, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8]); break;
-                    case 10: ((fn10)m->fn_ptr)(obj, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], a[9]); break;
-                    case 11: ((fn11)m->fn_ptr)(obj, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], a[9], a[10]); break;
-                    case 12: ((fn12)m->fn_ptr)(obj, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], a[9], a[10], a[11]); break;
-                    case 13: ((fn13)m->fn_ptr)(obj, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], a[9], a[10], a[11], a[12]); break;
-                    case 14: ((fn14)m->fn_ptr)(obj, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], a[9], a[10], a[11], a[12], a[13]); break;
-                    case 15: ((fn15)m->fn_ptr)(obj, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], a[9], a[10], a[11], a[12], a[13], a[14]); break;
-                    case 16: ((fn16)m->fn_ptr)(obj, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], a[9], a[10], a[11], a[12], a[13], a[14], a[15]); break;
-                    default: die_method_arity("constructor", klass->name, "new", expected, 16); break;
-                }
+                w_method_invoke(m, obj, args->slots, args->size);
             } else if (args->size > 0) {
                 /* No constructor accepts these arguments. Dropping them
                  * silently returned an object with every field unset, so the
@@ -63665,30 +63615,7 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
         if (!sm) sm = w_static_method_lookup(klass, name);
 invoke_static_method:
         if (sm) {
-            int expected = sm->arity - 1;  /* subtract self */
-            WValue a[8];
-            w_bind_method_args(sm, args->slots, args->size, a, 8);
-            typedef WValue (*sfn1)(WValue);
-            typedef WValue (*sfn2)(WValue, WValue);
-            typedef WValue (*sfn3)(WValue, WValue, WValue);
-            typedef WValue (*sfn4)(WValue, WValue, WValue, WValue);
-            typedef WValue (*sfn5)(WValue, WValue, WValue, WValue, WValue);
-            typedef WValue (*sfn6)(WValue, WValue, WValue, WValue, WValue, WValue);
-            typedef WValue (*sfn7)(WValue, WValue, WValue, WValue, WValue, WValue, WValue);
-            typedef WValue (*sfn8)(WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue);
-            typedef WValue (*sfn9)(WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue);
-            switch (expected) {
-                case 0: return ((sfn1)sm->fn_ptr)(recv);
-                case 1: return ((sfn2)sm->fn_ptr)(recv, a[0]);
-                case 2: return ((sfn3)sm->fn_ptr)(recv, a[0], a[1]);
-                case 3: return ((sfn4)sm->fn_ptr)(recv, a[0], a[1], a[2]);
-                case 4: return ((sfn5)sm->fn_ptr)(recv, a[0], a[1], a[2], a[3]);
-                case 5: return ((sfn6)sm->fn_ptr)(recv, a[0], a[1], a[2], a[3], a[4]);
-                case 6: return ((sfn7)sm->fn_ptr)(recv, a[0], a[1], a[2], a[3], a[4], a[5]);
-                case 7: return ((sfn8)sm->fn_ptr)(recv, a[0], a[1], a[2], a[3], a[4], a[5], a[6]);
-                case 8: return ((sfn9)sm->fn_ptr)(recv, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]);
-                default: die_method_arity("static method", klass->name, as_str(sm->name), expected, 8); return W_NIL;
-            }
+            return w_method_invoke(sm, recv, args->slots, args->size);
         }
     }
 

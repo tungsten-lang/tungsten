@@ -1113,9 +1113,19 @@ function_emit_cache_state = {
       instrs = func[:blocks][bi][:instructions]
       ii = 0
       while ii < instrs.size()
-        fname = address_taken_function_for_inst(instrs[ii])
+        inst = instrs[ii]
+        fname = address_taken_function_for_inst(inst)
         if fname != nil
           taken[fname] = true
+        # The guarded direct arms of an IC dispatch site are rendered without
+        # a calling convention, so their targets keep the C one too. (A
+        # method wider than method_spread_max is registered through its argv
+        # entry, which leaves these arms as its only other callers.)
+        if wire_kind(inst) == :call_method_i64
+          if wire_get(inst, :devirt_fn) != nil
+            taken[wire_get(inst, :devirt_fn)] = true
+          if wire_get(inst, :construct_fn) != nil
+            taken[wire_get(inst, :construct_fn)] = true
         ii += 1
       bi += 1
     fi += 1

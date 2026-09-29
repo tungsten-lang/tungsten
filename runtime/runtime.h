@@ -1152,9 +1152,21 @@ WValue w_hash_delete(WValue hash, WValue key);
 WValue __w_hash_match(WValue subject, WValue pattern);
 
 /* ---- Classes and Objects ---- */
+
+/* Widest compiled-method signature the runtime calls through its native
+ * spread entry, WValue fn(self, a0, .., aN-1), N = arity - 1. A method with
+ * more parameters registers its ARGV ENTRY as fn_ptr instead:
+ * WValue entry(WValue self, WValue argv), where argv is the address of the
+ * N bound argument slots. The compiler emits that entry (lowering/
+ * definitions.w lower_method_argv_entry, threshold method_spread_max), so
+ * dynamic dispatch reaches every arity. The two constants must agree. */
+#define W_METHOD_SPREAD_MAX 8
+
 typedef struct WMethod {
     WValue name;
     uint64_t name_hash;
+    /* Native spread entry when arity - 1 <= W_METHOD_SPREAD_MAX, argv entry
+     * beyond that (see above). */
     void *fn_ptr;
     int arity;
     int min_arity;
@@ -1334,7 +1346,9 @@ WValue w_method_call_fast(WValue recv, WValue name, WValue *args_ptr, int argc);
  * Wassat#analyze (13 crash reports, 2026-07-24). */
 typedef struct {
     _Atomic uint64_t type_key; /* w_dispatch_key(recv); 0 = empty/mid-write */
-    int32_t  arity;        /* -1 = builtin wrapper, >= 0 = user method arity */
+    int32_t  arity;        /* -1 = builtin wrapper, >= 0 = user method arity
+                            * (a spread entry, <= W_METHOD_SPREAD_MAX),
+                            * <= -2 = cached constructor, -(2 + argc) */
     void    *fn_ptr;       /* cached function pointer */
 } WInlineCache;
 

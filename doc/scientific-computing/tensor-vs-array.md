@@ -80,12 +80,25 @@ Elegant long-term story:
 That’s a language-kernel change. Until then, **explicit Tensor** is clearer
 than overloading Array push/size semantics.
 
-## What about `core/sci/grid.w` today?
+## No Diagonal or Adjoint types
 
-Still there as a **pure-Tungsten multi-D** that works without Metal (smoke
-tests, portable LA). Treat as **implementation scaffold** for Tensor’s CPU
-path — migrate call sites to Tensor once `.zeros(shape)` works without a
-Metal device.
+One dense Tensor with shape/strides is enough. Do not add `Diagonal` or
+`Adjoint` subclasses (Julia's wrappers around the same idea):
+
+| Spelling | Meaning |
+|----------|---------|
+| `.T` / `.transpose` | permute axes; a strided view, still a Tensor |
+| `.H` / `.adjoint` | conjugate transpose; real dtypes are transpose |
+| `.diag(k=0)` | extract a diagonal as rank-1 (NumPy `diag`) |
+| `Tensor.diag(values)` | dense n×n with those values on the main diagonal |
+
+Compact diagonal storage is a BLAS optimization inside matmul, not a
+user-facing type. `.conjugate` is identity until complex dtypes exist.
+
+## What about Grid?
+
+**Removed.** `doc/scientific-computing/grid.md` is a historical note.
+Multi-D dense is Tensor (`core/tensor.w`), including the CPU face.
 
 ## Safetensors
 

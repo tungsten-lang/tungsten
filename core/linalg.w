@@ -973,6 +973,52 @@
       i += 1
     out
 
+  # Thin SVD: [U, singular_values, Vt], with U m×k and Vt k×n,
+  # k=min(m,n). Supports rank deficiency and rectangular matrices; vectors
+  # are not uniquely oriented inside repeated/zero singular subspaces.
+  # This copies input and uses LAPACK directly, never A^T A.
+  -> .svd(a)
+    m = LinAlg.rows(a)
+    n = LinAlg.cols(a)
+    k = m < n ? m : n
+    i = 0
+    while i < m
+      raise "LinAlg.svd: rows must be rectangular" if a[i].size != n
+      i += 1
+    if k == 0
+      return [LinAlg.zeros(m, 0), [], []]
+    flat = ccall("w_array_new_aligned", -64, m * n)
+    i = 0
+    while i < m
+      j = 0
+      while j < n
+        value = a[i][j].to_f
+        raise "LinAlg.svd: entries must be finite" if !value.finite?
+        flat[j * m + i] = value
+        j += 1
+      i += 1
+    values = ccall("w_array_new_aligned", -64, k)
+    uf = ccall("w_array_new_aligned", -64, m * k)
+    vf = ccall("w_array_new_aligned", -64, k * n)
+    info = ccall("w_blas_dgesdd_thin", flat, values, uf, vf, m, n)
+    raise "LinAlg.svd: LAPACK failed with info=" + info.to_s if info != 0
+    u = LinAlg.zeros(m, k)
+    vt = LinAlg.zeros(k, n)
+    s = []
+    j = 0
+    while j < k
+      s.push(values[j])
+      i = 0
+      while i < m
+        u[i][j] = uf[j * m + i]
+        i += 1
+      i = 0
+      while i < n
+        vt[j][i] = vf[i * k + j]
+        i += 1
+      j += 1
+    [u, s, vt]
+
   # Overdetermined, full-column-rank least squares for one RHS. Rank failure
   # is explicit; underdetermined and multi-RHS contracts remain separate APIs.
   -> .least_squares(a, b)

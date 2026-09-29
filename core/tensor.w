@@ -565,6 +565,67 @@ TENSOR_EW = {}
       i = i - 1
     self.permute(axes)
 
+  # NumPy/PyTorch `.T` — alias of transpose. Not a second type.
+  -> T
+    self.transpose
+
+  # Conjugate transpose. Real dtypes have no conjugate, so this is transpose.
+  # Complex dtypes (when added) conjugate then transpose; do not introduce an
+  # Adjoint class — Julia's Adjoint is a wrapper around the same idea.
+  -> conjugate
+    self
+
+  -> adjoint
+    self.conjugate.transpose
+
+  -> H
+    self.adjoint
+
+  # Main diagonal as a rank-1 CPU copy. Offset `k` is superdiagonal (+) /
+  # subdiagonal (-), matching NumPy `diag`.
+  -> diag(k = 0)
+    if self.rank != 2
+      raise "Tensor.diag: requires a rank-2 tensor"
+    rows = shape[0]
+    cols = shape[1]
+    n = 0
+    if k >= 0
+      n = rows
+      n = cols - k if cols - k < n
+    else
+      n = cols
+      n = rows + k if rows + k < n
+    n = 0 if n < 0
+    out = Tensor.zeros_cpu(dtype, [n])
+    i = 0
+    while i < n
+      r = i
+      c = i
+      if k >= 0
+        c = i + k
+      else
+        r = i - k
+      out.set([i], self.at([r, c]))
+      i = i + 1
+    out
+
+  # Dense n×n matrix with `values` on the main diagonal. Compact Diagonal
+  # storage is a BLAS optimization, not a user-facing type: matmul already
+  # sees a packed Tensor. Build from a rank-1 Tensor or a numeric Array.
+  -> .diag(values, dtype = Tensor.f64)
+    n = values.size()
+    out = Tensor.zeros_cpu(dtype, [n, n])
+    i = 0
+    while i < n
+      v = values
+      if type(values) == "Tensor"
+        v = values.at([i])
+      else
+        v = values[i]
+      out.set([i, i], v.to_f)
+      i = i + 1
+    out
+
   # Narrow one axis to [start, start+len): offset shifts by start*stride[axis].
   -> slice(axis, start, len)
     es = strides

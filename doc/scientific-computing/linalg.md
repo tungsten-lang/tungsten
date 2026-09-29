@@ -1,10 +1,25 @@
 # Linear algebra
 
+## Thin SVD (`core/linalg.w`)
+
+`LinAlg.svd(rows)` returns `[U, singular_values, Vt]`, with thin shapes
+`m × k`, `k`, `k × n`, where `k = min(m,n)`. It copies finite rectangular input
+and calls LAPACK directly; rank-deficient and wide matrices are supported.
+Singular values are nonnegative and descending; vectors in repeated/zero
+singular subspaces have no unique orientation. Empty input returns empty factors.
+
+This is the numerical backend for [CP and Tucker decomposition](tensor-decomposition.md).
+
+## Tensor layout helpers (`core/tensor.w`)
+
+Dense Tensor is the matrix type. `.T` / `.H` / `.diag` / `Tensor.diag` are
+methods on that type, not extra classes — see [tensor-vs-array.md](tensor-vs-array.md).
+
 ## Surface (`core/sci/linalg.w`)
 
 | Op | Notes |
 |----|--------|
-| `matmul` | via `Grid.matmul` (triple loop v0) |
+| `matmul` | nested-list GE / staged dgemm; no Grid type |
 | `solve` | GE with partial pivoting |
 | `lu` / `cholesky` / `qr` | pure Tungsten |
 | `det` / `inv` | via GE |

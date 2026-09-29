@@ -4,9 +4,10 @@
 in `runtime/runtime.h`). See `tensor-vs-array.md` and `wtensor.md`.
 
 Historical note: Grid briefly stood in as a pure-Tungsten multi-D before
-Tensor gained a proper CPU header. We do not keep both.
+Tensor gained a proper CPU header. We do not keep both. The sections below
+are the old API, kept only so old notes still resolve.
 
-## Quick use
+## Old API (do not use)
 
 ```
 use core/sci/grid

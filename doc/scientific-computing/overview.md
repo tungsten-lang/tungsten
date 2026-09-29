@@ -5,6 +5,7 @@ Flat under `core/` (no `core/sci/` namespace):
 | Module | Role |
 |--------|------|
 | `tensor.w` | multi-D dense — **CPU** `Tensor.zeros([m,n])` + Metal path |
+| `tensor/decomposition.w` | [CP-ALS and Tucker HOSVD/HOOI](tensor-decomposition.md), dense CPU f32/f64 |
 | `linalg.w` | dense LA (nested lists) + BLAS |
 | `sparse.w` | **SparseMatrix** CSR/COO; SpMV + Apple Sparse Solvers (QR/Cholesky) |
 | `fft.w` | pure radix-2 DFT |

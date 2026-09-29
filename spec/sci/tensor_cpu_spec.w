@@ -60,4 +60,13 @@ f64_product = f64_rows.matmul(f64_rows)
 << f64_product.dtype
 << f64_product.at([0, 0])
 << f64_product.at([1, 1])
+
+d = Tensor.diag([1, 2, 3], Tensor.f64)
+<< d.shape[0]
+<< d.shape[1]
+<< d.at([1, 1])
+<< d.at([0, 1])
+<< d.diag.at([1])
+<< d.T.at([1, 0])
+<< d.H.at([2, 2])
 << "TENSOR_CPU_OK"

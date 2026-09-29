@@ -10,6 +10,7 @@
 #include "wvalue.h"
 #include <cblas.h>
 #include <float.h>
+#include <limits.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -630,6 +631,38 @@ WValue w_blas_dsyev_values(WValue a_wval, WValue values_wval, WValue n_wval) {
     if (!work) { w_raise(w_string("dsyev_values: out of memory")); return w_int(-1); }
     dsyev_("N", "U", &n, ap, &n, wp, work, &lwork, &info); free(work);
     return w_int(info);
+}
+
+/* Thin SVD, column-major buffers: A[m,n], U[m,k], VT[k,n], k=min(m,n).
+ * Inputs/outputs must be distinct f64 buffers; Core allocates them privately. */
+WValue w_blas_dgesdd_thin(WValue av, WValue sv, WValue uv, WValue vtv,
+                         WValue mv, WValue nv) {
+    WArray *a = w_as_array(av), *s = w_as_array(sv);
+    WArray *u = w_as_array(uv), *vt = w_as_array(vtv);
+    int64_t mm = w_as_int(mv), nn = w_as_int(nv);
+    if (mm <= 0 || nn <= 0 || mm > INT_MAX || nn > INT_MAX) {
+        w_raise(w_string("dgesdd_thin: invalid dimensions")); return w_int(-1);
+    }
+    int m = (int)mm, n = (int)nn, k = m < n ? m : n;
+    if (a->ebits != -64 || s->ebits != -64 || u->ebits != -64 || vt->ebits != -64 ||
+        a->size < mm * nn || s->size < k || u->size < mm * k || vt->size < (int64_t)k * nn) {
+        w_raise(w_string("dgesdd_thin: f64 buffers too small")); return w_int(-1);
+    }
+    double *ap = (double *)a->slots + a->start, *sp = (double *)s->slots + s->start;
+    double *up = (double *)u->slots + u->start, *vp = (double *)vt->slots + vt->start;
+    int info = 0, lwork = -1; double query = 0.0;
+    int *iw = (int *)malloc(sizeof(int) * 8u * (size_t)k);
+    if (!iw) { w_raise(w_string("dgesdd_thin: out of memory")); return w_int(-1); }
+    dgesdd_("S", &m, &n, ap, &m, sp, up, &m, vp, &k, &query, &lwork, iw, &info);
+    if (info != 0) { free(iw); return w_int(info); }
+    if (!(query >= 1.0 && query <= INT_MAX)) {
+        free(iw); w_raise(w_string("dgesdd_thin: workspace exceeds LAPACK range")); return w_int(-1);
+    }
+    lwork = (int)query;
+    double *work = (double *)malloc(sizeof(double) * (size_t)lwork);
+    if (!work) { free(iw); w_raise(w_string("dgesdd_thin: out of memory")); return w_int(-1); }
+    dgesdd_("S", &m, &n, ap, &m, sp, up, &m, vp, &k, work, &lwork, iw, &info);
+    free(work); free(iw); return w_int(info);
 }
 
 WValue w_blas_dgesdd_values(WValue a_wval, WValue values_wval,

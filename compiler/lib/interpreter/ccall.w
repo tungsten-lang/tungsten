@@ -325,8 +325,8 @@
       # Source-defined objects exist only in this interpreter environment;
       # native w_to_s cannot see their method table. Route through the tree
       # walker's equivalent only for those objects so core methods retain
-      # custom to_s side effects. Native values must keep runtime conversion
-      # details such as w_to_s(nil) == "" (distinct from display/inspect nil).
+      # custom to_s side effects. Native values keep runtime conversion
+      # details (`w_to_s(nil) == ""`); `<<` uses to_s, not inspect.
       value = args[1]
       if type(value) == "Hash" && value.has_key?(:rt) && value[:rt] == :object
         return w_to_s(value)
@@ -684,6 +684,8 @@
       return ccall("w_blas_dsyev_values", args[1], args[2], args[3])
     when "w_blas_dgesdd_values"
       return ccall("w_blas_dgesdd_values", args[1], args[2], args[3], args[4])
+    when "w_blas_dgesdd_thin"
+      return ccall("w_blas_dgesdd_thin", args[1], args[2], args[3], args[4], args[5], args[6])
     when "w_blas_dgelsy"
       return ccall("w_blas_dgelsy", args[1], args[2], args[3], args[4])
     when "w_blas_dgeev"

@@ -95,6 +95,30 @@ use runtime_types
     i += 1
   out.to_s()
 
+# -- LLVM parameter registers --
+#
+# LLVM gives a function's SSA values and basic-block labels ONE namespace,
+# and the compiler mints its own names in it: `%t<N>` temporaries
+# (wire.w next_temp), `%vs.<N>` var slots, `<prefix>.<N>` labels and the
+# `__entry` block, `%argc`/`%argv`, `%__captures`, `%t<N>.<suffix>` emitter
+# scratch. Parameters are where a SOURCE identifier becomes an LLVM local, so
+# spelling them `%<name>` let `-> run(k, t0, t1)` define `%t0` twice (clang:
+# "multiple definition of local value named 't0'") and let any pass mapping a
+# register back to a parameter mistake the temporary `%t0` for one.
+#
+# Every parameter register therefore lives under a leading dot: `%.k`,
+# `%.t0`, `%.__self`. No compiler-minted local starts with `.`, and
+# llvm_safe_name never produces a leading one (a Tungsten identifier cannot
+# begin with `.`; transliteration writes `_uXXXXXX_`), so the namespaces are
+# disjoint by construction and the map stays injective because
+# llvm_safe_name is. Every site that names a lowered function's parameter
+# register -- lowering's reads, the emitted signature, the content-hash
+# seed, escape analysis -- goes through here. The one exception is an
+# embedded `ll` body, whose hand-written IR names its parameters verbatim
+# (see emit_param_signature).
+-> llvm_param_reg(name)
+  "%." + llvm_safe_name(name)
+
 # UTF-8 byte length of a Tungsten string (chars are codepoints).
 # Shared by lowering (class-name registration) and the emitter (string
 # constants); lives here so neither tower needs the other for it.

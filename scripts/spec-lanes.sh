@@ -292,6 +292,7 @@ compiled_specs=(
   spec/compiler/bigint_literal_cache_spec.w
   spec/compiler/ivar_param_type_spec.w
   spec/compiler/llvm_name_mangling_injective_spec.w
+  spec/compiler/param_register_namespace_spec.w
   spec/compiler/top_level_method_name_hygiene_spec.w
   spec/compiler/u64_raw_multiply_spec.w
   spec/compiler/conditional_reassign_param_spec.w
@@ -565,6 +566,13 @@ interpreter_specs=(
   spec/compiler/carry_intrinsics_parity_spec.w
   spec/compiler/ivar_param_type_spec.w
   spec/compiler/llvm_name_mangling_injective_spec.w
+  # param_register_namespace_spec stays compiled-only for now: its trailing-block
+  # checks (`apply_twice(3) ->(t2) ...`, `yielder(4) ->(t9) ...`) die under the
+  # tree interpreter on main, where interpreter_method_takes_no_block?
+  # (e8bc84f75) reads a trailing block on ANY non-whitelisted method name as an
+  # implicit `.each` over the call's result, so a user method's `&t1` / `yield`
+  # never sees it ("undefined method 'call'"). Pin it here once trailing blocks
+  # reach user-defined methods again; block_presence_parity_spec fails the same way.
   spec/compiler/top_level_method_name_hygiene_spec.w
   spec/compiler/string_buffer_dynamic_append_spec.w
   spec/compiler/string_buffer_dynamic_receiver_spec.w

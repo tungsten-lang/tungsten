@@ -5,6 +5,7 @@
 use runtime_types
 use hashing
 use wire
+use naming
 
 # Normalize a temp name to a sequential index.
 # First occurrence of a temp gets the next index.
@@ -547,10 +548,12 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
     bi += 1
 
   # Build a dense temp table plus a small fallback map for named parameters.
+  # Seed each parameter under the exact register the body references, so two
+  # bodies differing only in WHICH parameter they use never hash alike.
   temp_map = ccall_rawargs("w_content_temp_map_new", func[:next_temp], func[:params].size())
   pi = 0
   while pi < func[:params].size()
-    ccall_nobox("w_content_temp_map_seed", temp_map, "%" + func[:params][pi], pi)
+    ccall_nobox("w_content_temp_map_seed", temp_map, llvm_param_reg(func[:params][pi]), pi)
     pi += 1
 
   # Encode all blocks

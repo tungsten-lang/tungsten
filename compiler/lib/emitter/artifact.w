@@ -1147,9 +1147,16 @@
       ep = f[:extra_params][i]
       parts.push(ep[:type] + " " + ep[:name])
       i += 1
+  # An embedded `ll` body is hand-written IR that names its parameters as
+  # written in the .w source (`%a`); it mints no temporaries of its own for
+  # them to collide with. Lowered bodies reference the llvm_param_reg names.
+  verbatim = f[:embedded_ll] != nil
   i = 0
   while i < f[:params].size()
-    parts.push("i64 %" + llvm_safe_name(f[:params][i]))
+    if verbatim
+      parts.push("i64 %" + llvm_safe_name(f[:params][i]))
+    else
+      parts.push("i64 " + llvm_param_reg(f[:params][i]))
     i += 1
   parts.join(", ")
 

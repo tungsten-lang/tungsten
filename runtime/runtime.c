@@ -21660,8 +21660,10 @@ WValue w_content_temp_map_seed(WValue state, WValue name, WValue index_value) {
     int64_t ordinal = w_content_temp_ordinal(name);
     int64_t index = w_as_int(index_value);
     WValue boxed = w_box_int(index);
-    /* Preserve the old Hash map's spelling collision semantics for an
-     * unusually named parameter such as `t0`. */
+    /* Parameters are seeded under their `%.name` registers (naming.w
+     * llvm_param_reg), which never parse as a temp ordinal and so take the
+     * named fallback. A `%tN` seed still claims its dense slot, exactly as
+     * the old String-keyed Hash map would have. */
     if (ordinal >= 0 && ordinal < dense->size)
         dense->slots[ordinal] = boxed;
     else

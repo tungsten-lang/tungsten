@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **A parameter named `t0` compiles** — WIRE emitted each parameter as
+  `%<name>`, in the one LLVM namespace per function that the compiler's own
+  `%t<N>` temporaries share, so `-> run(k, t0, t1)` died in clang with
+  "multiple definition of local value named 't0'". Parameters now live under
+  a leading dot (`%.t0`, `llvm_param_reg` in `compiler/lib/naming.w`), which
+  no compiler-minted name and no Tungsten identifier starts with. The same
+  change fixes two bugs of that kind: escape analysis found a parameter by
+  its stripped register spelling, so a unicode parameter such as `α` was never
+  recorded as escaping and the caller freed a string the callee had stored
+  (a use-after-free), and the content hash seeded parameters under their raw
+  names, so bodies differing only in which unicode parameter they used could
+  hash alike and be merged. Pinned in
+  `spec/compiler/param_register_namespace_spec.w`.
+
 - **Dynamic method dispatch reaches any arity** — a method with more than
   eight parameters, reached through runtime dispatch (an untyped receiver,
   a parent's self-call a subclass overrides, a class held in a variable, a

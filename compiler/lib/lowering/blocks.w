@@ -737,7 +737,7 @@
   while pi < reassigned.size()
     pname = reassigned[pi]
     ptr = ensure_var_slot(new_fn, pname)
-    emit_wire_store_i64(new_fn, ptr, "%" + llvm_safe_name(pname))
+    emit_wire_store_i64(new_fn, ptr, llvm_param_reg(pname))
     pi += 1
 
   # Lower block body with implicit return for last expression.

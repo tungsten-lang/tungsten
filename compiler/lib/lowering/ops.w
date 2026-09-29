@@ -3976,7 +3976,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     ai += 1
 
   blk_ptr = next_temp(wfn2)
-  emit_wire_inttoptr_i64(wfn2, blk_ptr, "%__fw_blk")
+  emit_wire_inttoptr_i64(wfn2, blk_ptr, llvm_param_reg("__fw_blk"))
   out_wv = next_temp(wfn2)
   emit_wire_load_i64_at(wfn2, "0", blk_ptr, out_wv)
   ai = 0
@@ -4003,7 +4003,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
 
   saved_func = ctx[:func]
   ctx[:func] = wfn2
-  fuse_ew_emit_range_loop(ctx, spec, arrs, out_base, "%__fw_lo", "%__fw_hi", odt, ewsid)
+  fuse_ew_emit_range_loop(ctx, spec, arrs, out_base, llvm_param_reg("__fw_lo"), llvm_param_reg("__fw_hi"), odt, ewsid)
   ctx[:func] = saved_func
 
   emit_wire_ret_i64(wfn2, nil, "0")

@@ -101,7 +101,7 @@
   i = 0
   while i < 12
     if i < n
-      remap_args.push("%" + llvm_safe_name(arg_slot_names[i]))
+      remap_args.push(llvm_param_reg(arg_slot_names[i]))
     else
       remap_args.push(w_nil.to_s())
     i += 1
@@ -111,7 +111,7 @@
   i = 0
   while i < n
     slot_temp = next_temp(new_fn)
-    emit_wire_call_direct_i64(new_fn, nil, [did, "%" + llvm_safe_name(arg_slot_names[i])], nil, nil, "w_kwargs_slot_" + i.to_s(), nil, nil, slot_temp)
+    emit_wire_call_direct_i64(new_fn, nil, [did, llvm_param_reg(arg_slot_names[i])], nil, nil, "w_kwargs_slot_" + i.to_s(), nil, nil, slot_temp)
     kw_rebound[arg_slot_names[i]] = slot_temp
     child_ctx[:bindings][arg_slot_names[i]] = slot_temp
     i += 1
@@ -125,7 +125,7 @@
   kw_rebound = child_ctx[:kw_rebound]
   if kw_rebound != nil && kw_rebound[pname] != nil
     return kw_rebound[pname]
-  "%" + llvm_safe_name(pname)
+  llvm_param_reg(pname)
 
 -> method_lowering_analysis(node)
   cached = ast_analysis_get(node)
@@ -189,8 +189,8 @@
   entry_fn[:source_line] = node.line
   replace_or_append_function(mod, entry_fn)
   slots = next_temp(entry_fn)
-  emit_wire_inttoptr_i64(entry_fn, slots, "%__argv")
-  call_args = ["%__self"]
+  emit_wire_inttoptr_i64(entry_fn, slots, llvm_param_reg("__argv"))
+  call_args = [llvm_param_reg("__self")]
   i = 0
   while i < argc
     slot_ptr = next_temp(entry_fn)
@@ -1060,7 +1060,7 @@
     pt = child_var_types[pname]
     if is_raw_int_storage_type(pt)
       if raw_i64_sig || raw_int_sig
-        child_ctx[:bindings][pname] = "%" + llvm_safe_name(pname)
+        child_ctx[:bindings][pname] = llvm_param_reg(pname)
       elsif pt in (:i64 :u64)
         # Checked unbox: a boxed caller passes values >2^47 as heap bigint
         # boxes, which the plain shl/ashr nanunbox would pass through as
@@ -1142,10 +1142,10 @@
         emit_wire_store_i64(new_fn, ptr, child_ctx[:bindings][pname])
     else
       if is_raw_int_storage_type(child_var_types[pname])
-        raw = ensure_raw_machine_int(new_fn, typed_value(:i64, "%" + llvm_safe_name(pname)), child_var_types[pname], child_var_types[pname])
+        raw = ensure_raw_machine_int(new_fn, typed_value(:i64, llvm_param_reg(pname)), child_var_types[pname], child_var_types[pname])
         emit_wire_dynamic_2(new_fn, machine_store_op(child_var_types[pname]), :ptr, ptr, :value, raw)
       else
-        emit_wire_store_i64(new_fn, ptr, "%" + llvm_safe_name(pname))
+        emit_wire_store_i64(new_fn, ptr, llvm_param_reg(pname))
     pi += 1
 
   captured_params = find_captured_params_in_body(body, param_names_list)
@@ -1164,10 +1164,10 @@
         else
           emit_wire_store_i64(new_fn, ptr, child_ctx[:bindings][pname])
       elsif is_raw_int_storage_type(child_var_types[pname])
-        raw = ensure_raw_machine_int(new_fn, typed_value(:i64, "%" + llvm_safe_name(pname)), child_var_types[pname], child_var_types[pname])
+        raw = ensure_raw_machine_int(new_fn, typed_value(:i64, llvm_param_reg(pname)), child_var_types[pname], child_var_types[pname])
         emit_wire_dynamic_2(new_fn, machine_store_op(child_var_types[pname]), :ptr, ptr, :value, raw)
       else
-        emit_wire_store_i64(new_fn, ptr, "%" + llvm_safe_name(pname))
+        emit_wire_store_i64(new_fn, ptr, llvm_param_reg(pname))
     pi += 1
 
   # Lower body with implicit return for last expression
@@ -2039,16 +2039,16 @@
   wrapper_fn[:source_line] = node.line
   replace_or_append_function(mod, wrapper_fn)
 
-  call_args = ["%__self"]
+  call_args = [llvm_param_reg("__self")]
   i = 0
   while i < params.size()
     pname = param_runtime_name(params[i])
     pt = child_var_types[pname]
     if is_machine_int64_type(pt)
-      raw = ensure_raw_machine_int(wrapper_fn, typed_value(:i64, "%" + llvm_safe_name(pname)), pt, pt)
+      raw = ensure_raw_machine_int(wrapper_fn, typed_value(:i64, llvm_param_reg(pname)), pt, pt)
       call_args.push(raw)
     else
-      call_args.push("%" + llvm_safe_name(pname))
+      call_args.push(llvm_param_reg(pname))
     i += 1
 
   temp = next_temp(wrapper_fn)
@@ -2353,7 +2353,7 @@
     pt = child_var_types[pname]
     if is_raw_int_storage_type(pt)
       if raw_abi && is_machine_int64_type(pt)
-        child_ctx[:bindings][pname] = "%" + llvm_safe_name(pname)
+        child_ctx[:bindings][pname] = llvm_param_reg(pname)
       elsif pt in (:i64 :u64)
         # Checked unbox, mirroring lower_method_def: a boxed caller passes
         # values >2^47 as heap BigInt boxes, which the plain shl/ashr
@@ -2410,10 +2410,10 @@
         emit_wire_store_i64(new_fn, ptr, child_ctx[:bindings][pname])
     else
       if is_raw_int_storage_type(child_var_types[pname])
-        raw = ensure_raw_machine_int(new_fn, typed_value(:i64, "%" + llvm_safe_name(pname)), child_var_types[pname], child_var_types[pname])
+        raw = ensure_raw_machine_int(new_fn, typed_value(:i64, llvm_param_reg(pname)), child_var_types[pname], child_var_types[pname])
         emit_wire_dynamic_2(new_fn, machine_store_op(child_var_types[pname]), :ptr, ptr, :value, raw)
       else
-        emit_wire_store_i64(new_fn, ptr, "%" + llvm_safe_name(pname))
+        emit_wire_store_i64(new_fn, ptr, llvm_param_reg(pname))
     pi += 1
 
   captured_params = find_captured_params_in_body(body, param_names)
@@ -2432,10 +2432,10 @@
         else
           emit_wire_store_i64(new_fn, ptr, child_ctx[:bindings][pname])
       elsif is_raw_int_storage_type(child_var_types[pname])
-        raw = ensure_raw_machine_int(new_fn, typed_value(:i64, "%" + llvm_safe_name(pname)), child_var_types[pname], child_var_types[pname])
+        raw = ensure_raw_machine_int(new_fn, typed_value(:i64, llvm_param_reg(pname)), child_var_types[pname], child_var_types[pname])
         emit_wire_dynamic_2(new_fn, machine_store_op(child_var_types[pname]), :ptr, ptr, :value, raw)
       else
-        emit_wire_store_i64(new_fn, ptr, "%" + llvm_safe_name(pname))
+        emit_wire_store_i64(new_fn, ptr, llvm_param_reg(pname))
     pi += 1
 
   # Lower body with implicit return for last expression
@@ -2696,12 +2696,12 @@
     i = 0
     while i < wfn[:params].size()
       if wfn[:params][i] == block_name
-        block_reg = "%" + llvm_safe_name(block_name)
+        block_reg = llvm_param_reg(block_name)
         break
       i += 1
 
   if block_reg == nil
-    block_reg = "%" + llvm_safe_name(block_name)
+    block_reg = llvm_param_reg(block_name)
 
   # Lower yield arguments
   arg_regs = []

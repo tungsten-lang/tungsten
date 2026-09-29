@@ -60,17 +60,16 @@
 
 # Param index for a WIRE value: a parameter register itself, or a temp the
 # forward derivation walk below traced back to one. nil when unrelated.
+# param_idx is keyed by the exact register (naming.w llvm_param_reg), never by
+# a stripped spelling: a temporary `%t0` is not the parameter `t0`.
 -> escape_param_source(value, temp_from_param, param_idx)
   if value == nil
     return nil
   src = temp_from_param[value]
   if src != nil
     return src
-  if type(value) == "String" && value.size() > 1
-    bare = value
-    if bare.starts_with?("%")
-      bare = value.slice(1, value.size() - 1)
-    return param_idx[bare]
+  if type(value) == "String"
+    return param_idx[value]
   nil
 
 # Record that `value` (if param-derived) escapes. `stored` distinguishes a
@@ -156,7 +155,7 @@
   while pi < params.size()
     param_escaped.push(false)
     param_stored.push(false)
-    param_idx[params[pi]] = pi
+    param_idx[llvm_param_reg(params[pi])] = pi
     pi += 1
 
   state = {param_escaped: param_escaped, param_stored: param_stored, param_idx: param_idx, temp_from_param: {}}

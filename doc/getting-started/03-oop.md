@@ -175,11 +175,11 @@ dist.print_self()             # => Distance: 42
 ```
 
 ```bash
-bin/tungsten -o /tmp/traits doc/examples/03-oop/traits.w && /tmp/traits
+bin/tungsten doc/examples/03-oop/traits.w
 ```
 
-Trait **method dispatch** is a *(compiled)* feature: use the native path for
-programs that rely on `is Trait` methods.
+Trait method dispatch is part of the compiled WIRE path (`bin/tungsten file.w`
+or `-o`).
 
 Inside a trait, `with OtherTrait` composes another trait in.
 

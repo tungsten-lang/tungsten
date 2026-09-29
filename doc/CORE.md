@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(632 total), grouped by area, with its declaration, a one-line
+(635 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -70,6 +70,9 @@ summary from the source header, and a link to the source.
 | `Special` | `+ Special` | Special — transcendental / special functions (SciPy `scipy.special` analogue). | [`core/special.w`](../core/special.w) |
 | `Stats` | `+ Stats` | — | [`core/stats.w`](../core/stats.w) |
 | `Tensor` | `+ Tensor` | — | [`core/tensor.w`](../core/tensor.w) |
+| `TensorDecomposition` | `+ TensorDecomposition` | Dense real CP-ALS and Tucker HOSVD/HOOI over the existing CPU Tensor storage. | [`core/tensor/decomposition.w`](../core/tensor/decomposition.w) |
+| `CPDecomposition` | `+ CPDecomposition` | Numerical CP factors with explicit weights, residual and stopping status. | [`core/tensor/decomposition.w`](../core/tensor/decomposition.w) |
+| `TuckerDecomposition` | `+ TuckerDecomposition` | Numerical Tucker core and orthonormal mode factors, with fit diagnostics. | [`core/tensor/decomposition.w`](../core/tensor/decomposition.w) |
 | `Tempfile` | `+ Tempfile` | Tempfile — a securely-created, path-owning temporary file. | [`core/file.w`](../core/file.w) |
 | `Expression` | `+ Expression` | — | [`core/expression.w`](../core/expression.w) |
 | `Calculus` | `+ Calculus` | — | [`core/calculus.w`](../core/calculus.w) |

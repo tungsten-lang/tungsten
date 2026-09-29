@@ -62,8 +62,7 @@ Companion `.w` files live under [`doc/examples/`](../examples/):
 ```bash
 bin/tungsten doc/examples/01-basics/hello.w
 bin/tungsten doc/examples/02-data/arrays.w
-# Some OOP / pure-fn examples need the native path — see 06-gotchas.md
-bin/tungsten -o /tmp/classes doc/examples/03-oop/classes.w && /tmp/classes
+bin/tungsten doc/examples/03-oop/classes.w
 ```
 
 ## Orientation commands

@@ -442,6 +442,25 @@ digits, not followed by another digit or underscore.
 **Fix:** Zero-pad to sixteen digits. WValue literals are a compiler-internal
 spelling for NaN-boxed words; ordinary programs want an integer literal.
 
+## E_LOWER_FOLD
+
+`## fold` demands that an expression (or a `-> ## fold` block) evaluate to a
+constant while compiling. The compiler could not prove that: a name was
+unbound, a call was impure (`env`, IO, a function that does `ccall`), a
+construct is not foldable, or the fold ran too long.
+
+**Fix:** Fold only closed arithmetic, literals, arrays, and pure functions.
+Host facts (`l1d_cache_bytes`) fold on a native build. Put side effects
+outside the annotation.
+
+## E_PARSE_FOLD_PARAMS
+
+`-> ## fold` starts a compile-time block, not a lambda. Parameters are not
+allowed; bind locals inside the body instead.
+
+**Fix:** Write `tables = -> ## fold` then indented statements, not
+`->(x) ## fold`.
+
 ## E_LOWER_UNKNOWN_FN
 
 A bare call names a function that does not exist: no source `fn` or `->`

@@ -7,70 +7,50 @@ slow, wrong, or "works in the README but not for me."
 
 ---
 
-## 1. Default `Int` is a bignum — use `## i64` on hot paths
+## 1. Unspecified ints wrap at `i64`
 
-Tungsten's default integer is **arbitrary-precision**. Small values live in a
-NaN-boxed 48-bit range (no heap). Cross that range — or do enough arithmetic
-that intermediates overflow the small-int box — and every op becomes a heap
-bignum helper.
+Untyped decimal integer arithmetic is C-like wrapping i64 on every product
+engine (`bin/tungsten file.w`, `-o`, and `run --interpret`). You do **not**
+need `## i64` on an ordinary `rng = 1` loop for it to be a machine multiply.
+
+`type(x)` still prints `Int` — that is the language class, not the machine
+width. Arbitrary-precision is the *other* integer:
+
+- literals bigger than i64 (`format == :dec_big`) and `## int` / `## bigint`
+- `**` and untyped `1 << n` (the result may be a BigInt; typing those `:i64`
+  wraps the shift)
+- `Math.promote -> …` for a lexical promoting block
+- `TUNGSTEN_INFER=boxed`, the reference oracle that keeps every untyped
+  integer on the guarded promoting path
 
 In the type hierarchy, `Integer` is the generic exact-integer family, `Int`
-selects Tungsten's auto-promoting policy, and `BigInt` is its heap
-continuation. Use `is_a?(Integer)` for generic integer algorithms and
-`is_a?(Int)` when the default promotion contract is required.
+is the default class name, and `BigInt` is the heap continuation. Use
+`is_a?(Integer)` for generic integer algorithms.
 
-In a tight loop this shows up as:
-
-- Sudden multi‑MB/s RSS growth (escaping bignum intermediates)
-- Profiles dominated by `bigint_*` / `w_eq` / `w_add` / `w_mod`
-- Correct code that is 10–18× slower than the fixed-width version
-
-**Fix for performance-critical compiled code:** type hot scalars as fixed-width:
-
-```tungsten
-rng = base * 1009 + 12345 ## i64
-ui = us[ti] ## i64
-scan = 0 ## i64
-rank = 0 ## i64
-```
-
-Rules of thumb (from
-[tungsten-performance-engineering.md](../articles/tungsten-performance-engineering.md)):
-
-1. Hot-loop scalars: `## i64` or `## u64`.
-2. Profile the **native** binary (`sample`, etc.) — do not guess.
-3. Typed array reads (`i64[]`) are already raw; the problem is often the
-   untyped temporary you assign them into.
-
-For everyday scripting, plain `Int` is fine and convenient. For search loops,
-RNGs, checksums, and compilers — type the width.
+The remaining slow path is a **boxed `:int`** that still goes through guarded
+i48 arithmetic and can allocate a BigInt. That is no longer the default for
+untyped literals. `## i64` / `## u64` remain useful when you must pin a
+machine width against a value that would otherwise stay `:int` (a `to_i` of
+a huge string, a `## int` accumulator, a bigint `**`).
 
 ---
 
-## 2. One product engine, two workflows
+## 2. Compiled WIRE is the reference
 
-| Path | Command | Strength |
-| ---- | ------- | -------- |
-| Cached WIRE run | `bin/tungsten file.w` | Full language with a cached output binary |
-| Native compile | `bin/tungsten -o out file.w` | Full language; production path |
-| Ruby interpreter | `bin/tungsten --ruby file.w` | Bootstrap / fallback tree-walk |
+| Path | Command | Role |
+| ---- | ------- | ---- |
+| Cached WIRE run | `bin/tungsten file.w` | Product: lower through WIRE, cache, run |
+| Native compile | `bin/tungsten -o out file.w` | Same semantics, explicit binary |
+| Tree-walk | `bin/tungsten run --interpret` | Same language; evaluates the AST (must match WIRE) |
+| Ruby | `bin/tungsten --ruby file.w` | Full second implementation |
 
-Quick run and native compile now share lexer, parser, lowering, WIRE, codegen,
-and runtime semantics. Use `--ruby` only when debugging or changing the legacy
-bootstrap interpreter; its remaining gaps do not define product behavior:
+Quick run and `-o` share lexer, parser, lowering, WIRE, codegen, and runtime
+semantics. The self-hosted interpreter is a tree-walk of the same AST and is
+kept in lockstep with that semantics. `@gpu fn` is a separate kernel dialect
+(Metal/CUDA/WGSL), not a second CPU language.
 
-| Construct | Notes |
-| --------- | ----- |
-| Trait autoload | Local `trait` bodies work; some `is Trait` paths need autoload |
-| `go` / channels | Basic `go` drains at end of program; channel fixtures may still diverge |
-| Array `[]=` via alias | A few alias/subscript cases still differ from compiled |
-| GPU / `@gpu fn` | Compile + Metal/CUDA path only |
-
-When an example "doesn't work," try:
-
-```bash
-bin/tungsten -o /tmp/prog file.w && /tmp/prog
-```
+The C VM in `implementations/c` bootstraps the self-hosted compiler. It is
+not a full language implementation. `implementations/ruby` is.
 
 Agent-oriented summary: [TUNGSTEN_FOR_LLMs.md](../TUNGSTEN_FOR_LLMs.md)
 (section **Engines**).
@@ -160,7 +140,8 @@ TUNGSTEN_FREE=0 bin/tungsten -o out file.w   # disable free insertion
 
 If you see RSS climb:
 
-1. Check for **bignum** hot paths first (`## i64`) — that is the usual culprit.
+1. Check for a boxed `:int` / BigInt path (`## int`, `**`, huge `to_i`) — not
+   ordinary untyped i64 arithmetic.
 2. Then consider whether values escape in a way that disables free insertion.
 3. Only then turn `TUNGSTEN_FREE` as a diagnostic.
 
@@ -180,19 +161,18 @@ If you see RSS climb:
 
 Gotchas:
 
-- **Platform:** Metal path targets macOS (Apple silicon); needs a recent Metal
-  toolchain. Not the Linux CPU path.
-- **Subset:** v0 emits Metal Shading Language from a limited kernel dialect —
-  typed arrays, simple control flow, GPU builtins. Full Tungsten (classes,
-  Decimal money, traits, …) does **not** run on the GPU.
-- **Types:** Prefer explicit `## f32`, `## i32`, buffer types; default `Int`
+- **Platform:** Metal on macOS (Apple silicon); CUDA and WGSL sidecars from
+  the same kernel AST. Not a Linux CPU fallback for `@gpu fn`.
+- **Subset:** a limited kernel dialect — typed arrays, simple control flow,
+  GPU builtins. Full Tungsten (classes, Decimal money, traits, …) does
+  **not** run on the GPU.
+- **Types:** Prefer explicit `## f32`, `## i32`, buffer types; wrapping `Int`
   thinking does not apply.
-- **Dispatch:** Host/runtime Metal bridges compile and launch kernels; a bare
+- **Dispatch:** Host/runtime bridges compile and launch kernels; a bare
   `@gpu fn` without the supporting host call path will not "just run" like a
   CPU `->`.
 
-See `compiler/lib/metal_emitter.w` and the CHANGELOG GPU notes for current
-scope.
+See `compiler/lib/metal_emitter.w`, `doc/gpu-cuda.md`, and `doc/gpu-portable.md`.
 
 ---
 
@@ -218,17 +198,27 @@ accidentally return a print result. Be deliberate about the last expression.
 
 ---
 
-## 11. Interpreter vs compiler small divergences
+## 11. Interpreter vs compiler remaining divergences
 
-Documented examples:
+`bin/tungsten file.w`, `-o`, and `run --interpret` are the same language.
+`<<` prints `#to_s` (so `<< nil` is a blank line, and arrays of strings are
+`[a, b]`, not inspect-quoted). Remaining splits live in `spec/parity/` —
+mostly compile-time vs run-time arity errors, error-message shape, and
+generic class names (`type(Box<Integer>)` is `Box` interpreted and
+`Box$Integer` compiled). Dates, ranges, IPv6, and `|` unit conversion agree:
 
-- **Date/time range checks:** interpreter validates calendar/clock fields more
-  strictly; compiler may accept digit-shaped but invalid dates.
-- **IPv6 forms:** some expanded/zone forms differ by engine.
-- **Unit pipelines:** surface is real; compiled conversion is still maturing.
+- **Dates:** invalid calendar/clock fields are rejected. Compiled literals
+  fail at lowering (`E_LOWER_DATE_*` / `E_LOWER_TIME_*`); `Date.parse` and
+  interp literals go through `w_date_parse`, which uses the same checks as
+  `Date.new`.
+- **IPv6:** both engines share the lexer (`::`-compressed literals, no zone
+  id) and `w_ipv6_from_string`. Print is always expanded
+  (`2001:db8:0:0:0:0:0:1`). Expanded input and `%zone` are not literals on
+  either engine; `IPv6.parse` accepts the 8-group form and rejects zones.
+- **Unit pipelines:** `| km` / `| cm(2)` call `w_quantity_pipe` on both
+  engines.
 
-When writing tests that must match exactly, pin the engine (`-o` vs quick run)
-the harness expects.
+The ledger is `spec/parity/DIVERGENCES.md`.
 
 ---
 
@@ -286,12 +276,11 @@ GOOD_7 = [1, 5]          # digits are fine in SCREAMING_SNAKE
 | ------- | ------------ | --- |
 | Syntax error at a surprising indent | Dedent / tabs | Spaces only; reindent |
 | `Invalid assignment target` on `Foo=…` | PascalCase → class_ref | Use `snake_case` or `SCREAMING_SNAKE` |
-| Feature works in docs, fails quick run | Compiled-only construct | `bin/tungsten -o …` |
-| Slow loop / growing RSS | Default `Int` bignums | `## i64` on hot vars |
+| Feature works in docs, fails quick run | Remaining parity split | `spec/parity/DIVERGENCES.md` |
+| Slow loop / growing RSS | Boxed `:int` / BigInt (`## int`, `**`, huge `to_i`) | Keep untyped i64; annotate only when you mean it |
 | `a/b` not dividing | MAP lex | `a / b` with spaces |
 | Money/float weirdness | Decimal vs `~` float | Pick one intentionally |
-| Trait methods missing | Engine gap | Compile with `-o` |
-| GPU kernel ignored / errors | Subset / platform | Metal host path; typed kernel body |
+| GPU kernel ignored / errors | Subset / platform | Typed kernel body; Metal/CUDA/WGSL host path |
 
 ---
 

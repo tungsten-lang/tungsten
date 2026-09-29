@@ -87,8 +87,8 @@ fn fib(n)
 # Machine types: i64 u64 i32 u8 f64 f32 bool ; typed arrays: i64[] f64[] u8[] …
 # Return type may also be a class: -> build(cap) (i64) string_buffer
 # Inside a body, type an accumulator with `## i64` / `## f64`; `~3.0` is a raw
-# float literal. Untyped ints are arbitrary-precision (correct, but boxed and
-# ~18x slower in tight loops) — annotate the signature and hot-loop locals.
+# float literal. Untyped decimal integer literals already infer wrapping i64
+# on the compiled path. `## int` / BigInt literals / `**` stay promoting.
 ```
 
 ## Blocks
@@ -318,21 +318,22 @@ tightly than `∪`. Set operations produce new sets.
 
 ## Engines
 
-Product execution has one semantic path. The tree-walker remains an explicit
-bootstrap/debug aid:
+Product execution has one semantic path:
 
 | Path | Command |
 | ---- | ------- |
 | Cached WIRE run | `bin/tungsten file.w` or `bin/tungsten -e '…'` |
 | Native compile | `bin/tungsten -o out file.w && ./out` |
-| Legacy tree-walk | `bin/tungsten --ruby file.w` |
+| Native tree-walk | `bin/tungsten run --interpret` (same semantics; AST eval) |
+| Ruby | `bin/tungsten --ruby file.w` (full second implementation) |
 
-Because quick run and native compile both consume WIRE, language features,
-exceptions, math modes, and concurrency no longer require a second product
-implementation.
+Because quick run and native compile both consume WIRE, they are the same
+language. The self-hosted interpreter matches that semantics. `@gpu fn` is a
+kernel dialect on the side.
 
-`implementations/c` and `implementations/ruby` are **bootstrap hosts only** —
-they build the self-hosted compiler; they are not the product runtime.
+`implementations/c` bootstraps the self-hosted compiler; it is not a full
+language implementation. `implementations/ruby` is a second full implementation
+and is not the product runtime.
 
 ## Tooling for agents
 

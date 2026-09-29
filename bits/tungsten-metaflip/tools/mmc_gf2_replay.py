@@ -324,6 +324,10 @@ class Replayer:
                 self.dep_stack[-1].add(("atom", path))
             if not G.check_exact(a):
                 raise ReplayError("GF(2) verification failed for " + path)
+            # The disk cache stores sorted terms and the constructions above index terms by position, so a
+            # freshly computed scheme must carry the same order a cache hit would: otherwise a result depends
+            # on which files an earlier replay in the same cache had already materialized.
+            a = Alg(a.n, a.m, a.p, sorted(a.terms))
             log("materialized", path, a, "declared", d.get("m"))
             self.file_memo[path] = a
             deps = self.dep_stack[-1]

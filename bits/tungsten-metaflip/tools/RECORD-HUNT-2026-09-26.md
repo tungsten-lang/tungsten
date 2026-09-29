@@ -113,8 +113,17 @@ but 42 over GF(2), affecting 30 targets; 3x3x8 55/56, 13; 2x4x5 32/33, 11). The 
 stamp therefore over-claims for those recipes, and comparisons against its F2 minima are
 conservative. The replay tool reproduces the first pass's 263 successes and 110 failures exactly;
 216 of the 263 tensors are byte-identical and the other 47 are equal-rank variants or the five seeds
-the first pass built with local witnesses as leaves. Replays are deterministic across hash seeds. A
-second pass at the 2026-09-29 revision replayed 979 targets into 835 exact tensors.
+the first pass built with local witnesses as leaves. A second pass at the 2026-09-29 revision
+replayed 979 targets into 835 exact tensors (144 failures).
+
+A replay is now a pure function of the catalogue revision and the file. It was not: the disk cache
+stores sorted terms while a freshly computed scheme kept its insertion order, and the bud and
+recombination constructions index terms by position, so a result depended on which files an earlier
+replay in the same cache had materialized. Only which equal-rank tensor came out varied: 43 of the
+1,098 seeds of the two passes (35 and 8) differ from what an empty cache gives now, none in rank and
+none in the success counts above. `materialize_file` sorts terms before memoizing, the replay spec
+pins it, and the 11 replay seeds of the searched-records bundle that an empty cache does not
+reproduce are marked `rederivable: false` (still exact and attributed).
 
 ## Finite negatives
 

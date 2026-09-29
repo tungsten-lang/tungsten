@@ -89,10 +89,16 @@ with tempfile.TemporaryDirectory() as tmp:
     a = rp.materialize_file(DERIVED)
     assert a.shape == (4, 4, 4) and a.r == 49 and G.check_exact(a)
     assert rp.deps_file[DERIVED] == {("atom", ATOM)}
-    # A second replayer reads the cached tensor and reports the same dependencies.
+    # A second replayer reads the cached tensor and reports the same dependencies. It must return the very
+    # same term list, order included: constructions that index terms by position (bud grouping,
+    # recombination) would otherwise give a result that depends on which files an earlier replay in the
+    # same cache had already materialized.
     rp2 = MR.Replayer(source)
     b = rp2.materialize_file(DERIVED)
-    assert sorted(b.terms) == sorted(a.terms) and rp2.deps_file[DERIVED] == {("atom", ATOM)}
+    assert b.terms == a.terms == sorted(a.terms) and rp2.deps_file[DERIVED] == {("atom", ATOM)}
+    fresh_atom = MR.Replayer(MR.Source(repo, "HEAD", Path(tmp) / "cache3")).materialize_file(ATOM)
+    cached_atom = MR.Replayer(MR.Source(repo, "HEAD", Path(tmp) / "cache3")).materialize_file(ATOM)
+    assert fresh_atom.terms == cached_atom.terms == sorted(fresh_atom.terms)
 
     # An even-denominator coefficient cannot reduce to GF(2).
     try:

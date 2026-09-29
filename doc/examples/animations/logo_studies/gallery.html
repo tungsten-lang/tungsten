@@ -1,0 +1,127 @@
+<div id="tungsten-logo-studies">
+  <div class="viz-controls">
+    <button class="btn" type="button" data-play aria-pressed="false">Play motion</button>
+    <label class="form-check"><input class="form-check-input" type="checkbox" data-mono><span class="form-check-label">One color</span></label>
+    <span class="text-small text-muted" data-time>Still / 2.00 s</span>
+  </div>
+  <div class="logo-grid">
+    <!-- LOGO_STUDIES -->
+  </div>
+</div>
+<style>
+#tungsten-logo-studies .logo-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:24px 16px; margin-top:16px; }
+#tungsten-logo-studies figure { margin:0; min-width:0; }
+#tungsten-logo-studies .logo-stage { width:100%; }
+#tungsten-logo-studies .logo-stage > svg { display:block; width:100%; height:auto; }
+#tungsten-logo-studies figcaption { display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:6px 12px; padding-top:10px; color:var(--foreground); }
+#tungsten-logo-studies figcaption .text-small { color:var(--muted-foreground); }
+@media(max-width:540px) { #tungsten-logo-studies .logo-grid { grid-template-columns:1fr; } }
+</style>
+<script>
+(() => {
+  const root = document.getElementById('tungsten-logo-studies');
+  const studies = /* LOGO_DATA */;
+  const button = root.querySelector('[data-play]');
+  const monoControl = root.querySelector('[data-mono]');
+  const timeLabel = root.querySelector('[data-time]');
+  let playing = false;
+  let currentFrame = 48;
+  let previousFrame = -1;
+  let started = 0;
+  let request = 0;
+  const views = studies.map((design, index) => {
+    const svg = root.querySelector(`[data-stage="${index}"] > svg`);
+    const nodes = new Map();
+    design.scene.nodes.forEach(node => {
+      const element = svg.querySelector(`[data-node="${node.id}"]`);
+      nodes.set(node.id, {node, element,
+        fill:element.getAttribute('fill'), stroke:element.getAttribute('stroke'),
+        filter:element.getAttribute('filter'), width:element.getAttribute('stroke-width'),
+        paths:Array.from(element.querySelectorAll('path')),
+        glyphs:Array.from(element.querySelectorAll('[data-glyph]'))});
+    });
+    return {svg,nodes};
+  });
+  const number = x => Number(x).toFixed(3);
+  function frameAt(frame) {
+    currentFrame=frame;
+    studies.forEach((design, index) => {
+      const view = views[index];
+      const values = design.frames[frame];
+      design.channels.forEach(([target,property], i) => {
+        const record = view.nodes.get(target);
+        const {element,node} = record;
+        const value = values[i];
+        if(property==='points') {
+          const d='M'+value.map(p=>p.map(number).join(' ')).join(' L')+(node.kind==='polygon'?' Z':'');
+          record.paths.forEach(path=>path.setAttribute('d',d));
+        } else if(property==='translate') {
+          element.setAttribute('transform',`translate(${value[0]} ${value[1]})`);
+        } else if(property==='opacity') {
+          element.setAttribute('opacity',value);
+        } else if(property==='stroke_width') {
+          element.setAttribute('stroke-width',value);
+        } else if(property==='heat') {
+          const floor=node.metadata.heat_floor ?? .6;
+          element.setAttribute('opacity',monoControl.checked?1:floor+(1-floor)*value);
+        } else if(property==='sheen') {
+          const material=node.metadata.material==='copper'?'copper':'chrome';
+          view.svg.querySelector(`#logo-${index}-${material}`).setAttribute('gradientTransform',`translate(0 ${value*.35})`);
+        } else if(property==='tracking') {
+          const glyphs=node.outline.glyphs;
+          const x=node.geometry.position[0]-(node.outline.width+value*(glyphs.length-1))/2;
+          const y=node.geometry.position[1];
+          record.glyphs.forEach((glyph,g)=>glyph.setAttribute('transform',`translate(${number(x+glyphs[g].advance+g*value)} ${y})`));
+        }
+      });
+    });
+    timeLabel.textContent=(playing?'Motion / ':'Still / ')+(frame/24).toFixed(2)+' s';
+  }
+  function tick(now) {
+    if(!playing)return;
+    const elapsed=(now-started)/1000;
+    if(elapsed>=4) {
+      playing=false;
+      button.textContent='Play motion';
+      button.setAttribute('aria-pressed','false');
+      frameAt(48);
+      return;
+    }
+    const frame=(48+Math.floor(elapsed*24))%96;
+    if(frame!==previousFrame) { frameAt(frame); previousFrame=frame; }
+    request=requestAnimationFrame(tick);
+  }
+  button.addEventListener('click',()=>{
+    playing=!playing;
+    button.textContent=playing?'Pause':'Play motion';
+    button.setAttribute('aria-pressed',String(playing));
+    cancelAnimationFrame(request);
+    if(playing) { started=performance.now(); previousFrame=-1; request=requestAnimationFrame(tick); }
+    else frameAt(currentFrame);
+  });
+  monoControl.addEventListener('change',()=>{
+    const mono=monoControl.checked;
+    studies.forEach((design,index)=>{
+      for(const record of views[index].nodes.values()) {
+        const {element,node}=record;
+        const ink=design.scene.metadata.ink;
+        if(node.metadata.role==='atmosphere')element.style.display=mono?'none':'';
+        element.setAttribute('fill',mono&&record.fill!=='none'?ink:record.fill);
+        element.setAttribute('stroke',mono&&record.stroke!=='none'?ink:record.stroke);
+        element.setAttribute('stroke-width',mono?node.style.stroke_width:record.width);
+        if(!mono&&record.filter)element.setAttribute('filter',record.filter);
+        else element.removeAttribute('filter');
+        element.querySelectorAll('[data-core]').forEach(core=>core.style.display=mono?'none':'');
+      }
+    });
+    frameAt(currentFrame);
+  });
+  document.addEventListener('visibilitychange',()=>{
+    if(document.hidden&&playing) {
+      playing=false; cancelAnimationFrame(request); button.textContent='Play motion';
+      button.setAttribute('aria-pressed','false'); frameAt(48);
+    }
+  });
+  frameAt(48);
+})();
+</script>

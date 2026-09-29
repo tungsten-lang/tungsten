@@ -78,3 +78,43 @@ All campaign state lives in the repo: scratchpad/soccer4/, params/, out/. Nothin
   left foot within its 1.2 s timeout: from the routine's centred right-leg hold the plant spot is 0.75 m ahead, and the parent's run-up
   gets there dynamically (COM leaning ahead at the lift: shift_x/d_go/x_step). A second search A2 (rk4 1: the routine's terms in the reach)
   runs in parallel (p2/A2.out).
+- 03:42 VALIDATION (fresh seeds 91000-91119, 20 s, one-leg >= 15 s and standing): lift 105/120 (87.5 %), ramp 112/120 (93.3 %; fixed 13, broke 6, z +1.5).
+  The training-set gain (83 -> 97.5 %) was inflated by selection; the honest gain is about +6 %. Ramp failures are now mostly
+  lift falls caught by the put-down at ~3 s (6 of 8). Right leg first with the ramp: 111/120 (92.5 %, 8 s).
+- 03:36 LATE FAILURE (lift challenger, seed 89106, arena rollout): a perfectly still one-leg hold (COP oscillation 1e-4 m for 200 s) ends
+  suddenly at 222.3 s (swing foot touches down, then the kicker falls); no precursor in the stance-leg variables, the swing foot's
+  yaw drifts +0.59..+0.62 rad. Contact log (contactlog.py) being checked for a swing-leg/stance-leg collision.
+- 03:45 P2 stage A searches stopped (best plant7 4.3 after 13 generations: the reach never lands the left foot; the parent's reach needs
+  the run-up's forward fall: COM 0.24 m ahead of the stance foot at the lift, 1 m/s forward and 0.86 m/s downward at the plant).
+  Started balance search M (runM.sh): lift + hold parameters on the ramp base with the cp_wash washout structure (cp_khs starts equal
+  to cp_kh so candidate 0 replays the ramp challenger), 7 s, 20 random training starts per generation, 43 tunables.
+- 03:45 (mistake, recorded): my new balance search was first named "M" and OVERWROTE the previous session's scratchpad/soccer4/runM.sh and
+  sM.out (the redirect truncated it; the old sM.txt, sM.txt.mean, sM.txt.log and M_init.txt are intact, mtime 9/28 07:33-07:36).
+  This session's files carry a "9" prefix (run9M.sh, s9M.txt, ...).
+- 03:55 FOUND (contact log): in EVERY hold the swing shank (tibia_r) presses on the stance thigh (femur_l) with ~200-230 N (legcontact.py, 12 seeds:
+  190-230 N mean). The late failure of 89106 at 222.07 s is a MuJoCo instability ("WARNING: Nan, Inf or huge value in QACC at DOF 6")
+  triggered by that stiff sustained contact, not a balance failure. Search M now adds a score penalty for mean inter-leg force above 40 N
+  (--leg_w 0.004) so the swing posture can find a clearance; the official contact parameters are untouched.
+- 04:03 ARENA soccer_single_leg_310_40: the lift challenger (bin/challengers/soccer5-lift + params/myo_soccer_single_leg_310_lift.txt) WINS:
+  bal1_300 34/40 = 0.850 (ci 0.112, 6721 s) vs the champion 24/40 = 0.600: mean paired diff +0.25, p = 0.006 -> PROMOTED
+  (bin/champions/soccer_single_leg_310_40-2026*, per-seed rows scratchpad/soccer4/evals/bal1_300-soccer5-lift-20260929-040311.json).
+  Failures (6/40): 89106 (222 s, the MuJoCo blow-up), 89110, 89115, 89117, 89130, 89133 (the hold/lift/shift failures of the 20 s scan).
+- 04:49 ARENA soccer_single_leg_310_40, the ramp challenger (bin/challengers/soccer6-i + params/myo_soccer_single_leg_310_ramp.txt): 38/40 hold 300 s
+  (0.95, ci 0.068, 6820 s); vs the old champion (0.60) p < 0.001 (NOT promoted: the champion changed while it ran); re-run from the
+  rollout cache against the promoted lift champion (0.85, 34/40): mean paired diff +0.10, p = 0.115 -> does not beat it.
+  Against the lift champion it fixed 89106, 89110, 89115, 89117, 89130 (5), broke 89122 (falls at 16 s), 89133 fails in both
+  (a 5-0 result would have been p = 0.031). Failures: 89122 (14.3 s one-leg, 16.1 s standing), 89133 (1.4 s).
+- 04:50 pre-lift states of the persistently failing validation starts (liftfeat.py, ramp base, 120 starts): stance width at the lift
+  16.4 cm against 20.4 cm (z -8.3), capture point 0.8 cm outboard of the stance foot against 1.2 cm inboard (z +12), stance load 0.665
+  against 0.703. bwide (both hips abducted b_wide in the routine's stance) and sb_y -0.01 (lift target 1 cm more inboard) built/tried;
+  sb_y -0.01 on 8 persistent failures + 8 controls: 12/16 (fixed 6, broke 2) vs 8/16; b_cp_tol 0.015: 7/16 (worse).
+- 05:08 P2 standing kick (K4 search, k6_init-style params: the robust left stance with the P1 kick's swing, the plant leg kept on cp4 through the swing
+  (k4_cp), feet 0.45 m behind the ball, noise 1, stage speed): 24 generations, best score 3.5 (ball ~1.7 m/s, no goal): the swing from the
+  standing stance either misses or drops the body; stopped. A lean phase (k7) before the reach lands the foot on 1 of 6 seeds at best
+  (A3: plant7 4.6 of ~13). No phase-2 goals.
+- 05:15 sb_y -0.01 on all 120 validation starts (20 s): 82/120 (68 %) vs the ramp base 112/120: fixed 6, broke 36 (z -4.9): the 16-seed subset result (12/16) was regression
+  to the mean; discarded. RIGHT LEG at 310 s: right-first (bc_first 1) with the ramp params on starts 89100-89107: 8/8 stand the whole
+  310 s and hold the right leg for the metric's full 300 s (the scan printed BAD only because its criterion wanted 306 s and bal1_s is capped at 300).
+- 05:20 swing-leg clearance: kinematically 0.1 rad more swing-hip abduction clears the stance thigh by 3.6 cm (clearance.py; -0.9 mm at the hold pose), but a swing-hip
+  abductor drive (swabd, sw_drv_abd 0.15-0.5) leaves the contact force at 208-219 N, b_sw_add -0.1 gives 155 N, b_sw_knee 1.0 gives 140 N (holds 8/8 at 12 s),
+  b_sw_knee <= 0.8 or b_sw_th >= 0.5 fall; the fyaw servo is not the cause (fyaw 0: 187 N). Search M (s9M.txt) continues with the force penalty (best 127 N at gen 2).

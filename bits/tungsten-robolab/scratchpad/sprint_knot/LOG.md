@@ -73,3 +73,38 @@ All campaign state lives in the repo (scratchpad/sprint_knot/, out/, params/). N
   Restarted both from their bests as h4 (P95, from h3_snap 656.3, peak 7.2 on the first seed) and a4 (avg, from a3_snap 551.4).
   elite2 e1_snap gait: 7/24 falls on 51-62 + arena seeds, 10/40 on fresh 71-110 (fall times 4,4,4,4,8,9,17,21,24,27 s): mined for a later gated stage:
   gates 77,79,90,94 (4 s falls) 10 s; 88,93 (8-9 s) 14 s; full seeds 95,97,99,102 (late falls).
+- 04:00 (clock) h4_snap1 (P95 hardened on 8 mined seeds, peak 7.25): 9/42 falls on fresh 111-140 + 51-62 (21 %) AND falls on the training seed 31: OVERFIT to 8 seeds (p2a had 15/64 = 23 %).
+  Failure anatomy: not a slow drift (max torso pitch after 5 s is 0.23-0.38 rad on all surviving seeds; failing runs cross 0.6 rad only ~0.05 s before the fall): sudden bad-step events
+  (hazard ~0.7 %/stride), so small min-over-seeds sets select luck. => cascades must use MANY seeds (racing: candidates die on the first fall; only low-hazard ones run all).
+  New opt-in tunables in RunRISkill (lib/robolab/skills/run_ri.w): k_sp / k_spd = spine-angle trunk servo (default 0 reproduces run_ri-v4base exactly: p2a 553.09 on both);
+  small gains help slightly (k_sp 0.2: +2.7 points), large ones break the gait. Rebuilt run_knot, frozen bin/challengers/run_knot-v4c (RunKnot + fly_entry + spine servo).
+  Both stalled ES searches restarted with 26 / 22-seed cascades and widened boxes (z_ref .6-1, t_push, k_land -.2, t_land, t_push_max .03, a_push 1.3, k_late 3, g_kl 2.5, hip_lead .3,
+  vz_push -.8, k_fly 3, elbow 3, d_go .5, k_sp 0-1, k_spd 0-.3): h5 (P95 from h4_snap2, 7.26) and e3 (elite2 from e2_snap, 6.48). Validation seeds: 141-180 + 51-62 (never trained).
+- 04:45 (clock) BIG FINDING: the start-phase falls (4-9 s) of ALL the searched gaits come from the start plan speed v0 (searched to ~0.25 m/s: the plan starts with almost no drive):
+  v0 = 2.0 (params-file value; the tunable box is [0, 2.5]) fixes them with the stride untouched: avg a2: hard early seeds 6/6 -> 0/6 falls; a2v on 40 unseen seeds (141-180) 0 falls (a2: 4/40);
+  P95 p2a: 7/8 -> 1/8 (0/8 with drv_floor 0.15), p2b on 40 unseen: 5/40 (all late 19-27 s); elite2 e1_snap 8/8 -> 1/8, e1v on 40 unseen: 5/40 (4 late, 1 at 5 s).
+  Overfit lessons: hardening the stride on 8-10 mined seeds (h4, a4, x1) generalises WORSE (a4_snap 8/30 fresh falls, h4_snap1 9/42, x1_snap1 10/40 early falls): never tune on < ~30 seeds.
+  hazard proxies (stride/stance/thigh/pitch variability, max pitch 8-20 s) do not predict the late falls (sudden bad steps).
+  ARENA: sprint_top_speed_v4_p95 PROMOTED p2b: 7.00 m/s, 10/12 (falls seeds 230, 232), p 0.001; sprint_top_speed_v4_elite2 PROMOTED e1v: 6.44 m/s, 10/12 (falls 225, 231), p 0.001;
+  sprint_top_speed_v4: a2v (12/12 survive, 5.8727 +- 0.0047) does NOT beat a2 (11/12 5.875): p 0.304 (a rescue-only challenger cannot win the sign-flip test).
+  extended-mode P95 gait (p1_snap1): early falls are structural (60 % at 71-110), v0 2 + drv_floor 0.3 gives 2/8 on the mined seeds; x1 ES (10 gates) overfit (10/40 early falls fresh). Dropped.
+- 04:32 (clock; earlier '04:45' stamps were wrong) speed stages with the validated start phase FROZEN (v0, drv_floor, accel, d_go, drv0_*, psi0, k0, t0_max, v_tau, lean_acc excluded), 8 training seeds 31-38 (all survive),
+  widened boxes, controller run_knot-v4c: a5 = ES from a2v (avg), h6 = ES from p2b (P95). Each result is validated on 40 unseen seeds (141-180) before an arena entry.
+- 04:45 (clock) FLYING START FIXED: RunKnotSkill fly_entry 2 enters the right stance chunk (r_land) instead of l_flight (whose >= 30 ms hold overran the 8 ms to touchdown):
+  the P95 champion's own 7 m/s snapshots now run (1/6 falls in 8 s, peak 6.97) instead of falling in 0.7 s. Rebuilt run_knot, frozen bin/challengers/run_knot-v4d.
+  h7 = flying-start speed ES for P95 (8 s rollouts from 8 snapshots of p2_snap at 7 m/s, objective 3 pace, fall_pen 60, start-phase params frozen): 3-4x cheaper than 30 s standing rollouts.
+  Final entries drop fly_entry (standing start) and are validated on 40 unseen standing-start seeds.
+- 04:50 (clock) gear-hypothesis test: x2 = flying-start speed ES on the EXTENDED-mode P95 gait (p1_snap1: TD knee 0.54, regular, no scuffs; 17 snapshots at 6.5 m/s recorded to
+  playground/cache/sprint_touch_run_v4_p95x.npz; 0/8 falls in 8 s flying), same protocol as h7 (crouched, snapshots run_v4_p95). If the extended mode climbs past the crouch's top speed
+  under the same budget, a gear switch (crouch to accelerate, extended at top speed) is worth building. a5 (avg standing ES) killed at 547.06 (flat; a5_snap).
+  h6 (P95 standing ES, first-gen jump to 640 = min over 8 seeds): validated 6/40 falls, peak 7.02: no change vs p2b (5/40, 7.02).
+- 05:25 (clock) TWO GEARS (RunGearSkill, lib/robolab/skills/run_gear.w + entry, Track#set_movement in controller.w; all opt-in, g2 0 = RunKnot exactly, verified identical on p2b):
+  every tunable X has a gear-2 twin g2_X; the first flight after the filtered speed reaches g2_v_on rebuilds the stride from the twins (chunks, poses, corrections, reflex gains, RI, plan ramped).
+  Flying-start ES (h7: 8 s rollouts, gear-1 params = p2b, 20 min) took the P95 crouched gait 6.95 -> 7.46 steady in flying start, but from a STANDING start it falls (6/6 at 4 s): one parameter
+  set cannot both accelerate and cruise. Combined as gear 1 = p2b (start, acceleration) + gear 2 = h7 (cruise), switching at 6.5 m/s: standing-start runs reach peak 7.51-7.56 steady 7.41-7.49
+  (+0.5 m/s over p2b) and then FALL at ~18.6 s on 6/6 seeds (gear 2 was trained for 8 s only: it exploits the horizon). Next: gear-2 ES with 24 s flying rollouts (fall_pen 300):
+  g1p (P95, from gear_p95_fly = p2b + h7 twins) and g1a (avg, twins = a2v). x2 (extended-mode flying ES) reached 7.10 steady vs the crouch's 7.46: killed.
+- 05:25 (clock) gear-2 ES with 24 s flying rollouts (4 seeds, fall_pen 300) fixed the 19 s instability within 6 generations (first seed peak 7.595 steady 7.56);
+  as a standing-start two-gear controller (gear 1 p2b, switch 6.5 m/s; gear_p95_b.txt): 6/6 survive 30 s, peak 7.61 steady 7.56 (+0.6 m/s over p2b);
+  on 40 unseen seeds 8/40 fall (18-28 s), survivors mean peak 7.601 (min 7.523). Hazard 20 % (p2b: 12.5 %). g2p = gear-2 ES on a 16-seed flying cascade to bring the hazard down.
+  N-GEAR generalisation built: `gears N`, twins g2_X..gN_X (default previous gear), gN_v_on; verified identical to the 2-gear runs and (g3 = g2) identical to 2 gears.

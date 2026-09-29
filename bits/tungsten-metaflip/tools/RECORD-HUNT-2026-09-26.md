@@ -1,82 +1,161 @@
-# GF(2) record hunt, 2026-09-26/27
+# GF(2) record hunt, 2026-09-26 to 2026-09-29
 
-A cold campaign outside the live fleet. Every counted tensor was expanded
-against the complete matrix-multiplication tensor in Python (package gate),
-and every claimed new rank also passed `tools/verify_tensor.rb`. Comparison
-sources and their pitfalls are in `PUBLIC-TERNARY-GF2-SCREEN-2026-09-26.md`;
-`tools/gf2_record_board.py` implements the classification. Nothing here is an
-optimality or completed-novelty claim.
+A cold campaign outside the live fleet: exact GF(2) tensors, compared against four public
+rank tables, found by composing, projecting and walking. **The tensors are not in this
+directory.** They are release assets of the private
+[`tungsten-lang/metaflip-archives`](https://github.com/tungsten-lang/metaflip-archives)
+repository, tag `evidence-2026-09-29` (see "Where the tensors are"). This package keeps the
+search and verification tools and this write-up.
 
-## Scoreboard (2026-09-27)
+Every counted tensor was expanded against the complete matrix-multiplication tensor by the
+package gate. A stratified sample of 15 new records (three per way of finding them, including the
+largest margins) was also checked by the independent Ruby reconstruction
+(`tools/verify_tensor.rb`); all 15 were exact. Comparison ranks are comparison data, not
+certificates. Nothing here is an optimality claim or a completed novelty audit: under
+`RECORD_POLICY.md` these are **apparent** GF(2) upper bounds.
 
-Shapes with a verified local witness: **1686**. Below every listed rank in any
-ring (Lille digest `cd87163`, Perminov `b28490ca`, fmm-schemes `e2f5c2e`,
-matmulcatalog `b944258` without commutative entries): **545**. Tied: 539.
-Below every listed GF(2)-valid scheme but not a rational one: 197 (an upper
-bound: the Lille digest carries no field information).
+## Standing on 2026-09-29
 
-| Origin of the best witness | Below every listed rank |
+Scored against Lille `fmm_digest` `9f26324` (2026-09-28), matmulcatalog `f0c2ba9` (2026-09-29,
+commutative entries excluded), FastMatrixMultiplication `613599b` (2026-09-28) and fmm-schemes
+`8fa0f2a` (release 1.1, 2026-09-27); the exact revisions are in the archive's `comparators.json`.
+
+| Class (best verified local witness per shape) | Shapes |
 |---|---:|
-| July block-47 certificates (restored from `47ad44dc5^`) | 146 |
-| September certificates in `tools/certificates/` | 143 |
-| Closure materializations (block sums/Kronecker products of verified leaves) | 177 |
-| matmulcatalog recipes replayed over GF(2), then walked | 37 |
-| One-coordinate projections of July certificates | 33 |
-| Directed walks from public ternary seeds and closure outputs | 7 |
-| Live fleet checkpoints (7×7×7/247, 9×9×9/482) | 2 |
+| Below every listed rank in any ring | **733** |
+| Below every listed GF(2)-valid scheme, but a lower rational scheme exists (denominators 2, 4, 8) | **62** |
+| Tie the best listed rank | 1,413 |
+| Above it | 1,454 |
+| Shapes with a verified witness (of 5,456 with every side at most 32) | 3,662 |
 
-Closure products are mechanical consequences of already-public leaves (for
-example AlphaTensor's GF(2) 4×4×4/47 times a Perminov scheme). Count them
-separately from searched results. The rank-only closure over the final board
-has **no** remaining lead, i.e. it converged.
+That is **795 record shapes**, 235 more than at the start of 2026-09-29 on the same tables, none
+lost, and 49 earlier records lowered further. 734 of the 795 have a side above 16, where the listed
+ranks are mostly composition-based; a large margin there says the listed number is weak, not that
+the walk found something deep. Of the 235 new ones, 200 are below every listed rank (margin 1 to
+138, median 11; 60 by at most 3 and 30 by at least 50) and 35 are GF(2)-valid-only records.
+
+### How the records were reached
+
+The chain behind each witness, from the archive's lineage bundles:
+
+| Chain | Records | Of which new today |
+|---|---:|---:|
+| Closure product (block sum / Kronecker product of exact witnesses), no search | 203 | 52 |
+| July 2026 block-composition certificate, as archived | 151 | 0 |
+| Certificate from the September campaign, as committed | 126 | 0 |
+| Closure product, projected, then walked | 106 | 85 |
+| matmulcatalog recipe replayed over GF(2), then walked | 58 | 38 |
+| July certificate, projected | 36 | 0 |
+| matmulcatalog recipe replayed over GF(2), no walk | 24 | 4 |
+| Committed certificate, projected, then walked | 23 | 14 |
+| July certificate, projected, then walked | 15 | 14 |
+| Closure product, projected | 15 | 5 |
+| matmulcatalog replay, projected, then walked | 12 | 12 |
+| Closure product, walked | 8 | 7 |
+| Committed certificate, projected | 8 | 3 |
+| Public ternary seed reduced mod 2, then walked | 5 | 0 |
+| matmulcatalog replay, projected | 1 | 1 |
+| Live fleet checkpoints (7x7x7/247, 9x9x9/482, 13x13x13/1402, 15x15x15/2006) | 4 | 0 |
+
+287 of the 795 have a walk or projection in their chain. Closure products are mechanical
+consequences of already-public leaves (AlphaTensor's GF(2) 4x4x4/47 times a Perminov scheme, and
+so on); count them separately from searched results.
+
+Largest new margins below the best listed rank: 24x31x32 at 12297 (12435 listed), 16x20x23 at 4132
+(4260), 16x23x28 at 5656 (5784), 19x27x28 at 7856 (7983), 16x27x32 at 7447 (7568). Among smaller
+shapes, 10x13x14 at 1150 (1152 listed) and 11x13x15 at 1363 (1364 listed) are below every rank in
+any ring; 9x9x9 at 482 (486 listed) was reached by the live fleet on 2026-09-12 and now also has a
+replayable public-seed lineage.
+
+## The public tables moved under the search
+
+All four sources changed between 2026-09-26 and 2026-09-29. fmm-schemes release 1.1 lowered
+13x14x16 to 1806, 9x14x16 to 1260 and 11x15x16 to 1641 and tied 8x11x16 (906) and 11x15x15 (1547),
+which took away or tied five of the ten shapes in the first bundle of this campaign (kept in the
+archive as history). Re-walking each new public ternary release in GF(2) re-took some of them:
+9x11x13 at 836 (840 listed), 11x14x14 at 1372 (1373), 12x13x15 at 1462 (1464), 13x14x16 at 1805
+(1806), 11x16x16 at 1748 (1749). The comparison is a race: rescore against fresh tables before
+quoting any of these.
+
+## Tools added
+
+| Tool | Purpose |
+|---|---|
+| `screen_public_ternary_gf2.py` | Reduce public ternary/integer schemes mod 2 into exact seeds (ring from the file-name suffix, never the directory) and walk them with `wide_rect_walk.w`; walks resume by seed content hash |
+| `mmc_gf2_alg.py`, `mmc_gf2_replay.py`, `mmc_gf2_seeds.py` | Replay matmulcatalog composition recipes over GF(2), pinned to one catalogue revision, with per-tensor attribution; a recipe the catalogue stamps F2 but that needs a Q/F3-only leaf is recorded as a failure, not emitted |
+| `gf2_record_board.py` | Score every verified local witness against the four tables (verification cached by SHA-256, run in parallel) |
+| `build_gf2_lineage_bundle.py`, `verify_gf2_lineage.py` | Write and verify lineage bundles: exact tensors, parent links, re-derivation of seeds from the pinned upstream file, replay of basis/projection steps, byte-identical native walk replay |
+
+Specs: `spec/public_ternary_gf2_test.py`, `spec/mmc_gf2_alg_test.py`, `spec/mmc_gf2_replay_test.py`,
+`spec/verify_gf2_lineage_test.py`, `spec/build_gf2_lineage_bundle_test.py`.
+
+The campaign drivers that sat between these tools (closure pricing and materialization,
+projection screening, child selection, iterative deepening, chain collection) are in the archive's
+`gf2-campaign-records` asset under `scripts/`. They carry scratch-directory assumptions and are
+**not yet promoted** into this package.
 
 ## matmulcatalog derived recipes over GF(2)
 
-373 shapes had a matmulcatalog "derived" F2-stamped recipe strictly below the
-Lille and Perminov ranks and below our board. Replaying the lineage operations
-(Atom, OrientAs, Recombination, SerendipitousProduct, concatenations,
-projections, Kronecker) over GF(2) produced **263 exact tensors**; 22 came out
-below the catalogue's own rank (for example 12×20×22: 3001 versus 3061). The
-other **110 cannot reach the stamped rank over GF(2)**: each depends on a leaf
-whose cheapest catalogue scheme is valid over Q/F3 but not F2 (largest
-effects: 3×3×6 is 40 over Q but 42 over GF(2), 30 targets; 3×3×8 55/56, 13;
-2×4×5 32/33, 11; 3×6×6 80/82, 9). The catalogue's F2 field inference
-therefore over-claims for those recipes; comparisons against its F2 minima
-are conservative.
-
-Directed walks (two 40M passes, 100M continuations, then per-shape iterative
-deepening until two stalled rounds) lowered 20 of the 263. Together with the
-22 materialization gains, **37 shapes** are below every listed rank, e.g.
-21×30×32/10795 (listed 10860), 12×20×22/3001 (3061), 10×25×29/4237 (4278),
-8×14×24/1645 (1667), 8×22×32/3308 (3328), 8×16×22/1700 (1710).
-
-matmulcatalog has no licence, so under the release rule in `THIRD_PARTY.md`
-none of these tensors is bundled. They, the replay code, logs and board are
-kept in the live store:
-`~/.tungsten/metaflip/experiments/record-hunt-20260926/artifacts-snapshot2.tar.gz`
-(SHA-256 `4ec7b6e56794e00968e0f81652839c9b23b78a655dd2ea82a6d62139b8fbd8b7`;
-snapshot 1 `04fbdfd282a02e39834e21c0591a5d15b72673d58890e0aedcb3a5ad50f9ee96`).
+373 shapes had a matmulcatalog "derived" recipe stamped F2 that beat the other sources' best rank.
+Replaying the lineage operations over GF(2) gave 263 exact tensors and 110 failures: each failure
+depends on a leaf whose cheapest catalogue scheme is valid over Q or F3 only (3x3x6 is 40 over Q
+but 42 over GF(2), affecting 30 targets; 3x3x8 55/56, 13; 2x4x5 32/33, 11). The catalogue's F2
+stamp therefore over-claims for those recipes, and comparisons against its F2 minima are
+conservative. The replay tool reproduces the first pass's 263 successes and 110 failures exactly;
+216 of the 263 tensors are byte-identical and the other 47 are equal-rank variants or the five seeds
+the first pass built with local witnesses as leaves. Replays are deterministic across hash seeds. A
+second pass at the 2026-09-29 revision replayed 979 targets into 835 exact tensors.
 
 ## Finite negatives
 
-- A 200M-move pass over all 281 Perminov seeds of rank at least 450 found no
-  shape beyond the six from the 40M screen.
-- 162 alternative near-best Perminov seeds (`--alternatives 2`) produced only
-  ties (5×12×13/537, 9×9×11/594).
-- Four 200M continuations and two-round auto-loop basis rewrites of the ten
-  public-ternary records improved only 11×16×16 (1750→1748).
-- The 110 above-catalogue matmulcatalog replays: five 40M drops, none below
-  the listed ranks (closest 8×21×32/3223 versus Lille 3220).
-- The fleet's baseline packed walker also reaches 9×9×9/482 within 90 s from
-  Perminov's 486, so that basin does not favour the directed walker.
+- All 243 rational schemes in FastMatrixMultiplication use even denominators; none reduces to GF(2).
+- Walking 801 replayed matmulcatalog seeds that sit exactly at the listed rank dropped 38 of them
+  (5%) at 40M moves; the rest tied.
+- Closure products of rank below about 2,000 never dropped under walks (0 of about 500); the drops
+  come from the larger ones.
+- Projection of the newest 118 parents produced 306 child shapes, of which 4 were worth walking:
+  the projection cascade has converged on this witness set.
+- The live fleet's baseline packed walker also reaches 9x9x9/482 from Perminov's 486 within 90 s,
+  so that basin does not favour the directed walker.
+- 162 alternative best-plus-one Perminov seeds produced only ties.
 
-## Still open
+## Where the tensors are
 
-- The 186 July certificates exist only in Git history and the local-only
-  results repository; archive them before any history purge (a 10.3 MB
-  staged tarball, SHA-256 `46ff91ca…`, awaits approval to upload).
-- Register the July certificates and today's witnesses in the wide loop's
-  price universe so September-style campaigns start from the strongest
-  parents.
-- Promotion into `tungsten-metaflip-results` needs the prior-art audit and
-  attribution review required by its `RECORD_POLICY.md`.
+`tungsten-lang/metaflip-archives`, release `evidence-2026-09-29` (private):
+
+| Asset | Contents |
+|---|---|
+| `2026-09-29-gf2-searched-records.tar.gz` | Lineage bundle: every record whose chain has a walk or projection, plus matmulcatalog replays and public seeds, from seed to retained tensor |
+| `2026-09-29-gf2-closure-products.tar.gz` | The 203 closure-product records, each with its recipe |
+| `2026-07-block47-certificates.tar.gz` | The 186 July block-composition certificates removed from this tree in `47ad44dc5`, as `archived` rows re-derivable from git history |
+| `2026-09-26-gf2-public-ternary-walks.tar.gz` | The ten-shape bundle from the first day of the campaign, kept as history |
+| `2026-09-29-gf2-campaign-records.tar.gz` | `records.tsv` (every record shape and the asset that holds its tensor), scoreboards, comparator revisions, walk logs, seed manifests, campaign scripts, fleet checkpoints |
+
+Verify a bundle with `python3 tools/verify_gf2_lineage.py BUNDLE --source NAME=CLONE ...`; see the
+docstring for which rows re-derive from which source.
+
+## Attribution
+
+Tensors derived from public schemes carry the credit of their sources in each row's `details`:
+
+- [Perminov, FastMatrixMultiplication](https://github.com/dronperminov/FastMatrixMultiplication)
+  (MIT; Andrew I. Perminov and the authors the catalogue cites).
+- [MerlijnW70, fmm-schemes](https://github.com/MerlijnW70/fmm-schemes) (CC BY 4.0).
+- [solven-eu, matmulcatalog](https://github.com/solven-eu/matmulcatalog) (arXiv:2606.13408; no
+  licence file). Each replayed tensor lists the catalogue file, revision and lineage, and every
+  atomic scheme it depends on with the catalogue's recorded source and year: Perminov, AlphaTensor
+  (Fawzi et al., 2022), AlphaEvolve (Novikov et al., 2025), Hopcroft and Kerr (1971) and others.
+- Sedoglavic's Lille catalogue is used for comparison only.
+
+The project owner's decision (2026-09-29) is that tensor decompositions are treated as mathematical
+objects rather than licensable expression; attribution is kept regardless. Repository size is the
+separate reason the tensors live in the archive rather than in this package.
+
+## Open items
+
+- Promote the campaign drivers into this package with parameters instead of scratch paths.
+- Promotion of any result into `tungsten-metaflip-results` needs the prior-art audit and
+  attribution review its `RECORD_POLICY.md` requires.
+- The closure, deepening and projection queues were stopped at the owner's request: 638 of 713
+  closure walks and 495 of an open-ended deepening run had finished. Results beyond this snapshot
+  exist only as further walk logs.

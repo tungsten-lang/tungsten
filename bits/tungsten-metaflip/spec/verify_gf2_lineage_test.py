@@ -189,4 +189,33 @@ with tempfile.TemporaryDirectory() as tmp:
         pass
     else:
         raise AssertionError("archived digest mismatch accepted")
-print("PASS verify_gf2_lineage: closure, basis, projection, walk, retained, archived rows; tampering rejected")
+
+# Walk replay: a stub walker that copies its seed reproduces a no-op walk; a corrupting one is caught,
+# and --replay-max-rank skips the walk entirely.
+with tempfile.TemporaryDirectory() as tmp:
+    replay = Path(tmp) / "bundle"
+    replay.mkdir()
+    shape, seed_terms = grb.decode(SEED, grb.load(SEED))
+    base = sorted(seed_terms)
+    rows = []
+    seed_recipe = dict(kind="seed", rank=len(base), shape=list(shape), source=str(SEED.relative_to(REPO)),
+                       source_sha256=hashlib.sha256(SEED.read_bytes()).hexdigest())
+    root = add_row(replay, rows, base, shape, "closure", None, dict(recipe=seed_recipe))
+    add_row(replay, rows, base, shape, "walk", root, dict(steps=1000, nonce=7))
+    write_manifest(replay, rows)
+    good_walker, bad_walker = Path(tmp) / "good-walker", Path(tmp) / "bad-walker"
+    # usage: walker SHAPE SEED OUTPUT STEPS NONCE
+    good_walker.write_text("#!/bin/sh\ncp \"$2\" \"$3\"\n")
+    bad_walker.write_text("#!/bin/sh\nprintf 'MFW1 3 3 4 1\\n1 1 1\\n' > \"$3\"\n")
+    for walker in (good_walker, bad_walker):
+        walker.chmod(0o755)
+    assert V.main([str(replay), "--no-ruby", "--replay-walk", str(good_walker)]) == 0
+    try:
+        V.main([str(replay), "--no-ruby", "--replay-walk", str(bad_walker)])
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("corrupt walk replay accepted")
+    # rank 29 > 5: the corrupting walker is never run
+    assert V.main([str(replay), "--no-ruby", "--replay-walk", str(bad_walker), "--replay-max-rank", "5"]) == 0
+print("PASS verify_gf2_lineage: closure, basis, projection, walk, retained, archived rows; walk replay; tampering rejected")

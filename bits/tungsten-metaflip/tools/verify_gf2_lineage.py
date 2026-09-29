@@ -20,6 +20,7 @@ Rows form chains (`parent` is the parent row's SHA-256). What is checked, by row
                  the parent reproduce the row
   walk           same shape as the parent, rank never above it; with --replay-walk BINARY the
                  deterministic native walk (steps, nonce) reproduces the row byte-for-byte
+                 (--replay-max-rank N replays only walks whose result has rank at most N)
 
 Every tensor is expanded against the complete matrix-multiplication tensor in Python and, unless
 --no-ruby, again by the independent Ruby reconstruction. `--source NAME=PATH` matches a row when
@@ -94,6 +95,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("bundle", type=Path)
     parser.add_argument("--replay-walk", help="compiled tools/wide_rect_walk.w")
+    parser.add_argument("--replay-max-rank", type=int, default=10 ** 9,
+                        help="replay only walks whose result has at most this rank")
     parser.add_argument("--source", action="append", default=[], help="NAME=CLONE for re-derivation")
     parser.add_argument("--cache-dir", default="mmc-cache", help="matmulcatalog replay cache")
     parser.add_argument("--repo-root", type=Path, help="checkout root for `retained` rows")
@@ -173,7 +176,7 @@ def main(argv=None):
                 assert top.blob(child_shape, compressed) == raw
             elif kind == "walk":
                 assert shape == parent_shape and len(terms) <= len(parent_terms)
-                if args.replay_walk:
+                if args.replay_walk and len(terms) <= args.replay_max_rank:
                     with tempfile.TemporaryDirectory() as temp:
                         seed, out = Path(temp) / "seed.mfw", Path(temp) / "out.mfw"
                         seed.write_bytes(parent_raw)

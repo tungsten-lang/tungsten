@@ -1457,6 +1457,15 @@ The [closure and catalog audit](tools/COMPOSITION-CLOSURE-2026-09-06.md) separat
 remaining novelty-audit shortlist. `bud_products.rb --recursive-products`
 enables the same optional leaf-pricing family; the default is unchanged.
 
+The 2026-09 record hunt added offline GF(2) tools: `tools/screen_public_ternary_gf2.py`
+reduces public ternary and integer schemes modulo two and walks them,
+`tools/mmc_gf2_seeds.py` replays matmulcatalog composition recipes over GF(2) with
+per-tensor attribution, `tools/gf2_record_board.py` scores verified witnesses against four
+public rank tables, and `tools/build_gf2_lineage_bundle.py` with
+`tools/verify_gf2_lineage.py` write and check lineage bundles. The
+[campaign write-up](tools/RECORD-HUNT-2026-09-26.md) has the standing and its caveats; the
+tensors are release assets of `tungsten-lang/metaflip-archives`, not part of this package.
+
 Bundled seed files can have licenses or attribution requirements different
 from the engine. Read [THIRD_PARTY.md](THIRD_PARTY.md) before redistributing a
 package archive or adding a new imported seed.

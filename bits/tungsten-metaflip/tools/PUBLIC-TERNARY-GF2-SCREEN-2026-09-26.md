@@ -39,12 +39,15 @@ mod-2 cancellation, and ring gates. Walks are deterministic in
   improved 1750→1748. Two-round auto-loop basis rewrites of 10×13×14/r1150
   tied in their first walks.
 
-Ten retained shapes, with comparisons and replay, are in
-`certificates/public-ternary-gf2-walks-20260926/`. Three are below every
-listed rank in any ring: **9×9×9/482, 10×13×14/1150, 11×13×15/1363**. Seven
-are below every listed GF(2)-valid scheme while a rational scheme with even
-denominators is lower. These are apparent upper bounds under
-`RECORD_POLICY.md`, not optimality or completed-novelty claims.
+Ten retained shapes, with comparisons and replay, were committed on 2026-09-26 as a
+lineage bundle; the tensors now live in the archive release asset
+`2026-09-26-gf2-public-ternary-walks.tar.gz` (`tungsten-lang/metaflip-archives`,
+`evidence-2026-09-29`), not in this package. On 2026-09-26 three were below every listed rank in
+any ring (**9×9×9/482, 10×13×14/1150, 11×13×15/1363**) and seven were below every listed
+GF(2)-valid scheme while a rational scheme with even denominators was lower. fmm-schemes release
+1.1 (2026-09-27) has since lowered or tied five of them; `RECORD-HUNT-2026-09-26.md` has the
+current standing. These are apparent upper bounds under `RECORD_POLICY.md`, not optimality or
+completed-novelty claims.
 
 ## Comparator pitfalls found
 
@@ -76,5 +79,7 @@ certificates, packaged seeds and `archived-exact-prices.json`, so it never
 sees them: several September leads are dominated by July results (for
 example 15×17×19, September r2963 against the July certificate r2862; a
 20M directed walk lowers that certificate to r2860). 160 of the 186 remain
-below the 2026-09-25 Lille digest. Archive them before any history purge and
-register them as a priced source.
+below the 2026-09-25 Lille digest. On 2026-09-29 they were archived as the release asset
+`2026-07-block47-certificates.tar.gz` (`tungsten-lang/metaflip-archives`, `evidence-2026-09-29`),
+which makes the `TODO.md` history purge safe with respect to them. Registering them as a priced
+source for the wide auto loop is still open.

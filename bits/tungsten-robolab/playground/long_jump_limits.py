@@ -90,6 +90,14 @@ MIN_STANCE = 0.04    # (after at least this much stance: a touchdown bounce is n
 PITCH_MARGIN = 1.85  # the landing score's torso-pitch margin (rad; the somersault rule fails at 2.1)
 SPEC = mujoco.mjtState.mjSTATE_INTEGRATION
 FOOT_GEOMS = ("l_foot", "l_toes", "r_foot", "r_toes")
+# ROBOLAB_LJ_DV (m/s, default 0 = off): `optimise` restarts the captured state with the root moving this much faster
+# (a what-if of a faster run-up); ROBOLAB_LJ_FSCALE scales every muscle's peak force (a stronger body)
+DV = float(os.environ.get("ROBOLAB_LJ_DV", "0"))
+FSCALE = float(os.environ.get("ROBOLAB_LJ_FSCALE", "1"))
+BOARD = os.environ.get("ROBOLAB_LJ_BOARD", "0") == "1"
+MARGIN = float(os.environ.get("ROBOLAB_LJ_MARGIN", "0"))   # (m) the foot's foul margin behind the line in board_score (round 3; 0 = the line itself)
+TD_TARGET = float(os.environ.get("ROBOLAB_LJ_TD", "0"))
+TD_WEIGHT = float(os.environ.get("ROBOLAB_LJ_TDW", "20"))
 
 
 # ---------------------------------------------------------------------------
@@ -120,6 +128,10 @@ class Body:
         m = self.m
         self.muscles = [mu.name for mu in self.b.spec.muscles]
         self.act_ids = [mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_ACTUATOR, n) for n in self.muscles]
+        if FSCALE != 1.0:
+            # round 3 what-if (ROBOLAB_LJ_FSCALE): every muscle's peak isometric force scaled (MuJoCo muscle: gainprm[2] = biasprm[2] = F0)
+            m.actuator_gainprm[self.act_ids, 2] *= FSCALE
+            m.actuator_biasprm[self.act_ids, 2] *= FSCALE
         self.ground = {m.geom(n).id for n in ("runway", "pit", "far_ground")}
         self.runway = m.geom("runway").id
         self.feet = {}
@@ -309,6 +321,9 @@ def simulate(body, cap, program, record=False, restore=True, until=None):
     m, d = body.m, body.d
     if restore:
         mujoco.mj_setState(m, d, cap["state"], SPEC)
+        if DV:
+            # sensitivity study (round 3): the captured approach state with the whole body moving DV m/s faster
+            d.qvel[m.joint("root_x").dofadr[0]] += DV
         mujoco.mj_forward(m, d)
     t0 = d.time
     ids = body.act_ids
@@ -437,6 +452,10 @@ def score(r, lmax):
         s -= 0.2 * (r["L"] - lmax)
     p = r["torso_pitch"]
     s -= 2.0 * (max(0.0, p - 0.8) + max(0.0, -0.5 - p))
+    if TD_TARGET > 0.0:
+        # round 3: the plant touchdown at a fixed program time (ROBOLAB_LJ_TD, weight ROBOLAB_LJ_TDW per second beyond a 4 ms band):
+        # ideals of different starts then share the skill's clock latch (ik_td) and their excitation knots can be interpolated
+        s -= TD_WEIGHT * max(0.0, abs(r["td"]["t"] - TD_TARGET) - 0.004)
     return s
 
 
@@ -445,6 +464,9 @@ def _eval(job):
     body, cap = _W["body"], _W["cap"]
     X = np.asarray(x).reshape(len(body.muscles), -1)
     r = simulate(body, cap, lambda t, k: excitation(X, t))
+    if BOARD and r["valid"]:
+        # round 3 (ROBOLAB_LJ_BOARD=1): the distance from the foul line, a foot past the line graded as a foul (board_score), not from the foot
+        return board_score(r, cap, lmax), {k: v for k, v in r.items() if k != "trace"}
     return score(r, lmax), {k: v for k, v in r.items() if k != "trace"}
 
 
@@ -513,7 +535,8 @@ def optimise(a):
     base = simulate(body, cap, recorded_program(cap))
     lmax = float(a.lmax) if a.lmax != "auto" else (base["L"] + 0.5 if base["valid"] else 20.0)
     opt = make_optimizer(a.method, x0, sigma0=a.sigma, seed=a.seed, **({"popsize": a.pop} if a.pop else {}))
-    best = (score(simulate(body, cap, lambda t, k: excitation(X0, t)), lmax), x0.copy(), None)
+    r0 = simulate(body, cap, lambda t, k: excitation(X0, t))
+    best = (board_score(r0, cap, lmax) if BOARD and r0["valid"] else score(r0, lmax), x0.copy(), None)
     log = []
     t0 = time.time()
     used = 0
@@ -573,6 +596,31 @@ def role_of(name, plant):
     if name.startswith(free + "_"):
         return "F_" + name[2:]
     return name
+
+
+def side_perm(names):
+    """Muscle index permutation that swaps the two sides (l_x <-> r_x, unsided muscles fixed): a table written for a take-off
+    leg on one side, read for the other (round 3: `robust` and `landing` train on both plant sides)."""
+    idx = {n: i for i, n in enumerate(names)}
+    out = []
+    for n in names:
+        m = ("r_" + n[2:]) if n.startswith("l_") else ("l_" + n[2:]) if n.startswith("r_") else n
+        out.append(idx[m])
+    return np.array(out)
+
+
+def mirror_tab(tab, perm):
+    """The table with its muscle axis permuted (2-D knot tables and 1-D per-muscle gain vectors); scalars are kept."""
+    n = len(perm)
+    out = {}
+    for k, v in tab.items():
+        if isinstance(v, np.ndarray) and v.ndim == 2 and v.shape[1] == n:
+            out[k] = v[:, perm]
+        elif isinstance(v, np.ndarray) and v.ndim == 1 and v.shape[0] == n:
+            out[k] = v[perm]
+        else:
+            out[k] = v
+    return out
 
 
 def distil(a):
@@ -860,13 +908,15 @@ def board_score(r, cap, lmax):
         return -5.0 + r.get("t", 0.0) + 0.5 * r.get("progress", 0.0)
     D_board = r["D"] - (cap["board_x"] - r["toe_max"])
     s = D_board
-    if r["toe_max"] > cap["board_x"]:
-        s = -1.0 - 4.0 * (r["toe_max"] - cap["board_x"])
+    if r["toe_max"] > cap["board_x"] - MARGIN:
+        s = -1.0 - 4.0 * (r["toe_max"] - cap["board_x"] + MARGIN)
     s -= 0.1 * r["other_foot"]
     if r["L"] > lmax:
         s -= 0.2 * (r["L"] - lmax)
     p = r["torso_pitch"]
     s -= 2.0 * (max(0.0, p - 0.8) + max(0.0, -0.5 - p))
+    if TD_TARGET > 0.0:
+        s -= TD_WEIGHT * max(0.0, abs(r["td"]["t"] - TD_TARGET) - 0.004)
     return s
 
 
@@ -894,9 +944,17 @@ def _reval(job):
     body, caps = _R["body"], _R["caps"]
     tab, g = _decode(np.asarray(x), base, meta["nk"], len(body.muscles))
     prog = IKProgram(tab, meta["h"], meta["td"], g, 1.0, meta["kp"], meta["kd"], meta["gap0"], meta.get("end"))
+    prog_m = None
     scores, rows = [], []
     for cap in caps:
-        r = simulate_prog(body, cap, prog)
+        pr = prog
+        if cap["plant"] != meta.get("p0", cap["plant"]):
+            # a start whose plant leg is on the other side reads the tables mirrored (the tables are by role)
+            if prog_m is None:
+                prog_m = IKProgram(mirror_tab(tab, side_perm(body.muscles)), meta["h"], meta["td"], g, 1.0, meta["kp"], meta["kd"],
+                                   meta["gap0"], meta.get("end"))
+            pr = prog_m
+        r = simulate_prog(body, cap, pr)
         scores.append(board_score(r, cap, meta["lmax"]))
         rows.append({k: r.get(k) for k in ("D", "vx", "vz", "contact_s", "toe_max", "valid")})
     sc = np.array(scores)
@@ -922,7 +980,7 @@ def robust(a):
         gaps.append(cap["board_x"] - seen_site_x(body, f"{pen}_toe"))
     gap0 = float(np.median(gaps))
     meta = {"nk": a.nk, "h": pfile["ik_h"], "td": pfile["ik_td"], "kp": kp, "kd": kd, "gap0": gap0,
-            "lmax": float(a.lmax), "risk": a.risk, "end": pfile["ik_td"] + a.post}
+            "lmax": float(a.lmax), "risk": a.risk, "end": pfile["ik_td"] + a.post, "p0": caps[0]["plant"]}
     n = len(mus)
     x0 = np.concatenate([np.clip(base["e"], 0, 1).ravel(), np.full(a.nk * n, 0.5), np.full(a.nk * n, 0.5), [a.g0 / 1.5]])
     if a.init:
@@ -1448,7 +1506,7 @@ def handover(a):
         # the rollout runs to the task's end: the landing is scored over all of it
         t_left = float(body.task.seconds) - float(body.d.time)
         foul = (not r["valid"]) or r["toe_max"] > cap["board_x"]
-        out[nm] = {"state": st, "board_x": cap["board_x"], "foul": bool(foul), "valid": r["valid"], "t_left": t_left,
+        out[nm] = {"state": st, "board_x": cap["board_x"], "foul": bool(foul), "valid": r["valid"], "t_left": t_left, "plant": cap["plant"],
                    "D_board": (r["D"] - (cap["board_x"] - r["toe_max"])) if r["valid"] else None,
                    "vx": r.get("vx"), "vz": r.get("vz"), "contact_s": r.get("contact_s"), "L": r.get("L"),
                    "leg_angle_deg": r.get("td", {}).get("leg_angle_deg"), "toe_max": r.get("toe_max"),
@@ -1585,7 +1643,10 @@ def _leval(job):
         lead, delay = 0.0, 0
         if meta.get("jitter"):
             lead, delay = 0.004 * (i % 3), (i // 3) % 2
-        prog = LandingProgram(tab, meta["h"], meta["ld"], g, 1.0, meta["kp"], meta["kd"], lead, delay)
+        tab_i = tab
+        if ho.get("plant") is not None and ho["plant"] != meta.get("p0", ho["plant"]):
+            tab_i = mirror_tab(tab, side_perm(body.muscles))   # a take-off from the other side: the landing table mirrored
+        prog = LandingProgram(tab_i, meta["h"], meta["ld"], g, 1.0, meta["kp"], meta["kd"], lead, delay)
         # to the rollout's end (the metrics cover the whole motion); --seconds for old hand-overs
         r = run_landing(body, ho, prog, ho.get("t_left", meta["seconds"]))
         sc.append(landing_score(r, ho))
@@ -1620,7 +1681,7 @@ def landing(a):
         # the take-off program's j_land_z (the skill's time_to_land)
         base["tg"] = a.tg
         base["zl"] = float(json.loads(c0["params"]).get("j_land_z", LAND_Z))
-    meta = {"nk": a.nk, "h": a.h, "ld": ld, "kp": kp, "kd": kd, "risk": a.risk, "seconds": a.seconds,
+    meta = {"nk": a.nk, "h": a.h, "ld": ld, "kp": kp, "kd": kd, "risk": a.risk, "seconds": a.seconds, "p0": c0["plant"],
             "jitter": a.jitter, "tail_q": a.tail_q}
     n = len(mus)
     x0 = np.concatenate([np.clip(base["e"], 0, 1).ravel(), np.full(a.nk * n, 0.5), [a.g0 / 1.5]])

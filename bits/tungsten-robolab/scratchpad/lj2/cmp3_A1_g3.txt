@@ -1,0 +1,18 @@
+seed None  fell False v5 6.532 t_board 10.22
+seed 401   fell False v5 6.607 t_board 10.10
+seed 402   fell False v5 6.626 t_board 9.96
+seed 403   fell False v5 6.593 t_board 10.03
+seed 404   fell False v5 6.640 t_board 10.34
+seed 405   fell False v5 6.591 t_board 10.04
+seed 406   fell False v5 6.655 t_board 9.76
+seed 407   fell False v5 6.580 t_board 9.85
+seed 408   fell False v5 6.571 t_board 10.05
+seed 409   fell False v5 6.558 t_board 10.23
+seed 410   fell False v5 6.591 t_board 9.69
+seed 411   fell False v5 6.610 t_board 10.03
+seed 412   fell False v5 6.625 t_board 9.85
+seed 413   fell False v5 6.677 t_board 9.86
+seed 414   fell False v5 6.623 t_board 9.74
+seed 415   fell False v5 6.581 t_board 9.92
+seed 416   fell False v5 6.615 t_board 9.89
+SUMMARY long_jump_run-c2 params A1_g3.txt {}: n 17 fell 0 v5 mean 6.604 sd 0.036 min 6.532 max 6.677

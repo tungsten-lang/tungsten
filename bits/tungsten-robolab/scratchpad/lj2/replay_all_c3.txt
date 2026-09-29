@@ -1,0 +1,17 @@
+long_jump_elite              playground/arena/params/long_jump_elite-20260928-055224.txt mean   4.0750 n=  1 stored   4.0750  differ 0
+long_jump_elite2             playground/arena/params/long_jump_elite2-20260928-155732.txt mean   4.0090 n=  1 stored   4.0090  differ 0
+long_jump_elite2_robust      playground/arena/params/long_jump_elite2_robust-20260928-155730.txt mean   3.9358 n= 16 stored   3.9358  differ 0
+long_jump_elite2_robust32    playground/arena/params/long_jump_elite2_robust32-20260929-035846.txt mean   3.5915 n= 32 stored   3.5915  differ 0
+long_jump_elite_robust       playground/arena/params/long_jump_elite_robust-20260928-031707.txt mean   3.6566 n= 16 stored   3.6566  differ 0
+long_jump_p95                playground/arena/params/long_jump_p95-20260929-043732.txt  mean   5.1220 n=  1 stored   5.1220  differ 0
+long_jump_p95_robust         playground/arena/params/long_jump_p95_robust-20260929-034646.txt mean   4.6305 n= 16 stored   4.6305  differ 0
+long_jump_p95_robust32       playground/arena/params/long_jump_p95_robust32-20260929-034738.txt mean   4.5458 n= 32 stored   4.5458  differ 0
+long_jump_p95_robust96       playground/arena/params/long_jump_p95_robust96-20260929-042456.txt mean   4.3173 n= 96 stored   4.3173  differ 0
+long_jump_robust             playground/arena/params/long_jump_robust-20260928-005438.txt mean   1.8518 n= 16 stored   1.8518  differ 0
+long_jump_v2                 playground/arena/params/long_jump_v2-20260928-012555.txt   mean   2.4730 n=  1 stored   2.4730  differ 0
+long_jump_v4_elite2          playground/arena/params/long_jump_v4_elite2-20260929-044859.txt mean   0.0000 n=  1 stored   0.0000  differ 0
+long_jump_v4_elite2_robust   playground/arena/params/long_jump_v4_elite2_robust-20260929-044927.txt mean   0.4499 n= 16 stored   0.4499  differ 0
+long_jump_v4_p95             playground/arena/params/long_jump_v4_p95-20260929-142415.txt mean   5.2090 n=  1 stored   5.2090  differ 0
+long_jump_v4_p95_robust      playground/arena/params/long_jump_v4_p95_robust-20260929-135924.txt mean   3.4118 n= 16 stored   3.4118  differ 0
+long_jump_v4_p95_robust32    playground/arena/params/long_jump_v4_p95_robust32-20260929-135945.txt mean   4.5012 n= 32 stored   4.5012  differ 0
+long_jump_v4_p95_robust96    playground/arena/params/long_jump_v4_p95_robust96-20260929-142944.txt mean   3.7238 n= 96 stored   3.7238  differ 0

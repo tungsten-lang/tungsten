@@ -1,0 +1,31 @@
+== board 30 runner runner_p2a.txt 
+SUMMARY long_jump_run-c3 params runner_p2a.txt {}: n 17 fell 0 v5 mean 6.023 sd 0.064 min 5.903 max 6.130
+== board 30 runner lj_runner_gear_v4_p95.txt g2_v_on=6.5
+SUMMARY long_jump_run-c3 params lj_runner_gear_v4_p95.txt {'g2_v_on': '6.5'}: n 17 fell 0 v5 mean 6.023 sd 0.064 min 5.903 max 6.130
+== board 30 runner lj_runner_gear_v4_p95.txt g2_v_on=5.0
+SUMMARY long_jump_run-c3 params lj_runner_gear_v4_p95.txt {'g2_v_on': '5.0'}: n 17 fell 0 v5 mean 6.215 sd 0.068 min 6.116 max 6.342
+== board 35 runner runner_p2a.txt 
+SUMMARY long_jump_run-c3 params runner_p2a.txt {}: n 17 fell 0 v5 mean 6.284 sd 0.056 min 6.188 max 6.395
+== board 35 runner lj_runner_gear_v4_p95.txt g2_v_on=6.5
+SUMMARY long_jump_run-c3 params lj_runner_gear_v4_p95.txt {'g2_v_on': '6.5'}: n 17 fell 0 v5 mean 6.284 sd 0.056 min 6.188 max 6.395
+== board 35 runner lj_runner_gear_v4_p95.txt g2_v_on=5.0
+SUMMARY long_jump_run-c3 params lj_runner_gear_v4_p95.txt {'g2_v_on': '5.0'}: n 17 fell 0 v5 mean 6.478 sd 0.059 min 6.383 max 6.568
+== board 40 runner runner_p2a.txt 
+SUMMARY long_jump_run-c3 params runner_p2a.txt {}: n 17 fell 0 v5 mean 6.472 sd 0.036 min 6.419 max 6.563
+== board 40 runner lj_runner_gear_v4_p95.txt g2_v_on=6.5
+SUMMARY long_jump_run-c3 params lj_runner_gear_v4_p95.txt {'g2_v_on': '6.5'}: n 17 fell 0 v5 mean 6.473 sd 0.039 min 6.419 max 6.582
+== board 40 runner lj_runner_gear_v4_p95.txt g2_v_on=5.0
+SUMMARY long_jump_run-c3 params lj_runner_gear_v4_p95.txt {'g2_v_on': '5.0'}: n 17 fell 0 v5 mean 6.687 sd 0.045 min 6.629 max 6.765
+== board 44 runner runner_p2a.txt 
+SUMMARY long_jump_run-c3 params runner_p2a.txt {}: n 17 fell 0 v5 mean 6.593 sd 0.043 min 6.526 max 6.671
+== board 44 runner lj_runner_gear_v4_p95.txt g2_v_on=6.5
+SUMMARY long_jump_run-c3 params lj_runner_gear_v4_p95.txt {'g2_v_on': '6.5'}: n 17 fell 0 v5 mean 6.618 sd 0.056 min 6.526 max 6.710
+== board 44 runner lj_runner_gear_v4_p95.txt g2_v_on=5.0
+SUMMARY long_jump_run-c3 params lj_runner_gear_v4_p95.txt {'g2_v_on': '5.0'}: n 17 fell 0 v5 mean 6.832 sd 0.045 min 6.754 max 6.921
+== board 45 runner runner_p2a.txt 
+SUMMARY long_jump_run-c3 params runner_p2a.txt {}: n 17 fell 0 v5 mean 6.623 sd 0.043 min 6.540 max 6.703
+== board 45 runner lj_runner_gear_v4_p95.txt g2_v_on=6.5
+SUMMARY long_jump_run-c3 params lj_runner_gear_v4_p95.txt {'g2_v_on': '6.5'}: n 17 fell 0 v5 mean 6.668 sd 0.057 min 6.541 max 6.751
+== board 45 runner lj_runner_gear_v4_p95.txt g2_v_on=5.0
+SUMMARY long_jump_run-c3 params lj_runner_gear_v4_p95.txt {'g2_v_on': '5.0'}: n 17 fell 0 v5 mean 6.864 sd 0.046 min 6.788 max 6.939
+DONE

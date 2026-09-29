@@ -1,0 +1,7 @@
+== s8 (j_st_rnd=0.9):      125 captures
+SUMMARY rob_a4_final.txt: 125 starts, valid 109, fouls 3, D_board mean 4.425 min 3.148, legal mean (fouls 0) 3.757; foot offset mean -0.046 sd 0.038; gap sd 0.152
+   plant offset vs pen gap: slope -0.181 (a program that compensates fully: 0; none: -1) resid sd 0.026
+== s9 (j_st_rnd=1.0):      125 captures
+SUMMARY rob_a4_final.txt: 125 starts, valid 92, fouls 3, D_board mean 4.452 min 3.580, legal mean (fouls 0) 3.175; foot offset mean -0.034 sd 0.025; gap sd 0.135
+   plant offset vs pen gap: slope -0.118 (a program that compensates fully: 0; none: -1) resid sd 0.019
+DONE

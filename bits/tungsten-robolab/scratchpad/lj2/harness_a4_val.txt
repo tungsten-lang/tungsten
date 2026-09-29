@@ -1,0 +1,95 @@
+a4_s8092   r gap 1.54 valid D_board 3.580 off -0.065 vx 6.76 vz 1.35 L  -1.2 contact 0.104
+a4_s8010   l gap 1.59 valid D_board 4.141 off +0.021 vx 6.76 vz 1.80 L  -1.5 contact 0.096  FOUL
+a4_s8119   l gap 1.63 valid D_board 4.168 off -0.005 vx 6.74 vz 1.87 L  -2.8 contact 0.092
+a4_s8004   l gap 1.64 INVALID runway after take-off
+a4_s8052   l gap 1.64 valid D_board 4.246 off +0.017 vx 6.87 vz 1.79 L  -7.4 contact 0.100  FOUL
+a4_s8122   l gap 1.64 valid D_board 4.069 off -0.024 vx 6.68 vz 1.82 L  -5.2 contact 0.104
+a4_s8066   l gap 1.66 valid D_board 4.224 off -0.006 vx 6.90 vz 1.77 L  -7.3 contact 0.100
+a4_s8015   l gap 1.67 valid D_board 4.226 off -0.020 vx 6.75 vz 1.91 L  -5.8 contact 0.096
+a4_s8109   l gap 1.68 valid D_board 4.173 off -0.014 vx 6.69 vz 1.89 L  -4.9 contact 0.096
+a4_s8055   l gap 1.69 INVALID runway after take-off
+a4_s8128   l gap 1.69 valid D_board 4.368 off +0.003 vx 6.76 vz 1.99 L  -7.6 contact 0.100  FOUL
+a4_s8011   l gap 1.69 valid D_board 4.193 off -0.027 vx 6.80 vz 1.82 L  -8.3 contact 0.100
+a4_s8081   l gap 1.72 valid D_board 4.325 off -0.025 vx 6.73 vz 2.00 L  -8.3 contact 0.100
+a4_s8075   r gap 1.72 valid D_board 4.394 off -0.007 vx 6.71 vz 2.07 L  -7.3 contact 0.096
+a4_s8080   r gap 1.72 valid D_board 4.332 off -0.028 vx 6.71 vz 2.02 L  -8.3 contact 0.100
+a4_s8059   l gap 1.72 valid D_board 4.367 off -0.012 vx 6.75 vz 2.01 L  -8.4 contact 0.100
+a4_s8031   l gap 1.73 valid D_board 4.250 off -0.031 vx 6.77 vz 1.89 L  -9.0 contact 0.104
+a4_s8007   l gap 1.73 valid D_board 4.162 off -0.042 vx 6.53 vz 2.03 L  -8.2 contact 0.096
+a4_s8058   l gap 1.73 valid D_board 4.361 off -0.022 vx 6.72 vz 2.03 L  -8.9 contact 0.100
+a4_s8021   l gap 1.73 valid D_board 4.318 off -0.019 vx 6.78 vz 1.96 L  -8.0 contact 0.100
+a4_s8097   l gap 1.75 valid D_board 4.461 off -0.007 vx 6.61 vz 2.18 L  -7.7 contact 0.100
+a4_s8117   l gap 1.75 valid D_board 4.243 off -0.035 vx 6.74 vz 1.93 L  -8.8 contact 0.100
+a4_s8063   l gap 1.76 INVALID runway after take-off
+a4_s8025   l gap 1.76 valid D_board 4.338 off -0.030 vx 6.65 vz 2.08 L  -8.7 contact 0.100
+a4_s8093   l gap 1.77 valid D_board 4.499 off -0.013 vx 6.58 vz 2.24 L  -7.6 contact 0.100
+a4_s8056   l gap 1.77 valid D_board 4.419 off -0.041 vx 6.63 vz 2.13 L  -9.8 contact 0.104
+a4_s8043   r gap 1.79 valid D_board 4.553 off -0.016 vx 6.61 vz 2.28 L  -9.1 contact 0.100
+a4_s8102   l gap 1.81 valid D_board 4.573 off -0.025 vx 6.59 vz 2.28 L -10.3 contact 0.104
+a4_s8100   l gap 1.82 valid D_board 4.372 off -0.017 vx 6.34 vz 2.31 L  -9.2 contact 0.100
+a4_s8012   r gap 1.82 valid D_board 4.561 off -0.020 vx 6.56 vz 2.32 L  -9.7 contact 0.104
+a4_s8040   l gap 1.85 valid D_board 4.597 off -0.035 vx 6.52 vz 2.39 L  -9.5 contact 0.100
+a4_s8088   l gap 1.85 valid D_board 4.654 off -0.024 vx 6.40 vz 2.51 L -10.6 contact 0.104
+a4_s8120   l gap 1.88 valid D_board 4.602 off -0.027 vx 6.21 vz 2.60 L -10.2 contact 0.104
+a4_s8032   l gap 1.88 valid D_board 4.524 off -0.038 vx 6.32 vz 2.48 L -10.9 contact 0.104
+a4_s8083   r gap 1.89 valid D_board 4.698 off -0.008 vx 6.30 vz 2.62 L  -9.7 contact 0.104
+a4_s8024   r gap 1.89 valid D_board 4.708 off -0.024 vx 6.43 vz 2.53 L -10.1 contact 0.104
+a4_s8046   l gap 1.91 valid D_board 4.661 off -0.034 vx 6.35 vz 2.58 L  -9.2 contact 0.100
+a4_s8060   l gap 1.91 valid D_board 4.615 off -0.051 vx 6.29 vz 2.56 L  -9.8 contact 0.104
+a4_s8068   r gap 1.92 valid D_board 4.488 off -0.033 vx 6.15 vz 2.57 L  -9.9 contact 0.104
+a4_s8118   l gap 1.92 valid D_board 4.684 off -0.016 vx 6.25 vz 2.64 L -10.0 contact 0.104
+a4_s8037   l gap 1.92 valid D_board 4.423 off -0.047 vx 6.06 vz 2.63 L  -9.4 contact 0.104
+a4_s8105   r gap 1.93 valid D_board 4.696 off -0.014 vx 6.25 vz 2.65 L  -9.2 contact 0.104
+a4_s8014   l gap 1.93 valid D_board 4.454 off -0.035 vx 6.08 vz 2.62 L  -9.8 contact 0.104
+a4_s8082   l gap 1.93 valid D_board 4.514 off -0.049 vx 5.98 vz 2.78 L -10.5 contact 0.104
+a4_s8098   l gap 1.94 valid D_board 4.649 off -0.034 vx 6.23 vz 2.65 L  -9.3 contact 0.104
+a4_s8076   l gap 1.94 valid D_board 4.572 off -0.054 vx 6.44 vz 2.44 L  -8.4 contact 0.100
+a4_s8112   r gap 1.94 valid D_board 4.679 off -0.042 vx 6.37 vz 2.56 L  -8.9 contact 0.104
+a4_s8003   l gap 1.94 valid D_board 4.590 off -0.071 vx 6.23 vz 2.61 L  -9.0 contact 0.104
+a4_s8126   l gap 1.95 valid D_board 4.647 off -0.047 vx 6.19 vz 2.71 L  -8.4 contact 0.100
+a4_s8013   l gap 1.95 valid D_board 4.663 off -0.059 vx 6.17 vz 2.72 L  -8.9 contact 0.104
+a4_s8116   r gap 1.96 valid D_board 4.688 off -0.040 vx 6.23 vz 2.70 L  -8.8 contact 0.104
+a4_s8064   l gap 1.96 valid D_board 4.470 off -0.082 vx 6.44 vz 2.32 L  -8.5 contact 0.104
+a4_s8073   r gap 1.97 valid D_board 4.562 off -0.067 vx 6.40 vz 2.47 L  -7.6 contact 0.100
+a4_s8115   r gap 1.98 valid D_board 4.723 off -0.048 vx 6.25 vz 2.74 L  -8.6 contact 0.104
+a4_s8079   r gap 1.98 valid D_board 4.494 off -0.060 vx 6.46 vz 2.35 L  -7.5 contact 0.100
+a4_s8034   l gap 1.98 valid D_board 4.352 off -0.047 vx 6.42 vz 2.23 L  -8.7 contact 0.100
+a4_s8029   l gap 1.98 valid D_board 4.545 off -0.091 vx 6.30 vz 2.54 L  -7.4 contact 0.100
+a4_s8111   l gap 1.98 valid D_board 4.609 off -0.068 vx 6.27 vz 2.60 L  -7.6 contact 0.104
+a4_s8020   r gap 1.99 valid D_board 4.567 off -0.066 vx 6.18 vz 2.61 L  -6.6 contact 0.104
+a4_s8038   r gap 1.99 valid D_board 4.622 off -0.074 vx 6.22 vz 2.65 L  -7.6 contact 0.104
+a4_s8016   l gap 2.00 valid D_board 4.495 off -0.109 vx 6.03 vz 2.75 L  -8.0 contact 0.104
+a4_s8009   l gap 2.01 valid D_board 3.587 off -0.165 vx 6.44 vz 1.57 L  -5.3 contact 0.084
+a4_s8005   r gap 2.01 valid D_board 3.886 off -0.159 vx 6.58 vz 1.80 L  -4.2 contact 0.096
+a4_s8070   r gap 2.02 valid D_board 4.589 off -0.050 vx 6.26 vz 2.56 L  -7.4 contact 0.104
+a4_s8101   l gap 2.02 valid D_board 4.220 off -0.096 vx 6.36 vz 2.17 L  -5.9 contact 0.100
+a4_s8002   r gap 2.02 valid D_board 4.607 off -0.056 vx 6.36 vz 2.53 L  -6.8 contact 0.100
+a4_s8069   l gap 2.02 valid D_board 4.195 off -0.091 vx 6.46 vz 2.09 L  -6.8 contact 0.100
+a4_s8067   l gap 2.03 valid D_board 4.454 off -0.072 vx 6.15 vz 2.56 L  -7.3 contact 0.100
+a4_s8113   r gap 2.03 valid D_board 4.236 off -0.082 vx 6.44 vz 2.15 L  -6.6 contact 0.100
+a4_s8030   l gap 2.03 valid D_board 4.200 off -0.102 vx 6.40 vz 2.14 L  -5.4 contact 0.100
+a4_s8108   l gap 2.04 valid D_board 4.225 off -0.107 vx 6.42 vz 2.18 L  -7.7 contact 0.100
+a4_s8048   l gap 2.04 valid D_board 4.516 off -0.120 vx 6.18 vz 2.66 L  -6.9 contact 0.104
+a4_s8099   r gap 2.04 valid D_board 4.160 off -0.102 vx 6.38 vz 2.13 L  -5.0 contact 0.100
+a4_s8053   r gap 2.04 valid D_board 4.475 off -0.125 vx 6.31 vz 2.50 L  -6.0 contact 0.104
+a4_s8054   l gap 2.04 valid D_board 4.349 off -0.131 vx 6.22 vz 2.44 L  -6.2 contact 0.104
+a4_s8071   l gap 2.04 valid D_board 4.121 off -0.105 vx 6.35 vz 2.10 L  -5.2 contact 0.100
+a4_s8001   r gap 2.05 valid D_board 4.018 off -0.115 vx 6.41 vz 1.97 L  -4.1 contact 0.100
+a4_s8022   l gap 2.05 valid D_board 4.456 off -0.097 vx 6.32 vz 2.46 L  -6.2 contact 0.100
+a4_s8035   r gap 2.06 valid D_board 4.504 off -0.114 vx 6.17 vz 2.63 L  -5.8 contact 0.104
+a4_s8050   r gap 2.06 valid D_board 4.062 off -0.133 vx 6.33 vz 2.08 L  -3.8 contact 0.100
+a4_s8026   r gap 2.06 valid D_board 4.250 off -0.115 vx 6.36 vz 2.25 L  -5.7 contact 0.100
+a4_s8006   l gap 2.07 valid D_board 4.109 off -0.123 vx 6.24 vz 2.20 L  -4.4 contact 0.100
+a4_s8057   r gap 2.07 valid D_board 4.429 off -0.121 vx 6.09 vz 2.67 L  -3.9 contact 0.104
+a4_s8041   r gap 2.08 valid D_board 4.249 off -0.122 vx 6.36 vz 2.24 L  -5.6 contact 0.100
+a4_s8121   r gap 2.10 valid D_board 4.309 off -0.160 vx 6.33 vz 2.35 L  -4.6 contact 0.104
+a4_s8074   l gap 2.10 valid D_board 4.320 off -0.166 vx 6.25 vz 2.42 L  -5.3 contact 0.104
+a4_s8008   l gap 2.11 valid D_board 4.293 off -0.154 vx 6.22 vz 2.41 L  -5.4 contact 0.104
+a4_s8049   l gap 2.16 INVALID runway after take-off
+a4_s8091   r gap 2.17 valid D_board 4.044 off -0.183 vx 5.96 vz 2.49 L  -0.9 contact 0.104
+a4_s8018   l gap 2.19 INVALID runway after take-off
+a4_s8078   r gap 2.22 valid D_board 4.294 off -0.132 vx 6.05 vz 2.55 L  -3.0 contact 0.100
+a4_s8087   r gap 2.23 INVALID runway after take-off
+a4_s8047   r gap 2.27 INVALID runway after take-off
+SUMMARY rob_a4_final.txt: 93 starts, valid 86, fouls 3, D_board mean 4.387 min 3.580, legal mean (fouls 0) 3.920; foot offset mean -0.062 sd 0.048; gap sd 0.149
+   plant offset vs pen gap: slope -0.258 (a program that compensates fully: 0; none: -1) resid sd 0.028

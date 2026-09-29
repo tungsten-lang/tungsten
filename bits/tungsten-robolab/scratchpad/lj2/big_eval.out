@@ -1,0 +1,4 @@
+MEAN 4.0009 (+-0.144) over 480 starts; legal 415/480; failures ['fell-in-run', 'fell-in-run', 'somersault', 'fell-in-run', 'fell-in-run', 'fell-in-run', 'somersault', 'fell-in-run', 'fell-in-run', 'fell-in-run', 'fell-in-run', 'fell-in-run', 'fell-in-run', 'fell-in-run', 'fell-in-run', 'fell-in-run'
+MEAN 3.9560 (+-0.146) over 480 starts; legal 411/480; failures ['fell-in-run', 'fell-in-run', 'fell-in-run', 'somersault', 'fell-in-run', 'fell-in-run', 'fell-in-run', 'fell-in-run', 'fell-in-run', 'fell-in-run', 'fell-in-run', 'fell-in-run', 'fell-in-run', 'fell-in-run', 'foul', 'fell-in-run', 'fel
+MEAN 4.0263 (+-0.140) over 480 starts; legal 419/480; failures ['fell-in-run', 'fell-in-run', 'somersault', 'fell-in-run', 'fell-in-run', 'fell-in-run', 'fell-in-run', 'fell-in-run', 'somersault', 'fell-in-run', 'somersault', 'somersault', 'fell-in-run', 'fell-in-run', 'fell-in-run', 'fell-in-run', 
+BIG_DONE

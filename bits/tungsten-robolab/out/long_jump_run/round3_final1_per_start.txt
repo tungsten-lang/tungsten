@@ -1,0 +1,146 @@
+# per-start results of params/long_jump_v4_gear_final1.txt (controller bin/challengers/long_jump_run-c3, task long_jump_v4_p95b): trial, seed, official mark (0 = failed), failure class
+
+long_jump_v4_p95_robust 401 4.250 
+long_jump_v4_p95_robust 402 4.677 
+long_jump_v4_p95_robust 403 4.589 
+long_jump_v4_p95_robust 404 0.000 fell in run
+long_jump_v4_p95_robust 405 4.842 
+long_jump_v4_p95_robust 406 4.528 
+long_jump_v4_p95_robust 407 0.000 somersault
+long_jump_v4_p95_robust 408 4.773 
+long_jump_v4_p95_robust 409 0.000 foul
+long_jump_v4_p95_robust 410 4.609 
+long_jump_v4_p95_robust 411 4.755 
+long_jump_v4_p95_robust 412 4.100 
+long_jump_v4_p95_robust 413 4.476 
+long_jump_v4_p95_robust 414 4.635 
+long_jump_v4_p95_robust 415 4.354 
+long_jump_v4_p95_robust 416 0.000 somersault
+long_jump_v4_p95_robust32 9001 4.385 
+long_jump_v4_p95_robust32 9002 4.505 
+long_jump_v4_p95_robust32 9003 4.844 
+long_jump_v4_p95_robust32 9004 4.785 
+long_jump_v4_p95_robust32 9005 4.737 
+long_jump_v4_p95_robust32 9006 4.367 
+long_jump_v4_p95_robust32 9007 4.465 
+long_jump_v4_p95_robust32 9008 4.681 
+long_jump_v4_p95_robust32 9009 4.859 
+long_jump_v4_p95_robust32 9010 0.000 somersault
+long_jump_v4_p95_robust32 9011 4.849 
+long_jump_v4_p95_robust32 9012 4.744 
+long_jump_v4_p95_robust32 9013 4.619 
+long_jump_v4_p95_robust32 9014 4.577 
+long_jump_v4_p95_robust32 9015 4.849 
+long_jump_v4_p95_robust32 9016 4.688 
+long_jump_v4_p95_robust32 9017 4.597 
+long_jump_v4_p95_robust32 9018 4.857 
+long_jump_v4_p95_robust32 9019 4.753 
+long_jump_v4_p95_robust32 9020 4.797 
+long_jump_v4_p95_robust32 9021 4.071 
+long_jump_v4_p95_robust32 9022 4.544 
+long_jump_v4_p95_robust32 9023 4.751 
+long_jump_v4_p95_robust32 9024 4.819 
+long_jump_v4_p95_robust32 9025 4.579 
+long_jump_v4_p95_robust32 9026 4.824 
+long_jump_v4_p95_robust32 9027 4.581 
+long_jump_v4_p95_robust32 9028 4.654 
+long_jump_v4_p95_robust32 9029 3.913 
+long_jump_v4_p95_robust32 9030 4.813 
+long_jump_v4_p95_robust32 9031 4.721 
+long_jump_v4_p95_robust32 9032 4.811 
+long_jump_v4_p95_robust96 9033 0.000 foul
+long_jump_v4_p95_robust96 9034 4.449 
+long_jump_v4_p95_robust96 9035 4.878 
+long_jump_v4_p95_robust96 9036 4.498 
+long_jump_v4_p95_robust96 9037 4.734 
+long_jump_v4_p95_robust96 9038 4.564 
+long_jump_v4_p95_robust96 9039 4.645 
+long_jump_v4_p95_robust96 9040 4.637 
+long_jump_v4_p95_robust96 9041 4.752 
+long_jump_v4_p95_robust96 9042 0.000 somersault
+long_jump_v4_p95_robust96 9043 4.512 
+long_jump_v4_p95_robust96 9044 4.671 
+long_jump_v4_p95_robust96 9045 4.560 
+long_jump_v4_p95_robust96 9046 4.653 
+long_jump_v4_p95_robust96 9047 0.000 fell in run
+long_jump_v4_p95_robust96 9048 4.567 
+long_jump_v4_p95_robust96 9049 4.647 
+long_jump_v4_p95_robust96 9050 4.508 
+long_jump_v4_p95_robust96 9051 4.696 
+long_jump_v4_p95_robust96 9052 4.727 
+long_jump_v4_p95_robust96 9053 4.583 
+long_jump_v4_p95_robust96 9054 0.000 fell in run
+long_jump_v4_p95_robust96 9055 0.000 somersault
+long_jump_v4_p95_robust96 9056 4.420 
+long_jump_v4_p95_robust96 9057 4.583 
+long_jump_v4_p95_robust96 9058 4.376 
+long_jump_v4_p95_robust96 9059 4.645 
+long_jump_v4_p95_robust96 9060 0.000 fell in run
+long_jump_v4_p95_robust96 9061 4.573 
+long_jump_v4_p95_robust96 9062 4.597 
+long_jump_v4_p95_robust96 9063 4.691 
+long_jump_v4_p95_robust96 9064 0.000 fell in run
+long_jump_v4_p95_robust96 9065 4.303 
+long_jump_v4_p95_robust96 9066 4.596 
+long_jump_v4_p95_robust96 9067 4.722 
+long_jump_v4_p95_robust96 9068 0.000 fell in run
+long_jump_v4_p95_robust96 9069 4.539 
+long_jump_v4_p95_robust96 9070 4.498 
+long_jump_v4_p95_robust96 9071 4.631 
+long_jump_v4_p95_robust96 9072 4.729 
+long_jump_v4_p95_robust96 9073 4.403 
+long_jump_v4_p95_robust96 9074 4.613 
+long_jump_v4_p95_robust96 9075 0.000 foul
+long_jump_v4_p95_robust96 9076 4.810 
+long_jump_v4_p95_robust96 9077 4.674 
+long_jump_v4_p95_robust96 9078 4.829 
+long_jump_v4_p95_robust96 9079 4.687 
+long_jump_v4_p95_robust96 9080 4.710 
+long_jump_v4_p95_robust96 9081 4.664 
+long_jump_v4_p95_robust96 9082 4.422 
+long_jump_v4_p95_robust96 9083 0.000 somersault
+long_jump_v4_p95_robust96 9084 4.684 
+long_jump_v4_p95_robust96 9085 4.065 
+long_jump_v4_p95_robust96 9086 0.000 fell in run
+long_jump_v4_p95_robust96 9087 4.900 
+long_jump_v4_p95_robust96 9088 4.410 
+long_jump_v4_p95_robust96 9089 4.784 
+long_jump_v4_p95_robust96 9090 4.768 
+long_jump_v4_p95_robust96 9091 4.849 
+long_jump_v4_p95_robust96 9092 4.440 
+long_jump_v4_p95_robust96 9093 0.000 fell in run
+long_jump_v4_p95_robust96 9094 4.812 
+long_jump_v4_p95_robust96 9095 4.743 
+long_jump_v4_p95_robust96 9096 4.757 
+long_jump_v4_p95_robust96 9097 4.501 
+long_jump_v4_p95_robust96 9098 0.000 fell in run
+long_jump_v4_p95_robust96 9099 4.684 
+long_jump_v4_p95_robust96 9100 4.715 
+long_jump_v4_p95_robust96 9101 4.748 
+long_jump_v4_p95_robust96 9102 4.313 
+long_jump_v4_p95_robust96 9103 4.750 
+long_jump_v4_p95_robust96 9104 4.515 
+long_jump_v4_p95_robust96 9105 0.000 fell in run
+long_jump_v4_p95_robust96 9106 0.000 somersault
+long_jump_v4_p95_robust96 9107 4.483 
+long_jump_v4_p95_robust96 9108 4.729 
+long_jump_v4_p95_robust96 9109 4.685 
+long_jump_v4_p95_robust96 9110 0.000 fell in run
+long_jump_v4_p95_robust96 9111 4.758 
+long_jump_v4_p95_robust96 9112 0.000 somersault
+long_jump_v4_p95_robust96 9113 4.862 
+long_jump_v4_p95_robust96 9114 4.151 
+long_jump_v4_p95_robust96 9115 4.724 
+long_jump_v4_p95_robust96 9116 4.632 
+long_jump_v4_p95_robust96 9117 0.000 somersault
+long_jump_v4_p95_robust96 9118 4.763 
+long_jump_v4_p95_robust96 9119 0.000 fell in run
+long_jump_v4_p95_robust96 9120 4.324 
+long_jump_v4_p95_robust96 9121 4.885 
+long_jump_v4_p95_robust96 9122 4.734 
+long_jump_v4_p95_robust96 9123 4.554 
+long_jump_v4_p95_robust96 9124 4.801 
+long_jump_v4_p95_robust96 9125 4.736 
+long_jump_v4_p95_robust96 9126 0.000 fell in run
+long_jump_v4_p95_robust96 9127 4.682 
+long_jump_v4_p95_robust96 9128 4.303 

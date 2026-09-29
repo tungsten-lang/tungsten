@@ -1,0 +1,5 @@
+j_st_n=6: MEAN 3.4763 (+-0.405) over 96 starts; legal 72/96; failures ['foul', 'somersault', 'foul',
+j_st_n=7: MEAN 2.8011 (+-0.457) over 96 starts; legal 58/96; failures ['fell-in-run', 'fell-in-run',
+j_st_n=8: MEAN 2.3164 (+-0.467) over 96 starts; legal 48/96; failures ['fell-in-run', 'fell-in-run',
+j_st_n=10: MEAN 1.5132 (+-0.431) over 96 starts; legal 32/96; failures ['somersault', 'fell-in-run', 
+SCAN_DONE

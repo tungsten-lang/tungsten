@@ -1,0 +1,4 @@
+j_st_n=6,j_board_shift=1.00: MEAN 3.3601 (+-0.413) over 96 starts; legal 70/96; failures ['fell-in-run', 'somersault', 
+j_st_n=6,j_board_shift=0.96: MEAN 3.4391 (+-0.392) over 96 starts; legal 73/96; failures ['somersault', 'somersault', '
+j_st_n=6,j_board_shift=0.92: MEAN 3.5094 (+-0.349) over 96 starts; legal 78/96; failures ['somersault', 'somersault', '
+SCAN_DONE

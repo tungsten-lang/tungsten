@@ -1,0 +1,15 @@
+== step length vs g2_z_ref (approach only, 8 starts)
+g2_z_ref=0.8                             n 8 fell 0 step 0.927 (sd 0.115) speed 6.412
+g2_z_ref=0.86                            n 8 fell 0 step 1.015 (sd 0.144) speed 6.795
+g2_z_ref=0.92                            n 8 fell 0 step 1.101 (sd 0.100) speed 6.672
+g2_z_ref=1.0                             n 8 fell 0 step 1.061 (sd 0.161) speed 6.619
+== j_st_w=0,j_st_zk=1.0,j_st_max=0.3,j_st_n=6
+starts 64, without a penultimate/plant (fell or no take-off) 1
+plant offset vs pen gap error: slope -1.009 intercept -0.056 resid sd 0.049 | gap_err mean 0.306 sd 0.480 | offset mean -0.365 sd 0.487 n 63
+== j_st_w=0,j_st_zk=2.0,j_st_max=0.3,j_st_n=6
+starts 64, without a penultimate/plant (fell or no take-off) 1
+plant offset vs pen gap error: slope -1.032 intercept -0.052 resid sd 0.050 | gap_err mean 0.282 sd 0.481 | offset mean -0.343 sd 0.499 n 63
+== j_st_w=0.3,j_st_zk=1.0,j_st_max=0.3,j_st_n=6
+starts 64, without a penultimate/plant (fell or no take-off) 1
+plant offset vs pen gap error: slope -1.206 intercept 0.047 resid sd 0.031 | gap_err mean 0.010 sd 0.215 | offset mean 0.035 sd 0.261 n 63
+DONE

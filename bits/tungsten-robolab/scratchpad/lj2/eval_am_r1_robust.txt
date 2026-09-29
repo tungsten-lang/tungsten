@@ -1,0 +1,18 @@
+long_jump_v4_p95_robust task long_jump_v4_p95b controller long_jump_run-c2 params long_jump_v4_gear_am_r1.txt   (70s)
+seed 401   official  3.893              eff 3.984 ballistic 4.39 off -0.091 foul_x -0.048 vx 6.071 vz 2.443 ang 21.9 contact 0.107 flight 0.674 v5 6.64
+seed 402   official  0.000 foul         eff 2.823 ballistic 4.272 off -0.018 foul_x 0.007 vx 6.742 vz 1.879 ang 15.6 contact 0.103 flight 0.397 v5 6.745
+seed 403   official  0.000 foul         eff 2.649 ballistic 4.153 off -0.021 foul_x 0.003 vx 6.797 vz 1.733 ang 14.3 contact 0.104 flight 0.37 v5 6.753
+seed 404   official  0.000 somersault   eff 1.613 ballistic 2.822 off -1.807 foul_x -1.76 vx 6.133 vz 0.671 ang 6.2 contact 0.071 flight 0.165 v5 6.519
+seed 405   official  0.000 somersault   eff 3.013 ballistic 4.15 off -0.048 foul_x -0.034 vx 6.208 vz 2.15 ang 19.1 contact 0.108 flight 0.448 v5 6.641
+seed 406   official  0.000 foul         eff 4.192 ballistic 4.467 off -0.021 foul_x 0.019 vx 6.193 vz 2.446 ang 21.6 contact 0.106 flight 0.672 v5 6.696
+seed 407   official  0.000 short        eff 1.814 ballistic 2.818 off -1.766 foul_x -1.717 vx 6.062 vz 0.694 ang 6.5 contact 0.078 flight 0.182 v5 6.501
+seed 408   official  0.000 somersault   eff 2.952 ballistic 4.073 off -0.047 foul_x -0.034 vx 6.128 vz 2.14 ang 19.3 contact 0.111 flight 0.448 v5 6.616
+seed 409   official  0.000 fell-in-run  eff None ballistic None off None foul_x None vx None vz None ang None contact None flight None v5 None
+seed 410   official  3.091              eff 3.229 ballistic 4.244 off -0.138 foul_x -0.106 vx 6.168 vz 2.273 ang 20.2 contact 0.106 flight 0.476 v5 6.622
+seed 411   official  0.000 somersault   eff 2.757 ballistic 4.162 off -0.052 foul_x -0.027 vx 6.591 vz 1.849 ang 15.7 contact 0.108 flight 0.395 v5 6.685
+seed 412   official  0.000 fell-in-run  eff None ballistic None off None foul_x None vx None vz None ang None contact None flight None v5 None
+seed 413   official  4.507              eff 4.655 ballistic 4.391 off -0.148 foul_x -0.1 vx 6.189 vz 2.341 ang 20.7 contact 0.107 flight 0.651 v5 6.632
+seed 414   official  4.510              eff 4.63 ballistic 4.433 off -0.12 foul_x -0.065 vx 6.255 vz 2.321 ang 20.4 contact 0.108 flight 0.65 v5 6.643
+seed 415   official  0.000 foul         eff 2.477 ballistic 3.937 off -0.033 foul_x 0.002 vx 6.68 vz 1.598 ang 13.5 contact 0.105 flight 0.326 v5 6.735
+seed 416   official  0.000 fell-in-run  eff None ballistic None off None foul_x None vx None vz None ang None contact None flight None v5 None
+MEAN 1.0001 (+-0.889) over 16 starts; legal 4/16; failures ['foul', 'foul', 'somersault', 'somersault', 'foul', 'short', 'somersault', 'fell-in-run', 'somersault', 'fell-in-run', 'foul', 'fell-in-run']; mean of legal 4.000

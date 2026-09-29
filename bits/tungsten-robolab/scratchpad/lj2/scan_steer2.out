@@ -1,0 +1,10 @@
+== s2 (j_st_w=0.4,j_st_max=0.2):      125 captures
+SUMMARY rob_a4_final.txt: 125 starts, valid 119, fouls 4, D_board mean 4.034 min 1.953, legal mean (fouls 0) 3.741; foot offset mean -0.069 sd 0.098; gap sd 0.203
+   plant offset vs pen gap: slope -0.262 (a program that compensates fully: 0; none: -1) resid sd 0.083
+== s3 (j_st_w=0.5,j_st_max=0.15,j_st_n=6):      125 captures
+SUMMARY rob_a4_final.txt: 125 starts, valid 117, fouls 10, D_board mean 3.990 min 2.089, legal mean (fouls 0) 3.482; foot offset mean -0.058 sd 0.042; gap sd 0.255
+   plant offset vs pen gap: slope -0.146 (a program that compensates fully: 0; none: -1) resid sd 0.019
+== s4 (j_st_w=0.3,j_st_max=0.25):      125 captures
+SUMMARY rob_a4_final.txt: 125 starts, valid 118, fouls 11, D_board mean 3.966 min 2.874, legal mean (fouls 0) 3.469; foot offset mean -0.066 sd 0.049; gap sd 0.217
+   plant offset vs pen gap: slope -0.203 (a program that compensates fully: 0; none: -1) resid sd 0.021
+DONE

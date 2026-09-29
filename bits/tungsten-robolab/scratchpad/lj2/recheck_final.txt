@@ -1,0 +1,18 @@
+long_jump_elite: stored 4.0750, now 4.0750  OK
+long_jump_elite2: stored 4.0090, now 4.0090  OK
+long_jump_elite2_robust: stored 3.9358, now 3.9358  OK
+long_jump_elite2_robust32: stored 3.5915, now 3.5915  OK
+long_jump_elite_robust: stored 3.6566, now 3.6566  OK
+long_jump_p95: stored 5.1220, now 5.1220  OK
+long_jump_p95_robust: stored 4.6305, now 4.6305  OK
+long_jump_p95_robust32: stored 4.5458, now 4.5458  OK
+long_jump_p95_robust96: stored 4.3173, now 4.3173  OK
+long_jump_robust: stored 1.8518, now 1.8518  OK
+long_jump_v2: stored 2.4730, now 2.4730  OK
+long_jump_v4_elite2: stored 0.0000, now 0.0000  OK
+long_jump_v4_elite2_robust: stored 0.4499, now 0.4499  OK
+long_jump_v4_p95: stored 5.2090, now 5.2090  OK
+long_jump_v4_p95_robust: stored 3.4118, now 3.4118  OK
+long_jump_v4_p95_robust32: stored 4.5012, now 4.5012  OK
+long_jump_v4_p95_robust96: stored 3.7238, now 3.7238  OK
+RECHECK_DONE

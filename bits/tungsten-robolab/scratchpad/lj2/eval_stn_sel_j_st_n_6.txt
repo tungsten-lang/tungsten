@@ -1,0 +1,98 @@
+long_jump_v4_p95_robust96 task long_jump_v4_p95b controller long_jump_run-c3 params long_jump_v4_gear_final2.txt j_st_n=6  (50s)
+seed 7001  official  4.576              eff 4.777 ballistic 4.614 off -0.201 foul_x -0.157 vx 6.03 vz 2.701 ang 24.1 contact 0.107 flight 0.755 v5 6.604
+seed 7002  official  4.711              eff 4.843 ballistic 4.676 off -0.132 foul_x -0.08 vx 6.048 vz 2.737 ang 24.4 contact 0.107 flight 0.777 v5 6.677
+seed 7003  official  0.000 foul         eff 1.247 ballistic 3.395 off -0.007 foul_x 0.018 vx 7.045 vz 0.918 ang 7.4 contact 0.093 flight 0.218 v5 6.718
+seed 7004  official  4.564              eff 4.664 ballistic 4.508 off -0.1 foul_x -0.085 vx 5.841 vz 2.818 ang 25.8 contact 0.107 flight 0.8 v5 6.654
+seed 7005  official  4.618              eff 4.724 ballistic 4.522 off -0.106 foul_x -0.08 vx 6.321 vz 2.396 ang 20.8 contact 0.109 flight 0.731 v5 6.697
+seed 7006  official  4.511              eff 4.691 ballistic 4.489 off -0.18 foul_x -0.133 vx 6.247 vz 2.404 ang 21.0 contact 0.106 flight 0.72 v5 6.594
+seed 7007  official  0.000 somersault   eff 1.494 ballistic 3.673 off -0.029 foul_x -0.002 vx 7.037 vz 1.171 ang 9.5 contact 0.098 flight 0.232 v5 6.692
+seed 7008  official  4.770              eff 4.851 ballistic 4.681 off -0.082 foul_x -0.062 vx 6.079 vz 2.783 ang 24.6 contact 0.105 flight 0.783 v5 6.728
+seed 7009  official  0.000 foul         eff 4.31 ballistic 4.099 off -0.014 foul_x 0.025 vx 6.776 vz 1.71 ang 14.2 contact 0.098 flight 0.529 v5 6.724
+seed 7010  official  4.783              eff 4.84 ballistic 4.675 off -0.056 foul_x -0.038 vx 6.019 vz 2.838 ang 25.2 contact 0.104 flight 0.803 v5 6.697
+seed 7011  official  0.000 fell-in-run  eff None ballistic None off None foul_x None vx None vz None ang None contact None flight None v5 None
+seed 7012  official  4.813              eff 4.896 ballistic 4.711 off -0.083 foul_x -0.041 vx 6.253 vz 2.613 ang 22.7 contact 0.107 flight 0.757 v5 6.728
+seed 7013  official  4.631              eff 4.707 ballistic 4.538 off -0.077 foul_x -0.061 vx 5.994 vz 2.724 ang 24.4 contact 0.107 flight 0.77 v5 6.723
+seed 7014  official  4.743              eff 4.794 ballistic 4.58 off -0.051 foul_x -0.023 vx 6.443 vz 2.371 ang 20.2 contact 0.106 flight 0.72 v5 6.755
+seed 7015  official  0.000 fell-in-run  eff None ballistic None off None foul_x None vx None vz None ang None contact None flight None v5 None
+seed 7016  official  4.710              eff 4.75 ballistic 4.502 off -0.04 foul_x -0.013 vx 6.7 vz 2.141 ang 17.7 contact 0.101 flight 0.656 v5 6.803
+seed 7017  official  4.654              eff 4.806 ballistic 4.648 off -0.152 foul_x -0.108 vx 5.94 vz 2.811 ang 25.3 contact 0.107 flight 0.792 v5 6.598
+seed 7018  official  4.173              eff 4.203 ballistic 4.316 off -0.03 foul_x -0.004 vx 6.695 vz 2.0 ang 16.6 contact 0.103 flight 0.604 v5 6.743
+seed 7019  official  0.000 somersault   eff 1.586 ballistic 3.706 off -0.06 foul_x -0.039 vx 7.041 vz 1.207 ang 9.7 contact 0.098 flight 0.242 v5 6.725
+seed 7020  official  4.828              eff 4.895 ballistic 4.68 off -0.067 foul_x -0.035 vx 6.509 vz 2.41 ang 20.3 contact 0.105 flight 0.732 v5 6.705
+seed 7021  official  4.718              eff 4.835 ballistic 4.67 off -0.117 foul_x -0.095 vx 6.004 vz 2.824 ang 25.2 contact 0.104 flight 0.8 v5 6.589
+seed 7022  official  4.531              eff 4.695 ballistic 4.508 off -0.164 foul_x -0.117 vx 6.156 vz 2.497 ang 22.1 contact 0.105 flight 0.731 v5 6.599
+seed 7023  official  4.539              eff 4.712 ballistic 4.529 off -0.173 foul_x -0.127 vx 6.168 vz 2.516 ang 22.2 contact 0.105 flight 0.731 v5 6.623
+seed 7024  official  4.603              eff 4.655 ballistic 4.384 off -0.052 foul_x -0.026 vx 6.816 vz 1.952 ang 16.0 contact 0.101 flight 0.627 v5 6.764
+seed 7025  official  4.675              eff 4.726 ballistic 4.486 off -0.051 foul_x -0.024 vx 6.574 vz 2.204 ang 18.5 contact 0.104 flight 0.681 v5 6.757
+seed 7026  official  0.000 foul         eff 1.757 ballistic 3.618 off 0.013 foul_x 0.032 vx 6.915 vz 1.223 ang 10.0 contact 0.094 flight 0.273 v5 6.712
+seed 7027  official  4.663              eff 4.786 ballistic 4.579 off -0.123 foul_x -0.079 vx 6.37 vz 2.419 ang 20.8 contact 0.104 flight 0.724 v5 6.686
+seed 7028  official  4.832              eff 4.913 ballistic 4.735 off -0.08 foul_x -0.049 vx 6.185 vz 2.715 ang 23.7 contact 0.106 flight 0.762 v5 6.712
+seed 7029  official  4.458              eff 4.65 ballistic 4.457 off -0.192 foul_x -0.145 vx 6.173 vz 2.432 ang 21.5 contact 0.106 flight 0.721 v5 6.573
+seed 7030  official  4.949              eff 5.011 ballistic 4.812 off -0.061 foul_x -0.031 vx 6.439 vz 2.599 ang 22.0 contact 0.104 flight 0.763 v5 6.809
+seed 7031  official  4.767              eff 4.882 ballistic 4.713 off -0.114 foul_x -0.081 vx 6.111 vz 2.749 ang 24.2 contact 0.106 flight 0.773 v5 6.715
+seed 7032  official  0.000 foul         eff 2.62 ballistic 3.942 off 0.007 foul_x 0.029 vx 6.829 vz 1.585 ang 13.1 contact 0.097 flight 0.349 v5 6.7
+seed 7033  official  4.644              eff 4.727 ballistic 4.54 off -0.082 foul_x -0.067 vx 6.174 vz 2.575 ang 22.6 contact 0.106 flight 0.754 v5 6.679
+seed 7034  official  4.867              eff 4.932 ballistic 4.735 off -0.065 foul_x -0.037 vx 6.419 vz 2.531 ang 21.5 contact 0.106 flight 0.751 v5 6.744
+seed 7035  official  4.580              eff 4.651 ballistic 4.476 off -0.072 foul_x -0.056 vx 6.009 vz 2.649 ang 23.8 contact 0.109 flight 0.763 v5 6.716
+seed 7036  official  4.596              eff 4.762 ballistic 4.589 off -0.166 foul_x -0.121 vx 6.092 vz 2.629 ang 23.3 contact 0.106 flight 0.75 v5 6.613
+seed 7037  official  0.000 foul         eff 1.541 ballistic 3.54 off 0.018 foul_x 0.04 vx 6.959 vz 1.109 ang 9.1 contact 0.095 flight 0.253 v5 6.71
+seed 7038  official  4.939              eff 4.986 ballistic 4.787 off -0.047 foul_x -0.013 vx 6.496 vz 2.518 ang 21.2 contact 0.104 flight 0.748 v5 6.734
+seed 7039  official  4.575              eff 4.766 ballistic 4.583 off -0.191 foul_x -0.145 vx 6.195 vz 2.541 ang 22.3 contact 0.106 flight 0.726 v5 6.664
+seed 7040  official  4.417              eff 4.585 ballistic 4.368 off -0.168 foul_x -0.123 vx 6.345 vz 2.222 ang 19.3 contact 0.103 flight 0.678 v5 6.66
+seed 7041  official  4.536              eff 4.58 ballistic 4.331 off -0.045 foul_x -0.006 vx 6.627 vz 2.004 ang 16.8 contact 0.102 flight 0.626 v5 6.705
+seed 7042  official  4.506              eff 4.695 ballistic 4.495 off -0.189 foul_x -0.143 vx 6.251 vz 2.418 ang 21.2 contact 0.104 flight 0.716 v5 6.592
+seed 7043  official  4.896              eff 4.99 ballistic 4.818 off -0.094 foul_x -0.066 vx 6.163 vz 2.824 ang 24.6 contact 0.104 flight 0.801 v5 6.687
+seed 7044  official  4.808              eff 4.926 ballistic 4.764 off -0.118 foul_x -0.092 vx 6.079 vz 2.85 ang 25.1 contact 0.104 flight 0.803 v5 6.664
+seed 7045  official  4.756              eff 4.857 ballistic 4.685 off -0.101 foul_x -0.067 vx 6.114 vz 2.708 ang 23.9 contact 0.108 flight 0.781 v5 6.648
+seed 7046  official  0.000 somersault   eff 2.1 ballistic 3.82 off -0.027 foul_x -0.005 vx 6.955 vz 1.373 ang 11.2 contact 0.096 flight 0.291 v5 6.736
+seed 7047  official  4.467              eff 4.671 ballistic 4.493 off -0.204 foul_x -0.157 vx 6.12 vz 2.509 ang 22.3 contact 0.106 flight 0.721 v5 6.592
+seed 7048  official  0.000 somersault   eff 1.909 ballistic 3.845 off -0.028 foul_x -0.002 vx 6.993 vz 1.364 ang 11.0 contact 0.098 flight 0.268 v5 6.715
+seed 7049  official  4.767              eff 4.892 ballistic 4.712 off -0.125 foul_x -0.081 vx 6.161 vz 2.691 ang 23.6 contact 0.107 flight 0.766 v5 6.7
+seed 7050  official  4.765              eff 4.811 ballistic 4.556 off -0.047 foul_x -0.017 vx 6.714 vz 2.162 ang 17.9 contact 0.103 flight 0.677 v5 6.724
+seed 7051  official  4.700              eff 4.845 ballistic 4.669 off -0.145 foul_x -0.099 vx 6.166 vz 2.635 ang 23.1 contact 0.107 flight 0.77 v5 6.634
+seed 7052  official  4.255              eff 4.39 ballistic 4.249 off -0.136 foul_x -0.12 vx 5.656 vz 2.712 ang 25.6 contact 0.11 flight 0.76 v5 6.615
+seed 7053  official  0.000 foul         eff 4.128 ballistic 3.998 off -0.018 foul_x 0.006 vx 6.839 vz 1.611 ang 13.3 contact 0.096 flight 0.502 v5 6.721
+seed 7054  official  4.574              eff 4.693 ballistic 4.544 off -0.119 foul_x -0.099 vx 5.792 vz 2.904 ang 26.6 contact 0.104 flight 0.806 v5 6.594
+seed 7055  official  4.858              eff 4.925 ballistic 4.746 off -0.067 foul_x -0.047 vx 6.186 vz 2.754 ang 24.0 contact 0.104 flight 0.788 v5 6.69
+seed 7056  official  4.642              eff 4.807 ballistic 4.637 off -0.165 foul_x -0.122 vx 6.089 vz 2.68 ang 23.8 contact 0.107 flight 0.751 v5 6.636
+seed 7057  official  4.598              eff 4.653 ballistic 4.397 off -0.055 foul_x -0.028 vx 6.714 vz 2.041 ang 16.9 contact 0.099 flight 0.631 v5 6.73
+seed 7058  official  4.821              eff 4.888 ballistic 4.663 off -0.067 foul_x -0.034 vx 6.596 vz 2.338 ang 19.5 contact 0.103 flight 0.716 v5 6.706
+seed 7059  official  4.765              eff 4.824 ballistic 4.609 off -0.059 foul_x -0.032 vx 6.459 vz 2.39 ang 20.3 contact 0.106 flight 0.725 v5 6.782
+seed 7060  official  4.827              eff 4.927 ballistic 4.737 off -0.099 foul_x -0.061 vx 6.306 vz 2.604 ang 22.4 contact 0.105 flight 0.765 v5 6.649
+seed 7061  official  4.866              eff 4.943 ballistic 4.774 off -0.077 foul_x -0.055 vx 6.09 vz 2.869 ang 25.2 contact 0.103 flight 0.801 v5 6.721
+seed 7062  official  4.784              eff 4.853 ballistic 4.662 off -0.069 foul_x -0.035 vx 6.293 vz 2.552 ang 22.1 contact 0.106 flight 0.753 v5 6.688
+seed 7063  official  4.370              eff 4.535 ballistic 4.313 off -0.165 foul_x -0.119 vx 6.34 vz 2.173 ang 18.9 contact 0.103 flight 0.686 v5 6.627
+seed 7064  official  4.537              eff 4.593 ballistic 4.291 off -0.056 foul_x -0.029 vx 6.724 vz 1.939 ang 16.1 contact 0.099 flight 0.606 v5 6.715
+seed 7065  official  0.000 somersault   eff 4.341 ballistic 4.158 off -0.04 foul_x -0.002 vx 6.811 vz 1.759 ang 14.5 contact 0.096 flight 0.534 v5 6.782
+seed 7066  official  0.000 foul         eff 2.166 ballistic 3.823 off -0.014 foul_x 0.009 vx 6.925 vz 1.386 ang 11.3 contact 0.096 flight 0.298 v5 6.704
+seed 7067  official  4.542              eff 4.73 ballistic 4.575 off -0.188 foul_x -0.135 vx 5.938 vz 2.718 ang 24.6 contact 0.108 flight 0.759 v5 6.585
+seed 7068  official  4.506              eff 4.57 ballistic 4.283 off -0.064 foul_x -0.034 vx 6.847 vz 1.824 ang 14.9 contact 0.102 flight 0.611 v5 6.689
+seed 7069  official  4.596              eff 4.663 ballistic 4.403 off -0.067 foul_x -0.041 vx 6.708 vz 2.033 ang 16.9 contact 0.103 flight 0.648 v5 6.748
+seed 7070  official  4.330              eff 4.484 ballistic 4.273 off -0.153 foul_x -0.109 vx 6.269 vz 2.197 ang 19.3 contact 0.102 flight 0.669 v5 6.608
+seed 7071  official  4.490              eff 4.702 ballistic 4.538 off -0.212 foul_x -0.16 vx 6.085 vz 2.548 ang 22.7 contact 0.11 flight 0.718 v5 6.58
+seed 7072  official  4.201              eff 4.229 ballistic 4.113 off -0.027 foul_x -0.001 vx 6.844 vz 1.68 ang 13.8 contact 0.1 flight 0.548 v5 6.701
+seed 7073  official  4.704              eff 4.782 ballistic 4.576 off -0.078 foul_x -0.052 vx 6.413 vz 2.383 ang 20.4 contact 0.109 flight 0.726 v5 6.77
+seed 7074  official  0.000 somersault   eff 1.648 ballistic 3.711 off -0.051 foul_x -0.029 vx 7.02 vz 1.223 ang 9.9 contact 0.098 flight 0.25 v5 6.72
+seed 7075  official  0.000 foul         eff 0.0 ballistic 2.662 off 0.5 foul_x 0.511 vx 6.597 vz -0.148 ang -1.3 contact 0.002 flight 0.0 v5 6.512
+seed 7076  official  4.813              eff 4.886 ballistic 4.71 off -0.074 foul_x -0.045 vx 6.193 vz 2.684 ang 23.4 contact 0.107 flight 0.758 v5 6.77
+seed 7077  official  0.000 fell-in-run  eff None ballistic None off None foul_x None vx None vz None ang None contact None flight None v5 None
+seed 7078  official  0.000 somersault   eff 1.114 ballistic 3.464 off -0.081 foul_x -0.044 vx 6.974 vz 0.959 ang 7.8 contact 0.095 flight 0.191 v5 6.673
+seed 7079  official  4.529              eff 4.632 ballistic 4.395 off -0.104 foul_x -0.062 vx 6.506 vz 2.158 ang 18.3 contact 0.105 flight 0.641 v5 6.655
+seed 7080  official  0.000 foul         eff 1.197 ballistic 3.235 off -0.003 foul_x 0.025 vx 7.034 vz 0.716 ang 5.8 contact 0.097 flight 0.213 v5 6.702
+seed 7081  official  4.887              eff 4.927 ballistic 4.743 off -0.04 foul_x -0.002 vx 6.262 vz 2.651 ang 22.9 contact 0.103 flight 0.767 v5 6.603
+seed 7082  official  0.000 somersault   eff 2.216 ballistic 3.947 off -0.045 foul_x -0.021 vx 7.014 vz 1.449 ang 11.7 contact 0.098 flight 0.295 v5 6.779
+seed 7083  official  0.000 somersault   eff 2.147 ballistic 3.954 off -0.046 foul_x -0.017 vx 6.989 vz 1.453 ang 11.7 contact 0.1 flight 0.283 v5 6.701
+seed 7084  official  4.776              eff 4.88 ballistic 4.679 off -0.104 foul_x -0.072 vx 6.391 vz 2.486 ang 21.3 contact 0.107 flight 0.739 v5 6.688
+seed 7085  official  4.507              eff 4.701 ballistic 4.534 off -0.194 foul_x -0.151 vx 6.061 vz 2.598 ang 23.2 contact 0.108 flight 0.733 v5 6.592
+seed 7086  official  3.908              eff 4.047 ballistic 3.916 off -0.139 foul_x -0.126 vx 5.405 vz 2.593 ang 25.6 contact 0.119 flight 0.738 v5 6.581
+seed 7087  official  0.000 somersault   eff 1.337 ballistic 3.471 off -0.025 foul_x -0.001 vx 7.008 vz 1.013 ang 8.2 contact 0.095 flight 0.227 v5 6.678
+seed 7088  official  0.000 somersault   eff 1.706 ballistic 3.69 off -0.044 foul_x -0.024 vx 7.028 vz 1.23 ang 9.9 contact 0.095 flight 0.261 v5 6.767
+seed 7089  official  4.430              eff 4.487 ballistic 4.13 off -0.057 foul_x -0.033 vx 6.937 vz 1.651 ang 13.4 contact 0.1 flight 0.548 v5 6.756
+seed 7090  official  4.532              eff 4.723 ballistic 4.561 off -0.191 foul_x -0.146 vx 6.018 vz 2.66 ang 23.8 contact 0.107 flight 0.749 v5 6.597
+seed 7091  official  0.000 somersault   eff 1.557 ballistic 3.631 off -0.035 foul_x -0.015 vx 7.017 vz 1.167 ang 9.4 contact 0.096 flight 0.249 v5 6.731
+seed 7092  official  4.470              eff 4.524 ballistic 4.232 off -0.054 foul_x -0.028 vx 6.881 vz 1.767 ang 14.4 contact 0.101 flight 0.585 v5 6.735
+seed 7093  official  4.803              eff 4.939 ballistic 4.77 off -0.137 foul_x -0.097 vx 6.118 vz 2.793 ang 24.5 contact 0.106 flight 0.778 v5 6.705
+seed 7094  official  4.865              eff 4.927 ballistic 4.753 off -0.062 foul_x -0.033 vx 6.178 vz 2.744 ang 24.0 contact 0.106 flight 0.787 v5 6.746
+seed 7095  official  4.685              eff 4.756 ballistic 4.531 off -0.07 foul_x -0.039 vx 6.496 vz 2.284 ang 19.4 contact 0.104 flight 0.688 v5 6.678
+seed 7096  official  4.618              eff 4.779 ballistic 4.615 off -0.162 foul_x -0.116 vx 5.956 vz 2.759 ang 24.9 contact 0.107 flight 0.781 v5 6.599
+MEAN 3.4763 (+-0.405) over 96 starts; legal 72/96; failures ['foul', 'somersault', 'foul', 'fell-in-run', 'fell-in-run', 'somersault', 'foul', 'foul', 'foul', 'somersault', 'somersault', 'foul', 'somersault', 'foul', 'somersault', 'foul', 'fell-in-run', 'somersault', 'foul', 'somersault', 'somersault', 'somersault', 'somersault', 'somersault']; mean of legal 4.635

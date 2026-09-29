@@ -289,3 +289,19 @@ j_st_n = how many steps before the penultimate touchdown the planner starts nudg
 ## 2026-09-29 16:42 time-boxed attempt: retrain the take-off program on the j_st_n 6 states (scratchpad/lj2/rob_a6.sh, select_train.py a6: 32 gap-stratified states, 26 plant-l 6 plant-r, gaps 1.37-2.05, warm start rob_a4_final, 200k sims, out out/long_jump_limits/rob_a6.txt, log rob_a6.log)
 
 First launch with 4 workers at 16:41 (pid 49589 and children) was stopped at 16:42 because the 5-min load average passed 30 (own pids only); relaunched with 2 workers at 16:42 (wrapper pid 49957, scratchpad/lj2/rob_a6.pid). Plan: assemble A6 + rob_a6 + the frozen landing table (land_a4b_g30) + shifts, evaluate on 7001-7096 (selection), 9129-9224 and 9033-9128; adopt only if it clearly beats final2 there and on a fresh sample; stop at 17:20 whatever the state.
+
+## 2026-09-29 17:02 result of the j_st_n 6 attempt: NOT adopted (needs a landing retrain that does not fit the time box)
+
+rob_a6 (2 workers, 200k sims, 240 generations, 991 s; out/long_jump_limits/rob_a6.txt, log rob_a6.log): 32 training starts (gaps 1.37-2.03): mean 4.013 with one start still invalid (-4.16, the state #18), marks 3.27-4.65; ik_gap0 1.8721.
+Params = A6 + rob_a6 + land_a4b_g30 (the frozen n=5 landing table) + aim shift d (j_board_shift 1.11 - d, ik_gap0 1.8721 + d): params/long_jump_v4_gear_n6_d00.txt / _d03.txt / _d06.txt (scratchpad/lj2/eval_cands.sh, seeds 7001-7096, c3, 4 workers; final2: 3.958, 83 legal):
+ d 0.00: 2.821 (59 legal: fell 6, foul 19, somersault 12) | d 0.03: 3.267 (69: fell 6, foul 1, somersault 20) | d 0.06: 3.387 (72: fell 4, somersault 20; legal mean 4.516).
+ The retrained take-off removes the fouls and keeps the stumbles at 4-6 of 96 (final2: 9) but the frozen landing table somersaults on 20 of 96 hand-overs of these take-offs (final2: 4): the landing table would have to be retrained on the n=6 hand-overs (hand-overs of 117 states + a landing search, about 1.5 h) before the shorter-horizon steering can pay; stopped here (the coordinator's two-hour box).
+ The n=6 direction is the most promising open lever (fell-in-run 26 -> 9 of 288 fresh starts with the frozen programs): the stumbles are 11 % of fresh starts and cost about 0.5 m of the mean.
+
+## 2026-09-29 17:05 END STATE (agent L2, round 3)
+
+Nothing of mine is running (ps checked 17:02). Champions (arena, controller bin/challengers/long_jump_run-c3 = source md5 a40a3113; `arena.py recheck` of all 17 long-jump champions OK at 16:32):
+ long_jump_v4_p95 (1 start) 5.209 m (params/long_jump_v4_gear_nom3.txt) | _robust (16) 3.412, 12 legal (final1) | _robust32 4.501, 31 legal (final1) | _robust96 3.724, 77 legal (final2).
+ 480 never-used starts (seeds 10001-10480), final2: mean 4.001 m, 415 legal (86.5 %): fell in the run 54, somersault 10, foul 1; legal median 4.70 m, best 4.92 m. final1 3.956, final3 4.026 (not significant), no check-mark shift 3.603.
+Not adopted, all documented above: ik_fmin 1.5 (final3), aim/gap0 variants, larger steering caps and other rounding, hop-height steering, steering horizons 6-10 (6 with a retrained take-off: somersaults, needs a landing retrain).
+No commits made. README section "Long jump, round 3" is in README.md (line ~803).

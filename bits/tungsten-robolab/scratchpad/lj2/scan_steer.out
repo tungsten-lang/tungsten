@@ -1,0 +1,9 @@
+== j_st_w=0.6,j_st_max=0.3,j_st_n=6
+starts 96, without a penultimate/plant (fell or no take-off) 3
+plant offset vs pen gap error: slope 0.489 intercept -0.268 resid sd 0.328 | gap_err mean 0.114 sd 0.120 | offset mean -0.213 sd 0.333 n 87
+== j_st_w=0.5,j_st_max=0.25,j_st_n=5
+starts 96, without a penultimate/plant (fell or no take-off) 1
+plant offset vs pen gap error: slope -0.484 intercept -0.207 resid sd 0.364 | gap_err mean 0.108 sd 0.164 | offset mean -0.259 sd 0.372 n 95
+== j_st_w=0.8,j_st_max=0.2,j_st_n=4
+starts 96, without a penultimate/plant (fell or no take-off) 1
+plant offset vs pen gap error: slope -1.894 intercept -0.050 resid sd 0.408 | gap_err mean 0.275 sd 0.107 | offset mean -0.571 sd 0.456 n 75

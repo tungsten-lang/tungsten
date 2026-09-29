@@ -85,29 +85,26 @@
 # on them zero-initialised sensed feedback.
 #
 # `j_run 1` (a params-file switch) never takes off: the approach alone.
+#
+# The runner is RunGearSkill (skills/run_gear.w: RunKnot / RunRI with more gears), whose
+# `gears N` params-file switch is the opt-in: without it (every params file before round 3) the
+# run is RunRISkill's exactly, with `gears 2` and the g2_ twins (params/lj_runner_gear_v4_p95.txt:
+# the sprint_top_speed_v4_p95 champion's runner) the stride is rebuilt from the twins above
+# g2_v_on. A gear change replaces the stride's movement, so the jump's chunks go onto the new
+# one (`switch_gear` below); the take-off, flight and landing are the same in every gear.
 
-+ LongJumpRunSkill < RunRISkill
++ LongJumpRunSkill < RunGearSkill
   -> start(frame, ctl)
+    @jump_ready = false
     super(frame, ctl)
     @track = ctl.track("body")
-    mv = @track.movement
-    # RunSkill's loop ends with l_push (gait 0): it keeps looping to l_flight
-    # now that the jump's chunks follow it in the list
-    mv[mv.size - 1].followed_by("l_flight")
-    takeoff_chunks(mv, "l_", "r_")
-    takeoff_chunks(mv, "r_", "l_")
-    if @ik
-      ik_tables
-      ik_chunk(mv, "l_", "r_")
-      ik_chunk(mv, "r_", "l_")
-    if @il
-      il_tables
-      il_chunk(mv, "l_", "r_")
-      il_chunk(mv, "r_", "l_")
+    ik_tables if @ik
+    il_tables if @il
+    add_jump_chunks(@track.movement)
+    @jump_ready = true
     @ik_on = false
     @ik_skip = false
     @pen_t = ~-1.0
-    add_flight(mv)
     @stride = ~0.0
     @last_toe = ~-99.0
     @plan_n = 0
@@ -117,6 +114,31 @@
     @to_side = ""
     @jumping = false
     @t_to = ~-1.0
+    self
+
+  # The jump's chunks on a running movement: RunSkill's loop ends with l_push
+  # (gait 0), which keeps looping to l_flight now that the jump's chunks follow it
+  # in the list; then the take-off chunks for either foot, the ideal take-off and
+  # landing programs, the flight and the landing.
+  -> add_jump_chunks(mv)
+    mv[mv.size - 1].followed_by("l_flight")
+    takeoff_chunks(mv, "l_", "r_")
+    takeoff_chunks(mv, "r_", "l_")
+    if @ik
+      ik_chunk(mv, "l_", "r_")
+      ik_chunk(mv, "r_", "l_")
+    if @il
+      il_chunk(mv, "l_", "r_")
+      il_chunk(mv, "r_", "l_")
+    add_flight(mv)
+    mv
+
+  # A gear change (RunGearSkill#switch_gear) builds a fresh stride movement and swaps it under
+  # the track: the jump's chunks go onto it before the track looks for its next chunk by name.
+  # (A gear change inside the runner's own start, `gear0`, comes before the jump exists.)
+  -> switch_gear(f, ctl, k)
+    super(f, ctl, k)
+    add_jump_chunks(@track.movement) if @jump_ready
     self
 
   -> read_params
@@ -137,6 +159,19 @@
     @st_w = param("j_st_w", ~0.6, ~0.0, ~2.0)
     @st_max = param("j_st_max", ~0.2, ~0.0, ~0.5)
     @st_kdrv = param("j_st_kdrv", ~0.0, ~0.0, ~3.0)
+    # round 3 (both off unless present): j_st_up caps the lengthening a nudge may ask for (m of step change,
+    # the shortening keeps j_st_max), j_st_zk steers the step length through the hop height as well: the
+    # gait's hop-height loop (k_z x (z_ref - pelvis height) on the stance extensors) gets its reference moved
+    # by j_st_zk x the planned step change, so a longer planned step pushes harder and a shorter one softer
+    @st_up = @st_max
+    @st_up = param("j_st_up", @st_max, ~0.0, ~0.5) if @params.key?("j_st_up")
+    @st_zk = ~0.0
+    @st_zk = param("j_st_zk", ~0.0, ~0.0, ~4.0) if @params.key?("j_st_zk")
+    # how the number of steps left to the penultimate touchdown is rounded (0.5 = to the nearest; toward 1.0 = up: the
+    # plan shortens steps, which a nudge does, instead of lengthening them, which it does not: a forward reach makes the
+    # foot touch down early and the step comes out shorter)
+    @st_rnd = ~0.5
+    @st_rnd = param("j_st_rnd", ~0.5, ~0.3, ~1.0) if @params.key?("j_st_rnd")
     @leg_len = param("j_leg_len", ~0.9, ~0.75, ~0.98)
     # final approach
     @fin_d = param("j_fin_d", ~6.0, ~0.5, ~20.0)
@@ -389,7 +424,7 @@
       @pen_t = f.t
       @plant = other(side)
       return self
-    n = (to_pen / @stride + ~0.5).floor
+    n = (to_pen / @stride + @st_rnd).floor
     n = 1 if n < 1
     return self if n + 1 > @st_n
     @plan_n = n + 1
@@ -460,7 +495,7 @@
         joint_offset(off, st + "hip_flex", @pl_free_hip)
         joint_offset(off, st + "knee", @pl_free_knee)
       elsif @plan_n > 1
-        adj = clamp(@plan_step - @stride, ~0.0 - @st_max, @st_max)
+        adj = clamp(@plan_step - @stride, ~0.0 - @st_max, @st_up)
         joint_offset(off, sw + "hip_flex", @st_w * adj / @leg_len)
       return off
     if st == @pen
@@ -471,6 +506,9 @@
   # RunSkill's drive scaling, then the planner's: a longer planned step
   # pushes harder, and the penultimate push by j_pn_drv.
   -> scale_drives(frame)
+    if @st_zk != ~0.0 && !@jumping && @plan_n > 1 && @stride > ~0.5
+      # (@z_err is recomputed every tick by RunSkill#before: the shift lasts one tick)
+      @z_err = @z_err + @st_zk * clamp(@plan_step - @stride, ~0.0 - @st_max, @st_up)
     super(frame)
     return self if @jumping || @plan_n == 0 || @stride <= ~0.5
     k = ~1.0

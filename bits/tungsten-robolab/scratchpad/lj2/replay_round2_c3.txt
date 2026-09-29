@@ -1,0 +1,4 @@
+long_jump_v4_p95             task long_jump_v4_p95b  frozen binary mean   4.9450 | current build mean   4.9450 | n=  1 differ 0
+long_jump_v4_p95_robust      task long_jump_v4_p95b  frozen binary mean   2.1452 | current build mean   2.1452 | n= 16 differ 0
+long_jump_v4_p95_robust32    task long_jump_v4_p95b  frozen binary mean   2.8508 | current build mean   2.8508 | n= 32 differ 0
+long_jump_v4_p95_robust96    task long_jump_v4_p95b  frozen binary mean   2.5355 | current build mean   2.5355 | n= 96 differ 0

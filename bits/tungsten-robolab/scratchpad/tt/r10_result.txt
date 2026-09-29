@@ -1,0 +1,6 @@
+**Result.** `tt_p2_300` rises from 33.0% to **40.0%** (120 of 300 serves; paired +0.070, p 0.002): the round-10 candidate c3 was promoted to champion (`bin/champions/tt_p2_300-20260929-101727`, `params/myo_tt_p2_r10_c3.txt`,
+built from `bin/challengers/myo_tt_r10-n`). The forehand is the old champion's, serve for serve (60 of 156 = 38.5%); the backhand goes from 39 of 144 (27.1%) to 60 of 144 (41.7%). On 900 serves never used to tune anything the gain is
+30.2% -> 37.7% (backhand 21.8% -> 35.9%; paired p 0.004 and < 0.0001 on the two blocks). `tt_p1` stays 100% (50 of 50); `tt_p2_backhand` goes from 22.9% to 35.9% (p 0.001, promoted there too). A later candidate, c5
+(`params/myo_tt_p2_r10_c5.txt`, same binary), is better on fresh serves (900: 40.9% against c3's 37.7%; backhand 42.0% against 35.9% and the round-5 champion's 21.8%) and scores 121 against c3's 120 in the arena (p 0.51): the arena's 300
+seeds cannot tell them apart. 90% is not within reach of this arm (ceiling table below): the gain came from finding and removing a one-tick artifact in the servo at the table bounce, restoring the backhand's retreat on purpose, and
+re-tuning the backhand's swing gain, kick, fly-by slide, servo and posture together with screening designs on fixed serves; the forehand's response to the same treatment was flat.

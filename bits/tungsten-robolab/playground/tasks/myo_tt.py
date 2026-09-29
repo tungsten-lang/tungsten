@@ -309,6 +309,10 @@ class MyoTTTask(MyoTask):
             sim.tt_feat = [float(x) for x in cmd.split(":")[1:]]
         elif cmd.startswith("qc:"):
             sim.tt_qc = [float(x) for x in cmd.split(":")[1:]]
+        elif cmd.startswith("l8:"):
+            sim.tt_l8 = [float(x) for x in cmd.split(":")[1:]]
+        elif cmd.startswith("pv:"):
+            sim.tt_pv = [float(x) for x in cmd.split(":")[1:]]
         elif cmd == "stroke":
             sim.tt_stroke = sim.d.time
 
@@ -332,6 +336,15 @@ class MyoTTTask(MyoTask):
         if getattr(sim, "tt_real", False):
             # the ball's angular velocity in the world frame
             sim.tt_ww.append(d.xmat[m.body("pingpong").id].reshape(3, 3) @ sim.tt_w[-1])
+        if os.environ.get("TT_SAVE_LOG"):
+            # round-10 diagnostics (opt-in, read-only): the servo joints' angles and velocities, the pelvis slides'
+            if not hasattr(sim, "tt_extra"):
+                sim.tt_extra = []
+                sim.tt_extra_j = [m.joint(nm) for nm in (
+                    "elv_angle", "shoulder_elv", "shoulder_rot", "elbow_flexion", "pro_sup", "deviation", "flexion",
+                    "axial_rotation", "flex_extension", "lat_bending", "pelvis_x", "pelvis_y")]
+            sim.tt_extra.append(np.r_[[d.qpos[j.qposadr[0]] for j in sim.tt_extra_j],
+                                      [d.qvel[j.dofadr[0]] for j in sim.tt_extra_j]])
         act = np.asarray(o["act"], dtype=float)
         sim.tt_log.append(np.r_[d.time, o["ball_pos"], o["ball_vel"], pad, o["paddle_vel"], nrm,
                                 o["pelvis_pos"], o["touching_info"], o["palm_err"],
@@ -397,6 +410,13 @@ class MyoTTTask(MyoTask):
             out["feat"] = [round(x, 5) for x in sim.tt_feat]
         if hasattr(sim, "tt_qc"):
             out["q_corr"] = [round(x, 4) for x in sim.tt_qc]
+        if hasattr(sim, "tt_l8"):
+            # the skill's lock-time report (MyoTTV8Skill#emit_lock): side, aim target x y, plan (t y z vx vy vz), pad plane x,
+            # pad normal, aim normal, learned outputs (7: [5], [6] = the probe's yaw and pitch trims), centring (2)
+            out["l8"] = [round(x, 5) for x in sim.tt_l8]
+        if hasattr(sim, "tt_pv"):
+            # MyoTTV11Skill#lock_now: planned retreat u, the slide reference's q-velocity and q, time to go, goal q
+            out["pv"] = [round(x, 4) for x in sim.tt_pv]
         if hasattr(sim, "tt_stroke"):
             out["t_stroke"] = round(float(sim.tt_stroke), 3)
         # spin: the skill's estimate (from the bounce) against the true
@@ -461,6 +481,15 @@ class MyoTTTask(MyoTask):
         if win.any():
             ang = np.degrees(np.arccos(np.clip(np.abs(nrm[win] @ tgt), 0, 1)))
             out["normal_err_deg"] = round(float(ang.mean()), 2)
+        if hit and k >= 1:
+            # the pelvis's velocity at contact (finite difference, as paddle_vel)
+            kk2 = max(k - 1, 1)
+            out["pelvis_vel"] = [round(float(x), 3) for x in (pel[kk2] - pel[kk2 - 1]) / max(t[kk2] - t[kk2 - 1], 1e-6)]
+        if os.environ.get("TT_SAVE_LOG"):
+            d0 = os.environ["TT_SAVE_LOG"]
+            os.makedirs(d0, exist_ok=True)
+            np.savez_compressed(os.path.join(d0, f"{sim.seed}.npz"), L=L, X=np.array(getattr(sim, "tt_extra", [])),
+                                aim=np.array(getattr(sim, "tt_aim", [])), contact=(k if hit else -1))
         if getattr(sim, "tt_real", False):
             out.update(self.real_spin_metrics(sim, L))
         return out

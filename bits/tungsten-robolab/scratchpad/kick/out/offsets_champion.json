@@ -1,0 +1,4885 @@
+{
+ "champion": [
+  {
+   "goal": 1.0,
+   "ball_speed": 11.841,
+   "t_touch": 2.05,
+   "touch_body": "calcn_r",
+   "cross_y": 1.445,
+   "cross_z": 0.196,
+   "launch": 7.63,
+   "elev": 10.23,
+   "fallen": false,
+   "t_fall": null,
+   "strike_zone": "sole",
+   "strike_point": [
+    0.147,
+    0.022,
+    0.012
+   ],
+   "keeper": "random",
+   "keeper_y": -2.907,
+   "r_toe_ball_min": 0.097,
+   "steps": 301,
+   "time": 3.01,
+   "kick_ok": true,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.74,
+    "snap": 1.97,
+    "follow": 2.06,
+    "land": 2.28,
+    "recover": 2.72
+   },
+   "sw_t": 1.7399999999999192,
+   "sw_toe": [
+    -0.96,
+    -0.057,
+    -0.062
+   ],
+   "sw_pelvis": [
+    -0.452,
+    0.142,
+    0.755
+   ],
+   "sw_yaw": 0.75,
+   "sw_com": [
+    -0.503,
+    0.131,
+    0.756
+   ],
+   "sn_t": 1.9699999999998938,
+   "sn_toe": [
+    -0.603,
+    0.018,
+    -0.069
+   ],
+   "sn_pelvis": [
+    -0.289,
+    0.205,
+    0.744
+   ],
+   "sn_yaw": 0.731,
+   "sn_com": [
+    -0.321,
+    0.228,
+    0.724
+   ],
+   "ct_toe": [
+    -0.135,
+    -0.001,
+    -0.054
+   ],
+   "ct_vtoe": [
+    9.89,
+    -0.41,
+    0.75
+   ],
+   "seed": 6000,
+   "noise": 0.0,
+   "dx": -0.02,
+   "dy": 0.0,
+   "groups": null,
+   "wall": 1.9
+  },
+  {
+   "goal": 1.0,
+   "ball_speed": 11.474,
+   "t_touch": 2.04,
+   "touch_body": "calcn_r",
+   "cross_y": 1.248,
+   "cross_z": 0.174,
+   "launch": 6.41,
+   "elev": 8.01,
+   "fallen": false,
+   "t_fall": null,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.179,
+    -0.006,
+    0.03
+   ],
+   "keeper": "stationary",
+   "keeper_y": 0.028,
+   "r_toe_ball_min": 0.108,
+   "steps": 304,
+   "time": 3.04,
+   "kick_ok": true,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.74,
+    "snap": 1.96,
+    "follow": 2.05,
+    "land": 2.27,
+    "recover": 2.69
+   },
+   "sw_t": 1.7399999999999192,
+   "sw_toe": [
+    -0.961,
+    -0.062,
+    -0.057
+   ],
+   "sw_pelvis": [
+    -0.446,
+    0.144,
+    0.764
+   ],
+   "sw_yaw": 0.633,
+   "sw_com": [
+    -0.5,
+    0.139,
+    0.764
+   ],
+   "sn_t": 1.959999999999895,
+   "sn_toe": [
+    -0.594,
+    0.046,
+    -0.066
+   ],
+   "sn_pelvis": [
+    -0.308,
+    0.22,
+    0.789
+   ],
+   "sn_yaw": 0.801,
+   "sn_com": [
+    -0.321,
+    0.229,
+    0.768
+   ],
+   "ct_toe": [
+    -0.11,
+    0.003,
+    -0.03
+   ],
+   "ct_vtoe": [
+    8.63,
+    -0.57,
+    1.74
+   ],
+   "seed": 6001,
+   "noise": 0.0,
+   "dx": -0.02,
+   "dy": 0.0,
+   "groups": null,
+   "wall": 1.9
+  },
+  {
+   "goal": 1.0,
+   "ball_speed": 11.841,
+   "t_touch": 2.05,
+   "touch_body": "calcn_r",
+   "cross_y": 1.445,
+   "cross_z": 0.196,
+   "launch": 7.63,
+   "elev": 10.23,
+   "fallen": false,
+   "t_fall": null,
+   "strike_zone": "sole",
+   "strike_point": [
+    0.147,
+    0.022,
+    0.012
+   ],
+   "keeper": "stationary",
+   "keeper_y": -2.332,
+   "r_toe_ball_min": 0.097,
+   "steps": 301,
+   "time": 3.01,
+   "kick_ok": true,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.74,
+    "snap": 1.97,
+    "follow": 2.06,
+    "land": 2.28,
+    "recover": 2.72
+   },
+   "sw_t": 1.7399999999999192,
+   "sw_toe": [
+    -0.96,
+    -0.057,
+    -0.062
+   ],
+   "sw_pelvis": [
+    -0.452,
+    0.142,
+    0.755
+   ],
+   "sw_yaw": 0.75,
+   "sw_com": [
+    -0.503,
+    0.131,
+    0.756
+   ],
+   "sn_t": 1.9699999999998938,
+   "sn_toe": [
+    -0.603,
+    0.018,
+    -0.069
+   ],
+   "sn_pelvis": [
+    -0.289,
+    0.205,
+    0.744
+   ],
+   "sn_yaw": 0.731,
+   "sn_com": [
+    -0.321,
+    0.228,
+    0.724
+   ],
+   "ct_toe": [
+    -0.135,
+    -0.001,
+    -0.054
+   ],
+   "ct_vtoe": [
+    9.89,
+    -0.41,
+    0.75
+   ],
+   "seed": 6002,
+   "noise": 0.0,
+   "dx": -0.02,
+   "dy": 0.0,
+   "groups": null,
+   "wall": 1.4
+  },
+  {
+   "goal": 1.0,
+   "ball_speed": 11.841,
+   "t_touch": 2.05,
+   "touch_body": "calcn_r",
+   "cross_y": 1.445,
+   "cross_z": 0.196,
+   "launch": 7.63,
+   "elev": 10.23,
+   "fallen": false,
+   "t_fall": null,
+   "strike_zone": "sole",
+   "strike_point": [
+    0.147,
+    0.022,
+    0.012
+   ],
+   "keeper": "stationary",
+   "keeper_y": -2.94,
+   "r_toe_ball_min": 0.097,
+   "steps": 301,
+   "time": 3.01,
+   "kick_ok": true,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.74,
+    "snap": 1.97,
+    "follow": 2.06,
+    "land": 2.28,
+    "recover": 2.72
+   },
+   "sw_t": 1.7399999999999192,
+   "sw_toe": [
+    -0.96,
+    -0.057,
+    -0.062
+   ],
+   "sw_pelvis": [
+    -0.452,
+    0.142,
+    0.755
+   ],
+   "sw_yaw": 0.75,
+   "sw_com": [
+    -0.503,
+    0.131,
+    0.756
+   ],
+   "sn_t": 1.9699999999998938,
+   "sn_toe": [
+    -0.603,
+    0.018,
+    -0.069
+   ],
+   "sn_pelvis": [
+    -0.289,
+    0.205,
+    0.744
+   ],
+   "sn_yaw": 0.731,
+   "sn_com": [
+    -0.321,
+    0.228,
+    0.724
+   ],
+   "ct_toe": [
+    -0.135,
+    -0.001,
+    -0.054
+   ],
+   "ct_vtoe": [
+    9.89,
+    -0.41,
+    0.75
+   ],
+   "seed": 6003,
+   "noise": 0.0,
+   "dx": -0.02,
+   "dy": 0.0,
+   "groups": null,
+   "wall": 1.4
+  },
+  {
+   "goal": 1.0,
+   "ball_speed": 11.474,
+   "t_touch": 2.04,
+   "touch_body": "calcn_r",
+   "cross_y": 1.248,
+   "cross_z": 0.174,
+   "launch": 6.41,
+   "elev": 8.01,
+   "fallen": false,
+   "t_fall": null,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.179,
+    -0.006,
+    0.03
+   ],
+   "keeper": "stationary",
+   "keeper_y": 0.803,
+   "r_toe_ball_min": 0.108,
+   "steps": 304,
+   "time": 3.04,
+   "kick_ok": true,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.74,
+    "snap": 1.96,
+    "follow": 2.05,
+    "land": 2.27,
+    "recover": 2.69
+   },
+   "sw_t": 1.7399999999999192,
+   "sw_toe": [
+    -0.961,
+    -0.062,
+    -0.057
+   ],
+   "sw_pelvis": [
+    -0.446,
+    0.144,
+    0.764
+   ],
+   "sw_yaw": 0.633,
+   "sw_com": [
+    -0.5,
+    0.139,
+    0.764
+   ],
+   "sn_t": 1.959999999999895,
+   "sn_toe": [
+    -0.594,
+    0.046,
+    -0.066
+   ],
+   "sn_pelvis": [
+    -0.308,
+    0.22,
+    0.789
+   ],
+   "sn_yaw": 0.801,
+   "sn_com": [
+    -0.321,
+    0.229,
+    0.768
+   ],
+   "ct_toe": [
+    -0.11,
+    0.003,
+    -0.03
+   ],
+   "ct_vtoe": [
+    8.63,
+    -0.57,
+    1.74
+   ],
+   "seed": 6004,
+   "noise": 0.0,
+   "dx": -0.02,
+   "dy": 0.0,
+   "groups": null,
+   "wall": 1.4
+  },
+  {
+   "goal": 1.0,
+   "ball_speed": 11.474,
+   "t_touch": 2.04,
+   "touch_body": "calcn_r",
+   "cross_y": 1.248,
+   "cross_z": 0.174,
+   "launch": 6.41,
+   "elev": 8.01,
+   "fallen": false,
+   "t_fall": null,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.179,
+    -0.006,
+    0.03
+   ],
+   "keeper": "random",
+   "keeper_y": 2.674,
+   "r_toe_ball_min": 0.108,
+   "steps": 304,
+   "time": 3.04,
+   "kick_ok": true,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.74,
+    "snap": 1.96,
+    "follow": 2.05,
+    "land": 2.27,
+    "recover": 2.69
+   },
+   "sw_t": 1.7399999999999192,
+   "sw_toe": [
+    -0.961,
+    -0.062,
+    -0.057
+   ],
+   "sw_pelvis": [
+    -0.446,
+    0.144,
+    0.764
+   ],
+   "sw_yaw": 0.633,
+   "sw_com": [
+    -0.5,
+    0.139,
+    0.764
+   ],
+   "sn_t": 1.959999999999895,
+   "sn_toe": [
+    -0.594,
+    0.046,
+    -0.066
+   ],
+   "sn_pelvis": [
+    -0.308,
+    0.22,
+    0.789
+   ],
+   "sn_yaw": 0.801,
+   "sn_com": [
+    -0.321,
+    0.229,
+    0.768
+   ],
+   "ct_toe": [
+    -0.11,
+    0.003,
+    -0.03
+   ],
+   "ct_vtoe": [
+    8.63,
+    -0.57,
+    1.74
+   ],
+   "seed": 6005,
+   "noise": 0.0,
+   "dx": -0.02,
+   "dy": 0.0,
+   "groups": null,
+   "wall": 1.4
+  },
+  {
+   "goal": 1.0,
+   "ball_speed": 11.442,
+   "t_touch": 2.06,
+   "touch_body": "calcn_r",
+   "cross_y": 1.286,
+   "cross_z": 0.295,
+   "launch": 7.05,
+   "elev": 15.9,
+   "fallen": false,
+   "t_fall": null,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.172,
+    0.014,
+    -0.004
+   ],
+   "keeper": "random",
+   "keeper_y": -2.908,
+   "r_toe_ball_min": 0.097,
+   "steps": 304,
+   "time": 3.04,
+   "kick_ok": true,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.74,
+    "snap": 1.96,
+    "follow": 2.07,
+    "land": 2.29,
+    "recover": 2.68
+   },
+   "sw_t": 1.7399999999999192,
+   "sw_toe": [
+    -0.99,
+    -0.054,
+    -0.06
+   ],
+   "sw_pelvis": [
+    -0.48,
+    0.14,
+    0.752
+   ],
+   "sw_yaw": 0.775,
+   "sw_com": [
+    -0.532,
+    0.131,
+    0.753
+   ],
+   "sn_t": 1.959999999999895,
+   "sn_toe": [
+    -0.663,
+    0.007,
+    -0.072
+   ],
+   "sn_pelvis": [
+    -0.313,
+    0.199,
+    0.728
+   ],
+   "sn_yaw": 0.734,
+   "sn_com": [
+    -0.355,
+    0.224,
+    0.709
+   ],
+   "ct_toe": [
+    -0.122,
+    -0.03,
+    -0.049
+   ],
+   "ct_vtoe": [
+    9.46,
+    -0.15,
+    1.12
+   ],
+   "seed": 6000,
+   "noise": 0.0,
+   "dx": -0.05,
+   "dy": 0.0,
+   "groups": null,
+   "wall": 1.4
+  },
+  {
+   "goal": 1.0,
+   "ball_speed": 10.92,
+   "t_touch": 2.04,
+   "touch_body": "calcn_r",
+   "cross_y": 2.417,
+   "cross_z": 0.141,
+   "launch": 12.04,
+   "elev": 8.27,
+   "fallen": false,
+   "t_fall": null,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.171,
+    -0.003,
+    0.035
+   ],
+   "keeper": "stationary",
+   "keeper_y": 0.028,
+   "r_toe_ball_min": 0.111,
+   "steps": 314,
+   "time": 3.14,
+   "kick_ok": true,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.74,
+    "snap": 1.95,
+    "follow": 2.05,
+    "land": 2.27,
+    "recover": 2.7
+   },
+   "sw_t": 1.7399999999999192,
+   "sw_toe": [
+    -0.987,
+    -0.057,
+    -0.056
+   ],
+   "sw_pelvis": [
+    -0.474,
+    0.144,
+    0.761
+   ],
+   "sw_yaw": 0.683,
+   "sw_com": [
+    -0.528,
+    0.137,
+    0.762
+   ],
+   "sn_t": 1.949999999999896,
+   "sn_toe": [
+    -0.635,
+    0.042,
+    -0.07
+   ],
+   "sn_pelvis": [
+    -0.33,
+    0.211,
+    0.769
+   ],
+   "sn_yaw": 0.88,
+   "sn_com": [
+    -0.354,
+    0.226,
+    0.749
+   ],
+   "ct_toe": [
+    -0.114,
+    -0.002,
+    -0.037
+   ],
+   "ct_vtoe": [
+    8.47,
+    0.04,
+    1.49
+   ],
+   "seed": 6001,
+   "noise": 0.0,
+   "dx": -0.05,
+   "dy": 0.0,
+   "groups": null,
+   "wall": 1.5
+  },
+  {
+   "goal": 1.0,
+   "ball_speed": 11.442,
+   "t_touch": 2.06,
+   "touch_body": "calcn_r",
+   "cross_y": 1.286,
+   "cross_z": 0.295,
+   "launch": 7.05,
+   "elev": 15.9,
+   "fallen": false,
+   "t_fall": null,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.172,
+    0.014,
+    -0.004
+   ],
+   "keeper": "stationary",
+   "keeper_y": -2.332,
+   "r_toe_ball_min": 0.097,
+   "steps": 304,
+   "time": 3.04,
+   "kick_ok": true,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.74,
+    "snap": 1.96,
+    "follow": 2.07,
+    "land": 2.29,
+    "recover": 2.68
+   },
+   "sw_t": 1.7399999999999192,
+   "sw_toe": [
+    -0.99,
+    -0.054,
+    -0.06
+   ],
+   "sw_pelvis": [
+    -0.48,
+    0.14,
+    0.752
+   ],
+   "sw_yaw": 0.775,
+   "sw_com": [
+    -0.532,
+    0.131,
+    0.753
+   ],
+   "sn_t": 1.959999999999895,
+   "sn_toe": [
+    -0.663,
+    0.007,
+    -0.072
+   ],
+   "sn_pelvis": [
+    -0.313,
+    0.199,
+    0.728
+   ],
+   "sn_yaw": 0.734,
+   "sn_com": [
+    -0.355,
+    0.224,
+    0.709
+   ],
+   "ct_toe": [
+    -0.122,
+    -0.03,
+    -0.049
+   ],
+   "ct_vtoe": [
+    9.46,
+    -0.15,
+    1.12
+   ],
+   "seed": 6002,
+   "noise": 0.0,
+   "dx": -0.05,
+   "dy": 0.0,
+   "groups": null,
+   "wall": 1.4
+  },
+  {
+   "goal": 1.0,
+   "ball_speed": 11.442,
+   "t_touch": 2.06,
+   "touch_body": "calcn_r",
+   "cross_y": 1.286,
+   "cross_z": 0.295,
+   "launch": 7.05,
+   "elev": 15.9,
+   "fallen": false,
+   "t_fall": null,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.172,
+    0.014,
+    -0.004
+   ],
+   "keeper": "stationary",
+   "keeper_y": -2.94,
+   "r_toe_ball_min": 0.097,
+   "steps": 304,
+   "time": 3.04,
+   "kick_ok": true,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.74,
+    "snap": 1.96,
+    "follow": 2.07,
+    "land": 2.29,
+    "recover": 2.68
+   },
+   "sw_t": 1.7399999999999192,
+   "sw_toe": [
+    -0.99,
+    -0.054,
+    -0.06
+   ],
+   "sw_pelvis": [
+    -0.48,
+    0.14,
+    0.752
+   ],
+   "sw_yaw": 0.775,
+   "sw_com": [
+    -0.532,
+    0.131,
+    0.753
+   ],
+   "sn_t": 1.959999999999895,
+   "sn_toe": [
+    -0.663,
+    0.007,
+    -0.072
+   ],
+   "sn_pelvis": [
+    -0.313,
+    0.199,
+    0.728
+   ],
+   "sn_yaw": 0.734,
+   "sn_com": [
+    -0.355,
+    0.224,
+    0.709
+   ],
+   "ct_toe": [
+    -0.122,
+    -0.03,
+    -0.049
+   ],
+   "ct_vtoe": [
+    9.46,
+    -0.15,
+    1.12
+   ],
+   "seed": 6003,
+   "noise": 0.0,
+   "dx": -0.05,
+   "dy": 0.0,
+   "groups": null,
+   "wall": 1.4
+  },
+  {
+   "goal": 1.0,
+   "ball_speed": 10.92,
+   "t_touch": 2.04,
+   "touch_body": "calcn_r",
+   "cross_y": 2.417,
+   "cross_z": 0.141,
+   "launch": 12.04,
+   "elev": 8.27,
+   "fallen": false,
+   "t_fall": null,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.171,
+    -0.003,
+    0.035
+   ],
+   "keeper": "stationary",
+   "keeper_y": 0.803,
+   "r_toe_ball_min": 0.111,
+   "steps": 314,
+   "time": 3.14,
+   "kick_ok": true,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.74,
+    "snap": 1.95,
+    "follow": 2.05,
+    "land": 2.27,
+    "recover": 2.7
+   },
+   "sw_t": 1.7399999999999192,
+   "sw_toe": [
+    -0.987,
+    -0.057,
+    -0.056
+   ],
+   "sw_pelvis": [
+    -0.474,
+    0.144,
+    0.761
+   ],
+   "sw_yaw": 0.683,
+   "sw_com": [
+    -0.528,
+    0.137,
+    0.762
+   ],
+   "sn_t": 1.949999999999896,
+   "sn_toe": [
+    -0.635,
+    0.042,
+    -0.07
+   ],
+   "sn_pelvis": [
+    -0.33,
+    0.211,
+    0.769
+   ],
+   "sn_yaw": 0.88,
+   "sn_com": [
+    -0.354,
+    0.226,
+    0.749
+   ],
+   "ct_toe": [
+    -0.114,
+    -0.002,
+    -0.037
+   ],
+   "ct_vtoe": [
+    8.47,
+    0.04,
+    1.49
+   ],
+   "seed": 6004,
+   "noise": 0.0,
+   "dx": -0.05,
+   "dy": 0.0,
+   "groups": null,
+   "wall": 1.5
+  },
+  {
+   "goal": 1.0,
+   "ball_speed": 10.92,
+   "t_touch": 2.04,
+   "touch_body": "calcn_r",
+   "cross_y": 2.417,
+   "cross_z": 0.141,
+   "launch": 12.04,
+   "elev": 8.27,
+   "fallen": false,
+   "t_fall": null,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.171,
+    -0.003,
+    0.035
+   ],
+   "keeper": "random",
+   "keeper_y": 2.678,
+   "r_toe_ball_min": 0.111,
+   "steps": 314,
+   "time": 3.14,
+   "kick_ok": true,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.74,
+    "snap": 1.95,
+    "follow": 2.05,
+    "land": 2.27,
+    "recover": 2.7
+   },
+   "sw_t": 1.7399999999999192,
+   "sw_toe": [
+    -0.987,
+    -0.057,
+    -0.056
+   ],
+   "sw_pelvis": [
+    -0.474,
+    0.144,
+    0.761
+   ],
+   "sw_yaw": 0.683,
+   "sw_com": [
+    -0.528,
+    0.137,
+    0.762
+   ],
+   "sn_t": 1.949999999999896,
+   "sn_toe": [
+    -0.635,
+    0.042,
+    -0.07
+   ],
+   "sn_pelvis": [
+    -0.33,
+    0.211,
+    0.769
+   ],
+   "sn_yaw": 0.88,
+   "sn_com": [
+    -0.354,
+    0.226,
+    0.749
+   ],
+   "ct_toe": [
+    -0.114,
+    -0.002,
+    -0.037
+   ],
+   "ct_vtoe": [
+    8.47,
+    0.04,
+    1.49
+   ],
+   "seed": 6005,
+   "noise": 0.0,
+   "dx": -0.05,
+   "dy": 0.0,
+   "groups": null,
+   "wall": 1.4
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 0.0,
+   "t_touch": null,
+   "touch_body": null,
+   "cross_y": null,
+   "cross_z": null,
+   "launch": null,
+   "elev": null,
+   "fallen": true,
+   "t_fall": 1.52,
+   "strike_zone": null,
+   "strike_point": null,
+   "keeper": "random",
+   "keeper_y": -2.906,
+   "r_toe_ball_min": 0.74,
+   "steps": 152,
+   "time": 1.52,
+   "kick_ok": false,
+   "events": {
+    "ap_hold": 0.01,
+    "r_shift": 0.31,
+    "r_lift": 0.51,
+    "r_reach": 0.91,
+    "r_settle": 1.09,
+    "l_shift": 1.34,
+    "l_lift": 1.52
+   },
+   "seed": 6000,
+   "noise": 0.0,
+   "dx": -0.075,
+   "dy": 0.0,
+   "groups": null,
+   "wall": 0.9
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 0.0,
+   "t_touch": null,
+   "touch_body": null,
+   "cross_y": null,
+   "cross_z": null,
+   "launch": null,
+   "elev": null,
+   "fallen": true,
+   "t_fall": 1.52,
+   "strike_zone": null,
+   "strike_point": null,
+   "keeper": "stationary",
+   "keeper_y": 0.028,
+   "r_toe_ball_min": 0.74,
+   "steps": 152,
+   "time": 1.52,
+   "kick_ok": false,
+   "events": {
+    "ap_hold": 0.01,
+    "r_shift": 0.31,
+    "r_lift": 0.51,
+    "r_reach": 0.91,
+    "r_settle": 1.09,
+    "l_shift": 1.34,
+    "l_lift": 1.52
+   },
+   "seed": 6001,
+   "noise": 0.0,
+   "dx": -0.075,
+   "dy": 0.0,
+   "groups": null,
+   "wall": 0.9
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 0.0,
+   "t_touch": null,
+   "touch_body": null,
+   "cross_y": null,
+   "cross_z": null,
+   "launch": null,
+   "elev": null,
+   "fallen": true,
+   "t_fall": 1.52,
+   "strike_zone": null,
+   "strike_point": null,
+   "keeper": "stationary",
+   "keeper_y": -2.332,
+   "r_toe_ball_min": 0.74,
+   "steps": 152,
+   "time": 1.52,
+   "kick_ok": false,
+   "events": {
+    "ap_hold": 0.01,
+    "r_shift": 0.31,
+    "r_lift": 0.51,
+    "r_reach": 0.91,
+    "r_settle": 1.09,
+    "l_shift": 1.34,
+    "l_lift": 1.52
+   },
+   "seed": 6002,
+   "noise": 0.0,
+   "dx": -0.075,
+   "dy": 0.0,
+   "groups": null,
+   "wall": 0.8
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 0.0,
+   "t_touch": null,
+   "touch_body": null,
+   "cross_y": null,
+   "cross_z": null,
+   "launch": null,
+   "elev": null,
+   "fallen": true,
+   "t_fall": 1.52,
+   "strike_zone": null,
+   "strike_point": null,
+   "keeper": "stationary",
+   "keeper_y": -2.94,
+   "r_toe_ball_min": 0.74,
+   "steps": 152,
+   "time": 1.52,
+   "kick_ok": false,
+   "events": {
+    "ap_hold": 0.01,
+    "r_shift": 0.31,
+    "r_lift": 0.51,
+    "r_reach": 0.91,
+    "r_settle": 1.09,
+    "l_shift": 1.34,
+    "l_lift": 1.52
+   },
+   "seed": 6003,
+   "noise": 0.0,
+   "dx": -0.075,
+   "dy": 0.0,
+   "groups": null,
+   "wall": 0.8
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 0.0,
+   "t_touch": null,
+   "touch_body": null,
+   "cross_y": null,
+   "cross_z": null,
+   "launch": null,
+   "elev": null,
+   "fallen": true,
+   "t_fall": 1.52,
+   "strike_zone": null,
+   "strike_point": null,
+   "keeper": "stationary",
+   "keeper_y": 0.803,
+   "r_toe_ball_min": 0.74,
+   "steps": 152,
+   "time": 1.52,
+   "kick_ok": false,
+   "events": {
+    "ap_hold": 0.01,
+    "r_shift": 0.31,
+    "r_lift": 0.51,
+    "r_reach": 0.91,
+    "r_settle": 1.09,
+    "l_shift": 1.34,
+    "l_lift": 1.52
+   },
+   "seed": 6004,
+   "noise": 0.0,
+   "dx": -0.075,
+   "dy": 0.0,
+   "groups": null,
+   "wall": 0.9
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 0.0,
+   "t_touch": null,
+   "touch_body": null,
+   "cross_y": null,
+   "cross_z": null,
+   "launch": null,
+   "elev": null,
+   "fallen": true,
+   "t_fall": 1.52,
+   "strike_zone": null,
+   "strike_point": null,
+   "keeper": "random",
+   "keeper_y": 2.679,
+   "r_toe_ball_min": 0.74,
+   "steps": 152,
+   "time": 1.52,
+   "kick_ok": false,
+   "events": {
+    "ap_hold": 0.01,
+    "r_shift": 0.31,
+    "r_lift": 0.51,
+    "r_reach": 0.91,
+    "r_settle": 1.09,
+    "l_shift": 1.34,
+    "l_lift": 1.52
+   },
+   "seed": 6005,
+   "noise": 0.0,
+   "dx": -0.075,
+   "dy": 0.0,
+   "groups": null,
+   "wall": 0.9
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 0.0,
+   "t_touch": null,
+   "touch_body": null,
+   "cross_y": null,
+   "cross_z": null,
+   "launch": null,
+   "elev": null,
+   "fallen": true,
+   "t_fall": 1.52,
+   "strike_zone": null,
+   "strike_point": null,
+   "keeper": "random",
+   "keeper_y": -2.903,
+   "r_toe_ball_min": 0.765,
+   "steps": 152,
+   "time": 1.52,
+   "kick_ok": false,
+   "events": {
+    "ap_hold": 0.01,
+    "r_shift": 0.31,
+    "r_lift": 0.51,
+    "r_reach": 0.91,
+    "r_settle": 1.09,
+    "l_shift": 1.34,
+    "l_lift": 1.52
+   },
+   "seed": 6000,
+   "noise": 0.0,
+   "dx": -0.1,
+   "dy": 0.0,
+   "groups": null,
+   "wall": 0.8
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 0.0,
+   "t_touch": null,
+   "touch_body": null,
+   "cross_y": null,
+   "cross_z": null,
+   "launch": null,
+   "elev": null,
+   "fallen": true,
+   "t_fall": 1.52,
+   "strike_zone": null,
+   "strike_point": null,
+   "keeper": "stationary",
+   "keeper_y": 0.028,
+   "r_toe_ball_min": 0.765,
+   "steps": 152,
+   "time": 1.52,
+   "kick_ok": false,
+   "events": {
+    "ap_hold": 0.01,
+    "r_shift": 0.31,
+    "r_lift": 0.51,
+    "r_reach": 0.91,
+    "r_settle": 1.09,
+    "l_shift": 1.34,
+    "l_lift": 1.52
+   },
+   "seed": 6001,
+   "noise": 0.0,
+   "dx": -0.1,
+   "dy": 0.0,
+   "groups": null,
+   "wall": 0.8
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 0.0,
+   "t_touch": null,
+   "touch_body": null,
+   "cross_y": null,
+   "cross_z": null,
+   "launch": null,
+   "elev": null,
+   "fallen": true,
+   "t_fall": 1.52,
+   "strike_zone": null,
+   "strike_point": null,
+   "keeper": "stationary",
+   "keeper_y": -2.332,
+   "r_toe_ball_min": 0.765,
+   "steps": 152,
+   "time": 1.52,
+   "kick_ok": false,
+   "events": {
+    "ap_hold": 0.01,
+    "r_shift": 0.31,
+    "r_lift": 0.51,
+    "r_reach": 0.91,
+    "r_settle": 1.09,
+    "l_shift": 1.34,
+    "l_lift": 1.52
+   },
+   "seed": 6002,
+   "noise": 0.0,
+   "dx": -0.1,
+   "dy": 0.0,
+   "groups": null,
+   "wall": 0.9
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 0.0,
+   "t_touch": null,
+   "touch_body": null,
+   "cross_y": null,
+   "cross_z": null,
+   "launch": null,
+   "elev": null,
+   "fallen": true,
+   "t_fall": 1.52,
+   "strike_zone": null,
+   "strike_point": null,
+   "keeper": "stationary",
+   "keeper_y": -2.94,
+   "r_toe_ball_min": 0.765,
+   "steps": 152,
+   "time": 1.52,
+   "kick_ok": false,
+   "events": {
+    "ap_hold": 0.01,
+    "r_shift": 0.31,
+    "r_lift": 0.51,
+    "r_reach": 0.91,
+    "r_settle": 1.09,
+    "l_shift": 1.34,
+    "l_lift": 1.52
+   },
+   "seed": 6003,
+   "noise": 0.0,
+   "dx": -0.1,
+   "dy": 0.0,
+   "groups": null,
+   "wall": 0.9
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 0.0,
+   "t_touch": null,
+   "touch_body": null,
+   "cross_y": null,
+   "cross_z": null,
+   "launch": null,
+   "elev": null,
+   "fallen": true,
+   "t_fall": 1.52,
+   "strike_zone": null,
+   "strike_point": null,
+   "keeper": "stationary",
+   "keeper_y": 0.803,
+   "r_toe_ball_min": 0.765,
+   "steps": 152,
+   "time": 1.52,
+   "kick_ok": false,
+   "events": {
+    "ap_hold": 0.01,
+    "r_shift": 0.31,
+    "r_lift": 0.51,
+    "r_reach": 0.91,
+    "r_settle": 1.09,
+    "l_shift": 1.34,
+    "l_lift": 1.52
+   },
+   "seed": 6004,
+   "noise": 0.0,
+   "dx": -0.1,
+   "dy": 0.0,
+   "groups": null,
+   "wall": 0.8
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 0.0,
+   "t_touch": null,
+   "touch_body": null,
+   "cross_y": null,
+   "cross_z": null,
+   "launch": null,
+   "elev": null,
+   "fallen": true,
+   "t_fall": 1.52,
+   "strike_zone": null,
+   "strike_point": null,
+   "keeper": "random",
+   "keeper_y": 2.679,
+   "r_toe_ball_min": 0.765,
+   "steps": 152,
+   "time": 1.52,
+   "kick_ok": false,
+   "events": {
+    "ap_hold": 0.01,
+    "r_shift": 0.31,
+    "r_lift": 0.51,
+    "r_reach": 0.91,
+    "r_settle": 1.09,
+    "l_shift": 1.34,
+    "l_lift": 1.52
+   },
+   "seed": 6005,
+   "noise": 0.0,
+   "dx": -0.1,
+   "dy": 0.0,
+   "groups": null,
+   "wall": 0.8
+  },
+  {
+   "goal": 1.0,
+   "ball_speed": 11.448,
+   "t_touch": 2.05,
+   "touch_body": "calcn_r",
+   "cross_y": 1.216,
+   "cross_z": 0.169,
+   "launch": 6.26,
+   "elev": 8.58,
+   "fallen": false,
+   "t_fall": null,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.182,
+    0.0,
+    -0.002
+   ],
+   "keeper": "random",
+   "keeper_y": -2.902,
+   "r_toe_ball_min": 0.099,
+   "steps": 305,
+   "time": 3.05,
+   "kick_ok": true,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.74,
+    "snap": 1.97,
+    "follow": 2.06,
+    "land": 2.28,
+    "recover": 2.74
+   },
+   "sw_t": 1.7399999999999192,
+   "sw_toe": [
+    -0.911,
+    -0.061,
+    -0.064
+   ],
+   "sw_pelvis": [
+    -0.403,
+    0.144,
+    0.758
+   ],
+   "sw_yaw": 0.71,
+   "sw_com": [
+    -0.455,
+    0.132,
+    0.759
+   ],
+   "sn_t": 1.9699999999998938,
+   "sn_toe": [
+    -0.548,
+    0.019,
+    -0.064
+   ],
+   "sn_pelvis": [
+    -0.25,
+    0.215,
+    0.766
+   ],
+   "sn_yaw": 0.735,
+   "sn_com": [
+    -0.275,
+    0.229,
+    0.747
+   ],
+   "ct_toe": [
+    -0.095,
+    -0.028,
+    -0.036
+   ],
+   "ct_vtoe": [
+    7.96,
+    -0.78,
+    1.71
+   ],
+   "seed": 6000,
+   "noise": 0.0,
+   "dx": 0.03,
+   "dy": 0.0,
+   "groups": null,
+   "wall": 1.5
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 11.81,
+   "t_touch": 2.03,
+   "touch_body": "calcn_r",
+   "cross_y": -1.182,
+   "cross_z": null,
+   "launch": -6.74,
+   "elev": 11.68,
+   "fallen": true,
+   "t_fall": 2.69,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.209,
+    -0.01,
+    -0.004
+   ],
+   "keeper": "stationary",
+   "keeper_y": 0.028,
+   "r_toe_ball_min": 0.104,
+   "steps": 269,
+   "time": 2.69,
+   "kick_ok": false,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.73,
+    "snap": 1.95,
+    "follow": 2.04,
+    "land": 2.26
+   },
+   "sw_t": 1.7299999999999203,
+   "sw_toe": [
+    -0.916,
+    -0.066,
+    -0.057
+   ],
+   "sw_pelvis": [
+    -0.409,
+    0.139,
+    0.776
+   ],
+   "sw_yaw": 0.552,
+   "sw_com": [
+    -0.463,
+    0.135,
+    0.775
+   ],
+   "sn_t": 1.949999999999896,
+   "sn_toe": [
+    -0.566,
+    0.066,
+    -0.063
+   ],
+   "sn_pelvis": [
+    -0.277,
+    0.215,
+    0.805
+   ],
+   "sn_yaw": 0.655,
+   "sn_com": [
+    -0.286,
+    0.223,
+    0.783
+   ],
+   "ct_toe": [
+    -0.1,
+    -0.011,
+    -0.019
+   ],
+   "ct_vtoe": [
+    7.82,
+    -1.98,
+    2.12
+   ],
+   "seed": 6001,
+   "noise": 0.0,
+   "dx": 0.03,
+   "dy": 0.0,
+   "groups": null,
+   "wall": 1.3
+  },
+  {
+   "goal": 1.0,
+   "ball_speed": 11.448,
+   "t_touch": 2.05,
+   "touch_body": "calcn_r",
+   "cross_y": 1.216,
+   "cross_z": 0.169,
+   "launch": 6.26,
+   "elev": 8.58,
+   "fallen": false,
+   "t_fall": null,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.182,
+    0.0,
+    -0.002
+   ],
+   "keeper": "stationary",
+   "keeper_y": -2.332,
+   "r_toe_ball_min": 0.099,
+   "steps": 305,
+   "time": 3.05,
+   "kick_ok": true,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.74,
+    "snap": 1.97,
+    "follow": 2.06,
+    "land": 2.28,
+    "recover": 2.74
+   },
+   "sw_t": 1.7399999999999192,
+   "sw_toe": [
+    -0.911,
+    -0.061,
+    -0.064
+   ],
+   "sw_pelvis": [
+    -0.403,
+    0.144,
+    0.758
+   ],
+   "sw_yaw": 0.71,
+   "sw_com": [
+    -0.455,
+    0.132,
+    0.759
+   ],
+   "sn_t": 1.9699999999998938,
+   "sn_toe": [
+    -0.548,
+    0.019,
+    -0.064
+   ],
+   "sn_pelvis": [
+    -0.25,
+    0.215,
+    0.766
+   ],
+   "sn_yaw": 0.735,
+   "sn_com": [
+    -0.275,
+    0.229,
+    0.747
+   ],
+   "ct_toe": [
+    -0.095,
+    -0.028,
+    -0.036
+   ],
+   "ct_vtoe": [
+    7.96,
+    -0.78,
+    1.71
+   ],
+   "seed": 6002,
+   "noise": 0.0,
+   "dx": 0.03,
+   "dy": 0.0,
+   "groups": null,
+   "wall": 1.4
+  },
+  {
+   "goal": 1.0,
+   "ball_speed": 11.448,
+   "t_touch": 2.05,
+   "touch_body": "calcn_r",
+   "cross_y": 1.216,
+   "cross_z": 0.169,
+   "launch": 6.26,
+   "elev": 8.58,
+   "fallen": false,
+   "t_fall": null,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.182,
+    0.0,
+    -0.002
+   ],
+   "keeper": "stationary",
+   "keeper_y": -2.94,
+   "r_toe_ball_min": 0.099,
+   "steps": 305,
+   "time": 3.05,
+   "kick_ok": true,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.74,
+    "snap": 1.97,
+    "follow": 2.06,
+    "land": 2.28,
+    "recover": 2.74
+   },
+   "sw_t": 1.7399999999999192,
+   "sw_toe": [
+    -0.911,
+    -0.061,
+    -0.064
+   ],
+   "sw_pelvis": [
+    -0.403,
+    0.144,
+    0.758
+   ],
+   "sw_yaw": 0.71,
+   "sw_com": [
+    -0.455,
+    0.132,
+    0.759
+   ],
+   "sn_t": 1.9699999999998938,
+   "sn_toe": [
+    -0.548,
+    0.019,
+    -0.064
+   ],
+   "sn_pelvis": [
+    -0.25,
+    0.215,
+    0.766
+   ],
+   "sn_yaw": 0.735,
+   "sn_com": [
+    -0.275,
+    0.229,
+    0.747
+   ],
+   "ct_toe": [
+    -0.095,
+    -0.028,
+    -0.036
+   ],
+   "ct_vtoe": [
+    7.96,
+    -0.78,
+    1.71
+   ],
+   "seed": 6003,
+   "noise": 0.0,
+   "dx": 0.03,
+   "dy": 0.0,
+   "groups": null,
+   "wall": 1.4
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 11.81,
+   "t_touch": 2.03,
+   "touch_body": "calcn_r",
+   "cross_y": -1.182,
+   "cross_z": null,
+   "launch": -6.74,
+   "elev": 11.68,
+   "fallen": true,
+   "t_fall": 2.69,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.209,
+    -0.01,
+    -0.004
+   ],
+   "keeper": "stationary",
+   "keeper_y": 0.803,
+   "r_toe_ball_min": 0.104,
+   "steps": 269,
+   "time": 2.69,
+   "kick_ok": false,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.73,
+    "snap": 1.95,
+    "follow": 2.04,
+    "land": 2.26
+   },
+   "sw_t": 1.7299999999999203,
+   "sw_toe": [
+    -0.916,
+    -0.066,
+    -0.057
+   ],
+   "sw_pelvis": [
+    -0.409,
+    0.139,
+    0.776
+   ],
+   "sw_yaw": 0.552,
+   "sw_com": [
+    -0.463,
+    0.135,
+    0.775
+   ],
+   "sn_t": 1.949999999999896,
+   "sn_toe": [
+    -0.566,
+    0.066,
+    -0.063
+   ],
+   "sn_pelvis": [
+    -0.277,
+    0.215,
+    0.805
+   ],
+   "sn_yaw": 0.655,
+   "sn_com": [
+    -0.286,
+    0.223,
+    0.783
+   ],
+   "ct_toe": [
+    -0.1,
+    -0.011,
+    -0.019
+   ],
+   "ct_vtoe": [
+    7.82,
+    -1.98,
+    2.12
+   ],
+   "seed": 6004,
+   "noise": 0.0,
+   "dx": 0.03,
+   "dy": 0.0,
+   "groups": null,
+   "wall": 1.3
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 11.81,
+   "t_touch": 2.03,
+   "touch_body": "calcn_r",
+   "cross_y": -1.182,
+   "cross_z": null,
+   "launch": -6.74,
+   "elev": 11.68,
+   "fallen": true,
+   "t_fall": 2.69,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.209,
+    -0.01,
+    -0.004
+   ],
+   "keeper": "random",
+   "keeper_y": 2.679,
+   "r_toe_ball_min": 0.104,
+   "steps": 269,
+   "time": 2.69,
+   "kick_ok": false,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.73,
+    "snap": 1.95,
+    "follow": 2.04,
+    "land": 2.26
+   },
+   "sw_t": 1.7299999999999203,
+   "sw_toe": [
+    -0.916,
+    -0.066,
+    -0.057
+   ],
+   "sw_pelvis": [
+    -0.409,
+    0.139,
+    0.776
+   ],
+   "sw_yaw": 0.552,
+   "sw_com": [
+    -0.463,
+    0.135,
+    0.775
+   ],
+   "sn_t": 1.949999999999896,
+   "sn_toe": [
+    -0.566,
+    0.066,
+    -0.063
+   ],
+   "sn_pelvis": [
+    -0.277,
+    0.215,
+    0.805
+   ],
+   "sn_yaw": 0.655,
+   "sn_com": [
+    -0.286,
+    0.223,
+    0.783
+   ],
+   "ct_toe": [
+    -0.1,
+    -0.011,
+    -0.019
+   ],
+   "ct_vtoe": [
+    7.82,
+    -1.98,
+    2.12
+   ],
+   "seed": 6005,
+   "noise": 0.0,
+   "dx": 0.03,
+   "dy": 0.0,
+   "groups": null,
+   "wall": 1.3
+  },
+  {
+   "goal": 1.0,
+   "ball_speed": 10.669,
+   "t_touch": 2.04,
+   "touch_body": "calcn_r",
+   "cross_y": 1.547,
+   "cross_z": 0.126,
+   "launch": 7.53,
+   "elev": 6.52,
+   "fallen": false,
+   "t_fall": null,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.174,
+    0.007,
+    0.018
+   ],
+   "keeper": "random",
+   "keeper_y": -2.903,
+   "r_toe_ball_min": 0.106,
+   "steps": 318,
+   "time": 3.18,
+   "kick_ok": true,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.74,
+    "snap": 1.97,
+    "follow": 2.05,
+    "land": 2.27,
+    "recover": 2.73
+   },
+   "sw_t": 1.7399999999999192,
+   "sw_toe": [
+    -0.889,
+    -0.062,
+    -0.065
+   ],
+   "sw_pelvis": [
+    -0.385,
+    0.145,
+    0.758
+   ],
+   "sw_yaw": 0.712,
+   "sw_com": [
+    -0.435,
+    0.132,
+    0.759
+   ],
+   "sn_t": 1.9699999999998938,
+   "sn_toe": [
+    -0.528,
+    0.019,
+    -0.063
+   ],
+   "sn_pelvis": [
+    -0.231,
+    0.219,
+    0.77
+   ],
+   "sn_yaw": 0.761,
+   "sn_com": [
+    -0.255,
+    0.23,
+    0.751
+   ],
+   "ct_toe": [
+    -0.124,
+    -0.015,
+    -0.043
+   ],
+   "ct_vtoe": [
+    8.13,
+    -1.12,
+    0.96
+   ],
+   "seed": 6000,
+   "noise": 0.0,
+   "dx": 0.05,
+   "dy": 0.0,
+   "groups": null,
+   "wall": 1.5
+  },
+  {
+   "goal": 1.0,
+   "ball_speed": 11.325,
+   "t_touch": 2.03,
+   "touch_body": "calcn_r",
+   "cross_y": -1.09,
+   "cross_z": 0.236,
+   "launch": -5.84,
+   "elev": 12.86,
+   "fallen": false,
+   "t_fall": null,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.212,
+    -0.007,
+    0.009
+   ],
+   "keeper": "stationary",
+   "keeper_y": 0.028,
+   "r_toe_ball_min": 0.111,
+   "steps": 303,
+   "time": 3.03,
+   "kick_ok": true,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.73,
+    "snap": 1.95,
+    "follow": 2.04,
+    "land": 2.26,
+    "recover": 2.7
+   },
+   "sw_t": 1.7299999999999203,
+   "sw_toe": [
+    -0.897,
+    -0.07,
+    -0.058
+   ],
+   "sw_pelvis": [
+    -0.39,
+    0.139,
+    0.778
+   ],
+   "sw_yaw": 0.537,
+   "sw_com": [
+    -0.444,
+    0.135,
+    0.777
+   ],
+   "sn_t": 1.949999999999896,
+   "sn_toe": [
+    -0.546,
+    0.077,
+    -0.063
+   ],
+   "sn_pelvis": [
+    -0.26,
+    0.217,
+    0.807
+   ],
+   "sn_yaw": 0.665,
+   "sn_com": [
+    -0.266,
+    0.223,
+    0.785
+   ],
+   "ct_toe": [
+    -0.103,
+    -0.005,
+    -0.018
+   ],
+   "ct_vtoe": [
+    7.54,
+    -2.01,
+    1.75
+   ],
+   "seed": 6001,
+   "noise": 0.0,
+   "dx": 0.05,
+   "dy": 0.0,
+   "groups": null,
+   "wall": 1.4
+  },
+  {
+   "goal": 1.0,
+   "ball_speed": 10.669,
+   "t_touch": 2.04,
+   "touch_body": "calcn_r",
+   "cross_y": 1.547,
+   "cross_z": 0.126,
+   "launch": 7.53,
+   "elev": 6.52,
+   "fallen": false,
+   "t_fall": null,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.174,
+    0.007,
+    0.018
+   ],
+   "keeper": "stationary",
+   "keeper_y": -2.332,
+   "r_toe_ball_min": 0.106,
+   "steps": 318,
+   "time": 3.18,
+   "kick_ok": true,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.74,
+    "snap": 1.97,
+    "follow": 2.05,
+    "land": 2.27,
+    "recover": 2.73
+   },
+   "sw_t": 1.7399999999999192,
+   "sw_toe": [
+    -0.889,
+    -0.062,
+    -0.065
+   ],
+   "sw_pelvis": [
+    -0.385,
+    0.145,
+    0.758
+   ],
+   "sw_yaw": 0.712,
+   "sw_com": [
+    -0.435,
+    0.132,
+    0.759
+   ],
+   "sn_t": 1.9699999999998938,
+   "sn_toe": [
+    -0.528,
+    0.019,
+    -0.063
+   ],
+   "sn_pelvis": [
+    -0.231,
+    0.219,
+    0.77
+   ],
+   "sn_yaw": 0.761,
+   "sn_com": [
+    -0.255,
+    0.23,
+    0.751
+   ],
+   "ct_toe": [
+    -0.124,
+    -0.015,
+    -0.043
+   ],
+   "ct_vtoe": [
+    8.13,
+    -1.12,
+    0.96
+   ],
+   "seed": 6002,
+   "noise": 0.0,
+   "dx": 0.05,
+   "dy": 0.0,
+   "groups": null,
+   "wall": 1.5
+  },
+  {
+   "goal": 1.0,
+   "ball_speed": 10.669,
+   "t_touch": 2.04,
+   "touch_body": "calcn_r",
+   "cross_y": 1.547,
+   "cross_z": 0.126,
+   "launch": 7.53,
+   "elev": 6.52,
+   "fallen": false,
+   "t_fall": null,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.174,
+    0.007,
+    0.018
+   ],
+   "keeper": "stationary",
+   "keeper_y": -2.94,
+   "r_toe_ball_min": 0.106,
+   "steps": 318,
+   "time": 3.18,
+   "kick_ok": true,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.74,
+    "snap": 1.97,
+    "follow": 2.05,
+    "land": 2.27,
+    "recover": 2.73
+   },
+   "sw_t": 1.7399999999999192,
+   "sw_toe": [
+    -0.889,
+    -0.062,
+    -0.065
+   ],
+   "sw_pelvis": [
+    -0.385,
+    0.145,
+    0.758
+   ],
+   "sw_yaw": 0.712,
+   "sw_com": [
+    -0.435,
+    0.132,
+    0.759
+   ],
+   "sn_t": 1.9699999999998938,
+   "sn_toe": [
+    -0.528,
+    0.019,
+    -0.063
+   ],
+   "sn_pelvis": [
+    -0.231,
+    0.219,
+    0.77
+   ],
+   "sn_yaw": 0.761,
+   "sn_com": [
+    -0.255,
+    0.23,
+    0.751
+   ],
+   "ct_toe": [
+    -0.124,
+    -0.015,
+    -0.043
+   ],
+   "ct_vtoe": [
+    8.13,
+    -1.12,
+    0.96
+   ],
+   "seed": 6003,
+   "noise": 0.0,
+   "dx": 0.05,
+   "dy": 0.0,
+   "groups": null,
+   "wall": 1.5
+  },
+  {
+   "goal": 1.0,
+   "ball_speed": 11.325,
+   "t_touch": 2.03,
+   "touch_body": "calcn_r",
+   "cross_y": -1.09,
+   "cross_z": 0.236,
+   "launch": -5.84,
+   "elev": 12.86,
+   "fallen": false,
+   "t_fall": null,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.212,
+    -0.007,
+    0.009
+   ],
+   "keeper": "stationary",
+   "keeper_y": 0.803,
+   "r_toe_ball_min": 0.111,
+   "steps": 303,
+   "time": 3.03,
+   "kick_ok": true,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.73,
+    "snap": 1.95,
+    "follow": 2.04,
+    "land": 2.26,
+    "recover": 2.7
+   },
+   "sw_t": 1.7299999999999203,
+   "sw_toe": [
+    -0.897,
+    -0.07,
+    -0.058
+   ],
+   "sw_pelvis": [
+    -0.39,
+    0.139,
+    0.778
+   ],
+   "sw_yaw": 0.537,
+   "sw_com": [
+    -0.444,
+    0.135,
+    0.777
+   ],
+   "sn_t": 1.949999999999896,
+   "sn_toe": [
+    -0.546,
+    0.077,
+    -0.063
+   ],
+   "sn_pelvis": [
+    -0.26,
+    0.217,
+    0.807
+   ],
+   "sn_yaw": 0.665,
+   "sn_com": [
+    -0.266,
+    0.223,
+    0.785
+   ],
+   "ct_toe": [
+    -0.103,
+    -0.005,
+    -0.018
+   ],
+   "ct_vtoe": [
+    7.54,
+    -2.01,
+    1.75
+   ],
+   "seed": 6004,
+   "noise": 0.0,
+   "dx": 0.05,
+   "dy": 0.0,
+   "groups": null,
+   "wall": 1.4
+  },
+  {
+   "goal": 1.0,
+   "ball_speed": 11.325,
+   "t_touch": 2.03,
+   "touch_body": "calcn_r",
+   "cross_y": -1.09,
+   "cross_z": 0.236,
+   "launch": -5.84,
+   "elev": 12.86,
+   "fallen": false,
+   "t_fall": null,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.212,
+    -0.007,
+    0.009
+   ],
+   "keeper": "random",
+   "keeper_y": 2.675,
+   "r_toe_ball_min": 0.111,
+   "steps": 303,
+   "time": 3.03,
+   "kick_ok": true,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.73,
+    "snap": 1.95,
+    "follow": 2.04,
+    "land": 2.26,
+    "recover": 2.7
+   },
+   "sw_t": 1.7299999999999203,
+   "sw_toe": [
+    -0.897,
+    -0.07,
+    -0.058
+   ],
+   "sw_pelvis": [
+    -0.39,
+    0.139,
+    0.778
+   ],
+   "sw_yaw": 0.537,
+   "sw_com": [
+    -0.444,
+    0.135,
+    0.777
+   ],
+   "sn_t": 1.949999999999896,
+   "sn_toe": [
+    -0.546,
+    0.077,
+    -0.063
+   ],
+   "sn_pelvis": [
+    -0.26,
+    0.217,
+    0.807
+   ],
+   "sn_yaw": 0.665,
+   "sn_com": [
+    -0.266,
+    0.223,
+    0.785
+   ],
+   "ct_toe": [
+    -0.103,
+    -0.005,
+    -0.018
+   ],
+   "ct_vtoe": [
+    7.54,
+    -2.01,
+    1.75
+   ],
+   "seed": 6005,
+   "noise": 0.0,
+   "dx": 0.05,
+   "dy": 0.0,
+   "groups": null,
+   "wall": 1.4
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 5.377,
+   "t_touch": 2.05,
+   "touch_body": "tibia_l",
+   "cross_y": 5.917,
+   "cross_z": null,
+   "launch": 24.78,
+   "elev": 4.08,
+   "fallen": true,
+   "t_fall": 2.82,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.214,
+    0.009,
+    -0.034
+   ],
+   "keeper": "random",
+   "keeper_y": -2.901,
+   "r_toe_ball_min": 0.14,
+   "steps": 282,
+   "time": 2.82,
+   "kick_ok": false,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.75,
+    "snap": 1.98,
+    "follow": 2.06,
+    "land": 2.28
+   },
+   "sw_t": 1.749999999999918,
+   "sw_toe": [
+    -0.934,
+    -0.026,
+    -0.062
+   ],
+   "sw_pelvis": [
+    -0.407,
+    0.163,
+    0.736
+   ],
+   "sw_yaw": 0.681,
+   "sw_com": [
+    -0.468,
+    0.147,
+    0.741
+   ],
+   "sn_t": 1.9799999999998927,
+   "sn_toe": [
+    -0.52,
+    -0.001,
+    -0.069
+   ],
+   "sn_pelvis": [
+    -0.22,
+    0.258,
+    0.717
+   ],
+   "sn_yaw": 0.898,
+   "sn_com": [
+    -0.274,
+    0.266,
+    0.701
+   ],
+   "ct_toe": [
+    -0.198,
+    -0.083,
+    -0.028
+   ],
+   "ct_vtoe": [
+    3.49,
+    -1.26,
+    1.51
+   ],
+   "seed": 6000,
+   "noise": 0.0,
+   "dx": 0.0,
+   "dy": 0.02,
+   "groups": null,
+   "wall": 1.4
+  },
+  {
+   "goal": 1.0,
+   "ball_speed": 10.883,
+   "t_touch": 2.04,
+   "touch_body": "calcn_r",
+   "cross_y": 1.876,
+   "cross_z": 0.142,
+   "launch": 9.24,
+   "elev": 7.63,
+   "fallen": false,
+   "t_fall": null,
+   "strike_zone": "outside",
+   "strike_point": [
+    0.165,
+    0.008,
+    0.034
+   ],
+   "keeper": "stationary",
+   "keeper_y": 0.028,
+   "r_toe_ball_min": 0.104,
+   "steps": 315,
+   "time": 3.15,
+   "kick_ok": true,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.74,
+    "snap": 1.97,
+    "follow": 2.05,
+    "land": 2.27,
+    "recover": 2.68
+   },
+   "sw_t": 1.7399999999999192,
+   "sw_toe": [
+    -0.941,
+    -0.04,
+    -0.062
+   ],
+   "sw_pelvis": [
+    -0.432,
+    0.162,
+    0.758
+   ],
+   "sw_yaw": 0.712,
+   "sw_com": [
+    -0.484,
+    0.153,
+    0.759
+   ],
+   "sn_t": 1.9699999999998938,
+   "sn_toe": [
+    -0.559,
+    0.034,
+    -0.066
+   ],
+   "sn_pelvis": [
+    -0.281,
+    0.235,
+    0.76
+   ],
+   "sn_yaw": 0.814,
+   "sn_com": [
+    -0.302,
+    0.248,
+    0.739
+   ],
+   "ct_toe": [
+    -0.142,
+    0.002,
+    -0.043
+   ],
+   "ct_vtoe": [
+    9.13,
+    -0.83,
+    0.77
+   ],
+   "seed": 6001,
+   "noise": 0.0,
+   "dx": 0.0,
+   "dy": 0.02,
+   "groups": null,
+   "wall": 1.5
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 5.377,
+   "t_touch": 2.05,
+   "touch_body": "tibia_l",
+   "cross_y": 5.917,
+   "cross_z": null,
+   "launch": 24.78,
+   "elev": 4.08,
+   "fallen": true,
+   "t_fall": 2.82,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.214,
+    0.009,
+    -0.034
+   ],
+   "keeper": "stationary",
+   "keeper_y": -2.332,
+   "r_toe_ball_min": 0.14,
+   "steps": 282,
+   "time": 2.82,
+   "kick_ok": false,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.75,
+    "snap": 1.98,
+    "follow": 2.06,
+    "land": 2.28
+   },
+   "sw_t": 1.749999999999918,
+   "sw_toe": [
+    -0.934,
+    -0.026,
+    -0.062
+   ],
+   "sw_pelvis": [
+    -0.407,
+    0.163,
+    0.736
+   ],
+   "sw_yaw": 0.681,
+   "sw_com": [
+    -0.468,
+    0.147,
+    0.741
+   ],
+   "sn_t": 1.9799999999998927,
+   "sn_toe": [
+    -0.52,
+    -0.001,
+    -0.069
+   ],
+   "sn_pelvis": [
+    -0.22,
+    0.258,
+    0.717
+   ],
+   "sn_yaw": 0.898,
+   "sn_com": [
+    -0.274,
+    0.266,
+    0.701
+   ],
+   "ct_toe": [
+    -0.198,
+    -0.083,
+    -0.028
+   ],
+   "ct_vtoe": [
+    3.49,
+    -1.26,
+    1.51
+   ],
+   "seed": 6002,
+   "noise": 0.0,
+   "dx": 0.0,
+   "dy": 0.02,
+   "groups": null,
+   "wall": 1.4
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 5.377,
+   "t_touch": 2.05,
+   "touch_body": "tibia_l",
+   "cross_y": 5.917,
+   "cross_z": null,
+   "launch": 24.78,
+   "elev": 4.08,
+   "fallen": true,
+   "t_fall": 2.82,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.214,
+    0.009,
+    -0.034
+   ],
+   "keeper": "stationary",
+   "keeper_y": -2.94,
+   "r_toe_ball_min": 0.14,
+   "steps": 282,
+   "time": 2.82,
+   "kick_ok": false,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.75,
+    "snap": 1.98,
+    "follow": 2.06,
+    "land": 2.28
+   },
+   "sw_t": 1.749999999999918,
+   "sw_toe": [
+    -0.934,
+    -0.026,
+    -0.062
+   ],
+   "sw_pelvis": [
+    -0.407,
+    0.163,
+    0.736
+   ],
+   "sw_yaw": 0.681,
+   "sw_com": [
+    -0.468,
+    0.147,
+    0.741
+   ],
+   "sn_t": 1.9799999999998927,
+   "sn_toe": [
+    -0.52,
+    -0.001,
+    -0.069
+   ],
+   "sn_pelvis": [
+    -0.22,
+    0.258,
+    0.717
+   ],
+   "sn_yaw": 0.898,
+   "sn_com": [
+    -0.274,
+    0.266,
+    0.701
+   ],
+   "ct_toe": [
+    -0.198,
+    -0.083,
+    -0.028
+   ],
+   "ct_vtoe": [
+    3.49,
+    -1.26,
+    1.51
+   ],
+   "seed": 6003,
+   "noise": 0.0,
+   "dx": 0.0,
+   "dy": 0.02,
+   "groups": null,
+   "wall": 1.4
+  },
+  {
+   "goal": 1.0,
+   "ball_speed": 10.883,
+   "t_touch": 2.04,
+   "touch_body": "calcn_r",
+   "cross_y": 1.876,
+   "cross_z": 0.142,
+   "launch": 9.24,
+   "elev": 7.63,
+   "fallen": false,
+   "t_fall": null,
+   "strike_zone": "outside",
+   "strike_point": [
+    0.165,
+    0.008,
+    0.034
+   ],
+   "keeper": "stationary",
+   "keeper_y": 0.803,
+   "r_toe_ball_min": 0.104,
+   "steps": 315,
+   "time": 3.15,
+   "kick_ok": true,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.74,
+    "snap": 1.97,
+    "follow": 2.05,
+    "land": 2.27,
+    "recover": 2.68
+   },
+   "sw_t": 1.7399999999999192,
+   "sw_toe": [
+    -0.941,
+    -0.04,
+    -0.062
+   ],
+   "sw_pelvis": [
+    -0.432,
+    0.162,
+    0.758
+   ],
+   "sw_yaw": 0.712,
+   "sw_com": [
+    -0.484,
+    0.153,
+    0.759
+   ],
+   "sn_t": 1.9699999999998938,
+   "sn_toe": [
+    -0.559,
+    0.034,
+    -0.066
+   ],
+   "sn_pelvis": [
+    -0.281,
+    0.235,
+    0.76
+   ],
+   "sn_yaw": 0.814,
+   "sn_com": [
+    -0.302,
+    0.248,
+    0.739
+   ],
+   "ct_toe": [
+    -0.142,
+    0.002,
+    -0.043
+   ],
+   "ct_vtoe": [
+    9.13,
+    -0.83,
+    0.77
+   ],
+   "seed": 6004,
+   "noise": 0.0,
+   "dx": 0.0,
+   "dy": 0.02,
+   "groups": null,
+   "wall": 1.5
+  },
+  {
+   "goal": 1.0,
+   "ball_speed": 10.883,
+   "t_touch": 2.04,
+   "touch_body": "calcn_r",
+   "cross_y": 1.876,
+   "cross_z": 0.142,
+   "launch": 9.24,
+   "elev": 7.63,
+   "fallen": false,
+   "t_fall": null,
+   "strike_zone": "outside",
+   "strike_point": [
+    0.165,
+    0.008,
+    0.034
+   ],
+   "keeper": "random",
+   "keeper_y": 2.679,
+   "r_toe_ball_min": 0.104,
+   "steps": 315,
+   "time": 3.15,
+   "kick_ok": true,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.74,
+    "snap": 1.97,
+    "follow": 2.05,
+    "land": 2.27,
+    "recover": 2.68
+   },
+   "sw_t": 1.7399999999999192,
+   "sw_toe": [
+    -0.941,
+    -0.04,
+    -0.062
+   ],
+   "sw_pelvis": [
+    -0.432,
+    0.162,
+    0.758
+   ],
+   "sw_yaw": 0.712,
+   "sw_com": [
+    -0.484,
+    0.153,
+    0.759
+   ],
+   "sn_t": 1.9699999999998938,
+   "sn_toe": [
+    -0.559,
+    0.034,
+    -0.066
+   ],
+   "sn_pelvis": [
+    -0.281,
+    0.235,
+    0.76
+   ],
+   "sn_yaw": 0.814,
+   "sn_com": [
+    -0.302,
+    0.248,
+    0.739
+   ],
+   "ct_toe": [
+    -0.142,
+    0.002,
+    -0.043
+   ],
+   "ct_vtoe": [
+    9.13,
+    -0.83,
+    0.77
+   ],
+   "seed": 6005,
+   "noise": 0.0,
+   "dx": 0.0,
+   "dy": 0.02,
+   "groups": null,
+   "wall": 1.5
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 11.497,
+   "t_touch": 2.03,
+   "touch_body": "calcn_r",
+   "cross_y": -0.728,
+   "cross_z": null,
+   "launch": -4.04,
+   "elev": 16.32,
+   "fallen": true,
+   "t_fall": 2.93,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.226,
+    -0.01,
+    -0.028
+   ],
+   "keeper": "random",
+   "keeper_y": -2.904,
+   "r_toe_ball_min": 0.117,
+   "steps": 293,
+   "time": 2.93,
+   "kick_ok": false,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.73,
+    "snap": 1.95,
+    "follow": 2.04,
+    "land": 2.26,
+    "recover": 2.73
+   },
+   "sw_t": 1.7299999999999203,
+   "sw_toe": [
+    -0.944,
+    -0.083,
+    -0.058
+   ],
+   "sw_pelvis": [
+    -0.439,
+    0.118,
+    0.775
+   ],
+   "sw_yaw": 0.598,
+   "sw_com": [
+    -0.492,
+    0.114,
+    0.774
+   ],
+   "sn_t": 1.949999999999896,
+   "sn_toe": [
+    -0.599,
+    0.04,
+    -0.062
+   ],
+   "sn_pelvis": [
+    -0.307,
+    0.186,
+    0.793
+   ],
+   "sn_yaw": 0.617,
+   "sn_com": [
+    -0.318,
+    0.199,
+    0.772
+   ],
+   "ct_toe": [
+    -0.103,
+    -0.047,
+    -0.023
+   ],
+   "ct_vtoe": [
+    8.15,
+    -3.11,
+    2.44
+   ],
+   "seed": 6000,
+   "noise": 0.0,
+   "dx": 0.0,
+   "dy": -0.02,
+   "groups": null,
+   "wall": 1.4
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 11.086,
+   "t_touch": 2.01,
+   "touch_body": "toes_r",
+   "cross_y": -1.277,
+   "cross_z": null,
+   "launch": -6.57,
+   "elev": 6.59,
+   "fallen": true,
+   "t_fall": 2.62,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.195,
+    -0.001,
+    0.023
+   ],
+   "keeper": "stationary",
+   "keeper_y": 0.028,
+   "r_toe_ball_min": 0.105,
+   "steps": 262,
+   "time": 2.62,
+   "kick_ok": false,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.73,
+    "snap": 1.93,
+    "follow": 2.02,
+    "land": 2.24
+   },
+   "sw_t": 1.7299999999999203,
+   "sw_toe": [
+    -0.94,
+    -0.079,
+    -0.052
+   ],
+   "sw_pelvis": [
+    -0.434,
+    0.121,
+    0.779
+   ],
+   "sw_yaw": 0.571,
+   "sw_com": [
+    -0.489,
+    0.118,
+    0.777
+   ],
+   "sn_t": 1.9299999999998982,
+   "sn_toe": [
+    -0.59,
+    0.071,
+    -0.07
+   ],
+   "sn_pelvis": [
+    -0.308,
+    0.18,
+    0.815
+   ],
+   "sn_yaw": 0.612,
+   "sn_com": [
+    -0.32,
+    0.199,
+    0.792
+   ],
+   "ct_toe": [
+    -0.133,
+    0.021,
+    -0.013
+   ],
+   "ct_vtoe": [
+    8.86,
+    -1.75,
+    1.62
+   ],
+   "seed": 6001,
+   "noise": 0.0,
+   "dx": 0.0,
+   "dy": -0.02,
+   "groups": null,
+   "wall": 1.3
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 11.497,
+   "t_touch": 2.03,
+   "touch_body": "calcn_r",
+   "cross_y": -0.728,
+   "cross_z": null,
+   "launch": -4.04,
+   "elev": 16.32,
+   "fallen": true,
+   "t_fall": 2.93,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.226,
+    -0.01,
+    -0.028
+   ],
+   "keeper": "stationary",
+   "keeper_y": -2.332,
+   "r_toe_ball_min": 0.117,
+   "steps": 293,
+   "time": 2.93,
+   "kick_ok": false,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.73,
+    "snap": 1.95,
+    "follow": 2.04,
+    "land": 2.26,
+    "recover": 2.73
+   },
+   "sw_t": 1.7299999999999203,
+   "sw_toe": [
+    -0.944,
+    -0.083,
+    -0.058
+   ],
+   "sw_pelvis": [
+    -0.439,
+    0.118,
+    0.775
+   ],
+   "sw_yaw": 0.598,
+   "sw_com": [
+    -0.492,
+    0.114,
+    0.774
+   ],
+   "sn_t": 1.949999999999896,
+   "sn_toe": [
+    -0.599,
+    0.04,
+    -0.062
+   ],
+   "sn_pelvis": [
+    -0.307,
+    0.186,
+    0.793
+   ],
+   "sn_yaw": 0.617,
+   "sn_com": [
+    -0.318,
+    0.199,
+    0.772
+   ],
+   "ct_toe": [
+    -0.103,
+    -0.047,
+    -0.023
+   ],
+   "ct_vtoe": [
+    8.15,
+    -3.11,
+    2.44
+   ],
+   "seed": 6002,
+   "noise": 0.0,
+   "dx": 0.0,
+   "dy": -0.02,
+   "groups": null,
+   "wall": 1.4
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 11.497,
+   "t_touch": 2.03,
+   "touch_body": "calcn_r",
+   "cross_y": -0.728,
+   "cross_z": null,
+   "launch": -4.04,
+   "elev": 16.32,
+   "fallen": true,
+   "t_fall": 2.93,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.226,
+    -0.01,
+    -0.028
+   ],
+   "keeper": "stationary",
+   "keeper_y": -2.94,
+   "r_toe_ball_min": 0.117,
+   "steps": 293,
+   "time": 2.93,
+   "kick_ok": false,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.73,
+    "snap": 1.95,
+    "follow": 2.04,
+    "land": 2.26,
+    "recover": 2.73
+   },
+   "sw_t": 1.7299999999999203,
+   "sw_toe": [
+    -0.944,
+    -0.083,
+    -0.058
+   ],
+   "sw_pelvis": [
+    -0.439,
+    0.118,
+    0.775
+   ],
+   "sw_yaw": 0.598,
+   "sw_com": [
+    -0.492,
+    0.114,
+    0.774
+   ],
+   "sn_t": 1.949999999999896,
+   "sn_toe": [
+    -0.599,
+    0.04,
+    -0.062
+   ],
+   "sn_pelvis": [
+    -0.307,
+    0.186,
+    0.793
+   ],
+   "sn_yaw": 0.617,
+   "sn_com": [
+    -0.318,
+    0.199,
+    0.772
+   ],
+   "ct_toe": [
+    -0.103,
+    -0.047,
+    -0.023
+   ],
+   "ct_vtoe": [
+    8.15,
+    -3.11,
+    2.44
+   ],
+   "seed": 6003,
+   "noise": 0.0,
+   "dx": 0.0,
+   "dy": -0.02,
+   "groups": null,
+   "wall": 1.4
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 11.086,
+   "t_touch": 2.01,
+   "touch_body": "toes_r",
+   "cross_y": -1.277,
+   "cross_z": null,
+   "launch": -6.57,
+   "elev": 6.59,
+   "fallen": true,
+   "t_fall": 2.62,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.195,
+    -0.001,
+    0.023
+   ],
+   "keeper": "stationary",
+   "keeper_y": 0.803,
+   "r_toe_ball_min": 0.105,
+   "steps": 262,
+   "time": 2.62,
+   "kick_ok": false,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.73,
+    "snap": 1.93,
+    "follow": 2.02,
+    "land": 2.24
+   },
+   "sw_t": 1.7299999999999203,
+   "sw_toe": [
+    -0.94,
+    -0.079,
+    -0.052
+   ],
+   "sw_pelvis": [
+    -0.434,
+    0.121,
+    0.779
+   ],
+   "sw_yaw": 0.571,
+   "sw_com": [
+    -0.489,
+    0.118,
+    0.777
+   ],
+   "sn_t": 1.9299999999998982,
+   "sn_toe": [
+    -0.59,
+    0.071,
+    -0.07
+   ],
+   "sn_pelvis": [
+    -0.308,
+    0.18,
+    0.815
+   ],
+   "sn_yaw": 0.612,
+   "sn_com": [
+    -0.32,
+    0.199,
+    0.792
+   ],
+   "ct_toe": [
+    -0.133,
+    0.021,
+    -0.013
+   ],
+   "ct_vtoe": [
+    8.86,
+    -1.75,
+    1.62
+   ],
+   "seed": 6004,
+   "noise": 0.0,
+   "dx": 0.0,
+   "dy": -0.02,
+   "groups": null,
+   "wall": 1.2
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 11.086,
+   "t_touch": 2.01,
+   "touch_body": "toes_r",
+   "cross_y": -1.277,
+   "cross_z": null,
+   "launch": -6.57,
+   "elev": 6.59,
+   "fallen": true,
+   "t_fall": 2.62,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.195,
+    -0.001,
+    0.023
+   ],
+   "keeper": "random",
+   "keeper_y": 2.679,
+   "r_toe_ball_min": 0.105,
+   "steps": 262,
+   "time": 2.62,
+   "kick_ok": false,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.73,
+    "snap": 1.93,
+    "follow": 2.02,
+    "land": 2.24
+   },
+   "sw_t": 1.7299999999999203,
+   "sw_toe": [
+    -0.94,
+    -0.079,
+    -0.052
+   ],
+   "sw_pelvis": [
+    -0.434,
+    0.121,
+    0.779
+   ],
+   "sw_yaw": 0.571,
+   "sw_com": [
+    -0.489,
+    0.118,
+    0.777
+   ],
+   "sn_t": 1.9299999999998982,
+   "sn_toe": [
+    -0.59,
+    0.071,
+    -0.07
+   ],
+   "sn_pelvis": [
+    -0.308,
+    0.18,
+    0.815
+   ],
+   "sn_yaw": 0.612,
+   "sn_com": [
+    -0.32,
+    0.199,
+    0.792
+   ],
+   "ct_toe": [
+    -0.133,
+    0.021,
+    -0.013
+   ],
+   "ct_vtoe": [
+    8.86,
+    -1.75,
+    1.62
+   ],
+   "seed": 6005,
+   "noise": 0.0,
+   "dx": 0.0,
+   "dy": -0.02,
+   "groups": null,
+   "wall": 1.2
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 0.089,
+   "t_touch": 1.68,
+   "touch_body": "toes_l",
+   "cross_y": -2.655,
+   "cross_z": null,
+   "launch": -39.35,
+   "elev": 0.65,
+   "fallen": true,
+   "t_fall": 2.96,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.217,
+    -0.012,
+    0.045
+   ],
+   "keeper": "random",
+   "keeper_y": -2.908,
+   "r_toe_ball_min": 0.243,
+   "steps": 296,
+   "time": 2.96,
+   "kick_ok": false,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.75,
+    "snap": 1.98,
+    "follow": 1.99,
+    "land": 2.21
+   },
+   "sw_t": 1.749999999999918,
+   "sw_toe": [
+    -0.935,
+    0.033,
+    -0.067
+   ],
+   "sw_pelvis": [
+    -0.395,
+    0.172,
+    0.7
+   ],
+   "sw_yaw": 0.662,
+   "sw_com": [
+    -0.463,
+    0.156,
+    0.705
+   ],
+   "sn_t": 1.9799999999998927,
+   "sn_toe": [
+    -0.567,
+    -0.006,
+    -0.069
+   ],
+   "sn_pelvis": [
+    -0.23,
+    0.23,
+    0.684
+   ],
+   "sn_yaw": 0.863,
+   "sn_com": [
+    -0.262,
+    0.269,
+    0.644
+   ],
+   "ct_toe": [
+    -0.953,
+    0.032,
+    -0.06
+   ],
+   "ct_vtoe": [
+    0.37,
+    0.04,
+    -0.08
+   ],
+   "seed": 6000,
+   "noise": 0.0,
+   "dx": 0.0,
+   "dy": 0.05,
+   "groups": null,
+   "wall": 1.4
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 5.006,
+   "t_touch": 2.08,
+   "touch_body": "calcn_r",
+   "cross_y": 9.173,
+   "cross_z": null,
+   "launch": 31.22,
+   "elev": 4.03,
+   "fallen": true,
+   "t_fall": 3.95,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.212,
+    0.009,
+    -0.037
+   ],
+   "keeper": "stationary",
+   "keeper_y": 0.028,
+   "r_toe_ball_min": 0.143,
+   "steps": 395,
+   "time": 3.95,
+   "kick_ok": false,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.75,
+    "snap": 1.97,
+    "follow": 2.09,
+    "land": 2.31,
+    "recover": 2.97
+   },
+   "sw_t": 1.749999999999918,
+   "sw_toe": [
+    -0.931,
+    0.012,
+    -0.063
+   ],
+   "sw_pelvis": [
+    -0.401,
+    0.195,
+    0.726
+   ],
+   "sw_yaw": 0.652,
+   "sw_com": [
+    -0.467,
+    0.173,
+    0.732
+   ],
+   "sn_t": 1.9699999999998938,
+   "sn_toe": [
+    -0.563,
+    0.013,
+    -0.07
+   ],
+   "sn_pelvis": [
+    -0.251,
+    0.242,
+    0.693
+   ],
+   "sn_yaw": 1.047,
+   "sn_com": [
+    -0.278,
+    0.274,
+    0.652
+   ],
+   "ct_toe": [
+    -0.074,
+    -0.131,
+    -0.025
+   ],
+   "ct_vtoe": [
+    7.69,
+    -1.12,
+    0.66
+   ],
+   "seed": 6001,
+   "noise": 0.0,
+   "dx": 0.0,
+   "dy": 0.05,
+   "groups": null,
+   "wall": 1.8
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 0.089,
+   "t_touch": 1.68,
+   "touch_body": "toes_l",
+   "cross_y": -2.655,
+   "cross_z": null,
+   "launch": -39.35,
+   "elev": 0.65,
+   "fallen": true,
+   "t_fall": 2.96,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.217,
+    -0.012,
+    0.045
+   ],
+   "keeper": "stationary",
+   "keeper_y": -2.332,
+   "r_toe_ball_min": 0.243,
+   "steps": 296,
+   "time": 2.96,
+   "kick_ok": false,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.75,
+    "snap": 1.98,
+    "follow": 1.99,
+    "land": 2.21
+   },
+   "sw_t": 1.749999999999918,
+   "sw_toe": [
+    -0.935,
+    0.033,
+    -0.067
+   ],
+   "sw_pelvis": [
+    -0.395,
+    0.172,
+    0.7
+   ],
+   "sw_yaw": 0.662,
+   "sw_com": [
+    -0.463,
+    0.156,
+    0.705
+   ],
+   "sn_t": 1.9799999999998927,
+   "sn_toe": [
+    -0.567,
+    -0.006,
+    -0.069
+   ],
+   "sn_pelvis": [
+    -0.23,
+    0.23,
+    0.684
+   ],
+   "sn_yaw": 0.863,
+   "sn_com": [
+    -0.262,
+    0.269,
+    0.644
+   ],
+   "ct_toe": [
+    -0.953,
+    0.032,
+    -0.06
+   ],
+   "ct_vtoe": [
+    0.37,
+    0.04,
+    -0.08
+   ],
+   "seed": 6002,
+   "noise": 0.0,
+   "dx": 0.0,
+   "dy": 0.05,
+   "groups": null,
+   "wall": 1.4
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 0.089,
+   "t_touch": 1.68,
+   "touch_body": "toes_l",
+   "cross_y": -2.655,
+   "cross_z": null,
+   "launch": -39.35,
+   "elev": 0.65,
+   "fallen": true,
+   "t_fall": 2.96,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.217,
+    -0.012,
+    0.045
+   ],
+   "keeper": "stationary",
+   "keeper_y": -2.94,
+   "r_toe_ball_min": 0.243,
+   "steps": 296,
+   "time": 2.96,
+   "kick_ok": false,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.75,
+    "snap": 1.98,
+    "follow": 1.99,
+    "land": 2.21
+   },
+   "sw_t": 1.749999999999918,
+   "sw_toe": [
+    -0.935,
+    0.033,
+    -0.067
+   ],
+   "sw_pelvis": [
+    -0.395,
+    0.172,
+    0.7
+   ],
+   "sw_yaw": 0.662,
+   "sw_com": [
+    -0.463,
+    0.156,
+    0.705
+   ],
+   "sn_t": 1.9799999999998927,
+   "sn_toe": [
+    -0.567,
+    -0.006,
+    -0.069
+   ],
+   "sn_pelvis": [
+    -0.23,
+    0.23,
+    0.684
+   ],
+   "sn_yaw": 0.863,
+   "sn_com": [
+    -0.262,
+    0.269,
+    0.644
+   ],
+   "ct_toe": [
+    -0.953,
+    0.032,
+    -0.06
+   ],
+   "ct_vtoe": [
+    0.37,
+    0.04,
+    -0.08
+   ],
+   "seed": 6003,
+   "noise": 0.0,
+   "dx": 0.0,
+   "dy": 0.05,
+   "groups": null,
+   "wall": 1.4
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 5.006,
+   "t_touch": 2.08,
+   "touch_body": "calcn_r",
+   "cross_y": 9.173,
+   "cross_z": null,
+   "launch": 31.22,
+   "elev": 4.03,
+   "fallen": true,
+   "t_fall": 3.95,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.212,
+    0.009,
+    -0.037
+   ],
+   "keeper": "stationary",
+   "keeper_y": 0.803,
+   "r_toe_ball_min": 0.143,
+   "steps": 395,
+   "time": 3.95,
+   "kick_ok": false,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.75,
+    "snap": 1.97,
+    "follow": 2.09,
+    "land": 2.31,
+    "recover": 2.97
+   },
+   "sw_t": 1.749999999999918,
+   "sw_toe": [
+    -0.931,
+    0.012,
+    -0.063
+   ],
+   "sw_pelvis": [
+    -0.401,
+    0.195,
+    0.726
+   ],
+   "sw_yaw": 0.652,
+   "sw_com": [
+    -0.467,
+    0.173,
+    0.732
+   ],
+   "sn_t": 1.9699999999998938,
+   "sn_toe": [
+    -0.563,
+    0.013,
+    -0.07
+   ],
+   "sn_pelvis": [
+    -0.251,
+    0.242,
+    0.693
+   ],
+   "sn_yaw": 1.047,
+   "sn_com": [
+    -0.278,
+    0.274,
+    0.652
+   ],
+   "ct_toe": [
+    -0.074,
+    -0.131,
+    -0.025
+   ],
+   "ct_vtoe": [
+    7.69,
+    -1.12,
+    0.66
+   ],
+   "seed": 6004,
+   "noise": 0.0,
+   "dx": 0.0,
+   "dy": 0.05,
+   "groups": null,
+   "wall": 1.8
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 5.006,
+   "t_touch": 2.08,
+   "touch_body": "calcn_r",
+   "cross_y": 9.173,
+   "cross_z": null,
+   "launch": 31.22,
+   "elev": 4.03,
+   "fallen": true,
+   "t_fall": 3.95,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.212,
+    0.009,
+    -0.037
+   ],
+   "keeper": "random",
+   "keeper_y": 2.679,
+   "r_toe_ball_min": 0.143,
+   "steps": 395,
+   "time": 3.95,
+   "kick_ok": false,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.75,
+    "snap": 1.97,
+    "follow": 2.09,
+    "land": 2.31,
+    "recover": 2.97
+   },
+   "sw_t": 1.749999999999918,
+   "sw_toe": [
+    -0.931,
+    0.012,
+    -0.063
+   ],
+   "sw_pelvis": [
+    -0.401,
+    0.195,
+    0.726
+   ],
+   "sw_yaw": 0.652,
+   "sw_com": [
+    -0.467,
+    0.173,
+    0.732
+   ],
+   "sn_t": 1.9699999999998938,
+   "sn_toe": [
+    -0.563,
+    0.013,
+    -0.07
+   ],
+   "sn_pelvis": [
+    -0.251,
+    0.242,
+    0.693
+   ],
+   "sn_yaw": 1.047,
+   "sn_com": [
+    -0.278,
+    0.274,
+    0.652
+   ],
+   "ct_toe": [
+    -0.074,
+    -0.131,
+    -0.025
+   ],
+   "ct_vtoe": [
+    7.69,
+    -1.12,
+    0.66
+   ],
+   "seed": 6005,
+   "noise": 0.0,
+   "dx": 0.0,
+   "dy": 0.05,
+   "groups": null,
+   "wall": 1.7
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 11.075,
+   "t_touch": 2.01,
+   "touch_body": "calcn_r",
+   "cross_y": -1.659,
+   "cross_z": null,
+   "launch": -8.11,
+   "elev": 4.36,
+   "fallen": true,
+   "t_fall": 2.89,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.206,
+    -0.014,
+    0.015
+   ],
+   "keeper": "random",
+   "keeper_y": -2.901,
+   "r_toe_ball_min": 0.112,
+   "steps": 289,
+   "time": 2.89,
+   "kick_ok": false,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.73,
+    "snap": 1.93,
+    "follow": 2.02,
+    "land": 2.24
+   },
+   "sw_t": 1.7299999999999203,
+   "sw_toe": [
+    -0.936,
+    -0.108,
+    -0.051
+   ],
+   "sw_pelvis": [
+    -0.432,
+    0.092,
+    0.779
+   ],
+   "sw_yaw": 0.59,
+   "sw_com": [
+    -0.488,
+    0.089,
+    0.777
+   ],
+   "sn_t": 1.9299999999998982,
+   "sn_toe": [
+    -0.568,
+    0.043,
+    -0.069
+   ],
+   "sn_pelvis": [
+    -0.305,
+    0.147,
+    0.826
+   ],
+   "sn_yaw": 0.581,
+   "sn_com": [
+    -0.318,
+    0.17,
+    0.801
+   ],
+   "ct_toe": [
+    -0.105,
+    0.016,
+    0.001
+   ],
+   "ct_vtoe": [
+    7.8,
+    -1.06,
+    1.99
+   ],
+   "seed": 6000,
+   "noise": 0.0,
+   "dx": 0.0,
+   "dy": -0.05,
+   "groups": null,
+   "wall": 1.2
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 5.84,
+   "t_touch": 2.01,
+   "touch_body": "calcn_r",
+   "cross_y": -6.524,
+   "cross_z": null,
+   "launch": -24.36,
+   "elev": -0.65,
+   "fallen": true,
+   "t_fall": 3.19,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.184,
+    -0.006,
+    0.05
+   ],
+   "keeper": "stationary",
+   "keeper_y": 0.028,
+   "r_toe_ball_min": 0.154,
+   "steps": 319,
+   "time": 3.19,
+   "kick_ok": false,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.73,
+    "snap": 1.92,
+    "follow": 2.02,
+    "land": 2.24,
+    "recover": 3.05
+   },
+   "sw_t": 1.7299999999999203,
+   "sw_toe": [
+    -0.931,
+    -0.106,
+    -0.05
+   ],
+   "sw_pelvis": [
+    -0.43,
+    0.096,
+    0.781
+   ],
+   "sw_yaw": 0.61,
+   "sw_com": [
+    -0.486,
+    0.093,
+    0.779
+   ],
+   "sn_t": 1.9199999999998993,
+   "sn_toe": [
+    -0.555,
+    0.086,
+    -0.074
+   ],
+   "sn_pelvis": [
+    -0.299,
+    0.136,
+    0.841
+   ],
+   "sn_yaw": 0.627,
+   "sn_com": [
+    -0.317,
+    0.167,
+    0.812
+   ],
+   "ct_toe": [
+    -0.112,
+    0.099,
+    0.001
+   ],
+   "ct_vtoe": [
+    7.58,
+    0.87,
+    0.93
+   ],
+   "seed": 6001,
+   "noise": 0.0,
+   "dx": 0.0,
+   "dy": -0.05,
+   "groups": null,
+   "wall": 1.3
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 11.075,
+   "t_touch": 2.01,
+   "touch_body": "calcn_r",
+   "cross_y": -1.659,
+   "cross_z": null,
+   "launch": -8.11,
+   "elev": 4.36,
+   "fallen": true,
+   "t_fall": 2.89,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.206,
+    -0.014,
+    0.015
+   ],
+   "keeper": "stationary",
+   "keeper_y": -2.332,
+   "r_toe_ball_min": 0.112,
+   "steps": 289,
+   "time": 2.89,
+   "kick_ok": false,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.73,
+    "snap": 1.93,
+    "follow": 2.02,
+    "land": 2.24
+   },
+   "sw_t": 1.7299999999999203,
+   "sw_toe": [
+    -0.936,
+    -0.108,
+    -0.051
+   ],
+   "sw_pelvis": [
+    -0.432,
+    0.092,
+    0.779
+   ],
+   "sw_yaw": 0.59,
+   "sw_com": [
+    -0.488,
+    0.089,
+    0.777
+   ],
+   "sn_t": 1.9299999999998982,
+   "sn_toe": [
+    -0.568,
+    0.043,
+    -0.069
+   ],
+   "sn_pelvis": [
+    -0.305,
+    0.147,
+    0.826
+   ],
+   "sn_yaw": 0.581,
+   "sn_com": [
+    -0.318,
+    0.17,
+    0.801
+   ],
+   "ct_toe": [
+    -0.105,
+    0.016,
+    0.001
+   ],
+   "ct_vtoe": [
+    7.8,
+    -1.06,
+    1.99
+   ],
+   "seed": 6002,
+   "noise": 0.0,
+   "dx": 0.0,
+   "dy": -0.05,
+   "groups": null,
+   "wall": 1.3
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 11.075,
+   "t_touch": 2.01,
+   "touch_body": "calcn_r",
+   "cross_y": -1.659,
+   "cross_z": null,
+   "launch": -8.11,
+   "elev": 4.36,
+   "fallen": true,
+   "t_fall": 2.89,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.206,
+    -0.014,
+    0.015
+   ],
+   "keeper": "stationary",
+   "keeper_y": -2.94,
+   "r_toe_ball_min": 0.112,
+   "steps": 289,
+   "time": 2.89,
+   "kick_ok": false,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.73,
+    "snap": 1.93,
+    "follow": 2.02,
+    "land": 2.24
+   },
+   "sw_t": 1.7299999999999203,
+   "sw_toe": [
+    -0.936,
+    -0.108,
+    -0.051
+   ],
+   "sw_pelvis": [
+    -0.432,
+    0.092,
+    0.779
+   ],
+   "sw_yaw": 0.59,
+   "sw_com": [
+    -0.488,
+    0.089,
+    0.777
+   ],
+   "sn_t": 1.9299999999998982,
+   "sn_toe": [
+    -0.568,
+    0.043,
+    -0.069
+   ],
+   "sn_pelvis": [
+    -0.305,
+    0.147,
+    0.826
+   ],
+   "sn_yaw": 0.581,
+   "sn_com": [
+    -0.318,
+    0.17,
+    0.801
+   ],
+   "ct_toe": [
+    -0.105,
+    0.016,
+    0.001
+   ],
+   "ct_vtoe": [
+    7.8,
+    -1.06,
+    1.99
+   ],
+   "seed": 6003,
+   "noise": 0.0,
+   "dx": 0.0,
+   "dy": -0.05,
+   "groups": null,
+   "wall": 1.3
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 5.84,
+   "t_touch": 2.01,
+   "touch_body": "calcn_r",
+   "cross_y": -6.524,
+   "cross_z": null,
+   "launch": -24.36,
+   "elev": -0.65,
+   "fallen": true,
+   "t_fall": 3.19,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.184,
+    -0.006,
+    0.05
+   ],
+   "keeper": "stationary",
+   "keeper_y": 0.803,
+   "r_toe_ball_min": 0.154,
+   "steps": 319,
+   "time": 3.19,
+   "kick_ok": false,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.73,
+    "snap": 1.92,
+    "follow": 2.02,
+    "land": 2.24,
+    "recover": 3.05
+   },
+   "sw_t": 1.7299999999999203,
+   "sw_toe": [
+    -0.931,
+    -0.106,
+    -0.05
+   ],
+   "sw_pelvis": [
+    -0.43,
+    0.096,
+    0.781
+   ],
+   "sw_yaw": 0.61,
+   "sw_com": [
+    -0.486,
+    0.093,
+    0.779
+   ],
+   "sn_t": 1.9199999999998993,
+   "sn_toe": [
+    -0.555,
+    0.086,
+    -0.074
+   ],
+   "sn_pelvis": [
+    -0.299,
+    0.136,
+    0.841
+   ],
+   "sn_yaw": 0.627,
+   "sn_com": [
+    -0.317,
+    0.167,
+    0.812
+   ],
+   "ct_toe": [
+    -0.112,
+    0.099,
+    0.001
+   ],
+   "ct_vtoe": [
+    7.58,
+    0.87,
+    0.93
+   ],
+   "seed": 6004,
+   "noise": 0.0,
+   "dx": 0.0,
+   "dy": -0.05,
+   "groups": null,
+   "wall": 1.3
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 5.84,
+   "t_touch": 2.01,
+   "touch_body": "calcn_r",
+   "cross_y": -6.524,
+   "cross_z": null,
+   "launch": -24.36,
+   "elev": -0.65,
+   "fallen": true,
+   "t_fall": 3.19,
+   "strike_zone": "toe",
+   "strike_point": [
+    0.184,
+    -0.006,
+    0.05
+   ],
+   "keeper": "random",
+   "keeper_y": 2.679,
+   "r_toe_ball_min": 0.154,
+   "steps": 319,
+   "time": 3.19,
+   "kick_ok": false,
+   "events": {
+    "set": 0.01,
+    "shift": 0.41,
+    "lift": 1.29,
+    "reach": 1.32,
+    "swing": 1.73,
+    "snap": 1.92,
+    "follow": 2.02,
+    "land": 2.24,
+    "recover": 3.05
+   },
+   "sw_t": 1.7299999999999203,
+   "sw_toe": [
+    -0.931,
+    -0.106,
+    -0.05
+   ],
+   "sw_pelvis": [
+    -0.43,
+    0.096,
+    0.781
+   ],
+   "sw_yaw": 0.61,
+   "sw_com": [
+    -0.486,
+    0.093,
+    0.779
+   ],
+   "sn_t": 1.9199999999998993,
+   "sn_toe": [
+    -0.555,
+    0.086,
+    -0.074
+   ],
+   "sn_pelvis": [
+    -0.299,
+    0.136,
+    0.841
+   ],
+   "sn_yaw": 0.627,
+   "sn_com": [
+    -0.317,
+    0.167,
+    0.812
+   ],
+   "ct_toe": [
+    -0.112,
+    0.099,
+    0.001
+   ],
+   "ct_vtoe": [
+    7.58,
+    0.87,
+    0.93
+   ],
+   "seed": 6005,
+   "noise": 0.0,
+   "dx": 0.0,
+   "dy": -0.05,
+   "groups": null,
+   "wall": 1.3
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 0.0,
+   "t_touch": null,
+   "touch_body": null,
+   "cross_y": null,
+   "cross_z": null,
+   "launch": null,
+   "elev": null,
+   "fallen": true,
+   "t_fall": 1.49,
+   "strike_zone": null,
+   "strike_point": null,
+   "keeper": "random",
+   "keeper_y": -2.908,
+   "r_toe_ball_min": 0.662,
+   "steps": 149,
+   "time": 1.49,
+   "kick_ok": false,
+   "events": {
+    "ap_hold": 0.01,
+    "r_shift": 0.31,
+    "r_lift": 0.51,
+    "r_reach": 0.91,
+    "r_settle": 1.1,
+    "l_shift": 1.35
+   },
+   "seed": 6000,
+   "noise": 0.0,
+   "dx": 0.0,
+   "dy": 0.075,
+   "groups": null,
+   "wall": 0.8
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 0.0,
+   "t_touch": null,
+   "touch_body": null,
+   "cross_y": null,
+   "cross_z": null,
+   "launch": null,
+   "elev": null,
+   "fallen": true,
+   "t_fall": 1.49,
+   "strike_zone": null,
+   "strike_point": null,
+   "keeper": "stationary",
+   "keeper_y": 0.028,
+   "r_toe_ball_min": 0.662,
+   "steps": 149,
+   "time": 1.49,
+   "kick_ok": false,
+   "events": {
+    "ap_hold": 0.01,
+    "r_shift": 0.31,
+    "r_lift": 0.51,
+    "r_reach": 0.91,
+    "r_settle": 1.1,
+    "l_shift": 1.35
+   },
+   "seed": 6001,
+   "noise": 0.0,
+   "dx": 0.0,
+   "dy": 0.075,
+   "groups": null,
+   "wall": 0.8
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 0.0,
+   "t_touch": null,
+   "touch_body": null,
+   "cross_y": null,
+   "cross_z": null,
+   "launch": null,
+   "elev": null,
+   "fallen": true,
+   "t_fall": 1.49,
+   "strike_zone": null,
+   "strike_point": null,
+   "keeper": "stationary",
+   "keeper_y": -2.332,
+   "r_toe_ball_min": 0.662,
+   "steps": 149,
+   "time": 1.49,
+   "kick_ok": false,
+   "events": {
+    "ap_hold": 0.01,
+    "r_shift": 0.31,
+    "r_lift": 0.51,
+    "r_reach": 0.91,
+    "r_settle": 1.1,
+    "l_shift": 1.35
+   },
+   "seed": 6002,
+   "noise": 0.0,
+   "dx": 0.0,
+   "dy": 0.075,
+   "groups": null,
+   "wall": 0.8
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 0.0,
+   "t_touch": null,
+   "touch_body": null,
+   "cross_y": null,
+   "cross_z": null,
+   "launch": null,
+   "elev": null,
+   "fallen": true,
+   "t_fall": 1.49,
+   "strike_zone": null,
+   "strike_point": null,
+   "keeper": "stationary",
+   "keeper_y": -2.94,
+   "r_toe_ball_min": 0.662,
+   "steps": 149,
+   "time": 1.49,
+   "kick_ok": false,
+   "events": {
+    "ap_hold": 0.01,
+    "r_shift": 0.31,
+    "r_lift": 0.51,
+    "r_reach": 0.91,
+    "r_settle": 1.1,
+    "l_shift": 1.35
+   },
+   "seed": 6003,
+   "noise": 0.0,
+   "dx": 0.0,
+   "dy": 0.075,
+   "groups": null,
+   "wall": 0.8
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 0.0,
+   "t_touch": null,
+   "touch_body": null,
+   "cross_y": null,
+   "cross_z": null,
+   "launch": null,
+   "elev": null,
+   "fallen": true,
+   "t_fall": 1.49,
+   "strike_zone": null,
+   "strike_point": null,
+   "keeper": "stationary",
+   "keeper_y": 0.803,
+   "r_toe_ball_min": 0.662,
+   "steps": 149,
+   "time": 1.49,
+   "kick_ok": false,
+   "events": {
+    "ap_hold": 0.01,
+    "r_shift": 0.31,
+    "r_lift": 0.51,
+    "r_reach": 0.91,
+    "r_settle": 1.1,
+    "l_shift": 1.35
+   },
+   "seed": 6004,
+   "noise": 0.0,
+   "dx": 0.0,
+   "dy": 0.075,
+   "groups": null,
+   "wall": 0.8
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 0.0,
+   "t_touch": null,
+   "touch_body": null,
+   "cross_y": null,
+   "cross_z": null,
+   "launch": null,
+   "elev": null,
+   "fallen": true,
+   "t_fall": 1.49,
+   "strike_zone": null,
+   "strike_point": null,
+   "keeper": "random",
+   "keeper_y": 2.679,
+   "r_toe_ball_min": 0.662,
+   "steps": 149,
+   "time": 1.49,
+   "kick_ok": false,
+   "events": {
+    "ap_hold": 0.01,
+    "r_shift": 0.31,
+    "r_lift": 0.51,
+    "r_reach": 0.91,
+    "r_settle": 1.1,
+    "l_shift": 1.35
+   },
+   "seed": 6005,
+   "noise": 0.0,
+   "dx": 0.0,
+   "dy": 0.075,
+   "groups": null,
+   "wall": 0.8
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 0.0,
+   "t_touch": null,
+   "touch_body": null,
+   "cross_y": null,
+   "cross_z": null,
+   "launch": null,
+   "elev": null,
+   "fallen": true,
+   "t_fall": 1.7,
+   "strike_zone": null,
+   "strike_point": null,
+   "keeper": "random",
+   "keeper_y": -2.908,
+   "r_toe_ball_min": 0.981,
+   "steps": 170,
+   "time": 1.7,
+   "kick_ok": false,
+   "events": {
+    "ap_hold": 0.01,
+    "l_shift": 0.31,
+    "l_lift": 0.77,
+    "l_reach": 0.95
+   },
+   "seed": 6000,
+   "noise": 0.0,
+   "dx": 0.0,
+   "dy": -0.075,
+   "groups": null,
+   "wall": 0.8
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 0.0,
+   "t_touch": null,
+   "touch_body": null,
+   "cross_y": null,
+   "cross_z": null,
+   "launch": null,
+   "elev": null,
+   "fallen": true,
+   "t_fall": 1.7,
+   "strike_zone": null,
+   "strike_point": null,
+   "keeper": "stationary",
+   "keeper_y": 0.028,
+   "r_toe_ball_min": 0.981,
+   "steps": 170,
+   "time": 1.7,
+   "kick_ok": false,
+   "events": {
+    "ap_hold": 0.01,
+    "l_shift": 0.31,
+    "l_lift": 0.77,
+    "l_reach": 0.95
+   },
+   "seed": 6001,
+   "noise": 0.0,
+   "dx": 0.0,
+   "dy": -0.075,
+   "groups": null,
+   "wall": 0.9
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 0.0,
+   "t_touch": null,
+   "touch_body": null,
+   "cross_y": null,
+   "cross_z": null,
+   "launch": null,
+   "elev": null,
+   "fallen": true,
+   "t_fall": 1.7,
+   "strike_zone": null,
+   "strike_point": null,
+   "keeper": "stationary",
+   "keeper_y": -2.332,
+   "r_toe_ball_min": 0.981,
+   "steps": 170,
+   "time": 1.7,
+   "kick_ok": false,
+   "events": {
+    "ap_hold": 0.01,
+    "l_shift": 0.31,
+    "l_lift": 0.77,
+    "l_reach": 0.95
+   },
+   "seed": 6002,
+   "noise": 0.0,
+   "dx": 0.0,
+   "dy": -0.075,
+   "groups": null,
+   "wall": 0.8
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 0.0,
+   "t_touch": null,
+   "touch_body": null,
+   "cross_y": null,
+   "cross_z": null,
+   "launch": null,
+   "elev": null,
+   "fallen": true,
+   "t_fall": 1.7,
+   "strike_zone": null,
+   "strike_point": null,
+   "keeper": "stationary",
+   "keeper_y": -2.94,
+   "r_toe_ball_min": 0.981,
+   "steps": 170,
+   "time": 1.7,
+   "kick_ok": false,
+   "events": {
+    "ap_hold": 0.01,
+    "l_shift": 0.31,
+    "l_lift": 0.77,
+    "l_reach": 0.95
+   },
+   "seed": 6003,
+   "noise": 0.0,
+   "dx": 0.0,
+   "dy": -0.075,
+   "groups": null,
+   "wall": 0.8
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 0.0,
+   "t_touch": null,
+   "touch_body": null,
+   "cross_y": null,
+   "cross_z": null,
+   "launch": null,
+   "elev": null,
+   "fallen": true,
+   "t_fall": 1.7,
+   "strike_zone": null,
+   "strike_point": null,
+   "keeper": "stationary",
+   "keeper_y": 0.803,
+   "r_toe_ball_min": 0.981,
+   "steps": 170,
+   "time": 1.7,
+   "kick_ok": false,
+   "events": {
+    "ap_hold": 0.01,
+    "l_shift": 0.31,
+    "l_lift": 0.77,
+    "l_reach": 0.95
+   },
+   "seed": 6004,
+   "noise": 0.0,
+   "dx": 0.0,
+   "dy": -0.075,
+   "groups": null,
+   "wall": 0.8
+  },
+  {
+   "goal": 0.0,
+   "ball_speed": 0.0,
+   "t_touch": null,
+   "touch_body": null,
+   "cross_y": null,
+   "cross_z": null,
+   "launch": null,
+   "elev": null,
+   "fallen": true,
+   "t_fall": 1.7,
+   "strike_zone": null,
+   "strike_point": null,
+   "keeper": "random",
+   "keeper_y": 2.679,
+   "r_toe_ball_min": 0.981,
+   "steps": 170,
+   "time": 1.7,
+   "kick_ok": false,
+   "events": {
+    "ap_hold": 0.01,
+    "l_shift": 0.31,
+    "l_lift": 0.77,
+    "l_reach": 0.95
+   },
+   "seed": 6005,
+   "noise": 0.0,
+   "dx": 0.0,
+   "dy": -0.075,
+   "groups": null,
+   "wall": 0.8
+  }
+ ]
+}

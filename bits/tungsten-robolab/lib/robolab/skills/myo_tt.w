@@ -371,10 +371,10 @@
     # the same phase when the ball arrives; the trunk and grip switch at once)
     arm_bh = backhand
     arm_bh = Latch.test("bh_go", ->(f, e, c) bh_go(f)) if @bh_lead > ~0.0
-    mv2.add(Chunk.new("ready", @dur_ready).pose(p_ready).hold_until(Latch.any([due, arm_bh]), ~2.5).branch(to_bh_ready).correct(aim, @spring))
-    @stroke = mv2.add(Chunk.new("stroke", @t_push).pose(p_ready).ease(:min_jerk).hold_until(Latch.any([felt, Latch.after(@t_push)])).correct(aim, @spring))
-    @follow = mv2.add(Chunk.new("follow", @t_follow).pose(p_ready).correct(aim, @spring))
-    mv2.add(Chunk.new("hold", ~0.2).pose(p_ready).hold_until(Latch.after(~100.0)).correct(aim, @spring))
+    mv2.add(Chunk.new("ready", @dur_ready).pose(p_ready).gain(@fh_gain).hold_until(Latch.any([due, arm_bh]), ~2.5).branch(to_bh_ready).correct(aim, @spring))
+    @stroke = mv2.add(Chunk.new("stroke", @t_push).pose(p_ready).gain(@fh_gain).ease(:min_jerk).hold_until(Latch.any([felt, Latch.after(@t_push)])).correct(aim, @spring))
+    @follow = mv2.add(Chunk.new("follow", @t_follow).pose(p_ready).gain(@fh_gain).correct(aim, @spring))
+    mv2.add(Chunk.new("hold", ~0.2).pose(p_ready).gain(@fh_gain).hold_until(Latch.after(~100.0)).correct(aim, @spring))
     # the backhand family: the same chunks from the backhand ready posture
     # (bh_gain: the backhand arm's reflex gain multiplier, a stiffer arm)
     # (bh_ps: a pulse-step backhand, see bh_set below: the ready movement
@@ -586,6 +586,7 @@
     @bh_k_z = param("bh_k_z", ~0.0, ~0.0, ~30.0)
     @bh_k_n = param("bh_k_n", ~0.0, ~0.0, ~30.0)
     @bh_p_n = param("bh_p_n", ~0.0, ~0.0, ~1.5)
+    @bh_p_z = param("bh_p_z", ~0.0, ~0.0, ~1.5)
     @bh_grip = param("bh_grip", ~0.0, ~-0.2, ~0.4)
     @bh_grip_drive = param("bh_grip_drive", ~0.0, ~0.0, ~0.8)
     @bh_dur = param("bh_dur", ~0.25, ~0.05, ~0.5)
@@ -704,7 +705,7 @@
     @bh_dt_swing = param("bh_dt_swing", ~0.0, ~0.0, ~0.2)
     @bh_dd_push = param("bh_dd_push", ~0.0, ~-0.3, ~0.2)
     @bh_dnz = param("bh_dnz", ~0.0, ~-0.3, ~0.3)
-    @bh_box_dx = param("bh_box_dx", ~0.0, ~0.0, ~0.5)
+    @bh_box_dx = param("bh_box_dx", ~0.0, ~-0.5, ~0.5)
     # jac_live: the servo, anticipation and push use the hand's Jacobians at
     # the measured posture, every tick (the task's hand_jac sensor: forward
     # kinematics of the model at the observed joint angles, slaved joints
@@ -728,6 +729,7 @@
     # backhand's servo then instead of at t_servo (a servo integrating
     # through the swing winds up on errors the swing itself makes)
     @bh_gain = param("bh_gain", ~1.0, ~0.2, ~3.0)
+    @fh_gain = param("fh_gain", ~1.0, ~0.2, ~3.0)
     # bh_stiff >= 0: the backhand arm's own co-contraction (the shared stiff,
     # 0.11 in the P2 params, adds stiff / 2 to every posed muscle's
     # threshold: with the reflex gain that alone saturates most of the arm,
@@ -1279,6 +1281,15 @@
 
   # ---- seeing the ball -----------------------------------------------------------
 
+  # The ball's crossing of the pad's plane, and where it rises through a
+  # height, from the ball seen this tick (hooks for the model of the ball: a
+  # later round guards the tick of the table bounce).
+  -> plan_ball(p, v, f)
+    MyoTTBall.intercept(p, v, @xp, @bounced)
+
+  -> height_ball(p, v, zt)
+    MyoTTBall.at_height(p, v, zt, @bounced)
+
   -> before(f, ctl)
     @bounced = true if f.at("env_touching_info", 1) > ~0.5
     @hit = true if f.at("env_touching_info", 0) > ~0.5
@@ -1300,7 +1311,7 @@
       i += 1
     live_jacobians(f) if @jac_live > ~0.5 && f.has?("hand_jac") && (@jac_live < ~1.5 || @side == 2)
     @plan = nil
-    @plan = MyoTTBall.intercept(p, v, @xp, @bounced) if !@hit && f.t >= @react
+    @plan = plan_ball(p, v, f) if !@hit && f.t >= @react
     track_spin(f, p) if @spin_mode > ~0.5
     # the fly-by is per side: decide the side as soon as the ball is seen
     choose_side(f) if @plan != nil && (@pel_fly > ~0.0 || @bh_pel_fly > ~0.0)
@@ -1330,7 +1341,7 @@
         if @side == 2
           zt = zt + @bh_dz_hit
           xhi = @x_hi + @bh_dx_hi
-        xh = MyoTTBall.at_height(p, v, zt, @bounced)
+        xh = height_ball(p, v, zt)
         if xh != nil
           xw = clamp(xh, @x_lo, xhi)
           pel_x = f.at("env_pelvis_pos", 0)
@@ -1482,7 +1493,7 @@
     if @side == 2
       kz = @bh_k_z
       kn = @bh_k_n
-      pz = ~0.0
+      pz = @bh_p_z
       pn = @bh_p_n
     i = 0
     while i < 8

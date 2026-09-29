@@ -113,3 +113,77 @@ scratchpad/lj2/rob_am.sh waits for rob_f3.done, then robust ik_am.txt over am_no
 scratchpad/lj2/add_trial.py (under the arena lock; nothing existing touched): long_jump_v4_p95_robust96 = long_jump_v4_p95_robust32's scene, rules, body and metric on 96 fresh starts (seeds 9033-9128, the v3 robust96 seeds), task long_jump_v4_p95b.
 Seeded with the round 2 champion of the 32-start trial (params/long_jump_v4_p95_ik2.txt, controller long_jump_run-b20w): 2.5355 +- 0.369 m on 96 starts (failed 33 %; foot offset -0.43 m, speed_5m 6.34).
 The eval rows of every trial I run are in scratchpad/lj2/eval_*.txt (long_jump_eval.py, per-start lines with the failure class).
+
+## 2026-09-29 09:40 robust stages A and B: the more upright approach is the controllable one
+
+Steering scans on the F3 states (ikgap.py, 64 starts, un-robust ik_f3 program, penultimate gap error rel. to 1.817): (0.5, 0.25, 5): sd 0.15-0.16; (0.5, 0.4, 5): sd 0.136, a uniform spread -0.09..+0.39; (0.5, 0.25, 7): sd 0.22 (2 outliers); gentle long horizons (0.8, 0.12, 10): sd 0.26, 2 failed; (1.2, 0.1, 10): sd 0.31, 10 failed.
+ Moving the planner's target gap (j_board_shift 1.37 / 0.92 -> target 1.85 / 2.30) moves the mean gap (1.78 / 2.19) and leaves the spread (sd 0.15 / 0.20). A speed clamp (g2_v_cap 6.8-6.9 with g2_k_brake 1-2) does nothing to the v5 spread (sd 0.05 -> 0.04).
+ The floor is ~0.13 m of pen-gap sd: the take-off program has to absorb +-0.25 m.
+ROBUST B (F3 approach, rob_f3: 20 plant-l starts, 296k sims, 27 min): 11 of 20 valid at D_board 3.7-4.3, 9 INVALID. whyall.py: every invalid start is a free-foot ('r_toes') touch of the runway 0.03-0.05 s after the take-off (program time 0.39-0.42 s), all of them the FAST starts
+ (pen COM speed 6.9-7.1, gap error -0.3: gap 1.64-1.79, pen->plant flight ~0.07 s shorter): with the plant early the free leg has not swung up. Best objective -1.86 (mean 0.39, min -4.11). The un-robust programs do the same (A1 program on A1 states 17/24 valid, F3 program on F3 states 11/23).
+ROBUST A (am approach = A2_m495: upright final approach over 12.6 m, v5 6.60; rob_am, 20 plant-l starts): at generation 320: best 3.910, mean 4.014, MIN 3.806: ALL 20 valid (board-relative ballistic distance 3.8-4.0+ on every training start).
+ => the faster, less upright states (F3: +0.2 m/s at the board) break a single take-off program; the upright approach (torso -0.05 at the penultimate touchdown, free foot higher) is what a program can be robust to. Speed is traded for controllability: A is the working family.
+
+## 2026-09-29 09:50 what the robust program gives, and the price of robustness
+
+robust A stopped at generation 350 of ~580 (best flat since 310; snapshot out/long_jump_limits/rob_am_g340.txt = rob_am.txt): scripts harness_eval.py on its 20 training starts: 20 valid, 0 fouls, D_board mean 4.02 (min 3.81), foot offset -0.052 +- 0.041 (the program compensates the pen gap: slope -0.22, was -1.0; the pen gap sd is 0.166).
+ BUT the take-off is a compromise: on the NOMINAL start it gives vz 2.40 / vx 6.07 (D_board 4.13) where its own ideal has vz 3.10 / vx 6.3 (5.05); the short-gap fast starts (gap 1.6-1.7, vx 6.7-6.8) get vz 1.4-1.6 (D_board 3.8-3.9): keeping the foot behind the line with a shorter plant step costs vertical velocity.
+ The program's gap dependence is linear (e0 + gap_err x e1 on the excitation knots, the contraction targets do not depend on the gap) and was searched from the nominal ideal by CMA in 1800 dims: it found the foot-placement compensation but not the per-state ideals.
+ NEXT: ideal-control programs for the fast end (am_s8010, gap 1.59) and other gaps, then an initial e0 / e1 interpolated between them (a linear-in-gap program that starts near both ideals), then robust from there. Ideal for am_s8010 running (init lean_m495_ideal, 100k evals, log am_s8010_ideal.log).
+
+## 2026-09-29 10:05 full rollouts of robust A: the failures are the landing, gap outliers and a few mm of foul; steering asymmetry; j_st_rnd
+
+Full rollouts of params/long_jump_v4_gear_am_r1.txt (A2_m495 approach + rob_am_g340, chunk landing; c2) with scratchpad/lj2/eval_all.sh: 16 arena starts: 4 legal, mean 1.00; 32 fresh: 17 legal, mean 2.08; 96 fresh: 48 legal, mean 1.93 (scratchpad/lj2/eval_am_r1_*.txt).
+ Failure classes (16 starts): 5 somersault (short flights vz 1.6-2.4 with the chunk landing, as in round 2: the landing program is what saves them), 3 fouls of 2-19 mm (a 0.05 m check-mark shift), 3 fell-in-run, 2 far misses (foot 1.8 m behind the line).
+ The harness on the same starts' captured states (ar_*, harness_eval.py) predicts every one of them: the far misses and the runway-after-take-off invalids are the starts whose penultimate gap is OUTSIDE the trained range (2.18-2.49 vs a training range 1.6-2.08); on the 44 held-out captures of the 63 (both plant sides) the program is valid on 42 (D_board mean 4.08, 3 fouls).
+ Steering asymmetry (dbg traces of seeds 416, 404): a request to LENGTHEN the next step (plan 1.83 vs stride 1.65) comes out as a SHORT step (1.45): a forward reach makes the foot touch down early. Shortening works. So the starts that need lengthening end with a penultimate gap 0.2-0.5 m too FAR: the outliers.
+ New skill option j_st_rnd (c3, default 0.5 = the rounding of the step count to the nearest, bit-identical): toward 1.0 the plan shortens instead of lengthens. Penultimate gap errors on 80 starts (8001-8064 + 401-416): rnd 0.5: -0.34..+0.32, 0.75: -0.38..+0.18, 1.0: -0.44..+0.11.
+ Chosen j_st_rnd 0.75 (A4 = A2_m495 + j_st_rnd 0.75, scratchpad/lj2/A4.txt): the far outliers disappear, the near side (gap 1.55) is what a program handles (vz 1.4-1.6).
+ The fast-state ideal (am_s8010, gap 1.59, td constrained to 0.268, D from the foot) put the foot 0.45 m PAST the line: board-relative ideals now (ROBOLAB_LJ_BOARD=1, foul margin 4 cm) for the nominal and the fast start: scratchpad/lj2/ideal_board.sh.
+
+## 2026-09-29 10:25 board-relative ideals; robust stage A4 (two plant sides, gap-stratified)
+
+Board-relative ideals (ROBOLAB_LJ_BOARD=1, plant touchdown held at 0.268 s, foul margin 4 cm; out/long_jump_limits/am_nom_bd.json, am_s8010_bd.json): nominal start (gap 2.05): D 4.954 from the foot, foot 0.093 behind the line -> 4.861 from the line
+ (vx 5.99, vz 3.17, 27.9 deg, contact 0.092 s, L -3.3; before, foot mode: 4.78 from the line); the fast short-gap start (gap 1.59): a poor optimum, D 3.10 (vz 0.7): keeping the foot behind the line from a 1.59 m gap is a different take-off (a normal step) and the search from the foot-mode init
+ did not find it. So the two-ideal interpolation is not usable as it stands (needs a good ideal at the short-gap end); NOT pursued further for now.
+A4 captures (A4.txt = A2_m495 + j_st_rnd 0.75, controller c3, seeds 8001-8128): 125 states (3 no-plant: 8045, 8103, 8104): penultimate gap mean 1.891 sd 0.159, range 1.52-2.27, 93% within 1.55-2.15 (histogram 0.1 bins from 1.4: 0 3 15 23 14 36 25 6 3).
+Harness patched for training on both plant sides (side_perm / mirror_tab in long_jump_limits.py: robust and landing read the role tables mirrored for the other side; default single-side behaviour identical) and for board-relative ideals (ROBOLAB_LJ_BOARD/TD/TDW/MARGIN).
+robust stage A4: scratchpad/lj2/rob_a4.sh = robust rob_am_g340.txt --init rob_am_g340.txt --captures <32 gap-stratified a4 states: 26 plant-l, 6 plant-r, gaps 1.52-2.01 ...> --nk 19 --evals 400000 --sigma 0.03 --risk 0.3 --lmax=-1.5 (out rob_a4.txt, log rob_a4.log).
+
+## 2026-09-29 10:55 robust A4 done; full rollouts with the chunk landing; landing search started
+
+robust A4 (rob_a4.sh, 400k sims, 480 generations, 31 min; out/long_jump_limits/rob_a4_final.txt): 31 of the 32 training starts valid (board-relative distance 3.7-4.7, mean of the valid 4.34; plant offset -0.03, slope on the pen gap -0.04: the gap is compensated), 1 invalid (a free-toe touch of the runway after the take-off).
+ Held-out harness (93 captures of the same seeds set, both plant sides; harness_a4_val.txt): 86 valid, 3 fouls, D_board mean of the valid 4.39, min 3.58; the 7 invalid: 3 near extremes (gap 1.64-1.76) and 4 far outliers (2.16-2.27).
+ The harness predicts the full rollouts start by start (arena seeds 401-416 with the A4 approach: the 4 harness-invalid starts are the 4 fell-in-run starts, the valid ones jump within -0.1..+0.3 m of D_board).
+Full rollouts of params/long_jump_v4_gear_a4_r1.txt (A4 approach + rob_a4_final, chunk landing, c3): 16 arena starts: 7 legal (foul 3, somersault 2, fell-in-run 4), mean 1.97, legal mean 4.51;
+ 32 fresh: 21 legal (foul 2, somersault 7, fell 1, short 1), mean 2.95; 96 fresh: 60 legal (fell-in-run 9, foul 8, somersault 18, short 1), mean 2.81, mean of the legal 4.49.
+ The somersaults are the chunk landing on the short flights (short-gap fast starts: vz 1.5-1.9); the fell-in-run are the harness-invalid class (free toes touching the runway after the take-off); the fouls are mm-scale.
+landing search: scratchpad/lj2/land_a4.sh: 62 hand-overs (hoa4r: the 32 training starts + 1 execution-noise variant each; post_robust.sh a4 with VARIANTS=1 RECSEED=8039), the recorded chunk landing of seed 8039 (sand 0.584 s after the hand-over) as the base, tg 0.60, lz 0.8, h 0.08, nk 34,
+ tail 10 %, jitter, 300k sims. The chunk landing as the start rolls over on all 26 hand-overs of the short-gap starts (-4.6) and lands the others 4.2-4.9.
+
+## 2026-09-29 12:35 (resumed after the watchdog stall of ~11:36-12:14; everything below was checked against the files)
+
+State found: landing search land_a4.sh (pid 88001, --handover hoa4s, 2 workers) still alive, gen 60 at 4249 s (the stall cost ~35 min of its wall time; best 2.897, mean 4.401, min -4.617); snapshot out/long_jump_limits/land_a4.txt (12:15).
+Milestone promotions made just before the stall (arena history 11:41-11:48; params/long_jump_v4_gear_a4_m1.txt = scratchpad/lj2/A4c.txt (clean approach params) + rob_a4_final.txt + the generation-40 landing snapshot, controller bin/challengers/long_jump_run-c3):
+ - long_jump_v4_p95_robust32: 2.851 -> 3.9231 m (+1.072, p 0.005), 27 of 32 legal (foul 2, fell-in-run 2, somersault 1), mean of the legal 4.65: PROMOTED.
+ - long_jump_v4_p95_robust96 (new trial, seeded 2.5355): 3.4708 m (+0.935, p 0.0005), 72 of 96 legal (fell-in-run 9, foul 8, somersault 7), mean of the legal 4.62: PROMOTED.
+ - long_jump_v4_p95_robust (16 arena starts): 2.3146 vs the champion's 2.1452 (p 0.41): NOT promoted (8 of 16 legal: foul 3, somersault 1, fell-in-run 4).
+ (before that, the same take-off with the chunk landing: 16: 1.97 (7 legal), 32: 2.95 (21), 96: 2.81 (60); the landing table lifted the legal count on the 96 from 60 to 72 and the mean from 2.81 to 3.46.)
+Exactness re-checked with the current build (c3, source md5 a40a3113) after every skill and harness edit of the session, per-seed equal to the stored scores: long_jump_p95 (ik11) 5.1220, long_jump_p95_robust (pn1, 16 starts) 4.6305, long_jump_v4_p95 (nom1) 5.0650,
+ long_jump_v4_p95_robust32 (a4_m1) 3.9231, and the round-2 v4 params ik5 4.945 (one start) and ik2 2.1452 (16 starts). The harness patch (mixed plant sides in robust / landing; board-relative ideal; td constraint; margin; DV) is in place and BIT-IDENTICAL to HEAD for single-side inputs:
+ robust x0 scores [4.74, -1.17, 4.58] and landing x0 [4.81 4.8 4.78 4.54 4.63] equal in both versions (checked with a HEAD copy of the file).
+Worker cap now 4 while the 5-min load is under 30 (coordinator, 11:37 and 12:14): 5-min load 25.7 at 12:33.
+
+## 2026-09-29 12:50 landing converged; full rollouts with the generation-60 snapshot
+
+Landing search land_a4 (62 hand-overs) stopped by me (pid 88001) after generation 60-63: the snapshot at gen 60 lands 60 of the 62 hand-overs at 4.28-4.91 m from the line (harness); the two that roll over are the extreme short-gap start a4_s8124 (gap 1.52, vz 1.4) and its variant.
+Full rollouts with it (params/long_jump_v4_gear_a4_l60.txt = A4c + rob_a4_final + scratchpad/lj2/land_a4_g60.txt; c3): 16 arena starts 2.323 (8 legal; foul 3, somersault 1, fell-in-run 4), 32 fresh 3.934 (27 legal), 96 fresh 3.483 (72 legal; fell-in-run 9, foul 8, somersault 7), mean of the legal 4.65:
+identical counts to generation 40 (2.309 / 3.913 / 3.463): the landing is done; what is left is (1) the fell-in-run class (9 %, the take-off's invalid states: late stride phase, trunk forward, free foot behind), (2) mm-scale fouls (8 %), (3) somersaults after weak short flights (7 %).
+
+## 2026-09-29 13:10 check mark, greedy feedback, one-start landing
+
+Check-mark shift (j_board_shift -d, ik_gap0 +d: the planner aims d further back, the program sees the same gap error), params a4_l60 on the UNUSED seeds 7001-7096: d 0: 3.150 (66 legal), 0.02: 3.488 (74; foul 4, somersault 6, fell-in-run 12), 0.03: 3.625 (77), 0.04: 3.495 (74; foul 0, somersault 12, fell 10), 0.05: 3.411 (72). Plateau 0.02-0.05, peak 0.03: d = 0.03 (j_board_shift 1.08, ik_gap0 1.876777).
+Greedy swing-foot lag feedback (greedyfb --channels kf on the a4 captures, 94 train / 31 held out; out/long_jump_limits/fb_a4.txt): NOT adopted: the harness objective's weak-take-off penalty (vzmin 2.55) is v3's and the A family's vz is 1.5-2.4; the invalid count did not fall (train 3 -> 5, held out 2 -> 2).
+The harness-invalid class (8 of 125 a4 captures): no cheap detector: swing toe height at the penultimate touchdown does not separate them; 5 of 8 are 'late stride phase' states (COM 0.905-0.926 m vs 0.985, trunk +0.07..+0.19 rad, swing foot 0.52-0.62 m behind the COM), 3 are far gaps (2.16-2.27).
+One-start landing: hand-overs of the nom1 take-off program (nominal + 4 execution-noise variants, D_board 4.79-4.89, vz 2.95-3.13; out/long_jump_limits/hogp_handover.npz), the recorded chunk landing (sand 0.716 s after the hand-over; official 5.065, the HEAD marks, the jumper falls back) as the base;
+ scratchpad/lj2/land_gp1.sh: landing search, tg 0.73, nk 34, h 0.08, 4 workers (5-min load 24), 25k sims -> out/long_jump_limits/land_gp1.txt.

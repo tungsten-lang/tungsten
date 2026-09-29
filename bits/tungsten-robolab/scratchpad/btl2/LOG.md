@@ -133,3 +133,63 @@ the same as `oracle_multi.py --lead 32`.
   A4's pass 1 arrives with y from 0.23 to 0.48 at z 0.62 (its own reflex left hand adapts to that), so a single open-loop table cannot cover it: gain scheduling on the predicted
   arrival (T0 + ux Tx + uy Ty, `oracle_gs.py`, skill `pg_gs`; features: predicted crossing (x, y) from the skill's own sensor prediction) is the next step.
 - gs_left_a (started 10:5x): `oracle_gs.py --seeds 801..880 --val 881..900 --ctl bin/challengers/btl2-b1 --init scratchpad/btl2/runs/om_left_b_g100.npz --gens 800 --pop 48 --batch 12 --sigma 0.05 --gsigma 0.05 --workers 2 --out scratchpad/btl2/runs/gs_left_a.npz`
+- gs_left_a (gain-scheduled left return, 80 training starts): full-set J 2.18 -> 1.13 (good 22 -> 50/75), validation J 1.92 -> 0.22 (good 6 -> 12/19) by gen 300
+  (sep-CMA 816 dims; a first attempt with the repo's SepCMA diverged because that class clips x0 to [0,1] and penalises negative gains: replaced by an unboxed copy).
+  Closed loop on 32 unseen starts (901-932): gen 209: pass 2 complete 20/30, apex 0.58, streaks mean 1.53, >=2 on 20; gen 300: pass 2 17/30 (4 leg hits), streaks mean 1.44, >=2 on 17.
+  Pass 3 stays 0/21 (the right hand's A4 reflex stroke). The replay's J does not include the right hand's ability to take the ball; the next stage does.
+  Feature check: the oracle's predicted crossing (x, y) equals the skill's `receive_state` prediction to 2 mm on 4 starts.
+- gs_right_a (started 10:25): stage 1, the right hand's return pass, gain-scheduled: `oracle_gs.py --seeds 801..880 --val 881..900 --params scratchpad/btl2/params/pgLgs_g300.txt --ctl bin/challengers/btl2-b8 --hand r --muscles right_arm --bounce-no 3 --require 2 --t-lo 2.3 --t-hi 2.75 --t-end 3.6 --init scratchpad/btl2/runs/oracle_809_right.npz --gens 600 --pop 48 --batch 12 --sigma 0.06 --gsigma 0.04 --workers 2 --cache scratchpad/btl2/runs/rec_s1 --out scratchpad/btl2/runs/gs_right_a.npz`
+- Anchor fix (10:33): `oracle_gs.py` anchors a stage on the skill's own trigger rule (`oracle_multi.trigger_tick`: the first tick after the bounce with the ball off the floor whose
+  PREDICTED rising crossing of z 0.62 is within 0.165 s), not on the actual crossing: with the right hand's A4 reflex intercepting the return before z 0.62 the actual crossing does not exist
+  (52 of 100 starts were dropped from stage 1's set, biasing it). `--require N` now keeps starts whose first N passes crossed the gate without a leg hit (whoever failed to take the ball is not the question).
+  gs_right_a restarted: 53 training / 10 validation starts; gen 119: J 0.79, good 32/53, validation J 1.35 good 4/10.
+- First chain with both programs (stages 0+1, `pgLR_a.txt` = g300 left + gs_right_a g240; 32 unseen starts, 5 s): WORSE: pass 2 complete 9/30 (30%; 'body' 11, wrong hand 10),
+  pass 3 2/20; streaks mean 1.19, >=2 on 9. Cause: `evaluate` counted leg/arm hits only AFTER the release; the right arm's program brushes the incoming ball with its forearm before
+  the palm does (fails the previous pass). Fix: contacts of the ball with anything but the hands before the passer's first touch now count as a hit (J +3 +0.5 per tick). gs_right_b restarted from g240.
+- FIRST HONEST STREAKS BEYOND 2 (closed loop, 32 unseen starts 901-932, 5 s, `chain.py bin/challengers/btl2-b8 scratchpad/btl2/params/pgLR_b.txt`): params = A4 + gs left return
+  (gs_left_a gen 300) + gs right return (gs_right_b gen 100, trained on the left program's outputs with the corrected objective: forearm/body contacts on the incoming ball before the palm
+  touch, sampled at every physics step): pass 1 29/32, pass 2 16/30, pass 3 5/19, pass 4 1/6; streaks [4,3,3,3,3,2 x11,1 x13,0 x3] mean 1.59 (A4: 1.28), max 4, >=3 on 5 starts.
+  Residual analysis (`corr3.py`, stage 1 over the recorded starts): valid inputs (left return crossed the gate) have J <= 2.1 on ~80%; failures are returns arriving near the body midline
+  (crossing |y| < 0.13: the right forearm hits it) or where the left's own return went wrong. The stages have to be fitted to each other: alternate.
+- REPLAY vs CLOSED LOOP mismatch found (seed 902/905, stage 0): replay release (1.85,-1.96,-3.63) vs closed loop (1.58,-1.30,-3.66) with the same program. Two causes:
+  (1) the trigger tick differed by one tick on some starts (the replay's `ball_floor` guard used contact forces recomputed by mj_forward, the sensor's are from the last step): now BOTH use the state:
+  skill `pg_trigger` skips while ball z < 0.14 (b9), replay `trigger_tick` uses the ball's z before the tick; (2) the gain blocks of the gain-scheduled tables had grown large (CMA unbounded), so a 2 mm
+  difference in the predicted crossing (the skill's u vs the replay's u, from the same one-tick offset) moved activations by up to 0.27. Fix: gains bounded to +-1 activation per sigma of the feature (`--gmax`, skill `pg_gmax`),
+  feature jitter of 0.1 sigma in training (`--ujit`). gs_left_b restarted from gs_left_a_g300 with these.
+- gs_left_b (started 11:5x): `oracle_gs.py --seeds 801..880 --val 881..900 --ctl bin/challengers/btl2-b1 --init scratchpad/btl2/runs/gs_left_a_g300.npz --gens 800 --pop 48 --batch 12 --sigma 0.04 --gsigma 0.04 --gmax 1.0 --ujit 0.10 --workers 2 --out scratchpad/btl2/runs/gs_left_b.npz`
+- Two more replay/closed-loop mismatches found and fixed while building a two-stage replay (`oracle_pair.py`, self-test `pair_test.py`: replay of the recorded chain must reproduce the recorded ball path):
+  (3) the skill formed T0 + u Tx + u Ty, interpolated, then clipped to [0,1]; the oracle clipped at the knots, then interpolated: the skill now forms and bounds the knot values first (b10) and the
+  converter writes T0 unclipped for gain-scheduled tables; (4) THE SENSOR'S BALL POSITION IS ONE PHYSICS STEP STALE: the bridge reads `d.body("ball").xpos` as mj_step leaves it (before the last
+  integration), the replay's mj_forward recomputes it: 3 mm at 3 m/s, which shifted the predicted crossing by 1.8 mm and, through large gain terms, the program by up to 0.27 activation. The replay's
+  `pred_cross` now uses the recorded stale position. After both, the pair replay follows the recorded closed-loop ball to 0.4-2 mm for 65-120 ticks (was diverging at tick 37).
+- gs_left_b stopped (12:02, features were still the biased ones).
+- 11:3x coordinator: load is low; up to 4 rollout workers while the 5-minute load average is under 30 (2 above), still one search at a time.
+- pair_a (started 11:28, restarted 11:38 with 4 workers): `oracle_pair_search.py` joint search of the left and right returns on the two-stage replay (`oracle_pair.py`), 78 training / 20 validation
+  starts, records made closed loop with `scratchpad/btl2/params/pgLR_b.txt` (left gs_left_a g300 + right gs_right_b g100) and btl2-b10. Start: good(pair) 27/78, left good 67/78; the score is the left's release
+  (gate, no leg hit, bounce, energy; not its arrival point) plus the right's stroke on the ball the left sends. Output pair_a_L.npz / pair_a_R.npz.
+  Command: `oracle_pair_search.py --seeds 801..880 --val 881..900 --params scratchpad/btl2/params/pgLR_b.txt --ctl bin/challengers/btl2-b10 --initL scratchpad/btl2/runs/pair_a0_L.npz --initR scratchpad/btl2/runs/pair_a0_R.npz --gens 600 --pop 64 --batch 16 --sigma 0.03 --gmax 1000 --ujit 0.10 --workers 4 --out scratchpad/btl2/runs/pair_a`
+- 12:33 (the harness watchdog stalled this session 11:36-12:33; nothing lost: the skill patch (pg_*) and all tools are in the tree, pair_a kept running):
+  pair_a (joint left+right search on the two-stage replay) was stopped at gen 30 after 54 min: 108 s per generation under load (2x the trace, 1632 dims) and no real gain (mean-vector
+  full-set J 6.86 -> 6.56, good(pair) 21 -> 19/78, validation 10 -> 8/20). Too slow for what it gives; back to per-stage fits, now with the consistent features (unbiased predicted crossing, state-based
+  trigger guard, bounded gains, knot-level clipping), alternating left and right on re-recorded chains.
+- Pipeline v2 (12:34): every stage is fitted to be CONTRACTIVE and consistent with the next: tight arrival dead zones (position 2 cm, velocity 0.12 m/s) around the state the next stage works best from,
+  each stage fitted on chains recorded with the stages before it in the loop. Order: stage -1 (the launch pass, right hand, gain-scheduled: A4's arrival at the left hand spreads y 0.23-0.48, a program
+  that cancels the launch's variation makes everything downstream easier), then 0 (left), 1 (right), then the periodic cycle. New CLI: `--pos-dz --vel-dz --target --vt --no-pre` in oracle_gs.py.
+- gs_pass0 (started 12:34, 4 workers, load 21): `oracle_gs.py --seeds 801..880 --val 881..900 --params params/dribble_btl_a4.txt --ctl bin/challengers/btl2-b8 --hand r --muscles right_arm --bounce-no 1 --t-lo 1.35 --t-hi 1.75 --t-end 2.5 --init scratchpad/btl2/runs/om_pass0_g120.npz --gens 400 --pop 48 --batch 12 --sigma 0.04 --gsigma 0.03 --gmax 1.0 --ujit 0.10 --pos-dz 0.02 --vel-dz 0.12 --target -0.13,0.34 --vt -1.5,1.45 --no-pre --workers 4 --cache scratchpad/btl2/runs/rec_s_m1 --out scratchpad/btl2/runs/gs_pass0.npz`
+- gs_pass0 (stage -1, the launch pass as a gain-scheduled program, tight targets): after 10 generations: replay full-set J 0.161, good 80/80, validation good 20/20 (feature: the launch ball's predicted crossing,
+  nominal (0.52,-0.308), spread only (0.020, 0.021) m: the launch input is very consistent). Stopped at gen ~15 (load 38, 5-min 31: back to 2 workers). `pgP0.txt` = A4 + gs_pass0_g10 as pass 0 (pg_first 0):
+  closed loop, downstream still A4's reflex left hand, 16 unseen starts: release 1 vz -3.61 +- 0.15, |vh| 2.82 +- 0.13 (A4 -3.34 +- 0.11, 2.64 +- 0.16); pass 1 complete 8/16 (the reflex left hand cannot take it).
+- gs_left_c (started 12:45, 2 workers): stage 0 (left) fitted with stage -1 in the loop (`--params scratchpad/btl2/params/pgP0.txt --ctl bin/challengers/btl2-b11`, records in rec_s0v2), tight arrival
+  targets (0.45,-0.25) / (1.5,-1.5) m/s with dead zones 3 cm / 0.15 m/s, init gs_left_b_stop, gmax 1, ujit 0.1: `oracle_gs.py --seeds 801..880 --val 881..900 --hand l --muscles left_arm --bounce-no 2 --t-lo 1.70 --t-hi 2.40 --t-end 3.0 --require 1 --init scratchpad/btl2/runs/gs_left_b_stop.npz --gens 500 --pop 48 --batch 12 --sigma 0.04 --gsigma 0.04 --gmax 1.0 --ujit 0.10 --pos-dz 0.03 --vel-dz 0.15 --target=0.45,-0.25 --vt=1.5,-1.5 --workers 2 --cache scratchpad/btl2/runs/rec_s0v2 --out scratchpad/btl2/runs/gs_left_c.npz`
+- ARENA: new trial `dribble_btl_streak_fresh32` (32 fresh starts, seeds 1101-1132, never used in any tuning; added to trials.json, no existing entry changed) seeded with A4
+  (controller bin/challengers/dribble_btl-a2, params/dribble_btl_a4.txt, --task dribble_btl_v3): btl_streak mean 1.2188 +- 0.27, btl_rate 0.122.
+- 12:5x resume after the watchdog stall: the cosmetic skill edit (comments/header only) compiles to the same binary (`./build.sh dribble_btl` "(cache)", sha1 equal to
+  bin/challengers/btl2-b11); A4 params replay bit-identically on b11 (seeds 601, 705, 716; `scratchpad/btl/identity.py dribble_btl_v3 params/dribble_btl_a4.txt
+  bin/challengers/dribble_btl-a2 bin/challengers/btl2-b11 <seed> 8`).
+- gs_left_c gen 19: mean-vector full-set J 2.29 good 27/60 (start 9.11, 0/60), validation J 2.02 good 9/19. Load 27-32: 2 workers.
+- Arena, banked while stage 0 runs (2 more workers, load 5-min 28): pgLR_b (the first ORACLE chain, A4 + gs left g300 + gs right b g100) with btl2-b8 on `dribble_btl_streak_fresh32`
+  (`arena.py eval dribble_btl_streak_fresh32 --params scratchpad/btl2/params/pgLR_b.txt --controller bin/challengers/btl2-b8 --task dribble_btl_v3 --workers 2 --note "ORACLE ..."`, log runs/arena_pgLR_b_fresh32.log).
+- ARENA RESULT (12:52, not promoted yet): `dribble_btl_streak_fresh32`, pgLR_b (ORACLE, btl2-b8): btl_streak 1.5000 +- 0.278 (A4 champion 1.2188), paired diff +0.281, sign-flip p = 0.019 (a win by the arena's rule).
+  Per start (chain.py 1101-1133, 15 s, log runs/chain_pgLR_b_fresh32.log): streaks [3,3, 2 x16, 1 x10, 0 x4] (mean 1.50, >=2 on 18, >=3 on 2); pass 1 28/32 ok, pass 2 18/29 (62%),
+  pass 3 2/21 (10%: 19 x bounces_or_wrong_hand, rise apex 0.55), pass 4 0/2. The right hand's return stage (pass 3) is the weak link of pgLR_b: it was fitted to the wrong arrivals.
+- gs_left_c gen 29: full-set J 1.81 good 26/60, validation J 1.24 good 11/19.

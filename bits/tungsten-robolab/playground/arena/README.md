@@ -28,3 +28,10 @@ Rules for challengers:
   starts the smallest possible p is 2^-k, so a challenger that only rescues
   2 falls on an 8-start trial cannot win (p >= 0.25). `search_jump_robust`
   (32 starts, larger perturbation) exists for exactly that reason.
+
+`*_ng` trials (soccer balance) run `tasks/myo_soccer_ng.py`, the soccer task with a guard against a MuJoCo 3.6.0 tendon-wrap NaN
+(`length_circle`: `acos` of a dot product that rounds above 1; see `playground/repros/mujoco_wrap_nan.md`). A rollout is bit-identical to the
+official task's until such a NaN, which is nudged out of the way instead of ending the hold (`nan_events` / `nan_nudged` are reported). Use them
+for balance work: on the unguarded `soccer_single_leg_310_40` about 6 % of the 310 s holds (7 of 120 runs) ended in that NaN and decided the paired test.
+`scratchpad/blowup/arena_ng.py` runs the same commands with a resumable per-seed rollout cache (a killed evaluation continues).
+`soccer_single_leg_310_40_ng` is saturated (the champion holds 40 / 40); `soccer_hold20_120_ng` (120 fresh starts, 20 s) has room for early-fall gains.

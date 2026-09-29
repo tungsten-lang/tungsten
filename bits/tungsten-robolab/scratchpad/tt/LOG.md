@@ -335,3 +335,120 @@ plan is ~45 %, it plays 30-33 %. 90 % needs pitch <= 4 deg, pad velocity <= 0.25
   backhand `bh_ts_lead` 0.20 / 0.23 / 0.26: 55 / 62 / 65 against run 21's 69 (all worse). The absolute t_servo / bh_t_servo are at least as good.
 - Contact-timed backhand swing `bh_lead` (round 5's option) on run 21's backhand: 0.42 / 0.47 / 0.52: 1 / 8 / 16 of 200 solved against 69 (the whole backhand set is tuned for the absolute timing).
 - y_switch 0.25 / 0.4 with c2 on 710000:710600 (paired against mix_c2): scratchpad/tt/ysw.sh, started 09:35.
+
+## 10:07 Backhand stage 3 (posture, offsets, grip; rsm_bh5) and c3
+
+- rsm_bh5 (`scratchpad/tt/rsm_run7.sh`: params c2, r10-o, 11 factors around run 21 (bh_elv, bh_sh_elv, bh_elbow, bh_dev, bh_wflex, bh_trunk_ar, bh_off, bh_y_trim, bh_grip, bh_dz_hit, bh_dd_push), 20 runs + baseline,
+  fresh backhand serves bh[400:500]): baseline (run 21) 0.501 (28 %); design mean 0.400 sd 0.088, best 0.571 (run 15, 35 %); residual sd 0.080. Effects (score, t): bh_dz_hit (-0.03 / +0.03) -0.139 (-2.7),
+  bh_elbow (1.98 / 2.04) +0.129 (2.4), bh_dev (-0.11 / -0.04) +0.082 (1.6), bh_dd_push +0.088 (1.4), bh_trunk_ar +0.063 (1.4), bh_elv -0.050 (-0.9), bh_y_trim -0.043 (-0.9), the rest |t| < 0.6.
+- Validation on bh[100:300] (200 serves; champion 49, run 21 69): linear step (min_t 1.4: bh_elbow 2.04, bh_dev -0.04, bh_dz_hit -0.03, bh_dd_push +0.03) 80/200 = 40.0 % (+0.055 over run 21, p 0.078; +0.155 over the champion, p 0.0001);
+  half step 79/200 = 39.5 % (+0.050 over run 21, p 0.043); design runs 15 and 9: 58 and 54 (worse than run 21: winner's curse again). params/myo_tt_p2_r10_bh5_{step1,step05,run15,run9}.txt
+- c3 = c2 + the half step: params/myo_tt_p2_r10_c3.txt (bh_elbow 2.025, bh_dev -0.0575, bh_dz_hit -0.015, bh_dd_push 0.01). Blocks: scratchpad/tt/c3_blocks.sh (mix_c3, mix2_c3), started 10:07.
+- FH stage B (rsm_fh5, rsm_run8.sh: forehand posture / servo / lateral trim, 14 factors, 24 runs on fh[400:500]) was started and paused for this validation; resume with scratchpad/tt/rsm_run8.sh.
+
+## 10:13 c3 on both fresh blocks; arena attempt 2
+
+- mix_c3 (710000:710600): 208/600 = 34.7 % against the champion's 182: +0.043 +- 0.016, p 0.0038 (flips 58 / 32); backhand 31.6 % (98/310) against 23.2 %; forehand identical. against c2: +0.003 (p 0.45).
+- mix2_c3 (720000:720300): 131/300 = 43.7 % against 90: +0.137 +- 0.024, p < 0.0001 (flips 50 / 9); backhand 44.0 % (73/166) against 19.3 %; against c2 (117): +0.047, p 0.009.
+- Both blocks: 339/900 = 37.7 % against 272 (30.2 %); backhand 171/476 = 35.9 % against 104 (21.8 %) (c2: 155, 32.6 %).
+- Arena, attempt 2 (c3, frozen r10-n, --promote): started 10:13, log out/tt_r10/arena_tt_p2_300_c3.log.
+
+## 10:17 ARENA: c3 WINS and is promoted
+
+- `arena.py eval tt_p2_300 --params params/myo_tt_p2_r10_c3.txt --controller .../bin/challengers/myo_tt_r10-n --promote` (231 s): **tt_p2_300 = 0.4000 +- 0.0555 (120/300)** against the champion's 0.3300 (99/300):
+  mean paired diff +0.0700, **p = 0.002**, "challenger WINS champion", **promoted to champion** (bin/champions/tt_p2_300-20260929-101727, params playground/arena/params/tt_p2_300-20260929-101727.txt = params/myo_tt_p2_r10_c3.txt).
+  By the side rule on these seeds (out/tt_r10/pools_98000.json: 156 forehand, 144 backhand): forehand 60/156 = 38.5 % (the champion's forehand, unchanged) and backhand 60/144 = 41.7 % (the old champion 39/144 = 27.1 %).
+- tt_p1 with the promoted champion binary and params/myo_tt.txt: 50/50 = 100 % (no regression). tt_p2_backhand (131 serves) with c3: 35.9 % +- 8.3 against 22.9 %: WINS (+0.130, p 0.001), promoted on that trial too
+  (same 47/131 as c1's).
+- Attempt 1 (c1: backhand of run 21 + the forehand step, `bk 1`) had scored 35.3 % (106/300, +0.023, p 0.257, not promoted); attempt 2 is c3 (the champion's forehand exactly, the backhand re-tuned in three stages).
+- Stage 4 (backhand dynamics: rsm_bh6, scratchpad/tt/rsm_run9.sh, around c3, fresh block bh[500:600]) restarted 10:20.
+
+## 10:25 README section written
+
+- README.md: "Table tennis: where P2 is lost, a bounce-tick artifact, and a screening design (round 10)" inserted before the Relocate section (assembled by scratchpad/tt/assemble_readme.py from scratchpad/tt/README_r10_*.md and
+  r10_result.txt / r10_arena.txt; re-run it to replace the section in place). Copy of the README with it: scratchpad/tt/backup/README.md.20260929_1025.
+- r10-p = r10-n + `fh_gain` (a reflex gain multiplier on the forehand's four arm chunks, default 1.0 = the old behaviour; the forehand analogue of bh_gain). Frozen bin/challengers/myo_tt_r10-p.
+- Queue: backhand stage 4 (rsm_run9.sh, running since 10:21), then forehand stage B with fh_gain (rsm_run8.sh).
+
+## 10:38 Backhand stage 4 (rsm_bh6: dynamics around c3)
+
+- rsm_bh6 (`scratchpad/tt/rsm_run9.sh`: params c3, r10-o, 14 factors (bh_stiff, bh_ki, bh_pel_fly, bh_dt_swing, bh_dx_hi, lc24, kk2_amp, kk_m2, bh_t_servo, bh_gain, bh_p_n, bh_dnz, k_vpm2, ns_k2), 24 runs + baseline,
+  fresh backhand serves bh[500:600]): baseline (c3) 0.577 (35 %); design mean 0.513 sd 0.087, best 0.703 (run 7, 43 %), residual sd 0.053. Effects (score, t): bh_dt_swing (0 / 0.05) -0.092 (-3.1), bh_gain (0.91 / 0.94) -0.063 (-2.2),
+  bh_pel_fly (0 / 0.6) +0.071 (2.1), bh_dx_hi (0 / 0.1) -0.070 (-2.0), lc24 (-0.02 / +0.02) +0.048 (1.7), ns_k2 (0.02 / 0.08) +0.050 (1.5), bh_stiff (0.09 / 0.13) +0.034 (1.2), the rest |t| < 1.2.
+  Note: tt_rsm.py's step moves each factor from the MIDDLE of its range, so for factors whose baseline is a range end (bh_dt_swing, bh_dx_hi at 0) its half step is not a half step; the "half" candidate is built by hand
+  (params/myo_tt_p2_r10_bh6_half.txt).
+- Validation on bh[100:300] (c3's backhand: 79/200; champion 49): scratchpad/tt/bhval4.sh (step1, step05, run7, run18) and bhval4b.sh (half), started 10:38.
+- The forehand stage B (rsm_run8.sh) is paused; its design directory out/tt_r10/rsm_fh5 was removed before it produced runs.
+
+## 10:45 Stage-4 validation (bh[100:300]; c3's backhand 79/200, champion 49)
+
+| candidate | solved of 200 | vs c3 (paired) |
+| --- | --- | --- |
+| linear step (min_t 1.4: pel_fly 0.6, lc24 +0.02, bh_gain 0.91, ns_k2 0.08) | 82 | +0.015, p 0.37 |
+| tt_rsm step at 0.5 (moves dt_swing, dx_hi off their 0 baselines) | 79 | 0 |
+| hand half step (pel_fly 0.3, lc24 0.01, gain 0.915, ns_k2 0.065) | 79 | 0 |
+| design run 7 (in-sample 43 %) | 91 | +0.060, p 0.095 |
+| **design run 18** (in-sample 41 %) | **95 (47.5 %)** | **+0.080, p 0.033** |
+
+- The best four design runs share bh_pel_fly 0.6 (the backhand's fly-by slide), bh_gain 0.91, bh_dt_swing 0; runs 7 and 18 also bh_stiff 0.13, kk2_amp 1.2, kk_m2 -0.55, bh_p_n 0.2, bh_dnz -0.05, k_vpm2 0.7, lc24 -0.02.
+  c4 = params/myo_tt_p2_r10_c4.txt: c3 with those shared values (bh_t_servo 0.30, ns_k2 0.05 averaged).
+- Five candidates were looked at on bh[100:300]; to choose without that selection bias: scratchpad/tt/bhval5.sh on 196 never-used backhand serves bh[600:796] (c3, c4, run 18, run 7, the round-5 champion), started 10:44.
+
+## 10:56 Fresh backhand serves bh[600:796] (196, never used), and arena attempt 3 (c5)
+
+| run | solved of 196 | hit | vs champion (paired) | vs c3 |
+| --- | --- | --- | --- | --- |
+| round-5 champion | 44 (22.4 %) | 0.80 | | |
+| c3 | 72 (36.7 %) | 0.89 | +0.143 +- 0.042, p 0.0005 | |
+| c4 (stage-4 consensus of runs 7 and 18) | 88 (44.9 %) | 0.89 | +0.224, p < 0.0001 | +0.082, p 0.024 |
+| **stage-4 design run 18** | **93 (47.4 %)** | 0.90 | +0.250, p < 0.0001 | +0.107 +- 0.041, p 0.006 |
+| stage-4 design run 7 | 80 (40.8 %) | 0.89 | +0.184 | +0.041, p 0.17 |
+
+- c5 = the champion's forehand (bk 2) + run 18's backhand on top of c3: params/myo_tt_p2_r10_c5.txt. r10-n and r10-o play c5 identically (40/40 serves).
+- Arena attempt 3: `arena.py eval tt_p2_300 --params params/myo_tt_p2_r10_c5.txt --controller .../myo_tt_r10-o --promote` (205 s): 0.4033 +- 0.0556 (121/300) against the champion c3's 0.4000 (120): +0.0033, p 0.51: not promoted.
+  The arena's backhand serves have the pool's crossing distribution (13 % beyond -0.8), so it is chance: c3 and the round-5 champion both scored ~5 points above their fresh-block backhand rates on those 144 serves.
+- c5 on the two 900-serve blocks: scratchpad/tt/mixval.sh mix_c5, c5_block2.sh (mix2_c5), started 10:55.
+
+## 11:00 c5 on the two fresh blocks
+
+- mix_c5 (710000:710600): 237/600 = 39.5 % against the round-5 champion's 182 (30.3 %): +0.092 +- 0.017, p < 0.0001 (flips 83 / 28); backhand 127/310 = 41.0 % against 23.2 %, forehand identical; against c3 (208): +0.048, p 0.0009.
+- mix2_c5 (720000:720300): 131/300 = 43.7 % against 90 (30.0 %): +0.137, p < 0.0001; backhand 73/166 = 44.0 %; the same 131 as c3 (flips 23 / 23).
+- Both blocks: c5 368/900 = 40.9 % against the champion's 272 (30.2 %) and c3's 339 (37.7 %); backhand 200/476 = 42.0 % against 104 (21.8 %) and c3's 171 (35.9 %).
+- Backhand stage 5 (rsm_bh7: scratchpad/tt/rsm_run10.sh, 14 factors along stage 4's directions around c5, fresh block bh[300:400], 24 runs) started 11:00.
+
+## 11:20 Backhand stage 5 (rsm_bh7: further along stage 4's directions around c5)
+
+- rsm_bh7 (`scratchpad/tt/rsm_run10.sh`: params c5, r10-n, 14 factors, 24 runs + baseline, fresh block bh[300:400]): baseline (c5) 0.624 (37 %); design mean 0.479 sd 0.106; best 0.665 (run 1, 42 %); residual sd 0.057.
+  Effects (score, t): bh_pel_fly (0.4 / 1.0) +0.144 (2.9), lc24 (-0.04 / 0) +0.099 (2.6), bh_gain (0.89 / 0.93) -0.089 (-2.5), bh_t_servo (0.29 / 0.34) +0.086 (2.7), bh_dnz (-0.08 / -0.02) +0.070 (1.9), kk2_amp (1 / 1.4) -0.059 (-1.8),
+  bh_p_n +0.046 (1.1), the rest |t| < 1. c5 is near a local optimum (only run 1 beat the baseline by more than 0.04).
+- Validation on 200 backhand serves nobody has used (bh750[0:200] of out/tt_r10/pools_750000.json: seeds 750000-751499, forehand 717 / backhand 783): scratchpad/tt/bhval6.sh (c5, step1, step05, run 1, run 5, champion, c3), started 11:19.
+  params/myo_tt_p2_r10_bh7_{step1,step05,run1,run5}.txt.
+
+## 11:29 Stage-5 validation on never-used serves (bh750[0:200]) and the forehand stage B
+
+| run | solved of 200 | hit | paired |
+| --- | --- | --- | --- |
+| round-5 champion | 46 (23.0 %) | 0.795 | |
+| c3 | 82 (41.0 %) | 0.850 | +0.180 +- 0.037 over the champion |
+| **c5** | **92 (46.0 %)** | 0.900 | +0.230 +- 0.043 over the champion, +0.050 (p 0.12) over c3 |
+| stage-5 linear step (full) | 81 | 0.800 | -0.055 against c5 |
+| stage-5 step at 0.5 | 92 | 0.860 | 0.000 |
+| stage-5 run 1 (in-sample 42 %) / run 5 | 73 / 82 | 0.78 / 0.785 | -0.095 / -0.050 |
+
+- c5's backhand: 44.9-47.4 % on three independent sets (196 + 200 + the 476 backhands of the two blocks: 42.0 %); stage 5 found no better point: c5 is a local optimum of the backhand screens.
+- Forehand stage B (rsm_fh5: `scratchpad/tt/rsm_run8.sh`, r10-p with `fh_gain`, 15 factors incl. posture, servo timing and lateral trim, 24 runs on fresh forehand serves fh[400:500], params c3 = the champion's forehand) started 11:29.
+
+- Pooled over the 900 fresh serves (out/tt_r10/{champ,c3,c5}_900.jsonl; tt_cmp.py paired): champion -> c3 +0.074 +- 0.013 (flips 108 / 41); champion -> c5 +0.107 +- 0.014 (131 / 35); c3 -> c5 +0.032 +- 0.013, p 0.0066 (80 / 51).
+- 11:31 coordinator: the worker cap is now 4 while the 5-minute load average is under 30 (2 above 30), one search at a time; the forehand stage B (3 workers) plus one side job of 1 worker respect it. r10-p (fh_gain default) replays the round-5 champion's forehand on 30/30 serves.
+- 11:36 tt_p2_backhand with c5 (1 worker, --promote): 0.4122 (54/131) against the promoted c3's 0.3588: +0.053, p 0.173, not promoted.
+- 11:49 5-minute load 33.6 (above 30): the forehand stage B restarted with 2 workers (resumable design, 17 of 24 design runs done).
+
+## 12:55 Close of the campaign
+
+- Forehand stage B (rsm_fh5, r10-p, 15 factors incl. fh_gain; 24 runs on fh[400:500]): baseline (the champion's forehand) 0.623 (39 %), design mean 0.274 sd 0.163, best design run 0.615: every corner worse. fh_gain (0.88 / 1.10) +0.236 (t 9.9) by the linear model, but the scan on 200
+  unused forehand serves (fh750[0:200], champion 85): fh_gain 0.97 / 1.03 / 1.06 / 1.10 -> 80 / 76 / 68 / 60: the champion's forehand is at a sharp optimum. (scratchpad/tt/fhg.sh)
+- Final state of the arena: tt_p2_300 champion = c3 (bin/champions/tt_p2_300-20260929-101727, params/myo_tt_p2_r10_c3.txt) at 40.0 % (120/300; the round-5 champion 33.0 %); tt_p2_backhand champion = c3 (35.9 %); tt_p1 100 %.
+  Best controller on fresh serves: c5 (params/myo_tt_p2_r10_c5.txt, frozen bin/challengers/myo_tt_r10-n): 40.9 % of 900 fresh serves against c3's 37.7 % and the round-5 champion's 30.2 %; not promoted (arena 121 against 120, p 0.51).
+- Load policy applied: <= 3 workers while the 5-minute load average was under 30 (the coordinator allowed 4 at 11:30), 2 above 30; one search at a time; leftover own waiters stopped by task id.
+- README: the round-10 section is in place before the Relocate section (assemble_readme.py replaces it in place).
+- 12:50 the old 100-serve trial tt_p2 (97000-97099; champion round-5 approach A, 36.0 %): c3 39.0 % (+0.030, p 0.30), c5 44.0 % (+0.080, p 0.040: wins); c5 promoted there (arena `--promote`; frozen copy of r10-n under bin/champions/tt_p2-...).

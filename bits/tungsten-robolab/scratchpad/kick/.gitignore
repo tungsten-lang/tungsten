@@ -1,0 +1,9 @@
+# bulky saved-state checkpoints and raw rollout dumps (regenerable; see LOG.md)
+ckpt/
+out/
+logs/
+pids/
+__pycache__/
+*.pkl
+*.pkl.gz
+*.npz

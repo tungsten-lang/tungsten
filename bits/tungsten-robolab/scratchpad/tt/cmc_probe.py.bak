@@ -1,0 +1,31 @@
+import os, sys, warnings
+warnings.filterwarnings("ignore")
+os.environ["TT_ENV"]="P2"
+sys.path.insert(0,"playground"); sys.path.insert(0,"playground/tasks")
+import numpy as np, mujoco
+print("mujoco",mujoco.__version__)
+print([n for n in dir(mujoco) if "muscle" in n.lower()])
+from myosuite.utils import gym
+env=gym.make("myoChallengeTableTennisP2-v0"); u=env.unwrapped; m,d=u.mj_model,u.mj_data
+env.reset(seed=3)
+mujoco.mj_forward(m,d)
+print("nv",m.nv,"nu",m.nu,"na",m.na)
+ARM=("DELT1","DELT2","DELT3","SUPSP","INFSP","SUBSC","TMIN","TMAJ","PECM1","PECM2","PECM3","LAT1","LAT2","LAT3","CORB","TRIlong","TRIlat","TRImed","ANC","SUP","BIClong","BICshort","BRA","BRD","ECRL","ECRB","ECU","FCR","FCU","PL","PT","PQ")
+ids=[m.actuator(n).id for n in ARM]
+print("dyntype",[int(m.actuator_dyntype[i]) for i in ids[:4]],"gaintype",[int(m.actuator_gaintype[i]) for i in ids[:4]],"biastype",[int(m.actuator_biastype[i]) for i in ids[:4]])
+print("dynprm",m.actuator_dynprm[ids[0]][:3],"gainprm",m.actuator_gainprm[ids[0]][:10],"biasprm",m.actuator_biasprm[ids[0]][:10])
+print("acc0",m.actuator_acc0[ids[0]],"lengthrange",m.actuator_lengthrange[ids[0]])
+# validate force
+d.ctrl[:]=0.5
+for _ in range(30): mujoco.mj_step(m,d)
+mujoco.mj_forward(m,d)
+err=[]
+for i in ids:
+    L=d.actuator_length[i]; V=d.actuator_velocity[i]
+    g=mujoco.mju_muscleGain(L,V,m.actuator_lengthrange[i],m.actuator_acc0[i],m.actuator_gainprm[i])
+    b=mujoco.mju_muscleBias(L,m.actuator_lengthrange[i],m.actuator_acc0[i],m.actuator_biasprm[i])
+    f=g*d.act[m.actuator_actadr[i]]+b
+    err.append((f,d.actuator_force[i]))
+err=np.array(err)
+print("predicted vs actuator_force: max abs diff",np.abs(err[:,0]-err[:,1]).max(),"typical magnitude",np.abs(err[:,1]).mean())
+print("qM size",d.qM.shape, "qfrc_passive nonzero:",np.count_nonzero(d.qfrc_passive))

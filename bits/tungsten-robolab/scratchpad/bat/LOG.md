@@ -132,3 +132,94 @@ Round-2 practice seeds: TRAIN 3000+ (fresh pitches), VALIDATION 4000-4047, none 
 - Lesson: `train_lead` +18 ms etc. move the contact along the arc (aim_s mean 0.76, was ~0.65), a shift the k_z/k_x aim vectors are the wrong directions to cancel. S2b: an AS-RUN search
   (search.py's Problem on tasks/bat_rep.py: hit = speed - 0.5/cm of |aim_n| beyond 3 cm - 8 per m of contact position beyond [0.50, 0.80] m along the bat; miss = -5 - 100 gap; -4 per unit flow
   beyond 2.5) started from params/bat_r2_s2cal2.txt with the taim gains among its 32 dims, sigma 0.05: **S2b launched (pid 49936)**: `ROBOLAB_CONTROLLER=$PWD/bin/challengers/bat_r2-t5 BATREP_FLOW=4 BATREP_FLOW_CAP=2.5 .venv/bin/python playground/search.py bat_rep --method sep_cma --budget 3200 --workers 2 --sigma 0.05 --pop 14 --risk 0.25 --seconds 4.3 --seeds 3009,3022,3040,3041,3054,3055,3061,3062,3069,3070,3112,3123,3135,3137,3140,3143 --init params/bat_r2_s2cal2.txt --only "taim_*,train_lead,..." --box "..." --out params/search/bat_r2_s2b.txt --log out/bat_r2/s2b.jsonl`.
+
+## 2026-09-29 milestone: S1 in the arena (S2b paused with SIGSTOP for ~10 min and resumed with SIGCONT; same pids)
+
+- `calibrate.py` on the S1 best (seeds 5000-5047): iter 0 (taim gains unchanged): 48/48 hits, power 25.91, flow 2.61 max 2.88, aim fit a0 -1.5 az +17 ax +27;
+  iter 2: taim_z 2.90 taim_x 1.29 taim_z0 -0.031 (params/bat_r2_s1cal.txt): 48/48, power 25.74, flow 2.604 max 2.887, aim residual 1.3 cm. Re-centring the aim COSTS 0.17 m/s.
+- Validation on seeds 4000-4047 (never used for S1's tuning): S1 raw (params/bat_r2_s1.txt) **48/48 hits, power 25.83**, fair 46, flow 2.614 max 2.962 (48/48 under 3.0);
+  S1 recalibrated 25.58, flow 2.597 max 2.929. (S2 raw recalibrated to a0 = 0: 25.20, 46/48; see above.)
+- **Arena** `arena.py eval bat_power_fresh_rep --params params/bat_r2_s1.txt --controller bin/challengers/bat_r2-t1 --promote`: **25.71 m/s, 24/24 hits**, fair 95.8 %, quality 0.577,
+  flow 2.644: WINS against the v6 knots seed (19.44), promoted. `bat_power_fresh_rep_clean` (all 24 under the flow guard): 25.71, promoted (the seed failed its guard on 6).
+  ORACLE for reference: bat_power_fresh 25.24 on the old fresh seeds 1000-1023 (24/24).
+- `scratchpad/bat/paused.sh 49936 -- .venv/bin/python playground/bat_power_diag.py --params params/bat_r2_s1.txt --controller bin/challengers/bat_r2-t1 --seeds 4000-4015 --fresh --workers 2 --seconds 4.6 --json out/bat_r2/diag_s1.json`
+  (bat_power_diag.py gained `--fresh` and the joints' range margins): S1 on 16 fresh pitches: power 25.82, flow 2.59. Kinematic sequence: pelvis yaw peak 7.62 rad/s (437 deg/s) 119 ms before contact,
+  torso 9.36 rad/s (536 deg/s) at 150 ms, hands 6.1 m/s, bat 37.1 rad/s (2125 deg/s) at contact, sweet spot 25.6 m/s. Joint peaks against the unloaded limit (vmax / 0.3 ranges per second):
+  pelvis yaw 0.32, spine flexion 0.36, spine rotation 0.20, shoulders 0.18-0.41, elbows 0.42 (top-hand side, 11.0 rad/s = 632 deg/s) and 0.55 (bottom-hand side, 14.2 rad/s = 812 deg/s), wrist flexion 0.42,
+  bottom wrist deviation 1.77 (19.5 rad/s: the arms fling it). Range: the pelvis yaw closest approach to its end is 5.7 % of the range (0.1 % of the swing within 3 %), spine_lat / l_wrist_dev / r_wrist_dev / l_hip_rot
+  spend 11 / 17 / 18 / 28 % of the swing within 3 % of an end of their range. Activation >= 0.9 (share of each group's 213 ms power phase, agonist): pelvis 43 %, trunk 34 %, shoulders 34 %, elbows 33 %, wrists 13 %; CCI 0.01-0.09.
+  Reading: the trunk and the elbows are FAR from their speed limits and from their range ends (except the wrists): they are limited by torque x time / inertia (M_ii of the pelvis yaw at the stance: 2.3 kg m^2,
+  the bottom elbow 0.53; peak torques 375 and 105 N m) and by the chain's own sequencing (the pelvis peaks 119 ms before contact and brakes).
+- S1 (params/bat_r2_s1.txt, bat_r2-t1; `paused.sh 49936 -- bat_rep.py eval ...`) on the earlier trials' pitches, same seeds as the ORACLE / knots rows:
+  old fresh seeds 1000-1023 (bat_power_fresh's): **25.89 m/s, 24/24 hits**, fair 24, flow 2.578 max 2.801 (oracle 25.24, v6 knots 21.57, knots b 20.63);
+  the 18-pitch grid (BATREP_GRID=1, bat_power's): **25.74, 18/18 hits**, fair 16, flow 2.567 max 2.958 (oracle 25.17, knots 23.12, knots b 24.45).
+  An in-representation swing (reflexes ON, contraction knots) is now ABOVE the open-loop oracle on all three sets. To challenge the four oracle-held bat_power* trials with the final controller.
+- S2b (as-run objective, pid 49936; slowed by two pauses): gen 2 24.43 (recovered from 13.93: the calibrated S2 point missed some of these pitches as run), gen 3 24.64, gen 4 24.89, gen 5 25.02.
+  As-run check on its 16 training pitches (BATREP_FLOW=4 cap 2.5, mean score): S1 power 25.598 flow 2.638 -> 25.003; S2b gen-5 best (bat_r2-t5) power **26.121** (16/16) flow **2.465** (max 2.83) -> 25.531.
+
+## 2026-09-29 milestone: S2b gen-5 in the arena
+
+- S2b gens 6, 7: no gain (best stays gen 5, objective 25.0153; the machine's load dropped to ~20-30, ~3.5 min per generation). The gen-5 best (params/bat_r2_s2b_g5.txt, bat_r2-t5):
+  taim_z 5.30 taim_x 3.38 taim_z0 +0.0734, train_lead +18.2 ms, train_dlead +1.8 ms, train_first 1.19, train_ext 12.7 ms, train_legs_ease 0.02, prog_trig 0.2412 (fire 11 ms earlier than v6's 0.230),
+  train_end -0.028 (train 28 ms longer), k_in 0.0176, step_delay 0.169, arm_swing_kd 0.
+- Validation seeds 4000-4047 (as run, no recalibration): **48/48 hits, power 26.368**, fair 29, flow 2.443 max 2.913 (48/48 under 3.0) (S1: 25.83, 2.614).
+- Arena: `arena.py eval bat_power_fresh_rep --params params/bat_r2_s2b_g5.txt --controller bin/challengers/bat_r2-t5 --promote` (S2b paused with paused.sh): **26.204 m/s, 24/24 hits**, flow 2.478,
+  fair 0.667, quality 0.178: WINS against S1 (25.71), promoted; `bat_power_fresh_rep_clean` (all 24 under the guard): 26.20 promoted.
+  (The two notes typed on the command line quote the S2 numbers taim 6.1/3.2, 18 ms, 30 ms, 1.35x for two of the values; the file's are above. To be corrected in champions.json and history.jsonl under the lock.)
+- S2b stopped after gen 8 (gens 6-8 no gain; 1584 rollouts; pids 49936 + workers). Its best = the gen-5 candidate = params/bat_r2_s2b_g5.txt (identical in params/bat_r2_s2b_final_raw.txt).
+- Diagnosis of the S2b champion on the 48 validation pitches: speed 24.9-27.4 (sd 0.59), aim_n -2.2..+6.7 (mean +1.6), contact position along the bat aim_s 0.63-0.83 (mean 0.717: the sweet spot is 0.708),
+  flow terms lift 0.591 / pre 0.761 / post 0.593 / cmd 0.498 (v6 knots: 0.594 / 0.86 / 0.745 / 0.62; stall before the swing 18 ms mean, 45 max). BUT the ball quality fell: fair 29/48, launch angle mean 49 deg
+  (arena quality 0.18 vs 0.58 for S1): the speed was bought with an uppercut steeper than the 20 deg the bat_quality metric asks for. Nothing in the bat_power metric sees it; it is reported, and S2c prices it.
+- **S2c launched** (pid 27781): as S2b, from params/bat_r2_s2b_g5.txt, plus BATREP_LAUNCH=0.04 per degree of |launch - 20| beyond 10 (0.033 m/s per degree = 1 m/s per point of the arena's quality metric), 24 training pitches
+  (12 from each maximin set: seeds 3008,3049,3050,3060,3064,3073,3074,3091,3092,3107,3108,3118,3009,3022,3040,3041,3054,3055,3061,3069,3070,3112,3123,3135), budget 4000, population 14, sigma 0.05:
+  `ROBOLAB_CONTROLLER=$PWD/bin/challengers/bat_r2-t5 BATREP_FLOW=4 BATREP_FLOW_CAP=2.5 BATREP_LAUNCH=0.04 .venv/bin/python playground/search.py bat_rep --method sep_cma --budget 4000 --workers 2 --sigma 0.05 --pop 14 --risk 0.25 --seconds 4.3 --seeds ... --init params/bat_r2_s2b_g5.txt --only "..." --box "..." --out params/search/bat_r2_s2c.txt --log out/bat_r2/s2c.jsonl`.
+- S2c gens 2-5 (objective): 24.28, 24.77 (gen 3 best), 24.77, 24.77: plateau. Its gen-3 best (copy: params/bat_r2_s2c_g3.txt after this entry) on the validation seeds 4000-4047, as run, next to S1 and S2b
+  (`paused.sh 27781 -- bat_rep.py eval`; quality = the arena's bat_quality formula from launch/fair):
+    S1 raw    power 25.832  48/48 hits  fair 46  launch 7.9 deg   quality 0.388  flow 2.614 max 2.962
+    S2b g5    power 26.368  48/48 hits  fair 29  launch 49.3 deg  quality 0.213  flow 2.443 max 2.913
+    S2c g3    power 26.251  48/48 hits  fair 44  launch 27.6 deg  quality 0.373  flow 2.384 max 2.760
+  The launch term (0.04 per degree beyond 10 off 20) gave back the ball quality (0.21 -> 0.37) for 0.12 m/s.
+- S2c stopped after gen 8 (gens 7, 8 no gain; 2376 rollouts; pids 27781 + workers). Best = gen 6 = params/bat_r2_s2c.txt (objective 24.99). Validation seeds 4000-4047 as run: **power 26.147, 48/48 hits, fair 46, launch 12.8 deg,
+  quality 0.447, flow 2.316 max 2.671** (S2c gen 3: 26.251 / quality 0.373; S2b: 26.368 / 0.213; S1: 25.832 / 0.388). The balanced candidate.
+- **Ceiling runs launched** (10:38, `scratchpad/bat/ceil.sh params/bat_r2_s2c.txt bin/challengers/bat_r2-t5 250 base lead5 str20 trunk15 arms15 vmax45`, log out/bat_r2/ceil.log, results
+  out/bat_ceiling/r2_<variant>.json; `ceil_report.py` summarises): bat_ceiling.py --ball CMA (open loop, reflex gain 0, 16 upper-body joints, 250 generations) on the centre grid pitch (34.0 m/s, x 0.0, z 0.80),
+  captured from the S2c swing; variants: base body (athlete: strength x1.5, vmax 3.0), lead5 (start the free excitations 50 ms before the practised swing's hips fire, window 0.39 s), str20 (BAT_STRENGTH 2.0 = x1.33),
+  trunk15 (pelvis yaw + spine x1.5), arms15 (shoulders, elbows, wrists x1.5), vmax45 (vmax 4.5).
+
+## 2026-09-29 body-level: what the ceilings said, and the sensitivity of the fixed controller
+
+- `scratchpad/bat/ceil.sh` (10:38-10:51, 250 generations each, 2 workers, ~2 min per run at load 20): the open-loop CMA CAN NO LONGER IMPROVE on the practised swing. Base body: the practised (in-representation, S2c, reflexes on)
+  swing hits the centre pitch at 27.01 m/s; the open-loop replay of its net excitations scores 26.17 and the CMA never beat generation 0 in 250 generations (sigma 0.29 -> 0.07: any perturbation misses the ball, a needle-like
+  landscape). So `bat_ceiling.py` is not a ceiling any more; the in-representation swing is better than what open-loop CMA finds from its own state. Practised-swing speeds on the changed bodies (the S2c params UNCHANGED, one pitch):
+  base 27.01, strength x1.33 29.96, trunk x1.5 28.35, arms x1.5 29.10, vmax x1.5 29.85; lead5 (capture 50 ms early): the replay misses (-36) and the CMA reaches only 24.35.
+  => the body question is answered by the controller itself: `scratchpad/bat/bodysweep.sh` (fixed S2c controller, 16 fresh pitches 8000-8015, `evalcal.py`: speed at contact or closest approach with the aim shift re-centred; as-run hits in brackets):
+      athlete (strength 1.5, vmax 3.0)  26.40 (16/16)
+      strength x1.2 / x1.33 / x1.5 / x2 (all muscles)   28.71 (12) / 29.58 (3) / 30.36 (0) / 32.22 (0)
+      vmax x1.2 / x1.5 / x2                              27.99 (16) / 29.39 (13) / 30.68 (11)
+      trunk (pelvis yaw + spine) x1.5 / pelvis yaw x2    27.68 (15) / 26.86 (16)
+      arms (shoulders, elbows, wrists) x1.5 / elbows x2  28.41 (1) / 27.61 (15)
+      strength x1.5 + vmax x1.5                          33.14 (0)
+      **ROBOLAB_PROFILE=p95 on the athlete (strength x1.32, muscle speed x1.2, activation x0.87; profiles/p95.json)   30.83 (0/16: the aim is 10 cm off)**
+  About +2 m/s per +20 % of strength or of muscle speed; the arms are a bigger lever than the trunk (trunk x1.5 +1.3, arms x1.5 +2.0, pelvis yaw x2 only +0.5, elbows x2 +1.2). The rates are torque x time limited
+  (force-velocity: a faster muscle keeps more force at the same joint rate).
+- **P95 body** (the athlete at ROBOLAB_PROFILE=p95: strength x1.32, muscle speed x1.2, activation constants x0.87 (profiles/p95.json: each a marginal 95th percentile, Maden-Wilkinson 2020, Staron 2000, Trappe 2015); the
+  athlete's own x1.5 strength already stands for strength-trained men): S2c controller unchanged, calibrated speed 30.83 but the contact was BEYOND THE TIP (aim_s 0.90 m: the faster swing reaches the ball's plane earlier);
+  `evalcal.py --sets` scan of prog_trig (contact s mean, calibrated speed): 0.2409 (base) s 0.914 / 30.72; 0.2359 0.824 / 31.29; 0.2309 0.772 / 31.38; 0.2259 0.726 / 31.34; 0.2209 0.694 / 31.20 (fire 12 ms later puts contact on the barrel).
+  params/bat_r2_p95_init.txt = S2c + prog_trig 0.2289; `ROBOLAB_PROFILE=p95 calibrate.py --boost 2 --iters 4` (seeds 5000-5047) -> params/bat_r2_p95_cal2.txt: **45/48 hits, power 29.73 m/s** (hit speed 31.71), flow 2.43 max 2.67,
+  taim_z 4.79 taim_x 2.47 taim_z0 +0.069, aim residual 2.5 cm.
+- **S6 launched** (pid printed above; as-run sep-CMA on the P95 body from params/bat_r2_p95_cal2.txt, 24 random fresh pitches seeds 7000-7023, the S2c objective incl. launch and flow terms, budget 2100):
+  `ROBOLAB_PROFILE=p95 BAT_BODY=athlete ROBOLAB_CONTROLLER=$PWD/bin/challengers/bat_r2-t5 BATREP_FLOW=4 BATREP_FLOW_CAP=2.5 BATREP_LAUNCH=0.04 .venv/bin/python playground/search.py bat_rep --method sep_cma --budget 2100 --workers 2 --sigma 0.05 --pop 14 --risk 0.25 --seconds 4.3 --seeds 7000,...,7023 --init params/bat_r2_p95_cal2.txt --only "..." --box "..." --out params/search/bat_r2_s6.txt --log out/bat_r2/s6.jsonl`.
+- Coordinator (11:30): with the 5-minute load average under 30 the cap is 4 rollout workers (one search at a time); back to 2 above 30. Load now ~18-22.
+- S6 (P95 body, 24 random pitches 7000-7023, 6 generations, 1704 rollouts, stopped by me at 1704 of 2100): no gain over its start (30.4869): the calibrated start hits all of those pitches, and the
+  P95 controller's misses are on other pitches. P95 controller = params/bat_r2_p95_cal2.txt: validation seeds 4000-4047 (ROBOLAB_PROFILE=p95, as run): power 28.86, 44/48 hits (misses 4006, 4014, 4029, 4031),
+  hit speed 31.49, flow 2.447 max 2.697, fair 36. Arena trial `bat_power_fresh_rep_p95` created (scratchpad/bat/make_trials_p95.py; env BAT_BODY=athlete ROBOLAB_PROFILE=p95 BAT_FRESH_PITCH=1, seeds 1100-1123, labelled body variant).
+- **S7 launched** (pid 8069, 4 workers): S6's setup on the P95 body but trained on the CALIBRATION pitches 5000-5023 (they contain the hard ones: calibration misses 5007, 5011, 5014); budget 2400;
+  `ROBOLAB_PROFILE=p95 BAT_BODY=athlete ... playground/search.py bat_rep --budget 2400 --workers 4 --sigma 0.05 --pop 14 --seeds 5000,...,5023 --init params/bat_r2_p95_cal2.txt --only "..." --out params/search/bat_r2_s7.txt --log out/bat_r2/s7.log.jsonl`.
+
+## 2026-09-29 12:30 resume after the harness stall (11:36-12:30)
+
+- State on resume: S7 (pid 8069, P95 body, 4 workers) was still running; its generations had slowed to 25-28 min during the stall (load 38), 3-min generations after. Gens 5, 6 no gain; **stopped after gen 6** (best = gen 4, objective 30.06).
+  The P95 controller = params/bat_r2_p95_s7.txt (S2c + fire 12 ms later + taim recalibrated + S7): validation seeds 4000-4047 (ROBOLAB_PROFILE=p95, as run): **30.64 m/s, 47/48 hits** (miss 4031: contact at s 0.92 m, beyond the tip),
+  hit speed 31.29, flow 2.428 max 2.779, fair 32, launch 18 deg. On the calibration pitches 5000-5047: 48/48, 31.53, flow 2.42.
+- **Arena `bat_power_fresh_rep_p95` seeded** with it (`arena.py seed ... --workers 4`): **27.12 m/s, 21/24 hits** (misses 1105 (x +0.04, z 0.96), 1106 (x +0.15, z 0.69), 1123 (x +0.11, z 0.96): outside pitches whose contact falls beyond the tip),
+  hit speed 31.0, flow 2.43, fair 62 %, quality 0.27. A k_in scan on the calibration pitches (k_in 0.04/0.07/0.10 with prog_trig moved to keep the centre timing) made it no better (48 / 46 / 47 / 40 hits).

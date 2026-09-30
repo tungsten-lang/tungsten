@@ -16,3 +16,4 @@ __pycache__/
 !/verification/*.log
 !/prior-art/*.gz
 !/prior-art/*.log
+!/results/data/*.dat

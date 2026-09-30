@@ -13,6 +13,11 @@ use scheme
 # used, then two term-fingerprint caches indexed by stable live slot.
 # Dirty bucket IDs are kept in header 32..43; length is header[23].
 # Header 44/45 is scratch for the fused fingerprint calculation.
+# Policy words 46..52 (ffwd_init installs the campaign values; ffwd_policy and
+# ffwd_watch change them): split period, stall threshold, split on no legal
+# pair, split slack over the best rank, target rank, report threshold and
+# proposal mode (0 directed legal buckets, 1 uniform term/position). Words
+# 53/54 carry the partner slot and axis of the current proposal.
 -> ffwd_words(st, history) (i64[] i64) i64
   64+9*(st[3]+1)+3*history+2*st[2]
 
@@ -174,6 +179,10 @@ use scheme
   c[0]=mode
   c[1]=st[3]+1
   c[3]=history
+  c[46]=2000
+  c[47]=256
+  c[48]=1
+  c[49]=8
   c[24]=64
   c[25]=c[24]+3*c[1]
   c[26]=c[25]+3*c[1]
@@ -205,7 +214,7 @@ use scheme
 # A split is an escape, not a rank improvement. Reset the immediate-inverse
 # guard, retaining older history; the next proposal must normally leave it.
 -> ffwd_split(st, scratch, c) (i64[] i64[] i64[]) i64
-  if st[4]>=st[5]+8 || st[12]<1
+  if st[4]>=st[5]+c[49] || st[12]<1
     return 0
   stride=st[1] ## i64
   slot=st[st[16]+((ffws_rand(st)*st[4]) >> 31)] ## i64
@@ -246,19 +255,17 @@ use scheme
   z=ffws_adopt(st)
   1
 
--> ffwd_one(st, scratch, c, slack) (i64[] i64[] i64[] i64) i64
-  st[7]+=1
+# Directed pick: a uniform legal bucket, a random member, then a uniform
+# equal-factor partner. This deliberately changes the sampling distribution,
+# but not legal moves. Returns the first slot and leaves the partner and the
+# axis in c[53] and c[54]; -1: no legal pair, -2: no partner even for the
+# bucket witness.
+-> ffwd_pick_directed(st, c) (i64[] i64[]) i64
   if c[2]==0
-    c[16]+=1
-    st[23]+=1
-    st[9]+=1
-    return 0
+    return 0-1
   id=c[c[24]+((ffws_rand(st)*c[2]) >> 31)] ## i64
   axis=id / c[1] ## i64
   cap=st[2] ## i64
-  stride=st[1] ## i64
-  # Uniform bucket, random member, then uniform equal-factor partner. This
-  # deliberately changes the sampling distribution, but not legal moves.
   count=0 ## i64
   item=st[st[19]+id] ## i64
   while item!=0
@@ -276,7 +283,43 @@ use scheme
     first=c[c[26]+id]
     second=ffws_partner(st,first,axis,word)
   if second<0
+    return 0-2
+  c[53]=second
+  c[54]=axis
+  first
+
+# Uniform pick: term, position and equal-factor partner, as the packed fleet
+# walker draws them. Same results as ffwd_pick_directed; -1 is a draw without
+# a partner.
+-> ffwd_pick_uniform(st, c) (i64[] i64[]) i64
+  if st[4]<2
     return 0-1
+  first=st[st[16]+((ffws_rand(st)*st[4]) >> 31)] ## i64
+  axis=(ffws_rand(st)*3) >> 31 ## i64
+  second=ffws_partner(st,first,axis,ffws_rand(st)) ## i64
+  if second<0
+    return 0-1
+  c[53]=second
+  c[54]=axis
+  first
+
+-> ffwd_one(st, scratch, c, slack) (i64[] i64[] i64[] i64) i64
+  st[7]+=1
+  first=0 ## i64
+  if c[52]==0
+    first=ffwd_pick_directed(st,c)
+  else
+    first=ffwd_pick_uniform(st,c)
+  if first==0-2
+    return 0-1
+  if first<0
+    c[16]+=1
+    st[23]+=1
+    st[9]+=1
+    return 0
+  second=c[53] ## i64
+  axis=c[54] ## i64
+  stride=st[1] ## i64
   c[9]+=1
   i=0 ## i64
   while i<3*stride
@@ -355,14 +398,42 @@ use scheme
   c[19]+=1
   0
 
+# Ablation switches of the walk, all installed by ffwd_init with the campaign
+# values: a split every `period` proposals (0: never), on a stall of `stall`
+# consecutive rejections (0: never; the history is forgotten too) and when no
+# legal pair exists (`no_pair`), never above best+`slack`; `proposal` 0 samples
+# legal buckets, 1 samples term, position and partner uniformly.
+-> ffwd_policy(c, period, stall, no_pair, slack, proposal) (i64[] i64 i64 i64 i64 i64) i64
+  if period<0 || stall<0 || slack<0 || (no_pair!=0 && no_pair!=1) || (proposal!=0 && proposal!=1)
+    return 0
+  c[46]=period
+  c[47]=stall
+  c[48]=no_pair
+  c[49]=slack
+  c[52]=proposal
+  1
+
+# ffwd_work returns early once the best rank is <= target, and once it is
+# strictly below report, so a caller can log every new best rank as it happens.
+# Zero disables either condition.
+-> ffwd_watch(c, target, report) (i64[] i64 i64) i64
+  c[50]=target
+  c[51]=report
+  1
+
 -> ffwd_work(st, scratch, c, steps, stop, slack) (i64[] i64[] i64[] i64 i64[] i64) i64
+  period=c[46] ## i64
+  stall=c[47] ## i64
+  no_pair=c[48] ## i64
+  target=c[50] ## i64
+  report=c[51] ## i64
   i=0 ## i64
   while i<steps
     if (i & 63)==0 && stop[0]!=0
       break
-    if c[2]==0 || (st[7]>0 && st[7]%2000==0) || c[19]>=256
+    if (no_pair!=0 && c[2]==0) || (period>0 && st[7]>0 && st[7]%period==0) || (stall>0 && c[19]>=stall)
       z=ffwd_split(st,scratch,c) ## i64
-      if c[19]>=256
+      if stall>0 && c[19]>=stall
         # Do not strand a walk behind heuristic history. Bounded forgetting
         # restores exploration; repeats are explicitly allowed after reset.
         j=0 ## i64
@@ -377,4 +448,6 @@ use scheme
       stop[0]=1
       return 0-1
     i+=1
+    if st[5]<=target || st[5]<report
+      break
   st[5]

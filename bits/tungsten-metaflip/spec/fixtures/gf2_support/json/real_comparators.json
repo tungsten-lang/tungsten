@@ -1,0 +1,52 @@
+{
+ "scored_on": "2026-09-29",
+ "note": "A rank is called \"below every listed rank\" when it is strictly below the minimum over all four sources in any ring (Lille digest, matmulcatalog without commutative entries, FastMatrixMultiplication results, fmm-schemes), and \"below every listed GF(2)-valid scheme\" when it is below the minimum over ZT/Z schemes and matmulcatalog F2 entries. Listed ranks are comparison data, not certificates; nothing here is an optimality or completed-novelty claim.",
+ "sources": {
+  "lille_digest": {
+   "repository": "https://github.com/sedoglavic/fmm_digest",
+   "file": "fmm_sota.json",
+   "commit": "9f26324b2749973f7200363f3fc3661a370d03d9",
+   "date": "2026-09-28T12:05:25+02:00",
+   "subject": "<feature> add new Perminov's tensor decomposition (his 73ff2588e17162ab3d0166b6c8bd6a9d3a80fec3)",
+   "sha256": "4ad61b4846c5a7a7b229fb9d0d1ec63528626017b0f4b20927afdc420f44d856"
+  },
+  "matmulcatalog": {
+   "repository": "https://github.com/solven-eu/matmulcatalog",
+   "scored": {
+    "commit": "f0c2ba9e379709670672359b33f6ae29a5b8fd6c",
+    "date": "2026-09-29T04:10:00Z",
+    "subject": "Regenerate docs/*.json via Generate{CatalogManifest,CitedBounds,DerivedBounds}"
+   },
+   "catalog_sha256": "cc2ba618847d708fa701b218d8c47b339577eea3c42c639b427368824364ed0f",
+   "replay_revisions": [
+    "b944258b28fd9cfc644798fe88fb55b2bff2cb0a",
+    "f0c2ba9e379709670672359b33f6ae29a5b8fd6c"
+   ]
+  },
+  "fast_matrix_multiplication": {
+   "repository": "https://github.com/dronperminov/FastMatrixMultiplication",
+   "scored": {
+    "commit": "613599b6c35159b2dcc6749574152eee89518998",
+    "date": "2026-09-28T19:29:41+03:00",
+    "subject": "add new improvements"
+   },
+   "earlier_seed_revision": "b28490ca14c884c339a9fc69a3bdcba1f6e2c5da",
+   "license": "MIT"
+  },
+  "fmm_schemes": {
+   "repository": "https://github.com/MerlijnW70/fmm-schemes",
+   "scored": {
+    "commit": "8fa0f2a0b0d3d3ae070acabe24b99774a1c5e1a9",
+    "date": "2026-09-27T20:31:09+02:00",
+    "subject": "Release 1.1"
+   },
+   "earlier_seed_revision": "e2f5c2edadb4fa33bf186931c491337f8b7cc1a7",
+   "license": "CC-BY-4.0"
+  },
+  "tungsten_july_certificates": {
+   "repository": "https://github.com/tungsten-lang/tungsten",
+   "revision": "b133232426b9e38d273078b511f247267bff5e2f",
+   "note": "block-composition certificates removed from the tree in 47ad44dc5"
+  }
+ }
+}

@@ -1,0 +1,14 @@
+fmm	613599b6c35159b2dcc6749574152eee89518998	README.md	ok	112002	d4bf7228c0be5dac3f5ec8cfb636c16b499792e65d3171149851fed7549094e8
+fmm	613599b6c35159b2dcc6749574152eee89518998	CHANGELOG.md	ok	83533	073517239b52b8e4be408464265583654e06208ff66bff62f0d1ce3719731de4
+fmm	613599b6c35159b2dcc6749574152eee89518998	schemes/known/alpha_evolve/2x4x7_m45_mod0.json	missing	0	-
+fmm	613599b6c35159b2dcc6749574152eee89518998	schemes/status.json	missing	0	-
+fmm	613599b6c35159b2dcc6749574152eee89518998	no/such/path.json	missing	0	-
+mmc	HEAD	docs/catalog.json	ok	10675245	cc2ba618847d708fa701b218d8c47b339577eea3c42c639b427368824364ed0f
+mmc	HEAD	README.md	ok	14399	b9542c1e2307619809725f2df92f3444f4039340e4348c5722c68039d5d8d541
+mmc	HEAD	no/such/path.json	missing	0	-
+merlijn	HEAD	README.md	ok	2498	3a3285c45fa8f69bed4bd6940429c4673f028d924b9ea5852a32b6afb3cc3edb
+merlijn	HEAD	SHA256SUMS	ok	2468	bd1fbb48c49f2e828abf6484423d996aaaaa2c4d92da5e58c1a3e90fe0fa2201
+merlijn	HEAD	no/such/path.json	missing	0	-
+fmm_digest	HEAD	fmm_sota.json	ok	343712	4ad61b4846c5a7a7b229fb9d0d1ec63528626017b0f4b20927afdc420f44d856
+fmm_digest	HEAD	json_schema.json	ok	1804	faa90923f043f653ce788fa4fbbc823ee366b7ebfefda3565a3317bc25bc5894
+fmm_digest	HEAD	no/such/path.json	missing	0	-

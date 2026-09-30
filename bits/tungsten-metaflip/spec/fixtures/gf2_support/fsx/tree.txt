@@ -1,0 +1,58 @@
+d a
+d a/b
+f a/b/f.txt
+f a/g.txt
+f a.b
+f a-b
+d a-dir
+f a-dir/1.txt
+d a.dir
+f a.dir/2.txt
+d .hid
+f .hid/h.txt
+f .dot.txt
+d sp ace
+f sp ace/3.txt
+d é
+f é/ü.txt
+f é/plain.md
+d empty
+d deep
+d deep/x
+d deep/x/y
+f deep/x/y/z.mfw
+f deep/x/y/z.mfw.gz.b64
+f deep/x/w.mfw
+f deep/top.mfw
+f best.txt
+f matmul_2x3x5_gf2.txt
+f matmul_4x4_gf2.txt
+f 7
+d mat
+f mat/seeds.json
+d mat_r1
+f mat_r1/seeds.json
+d mat-x
+f mat-x/seeds.json
+d checkpoints
+d checkpoints/gf2
+d checkpoints/gf2/run1
+f checkpoints/gf2/run1/best.txt
+d checkpoints/gf2/run2
+f checkpoints/gf2/run2/best.txt
+f checkpoints/gf2/run2/other.txt
+l lnk a
+l loop .
+l dangling nowhere
+l a/up ..
+l r_abs ABS:a/b
+l r_rel a/b
+l r_chain1 r_chain2
+l r_chain2 a
+l r_dd lnk/b
+l r_loop1 r_loop2
+l r_loop2 r_loop1
+l r_self r_self
+l r_tri1 r_tri2
+l r_tri2 r_tri3
+l r_tri3 r_tri1

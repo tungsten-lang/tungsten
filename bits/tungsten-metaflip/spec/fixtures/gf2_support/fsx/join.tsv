@@ -1,0 +1,260 @@
+/a../q.r/c.tar.gz/ s	/a../q.r/c.tar.gz/ s
+///é/.x/c.tar.gz/|a	/é/.x/c.tar.gz/a
+//../é/é	//../é/é
+./ s	 s
+ s|/../b/.x	/../b/.x
+q.r/c.tar.gz//..a|//c.tar.gz/b/.|//q.r/	//q.r
+/a/b/.|///a../b/	/a../b
+/./x.|/a../é/c.tar.gz/c.tar.gz	/a../é/c.tar.gz/c.tar.gz
+////|//q.r/ s/q.r|a..	//q.r/ s/q.r/a..
+ s//../q.r/|///é/..	/é/..
+/a../ s/ s	/a../ s/ s
+///a//../../|/..a/b/..a	/..a/b/..a
+///.x/..|.hidden/.f|/a/b/.	/a/b
+///.|/..a	/..a
+/a../ s/ s|///c.tar.gz/x./|//c.tar.gz/b/.	//c.tar.gz/b
+/a/é/ s	/a/é/ s
+b|q.r/c.tar.gz//..a	b/q.r/c.tar.gz/..a
+/.x/q.r/ s	/.x/q.r/ s
+x./..	x./..
+/// s/	/ s
+/ s	/ s
+/a.././..|/./q.r	/q.r
+./a/./b	a/b
+/a/..a/x./ s|/..a/c.tar.gz/..|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx	/..a/c.tar.gz/../xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+///a//../../|//a	//a
+/a../q.r/c.tar.gz/ s|x./..	/a../q.r/c.tar.gz/ s/x./..
+///c.tar.gz/é/é/c.tar.gz|/../b|//.x/ s	//.x/ s
+/a../q.r/c.tar.gz/ s|/../.x|/b	/b
+//..a/b/a/x.|/./q.r/./c.tar.gz|.x//é	/q.r/c.tar.gz/.x/é
+x./..|/q.r/a/x./c.tar.gz	/q.r/a/x./c.tar.gz
+/a/..a/x./ s	/a/..a/x./ s
+//q.r/|x/../y	//q.r/x/../y
+/// s/|//.x/ s/x.	//.x/ s/x.
+//a..|/é	/é
+c.tar.gz/q.r|/ s	/ s
+b|//..|..a	//../..a
+x/../y|c.tar.gz/q.r	x/../y/c.tar.gz/q.r
+b|// s/ s|/./x./x.	/x./x.
+///c.tar.gz/é/é/c.tar.gz	/c.tar.gz/é/é/c.tar.gz
+./ s|/	/
+/// s/|.a.	/ s/.a.
+./b/..	b/..
+.x/a/c.tar.gz|//.x/..a/b	//.x/..a/b
+//q.r/|///é/.x/c.tar.gz/|.x/a/c.tar.gz	/é/.x/c.tar.gz/.x/a/c.tar.gz
+//q.r/ s/q.r|./ s	//q.r/ s/q.r/ s
+/q.r/a/x./c.tar.gz|///a../b/	/a../b
+///|/..a/x./q.r/é	/..a/x./q.r/é
+//.x/..a/b	//.x/..a/b
+a//b|dir.d/file.txt	a/b/dir.d/file.txt
+.bashrc|///./é/|/a	/a
+///c.tar.gz/é/é/c.tar.gz|/./x.	/x.
+a.tar.gz|/c.tar.gz/a|é/ü.txt	/c.tar.gz/a/é/ü.txt
+/..a/..a/..a|a b/c d|/./q.r/./c.tar.gz	/q.r/c.tar.gz
+/a/..a/x./ s	/a/..a/x./ s
+//q.r/ s/q.r|//a..|/.x/x.	/.x/x.
+//q.r/ s/q.r	//q.r/ s/q.r
+//a..|.//	//a..
+trail |//.././b	//../b
+a.|/./x./x.	/x./x.
+/b	/b
+////	/
+ lead	 lead
+trail |./ s	trail / s
+a..	a..
+a b/c d|/a.././..	/a../..
+///a../b/|/../.x|//c.tar.gz/../x.	//c.tar.gz/../x.
+/a/b/.|/..a/c.tar.gz/..	/..a/c.tar.gz/..
+//x./é/../|x/../y	//x./é/../x/../y
+/..a/..a/..a|///.	/
+a/	a
+//c.tar.gz/../x.|/.x/q.r/ s|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx	/.x/q.r/ s/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+///./é/|///b/a/	/b/a
+///./é/	/é
+/|/é/a..	/é/a..
+///é/..|/b|/a/b/c.txt	/a/b/c.txt
+/ s|/..a/..a/..a	/..a/..a/..a
+////|///.| s//../q.r/	/ s/../q.r
+///.x/é|/a.././..	/a../..
+./a../q.r/|x./..|a//b	a../q.r/x./../a/b
+/// s/|///c.tar.gz/x./|c.tar.gz	/c.tar.gz/x./c.tar.gz
+dir.d/file.txt	dir.d/file.txt
+//q.r/ s/q.r|//c.tar.gz|trail 	//c.tar.gz/trail 
+b	b
+//a../.x/.|///a//../../	/a/../..
+|//../é/é	//../é/é
+x/../y	x/../y
+é/ü.txt|/./x./x.|//a	//a
+///|a..	/a..
+/.x/q.r/ s	/.x/q.r/ s
+//q.r/ s/q.r|/.x/x.	/.x/x.
+///c.tar.gz/x./	/c.tar.gz/x.
+/q.r/ s/.x	/q.r/ s/.x
+///.x/..| lead	/.x/../ lead
+.x/a/c.tar.gz	.x/a/c.tar.gz
+//x./é/../|.	//x./é/..
+ s/q.r/é|///|/./x./x.	/x./x.
+///q.r/x./é/|a.|/..a/..a/..a	/..a/..a/..a
+/a/é/ s|/.x|//a../.x/.	//a../.x
+//a../	//a..
+/./x./x.|/c.tar.gz/b/.|//a..	//a..
+/a.././..|//q.r/b	//q.r/b
+.x/../a../ s|dir.d/file.txt|./b/..	.x/../a../ s/dir.d/file.txt/b/..
+/a/b/.|/..a/b/..a	/..a/b/..a
+/./x.	/x.
+|//q.r/ s/q.r	//q.r/ s/q.r
+//a../	//a..
+///é/.x/c.tar.gz/	/é/.x/c.tar.gz
+/.x|/.x/q.r/ s	/.x/q.r/ s
+/.x	/.x
+b	b
+.a.|..a	.a./..a
+///a../b/|./ s	/a../b/ s
+/é|/b/a/a|//..a/b/a/x.	//..a/b/a/x.
+/a../q.r/c.tar.gz/ s|.	/a../q.r/c.tar.gz/ s
+///..a/..|///a//../../	/a/../..
+///|.a.	/.a.
+dir.d/file.txt	dir.d/file.txt
+.x/a/c.tar.gz|/.x/x.|//a../.	//a..
+b|/b	/b
+.x/../a../ s|trail |//a../.x/.	//a../.x
+///a//../../	/a/../..
+c.tar.gz/q.r	c.tar.gz/q.r
+/ s|/.x/x.	/.x/x.
+//a../.|é/q.r/x./	//a../é/q.r/x.
+.x/../a../ s|trail 	.x/../a../ s/trail 
+a//b	a/b
+b	b
+c.tar.gz/q.r|/..a	/..a
+// s/ s|./ s	// s/ s/ s
+//|//q.r/b	//q.r/b
+/..a/..a/..a|//a../.	//a..
+//./..a|.x/a/c.tar.gz|/q.r/a/x./c.tar.gz	/q.r/a/x./c.tar.gz
+x./..|/..a/c.tar.gz/..	/..a/c.tar.gz/..
+/ s|//q.r/	//q.r
+//./..a	//..a
+/q.r/ s/.x|x/../y	/q.r/ s/.x/x/../y
+/a/q.r/b|/a/..a/x./ s|///.	/
+.x/../a../ s|///q.r/x./é/|/../.x	/../.x
+/b|.x/a/c.tar.gz	/b/.x/a/c.tar.gz
+a.tar.gz|/../b/.x|/// s/	/ s
+//c.tar.gz/../x.|..a/..a	//c.tar.gz/../x./..a/..a
+x./..|./b/..	x./../b/..
+//..|///c.tar.gz/é/é/c.tar.gz	/c.tar.gz/é/é/c.tar.gz
+é/ü.txt| lead	é/ü.txt/ lead
+/a	/a
+///c.tar.gz/é/é/c.tar.gz|./b/..|/q.r/ s/.x	/q.r/ s/.x
+.bashrc|//.x/..a/b	//.x/..a/b
+/a|x./..	/a/x./..
+//.././b|/./q.r/./c.tar.gz	/q.r/c.tar.gz
+//.x/ s/x.|trail 	//.x/ s/x./trail 
+./a../q.r/	a../q.r
+.x/a/c.tar.gz	.x/a/c.tar.gz
+..|////	/
+/a.././..|//..|/./q.r/./c.tar.gz	/q.r/c.tar.gz
+/.x|...	/.x/...
+/c.tar.gz/b/.	/c.tar.gz/b
+/..a|/a.././..	/a../..
+/c.tar.gz/b/.|/a../ s/ s	/a../ s/ s
+.//	.
+///	/
+a//b|é/q.r/x./	a/b/é/q.r/x.
+.|//c.tar.gz	//c.tar.gz
+/	/
+//a../|//a|///c.tar.gz/é/c.tar.gz	/c.tar.gz/é/c.tar.gz
+./a/./b|/c.tar.gz/a	/c.tar.gz/a
+///c.tar.gz/é/c.tar.gz	/c.tar.gz/é/c.tar.gz
+/./x.	/x.
+/./q.r/./c.tar.gz	/q.r/c.tar.gz
+é/q.r/x./|..a/..a	é/q.r/x./..a/..a
+///q.r/x./é/	/q.r/x./é
+..a/..a|a.	..a/..a/a.
+q.r/c.tar.gz//..a	q.r/c.tar.gz/..a
+//c.tar.gz/b/.|/é/a..	/é/a..
+/a|///a../q.r/x./../	/a../q.r/x./..
+//	//
+a.tar.gz	a.tar.gz
+/a|./a/./b|/../b	/../b
+.	.
+///a//../../	/a/../..
+//c.tar.gz/b/.|/a../ s/ s	/a../ s/ s
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx|c.tar.gz/q.r|/..a/x./q.r/é	/..a/x./q.r/é
+./a../q.r/	a../q.r
+.a.|//a../c.tar.gz/..	//a../c.tar.gz/..
+//c.tar.gz|/./x./x.	/x./x.
+//..a/b/a/x.	//..a/b/a/x.
+a|/./q.r	/q.r
+a../ s/./.x	a../ s/.x
+.a.|/ s	/ s
+..a/..a|	..a/..a
+///q.r/x./é/	/q.r/x./é
+a../ s/./.x|/ s	/ s
+..|q.r/c.tar.gz//..a	../q.r/c.tar.gz/..a
+/./x.|/ s	/ s
+.x/../a../ s|..a/..a	.x/../a../ s/..a/..a
+///.x/..|a b/c d	/.x/../a b/c d
+.|/c.tar.gz/b/.|///a//../../	/a/../..
+q.r/c.tar.gz//..a|/.x/..a/./	/.x/..a
+a../ s/./.x	a../ s/.x
+./a../q.r/|/b	/b
+/..a/..a/..a|/..a/..a/..a|é/q.r/x./	/..a/..a/..a/é/q.r/x.
+///a../b/	/a../b
+//c.tar.gz/../x.|/a/é/ s|//q.r/	//q.r
+//a../.|/..a/x./q.r/é	/..a/x./q.r/é
+a.tar.gz|//.x/..a/b	//.x/..a/b
+/a/é/ s|/a../é/c.tar.gz/c.tar.gz	/a../é/c.tar.gz/c.tar.gz
+/..a|/./q.r/./c.tar.gz	/q.r/c.tar.gz
+/c.tar.gz/a|///é/.x/c.tar.gz/	/é/.x/c.tar.gz
+/a../ s/ s|/a../q.r/c.tar.gz/ s|x./..	/a../q.r/c.tar.gz/ s/x./..
+/..a/c.tar.gz/..|//a../.x/.	//a../.x
+///a../b/|a b/c d	/a../b/a b/c d
+/../.x	/../.x
+//..|///.x/é	/.x/é
+.x/../a../ s	.x/../a../ s
+///c.tar.gz/é/c.tar.gz	/c.tar.gz/é/c.tar.gz
+..	..
+.bashrc|///.x/..	/.x/..
+x./c.tar.gz/../.x/|///a//../../	/a/../..
+a.|//..a/b/a/x.	//..a/b/a/x.
+.//|x./c.tar.gz/../.x/|///c.tar.gz/é/c.tar.gz	/c.tar.gz/é/c.tar.gz
+a../ s/./.x|//..|a../ s/./.x	//../a../ s/.x
+/..a/b/..a|///a../b/	/a../b
+/b/a/a	/b/a/a
+///é/.x/c.tar.gz/|//a..	//a..
+//x./é/../|x./..|/../.x	/../.x
+a../ s/./.x|./ s	a../ s/.x/ s
+|//	//
+//q.r/|é/ü.txt	//q.r/é/ü.txt
+//a../c.tar.gz/..|/./x./x.|/./q.r	/q.r
+/a/b/c.txt	/a/b/c.txt
+///a../b/|///q.r/x./é/	/q.r/x./é
+/c.tar.gz/a|//q.r/	//q.r
+ lead|/a/é/ s	/a/é/ s
+/q.r/ s/.x|...	/q.r/ s/.x/...
+q.r/c.tar.gz//..a|/..a/..a/..a	/..a/..a/..a
+/.x/x.| s/q.r/é	/.x/x./ s/q.r/é
+x./..|///é/..|//q.r/ s/q.r	//q.r/ s/q.r
+/a	/a
+//c.tar.gz/../x.|	//c.tar.gz/../x.
+/b/a/a	/b/a/a
+//a../c.tar.gz/..	//a../c.tar.gz/..
+./ s|x./..	 s/x./..
+//a../.x/.	//a../.x
+/q.r/ s/.x|//.x/ s/x.|/// s/	/ s
+/../b/.x|a//b	/../b/.x/a/b
+q.r/c.tar.gz//..a|a/	q.r/c.tar.gz/..a/a
+///a../b/|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx	/a../b/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+dir.d/file.txt|//a../.x/.	//a../.x
+/.x/..a/./|/// s/	/ s
+//.x/ s	//.x/ s
+x./..	x./..
+/a../é/c.tar.gz/c.tar.gz|//../é/é	//../é/é
+/.x/q.r/ s|///a//../../|/ s	/ s
+/.x/x.|/a.././..	/a../..
+//a../é|/a.././..	/a../..
+/a/b/.|/..a|/a/b/.	/a/b
+/b/a/a|//a../é|a.tar.gz	//a../é/a.tar.gz
+//.x/ s	//.x/ s
+./a/./b	a/b
+//a../|.bashrc	//a../.bashrc
+a/	a

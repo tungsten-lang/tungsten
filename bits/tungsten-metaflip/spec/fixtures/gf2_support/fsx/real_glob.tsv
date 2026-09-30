@@ -1,0 +1,14 @@
+upstream-latest/fmm-tree-ac13ca8855	**/*.json	all	2681	ea52c11ceebebacb3249c110ab4ee51650dd6f4a2c7ab259c48f6d51ed372aa7
+upstream-latest/fmm-tree-ac13ca8855	schemes/known/*/*.json	all	84	2e4f4ee3de124a1ba2d4679ba5215aaedfcbc2ff567f96e1a0e34e5e0fc0b973
+upstream-latest/fmm-tree-ac13ca8855	**	files	3557	7948f5560069ec1f77c1d745ff67a819bbc8423c6a6546160c5fa862f5103e0e
+release-0929/gf2-searched-records	*.mfw.gz.b64	all	677	98c818af6313be4a8725fe1fa79a5cde786231e53815a577bd12845a1883727f
+release-0929/gf2-searched-records	**/*	files	679	54342f3325d9bfb0d04ee7f004735c085328ae026336e423598984f892ed05da
+release-0929/gf2-closure-products	*.mfw.gz.b64	all	203	017511e091df4231745dcaff16214c222d1a5ef484e87731446dea94a271325f
+release-0929/gf2-campaign-records	**/*.jsonl	all	26	38001b22d1361c8cd35c8a12b486068a674f8059633f55bf214381d8923f8be1
+release-0929/gf2-campaign-records	*/*.json	all	25	ee4a40c673e124071c295909f5035b704792f94cef95409e365aafdbe5f8b105
+release-0929/gf2-campaign-records/seeds	**/seeds.json	all	12	399e36113d916956b77f6605fe04c9ce0c57ba2b3b6d1a63252d59c30d75c6a2
+.	*.jsonl	all	24	ebf4bd3274ff9e2c5efe916ea5bea0de7335692dcc4f743d3ebf3619dade4ed7
+.	mat*/seeds.json	all	4	5e88fdebf79b5ef1ab5b7915d349583b5f6cf6fdad5657ad1ffb3ffc87f6e709
+.	release-0929/gf2-*	all	5	b3717062fc5a0dfe091cae635b5048fa9bcc883030a128c1fd9b5b7b17716b06
+.	*_mfw/*.mfw	all	7240	3d8e070234d0f4dd5f4ed8cf1e824d497502f7cc9b62c75e940de773e145bc4b
+port-corpus	mfw/*.mfw	all	1087	34676b3ed27ac7fefa856d0d62a6a9b856417d2d0e684161a797110d26fecd44

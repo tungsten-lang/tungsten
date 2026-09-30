@@ -1,0 +1,3620 @@
+{
+ "schema": 1,
+ "field": "GF(2)",
+ "record_claim": false,
+ "rows": [
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "4x4x8",
+   "rank": 94,
+   "sha256": "407bc69994a3d0e9600cd6eeee3153d7440689318551e659701a2950ff6d0b69",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 94,
+     "axis": 2,
+     "left": {
+      "kind": "seed",
+      "rank": 47,
+      "source_shape": [
+       4,
+       4,
+       4
+      ],
+      "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_4x4_rank47_d450_gf2.txt",
+      "source_sha256": "6add1cbdf42a9bf5fda197cdf92a909b98ba64098f353377db608a96b742ab4a",
+      "shape": [
+       4,
+       4,
+       4
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 47,
+      "source_shape": [
+       4,
+       4,
+       4
+      ],
+      "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_4x4_rank47_d450_gf2.txt",
+      "source_sha256": "6add1cbdf42a9bf5fda197cdf92a909b98ba64098f353377db608a96b742ab4a",
+      "shape": [
+       4,
+       4,
+       4
+      ]
+     },
+     "shape": [
+      4,
+      4,
+      8
+     ]
+    }
+   },
+   "file": "4x4x8-r94-407bc699.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "2x4x17",
+   "rank": 109,
+   "sha256": "70c680cfbf695433becb31a39c04601279749b82b07f405909ce47444ea616cf",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 109,
+     "axis": 2,
+     "left": {
+      "kind": "seed",
+      "rank": 26,
+      "source_shape": [
+       2,
+       4,
+       4
+      ],
+      "state": "326d03d81076cd4478dcaaad9be98e782a5befd26e4d7b4fc10f0975fc721f98",
+      "shape": [
+       2,
+       4,
+       4
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 83,
+      "source_shape": [
+       2,
+       4,
+       13
+      ],
+      "state": "b238dcd41639f05cbbbbc03bca9e9f36552dc0ecd13281f48c22d43355b9fdd3",
+      "shape": [
+       2,
+       4,
+       13
+      ]
+     },
+     "shape": [
+      2,
+      4,
+      17
+     ]
+    }
+   },
+   "file": "2x4x17-r109-70c680cf.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "2x4x18",
+   "rank": 115,
+   "sha256": "18da0d57378b326b2d4396c151c4114ac18f2ca1383440bb2b30e7cee3df8316",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 115,
+     "axis": 2,
+     "left": {
+      "kind": "seed",
+      "rank": 45,
+      "source_shape": [
+       2,
+       4,
+       7
+      ],
+      "state": "0e348d7b0002bb3521a0c97c2279a3c638ce85a542917594d9767137e573e97f",
+      "shape": [
+       2,
+       4,
+       7
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 70,
+      "source_shape": [
+       2,
+       4,
+       11
+      ],
+      "state": "b25373ead6d9f8f4d741cff3a88d2116758737b3ecbf0f796f562f2638ef1b7b",
+      "shape": [
+       2,
+       4,
+       11
+      ]
+     },
+     "shape": [
+      2,
+      4,
+      18
+     ]
+    }
+   },
+   "file": "2x4x18-r115-18da0d57.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "2x4x20",
+   "rank": 128,
+   "sha256": "101e1ff961cd380a3c5ed8a60f3cfeee41889a3fbb57c7b1232c9dbdac240d45",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 128,
+     "axis": 2,
+     "left": {
+      "kind": "seed",
+      "rank": 26,
+      "source_shape": [
+       2,
+       4,
+       4
+      ],
+      "state": "326d03d81076cd4478dcaaad9be98e782a5befd26e4d7b4fc10f0975fc721f98",
+      "shape": [
+       2,
+       4,
+       4
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 102,
+      "source_shape": [
+       2,
+       4,
+       16
+      ],
+      "state": "3d2ba852dc9ce5143d5cae638df21c444f66b4f245ee24da10110b682cfbbba2",
+      "shape": [
+       2,
+       4,
+       16
+      ]
+     },
+     "shape": [
+      2,
+      4,
+      20
+     ]
+    }
+   },
+   "file": "2x4x20-r128-101e1ff9.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "2x4x21",
+   "rank": 134,
+   "sha256": "52cdca5cd4aa5114e904d42531c82c31d3a14f41cbfdea8d0136b75da0738e3d",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 134,
+     "axis": 2,
+     "left": {
+      "kind": "seed",
+      "rank": 51,
+      "source_shape": [
+       2,
+       4,
+       8
+      ],
+      "state": "15edd67e5634fb598915e4a0ef62e06f401c20241ce0a8c9cd13abe764d73936",
+      "shape": [
+       2,
+       4,
+       8
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 83,
+      "source_shape": [
+       2,
+       4,
+       13
+      ],
+      "state": "b238dcd41639f05cbbbbc03bca9e9f36552dc0ecd13281f48c22d43355b9fdd3",
+      "shape": [
+       2,
+       4,
+       13
+      ]
+     },
+     "shape": [
+      2,
+      4,
+      21
+     ]
+    }
+   },
+   "file": "2x4x21-r134-52cdca5c.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "2x5x17",
+   "rank": 134,
+   "sha256": "793467e072d9134a0e4994558fea17b1333cf9d7f3cd0f6481f1de56f69c0945",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 134,
+     "axis": 2,
+     "left": {
+      "kind": "seed",
+      "rank": 40,
+      "source_shape": [
+       2,
+       5,
+       5
+      ],
+      "state": "128938222eeeb3f72b5cff4c115f3f04b64dc55edb9b7ebb284ebd3cf8fec397",
+      "shape": [
+       2,
+       5,
+       5
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 94,
+      "source_shape": [
+       2,
+       5,
+       12
+      ],
+      "state": "bdd85df1d2442ee2d8dd54182f64e4471def1399bc388ba926bdb5cd44887639",
+      "shape": [
+       2,
+       5,
+       12
+      ]
+     },
+     "shape": [
+      2,
+      5,
+      17
+     ]
+    }
+   },
+   "file": "2x5x17-r134-793467e0.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "2x4x24",
+   "rank": 153,
+   "sha256": "755d5ad1f70c0db7b8940bd16d535e5aa4cf9b81628fae194be31a6532429d3a",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 153,
+     "axis": 2,
+     "left": {
+      "kind": "seed",
+      "rank": 51,
+      "source_shape": [
+       2,
+       4,
+       8
+      ],
+      "state": "15edd67e5634fb598915e4a0ef62e06f401c20241ce0a8c9cd13abe764d73936",
+      "shape": [
+       2,
+       4,
+       8
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 102,
+      "source_shape": [
+       2,
+       4,
+       16
+      ],
+      "state": "3d2ba852dc9ce5143d5cae638df21c444f66b4f245ee24da10110b682cfbbba2",
+      "shape": [
+       2,
+       4,
+       16
+      ]
+     },
+     "shape": [
+      2,
+      4,
+      24
+     ]
+    }
+   },
+   "file": "2x4x24-r153-755d5ad1.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "4x4x14",
+   "rank": 162,
+   "sha256": "c6c8a3ca9cbfdf9943b453fc1cc94ce3c245e183d9e0d71997fac2cf6f8955ce",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 162,
+     "axis": 2,
+     "left": {
+      "kind": "seed",
+      "rank": 47,
+      "source_shape": [
+       4,
+       4,
+       4
+      ],
+      "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_4x4_rank47_d450_gf2.txt",
+      "source_sha256": "6add1cbdf42a9bf5fda197cdf92a909b98ba64098f353377db608a96b742ab4a",
+      "shape": [
+       4,
+       4,
+       4
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 115,
+      "source_shape": [
+       4,
+       4,
+       10
+      ],
+      "state": "e60654005bd03c7cf91a5b351826e09c1fb305005810e78cca9a856ff8d4055b",
+      "shape": [
+       4,
+       4,
+       10
+      ]
+     },
+     "shape": [
+      4,
+      4,
+      14
+     ]
+    }
+   },
+   "file": "4x4x14-r162-c6c8a3ca.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "2x4x27",
+   "rank": 172,
+   "sha256": "6f76efabe6ba10142703481a3d4238b94cef5c9b57794d5987fc36c437d6f996",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 172,
+     "axis": 2,
+     "left": {
+      "kind": "seed",
+      "rank": 51,
+      "source_shape": [
+       2,
+       4,
+       8
+      ],
+      "state": "15edd67e5634fb598915e4a0ef62e06f401c20241ce0a8c9cd13abe764d73936",
+      "shape": [
+       2,
+       4,
+       8
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 121,
+      "source_shape": [
+       19,
+       2,
+       4
+      ],
+      "state": "b63fb2ce3bd97e866e763078472722ef952f4e8809459df114827c16bf49efcc",
+      "shape": [
+       2,
+       4,
+       19
+      ]
+     },
+     "shape": [
+      2,
+      4,
+      27
+     ]
+    }
+   },
+   "file": "2x4x27-r172-6f76efab.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "2x5x22",
+   "rank": 173,
+   "sha256": "817c8e7c0fcf5b40186c2962cb831c4d77e01ce02b9c678570022abc7ef40989",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 173,
+     "axis": 2,
+     "left": {
+      "kind": "seed",
+      "rank": 47,
+      "source_shape": [
+       2,
+       5,
+       6
+      ],
+      "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x5x6_rank47_catalog_gf2.txt",
+      "source_sha256": "790cc812b08fe84ee6f188447a08e76dd3f771a49514e500fa93aed623d8d841",
+      "shape": [
+       2,
+       5,
+       6
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 126,
+      "source_shape": [
+       2,
+       5,
+       16
+      ],
+      "state": "6fee005e04d71302fe8e1313b7326028b1c1513c98e2ca053ff1e8210c0738b8",
+      "shape": [
+       2,
+       5,
+       16
+      ]
+     },
+     "shape": [
+      2,
+      5,
+      22
+     ]
+    }
+   },
+   "file": "2x5x22-r173-817c8e7c.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "4x4x15",
+   "rank": 175,
+   "sha256": "6ebe930cde68d0458a9ba709e4a203b99d4672f911afd755c1d85f8833fd0050",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 175,
+     "axis": 2,
+     "left": {
+      "kind": "seed",
+      "rank": 60,
+      "source_shape": [
+       4,
+       4,
+       5
+      ],
+      "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_4x4x5_rank60_d628_gl_frontier_gf2.txt",
+      "source_sha256": "ea5474eecf79c21daccaf29069064f4ed65e9af069a333efc44cf9f18539a66c",
+      "shape": [
+       4,
+       4,
+       5
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 115,
+      "source_shape": [
+       4,
+       4,
+       10
+      ],
+      "state": "e60654005bd03c7cf91a5b351826e09c1fb305005810e78cca9a856ff8d4055b",
+      "shape": [
+       4,
+       4,
+       10
+      ]
+     },
+     "shape": [
+      4,
+      4,
+      15
+     ]
+    }
+   },
+   "file": "4x4x15-r175-6ebe930c.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "2x4x28",
+   "rank": 179,
+   "sha256": "0a0a043fcc6594c9137685a9ff099be3ecd40998c6d929b7c828746d744889ca",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 179,
+     "axis": 2,
+     "left": {
+      "kind": "seed",
+      "rank": 26,
+      "source_shape": [
+       2,
+       4,
+       4
+      ],
+      "state": "326d03d81076cd4478dcaaad9be98e782a5befd26e4d7b4fc10f0975fc721f98",
+      "shape": [
+       2,
+       4,
+       4
+      ]
+     },
+     "right": {
+      "kind": "split",
+      "rank": 153,
+      "axis": 2,
+      "left": {
+       "kind": "seed",
+       "rank": 51,
+       "source_shape": [
+        2,
+        4,
+        8
+       ],
+       "state": "15edd67e5634fb598915e4a0ef62e06f401c20241ce0a8c9cd13abe764d73936",
+       "shape": [
+        2,
+        4,
+        8
+       ]
+      },
+      "right": {
+       "kind": "seed",
+       "rank": 102,
+       "source_shape": [
+        2,
+        4,
+        16
+       ],
+       "state": "3d2ba852dc9ce5143d5cae638df21c444f66b4f245ee24da10110b682cfbbba2",
+       "shape": [
+        2,
+        4,
+        16
+       ]
+      },
+      "shape": [
+       2,
+       4,
+       24
+      ]
+     },
+     "shape": [
+      2,
+      4,
+      28
+     ]
+    }
+   },
+   "file": "2x4x28-r179-0a0a043f.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "2x5x23",
+   "rank": 181,
+   "sha256": "e85969c51c79e37851eebf793382eaf2870ef1fcd3a49e89ef84dc02e5840e1b",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 181,
+     "axis": 2,
+     "left": {
+      "kind": "seed",
+      "rank": 40,
+      "source_shape": [
+       2,
+       5,
+       5
+      ],
+      "state": "128938222eeeb3f72b5cff4c115f3f04b64dc55edb9b7ebb284ebd3cf8fec397",
+      "shape": [
+       2,
+       5,
+       5
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 141,
+      "source_shape": [
+       18,
+       2,
+       5
+      ],
+      "state": "8e57252da9b10087b32f58dbe35a137390386ea60d6bc6bdbaa1799bda8cbf46",
+      "shape": [
+       2,
+       5,
+       18
+      ]
+     },
+     "shape": [
+      2,
+      5,
+      23
+     ]
+    }
+   },
+   "file": "2x5x23-r181-e85969c5.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "2x4x29",
+   "rank": 185,
+   "sha256": "e670be6d5fedc8cbe2bf2940d694e182ede596b70313558a97f31ee9065ec607",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 185,
+     "axis": 2,
+     "left": {
+      "kind": "seed",
+      "rank": 45,
+      "source_shape": [
+       2,
+       4,
+       7
+      ],
+      "state": "0e348d7b0002bb3521a0c97c2279a3c638ce85a542917594d9767137e573e97f",
+      "shape": [
+       2,
+       4,
+       7
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 140,
+      "source_shape": [
+       22,
+       2,
+       4
+      ],
+      "state": "24ab31d2c4ac5f44dae8d9c71392cffc592488d63a07b1bd4ecec6167c6bb63c",
+      "shape": [
+       2,
+       4,
+       22
+      ]
+     },
+     "shape": [
+      2,
+      4,
+      29
+     ]
+    }
+   },
+   "file": "2x4x29-r185-e670be6d.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "2x4x31",
+   "rank": 198,
+   "sha256": "7da7ac763bd1f0eddb3f717a01c271bf0f1be31299d8b73bb361d6f44cae2932",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 198,
+     "axis": 2,
+     "left": {
+      "kind": "seed",
+      "rank": 26,
+      "source_shape": [
+       2,
+       4,
+       4
+      ],
+      "state": "326d03d81076cd4478dcaaad9be98e782a5befd26e4d7b4fc10f0975fc721f98",
+      "shape": [
+       2,
+       4,
+       4
+      ]
+     },
+     "right": {
+      "kind": "split",
+      "rank": 172,
+      "axis": 2,
+      "left": {
+       "kind": "seed",
+       "rank": 51,
+       "source_shape": [
+        2,
+        4,
+        8
+       ],
+       "state": "15edd67e5634fb598915e4a0ef62e06f401c20241ce0a8c9cd13abe764d73936",
+       "shape": [
+        2,
+        4,
+        8
+       ]
+      },
+      "right": {
+       "kind": "seed",
+       "rank": 121,
+       "source_shape": [
+        19,
+        2,
+        4
+       ],
+       "state": "b63fb2ce3bd97e866e763078472722ef952f4e8809459df114827c16bf49efcc",
+       "shape": [
+        2,
+        4,
+        19
+       ]
+      },
+      "shape": [
+       2,
+       4,
+       27
+      ]
+     },
+     "shape": [
+      2,
+      4,
+      31
+     ]
+    }
+   },
+   "file": "2x4x31-r198-7da7ac76.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "2x4x32",
+   "rank": 204,
+   "sha256": "0c425e36c2cd5669c09f375b141c30a62beccbe93c126a00c5a6f25fb891f928",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 204,
+     "axis": 2,
+     "left": {
+      "kind": "seed",
+      "rank": 51,
+      "source_shape": [
+       2,
+       4,
+       8
+      ],
+      "state": "15edd67e5634fb598915e4a0ef62e06f401c20241ce0a8c9cd13abe764d73936",
+      "shape": [
+       2,
+       4,
+       8
+      ]
+     },
+     "right": {
+      "kind": "split",
+      "rank": 153,
+      "axis": 2,
+      "left": {
+       "kind": "seed",
+       "rank": 51,
+       "source_shape": [
+        2,
+        4,
+        8
+       ],
+       "state": "15edd67e5634fb598915e4a0ef62e06f401c20241ce0a8c9cd13abe764d73936",
+       "shape": [
+        2,
+        4,
+        8
+       ]
+      },
+      "right": {
+       "kind": "seed",
+       "rank": 102,
+       "source_shape": [
+        2,
+        4,
+        16
+       ],
+       "state": "3d2ba852dc9ce5143d5cae638df21c444f66b4f245ee24da10110b682cfbbba2",
+       "shape": [
+        2,
+        4,
+        16
+       ]
+      },
+      "shape": [
+       2,
+       4,
+       24
+      ]
+     },
+     "shape": [
+      2,
+      4,
+      32
+     ]
+    }
+   },
+   "file": "2x4x32-r204-0c425e36.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "4x5x14",
+   "rank": 206,
+   "sha256": "f02e9db5222a3d64fc4ae6d821968fe6d062567dfd6afafc7da0ac23e02c267f",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 206,
+     "axis": 2,
+     "left": {
+      "kind": "seed",
+      "rank": 60,
+      "source_shape": [
+       4,
+       4,
+       5
+      ],
+      "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_4x4x5_rank60_d628_gl_frontier_gf2.txt",
+      "source_sha256": "ea5474eecf79c21daccaf29069064f4ed65e9af069a333efc44cf9f18539a66c",
+      "shape": [
+       4,
+       5,
+       4
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 146,
+      "source_shape": [
+       4,
+       5,
+       10
+      ],
+      "state": "209c0b3d2e9d9b5c7a3a70bf1f7cb1be5bba9e854cd3b54aaff44bfe3d0bf321",
+      "shape": [
+       4,
+       5,
+       10
+      ]
+     },
+     "shape": [
+      4,
+      5,
+      14
+     ]
+    }
+   },
+   "file": "4x5x14-r206-f02e9db5.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "2x5x28",
+   "rank": 220,
+   "sha256": "d2eb0c1f3d8d7d0520ad07459603bc6d6edecd70056afe9367ba4bfe456a8ae9",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 220,
+     "axis": 2,
+     "left": {
+      "kind": "seed",
+      "rank": 47,
+      "source_shape": [
+       2,
+       5,
+       6
+      ],
+      "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x5x6_rank47_catalog_gf2.txt",
+      "source_sha256": "790cc812b08fe84ee6f188447a08e76dd3f771a49514e500fa93aed623d8d841",
+      "shape": [
+       2,
+       5,
+       6
+      ]
+     },
+     "right": {
+      "kind": "split",
+      "rank": 173,
+      "axis": 2,
+      "left": {
+       "kind": "seed",
+       "rank": 47,
+       "source_shape": [
+        2,
+        5,
+        6
+       ],
+       "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x5x6_rank47_catalog_gf2.txt",
+       "source_sha256": "790cc812b08fe84ee6f188447a08e76dd3f771a49514e500fa93aed623d8d841",
+       "shape": [
+        2,
+        5,
+        6
+       ]
+      },
+      "right": {
+       "kind": "seed",
+       "rank": 126,
+       "source_shape": [
+        2,
+        5,
+        16
+       ],
+       "state": "6fee005e04d71302fe8e1313b7326028b1c1513c98e2ca053ff1e8210c0738b8",
+       "shape": [
+        2,
+        5,
+        16
+       ]
+      },
+      "shape": [
+       2,
+       5,
+       22
+      ]
+     },
+     "shape": [
+      2,
+      5,
+      28
+     ]
+    }
+   },
+   "file": "2x5x28-r220-d2eb0c1f.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "4x5x15",
+   "rank": 220,
+   "sha256": "429ead1905a5ee53265378d02d81fb69a9ba94f54a19aa1311ec1b6709e84221",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 220,
+     "axis": 2,
+     "left": {
+      "kind": "seed",
+      "rank": 60,
+      "source_shape": [
+       4,
+       4,
+       5
+      ],
+      "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_4x4x5_rank60_d628_gl_frontier_gf2.txt",
+      "source_sha256": "ea5474eecf79c21daccaf29069064f4ed65e9af069a333efc44cf9f18539a66c",
+      "shape": [
+       4,
+       5,
+       4
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 160,
+      "source_shape": [
+       4,
+       5,
+       11
+      ],
+      "state": "37476474714b530999ff9e8b917b72e29f2f1ac64a47541a0bc3b0a0bb93879a",
+      "shape": [
+       4,
+       5,
+       11
+      ]
+     },
+     "shape": [
+      4,
+      5,
+      15
+     ]
+    }
+   },
+   "file": "4x5x15-r220-429ead19.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "2x5x29",
+   "rank": 228,
+   "sha256": "4819137986dcf493a8b92b63604fb2a3403138fbfc8345d215b10518a49e0e57",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 228,
+     "axis": 2,
+     "left": {
+      "kind": "seed",
+      "rank": 40,
+      "source_shape": [
+       2,
+       5,
+       5
+      ],
+      "state": "128938222eeeb3f72b5cff4c115f3f04b64dc55edb9b7ebb284ebd3cf8fec397",
+      "shape": [
+       2,
+       5,
+       5
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 188,
+      "source_shape": [
+       24,
+       2,
+       5
+      ],
+      "state": "a526887915ac818484caf9f095453a844e946340f4239086cc7cf7a60e119fee",
+      "shape": [
+       2,
+       5,
+       24
+      ]
+     },
+     "shape": [
+      2,
+      5,
+      29
+     ]
+    }
+   },
+   "file": "2x5x29-r228-48191379.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "4x5x16",
+   "rank": 234,
+   "sha256": "4b0c23a1cd1803b19fd1a075dae796cedb087ac4fdf20dc7bbf867a91a68499e",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 234,
+     "axis": 2,
+     "left": {
+      "kind": "seed",
+      "rank": 60,
+      "source_shape": [
+       4,
+       4,
+       5
+      ],
+      "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_4x4x5_rank60_d628_gl_frontier_gf2.txt",
+      "source_sha256": "ea5474eecf79c21daccaf29069064f4ed65e9af069a333efc44cf9f18539a66c",
+      "shape": [
+       4,
+       5,
+       4
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 174,
+      "source_shape": [
+       4,
+       5,
+       12
+      ],
+      "state": "da6efa37c36015c741d28187577483432c454064bb498ac81c90c83bb57a8a52",
+      "shape": [
+       4,
+       5,
+       12
+      ]
+     },
+     "shape": [
+      4,
+      5,
+      16
+     ]
+    }
+   },
+   "file": "4x5x16-r234-4b0c23a1.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "4x4x24",
+   "rank": 277,
+   "sha256": "7ee4a4d81c9828fed4b4aa2ad06a00db714ac56e5cf7cc41ce2cb1f8b9028e27",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 277,
+     "axis": 2,
+     "left": {
+      "kind": "seed",
+      "rank": 47,
+      "source_shape": [
+       4,
+       4,
+       4
+      ],
+      "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_4x4_rank47_d450_gf2.txt",
+      "source_sha256": "6add1cbdf42a9bf5fda197cdf92a909b98ba64098f353377db608a96b742ab4a",
+      "shape": [
+       4,
+       4,
+       4
+      ]
+     },
+     "right": {
+      "kind": "split",
+      "rank": 230,
+      "axis": 2,
+      "left": {
+       "kind": "seed",
+       "rank": 115,
+       "source_shape": [
+        4,
+        4,
+        10
+       ],
+       "state": "e60654005bd03c7cf91a5b351826e09c1fb305005810e78cca9a856ff8d4055b",
+       "shape": [
+        4,
+        4,
+        10
+       ]
+      },
+      "right": {
+       "kind": "seed",
+       "rank": 115,
+       "source_shape": [
+        4,
+        4,
+        10
+       ],
+       "state": "e60654005bd03c7cf91a5b351826e09c1fb305005810e78cca9a856ff8d4055b",
+       "shape": [
+        4,
+        4,
+        10
+       ]
+      },
+      "shape": [
+       4,
+       4,
+       20
+      ]
+     },
+     "shape": [
+      4,
+      4,
+      24
+     ]
+    }
+   },
+   "file": "4x4x24-r277-7ee4a4d8.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "4x4x25",
+   "rank": 290,
+   "sha256": "d11ea7c75038c16d781189e571655f27feb1cf6f88bdc3fbcce1dda06a019c43",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 290,
+     "axis": 2,
+     "left": {
+      "kind": "seed",
+      "rank": 60,
+      "source_shape": [
+       4,
+       4,
+       5
+      ],
+      "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_4x4x5_rank60_d628_gl_frontier_gf2.txt",
+      "source_sha256": "ea5474eecf79c21daccaf29069064f4ed65e9af069a333efc44cf9f18539a66c",
+      "shape": [
+       4,
+       4,
+       5
+      ]
+     },
+     "right": {
+      "kind": "split",
+      "rank": 230,
+      "axis": 2,
+      "left": {
+       "kind": "seed",
+       "rank": 115,
+       "source_shape": [
+        4,
+        4,
+        10
+       ],
+       "state": "e60654005bd03c7cf91a5b351826e09c1fb305005810e78cca9a856ff8d4055b",
+       "shape": [
+        4,
+        4,
+        10
+       ]
+      },
+      "right": {
+       "kind": "seed",
+       "rank": 115,
+       "source_shape": [
+        4,
+        4,
+        10
+       ],
+       "state": "e60654005bd03c7cf91a5b351826e09c1fb305005810e78cca9a856ff8d4055b",
+       "shape": [
+        4,
+        4,
+        10
+       ]
+      },
+      "shape": [
+       4,
+       4,
+       20
+      ]
+     },
+     "shape": [
+      4,
+      4,
+      25
+     ]
+    }
+   },
+   "file": "4x4x25-r290-d11ea7c7.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "4x5x27",
+   "rank": 394,
+   "sha256": "0d0dd2571afa0d022f1c1ef1e5f34ef3ae9d87908a7784b372ed895263783cf6",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 394,
+     "axis": 2,
+     "left": {
+      "kind": "seed",
+      "rank": 60,
+      "source_shape": [
+       4,
+       4,
+       5
+      ],
+      "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_4x4x5_rank60_d628_gl_frontier_gf2.txt",
+      "source_sha256": "ea5474eecf79c21daccaf29069064f4ed65e9af069a333efc44cf9f18539a66c",
+      "shape": [
+       4,
+       5,
+       4
+      ]
+     },
+     "right": {
+      "kind": "split",
+      "rank": 334,
+      "axis": 2,
+      "left": {
+       "kind": "seed",
+       "rank": 160,
+       "source_shape": [
+        4,
+        5,
+        11
+       ],
+       "state": "37476474714b530999ff9e8b917b72e29f2f1ac64a47541a0bc3b0a0bb93879a",
+       "shape": [
+        4,
+        5,
+        11
+       ]
+      },
+      "right": {
+       "kind": "seed",
+       "rank": 174,
+       "source_shape": [
+        4,
+        5,
+        12
+       ],
+       "state": "da6efa37c36015c741d28187577483432c454064bb498ac81c90c83bb57a8a52",
+       "shape": [
+        4,
+        5,
+        12
+       ]
+      },
+      "shape": [
+       4,
+       5,
+       23
+      ]
+     },
+     "shape": [
+      4,
+      5,
+      27
+     ]
+    }
+   },
+   "file": "4x5x27-r394-0d0dd257.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "4x5x28",
+   "rank": 408,
+   "sha256": "3a0643adadca6b2e8609e9b5c935502779b67f3c15d1477f6e4aa675436779e1",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 408,
+     "axis": 2,
+     "left": {
+      "kind": "seed",
+      "rank": 60,
+      "source_shape": [
+       4,
+       4,
+       5
+      ],
+      "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_4x4x5_rank60_d628_gl_frontier_gf2.txt",
+      "source_sha256": "ea5474eecf79c21daccaf29069064f4ed65e9af069a333efc44cf9f18539a66c",
+      "shape": [
+       4,
+       5,
+       4
+      ]
+     },
+     "right": {
+      "kind": "split",
+      "rank": 348,
+      "axis": 2,
+      "left": {
+       "kind": "seed",
+       "rank": 174,
+       "source_shape": [
+        4,
+        5,
+        12
+       ],
+       "state": "da6efa37c36015c741d28187577483432c454064bb498ac81c90c83bb57a8a52",
+       "shape": [
+        4,
+        5,
+        12
+       ]
+      },
+      "right": {
+       "kind": "seed",
+       "rank": 174,
+       "source_shape": [
+        4,
+        5,
+        12
+       ],
+       "state": "da6efa37c36015c741d28187577483432c454064bb498ac81c90c83bb57a8a52",
+       "shape": [
+        4,
+        5,
+        12
+       ]
+      },
+      "shape": [
+       4,
+       5,
+       24
+      ]
+     },
+     "shape": [
+      4,
+      5,
+      28
+     ]
+    }
+   },
+   "file": "4x5x28-r408-3a0643ad.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "8x8x10",
+   "rank": 420,
+   "sha256": "0ef8eea6b749f359a05d5082d3581ad676a8ccd1d42b3a3b8563262fad272338",
+   "details": {
+    "recipe": {
+     "kind": "product",
+     "rank": 420,
+     "left": {
+      "kind": "seed",
+      "rank": 7,
+      "source_shape": [
+       2,
+       2,
+       2
+      ],
+      "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x2_rank7_d36_gl120_gf2.txt",
+      "source_sha256": "67322d7816f4e93284b07edc1cecd1c1a41e92647d069019e8e44847f6cdfdb2",
+      "shape": [
+       2,
+       2,
+       2
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 60,
+      "source_shape": [
+       4,
+       4,
+       5
+      ],
+      "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_4x4x5_rank60_d628_gl_frontier_gf2.txt",
+      "source_sha256": "ea5474eecf79c21daccaf29069064f4ed65e9af069a333efc44cf9f18539a66c",
+      "shape": [
+       4,
+       4,
+       5
+      ]
+     },
+     "shape": [
+      8,
+      8,
+      10
+     ]
+    }
+   },
+   "file": "8x8x10-r420-0ef8eea6.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "8x8x16",
+   "rank": 658,
+   "sha256": "11b9e6a0c190e1598596dbca673ea4ccea144667250395e967f80634a75304c7",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 658,
+     "axis": 2,
+     "left": {
+      "kind": "seed",
+      "rank": 329,
+      "source_shape": [
+       8,
+       8,
+       8
+      ],
+      "state": "15002c67a7e40d618c4506d5bfe6698258f4c8caf35f46b0fd3daf80fd5e1a00",
+      "shape": [
+       8,
+       8,
+       8
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 329,
+      "source_shape": [
+       8,
+       8,
+       8
+      ],
+      "state": "15002c67a7e40d618c4506d5bfe6698258f4c8caf35f46b0fd3daf80fd5e1a00",
+      "shape": [
+       8,
+       8,
+       8
+      ]
+     },
+     "shape": [
+      8,
+      8,
+      16
+     ]
+    }
+   },
+   "file": "8x8x16-r658-11b9e6a0.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "3x14x25",
+   "rank": 780,
+   "sha256": "3637081120d0bf083e44be29c58f7e3a59cdc831006ecd16a2ad62e33583d4a3",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 780,
+     "axis": 2,
+     "left": {
+      "kind": "seed",
+      "rank": 219,
+      "source_shape": [
+       3,
+       7,
+       14
+      ],
+      "state": "b62bedffefda7fc8e65ecc5a1ea047ce057866a8dff0abb33e1b2e7febcc7766",
+      "shape": [
+       3,
+       14,
+       7
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 561,
+      "source_shape": [
+       3,
+       14,
+       18
+      ],
+      "state": "770c95d89ccdab2d1d69de2b362068fb85fff2e9086fdfc25b8e32698996f108",
+      "shape": [
+       3,
+       14,
+       18
+      ]
+     },
+     "shape": [
+      3,
+      14,
+      25
+     ]
+    }
+   },
+   "file": "3x14x25-r780-36370811.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "3x14x27",
+   "rank": 842,
+   "sha256": "3ca0102bf4da302874cfe34a6c2e8e222bbb231e1843c6044a0a1737540846a3",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 842,
+     "axis": 2,
+     "left": {
+      "kind": "seed",
+      "rank": 281,
+      "source_shape": [
+       3,
+       9,
+       14
+      ],
+      "state": "99e27dfea8968c92eb3d4ad1761ae31925ec30e44d32a0110f79e02e54efda92",
+      "shape": [
+       3,
+       14,
+       9
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 561,
+      "source_shape": [
+       3,
+       14,
+       18
+      ],
+      "state": "770c95d89ccdab2d1d69de2b362068fb85fff2e9086fdfc25b8e32698996f108",
+      "shape": [
+       3,
+       14,
+       18
+      ]
+     },
+     "shape": [
+      3,
+      14,
+      27
+     ]
+    }
+   },
+   "file": "3x14x27-r842-3ca0102b.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "10x12x12",
+   "rank": 900,
+   "sha256": "b3b59f7b281502d50e5d5f88c82254a3a5156014269c705e44f344a48a72372e",
+   "details": {
+    "recipe": {
+     "kind": "product",
+     "rank": 900,
+     "left": {
+      "kind": "projection",
+      "rank": 15,
+      "parent": {
+       "kind": "seed",
+       "shape": [
+        2,
+        3,
+        5
+       ],
+       "source_shape": [
+        2,
+        3,
+        5
+       ],
+       "rank": 26,
+       "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x3x5_rank26_peterson_2026_block15_11_gf2.txt",
+       "source_sha256": "737502807cc620cc9fa11018145a4b3044a7a4c182dcf0f696499addf1caf41e"
+      },
+      "deletions": [
+       {
+        "axis": 2,
+        "coordinate": 4
+       },
+       {
+        "axis": 2,
+        "coordinate": 3
+       }
+      ],
+      "shape": [
+       2,
+       3,
+       3
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 60,
+      "source_shape": [
+       4,
+       4,
+       5
+      ],
+      "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_4x4x5_rank60_d628_gl_frontier_gf2.txt",
+      "source_sha256": "ea5474eecf79c21daccaf29069064f4ed65e9af069a333efc44cf9f18539a66c",
+      "shape": [
+       5,
+       4,
+       4
+      ]
+     },
+     "shape": [
+      10,
+      12,
+      12
+     ]
+    }
+   },
+   "file": "10x12x12-r900-b3b59f7b.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "8x12x16",
+   "rank": 940,
+   "sha256": "124cb35ae038e7e26e5a9e848781122128aac8087c9c5ea923564186e9414f68",
+   "details": {
+    "recipe": {
+     "kind": "product",
+     "rank": 940,
+     "left": {
+      "kind": "seed",
+      "rank": 20,
+      "source_shape": [
+       2,
+       3,
+       4
+      ],
+      "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x3x4_rank20_d130_global_isotropy_gf2.txt",
+      "source_sha256": "f9e858e97e84052d949e252a88885886146f3839275cbee615f03faf83658b72",
+      "shape": [
+       2,
+       3,
+       4
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 47,
+      "source_shape": [
+       4,
+       4,
+       4
+      ],
+      "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_4x4_rank47_d450_gf2.txt",
+      "source_sha256": "6add1cbdf42a9bf5fda197cdf92a909b98ba64098f353377db608a96b742ab4a",
+      "shape": [
+       4,
+       4,
+       4
+      ]
+     },
+     "shape": [
+      8,
+      12,
+      16
+     ]
+    }
+   },
+   "file": "8x12x16-r940-124cb35a.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "8x12x17",
+   "rank": 1036,
+   "sha256": "a95f2d3ba01521d704f5acbf981fa45cc76f46fffbcfe7fcc33b9bb0f37f1781",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 1036,
+     "axis": 2,
+     "left": {
+      "kind": "naive",
+      "rank": 96,
+      "shape": [
+       8,
+       12,
+       1
+      ]
+     },
+     "right": {
+      "kind": "product",
+      "rank": 940,
+      "left": {
+       "kind": "seed",
+       "rank": 20,
+       "source_shape": [
+        2,
+        3,
+        4
+       ],
+       "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x3x4_rank20_d130_global_isotropy_gf2.txt",
+       "source_sha256": "f9e858e97e84052d949e252a88885886146f3839275cbee615f03faf83658b72",
+       "shape": [
+        2,
+        3,
+        4
+       ]
+      },
+      "right": {
+       "kind": "seed",
+       "rank": 47,
+       "source_shape": [
+        4,
+        4,
+        4
+       ],
+       "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_4x4_rank47_d450_gf2.txt",
+       "source_sha256": "6add1cbdf42a9bf5fda197cdf92a909b98ba64098f353377db608a96b742ab4a",
+       "shape": [
+        4,
+        4,
+        4
+       ]
+      },
+      "shape": [
+       8,
+       12,
+       16
+      ]
+     },
+     "shape": [
+      8,
+      12,
+      17
+     ]
+    }
+   },
+   "file": "8x12x17-r1036-a95f2d3b.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "8x8x28",
+   "rank": 1134,
+   "sha256": "33c07feedd855c183e6063cbfe5b0559320e67c88f6afa073b3fbdc5bc2146a5",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 1134,
+     "axis": 2,
+     "left": {
+      "kind": "seed",
+      "rank": 329,
+      "source_shape": [
+       8,
+       8,
+       8
+      ],
+      "state": "15002c67a7e40d618c4506d5bfe6698258f4c8caf35f46b0fd3daf80fd5e1a00",
+      "shape": [
+       8,
+       8,
+       8
+      ]
+     },
+     "right": {
+      "kind": "product",
+      "rank": 805,
+      "left": {
+       "kind": "seed",
+       "rank": 7,
+       "source_shape": [
+        2,
+        2,
+        2
+       ],
+       "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x2_rank7_d36_gl120_gf2.txt",
+       "source_sha256": "67322d7816f4e93284b07edc1cecd1c1a41e92647d069019e8e44847f6cdfdb2",
+       "shape": [
+        2,
+        2,
+        2
+       ]
+      },
+      "right": {
+       "kind": "seed",
+       "rank": 115,
+       "source_shape": [
+        4,
+        4,
+        10
+       ],
+       "state": "e60654005bd03c7cf91a5b351826e09c1fb305005810e78cca9a856ff8d4055b",
+       "shape": [
+        4,
+        4,
+        10
+       ]
+      },
+      "shape": [
+       8,
+       8,
+       20
+      ]
+     },
+     "shape": [
+      8,
+      8,
+      28
+     ]
+    }
+   },
+   "file": "8x8x28-r1134-33c07fee.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "8x13x17",
+   "rank": 1141,
+   "sha256": "dead0e0138f8069b371fbb85ebe62fc852d16236650fc8f4a3ea1e8baaba679d",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 1141,
+     "axis": 2,
+     "left": {
+      "kind": "naive",
+      "rank": 104,
+      "shape": [
+       8,
+       13,
+       1
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 1037,
+      "source_shape": [
+       8,
+       16,
+       13
+      ],
+      "source": "bits/tungsten-metaflip/tools/certificates/7x13x16-directed-20260924/8x16x13-r1037.mfw.gz.b64",
+      "source_sha256": "bb75e5b3f3624db217aa6727d37bd8b94e462cee3832b877c9a1ad0dc459160f",
+      "shape": [
+       8,
+       13,
+       16
+      ]
+     },
+     "shape": [
+      8,
+      13,
+      17
+     ]
+    }
+   },
+   "file": "8x13x17-r1141-dead0e01.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "8x16x16",
+   "rank": 1222,
+   "sha256": "a544638a99475ecf515ed74f6d838fd6e4d360ad20f86bb1a2a3d6f16315f292",
+   "details": {
+    "recipe": {
+     "kind": "product",
+     "rank": 1222,
+     "left": {
+      "kind": "seed",
+      "rank": 26,
+      "source_shape": [
+       2,
+       4,
+       4
+      ],
+      "state": "326d03d81076cd4478dcaaad9be98e782a5befd26e4d7b4fc10f0975fc721f98",
+      "shape": [
+       2,
+       4,
+       4
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 47,
+      "source_shape": [
+       4,
+       4,
+       4
+      ],
+      "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_4x4_rank47_d450_gf2.txt",
+      "source_sha256": "6add1cbdf42a9bf5fda197cdf92a909b98ba64098f353377db608a96b742ab4a",
+      "shape": [
+       4,
+       4,
+       4
+      ]
+     },
+     "shape": [
+      8,
+      16,
+      16
+     ]
+    }
+   },
+   "file": "8x16x16-r1222-a544638a.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "8x8x30",
+   "rank": 1225,
+   "sha256": "f2a2e90d7a9f615f3a17eb2284120500bbebbe8216d99fa4020eccf56a107e84",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 1225,
+     "axis": 2,
+     "left": {
+      "kind": "product",
+      "rank": 420,
+      "left": {
+       "kind": "seed",
+       "rank": 7,
+       "source_shape": [
+        2,
+        2,
+        2
+       ],
+       "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x2_rank7_d36_gl120_gf2.txt",
+       "source_sha256": "67322d7816f4e93284b07edc1cecd1c1a41e92647d069019e8e44847f6cdfdb2",
+       "shape": [
+        2,
+        2,
+        2
+       ]
+      },
+      "right": {
+       "kind": "seed",
+       "rank": 60,
+       "source_shape": [
+        4,
+        4,
+        5
+       ],
+       "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_4x4x5_rank60_d628_gl_frontier_gf2.txt",
+       "source_sha256": "ea5474eecf79c21daccaf29069064f4ed65e9af069a333efc44cf9f18539a66c",
+       "shape": [
+        4,
+        4,
+        5
+       ]
+      },
+      "shape": [
+       8,
+       8,
+       10
+      ]
+     },
+     "right": {
+      "kind": "product",
+      "rank": 805,
+      "left": {
+       "kind": "seed",
+       "rank": 7,
+       "source_shape": [
+        2,
+        2,
+        2
+       ],
+       "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x2_rank7_d36_gl120_gf2.txt",
+       "source_sha256": "67322d7816f4e93284b07edc1cecd1c1a41e92647d069019e8e44847f6cdfdb2",
+       "shape": [
+        2,
+        2,
+        2
+       ]
+      },
+      "right": {
+       "kind": "seed",
+       "rank": 115,
+       "source_shape": [
+        4,
+        4,
+        10
+       ],
+       "state": "e60654005bd03c7cf91a5b351826e09c1fb305005810e78cca9a856ff8d4055b",
+       "shape": [
+        4,
+        4,
+        10
+       ]
+      },
+      "shape": [
+       8,
+       8,
+       20
+      ]
+     },
+     "shape": [
+      8,
+      8,
+      30
+     ]
+    }
+   },
+   "file": "8x8x30-r1225-f2a2e90d.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "8x11x22",
+   "rank": 1246,
+   "sha256": "f44168cfb013071294365f2b66221fc8e76eb7e81d48e9b9167ff60de3ddd792",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 1246,
+     "axis": 2,
+     "left": {
+      "kind": "seed",
+      "rank": 357,
+      "source_shape": [
+       6,
+       8,
+       11
+      ],
+      "state": "715091230350475e0bb3919a98213fead81001b22fc661b42405bed20e680367",
+      "shape": [
+       8,
+       11,
+       6
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 889,
+      "source_shape": [
+       8,
+       11,
+       16
+      ],
+      "state": "70620ac92335cdacdf4da5aba2b602a99a905b9b9889b4ee227fff0922e045ce",
+      "shape": [
+       8,
+       11,
+       16
+      ]
+     },
+     "shape": [
+      8,
+      11,
+      22
+     ]
+    }
+   },
+   "file": "8x11x22-r1246-f44168cf.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "8x16x17",
+   "rank": 1350,
+   "sha256": "8b89fc5daa0481c25ead2cd7f8204dbb8e1e40fe7d5ceb4405300606c31c2584",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 1350,
+     "axis": 2,
+     "left": {
+      "kind": "naive",
+      "rank": 128,
+      "shape": [
+       8,
+       16,
+       1
+      ]
+     },
+     "right": {
+      "kind": "product",
+      "rank": 1222,
+      "left": {
+       "kind": "seed",
+       "rank": 26,
+       "source_shape": [
+        2,
+        4,
+        4
+       ],
+       "state": "326d03d81076cd4478dcaaad9be98e782a5befd26e4d7b4fc10f0975fc721f98",
+       "shape": [
+        2,
+        4,
+        4
+       ]
+      },
+      "right": {
+       "kind": "seed",
+       "rank": 47,
+       "source_shape": [
+        4,
+        4,
+        4
+       ],
+       "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_4x4_rank47_d450_gf2.txt",
+       "source_sha256": "6add1cbdf42a9bf5fda197cdf92a909b98ba64098f353377db608a96b742ab4a",
+       "shape": [
+        4,
+        4,
+        4
+       ]
+      },
+      "shape": [
+       8,
+       16,
+       16
+      ]
+     },
+     "shape": [
+      8,
+      16,
+      17
+     ]
+    }
+   },
+   "file": "8x16x17-r1350-8b89fc5d.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "3x22x28",
+   "rank": 1364,
+   "sha256": "ac168dde34313618a4231bcf8770cbcc51ba26af01e49b2a4aefb970b11b4d99",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 1364,
+     "axis": 2,
+     "left": {
+      "kind": "split",
+      "rank": 200,
+      "axis": 2,
+      "left": {
+       "kind": "seed",
+       "rank": 38,
+       "source_shape": [
+        3,
+        4,
+        4
+       ],
+       "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_3x4x4_rank38_d280_live_density_leader_gf2.txt",
+       "source_sha256": "a08fc5382ac7da3e0fd09b3c1e389138feada0f91a6be5a0e06e75aa07668855",
+       "shape": [
+        3,
+        4,
+        4
+       ]
+      },
+      "right": {
+       "kind": "split",
+       "rank": 162,
+       "axis": 2,
+       "left": {
+        "kind": "seed",
+        "rank": 54,
+        "source_shape": [
+         3,
+         4,
+         6
+        ],
+        "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_3x4x6_rank54_catalog_gf2.txt",
+        "source_sha256": "8cd49512a068c5b577dedf43e6c0079e028f395555540ce53e83165b52759ec9",
+        "shape": [
+         3,
+         4,
+         6
+        ]
+       },
+       "right": {
+        "kind": "seed",
+        "rank": 108,
+        "source_shape": [
+         3,
+         4,
+         12
+        ],
+        "state": "9be00e6939787d91d2306b9cf5ef496a46d16d4aaf3a287dcba8ed36d2f3929d",
+        "shape": [
+         3,
+         4,
+         12
+        ]
+       },
+       "shape": [
+        3,
+        4,
+        18
+       ]
+      },
+      "shape": [
+       3,
+       22,
+       4
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 1164,
+      "source_shape": [
+       3,
+       22,
+       24
+      ],
+      "state": "0a1af5b0f2dfe48a17b9b591eae6e1bab8a110b3df0ef9752212727815329ca8",
+      "shape": [
+       3,
+       22,
+       24
+      ]
+     },
+     "shape": [
+      3,
+      22,
+      28
+     ]
+    }
+   },
+   "file": "3x22x28-r1364-ac168dde.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "4x20x27",
+   "rank": 1384,
+   "sha256": "5c0b1b3ef7689e5d923490569576403cfb5287d10c504a0aea8351c6d640dd5a",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 1384,
+     "axis": 2,
+     "left": {
+      "kind": "split",
+      "rank": 181,
+      "axis": 2,
+      "left": {
+       "kind": "seed",
+       "rank": 54,
+       "source_shape": [
+        3,
+        4,
+        6
+       ],
+       "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_3x4x6_rank54_catalog_gf2.txt",
+       "source_sha256": "8cd49512a068c5b577dedf43e6c0079e028f395555540ce53e83165b52759ec9",
+       "shape": [
+        3,
+        4,
+        6
+       ]
+      },
+      "right": {
+       "kind": "seed",
+       "rank": 127,
+       "source_shape": [
+        3,
+        4,
+        14
+       ],
+       "state": "11aa48fe21e8061ce78beb77e48a954bf22a611c6a0c72a36836119442ea972e",
+       "shape": [
+        3,
+        4,
+        14
+       ]
+      },
+      "shape": [
+       4,
+       20,
+       3
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 1203,
+      "source_shape": [
+       4,
+       20,
+       24
+      ],
+      "state": "257cdbef7d6c28130c1e93f8a870d52232de233f3295b2fb8a61a2327ab55dc1",
+      "shape": [
+       4,
+       20,
+       24
+      ]
+     },
+     "shape": [
+      4,
+      20,
+      27
+     ]
+    }
+   },
+   "file": "4x20x27-r1384-5c0b1b3e.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "8x16x18",
+   "rank": 1422,
+   "sha256": "64f65bab3339f80849b0b5f471ad5f9d1d067ed36f0ad2af6a83ea3fa4607f63",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 1422,
+     "axis": 2,
+     "left": {
+      "kind": "split",
+      "rank": 200,
+      "axis": 2,
+      "left": {
+       "kind": "seed",
+       "rank": 75,
+       "source_shape": [
+        2,
+        6,
+        8
+       ],
+       "state": "042adf128b3cf632ccc01b0e2d4334be1d1d0a5816a9d9de9f78b0bef7099172",
+       "shape": [
+        2,
+        8,
+        6
+       ]
+      },
+      "right": {
+       "kind": "seed",
+       "rank": 125,
+       "source_shape": [
+        2,
+        8,
+        10
+       ],
+       "state": "5a8dd2ea51a0a478f3eb8ac8f9e19ceebc011fd71b0df38bb6c7abd352c2230b",
+       "shape": [
+        2,
+        8,
+        10
+       ]
+      },
+      "shape": [
+       8,
+       16,
+       2
+      ]
+     },
+     "right": {
+      "kind": "product",
+      "rank": 1222,
+      "left": {
+       "kind": "seed",
+       "rank": 26,
+       "source_shape": [
+        2,
+        4,
+        4
+       ],
+       "state": "326d03d81076cd4478dcaaad9be98e782a5befd26e4d7b4fc10f0975fc721f98",
+       "shape": [
+        2,
+        4,
+        4
+       ]
+      },
+      "right": {
+       "kind": "seed",
+       "rank": 47,
+       "source_shape": [
+        4,
+        4,
+        4
+       ],
+       "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_4x4_rank47_d450_gf2.txt",
+       "source_sha256": "6add1cbdf42a9bf5fda197cdf92a909b98ba64098f353377db608a96b742ab4a",
+       "shape": [
+        4,
+        4,
+        4
+       ]
+      },
+      "shape": [
+       8,
+       16,
+       16
+      ]
+     },
+     "shape": [
+      8,
+      16,
+      18
+     ]
+    }
+   },
+   "file": "8x16x18-r1422-64f65bab.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "8x13x22",
+   "rank": 1455,
+   "sha256": "24e867dcf133f2656f1db1bc5c0a33fd63aa92179cefe836cb12a7cdbdb418ff",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 1455,
+     "axis": 2,
+     "left": {
+      "kind": "seed",
+      "rank": 418,
+      "source_shape": [
+       6,
+       8,
+       13
+      ],
+      "state": "1ab240d54986125995d78d8c06feb57478c495d53f7fdd27552f632e42561be2",
+      "shape": [
+       8,
+       13,
+       6
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 1037,
+      "source_shape": [
+       8,
+       16,
+       13
+      ],
+      "source": "bits/tungsten-metaflip/tools/certificates/7x13x16-directed-20260924/8x16x13-r1037.mfw.gz.b64",
+      "source_sha256": "bb75e5b3f3624db217aa6727d37bd8b94e462cee3832b877c9a1ad0dc459160f",
+      "shape": [
+       8,
+       13,
+       16
+      ]
+     },
+     "shape": [
+      8,
+      13,
+      22
+     ]
+    }
+   },
+   "file": "8x13x22-r1455-24e867dc.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "6x16x26",
+   "rank": 1533,
+   "sha256": "731d11613ce50c2a6cf9c0f263d44c962b52bccadfef51ed2966f4efb44912a7",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 1533,
+     "axis": 2,
+     "left": {
+      "kind": "seed",
+      "rank": 150,
+      "source_shape": [
+       2,
+       6,
+       16
+      ],
+      "state": "c631c16034d09307a96c1e0a2151dadeb4ea8d54b8668699f13612f4fe74cdc0",
+      "shape": [
+       6,
+       16,
+       2
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 1383,
+      "source_shape": [
+       6,
+       16,
+       24
+      ],
+      "state": "1a4a8428e7cb608e5662aaa4a93c27bf97c83becb8be46e9327a680636cd1108",
+      "shape": [
+       6,
+       16,
+       24
+      ]
+     },
+     "shape": [
+      6,
+      16,
+      26
+     ]
+    }
+   },
+   "file": "6x16x26-r1533-731d1161.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "3x25x32",
+   "rank": 1750,
+   "sha256": "1158fb3b7698435154a29f0d358766cdc74d29fe26968c23524d957bc2f10f12",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 1750,
+     "axis": 2,
+     "left": {
+      "kind": "seed",
+      "rank": 125,
+      "source_shape": [
+       2,
+       3,
+       25
+      ],
+      "state": "4ad92568c12c641f42c9b5ba600bf07e0d354046b71f3b439077bb1fd90c5f3c",
+      "shape": [
+       3,
+       25,
+       2
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 1625,
+      "source_shape": [
+       3,
+       25,
+       30
+      ],
+      "state": "4dfb3e3cda4fb82140ade407880a7590943462e89ad591eeea3dfc21f0a3cb2b",
+      "shape": [
+       3,
+       25,
+       30
+      ]
+     },
+     "shape": [
+      3,
+      25,
+      32
+     ]
+    }
+   },
+   "file": "3x25x32-r1750-1158fb3b.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "8x16x24",
+   "rank": 1833,
+   "sha256": "e4963fe6129f0c0f04a6182ae911611a96c71f4b47b0311cbcbd8b3f3a4962b2",
+   "details": {
+    "recipe": {
+     "kind": "product",
+     "rank": 1833,
+     "left": {
+      "kind": "seed",
+      "rank": 39,
+      "source_shape": [
+       2,
+       4,
+       6
+      ],
+      "state": "3b5cfbace721c62a4dff9212e7253c041d75ceef2858d9f46623028c4a48b82c",
+      "shape": [
+       2,
+       4,
+       6
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 47,
+      "source_shape": [
+       4,
+       4,
+       4
+      ],
+      "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_4x4_rank47_d450_gf2.txt",
+      "source_sha256": "6add1cbdf42a9bf5fda197cdf92a909b98ba64098f353377db608a96b742ab4a",
+      "shape": [
+       4,
+       4,
+       4
+      ]
+     },
+     "shape": [
+      8,
+      16,
+      24
+     ]
+    }
+   },
+   "file": "8x16x24-r1833-e4963fe6.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "8x20x20",
+   "rank": 1880,
+   "sha256": "7dfe6abe9059496ff11b71412d053526421c3a0f46454259f3f501d277ac01bf",
+   "details": {
+    "recipe": {
+     "kind": "product",
+     "rank": 1880,
+     "left": {
+      "kind": "seed",
+      "rank": 40,
+      "source_shape": [
+       2,
+       5,
+       5
+      ],
+      "state": "39605bf6836606e6e48f7649b872a7579db0bc73c56f9cacf47e5d576d79b896",
+      "shape": [
+       2,
+       5,
+       5
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 47,
+      "source_shape": [
+       4,
+       4,
+       4
+      ],
+      "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_4x4_rank47_d450_gf2.txt",
+      "source_sha256": "6add1cbdf42a9bf5fda197cdf92a909b98ba64098f353377db608a96b742ab4a",
+      "shape": [
+       4,
+       4,
+       4
+      ]
+     },
+     "shape": [
+      8,
+      20,
+      20
+     ]
+    }
+   },
+   "file": "8x20x20-r1880-7dfe6abe.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "8x20x21",
+   "rank": 2040,
+   "sha256": "f6300e6800e5c7b09b6762b9d4171193dc1670a4c270407cca115b619b2f5d14",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 2040,
+     "axis": 2,
+     "left": {
+      "kind": "naive",
+      "rank": 160,
+      "shape": [
+       8,
+       20,
+       1
+      ]
+     },
+     "right": {
+      "kind": "product",
+      "rank": 1880,
+      "left": {
+       "kind": "seed",
+       "rank": 40,
+       "source_shape": [
+        2,
+        5,
+        5
+       ],
+       "state": "39605bf6836606e6e48f7649b872a7579db0bc73c56f9cacf47e5d576d79b896",
+       "shape": [
+        2,
+        5,
+        5
+       ]
+      },
+      "right": {
+       "kind": "seed",
+       "rank": 47,
+       "source_shape": [
+        4,
+        4,
+        4
+       ],
+       "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_4x4_rank47_d450_gf2.txt",
+       "source_sha256": "6add1cbdf42a9bf5fda197cdf92a909b98ba64098f353377db608a96b742ab4a",
+       "shape": [
+        4,
+        4,
+        4
+       ]
+      },
+      "shape": [
+       8,
+       20,
+       20
+      ]
+     },
+     "shape": [
+      8,
+      20,
+      21
+     ]
+    }
+   },
+   "file": "8x20x21-r2040-f6300e68.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "3x31x31",
+   "rank": 2090,
+   "sha256": "9b75582ef96f85f9605b343e805f8c89b23646ef078fb216be3b053aba918c31",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 2090,
+     "axis": 1,
+     "left": {
+      "kind": "naive",
+      "rank": 93,
+      "shape": [
+       3,
+       1,
+       31
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 1997,
+      "source_shape": [
+       3,
+       30,
+       31
+      ],
+      "state": "a7f6585a10889e64fc3120f19ad614fc0274a00b0ae390a4cc6bb7d4b66ab3eb",
+      "shape": [
+       3,
+       30,
+       31
+      ]
+     },
+     "shape": [
+      3,
+      31,
+      31
+     ]
+    }
+   },
+   "file": "3x31x31-r2090-9b75582e.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "8x16x28",
+   "rank": 2115,
+   "sha256": "8e2797cc28c47aad2bcdfc765b60fd902b4efec38383ed3454e721f53c748e4b",
+   "details": {
+    "recipe": {
+     "kind": "product",
+     "rank": 2115,
+     "left": {
+      "kind": "seed",
+      "rank": 45,
+      "source_shape": [
+       2,
+       4,
+       7
+      ],
+      "state": "c6f8c754ddc2990fb9eed1c6eecd6a1bbbb95a0b2a9fe04f5881be159ac1adfb",
+      "shape": [
+       2,
+       4,
+       7
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 47,
+      "source_shape": [
+       4,
+       4,
+       4
+      ],
+      "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_4x4_rank47_d450_gf2.txt",
+      "source_sha256": "6add1cbdf42a9bf5fda197cdf92a909b98ba64098f353377db608a96b742ab4a",
+      "shape": [
+       4,
+       4,
+       4
+      ]
+     },
+     "shape": [
+      8,
+      16,
+      28
+     ]
+    }
+   },
+   "file": "8x16x28-r2115-8e2797cc.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "4x26x32",
+   "rank": 2121,
+   "sha256": "b1e25ca5d4dece8d2ca9042195ed772cc6121106e6d1ba4642d2ad6b5348a78c",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 2121,
+     "axis": 1,
+     "left": {
+      "kind": "split",
+      "rank": 204,
+      "axis": 2,
+      "left": {
+       "kind": "seed",
+       "rank": 51,
+       "source_shape": [
+        2,
+        4,
+        8
+       ],
+       "state": "15edd67e5634fb598915e4a0ef62e06f401c20241ce0a8c9cd13abe764d73936",
+       "shape": [
+        2,
+        4,
+        8
+       ]
+      },
+      "right": {
+       "kind": "split",
+       "rank": 153,
+       "axis": 2,
+       "left": {
+        "kind": "seed",
+        "rank": 51,
+        "source_shape": [
+         2,
+         4,
+         8
+        ],
+        "state": "15edd67e5634fb598915e4a0ef62e06f401c20241ce0a8c9cd13abe764d73936",
+        "shape": [
+         2,
+         4,
+         8
+        ]
+       },
+       "right": {
+        "kind": "split",
+        "rank": 102,
+        "axis": 2,
+        "left": {
+         "kind": "seed",
+         "rank": 51,
+         "source_shape": [
+          2,
+          4,
+          8
+         ],
+         "state": "15edd67e5634fb598915e4a0ef62e06f401c20241ce0a8c9cd13abe764d73936",
+         "shape": [
+          2,
+          4,
+          8
+         ]
+        },
+        "right": {
+         "kind": "seed",
+         "rank": 51,
+         "source_shape": [
+          2,
+          4,
+          8
+         ],
+         "state": "15edd67e5634fb598915e4a0ef62e06f401c20241ce0a8c9cd13abe764d73936",
+         "shape": [
+          2,
+          4,
+          8
+         ]
+        },
+        "shape": [
+         2,
+         4,
+         16
+        ]
+       },
+       "shape": [
+        2,
+        4,
+        24
+       ]
+      },
+      "shape": [
+       4,
+       2,
+       32
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 1917,
+      "source_shape": [
+       4,
+       24,
+       32
+      ],
+      "state": "e1929c21ca1d8d9c7b12a09f5f4440771ef3cc7ac13ffb3875ff638043bf2af1",
+      "shape": [
+       4,
+       24,
+       32
+      ]
+     },
+     "shape": [
+      4,
+      26,
+      32
+     ]
+    }
+   },
+   "file": "4x26x32-r2121-b1e25ca5.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "7x20x25",
+   "rank": 2201,
+   "sha256": "4d0969d8dda665706219e559e1853080612456fbf7d9f64b08a1a246cfba1386",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 2201,
+     "axis": 2,
+     "left": {
+      "kind": "naive",
+      "rank": 140,
+      "shape": [
+       7,
+       20,
+       1
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 2061,
+      "source_shape": [
+       7,
+       20,
+       24
+      ],
+      "state": "dae2cb1161966a901efb722d1a08fed3b6d8172aca532f8d20ed329b09b83980",
+      "shape": [
+       7,
+       20,
+       24
+      ]
+     },
+     "shape": [
+      7,
+      20,
+      25
+     ]
+    }
+   },
+   "file": "7x20x25-r2201-4d0969d8.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "8x20x24",
+   "rank": 2209,
+   "sha256": "d6aea055e00f559db0998ee27c3e10a1a6bbc128e1611ac5b9c6559de1bd48f1",
+   "details": {
+    "recipe": {
+     "kind": "product",
+     "rank": 2209,
+     "left": {
+      "kind": "seed",
+      "rank": 47,
+      "source_shape": [
+       2,
+       5,
+       6
+      ],
+      "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x5x6_rank47_catalog_gf2.txt",
+      "source_sha256": "790cc812b08fe84ee6f188447a08e76dd3f771a49514e500fa93aed623d8d841",
+      "shape": [
+       2,
+       5,
+       6
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 47,
+      "source_shape": [
+       4,
+       4,
+       4
+      ],
+      "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_4x4_rank47_d450_gf2.txt",
+      "source_sha256": "6add1cbdf42a9bf5fda197cdf92a909b98ba64098f353377db608a96b742ab4a",
+      "shape": [
+       4,
+       4,
+       4
+      ]
+     },
+     "shape": [
+      8,
+      20,
+      24
+     ]
+    }
+   },
+   "file": "8x20x24-r2209-d6aea055.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "8x16x29",
+   "rank": 2243,
+   "sha256": "879cbc49bdeb21fb2ba82a2679e5e376af9c066505d9ecd9af4b1031908d91ca",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 2243,
+     "axis": 2,
+     "left": {
+      "kind": "naive",
+      "rank": 128,
+      "shape": [
+       8,
+       16,
+       1
+      ]
+     },
+     "right": {
+      "kind": "product",
+      "rank": 2115,
+      "left": {
+       "kind": "seed",
+       "rank": 45,
+       "source_shape": [
+        2,
+        4,
+        7
+       ],
+       "state": "c6f8c754ddc2990fb9eed1c6eecd6a1bbbb95a0b2a9fe04f5881be159ac1adfb",
+       "shape": [
+        2,
+        4,
+        7
+       ]
+      },
+      "right": {
+       "kind": "seed",
+       "rank": 47,
+       "source_shape": [
+        4,
+        4,
+        4
+       ],
+       "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_4x4_rank47_d450_gf2.txt",
+       "source_sha256": "6add1cbdf42a9bf5fda197cdf92a909b98ba64098f353377db608a96b742ab4a",
+       "shape": [
+        4,
+        4,
+        4
+       ]
+      },
+      "shape": [
+       8,
+       16,
+       28
+      ]
+     },
+     "shape": [
+      8,
+      16,
+      29
+     ]
+    }
+   },
+   "file": "8x16x29-r2243-879cbc49.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "13x16x18",
+   "rank": 2250,
+   "sha256": "2de702b9d4b804cd2c1c536680e9987eba776843b1539439960eca3bd21dc0ca",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 2250,
+     "axis": 2,
+     "left": {
+      "kind": "seed",
+      "rank": 320,
+      "source_shape": [
+       2,
+       13,
+       16
+      ],
+      "state": "707868cf2164ff22bfc4a25c5389fb28e7e924eaa343fa9322c4b6081f18f843",
+      "shape": [
+       13,
+       16,
+       2
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 1930,
+      "source_shape": [
+       13,
+       16,
+       16
+      ],
+      "state": "fc19daea34b67b9449cc3bfd1dec15520d200266654c00dbda73e40b1172b4e1",
+      "shape": [
+       13,
+       16,
+       16
+      ]
+     },
+     "shape": [
+      13,
+      16,
+      18
+     ]
+    }
+   },
+   "file": "13x16x18-r2250-2de702b9.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "7x20x26",
+   "rank": 2279,
+   "sha256": "836efcf608bbecb11abde2b328f44a07d03e807382f5a8bf41c9199546e351b0",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 2279,
+     "axis": 2,
+     "left": {
+      "kind": "seed",
+      "rank": 218,
+      "source_shape": [
+       2,
+       7,
+       20
+      ],
+      "state": "65c9cd4e520d9b062ddd5dbe8ccd1322b1457ef0888a360b998ecc1b814ff6b7",
+      "shape": [
+       7,
+       20,
+       2
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 2061,
+      "source_shape": [
+       7,
+       20,
+       24
+      ],
+      "state": "dae2cb1161966a901efb722d1a08fed3b6d8172aca532f8d20ed329b09b83980",
+      "shape": [
+       7,
+       20,
+       24
+      ]
+     },
+     "shape": [
+      7,
+      20,
+      26
+     ]
+    }
+   },
+   "file": "7x20x26-r2279-836efcf6.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "12x12x28",
+   "rank": 2303,
+   "sha256": "6fca3f5207de6f73951ffab92a52e1f2a9f7fecf45cb77d5dd6c4febd1bb1378",
+   "details": {
+    "recipe": {
+     "kind": "product",
+     "rank": 2303,
+     "left": {
+      "kind": "seed",
+      "rank": 49,
+      "source_shape": [
+       3,
+       3,
+       7
+      ],
+      "state": "99ec1b6aec326aaa44d101f373c45092db5041771f27789cd83f6d227f85e23f",
+      "shape": [
+       3,
+       3,
+       7
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 47,
+      "source_shape": [
+       4,
+       4,
+       4
+      ],
+      "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_4x4_rank47_d450_gf2.txt",
+      "source_sha256": "6add1cbdf42a9bf5fda197cdf92a909b98ba64098f353377db608a96b742ab4a",
+      "shape": [
+       4,
+       4,
+       4
+      ]
+     },
+     "shape": [
+      12,
+      12,
+      28
+     ]
+    }
+   },
+   "file": "12x12x28-r2303-6fca3f52.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "12x13x25",
+   "rank": 2322,
+   "sha256": "8d0962c7bd56951c9819faa8da1bae355aa6e0b80002db7fd7b48952b36cafca",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 2322,
+     "axis": 2,
+     "left": {
+      "kind": "naive",
+      "rank": 156,
+      "shape": [
+       12,
+       13,
+       1
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 2166,
+      "source_shape": [
+       12,
+       13,
+       24
+      ],
+      "source": "bits/tungsten-metaflip/tools/certificates/impact-parents-20260925/12x13x24-r2166.mfw.gz.b64",
+      "source_sha256": "848f9e4748e10ab517675779ca122c3acb4c03fda9e7503baa14b1bfbefff0fd",
+      "shape": [
+       12,
+       13,
+       24
+      ]
+     },
+     "shape": [
+      12,
+      13,
+      25
+     ]
+    }
+   },
+   "file": "12x13x25-r2322-8d0962c7.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "8x20x25",
+   "rank": 2369,
+   "sha256": "3d32034549a7ecb7498bdd4c2317164a9dfe347b01c0dd59d681ae75e1b3f990",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 2369,
+     "axis": 2,
+     "left": {
+      "kind": "naive",
+      "rank": 160,
+      "shape": [
+       8,
+       20,
+       1
+      ]
+     },
+     "right": {
+      "kind": "product",
+      "rank": 2209,
+      "left": {
+       "kind": "seed",
+       "rank": 47,
+       "source_shape": [
+        2,
+        5,
+        6
+       ],
+       "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x5x6_rank47_catalog_gf2.txt",
+       "source_sha256": "790cc812b08fe84ee6f188447a08e76dd3f771a49514e500fa93aed623d8d841",
+       "shape": [
+        2,
+        5,
+        6
+       ]
+      },
+      "right": {
+       "kind": "seed",
+       "rank": 47,
+       "source_shape": [
+        4,
+        4,
+        4
+       ],
+       "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_4x4_rank47_d450_gf2.txt",
+       "source_sha256": "6add1cbdf42a9bf5fda197cdf92a909b98ba64098f353377db608a96b742ab4a",
+       "shape": [
+        4,
+        4,
+        4
+       ]
+      },
+      "shape": [
+       8,
+       20,
+       24
+      ]
+     },
+     "shape": [
+      8,
+      20,
+      25
+     ]
+    }
+   },
+   "file": "8x20x25-r2369-3d320345.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "8x16x32",
+   "rank": 2397,
+   "sha256": "f21516bcea597d4f82e408489f20ee2e37956b2b10c4a7f387a1ab6dad051bdb",
+   "details": {
+    "recipe": {
+     "kind": "product",
+     "rank": 2397,
+     "left": {
+      "kind": "seed",
+      "rank": 51,
+      "source_shape": [
+       2,
+       4,
+       8
+      ],
+      "state": "e6096b47145cafc663bd9aca23ccdc43eea8babba0600f57088f331ac9e4e0ba",
+      "shape": [
+       2,
+       4,
+       8
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 47,
+      "source_shape": [
+       4,
+       4,
+       4
+      ],
+      "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_4x4_rank47_d450_gf2.txt",
+      "source_sha256": "6add1cbdf42a9bf5fda197cdf92a909b98ba64098f353377db608a96b742ab4a",
+      "shape": [
+       4,
+       4,
+       4
+      ]
+     },
+     "shape": [
+      8,
+      16,
+      32
+     ]
+    }
+   },
+   "file": "8x16x32-r2397-f21516bc.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "8x21x24",
+   "rank": 2401,
+   "sha256": "49cafd261aa1afafe7619b42f903b48297f5e4f5c4e97489fcbd8f36a7171360",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 2401,
+     "axis": 1,
+     "left": {
+      "kind": "naive",
+      "rank": 192,
+      "shape": [
+       8,
+       1,
+       24
+      ]
+     },
+     "right": {
+      "kind": "product",
+      "rank": 2209,
+      "left": {
+       "kind": "seed",
+       "rank": 47,
+       "source_shape": [
+        2,
+        5,
+        6
+       ],
+       "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x5x6_rank47_catalog_gf2.txt",
+       "source_sha256": "790cc812b08fe84ee6f188447a08e76dd3f771a49514e500fa93aed623d8d841",
+       "shape": [
+        2,
+        5,
+        6
+       ]
+      },
+      "right": {
+       "kind": "seed",
+       "rank": 47,
+       "source_shape": [
+        4,
+        4,
+        4
+       ],
+       "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_4x4_rank47_d450_gf2.txt",
+       "source_sha256": "6add1cbdf42a9bf5fda197cdf92a909b98ba64098f353377db608a96b742ab4a",
+       "shape": [
+        4,
+        4,
+        4
+       ]
+      },
+      "shape": [
+       8,
+       20,
+       24
+      ]
+     },
+     "shape": [
+      8,
+      21,
+      24
+     ]
+    }
+   },
+   "file": "8x21x24-r2401-49cafd26.mfw.gz.b64"
+  }
+ ],
+ "walker": "bits/tungsten-metaflip/tools/wide_rect_walk.w"
+}

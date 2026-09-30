@@ -2,7 +2,7 @@
 # metabench (bench/README.md, section 7).
 #
 #   metascore summary --in PATH[,PATH...] [--experiment NAME] [--reference ALGO] [--reps R]
-#                     [--tsv FILE] [--md FILE] [--latex DIR] [--data DIR]
+#                     [--tsv FILE] [--md FILE] [--latex DIR] [--data DIR] [--axes ALGO,ALGO]
 #                     [--unverified] [--points G] [--decades D]
 #
 # PATH is a JSONL file or a directory of them. Hits count only when the verifier
@@ -16,7 +16,7 @@ use ../lib/metaflip/bench/latex
 use ../lib/metaflip/bench/pgf
 use ../lib/metaflip/bench/proc
 
-VALUED = ["--in", "--experiment", "--reference", "--reps", "--tsv", "--md", "--latex", "--data", "--points", "--decades"]
+VALUED = ["--in", "--experiment", "--reference", "--reps", "--tsv", "--md", "--latex", "--data", "--points", "--decades", "--axes"]
 FLAGS = ["--unverified"]
 
 -> usage()
@@ -60,6 +60,8 @@ if opts["--latex"] != nil
   scoring.tasks.each -> (task)
     write_out(opts["--latex"] + "/summary_" + Pgf.slug(task) + ".tex", Latex.summary(scoring, task))
   write_out(opts["--latex"] + "/ablation.tex", Latex.ablation(scoring, reference)) if comparison != nil && comparison.rows.size > 0
+  write_out(opts["--latex"] + "/matrix.tex", Latex.matrix(scoring, reference)) if comparison != nil && comparison.rows.size > 0
+  write_out(opts["--latex"] + "/axes.tex", Latex.axes(scoring, opts["--axes"].split(","))) if opts["--axes"] != nil
 if opts["--data"] != nil
   files = Pgf.write_all(scoring, opts["--data"], Cli.integer(opts, "--points", 49), Cli.integer(opts, "--decades", 3))
   << "wrote " + files.to_s + " data files to " + opts["--data"]

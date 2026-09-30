@@ -228,7 +228,7 @@ bench/metabench run --experiment NAME --algo A[,A2] --tasks tier1|tier2|tier3|ti
 bench/metabench verify --scheme FILE --shape NxMxP [--verifier NAME]
 bench/metabench exec [--report FILE] [--kill-after CPU_S] -- COMMAND [ARG...]
 bench/metascore summary --in DIR|FILE[,...] [--experiment NAME] [--reference ALGO] [--reps R] [--unverified]
-                 [--tsv FILE] [--md FILE] [--latex DIR] [--data DIR] [--points G] [--decades D]
+                 [--tsv FILE] [--md FILE] [--latex DIR] [--data DIR] [--axes ALGO,ALGO] [--points G] [--decades D]
 ```
 
 `--out` defaults to `~/.tungsten/metaflip/experiments/record-hunt-20260926/work/eval/NAME/`; it holds `<algo>.<variant>.jsonl`, `schemes/` (the scheme of every hit),
@@ -236,6 +236,11 @@ bench/metascore summary --in DIR|FILE[,...] [--experiment NAME] [--reference ALG
 Runs are resumable: a finished `(experiment, algo, task, seed)` row is skipped on the next invocation; `--n` may grow between invocations.
 `--jobs` is the number of concurrent runs (default 4). Hits count in `metascore` only when the verifier approved them (`--unverified` also counts hits without a verdict).
 Running the `.w` files with `bin/tungsten FILE ...` needs a bare `--` before the options; the launchers avoid that.
+
+`--latex DIR` writes `summary.tex` and `summary_<task>.tex` (per-task summaries), `ablation.tex` (every algorithm against the reference, one row per task and algorithm),
+`matrix.tex` (ERT ratios against the reference: one row per algorithm, grouped by component and in numeric order of the setting, one column per task, tasks in ascending target rank;
+bold when the 95% interval excludes 1, with the success rate when some runs missed) and, with `--axes A,B`, `axes.tex` (ERT in CPU seconds, retired instructions and accepted flips, and flips per CPU second, for the named algorithms).
+`papers/scripts/gen_bench_tables.sh` runs it for every experiment and writes the fragments the Methods paper includes.
 
 Reproduce a table from the raw records:
 

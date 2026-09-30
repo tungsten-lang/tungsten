@@ -110,6 +110,20 @@ steps = Pgf.profile(scoring, profile, "A", 10)
 expect(counts, "profile header", steps.split("\n")[0], "tau rho")
 expect(counts, "profile of an unsolved task is flat", Pgf.profile(scoring, profile, "B", 10).strip.split("\n").size, 3)
 
+# The matrix of ERT ratios, the ordering of variants and the cost axes.
+matrix = Latex.matrix(scoring, "B")
+expect(counts, "matrix tabular", matrix.starts_with?("\\begin{tabular}{lr}\\toprule"), true)
+expect(counts, "matrix row of a variant whose reference never hits", matrix.include?("\\texttt{A} & --"), true)
+expect(counts, "short drops the metaflip prefix", Latex.short("metaflip/slack-2"), "slack-2")
+expect(counts, "short keeps other programs", Latex.short("km2022/default"), "km2022/default")
+expect(counts, "group of a metaflip variant", Latex.group("metaflip/slack-2"), "slack")
+expect(counts, "group of another program", Latex.group("tfg/count8"), "tfg")
+expect(counts, "settings sort numerically", Latex.order_key("metaflip/slack-2") < Latex.order_key("metaflip/slack-16"), true)
+expect(counts, "thousands sort before millions", Latex.order_key("metaflip/restart-100k") < Latex.order_key("metaflip/restart-1M"), true)
+axes = Latex.axes(scoring, ["A", "B"])
+expect(counts, "axes list the cost rows", axes.include?("ERT (CPU s)") && axes.include?("Mflips/s"), true)
+expect(counts, "axes name the algorithms", axes.include?("\\texttt{A}") && axes.include?("\\texttt{B}"), true)
+
 if counts["failures"] > 0
   << "FAIL " + counts["failures"].to_s + " of " + counts["checks"].to_s + " score checks"
   exit(1)

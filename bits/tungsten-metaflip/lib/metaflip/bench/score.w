@@ -22,8 +22,12 @@ use profile
     @skipped = 0
     @meta = {}
     @samples = {}
+    @task_key = {}
     @records.each -> (rec)
       self.add(rec)
+    # Tasks in ascending order of their target rank (then by name), whatever the order of the records.
+    @tasks = @task_key.values.sort.map -> (key)
+      key.split("\t")[1]
 
   # The records of files and directories (`*.jsonl` inside), restricted to one experiment when
   # named. When a run appears twice the later record wins.
@@ -57,6 +61,8 @@ use profile
       @samples[task] = {}
       @tasks.push(task)
       @meta[task] = {"target" => rec["target_rank"], "start" => rec["start_rank"], "budget" => rec["budget_cpu_s"]}
+      padded = "00000" + rec["target_rank"].to_s()
+      @task_key[task] = padded.slice(padded.size - 5, 5) + "\t" + task
     @algos.push(algo) if !@algos.include?(algo)
     if @meta[task]["budget"] != rec["budget_cpu_s"]
       raise "task " + task + " has records with budgets " + @meta[task]["budget"].to_s + " and " + rec["budget_cpu_s"].to_s + "; select one experiment"

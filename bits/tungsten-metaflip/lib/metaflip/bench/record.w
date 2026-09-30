@@ -9,7 +9,7 @@ use format
 + Record
   # Fields in file order; extra keys follow in insertion order.
   -> .fields()
-    ["schema", "experiment", "algo", "variant", "task", "index", "seed", "status", "error", "target_rank", "start_rank", "budget_cpu_s", "hit", "tool_hit", "exact", "best_rank", "cpu_s_total", "cpu_s_user", "cpu_s_sys", "cpu_s_to_hit", "wall_s_total", "load1", "proposals_total", "proposals_to_hit", "flips_total", "flips_to_hit", "trace", "instr_retired", "cycles", "max_rss_kb", "scheme_sha256", "exit_code", "signal", "host", "commit", "tool"]
+    ["schema", "experiment", "algo", "variant", "task", "index", "seed", "status", "error", "target_rank", "start_rank", "budget_cpu_s", "hit", "tool_hit", "exact", "best_rank", "cpu_s_total", "cpu_s_tree", "cpu_s_to_hit", "wall_s_total", "load1", "proposals_total", "proposals_to_hit", "flips_total", "flips_to_hit", "trace", "instr_retired", "cycles", "max_rss_kb", "scheme_sha256", "exit_code", "signal", "host", "commit", "tool"]
 
   # Digits after the point of the float fields; other floats use six.
   -> .decimals(key) (String)

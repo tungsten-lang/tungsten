@@ -89,17 +89,14 @@ use stats
       i += 1
     sign + out
 
-  # A cost with a precision that follows its magnitude: whole numbers from
-  # 1000, one decimal from 100, two from 1, three below.
+  # A cost with three significant digits (whole numbers from 1000).
   -> .cost(x) (f64)
     if x != x
       return "nan"
     if x == Stats.inf()
       return "inf"
-    if x >= 1000.0
-      return Format.fixed(x, 0)
-    if x >= 100.0
-      return Format.fixed(x, 1)
-    if x >= 1.0
-      return Format.fixed(x, 2)
-    Format.fixed(x, 3)
+    return "0" if x == 0.0
+    magnitude = Math.floor(Math.log(x) / Math.log(10.0)).to_i ## i64
+    decimals = 2 - magnitude ## i64
+    decimals = 0 if decimals < 0
+    Format.fixed(x, decimals)

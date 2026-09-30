@@ -143,6 +143,7 @@ use walker
       "MB_BUDGET_CPU_S=" + Format.trimmed(budget, 3),
       "MB_OUT=" + dir,
       "MB_WALKER=" + @walker,
+      "MB_TOOL=" + System.executable_path,
       "OMP_NUM_THREADS=1",
       "VECLIB_MAXIMUM_THREADS=1",
       "OPENBLAS_NUM_THREADS=1",
@@ -216,6 +217,8 @@ use walker
     algo = job["algo"]
     result = self.read_json(job["dir"] + "/result.json")
     cpu = ended.cpu_s ## f64
+    tool_cpu = result == nil ? nil : result["cpu_s_tool"]
+    cpu = tool_cpu.to_f if tool_cpu != nil && tool_cpu.to_f > 0.0
     error = nil
     if job["killed"]
       error = "wall-clock limit"
@@ -232,8 +235,7 @@ use walker
     rec["budget_cpu_s"] = job["budget"]
     self.judge(rec, job, result, cpu, error)
     rec["cpu_s_total"] = cpu
-    rec["cpu_s_user"] = ended.user_s
-    rec["cpu_s_sys"] = ended.sys_s
+    rec["cpu_s_tree"] = ended.cpu_s
     rec["cpu_s_to_hit"] = rec["hit"] == true ? cpu : nil
     rec["wall_s_total"] = Exit.seconds((Proc.now_ms() - job["child"].started_ms) * 1000)
     rec["load1"] = job["load1"]

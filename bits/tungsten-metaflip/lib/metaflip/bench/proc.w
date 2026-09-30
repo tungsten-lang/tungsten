@@ -134,3 +134,33 @@ use core/process
     slash = path.rindex("/")
     return path if slash == nil
     path.slice(slash + 1, path.size - slash - 1)
+
+# Resource usage of one child, read through libproc while it runs and once
+# more after it has exited but before it is reaped. Times are in nanoseconds.
++ Meter
+  -> new(@pid)
+    @info = i64[16]
+    @usage = i64[64]
+    @clock = i64[2]
+    ccall_nobox("mach_timebase_info", Proc.address(@clock))
+    @numer = @clock[0] & 4294967295
+    @denom = @clock[0] >> 32
+
+  # True once the child has exited (it stays a zombie until it is reaped).
+  -> exited?
+    @info[0] = 0
+    pid = @pid ## i64
+    ccall_nobox("waitid", 1, pid, Proc.address(@info), 37)
+    (@info[0] & 4294967295) != 0
+
+  # User plus system CPU time of the child process itself so far; nil when it cannot be read.
+  -> cpu_ns
+    pid = @pid ## i64
+    return nil if ccall_nobox("proc_pid_rusage", pid, 0, Proc.address(@usage)) != 0
+    (@usage[2] + @usage[3]) * @numer / @denom
+
+  # Usage of an exited child as a Hash: instr_retired, cycles, footprint_kb, cpu_ns.
+  -> final
+    pid = @pid ## i64
+    return {} if ccall_nobox("proc_pid_rusage", pid, 4, Proc.address(@usage)) != 0
+    {"instr_retired" => @usage[31], "cycles" => @usage[32], "footprint_kb" => @usage[30] / 1024, "cpu_ns" => (@usage[2] + @usage[3]) * @numer / @denom}

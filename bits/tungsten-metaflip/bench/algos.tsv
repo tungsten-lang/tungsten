@@ -1,0 +1,17 @@
+# Algorithms (bench/README.md, section 2): name, adapter command, note.
+algo	command	notes
+metaflip/V0	{bench}/adapters/metaflip {task} {seed} {budget} {out}	campaign walker: directed legal-bucket proposals, nonbacktracking guard, split every 2000 proposals, on 256 consecutive rejections and without a legal pair, slack 8
+metaflip/uniform	{bench}/adapters/metaflip --proposal uniform {task} {seed} {budget} {out}	V0 with proposals drawn uniformly over terms, positions and partners
+metaflip/guard-none	{bench}/adapters/metaflip --guard none {task} {seed} {budget} {out}	V0 without a guard
+metaflip/guard-tabu	{bench}/adapters/metaflip --guard tabu {task} {seed} {budget} {out}	V0 with the tabu history guard (4096 entries)
+metaflip/split-p500	{bench}/adapters/metaflip --split-period 500 {task} {seed} {budget} {out}	V0 with a split every 500 proposals
+metaflip/split-p8000	{bench}/adapters/metaflip --split-period 8000 {task} {seed} {budget} {out}	V0 with a split every 8000 proposals
+metaflip/split-nopair	{bench}/adapters/metaflip --split-period 0 --split-stall 0 {task} {seed} {budget} {out}	V0 splitting only when no legal pair exists
+metaflip/split-nostall	{bench}/adapters/metaflip --split-stall 0 {task} {seed} {budget} {out}	V0 without the 256-rejection split
+metaflip/split-never	{bench}/adapters/metaflip --split-period 0 --split-stall 0 --split-no-pair off {task} {seed} {budget} {out}	V0 without any split
+metaflip/slack-0	{bench}/adapters/metaflip --slack 0 {task} {seed} {budget} {out}	V0 with splits only below best + 0
+metaflip/slack-2	{bench}/adapters/metaflip --slack 2 {task} {seed} {budget} {out}	V0 with splits only below best + 2
+metaflip/slack-4	{bench}/adapters/metaflip --slack 4 {task} {seed} {budget} {out}	V0 with splits only below best + 4
+metaflip/slack-16	{bench}/adapters/metaflip --slack 16 {task} {seed} {budget} {out}	V0 with splits only below best + 16
+metaflip/restart-100k	{bench}/adapters/metaflip --restart 100000 {task} {seed} {budget} {out}	V0 restarted from the seed every 100000 proposals
+metaflip/restart-1M	{bench}/adapters/metaflip --restart 1000000 {task} {seed} {budget} {out}	V0 restarted from the seed every 1000000 proposals

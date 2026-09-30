@@ -16,8 +16,7 @@ use scheme
 # Policy words 46..52 (ffwd_init installs the campaign values; ffwd_policy and
 # ffwd_watch change them): split period, stall threshold, split on no legal
 # pair, split slack over the best rank, target rank, report threshold and
-# proposal mode (0 directed legal buckets, 1 uniform term/position). Words
-# 53/54 carry the partner slot and axis of the current proposal.
+# proposal mode (0 directed legal buckets, 1 uniform term/position).
 -> ffwd_words(st, history) (i64[] i64) i64
   64+9*(st[3]+1)+3*history+2*st[2]
 
@@ -255,71 +254,57 @@ use scheme
   z=ffws_adopt(st)
   1
 
-# Directed pick: a uniform legal bucket, a random member, then a uniform
-# equal-factor partner. This deliberately changes the sampling distribution,
-# but not legal moves. Returns the first slot and leaves the partner and the
-# axis in c[53] and c[54]; -1: no legal pair, -2: no partner even for the
-# bucket witness.
--> ffwd_pick_directed(st, c) (i64[] i64[]) i64
-  if c[2]==0
-    return 0-1
-  id=c[c[24]+((ffws_rand(st)*c[2]) >> 31)] ## i64
-  axis=id / c[1] ## i64
-  cap=st[2] ## i64
-  count=0 ## i64
-  item=st[st[19]+id] ## i64
-  while item!=0
-    count+=1
-    item=st[st[20]+axis*cap+item-1]
-  want=(ffws_rand(st)*count) >> 31 ## i64
-  item=st[st[19]+id]
-  while want>0
-    item=st[st[20]+axis*cap+item-1]
-    want-=1
-  first=item-1 ## i64
-  word=ffws_rand(st) ## i64
-  second=ffws_partner(st,first,axis,word) ## i64
-  if second<0
-    first=c[c[26]+id]
-    second=ffws_partner(st,first,axis,word)
-  if second<0
-    return 0-2
-  c[53]=second
-  c[54]=axis
-  first
+# A proposal void of any flip: no legal pair, or a uniform draw without a partner.
+-> ffwd_void(st, c) (i64[] i64[]) i64
+  c[16]+=1
+  st[23]+=1
+  st[9]+=1
+  0
 
-# Uniform pick: term, position and equal-factor partner, as the packed fleet
-# walker draws them. Same results as ffwd_pick_directed; -1 is a draw without
-# a partner.
--> ffwd_pick_uniform(st, c) (i64[] i64[]) i64
-  if st[4]<2
-    return 0-1
-  first=st[st[16]+((ffws_rand(st)*st[4]) >> 31)] ## i64
-  axis=(ffws_rand(st)*3) >> 31 ## i64
-  second=ffws_partner(st,first,axis,ffws_rand(st)) ## i64
-  if second<0
-    return 0-1
-  c[53]=second
-  c[54]=axis
-  first
-
+# One proposal: pick two live terms that share a factor, flip them, and keep or
+# roll back the result. Directed proposals draw a uniform legal bucket, a random
+# member, then a uniform equal-factor partner; this deliberately changes the
+# sampling distribution, but not legal moves. Uniform proposals (c[52]=1) draw
+# term, position and partner as the packed fleet walker does; a draw without a
+# partner is a void proposal, not a rejection.
 -> ffwd_one(st, scratch, c, slack) (i64[] i64[] i64[] i64) i64
   st[7]+=1
-  first=0 ## i64
-  if c[52]==0
-    first=ffwd_pick_directed(st,c)
-  else
-    first=ffwd_pick_uniform(st,c)
-  if first==0-2
-    return 0-1
-  if first<0
-    c[16]+=1
-    st[23]+=1
-    st[9]+=1
-    return 0
-  second=c[53] ## i64
-  axis=c[54] ## i64
   stride=st[1] ## i64
+  first=0 ## i64
+  second=0 ## i64
+  axis=0 ## i64
+  if c[52]==0
+    if c[2]==0
+      return ffwd_void(st,c)
+    id=c[c[24]+((ffws_rand(st)*c[2]) >> 31)] ## i64
+    axis=id / c[1]
+    cap=st[2] ## i64
+    count=0 ## i64
+    item=st[st[19]+id] ## i64
+    while item!=0
+      count+=1
+      item=st[st[20]+axis*cap+item-1]
+    want=(ffws_rand(st)*count) >> 31 ## i64
+    item=st[st[19]+id]
+    while want>0
+      item=st[st[20]+axis*cap+item-1]
+      want-=1
+    first=item-1
+    word=ffws_rand(st) ## i64
+    second=ffws_partner(st,first,axis,word)
+    if second<0
+      first=c[c[26]+id]
+      second=ffws_partner(st,first,axis,word)
+    if second<0
+      return 0-1
+  else
+    if st[4]<2
+      return ffwd_void(st,c)
+    first=st[st[16]+((ffws_rand(st)*st[4]) >> 31)]
+    axis=(ffws_rand(st)*3) >> 31
+    second=ffws_partner(st,first,axis,ffws_rand(st))
+    if second<0
+      return ffwd_void(st,c)
   c[9]+=1
   i=0 ## i64
   while i<3*stride
@@ -422,18 +407,32 @@ use scheme
   1
 
 -> ffwd_work(st, scratch, c, steps, stop, slack) (i64[] i64[] i64[] i64 i64[] i64) i64
+  never=1099511627776 ## i64
   period=c[46] ## i64
+  next_split=never ## i64
+  if period>0
+    span=st[7]+period-1 ## i64
+    next_split=span / period * period
+    if next_split==0
+      next_split=period
   stall=c[47] ## i64
-  no_pair=c[48] ## i64
-  target=c[50] ## i64
-  report=c[51] ## i64
+  if stall==0
+    stall=never
+  no_pair=0-1 ## i64
+  if c[48]!=0
+    no_pair=0
+  floor_rank=c[50] ## i64
+  if c[51]-1>floor_rank
+    floor_rank=c[51]-1
   i=0 ## i64
   while i<steps
     if (i & 63)==0 && stop[0]!=0
       break
-    if (no_pair!=0 && c[2]==0) || (period>0 && st[7]>0 && st[7]%period==0) || (stall>0 && c[19]>=stall)
+    if c[2]==no_pair || st[7]==next_split || c[19]>=stall
       z=ffwd_split(st,scratch,c) ## i64
-      if stall>0 && c[19]>=stall
+      if st[7]==next_split
+        next_split+=period
+      if c[19]>=stall
         # Do not strand a walk behind heuristic history. Bounded forgetting
         # restores exploration; repeats are explicitly allowed after reset.
         j=0 ## i64
@@ -448,6 +447,6 @@ use scheme
       stop[0]=1
       return 0-1
     i+=1
-    if st[5]<=target || st[5]<report
+    if st[5]<=floor_rank
       break
   st[5]

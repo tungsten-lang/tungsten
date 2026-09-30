@@ -1,0 +1,27 @@
+{
+ "tag": "rung2",
+ "n": 100,
+ "errors": 0,
+ "solved": 0,
+ "hit": 0,
+ "forehand": {
+  "n": 46,
+  "solved": 0,
+  "hit": 0
+ },
+ "backhand": {
+  "n": 54,
+  "solved": 0,
+  "hit": 0
+ },
+ "classes": {
+  "miss: lateral (out of reach)": 47,
+  "miss: pad above the ball": 45,
+  "miss: pad below the ball": 7,
+  "miss: within 10 cm (rim/timing)": 1
+ },
+ "pitch_yaw": {},
+ "pad_velocity": {},
+ "place": {},
+ "posture": {}
+}

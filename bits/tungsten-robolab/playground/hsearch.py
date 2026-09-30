@@ -50,6 +50,23 @@ def cascade_job(job):
     agg = job[6] if len(job) > 6 else "min"
     score, first, ran = np.inf, None, 0
     total, count = 0.0, 0
+    if agg == "meanall":
+        # opt-in (`--agg meanall`, S4): the score is the mean over ALL the seeds, a fall costing its own (very low) score and NOT
+        # stopping the candidate: a smooth statistic while most starts still fall (the number of survivors and how late the falls
+        # come both move it), for a search that must climb out of a failing incumbent. A candidate stops early only when even a
+        # perfect remaining set of seeds (each scoring HSEARCH_UB, default 350) could not lift its mean above `bar`; its returned
+        # score is that upper bound (below the bar), like the pruned scores of the other modes. Gates are not used here.
+        ub = float(os.environ.get("HSEARCH_UB", "350"))
+        n = len(specs)
+        for i, (seed, gate) in enumerate(specs):
+            s, m, _ = rollout((task, params, seed, seconds) + ((attrs,) if attrs else ()))
+            ran += 1
+            total += s
+            if first is None:
+                first = m
+            if total + (n - 1 - i) * ub < bar * n:
+                return float((total + (n - 1 - i) * ub) / n), ran, first
+        return float(total / n), ran, first
     for seed, gate in specs:
         s, m, _ = rollout((task, params, seed, gate or seconds) + ((attrs,) if attrs else ()))
         ran += 1
@@ -160,7 +177,7 @@ def main():
     ap.add_argument("--exclude")
     ap.add_argument("--attrs")
     ap.add_argument("--box")
-    ap.add_argument("--agg", default="min", choices=["min", "mean"], help="min: worst seed with pruning (default); mean: mean score, a candidate dies at its first fall")
+    ap.add_argument("--agg", default="min", choices=["min", "mean", "meanall"], help="min: worst seed with pruning (default); mean: mean score, a candidate dies at its first fall; meanall: mean over all seeds, falls do not stop a candidate (HSEARCH_UB bounds the pruning)")
     ap.add_argument("--out", required=True)
     ap.add_argument("--log")
     ap.add_argument("--archive")

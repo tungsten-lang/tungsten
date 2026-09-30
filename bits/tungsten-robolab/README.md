@@ -125,7 +125,8 @@ springs so nothing ever steps.
 | `params/<task>.txt` | practised parameters (`--params params/<task>.txt`) |
 | `playground/arena.py`, `playground/arena/` | the champion-challenger arena: `trials.json`, `champions.json`, `history.jsonl`; rules in `playground/arena/README.md` |
 | `tools/` | `snapshot_commit.sh` (commit this directory to the branch `robolab-campaign-2026-09` without touching the shared checkout), `land_snapshot.sh` (fast-forward or merge that branch onto `main`, healing the shared index), `arena_board_md.py` (the board with each champion's frozen artifacts), `check_doc_paths.py` (checks the backticked paths of a Markdown file) |
-| `site/progress/` | generator of the progress page (`build_progress.py` writes `progress.html`; numbers come from `champions.json`) |
+| `site/progress/` | generator of the progress page (`build_progress.py` writes `progress.html`; numbers come from `champions.json`; `--publish` / `--mark-published` with `published.json` track which videos the live artifact holds) |
+| `site/keyframe_bench/` | the Keyframe Bench artifact (`keyframe_bench.html`, https://claude.ai/artifact/L6CSUpkUVwrygS5yP6UmaB): drag-the-joints keyframes with an onion skin of the whole stride and subset keyframes (`pinned` per joint; the export gives free joints their interpolated value plus `ref_<event>_<key>_free 1`); `seed.py` writes the database seed docs, `check_bench.py` runs 30 headless checks against a mock database, `bench_perf.py` times a refresh |
 | `HANDOFF_20260929.md`, `HANDOFF_20260929_board.md` | where everything stands on 29 Sep, who owns which workstream, next steps and traps |
 
 ## Setup
@@ -1833,6 +1834,100 @@ frozen binary `bin/challengers/run_gearx-s3a` (RunGearX, the same build as `run_
 `out/sprint_limits/probe_v4b_sprinter_*`; every tool (`snap3.py`, `val3.sh`, `rep.sh`, `qv.sh`, `scan3.sh`, `es3.sh`, `st.sh`, `stab.py`, `runway.py`), search log and run-by-run log in `scratchpad/sprint3/`,
 outputs in `out/sprint3/`.
 
+### Sprinters on a beyond-human body (labelled) (29 Sep, round 4)
+
+**BEYOND-HUMAN, not a human profile.** Round 3's labelled elite-sprinter runner ended with 8/12 fall-free arena starts on its own body and named what was left: the start and gears 1-4 were never
+re-searched on a stronger body. This round asks the honest open-ended question for the control plane: on a clearly invented body **chosen up front**, can the same runner family (`RunGearXSkill`, the gears, the
+mean-of-seeds search) be tuned to a fall-free standing-start peak speed above 10 m/s, and what did that body need? **Everything below is a labelled body variant (`playground/profiles/beyond.json`, trial
+`sprint_top_speed_v4_beyond`): BEYOND-HUMAN. It is not a claim about human sprinting and is never to be compared with the average, P95, elite2 or sprinter trials.** Run-by-run log with every command line:
+`scratchpad/sprint4/LOG.md`.
+
+**The body** (rule and ladder written 2026-09-29 21:18 before any runner, replay or ceiling ran on it; the pick made at 21:52 from two measured ceilings; `changes` in the file is empty). The sprinter profile scaled UP by
+round numbers, the smallest step whose ideal-control ceiling is above 14.5 m/s (so that 10 m/s is about 70 % of it; the ladder had no finer step). **The multipliers are an invented stretch**: no measurement or literature
+value stands behind strength x2.4 or speed x2.0 on top of a model whose peak forces are already 1.4-2.9x young men's voluntary maxima.
+
+| body (listed to DEFINE the beyond body, not to compare runners across bodies) | strength | muscle speed | tendon | activation | ideal-control ceiling (t_sw 0.35) |
+| --- | --- | --- | --- | --- | --- |
+| average | 1.0 | 1.0 | 1.0 | 1.0 | 8.20 m/s |
+| P95 | x1.32 | x1.2 | x1.5 | x0.87 | 10.45 |
+| sprinter (labelled, round 3) | x1.55 | x1.45 | x1.5 | x0.8 | 12.36 |
+| ladder step 1 (measured, not used) | x2.0 | x1.7 | x1.5 | x0.8 | 13.51 (13.09-13.94) |
+| **beyond = ladder step 2 (BEYOND-HUMAN)** | **x2.4** | **x2.0** | x1.5 | x0.8 | **16.32 (14.99-16.69 for t_sw 0.37-0.33)** |
+
+Ceiling recipe = the sprinter's (`scratchpad/sprint_knot/ceiling_probe.py`, pitch-free, v4 anatomy, four muscle parts, one sparse chain at 1 m/s from the sprinter's 10 m/s solution, `--cycle 0`, two restarts per speed;
+`budget_ceiling.py` at t_sw 0.35), so it carries the usual +-0.5-0.7 m/s. Step 1 gave 13.51 < 14.5 and step 2 16.32 > 14.5, so the rule picked step 2 (step 3, x3.0 / x2.4, was never needed or computed). 10 m/s is 61 % of the
+beyond body's ceiling. Budgets per speed (best penalised stance budget, s): step 2: 10 m/s 0.580, 12: 0.481, 14: 0.408, 15: 0.370, 16: 0.367, 17: 0.314, 18: 0.280; the ideal at 16 m/s: contact 0.061 s, aerial 0.157 s, step
+3.49 m at 4.59/s, peak vertical force 5.0 BW. Data `out/sprint_limits/probe_v4b_beyondc{1,2}_s1_v*`.
+
+**Porting the runner** (each row is a run in `scratchpad/sprint4/LOG.md`; standing starts are the arena's 221-232, 30 s; flying starts are snapshots of the chain's own running on THIS body; every BEYOND-HUMAN number):
+
+| stage | what it is | result |
+| --- | --- | --- |
+| replay of round 3's sprinter chain (`run_gearx_v4_sprinter_g5a`) | the entered chain of the sprinter body, unchanged | **0/12**: all fall in the start (2.2-6.4 s), the trunk pitching 0.56 -> 0.69 -> 0.86 rad in the first strides; one-number levers (lean, lean_acc, accel, torso_kp, drives x0.5-0.7, start drives) do not fix it |
+| start ES `sa` (gear 1 only, 27 generations, 4 014 rollouts, 10 min) | `hsearch --agg meanall` over the 100 gear-1 tunables from standing starts 31-42, 7 s | lean 0.19 -> 0.02 (the sprinter lever, found by the search); 12 s: 11/12; 30 s: 0/12 (falls 15-27 s after a steady 8.4-8.5 m/s: ONE searched gear already equals the sprinter chain's speed) |
+| gear 2 ES `gb` (40 generations, 3 019 rollouts, 16 min) | gear 2 = a copy of gear 1, flying starts from 10 entry + edge-of-instability snapshots (7.2-8.6 m/s), 14 s | 21 unseen snapshots, 24 s: 17/21 survive, **peak 9.87 m/s**; chain 1+2 on the arena starts: 9/12, peaks 9.81-9.88 (9.855) |
+| gear 3 ES `gc`/`gd`/`ge` | gear 3 = a copy of gear 2, flying starts from the top of chain 1+2 (9.3-9.9 m/s), 16 s | with the plan caps at their boxes (v_top 9.75, v_cap 10.0) chain 1+2+3: 10/12, peaks 9.82-10.005 (9.924); with the caps raised (v_top 11, v_cap 11.5) peak 10.2 |
+| final chain | start (`lean_acc` 0, `lean` 0.06) + gear 2 (`g2_v_on` 7.6) + gear 3 (`g3_v_on` 9.4, caps 11 / 11.5) | see the arena table |
+
+*The finding that mattered: the speed-plan caps bound the top gear.* The gear searches had pushed `v_cap` to 10.0 (its box top) and `v_top` to 9.75: above `v_cap` the landing foot moves forward (speed brake, `k_brake`), and `v_top` sets the drive scale
+(`s = drv_floor + (1 - drv_floor) v_des / v_top + k_vd (v_des - v)`), so no chain could exceed ~10 m/s however well its stride was tuned. Widening the two boxes to 8-14 and starting gear 3 at 11.0 / 11.5 moved the same gait from 9.94 to 10.23 m/s
+(lab, 14 top-speed snapshots). Every earlier runner box (2.5-10.0) was set on bodies that never reached them.
+
+*What the search needed here that round 3 did not have:* (1) an aggregate that lets a search climb out of a failing incumbent (`hsearch --agg meanall`, opt-in: the mean over ALL seeds, falls do not stop a candidate, so the number of survivors moves the score; the `--agg mean` of round 2
+needs an incumbent that already survives every seed); (2) edge-of-instability snapshots (states taken 2 s before a fall) as training states, so 10-16 s rollouts see the trunk drift that only shows after 15-25 s of running; (3) gear twins frozen explicitly (`freeze_twins.py`), so a
+search of one gear cannot move another through the fallback; (4) a pruning bound `HSEARCH_UB` above the best possible per-seed score (a bound of 350 under an incumbent scoring 351 pruned every candidate for 15 minutes).
+
+**Arena** (`sprint_top_speed_v4_beyond`, a new trial: the rules of `sprint_top_speed_v4_p95`, 12 perturbed standing starts 221-232, 30 s, `peak_speed_1s`, guard no fall, `ROBOLAB_CALIB=v4 ROBOLAB_PROFILE=beyond ROBOLAB_PROFILE_PARTS=strength,speed,tendon,activation`,
+task `run_v4`; no existing trial was edited). Seeded with round 3's sprinter chain replayed on this body (-1e9 on 12/12); challenged with chain C (`arena.py eval ... --promote`): **wins, mean paired difference +7.5e8, p = 0.002, promoted** (frozen
+`bin/champions/sprint_top_speed_v4_beyond-20260929-233725`, controller `bin/challengers/run_gearx-s4a` = RunGearX, params `params/run_gearx_v4_beyond_c.txt`). BEYOND-HUMAN: not comparable with any other trial.
+
+| per-start peak (m/s) | 221 | 222 | 223 | 224 | 225 | 226 | 227 | 228 | 229 | 230 | 231 | 232 | survivors' mean |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| chain C (promoted) | 10.159 | 10.105 | 10.185 | 10.178 | fall | 10.152 | fall | 10.153 | 10.146 | 10.170 | fall | 10.103 | **10.150 (9/12)** |
+| chain D (`..._d.txt`, not promoted: p = 0.267 against C) | 10.164 | fall 23.9 s | 10.195 | 10.173 | 10.174 | 10.176 | fall 13.0 s | 10.174 | 10.127 | 10.171 | fall 6.6 s | 10.178 | 10.170 (9/12) |
+
+**Result: above 10 m/s on every survivor (10.10-10.20 m/s), but NOT fall-free**: 9 of 12 arena starts survive 30 s, and on unseen standing starts C falls 20/80 (the two official sets) and 26/80 (80 fresh seeds, 251-330) and D 14/80 and 14/80, against the target of at most 10 % on each set. Chain D is chain C with two numbers of gear 3 changed (`g3_k_swh` 1.87 -> 3.0, the swing-hip trunk synergy, and `g3_lean` -0.151 -> -0.10; chosen on the 141-180 set): on the fresh seeds it cut the top-speed falls from 15 to 3 of 80, so **D is the better chain (17.5 % falls on 160 unseen starts, survivors' peak 10.16-10.17 m/s)**; the arena's paired test on the 12 starts could not tell it from C (3 falls each, different seeds, p = 0.267), so C stays the promoted champion.
+
+Falls on unseen standing starts (30 s, never trained on; type: START = gear 1 before 8 s, HANDOVER = the gear-1 -> gear-2 switch at 7.6 m/s, TOP = gear 2/3 above 9.4 m/s):
+
+| chain | seeds 141-180 | seeds 181-220 | seeds 251-330 (fresh: selected nothing) |
+| --- | --- | --- | --- |
+| C (entered) | **9/40**: 155 (6.1 s, START), 171 (11.8), 173 (11.1) HANDOVER, 142 (28.8), 160 (23.6), 163 (26.8), 175 (23.9), 176 (24.7), 180 (26.6) TOP; survivors' peak 10.134 (min 9.944, max 10.227) | **11/40**: 216 (6.1 START), 182 (10.1), 196 (12.6), 218 (12.5) HANDOVER, 181 (24.8), 185 (22.6), 194 (23.5), 198 (24.5), 202 (24.1), 212 (26.5), 217 (29.2) TOP; survivors' peak 10.136 (min 9.877, max 10.197) | **26/80**: START 260 (7.2 s), 271 (6.2), 278 (2.2), 295 (6.1), 298 (6.6), 310 (5.1), 318 (7.7); HANDOVER 277 (14.6), 280 (11.4), 300 (9.3), 301 (12.0); TOP (15) 259, 261, 262, 263, 264, 270, 276, 283, 289, 312, 314, 317, 319, 323, 330 at 19.9-29.9 s; survivors' peak 10.134 (9.909-10.217) |
+| D | **4/40**: 155 (START), 171, 173 (HANDOVER), 149 (27.1 TOP); survivors' peak 10.172 (10.107-10.223) | **10/40**: 216 (START), 182, 196, 218 (HANDOVER), 191 (21.8), 201 (24.9), 202 (28.4), 203 (18.9), 206 (29.4), 212 (26.9) TOP; survivors' peak 10.171 (10.127-10.234) | **14/80**: START 260, 271, 278, 295, 298, 310, 318 (same seeds as C, 2.2-7.7 s); HANDOVER 277, 280, 300, 301 (9.3-14.6 s); TOP (3) 258 (25.8 s), 273 (24.2), 309 (27.7); survivors' peak 10.159 (10.073-10.259) |
+
+By type: over 141-220 C has 2 start + 5 handover + 13 top falls and D 2 + 5 + 7; over the fresh 251-330 both have 7 start + 4 handover, and C 15 top falls against D's 3 (the same start and handover seeds fall for both, as the gears below the top are identical). Every fall is one of three chaotic hazards, roughly 4-9 % (start), 5 % (handover) and 4-19 % (top) per run; the top falls come 10-15 s after the gait reached ~10 m/s (a slow trunk drift: pitch at touchdown 0.13-0.16 in the tail of the
+falling runs against 0.05 in the survivors).
+
+**The stride against the ideal** (chain D at its steady state, seed 224, 15 stances of the last 30 % of a 24 s run, `scratchpad/sprint_knot/stridetab.py`; the ideal is the best stance budget of the beyond body's ceiling chain, `probe_v4b_beyondc2`):
+
+| | chain D, 10.05 m/s | ideal at 10 m/s | ideal at 16 m/s (the ceiling) |
+| --- | --- | --- | --- |
+| contact / flight (s) | 0.080 / 0.149 | 0.092 / 0.262 | 0.061 / 0.157 |
+| step (m) / rate (1/s) | 2.31 / 4.36 | 3.54 / 2.83 | 3.49 / 4.59 |
+| mean / peak vertical force (BW) | 2.79 / 4.81 | 3.84 / 5.18 | 3.57 / 5.0 |
+| thigh at touchdown / lift-off (rad) | +0.66 / -0.46 | +0.65 / -0.55 | +0.93 / -0.28 |
+| trunk pitch at touchdown (rad) | 0.055 (rock over the stance -0.01) | free (excursion 0.07) | free (excursion 0.11) |
+
+It is the crouched high-cadence bounce family the runner started from (4.2-4.4 steps/s) run at a higher speed: its cadence and flight time are the ideal's at 16 m/s, and the speed comes from the step growing from 1.9 m (8.4 m/s) to 2.3 m; the peak force
+(4.8 BW) is the ideal's, so the strength of this body is not what limits it.
+
+**Runway profile of chain D from a standing start** (`scratchpad/sprint4/runway.py`, seed 224; seed 222 in brackets): 10 m at 4.08 s (4.97 m/s), 20 m at 5.84 s (6.32), 30 m at 7.33 s (7.14), 40 m at 8.69 s (7.63), **44 m mark at 9.21 s: 7.74 m/s, mean 7.62 m/s over the last 5 m** (seed 222: 7.19 / 7.40),
+50 m at 9.98 s (8.25), 60 m at 11.18 s (8.61), 80 m at 13.46 s (9.14), 100 m at 15.62 s (9.51), 120 m at 17.69 s (9.83): 10 m/s only after about 140 m (about 19 s). A long jump from a 44 m run-up would still take off at about 7.4-7.7 m/s, 2.5 m/s below this chain's top speed: the
+3-7 m/s acceleration (30 m to reach 7.1 m/s) is the slow part, so a faster start gear is the next thing the jump needs. Its gear 1 has a ~6 % start hazard (gear-1 falls at 5-7 s), and the searches on 12-14 seeds did not reduce it on unseen seeds, so the acceleration gear has to be searched on 40+ seeds
+first. **The long jump was not started.**
+
+**What worked / what did not.** Worked: choosing the body by a written rule and two measured ceilings (13.51, 16.32) before any runner ran; **re-searching the runner from the start on the new body, gear by gear from flying (and edge-of-instability) snapshots with the mean-of-seeds search**: one searched gear 1 reaches 8.4 m/s
+in 10 minutes, gear 2 9.87 m/s in 16, and the three-gear chain passes 10 m/s on every survivor; finding that the speed-plan caps (`v_cap`, `v_top`) bound the top gear at 10.0 m/s; `lean_acc` 0 halving the start hazard (13 % -> 6 %, 136 seeds); the gear-3
+trunk synergy `k_swh` 3.0 with `lean` -0.10 on the set it was selected on (141-180, 30 s: 9/40 -> 4/40 falls at 10.17 m/s), only 11/40 -> 10/40 on 181-220, and 26/80 -> 14/80 on the 80 fresh seeds (top falls 15 -> 3), i.e. a real but partial gain. Did not: replaying round 3's sprinter chain (0/12); any single lever on the start (12/12 fall); a start / handover search on 12-14 seeds (fixes those seeds, not the hazard: 9/56 unseen starts still fall);
+a 40-seed `mean` search (stopped before its first generation ended: 16 candidates x 40 seeds is ~5 min per generation); lowering the handover speed (5.0-6.5 m/s: gear 2 does not take over below ~7 m/s) or moving it in 7.2-8.0 (the handover hazard stays 6-8 %); trading speed for stability with `lean` (-0.25: 8/40 falls at 9.64 m/s) or `torso_kp` / `torso_kd` / `hip_lead` (worse). **What would be needed for a
+fall-free 10 m/s:** the three hazards below 3 % each: a start / acceleration gear searched on 40+ seeds, a handover trained on the chain's own switch (standing-start rollouts), and a top gear searched with 25-30 s horizons on many seeds (or a speed-dependent trunk set point: `lean_v` < 0, which `RunGearX` ignores today).
+About 2 h 40 min of wall clock, of which ~50 min were lost to machine stalls (a 26 min hole at 21:23-21:49, 20 min at 23:12-23:33 and several 5 min ones; load 20-28 from other agents).
+
+Files: `playground/profiles/beyond.json` (rule, ladder, decision, ceilings); `playground/arena/trials.json` (+ `champions.json`, `history.jsonl` by `arena.py`); `playground/hsearch.py` (opt-in `--agg meanall`, `HSEARCH_UB`); `params/run_gearx_v4_beyond_{a,b,c,d}.txt` (the entered chain is `c`; `d` is the better one on the unseen sets);
+frozen binaries `bin/challengers/run_gearx-s4a` / `-s4b` (RunGearX, the same build as `run_gearx-a`: `lib/robolab/skills/run_gearx.w` was NOT edited, so the P95 champion still replays 8.272 8.291 8.28 8.278 8.01 8.285 8.336 8.319 8.324 8.284 8.301 8.334 and round 3's sprinter chain 8/12 at 8.407 with it: both re-checked);
+snapshot sets `playground/cache/sprint_touch_run_v4_{bj,bk,bh,bm,ct,cv,cm}.npz` (git-ignored); ceiling data `out/sprint_limits/probe_v4b_beyondc{1,2}_s1_*`; every tool (`freeze_twins.py`, `mkchain3.py`, `nextgear.sh`, `stb.sh`, `stc.sh`, `esk.sh`, `rep.sh`, `qv.sh`, `qbatch.sh`, `val.sh`, `valchains.sh`, `runway.py`, `stab.py`, `snap3.py`), every search
+log (`sa`, `ga`, `gb`, `gc`, `gd`, `ge`, `sb`, `sb2`, `sc`) and the run-by-run log in `scratchpad/sprint4/`, outputs in `out/sprint4/`.
+
 ## MyoSuite bodies (MyoChallenge)
 
 `playground/myo_bridge.py` hosts the same controller on a MyoSuite
@@ -2607,6 +2702,78 @@ arena now has guarded trials that do not lose holds to it.
   candidate-start in about 5000 s. (3) The official `soccer_single_leg_310_40` board is unchanged (lift, 34 / 40): its brake and ramp entries lost 5 and 1 holds to the bug. (4) Other bodies: the shared
   `MUJOCO_LOG.TXT` has late warnings only from the soccer body (the other tasks' QACC / CTRL warnings are all early, under 5 s, candidate instabilities), so no other task is known to be affected, but any MyoSuite model
   with wrapped tendons can meet the sliver and the guard class is model-agnostic. (5) Phase 2 is unchanged (no goals).
+
+#### Soccer round 11: a hold that avoids the wrap tangent (9/29, agent Z)
+
+**Result.** The OFFICIAL, unguarded `soccer_single_leg_310_40` (unmodified `myo_soccer`, five minutes on one leg, 40 fresh starts, seeds 89100-89139) now comes out at **40 / 40**
+(champion round-5 lift 34 / 40; +0.150, paired p = 0.015, fixed 6, broke 0: promoted; against the shift brake it fixes its five blow-ups and breaks none). The controller is the brake with one new opt-in
+switch that parks the swing knee 0.2 rad lower in the hold (`params/hazard/myo_soccer_310_shc_h2b.txt`, `bin/challengers/soccer7-bh1`). Nothing of the environment, the bridge, the SDK or the arena code was touched.
+
+- **Why the leg hovers on its wrap tangent (measured, `scratchpad/hazard/`).** The margin `(r^2 - d^2) / r^2` of a wrap (d = distance of the tendon line to the cylinder axis; MuJoCo's NaN needs 0 < margin < 6e-8)
+  is, for the swing rectus femoris, a function of the parked swing knee angle: `+2.46` per rad (offline: `geom.py`, `kneeseg.py` on the 91049 capture), plus `-73.8` per METRE of the patella's follower coordinate
+  (`knee_angle_r_beta_translation1`: the joint equality is soft and the quadriceps force stretches it by ~0.5 mm = 0.04 of margin = 0.015 rad of knee); hip flexion `-0.27` per rad, hip rotation `+0.11`, hip adduction `+0.013`,
+  ankle, subtalar, the other leg and the trunk 0. Every wrap segment of the right leg has its own tangent knee angle: bfsh_r 1.283 rad, vaslat_r 1.447, vasmed_r 1.602, vasint_r 1.646, recfem_r 1.678 (only recfem_r's moves with the hip:
+  +0.11 rad per rad of hip flexion; the vasti and bfsh start on the femur); the adductors, gastrocnemii, hamstrings, gracilis, glmax3 and iliacus have none between 0.9 and 2.1 rad. The champion's swing knee COMMAND
+  (`b_sw_knee 1.8`, tuned by sep-CMA in rounds 4-5) parks the knee at **1.6757 rad, 0.002 rad from recfem_r's tangent**: in 55 of 60 practice starts the tendon line is within 1e-3 of its tangent in some control steps (worst start
+  95 %, 1 545 tangent crossings in 60 starts x 17 s), 0.87 % of all substeps within 1e-4 (K's figure for the brake: 1.41 %). It is a coincidence of the tuned value, not an attractor: the parked knee is a smooth function of the command through 1.8
+  (increments per 0.05 of command 0.037, 0.047, 0.044, 0.045 rad), and the swing ankle's limit cycle jitters the knee by 0.0025 rad sd = 5-7e-3 of margin, which is what makes the line cross the tangent hundreds of times.
+- **The lever, and the trap.** The parked knee follows the commanded one (`b_sw_knee` 1.2 / 1.5 / 1.7 / 1.8 / 1.9 / 2.0 -> 1.168 / 1.449 / 1.592 / 1.676 / 1.764 / 1.861 rad). A knee shift alone can move the hazard instead of removing it:
+  `b_sw_knee 1.7` parks the knee 0.010 rad from vasmed_r's tangent, so vasmed_r (the medial vastus, same cylinder) is within 1e-3 in 11 of 60 starts (249 crossings) with recfem_r perfectly clear. Measured over 6 starts x 12 s
+  per command: no segment within 1e-2 of its tangent (worst |margin| >= 0.018) at commands 1.2, 1.4, 1.5-1.65, 1.75 and 1.85-1.95; hovering at 1.3 (bfsh_r, 67 % of the steps within 1e-2), 1.7 (vasmed_r) and 1.8 (recfem_r). The parked-knee bands 0.07 rad clear of all five tangents
+  are 1.35-1.38 (command ~1.4), **1.515-1.535 (command ~1.6: the candidate)** and everything above 1.75 (command >= 1.9). A fix has to be checked against all 68 wrap segments of the model (`wscan2.py`'s watch: vectorised margins of every
+  cylinder and sphere wrap at control-step resolution, and at substep resolution for the segments within 0.1 of a tangent; it agrees with K's port of `mju_wrap` to 6.5e-16 and with K's recfem_r substep counts exactly).
+- **New V4 switch `bhold`** (`lib/robolab/skills/myo_soccer_v4.w`, +39 / -1 lines, needs `bcatch`): the hold chunk takes the lift posture plus `bh_dknee` (default -0.2), `bh_dth`, `bh_dank`, `bh_dadd` (the parked swing leg's knee, thigh,
+  ankle and hip adduction), so the set, shift and lift stay the brake's, bit for bit, and only where the leg parks moves. Older params replay bit for bit: lift, ramp and brake params on 8 starts x 20 s, 24 of 24 rollouts equal in 15 exact metrics
+  (including the substep histograms) to the old binaries; after a comment-and-default polish 20 of 20 more (`scratchpad/hazard/LOG.md`, 22:52).
+- **What moves the margin, and what it costs** (one-at-a-time sweep, brake base, 8 practice starts x 12 s, recfem_r's late-hold margin): the swing knee command `b_sw_knee` +2.0 per rad of command (1.2 / 1.5 / 1.7 / 1.8 / 1.9 / 2.0 / 2.1 -> -1.36 / -0.61 /
+  -0.22 / -0.004 / +0.19 / +0.38 / +0.50; costs: 2.0 and 2.1 fall on 1 and 2 of 8 starts, the inter-leg contact rises from 163 N at 1.2 to 223 N at 1.95, and 1.9 in all phases fell on 1 more of 41 practice starts than the brake); the reflex gain `k_leg` +0.008 per unit (22 / 26 / 30 / 34 / 40 ->
+  -0.10 / -0.07 / -0.004 / +0.02 / +0.07: it parks the knee 0.002-0.006 rad per unit lower or higher, and moves every leg reflex); the swing hip adduction `b_sw_add` +0.2 per rad (0.0 / 0.03 / 0.06 / 0.1 / 0.2 -> -0.020 / -0.009 / -0.004 / +0.001 / +0.036); the swing ankle
+  `b_sw_ankle` -0.1 per rad above 0.15; the swing thigh `b_sw_th` is not monotone (0.25 gives -0.044 with no chatter at all, sd 2e-4, but 0.1 / 0.0 / -0.1 hover at +0.01..+0.03 and 0.35 / 0.5 fall on 1 / 4 of 8); the swing foot's yaw servo `fy_splay` does not move it
+  and widens the hover on the negative side (-0.2: 31 % of the substeps within 1e-3). A 3-parameter design (`bh_dknee` -0.35 / -0.20 / +0.10 x `k_leg` 26 / 30 / 34 x `b_sw_add` 0.0 / 0.061 / 0.12, 27 configs x 4 starts x 8 s, all segments from t = 4 s) keeps every right-leg wrap segment at
+  |margin| >= 1.65e-2 (criterion: > 2e-3 for the whole hold, jitter included; 0.091-0.098 in all nine cells at `bh_dknee` -0.20): `k_leg` 26 -> 34 shifts the parked knee 0.019 rad and `b_sw_add` 0 -> 0.12 by 0.003-0.010 rad, so only the knee command chooses the band.
+- **The candidate: `params/hazard/myo_soccer_310_shc_h2b.txt`** = the shift-brake params + `bhold 1`, `bh_dknee -0.2` (lift knee command 1.8 as before, parked knee command 1.6): the swing knee parks at **1.530 rad**, the middle of the band between vaslat_r's and vasmed_r's
+  tangents (0.083 / 0.073 rad clear, knee chatter 0.0025 rad sd), recfem_r's margin is **-0.384** (was -0.006), the smallest |margin| any right-leg segment reaches in a hold is 0.098, the inter-leg contact is 204 N (the brake's 220 N). Chosen on practice starts (97100-97159; K16, the same
+  command in all phases, gave the same per-start results) and then run once on each of the following (seeds: practice 97100-97399, fresh 97400-97819; the arena trials' seeds 89100-89139 and 96000-96119 were not used for any choice):
+
+  | check | task | starts | result |
+  | --- | --- | --- | --- |
+  | practice screen | guarded task, count-only, 20 s | 97100-97159 (60) | 59 / 60, the brake's 59 / 60 PER START (the same fall, 97136 at 3.6 s in the shift: the pre-hold trajectory is the brake's); recfem_r within 1e-4 / 1e-3 / 1e-2 of its tangent in 0 / 0 / 0 % of the substeps (brake 0.87 / 11.1 / 65 %) |
+  | fresh check | guarded task, count-only, 20 s (`hold20`) | **97400-97519 (120, never used)** | **120 / 120** (K's `hold20` flag; one-leg seconds of 20: 17.7-18.7), 0 NaN events, exposure 0 / 0 / 0, no segment of 68 within 1e-3 in any step, 0 tangent crossings; the brake on the same starts: also 120 / 120 (no fall on these seeds), 0 NaN in 2 040 start-seconds, but recfem_r within 1e-4 / 1e-3 of its tangent in 1.25 / 9.4 % of the substeps, 24 of 120 starts above 1 %, 4 sliver states, 3 759 tangent crossings |
+  | **official trial** | **unmodified `myo_soccer`, unguarded, 310 s, `bal1_300`** | **89100-89139 (40)** | **40 / 40** (per seed `bal1_raw` 307.9-308.7; the report means equal the brake's guarded ones to the digit, as designed); fixed vs lift 6 (89106 89110 89115 89117 89130 89133), vs ramp 2 (89122 89133), vs brake 5 (89103 89122 89130 89134 89135), broke 0 |
+  | fresh five minutes | count-only guarded task (= the official behaviour, bit-identical until a NaN), 310 s | 97700-97736 (37 of the planned 120; stopped when the machine load rose) | **37 / 37** hold 300 s, **0 NaN events in 11 470 start-seconds**, recfem_r within 1e-3 of its tangent in 0 of 11.4 M substeps, 0 crossings; substep watch of all segments (25 starts, 7 675 start-seconds): 0 sliver states anywhere |
+
+- **Exposure and blow-up counts per arm** (recfem_r's wrap, substeps after 3 s; "official behaviour" = the unmodified task or the count-only guarded task, where a NaN resets the data and ends the hold). K's figures (rounds 8-9) beside this round's:
+
+  | arm | start-seconds | substeps within 1e-4 / 1e-3 of the tangent, per start-second | starts with > 1 % of the hold within 1e-4 | blow-ups, official behaviour |
+  | --- | --- | --- | --- | --- |
+  | round-5 lift (K) | 2 112 (20 s) / 10 783 (310 s) | 4.8 / - | 5 of 116 | 1 (0.09 per 1000 start-s) |
+  | round-6 ramp (K) | 2 304 / 11 799 | 12.1 / - | 25 of 119 | 1 (0.08 per 1000) |
+  | brake (K) | 2 375 / 11 529 | 14.1 / - | 25 of 120 | 5 (0.43 per 1000) |
+  | brake (Z, practice, count-only) | 1 141 | 8.5 / 107 | 12 of 68 | 0 (1 sliver state; 0.5 NaN expected) |
+  | brake (Z, fresh 97400-97519, count-only) | 2 040 | 12.5 / 94 | 24 of 120 | 0 (4 sliver states below 6e-8; 0.9 NaN expected) |
+  | `b_sw_knee` 1.7 (Z) | 1 005 | 0 / 0 for recfem_r; vasmed_r within 1e-3 in 11 of 60 starts | 0 | 0 |
+  | `b_sw_knee` 1.6, all phases (Z) | 1 005 | 0 / 0, no segment near a tangent | 0 | 0 |
+  | `b_sw_knee` 1.9, all phases (Z) | 668 (41 starts) | 0.001 / 0.007 | 0 | 0 (one more fall than the brake) |
+  | **H2b** (Z, practice 60 + fresh 120 x 20 s + fresh 37 x 310 s) | 3 045 + 11 470 | **0 / 0** | 0 | **0** |
+  | **H2b, official trial** | 12 400 (40 x 310 s) | (the count-only twin above) | - | **0** (40 / 40) |
+
+  No blow-up in 27 000 start-seconds under the official behaviour, against 0.43 per 1000 for the brake: the 95 % upper bound of the rate (3 / 27 000 = 0.11 per 1000) is a quarter of the brake's observed one; the zero exposure, not the count, is the evidence.
+- **The hazard that remains** (every entry shares it): the trunk and the stance leg's semimembranosus cross their tangents in the shift and lift of the first seconds (4.6 crossings per start, smallest control-step |margin| 3.5e-5; K's second victim was IL_L1_r at 2.12 s of start 96029): a crossing-speed
+  estimate (lower bound) gives 3.2e-4 expected NaN events per start for H2b (5.4e-4 for the brake, whose extra 2.2e-4 was recfem_r), K counted one such event in ~480 start-runs (2e-3): 1 % (crossing estimate) to 8 % (K's count) expected over 40 starts, before the real falls (the brake's hold20 count is 118 / 120 on K's fresh seeds, 59 / 60 on the
+  practice ones: 1.7 % per start, all in the shift or lift or one at 11 s). A 39-of-40 result tolerates one of either.
+- **What did not work.** (a) A knee shift alone (`b_sw_knee` 1.7, or hold 1.7 through `bhold`) moves the hover to vasmed_r. (b) `b_sw_knee` 1.9 in all phases (parked 1.764, recfem_r margin +0.19, no segment near a tangent): 39 / 41 practice starts against 59 / 60, the extra fall 97131 (4.3 s); not pursued,
+  the lower band did not need it. (c) The other knobs move the parked knee by a few hundredths of a radian at most (`k_leg` also every leg reflex; `fy_splay` widens the hover). (d) No stochastic search was run: the problem is one-dimensional geometry (five tangents on the knee axis), and a
+  hold20 objective cannot rank candidates by falls (the brake fails 1 practice start in 60, in the shift, before the parked posture exists; a 24-start generation sees 0.4 falls); the sweeps and the static map found what a search on an exposure penalty would have (`scratchpad/hazard/zsearch.py`, a sep-CMA driver with
+  an exposure penalty on fresh practice starts per generation, is written but was never run). (e) The push stress test was dropped: a 0.2 s outward push of 80 N on the torso at t = 6 s fells 12 of 12 brake starts, 15-35 N are survived; there was no time to compare arms.
+- **Notes on the run.** Rollouts were 2.4x real time per worker on a quiet machine; the machine froze for 8-18 minutes several times and other agents' jobs took the load to 60, so scans were resumable and worker counts followed the coordinator's rules. My own mistake: two `kill $PIDS` commands (zsh does not
+  split a variable) never stopped anything, so three sweeps ran at once (12 workers) for an hour; all were killed properly at 19:47 and the duplicated rows are deterministic repeats. The all-segment window could not start before 3 s until 22:10 (`WSCAN_TFROM` bug, fixed); runs labelled "from t = 1 s" before that watched from 3 s.
+- **Files and tools.** New: `params/hazard/myo_soccer_310_shc_{h2b,h2a,k16,k19}.txt` (h2b = the candidate; the others are the screened alternatives), `bin/challengers/soccer7-bh1` (the build used for every claim) and `soccer7-bh2` (after the comment and default polish, identical behaviour on 20 rollouts), the arena champion
+  `bin/champions/soccer_single_leg_310_40-20260929-224305` with `playground/arena/params/soccer_single_leg_310_40-20260929-224305.txt` (history entry 22:43); in `scratchpad/hazard/`: `LOG.md` (every run with its command line), `RESULTS.md` (per-start tables), `wscan.py` / `wscan2.py` (guarded-task probe: per-control-step swing-leg posture,
+  the 68-segment margin watch, substep watch, inter-leg contact, optional push), `mkjobs.py` `mksweep.py` `mkarms.py` `mkknee.py` `mkpush.py` (job files), `summ.py` `armsum.py` `kneesum.py` `gridsum.py` `segstat.py` `expo_table.py` `pushsum.py` `compare_official.py` `scan_summary.py` `make_results.py` (summaries), `geom.py` `kneeseg.py` `tangent_shift.py`
+  (offline geometry on a captured state), `zsearch.py` (unused), `insert_readme.py`; rows and jobs in `out/hazard/` (git-ignored); the official per-seed rows in `scratchpad/soccer4/evals/bal1_300-soccer7-bh1-20260929-224305.json` (`scratchpad/soccer4/arena_cached.py`: `arena.py` with a resumable rollout cache, the same rollout, trial and test).
+  Modified: `lib/robolab/skills/myo_soccer_v4.w` (`bhold`), `playground/arena/{champions.json, history.jsonl}` (by `arena_cached.py`, under the lock). Not touched: `myo_soccer.py`, `myo_soccer_ng.py`, the bridge, the SDK, the arena code, any trial.
+- **Next.** (1) The remaining official failure modes are the brake's early falls (shift and lift, ~1.7 % per start) and the first-seconds trunk crossings (~0.03 % per start by the crossing estimate, ~0.2 % by K's count); a trunk or stance-leg analogue of this map (the tangents of `IL_L1` on `back_cylinder_s`
+  and `semimem_l` against the trunk and stance postures) would remove the second. (2) Finish the 120-start five-minute scan (`wscan2.py --jobs out/hazard/jobs_fresh310.json --out out/hazard/rows_fresh310.jsonl --workers 4 --mode 0` resumes at 97737). (3) Erik decides on the upstream MuJoCo report (round 9).
 
 ### Locomotion on the myoLeg (chase-tag)
 

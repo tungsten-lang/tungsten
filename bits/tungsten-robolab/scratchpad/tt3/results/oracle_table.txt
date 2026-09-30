@@ -1,0 +1,185 @@
+o0         | A: 43/100 hit 91 | B: 34/100 hit 86 | pooled 77/200 = 38.5% (+-3.4) hit 177/200 | vs O0 flips lost 0 gained 0 z +0.0
+    classes pooled {"solved": 77, "out": 78, "own": 14, "below": 12, "net": 8, "lateral": 6, "above": 1, "rim<10cm": 4}
+    classes A {"solved": 43, "out": 37, "own": 6, "below": 4, "net": 5, "lateral": 2, "above": 1, "rim<10cm": 2}
+    classes B {"solved": 34, "out": 41, "lateral": 4, "below": 8, "own": 8, "net": 3, "rim<10cm": 2}
+    sigmas (pooled hits): pitch 11.3 deg, pad velocity 0.538 m/s, place 4.32 cm (median dist 5.4 cm)
+o1         | A: 28/100 hit 75 | B: 24/100 hit 71 | pooled 52/200 = 26.0% (+-3.1) hit 146/200 | vs O0 flips lost 51 gained 26 z -2.8
+    classes pooled {"solved": 52, "out": 85, "below": 24, "lateral": 23, "rim<10cm": 6, "own": 7, "net": 2, "above": 1}
+    classes A {"solved": 28, "out": 43, "below": 11, "lateral": 11, "rim<10cm": 3, "own": 4}
+    classes B {"solved": 24, "out": 42, "lateral": 12, "below": 13, "own": 3, "net": 2, "rim<10cm": 3, "above": 1}
+    sigmas (pooled hits): pitch 9.7 deg, pad velocity 0.470 m/s, place 4.66 cm (median dist 6.1 cm)
+o1a        | A: 23/100 hit 72 | B: 21/100 hit 65 | pooled 44/200 = 22.0% (+-2.9) hit 137/200 | vs O0 flips lost 56 gained 23 z -3.7
+    classes pooled {"solved": 44, "out": 84, "below": 38, "lateral": 19, "net": 6, "rim<10cm": 5, "own": 3, "above": 1}
+    classes A {"solved": 23, "out": 46, "below": 17, "lateral": 8, "net": 2, "rim<10cm": 3, "own": 1}
+    classes B {"solved": 21, "out": 38, "lateral": 11, "below": 21, "net": 4, "own": 2, "rim<10cm": 2, "above": 1}
+    sigmas (pooled hits): pitch 8.3 deg, pad velocity 0.473 m/s, place 4.38 cm (median dist 5.5 cm)
+o1c        | A: 26/100 hit 73 | B: 23/100 hit 67 | pooled 49/200 = 24.5% (+-3.0) hit 140/200 | vs O0 flips lost 53 gained 25 z -3.2
+    classes pooled {"solved": 49, "out": 60, "own": 17, "below": 38, "net": 14, "lateral": 19, "rim<10cm": 2, "above": 1}
+    classes A {"solved": 26, "out": 31, "own": 9, "below": 18, "net": 7, "lateral": 8, "rim<10cm": 1}
+    classes B {"net": 7, "out": 29, "lateral": 11, "below": 20, "own": 8, "solved": 23, "above": 1, "rim<10cm": 1}
+    sigmas (pooled hits): pitch 7.9 deg, pad velocity 0.496 m/s, place 4.83 cm (median dist 6.2 cm)
+o1ca       | A: 18/100 hit 69 | B: 24/100 hit 68 | pooled 42/200 = 21.0% (+-2.9) hit 137/200 | vs O0 flips lost 58 gained 23 z -3.9
+    classes pooled {"solved": 42, "out": 63, "own": 18, "below": 39, "net": 14, "lateral": 20, "above": 1, "rim<10cm": 3}
+    classes A {"solved": 18, "out": 36, "own": 9, "below": 22, "net": 6, "lateral": 9}
+    classes B {"net": 8, "solved": 24, "lateral": 11, "below": 17, "own": 9, "out": 27, "above": 1, "rim<10cm": 3}
+    sigmas (pooled hits): pitch 7.3 deg, pad velocity 0.520 m/s, place 4.32 cm (median dist 5.4 cm)
+o2         | A: 20/100 hit 69 | B: 12/100 hit 58 | pooled 32/200 = 16.0% (+-2.6) hit 127/200 | vs O0 flips lost 56 gained 11 z -5.5
+    classes pooled {"own": 10, "lateral": 35, "out": 79, "solved": 32, "below": 20, "rim<10cm": 3, "above": 15, "net": 6}
+    classes A {"own": 7, "lateral": 18, "out": 38, "solved": 20, "below": 4, "rim<10cm": 2, "above": 7, "net": 4}
+    classes B {"out": 41, "solved": 12, "lateral": 17, "below": 16, "above": 8, "net": 2, "own": 3, "rim<10cm": 1}
+    sigmas (pooled hits): pitch 13.3 deg, pad velocity 0.518 m/s, place 4.84 cm (median dist 6.6 cm)
+o2u        | A: 27/100 hit 68 | B: 17/100 hit 65 | pooled 44/200 = 22.0% (+-2.9) hit 133/200 | vs O0 flips lost 50 gained 17 z -4.0
+    classes pooled {"own": 13, "lateral": 41, "out": 74, "solved": 44, "below": 14, "above": 11, "net": 2, "rim<10cm": 1}
+    classes A {"own": 6, "lateral": 21, "out": 34, "solved": 27, "below": 6, "above": 5, "net": 1}
+    classes B {"out": 40, "lateral": 20, "own": 7, "solved": 17, "below": 8, "above": 6, "rim<10cm": 1, "net": 1}
+    sigmas (pooled hits): pitch 13.4 deg, pad velocity 0.718 m/s, place 4.74 cm (median dist 6.0 cm)
+o2abs      | A: 0/100 hit 1 | B: 0/100 hit 8 | pooled 0/200 = 0.0% (+-0.0) hit 9/200 | vs O0 flips lost 77 gained 0 z -8.8
+    classes pooled {"lateral": 108, "above": 21, "below": 59, "rim<10cm": 3, "out": 4, "own": 5}
+    classes A {"lateral": 53, "above": 15, "below": 29, "rim<10cm": 2, "out": 1}
+    classes B {"lateral": 55, "below": 30, "above": 6, "own": 5, "rim<10cm": 1, "out": 3}
+    sigmas (pooled hits): pitch 31.0 deg, pad velocity 0.628 m/s, place 5.15 cm (median dist 6.7 cm)
+o2own0     | A: 39/100 hit 88 | B: 33/100 hit 83 | pooled 72/200 = 36.0% (+-3.4) hit 171/200 | vs O0 flips lost 14 gained 9 z -1.0
+    classes pooled {"solved": 72, "out": 76, "net": 7, "own": 16, "rim<10cm": 3, "below": 20, "lateral": 5, "above": 1}
+    classes A {"solved": 39, "out": 37, "net": 5, "own": 7, "rim<10cm": 1, "below": 8, "lateral": 2, "above": 1}
+    classes B {"solved": 33, "out": 39, "below": 12, "own": 9, "lateral": 3, "rim<10cm": 2, "net": 2}
+    sigmas (pooled hits): pitch 11.7 deg, pad velocity 0.556 m/s, place 4.32 cm (median dist 5.3 cm)
+o2own2     | A: 42/100 hit 90 | B: 32/100 hit 85 | pooled 74/200 = 37.0% (+-3.4) hit 175/200 | vs O0 flips lost 14 gained 11 z -0.6
+    classes pooled {"solved": 74, "out": 75, "own": 18, "rim<10cm": 3, "net": 8, "below": 16, "lateral": 5, "above": 1}
+    classes A {"solved": 42, "out": 35, "own": 8, "rim<10cm": 1, "net": 5, "below": 6, "lateral": 2, "above": 1}
+    classes B {"solved": 32, "out": 40, "below": 10, "own": 10, "lateral": 3, "rim<10cm": 2, "net": 3}
+    sigmas (pooled hits): pitch 11.4 deg, pad velocity 0.540 m/s, place 4.29 cm (median dist 5.4 cm)
+o2own4     | A: 37/100 hit 93 | B: 36/100 hit 85 | pooled 73/200 = 36.5% (+-3.4) hit 178/200 | vs O0 flips lost 16 gained 12 z -0.8
+    classes pooled {"solved": 73, "out": 75, "net": 15, "own": 15, "below": 13, "lateral": 6, "above": 2, "rim<10cm": 1}
+    classes A {"solved": 37, "out": 38, "net": 10, "own": 8, "below": 4, "lateral": 2, "above": 1}
+    classes B {"solved": 36, "out": 37, "lateral": 4, "below": 9, "net": 5, "above": 1, "own": 7, "rim<10cm": 1}
+    sigmas (pooled hits): pitch 11.2 deg, pad velocity 0.519 m/s, place 4.32 cm (median dist 5.3 cm)
+o3         | A: 15/100 hit 56 | B: 8/100 hit 36 | pooled 23/200 = 11.5% (+-2.3) hit 92/200 | vs O0 flips lost 65 gained 11 z -6.2
+    classes pooled {"net": 2, "out": 61, "solved": 23, "rim<10cm": 7, "lateral": 49, "above": 9, "below": 43, "own": 6}
+    classes A {"net": 2, "out": 36, "solved": 15, "rim<10cm": 1, "lateral": 25, "above": 5, "below": 13, "own": 3}
+    classes B {"below": 30, "out": 25, "lateral": 24, "solved": 8, "above": 4, "rim<10cm": 6, "own": 3}
+    sigmas (pooled hits): pitch 14.9 deg, pad velocity 0.458 m/s, place 4.34 cm (median dist 5.4 cm)
+o3c        | A: 13/100 hit 63 | B: 11/100 hit 46 | pooled 24/200 = 12.0% (+-2.3) hit 109/200 | vs O0 flips lost 63 gained 10 z -6.2
+    classes pooled {"own": 5, "out": 76, "solved": 24, "below": 35, "lateral": 43, "net": 4, "above": 10, "rim<10cm": 3}
+    classes A {"own": 4, "out": 43, "solved": 13, "below": 12, "lateral": 21, "net": 3, "above": 4}
+    classes B {"solved": 11, "out": 33, "below": 23, "lateral": 22, "above": 6, "rim<10cm": 3, "net": 1, "own": 1}
+    sigmas (pooled hits): pitch 10.0 deg, pad velocity 0.442 m/s, place 4.63 cm (median dist 5.9 cm)
+o4a        | A: 18/100 hit 100 | B: 15/100 hit 100 | pooled 33/200 = 16.5% (+-2.6) hit 200/200 | vs O0 flips lost 57 gained 13 z -5.3
+    classes pooled {"solved": 33, "out": 167}
+    classes A {"solved": 18, "out": 82}
+    classes B {"out": 85, "solved": 15}
+o4a2       | A: 34/100 hit 100 | B: 29/100 hit 100 | pooled 63/200 = 31.5% (+-3.3) hit 200/200 | vs O0 flips lost 49 gained 35 z -1.5
+    classes pooled {"solved": 63, "out": 130, "own": 5, "net": 2}
+    classes A {"solved": 34, "out": 64, "own": 2}
+    classes B {"out": 66, "solved": 29, "net": 2, "own": 3}
+o4b        | A: 100/100 hit 100 | B: 100/100 hit 100 | pooled 200/200 = 100.0% (+-0.0) hit 200/200 | vs O0 flips lost 0 gained 123 z +11.1
+    classes pooled {"solved": 200}
+    classes A {"solved": 100}
+    classes B {"solved": 100}
+o4bm       | A: 100/100 hit 100 | B: 100/100 hit 100 | pooled 200/200 = 100.0% (+-0.0) hit 200/200 | vs O0 flips lost 0 gained 123 z +11.1
+    classes pooled {"solved": 200}
+    classes A {"solved": 100}
+    classes B {"solved": 100}
+o4bn01     | A: 97/100 hit 100 | B: 97/100 hit 100 | pooled 194/200 = 97.0% (+-1.2) hit 200/200 | vs O0 flips lost 2 gained 119 z +10.6
+    classes pooled {"solved": 194, "out": 6}
+    classes A {"solved": 97, "out": 3}
+    classes B {"solved": 97, "out": 3}
+o4bn_champ | A: 21/100 hit 87 | B: 18/100 hit 87 | pooled 39/200 = 19.5% (+-2.8) hit 174/200 | vs O0 flips lost 62 gained 24 z -4.1
+    classes pooled {"net": 4, "rim<10cm": 13, "out": 101, "lateral": 7, "solved": 39, "own": 30, "below": 6}
+    classes A {"net": 3, "rim<10cm": 6, "out": 52, "lateral": 6, "solved": 21, "own": 11, "below": 1}
+    classes B {"out": 49, "own": 19, "solved": 18, "rim<10cm": 7, "below": 5, "lateral": 1, "net": 1}
+o4bn_pitch | A: 40/100 hit 100 | B: 32/100 hit 100 | pooled 72/200 = 36.0% (+-3.4) hit 200/200 | vs O0 flips lost 50 gained 45 z -0.5
+    classes pooled {"solved": 72, "out": 97, "own": 30, "net": 1}
+    classes A {"solved": 40, "out": 48, "own": 12}
+    classes B {"out": 49, "own": 18, "solved": 32, "net": 1}
+o4bn_yaw   | A: 81/100 hit 100 | B: 85/100 hit 100 | pooled 166/200 = 83.0% (+-2.7) hit 200/200 | vs O0 flips lost 12 gained 101 z +8.4
+    classes pooled {"solved": 166, "out": 34}
+    classes A {"solved": 81, "out": 19}
+    classes B {"solved": 85, "out": 15}
+o4bn_vel   | A: 42/100 hit 100 | B: 34/100 hit 100 | pooled 76/200 = 38.0% (+-3.4) hit 200/200 | vs O0 flips lost 43 gained 42 z -0.1
+    classes pooled {"solved": 76, "own": 48, "out": 76}
+    classes A {"solved": 42, "own": 23, "out": 35}
+    classes B {"solved": 34, "out": 41, "own": 25}
+o4bn_pos   | A: 84/100 hit 86 | B: 88/100 hit 88 | pooled 172/200 = 86.0% (+-2.5) hit 174/200 | vs O0 flips lost 14 gained 109 z +8.6
+    classes pooled {"solved": 172, "rim<10cm": 10, "lateral": 8, "out": 2, "below": 8}
+    classes A {"solved": 84, "rim<10cm": 5, "lateral": 7, "out": 2, "below": 2}
+    classes B {"solved": 88, "below": 6, "rim<10cm": 5, "lateral": 1}
+o4bn_half  | A: 45/100 hit 100 | B: 43/100 hit 98 | pooled 88/200 = 44.0% (+-3.5) hit 198/200 | vs O0 flips lost 38 gained 49 z +1.2
+    classes pooled {"solved": 88, "out": 69, "own": 36, "net": 5, "rim<10cm": 2}
+    classes A {"solved": 45, "out": 38, "own": 16, "net": 1}
+    classes B {"out": 31, "solved": 43, "net": 4, "own": 20, "rim<10cm": 2}
+o4bn_spec  | A: 50/100 hit 98 | B: 47/100 hit 95 | pooled 97/200 = 48.5% (+-3.5) hit 193/200 | vs O0 flips lost 34 gained 54 z +2.1
+    classes pooled {"solved": 97, "out": 57, "net": 4, "rim<10cm": 5, "own": 35, "below": 2}
+    classes A {"solved": 50, "out": 33, "net": 1, "rim<10cm": 2, "own": 14}
+    classes B {"own": 21, "solved": 47, "out": 24, "rim<10cm": 3, "net": 3, "below": 2}
+o4rn_champ | A: 36/100 hit 90 | B: 40/100 hit 92 | pooled 76/200 = 38.0% (+-3.4) hit 182/200 | vs O0 flips lost 50 gained 49 z -0.1
+    classes pooled {"solved": 76, "out": 69, "lateral": 8, "rim<10cm": 2, "own": 30, "below": 8, "net": 7}
+    classes A {"solved": 36, "out": 34, "lateral": 7, "rim<10cm": 1, "own": 17, "below": 2, "net": 3}
+    classes B {"solved": 40, "out": 35, "net": 4, "below": 6, "own": 13, "lateral": 1, "rim<10cm": 1}
+o4rn_mid8  | A: 51/100 hit 96 | B: 49/100 hit 94 | pooled 100/200 = 50.0% (+-3.5) hit 190/200 | vs O0 flips lost 37 gained 60 z +2.3
+    classes pooled {"solved": 100, "own": 22, "out": 65, "rim<10cm": 4, "net": 3, "lateral": 2, "below": 4}
+    classes A {"solved": 51, "own": 12, "out": 32, "rim<10cm": 3, "net": 1, "lateral": 1}
+    classes B {"solved": 49, "out": 33, "own": 10, "rim<10cm": 1, "below": 4, "lateral": 1, "net": 2}
+o4rn_mid6  | A: 62/100 hit 100 | B: 63/100 hit 96 | pooled 125/200 = 62.5% (+-3.4) hit 196/200 | vs O0 flips lost 29 gained 77 z +4.7
+    classes pooled {"solved": 125, "own": 13, "out": 53, "net": 5, "rim<10cm": 2, "below": 2}
+    classes A {"solved": 62, "own": 9, "out": 28, "net": 1}
+    classes B {"solved": 63, "out": 25, "net": 4, "own": 4, "rim<10cm": 2, "below": 2}
+o4rn_half  | A: 71/100 hit 100 | B: 76/100 hit 100 | pooled 147/200 = 73.5% (+-3.1) hit 200/200 | vs O0 flips lost 17 gained 87 z +6.9
+    classes pooled {"solved": 147, "out": 41, "own": 9, "net": 3}
+    classes A {"solved": 71, "out": 22, "own": 5, "net": 2}
+    classes B {"solved": 76, "out": 19, "own": 4, "net": 1}
+o4rn_spec  | A: 74/100 hit 100 | B: 75/100 hit 96 | pooled 149/200 = 74.5% (+-3.1) hit 196/200 | vs O0 flips lost 17 gained 89 z +7.0
+    classes pooled {"solved": 149, "out": 40, "own": 3, "net": 4, "rim<10cm": 2, "below": 2}
+    classes A {"solved": 74, "out": 21, "own": 2, "net": 3}
+    classes B {"solved": 75, "out": 19, "own": 1, "rim<10cm": 2, "net": 1, "below": 2}
+o4rn_tight | A: 86/100 hit 100 | B: 88/100 hit 100 | pooled 174/200 = 87.0% (+-2.4) hit 200/200 | vs O0 flips lost 7 gained 104 z +9.2
+    classes pooled {"solved": 174, "out": 24, "net": 1, "own": 1}
+    classes A {"solved": 86, "out": 13, "net": 1}
+    classes B {"solved": 88, "out": 11, "own": 1}
+o4rn_t25   | A: 93/100 hit 100 | B: 98/100 hit 100 | pooled 191/200 = 95.5% (+-1.5) hit 200/200 | vs O0 flips lost 3 gained 117 z +10.4
+    classes pooled {"solved": 191, "out": 7, "net": 2}
+    classes A {"solved": 93, "out": 6, "net": 1}
+    classes B {"solved": 98, "net": 1, "out": 1}
+o4rn_tighter | A: 100/100 hit 100 | B: 100/100 hit 100 | pooled 200/200 = 100.0% (+-0.0) hit 200/200 | vs O0 flips lost 0 gained 123 z +11.1
+    classes pooled {"solved": 200}
+    classes A {"solved": 100}
+    classes B {"solved": 100}
+o4rn_pitch | A: 77/100 hit 100 | B: 83/100 hit 100 | pooled 160/200 = 80.0% (+-2.8) hit 200/200 | vs O0 flips lost 15 gained 98 z +7.8
+    classes pooled {"solved": 160, "own": 17, "net": 10, "out": 13}
+    classes A {"solved": 77, "own": 6, "net": 9, "out": 8}
+    classes B {"own": 11, "solved": 83, "out": 5, "net": 1}
+o4rn_yaw   | A: 98/100 hit 100 | B: 97/100 hit 100 | pooled 195/200 = 97.5% (+-1.1) hit 200/200 | vs O0 flips lost 0 gained 118 z +10.9
+    classes pooled {"solved": 195, "out": 5}
+    classes A {"solved": 98, "out": 2}
+    classes B {"solved": 97, "out": 3}
+o4rn_vel   | A: 70/100 hit 100 | B: 82/100 hit 100 | pooled 152/200 = 76.0% (+-3.0) hit 200/200 | vs O0 flips lost 16 gained 91 z +7.3
+    classes pooled {"solved": 152, "out": 39, "net": 9}
+    classes A {"solved": 70, "out": 23, "net": 7}
+    classes B {"solved": 82, "out": 16, "net": 2}
+o4rn_pos   | A: 80/100 hit 88 | B: 87/100 hit 92 | pooled 167/200 = 83.5% (+-2.6) hit 180/200 | vs O0 flips lost 18 gained 108 z +8.0
+    classes pooled {"solved": 167, "rim<10cm": 4, "lateral": 8, "out": 9, "own": 2, "below": 8, "net": 2}
+    classes A {"solved": 80, "rim<10cm": 3, "lateral": 7, "out": 5, "own": 2, "below": 2, "net": 1}
+    classes B {"solved": 87, "below": 6, "net": 1, "out": 4, "lateral": 1, "rim<10cm": 1}
+o5a        | A: 32/100 hit 84 | B: 24/100 hit 78 | pooled 56/200 = 28.0% (+-3.2) hit 162/200 | vs O0 flips lost 44 gained 23 z -2.6
+    classes pooled {"solved": 56, "out": 80, "net": 9, "own": 17, "above": 2, "rim<10cm": 5, "lateral": 15, "below": 16}
+    classes A {"solved": 32, "out": 40, "net": 3, "own": 9, "above": 1, "rim<10cm": 3, "lateral": 7, "below": 5}
+    classes B {"solved": 24, "own": 8, "lateral": 8, "out": 40, "net": 6, "below": 11, "above": 1, "rim<10cm": 2}
+o5b        | A: 32/100 hit 79 | B: 20/100 hit 76 | pooled 52/200 = 26.0% (+-3.1) hit 155/200 | vs O0 flips lost 51 gained 26 z -2.8
+    classes pooled {"solved": 52, "own": 18, "out": 78, "below": 16, "net": 7, "lateral": 19, "rim<10cm": 3, "above": 7}
+    classes A {"solved": 32, "own": 6, "out": 39, "below": 7, "net": 2, "lateral": 11, "rim<10cm": 2, "above": 1}
+    classes B {"solved": 20, "net": 5, "above": 6, "lateral": 8, "below": 9, "own": 12, "out": 39, "rim<10cm": 1}
+o5cap      | A: 26/100 hit 72 | B: 23/100 hit 76 | pooled 49/200 = 24.5% (+-3.0) hit 148/200 | vs O0 flips lost 53 gained 25 z -3.2
+    classes pooled {"solved": 49, "out": 79, "lateral": 13, "below": 27, "net": 9, "above": 9, "rim<10cm": 3, "own": 11}
+    classes A {"solved": 26, "out": 39, "lateral": 8, "below": 15, "net": 4, "above": 3, "rim<10cm": 2, "own": 3}
+    classes B {"solved": 23, "net": 5, "above": 6, "lateral": 5, "out": 40, "below": 12, "own": 8, "rim<10cm": 1}
+o4rn_champ2 | A: 37/100 hit 90 | B: 29/100 hit 89 | pooled 66/200 = 33.0% (+-3.3) hit 179/200 | vs O0 flips lost 48 gained 37 z -1.2
+    classes pooled {"out": 56, "own": 46, "solved": 66, "net": 11, "below": 5, "above": 3, "lateral": 6, "rim<10cm": 7}
+    classes A {"out": 27, "own": 24, "solved": 37, "net": 2, "below": 3, "above": 1, "lateral": 3, "rim<10cm": 3}
+    classes B {"own": 22, "out": 29, "solved": 29, "net": 9, "lateral": 3, "below": 2, "above": 2, "rim<10cm": 4}
+o4rn_tight2 | A: 98/100 hit 100 | B: 93/100 hit 100 | pooled 191/200 = 95.5% (+-1.5) hit 200/200 | vs O0 flips lost 0 gained 114 z +10.7
+    classes pooled {"solved": 191, "out": 8, "own": 1}
+    classes A {"solved": 98, "out": 2}
+    classes B {"solved": 93, "out": 6, "own": 1}
+o4rn_t252  | A: 99/100 hit 100 | B: 97/100 hit 100 | pooled 196/200 = 98.0% (+-1.0) hit 200/200 | vs O0 flips lost 0 gained 119 z +10.9
+    classes pooled {"solved": 196, "out": 4}
+    classes A {"solved": 99, "out": 1}
+    classes B {"solved": 97, "out": 3}

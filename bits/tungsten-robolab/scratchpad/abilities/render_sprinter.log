@@ -1,0 +1,6 @@
+== sprint v4 sprinter body, start 222
+Tue Sep 29 22:29:48 EDT 2026
+wrote out/sprint_v4_sprinter.mp4 1561 frames
+{'time': 26.0, 'distance': 169.619, 'speed_last5': np.float64(8.338), 'speed_10s': np.float64(8.316), 'min_speed_1s': np.float64(8.211), 'peak_speed_1s': np.float64(8.407), 'time_at_3': 22.4, 'stride_freq': np.float64(2.0), 'step_freq': np.float64(4.2), 'stride_length': np.float64(4.169), 'step_length': np.float64(1.985), 'flight_frac': 0.598, 'scuffs_per_s': np.float64(0.0), 'contact_time': 0.094, 'flight_time': 0.128, 'peak_grf': 4.35, 'pelvis_z': 0.894, 'thigh_peak': 1.375, 'knee_lift': 0.806, 'knee_stand': 0.525, 'pelvis_pitch': -0.187, 'com_lead': 0.134, 'torso_pitch': 0.097, 'torso_pitch_max': 0.197, 'effort': 0.22, 'steady_speed': np.float64(8.338), 'strides': 52, 't_100m': 17.65, 'decisions_per_cycle': 6.6, 'fell': False}
+== done
+Tue Sep 29 22:30:04 EDT 2026

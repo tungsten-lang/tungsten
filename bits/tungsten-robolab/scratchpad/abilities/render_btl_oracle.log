@@ -1,0 +1,8 @@
+== dribble_btl champion, seed 715
+Tue Sep 29 17:18:49 EDT 2026
+wrote out/dribble_btl_oracle.gif 301 frames
+wrote out/dribble_btl_oracle.gif 226 frames
+{'btl_rate': 0.4, 'btl_ok': 4, 'btl_opportunities': 10, 'btl_streak': 4, 'lost': 'two floor bounces without a touch', 'carry_why': None}
+[{'t': 1.53, 'k': 'BR', 'ok': True, 'why': 'ok', 'gate': (2.004, 0.318, 0.2)}, {'t': 2.005, 'k': 'BL', 'ok': True, 'why': 'ok', 'gate': (2.381, 0.306, 0.126)}, {'t': 2.43, 'k': 'BR', 'ok': True, 'why': 'ok', 'gate': (2.833, 0.327, 0.292)}, {'t': 2.94, 'k': 'BL', 'ok': True, 'why': 'ok', 'gate': (3.251, 0.418, 0.198)}, {'t': 3.36, 'k': 'BR', 'ok': False, 'why': 'bounces_or_wrong_hand', 'gate': None
+== done
+Tue Sep 29 17:19:25 EDT 2026

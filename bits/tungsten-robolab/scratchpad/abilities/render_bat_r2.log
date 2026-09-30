@@ -1,0 +1,6 @@
+== bat_r2-t1 / params/bat_r2_s1.txt
+Tue Sep 29 09:36:32 EDT 2026
+{'time': 17.505, 'hitch': 0.6671, 'hitch_full': 0.6671, 'flow': 2.6193, 'flow_valley_lift': 0.59, 'flow_valley_pre': 0.928, 'flow_valley_post': 0.81, 'flow_cmd': 0.667, 'flow_stall_ms_pre': 60.0, 'flow_stall_ms_post': 40.0, 'flow_dip_pre': 0.928, 'flow_dip_post': 0.81, 'power': 25.65, 'flow_ok': True, 'quality': 0.65, 'pitches': [{'pitch': 1, 'speed_mph': 82.8, 'target_x': 0.0, 'target_z': 0.8, 't_release': 2.9, 'hit': True, 'closest': 0.0, 't_release_hand': 3.515, 't_swing': 3.135, 't_aim': 2.9
+wrote out/bat_r2_s1.mp4 1051 frames
+== done
+Tue Sep 29 09:36:56 EDT 2026

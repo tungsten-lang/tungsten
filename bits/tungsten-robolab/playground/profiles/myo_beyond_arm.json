@@ -1,0 +1,183 @@
+{
+ "name": "myo_beyond_arm",
+ "label": "BEYOND-HUMAN ARM, not a human profile. A LABELLED BODY VARIANT of the OFFICIAL MyoSuite table-tennis body (myoChallengeTableTennisP2-v0) with invented multipliers on every muscle. Its results are never to be compared with the official trials (tt_p1, tt_p2, tt_p2_300, tt_p2_backhand) and say nothing about human table tennis.",
+ "fixed": "The RULE, the LADDER, the go/no-go criterion and the definitions of the measures were fixed 2026-09-29 22:59 (machine clock; file created 22:59:43 by the machine clock, the wording of this sentence corrected at 23:01 before any rollout), BEFORE any rollout was run on any rung. Before this line only a read-only probe of the official model's actuator parameters ran (scratchpad/tt2/probe_model.py, nothing scored).",
+ "status": "FIXED 2026-09-29 22:59 (machine clock). No rung has been run. `changes` stays empty unless a documented reason is added; the ladder has exactly three rungs and no other multiplier is ever tried as a candidate.",
+ "changes": [],
+ "about": "A hypothetical arm that is not human: every one of the 273 muscle actuators of the official table-tennis body is stronger, faster to shorten and faster to activate by round numbers. It exists to answer ONE question for the control plane (agent T2, 29 Sep): agent T showed that 90 % of phase-2 serves is out of reach for the official arm because the arm cannot carry out the aim (pad pitch 10 deg, pad velocity 0.5 m/s, place 5 cm, 1 sigma each; the face follows 0.53-0.66 of an aimed change on the forehand and 0.13-0.28 on the backhand). Does a stronger, faster arm remove that limit for the UNCHANGED champion controller? It is NOT a claim about human players. Every note, arena entry, log line and page text about it says BEYOND-HUMAN ARM.",
+ "population": "none: an invented arm, stronger and faster than any person in every muscle",
+ "rule": {
+  "text": "The body is the official MyoSuite table-tennis P2 model (myoarm + myoTorso, 273 muscle actuators, the two pelvis position actuators, a free paddle, a ball, the table), compiled by MyoSuite unchanged, and then, in the compiled MjModel that the env and its Robot share (so the stepped MjData sees it), every one of the 273 actuators whose dyntype is MUSCLE gets the rung's multipliers: peak isometric force (gainprm[2] and biasprm[2], the compiled values: the muscles carry force -1 in the XML and the compile resolves it, so the compiled numbers 4.8-2150.7 N are what is scaled) x strength; maximum shortening speed vmax (gainprm[6] and biasprm[6]) x speed; the activation and deactivation time constants (dynprm[0] and dynprm[1]) x activation. UNCHANGED: the two pelvis position actuators (pelvis_x, pelvis_y), every geometry, tendon path, wrap, mass, inertia, joint range and damping, contact, sensor, the reset, the serve randomisation, the ball, the paddle and the scoring. The controller is told the body it has (the bridge sends MFORCE = the compiled peak force of each muscle, so its normalised-force reflex and feed-forward see the scaled peaks); nothing else about it changes.",
+  "unchanged_controller": "bin/challengers/myo_tt_r10-n (byte-identical to the tt_p2_300 champion's frozen bin/champions/tt_p2_300-20260929-101727) with params/myo_tt_p2_r10_c3.txt, no retuning at the measurement stage.",
+  "switch": "env var MYO_TT_BEYOND = the rung (0 or unset = the official env, the very same env class and id: byte-identical, proved by a check on fresh serves before any rung is run); implemented by playground/tasks/myo_tt_beyond.py.",
+  "measurements_in_order": [
+   "0. identity: on 6 fresh serves (arena seeds 98000-98005) the official task and the beyond task at rung 0 give identical metrics on every key, on the standard path and on the fast path (playground/tt_fast.py check).",
+   "a. THE UNCHANGED CHAMPION on the 100 arena serves 98000-98099 at rungs 1, 2 and 3 (and, as the yardstick for the measures below, at rung 0 = the official body on the same serves): solved count, hit count, failure classes by side. Runs write per-episode logs (TT_SAVE_LOG, read-only diagnostics that leave the episode bit for bit unchanged).",
+   "b. THE NOISE DECOMPOSITION of every rung from those same logs (no extra rollouts): the three measures defined below, and the joint-level asked-versus-reached table of the arm's ready posture at contact, both sides. If time allows, the face-follow ratio by agent T's probe (params ft_amp / ft_yaw, the slope of the reached pad normal on the aimed trim) at the best rung and at rung 0 on fresh serves (never the arena's)."
+  ],
+  "measures": {
+   "pitch_sigma_deg": "standard deviation over the hits of a run of (pitch of the pad's normal at contact) minus (pitch of the aim law's last normal at or before contact), in degrees, both sides pooled (metrics pad_normal, aim_normal; playground/tt_impact.py angles_from_normal; scratchpad/tt/an8.py).",
+   "pad_velocity_sigma_m_s": "mean over the three components (x, y, z) of the standard deviation over the hits of the pad centre's world velocity at contact (metric paddle_vel: the finite difference of the logged pad centre, as agent T's analyses), m/s. The velocity along the pad's normal is reported beside it.",
+   "place_error_cm": "the in-plane offset of the ball centre from the pad centre at the first row with paddle contact, from the episode logs (the logged ball position minus the logged pad centre, minus its component along the pad normal), reported as sqrt(mean(d^2) / 2) over the hits (the per-axis sigma of an isotropic Gaussian miss, which includes any bias) in cm, with the median distance beside it (agent T's ceiling table uses the same per-axis reading, position sd 5 cm on the official arm).",
+   "solved_and_hit": "the arena metric solved (the ball touches the paddle and then lands on the opponent's half, no second own-half bounce, no double touch) and hit (paddle touched the ball), counted over the 100 serves."
+  },
+  "go_no_go": {
+   "text": "The BEST RUNG is the rung among 1, 2, 3 with the most solved serves of the 100 (a tie goes to the smaller rung). GO if the unchanged champion at the best rung solves at least 55 of the 100 serves OR its noise decomposition shows ALL of: pitch sigma below 6 deg, pad-velocity sigma below 0.35 m/s and place error below 4 cm. NO-GO otherwise: stop, write the report (no tuning, nothing else run on the arm except diagnostics after the verdict is written, which never change it).",
+   "pick": "If GO: the rung that is used for the arena trials and the tuning is the SMALLEST rung that clears the criterion by itself (at least 55 of the 100 solved, or all three noise measures inside their limits, each evaluated on that rung's own runs). No rung is skipped on grounds of taste, no intermediate multiplier is tried.",
+   "target": "above 90 % solved on the 300 arena serves (98000-98299) and on 300 fresh serves (seeds nobody used), on the labelled trials only."
+  },
+  "tuning_rules": "Arena trials for the picked rung are new, labelled (tt_p2_300_beyond and, if the backhand-only view is needed, tt_p2_backhand_beyond; same seeds as the official trials; note starting LABELLED BODY VARIANT (BEYOND-HUMAN ARM ...)); the official champion's entries are never touched. Training serves are never the arena's 300 (seeds 720000 and up); finalists are judged on the arena's seeds and on 300 fresh serves. Stop tuning when 4 consecutive rounds gain under 1 point or about 4 hours after GO.",
+  "stretch": "THE MULTIPLIERS ARE AN INVENTED STRETCH. The official model's peak forces are already those of a strong young man's arm; no measurement, distribution or literature value stands behind strength x2.0-3.0, speed x1.7-2.4 or activation x0.8 on the whole body of muscles. They are round numbers chosen so that a stronger and faster arm exists (the same strength and speed steps as the labelled beyond-human sprint body, profiles/beyond.json, ladder steps 1-3; the sprint body's tendon x1.5 has no counterpart here because the tendons of this model are MuJoCo spatial tendons and are left alone)."
+ },
+ "ladder": [
+  {
+   "rung": 1,
+   "strength": 2.0,
+   "speed": 1.7,
+   "activation": 0.8
+  },
+  {
+   "rung": 2,
+   "strength": 2.4,
+   "speed": 2.0,
+   "activation": 0.8
+  },
+  {
+   "rung": 3,
+   "strength": 3.0,
+   "speed": 2.4,
+   "activation": 0.8
+  }
+ ],
+ "rung_0": "the official body: no multiplier, the official env class; the yardstick.",
+ "parts": {
+  "strength": {
+   "compiled_fields": "actuator_gainprm[:, 2] and actuator_biasprm[:, 2] of the 273 muscle actuators",
+   "stat": "peak isometric force of every muscle by the rung's factor; the passive-force curve scales with it (MuJoCo's muscle bias uses the same F0)",
+   "evidence": [],
+   "verified": false,
+   "note": "INVENTED."
+  },
+  "speed": {
+   "compiled_fields": "actuator_gainprm[:, 6] and actuator_biasprm[:, 6] (vmax, in optimal-fibre-lengths per second: 1.5 or 10 in the official model)",
+   "stat": "maximum shortening velocity by the rung's factor, so the force-velocity curve falls off later",
+   "evidence": [],
+   "verified": false,
+   "note": "INVENTED."
+  },
+  "activation": {
+   "compiled_fields": "actuator_dynprm[:, 0] (activation, 10-15 ms) and actuator_dynprm[:, 1] (deactivation, 40-50 ms)",
+   "stat": "both time constants x0.8 at every rung",
+   "evidence": [],
+   "verified": false,
+   "note": "INVENTED, the sprint body's x0.8."
+  },
+  "pelvis": {
+   "stat": "the two pelvis position actuators (pelvis_x, pelvis_y; kp 3500) are NOT scaled: they are the challenge's own gantry-like slides, not muscles",
+   "evidence": [],
+   "verified": true,
+   "note": "unchanged"
+  }
+ },
+ "relation_to_other_bodies": {
+  "sprint_beyond": "the same strength and speed steps as profiles/beyond.json (rung r = ladder step r); no tendon multiplier here",
+  "official": "rung 0"
+ },
+ "decision": {
+  "made": "2026-09-29 23:09 (machine clock)",
+  "verdict": "NO-GO by the rule written at 22:59: the unchanged champion solves 0 of the 100 serves at every rung.",
+  "step_a": {
+   "serves": "arena seeds 98000-98099, bin/challengers/myo_tt_r10-n + params/myo_tt_p2_r10_c3.txt, unchanged, fast path (TT_TASK=myo_tt_beyond)",
+   "rung0_official_yardstick": {
+    "solved": 43,
+    "hit": 91,
+    "note": "identical, serve for serve, to the arena's recorded scores of the tt_p2_300 champion on these 100 seeds"
+   },
+   "rung1": {
+    "solved": 0,
+    "hit": 23,
+    "classes": "miss lateral 35, pad above the ball 32, pad below 10, hit out 21, hit own half 2"
+   },
+   "rung2": {
+    "solved": 0,
+    "hit": 0,
+    "classes": "miss lateral 47, pad above 45, pad below 7, within 10 cm 1"
+   },
+   "rung3": {
+    "solved": 0,
+    "hit": 2,
+    "classes": "miss lateral 93, pad below 2, pad above 2, within 10 cm 1, hit out 2"
+   },
+   "best_rung": "rung 1 (a tie at 0 solved goes to the smaller rung)"
+  },
+  "step_b_at_best_rung_and_yardstick": {
+   "rung0_official": {
+    "pitch_sigma_deg": 11.0,
+    "pad_velocity_sigma_m_s": 0.497,
+    "place_error_cm": 4.28,
+    "hits": 91
+   },
+   "rung1": {
+    "pitch_sigma_deg": 22.4,
+    "pad_velocity_sigma_m_s": 0.578,
+    "place_error_cm": 5.51,
+    "hits": 23,
+    "note": "measured on 23 hits of an arm that flings the paddle out of the hand; not a measure of the arm's precision"
+   }
+  },
+  "criterion_met": false,
+  "note": "The verdict is a statement about the UNCHANGED champion, which fails outright on the stronger arm (its activation-level commands are calibrated to the official strength); it is not evidence that a controller tuned for the arm could not exceed the official arm's noise. Diagnostics after this line never change the verdict.",
+  "post_verdict_diagnostics": {
+   "note": "run after the verdict was written (23:09); they never change it; all LABELLED BEYOND-HUMAN ARM what-ifs on the same 100 arena serves with the unchanged champion (official body: 43 solved, 91 hit); rung 9 of tasks/myo_tt_beyond.py = MYO_TT_BEYOND_DIAG multipliers, not a candidate rung",
+   "code_path_check": "the env subclass with unit multipliers (1,1,1) is identical to the official task on every metric on 6 of 6 serves, standard and fast path",
+   "one_factor_what_ifs_solved_hit": {
+    "strength 2.0 alone": [
+     0,
+     10
+    ],
+    "speed 1.7 alone": [
+     6,
+     69
+    ],
+    "activation 0.8 alone": [
+     16,
+     67
+    ],
+    "strength 1.5 alone": [
+     0,
+     42
+    ],
+    "strength 1.2 alone": [
+     7,
+     42
+    ]
+   },
+   "reading": "every single change of the arm's muscles costs the champion most of its serves: the gate 'unchanged champion on a modified arm' measures the controller's brittleness, not the arm's precision",
+   "stale_mforce": "telling the controller the official peak forces instead of the arm's own changes no metric of any of 100 episodes (rung 1 and strength 1.2 alone): the champion ignores MFORCE",
+   "ready_posture_0.28s": "forehand forearm rotation asked 1.20 reaches 0.28 / 0.32 / 0.35 / 0.34 rad on rungs 0 / 1 / 2 / 3: a stronger, faster arm does not follow the commanded posture any better",
+   "muscle_group_what_ifs_rung1_multipliers": {
+    "arm (32 ARM_MUSCLES)": {
+     "solved": 0,
+     "hit": 10,
+     "paddle_lost_of_100": 100
+    },
+    "hand (31 finger and thumb muscles)": {
+     "solved": 0,
+     "hit": 44,
+     "paddle_lost_of_100": 1
+    },
+    "trunk (210)": {
+     "solved": 21,
+     "hit": 79,
+     "paddle_lost_of_100": 13
+    },
+    "official": {
+     "solved": 43,
+     "hit": 91,
+     "paddle_lost_of_100": 9
+    }
+   },
+   "pelvis_share": "official run, 91 hits, velocity along the pad axis at contact: pad 0.49 sd = pelvis part 0.42 sd + arm/trunk part 0.25 sd; the pelvis actuators are unchanged by every rung"
+  }
+ }
+}

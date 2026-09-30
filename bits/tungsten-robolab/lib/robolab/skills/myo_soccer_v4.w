@@ -378,6 +378,31 @@
       @bsh_ref = param("bsh_ref", ~-0.005, ~-0.03, ~0.03)
       @bsh_k = param("bsh_k", ~2.0, ~0.0, ~10.0)
       @bsh_lim = param("bsh_lim", ~0.08, ~0.0, ~0.25)
+    # bhold 1 (with bcatch): the PARKED swing leg's references differ from the
+    # lift's: the hold chunk takes the lift posture plus bh_dknee (knee), bh_dth
+    # (thigh, world angle), bh_dank (ankle), bh_dadd (hip adduction), so the set,
+    # shift and lift stay what they were and only where the leg parks moves.
+    # Measured: the champion parks the swing knee at 1.676 rad (b_sw_knee 1.8),
+    # 0.002 rad from the tangent of the rectus femoris's wrap (cylinder
+    # KnExt_at_fem_*_wrap; its margin moves 2.5 per rad of knee), where MuJoCo
+    # 3.6.0's length_circle returns NaN in a ~1 nm sliver (playground/repros/
+    # mujoco_wrap_nan.md); the knee's chatter (sd 0.0025 rad) crosses that tangent
+    # hundreds of times a minute. The swing leg's five wrap tangents sit at knee
+    # 1.283 (bfsh), 1.447 (vaslat), 1.602 (vasmed), 1.646 (vasint), 1.678 (recfem):
+    # park the knee far from all of them: 1.35-1.38 and 1.515-1.535 are 0.07 rad
+    # clear, so is anything above 1.75 (b_sw_knee 1.8 with bh_dknee -0.2 parks
+    # 1.53); a knee 0.01 rad from one of them still hovers on it (see
+    # scratchpad/hazard/LOG.md)
+    @bhold = switch_on("bhold")
+    @bh_dknee = ~0.0
+    @bh_dth = ~0.0
+    @bh_dank = ~0.0
+    @bh_dadd = ~0.0
+    if @bhold
+      @bh_dknee = param("bh_dknee", ~-0.2, ~-0.6, ~0.3)
+      @bh_dth = param("bh_dth", ~0.0, ~-0.3, ~0.3)
+      @bh_dank = param("bh_dank", ~0.0, ~-0.3, ~0.3)
+      @bh_dadd = param("bh_dadd", ~0.0, ~-0.2, ~0.2)
     # bretry 1: a hold that the fall catch ends within bc_short seconds is
     # retried on the same leg (at most bc_retry times) instead of switching to
     # the other one: the strict five-minute trial needs one 300 s stretch on
@@ -649,6 +674,17 @@
     if @b_wide != nil && @b_wide != ~0.0
       p.set("hip_adduction_l", p.get("hip_adduction_l") - @b_wide)
       p.set("hip_adduction_r", p.get("hip_adduction_r") - @b_wide)
+    p
+
+  # (bhold) The one-leg posture with the parked swing leg's references shifted
+  # (see read_params).
+  -> hold_posture(st)
+    sw = other_side(st)
+    p = one_leg_posture(st)
+    p.set("knee_angle_" + sw, p.get("knee_angle_" + sw) + @bh_dknee)
+    p.set("hip_flexion_" + sw, p.get("hip_flexion_" + sw) + @bh_dth)
+    p.set("ankle_angle_" + sw, p.get("ankle_angle_" + sw) + @bh_dank)
+    p.set("hip_adduction_" + sw, p.get("hip_adduction_" + sw) + @bh_dadd)
     p
 
   # (dsx) In double support (no foot unloaded below sb_ds_load) the COM's
@@ -1015,7 +1051,9 @@
     p = one_leg_posture(st)
     mv.add(chunk("b_lift_" + st, @b_t_lift, p, :b_lift, ss, ss).hold_until(Latch.after(@b_t_lift)))
     stop = Latch.test(st + "_bfall", ->(f, e, c) @bal_acc[st] >= @bc_cap || ~0.0 - cp_lateral(f, st) > @bc_in || (cp_lateral(f, st) > @bc_out && e < @bc_arm) || (roll_out(f, st) > @bc_roll && e < @bc_arm))
-    mv.add(chunk("b_hold_" + st, ~0.2, p, :b_hold, ss, ss).hold_until(Latch.any([Latch.after(@b_hold), stop]), @b_hold))
+    ph = p
+    ph = hold_posture(st) if @bhold
+    mv.add(chunk("b_hold_" + st, ~0.2, ph, :b_hold, ss, ss).hold_until(Latch.any([Latch.after(@b_hold), stop]), @b_hold))
     down = Latch.test(st + "_bdown", ->(f, e, c) foot_load(sw) > @b_load)
     mv.add(chunk("b_down_" + st, @b_t_down, stance, :b_down, ss, ss).hold_until(down.after_min(@b_t_down * ~0.5), ~1.0))
     ch = chunk("b_mid_" + st, ~0.3, stance, :b_mid, :both, :mid).hold_until(Latch.after(@b_t_mid))

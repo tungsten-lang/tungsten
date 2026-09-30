@@ -1,0 +1,6 @@
+== sprint v4 beyond-human body, start 224
+Wed Sep 30 01:04:38 EDT 2026
+wrote out/sprint_v4_beyond.mp4 1801 frames
+{'time': 30.0, 'distance': 243.655, 'speed_last5': np.float64(10.091), 'speed_10s': np.float64(10.084), 'min_speed_1s': np.float64(10.003), 'peak_speed_1s': np.float64(10.178), 'time_at_3': 27.8, 'stride_freq': np.float64(2.0), 'step_freq': np.float64(4.2), 'stride_length': np.float64(5.046), 'step_length': np.float64(2.403), 'flight_frac': 0.668, 'scuffs_per_s': np.float64(1.6), 'contact_time': 0.081, 'flight_time': 0.148, 'peak_grf': 6.35, 'pelvis_z': 0.888, 'thigh_peak': 1.468, 'knee_lift': 0.838, 'knee_stand': 0.525, 'pelvis_pitch': 0.021, 'com_lead': 0.099, 'torso_pitch': 0.11, 'torso_pitch_max': 0.328, 'effort': 0.2, 'steady_speed': np.float64(10.095), 'strides': 63, 't_100m': 15.62, 'decisions_per_cycle': 6.5, 'fell': False}
+== done
+Wed Sep 30 01:05:02 EDT 2026

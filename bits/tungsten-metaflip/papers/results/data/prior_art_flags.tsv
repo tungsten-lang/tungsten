@@ -1,0 +1,796 @@
+shape	rank	class	flag	prior_rank	how
+2x4x17	109	gf2_valid_only	M1	109	composition: 2x4x17:109=(2x4x4:26[HK71] (+) 2x4x13:83[FMM-ZT])
+2x4x18	115	gf2_valid_only	M1	115	composition: 2x4x18:115=(2x4x7:45[Perminov-ZT] (+) 2x4x11:70[FMM-ZT])
+2x4x20	128	gf2_valid_only	M1	128	composition: 2x4x20:128=(2x4x4:26[HK71] (+) 2x4x16:102=(2x4x8:51[AlphaEvolve] (+) 2x4x8:51[AlphaEvolve]))
+2x4x21	134	gf2_valid_only	M1	134	composition: 2x4x21:134=(2x4x8:51[AlphaEvolve] (+) 2x4x13:83[FMM-ZT])
+2x4x24	153	gf2_valid_only	M1	153	composition: 2x4x24:153=(2x4x8:51[AlphaEvolve] (+) 2x4x16:102=(2x4x8:51[AlphaEvolve] (+) 2x4x8:51[AlphaEvolve]))
+2x4x27	172	gf2_valid_only	M1	172	composition: 2x4x27:172=(2x4x8:51[AlphaEvolve] (+) 2x4x19:121=(2x4x8:51[AlphaEvolve] (+) 2x4x11:70[FMM-ZT]))
+2x4x28	179	gf2_valid_only	M1	179	composition: 2x4x28:179=(2x4x4:26[HK71] (+) 2x4x24:153=(2x4x8:51[AlphaEvolve] (+) 2x4x16:102=(2x4x8:51[AlphaEvolve] (+) 2x4x8:51[AlphaEvolve])))
+2x4x29	185	gf2_valid_only	M1	185	composition: 2x4x29:185=(2x4x7:45[Perminov-ZT] (+) 2x4x22:140=(2x4x11:70[FMM-ZT] (+) 2x4x11:70[FMM-ZT]))
+2x4x31	198	gf2_valid_only	M1	198	composition: 2x4x31:198=(2x4x4:26[HK71] (+) 2x4x27:172=(2x4x8:51[AlphaEvolve] (+) 2x4x19:121=(2x4x8:51[AlphaEvolve] (+) 2x4x11:70[FMM-ZT])))
+2x4x32	204	gf2_valid_only	M1	204	composition: 2x4x32:204=(2x4x8:51[AlphaEvolve] (+) 2x4x24:153=(2x4x8:51[AlphaEvolve] (+) 2x4x16:102=(2x4x8:51[AlphaEvolve] (+) 2x4x8:51[AlphaEvolve])))
+2x5x17	134	gf2_valid_only	M1	134	composition: 2x5x17:134=(2x5x5:40[HK71] (+) 2x5x12:94=(2x5x6:47[AlphaEvolve] (+) 2x5x6:47[AlphaEvolve]))
+2x5x22	173	gf2_valid_only	M1	173	composition: 2x5x22:173=(2x5x6:47[AlphaEvolve] (+) 2x5x16:126[FMM-Z])
+2x5x23	181	gf2_valid_only	M1	181	composition: 2x5x23:181=(2x5x5:40[HK71] (+) 2x5x18:141=(2x5x6:47[AlphaEvolve] (+) 2x5x12:94=(2x5x6:47[AlphaEvolve] (+) 2x5x6:47[AlphaEvolve])))
+2x5x28	220	gf2_valid_only	M1	220	composition: 2x5x28:220=(2x5x6:47[AlphaEvolve] (+) 2x5x22:173=(2x5x6:47[AlphaEvolve] (+) 2x5x16:126[FMM-Z]))
+2x5x29	228	gf2_valid_only	M1	228	composition: 2x5x29:228=(2x5x5:40[HK71] (+) 2x5x24:188=(2x5x6:47[AlphaEvolve] (+) 2x5x18:141=(2x5x6:47[AlphaEvolve] (+) 2x5x12:94=(2x5x6:47[AlphaEvolve] (+) 2x5x6:47[AlphaEvolve]))))
+3x14x18	561	below_all	S1	560	serendipitous product <3,7,9> x <1,2,2> of FMM 3x7x9_m141_076164eb11b2f..; bud blocks 1 x <3x1x2>
+3x14x25	780	below_all	none		
+3x14x27	842	below_all	S1	840	serendipitous product <3,7,9> x <1,2,3> of FMM 3x7x9_m141_db6384fced8e1..; bud blocks 2 x <3x1x1>
+3x14x28	873	below_all	none		
+3x16x31	1100	below_all	none		
+3x22x28	1364	gf2_valid_only	M2	1364	composition of listed / published GF(2) ranks (L2S): 3x22x28:1364=(3x4x22:200=(3x4x4:38[matmulcatalog:Smirnov 2013 / matmulcatalog:unknown / matmulcatalog:AlphaTensor] (+) 3x4x18:162=(3x4x6:54[matmulcatalog:Kauers & Wood 2025 / FMM:ZT / arXiv:2511.20317 Table 5 (best known, as listed) line 804 (Z)] (+) 3x4x12:108[matmulcatalog:FMM-Lille / FMM:ZT / arX
+3x23x23	1167	below_all	none		
+3x25x32	1750	gf2_valid_only	M2	1750	composition of listed / published GF(2) ranks (L2S): 3x25x32:1750=(2x3x25:125[matmulcatalog:Hopcroft-Kerr 1971 (constructive, this work) / matmulcatalog:unknown] (+) 3x25x30:1625[matmulcatalog:unknown])
+3x27x30	1762	gf2_valid_only	none		
+3x28x30	1829	gf2_valid_only	none		
+3x29x29	1839	below_all	none		
+3x29x30	1880	below_all	none		
+3x29x31	1961	below_all	none		
+3x29x32	2025	below_all	none		
+3x30x31	1997	below_all	none		
+3x31x31	2090	below_all	none		
+3x31x32	2152	below_all	none		
+4x4x8	94	below_all	M1	94	composition: 4x4x8:94=(4x4x4:47[AlphaTensor-F2] (+) 4x4x4:47[AlphaTensor-F2])
+4x4x14	162	below_all	M1	162	composition: 4x4x14:162=(4x4x4:47[AlphaTensor-F2] (+) 4x4x10:115[FMM-ZT])
+4x4x15	175	below_all	M1	175	composition: 4x4x15:175=(4x4x5:60[KM-F2] (+) 4x4x10:115[FMM-ZT])
+4x4x24	277	below_all	M1	277	composition: 4x4x24:277=(4x4x4:47[AlphaTensor-F2] (+) 4x4x20:230=(4x4x10:115[FMM-ZT] (+) 4x4x10:115[FMM-ZT]))
+4x4x25	290	below_all	M1	290	composition: 4x4x25:290=(4x4x5:60[KM-F2] (+) 4x4x20:230=(4x4x10:115[FMM-ZT] (+) 4x4x10:115[FMM-ZT]))
+4x5x14	206	gf2_valid_only	S1	205	composition: 4x5x14:205=(4x5x5:73[Arai 455:73] (+) 4x5x9:132[FMM-ZT])
+4x5x15	220	below_all	S1	219	composition: 4x5x15:219=(4x5x5:73[Arai 455:73] (+) 4x5x10:146[FMM-ZT])
+4x5x16	234	below_all	S1	233	composition: 4x5x16:233=(4x5x5:73[Arai 455:73] (+) 4x5x11:160[FMM-ZT])
+4x5x27	394	below_all	S1	393	composition: 4x5x27:393=(4x5x5:73[Arai 455:73] (+) 4x5x22:320=(4x5x5:73[Arai 455:73] (+) 4x5x17:247=(4x5x5:73[Arai 455:73] (+) 4x5x12:174[FMM-ZT])))
+4x5x28	408	below_all	S1	407	composition: 4x5x28:407=(4x5x5:73[Arai 455:73] (+) 4x5x23:334=(4x5x11:160[FMM-ZT] (+) 4x5x12:174[FMM-ZT]))
+4x11x24	720	below_all	S1	716	serendipitous product <2,3,11> x <2,8,1> of FMM 2x3x11_m55_f7a29b60b3ee9..; bud blocks 1 x <1x1x2>, 7 x <1x1x3>, 8 x <1x1x4>
+4x14x20	753	gf2_valid_only	S2	736	matmulcatalog cited-bounds (Perminov 2026 (serendipitous); Z; no factor matrices)
+4x15x27	1065	below_all	M1	1065	serendipitous product <2,3,9> x <2,5,3> of FMM 2x3x9_m45_6ae2c908a899e4..; bud blocks 16 x <1x1x2>, 2 x <1x1x4>
+4x16x31	1287	below_all	none		
+4x18x23	1083	below_all	none		
+4x18x29	1363	below_all	none		
+4x19x27	1340	below_all	none		
+4x19x28	1379	below_all	none		
+4x19x32	1577	below_all	none		
+4x20x27	1384	gf2_valid_only	S1	1375	serendipitous product <2,4,9> x <2,5,3> of FMM 2x4x9_m58_00bb4c5b01ed5e..; bud blocks 24 x <1x1x2>, 1 x <2x1x1>
+4x22x31	1763	below_all	none		
+4x26x32	2121	below_all	S1	2112	serendipitous product <2,4,13> x <2,8,2> of FMM 2x4x13_m84_e0fd00fee2bf6..; bud blocks 16 x <1x1x3>, 8 x <1x1x4>
+4x27x29	1993	below_all	none		
+4x27x30	2033	below_all	M1	2033	serendipitous product <2,6,9> x <2,5,3> of FMM 2x6x9_m86_e4fd94c67073c6..; bud blocks 39 x <1x1x2>
+5x17x32	1793	below_all	none		
+5x25x32	2587	below_all	none		
+6x16x26	1533	below_all	S1	1528	serendipitous product <2,4,13> x <3,4,2> of FMM 2x4x13_m84_e0fd00fee2bf6..; bud blocks 16 x <1x1x3>, 8 x <1x1x4>
+6x20x20	1494	below_all	S1	1485	serendipitous product <3,5,10> x <2,4,2> of FMM 3x5x10_m115_a4e068d59342..; bud blocks 31 x <1x1x2>, 15 x <1x1x3>, 2 x <2x1x2>
+6x32x32	3701	gf2_valid_only	S1	3690	serendipitous product <3,4,16> x <2,8,2> of FMM 3x4x16_m147_99a01de9ddee..; bud blocks 15 x <1x1x2>, 39 x <1x1x3>
+7x7x7	247	below_all	S1	245	Medley et al. arXiv:2609.17533 App. A (F2)
+7x12x12	663	gf2_valid_only	none		
+7x12x16	871	below_all	none		
+7x12x20	1088	below_all	S1	1081	serendipitous product <2,4,7> x <6,5,1> of FMM 2x4x7_m46_e09c7dfeefbf3e..; bud blocks 23 x <1x1x2>
+7x13x16	962	gf2_valid_only	none		
+7x14x20	1282	below_all	S1	1265	serendipitous product <2,4,7> x <7,5,1> of FMM 2x4x7_m46_e09c7dfeefbf3e..; bud blocks 23 x <1x1x2>
+7x16x16	1135	below_all	none		
+7x16x24	1703	below_all	none		
+7x16x28	1984	below_all	none		
+7x16x31	2202	below_all	none		
+7x16x32	2238	below_all	none		
+7x18x30	2374	below_all	none		
+7x19x20	1698	below_all	none		
+7x19x23	1955	below_all	none		
+7x19x24	2002	below_all	none		
+7x19x25	2122	below_all	none		
+7x19x26	2209	below_all	none		
+7x20x20	1749	below_all	none		
+7x20x21	1877	below_all	S1	1846	serendipitous product <3,4,7> x <7,5,1> of FMM 3x4x7_m68_afca9a1afadc0b..; bud blocks 20 x <1x1x2>, 9 x <1x1x3>
+7x20x22	1961	below_all	none		
+7x20x23	2017	below_all	none		
+7x20x24	2061	below_all	none		
+7x20x25	2201	below_all	none		
+7x20x26	2279	below_all	none		
+7x20x27	2368	below_all	none		
+7x20x28	2413	below_all	none		
+7x20x29	2553	below_all	none		
+7x20x30	2622	below_all	none		
+7x20x32	2770	below_all	none		
+7x24x24	2458	below_all	none		
+7x24x26	2720	below_all	none		
+7x24x28	2894	below_all	none		
+7x24x32	3293	below_all	none		
+7x28x28	3342	below_all	none		
+8x8x9	381	below_all	M1	381	composition: 8x8x9:381=Strassen((4, 4), (4, 4), (4, 5))(4x4x5:60[KM-F2], 4x4x5:60[KM-F2], 4x4x4:47[AlphaTensor-F2], 4x4x5:60[KM-F2], 4x4x4:47[AlphaTensor-F2], 4x4x4:47[AlphaTensor-F2], 4x4x5:60[KM-F2])
+8x8x10	420	below_all	M1	420	composition: 8x8x10:420=(2x2x2:7[mmc] (x) 4x4x5:60[KM-F2])
+8x8x15	632	gf2_valid_only	S1	631	composition: 8x8x15:631=(7x8x8:302=Strassen((3, 4), (4, 4), (4, 4))(4x4x4:47[AlphaTensor-F2], 3x4x4:38[AlphaTensor-F2], 4x4x4:47[AlphaTensor-F2], 3x4x4:38[AlphaTensor-F2], 4x4x4:47[AlphaTensor-F2], 3x4x4:38[AlphaTensor-F2], 4x4x4:47[AlphaTensor-F2]) (+) 8x8x8:329=(2x2x2:7[mmc] (x) 4x4x4:47[AlphaTensor-F2]))
+8x8x16	658	below_all	M1	658	composition: 8x8x16:658=(8x8x8:329=(2x2x2:7[mmc] (x) 4x4x4:47[AlphaTensor-F2]) (+) 8x8x8:329=(2x2x2:7[mmc] (x) 4x4x4:47[AlphaTensor-F2]))
+8x8x27	1107	below_all	M1	1107	composition: 8x8x27:1107=(7x8x8:302=Strassen((3, 4), (4, 4), (4, 4))(4x4x4:47[AlphaTensor-F2], 3x4x4:38[AlphaTensor-F2], 4x4x4:47[AlphaTensor-F2], 3x4x4:38[AlphaTensor-F2], 4x4x4:47[AlphaTensor-F2], 3x4x4:38[AlphaTensor-F2], 4x4x4:47[AlphaTensor-F2]) (+) 8x8x20:805=(2x2x2:7[mmc] (x) 4x4x10:115[FMM-ZT]))
+8x8x28	1134	below_all	M1	1134	composition: 8x8x28:1134=(8x8x8:329=(2x2x2:7[mmc] (x) 4x4x4:47[AlphaTensor-F2]) (+) 8x8x20:805=(2x2x2:7[mmc] (x) 4x4x10:115[FMM-ZT]))
+8x8x29	1186	below_all	M1	1186	composition: 8x8x29:1186=(8x8x9:381=Strassen((4, 4), (4, 4), (4, 5))(4x4x5:60[KM-F2], 4x4x5:60[KM-F2], 4x4x4:47[AlphaTensor-F2], 4x4x5:60[KM-F2], 4x4x4:47[AlphaTensor-F2], 4x4x4:47[AlphaTensor-F2], 4x4x5:60[KM-F2]) (+) 8x8x20:805=(2x2x2:7[mmc] (x) 4x4x10:115[FMM-ZT]))
+8x8x30	1225	below_all	S1	1215	serendipitous product <2,2,6> x <4,4,5> of FMM 2x2x6_m21_f0cb325cf2e6a7..; bud blocks 9 x <1x1x2>
+8x10x20	1015	below_all	none		
+8x11x12	673	below_all	none		
+8x11x16	889	below_all	none		
+8x11x19	1079	below_all	none		
+8x11x20	1119	below_all	none		
+8x11x22	1246	below_all	none		
+8x12x12	705	below_all	M1	705	composition: 8x12x12:705=(2x3x3:15[HK71] (x) 4x4x4:47[AlphaTensor-F2])
+8x12x13	786	gf2_valid_only	none		
+8x12x14	849	gf2_valid_only	none		
+8x12x15	899	below_all	none		
+8x12x16	940	below_all	M1	940	composition: 8x12x16:940=(2x3x4:20[HK71] (x) 4x4x4:47[AlphaTensor-F2])
+8x12x17	1036	below_all	M1	1036	composition: 8x12x17:1036=(1x8x12:96[naive] (+) 8x12x16:940=(2x3x4:20[HK71] (x) 4x4x4:47[AlphaTensor-F2]))
+8x12x19	1143	below_all	none		
+8x12x20	1175	below_all	M1	1175	composition: 8x12x20:1175=(2x3x5:25[HK71] (x) 4x4x4:47[AlphaTensor-F2])
+8x13x15	989	below_all	none		
+8x13x16	1037	below_all	none		
+8x13x17	1141	below_all	none		
+8x13x22	1455	below_all	none		
+8x14x19	1355	below_all	none		
+8x14x20	1395	below_all	none		
+8x14x23	1607	below_all	none		
+8x14x24	1645	below_all	none		
+8x14x32	2200	below_all	none		
+8x15x16	1177	below_all	none		
+8x15x23	1713	below_all	none		
+8x15x32	2318	below_all	Q	2295	matmulcatalog cited-bounds (Perminov 2026 (serendipitous); Q)
+8x16x16	1222	below_all	M1	1222	composition: 8x16x16:1222=(2x4x4:26[HK71] (x) 4x4x4:47[AlphaTensor-F2])
+8x16x17	1350	below_all	M1	1350	composition: 8x16x17:1350=(1x8x16:128[naive] (+) 8x16x16:1222=(2x4x4:26[HK71] (x) 4x4x4:47[AlphaTensor-F2]))
+8x16x18	1422	below_all	M1	1422	composition: 8x16x18:1422=(2x8x16:200=(2x6x8:75[Perminov-ZT] (+) 2x8x10:125[FMM-ZT]) (+) 8x16x16:1222=(2x4x4:26[HK71] (x) 4x4x4:47[AlphaTensor-F2]))
+8x16x22	1700	below_all	none		
+8x16x23	1792	below_all	none		
+8x16x24	1833	below_all	M1	1833	composition: 8x16x24:1833=(2x4x6:39[HK71] (x) 4x4x4:47[AlphaTensor-F2])
+8x16x25	1938	below_all	none		
+8x16x26	2021	below_all	none		
+8x16x28	2115	below_all	M1	2115	composition: 8x16x28:2115=(2x4x7:45[Perminov-ZT] (x) 4x4x4:47[AlphaTensor-F2])
+8x16x29	2243	below_all	M1	2243	composition: 8x16x29:2243=(1x8x16:128[naive] (+) 8x16x28:2115=(2x4x7:45[Perminov-ZT] (x) 4x4x4:47[AlphaTensor-F2]))
+8x16x31	2362	below_all	none		
+8x16x32	2397	below_all	M1	2397	composition: 8x16x32:2397=(2x4x8:51[AlphaEvolve] (x) 4x4x4:47[AlphaTensor-F2])
+8x17x21	1767	below_all	none		
+8x17x23	1919	below_all	none		
+8x17x24	1962	below_all	none		
+8x17x25	2074	below_all	none		
+8x17x26	2162	below_all	none		
+8x17x27	2247	below_all	none		
+8x17x28	2275	below_all	none		
+8x17x29	2411	below_all	none		
+8x17x31	2567	below_all	none		
+8x17x32	2589	below_all	none		
+8x18x23	2015	below_all	none		
+8x18x24	2059	below_all	Q	2040	matmulcatalog cited-bounds (Perminov 2026 (serendipitous); Q)
+8x18x25	2180	below_all	none		
+8x18x26	2274	below_all	none		
+8x18x27	2334	below_all	M1	2334	serendipitous product <2,6,9> x <4,3,3> of FMM 2x6x9_m86_e4fd94c67073c6..; bud blocks 39 x <1x1x2>, 1 x <1x2x1>
+8x18x29	2498	below_all	none		
+8x19x20	1828	below_all	none		
+8x19x22	2034	below_all	none		
+8x19x23	2099	below_all	none		
+8x19x24	2140	below_all	none		
+8x19x25	2267	below_all	none		
+8x19x26	2366	below_all	none		
+8x19x27	2464	below_all	none		
+8x19x28	2505	below_all	none		
+8x19x29	2642	below_all	none		
+8x19x30	2723	below_all	none		
+8x19x31	2842	below_all	none		
+8x19x32	2865	below_all	none		
+8x20x20	1880	below_all	M1	1880	composition: 8x20x20:1880=(2x5x5:40[HK71] (x) 4x4x4:47[AlphaTensor-F2])
+8x20x21	2040	below_all	M1	2040	composition: 8x20x21:2040=(1x8x20:160[naive] (+) 8x20x20:1880=(2x5x5:40[HK71] (x) 4x4x4:47[AlphaTensor-F2]))
+8x20x22	2098	below_all	none		
+8x20x23	2165	below_all	none		
+8x20x24	2209	below_all	M1	2209	composition: 8x20x24:2209=(2x5x6:47[AlphaEvolve] (x) 4x4x4:47[AlphaTensor-F2])
+8x20x25	2369	below_all	M1	2369	composition: 8x20x25:2369=(1x8x20:160[naive] (+) 8x20x24:2209=(2x5x6:47[AlphaEvolve] (x) 4x4x4:47[AlphaTensor-F2]))
+8x20x26	2459	below_all	M1	2459	composition: 8x20x26:2459=(2x8x20:250=(2x6x8:75[Perminov-ZT] (+) 2x8x14:175[FMM-Z]) (+) 8x20x24:2209=(2x5x6:47[AlphaEvolve] (x) 4x4x4:47[AlphaTensor-F2]))
+8x20x27	2540	below_all	none		
+8x20x28	2585	below_all	M1	2585	composition: 8x20x28:2585=(2x5x7:55[Perminov-ZT] (x) 4x4x4:47[AlphaTensor-F2])
+8x20x29	2724	below_all	none		
+8x20x30	2820	below_all	M1	2820	composition: 8x20x30:2820=(2x5x6:47[AlphaEvolve] (x) 4x4x5:60[KM-F2])
+8x20x31	2897	below_all	none		
+8x20x32	2961	below_all	M1	2961	composition: 8x20x32:2961=(2x5x8:63[Perminov-ZT] (x) 4x4x4:47[AlphaTensor-F2])
+8x21x24	2401	below_all	M1	2401	composition: 8x21x24:2401=(1x8x24:192[naive] (+) 8x20x24:2209=(2x5x6:47[AlphaEvolve] (x) 4x4x4:47[AlphaTensor-F2]))
+8x21x28	2809	below_all	M1	2809	composition: 8x21x28:2809=(1x8x28:224[naive] (+) 8x20x28:2585=(2x5x7:55[Perminov-ZT] (x) 4x4x4:47[AlphaTensor-F2]))
+8x22x23	2453	below_all	none		
+8x22x24	2509	below_all	M1	2509	composition: 8x22x24:2509=(2x8x24:300=(2x6x8:75[Perminov-ZT] (+) 2x8x18:225=(2x6x8:75[Perminov-ZT] (+) 2x8x12:150[FMM-ZT])) (+) 8x20x24:2209=(2x5x6:47[AlphaEvolve] (x) 4x4x4:47[AlphaTensor-F2]))
+8x22x32	3308	below_all	none		
+8x23x23	2520	below_all	none		
+8x23x24	2582	below_all	none		
+8x23x25	2751	below_all	none		
+8x23x26	2866	below_all	none		
+8x23x27	2976	below_all	none		
+8x23x28	3036	below_all	none		
+8x23x32	3468	below_all	none		
+8x24x24	2632	below_all	M1	2632	composition: 8x24x24:2632=(2x6x6:56[KM-F2] (x) 4x4x4:47[AlphaTensor-F2])
+8x24x25	2820	below_all	M1	2820	composition: 8x24x25:2820=(2x5x6:47[AlphaEvolve] (x) 4x4x5:60[KM-F2])
+8x24x26	2932	below_all	S1	2930	serendipitous product <2,3,13> x <4,8,2> of FMM 2x3x13_m65_2b88a550754ac..; bud blocks 15 x <1x1x4>, 1 x <1x1x5>
+8x24x27	3042	below_all	none		
+8x24x28	3102	below_all	M1	3102	composition: 8x24x28:3102=(2x6x7:66[Perminov-ZT] (x) 4x4x4:47[AlphaTensor-F2])
+8x24x32	3525	below_all	M1	3525	composition: 8x24x32:3525=(2x6x8:75[Perminov-ZT] (x) 4x4x4:47[AlphaTensor-F2])
+8x25x28	3300	below_all	M1	3300	composition: 8x25x28:3300=(2x5x7:55[Perminov-ZT] (x) 4x4x5:60[KM-F2])
+8x27x32	4024	below_all	S1	4018	serendipitous product <2,3,16> x <4,9,2> of FMM 2x3x16_m80_80f2e138a23b9..; bud blocks 1 x <1x1x3>, 1 x <1x1x4>, 11 x <1x1x5>, 3 x <1x1x6>
+8x28x28	3572	below_all	M1	3572	composition: 8x28x28:3572=(2x7x7:76[Perminov-ZT] (x) 4x4x4:47[AlphaTensor-F2])
+8x28x29	3796	below_all	M1	3796	composition: 8x28x29:3796=(1x8x28:224[naive] (+) 8x28x28:3572=(2x7x7:76[Perminov-ZT] (x) 4x4x4:47[AlphaTensor-F2]))
+8x32x32	4649	gf2_valid_only	S1	4602	serendipitous product <2,4,8> x <4,8,4> of FMM 2x4x8_m51_4f8823917d1632..; bud blocks 24 x <1x1x2>
+9x9x9	482	below_all	none		
+9x9x18	915	below_all	S2	913	matmulcatalog cited-bounds (Perminov 2026 (serendipitous); Z; no factor matrices)
+9x10x14	819	gf2_valid_only	none		
+9x11x13	836	gf2_valid_only	none		
+9x16x32	2742	below_all	S1	2676	serendipitous product <3,4,16> x <3,4,2> of FMM 3x4x16_m147_99a01de9ddee..; bud blocks 15 x <1x1x2>, 39 x <1x1x3>
+9x20x32	3393	gf2_valid_only	S1	3357	serendipitous product <3,4,16> x <3,5,2> of FMM 3x4x16_m147_99a01de9ddee..; bud blocks 15 x <1x1x2>, 39 x <1x1x3>
+10x11x21	1458	gf2_valid_only	S1	1432	serendipitous product <2,3,11> x <5,7,1> of FMM 2x3x11_m55_f59d3d4580ef7..; bud blocks 1 x <1x1x2>, 11 x <1x1x3>, 4 x <1x1x5>
+10x12x12	900	gf2_valid_only	M1	900	composition: 10x12x12:900=(2x3x3:15[HK71] (x) 4x4x5:60[KM-F2])
+10x12x19	1421	below_all	none		
+10x12x20	1448	below_all	none		
+10x12x25	1836	below_all	S1	1825	composition: 10x12x25:1825=(2x3x5:25[HK71] (x) 4x5x5:73[Arai 455:73])
+10x12x29	2133	below_all	none		
+10x13x14	1150	below_all	none		
+10x13x32	2540	below_all	none		
+10x14x17	1503	below_all	none		
+10x14x23	1990	below_all	none		
+10x14x26	2233	below_all	none		
+10x14x31	2633	below_all	none		
+10x14x32	2698	below_all	none		
+10x15x17	1581	below_all	none		
+10x15x19	1751	below_all	none		
+10x15x21	1900	below_all	S1	1899	serendipitous product <5,5,7> x <3,2,3> of FMM 5x5x7_m127_4eb22c620327f..; bud blocks 6 x <1x2x1>
+10x15x25	2261	below_all	none		
+10x15x31	2749	below_all	none		
+10x16x16	1558	below_all	none		
+10x16x17	1694	below_all	none		
+10x16x19	1838	below_all	none		
+10x16x20	1886	below_all	none		
+10x16x23	2227	below_all	none		
+10x16x24	2277	below_all	none		
+10x16x25	2412	gf2_valid_only	S1	2409	composition: 10x16x25:2409=(2x4x5:33[HK71] (x) 4x5x5:73[Arai 455:73])
+10x16x26	2509	below_all	none		
+10x16x29	2806	below_all	none		
+10x16x32	3012	below_all	none		
+10x17x21	2157	below_all	none		
+10x17x24	2444	below_all	none		
+10x17x25	2570	below_all	none		
+10x17x26	2679	below_all	none		
+10x17x27	2766	below_all	none		
+10x18x24	2546	below_all	S1	2540	serendipitous product <5,6,8> x <2,3,3> of FMM 5x6x8_m170_69e0daa26da5e..; bud blocks 4 x <2x1x1>, 1 x <2x1x2>
+10x18x25	2687	below_all	S1	2655	serendipitous product <3,5,10> x <6,5,1> of FMM 3x5x10_m115_58c6134ed31e..; bud blocks 31 x <1x1x2>, 15 x <1x1x3>, 2 x <1x1x4>
+10x18x31	3319	below_all	none		
+10x19x27	3101	below_all	none		
+10x19x30	3429	below_all	none		
+10x20x23	2771	below_all	none		
+10x20x29	3437	below_all	none		
+10x21x23	2902	below_all	none		
+10x22x22	2920	below_all	none		
+10x22x31	3998	below_all	none		
+10x23x28	3784	below_all	none		
+10x23x32	4286	below_all	none		
+10x24x26	3696	gf2_valid_only	S1	3628	serendipitous product <2,4,13> x <5,6,2> of FMM 2x4x13_m84_e0fd00fee2bf6..; bud blocks 16 x <1x1x3>, 8 x <1x1x4>
+10x24x27	3797	below_all	S1	3770	serendipitous product <2,4,9> x <5,6,3> of FMM 2x4x9_m58_02bdf2eacce8f4..; bud blocks 18 x <1x1x2>, 6 x <1x1x3>
+10x25x29	4237	below_all	none		
+10x27x28	4435	below_all	S1	4390	serendipitous product <2,4,9> x <5,7,3> of FMM 2x4x9_m58_00bb4c5b01ed5e..; bud blocks 24 x <1x1x2>
+10x27x30	4752	below_all	S1	4748	serendipitous product <2,5,9> x <5,6,3> of FMM 2x5x9_m73_47f39587c21563..; bud blocks 23 x <1x1x2>, 2 x <1x1x3>, 4 x <1x1x4>
+10x28x28	4537	below_all	S1	4524	serendipitous product <5,7,7> x <2,4,4> of FMM 5x7x7_m176_fa24218eda7a1..; bud blocks 4 x <1x1x2>, 3 x <1x2x1>, 7 x <2x1x1>, 1 x <4x1x1>
+11x11x17	1312	below_all	none		
+11x12x16	1301	gf2_valid_only	none		
+11x12x17	1406	below_all	none		
+11x12x20	1618	below_all	Q	1605	matmulcatalog cited-bounds (Perminov 2026 (serendipitous); Q)
+11x12x27	2163	below_all	none		
+11x12x28	2195	below_all	none		
+11x12x31	2477	below_all	none		
+11x12x32	2508	below_all	none		
+11x13x15	1363	below_all	none		
+11x13x16	1452	gf2_valid_only	none		
+11x13x20	1797	below_all	none		
+11x13x25	2197	below_all	none		
+11x13x26	2272	below_all	none		
+11x13x27	2359	below_all	none		
+11x14x14	1372	below_all	none		
+11x14x20	1920	below_all	S1	1896	serendipitous product <2,4,11> x <7,5,1> of FMM 2x4x11_m72_c1ded329417b6..; bud blocks 4 x <1x1x2>, 18 x <1x1x3>, 2 x <1x1x5>
+11x14x23	2173	below_all	none		
+11x14x24	2225	below_all	none		
+11x14x25	2335	below_all	none		
+11x14x26	2441	below_all	none		
+11x14x27	2539	below_all	none		
+11x15x21	2111	below_all	none		
+11x15x23	2307	below_all	none		
+11x15x24	2357	below_all	Q	2347	matmulcatalog cited-bounds (Perminov 2026 (serendipitous); Q)
+11x15x25	2476	below_all	none		
+11x15x26	2593	below_all	none		
+11x15x27	2694	below_all	none		
+11x15x28	2774	below_all	Q	2719	matmulcatalog cited-bounds (Perminov 2026 (serendipitous); Q)
+11x16x16	1707	below_all	none		
+11x16x17	1849	below_all	none		
+11x16x19	2045	below_all	none		
+11x16x20	2114	below_all	none		
+11x16x21	2221	below_all	S1	2216	serendipitous product <3,4,11> x <7,4,1> of FMM 3x4x11_m104_075e9ae9269f..; bud blocks 1 x <1x1x2>, 14 x <1x1x3>, 15 x <1x1x4>
+11x16x22	2302	below_all	none		
+11x16x23	2382	below_all	none		
+11x16x24	2433	below_all	none		
+11x16x25	2582	below_all	none		
+11x16x26	2701	below_all	none		
+11x16x27	2825	below_all	S2	2780	matmulcatalog cited-bounds (Perminov 2026 (serendipitous); Z; no factor matrices)
+11x16x28	2878	below_all	none		
+11x16x29	3034	below_all	none		
+11x16x30	3105	below_all	S1	3077	serendipitous product <3,4,11> x <10,4,1> of FMM 3x4x11_m104_075e9ae9269f..; bud blocks 1 x <1x1x2>, 14 x <1x1x3>, 15 x <1x1x4>
+11x16x31	3195	below_all	none		
+11x16x32	3255	below_all	none		
+11x17x19	2190	below_all	none		
+11x17x20	2308	below_all	none		
+11x17x24	2697	below_all	none		
+11x18x25	2978	below_all	none		
+11x18x26	3088	below_all	none		
+11x19x19	2430	below_all	none		
+11x19x20	2556	below_all	none		
+11x19x21	2679	below_all	none		
+11x19x22	2797	below_all	none		
+11x19x23	2898	below_all	none		
+11x19x24	2969	below_all	none		
+11x19x25	3140	below_all	none		
+11x19x26	3279	below_all	none		
+11x19x27	3400	below_all	none		
+11x19x28	3480	below_all	none		
+11x19x29	3623	below_all	none		
+11x19x31	3856	below_all	none		
+11x19x32	3945	below_all	none		
+11x20x20	2614	below_all	none		
+11x20x21	2730	below_all	Q	2719	matmulcatalog cited-bounds (Perminov 2026 (serendipitous); Q)
+11x20x22	2854	below_all	none		
+11x20x23	2961	below_all	none		
+11x20x24	3028	below_all	none		
+11x20x25	3192	below_all	none		
+11x20x26	3329	below_all	none		
+11x20x27	3447	below_all	none		
+11x20x28	3521	below_all	none		
+11x20x29	3685	below_all	none		
+11x20x30	3822	below_all	none		
+11x20x31	3940	below_all	none		
+11x20x32	4012	below_all	none		
+11x21x21	2892	below_all	none		
+11x21x22	3087	below_all	none		
+11x21x23	3206	below_all	none		
+11x21x24	3287	below_all	Q	3225	matmulcatalog cited-bounds (Perminov 2026 (serendipitous); Q)
+11x21x25	3467	below_all	none		
+11x21x26	3615	below_all	none		
+11x21x27	3744	below_all	none		
+11x21x28	3829	below_all	Q	3784	matmulcatalog cited-bounds (Perminov 2026 (serendipitous); Q)
+11x21x32	4362	below_all	S1	4295	serendipitous product <3,4,11> x <7,8,1> of FMM 3x4x11_m104_075e9ae9269f..; bud blocks 1 x <1x1x2>, 14 x <1x1x3>, 15 x <1x1x4>
+11x22x22	3226	below_all	none		
+11x22x23	3344	below_all	none		
+11x22x24	3436	below_all	none		
+11x22x25	3617	below_all	none		
+11x22x26	3771	below_all	none		
+11x22x27	3906	below_all	none		
+11x22x28	3997	below_all	none		
+11x22x29	4178	below_all	none		
+11x22x32	4554	below_all	none		
+11x24x32	4866	below_all	S1	4830	serendipitous product <3,4,11> x <8,8,1> of FMM 3x4x11_m104_075e9ae9269f..; bud blocks 1 x <1x1x2>, 14 x <1x1x3>, 15 x <1x1x4>
+11x25x26	4282	below_all	none		
+11x25x27	4426	below_all	none		
+11x25x28	4518	below_all	none		
+11x26x28	4726	below_all	none		
+11x26x29	4900	below_all	none		
+11x27x28	4889	below_all	S1	4878	serendipitous product <3,4,11> x <9,7,1> of FMM 3x4x11_m104_075e9ae9269f..; bud blocks 1 x <1x1x2>, 14 x <1x1x3>, 15 x <1x1x4>
+11x27x29	5082	below_all	none		
+11x28x28	4937	below_all	none		
+11x28x29	5241	below_all	none		
+11x28x32	5713	below_all	none		
+12x12x14	1251	gf2_valid_only	none		
+12x12x15	1320	gf2_valid_only	none		
+12x12x16	1363	below_all	M1	1363	composition: 12x12x16:1363=(3x3x4:29[AlphaTensor-F2] (x) 4x4x4:47[AlphaTensor-F2])
+12x12x17	1475	below_all	none		
+12x12x19	1636	below_all	none		
+12x12x20	1692	below_all	M1	1692	composition: 12x12x20:1692=(3x3x5:36[AlphaTensor-F2] (x) 4x4x4:47[AlphaTensor-F2])
+12x12x28	2303	below_all	M1	2303	composition: 12x12x28:2303=(3x3x7:49[Perminov-ZT] (x) 4x4x4:47[AlphaTensor-F2])
+12x12x32	2632	below_all	M1	2632	composition: 12x12x32:2632=(3x3x8:56[Perminov-ZT] (x) 4x4x4:47[AlphaTensor-F2])
+12x13x13	1292	gf2_valid_only	none		
+12x13x14	1383	gf2_valid_only	none		
+12x13x15	1455	gf2_valid_only	none		
+12x13x16	1507	below_all	none		
+12x13x17	1627	below_all	none		
+12x13x19	1804	below_all	none		
+12x13x20	1868	below_all	none		
+12x13x24	2166	below_all	none		
+12x13x25	2322	below_all	none		
+12x13x26	2407	below_all	none		
+12x13x27	2517	below_all	none		
+12x13x28	2596	below_all	S1	2583	serendipitous product <3,4,13> x <4,7,1> of FMM 3x4x13_m123_f0956bad0813..; bud blocks 12 x <1x1x3>, 3 x <1x1x4>, 15 x <1x1x5>
+12x13x32	2952	below_all	S1	2928	serendipitous product <3,4,13> x <4,8,1> of FMM 3x4x13_m123_f0956bad0813..; bud blocks 12 x <1x1x3>, 3 x <1x1x4>, 15 x <1x1x5>
+12x14x16	1626	gf2_valid_only	none		
+12x14x17	1752	below_all	none		
+12x14x19	1943	below_all	none		
+12x14x20	2011	below_all	none		
+12x14x26	2600	below_all	Q	2590	matmulcatalog cited-bounds (Perminov 2026 (serendipitous); Q)
+12x14x27	2663	below_all	none		
+12x14x28	2764	below_all	none		
+12x15x16	1714	below_all	none		
+12x15x20	2121	below_all	S1	2117	composition: 12x15x20:2117=(3x3x4:29[AlphaTensor-F2] (x) 4x5x5:73[Arai 455:73])
+12x15x27	2839	below_all	none		
+12x15x28	2881	below_all	none		
+12x16x16	1786	below_all	M1	1786	composition: 12x16x16:1786=(3x4x4:38[AlphaTensor-F2] (x) 4x4x4:47[AlphaTensor-F2])
+12x16x17	1930	below_all	none		
+12x16x19	2137	below_all	none		
+12x16x20	2209	below_all	M1	2209	composition: 12x16x20:2209=(3x4x5:47[AlphaTensor-F2] (x) 4x4x4:47[AlphaTensor-F2])
+12x16x21	2321	below_all	none		
+12x16x22	2433	below_all	none		
+12x16x23	2497	below_all	none		
+12x16x24	2538	below_all	M1	2538	composition: 12x16x24:2538=(3x4x6:54[Perminov-ZT] (x) 4x4x4:47[AlphaTensor-F2])
+12x16x25	2730	below_all	M1	2730	composition: 12x16x25:2730=(1x12x16:192[naive] (+) 12x16x24:2538=(3x4x6:54[Perminov-ZT] (x) 4x4x4:47[AlphaTensor-F2]))
+12x16x26	2834	below_all	M1	2834	composition: 12x16x26:2834=(2x12x16:296[FMM-known] (+) 12x16x24:2538=(3x4x6:54[Perminov-ZT] (x) 4x4x4:47[AlphaTensor-F2]))
+12x16x27	2957	below_all	none		
+12x16x28	3008	below_all	M1	3008	composition: 12x16x28:3008=(3x4x7:64[FMM-ZT] (x) 4x4x4:47[AlphaTensor-F2])
+12x16x29	3169	below_all	none		
+12x16x30	3240	below_all	M1	3240	composition: 12x16x30:3240=(3x4x6:54[Perminov-ZT] (x) 4x4x5:60[KM-F2])
+12x16x31	3399	below_all	none		
+12x16x32	3431	below_all	M1	3431	composition: 12x16x32:3431=(3x4x8:73[Perminov-ZT] (x) 4x4x4:47[AlphaTensor-F2])
+12x17x17	2082	below_all	none		
+12x17x19	2305	below_all	none		
+12x17x20	2385	below_all	none		
+12x17x23	2773	below_all	none		
+12x17x24	2826	below_all	M1	2826	composition: 12x17x24:2826=(1x12x24:288[naive] (+) 12x16x24:2538=(3x4x6:54[Perminov-ZT] (x) 4x4x4:47[AlphaTensor-F2]))
+12x19x19	2563	below_all	none		
+12x19x20	2638	below_all	none		
+12x19x22	2935	below_all	none		
+12x19x23	3044	below_all	none		
+12x19x24	3109	below_all	none		
+12x19x25	3337	below_all	none		
+12x19x26	3461	below_all	none		
+12x19x27	3592	below_all	none		
+12x19x28	3604	below_all	none		
+12x19x29	3832	below_all	none		
+12x19x30	3941	below_all	none		
+12x19x31	4040	below_all	none		
+12x19x32	4114	below_all	none		
+12x20x20	2726	below_all	M1	2726	composition: 12x20x20:2726=(3x5x5:58[AlphaTensor-F2] (x) 4x4x4:47[AlphaTensor-F2])
+12x20x22	3001	below_all	none		
+12x20x23	3128	below_all	none		
+12x20x24	3196	below_all	M1	3196	composition: 12x20x24:3196=(3x5x6:68[AlphaEvolve] (x) 4x4x4:47[AlphaTensor-F2])
+12x20x25	3436	below_all	S1	3431	composition: 12x20x25:3431=(3x4x5:47[AlphaTensor-F2] (x) 4x5x5:73[Arai 455:73])
+12x20x26	3566	below_all	M2	3566	composition of listed / published GF(2) ranks (L2S): 12x20x26:3566=(2x12x20:370[matmulcatalog:Hopcroft-Kerr 1971 (constructive, this work)] (+) 12x20x24:3196=(3x5x6:68[matmulcatalog:unknown / matmulcatalog:AlphaEvolve / FMM:ZT] (x) 4x4x4:47[matmulcatalog:AlphaTensor / arXiv:2210.04045 in text line 28 (ring R of characteristic 2) / arXiv:2210.04045 in
+12x20x27	3699	below_all	none		
+12x20x28	3713	below_all	M1	3713	composition: 12x20x28:3713=(3x5x7:79[Perminov-ZT] (x) 4x4x4:47[AlphaTensor-F2])
+12x20x29	3922	below_all	none		
+12x20x30	4031	below_all	S1	3942	composition: 12x20x30:3942=(3x4x6:54[Perminov-ZT] (x) 4x5x5:73[Arai 455:73])
+12x20x31	4146	below_all	none		
+12x20x32	4230	below_all	M1	4230	composition: 12x20x32:4230=(3x5x8:90[Perminov-ZT] (x) 4x4x4:47[AlphaTensor-F2])
+12x22x22	3372	below_all	none		
+12x22x23	3496	below_all	none		
+12x22x24	3601	below_all	S2	3567	composition of listed / published GF(2) ranks (L2S): 12x22x24:3567=(6x12x24:1029[matmulcatalog:unknown] (+) 12x16x24:2538=(3x4x6:54[matmulcatalog:Kauers & Wood 2025 / FMM:ZT / arXiv:2511.20317 Table 5 (best known, as listed) line 804 (Z)] (x) 4x4x4:47[matmulcatalog:AlphaTensor / arXiv:2210.04045 in text line 28 (ring R of characteristic 2) / arXiv:221
+12x23x23	3642	below_all	none		
+12x23x24	3736	below_all	none		
+12x23x25	3952	below_all	none		
+12x23x32	4994	below_all	none		
+12x24x25	4080	below_all	S2	4053	composition of listed / published GF(2) ranks (L2S): 12x24x25:4053=(9x12x24:1515[matmulcatalog:unknown] (+) 12x16x24:2538=(3x4x6:54[matmulcatalog:Kauers & Wood 2025 / FMM:ZT / arXiv:2511.20317 Table 5 (best known, as listed) line 804 (Z)] (x) 4x4x4:47[matmulcatalog:AlphaTensor / arXiv:2210.04045 in text line 28 (ring R of characteristic 2) / arXiv:221
+12x25x28	4740	below_all	M1	4740	composition: 12x25x28:4740=(3x5x7:79[Perminov-ZT] (x) 4x4x5:60[KM-F2])
+12x28x28	5217	below_all	M1	5217	composition: 12x28x28:5217=(3x7x7:111[Perminov-ZT] (x) 4x4x4:47[AlphaTensor-F2])
+13x13x13	1402	gf2_valid_only	none		
+13x13x14	1501	below_all	none		
+13x13x15	1582	below_all	none		
+13x13x16	1648	below_all	none		
+13x13x17	1778	below_all	none		
+13x13x19	1978	below_all	none		
+13x13x20	2052	below_all	none		
+13x14x16	1763	below_all	none		
+13x14x17	1907	below_all	none		
+13x14x19	2125	below_all	none		
+13x14x20	2203	below_all	none		
+13x15x15	1796	gf2_valid_only	none		
+13x15x16	1858	below_all	none		
+13x15x17	2008	below_all	none		
+13x15x19	2252	below_all	none		
+13x15x20	2321	below_all	S1	2310	serendipitous product <3,4,13> x <5,5,1> of FMM 3x4x13_m123_f0956bad0813..; bud blocks 12 x <1x1x3>, 3 x <1x1x4>, 15 x <1x1x5>
+13x15x22	2595	below_all	S1	2592	serendipitous product <2,3,13> x <11,5,1> of FMM 2x3x13_m65_168e89abc94ef..; bud blocks 1 x <1x1x2>, 12 x <1x1x4>, 3 x <1x1x5>
+13x15x23	2659	below_all	none		
+13x15x26	3010	below_all	none		
+13x15x27	3126	below_all	none		
+13x16x16	1930	below_all	none		
+13x16x17	2090	below_all	none		
+13x16x18	2250	below_all	S1	2202	serendipitous product <3,4,13> x <6,4,1> of FMM 3x4x13_m123_f0956bad0813..; bud blocks 12 x <1x1x3>, 3 x <1x1x4>, 15 x <1x1x5>
+13x16x19	2329	below_all	none		
+13x16x20	2417	below_all	none		
+13x16x21	2582	below_all	S2	2571	matmulcatalog cited-bounds (Perminov 2026 (serendipitous); Z; no factor matrices)
+13x16x22	2668	below_all	none		
+13x16x23	2771	below_all	none		
+13x16x24	2842	below_all	none		
+13x16x25	3050	below_all	none		
+13x16x26	3148	below_all	none		
+13x16x27	3256	below_all	none		
+13x16x28	3372	below_all	none		
+13x16x29	3560	below_all	none		
+13x16x30	3658	below_all	S1	3623	serendipitous product <3,4,13> x <10,4,1> of FMM 3x4x13_m123_1fbde9a51611..; bud blocks 10 x <1x1x3>, 7 x <1x1x4>, 13 x <1x1x5>
+13x16x31	3788	below_all	none		
+13x16x32	3860	below_all	none		
+13x17x17	2259	below_all	none		
+13x17x18	2401	below_all	none		
+13x17x19	2516	below_all	none		
+13x17x20	2613	below_all	none		
+13x17x21	2834	below_all	none		
+13x17x23	3070	below_all	none		
+13x17x24	3154	below_all	none		
+13x19x19	2822	below_all	none		
+13x19x20	2906	below_all	none		
+13x19x21	3153	below_all	S1	3147	composition: 13x19x21:3147=Strassen((6, 7), (9, 10), (10, 11))(7x10x11:518=Strassen((3, 4), (5, 5), (5, 6))(4x5x6:89[KW-Z2 456], 3x5x6:68[AlphaEvolve], 4x5x5:73[Arai 455:73], 3x5x6:68[AlphaEvolve], 4x5x5:73[Arai 455:73], 3x5x5:58[AlphaTensor-F2], 4x5x6:89[KW-Z2 456]), 6x10x11:446[FMM-ZT], 7x10x10:466=Strassen((3, 4), (5, 5), (5, 5))(4x5x5:73[Arai 455:73], 3x5x5:58[AlphaTensor-F2], 4x5x5:73[Arai 455:73], 3x5x5:58[AlphaTensor-F2], 4x5x5:73[Arai 455:73], 3x5x5:58[AlphaTensor-F2], 4x5x5:73[Arai 455:73]), 6x9x11:407[FMM-Z], 7x9x10:429=Strassen((3, 4), (4, 5), (5, 5))(4x5x5:73[Arai 455:73], 3x5x5:58[AlphaTensor-F2], 4x5x5:73[Arai 455:73], 3x4x5:47[AlphaTensor-F2], 4x4x5:60[KM-F2], 3x5x5:58[AlphaTensor-F2], 4x4x5:60[KM-F2]), 6x10x10:406=(2x2x2:7[mmc] (x) 3x5x5:58[AlphaTensor-F2]), 7x9x11:475=Strassen((3, 4), (4, 5), (5, 6))(4x5x6:89[KW-Z2 456], 3x5x6:68[AlphaEvolve], 4x5x5:73[Arai 455:73], 3x4x6:54[Perminov-ZT], 4x4x5:60[KM-F2], 3x5x5:58[AlphaTensor-F2], 4x4x6:73[Perminov-ZT]))
+13x19x22	3286	below_all	S1	3285	composition: 13x19x22:3285=Strassen((6, 7), (9, 10), (11, 11))(7x10x11:518=Strassen((3, 4), (5, 5), (5, 6))(4x5x6:89[KW-Z2 456], 3x5x6:68[AlphaEvolve], 4x5x5:73[Arai 455:73], 3x5x6:68[AlphaEvolve], 4x5x5:73[Arai 455:73], 3x5x5:58[AlphaTensor-F2], 4x5x6:89[KW-Z2 456]), 6x10x11:446[FMM-ZT], 7x10x11:518=Strassen((3, 4), (5, 5), (5, 6))(4x5x6:89[KW-Z2 456], 3x5x6:68[AlphaEvolve], 4x5x5:73[Arai 455:73], 3x5x6:68[AlphaEvolve], 4x5x5:73[Arai 455:73], 3x5x5:58[AlphaTensor-F2], 4x5x6:89[KW-Z2 456]), 6x9x11:407[FMM-Z], 7x9x11:475=Strassen((3, 4), (4, 5), (5, 6))(4x5x6:89[KW-Z2 456], 3x5x6:68[AlphaEvolve], 4x5x5:73[Arai 455:73], 3x4x6:54[Perminov-ZT], 4x4x5:60[KM-F2], 3x5x5:58[AlphaTensor-F2], 4x4x6:73[Perminov-ZT]), 6x10x11:446[FMM-ZT], 7x9x11:475=Strassen((3, 4), (4, 5), (5, 6))(4x5x6:89[KW-Z2 456], 3x5x6:68[AlphaEvolve], 4x5x5:73[Arai 455:73], 3x4x6:54[Perminov-ZT], 4x4x5:60[KM-F2], 3x5x5:58[AlphaTensor-F2], 4x4x6:73[Perminov-ZT]))
+13x19x25	3644	below_all	none		
+13x19x26	3761	below_all	none		
+13x19x27	3893	below_all	none		
+13x19x28	4052	below_all	none		
+13x20x20	3014	below_all	none		
+13x20x21	3274	below_all	S1	3165	serendipitous product <3,4,13> x <7,5,1> of FMM 3x4x13_m123_f0956bad0813..; bud blocks 12 x <1x1x3>, 3 x <1x1x4>, 15 x <1x1x5>
+13x20x22	3414	below_all	S1	3410	composition: 13x20x22:3410=Strassen((6, 7), (10, 10), (11, 11))(7x10x11:518=Strassen((3, 4), (5, 5), (5, 6))(4x5x6:89[KW-Z2 456], 3x5x6:68[AlphaEvolve], 4x5x5:73[Arai 455:73], 3x5x6:68[AlphaEvolve], 4x5x5:73[Arai 455:73], 3x5x5:58[AlphaTensor-F2], 4x5x6:89[KW-Z2 456]), 6x10x11:446[FMM-ZT], 7x10x11:518=Strassen((3, 4), (5, 5), (5, 6))(4x5x6:89[KW-Z2 456], 3x5x6:68[AlphaEvolve], 4x5x5:73[Arai 455:73], 3x5x6:68[AlphaEvolve], 4x5x5:73[Arai 455:73], 3x5x5:58[AlphaTensor-F2], 4x5x6:89[KW-Z2 456]), 6x10x11:446[FMM-ZT], 7x10x11:518=Strassen((3, 4), (5, 5), (5, 6))(4x5x6:89[KW-Z2 456], 3x5x6:68[AlphaEvolve], 4x5x5:73[Arai 455:73], 3x5x6:68[AlphaEvolve], 4x5x5:73[Arai 455:73], 3x5x5:58[AlphaTensor-F2], 4x5x6:89[KW-Z2 456]), 6x10x11:446[FMM-ZT], 7x10x11:518=Strassen((3, 4), (5, 5), (5, 6))(4x5x6:89[KW-Z2 456], 3x5x6:68[AlphaEvolve], 4x5x5:73[Arai 455:73], 3x5x6:68[AlphaEvolve], 4x5x5:73[Arai 455:73], 3x5x5:58[AlphaTensor-F2], 4x5x6:89[KW-Z2 456]))
+13x20x26	3984	below_all	none		
+13x20x27	4075	below_all	S1	4035	serendipitous product <3,4,13> x <9,5,1> of FMM 3x4x13_m123_f0956bad0813..; bud blocks 12 x <1x1x3>, 3 x <1x1x4>, 15 x <1x1x5>
+13x20x28	4167	below_all	none		
+13x20x29	4427	below_all	none		
+13x20x31	4688	below_all	none		
+13x20x32	4758	below_all	none		
+13x23x32	5542	below_all	none		
+13x24x28	5008	below_all	none		
+13x26x28	5555	below_all	none		
+13x32x32	7502	below_all	S1	7450	serendipitous product <2,2,13> x <16,16,1> of FMM 2x2x13_m47_caa900503e2e5..; bud blocks 1 x <1x1x5>, 3 x <1x1x6>, 3 x <1x1x8>
+14x14x16	1881	below_all	none		
+14x14x17	2035	gf2_valid_only	none		
+14x14x19	2276	gf2_valid_only	none		
+14x14x20	2364	below_all	none		
+14x15x16	1975	below_all	none		
+14x15x17	2145	below_all	none		
+14x15x20	2486	below_all	none		
+14x15x32	3946	below_all	none		
+14x16x16	2041	below_all	none		
+14x16x17	2223	below_all	none		
+14x16x18	2376	below_all	none		
+14x16x19	2490	below_all	none		
+14x16x20	2586	below_all	none		
+14x16x21	2746	below_all	none		
+14x16x22	2888	below_all	none		
+14x16x23	2994	below_all	none		
+14x16x24	3084	below_all	none		
+14x16x26	3407	below_all	none		
+14x16x28	3645	below_all	none		
+14x16x29	3804	below_all	none		
+14x16x31	4016	below_all	none		
+14x16x32	4082	below_all	none		
+14x17x17	2409	below_all	none		
+14x17x18	2576	below_all	none		
+14x17x19	2703	below_all	none		
+14x17x20	2802	below_all	none		
+14x17x27	3818	below_all	none		
+14x18x19	2878	below_all	none		
+14x19x19	3037	below_all	none		
+14x19x20	3130	below_all	none		
+14x19x28	4356	below_all	none		
+14x20x20	3248	below_all	none		
+14x20x28	4484	below_all	none		
+14x20x31	5024	below_all	none		
+14x20x32	5141	below_all	none		
+14x28x32	6969	below_all	none		
+14x32x32	7782	below_all	none		
+15x15x15	2006	gf2_valid_only	none		
+15x15x16	2074	below_all	none		
+15x15x20	2627	below_all	none		
+15x15x21	2793	gf2_valid_only	S1	2782	serendipitous product <3,3,7> x <5,5,3> of FMM 3x3x7_m49_6b28e31f65936b..; bud blocks 10 x <1x1x2>
+15x16x16	2137	below_all	none		
+15x16x17	2329	below_all	none		
+15x16x18	2490	below_all	none		
+15x16x19	2629	below_all	none		
+15x16x20	2716	below_all	none		
+15x16x21	2900	below_all	none		
+15x16x22	3057	below_all	none		
+15x16x23	3164	below_all	none		
+15x16x24	3240	below_all	M1	3240	composition: 15x16x24:3240=(3x4x6:54[Perminov-ZT] (x) 4x4x5:60[KM-F2])
+15x16x25	3457	below_all	S1	3431	composition: 15x16x25:3431=(3x4x5:47[AlphaTensor-F2] (x) 4x5x5:73[Arai 455:73])
+15x16x26	3608	below_all	M1	3608	composition: 15x16x26:3608=(2x15x16:368[FMM-Z] (+) 15x16x24:3240=(3x4x6:54[Perminov-ZT] (x) 4x4x5:60[KM-F2]))
+15x16x28	3840	below_all	M1	3840	composition: 15x16x28:3840=(3x4x7:64[FMM-ZT] (x) 4x4x5:60[KM-F2])
+15x16x29	3995	below_all	none		
+15x16x31	4211	below_all	S1	4182	composition: 15x16x31:4182=(1x15x16:240[naive] (+) 15x16x30:3942=(3x4x6:54[Perminov-ZT] (x) 4x5x5:73[Arai 455:73]))
+15x16x32	4274	below_all	none		
+15x17x17	2532	below_all	none		
+15x17x18	2709	below_all	none		
+15x17x19	2862	below_all	none		
+15x17x20	2952	below_all	none		
+15x17x22	3309	below_all	none		
+15x17x28	4165	below_all	none		
+15x17x31	4591	below_all	none		
+15x17x32	4658	below_all	none		
+15x19x19	3225	below_all	S1	3210	composition: 15x19x19:3210=Strassen((7, 8), (9, 10), (9, 10))(8x10x10:511=(2x2x2:7[mmc] (x) 4x5x5:73[Arai 455:73]), 7x10x10:466=Strassen((3, 4), (5, 5), (5, 5))(4x5x5:73[Arai 455:73], 3x5x5:58[AlphaTensor-F2], 4x5x5:73[Arai 455:73], 3x5x5:58[AlphaTensor-F2], 4x5x5:73[Arai 455:73], 3x5x5:58[AlphaTensor-F2], 4x5x5:73[Arai 455:73]), 8x9x9:432[FMM-ZT], 7x9x10:429=Strassen((3, 4), (4, 5), (5, 5))(4x5x5:73[Arai 455:73], 3x5x5:58[AlphaTensor-F2], 4x5x5:73[Arai 455:73], 3x4x5:47[AlphaTensor-F2], 4x4x5:60[KM-F2], 3x5x5:58[AlphaTensor-F2], 4x4x5:60[KM-F2]), 8x10x10:511=(2x2x2:7[mmc] (x) 4x5x5:73[Arai 455:73]), 7x9x10:429=Strassen((3, 4), (4, 5), (5, 5))(4x5x5:73[Arai 455:73], 3x5x5:58[AlphaTensor-F2], 4x5x5:73[Arai 455:73], 3x4x5:47[AlphaTensor-F2], 4x4x5:60[KM-F2], 3x5x5:58[AlphaTensor-F2], 4x4x5:60[KM-F2]), 8x9x9:432[FMM-ZT])
+15x19x20	3321	below_all	none		
+15x19x28	4576	below_all	none		
+15x19x29	4766	below_all	none		
+15x19x31	5083	below_all	none		
+15x19x32	5243	below_all	none		
+15x20x20	3428	below_all	none		
+15x20x23	4002	below_all	none		
+15x20x32	5400	below_all	S1	5329	composition: 15x20x32:5329=(3x4x8:73[Perminov-ZT] (x) 4x5x5:73[Arai 455:73])
+15x22x25	4731	below_all	none		
+15x22x26	4936	below_all	none		
+15x22x27	5115	below_all	none		
+15x23x24	4699	below_all	none		
+15x23x25	4913	below_all	none		
+15x23x26	5129	below_all	none		
+15x23x28	5501	below_all	none		
+15x28x32	7376	below_all	none		
+15x31x32	8166	below_all	none		
+15x32x32	8251	below_all	none		
+16x16x17	2417	below_all	none		
+16x16x18	2586	below_all	none		
+16x16x19	2716	below_all	none		
+16x16x20	2820	below_all	M1	2820	composition: 16x16x20:2820=(4x4x4:47[AlphaTensor-F2] (x) 4x4x5:60[KM-F2])
+16x16x21	3028	below_all	none		
+16x16x22	3181	below_all	M1	3181	composition: 16x16x22:3181=(6x16x16:972[FMM-ZT] (+) 16x16x16:2209=(4x4x4:47[AlphaTensor-F2] (x) 4x4x4:47[AlphaTensor-F2]))
+16x16x23	3324	below_all	none		
+16x16x24	3431	below_all	M1	3431	composition: 16x16x24:3431=(8x16x16:1222=(2x4x4:26[HK71] (x) 4x4x4:47[AlphaTensor-F2]) (+) 16x16x16:2209=(4x4x4:47[AlphaTensor-F2] (x) 4x4x4:47[AlphaTensor-F2]))
+16x16x25	3589	below_all	M1	3589	composition: 16x16x25:3589=(9x16x16:1380[FMM-Z] (+) 16x16x16:2209=(4x4x4:47[AlphaTensor-F2] (x) 4x4x4:47[AlphaTensor-F2]))
+16x16x26	3767	below_all	none		
+16x16x27	3904	below_all	none		
+16x16x28	3995	below_all	M1	3995	composition: 16x16x28:3995=(12x16x16:1786=(3x4x4:38[AlphaTensor-F2] (x) 4x4x4:47[AlphaTensor-F2]) (+) 16x16x16:2209=(4x4x4:47[AlphaTensor-F2] (x) 4x4x4:47[AlphaTensor-F2]))
+16x16x29	4139	below_all	none		
+16x16x30	4250	below_all	none		
+16x16x31	4346	below_all	none		
+16x16x32	4418	below_all	M1	4418	composition: 16x16x32:4418=(16x16x16:2209=(4x4x4:47[AlphaTensor-F2] (x) 4x4x4:47[AlphaTensor-F2]) (+) 16x16x16:2209=(4x4x4:47[AlphaTensor-F2] (x) 4x4x4:47[AlphaTensor-F2]))
+16x17x17	2637	below_all	none		
+16x17x18	2818	below_all	none		
+16x17x19	2960	below_all	none		
+16x17x20	3076	below_all	none		
+16x17x21	3321	below_all	none		
+16x17x22	3474	below_all	none		
+16x17x23	3595	below_all	none		
+16x17x25	3941	below_all	none		
+16x17x26	4111	below_all	none		
+16x17x27	4259	below_all	none		
+16x17x28	4347	below_all	none		
+16x17x29	4507	below_all	none		
+16x17x30	4640	below_all	none		
+16x17x31	4746	below_all	none		
+16x17x32	4834	below_all	none		
+16x18x19	3162	below_all	none		
+16x18x20	3284	below_all	none		
+16x19x19	3335	below_all	none		
+16x19x20	3444	below_all	none		
+16x19x22	3892	below_all	S1	3863	composition: 16x19x22:3863=Strassen((8, 8), (9, 10), (11, 11))(8x10x11:575=Strassen((4, 4), (5, 5), (5, 6))(4x5x6:89[KW-Z2 456], 4x5x6:89[KW-Z2 456], 4x5x5:73[Arai 455:73], 4x5x6:89[KW-Z2 456], 4x5x5:73[Arai 455:73], 4x5x5:73[Arai 455:73], 4x5x6:89[KW-Z2 456]), 8x10x11:575=Strassen((4, 4), (5, 5), (5, 6))(4x5x6:89[KW-Z2 456], 4x5x6:89[KW-Z2 456], 4x5x5:73[Arai 455:73], 4x5x6:89[KW-Z2 456], 4x5x5:73[Arai 455:73], 4x5x5:73[Arai 455:73], 4x5x6:89[KW-Z2 456]), 8x10x11:575=Strassen((4, 4), (5, 5), (5, 6))(4x5x6:89[KW-Z2 456], 4x5x6:89[KW-Z2 456], 4x5x5:73[Arai 455:73], 4x5x6:89[KW-Z2 456], 4x5x5:73[Arai 455:73], 4x5x5:73[Arai 455:73], 4x5x6:89[KW-Z2 456]), 8x9x11:521[FMM-ZT], 8x9x11:521[FMM-ZT], 8x10x11:575=Strassen((4, 4), (5, 5), (5, 6))(4x5x6:89[KW-Z2 456], 4x5x6:89[KW-Z2 456], 4x5x5:73[Arai 455:73], 4x5x6:89[KW-Z2 456], 4x5x5:73[Arai 455:73], 4x5x5:73[Arai 455:73], 4x5x6:89[KW-Z2 456]), 8x9x11:521[FMM-ZT])
+16x19x23	4009	below_all	none		
+16x19x24	4106	below_all	none		
+16x19x25	4366	below_all	none		
+16x19x26	4541	below_all	none		
+16x19x27	4696	below_all	none		
+16x19x28	4771	below_all	none		
+16x19x29	5045	below_all	none		
+16x19x30	5206	below_all	S2	5199	composition of listed / published GF(2) ranks (L2S): 16x19x30:5199=(4x16x30:1257=(2x4x16:102[matmulcatalog:FMM-Lille / arXiv:2512.13365 Table 1 line 497 (ZT = {-1,0,1} (ternary; valid over any r)] (+) 4x16x28:1155[matmulcatalog:unknown]) (+) 15x16x30:3942=(3x4x6:54[matmulcatalog:Kauers & Wood 2025 / FMM:ZT / arXiv:2511.20317 Table 5 (best known, as li
+16x19x31	5345	below_all	none		
+16x19x32	5432	below_all	none		
+16x20x20	3572	below_all	S1	3431	composition: 16x20x20:3431=(4x4x4:47[AlphaTensor-F2] (x) 4x5x5:73[Arai 455:73])
+16x20x21	3840	below_all	S1	3751	composition: 16x20x21:3751=(1x16x20:320[naive] (+) 16x20x20:3431=(4x4x4:47[AlphaTensor-F2] (x) 4x5x5:73[Arai 455:73]))
+16x20x22	3976	below_all	S1	3925	composition: 16x20x22:3925=(2x16x20:494=(2x5x16:126[FMM-Z] (+) 2x15x16:368[FMM-Z]) (+) 16x20x20:3431=(4x4x4:47[AlphaTensor-F2] (x) 4x5x5:73[Arai 455:73]))
+16x20x23	4132	below_all	none		
+16x20x24	4230	below_all	S1	4183	composition: 16x20x24:4183=(4x4x4:47[AlphaTensor-F2] (x) 4x5x6:89[KW-Z2 456])
+16x20x25	4470	below_all	S1	4380	composition: 16x20x25:4380=(4x4x5:60[KM-F2] (x) 4x5x5:73[Arai 455:73])
+16x20x26	4634	below_all	M2	4634	composition of listed / published GF(2) ranks (L2S): 16x20x26:4634=(6x16x20:1203[matmulcatalog:unknown] (+) 16x20x20:3431=(4x4x4:47[matmulcatalog:AlphaTensor / arXiv:2210.04045 in text line 28 (ring R of characteristic 2) / arXiv:2210.04045 in text line 52 (ring R of characteristic 2)] (x) 4x5x5:73[arXiv:2312.16960 Table 1 line 402 (characteristic 2 (
+16x20x27	4792	below_all	none		
+16x20x28	4888	below_all	M1	4888	composition: 16x20x28:4888=(4x4x4:47[AlphaTensor-F2] (x) 4x5x7:104[Perminov-ZT])
+16x20x29	5193	below_all	none		
+16x20x30	5335	below_all	S1	5329	composition: 16x20x30:5329=(10x16x20:1898=(2x4x4:26[HK71] (x) 4x5x5:73[Arai 455:73]) (+) 16x20x20:3431=(4x4x4:47[AlphaTensor-F2] (x) 4x5x5:73[Arai 455:73]))
+16x20x31	5450	below_all	none		
+16x20x32	5546	below_all	M1	5546	composition: 16x20x32:5546=(4x4x4:47[AlphaTensor-F2] (x) 4x5x8:118[Perminov-ZT])
+16x21x24	4518	below_all	none		
+16x21x25	4710	below_all	none		
+16x21x26	4908	below_all	none		
+16x22x23	4603	below_all	none		
+16x22x24	4665	below_all	none		
+16x22x25	4921	below_all	none		
+16x22x26	5136	below_all	none		
+16x22x28	5486	below_all	none		
+16x22x32	6223	below_all	none		
+16x23x23	4743	below_all	none		
+16x23x24	4815	below_all	none		
+16x23x27	5582	below_all	none		
+16x23x28	5656	below_all	none		
+16x23x31	6355	below_all	S1	6344	composition: 16x23x31:6344=Strassen((8, 8), (11, 12), (15, 16))(8x12x16:940=(2x3x4:20[HK71] (x) 4x4x4:47[AlphaTensor-F2]), 8x12x15:900=(2x3x3:15[HK71] (x) 4x4x5:60[KM-F2]), 8x12x16:940=(2x3x4:20[HK71] (x) 4x4x4:47[AlphaTensor-F2]), 8x11x15:859[FMM-ZT], 8x11x16:906[fmm-schemes], 8x12x16:940=(2x3x4:20[HK71] (x) 4x4x4:47[AlphaTensor-F2]), 8x11x15:859[FMM-ZT])
+16x23x32	6448	below_all	none		
+16x24x24	4935	below_all	M1	4935	composition: 16x24x24:4935=(2x2x2:7[mmc] (x) 8x12x12:705=(2x3x3:15[HK71] (x) 4x4x4:47[AlphaTensor-F2]))
+16x24x28	5781	below_all	M1	5781	composition: 16x24x28:5781=(4x4x4:47[AlphaTensor-F2] (x) 4x6x7:123[Perminov-ZT])
+16x24x31	6487	below_all	S1	6460	composition: 16x24x31:6460=Strassen((8, 8), (12, 12), (15, 16))(8x12x16:940=(2x3x4:20[HK71] (x) 4x4x4:47[AlphaTensor-F2]), 8x12x16:940=(2x3x4:20[HK71] (x) 4x4x4:47[AlphaTensor-F2]), 8x12x15:900=(2x3x3:15[HK71] (x) 4x4x5:60[KM-F2]), 8x12x16:940=(2x3x4:20[HK71] (x) 4x4x4:47[AlphaTensor-F2]), 8x12x15:900=(2x3x3:15[HK71] (x) 4x4x5:60[KM-F2]), 8x12x15:900=(2x3x3:15[HK71] (x) 4x4x5:60[KM-F2]), 8x12x16:940=(2x3x4:20[HK71] (x) 4x4x4:47[AlphaTensor-F2]))
+16x24x32	6580	below_all	M1	6580	composition: 16x24x32:6580=(2x2x2:7[mmc] (x) 8x12x16:940=(2x3x4:20[HK71] (x) 4x4x4:47[AlphaTensor-F2]))
+16x25x28	6223	below_all	S1	6218	composition: 16x25x28:6218=(3x16x25:889=(3x10x16:355[FMM-ZT] (+) 3x15x16:534[FMM-ZT]) (+) 16x25x25:5329=(4x5x5:73[Arai 455:73] (x) 4x5x5:73[Arai 455:73]))
+16x25x31	6873	below_all	S1	6829	composition: 16x25x31:6829=(6x16x25:1500=(1x6x16:96[naive] (+) 6x16x24:1404=(2x4x4:26[HK71] (x) 3x4x6:54[Perminov-ZT])) (+) 16x25x25:5329=(4x5x5:73[Arai 455:73] (x) 4x5x5:73[Arai 455:73]))
+16x25x32	6987	below_all	none		
+16x26x28	6467	below_all	M2	6467	composition of listed / published GF(2) ranks (L2S): 16x26x28:6467=(2x16x28:686[matmulcatalog:Hopcroft-Kerr 1971 (constructive, this work)] (+) 16x24x28:5781=(4x4x4:47[matmulcatalog:AlphaTensor / arXiv:2210.04045 in text line 28 (ring R of characteristic 2) / arXiv:2210.04045 in text line 52 (ring R of characteristic 2)] (x) 4x6x7:123[matmulcatalog:Ka
+16x26x29	6720	below_all	none		
+16x26x30	6923	gf2_valid_only	S1	6878	serendipitous product <3,4,13> x <10,4,2> of FMM 3x4x13_m119_4fbf255e27f0..; bud blocks 45 x <1x1x2>, 9 x <1x1x3>
+16x26x31	7128	below_all	none		
+16x26x32	7259	below_all	none		
+16x27x29	6871	below_all	none		
+16x27x31	7379	below_all	none		
+16x27x32	7447	below_all	none		
+16x28x28	6768	below_all	M1	6768	composition: 16x28x28:6768=(4x4x4:47[AlphaTensor-F2] (x) 4x7x7:144[Perminov-ZT])
+16x28x31	7498	below_all	none		
+16x28x32	7567	below_all	M1	7567	composition: 16x28x32:7567=(4x4x4:47[AlphaTensor-F2] (x) 4x7x8:161[Perminov-ZT])
+16x31x31	8294	below_all	S1	8256	composition: 16x31x31:8256=Strassen((8, 8), (15, 16), (15, 16))(8x16x16:1222=(2x4x4:26[HK71] (x) 4x4x4:47[AlphaTensor-F2]), 8x15x16:1200=(2x3x4:20[HK71] (x) 4x4x5:60[KM-F2]), 8x16x16:1222=(2x4x4:26[HK71] (x) 4x4x4:47[AlphaTensor-F2]), 8x15x15:1095=(2x3x3:15[HK71] (x) 4x5x5:73[Arai 455:73]), 8x15x16:1200=(2x3x4:20[HK71] (x) 4x4x5:60[KM-F2]), 8x16x16:1222=(2x4x4:26[HK71] (x) 4x4x4:47[AlphaTensor-F2]), 8x15x15:1095=(2x3x3:15[HK71] (x) 4x5x5:73[Arai 455:73]))
+16x31x32	8388	below_all	none		
+16x32x32	8460	below_all	M1	8460	composition: 16x32x32:8460=(4x4x4:47[AlphaTensor-F2] (x) 4x8x8:180[Perminov-ZT])
+17x17x20	3336	below_all	none		
+17x19x19	3598	below_all	none		
+17x19x20	3712	below_all	none		
+17x20x20	3844	below_all	S1	3831	composition: 17x20x20:3831=(1x20x20:400[naive] (+) 16x20x20:3431=(4x4x4:47[AlphaTensor-F2] (x) 4x5x5:73[Arai 455:73]))
+19x19x32	6454	below_all	none		
+19x20x30	6285	below_all	none		
+19x20x31	6484	below_all	none		
+19x20x32	6560	below_all	none		
+19x21x27	6054	below_all	none		
+19x21x28	6232	below_all	none		
+19x22x27	6369	below_all	none		
+19x22x28	6530	below_all	none		
+19x23x25	6122	below_all	none		
+19x23x27	6594	below_all	none		
+19x23x28	6729	below_all	none		
+19x23x32	7630	below_all	none		
+19x24x24	5974	below_all	none		
+19x24x26	6561	below_all	none		
+19x24x27	6745	below_all	none		
+19x24x28	6903	below_all	none		
+19x24x29	7236	below_all	none		
+19x25x27	7144	below_all	none		
+19x26x27	7454	below_all	none		
+19x26x28	7597	below_all	none		
+19x27x27	7713	below_all	none		
+19x27x28	7856	below_all	none		
+19x28x28	8010	below_all	none		
+19x28x29	8542	below_all	none		
+20x20x20	4451	gf2_valid_only	S1	4371	composition: 20x20x20:4371=(4x4x4:47[AlphaTensor-F2] (x) 5x5x5:93[Perminov-ZT])
+20x20x24	5202	gf2_valid_only	S1	5170	composition: 20x20x24:5170=(4x4x4:47[AlphaTensor-F2] (x) 5x5x6:110[Perminov-ZT])
+20x20x25	5442	gf2_valid_only	S1	5329	composition: 20x20x25:5329=(4x5x5:73[Arai 455:73] (x) 4x5x5:73[Arai 455:73])
+20x20x32	6768	below_all	M1	6768	composition: 20x20x32:6768=(4x4x4:47[AlphaTensor-F2] (x) 5x5x8:144[Perminov-ZT])
+20x21x25	5829	gf2_valid_only	M1	5829	composition: 20x21x25:5829=(1x20x25:500[naive] (+) 20x20x25:5329=(4x5x5:73[Arai 455:73] (x) 4x5x5:73[Arai 455:73]))
+20x21x27	6188	below_all	none		
+20x21x28	6372	below_all	none		
+20x21x29	6736	gf2_valid_only	none		
+20x21x31	7118	below_all	none		
+20x21x32	7184	below_all	none		
+20x22x26	6340	gf2_valid_only	none		
+20x22x27	6519	below_all	none		
+20x22x28	6635	below_all	none		
+20x22x29	6985	gf2_valid_only	none		
+20x22x30	7242	below_all	none		
+20x22x31	7416	below_all	none		
+20x22x32	7513	below_all	none		
+20x23x23	5883	below_all	none		
+20x23x24	6005	below_all	none		
+20x23x25	6258	below_all	none		
+20x23x26	6508	below_all	none		
+20x23x27	6724	below_all	none		
+20x23x28	6863	below_all	none		
+20x23x29	7173	below_all	none		
+20x23x30	7427	below_all	none		
+20x23x31	7636	below_all	none		
+20x23x32	7772	below_all	none		
+20x24x24	6110	below_all	M1	6110	composition: 20x24x24:6110=(4x4x4:47[AlphaTensor-F2] (x) 5x6x6:130[Perminov-ZT])
+20x24x26	6684	below_all	none		
+20x24x27	6883	below_all	none		
+20x24x28	7050	below_all	M1	7050	composition: 20x24x28:7050=(4x4x4:47[AlphaTensor-F2] (x) 5x6x7:150[Perminov-ZT])
+20x24x29	7370	below_all	none		
+20x24x31	7827	below_all	none		
+20x24x32	7990	below_all	M1	7990	composition: 20x24x32:7990=(4x4x4:47[AlphaTensor-F2] (x) 5x6x8:170[Perminov-ZT])
+20x25x26	7130	below_all	none		
+20x25x27	7282	below_all	none		
+20x25x28	7545	below_all	none		
+20x25x29	7950	below_all	none		
+20x25x31	8342	below_all	none		
+20x25x32	8630	below_all	S1	8614	composition: 20x25x32:8614=(4x5x8:118[Perminov-ZT] (x) 4x5x5:73[Arai 455:73])
+20x26x26	7370	below_all	none		
+20x26x27	7606	below_all	none		
+20x26x28	7831	below_all	none		
+20x26x29	8255	gf2_valid_only	none		
+20x26x31	8773	below_all	none		
+20x26x32	8966	below_all	M2	8966	composition of listed / published GF(2) ranks (L2S): 20x26x32:8966=(2x20x32:976[matmulcatalog:Hopcroft-Kerr 1971 (constructive, this work)] (+) 20x24x32:7990=(4x4x4:47[matmulcatalog:AlphaTensor / arXiv:2210.04045 in text line 28 (ring R of characteristic 2) / arXiv:2210.04045 in text line 52 (ring R of characteristic 2)] (x) 5x6x8:170[matmulcatalog:Ka
+20x27x27	7932	below_all	none		
+20x27x28	8075	below_all	none		
+20x28x28	8272	below_all	M1	8272	composition: 20x28x28:8272=(4x4x4:47[AlphaTensor-F2] (x) 5x7x7:176[Perminov-ZT])
+20x28x29	8832	below_all	M1	8832	composition: 20x28x29:8832=(1x20x28:560[naive] (+) 20x28x28:8272=(4x4x4:47[AlphaTensor-F2] (x) 5x7x7:176[Perminov-ZT]))
+20x28x31	9431	below_all	none		
+20x28x32	9588	below_all	M1	9588	composition: 20x28x32:9588=(4x4x4:47[AlphaTensor-F2] (x) 5x7x8:204[Perminov-ZT])
+20x29x32	10060	below_all	M2	10060	composition of listed / published GF(2) ranks (L2S): 20x29x32:10060=(5x20x32:2070[matmulcatalog:unknown] (+) 20x24x32:7990=(4x4x4:47[matmulcatalog:AlphaTensor / arXiv:2210.04045 in text line 28 (ring R of characteristic 2) / arXiv:2210.04045 in text line 52 (ring R of characteristic 2)] (x) 5x6x8:170[matmulcatalog:Kauers & Wood 2025 / FMM:ZT / arXiv:2
+20x32x32	10800	below_all	M1	10800	composition: 20x32x32:10800=(4x8x8:180[Perminov-ZT] (x) 4x4x5:60[KM-F2])
+21x23x28	7354	below_all	none		
+21x23x32	8282	below_all	none		
+21x25x31	8876	below_all	none		
+21x25x32	9066	below_all	none		
+21x28x28	8848	below_all	none		
+21x30x32	10795	below_all	none		
+23x31x32	12085	below_all	none		
+23x32x32	12214	below_all	none		
+24x30x32	11998	gf2_valid_only	none		
+24x31x32	12297	below_all	none		
+24x32x32	12502	below_all	M1	12502	composition: 24x32x32:12502=(2x2x2:7[mmc] (x) 12x16x16:1786=(3x4x4:38[AlphaTensor-F2] (x) 4x4x4:47[AlphaTensor-F2]))
+25x30x32	12665	gf2_valid_only	S1	12410	composition: 25x30x32:12410=(4x5x5:73[Arai 455:73] (x) 5x6x8:170[Perminov-ZT])
+25x31x32	12929	below_all	none		
+25x32x32	13142	below_all	none		
+26x32x32	13510	below_all	none		
+27x32x32	13999	gf2_valid_only	none		

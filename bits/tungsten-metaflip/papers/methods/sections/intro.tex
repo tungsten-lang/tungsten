@@ -1,0 +1,75 @@
+\section{Introduction}\label{sec:intro}
+
+A scheme of rank $r$ for $n\times m$ by $m\times p$ matrix multiplication computes the product with $r$
+non-commutative multiplications of linear forms; equivalently it writes the matrix-multiplication
+tensor $\MM nmp$ as a sum of $r$ rank-one tensors \cite{burgisser1997algebraic,landsberg2012tensors,blaser2013fast}.
+Since Strassen's rank-7 scheme for $\MM222$ \cite{strassen1969gaussian}, upper bounds for small formats have come from
+clever constructions \cite{hopcroft1971minimizing,laderman1976noncommutative,smirnov2013bilinear}, from
+SAT and local search \cite{heule2019local,heule2021new}, from reinforcement learning \cite{fawzi2022discovering}, from
+program evolution \cite{novikov2025alphaevolve} and, most productively in recent years, from random walks on \emph{flip graphs}
+\cite{kauers2023flip,arai2024adaptive,moosbauer2025flip,kauers2025meta,perminov2025ternary}.
+The field matters: over $\F$ there are schemes that do not exist in other characteristics.
+The best-known example is the rank-47 scheme for $\MM444$ \cite{fawzi2022discovering}; for $\MM555$ the $\F$ record
+went $98\to96\to95\to94\to93$ \cite{sedoglavic2021tensor,fawzi2022discovering,kauers2022still,arai2024adaptive,moosbauer2025flip}.
+
+Best-known ranks for all formats up to $32\times32\times32$ are collected in two public tables
+\cite{sedoglavic2026catalogue,lacelle2026catalog}; two repositories hold explicit schemes for the formats up to $16\times16\times16$
+\cite{perminov2026fmmrepo} and for 25 formats \cite{witteveen2026schemes}.
+Small formats are the subject of intense search.
+Large formats mostly are not searched at all: the listed ranks there come from composing smaller
+schemes by block sums and Kronecker products, so they respond to any improvement of a component,
+and the components that matter in characteristic two (the rank-47 scheme above, in particular) are
+not the ones the general-ring tables were built from.
+
+This paper describes a pipeline that attacks that regime and the engineering needed to make its
+output believable.
+It was used for a campaign in September 2026. The results, pooled from three stages of the project (July, 2026-09-22 to 09-26,
+and the campaign of 2026-09-26 to 09-29), are 795 shapes for which our best verified scheme is below every GF(2)-valid rank listed in four public tables at the pinned revisions
+(733 of them also below every rank listed in any ring); they are reported in a companion paper \cite{peterson2026results}.
+Here we concentrate on \emph{how} the schemes were obtained, how they were checked, and what each stage of the campaign was worth.
+The campaign ran 4{,}816 walks totalling \(3.1\times10^{11}\) proposals over 2{,}708 distinct shapes,
+materialized 942 composition products, replayed 1{,}352 derivation recipes from the matmulcatalog (1{,}098 of them exactly over $\F$),
+and verified every tensor that is claimed.
+
+\paragraph{Contributions.}
+\begin{enumerate}
+\item A \textbf{directed flip-graph walker} for formats with all sides at least 2 and factors of up to $1{,}024$ bits
+(\cref{sec:walker}): proposals are sampled only among factor buckets that contain a flippable pair,
+factors are multiword bit vectors, memory is allocated once, and a walk is a deterministic function of
+(seed file, number of proposals, nonce). We report its per-proposal cost as a function of factor width
+and the byte-for-byte replay of 42 distinct campaign walks.
+\item A \textbf{cross-shape derivation step} (\cref{sec:derive}): coordinate deletion applied to the best
+scheme after a shared-factor basis rewrite, followed by shared-factor compression. Walks from these
+``projection children'' lowered the rank below the child's own starting rank in 792 of 880 cases, at 44M proposals per
+lowering against 0.3--9G for the seed classes that do not descend from projection children (0.16G for the deepening of projection lineages); children start unreduced, so this measures the slack that projection
+leaves for the walker rather than the yield of records.
+\item A \textbf{rank-only composition closure} with witness-backed materialization (\cref{sec:composition}):
+a dynamic programme over all 5{,}984 sorted formats with sides $\le32$ that prices block sums and Kronecker products in
+0.3\,s, followed by construction and exact checking of each priced improvement.
+\item \textbf{Seeds from public tables} (\cref{sec:seeds}): reduction of published ternary and integer schemes
+modulo two behind a ring gate, and replay of matmulcatalog derivation recipes over $\F$, including detection of recipes whose
+``F2'' stamp over-claims and a case study of a cache-history dependence that made replays
+non-reproducible until it was fixed.
+\item A \textbf{scoring and claim discipline} (\cref{sec:scoring}): what to compare against, which comparisons are
+invalid (commutative algorithms, wrong ring, stale tables), and how field-agnostic tables distort the picture.
+\item \textbf{Lineage bundles and a verification protocol} (\cref{sec:lineage}) in which every tensor is expanded against
+the full matrix-multiplication tensor by two separately written implementations; projection, public-seed, archived and retained rows
+are recomputed from their source; 42 of 244 distinct walks are replayed and 71 of 82 catalogue replays are reproduced from an empty cache;
+and the check is repeated from a clean extraction.
+\item An \textbf{empirical account of yield and cost} per stage, including the negative results (\cref{sec:eval}).
+\end{enumerate}
+
+\input{figures/pipeline}
+
+\paragraph{What is not claimed.}
+Projection, block composition and Kronecker products are classical; our contribution there is the
+shared-factor basis rewrite before projection, the materialization from GF(2)-valid leaves and the measured yield, not a new mathematical operation.
+Every rank reported anywhere is an upper bound. We prove no lower bounds, we do not claim optimality, and, following
+the record policy of the project, results that beat a table are called \emph{apparent} until a complete prior-art
+audit has been done (\cref{sec:scoring,sec:limits}).
+
+\paragraph{Organization.}
+\Cref{sec:background} fixes notation. \Cref{sec:repr} defines the scheme format and the exactness gate,
+\cref{sec:walker} the walker, \cref{sec:derive} projection and basis rewriting, \cref{sec:composition} composition closure and
+\cref{sec:seeds} the use of public schemes. \Cref{sec:scoring} covers scoring, \cref{sec:lineage} provenance and verification,
+\cref{sec:eval} the campaign's measured behaviour and \cref{sec:limits} limitations.

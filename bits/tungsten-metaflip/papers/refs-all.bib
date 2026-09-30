@@ -1,0 +1,582 @@
+% 05-refs.bib -- verified bibliography for the two GF(2) flip-graph papers.
+% Verified 2026-09-29 against: arXiv API + abs pages (exact title / author order / versions),
+% Crossref DOI records, doi.org resolution, Springer / Nature / AMS / ToC / Cornell eCommons pages,
+% GitHub / DataCite / Wikidata metadata, and the reference lists of the flip-graph papers themselves.
+% Fields that could NOT be confirmed were omitted on purpose.  Sources, confidence and open items
+% for every key: 05-bibliography-notes.md.
+%
+% Sections: (1) classical  (2) catalogues, repositories and datasets  (3) search-based
+%           (4) theory / context  (5) additions found while verifying (not on the request list)
+
+% ============================ (1) CLASSICAL ============================
+
+@article{strassen1969gaussian,
+  author  = {Strassen, Volker},
+  title   = {Gaussian elimination is not optimal},
+  journal = {Numerische Mathematik},
+  volume  = {13},
+  number  = {4},
+  pages   = {354--356},
+  year    = {1969},
+  month   = aug,
+  doi     = {10.1007/BF02165411}
+}
+
+@article{winograd1971multiplication,
+  author  = {Winograd, Shmuel},
+  title   = {On multiplication of {$2 \times 2$} matrices},
+  journal = {Linear Algebra and its Applications},
+  volume  = {4},
+  number  = {4},
+  pages   = {381--388},
+  year    = {1971},
+  month   = oct,
+  doi     = {10.1016/0024-3795(71)90009-7}
+}
+
+@article{hopcroft1971minimizing,
+  author  = {Hopcroft, J. E. and Kerr, L. R.},
+  title   = {On Minimizing the Number of Multiplications Necessary for Matrix Multiplication},
+  journal = {SIAM Journal on Applied Mathematics},
+  volume  = {20},
+  number  = {1},
+  pages   = {30--36},
+  year    = {1971},
+  month   = jan,
+  doi     = {10.1137/0120004}
+}
+
+@techreport{hopcroft1969minimizing,
+  author      = {Hopcroft, John E. and Kerr, Leslie Robert},
+  title       = {On Minimizing the Number of Multiplications Necessary for Matrix Multiplication},
+  institution = {Cornell University},
+  type        = {Technical Report},
+  number      = {69-44},
+  year        = {1969},
+  month       = sep,
+  url         = {https://hdl.handle.net/1813/5902},
+  note        = {Report version of the SIAM J. Appl. Math. paper; the lower-bound framework over $\mathbb{Z}_2$ is on p.~15 of the scan}
+}
+
+@article{hopcroft1973duality,
+  author  = {Hopcroft, J. and Musinski, J.},
+  title   = {Duality Applied to the Complexity of Matrix Multiplication and Other Bilinear Forms},
+  journal = {SIAM Journal on Computing},
+  volume  = {2},
+  number  = {3},
+  pages   = {159--173},
+  year    = {1973},
+  month   = sep,
+  doi     = {10.1137/0202013},
+  note    = {The STOC 1973 version is titled ``...Matrix Multiplications...'' (plural); see hopcroft1973dualitystoc}
+}
+
+@inproceedings{hopcroft1973dualitystoc,
+  author    = {Hopcroft, J. and Musinski, J.},
+  title     = {Duality applied to the complexity of matrix multiplications and other bilinear forms},
+  booktitle = {Proceedings of the Fifth Annual ACM Symposium on Theory of Computing (STOC '73)},
+  pages     = {73--87},
+  publisher = {ACM},
+  year      = {1973},
+  doi       = {10.1145/800125.804038}
+}
+
+@article{laderman1976noncommutative,
+  author  = {Laderman, Julian D.},
+  title   = {A noncommutative algorithm for multiplying {$3 \times 3$} matrices using 23 multiplications},
+  journal = {Bulletin of the American Mathematical Society},
+  volume  = {82},
+  number  = {1},
+  pages   = {126--128},
+  year    = {1976},
+  doi     = {10.1090/S0002-9904-1976-13988-2}
+}
+
+@article{degroote1978isotropy,
+  author  = {de Groote, Hans F.},
+  title   = {On varieties of optimal algorithms for the computation of bilinear mappings {I}. {T}he isotropy group of a bilinear mapping},
+  journal = {Theoretical Computer Science},
+  volume  = {7},
+  number  = {1},
+  pages   = {1--24},
+  year    = {1978},
+  doi     = {10.1016/0304-3975(78)90038-5}
+}
+
+@article{degroote1978optimal,
+  author  = {de Groote, Hans F.},
+  title   = {On varieties of optimal algorithms for the computation of bilinear mappings {II}. {O}ptimal algorithms for {$2 \times 2$}-matrix multiplication},
+  journal = {Theoretical Computer Science},
+  volume  = {7},
+  number  = {2},
+  pages   = {127--148},
+  year    = {1978},
+  doi     = {10.1016/0304-3975(78)90045-2}
+}
+
+@misc{burichenko2014strassen,
+  author        = {Burichenko, Vladimir P.},
+  title         = {On symmetries of the {S}trassen algorithm},
+  year          = {2014},
+  eprint        = {1408.6273},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.CC}
+}
+
+@misc{burichenko2015symmetries,
+  author        = {Burichenko, V. P.},
+  title         = {Symmetries of matrix multiplication algorithms. {I}},
+  year          = {2015},
+  eprint        = {1508.01110},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.CC}
+}
+
+@article{burichenko2016isotropy,
+  author        = {Burichenko, V. P.},
+  title         = {The isotropy group of the matrix multiplication tensor},
+  journal       = {Trudy Instituta Matematiki (Proceedings of the Institute of Mathematics)},
+  volume        = {24},
+  number        = {2},
+  pages         = {106--118},
+  year          = {2016},
+  eprint        = {2210.16565},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.CC},
+  note          = {Journal reference as stated in the arXiv listing (arXiv posting dated 2022-10-29); the journal page was not opened}
+}
+
+@misc{burichenko2022automorphism,
+  author        = {Burichenko, Vladimir},
+  title         = {On automorphism group of a possible short algorithm for multiplication of {$3\times3$} matrices},
+  year          = {2022},
+  eprint        = {2211.06485},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.CC}
+}
+
+@article{burichenko2024bilinear,
+  author  = {Burichenko, Vladimir P.},
+  title   = {On bilinear complexity of multiplication of a {$3 \times 2$} matrix by a {$2 \times 3$} matrix},
+  journal = {Diskretnaya Matematika},
+  volume  = {36},
+  number  = {1},
+  pages   = {15--45},
+  year    = {2024},
+  doi     = {10.4213/dm1804},
+  note    = {Published in Russian; English title as cited in arXiv:2609.14393. Crossref abstract: over any commutative ring the bilinear complexity of $3\times 2$ by $2\times 3$ is 15, i.e. the Hopcroft--Kerr scheme is optimal for every domain of scalars}
+}
+
+@article{waksman1970winograd,
+  author  = {Waksman, A.},
+  title   = {On {W}inograd's Algorithm for Inner Products},
+  journal = {IEEE Transactions on Computers},
+  volume  = {C-19},
+  number  = {4},
+  pages   = {360--361},
+  year    = {1970},
+  month   = apr,
+  doi     = {10.1109/T-C.1970.222926},
+  note    = {Commutative algorithm}
+}
+
+@article{winograd1968inner,
+  author  = {Winograd, S.},
+  title   = {A New Algorithm for Inner Product},
+  journal = {IEEE Transactions on Computers},
+  volume  = {C-17},
+  number  = {7},
+  pages   = {693--694},
+  year    = {1968},
+  month   = jul,
+  doi     = {10.1109/TC.1968.227420},
+  note    = {Commutative algorithm}
+}
+
+@article{smirnov2013bilinear,
+  author  = {Smirnov, A. V.},
+  title   = {The bilinear complexity and practical algorithms for matrix multiplication},
+  journal = {Computational Mathematics and Mathematical Physics},
+  volume  = {53},
+  number  = {12},
+  pages   = {1781--1795},
+  year    = {2013},
+  doi     = {10.1134/S0965542513120129},
+  note    = {English translation of Zh. Vychisl. Mat. Mat. Fiz. 53(12):1970--1984, doi:10.7868/S0044466913120168}
+}
+
+@inproceedings{sedoglavic2021tensor,
+  author        = {Sedoglavic, Alexandre and Smirnov, Alexey V.},
+  title         = {The tensor rank of 5x5 matrices multiplication is bounded by 98 and its border rank by 89},
+  booktitle     = {Proceedings of the 2021 International Symposium on Symbolic and Algebraic Computation (ISSAC '21)},
+  pages         = {345--351},
+  publisher     = {ACM},
+  year          = {2021},
+  doi           = {10.1145/3452143.3465537},
+  eprint        = {2101.12568},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.CC}
+}
+
+@misc{sedoglavic2017seven,
+  author        = {Sedoglavic, Alexandre},
+  title         = {A non-commutative algorithm for multiplying (7 $\times$ 7) matrices using 250 multiplications},
+  year          = {2017},
+  eprint        = {1712.07935},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.SC},
+  note          = {Also HAL hal-01572046 (identifier as cited on fmm.univ-lille.fr; the HAL page itself could not be opened)}
+}
+
+% ============== (2) CATALOGUES, REPOSITORIES AND DATASETS ==============
+
+@misc{sedoglavic2026catalogue,
+  author       = {Sedoglavic, Alexandre},
+  title        = {Yet another catalogue of fast matrix multiplication algorithms},
+  howpublished = {\url{https://fmm.univ-lille.fr/}},
+  year         = {2026},
+  note         = {Accessed 2026-09-29. The site states 5426 algorithms (2x2 up to 32x32) and gives no citation instruction; this is the form used by Kauers and Wood (arXiv:2510.19787). The site's ``Meta-Data'' link is Wikidata Q87551962 (creator Sedoglavic, ORCID 0000-0003-3225-8631, licence CC BY 3.0)}
+}
+
+@misc{sedoglavic2026digest,
+  author       = {Sedoglavic, Alexandre},
+  title        = {{fmm\_digest}: table of known tensor-decomposition ranks and exponents ({fmm\_sota.json})},
+  howpublished = {\url{https://github.com/sedoglavic/fmm_digest}},
+  year         = {2026},
+  note         = {Commit 9f26324b2749973f7200363f3fc3661a370d03d9 (2026-09-28); JSON createdAt 2026-09-28T12:03:11, contributor ORCID 0000-0003-3225-8631. The repository has no README, CITATION or LICENSE file, so no citation instruction exists; the table stores only format, rank and exponent (no coefficient field)}
+}
+
+@misc{perminov2026fmmrepo,
+  author       = {Perminov, Andrew I.},
+  title        = {{FastMatrixMultiplication}: research of fast matrix multiplication schemes in small formats from (2, 2, 2) to (16, 16, 16)},
+  howpublished = {\url{https://github.com/dronperminov/FastMatrixMultiplication}},
+  year         = {2026},
+  note         = {MIT licence; repository created 2025-11-16 (GitHub API). README section ``License and Citation'' asks users to cite arXiv:2606.02480, 2603.02398, 2512.21980, 2512.13365 and 2511.20317. Local clone at commit 613599b6c35159b2dcc6749574152eee89518998 (2026-09-28)}
+}
+
+@misc{perminov2026tfgrepo,
+  author       = {Perminov, Andrew I.},
+  title        = {{ternary\_flip\_graph}: implementation of the flip graph algorithm with ternary coefficient set restrictions},
+  howpublished = {\url{https://github.com/dronperminov/ternary_flip_graph}},
+  year         = {2026},
+  note         = {MIT licence; repository created 2025-12-14 (GitHub API). README asks users to cite arXiv:2603.02398, 2511.20317 and 2512.21980}
+}
+
+@misc{witteveen2026schemes,
+  author    = {Witteveen, Merlijn S.},
+  title     = {New fast matrix multiplication schemes},
+  year      = {2026},
+  publisher = {Zenodo},
+  version   = {1.1},
+  doi       = {10.5281/zenodo.22943995},
+  url       = {https://github.com/MerlijnW70/fmm-schemes},
+  note      = {Dataset, CC BY 4.0. The DOI is the Zenodo concept DOI (all versions) exactly as given in the repository CITATION.cff; version 1.1 (2026-09-27) is doi:10.5281/zenodo.23001328 and version 1.0 (2026-09-24) is doi:10.5281/zenodo.22943996}
+}
+
+@misc{lacelle2026catalog,
+  author        = {Benoit Chatain Lacelle},
+  title         = {A catalog of fast matrix multiplication algorithms with exhaustive derivations},
+  year          = {2026},
+  eprint        = {2606.13408},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.SC},
+  note          = {arXiv v3 of 2026-08-14. Versions v1 and v2 were titled ``... with frontier-closure search''. Code and catalogue: https://github.com/solven-eu/matmulcatalog (no licence file). The paper's own byline reads ``Benoit Lacelle''}
+}
+
+% ========================== (3) SEARCH-BASED ==========================
+
+@inproceedings{heule2019local,
+  author        = {Heule, Marijn J. H. and Kauers, Manuel and Seidl, Martina},
+  title         = {Local Search for Fast Matrix Multiplication},
+  booktitle     = {Theory and Applications of Satisfiability Testing -- {SAT} 2019},
+  editor        = {Janota, Mikol{\'a}{\v{s}} and Lynce, In{\^e}s},
+  series        = {Lecture Notes in Computer Science},
+  volume        = {11628},
+  pages         = {155--163},
+  publisher     = {Springer},
+  address       = {Cham},
+  year          = {2019},
+  doi           = {10.1007/978-3-030-24258-9_10},
+  eprint        = {1903.11391},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.LO}
+}
+
+@article{heule2021new,
+  author        = {Heule, Marijn J. H. and Kauers, Manuel and Seidl, Martina},
+  title         = {New ways to multiply {$3 \times 3$}-matrices},
+  journal       = {Journal of Symbolic Computation},
+  volume        = {104},
+  pages         = {899--916},
+  year          = {2021},
+  doi           = {10.1016/j.jsc.2020.10.003},
+  eprint        = {1905.10192},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.SC}
+}
+
+@article{fawzi2022discovering,
+  author  = {Fawzi, Alhussein and Balog, Matej and Huang, Aja and Hubert, Thomas and Romera-Paredes, Bernardino and Barekatain, Mohammadamin and Novikov, Alexander and Ruiz, Francisco J. R. and Schrittwieser, Julian and Swirszcz, Grzegorz and Silver, David and Hassabis, Demis and Kohli, Pushmeet},
+  title   = {Discovering faster matrix multiplication algorithms with reinforcement learning},
+  journal = {Nature},
+  volume  = {610},
+  number  = {7930},
+  pages   = {47--53},
+  year    = {2022},
+  month   = oct,
+  doi     = {10.1038/s41586-022-05172-4}
+}
+
+@inproceedings{kauers2023flip,
+  author        = {Kauers, Manuel and Moosbauer, Jakob},
+  title         = {Flip Graphs for Matrix Multiplication},
+  booktitle     = {Proceedings of the 2023 International Symposium on Symbolic and Algebraic Computation (ISSAC '23)},
+  pages         = {381--388},
+  publisher     = {ACM},
+  address       = {New York, NY, USA},
+  year          = {2023},
+  doi           = {10.1145/3597066.3597120},
+  eprint        = {2212.01175},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.SC}
+}
+
+@misc{kauers2022still,
+  author        = {Kauers, Manuel and Moosbauer, Jakob},
+  title         = {The {FBHHRBNRSSSHK}-Algorithm for Multiplication in {$\mathbb{Z}_2^{5\times5}$} is still not the end of the story},
+  year          = {2022},
+  eprint        = {2210.04045},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.SC},
+  note          = {arXiv v3, 2022-10-13; no published version found}
+}
+
+@article{kauers2025six,
+  author        = {Kauers, Manuel and Moosbauer, Jakob},
+  title         = {Some New Non-Commutative Matrix Multiplication Algorithms of Size {$(n,m,6)$}},
+  journal       = {ACM Communications in Computer Algebra},
+  volume        = {58},
+  number        = {1},
+  pages         = {1--11},
+  year          = {2025},
+  doi           = {10.1145/3712020.3712021},
+  eprint        = {2306.00882},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.SC},
+  note          = {Crossref: issue dated March 2024, published online 2025-01-10; Kauers--Wood and Moosbauer--Poole cite it as 2025}
+}
+
+@inproceedings{arai2024adaptive,
+  author        = {Arai, Yamato and Ichikawa, Yuma and Hukushima, Koji},
+  title         = {Adaptive Flip Graph Algorithm for Matrix Multiplication},
+  booktitle     = {Proceedings of the 2024 International Symposium on Symbolic and Algebraic Computation (ISSAC '24)},
+  pages         = {292--298},
+  publisher     = {ACM},
+  address       = {New York, NY, USA},
+  year          = {2024},
+  doi           = {10.1145/3666000.3669701},
+  eprint        = {2312.16960},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.SC}
+}
+
+@inproceedings{moosbauer2025flip,
+  author        = {Moosbauer, Jakob and Poole, Michael J.},
+  title         = {Flip Graphs with Symmetry and New Matrix Multiplication Schemes},
+  booktitle     = {Proceedings of the 2025 International Symposium on Symbolic and Algebraic Computation (ISSAC '25)},
+  pages         = {233--239},
+  publisher     = {ACM},
+  address       = {New York, NY, USA},
+  year          = {2025},
+  doi           = {10.1145/3747199.3747566},
+  eprint        = {2502.04514},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.SC}
+}
+
+@misc{kauers2025meta,
+  author        = {Kauers, Manuel and Wood, Isaac},
+  title         = {Exploring the Meta Flip Graph for Matrix Multiplication},
+  year          = {2025},
+  eprint        = {2510.19787},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.SC},
+  note          = {arXiv v1, 2025-10-22; no published version found}
+}
+
+@article{kauers2025consequences,
+  author        = {Kauers, Manuel and Wood, Isaac},
+  title         = {Consequences of the {M}oosbauer-{P}oole Algorithms},
+  journal       = {ACM Communications in Computer Algebra},
+  volume        = {59},
+  number        = {4},
+  pages         = {74--76},
+  year          = {2025},
+  month         = dec,
+  doi           = {10.1145/3832046.3832048},
+  eprint        = {2505.05896},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.SC},
+  note          = {Short earlier version of arXiv:2510.19787 (ISSAC'25 poster)}
+}
+
+@misc{novikov2025alphaevolve,
+  author        = {Novikov, Alexander and V{\~u}, Ng{\^a}n and Eisenberger, Marvin and Dupont, Emilien and Huang, Po-Sen and Wagner, Adam Zsolt and Shirobokov, Sergey and Kozlovskii, Borislav and Ruiz, Francisco J. R. and Mehrabian, Abbas and Kumar, M. Pawan and See, Abigail and Chaudhuri, Swarat and Holland, George and Davies, Alex and Nowozin, Sebastian and Kohli, Pushmeet and Balog, Matej},
+  title         = {{AlphaEvolve}: A coding agent for scientific and algorithmic discovery},
+  year          = {2025},
+  eprint        = {2506.13131},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.AI},
+  note          = {Google DeepMind white paper, arXiv v1 2025-06-16; no journal version found}
+}
+
+@misc{dumas2025fortyeight,
+  author        = {Dumas, Jean-Guillaume and Pernet, Cl{\'e}ment and Sedoglavic, Alexandre},
+  title         = {A non-commutative algorithm for multiplying {$4\times4$} matrices using 48 non-complex multiplications},
+  year          = {2025},
+  eprint        = {2506.13242},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.SC},
+  note          = {arXiv v7 of 2026-07-27}
+}
+
+@misc{perminov2025ternary,
+  author        = {Perminov, Andrew I.},
+  title         = {Fast Matrix Multiplication via Ternary Meta Flip Graphs},
+  year          = {2025},
+  eprint        = {2511.20317},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.SC},
+  note          = {arXiv v2, 2025-11-29; arXiv author string ``A. I. Perminov''}
+}
+
+@misc{perminov2025parallel,
+  author        = {Perminov, Andrew I.},
+  title         = {Parallel Heuristic Exploration for Additive Complexity Reduction in Fast Matrix Multiplication},
+  year          = {2025},
+  eprint        = {2512.13365},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.SC},
+  note          = {arXiv v2, 2025-12-21}
+}
+
+@misc{perminov2025addition,
+  author        = {Perminov, Andrew I.},
+  title         = {A 58-Addition, Rank-23 Scheme for General 3x3 Matrix Multiplication},
+  year          = {2025},
+  eprint        = {2512.21980},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.DS}
+}
+
+@misc{perminov2026framework,
+  author        = {Perminov, Andrew I.},
+  title         = {Fast Matrix Multiplication in Small Formats: Discovering New Schemes with an Open-Source Flip Graph Framework},
+  year          = {2026},
+  eprint        = {2603.02398},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.SC}
+}
+
+@misc{perminov2026serendipitous,
+  author        = {Perminov, Andrew I.},
+  title         = {Meta Flip Graph meets Serendipitous Product: new Fast Matrix Multiplication results},
+  year          = {2026},
+  eprint        = {2606.02480},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.SC},
+  note          = {arXiv v2, 2026-06-05}
+}
+
+% ======================== (4) THEORY / CONTEXT ========================
+
+@inproceedings{alman2025asymmetry,
+  author        = {Alman, Josh and Duan, Ran and Vassilevska Williams, Virginia and Xu, Yinzhan and Xu, Zixuan and Zhou, Renfei},
+  title         = {More Asymmetry Yields Faster Matrix Multiplication},
+  booktitle     = {Proceedings of the 2025 Annual {ACM-SIAM} Symposium on Discrete Algorithms ({SODA})},
+  pages         = {2005--2039},
+  publisher     = {SIAM},
+  year          = {2025},
+  doi           = {10.1137/1.9781611978322.63},
+  eprint        = {2404.16349},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.DS},
+  note          = {The SODA 2025 version (arXiv v1/v2) proves $\omega < 2.371339$; arXiv v3 of 2026-08-19 states $\omega < 2.371177$ using the numerical optimisation of arXiv:2608.16884}
+}
+
+@book{landsberg2012tensors,
+  author    = {Landsberg, J. M.},
+  title     = {Tensors: Geometry and Applications},
+  series    = {Graduate Studies in Mathematics},
+  volume    = {128},
+  publisher = {American Mathematical Society},
+  address   = {Providence, RI},
+  year      = {2012},
+  doi       = {10.1090/gsm/128}
+}
+
+@book{burgisser1997algebraic,
+  author    = {B{\"u}rgisser, Peter and Clausen, Michael and Shokrollahi, Mohammad Amin},
+  title     = {Algebraic Complexity Theory},
+  series    = {Grundlehren der mathematischen Wissenschaften},
+  volume    = {315},
+  publisher = {Springer},
+  address   = {Berlin, Heidelberg},
+  year      = {1997},
+  isbn      = {978-3-540-60582-9},
+  doi       = {10.1007/978-3-662-03338-8}
+}
+
+@book{blaser2013fast,
+  author    = {Bl{\"a}ser, Markus},
+  title     = {Fast Matrix Multiplication},
+  series    = {Graduate Surveys},
+  number    = {5},
+  publisher = {Theory of Computing Library},
+  year      = {2013},
+  pages     = {1--60},
+  doi       = {10.4086/toc.gs.2013.005},
+  note      = {Published 2013-12-24; entry follows the BibTeX offered on the article page}
+}
+
+% ============ (5) ADDITIONS FOUND WHILE VERIFYING (not requested) ============
+
+@misc{medley2026gpu,
+  author        = {Medley, Zeke and Gokul, Anagha and Luu, Quan and Manolios, Panagiotis},
+  title         = {{GPU}-Accelerated Search for Fast Matrix Multiplication over {$\mathbb{F}_2$}},
+  year          = {2026},
+  eprint        = {2609.17533},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.SC},
+  note          = {arXiv v1, stamped 22 Jun 2026; reports a 245-multiplication scheme for $7\times7$ over $\mathbb{F}_2$}
+}
+
+@misc{dupont2026omega,
+  author        = {Dupont, Emilien and Eisenberger, Marvin and Kozlovskii, Borislav and Mehrabian, Abbas and Ruiz, Francisco J. R. and See, Abigail and Zhou, Renfei and Alman, Josh and Vassilevska Williams, Virginia and Balog, Matej},
+  title         = {Improving the matrix multiplication exponent with modern optimization and {AlphaEvolve}},
+  year          = {2026},
+  eprint        = {2608.16884},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.DS},
+  note          = {Reports $\omega < 2.371177$}
+}
+
+@misc{yang2026lower,
+  author        = {Yang, Jason},
+  title         = {New lower bounds on tensor rank of {$(n,2,m)$} matrix multiplication with {GPT-6}},
+  year          = {2026},
+  eprint        = {2609.14393},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.CC},
+  note          = {arXiv v2, 2026-09-28. Over arbitrary fields; matches the Hopcroft--Kerr bound for $(3,2,m)$, $m\le 6$}
+}
+
+@misc{tsyganov2026lower,
+  author        = {Tsyganov, Askar and Parkina, Uliana and Samsonov, Sergey and Rakhuba, Maxim},
+  title         = {A lower bound for {$\langle 3,2,m \rangle$} matrix multiplication},
+  year          = {2026},
+  eprint        = {2609.22054},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.CC},
+  note          = {Over any field; with the Hopcroft--Kerr upper bound, rank of $\langle 3,2,5\rangle$ is exactly 25}
+}

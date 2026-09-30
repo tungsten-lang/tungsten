@@ -1,0 +1,72 @@
+\documentclass[11pt]{article}
+
+% ---------------------------------------------------------------- packages
+\usepackage[margin=1.05in]{geometry}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{booktabs,array,multirow,longtable}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.17}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage[hidelinks]{hyperref}
+\usepackage[capitalise]{cleveref}
+
+% ---------------------------------------------------------------- macros
+\newcommand{\F}{{\mathbb{F}_2}}
+\newcommand{\MM}[3]{\langle #1,#2,#3\rangle}
+\newcommand{\rk}{\operatorname{rk}}
+\newcommand{\todo}[1]{{\color{red}[TODO: #1]}}
+
+% ---------------------------------------------------------------- front matter
+\title{Upper Bounds on the GF(2) Rank of Matrix Multiplication\\
+Below Four Public Tables: 795 Formats up to $32\times32\times32$\\
+and a Prior-Art Check}
+\author{Erik Peterson\thanks{\todo{affiliation and contact e-mail}}}
+\date{\today\ \textbf{(draft)}}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We report exact decompositions of the matrix-multiplication tensor over $\mathrm{GF}(2)$ for 795 formats $\MM nmp$ with all sides at most 32 whose rank is below every rank that four public tables list on 2026-09-29, in any ring (733 formats) or among schemes known to be valid over $\F$ (62 formats). They are upper bounds only.
+The tables omit public GF(2)-valid prior art, and a check against the literature shows it: 87 of the 795 are superseded by published constructions or claims (80 by schemes we rebuilt and verified, 7 by published rank claims that we did not reproduce) and 112 more equal the rank of a composition of published schemes; 596 remain.
+Most of the 795 have no walk and no projection in their recorded lineage (507: 379 compositions, and 128 certificates and fleet checkpoints of earlier stages, which include walks); the rank-47 scheme for $\MM444$ over $\F$ is the most frequent ingredient, and 92\% have a side above 16.
+For the 733 strongest the median saving over the listed rank is 29 terms (0.9\%); the largest are 268 terms, for $\MM{20}{23}{32}$ (7{,}772 against 8{,}040), and 4.8\%, for $\MM{15}{16}{17}$, and both remain. Neither record with all sides at most 8 is new.
+The comparison is easy to overstate (458 of the 733 have no GF(2)-valid scheme listed at all, commutative algorithms must be excluded, and the tables move), so we describe it carefully.
+All tensors are exact over $\F$ and were checked by two separately written implementations; 691 ship with their derivation. The methods are in a companion paper.
+\end{abstract}
+
+\noindent\textbf{Keywords:} matrix multiplication, tensor rank, bilinear algorithms, $\mathrm{GF}(2)$, upper bounds.\\
+\textbf{MSC 2020:} 68Q25, 15A69, 68W30.
+
+\input{sections/intro}
+\input{sections/setting}
+\input{sections/overview}
+\input{sections/nature}
+\input{sections/highlights}
+\input{sections/comparators}
+\input{sections/persistence}
+\input{sections/verification}
+\input{sections/limits}
+
+\section*{Acknowledgements and disclosure}
+The search campaign, the tooling and the drafting of this manuscript were assisted by Claude (Anthropic); the author is responsible for the content.
+The results build on the schemes and tables of many authors (Hopcroft and Kerr, Sedoglavic, Fawzi et al., Kauers and Moosbauer, Arai et al., Moosbauer and Poole, Kauers and Wood, Medley et al., Perminov, Witteveen, Lacelle and others cited in the text); every derived tensor keeps their credit, recorded per row in the data release.
+\todo{funding / conflicts-of-interest statement}
+
+\bibliographystyle{plainnat}
+\bibliography{refs}
+
+\appendix
+\section{Family codes}\label{app:families}
+\input{tables/families}
+
+\section{All 795 records}\label{app:all}
+\input{tables/appendix_records}
+
+\end{document}

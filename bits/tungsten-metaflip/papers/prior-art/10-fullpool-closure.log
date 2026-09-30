@@ -1,0 +1,26 @@
+L0 closure done
+L1 closure done
+L2 closure done
+U closure done
+shapes 5456 our records 795
+ours {'tie': 1413, 'above': 1454, 'gf2_valid_only': 62, 'no_witness': 1794, 'below_all': 733} records 795
+L0 {'tie': 1741, 'above': 3439, 'gf2_valid_only': 59, 'below_all': 217} records 276
+L1 {'tie': 1741, 'above': 3439, 'gf2_valid_only': 59, 'below_all': 217} records 276
+L2 {'tie': 1679, 'above': 3316, 'gf2_valid_only': 77, 'below_all': 384} records 461
+U {'tie': 1513, 'above': 2959, 'gf2_valid_only': 92, 'below_all': 892} records 984
+L0 record-class shapes NOT among our 795: 52 | among our 795: beat ours 7 , equal 124 , worse 664 | our records the closure cannot reach: 664
+L1 record-class shapes NOT among our 795: 52 | among our 795: beat ours 7 , equal 124 , worse 664 | our records the closure cannot reach: 664
+L2 record-class shapes NOT among our 795: 174 | among our 795: beat ours 42 , equal 115 , worse 638 | our records the closure cannot reach: 638
+U record-class shapes NOT among our 795: 189 | among our 795: beat ours 56 , equal 739 , worse 0 | our records the closure cannot reach: 0
+L1 new record-class shapes 52 median saving terms 2.5 median % 0.27 max 1344
+   by largest side {'17-24': 5, '<=16': 23, '25-32': 24}  with a verified witness of ours: 37  without: 15
+   largest savings: [('32x32x32', 15463, 'gf2_valid_only', 1344), ('24x24x32', 9541, 'gf2_valid_only', 119), ('13x13x30', 3129, 'gf2_valid_only', 81), ('14x24x24', 4530, 'below_all', 30), ('12x22x25', 3831, 'below_all', 26), ('17x32x32', 9186, 'below_all', 24)]
+L2 new record-class shapes 174 median saving terms 12.0 median % 0.58 max 1344
+   by largest side {'<=16': 48, '17-24': 25, '25-32': 101}  with a verified witness of ours: 131  without: 43
+   largest savings: [('32x32x32', 15463, 'gf2_valid_only', 1344), ('25x28x30', 10950, 'gf2_valid_only', 320), ('16x25x25', 5329, 'below_all', 275), ('16x30x30', 7665, 'below_all', 165), ('16x25x30', 6497, 'below_all', 148), ('20x25x25', 6789, 'below_all', 135)]
+U new record-class shapes 189 median saving terms 12 median % 0.52 max 1344
+   by largest side {'<=16': 48, '25-32': 113, '17-24': 28}  with a verified witness of ours: 142  without: 47
+   largest savings: [('32x32x32', 15463, 'gf2_valid_only', 1344), ('25x28x30', 10950, 'gf2_valid_only', 320), ('16x25x25', 5329, 'below_all', 275), ('16x30x30', 7665, 'below_all', 165), ('16x25x30', 6497, 'below_all', 148), ('20x25x25', 6789, 'below_all', 135)]
+U beats ours on 56 of our 795; terms saved: median 18.5 max 255 total 1948
+formats with a verified witness of ours that are NOT records but U is: 142
+done

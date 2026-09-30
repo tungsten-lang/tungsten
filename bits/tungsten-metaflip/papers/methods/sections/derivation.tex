@@ -1,0 +1,99 @@
+\section{Cross-shape derivation: projection, basis rewrite, compression}\label{sec:derive}
+
+The walker improves a scheme within its format. A second family of operators moves \emph{between} formats. Restriction is classical (zero-padding shows
+that a bound for a componentwise larger format bounds a smaller one); what matters in practice is that the restricted scheme is usually \emph{unreduced}, so that a walk from it has
+slack to exploit, and that the choice among the many possible restrictions can be made by rank after a cleanup.
+
+\subsection{Coordinate projection}
+Fix a dimension $d\in\{i,j,k\}$ (the row index of $A$ and $C$, the inner index, or the column index of $B$ and $C$) and a value $x$ of that index.
+The \emph{projection} deletes $x$ from the two factors that carry $d$: for $d=i$, row $x$ of the $A$-mask and of the $C$-mask; for $d=j$, column $x$ of the $A$-mask and
+row $x$ of the $B$-mask; for $d=k$, column $x$ of the $B$-mask and of the $C$-mask; the remaining factor is unchanged, the coordinates above $x$ are shifted down, a term
+is dropped if a projected factor is zero, and terms that become equal cancel in pairs.
+
+\begin{lemma}[projection]\label{lem:projection}
+If $S$ is a scheme of rank $r$ for $\MM nmp$, its projection along any dimension and value is a scheme for the format with that dimension decreased by one and of rank at most $r$.
+\end{lemma}
+\begin{proof}
+Let $\pi_e$ be the linear map on the space of factor $e$ that deletes the coordinates with index value $x$ in $d$ (and is the identity if factor $e$ does not carry $d$), and $\Pi=\pi_1\tensor\pi_2\tensor\pi_3$.
+For $d=i$, $\Pi(e_{(i,j)}\tensor e_{(j,k)}\tensor e_{(i,k)})$ is zero if $i=x$ and otherwise equals the same basis tensor with $i$ renumbered to $i-[i>x]$; hence $\Pi(T_{n,m,p})=T_{n-1,m,p}$. The cases $d=j,k$ are identical.
+By linearity, $\sum_t \pi_1u_t\tensor\pi_2v_t\tensor\pi_3w_t=\Pi(T_{n,m,p})$. Terms with a zero factor are the zero tensor and can be dropped, and over $\F$ replacing multiplicities by their parity does not change the sum.
+\end{proof}
+
+The rank of the child is $r-z-c$, with $z$ the number of terms one of whose projected factors vanishes (its support lies entirely in the deleted row or column) and $c$ the number of terms removed by
+cancellation; nothing guarantees $z>0$, so the saving is measured. For the naive scheme, deleting a row of $A$ removes exactly the $mp$ terms of that row. For the packaged presentation of the rank-47 scheme for $\MM444$ (file \texttt{d450}) it yields rank-40 schemes for $\MM344$
+(seven terms vanish at one coordinate, four at each other coordinate followed by a cleanup of three) and rank-39 schemes for the same format along the middle index (eight terms vanish),
+one above the rank-38 schemes for that format in the seed library.
+
+\subsection{Shared-factor compression and the basis rewrite}
+Group the terms of a scheme by their factor in one position $a$. For a group $G$ with common factor $f$, write the other two factors as $(l_t,r_t)$; then $\sum_{t\in G}t=f\tensor M_G$ with $M_G=\sum_{t\in G}l_t r_t^{\top}$
+regarded as an element of the tensor product of the other two spaces. \emph{Any} factorization $M_G=\sum_{s=1}^{\rho}l'_sr_s'^{\top}$ gives an exact replacement of $G$ by the $\rho$ terms $(f,l'_s,r'_s)$.
+
+\begin{description}
+\item[Compression.] Sweep the three positions; in each, replace every group whose matrix $M_G$ has rank $\rho<|G|$ by a canonical rank factorization (the first $\rho$ linearly independent columns of $M_G$ and the coefficients that express all columns in them),
+cancel duplicate pairs, and repeat until a sweep removes nothing. This generalizes the pair identity $(a,b,c)+(a,b,d)=(a,b,c\oplus d)$ and finds reductions even when no two terms share two factors; it never increases the rank and its fixed point
+is a local optimum for one-factor groups, not a rank minimum.
+\item[Basis rewrite (two-pass modes).] The same factorization is applied to \emph{every} group of two or more terms, also when the rank does not drop (a ``neutral'' rewrite), in two passes over the three positions in a chosen order and with the column scan in ascending
+or descending order, followed by compression. The $3!\times2=12$ combinations are called modes 6--17. The rewrite is a composition of flips and drops of vanishing terms. Write the group as $LR^{\top}$ with $|G|$ columns; a flip between two of its terms is a transvection $(L,R)\mapsto(LE,RE^{-\top})$ (\cref{lem:flip}), transvections generate $\mathrm{GL}_{|G|}(\F)$, suitable column operations of this kind turn any expansion of $M_G$ into a $\rho$-term factorization (with $\rho=\operatorname{rank}M_G$) plus $|G|-\rho$ terms with a zero factor, and any two $\rho$-term factorizations with independent columns differ by an element of $\mathrm{GL}_\rho(\F)$.
+The rewrite therefore stays inside the flip graph but jumps in one step to a canonical representative of each group. It is \emph{not} an isotropy: it changes the presentation, not the index spaces.
+\end{description}
+Both operators are deterministic functions of the multiset of terms and, for the rewrite, the mode, and neither increases the rank; every result is re-expanded against the full tensor.
+
+\subsection{Screening and the cascade}\label{sec:cascade}
+For a \emph{parent} scheme, the screen tries 13 bases (the parent itself and the 12 rewrites), every dimension whose one-smaller format appears in the public table, and every coordinate; each child is the compressed projection.
+For each canonical child format it keeps the child of least rank, breaking ties toward the largest single-position count of shared-factor pairs ($\sum_G\lfloor|G|/2\rfloor$ within one position), then the total over the three positions, then the hash (a scheduling proxy that leaves more material for the walker and is not a rank bound), and re-derives it with a separately written bit-grid projector.
+\Cref{alg:cascade} is the driver as run.
+
+\begin{algorithm}[t]
+\caption{The projection cascade (one round).}\label{alg:cascade}
+\begin{algorithmic}[1]
+\State \textbf{parents} $\gets$ current record witnesses of the scoreboard not yet projected, ordered by rank
+\For{each parent $P$ \textbf{in parallel}}
+  \For{each canonical child format $s$ in the public table}
+    \State $c_s\gets\arg\min$ over bases $\in\{P,\textsc{TwoPass}(P,6),\dots,\textsc{TwoPass}(P,17)\}$, coordinates:
+    \Statex\hspace{2.6em}rank of \textsc{Compress}(\textsc{Project}(basis, $d$, $x$)); ties by shared-factor pair counts
+  \EndFor
+  \State verify each kept child (exactness gate, separate projector); log parent, mode, dimension, coordinate
+\EndFor
+\State rescore the scoreboard (children are witnesses too)
+\For{each canonical child format $s$ with best logged child $c_s$}
+  \If{board rank of $s\le\mathrm{rank}(c_s)$ \textbf{or} $\mathrm{rank}(c_s)>1.03\times$ best listed rank of $s$} \textbf{skip}
+  \EndIf
+  \State walk $c_s$ for $2\times40$M proposals (two nonces)
+\EndFor
+\end{algorithmic}
+\end{algorithm}
+
+Three rounds were run on 2026-09-29, each over the record witnesses of the moment (410, 316 and 118 parents; \cref{tab:cascade}), preceded by a screen of the 186 July certificates on 09-26 (483 children).
+The 1{,}128, 910 and 345 children of the rounds cover 887, 746 and 316 distinct formats. In round 2 we also selected 309 near-listing witnesses of the campaign's own chains for iterated 100M-move deepening; the queue was stopped during its first round (461 walks completed, 164 shapes improved).
+
+\begin{table}[t]
+\centering\small
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+& r1 & r2 & r3 & total\\
+\midrule
+parents (median rank) & 410 (2{,}885) & 316 (2{,}911) & 118 (3{,}516) & 844\\
+children logged / distinct formats & 1{,}128 / 887 & 910 / 746 & 345 / 316 & 2{,}383\\
+children from a basis rewrite (mode $\ne$ plain) & 67\% & 86\% & 90\% & 78\%\\
+children below the listed rank & 318 & 188 & 67 & 573\\
+terms removed parent$\to$child, median (max) & 95 (640) & 93 (579) & 110 (528) & 96 (640)\\
+children walked / walks & 271 / 542 & 165 / 330 & 4 / 8 & 440 / 880\\
+walks that lowered the child's rank & 494 & 290 & 8 & 792 (90\%)\\
+children improved by walking & 248 & 146 & 4 & 398 (90\%)\\
+\bottomrule
+\end{tabular}
+\caption{The projection cascade on 2026-09-29; the 844 parent slots hold 833 distinct parents. Walks are $2\times40$M proposals per child. In round 2 the first pick covered 121 children and the second 44 more; ``lowered the child's rank'' is relative to the projected child, which starts unreduced, not relative to any record.}
+\label{tab:cascade}
+\end{table}
+
+\subsection{What projection and the rewrite contribute}
+Every logged child whose parent file survives re-derives byte for byte from its parent with the current code (2{,}863 of the 2{,}866 children of the three rounds and the earlier screen). For 2{,}375 children of the three rounds we also decomposed the saving: of the $264{,}271$ terms removed between parent and child, 64.6\% vanished under the deletion, 35.2\% were removed by compression, 0.3\% by the basis rewrite itself, and none by cancellation; the median child is about 3\% smaller than its parent.
+The rewrite matters because of what it \emph{enables}: for 1{,}177 of the 1{,}846 basis-mode children that could be checked (63.8\%), the child is strictly smaller than the best plain deletion of the same parent onto the same format (median gain 4 terms, maximum 33), and 32 children are below the listed rank only because of it; the remainder tie and were selected by the
+shared-pair tie-break. On small optimal schemes it does nothing: for the rank-47 scheme for $\MM444$ every mode returns its input.
+Of the 795 record shapes of the companion paper, 216 have a projection in their lineage; 153 of those contain a basis-mode step and 88 contain a step where the basis child is strictly better than every plain deletion.
+
+\subsection{A defect in the campaign as run}\label{sec:selfref}
+The scoreboard scans the whole working directory, including the directory to which the round's children are written. A board scored while a round is running therefore already contains that round's children, and the ``no gain'' test of \cref{alg:cascade}, which compares a child with the board's best witness for its format, then compares the child with itself.
+The effect is visible: on the board used for the last pick, the best witness of 90 of the 316 round-3 formats \emph{was} the round-3 child; 48 round-3 children that beat the board of the previous round and lay within 3\% of the listing were excluded only for this reason and never walked (against the earlier board the rule selects 74 children instead of 4).
+An example is $20\times25\times28$: the projection child of rank 7{,}545 (a record) was never walked. In round 2 the same defect affected 88 children, of which 77 were walked anyway through the deepening or an earlier pick (11 never).
+Consequently the statement in the campaign's notes that ``the projection cascade has converged on this witness set'' is not supported by the data; what the data support is that the last pick was drastically under-filled.

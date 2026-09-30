@@ -1,0 +1,62 @@
+\section{Lineage bundles and the verification protocol}\label{sec:lineage}
+
+A result that cannot be re-derived is an anecdote. We therefore publish every claimed tensor inside a \emph{lineage bundle} that records how it was obtained, and we verify the bundles by a fixed protocol.
+
+\subsection{Bundle format}
+A bundle is a directory with one \texttt{.mfw.gz.b64} file per row (the gzip-compressed, base64-encoded MFW1 bytes, gzip with a zero timestamp so that the stored bytes are deterministic) and a manifest
+\texttt{\{schema:1, field:"GF(2)", record\_claim:false, rows:[...]\}}.
+A row is \texttt{\{kind, parent, shape, rank, sha256, file, details\}}, where \texttt{parent} is the SHA-256 of the row from which this one was derived. A chain therefore reads from a \emph{seed row}, which has no parent, to the retained tensor.
+The kinds and their provenance are:
+\begin{description}
+\item[\texttt{public-mod2}] a public integer or ternary scheme reduced modulo two: repository, revision, path, SHA-256 of the source file, its rank, licence and credit.
+\item[\texttt{recipe-replay}] a matmulcatalog recipe replayed over $\F$: catalogue revision and file, the recipe, the atoms it depends on with the catalogue's recorded source and year, and a flag saying whether an empty-cache replay must reproduce it.
+\item[\texttt{closure}] a block-sum/Kronecker recipe (\cref{sec:composition}).
+\item[\texttt{retained}, \texttt{archived}] a certificate committed to the repository, or recovered from a named git revision with the SHA-256 of the original decimal file.
+\item[\texttt{basis}, \texttt{projection}] a rewrite mode, dimension and coordinate (\cref{sec:derive}).
+\item[\texttt{walk}] the number of proposals and the nonce; the walker is identified by its source path.
+\end{description}
+A builder writes bundles from explicit chains: it exact-checks every step, takes shape, rank and hash from the tensor itself, stores a tensor reached by several chains once, and rejects the same tensor reached with different provenance.
+
+\subsection{What the verifier checks}
+For every row the verifier decodes the file, compares its SHA-256, parses it canonically, compares shape and rank with the row, expands it against the tensor (Python; optionally Ruby as well), checks that the provenance fields required by the kind are present and that the row has a parent if and only if it is not a seed.
+In addition, by kind:
+\emph{public-mod2} rows are re-derived from the pinned upstream file (its hash must equal the recorded one and \texttt{reduce\_mod2} must give the recorded tensor);
+\emph{recipe-replay} rows flagged as reproducible must equal an empty-cache replay of the recipe at the pinned revision;
+\emph{closure} rows must have consistent rank arithmetic (splits add, products multiply);
+\emph{retained} rows must equal the committed certificate; \emph{archived} rows are re-read at the named revision and must match the recorded hash;
+\emph{basis} and \emph{projection} rows are recomputed from the parent with the same code paths and must be byte-identical;
+\emph{walk} rows must keep the shape and not raise the rank and, on request, must be reproduced byte for byte by the native walker from the parent's bytes, the recorded number of proposals and the nonce.
+\Cref{tab:revisions} lists the upstream revisions that the campaign pinned.
+
+\begin{table}[t]
+\centering\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+source & revision & date\\
+\midrule
+Lille \texttt{fmm\_digest} & \texttt{9f26324b2749} & 2026-09-28\\
+matmulcatalog & \texttt{f0c2ba9e3797} (replays also at \texttt{b944258b28fd}) & 2026-09-29\\
+FastMatrixMultiplication & \texttt{613599b6c351} (seeds also from \texttt{b28490ca14c8}) & 2026-09-28\\
+fmm-schemes (release 1.1) & \texttt{8fa0f2a0b0d3} (seeds also from \texttt{e2f5c2ed}) & 2026-09-27\\
+July certificates (git history) & \texttt{b133232426b9} $=$ parent of \texttt{47ad44dc5} & 2026-09-03\\
+\bottomrule
+\end{tabular}
+\caption{Upstream revisions pinned by the campaign. All four tables moved between 2026-09-26 and 2026-09-29, and three of the four heads moved again after scoring (companion paper).}
+\label{tab:revisions}
+\end{table}
+
+\subsection{Protocol and outcome}
+The release comprises four bundles---searched records (677 rows), closure products (203), the July block-composition certificates recovered from git history (186) and a first-day bundle (21)---which together hold 985 distinct tensors, plus an asset of indices, logs and a snapshot of the tools.
+Our protocol has four parts.
+(1) \emph{Exactness by two separately written implementations.} The Python gate ran on all 1{,}087 rows. The Ruby gate ran, after the bundles were built, on the 691 records held in bundles and on all 661 chain heads (logs in the release), and later on all 1{,}089 tensors behind the records: the 985 distinct bundle tensors, the 102 committed certificates and the two fleet checkpoints (log in the repository). All are exact at the manifest rank. The verification runs of the release itself used the Python gate only.
+(2) \emph{Re-derivation from pinned sources.} All 11 distinct public seeds, all 186 distinct archived certificates and all 25 retained certificates were re-derived; every one of the 225 projection rows was recomputed; 71 of 82 recipe replays were reproduced from an empty cache.
+(3) \emph{Walk replay.} The native walker reproduced 42 distinct walks byte for byte: 34 of the 236 walks of the searched-records bundle (all those ending at rank at most 1{,}600) and all 11 of the first-day bundle (three walks are in both sets). The remaining walks were checked for exactness and for the invariant that a walk keeps the shape and never raises the rank, but not replayed:
+a 40M-move walk of a large scheme takes minutes, and we chose breadth of the cheap checks over depth of this one.
+(4) \emph{Clean extraction.} The five release tarballs were extracted into a fresh directory and verified with the tools snapshot they carry and empty caches for the replay; this step, and not any earlier one, exposed the defect of \cref{sec:cachebug}.
+
+\subsection{What this does not establish}
+The verifier does not rebuild a closure row from its leaves (the rank arithmetic is checked, and a separate script of the repository rebuilt 259 of the 267 closure rows byte for byte; the other eight rows, which are six distinct tensors, depend on three intermediate witnesses whose files no longer exist).
+Five replayed seeds were built with local witnesses that the manifest does not list (\cref{sec:cachebug}).
+Only 42 of the 244 distinct walks were replayed.
+The two exactness implementations share the bit-layout convention by design, and the same author wrote both.
+None of this bears on the exactness of the tensors, which is established directly; it bears on how much of the \emph{provenance} an independent reader can re-derive.

@@ -1,0 +1,35 @@
+\begin{figure}[t]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[
+  box/.style={draw,rounded corners=2pt,align=center,inner sep=4pt,font=\small,minimum height=10mm,minimum width=46mm},
+  shade/.style={fill=gray!14},
+  arr/.style={-{Stealth[length=2.2mm]},thick}]
+  % sources
+  \node[box] (tab) at (0,6.0) {four public tables\\ {\footnotesize Lille, matmulcatalog, FMM, fmm-schemes}};
+  \node[box] (pub) at (6.0,6.0) {integer/ternary schemes\\ reduced mod 2 {\footnotesize(\S\ref{sec:seeds})}};
+  \node[box] (rep) at (12.0,6.0) {matmulcatalog recipes\\ replayed over $\mathbb F_2$ {\footnotesize(\S\ref{sec:seeds})}};
+  % scoreboard
+  \node[box,shade,minimum width=76mm] (board) at (6.0,3.7) {scoreboard: best verified scheme per sorted format {\footnotesize(\S\ref{sec:scoring})}};
+  % operators
+  \node[box] (clo) at (0,1.4) {composition closure\\ price $\to$ materialize {\footnotesize(\S\ref{sec:composition})}};
+  \node[box] (proj) at (6.0,1.4) {projection cascade\\ rewrite, project, compress {\footnotesize(\S\ref{sec:derive})}};
+  \node[box] (walk) at (12.0,1.4) {directed flip walks\\ $4\!\times\!10^{7}$--$2\!\times\!10^{8}$ proposals {\footnotesize(\S\ref{sec:walker})}};
+  % gate and bundle
+  \node[box] (gate) at (3.0,-1.2) {exactness gate\\ Python; Ruby audit {\footnotesize(\S\ref{sec:repr})}};
+  \node[box,shade] (bundle) at (9.0,-1.2) {lineage bundles; clean-extraction check\\ {\footnotesize(\S\ref{sec:lineage})}};
+  \draw[arr] (tab) -- node[left,font=\footnotesize,pos=0.55]{bars} (board.north west);
+  \draw[arr] (pub) -- (board.north);
+  \draw[arr] (rep) -- (board.north east);
+  \draw[arr] (board.south west) -- node[left,font=\footnotesize]{leads} (clo.north);
+  \draw[arr] (board.south) -- node[right,font=\footnotesize]{parents} (proj.north);
+  \draw[arr] (board.south east) -- node[right,font=\footnotesize]{seeds} (walk.north);
+  \draw[arr] (clo.south) -- (gate.north west);
+  \draw[arr] (proj.south) -- (gate.north east);
+  \draw[arr] (walk.south) |- ++(0,-0.75) -| (gate.north east);
+  \draw[arr] (gate) -- (bundle);
+  \draw[arr,dashed] (gate.west) -- ++(-3.9,0) |- (board.west);
+\end{tikzpicture}}
+\caption{The pipeline. Every tensor enters the scoreboard only through the exactness gate (dashed arrow); the public tables steer effort (bars, leads, parents, seeds) but never admission.}
+\label{fig:pipeline}
+\end{figure}

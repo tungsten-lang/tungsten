@@ -1,0 +1,17 @@
+family	code	records
+closure product	C	203
+July certificate	J	152
+committed certificate	K	126
+closure product -> projection -> walk	CPW	106
+matmulcatalog replay -> walk	MW	58
+July certificate -> projection	JP	36
+matmulcatalog replay	M	24
+committed certificate -> projection -> walk	KPW	23
+closure product -> projection	CP	15
+July certificate -> projection -> walk	JPW	15
+matmulcatalog replay -> projection -> walk	MPW	12
+committed certificate -> projection	KP	8
+closure product -> walk	CW	8
+public seed -> walk	S	6
+live fleet checkpoint	F	2
+matmulcatalog replay -> projection	MP	1

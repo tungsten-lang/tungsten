@@ -224,6 +224,39 @@ Strassen and AlphaTensor rank-47 4x4 seeds, which improve on the published
 ternary starts without asserting a new record. Alternative compositions are
 presentations of those known constructions, not independent discoveries.
 
+### GF(2) record-hunt tensors derived from public schemes (2026-09)
+
+The tensors from the 2026-09 record hunt (`tools/RECORD-HUNT-2026-09-26.md`) are **not in this
+package**. They are release assets of the private `tungsten-lang/metaflip-archives` repository
+(tag `evidence-2026-09-29`); each lineage bundle's `manifest.json` records, per seed row, the
+upstream repository, pinned revision, path and source SHA-256, and per matmulcatalog replay the
+catalogue file, lineage and every atomic scheme it depends on. This package only carries the tools
+that read those upstream files (`tools/screen_public_ternary_gf2.py`,
+`tools/mmc_gf2_replay.py`, `tools/mmc_gf2_seeds.py`) and verify the bundles
+(`tools/verify_gf2_lineage.py`). The sources, and the notices that go with the derived tensors:
+
+- [`dronperminov/FastMatrixMultiplication`](https://github.com/dronperminov/FastMatrixMultiplication)
+  (revisions `b28490ca14c884c339a9fc69a3bdcba1f6e2c5da` and `613599b6c35159b2dcc6749574152eee89518998`):
+  MIT License, copyright Andrew Perminov (2025); schemes by Andrew I. Perminov and the authors the
+  upstream catalog cites.
+- [`MerlijnW70/fmm-schemes`](https://github.com/MerlijnW70/fmm-schemes) (`e2f5c2e`, v1.0, 2026-09-24,
+  and `8fa0f2a`, v1.1, 2026-09-27): [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), by
+  MerlijnW70. Changes: coefficients reduced modulo two, the output factor transposed to Metaflip
+  `(i,k)` order, and the resulting tensors transformed by GF(2) flip walks. The seed files are the
+  unmodified reductions.
+- [`solven-eu/matmulcatalog`](https://github.com/solven-eu/matmulcatalog) (arXiv:2606.13408;
+  revisions `b944258b28fd9cfc644798fe88fb55b2bff2cb0a` and `f0c2ba9e379709670672359b33f6ae29a5b8fd6c`):
+  no licence file. Composition recipes from its `derived` files were replayed over GF(2) with the
+  algebra re-implemented in `tools/mmc_gf2_alg.py`; the result is attributed to the catalogue and to
+  the scheme authors it records for each atomic leaf (Perminov, AlphaTensor by Fawzi et al. 2022,
+  AlphaEvolve by Novikov et al. 2025, Hopcroft and Kerr 1971, and others).
+- Sedoglavic's [Lille catalogue](https://fmm.univ-lille.fr/) digest (`sedoglavic/fmm_digest`) is
+  used for rank comparison only; none of its tensors is imported.
+
+Project owner's decision, 2026-09-29: tensor decompositions are treated as mathematical objects, so
+their redistribution is not held back over copyright, but every derived tensor keeps its
+attribution. Repository size is the separate reason they live in the archive.
+
 ## Release rule
 
 Keep an imported scheme outside the bit when its redistribution status is not

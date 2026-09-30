@@ -1,0 +1,69 @@
+\section{Notable records}\label{sec:highlights}
+
+\paragraph{Small formats.}
+Only nine records have all sides at most 12 and two have all sides at most 8 (\cref{tab:small}). Of the nine, three are closure products ($\MM448$, $\MM8{8}{10}$, $\MM{10}{12}{12}$), $\MM889$ is a projection of one of them, $\MM777$ is a July construction kept by the fleet, $\MM999$ is a walk from a public scheme, and $\MM8{12}{12}$, $\MM8{11}{12}$ and $\MM7{12}{12}$ come from a chain of projected directed walks.
+Neither record with all sides at most 8 is new: Table~3 of Perminov's preprint \cite{perminov2025ternary} lists rank 94 for $\MM448$ over $\mathbb Z_2$ (and 248 for $\MM777$), and \cite{medley2026gpu} reports 245 for $\MM777$.
+The prior-art check of \cref{sec:persistence} leaves three of the nine: five are matched by elementary compositions of published schemes ($\MM448$, $\MM889$, $\MM8{8}{10}$, $\MM8{12}{12}$, $\MM{10}{12}{12}$), $\MM777$ is superseded, and only $\MM999$, $\MM7{12}{12}$ and $\MM8{11}{12}$ remain.
+The interest of the list is what it does not contain:
+$\MM444$ at rank 47 (an AlphaTensor scheme) ties and is not a record, and the best known $\MM555$ (93) and $\MM666$ (153) \cite{moosbauer2025flip} are at the tables' ranks.
+\begin{table}[t]
+\centering\small
+\begin{tabular}{@{}lrrrp{2.7cm}l>{\raggedright\arraybackslash}p{3.5cm}@{}}
+\toprule
+format & rank & any ring & GF(2)-valid & class & family & note\\
+\midrule
+$4\times4\times8$ & 94 & 95 & 96 & \textsf{below\_all} & C & matched: $47+47$; rank 94 also in \cite{perminov2025ternary}\\
+$7\times7\times7$ & 247 & 249 & 250 & \textsf{below\_all} & F & superseded: 245 reported \cite{medley2026gpu}\\
+$8\times8\times9$ & 381 & 388 & 391 & \textsf{below\_all} & CP & projected closure product; matched\\
+$8\times8\times10$ & 420 & 427 & 427 & \textsf{below\_all} & C & matched: $7\cdot60$\\
+$9\times9\times9$ & 482 & 486 & 486 & \textsf{below\_all} & S & walk from a public scheme; also reached by the fleet; remains\\
+$7\times12\times12$ & 663 & 660 & 669 & \textsf{gf2\_valid\_only} & KP & projection of the $8\times12\times12$ certificate; rational 660 listed; remains\\
+$8\times11\times12$ & 673 & 676 & 690 & \textsf{below\_all} & KP & projection of the $8\times12\times12$ certificate; remains\\
+$8\times12\times12$ & 705 & 720 & 735 & \textsf{below\_all} & K & directed-walk chain from $\langle8,12,15\rangle$; matched: $15\cdot47$\\
+$10\times12\times12$ & 900 & 900 & 902 & \textsf{gf2\_valid\_only} & C & matched: $15\cdot60$; ties the any-ring rank\\
+\bottomrule
+\end{tabular}
+\caption{The nine records with all sides at most 12; ``any ring'' and ``GF(2)-valid'' are the best listed ranks. For $\MM777$, Perminov's preprint \cite{perminov2025ternary} reports 248 and the Lille digest lists 249, so 247 was 2 terms below the tables' best rank (3 below their GF(2)-valid rank) and 1 below Perminov's $\mathbb Z_2$ rank; \cite{medley2026gpu} reports 245 (\cref{sec:persistence}).}
+\label{tab:small}
+\end{table}
+
+\paragraph{Formats searched directly.}
+Six records came from short walks (40M to 200M proposals) starting from a public integer or ternary scheme reduced modulo two: $\MM999$ (482 from Perminov's 486), $\MM{10}{13}{14}$ (1{,}150 from 1{,}152), $\MM{11}{13}{15}$ (1{,}363 from fmm-schemes' 1{,}364), $\MM{11}{14}{14}$ (1{,}372 from 1{,}373),
+$\MM9{11}{13}$ (836 from 840; a rational scheme of rank 835 is listed, so this is a \textsf{gf2\_valid\_only} record) and $\MM9{10}{14}$ (819 from 820, against a listed rational 808). The savings are one to four terms.
+These six are the records closest to what flip-graph searches usually report: each is the result of one walk from a public scheme, and their ranks span 482 to 1{,}372.
+Of the ten formats of our first-day bundle, four were lowered or tied within two days by a new release of a public table ($\MM{13}{14}{16}$ and $\MM9{14}{16}$ lowered, $\MM8{11}{16}$ and $\MM{11}{15}{15}$ tied); three of the ten were later lowered much further by other lineages
+($\MM8{11}{16}$ to 889, $\MM{13}{14}{16}$ to 1{,}763 and $\MM{11}{16}{16}$ to 1{,}707); and two, $\MM{11}{15}{15}$ and $\MM9{14}{16}$, are no longer records.
+
+\paragraph{Squares.}
+Of the five square formats among the records, $\MM777$ (247) and $\MM{13}{13}{13}$ (1{,}402, a July composition) were not found by walks; $\MM999$ (482) is a walk from a public scheme, also reached by the live fleet's walker from the same scheme; $\MM{15}{15}{15}$ (2{,}006) is a reduction, by the project's live fleet (mostly flip walkers, lane not recorded), of a July composition of rank 2{,}008; and $\MM{20}{20}{20}$ (4{,}451) is a projected July certificate. The $\MM{13}{13}{13}$, $\MM{15}{15}{15}$ and $\MM{20}{20}{20}$ records are \textsf{gf2\_valid\_only}: lower ranks (1{,}379, 1{,}977 and 3{,}995) are listed for other or unspecified rings. After the prior-art check of \cref{sec:persistence}, $\MM777$ (245 published) and $\MM{20}{20}{20}$ (4{,}371, the product of the rank-47 and a rank-93 scheme) are superseded; the other three remain.
+
+\paragraph{Largest savings.}
+\Cref{tab:top} lists the ten records with the largest absolute and relative savings over the best listed rank. All twenty have a side of at least 11 and rank in the thousands; eighteen are July or committed certificates (families J and K), one is a projected closure product and one a projected and walked one. The largest absolute saving is 268 terms for $\MM{20}{23}{32}$; the largest relative saving is 4.78\% for $\MM{15}{16}{17}$.
+\begin{table}[t]
+\centering\footnotesize
+\begin{tabular}{@{}lrrrrl@{\hspace{7mm}}lrrrrl@{}}
+\toprule
+\multicolumn{6}{c}{largest absolute saving} & \multicolumn{6}{c}{largest relative saving}\\
+format & rank & listed & terms & \% & fam. & format & rank & listed & terms & \% & fam.\\
+\midrule
+$20{\times}23{\times}32$ & 7{,}772 & 8{,}040 & 268 & 3.33 & K & $15{\times}16{\times}17$ & 2{,}329 & 2{,}446 & 117 & 4.78 & J\\
+$20{\times}24{\times}31$ & 7{,}827 & 8{,}070 & 243 & 3.01 & K & $13{\times}16{\times}16$ & 1{,}930 & 2{,}022 & 92 & 4.55 & J\\
+$20{\times}23{\times}28$ & 6{,}863 & 7{,}100 & 237 & 3.34 & K & $15{\times}16{\times}20$ & 2{,}716 & 2{,}834 & 118 & 4.16 & J\\
+$20{\times}25{\times}31$ & 8{,}342 & 8{,}570 & 228 & 2.66 & J & $14{\times}16{\times}16$ & 2{,}041 & 2{,}128 & 87 & 4.09 & J\\
+$20{\times}25{\times}27$ & 7{,}282 & 7{,}509 & 227 & 3.02 & K & $13{\times}16{\times}20$ & 2{,}417 & 2{,}516 & 99 & 3.93 & J\\
+$20{\times}23{\times}31$ & 7{,}636 & 7{,}862 & 226 & 2.87 & K & $15{\times}16{\times}16$ & 2{,}137 & 2{,}223 & 86 & 3.87 & J\\
+$19{\times}28{\times}28$ & 8{,}010 & 8{,}231 & 221 & 2.68 & CP & $11{\times}20{\times}28$ & 3{,}521 & 3{,}655 & 134 & 3.67 & J\\
+$20{\times}23{\times}27$ & 6{,}724 & 6{,}943 & 219 & 3.15 & K & $14{\times}16{\times}17$ & 2{,}223 & 2{,}306 & 83 & 3.60 & J\\
+$23{\times}32{\times}32$ & 12{,}214 & 12{,}432 & 218 & 1.75 & J & $11{\times}20{\times}32$ & 4{,}012 & 4{,}160 & 148 & 3.56 & CPW\\
+$20{\times}23{\times}30$ & 7{,}427 & 7{,}638 & 211 & 2.76 & K & $13{\times}16{\times}19$ & 2{,}329 & 2{,}414 & 85 & 3.52 & J\\
+\bottomrule
+\end{tabular}
+\caption{The ten largest absolute and relative savings among the 733 records below every listed rank. ``listed'' is the best listed rank in any ring.}
+\label{tab:top}
+\end{table}
+Among the new records below every listed rank, the largest savings are $\MM{24}{31}{32}$ at 12{,}297 (listed 12{,}435; $-138$), $\MM{16}{20}{23}$ at 4{,}132 (4{,}260) and $\MM{16}{23}{28}$ at 5{,}656 (5{,}784).
+
+\paragraph{Normalized exponent.}
+The normalized exponent $\omega=3\ln r/\ln(nmp)$ of a scheme of rank $r$ for $\MM nmp$ is the exponent of the recursive algorithm obtained by using the scheme as its base case.
+Among the records the smallest is $2.7870$ for $\MM{15}{16}{16}$ at rank 2{,}137 (the listed rank 2{,}223 gives $2.8013$); 43 records are below 2.80 (15 of them remain after the prior-art check of \cref{sec:persistence}) and none below 2.78; the median is 2.8131. For comparison the rank-47 scheme for $\MM444$ gives 2.7773 and Strassen's 2.8074.
+These numbers say nothing about the asymptotic exponent of matrix multiplication, which is far below them \cite{alman2025asymmetry,dupont2026omega}; they matter only for recursive algorithms over $\F$ with small base cases.

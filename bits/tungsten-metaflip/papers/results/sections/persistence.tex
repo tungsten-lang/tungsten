@@ -1,0 +1,84 @@
+\section{Persistence: re-scoring and prior art}\label{sec:persistence}
+
+\paragraph{Re-scoring against later revisions.}
+The four tables kept changing on the day of scoring and after it (\cref{tab:rescore}). We therefore re-scored all 795 records against the revisions current at 21:33 UTC on 2026-09-29, about eight hours after the scoreboard of \cref{sec:overview}.
+The scoring rule applied to the pinned inputs reproduces the bars and the class of every record, and the same tables rebuilt from fresh clones at the pinned revisions are identical; applied to the later revisions the rule leaves 793 records unchanged and lowers two margins, both because the Lille digest gained a lower rank:
+$\MM{11}{11}{17}$ (ours 1{,}312; the listed rank fell from 1{,}314 to 1{,}313, so the margin is now one term) and $\MM{16}{16}{31}$ (ours 4{,}346; 4{,}474 fell to 4{,}460, a margin of 114 terms instead of 128).
+No record changed class and none was lost. The four heads had not moved when we checked again two hours later, but a re-scoring on the day of submission will still be needed.
+\begin{table}[t]
+\centering\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+source & pinned at scoring (2026-09-29) & latest (2026-09-29, 21:33 UTC)\\
+\midrule
+Lille digest & \texttt{9f26324} & \texttt{f5c2b26}\\
+matmulcatalog & \texttt{f0c2ba9} & \texttt{5a30652}\\
+FastMatrixMultiplication & \texttt{613599b} & \texttt{ac13ca8}\\
+fmm-schemes & \texttt{8fa0f2a} & \texttt{8fa0f2a} (unchanged)\\
+\bottomrule
+\end{tabular}
+\caption{Revisions of the four tables at scoring and at the re-scoring.}
+\label{tab:rescore}
+\end{table}
+
+\paragraph{What the scoring rule does not read.}
+The four tables are not a complete record of GF(2)-valid prior art. The scoring rule reads the schemes of the catalogue file \texttt{catalog.json}, the ranks of the Lille digest and the ranks and rings encoded in the file names of the scheme files of the two repositories. It does not read
+(i) schemes valid only in characteristic two that are published outside the tables: Arai et al.'s $\MM455$ of rank 73 \cite{arai2024adaptive}, Kauers and Wood's $\MM456$ of rank 89 over $\mathbb Z_2$ \cite{kauers2025meta}, Medley et al.'s $\MM777$ of rank 245 \cite{medley2026gpu} and the $\mathbb Z_2$ discoveries of Perminov's Table~3 \cite{perminov2025ternary};
+(ii) the rank claims that the matmulcatalog keeps without factor matrices in its file \texttt{docs/cited-bounds.json}, which has 6{,}524 entries, was public in the revision we scored, and includes 971 serendipitous-product claims of Perminov \cite{perminov2026serendipitous} for formats with largest side 18 to 32;
+(iii) compositions (direct sums, Kronecker products, Strassen's algorithm on unequal blocks) of the schemes that the tables do list.
+
+\paragraph{The prior-art check.}
+On the evening of 2026-09-29 we read the result tables of 48 arXiv papers (one turned out to be unrelated) and the README of one repository: 770 rows of Perminov's three rank papers were parsed from the text (each table's row count equals the count the paper states) and 878 rows of 34 further sources were transcribed with their line and a verbatim quote, each re-checked mechanically against the text. A row counts as valid over $\F$ only if the source states characteristic two, $\mathbb Z_2$, ternary or integer coefficients, or an arbitrary ring; a field that is not stated is never counted.
+We then computed the smallest rank reachable from listed and published GF(2)-valid ranks by direct sums, Kronecker products and Strassen's algorithm on unequal blocks; built every composition of explicit published scheme files whose rank is at or below one of ours (146 schemes) and rebuilt the catalogue's serendipitous-product claims from the FastMatrixMultiplication base schemes named there, reduced modulo two; and verified every scheme exactly over $\F$ with a numpy-based check. Nine of these schemes (eight that supersede ours and one that matches it) were also verified with the verifier of our release, and an independent re-check of all 185 schemes that we rebuilt, with two further implementations, agreed.
+
+\begin{table}[t]
+\centering\small
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+prior art found & records & \textsf{below\_all} & \textsf{gf2\_valid\_only}\\
+\midrule
+superseded: a scheme built from published files, verified & 80 & 65 & 15\\
+superseded: a published rank claim, not reproduced by us & 7 & 6 & 1\\
+matched: a composition of published schemes, built and verified & 105 & 88 & 17\\
+matched: a published rank claim & 7 & 5 & 2\\
+\textsf{below\_all} contradicted only by a rational claim & 9 & 9 & --\\
+none found & 587 & 560 & 27\\
+\midrule
+all & 795 & 733 & 62\\
+\bottomrule
+\end{tabular}
+\caption{Outcome of the prior-art check; each record has the first flag that applies, in the order of the rows.}
+\label{tab:priorart}
+\end{table}
+
+\paragraph{Outcome.}
+For 80 records we built, from published material, a scheme over $\F$ of smaller rank than ours, and every one verifies exactly (\cref{tab:priorart}). Of these, 43 are serendipitous products whose rank claims the matmulcatalog has carried since 2026-06-16, 36 are compositions of explicit published schemes and one is Medley et al.'s $\MM777$ of rank 245.
+The ingredients of the compositions are most often schemes valid only in characteristic two that the four tables lack, above all Arai et al.'s $\MM455$ of rank 73 (30 of the 36), together with AlphaTensor's rank-47 scheme for $\MM444$ and Perminov's ternary schemes. For example, the Kronecker product of the rank-47 scheme for $\MM444$ and a rank-93 scheme for $\MM555$ \cite{moosbauer2025flip} has rank 4{,}371 and supersedes our $\MM{20}{20}{20}$ at 4{,}451.
+For seven more records a published rank claim lies below ours. For four of these we tried to rebuild the claim from the base schemes it names and did not reach it (the $\MM{9}{9}{18}$ claim fits only a rational scheme), and the other three, like the seven matches by claim below, compose listed ranks that include catalogue-derived entries, which carry the caveat of the F2 stamp (\cref{sec:comparators}). \emph{We withdraw all 87 records}, which is the conservative choice.
+For 112 further records our rank equals that of a composition of published schemes (105 built and verified, of which 102 are compositions and three serendipitous products; seven by claim); these are composition bounds and not search results, and most of them (96 of the 112) are closure products of our own.
+For nine \textsf{below\_all} records the matmulcatalog records a lower rank over the rationals (sixteen records carry such a claim, seven of them also flagged above), so that the label ``below every listed rank in any ring'' is contradicted while the GF(2) comparison stands.
+That leaves \textbf{596 records} (587 with no prior art found, and those nine) that remain below every GF(2)-valid bound we could find or build.
+
+\begin{table}[t]
+\centering\small
+\input{tables/prior_art_by_family}
+\caption{Prior-art outcome by lineage family (codes as in \cref{tab:families}). ``Superseded'' and ``matched'' are as in \cref{tab:priorart}; ``remaining'' includes the nine rational-claim cases.}
+\label{tab:priorart-family}
+\end{table}
+
+\paragraph{Where the prior art bites.}
+The check hits the closure products hardest (128 of 203 are superseded or matched; \cref{tab:priorart-family}), as one expects of compositions: the tables did not compose everything they could. The block recombinations of July and the certificates descended from them mostly remain (13 of 152 July certificates and 10 of 126 committed certificates are flagged), and so do the records that come from walks (35 of the 288 with a walk or a projection in their lineage are flagged).
+By size, none of the two records with all sides at most 8 remains and three of the seven with largest side 9 to 12 do; 41 of the 52 with largest side 13 to 16 and 552 of the 734 above 16 remain.
+The ten largest absolute and the ten largest relative savings (\cref{tab:top}), and the record with the best normalized exponent ($\MM{15}{16}{16}$), all remain. The median saving of the 596 is 29 terms (0.92\%).
+
+\paragraph{Composing everything public.}
+The check asks whether our records are beaten. The converse question is what a closure over every public GF(2)-valid scheme would give for all 5{,}456 formats. A rank-only estimate, by direct sums, Kronecker products and Strassen's algorithm on unequal blocks, from the ranks of the four tables puts 276 formats below the tables, 52 of them not among our 795, because the tables are not closed under composition. Adding the published GF(2)-valid ranks above (some of them claims for which we hold no scheme) gives 461 formats, 174 of them not among our 795, and adding our own witnesses gives 984, that is 189 more than our 795, and lowers 56 of the 795 (median 18.5 terms).
+We did not build these schemes. The estimate leaves out serendipitous products, the July block recombination with the newer leaves, projection and walks, so it is a lower bound on what a full run over the union of the public schemes would give. It makes the same point as the check: against tables that are not closed under composition, ``below the tables'' is a weak claim of novelty.
+
+\paragraph{Direct overlaps with the literature.}
+Two of our shapes appear in a published table at or below our rank. Medley et al.\ \cite{medley2026gpu} report $\MM777$ over $\F$ with 245 multiplications, below our 247; we decoded the scheme printed in their appendix and verified it. Perminov's Table~3 \cite{perminov2025ternary}, which lists 30 improvements over $\mathbb Z_2$, has $\MM448$ at rank 94, equal to ours (and to $47+47$); it also has $\MM777$ at 248.
+No other table we read states a rank valid over $\F$ at or below ours for one of our shapes; lower ranks over the rationals, or with no stated field, exist for some (see above and \cref{sec:comparators}). The prior art that matters is in compositions and in one catalogue file, not in direct searches of these formats.
+
+\paragraph{What the check does not cover.}
+The check is limited. It reads 48 arXiv papers found by searching and by following references on one evening; it builds compositions only from explicit published scheme files; it uses a paper's rank only where the paper states the field; and it knows four constructions (direct sums, Kronecker products, Strassen's algorithm on unequal blocks, serendipitous products). A source we did not find, a scheme that exists only as an unpublished claim, or another construction could supersede more records. ``None found'' means no more than that, and the 596 are not optimality claims.
+The other sections describe all 795 records, because the scoring rule did not see this prior art; \cref{app:all} marks the status of every record, and the statements that change for the 596 are given in this section.

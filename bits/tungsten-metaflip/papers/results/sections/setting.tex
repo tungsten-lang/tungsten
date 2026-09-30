@@ -1,0 +1,38 @@
+\section{Setting and definitions}\label{sec:setting}
+
+\paragraph{Schemes and formats.}
+A scheme of rank $r$ for $\MM nmp$ over $\F$ is a list of $r$ triples $(u_t,v_t,w_t)$ of nonzero bit vectors of lengths $nm$, $mp$, $np$ with
+$\sum_t u_t\otimes v_t\otimes w_t=\sum_{i,j,k}e_{(i,j)}\otimes e_{(j,k)}\otimes e_{(i,k)}$ over $\F$; it computes $(AB)_{ik}=\sum_t w_t[(i,k)]\langle u_t,A\rangle\langle v_t,B\rangle$ with $r$ multiplications.
+The rank depends only on the multiset $\{n,m,p\}$, so we index everything by \emph{sorted} formats $n\le m\le p$; a scheme for one ordering yields one for every ordering by permuting coordinates.
+The universe here is the 5{,}456 sorted formats with all sides between 2 and 32; 3{,}662 of them (67.1\%) have a verified scheme in our holdings, including all 680 formats with all sides at most 16.
+Each sorted format stands for up to six orderings: the 3{,}662 formats represent 20{,}217 of the 29{,}791 ordered formats, and the 795 records represent 4{,}343.
+
+\paragraph{The four tables.}
+\Cref{tab:sources} lists the sources against which every result is compared, at the revisions pinned on the day of scoring.
+The Lille digest records only a rank and an exponent per sorted format, with no coefficient field or ring; the matmulcatalog records the fields over which each scheme is valid and flags commutative algorithms;
+the FastMatrixMultiplication repository and the fmm-schemes dataset store coefficients (rings ZT $=\{-1,0,1\}$, Z and Q), from which the ring can be read.
+\begin{table}[t]
+\centering\small
+\begin{tabular}{@{}p{4.0cm}p{4.5cm}p{2.3cm}p{1.9cm}@{}}
+\toprule
+source & lists & revision & date\\
+\midrule
+Lille digest \cite{sedoglavic2026catalogue} & rank and exponent per sorted format up to 32 (no field) & \texttt{9f26324} & 2026-09-28\\
+matmulcatalog \cite{lacelle2026catalog} & schemes with the fields they are valid over; commutative algorithms flagged & \texttt{f0c2ba9} & 2026-09-29\\
+FastMatrixMultiplication \cite{perminov2026fmmrepo} & ZT, Z and Q schemes, formats up to 16 (ring in the file name) & \texttt{613599b} & 2026-09-28\\
+fmm-schemes \cite{witteveen2026schemes} & 25 ZT schemes, sides at most 16 (largest volume $13\times14\times16$) & \texttt{8fa0f2a} (release 1.1) & 2026-09-27\\
+\bottomrule
+\end{tabular}
+\caption{The four tables and the revisions scored against.}
+\label{tab:sources}
+\end{table}
+
+\paragraph{Bars and classes.}
+For a sorted format $s$, the \emph{any-ring bar} $B_{\mathrm{any}}(s)$ is the least rank listed by any source (commutative algorithms excluded), and the \emph{GF(2)-valid bar} $B_{\F}(s)$ is the least rank among matmulcatalog entries whose field list contains F2 and among ZT and Z schemes of the two repositories, which reduce modulo two; rational (\texttt{Q}) schemes never count, and the files under \texttt{schemes/known/} of the FastMatrixMultiplication repository are not read (reading them would change no class). The bar is undefined when nothing GF(2)-valid is listed.
+A verified scheme of rank $r$ for $s$ is \textsf{below\_all} if $r<B_{\mathrm{any}}(s)$; otherwise \textsf{gf2\_valid\_only} if $r<B_{\F}(s)$; otherwise a \textsf{tie} if $r=B_{\mathrm{any}}(s)$ and \textsf{above} if not.
+A \emph{record} is a format whose best scheme is \textsf{below\_all} or \textsf{gf2\_valid\_only}. On the scoreboard of 2026-09-29 there are 733 and 62 of these; 1{,}413 formats tie and 1{,}454 are above (\cref{tab:classes}).
+The definitions and the pitfalls of this comparison are treated in \cref{sec:comparators} and in the companion paper.
+
+\paragraph{Holdings.}
+The scoreboard keeps, per sorted format, the lowest-rank scheme among all exact files found in the campaign's working directories, the committed certificates of the package, its packaged seeds and the live fleet's checkpoints; a file counts only if it passes the exactness gate, and verdicts are cached by content hash.
+Ties in rank keep the lexicographically first path, so a record is one particular tensor of that rank, identified by its SHA-256; the index gives the hash of one exact tensor of that rank held in the release, which for 18 rows is an equal-rank sibling of the file the scoreboard chose.

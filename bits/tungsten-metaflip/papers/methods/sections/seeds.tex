@@ -1,0 +1,36 @@
+\section{Seeds from public tables}\label{sec:seeds}
+
+Three public sources provide starting schemes: integer and ternary schemes from the FastMatrixMultiplication repository \cite{perminov2026fmmrepo} and the fmm-schemes dataset \cite{witteveen2026schemes},
+and derivation recipes from the matmulcatalog \cite{lacelle2026catalog}. Each needs a gate, because a scheme is only useful here if it is \emph{valid over $\F$}.
+
+\subsection{Integer and ternary schemes modulo two}
+A scheme with integer coefficients reduces to a scheme over $\F$ of the same or smaller rank by reducing every coefficient modulo two; a rational scheme reduces term by term when every denominator is odd (an odd $b$ is congruent to 1, so $a/b\mapsto a\bmod2$), and more generally when no term has negative 2-adic weight; a scheme with an even denominator is not reduced by our importer.
+Our importer applies the odd-denominator rule, with three further gates.
+\begin{itemize}
+\item \textbf{The ring is read from the file-name suffix, never from the directory.} In the repository we ingest, files of ring ZT ($\{-1,0,1\}$), Z and Q sit in directories that do not correspond to the suffix (a file in a directory named for a base scheme can be rational); the window of ranks
+that is imported is anchored on the best ZT or Z rank of each format, so that a lower rational file cannot crowd out valid seeds.
+\item \textbf{Layout.} The public third factor is indexed by entry $(k,i)$ of the transposed product; it is transposed on import, and a spec builds public rows both ways and checks that the wrong layout fails the gate on a non-square format.
+\item \textbf{Cancellation.} Terms are counted as triples modulo two; a term whose reduced factor is zero disappears and equal terms cancel. The result is expanded against the tensor before it is written.
+\end{itemize}
+At the pinned revision of the repository there are 298 rational files: 278 contain an even denominator (most $\tfrac12,\tfrac14,\tfrac18$, some others such as $6$, $10$ or $1088$), each with a term of negative 2-adic weight, and are not reduced; 20 use only odd denominators and reduce to exact $\F$ schemes at their own rank, but none of them lies below our best scheme for its format.
+Seed sets prepared were 629 schemes (the best integer scheme of every format with largest side 5--16 that has one), 1{,}363 alternative schemes, 42 fmm-schemes files in two revisions and 1{,}189 schemes at the last revision of the repository; 162 of the alternatives and all of the others but the last set were walked (\cref{sec:eval}).
+None of the 629 primary schemes or of the fmm-schemes files showed a mod-2 cancellation.
+
+\subsection{Replay of matmulcatalog recipes over $\F$}
+The matmulcatalog stores many schemes not as coefficients but as \emph{derivations}: Kronecker and chained products, concatenations, restrictions, recombinations and serendipitous products over atomic schemes. Its metadata label ``F2'' appears to be inferred from recorded ranks (our reading of its tooling) and can over-claim: a recipe whose rank needs a leaf that is valid over
+$\mathbb Q$ or $\mathbb F_3$ only is still stamped F2. We re-implemented the operations index for index over $\F$, pinned to one catalogue revision, resolved a request for ``the best scheme of a format'' only among schemes stamped F2 (pinned and named leaves are taken as given, and in every case the coefficients pass the odd-denominator rule), and expanded every materialized file against the tensor.
+A recipe that cannot be realized at the catalogue's rank is recorded as a failure with its reason and no tensor is written; each success records the catalogue file, the revision, the recorded source and year of every atomic scheme it depends on, and any local witnesses used as leaves.
+
+The leaves that break the stamp are few and heavily used: the best scheme for $\MM336$ is 40 (Smirnov; listed for $\mathbb F_3$, $\mathbb Q$, $\mathbb R$ and $\mathbb C$ but not $\F$), against 42 with an $\F$ stamp; for $\MM338$ the figures are 55 and 56, and for $\MM245$ they are 32 (AlphaEvolve; again not listed for $\F$) and 33.
+On the two passes of the campaign 373 targets at one revision produced 263 exact tensors and 110 failures (all of the form ``$\F$ rank above catalogue rank''), and 979 targets at the later revision produced 835 tensors and 144 failures (134 of that form, 8 with an even-denominator coefficient, 2 with an unresolvable pinned reference).
+Consequently the catalogue's F2 minima can be lower than what is achievable over $\F$, and comparisons against them are conservative.
+
+\subsection{A reproducibility defect}\label{sec:cachebug}
+Replays are cached on disk, and every claim in this paper that a tensor ``re-derives'' depends on that cache being invisible. It was not. The cache stores each materialized scheme with its terms sorted, whereas a freshly computed scheme kept its terms in the order the algebra produced them,
+and two of the constructions that we replay (the serendipitous product and recombination) group terms by \emph{position}. A replay therefore depended on which files an earlier replay in the same cache had already materialized. Only \emph{which} tensor of a given rank came out varied, never the success counts: replays from an empty cache differ from the campaign's own pure-mode replays in exactly 43 tensors (35 of the first pass, 8 of the second), and in no rank.
+The first-pass seeds that were actually walked differ from an empty-cache replay in 59 files: 54 equal-rank variants, and the five local-witness constructions described below, which differ in rank.
+
+The defect went unnoticed because our verification used the same persistent cache that had produced the archived tensors, so a replay could not disagree with the archive. It surfaced when we extracted the release archives afresh and verified them with an empty cache.
+The mechanism is explained by the code path (sorted on write, insertion order on a fresh computation, position-based grouping) and confirmed by three checks: replays from an empty cache differ from the campaign's own pure-mode replays in exactly 43 tensors (35 of the first pass, 8 of the second) and in no rank; in a later re-experiment with the unfixed tool, caches built in two different orders differed in 129 of 984 files, 126 of them outputs of serendipitous products; and the fix, which sorts terms
+before memoizing, made every cached file identical across orders (checked for the first pass). The replay specification now compares term lists between a fresh replay and a cache hit, and fails without the fix; sequential and four-way parallel runs now produce identical caches.
+The archived bundle keeps the tensors that were actually used: of its 82 replayed seeds, 71 re-derive byte for byte from an empty cache, six are equal-rank variants, and five are lower-rank first-pass constructions that used local witnesses ($\MM448$ and $\MM{12}{15}{16}$) as leaves, which its manifest does not list; those five seeds and the eight records that depend on them are exact but their leaf provenance is incomplete.

@@ -1,0 +1,114 @@
+\section{The directed walker}\label{sec:walker}
+
+The walker is a stand-alone, single-threaded program written in Tungsten (an ahead-of-time compiled language;
+source and compiler are in the repository cited in the availability statement). It takes a shape, a seed scheme in MFW1 format, a number of proposals
+and a nonce, and writes the best scheme it saw.
+
+\subsection{State and moves}
+The state is a \emph{set} of distinct terms with three nonzero factors. Inserting a term that is already present removes it (cancellation
+in characteristic two); inserting a term with a zero factor does nothing. Terms live in stable slots of one flat integer array with a
+dense list of live slots and a free-slot stack; three chained hash indices, one per factor position, map a factor value to the terms that carry
+it (the hash only selects a bucket; every comparison is exact). The array is sized once, to the rank of the seed plus 64 slots, and nothing is allocated in
+the search loop.
+
+The walk uses two moves.
+\begin{description}
+\item[Flip.] Two distinct terms whose factors agree in some position $s$ are replaced according to \cref{lem:flip}: with $L,R$ the
+next two positions in cyclic order, the first term keeps its $L$-factor and receives $R_1\oplus R_2$, and the second keeps its
+$R$-factor and receives $L_1\oplus L_2$. Each of the two new terms contributes $+1$ if it is inserted, $0$ if it has a zero factor and $-1$ if it cancels a live term, so the
+rank changes by $-2+\delta_1+\delta_2$: it never increases and can fall by as much as four. There is no other reduction step and no scan for
+reductions, so reductions are found only by accident, which agrees with the lesson recorded in the project's earlier experiments that
+scheduled greedy reduction \emph{loses} ground.
+\item[Split (a variant of the plus transition).] One live term, one factor position and one bit position of that factor are chosen uniformly; the factor
+$f$ is replaced by the unit vector $e$ in one copy of the term and by $f\oplus e$ in another. The rank increases by one, except in
+degenerate cases. A split is attempted every 2{,}000 proposals, whenever no flippable pair exists, and after 256 consecutive rejected proposals
+(which also clears the fingerprint history described below), and only while the current rank is below the best rank seen plus 8 and a slot is free.
+\end{description}
+
+\subsection{Directed proposals}
+The baseline way to run a flip walk picks a random term and a random position and looks for a partner. In the project's live fleet the packed
+baseline walker found no partner for 93.8\% (the $9\times9\times9$ run) and 92.2\% (the $15\times15\times15$ run) of its proposals.
+The directed walker instead keeps the list of \emph{legal buckets}, the chains that contain at least one pair of exactly equal factors (with one witness
+each), and proposes only inside those: pick a legal bucket uniformly, a member of its chain uniformly, and a partner of that member with an equal factor
+uniformly (if the member has none, because of a hash collision, the bucket's witness is used). This changes the sampling distribution (it is uniform over buckets, not over legal flips) but not the set of legal moves, and an
+incremental index keeps the list exact under insertions and removals. Every legal proposal is accepted unless a guard rejects it; there is no energy,
+temperature or priority function. The best scheme is ordered by rank first and by total number of nonzero coefficients second, and density never steers the walk.
+
+The guard used throughout the campaign is the \emph{nonbacktracking} mode: a proposal is rejected (and undone) if the fingerprint of the resulting
+state equals the fingerprint of the current state or of the previous state, that is, if it would undo the immediately preceding flip; a proposal that
+reaches a new best rank overrides the guard, and the best scheme is saved \emph{before} any guard can roll the walk back.
+Fingerprints are the XOR over live terms of two salted 63-bit term hashes, cached per slot; they are a heuristic (collisions can
+reject a legal move), whereas correctness is decided only by the exactness gate of \cref{sec:repr}.
+Two further modes exist in the code (no guard; a tabu list over a bounded history table); the campaign did not use them.
+We stress that we did \emph{not} measure whether directed sampling raises the probability of finding a lower rank
+relative to uniform sampling; a small early screen of 64 one-second runs found no rank drop in any arm. Its motivation is throughput: 92--94\% of undirected proposals find no partner, which caps the possible gain at 12--16 times per proposal if a wasted and a useful proposal cost the same; in that screen the accepted-flip rate of the directed walker relative to the baseline ranged from 0.6 to 4.7 times for the nonbacktracking policy used in the campaign (0.6 to 4.6 for the plain partner policy), and we did not measure the advantage of the campaign walker.
+
+\begin{algorithm}[t]
+\caption{One directed walk (\texttt{wide\_rect\_walk SHAPE SEED OUT STEPS NONCE}).}\label{alg:walk}
+\begin{algorithmic}[1]
+\State parse the seed strictly; \textbf{require} the header shape equals \texttt{SHAPE} and the seed passes the exactness gate
+\State initialize the state from the seed; RNG state $\gets$ \texttt{NONCE}; best $\gets$ seed
+\For{$\textit{move}=1,\dots,\texttt{STEPS}$}
+  \If{no legal bucket, or $\textit{move}\bmod 2000=0$, or 256 consecutive rejections}
+    \State \textsc{Split}() \Comment{only if $\mathrm{rank}<\mathrm{best}+8$ and a slot is free}
+    \State \textbf{if} 256 rejections: clear history, forget previous state
+  \EndIf
+  \State $b\gets$ uniform legal bucket; $t_1\gets$ uniform member of $b$; $t_2\gets$ uniform equal-factor partner of $t_1$
+  \State remove $t_1,t_2$; insert the two flipped terms (zero factors dropped, equal live terms cancel)
+  \State \textbf{if} $(\mathrm{rank},\mathrm{density})<(\mathrm{best.rank},\mathrm{best.density})$ \textbf{then} best $\gets$ state
+  \If{rank has not reached a new best \textbf{and} fingerprint $\in\{$current, previous$\}$}
+    \State undo the flip \Comment{nonbacktracking guard}
+  \EndIf
+\EndFor
+\State \textbf{require} the best scheme passes the exactness gate; canonicalize (sort, cancel) without changing the rank; write it
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Determinism}
+The generator is the 63-bit linear congruential generator
+\[ s\mapsto 6364136223846793005\,s+1442695040888963407 \pmod{2^{63}}, \]
+initialized directly to the nonce, with the top 31 bits used and multiply-shift range reduction. The program has no threads, clocks, addresses or environment reads, so the output is a deterministic
+function of (shape, seed bytes, number of proposals, nonce, binary). Two walks with the same seed and nonce but different lengths share a trajectory prefix.
+Nonces are derived from a per-log base, the shape and a repeat counter, so any campaign walk can be reconstructed from its manifest row.
+Evidence for reproducibility: seven seeds run three times each gave identical outputs; two campaign walks, one of them from the first day, replayed byte for byte
+with a binary rebuilt three days later; and the release verification replayed 42 distinct walks from the bundles (34 of the 236 walks in the searched-records bundle, all 11 walks of the
+first-day bundle, three of which coincide). We did not test other platforms or compiler versions.
+
+\subsection{Cost}
+A proposal touches four terms, twelve factor buckets and two term fingerprints; in our measurements its cost tracked the number of limbs (the rank grows with the limbs in every regular row, so the two are not separated, and chain traversal is linear in the chain length),
+and nothing scans the scheme (best-scheme adoption copies the state, but only on improvement). \Cref{tab:throughput} reports measurements on one core of an Apple M5 Max
+(18 cores) that was heavily loaded by other jobs and niced, so we give retired instructions per proposal, which is load-independent, next to moves per CPU-second.
+Instructions per proposal grow roughly as $2{,}040+344\times$(limbs) over the five regular rows; the two rows marked $\dagger$ are dominated by
+proposals with no legal pair and by rejections and are not comparable. The 24$\times$31$\times$32 row uses 59\,MiB: 43\,MiB are predicted for the state, the control arrays and the packed array,
+and the rest is text buffers and the runtime.
+
+\begin{table}[t]
+\centering\small
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+shape & seed rank & limbs & Mmoves/CPU-s & instr./move & RSS (MiB) & rank after 5M\\
+\midrule
+$3\times4\times6^{\dagger}$ & 54 & 1 & 4.67 & 3{,}070 & 3.2 & 54\\
+$4\times4\times6$ & 73 & 1 & 6.67 & 2{,}387 & 3.4 & 73\\
+$9\times9\times9$ & 486 & 3 & 4.20 & 3{,}123 & 4.2 & 482\\
+$9\times10\times14$ & 820 & 5 & 2.92 & 3{,}815 & 4.5 & 820\\
+$16\times16\times16^{\dagger}$ & 2{,}401 & 8 & 1.57 & 7{,}641 & 9.1 & 2{,}401\\
+$10\times28\times28$ & 4{,}537 & 25 & 0.97 & 10{,}124 & 22.1 & 4{,}537\\
+$24\times31\times32$ & 12{,}297 & 31 & 0.62 & 13{,}098 & 59.0 & 12{,}296\\
+\bottomrule
+\end{tabular}
+\caption{Walker throughput, 5M proposals per row after subtracting fixed I/O cost (three repeats, identical outputs). $\dagger$: escape-heavy regimes. The last column
+shows that a fresh 5M-move walk already lowers the $9\times9\times9$ scheme from Perminov's rank 486 to 482 and the campaign's $24\times31\times32$ witness from 12{,}297 to 12{,}296,
+for that witness the campaign's 40M-move budget did not reach stagnation (no other large shape was tested).}
+\label{tab:throughput}
+\end{table}
+
+Over the campaign the walker executed \(3.103\times10^{11}\) proposals. CPU time was not logged; interpolating the per-limb rates gives a rough
+55 CPU-hours (uncertain by about a factor of two), i.e.\ an average of about 1.6M proposals per CPU-second.
+Fingerprint caching (each term's two hashes are stored in its slot instead of being recomputed) sped up representative walks by 1.20--1.41$\times$ and was verified to leave endpoints and all counters
+unchanged in 39 paired comparisons.
+
+\subsection{Parameters and their status}
+The campaign used nonbacktracking mode with a 4{,}096-entry history table (in this mode the table only feeds counters), a periodic split every 2{,}000 proposals, at most +8 rank above the best, and walk lengths of 40M, 100M or 200M proposals
+(\cref{sec:eval}). The ``+8'' is hard-coded in the split; the walker passes a constant slack of 8 to the flip routine, which ignores it. A capacity of seed rank $+64$ slots cannot overflow because flips never
+raise the rank and splits are refused at best rank $+8$. We mention these details because they determine what a replay must reproduce.

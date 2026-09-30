@@ -5646,6 +5646,36 @@
   ],
   "task": "run_v4"
  },
+ "sprint_top_speed_v4_sprinter": {
+  "about": "top sprint speed, LABELLED BODY VARIANT (profiles/sprinter.json, fixed 2026-09-29 18:28 from the elite-sprinter and strength-trained-man literature before any runner ran on it): strength x1.55 on every muscle, muscle speed x1.45, tendon stiffness x1.5 (as P95), activation time constants x0.8, on the average 1.75 m / 67.5 kg skeleton. NEVER compare its scores with the P95, elite2 or average trials: this body is stronger and faster than any of them and its hip, knee and ankle extensors are a chosen stretch beyond measured sprinters. Same rules as sprint_top_speed_v4_p95: the fastest 1 s window (peak_speed_1s, m/s) in a 30 s run from a perturbed standing start, seeds 221-232, guard no fall, on the v4 body (calibrations/v4.json), task run_v4.",
+  "env": {
+   "ROBOLAB_CALIB": "v4",
+   "ROBOLAB_PROFILE": "sprinter",
+   "ROBOLAB_PROFILE_PARTS": "strength,speed,tendon,activation"
+  },
+  "guard": {
+   "fell": false
+  },
+  "higher": true,
+  "metric": "peak_speed_1s",
+  "python": "robolab",
+  "seconds": 30,
+  "seeds": [
+   221,
+   222,
+   223,
+   224,
+   225,
+   226,
+   227,
+   228,
+   229,
+   230,
+   231,
+   232
+  ],
+  "task": "run_v4"
+ },
  "tt_p1": {
   "about": "MyoChallenge table tennis P1 success",
   "env": {

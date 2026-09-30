@@ -1719,6 +1719,120 @@ Files: `lib/robolab/skills/run_gearx.w`, `lib/entry/run_gearx.w` (RunGearX); `pl
 `params/run_gearx_v4_p95_x5a.txt` (the champion; frozen binary `bin/challengers/run_gearx-a`, copy in `bin/champions/`); snapshot sets `playground/cache/sprint_touch_run_v4_p95{j,k,m,n}.npz`; every tool,
 practice file, search log and the run-by-run log in `scratchpad/sprint2/`.
 
+### Sprinters on a stronger body (labelled) (29 Sep, round 3)
+
+Round 2 ended at 8.276 m/s on P95 (79 % of its 10.45 ceiling) and named the one honest route left to 10 m/s: a stronger, **labelled** body, the move that took the bat from 26.5 to 32.4 m/s.
+This round defines that body from the literature, computes its ideal-control ceiling, ports the five-gear runner to it and enters a new arena trial. **Everything below is a labelled body
+variant (`playground/profiles/sprinter.json`, trial `sprint_top_speed_v4_sprinter`): never compare it with the average, P95 or elite2 trials.** Log of every run with its command line:
+`scratchpad/sprint3/LOG.md`.
+
+**The body** (fixed 2026-09-29 18:28, before any runner, replay or ceiling was run on it; `changes` in the file is empty). The same v4 anatomy and the average 1.75 m / 67.5 kg skeleton,
+so lengths and masses stay comparable; the rule was the middle of the ranges the literature gives, not their top:
+
+| part | P95 | elite2 | **sprinter** | status |
+| --- | --- | --- | --- | --- |
+| strength (peak force per kg, every muscle) | x1.32 | hip ext. 1.5, ham 1.4, vasti 1.1, plantarflexors 1.05-1.1, dorsiflexors 1.0 | **x1.55** | literature for hip extensors and hamstrings (Miller 2021 x1.4-1.6 per kg; Handsfield 2017); **chosen stretch** for knee and ankle extensors (strength-trained men x1.58, Maden-Wilkinson 2020; sprinters only x1.07-1.26 vasti, x1.09-1.18 plantarflexors) and every other muscle |
+| muscle speed (fibre mix x fascicle length) | x1.2 | x1.3 | **x1.45** | derived: fibre mix x1.23-1.31 (Trappe 2015) times fascicles +12-24 % (Abe 2000, Kumagai 2000) = 1.3-1.5, the middle taken |
+| tendon stiffness | x1.5 | Achilles 1.3, quadriceps 1.0 | **x1.5** (P95's) | unchanged on purpose: the sprinter differs from P95 in strength x1.17, speed x1.21, activation x0.92 only; the quadriceps value is P95's, not a sprinter's (Kubo: sprinters' knee tendons are more compliant) |
+| activation time constants | x0.87 | 1.0 | **x0.8** | **unverified stretch** (fibre-mix inference gives 0.87-0.89; Tillin 2010's faster neural force onset has no place else in the model); the v4 screen says it barely matters |
+| anthropometry | 1.0 | not applied | 1.0 | `ROBOLAB_PROFILE_PARTS=all` builds the same XML as the four muscle parts (checked byte-identical) |
+
+The bat's athlete body is strength x1.5 on every muscle and a uniform fibre speed of 3.0 L0/s on the v1 placeholder body (not comparable with the v2+ speed multipliers); this body's x1.55 sits
+on top of the model's peak forces, which are already 1.4-2.9x young men's voluntary maxima (`calibrations/v4.json`), so it is stronger than any measured person in the knee and ankle
+extensors, the groups the ceiling is most sensitive to. A result on this body says what a runner could do if a body really had these muscles, not what any person does.
+
+**The ideal-control ceiling of the sprinter (step 2): 12.36 m/s** (stance-budget ceiling at t_sw 0.35 s, 12.01-12.71 for t_sw 0.37-0.33; the margin chain is positive to 12.0 and its line
+fits 12.75). Same recipe and measure as the other bodies (`scratchpad/sprint_knot/ceiling_probe.py`, pitch-free, v4 anatomy, default four muscle parts; `budget_ceiling.py v4b_sprinter`),
+with one difference in effort: **one sparse chain** (1 m/s spacing from 10 m/s, warm-started from P95's 10 m/s solution, no joint stance-plus-swing refinement, two restarts per speed)
+plus the dense points at 8-9.5 m/s of two earlier chains that an external load spike made too slow to finish. The estimate carries the usual +-0.5-0.7 m/s.
+
+| body | average | P95 | elite2 | **sprinter** |
+| --- | --- | --- | --- | --- |
+| ideal-control ceiling, m/s | 8.20 | 10.45 | 9.28 | **12.36** |
+| best runner, m/s (share of the ceiling) | 6.170 (75 %) | 8.276 (79 %) | 6.78 (73 %) | **8.407 (68 %; 8/12 starts survive)** |
+
+The ideal stance at the ceiling (best stance budget of the sprinter's chains): at 12.0 m/s contact 0.066 s, aerial 0.154 s, step 2.64 m at 4.54 /s, mean / peak vertical force 3.34 / 4.72 BW,
+thigh +0.38 at touchdown / -0.73 at lift-off, touchdown knee 0.60, touchdown ankle -0.37 (dorsiflexed, as P95's -0.43), trunk excursion 0.05 rad. At 10 m/s (the
+sprinter's ideal is far from its limit there): contact 0.085 s, aerial 0.225 s, step 3.10 m, 3.65 / 5.25 BW. 10 m/s is 81 % of the sprinter's ceiling; round 2's P95 runner reached 79 % of P95's.
+
+**Result: no fall-free runner, and not 10 m/s.** The best chain (`params/run_gearx_v4_sprinter_g5a.txt`, promoted in `sprint_top_speed_v4_sprinter`) reaches **8.407 m/s (survivors' mean
+peak_speed_1s, 68 % of the 12.36 ceiling)** and survives **8 of the 12 arena starts**; on 80 unseen standing starts it falls 19 times. 10 m/s is 1.6 m/s away and 81 % of the ceiling.
+Round 2's P95 champion, replayed on this body, falls on all 12 starts.
+
+**Porting the runner** (each row is a run in `scratchpad/sprint3/LOG.md`; standing starts 30 s, flying starts 24 s from the champion's own steady-running snapshots on THIS body,
+`sprj` = 17 training snapshots at 7.5-8.2 m/s, `sprk` = 36 unseen ones at 7.4-8.3):
+
+| stage | flying, 17 training | flying, 36 unseen | standing, 12 arena starts | unseen standing (40 + 40) |
+| --- | --- | --- | --- | --- |
+| P95 five-gear champion replayed (`x5a`) | | | **0/12** (falls 12.0-16.3 s on ten, 3.5 and 3.8 s on 226 and 230); peaks before the falls 7.6-8.65 | |
+| P95 four-gear champion replayed | | | **0/12** (13.0-16.5 s; 226, 230 at 3.5, 3.8 s); peaks before the falls 7.6-8.54 | |
+| gear 5 = gear 4's values (control) | 0/17 survive (0.4-5.2 s, after 8.3-8.5 m/s) | | | |
+| `x5a`'s extended gear 5 | 0/17 (0.7-6.3 s) | | | |
+| V1: gear 5 = gear 4's values, **lean 0.10** (from 0.23) | 8/17 survive, steady 8.35-8.48 | 12/36 survive, peak 8.562 | 6/12, peaks 8.484-8.589 (mean 8.535) | |
+| **g5a**: V1 + one generation of gear-5 ES (entered) | 15/17, steady 8.24-8.50, peak 8.428 | | **8/12, mean peak 8.407** | 30/40 (8.385) + 31/40 (8.423) |
+| g5a5: the same ES, generation 5 | | 19/36 survive, peak 8.509 | 7/12, mean peak 8.532 | |
+
+- *What breaks on the stronger body is the trunk.* The P95 chain accelerates FASTER here (6.2 m/s at 7.8 s, 8.26 at 12.4 s), then the trunk pitches forward stance after stance (touchdown pitch
+  0.13 -> 0.21 -> 0.42 -> 0.54 -> 0.77 rad, peak force 4.2 -> 6.3 BW) and it falls at 15.8 s: the round-2 trunk runaway, reached at ~8.3 m/s. The crouched control rocks the trunk +0.10-0.20
+  rad per stance (P95: +0.016). Working reading: the stance hip extensors deliver ~1.5x P95's torque at the same command (strength x1.17, and in the fast retraction the force-velocity factor
+  x1.2-1.3 from the x1.21 speed) and the stance-hip trunk servo does not hold it.
+- *One lever moves it: the forward-lean set point.* One-at-a-time probes on the control (8-12 flying seeds, 12-14 s): every drive (hamstring, knee, hip, gastrocnemius, ankle) x0.6-0.8, the
+  servo gain `torso_kp` 0.4 / 1.5 and `leg_kp` 8 leave 8/8 falling at 3-4.6 s; **`lean` 0.23 -> 0.10: 4/12 fall, steady 8.40** (0.05: 2/12, steady 8.21; 0.0: 6/12; 0.3: 8/8). A lower speed plan
+  (`v_top` 8.2 / 8.5) does not prevent the falls (6/6 fall at 11-18 s). Lowering the lean in gears 2-4 as well (V2) is worse (7/12 fall). The extended gear does not survive on this body with any
+  lean tried (0.1, 0.0, -0.08: 12/12 fall each time, mean survival 2.4-3.2 s): the crouched family is the base here, the reverse of P95.
+- *The gear-5 search* (`hsearch.py --agg mean`, (1+16)-ES on the 78 `g5_*` tunables, 10 training flying starts x 16 s, objective 3, fall penalty 300, `scratchpad/sprint3/es3.sh`, 4 workers)
+  was stopped by the machine load and two harness stalls after 8 generations (436 rollouts, against 3900 + 2300 for round 2's gear 5). Its first generation already found a survivor of all 10 seeds
+  (15/17 on the training snapshots); the fifth generation's incumbent flies faster (8.53) and falls about as often (5/12 arena starts against 4/12). Its late falls (10 of the 17 on unseen flying starts come at 17-24 s) are
+  beyond its 16 s horizon, as in round 2. A start-phase search (`st.sh`, the 12 gear-1 start tunables, standing starts) reached generation 3 and was not usable.
+- *What is left are gears 1-4, which nobody re-searched.* Seed 221 falls at 13.048 s in EVERY variant (steady 7.29 m/s; the fall time is identical to the digit with different gear-5 parameters, so gear 5 was never active): a gear 1-4 event. The start plan tuned on P95 is a
+  hazard of ~12 % here (5 of 40 unseen 8 s starts fall at 3.3-4.0 s; `accel` 2.0 makes it 3/40; k0, drv0_* and psi0 change it by chance). Switching to gear 5 earlier rescues 221 and 229 and
+  drops two others.
+
+**Arena** (`sprint_top_speed_v4_sprinter`, a new trial: the rules of `sprint_top_speed_v4_p95`, 12 perturbed standing starts 221-232, 30 s, `peak_speed_1s`, guard no fall,
+`ROBOLAB_CALIB=v4 ROBOLAB_PROFILE=sprinter ROBOLAB_PROFILE_PARTS=strength,speed,tendon,activation`, task `run_v4`; no existing trial was edited). Seeded with the P95 five-gear champion
+replayed on this body (-1e9 on 12/12); challenged with the chain above (`arena.py eval ... --promote`): **wins, mean paired difference +6.7e8, p = 0.004, promoted**
+(frozen `bin/champions/sprint_top_speed_v4_sprinter-20260929-210109`, controller `bin/challengers/run_gearx-s3a` = RunGearX). Not comparable with the P95 trials.
+
+| per-start peak (m/s) | 221 | 222 | 223 | 224 | 225 | 226 | 227 | 228 | 229 | 230 | 231 | 232 | mean of survivors |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `run_gearx_v4_sprinter_g5a` | fall 13.0 s | 8.504 | 8.432 | 8.326 | 8.486 | fall 3.5 s | 8.361 | 8.334 | fall 11.5 s | fall 3.8 s | 8.349 | 8.461 | **8.407** (8/12) |
+
+Falls on unseen standing starts (30 s, never trained on): seeds 141-180 **10/40** (five start falls at 3.5-3.9 s: 141, 148, 150, 164, 176; 155 at 22.9 s, 156 at 15.6, 157 at 11.5,
+161 at 16.8, 162 at 12.1; survivors' peak 8.385, min 8.306, max 8.533); seeds 181-220 **9/40** (182 at 6.2 s, 184 at 27.1, 193 at 9.7, 196 at 4.7, 202 at 13.3, 209 at 28.8, 211 at 10.3, 214 at
+10.8, 215 at 5.6; survivors' peak 8.423, min 8.300, max 8.569). 19 of 80 (24 %) fall, against 4 of 80 for round 2's P95 champion.
+
+**The stride against the ideal** (entered chain at its steady state, seed 222, 26 stances of the last 12 s, `stridetab.py`; the ideal is the best stance budget of the sprinter's ceiling chains):
+
+| | entered chain, 8.44 m/s | ideal at 8.5 m/s | ideal at 12.0 m/s (the ceiling) |
+| --- | --- | --- | --- |
+| contact / flight (s) | 0.093 / 0.133 | 0.116 / 0.256 | 0.066 / 0.154 |
+| step (m) / rate (1/s) | 1.92 / 4.4 | 3.16 / 2.69 | 2.64 / 4.54 |
+| thigh at touchdown / lift-off (rad, + ahead) | +0.56 / -0.42 | +0.46 / -0.52 | +0.38 / -0.73 |
+| knee at touchdown (rad) | 0.69 (max 0.72) | 0.56 | 0.60 |
+| ankle at touchdown (rad, - dorsiflexed) | 0.00 | -0.50 (the box floor) | -0.37 |
+| mean / peak vertical force (BW) | 2.38 / 4.15 | 3.21 / 4.98 | 3.34 / 4.72 |
+| trunk pitch touchdown -> lift-off (rad) | 0.086 -> 0.097 (rock +0.011) | excursion 0.11 (penalised above 0.1) | 0.05 |
+
+It is P95's crouched high-cadence bounce at a higher speed: at 8.44 m/s the ideal stance has a 0.26 s flight and a 3.2 m step (the budget optimiser buys swing time with flight at low speed),
+the runner flies half as long and steps 40 % shorter; it uses 4.15 of the ~5 BW peak force the ideal uses and 2.4 of its 3.2 BW mean, so the body's strength is largely unused. The trunk, the
+problem of this body, rocks only 0.011 rad per stance in the steady gait.
+
+**Long jump (reported, not started).** The runner does not exceed 10 m/s, so no jump work; its runway profile from a standing start (seed 222, `scratchpad/sprint3/runway.py`): 10 m at 5.1 s
+(4.1 m/s), 20 m at 7.1 s (5.8), 30 m at 8.7 s (6.5), 40 m at 10.2 s (7.3), **44 m mark at 10.7 s: 7.50 m/s, mean 7.27 m/s over the last 5 m** (P95's runner: 6.6-6.9 m/s at 44 m). The
+acceleration between 3 and 7 m/s is still the slow part (44 m to reach 7.5).
+
+**What worked / what did not.** Worked: fixing the body before anything ran; the ceiling (12.36); the lean lever (0/12 -> 6/12 standing survivors with one number); a mean-aggregate ES from a
+surviving crouched start (15/17 on its training snapshots). Did not: replaying either P95 champion (0/12 each); the extended gear on this body; drive, servo-gain and speed-plan changes; lowering
+the lean in gears 2-4; earlier gear switches (they trade one fall for another); the start search (too slow under the machine load). **What would be needed for 10 m/s:** the start and gears 1-4
+re-searched on this body from flying starts as round 1 did (they carry the start hazard and the 13 s falls), a trunk mechanism that scales with the stronger hips, an extended-stance gear searched
+from the crouched 8.4 m/s gait (round 2's recipe; the extended gear of round 2 does not transfer), and the ~1.6 m/s between 8.4 and 10, which on P95 all of round 2 bought +0.37 m/s: the runner uses
+68 % of the ceiling, and P95's best was 79 %.
+
+Files: `playground/profiles/sprinter.json`; `playground/arena/trials.json` (+ `champions.json`, `history.jsonl` by `arena.py`); `params/run_gearx_v4_sprinter_{v1,g5a,g5a5}.txt` (the entered chain is `g5a`);
+frozen binary `bin/challengers/run_gearx-s3a` (RunGearX, the same build as `run_gearx-a`); snapshot sets `playground/cache/sprint_touch_run_v4_sprj.npz` / `_sprk.npz` (git-ignored); ceiling data
+`out/sprint_limits/probe_v4b_sprinter_*`; every tool (`snap3.py`, `val3.sh`, `rep.sh`, `qv.sh`, `scan3.sh`, `es3.sh`, `st.sh`, `stab.py`, `runway.py`), search log and run-by-run log in `scratchpad/sprint3/`,
+outputs in `out/sprint3/`.
+
 ## MyoSuite bodies (MyoChallenge)
 
 `playground/myo_bridge.py` hosts the same controller on a MyoSuite

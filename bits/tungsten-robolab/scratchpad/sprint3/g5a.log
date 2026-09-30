@@ -1,0 +1,12 @@
+hsearch sprint_touch_v4x: es, 78 tunables, budget 3000 rollouts, seeds [(0, None), (1, None), (4, None), (5, None), (6, None), (8, None), (10, None), (11, None), (13, None), (14, None)]
+start -77.766 (1 rollouts)
+gen 1 used 40 best 296.970 gen_best 296.97 alive_full 1/16 (27s) {'sigma': 0.034499999999999996, 'rate': 1.0}
+gen 2 used 90 best 296.970 gen_best -11.83 alive_full 0/16 (73s) {'sigma': 0.033464999999999995, 'rate': 0.5}
+gen 3 used 145 best 296.970 gen_best -4.13 alive_full 0/16 (185s) {'sigma': 0.03246104999999999, 'rate': 0.3333333333333333}
+gen 4 used 222 best 296.970 gen_best 296.75 alive_full 4/16 (338s) {'sigma': 0.03148721849999999, 'rate': 0.25}
+gen 5 used 281 best 298.516 gen_best 298.52 alive_full 2/16 (453s) {'sigma': 0.03621030127499999, 'rate': 0.4}
+gen 6 used 347 best 298.516 gen_best 296.93 alive_full 1/16 (601s) {'sigma': 0.03512399223674999, 'rate': 0.3333333333333333}
+gen 7 used 383 best 298.516 gen_best -1.14 alive_full 0/16 (1905s) {'sigma': 0.034070272469647486, 'rate': 0.2857142857142857}
+gen 8 used 436 best 298.516 gen_best 297.52 alive_full 1/16 (1953s) {'sigma': 0.03304816429555806, 'rate': 0.25}
+/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/resource_tracker.py:279: UserWarning: resource_tracker: There appear to be 6 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '

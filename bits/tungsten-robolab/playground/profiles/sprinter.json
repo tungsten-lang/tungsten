@@ -1,0 +1,70 @@
+{
+ "name": "sprinter",
+ "label": "LABELLED BODY VARIANT: a stronger-than-P95 elite-sprinter body. A chosen stretch on top of the literature, not a population percentile and not a measured person. Its results are never to be compared with the average, P95 or elite2 trials.",
+ "fixed": "Fixed 2026-09-29 18:28 (machine clock) from the evidence below, BEFORE any runner, replay or ideal-control ceiling was run on this body. It is changed only for a documented reason (see `changes`).",
+ "changes": [],
+ "about": "The elite-sprinter body the P95 runner is ported to in the third sprint round. The question it answers: if the body is what the sprinters' morphology and the strength-trained man's strength say it can be, does a muscle-driven runner exceed 10 m/s? It starts from P95's composite (profiles/p95.json: strength x1.32, speed x1.2, tendon x1.5, activation x0.87) and raises three of its four parts to the middle of the ranges the elite-sprinter and strength-trained-man literature gives: strength x1.55, speed x1.45, activation x0.8. The tendon part stays at P95's x1.5, so the sprinter differs from P95 in muscle force (x1.17), muscle speed (x1.21) and activation (x0.92) only. The anthropometry stays the average 1.75 m / 67.5 kg body, so lengths, masses and every practised distance stay comparable with the average and P95 trials (the anthro part is 1.0 / 1.0 here: ROBOLAB_PROFILE_PARTS=all builds the same body as the four muscle parts). Every number was fixed from the sources before a runner ran; none is tuned to reach a speed. The strength value is literature for the hip extensors and hamstrings and a chosen stretch for the knee and ankle extensors (the groups the ideal-control ceiling is most sensitive to); the speed value is derived from measured ranges; the activation value is an unverified stretch.",
+ "population": "a hypothetical elite male sprinter who is also as strong per kg in every muscle group as a strength-trained man (upper envelope, no real person matches every part at once)",
+ "parts": {
+  "strength": {
+   "multiplier": 1.55,
+   "stat": "peak isometric force per kg body mass, the same multiplier on every muscle group (like the bat's athlete body, x1.5): x1.55 = between the elite sprinters' hip-extensor volume per kg (x1.54) and the strength-trained man's knee-extension torque (x1.58)",
+   "evidence": [
+    "Miller R, Balshaw TG, Massey GJ, Maeo S, Lanza MB, Johnston M, Allen SJ, Folland JP (2021) The muscle morphology of elite sprint running. Med Sci Sports Exerc 53:804-815 (as recorded in profiles/elite2.json, checked 2026-09-28): 5 elite sprinters (best 10.10 s) vs 11 untrained, volume per kg: hip extensors x1.54 (gluteus maximus x1.67), biarticular hamstrings x1.42, biceps femoris short head x1.33, iliopsoas x1.20, rectus femoris x1.37, vasti x1.26, soleus x1.18, gastrocnemius x1.09; isometric torque per kg: hip extension +48 %, hip flexion +40 %, knee flexion +49 %, knee extension ~+7 % (n.s.), plantarflexion ~+18 % (n.s.)",
+    "Handsfield GG et al. (2017) Scand J Med Sci Sports 27:1050-1060 (as recorded in profiles/elite2.json): collegiate sprinters, gluteus maximus +31 % volume / +29 % PCSA per kg, semitendinosus +54 / +47, rectus femoris +40 / +34, vasti +26-30 / +20-28",
+    "Maden-Wilkinson TM, Balshaw TG, Massey GJ, Folland JP (2020) J Appl Physiol 128:1000-1011, doi:10.1152/japplphysiol.00224.2019 (as recorded in profiles/p95.json): 4-year strength-trained men's isometric knee-extension MVT 388 +- 70 N m against 245 +- 43 N m untrained: x1.58 (absolute torque; the trained group is heavier, so per kg it is somewhat less)",
+    "the bat's athlete body (README, bat results): strength x1.5 on every muscle, the value that body stands for strength-trained men with"
+   ],
+   "verified": "partly",
+   "note": "LITERATURE for the hip extensors and hamstrings: elite sprinters x1.4-1.6 per kg (Miller, Handsfield), so x1.55 is inside the measured range. A CHOSEN STRETCH for the knee extensors (vasti: sprinters x1.07 torque / x1.26 volume, strength-trained men x1.58, the value used) and the ankle plantarflexors (sprinters x1.09-1.18, no strength-trained measurement here: x1.55 is the same stretch), and for hip flexors, dorsiflexors and every other muscle (no sprinter or trained-man data; x1.55 like the rest). The model's peak forces are already 1.4-2.9x young men's voluntary maxima (calibrations/v4.json, kept); x1.55 sits on top of that, so the body is stronger than any measured person in the knee and ankle extensors. Expect the ideal-control ceiling to be raised mostly by those."
+  },
+  "speed": {
+   "multiplier": 1.45,
+   "stat": "maximum joint angular velocity = fibre shortening velocity (fibre-type mix) x fascicle length: x1.45 = the middle of the sprinters' derived range x1.3-1.5, one multiplier for every joint",
+   "evidence": [
+    "Trappe S et al. (2015) J Appl Physiol 118:1460-1466 (as recorded in profiles/p95.json and elite2.json): unloaded fibre velocity IIa x3.37, IIx x5.04 type I; a world-class sprinter's fibre mix gives ~x1.23-1.31 the average whole-muscle Vmax",
+    "Abe T, Kumagai K, Brechue WF (2000) Med Sci Sports Exerc 32:1125-1129 and Kumagai K et al. (2000) J Appl Physiol 88:811-816 (as recorded in profiles/elite2.json): sprinters' fascicles longer by +12-24 % (vastus lateralis +24 %, medial gastrocnemius +17 %) and +16-23 % in the faster sprinters",
+    "derivation (recorded in profiles/elite2.json): fibre-mix gain ~x1.2-1.3 times fascicle length ~x1.1-1.2 gives x1.3-1.5; the elite2 profile took the bottom of that range (1.3), this one takes the middle (1.45 = 1.27 x 1.14); the P95 profile took 1.2"
+   ],
+   "verified": "derived",
+   "note": "DERIVED, at the middle of its range; no single measurement says x1.45. It is not the bat athlete body's 'vmax 3.0' (that is the v1 placeholder body's uniform fibre speed, twice the v1 default 1.5 L0/s; the human-calibrated v2+ joint speeds this multiplier scales, V2_OMEGA and the v4 hip values, already sit above the average sprinter's measured joint speeds). The moment-arm differences between sprinters and non-sprinters (not modelled) can lower joint speed at the same fibre speed."
+  },
+  "tendon": {
+   "multiplier": 1.5,
+   "stat": "in vivo tendon stiffness per unit body size, both groups (Achilles, quadriceps) x1.5: UNCHANGED from the P95 profile",
+   "evidence": [
+    "P95 part (profiles/p95.json): Fujimori & Sado 2025 Achilles stiffness CV 33 %, P95 x1.5",
+    "Arampatzis A et al. (2007) J Biomech 40:1946-1952 (as recorded in profiles/elite2.json): only sprinters had higher normalised triceps-surae tendon-aponeurosis stiffness than endurance runners and inactive men (~+70 % in a secondary summary); Kubo K et al. (2020) Physiol Rep 8:e14583: no difference between sprinters and untrained men; Kubo 2000 / 2011: sprinters' knee-extensor tendons more compliant"
+   ],
+   "verified": "partly",
+   "note": "Kept at P95's value on purpose: the sprinter then differs from P95 in strength, speed and activation only, and the runner tuned on P95's tendons is ported to a body whose tendons it already knows. For the Achilles x1.5 is inside the sprinter range (x1.0-1.7 in the conflicting evidence); for the quadriceps the sprinter data do not support stiffer (elite2 uses 1.0), so it is P95's, not a sprinter's."
+  },
+  "activation": {
+   "act": 0.8,
+   "deact": 0.8,
+   "stat": "activation and deactivation time constants x0.8 (10 -> 8 ms, 40 -> 32 ms)",
+   "evidence": [
+    "P95 part (profiles/p95.json): x0.87 inferred from the fibre mix (type II twitches ~2x faster than type I: the P95 mix shortens whole-muscle twitch timing by ~13 %); the same inference for a sprinter's mix (type I ~25-29 % against 41 %) gives ~11-13 %, i.e. ~0.87-0.89",
+    "Tillin NA, Jimenez-Reyes P, Pain MTG, Folland JP (2010) Med Sci Sports Exerc 42:781-790 (as recorded in profiles/p95.json and elite2.json): power athletes' rate of force development over the first 50 ms 4.86 +- 1.46 MVC/s against 2.81 +- 1.20 in controls (x1.7), but twitch and normalised tetanic RFD did not differ: the faster onset is neural"
+   ],
+   "verified": false,
+   "note": "UNVERIFIED CHOSEN STRETCH, below what the fibre-mix inference gives (0.87-0.89). It stands for the sprinters' faster neural force onset, which a model without a neural stage can show only as a shorter activation time constant (the elite2 profile refused this and kept 1.0). The v4 screen of the activation time constants on the average body (calibrations/v4.json: x0.5 gave -0.6 m/s, inside its +-0.5-0.7 m/s noise) says it matters little either way."
+  },
+  "anthro": {
+   "length": 1.0,
+   "mass": 1.0,
+   "stat": "the average body's 1.75 m / 67.5 kg (segment lengths and masses after Winter's tables)",
+   "evidence": [
+    "not scaled on purpose: results stay comparable in length and mass with the average and P95 trials. World-class sprinters are 1.80 m / 77 kg (Uth 2005, as recorded in profiles/elite2.json: length 1.03, mass 1.14), not applied here"
+   ],
+   "verified": true,
+   "note": "1.0 / 1.0, so ROBOLAB_PROFILE_PARTS=all builds the same XML as ROBOLAB_PROFILE_PARTS=strength,speed,tendon,activation."
+  }
+ },
+ "relation_to_other_bodies": {
+  "p95": "strength x1.55 / 1.32 = x1.17, speed x1.45 / 1.2 = x1.21, activation x0.8 / 0.87 = x0.92, tendon and anthropometry the same",
+  "elite2": "elite2 has hip extensors x1.5, hamstrings x1.4, vasti x1.1, plantarflexors x1.05-1.1, dorsiflexors x1.0, speed x1.3, Achilles x1.3 (quadriceps 1.0), activation 1.0: the sprinter is at least as strong in every group (hip extensors 1.55 against 1.5, hamstrings 1.55 against 1.4, vasti and plantarflexors +41-48 %), faster (1.45 against 1.3) and stiffer in the quadriceps tendon",
+  "bat_athlete_body": "the bat's athlete body is strength x1.5 on every muscle and vmax 3.0 L0/s on the v1 placeholder body (not comparable with the v2+ speed multipliers); this body is x1.55 on the human-calibrated v4 anatomy (the bat's labelled P95 variant was strength x1.32, speed x1.2, activation x0.87)",
+  "reading": "x1.55 strength and x1.45 speed are at the upper end of what any measured group has in the muscles that matter most for the ceiling (knee and ankle extensors), so a result on this body says what a runner could do if a body really had them, not what any person does"
+ }
+}

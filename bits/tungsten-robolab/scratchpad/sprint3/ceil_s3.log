@@ -1,0 +1,6 @@
+  v 10: margin 0.3062 tc 0.085 taer 0.2251 f 3.225 Favg 3.648 peak 5.25 thigh 0.335/-0.711 dw -0.238 exc 0.105 (88s)
+  v 11: margin 0.2159 tc 0.075 taer 0.1929 f 3.732 Favg 3.573 peak 5.14 thigh 0.33/-0.727 dw 0.108 exc 0.073 (173s)
+  v 12: margin 0.1169 tc 0.066 taer 0.1542 f 4.541 Favg 3.337 peak 4.72 thigh 0.379/-0.729 dw 0.069 exc 0.052 (229s)
+  v 13: margin -0.0602 tc 0.059 taer 0.13 f 5.29 Favg 3.204 peak 4.99 thigh 0.688/-0.277 dw 0.172 exc 0.111 (277s)
+  v 14: margin -0.139 tc 0.053 taer 0.1391 f 5.207 Favg 3.624 peak 4.97 thigh 0.797/-0.11 dw 0.227 exc 0.172 (325s)
+v4b_sprinter_s3: ceiling (fit) 12.754050578654097, fastest positive margin 12.0

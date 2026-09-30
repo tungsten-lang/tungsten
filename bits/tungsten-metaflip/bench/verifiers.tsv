@@ -1,0 +1,3 @@
+# Exactness verifiers (bench/README.md, section 6): name, command, marker of a `not exact` verdict.
+name	command	not_exact_marker
+ruby	ruby {bench}/../tools/verify_tensor.rb --shape {shape} {scheme}	Tensor verification failed

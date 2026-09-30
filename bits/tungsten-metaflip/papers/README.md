@@ -47,7 +47,7 @@ certificates and the two fleet checkpoints, 1,089 tensors, all exact) and `rebui
 ## Before submitting (author's list)
 
 1. Affiliation, contact, funding and conflict-of-interest statements (placeholders in `results/main.tex` and `methods/main.tex`).
-2. Push and merge branch `metaflip-public-ternary-gf2`; deposit the tensors publicly (the archive repository is private) and cite the DOI.
+2. Push `main` (the branch `metaflip-public-ternary-gf2`, with the tools of the release and these papers, was merged into the local `main` on 2026-09-29; nothing has been pushed); deposit the tensors publicly (the archive repository is private) and cite the DOI.
 3. Re-score against the tables at submission time: all four sources changed during the campaign, and `results/sections/persistence.tex`
    records the state of the last check (2026-09-29, 21:33 UTC).
 4. Prior art: the check in `persistence.tex` was limited (48 papers, four constructions, one evening). It superseded 87 of the 795 records and matched 112;

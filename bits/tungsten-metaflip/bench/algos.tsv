@@ -15,3 +15,14 @@ metaflip/slack-4	{bench}/adapters/metaflip --slack 4 {task} {seed} {budget} {out
 metaflip/slack-16	{bench}/adapters/metaflip --slack 16 {task} {seed} {budget} {out}	V0 with splits only below best + 16
 metaflip/restart-100k	{bench}/adapters/metaflip --restart 100000 {task} {seed} {budget} {out}	V0 restarted from the seed every 100000 proposals
 metaflip/restart-1M	{bench}/adapters/metaflip --restart 1000000 {task} {seed} {budget} {out}	V0 restarted from the seed every 1000000 proposals
+km2022/default	{bench}/baselines/adapters/km2022 {task} {seed} {budget} {out}	Kauers-Moosbauer 2022 flip, path 10^6 per reduction, restart from the start scheme
+km2022/path1e7	KM_PATH=10000000 {bench}/baselines/adapters/km2022 {task} {seed} {budget} {out}	path 10^7 (paper Sect. 4, single walks on 3x3x3)
+km2022/path1e5	KM_PATH=100000 {bench}/baselines/adapters/km2022 {task} {seed} {budget} {out}	path 10^5
+km2022/best	KM_RESTART=best {bench}/baselines/adapters/km2022 {task} {seed} {budget} {out}	restart from the scheme the failed walk ended on
+km2024/default	{bench}/baselines/adapters/km2024 {task} {seed} {budget} {out}	updated flip with plus transition before the walk, path 10^6, restart from the start scheme
+km2024/path1e7	KM_PATH=10000000 {bench}/baselines/adapters/km2024 {task} {seed} {budget} {out}	path 10^7
+km2024/path1e5	KM_PATH=100000 {bench}/baselines/adapters/km2024 {task} {seed} {budget} {out}	path 10^5
+km2024/nosplit	KM_SPLIT=0 {bench}/baselines/adapters/km2024 {task} {seed} {budget} {out}	no plus transition before the walk
+tfg/default	{bench}/baselines/adapters/tfg {task} {seed} {budget} {out}	Perminov flip_graph over Z2, 128 runners on one thread, tool defaults
+tfg/count1	TFG_COUNT=1 {bench}/baselines/adapters/tfg {task} {seed} {budget} {out}	one runner
+tfg/count8	TFG_COUNT=8 {bench}/baselines/adapters/tfg {task} {seed} {budget} {out}	8 runners

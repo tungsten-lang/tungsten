@@ -5,13 +5,13 @@ id	n	m	p	start	target	tier	runs	budget_cpu_s	seed_base	target_source	calibration
 2x2x3	2	2	3	standard	11	1	100	2	102000	agree: Lille, FMM, matmulcatalog, mkauers, KM22, Arai23 (bench/targets.md)	uncalibrated
 2x2x4	2	2	4	standard	14	1	100	2	103000	agree: Lille, FMM, matmulcatalog, mkauers, KM22, Arai23 (bench/targets.md)	uncalibrated
 2x3x3	2	3	3	standard	15	1	100	2	104000	agree: Lille, FMM, matmulcatalog, KM22, Arai23 (bench/targets.md)	uncalibrated
-2x3x4	2	3	4	standard	20	1	100	30	105000	agree: Lille, FMM, matmulcatalog, mkauers, KM22, Arai23 (bench/targets.md)	uncalibrated
-2x3x5	2	3	5	standard	25	1	100	300	106000	agree: Lille, FMM, matmulcatalog, KM22, Arai23 (bench/targets.md)	uncalibrated
-2x4x4	2	4	4	standard	26	1	100	30	107000	agree: Lille, FMM, matmulcatalog, mkauers, KM22, Arai23 (bench/targets.md)	uncalibrated
-3x3x3	3	3	3	standard	23	1	100	2	108000	agree: Lille, FMM, matmulcatalog, mkauers, KM22, Arai23 (bench/targets.md)	uncalibrated
-3x3x4	3	3	4	standard	29	1	100	5	109000	agree: Lille, FMM, matmulcatalog, mkauers, KM22, Arai23 (bench/targets.md)	uncalibrated
+2x3x4	2	3	4	standard	20	1	100	2	105000	agree: Lille, FMM, matmulcatalog, mkauers, KM22, Arai23 (bench/targets.md)	pilot-20260930
+2x3x5	2	3	5	standard	25	1	60	120	106000	agree: Lille, FMM, matmulcatalog, KM22, Arai23 (bench/targets.md)	pilot-20260930
+2x4x4	2	4	4	standard	26	1	100	10	107000	agree: Lille, FMM, matmulcatalog, mkauers, KM22, Arai23 (bench/targets.md)	pilot-20260930
+3x3x3	3	3	3	standard	23	1	100	1	108000	agree: Lille, FMM, matmulcatalog, mkauers, KM22, Arai23 (bench/targets.md)	pilot-20260930
+3x3x4	3	3	4	standard	29	1	60	30	109000	agree: Lille, FMM, matmulcatalog, mkauers, KM22, Arai23 (bench/targets.md)	pilot-20260930
 2x4x5	2	4	5	standard	33	1	100	800	110000	agree: FMM, matmulcatalog, mkauers, KM22, Arai23 (bench/targets.md)	uncalibrated
-3x3x5	3	3	5	standard	36	1	100	60	111000	agree: Lille, FMM, matmulcatalog, KM22, Arai23 (bench/targets.md)	uncalibrated
+3x3x5	3	3	5	standard	36	1	60	60	111000	agree: Lille, FMM, matmulcatalog, KM22, Arai23 (bench/targets.md)	pilot-20260930
 3x4x4	3	4	4	standard	38	2	30	600	112000	agree: Lille, FMM, matmulcatalog, KM22, Arai23 (bench/targets.md)	uncalibrated
 3x4x5	3	4	5	standard	47	2	30	600	113000	agree: Lille, FMM, matmulcatalog, KM22, Arai23 (bench/targets.md)	uncalibrated
 3x5x5	3	5	5	standard	58	2	30	600	114000	agree: Lille, FMM, matmulcatalog, KM22, Arai23 (bench/targets.md)	uncalibrated

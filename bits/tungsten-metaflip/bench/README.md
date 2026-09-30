@@ -247,7 +247,20 @@ bench/metascore summary --in ~/.tungsten/metaflip/experiments/record-hunt-202609
 
 ## 10. The suite and its calibration
 
-CALIBRATION_PLACEHOLDER
+Budgets of tier 1 come from a pilot of `metaflip/V0` (20 seeds per task, `pilot-20260930`): a budget is at least ten times the pilot median and at least twice the pilot maximum, rounded. `N` is the planned number of seeds.
+
+| task | target | pilot hits | median CPU s | max CPU s | budget CPU s | N |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 3x3x3 | 23 | 20 of 20 | 0.018 | 0.040 | 1 | 100 |
+| 2x3x4 | 20 | 20 of 20 | 0.037 | 0.111 | 2 | 100 |
+| 2x4x4 | 26 | 20 of 20 | 0.57 | 1.46 | 10 | 100 |
+| 3x3x4 | 29 | 18 of 20 (5 s budget) | 2.4 | 5.0 | 30 | 60 |
+| 3x3x5 | 36 | 20 of 20 | 1.8 | 12.8 | 60 | 60 |
+| 2x3x5 | 25 | 20 of 20 | 5.2 | 29.7 | 120 | 60 |
+
+These six tasks are the **ablation suite** (`--tasks 2x3x4,2x4x4,3x3x3,3x3x4,3x3x5,2x3x5`). The tasks 2x2x3, 2x2x4 and 2x3x3 are solved in milliseconds (20 of 20 pilot hits, median at most 0.01 s) and serve as smoke tests;
+2x4x5 has a median of 187 s (10 of 12 pilot runs hit within 800 s) and is kept as a long task; tiers 2 and 3 (from 3x4x4 on) and the improvement tasks of tier 4 keep the placeholder budgets marked `uncalibrated`.
+Comparisons with the prior programs on the three hardest tasks use `--budget-scale 5` and 30 seeds, because the prior programs need more time there; budgets are identical for all algorithms of one experiment.
 
 ## 11. Extending
 

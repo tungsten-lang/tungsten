@@ -192,6 +192,11 @@ Workaround: `Cli#add(name, opts = {})` takes an options Hash.
 * `Real#<=>` aborts on unlike operands instead of answering nil:
   `-> order(a, b)` with `a <=> b` and `order(1, "a")` dies with "expected int, got string" (core/numeric/real.w:8).
 * `fn` is reserved and cannot be a variable name.
+* Regex literals in the compiled engine: `\d` and `\w` never match (`"42" =~ /^\d+$/` is false), `(?:...)` is rejected at
+  run time ("invalid regex ...: repetition-operator operand invalid"), and `String#match` is undefined (`=~` answers a
+  Boolean). Explicit classes, capturing groups, alternation and optional groups work:
+  `"4x5x6_m9_ZT.json" =~ /^([0-9]+)x([0-9]+)x([0-9]+)_m([0-9]+)(_[^\/]*)?_(ZT|Z|Q)\.json$/` is true. The originals' `re` patterns
+  (FMM ring names, catalogue file names, lineage references) need this rewrite; no support library covers regex.
 * `Array#last(n)` ignores `n`; `Array#copy` needs an argument; `Array#insert` is missing; `String#split(sep, limit)`
   ignores the limit; `nil.nil?` is undefined when compiled.
 * An explicit `use core/base64` (or another core file that the autoloader also provides) inside a worktree

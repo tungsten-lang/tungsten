@@ -31,7 +31,7 @@ Sub-commands:
   verify_tensor_parity_test.py corpus --corpus DIR --binary verify_tensor [--out DIR] [--jobs 3]
   verify_tensor_parity_test.py mutate --corpus DIR --binary verify_tensor --samples 210 [--seed 1]
   verify_tensor_parity_test.py fuzz   --corpus DIR --binary verify_tensor --cases 4000 [--seed 1]
-  verify_tensor_parity_test.py time   --corpus DIR --binary verify_tensor [--runs 3] [--skip-corpus]
+  verify_tensor_parity_test.py time   --corpus DIR --binary verify_tensor [--runs 3] [--only CELLS] [--subset K]
   verify_tensor_parity_test.py parse-fuzz --corpus DIR --parse-binary gf2_scheme_parse_parity [--cases 20000]
 """
 import argparse
@@ -370,20 +370,35 @@ def median(values):
 
 
 def timing_command(args):
+    """Timing cells, each selectable with --only so that no single call runs for long (output is flushed)."""
     rows = entries(args.corpus)
+    if args.subset > 1:
+        rows = rows[::args.subset]
     script = Path(__file__).resolve()
+    only = set(args.only.split(',')) if args.only else {'corpus-tungsten', 'corpus-ruby', 'corpus-python', 'single'}
     print(f'{len(rows)} tensors; {args.runs} runs per Tungsten/single-file cell (median); machine load '
-          f'{os.getloadavg()[0]:.1f} (1 min)')
+          f'{os.getloadavg()[0]:.1f} (1 min)', flush=True)
 
     def report(label, walls, cpus, note=''):
-        print(f'{label:46s} wall {median(walls):8.2f} s   cpu {median(cpus):8.2f} s   {note}')
+        print(f'{label:46s} wall {median(walls):8.2f} s   cpu {median(cpus):8.2f} s   {note}', flush=True)
 
-    if not args.skip_corpus:
-        print('\nwhole corpus')
-        wall, cpu = measure(lambda: [ruby_verdict(p, shape) for p, shape in rows])
+    def sequential(label, one):
+        started = time.perf_counter()
+        cpu0, own0 = children_cpu(), time.process_time()
+        for index, (path, shape) in enumerate(rows, 1):
+            one(path, shape)
+            if index % 100 == 0:
+                print(f'  {label}: {index}/{len(rows)} files, wall {time.perf_counter() - started:.1f} s', flush=True)
+        wall = time.perf_counter() - started
+        return wall, children_cpu() - cpu0 + time.process_time() - own0
+
+    if 'corpus-ruby' in only:
+        wall, cpu = sequential('ruby', ruby_verdict)
         report('ruby verify_tensor.rb, one process per file', [wall], [cpu], '(1 pass)')
-        wall, cpu = measure(lambda: [python_verdict(p, shape) for p, shape in rows])
+    if 'corpus-python' in only:
+        wall, cpu = sequential('python', python_verdict)
         report('python read_blob + exact, in one process', [wall], [cpu], '(1 pass; no per-file start-up)')
+    if 'corpus-tungsten' in only:
         for name, options in (('dense', ('--gate', 'dense')), ('sparse', ('--gate', 'sparse')),
                               ('both', ()), ('strict, both', ('--strict',))):
             walls, cpus = [], []
@@ -392,25 +407,26 @@ def timing_command(args):
                 walls.append(wall)
                 cpus.append(cpu)
             report(f'tungsten --release --batch, gate {name}', walls, cpus, f'({args.runs} runs)')
-
-    print('\nper invocation (one certificate, one process each time)')
-    by_rank = sorted(rows, key=lambda r: Path(r[0]).stat().st_size)
-    picks = [('smallest corpus tensor', by_rank[0]), ('median-size tensor', by_rank[len(by_rank) // 2]),
-             ('largest tensor (28x32x32, rank 14,271)', by_rank[-1])]
-    for label, (path, shape) in picks:
-        print(f'{label}: {shape}, {Path(path).stat().st_size} bytes')
-        commands = {'ruby': ['ruby', str(RUBY), '--shape', shape, path],
-                    'python': [sys.executable, str(script), 'python-one', path, shape],
-                    'tungsten dense': [args.binary, '--gate', 'dense', '--shape', shape, path],
-                    'tungsten sparse': [args.binary, '--gate', 'sparse', '--shape', shape, path],
-                    'tungsten both': [args.binary, '--shape', shape, path]}
-        for name, command in commands.items():
-            walls, cpus = [], []
-            for _ in range(args.runs):
-                wall, cpu = measure(lambda: subprocess.run(command, capture_output=True, check=True))
-                walls.append(wall)
-                cpus.append(cpu)
-            report(f'  {name}', walls, cpus)
+    if 'single' in only:
+        print('per invocation (one certificate, one process each time)', flush=True)
+        all_rows = entries(args.corpus)
+        by_size = sorted(all_rows, key=lambda r: Path(r[0]).stat().st_size)
+        picks = [('smallest corpus tensor', by_size[0]), ('median-size tensor', by_size[len(by_size) // 2]),
+                 ('largest tensor (28x32x32, rank 14,271)', by_size[-1])]
+        for label, (path, shape) in picks:
+            print(f'{label}: {shape}, {Path(path).stat().st_size} bytes', flush=True)
+            commands = {'ruby': ['ruby', str(RUBY), '--shape', shape, path],
+                        'python': [sys.executable, str(script), 'python-one', path, shape],
+                        'tungsten dense': [args.binary, '--gate', 'dense', '--shape', shape, path],
+                        'tungsten sparse': [args.binary, '--gate', 'sparse', '--shape', shape, path],
+                        'tungsten both': [args.binary, '--shape', shape, path]}
+            for name, command in commands.items():
+                walls, cpus = [], []
+                for _ in range(args.runs):
+                    wall, cpu = measure(lambda: subprocess.run(command, capture_output=True, check=True))
+                    walls.append(wall)
+                    cpus.append(cpu)
+                report(f'  {name}', walls, cpus)
 
 
 def python_one(path, shape):
@@ -743,7 +759,8 @@ def main():
     timing.add_argument('--corpus', required=True)
     timing.add_argument('--binary', required=True)
     timing.add_argument('--runs', type=int, default=3)
-    timing.add_argument('--skip-corpus', action='store_true')
+    timing.add_argument('--only', help='comma list of: corpus-tungsten, corpus-ruby, corpus-python, single')
+    timing.add_argument('--subset', type=int, default=1, help='use every K-th corpus entry (default: all)')
     one = sub.add_parser('python-one')
     one.add_argument('path')
     one.add_argument('shape')

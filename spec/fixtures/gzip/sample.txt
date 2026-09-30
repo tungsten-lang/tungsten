@@ -1,0 +1,1296 @@
+use lexer
+use parser
+use hashing
+
+# Process-local parsed-file cache for compile-batch. Entries own pristine,
+# unflattened slab ASTs; each load receives a deep clone before import
+# expansion or lowering can attach analysis. A stat tuple is the cheap hit
+# gate. If metadata changes, the already-required source read is fingerprinted
+# so a touch without a content change can still reuse the parse.
+loader_parse_cache_state = {
+  enabled: false,
+  entries: {},
+  hits: 0,
+  misses: 0,
+  fingerprint_hits: 0,
+  disk_hits: 0,
+  disk_misses: 0,
+  disk_fingerprint_hits: 0,
+  disk_stores: 0,
+  disk_bypasses: 0
+}
+
+-> loader_enable_parse_cache
+  loader_parse_cache_state[:enabled] = true
+  nil
+
++ Loader
+  -> new(@verbose = false)
+    @loaded_files = []
+    @manifest_files = []
+    @cacheable = false
+    @runtime_id = nil
+    @service_bindings = parse_service_bindings(env("TUNGSTEN_SERVICE_BINDINGS"))
+    @service_bindings_id = canonical_service_bindings(@service_bindings)
+    @autoload_registry = nil
+    @contract_core_registry = nil
+    @core_root = nil
+    @autoload_loaded = {}
+    @manifest_poisoned = false
+    @manifest_wanted = false
+    @parse_cache_hits_start = loader_parse_cache_state[:hits]
+    @parse_cache_misses_start = loader_parse_cache_state[:misses]
+    @parse_cache_fingerprint_hits_start = loader_parse_cache_state[:fingerprint_hits]
+    @parse_cache_disk_hits_start = loader_parse_cache_state[:disk_hits]
+    @parse_cache_disk_misses_start = loader_parse_cache_state[:disk_misses]
+    @parse_cache_disk_fingerprint_hits_start = loader_parse_cache_state[:disk_fingerprint_hits]
+    @parse_cache_disk_stores_start = loader_parse_cache_state[:disk_stores]
+    @parse_cache_disk_bypasses_start = loader_parse_cache_state[:disk_bypasses]
+    @persistent_parse_cache_identity = nil
+    @persistent_parse_cache_probes = {}
+
+  -> memory_parse_cache_enabled?
+    loader_parse_cache_state[:enabled] == true && env("TUNGSTEN_FRONTEND_PARSE_CACHE") != "0" && @runtime_id == "compiled-runtime"
+
+  -> memory_parse_cache_stat(resolved)
+    stat = File.stat(resolved)
+    if stat == nil || stat.mtime_ns() == nil || stat.ctime_ns() == nil || stat.size() == nil
+      return nil
+    {mtime: stat.mtime_ns().to_s(), ctime: stat.ctime_ns().to_s(), size: stat.size().to_s()}
+
+  -> memory_parse_cache_entry(resolved)
+    entry = loader_parse_cache_state[:entries][resolved]
+    if entry == nil || entry[:path] == nil || entry[:path].size() != resolved.size() || entry[:path] != resolved
+      return nil
+    entry
+
+  -> read_memory_parse_cache(resolved)
+    if !memory_parse_cache_enabled?
+      return nil
+    stat = memory_parse_cache_stat(resolved)
+    entry = memory_parse_cache_entry(resolved)
+    if stat == nil || entry == nil
+      loader_parse_cache_state[:misses] = loader_parse_cache_state[:misses] + 1
+      return nil
+    if entry[:mtime] != stat[:mtime] || entry[:ctime] != stat[:ctime] || entry[:size] != stat[:size]
+      loader_parse_cache_state[:misses] = loader_parse_cache_state[:misses] + 1
+      return nil
+    loader_parse_cache_state[:hits] = loader_parse_cache_state[:hits] + 1
+    ast_deep_clone(entry[:ast])
+
+  -> read_memory_parse_cache_fingerprint(resolved, source)
+    if !memory_parse_cache_enabled?
+      return nil
+    entry = memory_parse_cache_entry(resolved)
+    if entry == nil
+      return nil
+    fingerprint = wyhash64_hex_string(source)
+    if entry[:fingerprint] != fingerprint
+      return nil
+    stat = memory_parse_cache_stat(resolved)
+    if stat == nil
+      return nil
+    entry[:mtime] = stat[:mtime]
+    entry[:ctime] = stat[:ctime]
+    entry[:size] = stat[:size]
+    loader_parse_cache_state[:hits] = loader_parse_cache_state[:hits] + 1
+    loader_parse_cache_state[:fingerprint_hits] = loader_parse_cache_state[:fingerprint_hits] + 1
+    ast_deep_clone(entry[:ast])
+
+  -> write_memory_parse_cache(resolved, source, ast)
+    if !memory_parse_cache_enabled?
+      return ast
+    stat = memory_parse_cache_stat(resolved)
+    if stat == nil
+      return ast
+    loader_parse_cache_state[:entries][resolved] = {
+      path: resolved,
+      mtime: stat[:mtime],
+      ctime: stat[:ctime],
+      size: stat[:size],
+      fingerprint: wyhash64_hex_string(source),
+      ast: ast_deep_clone(ast)
+    }
+    ast
+
+  # Persist pristine per-file packed ASTs for independent compiler processes
+  # and parallel batch workers. Handles are reconstructed into the current
+  # AST store by the runtime graph reader; raw arena offsets never cross the
+  # process boundary. A small manifest is consulted first. Hits still read the
+  # source to rebuild process-local location tables, but avoid lexing, parsing,
+  # and materializing their large temporary Arrays.
+  -> persistent_parse_cache_version
+    "loader-parse-v1"
+
+  -> persistent_parse_cache_enabled?
+    @runtime_id == "compiled-runtime" && env("TUNGSTEN_FRONTEND_PARSE_CACHE") != "0" && env("TUNGSTEN_FRONTEND_DISK_CACHE") != "0"
+
+  -> persistent_parse_compiler_identity
+    if @persistent_parse_cache_identity == false
+      return nil
+    if @persistent_parse_cache_identity != nil
+      return @persistent_parse_cache_identity
+    exe = ccall("w_executable_path")
+    stat = File.stat(exe)
+    if exe == nil || exe == "" || stat == nil || stat.mtime_ns() == nil || stat.ctime_ns() == nil || stat.size() == nil
+      @persistent_parse_cache_identity = false
+      return nil
+    @persistent_parse_cache_identity = [exe, stat.mtime_ns().to_s(), stat.ctime_ns().to_s(), stat.size().to_s()].join("|")
+    @persistent_parse_cache_identity
+
+  -> persistent_parse_cache_key(resolved)
+    identity = persistent_parse_compiler_identity()
+    if identity == nil
+      return nil
+    wyhash64_hex_string([persistent_parse_cache_version(), resolved, identity, w_ast_schema_hash_tungsten().to_s()].join("|"))
+
+  -> persistent_parse_cache_paths(resolved)
+    dir = cache_dir()
+    key = persistent_parse_cache_key(resolved)
+    if dir == nil || key == nil
+      return nil
+    base = dir + "/loader-parse-" + key
+    {ast: base + ".twc", manifest: base + "-manifest.twc"}
+
+  -> persistent_parse_manifest_base_valid?(manifest, resolved)
+    type(manifest) == "Hash" && manifest[:version] == persistent_parse_cache_version() && manifest[:path] == resolved && manifest[:compiler] == persistent_parse_compiler_identity() && manifest[:schema_hash] == w_ast_schema_hash_tungsten() && manifest[:fingerprint] != nil && type(manifest[:file_id]) == "Int" && manifest[:file_id] > 0
+
+  -> persistent_parse_stat_matches?(manifest, stat)
+    stat != nil && manifest[:mtime] == stat[:mtime].to_s() && manifest[:ctime] == stat[:ctime].to_s() && manifest[:size] == stat[:size].to_s()
+
+  -> persistent_parse_cache_stat(resolved)
+    stat = File.stat(resolved)
+    if stat == nil || stat.mtime_ns() == nil || stat.ctime_ns() == nil || stat.size() == nil
+      return nil
+    {mtime: stat.mtime_ns(), ctime: stat.ctime_ns(), size: stat.size()}
+
+  -> persistent_parse_cache_worthwhile?(stat)
+    if stat == nil
+      return false
+    configured = env("TUNGSTEN_FRONTEND_DISK_CACHE_MIN_BYTES")
+    minimum = 16384
+    if configured != nil && configured != ""
+      minimum = configured.to_i()
+      if minimum < 0
+        minimum = 0
+    stat[:size] >= minimum
+
+  -> persistent_parse_restore(probe, source = nil)
+    manifest = probe[:manifest]
+    if source == nil
+      source = read_file(manifest[:path])
+      if source == nil
+        return nil
+      source = ccall("w_algebra_rewrite_source", source)
+    # Parser registers the post-shebang-rewrite source layout. Reconstruct the
+    # same codepoint-indexed table in this process before restoring locations.
+    location_source = strip_bash_shebang(source)
+    file_id = ccall_nobox("w_loc_register_source_text", manifest[:path], location_source)
+    if file_id <= 0
+      return nil
+    entry = ccall("w_core_cache_read_rebase_locations", probe[:ast_path], manifest[:file_id], file_id)
+    if type(entry) != "Hash" || entry[:version] != persistent_parse_cache_version() || entry[:path] != manifest[:path] || entry[:compiler] != manifest[:compiler] || entry[:schema_hash] != w_ast_schema_hash_tungsten() || entry[:fingerprint] != manifest[:fingerprint] || entry[:file_id] != manifest[:file_id]
+      return nil
+    ast = entry[:ast]
+    if ast == nil || !is_ast_node?(ast) || ast_kind(ast) != :program
+      return nil
+    ast
+
+  -> accept_persistent_parse_cache(resolved, ast, stat, fingerprint)
+    if memory_parse_cache_enabled?
+      loader_parse_cache_state[:entries][resolved] = {
+        path: resolved,
+        mtime: stat[:mtime],
+        ctime: stat[:ctime],
+        size: stat[:size],
+        fingerprint: fingerprint,
+        ast: ast
+      }
+      return ast_deep_clone(ast)
+    ast
+
+  -> read_persistent_parse_cache(resolved)
+    if !persistent_parse_cache_enabled?
+      return nil
+    stat = persistent_parse_cache_stat(resolved)
+    if !persistent_parse_cache_worthwhile?(stat)
+      @persistent_parse_cache_probes[resolved] = :bypass
+      loader_parse_cache_state[:disk_bypasses] = loader_parse_cache_state[:disk_bypasses] + 1
+      return nil
+    paths = persistent_parse_cache_paths(resolved)
+    if paths == nil
+      @persistent_parse_cache_probes[resolved] = false
+      return nil
+    manifest = ccall("w_core_cache_read", paths[:manifest])
+    if !persistent_parse_manifest_base_valid?(manifest, resolved)
+      @persistent_parse_cache_probes[resolved] = false
+      return nil
+    probe = {manifest: manifest, ast_path: paths[:ast], manifest_path: paths[:manifest]}
+    @persistent_parse_cache_probes[resolved] = probe
+    if !persistent_parse_stat_matches?(manifest, stat)
+      return nil
+    ast = persistent_parse_restore(probe)
+    if ast == nil
+      @persistent_parse_cache_probes[resolved] = false
+      return nil
+    loader_parse_cache_state[:disk_hits] = loader_parse_cache_state[:disk_hits] + 1
+    accept_persistent_parse_cache(resolved, ast, stat, manifest[:fingerprint])
+
+  -> read_persistent_parse_cache_fingerprint(resolved, source)
+    if !persistent_parse_cache_enabled?
+      return nil
+    probe = @persistent_parse_cache_probes[resolved]
+    if probe == :bypass
+      return nil
+    if probe == nil || probe == false
+      loader_parse_cache_state[:disk_misses] = loader_parse_cache_state[:disk_misses] + 1
+      return nil
+    fingerprint = wyhash64_hex_string(source)
+    manifest = probe[:manifest]
+    if manifest[:fingerprint] != fingerprint
+      loader_parse_cache_state[:disk_misses] = loader_parse_cache_state[:disk_misses] + 1
+      return nil
+    ast = persistent_parse_restore(probe, source)
+    stat = persistent_parse_cache_stat(resolved)
+    if ast == nil || stat == nil
+      loader_parse_cache_state[:disk_misses] = loader_parse_cache_state[:disk_misses] + 1
+      return nil
+    manifest[:mtime] = stat[:mtime].to_s()
+    manifest[:ctime] = stat[:ctime].to_s()
+    manifest[:size] = stat[:size].to_s()
+    ccall("w_core_cache_write", probe[:manifest_path], manifest)
+    loader_parse_cache_state[:disk_hits] = loader_parse_cache_state[:disk_hits] + 1
+    loader_parse_cache_state[:disk_fingerprint_hits] = loader_parse_cache_state[:disk_fingerprint_hits] + 1
+    accept_persistent_parse_cache(resolved, ast, stat, fingerprint)
+
+  -> write_persistent_parse_cache(resolved, source, ast, file_id)
+    if !persistent_parse_cache_enabled?
+      return ast
+    paths = persistent_parse_cache_paths(resolved)
+    stat = persistent_parse_cache_stat(resolved)
+    dir = cache_dir()
+    if !persistent_parse_cache_worthwhile?(stat) || paths == nil || dir == nil || ccall("__w_mkdir_p", dir) != true
+      return ast
+    fingerprint = wyhash64_hex_string(source)
+    entry = {version: persistent_parse_cache_version(), path: resolved, compiler: persistent_parse_compiler_identity(), schema_hash: w_ast_schema_hash_tungsten(), fingerprint: fingerprint, file_id: file_id, ast: ast}
+    manifest = {version: persistent_parse_cache_version(), path: resolved, compiler: persistent_parse_compiler_identity(), schema_hash: w_ast_schema_hash_tungsten(), fingerprint: fingerprint, file_id: file_id, mtime: stat[:mtime].to_s(), ctime: stat[:ctime].to_s(), size: stat[:size].to_s()}
+    if ccall("w_core_cache_write", paths[:ast], entry) == true && ccall("w_core_cache_write", paths[:manifest], manifest) == true
+      loader_parse_cache_state[:disk_stores] = loader_parse_cache_state[:disk_stores] + 1
+    ast
+
+  -> parse_cache_verbose_text
+    if !memory_parse_cache_enabled? && !persistent_parse_cache_enabled?
+      return nil
+    hits = loader_parse_cache_state[:hits] - @parse_cache_hits_start
+    misses = loader_parse_cache_state[:misses] - @parse_cache_misses_start
+    fingerprint_hits = loader_parse_cache_state[:fingerprint_hits] - @parse_cache_fingerprint_hits_start
+    disk_hits = loader_parse_cache_state[:disk_hits] - @parse_cache_disk_hits_start
+    disk_misses = loader_parse_cache_state[:disk_misses] - @parse_cache_disk_misses_start
+    disk_fingerprint_hits = loader_parse_cache_state[:disk_fingerprint_hits] - @parse_cache_disk_fingerprint_hits_start
+    disk_stores = loader_parse_cache_state[:disk_stores] - @parse_cache_disk_stores_start
+    disk_bypasses = loader_parse_cache_state[:disk_bypasses] - @parse_cache_disk_bypasses_start
+    if hits == 0 && misses == 0 && disk_hits == 0 && disk_misses == 0 && disk_stores == 0 && disk_bypasses == 0
+      return nil
+    text = "  frontend parse cache: memory " + hits.to_s() + " hits, " + misses.to_s() + " misses"
+    if fingerprint_hits > 0 || disk_fingerprint_hits > 0
+      text = text + " (" + fingerprint_hits.to_s() + "/" + disk_fingerprint_hits.to_s() + " fingerprint)"
+    text = text + "; disk " + disk_hits.to_s() + " hits, " + disk_misses.to_s() + " misses, " + disk_stores.to_s() + " stores, " + disk_bypasses.to_s() + " small bypasses"
+    text
+
+  # Parse the shell-wrapper-exported TUNGSTEN_SERVICE_BINDINGS env var.
+  # Format: "name1=bit1,name2=bit2". Missing/empty → empty hash.
+  # e.g. "json=tungsten-json,yaml=tungsten-yaml" →
+  #   {"json" => "tungsten-json", "yaml" => "tungsten-yaml"}
+  -> parse_service_bindings(raw)
+    bindings = {}
+    if raw == nil || raw == ""
+      return bindings
+    pairs = raw.split(",")
+    i = 0
+    while i < pairs.size()
+      pair = pairs[i]
+      eq_idx = pair.index("=")
+      if eq_idx != nil
+        key = pair.slice(0, eq_idx)
+        val = pair.slice(eq_idx + 1, pair.size() - eq_idx - 1)
+        if key != "" && val != ""
+          bindings[key] = val
+      i += 1
+    bindings
+
+  -> canonical_service_bindings(bindings)
+    # Sorted deliberately (NOT an iteration-order workaround): the env
+    # string's pair order is caller-controlled, and the canonical form
+    # must be identical regardless of how the pairs were written.
+    keys = bindings.keys().sort()
+    parts = []
+    i = 0
+    while i < keys.size()
+      key = keys[i]
+      parts.push(key + "=" + bindings[key])
+      i += 1
+    parts.join(",")
+
+  -> begin_program_manifest
+    @manifest_files = []
+    @manifest_poisoned = false
+    @runtime_id = runtime_identity()
+    @cacheable = @runtime_id.starts_with?("ruby ")
+    # Manifest recording engages for the ruby AST cache AND the compiled
+    # driver's incremental binary/Core caches. Stage 0 implements the same
+    # nanosecond file metadata boundary so its cold lowering order and Core
+    # reachability decision remain byte-identical with the native stage.
+    @manifest_wanted = @cacheable || @runtime_id in ("compiled-runtime" "tungsten-c")
+    nil
+
+  -> load_program_ast(path, from_file = nil)
+    resolved = resolve_path(path, from_file)
+
+    if from_file == nil
+      @loaded_files = []
+      begin_program_manifest()
+
+      cached = read_ast_cache(resolved)
+      if cached != nil
+        # Cached programs have already been flattened/autoloaded, but contract
+        # validation is deliberately not cached: its guarantees must survive a
+        # compiler upgrade that tightens the closed-world checks.
+        autoload_registry(resolved)
+        validate_program_contracts(cached.expressions, resolved)
+        return cached
+
+    if @loaded_files.include?(resolved)
+      return Tungsten:AST:Program.new([])
+
+    @loaded_files.push(resolved)
+    record_manifest_file(resolved)
+    if @verbose && env("DEBUG_LOADS") == "1"
+      << "  load " + display_path(resolved)
+
+    ast = read_memory_parse_cache(resolved)
+    if ast == nil
+      ast = read_persistent_parse_cache(resolved)
+    if ast == nil
+      source = read_file(resolved)
+      if source == nil
+        raise compile_error(:E_LOAD_MISSING_FILE, "Could not load '" + path + "' (resolved to '" + resolved + "')", from_file, 1, 1)
+      source = ccall("w_algebra_rewrite_source", source)
+      ast = read_memory_parse_cache_fingerprint(resolved, source)
+      if ast == nil
+        ast = read_persistent_parse_cache_fingerprint(resolved, source)
+      if ast == nil
+        lexer = Lexer.new(source, resolved)
+        token_count = lexer.tokenize()
+        parser = Parser.new(token_count, lexer.packed_tokens, source, lexer.values, lexer.line_at, lexer.col_at, lexer.file).set_chars(lexer.chars)
+        ast = parser.parse()
+        write_memory_parse_cache(resolved, source, ast)
+        write_persistent_parse_cache(resolved, source, ast, parser.file_id)
+    validate_contract_locations(ast.expressions, resolved, from_file)
+
+    expressions = []
+    i = 0
+    while i < ast.expressions.size()
+      expr = ast.expressions[i]
+      if ast_kind(expr) == :use
+        imported = load_program_ast(expr.path, resolved)
+        imported.expressions.each -> (imported_expr)
+          expressions.push(imported_expr)
+      else
+        expressions.push(expr)
+      i += 1
+
+    ast = Tungsten:AST:Program.new(expressions)
+    if from_file == nil
+      # BigInt comparison and bitwise arithmetic are runtime support, not
+      # demand-loaded class methods. Integer values can enter through opaque
+      # native boundaries and runtime-internal callers without any BigInt name
+      # or relevant syntax in the source AST. Always prepend the small native
+      # support modules so every production binary supplies their strong
+      # source seams; the runtime's weak C bodies remain only stage0/bootstrap
+      # defaults and differential oracles. Loading these modules through the
+      # normal path also records and deduplicates them.
+      compare_support = load_program_ast("core/numeric/big_int_compare", resolved)
+      bitwise_support = load_program_ast("core/numeric/big_int_bitwise", resolved)
+      has_compare_support = compare_support != nil && compare_support.expressions.size() > 0
+      has_bitwise_support = bitwise_support != nil && bitwise_support.expressions.size() > 0
+      if has_compare_support || has_bitwise_support
+        with_support = []
+        if compare_support != nil
+          compare_support.expressions.each -> (support_expr)
+            with_support.push(support_expr)
+        if bitwise_support != nil
+          bitwise_support.expressions.each -> (support_expr)
+            with_support.push(support_expr)
+        expressions.each -> (program_expr)
+          with_support.push(program_expr)
+        expressions = with_support
+        ast = Tungsten:AST:Program.new(expressions)
+      ast = autoload_pass(ast, resolved)
+      validate_program_contracts(ast.expressions, resolved)
+      write_ast_cache(resolved, ast)
+    ast
+
+  -> tungsten_contract_name(node)
+    if node == nil || !is_ast_node?(node) || ast_kind(node) != :call
+      return nil
+    receiver = node.receiver
+    if receiver == nil || !is_ast_node?(receiver) || ast_kind(receiver) != :class_ref || receiver.name != "Tungsten"
+      return nil
+    if node.name in ("PROTECT_THE_CORE!" "STOP_THE_PRESS!" "LOCK_THE_DOORS!")
+      return node.name
+    nil
+
+  # Contracts belong to the executable that owns the process. A dependency
+  # may document that it works under a closed world, but it cannot silently
+  # close its caller's method tables or opt the caller into Core assumptions.
+  -> validate_contract_locations(expressions, resolved, from_file)
+    i = 0
+    while i < expressions.size()
+      node = expressions[i]
+      contract = tungsten_contract_name(node)
+      if contract != nil
+        if node.args == nil || node.args.size() != 0 || node.block != nil
+          raise compile_error_for_node(:E_CONTRACT_ARITY, "Tungsten." + contract + " takes no arguments or block", resolved, node)
+        if from_file != nil
+          raise compile_error_for_node(:E_CONTRACT_DEPENDENCY, "Tungsten." + contract + " may only be declared by the entry program", resolved, node)
+      i += 1
+    nil
+
+  -> loader_core_source?(node)
+    path = ast_get(node, :source_path)
+    if path == nil
+      return false
+    text = "" + path
+    if @core_root != nil
+      prefix = @core_root + "/core/"
+      if text.size() >= prefix.size() && text.slice(0, prefix.size()) == prefix
+        return true
+    root = env("TUNGSTEN_ROOT")
+    if root != nil
+      prefix = root + "/core/"
+      if text.size() >= prefix.size() && text.slice(0, prefix.size()) == prefix
+        return true
+    text.size() >= 5 && text.slice(0, 5) == "core/"
+
+  -> definition_contract_key(node)
+    kind = ast_kind(node)
+    if kind in (:class_def :module_def :trait_def)
+      return "type:" + node.name
+    if kind in (:fn_def :method_def)
+      arity = 0
+      if node.params != nil
+        arity = node.params.size()
+      return "fn:" + node.name + "/" + arity.to_s()
+    nil
+
+  # PROTECT_THE_CORE! is a checked assertion, not an advisory hint. Reject a
+  # user reopen/replacement before lowering can consume a stable Core fact.
+  # STOP_THE_PRESS! is a type-universe barrier: later reopens of an already
+  # known type may add methods, but no new class/module/trait name may appear.
+  # LOCK_THE_DOORS! is the stronger source barrier: every definition must
+  # precede it. The AOT compiler can then register the complete set and close
+  # the runtime tables once, before executing user statements.
+  -> validate_program_contracts(expressions, resolved)
+    protect_core = false
+    stop_seen = false
+    lock_seen = false
+    known_types = {}
+    core_keys = {}
+    i = 0
+    while i < expressions.size()
+      node = expressions[i]
+      contract = tungsten_contract_name(node)
+      if contract == "PROTECT_THE_CORE!"
+        protect_core = true
+      elsif contract == "STOP_THE_PRESS!"
+        stop_seen = true
+      elsif contract == "LOCK_THE_DOORS!"
+        stop_seen = true
+        lock_seen = true
+      elsif lock_seen
+        key = definition_contract_key(node)
+        if key != nil
+          path = ast_get(node, :source_path)
+          if path == nil
+            path = resolved
+          raise compile_error_for_node(:E_CONTRACT_LOCK_ORDER, "method and type definitions must appear before Tungsten.LOCK_THE_DOORS!", path, node)
+      elsif stop_seen && ast_kind(node) in (:class_def :module_def :trait_def) && known_types[node.name] != true
+        path = ast_get(node, :source_path)
+        if path == nil
+          path = resolved
+        raise compile_error_for_node(:E_CONTRACT_TYPE_ORDER, "new type definitions must appear before Tungsten.STOP_THE_PRESS!", path, node)
+      key = definition_contract_key(node)
+      if ast_kind(node) in (:class_def :module_def :trait_def)
+        known_types[node.name] = true
+      if key != nil && loader_core_source?(node)
+        core_keys[key] = true
+      i += 1
+
+    if !protect_core
+      return nil
+
+    registry = @autoload_registry
+    if registry == nil || registry.size() == 0
+      registry = contract_core_registry(resolved)
+    i = 0
+    while i < expressions.size()
+      node = expressions[i]
+      key = definition_contract_key(node)
+      if key != nil && !loader_core_source?(node)
+        core_owned = core_keys[key] == true
+        kind = ast_kind(node)
+        if kind in (:class_def :module_def :trait_def)
+          core_owned = core_owned || registry[node.name] != nil || node.name == "Tungsten"
+        if core_owned
+          path = ast_get(node, :source_path)
+          if path == nil
+            path = resolved
+          raise compile_error_for_node(:E_CONTRACT_CORE_MUTATION, "Tungsten.PROTECT_THE_CORE! forbids replacing or reopening Core definition '" + node.name + "'", path, node)
+      i += 1
+    nil
+
+  # Read Core ownership names even when the entry program explicitly `use`s
+  # core/tungsten.w. The ordinary autoloader intentionally returns an empty
+  # registry in that case, but PROTECT_THE_CORE still must recognize an
+  # unloaded Core name as Core-owned.
+  -> contract_core_registry(base_resolved)
+    if @contract_core_registry != nil
+      return @contract_core_registry
+    if @core_root == nil
+      parts = base_resolved.split("/")
+      parts.pop()
+      @core_root = find_core_root(parts.join("/"))
+    registry = {}
+    if @core_root == nil || @core_root == ""
+      @contract_core_registry = registry
+      return registry
+    registry_path = @core_root + "/core/tungsten.w"
+    source = read_file(registry_path)
+    if source != nil
+      lexer = Lexer.new(source, registry_path)
+      token_count = lexer.tokenize()
+      parser = Parser.new(token_count, lexer.packed_tokens, source, lexer.values, lexer.line_at, lexer.col_at, lexer.file).set_chars(lexer.chars)
+      parsed = parser.parse()
+      extract_autoload_entries(parsed.expressions, registry)
+    @contract_core_registry = registry
+    registry
+
+  # Lazy iterative autoload. After the entry-file's recursive `:use` walk
+  # produces `ast`, scan for unresolved class/trait references whose names
+  # appear in core/tungsten.w's `auto :Name, "path"` registry. Load each
+  # missing file once, append its expressions, and rescan — newly-loaded
+  # files often introduce further references (e.g. core/array.w → Enumerable).
+  -> autoload_pass(ast, base_resolved, fast_loaded = nil)
+    # TUNGSTEN_C_FAST_PARSE bootstrap: the C fast-loader inlines the whole
+    # use-graph itself, bypassing load_program_ast's bookkeeping, then
+    # re-enters here. It hands the inlined file list over so this pass
+    # doesn't re-load a module the flatten already included — a re-load
+    # duplicates every definition in it (e.g. `use core/numeric/big_int`
+    # at the compiler's top produced duplicate __bigint_* fns).
+    if fast_loaded != nil
+      @loaded_files = []
+      begin_program_manifest()
+      manifest_seen = {}
+      fli = 0
+      while fli < fast_loaded.size()
+        loaded_path = fast_loaded[fli]
+        @loaded_files.push(loaded_path)
+        # fast_loaded also carries relative aliases used solely for Loader's
+        # duplicate-load checks. The first spelling for each file is its
+        # canonical absolute path; only those belong in the source manifest.
+        if loaded_path.starts_with?("/") && manifest_seen[loaded_path] != true
+          record_manifest_file(loaded_path)
+          manifest_seen[loaded_path] = true
+        fli += 1
+    registry = autoload_registry(base_resolved)
+    if registry == nil
+      return ast
+    @autoload_loaded = {}
+    # Working copy, not an alias — `ast.expressions` is immutable once
+    # frozen into the Program's slot, but this loop accumulates newly
+    # autoloaded files into `expressions` across up to 64 iterations.
+    # The function builds a fresh Program from `reordered` at the end
+    # regardless, so `ast` itself is never written back to.
+    expressions = []
+    ast.expressions.each -> (e)
+      expressions.push(e)
+    user_count = expressions.size()
+    # [start, count] per autoloaded file so the final reorder can reverse
+    # at file granularity (see below).
+    blocks = []
+    iteration = 0
+    # Deep autoload walk watermark: each iteration only recurses into
+    # expressions appended since the last one. Re-walking already-scanned
+    # expressions is pure waste — any autoload name they reference was either
+    # collected in an earlier iteration (and is now loaded or marked in
+    # @autoload_loaded, so consider_autoload_name filters it) or was never in
+    # the registry. New pending names can only come from newly-loaded files.
+    # The lighter whole-program passes (collect_defined_names, the array-
+    # necessity analysis inside collect_unresolved_autoload_names) still see
+    # everything. This turns the fixpoint from O(iterations x total AST) into
+    # a single pass over each expression — the autoload walker was the hottest
+    # function in a compile.
+    walked = 0
+    while iteration < 64
+      defined = collect_defined_names(expressions)
+      pending = collect_unresolved_autoload_names(expressions, walked, defined, registry)
+      walked = expressions.size()
+      if env("DEBUG_AUTOLOAD") == "1"
+        ccall("w_eputs", "autoload iter " + iteration.to_s() + " pending=" + pending.size().to_s() + " exprs=" + expressions.size().to_s())
+      if pending.size() == 0
+        break
+      pi = 0
+      while pi < pending.size()
+        name = pending[pi]
+        if env("DEBUG_AUTOLOAD") == "1"
+          ccall("w_eputs", "  pending name=" + name.to_s())
+        if @autoload_loaded[name] != true
+          @autoload_loaded[name] = true
+          path = registry[name]
+          # Tolerant load: if the autoloaded file has a parse error or other
+          # compile-time failure, swallow it and skip this name. Several core
+          # `.w` files (notably core/object.w with `-> !~/1` and `-> ARGF`
+          # stubs the lexer doesn't yet accept) are still scaffolds — they
+          # only matter once their methods are actually used. A user program
+          # that *needs* them will fail at lowering time with a clear "no
+          # such class" or "no such trait" error rather than crashing the
+          # loader for every other compilation. `core/tungsten.w`'s registry
+          # remains the source of truth for what *can* be autoloaded; this
+          # block decides what *currently can be* loaded.
+          loaded = nil
+          begin
+            loaded = load_program_ast("core/" + path, base_resolved)
+          rescue err
+            if @verbose && env("DEBUG_LOADS") == "1"
+              << "  autoload skip " + name + " (parse error in core/" + path + ")"
+            loaded = nil
+          if loaded != nil
+            block_start = expressions.size()
+            li = 0
+            while li < loaded.expressions.size()
+              expressions.push(loaded.expressions[li])
+              li += 1
+            blocks.push([block_start, loaded.expressions.size()])
+        pi += 1
+      iteration += 1
+    # Reorder so autoloaded class defs come before user code that inherits
+    # from them: `+ Foo < Object` would otherwise reference @class.Object
+    # before Object's class_new ran. Autoload pulls in top-down order
+    # (user-referenced first, then their deps), so the deepest dependency
+    # was loaded LAST — reversing the autoloaded tail puts roots first,
+    # which is what class creation needs. The reverse is at FILE-BLOCK
+    # granularity: each autoloaded file keeps its own declaration order
+    # (an orchestrator like core/dynamics.w splices `use`d workers with
+    # parents before children — an expression-level reverse would run
+    # child class_new before its parent and leave a nil superclass).
+    reordered = []
+    bi = blocks.size() - 1
+    while bi >= 0
+      bstart = blocks[bi][0]
+      bcount = blocks[bi][1]
+      k = 0
+      while k < bcount
+        reordered.push(expressions[bstart + k])
+        k += 1
+      bi -= 1
+    ui = 0
+    while ui < user_count
+      reordered.push(expressions[ui])
+      ui += 1
+    Tungsten:AST:Program.new(reordered)
+
+  -> autoload_registry(base_resolved)
+    if @autoload_registry != nil
+      return @autoload_registry
+    parts = base_resolved.split("/")
+    parts.pop()
+    base_dir = parts.join("/")
+    project_root = find_core_root(base_dir)
+    if project_root == ""
+      return nil
+    @core_root = project_root
+    registry_path = project_root + "/core/tungsten.w"
+    if !file?(registry_path)
+      return nil
+    if @loaded_files.include?(registry_path)
+      # Caller already loaded it — registry already merged inline, skip.
+      @autoload_registry = {}
+      return @autoload_registry
+    source = read_file(registry_path)
+    if source == nil
+      return nil
+    lexer = Lexer.new(source, registry_path)
+    token_count = lexer.tokenize()
+    parser = Parser.new(token_count, lexer.packed_tokens, source, lexer.values, lexer.line_at, lexer.col_at, lexer.file).set_chars(lexer.chars)
+    parsed = parser.parse()
+    registry = {}
+    extract_autoload_entries(parsed.expressions, registry)
+    @autoload_registry = registry
+    record_manifest_file(registry_path)
+    registry
+
+  -> extract_autoload_entries(exprs, registry)
+    i = 0
+    while i < exprs.size()
+      e = exprs[i]
+      if ast_kind(e) == :class_def && e.name == "Tungsten" && e.body != nil
+        bj = 0
+        while bj < e.body.size()
+          n = e.body[bj]
+          if ast_kind(n) == :call && n.name == "auto" && n.args != nil && n.args.size() == 2
+            sym = n.args[0]
+            path = n.args[1]
+            if ast_kind(sym) == :symbol && ast_kind(path) == :string
+              registry[sym.value] = path.value
+          bj += 1
+      i += 1
+
+  -> collect_defined_names(exprs)
+    defined = {}
+    i = 0
+    while i < exprs.size()
+      e = exprs[i]
+      if ast_kind(e) == :class_def && e.name != nil
+        defined[e.name] = true
+      elsif ast_kind(e) == :trait_def && e.name != nil
+        defined[e.name] = true
+      i += 1
+    defined
+
+  -> collect_unresolved_autoload_names(exprs, start, defined, registry)
+    # Decide whether an array literal should pull in the Array class. The
+    # literal alone needs Array only for class/Enumerable methods the runtime
+    # WArray and the compiler's inline-iterator lowering don't cover (uniq,
+    # zip, flatten, sort, +, <<, ==, …). A program that builds an array and
+    # only ever drives it with inlined scalar iterators (any?/all?/none?/
+    # count/find/detect) needs none of that — autoloading Array there drags
+    # the whole Enumerable/Array/Hash tower (w_add / w_closure_new method
+    # bodies) into a program that never calls them. `array_class_needed?` is
+    # SOUND-by-overapproximation: it returns false ONLY when every array
+    # literal is provably used in that inlined-iterator-only shape, and true
+    # for anything it can't prove (unknown node, escape, non-safe method).
+    @array_needed = array_class_needed?(exprs)
+    # Source-defined Array methods have no runtime fallback, and an Array can
+    # enter through argv/a parameter without any literal or class reference.
+    # Scan call names only until the first such method schedules Array. Later
+    # autoload iterations see Array in @autoload_loaded and skip the guard.
+    @array_source_method_unresolved = defined["Array"] != true && registry["Array"] != nil && @autoload_loaded["Array"] != true
+    # Source-defined Float leaves have no runtime fallback. A Float can arrive
+    # through a parameter or native call without a literal or class reference,
+    # so schedule its class on the first matching method name.
+    @float_source_method_unresolved = defined["Float"] != true && registry["Float"] != nil && @autoload_loaded["Float"] != true
+    # Decimal's portable source leaves (normalization, reciprocal, and the
+    # transcendental facade) likewise need the class even when a packed or
+    # heap Decimal crosses an untyped boundary. Its primitive conversions and
+    # rounding methods remain native IC rows and do not need this trigger.
+    @decimal_source_method_unresolved = defined["Decimal"] != true && registry["Decimal"] != nil && @autoload_loaded["Decimal"] != true
+    # BigInt#to_i is likewise source-defined identity and a heap BigInt can
+    # cross a parameter/native boundary without a literal in this AST.
+    @bigint_to_i_unresolved = defined["BigInt"] != true && registry["BigInt"] != nil && @autoload_loaded["BigInt"] != true
+    # BigInts also cross literal, promotion, parameter, and native boundaries
+    # without a reliable receiver-class node. Their five representation-only
+    # predicates and in-place sign operations now live in source, so schedule
+    # BigInt on the first matching spelling and collapse the guard for the
+    # remainder of this walk/pass.
+    @bigint_predicates_unresolved = defined["BigInt"] != true && registry["BigInt"] != nil && @autoload_loaded["BigInt"] != true
+    # String and Symbol share runtime dispatch key 0xF9 and may arrive through
+    # parameters, native calls, or rope-producing expressions. A one-shot
+    # method-name gate is the sound registration boundary for their
+    # deliberately tiny source facade.
+    @string_source_method_unresolved = defined["String"] != true && registry["String"] != nil && @autoload_loaded["String"] != true
+    # Opaque synchronization handles have no reliable receiver-class evidence
+    # in the AST. Only the four bounded source leaves participate; ubiquitous
+    # or hard-fatal native selectors deliberately keep their IC fallback.
+    @atomic_source_method_unresolved = defined["Atomic"] != true && registry["Atomic"] != nil && @autoload_loaded["Atomic"] != true
+    @channel_source_method_unresolved = defined["Channel"] != true && registry["Channel"] != nil && @autoload_loaded["Channel"] != true
+    @thread_source_method_unresolved = defined["Thread"] != true && registry["Thread"] != nil && @autoload_loaded["Thread"] != true
+    # Keep Mmap call-name triggers separate. size is common but already retained
+    # under its deliberately tiny facade. The typed-view names are narrow
+    # enough to cover unknown native/parameter boundaries without the unsound
+    # provenance assumptions that `[]` or `close` would require.
+    @mmap_size_unresolved = defined["Mmap"] != true && registry["Mmap"] != nil && @autoload_loaded["Mmap"] != true
+    mmap_missing = defined["Mmap"] != true && registry["Mmap"] != nil && @autoload_loaded["Mmap"] != true
+    big_array_missing = defined["BigArray"] != true && registry["BigArray"] != nil && @autoload_loaded["BigArray"] != true
+    @mmap_typed_view_unresolved = mmap_missing || big_array_missing
+    seen = {}
+    pending = []
+    i = start
+    while i < exprs.size()
+      collect_autoload_refs(exprs[i], defined, registry, seen, pending)
+      i += 1
+    pending
+
+  # --- Array-autoload necessity analysis (see collect_unresolved_autoload_names) ---
+
+  # Scalar/element-returning iterators the compiler inlines for a plain array
+  # without consulting the Array class. Verified: each result is bool/int/an
+  # element — never a fresh array — so the result can't transitively need the
+  # class. `each` is excluded (it returns the array itself).
+  -> arr_safe_iter?(name)
+    name in ("any?" "all?" "none?" "count" "find" "detect")
+
+  -> array_class_needed?(exprs)
+    arr_vars = {}
+    other_assign = {}
+    collect_arr_literal_vars_list(exprs, arr_vars, other_assign)
+    # A var assigned anything besides a scalar-element array literal is not a
+    # clean array binding — drop it so its uses fall to the conservative path.
+    names = arr_vars.keys()
+    ni = 0
+    while ni < names.size()
+      if other_assign[names[ni]] == true
+        arr_vars[names[ni]] = nil
+      ni += 1
+    st = {needed: false}
+    scan_arr_safety_list(exprs, arr_vars, st)
+    st[:needed]
+
+  # True iff every element of an array literal is a scalar literal (so the
+  # array is a flat int/string/… array, never an array-of-arrays whose
+  # element results could themselves need the class).
+  -> arr_literal_all_scalar?(node)
+    els = node.elements
+    if els == nil
+      return true
+    i = 0
+    while i < els.size()
+      e = els[i]
+      if !is_ast_node?(e)
+        return false
+      if ast_kind(e) in (:int :float :string :bool :char :symbol :nil :decimal)
+        nil
+      else
+        return false
+      i += 1
+    true
+
+  -> collect_arr_literal_vars_list(nodes, arr_vars, other_assign)
+    if nodes == nil
+      return nil
+    # A "list" field is not always a list: rescue_expr.body (postfix
+    # `rescue`) holds a single packed node, and .size() on an AST node is
+    # nil — `i < nil` raises in the compiled compiler. Route single nodes
+    # through the node walker (which forwards real arrays back here),
+    # mirroring the puts/value convention in scan_arr_safety_node.
+    if is_ast_node?(nodes)
+      collect_arr_literal_vars_node(nodes, arr_vars, other_assign)
+      return nil
+    i = 0
+    while i < nodes.size()
+      collect_arr_literal_vars_node(nodes[i], arr_vars, other_assign)
+      i += 1
+
+  -> collect_arr_literal_vars_node(node, arr_vars, other_assign)
+    if !is_ast_node?(node)
+      if type(node) == "Array"
+        collect_arr_literal_vars_list(node, arr_vars, other_assign)
+      return nil
+    t = ast_kind(node)
+    # @fastmath / @strictmath / Math.promote blocks are plain hash nodes that
+    # answer only subscript access, not the method-style `.body` the recursion
+    # below uses (calling `.body` on the hash raises). Recurse via subscript.
+    if t in (:fastmath_block :strictmath_block :overflow_block)
+      collect_arr_literal_vars_list(node[:body], arr_vars, other_assign)
+      return nil
+    if t == :assign && node.target != nil && ast_kind(node.target) == :var
+      v = node.value
+      if v != nil && is_ast_node?(v) && ast_kind(v) == :array && arr_literal_all_scalar?(v)
+        arr_vars[node.target.name] = true
+      else
+        other_assign[node.target.name] = true
+    if t == :compound_assign && node.target != nil && ast_kind(node.target) == :var
+      other_assign[node.target.name] = true
+    # Recurse into bodies/children to find nested assignments.
+    collect_arr_literal_vars_list(node.body, arr_vars, other_assign)
+    collect_arr_literal_vars_list(node.then_body, arr_vars, other_assign)
+    collect_arr_literal_vars_list(node.else_body, arr_vars, other_assign)
+    collect_arr_literal_vars_list(node.expressions, arr_vars, other_assign)
+    if node.value != nil && is_ast_node?(node.value)
+      collect_arr_literal_vars_node(node.value, arr_vars, other_assign)
+    nil
+
+  -> scan_arr_safety_list(nodes, arr_vars, st)
+    if nodes == nil
+      return nil
+    if st[:needed] == true
+      return nil
+    i = 0
+    while i < nodes.size()
+      scan_arr_safety_node(nodes[i], arr_vars, st)
+      i += 1
+
+  -> scan_arr_safety_node(node, arr_vars, st)
+    if st[:needed] == true
+      return nil
+    if node == nil
+      return nil
+    if !is_ast_node?(node)
+      if type(node) == "Array"
+        scan_arr_safety_list(node, arr_vars, st)
+      return nil
+    t = ast_kind(node)
+    case t
+    when :int, :float, :string, :bool, :nil, :symbol, :char, :decimal
+      return nil
+    when :var
+      # An array-var reaching here is NOT a safe-iterator receiver (those are
+      # consumed in the :call arm) — treat it as an escape that may need the class.
+      if arr_vars[node.name] == true
+        st[:needed] = true
+      return nil
+    when :array
+      # An array literal anywhere except a tracked `V = [scalars]` assignment
+      # (handled in :assign) is an unproven use.
+      st[:needed] = true
+      return nil
+    when :program
+      scan_arr_safety_list(node.expressions, arr_vars, st)
+      return nil
+    when :assign
+      tgt = node.target
+      val = node.value
+      if tgt != nil && ast_kind(tgt) == :var && arr_vars[tgt.name] == true && val != nil && is_ast_node?(val) && ast_kind(val) == :array
+        # The tracking assignment: literal is all-scalar (proven at collect
+        # time), so nothing to flag.
+        return nil
+      scan_arr_safety_node(tgt, arr_vars, st)
+      scan_arr_safety_node(val, arr_vars, st)
+      return nil
+    when :compound_assign
+      scan_arr_safety_node(node.target, arr_vars, st)
+      scan_arr_safety_node(node.value, arr_vars, st)
+      return nil
+    when :call
+      recv = node.receiver
+      recv_is_arr_var = recv != nil && is_ast_node?(recv) && ast_kind(recv) == :var && arr_vars[recv.name] == true
+      if recv_is_arr_var && arr_safe_iter?(node.name)
+        # Safe inlined iterator on a tracked array — scan args/block only.
+        scan_arr_safety_list(node.args, arr_vars, st)
+        scan_arr_safety_node(node.block, arr_vars, st)
+        return nil
+      scan_arr_safety_node(recv, arr_vars, st)
+      scan_arr_safety_list(node.args, arr_vars, st)
+      scan_arr_safety_node(node.block, arr_vars, st)
+      return nil
+    when :binary_op, :and, :or
+      scan_arr_safety_node(node.left, arr_vars, st)
+      scan_arr_safety_node(node.right, arr_vars, st)
+      return nil
+    when :unary_op, :not
+      scan_arr_safety_node(node.operand, arr_vars, st)
+      return nil
+    when :fn_def, :method_def
+      scan_arr_safety_list(node.params, arr_vars, st)
+      scan_arr_safety_list(node.body, arr_vars, st)
+      return nil
+    when :param
+      scan_arr_safety_node(node.default, arr_vars, st)
+      return nil
+    when :block
+      scan_arr_safety_list(node.body, arr_vars, st)
+      return nil
+    when :puts
+      # puts.value may be a single print-arg node or a list of them; the
+      # node dispatcher handles both (it forwards arrays to the list walker).
+      scan_arr_safety_node(node.value, arr_vars, st)
+      return nil
+    when :return, :print
+      scan_arr_safety_node(node.value, arr_vars, st)
+      return nil
+    else
+      # Unknown / not-modeled node — conservatively assume Array may be needed.
+      st[:needed] = true
+      return nil
+
+  -> collect_autoload_refs(node, defined, registry, seen, pending)
+    if !is_ast_node?(node) || ast_kind(node) == nil
+      return nil
+    t = ast_kind(node)
+    # @fastmath / @strictmath scoped blocks are plain hash nodes
+    # ({node:, body:}) that only live until lowering. Recurse into the body
+    # via subscript (hash nodes don't answer the method-style `.args` /
+    # `.body` accessors the generic field-probe below uses — calling `.args`
+    # on the hash raises) so class refs inside the block still autoload.
+    if t in (:fastmath_block :strictmath_block :overflow_block)
+      mblock_body = node[:body]
+      if mblock_body != nil
+        mbi = 0
+        while mbi < mblock_body.size()
+          collect_autoload_refs(mblock_body[mbi], defined, registry, seen, pending)
+          mbi += 1
+      return nil
+    if t == :trait_include && node.name != nil
+      consider_autoload_name(node.name, defined, registry, seen, pending)
+    # A handler can receive a runtime failure (division by zero, undefined
+    # method, ...), which the runtime raises as an instance of the matching
+    # core error class WHEN that class is linked. Link the whole hierarchy
+    # into any program that can rescue, so `rescue e: ZeroDivisionError`
+    # and `e.message` work without the program naming the class first, and
+    # so both engines see the same typed object. Programs without a handler
+    # pay nothing — an unrescued failure is fatal either way.
+    if t in (:begin :rescue_expr)
+      err_names = runtime_error_class_names()
+      eni = 0
+      while eni < err_names.size()
+        consider_autoload_name(err_names[eni], defined, registry, seen, pending)
+        eni += 1
+    if t == :class_def
+      # `+ Name` is a reopen when Name is supplied by core. Load the core
+      # definition before the user's body even though collect_defined_names
+      # has already seen this declaration; otherwise the partial user class
+      # suppresses autoload and replaces the primitive dispatch surface.
+      consider_autoload_name(node.name, defined, registry, seen, pending, true)
+      if node.superclass != nil
+        consider_autoload_name(node.superclass, defined, registry, seen, pending)
+      if node.body != nil
+        bj = 0
+        while bj < node.body.size()
+          collect_autoload_refs(node.body[bj], defined, registry, seen, pending)
+          bj += 1
+    # Keep every call-specific autoload trigger in one arm. This walker visits
+    # the complete AST, so repeatedly fetching `receiver`/`name` in separate
+    # `t == :call` conditions is measurable on a self-host compile.
+    if t == :call
+      call_receiver = node.receiver
+      call_name = node.name
+
+      # Const/class-name receivers: `Array.new(...)` and
+      # `ByteArray.from_array(...)` reach a class via a var receiver. A broken
+      # core stub is handled by the tolerant-load block above.
+      if call_receiver != nil && ast_kind(call_receiver) == :var
+        consider_autoload_name(call_receiver.name, defined, registry, seen, pending)
+      # ClassRef receiver — always a class reference.
+      if call_receiver != nil && ast_kind(call_receiver) == :class_ref
+        consider_autoload_name(call_receiver.name, defined, registry, seen, pending)
+
+      # File's other operations stay compiler intrinsics and should not pull in
+      # its full source facade. Mmap#size uniquely needs the Mmap type class,
+      # which lives in core/mmap.w and is registered under Mmap itself.
+      if call_receiver != nil && ast_kind(call_receiver) in (:var :class_ref) && call_receiver.name == "File" && call_name == "mmap"
+        consider_autoload_name("Mmap", defined, registry, seen, pending)
+
+      # A direct ccall can construct a value whose runtime type is visible only
+      # after the call. Keep this scoped to exact known value-producing names.
+      if call_receiver == nil && call_name in ("ccall" "ccall_rawargs") && node.args != nil && node.args.size() > 0
+        target = node.args[0]
+        if target != nil && ast_kind(target) == :string
+          result_class = native_ccall_result_class(target.value)
+          if result_class != nil
+            consider_autoload_name(result_class, defined, registry, seen, pending)
+
+      # argv() returns the process Array without a literal or class reference.
+      if call_receiver == nil && call_name == "argv"
+        consider_autoload_name("Array", defined, registry, seen, pending)
+
+      # StringBuffer(...) is a compiler-recognized bare constructor rather
+      # than a class receiver call, so its spelling is the only source-level
+      # class reference. Its methods now include a source-defined size.
+      if call_receiver == nil && call_name == "StringBuffer"
+        consider_autoload_name("StringBuffer", defined, registry, seen, pending)
+
+      # Every executable String source method lives in core/string.w.
+      # Name-gate the complete surface behind a
+      # one-shot latch: a false-positive Array#size/Object#to_s load is small,
+      # while omitting any name makes a value crossing an erased/native
+      # boundary fail only in compiled dispatch. String and Symbol share the
+      # 0xF9 registration, so the same trigger covers both representations.
+      if @string_source_method_unresolved && call_name in ("to_s" "empty?" "size" "length" "swapcase" "capitalize" "reverse" "chars" "bytes" "upcase" "downcase" "lpad" "rpad" "ljust" "rjust" "center" "delete" "squeeze" "tr" "ascii?" "blank?" "byte_at" "codepoints" "characters" "each_byte" "each_codepoint" "each_character" "each_line" "lines" "contains?" "levenshtein" "__bytes_array" "nfc" "nfd" "nfkc" "nfkd" "normalize" "canonically_equivalent?" "each_grapheme" "graphemes" "scan" "astralize" "__astral_cp" "camelize" "underscore" "snakecase" "dasherize" "humanize" "transliterate" "__translit_fold" "parameterize" "lowercase" "uppercase" "includes?" "to_regex" "constantize" "[]=")
+        consider_autoload_name("String", defined, registry, seen, pending)
+        @string_source_method_unresolved = false
+      # Lowering synthesizes a per-element call for these Symbol-to-proc forms
+      # after this source-AST walk. Mirror that exact domain here so
+      # :size/:length cannot bypass String registration.
+      elsif @string_source_method_unresolved && call_name in ("map" "select" "reject" "count") && node.block == nil && call_receiver != nil && node.args != nil && node.args.size() == 1
+        iteratee = node.args[0]
+        if iteratee != nil && is_ast_node?(iteratee) && ast_kind(iteratee) == :symbol && iteratee.value in ("size" "length") && ast_kind(call_receiver) in (:range :array :var :call :map :calc)
+          consider_autoload_name("String", defined, registry, seen, pending)
+          @string_source_method_unresolved = false
+
+      if @atomic_source_method_unresolved && call_name in ("increment" "decrement")
+        consider_autoload_name("Atomic", defined, registry, seen, pending)
+        @atomic_source_method_unresolved = false
+      if @channel_source_method_unresolved && call_name == "recv"
+        consider_autoload_name("Channel", defined, registry, seen, pending)
+        @channel_source_method_unresolved = false
+      if @thread_source_method_unresolved && call_name == "alive?"
+        consider_autoload_name("Thread", defined, registry, seen, pending)
+        @thread_source_method_unresolved = false
+
+      # These methods are source-defined after removal of their runtime ICs.
+      # Arrays can arrive through argv, a parameter, or a native factory, so
+      # no receiver-shape test can soundly cover every use.
+      if @array_source_method_unresolved && call_name in ("join" "compact" "dup" "take" "drop" "reverse" "uniq" "minmax" "copy" "delete_at" "flatten")
+        consider_autoload_name("Array", defined, registry, seen, pending)
+        @array_source_method_unresolved = false
+
+      if @float_source_method_unresolved && call_name in ("to_f" "abs" "nan?" "infinite?" "finite?" "sqrt" "ceil" "floor" "round" "sq" "truncate")
+        consider_autoload_name("Float", defined, registry, seen, pending)
+        @float_source_method_unresolved = false
+
+      if @decimal_source_method_unresolved && call_receiver != nil && call_name in ("to_s" "normalize" "reciprocal" "inv" "sin" "cos" "tan" "arcsin" "arccos" "arctan" "sinh" "cosh" "tanh" "arcsinh" "arccosh" "arctanh")
+        consider_autoload_name("Decimal", defined, registry, seen, pending)
+        @decimal_source_method_unresolved = false
+
+      if @mmap_size_unresolved && call_name == "size"
+        consider_autoload_name("Mmap", defined, registry, seen, pending)
+        @mmap_size_unresolved = false
+
+      if @mmap_typed_view_unresolved && call_name in ("as_u8" "as_u16" "as_u32" "as_u64" "as_i8" "as_i16" "as_i32" "as_i64" "as_f32" "as_f64")
+        consider_autoload_name("Mmap", defined, registry, seen, pending)
+        consider_autoload_name("BigArray", defined, registry, seen, pending)
+        @mmap_typed_view_unresolved = false
+
+      # Int/Integer leaf methods commonly receive literals or locals, which
+      # carry no explicit class reference. The to_i spelling is shared with
+      # source-only BigInt identity, so schedule that tiny class once as well.
+      # The bitwise/divmod spellings require an explicit receiver: a
+      # receiverless call named "&" is BLOCK INVOCATION `&(args)` — gating
+      # on it would autoload Integer/BigInt into every block-using program
+      # (including the compiler itself, which broke stage identity).
+      bitwise_op_send = call_receiver != nil && call_name in ("&" "|" "^" "/" "%")
+      if bitwise_op_send || call_name in ("to_i" "prev" "succ" "next" "zero?" "even?" "odd?" "negative?" "positive?" "sq" "gcd" "lcm" "chr" "pow" "modpow" "factorial" "primorial" "digits" "isqrt" "bit_length" "to_s" "to_f" "abs" "prime?" "+" "-" "*")
+        consider_autoload_name("Int", defined, registry, seen, pending)
+        if call_name == "to_i" && @bigint_to_i_unresolved
+          consider_autoload_name("BigInt", defined, registry, seen, pending)
+          @bigint_to_i_unresolved = false
+        # BigInt (and its base Int) supply the source bodies for these on a
+        # bigint receiver. even?/odd?/... already loaded BigInt widely, so the
+        # incremental cost of also loading it for the integer methods is small,
+        # and it makes a standalone bigint-method program (e.g. `n.modpow(...)`
+        # with no predicate) resolve instead of dispatching to Object.
+        if @bigint_predicates_unresolved && (bitwise_op_send || call_name in ("zero?" "even?" "odd?" "negative?" "positive?" "neg!" "abs!" "abs" "gcd" "lcm" "pow" "modpow" "digits" "isqrt" "bit_length" "prev" "succ" "next" "prime?" "to_f" "to_s" "+" "-" "*"))
+          consider_autoload_name("BigInt", defined, registry, seen, pending)
+          @bigint_predicates_unresolved = false
+
+      # Legacy Base64 globals are source-defined bare calls.
+      if call_receiver == nil && call_name in ("base64_encode" "base64_decode" "base64url_encode" "base64url_decode")
+        consider_autoload_name("Base64", defined, registry, seen, pending)
+    # Standalone ClassRef (Integer as a bare expression): same.
+    if t == :class_ref
+      consider_autoload_name(node.name, defined, registry, seen, pending)
+      if node.name == "ARGV"
+        consider_autoload_name("Array", defined, registry, seen, pending)
+    if t == :var && node.name.ends_with?("!")
+      consider_autoload_name("Int", defined, registry, seen, pending)
+    if t == :var && node.name == "ARGV"
+      consider_autoload_name("Array", defined, registry, seen, pending)
+    # Literal-driven autoload: an array literal `[...]` needs Array's
+    # class def (for Enumerable methods like zip/uniq that the runtime
+    # WArray doesn't provide); a hash literal `{...}` needs Hash. Without
+    # this, code that builds arrays via literals and then calls a pure
+    # Enumerable method fails at runtime with "undefined method" because
+    # array.w was never pulled in (the literal alone references no name).
+    if t == :array
+      if @array_needed != false
+        consider_autoload_name("Array", defined, registry, seen, pending)
+      els = node.elements
+      if els != nil
+        ej2 = 0
+        while ej2 < els.size()
+          collect_autoload_refs(els[ej2], defined, registry, seen, pending)
+          ej2 += 1
+    # Typed-array constructors lower directly to WArray factories and carry no
+    # Array class reference. Their public query leaves share Array's source
+    # method table, so register it before the first dynamic dispatch.
+    if t in (:typed_array :typed_array_new)
+      consider_autoload_name("Array", defined, registry, seen, pending)
+    if t == :hash_literal
+      consider_autoload_name("Hash", defined, registry, seen, pending)
+    # IPv4/CIDR literals carry their runtime type without naming the IPv4
+    # class in source. Once accessors and predicates have Tungsten bodies,
+    # their class definition must still be registered before a literal-only
+    # call such as `10.0.0.1.private?` reaches runtime dispatch.
+    if t == :ip4 || t == :cidr4
+      consider_autoload_name("IPv4", defined, registry, seen, pending)
+    # IPv6/CIDR literals likewise carry their heap type without spelling the
+    # class name; their accessors now require the source-defined type class.
+    if t == :ip6 || t == :cidr6
+      consider_autoload_name("IPv6", defined, registry, seen, pending)
+    # Date and Datetime literals share the packed Date runtime type. Their
+    # native accessors now live in core/date.w, so literal-only programs must
+    # register Date's 0xE4 type class even when they never name Date directly.
+    if t == :date || t == :datetime
+      consider_autoload_name("Date", defined, registry, seen, pending)
+    # Rational literals are packed values whose accessors and conversions
+    # live in core/numeric/rational.w.
+    if t == :rational
+      consider_autoload_name("Rational", defined, registry, seen, pending)
+    # UUID literals carry the runtime subtag without a class reference. Once
+    # byte is source-defined, literal-only programs must register UUID's type
+    # class before public dispatch.
+    if t == :uuid
+      consider_autoload_name("UUID", defined, registry, seen, pending)
+    # A range literal `(a..b)` references no class name, but its numeric
+    # machinery — and the elementwise methods (`sq`, `cube`, …) the fused
+    # pipeline's closed-form recognizer resolves by AST — lives on Number.
+    # Pull it in so those method bodies are registered (mirrors Array/Hash).
+    if t == :range
+      consider_autoload_name("Number", defined, registry, seen, pending)
+      consider_autoload_name("Range", defined, registry, seen, pending)
+    # Closure values arrive from lambda/block literals, from `f(1, _)`
+    # placeholders and `f/2` method references (both synthesized at
+    # lowering, after this walk), and their source methods (`arity`,
+    # `curry`) live in core/closure.w. Register the class whenever a
+    # program can produce or interrogate a closure, so dispatch on a
+    # closure receiver finds them without an explicit `use core/closure`.
+    if t == :block || (t == :call && node.name in ("arity" "curry" "call"))
+      consider_autoload_name("Closure", defined, registry, seen, pending)
+    # `<< a, b` stores a list of value nodes in Puts#value. The generic
+    # single-value walk below intentionally ignores non-AST containers, so
+    # recurse the print list here or class refs inside `<< Digest.sha1(...)`
+    # never trigger core autoload.
+    if t == :puts && node.value != nil
+      vals = node.value
+      vi = 0
+      while vi < vals.size()
+        collect_autoload_refs(vals[vi], defined, registry, seen, pending)
+        vi += 1
+    # `"[Sandbox.active?]"` keeps its parts as [tag, payload] pairs in
+    # Node#parts, not as AST children, so the generic probes below never see
+    # them. A class named ONLY inside an interpolation would resolve to nil at
+    # runtime. Literal parts carry a String payload (tag :str); the rest carry
+    # an expression node.
+    if t in (:string_interp :byte_array_interp) && node.parts != nil
+      iparts = node.parts
+      pi = 0
+      while pi < iparts.size()
+        ipart = iparts[pi]
+        if ipart != nil && ipart[0] != :str
+          collect_autoload_refs(ipart[1], defined, registry, seen, pending)
+        pi += 1
+    if node.args != nil
+      ai = 0
+      while ai < node.args.size()
+        collect_autoload_refs(node.args[ai], defined, registry, seen, pending)
+        ai += 1
+    if node.body != nil && t != :class_def
+      collect_autoload_refs_seq(node.body, defined, registry, seen, pending)
+    if node.then_body != nil
+      collect_autoload_refs_seq(node.then_body, defined, registry, seen, pending)
+    if node.else_body != nil
+      collect_autoload_refs_seq(node.else_body, defined, registry, seen, pending)
+    # begin/rescue/ensure — the rescue and ensure clauses live in their own
+    # fields, so class refs that appear only inside them (`rescue TypeError`
+    # checks, ensure-time cleanup) would otherwise never trigger autoload.
+    if node.rescue_body != nil
+      collect_autoload_refs_seq(node.rescue_body, defined, registry, seen, pending)
+    if node.ensure_body != nil
+      collect_autoload_refs_seq(node.ensure_body, defined, registry, seen, pending)
+    # Postfix `rescue` (rescue_expr) packs its fallback expression as a single
+    # node in its own field — a class named only there must still autoload.
+    if node.fallback != nil
+      collect_autoload_refs_seq(node.fallback, defined, registry, seen, pending)
+    if node.expressions != nil
+      collect_autoload_refs_seq(node.expressions, defined, registry, seen, pending)
+    if node.value != nil && is_ast_node?(node.value)
+      collect_autoload_refs(node.value, defined, registry, seen, pending)
+    if node.left != nil && is_ast_node?(node.left)
+      collect_autoload_refs(node.left, defined, registry, seen, pending)
+    if node.right != nil && is_ast_node?(node.right)
+      collect_autoload_refs(node.right, defined, registry, seen, pending)
+    if node.condition != nil && is_ast_node?(node.condition)
+      collect_autoload_refs(node.condition, defined, registry, seen, pending)
+    # `range.each { }` (and the bare `1..N -> …` loop, which parses to `each`)
+    # lowers to a native counting loop — no Range/Number method is ever called.
+    # Recursing into the range receiver here would autoload Range, which
+    # `is Enumerable` and transitively drags in Array/Hash/Enu

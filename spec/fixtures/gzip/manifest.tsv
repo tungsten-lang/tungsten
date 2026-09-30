@@ -1,0 +1,17 @@
+sample.l0.gz	sample.txt
+sample.l1.gz	sample.txt
+sample.l6.gz	sample.txt
+sample.l9.gz	sample.txt
+sample.fixed.gz	sample.txt
+sample.huffman.gz	sample.txt
+sample.rle.gz	sample.txt
+sample.small.gz	sample.txt
+random.gz	random.raw
+zeros.gz	-
+header_fname.gz	hello.txt
+header_extra.gz	hello.txt
+header_comment.gz	hello.txt
+header_hcrc.gz	hello.txt
+header_all.gz	hello.txt
+multi.gz	multi.txt
+multi_padded.gz	multi.txt

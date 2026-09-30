@@ -6,6 +6,7 @@
 #   TensorVerifier.infer_shape(path)              the deepest NxMxP path component
 #   TensorVerifier.expand_path(path)              File.expand_path (lexical, no symlinks)
 #   TensorVerifier.read(text, n, m, p)            certificate text -> Packed (raises)
+#   TensorVerifier.read_scheme(text, n, m, p)     the same as a Scheme (any certificate format)
 #   TensorVerifier.verify_text(text, n, m, p, gate, strict)   -> record Hash
 #   TensorVerifier.verify(path, n, m, p, gate, strict)        -> record Hash + :path
 #   TensorVerifier.main(args)                     -> [status, stdout, stderr]
@@ -372,6 +373,15 @@ use scheme
       raise failure
     Metaflip:Gf2:Bits.release(dims)
     scheme
+
+  # A certificate of any accepted format as a Scheme (masks in file order), for
+  # callers that ingest seeds and checkpoints rather than verify them. The
+  # factors are range-checked; the tensor is not.
+  -> .read_scheme(text, n, m, p)
+    packed = Metaflip:Gf2:TensorVerifier.read(text, n, m, p)
+    columns = packed.masks
+    packed.release
+    Metaflip:Gf2:Scheme.new(n, m, p, columns[0], columns[1], columns[2])
 
   # ---- verification ----------------------------------------------------------------
 

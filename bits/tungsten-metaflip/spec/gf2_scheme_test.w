@@ -50,6 +50,8 @@ rows.each -> (row)
   failures += check(name + " transpose", hex(Metaflip:Gf2:Bits.transpose(x, row[4].to_i, row[5].to_i)) == row[6])
   table_ = (0...(x == 0 ? 1 : Metaflip:Gf2:Bits.high_bit_index(x) + 1)).map -> (b) (b * 7 + 3) % 1500
   failures += check(name + " remap", hex(Metaflip:Gf2:Bits.remap(x, table_)) == row[7])
+  dropping = (0...(x == 0 ? 1 : Metaflip:Gf2:Bits.high_bit_index(x) + 1)).map -> (b) b % 5 == 0 ? -1 : (b * 3 + 1) % 900
+  failures += check(name + " remap dropping negative entries", hex(Metaflip:Gf2:Bits.remap(x, dropping)) == row[9])
   positions = Metaflip:Gf2:Bits.positions(x)
   golden = row[8] == "-" ? [] : row[8].split(",").map -> (s) s.to_i
   failures += check(name + " positions", positions.size == golden.size)
@@ -86,7 +88,7 @@ failures += check("limbs_for", Metaflip:Gf2:Bits.limbs_for(0) == 1 && Metaflip:G
 
 # ---- fixtures: the originals' verdicts ------------------------------------------------
 cases = table("cases.tsv")
-bases = ["strassen_2x2x2", "rank23_3x3x3", "rank47_4x4x4", "wide68_2x4x17", "wide145_2x5x29", "wide264_4x11x24", "wide529_3x23x23"]
+bases = ["strassen_2x2x2", "rank23_3x3x3", "rank47_4x4x4", "repeated94_4x4x8", "wide68_2x4x17", "wide145_2x5x29", "wide264_4x11x24", "wide529_3x23x23"]
 base_rows = {}
 cases.each -> (row)
   base_rows[row[0]] = row if row[2] == "base"
@@ -197,6 +199,15 @@ bases.each -> (name)
   failures += check(name + " transpose involution", scheme.transpose.transpose.sorted.equal_terms?(scheme.sorted))
   failures += check(name + " orientations stay exact", scheme.cyclic_shift.exact?(:dense) && scheme.transpose.exact?(:sparse))
 
+# verify_cofactor_mergers.orient: every permuted target shape, degenerate shapes included
+table("orient_to.tsv").each -> (row)
+  scheme = Metaflip:Gf2:Scheme.parse(read_file(fixtures + "/" + row[0] + ".mfw"))
+  target = row[1].split("x").map -> (part) part.to_i
+  moved = scheme.oriented_to(target)
+  failures += check(row[0] + " oriented_to " + row[1], moved.shape_key == row[1] && moved.sha256 == row[2])
+  failures += check(row[0] + " oriented_to " + row[1] + " stays exact", moved.exact?(:sparse))
+failures += raised("oriented_to rejects a foreign shape", "no orientation", ->() Metaflip:Gf2:Scheme.naive(2, 3, 4).oriented_to([2, 3, 5]))
+failures += check("shape keys", Metaflip:Gf2:Scheme.naive(5, 2, 3).shape_key == "5x2x3" && Metaflip:Gf2:Scheme.naive(5, 2, 3).sorted_shape_key == "2x3x5")
 failures += check("sorted_shape", Metaflip:Gf2:Scheme.naive(5, 2, 3).sorted_shape[0] == 2 && Metaflip:Gf2:Scheme.naive(5, 2, 3).sorted_shape[2] == 5)
 failures += check("permuted_shape", Metaflip:Gf2:Scheme.permuted_shape([7, 8, 9], [1, 2, 0]) == [8, 9, 7])
 failures += check("orient_perms", Metaflip:Gf2:Scheme.orient_perms.size == 6 && Metaflip:Gf2:Scheme.orient_perms[3][0] == 2)
@@ -258,6 +269,106 @@ failures += raised("header only, rows missing", "wrong term count", ->() Metafli
 failures += check("a one-term scheme", Metaflip:Gf2:Scheme.parse("MFW1 1 1 1 1\n1 1 1\n").exact?)
 failures += check("a rank-zero header", Metaflip:Gf2:Scheme.parse("MFW1 1 1 1 0\n").rank == 0)
 failures += check("parse_hex of a short string", Metaflip:Gf2:Bits.parse_hex("f", 0, 1) == 15 && Metaflip:Gf2:Bits.parse_hex("abcde", 1, 3) == 188)
+
+# ---- random schemes against a brute-force reference ---------------------------------------------------------
+# The reference re-derives every coefficient from the definition with plain Integer
+# shifts, sharing no code with the gates. Schemes are the naive scheme after random
+# exactness-preserving flips (exact), the same with random damage (usually inexact),
+# and fully random terms.
+-> lcg(state) (i64) i64
+  (state * 6364136223846793005 + 1442695040888963407) & 9223372036854775807 ## i64
+
+-> rand(rng, bound)
+  rng[0] = lcg(rng[0])
+  (rng[0] >> 20) % bound
+
+-> random_mask(rng, width, percent)
+  x = 0
+  (0...width).each -> (b)
+    x = x | (1 << b) if rand(rng, 100) < percent
+  x = 1 << rand(rng, width) if x == 0
+  x
+
+# nil for an exact scheme, else [a, b, expected, actual] of the first wrong coefficient.
+-> brute_first_bad(scheme)
+  n = scheme.n
+  m = scheme.m
+  p = scheme.p
+  a = 0
+  while a < n * m
+    b = 0
+    while b < m * p
+      actual = 0
+      (0...scheme.rank).each -> (t)
+        actual = actual ^ scheme.ws[t] if ((scheme.us[t] >> a) & 1) == 1 && ((scheme.vs[t] >> b) & 1) == 1
+      expected = 0
+      expected = 1 << ((a / m) * p + b % p) if a % m == b / p
+      return [a, b, expected, actual] if actual != expected
+      b += 1
+    a += 1
+  nil
+
+# The naive scheme after `steps` random flips: (s, x1, y1), (s, x2, y2) become
+# (s, x1^x2, y1), (s, x2, y1^y2) for two terms sharing the factor s on one axis.
+-> flipped_scheme(rng, n, m, p, steps)
+  base = Metaflip:Gf2:Scheme.naive(n, m, p)
+  rows = base.terms
+  steps.times ->
+    i = rand(rng, rows.size)
+    j = rand(rng, rows.size)
+    axis = rand(rng, 3)
+    x = (axis + 1) % 3
+    y = (axis + 2) % 3
+    if i != j && rows[i][axis] == rows[j][axis] && rows[i][x] != rows[j][x] && rows[i][y] != rows[j][y]
+      rows[i][x] = rows[i][x] ^ rows[j][x]
+      rows[j][y] = rows[i][y] ^ rows[j][y]
+  Metaflip:Gf2:Scheme.from_terms(n, m, p, rows)
+
+-> agree_with_brute(label, scheme)
+  bad = brute_first_bad(scheme)
+  problems = 0
+  [:dense, :sparse, :both].each -> (gate)
+    found = scheme.defect(gate)
+    if bad == nil
+      problems += check(label + " " + gate.to_s + " accepts", found == nil)
+    else
+      ok = found != nil && found.kind == :coefficient && found.a == bad[0] && found.b == bad[1] && found.expected == bad[2] && found.actual == bad[3]
+      problems += check(label + " " + gate.to_s + " names the same coefficient", ok)
+  packed = scheme.pack
+  [1, 2, 7, 100].each -> (budget)
+    found = packed.defect_dense(budget)
+    ok = bad == nil ? found == nil : found != nil && found.a == bad[0] && found.b == bad[1]
+    problems += check(label + " dense in bands of a budget of " + budget.to_s, ok)
+  problems
+
+rng = [20260930]
+shapes = [[1, 9, 9], [2, 8, 9], [3, 9, 4], [1, 13, 5], [4, 4, 5], [2, 3, 3], [5, 2, 7], [3, 7, 3], [1, 1, 1], [1, 2, 3], [2, 2, 2], [3, 3, 3], [7, 1, 9], [2, 11, 3]]
+exact_walks = 0
+inexact_damaged = 0
+inexact_random = 0
+shapes.each -> (shape)
+  widths = [shape[0] * shape[1], shape[1] * shape[2], shape[0] * shape[2]]
+  12.times ->
+    walked = flipped_scheme(rng, shape[0], shape[1], shape[2], rand(rng, 80))
+    exact_walks += 1 if brute_first_bad(walked) == nil
+    failures += agree_with_brute("flip walk " + walked.shape_key, walked)
+    terms = walked.terms
+    axis = rand(rng, 3)
+    terms[rand(rng, terms.size)][axis] = random_mask(rng, widths[axis], 40)
+    damaged = Metaflip:Gf2:Scheme.from_terms(shape[0], shape[1], shape[2], terms)
+    inexact_damaged += 1 if brute_first_bad(damaged) != nil
+    failures += agree_with_brute("damaged walk " + damaged.shape_key, damaged)
+    random_terms = (0...(1 + rand(rng, 9))).map -> (t) [random_mask(rng, widths[0], 30), random_mask(rng, widths[1], 30), random_mask(rng, widths[2], 30)]
+    randoms = Metaflip:Gf2:Scheme.from_terms(shape[0], shape[1], shape[2], random_terms)
+    inexact_random += 1 if brute_first_bad(randoms) != nil
+    failures += agree_with_brute("random " + randoms.shape_key, randoms)
+failures += check("the flip walks include exact schemes (" + exact_walks.to_s + " of 168)", exact_walks > 100)
+failures += check("the damaged walks include inexact schemes (" + inexact_damaged.to_s + " of 168)", inexact_damaged > 100)
+failures += check("the random schemes include inexact schemes (" + inexact_random.to_s + " of 168)", inexact_random > 120)
+["wide264_4x11x24", "wide529_3x23x23"].each -> (name)
+  packed = Metaflip:Gf2:Scheme.parse(read_file(fixtures + "/" + name + ".mfw")).pack
+  [1, 3, 64, 100000000].each -> (budget)
+    failures += check(name + " dense gate, budget " + budget.to_s, packed.defect_dense(budget) == nil)
 
 # ---- class contracts ----------------------------------------------------------------------------------
 failures += raised("dimensions", "positive", ->() Metaflip:Gf2:Scheme.new(0, 2, 2, [], [], []))

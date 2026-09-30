@@ -59,10 +59,19 @@ failures = 0
 -> failure_line(message)
   "Tensor verification failed: " + message + "\n"
 
+rows_for_scheme_test = "12 1 12\n1 10 10\n8 5 5\n3 8 3\n5 3 8\n10 12 1\n"
+
 # verify_text / read as a value: the record, or the failure message.
 -> outcome(text, n, m, p)
   begin
     Metaflip:Gf2:TensorVerifier.verify_text(text, n, m, p, :both, false)
+  rescue e
+    "[e]"
+
+# read_scheme as a value: "N terms", or the failure message.
+-> scheme_outcome(text)
+  begin
+    "[Metaflip:Gf2:TensorVerifier.read_scheme(text, 2, 2, 2).rank] terms"
   rescue e
     "[e]"
 
@@ -121,7 +130,21 @@ failures += same("options may follow certificates", run([strassen, "--shape", "2
 failures += same("an ambiguous prefix", run(["--s", strassen]), [1, "", failure_line("ambiguous option: --s")])
 failures += same("--gate value", run(["--gate", "third", "--shape", "2x2x2", strassen]), [1, "", failure_line("invalid argument: --gate third")])
 failures += same("--gate needs a value", run(["--gate"]), [1, "", failure_line("missing argument: --gate")])
+failures += same("--gate=VALUE", run(["--gate=sparse", "--shape=2x2x2", strassen])[0], 0)
+failures += same("--gate=VALUE, refused", run(["--gate=nope", "--shape=2x2x2", strassen]), [1, "", failure_line("invalid argument: --gate nope")])
+failures += same("a flag takes no value", run(["--strict=1", strassen]), [1, "", failure_line("needless argument: --strict=1")])
 failures += same("missing batch list", run(["--batch", "/nonexistent/list.txt"]), [1, "", failure_line("No such file or directory @ rb_sysopen - /nonexistent/list.txt")])
+
+# ---- certificates of any format as a Scheme -------------------------------------------------------
+canonical = Metaflip:Gf2:Scheme.parse(read_file(fixtures + "/rank23_3x3x3.mfw"))
+from_checkpoint = Metaflip:Gf2:TensorVerifier.read_scheme(read_file(fixtures + "/3x3x3_rank23_checkpoint.txt"), 3, 3, 3)
+failures += same("a checkpoint reads as the same terms", from_checkpoint.sorted.blob, canonical.blob)
+wide_canonical = Metaflip:Gf2:Scheme.parse(read_file(fixtures + "/wide68_2x4x17.mfw"))
+["wide68_2x4x17_R.txt", "wide68_2x4x17_checkpoint.txt", "wide68_2x4x17.mfw"].each -> (name)
+  read = Metaflip:Gf2:TensorVerifier.read_scheme(read_file(fixtures + "/" + name), 2, 4, 17)
+  failures += same(name + " reads as the same terms (masks wider than 64 bits)", read.sorted.blob, wide_canonical.blob)
+failures += same("read_scheme range-checks", scheme_outcome("7\n16 9 9\n" + rows_for_scheme_test), "zero or out-of-bounds factor at term 0")
+failures += same("read_scheme reads a good checkpoint", scheme_outcome("7\n9 9 9\n" + rows_for_scheme_test), "7 terms")
 
 # ---- shape inference and path expansion -----------------------------------------------------------
 inferred = run([fixtures + "/shape_dir/2x2x2/certificate.mfw"])

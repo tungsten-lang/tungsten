@@ -18,6 +18,12 @@ Sub-commands:
            --strict) must agree on accept/reject wherever the originals agree with each other, and
            the deliberate strictness differences of the originals must be reproduced (Tungsten
            default == Ruby, Tungsten --strict == Python) on every case.
+  time     wall-clock and CPU time of the three implementations on the same files: whole corpus
+           (Ruby and Python once, sequentially; Tungsten one --batch process, median of --runs) and
+           per-invocation cost of single certificates (median of --runs).
+  parse-fuzz  the strict MFW1 reader alone (spec/gf2_scheme_parse_parity.w) against read_blob on thousands of
+           damaged canonical files: identical accept/reject, identical rank and digest on accepts, except for
+           the documented deviations (negative numbers, non-positive dimensions, rows with other than three fields).
   fuzz     thousands of randomly damaged certificate texts (whitespace of every kind, NUL, tokens,
            lines, case, headers, formats): Tungsten's default mode must reproduce Ruby's exit status,
            records and failure messages byte for byte, and --strict must reproduce Python's verdict.
@@ -25,6 +31,8 @@ Sub-commands:
   verify_tensor_parity_test.py corpus --corpus DIR --binary verify_tensor [--out DIR] [--jobs 3]
   verify_tensor_parity_test.py mutate --corpus DIR --binary verify_tensor --samples 210 [--seed 1]
   verify_tensor_parity_test.py fuzz   --corpus DIR --binary verify_tensor --cases 4000 [--seed 1]
+  verify_tensor_parity_test.py time   --corpus DIR --binary verify_tensor [--runs 3] [--skip-corpus]
+  verify_tensor_parity_test.py parse-fuzz --corpus DIR --parse-binary gf2_scheme_parse_parity [--cases 20000]
 """
 import argparse
 import concurrent.futures as futures
@@ -340,6 +348,77 @@ def mutate_command(args):
     print('PASS mutation parity')
 
 
+# ----------------------------------------------------------------------------- timing
+
+def children_cpu():
+    import resource
+    usage = resource.getrusage(resource.RUSAGE_CHILDREN)
+    return usage.ru_utime + usage.ru_stime
+
+
+def measure(function):
+    """(wall seconds, CPU seconds of child processes plus this one) of function()."""
+    cpu0, own0, started = children_cpu(), time.process_time(), time.perf_counter()
+    function()
+    wall = time.perf_counter() - started
+    return wall, children_cpu() - cpu0 + time.process_time() - own0
+
+
+def median(values):
+    ordered = sorted(values)
+    return ordered[len(ordered) // 2]
+
+
+def timing_command(args):
+    rows = entries(args.corpus)
+    script = Path(__file__).resolve()
+    print(f'{len(rows)} tensors; {args.runs} runs per Tungsten/single-file cell (median); machine load '
+          f'{os.getloadavg()[0]:.1f} (1 min)')
+
+    def report(label, walls, cpus, note=''):
+        print(f'{label:46s} wall {median(walls):8.2f} s   cpu {median(cpus):8.2f} s   {note}')
+
+    if not args.skip_corpus:
+        print('\nwhole corpus')
+        wall, cpu = measure(lambda: [ruby_verdict(p, shape) for p, shape in rows])
+        report('ruby verify_tensor.rb, one process per file', [wall], [cpu], '(1 pass)')
+        wall, cpu = measure(lambda: [python_verdict(p, shape) for p, shape in rows])
+        report('python read_blob + exact, in one process', [wall], [cpu], '(1 pass; no per-file start-up)')
+        for name, options in (('dense', ('--gate', 'dense')), ('sparse', ('--gate', 'sparse')),
+                              ('both', ()), ('strict, both', ('--strict',))):
+            walls, cpus = [], []
+            for _ in range(args.runs):
+                wall, cpu = measure(lambda: tungsten_batch(args.binary, rows, *options))
+                walls.append(wall)
+                cpus.append(cpu)
+            report(f'tungsten --release --batch, gate {name}', walls, cpus, f'({args.runs} runs)')
+
+    print('\nper invocation (one certificate, one process each time)')
+    by_rank = sorted(rows, key=lambda r: Path(r[0]).stat().st_size)
+    picks = [('smallest corpus tensor', by_rank[0]), ('median-size tensor', by_rank[len(by_rank) // 2]),
+             ('largest tensor (28x32x32, rank 14,271)', by_rank[-1])]
+    for label, (path, shape) in picks:
+        print(f'{label}: {shape}, {Path(path).stat().st_size} bytes')
+        commands = {'ruby': ['ruby', str(RUBY), '--shape', shape, path],
+                    'python': [sys.executable, str(script), 'python-one', path, shape],
+                    'tungsten dense': [args.binary, '--gate', 'dense', '--shape', shape, path],
+                    'tungsten sparse': [args.binary, '--gate', 'sparse', '--shape', shape, path],
+                    'tungsten both': [args.binary, '--shape', shape, path]}
+        for name, command in commands.items():
+            walls, cpus = [], []
+            for _ in range(args.runs):
+                wall, cpu = measure(lambda: subprocess.run(command, capture_output=True, check=True))
+                walls.append(wall)
+                cpus.append(cpu)
+            report(f'  {name}', walls, cpus)
+
+
+def python_one(path, shape):
+    result = python_verdict(path, shape)
+    if not result['ok']:
+        raise SystemExit(1)
+
+
 # ----------------------------------------------------------------------------- fuzzing
 
 VOCABULARY = [b'0', b'00', b'1', b'01', b'7', b'R', b'r', b'#', b'# c', b'MFW1', b'MFW2', b'-1', b'+3', b'0x10',
@@ -356,7 +435,7 @@ def flip_walk(rng, shape, steps):
     n, m, p = shape
     terms = [[1 << (i * m + j), 1 << (j * p + k), 1 << (i * p + k)]
              for i in range(n) for j in range(m) for k in range(p)]
-    for _ in range(steps):
+    for _ in range(steps if len(terms) > 1 else 0):
         a, b = rng.sample(range(len(terms)), 2)
         axis = rng.randrange(3)
         if terms[a][axis] != terms[b][axis]:
@@ -505,6 +584,139 @@ def fuzz_command(args):
     print('PASS fuzz parity')
 
 
+# ----------------------------------------------------------------------------- strict reader alone
+
+ALPHABET = list(b'0123456789abcdefABCDEF -+_xX\t\r\n#gzG.') + [0, 11, 12, 0xff, 0xc3]
+
+
+def canonical_texts(rng, corpus, count):
+    blob, read_blob, _ = load_read_blob()
+    texts = []
+    for _ in range(count):
+        shape = (rng.randrange(1, 5), rng.randrange(1, 6), rng.randrange(1, 9))
+        texts.append(blob(shape, flip_walk(rng, shape, rng.randrange(0, 100))))
+        texts.append(blob(shape, random_terms(rng, shape)))
+    small = [r for r in csv.DictReader(open(Path(corpus) / 'corpus.tsv'), delimiter='\t') if int(r['rank']) < 300]
+    for row in rng.sample(small, min(6, len(small))):
+        texts.append((Path(corpus) / 'mfw' / (row['sha256'] + '.mfw')).read_bytes())
+    return texts
+
+
+def damage_canonical(rng, text):
+    for _ in range(rng.choice((1, 1, 1, 2, 3))):
+        lines = text.split(b'\n')
+        kind = rng.choice(('replace', 'insert', 'delete', 'swap_rows', 'dup_row', 'drop_row', 'zeros', 'upper',
+                           'header', 'final_newline', 'crlf', 'truncate', 'swap_words'))
+        if kind == 'replace' and text:
+            i = rng.randrange(len(text))
+            text = text[:i] + bytes([rng.choice(ALPHABET)]) + text[i + 1:]
+        elif kind == 'insert':
+            i = rng.randrange(len(text) + 1)
+            text = text[:i] + bytes([rng.choice(ALPHABET)]) + text[i:]
+        elif kind == 'delete' and text:
+            i = rng.randrange(len(text))
+            text = text[:i] + text[i + 1:]
+        elif kind == 'swap_rows' and len(lines) > 3:
+            i, j = rng.randrange(1, len(lines) - 1), rng.randrange(1, len(lines) - 1)
+            lines[i], lines[j] = lines[j], lines[i]
+            text = b'\n'.join(lines)
+        elif kind == 'dup_row' and len(lines) > 2:
+            i = rng.randrange(1, len(lines) - 1)
+            lines.insert(i, lines[i])
+            text = b'\n'.join(lines)
+        elif kind == 'drop_row' and len(lines) > 2:
+            del lines[rng.randrange(1, len(lines) - 1)]
+            text = b'\n'.join(lines)
+        elif kind == 'zeros' and len(lines) > 2:
+            i = rng.randrange(1, len(lines) - 1)
+            lines[i] = b'0' + lines[i]
+            text = b'\n'.join(lines)
+        elif kind == 'upper':
+            i = rng.randrange(len(lines))
+            lines[i] = lines[i].upper()
+            text = b'\n'.join(lines)
+        elif kind == 'header':
+            head = lines[0].split(b' ')
+            if len(head) == 5:
+                k = rng.randrange(1, 5)
+                head[k] = str(max(0, int(head[k]) + rng.choice((-1, 1, 10)))).encode() if head[k].isdigit() else head[k]
+                lines[0] = b' '.join(head)
+                text = b'\n'.join(lines)
+        elif kind == 'final_newline':
+            text = text[:-1] if text.endswith(b'\n') else text + b'\n'
+        elif kind == 'crlf':
+            i = rng.randrange(len(lines))
+            lines[i] = lines[i] + b'\r'
+            text = b'\n'.join(lines)
+        elif kind == 'truncate' and text:
+            text = text[:rng.randrange(len(text))]
+        elif kind == 'swap_words' and len(lines) > 2:
+            i = rng.randrange(1, len(lines) - 1)
+            words = lines[i].split(b' ')
+            rng.shuffle(words)
+            lines[i] = b' '.join(words)
+            text = b'\n'.join(lines)
+    return text
+
+
+def parse_fuzz_command(args):
+    _, read_blob, _ = load_read_blob()
+    rng = random.Random(args.seed)
+    work = Path(args.workdir) if args.workdir else Path(tempfile.mkdtemp(prefix='gf2-parse-fuzz-'))
+    work.mkdir(parents=True, exist_ok=True)
+    bases = canonical_texts(rng, args.corpus, 200)
+    paths = []
+    for i in range(args.cases):
+        text = bases[i % len(bases)] if i < len(bases) else damage_canonical(rng, rng.choice(bases))
+        path = work / f'{i:06d}.mfw'
+        path.write_bytes(text)
+        paths.append(path)
+    listing = work / 'list.txt'
+    listing.write_text('\n'.join(map(str, paths)) + '\n')
+    run = subprocess.run([args.parse_binary, str(listing)], capture_output=True, text=True, errors='replace')
+    if run.returncode != 0:
+        raise SystemExit(f'driver failed: {run.stderr.strip()}')
+    verdicts = {}
+    for line in run.stdout.split('\n'):
+        if line:
+            kind, path, *rest = line.split('\t')
+            verdicts[path] = (kind, rest)
+    agree_accept = agree_reject = deviations = 0
+    bad = []
+    for path in paths:
+        raw = path.read_bytes()
+        try:
+            shape, terms = read_blob(raw)
+            python_accepts = True
+        except Exception:  # every rejection is an assertion or a parse error
+            python_accepts = False
+        kind, rest = verdicts[str(path)]
+        if python_accepts and kind == 'ACCEPT':
+            if rest[0] != str(len(terms)) or rest[1] != hashlib.sha256(raw).hexdigest():
+                bad.append((str(path), 'accepted with a different rank or digest', rest))
+            else:
+                agree_accept += 1
+        elif not python_accepts and kind == 'REJECT':
+            agree_reject += 1
+        elif python_accepts and kind == 'REJECT':
+            # read_blob lets through negative numbers, non-positive dimensions and rows whose field count
+            # is not three (they become tuples of another length); exact refuses each of them later.
+            irregular = b'-' in raw or any(dim < 1 for dim in shape) or any(len(t) != 3 for t in terms)
+            if irregular:
+                deviations += 1
+            else:
+                bad.append((str(path), 'python accepts, tungsten rejects', rest))
+        else:
+            bad.append((str(path), 'tungsten accepts, python rejects', rest))
+    print(f'{len(paths)} damaged canonical files: both accept {agree_accept}, both reject {agree_reject}, '
+          f'documented deviations {deviations} (negative numbers, non-positive dimensions, rows of a field count other than three), unexplained {len(bad)}')
+    for item in bad[:15]:
+        print('MISMATCH', *item)
+    if bad:
+        raise SystemExit('PARITY FAILURES')
+    print('PASS strict reader parity')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest='command', required=True)
@@ -521,6 +733,20 @@ def main():
     mutate.add_argument('--max-bytes', type=int, default=400_000)
     mutate.add_argument('--workdir')
     mutate.add_argument('--jobs', type=int, default=3)
+    pf = sub.add_parser('parse-fuzz')
+    pf.add_argument('--corpus', required=True)
+    pf.add_argument('--parse-binary', required=True)
+    pf.add_argument('--cases', type=int, default=20000)
+    pf.add_argument('--seed', type=int, default=1)
+    pf.add_argument('--workdir')
+    timing = sub.add_parser('time')
+    timing.add_argument('--corpus', required=True)
+    timing.add_argument('--binary', required=True)
+    timing.add_argument('--runs', type=int, default=3)
+    timing.add_argument('--skip-corpus', action='store_true')
+    one = sub.add_parser('python-one')
+    one.add_argument('path')
+    one.add_argument('shape')
     fuzz = sub.add_parser('fuzz')
     fuzz.add_argument('--corpus', required=True)
     fuzz.add_argument('--binary', required=True)
@@ -529,7 +755,10 @@ def main():
     fuzz.add_argument('--workdir')
     fuzz.add_argument('--jobs', type=int, default=3)
     args = parser.parse_args()
-    {'corpus': corpus_command, 'mutate': mutate_command, 'fuzz': fuzz_command}[args.command](args)
+    if args.command == 'python-one':
+        return python_one(args.path, args.shape)
+    {'corpus': corpus_command, 'mutate': mutate_command, 'fuzz': fuzz_command, 'time': timing_command,
+     'parse-fuzz': parse_fuzz_command}[args.command](args)
 
 
 if __name__ == '__main__':

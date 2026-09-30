@@ -16,7 +16,7 @@
 #   popcount(x)                   Bits.popcount(x)
 #   (x & -x).bit_length() - 1     Bits.low_bit_index(x)          -1 for 0
 #   x.bit_length() - 1            Bits.high_bit_index(x)         -1 for 0
-#   remap(x, tab)                 Bits.remap(x, tab)
+#   remap(x, tab)                 Bits.remap(x, tab)             tab[b] < 0 drops bit b
 #   T(x, R, C)                    Bits.transpose(x, R, C)
 #   sum(1 << b for b in ...)      Bits.from_positions(list)
 #   f"{x:x}", int(s, 16)          Bits.to_hex(x), Bits.parse_hex(s, 0, s.size)
@@ -32,8 +32,14 @@
 # limb is just `limbs[k] = x` followed by `x = x >> 64`, on both engines.
 #
 # Hexadecimal text (the MFW1 spelling of a mask) is lowercase, without leading
-# zeros; `Bits.hex_run`/`Bits.hex_limb` are the typed byte scanners the MFW1
-# readers are built from.
+# zeros. `Bits.parse_hex(text, first, last)` reads text[first, last) (-1 when it
+# is empty or not lowercase hex), `Bits.from_hex(text)` a whole string (raises).
+# For the MFW1 readers, which scan hundreds of megabytes, there are typed byte
+# scanners over a raw pointer: `Bits.text_ptr(text)` then `Bits.byte(text, ptr, i)`,
+# `Bits.hex_run`, `Bits.hex_limb`, `Bits.hex_value`.
+#
+# Also: `Bits.limbs_for(bits)` (limbs of a mask that wide), `Bits.bit_mask(i)` and
+# `Bits.set_bit(limbs, i)` for building limb arrays by hand.
 #
 # Memory: compiled Tungsten has no garbage collector, and the compiler only frees
 # values it can prove never escape, which excludes every array or string handed to
@@ -51,6 +57,9 @@ use core/bit_ops
   # strings. Never call it on a value another object may still reference. The
   # tree-walking interpreter has no such runtime call (it raises, and the
   # rescue turns that into a no-op); the guard costs a few nanoseconds compiled.
+  #
+  # TODO(port): the interpreter should provide `w_value_free_w` (or a documented
+  # release primitive) so that this guard can go (PORT-BLOCKERS.md, entry 4).
   -> .release(value)
     begin
       ccall("w_value_free_w", value)
@@ -128,6 +137,8 @@ use core/bit_ops
   # ascending, offset by base. It works on the two 32-bit halves so that the
   # answer is the same whether the engine wraps a wide argument to i64 on the
   # way in (compiled) or hands it over unchanged (tree-walking interpreter).
+  # TODO(port): the interpreter does not coerce arguments to a typed `(i64)`
+  # parameter (PORT-BLOCKERS.md, entry 3); the halves are the workaround.
   -> .limb_positions(limb, base, out) (i64 i64 Array) i64
     count = 0 ## i64
     half = limb & 4294967295 ## i64
@@ -186,10 +197,15 @@ use core/bit_ops
     Metaflip:Gf2:Bits.release(limbs)
     x
 
-  # Moves every set bit b to table[b] (an Array or i64[] indexed by bit).
+  # Moves every set bit b to table[b] (an Array or i64[] indexed by bit). A
+  # negative entry drops the bit, which is what the projections of mmc_gf2_alg.py
+  # need (its `project` maps deleted rows and columns to -1).
   -> .remap(x, table)
     positions = Metaflip:Gf2:Bits.positions(x)
-    moved = positions.map -> (b) table[b]
+    moved = []
+    positions.each -> (b)
+      target = table[b]
+      moved.push(target) if target >= 0
     result = Metaflip:Gf2:Bits.from_positions(moved)
     Metaflip:Gf2:Bits.release(positions)
     Metaflip:Gf2:Bits.release(moved)
@@ -316,6 +332,9 @@ use core/bit_ops
 
   # The value of the hex digits text[first, last), which the caller has already
   # checked (non-empty, lowercase hex digits only; leading zeros are fine).
+  #
+  # TODO(port): `String#to_i(16)` silently saturates at 2^63-1 for longer digit
+  # strings (PORT-BLOCKERS.md, entry 1), so the digits are folded into limbs here.
   -> .hex_value(text, ptr, first, last)
     digits = last - first
     return Metaflip:Gf2:Bits.hex_limb(text, ptr, first, last) if digits <= 15

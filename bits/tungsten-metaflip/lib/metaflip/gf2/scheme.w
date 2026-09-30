@@ -22,19 +22,27 @@
 #   Scheme.naive(n, m, p)                the n*m*p rank-one terms, (i, j, k) order
 #   Scheme.parse(text, expect = nil)     strict MFW1 (see below); expect = [n, m, p]
 #   Scheme.read(path, expect = nil)      parse of a file
+#   (checkpoints, R-prefixed rows and the other certificate formats of verify_tensor.rb
+#   come in through TensorVerifier.read_scheme in tensor_verifier.w)
 #
 #   s.n s.m s.p s.us s.vs s.ws           fields; treat the Arrays as immutable
 #   s.rank  s.shape  s.sorted_shape      rank; [n, m, p]; the sorted-shape key
+#   s.shape_key  s.sorted_shape_key      "NxMxP" strings of the same (Hash keys, manifests)
 #   s.terms  s.term(i)                   [[u, v, w], ...]; [u, v, w]
 #   s.density                            total number of set bits
 #   s.sorted                             same terms in canonical (u, v, w) order
 #   s.cleaned                            no zero-factor terms, identical pairs cancelled
 #   s.blob  s.sha256                     canonical MFW1 text; its SHA-256 (hex)
 #   s.cyclic_shift  s.transpose          the S3 moves of mmc_gf2_alg.py
-#   s.oriented(perm)  s.orient_as(shape) axis permutation; nil if unreachable
+#   s.oriented(perm)                     the orientation for one of the six permutations
+#   s.oriented_to(target)                verify_cofactor_mergers.orient: first permutation,
+#                                        in lexicographic order, that yields target
+#   s.orient_as(shape)                   mmc_gf2_alg.orient_as; nil if unreachable
 #   Scheme.orient_perms                  the six permutations, ORIENT_PERMS order
 #   Scheme.permuted_shape(shape, perm)   [shape[perm[0]], shape[perm[1]], shape[perm[2]]]
 #   s.equal_terms?(other)                same shape and same terms in the same order
+#   s.release                            frees the masks (no GC; see the note on sharing
+#                                        at the method and Bits.release in bits.w)
 #
 # Exactness (two independent gates, see packed.w; a gate returns nil or the first
 # failing coefficient as a Metaflip:Gf2:Defect with .message/.a/.b/.expected/.actual):
@@ -51,10 +59,12 @@
 # as (u, v, w) integer triples, so no duplicates, nothing after the last row).
 # Blank lines, comments, CRLF, uppercase hex, leading zeros, wrong row counts
 # and unsorted or repeated terms are all rejected with a message naming the
-# cause. Two deliberate deviations, both invisible to any accept/reject decision
-# that also requires exactness: negative numbers and non-positive dimensions
-# are rejected at parse time (read_blob only stumbles over them later). Range
-# and exactness of the factors are NOT checked by parse; that is the gates' job.
+# cause. Three deliberate deviations, all invisible to any accept/reject decision
+# that also requires exactness: negative numbers, non-positive dimensions and
+# rows whose field count is not three are rejected at parse time (read_blob
+# returns such rows as tuples of some other length, and `exact` refuses them
+# later). Range and exactness of the factors are NOT checked by parse; that is
+# the gates' job.
 
 use packed
 
@@ -100,6 +110,14 @@ use packed
   # The shape sorted ascending: the key under which all six orientations meet.
   -> sorted_shape
     shape.sort
+
+  # "NxMxP" (the spelling of certificates, manifests and hash keys) of the shape
+  # and of the sorted shape.
+  -> shape_key
+    "[@n]x[@m]x[@p]"
+
+  -> sorted_shape_key
+    sorted_shape.join("x")
 
   -> rank
     @us.size
@@ -153,6 +171,20 @@ use packed
       x = x.cyclic_shift
       shifts -= 1
     x
+
+  # verify_cofactor_mergers.orient(shape, terms, target): the orientation for the
+  # first permutation, in lexicographic order, whose permuted shape is `target`.
+  # (orient_as walks the moves in a different order, which only matters when the
+  # shape repeats a dimension: the two then pick different but equally valid
+  # orientations.) Raises when target is not a permutation of the shape.
+  -> oriented_to(target)
+    perms = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]]
+    found = nil
+    perms.each -> (perm)
+      permuted = Metaflip:Gf2:Scheme.permuted_shape(shape, perm)
+      found = perm if found == nil && permuted[0] == target[0] && permuted[1] == target[1] && permuted[2] == target[2]
+    raise "no orientation of [self] has shape [target]" if found == nil
+    oriented(found)
 
   # The first orientation whose shape is `shape` (searching the cyclic shifts of
   # the scheme, then of its transpose, as mmc_gf2_alg.orient_as), or nil.

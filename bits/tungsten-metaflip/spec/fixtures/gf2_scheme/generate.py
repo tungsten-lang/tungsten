@@ -19,6 +19,8 @@ writes, next to this file:
   bits.tsv                  Python bits/popcount/T/remap of assorted masks (mmc_gf2_alg.py)
   orient.tsv                SHA-256 of the blob of every S3 orientation of each base (mmc_gf2_alg.py)
   naive.tsv                 rank, density and blob SHA-256 of the naive schemes (mmc_gf2_alg.naive)
+  orient_to.tsv             SHA-256 of the blob of verify_cofactor_mergers.orient(shape, terms, target) for
+                            every permuted target shape of each base
   clean.tsv                 a scheme with zero-factor terms and repeated terms, and mmc_gf2_alg.clean of it
   defects.tsv               the wrong entry of each inexact mutant: coordinates from Ruby, the expected
                             and actual w masks recomputed in Python from the terms
@@ -42,6 +44,7 @@ TOOLS = BIT / 'tools'
 sys.path[:0] = [str(SPEC), str(TOOLS), str(ROOT / 'benchmarks/matmul/metaflip')]
 from wide_matrix_cleanup_parity_test import blob, read_blob  # noqa: E402
 from packed_composition_parity_test import exact  # noqa: E402
+from verify_cofactor_mergers import orient  # noqa: E402
 import mmc_gf2_alg as alg  # noqa: E402
 
 RUBY = TOOLS / 'verify_tensor.rb'
@@ -50,6 +53,7 @@ BASES = {  # name -> (source, shape)
     'strassen_2x2x2': ('seed:matmul_2x2_rank7_strassen_gf2.txt', (2, 2, 2)),
     'rank23_3x3x3': ('seed:matmul_3x3_rank23_d139_gf2.txt', (3, 3, 3)),
     'rank47_4x4x4': ('seed:matmul_4x4_rank47_d450_gf2.txt', (4, 4, 4)),
+    'repeated94_4x4x8': ('corpus:407bc69994a3', (4, 4, 8)),
     'wide68_2x4x17': ('corpus:70c680cfbf69', (2, 4, 17)),
     'wide145_2x5x29': ('corpus:4819137986dc', (2, 5, 29)),
     'wide264_4x11x24': ('corpus:cb438bdd9ea0', (4, 11, 24)),
@@ -184,6 +188,15 @@ def orientations(shape, terms):
     return out
 
 
+def dropped(x, table):
+    """mmc_gf2_alg.project's `rm`: bits whose table entry is negative are dropped (OR, not sum: targets may collide)."""
+    y = 0
+    for b in alg.bits(x):
+        if table[b] >= 0:
+            y |= 1 << table[b]
+    return y
+
+
 def bits_vectors():
     rng = random.Random(9)
     masks = [0, 1, 2, 3, 5, (1 << 47) - 1, 1 << 47, (1 << 48) + 1, (1 << 62) | 1, (1 << 63) - 1, 1 << 63,
@@ -199,10 +212,12 @@ def bits_vectors():
         cols = 8
         rws = max(1, (x.bit_length() + cols - 1) // cols)
         table = [(b * 7 + 3) % 1500 for b in range(max(1, x.bit_length()))]
+        dropping = [-1 if b % 5 == 0 else (b * 3 + 1) % 900 for b in range(max(1, x.bit_length()))]
         rows.append((f'{x:x}', alg.popcount(x), (x & -x).bit_length() - 1, x.bit_length() - 1, rws, cols,
                      f'{alg.remap(x, alg._ttab(rws, cols)):x}' if x else '0',
                      f'{alg.remap(x, table):x}' if x else '0',
-                     ','.join(map(str, alg.bits(x))) or '-'))
+                     ','.join(map(str, alg.bits(x))) or '-',
+                     f'{dropped(x, dropping):x}'))
     return rows
 
 
@@ -256,7 +271,7 @@ def main():
             out.write('\t'.join([str(path.relative_to(HERE)), 'x'.join(map(str, shape)), kind, str(status),
                                  str(python(path, shape)), message]) + '\n')
     with open(HERE / 'bits.tsv', 'w') as out:
-        out.write('# hex\tpopcount\tlow_bit\thigh_bit\trows\tcols\ttransposed_hex\tremapped_hex\tpositions\n')
+        out.write('# hex\tpopcount\tlow_bit\thigh_bit\trows\tcols\ttransposed_hex\tremapped_hex\tpositions\tremapped_dropping_hex\n')
         for row in bits_vectors():
             out.write('\t'.join(map(str, row)) + '\n')
     with open(HERE / 'orient.tsv', 'w') as out:
@@ -265,11 +280,23 @@ def main():
             out.write('\t'.join(row) + '\n')
     with open(HERE / 'naive.tsv', 'w') as out:
         out.write('# shape\trank\tdensity\tsha256_of_blob\n')
-        for shape in ((2, 2, 2), (2, 3, 4), (3, 1, 5), (1, 32, 32), (2, 32, 16)):
+        for shape in ((2, 2, 2), (2, 3, 4), (3, 1, 5), (1, 32, 32), (2, 32, 16), (1, 8, 8), (1, 9, 7), (1, 13, 5), (2, 8, 8), (8, 8, 1), (7, 9, 1), (3, 3, 7)):
             a = alg.naive(*shape)
             density = sum(alg.popcount(u) + alg.popcount(v) + alg.popcount(w) for u, v, w in a.terms)
             out.write('\t'.join(['x'.join(map(str, shape)), str(a.r), str(density),
                                  hashlib.sha256(blob(shape, a.terms)).hexdigest()]) + '\n')
+    with open(HERE / 'orient_to.tsv', 'w') as out:
+        out.write('# base\ttarget\tsha256_of_blob\n')
+        for name, (source, shape) in BASES.items():
+            terms = sorted(base_terms(source, args.corpus))
+            seen = set()
+            for perm in __import__('itertools').permutations(range(3)):
+                target = tuple(shape[i] for i in perm)
+                if target in seen:
+                    continue
+                seen.add(target)
+                out.write('\t'.join([name, 'x'.join(map(str, target)),
+                                     hashlib.sha256(blob(target, orient(shape, terms, target))).hexdigest()]) + '\n')
     original = sorted(base_terms(BASES['rank23_3x3x3'][0], args.corpus))
     dirty = list(original) + [original[2], (0, original[1][1], original[1][2]), original[5], original[5],
                               original[5], original[2], (original[3][0], 0, original[3][2]), original[9], original[9]]

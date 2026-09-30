@@ -62,6 +62,7 @@ mutants/rank23_3x3x3__r_prefix_in_mfw1.mfw	3x3x3	r_prefix_in_mfw1	1	1	R prefix i
 mutants/rank23_3x3x3__empty_file.mfw	3x3x3	empty_file	1	1	empty tensor certificate
 mutants/rank23_3x3x3__comments_only.mfw	3x3x3	comments_only	1	1	empty tensor certificate
 rank47_4x4x4.mfw	4x4x4	base	0	0	47	450	d90a7cf8e5b843b4ec09dfcf4313bdfdac8692b45b9fde2af84a2f90aa929441
+repeated94_4x4x8.mfw	4x4x8	base	0	0	94	900	407bc69994a3d0e9600cd6eeee3153d7440689318551e659701a2950ff6d0b69
 wide68_2x4x17.mfw	2x4x17	base	0	0	109	987	70c680cfbf695433becb31a39c04601279749b82b07f405909ce47444ea616cf
 mutants/wide68_2x4x17__bit_flip_u.mfw	2x4x17	bit_flip_u	1	1	inexact GF(2) tensor at coefficients 7,15
 mutants/wide68_2x4x17__bit_flip_v.mfw	2x4x17	bit_flip_v	1	1	inexact GF(2) tensor at coefficients 0,67

@@ -18,9 +18,11 @@
 # Scheme (scheme.w) is the Integer-mask view of the same data; Packed.from_masks
 # and Packed#masks convert between them.
 #
-# Invariant: every stored factor is nonzero and narrower than its matrix. The
-# constructors that take foreign data (from_masks, the certificate reader) check
-# it; `range_defect` re-checks it for callers that fill the arrays themselves.
+# Invariant the gates rely on: every stored factor is nonzero and narrower than
+# its matrix. The certificate reader (tensor_verifier.w) enforces it while
+# parsing; from_masks stores what it is given (Scheme#defect tests the Integer
+# masks first); `defect` starts with `range_defect`, which checks the arrays
+# themselves, and reports a violation as a :range Defect before any gate runs.
 #
 # The two gates (both return nil for an exact scheme, else the first failing
 # coefficient in row-major (a, b) order, so they must agree on the whole
@@ -38,7 +40,13 @@
 #                   (formulated like the `exact` of the Python tooling).
 #
 # `defect(gate)` selects :dense, :sparse, or :both (run both; they must agree,
-# anything else is an internal error).
+# anything else is an internal error). A gate only reports WHERE it saw a wrong
+# coefficient; the Defect's expected and actual masks are then recomputed from the
+# terms by a third, trivial routine (cell_row), and a report that does not
+# reconstruct raises "internal error" instead of returning a wrong explanation.
+#
+# Memory: compiled Tungsten has no GC, so every gate frees its scratch arrays and
+# `release` frees the limb arrays of a Packed scheme (see bits.w).
 #
 # Wide-argument note: nothing here relies on a 64-bit limb being sign-safe. Bit
 # tests use `& 1` after an arithmetic shift and bit lists are read through
@@ -66,10 +74,12 @@ use bits
 + Metaflip:Gf2:Packed
   ro :n, :m, :p, :rank, :wu, :wv, :ww, :ulimbs, :vlimbs, :wlimbs
 
-  # Table budget of the dense gate, in limbs (8 MiB): larger tables are filled
-  # in bands of rows. Tunable, not part of the contract.
+  # Table budget of the dense gate, in limbs (32 MiB): larger tables are filled
+  # in bands of rows. Tunable, not part of the contract; on the 28x32x32,
+  # rank-14,271 tensor a 32 MiB budget (4 bands) runs 15% faster than 8 MiB and
+  # as fast as the unbanded 103 MiB table.
   -> .band_words
-    1048576
+    4194304
 
   # An empty (all-zero, hence invalid until filled) scheme of `rank` terms.
   -> new(@n, @m, @p, @rank)
@@ -458,10 +468,13 @@ use bits
   # ---- gates -------------------------------------------------------------------
 
   # Dense gate alone: nil or the :coefficient Defect (ranges are not checked).
-  -> defect_dense
+  # `budget` is the table size in limbs above which the rows are filled band by
+  # band (default Packed.band_words); it never changes the verdict.
+  -> defect_dense(budget = nil)
+    budget = Metaflip:Gf2:Packed.band_words if budget == nil
     row_words = @m * @p * @ww
     raise "dense gate needs too much memory for this shape; use the sparse gate" if row_words > 268435456
-    band_rows = Metaflip:Gf2:Packed.band_words / row_words
+    band_rows = budget / row_words
     band_rows = 1 if band_rows < 1
     band_rows = @n * @m if band_rows > @n * @m
     d = dims

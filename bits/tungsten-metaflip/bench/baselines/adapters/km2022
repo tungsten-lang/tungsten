@@ -1,0 +1,89 @@
+#!/bin/sh
+# Adapter for the flip-graph program of Kauers and Moosbauer, "Flip graphs for matrix multiplication" (2022):
+# github.com/jakobmoosbauer/flips, directory code/, built by ../build.sh as km2022_flip.
+#
+#   km2022 TASK_ID SEED BUDGET_CPU_S OUTDIR        (contract: bench/README.md, section 3)
+#
+# The program takes  flip FILE.exp n m p PATH TRIES : from the scheme in FILE it walks the flip graph over GF(2); each
+# step first looks for a neighbour that reduces, else takes a random flip; a path ends when the rank drops or after
+# PATH steps. With TRIES = 1 the program keeps reducing (a new path from every reduced scheme) until one path of PATH
+# steps fails; it then exits. This adapter restarts it (new seed) until the target is reached or the budget is used.
+#
+# Environment (defaults are the values of the paper / README):
+#   KM_PATH      path length limit per reduction                             1000000   (README example; paper Sect. 5)
+#   KM_TRIES     1: descend as far as possible in one process, 0: one path per process        1
+#   KM_RESTART   after a failed walk:  start = begin again from the start scheme,
+#                                      best  = continue from the scheme the failed walk ended on              start
+#   KM_BIN       the built program                                           $MB_SOTA_BIN/km2022_flip
+# Seeds: walk k of a run uses the seed SEED + 1000003 k (mod 2^31-2); walk 0 uses SEED itself (KM_SEED of the patched program).
+
+case $0 in */*) . "${0%/*}/lib.sh" ;; *) . ./lib.sh ;; esac
+bl_init km2022 "$@"
+
+KM_PATH=${KM_PATH:-1000000}
+KM_TRIES=${KM_TRIES:-1}
+KM_RESTART=${KM_RESTART:-start}
+KM_BIN=${KM_BIN:-$MB_SOTA_BIN/km2022_flip}
+[ -x "$KM_BIN" ] || bl_die 3 "program $KM_BIN not built (run bench/baselines/build.sh)"
+case $KM_RESTART in start | best) ;; *) bl_die 2 "KM_RESTART must be start or best" ;; esac
+
+work=$BL_OUT/km2022.work
+mkdir -p "$work"
+awk -f "$bl_here/mfw-lib.awk" -f "$bl_here/mfw2exp.awk" "$BL_START" > "$work/start.exp" \
+  || bl_die 2 "task $BL_TASK is not representable for this program (dimensions <= 9, factors <= 64 bits, rank <= n*m*p)"
+
+if [ "$BL_START_RANK" -le "$BL_TARGET" ]; then
+  cp "$BL_START" "$BL_OUT/scheme.mfw"
+  BL_HIT=true
+fi
+
+cd "$work" || exit 3
+cur=$work/start.exp
+k=0
+best_out= best_out_rank=$BL_START_RANK # the lowest-rank scheme a finished walk wrote
+export KM_TARGET_RANK=$BL_TARGET
+while [ "$BL_HIT" != true ] && [ "$BL_REM_US" -ge 2000 ]; do
+  bl_seed "$k"
+  bl_sec "$BL_REM_US"
+  export KM_SEED=$BL_WALK_SEED KM_CPU_BUDGET=$BL_SEC
+  bl_run "$work/time.$k" "$KM_BIN" "$cur" "$BL_N" "$BL_M" "$BL_P" "$KM_PATH" "$KM_TRIES" > "$work/out.$k" 2> "$work/err.$k"
+  status=$?
+  steps_before=$BL_FLIPS
+  bl_merge "$work/err.$k" "$work/time.$k" KM
+  case $status in
+    0) ;;
+    1) BL_ERRORS=$((BL_ERRORS + 1)) ;; # the program's own consistency abort ("Reduction not possible")
+    3) break ;;                          # the CPU budget ran out inside the program
+    *) bl_die 4 "km2022_flip exited with status $status: $(tail -n 3 "$work/err.$k" | tr '\n' ' ')" ;;
+  esac
+  [ "$BL_FLIPS" -gt "$steps_before" ] || break # no flip exists at the start scheme: another walk cannot differ
+  read -r line < "$work/out.$k"          # "FILE,RANK" when the program wrote a scheme
+  name=${line%%,*}
+  case $line in
+    *,*) if [ -r "$work/$name" ] && [ "${line#*,}" -lt "$best_out_rank" ]; then best_out=$work/$name best_out_rank=${line#*,}; fi ;;
+  esac
+  if [ "$BL_TARGET" -gt 0 ] && [ "$BL_BEST" -le "$BL_TARGET" ]; then
+    [ -n "$name" ] && [ -r "$work/$name" ] || bl_die 4 "target reached but the program wrote no scheme"
+    awk -v n="$BL_N" -v m="$BL_M" -v p="$BL_P" -f "$bl_here/mfw-lib.awk" -f "$bl_here/exp2mfw.awk" "$work/$name" > "$BL_OUT/scheme.mfw" \
+      || bl_die 4 "cannot convert $work/$name"
+    BL_HIT=true
+    break
+  fi
+  # the walk ended without reaching the target: choose where the next one begins
+  if [ "$KM_RESTART" = best ] && [ -n "$name" ] && [ -r "$work/$name" ]; then
+    cur=$work/$name
+  elif [ "$KM_TRIES" = 0 ] && [ -n "$name" ] && [ -r "$work/$name" ]; then
+    cur=$work/$name # a single path that reduced: continue the descent from its result
+  elif [ "$KM_TRIES" != 0 ]; then
+    cur=$work/start.exp
+  fi
+  k=$((k + 1))
+done
+cd "$BL_OUT" || exit 3
+if [ "$BL_HIT" != true ] && [ -n "$best_out" ] && [ "$best_out_rank" -eq "$BL_BEST" ]; then
+  # the best scheme of a run that missed the target, when a finished walk wrote it
+  awk -v n="$BL_N" -v m="$BL_M" -v p="$BL_P" -f "$bl_here/mfw-lib.awk" -f "$bl_here/exp2mfw.awk" "$best_out" > "$BL_OUT/scheme.mfw" || rm -f "$BL_OUT/scheme.mfw"
+fi
+
+bl_finish km2022_flip "e31a0a0+mb1" "flips = proposals = walk steps: every step scans all neighbours for an immediate reduction (Gaussian elimination on pools of equal factors) and then takes one uniformly random flip that does not undo the previous one. GF(2), standard start unless the task names a seed. Parameters: KM_PATH=$KM_PATH KM_TRIES=$KM_TRIES KM_RESTART=$KM_RESTART. Walks started: $BL_WALKS (internal consistency aborts: $BL_ERRORS). Steps of an interrupted path are counted."
+exit 0

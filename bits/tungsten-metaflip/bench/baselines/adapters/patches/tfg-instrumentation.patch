@@ -1,0 +1,132 @@
+--- a/flip_graph.cpp
++++ b/flip_graph.cpp
+@@ -5,6 +5,9 @@
+ #include <sstream>
+ #include <algorithm>
+ #include <omp.h>
++#include <csignal>
++#include <unistd.h>
++#include <sys/time.h>
+ 
+ #include "src/utils.h"
+ #include "src/entities/arg_parser.h"
+@@ -193,7 +196,22 @@
+     return true;
+ }
+ 
++// metabench instrumentation (see bench/baselines/adapters/README.md): env TFG_CPU_BUDGET (CPU seconds) ends the process with status 3.
++static void mbTimeout(int) {
++    char buf[192];
++    int len = snprintf(buf, sizeof buf, "TFGTIMEOUT cpu=%.6f attempts=%lld flips=%lld expands=%lld rank=%d\n", mbCpu(), mb.attempts, mb.flips, mb.expands, mb.best);
++    write(2, buf, len);
++    _exit(3);
++}
++
+ int main(int argc, char **argv) {
++    if (getenv("TFG_CPU_BUDGET") && atof(getenv("TFG_CPU_BUDGET")) > 0) {
++        double b = atof(getenv("TFG_CPU_BUDGET"));
++        struct itimerval it = {{0, 0}, {(time_t)b, (suseconds_t)((b - (time_t)b) * 1e6)}};
++        signal(SIGPROF, mbTimeout);
++        setitimer(ITIMER_PROF, &it, NULL);
++    }
++
+     ArgParser parser("flip_graph", "Find fast matrix multiplication schemes using flip graph");
+ 
+     parser.addChoices("--ring", "-r", ArgType::String, "Coefficient ring: Z2 - {0, 1}, Z3 - {0, 1, 2} or ZT - {-1, 0, 1}", {"ZT", "Z2", "Z3"}, "ZT");
+--- a/src/flip_graph.hpp
++++ b/src/flip_graph.hpp
+@@ -13,6 +13,27 @@
+ #include "parameters/flip_parameters.h"
+ #include "parameters/metrics_parameters.h"
+ 
++#include <cstdio>
++#include <sys/resource.h>
++
++// metabench instrumentation (see bench/baselines/adapters/README.md), single-threaded runs only: global flip / attempt counters,
++// a TFGTRACE line on stderr for every new global best rank, and stop at --target-rank inside the round.
++// The search itself is unchanged.
++struct MbState {
++    long long flips = 0;
++    long long attempts = 0;
++    long long expands = 0;
++    int best = 1 << 30;
++    int stop = 0;
++    bool stopped = false;
++};
++inline MbState mb;
++inline double mbCpu() {
++    struct rusage ru;
++    getrusage(RUSAGE_SELF, &ru);
++    return double(ru.ru_utime.tv_sec + ru.ru_stime.tv_sec) + 1e-6 * double(ru.ru_utime.tv_usec + ru.ru_stime.tv_usec);
++}
++
+ template <typename Scheme>
+ class FlipGraph {
+     int count;
+@@ -147,6 +168,8 @@
+ template <typename Scheme>
+ void FlipGraph<Scheme>::run(int targetRank) {
+     initialize();
++    mb.stop = targetRank;
++    mb.best = bestRank;
+ 
+     auto startTime = std::chrono::high_resolution_clock::now();
+     std::vector<double> elapsedTimes;
+@@ -161,6 +184,8 @@
+ 
+         report(iteration + 1, startTime, elapsedTimes);
+     }
++
++    fprintf(stderr, "TFGDONE cpu=%.6f attempts=%lld flips=%lld expands=%lld rank=%d\n", mbCpu(), mb.attempts, mb.flips, mb.expands, bestRank);
+ }
+ 
+ template <typename Scheme>
+@@ -306,14 +331,20 @@
+ 
+ template <typename Scheme>
+ void FlipGraph<Scheme>::randomWalk(Scheme &scheme, Scheme &schemeBest, size_t &flipsCount, size_t &iterationsCount, size_t &plusIterations, int &bestRank, std::mt19937 &generator) {
++    if (mb.stopped)
++        return;
++
+     plusIterations = plusDistribution(generator);
+ 
+     for (size_t iteration = 0; iteration < flipParameters.flipIterations; iteration++) {
++        mb.attempts++;
+         int prevRank = scheme.getRank();
+ 
+         if (!scheme.tryFlip(generator)) {
+-            if (scheme.tryExpand(generator))
++            if (scheme.tryExpand(generator)) {
+                 flipsCount = 0;
++                mb.expands++;
++            }
+ 
+             continue;
+         }
+@@ -330,6 +361,7 @@
+ 
+         flipsCount++;
+         iterationsCount++;
++        mb.flips++;
+ 
+         if (rank < bestRank) {
+             schemeBest.copy(scheme);
+@@ -337,8 +369,18 @@
+             iterationsCount = 0;
+         }
+ 
++        if (rank < mb.best) {
++            mb.best = rank;
++            fprintf(stderr, "TFGTRACE cpu=%.6f attempts=%lld flips=%lld expands=%lld rank=%d\n", mbCpu(), mb.attempts, mb.flips, mb.expands, rank);
++            if (mb.stop > 0 && rank <= mb.stop) {
++                mb.stopped = true;
++                return;
++            }
++        }
++
+         if (flipsCount >= plusIterations && rank < bestRank + flipParameters.plusDiff && scheme.tryExpand(generator)) {
+             flipsCount = 0;
++            mb.expands++;
+             plusIterations = plusDistribution(generator);
+         }
+ 

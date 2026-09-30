@@ -509,3 +509,31 @@ Compiled binaries are unaffected. The tools are run through `bench/tool.sh` (com
 Written inside the bit with `ccall_nobox("wait4", ...)`, `ccall_nobox("w_typed_array_data_ptr", array)`,
 `waitid` with `WNOWAIT` and `proc_pid_rusage` (`lib/metaflip/bench/proc.w`). A clock for the CPU time of the
 process is `ccall_nobox("clock")` (microseconds).
+
+---
+
+# Port blockers (record board, written on the integration branch)
+
+## Array#sort and strings built by concatenation
+
+`Array#sort` orders a long string that was built with `+` wrongly against a shorter string; `<=>` on the same two strings
+is right, and so is `sort` on a copy made with `to_s`. The file lists that `Fsx.rglob` returns are such strings, so
+`paths.sort` put a 126-character path before a 64-character one that is smaller bytewise (the scoreboard then chose a different
+file among equal-rank witnesses than the Python tool does).
+
+```tungsten
+pad = "/Users/erik/tungsten-mf-port/bits/tungsten-metaflip/lib/metaflip/seeds/gf2/wide/matmul_"
+a = pad + "9x9_rank486_ba73e1dfe4_perminov_gf2.mfw"            # 126 bytes, built by concatenation
+b = "/Users/erik/.tungsten/metaflip/checkpoints/gf2/10x10x10/best.txt"
+<< (a <=> b).to_s              # 1   (a is greater: correct)
+<< [a, b].sort[0].slice(0, 30) # /Users/erik/tungsten-mf-port/b   (wrong: the smaller string is b)
+```
+
+Literals sort correctly; so do short concatenations and `x + "literal".to_s`. Workaround in `lib/metaflip/gf2/record_board.w`
+(`witness_files`): copy each path with `to_s` before sorting, marked `TODO(port)`. The root cause is in how `sort` reads
+such strings (a flat-buffer or length fast path that does not see the concatenated representation).
+
+## Parenthesised ternary before `+`
+
+`(flag ? a : b) + 1` compiles and silently drops the `+ 1` (the same parser defect as the `- 2` case of the support
+blockers, section 9); a counter written that way stayed at its initial value. Use an intermediate variable.

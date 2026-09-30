@@ -14,6 +14,10 @@ Metaflip executable:
   optional bounded proposal batches and scalar-normalized diversity bins let
   callers explore several exact neighborhoods without changing the generic
   coordinator.
+- `gf2/` is the arbitrary-width GF(2) scheme toolkit (bit helpers, the
+  Integer-mask `Scheme` with strict MFW1 IO, limb-array `Packed` schemes with
+  two independent exactness gates, and the `verify_tensor` certificate
+  verifier); see the header comments of its files.
 - `fleet/`, `rect/`, and `strategies/` contain coordinator and search modules.
   `rect/cpu_pool.w` keeps one OS thread per rectangular island across campaign
   epochs; workers reread their state slot after each barrier so rebases and

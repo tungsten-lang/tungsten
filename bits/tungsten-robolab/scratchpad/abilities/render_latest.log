@@ -1,0 +1,15 @@
+== long jump p95 champion (4.895 m)
+Tue Sep 29 01:17:11 EDT 2026
+wrote out/long_jump_v5_p95_sheet.png
+{'official_m': 4.895, 'effective_m': 4.978, 'board_offset_m': -0.083, 'foul_max_x': -0.072, 'speed_5m': 6.745, 'takeoff_vx': 5.887, 'takeoff_vz': 3.001, 'takeoff_angle_deg': 27.0, 'contact_time_s': 0.13, 'flight_s': 0.748, 'somersault': False, 'nearest_mark_by': 'l_foot'}
+gif 5462302 bytes
+== sprint p95 champion (7.02 m/s)
+Tue Sep 29 01:17:44 EDT 2026
+{'time': 26.0, 'distance': 161.117, 'speed_last5': np.float64(6.881), 'speed_10s': np.float64(6.878), 'min_speed_1s': np.float64(6.769), 'peak_speed_1s': np.float64(7.008), 'time_at_3': 24.4, 'stride_freq': np.float64(1.8), 'step_freq': np.float64(3.6), 'stride_length': np.float64(3.823), 'step_length': np.float64(1.911), 'flight_frac': 0.516, 'scuffs_per_s': np.float64(0.0), 'contact_time': 0.138
+wrote out/sprint_p95_ri.mp4 1561 frames
+== bat, in robolab's representation (distilled knots, reflexes on)
+Tue Sep 29 01:18:25 EDT 2026
+{'time': 17.505, 'hitch': 0.7427, 'hitch_full': 0.7427, 'flow': 2.9021, 'flow_valley_lift': 0.594, 'flow_valley_pre': 0.936, 'flow_valley_post': 0.809, 'flow_cmd': 0.743, 'flow_stall_ms_pre': 55.0, 'flow_stall_ms_post': 20.0, 'flow_dip_pre': 0.936, 'flow_dip_post': 0.809, 'power': 23.22, 'flow_ok': True, 'quality': 0.0, 'pitches': [{'pitch': 1, 'speed_mph': 82.8, 'target_x': 0.0, 'target_z': 0.8, 
+wrote out/bat_v6_knots.mp4 1051 frames
+== done
+Tue Sep 29 01:19:00 EDT 2026

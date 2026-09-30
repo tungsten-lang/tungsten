@@ -1,0 +1,6 @@
+== sprint v4 p95 five-gear champion
+Tue Sep 29 18:16:12 EDT 2026
+{'time': 26.0, 'distance': 164.297, 'speed_last5': np.float64(8.145), 'speed_10s': np.float64(7.944), 'min_speed_1s': np.float64(7.634), 'peak_speed_1s': np.float64(8.318), 'time_at_3': 23.4, 'stride_freq': np.float64(2.0), 'step_freq': np.float64(3.8), 'stride_length': np.float64(4.072), 'step_length': np.float64(2.143), 'flight_frac': 0.593, 'scuffs_per_s': np.float64(0.2), 'contact_time': 0.109, 'flight_time': 0.148, 'peak_grf': 5.48, 'pelvis_z': 0.887, 'thigh_peak': 1.368, 'knee_lift': 0.797
+wrote out/sprint_v4_p95_gear5.mp4 1561 frames
+== done
+Tue Sep 29 18:16:26 EDT 2026

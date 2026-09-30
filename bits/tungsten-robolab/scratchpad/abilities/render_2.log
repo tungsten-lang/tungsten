@@ -1,0 +1,16 @@
+== long jump one-start champion (5.122 m)
+Tue Sep 29 05:24:57 EDT 2026
+wrote out/long_jump_v7_p95_sheet.png
+{'official_m': 5.122, 'effective_m': 5.205, 'board_offset_m': -0.083, 'foul_max_x': -0.072, 'speed_5m': 6.745, 'takeoff_vx': 5.887, 'takeoff_vz': 3.001, 'takeoff_angle_deg': 27.0, 'contact_time_s': 0.13, 'flight_s': 0.779, 'somersault': False, 'nearest_mark_by': 'l_foot'}
+gif 5545748 bytes
+== long jump robust champion (seed 401)
+Tue Sep 29 05:25:51 EDT 2026
+wrote out/long_jump_v7_p95_robust_sheet.png
+{'official_m': 4.67, 'effective_m': 4.774, 'board_offset_m': -0.104, 'foul_max_x': -0.094, 'speed_5m': 6.783, 'takeoff_vx': 5.982, 'takeoff_vz': 2.749, 'takeoff_angle_deg': 24.7, 'contact_time_s': 0.099, 'flight_s': 0.741, 'somersault': False, 'nearest_mark_by': 'l_hand'}
+gif 5438590 bytes
+== sprint v4 P95 champion
+Tue Sep 29 05:26:47 EDT 2026
+{'time': 26.0, 'distance': 152.783, 'speed_last5': np.float64(6.982), 'speed_10s': np.float64(6.978), 'min_speed_1s': np.float64(6.926), 'peak_speed_1s': np.float64(7.019), 'time_at_3': 23.4, 'stride_freq': np.float64(2.0), 'step_freq': np.float64(4.0), 'stride_length': np.float64(3.491), 'step_length': np.float64(1.746), 'flight_frac': 0.538, 'scuffs_per_s': np.float64(0.0), 'contact_time': 0.114, 'flight_time': 0.126, 'peak_grf': 3.74, 'pelvis_z': 0.882, 'thigh_peak': 1.203, 'knee_lift': 0.727
+wrote out/sprint_v4_p95.mp4 1561 frames
+== done
+Tue Sep 29 05:27:44 EDT 2026

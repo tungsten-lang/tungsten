@@ -1,0 +1,6 @@
+wrote out/long_jump_v6_p95.mp4 1040 frames
+wrote out/long_jump_v6_p95_metrics.json
+wrote out/long_jump_v6_p95.gif 314 frames 5334779 bytes
+wrote out/long_jump_v6_p95_sheet.png
+{'official_m': 4.958, 'effective_m': 5.041, 'board_offset_m': -0.083, 'foul_max_x': -0.072, 'speed_5m': 6.745, 'takeoff_vx': 5.887, 'takeoff_vz': 3.001, 'takeoff_angle_deg': 27.0, 'contact_time_s': 0.13, 'flight_s': 0.764, 'somersault': False, 'nearest_mark_by': 'r_hand'}
+gif 5334779 bytes

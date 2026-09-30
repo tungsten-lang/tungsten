@@ -1,0 +1,17 @@
+MYO_TT_BEYOND=0 TT_ENV=P2 beyond task env id myoChallengeTableTennisP2-v0 official env id myoChallengeTableTennisP2-v0
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/tungsten/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+98000 solved 1.0 | official vs beyond-0 (standard): IDENTICAL | beyond standard vs fast: IDENTICAL
+98001 solved 0.0 | official vs beyond-0 (standard): IDENTICAL | beyond standard vs fast: IDENTICAL
+98002 solved 0.0 | official vs beyond-0 (standard): IDENTICAL | beyond standard vs fast: IDENTICAL
+98003 solved 0.0 | official vs beyond-0 (standard): IDENTICAL | beyond standard vs fast: IDENTICAL
+98004 solved 0.0 | official vs beyond-0 (standard): IDENTICAL | beyond standard vs fast: IDENTICAL
+98005 solved 0.0 | official vs beyond-0 (standard): IDENTICAL | beyond standard vs fast: IDENTICAL
+official standard 15.2s, beyond standard 14.0s, beyond fast 8.8s for 6 serves; 0 differ

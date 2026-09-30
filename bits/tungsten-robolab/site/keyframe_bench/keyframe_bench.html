@@ -1,0 +1,779 @@
+<title>Keyframe Bench</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+:root {
+  --bg: #F1F3EF; --panel: #FFFFFF; --ink: #1B2420; --muted: #5C6962; --rule: #D8DED7; --grid: #E2E7E0;
+  --right: #23855A; --left: #C9432F; --ref: #7B8A82; --ach: #B7791F; --accent: #1F5FA8; --focus: #1F5FA8;
+  --chip: #E6ECE5; --warn-bg: #FBEFD9; --warn-ink: #7A4B0B;
+  --g0: #2F6FE0; --g1: #A248C8; --g2: #E5602D;
+  --display: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+  --body: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #111713; --panel: #19211C; --ink: #E4EBE6; --muted: #98A69E; --rule: #2B3630; --grid: #1F2923;
+    --right: #4CC08A; --left: #F07661; --ref: #8D9C94; --ach: #E3AE52; --accent: #6FA6E8; --focus: #6FA6E8;
+    --chip: #232D27; --warn-bg: #34290F; --warn-ink: #E9C27A;
+    --g0: #6FA6E8; --g1: #C58BE6; --g2: #F0906A;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #111713; --panel: #19211C; --ink: #E4EBE6; --muted: #98A69E; --rule: #2B3630; --grid: #1F2923;
+  --right: #4CC08A; --left: #F07661; --ref: #8D9C94; --ach: #E3AE52; --accent: #6FA6E8; --focus: #6FA6E8;
+  --chip: #232D27; --warn-bg: #34290F; --warn-ink: #E9C27A;
+  --g0: #6FA6E8; --g1: #C58BE6; --g2: #F0906A;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.5 var(--body); padding-inline: 16px; padding-block: 18px 40px; margin: 0; }
+.wrap { max-width: 1180px; margin: 0 auto; display: grid; gap: 14px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 20px; }
+h1 { font: 700 26px/1.1 var(--display); margin: 0; letter-spacing: 0.01em; }
+h2 { font: 600 13px/1.2 var(--display); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 0; }
+.sub { color: var(--muted); max-width: 74ch; margin: 0; }
+.status { font: 500 12px/1 var(--mono); color: var(--muted); display: flex; align-items: center; gap: 8px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ref); }
+.dot.live { background: var(--right); }
+.dot.saving { background: var(--ach); }
+.main { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(320px, 1fr); gap: 14px; align-items: start; }
+@media (max-width: 860px) { .main { grid-template-columns: 1fr; } }
+.stage { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; display: grid; min-width: 0; }
+.bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--rule); }
+.bar.bottom { border-bottom: 0; border-top: 1px solid var(--rule); justify-content: space-between; }
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; border-right: 1px solid var(--rule); background: transparent; color: var(--ink); font: 600 13px/1 var(--display); letter-spacing: 0.03em; padding: 9px 12px; cursor: pointer; }
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--panel); }
+.seg button .pct { font: 400 11px var(--mono); opacity: 0.7; margin-left: 5px; }
+button.plain { border: 1px solid var(--rule); background: var(--panel); color: var(--ink); border-radius: 8px; font: 500 13px/1 var(--body); padding: 8px 11px; cursor: pointer; }
+button.plain:hover, .seg button:hover { outline: 1px solid var(--accent); outline-offset: -1px; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+select { font: 500 13px var(--body); color: var(--ink); background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 7px 8px; max-width: 100%; }
+svg#fig { width: 100%; height: auto; display: block; touch-action: none; user-select: none; -webkit-user-select: none; background: var(--panel); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12.5px; color: var(--muted); align-items: center; }
+.legend label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+.sw { display: inline-block; width: 18px; height: 0; border-top: 3px solid; vertical-align: middle; }
+.sw.grad { height: 3px; border-top: 0; background: linear-gradient(90deg, var(--g0), var(--g1), var(--g2)); border-radius: 2px; }
+.strip { border-top: 1px solid var(--rule); padding: 8px 12px 12px; display: grid; gap: 4px; }
+.striphead { display: flex; justify-content: space-between; align-items: baseline; gap: 4px 12px; flex-wrap: wrap; }
+svg#strip { width: 100%; height: auto; display: block; touch-action: pan-y; user-select: none; -webkit-user-select: none; cursor: crosshair; }
+.panel { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: 12px; display: grid; gap: 12px; min-width: 0; }
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+th { font: 600 11px/1.2 var(--display); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
+td.grp { font: 600 11px var(--display); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); padding-top: 10px; }
+td.d.pos { color: var(--right); } td.d.neg { color: var(--left); }
+td.pinc { width: 24px; padding-right: 0; }
+input.pin { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; cursor: pointer; }
+input.num { width: 70px; font: 500 13px var(--mono); text-align: right; color: var(--ink); background: var(--bg); border: 1px solid var(--rule); border-radius: 6px; padding: 3px 6px; font-variant-numeric: tabular-nums; }
+input.num.isfree { color: var(--muted); font-style: italic; border-style: dashed; }
+tr.hot td { background: var(--chip); }
+tr.free td:not(.pinc):not(.grp) { color: var(--muted); }
+.side-r { color: var(--right); font-weight: 600; } .side-l { color: var(--left); font-weight: 600; }
+tr.free .side-r, tr.free .side-l { font-weight: 500; opacity: 0.75; }
+.note { font-size: 12.5px; color: var(--muted); margin: 0; }
+.notice { background: var(--warn-bg); color: var(--warn-ink); border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+textarea#out { width: 100%; min-height: 90px; font: 12px var(--mono); color: var(--ink); background: var(--bg); border: 1px solid var(--rule); border-radius: 8px; padding: 8px; }
+.kbd { font: 500 11px var(--mono); border: 1px solid var(--rule); border-radius: 4px; padding: 1px 4px; }
+table.pins { font-size: 11.5px; width: auto; }
+table.pins th, table.pins td { padding: 2px 3px; text-align: center; border-bottom: 1px solid var(--rule); }
+table.pins th small { font: 400 10px var(--mono); color: var(--muted); letter-spacing: 0; text-transform: none; }
+table.pins .row { text-align: left; font: 500 11.5px var(--body); color: var(--muted); padding-right: 8px; }
+table.pins th.cur, table.pins td.cur { background: var(--chip); }
+table.pins button.pinb { width: 20px; height: 20px; border-radius: 5px; border: 1px solid var(--rule); background: transparent; color: var(--muted); font: 600 11px/1 var(--mono); cursor: pointer; padding: 0; }
+table.pins button.pinb[aria-pressed="true"] { background: var(--ink); color: var(--panel); border-color: var(--ink); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Keyframe Bench</h1>
+      <p class="sub">Drag a joint to set where the body should be at a gait event. A keyframe only has to pin the joints it cares about (the toe at toe-off, say): the others follow the eased motion between the neighbouring keyframes. The strip below the editor shows the whole stride as it stands now, an onion skin that redraws as you edit; hover it to scrub, and the blue figure shows that point of the stride over the pose you are editing. The left step is the mirror of the right.</p>
+    </div>
+    <div class="status" aria-live="polite"><span class="dot" id="dot"></span><span id="status">Connecting…</span></div>
+  </header>
+
+  <div class="notice" id="offline" hidden>Saving is not available in this view. Edits stay on this page until you reload; use Copy params to keep them.</div>
+
+  <div class="main">
+    <section class="stage" aria-label="Pose editor">
+      <div class="bar">
+        <select id="setSel" aria-label="Keyframe set"></select>
+        <div class="seg" id="events" role="group" aria-label="Keyframe"></div>
+        <button class="plain" id="prev" title="Previous keyframe (left arrow)">◀</button>
+        <button class="plain" id="next" title="Next keyframe (right arrow)">▶</button>
+        <button class="plain" id="addBtn" title="Add a keyframe at a point in the stride">+ Keyframe</button>
+      </div>
+      <form class="bar" id="addForm" hidden>
+        <label for="addName">Name</label>
+        <input id="addName" type="text" maxlength="40" placeholder="e.g. Foot flat" style="font:500 13px var(--body);padding:6px 8px;border:1px solid var(--rule);border-radius:6px;background:var(--bg);color:var(--ink);min-width:0;flex:1 1 140px">
+        <label for="addPct">at</label>
+        <input id="addPct" class="num" type="number" min="0" max="49.5" step="0.5" value="9">
+        <span class="note" id="addUnit">% of the stride</span>
+        <button class="plain" type="submit">Add</button>
+        <button class="plain" type="button" id="addCancel">Cancel</button>
+        <span class="note" id="addMsg"></span>
+      </form>
+      <svg id="fig" viewBox="0 0 640 700" role="img" aria-label="Side view of the runner in the selected keyframe"></svg>
+      <div class="bar bottom">
+        <div class="legend">
+          <span><span class="sw" style="border-color:var(--right)"></span> right side</span>
+          <span><span class="sw" style="border-color:var(--left)"></span> left side</span>
+          <span><span class="sw" style="border-color:var(--accent)"></span> scrub position</span>
+          <label><input type="checkbox" id="showRef" checked> <span class="sw" style="border-color:var(--ref);border-top-style:dashed"></span> human reference</label>
+          <label><input type="checkbox" id="showAch" checked> <span class="sw" style="border-color:var(--ach);border-top-style:dotted"></span> runner now</label>
+        </div>
+        <div class="actions">
+          <button class="plain" id="play">Play stride</button>
+          <select id="speedSel" aria-label="Playback speed"><option value="0.25">¼ speed</option><option value="0.5" selected>½ speed</option><option value="1">real time</option></select>
+        </div>
+      </div>
+      <div class="strip">
+        <div class="striphead"><h2>The whole stride</h2><span class="note" id="stripNote">Hover to scrub (the blue figure also shows in the editor), click a keyframe to edit it.</span></div>
+        <svg id="strip" viewBox="0 0 640 222" role="img" aria-label="The whole stride as a strip of poses, with the keyframes marked"></svg>
+      </div>
+    </section>
+
+    <aside class="panel" aria-label="Joint angles">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap">
+        <h2 id="evTitle">Touchdown</h2>
+        <span class="note" id="evNote"></span>
+      </div>
+      <div class="tablewrap">
+        <table id="tbl">
+          <thead><tr><th title="Pin: this keyframe fixes the joint"></th><th>Joint</th><th style="text-align:right">Yours</th><th style="text-align:right">Ref</th><th style="text-align:right">Runner</th><th style="text-align:right">Δ ref</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="note">Tick a joint to pin it at this keyframe; untick it to let it follow the motion between the other keyframes (its value shows in grey). Dragging or typing pins a joint. Degrees, model convention: hip + flexion (thigh forward), knee + flexion, ankle + plantarflexion (toes down), toe − extended, shoulder + arm forward, elbow + flexion, spine + forward. Trunk lean = pelvis + spine. <span class="kbd">←</span> <span class="kbd">→</span> switch keyframes.</p>
+      <div class="actions">
+        <button class="plain" id="pinAll">Pin all</button>
+        <button class="plain" id="freeAll">Free all</button>
+        <button class="plain" id="pinChanged" title="Pin only the joints that differ from the human reference by half a degree or more">Only what I changed</button>
+      </div>
+      <div class="actions">
+        <button class="plain" id="reset">Reset to reference</button>
+        <button class="plain" id="copyRunner">Start from runner now</button>
+        <button class="plain" id="copy">Copy params</button>
+        <button class="plain" id="remove" hidden>Remove this keyframe</button>
+      </div>
+      <div style="display:grid;gap:6px">
+        <h2>Pinned joints across the stride</h2>
+        <div class="tablewrap"><table class="pins" id="pins"></table></div>
+        <p class="note">● pinned, ○ free. Click a cell to pin or free that joint at that keyframe. St = stance leg, Sw = swing leg, R / L = right / left arm at the keyframe.</p>
+      </div>
+      <textarea id="out" readonly hidden aria-label="Params for this keyframe set"></textarea>
+      <p class="note" id="who"></p>
+    </aside>
+  </div>
+</div>
+
+<script>
+(() => {
+  const D2R = Math.PI / 180, R2D = 180 / Math.PI;
+  // Segment lengths (m) from the simulated body (playground/body.py).
+  const L = { thigh: 0.43, shank: 0.43, spineUp: 0.10, shoulder: 0.42, head: 0.58, upper: 0.30, fore: 0.26, hand: 0.09,
+              ballX: 0.14, ballY: 0.068, heelX: 0.06, heelY: 0.08, toe: 0.07 };
+  const LIM = { hip: [-34, 126], knee: [-1, 143], ankle: [-34, 52], toe: [-46, 23], spine: [-29, 69], pelvis: [-20, 40], shoulder: [-57, 178], elbow: [0, 149] };
+  const JOINTS = [
+    { g: "Stance leg (right)", side: "r", rows: [["st_hip", "Hip", "hip"], ["st_knee", "Knee", "knee"], ["st_ankle", "Ankle", "ankle"], ["st_toe", "Toe", "toe"]] },
+    { g: "Swing leg (left)", side: "l", rows: [["sw_hip", "Hip", "hip"], ["sw_knee", "Knee", "knee"], ["sw_ankle", "Ankle", "ankle"], ["sw_toe", "Toe", "toe"]] },
+    { g: "Arms", side: "", rows: [["st_shoulder", "Right shoulder", "shoulder"], ["st_elbow", "Right elbow", "elbow"], ["sw_shoulder", "Left shoulder", "shoulder"], ["sw_elbow", "Left elbow", "elbow"]] },
+    { g: "Trunk", side: "", rows: [["spine", "Spine", "spine"], ["pelvis", "Pelvis tilt", "pelvis"]] },
+  ];
+  const KEYS = JOINTS.flatMap(g => g.rows.map(r => r[0]));
+  const LIMOF = Object.fromEntries(JOINTS.flatMap(g => g.rows.map(r => [r[0], LIM[r[2]]])));
+  const SHORT = { st_hip: "St hip", st_knee: "St knee", st_ankle: "St ankle", st_toe: "St toe", sw_hip: "Sw hip", sw_knee: "Sw knee", sw_ankle: "Sw ankle", sw_toe: "Sw toe",
+                  st_shoulder: "R shoulder", st_elbow: "R elbow", sw_shoulder: "L shoulder", sw_elbow: "L elbow", spine: "Spine", pelvis: "Pelvis" };
+  const JN = ["hip", "knee", "ankle", "toe", "shoulder", "elbow"];
+  const clamp = (k, v) => Math.min(LIMOF[k][1], Math.max(LIMOF[k][0], v));
+  const wrap = a => { a = ((a + 180) % 360 + 360) % 360 - 180; return a; };
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  // Literature reference (Novacheck 1998, Hamner & Delp 2013, Fukuchi 2017, Pontzer 2009), shown only when the
+  // page cannot reach its saved keyframes.
+  const FALLBACK = { label: "Natural run (right stance; the left step is the mirror)", events: [
+    { event: "td", label: "Touchdown", order: 0, phase_pct: 0, reference: { st_hip: 30, st_knee: 18, st_ankle: 0, st_toe: 0, sw_hip: -8, sw_knee: 55, sw_ankle: 12, sw_toe: 0, st_shoulder: -18.5, st_elbow: 82.1, sw_shoulder: 28.5, sw_elbow: 87.9, spine: 2.4, pelvis: 3 } },
+    { event: "ms", label: "Mid-stance", order: 1, phase_pct: 18, reference: { st_hip: 12, st_knee: 40, st_ankle: -20, st_toe: 0, sw_hip: 20, sw_knee: 110, sw_ankle: -5, sw_toe: 0, st_shoulder: 24.3, st_elbow: 87.4, sw_shoulder: -14.3, sw_elbow: 82.6, spine: 5.9, pelvis: 3 } },
+    { event: "to", label: "Toe-off", order: 2, phase_pct: 36, reference: { st_hip: -12, st_knee: 15, st_ankle: 25, st_toe: -30, sw_hip: 55, sw_knee: 90, sw_ankle: -2, sw_toe: 0, st_shoulder: 44.9, st_elbow: 90, sw_shoulder: -34.9, sw_elbow: 80, spine: 3.1, pelvis: 3 } },
+  ]};
+
+  const state = { sets: {}, setId: null, idx: 0, showRef: true, showAch: true,
+                  playing: false, playQ: null, scrubQ: null, drag: null, db: null, local: {}, localPin: {} };
+
+  // ---- kinematics ---------------------------------------------------------
+  // Side-based pose: {r:{hip,knee,ankle,toe,shoulder,elbow}, l:{...}, spine, pelvis}.
+  function sidePose(a, mirror) {
+    const st = { hip: a.st_hip, knee: a.st_knee, ankle: a.st_ankle, toe: a.st_toe, shoulder: a.st_shoulder, elbow: a.st_elbow };
+    const sw = { hip: a.sw_hip, knee: a.sw_knee, ankle: a.sw_ankle, toe: a.sw_toe, shoulder: a.sw_shoulder, elbow: a.sw_elbow };
+    return mirror ? { r: sw, l: st, spine: a.spine, pelvis: a.pelvis } : { r: st, l: sw, spine: a.spine, pelvis: a.pelvis };
+  }
+  const dir = phi => [Math.cos(phi * D2R), Math.sin(phi * D2R)];
+  const add = (p, d, s) => [p[0] + d[0] * s, p[1] + d[1] * s];
+  function leg(hip, lg, pel) {
+    const phT = -90 - pel + lg.hip, knee = add(hip, dir(phT), L.thigh);
+    const phS = phT - lg.knee, ankle = add(knee, dir(phS), L.shank);
+    const phF = phS + 90 - lg.ankle, f = dir(phF), n = [f[1], -f[0]];
+    const ball = [ankle[0] + f[0] * L.ballX + n[0] * L.ballY, ankle[1] + f[1] * L.ballX + n[1] * L.ballY];
+    const heel = [ankle[0] - f[0] * L.heelX + n[0] * L.heelY, ankle[1] - f[1] * L.heelX + n[1] * L.heelY];
+    const phTo = phF - lg.toe, toe = add(ball, dir(phTo), L.toe);
+    return { knee, ankle, ball, heel, toe, phT, phS, phF };
+  }
+  function fk(sp) {
+    const hip = [0, 0], pel = sp.pelvis;
+    const spineJ = add(hip, dir(90 - pel), L.spineUp);
+    const phTor = 90 - pel - sp.spine;
+    const shoulder = add(spineJ, dir(phTor), L.shoulder), head = add(spineJ, dir(phTor), L.head);
+    const arm = a => { const phU = phTor - 180 + a.shoulder, elbow = add(shoulder, dir(phU), L.upper);
+      const phF = phU + a.elbow, wrist = add(elbow, dir(phF), L.fore), hand = add(wrist, dir(phF), L.hand); return { elbow, wrist, hand, phU }; };
+    return { hip, spineJ, shoulder, head, phTor, r: leg(hip, sp.r, pel), l: leg(hip, sp.l, pel), ra: arm(sp.r), la: arm(sp.l) };
+  }
+  function lowest(k) { let m = Infinity; for (const s of ["r", "l"]) for (const p of ["heel", "ball", "toe"]) m = Math.min(m, k[s][p][1]); return m; }
+
+  // ---- keyframes as per-joint timelines -----------------------------------------
+  // A keyframe pins some joints (all of them unless it says otherwise). Every joint is its own channel: it eases (min-jerk)
+  // between the keyframes that pin it and ignores the ones that do not. A cyclic set mirrors the right-stance keyframes
+  // half a stride later (the right leg then takes the swing values, the left leg the stance values).
+  const minjerk = t => t * t * t * (10 - 15 * t + 6 * t * t);
+  const cycOf = s => s.cycle !== false && s.events.length > 0 && s.events.every(e => e.phase_pct !== undefined);
+  const evPhase = (s, i) => cycOf(s) ? s.events[i].phase_pct : (s.events.length > 1 ? i * 100 / (s.events.length - 1) : 0);
+  function yours(ev) { return state.local[ev.id] || ev.angles || ev.reference; }
+  function pinsOf(ev) { return state.localPin[ev.id] || ev.pinned || null; }
+  function isPinned(ev, key) { const p = pinsOf(ev); return !p || p[key] !== false; }
+  function fullPins(ev) { return Object.fromEntries(KEYS.map(k => [k, isPinned(ev, k)])); }
+  function buildTL(s, pick, pinOf) {
+    const cyc = cycOf(s), T = {};
+    const put = (c, x) => (T[c] = T[c] || []).push(x);
+    s.events.forEach((ev, i) => {
+      const a = pick(ev); if (!a) return;
+      const p = evPhase(s, i);
+      for (const j of JN) {
+        const kst = "st_" + j, ksw = "sw_" + j;
+        put("r." + j, { p, v: a[kst], pin: pinOf(ev, kst) });
+        put("l." + j, { p, v: a[ksw], pin: pinOf(ev, ksw) });
+        if (cyc) { put("r." + j, { p: p + 50, v: a[ksw], pin: pinOf(ev, ksw) }); put("l." + j, { p: p + 50, v: a[kst], pin: pinOf(ev, kst) }); }
+      }
+      for (const c of ["spine", "pelvis"]) { const pn = pinOf(ev, c); put(c, { p, v: a[c], pin: pn }); if (cyc) put(c, { p: p + 50, v: a[c], pin: pn }); }
+    });
+    const P = {};
+    for (const c in T) P[c] = T[c].filter(x => x.pin && Number.isFinite(x.v)).sort((x, y) => x.p - y.p);
+    return { cyc, P };
+  }
+  function evalTL(tl, c, q) {
+    const P = tl.P[c]; if (!P || !P.length) return null;
+    if (P.length === 1) return P[0].v;
+    let arr = P;
+    if (tl.cyc) { q = ((q % 100) + 100) % 100; arr = [{ p: P[P.length - 1].p - 100, v: P[P.length - 1].v }, ...P, { p: P[0].p + 100, v: P[0].v }]; }
+    if (q <= arr[0].p) return arr[0].v;
+    if (q >= arr[arr.length - 1].p) return arr[arr.length - 1].v;
+    let i = 0; while (i < arr.length - 2 && q > arr[i + 1].p) i++;
+    const a = arr[i], b = arr[i + 1], t = (q - a.p) / Math.max(1e-6, b.p - a.p);
+    return a.v + (b.v - a.v) * minjerk(t);
+  }
+  let TL = null, TLREF = null;   // the current set's timelines: yours (pinned joints only) and the human reference (every joint)
+  function prep() {
+    const s = state.sets[state.setId];
+    if (!s) { TL = TLREF = null; return; }
+    TL = buildTL(s, yours, isPinned);
+    TLREF = buildTL(s, ev => ev.reference, () => true);
+  }
+  function chanVal(c, q) { let v = evalTL(TL, c, q); if (v === null) v = evalTL(TLREF, c, q); return v === null ? 0 : v; }
+  function poseAtQ(q) {
+    const o = { r: {}, l: {} };
+    for (const j of JN) { o.r[j] = chanVal("r." + j, q); o.l[j] = chanVal("l." + j, q); }
+    o.spine = chanVal("spine", q); o.pelvis = chanVal("pelvis", q);
+    return o;
+  }
+  // The joints a keyframe pins keep their value; the free ones take what the animation has at that point of the stride.
+  function anglesAt(p) {
+    const o = {};
+    for (const j of JN) { o["st_" + j] = chanVal("r." + j, p); o["sw_" + j] = chanVal("l." + j, p); }
+    o.spine = chanVal("spine", p); o.pelvis = chanVal("pelvis", p);
+    return o;
+  }
+  function displayAngles(ev) {
+    if (!TL) prep();
+    const s = state.sets[state.setId], i = s.events.indexOf(ev);
+    const a = yours(ev), free = anglesAt(evPhase(s, i)), out = {};
+    for (const k of KEYS) out[k] = isPinned(ev, k) ? a[k] : free[k];
+    return out;
+  }
+
+  // ---- drawing ------------------------------------------------------------
+  const svg = document.getElementById("fig"), strip = document.getElementById("strip");
+  const S = 300, X0 = 300, GROUND = 640;
+  let anchorY = 0;
+  const px = (p, ay) => [X0 + p[0] * S, GROUND - (p[1] - ay) * S];
+  const NS = "http://www.w3.org/2000/svg";
+  function el(tag, attrs, parent) { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); (parent || svg).appendChild(e); return e; }
+  function line(pts, ay, attrs, parent) { el("polyline", Object.assign({ points: pts.map(p => px(p, ay).join(",")).join(" "), fill: "none", "stroke-linecap": "round", "stroke-linejoin": "round" }, attrs), parent); }
+  function drawFigure(k, ay, style, parent) {
+    const g = el("g", {}, parent);
+    const w = style.w, dash = style.dash || "", op = style.opacity || 1;
+    const col = s => style.color || (s === "r" ? "var(--right)" : "var(--left)");
+    // far side (left) first
+    for (const s of ["l", "r"]) {
+      const lg = k[s], ar = k[s + "a"];
+      line([k.hip, lg.knee, lg.ankle, lg.heel, lg.ball, lg.toe], ay, { stroke: col(s), "stroke-width": w, "stroke-dasharray": dash, opacity: s === "l" && !style.color ? op * 0.9 : op }, g);
+      line([lg.ankle, lg.ball], ay, { stroke: col(s), "stroke-width": w * 0.8, "stroke-dasharray": dash, opacity: op }, g);
+      if (s === "l") line([k.shoulder, ar.elbow, ar.wrist, ar.hand], ay, { stroke: col(s), "stroke-width": w * 0.85, "stroke-dasharray": dash, opacity: op }, g);
+    }
+    line([k.hip, k.spineJ, k.shoulder, k.head], ay, { stroke: style.color || "var(--ink)", "stroke-width": w * 1.25, "stroke-dasharray": dash, opacity: op }, g);
+    const hp = px(k.head, ay);
+    el("circle", { cx: hp[0], cy: hp[1], r: 0.1 * S, fill: style.fillHead || "none", stroke: style.color || "var(--ink)", "stroke-width": w * 0.8, "stroke-dasharray": dash, opacity: op }, g);
+    line([k.shoulder, k.ra.elbow, k.ra.wrist, k.ra.hand], ay, { stroke: col("r"), "stroke-width": w * 0.85, "stroke-dasharray": dash, opacity: op }, g);
+    return g;
+  }
+  // Ghost figures: the far side (left leg and arm) and the near side (right leg, trunk, right arm) as one path each.
+  function ghost(k, V, color, w, opNear, opFar, parent) {
+    const P = p => (V.ox + p[0] * V.sc).toFixed(1) + "," + (V.oy - (p[1] - V.ay) * V.sc).toFixed(1);
+    const seg = pts => "M" + pts.map(P).join("L");
+    const base = { fill: "none", stroke: color, "stroke-width": w, "stroke-linecap": "round", "stroke-linejoin": "round" };
+    el("path", Object.assign({ d: seg([k.hip, k.l.knee, k.l.ankle, k.l.heel, k.l.ball, k.l.toe]) + seg([k.shoulder, k.la.elbow, k.la.wrist, k.la.hand]), opacity: opFar }, base), parent);
+    el("path", Object.assign({ d: seg([k.hip, k.r.knee, k.r.ankle, k.r.heel, k.r.ball, k.r.toe]) + seg([k.hip, k.spineJ, k.shoulder, k.head]) + seg([k.shoulder, k.ra.elbow, k.ra.wrist, k.ra.hand]), opacity: opNear }, base), parent);
+    const hx = V.ox + k.head[0] * V.sc, hy = V.oy - (k.head[1] - V.ay) * V.sc;
+    el("circle", { cx: hx.toFixed(1), cy: hy.toFixed(1), r: (0.1 * V.sc).toFixed(1), fill: "none", stroke: color, "stroke-width": w * 0.8, opacity: opNear }, parent);
+  }
+  const hex = h => { h = h.trim().replace("#", ""); return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16)); };
+  let PAL = [[47, 111, 224], [162, 72, 200], [229, 96, 45]];
+  function loadPalette() {
+    const cs = getComputedStyle(document.documentElement);
+    const g = ["--g0", "--g1", "--g2"].map(n => cs.getPropertyValue(n));
+    if (g.every(x => /^\s*#[0-9a-fA-F]{6}\s*$/.test(x))) PAL = g.map(hex);
+  }
+  function phaseColor(u) {
+    u = Math.min(1, Math.max(0, u));
+    const t = u < 0.5 ? u * 2 : (u - 0.5) * 2, a = PAL[u < 0.5 ? 0 : 1], b = PAL[u < 0.5 ? 1 : 2];
+    return "rgb(" + [0, 1, 2].map(i => Math.round(a[i] + (b[i] - a[i]) * t)).join(",") + ")";
+  }
+
+  // Handles: key -> [point getter, solver(P, k, a) -> angle update]
+  const HANDLES = [
+    ["r", "knee", "hip"], ["r", "ankle", "knee"], ["r", "ball", "ankle"], ["r", "toe", "toe"],
+    ["l", "knee", "hip"], ["l", "ankle", "knee"], ["l", "ball", "ankle"], ["l", "toe", "toe"],
+    ["ra", "elbow", "shoulder"], ["ra", "wrist", "elbow"], ["la", "elbow", "shoulder"], ["la", "wrist", "elbow"], ["", "head", "spine"],
+  ];
+  const BALL_A = Math.atan2(-L.ballY, L.ballX) * R2D;
+  function angleKey(side, joint) {
+    if (joint === "spine") return "spine";
+    const s = side.replace("a", "");
+    const stance = !isMirror() ? "r" : "l";
+    return (s === stance ? "st_" : "sw_") + joint;
+  }
+  function solve(h, P, k, a) {
+    const [side, pt, joint] = h, at = (p, q) => Math.atan2(q[1] - p[1], q[0] - p[0]) * R2D;
+    const key = angleKey(side, joint);
+    let v;
+    if (joint === "spine") v = 90 - a.pelvis - at(k.spineJ, P);
+    else if (side === "ra" || side === "la") {
+      const ar = k[side];
+      if (joint === "shoulder") v = wrap(at(k.shoulder, P) - k.phTor + 180);
+      else v = wrap(at(ar.elbow, P) - ar.phU);
+    } else {
+      const lg = k[side];
+      if (joint === "hip") v = wrap(at(k.hip, P) + 90 + a.pelvis);
+      else if (joint === "knee") v = wrap(lg.phT - at(lg.knee, P));
+      else if (joint === "ankle") v = wrap(lg.phS + 90 - (at(lg.ankle, P) - BALL_A));
+      else v = wrap(lg.phF - at(lg.ball, P));
+    }
+    return [key, clamp(key, Math.round(v * 2) / 2)];
+  }
+
+  function cur() { const s = state.sets[state.setId]; return s ? s.events[state.idx] : null; }
+  function isMirror() { return false; }
+
+  function render() {
+    svg.textContent = "";
+    if (!TL) prep();
+    // grid (10 cm)
+    const gg = el("g", {});
+    for (let x = 0; x <= 640; x += 30) el("line", { x1: x, y1: 0, x2: x, y2: 700, stroke: "var(--grid)", "stroke-width": x % 150 === 0 ? 1.2 : 0.6 }, gg);
+    for (let y = GROUND; y >= 0; y -= 30) el("line", { x1: 0, y1: y, x2: 640, y2: y, stroke: "var(--grid)", "stroke-width": (GROUND - y) % 150 === 0 ? 1.2 : 0.6 }, gg);
+    el("line", { x1: 0, y1: GROUND, x2: 640, y2: GROUND, stroke: "var(--muted)", "stroke-width": 2 }, gg);
+    const t = el("text", { x: 12, y: GROUND + 22, fill: "var(--muted)", "font-family": "IBM Plex Mono, monospace", "font-size": 11 }, gg); t.textContent = "grid 10 cm · running direction →";
+    const s = state.sets[state.setId], ev = cur();
+    if (!s || !ev) return;
+    const mine = displayAngles(ev);
+    const k = fk(sidePose(mine));
+    if (!state.drag && state.playQ === null) anchorY = lowest(k);
+    if (state.playQ !== null) {
+      const kp = fk(poseAtQ(state.playQ));
+      drawFigure(kp, lowest(kp), { w: 7, fillHead: "var(--panel)" });
+      return;
+    }
+    if (state.showRef && ev.reference) { const kr = fk(sidePose(ev.reference)); drawFigure(kr, lowest(kr), { w: 3, dash: "7 6", color: "var(--ref)", opacity: 0.9 }); }
+    if (state.showAch && ev.achieved) { const ka = fk(sidePose(ev.achieved)); drawFigure(ka, lowest(ka), { w: 3, dash: "1 6", color: "var(--ach)", opacity: 1 }); }
+    drawFigure(k, anchorY, { w: 7, fillHead: "var(--panel)" });
+    if (state.scrubQ !== null && !state.drag) { const ks = fk(poseAtQ(state.scrubQ)); drawFigure(ks, lowest(ks), { w: 5, color: "var(--accent)", opacity: 0.9 }); }   // lowest point on the ground
+    const hg = el("g", {});
+    for (const h of HANDLES) {
+      const p = h[0] === "" ? k.head : k[h[0]][h[1]];
+      const q = px(p, anchorY);
+      const key = angleKey(h[0], h[2]);
+      const pinned = isPinned(ev, key);
+      const col = h[0].startsWith("l") ? "var(--left)" : h[0] === "" ? "var(--ink)" : "var(--right)";
+      const c = el("circle", { cx: q[0], cy: q[1], r: h[1] === "head" ? 13 : 9, fill: pinned ? col : "var(--panel)", stroke: pinned ? "var(--panel)" : col, "stroke-width": pinned ? 2.5 : 3, cursor: "grab", tabindex: 0,
+        "data-h": HANDLES.indexOf(h), "aria-label": (pinned ? "Drag to set " : "Free joint, drag to pin ") + key.replace("_", " ") }, hg);
+      if (state.drag && state.drag.h === h) c.setAttribute("r", 12);
+    }
+  }
+
+  // The whole stride as a strip of poses (a filmstrip), keyframes marked; scrubbing shows any point of the stride in the big view.
+  const SX0 = 30, SX1 = 610, SGY = 170, SSC = 74;
+  function renderStrip() {
+    strip.textContent = "";
+    loadPalette();
+    const s = state.sets[state.setId];
+    if (!s || !TL) return;
+    const cyc = TL.cyc, N = 16;
+    const xOf = q => SX0 + q / 100 * (SX1 - SX0);
+    const frames = [];
+    for (let i = 0; i < N; i++) { const q = cyc ? (i + 0.5) * 100 / N : i * 100 / (N - 1); frames.push({ q, k: fk(poseAtQ(q)) }); }
+    const keys = [];
+    s.events.forEach((ev, i) => { const p = evPhase(s, i); keys.push({ i, q: p, mirror: false, k: fk(poseAtQ(p)) }); if (cyc) keys.push({ i, q: p + 50, mirror: true, k: fk(poseAtQ(p + 50)) }); });
+    let ay = Infinity;
+    for (let i = 0; i <= 100; i++) ay = Math.min(ay, lowest(fk(poseAtQ(i))));
+    for (const f of frames.concat(keys)) ay = Math.min(ay, lowest(f.k));
+    // the selected keyframe's places
+    for (const kf of keys) if (kf.i === state.idx) el("rect", { x: xOf(kf.q) - 24, y: 6, width: 48, height: SGY + 44, rx: 8, fill: "var(--chip)" }, strip);
+    if (cyc) {
+      const t1 = el("text", { x: SX0, y: 14, fill: "var(--muted)", "font-family": "IBM Plex Mono, monospace", "font-size": 10 }, strip); t1.textContent = "right stance";
+      const t2 = el("text", { x: xOf(50) + 6, y: 14, fill: "var(--muted)", "font-family": "IBM Plex Mono, monospace", "font-size": 10 }, strip); t2.textContent = "left stance (mirror)";
+      el("line", { x1: xOf(50), y1: 6, x2: xOf(50), y2: SGY + 34, stroke: "var(--rule)", "stroke-width": 1, "stroke-dasharray": "3 4" }, strip);
+    }
+    el("line", { x1: 10, y1: SGY, x2: 630, y2: SGY, stroke: "var(--muted)", "stroke-width": 1.5 }, strip);
+    for (const f of frames) ghost(f.k, { ox: xOf(f.q), oy: SGY, sc: SSC, ay }, phaseColor(f.q / 100), 1.8, 0.5, 0.26, strip);
+    for (const kf of keys) ghost(kf.k, { ox: xOf(kf.q), oy: SGY, sc: SSC, ay }, phaseColor(kf.q / 100), 2.6, kf.mirror ? 0.8 : 1, kf.mirror ? 0.45 : 0.6, strip);
+    // ruler and labels
+    const ticks = cyc ? [0, 25, 50, 75, 100] : [];
+    for (const q of ticks) {
+      el("line", { x1: xOf(q), y1: SGY, x2: xOf(q), y2: SGY + 5, stroke: "var(--muted)", "stroke-width": 1 }, strip);
+      const tx = el("text", { x: xOf(q), y: SGY + 17, "text-anchor": "middle", fill: "var(--muted)", "font-family": "IBM Plex Mono, monospace", "font-size": 10 }, strip); tx.textContent = q + "%";
+    }
+    keys.slice().sort((a, b) => a.q - b.q).forEach((kf, n) => {
+      const ev = s.events[kf.i];
+      const tx = el("text", { x: xOf(kf.q), y: SGY + 30 + (n % 2) * 11, "text-anchor": "middle", fill: kf.i === state.idx ? "var(--ink)" : "var(--muted)", opacity: kf.mirror ? 0.6 : 1,
+        "font-family": "IBM Plex Mono, monospace", "font-size": 10, "font-weight": kf.i === state.idx ? 600 : 400 }, strip);
+      tx.textContent = ev.event;
+    });
+    const pq = state.playQ !== null ? state.playQ : state.scrubQ;
+    if (pq !== null) {
+      ghost(fk(poseAtQ(pq)), { ox: xOf(pq), oy: SGY, sc: SSC, ay }, "var(--accent)", 3.4, 1, 0.65, strip);
+      el("line", { x1: xOf(pq), y1: 4, x2: xOf(pq), y2: SGY + 6, stroke: "var(--accent)", "stroke-width": 1.5, "stroke-dasharray": "3 3" }, strip);
+      el("circle", { cx: xOf(pq), cy: 6, r: 4, fill: "var(--accent)" }, strip);
+    }
+  }
+  const stripQ = e => {
+    const pt = strip.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+    const q = pt.matrixTransform(strip.getScreenCTM().inverse());
+    return Math.min(100, Math.max(0, (q.x - SX0) / (SX1 - SX0) * 100));
+  };
+  strip.addEventListener("pointermove", e => { if (state.playing || state.drag) return; state.scrubQ = stripQ(e); refreshView(); });
+  strip.addEventListener("pointerleave", () => { if (state.scrubQ === null) return; state.scrubQ = null; refreshView(); });
+  strip.addEventListener("click", e => {
+    if (state.playing) return;
+    const s = state.sets[state.setId]; if (!s || !TL) return;
+    const q = stripQ(e); let best = 0, bd = Infinity;
+    s.events.forEach((ev, i) => { const p = evPhase(s, i); for (const c of TL.cyc ? [p, p + 50] : [p]) { const d = Math.abs(c - q); if (d < bd) { bd = d; best = i; } } });
+    state.idx = best; state.scrubQ = null; chrome(); refresh();
+  });
+
+  // ---- interaction --------------------------------------------------------
+  function toWorld(evt) {
+    const pt = svg.createSVGPoint(); pt.x = evt.clientX; pt.y = evt.clientY;
+    const q = pt.matrixTransform(svg.getScreenCTM().inverse());
+    return [(q.x - X0) / S, (GROUND - q.y) / S + anchorY];
+  }
+  let frame = null;
+  function schedule() { if (frame) return; frame = requestAnimationFrame(() => { frame = null; refresh(true); }); }
+  svg.addEventListener("pointerdown", e => {
+    const i = e.target.getAttribute && e.target.getAttribute("data-h");
+    if (i === null || i === undefined || state.playing) return;
+    const ev = cur(); if (!ev) return;
+    const h = HANDLES[+i], key = angleKey(h[0], h[2]);
+    state.drag = { h, id: ev.id, key };
+    state.local[ev.id] = Object.assign({}, yours(ev), displayAngles(ev));            // free joints start where the animation has them
+    state.localPin[ev.id] = Object.assign(fullPins(ev), { [key]: true });            // dragging a joint pins it
+    try { svg.setPointerCapture(e.pointerId); } catch (_) {}
+    e.preventDefault();
+    refresh();
+  });
+  svg.addEventListener("pointermove", e => {
+    if (!state.drag) return;
+    const ev = cur(); const a = state.local[ev.id];
+    const k = fk(sidePose(a));
+    const [key, v] = solve(state.drag.h, toWorld(e), k, a);
+    if (a[key] !== v) { a[key] = v; schedule(); }
+  });
+  const endDrag = () => { if (!state.drag) return; const id = state.drag.id; state.drag = null; if (frame) { cancelAnimationFrame(frame); frame = null; } refresh(); save(id); };
+  svg.addEventListener("pointerup", endDrag); svg.addEventListener("pointercancel", endDrag);
+
+  // ---- table --------------------------------------------------------------
+  const tbody = document.querySelector("#tbl tbody");
+  const f1 = v => (v === undefined || v === null || Number.isNaN(v)) ? "—" : (Math.round(v * 10) / 10).toFixed(1);
+  function table() {
+    const ev = cur(); if (!ev) { tbody.textContent = ""; return; }
+    const a = displayAngles(ev), r = ev.reference || {}, c = ev.achieved || {};
+    const active = state.drag ? state.drag.key : null;
+    const rows = [];
+    let pinned = 0;
+    for (const g of JOINTS) {
+      rows.push(`<tr><td class="grp" colspan="6">${g.g}</td></tr>`);
+      for (const [key, label] of g.rows) {
+        const pin = isPinned(ev, key); if (pin) pinned++;
+        const d = a[key] - r[key];
+        const cls = key.includes("sw_") ? "side-l" : key.includes("st_") ? "side-r" : "";
+        rows.push(`<tr class="${active === key ? "hot" : ""}${pin ? "" : " free"}"><td class="pinc"><input type="checkbox" class="pin" id="pin_${key}" ${pin ? "checked" : ""} aria-label="Pin ${g.g} ${label} at this keyframe"></td><td class="${cls}">${label}</td>` +
+          `<td class="n"><input class="num${pin ? "" : " isfree"}" id="in_${key}" type="number" step="0.5" min="${LIMOF[key][0]}" max="${LIMOF[key][1]}" value="${f1(a[key])}" aria-label="${g.g} ${label}${pin ? "" : " (free: follows the animation)"}"></td>` +
+          `<td class="n">${f1(r[key])}</td><td class="n">${f1(c[key])}</td>` +
+          `<td class="n d ${Math.abs(d) < 0.05 ? "" : d > 0 ? "pos" : "neg"}">${Math.abs(d) < 0.05 ? "·" : (d > 0 ? "+" : "") + f1(d)}</td></tr>`);
+      }
+    }
+    const focused = document.activeElement && document.activeElement.id;
+    tbody.innerHTML = rows.join("");
+    if (focused && (focused.startsWith("in_") || focused.startsWith("pin_"))) { const f = document.getElementById(focused); if (f) f.focus(); }
+    document.getElementById("evTitle").textContent = ev.label;
+    document.getElementById("evNote").textContent = (ev.phase_pct !== undefined ? ev.phase_pct + " % of the stride" : "") + " · " + pinned + " of " + KEYS.length + " joints pinned" + (ev.edited ? " · edited" : "") + (ev.user_added ? " · added" : "");
+    document.getElementById("remove").hidden = !ev.user_added;
+  }
+  // Pin or free one joint of one keyframe; pinning keeps the value it has at that point, so the pose does not jump.
+  function setPin(ev, key, on) {
+    const disp = displayAngles(ev);
+    const pins = fullPins(ev); pins[key] = on;
+    state.localPin[ev.id] = pins;
+    state.local[ev.id] = Object.assign({}, yours(ev), on ? { [key]: disp[key] } : {});
+  }
+  let inputTimer = null;
+  tbody.addEventListener("change", e => {
+    const t = e.target; if (!t.id) return;
+    const ev = cur(); if (!ev) return;
+    if (t.id.startsWith("pin_")) { setPin(ev, t.id.slice(4), t.checked); refresh(); save(ev.id); return; }
+    if (!t.id.startsWith("in_")) return;
+    const key = t.id.slice(3), v = parseFloat(t.value);
+    if (Number.isNaN(v)) return;
+    state.localPin[ev.id] = Object.assign(fullPins(ev), { [key]: true });          // typing a value pins the joint
+    state.local[ev.id] = Object.assign({}, yours(ev), displayAngles(ev), { [key]: clamp(key, v) });
+    refresh();
+    clearTimeout(inputTimer); inputTimer = setTimeout(() => save(ev.id), 300);
+  });
+
+  // The pins across the stride: a small dope sheet, one column per keyframe.
+  const pinsTbl = document.getElementById("pins");
+  function pinsGrid() {
+    const s = state.sets[state.setId];
+    if (!s) { pinsTbl.innerHTML = ""; return; }
+    const head = `<tr><th class="row"></th>${s.events.map((e, i) => `<th class="${i === state.idx ? "cur" : ""}" title="${esc(e.label)}">${esc(e.event)}${e.phase_pct !== undefined ? `<br><small>${esc(e.phase_pct)}%</small>` : ""}</th>`).join("")}</tr>`;
+    const rows = KEYS.map(k => `<tr><td class="row">${SHORT[k]}</td>${s.events.map((e, i) => { const on = isPinned(e, k);
+      return `<td class="${i === state.idx ? "cur" : ""}"><button class="pinb" data-e="${i}" data-k="${k}" aria-pressed="${on}" aria-label="${SHORT[k]} at ${esc(e.label)}: ${on ? "pinned" : "free"}">${on ? "●" : "○"}</button></td>`; }).join("")}</tr>`);
+    pinsTbl.innerHTML = head + rows.join("");
+  }
+  pinsTbl.addEventListener("click", e => {
+    const b = e.target.closest("button.pinb"); if (!b) return;
+    const s = state.sets[state.setId]; const ev = s && s.events[+b.dataset.e]; if (!ev) return;
+    setPin(ev, b.dataset.k, !isPinned(ev, b.dataset.k)); refresh(); save(ev.id);
+  });
+  function bulkPins(fn) { const ev = cur(); if (!ev) return; const disp = displayAngles(ev); const pins = {}; for (const k of KEYS) pins[k] = fn(k, disp, ev); state.localPin[ev.id] = pins; state.local[ev.id] = Object.assign({}, yours(ev), disp); refresh(); save(ev.id); }
+  document.getElementById("pinAll").onclick = () => bulkPins(() => true);
+  document.getElementById("freeAll").onclick = () => bulkPins(() => false);
+  document.getElementById("pinChanged").onclick = () => bulkPins((k, d, ev) => !ev.reference || Math.abs(d[k] - ev.reference[k]) >= 0.5);
+
+  // ---- sets, events, playback ----------------------------------------------
+  const setSel = document.getElementById("setSel"), evBar = document.getElementById("events");
+  function chrome() {
+    const ids = Object.keys(state.sets).sort((a, b) => (state.sets[a].order || 0) - (state.sets[b].order || 0));
+    setSel.innerHTML = ids.map(id => `<option value="${esc(id)}" ${id === state.setId ? "selected" : ""}>${esc(state.sets[id].label)}</option>`).join("");
+    const s = state.sets[state.setId];
+    evBar.innerHTML = s ? s.events.map((ev, i) => `<button aria-pressed="${i === state.idx}" data-i="${i}">${esc(ev.label)}${ev.phase_pct !== undefined ? `<span class="pct">${esc(ev.phase_pct)}%</span>` : ""}</button>`).join("") : "";
+  }
+  // Everything that follows from the state: the timelines, the big view, the strip, the joint table and the pins.
+  function refresh(light) { prep(); render(); renderStrip(); table(); if (!light) pinsGrid(); }
+  // Cheaper: the state is unchanged, only the playhead or a toggle moved.
+  function refreshView() { render(); renderStrip(); }
+  setSel.addEventListener("change", () => { state.setId = setSel.value; state.idx = 0; stopPlay(); chrome(); refresh(); });
+  evBar.addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; state.idx = +b.dataset.i; stopPlay(); chrome(); refresh(); });
+  const step = d => { const s = state.sets[state.setId]; if (!s) return; state.idx = (state.idx + d + s.events.length) % s.events.length; stopPlay(); chrome(); refresh(); };
+  document.getElementById("prev").onclick = () => step(-1);
+  document.getElementById("next").onclick = () => step(1);
+  document.addEventListener("keydown", e => { if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT" || e.target.tagName === "TEXTAREA") return; if (e.key === "ArrowLeft") step(-1); if (e.key === "ArrowRight") step(1); });
+  document.getElementById("showRef").onchange = e => { state.showRef = e.target.checked; refreshView(); };
+  document.getElementById("showAch").onchange = e => { state.showAch = e.target.checked; refreshView(); };
+  
+  // Playback: the timelines, eased min-jerk between each joint's pinned keyframes.
+  let raf = null;
+  function stopPlay() { if (raf) cancelAnimationFrame(raf); raf = null; const was = state.playing || state.playQ !== null; state.playing = false; state.playQ = null; document.getElementById("play").textContent = "Play stride"; return was; }
+  document.getElementById("play").onclick = () => {
+    if (state.playing) { stopPlay(); refreshView(); return; }
+    const s = state.sets[state.setId]; if (!s || s.events.length < 2 || !TL) return;
+    const cyc = TL.cyc, period = (s.period_s || 0.69) / parseFloat(document.getElementById("speedSel").value);
+    state.playing = true; state.scrubQ = null; document.getElementById("play").textContent = "Stop";
+    const t0 = performance.now();
+    const tick = now => {
+      let ph = ((now - t0) / 1000 / period) * 100; ph = cyc ? ph % 100 : Math.min(ph, 100);
+      state.playQ = ph; refreshView();
+      if (!cyc && ph >= 100) { stopPlay(); refreshView(); return; }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+  };
+
+  // ---- actions ------------------------------------------------------------
+  document.getElementById("reset").onclick = () => { const ev = cur(); if (!ev || !ev.reference) return; state.local[ev.id] = Object.assign({}, ev.reference); state.localPin[ev.id] = Object.fromEntries(KEYS.map(k => [k, true])); refresh(); save(ev.id); };
+  document.getElementById("copyRunner").onclick = () => { const ev = cur(); if (!ev || !ev.achieved) return; state.local[ev.id] = Object.assign({}, yours(ev), ev.achieved); state.localPin[ev.id] = Object.fromEntries(KEYS.map(k => [k, true])); refresh(); save(ev.id); };
+  document.getElementById("copy").onclick = async () => {
+    const s = state.sets[state.setId]; if (!s) return;
+    if (!TL) prep();
+    const lines = [`# ${s.label}: keyframe targets (degrees), from Keyframe Bench`,
+      `# A joint marked "_free 1" is not pinned at that keyframe (don't care): its value is where the eased animation has it between the neighbouring pinned keyframes,`,
+      `# so a controller that cannot skip a joint can still track it, and one that supports subset keyframes can leave it alone.`];
+    for (const ev of s.events) {
+      const a = displayAngles(ev);
+      if (ev.phase_pct !== undefined) lines.push(`ref_${ev.event}_phase ${f1(ev.phase_pct)}`);
+      for (const k of KEYS) { lines.push(`ref_${ev.event}_${k} ${f1(a[k])}`); if (!isPinned(ev, k)) lines.push(`ref_${ev.event}_${k}_free 1`); }
+    }
+    const text = lines.join("\n"), out = document.getElementById("out");
+    out.value = text; out.hidden = false;
+    try { await navigator.clipboard.writeText(text); setStatus("Copied params to the clipboard", "live"); }
+    catch (_) { out.focus(); out.select(); setStatus("Select the text below and copy it", ""); }
+  };
+
+  // ---- storage ------------------------------------------------------------
+  const dot = document.getElementById("dot"), statusEl = document.getElementById("status");
+  function setStatus(t, cls) { statusEl.textContent = t; dot.className = "dot" + (cls ? " " + cls : ""); }
+  const chains = {};
+  const r1 = o => o && Object.fromEntries(Object.entries(o).map(([k, v]) => [k, Math.round(v * 10) / 10]));
+  function save(id) {
+    const ev = findEv(id); if (!ev || (!state.local[id] && !state.localPin[id])) return;
+    const disp = displayAngles(ev), pins = fullPins(ev);
+    if (!state.db) { ev.angles = r1(Object.assign({}, yours(ev), disp)); ev.pinned = pins; ev.edited = true; delete state.local[id]; delete state.localPin[id]; refresh(); setStatus("Not saved (no storage in this view)", ""); return; }
+    const body = { angles: Object.fromEntries(KEYS.map(k => [k, Math.round(disp[k] * 10) / 10])), pinned: pins, edited: true, updated_at: new Date().toISOString() };
+    setStatus("Saving…", "saving");
+    chains[id] = (chains[id] || Promise.resolve()).then(() => state.db.doc("keyframes/" + id).update(body))
+      .then(() => { setStatus("Saved", "live"); })
+      .catch(err => { setStatus(err && err.code === "invalid_argument" ? "You can view but not save here" : "Not saved: " + ((err && err.code) || "error"), ""); });
+  }
+  function findEv(id) { for (const s of Object.values(state.sets)) for (const ev of s.events) if (ev.id === id) return ev; return null; }
+  function ingest(docs) {
+    const sets = {};
+    for (const d of docs) {
+      const v = d.data(); if (!v || !v.set) continue;
+      const s = sets[v.set] || (sets[v.set] = { label: v.set_label || v.set, order: v.set_order || 0, period_s: v.period_s, cycle: v.cycle, events: [] });
+      s.events.push(Object.assign({ id: d.id }, v));
+    }
+    const sortKey = e => e.phase_pct !== undefined ? e.phase_pct : 1000 + (e.order || 0);
+    for (const s of Object.values(sets)) s.events.sort((a, b) => sortKey(a) - sortKey(b));
+    // keep the selected keyframe selected when others are added or removed
+    const was = (cur() || {}).id;
+    // drop local drafts the store now matches, keep the one being dragged
+    for (const id of Object.keys(state.local).concat(Object.keys(state.localPin))) {
+      if (state.drag && state.drag.id === id) continue;
+      const ev = Object.values(sets).flatMap(s => s.events).find(e => e.id === id);
+      if (!ev || !ev.angles) continue;
+      const a = state.local[id] || ev.angles, pins = state.localPin[id] || ev.pinned || null;
+      const pinnedNow = k => !pins || pins[k] !== false, pinnedThen = k => !ev.pinned || ev.pinned[k] !== false;
+      if (KEYS.every(k => pinnedNow(k) === pinnedThen(k) && (!pinnedNow(k) || Math.abs((ev.angles[k] ?? 0) - (a[k] ?? 0)) < 0.051))) { delete state.local[id]; delete state.localPin[id]; }
+    }
+    state.sets = sets;
+    if (!state.setId || !sets[state.setId]) state.setId = Object.keys(sets).sort((a, b) => sets[a].order - sets[b].order)[0] || null;
+    const s = sets[state.setId];
+    if (s && was) { const j = s.events.findIndex(e => e.id === was); if (j >= 0) state.idx = j; }
+    if (s && pendingSel) { const j = s.events.findIndex(e => e.id === pendingSel); if (j >= 0) { state.idx = j; pendingSel = null; } }
+    if (s && state.idx >= s.events.length) state.idx = 0;
+    chrome(); if (!state.playing) refresh(); else { prep(); table(); pinsGrid(); }
+  }
+
+  // ---- add / remove keyframes -----------------------------------------------
+  // A pose at phase p of a cyclic set, from a plain timeline of `pick` (every joint pinned), for the reference and the runner's pose.
+  function poseFrom(s, p, pick) {
+    const tl = buildTL(s, pick, () => true), o = {};
+    for (const j of JN) { o["st_" + j] = evalTL(tl, "r." + j, p); o["sw_" + j] = evalTL(tl, "l." + j, p); }
+    o.spine = evalTL(tl, "spine", p); o.pelvis = evalTL(tl, "pelvis", p);
+    return KEYS.every(k => o[k] !== null && Number.isFinite(o[k])) ? r1(o) : null;
+  }
+  const addForm = document.getElementById("addForm"), addMsg = document.getElementById("addMsg"), addPct = document.getElementById("addPct");
+  document.getElementById("addBtn").onclick = () => {
+    const s = state.sets[state.setId]; if (!s) return;
+    const cyc = cycOf(s);
+    addPct.hidden = !cyc;
+    document.getElementById("addUnit").textContent = cyc ? "% of the stride (0–49.5; the left step mirrors it). A new keyframe pins nothing until you edit a joint." : "inserted after the current keyframe. A new keyframe pins nothing until you edit a joint.";
+    const ev = cur(); if (cyc && ev) addPct.value = Math.min(49.5, (ev.phase_pct || 0) + 4);
+    addMsg.textContent = ""; addForm.hidden = false; document.getElementById("addName").focus();
+  };
+  document.getElementById("addCancel").onclick = () => { addForm.hidden = true; };
+  addForm.addEventListener("submit", async e => {
+    e.preventDefault();
+    const s = state.sets[state.setId]; if (!s) return;
+    if (!TL) prep();
+    const name = document.getElementById("addName").value.trim();
+    if (!name) { addMsg.textContent = "Give the keyframe a name."; return; }
+    let slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 24) || "kf";
+    while (s.events.some(x => x.event === slug)) slug += "2";
+    const cyc = cycOf(s), base = cur() || s.events[0];
+    const body = { set: state.setId, set_label: s.label, set_order: s.order || 0, event: slug, label: name, edited: true, user_added: true,
+                   updated_at: new Date().toISOString(), source: "added in Keyframe Bench, interpolated from the neighbouring keyframes",
+                   pinned: Object.fromEntries(KEYS.map(k => [k, false])) };
+    if (s.period_s !== undefined) body.period_s = s.period_s;
+    if (s.cycle !== undefined) body.cycle = s.cycle;
+    let p;
+    if (cyc) {
+      p = Math.round(parseFloat(addPct.value) * 10) / 10;
+      if (!(p >= 0 && p <= 49.5)) { addMsg.textContent = "Pick a point from 0 to 49.5 % (the left step is the mirror)."; return; }
+      if (s.events.some(x => Math.abs(x.phase_pct - p) < 0.5)) { addMsg.textContent = "There is already a keyframe within 0.5 % of that point."; return; }
+      body.phase_pct = p; body.order = p;
+    } else {
+      const i = s.events.indexOf(base), nx = s.events[i + 1] || base;
+      body.order = ((base.order || 0) + (nx === base ? (base.order || 0) + 1 : (nx.order || 0))) / 2;
+      p = (evPhase(s, i) + evPhase(s, s.events.indexOf(nx))) / 2;
+    }
+    body.angles = r1(anglesAt(p));
+    body.reference = poseFrom(s, p, x => x.reference); body.achieved = poseFrom(s, p, x => x.achieved);
+    for (const k of ["reference", "achieved"]) if (!body[k]) delete body[k];
+    const id = state.setId + "." + slug;
+    addForm.hidden = true; document.getElementById("addName").value = "";
+    if (!state.db) { s.events.push(Object.assign({ id }, body)); ingestLocal(s); return; }
+    try { setStatus("Saving…", "saving"); await state.db.doc("keyframes/" + id).set(body); setStatus("Added " + name, "live"); selectLater(id); }
+    catch (err) { setStatus("Not added: " + ((err && err.code) || "error"), ""); }
+  });
+  let pendingSel = null;
+  function selectLater(id) { pendingSel = id; }
+  function ingestLocal(s) {
+    const sortKey = e => e.phase_pct !== undefined ? e.phase_pct : 1000 + (e.order || 0);
+    s.events.sort((a, b) => sortKey(a) - sortKey(b)); chrome(); refresh();
+  }
+  let removeArmed = null;
+  document.getElementById("remove").onclick = async () => {
+    const ev = cur(); if (!ev || !ev.user_added) return;
+    const btn = document.getElementById("remove");
+    if (removeArmed !== ev.id) { removeArmed = ev.id; btn.textContent = "Click again to remove " + ev.label; setTimeout(() => { if (removeArmed === ev.id) { removeArmed = null; btn.textContent = "Remove this keyframe"; } }, 4000); return; }
+    removeArmed = null; btn.textContent = "Remove this keyframe";
+    if (!state.db) { const s = state.sets[state.setId]; s.events.splice(s.events.indexOf(ev), 1); state.idx = 0; chrome(); refresh(); return; }
+    try { await state.db.doc("keyframes/" + ev.id).delete(); state.idx = Math.max(0, state.idx - 1); setStatus("Removed " + ev.label, "live"); }
+    catch (err) { setStatus("Not removed: " + ((err && err.code) || "error"), ""); }
+  };
+  function useFallback() {
+    state.sets = { run_natural: { label: FALLBACK.label, order: 0, period_s: 0.69, events: FALLBACK.events.map(e => Object.assign({ id: "run_natural." + e.event, angles: Object.assign({}, e.reference) }, e)) } };
+    state.setId = "run_natural"; chrome(); refresh();
+  }
+  window.__bench = { state, refresh, refreshView, ingest, chrome, KEYS, displayAngles, poseAtQ, cur };   // for the page's own checks
+
+  useFallback();
+  setStatus("Connecting…", "");
+  (async () => {
+    let db = null;
+    try { db = window.claude && window.claude.use ? await window.claude.use("db") : null; } catch (_) { db = null; }
+    if (!db) { document.getElementById("offline").hidden = false; setStatus("Local only", ""); return; }
+    state.db = db;
+    db.collection("keyframes").onSnapshot(snap => { if (snap.size) { ingest(snap.docs); setStatus("Live · saved to this page", "live"); } else setStatus("No keyframes saved yet", ""); },
+      err => { setStatus("Storage stopped: " + (err && err.code), ""); });
+    try {
+      const user = window.claude.use ? await window.claude.use("user") : null;
+      if (user && user.can) { const w = await user.can("data.write"); if (w === false) document.getElementById("who").textContent = "You can view these keyframes; editing needs Contributor access."; }
+    } catch (_) {}
+  })();
+})();
+</script>

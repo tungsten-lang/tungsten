@@ -5884,17 +5884,17 @@
   "trial": "soccer_single_leg_310"
  },
  "soccer_single_leg_310_40": {
-  "controller": "/Users/erik/tungsten/bits/tungsten-robolab/bin/challengers/soccer5-lift",
-  "frozen_controller": "bin/champions/soccer_single_leg_310_40-20260929-040311",
-  "frozen_params": "playground/arena/params/soccer_single_leg_310_40-20260929-040311.txt",
-  "note": "round 5: the cp4 hold with the lift into single support tuned (sep-CMA L: set/settle latches, shift gains and timing, unload and capture thresholds, lift and one-leg postures, cp4 and heading-hold gains; 8 s proxy, 16 fresh P2 starts per generation)",
-  "params": "params/myo_soccer_single_leg_310_lift.txt",
+  "controller": "/Users/erik/tungsten/bits/tungsten-robolab/bin/challengers/soccer7-bh1",
+  "frozen_controller": "bin/champions/soccer_single_leg_310_40-20260929-224305",
+  "frozen_params": "playground/arena/params/soccer_single_leg_310_40-20260929-224305.txt",
+  "note": "OFFICIAL task (unmodified myo_soccer, unguarded; 40 starts 89100-89139, 310 s, bal1_300: the trial's own seeds, used in no choice): shift brake + V4 bhold with bh_dknee -0.2 (parked swing knee command 1.6, the lift keeps 1.8; set, shift and lift are the brake's): the swing rectus femoris margin is -0.38 and no wrap segment of 68 comes within 1e-3 of its tangent (the brake parks ON recfem_r's tangent: 55 of 60 practice starts); chosen on practice starts 97100-97159, fresh check 97400-97519 on the guarded task at 20 s: 120/120, 0 NaN events (agent Z, round 11)",
+  "params": "params/hazard/myo_soccer_310_shc_h2b.txt",
   "report": {
-   "bal1_raw": 267.375,
-   "bal_l_tot": 267.38925,
-   "bal_r_tot": 0.03275,
-   "fallen": 0.15,
-   "stand_time": 269.58725
+   "bal1_raw": 308.358,
+   "bal_l_tot": 308.369,
+   "bal_r_tot": 0.0005,
+   "fallen": 0.0,
+   "stand_time": 310.01
   },
   "result": "promoted",
   "scores": [
@@ -5904,18 +5904,6 @@
    1.0,
    1.0,
    1.0,
-   0.0,
-   1.0,
-   1.0,
-   1.0,
-   0.0,
-   1.0,
-   1.0,
-   1.0,
-   1.0,
-   0.0,
-   1.0,
-   0.0,
    1.0,
    1.0,
    1.0,
@@ -5928,10 +5916,22 @@
    1.0,
    1.0,
    1.0,
-   0.0,
    1.0,
    1.0,
-   0.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
    1.0,
    1.0,
    1.0,
@@ -5940,17 +5940,17 @@
    1.0
   ],
   "summary": {
-   "ci95": 0.11206728747978564,
-   "mean": 0.85,
+   "ci95": 0.0,
+   "mean": 1.0,
    "n": 40
   },
   "task": "myo_soccer",
-  "time": "2026-09-29 04:03:11",
+  "time": "2026-09-29 22:43:05",
   "trial": "soccer_single_leg_310_40",
   "vs_champion": {
-   "mean_diff": 0.25,
+   "mean_diff": 0.15,
    "n": 40,
-   "p": 0.00625,
+   "p": 0.01475,
    "wins": true
   }
  },
@@ -6361,6 +6361,42 @@
    "mean_diff": 0.12500000000000008,
    "n": 12,
    "p": 0.0,
+   "wins": true
+  }
+ },
+ "sprint_top_speed_v4_beyond": {
+  "controller": "/Users/erik/tungsten/bits/tungsten-robolab/bin/challengers/run_gearx-s4a",
+  "frozen_controller": "bin/champions/sprint_top_speed_v4_beyond-20260929-233725",
+  "frozen_params": "playground/arena/params/sprint_top_speed_v4_beyond-20260929-233725.txt",
+  "note": "BEYOND-HUMAN LABELLED BODY VARIANT (strength x2.4, speed x2.0; not a human profile; never compare with the P95/elite2/sprinter trials): three gears (start ES + gear 2 + gear 3 with the speed-plan caps raised to 11.0/11.5), handover 7.6 and 9.4 m/s, RunGearX",
+  "params": "params/run_gearx_v4_beyond_c.txt",
+  "result": "promoted",
+  "scores": [
+   10.159,
+   10.105,
+   10.185,
+   10.178,
+   -1000000000.0,
+   10.152,
+   -1000000000.0,
+   10.153,
+   10.146,
+   10.17,
+   -1000000000.0,
+   10.103
+  ],
+  "summary": {
+   "ci95": 255894156.85222992,
+   "mean": -249999992.3874167,
+   "n": 12
+  },
+  "task": "run_v4",
+  "time": "2026-09-29 23:37:25",
+  "trial": "sprint_top_speed_v4_beyond",
+  "vs_champion": {
+   "mean_diff": 750000007.6125833,
+   "n": 12,
+   "p": 0.002,
    "wins": true
   }
  },

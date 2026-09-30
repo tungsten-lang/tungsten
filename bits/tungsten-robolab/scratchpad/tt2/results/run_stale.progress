@@ -1,0 +1,5 @@
+2026-09-29 23:35:06 stale rung1 start
+2026-09-29 23:35:35 stale rung1 done: {"n": 100, "errors": 0, "solved": 0, "hit": 23, "wall_s": 29}
+2026-09-29 23:35:35 stale s12 start
+2026-09-29 23:36:06 stale s12 done: {"n": 100, "errors": 0, "solved": 7, "hit": 42, "wall_s": 31}
+2026-09-29 23:36:06 ALL DONE

@@ -1,0 +1,18 @@
+2026-09-29 23:10:29 s2 (2.0,1.0,1.0) start
+2026-09-29 23:11:11 s2 done: {"n": 100, "solved": 0, "rate": 0.0, "hit": 0.1, "forehand": {"n": 46, "solved": 0}, "backhand": {"n": 54, "solved": 0}, "classes": {"hit: out (long, wide or back)": 10, "miss: pad above the ball": 47, "miss: lateral (out of reach)": 32, "miss: within 10 cm (rim/timing)": 10, "miss: pad below the ball": 1}, "errors": 0, "wall_s": 41}
+2026-09-29 23:11:11 v17 (1.0,1.7,1.0) start
+2026-09-29 23:12:01 v17 done: {"n": 100, "solved": 6, "rate": 0.06, "hit": 0.69, "forehand": {"n": 46, "solved": 0}, "backhand": {"n": 54, "solved": 6}, "classes": {"hit: landed on own half": 9, "hit: out (long, wide or back)": 47, "hit: net": 7, "miss: pad below the ball": 14, "miss: pad above the ball": 3, "solved": 6, "miss: within 10 cm (rim/timing)": 3, "miss: lateral (out of reach)": 11}, "errors": 0, "wall_s": 50}
+2026-09-29 23:12:01 a08 (1.0,1.0,0.8) start
+2026-09-29 23:12:49 a08 done: {"n": 100, "solved": 16, "rate": 0.16, "hit": 0.67, "forehand": {"n": 46, "solved": 13}, "backhand": {"n": 54, "solved": 3}, "classes": {"miss: pad below the ball": 29, "hit: out (long, wide or back)": 43, "miss: within 10 cm (rim/timing)": 1, "hit: net": 1, "solved": 16, "hit: landed on own half": 7, "miss: pad above the ball": 1, "miss: lateral (out of reach)": 2}, "errors": 0, "wall_s": 48}
+2026-09-29 23:12:49 s15 (1.5,1.0,1.0) start
+2026-09-29 23:33:47 s15 done: {"n": 100, "solved": 0, "rate": 0.0, "hit": 0.42, "forehand": {"n": 46, "solved": 0}, "backhand": {"n": 54, "solved": 0}, "classes": {"hit: out (long, wide or back)": 41, "miss: lateral (out of reach)": 35, "miss: pad above the ball": 6, "miss: pad below the ball": 11, "miss: within 10 cm (rim/timing)": 6, "hit: landed on own half": 1}, "errors": 0, "wall_s": 1257}
+2026-09-29 23:33:47 s12 (1.2,1.0,1.0) start
+2026-09-29 23:34:30 s12 done: {"n": 100, "solved": 7, "rate": 0.07, "hit": 0.42, "forehand": {"n": 46, "solved": 7}, "backhand": {"n": 54, "solved": 0}, "classes": {"miss: pad below the ball": 54, "hit: out (long, wide or back)": 31, "hit: landed on own half": 4, "miss: lateral (out of reach)": 4, "solved": 7}, "errors": 0, "wall_s": 42}
+2026-09-29 23:34:30 ALL DONE
+2026-09-29 23:39:47 g_arm (2.0,1.7,0.8 group arm) start
+2026-09-29 23:40:12 g_arm done: {"n": 100, "solved": 0, "rate": 0.0, "hit": 0.1, "forehand": {"n": 46, "solved": 0}, "backhand": {"n": 54, "solved": 0}, "classes": {"miss: lateral (out of reach)": 60, "miss: pad below the ball": 25, "miss: within 10 cm (rim/timing)": 3, "miss: pad above the ball": 2, "hit: out (long, wide or back)": 8, "hit: landed on own half": 2}, "errors": 0, "wall_s": 25}
+2026-09-29 23:40:12 g_hand (2.0,1.7,0.8 group hand) start
+2026-09-29 23:40:47 g_hand done: {"n": 100, "solved": 0, "rate": 0.0, "hit": 0.44, "forehand": {"n": 46, "solved": 0}, "backhand": {"n": 54, "solved": 0}, "classes": {"miss: lateral (out of reach)": 40, "miss: pad above the ball": 12, "hit: out (long, wide or back)": 42, "miss: within 10 cm (rim/timing)": 1, "miss: pad below the ball": 3, "hit: landed on own half": 2}, "errors": 0, "wall_s": 35}
+2026-09-29 23:40:47 g_trunk (2.0,1.7,0.8 group trunk) start
+2026-09-29 23:41:22 g_trunk done: {"n": 100, "solved": 21, "rate": 0.21, "hit": 0.79, "forehand": {"n": 46, "solved": 15}, "backhand": {"n": 54, "solved": 6}, "classes": {"hit: net": 2, "hit: out (long, wide or back)": 51, "solved": 21, "miss: pad below the ball": 16, "hit: landed on own half": 5, "miss: pad above the ball": 5}, "errors": 0, "wall_s": 35}
+2026-09-29 23:41:22 ALL DONE

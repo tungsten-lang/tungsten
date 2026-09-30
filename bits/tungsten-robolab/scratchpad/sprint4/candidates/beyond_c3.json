@@ -1,0 +1,78 @@
+{
+ "name": "beyond",
+ "label": "BEYOND-HUMAN, not a human profile. A LABELLED BODY VARIANT with invented multipliers. Its results are never to be compared with the average, P95, elite2 or sprinter trials, and say nothing about human sprinting.",
+ "fixed": "The RULE and the LADDER below were fixed 2026-09-29 21:23 (machine clock), BEFORE any runner, replay or ideal-control ceiling was run on any candidate of the ladder. The multipliers in `parts` are the rule's pick from the measured ceilings (see `decision`); after `status` says FIXED they change only for a documented reason (see `changes`, empty).",
+ "status": "CANDIDATE FILE for the ceiling of ladder step 3 only (scratchpad copy of playground/profiles/beyond.json with the step-3 multipliers); not a trial body.",
+ "changes": [],
+ "about": "A hypothetical body that is not human: the elite-sprinter body (profiles/sprinter.json) scaled UP by round numbers. It exists to answer one question for the control plane: can the same runner family (RunGearXSkill: the gears, the mean-of-seeds search, the standing start) be tuned to a fall-free standing-start peak speed above 10 m/s on a body whose muscles are strong and fast enough for that, and what did that body need. It is NOT a claim about human sprinting: 10 m/s and beyond is beyond every measured person on this model (calibrated so that the average man's ideal-control ceiling is 8.2 m/s, P95's 10.45, the sprinter's 12.36). Every note, page text and README line about it says BEYOND-HUMAN.",
+ "population": "none: an invented body, stronger and faster than any person in every muscle group",
+ "rule": {
+  "text": "The body is the sprinter profile scaled UP by round numbers (strength multiplier and speed multiplier from the ladder; tendon x1.5 and activation x0.8 exactly as the sprinter; anthropometry unchanged, the average 1.75 m / 67.5 kg skeleton), and it is the SMALLEST ladder step whose ideal-control ceiling is above 14.5 m/s, so that 10 m/s is about 70 % of the ceiling (the runner family reached 68 % of the sprinter's ceiling, 79 % of P95's, 75 % of the average body's, 73 % of elite2's).",
+  "ceiling": "the stance-budget ceiling at t_sw 0.35 s, the same estimator and recipe as the other bodies: playground/sprint_limits.py speeds --pitch-free, driven by scratchpad/sprint_knot/ceiling_probe.py (v4 anatomy, ROBOLAB_BODY=v4 ROBOLAB_CALIB=v4, the four muscle parts, two restarts per speed, --cycle 0, --stop budget, 1 m/s spacing warm-started from the sprinter's solutions) and scratchpad/sprint_knot/budget_ceiling.py at t_sw 0.35 (the point estimate, no tolerance).",
+  "at_most_two_ceilings": "At most two candidates get a measured ceiling: steps 1 and 2 (run at the same time to save wall clock). The pick: step 1 if its ceiling is above 14.5 m/s; else step 2 if its ceiling is above 14.5; else step 3 WITHOUT a further stretch and without waiting for its ceiling (which is then measured afterwards, if time allows, and reported as it is).",
+  "ladder": [
+   {
+    "step": 1,
+    "strength": 2.0,
+    "speed": 1.7
+   },
+   {
+    "step": 2,
+    "strength": 2.4,
+    "speed": 2.0
+   },
+   {
+    "step": 3,
+    "strength": 3.0,
+    "speed": 2.4
+   }
+  ],
+  "unchanged_from_sprinter": "tendon x1.5, activation x0.8 (10 -> 8 ms, 40 -> 32 ms), anthropometry 1.0 / 1.0",
+  "stretch": "THE MULTIPLIERS ARE AN INVENTED STRETCH. No measurement, distribution or literature value stands behind strength x2.0-3.0 or speed x1.7-2.4 on top of a model whose peak forces are already 1.4-2.9x young men's voluntary maxima; they are round numbers chosen so that a stronger body exists, not estimates of anything living."
+ },
+ "decision": "PENDING the ceilings of ladder steps 1 and 2.",
+ "parts": {
+  "strength": {
+   "multiplier": 3.0,
+   "stat": "peak isometric force per kg body mass, every muscle group: ladder step 3",
+   "evidence": [],
+   "verified": false,
+   "note": "INVENTED. Not literature, not a percentile. The sprinter's x1.55 was already a stretch above the measured range for the knee and ankle extensors."
+  },
+  "speed": {
+   "multiplier": 2.4,
+   "stat": "maximum joint angular velocity, every joint: ladder step 3",
+   "evidence": [],
+   "verified": false,
+   "note": "INVENTED. Above the sprinter range derived from fibre mix and fascicle length (x1.3-1.5)."
+  },
+  "tendon": {
+   "multiplier": 1.5,
+   "stat": "tendon stiffness per unit body size x1.5: UNCHANGED from the P95 and sprinter profiles",
+   "evidence": [],
+   "verified": false,
+   "note": "Kept at the sprinter's value on purpose, so the beyond body differs from the sprinter in muscle force and muscle speed only."
+  },
+  "activation": {
+   "act": 0.8,
+   "deact": 0.8,
+   "stat": "activation and deactivation time constants x0.8: UNCHANGED from the sprinter profile",
+   "evidence": [],
+   "verified": false,
+   "note": "Kept at the sprinter's unverified x0.8."
+  },
+  "anthro": {
+   "length": 1.0,
+   "mass": 1.0,
+   "stat": "the average body's 1.75 m / 67.5 kg (segment lengths and masses after Winter's tables): UNCHANGED",
+   "evidence": [],
+   "verified": true,
+   "note": "1.0 / 1.0, so ROBOLAB_PROFILE_PARTS=all builds the same XML as ROBOLAB_PROFILE_PARTS=strength,speed,tendon,activation."
+  }
+ },
+ "relation_to_other_bodies": {
+  "sprinter": "strength x2.0 / 1.55 = x1.29 and speed x1.7 / 1.45 = x1.17 at ladder step 1 (x1.55 and x1.38 at step 2, x1.94 and x1.66 at step 3); tendon, activation and anthropometry the same",
+  "p95": "strength x2.0 / 1.32 = x1.52 and speed x1.7 / 1.2 = x1.42 at step 1",
+  "reading": "a result on this body says what the control plane can do when the body is strong and fast enough, and which of the runner's pieces had to be re-searched for it; it is not comparable with any human trial"
+ }
+}

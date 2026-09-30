@@ -1,0 +1,3 @@
+rung 0: hits 91; velocity along the pad axis at contact (+x oriented): pad +0.21 +- 0.49 | pelvis part +0.31 +- 0.42 | arm+trunk part -0.10 +- 0.25
+   forehand (n 42): pad +0.51 +- 0.48 | pelvis +0.62 +- 0.34 | arm+trunk -0.10 +- 0.32
+   backhand (n 49): pad -0.05 +- 0.31 | pelvis +0.06 +- 0.28 | arm+trunk -0.10 +- 0.17

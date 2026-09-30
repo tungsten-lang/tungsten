@@ -111,9 +111,11 @@ def episode(job):
     """job = (params, seed, env_id or None, controller or None[, task attrs]) -> the episode's metrics."""
     params, seed, env_id, controller = job[:4]
     attrs = job[4] if len(job) > 4 else {}
-    from tasks.myo_tt import MyoTTTask
-    task = MyoTTTask()
-    task.env_id = env_id or MyoTTTask.env_id
+    import importlib
+    # TT_TASK names another module of tasks/ whose TASK subclasses MyoTTTask (e.g. myo_tt_beyond, the labelled beyond-human arm); default: the official task
+    Task = importlib.import_module("tasks." + os.environ.get("TT_TASK", "myo_tt")).TASK
+    task = Task()
+    task.env_id = env_id or Task.env_id
     for k, v in attrs.items():
         setattr(task, k, v)
     try:

@@ -1,0 +1,16 @@
+{"n": 100, "solved": 7, "rate": 0.07, "hit": 0.42, "forehand": {"n": 46, "solved": 7}, "backhand": {"n": 54, "solved": 0}, "classes": {"miss: pad below the ball": 54, "hit: out (long, wide or back)": 31, "hit: landed on own half": 4, "miss: lateral (out of reach)": 4, "solved": 7}, "errors": 0, "wall_s": 42}
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    

@@ -5586,6 +5586,36 @@
   ],
   "task": "run_v4"
  },
+ "sprint_top_speed_v4_beyond": {
+  "about": "top sprint speed, BEYOND-HUMAN LABELLED BODY VARIANT (profiles/beyond.json, fixed 2026-09-29 21:52, its rule and ladder written 21:18, BEFORE any runner or replay ran on it): the elite-sprinter body scaled UP by round numbers, an INVENTED stretch that is not a human profile: strength x2.4 on every muscle, muscle speed x2.0, tendon stiffness x1.5, activation time constants x0.8, on the average 1.75 m / 67.5 kg skeleton; its ideal-control ceiling is 16.32 m/s (sprinter 12.36, P95 10.45, average 8.20). NEVER compare its scores with the average, P95, elite2 or sprinter trials, and it says nothing about human sprinting. Same rules as sprint_top_speed_v4_p95: the fastest 1 s window (peak_speed_1s, m/s) in a 30 s run from a perturbed standing start, seeds 221-232, guard no fall, on the v4 body (calibrations/v4.json), task run_v4.",
+  "env": {
+   "ROBOLAB_CALIB": "v4",
+   "ROBOLAB_PROFILE": "beyond",
+   "ROBOLAB_PROFILE_PARTS": "strength,speed,tendon,activation"
+  },
+  "guard": {
+   "fell": false
+  },
+  "higher": true,
+  "metric": "peak_speed_1s",
+  "python": "robolab",
+  "seconds": 30,
+  "seeds": [
+   221,
+   222,
+   223,
+   224,
+   225,
+   226,
+   227,
+   228,
+   229,
+   230,
+   231,
+   232
+  ],
+  "task": "run_v4"
+ },
  "sprint_top_speed_v4_elite2": {
   "about": "top sprint speed, literature elite-sprinter body (profiles/elite2.json), v4: the fastest 1 s window (peak_speed_1s, m/s) in a 30 s run from a perturbed standing start, sprint_top_speed's seeds and guard (no fall), on the v4 body: v3 with the literature calibration playground/calibrations/v4.json (unloaded hip joint speeds 18.5 rad/s extension / 29 flexion from the standard models' 10 L0/s fibre speed and Ward et al. 2009's fibre lengths; quadriceps series stiffness 1000 N/mm as in the OpenSim models; everything else v3). task run_v4.",
   "env": {

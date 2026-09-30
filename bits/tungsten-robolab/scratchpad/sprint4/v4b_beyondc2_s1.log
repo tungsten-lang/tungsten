@@ -1,0 +1,10 @@
+  v 10: margin 0.3971 tc 0.092 taer 0.2616 f 2.828 Favg 3.843 peak 5.18 thigh 0.65/-0.548 dw -0.389 exc 0.07 (33s)
+  v 11: margin 0.3625 tc 0.081 taer 0.2447 f 3.07 Favg 4.022 peak 5.17 thigh 0.582/-0.663 dw 0.352 exc 0.066 (637s)
+  v 12: margin 0.2288 tc 0.078 taer 0.2034 f 3.554 Favg 3.607 peak 5.0 thigh 0.762/-0.491 dw -0.574 exc 0.092 (1610s)
+  v 13: margin 0.1689 tc 0.073 taer 0.1854 f 3.869 Favg 3.54 peak 4.96 thigh 0.791/-0.624 dw -0.338 exc 0.099 (1640s)
+  v 14: margin 0.1417 tc 0.07 taer 0.1779 f 4.035 Favg 3.541 peak 5.02 thigh 0.871/-0.493 dw -0.794 exc 0.096 (1661s)
+  v 15: margin 0.1405 tc 0.065 taer 0.1578 f 4.489 Favg 3.427 peak 5.01 thigh 0.84/-0.449 dw -0.359 exc 0.119 (1676s)
+  v 16: margin 0.1308 tc 0.061 taer 0.1568 f 4.591 Favg 3.57 peak 5.0 thigh 0.927/-0.282 dw -0.136 exc 0.114 (1697s)
+  v 17: margin 0.0889 tc 0.058 taer 0.1344 f 5.197 Favg 3.318 peak 4.97 thigh 0.907/-0.345 dw -0.378 exc 0.126 (1718s)
+  v 18: margin 0.0624 tc 0.054 taer 0.1227 f 5.66 Favg 3.272 peak 4.82 thigh 0.915/-0.289 dw -0.294 exc 0.139 (1732s)
+v4b_beyondc2_s1: ceiling (fit) 18.814317673378078, fastest positive margin 18.0

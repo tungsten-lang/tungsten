@@ -54,5 +54,8 @@ patch:      d90939037d3f4422ca61a07a63a4d2ba3476fbf49ebe9466e4e5d084a08165aa  ad
 Equal seeds give the same trajectory with and without the patches (`check-patches.sh`):
 
 ```
-CHECK_PLACEHOLDER
+km2024: 80 identical of 80 compared
+km2024 (KM_LOOP): 20 identical of 20 compared
+km2022: 40 identical of 40 compared
+tfg: 40 identical of 40 compared
 ```

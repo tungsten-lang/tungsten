@@ -1,0 +1,47 @@
+[
+ {
+  "shape": "2x2x2",
+  "rank": 7,
+  "kind": "tie",
+  "lille": 7,
+  "best_any": 7,
+  "best_gf2_valid": 7,
+  "path": "@FIX@/witnesses/.hidden/2x2x2/best.txt"
+ },
+ {
+  "shape": "2x3x3",
+  "rank": 18,
+  "kind": "above",
+  "lille": 15,
+  "best_any": 15,
+  "best_gf2_valid": 15,
+  "path": "@FIX@/witnesses/rect/2x3x3/best.txt"
+ },
+ {
+  "shape": "3x3x4",
+  "rank": 36,
+  "kind": "below_all",
+  "lille": 40,
+  "best_any": 40,
+  "best_gf2_valid": 41,
+  "path": "@FIX@/witnesses/rect/334.mfw"
+ },
+ {
+  "shape": "3x3x5",
+  "rank": 45,
+  "kind": "no_public_rank",
+  "lille": null,
+  "best_any": null,
+  "best_gf2_valid": null,
+  "path": "@FIX@/witnesses/rect/matmul_3x5_naive_gf2.txt"
+ },
+ {
+  "shape": "3x4x4",
+  "rank": 48,
+  "kind": "gf2_valid_only",
+  "lille": 47,
+  "best_any": 47,
+  "best_gf2_valid": 50,
+  "path": "@FIX@/witnesses/mixed/3x4x4/best.txt"
+ }
+]

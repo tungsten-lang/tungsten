@@ -1,0 +1,1 @@
+5 shapes with verified witnesses: below_all=1, gf2_valid_only=1, tie=1, above=1, no_public_rank=1

@@ -1,0 +1,19 @@
+schemes/2x2x2_m7_ZT.json	2x2x2	ZT	7
+schemes/known/3x3x3_m21_Z.json	None
+schemes/3x3x4_m45_Q.json	3x3x4	Q	45
+schemes/2x2x3_m11_foo_Z.json	2x2x3	Z	11
+schemes/2x3x3_m15_ZT.json	2x3x3	ZT	15
+schemes/bad_name.json	None
+top_2x2x2_m6_Q.json	None
+known/3x5x5_m70_Z.json	3x5x5	Z	70
+schemes/4x3x3_m44_Z.json	3x3x4	Z	44
+3x3x3_m23_ZT_Z.json	3x3x3	Z	23
+3x3x3_m23_a_b_ZT.json	3x3x3	ZT	23
+3x3x3_m23a_ZT.json	None
+3x3x3_m_ZT.json	None
+x3x3x3_m23_Q.json	None
+dir/4x4x4_m47_ZT.json	4x4x4	ZT	47
+4x4x4_m47_ZT.jsonx	None
+4x4x4_m47_QT.json	None
+10x3x7_m99_Q.json	3x7x10	Q	99
+a/b/5x6x7_m80__Q.json	5x6x7	Q	80

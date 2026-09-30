@@ -1,0 +1,2 @@
+      below_all      3x3x4     36 any=40 gf2=41 lille=40
+ gf2_valid_only      3x4x4     48 any=47 gf2=50 lille=47

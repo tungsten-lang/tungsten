@@ -857,7 +857,7 @@ use core/crypto/crc32
         bb = b
         bc -= k + x + y + z
         stop = op + len ## i64
-        if stop + 8 > cap
+        if stop + 16 > cap
           while op < stop
             out[op] = out[op - dist]
             op += 1
@@ -865,11 +865,12 @@ use core/crypto/crc32
           fill = out[op - 1] * 72340172838076673 ## i64
           while op < stop
             array_store_u64(out, op, fill)
-            op += 8
+            array_store_u64(out, op + 8, fill)
+            op += 16
           op = stop
         else
-          # Room to store whole words past the end.  A period shorter than a
-          # word is first copied byte by byte, then read at a multiple of it.
+          # Room to store two whole words past the end.  A period shorter than
+          # a word is first copied byte by byte, then read at a multiple of it.
           if dist < 8
             lead = op + 8 ## i64
             if lead > stop
@@ -882,7 +883,8 @@ use core/crypto/crc32
               dist += period
           while op < stop
             array_store_u64(out, op, array_load_u64(out, op - dist))
-            op += 8
+            array_store_u64(out, op + 8, array_load_u64(out, op + 8 - dist))
+            op += 16
           op = stop
       elsif kind == 0x300
         bb = bb >> k
@@ -1139,8 +1141,9 @@ use core/crypto/crc32
     Gzip.__release(sc)
     0
 
-  # Append the low `nbits` (<= 16) bits of `value` to the output.  Not the
-  # hot path (headers only).
+  # The bit writer's state is st[0] the next output byte, st[1] the bits not
+  # yet written (st[2] of them, always fewer than 8 between calls).  Append the
+  # low `nbits` (<= 16) bits of `value`.  Not the hot path (headers only).
   -> .__put(out, st, value, nbits) (u8[] i64[] i64 i64) i64
     bb = st[1] | (value << st[2]) ## i64
     bc = st[2] + nbits ## i64
@@ -1235,12 +1238,10 @@ use core/crypto/crc32
     st[2] = bc
     0
 
-  # Encode one block: the symbols in syms[0, sn), covering src[lo, hi), as
-  # whichever of a stored, fixed-Huffman or dynamic-Huffman block is smallest.
-  -> .__block(src, out0, st, syms, sn, lo, hi, last, tb) (u8[] u8[] i64[] i32[] i64 i64 i64 i64 i64[]) u8[]
-    out = out0
-    fl = i64[288]
-    fd = i64[32]
+  # Count the symbols of a block: fl[0..286) for literals, end of block and
+  # lengths, fd[0..30) for distance codes.  Returns the extra bits that the
+  # lengths and distances carry.
+  -> .__tally(syms, sn, tb, fl, fd) (i32[] i64 i64[] i64[] i64[]) i64
     xb = 0 ## i64
     i = 0 ## i64
     while i < sn
@@ -1262,31 +1263,15 @@ use core/crypto/crc32
         xb += tb[96 + dc]
       i += 1
     fl[256] = 1
-    # Dynamic trees and the run-length coded code lengths that describe them.
-    ll_len = i64[288]
-    d_len = i64[32]
-    Gzip.__lengths(fl, 0, 286, 15, ll_len, 0)
-    Gzip.__lengths(fd, 0, 30, 15, d_len, 0)
-    hlit = 286 ## i64
-    while hlit > 257 && ll_len[hlit - 1] == 0
-      hlit -= 1
-    hdist = 30 ## i64
-    while hdist > 1 && d_len[hdist - 1] == 0
-      hdist -= 1
-    seq = i64[320]
-    i = 0
-    while i < hlit
-      seq[i] = ll_len[i]
-      i += 1
-    i = 0
-    while i < hdist
-      seq[hlit + i] = d_len[i]
-      i += 1
-    total = hlit + hdist ## i64
-    tk = i64[320]
-    cf = i64[19]
+    xb
+
+  # Run-length code the code lengths seq[0, total) as a dynamic block header
+  # sends them: symbols 0-15 are lengths, 16 repeats the previous length 3-6
+  # times, 17 and 18 repeat zero 3-10 and 11-138 times.  Tokens go to tk as
+  # symbol | extra bits << 8, their frequencies to cf; returns their number.
+  -> .__runs(seq, total, tk, cf) (i64[] i64 i64[] i64[]) i64
     nt = 0 ## i64
-    i = 0
+    i = 0 ## i64
     while i < total
       v = seq[i] ## i64
       run = 1 ## i64
@@ -1330,6 +1315,66 @@ use core/crypto/crc32
           cf[v] = cf[v] + 1
           nt += 1
           run -= 1
+    nt
+
+  # A dynamic block's header: BFINAL, BTYPE 2, the counts, the code lengths of
+  # the code-length alphabet (cl_len, in transmission order) and then the run
+  # length tokens tk[0, nt) in the code-length code cle.
+  -> .__send_header(out, st, last, hlit, hdist, hclen, cl_len, cle, tk, nt) (u8[] i64[] i64 i64 i64 i64 i64[] i64[] i64[] i64) i64
+    Gzip.__put(out, st, last | 4, 3)
+    Gzip.__put(out, st, hlit - 257, 5)
+    Gzip.__put(out, st, hdist - 1, 5)
+    Gzip.__put(out, st, hclen - 4, 4)
+    i = 0 ## i64
+    while i < hclen
+      Gzip.__put(out, st, cl_len[Gzip.__order(i)], 3)
+      i += 1
+    i = 0
+    while i < nt
+      t = tk[i] ## i64
+      code = t & 255 ## i64
+      e = cle[code] ## i64
+      Gzip.__put(out, st, e & 0xFFFF, e >> 16)
+      if code == 16
+        Gzip.__put(out, st, t >> 8, 2)
+      elsif code == 17
+        Gzip.__put(out, st, t >> 8, 3)
+      elsif code == 18
+        Gzip.__put(out, st, t >> 8, 7)
+      i += 1
+    0
+
+  # Encode one block: the symbols in syms[0, sn), covering src[lo, hi), as
+  # whichever of a stored, fixed-Huffman or dynamic-Huffman block is smallest.
+  -> .__block(src, out0, st, syms, sn, lo, hi, last, tb) (u8[] u8[] i64[] i32[] i64 i64 i64 i64 i64[]) u8[]
+    out = out0
+    fl = i64[288]
+    fd = i64[32]
+    xb = Gzip.__tally(syms, sn, tb, fl, fd) ## i64
+    # Dynamic trees and the run-length coded code lengths that describe them.
+    ll_len = i64[288]
+    d_len = i64[32]
+    Gzip.__lengths(fl, 0, 286, 15, ll_len, 0)
+    Gzip.__lengths(fd, 0, 30, 15, d_len, 0)
+    hlit = 286 ## i64
+    while hlit > 257 && ll_len[hlit - 1] == 0
+      hlit -= 1
+    hdist = 30 ## i64
+    while hdist > 1 && d_len[hdist - 1] == 0
+      hdist -= 1
+    seq = i64[320]
+    i = 0
+    while i < hlit
+      seq[i] = ll_len[i]
+      i += 1
+    i = 0
+    while i < hdist
+      seq[hlit + i] = d_len[i]
+      i += 1
+    total = hlit + hdist ## i64
+    tk = i64[320]
+    cf = i64[19]
+    nt = Gzip.__runs(seq, total, tk, cf) ## i64
     cl_len = i64[32]
     Gzip.__lengths(cf, 0, 19, 7, cl_len, 0)
     hclen = 19 ## i64
@@ -1382,27 +1427,7 @@ use core/crypto/crc32
       Gzip.__canonical(ll_len, 0, 286, lle, 0, wk)
       Gzip.__canonical(d_len, 0, 30, dde, 0, wk)
       Gzip.__canonical(cl_len, 0, 19, cle, 0, wk)
-      Gzip.__put(out, st, last | 4, 3)
-      Gzip.__put(out, st, hlit - 257, 5)
-      Gzip.__put(out, st, hdist - 1, 5)
-      Gzip.__put(out, st, hclen - 4, 4)
-      i = 0
-      while i < hclen
-        Gzip.__put(out, st, cl_len[Gzip.__order(i)], 3)
-        i += 1
-      i = 0
-      while i < nt
-        t = tk[i] ## i64
-        code = t & 255 ## i64
-        e = cle[code] ## i64
-        Gzip.__put(out, st, e & 0xFFFF, e >> 16)
-        if code == 16
-          Gzip.__put(out, st, t >> 8, 2)
-        elsif code == 17
-          Gzip.__put(out, st, t >> 8, 3)
-        elsif code == 18
-          Gzip.__put(out, st, t >> 8, 7)
-        i += 1
+      Gzip.__send_header(out, st, last, hlit, hdist, hclen, cl_len, cle, tk, nt)
       Gzip.__emit(out, st, syms, sn, lle, 0, dde, 0, tb)
       Gzip.__release(lle)
       Gzip.__release(dde)

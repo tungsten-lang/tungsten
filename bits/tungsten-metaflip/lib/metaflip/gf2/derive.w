@@ -60,10 +60,14 @@ use scheme
   # The bits of `word` (a matrix with `cols` columns) moved into a matrix with `target_cols` columns, starting at
   # row `row_offset` and column `col_offset`.
   -> .shift_matrix(word, cols, target_cols, row_offset, col_offset)
+    positions = Metaflip:Gf2:Bits.positions(word)
     moved = []
-    Metaflip:Gf2:Bits.positions(word).each -> (bit)
+    positions.each -> (bit)
       moved.push((bit / cols + row_offset) * target_cols + bit % cols + col_offset)
-    Metaflip:Gf2:Bits.from_positions(moved)
+    result = Metaflip:Gf2:Bits.from_positions(moved)
+    Metaflip:Gf2:Bits.release(positions)
+    Metaflip:Gf2:Bits.release(moved)
+    result
 
   # The terms of a scheme for `shape`, placed at `offsets` of the larger `target` shape.
   -> .block(shape, terms, target, offsets)
@@ -80,9 +84,12 @@ use scheme
   # The product of two schemes: terms (l, r) in left-major order, each factor the Kronecker product of the
   # factors of l and r for the componentwise product of the shapes.
   -> .kronecker(left_shape, left, right_shape, right)
+    right_bits = right.map -> (r)
+      [Metaflip:Gf2:Bits.positions(r[0]), Metaflip:Gf2:Bits.positions(r[1]), Metaflip:Gf2:Bits.positions(r[2])]
     out = []
     left.each -> (l)
-      right.each -> (r)
+      left_bits = [Metaflip:Gf2:Bits.positions(l[0]), Metaflip:Gf2:Bits.positions(l[1]), Metaflip:Gf2:Bits.positions(l[2])]
+      right_bits.each -> (rb)
         row = []
         3.times -> (position)
           er = Metaflip:Gf2:Derive.edge_rows(position)
@@ -91,12 +98,21 @@ use scheme
           rr = right_shape[er]
           rc = right_shape[ec]
           bits = []
-          Metaflip:Gf2:Bits.positions(l[position]).each -> (i)
+          left_bits[position].each -> (i)
             base = (i / lc * rr) * (lc * rc) + (i % lc) * rc
-            Metaflip:Gf2:Bits.positions(r[position]).each -> (j)
+            rb[position].each -> (j)
               bits.push(base + (j / rc) * (lc * rc) + j % rc)
           row.push(Metaflip:Gf2:Bits.from_positions(bits))
+          Metaflip:Gf2:Bits.release(bits)
         out.push(row)
+      left_bits.each -> (positions)
+        Metaflip:Gf2:Bits.release(positions)
+      Metaflip:Gf2:Bits.release(left_bits)
+    right_bits.each -> (triple)
+      triple.each -> (positions)
+        Metaflip:Gf2:Bits.release(positions)
+      Metaflip:Gf2:Bits.release(triple)
+    Metaflip:Gf2:Bits.release(right_bits)
     out
 
   # ---- coordinate projection ------------------------------------------------------------

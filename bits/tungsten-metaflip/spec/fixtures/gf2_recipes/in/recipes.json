@@ -1,0 +1,731 @@
+{
+ "seed-file": {
+  "kind": "seed",
+  "rank": 7,
+  "shape": [
+   2,
+   2,
+   2
+  ],
+  "source_shape": [
+   2,
+   2,
+   2
+  ],
+  "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x2_rank7_strassen_gf2.txt",
+  "source_sha256": "9e0afd23436703e74eae1fc8faa10e391ffd725bbc5bedc44f14337279dc5c33"
+ },
+ "seed-file-oriented": {
+  "kind": "seed",
+  "rank": 20,
+  "shape": [
+   4,
+   2,
+   3
+  ],
+  "source_shape": [
+   2,
+   3,
+   4
+  ],
+  "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x3x4_rank20_d130_global_isotropy_gf2.txt",
+  "source_sha256": "f9e858e97e84052d949e252a88885886146f3839275cbee615f03faf83658b72"
+ },
+ "seed-state": {
+  "kind": "seed",
+  "rank": 7,
+  "shape": [
+   2,
+   2,
+   2
+  ],
+  "source_shape": [
+   2,
+   2,
+   2
+  ],
+  "state": "s1"
+ },
+ "seed-state-oriented": {
+  "kind": "seed",
+  "rank": 18,
+  "shape": [
+   5,
+   2,
+   2
+  ],
+  "source_shape": [
+   2,
+   2,
+   5
+  ],
+  "state": "s2"
+ },
+ "naive": {
+  "kind": "naive",
+  "rank": 18,
+  "shape": [
+   3,
+   3,
+   2
+  ]
+ },
+ "split-axis2": {
+  "kind": "split",
+  "rank": 14,
+  "axis": 2,
+  "shape": [
+   2,
+   2,
+   4
+  ],
+  "left": {
+   "kind": "seed",
+   "rank": 7,
+   "shape": [
+    2,
+    2,
+    2
+   ],
+   "source_shape": [
+    2,
+    2,
+    2
+   ],
+   "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x2_rank7_strassen_gf2.txt",
+   "source_sha256": "9e0afd23436703e74eae1fc8faa10e391ffd725bbc5bedc44f14337279dc5c33"
+  },
+  "right": {
+   "kind": "seed",
+   "rank": 7,
+   "shape": [
+    2,
+    2,
+    2
+   ],
+   "source_shape": [
+    2,
+    2,
+    2
+   ],
+   "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x2_rank7_strassen_gf2.txt",
+   "source_sha256": "9e0afd23436703e74eae1fc8faa10e391ffd725bbc5bedc44f14337279dc5c33"
+  }
+ },
+ "split-oriented": {
+  "kind": "split",
+  "rank": 14,
+  "axis": 2,
+  "shape": [
+   4,
+   2,
+   2
+  ],
+  "left": {
+   "kind": "seed",
+   "rank": 7,
+   "shape": [
+    2,
+    2,
+    2
+   ],
+   "source_shape": [
+    2,
+    2,
+    2
+   ],
+   "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x2_rank7_strassen_gf2.txt",
+   "source_sha256": "9e0afd23436703e74eae1fc8faa10e391ffd725bbc5bedc44f14337279dc5c33"
+  },
+  "right": {
+   "kind": "seed",
+   "rank": 7,
+   "shape": [
+    2,
+    2,
+    2
+   ],
+   "source_shape": [
+    2,
+    2,
+    2
+   ],
+   "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x2_rank7_strassen_gf2.txt",
+   "source_sha256": "9e0afd23436703e74eae1fc8faa10e391ffd725bbc5bedc44f14337279dc5c33"
+  }
+ },
+ "split-mixed": {
+  "kind": "split",
+  "rank": 32,
+  "axis": 2,
+  "shape": [
+   2,
+   3,
+   6
+  ],
+  "left": {
+   "kind": "seed",
+   "rank": 20,
+   "shape": [
+    2,
+    3,
+    4
+   ],
+   "source_shape": [
+    2,
+    3,
+    4
+   ],
+   "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x3x4_rank20_d130_global_isotropy_gf2.txt",
+   "source_sha256": "f9e858e97e84052d949e252a88885886146f3839275cbee615f03faf83658b72"
+  },
+  "right": {
+   "kind": "naive",
+   "rank": 12,
+   "shape": [
+    2,
+    3,
+    2
+   ]
+  }
+ },
+ "product": {
+  "kind": "product",
+  "rank": 49,
+  "shape": [
+   4,
+   4,
+   4
+  ],
+  "left": {
+   "kind": "seed",
+   "rank": 7,
+   "shape": [
+    2,
+    2,
+    2
+   ],
+   "source_shape": [
+    2,
+    2,
+    2
+   ],
+   "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x2_rank7_strassen_gf2.txt",
+   "source_sha256": "9e0afd23436703e74eae1fc8faa10e391ffd725bbc5bedc44f14337279dc5c33"
+  },
+  "right": {
+   "kind": "seed",
+   "rank": 7,
+   "shape": [
+    2,
+    2,
+    2
+   ],
+   "source_shape": [
+    2,
+    2,
+    2
+   ],
+   "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x2_rank7_strassen_gf2.txt",
+   "source_sha256": "9e0afd23436703e74eae1fc8faa10e391ffd725bbc5bedc44f14337279dc5c33"
+  }
+ },
+ "product-mixed": {
+  "kind": "product",
+  "rank": 140,
+  "shape": [
+   4,
+   6,
+   8
+  ],
+  "left": {
+   "kind": "seed",
+   "rank": 7,
+   "shape": [
+    2,
+    2,
+    2
+   ],
+   "source_shape": [
+    2,
+    2,
+    2
+   ],
+   "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x2_rank7_strassen_gf2.txt",
+   "source_sha256": "9e0afd23436703e74eae1fc8faa10e391ffd725bbc5bedc44f14337279dc5c33"
+  },
+  "right": {
+   "kind": "seed",
+   "rank": 20,
+   "shape": [
+    2,
+    3,
+    4
+   ],
+   "source_shape": [
+    2,
+    3,
+    4
+   ],
+   "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x3x4_rank20_d130_global_isotropy_gf2.txt",
+   "source_sha256": "f9e858e97e84052d949e252a88885886146f3839275cbee615f03faf83658b72"
+  }
+ },
+ "projection": {
+  "kind": "projection",
+  "rank": 16,
+  "shape": [
+   2,
+   3,
+   3
+  ],
+  "parent": {
+   "kind": "seed",
+   "rank": 20,
+   "shape": [
+    2,
+    3,
+    4
+   ],
+   "source_shape": [
+    2,
+    3,
+    4
+   ],
+   "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x3x4_rank20_d130_global_isotropy_gf2.txt",
+   "source_sha256": "f9e858e97e84052d949e252a88885886146f3839275cbee615f03faf83658b72"
+  },
+  "deletions": [
+   {
+    "axis": 2,
+    "coordinate": 1
+   }
+  ]
+ },
+ "projection-two": {
+  "kind": "projection",
+  "rank": 13,
+  "shape": [
+   2,
+   2,
+   3
+  ],
+  "parent": {
+   "kind": "seed",
+   "rank": 20,
+   "shape": [
+    2,
+    3,
+    4
+   ],
+   "source_shape": [
+    2,
+    3,
+    4
+   ],
+   "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x3x4_rank20_d130_global_isotropy_gf2.txt",
+   "source_sha256": "f9e858e97e84052d949e252a88885886146f3839275cbee615f03faf83658b72"
+  },
+  "deletions": [
+   {
+    "axis": 2,
+    "coordinate": 0
+   },
+   {
+    "axis": 1,
+    "coordinate": 2
+   }
+  ]
+ },
+ "nested": {
+  "kind": "split",
+  "rank": 81,
+  "axis": 2,
+  "shape": [
+   6,
+   4,
+   4
+  ],
+  "left": {
+   "kind": "product",
+   "rank": 49,
+   "shape": [
+    4,
+    4,
+    4
+   ],
+   "left": {
+    "kind": "seed",
+    "rank": 7,
+    "shape": [
+     2,
+     2,
+     2
+    ],
+    "source_shape": [
+     2,
+     2,
+     2
+    ],
+    "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x2_rank7_strassen_gf2.txt",
+    "source_sha256": "9e0afd23436703e74eae1fc8faa10e391ffd725bbc5bedc44f14337279dc5c33"
+   },
+   "right": {
+    "kind": "seed",
+    "rank": 7,
+    "shape": [
+     2,
+     2,
+     2
+    ],
+    "source_shape": [
+     2,
+     2,
+     2
+    ],
+    "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x2_rank7_strassen_gf2.txt",
+    "source_sha256": "9e0afd23436703e74eae1fc8faa10e391ffd725bbc5bedc44f14337279dc5c33"
+   }
+  },
+  "right": {
+   "kind": "split",
+   "rank": 32,
+   "axis": 0,
+   "shape": [
+    4,
+    4,
+    2
+   ],
+   "left": {
+    "kind": "naive",
+    "rank": 16,
+    "shape": [
+     1,
+     4,
+     4
+    ]
+   },
+   "right": {
+    "kind": "naive",
+    "rank": 16,
+    "shape": [
+     1,
+     4,
+     4
+    ]
+   }
+  }
+ },
+ "bad-rank": {
+  "kind": "split",
+  "rank": 15,
+  "axis": 2,
+  "shape": [
+   2,
+   2,
+   4
+  ],
+  "left": {
+   "kind": "seed",
+   "rank": 7,
+   "shape": [
+    2,
+    2,
+    2
+   ],
+   "source_shape": [
+    2,
+    2,
+    2
+   ],
+   "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x2_rank7_strassen_gf2.txt",
+   "source_sha256": "9e0afd23436703e74eae1fc8faa10e391ffd725bbc5bedc44f14337279dc5c33"
+  },
+  "right": {
+   "kind": "seed",
+   "rank": 7,
+   "shape": [
+    2,
+    2,
+    2
+   ],
+   "source_shape": [
+    2,
+    2,
+    2
+   ],
+   "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x2_rank7_strassen_gf2.txt",
+   "source_sha256": "9e0afd23436703e74eae1fc8faa10e391ffd725bbc5bedc44f14337279dc5c33"
+  }
+ },
+ "bad-cut": {
+  "kind": "split",
+  "rank": 14,
+  "axis": 2,
+  "shape": [
+   2,
+   2,
+   5
+  ],
+  "left": {
+   "kind": "seed",
+   "rank": 7,
+   "shape": [
+    2,
+    2,
+    2
+   ],
+   "source_shape": [
+    2,
+    2,
+    2
+   ],
+   "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x2_rank7_strassen_gf2.txt",
+   "source_sha256": "9e0afd23436703e74eae1fc8faa10e391ffd725bbc5bedc44f14337279dc5c33"
+  },
+  "right": {
+   "kind": "seed",
+   "rank": 7,
+   "shape": [
+    2,
+    2,
+    2
+   ],
+   "source_shape": [
+    2,
+    2,
+    2
+   ],
+   "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x2_rank7_strassen_gf2.txt",
+   "source_sha256": "9e0afd23436703e74eae1fc8faa10e391ffd725bbc5bedc44f14337279dc5c33"
+  }
+ },
+ "missing-state": {
+  "kind": "seed",
+  "rank": 7,
+  "shape": [
+   2,
+   2,
+   2
+  ],
+  "source_shape": [
+   2,
+   2,
+   2
+  ],
+  "state": "nope"
+ },
+ "hash-mismatch": {
+  "kind": "seed",
+  "rank": 7,
+  "shape": [
+   2,
+   2,
+   2
+  ],
+  "source_shape": [
+   2,
+   2,
+   2
+  ],
+  "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x2_rank7_strassen_gf2.txt",
+  "source_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+ },
+ "unsafe-source": {
+  "kind": "seed",
+  "rank": 7,
+  "shape": [
+   2,
+   2,
+   2
+  ],
+  "source_shape": [
+   2,
+   2,
+   2
+  ],
+  "source": "../escape.txt",
+  "source_sha256": "9e0afd23436703e74eae1fc8faa10e391ffd725bbc5bedc44f14337279dc5c33"
+ },
+ "leaf-metadata": {
+  "kind": "seed",
+  "rank": 7,
+  "shape": [
+   2,
+   2,
+   2
+  ],
+  "source_shape": [
+   2,
+   2,
+   3
+  ],
+  "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x2_rank7_strassen_gf2.txt",
+  "source_sha256": "9e0afd23436703e74eae1fc8faa10e391ffd725bbc5bedc44f14337279dc5c33"
+ },
+ "product-rank": {
+  "kind": "product",
+  "rank": 48,
+  "shape": [
+   4,
+   4,
+   4
+  ],
+  "left": {
+   "kind": "seed",
+   "rank": 7,
+   "shape": [
+    2,
+    2,
+    2
+   ],
+   "source_shape": [
+    2,
+    2,
+    2
+   ],
+   "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x2_rank7_strassen_gf2.txt",
+   "source_sha256": "9e0afd23436703e74eae1fc8faa10e391ffd725bbc5bedc44f14337279dc5c33"
+  },
+  "right": {
+   "kind": "seed",
+   "rank": 7,
+   "shape": [
+    2,
+    2,
+    2
+   ],
+   "source_shape": [
+    2,
+    2,
+    2
+   ],
+   "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x2_rank7_strassen_gf2.txt",
+   "source_sha256": "9e0afd23436703e74eae1fc8faa10e391ffd725bbc5bedc44f14337279dc5c33"
+  }
+ },
+ "naive-rank": {
+  "kind": "naive",
+  "rank": 17,
+  "shape": [
+   3,
+   3,
+   2
+  ]
+ },
+ "unknown-kind": {
+  "kind": "merge",
+  "rank": 14,
+  "axis": 2,
+  "shape": [
+   2,
+   2,
+   4
+  ],
+  "left": {
+   "kind": "seed",
+   "rank": 7,
+   "shape": [
+    2,
+    2,
+    2
+   ],
+   "source_shape": [
+    2,
+    2,
+    2
+   ],
+   "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x2_rank7_strassen_gf2.txt",
+   "source_sha256": "9e0afd23436703e74eae1fc8faa10e391ffd725bbc5bedc44f14337279dc5c33"
+  },
+  "right": {
+   "kind": "seed",
+   "rank": 7,
+   "shape": [
+    2,
+    2,
+    2
+   ],
+   "source_shape": [
+    2,
+    2,
+    2
+   ],
+   "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x2_rank7_strassen_gf2.txt",
+   "source_sha256": "9e0afd23436703e74eae1fc8faa10e391ffd725bbc5bedc44f14337279dc5c33"
+  }
+ },
+ "shape-range": {
+  "kind": "split",
+  "rank": 14,
+  "axis": 2,
+  "shape": [
+   2,
+   2,
+   40
+  ],
+  "left": {
+   "kind": "seed",
+   "rank": 7,
+   "shape": [
+    2,
+    2,
+    2
+   ],
+   "source_shape": [
+    2,
+    2,
+    2
+   ],
+   "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x2_rank7_strassen_gf2.txt",
+   "source_sha256": "9e0afd23436703e74eae1fc8faa10e391ffd725bbc5bedc44f14337279dc5c33"
+  },
+  "right": {
+   "kind": "seed",
+   "rank": 7,
+   "shape": [
+    2,
+    2,
+    2
+   ],
+   "source_shape": [
+    2,
+    2,
+    2
+   ],
+   "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x2_rank7_strassen_gf2.txt",
+   "source_sha256": "9e0afd23436703e74eae1fc8faa10e391ffd725bbc5bedc44f14337279dc5c33"
+  }
+ },
+ "projection-growth": {
+  "kind": "projection",
+  "rank": 16,
+  "shape": [
+   2,
+   3,
+   3
+  ],
+  "parent": {
+   "kind": "seed",
+   "rank": 20,
+   "shape": [
+    1,
+    1,
+    1
+   ],
+   "source_shape": [
+    2,
+    3,
+    4
+   ],
+   "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x3x4_rank20_d130_global_isotropy_gf2.txt",
+   "source_sha256": "f9e858e97e84052d949e252a88885886146f3839275cbee615f03faf83658b72"
+  },
+  "deletions": [
+   {
+    "axis": 2,
+    "coordinate": 1
+   }
+  ]
+ }
+}

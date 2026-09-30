@@ -20,6 +20,9 @@
 #                                                          that share a factor, repeated until nothing changes
 #   Derive.matrix_factors(pairs, max_bits, reverse)        the canonical column-basis factorisation of sum l (x) r
 #   Derive.refactor_shared(terms, axis, max_bits, reverse) every group refactored along one axis (the basis rewrite)
+#   Derive.two_pass(terms, shape, mode)                    the two-pass basis rewrite of modes 6..17, then compression
+#                                                          (screen_two_pass_basis_children.two_pass)
+#   Derive.child(shape, terms, axis, coordinate)           [shape', terms', history]: the projection, compressed
 #
 # Terms are keyed by their hexadecimal text where the originals use tuples as dictionary keys.
 use scheme
@@ -302,3 +305,43 @@ use scheme
       raise "compression raised the rank" if current.size > before
       done = true if current.size == before
     [current, history]
+
+  # The widest matrix of a shape, in bits: the `max_bits` that the screens pass.
+  -> .width(shape)
+    [shape[0] * shape[1], shape[1] * shape[2], shape[0] * shape[2]].max
+
+  # The orders in which the three axes are visited by the basis modes: itertools.permutations(range(3)).
+  -> .axis_orders
+    [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]]
+
+  # The same terms in the same order.
+  -> .same_sequence?(a, b)
+    return false if a.size != b.size
+    same = true
+    a.each_with_index -> (term, i)
+      same = false if term[0] != b[i][0] || term[1] != b[i][1] || term[2] != b[i][2]
+    same
+
+  # Basis mode 6..17: the axes in order (mode - 6) / 2 of the permutations, column scans descending for an odd mode; at
+  # most two rounds of the rewrite (the second is skipped when the first returned the terms in their original order),
+  # then shared-factor compression.
+  -> .two_pass(terms, shape, mode)
+    raise "two-pass mode outside 6..17" if mode < 6 || mode >= 18
+    width = Metaflip:Gf2:Derive.width(shape)
+    order = Metaflip:Gf2:Derive.axis_orders[(mode - 6) / 2]
+    reverse = mode % 2 == 1
+    current = terms
+    rounds = 0
+    done = false
+    while rounds < 2 && !done
+      order.each -> (axis)
+        current = Metaflip:Gf2:Derive.refactor_shared(current, axis, width, reverse)[0]
+      done = true if Metaflip:Gf2:Derive.same_sequence?(current, terms)
+      rounds += 1
+    Metaflip:Gf2:Derive.compress_shared(current, width)[0]
+
+  # The projection child the screens build: delete a coordinate, then compress at the width of the smaller shape.
+  -> .child(shape, terms, axis, coordinate)
+    projected = Metaflip:Gf2:Derive.project(shape, terms, axis, coordinate)
+    compressed = Metaflip:Gf2:Derive.compress_shared(projected[1], Metaflip:Gf2:Derive.width(projected[0]))
+    [projected[0], compressed[0], compressed[1]]

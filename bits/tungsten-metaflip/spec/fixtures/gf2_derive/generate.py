@@ -16,6 +16,8 @@ writes, next to this file:
                          factors:<seed>:<reverse>                   verify_cofactor_mergers.matrix_factors on random pairs
                          compress:<scheme>                          compress_shared (terms, then its history)
                          refactor:<scheme>:<axis>:<reverse>         refactor_shared (terms, then the changed groups)
+                         basis:<scheme>:<mode>                      two_pass, modes 6..17
+                         child:<scheme>:<axis>:<coordinate>         project, then compress_shared at the width of the smaller shape
 
 Everything here is derived from the Python originals, never from the Tungsten port.
 """
@@ -34,6 +36,7 @@ os.environ.setdefault('PYTHONDONTWRITEBYTECODE', '1')
 from verify_composition_targets import block, kronecker  # noqa: E402
 from verify_cofactor_mergers import compress_shared, matrix_factors, refactor_shared  # noqa: E402
 from screen_structured_parent_projections import project  # noqa: E402
+from screen_two_pass_basis_children import two_pass  # noqa: E402
 
 SEEDS = BIT / 'lib/metaflip/seeds/gf2'
 PICK = {
@@ -134,5 +137,18 @@ for name, (shape, terms) in schemes.items():
             out, changed = refactor_shared(terms, axis, max_bits=max(256, big), reverse_columns=reverse)
             record(f'refactor:{name}:{axis}:{int(reverse)}', out,
                    ''.join(f"{c['fixed']:x} {c['before']} {c['after']}\n" for c in changed))
+for name, (shape, terms) in schemes.items():
+    if name in ('strassen', 's234', 's225', 's235p2', 's256', 's234_split'):
+        for mode in range(6, 18):
+            record(f'basis:{name}:{mode}', two_pass(terms, shape, mode))
+for name in ('s234', 's235p2', 's234_split'):
+    shape, terms = schemes[name]
+    for axis in range(3):
+        for coordinate in (0, shape[axis] - 1):
+            target, raw = project(shape, terms, axis, coordinate)
+            width = max(target[0] * target[1], target[1] * target[2], target[0] * target[2])
+            child, history = compress_shared(raw, max_bits=width)
+            record(f'child:{name}:{axis}:{coordinate}', child, 'x'.join(map(str, target)) + '\n' +
+                   ''.join(f"{h['axis']} {h['fixed']:x} {h['before']} {h['after']}\n" for h in history))
 (HERE / 'expected' / 'cases.tsv').write_text(''.join(f'{n}\t{r}\t{d}\n' for n, r, d in rows))
 print(len(rows), 'cases')

@@ -94,6 +94,22 @@ read_lines(fixtures + "/expected/cases.tsv").each -> (line)
       checks += 1
       failures += expect_case(golden, "refactor:" + name + ":" + axis.to_s + ":" + (reverse ? "1" : "0"), rewritten[0], changed_text(rewritten[1]))
 
+# the two-pass basis rewrite and the projection children of the screens
+["strassen", "s234", "s225", "s235p2", "s256", "s234_split"].each -> (name)
+  shape = shape_of(name)
+  terms = terms_of(name)
+  (6..17).each -> (mode)
+    checks += 1
+    failures += expect_case(golden, "basis:" + name + ":" + mode.to_s, Metaflip:Gf2:Derive.two_pass(terms, shape, mode), "")
+["s234", "s235p2", "s234_split"].each -> (name)
+  shape = shape_of(name)
+  terms = terms_of(name)
+  3.times -> (axis)
+    [0, shape[axis] - 1].each -> (coordinate)
+      child = Metaflip:Gf2:Derive.child(shape, terms, axis, coordinate)
+      checks += 1
+      failures += expect_case(golden, "child:" + name + ":" + axis.to_s + ":" + coordinate.to_s, child[1], shape_text(child[0]) + "\n" + history_text(child[2]))
+
 if failures > 0
   << "FAIL " + failures.to_s + " of " + checks.to_s + " derive checks"
   exit(1)

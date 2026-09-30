@@ -1,0 +1,185 @@
+{
+ "schema": 1,
+ "field": "GF(2)",
+ "record_claim": false,
+ "repository": "https://example.invalid/fixture-schemes",
+ "revision": "f9dddf759a5d00d91ba0dae7ee918e7f274b66c6",
+ "seeds": [
+  {
+   "shape": "2x2x2",
+   "canonical": "2x2x2",
+   "source": "schemes/found/Q/2x2x2_m7_Q.json",
+   "source_rank": 7,
+   "source_sha256": "d79124eeba12ca1d4222d4f3ba35bcdd533d89fb373e44b2cd9bcb8ce44fab31",
+   "gf2_rank": 7,
+   "mfw": "out-everything/2x2x2_r7_37aeec2e.mfw",
+   "mfw_sha256": "37aeec2ece7526fe09a367e1fc0484ac2d60aca7b446fc41bd231f9fe1e2c2b3"
+  },
+  {
+   "shape": "2x2x2",
+   "canonical": "2x2x2",
+   "source": "schemes/found/ZT/2x2x2_m8_ZT.json",
+   "source_rank": 8,
+   "source_sha256": "ce6d3b991f1ae21c9d99c8863bb32a9b9afcd12a0256e78cf0b3e1f80a926ed0",
+   "gf2_rank": 8,
+   "mfw": "out-everything/2x2x2_r8_0073e265.mfw",
+   "mfw_sha256": "0073e265ae2759f8f7e180e225b52a72e68db3953facfc9929e6c9619df7f754"
+  },
+  {
+   "shape": "2x2x3",
+   "canonical": "2x2x3",
+   "source": "schemes/found/Z/2x2x3_m12_Z.json",
+   "source_rank": 12,
+   "source_sha256": "1deaac5eb52bf129cd89fc553525091c930928bee4bc3d92482c8ec32ac1643d",
+   "gf2_rank": 12,
+   "mfw": "out-everything/2x2x3_r12_3ebc5b87.mfw",
+   "mfw_sha256": "3ebc5b8735e539ae98bd5870348aba54cf673ba4bec359ea81fe911585c03878"
+  },
+  {
+   "shape": "3x2x2",
+   "canonical": "2x2x3",
+   "source": "schemes/found/ZT/3x2x2_m12_ZT.json",
+   "source_rank": 12,
+   "source_sha256": "7aa616c2b2a6cdff2989d81653d627ccbfddf38bbb0160a5246cb6d8a42f1c6e",
+   "gf2_rank": 12,
+   "mfw": "out-everything/3x2x2_r12_1fc46653.mfw",
+   "mfw_sha256": "1fc4665373495c116926d46b6f104c3d236ceae8e7306830c8b832178e09ecd5"
+  },
+  {
+   "shape": "2x2x4",
+   "canonical": "2x2x4",
+   "source": "schemes/found/ZT/2x2x4_m18_cancelling_pair_ZT.json",
+   "source_rank": 18,
+   "source_sha256": "a07eae4128a89f74ffe0e4c9bbc3e3bfb13bdd66dffbf0295117767b52b3afcc",
+   "gf2_rank": 16,
+   "mfw": "out-everything/2x2x4_r16_f05e9c32.mfw",
+   "mfw_sha256": "f05e9c32c535482b6516af6a504ef2515afb8ef8331a77e0cc9122aff01c451e"
+  },
+  {
+   "shape": "2x2x5",
+   "canonical": "2x2x5",
+   "source": "schemes/found/ZT/2x2x5_m21_vanishing_term_ZT.json",
+   "source_rank": 21,
+   "source_sha256": "d5bbc128c030e48f8986467c62193bde8a32f2f78023d7114ee097792124696f",
+   "gf2_rank": 20,
+   "mfw": "out-everything/2x2x5_r20_2c88dcfc.mfw",
+   "mfw_sha256": "2c88dcfc358748cbf2c8a5f8decdffd79ba0c614d47e866a2a4051b05d9c7d80"
+  },
+  {
+   "shape": "2x2x9",
+   "canonical": "2x2x9",
+   "source": "schemes/found/ZT/2x2x9_m36_ZT.json",
+   "source_rank": 36,
+   "source_sha256": "82c7c3eaa1ca5f26da8dc0a470c16b925c13dc5f82f2b6ca2541c389c5129d68",
+   "gf2_rank": 36,
+   "mfw": "out-everything/2x2x9_r36_4042525b.mfw",
+   "mfw_sha256": "4042525bcdd72082d76c7ecd0ebe4f1b9c1378f86e3c0429f384dac36f202065"
+  },
+  {
+   "shape": "2x3x3",
+   "canonical": "2x3x3",
+   "source": "schemes/found/ZT/2x3x3_m18_large_coefficients_ZT.json",
+   "source_rank": 18,
+   "source_sha256": "0c52169140805fd3e7da3b79523d2280f52257d3647ab78ffc64295a05c7c2dc",
+   "gf2_rank": 18,
+   "mfw": "out-everything/2x3x3_r18_bba59e9b.mfw",
+   "mfw_sha256": "bba59e9bcd9bbc60738c6003e37decb42eb3577e49b254b09f0619549aee8e57"
+  },
+  {
+   "shape": "2x3x4",
+   "canonical": "2x3x4",
+   "source": "schemes/found/ZT/2x3x4_m24_ZT.json",
+   "source_rank": 24,
+   "source_sha256": "fdc88ebc340dfc4473db9478fff3d9e3753724824339f3f1be2f2f9de82b3d7e",
+   "gf2_rank": 24,
+   "mfw": "out-everything/2x3x4_r24_81d39ff3.mfw",
+   "mfw_sha256": "81d39ff3665dbde7cf9a0288a9419c58d137890147eb08603d529f87a9a5a258"
+  }
+ ],
+ "errors": [
+  {
+   "source": "schemes/found/Q/2x2x3_m11_Q.json",
+   "error": "even denominator: scheme does not reduce to GF(2)"
+  },
+  {
+   "source": "schemes/found/ZT/2x3x3_m17_name_rank_ZT.json",
+   "error": "file-name rank disagrees with the scheme"
+  },
+  {
+   "source": "schemes/found/ZT/2x3x3_m18_bad_size_row_ZT.json",
+   "error": "v has the wrong size"
+  },
+  {
+   "source": "schemes/found/ZT/2x3x3_m18_bad_size_u_ZT.json",
+   "error": "u has the wrong size"
+  },
+  {
+   "source": "schemes/found/ZT/2x3x3_m18_bool_coefficient_ZT.json",
+   "error": "coefficient must be an exact integer or rational"
+  },
+  {
+   "source": "schemes/found/ZT/2x3x3_m18_float_coefficient_ZT.json",
+   "error": "coefficient must be an exact integer or rational"
+  },
+  {
+   "source": "schemes/found/ZT/2x3x3_m18_inexact_ZT.json",
+   "error": ""
+  },
+  {
+   "source": "schemes/found/ZT/2x3x3_m18_missing_m_ZT.json",
+   "error": "'m'"
+  },
+  {
+   "source": "schemes/found/ZT/2x3x3_m18_missing_n_ZT.json",
+   "error": "'n'"
+  },
+  {
+   "source": "schemes/found/ZT/2x3x3_m18_missing_w_ZT.json",
+   "error": "'w'"
+  },
+  {
+   "source": "schemes/found/ZT/2x3x3_m18_null_coefficient_ZT.json",
+   "error": "coefficient must be an exact integer or rational"
+  },
+  {
+   "source": "schemes/found/ZT/2x3x3_m18_rational_even_denominator_ZT.json",
+   "error": "even denominator: scheme does not reduce to GF(2)"
+  },
+  {
+   "source": "schemes/found/ZT/2x3x3_m18_rational_zero_denominator_ZT.json",
+   "error": "coefficient must be an exact integer or rational"
+  },
+  {
+   "source": "schemes/found/ZT/2x3x3_m18_short_n_ZT.json",
+   "error": "unsupported scheme header"
+  },
+  {
+   "source": "schemes/found/ZT/2x3x3_m18_text_coefficient_ZT.json",
+   "error": "coefficient must be an exact integer or rational"
+  },
+  {
+   "source": "schemes/found/ZT/2x3x3_m18_wrong_rank_ZT.json",
+   "error": "u has the wrong size"
+  },
+  {
+   "source": "schemes/found/ZT/2x3x3_m18_z2_true_ZT.json",
+   "error": "unsupported scheme header"
+  },
+  {
+   "source": "schemes/found/ZT/2x3x3_m18_zero_dim_ZT.json",
+   "error": "unsupported scheme header"
+  },
+  {
+   "source": "schemes/found/ZT/2x3x5_m30_broken_json_ZT.json",
+   "error": "Expecting property name enclosed in double quotes: line 1 column 26 (char 25)"
+  },
+  {
+   "source": "schemes/found/ZT/2x3x5_m30_empty_ZT.json",
+   "error": "Expecting value: line 1 column 1 (char 0)"
+  },
+  {
+   "source": "schemes/found/ZT/2x3x5_m30_trailing_ZT.json",
+   "error": "Extra data: line 1 column 2091 (char 2090)"
+  }
+ ]
+}

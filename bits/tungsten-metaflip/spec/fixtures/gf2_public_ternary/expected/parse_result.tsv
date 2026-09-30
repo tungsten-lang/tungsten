@@ -1,0 +1,11 @@
+"seed_rank=21 rank=20 moves=1000 accepted=5 no_pair=2 escapes=0"	21 20 1000
+"noise\nseed_rank=3 rank=3 moves=4 accepted=5 no_pair=6 escapes=7\n"	3 3 4
+"seed_rank=1 rank=2 moves=3 accepted=4 no_pair=5"	none
+"seed_rank=1 rank=2 moves=3 accepted=4 no_pair=5 escapes="	none
+"seed_rank=x rank=2 moves=3 accepted=4 no_pair=5 escapes=6"	none
+"seed_rank=9 seed_rank=1 rank=2 moves=3 accepted=4 no_pair=5 escapes=6 rank=7"	1 2 3
+"seed_rank=1  rank=2 moves=3 accepted=4 no_pair=5 escapes=6"	none
+"seed_rank=100 rank=99 moves=40000000 accepted=123456 no_pair=0 escapes=9\nseed_rank=1 rank=1 moves=1 accepted=1 no_pair=1 escapes=1"	100 99 40000000
+""	none
+"seed_rank="	none
+"rank=2 moves=3"	none

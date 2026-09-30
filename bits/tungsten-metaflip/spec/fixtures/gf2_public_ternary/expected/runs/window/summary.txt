@@ -1,0 +1,1 @@
+6 exact GF(2) seeds at f9dddf759a5d; 2 with mod-2 cancellations; 21 rejected

@@ -537,3 +537,26 @@ such strings (a flat-buffer or length fast path that does not see the concatenat
 
 `(flag ? a : b) + 1` compiles and silently drops the `+ 1` (the same parser defect as the `- 2` case of the support
 blockers, section 9); a counter written that way stayed at its initial value. Use an intermediate variable.
+
+---
+
+# Port blockers (public-scheme import, written on the integration branch)
+
+## `is_a?(Hash)` is false for every Hash; `is_a?(Integer)` is slow in a hot loop
+
+```tungsten
+lit = {"a" => 1}
+<< lit.is_a?(Hash)        # false (both engines); type(lit) == "Hash" and lit.class.to_s == "Hash"
+<< [1].is_a?(Array)       # true
+<< lit.is_a?(Object)      # false
+```
+
+`w_value_is_a` (runtime/runtime.c) names a primitive receiver from a fixed chain (`Int`, `Float`, `String`, `Symbol`, `Array`,
+`Boolean`) and then asks `w_primitive_is_a_type_name`, which knows IPv4, IPv6, MAC, `Int`/`BigInt`/`Float`/`Decimal` and
+their `Real`/`Number` parents. There is no branch for a hash (nor a range, nor nil), so a Hash is never a `Hash`.
+Workaround in `lib/metaflip/gf2/public_ternary.w`: `type(x) == "Hash"`, marked `TODO(port)`; the fix is one more line in each of the
+two chains (`w_is_hash(recv) ? "Hash"`). `Jsonx`, which builds the trees this tool reads, uses `type(value) == "Hash"` for the same reason.
+
+The same call once per coefficient (`value.is_a?(Integer)` while reading every scheme file of the public tree) goes through
+`w_method_call_slow` and `w_type_class_dispatch`, and the profile put about a fifth of the tool's samples there. `type(value)`
+answers an Int in three tag checks; with it the conversion of the 1,454 files took 38 s of CPU time instead of 117 s.

@@ -1,0 +1,21 @@
+# file	a	b	expected_hex	actual_hex
+mutants/strassen_2x2x2__bit_flip_u.mfw	0	0	1	4
+mutants/strassen_2x2x2__bit_flip_v.mfw	3	3	8	d
+mutants/strassen_2x2x2__bit_flip_w.mfw	3	0	0	8
+mutants/strassen_2x2x2__dropped_term.mfw	3	0	0	5
+mutants/rank23_3x3x3__bit_flip_u.mfw	8	1	0	1b0
+mutants/rank23_3x3x3__bit_flip_v.mfw	6	8	0	1b0
+mutants/rank23_3x3x3__bit_flip_w.mfw	6	1	80	180
+mutants/rank23_3x3x3__dropped_term.mfw	6	1	80	130
+mutants/wide68_2x4x17__bit_flip_u.mfw	7	15	0	80008000
+mutants/wide68_2x4x17__bit_flip_v.mfw	0	67	0	80008000
+mutants/wide68_2x4x17__bit_flip_w.mfw	0	15	8000	200008000
+mutants/wide68_2x4x17__dropped_term.mfw	0	15	8000	80000000
+mutants/wide68_2x4x17__transposed_c.mfw	0	1	2	4
+mutants/wide145_2x5x29__bit_flip_u.mfw	9	17	0	8400000000000
+mutants/wide145_2x5x29__bit_flip_v.mfw	5	144	0	8400000000000
+mutants/wide145_2x5x29__bit_flip_w.mfw	5	17	400000000000	200400000000000
+mutants/wide145_2x5x29__dropped_term.mfw	5	17	400000000000	8000000000000
+mutants/wide145_2x5x29__transposed_c.mfw	0	1	2	4
+mutants/wide264_4x11x24__bit_flip_u.mfw	43	2	0	40000000000000000
+mutants/wide264_4x11x24__dropped_term.mfw	1	2	0	40000000000000000

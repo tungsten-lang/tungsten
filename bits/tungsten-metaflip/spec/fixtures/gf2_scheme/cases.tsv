@@ -1,0 +1,138 @@
+# file	shape	kind	ruby_status	python_status	ruby_message_or_rank_density_sha256
+strassen_2x2x2.mfw	2x2x2	base	0	0	7	36	37aeec2ece7526fe09a367e1fc0484ac2d60aca7b446fc41bd231f9fe1e2c2b3
+mutants/strassen_2x2x2__bit_flip_u.mfw	2x2x2	bit_flip_u	1	1	inexact GF(2) tensor at coefficients 0,0
+mutants/strassen_2x2x2__bit_flip_v.mfw	2x2x2	bit_flip_v	1	1	inexact GF(2) tensor at coefficients 3,3
+mutants/strassen_2x2x2__bit_flip_w.mfw	2x2x2	bit_flip_w	1	1	inexact GF(2) tensor at coefficients 3,0
+mutants/strassen_2x2x2__dropped_term.mfw	2x2x2	dropped_term	1	1	inexact GF(2) tensor at coefficients 3,0
+mutants/strassen_2x2x2__duplicated_term.mfw	2x2x2	duplicated_term	1	1	inexact GF(2) tensor at coefficients 0,1
+mutants/strassen_2x2x2__cancelling_pair.mfw	2x2x2	cancelling_pair	0	1	9	46	a090a0b664b4838271872e7950587ee209d6ec3973ed97877330399ec2164a33
+mutants/strassen_2x2x2__zero_factor.mfw	2x2x2	zero_factor	1	1	zero or out-of-bounds factor at term 0
+mutants/strassen_2x2x2__wide_factor.mfw	2x2x2	wide_factor	1	1	zero or out-of-bounds factor at term 6
+mutants/strassen_2x2x2__wrong_term_count.mfw	2x2x2	wrong_term_count	1	1	wrong term count
+mutants/strassen_2x2x2__short_file.mfw	2x2x2	short_file	1	1	wrong term count
+mutants/strassen_2x2x2__shape_mismatch.mfw	2x2x2	shape_mismatch	1	1	MFW1 shape mismatch
+mutants/strassen_2x2x2__bad_tag.mfw	2x2x2	bad_tag	1	1	missing rank header or R prefix
+mutants/strassen_2x2x2__bad_header_fields.mfw	2x2x2	bad_header_fields	1	1	malformed MFW1 header
+mutants/strassen_2x2x2__zero_dimension.mfw	2x2x2	zero_dimension	1	1	malformed MFW1 header
+mutants/strassen_2x2x2__header_double_space.mfw	2x2x2	header_double_space	0	1	7	36	4babecb8e7afc4b6fe81bf99582d5bd694f67bb173d2e1e56415c5fb4c6c4295
+mutants/strassen_2x2x2__non_canonical_order.mfw	2x2x2	non_canonical_order	0	1	7	36	70268c1be167580c5d3d8e59efe2f6e1e0f303b75df590b7784f2cfed6e358b3
+mutants/strassen_2x2x2__uppercase_hex.mfw	2x2x2	uppercase_hex	1	1	malformed factor triple at term 0
+mutants/strassen_2x2x2__leading_zero.mfw	2x2x2	leading_zero	0	1	7	36	ea2d991038b1c564e3c7dc500668fd7d0f0fb233b326813950c20f26579db7f8
+mutants/strassen_2x2x2__blank_line.mfw	2x2x2	blank_line	0	1	7	36	54fb1a6ef6b57638e9b9940fd389866df4e5e902641a1791f2be3ec52f2454f7
+mutants/strassen_2x2x2__comment_line.mfw	2x2x2	comment_line	0	1	7	36	a8eb26a707b3b8d28c286127bc0ad25c3f3d34145344c6ab182169bbb63353de
+mutants/strassen_2x2x2__crlf.mfw	2x2x2	crlf	0	1	7	36	30e4ce3113544fe6c677d043248b478cb2cfc053f6a00281146f656ce72d57b9
+mutants/strassen_2x2x2__trailing_space.mfw	2x2x2	trailing_space	0	1	7	36	cbd012ef302680a3a924bfe2f94de2a72aeaa211463f7be062a4752a369e218d
+mutants/strassen_2x2x2__tab_separator.mfw	2x2x2	tab_separator	0	1	7	36	84fe6da9ece1cfa256559fe4c4fd8a0612132c4996cef284dd555f1a4f66531b
+mutants/strassen_2x2x2__no_final_newline.mfw	2x2x2	no_final_newline	0	1	7	36	8ea9bfeb066131362ea2aa0e0c725aedab76805e45316169f6732fe38c446100
+mutants/strassen_2x2x2__extra_blank_at_end.mfw	2x2x2	extra_blank_at_end	0	1	7	36	efe8896e5d0660d123d73265f1142b013a453433a8c581fcfaaa50e1fe8b4d8d
+mutants/strassen_2x2x2__junk_row.mfw	2x2x2	junk_row	1	1	wrong term count
+mutants/strassen_2x2x2__four_words.mfw	2x2x2	four_words	1	1	malformed factor triple at term 0
+mutants/strassen_2x2x2__r_prefix_in_mfw1.mfw	2x2x2	r_prefix_in_mfw1	1	1	R prefix in MFW1
+mutants/strassen_2x2x2__empty_file.mfw	2x2x2	empty_file	1	1	empty tensor certificate
+mutants/strassen_2x2x2__comments_only.mfw	2x2x2	comments_only	1	1	empty tensor certificate
+rank23_3x3x3.mfw	3x3x3	base	0	0	23	139	0f2ac22ffefb05968cc46dde7efe6191aa6b2b93ebbecbb9e69505de3822757e
+mutants/rank23_3x3x3__bit_flip_u.mfw	3x3x3	bit_flip_u	1	1	inexact GF(2) tensor at coefficients 8,1
+mutants/rank23_3x3x3__bit_flip_v.mfw	3x3x3	bit_flip_v	1	1	inexact GF(2) tensor at coefficients 6,8
+mutants/rank23_3x3x3__bit_flip_w.mfw	3x3x3	bit_flip_w	1	1	inexact GF(2) tensor at coefficients 6,1
+mutants/rank23_3x3x3__dropped_term.mfw	3x3x3	dropped_term	1	1	inexact GF(2) tensor at coefficients 6,1
+mutants/rank23_3x3x3__duplicated_term.mfw	3x3x3	duplicated_term	1	1	inexact GF(2) tensor at coefficients 0,0
+mutants/rank23_3x3x3__cancelling_pair.mfw	3x3x3	cancelling_pair	0	1	25	147	5475a2b85bbc2b842c7234ae8d207386f561b62bd46ca5f008ed18a16c204af6
+mutants/rank23_3x3x3__zero_factor.mfw	3x3x3	zero_factor	1	1	zero or out-of-bounds factor at term 0
+mutants/rank23_3x3x3__wide_factor.mfw	3x3x3	wide_factor	1	1	zero or out-of-bounds factor at term 22
+mutants/rank23_3x3x3__wrong_term_count.mfw	3x3x3	wrong_term_count	1	1	wrong term count
+mutants/rank23_3x3x3__short_file.mfw	3x3x3	short_file	1	1	wrong term count
+mutants/rank23_3x3x3__shape_mismatch.mfw	3x3x3	shape_mismatch	1	1	MFW1 shape mismatch
+mutants/rank23_3x3x3__bad_tag.mfw	3x3x3	bad_tag	1	1	missing rank header or R prefix
+mutants/rank23_3x3x3__bad_header_fields.mfw	3x3x3	bad_header_fields	1	1	malformed MFW1 header
+mutants/rank23_3x3x3__zero_dimension.mfw	3x3x3	zero_dimension	1	1	malformed MFW1 header
+mutants/rank23_3x3x3__header_double_space.mfw	3x3x3	header_double_space	0	1	23	139	78a8c2b33e48f49a475d470781dd6d304531047ef7f87e461b319e16514736e3
+mutants/rank23_3x3x3__non_canonical_order.mfw	3x3x3	non_canonical_order	0	1	23	139	b0f050b62da657681c499917be05b5e2836ed54420923190cadfff64f58c78eb
+mutants/rank23_3x3x3__uppercase_hex.mfw	3x3x3	uppercase_hex	1	1	malformed factor triple at term 3
+mutants/rank23_3x3x3__leading_zero.mfw	3x3x3	leading_zero	0	1	23	139	9f2fda7bff00b3fe0bfcdefc78f83907c00c4a9868da03f6df952a00f2ebd51f
+mutants/rank23_3x3x3__blank_line.mfw	3x3x3	blank_line	0	1	23	139	dd7aa3b1d12269f1985ad7f3c4df39fe0507418ce7036743a0adfea339525a38
+mutants/rank23_3x3x3__comment_line.mfw	3x3x3	comment_line	0	1	23	139	1b6050df9159ad9cfa05a611ab5b4c17b4c45f0d960d5b06951d346078bb178c
+mutants/rank23_3x3x3__crlf.mfw	3x3x3	crlf	0	1	23	139	372715e46cd14a6d6dc0ead66433dcec7c5144eec1ed32768c3954eb4254076a
+mutants/rank23_3x3x3__trailing_space.mfw	3x3x3	trailing_space	0	1	23	139	81125cd4fe652fc0cade914da4e0e6e52121cd771ec18a9ba4d6f605b04c1c34
+mutants/rank23_3x3x3__tab_separator.mfw	3x3x3	tab_separator	0	1	23	139	b9bacac10dd038cfc6954715177839917de2eda7bf377464b92d335e885a2943
+mutants/rank23_3x3x3__no_final_newline.mfw	3x3x3	no_final_newline	0	1	23	139	ff6014aa1840ae1bb11578b549e95887162339c9c012555226c560bec345513d
+mutants/rank23_3x3x3__extra_blank_at_end.mfw	3x3x3	extra_blank_at_end	0	1	23	139	a9ce65efe57f056dd311e65642c340e732ef8c88e54da344031da19ac664ed68
+mutants/rank23_3x3x3__junk_row.mfw	3x3x3	junk_row	1	1	wrong term count
+mutants/rank23_3x3x3__four_words.mfw	3x3x3	four_words	1	1	malformed factor triple at term 0
+mutants/rank23_3x3x3__r_prefix_in_mfw1.mfw	3x3x3	r_prefix_in_mfw1	1	1	R prefix in MFW1
+mutants/rank23_3x3x3__empty_file.mfw	3x3x3	empty_file	1	1	empty tensor certificate
+mutants/rank23_3x3x3__comments_only.mfw	3x3x3	comments_only	1	1	empty tensor certificate
+rank47_4x4x4.mfw	4x4x4	base	0	0	47	450	d90a7cf8e5b843b4ec09dfcf4313bdfdac8692b45b9fde2af84a2f90aa929441
+wide68_2x4x17.mfw	2x4x17	base	0	0	109	987	70c680cfbf695433becb31a39c04601279749b82b07f405909ce47444ea616cf
+mutants/wide68_2x4x17__bit_flip_u.mfw	2x4x17	bit_flip_u	1	1	inexact GF(2) tensor at coefficients 7,15
+mutants/wide68_2x4x17__bit_flip_v.mfw	2x4x17	bit_flip_v	1	1	inexact GF(2) tensor at coefficients 0,67
+mutants/wide68_2x4x17__bit_flip_w.mfw	2x4x17	bit_flip_w	1	1	inexact GF(2) tensor at coefficients 0,15
+mutants/wide68_2x4x17__dropped_term.mfw	2x4x17	dropped_term	1	1	inexact GF(2) tensor at coefficients 0,15
+mutants/wide68_2x4x17__duplicated_term.mfw	2x4x17	duplicated_term	1	1	inexact GF(2) tensor at coefficients 0,6
+mutants/wide68_2x4x17__cancelling_pair.mfw	2x4x17	cancelling_pair	0	1	111	999	023e3d8ba86877d3f25eb2a0b7e140d15f2ed28a5ecdf946e18b74c8f5c94c82
+mutants/wide68_2x4x17__transposed_c.mfw	2x4x17	transposed_c	1	1	inexact GF(2) tensor at coefficients 0,1
+mutants/wide68_2x4x17__zero_factor.mfw	2x4x17	zero_factor	1	1	zero or out-of-bounds factor at term 0
+mutants/wide68_2x4x17__wide_factor.mfw	2x4x17	wide_factor	1	1	zero or out-of-bounds factor at term 108
+mutants/wide68_2x4x17__wrong_term_count.mfw	2x4x17	wrong_term_count	1	1	wrong term count
+mutants/wide68_2x4x17__short_file.mfw	2x4x17	short_file	1	1	wrong term count
+mutants/wide68_2x4x17__shape_mismatch.mfw	2x4x17	shape_mismatch	1	1	MFW1 shape mismatch
+mutants/wide68_2x4x17__bad_tag.mfw	2x4x17	bad_tag	1	1	missing rank header or R prefix
+mutants/wide68_2x4x17__bad_header_fields.mfw	2x4x17	bad_header_fields	1	1	malformed MFW1 header
+mutants/wide68_2x4x17__zero_dimension.mfw	2x4x17	zero_dimension	1	1	malformed MFW1 header
+mutants/wide68_2x4x17__header_double_space.mfw	2x4x17	header_double_space	0	1	109	987	c30bf3a0cf10f198ee4401cbeffcb332bd4c76b1429604cb103d6483a0c482a8
+mutants/wide68_2x4x17__non_canonical_order.mfw	2x4x17	non_canonical_order	0	1	109	987	619beb103ba6c2cf1422e747802d109b459a01330629501a25c07474b8420b3a
+mutants/wide68_2x4x17__uppercase_hex.mfw	2x4x17	uppercase_hex	1	1	malformed factor triple at term 0
+mutants/wide68_2x4x17__leading_zero.mfw	2x4x17	leading_zero	0	1	109	987	43fc51890859edf7e1d5b9a8f5ebb49c8f65445df0b695a37ebdd1001afcd457
+mutants/wide68_2x4x17__blank_line.mfw	2x4x17	blank_line	0	1	109	987	6ef24fd6db24179eb3f8655bf39b1201f331cfa56977970a3817de34a019a16b
+mutants/wide68_2x4x17__comment_line.mfw	2x4x17	comment_line	0	1	109	987	fbea079af96441885d8f8a9f20ecd753b4639ccfef051f1bb4cae17ac3119567
+mutants/wide68_2x4x17__crlf.mfw	2x4x17	crlf	0	1	109	987	449475104636dcb9521b7fc2597eb019d7d8592634fd936a780039607bd7a14f
+mutants/wide68_2x4x17__trailing_space.mfw	2x4x17	trailing_space	0	1	109	987	66977aab880b0176f91daf7ea1d3d21566588e595ec0bc4ba82e1d75aa141271
+mutants/wide68_2x4x17__tab_separator.mfw	2x4x17	tab_separator	0	1	109	987	afd765267f7e4f3990eda0d3f7617175a0b8db95b2896ad232ad59c702f21d81
+mutants/wide68_2x4x17__no_final_newline.mfw	2x4x17	no_final_newline	0	1	109	987	1758b27857bcb058a6e7bbc0fedfb08a224db704f166d28d9e787a94613081e6
+mutants/wide68_2x4x17__extra_blank_at_end.mfw	2x4x17	extra_blank_at_end	0	1	109	987	0dbab6fa51f1c70b5f4c229c9b41e0b0a4b5905a7b1cb6683ddd8d45f371a991
+mutants/wide68_2x4x17__junk_row.mfw	2x4x17	junk_row	1	1	wrong term count
+mutants/wide68_2x4x17__four_words.mfw	2x4x17	four_words	1	1	malformed factor triple at term 0
+mutants/wide68_2x4x17__r_prefix_in_mfw1.mfw	2x4x17	r_prefix_in_mfw1	1	1	R prefix in MFW1
+mutants/wide68_2x4x17__empty_file.mfw	2x4x17	empty_file	1	1	empty tensor certificate
+mutants/wide68_2x4x17__comments_only.mfw	2x4x17	comments_only	1	1	empty tensor certificate
+wide145_2x5x29.mfw	2x5x29	base	0	0	228	2230	4819137986dcf493a8b92b63604fb2a3403138fbfc8345d215b10518a49e0e57
+mutants/wide145_2x5x29__bit_flip_u.mfw	2x5x29	bit_flip_u	1	1	inexact GF(2) tensor at coefficients 9,17
+mutants/wide145_2x5x29__bit_flip_v.mfw	2x5x29	bit_flip_v	1	1	inexact GF(2) tensor at coefficients 5,144
+mutants/wide145_2x5x29__bit_flip_w.mfw	2x5x29	bit_flip_w	1	1	inexact GF(2) tensor at coefficients 5,17
+mutants/wide145_2x5x29__dropped_term.mfw	2x5x29	dropped_term	1	1	inexact GF(2) tensor at coefficients 5,17
+mutants/wide145_2x5x29__duplicated_term.mfw	2x5x29	duplicated_term	1	1	inexact GF(2) tensor at coefficients 0,8
+mutants/wide145_2x5x29__cancelling_pair.mfw	2x5x29	cancelling_pair	0	1	230	2256	bd8b46e3fc22d7439f96e6ab350c614335fee62144c026fb3a6718de62325fba
+mutants/wide145_2x5x29__transposed_c.mfw	2x5x29	transposed_c	1	1	inexact GF(2) tensor at coefficients 0,1
+mutants/wide145_2x5x29__zero_factor.mfw	2x5x29	zero_factor	1	1	zero or out-of-bounds factor at term 0
+mutants/wide145_2x5x29__wide_factor.mfw	2x5x29	wide_factor	1	1	zero or out-of-bounds factor at term 227
+mutants/wide145_2x5x29__wrong_term_count.mfw	2x5x29	wrong_term_count	1	1	wrong term count
+mutants/wide145_2x5x29__short_file.mfw	2x5x29	short_file	1	1	wrong term count
+mutants/wide145_2x5x29__shape_mismatch.mfw	2x5x29	shape_mismatch	1	1	MFW1 shape mismatch
+mutants/wide145_2x5x29__bad_tag.mfw	2x5x29	bad_tag	1	1	missing rank header or R prefix
+mutants/wide145_2x5x29__bad_header_fields.mfw	2x5x29	bad_header_fields	1	1	malformed MFW1 header
+mutants/wide145_2x5x29__zero_dimension.mfw	2x5x29	zero_dimension	1	1	malformed MFW1 header
+mutants/wide145_2x5x29__header_double_space.mfw	2x5x29	header_double_space	0	1	228	2230	263b0e46e4955a5fe021ecf9da2e678d2f29cffa452883065f0df03c7d17e869
+mutants/wide145_2x5x29__non_canonical_order.mfw	2x5x29	non_canonical_order	0	1	228	2230	caaf00c786dac4715cf16ac1394ccc9786eb56fea53e12c6bd60f8b92c27dffd
+mutants/wide145_2x5x29__uppercase_hex.mfw	2x5x29	uppercase_hex	1	1	malformed factor triple at term 0
+mutants/wide145_2x5x29__leading_zero.mfw	2x5x29	leading_zero	0	1	228	2230	f17461f6980b5ed01505aa345485182a13e5eac31c0f383bf2b1b96f2459c8da
+mutants/wide145_2x5x29__blank_line.mfw	2x5x29	blank_line	0	1	228	2230	d3f037ee547a5d9a256f271e80a81f12cab9b1087fe81fb9a9675e7a74ce6e92
+mutants/wide145_2x5x29__comment_line.mfw	2x5x29	comment_line	0	1	228	2230	577744087bea3ec48cef6bea6c8dd65633bc537534ef9b68371fc8d2cfc6daae
+mutants/wide145_2x5x29__crlf.mfw	2x5x29	crlf	0	1	228	2230	8c093a89722d70ed1cea049c7a2f1250177c4c244c11196d6b3ceaa79ca30f58
+mutants/wide145_2x5x29__trailing_space.mfw	2x5x29	trailing_space	0	1	228	2230	fc0c35cd851a34a85baffe9df447cc65dc891e1355fb17bd2cbb312e67b2c12e
+mutants/wide145_2x5x29__tab_separator.mfw	2x5x29	tab_separator	0	1	228	2230	9430f290075a2947cef85740e1ab51ebaa11c7d72bca91ac5717c5f9a9f80f36
+mutants/wide145_2x5x29__no_final_newline.mfw	2x5x29	no_final_newline	0	1	228	2230	f737dccd256ccd8b29c5edf8484a1d4548bd47d3248d9f93ace5d2c31e8a2e19
+mutants/wide145_2x5x29__extra_blank_at_end.mfw	2x5x29	extra_blank_at_end	0	1	228	2230	adde9d1269085cea095c188818a4d20df74bb2417fab39d44965ef896c31120a
+mutants/wide145_2x5x29__junk_row.mfw	2x5x29	junk_row	1	1	wrong term count
+mutants/wide145_2x5x29__four_words.mfw	2x5x29	four_words	1	1	malformed factor triple at term 0
+mutants/wide145_2x5x29__r_prefix_in_mfw1.mfw	2x5x29	r_prefix_in_mfw1	1	1	R prefix in MFW1
+mutants/wide145_2x5x29__empty_file.mfw	2x5x29	empty_file	1	1	empty tensor certificate
+mutants/wide145_2x5x29__comments_only.mfw	2x5x29	comments_only	1	1	empty tensor certificate
+wide264_4x11x24.mfw	4x11x24	base	0	0	721	12707	cb438bdd9ea0cf8f7864d91491d96e0097f10ad7c0dd3f7cdb97f211f9e2110e
+mutants/wide264_4x11x24__bit_flip_u.mfw	4x11x24	bit_flip_u	1	1	inexact GF(2) tensor at coefficients 43,2
+mutants/wide264_4x11x24__dropped_term.mfw	4x11x24	dropped_term	1	1	inexact GF(2) tensor at coefficients 1,2
+mutants/wide264_4x11x24__crlf.mfw	4x11x24	crlf	0	1	721	12707	f82287afd4cddeb46989d5a39b4e881427b023139f9ab81350a132fe817a1fa9
+wide529_3x23x23.mfw	3x23x23	base	0	0	1167	38117	4d3c629c6bff862ce51f2b75f2d334e1eb1c0e6660e50a8e39112ce2f71abe55
+3x3x3_rank23_checkpoint.txt	3x3x3	checkpoint	0	1	23	139	9d4c649998137bcbe779cfcc57c16c7b4c0f54497687c3cf10b601be428afc80
+strassen_2x2x2_R.txt	2x2x2	r_rows	0	1	7	36	67322d7816f4e93284b07edc1cecd1c1a41e92647d069019e8e44847f6cdfdb2
+wide68_2x4x17_R.txt	2x4x17	r_rows_wide	0	1	109	987	7204a4592f35fd2f4367d39550ddda7a13388d921d9c21ce6e2346029a5b2cd0
+wide68_2x4x17_checkpoint.txt	2x4x17	checkpoint_wide	0	1	109	987	0c8fef70cefde444cec3f5f02e0f3ba1d949263e5a421675ce7e2feaec8a0409
+strassen_2x2x2_commented.txt	2x2x2	commented_checkpoint	0	1	7	36	90abc0192b891a3abcab5996710224bb97a253ea61dfaa29fd04cf8be7624fce

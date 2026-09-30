@@ -16,6 +16,14 @@ the indexed rank. The other 102 record tensors are certificates already committe
 optimality claim or a completed novelty audit: under `RECORD_POLICY.md` these are **apparent**
 GF(2) upper bounds.
 
+> **Update, evening of 2026-09-29: prior-art audit.** The counts below are the scoring against the four tables only. A limited
+> audit afterwards (48 papers, the matmulcatalog's own `docs/cited-bounds.json`, and compositions of published schemes; every
+> scheme we rebuilt was verified exactly) found **87 of the 795 superseded** by published constructions (80 by GF(2) schemes
+> we rebuilt from published files, 7 by published rank claims) and **112 more matched** by elementary compositions of published
+> schemes; **596 remain**. `4x4x8` at 94 is Perminov's Z2 result and `7x7x7` at 247 is beaten by Medley et al.'s 245. Re-scoring
+> against the latest heads of the four tables changes no class. See `papers/results/sections/persistence.tex`,
+> `papers/results/data/prior_art_flags.tsv` (one flag per record) and `papers/ERRATA.md`.
+
 ## Standing on 2026-09-29
 
 Scored against Lille `fmm_digest` `9f26324` (2026-09-28), matmulcatalog `f0c2ba9` (2026-09-29,

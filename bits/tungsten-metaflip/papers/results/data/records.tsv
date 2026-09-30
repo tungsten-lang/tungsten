@@ -1,0 +1,796 @@
+shape	rank	class	best_listed_any_ring	best_listed_gf2_valid	family	code	prior_art
+7x7x7	247	below_all	249	250	live fleet checkpoint	F	S1
+4x4x8	94	below_all	95	96	closure product	C	M1
+8x8x9	381	below_all	388	391	closure product -> projection	CP	M1
+9x9x9	482	below_all	486	486	public seed -> walk	S	none
+8x8x10	420	below_all	427	427	closure product	C	M1
+8x11x12	673	below_all	676	690	committed certificate -> projection	KP	none
+7x12x12	663	gf2_valid_only	660	669	committed certificate -> projection	KP	none
+8x12x12	705	below_all	720	735	committed certificate	K	M1
+10x12x12	900	gf2_valid_only	900	902	closure product	C	M1
+9x11x13	836	gf2_valid_only	835	840	public seed -> walk	S	none
+8x12x13	786	gf2_valid_only	781	807	committed certificate	K	none
+12x13x13	1292	gf2_valid_only	1274	1298	July certificate -> projection	JP	none
+13x13x13	1402	gf2_valid_only	1379	1426	July certificate	J	none
+4x4x14	162	below_all	163	164	closure product	C	M1
+4x5x14	206	gf2_valid_only	206	207	closure product	C	S1
+9x10x14	819	gf2_valid_only	808	820	public seed -> walk	S	none
+8x12x14	849	gf2_valid_only	843	861	committed certificate	K	none
+12x12x14	1251	gf2_valid_only	1232	1260	July certificate	J	none
+10x13x14	1150	below_all	1152	1152	public seed -> walk	S	none
+12x13x14	1383	gf2_valid_only	1370	1389	July certificate -> projection	JP	none
+13x13x14	1501	below_all	1511	1511	July certificate	J	none
+11x14x14	1372	below_all	1373	1373	public seed -> walk	S	none
+4x4x15	175	below_all	176	176	closure product	C	M1
+4x5x15	220	below_all	221	221	closure product	C	S1
+8x8x15	632	gf2_valid_only	628	639	closure product -> projection -> walk	CPW	S1
+8x12x15	899	below_all	904	914	committed certificate	K	none
+12x12x15	1320	gf2_valid_only	1280	1326	July certificate -> projection	JP	none
+8x13x15	989	below_all	991	991	committed certificate	K	none
+11x13x15	1363	below_all	1364	1364	public seed -> walk	S	none
+12x13x15	1455	gf2_valid_only	1442	1464	July certificate -> projection	JP	none
+13x13x15	1582	below_all	1605	1605	July certificate	J	none
+13x15x15	1796	gf2_valid_only	1776	1797	July certificate	J	none
+15x15x15	2006	gf2_valid_only	1977	2058	live fleet checkpoint	F	none
+4x5x16	234	below_all	235	235	closure product	C	S1
+8x8x16	658	below_all	665	666	closure product	C	M1
+8x11x16	889	below_all	904	906	closure product -> projection -> walk	CPW	none
+7x12x16	871	below_all	876	876	committed certificate	K	none
+8x12x16	940	below_all	956	960	closure product	C	M1
+11x12x16	1301	gf2_valid_only	1278	1306	July certificate -> projection	JP	none
+12x12x16	1363	below_all	1380	1380	July certificate	J	M1
+7x13x16	962	gf2_valid_only	962	966	committed certificate	K	none
+8x13x16	1037	below_all	1054	1064	closure product -> projection	CP	none
+11x13x16	1452	gf2_valid_only	1446	1458	July certificate -> projection	JP	none
+12x13x16	1507	below_all	1509	1544	July certificate	J	none
+13x13x16	1648	below_all	1704	1711	July certificate	J	none
+12x14x16	1626	gf2_valid_only	1617	1663	July certificate -> projection	JP	none
+13x14x16	1763	below_all	1796	1806	July certificate	J	none
+14x14x16	1881	below_all	1895	1943	July certificate	J	none
+8x15x16	1177	below_all	1185	1203	closure product -> projection -> walk	CPW	none
+12x15x16	1714	below_all	1725	1725	July certificate	J	none
+13x15x16	1858	below_all	1885	1885	July certificate	J	none
+14x15x16	1975	below_all	2016	2043	July certificate	J	none
+15x15x16	2074	below_all	2132	2132	July certificate	J	none
+7x16x16	1135	below_all	1148	1158	closure product -> projection -> walk	CPW	none
+8x16x16	1222	below_all	1230	1256	closure product	C	M1
+10x16x16	1558	below_all	1560	1578	July certificate	J	none
+11x16x16	1707	below_all	1724	1749	July certificate -> projection	JP	none
+12x16x16	1786	below_all	1815	1862	July certificate	J	M1
+13x16x16	1930	below_all	2022	2038	July certificate	J	none
+14x16x16	2041	below_all	2128	2170	July certificate	J	none
+15x16x16	2137	below_all	2223	2302	July certificate	J	none
+2x4x17	109	gf2_valid_only	109	111	closure product	C	M1
+2x5x17	134	gf2_valid_only	134	136	closure product	C	M1
+11x11x17	1312	below_all	1314	1314	matmulcatalog replay -> walk	MW	none
+8x12x17	1036	below_all	1038		closure product	C	M1
+11x12x17	1406	below_all	1408		July certificate -> projection	JP	none
+12x12x17	1475	below_all	1480		July certificate	J	none
+8x13x17	1141	below_all	1144		closure product	C	none
+12x13x17	1627	below_all	1636		July certificate	J	none
+13x13x17	1778	below_all	1805	1876	July certificate	J	none
+10x14x17	1503	below_all	1505	1505	matmulcatalog replay -> walk	MW	none
+12x14x17	1752	below_all	1764		July certificate	J	none
+13x14x17	1907	below_all	1923	1923	July certificate	J	none
+14x14x17	2035	gf2_valid_only	2032	2054	July certificate	J	none
+10x15x17	1581	below_all	1582	1582	matmulcatalog replay -> walk	MW	none
+13x15x17	2008	below_all	2037		July certificate	J	none
+14x15x17	2145	below_all	2158	2158	July certificate	J	none
+8x16x17	1350	below_all	1352		closure product	C	M1
+10x16x17	1694	below_all	1696	1696	July certificate	J	none
+11x16x17	1849	below_all	1864		July certificate -> projection	JP	none
+12x16x17	1930	below_all	1980		July certificate	J	none
+13x16x17	2090	below_all	2164		July certificate	J	none
+14x16x17	2223	below_all	2306		July certificate	J	none
+15x16x17	2329	below_all	2446	2446	July certificate	J	none
+16x16x17	2417	below_all	2493		July certificate	J	none
+12x17x17	2082	below_all	2114		July certificate	J	none
+13x17x17	2259	below_all	2320		July certificate	J	none
+14x17x17	2409	below_all	2456		July certificate	J	none
+15x17x17	2532	below_all	2622		July certificate	J	none
+16x17x17	2637	below_all	2723		July certificate	J	none
+2x4x18	115	gf2_valid_only	115	117	closure product	C	M1
+9x9x18	915	below_all	918	918	matmulcatalog replay	M	S2
+3x14x18	561	below_all	562	562	matmulcatalog replay -> walk	MW	S1
+8x16x18	1422	below_all	1424	1424	closure product	C	M1
+13x16x18	2250	below_all	2273		closure product	C	S1
+14x16x18	2376	below_all	2427		July certificate	J	none
+15x16x18	2490	below_all	2530		July certificate	J	none
+16x16x18	2586	below_all	2629		July certificate	J	none
+13x17x18	2401	below_all	2404		July certificate	J	none
+14x17x18	2576	below_all	2596		July certificate	J	none
+15x17x18	2709	below_all	2712		July certificate	J	none
+16x17x18	2818	below_all	2884		July certificate	J	none
+8x11x19	1079	below_all	1085		July certificate -> projection -> walk	JPW	none
+8x12x19	1143	below_all	1159		July certificate -> projection	JP	none
+10x12x19	1421	below_all	1434		committed certificate -> projection	KP	none
+12x12x19	1636	below_all	1659		July certificate	J	none
+12x13x19	1804	below_all	1832		July certificate	J	none
+13x13x19	1978	below_all	2015		July certificate	J	none
+8x14x19	1355	below_all	1356		matmulcatalog replay -> projection -> walk	MPW	none
+12x14x19	1943	below_all	1960		July certificate	J	none
+13x14x19	2125	below_all	2143	2143	July certificate	J	none
+14x14x19	2276	gf2_valid_only	2266	2288	July certificate	J	none
+10x15x19	1751	below_all	1752	1752	matmulcatalog replay -> walk	MW	none
+13x15x19	2252	below_all	2268	2268	July certificate	J	none
+10x16x19	1838	below_all	1878	1878	matmulcatalog replay -> projection -> walk	MPW	none
+11x16x19	2045	below_all	2074		July certificate -> projection -> walk	JPW	none
+12x16x19	2137	below_all	2186		July certificate	J	none
+13x16x19	2329	below_all	2414	2414	July certificate	J	none
+14x16x19	2490	below_all	2580		July certificate	J	none
+15x16x19	2629	below_all	2718		July certificate	J	none
+16x16x19	2716	below_all	2806		July certificate	J	none
+11x17x19	2190	below_all	2205	2205	July certificate	J	none
+12x17x19	2305	below_all	2348		July certificate	J	none
+13x17x19	2516	below_all	2586		July certificate	J	none
+14x17x19	2703	below_all	2753		July certificate	J	none
+15x17x19	2862	below_all	2921		July certificate	J	none
+16x17x19	2960	below_all	3066		July certificate	J	none
+14x18x19	2878	below_all	2890		July certificate	J	none
+16x18x19	3162	below_all	3204		July certificate	J	none
+11x19x19	2430	below_all	2462	2462	July certificate	J	none
+12x19x19	2563	below_all	2604		July certificate	J	none
+13x19x19	2822	below_all	2880		July certificate	J	none
+14x19x19	3037	below_all	3056		July certificate	J	none
+15x19x19	3225	below_all	3245		July certificate	J	S1
+16x19x19	3335	below_all	3408	3408	July certificate	J	none
+17x19x19	3598	below_all	3633		July certificate	J	none
+2x4x20	128	gf2_valid_only	128	130	closure product	C	M1
+8x10x20	1015	below_all	1016	1020	matmulcatalog replay	M	none
+8x11x20	1119	below_all	1138	1138	July certificate	J	none
+7x12x20	1088	below_all	1098		July certificate -> projection -> walk	JPW	S1
+8x12x20	1175	below_all	1192	1192	July certificate	J	M1
+10x12x20	1448	below_all	1464		committed certificate	K	none
+11x12x20	1618	below_all	1633		July certificate -> projection	JP	Q
+12x12x20	1692	below_all	1710	1710	July certificate	J	M1
+11x13x20	1797	below_all	1801		July certificate -> projection	JP	none
+12x13x20	1868	below_all	1911	1911	July certificate	J	none
+13x13x20	2052	below_all	2099	2099	July certificate	J	none
+4x14x20	753	gf2_valid_only	736	755	matmulcatalog replay -> walk	MW	S2
+7x14x20	1282	below_all	1283		matmulcatalog replay -> projection -> walk	MPW	S1
+8x14x20	1395	below_all	1402	1402	matmulcatalog replay	M	none
+11x14x20	1920	below_all	1932		July certificate -> projection -> walk	JPW	S1
+12x14x20	2011	below_all	2016		July certificate	J	none
+13x14x20	2203	below_all	2254	2254	July certificate	J	none
+14x14x20	2364	below_all	2370	2385	July certificate	J	none
+12x15x20	2121	below_all	2132	2132	July certificate	J	S1
+13x15x20	2321	below_all	2382	2382	July certificate	J	S1
+14x15x20	2486	below_all	2505		July certificate	J	none
+15x15x20	2627	below_all	2653	2653	July certificate	J	none
+10x16x20	1886	below_all	1904	1904	matmulcatalog replay	M	none
+11x16x20	2114	below_all	2156		July certificate -> projection	JP	none
+12x16x20	2209	below_all	2256		July certificate	J	M1
+13x16x20	2417	below_all	2516		July certificate	J	none
+14x16x20	2586	below_all	2645	2664	July certificate	J	none
+15x16x20	2716	below_all	2834	2834	July certificate	J	none
+16x16x20	2820	below_all	2903		July certificate	J	M1
+11x17x20	2308	below_all	2316		July certificate -> projection	JP	none
+12x17x20	2385	below_all	2449		July certificate	J	none
+13x17x20	2613	below_all	2697		July certificate	J	none
+14x17x20	2802	below_all	2879		July certificate	J	none
+15x17x20	2952	below_all	3027		July certificate	J	none
+16x17x20	3076	below_all	3188		July certificate	J	none
+17x17x20	3336	below_all	3370		July certificate	J	none
+16x18x20	3284	below_all	3328		July certificate	J	none
+7x19x20	1698	below_all	1711		closure product -> projection -> walk	CPW	none
+8x19x20	1828	below_all	1860		closure product -> projection -> walk	CPW	none
+11x19x20	2556	below_all	2572		July certificate -> projection	JP	none
+12x19x20	2638	below_all	2704		July certificate	J	none
+13x19x20	2906	below_all	3001		July certificate	J	none
+14x19x20	3130	below_all	3187	3187	July certificate	J	none
+15x19x20	3321	below_all	3357		July certificate	J	none
+16x19x20	3444	below_all	3548		July certificate	J	none
+17x19x20	3712	below_all	3780		July certificate	J	none
+6x20x20	1494	below_all	1496	1496	matmulcatalog replay	M	S1
+7x20x20	1749	below_all	1770		closure product -> projection -> walk	CPW	none
+8x20x20	1880	below_all	1920		closure product	C	M1
+11x20x20	2614	below_all	2634		July certificate -> projection	JP	none
+12x20x20	2726	below_all	2781		July certificate	J	M1
+13x20x20	3014	below_all	3109		July certificate	J	none
+14x20x20	3248	below_all	3261	3261	July certificate	J	none
+15x20x20	3428	below_all	3494	3498	July certificate	J	none
+16x20x20	3572	below_all	3635		July certificate	J	S1
+17x20x20	3844	below_all	3964		July certificate	J	S1
+20x20x20	4451	gf2_valid_only	3995	4551	July certificate -> projection	JP	S1
+2x4x21	134	gf2_valid_only	134	137	closure product	C	M1
+10x11x21	1458	gf2_valid_only	1455	1460	matmulcatalog replay -> walk	MW	S1
+10x15x21	1900	below_all	1901	1901	matmulcatalog replay	M	S1
+11x15x21	2111	below_all	2112	2112	matmulcatalog replay -> walk	MW	none
+15x15x21	2793	gf2_valid_only	2782	2802	matmulcatalog replay -> walk	MW	S1
+11x16x21	2221	below_all	2274		committed certificate	K	S1
+12x16x21	2321	below_all	2384		committed certificate	K	none
+13x16x21	2582	below_all	2650		committed certificate -> projection -> walk	KPW	S2
+14x16x21	2746	below_all	2811	2811	committed certificate	K	none
+15x16x21	2900	below_all	2961		committed certificate	K	none
+16x16x21	3028	below_all	3105		committed certificate	K	none
+8x17x21	1767	below_all	1769	1769	matmulcatalog replay -> walk	MW	none
+10x17x21	2157	below_all	2158	2158	matmulcatalog replay -> walk	MW	none
+13x17x21	2834	below_all	2842		closure product	C	none
+16x17x21	3321	below_all	3368		committed certificate	K	none
+11x19x21	2679	below_all	2711		July certificate -> projection	JP	none
+13x19x21	3153	below_all	3166		closure product	C	S1
+7x20x21	1877	below_all	1880	1880	matmulcatalog replay -> walk	MW	S1
+8x20x21	2040	below_all	2044	2044	closure product	C	M1
+11x20x21	2730	below_all	2816	2816	July certificate	J	Q
+13x20x21	3274	below_all	3291		closure product	C	S1
+16x20x21	3840	below_all	3896		closure product -> projection -> walk	CPW	S1
+11x21x21	2892	below_all	2964	2964	July certificate	J	none
+2x5x22	173	gf2_valid_only	173	176	closure product	C	M1
+8x11x22	1246	below_all	1247		closure product	C	none
+8x13x22	1455	below_all	1458		closure product	C	none
+13x15x22	2595	below_all	2604		committed certificate -> projection -> walk	KPW	S1
+8x16x22	1700	below_all	1710	1710	matmulcatalog replay	M	none
+11x16x22	2302	below_all	2360		committed certificate	K	none
+12x16x22	2433	below_all	2493		closure product -> projection -> walk	CPW	none
+13x16x22	2668	below_all	2757		committed certificate	K	none
+14x16x22	2888	below_all	2932	2932	committed certificate	K	none
+15x16x22	3057	below_all	3091		closure product	C	none
+16x16x22	3181	below_all	3209		closure product	C	M1
+15x17x22	3309	below_all	3338		closure product	C	none
+16x17x22	3474	below_all	3509	3509	committed certificate	K	none
+8x19x22	2034	below_all	2057	2057	committed certificate	K	none
+11x19x22	2797	below_all	2815		July certificate -> projection	JP	none
+12x19x22	2935	below_all	2989		matmulcatalog replay -> projection -> walk	MPW	none
+13x19x22	3286	below_all	3287		closure product	C	S1
+16x19x22	3892	below_all	3906		closure product	C	S1
+7x20x22	1961	below_all	1975		closure product -> projection -> walk	CPW	none
+8x20x22	2098	below_all	2126		closure product -> projection -> walk	CPW	none
+11x20x22	2854	below_all	2932	2932	July certificate	J	none
+12x20x22	3001	below_all	3061	3061	matmulcatalog replay	M	none
+13x20x22	3414	below_all	3428		closure product	C	S1
+16x20x22	3976	below_all	4061	4061	closure product -> projection -> walk	CPW	S1
+11x21x22	3087	below_all	3096	3096	closure product	C	none
+10x22x22	2920	below_all	2922	2922	matmulcatalog replay	M	none
+11x22x22	3226	below_all	3228		closure product -> walk	CW	none
+12x22x22	3372	below_all	3422	3422	committed certificate	K	none
+2x5x23	181	gf2_valid_only	181	184	closure product	C	M1
+8x14x23	1607	below_all	1626		matmulcatalog replay -> projection -> walk	MPW	none
+10x14x23	1990	below_all	1991	1991	matmulcatalog replay -> walk	MW	none
+11x14x23	2173	below_all	2176		committed certificate	K	none
+8x15x23	1713	below_all	1714	1714	matmulcatalog replay -> walk	MW	none
+11x15x23	2307	below_all	2317	2317	committed certificate	K	none
+13x15x23	2659	below_all	2679		committed certificate	K	none
+8x16x23	1792	below_all	1824		committed certificate -> projection -> walk	KPW	none
+10x16x23	2227	below_all	2242	2242	committed certificate	K	none
+11x16x23	2382	below_all	2433		committed certificate	K	none
+12x16x23	2497	below_all	2552		closure product -> projection -> walk	CPW	none
+13x16x23	2771	below_all	2863		closure product -> projection	CP	none
+14x16x23	2994	below_all	3071		committed certificate	K	none
+15x16x23	3164	below_all	3238		committed certificate	K	none
+16x16x23	3324	below_all	3385	3441	committed certificate	K	none
+8x17x23	1919	below_all	1946	1947	committed certificate -> projection -> walk	KPW	none
+12x17x23	2773	below_all	2779		closure product -> projection -> walk	CPW	none
+13x17x23	3070	below_all	3072		closure product	C	none
+16x17x23	3595	below_all	3645		committed certificate	K	none
+4x18x23	1083	below_all	1084	1084	matmulcatalog replay -> walk	MW	none
+8x18x23	2015	below_all	2025	2025	committed certificate	K	none
+7x19x23	1955	below_all	1959		committed certificate	K	none
+8x19x23	2099	below_all	2145	2145	committed certificate	K	none
+11x19x23	2898	below_all	2924		July certificate -> projection	JP	none
+12x19x23	3044	below_all	3106		closure product -> projection -> walk	CPW	none
+16x19x23	4009	below_all	4062		closure product -> projection -> walk	CPW	none
+7x20x23	2017	below_all	2054	2054	closure product -> projection -> walk	CPW	none
+8x20x23	2165	below_all	2228		closure product -> projection -> walk	CPW	none
+10x20x23	2771	below_all	2775	2775	matmulcatalog replay -> walk	MW	none
+11x20x23	2961	below_all	3035	3046	July certificate	J	none
+12x20x23	3128	below_all	3184		closure product -> projection -> walk	CPW	none
+15x20x23	4002	below_all	4008	4008	matmulcatalog replay -> walk	MW	none
+16x20x23	4132	below_all	4260		closure product -> projection -> walk	CPW	none
+10x21x23	2902	below_all	2908	2908	matmulcatalog replay -> walk	MW	none
+11x21x23	3206	below_all	3218		closure product -> projection -> walk	CPW	none
+8x22x23	2453	below_all	2457	2457	closure product	C	none
+11x22x23	3344	below_all	3353		closure product -> walk	CW	none
+12x22x23	3496	below_all	3554		committed certificate	K	none
+16x22x23	4603	below_all	4627		committed certificate -> projection	KP	none
+3x23x23	1167	below_all	1169	1169	matmulcatalog replay	M	none
+8x23x23	2520	below_all	2550	2550	closure product -> projection -> walk	CPW	none
+12x23x23	3642	below_all	3694		committed certificate	K	none
+16x23x23	4743	below_all	4785		committed certificate	K	none
+20x23x23	5883	below_all	5904		committed certificate	K	none
+2x4x24	153	gf2_valid_only	153	156	closure product	C	M1
+4x4x24	277	below_all	278		closure product	C	M1
+4x11x24	720	below_all	721	721	matmulcatalog replay -> walk	MW	S1
+12x13x24	2166	below_all	2184		closure product -> projection	CP	none
+8x14x24	1645	below_all	1667	1667	matmulcatalog replay	M	none
+11x14x24	2225	below_all	2232		committed certificate	K	none
+11x15x24	2357	below_all	2390		committed certificate	K	Q
+7x16x24	1703	below_all	1708		closure product -> projection -> walk	CPW	none
+8x16x24	1833	below_all	1866	1866	closure product	C	M1
+10x16x24	2277	below_all	2301	2301	committed certificate	K	none
+11x16x24	2433	below_all	2472		closure product -> projection	CP	none
+12x16x24	2538	below_all	2592		closure product	C	M1
+13x16x24	2842	below_all	2942		closure product -> projection	CP	none
+14x16x24	3084	below_all	3138	3138	committed certificate	K	none
+15x16x24	3240	below_all	3294		closure product	C	M1
+16x16x24	3431	below_all	3467		closure product	C	M1
+8x17x24	1962	below_all	2012	2012	committed certificate -> projection	KP	none
+10x17x24	2444	below_all	2446	2446	matmulcatalog replay -> walk	MW	none
+11x17x24	2697	below_all	2701		closure product	C	none
+12x17x24	2826	below_all	2846		closure product	C	M1
+13x17x24	3154	below_all	3156		closure product	C	none
+8x18x24	2059	below_all	2076		committed certificate	K	Q
+10x18x24	2546	below_all	2547	2547	matmulcatalog replay	M	S1
+7x19x24	2002	below_all	2025		committed certificate	K	none
+8x19x24	2140	below_all	2216	2216	committed certificate	K	none
+11x19x24	2969	below_all	3003		July certificate -> projection	JP	none
+12x19x24	3109	below_all	3168		closure product -> projection -> walk	CPW	none
+16x19x24	4106	below_all	4158		closure product -> projection -> walk	CPW	none
+7x20x24	2061	below_all	2086	2120	closure product -> projection	CP	none
+8x20x24	2209	below_all	2256		closure product	C	M1
+11x20x24	3028	below_all	3114	3128	July certificate	J	none
+12x20x24	3196	below_all	3264		closure product	C	M1
+16x20x24	4230	below_all	4320		closure product	C	S1
+20x20x24	5202	gf2_valid_only	5019	5232	July certificate -> projection	JP	S1
+8x21x24	2401	below_all	2412	2415	closure product	C	M1
+11x21x24	3287	below_all	3288		closure product -> projection -> walk	CPW	Q
+16x21x24	4518	below_all	4560		committed certificate -> projection	KP	none
+8x22x24	2509	below_all	2512	2512	closure product	C	M1
+11x22x24	3436	below_all	3446		closure product	C	none
+12x22x24	3601	below_all	3632		committed certificate	K	S2
+16x22x24	4665	below_all	4732		committed certificate	K	none
+8x23x24	2582	below_all	2624	2624	closure product -> projection -> walk	CPW	none
+12x23x24	3736	below_all	3790		committed certificate	K	none
+15x23x24	4699	below_all	4712		committed certificate	K	none
+16x23x24	4815	below_all	4908		committed certificate	K	none
+20x23x24	6005	below_all	6071		committed certificate	K	none
+7x24x24	2458	below_all	2480		closure product -> projection -> walk	CPW	none
+8x24x24	2632	below_all	2682		closure product	C	M1
+16x24x24	4935	below_all	5040		closure product	C	M1
+19x24x24	5974	below_all	6000		closure product -> projection -> walk	CPW	none
+20x24x24	6110	below_all	6234		closure product	C	M1
+4x4x25	290	below_all	291	291	closure product	C	M1
+10x12x25	1836	below_all	1844		committed certificate	K	S1
+11x13x25	2197	below_all	2202		July certificate -> projection -> walk	JPW	none
+12x13x25	2322	below_all	2326		closure product	C	none
+3x14x25	780	below_all	781		closure product	C	none
+11x14x25	2335	below_all	2361		July certificate	J	none
+10x15x25	2261	below_all	2262	2262	matmulcatalog replay -> walk	MW	none
+11x15x25	2476	below_all	2514	2514	July certificate	J	none
+8x16x25	1938	below_all	1948		committed certificate -> projection	KP	none
+10x16x25	2412	gf2_valid_only	2378	2430	committed certificate -> projection -> walk	KPW	S1
+11x16x25	2582	below_all	2643		committed certificate	K	none
+12x16x25	2730	below_all	2772		closure product	C	M1
+13x16x25	3050	below_all	3102		closure product	C	none
+15x16x25	3457	below_all	3474		closure product	C	S1
+16x16x25	3589	below_all	3617		closure product	C	M1
+8x17x25	2074	below_all	2112		committed certificate	K	none
+10x17x25	2570	below_all	2572	2572	matmulcatalog replay -> walk	MW	none
+16x17x25	3941	below_all	3972		closure product	C	none
+8x18x25	2180	below_all	2200	2200	committed certificate	K	none
+10x18x25	2687	below_all	2688	2688	matmulcatalog replay -> walk	MW	S1
+11x18x25	2978	below_all	2980	2980	matmulcatalog replay -> walk	MW	none
+7x19x25	2122	below_all	2127		committed certificate	K	none
+8x19x25	2267	below_all	2330	2330	committed certificate	K	none
+11x19x25	3140	below_all	3163		July certificate -> projection	JP	none
+12x19x25	3337	below_all	3348		closure product	C	none
+13x19x25	3644	below_all	3705		committed certificate -> projection -> walk	KPW	none
+16x19x25	4366	below_all	4410		matmulcatalog replay -> projection -> walk	MPW	none
+7x20x25	2201	below_all	2220	2220	closure product	C	none
+8x20x25	2369	below_all	2398	2398	closure product	C	M1
+11x20x25	3192	below_all	3302	3302	July certificate	J	none
+12x20x25	3436	below_all	3474		closure product	C	S1
+16x20x25	4470	below_all	4510	4510	matmulcatalog replay	M	S1
+20x20x25	5442	gf2_valid_only	5323	5610	July certificate	J	S1
+11x21x25	3467	below_all	3493		closure product	C	none
+16x21x25	4710	below_all	4792		committed certificate	K	none
+20x21x25	5829	gf2_valid_only	5789	5923	committed certificate	K	M1
+11x22x25	3617	below_all	3640		closure product	C	none
+15x22x25	4731	below_all	4786	4786	committed certificate	K	none
+16x22x25	4921	below_all	4997		committed certificate	K	none
+8x23x25	2751	below_all	2778		closure product -> projection -> walk	CPW	none
+12x23x25	3952	below_all	4019		committed certificate	K	none
+15x23x25	4913	below_all	4968		committed certificate	K	none
+19x23x25	6122	below_all	6154		committed certificate	K	none
+20x23x25	6258	below_all	6396		committed certificate	K	none
+8x24x25	2820	below_all	2855		closure product	C	M1
+12x24x25	4080	below_all	4088		closure product	C	S2
+11x13x26	2272	below_all	2295		July certificate	J	none
+12x13x26	2407	below_all	2425		closure product	C	none
+10x14x26	2233	below_all	2234	2234	matmulcatalog replay -> walk	MW	none
+11x14x26	2441	below_all	2452		July certificate	J	none
+12x14x26	2600	below_all	2601		committed certificate -> projection -> walk	KPW	Q
+11x15x26	2593	below_all	2617	2617	July certificate	J	none
+13x15x26	3010	below_all	3020		committed certificate	K	none
+6x16x26	1533	below_all	1548		closure product	C	S1
+8x16x26	2021	below_all	2046		committed certificate	K	none
+10x16x26	2509	below_all	2527	2527	July certificate	J	none
+11x16x26	2701	below_all	2729		committed certificate	K	none
+12x16x26	2834	below_all	2888		closure product	C	M1
+13x16x26	3148	below_all	3222		committed certificate	K	none
+14x16x26	3407	below_all	3458		committed certificate	K	none
+15x16x26	3608	below_all	3624		closure product	C	M1
+16x16x26	3767	below_all	3797		closure product	C	none
+8x17x26	2162	below_all	2191		committed certificate	K	none
+10x17x26	2679	below_all	2681	2681	matmulcatalog replay -> walk	MW	none
+16x17x26	4111	below_all	4122		closure product	C	none
+8x18x26	2274	below_all	2275	2275	committed certificate	K	none
+11x18x26	3088	below_all	3092	3092	matmulcatalog replay -> walk	MW	none
+7x19x26	2209	below_all	2215		committed certificate	K	none
+8x19x26	2366	below_all	2419	2419	committed certificate	K	none
+11x19x26	3279	below_all	3280		July certificate -> projection -> walk	JPW	none
+12x19x26	3461	below_all	3475		closure product	C	none
+13x19x26	3761	below_all	3835		committed certificate	K	none
+16x19x26	4541	below_all	4568		committed certificate -> projection	KP	none
+7x20x26	2279	below_all	2300	2300	closure product	C	none
+8x20x26	2459	below_all	2506		closure product	C	M1
+11x20x26	3329	below_all	3428	3428	July certificate	J	none
+12x20x26	3566	below_all	3624		closure product	C	M2
+13x20x26	3984	below_all	4002		committed certificate	K	none
+16x20x26	4634	below_all	4776		committed certificate	K	M2
+11x21x26	3615	below_all	3628		closure product	C	none
+16x21x26	4908	below_all	4969		committed certificate	K	none
+11x22x26	3771	below_all	3776		closure product	C	none
+15x22x26	4936	below_all	4966		committed certificate	K	none
+16x22x26	5136	below_all	5182		committed certificate	K	none
+20x22x26	6340	gf2_valid_only	6277	6448	July certificate -> projection -> walk	JPW	none
+8x23x26	2866	below_all	2884		closure product -> projection -> walk	CPW	none
+15x23x26	5129	below_all	5167		committed certificate	K	none
+20x23x26	6508	below_all	6585		committed certificate	K	none
+7x24x26	2720	below_all	2727		closure product	C	none
+8x24x26	2932	below_all	2936	2936	closure product	C	S1
+10x24x26	3696	gf2_valid_only	3680	3700	closure product	C	S1
+19x24x26	6561	below_all	6576		committed certificate -> projection -> walk	KPW	none
+20x24x26	6684	below_all	6747	6906	committed certificate	K	none
+11x25x26	4282	below_all	4283		closure product -> walk	CW	none
+20x25x26	7130	below_all	7167		committed certificate	K	none
+20x26x26	7370	below_all	7408	7566	committed certificate	K	none
+2x4x27	172	gf2_valid_only	172	176	closure product	C	M1
+4x5x27	394	below_all	395	395	closure product	C	S1
+8x8x27	1107	below_all	1108		closure product -> projection -> walk	CPW	M1
+11x12x27	2163	below_all	2166		closure product -> projection -> walk	CPW	none
+11x13x27	2359	below_all	2393		July certificate	J	none
+12x13x27	2517	below_all	2529		closure product	C	none
+3x14x27	842	below_all	843	843	closure product	C	S1
+11x14x27	2539	below_all	2555		July certificate	J	none
+12x14x27	2663	below_all	2697		committed certificate	K	none
+4x15x27	1065	below_all	1068	1068	matmulcatalog replay -> walk	MW	M1
+11x15x27	2694	below_all	2703	2703	July certificate	J	none
+12x15x27	2839	below_all	2840		committed certificate -> projection -> walk	KPW	none
+13x15x27	3126	below_all	3155		committed certificate	K	none
+11x16x27	2825	below_all	2847		committed certificate	K	S2
+12x16x27	2957	below_all	2964		closure product -> projection -> walk	CPW	none
+13x16x27	3256	below_all	3346		committed certificate	K	none
+16x16x27	3904	below_all	3944		closure product -> projection -> walk	CPW	none
+8x17x27	2247	below_all	2248		July certificate -> projection	JP	none
+10x17x27	2766	below_all	2767	2767	matmulcatalog replay -> walk	MW	none
+14x17x27	3818	below_all	3820	3820	matmulcatalog replay -> walk	MW	none
+16x17x27	4259	below_all	4278		closure product	C	none
+8x18x27	2334	below_all	2338	2338	matmulcatalog replay	M	M1
+4x19x27	1340	below_all	1344	1344	matmulcatalog replay -> walk	MW	none
+8x19x27	2464	below_all	2516	2516	committed certificate	K	none
+10x19x27	3101	below_all	3104	3104	matmulcatalog replay -> walk	MW	none
+11x19x27	3400	below_all	3404		July certificate -> projection -> walk	JPW	none
+12x19x27	3592	below_all	3600	3600	closure product -> projection -> walk	CPW	none
+13x19x27	3893	below_all	3987		committed certificate	K	none
+16x19x27	4696	below_all	4746	4746	closure product -> projection -> walk	CPW	none
+4x20x27	1384	gf2_valid_only	1383	1390	closure product	C	S1
+7x20x27	2368	below_all	2387	2387	closure product -> projection -> walk	CPW	none
+8x20x27	2540	below_all	2584	2584	closure product -> projection -> walk	CPW	none
+11x20x27	3447	below_all	3559	3559	July certificate	J	none
+12x20x27	3699	below_all	3734		committed certificate	K	none
+13x20x27	4075	below_all	4160	4160	committed certificate	K	S1
+16x20x27	4792	below_all	4884		closure product -> projection -> walk	CPW	none
+11x21x27	3744	below_all	3750	3750	closure product	C	none
+19x21x27	6054	below_all	6107		committed certificate -> projection -> walk	KPW	none
+20x21x27	6188	below_all	6277		committed certificate	K	none
+11x22x27	3906	below_all	3913		closure product	C	none
+15x22x27	5115	below_all	5148		committed certificate	K	none
+19x22x27	6369	below_all	6387		July certificate -> projection -> walk	JPW	none
+20x22x27	6519	below_all	6581		committed certificate -> projection -> walk	KPW	none
+8x23x27	2976	below_all	2998		closure product -> projection -> walk	CPW	none
+16x23x27	5582	below_all	5590		closure product -> projection -> walk	CPW	none
+19x23x27	6594	below_all	6639		committed certificate -> projection -> walk	KPW	none
+20x23x27	6724	below_all	6943	6962	committed certificate	K	none
+8x24x27	3042	below_all	3072		closure product -> projection	CP	none
+10x24x27	3797	below_all	3800	3800	matmulcatalog replay -> walk	MW	S1
+19x24x27	6745	below_all	6830		committed certificate -> projection -> walk	KPW	none
+20x24x27	6883	below_all	7056		committed certificate	K	none
+11x25x27	4426	below_all	4431		committed certificate	K	none
+19x25x27	7144	below_all	7198		committed certificate	K	none
+20x25x27	7282	below_all	7509	7509	committed certificate	K	none
+19x26x27	7454	below_all	7483		committed certificate -> projection -> walk	KPW	none
+20x26x27	7606	below_all	7753	7762	committed certificate	K	none
+19x27x27	7713	below_all	7722		closure product -> projection -> walk	CPW	none
+20x27x27	7932	below_all	7980		closure product -> projection -> walk	CPW	none
+2x4x28	179	gf2_valid_only	179	182	closure product	C	M1
+2x5x28	220	gf2_valid_only	220	224	closure product	C	M1
+4x5x28	408	below_all	409	409	closure product	C	S1
+8x8x28	1134	below_all	1141		closure product	C	M1
+11x12x28	2195	below_all	2232		closure product -> projection -> walk	CPW	none
+12x12x28	2303	below_all	2309		closure product	C	M1
+12x13x28	2596	below_all	2604		closure product	C	S1
+3x14x28	873	below_all	874	874	matmulcatalog replay -> walk	MW	none
+12x14x28	2764	below_all	2772		committed certificate -> projection -> walk	KPW	none
+11x15x28	2774	below_all	2803		committed certificate -> projection -> walk	KPW	Q
+12x15x28	2881	below_all	2920		committed certificate	K	none
+7x16x28	1984	below_all	1990		closure product -> projection -> walk	CPW	none
+8x16x28	2115	below_all	2142		closure product	C	M1
+11x16x28	2878	below_all	2894		closure product -> projection -> walk	CPW	none
+12x16x28	3008	below_all	3024		closure product	C	M1
+13x16x28	3372	below_all	3439		closure product -> projection	CP	none
+14x16x28	3645	below_all	3674		closure product -> projection	CP	none
+15x16x28	3840	below_all	3843		closure product	C	M1
+16x16x28	3995	below_all	4052		closure product	C	M1
+8x17x28	2275	below_all	2345	2345	July certificate	J	none
+15x17x28	4165	below_all	4166	4166	matmulcatalog replay -> walk	MW	none
+16x17x28	4347	below_all	4401	4401	closure product	C	none
+4x19x28	1379	below_all	1380	1380	matmulcatalog replay -> walk	MW	none
+8x19x28	2505	below_all	2590	2590	July certificate	J	none
+11x19x28	3480	below_all	3495		July certificate -> projection	JP	none
+12x19x28	3604	below_all	3694	3694	closure product -> projection	CP	none
+13x19x28	4052	below_all	4062		committed certificate	K	none
+14x19x28	4356	below_all	4360	4360	committed certificate	K	none
+15x19x28	4576	below_all	4656		committed certificate	K	none
+16x19x28	4771	below_all	4866	4866	closure product -> projection -> walk	CPW	none
+7x20x28	2413	below_all	2440	2454	closure product -> projection	CP	none
+8x20x28	2585	below_all	2640		closure product	C	M1
+11x20x28	3521	below_all	3655	3655	July certificate	J	none
+12x20x28	3713	below_all	3782	3786	closure product	C	M1
+13x20x28	4167	below_all	4271	4271	closure product -> projection	CP	none
+14x20x28	4484	below_all	4523	4530	committed certificate	K	none
+16x20x28	4888	below_all	4936		closure product	C	M1
+8x21x28	2809	below_all	2817		closure product	C	M1
+11x21x28	3829	below_all	3865		closure product	C	Q
+19x21x28	6232	below_all	6312		July certificate -> projection -> walk	JPW	none
+20x21x28	6372	below_all	6455		committed certificate -> projection -> walk	KPW	none
+3x22x28	1364	gf2_valid_only	1363	1370	closure product	C	M2
+11x22x28	3997	below_all	4024		closure product	C	none
+16x22x28	5486	below_all	5500		closure product -> projection -> walk	CPW	none
+19x22x28	6530	below_all	6562		July certificate -> projection	JP	none
+20x22x28	6635	below_all	6761	6859	committed certificate	K	none
+8x23x28	3036	below_all	3095		closure product -> projection -> walk	CPW	none
+10x23x28	3784	below_all	3785	3785	matmulcatalog replay -> walk	MW	none
+15x23x28	5501	below_all	5526		closure product -> projection -> walk	CPW	none
+16x23x28	5656	below_all	5784		closure product -> projection -> walk	CPW	none
+19x23x28	6729	below_all	6820		committed certificate -> projection -> walk	KPW	none
+20x23x28	6863	below_all	7100		committed certificate	K	none
+21x23x28	7354	below_all	7404		July certificate	J	none
+7x24x28	2894	below_all	2908		closure product -> projection -> walk	CPW	none
+8x24x28	3102	below_all	3141		closure product	C	M1
+13x24x28	5008	below_all	5031		closure product	C	none
+16x24x28	5781	below_all	5892	5892	closure product	C	M1
+19x24x28	6903	below_all	7012		closure product -> projection -> walk	CPW	none
+20x24x28	7050	below_all	7191		closure product	C	M1
+8x25x28	3300	below_all	3310		closure product	C	M1
+11x25x28	4518	below_all	4572		committed certificate	K	none
+12x25x28	4740	below_all	4777		closure product	C	M1
+16x25x28	6223	below_all	6283	6283	committed certificate	K	S1
+20x25x28	7545	below_all	7681	7681	closure product -> projection -> walk	CPW	none
+11x26x28	4726	below_all	4760		closure product	C	none
+13x26x28	5555	below_all	5563		closure product	C	none
+16x26x28	6467	below_all	6488		closure product	C	M2
+19x26x28	7597	below_all	7680		closure product -> projection -> walk	CPW	none
+20x26x28	7831	below_all	7866		closure product -> projection -> walk	CPW	none
+10x27x28	4435	below_all	4446	4446	matmulcatalog replay -> projection -> walk	MPW	S1
+11x27x28	4889	below_all	4934		July certificate -> projection	JP	S1
+19x27x28	7856	below_all	7983		closure product -> projection -> walk	CPW	none
+20x27x28	8075	below_all	8192		closure product -> projection -> walk	CPW	none
+7x28x28	3342	below_all	3401		closure product -> projection -> walk	CPW	none
+8x28x28	3572	below_all	3648		closure product	C	M1
+10x28x28	4537	below_all	4543	4543	matmulcatalog replay	M	S1
+11x28x28	4937	below_all	5069	5120	July certificate	J	none
+12x28x28	5217	below_all	5328		closure product	C	M1
+16x28x28	6768	below_all	6860		closure product	C	M1
+19x28x28	8010	below_all	8231		closure product -> projection	CP	none
+20x28x28	8272	below_all	8434		closure product	C	M1
+21x28x28	8848	below_all	9047		July certificate	J	none
+2x4x29	185	gf2_valid_only	185	189	closure product	C	M1
+2x5x29	228	gf2_valid_only	228	232	closure product	C	M1
+8x8x29	1186	below_all	1193		closure product -> projection	CP	M1
+10x12x29	2133	below_all	2134	2134	matmulcatalog replay -> walk	MW	none
+8x16x29	2243	below_all	2256		closure product	C	M1
+10x16x29	2806	below_all	2813		closure product	C	none
+11x16x29	3034	below_all	3067		committed certificate	K	none
+12x16x29	3169	below_all	3216		closure product -> projection -> walk	CPW	none
+13x16x29	3560	below_all	3562		closure product	C	none
+14x16x29	3804	below_all	3815		closure product	C	none
+15x16x29	3995	below_all	4022		closure product	C	none
+16x16x29	4139	below_all	4259		closure product	C	none
+8x17x29	2411	below_all	2436		closure product	C	none
+16x17x29	4507	below_all	4557		closure product	C	none
+4x18x29	1363	below_all	1364	1364	matmulcatalog replay -> walk	MW	none
+8x18x29	2498	below_all	2523	2550	committed certificate	K	none
+8x19x29	2642	below_all	2696		committed certificate	K	none
+11x19x29	3623	below_all	3633		July certificate -> projection -> walk	JPW	none
+12x19x29	3832	below_all	3846		closure product	C	none
+15x19x29	4766	below_all	4828		committed certificate	K	none
+16x19x29	5045	below_all	5060		closure product	C	none
+7x20x29	2553	below_all	2554	2554	closure product	C	none
+8x20x29	2724	below_all	2800		committed certificate	K	none
+10x20x29	3437	below_all	3438	3438	matmulcatalog replay -> walk	MW	none
+11x20x29	3685	below_all	3813	3813	July certificate	J	none
+12x20x29	3922	below_all	4012		closure product -> projection -> walk	CPW	none
+13x20x29	4427	below_all	4435	4435	closure product	C	none
+16x20x29	5193	below_all	5256		closure product -> projection -> walk	CPW	none
+20x21x29	6736	gf2_valid_only	6648	6865	July certificate -> projection -> walk	JPW	none
+11x22x29	4178	below_all	4182		closure product	C	none
+20x22x29	6985	gf2_valid_only	6957	7143	committed certificate -> projection -> walk	KPW	none
+20x23x29	7173	below_all	7347	7421	committed certificate	K	none
+19x24x29	7236	below_all	7272		committed certificate	K	none
+20x24x29	7370	below_all	7515		July certificate	J	none
+10x25x29	4237	below_all	4278	4278	matmulcatalog replay -> walk	MW	none
+20x25x29	7950	below_all	7995	8024	closure product	C	none
+11x26x29	4900	below_all	4915		July certificate	J	none
+16x26x29	6720	below_all	6778		committed certificate -> projection -> walk	KPW	none
+20x26x29	8255	gf2_valid_only	8252	8376	closure product	C	none
+4x27x29	1993	below_all	2003	2003	matmulcatalog replay -> projection -> walk	MPW	none
+11x27x29	5082	below_all	5098		July certificate	J	none
+16x27x29	6871	below_all	6984		committed certificate	K	none
+8x28x29	3796	below_all	3820	3820	closure product	C	M1
+11x28x29	5241	below_all	5243		closure product -> walk	CW	none
+19x28x29	8542	below_all	8543		closure product	C	none
+20x28x29	8832	below_all	8870	8939	closure product	C	M1
+3x29x29	1839	below_all	1840	1840	matmulcatalog replay -> projection -> walk	MPW	none
+8x8x30	1225	below_all	1228		closure product	C	S1
+11x16x30	3105	below_all	3126		committed certificate	K	S1
+12x16x30	3240	below_all	3275	3275	closure product	C	M1
+13x16x30	3658	below_all	3668		closure product	C	S1
+16x16x30	4250	below_all	4325	4325	closure product	C	none
+16x17x30	4640	below_all	4680		closure product	C	none
+7x18x30	2374	below_all	2375		committed certificate	K	none
+8x19x30	2723	below_all	2775		committed certificate	K	none
+10x19x30	3429	below_all	3432	3432	matmulcatalog replay -> walk	MW	none
+12x19x30	3941	below_all	3960		closure product -> projection -> walk	CPW	none
+16x19x30	5206	below_all	5209		closure product	C	S2
+7x20x30	2622	below_all	2629	2629	committed certificate	K	none
+8x20x30	2820	below_all	2830	2830	closure product	C	M1
+11x20x30	3822	below_all	3888	3933	July certificate	J	none
+12x20x30	4031	below_all	4080	4080	closure product -> projection -> walk	CPW	S1
+16x20x30	5335	below_all	5345	5345	closure product -> projection -> walk	CPW	S1
+19x20x30	6285	below_all	6309	6420	July certificate -> projection -> walk	JPW	none
+20x22x30	7242	below_all	7278		committed certificate -> projection -> walk	KPW	none
+20x23x30	7427	below_all	7638	7638	committed certificate	K	none
+16x26x30	6923	gf2_valid_only	6900	6937	closure product	C	S1
+3x27x30	1762	gf2_valid_only	1752	1772	matmulcatalog replay -> projection	MP	none
+4x27x30	2033	below_all	2036	2036	matmulcatalog replay	M	M1
+10x27x30	4752	below_all	4758	4758	matmulcatalog replay	M	S1
+3x28x30	1829	gf2_valid_only	1822	1846	matmulcatalog replay -> projection -> walk	MPW	none
+3x29x30	1880	below_all	1882	1882	matmulcatalog replay -> walk	MW	none
+2x4x31	198	gf2_valid_only	198	202	closure product	C	M1
+11x12x31	2477	below_all	2488		closure product -> projection -> walk	CPW	none
+10x14x31	2633	below_all	2635	2635	matmulcatalog replay -> walk	MW	none
+10x15x31	2749	below_all	2752	2752	matmulcatalog replay -> walk	MW	none
+3x16x31	1100	below_all	1103		matmulcatalog replay -> projection -> walk	MPW	none
+4x16x31	1287	below_all	1294	1294	matmulcatalog replay -> walk	MW	none
+7x16x31	2202	below_all	2208		closure product -> projection -> walk	CPW	none
+8x16x31	2362	below_all	2404	2404	closure product -> projection -> walk	CPW	none
+11x16x31	3195	below_all	3287		July certificate	J	none
+12x16x31	3399	below_all	3438		closure product -> projection -> walk	CPW	none
+13x16x31	3788	below_all	3810		closure product	C	none
+14x16x31	4016	below_all	4063		closure product	C	none
+15x16x31	4211	below_all	4284		closure product	C	S1
+16x16x31	4346	below_all	4474		closure product	C	none
+8x17x31	2567	below_all	2599	2599	July certificate -> projection	JP	none
+15x17x31	4591	below_all	4600		closure product	C	none
+16x17x31	4746	below_all	4825		closure product	C	none
+10x18x31	3319	below_all	3320	3320	matmulcatalog replay -> walk	MW	none
+8x19x31	2842	below_all	2879		July certificate -> projection	JP	none
+11x19x31	3856	below_all	3859		July certificate -> projection -> walk	JPW	none
+12x19x31	4040	below_all	4081		closure product -> projection -> walk	CPW	none
+15x19x31	5083	below_all	5121		committed certificate	K	none
+16x19x31	5345	below_all	5369		closure product	C	none
+8x20x31	2897	below_all	2990	2990	July certificate	J	none
+11x20x31	3940	below_all	4063	4063	July certificate	J	none
+12x20x31	4146	below_all	4276		closure product -> projection -> walk	CPW	none
+13x20x31	4688	below_all	4714		closure product -> projection -> walk	CPW	none
+14x20x31	5024	below_all	5026		closure product -> projection -> walk	CPW	none
+16x20x31	5450	below_all	5608		closure product -> projection -> walk	CPW	none
+19x20x31	6484	below_all	6567		July certificate -> projection	JP	none
+20x21x31	7118	below_all	7223		July certificate -> projection	JP	none
+4x22x31	1763	below_all	1772	1772	matmulcatalog replay -> walk	MW	none
+10x22x31	3998	below_all	4000	4000	matmulcatalog replay -> walk	MW	none
+20x22x31	7416	below_all	7494	7569	committed certificate -> projection -> walk	KPW	none
+16x23x31	6355	below_all	6372		closure product -> projection -> walk	CPW	S1
+20x23x31	7636	below_all	7862	7862	committed certificate	K	none
+16x24x31	6487	below_all	6549		closure product -> projection -> walk	CPW	S1
+20x24x31	7827	below_all	8070	8070	committed certificate	K	none
+16x25x31	6873	below_all	6906		closure product -> projection -> walk	CPW	S1
+20x25x31	8342	below_all	8570		July certificate	J	none
+21x25x31	8876	below_all	8879		July certificate	J	none
+16x26x31	7128	below_all	7143		closure product -> projection -> walk	CPW	none
+20x26x31	8773	below_all	8895		closure product	C	none
+16x27x31	7379	below_all	7411		closure product -> projection -> walk	CPW	none
+16x28x31	7498	below_all	7605		closure product -> projection -> walk	CPW	none
+20x28x31	9431	below_all	9525	9525	closure product	C	none
+3x29x31	1961	below_all	1968		matmulcatalog replay -> projection -> walk	MPW	none
+3x30x31	1997	below_all	1998	1998	matmulcatalog replay	M	none
+3x31x31	2090	below_all	2101	2101	closure product	C	none
+16x31x31	8294	below_all	8320		closure product -> projection -> walk	CPW	S1
+2x4x32	204	gf2_valid_only	204	208	closure product	C	M1
+11x12x32	2508	below_all	2546		closure product -> projection -> walk	CPW	none
+12x12x32	2632	below_all	2640		closure product	C	M1
+10x13x32	2540	below_all	2542	2542	matmulcatalog replay -> walk	MW	none
+12x13x32	2952	below_all	2965		closure product	C	S1
+8x14x32	2200	below_all	2204		closure product -> projection -> walk	CPW	none
+10x14x32	2698	below_all	2700	2700	matmulcatalog replay -> walk	MW	none
+8x15x32	2318	below_all	2328		closure product -> projection -> walk	CPW	Q
+14x15x32	3946	below_all	3947		closure product -> walk	CW	none
+7x16x32	2238	below_all	2250		closure product -> projection -> walk	CPW	none
+8x16x32	2397	below_all	2438		closure product	C	M1
+9x16x32	2742	below_all	2745	2745	matmulcatalog replay	M	S1
+10x16x32	3012	below_all	3015	3015	matmulcatalog replay	M	none
+11x16x32	3255	below_all	3373		July certificate	J	none
+12x16x32	3431	below_all	3496		closure product	C	M1
+13x16x32	3860	below_all	3922	3922	closure product	C	none
+14x16x32	4082	below_all	4119	4119	closure product	C	none
+15x16x32	4274	below_all	4413	4413	closure product	C	none
+16x16x32	4418	below_all	4474		closure product	C	M1
+5x17x32	1793	below_all	1794	1794	matmulcatalog replay -> walk	MW	none
+8x17x32	2589	below_all	2663	2663	July certificate	J	none
+15x17x32	4658	below_all	4722	4722	closure product	C	none
+16x17x32	4834	below_all	4935	4938	closure product	C	none
+4x19x32	1577	below_all	1578	1578	matmulcatalog replay -> walk	MW	none
+8x19x32	2865	below_all	2958	2958	July certificate	J	none
+11x19x32	3945	below_all	3959		closure product -> projection -> walk	CPW	none
+12x19x32	4114	below_all	4176	4176	closure product -> projection -> walk	CPW	none
+15x19x32	5243	below_all	5253		closure product -> walk	CW	none
+16x19x32	5432	below_all	5493		closure product	C	none
+19x19x32	6454	below_all	6500		July certificate -> projection	JP	none
+7x20x32	2770	below_all	2788	2788	closure product -> projection -> walk	CPW	none
+8x20x32	2961	below_all	3013	3015	closure product	C	M1
+9x20x32	3393	gf2_valid_only	3384	3395	matmulcatalog replay	M	S1
+11x20x32	4012	below_all	4160	4160	closure product -> projection -> walk	CPW	none
+12x20x32	4230	below_all	4320		closure product	C	M1
+13x20x32	4758	below_all	4834		closure product -> projection -> walk	CPW	none
+14x20x32	5141	below_all	5148		closure product -> projection -> walk	CPW	none
+15x20x32	5400	below_all	5410	5410	closure product	C	S1
+16x20x32	5546	below_all	5650		closure product	C	M1
+19x20x32	6560	below_all	6699		July certificate	J	none
+20x20x32	6768	below_all	6779		closure product	C	M1
+11x21x32	4362	below_all	4365		closure product -> projection -> walk	CPW	S1
+20x21x32	7184	below_all	7304		July certificate	J	none
+8x22x32	3308	below_all	3328	3328	matmulcatalog replay	M	none
+11x22x32	4554	below_all	4563		closure product -> walk	CW	none
+16x22x32	6223	below_all	6290		closure product	C	none
+20x22x32	7513	below_all	7693	7728	committed certificate	K	none
+8x23x32	3468	below_all	3492	3492	closure product -> projection -> walk	CPW	none
+10x23x32	4286	below_all	4290	4290	matmulcatalog replay -> walk	MW	none
+12x23x32	4994	below_all	4996		closure product	C	none
+13x23x32	5542	below_all	5552		closure product	C	none
+16x23x32	6448	below_all	6536		closure product -> projection -> walk	CPW	none
+19x23x32	7630	below_all	7642	7642	committed certificate -> projection -> walk	KPW	none
+20x23x32	7772	below_all	8040	8040	committed certificate	K	none
+21x23x32	8282	below_all	8382		July certificate	J	none
+7x24x32	3293	below_all	3320		closure product -> projection -> walk	CPW	none
+8x24x32	3525	below_all	3579	3579	closure product	C	M1
+11x24x32	4866	below_all	4909		closure product	C	S1
+16x24x32	6580	below_all	6692		closure product	C	M1
+20x24x32	7990	below_all	8145		closure product	C	M1
+3x25x32	1750	gf2_valid_only	1745	1753	closure product	C	M2
+5x25x32	2587	below_all	2590	2590	matmulcatalog replay -> walk	MW	none
+16x25x32	6987	below_all	7084		closure product -> projection -> walk	CPW	none
+20x25x32	8630	below_all	8710	8710	closure product	C	S1
+21x25x32	9066	below_all	9144		July certificate	J	none
+4x26x32	2121	below_all	2130	2130	closure product	C	S1
+16x26x32	7259	below_all	7296		closure product	C	none
+20x26x32	8966	below_all	9078		closure product	C	M2
+8x27x32	4024	below_all	4025	4025	matmulcatalog replay -> walk	MW	S1
+16x27x32	7447	below_all	7568		closure product -> projection -> walk	CPW	none
+11x28x32	5713	below_all	5760		closure product -> walk	CW	none
+14x28x32	6969	below_all	7008		closure product -> projection -> walk	CPW	none
+15x28x32	7376	below_all	7419		closure product -> projection -> walk	CPW	none
+16x28x32	7567	below_all	7728		closure product	C	M1
+20x28x32	9588	below_all	9697		closure product	C	M1
+3x29x32	2025	below_all	2027	2027	matmulcatalog replay -> walk	MW	none
+20x29x32	10060	below_all	10122		closure product	C	M2
+21x30x32	10795	below_all	10860	10860	matmulcatalog replay -> walk	MW	none
+24x30x32	11998	gf2_valid_only	11889	12075	closure product	C	none
+25x30x32	12665	gf2_valid_only	12415	12686	July certificate -> projection -> walk	JPW	S1
+3x31x32	2152	below_all	2153	2153	matmulcatalog replay	M	none
+15x31x32	8166	below_all	8185		closure product -> projection -> walk	CPW	none
+16x31x32	8388	below_all	8475		closure product -> projection -> walk	CPW	none
+23x31x32	12085	below_all	12104		July certificate -> projection	JP	none
+24x31x32	12297	below_all	12435		closure product -> projection -> walk	CPW	none
+25x31x32	12929	below_all	13034		July certificate -> projection	JP	none
+6x32x32	3701	gf2_valid_only	3697	3704	closure product	C	S1
+8x32x32	4649	gf2_valid_only	4608	4656	matmulcatalog replay	M	S1
+13x32x32	7502	below_all	7508		closure product -> projection -> walk	CPW	S1
+14x32x32	7782	below_all	7827	7827	closure product -> projection -> walk	CPW	none
+15x32x32	8251	below_all	8364		closure product -> projection -> walk	CPW	none
+16x32x32	8460	below_all	8610		closure product	C	M1
+20x32x32	10800	below_all	10920		closure product	C	M1
+23x32x32	12214	below_all	12432		July certificate	J	none
+24x32x32	12502	below_all	12676	12676	closure product	C	M1
+25x32x32	13142	below_all	13324		July certificate -> projection	JP	none
+26x32x32	13510	below_all	13602		July certificate	J	none
+27x32x32	13999	gf2_valid_only	13983	14160	July certificate	J	none

@@ -1,0 +1,18 @@
+# build products (make / tectonic); the sources are the durable artifact
+dist/
+__pycache__/
+*/main.pdf
+*/main.aux
+*/main.log
+*/main.out
+*/main.blg
+*/main.toc
+*/main.xdv
+*/refs.bib
+*/main.bbl
+
+# the global excludes file of this machine hides "results", "*.log" and "*.gz"; these are sources here
+!/results/
+!/verification/*.log
+!/prior-art/*.gz
+!/prior-art/*.log

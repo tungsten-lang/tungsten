@@ -1,0 +1,48 @@
+\section{What the records are compared with}\label{sec:comparators}
+
+A record is a statement about a bar. The choice and reading of the bars determine how much it means, so we report them in detail.
+
+\paragraph{Which table sets the bar.}
+For each record we re-derived the bar from the four tables at the pinned revisions (all 795 agree with the archive's index). \Cref{tab:suppliers} shows which sources attain the any-ring bar. The matmulcatalog attains it for 707 of the 795 records and is the only source at that rank for 273; the Lille digest attains it for 519 and alone for 86; FastMatrixMultiplication attains it for 46 and never alone (through a rational scheme in 33 cases, a ternary one in 13 and an integer one in 3; a record can tie several rings); fmm-schemes attains it for two records, alone in both.
+\begin{table}[t]
+\centering\small
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+records attaining the any-ring bar through & Lille & matmulcatalog & FMM & fmm-schemes\\
+\midrule
+\textsf{below\_all} (733): attain (sole) & 465 (70) & 661 (265) & 31 (0) & 2 (2)\\
+\textsf{gf2\_valid\_only} (62): attain (sole) & 54 (16) & 46 (8) & 15 (0) & 0 (0)\\
+all 795: attain (sole) & 519 (86) & 707 (273) & 46 (0) & 2 (2)\\
+\bottomrule
+\end{tabular}
+\caption{Which table supplies the best listed rank in any ring (ties counted for every attaining source; ``sole'' = the only source at that rank). FMM by ring: Q 33, ZT 13, Z 3 (a record may tie with several).}
+\label{tab:suppliers}
+\end{table}
+
+\paragraph{No GF(2)-valid bar for 458 of the 733 strongest records.}
+The Lille digest, which sets the any-ring bar alone or jointly for 465 of the 733 \textsf{below\_all} records, records no field, so its rank may or may not be achievable over $\F$. For 458 of the 733 records no scheme known to be valid over $\F$ is listed at all: the any-ring bar (matmulcatalog for 403 of them, Lille for 291, with ties counted) is the only bar.
+For the other 275 the GF(2)-valid bar is defined and we are below it by a median of 19 terms (0.95\%, maximum 268). The two readings answer different questions: ``below every listed rank'' says that no listed scheme, over any ring, is as small; it does not say that a scheme of that size was not already known over $\F$ (for example in a paper), only that it is not in the tables.
+Conversely, where no GF(2)-valid scheme is listed at all (1{,}025 formats classed \textsf{above} and 68 classed \textsf{tie}), a scheme of ours that lies at or above a listed rank of unspecified field (Lille) or of another field (matmulcatalog) is not a record, although it may be the best scheme known over $\F$; the records therefore undercount the formats for which we hold the best known scheme over $\F$.
+
+\paragraph{The 62 \textsf{gf2\_valid\_only} records.}
+For 55 of them the Lille digest lists a rank at or below ours (field unspecified), for the other seven only a matmulcatalog scheme over another field does. For 17 of the 62 a rational scheme of the FastMatrixMultiplication repository is at or below our rank (15 in its rational directory and 2 in its \texttt{known} directory, for $\MM{13}{13}{13}$ and $\MM{15}{15}{15}$); all 17 have an even denominator, so none reduces modulo two.
+Twenty of the 298 rational files use only odd denominators and do reduce to exact schemes over $\F$; none of them is below our scheme for its format.
+
+\paragraph{Commutative algorithms are excluded.}
+The matmulcatalog also lists commutative algorithms (Waksman's rank 473 for $\MM999$, for instance) \cite{waksman1970winograd,winograd1968inner}. These are not decompositions of the tensor and do not bound its rank; they cannot be composed recursively into matrix algorithms. We exclude them. The catalogue does not stamp them F2, so counting them in the any-ring bar alone would move $\MM777$ and $\MM999$ from \textsf{below\_all} to \textsf{gf2\_valid\_only}; but a commutative entry lies at or below our rank for five records, and all five would be lost if commutative algorithms were also counted as valid over $\F$:
+\begin{center}\small
+\begin{tabular}{@{}lrr@{}}
+\toprule
+format & our rank & commutative entry\\\midrule
+$7\times7\times7$ & 247 & 235\\
+$9\times9\times9$ & 482 & 473\\
+$13\times13\times13$ & 1{,}402 & 1{,}333\\
+$15\times15\times15$ & 2{,}006 & 2{,}003\\
+$20\times20\times20$ & 4{,}451 & 4{,}390\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{The catalogue's F2 stamp over-claims.}
+Derived entries stamped F2 in the matmulcatalog may need a leaf that is valid over another field only (for $\MM336$ the best rank is 40 for $\mathbb F_3$, $\mathbb Q$, $\mathbb R$ and $\mathbb C$ but 42 with an F2 stamp; for $\MM338$ 55 and 56; for $\MM245$ 32 and 33).
+When we replay its recipes over $\F$ (companion paper), 110 of 373 and 144 of 979 targets fail at the catalogue's rank. Its F2 minima can therefore be lower than what is achievable over $\F$, which makes the \textsf{gf2\_valid\_only} comparison conservative.

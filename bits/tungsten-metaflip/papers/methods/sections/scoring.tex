@@ -1,0 +1,50 @@
+\section{Scoring against public tables}\label{sec:scoring}
+
+Everything the pipeline does is steered by, and finally judged against, the best ranks listed in public tables. Doing that honestly over $\F$ is not straightforward, because the tables were not built for this field.
+
+\subsection{Sources and the two minima}
+Four sources are read at pinned revisions:
+the Lille catalogue digest \cite{sedoglavic2026catalogue}, which records for each sorted format a rank and an exponent and \emph{no coefficient field or ring};
+the matmulcatalog \cite{lacelle2026catalog}, whose entries carry the list of fields over which the scheme is valid, a flag for commutative algorithms, and (for derived entries) a recipe;
+the FastMatrixMultiplication repository \cite{perminov2026fmmrepo}, from whose file names \texttt{NxMxP\_m<rank>\_<ring>.json} we read the rank and the ring (ZT, Z or Q; files in a \texttt{known/} directory are excluded by the scoring rule);
+and the fmm-schemes dataset \cite{witteveen2026schemes} (ZT).
+For a sorted format $s$ define two minima.
+The \emph{any-ring} bar $B_{\mathrm{any}}(s)$ is the least listed rank over all four sources, commutative entries excluded.
+The \emph{GF(2)-valid} bar $B_{\F}(s)$ is the least listed rank among matmulcatalog entries whose field list contains F2 and among ZT and Z schemes of the two repositories (both reduce modulo two); it is undefined when no such scheme is listed.
+A verified local scheme of rank $r$ is classified, in this order, as
+\begin{align*}
+\textsf{below\_all}&\quad r<B_{\mathrm{any}}(s),\\
+\textsf{gf2\_valid\_only}&\quad r<B_{\F}(s)\text{ (and not below all)},\\
+\textsf{tie}&\quad r=B_{\mathrm{any}}(s),\qquad\textsf{above}\quad\text{otherwise.}
+\end{align*}
+\textsf{below\_all} is the strong statement: no scheme in the four tables, as read by the scoring rule, is as small (the catalogue's \texttt{cited-bounds} file lists a lower rational rank for nine of the 733). \textsf{gf2\_valid\_only} says that every listed scheme that is known to be valid over $\F$ is larger, while another table lists an equal or smaller rank for an unspecified field or a different one.
+Rounds of the campaign re-scored the board after every batch of walks; the recorded classification uses a single set of four table revisions (\cref{tab:revisions}).
+
+\subsection{Pitfalls}
+\Cref{tab:pitfalls} lists the ways in which a comparison of this kind goes wrong, each with the effect we measured.
+\begin{table}[t]
+\centering\small
+\begin{tabular}{@{}p{3.3cm}p{5.0cm}p{5.5cm}@{}}
+\toprule
+pitfall & what goes wrong & measured effect\\
+\midrule
+Lille lists no field & the any-ring bar may not be valid over $\F$; and where no GF(2)-valid scheme is listed, an $\F$ scheme above it is classed \textsf{above} even if it is the best $\F$ scheme known & 458 of the 733 \textsf{below\_all} records have no GF(2)-valid scheme listed at all; for 465 of the 733 the Lille rank equals the bar (for 70 it is the only source)\\
+commutative entries & matmulcatalog lists commutative algorithms (Waksman's 473 for $\MM999$) \cite{waksman1970winograd,winograd1968inner}; they are not bilinear decompositions and do not bound tensor rank & counting them would remove 5 records ($\MM777$, $\MM999$, $\MM{13}{13}{13}$, $\MM{15}{15}{15}$, $\MM{20}{20}{20}$)\\
+ring by directory & directories named for a construction (\texttt{serendipitous\_base}, \texttt{known/*}) mix rings & ring read from the suffix; a lower rational file must not crowd out valid seeds\\
+even denominators & rational schemes with an even denominator (such as $\tfrac12$) are not reduced term by term modulo two & 278 of 298 rational files unusable; 20 usable (odd denominators), none below our schemes\\
+F2 stamp over-claims & derived entries may need a leaf that is not valid over $\F$ & 110 and 144 of the replayed recipes fail (\cref{sec:seeds}); the $\F$-valid bar is therefore conservative\\
+moving tables & the bars fall from day to day & release 1.1 of fmm-schemes (2026-09-27) lowered or tied four of ten first-day results; three of the four heads (Lille, matmulcatalog, FastMatrixMultiplication) moved again after scoring, which changed no class and lowered two margins (companion paper)\\
+tables lag the literature & a table may not list a published scheme, and a catalogue may keep rank claims in a separate file (\texttt{cited-bounds.json}) that a rule reading only its scheme file never sees & 87 of the 795 results are superseded and 112 matched by published schemes and claims, among them schemes valid only in characteristic two that lie outside the tables and the catalogue's \texttt{cited-bounds} file (companion paper); rank 245 for $\MM777$ over $\F$ \cite{medley2026gpu} against 249 (any ring) and 250 (GF(2)-valid) listed, and 248 in \cite{perminov2025ternary}\\
+\bottomrule
+\end{tabular}
+\caption{Comparison pitfalls and the effects measured on the 2026-09-29 board.}
+\label{tab:pitfalls}
+\end{table}
+
+The tables steer effort (which formats to price, which projection children to walk) but never decide admission: a tensor is admitted only by the exactness gate, and a listed rank is comparison data, not a certificate.
+Because these bars are moving and incomplete, the honest unit of a result is a triple (scheme, comparison date, table revisions).
+
+\subsection{Claim discipline}
+The project's record policy distinguishes \emph{published} world records, \emph{candidate} records (audited by the project and apparently improving the known rank, novelty pending an independent prior-art audit), \emph{apparent} records (a composition that improves the project's baseline and appears new, without exhaustive exclusion of the rectangular literature),
+and \emph{best known to the project}. Before an apparent or candidate result is promoted the policy requires an independently reproducible exactness check in the correct coefficient domain, stable hashes, an attribution audit of the presentation and of all composition ingredients, a dated search of papers, catalogues and repositories for an equal or lower bound, and public, citable disclosure.
+All results reported in the companion paper are, at most, \emph{apparent}: the first two requirements are met once the release is public (the two exactness implementations were written by one author and share the bit layout); the attribution audit is partial; the prior-art search consisted of the four tables at pinned revisions and, in the companion paper, of a dated and limited check of 48 sources and of compositions of published schemes, which superseded 87 of the 795 results; public, citable disclosure will be met once the data release is deposited publicly.

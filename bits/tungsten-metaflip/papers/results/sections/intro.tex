@@ -1,0 +1,33 @@
+\section{Introduction}\label{sec:intro}
+
+The rank of the matrix-multiplication tensor $\MM nmp$ over a field bounds the number of multiplications of any bilinear algorithm for $n\times m$ by $m\times p$ products over that field \cite{burgisser1997algebraic,landsberg2012tensors}.
+Over $\F$ there are schemes that have no counterpart in other characteristics, the rank-47 scheme for $\MM444$ being the best known \cite{fawzi2022discovering}, and flip-graph searches have since improved several small formats over $\F$
+\cite{kauers2023flip,kauers2022still,arai2024adaptive,moosbauer2025flip,kauers2025meta,medley2026gpu}.
+Two public tables list a rank for every format up to $32\times32\times32$ \cite{sedoglavic2026catalogue,lacelle2026catalog}, and two repositories hold explicit schemes for formats with all sides at most $16$ \cite{perminov2026fmmrepo,witteveen2026schemes} (the second only 25 of them), but these tables were built for arbitrary rings;
+for most large formats the listed rank is obtained by composing smaller schemes, and these compositions generally do not use the schemes that are best in characteristic two (for $\MM448$ the catalogue's minimum among schemes stamped F2 is 96, although it lists the F2 rank-47 scheme for $\MM444$).
+
+In September 2026 we built a pipeline that composes, projects and walks over $\F$ (described in a companion paper \cite{peterson2026methods}) and compared its output, and the output of two earlier stages of the same project, with four public tables.
+This paper reports the outcome as a list of exact schemes, and analyses it.
+For each of 795 formats with all sides at most 32, the best scheme we hold has smaller rank than every entry of the tables for that format in any ring (733 formats) or smaller than every listed scheme known to be valid over $\F$ (62 formats).
+The tables are not the whole of the public record, however: a check against the literature (\cref{sec:persistence}) finds published constructions and claims that supersede 87 of these 795 and constructions that equal the rank of 112 more, leaving 596.
+
+\paragraph{Summary.}
+\begin{itemize}
+\item The records are exact: every tensor was expanded against the full matrix-multiplication tensor by two separately written implementations, and 691 of the 795 are accompanied by their derivation (\cref{sec:verification}).
+\item The tables omit public prior art. Published GF(2)-valid schemes that they lack, rank claims kept in the matmulcatalog's own \texttt{cited-bounds} file, and compositions of listed schemes supersede 87 of the 795 (which we withdraw; for seven of them only a published claim, which we did not reproduce) and match 112 more; 596 remain (\cref{sec:persistence}).
+\item They are concentrated in large formats: 734 of 795 have a side above 16, and only 61 have all sides at most 16. Every format with all sides at most 16 has a verified scheme, so the concentration is about where improvements exist, not only about where we looked (\cref{sec:overview}).
+\item Most have no walk and no projection in their recorded lineage (507 of 795): 379 are compositions whose rank follows from the ranks of their parts (block sums, Kronecker products, block recombinations, replayed catalogue recipes), and 128 are certificates and fleet checkpoints of earlier stages of the project, which include walks. The 4$\times$4$\times$4 rank-47 scheme is a leaf of 58 of the 203 pure closure products and the outer scheme of the July block compositions.
+Walks and projections are part of the lineage of 288 records (\cref{sec:nature}).
+\item Margins are modest: for the 733 records below every listed rank the median saving over the best listed rank is 29 terms (0.91\%; 26 terms over all 795 against the bar that defines each class); the largest are 268 terms ($\MM{20}{23}{32}$) and 4.8\% ($\MM{15}{16}{17}$); 59 of the 733 beat the listed rank by exactly one.
+The best normalized exponent among the records is 2.7870 ($\MM{15}{16}{16}$ at rank 2{,}137), worse than that of $\MM444$ at rank 47 (2.7773; \cref{sec:highlights}).
+\item The comparison is delicate. Of the 733 strongest records, 458 have no GF(2)-valid scheme listed at all; commutative algorithms must be excluded (a commutative entry lies at or below our rank for five records); all four tables changed during the campaign; and preprints report rank 94 for $\MM448$ over $\mathbb Z_2$ \cite{perminov2025ternary} and rank 245 for $\MM777$ over $\F$ \cite{medley2026gpu}, so neither of our two records with all sides at most 8 is new (\cref{sec:comparators,sec:persistence}).
+\end{itemize}
+
+\paragraph{How to read these results.}
+Three qualifiers apply throughout. First, every rank is an upper bound; we prove no lower bound. Second, ``record'' means smaller than the entries of four tables at stated revisions; it does not mean new to the literature, and following the project's claim policy we call each result \emph{apparent} until a complete prior-art audit has been done; the check of \cref{sec:persistence} is not that audit, and it already removes 87 records and reclassifies 112.
+Third, many of the results are best understood as the completion over $\F$ of constructions that the tables already contain over other rings: replacing a leaf of a known composition by its better $\F$ counterpart lowers the rank of every format that uses it.
+That is worth recording, and it is how 203 of the records arise (75 of them remain after the check of \cref{sec:persistence}), but it is not the same kind of result as a new scheme for a small format.
+
+\paragraph{Organization.}
+\Cref{sec:setting} fixes the setting and definitions, \cref{sec:overview} gives the counts, \cref{sec:nature} analyses how the records arose, \cref{sec:highlights} lists notable ones, \cref{sec:comparators} examines the comparison in detail, \cref{sec:persistence} reports a re-scoring against later table revisions and a literature check,
+\cref{sec:verification} summarizes verification and \cref{sec:limits} states limitations and data availability. The full list is in \cref{app:all}.

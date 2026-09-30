@@ -1,0 +1,71 @@
+\section{Composition closure}\label{sec:composition}
+
+Large formats are rarely searched directly; their best-known ranks come from composing schemes for smaller formats. Over $\F$ this matters more than usual, because
+the components that are best in characteristic two (the rank-47 scheme for $\MM444$, for instance) were not the ones the general-ring tables were composed from.
+We compose \emph{exhaustively} over a finite family and price first, materialize afterwards.
+
+\subsection{Operations}
+\begin{lemma}[block sum]\label{lem:split}
+Let $s=(s_1,s_2,s_3)$ be a format and $1\le c<s_\alpha$ for a position $\alpha$; let $s'$ and $s''$ equal $s$ except that $s'_\alpha=c$ and $s''_\alpha=s_\alpha-c$. Then $\rk_\F(s)\le\rk_\F(s')+\rk_\F(s'')$.
+\end{lemma}
+\begin{proof}
+Relabelling the coordinates of the factors that carry position $\alpha$ by an offset ($0$ for $s'$, $c$ for $s''$) is an injective linear map on each factor space. It sends $T_{s'}$ and $T_{s''}$ to the parts of $T_s$ whose index in position $\alpha$ lies in $[0,c)$ and $[c,s_\alpha)$ respectively; these parts partition the basis tensors of $T_s$, so the concatenated term lists sum to $T_s$.
+For $\alpha$ the inner dimension this is $C=A_1B_1+A_2B_2$; for the other two it stacks two products.
+\end{proof}
+
+\begin{lemma}[Kronecker product]\label{lem:kron}
+If $\rk_\F\MM{n_1}{m_1}{p_1}\le r_1$ and $\rk_\F\MM{n_2}{m_2}{p_2}\le r_2$ then
+\[ \rk_\F\MM{n_1n_2}{m_1m_2}{p_1p_2}\le r_1r_2. \]
+\end{lemma}
+\begin{proof}
+Writing $i=i_1n_2+i_2$ (and likewise $j,k$), each basis vector $e_{(i,j)}$ is the matrix Kronecker product of $e_{(i_1,j_1)}$ and $e_{(i_2,j_2)}$, hence $T_{n_1n_2,m_1m_2,p_1p_2}=T_1\boxtimes T_2$ with $\boxtimes$ applied factorwise;
+since $(x\tensor y\tensor z)\boxtimes(x'\tensor y'\tensor z')=(x\boxtimes x')\tensor(y\boxtimes y')\tensor(z\boxtimes z')$ and $\boxtimes$ is bilinear, the $r_1r_2$ products of terms sum to $T$.
+\end{proof}
+The naive scheme has $nmp$ terms; formats with a side equal to 1 are treated as naive only. Orientation is handled by explicit coordinate permutations, and the results of \cref{lem:split,lem:kron} are checked by the gate, so a bookkeeping error cannot produce a wrong claim.
+We ran both lemmas on the packaged rank-47 scheme: $47+47$ along each position gives exact schemes of rank 94 for $\MM844$, $\MM484$ and $\MM448$, and $7\times47$ and $47\times47$ give ranks 329 for $\MM888$ and 2{,}209 for $\MM{16}{16}{16}$
+(both are already in the matmulcatalog as $\F$ entries, and neither is new).
+
+\subsection{Pricing}
+A \emph{recipe} is a tree whose leaves are seeds (a file of the repository, or a witness identified by the SHA-256 of its canonical MFW1 bytes) or naive schemes (one recipe of the closure-products bundle has a projection of a seed as a leaf) and whose inner nodes are block sums (with a position) and Kronecker products (\cref{tab:recipes}
+gives the census). The \emph{price} of a sorted format is defined by the recurrence
+\[
+ \mathrm{price}(s)=\min\Bigl(\mathrm{witness}(s),\; nmp,\;\min_{\alpha,\,c}\bigl[\mathrm{price}(s')+\mathrm{price}(s'')\bigr],\;\min_{s=f\cdot g}\mathrm{price}(f)\,\mathrm{price}(g)\Bigr),
+\]
+over all sorted formats with sides $\le32$ in order of increasing volume, where $\mathrm{witness}(s)$ is the rank of the best verified local scheme of that format (or $\infty$), $c\le\lfloor s_\alpha/2\rfloor$ (the other half is symmetric) and $f\cdot g$ ranges over componentwise factorizations with neither factor $(1,1,1)$.
+The table has 5{,}984 entries (5{,}456 with all sides at least two); computing it takes 143{,}616 split candidates and 302{,}550 product candidates and 0.3\,s in CPython.
+A price is a rank, not a construction: the recurrence uses only ranks of the scoreboard, so it can be re-run after every walk round. There is no restriction step in it, so on the final scoreboard 133 formats have a price above that of some format larger in one side; the projection cascade of \cref{sec:derive} is what repairs this, as a separate stage.
+
+\emph{Leads} are formats whose price is at most $(1+\tau)$ times the best listed rank in any ring and strictly below the scoreboard's rank ($\tau=0$ for the first rounds; $\tau=0.01$ in the last, which admits products slightly above the listing as seeds for walks).
+
+\subsection{Materialization}
+A separate library re-builds each recipe from real witnesses: seeds are the packaged $\F$ schemes and the committed certificates of the repository together with every witness on the scoreboard. Repository leaves are path-contained, hash-pinned, expanded against the tensor
+and re-verified by the Ruby check; the assembled tensor is checked once more before it is written. Over four rounds we priced and materialized 942 products (173 on the first day and 28, 28 and 713 on 2026-09-29); every one had exactly the predicted rank (no price mismatch, no error).
+Of the campaign's records, 203 are such products with no search step and 332 of 795 have a closure product at the root of their lineage.
+The leaves of the closure were the tables' schemes and the witnesses of our scoreboard. Schemes valid only in characteristic two that are published elsewhere, such as Arai et al.'s $\MM455$ of rank 73 \cite{arai2024adaptive} or Kauers and Wood's $\MM456$ of rank 89 over $\mathbb Z_2$ \cite{kauers2025meta}, were not among them. The companion paper reports that 128 of the 203 closure products are superseded (32) or matched (96) by published constructions, but only 15 of them by compositions that use such leaves; the others are 15 serendipitous products, 90 equal-rank compositions of published schemes and 8 published rank claims.
+Pricing alone is not admission: a 50M-move walk from a materialized $16\times16\times19$ composition parent of rank 2{,}787 returned the identical tensor.
+
+\begin{table}[t]
+\centering\small
+\begin{tabular}{@{}p{7.2cm}rr@{}}
+\toprule
+& records (203) & bundle A rows (64)\\
+\midrule
+depth 1 / 2 / 3 / 4 & 157 / 40 / 5 / 1 & 55 / 7 / 2 / 0\\
+leaves per recipe (mean) & 2--5 (2.28) & 2--5 (2.20)\\
+root is a block sum / a product & 148 / 55 & 27 / 37\\
+splits along the largest / middle / smallest side & 150 / 30 / 0 & 24 / 9 / 0\\
+recipes with the rank-47 $\MM444$ scheme as a leaf & 58 & 33\\
+leaf occurrences: repository file / campaign witness / naive & 162 / 264 / 37 & 69 / 59 / 13\\
+\bottomrule
+\end{tabular}
+\caption{Census of the closure recipes of the 203 closure-product records (bundle B) and of the 64 closure rows of the searched-records bundle (A). Depth counts edges on the longest root-to-leaf path. A campaign witness is a scheme found earlier by another stage and identified by hash; 159 of the 203 recipes use one.
+The rank-47 scheme is almost always a Kronecker factor (55 of its 59 uses). The one recipe with a projection leaf counts that leaf as a repository leaf at depth one.}
+\label{tab:recipes}
+\end{table}
+
+Of the 267 closure recipes in the two bundles, 259 rebuild byte for byte from their recipes and the archived leaves; the other eight depend on three intermediate witnesses whose files no longer exist (\cref{sec:lineage}).
+
+\subsection{Serendipitous products}
+A related construction, the serendipitous (``bud'') product (Smith; generalized by Sedoglavic, and used with meta flip graphs by Perminov \cite{perminov2026serendipitous}), replaces $k$ Kronecker copies of an inner scheme that are attached to $k$ terms sharing a factor by one scheme for a format enlarged by $k$ in one position;
+it wins exactly when $\sum_{\text{buds}}[R(\text{enlarged})-k\,R(\text{inner})]<0$. It does not occur in any of our closure recipes; it enters only through the replay of matmulcatalog derivations (\cref{sec:seeds}), where 20 of the 82 replayed seeds of the searched-records bundle use it.
+Neither block sums nor Kronecker products are new; the earlier July composition with the rank-47 outer scheme is an established construction (the general seven-block identity is Sedoglavic's \cite{sedoglavic2017seven}; the support-aware form is that of the public AlphaTensor recombination code, which credits Sedoglavic and Drevet, Islam and Schost \cite{drevet2011optimization}, and is stated with its rank formula and worked examples in the companion paper \cite{peterson2026results}) and we do not reprise it here.

@@ -1,0 +1,6 @@
+closure rows 267
+state leaves needed 154 loaded 151 not on disk 3 == unrecovered set: True
+rebuilt byte-identical: 259 of 267  failures: 8  mismatches: 0 elapsed 32s
+failure reasons: {'missing composition state'}
+failing rows: [('B', '8x13x22', 1455), ('B', '8x20x26', 2459), ('B', '8x22x24', 2509), ('B', '12x13x28', 2596), ('A', '8x24x26', 2932), ('B', '8x24x26', 2932), ('A', '8x24x32', 3525), ('B', '8x24x32', 3525)]
+mismatching rows: []

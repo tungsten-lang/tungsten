@@ -1,0 +1,60 @@
+\section{Scheme representation and the exactness gate}\label{sec:repr}
+
+\paragraph{Terms and the MFW1 format.}
+A term $(u,v,w)$ is stored as three bit masks: bit $i\,m+j$ of $u$ is $A[i][j]$, bit $j\,p+k$ of $v$ is $B[j][k]$ and bit $i\,p+k$ of $w$ is
+$C[i][k]$ (the output layout is row-major and \emph{not} transposed; the public tables that store the third factor column-major are
+transposed on import, and a spec asserts that a transposed factor fails the gate).
+A scheme is serialized as text (``MFW1''): a header \texttt{MFW1 n m p rank}, then one line \texttt{a b c} per term with the
+three masks as lower-case hexadecimal without leading zeros, terms sorted in increasing order of $(a,b,c)$ and each line
+terminated by a newline. The parser rejects any input that does not re-serialize to itself and any duplicated term.
+The SHA-256 of the canonical bytes identifies a tensor everywhere in this paper; bundle file names embed its first eight hex digits.
+A successful parse validates the layout only. The tensor identity is checked separately, by a gate.
+
+\paragraph{Wide factors.}
+In the walker each factor is a vector of $\lceil\max(nm,mp,np)/32\rceil\le 32$ little-endian 32-bit limbs, one limb per 64-bit word, so
+factors of up to 1{,}024 bits, formats with all sides at least 2 and $nm,mp,np\le1024$, and seed ranks up to 16{,}320 (files of up to 16{,}384 terms) are supported; the same
+layout is used for every shape, including those whose factors fit a machine word.
+(The project's earlier production fleet uses a narrower one-word representation restricted to $2\le n\le7$; it is not used in this paper.)
+
+\paragraph{The gate.}
+\begin{definition}[exact]
+A list of triples of nonzero masks is \emph{exact for $\MM nmp$} if $\sum_t u_t\tensor v_t\tensor w_t = T_{n,m,p}$ over $\F$;
+coordinatewise, for every $\alpha<nm$ and $\beta<mp$,
+\[
+  \bigoplus_{t:\;\alpha\in\supp u_t,\;\beta\in\supp v_t} w_t \;=\;
+  \begin{cases} 2^{(\alpha\,\mathrm{div}\,m)\,p+(\beta\bmod p)} & \text{if } \alpha\bmod m=\beta\,\mathrm{div}\,p,\\ 0 & \text{otherwise.}\end{cases}
+\]
+\end{definition}
+The rank claimed for a list is its number of terms; the gate does not require the terms to be irredundant, which is harmless for an upper bound.
+The sparse-table gate costs $\sum_t|u_t|\,|v_t|$ word operations on masks of at most $np$ bits plus $nmp$ for the target.
+Three implementations exist and disagree about nothing on any tensor we tested: a Python function that accumulates each $w_t$ into a
+sparse table indexed by $(\alpha,\beta)$, XORs the target into the same table and asserts that it is empty; a Ruby program with its own
+parser and its own formulation, which builds the dense $nm\times mp$ table and compares every cell with the closed form above; and the walker's
+own packed check in Tungsten. \Cref{tab:verifiers} summarizes what was checked by which.
+
+\begin{table}[t]
+\centering\small
+\begin{tabular}{@{}p{3.6cm}p{2.1cm}p{7.7cm}@{}}
+\toprule
+verifier & language & role in the campaign\\
+\midrule
+walker's packed gate & Tungsten & seed on entry and best scheme on exit of every walk; canonicalization must preserve the rank\\
+sparse-table gate & Python & every tensor admitted to the scoreboard (verdicts cached by content hash), every row of every bundle\\
+dense-table gate & Ruby & run after the fact over the 691 record tensors held in the archive, all 661 chain heads and all 1{,}089 tensors behind the records (985 distinct bundle tensors, 102 committed certificates, 2 fleet checkpoints): all exact; also inside the leaf check of the composition library. The campaign's walk and projection drivers did not call it\\
+\bottomrule
+\end{tabular}
+\caption{The exactness verifiers. The Ruby program does not invoke any code of the searcher, shares no parser with it, and formulates the
+target tensor differently; it shares the bit-layout convention by design, so a convention error common to both would go unnoticed.}
+\label{tab:verifiers}
+\end{table}
+
+\paragraph{Negative controls.}
+On a rank-561 scheme for $\MM3{14}{18}$ both the Python and the Ruby gate accept the original and reject the same scheme with one bit flipped,
+with one term dropped, and with the third factor transposed into the public column-major layout. A scheme with one term added twice is
+accepted by both (it is still a valid, redundant decomposition of two more terms); such files are rejected earlier by the canonical parser.
+The Python gate relies on assertions, so the verifiers that use it refuse to run under \texttt{python -O}.
+
+\paragraph{Cost of checking.}
+On the loaded development machine the Python gate took $<0.01$\,s for a $9\times9\times9$ scheme of rank 482, 0.04\,s for
+$16\times16\times16$ at rank 2209, and 2.1\,s for a $28\times32\times32$ scheme of rank 14{,}271; the Ruby gate took 0.2\,s, 0.1\,s and 1.2\,s
+respectively (the first is dominated by start-up). Checking is never the bottleneck.

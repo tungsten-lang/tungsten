@@ -1,0 +1,68 @@
+\section{Background and notation}\label{sec:background}
+
+\paragraph{Schemes.}
+Index the entries of an $n\times m$ matrix $A$ by pairs $(i,j)$ and identify the pair with the coordinate $i\,m+j$
+(row-major). Let $e_{(i,j)}$ be the corresponding standard basis vector of $\F^{nm}$. The matrix-multiplication tensor is
+\[
+  T_{n,m,p} \;=\; \sum_{i<n,\;j<m,\;k<p} e_{(i,j)}\tensor e_{(j,k)}\tensor e_{(i,k)}
+  \;\in\; \F^{nm}\tensor\F^{mp}\tensor\F^{np}.
+\]
+Note that the third factor is indexed by the entry $(i,k)$ of the \emph{product}, not transposed.
+A \emph{scheme of rank $r$ for $\MM nmp$ over $\F$} is a list of $r$ triples $(u_t,v_t,w_t)$ of nonzero vectors with
+$\sum_t u_t\tensor v_t\tensor w_t = T_{n,m,p}$. Equivalently, for all $A\in\F^{n\times m}$ and $B\in\F^{m\times p}$,
+\[
+  (AB)_{ik} \;=\; \sum_{t=1}^{r} w_t[(i,k)]\;\langle u_t,A\rangle\,\langle v_t,B\rangle ,
+\]
+so the scheme computes the product with $r$ multiplications of linear forms in the entries of $A$ and $B$.
+We write $\rk_{\F}\MM nmp$ for the least such $r$. Every scheme found by any of our tools is an \emph{upper bound}
+for this quantity; we never certify a lower bound.
+
+\paragraph{Orientation.}
+The tensor $T_{n,m,p}$ is carried to $T_{m,p,n}$ and to $T_{p,m,n}$ by cyclic shifts of the three factors and by transposition of the
+matrices, with the appropriate re-indexing of coordinates. Hence $\rk_{\F}\MM nmp$ depends only on the multiset $\{n,m,p\}$. All tables and
+all price computations in this paper key on the \emph{sorted} shape, and a scheme found for one orientation is turned into a scheme for
+another by an explicit coordinate permutation (with a transposition of a factor when the permuted edge is reversed) that is itself
+covered by the exactness gate of \cref{sec:repr}.
+
+\paragraph{Symmetries.}
+The isotropy group $\mathrm{GL}_n(\F)\times\mathrm{GL}_m(\F)\times\mathrm{GL}_p(\F)$ acts on schemes for $\MM nmp$ and is the source of
+the many equivalent presentations of a fixed scheme \cite{degroote1978isotropy,burichenko2015symmetries}.
+The walker of \cref{sec:walker} does not use it; the derivation step of \cref{sec:derive} acts on presentations by a different mechanism
+(refactoring the terms that share a factor).
+
+\paragraph{Flips, reductions and plus transitions.}
+Regard a scheme as a set of terms, with the convention that two equal terms cancel (characteristic two) and a term with a zero
+factor is dropped. The following identity is the basis of the flip graph of Kauers and Moosbauer \cite{kauers2023flip}.
+
+\begin{lemma}[flip]\label{lem:flip}
+For vectors $s$, $l_1,l_2$, $r_1,r_2$ of the three factor spaces (in any assignment of the roles to the three factors),
+\[
+  s\tensor l_1\tensor r_1 + s\tensor l_2\tensor r_2
+  \;=\; s\tensor l_1\tensor (r_1+r_2) + s\tensor (l_1+l_2)\tensor r_2
+  \qquad\text{over }\F .
+\]
+\end{lemma}
+\begin{proof}
+The right-hand side expands to $s\tensor l_1\tensor r_1 + s\tensor l_1\tensor r_2 + s\tensor l_1\tensor r_2 + s\tensor l_2\tensor r_2$, and the
+two middle terms cancel in characteristic two.
+\end{proof}
+
+Two terms that share a factor can therefore be replaced by two other terms without changing the sum. The replacement never
+increases the number of terms; it lowers it when one of the new terms has a zero factor (which happens when the two old terms
+already share a second factor: the pair \emph{merges}) or equals a third term of the scheme (both cancel). Such coincidences are called
+\emph{reductions}; a flip walk moves through schemes of equal rank until one occurs. A rank-\emph{increasing} move is needed to
+leave a basin: the \emph{plus transition} of adaptive flip graphs \cite{arai2024adaptive} raises the rank by one by splitting a factor, taking the new part $e$ from another term.
+Our walker's rank-raising move is a variant: it splits one factor with a random unit vector $e$,
+$f\tensor g\tensor h = e\tensor g\tensor h + (f+e)\tensor g\tensor h$, raising the rank by one.
+Our walker uses flips and these splits and nothing else (\cref{sec:walker}).
+
+\paragraph{Related searches.}
+Flip graphs were introduced for formats up to $5\times5\times5$ with lifting from $\F$ to $\mathbb Z$ by Hensel's lemma \cite{kauers2023flip},
+extended to formats $(n,m,6)$ \cite{kauers2025six} and to formats with all dimensions up to 8 by a meta flip graph
+\cite{kauers2025meta}, restricted to symmetric schemes \cite{moosbauer2025flip}, run over ternary coefficients on GPUs
+\cite{perminov2025ternary} and in a CPU framework up to $16\times16\times16$ \cite{perminov2026framework}, combined with the serendipitous product (Smith; generalized by Sedoglavic)
+\cite{perminov2026serendipitous}, and run over $\F$ on a GPU to reach rank 245 for $7\times7\times7$ \cite{medley2026gpu}.
+Reinforcement learning \cite{fawzi2022discovering}, SAT solvers \cite{heule2019local,heule2021new} and evolutionary program search
+\cite{novikov2025alphaevolve} found other records.
+Our pipeline differs in target and in emphasis: it works on formats up to $32\times32\times32$ from seeds that already exist, and the
+part of it that is new to the literature (as far as we know) is not the moves (projection between formats is an edge of the meta flip graph \cite{kauers2025meta}, and the public catalogues \cite{sedoglavic2026catalogue,lacelle2026catalog} already derive ranks exhaustively by composition and projection) but the shared-factor basis rewrite applied before projection, the pricing and materialization of compositions from GF(2)-valid leaves with hash-pinned witnesses, the replay of public derivations over $\F$, and verifiable provenance.

@@ -1,0 +1,86 @@
+\documentclass[11pt]{article}
+
+% ---------------------------------------------------------------- packages
+\usepackage[margin=1.05in]{geometry}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{booktabs,array,multirow}
+\usepackage{xcolor}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta,shapes.geometric,calc,fit,backgrounds}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.17}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage[hidelinks]{hyperref}
+\usepackage[capitalise]{cleveref}
+\makeatletter\def\theHALG@line{\thealgorithm.\arabic{ALG@line}}\makeatother
+
+% ---------------------------------------------------------------- macros
+\newcommand{\F}{{\mathbb{F}_2}}
+\newcommand{\MM}[3]{\langle #1,#2,#3\rangle}
+\newcommand{\rk}{\operatorname{rk}}
+\newcommand{\supp}{\operatorname{supp}}
+\newcommand{\bits}{\operatorname{bits}}
+\newcommand{\tensor}{\otimes}
+\newcommand{\file}[1]{\texttt{#1}}
+\newcommand{\todo}[1]{{\color{red}[TODO: #1]}}
+
+\theoremstyle{plain}
+\newtheorem{lemma}{Lemma}
+\newtheorem{proposition}{Proposition}
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}
+
+\Crefname{algorithm}{Algorithm}{Algorithms}
+
+% ---------------------------------------------------------------- front matter
+\title{Directed Flip-Graph Walks, Projection Cascades and\\
+Composition Closure for GF(2) Matrix-Multiplication Schemes:\\
+Search Methods with Provenance-Preserving Verification}
+\author{Erik Peterson\thanks{\todo{affiliation and contact e-mail}}}
+\date{\today\ \textbf{(draft)}}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Upper bounds on the tensor rank of matrix multiplication over $\F$ are found by random walks on flip graphs and by composing known schemes.
+We describe the pipeline behind a large 2026 campaign, whose outcome is reported in a companion paper: a single-threaded, allocation-free \emph{directed} flip-graph walker with bit-packed multiword factors, whose walks replay byte for byte, on the same build, from a seed file, a step count and a nonce; a cross-shape derivation step that projects a scheme onto a smaller shape after a shared-factor basis rewrite; a rank-only composition closure over block sums and Kronecker products, materialized into witnesses; ingestion of public integer and ternary schemes modulo two, and replay of matmulcatalog derivations over $\F$; a scoring discipline against four public rank tables; and \emph{lineage bundles} whose tensors are checked by two separately written exactness verifiers and whose seed, projection and replay rows are re-derived from pinned upstream revisions.
+Over 4{,}816 walks (\(3.1\times10^{11}\) proposals) the stages differ by orders of magnitude in yield: 40M-move walks from projection children lowered the rank below their starting rank in 90\% of cases (relative to unreduced seeds, so not a yield of records), against 0.95\% for walks from public integer schemes.
+We report a reproducibility defect that only a verification from a clean extraction with empty caches exposed, and comparison pitfalls: a comparison with the four tables alone overstated novelty, since a later check found 87 of 795 results superseded by published constructions or rank claims (80 rebuilt and verified, 7 claims) and 112 more matched by compositions of published schemes or claims.
+Every claim is an upper bound; nothing here proves optimality.
+\end{abstract}
+
+\noindent\textbf{Keywords:} matrix multiplication, tensor rank, bilinear algorithms, flip graphs,
+$\mathrm{GF}(2)$, exact verification, reproducibility.\\
+\textbf{MSC 2020:} 68Q25, 15A69, 68W30. \quad \textbf{ACM CCS:} Computing methodologies $\to$ Symbolic and algebraic algorithms.
+
+\input{sections/intro}
+\input{sections/background}
+\input{sections/representation}
+\input{sections/walker}
+\input{sections/derivation}
+\input{sections/composition}
+\input{sections/seeds}
+\input{sections/scoring}
+\input{sections/lineage}
+\input{sections/evaluation}
+\input{sections/discussion}
+
+\section*{Acknowledgements and disclosure}
+The search campaign, the tooling and the drafting of this manuscript were assisted by Claude
+(Anthropic); the author is responsible for the content.
+The pipeline builds on the published work of Kauers and Moosbauer, Arai, Ichikawa and Hukushima,
+Moosbauer and Poole, Kauers and Wood, Perminov, Witteveen, Sedoglavic, Lacelle and others cited
+below; the schemes that seed or compose our results keep the credit of their authors.
+\todo{funding / conflicts-of-interest statement}
+
+\bibliographystyle{plainnat}
+\bibliography{refs}
+
+\end{document}

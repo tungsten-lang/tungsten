@@ -1,0 +1,215 @@
+--- a/main_mm.cpp
++++ b/main_mm.cpp
+@@ -5,7 +5,37 @@
+  **********************************************************************/
+ 
+ # include "mm.hpp"
++#include <set>
++#include <sys/resource.h>
++#include <sys/time.h>
++#include <unistd.h>
++#include <csignal>
+ 
++// metabench instrumentation (see bench/baselines/adapters/README.md): environment KM_TARGET_RANK, KM_CPU_BUDGET, KM_LOOP, KM_RESTART, KM_POOL and
++// KMTRACE / KMDONE / KMTIMEOUT lines on stderr; the counters live here, the hooks in Tensor::randompath and
++// Tensor::randomsplit. The search itself is unchanged.
++int mb_target = 0;
++int mb_best = 1 << 30;
++long long mb_flips = 0;
++long mb_walks = 0;
++double mb_cpu(){
++  struct rusage ru;
++  getrusage(RUSAGE_SELF, &ru);
++  return (double)(ru.ru_utime.tv_sec + ru.ru_stime.tv_sec) + 1e-6 * (double)(ru.ru_utime.tv_usec + ru.ru_stime.tv_usec);
++}
++void mb_trace(int rank){
++  if(rank < mb_best){
++    mb_best = rank;
++    fprintf(stderr, "KMTRACE cpu=%.6f flips=%lld rank=%d\n", mb_cpu(), mb_flips, rank);
++  }
++}
++static void mb_timeout(int){
++  char buf[128];
++  int len = snprintf(buf, sizeof buf, "KMTIMEOUT cpu=%.6f flips=%lld rank=%d walks=%ld\n", mb_cpu(), mb_flips, mb_best, mb_walks);
++  write(2, buf, len);
++  _exit(3);
++}
++
+ int oldrank;
+ string filename;
+ int correctness_check = 1;
+@@ -43,11 +73,91 @@
+   }
+   
+ 
++  // KM_POOL=s: Algorithm 2 of the paper. A pool of schemes of rank r; walks (one reduction each, at most PATH steps) start from
++  // random members, every walk that reduces adds its scheme to the next pool; at s schemes the next pool becomes the pool and r
++  // falls by one. The run ends at the target rank, at the CPU budget, or when no walk can start.
++  long pool_size = getenv("KM_POOL") ? atol(getenv("KM_POOL")) : 0;
++  if(pool_size > 0){
++    MM s0 = MM(filename,n,m,l);
++    oldrank = s0.rank;
++    mb_best = s0.rank;
++    if(getenv("KM_TARGET_RANK")) mb_target = atoi(getenv("KM_TARGET_RANK"));
++    if(getenv("KM_CPU_BUDGET") && atof(getenv("KM_CPU_BUDGET")) > 0){
++      double b = atof(getenv("KM_CPU_BUDGET"));
++      struct itimerval it = {{0, 0}, {(time_t)b, (suseconds_t)((b - (time_t)b) * 1e6)}};
++      signal(SIGPROF, mb_timeout);
++      setitimer(ITIMER_PROF, &it, NULL);
++    }
++    if(!s0.iscorrect()){
++      cerr << "Opened incorrect scheme: " << filename << endl;
++      return 1;
++    }
++    mt19937 master;
++    if(seed == -1){
++      random_device rd;
++      master.seed(rd());
++    }
++    else{
++      master.seed(seed);
++    }
++    vector<string> pool(1, filename);
++    int level = s0.rank;
++    int last_rank = s0.rank;
++    bool done = false;
++    while(!done && level > 1 && !pool.empty()){
++      vector<string> next;
++      set<string> seen;
++      while(!done && (long)next.size() < pool_size && !pool.empty()){
++        size_t at = master() % pool.size();
++        MM s = MM(pool[at],n,m,l);
++        mt19937 gen(master());
++        long long flips_before = mb_flips;
++        s.randompath(pathlength, gen, split_distance, split, false);
++        ++mb_walks;
++        last_rank = s.rank;
++        if(s.rank < level){
++          string name = s.newfilename();
++          if(seen.insert(name).second) next.push_back(name);
++        }
++        else if(mb_flips == flips_before){
++          pool[at] = pool.back(); // no flip exists at this member: it cannot lead anywhere
++          pool.pop_back();
++        }
++        if(mb_target && s.rank <= mb_target) done = true;
++      }
++      if(!done){
++        pool.swap(next);
++        --level;
++      }
++    }
++    fprintf(stderr, "KMDONE cpu=%.6f flips=%lld rank=%d walks=%ld\n", mb_cpu(), mb_flips, last_rank, mb_walks);
++    return 0;
++  }
++
++  // KM_LOOP=1: repeat the program (a new walk with the seed seed + 1000003 * walk) until the target rank is reached,
++  // the CPU budget is used, or a walk makes no step; KM_RESTART=best starts the next walk from the scheme the last one wrote.
++  bool loop = getenv("KM_LOOP") && atoi(getenv("KM_LOOP")) != 0;
++  bool from_best = getenv("KM_RESTART") && string(getenv("KM_RESTART")) == "best";
++  string startfile = filename;
++  int final_rank = 0;
++
++  for(long walk = 0; ; ++walk){
++
+   // Reading the scheme
+ 
+   MM s = MM(filename,n,m,l);
+ 
+-  oldrank = s.rank;
++  if(walk == 0){
++    oldrank = s.rank;
++    mb_best = s.rank;
++    if(getenv("KM_TARGET_RANK")) mb_target = atoi(getenv("KM_TARGET_RANK"));
++    if(getenv("KM_CPU_BUDGET") && atof(getenv("KM_CPU_BUDGET")) > 0){
++      double b = atof(getenv("KM_CPU_BUDGET"));
++      struct itimerval it = {{0, 0}, {(time_t)b, (suseconds_t)((b - (time_t)b) * 1e6)}};
++      signal(SIGPROF, mb_timeout);
++      setitimer(ITIMER_PROF, &it, NULL);
++    }
++  }
+   
+   if(!s.iscorrect()){
+     cerr << "Opened incorrect scheme: " << filename << endl;
+@@ -62,6 +172,10 @@
+     random_device rd;
+     gen.seed(rd());
+   }
++  else if(loop){
++    long ws = ((long)seed + walk * 1000003L) % 2147483646L;
++    gen.seed(ws > 0 ? ws : 1);
++  }
+   else{
+     gen.seed(seed);
+   }
+@@ -69,7 +183,16 @@
+ 
+   // Main call
+   
++  long long flips_before = mb_flips;
+   s.randompath(pathlength, gen, split_distance, split, restart);
++  ++mb_walks;
++  final_rank = s.rank;
++  if(!loop || (mb_target && s.rank <= mb_target) || mb_flips == flips_before) break;
++  filename = from_best ? s.newfilename() : startfile;
++
++  }
++
++  fprintf(stderr, "KMDONE cpu=%.6f flips=%lld rank=%d walks=%ld\n", mb_cpu(), mb_flips, final_rank, mb_walks);
+   
+   return 0;
+ }
+--- a/tensor.cpp
++++ b/tensor.cpp
+@@ -204,6 +204,11 @@
+   uniform_int_distribution<> d3(0, 2);
+   if (split) {
+     while(!randomsplit(gen, coinflip, d3, split_distance));
++    mb_trace(rank);
++    if (mb_target && rank <= mb_target) {
++      writetofile(0);
++      return;
++    }
+   }
+   int i = 0;
+   do{
+@@ -214,6 +219,7 @@
+         writetofile(i);
+         return;
+       }
++      mb_flips++;
+       if (randomflip(gen, coinflip, true)) {
+         break;
+       }
+@@ -222,6 +228,11 @@
+       writetofile(steps);
+       return;
+     }
++    mb_trace(rank);
++    if (mb_target && rank <= mb_target) {
++      writetofile(i);
++      return;
++    }
+   } while(restart);
+   writetofile(i);
+   return;
+@@ -274,6 +285,7 @@
+   for(int j = 0; j < split_distance; ++j){
+     randomflip(gen, coinflip, false);
+   }
++  mb_flips += split_distance + 1;
+   int previousrank = rank;
+   remove_zero_rows();
+   while(reduce());
+--- a/tensor.hpp
++++ b/tensor.hpp
+@@ -37,6 +37,9 @@
+ extern string filename;
+ extern int correctness_check;
+ //extern volatile sig_atomic_t termination_flag;
++extern int mb_target;
++extern long long mb_flips;
++void mb_trace(int rank);
+ 
+ class Tensor{
+ public:

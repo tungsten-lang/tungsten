@@ -1,0 +1,81 @@
+#!/bin/sh
+# Adapter for the updated flip-graph program of Kauers and Moosbauer (github.com/jakobmoosbauer/flips, directory
+# updated_code/, built by ../build.sh as km2024_flip): random flips with incremental flip sets, reductions detected
+# when a flip creates a second equal factor, and an optional plus transition (a split followed by flips) before the walk.
+#
+#   km2024 TASK_ID SEED BUDGET_CPU_S OUTDIR        (contract: bench/README.md, section 3)
+#
+# The program takes  flip FILE.exp n m p PATH SPLIT RESTART [SPLIT_DISTANCE [CHECK [SEED]]] : with RESTART = 1 it keeps
+# reducing (a walk of at most PATH steps per reduction) until one walk fails, then writes the scheme and exits.
+# With KM_LOOP=1 (the instrumentation patch) it then starts the next walk with the next seed inside the same process,
+# until the target rank is reached or the CPU budget is used.
+#
+# Environment:
+#   KM_PATH            path length limit per reduction                                        1000000
+#   KM_SPLIT           1: one plus transition (split, flip, SPLIT_DISTANCE random flips) before each walk; 0: none
+#                      (the transition needs rank < n*m*p, so it does nothing on a standard start)    1
+#   KM_SPLIT_DISTANCE  flips after the split (the program's default)                                    10
+#   KM_CONTINUE        1: descend as far as possible in one walk; 0: stop after the first reduction   1
+#   KM_POOL            s > 0: Algorithm 2 of the paper instead of independent walks (pool of s schemes per rank, walks of one
+#                      reduction from random members; instrumentation patch); implies KM_CONTINUE=0 and KM_SPLIT=0 unless set   0
+#   KM_RESTART         after a failed walk:  start = begin again from the start scheme,
+#                                            best  = continue from the scheme the failed walk ended on   start
+#   KM_BIN             the built program                                                   $MB_SOTA_BIN/km2024_flip
+# Seeds: walk k of a run uses the seed SEED + 1000003 k (mod 2^31-2); walk 0 uses SEED itself.
+
+case $0 in */*) . "${0%/*}/lib.sh" ;; *) . ./lib.sh ;; esac
+bl_init km2024 "$@"
+
+KM_PATH=${KM_PATH:-1000000}
+KM_POOL=${KM_POOL:-0}
+if [ "$KM_POOL" -gt 0 ]; then
+  KM_SPLIT=${KM_SPLIT:-0}
+  KM_CONTINUE=0
+else
+  KM_SPLIT=${KM_SPLIT:-1}
+  KM_CONTINUE=${KM_CONTINUE:-1}
+fi
+KM_SPLIT_DISTANCE=${KM_SPLIT_DISTANCE:-10}
+KM_RESTART=${KM_RESTART:-start}
+KM_BIN=${KM_BIN:-$MB_SOTA_BIN/km2024_flip}
+[ -x "$KM_BIN" ] || bl_die 3 "program $KM_BIN not built (run bench/baselines/build.sh)"
+case $KM_RESTART in start | best) ;; *) bl_die 2 "KM_RESTART must be start or best" ;; esac
+
+work=$BL_OUT/km2024.work
+mkdir -p "$work"
+awk -f "$bl_here/mfw-lib.awk" -f "$bl_here/mfw2exp.awk" "$BL_START" > "$work/start.exp" \
+  || bl_die 2 "task $BL_TASK is not representable for this program (dimensions <= 9, factors <= 64 bits, rank <= n*m*p)"
+
+if [ "$BL_START_RANK" -le "$BL_TARGET" ]; then
+  cp "$BL_START" "$BL_OUT/scheme.mfw"
+  BL_HIT=true
+elif [ "$BL_REM_US" -ge 2000 ]; then
+  bl_seed 0
+  bl_sec "$BL_REM_US"
+  export KM_TARGET_RANK=$BL_TARGET KM_CPU_BUDGET=$BL_SEC KM_LOOP=1 KM_RESTART KM_POOL
+  cd "$work" || exit 3
+  bl_run "$work/time.0" "$KM_BIN" "$work/start.exp" "$BL_N" "$BL_M" "$BL_P" "$KM_PATH" "$KM_SPLIT" "$KM_CONTINUE" "$KM_SPLIT_DISTANCE" 1 "$BL_WALK_SEED" \
+    > "$work/out.0" 2> "$work/err.0"
+  status=$?
+  cd "$BL_OUT" || exit 3
+  bl_merge "$work/err.0" "$work/time.0" KM
+  case $status in
+    0 | 3) ;; # 3: the CPU budget ran out inside the program
+    *) bl_die 4 "km2024_flip exited with status $status: $(tail -n 3 "$work/err.0" | tr '\n' ' ')" ;;
+  esac
+  # every finished walk printed "FILE,RANK": the last one is the walk that ended the run, the lowest rank is the best scheme written
+  set -- $(awk -F, 'NR == 1 || $2 < best { best = $2; bf = $1 } { last = $1 } END { print (last == "" ? "-" : last), (bf == "" ? "-" : bf), best + 0 }' "$work/out.0")
+  last_file=$1 best_file=$2 best_out_rank=$3
+  if [ "$BL_TARGET" -gt 0 ] && [ "$BL_BEST" -le "$BL_TARGET" ]; then
+    [ -r "$work/$last_file" ] || bl_die 4 "target reached but the program wrote no scheme: $(tail -n 3 "$work/err.0" | tr '\n' ' ')"
+    awk -v n="$BL_N" -v m="$BL_M" -v p="$BL_P" -f "$bl_here/mfw-lib.awk" -f "$bl_here/exp2mfw.awk" "$work/$last_file" > "$BL_OUT/scheme.mfw" \
+      || bl_die 4 "cannot convert $work/$last_file"
+    BL_HIT=true
+  elif [ -r "$work/$best_file" ] && [ "$best_out_rank" -eq "$BL_BEST" ]; then
+    # the best scheme of a run that missed the target, when a finished walk wrote it
+    awk -v n="$BL_N" -v m="$BL_M" -v p="$BL_P" -f "$bl_here/mfw-lib.awk" -f "$bl_here/exp2mfw.awk" "$work/$best_file" > "$BL_OUT/scheme.mfw" || rm -f "$BL_OUT/scheme.mfw"
+  fi
+fi
+
+bl_finish km2024_flip "e31a0a0+mb1" "flips = proposals = walk steps: one uniformly random flip per step, reductions found when a flip creates a second equal factor (no look-ahead, no guard against undoing the last flip); the split moves before a walk count SPLIT_DISTANCE+1 steps. GF(2), standard start unless the task names a seed. Parameters: KM_PATH=$KM_PATH KM_SPLIT=$KM_SPLIT KM_SPLIT_DISTANCE=$KM_SPLIT_DISTANCE KM_CONTINUE=$KM_CONTINUE KM_RESTART=$KM_RESTART KM_POOL=$KM_POOL. Walks started: $BL_WALKS, all in one process. Steps of an interrupted walk are counted."
+exit 0

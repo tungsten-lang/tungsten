@@ -1,0 +1,94 @@
+#!/bin/sh
+# Adapter for Perminov's ternary_flip_graph (github.com/dronperminov/ternary_flip_graph), tool flip_graph over Z2
+# (coefficients {0,1}), built by ../build.sh as tfg_flip_graph.
+#
+#   tfg TASK_ID SEED BUDGET_CPU_S OUTDIR        (contract: bench/README.md, section 3)
+#
+# flip_graph keeps COUNT runners, each a random walk that takes uniformly random flips, checks for a reduction whenever
+# a flip creates a second equal factor, and after 5K..100K flips without a reduction applies one plus/split move (only
+# while its rank is below its best + PLUS_DIFF). The runners advance in rounds of FLIP_ITERATIONS iterations; after a
+# round the best scheme becomes the state of each other runner with probability COPY_BEST. One thread is used, so the
+# runners of a round run one after the other.
+#
+# Environment (defaults are the values of the tool):
+#   TFG_COUNT            runners                                             128
+#   TFG_FLIP_ITERATIONS  iterations per runner and round                     1M
+#   TFG_MIN_PLUS         shortest period of the plus move (flips)            5K
+#   TFG_MAX_PLUS         longest period of the plus move                    100K
+#   TFG_PLUS_DIFF        plus only while rank < best + PLUS_DIFF             4
+#   TFG_RESET            iterations without a new best before a reset        10B
+#   TFG_COPY_BEST        probability that a runner adopts a new best         0.5
+#   TFG_MAX_IMPROVEMENTS size of the reset pool                              10
+#   TFG_REDUCE_PROB      probability of the full reduction scan per flip     0
+#   TFG_SANDWICH_PROB    probability of a sandwiching move per flip          0
+#   TFG_NO_VERIFY        1: skip the Brent-equation check of the start scheme 0
+#   TFG_KEEP_LOG         1: keep the tool's per-round report in tfg.work/stdout.txt   0
+#   TFG_BIN              the built program                                   $MB_SOTA_BIN/tfg_flip_graph
+# Seed: SEED itself is the tool's --seed (a positive 31-bit integer; larger values are reduced).
+
+case $0 in */*) . "${0%/*}/lib.sh" ;; *) . ./lib.sh ;; esac
+bl_init tfg "$@"
+
+TFG_COUNT=${TFG_COUNT:-128}
+TFG_FLIP_ITERATIONS=${TFG_FLIP_ITERATIONS:-1M}
+TFG_MIN_PLUS=${TFG_MIN_PLUS:-5K}
+TFG_MAX_PLUS=${TFG_MAX_PLUS:-100K}
+TFG_PLUS_DIFF=${TFG_PLUS_DIFF:-4}
+TFG_RESET=${TFG_RESET:-10B}
+TFG_COPY_BEST=${TFG_COPY_BEST:-0.5}
+TFG_MAX_IMPROVEMENTS=${TFG_MAX_IMPROVEMENTS:-10}
+TFG_REDUCE_PROB=${TFG_REDUCE_PROB:-0}
+TFG_SANDWICH_PROB=${TFG_SANDWICH_PROB:-0}
+TFG_NO_VERIFY=${TFG_NO_VERIFY:-0}
+TFG_KEEP_LOG=${TFG_KEEP_LOG:-0}
+TFG_BIN=${TFG_BIN:-$MB_SOTA_BIN/tfg_flip_graph}
+[ -x "$TFG_BIN" ] || bl_die 3 "program $TFG_BIN not built (run bench/baselines/build.sh)"
+
+work=$BL_OUT/tfg.work
+mkdir -p "$work"
+awk -f "$bl_here/mfw-lib.awk" -f "$bl_here/mfw2tfg.awk" "$BL_START" > "$work/start.txt" || bl_die 2 "cannot convert the start scheme"
+
+if [ "$BL_START_RANK" -le "$BL_TARGET" ]; then
+  cp "$BL_START" "$BL_OUT/scheme.mfw"
+  BL_HIT=true
+fi
+
+if [ "$BL_HIT" != true ] && [ "$BL_REM_US" -ge 2000 ]; then
+  bl_seed 0
+  bl_sec "$BL_REM_US"
+  export TFG_CPU_BUDGET=$BL_SEC OMP_NUM_THREADS=1
+  set -- --ring Z2 -i "$work/start.txt" -o "$work/out" --count "$TFG_COUNT" --threads 1 --seed "$BL_WALK_SEED" \
+    --target-rank "$BL_TARGET" --top-count 1 --flip-iterations "$TFG_FLIP_ITERATIONS" \
+    --min-plus-iterations "$TFG_MIN_PLUS" --max-plus-iterations "$TFG_MAX_PLUS" --plus-diff "$TFG_PLUS_DIFF" \
+    --reset-iterations "$TFG_RESET" --copy-best-probability "$TFG_COPY_BEST" --max-improvements "$TFG_MAX_IMPROVEMENTS" \
+    --reduce-probability "$TFG_REDUCE_PROB" --sandwiching-probability "$TFG_SANDWICH_PROB"
+  [ "$TFG_NO_VERIFY" = 1 ] && set -- "$@" --no-verify
+  log=/dev/null
+  [ "$TFG_KEEP_LOG" = 1 ] && log=$work/stdout.txt
+  bl_run "$work/time.0" "$TFG_BIN" "$@" > "$log" 2> "$work/err.0"
+  status=$?
+  bl_merge "$work/err.0" "$work/time.0" TFG
+  case $status in
+    0 | 3) ;;
+    *) bl_die 4 "tfg_flip_graph exited with status $status: $(tail -n 3 "$work/err.0" | tr '\n' ' ')" ;;
+  esac
+  # the tool saves every improvement it validates as  NxMxP_m<rank>_c<complexity>_iteration<k>_Z2.txt : take the lowest rank
+  best_file= best_rank=999999
+  for f in "$work"/out/*_Z2.txt; do
+    [ -r "$f" ] || continue
+    r=${f##*_m}
+    r=${r%%_*}
+    if [ "$r" -lt "$best_rank" ]; then best_rank=$r best_file=$f; fi
+  done
+  if [ "$BL_TARGET" -gt 0 ] && [ "$BL_BEST" -le "$BL_TARGET" ]; then
+    [ -n "$best_file" ] || bl_die 4 "target reached but the tool saved no scheme"
+    awk -f "$bl_here/mfw-lib.awk" -f "$bl_here/tfg2mfw.awk" "$best_file" > "$BL_OUT/scheme.mfw" || bl_die 4 "cannot convert $best_file"
+    BL_HIT=true
+  elif [ -n "$best_file" ] && [ "$best_rank" -eq "$BL_BEST" ]; then
+    # the best scheme of a run that missed the target (saved when its round ended)
+    awk -f "$bl_here/mfw-lib.awk" -f "$bl_here/tfg2mfw.awk" "$best_file" > "$BL_OUT/scheme.mfw" || rm -f "$BL_OUT/scheme.mfw"
+  fi
+fi
+
+bl_finish tfg_flip_graph "b942f00+mb1" "flips = accepted flips; proposals = loop iterations (each tries a flip, and a plus/split move when no flip is available); plus/split moves are not counted as flips. Standard reduction check only (two equal factors after a flip), GF(2). Parameters: TFG_COUNT=$TFG_COUNT TFG_FLIP_ITERATIONS=$TFG_FLIP_ITERATIONS TFG_MIN_PLUS=$TFG_MIN_PLUS TFG_MAX_PLUS=$TFG_MAX_PLUS TFG_PLUS_DIFF=$TFG_PLUS_DIFF TFG_RESET=$TFG_RESET TFG_COPY_BEST=$TFG_COPY_BEST TFG_MAX_IMPROVEMENTS=$TFG_MAX_IMPROVEMENTS TFG_REDUCE_PROB=$TFG_REDUCE_PROB TFG_SANDWICH_PROB=$TFG_SANDWICH_PROB TFG_NO_VERIFY=$TFG_NO_VERIFY. Plus/split moves taken: $BL_EXPANDS. One thread; the runners of a round run in sequence."
+exit 0

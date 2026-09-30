@@ -8,18 +8,21 @@ use tables
 use proc
 
 + Verifier
+  ro :name
+
+  -> new(@bench, @name)
+    @row = @bench.verifier_row(@name)
+
   # true: exact; false: not exact; nil: the verifier could not run. The
   # verifier's output is kept next to the scheme as `<scheme>.verify.log`.
-  -> .exact?(bench, name, scheme, n, m, p)
-    template = bench.verifier_row(name)["command"]
-    values = {"bench" => bench.dir, "scheme" => scheme, "n" => n, "m" => m, "p" => p, "shape" => n.to_s + "x" + m.to_s + "x" + p.to_s}
-    command = Shell.expand(template, values) + " > " + Shell.quote(scheme + ".verify.log") + " 2>&1"
+  -> exact?(scheme, n, m, p)
+    values = {"bench" => @bench.dir, "scheme" => scheme, "n" => n, "m" => m, "p" => p, "shape" => n.to_s + "x" + m.to_s + "x" + p.to_s}
+    command = Shell.expand(@row["command"], values) + " > " + Shell.quote(scheme + ".verify.log") + " 2>&1"
     child = Child.spawn(["/bin/sh", "-c", command])
     result = child.wait(600000)
     done = result[0]
     return nil if result[1] || done.signal != 0
     return true if done.code == 0
-    marker = bench.verifier_row(name)["not_exact_marker"]
     log = read_file(scheme + ".verify.log")
-    return false if done.code == 1 && log != nil && log.include?(marker)
+    return false if done.code == 1 && log != nil && log.include?(@row["not_exact_marker"])
     nil

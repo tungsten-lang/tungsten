@@ -25,7 +25,7 @@ use walker
     @slots = self.option("jobs", 4).to_i
     @scale = self.option("scale", 1.0).to_f
     @verify = self.option("verify", "hits")
-    @verifier = self.option("verifier", "ruby")
+    @verifier = Verifier.new(@bench, self.option("verifier", "ruby"))
     @starts = {}
     @tally = {"runs" => 0, "hits" => 0, "errors" => 0, "false_claims" => 0}
     @host = Proc.hostname()
@@ -262,10 +262,10 @@ use walker
       return nil
     scheme = job["dir"] + "/scheme.mfw"
     if @verify != "none" && File.exists?(scheme) && (rec["tool_hit"] || @verify == "all")
-      rec["exact"] = Verifier.exact?(@bench, @verifier, scheme, task.n, task.m, task.p)
+      rec["exact"] = @verifier.exact?(scheme, task.n, task.m, task.p)
       if rec["exact"] == nil
         rec["status"] = "error"
-        rec["error"] = "verifier " + @verifier + " could not run"
+        rec["error"] = "verifier " + @verifier.name + " could not run"
         return nil
     elsif rec["tool_hit"] && !File.exists?(scheme)
       rec["exact"] = false

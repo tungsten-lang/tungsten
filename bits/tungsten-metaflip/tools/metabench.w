@@ -83,7 +83,7 @@ elsif command == "validate"
 elsif command == "verify"
   shape = Cli.get(opts, "--shape", "").split("x")
   usage() if shape.size != 3 || opts["--scheme"] == nil
-  verdict = Verifier.exact?(bench, Cli.get(opts, "--verifier", "ruby"), opts["--scheme"], shape[0].to_i, shape[1].to_i, shape[2].to_i)
+  verdict = Verifier.new(bench, Cli.get(opts, "--verifier", "ruby")).exact?(opts["--scheme"], shape[0].to_i, shape[1].to_i, shape[2].to_i)
   << (verdict == nil ? "unknown" : (verdict ? "exact" : "not exact"))
   exit(verdict == nil ? 2 : (verdict ? 0 : 1))
 elsif command == "exec"

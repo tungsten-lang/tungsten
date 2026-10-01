@@ -1,0 +1,265 @@
+[
+ {
+  "name": "good",
+  "bundle": "good",
+  "options": {},
+  "expect": "ok"
+ },
+ {
+  "name": "file-swap",
+  "bundle": "file-swap",
+  "options": {},
+  "expect": "rejected"
+ },
+ {
+  "name": "recipe-rank",
+  "bundle": "recipe-rank",
+  "options": {},
+  "expect": "rejected"
+ },
+ {
+  "name": "projection-coordinate",
+  "bundle": "projection-coordinate",
+  "options": {},
+  "expect": "rejected"
+ },
+ {
+  "name": "projection-mode",
+  "bundle": "projection-mode",
+  "options": {},
+  "expect": "rejected"
+ },
+ {
+  "name": "basis-mode",
+  "bundle": "basis-mode",
+  "options": {},
+  "expect": "rejected"
+ },
+ {
+  "name": "unknown-kind",
+  "bundle": "unknown-kind",
+  "options": {},
+  "expect": "rejected"
+ },
+ {
+  "name": "walk-shape",
+  "bundle": "walk-shape",
+  "options": {},
+  "expect": "rejected"
+ },
+ {
+  "name": "provenance",
+  "bundle": "provenance",
+  "options": {},
+  "expect": "rejected"
+ },
+ {
+  "name": "header",
+  "bundle": "header",
+  "options": {},
+  "expect": "rejected"
+ },
+ {
+  "name": "record-claim",
+  "bundle": "record-claim",
+  "options": {},
+  "expect": "rejected"
+ },
+ {
+  "name": "parent-missing",
+  "bundle": "parent-missing",
+  "options": {},
+  "expect": "rejected"
+ },
+ {
+  "name": "parent-later",
+  "bundle": "parent-later",
+  "options": {},
+  "expect": "rejected"
+ },
+ {
+  "name": "parent-on-seed",
+  "bundle": "parent-on-seed",
+  "options": {},
+  "expect": "rejected"
+ },
+ {
+  "name": "rank-field",
+  "bundle": "rank-field",
+  "options": {},
+  "expect": "rejected"
+ },
+ {
+  "name": "shape-field",
+  "bundle": "shape-field",
+  "options": {},
+  "expect": "rejected"
+ },
+ {
+  "name": "inexact-tensor",
+  "bundle": "inexact-tensor",
+  "options": {},
+  "expect": "rejected"
+ },
+ {
+  "name": "uncanonical-text",
+  "bundle": "uncanonical-text",
+  "options": {},
+  "expect": "rejected"
+ },
+ {
+  "name": "replay-no-walker",
+  "bundle": "replay",
+  "options": {},
+  "expect": "ok"
+ },
+ {
+  "name": "replay-copy",
+  "bundle": "replay",
+  "options": {
+   "replay_walk": "$WALKER_COPY"
+  },
+  "expect": "ok"
+ },
+ {
+  "name": "replay-corrupt",
+  "bundle": "replay",
+  "options": {
+   "replay_walk": "$WALKER_CORRUPT"
+  },
+  "expect": "rejected"
+ },
+ {
+  "name": "replay-fail",
+  "bundle": "replay",
+  "options": {
+   "replay_walk": "$WALKER_FAIL"
+  },
+  "expect": "rejected"
+ },
+ {
+  "name": "replay-skipped-by-rank",
+  "bundle": "replay",
+  "options": {
+   "replay_walk": "$WALKER_CORRUPT",
+   "replay_max_rank": 5
+  },
+  "expect": "ok"
+ },
+ {
+  "name": "retained-no-root",
+  "bundle": "retained",
+  "options": {},
+  "expect": "ok"
+ },
+ {
+  "name": "retained-root",
+  "bundle": "retained",
+  "options": {
+   "repo_root": "$REPO"
+  },
+  "expect": "ok"
+ },
+ {
+  "name": "retained-wrong-file",
+  "bundle": "retained-bad",
+  "options": {
+   "repo_root": "$REPO"
+  },
+  "expect": "rejected"
+ },
+ {
+  "name": "archived-no-source",
+  "bundle": "archived",
+  "options": {},
+  "expect": "ok"
+ },
+ {
+  "name": "archived-source",
+  "bundle": "archived",
+  "options": {
+   "sources": {
+    "tungsten-history": "$HISTORY"
+   }
+  },
+  "expect": "ok"
+ },
+ {
+  "name": "archived-digest",
+  "bundle": "archived-bad",
+  "options": {
+   "sources": {
+    "tungsten-history": "$HISTORY"
+   }
+  },
+  "expect": "rejected"
+ },
+ {
+  "name": "archived-other-tensor",
+  "bundle": "archived-other",
+  "options": {
+   "sources": {
+    "tungsten-history": "$HISTORY"
+   }
+  },
+  "expect": "rejected"
+ },
+ {
+  "name": "public-no-source",
+  "bundle": "public",
+  "options": {},
+  "expect": "ok"
+ },
+ {
+  "name": "public-source",
+  "bundle": "public",
+  "options": {
+   "sources": {
+    "fixture-schemes": "$SCHEMES"
+   }
+  },
+  "expect": "ok"
+ },
+ {
+  "name": "public-source-rank",
+  "bundle": "public-bad",
+  "options": {
+   "sources": {
+    "fixture-schemes": "$SCHEMES"
+   }
+  },
+  "expect": "rejected"
+ },
+ {
+  "name": "public-source-digest",
+  "bundle": "public-sha",
+  "options": {
+   "sources": {
+    "fixture-schemes": "$SCHEMES"
+   }
+  },
+  "expect": "rejected"
+ },
+ {
+  "name": "recipe-no-source",
+  "bundle": "recipe",
+  "options": {},
+  "expect": "ok"
+ },
+ {
+  "name": "recipe-equal-rank-variant",
+  "bundle": "recipe",
+  "options": {
+   "sources": {
+    "matmulcatalog": "$HISTORY"
+   }
+  },
+  "expect": "ok"
+ },
+ {
+  "name": "recipe-provenance",
+  "bundle": "recipe-bad",
+  "options": {},
+  "expect": "rejected"
+ }
+]

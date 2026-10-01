@@ -199,6 +199,31 @@ use tensor_verifier
     last.release if last != nil
     verdict
 
+  # The Scheme of a witness whose terms sum to the matrix-multiplication tensor, or nil: what `decode` accepts, with
+  # the terms (in the order the text gives them) for the caller, who releases it.
+  -> .decode_scheme(path, text)
+    if text.starts_with?("MFW1")
+      scheme = nil
+      begin
+        scheme = Metaflip:Gf2:Scheme.parse(text)
+      rescue failure
+        return nil
+      return scheme if scheme.exact?
+      scheme.release
+      return nil
+    hint = Metaflip:Gf2:RecordBoard.shape_hint(path)
+    return nil if hint == nil
+    terms = Metaflip:Gf2:RecordBoard.decimal_terms(text)
+    return nil if terms == nil
+    us = terms.map(-> (t) t[0])
+    vs = terms.map(-> (t) t[1])
+    ws = terms.map(-> (t) t[2])
+    found = nil
+    Metaflip:Gf2:RecordBoard.orientations(hint).each -> (shape)
+      candidate = Metaflip:Gf2:Scheme.new(shape[0], shape[1], shape[2], us, vs, ws)
+      found = candidate if found == nil && candidate.exact?
+    found
+
   # The files a root stands for: itself when it is a file, else everything below it that looks like a witness.
   -> .witness_files(roots)
     found = []

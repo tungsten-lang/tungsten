@@ -113,6 +113,9 @@ use core/process
       digits = cut == nil ? "" : raw.slice(cut + marker.size, raw.size - cut - marker.size)
       if Procx.digits?(digits)
         result = ProcResult.new(digits.to_i, raw.slice(0, cut), err)
+        # the slice is a copy: the captured text (output plus marker) is ours and, with no garbage collector, not
+        # freed by anyone else (a `git show` of a large blob would otherwise stay in memory for good)
+        ccall("w_value_free_w", raw)
       else
         result = ProcResult.new(nil, raw, err)
     ensure

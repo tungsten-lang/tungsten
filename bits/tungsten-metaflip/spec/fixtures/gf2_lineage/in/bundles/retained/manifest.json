@@ -1,0 +1,18 @@
+{
+ "schema": 1,
+ "field": "GF(2)",
+ "record_claim": false,
+ "rows": [
+  {
+   "kind": "retained",
+   "parent": null,
+   "shape": "3x3x4",
+   "rank": 29,
+   "sha256": "4bd271ef3ac03619f7a64820337a4eee03ed53e5bd0f521f3a179d806560f8ab",
+   "file": "3x3x4-r29-4bd271ef.mfw.gz.b64",
+   "details": {
+    "path": "lib/metaflip/seeds/gf2/matmul_3x3x4_rank29_d249_peterson_2026_aws_disjoint_gf2.txt"
+   }
+  }
+ ]
+}

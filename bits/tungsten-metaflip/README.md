@@ -1494,7 +1494,7 @@ public rank tables, and `tools/build_gf2_lineage_bundle.py` with
 [campaign write-up](tools/RECORD-HUNT-2026-09-26.md) has the standing and its caveats; the
 tensors are release assets of `tungsten-lang/metaflip-archives`, not part of this package.
 Tungsten ports of these tools (`tools/gf2_record_board.w`, `public_ternary.w`, `mmc_seeds.w`, `build_lineage.w`,
-`verify_lineage.w`, `closure_prices.w`, with their libraries in `lib/metaflip/gf2/`) reproduce the output of the Python
+`verify_lineage.w`, `closure_prices.w`, `projection_walks.w`, with their libraries in `lib/metaflip/gf2/`) reproduce the output of the Python
 originals, which stay as the oracles of the specs; the campaign itself ran on the originals.
 
 Bundled seed files can have licenses or attribution requirements different

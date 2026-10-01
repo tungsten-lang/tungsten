@@ -613,3 +613,31 @@ worked by accident and was replaced by `Fsx.regular?`. Probably a call-site spec
 different scoreboard, or with `--allow-nonf2 --board` after one without the board, reuses the recipes the earlier replay materialized.
 The port keeps this (the golden of `replay-selected` in `spec/fixtures/gf2_catalogue_seeds` shows it: a recipe that needs the board's
 rank-23 leaf fails with the rank 189 of the cached result), and builds one replayer per command.
+
+---
+
+# Port blockers (projection walks, written on the integration branch)
+
+## Sibling blocks of one method that share a parameter name: the second takes the type of the first (compiled engine)
+
+```tungsten
++ Probe
+  -> .go
+    modes = [nil]
+    (6...9).each -> (mode)
+      modes.push(mode)
+    out = []
+    modes.each -> (mode)
+      out.push([1].select(-> (x) x == 1).size)
+    out.size
+
+<< Probe.go.to_s   # compiled and `run`: runtime error: expected int, got nil (w_index_raw_i64 <- w_to_i64);
+                   # --interpret answers 4. Renaming the second `mode` makes the compiled engine answer 4 too.
+```
+
+The first block is the `Range#each` block with an integer parameter, the second iterates an Array that holds `nil` and has any closure
+nested in its body (the lambda need not capture anything; without a nested closure the same code works). The call of the second block fails
+at entry, before its first statement. It looks like the family of the other slot collisions: block parameters of one method seem to share
+a slot per name once a nested closure forces an environment, and the slot keeps the type of the first block that declared it. Found in
+`lib/metaflip/gf2/projection_walks.w`, where the list of basis modes was built by a `(6...18).each` before the loop over the modes; the
+list is a literal now (`[nil, 6, ..., 17]`), and no block of that method reuses a parameter name with another type.

@@ -1,0 +1,62 @@
+{
+  "seed": "0615918df0de56bcd410a33f6ad2aa7451efb4238d7ff7fe4a3d82dce6d97d3f",
+  "selected": [
+    {
+      "shape": [
+        3,
+        3,
+        3
+      ],
+      "rank": 23,
+      "mode": null,
+      "axis": 2,
+      "coordinate": 3,
+      "sha256": "5ae3a386ceb6defebcc283870d8d9d8fd2f225ff9fa783c1cd51b4307d8cc415",
+      "public_rank": 23,
+      "pair_counts": [
+        1,
+        4,
+        3
+      ],
+      "density": 146
+    },
+    {
+      "shape": [
+        3,
+        2,
+        4
+      ],
+      "rank": 21,
+      "mode": null,
+      "axis": 1,
+      "coordinate": 2,
+      "sha256": "40b85dd98e1c7f0fd04725fe08bff24ce3671798f016d60e76f4b1b2d07a4422",
+      "public_rank": 20,
+      "pair_counts": [
+        4,
+        2,
+        0
+      ],
+      "density": 138
+    },
+    {
+      "shape": [
+        3,
+        3,
+        3
+      ],
+      "rank": 23,
+      "mode": null,
+      "axis": 2,
+      "coordinate": 0,
+      "sha256": "d1afec32fa121188f0ddbc85b19e09e16a1158f327012352c1da2f6f36376724",
+      "public_rank": 23,
+      "pair_counts": [
+        1,
+        4,
+        3
+      ],
+      "density": 146
+    }
+  ]
+}

@@ -23,7 +23,8 @@ Metaflip executable:
   basis rewrites (`derive`), composition recipes and closure (`recipes`,
   `closure_prices`), the import of public integer schemes (`public_ternary`),
   the replay of matmulcatalog recipes (`mmc_alg`, `catalogue`,
-  `catalogue_seeds`) and lineage bundles (`lineage`). The originals stay in
+  `catalogue_seeds`), lineage bundles (`lineage`) and the bounded projection
+  and walk search (`projection_walks`). The originals stay in
   `tools/` as the oracles of the specs; see the header comments of the files.
 - `fleet/`, `rect/`, and `strategies/` contain coordinator and search modules.
   `rect/cpu_pool.w` keeps one OS thread per rectangular island across campaign

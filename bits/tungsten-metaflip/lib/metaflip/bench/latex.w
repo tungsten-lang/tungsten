@@ -136,12 +136,20 @@ use report
 
   # Matrix of ERT ratios against the reference: one row per algorithm (grouped, in numeric order of the
   # settings), one column per task.
-  -> .matrix(scoring, reference)
+  # With `selected` (an Array of task ids), only those columns, and only the algorithms that have a cell in one of them.
+  -> .matrix(scoring, reference, selected = nil)
     cells = {}
     scoring.comparisons(reference).each -> (r)
       cells[r["task"] + "\t" + r["algo"]] = r
     tasks = scoring.tasks
+    tasks = tasks.select(-> (t) selected.include?(t)) if selected != nil
     algos = scoring.algos.select(-> (a) a != reference).sort_by(-> (a) Latex.order_key(a))
+    if selected != nil
+      algos = algos.select -> (a)
+        present = false
+        tasks.each -> (t)
+          present = true if cells.key?(t + "\t" + a)
+        present
     rows = []
     breaks = []
     last = nil

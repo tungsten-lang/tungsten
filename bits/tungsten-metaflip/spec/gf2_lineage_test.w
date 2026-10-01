@@ -64,7 +64,8 @@ Fsx.with_tempdir(prefix: "gf2-lineage-") -> (tmp)
     write_file(path, read_file(fixtures + "/in/walker-" + name + ".sh"))
     Procx.check_output(["chmod", "755", path])
     walkers["$WALKER_" + name.upcase] = path
-  places = {"$REPO" => fixtures + "/in/repo", "$HISTORY" => history, "$SCHEMES" => schemes}
+  catalogue = committed(fixtures + "/../gf2_catalogue/tree", tmp + "/catalogue", git_env)
+  places = {"$REPO" => fixtures + "/in/repo", "$HISTORY" => history, "$SCHEMES" => schemes, "$CATALOGUE" => catalogue, "$CACHE" => tmp + "/mmc-cache"}
   walkers.each -> (key, path)
     places[key] = path
 
@@ -77,6 +78,7 @@ Fsx.with_tempdir(prefix: "gf2-lineage-") -> (tmp)
     options["repo_root"] = places[given["repo_root"]] if given.key?("repo_root")
     options["replay_walk"] = places[given["replay_walk"]] if given.key?("replay_walk")
     options["replay_max_rank"] = given["replay_max_rank"] if given.key?("replay_max_rank")
+    options["cache_dir"] = places[given["cache_dir"]] if given.key?("cache_dir")
     result = nil
     outcome = "ok"
     begin

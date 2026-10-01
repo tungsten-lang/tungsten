@@ -261,5 +261,44 @@
   "bundle": "recipe-bad",
   "options": {},
   "expect": "rejected"
+ },
+ {
+  "name": "catalogue-no-source",
+  "bundle": "catalogue",
+  "options": {},
+  "expect": "ok"
+ },
+ {
+  "name": "catalogue-replay",
+  "bundle": "catalogue",
+  "options": {
+   "sources": {
+    "solven-eu": "$CATALOGUE"
+   },
+   "cache_dir": "$CACHE"
+  },
+  "expect": "ok"
+ },
+ {
+  "name": "catalogue-replay-differs",
+  "bundle": "catalogue-wrong",
+  "options": {
+   "sources": {
+    "solven-eu": "$CATALOGUE"
+   },
+   "cache_dir": "$CACHE"
+  },
+  "expect": "rejected"
+ },
+ {
+  "name": "catalogue-replay-fails",
+  "bundle": "catalogue-failing",
+  "options": {
+   "sources": {
+    "solven-eu": "$CATALOGUE"
+   },
+   "cache_dir": "$CACHE"
+  },
+  "expect": "rejected"
  }
 ]

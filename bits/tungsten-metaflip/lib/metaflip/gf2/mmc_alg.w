@@ -435,38 +435,60 @@ use textx
     Metaflip:Gf2:Bits.release(mask)
     y
 
-  -> .build_bud_block(outer, type, indices, s3, n2, m2, p2)
-    n1 = outer.n
-    m1 = outer.m
-    p1 = outer.p
+  # one term of the bud block of type U: s3 = <n2, m2, k p2>
+  -> .bud_term_u(shared, sub, terms, indices, n1, m1, p1, n2, m2, p2)
     k = indices.size
+    u = Metaflip:Gf2:MmcAlg.kron_bits(shared, sub[0], n1, m1, n2, m2)
+    v = 0
+    w = 0
+    l = 0
+    while l < k
+      row = terms[indices[l]]
+      v = v ^ Metaflip:Gf2:MmcAlg.kron_bits(row[1], Metaflip:Gf2:MmcAlg.col_block(sub[1], l, m2, k, p2), m1, p1, m2, p2)
+      w = w ^ Metaflip:Gf2:MmcAlg.kron_bits(row[2], Metaflip:Gf2:MmcAlg.col_block(sub[2], l, n2, k, p2), n1, p1, n2, p2)
+      l += 1
+    [u, v, w]
+
+  # of type V: s3 = <k n2, m2, p2>
+  -> .bud_term_v(shared, sub, terms, indices, n1, m1, p1, n2, m2, p2)
+    k = indices.size
+    v = Metaflip:Gf2:MmcAlg.kron_bits(shared, sub[1], m1, p1, m2, p2)
+    u = 0
+    w = 0
+    l = 0
+    while l < k
+      row = terms[indices[l]]
+      u = u ^ Metaflip:Gf2:MmcAlg.kron_bits(row[0], Metaflip:Gf2:MmcAlg.row_block(sub[0], l, n2, m2), n1, m1, n2, m2)
+      w = w ^ Metaflip:Gf2:MmcAlg.kron_bits(row[2], Metaflip:Gf2:MmcAlg.row_block(sub[2], l, n2, p2), n1, p1, n2, p2)
+      l += 1
+    [u, v, w]
+
+  # of type W: s3 = <n2, k m2, p2>
+  -> .bud_term_w(shared, sub, terms, indices, n1, m1, p1, n2, m2, p2)
+    k = indices.size
+    w = Metaflip:Gf2:MmcAlg.kron_bits(shared, sub[2], n1, p1, n2, p2)
+    u = 0
+    v = 0
+    l = 0
+    while l < k
+      row = terms[indices[l]]
+      u = u ^ Metaflip:Gf2:MmcAlg.kron_bits(row[0], Metaflip:Gf2:MmcAlg.col_block(sub[0], l, n2, k, m2), n1, m1, n2, m2)
+      v = v ^ Metaflip:Gf2:MmcAlg.kron_bits(row[1], Metaflip:Gf2:MmcAlg.row_block(sub[1], l, m2, p2), m1, p1, m2, p2)
+      l += 1
+    [u, v, w]
+
+  -> .build_bud_block(outer, type, indices, s3, n2, m2, p2)
     fi = Metaflip:Gf2:MmcAlg.factor_index(type)
     terms = outer.terms
     shared = terms[indices[0]][fi]
     out = []
-    s3.terms.each -> (s)
-      u = 0
-      v = 0
-      w = 0
+    s3.terms.each -> (sub)
       if type == "U"
-        u = Metaflip:Gf2:MmcAlg.kron_bits(shared, s[0], n1, m1, n2, m2)
-        indices.each_with_index -> (t, l)
-          row = terms[t]
-          v = v ^ Metaflip:Gf2:MmcAlg.kron_bits(row[1], Metaflip:Gf2:MmcAlg.col_block(s[1], l, m2, k, p2), m1, p1, m2, p2)
-          w = w ^ Metaflip:Gf2:MmcAlg.kron_bits(row[2], Metaflip:Gf2:MmcAlg.col_block(s[2], l, n2, k, p2), n1, p1, n2, p2)
+        out.push(Metaflip:Gf2:MmcAlg.bud_term_u(shared, sub, terms, indices, outer.n, outer.m, outer.p, n2, m2, p2))
       elsif type == "V"
-        v = Metaflip:Gf2:MmcAlg.kron_bits(shared, s[1], m1, p1, m2, p2)
-        indices.each_with_index -> (t, l)
-          row = terms[t]
-          u = u ^ Metaflip:Gf2:MmcAlg.kron_bits(row[0], Metaflip:Gf2:MmcAlg.row_block(s[0], l, n2, m2), n1, m1, n2, m2)
-          w = w ^ Metaflip:Gf2:MmcAlg.kron_bits(row[2], Metaflip:Gf2:MmcAlg.row_block(s[2], l, n2, p2), n1, p1, n2, p2)
+        out.push(Metaflip:Gf2:MmcAlg.bud_term_v(shared, sub, terms, indices, outer.n, outer.m, outer.p, n2, m2, p2))
       else
-        w = Metaflip:Gf2:MmcAlg.kron_bits(shared, s[2], n1, p1, n2, p2)
-        indices.each_with_index -> (t, l)
-          row = terms[t]
-          u = u ^ Metaflip:Gf2:MmcAlg.kron_bits(row[0], Metaflip:Gf2:MmcAlg.col_block(s[0], l, n2, k, m2), n1, m1, n2, m2)
-          v = v ^ Metaflip:Gf2:MmcAlg.kron_bits(row[1], Metaflip:Gf2:MmcAlg.row_block(s[1], l, m2, p2), m1, p1, m2, p2)
-      out.push([u, v, w])
+        out.push(Metaflip:Gf2:MmcAlg.bud_term_w(shared, sub, terms, indices, outer.n, outer.m, outer.p, n2, m2, p2))
     out
 
   -> .serendipitous(outer, n2, m2, p2, resolve, rank_of)

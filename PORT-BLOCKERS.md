@@ -560,3 +560,29 @@ two chains (`w_is_hash(recv) ? "Hash"`). `Jsonx`, which builds the trees this to
 The same call once per coefficient (`value.is_a?(Integer)` while reading every scheme file of the public tree) goes through
 `w_method_call_slow` and `w_type_class_dispatch`, and the profile put about a fifth of the tool's samples there. `type(value)`
 answers an Int in three tag checks; with it the conversion of the 1,454 files took 38 s of CPU time instead of 117 s.
+
+---
+
+# Port blockers (catalogue replay, written on the integration branch)
+
+## A splat method called with two arguments binds `self` when the class's constructor takes keyword arguments
+
+```tungsten
++ C
+  -> new(@owner, flag: true)
+    @n = 0
+  -> note(*parts)
+    parts.size
+<< C.new("o").note("x", "y")      # runtime error: undefined method 'size' for C (object/instance ...)
+```
+
+With one argument, with three, or in a class whose constructor has no keyword argument (or no constructor), `parts` is the argument list
+as it should be (`A 1:1`, `A 2:2`, `A 3:3`, `B 2:2` in the probe; `C 3` too). Both engines. `lib/metaflip/gf2/catalogue.w` takes a single
+String instead (`note_log(line)`), marked by this entry.
+
+## A closure that reads a block parameter, in sibling `if`/`elsif`/`else` branches that each hold such a closure
+
+The bud blocks of the serendipitous product (`lib/metaflip/gf2/mmc_alg.w`) were written as one block with three branches, each reading
+`sub[i]` at its top and in a nested closure; the last branch's first read failed with `undefined method '[]' for Object (object/atomic ...)`
+on one input of the 71 real recipes (and passed on 680 synthetic cases). A reduction of the shape (r2 of the investigation) did not reproduce
+it, so the cause is not pinned down; the code is now three methods with `while` loops and no closures (`bud_term_u`, `bud_term_v`, `bud_term_w`).

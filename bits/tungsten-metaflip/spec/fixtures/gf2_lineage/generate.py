@@ -41,6 +41,8 @@ import screen_top_two_projection_children as top  # noqa: E402
 import verify_gf2_lineage as V  # noqa: E402
 from screen_public_ternary_gf2 import reduce_mod2  # noqa: E402
 from screen_two_pass_basis_children import two_pass  # noqa: E402
+import mmc_gf2_alg as G  # noqa: E402
+import mmc_gf2_replay as MR  # noqa: E402
 
 IN = HERE / 'in'
 EXPECTED = HERE / 'expected'
@@ -113,12 +115,13 @@ def main():
     try:
         history, history_rev = commit_tree(IN / 'history', scratch)
         schemes, schemes_rev = commit_tree(IN / 'schemes', scratch)
-        build(scratch, history, history_rev, schemes, schemes_rev)
+        catalogue, catalogue_rev = commit_tree(HERE.parent / 'gf2_catalogue' / 'tree', scratch)
+        build(scratch, history, history_rev, schemes, schemes_rev, catalogue, catalogue_rev)
     finally:
         shutil.rmtree(scratch)
 
 
-def build(scratch, history, history_rev, schemes, schemes_rev):
+def build(scratch, history, history_rev, schemes, schemes_rev, catalogue_repo, catalogue_rev):
     seed = SEEDS / SEED_NAME
     shape, seed_terms = grb.decode(seed, grb.load(seed))
     base = sorted(seed_terms)
@@ -357,13 +360,43 @@ def build(scratch, history, history_rev, schemes, schemes_rev):
     (recipe_bad / 'manifest.json').write_text(json.dumps(manifest))
     case('recipe-provenance', 'recipe-bad', expect='rejected')
 
+    # ---- recipe-replay rows with a catalogue to replay them from (the synthetic one of spec/fixtures/gf2_catalogue)
+    replay_file = 'derived/s4/4x4x4-r49-derived-aaaaaaa.json'
+    cache = scratch / 'mmc-cache-fixture'
+    replayed = MR.Replayer(MR.Source(catalogue_repo, catalogue_rev, cache), use_disk_cache=False).materialize_file(replay_file)
+    details = dict(repository='https://github.com/solven-eu/matmulcatalog', revision=catalogue_rev, file=replay_file, lineage='synthetic')
+    catalogue_bundle = bundles / 'catalogue'
+    catalogue_bundle.mkdir()
+    rows = []
+    add_row(catalogue_bundle, rows, sorted(replayed.terms), replayed.shape, 'recipe-replay', None, details)
+    write_manifest(catalogue_bundle, rows)
+    case('catalogue-no-source', 'catalogue')
+    case('catalogue-replay', 'catalogue', dict(sources={'solven-eu': '$CATALOGUE'}, cache_dir='$CACHE'))
+    wrong = bundles / 'catalogue-wrong'
+    wrong.mkdir()
+    rows = []
+    other_replayed = MR.Replayer(MR.Source(catalogue_repo, catalogue_rev, cache), use_disk_cache=False).materialize_file(
+        'derived/s4/6x4x4-r98-derived-000000b.json')
+    # a different exact tensor of the same format and rank class under the row's recipe
+    swapped = G.kron(G.naive(2, 2, 2), G.naive(2, 2, 2))
+    add_row(wrong, rows, sorted(swapped.terms), swapped.shape, 'recipe-replay', None, details)
+    write_manifest(wrong, rows)
+    case('catalogue-replay-differs', 'catalogue-wrong', dict(sources={'solven-eu': '$CATALOGUE'}, cache_dir='$CACHE'), expect='rejected')
+    failing = bundles / 'catalogue-failing'
+    failing.mkdir()
+    rows = []
+    add_row(failing, rows, sorted(replayed.terms), replayed.shape, 'recipe-replay', None,
+            dict(details, file='derived/s4/2x2x2-r7-derived-000001d.json'))
+    write_manifest(failing, rows)
+    case('catalogue-replay-fails', 'catalogue-failing', dict(sources={'solven-eu': '$CATALOGUE'}, cache_dir='$CACHE'), expect='rejected')
+
     # ---- run the original on every case
     (IN / 'walker-copy.sh').chmod(0o755)
     (IN / 'walker-corrupt.sh').chmod(0o755)
     (IN / 'walker-fail.sh').chmod(0o755)
     substitutions = {'$WALKER_COPY': str(IN / 'walker-copy.sh'), '$WALKER_CORRUPT': str(IN / 'walker-corrupt.sh'),
                      '$WALKER_FAIL': str(IN / 'walker-fail.sh'), '$REPO': str(IN / 'repo'), '$HISTORY': str(history),
-                     '$SCHEMES': str(schemes)}
+                     '$SCHEMES': str(schemes), '$CATALOGUE': str(catalogue_repo), '$CACHE': str(scratch / 'mmc-cache-run')}
     for entry in cases:
         options = entry['options']
         argv = [str(bundles / entry['bundle']), '--no-ruby']
@@ -375,12 +408,14 @@ def build(scratch, history, history_rev, schemes, schemes_rev):
             argv += ['--replay-walk', substitutions[options['replay_walk']]]
         if 'replay_max_rank' in options:
             argv += ['--replay-max-rank', str(options['replay_max_rank'])]
+        if 'cache_dir' in options:
+            argv += ['--cache-dir', substitutions[options['cache_dir']]]
         out = io.StringIO()
         outcome = 'ok'
         try:
             with contextlib.redirect_stdout(out):
                 V.main(argv)
-        except (AssertionError, KeyError, ValueError, TypeError, subprocess.CalledProcessError):
+        except (AssertionError, KeyError, ValueError, TypeError, MR.ReplayError, subprocess.CalledProcessError):
             outcome = 'rejected'
         assert outcome == entry['expect'], (entry['name'], outcome)
         if outcome == 'ok':

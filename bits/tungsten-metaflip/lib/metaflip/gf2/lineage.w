@@ -6,8 +6,9 @@
 #
 #   public-mod2    upstream repository, revision and path recorded; with a source (NAME=CLONE) the tensor is
 #                  re-derived from the pinned upstream file (coefficients mod two)
-#   recipe-replay  catalogue repository, revision, file and lineage recorded (the replay of the catalogue's recipe
-#                  is not part of this port: a row with a source is noted as not re-derived)
+#   recipe-replay  catalogue repository, revision, file and lineage recorded; with a source (NAME=CLONE of the matmulcatalog
+#                  checkout) the recipe is replayed over GF(2) (catalogue.w) and must give the same bytes when the row is
+#                  marked rederivable
 #   closure        block-sum/Kronecker recipe with consistent rank arithmetic
 #   retained       a tensor already kept in a committed certificate; with a repo root the recorded repo-relative
 #                  file must decode to the same tensor
@@ -26,7 +27,8 @@
 # occurs in its recorded repository URL.
 #
 #   Lineage.verify(bundle, options)     {"summary" => line, "notes" => [...], "finals" => [...]}, or raises LineageError
-#       options: "sources" (Hash NAME => CLONE), "repo_root", "replay_walk" (binary), "replay_max_rank"
+#       options: "sources" (Hash NAME => CLONE), "repo_root", "replay_walk" (binary), "replay_max_rank", "cache_dir" (the
+#       catalogue replay's cache, default mmc-cache)
 #   Lineage.recipe_rank(recipe)         the rank a composition recipe implies; split and product must add or multiply exactly
 #   Lineage.lines(result)               what the tool prints
 #   Lineage.build(spec, out)            writes a bundle (port of tools/build_gf2_lineage_bundle.py) from chain descriptions:
@@ -46,6 +48,7 @@ use textx
 use derive
 use record_board
 use public_ternary
+use catalogue
 
 # A bundle that does not verify; `to_s` names the row and the check.
 + LineageError < Error
@@ -146,6 +149,7 @@ use public_ternary
       if row["parent"] != nil
         before = pending.key?(row["parent"]) ? pending[row["parent"]] : 0
         pending[row["parent"]] = before + 1
+    catalogues = {}
     states = {}
     distinct = {}
     counts = {}
@@ -212,7 +216,9 @@ use public_ternary
         elsif details.key?("rederivable") && !details["rederivable"]
           notes.push(file + ": recipe-replay seed is an equal-rank variant; not re-derived")
         else
-          notes.push(file + ": recipe replay is not part of this verifier; not re-derived")
+          replayed = Metaflip:Gf2:Lineage.replay_recipe(clone, details, options, catalogues, file)
+          Metaflip:Gf2:Lineage.check(Metaflip:Gf2:Lineage.same_blob?([replayed.n, replayed.m, replayed.p], replayed.terms.sort, raw), "replay differs")
+          checked += "+rederived"
       elsif kind == "closure"
         Metaflip:Gf2:Lineage.check(Metaflip:Gf2:Lineage.recipe_rank(details["recipe"]) == row["rank"], file + ": the recipe's rank differs from the row's")
       else
@@ -262,6 +268,18 @@ use public_ternary
     summary = "PASS " + distinct.size.to_s + " exact GF(2) tensors (Tungsten, two gates); rows: " + kinds.map(-> (kind) counts[kind].to_s + " " + kind).join(", ")
     ordered = Textx.sort_by(finals.keys) -> (shape) shape.split("x").map(-> (d) d.to_i)
     {"summary" => summary, "notes" => notes, "finals" => ordered.map(-> (shape) "  " + shape + " rank " + finals[shape].to_s)}
+
+  # The scheme the catalogue's recipe of a recipe-replay row replays to (a source per catalogue revision, a new replayer per row).
+  -> .replay_recipe(clone, details, options, catalogues, file)
+    cache = options["cache_dir"] == nil ? "mmc-cache" : options["cache_dir"]
+    key = clone + "\t" + details["revision"]
+    begin
+      catalogues[key] = MmcSource.new(clone, details["revision"], cache) if !catalogues.key?(key)
+      MmcReplayer.new(catalogues[key]).materialize_file(details["file"])
+    rescue e: ReplayError
+      Metaflip:Gf2:Lineage.fail(file + ": " + e.message)
+    rescue e: FetchError
+      Metaflip:Gf2:Lineage.fail(file + ": " + e.message)
 
   # Forgets the state of a row and frees its masks.
   -> .drop(states, sha)

@@ -1,0 +1,21 @@
+{
+ "schema": 1,
+ "field": "GF(2)",
+ "record_claim": false,
+ "rows": [
+  {
+   "kind": "recipe-replay",
+   "parent": null,
+   "shape": "4x4x4",
+   "rank": 64,
+   "sha256": "45e57f3dd12655ceb292a28ef3e67374be36910c3cbc82cb8973d556fd0205a5",
+   "file": "4x4x4-r64-45e57f3d.mfw.gz.b64",
+   "details": {
+    "repository": "https://github.com/solven-eu/matmulcatalog",
+    "revision": "903e526bc95b8615c6c95f2ad6616a034b3dd4bc",
+    "file": "derived/s4/4x4x4-r49-derived-aaaaaaa.json",
+    "lineage": "synthetic"
+   }
+  }
+ ]
+}

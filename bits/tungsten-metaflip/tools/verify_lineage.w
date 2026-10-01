@@ -1,11 +1,12 @@
 # Verify a GF(2) lineage bundle: exact tensors, parent links, replayable steps, provenance.
 # Port of tools/verify_gf2_lineage.py; the library is lib/metaflip/gf2/lineage.w (its header lists what each row kind is checked for).
 #
-#   verify_lineage BUNDLE [--replay-walk BINARY] [--replay-max-rank N] [--source NAME=CLONE]... [--repo-root ROOT]
+#   verify_lineage BUNDLE [--replay-walk BINARY] [--replay-max-rank N] [--source NAME=CLONE]... [--repo-root ROOT] [--cache-dir DIR]
 #
 # BUNDLE is a directory with `manifest.json` and one `*.mfw.gz.b64` per row. Every tensor is expanded against the complete
 # matrix-multiplication tensor by two independent gates; the rows of each kind are re-derived as far as the options allow.
-# --no-ruby and --cache-dir are accepted for compatibility with the original's command line and do nothing here.
+# --cache-dir is where the replay of matmulcatalog recipes keeps the files it reads and the schemes it builds; --no-ruby is accepted for
+# compatibility with the original's command line and does nothing here.
 # Exit status 0 and a PASS line when the bundle verifies; 1 and the reason on standard error otherwise.
 #
 # Run as `bin/tungsten run tools/verify_lineage.w -- ARGS` or compile with `-o`.
@@ -27,7 +28,7 @@ args["source"].each -> (item)
   at = item.index("=")
   parser.error("argument --source: expected NAME=CLONE: " + item) if at == nil
   sources[item.slice(0, at)] = item.slice(at + 1, item.size - at - 1)
-options = {"sources" => sources, "repo_root" => args["repo_root"], "replay_walk" => args["replay_walk"], "replay_max_rank" => args["replay_max_rank"]}
+options = {"sources" => sources, "repo_root" => args["repo_root"], "replay_walk" => args["replay_walk"], "replay_max_rank" => args["replay_max_rank"], "cache_dir" => args["cache_dir"]}
 result = nil
 begin
   result = Metaflip:Gf2:Lineage.verify(args["bundle"], options)

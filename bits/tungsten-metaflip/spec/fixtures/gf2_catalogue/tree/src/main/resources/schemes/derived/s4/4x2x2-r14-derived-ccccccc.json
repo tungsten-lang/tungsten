@@ -1,0 +1,1 @@
+{"n":[4,2,2],"m":14,"lineage":{"op":"ConcatRows","top":{"op":"Atom","ref":"2x2x2-r7-strassen-abcdef0"},"bottom":{"op":"Atom","ref":"2x2x2-r7-strassen-abcdef0"}}}

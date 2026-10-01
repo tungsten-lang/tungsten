@@ -1,0 +1,1 @@
+{"n":[4,6,6],"m":119,"lineage":{"op":"KronProduct","outer":{"op":"Atom","ref":"2x2x2-r7-strassen-abcdef0"},"inner":{"op":"Atom","ref":"2x3x3"}}}

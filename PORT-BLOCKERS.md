@@ -586,3 +586,30 @@ The bud blocks of the serendipitous product (`lib/metaflip/gf2/mmc_alg.w`) were 
 `sub[i]` at its top and in a nested closure; the last branch's first read failed with `undefined method '[]' for Object (object/atomic ...)`
 on one input of the 71 real recipes (and passed on 680 synthetic cases). A reduction of the shape (r2 of the investigation) did not reproduce
 it, so the cause is not pinned down; the code is now three methods with `while` loops and no closures (`bud_term_u`, `bud_term_v`, `bud_term_w`).
+
+---
+
+# Port blockers (catalogue seeds driver, written on the integration branch)
+
+## Compiled engine: `X.file?(path)` is "the path exists" for every `X`; the interpreter raises
+
+```tungsten
++ Foo
+  -> .bar(path)
+    1
+<< Foo.file?("/etc").to_s             # true  (compiled and `run`); a directory, and Foo has no file? at all
+<< Foo.file?("/etc/nonexistent").to_s # false
+```
+
+`bin/tungsten --interpret` answers `undefined method 'file?' for Foo`, which is what the class deserves (`Foo.exists?(...)` raises in
+both engines). `lib/metaflip/gf2/catalogue.w` called `Fsx.file?`, which `Fsx` does not define, for the cache checks of the replay; it
+worked by accident and was replaced by `Fsx.regular?`. Probably a call-site special case for the name `file?` (`core/os.w` declares
+`OS.file?(path)  # does the path exist?`); the root cause is not pinned down.
+
+## Notes on the original, not blockers
+
+`tools/mmc_gf2_seeds.py` keeps one replayer per process (`_STATE`), and the replayer's disk cache is keyed by the mode only
+(`mfw_cache`, `_board` when a board is given, `_wide` for `--allow-nonf2`; the board's content is not part of the key): a replay with a
+different scoreboard, or with `--allow-nonf2 --board` after one without the board, reuses the recipes the earlier replay materialized.
+The port keeps this (the golden of `replay-selected` in `spec/fixtures/gf2_catalogue_seeds` shows it: a recipe that needs the board's
+rank-23 leaf fails with the rank 189 of the cached result), and builds one replayer per command.

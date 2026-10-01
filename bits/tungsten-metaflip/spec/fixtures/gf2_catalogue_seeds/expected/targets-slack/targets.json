@@ -1,0 +1,69 @@
+{
+ "repository": "https://github.com/solven-eu/matmulcatalog",
+ "revision": "0ad89a79b9b91427fcf4f8125e96839f38adc512",
+ "targets": [
+  {
+   "mmc_file": "known/s2/2x2x3-r11-hk-2222222.json",
+   "canonical": "2x2x3",
+   "mmc_rank": 11,
+   "public": 11,
+   "board": null,
+   "atom": true,
+   "lineage_compact": null
+  },
+  {
+   "mmc_file": "derived/s4/2x2x4-r14-derived-6666666.json",
+   "canonical": "2x2x4",
+   "mmc_rank": 14,
+   "public": 14,
+   "board": null,
+   "atom": false,
+   "lineage_compact": null
+  },
+  {
+   "mmc_file": "derived/s4/2x2x5-r18-derived-3333333.json",
+   "canonical": "2x2x5",
+   "mmc_rank": 18,
+   "public": 17,
+   "board": null,
+   "atom": false,
+   "lineage_compact": "2x2x2 | 2x2x3"
+  },
+  {
+   "mmc_file": "derived/s4/3x3x5-r40-derived-7777777.json",
+   "canonical": "3x3x5",
+   "mmc_rank": 40,
+   "public": 40,
+   "board": null,
+   "atom": false,
+   "lineage_compact": null
+  },
+  {
+   "mmc_file": "derived/s4/4x4x4-r48-derived-2222222.json",
+   "canonical": "4x4x4",
+   "mmc_rank": 48,
+   "public": 49,
+   "board": null,
+   "atom": false,
+   "lineage_compact": "claims 48"
+  },
+  {
+   "mmc_file": "derived/s4/4x6x6-r119-derived-5555555.json",
+   "canonical": "4x6x6",
+   "mmc_rank": 119,
+   "public": null,
+   "board": null,
+   "atom": false,
+   "lineage_compact": "2x2x2 kron the rank-17 <2,3,3>"
+  },
+  {
+   "mmc_file": "derived/s4/6x6x6-r161-derived-4444444.json",
+   "canonical": "6x6x6",
+   "mmc_rank": 161,
+   "public": 162,
+   "board": null,
+   "atom": false,
+   "lineage_compact": "2x2x2 kron the rank-23 <3,3,3>"
+  }
+ ]
+}

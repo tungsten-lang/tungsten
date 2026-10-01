@@ -34,6 +34,7 @@ All commands from `~/.tungsten/metaflip/experiments/record-hunt-20260926/work` (
 | B `gf2-closure-products` | 203 closure | `PASS 203 ... rows: 203 closure` and 203 final ranks | **identical** output (apart from the name of the verifier in the PASS line), in all three runs |
 | C `gf2-block47-certificates-2026-07`, `--source tungsten=<repository>` | 186 archived | `186 archived+rederived` | identical, in all three runs |
 | A `gf2-searched-records`, sources perminov, Merlijn, tungsten, `--repo-root` | 677 (40 archived, 64 closure, 225 projection, 5 public-mod2, 82 recipe-replay, 25 retained, 236 walk) | `40 archived+rederived, ... 5 public-mod2+rederived, 82 recipe-replay, 25 retained+matched, 236 walk` and 82 notes | identical (512 lines), in all three runs |
+| A with `--source matmulcatalog=<clone>` added (the replay of the 71 recipes of `recipe-replay` rows marked rederivable, `catalogue.w`) | 677 | `... 11 recipe-replay, 71 recipe-replay+rederived ...` and 11 notes | identical (441 lines); the PORT-REPORT-catalogue.md has the replays themselves |
 | D `gf2-public-ternary-walks-2026-09-26`, sources perminov, Merlijn, `--replay-walk` | 21 (10 public-mod2, 11 walk) | `10 public-mod2+rederived, 11 walk+replayed` | identical; the 11 walks of 40M proposals run the same compiled walker in both (307 s and 245 s wall) |
 
 `spec/gf2_lineage_test.w` (55 checks, 1 s): the rank arithmetic of recipes (split, product, projection, three refused); 37 bundles built by the
@@ -66,10 +67,11 @@ parse of the largest tensors.
 ### Deviations from the original
 
 * The second opinion of the original, an independent Ruby reconstruction (`tools/verify_tensor.rb`), is not called: each tensor passes both
-  gates of the Tungsten verifier, and `papers/scripts/ruby_verify_all.w` runs the Ruby oracle over all release tensors (below). `--no-ruby` and
-  `--cache-dir` are accepted and do nothing. The PASS line reads `(Tungsten, two gates)` where the original's reads `(Python)` or `(Python and Ruby)`.
-* The re-derivation of `recipe-replay` rows (the replay of matmulcatalog recipes, `mmc_gf2_replay.py`) is not part of this port: a row of that
-  kind with a source is noted as `recipe replay is not part of this verifier; not re-derived`, one without a source as in the original.
+  gates of the Tungsten verifier, and `papers/scripts/ruby_verify_all.w` runs the Ruby oracle over all release tensors (below). `--no-ruby` is
+  accepted and does nothing. The PASS line reads `(Tungsten, two gates)` where the original's reads `(Python)` or `(Python and Ruby)`.
+* The re-derivation of `recipe-replay` rows (the replay of matmulcatalog recipes, `mmc_gf2_replay.py`) is `lib/metaflip/gf2/catalogue.w`
+  (PORT-REPORT-catalogue.md); `--cache-dir` is the replay's cache (raw scheme files and materialized tensors, as in the original). A row
+  without a source for its repository is noted `not re-derived (no --source for ...)`, as in the original.
 * A failed check raises `LineageError` with the row and the check named; the original raises `AssertionError` (often without a message) or `KeyError`.
 * The gzip layer of the builder's files is written by `core/gzip` (level 9, Base64 lines of 76), so its bytes differ from Python's `gzip.compress`;
   the rows' SHA-256 are those of the uncompressed tensors and agree.

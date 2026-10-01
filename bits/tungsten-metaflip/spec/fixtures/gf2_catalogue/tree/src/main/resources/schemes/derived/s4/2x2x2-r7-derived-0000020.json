@@ -1,0 +1,1 @@
+{"n":[2,2,2],"m":7,"lineage":{"op":"KronProduct","outer":{"op":"@ref","id":"missing"},"inner":{"op":"Atom","ref":"2x2x2-r7-strassen-abcdef0"}}}

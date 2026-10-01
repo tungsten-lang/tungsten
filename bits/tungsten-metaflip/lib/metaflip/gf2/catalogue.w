@@ -15,6 +15,8 @@
 #     .replay(lineage)                  the scheme of a lineage tree (a parsed JSON Hash)
 #     .best_rank(shape) .best(shape)    the cheapest F2-valid scheme of a shape (and orientation) the catalogue holds
 #     .deps_file                        path => the dependencies of a materialized file: ["atom", path], a board shape, ["nonf2", ...]
+#     .reset_dependencies               what the next materialize_file records starts from nothing (a dependency record per target)
+#     .board                            the extra exact leaves, {"NxMxP" (sorted) => [rank, witness path]}
 #   Mmc.load_atom_json(d), Mmc.parity(v)  an atom file's tensor over GF(2); a coefficient mod two
 #
 # Errors: ReplayError for everything the original raises as ReplayError, and for the ValueError, KeyError and the like it
@@ -490,7 +492,7 @@ use record_board
   # The text of schemes/<path> at the pinned revision (from the cache, else from git; a file read from git is cached).
   -> raw(path)
     cached = Fsx.join(@json_cache, path)
-    return Fsx.read(cached) if Fsx.file?(cached)
+    return Fsx.read(cached) if Fsx.regular?(cached)
     shown = @git.show(@revision, prefix + path)
     raise FetchError.new("fetch failed " + path + ": the blob is not in the clone") if shown == nil || shown == ""
     Fsx.mkdir_p(Fsx.dirname(cached))
@@ -508,7 +510,7 @@ use record_board
 
 # ---- the replayer ---------------------------------------------------------------------------------------------------
 + MmcReplayer
-  ro :deps_file, :log, :src
+  ro :deps_file, :log, :src, :board
 
   # `board`: {"NxMxP" (sorted) => [rank, witness path]} of extra exact GF(2) leaves (optional). `allow_nonf2` also replays
   # catalogue schemes that are not stamped F2 (diagnostics).
@@ -535,6 +537,10 @@ use record_board
     @dep_stack = [{}]
     @log = []
     @verbose = env("MMC_VERBOSE") != nil && env("MMC_VERBOSE") != ""
+
+  # The dependencies the next materialize_file reports are only its own (the original assigns a fresh `dep_stack`).
+  -> reset_dependencies
+    @dep_stack = [{}]
 
   -> note_log(line)
     @log.push(line)
@@ -570,7 +576,7 @@ use record_board
     atomic = board_file || !Mmc.stub?(@src.load(path))
     cp = Fsx.join(atomic ? @src.mfw_cache : @cachedir, path.replace("/", "__") + ".mfw")
     depf = cp + ".deps.json"
-    if @disk && Fsx.file?(cp) && (atomic || Fsx.file?(depf))
+    if @disk && Fsx.regular?(cp) && (atomic || Fsx.regular?(depf))
       a = Mmc.read_mfw(cp)
       deps = {}
       if board_file

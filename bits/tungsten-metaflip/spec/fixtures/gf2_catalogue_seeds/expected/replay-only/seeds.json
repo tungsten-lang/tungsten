@@ -1,0 +1,125 @@
+[
+ {
+  "shape": "2x2x3",
+  "canonical": "2x2x3",
+  "gf2_rank": 11,
+  "mfw": "$T/out/only/2x2x3_r11_mmc_4a0db28a.mfw",
+  "mfw_sha256": "4a0db28aa97428651cb06d12d9ffee57dee415ec99fb03227c7602f92abddd1e",
+  "mmc_file": "known/s2/2x2x3-r11-hk-2222222.json",
+  "mmc_rank": 11,
+  "leaf_mode": "pure",
+  "attribution": {
+   "catalogue": {
+    "repository": "https://github.com/solven-eu/matmulcatalog",
+    "revision": "0ad89a79b9b91427fcf4f8125e96839f38adc512",
+    "file": "known/s2/2x2x3-r11-hk-2222222.json",
+    "source": "Hopcroft-Kerr 1971",
+    "year": 1971,
+    "lineage": null
+   },
+   "atoms": [
+    {
+     "file": "known/s2/2x2x3-r11-hk-2222222.json",
+     "shape": "2x2x3",
+     "rank": 11,
+     "source": "Hopcroft-Kerr 1971",
+     "year": 1971,
+     "fields": [
+      "F2",
+      "Z"
+     ],
+     "source_scheme_url": null,
+     "source_paper_url": null
+    }
+   ],
+   "board_leaves": []
+  }
+ },
+ {
+  "shape": "2x2x5",
+  "canonical": "2x2x5",
+  "gf2_rank": 18,
+  "mfw": "$T/out/only/2x2x5_r18_mmc_96f61e56.mfw",
+  "mfw_sha256": "96f61e56d6b4bb47be2236dea0aeea2f14c9a88c94ce3a5c67427c7b58d617b3",
+  "mmc_file": "derived/s4/2x2x5-r18-derived-3333333.json",
+  "mmc_rank": 18,
+  "leaf_mode": "pure",
+  "attribution": {
+   "catalogue": {
+    "repository": "https://github.com/solven-eu/matmulcatalog",
+    "revision": "0ad89a79b9b91427fcf4f8125e96839f38adc512",
+    "file": "derived/s4/2x2x5-r18-derived-3333333.json",
+    "source": null,
+    "year": null,
+    "lineage": "2x2x2 | 2x2x3"
+   },
+   "atoms": [
+    {
+     "file": "known/s2/2x2x2-r7-strassen-abcdef0.json",
+     "shape": "2x2x2",
+     "rank": 7,
+     "source": "Strassen 1969",
+     "year": 1969,
+     "fields": [
+      "F2",
+      "Z",
+      "Q"
+     ],
+     "source_scheme_url": "https://example.invalid/strassen.json",
+     "source_paper_url": "https://example.invalid/strassen"
+    },
+    {
+     "file": "known/s2/2x2x3-r11-hk-2222222.json",
+     "shape": "2x2x3",
+     "rank": 11,
+     "source": "Hopcroft-Kerr 1971",
+     "year": 1971,
+     "fields": [
+      "F2",
+      "Z"
+     ],
+     "source_scheme_url": null,
+     "source_paper_url": null
+    }
+   ],
+   "board_leaves": []
+  }
+ },
+ {
+  "shape": "4x4x4",
+  "canonical": "4x4x4",
+  "gf2_rank": 49,
+  "mfw": "$T/out/only/4x4x4_r49_mmc_5d0087c7.mfw",
+  "mfw_sha256": "5d0087c71358021bf6c322107e4f979f6031e1fa195ba59872979021fc78cf70",
+  "mmc_file": "derived/s4/4x4x4-r49-derived-1111111.json",
+  "mmc_rank": 49,
+  "leaf_mode": "pure",
+  "attribution": {
+   "catalogue": {
+    "repository": "https://github.com/solven-eu/matmulcatalog",
+    "revision": "0ad89a79b9b91427fcf4f8125e96839f38adc512",
+    "file": "derived/s4/4x4x4-r49-derived-1111111.json",
+    "source": null,
+    "year": null,
+    "lineage": "2x2x2 kron 2x2x2"
+   },
+   "atoms": [
+    {
+     "file": "known/s2/2x2x2-r7-strassen-abcdef0.json",
+     "shape": "2x2x2",
+     "rank": 7,
+     "source": "Strassen 1969",
+     "year": 1969,
+     "fields": [
+      "F2",
+      "Z",
+      "Q"
+     ],
+     "source_scheme_url": "https://example.invalid/strassen.json",
+     "source_paper_url": "https://example.invalid/strassen"
+    }
+   ],
+   "board_leaves": []
+  }
+ }
+]

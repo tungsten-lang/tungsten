@@ -17,7 +17,14 @@ Metaflip executable:
 - `gf2/` is the arbitrary-width GF(2) scheme toolkit (bit helpers, the
   Integer-mask `Scheme` with strict MFW1 IO, limb-array `Packed` schemes with
   two independent exactness gates, and the `verify_tensor` certificate
-  verifier); see the header comments of its files.
+  verifier) and the Tungsten ports of the Python and Ruby tools of the
+  2026-09 record hunt: the support layer (`jsonx`, `floatx`, `textx`, `fsx`,
+  `gitx`, `procx`, `cli`), the scoreboard (`record_board`), projection and
+  basis rewrites (`derive`), composition recipes and closure (`recipes`,
+  `closure_prices`), the import of public integer schemes (`public_ternary`),
+  the replay of matmulcatalog recipes (`mmc_alg`, `catalogue`,
+  `catalogue_seeds`) and lineage bundles (`lineage`). The originals stay in
+  `tools/` as the oracles of the specs; see the header comments of the files.
 - `fleet/`, `rect/`, and `strategies/` contain coordinator and search modules.
   `rect/cpu_pool.w` keeps one OS thread per rectangular island across campaign
   epochs; workers reread their state slot after each barrier so rebases and

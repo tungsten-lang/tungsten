@@ -29,6 +29,12 @@
 #       options: "sources" (Hash NAME => CLONE), "repo_root", "replay_walk" (binary), "replay_max_rank"
 #   Lineage.recipe_rank(recipe)         the rank a composition recipe implies; split and product must add or multiply exactly
 #   Lineage.lines(result)               what the tool prints
+#   Lineage.build(spec, out)            writes a bundle (port of tools/build_gf2_lineage_bundle.py) from chain descriptions:
+#                                       {"walker" => PATH (optional), "chains" => [[STEP, ...], ...]}, each STEP
+#                                       {"kind", "file" (MFW1 text, a decimal certificate or .mfw.gz.b64), "details"}; the
+#                                       shape, rank and SHA-256 come from the tensor, a step's parent is the previous step of
+#                                       its chain, identical tensors are stored once, and a tensor reached with different
+#                                       provenance is refused
 #
 # Memory: a parent's terms are kept until its last child has been checked.
 use scheme
@@ -263,6 +269,37 @@ use public_ternary
     if held != nil
       held[2].release
       states.delete(sha)
+
+  # Writes a lineage bundle below the new directory `out` and returns its manifest.
+  -> .build(spec, out)
+    Fsx.mkdir(out, parents: true, exist_ok: false)
+    rows = []
+    by_sha = {}
+    spec["chains"].each -> (chain)
+      parent = nil
+      chain.each_with_index -> (step, index)
+        path = step["file"]
+        text = Metaflip:Gf2:RecordBoard.load(path)
+        scheme = text == nil ? nil : Metaflip:Gf2:RecordBoard.decode_scheme(path, text)
+        Metaflip:Gf2:Lineage.check(scheme != nil, path + ": not an exact tensor")
+        raw = scheme.blob
+        digest = Digest.sha256(raw)
+        Metaflip:Gf2:Lineage.check((index == 0) == Metaflip:Gf2:Lineage.seed_kind?(step["kind"]), path + ": seed kinds start a chain")
+        details = step["details"] == nil ? {} : step["details"]
+        row = {"kind" => step["kind"], "parent" => parent, "shape" => scheme.shape.join("x"), "rank" => scheme.rank, "sha256" => digest, "details" => details}
+        if by_sha.key?(digest)
+          old = by_sha[digest]
+          Metaflip:Gf2:Lineage.check(old["kind"] == row["kind"] && old["parent"] == row["parent"] && old["details"] == row["details"], path + ": same tensor reached with different provenance")
+        else
+          row["file"] = row["shape"] + "-r" + row["rank"].to_s + "-" + digest.slice(0, 8) + ".mfw.gz.b64"
+          Fsx.write(Fsx.join(out, row["file"]), Gzip.encode_b64(raw, 9, 76))
+          by_sha[digest] = row
+          rows.push(row)
+        parent = digest
+    manifest = {"schema" => 1, "field" => "GF(2)", "record_claim" => false, "rows" => rows}
+    manifest["walker"] = spec["walker"] if spec["walker"] != nil && spec["walker"] != ""
+    Fsx.write(Fsx.join(out, "manifest.json"), Jsonx.dumps(manifest, indent: 1) + "\n")
+    manifest
 
   # The lines the tool prints: the summary, a note per unchecked row, the final rank per shape.
   -> .lines(result)

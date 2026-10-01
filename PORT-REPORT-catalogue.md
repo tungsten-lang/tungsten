@@ -65,10 +65,11 @@ The lineage verifier on bundle A with the catalogue source, medians of three alt
 | | wall | CPU (user + system) | peak memory |
 |---|---|---|---|
 | `verify_gf2_lineage.py --no-ruby` | 179.3 s | 170.6 + 5.9 s | 2.03 GB |
-| `verify_lineage` (release binary) | 67.1 s | 61.5 + 2.4 s | 11.0 GB |
+| `verify_lineage` (release binary) | 61.7 s | 56.5 + 2.0 s | 9.06 GB |
 
-(all three runs of each: Python 181.7 / 179.3 / 178.3 s wall, Tungsten 66.1 / 68.0 / 67.1 s; the outputs are identical in all six runs; without
-the catalogue source the same bundle takes 53 s and 9.0 GB, see PORT-REPORT-lineage-and-papers.md.)
+(all three runs of each: Python 181.7 / 179.3 / 178.3 s wall, Tungsten 61.3 / 61.7 / 63.2 s; the outputs are identical in all six runs. The first
+three Tungsten runs, before `Derive.drop_matrix` freed its list literals (PORT-REPORT-cascade.md), took 66.1 / 68.0 / 67.1 s and 11.0 GB. Without
+the catalogue source the same bundle took 53 s and 9.0 GB before that change, see PORT-REPORT-lineage-and-papers.md.)
 
 The memory is the price of having no garbage collector: the replayer keeps every scheme it has materialized (`@file_memo`, the best-at-a-shape
 memo), and nothing frees the intermediate tensors of the constructions.

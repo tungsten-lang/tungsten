@@ -11,7 +11,7 @@ writes, next to this file:
                            terms that cancel or vanish modulo two, broken JSON) and files it must skip (`known/`, `_Q` without the flag)
   walker_stub.sh           a stand-in for the compiled walker: prints the result line the tool parses, or fails, by the seed's name
   expected/parity.tsv      `value (JSON)`, TAB, `ok <0|1>` or `error <message>` of the original's parity()
-  expected/parse_result.tsv  text (JSON string), TAB, the three numbers the RESULT pattern finds, or `none`
+  expected/parse_result.tsv  text (JSON string), TAB, the six numbers the RESULT pattern finds, or `none`
   expected/integer_files.json  integer_files() of the tree for four (alternatives, rational) pairs
   expected/runs/<name>/    seeds.json, summary.txt and mfw.tsv (file name, SHA-256) of `seeds` for several option sets
   expected/walk.tsv        the rows of `walk` with the stub, sorted
@@ -233,7 +233,7 @@ def parse_table():
     lines = []
     for text in PARSE_TEXTS:
         match = tool.RESULT.search(text)
-        found = 'none' if not match else ' '.join(match.group(1, 2, 3))
+        found = 'none' if not match else ' '.join(match.group(1, 2, 3, 4, 5, 6))
         lines.append(f'{json.dumps(text)}\t{found}')
     return '\n'.join(lines) + '\n'
 

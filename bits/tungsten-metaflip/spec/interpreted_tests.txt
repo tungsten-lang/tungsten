@@ -13,12 +13,14 @@
 1 spec/cpu_default_test.w  # 1s
 1 spec/rect_fill_quota_test.w  # 1s
 1 spec/wide_projection_test.w  # 111s
+1 spec/gf2_derive_test.w  # 15s
 # shard 2: 5 tests, 113 s measured
 2 spec/proof_cdcl_test.w  # 2s
 2 spec/rect_227_228_test.w  # 6s
 2 spec/rect_endpoint_path_rect_test.w  # 13s
 2 spec/rect_gpu_allocation_test.w  # 1s
 2 spec/rect_gpu_sampler_test.w  # 91s
+2 spec/gf2_mmc_alg_test.w  # 45s
 # shard 3: 6 tests, 113 s measured
 3 spec/cli_help_coverage_test.w  # 2s
 3 spec/finite_map_search_test.w  # 1s
@@ -74,5 +76,6 @@
 8 spec/seven_by_seven_cpu_role_policy_test.w  # 0s
 8 spec/verify_scratch_test.w  # 2s
 8 spec/wide_feedback_test.w  # 0s
+8 spec/papers_tex_test.w  # 0s
 8 spec/sat_repair_encoder_test.w  # 26s
 1 spec/build_cache_test.w  # 48s

@@ -1,0 +1,30 @@
+[
+ {
+  "shape": "3x3x4",
+  "canonical": "3x3x4",
+  "gf2_rank": 29,
+  "mfw": "$WITNESS/334.mfw",
+  "kind": "below_all"
+ },
+ {
+  "shape": "3x4x4",
+  "canonical": "3x4x4",
+  "gf2_rank": 38,
+  "mfw": "$WITNESS/344.mfw",
+  "kind": "below_all"
+ },
+ {
+  "shape": "2x3x5",
+  "canonical": "2x3x5",
+  "gf2_rank": 25,
+  "mfw": "$WITNESS/235.mfw",
+  "kind": "below_all"
+ },
+ {
+  "shape": "3x3x5",
+  "canonical": "3x3x5",
+  "gf2_rank": 36,
+  "mfw": "$WITNESS/335.mfw",
+  "kind": "below_all"
+ }
+]

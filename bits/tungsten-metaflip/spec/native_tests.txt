@@ -63,3 +63,23 @@ spec/wide_tui_test.w native  # native packed telemetry and dashboard renderer
 spec/wide_transform_queue_test.w argv  # positional arguments required
 spec/learned_residual_native.w argv  # independent native parity harness supplies model/cases
 spec/rect_public_seed_corpus_test.w timeout  # 186 s interpreted (56 exact door loads); passes, but exceeds a shard budget
+# The GF(2) record-hunt toolchain and the benchmark harness (ports of the Python and Ruby tools; each test is a self-test that prints PASS).
+spec/bench_exec_test.w native  # Procx process calls
+spec/bench_record_test.w native  # compiled file and hash calls
+spec/bench_runner_test.w native  # Procx process calls
+spec/bench_score_test.w native  # Decimal and Float formatting differs interpreted (1 of 55 checks)
+spec/bench_stats_test.w native  # Float statistics differ interpreted (954 of 6452 checks)
+spec/bench_walker_test.w timeout  # 120s+ interpreted
+spec/gf2_catalogue_seeds_test.w native  # Procx and git calls
+spec/gf2_catalogue_test.w native  # Procx and git calls
+spec/gf2_lineage_build_test.w native  # Procx and git calls
+spec/gf2_lineage_test.w native  # Procx and git calls
+spec/gf2_projection_walks_test.w native  # Procx process calls (stand-in walkers, ruby)
+spec/gf2_public_ternary_test.w native  # Procx and git calls
+spec/gf2_recipes_test.w native  # compiled file and hash calls
+spec/gf2_record_board_test.w native  # compiled file, hash and git calls
+spec/gf2_scheme_test.w timeout  # 120s+ interpreted (the two exactness gates)
+spec/gf2_support_test.w native  # Procx, git, file and JSON runtime calls (3,156 checks)
+spec/gzip_test.w native  # compiled byte and CRC calls
+spec/verify_tensor_test.w native  # runs the tool as a process
+spec/gf2_cascade_test.w native  # Procx process calls (stand-in walkers, a child bin/tungsten)

@@ -264,7 +264,7 @@ use record_board
   # ---- walks ---------------------------------------------------------------------------------------
 
   # re.search(r'seed_rank=(\d+) rank=(\d+) moves=(\d+) accepted=(\d+) no_pair=(\d+) escapes=(\d+)', text):
-  # [seed_rank, rank, moves] of the leftmost match, or nil.
+  # [seed_rank, rank, moves, accepted, no_pair, escapes] of the leftmost match, or nil.
   -> .parse_result(text)
     labels = ["seed_rank=", " rank=", " moves=", " accepted=", " no_pair=", " escapes="]
     from = 0
@@ -287,7 +287,7 @@ use record_board
             pos = stop
         else
           ok = false
-      return [numbers[0], numbers[1], numbers[2]] if ok
+      return numbers if ok
       from = at + 1
 
   # `sha or path`: a seed's content hash, else the fallback (Python's `a or b` on a missing or empty string).

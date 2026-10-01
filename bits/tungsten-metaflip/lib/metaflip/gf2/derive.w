@@ -154,8 +154,11 @@ use scheme
       high = word >> ((coordinate + 1) * cols)
       moved = high << (coordinate * cols)
       result = lower | moved
-      [low_bit, low_mask, lower, high, moved].each -> (temporary)
-        Metaflip:Gf2:Bits.release(temporary)
+      Metaflip:Gf2:Bits.release(low_bit)
+      Metaflip:Gf2:Bits.release(low_mask)
+      Metaflip:Gf2:Bits.release(lower)
+      Metaflip:Gf2:Bits.release(high)
+      Metaflip:Gf2:Bits.release(moved)
       return result
     old_bit = 1 << cols
     old_mask = old_bit - 1
@@ -172,12 +175,20 @@ use scheme
       smaller = low | high_moved
       placed = smaller << (row * (cols - 1))
       grown = result | placed
-      [shifted, chunk, low, high, high_moved, smaller, placed, result].each -> (temporary)
-        Metaflip:Gf2:Bits.release(temporary)
+      Metaflip:Gf2:Bits.release(shifted)
+      Metaflip:Gf2:Bits.release(chunk)
+      Metaflip:Gf2:Bits.release(low)
+      Metaflip:Gf2:Bits.release(high)
+      Metaflip:Gf2:Bits.release(high_moved)
+      Metaflip:Gf2:Bits.release(smaller)
+      Metaflip:Gf2:Bits.release(placed)
+      Metaflip:Gf2:Bits.release(result)
       result = grown
       row += 1
-    [old_bit, old_mask, lower_bit, lower_mask].each -> (temporary)
-      Metaflip:Gf2:Bits.release(temporary)
+    Metaflip:Gf2:Bits.release(old_bit)
+    Metaflip:Gf2:Bits.release(old_mask)
+    Metaflip:Gf2:Bits.release(lower_bit)
+    Metaflip:Gf2:Bits.release(lower_mask)
     result
 
   # [shape', terms']: coordinate `coordinate` of axis `dimension` deleted from the two factors that carry it.

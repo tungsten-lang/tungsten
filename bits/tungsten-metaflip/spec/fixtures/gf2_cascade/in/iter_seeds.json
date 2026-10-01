@@ -1,0 +1,20 @@
+[
+ {
+  "shape": "3x3x4",
+  "canonical": "3x3x4",
+  "gf2_rank": 31,
+  "mfw": "$WITNESS/334b.mfw"
+ },
+ {
+  "shape": "3x4x4",
+  "canonical": "3x4x4",
+  "gf2_rank": 40,
+  "mfw": "$WITNESS/344b.mfw"
+ },
+ {
+  "shape": "2x3x5",
+  "canonical": "2x3x5",
+  "gf2_rank": 25,
+  "mfw": "$WITNESS/235.mfw"
+ }
+]

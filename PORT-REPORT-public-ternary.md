@@ -36,7 +36,7 @@ All commands from `~/.tungsten/metaflip/experiments/record-hunt-20260926/work` (
 | `walk` over 6 real seeds (3,000,000 steps, a manifest as a dictionary with one seed lacking `mfw_sha256`, `--largest-first`), then a resume with `--repeats 2 --min-rank 22` | 12 rows | stdout, the 12 rows and the output files identical; the resume starts only the new walks |
 | `walk` over the naive schemes of 2x2x2, 2x2x3, 2x3x3 (20,000 steps) | `DROP 2x2x2 8 -> 7`, `DROP 2x2x3 12 -> 11`, `DROP 2x3x3 18 -> 16` | the same lines, rows and files |
 
-`spec/gf2_public_ternary_test.w` (125 checks, 6 s: it builds a git repository of the fixture tree): `parity` on 51 values (integers up to 2^70,
+`spec/gf2_public_ternary_test.w` (125 checks, 6 s: it builds a git repository of the fixture tree): `parity` on 49 values (integers up to 2^70,
 rationals with reducible and unreducible denominators, zero and invalid denominators, floats, booleans, null, arrays) with the original's result
 or message; `parse_result` on 11 texts against the original's regular expression; `integer_files` for four (alternatives, rational) pairs;
 `seeds` for six option sets over a tree of 41 files (naive and Strassen schemes in integer, ternary and rational coefficients; 21 rejected files

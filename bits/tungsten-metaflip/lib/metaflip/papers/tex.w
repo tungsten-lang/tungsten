@@ -9,7 +9,7 @@
 #   Tex.todo_lines(text)      the 1-based numbers of the lines that use \todo
 #   Tex.abstract(text)        the text of the abstract environment
 #
-# Used by papers/scripts/{mkbib,pack_arxiv,make_arxiv_md}.w.  The originals are the three
+# Used by tungsten-lang/papers/scripts/{mkbib,pack_arxiv,make_arxiv_md}.w.  The originals are the three
 # Python scripts of the same names, which use `re` for all of it.
 #
 # Everything works on byte offsets (String#index, #slice, #byte_at); the characters that matter

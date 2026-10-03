@@ -12,11 +12,11 @@ the benchmark runs), so CPU time is quoted next to wall time.
 | `bits/tungsten-metaflip/tools/verify_lineage.w` | 38 | | command line of the verifier |
 | `bits/tungsten-metaflip/tools/build_lineage.w` | 32 | | command line of the builder (it ends by verifying what it wrote) |
 | `bits/tungsten-metaflip/spec/gf2_lineage_test.w`, `spec/gf2_lineage_build_test.w`, `spec/fixtures/gf2_lineage/` | 96, 88, 564 KB | `spec/verify_gf2_lineage_test.py`, `spec/build_gf2_lineage_bundle_test.py` | 55 and 11 checks |
-| `bits/tungsten-metaflip/papers/scripts/{gen_results_data,prior_art_flags,make_arxiv_md,pack_arxiv,ruby_verify_all}.w` | 210, 108, 128, 135, 109 | the `.py` of the same names: 153, 44, 54, 111, 86 | the paper build and audit scripts |
+| `tungsten-lang/papers/scripts/{gen_results_data,prior_art_flags,make_arxiv_md,pack_arxiv,ruby_verify_all}.w` | 210, 108, 128, 135, 109 | the `.py` of the same names: 153, 44, 54, 111, 86 | the paper build and audit scripts |
 | `bits/tungsten-metaflip/lib/metaflip/papers/tex.w` | 152 | the regular expressions of `pack_arxiv.py` and `make_arxiv_md.py` | `Tex.strip_comments`, `references`, `todo_lines`, `abstract`, `cited_keys` |
 | `bits/tungsten-metaflip/spec/papers_tex_test.w` | 40 | | 6 checks against the originals' results on the same snippets |
 
-`papers/Makefile` compiles the scripts into `build/` with the compiler and runs them (`TOOLS=py` runs the Python originals).
+`tungsten-lang/papers/Makefile` compiles the scripts into `build/` with the compiler and runs them (`TOOLS=py` runs the Python originals).
 
 ## The lineage verifier
 
@@ -67,7 +67,7 @@ parse of the largest tensors.
 ### Deviations from the original
 
 * The second opinion of the original, an independent Ruby reconstruction (`tools/verify_tensor.rb`), is not called: each tensor passes both
-  gates of the Tungsten verifier, and `papers/scripts/ruby_verify_all.w` runs the Ruby oracle over all release tensors (below). `--no-ruby` is
+  gates of the Tungsten verifier, and `tungsten-lang/papers/scripts/ruby_verify_all.w` runs the Ruby oracle over all release tensors (below). `--no-ruby` is
   accepted and does nothing. The PASS line reads `(Tungsten, two gates)` where the original's reads `(Python)` or `(Python and Ruby)`.
 * The re-derivation of `recipe-replay` rows (the replay of matmulcatalog recipes, `mmc_gf2_replay.py`) is `lib/metaflip/gf2/catalogue.w`
   (PORT-REPORT-catalogue.md); `--cache-dir` is the replay's cache (raw scheme files and materialized tensors, as in the original). A row

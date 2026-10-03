@@ -3,7 +3,7 @@
 Catalogue of what each program does, read from its source at the pinned commit (`PINS.md`). Citations are
 `file:line`; a path is relative to the program's tree: `km2022` = `flips/code/`, `km2024` = `flips/updated_code/`,
 `tfg` = `ternary_flip_graph/`, `metaflip` = `bits/tungsten-metaflip/` (the directed walker as the campaign ran it,
-`lib/metaflip/wide/{scheme,directed}.w`, `tools/wide_rect_walk.w`, `papers/methods/sections/walker.tex`).
+`lib/metaflip/wide/{scheme,directed}.w`, `tools/wide_rect_walk.w`, `tungsten-lang/papers/methods/sections/walker.tex`).
 All four search the flip graph of matrix-multiplication schemes over GF(2) by random walk. The tables list the differences
 that bear on a comparison; the last section states which conditions the harness equalises.
 

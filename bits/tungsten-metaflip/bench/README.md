@@ -240,7 +240,7 @@ Running the `.w` files with `bin/tungsten FILE ...` needs a bare `--` before the
 `--latex DIR` writes `summary.tex` and `summary_<task>.tex` (per-task summaries), `ablation.tex` (every algorithm against the reference, one row per task and algorithm),
 `matrix.tex` (ERT ratios against the reference: one row per algorithm, grouped by component and in numeric order of the setting, one column per task, tasks in ascending target rank;
 bold when the 95% interval excludes 1, with the success rate when some runs missed) and, with `--axes A,B`, `axes.tex` (ERT in CPU seconds, retired instructions and accepted flips, and flips per CPU second, for the named algorithms).
-`papers/scripts/gen_bench_tables.sh` runs it for every experiment and writes the fragments the Methods paper includes.
+`tungsten-lang/papers/scripts/gen_bench_tables.sh` runs it for every experiment and writes the fragments the Methods paper includes.
 
 Reproduce a table from the raw records:
 

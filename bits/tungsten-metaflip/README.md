@@ -1496,6 +1496,7 @@ tensors are release assets of `tungsten-lang/metaflip-archives`, not part of thi
 Tungsten ports of these tools (`tools/gf2_record_board.w`, `public_ternary.w`, `mmc_seeds.w`, `build_lineage.w`,
 `verify_lineage.w`, `closure_prices.w`, `projection_walks.w`, `cascade.w`, with their libraries in `lib/metaflip/gf2/`) reproduce the output of the Python
 originals, which stay as the oracles of the specs; the campaign itself ran on the originals.
+The two papers about the campaign are in the private repository `tungsten-lang/papers` (split from this package on 2026-10-02).
 
 Bundled seed files can have licenses or attribution requirements different
 from the engine. Read [THIRD_PARTY.md](THIRD_PARTY.md) before redistributing a

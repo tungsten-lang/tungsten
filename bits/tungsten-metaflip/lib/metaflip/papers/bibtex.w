@@ -1,5 +1,5 @@
 # Bibtex: split a .bib file into its entries and print them the way the papers' bibliography
-# wants them (papers/scripts/mkbib.w; original: papers/scripts/mkbib.py).
+# wants them (tungsten-lang/papers/scripts/mkbib.w; original: tungsten-lang/papers/scripts/mkbib.py).
 #
 #   Bibtex.entries(raw)          Hash key => entry text, for every `@type{key, ...}` block of a file
 #   Bibtex.print_ready(key, block, notes)

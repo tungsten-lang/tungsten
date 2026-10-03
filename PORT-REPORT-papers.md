@@ -1,8 +1,8 @@
 # PORT-REPORT-papers: paper build scripts in Tungsten
 
 Branch `port/papers` (worktree `/Users/erik/tungsten-mf-port-papers`), created from `metaflip-tungsten-port` at `ec0a1d069`.
-Scope: `bits/tungsten-metaflip/papers/scripts/{mkbib,pack_arxiv,make_arxiv_md,gen_results_data,prior_art_flags}.py`
-ported to `.w` next to the originals (the originals stay as oracles); `papers/Makefile` switched to the Tungsten scripts.
+Scope: `tungsten-lang/papers/scripts/{mkbib,pack_arxiv,make_arxiv_md,gen_results_data,prior_art_flags}.py`
+ported to `.w` next to the originals (the originals stay as oracles); `tungsten-lang/papers/Makefile` switched to the Tungsten scripts.
 `ruby_verify_all.py` and `rebuild_closure.py` are not in this task.
 
 Status: in progress (this file is updated after every script).

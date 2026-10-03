@@ -5,8 +5,8 @@
 # .median, zlib.crc32, the csv module with delimiter tab).
 #
 # Every function is here because a surveyed original uses the idiom. Paths are
-# relative to bits/tungsten-metaflip/ (tools/, papers/scripts/) or, prefixed
-# `work/`, to the record-hunt work directory
+# relative to bits/tungsten-metaflip/ (tools/), written `tungsten-lang/papers/...` for the
+# papers repository (scripts/) or, prefixed `work/`, to the record-hunt work directory
 # ~/.tungsten/metaflip/experiments/record-hunt-20260926/work/.
 #
 #   char_count    every width below counts code points, as Python does
@@ -18,10 +18,10 @@
 #   thousands     work/make_release_metadata.py:48,88  f"({a['bytes']:,} bytes)"
 #   signed        work/compare.py:45             f"{gap:+d}"
 #   hex           tools/mmc_gf2_replay.py:236    "%x %x %x\n" % t
-#                 papers/scripts/ruby_verify_all.py:43  f'{a:x} {b:x} {c:x}\n'
+#                 tungsten-lang/papers/scripts/ruby_verify_all.py:43  f'{a:x} {b:x} {c:x}\n'
 #   parse_hex     tools/mmc_gf2_replay.py:244    int(x, 16) for the terms of an MFW1 file
 #                 work/board.py:33               (String#to_i(16) saturates at 2^63-1)
-#   repr_str      papers/scripts/pack_arxiv.py:62   f'{ref!r}'
+#   repr_str      tungsten-lang/papers/scripts/pack_arxiv.py:62   f'{ref!r}'
 #                 work/write_readmes.py:80          f'... PASS: {first!r}'
 #   splitlines    tools/gf2_record_board.py:64, tools/mmc_gf2_replay.py:57,242,
 #                 tools/screen_public_ternary_gf2.py:177, work/collect_chains.py:59
@@ -36,28 +36,28 @@
 #                 tools/wide_composition_recipes.py:255  _, _, _, shape = min(candidates)
 #   max_by        the twin of min_by (`max(..., key=)`); no original uses it
 #   compare       the tuple order min_by and max_by rely on
-#   median        papers/scripts/gen_results_data.py:123,126  statistics.median(...)
+#   median        tungsten-lang/papers/scripts/gen_results_data.py:123,126  statistics.median(...)
 #   median_pair   the two middle elements median averages for an even count
-#   tally         papers/scripts/prior_art_flags.py:35  Counter(f[0] for f in ...)
+#   tally         tungsten-lang/papers/scripts/prior_art_flags.py:35  Counter(f[0] for f in ...)
 #                 work/write_readmes.py:69,299,300, tools/search_wide_projection_walks.py:29
 #   pairs_of      d.items(), the input of sorted_items and most_common
-#   most_common   papers/scripts/gen_results_data.py:55  fam.most_common()
+#   most_common   tungsten-lang/papers/scripts/gen_results_data.py:55  fam.most_common()
 #   sorted_items  tools/verify_gf2_lineage.py:196,199, work/write_readmes.py:73,
 #                 tools/screen_top_two_projection_children.py:77  sorted(d.items())
 #   setdefault    tools/mmc_gf2_replay.py:63-76, tools/gf2_record_board.py:149,
 #                 work/release_index.py:16-20, work/collect_chains.py:234-247,
-#                 papers/scripts/ruby_verify_all.py:82  d.setdefault(key, [0, 0])[i] += 1
+#                 tungsten-lang/papers/scripts/ruby_verify_all.py:82  d.setdefault(key, [0, 0])[i] += 1
 #   push_to       tools/screen_public_ternary_gf2.py:98  d.setdefault(key, []).append(x)
 #   add_to        tools/gf2_record_board.py:223, tools/verify_gf2_lineage.py:190
 #                 counts[k] = counts.get(k, 0) + 1; tools/mmc_gf2_alg.py:540,550 defaultdict(int)
-#   group_by      papers/scripts/gen_results_data.py:112  defaultdict(list) rows by code
+#   group_by      tungsten-lang/papers/scripts/gen_results_data.py:112  defaultdict(list) rows by code
 #   crc32         tools/screen_public_ternary_gf2.py:184  zlib.crc32(seed['shape'].encode())
 #   tsv_rows      csv.reader(..., delimiter='\t') behind every DictReader below
-#   tsv_records   papers/scripts/gen_results_data.py:20,39,98, prior_art_flags.py:18,
+#   tsv_records   tungsten-lang/papers/scripts/gen_results_data.py:20,39,98, prior_art_flags.py:18,
 #                 ruby_verify_all.py:55, work/ruby_records.py:11, work/write_readmes.py:298,
 #                 work/collect_chains.py:111  csv.DictReader(open(path), delimiter='\t')
 #   tsv_text      work/release_index.py:55  csv.writer(fh, delimiter='\t')  (CRLF rows)
-#                 papers/scripts/prior_art_flags.py:39  ... lineterminator='\n'
+#                 tungsten-lang/papers/scripts/prior_art_flags.py:39  ... lineterminator='\n'
 #
 # What Python's data model gives for free and this file has to spell out:
 #  * Sizes: String#size counts bytes, Python's len counts code points.
@@ -813,9 +813,9 @@ use floatx
 
   # f"{x:.{places}f}" and "%.{places}f" % x: the exact binary value rounded half
   # to even. Ints, BigInts and Floats.
-  #   papers/scripts/gen_results_data.py:67,123  f'{rel:.4f}', f'{y:.2f}'
+  #   tungsten-lang/papers/scripts/gen_results_data.py:67,123  f'{rel:.4f}', f'{y:.2f}'
   #   work/collect_chains.py:254                  f'{spent / 1e6:.1f} MB compressed'
-  #   papers/scripts/rebuild_closure.py:75        'elapsed %.0fs' % (time.time() - t0)
+  #   tungsten-lang/papers/scripts/rebuild_closure.py:75        'elapsed %.0fs' % (time.time() - t0)
   -> .fixed(x, places)
     Floatx.fixed(x, places)
 
@@ -826,7 +826,7 @@ use floatx
 
   # f"{x:g}" and "%g" % x (precision 6 unless given): fixed or exponent form,
   # trailing zeros dropped.
-  #   papers/scripts/gen_results_data.py:123,126  f'{statistics.median(...):g}'
+  #   tungsten-lang/papers/scripts/gen_results_data.py:123,126  f'{statistics.median(...):g}'
   -> .general(x, precision = 6)
     Floatx.general(x, precision)
 

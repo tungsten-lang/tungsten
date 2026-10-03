@@ -14,9 +14,9 @@
 # with a returncode test, the native walker with check=True), screen_public_ternary_gf2.py
 # (walker with returncode + stdout + stderr), mmc_gf2_replay.py (`git rev-parse`, retrying
 # `git show`), search_wide_projection_walks.py and screen_*_children.py (`ruby verify_tensor.rb`),
-# papers/scripts/pack_arxiv.py (cwd= and DEVNULL); run_all: the ThreadPoolExecutor loops of
+# tungsten-lang/papers/scripts/pack_arxiv.py (cwd= and DEVNULL); run_all: the ThreadPoolExecutor loops of
 # screen_public_ternary_gf2.py walk, iterate.py, ruby_records.py, ruby_finals.py and
-# papers/scripts/ruby_verify_all.py.
+# tungsten-lang/papers/scripts/ruby_verify_all.py.
 #
 # How it works: every argument is single-quoted for /bin/sh and the child runs as
 #   { cd DIR && NAME='v' 'prog' 'arg' ; } < /dev/null 2> ERRFILE ; printf '\n<SOH>procx:%s' "$?"

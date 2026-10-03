@@ -1,0 +1,496 @@
+{
+ "arnold2010_F_on_rajagopal_geometry": {
+  "hip_knee90": {
+   "-20": {
+    "total_Nm": 98.38505772094577,
+    "rf_share": 0.1581866427606368,
+    "iliopsoas_share": 0.333164324933563,
+    "rest_share": 0.8418133572393632,
+    "rf_share_of_iliopsoas_rf_sar_tfl": 0.30528170968272045,
+    "iliopsoas_share_of_iliopsoas_rf_sar_tfl": 0.6429681605602467
+   },
+   "0": {
+    "total_Nm": 108.00810822358098,
+    "rf_share": 0.2538819264384322,
+    "iliopsoas_share": 0.3064404880787757,
+    "rest_share": 0.7461180735615678,
+    "rf_share_of_iliopsoas_rf_sar_tfl": 0.4022238241723657,
+    "iliopsoas_share_of_iliopsoas_rf_sar_tfl": 0.4854920817933139
+   },
+   "20": {
+    "total_Nm": 115.37065168810817,
+    "rf_share": 0.3181355019212528,
+    "iliopsoas_share": 0.3051466694540333,
+    "rest_share": 0.6818644980787472,
+    "rf_share_of_iliopsoas_rf_sar_tfl": 0.43595069613078224,
+    "iliopsoas_share_of_iliopsoas_rf_sar_tfl": 0.4181517063235646
+   },
+   "40": {
+    "total_Nm": 118.44129000366203,
+    "rf_share": 0.3568443198611321,
+    "iliopsoas_share": 0.32469464913082,
+    "rest_share": 0.6431556801388679,
+    "rf_share_of_iliopsoas_rf_sar_tfl": 0.43581559142847826,
+    "iliopsoas_share_of_iliopsoas_rf_sar_tfl": 0.39655105228991394
+   },
+   "60": {
+    "total_Nm": 115.98305163340332,
+    "rf_share": 0.37153680606196693,
+    "iliopsoas_share": 0.36814338517476636,
+    "rest_share": 0.6284631939380331,
+    "rf_share_of_iliopsoas_rf_sar_tfl": 0.41006174038678594,
+    "iliopsoas_share_of_iliopsoas_rf_sar_tfl": 0.4063164531038936
+   }
+  },
+  "hip_knee0": {
+   "-20": {
+    "total_Nm": 100.30141775266732,
+    "rf_share": 0.17764127580204808,
+    "iliopsoas_share": 0.3267988835409742,
+    "rest_share": 0.822358724197952,
+    "rf_share_of_iliopsoas_rf_sar_tfl": 0.33470300713713946,
+    "iliopsoas_share_of_iliopsoas_rf_sar_tfl": 0.6157384794517604
+   },
+   "0": {
+    "total_Nm": 109.32077211428768,
+    "rf_share": 0.2665697188907057,
+    "iliopsoas_share": 0.30276091871998073,
+    "rest_share": 0.7334302811092943,
+    "rf_share_of_iliopsoas_rf_sar_tfl": 0.4169367727183895,
+    "iliopsoas_share_of_iliopsoas_rf_sar_tfl": 0.4735427597765482
+   },
+   "20": {
+    "total_Nm": 116.47396768732166,
+    "rf_share": 0.3245945590390396,
+    "iliopsoas_share": 0.3022561248181782,
+    "rest_share": 0.6754054409609604,
+    "rf_share_of_iliopsoas_rf_sar_tfl": 0.4432468252560688,
+    "iliopsoas_share_of_iliopsoas_rf_sar_tfl": 0.41274280177859124
+   },
+   "40": {
+    "total_Nm": 118.86645238771541,
+    "rf_share": 0.35914476373567195,
+    "iliopsoas_share": 0.3235332789684166,
+    "rest_share": 0.640855236264328,
+    "rf_share_of_iliopsoas_rf_sar_tfl": 0.43827820887419966,
+    "iliopsoas_share_of_iliopsoas_rf_sar_tfl": 0.3948201403315919
+   },
+   "60": {
+    "total_Nm": 115.65187531274533,
+    "rf_share": 0.3697371627127016,
+    "iliopsoas_share": 0.3691975865999232,
+    "rest_share": 0.6302628372872985,
+    "rf_share_of_iliopsoas_rf_sar_tfl": 0.40819669442280093,
+    "iliopsoas_share_of_iliopsoas_rf_sar_tfl": 0.40760099237324315
+   }
+  },
+  "knee_hip0": {
+   "0": {
+    "rf_Nm": 41.1197349626689,
+    "vasti_Nm": 208.6954223170913,
+    "rf_share": 0.16460064077144923
+   },
+   "30": {
+    "rf_Nm": 38.92246317500706,
+    "vasti_Nm": 196.5286529021889,
+    "rf_share": 0.1653101663881932
+   },
+   "60": {
+    "rf_Nm": 33.29404255470372,
+    "vasti_Nm": 158.35486523723307,
+    "rf_share": 0.17372414452186352
+   },
+   "90": {
+    "rf_Nm": 19.983630721115308,
+    "vasti_Nm": 94.87579787428655,
+    "rf_share": 0.17398337224459523
+   },
+   "120": {
+    "rf_Nm": 22.663641683911024,
+    "vasti_Nm": 120.44094868978127,
+    "rf_share": 0.15837117191509326
+   }
+  }
+ },
+ "F_only": {
+  "gait2392_RF_over_RF_plus_vasti": 0.20512370591331813,
+  "rajagopal2016_RF_over_RF_plus_vasti": 0.18598337010011878,
+  "arnold2010_RF_over_RF_plus_vasti": 0.15233036018736204,
+  "gait2392_RF_over_RF_plus_iliopsoas": 0.34843517138599106,
+  "rajagopal2016_RF_over_RF_plus_iliopsoas": 0.4724137931034483,
+  "arnold2010_RF_over_RF_plus_iliopsoas": 0.43519278096800657
+ },
+ "ward2009_PCSA": {
+  "RF_over_RF_plus_vasti": 0.15715948777648428,
+  "RF_over_vasti": 0.18646408839779005,
+  "RF_over_hipflexor4_sum": 0.4090909090909091,
+  "iliopsoas_over_hipflexor4_sum": 0.5333333333333333,
+  "sartorius_over_hipflexor4_sum": 0.05757575757575757,
+  "RF_over_group_total_35p9": 0.3760445682451254,
+  "RF_over_knee_ext_group_total_88p4": 0.15271493212669682,
+  "hipflexor4_sum": 33.0,
+  "vasti_sum": 72.4
+ },
+ "rajagopal2016_volume_cm3_derived": {
+  "iliacus_r": 181.42271475409882,
+  "psoas_r": 277.9862836065582,
+  "recfem_r": 277.2552344262298,
+  "sart_r": 167.52247540983583,
+  "tfl_r": 65.10770491803291,
+  "vasint_r": 280.91318852459096,
+  "vaslat_r": 852.9791016393452,
+  "vasmed_r": 443.3154360655718,
+  "vasti_sum": 1577.207726229508,
+  "RF_over_RF_plus_vasti": 0.14950702187559053,
+  "RF_over_RF_plus_iliopsoas": 0.3763658150977968
+ },
+ "rf_knee_over_hip_arm_ratio": {
+  "gait2392": {
+   "hip0_knee30": {
+    "hip_arm_cm": 4.201996356690973,
+    "knee_arm_cm": 4.960225108510204,
+    "ratio_knee_over_hip": 1.1804448855867946
+   },
+   "hip0_knee60": {
+    "hip_arm_cm": 4.139544820141355,
+    "knee_arm_cm": 3.976787583211785,
+    "ratio_knee_over_hip": 0.960682334894006
+   },
+   "hip0_knee90": {
+    "hip_arm_cm": 4.055615024818636,
+    "knee_arm_cm": 2.646547189901822,
+    "ratio_knee_over_hip": 0.6525637107334106
+   },
+   "hip0_knee120": {
+    "hip_arm_cm": 4.0556150248192715,
+    "knee_arm_cm": 1.9567627213917602,
+    "ratio_knee_over_hip": 0.4824823631969256
+   },
+   "hip20_knee30": {
+    "hip_arm_cm": 5.071332188614859,
+    "knee_arm_cm": 4.976249674407179,
+    "ratio_knee_over_hip": 0.981250978900349
+   },
+   "hip20_knee60": {
+    "hip_arm_cm": 5.037671250857364,
+    "knee_arm_cm": 4.023720975817553,
+    "ratio_knee_over_hip": 0.7987263907172891
+   },
+   "hip20_knee90": {
+    "hip_arm_cm": 4.985508170496312,
+    "knee_arm_cm": 2.646547189901822,
+    "ratio_knee_over_hip": 0.5308480298084349
+   },
+   "hip20_knee120": {
+    "hip_arm_cm": 4.9855081704966295,
+    "knee_arm_cm": 1.9567627213923966,
+    "ratio_knee_over_hip": 0.39249012427101776
+   },
+   "hip40_knee30": {
+    "hip_arm_cm": 5.403139939787514,
+    "knee_arm_cm": 4.981630808813862,
+    "ratio_knee_over_hip": 0.9219881151199227
+   },
+   "hip40_knee60": {
+    "hip_arm_cm": 5.401373096200384,
+    "knee_arm_cm": 4.042165206179522,
+    "ratio_knee_over_hip": 0.7483588217638583
+   },
+   "hip40_knee90": {
+    "hip_arm_cm": 5.394885192094802,
+    "knee_arm_cm": 2.646547189901504,
+    "ratio_knee_over_hip": 0.4905659890185477
+   },
+   "hip40_knee120": {
+    "hip_arm_cm": 5.39488519209512,
+    "knee_arm_cm": 1.9567627213911243,
+    "ratio_knee_over_hip": 0.3627070181694098
+   },
+   "hip60_knee30": {
+    "hip_arm_cm": 5.084481013359028,
+    "knee_arm_cm": 4.976079512347259,
+    "ratio_knee_over_hip": 0.9786799280542197
+   },
+   "hip60_knee60": {
+    "hip_arm_cm": 5.119137191031413,
+    "knee_arm_cm": 4.02764707366386,
+    "ratio_knee_over_hip": 0.786782405581977
+   },
+   "hip60_knee90": {
+    "hip_arm_cm": 5.1661325973194865,
+    "knee_arm_cm": 2.646547189902458,
+    "ratio_knee_over_hip": 0.5122878942897542
+   },
+   "hip60_knee120": {
+    "hip_arm_cm": 5.1661325973191685,
+    "knee_arm_cm": 1.9567627213904881,
+    "ratio_knee_over_hip": 0.37876742118580153
+   }
+  },
+  "rajagopal2016": {
+   "hip0_knee30": {
+    "hip_arm_cm": 3.393075409524418,
+    "knee_arm_cm": 4.585587084708655,
+    "ratio_knee_over_hip": 1.3514545158167828
+   },
+   "hip0_knee60": {
+    "hip_arm_cm": 3.344044068700802,
+    "knee_arm_cm": 3.9224838071045856,
+    "ratio_knee_over_hip": 1.1729761111158183
+   },
+   "hip0_knee90": {
+    "hip_arm_cm": 3.23059691173108,
+    "knee_arm_cm": 2.354339151875036,
+    "ratio_knee_over_hip": 0.728762893112991
+   },
+   "hip0_knee120": {
+    "hip_arm_cm": 3.1928403038185302,
+    "knee_arm_cm": 2.6700803114881038,
+    "ratio_knee_over_hip": 0.8362711746950754
+   },
+   "hip20_knee30": {
+    "hip_arm_cm": 4.430949843034761,
+    "knee_arm_cm": 4.590282947492878,
+    "ratio_knee_over_hip": 1.0359591306835894
+   },
+   "hip20_knee60": {
+    "hip_arm_cm": 4.4009312784643795,
+    "knee_arm_cm": 3.967642601685372,
+    "ratio_knee_over_hip": 0.9015461389049012
+   },
+   "hip20_knee90": {
+    "hip_arm_cm": 4.324163546392358,
+    "knee_arm_cm": 2.4331395083196803,
+    "ratio_knee_over_hip": 0.5626844318480148
+   },
+   "hip20_knee120": {
+    "hip_arm_cm": 4.291747498309333,
+    "knee_arm_cm": 2.670129649069089,
+    "ratio_knee_over_hip": 0.6221544138188336
+   },
+   "hip40_knee30": {
+    "hip_arm_cm": 5.021828196392682,
+    "knee_arm_cm": 4.591274743108453,
+    "ratio_knee_over_hip": 0.9142636035232136
+   },
+   "hip40_knee60": {
+    "hip_arm_cm": 5.011022225593908,
+    "knee_arm_cm": 3.992442041857594,
+    "ratio_knee_over_hip": 0.7967320562790776
+   },
+   "hip40_knee90": {
+    "hip_arm_cm": 4.979394624744566,
+    "knee_arm_cm": 2.4796102974967527,
+    "ratio_knee_over_hip": 0.4979742487519659
+   },
+   "hip40_knee120": {
+    "hip_arm_cm": 4.963344406193537,
+    "knee_arm_cm": 2.6701737747081955,
+    "ratio_knee_over_hip": 0.5379787409828349
+   },
+   "hip60_knee30": {
+    "hip_arm_cm": 5.0460240622933465,
+    "knee_arm_cm": 4.590968769155694,
+    "ratio_knee_over_hip": 0.909819040194819
+   },
+   "hip60_knee60": {
+    "hip_arm_cm": 5.05578763067295,
+    "knee_arm_cm": 3.994015664531614,
+    "ratio_knee_over_hip": 0.7899888120894016
+   },
+   "hip60_knee90": {
+    "hip_arm_cm": 5.076811093448971,
+    "knee_arm_cm": 2.4863755234296496,
+    "ratio_knee_over_hip": 0.4897514360221174
+   },
+   "hip60_knee120": {
+    "hip_arm_cm": 5.084847511791598,
+    "knee_arm_cm": 2.6702171206572216,
+    "ratio_knee_over_hip": 0.5251321921581865
+   }
+  },
+  "rajagopal_lai_uhlrich2023": {
+   "hip0_knee30": {
+    "hip_arm_cm": 3.3930754095250544,
+    "knee_arm_cm": 4.618214056235773,
+    "ratio_knee_over_hip": 1.3610702677787547
+   },
+   "hip0_knee60": {
+    "hip_arm_cm": 3.344044068700166,
+    "knee_arm_cm": 4.021340985178503,
+    "ratio_knee_over_hip": 1.202538274784639
+   },
+   "hip0_knee90": {
+    "hip_arm_cm": 3.23059691173108,
+    "knee_arm_cm": 2.404797668517928,
+    "ratio_knee_over_hip": 0.7443818384724894
+   },
+   "hip0_knee120": {
+    "hip_arm_cm": 3.192840303817894,
+    "knee_arm_cm": 2.2697109512504055,
+    "ratio_knee_over_hip": 0.7108751880062273
+   },
+   "hip20_knee30": {
+    "hip_arm_cm": 4.430949843035398,
+    "knee_arm_cm": 4.622909919019997,
+    "ratio_knee_over_hip": 1.0433225567394593
+   },
+   "hip20_knee60": {
+    "hip_arm_cm": 4.400931278465015,
+    "knee_arm_cm": 4.066499779758017,
+    "ratio_knee_over_hip": 0.9240089250328755
+   },
+   "hip20_knee90": {
+    "hip_arm_cm": 4.324163546391722,
+    "knee_arm_cm": 2.483598024963208,
+    "ratio_knee_over_hip": 0.5743533976728598
+   },
+   "hip20_knee120": {
+    "hip_arm_cm": 4.291747498309969,
+    "knee_arm_cm": 2.2697602888313906,
+    "ratio_knee_over_hip": 0.5288662228440025
+   },
+   "hip40_knee30": {
+    "hip_arm_cm": 5.021828196393318,
+    "knee_arm_cm": 4.623901714635572,
+    "ratio_knee_over_hip": 0.920760634136481
+   },
+   "hip40_knee60": {
+    "hip_arm_cm": 5.011022225593273,
+    "knee_arm_cm": 4.091299219931511,
+    "ratio_knee_over_hip": 0.8164600027187323
+   },
+   "hip40_knee90": {
+    "hip_arm_cm": 4.979394624744566,
+    "knee_arm_cm": 2.5300688141396446,
+    "ratio_knee_over_hip": 0.5081077128466057
+   },
+   "hip40_knee120": {
+    "hip_arm_cm": 4.963344406193537,
+    "knee_arm_cm": 2.269804414470497,
+    "ratio_knee_over_hip": 0.457313502492011
+   },
+   "hip60_knee30": {
+    "hip_arm_cm": 5.0460240622939825,
+    "knee_arm_cm": 4.623595740683449,
+    "ratio_knee_over_hip": 0.9162849173139906
+   },
+   "hip60_knee60": {
+    "hip_arm_cm": 5.055787630674222,
+    "knee_arm_cm": 4.092872842606167,
+    "ratio_knee_over_hip": 0.8095420815886517
+   },
+   "hip60_knee90": {
+    "hip_arm_cm": 5.076811093448971,
+    "knee_arm_cm": 2.5368340400731775,
+    "ratio_knee_over_hip": 0.49969045398334083
+   },
+   "hip60_knee120": {
+    "hip_arm_cm": 5.0848475117909615,
+    "knee_arm_cm": 2.269847760420796,
+    "ratio_knee_over_hip": 0.4463944602384587
+   }
+  }
+ },
+ "candidate_splits": {
+  "150": {
+   "rf": 150,
+   "hip_flex_pos": 100,
+   "knee_neg": 230.0,
+   "rf_share_hip": 0.6,
+   "rf_share_knee": 0.34285714285714286,
+   "rf_hip_torque_Nm": 150,
+   "rf_knee_torque_Nm": 120.0
+  },
+  "100": {
+   "rf": 100,
+   "hip_flex_pos": 150,
+   "knee_neg": 270.0,
+   "rf_share_hip": 0.4,
+   "rf_share_knee": 0.22857142857142856,
+   "rf_hip_torque_Nm": 100,
+   "rf_knee_torque_Nm": 80.0
+  },
+  "90": {
+   "rf": 90,
+   "hip_flex_pos": 160,
+   "knee_neg": 278.0,
+   "rf_share_hip": 0.36,
+   "rf_share_knee": 0.2057142857142857,
+   "rf_hip_torque_Nm": 90,
+   "rf_knee_torque_Nm": 72.0
+  },
+  "88": {
+   "rf": 88,
+   "hip_flex_pos": 162,
+   "knee_neg": 279.6,
+   "rf_share_hip": 0.352,
+   "rf_share_knee": 0.20114285714285715,
+   "rf_hip_torque_Nm": 88,
+   "rf_knee_torque_Nm": 70.4
+  },
+  "85": {
+   "rf": 85,
+   "hip_flex_pos": 165,
+   "knee_neg": 282.0,
+   "rf_share_hip": 0.34,
+   "rf_share_knee": 0.19428571428571428,
+   "rf_hip_torque_Nm": 85,
+   "rf_knee_torque_Nm": 68.0
+  },
+  "80": {
+   "rf": 80,
+   "hip_flex_pos": 170,
+   "knee_neg": 286.0,
+   "rf_share_hip": 0.32,
+   "rf_share_knee": 0.18285714285714286,
+   "rf_hip_torque_Nm": 80,
+   "rf_knee_torque_Nm": 64.0
+  },
+  "76": {
+   "rf": 76,
+   "hip_flex_pos": 174,
+   "knee_neg": 289.2,
+   "rf_share_hip": 0.304,
+   "rf_share_knee": 0.17371428571428574,
+   "rf_hip_torque_Nm": 76,
+   "rf_knee_torque_Nm": 60.800000000000004
+  },
+  "70": {
+   "rf": 70,
+   "hip_flex_pos": 180,
+   "knee_neg": 294.0,
+   "rf_share_hip": 0.28,
+   "rf_share_knee": 0.16,
+   "rf_hip_torque_Nm": 70,
+   "rf_knee_torque_Nm": 56.0
+  },
+  "66": {
+   "rf": 66,
+   "hip_flex_pos": 184,
+   "knee_neg": 297.2,
+   "rf_share_hip": 0.264,
+   "rf_share_knee": 0.15085714285714286,
+   "rf_hip_torque_Nm": 66,
+   "rf_knee_torque_Nm": 52.800000000000004
+  },
+  "60": {
+   "rf": 60,
+   "hip_flex_pos": 190,
+   "knee_neg": 302.0,
+   "rf_share_hip": 0.24,
+   "rf_share_knee": 0.13714285714285715,
+   "rf_hip_torque_Nm": 60,
+   "rf_knee_torque_Nm": 48.0
+  },
+  "50": {
+   "rf": 50,
+   "hip_flex_pos": 200,
+   "knee_neg": 310.0,
+   "rf_share_hip": 0.2,
+   "rf_share_knee": 0.11428571428571428,
+   "rf_hip_torque_Nm": 50,
+   "rf_knee_torque_Nm": 40.0
+  }
+ }
+}

@@ -1,0 +1,6 @@
+# !!! RETRACTED 30 Sep 2026 (found by agent L3): THIS PROBE DID NOT TEST THE BEYOND-HUMAN BODY. It ran task long_jump_v4_p95, whose class hard-codes profile = "p95" (an explicit profile wins over
+# ROBOLAB_PROFILE, so the P95 body was built), and its check mark is a placeholder (37.8 m), not the champion's task long_jump_v4_p95b (44.0 m): the fall below is that wrong runway, not the body.
+# Do not cite it. The valid statement is L3's arena seed row: the human-body champion replayed on the labelled beyond-human body (task long_jump_v4_beyond, profile set in the class) scores 0 m (it falls);
+# see scratchpad/lj3/LOG.md (17:32) and the arena trial long_jump_v4_beyond.
+# 30 Sep 2026: the P95 long-jump champion (params/long_jump_v4_gear_nom3.txt, bin/challengers/long_jump_run-c3, task long_jump_v4_p95, seed 0) UNRETUNED on the labelled beyond-human body (ROBOLAB_CALIB=v4 ROBOLAB_PROFILE=beyond ROBOLAB_PROFILE_PARTS=strength,speed,tendon,activation), via scratchpad/anat5/lj_check.py:
+{'official_m': 0.0, 'effective_m': None, 'failed': None, 'approach_speed': None, 'speed_5m': None, 'peak_speed_1s_run': None, 'takeoff_vx': None, 'takeoff_vz': None, 'takeoff_angle_deg': None, 'contact_time_s': None, 'board_offset_m': None, 'flight_s': None, 'fell': True}

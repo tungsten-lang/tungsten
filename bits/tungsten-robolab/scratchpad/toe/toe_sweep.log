@@ -1,0 +1,10 @@
+identity: the base variant reproduces champions.json's 48 scores: YES
+base: td -14, ms 0, to -30   guard-passing 47/48  kin_rms 19.782  event_rms 24.674  speed  3.21 m/s  | paired vs base over 47 starts: +0.000 (p 1.000)
+to_st_toe -60                guard-passing 45/48  kin_rms 20.250  event_rms 25.156  speed  3.16 m/s  | paired vs base over 45 starts: +0.469 (p 0.000)
+to_st_toe -45                guard-passing 47/48  kin_rms 20.246  event_rms 25.151  speed  3.15 m/s  | paired vs base over 47 starts: +0.464 (p 0.000)
+to_st_toe -15                guard-passing 44/48  kin_rms 19.753  event_rms 24.505  speed  3.21 m/s  | paired vs base over 44 starts: -0.030 (p 0.000)
+to_st_toe 0                  guard-passing 36/48  kin_rms 19.781  event_rms 24.664  speed  3.21 m/s  | paired vs base over 36 starts: -0.001 (p 0.959)
+to_st_toe +10                guard-passing 34/48  kin_rms 19.774  event_rms 24.594  speed  3.21 m/s  | paired vs base over 34 starts: -0.009 (p 0.094)
+td_st_toe 0 (was -14)        guard-passing 47/48  kin_rms 19.932  event_rms 25.054  speed  3.22 m/s  | paired vs base over 47 starts: +0.150 (p 0.000)
+td_st_toe -30                guard-passing 47/48  kin_rms 19.986  event_rms 24.770  speed  3.17 m/s  | paired vs base over 47 starts: +0.204 (p 0.000)
+all three st_toe 0           guard-passing 35/48  kin_rms 19.920  event_rms 24.997  speed  3.22 m/s  | paired vs base over 35 starts: +0.138 (p 0.000)

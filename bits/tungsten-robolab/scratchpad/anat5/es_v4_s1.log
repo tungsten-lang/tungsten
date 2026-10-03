@@ -1,0 +1,177 @@
+hsearch sprint_touch_v4x: es, 79 tunables, budget 5000 rollouts, seeds [(0, None), (1, None), (2, None), (3, None), (4, None), (5, None), (6, None), (7, None)]
+start -264.429 (1 rollouts)
+gen 1 used 86 best 294.112 gen_best 294.11 alive_full 5/16 (31s) {'sigma': 0.034499999999999996, 'rate': 1.0}
+gen 2 used 114 best 294.112 gen_best -79.87 alive_full 0/16 (37s) {'sigma': 0.033464999999999995, 'rate': 0.5}
+gen 3 used 182 best 294.112 gen_best 293.15 alive_full 3/16 (60s) {'sigma': 0.03246104999999999, 'rate': 0.3333333333333333}
+gen 4 used 239 best 294.643 gen_best 294.64 alive_full 1/16 (79s) {'sigma': 0.03733020749999999, 'rate': 0.5}
+gen 5 used 291 best 294.643 gen_best 294.61 alive_full 1/16 (95s) {'sigma': 0.03621030127499999, 'rate': 0.4}
+gen 6 used 343 best 295.866 gen_best 295.87 alive_full 3/16 (114s) {'sigma': 0.041641846466249986, 'rate': 0.5}
+gen 7 used 392 best 295.866 gen_best 294.34 alive_full 2/16 (133s) {'sigma': 0.040392591072262486, 'rate': 0.42857142857142855}
+gen 8 used 423 best 295.866 gen_best 289.78 alive_full 1/16 (144s) {'sigma': 0.03918081334009461, 'rate': 0.375}
+gen 9 used 466 best 295.866 gen_best 293.16 alive_full 1/16 (158s) {'sigma': 0.03800538893989177, 'rate': 0.25}
+gen 10 used 525 best 295.866 gen_best 295.63 alive_full 5/16 (180s) {'sigma': 0.036865227271695014, 'rate': 0.25}
+gen 11 used 581 best 295.866 gen_best 294.65 alive_full 2/16 (201s) {'sigma': 0.03575927045354416, 'rate': 0.25}
+gen 12 used 606 best 295.866 gen_best -8.53 alive_full 0/16 (207s) {'sigma': 0.03325612152179607, 'rate': 0.125}
+gen 13 used 642 best 295.866 gen_best -40.62 alive_full 0/16 (217s) {'sigma': 0.030928193015270347, 'rate': 0.125}
+gen 14 used 675 best 295.866 gen_best 295.64 alive_full 1/16 (229s) {'sigma': 0.028763219504201423, 'rate': 0.0}
+gen 15 used 738 best 296.137 gen_best 296.14 alive_full 5/16 (254s) {'sigma': 0.033077702429831636, 'rate': 0.125}
+gen 16 used 783 best 296.794 gen_best 296.79 alive_full 1/16 (270s) {'sigma': 0.03803935779430638, 'rate': 0.25}
+gen 17 used 809 best 296.794 gen_best -14.74 alive_full 0/16 (280s) {'sigma': 0.03689817706047719, 'rate': 0.25}
+gen 18 used 845 best 296.794 gen_best -45.72 alive_full 0/16 (291s) {'sigma': 0.035791231748662874, 'rate': 0.25}
+gen 19 used 869 best 296.794 gen_best -22.48 alive_full 0/16 (299s) {'sigma': 0.03471749479620299, 'rate': 0.25}
+gen 20 used 902 best 296.794 gen_best 296.11 alive_full 1/16 (311s) {'sigma': 0.0336759699523169, 'rate': 0.25}
+gen 21 used 939 best 296.856 gen_best 296.86 alive_full 1/16 (322s) {'sigma': 0.03872736544516443, 'rate': 0.375}
+gen 22 used 992 best 296.856 gen_best 296.81 alive_full 3/16 (339s) {'sigma': 0.0375655444818095, 'rate': 0.375}
+gen 23 used 1018 best 296.856 gen_best -18.93 alive_full 0/16 (346s) {'sigma': 0.03643857814735522, 'rate': 0.25}
+gen 24 used 1056 best 296.856 gen_best 295.87 alive_full 1/16 (357s) {'sigma': 0.03388787767704035, 'rate': 0.125}
+gen 25 used 1089 best 296.856 gen_best 286.76 alive_full 1/16 (370s) {'sigma': 0.031515726239647525, 'rate': 0.125}
+gen 26 used 1129 best 296.856 gen_best -14.50 alive_full 0/16 (385s) {'sigma': 0.0293096254028722, 'rate': 0.125}
+gen 27 used 1158 best 296.856 gen_best -17.38 alive_full 0/16 (394s) {'sigma': 0.027257951624671147, 'rate': 0.125}
+gen 28 used 1198 best 296.856 gen_best -22.83 alive_full 0/16 (406s) {'sigma': 0.025349895010944166, 'rate': 0.125}
+gen 29 used 1261 best 297.210 gen_best 297.21 alive_full 3/16 (426s) {'sigma': 0.02915237926258579, 'rate': 0.125}
+gen 30 used 1305 best 297.210 gen_best 296.87 alive_full 2/16 (440s) {'sigma': 0.027111712714204785, 'rate': 0.125}
+gen 31 used 1337 best 297.210 gen_best -51.93 alive_full 0/16 (450s) {'sigma': 0.02521389282421045, 'rate': 0.125}
+gen 32 used 1384 best 297.210 gen_best -58.67 alive_full 0/16 (467s) {'sigma': 0.023448920326515722, 'rate': 0.125}
+gen 33 used 1426 best 297.210 gen_best 294.54 alive_full 2/16 (483s) {'sigma': 0.021807495903659622, 'rate': 0.125}
+gen 34 used 1477 best 297.210 gen_best 297.21 alive_full 4/16 (502s) {'sigma': 0.02028097119040345, 'rate': 0.125}
+gen 35 used 1516 best 297.210 gen_best -20.82 alive_full 0/16 (513s) {'sigma': 0.018861303207075207, 'rate': 0.125}
+gen 36 used 1549 best 297.210 gen_best 295.65 alive_full 1/16 (523s) {'sigma': 0.017541011982579943, 'rate': 0.125}
+gen 37 used 1588 best 297.210 gen_best 295.50 alive_full 1/16 (534s) {'sigma': 0.016313141143799347, 'rate': 0.0}
+gen 38 used 1635 best 297.210 gen_best 296.66 alive_full 2/16 (550s) {'sigma': 0.015171221263733393, 'rate': 0.0}
+gen 39 used 1673 best 297.210 gen_best -28.88 alive_full 0/16 (561s) {'sigma': 0.014109235775272056, 'rate': 0.0}
+gen 40 used 1712 best 297.210 gen_best -55.01 alive_full 0/16 (572s) {'sigma': 0.013121589271003013, 'rate': 0.0}
+gen 41 used 1751 best 297.210 gen_best 296.33 alive_full 1/16 (584s) {'sigma': 0.012203078022032802, 'rate': 0.0}
+gen 42 used 1795 best 297.210 gen_best 296.99 alive_full 1/16 (602s) {'sigma': 0.011348862560490506, 'rate': 0.0}
+gen 43 used 1845 best 297.210 gen_best -15.74 alive_full 0/16 (618s) {'sigma': 0.01055444218125617, 'rate': 0.0}
+gen 44 used 1895 best 297.210 gen_best 296.15 alive_full 1/16 (634s) {'sigma': 0.009815631228568239, 'rate': 0.0}
+gen 45 used 1923 best 297.210 gen_best -52.45 alive_full 0/16 (642s) {'sigma': 0.009128537042568463, 'rate': 0.0}
+gen 46 used 1957 best 297.210 gen_best -43.55 alive_full 0/16 (651s) {'sigma': 0.008489539449588671, 'rate': 0.0}
+gen 47 used 2002 best 297.210 gen_best -22.73 alive_full 0/16 (664s) {'sigma': 0.007895271688117465, 'rate': 0.0}
+gen 48 used 2058 best 297.210 gen_best 297.15 alive_full 3/16 (684s) {'sigma': 0.007342602669949242, 'rate': 0.0}
+gen 49 used 2103 best 297.210 gen_best -6.21 alive_full 0/16 (703s) {'sigma': 0.006828620483052795, 'rate': 0.0}
+gen 50 used 2168 best 297.210 gen_best 296.18 alive_full 1/16 (726s) {'sigma': 0.0063506170492391, 'rate': 0.0}
+gen 51 used 2207 best 297.210 gen_best 296.35 alive_full 1/16 (745s) {'sigma': 0.005906073855792364, 'rate': 0.0}
+gen 52 used 2268 best 297.210 gen_best 296.73 alive_full 2/16 (772s) {'sigma': 0.005492648685886899, 'rate': 0.0}
+gen 53 used 2319 best 297.210 gen_best 296.18 alive_full 1/16 (790s) {'sigma': 0.005108163277874816, 'rate': 0.0}
+gen 54 used 2359 best 297.210 gen_best -11.74 alive_full 0/16 (807s) {'sigma': 0.004750591848423579, 'rate': 0.0}
+gen 55 used 2400 best 297.210 gen_best -68.91 alive_full 0/16 (824s) {'sigma': 0.004418050419033929, 'rate': 0.0}
+gen 56 used 2458 best 297.210 gen_best 296.45 alive_full 1/16 (846s) {'sigma': 0.004108786889701554, 'rate': 0.0}
+gen 57 used 2507 best 297.210 gen_best 296.14 alive_full 1/16 (865s) {'sigma': 0.0038211718074224457, 'rate': 0.0}
+gen 58 used 2550 best 297.210 gen_best -39.83 alive_full 0/16 (883s) {'sigma': 0.0035536897809028745, 'rate': 0.0}
+gen 59 used 2594 best 297.210 gen_best -8.32 alive_full 0/16 (904s) {'sigma': 0.0033049314962396736, 'rate': 0.0}
+gen 60 used 2631 best 297.210 gen_best -18.32 alive_full 0/16 (917s) {'sigma': 0.0030735862915028966, 'rate': 0.0}
+gen 61 used 2685 best 297.210 gen_best 296.80 alive_full 2/16 (942s) {'sigma': 0.002858435251097694, 'rate': 0.0}
+gen 62 used 2737 best 297.210 gen_best -35.97 alive_full 1/16 (964s) {'sigma': 0.002658344783520856, 'rate': 0.0}
+gen 63 used 2793 best 297.210 gen_best 296.18 alive_full 1/16 (985s) {'sigma': 0.002472260648674396, 'rate': 0.0}
+gen 64 used 2836 best 297.210 gen_best 294.20 alive_full 1/16 (1000s) {'sigma': 0.0022992024032671885, 'rate': 0.0}
+gen 65 used 2879 best 297.210 gen_best -32.22 alive_full 0/16 (1015s) {'sigma': 0.0021382582350384853, 'rate': 0.0}
+gen 66 used 2926 best 297.210 gen_best 296.87 alive_full 1/16 (1032s) {'sigma': 0.002, 'rate': 0.0}
+gen 67 used 2977 best 297.210 gen_best 293.66 alive_full 1/16 (1053s) {'sigma': 0.002, 'rate': 0.0}
+gen 68 used 3020 best 297.210 gen_best 297.01 alive_full 1/16 (1073s) {'sigma': 0.002, 'rate': 0.0}
+gen 69 used 3072 best 297.210 gen_best 297.21 alive_full 2/16 (1092s) {'sigma': 0.002, 'rate': 0.0}
+gen 70 used 3123 best 297.210 gen_best -9.49 alive_full 0/16 (1114s) {'sigma': 0.002, 'rate': 0.0}
+gen 71 used 3166 best 297.210 gen_best -32.98 alive_full 0/16 (1130s) {'sigma': 0.002, 'rate': 0.0}
+Process SpawnPoolWorker-2:
+Traceback (most recent call last):
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/pool.py", line 131, in worker
+    put((job, i, result))
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/queues.py", line 399, in put
+    self._writer.send_bytes(obj)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 200, in send_bytes
+    self._send_bytes(m[offset:offset + size])
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 420, in _send_bytes
+    self._send(header)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 384, in _send
+    n = write(self._handle, buf)
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+BrokenPipeError: [Errno 32] Broken pipe
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/pool.py", line 136, in worker
+    put((job, i, (False, wrapped)))
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/queues.py", line 399, in put
+    self._writer.send_bytes(obj)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 200, in send_bytes
+    self._send_bytes(m[offset:offset + size])
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 427, in _send_bytes
+    self._send(header + buf)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 384, in _send
+    n = write(self._handle, buf)
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+BrokenPipeError: [Errno 32] Broken pipe
+Process SpawnPoolWorker-1:
+Traceback (most recent call last):
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/pool.py", line 131, in worker
+    put((job, i, result))
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/queues.py", line 399, in put
+    self._writer.send_bytes(obj)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 200, in send_bytes
+    self._send_bytes(m[offset:offset + size])
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 420, in _send_bytes
+    self._send(header)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 384, in _send
+    n = write(self._handle, buf)
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+BrokenPipeError: [Errno 32] Broken pipe
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/pool.py", line 136, in worker
+    put((job, i, (False, wrapped)))
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/queues.py", line 399, in put
+    self._writer.send_bytes(obj)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 200, in send_bytes
+    self._send_bytes(m[offset:offset + size])
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 427, in _send_bytes
+    self._send(header + buf)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 384, in _send
+    n = write(self._handle, buf)
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+BrokenPipeError: [Errno 32] Broken pipe
+Process SpawnPoolWorker-3:
+Traceback (most recent call last):
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/pool.py", line 131, in worker
+    put((job, i, result))
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/queues.py", line 399, in put
+    self._writer.send_bytes(obj)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 200, in send_bytes
+    self._send_bytes(m[offset:offset + size])
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 420, in _send_bytes
+    self._send(header)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 384, in _send
+    n = write(self._handle, buf)
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+BrokenPipeError: [Errno 32] Broken pipe
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/pool.py", line 136, in worker
+    put((job, i, (False, wrapped)))
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/queues.py", line 399, in put
+    self._writer.send_bytes(obj)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 200, in send_bytes
+    self._send_bytes(m[offset:offset + size])
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 427, in _send_bytes
+    self._send(header + buf)
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/connection.py", line 384, in _send
+    n = write(self._handle, buf)
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+BrokenPipeError: [Errno 32] Broken pipe
+/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/resource_tracker.py:279: UserWarning: resource_tracker: There appear to be 6 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '

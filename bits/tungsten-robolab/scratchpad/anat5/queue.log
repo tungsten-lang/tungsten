@@ -1,0 +1,11 @@
+01:16:23 launching v5b s1 gear 3 budget 5000
+started es_v5b_g3_s1 pid 32738 (arm v5b, search seed 1, budget 5000, workers 3, snap run_v4_a5w, init scratchpad/anat5/params/x5a_g3fly.txt)
+03:17:49 launching v4 s2 gear 3 budget 1500
+started es_v4_g3_s2 pid 47514 (arm v4, search seed 2, budget 1500, workers 3, snap run_v4_a5w, init scratchpad/anat5/params/x5a_g3fly.txt)
+16:00:58 launching v5b s2 gear 3 budget 1500
+started es_v5b_g3_s2 pid 99386 (arm v5b, search seed 2, budget 1500, workers 3, snap run_v4_a5w, init scratchpad/anat5/params/x5a_g3fly.txt)
+16:12:44 finished v5b s2
+16:12:44 launching v5 s1 gear 3 budget 1500
+started es_v5_g3_s1 pid 19010 (arm v5, search seed 1, budget 1500, workers 3, snap run_v5_a5w, init scratchpad/anat5/params/x5a_g3fly_v5.txt)
+16:27:11 finished v5 s1
+16:27:11 queue empty

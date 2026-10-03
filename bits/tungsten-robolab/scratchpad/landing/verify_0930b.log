@@ -1,0 +1,81 @@
+== verify (replays) 2cce555da Wed Sep 30 03:01:57 EDT 2026
+== py_compile of the changed python
+ok
+== sprint replays Wed Sep 30 03:01:57 EDT 2026
+sprint_top_speed_v4_beyond scores [10.159, 10.105] recorded [10.159, 10.105] -> same []
+sprint_top_speed_v4_p95 scores [8.272, 8.291] recorded [8.272, 8.291] -> same []
+SPRINT IDENTITY: PASS
+exit 0
+== soccer replays Wed Sep 30 03:02:04 EDT 2026
+/Users/erik/rl-verify-0930/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/rl-verify-0930/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/rl-verify-0930/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `reset()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/rl-verify-0930/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `step()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+seed 97100 {'stand_time': 20.0, 'bal1_raw': 18.4, 'time': 20.0} recorded {'stand_time': 20.0, 'bal1_raw': 18.4, 'time': 20.0} fallen False False -> same 
+seed 97101 {'stand_time': 20.0, 'bal1_raw': 18.48, 'time': 20.0} recorded {'stand_time': 20.0, 'bal1_raw': 18.48, 'time': 20.0} fallen False False -> same 
+SOCCER OLD-PARAMS IDENTITY: PASS
+/Users/erik/rl-verify-0930/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/rl-verify-0930/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/rl-verify-0930/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/rl-verify-0930/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/rl-verify-0930/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `reset()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/rl-verify-0930/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `reset()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/rl-verify-0930/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/rl-verify-0930/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+/Users/erik/rl-verify-0930/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `reset()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/rl-verify-0930/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `step()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/rl-verify-0930/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `step()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/Users/erik/rl-verify-0930/bits/tungsten-robolab/.venv-myo/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py:158: UserWarning: [33mWARN: The obs returned by the `step()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+seed 89100 bal1_raw 308.01 recorded 308.01 | numeric keys 40 differing []
+seed 89101 bal1_raw 308.57 recorded 308.57 | numeric keys 40 differing []
+seed 89102 bal1_raw 308.57 recorded 308.57 | numeric keys 40 differing []
+SOCCER OFFICIAL IDENTITY: PASS scores [1.0, 1.0, 1.0]
+REPLAY SOCCER: PASS
+exit 0
+== table tennis: tt_fast check (default path unchanged) Wed Sep 30 04:35:50 EDT 2026
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/subprocess.py", line 1026, in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+  File "/Users/erik/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/subprocess.py", line 1955, in _execute_child
+    raise child_exception_type(errno_num, err_msg, err_filename)
+FileNotFoundError: [Errno 2] No such file or directory: '/Users/erik/rl-verify-0930/bits/tungsten-robolab/bin/robolab_myo_tt'
+== handoff paths
+  HANDOFF_20260929.md: `playground/calibrations/v5b.json`
+  HANDOFF_20260929.md: `scratchpad/anat5/LOG.md`
+== done Wed Sep 30 04:35:52 EDT 2026

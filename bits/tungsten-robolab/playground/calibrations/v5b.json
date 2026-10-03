@@ -1,0 +1,206 @@
+{
+ "name": "v5b",
+ "about": "Opt-in sibling of v5 (select with ROBOLAB_BODY=v4 ROBOLAB_CALIB=v5b): the same source-based rectus femoris / hip flexor split as v5 (rf 80 N = 32 % of hip flexion, hip_flex_pos 170: hip flexion total 250 N m kept) but the vasti keep v4's value (knee_neg 230), so the knee-extension total is 294 N m (v4 and v5: 350) and the rectus femoris is 21.8 % of it (sources 15-22 %). Why it exists: in the anat5 A/B the champion's gears run on v5b with no retuning (gear 3 from gear-2 flying starts: 12/12 survive, steady 7.91 m/s, fold 110 deg, cadence 4.3/s; v4: 7.76 m/s, 96 deg, 4.16) while v5's stronger vasti (knee_neg 286: what makes up the knee total) makes the same stride fall (0/12): the controllers were tuned to the v4 vasti. The price is a 16 % weaker knee extension in total, which is the more conservative direction against v4.json's note that the model's capacities already exceed young men's voluntary maxima. A DIFFERENT BODY: not comparable with the v4 rows of the arena, nor with v5.",
+ "params": {
+  "tendon_scale": {
+   "value": {
+    "quadriceps": 4.0
+   },
+   "v3": {
+    "quadriceps": 1.0
+   },
+   "unit": "multiplier on the v3 quadriceps series stiffness (250 N/mm at 4.5 cm): 4.0 = 1000 N/mm",
+   "evidence": [
+    "whole vasti series elasticity in OpenSim models, from the model files: ~976 N/mm (gait2392), ~927 N/mm (Rajagopal 2016)",
+    "patellar tendon stiffness in vivo: 1076 N/mm (O'Brien et al. 2010), 2826 (Helland et al. 2013), 3185-3269 (Bojsen-Moller et al. 2007), 3622 (Couppe et al. 2012), 4334 (Hansen et al. 2006); the whole muscle-tendon series (tendon plus aponeurosis) is more compliant than the free tendon, so the models' ~1000 N/mm is taken",
+    "Achilles kept at 200 N/mm (188 +- 43 in hopping, Lichtwark & Wilson 2005; 306-319, Rosager et al. 2002)"
+   ],
+   "verified": true
+  },
+  "omega_muscle": {
+   "value": {
+    "hip_flex_neg": 18.5,
+    "hip_flex_pos": 29
+   },
+   "v3": {
+    "hip_flex_neg": 15,
+    "hip_flex_pos": 15
+   },
+   "unit": "unloaded joint angular velocity of one muscle direction, rad/s (hip_flex_neg = hip extensors: gluteus maximus and, through their hip action, the hamstrings; hip_flex_pos = hip flexors: iliopsoas and, through its hip action, rectus femoris); MuJoCo vmax = omega * 0.3 / joint range",
+   "evidence": [
+    "w0 = fibre vmax x optimal fibre length / moment arm with the standard models' fibre vmax of 10 L0/s (OpenSim Thelen2003 default, gait2392, Hamner 2010, Rajagopal 2016; Arnold & Delp 2011) and Ward et al. 2009's fibre lengths: PCSA-weighted hip extensors ~18.5 rad/s, hip flexors ~29 rad/s (at 15 L0/s, the high-speed models' value: ~28 and ~44); the standard 10 L0/s values are taken",
+    "the v3 value (15 for both) is below what sprinting needs: 79 sprinters at 9.9 m/s reach hip extension 850 +- 73 deg/s (14.8 rad/s) in stance and thigh lift 792 deg/s (13.8 rad/s) in swing (Miyashiro et al. 2019, PMC7739839), where a w0 of 15 leaves the muscles ~0 % of their force"
+   ],
+   "verified": "derived (fibre vmax and fibre lengths verified in the model files and Ward 2009; hip moment arms typical values)"
+  },
+  "peaks": {
+   "value": {
+    "hip_flex_pos": 170,
+    "rf": 80
+   },
+   "v4": {
+    "hip_flex_pos": 100,
+    "rf": 150,
+    "knee_neg": 230
+   },
+   "unit": "unscaled peak isometric force / torque scale of one muscle direction (N m at coefficient 1); the population profile then multiplies it (p95: x1.32). hip_flex_pos = the lumped monoarticular hip flexors (iliopsoas, sartorius, tensor fasciae latae, pectineus, anterior adductors), knee_neg = the lumped vasti, rf = the biarticular rectus femoris (torque 1.0 x F at the hip, 0.8 x F at the knee). Both legs.",
+   "totals_kept": {
+    "hip flexion": "hip_flex_pos + 1.0 x rf = 250 N m (v4: 100 + 150)",
+    "knee extension": "NOT kept: knee_neg 230 + 0.8 x rf 80 = 294 N m (v4: 230 + 120 = 350; v5 makes it up with knee_neg 286)",
+    "unchanged": "knee_neg (the vasti) 230, hip extension, knee flexion, ankle, toe, every speed / tendon / activation value"
+   },
+   "shares": {
+    "v4": {
+     "rf share of hip flexion": "60 % (150/250)",
+     "rf share of knee extension": "34 % (120/350)"
+    },
+    "v5b": {
+     "rf share of hip flexion": "32 % (80/250)",
+     "rf share of knee extension": "21.8 % (64/294)"
+    }
+   },
+   "evidence": [
+    "the sources' rectus femoris share of HIP FLEXION capacity (isometric F_max x sagittal moment arm, every muscle with a positive hip-flexion arm in the denominator; knee 90 deg): gait2392 (Delp 1990 lineage, model file gait2392_thelen2003muscle.osim) 19 / 26 / 29 / 31 / 30 % at hip -20 / 0 / 20 / 40 / 60 deg with iliopsoas 43 / 46 / 47 / 46 / 48 %; Rajagopal et al. 2016 (IEEE TBME 63:2068, Table II forces) 19 / 29 / 36 / 39 / 41 % with iliopsoas 32 / 29 / 28 / 30 / 34 %; Arnold et al. 2010 cadaver forces (Ann Biomed Eng 38:269, Table 1, PMC2903973) on the Rajagopal geometry 16 / 25 / 32 / 36 / 37 % with iliopsoas 33 / 31 / 31 / 33 / 37 %. A sprinter's swing runs the hip from about -20 to +60 deg flexion, so 26-41 % (about 32 % as the middle of the flexed-hip values) is the source share; 60 % is not (it is roughly the cadaver RF share among iliopsoas + RF ONLY, Kumazaki et al. 2022, 57-62 %, while v4's lumped hip flexor also holds sartorius, tensor fasciae latae, pectineus and the adductors)",
+    "the sources' rectus femoris share of KNEE EXTENSION capacity, RF / (RF + vasti), hip 0 deg, knee 0-120 deg: gait2392 19-22 %, Rajagopal 2016 19-21 %, Rajagopal-Lai-Uhlrich 2023 20-22 %, Arnold 2010 forces on the Rajagopal geometry 16-17 %; by force only 15.2 % (Arnold 2010: 848.8 N against 4723 N of vasti), 18.6 % (Rajagopal), 20.5 % (gait2392); by PCSA 15.7 % (Ward et al. 2009, Clin Orthop Relat Res 467:1074, PMC2650051: rectus femoris 13.5 cm2, vasti 35.1 + 16.7 + 20.6 cm2). In the models the vasti and the rectus femoris act through the same patellar tendon with similar knee-extension moment arms (rectus femoris 4.6-5.0 cm, vasti 4.0-4.9 cm at 0-30 deg knee flexion, gait2392 / Rajagopal), so the share of capacity is close to the share of force. 34 % is above every source",
+    "the compromise taken: rf 80 N, i.e. 32 % of hip flexion (sources 26-41 %) and 18.3 % of knee extension (sources 15-22 %); the two shares are tied by the fixed 1.0 : 0.8 coefficients, so one rf value cannot match a low knee share (cadaver PCSA 15 %) and Rajagopal's high hip share (38-41 %) together; 80 is inside both ranges. Alternatives priced in the split_check block: rf 66 (knee 15.1 %, hip 26.4 %), rf 88 (knee 20.1 %, hip 35.2 %)",
+    "the vasti keep v4's 230 (unlike v5): the anat5 A/B found the champion's strides tuned to the v4 vasti (any stronger knee_neg makes gear 3 fall: rf 110 / 140 / 262: 2/12 survive, 95 / 155 / 274: 0/12, v5: 0/12, while rf 80 / hip_flex_pos 170 / knee_neg 230: 12/12), and a lower knee-extension total is the conservative direction against v4.json's note (capacities already 1.4-2.9x young men's voluntary maxima); the rectus femoris' knee share 21.8 % is inside the sources' 15-22 %"
+   ],
+   "verified": "derived (as v5); the choice not to raise the vasti is an experimental finding, not a literature value"
+  }
+ },
+ "kept": {
+  "everything else": "every other parameter of v4.json (tendon_scale quadriceps x4, omega_muscle hip_flex_neg 18.5 / hip_flex_pos 29 rad/s) and every default of the v4 builder (peaks of all other muscles: hip_flex_neg 120, knee_pos 40, ankle 150 / 80, ham 200, gas 180; segments, foot contact, activation, force-length, force-velocity)",
+  "rf coefficients": "the rectus femoris keeps V2_BIARTICULAR's 1.0 (hip) : 0.8 (knee) coefficients (a code constant, not a calibration key)",
+  "quadriceps tendon": "the group's total series stiffness is unchanged; the v3 builder shares it among the group's muscles in proportion to their peak torques, so with the smaller rf the vasti's tendon is stiffer than in v4 (p95 XML: knee_neg 1996 -> 2376) and the rf's softer (1627 -> 1033): a consequence of the builder's sharing rule, not a separate choice"
+ },
+ "split_check": {
+  "how": "scratchpad/anat5/lit/{moment_arms.py, osim_paths.py, scenarios.py, moment_arms_*.json, shares.json, scenarios.json, tables.txt, sources.json}: muscle-tendon path lengths from the .osim path points, conditional / moving points, joint transforms and cylinder wraps, moment arm = -dL/dtheta by central differences (sagittal, pelvis fixed), capacity = F_max x arm; shares over every muscle with a positive hip-flexion arm (knee 90 deg for the hip table).",
+  "rectus femoris share of hip flexion, %": {
+   "hip angle, deg": [
+    -20,
+    0,
+    20,
+    40,
+    60
+   ],
+   "gait2392": [
+    19,
+    26,
+    29,
+    31,
+    30
+   ],
+   "rajagopal2016": [
+    19,
+    29,
+    36,
+    39,
+    41
+   ],
+   "arnold2010_forces_on_rajagopal_geometry": [
+    16,
+    25,
+    32,
+    36,
+    37
+   ],
+   "v4 body": 60,
+   "v5 body": 32.0
+  },
+  "iliopsoas share of hip flexion, %": {
+   "gait2392": [
+    43,
+    46,
+    47,
+    46,
+    48
+   ],
+   "rajagopal2016": [
+    32,
+    29,
+    28,
+    30,
+    34
+   ],
+   "arnold2010_forces_on_rajagopal_geometry": [
+    33,
+    31,
+    31,
+    33,
+    37
+   ],
+   "v5 body (hip_flex_pos lumps iliopsoas + sartorius + TFL + pectineus + anterior adductors)": 68.0
+  },
+  "rectus femoris share of knee extension, RF / (RF + vasti), %": {
+   "capacity, hip 0, knee 0-120 deg": {
+    "gait2392": "19-22",
+    "rajagopal2016": "19-21",
+    "rajagopal_lai_uhlrich2023": "20-22",
+    "arnold2010_forces_on_rajagopal_geometry": "16-17"
+   },
+   "force only": {
+    "arnold2010": 15.2,
+    "rajagopal2016": 18.6,
+    "gait2392": 20.5
+   },
+   "pcsa_ward2009": 15.7,
+   "v4 body": 34.3,
+   "v5 body": 18.3
+  },
+  "options priced (rf N -> hip_flex_pos, knee_neg, hip share %, knee share %)": {
+   "rf 66": [
+    66,
+    184,
+    297.2,
+    26.4,
+    15.1
+   ],
+   "rf 80 (taken)": [
+    80,
+    170,
+    286,
+    32.0,
+    18.3
+   ],
+   "rf 88": [
+    88,
+    162,
+    279.6,
+    35.2,
+    20.1
+   ],
+   "the brief's draft rf 60": [
+    60,
+    190,
+    302,
+    24.0,
+    13.7
+   ]
+  },
+  "draft_rejected": "the first proposal (rf 60, hip_flex_pos 190, knee_neg 302: 24 % of hip flexion, 13.7 % of knee extension) is below every source share on both joints (hip 26-41 %, knee 15-22 %); it was run only as a what-if through ROBOLAB_CALIB_SET (scratchpad/anat5/LOG.md) and is not a calibration",
+  "v5b_shares": {
+   "rf share of hip flexion %": 32.0,
+   "rf share of knee extension %": 21.8,
+   "knee extension total N m": 294
+  }
+ },
+ "sources": {
+  "read in the source (numbers taken from the text or table)": [
+   "Arnold EM, Ward SR, Lieber RL, Delp SL. A model of the lower limb for analysis of human movement. Ann Biomed Eng 2010;38:269-279 (PMC2903973): Table 1 PCSA and peak force: rectus femoris 13.9 cm2 / 848.8 N, iliacus 10.2 cm2 / 621.9 N, psoas 7.9 cm2 / 479.7 N, sartorius 113.5 N, TFL 155 N, pectineus 177 N, vasti 1024.2 + 2255.4 + 1443.7 N; text: the model quadriceps knee-extension moment arm peaks at 4.7 cm at 25 deg, the literature 4-5 cm",
+   "Rajagopal A, Dembia CL, DeMers MS, Delp DD, Hicks JL, Delp SL. Full-body musculoskeletal model for muscle-driven simulation of human gait. IEEE Trans Biomed Eng 2016;63:2068-2079 (PMC5507211): Table II and the model file Rajagopal2016.osim: rectus femoris 2192 N, iliacus 1021, psoas 1427, sartorius 249, TFL 411, vasti 1697 + 5149 + 2748 N (60 N/cm2 x Handsfield et al. 2014 volume fractions)",
+   "Ward SR, Eng CM, Smallwood LH, Lieber RL. Are current measurements of lower extremity muscle architecture accurate? Clin Orthop Relat Res 2009;467:1074-1082 (PMC2650051): PCSA psoas 7.7, iliacus 9.9, rectus femoris 13.5, sartorius 1.9, vastus lateralis / intermedius / medialis 35.1 / 16.7 / 20.6 cm2; hip flexors (psoas, iliacus, RF, sartorius) 35.9 +- 9.0 cm2, knee extensors 88.4 +- 30.5 cm2",
+   "Kumazaki T, et al. Action and contribution of the iliopsoas and rectus femoris as hip flexor agonists examined with anatomical analysis. Juntendo Iji Zasshi 2022;68:352-362 (PMC11250012): 22 cadaver limbs, PCSA psoas 5.45, iliacus 6.91, RF 10.88 cm2; RF share of (psoas + iliacus + RF) torque indicator 57.3 % at 0 deg, 60-62 % at 20-40 deg; only three muscles counted",
+   "Jiroumaru T, et al. SpringerPlus 2014;3:624 (PMC4221557): isometric hip-flexion torque of 10 young men 159.7 N m at 0 deg (knee 90), 70 % at 30 deg, 50 % at 60 deg; the iliopsoas contribution is relatively larger in the flexed hip (qualitative)"
+  ],
+  "read (model file) and computed (moment arms)": [
+   "gait2392_thelen2003muscle.osim (OpenSim; Delp SL, Loan JP, Hoy MG, Zajac FE, Topp EL, Rosen JM. An interactive graphics-based model of the lower extremity to study orthopaedic surgical procedures. IEEE Trans Biomed Eng 1990;37:757-767 lineage; Thelen, Seth, Anderson, Delp): iliacus 1073 N, psoas 1113, rectus femoris 1169, sartorius 156, TFL 233, pectineus 266, vasti 1294 + 1365 + 1871 N",
+   "Rajagopal2016.osim, RajagopalLaiUhlrich2023.osim (github.com/opensim-org/opensim-models)"
+  ],
+  "not accessible (nothing quoted from them)": "Delp 1990 and Arnold et al. 2000 (Comput Aided Surg 5:108) full texts, Nemeth & Ohlsen 1985, Visser et al. 1990, Spoor & van Leeuwen 1992, Herzog & Read 1993 (scanned), Handsfield et al. 2014 (paywalled): no hip-flexion moment-arm table could be re-read to validate the computed arms",
+  "file_layer": "scratchpad/anat5/lit/sources.json lists each source with its status"
+ },
+ "not_applied": {
+  "posture-dependent rf knee coupling": "the moment-arm ratio RF knee / RF hip is 0.36-0.54 in all three models at hip 40-60 deg and knee 90-120 deg (the fold-back posture) and 1.2-1.4 at hip 0, knee 30 deg (stance); V2_BIARTICULAR's fixed 0.8 therefore overstates the rectus femoris's knee-extension pull in the swing by ~1.5-2x. A fixed MuJoCo tendon cannot vary with posture; a lower constant coefficient would understate the stance; a code change, not a calibration key, so not part of v5",
+  "sartorius / gracilis (hip flexion + knee flexion)": "no biarticular hip-flexor-knee-flexor exists in the v2-v4 anatomy (sartorius 113-249 N, gracilis 162-281 N in the models: small); an optional v5.1 (needs a body.py change), not part of v5"
+ }
+}

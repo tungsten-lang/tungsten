@@ -1,0 +1,3 @@
+# ARM SEED BUDGET GEAR INIT SNAP [TAG]   (30 Sep, run by the main session once the machine was quiet: the two arms queue5 never reached)
+v5b 2 1500 3 scratchpad/anat5/params/x5a_g3fly.txt run_v4_a5w
+v5 1 1500 3 scratchpad/anat5/params/x5a_g3fly_v5.txt run_v5_a5w

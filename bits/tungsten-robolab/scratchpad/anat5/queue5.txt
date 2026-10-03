@@ -1,0 +1,6 @@
+# ARM SEED BUDGET GEAR INIT SNAP [TAG]
+v4 2 1500 3 scratchpad/anat5/params/x5a_g3fly.txt run_v4_a5w
+v5b 2 1500 3 scratchpad/anat5/params/x5a_g3fly.txt run_v4_a5w
+v5 1 1500 3 scratchpad/anat5/params/x5a_g3fly_v5.txt run_v5_a5w
+v4 1 1500 5 scratchpad/anat5/params/g5eq4_fly.txt run_v4_a5t _eq4
+v5b 1 1500 5 scratchpad/anat5/params/g5eq4_fly.txt run_v4_a5t _eq4

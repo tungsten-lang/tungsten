@@ -1,0 +1,7 @@
+dataset                                  side      serves  hit solved | rot 50ms  100ms  200ms | rate@contact | face err vs aim
+champion c3 (set A)                      forehand      46   42     19 |      5.2    8.4   12.1 |          101 |            27.1
+champion c3 (set A)                      backhand      54   49     24 |      8.2   18.3   52.2 |          139 |            51.6
+r9 live tracking, forehand-practised     forehand      46    9      1 |      4.2    6.8   10.7 |           95 |            29.3
+r9 live tracking, forehand-practised     backhand      54   43      0 |     12.0   28.6   65.0 |          160 |            47.7
+r9 live tracking, backhand-practised     forehand      46   16      1 |      6.0    9.7   15.2 |          179 |            27.0
+r9 live tracking, backhand-practised     backhand      54   42      9 |     13.9   30.7   59.9 |          233 |            60.8

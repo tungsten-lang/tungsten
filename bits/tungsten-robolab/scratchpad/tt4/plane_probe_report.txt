@@ -1,0 +1,71 @@
+200 logs in /Users/erik/tungsten/bits/tungsten-robolab/out/tt3/logs_o0, 177 with a paddle contact
+tick 10.0 ms; contact time median 0.510 s
+plane of elevation at contact histogram: [0, 24, 48, 14, 0, 70, 21, 0] -> {'forehand': 91, 'backhand': 86}
+== 1. the pad normal's rotation before contact (degrees between the normal at t_contact and at t_contact - lag)
+-- forehand
+   lag  50 ms: median    4.6  p90    7.5  max   10.4  (n=91)
+   lag 100 ms: median    7.4  p90   14.2  max   20.5  (n=91)
+   lag 200 ms: median   12.1  p90   25.5  max   32.8  (n=91)
+   lag 300 ms: median   14.3  p90   32.7  max   45.5  (n=91)
+   turning rate of the normal at contact (deg/s): median   91.1  p90  153.0  max  212.9  (n=91)
+   -> a contact-time shift of +-10 ms moves the face by median 0.9 deg, p90 1.5 deg; +-20 ms: 1.8 / 3.1
+-- backhand
+   lag  50 ms: median    8.4  p90   12.4  max   13.5  (n=86)
+   lag 100 ms: median   18.0  p90   24.0  max   31.1  (n=86)
+   lag 200 ms: median   54.0  p90   71.0  max   89.1  (n=86)
+   lag 300 ms: median  103.3  p90  117.4  max  130.8  (n=86)
+   turning rate of the normal at contact (deg/s): median  164.4  p90  263.2  max  288.0  (n=86)
+   -> a contact-time shift of +-10 ms moves the face by median 1.6 deg, p90 2.6 deg; +-20 ms: 3.3 / 5.3
+-- all
+   lag  50 ms: median    6.2  p90   11.8  max   13.5  (n=177)
+   lag 100 ms: median   12.1  p90   22.5  max   31.1  (n=177)
+   lag 200 ms: median   30.7  p90   66.3  max   89.1  (n=177)
+   lag 300 ms: median   42.5  p90  113.3  max  130.8  (n=177)
+   turning rate of the normal at contact (deg/s): median  114.5  p90  242.8  max  288.0  (n=177)
+   -> a contact-time shift of +-10 ms moves the face by median 1.1 deg, p90 2.4 deg; +-20 ms: 2.3 / 4.9
+== 2. the direction of travel of the pad centre against its normal at contact (0 deg = straight along the normal: a block; 90 = across it: a brush)
+   forehand: angle median   62.7  p90   86.1  max   89.3  (n=91); speed m/s median 1.10 p90 1.72
+   backhand: angle median   68.0  p90   85.8  max   89.2  (n=86); speed m/s median 0.69 p90 1.25
+== 3. the grasp: is the paddle rigid in the hand, and does its pose in the hand move?
+   hand body 'trapezium', paddle body 'paddle'; start pose: pad normal in the world [1.0, 0.0, 0.001], in the hand frame [-0.407, -0.07, 0.911]
+   kinematics check: my palm position against the logged one at contact (cm): median    0.1  p90    0.1  max    0.2  (n=177)
+   the pad normal in the HAND frame against its start-pose value (deg) and the pad centre's offset in the hand frame against the start (cm), by time:
+     t = 0.0 s: normal in hand median   21.4  p90   21.4  max   21.4  (n=177)
+     t = 0.1 s: normal in hand median   43.0  p90   46.5  max   48.7  (n=177)
+     t = 0.2 s: normal in hand median   25.1  p90   29.0  max   30.8  (n=177)
+     t = 0.3 s: normal in hand median   14.8  p90   20.2  max   25.7  (n=177)
+     t = 0.4 s: normal in hand median   15.5  p90   19.5  max   29.2  (n=177)
+   the grip after it has settled (the paddle swings ~20 deg in the hand in the first 0.1 s, before the fingers close: rows above): rotation of the pad normal IN THE HAND FRAME and shift of the pad centre in the hand frame before contact, by side
+   forehand t_contact - 200 ms -> contact: normal turns median    8.1  p90    9.2  max   11.6  (n=91);  pad centre shifts (cm) median 3.3 p90 4.6
+   forehand t_contact - 100 ms -> contact: normal turns median    3.4  p90    4.2  max    4.7  (n=91);  pad centre shifts (cm) median 1.4 p90 2.1
+   forehand t_contact -  50 ms -> contact: normal turns median    1.4  p90    2.2  max    3.5  (n=91);  pad centre shifts (cm) median 0.6 p90 1.0
+   backhand t_contact - 200 ms -> contact: normal turns median   12.2  p90   23.4  max   29.9  (n=86);  pad centre shifts (cm) median 3.4 p90 4.5
+   backhand t_contact - 100 ms -> contact: normal turns median    8.4  p90   11.7  max   13.3  (n=86);  pad centre shifts (cm) median 2.0 p90 2.6
+   backhand t_contact -  50 ms -> contact: normal turns median    4.8  p90    7.4  max    9.7  (n=86);  pad centre shifts (cm) median 1.0 p90 1.8
+   all      t_contact - 200 ms -> contact: normal turns median    8.9  p90   17.7  max   29.9  (n=177);  pad centre shifts (cm) median 3.3 p90 4.6
+   all      t_contact - 100 ms -> contact: normal turns median    4.2  p90   11.0  max   13.3  (n=177);  pad centre shifts (cm) median 1.6 p90 2.4
+   all      t_contact -  50 ms -> contact: normal turns median    2.2  p90    6.6  max    9.7  (n=177);  pad centre shifts (cm) median 0.8 p90 1.5
+== 4. which joints can steer the plane (lever = |joint axis x LOGGED normal|: rad of normal per rad of joint; 1 = the joint swings the face, 0 = it only spins the face about its own normal)
+-- forehand: lever and the joint's own contribution to the normal's turning at contact (deg/s = lever x joint speed)
+   elv_angle       lever median 0.97 (p10 0.94, p90 0.99)   turning contribution median  117.3 deg/s  p90  163.1
+   shoulder_elv    lever median 0.76 (p10 0.65, p90 0.89)   turning contribution median   31.0 deg/s  p90   84.5
+   shoulder_rot    lever median 1.00 (p10 0.99, p90 1.00)   turning contribution median   27.4 deg/s  p90   53.6
+   elbow_flexion   lever median 0.64 (p10 0.60, p90 0.69)   turning contribution median   19.8 deg/s  p90   36.7
+   pro_sup         lever median 0.86 (p10 0.82, p90 0.92)   turning contribution median   11.5 deg/s  p90   53.5
+   deviation       lever median 0.83 (p10 0.81, p90 0.85)   turning contribution median    6.1 deg/s  p90   32.6
+   flexion         lever median 0.73 (p10 0.68, p90 0.75)   turning contribution median   18.4 deg/s  p90   44.3
+   axial_rotation  lever median 0.97 (p10 0.94, p90 1.00)   turning contribution median    9.7 deg/s  p90   24.8
+   flex_extension  lever median 0.98 (p10 0.95, p90 1.00)   turning contribution median   44.4 deg/s  p90   55.5
+   lat_bending     lever median 0.30 (p10 0.13, p90 0.47)   turning contribution median    6.8 deg/s  p90   13.2
+-- backhand: lever and the joint's own contribution to the normal's turning at contact (deg/s = lever x joint speed)
+   elv_angle       lever median 0.97 (p10 0.81, p90 1.00)   turning contribution median   34.4 deg/s  p90   55.6
+   shoulder_elv    lever median 0.69 (p10 0.61, p90 0.87)   turning contribution median   89.8 deg/s  p90  140.5
+   shoulder_rot    lever median 0.99 (p10 0.93, p90 1.00)   turning contribution median   70.6 deg/s  p90  112.3
+   elbow_flexion   lever median 0.54 (p10 0.42, p90 0.60)   turning contribution median   10.3 deg/s  p90   19.4
+   pro_sup         lever median 0.87 (p10 0.83, p90 0.91)   turning contribution median   40.4 deg/s  p90   73.1
+   deviation       lever median 0.67 (p10 0.41, p90 0.78)   turning contribution median   12.6 deg/s  p90   47.8
+   flexion         lever median 0.85 (p10 0.77, p90 0.99)   turning contribution median   64.0 deg/s  p90  228.0
+   axial_rotation  lever median 0.99 (p10 0.92, p90 1.00)   turning contribution median   41.3 deg/s  p90   51.0
+   flex_extension  lever median 0.98 (p10 0.95, p90 1.00)   turning contribution median   19.3 deg/s  p90   36.4
+   lat_bending     lever median 0.23 (p10 0.12, p90 0.46)   turning contribution median    6.8 deg/s  p90   18.0
+(the contributions are upper bounds that ignore cancellation between joints; the net turning rate is in section 1)

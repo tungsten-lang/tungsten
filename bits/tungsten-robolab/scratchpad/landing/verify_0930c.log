@@ -1,0 +1,20 @@
+== build myo_tt Wed Sep 30 05:20:27 EDT 2026
+
+Built /Users/erik/rl-verify-0930/bits/tungsten-robolab/bin/robolab_myo_tt
+exit 0
+5448848 bin/robolab_myo_tt
+== tt_fast check (TT_ENV=P2) Wed Sep 30 05:23:58 EDT 2026
+MyoSuite:> Registering Myo Envs
+    MyoSuite: A contact-rich simulation suite for musculoskeletal motor control
+        Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, Vikash Kumar
+        L4DC-2019 | https://sites.google.com/view/myosuite
+    
+98000 solved 0.0 IDENTICAL
+98001 solved 0.0 IDENTICAL
+98002 solved 0.0 IDENTICAL
+98003 solved 0.0 IDENTICAL
+98004 solved 0.0 IDENTICAL
+98005 solved 0.0 IDENTICAL
+standard 9.8s, fast 5.2s for 6 episodes; 0 differ
+exit 0
+== done Wed Sep 30 05:24:13 EDT 2026

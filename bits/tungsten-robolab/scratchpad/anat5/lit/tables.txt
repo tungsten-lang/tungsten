@@ -1,0 +1,644 @@
+====================================================================================================
+MODEL gait2392 - gait2392 (Delp et al. 1990 lineage; OpenSim 4.0 file, Thelen2003Muscle)
+Fmax (N): {'sar_r': 156, 'tfl_r': 233, 'pect_r': 266, 'iliacus_r': 1073, 'psoas_r': 1113, 'rect_fem_r': 1169, 'vas_med_r': 1294, 'vas_int_r': 1365, 'vas_lat_r': 1871}
+
+HIP FLEXION capacity shares [%] (isometric), knee flexion 0 deg; hip angle across; total in N m
+  group                     -20        0       20       40       60
+  TOTAL Nm                175.1    186.2    200.3    201.5    198.3
+  iliopsoas                42.3     45.7     46.2     46.4     48.6
+  rf                       20.1     26.7     29.7     31.3     29.8
+  sartorius                 2.1      3.8      5.0      5.9      6.5
+  tfl                       2.4      4.3      5.8      7.4      8.9
+  pectineus                 3.3      3.3      2.9      2.2      1.2
+  adductors_gracilis       25.1     15.2     10.2      6.0      1.2
+  glut_med_min              0.0      0.0      0.2      0.7      3.8
+  other                     4.7      1.0      0.0      0.0      0.0
+  share among principal-6 (iliopsoas, rf, sar, tfl, pect):
+  iliopsoas                60.3     54.5     51.6     49.7     51.2
+  rf                       28.6     31.8     33.2     33.6     31.4
+
+HIP FLEXION capacity shares [%] (isometric), knee flexion 30 deg; hip angle across; total in N m
+  group                     -20        0       20       40       60
+  TOTAL Nm                174.5    185.9    200.0    201.5    198.7
+  iliopsoas                42.5     45.8     46.3     46.4     48.6
+  rf                       19.6     26.4     29.6     31.3     29.9
+  sartorius                 2.1      3.8      5.0      5.9      6.5
+  tfl                       2.4      4.3      5.8      7.4      8.9
+  pectineus                 3.3      3.3      2.9      2.2      1.2
+  adductors_gracilis       25.3     15.3     10.2      6.0      1.2
+  glut_med_min              0.0      0.0      0.2      0.7      3.8
+  other                     4.7      1.0      0.0      0.0      0.0
+  share among principal-6 (iliopsoas, rf, sar, tfl, pect):
+  iliopsoas                60.7     54.7     51.7     49.7     51.1
+  rf                       28.1     31.6     33.1     33.6     31.5
+
+HIP FLEXION capacity shares [%] (isometric), knee flexion 60 deg; hip angle across; total in N m
+  group                     -20        0       20       40       60
+  TOTAL Nm                173.7    185.4    199.6    201.5    199.1
+  iliopsoas                42.7     45.9     46.4     46.4     48.5
+  rf                       19.1     26.1     29.5     31.3     30.1
+  sartorius                 2.1      3.8      5.0      6.0      6.5
+  tfl                       2.4      4.3      5.9      7.4      8.9
+  pectineus                 3.3      3.3      2.9      2.2      1.2
+  adductors_gracilis       25.6     15.5     10.2      6.0      1.2
+  glut_med_min              0.0      0.0      0.2      0.7      3.8
+  other                     4.8      1.0      0.0      0.0      0.0
+  share among principal-6 (iliopsoas, rf, sar, tfl, pect):
+  iliopsoas                61.3     55.0     51.8     49.7     51.0
+  rf                       27.5     31.3     32.9     33.6     31.6
+
+HIP FLEXION capacity shares [%] (isometric), knee flexion 90 deg; hip angle across; total in N m
+  group                     -20        0       20       40       60
+  TOTAL Nm                172.5    184.4    199.0    201.4    199.6
+  iliopsoas                43.0     46.2     46.5     46.4     48.3
+  rf                       18.6     25.7     29.3     31.3     30.3
+  sartorius                 2.1      3.8      5.0      6.0      6.5
+  tfl                       2.4      4.4      5.9      7.4      8.9
+  pectineus                 3.4      3.3      2.9      2.2      1.2
+  adductors_gracilis       25.8     15.6     10.3      6.0      1.2
+  glut_med_min              0.0      0.0      0.2      0.7      3.8
+  other                     4.8      1.0      0.0      0.0      0.0
+  share among principal-6 (iliopsoas, rf, sar, tfl, pect):
+  iliopsoas                61.9     55.4     52.0     49.7     50.8
+  rf                       26.8     30.8     32.7     33.6     31.8
+
+HIP FLEXION capacity shares [%] (isometric), knee flexion 120 deg; hip angle across; total in N m
+  group                     -20        0       20       40       60
+  TOTAL Nm                172.4    184.2    199.0    201.4    199.6
+  iliopsoas                43.0     46.2     46.5     46.4     48.3
+  rf                       18.6     25.7     29.3     31.3     30.3
+  sartorius                 2.1      3.8      5.0      6.0      6.5
+  tfl                       2.4      4.4      5.9      7.4      8.9
+  pectineus                 3.4      3.3      2.9      2.2      1.2
+  adductors_gracilis       25.7     15.5     10.3      6.0      1.2
+  glut_med_min              0.0      0.0      0.2      0.7      3.8
+  other                     4.8      1.0      0.0      0.0      0.0
+  share among principal-6 (iliopsoas, rf, sar, tfl, pect):
+  iliopsoas                61.9     55.4     52.0     49.7     50.8
+  rf                       26.8     30.8     32.7     33.6     31.8
+
+HIP FLEXION capacity shares [%] (fl_weighted), knee flexion 0 deg; hip angle across; total in N m
+  group                     -20        0       20       40       60
+  TOTAL Nm                165.7    179.7    184.4    162.6    129.5
+  iliopsoas                41.7     47.0     49.2     50.4     52.9
+  rf                       21.2     26.8     27.8     26.2     21.6
+  sartorius                 2.2      3.8      5.2      6.9      8.8
+  tfl                       2.2      4.2      6.3      8.4      8.6
+  pectineus                 3.2      2.8      2.3      1.8      1.1
+  adductors_gracilis       24.7     14.2      9.0      5.4      1.3
+  glut_med_min              0.0      0.0      0.2      0.9      5.7
+  other                     4.9      1.0      0.0      0.0      0.0
+  share among principal-6 (iliopsoas, rf, sar, tfl, pect):
+  iliopsoas                59.2     55.5     54.2     53.8     56.9
+  rf                       30.1     31.7     30.7     28.0     23.3
+
+HIP FLEXION capacity shares [%] (fl_weighted), knee flexion 30 deg; hip angle across; total in N m
+  group                     -20        0       20       40       60
+  TOTAL Nm                161.2    179.1    192.0    178.7    147.8
+  iliopsoas                42.9     47.2     47.2     45.9     46.3
+  rf                       19.1     26.7     30.8     32.5     30.4
+  sartorius                 2.2      3.8      4.9      6.2      7.7
+  tfl                       2.0      4.0      6.0      8.0      8.5
+  pectineus                 3.3      2.8      2.2      1.6      0.9
+  adductors_gracilis       25.4     14.4      8.6      4.9      1.1
+  glut_med_min              0.0      0.0      0.2      0.8      5.0
+  other                     5.1      1.0      0.0      0.0      0.0
+  share among principal-6 (iliopsoas, rf, sar, tfl, pect):
+  iliopsoas                61.7     55.8     51.8     48.7     49.4
+  rf                       27.5     31.6     33.8     34.5     32.4
+
+HIP FLEXION capacity shares [%] (fl_weighted), knee flexion 60 deg; hip angle across; total in N m
+  group                     -20        0       20       40       60
+  TOTAL Nm                152.5    169.7    187.5    183.9    160.7
+  iliopsoas                45.3     49.8     48.4     44.6     42.6
+  rf                       14.6     22.8     29.3     34.3     35.5
+  sartorius                 2.3      4.0      5.0      6.0      7.0
+  tfl                       2.0      4.0      6.0      8.0      8.4
+  pectineus                 3.4      3.0      2.3      1.6      0.8
+  adductors_gracilis       26.9     15.3      8.9      4.8      1.0
+  glut_med_min              0.0      0.0      0.2      0.8      4.6
+  other                     5.3      1.0      0.0      0.0      0.0
+  share among principal-6 (iliopsoas, rf, sar, tfl, pect):
+  iliopsoas                67.0     59.6     53.2     47.2     45.1
+  rf                       21.5     27.2     32.2     36.3     37.6
+
+HIP FLEXION capacity shares [%] (fl_weighted), knee flexion 90 deg; hip angle across; total in N m
+  group                     -20        0       20       40       60
+  TOTAL Nm                145.5    160.0    178.2    180.0    164.3
+  iliopsoas                47.5     52.9     50.9     45.5     41.7
+  rf                       10.7     18.3     25.8     32.9     36.7
+  sartorius                 2.4      4.2      5.2      6.0      6.7
+  tfl                       2.0      4.1      6.2      8.2      8.6
+  pectineus                 3.6      3.2      2.4      1.6      0.8
+  adductors_gracilis       28.1     16.3      9.3      4.9      1.0
+  glut_med_min              0.0      0.0      0.2      0.8      4.5
+  other                     5.6      1.1      0.0      0.0      0.0
+  share among principal-6 (iliopsoas, rf, sar, tfl, pect):
+  iliopsoas                71.7     64.0     56.2     48.3     44.1
+  rf                       16.1     22.1     28.5     34.9     38.9
+
+HIP FLEXION capacity shares [%] (fl_weighted), knee flexion 120 deg; hip angle across; total in N m
+  group                     -20        0       20       40       60
+  TOTAL Nm                141.1    153.2    170.4    173.9    162.6
+  iliopsoas                49.0     55.2     53.2     47.1     42.1
+  rf                        8.2     14.9     22.5     30.7     36.1
+  sartorius                 2.5      4.4      5.4      6.1      6.6
+  tfl                       2.0      4.2      6.5      8.5      8.8
+  pectineus                 3.7      3.3      2.5      1.7      0.8
+  adductors_gracilis       28.8     16.8      9.7      5.1      1.0
+  glut_med_min              0.0      0.0      0.2      0.8      4.6
+  other                     5.8      1.2      0.0      0.0      0.0
+  share among principal-6 (iliopsoas, rf, sar, tfl, pect):
+  iliopsoas                74.9     67.3     59.1     50.1     44.6
+  rf                       12.5     18.2     25.0     32.6     38.3
+
+KNEE EXTENSION (isometric), hip 0 deg; knee angle across
+                                    0       30       60       90      120
+  RF Nm                          58.0     58.0     46.5     30.9     22.9
+  vasti Nm                      206.0    203.3    162.6    127.1     99.4
+  other Nm                        3.5      2.4      1.5      0.7      3.1
+  RF/(RF+vasti) %                22.0     22.2     22.2     19.6     18.7
+  RF/(all ext) %                 21.7     22.0     22.1     19.5     18.2
+
+KNEE EXTENSION (isometric), hip 60 deg; knee angle across
+                                    0       30       60       90      120
+  RF Nm                          58.7     58.2     47.1     30.9     22.9
+  vasti Nm                      206.0    203.3    162.6    127.1     99.4
+  other Nm                        3.5      2.4      1.5      0.7      3.0
+  RF/(RF+vasti) %                22.2     22.2     22.5     19.6     18.7
+  RF/(all ext) %                 21.9     22.0     22.3     19.5     18.3
+
+KNEE EXTENSION (fl_weighted), hip 0 deg; knee angle across
+                                    0       30       60       90      120
+  RF Nm                          56.3     56.4     37.1     19.1     11.0
+  vasti Nm                      125.1    185.8    161.8    112.4     71.3
+  other Nm                        3.3      2.2      1.3      0.5      1.4
+  RF/(RF+vasti) %                31.0     23.3     18.7     14.5     13.4
+  RF/(all ext) %                 30.5     23.1     18.6     14.5     13.2
+
+KNEE EXTENSION (fl_weighted), hip 60 deg; knee angle across
+                                    0       30       60       90      120
+  RF Nm                          27.9     44.0     44.9     30.9     22.3
+  vasti Nm                      125.1    185.8    161.8    112.4     71.3
+  other Nm                        2.2      1.7      1.2      0.5      3.0
+  RF/(RF+vasti) %                18.2     19.2     21.7     21.6     23.8
+  RF/(all ext) %                 17.9     19.0     21.6     21.5     23.1
+
+MOMENT ARMS [cm]  (hip flexion arm at knee 90; knee extension arm at hip 0 / hip 60)
+  hip  glut_med1_r    F=   819  arm@hip[-20, 0, 20, 40, 60] =  -1.96  -1.45  -0.83  -0.16   0.53
+  hip  glut_min1_r    F=   270  arm@hip[-20, 0, 20, 40, 60] =  -0.52  -0.20   0.13   0.45   0.74
+  hip  glut_min2_r    F=   285  arm@hip[-20, 0, 20, 40, 60] =  -0.88  -0.60  -0.27   0.08   0.42
+  hip  sar_r          F=   156  arm@hip[-20, 0, 20, 40, 60] =   2.34   4.51   6.36   7.69   8.28
+  hip  add_long_r     F=   627  arm@hip[-20, 0, 20, 40, 60] =   3.92   3.78   3.11   1.92   0.37
+  hip  add_brev_r     F=   429  arm@hip[-20, 0, 20, 40, 60] =   1.69   1.04   0.21  -0.66  -1.41
+  hip  add_mag1_r     F=   381  arm@hip[-20, 0, 20, 40, 60] =   1.74  -0.06  -1.85  -3.17  -3.87
+  hip  add_mag2_r     F=   343  arm@hip[-20, 0, 20, 40, 60] =   0.63  -1.63  -3.51  -4.71  -5.16
+  hip  tfl_r          F=   233  arm@hip[-20, 0, 20, 40, 60] =   1.79   3.46   5.02   6.41   7.59
+  hip  pect_r         F=   266  arm@hip[-20, 0, 20, 40, 60] =   2.19   2.31   2.16   1.67   0.86
+  hip  grac_r         F=   162  arm@hip[-20, 0, 20, 40, 60] =   2.37   0.36  -1.72  -3.50  -4.71
+  hip  iliacus_r      F=  1073  arm@hip[-20, 0, 20, 40, 60] =   3.44   3.94   4.26   4.23   4.46
+  hip  psoas_r        F=  1113  arm@hip[-20, 0, 20, 40, 60] =   3.35   3.85   4.21   4.32   4.37
+  hip  quad_fem_r     F=   381  arm@hip[-20, 0, 20, 40, 60] =   1.97   0.43  -1.25  -2.53  -3.20
+  hip  gem_r          F=   164  arm@hip[-20, 0, 20, 40, 60] =   0.47   0.13  -0.22  -0.54  -0.77
+  hip  rect_fem_r     F=  1169  arm@hip[-20, 0, 20, 40, 60] =   2.74   4.06   4.99   5.39   5.17
+  knee bifemlh_r      F=   896  ext-arm@knee[0, 30, 60, 90, 120] hip0 =  -2.76  -3.47  -3.07  -1.78   0.35 | hip60 =  -2.77  -3.48  -3.07  -1.79   0.33
+  knee sar_r          F=   156  ext-arm@knee[0, 30, 60, 90, 120] hip0 =   0.14  -0.89  -1.60  -2.04  -1.90 | hip60 =   0.14  -0.89  -1.60  -2.04  -1.90
+  knee tfl_r          F=   233  ext-arm@knee[0, 30, 60, 90, 120] hip0 =   1.40   1.04   0.65   0.29  -0.23 | hip60 =   1.40   1.04   0.65   0.29  -0.23
+  knee rect_fem_r     F=  1169  ext-arm@knee[0, 30, 60, 90, 120] hip0 =   4.96   4.96   3.98   2.65   1.96 | hip60 =   5.02   4.98   4.03   2.65   1.96
+  knee vas_med_r      F=  1294  ext-arm@knee[0, 30, 60, 90, 120] hip0 =   4.62   4.41   3.55   2.90   2.32 | hip60 =   4.62   4.41   3.55   2.90   2.32
+  knee vas_int_r      F=  1365  ext-arm@knee[0, 30, 60, 90, 120] hip0 =   4.85   4.47   3.73   2.72   2.12 | hip60 =   4.85   4.47   3.73   2.72   2.12
+  knee vas_lat_r      F=  1871  ext-arm@knee[0, 30, 60, 90, 120] hip0 =   4.27   4.55   3.52   2.80   2.16 | hip60 =   4.27   4.55   3.52   2.80   2.16
+
+fL of RF (hip rows, knee cols) and normalized fibre length:
+  hip -20  lf/lopt= 1.00  1.22  1.43  1.57  1.68  fL= 1.00  0.90  0.67  0.48  0.36
+  hip   0  lf/lopt= 0.88  1.11  1.32  1.47  1.57  fL= 0.97  0.97  0.80  0.62  0.48
+  hip  20  lf/lopt= 0.74  0.97  1.18  1.33  1.43  fL= 0.86  1.00  0.93  0.79  0.66
+  hip  40  lf/lopt= 0.58  0.81  1.02  1.17  1.27  fL= 0.68  0.92  1.00  0.94  0.85
+  hip  60  lf/lopt= 0.42  0.65  0.85  1.00  1.11  fL= 0.47  0.76  0.95  1.00  0.97
+  vas_lat_r (hip 0)  lf/lopt= 0.52  0.80  1.05  1.24  1.40  fL= 0.60  0.91  0.99  0.88  0.70
+====================================================================================================
+MODEL rajagopal2016 - Rajagopal et al. 2016 IEEE TBME (Millard2012EquilibriumMuscle)
+Fmax (N): {'iliacus_r': 1021, 'psoas_r': 1427, 'recfem_r': 2192, 'sart_r': 249, 'tfl_r': 411, 'vasint_r': 1697, 'vaslat_r': 5149, 'vasmed_r': 2748}
+
+HIP FLEXION capacity shares [%] (isometric), knee flexion 0 deg; hip angle across; total in N m
+  group                     -20        0       20       40       60
+  TOTAL Nm                219.6    247.5    269.4    279.2    272.2
+  iliopsoas                31.5     28.2     27.7     29.5     33.6
+  rf                       20.9     30.4     36.2     39.5     40.6
+  sartorius                 1.2      3.0      4.4      5.5      6.4
+  tfl                       1.8      4.5      6.7      8.8     11.1
+  pectineus                 0.0      0.0      0.0      0.0      0.0
+  adductors_gracilis       44.6     33.8     24.9     16.4      6.6
+  glut_med_min              0.0      0.0      0.0      0.3      1.8
+  other                     0.0      0.0      0.0      0.0      0.0
+  share among principal-6 (iliopsoas, rf, sar, tfl, pect):
+  iliopsoas                56.9     42.6     36.9     35.4     36.7
+  rf                       37.8     46.0     48.3     47.4     44.3
+
+HIP FLEXION capacity shares [%] (isometric), knee flexion 30 deg; hip angle across; total in N m
+  group                     -20        0       20       40       60
+  TOTAL Nm                218.7    247.0    268.9    279.0    272.3
+  iliopsoas                31.6     28.2     27.7     29.5     33.6
+  rf                       20.5     30.1     36.1     39.4     40.6
+  sartorius                 1.2      3.1      4.5      5.5      6.4
+  tfl                       1.8      4.5      6.7      8.8     11.1
+  pectineus                 0.0      0.0      0.0      0.0      0.0
+  adductors_gracilis       44.9     34.1     25.0     16.4      6.6
+  glut_med_min              0.0      0.0      0.0      0.3      1.8
+  other                     0.0      0.0      0.0      0.0      0.0
+  share among principal-6 (iliopsoas, rf, sar, tfl, pect):
+  iliopsoas                57.5     42.8     36.9     35.4     36.6
+  rf                       37.1     45.7     48.1     47.4     44.3
+
+HIP FLEXION capacity shares [%] (isometric), knee flexion 60 deg; hip angle across; total in N m
+  group                     -20        0       20       40       60
+  TOTAL Nm                217.6    246.3    268.3    278.8    272.6
+  iliopsoas                31.8     28.3     27.8     29.5     33.5
+  rf                       19.9     29.8     36.0     39.4     40.7
+  sartorius                 1.2      3.1      4.5      5.5      6.4
+  tfl                       1.8      4.5      6.8      8.8     11.0
+  pectineus                 0.0      0.0      0.0      0.0      0.0
+  adductors_gracilis       45.3     34.3     25.0     16.5      6.6
+  glut_med_min              0.0      0.0      0.0      0.3      1.8
+  other                     0.0      0.0      0.0      0.0      0.0
+  share among principal-6 (iliopsoas, rf, sar, tfl, pect):
+  iliopsoas                58.2     43.1     37.1     35.5     36.6
+  rf                       36.4     45.3     48.0     47.3     44.4
+
+HIP FLEXION capacity shares [%] (isometric), knee flexion 90 deg; hip angle across; total in N m
+  group                     -20        0       20       40       60
+  TOTAL Nm                214.5    243.9    266.6    278.1    273.0
+  iliopsoas                32.3     28.6     28.0     29.6     33.5
+  rf                       18.7     29.0     35.6     39.2     40.8
+  sartorius                 1.2      3.1      4.5      5.5      6.4
+  tfl                       1.8      4.6      6.8      8.8     11.0
+  pectineus                 0.0      0.0      0.0      0.0      0.0
+  adductors_gracilis       46.0     34.7     25.2     16.5      6.6
+  glut_med_min              0.0      0.0      0.0      0.3      1.8
+  other                     0.0      0.0      0.0      0.0      0.0
+  share among principal-6 (iliopsoas, rf, sar, tfl, pect):
+  iliopsoas                59.7     43.8     37.4     35.6     36.5
+  rf                       34.7     44.4     47.5     47.2     44.5
+
+HIP FLEXION capacity shares [%] (isometric), knee flexion 120 deg; hip angle across; total in N m
+  group                     -20        0       20       40       60
+  TOTAL Nm                213.4    242.5    265.9    277.8    273.2
+  iliopsoas                32.4     28.8     28.0     29.6     33.5
+  rf                       18.5     28.9     35.4     39.2     40.8
+  sartorius                 1.2      3.1      4.5      5.6      6.4
+  tfl                       1.8      4.6      6.8      8.8     11.0
+  pectineus                 0.0      0.0      0.0      0.0      0.0
+  adductors_gracilis       46.0     34.7     25.3     16.5      6.6
+  glut_med_min              0.0      0.0      0.0      0.3      1.8
+  other                     0.0      0.0      0.0      0.0      0.0
+  share among principal-6 (iliopsoas, rf, sar, tfl, pect):
+  iliopsoas                60.1     44.0     37.5     35.6     36.5
+  rf                       34.3     44.2     47.3     47.1     44.5
+
+HIP FLEXION capacity shares [%] (fl_weighted), knee flexion 0 deg; hip angle across; total in N m
+  group                     -20        0       20       40       60
+  TOTAL Nm                206.7    240.1    246.9    219.3    173.1
+  iliopsoas                30.8     28.3     30.1     36.6     48.1
+  rf                       22.3     30.1     31.9     27.9     21.1
+  sartorius                 1.2      3.0      4.7      7.0     10.1
+  tfl                       1.9      4.7      7.2      9.3      9.3
+  pectineus                 0.0      0.0      0.0      0.0      0.0
+  adductors_gracilis       43.9     33.9     26.1     18.8      8.7
+  glut_med_min              0.0      0.0      0.0      0.4      2.8
+  other                     0.0      0.0      0.0      0.0      0.0
+  share among principal-6 (iliopsoas, rf, sar, tfl, pect):
+  iliopsoas                54.9     42.9     40.7     45.3     54.3
+  rf                       39.7     45.5     43.2     34.5     23.8
+
+HIP FLEXION capacity shares [%] (fl_weighted), knee flexion 30 deg; hip angle across; total in N m
+  group                     -20        0       20       40       60
+  TOTAL Nm                197.6    237.3    265.7    260.3    213.3
+  iliopsoas                32.2     28.7     27.9     30.9     39.0
+  rf                       18.4     29.1     36.5     38.4     34.4
+  sartorius                 1.2      3.1      4.4      5.9      8.2
+  tfl                       1.8      4.6      6.8      8.6      9.1
+  pectineus                 0.0      0.0      0.0      0.0      0.0
+  adductors_gracilis       46.3     34.6     24.3     15.9      7.0
+  glut_med_min              0.0      0.0      0.0      0.3      2.2
+  other                     0.0      0.0      0.0      0.0      0.0
+  share among principal-6 (iliopsoas, rf, sar, tfl, pect):
+  iliopsoas                60.0     43.8     36.9     36.8     43.0
+  rf                       34.2     44.5     48.2     45.8     37.9
+
+HIP FLEXION capacity shares [%] (fl_weighted), knee flexion 60 deg; hip angle across; total in N m
+  group                     -20        0       20       40       60
+  TOTAL Nm                181.5    213.0    248.1    269.7    247.9
+  iliopsoas                35.1     31.9     29.9     29.8     33.6
+  rf                       10.9     20.9     32.0     40.1     42.6
+  sartorius                 1.4      3.5      4.8      5.7      7.0
+  tfl                       1.9      4.9      7.3      8.7      8.8
+  pectineus                 0.0      0.0      0.0      0.0      0.0
+  adductors_gracilis       50.8     38.8     26.0     15.3      6.1
+  glut_med_min              0.0      0.0      0.0      0.3      1.9
+  other                     0.0      0.0      0.0      0.0      0.0
+  share among principal-6 (iliopsoas, rf, sar, tfl, pect):
+  iliopsoas                71.3     52.2     40.4     35.3     36.5
+  rf                       22.1     34.2     43.3     47.6     46.3
+
+HIP FLEXION capacity shares [%] (fl_weighted), knee flexion 90 deg; hip angle across; total in N m
+  group                     -20        0       20       40       60
+  TOTAL Nm                171.2    192.7    221.0    250.9    253.2
+  iliopsoas                37.2     35.3     33.6     32.0     32.9
+  rf                        5.5     12.8     23.7     35.5     43.4
+  sartorius                 1.5      3.9      5.4      6.1      6.7
+  tfl                       1.9      5.2      8.1      9.6      9.1
+  pectineus                 0.0      0.0      0.0      0.0      0.0
+  adductors_gracilis       53.9     42.8     29.2     16.5      5.9
+  glut_med_min              0.0      0.0      0.0      0.4      1.9
+  other                     0.0      0.0      0.0      0.0      0.0
+  share among principal-6 (iliopsoas, rf, sar, tfl, pect):
+  iliopsoas                80.6     61.7     47.5     38.5     35.7
+  rf                       12.0     22.3     33.5     42.7     47.1
+
+HIP FLEXION capacity shares [%] (fl_weighted), knee flexion 120 deg; hip angle across; total in N m
+  group                     -20        0       20       40       60
+  TOTAL Nm                166.1    181.7    202.9    229.9    242.4
+  iliopsoas                38.3     37.4     36.6     34.9     34.3
+  rf                        3.1      7.9     17.1     29.7     41.0
+  sartorius                 1.5      4.1      5.9      6.5      6.8
+  tfl                       1.9      5.4      8.7     10.5      9.8
+  pectineus                 0.0      0.0      0.0      0.0      0.0
+  adductors_gracilis       55.1     45.0     31.8     18.0      6.2
+  glut_med_min              0.0      0.0      0.0      0.4      2.0
+  other                     0.0      0.0      0.0      0.0      0.0
+  share among principal-6 (iliopsoas, rf, sar, tfl, pect):
+  iliopsoas                85.4     68.1     53.6     42.8     37.4
+  rf                        6.9     14.4     25.0     36.4     44.6
+
+KNEE EXTENSION (isometric), hip 0 deg; knee angle across
+                                    0       30       60       90      120
+  RF Nm                         106.2    100.5     86.0     51.6     58.5
+  vasti Nm                      421.9    400.3    321.1    192.4    244.8
+  other Nm                        6.8      5.9      3.8      1.7      0.6
+  RF/(RF+vasti) %                20.1     20.1     21.1     21.1     19.3
+  RF/(all ext) %                 19.8     19.8     20.9     21.0     19.3
+
+KNEE EXTENSION (isometric), hip 60 deg; knee angle across
+                                    0       30       60       90      120
+  RF Nm                         108.5    100.6     87.5     54.5     58.5
+  vasti Nm                      421.9    400.3    321.1    192.4    244.8
+  other Nm                        6.8      5.9      3.8      1.7      0.6
+  RF/(RF+vasti) %                20.4     20.1     21.4     22.1     19.3
+  RF/(all ext) %                 20.2     19.9     21.2     21.9     19.3
+
+KNEE EXTENSION (fl_weighted), hip 0 deg; knee angle across
+                                    0       30       60       90      120
+  RF Nm                         101.9     93.3     52.3     17.9     12.1
+  vasti Nm                      389.0    399.5    287.9    144.7    150.4
+  other Nm                        6.8      5.7      3.5      1.5      0.6
+  RF/(RF+vasti) %                20.8     18.9     15.4     11.0      7.4
+  RF/(all ext) %                 20.5     18.7     15.2     10.9      7.4
+
+KNEE EXTENSION (fl_weighted), hip 60 deg; knee angle across
+                                    0       30       60       90      120
+  RF Nm                          35.9     66.8     83.4     53.9     52.2
+  vasti Nm                      389.0    399.5    287.9    144.7    150.4
+  other Nm                        3.7      3.8      2.7      1.3      0.5
+  RF/(RF+vasti) %                 8.4     14.3     22.5     27.1     25.7
+  RF/(all ext) %                  8.4     14.2     22.3     26.9     25.7
+
+MOMENT ARMS [cm]  (hip flexion arm at knee 90; knee extension arm at hip 0 / hip 60)
+  hip  addbrev_r      F=   626  arm@hip[-20, 0, 20, 40, 60] =   3.16   3.19   2.79   1.89   0.59
+  hip  addlong_r      F=   917  arm@hip[-20, 0, 20, 40, 60] =   4.56   4.75   4.35   3.26   1.55
+  hip  addmagMid_r    F=   597  arm@hip[-20, 0, 20, 40, 60] =   2.09   0.46  -1.27  -2.66  -3.50
+  hip  addmagProx_r   F=   597  arm@hip[-20, 0, 20, 40, 60] =   2.51   2.27   1.65   0.70  -0.38
+  hip  glmed1_r       F=  1093  arm@hip[-20, 0, 20, 40, 60] =  -2.18  -1.75  -1.18  -0.52   0.16
+  hip  glmin1_r       F=   374  arm@hip[-20, 0, 20, 40, 60] =  -0.74  -0.44  -0.10   0.24   0.57
+  hip  glmin2_r       F=   395  arm@hip[-20, 0, 20, 40, 60] =  -1.06  -0.81  -0.49  -0.14   0.23
+  hip  grac_r         F=   281  arm@hip[-20, 0, 20, 40, 60] =   3.41   1.67  -0.36  -2.33  -3.90
+  hip  iliacus_r      F=  1021  arm@hip[-20, 0, 20, 40, 60] =   3.41   3.46   3.64   3.88   4.29
+  hip  psoas_r        F=  1427  arm@hip[-20, 0, 20, 40, 60] =   2.41   2.41   2.62   2.99   3.34
+  hip  recfem_r       F=  2192  arm@hip[-20, 0, 20, 40, 60] =   1.83   3.23   4.32   4.98   5.08
+  hip  sart_r         F=   249  arm@hip[-20, 0, 20, 40, 60] =   1.02   3.03   4.80   6.19   7.00
+  hip  tfl_r          F=   411  arm@hip[-20, 0, 20, 40, 60] =   0.95   2.72   4.41   5.96   7.32
+  knee recfem_r       F=  2192  ext-arm@knee[0, 30, 60, 90, 120] hip0 =   4.84   4.59   3.92   2.35   2.67 | hip60 =   4.95   4.59   3.99   2.49   2.67
+  knee tfl_r          F=   411  ext-arm@knee[0, 30, 60, 90, 120] hip0 =   1.66   1.43   0.92   0.42   0.16 | hip60 =   1.66   1.43   0.92   0.42   0.16
+  knee vasint_r       F=  1697  ext-arm@knee[0, 30, 60, 90, 120] hip0 =   4.65   4.12   3.50   2.15   2.62 | hip60 =   4.65   4.12   3.50   2.15   2.62
+  knee vaslat_r       F=  5149  ext-arm@knee[0, 30, 60, 90, 120] hip0 =   4.26   4.28   3.34   2.02   2.58 | hip60 =   4.26   4.28   3.34   2.02   2.58
+  knee vasmed_r       F=  2748  ext-arm@knee[0, 30, 60, 90, 120] hip0 =   4.51   4.00   3.27   1.90   2.45 | hip60 =   4.51   4.00   3.27   1.90   2.45
+
+fL of RF (hip rows, knee cols) and normalized fibre length:
+  hip -20  lf/lopt= 0.99  1.31  1.60  1.81  1.96  fL= 1.00  0.81  0.46  0.24  0.13
+  hip   0  lf/lopt= 0.86  1.18  1.47  1.69  1.84  fL= 0.96  0.93  0.61  0.35  0.21
+  hip  20  lf/lopt= 0.69  1.00  1.30  1.52  1.67  fL= 0.81  1.00  0.82  0.55  0.37
+  hip  40  lf/lopt= 0.49  0.79  1.08  1.30  1.46  fL= 0.55  0.91  0.99  0.82  0.63
+  hip  60  lf/lopt= 0.29  0.57  0.85  1.07  1.23  fL= 0.33  0.66  0.95  0.99  0.89
+  vaslat_r (hip 0)  lf/lopt= 0.80  1.02  1.21  1.35  1.46  fL= 0.91  1.00  0.90  0.77  0.63
+====================================================================================================
+MODEL rajagopal_lai_uhlrich2023 - Rajagopal model as modified by Lai/Uhlrich (2023 release, Millard2012EquilibriumMuscle)
+Fmax (N): {'iliacus_r': 1021, 'psoas_r': 1427, 'recfem_r': 2192, 'sart_r': 249, 'tfl_r': 411, 'vasint_r': 1697, 'vaslat_r': 5149, 'vasmed_r': 2748}
+
+HIP FLEXION capacity shares [%] (isometric), knee flexion 0 deg; hip angle across; total in N m
+  group                     -20        0       20       40       60
+  TOTAL Nm                223.7    253.9    278.0    290.4    286.7
+  iliopsoas                30.9     27.5     26.8     28.3     31.9
+  rf                       20.6     29.6     35.1     38.0     38.5
+  sartorius                 1.1      3.0      4.3      5.3      6.1
+  tfl                       3.0      5.3      7.2      8.9     10.8
+  pectineus                 0.0      0.0      0.0      0.0      0.0
+  adductors_gracilis       43.7     32.9     24.2     15.8      6.3
+  glut_med_min              0.7      1.7      2.4      3.6      6.4
+  other                     0.0      0.0      0.0      0.0      0.0
+  share among principal-6 (iliopsoas, rf, sar, tfl, pect):
+  iliopsoas                55.6     42.0     36.5     35.2     36.5
+  rf                       37.0     45.3     47.8     47.1     44.1
+
+HIP FLEXION capacity shares [%] (isometric), knee flexion 30 deg; hip angle across; total in N m
+  group                     -20        0       20       40       60
+  TOTAL Nm                222.7    253.4    277.5    290.2    286.9
+  iliopsoas                31.1     27.5     26.9     28.3     31.9
+  rf                       20.1     29.3     35.0     37.9     38.5
+  sartorius                 1.1      3.0      4.3      5.3      6.1
+  tfl                       3.0      5.3      7.2      9.0     10.8
+  pectineus                 0.0      0.0      0.0      0.0      0.0
+  adductors_gracilis       44.1     33.1     24.2     15.8      6.2
+  glut_med_min              0.7      1.7      2.4      3.6      6.4
+  other                     0.0      0.0      0.0      0.0      0.0
+  share among principal-6 (iliopsoas, rf, sar, tfl, pect):
+  iliopsoas                56.2     42.2     36.6     35.2     36.5
+  rf                       36.3     45.0     47.7     47.1     44.1
+
+HIP FLEXION capacity shares [%] (isometric), knee flexion 60 deg; hip angle across; total in N m
+  group                     -20        0       20       40       60
+  TOTAL Nm                221.6    252.8    276.8    290.0    287.1
+  iliopsoas                31.2     27.6     26.9     28.4     31.8
+  rf                       19.5     29.0     34.8     37.9     38.6
+  sartorius                 1.2      3.0      4.3      5.3      6.1
+  tfl                       3.0      5.4      7.3      9.0     10.8
+  pectineus                 0.0      0.0      0.0      0.0      0.0
+  adductors_gracilis       44.4     33.4     24.3     15.8      6.2
+  glut_med_min              0.7      1.7      2.4      3.6      6.4
+  other                     0.0      0.0      0.0      0.0      0.0
+  share among principal-6 (iliopsoas, rf, sar, tfl, pect):
+  iliopsoas                56.9     42.5     36.7     35.2     36.5
+  rf                       35.6     44.7     47.5     47.0     44.2
+
+HIP FLEXION capacity shares [%] (isometric), knee flexion 90 deg; hip angle across; total in N m
+  group                     -20        0       20       40       60
+  TOTAL Nm                218.6    250.4    275.2    289.3    287.6
+  iliopsoas                31.7     27.9     27.1     28.4     31.8
+  rf                       18.4     28.3     34.4     37.7     38.7
+  sartorius                 1.2      3.0      4.4      5.3      6.1
+  tfl                       3.0      5.4      7.3      9.0     10.8
+  pectineus                 0.0      0.0      0.0      0.0      0.0
+  adductors_gracilis       45.1     33.8     24.4     15.9      6.2
+  glut_med_min              0.7      1.7      2.4      3.7      6.4
+  other                     0.0      0.0      0.0      0.0      0.0
+  share among principal-6 (iliopsoas, rf, sar, tfl, pect):
+  iliopsoas                58.4     43.1     37.0     35.3     36.4
+  rf                       33.9     43.8     47.1     46.9     44.3
+
+HIP FLEXION capacity shares [%] (isometric), knee flexion 120 deg; hip angle across; total in N m
+  group                     -20        0       20       40       60
+  TOTAL Nm                217.7    249.2    274.4    288.9    287.7
+  iliopsoas                31.8     28.0     27.2     28.5     31.8
+  rf                       18.1     28.1     34.3     37.7     38.7
+  sartorius                 1.2      3.0      4.4      5.3      6.1
+  tfl                       3.0      5.4      7.3      9.0     10.8
+  pectineus                 0.0      0.0      0.0      0.0      0.0
+  adductors_gracilis       45.2     33.8     24.5     15.9      6.2
+  glut_med_min              0.7      1.7      2.4      3.7      6.4
+  other                     0.0      0.0      0.0      0.0      0.0
+  share among principal-6 (iliopsoas, rf, sar, tfl, pect):
+  iliopsoas                58.7     43.4     37.2     35.4     36.4
+  rf                       33.5     43.5     46.9     46.8     44.3
+
+HIP FLEXION capacity shares [%] (fl_weighted), knee flexion 0 deg; hip angle across; total in N m
+  group                     -20        0       20       40       60
+  TOTAL Nm                210.4    245.7    253.5    227.3    184.0
+  iliopsoas                30.3     27.7     29.3     35.3     45.3
+  rf                       21.8     29.1     30.3     26.0     19.1
+  sartorius                 1.1      2.9      4.6      6.7      9.5
+  tfl                       3.0      5.5      7.8      9.2      8.2
+  pectineus                 0.0      0.0      0.0      0.0      0.0
+  adductors_gracilis       43.1     33.1     25.4     18.2      8.2
+  glut_med_min              0.7      1.7      2.6      4.6      9.7
+  other                     0.0      0.0      0.0      0.0      0.0
+  share among principal-6 (iliopsoas, rf, sar, tfl, pect):
+  iliopsoas                53.8     42.5     40.7     45.7     55.1
+  rf                       38.8     44.6     42.2     33.6     23.3
+
+HIP FLEXION capacity shares [%] (fl_weighted), knee flexion 30 deg; hip angle across; total in N m
+  group                     -20        0       20       40       60
+  TOTAL Nm                202.3    244.8    274.2    268.2    222.1
+  iliopsoas                31.5     27.8     27.1     30.0     37.5
+  rf                       18.6     28.8     35.4     36.3     31.5
+  sartorius                 1.2      3.0      4.3      5.7      7.9
+  tfl                       2.9      5.3      7.3      8.7      8.4
+  pectineus                 0.0      0.0      0.0      0.0      0.0
+  adductors_gracilis       45.1     33.4     23.5     15.4      6.8
+  glut_med_min              0.7      1.7      2.4      3.9      8.0
+  other                     0.0      0.0      0.0      0.0      0.0
+  share among principal-6 (iliopsoas, rf, sar, tfl, pect):
+  iliopsoas                58.1     42.9     36.6     37.1     44.0
+  rf                       34.3     44.4     47.8     45.0     36.9
+
+HIP FLEXION capacity shares [%] (fl_weighted), knee flexion 60 deg; hip angle across; total in N m
+  group                     -20        0       20       40       60
+  TOTAL Nm                185.8    220.7    258.6    281.3    259.5
+  iliopsoas                34.3     30.8     28.7     28.6     32.1
+  rf                       11.2     21.1     31.5     38.7     40.1
+  sartorius                 1.3      3.4      4.6      5.5      6.7
+  tfl                       2.8      5.5      7.7      8.9      8.4
+  pectineus                 0.0      0.0      0.0      0.0      0.0
+  adductors_gracilis       49.5     37.3     24.9     14.7      5.8
+  glut_med_min              0.8      1.9      2.5      3.7      6.9
+  other                     0.0      0.0      0.0      0.0      0.0
+  share among principal-6 (iliopsoas, rf, sar, tfl, pect):
+  iliopsoas                69.0     50.7     39.6     35.0     36.7
+  rf                       22.6     34.7     43.5     47.4     45.9
+
+HIP FLEXION capacity shares [%] (fl_weighted), knee flexion 90 deg; hip angle across; total in N m
+  group                     -20        0       20       40       60
+  TOTAL Nm                174.8    199.4    230.9    263.7    267.6
+  iliopsoas                36.4     34.1     32.2     30.5     31.1
+  rf                        5.7     12.9     23.5     34.4     41.3
+  sartorius                 1.4      3.8      5.2      5.8      6.4
+  tfl                       2.8      5.7      8.4      9.7      8.9
+  pectineus                 0.0      0.0      0.0      0.0      0.0
+  adductors_gracilis       52.8     41.4     27.9     15.7      5.6
+  glut_med_min              0.8      2.1      2.8      3.9      6.7
+  other                     0.0      0.0      0.0      0.0      0.0
+  share among principal-6 (iliopsoas, rf, sar, tfl, pect):
+  iliopsoas                78.5     60.4     46.5     37.9     35.5
+  rf                       12.3     22.9     33.9     42.8     47.1
+
+HIP FLEXION capacity shares [%] (fl_weighted), knee flexion 120 deg; hip angle across; total in N m
+  group                     -20        0       20       40       60
+  TOTAL Nm                170.0    188.7    213.5    244.5    259.0
+  iliopsoas                37.5     36.0     34.8     32.9     32.1
+  rf                        3.3      8.4     17.4     29.3     39.2
+  sartorius                 1.5      4.0      5.6      6.2      6.4
+  tfl                       2.8      5.9      9.0     10.5      9.5
+  pectineus                 0.0      0.0      0.0      0.0      0.0
+  adductors_gracilis       54.1     43.5     30.2     16.9      5.8
+  glut_med_min              0.9      2.2      3.1      4.2      6.9
+  other                     0.0      0.0      0.0      0.0      0.0
+  share among principal-6 (iliopsoas, rf, sar, tfl, pect):
+  iliopsoas                83.1     66.4     52.1     41.7     36.8
+  rf                        7.4     15.4     26.1     37.1     44.9
+
+KNEE EXTENSION (isometric), hip 0 deg; knee angle across
+                                    0       30       60       90      120
+  RF Nm                          97.5    101.2     88.1     52.7     49.7
+  vasti Nm                      384.2    403.6    330.6    189.4    200.5
+  other Nm                        5.6      6.7      5.1      2.8      0.0
+  RF/(RF+vasti) %                20.2     20.1     21.0     21.8     19.9
+  RF/(all ext) %                 20.0     19.8     20.8     21.5     19.9
+
+KNEE EXTENSION (isometric), hip 60 deg; knee angle across
+                                    0       30       60       90      120
+  RF Nm                          99.8    101.3     89.7     55.6     49.7
+  vasti Nm                      384.2    403.6    330.6    189.4    200.5
+  other Nm                        5.6      6.7      5.1      2.8     -0.0
+  RF/(RF+vasti) %                20.6     20.1     21.3     22.7     19.9
+  RF/(all ext) %                 20.4     19.8     21.1     22.4     19.9
+
+KNEE EXTENSION (fl_weighted), hip 0 deg; knee angle across
+                                    0       30       60       90      120
+  RF Nm                          92.6     95.9     56.0     19.2     11.2
+  vasti Nm                      310.1    388.4    329.7    179.6    176.7
+  other Nm                        5.6      6.4      4.5      2.3      0.0
+  RF/(RF+vasti) %                23.0     19.8     14.5      9.6      6.0
+  RF/(all ext) %                 22.7     19.5     14.3      9.5      6.0
+
+KNEE EXTENSION (fl_weighted), hip 60 deg; knee angle across
+                                    0       30       60       90      120
+  RF Nm                          31.8     64.1     84.3     55.2     45.4
+  vasti Nm                      310.1    388.4    329.7    179.6    176.7
+  other Nm                        2.7      4.0      3.6      2.1      0.0
+  RF/(RF+vasti) %                 9.3     14.2     20.4     23.5     20.4
+  RF/(all ext) %                  9.2     14.0     20.2     23.3     20.4
+
+MOMENT ARMS [cm]  (hip flexion arm at knee 90; knee extension arm at hip 0 / hip 60)
+  hip  addbrev_r      F=   626  arm@hip[-20, 0, 20, 40, 60] =   3.16   3.19   2.79   1.89   0.59
+  hip  addlong_r      F=   917  arm@hip[-20, 0, 20, 40, 60] =   4.56   4.75   4.35   3.26   1.55
+  hip  addmagMid_r    F=   597  arm@hip[-20, 0, 20, 40, 60] =   2.09   0.46  -1.27  -2.66  -3.50
+  hip  addmagProx_r   F=   597  arm@hip[-20, 0, 20, 40, 60] =   2.51   2.27   1.65   0.70  -0.38
+  hip  glmed1_r       F=  1093  arm@hip[-20, 0, 20, 40, 60] =  -1.59  -1.06  -0.45   0.20   0.82
+  hip  glmin1_r       F=   374  arm@hip[-20, 0, 20, 40, 60] =   0.38   0.81   1.17   1.43   1.55
+  hip  glmin2_r       F=   395  arm@hip[-20, 0, 20, 40, 60] =   0.01   0.30   0.56   0.78   0.91
+  hip  grac_r         F=   281  arm@hip[-20, 0, 20, 40, 60] =   3.39   1.65  -0.37  -2.34  -3.90
+  hip  iliacus_r      F=  1021  arm@hip[-20, 0, 20, 40, 60] =   3.41   3.46   3.64   3.88   4.29
+  hip  psoas_r        F=  1427  arm@hip[-20, 0, 20, 40, 60] =   2.41   2.41   2.62   2.99   3.34
+  hip  recfem_r       F=  2192  arm@hip[-20, 0, 20, 40, 60] =   1.83   3.23   4.32   4.98   5.08
+  hip  sart_r         F=   249  arm@hip[-20, 0, 20, 40, 60] =   1.02   3.03   4.80   6.19   7.00
+  hip  tfl_r          F=   411  arm@hip[-20, 0, 20, 40, 60] =   1.61   3.30   4.88   6.32   7.56
+  knee recfem_r       F=  2192  ext-arm@knee[0, 30, 60, 90, 120] hip0 =   4.45   4.62   4.02   2.40   2.27 | hip60 =   4.55   4.62   4.09   2.54   2.27
+  knee tfl_r          F=   411  ext-arm@knee[0, 30, 60, 90, 120] hip0 =   1.36   1.64   1.24   0.67  -0.01 | hip60 =   1.36   1.64   1.24   0.67  -0.01
+  knee vasint_r       F=  1697  ext-arm@knee[0, 30, 60, 90, 120] hip0 =   4.25   4.15   3.60   2.20   2.22 | hip60 =   4.25   4.15   3.60   2.20   2.22
+  knee vaslat_r       F=  5149  ext-arm@knee[0, 30, 60, 90, 120] hip0 =   3.87   4.33   3.45   1.92   2.08 | hip60 =   3.87   4.33   3.45   1.92   2.08
+  knee vasmed_r       F=  2748  ext-arm@knee[0, 30, 60, 90, 120] hip0 =   4.10   4.01   3.34   1.93   2.02 | hip60 =   4.10   4.01   3.34   1.93   2.02
+
+fL of RF (hip rows, knee cols) and normalized fibre length:
+  hip -20  lf/lopt= 0.97  1.28  1.57  1.79  1.93  fL= 1.00  0.84  0.48  0.25  0.14
+  hip   0  lf/lopt= 0.85  1.16  1.45  1.67  1.82  fL= 0.95  0.95  0.64  0.36  0.23
+  hip  20  lf/lopt= 0.67  0.98  1.27  1.50  1.65  fL= 0.79  1.00  0.85  0.57  0.39
+  hip  40  lf/lopt= 0.47  0.77  1.06  1.29  1.43  fL= 0.54  0.89  0.99  0.83  0.66
+  hip  60  lf/lopt= 0.28  0.55  0.83  1.06  1.20  fL= 0.32  0.63  0.94  0.99  0.91
+  vaslat_r (hip 0)  lf/lopt= 0.69  0.87  1.04  1.16  1.24  fL= 0.81  0.96  1.00  0.95  0.88

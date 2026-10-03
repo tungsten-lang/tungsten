@@ -1,0 +1,10 @@
+16:19:57 eval A2_final_v4_a5x
+AGG {"n": 44, "falls": 5, "peak_speed_1s": 7.9035, "speed": 7.8357, "cadence": 4.1293, "fold": 94.2173, "fold_max": 98.4504, "fold_min": 90.0756, "gain100": 19.7868, "t_pk": 0.2909, "heel_z": 0.3874, "heel_zpk": 0.3225, "heel_hip": 0.6004, "swing_t": 0.3784, "contact_t": 0.1016, "hip_pk": 71.6178, "task_step_freq": 4.1179, "task_steady_speed": 7.8584, "task_contact_time": 0.1022, "task_flight_time": 0.1352, "task_step_length": 1.9094, "task_peak_grf": 4.3415}
+16:21:14 eval B1_final_v4_a5x
+AGG {"n": 44, "falls": 1, "peak_speed_1s": 8.613, "speed": 8.5228, "cadence": 4.1491, "fold": 99.0467, "fold_max": 103.9427, "fold_min": 94.253, "gain100": 27.3435, "t_pk": 0.2873, "heel_z": 0.5345, "heel_zpk": 0.3725, "heel_hip": 0.5667, "swing_t": 0.3855, "contact_t": 0.0962, "hip_pk": 85.1529, "task_step_freq": 4.0326, "task_steady_speed": 8.5489, "task_contact_time": 0.0966, "task_flight_time": 0.1413, "task_step_length": 2.1205, "task_peak_grf": 5.3521}
+16:22:33 eval B2_final_v4_a5x
+AGG {"n": 44, "falls": 3, "peak_speed_1s": 8.504, "speed": 8.4417, "cadence": 4.2296, "fold": 100.7519, "fold_max": 102.5105, "fold_min": 99.5801, "gain100": 25.7074, "t_pk": 0.2402, "heel_z": 0.5516, "heel_zpk": 0.3917, "heel_hip": 0.5479, "swing_t": 0.3802, "contact_t": 0.0982, "hip_pk": 85.0205, "task_step_freq": 4.078, "task_steady_speed": 8.4422, "task_contact_time": 0.0986, "task_flight_time": 0.1403, "task_step_length": 2.0716, "task_peak_grf": 4.7873}
+16:23:46 ALL DONE
+16:26:55 eval C1_final_v5_a5x
+AGG {"n": 44, "falls": 12, "peak_speed_1s": 8.4154, "speed": 8.279, "cadence": 4.3923, "fold": 101.159, "fold_max": 107.438, "fold_min": 97.1996, "gain100": 21.4347, "t_pk": 0.2819, "heel_z": 0.5115, "heel_zpk": 0.3249, "heel_hip": 0.5567, "swing_t": 0.3583, "contact_t": 0.0977, "hip_pk": 73.4021, "task_step_freq": 4.3063, "task_steady_speed": 8.3431, "task_contact_time": 0.0978, "task_flight_time": 0.1292, "task_step_length": 1.9391, "task_peak_grf": 4.3359}
+16:27:58 ALL DONE v5

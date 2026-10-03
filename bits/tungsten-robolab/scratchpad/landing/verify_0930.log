@@ -1,0 +1,16 @@
+== verify 2cce555da Wed Sep 30 02:12:09 EDT 2026
+== build myo_soccer_v4 Wed Sep 30 02:12:09 EDT 2026
+
+Built /Users/erik/rl-verify-0930/bits/tungsten-robolab/bin/robolab_myo_soccer_v4
+exit 0
+== build run_gearx Wed Sep 30 02:13:21 EDT 2026
+
+Built /Users/erik/rl-verify-0930/bits/tungsten-robolab/bin/robolab_run_gearx
+exit 0
+5652232 bin/robolab_myo_soccer_v4
+5333216 bin/robolab_run_gearx
+== isolation: manifests naming the shared tree (must be none)
+(end)
+== py_compile of the changed python
+ok
+== the replay stage of this first run failed: its replay code ran from heredocs and the multiprocessing spawn workers died (FileNotFoundError '<stdin>'), and the remaining 39 MB of repeated tracebacks are dropped. The replays (as guarded .py files) are in verify_0930b.log and verify_0930c.log.

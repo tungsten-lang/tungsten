@@ -1,0 +1,90 @@
+== Wed Sep 30 16:04:05 EDT 2026   main 1010f8c0e   candidate 1 2cce555da
+
+== 1. the robolab tree already on main (tracked blobs, uncompressed)
+3536 files, 84.3 MB
+-- by directory
+    24.85 MB   763 files  playground
+    12.33 MB   327 files  scratchpad/sprint_knot
+    11.99 MB   433 files  params
+    10.39 MB   227 files  scratchpad/lj2
+     9.02 MB   669 files  scratchpad/soccer4
+     3.80 MB   250 files  scratchpad/btl
+     3.48 MB   137 files  lib
+     2.51 MB   156 files  scratchpad/btl2
+     1.29 MB   130 files  scratchpad/sprint2
+     1.25 MB    54 files  scratchpad/kick
+     0.98 MB    45 files  scratchpad/blowup
+     0.50 MB     7 files  (top-level files)
+     0.44 MB    92 files  scratchpad/sprint_touch
+     0.32 MB   132 files  scratchpad/tt
+-- 12 largest tracked files
+    1.88 MB  bits/tungsten-robolab/scratchpad/sprint_knot/dump_p1s1.npz
+    1.86 MB  bits/tungsten-robolab/scratchpad/sprint_knot/dump_p1f.npz
+    1.82 MB  bits/tungsten-robolab/scratchpad/sprint_knot/dump_fall150.npz
+    1.77 MB  bits/tungsten-robolab/playground/search_results/runs.json
+    1.75 MB  bits/tungsten-robolab/scratchpad/sprint_knot/dump_gear31.npz
+    1.16 MB  bits/tungsten-robolab/scratchpad/sprint_knot/dump_v4r1.npz
+    0.82 MB  bits/tungsten-robolab/playground/search_results/p2/best_balance_seed104_sheet.png
+    0.71 MB  bits/tungsten-robolab/playground/refs/bolt/keypoints_nitro2017_blocks.npz
+    0.63 MB  bits/tungsten-robolab/scratchpad/lj2/eval_big_final3.json
+    0.63 MB  bits/tungsten-robolab/scratchpad/lj2/eval_big_shift0.json
+    0.63 MB  bits/tungsten-robolab/scratchpad/lj2/eval_big_final1.json
+    0.62 MB  bits/tungsten-robolab/scratchpad/lj2/eval_big_final2.json
+
+== 2. candidate 1 (the verified commit on robolab-land-tmp) over main
+367 added or changed files, 7.25 MB of blobs (uncompressed)
+packed size of what main would gain (what a fetch adds): 1.79 MB
+-- added size by directory
+     2.50 MB    78 files  scratchpad/tt3
+     1.80 MB    55 files  scratchpad/tt2
+     0.91 MB    96 files  scratchpad/sprint4
+     0.78 MB    12 files  playground
+     0.45 MB     2 files  (top-level files)
+     0.26 MB    27 files  site
+     0.21 MB    14 files  scratchpad/abilities
+     0.13 MB    26 files  scratchpad/hazard
+     0.07 MB    41 files  scratchpad/soccer4
+     0.06 MB     1 files  lib
+     0.05 MB     8 files  params
+     0.02 MB     7 files  scratchpad/heel
+-- largest added files
+    0.41 MB  bits/tungsten-robolab/playground/arena/history.jsonl
+    0.40 MB  bits/tungsten-robolab/README.md
+    0.15 MB  bits/tungsten-robolab/scratchpad/tt2/results/diag_g_trunk_98000.jsonl
+    0.14 MB  bits/tungsten-robolab/scratchpad/tt2/results/champ_r0_98000.jsonl
+    0.14 MB  bits/tungsten-robolab/playground/arena/champions.json
+    0.14 MB  bits/tungsten-robolab/scratchpad/tt2/results/diag_v17_98000.jsonl
+    0.14 MB  bits/tungsten-robolab/scratchpad/tt2/results/diag_a08_98000.jsonl
+    0.13 MB  bits/tungsten-robolab/scratchpad/tt2/results/diag_stale_s12_98000.jsonl
+    0.13 MB  bits/tungsten-robolab/playground/arena/trials.json
+    0.13 MB  bits/tungsten-robolab/scratchpad/tt2/results/diag_g_hand_98000.jsonl
+
+== 3. candidate 2 additions on top of candidate 1 (the anatomy study, the subset audits, the landing records; du, upper bound)
+1.83 MB
+
+== 4. what stays out of git (local only; the .gitignore keeps it out)
+1.4G	bin/champions
+1.2G	bin/challengers
+3.3G	out
+ 46M	playground/cache
+ 32M	playground/refs
+435M bin/robolab_* (built entries)
+176M	.venv
+406M	.venv-myo
+730M	.venv-pose
+
+== 5. the repo around it
+count: 4162
+size: 362.12 MiB
+in-pack: 78748
+packs: 8
+size-pack: 750.24 MiB
+prune-packable: 0
+garbage: 0
+size-garbage: 0 bytes
+1.2G	.git
+commits on main: 1957
+
+== 6. robolab's share of main's history (every object reachable from commits that touch bits/tungsten-robolab; slow)
+3601 objects, inf MB on disk
+== done Wed Sep 30 16:04:08 EDT 2026

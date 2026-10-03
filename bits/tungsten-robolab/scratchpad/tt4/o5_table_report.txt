@@ -1,0 +1,5 @@
+variant                                rows  hit solved palm>0.5m ever | pad pos err cm pad ori err deg
+T3's o5a, champion grip (recorded)      100   84     32             22 |            5.9             9.2
+o5a, champion grip (re-run here)        100   84     32             22 |            5.9             9.2
+o5a, grip_drive 1.5                     100   81     15             23 |            6.1            14.5
+o5a, gfull (firmest working grip)       100   79      7             46 |            6.0            18.1

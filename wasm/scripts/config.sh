@@ -11,4 +11,4 @@ WASM_TRIPLE="wasm32-wasip1"
 # required: raise/rescue is setjmp/longjmp, which wasm lowers onto (legacy)
 # exception handling. Everything else stays at LLVM's "generic" baseline so the
 # module loads in every current browser and in Cloudflare Workers.
-WASM_FEATURE_FLAGS="-mexception-handling"
+WASM_FEATURE_FLAGS="${WASM_FEATURE_FLAGS:--mexception-handling}"

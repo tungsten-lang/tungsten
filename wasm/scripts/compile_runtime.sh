@@ -23,7 +23,7 @@ CFLAGS="--target=$WASM_TRIPLE --sysroot=$WASM_SYSROOT $OPT $LTO $WASM_FEATURE_FL
   -D_WASI_EMULATED_MMAN -D_WASI_EMULATED_SIGNAL -D_WASI_EMULATED_PROCESS_CLOCKS -D_WASI_EMULATED_GETPID \
   -DTUNGSTEN_RUNTIME_COMPILER_IMAGE=1 -DNDEBUG -DW_SLAB_MAX_SLOTS=${WASM_SLAB_SLOTS:-262144} \
   -I$ROOT/wasm/compat -include $ROOT/wasm/compat/wasi_compat.h -I$ROOT/runtime \
-  -fmerge-all-constants -fno-strict-aliasing -Wno-everything"
+  -fmerge-all-constants -fno-strict-aliasing -Wno-everything ${WASM_RT_CFLAGS:-}"
 
 pids=()
 for src in $SRCS; do
@@ -32,5 +32,12 @@ for src in $SRCS; do
 done
 ( "$WASM_CLANG" $CFLAGS -c "$ROOT/wasm/wasi_stubs.c" -o "$OUT/wasi_stubs.o" ) &
 pids+=($!)
+# WASM_ALLOC=seg links wasm_alloc.c (size-class pages, no coalescing: for one-shot
+# instances; trees kernel -13%, DETOUR solver -22..34%). The default keeps dlmalloc.
+rm -f "$OUT/wasm_alloc.o"
+if [ "${WASM_ALLOC:-dlmalloc}" != "dlmalloc" ]; then
+  ( "$WASM_CLANG" $CFLAGS -c "$ROOT/wasm/wasm_alloc.c" -o "$OUT/wasm_alloc.o" ) &
+  pids+=($!)
+fi
 for p in "${pids[@]}"; do wait "$p"; done
 ls -la "$OUT"

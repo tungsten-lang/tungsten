@@ -23091,6 +23091,55 @@ static int w_slab_equals_bytes(uint32_t index, const char *s, size_t len) {
     return stored_len == len && memcmp(slot + W_SLAB_DATA_OFFSET, s, len) == 0;
 }
 
+/* ---- Post-freeze absence filter ----
+ * Once the slab freezes (every compiled program, right after startup
+ * registration) a runtime-built string of 6..W_SLAB_SSO2_MAX bytes is still
+ * canonicalized by lookup, because the interned `case` switch compares slab
+ * WValues bit for bit. Almost no runtime string matches a literal, yet each
+ * one paid a full wyhash and a probe. This bitset holds a cheap fingerprint of
+ * every interned entry: a clear bit proves no entry has that content, so the
+ * constructor skips the hash and probe and mints a heap string directly; a
+ * set bit falls back to the exact lookup. Canonicalization is unchanged. Every
+ * insertion into the intern table sets its bit, so the set only grows.
+ * Enabled on wasm (where the hash's 128-bit multiply is emulated); define
+ * W_SLAB_ABSENT_FILTER=1 to use it elsewhere. */
+#ifndef W_SLAB_ABSENT_FILTER
+#if defined(__wasm__)
+#define W_SLAB_ABSENT_FILTER 1
+#else
+#define W_SLAB_ABSENT_FILTER 0
+#endif
+#endif
+#if W_SLAB_ABSENT_FILTER
+#define W_SLAB_FILTER_BITS 16
+static uint64_t g_slab_filter[(1u << W_SLAB_FILTER_BITS) / 64];
+static inline uint32_t w_slab_filter_fp(const char *s, size_t len) {
+    uint32_t a = 0, b = 0;
+    if (len >= 4) {
+        memcpy(&a, s, 4);
+        memcpy(&b, s + len - 4, 4);
+    } else {
+        for (size_t i = 0; i < len; i++) a = (a << 8) | (uint8_t)s[i];
+    }
+    uint32_t h = (a * 0x9E3779B1u) ^ ((b + (uint32_t)len) * 0x85EBCA77u);
+    h ^= h >> 15;
+    h *= 0x2C1B3C6Du;
+    h ^= h >> 12;
+    return h >> (32 - W_SLAB_FILTER_BITS);
+}
+static inline void w_slab_filter_add(const char *s, size_t len) {
+    uint32_t f = w_slab_filter_fp(s, len);
+    g_slab_filter[f >> 6] |= (uint64_t)1 << (f & 63);
+}
+static inline int w_slab_filter_maybe(const char *s, size_t len) {
+    uint32_t f = w_slab_filter_fp(s, len);
+    return (int)((g_slab_filter[f >> 6] >> (f & 63)) & 1);
+}
+#else
+static inline void w_slab_filter_add(const char *s, size_t len) { (void)s; (void)len; }
+static inline int w_slab_filter_maybe(const char *s, size_t len) { (void)s; (void)len; return 1; }
+#endif
+
 void w_slab_rebuild_intern(uint32_t total_slots) {
     w_slab_hash_cache_init();
     uint32_t idx = 1;
@@ -23114,6 +23163,13 @@ void w_slab_rebuild_intern(uint32_t total_slots) {
         g_intern.hashes[pos] = h;
         g_intern.indices[pos] = idx;
         g_intern.count++;
+#if W_SLAB_ABSENT_FILTER
+        {
+            size_t flen = 0;
+            const char *fdata = w_slab_read(idx, &flen);
+            if (fdata) w_slab_filter_add(fdata, flen);
+        }
+#endif
         idx += (flags & W_SFLAG_CONTINUATION) ? 2u : 1u;
     }
 }
@@ -23194,6 +23250,7 @@ static WValue w_slab_intern(const char *s, size_t len, uint64_t h, int ascii) {
     g_intern.hashes[pos] = h;
     g_intern.indices[pos] = idx;
     g_intern.count++;
+    w_slab_filter_add(s, len);
     return w_box_slab_str_len(idx, len);
 }
 
@@ -23219,9 +23276,11 @@ static WValue w_string_n_known_ascii(const char *s, size_t len, int ascii) {
 
     /* When frozen: check intern table for existing slab entry, fall back to heap */
     if (g_string_slab.frozen) {
-        WValue existing = w_slab_lookup_existing(
-            s, len, w_hash_wyhash((const uint8_t *)s, len));
-        if (existing != W_UNDEF) return existing;
+        if (w_slab_filter_maybe(s, len)) {
+            WValue existing = w_slab_lookup_existing(
+                s, len, w_hash_wyhash((const uint8_t *)s, len));
+            if (existing != W_UNDEF) return existing;
+        }
 
         WString *ws = malloc(sizeof(WString) + len + 1);
         w_heap_string_set_meta(ws, (uint32_t)len, ascii);
@@ -23264,7 +23323,8 @@ static WValue w_string_take_known_ascii(char *s, size_t len, int ascii) {
      * top level). Interning also keeps the result comparable to slab literals. */
     if (!g_string_slab.base) w_slab_init();
 
-    if (g_string_slab.frozen && len <= W_SLAB_SSO2_MAX) {
+    if (g_string_slab.frozen && len <= W_SLAB_SSO2_MAX &&
+        w_slab_filter_maybe(s, len)) {
         WValue existing = w_slab_lookup_existing(
             s, len, w_hash_wyhash((const uint8_t *)s, len));
         if (existing != W_UNDEF) {
@@ -39411,8 +39471,21 @@ static int64_t as_int(WValue v) {
 /* ---- Hash functions (user-selectable via :fn option) ---- */
 
 static inline uint64_t w_wymix(uint64_t a, uint64_t b) {
+#if defined(__wasm__) && !defined(W_WYMIX_NATIVE128)
+    /* wasm32 has no 64x64->128 multiply, so __uint128_t lowers to a call into
+     * compiler-rt's __multi3. The exact product assembled from 32-bit halves
+     * (wyhash's own portable form) yields identical hash values inline. */
+    uint64_t ha = a >> 32, hb = b >> 32, la = (uint32_t)a, lb = (uint32_t)b;
+    uint64_t rh = ha * hb, rm0 = ha * lb, rm1 = hb * la, rl = la * lb;
+    uint64_t t = rl + (rm0 << 32), c = t < rl;
+    uint64_t lo = t + (rm1 << 32);
+    c += lo < t;
+    uint64_t hi = rh + (rm0 >> 32) + (rm1 >> 32) + c;
+    return hi ^ lo;
+#else
     __uint128_t r = (__uint128_t)a * b;
     return (uint64_t)(r >> 64) ^ (uint64_t)r;
+#endif
 }
 
 static inline uint32_t w_hash_load32(const uint8_t *data) {

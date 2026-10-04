@@ -116,6 +116,18 @@ void backtrace_symbols_fd(void *const *buffer, int size, int fd) { (void)buffer;
  * event_kqueue.c / event_epoll.c: no event loop. Only goroutine scheduling
  * reaches these, and goroutines cannot start (see group 5). */
 void w_event_unregister(WEventLoop *el, int fd) { (void)el; (void)fd; }
+/* Ahead-of-time programs (not the interpreter image) also reference the loop's
+ * constructor from their runtime prologue, its poll from scheduler paths, and
+ * register from the blocking fd-write path (w_socket_write_fd), which raw
+ * stdout writes use. With no loop, init yields NULL, poll wakes nothing, and
+ * register is never reached because writes to stdout never report EAGAIN. */
+WEventLoop *w_event_init(void) { return NULL; }
+int w_event_poll(WEventLoop *el, int timeout_ms, WGoroutine **out, int max_out) {
+    (void)el; (void)timeout_ms; (void)out; (void)max_out; return 0;
+}
+void w_event_register(WEventLoop *el, int fd, int events, WGoroutine *g) {
+    (void)el; (void)fd; (void)events; (void)g;
+}
 int w_event_wake(WEventLoop *el) { (void)el; return -1; }
 WEventDeadlineQueue *w_event_deadline_queue(WEventLoop *el) { (void)el; return NULL; }
 

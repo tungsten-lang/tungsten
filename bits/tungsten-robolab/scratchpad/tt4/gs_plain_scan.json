@@ -1,0 +1,23 @@
+{
+ "alpha 0.25 / validation": {
+  "n": 70,
+  "contact": 59,
+  "lost": 0,
+  "never": 11,
+  "solved": 25
+ },
+ "alpha 0.5 / validation": {
+  "n": 70,
+  "contact": 61,
+  "lost": 0,
+  "never": 9,
+  "solved": 22
+ },
+ "alpha 0.75 / validation": {
+  "n": 70,
+  "contact": 60,
+  "lost": 0,
+  "never": 10,
+  "solved": 19
+ }
+}

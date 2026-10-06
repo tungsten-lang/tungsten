@@ -1,0 +1,403 @@
+# MyoTTV11: round-10 options for the table-tennis skill (MyoTTV10Skill), each
+# opt-in by params; with every switch at 0 it is MyoTTV10Skill (and so the
+# round-5 champions, serve for serve).
+#
+# Round 10 measured where P2 is lost (out/tt_r10/champ_710000.jsonl, 600
+# serves of the round-5 champion, 30.3 %). The success rate falls with the
+# serve's speed: 50 / 44 / 24 / 13 / 7 % over the speed quintiles, the hit
+# rate flat (72-89 %). A fast serve is hit and comes back too fast: the
+# return's speed follows the ball's (a still pad returns ~0.95 of it), and
+# above ~5.5 m/s the set of pad pitches whose return still clears the net
+# and lands narrows to 8-13 degrees (25 degrees at 5 m/s), against a face
+# that arrives 10 degrees (1 sigma) off its aim. The pad's velocity along
+# its normal at contact (mean -0.4 forehand, +0.2 backhand, sigma 0.5 m/s)
+# is uncontrolled and the aim law assumes a still pad.
+#
+#   pv       the pelvis as a speed governor (1 on): the fore-aft slide reaches
+#            its height-matching goal AT contact still moving away from the
+#            net (retreating with the ball) at u = pv_k (|v| - pv_v0) + pv_u0
+#            m/s, clamped to [pv_lo, pv_max], |v| the ball's predicted speed
+#            at the pad's plane. The pad then meets the ball moving with it,
+#            which lowers the return's speed by ~u and widens the pitch
+#            window (offline best retreat: 0.47 (v - 4.83) m/s on both
+#            sides). The aim law expects pv_g u of pad velocity along +x.
+#            pv_margin: the slide's goal time is the ball's arrival less this;
+#            pv_tmin: inside this time to go the slide coasts.
+#            pv 2: the slide's goal is stable. The champion's height matching
+#            chases the pad's measured plane (the arm reaches 8-13 cm toward
+#            the net in the last 0.1 s and the pelvis retreats to cancel it:
+#            the late reversal that leaves it at +-1 m/s at contact); here the
+#            goal is the plane where the rising ball passes the pad's height
+#            (from the height matching's own choice) less the pad's offset from
+#            the pelvis at the start plus pv_reach (the arm's reach by contact),
+#            and the retreat is u less the arm's own mean (pv_arm1 forehand,
+#            pv_arm2 backhand: what the arm and trunk add to the pad's velocity
+#            along +x at contact).
+#            pv 3: the slide is predictive. The arm's velocity relative to the
+#            pelvis (the paddle's world velocity less the pelvis's, smoothed by
+#            pv_sm per tick) is measured and carried to contact: the pelvis's
+#            goal is where the pad plane must be less the pad's offset from the
+#            pelvis now and the arm's reach over the time to go (looking ahead at
+#            most pv_h s, weighted in from pv_h2 s to pv_h2 - pv_hw s before
+#            contact), and its terminal velocity is what makes the PAD's velocity
+#            along its normal u: (u - arm . n - vy_pelvis n_y) / n_x. The aim law
+#            expects the pad's predicted world velocity (pv_g of it).
+
+#   sg       the servo's targets from the goal plane (1 on): the servo's pad
+#            height and the aim law's flight come from the ball's state where the
+#            height matching will put the pad's plane (the parent's plan is at
+#            the plane the pad has NOW; the pelvis is still sliding fore-aft
+#            when the servo starts, so the height target slides 5-15 cm over
+#            the next 0.15 s and the integral servo chases it, overshooting: the
+#            pad drops to 1.09 m at 0.4 s and is back at 1.19 m at contact, its
+#            height at contact sd 6-7 cm). Needs g_hx 1.
+
+#   qa       yaw-only servo (1 on): the aim law's normal keeps the pad's own
+#            pitch (the z component of its measured normal), so the servo turns
+#            the face in yaw only and the pitch stays where the posture holds it.
+#            The champion's forehand starts the servo (0.28 s) with the face at
+#            -21 deg and sweeps it to the aim in the last 0.2 s: the pitch at
+#            contact is -10 +- 12 deg and turning at 70 +- 55 deg/s, the spread
+#            made by that late motion (contact pitch is uncorrelated with the
+#            pitch at 0.27 s); with the ready posture at the pitch wanted the
+#            arm is quiet. qa 2: the backhand only (its pitch does not follow
+#            its aim at all), qa 3: the forehand only.
+
+#   ns_k     the aim's pitch by serve speed: n_z += ns_k (|v| - ns_v0), |v| the ball's
+#            predicted speed at the pad's plane. The champion's flat-arc aim puts
+#            the exit elevation at the upper edge of the feasible window for fast
+#            serves (a 6 m/s return must leave at 4-17 deg, the arc to the box asks
+#            17) and near its centre for slow ones (4.5 m/s: 16-64 deg); a slope
+#            flattens fast serves' faces (the skill's normals point at the player, so a larger n_z is a
+#            more closed face: ns_k > 0 closes the face as speed rises).
+#   bk       the table-bounce tick guarded (1 both sides, 2 backhand only, 3 forehand only): on the tick the table-contact
+#            flag is first seen the ball's velocity is mid-reversal (its
+#            vertical component between the pre- and post-bounce values, the
+#            sub-tick timing of the bounce random: -3.2, +1.4, -2.8 m/s in three
+#            serves) and the parent takes it for a post-bounce state, so for that
+#            one tick the ball's predicted crossing height is 0.3-1.6 m off (the
+#            servo's height error eh logs -1.39, -0.41, -0.41, -1.58) and the aim
+#            law's incoming velocity with it. The height servo is an integrator
+#            (k_z 11: one tick of a 1 m error moves the joint offsets by 0.1-0.4
+#            rad), the pad's height matching sends the pelvis's goal to the ball's
+#            own x, and it happens on every serve (50 of 150 serves show it in the
+#            every-third-tick log). With bk the plan and the height matching's
+#            ball on that tick are the previous tick's state carried through the
+#            model's bounce (e 0.99), less one tick.
+#
+#   kk       a late pelvis kick (1 on): in the last kk_t s before the ball's
+#            arrival the slide's command gets an extra constant acceleration
+#            along +x (away from the net) that adds kick_u m/s to the pad's
+#            velocity by contact (kick_u = the target axis velocity kk_k (|v| -
+#            kk_v0), clamped, less the champion's own mean pad velocity on that
+#            side (kk_m1 forehand, kk_m2 backhand), over the pad normal's x),
+#            costing kick_u kk_t / 2 of plane (3 cm for 0.6 m/s and 0.1 s: 1 cm of
+#            ball height). It rides on the command only (set_pelvis), so the
+#            parent's slide keeps its own reference and closed loop; the aim law
+#            expects kk_g of the kick. Unlike pv it leaves the parent's plane
+#            tracking alone (pv 2 and 3 cost the hit rate 7-20 points).
+
++ MyoTTV11Skill < MyoTTV10Skill
+  -> read_params
+    super
+    @pv = param("pv", ~0.0, ~0.0, ~3.0)
+    @pv_v0 = param("pv_v0", ~4.83, ~3.0, ~7.0)
+    @pv_k = param("pv_k", ~0.47, ~0.0, ~2.0)
+    @pv_u0 = param("pv_u0", ~0.0, ~-1.0, ~1.0)
+    @pv_lo = param("pv_lo", ~0.0, ~-1.0, ~1.0)
+    @pv_max = param("pv_max", ~1.2, ~0.0, ~2.5)
+    @pv_g = param("pv_g", ~0.9, ~0.0, ~1.5)
+    @pv_margin = param("pv_margin", ~0.0, ~-0.1, ~0.3)
+    @pv_tmin = param("pv_tmin", ~0.02, ~0.01, ~0.3)
+    @pv_reach = param("pv_reach", ~-0.1, ~-0.3, ~0.1)
+    @pv_arm1 = param("pv_arm1", ~0.0, ~-1.0, ~1.0)
+    @pv_arm2 = param("pv_arm2", ~0.0, ~-1.0, ~1.0)
+    @pv_t = ~1.0
+    @pv_off0 = ~-0.105
+    @pv_xw_st = nil
+    @kk = param("kk", ~0.0, ~0.0, ~1.0)
+    @kk_t = param("kk_t", ~0.12, ~0.03, ~0.3)
+    @kk_v0 = param("kk_v0", ~4.83, ~3.0, ~7.0)
+    @kk_k = param("kk_k", ~0.47, ~0.0, ~2.0)
+    @kk_m1 = param("kk_m1", ~0.36, ~-1.0, ~1.0)
+    @kk_m2 = param("kk_m2", ~-0.23, ~-1.0, ~1.0)
+    @kk_lo = param("kk_lo", ~-0.7, ~-2.0, ~0.0)
+    @kk_hi = param("kk_hi", ~1.0, ~0.0, ~2.5)
+    @kk_tlo = param("kk_tlo", ~-0.3, ~-1.0, ~0.5)
+    @kk_thi = param("kk_thi", ~1.3, ~0.0, ~2.5)
+    @kk_g = param("kk_g", ~0.9, ~0.0, ~1.5)
+    @kk_amp = param("kk_amp", ~1.0, ~0.0, ~1.5)
+    @kk2_amp = param("kk2_amp", ~-9.0, ~-9.0, ~1.5)
+    @kk2_k = param("kk2_k", ~-9.0, ~-9.0, ~2.0)
+    @kk2_v0 = param("kk2_v0", ~-9.0, ~-9.0, ~7.0)
+    @ns_k = param("ns_k", ~0.0, ~-0.3, ~0.3)
+    @ns_v0 = param("ns_v0", ~5.6, ~4.0, ~7.0)
+    @ns_k2 = param("ns_k2", ~-9.0, ~-9.0, ~0.3)
+    @k_vpm2 = param("k_vpm2", ~-9.0, ~-9.0, ~1.5)
+    @k_vpm0 = @k_vpm
+    @bk = param("bk", ~0.0, ~0.0, ~3.0)
+    @bk_p = nil
+    @bk_v = nil
+    @bk_done = false
+    @bk_g = false
+    @sg = param("sg", ~0.0, ~0.0, ~1.0)
+    @qa = param("qa", ~0.0, ~0.0, ~3.0)
+    @qa_n = [~1.0, ~0.0, ~0.0]
+    @pv_sm = param("pv_sm", ~0.4, ~0.05, ~1.0)
+    @pv_h = param("pv_h", ~0.1, ~0.0, ~0.3)
+    @pv_h2 = param("pv_h2", ~0.25, ~0.05, ~0.5)
+    @pv_hw = param("pv_hw", ~0.1, ~0.01, ~0.4)
+    @pv_arm_v = [~0.0, ~0.0, ~0.0]
+    @pv_vx = ~0.0
+
+  -> start(frame, ctl)
+    super(frame, ctl)
+    @pv_off0 = pad_center(frame)[0] - frame.at("env_pelvis_pos", 0)
+    nil
+
+  # ---- the pelvis as a speed governor (pv) ------------------------------------------
+
+  # The retreat speed (m/s along +x, away from the net) planned for this serve
+  # (the pad's total: the aim law expects it).
+  -> pv_speed
+    p = @plan
+    s = Math.sqrt(p[3] * p[3] + p[4] * p[4] + p[5] * p[5])
+    clamp(@pv_k * (s - @pv_v0) + @pv_u0, @pv_lo, @pv_max)
+
+  # The pelvis's share of it (world +x speed at contact): less what the arm and
+  # trunk add themselves (pv 1, 2: the constants pv_arm1 / pv_arm2; pv 3: the
+  # arm's measured velocity relative to the pelvis, and the pelvis's lateral
+  # velocity along the pad's normal).
+  -> pv_pelvis_speed(f)
+    if @pv > ~2.5
+      n = pad_normal(f)
+      ar = @pv_arm_v
+      w = pv_arm_weight(pv_tgo(f))
+      u = pv_speed - w * (ar[0] * n[0] + ar[1] * n[1] + ar[2] * n[2]) - (~0.0 - @rvy) * n[1]
+      return u / clamp(n[0], ~0.5, ~1.0)
+    a = @pv_arm1
+    a = @pv_arm2 if @side == 2
+    pv_speed - a
+
+  # How much of the measured arm velocity counts, by the time to go: none until
+  # pv_h2 s before contact, all of it pv_hw s later.
+  -> pv_arm_weight(tgo)
+    clamp((@pv_h2 - tgo) / @pv_hw, ~0.0, ~1.0)
+
+  # The smoothed velocity of the arm relative to the pelvis (world).
+  -> pv_track_arm(f)
+    vp = paddle_velocity(f)
+    i = 0
+    while i < 3
+      a = vp[i] - f.at("pelvis_vel", i)
+      @pv_arm_v[i] = @pv_arm_v[i] + (a - @pv_arm_v[i]) * @pv_sm
+      i += 1
+    nil
+
+  # pv 2: where the ball reaches the pad's plane at contact, from the base's
+  # height-matching goal (xw = the pad's plane + the pelvis's distance to its
+  # goal in q), and the pelvis's goal in q for it.
+  -> pv_xw(f)
+    @xp + pelvis_qx(f) - @gx
+
+  # The time for the ball to reach the pad's plane where the pelvis's goal puts
+  # it (the pad plane's world x when the pelvis is at @gx).
+  -> pv_tgo(f)
+    p = [f.at("env_ball_pos", 0), f.at("env_ball_pos", 1), f.at("env_ball_pos", 2)]
+    v = [f.at("env_ball_vel", 0), f.at("env_ball_vel", 1), f.at("env_ball_vel", 2)]
+    xg = @xp + pelvis_qx(f) - @gx
+    c = MyoTTBall.intercept(p, v, xg, @bounced)
+    return @plan[0] if c == nil
+    c[0]
+
+  # pv: the governor drives the slide from the first plan to the contact, on
+  # both sides (the parent's dispatch drops the backhand's minimum-jerk slide
+  # for the critically damped reference in the last 0.18 s, which is what leaves
+  # the pelvis ringing at contact); v7's contact adjustments still run first.
+  -> drive_pelvis(f)
+    if @pv > ~0.5 && @plan != nil && @pel_mj > ~0.5
+      apex_contact(f) if @ap_on > ~0.5 && !@locked && @g_hx > ~0.0
+      late_contact(f) if @bh_tmin > ~0.0 && @side == 2 && !@locked && @g_hx > ~0.0
+      return pv_drive(f, fly_factor > ~0.0)
+    super(f)
+
+  # drive_pelvis_fly / drive_pelvis_mj with the fore-aft slide's minimum-jerk
+  # path ending at the goal AT contact with the retreat velocity (q = 1.6 - x,
+  # so the reference's q-velocity is -u): jerk = 60 d / T^3 - (36 v + 24 vf)
+  # / T^2 - 9 a / T; inside pv_tmin of contact it coasts.
+  -> pv_drive(f, fly)
+    gq = @gx
+    tx = pv_tgo(f) - @pv_margin
+    pv_track_arm(f) if @pv > ~2.5
+    if @pv > ~1.5
+      xw = pv_xw(f)
+      if @locked && @pv_xw_st != nil
+        xw = @pv_xw_st
+      else
+        @pv_xw_st = xw
+      gq = ~1.6 - xw + @pv_off0 + @pv_reach
+      if @pv > ~2.5
+        # predictive: the pad's offset from the pelvis now plus the arm's reach over the time to go
+        ar = @pv_arm_v
+        h = tx
+        h = @pv_h if h > @pv_h
+        h = ~0.0 if h < ~0.0
+        off = pad_center(f)[0] - f.at("env_pelvis_pos", 0)
+        w = pv_arm_weight(tx)
+        gq = ~1.6 - (xw - off - w * ar[0] * h)
+      p = [f.at("env_ball_pos", 0), f.at("env_ball_pos", 1), f.at("env_ball_pos", 2)]
+      v = [f.at("env_ball_vel", 0), f.at("env_ball_vel", 1), f.at("env_ball_vel", 2)]
+      c = MyoTTBall.intercept(p, v, xw, @bounced)
+      tx = c[0] - @pv_margin if c != nil
+    @pv_t = tx
+    if tx > @pv_tmin
+      @pv_vx = pv_pelvis_speed(f)
+      vf = ~0.0 - @pv_vx
+      jx = ~60.0 * (gq - @rx) / (tx * tx * tx) - (~36.0 * @rvx + ~24.0 * vf) / (tx * tx) - ~9.0 * @rax / tx
+      @rax = clamp(@rax + jx * @dt, ~0.0 - @pel_amax, @pel_amax)
+    else
+      @rax = ~0.0
+    if fly
+      ty = @plan[0] - @fly_margin
+      if ty > @fly_tmin
+        d = @gy - @ry
+        vf2 = fly_factor * d / ty
+        jy = ~60.0 * d / (ty * ty * ty) - (~36.0 * @rvy + ~24.0 * vf2) / (ty * ty) - ~9.0 * @ray / ty
+        @ray = clamp(@ray + jy * @dt, ~0.0 - @pel_amax, @pel_amax)
+      else
+        @ray = ~0.0
+    else
+      tg = @plan[0] - @slide_margin
+      if tg > ~0.1
+        jy = ~60.0 * (@gy - @ry) / (tg * tg * tg) - ~36.0 * @rvy / (tg * tg) - ~9.0 * @ray / tg
+        @ray = clamp(@ray + jy * @dt, ~0.0 - @pel_amax, @pel_amax)
+      else
+        w = @pel_w
+        @ray = clamp(w * w * (@gy - @ry) - ~2.0 * w * @rvy, ~0.0 - @pel_amax, @pel_amax)
+    @rvx = @rvx + @rax * @dt
+    @rvy = @rvy + @ray * @dt
+    if fly && @rvy.abs > @pel_vcap
+      @rvy = clamp(@rvy, ~0.0 - @pel_vcap, @pel_vcap)
+      @ray = ~0.0
+    @rx = @rx + @rvx * @dt
+    @ry = @ry + @rvy * @dt
+    @ref_ax = ~0.0 - @rax
+    @ref_ay = ~0.0 - @ray
+    ex = @rx - pelvis_qx(f)
+    ey = @ry - pelvis_qy(f)
+    set_pelvis(@rx + @pel_fb * ex, @ry + @pel_fb * ey, @rvx, @rvy, @rax, @ray)
+
+  # kk: the kick's speed (m/s along +x) for this serve.
+  -> kick_u
+    p = @plan
+    s = Math.sqrt(p[3] * p[3] + p[4] * p[4] + p[5] * p[5])
+    amp = @kk_amp
+    k = @kk_k
+    v0 = @kk_v0
+    m = @kk_m1
+    if @side == 2
+      # the backhand's own amplitude, slope and speed origin (kk2_*; -9: the forehand's values)
+      amp = @kk2_amp if @kk2_amp > ~-8.0
+      k = @kk2_k if @kk2_k > ~-8.0
+      v0 = @kk2_v0 if @kk2_v0 > ~-8.0
+      m = @kk_m2
+    tgt = clamp(k * (s - v0), @kk_tlo, @kk_thi)
+    amp * clamp((tgt - m) / ~0.9, @kk_lo, @kk_hi)
+
+  -> set_pelvis(qx, qy, vx, vy, ax, ay)
+    if @kk > ~0.5 && @plan != nil && @side != 0
+      te = @kk_t - @plan[0]
+      if te > ~0.0
+        u = kick_u
+        a = u / @kk_t
+        v = a * te
+        d = ~0.5 * a * te * te
+        return super(qx - d * (~1.0 + @pel_fb), qy, vx - v, vy, ax - a, ay)
+    super(qx, qy, vx, vy, ax, ay)
+
+  # bk: the bounce tick's ball is the last tick's, carried through the model's bounce.
+  -> plan_ball(p, v, f)
+    @bk_g = false
+    if bk_on
+      if !@bk_done && f.at("env_touching_info", 1) > ~0.5 && @bk_p != nil
+        c = MyoTTBall.intercept(@bk_p, @bk_v, @xp, false)
+        if c != nil
+          @bk_done = true
+          @bk_g = true
+          return [c[0] - @dt, c[1], c[2], c[3], c[4], c[5]]
+      elsif !@bounced
+        @bk_p = p
+        @bk_v = v
+    super(p, v, f)
+
+  -> height_ball(p, v, zt)
+    return MyoTTBall.at_height(@bk_p, @bk_v, zt, false) if @bk_g
+    super(p, v, zt)
+
+  # bk: 1 both sides, 2 the backhand only, 3 the forehand only
+  -> bk_on
+    return false if @bk < ~0.5
+    return true if @bk < ~1.5
+    return @side == 2 if @bk < ~2.5
+    @side == 1
+
+  # qa: the aim law's normal at the pad's own pitch.
+  -> before(f, ctl)
+    @qa_n = pad_normal(f)
+    if @k_vpm2 > ~-8.0
+      # the backhand's own weight on the measured pad velocity (k_vpm2; -9: k_vpm)
+      @k_vpm = @k_vpm0
+      @k_vpm = @k_vpm2 if @side == 2
+    super(f, ctl)
+
+  -> aim_normal(plan)
+    n = super(plan)
+    nk = @ns_k
+    nk = @ns_k2 if @side == 2 && @ns_k2 > ~-8.0
+    if nk != ~0.0 && @side != 0
+      sp = Math.sqrt(plan[3] * plan[3] + plan[4] * plan[4] + plan[5] * plan[5])
+      nz = n[2] + nk * (sp - @ns_v0)
+      h0 = Math.sqrt(n[0] * n[0] + n[1] * n[1])
+      if h0 > ~0.01
+        k = Math.sqrt(clamp(~1.0 - nz * nz, ~0.0, ~1.0)) / h0
+        n = [n[0] * k, n[1] * k, nz]
+    return n if @qa < ~0.5 || @side == 0
+    return n if @qa > ~2.5 && @side != 1
+    return n if @qa > ~1.5 && @qa < ~2.5 && @side != 2
+    nz = @qa_n[2]
+    h = Math.sqrt(n[0] * n[0] + n[1] * n[1])
+    return n if h < ~0.01
+    k = Math.sqrt(clamp(~1.0 - nz * nz, ~0.0, ~1.0)) / h
+    [n[0] * k, n[1] * k, nz]
+
+  # sg: the servo works on the ball's state at the goal plane.
+  -> servo(f, pc, plan, ey)
+    if @sg > ~0.5 && plan != nil && @g_hx > ~0.5
+      p = [f.at("env_ball_pos", 0), f.at("env_ball_pos", 1), f.at("env_ball_pos", 2)]
+      v = [f.at("env_ball_vel", 0), f.at("env_ball_vel", 1), f.at("env_ball_vel", 2)]
+      c = MyoTTBall.intercept(p, v, pv_xw(f), @bounced)
+      return super(f, pc, c, ey) if c != nil
+    super(f, pc, plan, ey)
+
+  # the governor's lock-time report ("pv:" u : reference q-velocity : reference q : time to go : goal q)
+  -> lock_now(ctl)
+    super(ctl)
+    if @pv > ~0.5 && @plan != nil
+      ctl.emit("pv:" + [pv_speed, @rvx, @rx, @pv_t, @gx, @pv_vx, @pv_arm_v[0], @pv_arm_v[1], @pv_arm_v[2]].map(->(x) x.to_s).join(":"))
+    nil
+
+  # The aim law expects the retreat: the planned speed until the last 0.12 s,
+  # then the slide reference's own velocity.
+  -> pad_vel_expected
+    v = super
+    if @kk > ~0.5 && @plan != nil && @side != 0 && !((fam_side_on && @fam > 0) || @fam >= 5)
+      v = [v[0] + @kk_g * kick_u, v[1], v[2]]
+    return v if @pv < ~0.5 || @plan == nil || (fam_side_on && @fam > 0) || @fam >= 5
+    if @pv > ~2.5
+      # the pad's predicted world velocity: the pelvis's terminal velocity plus the arm's
+      w = pv_arm_weight(@pv_t)
+      ar = @pv_arm_v
+      return [v[0] + @pv_g * (@pv_vx + w * ar[0]), v[1] + @pv_g * ((~0.0 - @rvy) + w * ar[1]), v[2] + @pv_g * w * ar[2]]
+    u = pv_speed
+    u = ~0.0 - @rvx if @pv_t < ~0.12
+    [v[0] + @pv_g * u, v[1], v[2]]

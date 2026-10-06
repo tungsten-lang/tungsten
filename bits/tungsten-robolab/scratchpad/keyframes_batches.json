@@ -1,0 +1,126 @@
+{
+"writes_a": [
+{
+"op": "set",
+"collection": "keyframes",
+"doc_id": "bolt_sprint.block_exit",
+"file_path": "/Users/erik/tungsten/bits/tungsten-robolab/site/keyframe_bench/seed/bolt_sprint.block_exit.json"
+},
+{
+"op": "set",
+"collection": "keyframes",
+"doc_id": "bolt_sprint.drive_td",
+"file_path": "/Users/erik/tungsten/bits/tungsten-robolab/site/keyframe_bench/seed/bolt_sprint.drive_td.json"
+},
+{
+"op": "set",
+"collection": "keyframes",
+"doc_id": "bolt_sprint.drive_to",
+"file_path": "/Users/erik/tungsten/bits/tungsten-robolab/site/keyframe_bench/seed/bolt_sprint.drive_to.json"
+},
+{
+"op": "set",
+"collection": "keyframes",
+"doc_id": "bolt_sprint.maxv_mkl",
+"file_path": "/Users/erik/tungsten/bits/tungsten-robolab/site/keyframe_bench/seed/bolt_sprint.maxv_mkl.json"
+},
+{
+"op": "set",
+"collection": "keyframes",
+"doc_id": "bolt_sprint.maxv_ms",
+"file_path": "/Users/erik/tungsten/bits/tungsten-robolab/site/keyframe_bench/seed/bolt_sprint.maxv_ms.json"
+},
+{
+"op": "set",
+"collection": "keyframes",
+"doc_id": "bolt_sprint.maxv_td",
+"file_path": "/Users/erik/tungsten/bits/tungsten-robolab/site/keyframe_bench/seed/bolt_sprint.maxv_td.json"
+},
+{
+"op": "set",
+"collection": "keyframes",
+"doc_id": "bolt_sprint.maxv_to",
+"file_path": "/Users/erik/tungsten/bits/tungsten-robolab/site/keyframe_bench/seed/bolt_sprint.maxv_to.json"
+},
+{
+"op": "set",
+"collection": "keyframes",
+"doc_id": "bolt_sprint.rear_exit",
+"file_path": "/Users/erik/tungsten/bits/tungsten-robolab/site/keyframe_bench/seed/bolt_sprint.rear_exit.json"
+},
+{
+"op": "set",
+"collection": "keyframes",
+"doc_id": "bolt_sprint.s1_td",
+"file_path": "/Users/erik/tungsten/bits/tungsten-robolab/site/keyframe_bench/seed/bolt_sprint.s1_td.json"
+},
+{
+"op": "set",
+"collection": "keyframes",
+"doc_id": "bolt_sprint.s1_to",
+"file_path": "/Users/erik/tungsten/bits/tungsten-robolab/site/keyframe_bench/seed/bolt_sprint.s1_to.json"
+}
+],
+"writes_b": [
+{
+"op": "set",
+"collection": "keyframes",
+"doc_id": "bolt_sprint.s2_td",
+"file_path": "/Users/erik/tungsten/bits/tungsten-robolab/site/keyframe_bench/seed/bolt_sprint.s2_td.json"
+},
+{
+"op": "set",
+"collection": "keyframes",
+"doc_id": "bolt_sprint.s2_to",
+"file_path": "/Users/erik/tungsten/bits/tungsten-robolab/site/keyframe_bench/seed/bolt_sprint.s2_to.json"
+},
+{
+"op": "set",
+"collection": "keyframes",
+"doc_id": "bolt_sprint.s3_td",
+"file_path": "/Users/erik/tungsten/bits/tungsten-robolab/site/keyframe_bench/seed/bolt_sprint.s3_td.json"
+},
+{
+"op": "set",
+"collection": "keyframes",
+"doc_id": "bolt_sprint.s3_to",
+"file_path": "/Users/erik/tungsten/bits/tungsten-robolab/site/keyframe_bench/seed/bolt_sprint.s3_to.json"
+},
+{
+"op": "set",
+"collection": "keyframes",
+"doc_id": "bolt_sprint.set",
+"file_path": "/Users/erik/tungsten/bits/tungsten-robolab/site/keyframe_bench/seed/bolt_sprint.set.json"
+},
+{
+"op": "set",
+"collection": "keyframes",
+"doc_id": "run_natural.hr",
+"file_path": "/Users/erik/tungsten/bits/tungsten-robolab/site/keyframe_bench/seed/run_natural.hr.json"
+},
+{
+"op": "set",
+"collection": "keyframes",
+"doc_id": "run_natural.kl",
+"file_path": "/Users/erik/tungsten/bits/tungsten-robolab/site/keyframe_bench/seed/run_natural.kl.json"
+},
+{
+"op": "set",
+"collection": "keyframes",
+"doc_id": "run_natural.ms",
+"file_path": "/Users/erik/tungsten/bits/tungsten-robolab/site/keyframe_bench/seed/run_natural.ms.json"
+},
+{
+"op": "set",
+"collection": "keyframes",
+"doc_id": "run_natural.td",
+"file_path": "/Users/erik/tungsten/bits/tungsten-robolab/site/keyframe_bench/seed/run_natural.td.json"
+},
+{
+"op": "set",
+"collection": "keyframes",
+"doc_id": "run_natural.to",
+"file_path": "/Users/erik/tungsten/bits/tungsten-robolab/site/keyframe_bench/seed/run_natural.to.json"
+}
+]
+}

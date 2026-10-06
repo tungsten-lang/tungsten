@@ -6,10 +6,19 @@ take-off wants. ROBOLAB_LJ_APPROACH does not override it. Never compare its scor
 
 from tasks.long_jump_v4_beyond import LongJumpV4BeyondTask
 
+HUMAN_RECORD_M = 8.95  # the men's world record (Powell, 1991)
+
 
 class LongJumpV4BeyondATask(LongJumpV4BeyondTask):
     name = "long_jump_v4_beyond_a"
     board_x = 151.025
+
+    def metrics(self, m, d, log):
+        out = super().metrics(m, d, log)
+        # 1.0 for a LEGAL jump past the human record (official_m is 0 for a foul, a somersault, a short landing or a run
+        # that never jumps): the per-attempt event behind the best-of-six competition numbers of scratchpad/lj6/bo6.py
+        out["record_beaten"] = 1.0 if out.get("official_m", 0.0) > HUMAN_RECORD_M else 0.0
+        return out
 
 
 TASK = LongJumpV4BeyondATask

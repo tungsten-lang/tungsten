@@ -1,0 +1,13 @@
+# Landing of 2 Oct 2026: main 1010f8c0e -> 77b2f0ada (local fast-forward, nothing pushed)
+
+Erik's answer (2 Oct, AskUserQuestion): "Land both commits". Procedure of HANDOFF section 7: the first commit `2cce555da` (verified from a clean worktree, `RESULT_0930.md`), then a second commit `77b2f0ada` built with `tools/snapshot_commit.sh --branch robolab-land-tmp --only <scratchpad/landing_only_v2.txt, full paths>` under the arena `fcntl` lock on top of it (the script stacks on the branch tip while main has not moved), verified from a fresh worktree of exactly that commit, then `tools/land_snapshot.sh --branch robolab-land-tmp` (fast-forward; compare-and-swap `update-ref`; `git reset -q -- bits/tungsten-robolab`), then the temp branch and the worktree were deleted.
+
+The second commit: 446 added or changed files, 8.49 MB raw, 1.84 MB packed; nothing outside `bits/tungsten-robolab/`; the only modified existing files are `HANDOFF_20260929.md`, `README.md`, `playground/arena/{champions.json,history.jsonl,trials.json}`; its source changes over the first commit are 10 ADDED files (entries `long_jump_run_x`, `long_jump_run_y`, `run_geary`, their skills, tasks `long_jump_v4_beyond`, `long_jump_v4_beyond_a`, `sprint_touch_v4y`, `sprint_touch_v4z`) and no modified source. Together with the first commit (367 files, 1.8 MB packed) main gained 808 files, 226,298 insertions.
+
+Verification of `77b2f0ada` from `/Users/erik/rl-verify-1001` with `BIT_HOME=<worktree>/bits` (`verify_1001.sh`, `verify_1001.log`, `replay_beyond.py`):
+- builds of `run_geary`, `long_jump_run_x`, `long_jump_run_y`: exit 0 (22 s each); no build manifest names the shared tree;
+- replays with the WORKTREE-built binaries, each equal to the recorded score to 1e-9: `long_jump_v4_beyond` seed 0 10.848 m; `long_jump_v4_beyond_robust96` seeds 10001-10004 [7.124, 8.559, 0.0, 7.75]; `sprint_top_speed_v4_beyond_fresh128` seeds 12001-12003 [10.127, 10.112, 10.072]; the human-body champion `long_jump_v4_p95` 5.209 m through BOTH new jump skills;
+- `py_compile` of the new python: ok; the handoff's paths: all present except the git-ignored `playground/cache/*.npz`.
+Main-session checks before the commit (also in the README): `arena.py recheck` of the beyond trials, the out-of-sample fall-rate check of S5's chain (seeds 15001-15128) and of L4's champion (seeds 21001-21096).
+
+After landing: the tracked robolab files equal HEAD except one deletion that is not part of this work (`scratchpad/abilities/new_block.py`, deleted in the working tree before the landing), and the other sessions' modified files (`CLAUDE.md`, `runtime/runtime.c`, `wasm/...`) were untouched. The side branch `robolab-campaign-2026-09` (older backup) still exists.

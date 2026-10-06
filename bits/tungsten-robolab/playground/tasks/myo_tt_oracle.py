@@ -27,6 +27,22 @@ byte-identical to tasks/myo_tt.py's; proved by scratchpad/tt3/identity.py). Run 
         paddle are switched off while it is puppeted and the ball meets only the pad disc, the table halves, the net and the floor (contype/conaffinity bits, see
         Oracle.apply_geoms; restored at the episode's end: an arm left where the champion had it must not catch the rebound); the ball still hits
         the pad through the environment's own contact model, and `solved` is the environment's.
+  o5    IDEAL PAD-SPACE ARM SERVO (see padservo_tick); o6 below is meant to run with it.
+  o6    WELDED PADDLE (3 Oct 2026, opt-in): from the plan's t_on to t_off the paddle body is overwritten before every physics substep to the pose it had in the hand when the weld began, carried
+        rigidly by the ACTUAL palm (site S_grasp: position, orientation and velocity), the hand's contacts with the paddle switched off as in o4: the hand holds the paddle like a rigid extension, so
+        the pad's pose and speed are exactly the palm's and the ball meets the pad through the environment's own contact model. Separates the arm servo's residual pad error from the hand-held
+        paddle's response at impact (o4 puppets the paddle on the PLAN, independent of the arm).
+  o9    JOINT-SPACE MIN-JERK SERVO to a given joint target (3 Oct 2026, opt-in; the task attribute `orc_q` = {q_target (the 7 arm joints), t_start, t_end, t_stop}): from t_start the 7 arm joints follow the
+        quintic from their angles at that tick to q_target, arriving at t_end with zero velocity and acceleration, held until t_stop; computed-torque PD (o2_omega, o2_zeta, the torque caps) WITH the
+        reference acceleration as feed-forward. The target is the configuration a previous (welded) o5 run ended in (`o5_q_last`): a backward plan whose peak accelerations are set by the move, not by a
+        servo law that asks for its highest speed at the first tick.
+  o8    SHIFTED REPLAY (3 Oct 2026, opt-in; Erik: "slice up the ball's path ... see if we have a timing issue"): the paddle body follows a RECORDED pad trajectory (the task attribute `orc_traj`:
+        t, p = pad-centre positions, n = pad normals at the control ticks, `shift` seconds, `kend` = last tick before the original contact (the trajectory is continued at constant velocity and
+        normal rate beyond it, so the recoil of the original impact does not leak into a shifted contact; a miss uses its whole record)) delayed by `shift` (pad at time t = recorded pad at t - shift):
+        the champion's own stroke, position errors and all, meeting the SAME ball path earlier (shift < 0) or later (shift > 0). The hand's contacts with the paddle are off from the start (as in o4);
+        the ball meets the pad disc through the environment's own contact model.
+  o7    TRUNK LOCK (3 Oct 2026, opt-in): from t = cfg o7_t (0.25 s) the three independent trunk joints (flexion, lateral bend, axial rotation) are held at their angles of that instant by a
+        computed-torque PD (cfg o7_omega, 60 rad/s, critically damped): the champion's trunk swing through the hit, which moves the shoulder and so the pad, is removed.
 
 Extra metrics only when a mode is on (off adds none). TT3_CFG = a JSON dict of the modes' options.
 """
@@ -68,6 +84,7 @@ COUPLINGS = [("Abs_r3", "flex_extension", 0.6429), ("L4_L5_FE", "flex_extension"
 
 _PRISTINE = {}
 TAU_MAX = float(CFG.get("o2_taumax", 500.0))
+TAU_J = np.array(CFG["o2_taumax_j"], float) if CFG.get("o2_taumax_j") else None   # per-joint torque caps (N m) of the 7 arm joints (opt-in), e.g. the muscles' isometric capacities [90, 90, 90, 60, 13, 20, 25]
 O4_GEOMS = ("pad", "handle", "pingpong", "coll_own_half", "coll_opponent_half", "coll_net", "ground")
 
 
@@ -239,11 +256,30 @@ class Oracle:
             self.fit = ArmFit(sim, (p.get("trunk_fe", 0.0), p.get("trunk_lb", 0.0), p.get("trunk_ar", 0.0)))
         # the puppet (o4)
         self.plan = None
-        if self.modes & {"o4", "o5"}:
+        if self.modes & {"o4", "o5", "o6"}:
             self.load_plan()
         self.restore_geoms()
         if self.plan is not None and "o4" in self.modes:
             self.apply_geoms()
+        if "o8" in self.modes:
+            self.apply_geoms()
+        self.weld = None
+        self.mj0 = None
+        self.traj = None
+        self.joint_plan = None
+        self.q_start9 = None
+        self.qdd_ref = np.zeros(7)
+        if "o9" in self.modes:
+            jp = getattr(self.sim.task, "orc_q", None)
+            if jp is not None:
+                self.joint_plan = {k: (np.array(v, float) if isinstance(v, list) else v) for k, v in jp.items()}
+        if "o8" in self.modes:
+            self.load_traj()
+        self.sid_grasp = int(m.site("S_grasp").id)
+        self.trunk_q = [int(m.jnt_qposadr[m.joint(n).id]) for n in TRUNK3]
+        self.trunk_d = [int(m.jnt_dofadr[m.joint(n).id]) for n in TRUNK3]
+        self.trunk_ref = None
+        self.Mtt = None
         self.robot.__dict__.pop("_advance", None)             # a stale oracle of a crashed episode must not be chained
         self.orig_advance = self.robot._advance
         self.robot._advance = self.advance
@@ -263,9 +299,11 @@ class Oracle:
         self.hit1 = int(z["contact"]) >= 0
 
     def load_plan(self):
-        if not hasattr(Oracle, "_plans"):
-            Oracle._plans = json.load(open(PLAN))
-        p = Oracle._plans.get(str(self.seed))
+        p = getattr(self.sim.task, "orc_plan", None)      # a plan handed in with the job (task attribute `orc_plan`, opt-in): one serve, many plans without a file per plan
+        if p is None:
+            if not hasattr(Oracle, "_plans"):
+                Oracle._plans = json.load(open(PLAN))
+            p = Oracle._plans.get(str(self.seed))
         if p is None:
             return
         self.plan = {k: (np.array(v, float) if isinstance(v, list) else v) for k, v in p.items()}
@@ -314,8 +352,12 @@ class Oracle:
                 if not hasattr(self, "arm_mus"):
                     self.arm_mus = [i for i, mu in enumerate(sim.muscles) if mu.name in ARM_MUSCLES]
                 act[self.arm_mus] = 0.0
+        if "o9" in self.modes:
+            self.jointplan_tick(t, row)
         if "o1" in self.modes:
             self.pelvis_tick(t, row)
+        if "o7" in self.modes:
+            self.trunk_tick(t)
         self.log.append(row)
 
     def arm_tick(self, t, row):
@@ -370,7 +412,7 @@ class Oracle:
         centre to the plan's pad line P + v (t - t_hit) and its normal to the plan's; alpha = 1 - exp(-dt / tau) (cfg o5_tau, 0.05 s). The champion's own controller keeps running (its servo aims at
         ITS aim; the torque overpowers it); the paddle is held by the champion's grip; nothing is puppeted."""
         sim, p = self.sim, self.plan
-        if p is None or t + 1e-9 < float(CFG.get("o5_tact", 0.25)) or t > p["t_hit"] + float(CFG.get("o5_hold", 0.0)):
+        if p is None or t + 1e-9 < float(getattr(sim.task, "orc_tact", CFG.get("o5_tact", 0.25))) or t > p["t_hit"] + float(CFG.get("o5_hold", 0.0)):   # task attribute orc_tact (opt-in): a per-job start
             self.q_ref = None
             return
         m, d = sim.m, sim.d
@@ -381,6 +423,20 @@ class Oracle:
         n_goal = -np.array(p["n_out"])
         n_goal = n_goal / np.linalg.norm(n_goal)
         G = np.array(p["P"]) + np.array(p["v"]) * (t + self.dt - p["t_hit"])
+        if CFG.get("o5_minjerk"):
+            # MIN-JERK APPROACH (opt-in, 3 Oct 2026): instead of the time-to-go law (which asks for its highest pad speed at the very first tick: a velocity step of 5 m/s and 10+ g that throws a hand-held
+            # paddle out of the grip) the pad's target moves from where it is at the servo's first tick to the plan's pad line (and the normal to the plan's) along the quintic s(tau) that ends at
+            # t_hit - o5_lead with zero velocity and acceleration; the DLS step then tracks that moving target (alpha o5_mj_alpha, default 1).
+            if self.mj0 is None:
+                self.mj0 = (c.copy(), n.copy(), t)
+            c0, n0, t0 = self.mj0
+            T_end = p["t_hit"] - float(CFG.get("o5_lead", 0.0))
+            tau = min(max((t + self.dt - t0) / max(T_end - t0, self.dt), 0.0), 1.0)
+            sc = 10 * tau ** 3 - 15 * tau ** 4 + 6 * tau ** 5
+            line_t0 = np.array(p["P"]) + np.array(p["v"]) * (t0 - p["t_hit"])
+            G = G + (1 - sc) * (c0 - line_t0)
+            n_goal = (1 - sc) * n0 + sc * n_goal
+            n_goal = n_goal / np.linalg.norm(n_goal)
         Jv_Jw = sim.task.hand_jacobian(sim)
         JV = np.array(Jv_Jw[:24]).reshape(3, 8)[:, :7]
         JW = np.array(Jv_Jw[24:]).reshape(3, 8)[:, :7]
@@ -395,13 +451,32 @@ class Oracle:
         b = np.r_[e_p, wr * (Pn @ e_r)]
         lam = float(CFG.get("o5_lam", 1e-3))
         dq = A.T @ np.linalg.solve(A @ A.T + lam * np.eye(6), b)
+        if CFG.get("o5_limits"):
+            # joint-limit aware (opt-in): the same damped least squares, but the joint change is BOUNDED so that no arm joint is pushed through its range (cfg o5_limit_margin, 0.03 rad
+            # inside it): the redundancy (7 joints for a 5-dimensional plane target and a free spin) takes over from a joint at its limit. Without it the wrist sits past its limit and the
+            # pad's normal keeps a 1-4 deg floor (and 28 deg on an infeasible plan).
+            from scipy.optimize import lsq_linear
+            if not hasattr(self, "arm_range"):
+                self.arm_range = np.array([self.m.jnt_range[self.m.joint(n).id] for n in ARM7], float)
+            q0 = np.array([self.d.qpos[a] for a in self.arm_q])
+            mg = float(CFG.get("o5_limit_margin", 0.03))
+            lo = np.minimum(self.arm_range[:, 0] + mg - q0, 0.0) if not CFG.get("o5_limits_pull") else self.arm_range[:, 0] + mg - q0
+            hi = np.maximum(self.arm_range[:, 1] - mg - q0, 0.0) if not CFG.get("o5_limits_pull") else self.arm_range[:, 1] - mg - q0
+            lo, hi = np.minimum(lo, hi - 1e-9), hi
+            res = lsq_linear(np.vstack([A, np.sqrt(lam) * np.eye(7)]), np.r_[b, np.zeros(7)], bounds=(lo, hi))
+            dq = res.x
         if CFG.get("o5_togo"):
             # decelerating approach: close the fraction 2 dt / T_go of the remaining error per tick (T_go = time to the planned contact): e ~ T_go^2, so the pad arrives AT REST
-            alpha = min(1.0, 2.0 * self.dt / max(p["t_hit"] - t, self.dt))
+            # cfg o5_lead (opt-in, default 0 = the above): the pad arrives at rest o5_lead s BEFORE the planned contact and is then held on the plan (alpha 1), i.e. a held plane at contact
+            alpha = min(1.0, 2.0 * self.dt / max(p["t_hit"] - float(CFG.get("o5_lead", 0.0)) - t, self.dt))
+            if CFG.get("o5_lead") and t >= p["t_hit"] - float(CFG["o5_lead"]) - 1e-9:
+                alpha = float(CFG.get("o5_hold_alpha", 1.0))   # arrived: hold the plane with a DAMPED step (opt-in; a full Newton step per tick, 1.0, rings)
         else:
             alpha = 1.0 - np.exp(-self.dt / float(CFG.get("o5_tau", 0.05)))
+        if CFG.get("o5_minjerk"):
+            alpha = float(CFG.get("o5_mj_alpha", 1.0))
         q = np.array([self.d.qpos[a] for a in self.arm_q])
-        step = np.clip(alpha * dq, -0.15, 0.15)
+        step = np.clip(alpha * dq, -float(CFG.get("o5_step_clip", 0.15)), float(CFG.get("o5_step_clip", 0.15)))   # cfg o5_step_clip (rad per control tick, default 0.15 = 15 rad/s): bounds the pad-space correction's speed
         self.q_prev = q.copy()
         self.q_ref = q + step
         self.qd_ref = step / self.dt
@@ -410,30 +485,35 @@ class Oracle:
         self.Maa = M[np.ix_(self.arm_d, self.arm_d)].copy()
         self.w = np.array([float(CFG.get("o2_omega", 150.0))] * 4 + [float(CFG.get("o2_omega_distal", CFG.get("o2_omega", 150.0)))] * 3)
         self.zeta = float(CFG.get("o2_zeta", 1.0))
-        row.update(pad_err=np.r_[e_p, np.degrees(np.linalg.norm(e_r))], q=q, qref=self.q_ref.copy())
+        row.update(pad_err=np.r_[e_p, np.degrees(np.linalg.norm(e_r))], q=q, qref=self.q_ref.copy(), palm=palm.copy(), padc=c.copy(), padn=n.copy())
 
     def pelvis_tick(self, t, row):
         """o1: until t_a = tc - lead the pelvis is the champion's own (its commands untouched, so the run is pass 1's); from t_a the two slides follow a quintic from
         the measured state (position, velocity, acceleration) to the pass-1 contact position at rest, arriving at ts = tc - margin and held. The command adds the
         force the reference needs, (m a + c v) / kp, as the controller's own set_pelvis does."""
         sim = self.sim
+        # a plan may carry the STANCE: `pel` = the pelvis slides' target (a backward planner chooses where to stand), and cfg o1_plan_time settles the pelvis relative to the PLAN's contact time
+        # instead of the champion's own (both opt-in; without them this is the champion's pass-1 contact position and time as before)
+        p_ = self.plan
+        qc = np.array(p_["pel"], float) if (p_ is not None and "pel" in p_) else self.qc
+        tc = float(p_["t_hit"]) if (p_ is not None and CFG.get("o1_plan_time")) else self.tc
         margin = float(CFG.get("o1_margin", 0.15))
         lead = float(CFG.get("o1_lead", 0.35))
         q = np.array([self.d.qpos[a] for a in self.pel_q])
         v = np.array([self.d.qvel[a] for a in self.pel_d])
         acc = (v - self.pel_v_prev) / self.dt if self.pel_v_prev is not None else np.zeros(2)
         self.pel_v_prev = v.copy()
-        t_a = self.tc - lead
+        t_a = tc - lead
         if self.o1_poly is None and float(CFG.get("o1_vmax", 0.0)) > 0.0:
             # adaptive start: as late as the slides can still arrive by tc - margin: the blend starts when the time left covers the remaining distance at o1_vmax (min-jerk peak 1.875 d / T)
-            dist = float(np.max(np.abs(self.qc - q)))
+            dist = float(np.max(np.abs(qc - q)))
             need = max(float(CFG.get("o1_tmin", 0.2)), 1.875 * dist / float(CFG["o1_vmax"]))
-            t_a = self.tc - margin - need
+            t_a = tc - margin - need
         if self.o1_poly is None and t + 1e-9 < t_a:
             row.update(pel_q=q, pel_v=v)
             return
         if self.o1_poly is None:
-            T = max(self.tc - margin - t, 0.05)
+            T = max(tc - margin - t, 0.05)
             # quintic q(tau) = q + v tau + acc tau^2/2 + c3 tau^3 + c4 tau^4 + c5 tau^5 with q(T) = qT, q'(T) = vend, q''(T) = 0; vend = 0 (settled) or, with cfg o1_vend_file
             # (o1c), the champion's side-mean terminal velocity, carried at constant velocity to the contact: qT = qc - vend * margin
             vend = np.zeros(2)
@@ -441,7 +521,7 @@ class Oracle:
                 if not hasattr(Oracle, "_vend"):
                     Oracle._vend = json.load(open(CFG["o1_vend_file"]))
                 vend = np.array(Oracle._vend[str(2 if getattr(sim, "tt_side", 0) == 2 else 1)], float)
-            qT = self.qc - vend * margin
+            qT = qc - vend * margin
             A = np.array([[T ** 3, T ** 4, T ** 5], [3 * T ** 2, 4 * T ** 3, 5 * T ** 4], [6 * T, 12 * T ** 2, 20 * T ** 3]])
             rhs = np.stack([qT - q - v * T - 0.5 * acc * T * T, vend - (v + acc * T), -acc])   # 3 x 2
             C = np.linalg.solve(A, rhs)
@@ -466,19 +546,31 @@ class Oracle:
     def advance(self, model, data, n_frames=1, render=None):
         mj = self.mj
         h = float(model.opt.timestep)
-        o2 = self.q_ref is not None and bool(self.modes & {"o2", "o5"})
+        o2 = self.q_ref is not None and bool(self.modes & {"o2", "o5", "o9"})
         mech = CFG.get("o2_mech", "pd")
         for k in range(n_frames):
             if self.plan is not None and "o4" in self.modes:
                 self.puppet(model, data)
+            if self.plan is not None and "o6" in self.modes:
+                self.weld_step(model, data)
+            if self.traj is not None:
+                self.replay_step(model, data)
+            if self.trunk_ref is not None:
+                q = data.qpos[self.trunk_q]
+                qd = data.qvel[self.trunk_d]
+                w = float(CFG.get("o7_omega", 60.0))
+                tau = self.Mtt @ (w * w * (self.trunk_ref - q) - 2.0 * w * qd)
+                data.qfrc_applied[self.trunk_d] = np.clip(tau, -TAU_MAX, TAU_MAX) if np.all(np.isfinite(tau)) else np.zeros(3)
             if o2 and mech == "pd":
                 # computed-torque PD on the 7 arm joints: torque = M_aa (w^2 e + 2 zeta w de) with the joints' live 7 x 7 mass block; the applied torque is recorded
                 q = data.qpos[self.arm_q]
                 qd = data.qvel[self.arm_d]
-                tau = self.Maa @ (self.w ** 2 * (self.q_ref - q) + 2 * self.zeta * self.w * (self.qd_ref - qd))
+                tau = self.Maa @ (self.qdd_ref + self.w ** 2 * (self.q_ref - q) + 2 * self.zeta * self.w * (self.qd_ref - qd))
                 if CFG.get("o5_ff"):   # inverse-dynamics feed-forward: gravity + Coriolis, minus what the (decaying) muscles still supply
                     tau = tau + data.qfrc_bias[self.arm_d] - data.qfrc_actuator[self.arm_d]
                 tau = np.clip(tau, -TAU_MAX, TAU_MAX) if np.all(np.isfinite(tau)) else np.zeros(7)
+                if TAU_J is not None:
+                    tau = np.clip(tau, -TAU_J, TAU_J)
                 data.qfrc_applied[self.arm_d] = tau
                 self.tau_tick = np.maximum(self.tau_tick, np.abs(tau))
                 self.tau_peak = np.maximum(self.tau_peak, np.abs(tau))
@@ -532,6 +624,137 @@ class Oracle:
         data.qvel[self.pad_d:self.pad_d + 3] = p["v"]
         data.qvel[self.pad_d + 3:self.pad_d + 6] = 0.0
 
+    def jointplan_tick(self, t, row):
+        """o9: the joint-space min-jerk servo (see the module docstring)."""
+        jp = self.joint_plan
+        if jp is None:
+            return
+        t0, t1, t2 = float(jp["t_start"]), float(jp["t_end"]), float(jp["t_stop"])
+        if t + 1e-9 < t0 or t > t2:
+            if "o5" not in self.modes:        # hybrid (o9 + o5): the pad-space servo owns q_ref outside the joint-space window
+                self.q_ref = None
+            return
+        q = np.array([self.d.qpos[a] for a in self.arm_q])
+        if self.q_start9 is None:
+            self.q_start9 = q.copy()
+        T = max(t1 - t0, self.dt)
+        tau = min(max((t + self.dt - t0) / T, 0.0), 1.0)
+        sc = 10 * tau ** 3 - 15 * tau ** 4 + 6 * tau ** 5
+        ds = (30 * tau ** 2 - 60 * tau ** 3 + 30 * tau ** 4) / T if tau < 1.0 else 0.0
+        dds = (60 * tau - 180 * tau ** 2 + 120 * tau ** 3) / T ** 2 if tau < 1.0 else 0.0
+        dq = np.asarray(jp["q_target"], float) - self.q_start9
+        self.q_prev = q.copy()
+        self.q_ref = self.q_start9 + dq * sc
+        self.qd_ref = dq * ds
+        self.qdd_ref = dq * dds
+        M = np.zeros((self.m.nv, self.m.nv))
+        self.mj.mj_fullM(self.m, M, self.d.qM)
+        self.Maa = M[np.ix_(self.arm_d, self.arm_d)].copy()
+        self.w = np.array([float(CFG.get("o2_omega", 150.0))] * 4 + [float(CFG.get("o2_omega_distal", CFG.get("o2_omega", 150.0)))] * 3)
+        self.zeta = float(CFG.get("o2_zeta", 1.0))
+        d_ = self.d
+        pg_ = self.m.geom("pad").id
+        nn_ = np.array(d_.geom_xmat[pg_]).reshape(3, 3)[:, 2]
+        row.update(q=q, qref=self.q_ref.copy(), palm=np.array(d_.site_xpos[self.sid_grasp]), padc=np.array(d_.geom_xpos[pg_]), padn=nn_ * (1.0 if nn_[0] >= 0 else -1.0))
+
+    def load_traj(self):
+        tr = getattr(self.sim.task, "orc_traj", None)
+        if tr is None:
+            return
+        T = np.asarray(tr["t"], float)
+        P = np.asarray(tr["p"], float)
+        N = np.asarray(tr["n"], float)
+        N = N / np.linalg.norm(N, axis=1, keepdims=True)
+        for i in range(1, len(N)):                      # a pad normal is sign-free: keep it continuous
+            if N[i] @ N[i - 1] < 0:
+                N[i] = -N[i]
+        kend = int(tr.get("kend", len(T) - 1))
+        kend = min(max(kend, 1), len(T) - 1)
+        self.traj = dict(T=T, P=P, N=N, kend=kend, shift=float(tr.get("shift", 0.0)), xax0=None)
+
+    def traj_state(self, t):
+        """pad centre, normal, velocity and angular velocity of the recorded stroke at (un-shifted) time t"""
+        tr = self.traj
+        T, P, N, kend = tr["T"], tr["P"], tr["N"], tr["kend"]
+        if t <= T[0]:
+            return P[0].copy(), N[0].copy(), np.zeros(3), np.zeros(3)
+        if t <= T[kend]:
+            i = min(int(np.searchsorted(T, t, side="right")) - 1, kend - 1)
+            f = (t - T[i]) / (T[i + 1] - T[i])
+            pos = P[i] + f * (P[i + 1] - P[i])
+            n = N[i] + f * (N[i + 1] - N[i])
+            n = n / np.linalg.norm(n)
+            dt = T[i + 1] - T[i]
+            vel = (P[i + 1] - P[i]) / dt
+            dn = (N[i + 1] - N[i]) / dt
+        else:
+            dt = T[kend] - T[kend - 1]
+            vel = (P[kend] - P[kend - 1]) / dt
+            dn = (N[kend] - N[kend - 1]) / dt
+            pos = P[kend] + vel * (t - T[kend])
+            n = N[kend] + dn * (t - T[kend])
+            n = n / np.linalg.norm(n)
+        return pos, n, vel, np.cross(n, dn)
+
+    def replay_step(self, model, data):
+        tr = self.traj
+        pos, n, vel, om = self.traj_state(float(data.time) - tr["shift"])
+        if tr["xax0"] is None:
+            tr["xax0"] = data.xmat[self.pad_body].reshape(3, 3)[:, 0].copy()
+        xc = tr["xax0"] - (tr["xax0"] @ n) * n
+        if np.linalg.norm(xc) < 1e-6:
+            xc = np.array([0.0, 1.0, 0.0]) - n[1] * n
+        xc = xc / np.linalg.norm(xc)
+        R = np.stack([xc, np.cross(n, xc), n], axis=1)       # body z axis = the pad normal (either sign)
+        quat = np.zeros(4)
+        self.mj.mju_mat2Quat(quat, R.flatten())
+        origin = pos + 0.07 * xc                              # body origin = pad centre + 0.07 along the paddle's x axis
+        data.qpos[self.pad_q:self.pad_q + 3] = origin
+        data.qpos[self.pad_q + 3:self.pad_q + 7] = quat
+        data.qvel[self.pad_d:self.pad_d + 3] = vel + np.cross(om, 0.07 * xc)
+        data.qvel[self.pad_d + 3:self.pad_d + 6] = R.T @ om
+
+    def trunk_tick(self, t):
+        """o7: from t = o7_t the three independent trunk joints are held where they are (see the module docstring); the mass block is refreshed every control tick."""
+        if t + 1e-9 < float(CFG.get("o7_t", 0.25)):
+            return
+        if self.trunk_ref is None:
+            self.trunk_ref = np.array([self.d.qpos[a] for a in self.trunk_q])
+        M = np.zeros((self.m.nv, self.m.nv))
+        self.mj.mj_fullM(self.m, M, self.d.qM)
+        self.Mtt = M[np.ix_(self.trunk_d, self.trunk_d)].copy()
+
+    def weld_step(self, model, data):
+        """o6: the paddle body is the palm's rigid extension from t_on to t_off (see the module docstring)."""
+        p = self.plan
+        t = float(data.time)
+        if t < float(CFG.get("o6_ton", p["t_on"])) or t > p["t_off"]:   # cfg o6_ton: begin the weld earlier (an early, violent servo can shake the paddle out of the hand before t_on)
+            return
+        mj = self.mj
+        mj.mj_kinematics(model, data)
+        mj.mj_comPos(model, data)
+        mj.mj_comVel(model, data)
+        sid = self.sid_grasp
+        ps = data.site_xpos[sid].copy()
+        Rs = data.site_xmat[sid].reshape(3, 3).copy()
+        if self.weld is None:                                 # the paddle's pose in the palm's frame when the weld begins: the champion's own grip
+            self.apply_geoms()                                # the hand holds the paddle until now; from now on its contacts with the paddle are off
+            pp = data.xpos[self.pad_body].copy()
+            Rp = data.xmat[self.pad_body].reshape(3, 3).copy()
+            self.weld = (Rs.T @ (pp - ps), Rs.T @ Rp)
+        rel_p, rel_R = self.weld
+        pos = ps + Rs @ rel_p
+        R = Rs @ rel_R
+        quat = np.zeros(4)
+        mj.mju_mat2Quat(quat, R.flatten())
+        vel = np.zeros(6)                                     # [angular, linear] of the site, world frame
+        mj.mj_objectVelocity(model, data, mj.mjtObj.mjOBJ_SITE, sid, vel, 0)
+        w, v = vel[:3], vel[3:]
+        data.qpos[self.pad_q:self.pad_q + 3] = pos
+        data.qpos[self.pad_q + 3:self.pad_q + 7] = quat
+        data.qvel[self.pad_d:self.pad_d + 3] = v + np.cross(w, pos - ps)
+        data.qvel[self.pad_d + 3:self.pad_d + 6] = R.T @ w    # a free joint's angular velocity is in the body frame
+
     # ---- end of the episode --------------------------------------------------------------
     def finish(self, sim, out):
         self.robot.__dict__.pop("_advance", None)
@@ -545,10 +768,33 @@ class Oracle:
                       o2_tau_rms=[round(float(x), 2) for x in np.sqrt(self.tau_sq / max(self.tau_n, 1))])
         if self.plan is not None:
             ex.update(o4_t_hit=round(float(self.plan["t_hit"]), 3))
+        if self.traj is not None:
+            ex.update(o8_shift=round(self.traj["shift"], 4))
         if "o5" in self.modes:
             pe = [r["pad_err"] for r in self.log if "pad_err" in r]
             if pe:
                 ex.update(o5_pad_err_last=[round(float(x), 4) for x in pe[-1]])
+            qs = [r["q"] for r in self.log if r.get("q") is not None and "pad_err" in r]
+            if qs:
+                ex.update(o5_q_last=[round(float(x), 5) for x in qs[-1]])
+        rows_ = [r for r in self.log if r.get("palm") is not None]
+        if len(rows_) >= 8:
+            # RETENTION measures (3 Oct 2026): the palm's acceleration over the arm servo's window, split in the paddle's own axes: along the long axis (palm -> pad), along the pad normal, and ACROSS the
+            # paddle in its plane (the direction that twists it about the handle: the hand-held paddle was lost above about 80 m/s^2 of it, 115-120 m/s^2 in the other two)
+            P_ = np.array([r["palm"] for r in rows_])
+            dt_ = self.dt
+            a_ = np.zeros_like(P_)
+            a_[1:-1] = (P_[2:] - 2 * P_[1:-1] + P_[:-2]) / dt_ ** 2
+            k_ = np.ones(3) / 3.0
+            a_ = np.stack([np.convolve(a_[:, i], k_, mode="same") for i in range(3)], axis=1)
+            u_ = np.array([r["padc"] for r in rows_]) - P_
+            u_ = u_ / np.maximum(np.linalg.norm(u_, axis=1, keepdims=True), 1e-9)
+            n_ = np.array([r["padn"] for r in rows_])
+            ax_ = np.sum(a_ * u_, axis=1)
+            nm_ = np.sum(a_ * n_, axis=1)
+            lat_ = np.linalg.norm(a_ - ax_[:, None] * u_ - nm_[:, None] * n_, axis=1)
+            sl_ = slice(2, len(rows_) - 2)
+            ex.update(ret_lat=round(float(lat_[sl_].max()), 1), ret_ax=round(float(np.abs(ax_[sl_]).max()), 1), ret_n=round(float(np.abs(nm_[sl_]).max()), 1), ret_tot=round(float(np.linalg.norm(a_[sl_], axis=1).max()), 1))
         if self.fit is not None:
             R = [r["res"] for r in self.log if "res" in r]
             ex.update(fit_res_median=round(float(np.median(R)), 5) if R else None)

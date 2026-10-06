@@ -1,0 +1,54 @@
+{
+ "welded paddle + ideal arm (champion's pelvis) / validation 98030-98099": {
+  "n": 70,
+  "contact": 69,
+  "lost": 0,
+  "lost_frac": 0.0,
+  "never": 1,
+  "pos_med": 1.15,
+  "ori_med": 2.82,
+  "solved": 25,
+  "J": 4.1143,
+  "pad_speed_med": 0.99,
+  "solved_of_contacts": 0.362
+ },
+ "welded paddle + ideal arm (champion's pelvis) / set B 830000-830099": {
+  "n": 100,
+  "contact": 97,
+  "lost": 0,
+  "lost_frac": 0.0,
+  "never": 3,
+  "pos_med": 1.17,
+  "ori_med": 3.02,
+  "solved": 42,
+  "J": 3.973,
+  "pad_speed_med": 0.97,
+  "solved_of_contacts": 0.433
+ },
+ "welded paddle + ideal arm + settled pelvis / validation 98030-98099": {
+  "n": 70,
+  "contact": 69,
+  "lost": 0,
+  "lost_frac": 0.0,
+  "never": 1,
+  "pos_med": 0.91,
+  "ori_med": 2.74,
+  "solved": 31,
+  "J": 3.6266,
+  "pad_speed_med": 0.87,
+  "solved_of_contacts": 0.449
+ },
+ "welded paddle + ideal arm + settled pelvis / set B 830000-830099": {
+  "n": 100,
+  "contact": 97,
+  "lost": 0,
+  "lost_frac": 0.0,
+  "never": 3,
+  "pos_med": 1.0,
+  "ori_med": 2.85,
+  "solved": 40,
+  "J": 3.9094,
+  "pad_speed_med": 0.84,
+  "solved_of_contacts": 0.412
+ }
+}

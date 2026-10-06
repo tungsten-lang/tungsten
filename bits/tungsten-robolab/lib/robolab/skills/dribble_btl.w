@@ -59,6 +59,35 @@
 #           position's offset from the stage's nominal (pgc, pgs), knot values
 #           bounded to [0, 1] and the gains to +-pg_gmax; pg_first 0 programs the
 #           launch pass too; pg_stages / pg_per cycle the last tables.
+#   servo   (pg_fb > 0, scratchpad/btl3/) a tracking servo around the table: while a stage's
+#           program runs, the stroking arm's muscles take the stage's NOMINAL contractions
+#           (pgn / pgnx / pgny / pgnz: the conditional-mean contraction trajectory given the
+#           schedule's own features, fitted from closed-loop traces) as reflex targets with a
+#           small gain (pg_fb x pg_fbs<stage> x pg_fbw<joint>), damping about the nominal's
+#           own rate (pg_fbv); the table stays the drive. Further opt-in keys of the same
+#           study, every one neutral by default: pg_dt / pgdt (additive offset tables),
+#           pg_fk / pgfw / pgfa / pgft / pgfg (predict-then-cancel feedback on the offsets),
+#           pg_gfrom / pg_gu / pg_gz (play a stage only inside its schedule's design range),
+#           pg_lead<stage> (per-stage trigger lead).
+#   legs    (round 4, scratchpad/btl4/, every key neutral at zero) the ball that rises after a release clips the lead thigh (13-17 % of the
+#           right returns and the left second strokes) or crosses outside the gate: after the release of passes ll_from .. ll_from + ll_n - 1
+#           (3 and 4: the right return and the left second stroke) the lead leg's hip is flexed ll_hip and abducted ll_abd (ll_knee, ll_rot; with
+#           ll_two 1 the later windows use ll_hip1 / ll_abd1 / ll_knee1 / ll_rot1) for ll_win s (ramped by ll_ramp, from ll_t0), as contraction
+#           offsets on the stance track; lb_* do the same for the back leg. Motion during a table stroke breaks that stroke (l2_* window for the left
+#           return's flight, ls_* a static offset from the start: both measured and harmful), so the window starts at the table's release.
+#           Other round-4 opt-in keys: bl_trec / bt_trec (the x_recover duration of a reflex stroke), pg_vn / pgvk / pgvs / pgv (a hinge feature of the
+#           incoming ball's vertical speed times a block added to a table: fitted in the replay, no closed-loop gain), bl_dax / bl_day / bt_dax / bt_day
+#           (aim offsets of the reflex strokes after the tables), bl_ck* (cock offsets of the left second stroke), lt_* (trunk offsets in the leg windows).
+#   round 5 (scratchpad/btl5/, params only except one neutral key) the SECOND strokes of the cycle are tables too: stage 3 = the left hand's second stroke (pg_n 4), stage 4 = the
+#           right hand's second stroke (pg_n 5), same family as stages 0-2 (gain-scheduled on the predicted crossing and the arm's posture, 16 muscles x 17 knots,
+#           pg_gmax 4, pg_fbs3 / pg_fbs4 0 = no servo). A stage's trigger (pg_lead<stage>) may fire BEFORE the ball's bounce (ball_rise predicts the post-bounce state), so a lead
+#           above ~0.2 s starts the table before the reflex's own swing latch (stage 3: pg_lead3 0.24). pg_trec<stage> sets the x_recover duration before a programmed stage
+#           (default t_rec: neutral). Fitted in the replay (scratchpad/btl5/fit3.py) on closed-loop records of the chain that precedes the stage.
+#   round 6 (scratchpad/btl6/, three neutral keys + params) a ball that peaks below the strike height is where the chain breaks: the tables touch every ball that peaks above 0.66 m
+#           and 13-36 % of those below 0.62 (the tables' contact is planned at the ball's crossing of z 0.62, which such a ball never makes), and the chain's energy decays by ~0.1 m of
+#           apex per stage. pg_vn's hinge block (pgv<stage>_m_k) now has: pg_vsel<stage> 1 = the hinge's argument is the incoming ball's APEX, uv = clip((pgvk - apex) / pgvs, 0, 2.5)
+#           (2 = turned over, a block for strong balls); pg_vts<stage> = clock shift (s) per unit of uv; pg_gv<stage> = play the reflex instead of the table when the incoming ball's
+#           vertical speed at the crossing is below it (0.15 = a ball that never reaches the strike height; measured +0.036 streak on 840 training starts).
 #   learn   (bt_ilc > 0) iterative learning across repetitions: after each
 #           pass the receiving hand measures where the ball actually rose
 #           (its position as it crossed the strike height) against the spot
@@ -402,6 +431,79 @@
     # by the height)
     @bt_ldrop = param("bt_ldrop", ~0.0, ~0.0, ~1.0)
     @bt_lset = param("bt_lset", ~0.25, ~0.05, ~0.6)
+    # (reflex-stroke recovery, round 4) the duration of the x_recover chunk of a pass stroke that is NOT a programmed stage (the reflex
+    # strokes after the tables), for the lead leg's hand (bl_trec) and the other hand (bt_trec); the default is t_rec, the plain behavior.
+    # The ball of a table-driven pass arrives sooner than the reflex strokes were tuned for, so a full t_rec recovery starts the swing late.
+    @bl_trec = param("bl_trec", @t_rec, ~0.03, ~0.4)
+    @bt_trec = param("bt_trec", @t_rec, ~0.03, ~0.4)
+    # (round 5) the duration of the x_recover chunk that precedes a PROGRAMMED stage (pg_trec<stage>, default t_rec): a hand that has to start its table from the
+    # ready posture needs a recovery that ends before the table's trigger
+    @pg_trecs = []
+    zi = 0
+    while zi < 8
+      @pg_trecs.push(param("pg_trec" + zi.to_s, @t_rec, ~0.03, ~0.4))
+      zi += 1
+    # (leg clearance, round 4) after the release of passes ll_from .. ll_from + ll_n - 1 the lead leg's hip and knee are shifted by ll_hip /
+    # ll_knee radians (ramped over ll_ramp s, from ll_t0 to ll_win s after the release): a ball that rises after its bounce passes under the lead
+    # thigh with a few centimetres to spare, and clips it on 13-17 % of the right returns and the left second strokes. Neutral at zero.
+    @ll_hip = param("ll_hip", ~0.0, ~-0.4, ~0.4)
+    @ll_knee = param("ll_knee", ~0.0, ~-0.6, ~0.6)
+    @ll_abd = param("ll_abd", ~0.0, ~-0.4, ~0.4)
+    # the same for the back leg (lb_*): its thigh is hit by 5 of 21 stage-2 body failures
+    @ll_rot = param("ll_rot", ~0.0, ~-0.4, ~0.4)
+    # (round 4) aim offsets of the REFLEX pass strokes after the programmed stages (pass number >= pg_first + pg_n), added to bl_ax / bl_ay (the lead leg's
+    # hand) and bt_ax / bt_ay (the other hand): unlike bl_ax, they leave the programmed stages' posture untouched
+    @bl_dax = param("bl_dax", ~0.0, ~-0.3, ~0.3)
+    @bl_day = param("bl_day", ~0.0, ~-0.3, ~0.3)
+    @bt_dax = param("bt_dax", ~0.0, ~-0.3, ~0.3)
+    @bt_day = param("bt_day", ~0.0, ~-0.3, ~0.3)
+    # ll_two 1: the passes after the first window pass (ll_from) use ll_hip1 / ll_abd1 / ll_knee1 / ll_rot1 (the left second stroke's flight differs
+    # from the right return's)
+    @ll_two = param("ll_two", ~0.0, ~0.0, ~1.0)
+    @ll_hip1 = param("ll_hip1", ~0.0, ~-0.4, ~0.4)
+    @ll_abd1 = param("ll_abd1", ~0.0, ~-0.4, ~0.4)
+    @ll_knee1 = param("ll_knee1", ~0.0, ~-0.6, ~0.6)
+    @ll_rot1 = param("ll_rot1", ~0.0, ~-0.4, ~0.4)
+    # a second, independent clearance window (l2_*): the lead leg's hip / abduction / knee shifted from l2_t0 to l2_win s after the release of
+    # pass l2_pass (the left return's flight clips the lead thigh / shin on 13 % of the starts, but a lift during the right return's stroke disturbs it)
+    @l2_hip = param("l2_hip", ~0.0, ~-0.4, ~0.4)
+    @l2_abd = param("l2_abd", ~0.0, ~-0.4, ~0.4)
+    @l2_knee = param("l2_knee", ~0.0, ~-0.6, ~0.6)
+    @l2_pass = param("l2_pass", ~2.0, ~0.0, ~12.0).round
+    @l2_t0 = param("l2_t0", ~0.0, ~0.0, ~0.6)
+    @l2_win = param("l2_win", ~0.3, ~0.05, ~1.0)
+    @l2_ramp = param("l2_ramp", ~0.04, ~0.01, ~0.3)
+    # trunk offsets in the same windows: the left hand's second stroke meets arrivals up to 0.46 m out (it reaches 0.43): a twist toward it or a lean
+    # may extend its reach (the trunk joints spine_rot / spine_flex / spine_lat, radians)
+    @lt_rot = param("lt_rot", ~0.0, ~-0.4, ~0.4)
+    @lt_flex = param("lt_flex", ~0.0, ~-0.4, ~0.4)
+    @lt_lat = param("lt_lat", ~0.0, ~-0.4, ~0.4)
+    # a STATIC lead leg offset from the start (ramped over ls_ramp s): a different stance for the whole run (no motion during any stroke)
+    @ls_hip = param("ls_hip", ~0.0, ~-0.4, ~0.4)
+    @ls_abd = param("ls_abd", ~0.0, ~-0.4, ~0.4)
+    @ls_knee = param("ls_knee", ~0.0, ~-0.6, ~0.6)
+    @ls_ramp = param("ls_ramp", ~0.5, ~0.05, ~1.0)
+    # (round 4) a different cock for the reflex strokes after the tables (pass number >= pg_first + pg_n) of the lead leg's hand: joint offsets (radians)
+    # added to its commanded posture through its recovery, wait and the first bl_ckf s of its swing (the table strokes cock higher and more flexed)
+    @bl_cksf = param("bl_cksf", ~0.0, ~-0.6, ~0.6)
+    @bl_cksa = param("bl_cksa", ~0.0, ~-0.6, ~0.6)
+    @bl_cksr = param("bl_cksr", ~0.0, ~-0.6, ~0.6)
+    @bl_ckel = param("bl_ckel", ~0.0, ~-0.6, ~0.6)
+    @bl_ckwf = param("bl_ckwf", ~0.0, ~-0.6, ~0.6)
+    @bl_ckwd = param("bl_ckwd", ~0.0, ~-0.6, ~0.6)
+    @bl_ckr = param("bl_ckr", ~0.08, ~0.01, ~0.3)
+    @bl_ckf = param("bl_ckf", ~0.05, ~0.0, ~0.3)
+    @lb_hip1 = param("lb_hip1", ~0.0, ~-0.4, ~0.4)
+    @lb_abd1 = param("lb_abd1", ~0.0, ~-0.4, ~0.4)
+    @lb_knee1 = param("lb_knee1", ~0.0, ~-0.6, ~0.6)
+    @lb_hip = param("lb_hip", ~0.0, ~-0.4, ~0.4)
+    @lb_abd = param("lb_abd", ~0.0, ~-0.4, ~0.4)
+    @lb_knee = param("lb_knee", ~0.0, ~-0.6, ~0.6)
+    @ll_from = param("ll_from", ~3.0, ~0.0, ~12.0).round
+    @ll_n = param("ll_n", ~2.0, ~0.0, ~12.0).round
+    @ll_t0 = param("ll_t0", ~0.0, ~0.0, ~0.6)
+    @ll_win = param("ll_win", ~0.55, ~0.1, ~1.0)
+    @ll_ramp = param("ll_ramp", ~0.08, ~0.01, ~0.3)
     # (program) see the header
     @pg_on = param("pg_on", ~0.0, ~0.0, ~1.0)
     @pg_first = param("pg_first", ~1.0, ~0.0, ~8.0).round
@@ -413,6 +515,50 @@
     @pg_nk = param("pg_nk", ~17.0, ~2.0, ~40.0).round
     @pg_dk = param("pg_dk", ~0.025, ~0.005, ~0.1)
     @pg_lead = param("pg_lead", ~0.165, ~0.0, ~0.5)
+    # pg_align 1: the stage's table clock is aligned to the ball's predicted crossing instead of to the trigger tick: the trigger fires on the first
+    # control tick with the predicted time to the crossing <= the lead, so that time is anywhere in (lead - 0.005, lead]; the clock starts at
+    # (lead - pg_acd) - (that time), removing the tick quantisation (pg_acd 0.0025: the same mean start)
+    @pg_align = param("pg_align", ~0.0, ~0.0, ~1.0)
+    # (apex schedule) the incoming ball's predicted apex height da = apex - pg_ap0<stage> moves the stage's schedule position by
+    # (pg_apx<stage>, pg_apy<stage>) sigma per metre and its clock by pg_apt<stage> s per metre: a ball that will not rise to the strike height
+    # meets the palm lower and later
+    @pg_ap0 = []
+    @pg_apx = []
+    @pg_apy = []
+    @pg_apt = []
+    # (round 6) pg_vts<stage>: the stage's clock is shifted by pg_vts seconds per unit of the energy-hinge feature uvv (pg_vn 1): a weak ball's predicted crossing
+    # time is the time to its apex, so the stroke meets it at another phase; neutral at 0
+    @pg_vts = []
+    # (round 6) pg_gv<stage>: a stage whose incoming ball's vertical speed at the crossing (receive_state's c[6]) is below pg_gv is not played: the reflex strokes
+    # that pass (a weak ball hovers at the strike height: the open-loop table touches 34 % of them, the reflex more); neutral at its default -1
+    @pg_gvs = []
+    # (round 6) pg_vsel<stage> 1: the energy-hinge feature's argument is the incoming ball's predicted APEX (its rise's z + vz^2 / 2g) instead of its vertical speed
+    # at the crossing: uvv = clip((pgvk - apex) / pgvs, 0, 2.5), so the block pgv<stage>_m_k can lower the stroke for a ball that peaks below the strike height
+    # (the tables touch every ball that peaks above 0.66 m and 13-36 % of those below 0.62); neutral at 0
+    # pg_vsel<stage> 2: the same apex argument with the hinge turned over, uv = clip((apex - pgvk) / pgvs, 0, 2.5): a block for the STRONG balls
+    @pg_vsel = []
+    zi = 0
+    while zi < 8
+      @pg_ap0.push(param("pg_ap0" + zi.to_s, ~0.7, ~0.4, ~1.0))
+      @pg_apx.push(param("pg_apx" + zi.to_s, ~0.0, ~-100.0, ~100.0))
+      @pg_apy.push(param("pg_apy" + zi.to_s, ~0.0, ~-100.0, ~100.0))
+      @pg_apt.push(param("pg_apt" + zi.to_s, ~0.0, ~-1.0, ~1.0))
+      @pg_vts.push(param("pg_vts" + zi.to_s, ~0.0, ~-0.2, ~0.2))
+      @pg_gvs.push(param("pg_gv" + zi.to_s, ~-1.0, ~-1.0, ~3.0))
+      @pg_vsel.push(param("pg_vsel" + zi.to_s, ~0.0, ~0.0, ~2.0))
+      zi += 1
+    @pg_acd = param("pg_acd", ~0.0025, ~-0.005, ~0.005)
+    @pg_acds = []
+    zi = 0
+    while zi < 8
+      @pg_acds.push(param("pg_acd" + zi.to_s, @pg_acd, ~-0.005, ~0.005))
+      zi += 1
+    # per stage (table ordinal) trigger lead, defaulting to pg_lead
+    @pg_leads = []
+    zi = 0
+    while zi < 8
+      @pg_leads.push(param("pg_lead" + zi.to_s, @pg_lead, ~0.0, ~0.5))
+      zi += 1
     @pg_gain = param("pg_gain", ~0.0, ~0.0, ~1.0)
     @pg_dbg = param("pg_dbg", ~0.0, ~0.0, ~1.0)
     # gain-scheduled program (pg_gs 1): each stage's table is T0 + ux Tx + uy Ty, u the predicted crossing position's
@@ -428,6 +574,13 @@
     while zi < @pg_nz
       @pg_zj.push(param("pgzj" + zi.to_s, ~4.0, ~0.0, ~7.0).round)
       zi += 1
+    # (incoming-energy block, round 4) pg_vn 1: a hinge feature of the stage's predicted vertical speed at the crossing vzc,
+    # uv = clip((pgvk<stage> - vzc) / pgvs<stage>, 0, 2.5), multiplies a block pgv<stage>_<m>_<k> that is added to the table's knots (a ball that
+    # arrives with less energy than the table was fitted for is met with a different stroke); neutral at pg_vn 0 or a zero block
+    @pg_vn = param("pg_vn", ~0.0, ~0.0, ~1.0)
+    @pg_tv = []
+    @pg_vk = []
+    @pg_vs = []
     @pg_tz = []
     @pg_zn = []
     @pg_tx = []
@@ -485,6 +638,171 @@
             zi += 1
           @pg_tz.push(rz)
           @pg_zn.push(zn)
+          if @pg_vn > ~0.5
+            rv = []
+            mm = 0
+            while mm < 16
+              cv = []
+              kk = 0
+              while kk < @pg_nk
+                cv.push(param("pgv" + pp.to_s + "_" + mm.to_s + "_" + kk.to_s, ~0.0, ~-1.0, ~1.0))
+                kk += 1
+              rv.push(cv)
+              mm += 1
+            @pg_tv.push(rv)
+            @pg_vk.push(param("pgvk" + pp.to_s, ~1.5, ~0.0, ~3.0))
+            @pg_vs.push(param("pgvs" + pp.to_s, ~0.2, ~0.02, ~2.0))
+        pp += 1
+    # (feedback) a tracking servo around the table (pg_fb > 0): while a stage's program runs, the stroking arm's 16 muscles get the
+    # stage's NOMINAL contractions (tables pgn / pgnx / pgny / pgnz: the contraction trajectory of the table-driven stroke given the
+    # schedule's features, fitted from closed-loop traces) as reflex targets with gain pg_fb (x pg_fbw<joint>), from pg_fbt0 to pg_fbt1
+    # after the trigger (ramps of pg_fbr); the damping is about the nominal's own rate (weight pg_fbv). Every key neutral at pg_fb 0.
+    @pg_fb = param("pg_fb", ~0.0, ~0.0, ~4.0)
+    @pg_fbt0 = param("pg_fbt0", ~0.03, ~0.0, ~0.4)
+    @pg_fbt1 = param("pg_fbt1", ~0.4, ~0.0, ~0.4)
+    @pg_fbr = param("pg_fbr", ~0.03, ~0.001, ~0.2)
+    @pg_fbv = param("pg_fbv", ~1.0, ~0.0, ~1.0)
+    # the servo gain is multiplied by pg_fbm from pg_fbtl after the trigger on (ramped by pg_fbr): a different gain over the contact
+    @pg_fbm = param("pg_fbm", ~1.0, ~0.0, ~8.0)
+    @pg_fbtl = param("pg_fbtl", ~0.15, ~0.0, ~0.4)
+    @pg_fbw = []
+    zi = 0
+    while zi < 8
+      @pg_fbw.push(param("pg_fbw" + zi.to_s, ~1.0, ~0.0, ~4.0))
+      zi += 1
+    # per stage multipliers of the servo gain (stage p = pass number - pg_first)
+    @pg_fbs = []
+    zi = 0
+    while zi < 8
+      @pg_fbs.push(param("pg_fbs" + zi.to_s, ~1.0, ~0.0, ~4.0))
+      zi += 1
+    # (additive offsets) pg_dt 1: every stage adds an offset table pgdt<p>_<m>_<j> (activation, 16 arm muscles, pg_dtn knots pg_dtk s apart
+    # from the trigger, linear in between, zero after the last) to the table's drive: the excitation of the closed-loop sensitivity
+    # identification (scratchpad/btl3/), and the static bias of the stroke
+    @pg_dt = param("pg_dt", ~0.0, ~0.0, ~1.0)
+    @pg_dtn = param("pg_dtn", ~6.0, ~2.0, ~12.0).round
+    @pg_dtk = param("pg_dtk", ~0.05, ~0.01, ~0.1)
+    @pg_dtt = []
+    if @pg_on > ~0.5 && @pg_dt > ~0.5
+      pp = 0
+      while pp < @pg_stages
+        rows = []
+        mm = 0
+        while mm < 16
+          row = []
+          kk = 0
+          while kk < @pg_dtn
+            row.push(param("pgdt" + pp.to_s + "_" + mm.to_s + "_" + kk.to_s, ~0.0, ~-1.0, ~1.0))
+            kk += 1
+          rows.push(row)
+          mm += 1
+        @pg_dtt.push(rows)
+        pp += 1
+    # (predict-then-cancel feedback) pg_fk > 0: at pg_fq decision times pg_fd<q> after the trigger, the stage's predicted outcome error
+    # (3 numbers: the next stage's input, e.g. crossing x, y and vertical speed) is formed from the live features (the ball's predicted
+    # crossing x, y; the stroking arm's 8 joint proxies c(pos) - c(neg) and their rates) by a fitted linear map
+    # (pgfw<p>_<q>_<i>_<f>, pgfa<p>_<q>_<i>, minus the target pgft<p>_<i>), and the offset table of the running stage is changed by
+    # -pg_fk * G (pgfg<p>_<q>_<m>_<k>_<i>) times it: the offsets of pg_dt are the knots of that table
+    @pg_fk = param("pg_fk", ~0.0, ~0.0, ~2.0)
+    @pg_fq = param("pg_fq", ~1.0, ~0.0, ~3.0).round
+    @pg_fd = [param("pg_fd0", ~0.06, ~0.0, ~0.3), param("pg_fd1", ~0.10, ~0.0, ~0.3), param("pg_fd2", ~0.14, ~0.0, ~0.3)]
+    @pg_fw = []
+    @pg_fa = []
+    @pg_ft = []
+    @pg_fg = []
+    if @pg_on > ~0.5 && @pg_fk > ~0.0
+      pp = 0
+      while pp < @pg_stages
+        tg = []
+        i3 = 0
+        while i3 < 3
+          tg.push(param("pgft" + pp.to_s + "_" + i3.to_s, ~0.0, ~-10.0, ~10.0))
+          i3 += 1
+        @pg_ft.push(tg)
+        fwq = []
+        faq = []
+        fgq = []
+        qq = 0
+        while qq < @pg_fq
+          fw3 = []
+          fa3 = []
+          i3 = 0
+          while i3 < 3
+            fr = []
+            ff = 0
+            while ff < 18
+              fr.push(param("pgfw" + pp.to_s + "_" + qq.to_s + "_" + i3.to_s + "_" + ff.to_s, ~0.0, ~-100.0, ~100.0))
+              ff += 1
+            fw3.push(fr)
+            fa3.push(param("pgfa" + pp.to_s + "_" + qq.to_s + "_" + i3.to_s, ~0.0, ~-100.0, ~100.0))
+            i3 += 1
+          fwq.push(fw3)
+          faq.push(fa3)
+          gm = []
+          mm = 0
+          while mm < 16
+            gk = []
+            kk = 0
+            while kk < @pg_dtn
+              gk.push([param("pgfg" + pp.to_s + "_" + qq.to_s + "_" + mm.to_s + "_" + kk.to_s + "_0", ~0.0, ~-10.0, ~10.0), param("pgfg" + pp.to_s + "_" + qq.to_s + "_" + mm.to_s + "_" + kk.to_s + "_1", ~0.0, ~-10.0, ~10.0), param("pgfg" + pp.to_s + "_" + qq.to_s + "_" + mm.to_s + "_" + kk.to_s + "_2", ~0.0, ~-10.0, ~10.0)])
+              kk += 1
+            gm.push(gk)
+            mm += 1
+          fgq.push(gm)
+          qq += 1
+        @pg_fw.push(fwq)
+        @pg_fa.push(faq)
+        @pg_fg.push(fgq)
+        pp += 1
+    # (gate) from pass pg_gfrom on (pass number - pg_first), a stage whose schedule features at the trigger lie outside the table's design
+    # range (|ux|, |uy| > pg_gu or any |z_i| > pg_gz, in the stage's units) is not played: the reflex strokes that pass
+    @pg_gfrom = param("pg_gfrom", ~99.0, ~0.0, ~99.0).round
+    @pg_gu = param("pg_gu", ~2.0, ~0.0, ~2.5)
+    @pg_gz = param("pg_gz", ~2.0, ~0.0, ~2.5)
+    @pg_nt = []
+    @pg_nx = []
+    @pg_ny = []
+    @pg_nzt = []
+    if @pg_on > ~0.5 && @pg_fb > ~0.0
+      pp = 0
+      while pp < @pg_stages
+        rt = []
+        rx = []
+        ry = []
+        mm = 0
+        while mm < 16
+          ct = []
+          cx = []
+          cy = []
+          kk = 0
+          while kk < @pg_nk
+            ct.push(param("pgn" + pp.to_s + "_" + mm.to_s + "_" + kk.to_s, ~0.0, ~-1.0, ~2.0))
+            cx.push(param("pgnx" + pp.to_s + "_" + mm.to_s + "_" + kk.to_s, ~0.0, ~-1.0, ~1.0))
+            cy.push(param("pgny" + pp.to_s + "_" + mm.to_s + "_" + kk.to_s, ~0.0, ~-1.0, ~1.0))
+            kk += 1
+          rt.push(ct)
+          rx.push(cx)
+          ry.push(cy)
+          mm += 1
+        rz = []
+        zi = 0
+        while zi < @pg_nz
+          zrows = []
+          mm = 0
+          while mm < 16
+            cz = []
+            kk = 0
+            while kk < @pg_nk
+              cz.push(param("pgnz" + pp.to_s + "_" + zi.to_s + "_" + mm.to_s + "_" + kk.to_s, ~0.0, ~-1.0, ~1.0))
+              kk += 1
+            zrows.push(cz)
+            mm += 1
+          rz.push(zrows)
+          zi += 1
+        @pg_nt.push(rt)
+        @pg_nx.push(rx)
+        @pg_ny.push(ry)
+        @pg_nzt.push(rz)
         pp += 1
 
   -> btl?
@@ -547,11 +865,16 @@
     @ilc = {"r" => [~0.0, ~0.0], "l" => [~0.0, ~0.0]}
     @kch = {}
     @rch = {}
+    @xrc = {}
+    @rel_t = ~-1.0
+    @ck_sw = ~-1.0
     @kplan = {"r" => nil, "l" => nil}
     @ktouch = {"r" => false, "l" => false}
     @kplanned = {"r" => false, "l" => false}
     @pass_no = 0
     @pg_state = {"r" => nil, "l" => nil}
+    @pg_vref = {"r" => false, "l" => false}
+    @pg_skip = -1
     @pg_mus = {}
     if @pg_on > ~0.5
       ["r", "l"].each ->(sd)
@@ -798,7 +1121,9 @@
       plan_early = Latch.test("plan_early", ->(f, e, c) e >= @t_rec || plan_ready?(f, c, hand))
       mv.add(Chunk.new("x_recover", @t_rec).pose(bcock).hold_until(plan_early, ~1.5).correct(meet, @spring).on_enter(->(f, c) entering(f, c, hand, bzh)).branch(->(f, c) planned_next(hand)))
     else
-      mv.add(Chunk.new("x_recover", @t_rec).pose(bcock).correct(meet, @spring).on_enter(->(f, c) entering(f, c, hand, bzh)))
+      xr = BtlChunk.new("x_recover", @t_rec).pose(bcock).correct(meet, @spring).on_enter(->(f, c) entering(f, c, hand, bzh))
+      @xrc[hand.side] = xr
+      mv.add(xr)
     if planned?(hand)
       plan = Latch.test("plan", ->(f, e, c) plan_ready?(f, c, hand))
       mv.add(Chunk.new("x_wait", ~0.05).pose(bcock).hold_until(plan, ~1.5).correct(meet, @spring).followed_by("k_strike"))
@@ -865,6 +1190,9 @@
     if ychain?(hand)
       ax = @br_ax
       ay = ly(@br_ay)
+    if @pg_on > ~0.5 && @pass_no >= @pg_first + @pg_n
+      ax = ax + (hand.side == lead_side ? @bl_dax : @bt_dax)
+      ay = ay + ly(hand.side == lead_side ? @bl_day : @bt_day)
     @target = [sp[0] + off[0] + ax, sp[1] + off[1] + ay]
     @sent = [hand.side, sp[0], sp[1]]
     nil
@@ -982,6 +1310,7 @@
       return entry_for(hand)
     other = other_of(hand)
     @pass_no = @pass_no + 1
+    @rel_t = f.t
     ctl.track("trunk").jump(ctl, f, other.side == lead_side ? "rot_l" : "rot_r") if rotating?
     @active = other
     other.ix = ~0.0
@@ -994,7 +1323,24 @@
 
   -> entering(f, ctl, hand, zh)
     @kplanned[hand.side] = false if btl?
+    retime_recover(hand) if btl?
     super(f, ctl, hand, zh)
+
+  # (reflex-stroke recovery) The x_recover chunk of a reflex-driven pass stroke lasts bl_trec (the lead leg's hand) or bt_trec (the other
+  # hand); a programmed stage's, and every other chunk's entry, keep t_rec.
+  -> retime_recover(hand)
+    xr = @xrc[hand.side]
+    return nil if xr == nil
+    t = @t_rec
+    if @move == "B"
+      o = pg_ordinal
+      if o < 0
+        t = @bt_trec
+        t = @bl_trec if hand.side == lead_side
+      else
+        t = @pg_trecs[o]
+    xr.retime(t)
+    nil
 
   -> striking(f, ctl, hand, redirect)
     return super(f, ctl, hand, redirect) if !btl?
@@ -1395,7 +1741,7 @@
 
   # Start the program for the receiving hand once the ball's predicted rising crossing of bt_rh is pg_lead away.
   -> pg_trigger(f, ctl)
-    return nil if (@pass_no < 1 && @pg_first > 0) || @pg_state[@active.side] != nil
+    return nil if (@pass_no < 1 && @pg_first > 0) || @pg_state[@active.side] != nil || @pg_skip == @pass_no
     return nil if f.get("ball_held") > ~0.5
     o = pg_ordinal
     return nil if o < 0
@@ -1404,7 +1750,10 @@
     return nil if f.at("ball_pos", 2) < ~0.14
     c = receive_state(f)
     ctl.emit("dbg:pgc:" + (c == nil ? "nil" : c[0].to_s)) if @pg_dbg > ~0.5
-    return nil if c == nil || c[0] > @pg_lead
+    return nil if c == nil || c[0] > @pg_leads[o]
+    if @pg_gvs[o] > ~0.0 && c[6] < @pg_gvs[o]
+      @pg_skip = @pass_no
+      return nil
     hand = @active
     ux = ~0.0
     uy = ~0.0
@@ -1422,7 +1771,35 @@
         zp = @pg_zn[o][zi]
         zs.push(DribbleV3Math.clamp((zq - zp[0]) / zp[1], ~-2.5, ~2.5))
         zi += 1
-    @pg_state[hand.side] = [f.t, o, false, false, ux, uy, zs]
+    da = ~0.0
+    if @pg_apx[o] != ~0.0 || @pg_apy[o] != ~0.0 || @pg_apt[o] != ~0.0
+      da = f.at("ball_apex", 2) - @pg_ap0[o]
+      ux = DribbleV3Math.clamp(ux + @pg_apx[o] * da, ~-2.5, ~2.5)
+      uy = DribbleV3Math.clamp(uy + @pg_apy[o] * da, ~-2.5, ~2.5)
+    if @pass_no - @pg_first >= @pg_gfrom
+      far = ux.abs > @pg_gu || uy.abs > @pg_gu
+      gi = 0
+      while gi < zs.size
+        far = true if zs[gi].abs > @pg_gz
+        gi += 1
+      if far
+        @pg_skip = @pass_no
+        return nil
+    offs = nil
+    offs = pg_offsets_init(o) if @pg_dt > ~0.5 || @pg_fk > ~0.0
+    shift = ~0.0
+    shift = @pg_leads[o] - @pg_acds[o] - c[0] if @pg_align > ~0.5
+    shift = shift + @pg_apt[o] * da
+    uvv = ~0.0
+    if @pg_vn > ~0.5 && @pg_gs > ~0.5
+      fv = c[6]
+      if @pg_vsel[o] > ~0.5
+        vzr = f.at("ball_rise", 5)
+        fv = f.at("ball_rise", 2) + vzr * vzr / (~2.0 * @g)
+      uvv = DribbleV3Math.clamp((@pg_vk[o] - fv) / @pg_vs[o], ~0.0, ~2.5)
+      uvv = DribbleV3Math.clamp((fv - @pg_vk[o]) / @pg_vs[o], ~0.0, ~2.5) if @pg_vsel[o] > ~1.5
+      shift = shift + @pg_vts[o] * uvv if @pg_vts[o] != ~0.0
+    @pg_state[hand.side] = [f.t, o, false, false, ux, uy, zs, offs, 0, c[1], c[2], @pass_no - @pg_first, shift, uvv]
     ctl.emit("dbg:pgu:" + ux.to_s + ":" + uy.to_s + ":" + zs.join(":")) if @pg_dbg > ~0.5
     ctl.track(hand.name).jump(ctl, f, "g_run")
     nil
@@ -1432,15 +1809,18 @@
     st = @pg_state[hand.side]
     return nil if st == nil
     tt = f.t - st[0]
+    te = tt + st[12]
     tab = @pg_tab[st[1]]
     nk = @pg_nk
-    x = tt / @pg_dk
+    x = te / @pg_dk
+    x = ~0.0 if x < ~0.0
     if x >= (nk - 1) * ~1.0
       @pg_state[hand.side] = nil
       return nil
     i = x.floor
     w = x - i * ~1.0
     mus = @pg_mus[hand.side]
+    pg_decide(f, st, mus, te) if @pg_fk > ~0.0 && st[8] < @pg_fq && te >= @pg_fd[st[8]] - ~0.0025
     m = 0
     while m < 16
       row = tab[m]
@@ -1458,9 +1838,14 @@
           a0 = a0 + st[6][zi] * DribbleV3Math.clamp(rzz[i], ~0.0 - gm, gm)
           a1 = a1 + st[6][zi] * DribbleV3Math.clamp(rzz[i + 1], ~0.0 - gm, gm)
           zi += 1
+        if @pg_vn > ~0.5 && st[13] > ~0.0
+          rv = @pg_tv[st[1]][m]
+          a0 = a0 + st[13] * DribbleV3Math.clamp(rv[i], ~0.0 - gm, gm)
+          a1 = a1 + st[13] * DribbleV3Math.clamp(rv[i + 1], ~0.0 - gm, gm)
         a0 = DribbleV3Math.clamp(a0, ~0.0, ~1.0)
         a1 = DribbleV3Math.clamp(a1, ~0.0, ~1.0)
         v = a0 + (a1 - a0) * w
+      v = v + pg_offset(st, m, te) if st[7] != nil
       ctl.add_drive(mus[m], v)
       m += 1
     k = hand.touch_k
@@ -1471,12 +1856,77 @@
       handoff_prog(f, ctl, hand)
     nil
 
+  # The additive offset (pg_dt) of arm muscle m at time tt of the running program: the stage's offset table, linear between knots
+  # pg_dtk apart, falling to zero after the last knot.
+  -> pg_offset(st, m, tt)
+    x = tt / @pg_dtk
+    i = x.floor
+    return ~0.0 if i >= @pg_dtn
+    a = st[7][m]
+    w = x - i * ~1.0
+    return a[i] * (~1.0 - w) if i + 1 >= @pg_dtn
+    a[i] * (~1.0 - w) + a[i + 1] * w
+
+  # A fresh offset table for a starting stage: the static pgdt table's values (pg_dt) or zeros.
+  -> pg_offsets_init(o)
+    rows = []
+    m = 0
+    while m < 16
+      row = []
+      k = 0
+      while k < @pg_dtn
+        v = ~0.0
+        v = @pg_dtt[o][m][k] if @pg_dt > ~0.5
+        row.push(v)
+        k += 1
+      rows.push(row)
+      m += 1
+    rows
+
+  # One decision of the feedback: the predicted outcome error from the live features, cancelled through the stage's offset table.
+  -> pg_decide(f, st, mus, tt)
+    q = st[8]
+    o = st[1]
+    x = [st[9], st[10]]
+    j = 0
+    while j < 8
+      x.push(f.c(mus[2 * j]) - f.c(mus[2 * j + 1]))
+      j += 1
+    j = 0
+    while j < 8
+      x.push(f.cdot(mus[2 * j]) - f.cdot(mus[2 * j + 1]))
+      j += 1
+    yh = []
+    i = 0
+    while i < 3
+      wv = @pg_fw[o][q][i]
+      e = @pg_fa[o][q][i] - @pg_ft[o][i]
+      k = 0
+      while k < 18
+        e = e + wv[k] * x[k]
+        k += 1
+      yh.push(e)
+      i += 1
+    g = @pg_fg[o][q]
+    offs = st[7]
+    m = 0
+    while m < 16
+      k = 0
+      while k < @pg_dtn
+        d = g[m][k]
+        offs[m][k] = offs[m][k] - @pg_fk * (d[0] * yh[0] + d[1] * yh[1] + d[2] * yh[2])
+        k += 1
+      m += 1
+    st[8] = q + 1
+    nil
+
   # The release of a programmed pass: the other hand starts its receiving (as `handoff`, the hand itself carries on
   # with the program's follow-through).
   -> handoff_prog(f, ctl, hand)
     hand.fresh = false
     other = other_of(hand)
     @pass_no = @pass_no + 1
+    @rel_t = f.t
     @active = other
     other.ix = ~0.0
     other.iy = ~0.0
@@ -1484,6 +1934,168 @@
     other.fresh = true
     choose(f, ctl, other)
     ctl.track(other.name).jump(ctl, f, entry_for(other))
+    nil
+
+  # The nominal contraction of arm muscle m at knot i of the running stage's program, for this start's features (the table's own
+  # structure: N0 + ux Nx + uy Ny + sum_k z_k Nz_k).
+  -> pg_nominal(st, m, i)
+    o = st[1]
+    v = @pg_nt[o][m][i] + st[4] * @pg_nx[o][m][i] + st[5] * @pg_ny[o][m][i]
+    zi = 0
+    while zi < @pg_nz
+      v = v + st[6][zi] * @pg_nzt[o][zi][m][i]
+      zi += 1
+    v
+
+  # The servo around the table (pg_fb > 0), after the tracks of every tick: while the hand's program runs (between pg_fbt0 and pg_fbt1
+  # of its time, ramped), its 16 arm muscles take the nominal contractions as targets and the servo gain, so a deviation from the
+  # nominal stroke is pulled back by the stretch reflex while the table stays the drive; the damping is about the nominal's own rate.
+  -> pg_servo(f, ctl, hand)
+    st = @pg_state[hand.side]
+    if st == nil
+      pg_vref(ctl, hand, false)
+      return nil
+    tt = f.t - st[0] + st[12]
+    ramp = DribbleV3Math.clamp((tt - @pg_fbt0) / @pg_fbr, ~0.0, ~1.0) * DribbleV3Math.clamp((@pg_fbt1 - tt) / @pg_fbr, ~0.0, ~1.0)
+    pg_vref(ctl, hand, true)
+    x = tt / @pg_dk
+    x = ~0.0 if x < ~0.0
+    i = x.floor
+    w = x - i * ~1.0
+    mus = @pg_mus[hand.side]
+    cmd = ctl.command
+    late = DribbleV3Math.clamp((tt - @pg_fbtl) / @pg_fbr, ~0.0, ~1.0)
+    gs = @pg_fb * ramp * @pg_fbs[st[1]] * (~1.0 + (@pg_fbm - ~1.0) * late)
+    j = 0
+    while j < 8
+      g = gs * @pg_fbw[j]
+      s = 0
+      while s < 2
+        m = 2 * j + s
+        c0 = pg_nominal(st, m, i)
+        c1 = pg_nominal(st, m, i + 1)
+        cmd[mus[m]] = c0 + (c1 - c0) * w
+        ctl.set_gain(mus[m], g)
+        s += 1
+      j += 1
+    nil
+
+  # The velocity reference (damping about the commanded rate) of the stroking arm, switched only when it changes.
+  -> pg_vref(ctl, hand, running)
+    return nil if @pg_fbv <= ~0.0 || running == @pg_vref[hand.side]
+    @pg_vref[hand.side] = running
+    ctl.reflex.set_velocity_reference(@arm_mask[hand.side], running ? @pg_fbv : ~0.0)
+    nil
+
+  -> after(frame, ctl)
+    if btl? && @pg_on > ~0.5 && @pg_fb > ~0.0
+      pg_servo(frame, ctl, @right)
+      pg_servo(frame, ctl, @left)
+    cock_off(frame, ctl) if btl? && @pg_on > ~0.5 && (@bl_cksf != ~0.0 || @bl_cksa != ~0.0 || @bl_cksr != ~0.0 || @bl_ckel != ~0.0 || @bl_ckwf != ~0.0 || @bl_ckwd != ~0.0)
+    leg_static(frame, ctl) if btl? && (@ls_hip != ~0.0 || @ls_abd != ~0.0 || @ls_knee != ~0.0)
+    leg_clear2(frame, ctl) if btl? && (@l2_hip != ~0.0 || @l2_abd != ~0.0 || @l2_knee != ~0.0)
+    leg_clear(frame, ctl) if btl? && (@ll_hip != ~0.0 || @ll_knee != ~0.0 || @ll_abd != ~0.0 || @ll_rot != ~0.0 || @lb_hip1 != ~0.0 || @lb_abd1 != ~0.0 || @lb_knee1 != ~0.0 || @lt_rot != ~0.0 || @lt_flex != ~0.0 || @lt_lat != ~0.0 || @lb_hip != ~0.0 || @lb_abd != ~0.0 || @lb_knee != ~0.0 || @ll_two > ~0.5)
+    super(frame, ctl)
+
+  # (cock) The lead leg's hand's joint offsets through the recovery, the wait and the start of the swing of a reflex stroke after the tables.
+  -> cock_off(f, ctl)
+    return nil if @pass_no < @pg_first + @pg_n || @rel_t < ~0.0
+    hand = @left
+    hand = @right if lead_side == "r"
+    return nil if !active?(hand) || @move != "B"
+    nm = ctl.track(hand.name).chunk_name
+    w = ~0.0
+    if nm == "x_recover" || nm == "x_wait"
+      w = DribbleV3Math.clamp((f.t - @rel_t) / @bl_ckr, ~0.0, ~1.0)
+      @ck_sw = ~-1.0
+    elsif nm == "x_swing" && @bl_ckf > ~0.0
+      @ck_sw = f.t if @ck_sw < ~0.0
+      w = DribbleV3Math.clamp(~1.0 - (f.t - @ck_sw) / @bl_ckf, ~0.0, ~1.0)
+    return nil if w <= ~0.0
+    side = hand.side
+    off = zeros
+    joint_offset(off, side + "_shoulder_flex", @bl_cksf * w)
+    joint_offset(off, side + "_shoulder_abd", @bl_cksa * w)
+    joint_offset(off, side + "_shoulder_rot", @bl_cksr * w)
+    joint_offset(off, side + "_elbow", @bl_ckel * w)
+    joint_offset(off, side + "_wrist_flex", @bl_ckwf * w)
+    joint_offset(off, side + "_wrist_dev", @bl_ckwd * w)
+    i = 0
+    while i < off.size
+      ctl.add_offset(i, off[i]) if off[i] != ~0.0
+      i += 1
+    nil
+
+  # (static lead leg offset) from the start: the lead leg's hip / abduction / knee shifted for the whole run.
+  -> leg_static(f, ctl)
+    w = DribbleV3Math.clamp(f.t / @ls_ramp, ~0.0, ~1.0)
+    off = zeros
+    joint_offset(off, lead_side + "_hip_flex", @ls_hip * w)
+    joint_offset(off, lead_side + "_hip_abd", @ls_abd * w)
+    joint_offset(off, lead_side + "_knee", @ls_knee * w)
+    i = 0
+    while i < off.size
+      ctl.add_offset(i, off[i]) if off[i] != ~0.0
+      i += 1
+    nil
+
+  # (leg clearance 2) The lead leg's offsets in the window after the release of pass l2_pass.
+  -> leg_clear2(f, ctl)
+    return nil if @rel_t < ~0.0 || @pass_no != @l2_pass
+    tt = f.t - @rel_t - @l2_t0
+    return nil if tt < ~0.0 || tt > @l2_win
+    w = DribbleV3Math.clamp(tt / @l2_ramp, ~0.0, ~1.0) * DribbleV3Math.clamp((@l2_win - tt) / @l2_ramp, ~0.0, ~1.0)
+    off = zeros
+    joint_offset(off, lead_side + "_hip_flex", @l2_hip * w)
+    joint_offset(off, lead_side + "_hip_abd", @l2_abd * w)
+    joint_offset(off, lead_side + "_knee", @l2_knee * w)
+    i = 0
+    while i < off.size
+      ctl.add_offset(i, off[i]) if off[i] != ~0.0
+      i += 1
+    nil
+
+  # (leg clearance) The lead leg's hip and knee offsets in the window after the release of the passes ll_from ...
+  -> leg_clear(f, ctl)
+    return nil if @rel_t < ~0.0
+    p = @pass_no - @ll_from
+    return nil if p < 0 || p >= @ll_n
+    tt = f.t - @rel_t - @ll_t0
+    return nil if tt < ~0.0 || tt > @ll_win
+    w = DribbleV3Math.clamp(tt / @ll_ramp, ~0.0, ~1.0) * DribbleV3Math.clamp((@ll_win - tt) / @ll_ramp, ~0.0, ~1.0)
+    off = zeros
+    bs = "l"
+    bs = "r" if lead_side == "l"
+    hh = @ll_hip
+    ha = @ll_abd
+    hk = @ll_knee
+    hr = @ll_rot
+    if @ll_two > ~0.5 && p >= 1
+      hh = @ll_hip1
+      ha = @ll_abd1
+      hk = @ll_knee1
+      hr = @ll_rot1
+    joint_offset(off, "spine_rot", @lt_rot * w)
+    joint_offset(off, "spine_flex", @lt_flex * w)
+    joint_offset(off, "spine_lat", @lt_lat * w)
+    joint_offset(off, lead_side + "_hip_flex", hh * w)
+    joint_offset(off, lead_side + "_hip_abd", ha * w)
+    joint_offset(off, lead_side + "_hip_rot", hr * w)
+    joint_offset(off, lead_side + "_knee", hk * w)
+    bh = @lb_hip
+    ba = @lb_abd
+    bk = @lb_knee
+    if @ll_two > ~0.5 && p >= 1
+      bh = @lb_hip1
+      ba = @lb_abd1
+      bk = @lb_knee1
+    joint_offset(off, bs + "_hip_flex", bh * w)
+    joint_offset(off, bs + "_hip_abd", ba * w)
+    joint_offset(off, bs + "_knee", bk * w)
+    i = 0
+    while i < off.size
+      ctl.add_offset(i, off[i]) if off[i] != ~0.0
+      i += 1
     nil
 
   # ILC: as the ball rises through the receiving hand's strike height after a

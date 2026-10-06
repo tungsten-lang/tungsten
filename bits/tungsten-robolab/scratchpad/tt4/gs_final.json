@@ -1,0 +1,46 @@
+{
+ "champion grip / validation 98030-98099": {
+  "n": 70,
+  "contact": 58,
+  "lost": 0,
+  "lost_frac": 0.0,
+  "never": 12,
+  "pos_med": 1.08,
+  "ori_med": 3.66,
+  "solved": 24,
+  "J": 4.7317
+ },
+ "champion grip / set B 830000-830099": {
+  "n": 100,
+  "contact": 79,
+  "lost": 0,
+  "lost_frac": 0.0,
+  "never": 21,
+  "pos_med": 0.93,
+  "ori_med": 3.43,
+  "solved": 30,
+  "J": 4.8268
+ },
+ "best candidate / validation 98030-98099": {
+  "n": 70,
+  "contact": 58,
+  "lost": 0,
+  "lost_frac": 0.0,
+  "never": 12,
+  "pos_med": 1.01,
+  "ori_med": 2.73,
+  "solved": 35,
+  "J": 3.757
+ },
+ "best candidate / set B 830000-830099": {
+  "n": 100,
+  "contact": 82,
+  "lost": 0,
+  "lost_frac": 0.0,
+  "never": 18,
+  "pos_med": 0.93,
+  "ori_med": 2.28,
+  "solved": 40,
+  "J": 3.9838
+ }
+}

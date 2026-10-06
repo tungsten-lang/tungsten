@@ -1,0 +1,24 @@
+{
+ "validation 98030-98099": {
+  "n": 70,
+  "contact": 58,
+  "lost": 0,
+  "lost_frac": 0.0,
+  "never": 12,
+  "pos_med": 1.08,
+  "ori_med": 3.66,
+  "solved": 24,
+  "J": 2.1031
+ },
+ "set B 830000-830099": {
+  "n": 100,
+  "contact": 79,
+  "lost": 0,
+  "lost_frac": 0.0,
+  "never": 21,
+  "pos_med": 0.93,
+  "ori_med": 3.43,
+  "solved": 30,
+  "J": 2.0268
+ }
+}

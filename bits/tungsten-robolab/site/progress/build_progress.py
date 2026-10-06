@@ -28,7 +28,7 @@ ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 CHAMPS = json.load(open(os.path.join(ROOT, "playground/arena/champions.json")))
 CODEX_ROOT = "/Users/erik/.codex/worktrees/robolab-challengers/tungsten/bits/tungsten-robolab/"
 CODEX = CODEX_ROOT + "results-page/dist/assets/"
-ARTIFACT_URL = "https://claude.ai/artifact/CjykjapusLk3wsktyAbg7T"
+ARTIFACT_URL = "https://claude.ai/artifact/1eToMF5Y2bmx93RgAmRqdN"   # the artifact this login owns and updates (the earlier CjykjapusLk3wsktyAbg7T belongs to another login)
 PUBLIC_VIDEO_BASE = "https://thecompanygardener.yaks.app/robolab/"   # every video is also a public file here (video/mp4, byte ranges)
 PUBLISHED = os.path.join(HERE, "published.json")
 
@@ -485,7 +485,12 @@ def build():
     tt300 = 100 * F("tt_p2_300")
     v4p95, v4avg, v4e2, v4sp = (F("sprint_top_speed_v4_p95"), F("sprint_top_speed_v4"), F("sprint_top_speed_v4_elite2"),
                                 F("sprint_top_speed_v4_sprinter"))
-    v4bd = F("sprint_top_speed_v4_beyond")           # the labelled beyond-human body
+    bd = "sprint_top_speed_v4_beyond_fresh512"       # the labelled beyond-human body, the current runner on 512 fresh starts
+    v4bd = F(bd)
+    bd_n = len(CHAMPS[bd]["scores"])
+    bd_falls = bd_n - len(scores_ok(bd))
+    lj_bd, lj_bd96 = F("long_jump_v4_beyond"), F("long_jump_v4_beyond_robust96")   # the labelled beyond-human long jump
+    lj_bd96_legal = [x for x in CHAMPS["long_jump_v4_beyond_robust96"]["scores"] if x > 0]
 
     # ------------------------------------------------------------ board -------------
     # (anchor, name, big number, unit, one line under it)
@@ -493,7 +498,7 @@ def build():
         ("run-natural", "Natural running", "7.3°", "off human running", "12 starts, 11 stay up"),
         ("sprint", "Sprint", f"{v4p95:.2f}", "m/s", f"95th-percentile body · labelled bodies: {v4sp:.2f} and {v4bd:.2f}"),
         ("blocks", "Sprint from blocks", V("sprint_blocks_30", 2), "s to 30 m", "Bolt ran 3.78 s"),
-        ("longjump", "Long jump", V("long_jump_v4_p95", 3), "m", f"tuned to one start · {V('long_jump_p95_robust')} m mean of 16 starts"),
+        ("longjump", "Long jump", V("long_jump_v4_p95", 3), "m", f"tuned to one start · {V('long_jump_p95_robust')} m mean of 16 starts · labelled body: {lj_bd:.3f} m on one start, {lj_bd96:.3f} m mean of 96"),
         ("standing", "Standing jump", V("search_jump_legal", 3), "m", f"legal jump · {V('search_jump_robust_legal', 3)} m over 32 starts"),
         ("hurdles", "Hurdles", "0.762", "m", "first hurdle cleared on 4 of 8 starts"),
         ("bat", "Baseball swing", V("bat_power_fresh_rep", 1), "m/s", f"24 held-out pitches, all hit · athlete body"),
@@ -517,8 +522,8 @@ def build():
         "c-sprint", "Sprint speed", "m/s", 15, [0, 3, 6, 9, 12],
         [
             dict(label="Labelled beyond-human body", sub="strength ×2.4, speed ×2.0", value=v4bd, kind="variant",
-                 tip="A LABELLED body that is not human (strength ×2.4, muscle speed ×2.0, tendon ×1.5, activation ×0.8: an invented stretch, ideal-control ceiling 16.3 m/s), so never comparable with the other rows. "
-                     f"{passes('sprint_top_speed_v4_beyond')} arena starts stay up for 30 s and every one of them peaks above 10.1 m/s; 14 to 26 of each 80 unseen standing starts fall. It takes about 140 m to reach 10 m/s."),
+                 tip="A LABELLED body that is not human (strength ×2.4, muscle speed ×2.0, tendon ×1.5, activation ×0.8: an invented stretch with no measurement behind it), so never comparable with the other rows. "
+                     f"{passes(bd)} fresh starts stay up for 30 s and peak at {v4bd:.2f} m/s on average. The first version peaked at {V('sprint_top_speed_v4_beyond')} m/s and fell on about 30% of fresh starts."),
             dict(label="Labelled sprinter body", sub="stronger than a human", value=v4sp, kind="variant",
                  tip="A LABELLED stronger body (strength ×1.55, muscle speed ×1.45, tendon ×1.5, activation ×0.8), fixed from the literature before any runner ran on it, so never comparable with the other rows. "
                      f"{passes('sprint_top_speed_v4_sprinter')} test starts stay up for 30 s."),
@@ -539,7 +544,7 @@ def build():
             dict(label="Usain Bolt", sub="reference", value=12.34, kind="ref",
                  tip="12.34 m/s over 60–80 m of his 9.58 s run (Mackala & Mero 2013). Elite sprinters run 11.5–12.3 m/s."),
         ],
-        "Peak speed over one second from a standing start, mean of 12 perturbed starts (the labelled body: the starts that stay up).")
+        "Peak speed over one second from a standing start, mean of 12 perturbed starts (the labelled sprinter body: the starts that stay up; the labelled beyond-human body: the starts that stay up out of 512).")
 
     ch_jump = chart(
         "c-jump", "Long jump", "m", 10, [0, 2, 4, 6, 8, 10],
@@ -606,6 +611,22 @@ def build():
     charts = f'<div class="chartgrid">{ch_sprint}{ch_jump}{ch_bat}{ch_tt}</div>'
 
     # ------------------------------------------------------------ ability cards -----
+    # the labelled beyond-human sprinter, chain by chain: falls within 30 s of a perturbed standing start, each step on
+    # the same starts before and after (128 fresh starts for the first two steps, 512 other fresh starts for the last).
+    # Hand-written counts (arena history.jsonl unless noted): chain C 40 of 128 fresh starts (1 Oct 00:25:10 seed record);
+    # F1 44 of 512 (3 Oct 10:56:17 seed record); 2280 starts, 168 -> 128: README "round 6" table (it includes the 1000
+    # selection starts, so the page does not call them fresh); 9.2 m/s takeover, reversed spine servo: README "round 5".
+    bd128 = "sprint_top_speed_v4_beyond_fresh128"
+    bd128_n = len(CHAMPS[bd128]["scores"])
+    bd128_falls = bd128_n - len(scores_ok(bd128))
+    c_falls, f1_falls512 = 40, 44            # chain C on the fresh128 starts, F1 on the fresh512 starts (history.jsonl seed records)
+    bd_steps = (
+        f'<p class="note"><strong>Labelled beyond-human body: falls within 30 s of a perturbed standing start</strong></p>'
+        + steps([("29 Sep", f"{100 * c_falls / bd128_n:.1f} %", f"first runner above 10 m/s on this body: three gears, the speed limits of the top gear raised; {c_falls} of {bd128_n} fresh starts fall"),
+                 ("1 Oct", f"{100 * c_falls / bd128_n:.1f} → {100 * bd128_falls / bd128_n:.1f} %", f"the spine servo of the top gears reversed in sign (the old setting destabilised them), the start gear searched again on fresh starts, and the top gear taking over at 9.2 m/s: {bd128_falls} of the same {bd128_n} fall"),
+                 ("3 Oct", f"{100 * f1_falls512 / bd_n:.1f} → {100 * bd_falls / bd_n:.1f} %", f"a rear step for the starts whose weight begins over the heel (3% of starts, most of which fell). On {bd_n} more fresh starts {f1_falls512} falls become {bd_falls} with none new; over all 2280 starts measured 168 become 128 (7.4% to 5.6%)")],
+                head=("When", "Falls", "What changed")))
+
     run_cards = [
         card("run-natural", "Natural running from human keyframes", [("7.3°", "off human running, 12 starts")],
              [vid("run_knots.mp4", out("run_knots.mp4"), "Natural runner with the literature curves ghosted",
@@ -616,20 +637,21 @@ def build():
                    [["Literature curves, 12 starts", "#9.13° · 1 fall", "#7.29° · 1 fall"],
                     ["Motion capture, 48 starts", "#11.0° · 17 falls", "#10.09° · 11 falls"]]),
              body="v2 anatomy, average adult."),
-        card("sprint", "Sprint", [(f"{v4p95:.2f} m/s", "95th-percentile body, five gears"), (f"{v4sp:.2f} m/s", "labelled sprinter body"), (f"{v4bd:.2f} m/s", "labelled beyond-human body")],
+        card("sprint", "Sprint", [(f"{v4p95:.2f} m/s", "95th-percentile body, five gears"), (f"{v4sp:.2f} m/s", "labelled sprinter body"),
+                                  (f"{v4bd:.2f} m/s", f"labelled beyond-human body, {passes(bd)} fresh starts stay up")],
              [vid("sprint_v4_p95_gear5.mp4", out("sprint_v4_p95_gear5.mp4"), "Five-gear sprinter on the calibrated v4 body, 95th percentile",
                   "The five-gear runner on the calibrated body, 95th percentile, from a standing start: a crouched, high-cadence start, longer strides as the speed passes 6.5, 7.0 and 7.7 m/s, and an extended-stance gear above 7.8 m/s."),
               vid("sprint_v4_sprinter.mp4", out("sprint_v4_sprinter.mp4"), "Sprinter on a labelled stronger body",
                   "A labelled stronger body (strength ×1.55, muscle speed ×1.45), not comparable with the others: the five-gear runner with its forward lean retuned and its top gear searched again. It falls on 4 of its 12 test starts; this is one that stays up, peaking at 8.4 m/s."),
               vid("sprint_v4_beyond.mp4", out("sprint_v4_beyond.mp4"), "Sprinter on a labelled beyond-human body",
-                  "A labelled body that is not human (strength ×2.4, muscle speed ×2.0; invented multipliers), never comparable with the others. From a standing start it needs about 140 m (19 s) to reach 10 m/s, then holds it: this start peaks at 10.18 m/s. It falls on 3 of its 12 test starts; this is one that stays up.")],
+                  "The first version above 10 m/s (29 Sep), on a labelled body that is not human (strength ×2.4, muscle speed ×2.0; invented multipliers), never comparable with the others. From a standing start it needs about 140 m (19 s) to reach 10 m/s, then holds it: this start peaks at 10.18 m/s and stays up, where that version fell on 3 of its 12 test starts.")],
              ["Full drive on the prime movers, with the opposing muscles scaled down as their partners fire (reciprocal inhibition), latched on each foot. One parameter set cannot both accelerate a standing body and cruise, so the runner has gears: above set speeds the whole stride is rebuilt from the next gear's values at the next flight. The 95th-percentile runner now has five and reaches **" + f"{v4p95:.2f}" + " m/s**, up from 7.45 with two.",
-              f"Two what-if bodies, labelled as such and never compared with the human-profile runners. The **sprinter** (strength ×1.55, muscle speed ×1.45, tendon ×1.5, activation ×0.8, fixed from sprinter morphology data before any runner ran on it) reaches **{v4sp:.2f} m/s** ({passes('sprint_top_speed_v4_sprinter')} starts stay up). The **beyond-human** body (strength ×2.4, muscle speed ×2.0, the same tendon and activation: an invented stretch, the smallest of three round-number steps whose ideal-control ceiling is above 14.5 m/s) reaches **{v4bd:.2f} m/s**: {passes('sprint_top_speed_v4_beyond')} test starts stay up and every one of them peaks above 10.1 m/s. The other three fall, and so do 14 to 26 of each 80 unseen standing starts. From a standing start it takes about 140 m (19 s) to reach 10 m/s and passes the 44 m mark at 7.7 m/s; at 10 m/s its stride is 4.4 steps a second of 2.3 m.",
+              f"Two what-if bodies, labelled as such and never compared with the human-profile runners. The **sprinter** (strength ×1.55, muscle speed ×1.45, tendon ×1.5, activation ×0.8, fixed from sprinter morphology data before any runner ran on it) reaches **{v4sp:.2f} m/s** ({passes('sprint_top_speed_v4_sprinter')} starts stay up). The **beyond-human** body (strength ×2.4, muscle speed ×2.0, the same tendon and activation: an invented stretch with no measurement behind it) reaches **{v4bd:.2f} m/s** on the starts that stay up, and {passes(bd)} fresh starts do. Its first version peaked at {V('sprint_top_speed_v4_beyond')} m/s but fell on about 30% of fresh starts; the current one keeps the speed and falls on {100 * bd_falls / bd_n:.1f}%.",
               "The body model was calibrated against published data along the way (the calibrated body: quadriceps series stiffness and hip speeds), which is why the same runner design scores higher on it than on the older body."],
              table(["Body", "Older body", "Calibrated body"],
                    [["Average adult", f"#{V('sprint_top_speed')}", f"#{v4avg:.2f}"],
                     ["95th percentile", f"#{V('sprint_top_speed_p95')}", f"#{v4p95:.2f}"],
-                    ["Elite, literature", f"#{V('sprint_top_speed_elite2')}", f"#{v4e2:.2f}"]]),
+                    ["Elite, literature", f"#{V('sprint_top_speed_elite2')}", f"#{v4e2:.2f}"]]) + bd_steps,
              body="Average, 95th-percentile and literature-elite bodies on the calibrated anatomy (the older anatomy for the earlier runners), plus two labelled stronger bodies (sprinter and beyond-human).",
              chips=[chip("labelled", "Includes labelled stronger bodies")]),
         card("blocks", "Sprint from blocks, keyframed on Usain Bolt", [(f"{V('sprint_blocks_30', 2)} s", "30 m from the blocks"), (f"{V('sprint_blocks_100', 1)} s", "100 m")],
@@ -665,6 +687,29 @@ def build():
         vid("long_jump_v5_v4p95.mp4", out("long_jump_v5_v4p95.mp4"), "First long jump on the calibrated v4 body",
             lj_caption("long_jump_v5_v4p95_metrics.json", "The first jump on the calibrated body (one start):")),
     ]
+    # the labelled beyond-human long jump (150 m run-up): no video is embedded yet, so its media column is this chart.
+    # Hand-written numbers: 5.644 m / 69 legal = L3's program on the same 96 starts (history.jsonl 30 Sep 19:04:09, README
+    # "Long jump past the human record" table); 10.734 m = the one-start take-off before its landing table (history 30 Sep
+    # 17:32:31); 6.87 m / 88.5% over 400 further starts = README round 2 (L4); runs fall on the run-up in 8 of the 9 misses (L4 log).
+    lj_bd96_mean_legal = sum(lj_bd96_legal) / len(lj_bd96_legal)
+    ch_jump_bd = chart(
+        "c-jump-beyond", "Long jump, labelled beyond-human body", "m", 12, [0, 3, 6, 9, 12],
+        [
+            dict(label="One start, tuned to it", sub="30 Sep", value=lj_bd, kind="variant", nd=3,
+                 tip="Legal. An open-loop take-off and landing built for this exact start, so a best case and not a typical jump (10.734 m before the landing table). The nearest mark is by the pelvis; the jumper falls back after landing."),
+            dict(label="Mean of 96 fresh starts", sub="1 Oct · retrained on the fall-reduced runner", value=lj_bd96, kind="variant", nd=3,
+                 tip=f"{len(lj_bd96_legal)} of 96 legal; the legal jumps average {lj_bd96_mean_legal:.2f} m and the longest is {max(lj_bd96_legal):.2f} m. On 400 further fresh starts: mean 6.87 m, 88.5% legal."),
+            dict(label="Mean of 96 fresh starts", sub="30 Sep · first robust program", value=5.644, kind="variant", nd=3,
+                 tip="69 of 96 legal, on the same 96 starts. The runner of that version fell before the line on 15-20% of starts."),
+            # 9.08 m = the median best mark of six attempts, K3 pooled over 1920 fresh starts (README "Long jump past the human record", Round 3; L6 log)
+            dict(label="Best of six attempts, median", sub="4 Oct · a program for the competition rule", value=9.079, kind="variant", nd=2,
+                 tip="The best legal mark of six attempts, the rule that counts in athletics, over 1920 fresh starts: the median competition ends at 9.08 m and 64% of them pass 8.95 m (the program of 1 Oct: 8.5%). The price is a lower mean mark (6.0 m) and 74% legal jumps."),
+            # 9.21 m = the median best of six attempts, l7a pooled over 1920 fresh starts (README, Round 4; L7 log)
+            dict(label="Best of six attempts, median", sub="4 Oct · a more precise run-up", value=9.211, kind="variant", nd=2,
+                 tip="The same rule over 1920 fresh starts, after the run-up learned to predict the length of the next step at toe-off: the median competition ends at 9.21 m and 81% of them pass 8.95 m. Not a riskier program: 78% of attempts are legal and the mean mark is 6.5 m."),
+        ],
+        "Official marks on a 150 m run-up and a 14 m pit, under the same rules as the human-body long jump. A start without a legal jump counts as 0 m in a mean.")
+
     jump_cards = [
         card("longjump", "Long jump",
              [(f"{V('long_jump_v4_p95', 3)} m", "calibrated body, tuned to one start"), (f"{V('long_jump_p95_robust')} m", "older body, mean of 16 starts"),
@@ -680,6 +725,21 @@ def build():
                     ("28–29 Sep", "2.13 → 4.63 m", "mean of 16 perturbed starts: the take-off launched from the penultimate touchdown, a landing program learned on 32 hand-overs")]),
              body="v3 anatomy, 95th percentile; the calibrated v4 anatomy for the newest jump.",
              chips=[chip("tuned")]),
+        card("longjump-beyond", "Long jump on a labelled beyond-human body",
+             [(f"{lj_bd:.3f} m", "one start, tuned to it"), (f"{lj_bd96:.3f} m", "mean of 96 fresh starts"), (f"{len(lj_bd96_legal)} of 96", "of those starts end in a legal jump")],
+             [ch_jump_bd],
+             [f"The same long jump under the same rules, on the labelled beyond-human body (an invented stretch, not a human) with 150 m of run-up (the runner takes that long to get up to speed) and a 14 m pit; over the last 5 m the jumper averages {CHAMPS['long_jump_v4_beyond_robust96']['report']['speed_5m']:.2f} m/s. Nothing here is comparable with the human-body jumps above.",
+              f"The best mark, **{lj_bd:.3f} m**, is one start with a take-off and a landing built for that exact start: a best case, not a typical jump. One program for every start averages **{lj_bd96:.3f} m** over 96 fresh starts, counting a start without a legal jump as 0 m ({len(lj_bd96_legal)} legal; the legal jumps average {lj_bd96_mean_legal:.2f} m and the longest is {max(lj_bd96_legal):.2f} m), and 6.87 m over 400 more (88.5% legal). Most starts without a legal jump are a fall on the run-up.",
+              "Athletics counts the best of six attempts, and the programs above were trained for the mean mark. Trained for the best of six instead (a faster runner, a take-off that goes for the upper tail, the whole plan 0.10 m closer to the board), the same body passes the record of 8.95 m in **64%** of six-attempt competitions (the 1 Oct program: 8.5%), with a median best mark of **9.08 m**, "
+              "from 1920 starts nobody had tuned on. It was a worse jumper by the mean: 6.0 m instead of 7.0 m, and 74% of the attempts were legal instead of 91%. A more precise run-up then fixed most of that: predicting at toe-off how long the next step will be halved the scatter of the foot placement, which let the whole plan sit closer to the board. "
+              "Over 1920 starts nobody had tuned on, **81%** of six-attempt competitions now pass the record, the median best mark is **9.21 m**, 78% of the attempts are legal and the mean mark is 6.5 m."],
+             steps([("30 Sep", f"{lj_bd:.3f} m", "one start: a take-off from an ideal-control analysis of the runner's own approach and a landing table learned for that start (10.734 m before the landing table)"),
+                    ("30 Sep", "5.644 m", "one program for every start, mean of 96 fresh starts (69 legal)"),
+                    ("1 Oct", f"{lj_bd96:.3f} m", f"the same program retrained on the fall-reduced runner, with the run-up steering re-tuned: {len(lj_bd96_legal)} of 96 legal"),
+                    ("4 Oct", "9.08 m", "a program for the best of six attempts: 64% of competitions pass the human record (the 1 Oct program: 8.5%), at a mean mark of 6.0 m"),
+                    ("4 Oct", "9.21 m", "a more precise run-up (the next step's length predicted at toe-off): 81% of competitions pass the record, 78% of attempts legal, mean mark 6.5 m")]),
+             body="Labelled beyond-human body on the average 1.75 m, 67.5 kg skeleton: strength ×2.4, muscle speed ×2.0, tendon ×1.5, activation ×0.8.",
+             chips=[chip("labelled"), chip("tuned", "One-start mark tuned to it")]),
         card("standing", "Standing broad jump", [(f"{V('search_jump_legal', 3)} m", "legal jump, 8 starts"), (f"{V('search_jump_robust_legal', 3)} m", "32 larger nudges, all legal")],
              [vid("codex_standing_jump.mp4", CODEX + "competitor_jump_round2__video_search_jump_legal_tcn.mp4", "Standing jump, 1.363 m",
                   "The best legal jump, 1.363 m (Codex, round 2): it lands and stays on its feet."),
@@ -728,12 +788,12 @@ def build():
         card("dribble", "Dribbling", [(f"{V('dribble_crossover_25', 2)}", "crossovers in 15 s"), (f"{streak_max}", f"passes through the legs in a row (mean best streak {V('dribble_btl_streak_25', 2)})"),
                                       (f"{V('dribble', 0)}", "bounces in 15 s, first dribble")],
              [vid("dribble_btl_oracle.mp4", out("dribble_btl_oracle.mp4"), "Four passes through the legs in a row",
-                  f"Through the legs, on start 715 (a streak of {streak_max}), with a slow-motion replay of a pass."),
+                  "Through the legs, the earlier version (before the tracking servo), on start 715: a streak of 4, with a slow-motion replay of a pass."),
               vid("codex_crossover.mp4", CODEX_ROOT + "out/competitor_dribble_round9/video_dribble_crossover_25_tcn.mp4", "Crossover dribble",
                   f"Crossovers: Codex's round-9 policy, {V('dribble_crossover_25', 2)} per 15 s run. The ball is still lost eventually on every run."),
               vid("dribble.mp4", out("dribble.mp4"), "The first dribble, right hand",
                   f"Where it started: a right-hand dribble, {V('dribble', 0)} bounces in 15 s.")],
-             [f"**Through the legs.** A stance planner picks a staggered lunge with the trunk twisted toward the lead leg, and catch spots that both hands can reach from behind the ball. The launch, the left hand's return and the right hand's return are open-loop tables of the 16 arm muscles with the reflex layer off during each stroke, gain-scheduled on the ball's predicted crossing and the stroking arm's posture; the reflex controller drives everything else. The mean longest streak is **{V('dribble_btl_streak_25', 2)}** passes in 15 s over 25 starts (it was 1.28), with at most {streak_max}; on 32 fresh starts it is {V('dribble_btl_streak_fresh32', 2)} (was 1.22), and on 64 more that nothing was tuned on 1.95, with 14 streaks of 3 or more (the reflex controller never gets past 2).",
+             [f"**Through the legs.** A stance planner picks a staggered lunge with the trunk twisted toward the lead leg, and catch spots that both hands can reach from behind the ball. The launch, the left hand's return and the right hand's return are open-loop tables of the 16 arm muscles, gain-scheduled on the ball's predicted crossing and the stroking arm's posture, with a low-gain tracking servo around the nominal motion of each stroke; the reflex controller drives everything else. The mean longest streak is **{V('dribble_btl_streak_25', 2)}** passes in 15 s over 25 starts (it was 1.28), with at most {streak_max}; on 32 fresh starts it is {V('dribble_btl_streak_fresh32', 2)} (was 1.22), and on 128 more that nothing was tuned on 2.50 with the servo alone (2.09 before it), a streak of 3 or more on about half of the starts (the reflex controller never gets past 2). The lead leg is then lifted and turned out after the right hand's release, so the rising ball clears the thigh and finds the gate: about +0.15 more on fresh starts (2.69 against 2.59 on 128 starts nobody had used; a streak of 3 or more on 57 % of them). The two strokes of the second cycle, which were reflexes that end every long streak, are muscle tables as well: the left hand's clips the lead leg far less (87 % clean strokes against 54 %), worth about +0.3 more on starts nobody had tuned on (2.59 to 2.96 on 256 of them), a streak of 4 or more on 44 % of them (20 % before).",
               "**Crossovers.** A small learned correction from the recent ball motion (Codex) took the count from 3.72 to 7.52 per 15 s run, and its round-9 version, with sustained catching, to **" + V('dribble_crossover_25', 2) + "**. The trunk still pumps and the hands are rigid paddles."],
              table(["Trial", "Now", "Before"],
                    [["Crossovers per 15 s run, 25 starts", f"#{V('dribble_crossover_25')}", "#7.52 (3.72 earlier)"],

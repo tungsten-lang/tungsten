@@ -1,0 +1,40 @@
+run                                      n falls     steady m/s         peak1s       fold deg       fold max        gain100    heel@fold m     heel-hip m   touchdowns/s task step_freq        swing s      contact s         step m
+A1_final_v4_a5x                         44     8          7.863          7.982           96.0            103           18.6          0.342          0.587           4.17           4.02          0.380          0.102           1.96
+A2_final_v4_a5x                         44     5          7.858          7.903           94.2             98           19.8          0.323          0.600           4.13           4.12          0.378          0.102           1.91
+B1_final_v4_a5x                         44     1          8.549          8.613           99.0            104           27.3          0.372          0.567           4.15           4.03          0.386          0.096           2.12
+B2_final_v4_a5x                         44     3          8.442          8.504          100.8            103           25.7          0.392          0.548           4.23           4.08          0.380          0.098           2.07
+Traceback (most recent call last):
+  File "/Users/erik/tungsten/bits/tungsten-robolab/scratchpad/anat5/abtable.py", line 29, in <module>
+    if sys.argv[1] == "--pair": pair(sys.argv[2], sys.argv[3])
+                                                  ~~~~~~~~^^^
+IndexError: list index out of range
+
+Traceback (most recent call last):
+  File "/Users/erik/tungsten/bits/tungsten-robolab/scratchpad/anat5/abtable.py", line 29, in <module>
+    if sys.argv[1] == "--pair": pair(sys.argv[2], sys.argv[3])
+                                                  ~~~~~~~~^^^
+IndexError: list index out of range
+
+paired B1_final_v4_a5x - A1_final_v4_a5x over 35 starts both survive (falls A 8, B 1 of 44)
+        steady m/s: +0.679  CI95 [+0.613, +0.757]  p 0.0000
+            peak1s: +0.629  CI95 [+0.603, +0.656]  p 0.0000
+          fold deg: +3.1  CI95 [+2.5, +3.9]  p 0.0000
+          fold max: +2  CI95 [+0, +3]  p 0.0127
+           gain100: +8.6  CI95 [+7.9, +9.3]  p 0.0000
+       heel@fold m: +0.031  CI95 [+0.028, +0.033]  p 0.0000
+        heel-hip m: -0.020  CI95 [-0.024, -0.017]  p 0.0000
+
+paired B2_final_v4_a5x - A2_final_v4_a5x over 37 starts both survive (falls A 5, B 3 of 44)
+        steady m/s: +0.586  CI95 [+0.569, +0.604]  p 0.0000
+            peak1s: +0.602  CI95 [+0.592, +0.612]  p 0.0000
+          fold deg: +6.5  CI95 [+6.1, +6.9]  p 0.0000
+          fold max: +4  CI95 [+3, +5]  p 0.0000
+           gain100: +5.9  CI95 [+5.6, +6.2]  p 0.0000
+       heel@fold m: +0.069  CI95 [+0.065, +0.073]  p 0.0000
+        heel-hip m: -0.052  CI95 [-0.055, -0.049]  p 0.0000
+
+run                                      n falls     steady m/s         peak1s       fold deg       fold max        gain100    heel@fold m     heel-hip m   touchdowns/s task step_freq        swing s      contact s         step m
+g3start_v5_a5x                          44     5          7.001          7.069          109.5            114           30.7          0.421          0.498           4.30           4.18          0.363          0.104           1.68
+C1_final_v5_a5x                         44    12          8.343          8.415          101.2            107           21.4          0.325          0.557           4.39           4.31          0.358          0.098           1.94
+
+(C1_final_v5_a5x is on v5's own unseen starts, g3start_v5_a5x is the same starts before the search; not paired with the v4 / v5b rows above.)

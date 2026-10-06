@@ -1,0 +1,80 @@
+{
+ "ideal arm only (champion's pelvis) / validation 98030-98099": {
+  "n": 70,
+  "contact": 58,
+  "lost": 0,
+  "lost_frac": 0.0,
+  "never": 12,
+  "pos_med": 1.07,
+  "ori_med": 3.51,
+  "solved": 26,
+  "J": 4.5605,
+  "pad_speed_med": 0.59,
+  "solved_of_contacts": 0.448
+ },
+ "ideal arm only (champion's pelvis) / set B 830000-830099": {
+  "n": 100,
+  "contact": 78,
+  "lost": 0,
+  "lost_frac": 0.0,
+  "never": 22,
+  "pos_med": 0.89,
+  "ori_med": 3.06,
+  "solved": 29,
+  "J": 4.7451,
+  "pad_speed_med": 0.52,
+  "solved_of_contacts": 0.372
+ },
+ "settled pelvis + ideal arm (margin 0.15 s) / validation 98030-98099": {
+  "n": 70,
+  "contact": 61,
+  "lost": 0,
+  "lost_frac": 0.0,
+  "never": 9,
+  "pos_med": 0.7,
+  "ori_med": 2.36,
+  "solved": 34,
+  "J": 3.4496,
+  "pad_speed_med": 0.47,
+  "solved_of_contacts": 0.557
+ },
+ "settled pelvis + ideal arm (margin 0.15 s) / set B 830000-830099": {
+  "n": 100,
+  "contact": 79,
+  "lost": 0,
+  "lost_frac": 0.0,
+  "never": 21,
+  "pos_med": 0.65,
+  "ori_med": 2.27,
+  "solved": 50,
+  "J": 3.501,
+  "pad_speed_med": 0.36,
+  "solved_of_contacts": 0.633
+ },
+ "settled pelvis + ideal arm (margin 0.25 s) / validation 98030-98099": {
+  "n": 70,
+  "contact": 40,
+  "lost": 0,
+  "lost_frac": 0.0,
+  "never": 30,
+  "pos_med": 0.9,
+  "ori_med": 4.14,
+  "solved": 12,
+  "J": 5.9992,
+  "pad_speed_med": 0.65,
+  "solved_of_contacts": 0.3
+ },
+ "settled pelvis + ideal arm (margin 0.25 s) / set B 830000-830099": {
+  "n": 100,
+  "contact": 60,
+  "lost": 0,
+  "lost_frac": 0.0,
+  "never": 40,
+  "pos_med": 0.86,
+  "ori_med": 3.07,
+  "solved": 24,
+  "J": 5.2924,
+  "pad_speed_med": 0.61,
+  "solved_of_contacts": 0.4
+ }
+}

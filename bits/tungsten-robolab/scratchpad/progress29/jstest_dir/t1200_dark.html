@@ -1,0 +1,53 @@
+<!doctype html><meta charset="utf-8"><body style="margin:0">
+<iframe id="f" src="dark.html" width="1200" height="900" style="border:0;display:block"></iframe><pre id="o">pending</pre>
+<script>
+var AXIS = {"c-sprint": 15, "c-jump": 10, "c-jump-beyond": 12, "c-bat": 40, "c-tt": 100};
+function check(doc) {
+  var out = {rows: 0, bad: [], toggles: [], clipped: []};
+  Object.keys(AXIS).forEach(function (id) {
+    var fig = doc.getElementById(id);
+    if (!fig) { out.bad.push(id + ': missing'); return; }
+    fig.querySelectorAll('.crow').forEach(function (row) {
+      out.rows++;
+      var plot = row.querySelector('.cplot'), bar = row.querySelector('.cbar, .ctrack'), val = row.querySelector('.cval');
+      var v = parseFloat(row.dataset.v), pw = plot.getBoundingClientRect().width, bw = bar.getBoundingClientRect().width;
+      var expect = v / AXIS[id] * pw;
+      if (Math.abs(bw - expect) > 1.5) out.bad.push(id + ' ' + row.dataset.l + ': bar ' + bw.toFixed(1) + ' px, expected ' + expect.toFixed(1));
+      var shown = parseFloat(val.textContent);
+      if (Math.abs(shown - v) > 0.0005 * Math.max(1, v)) out.bad.push(id + ' ' + row.dataset.l + ': label ' + val.textContent + ' vs value ' + row.dataset.v);
+      var rr = row.getBoundingClientRect(), vr = val.getBoundingClientRect(), br = bar.getBoundingClientRect();
+      if (vr.right > rr.right + 0.5 || vr.left < rr.left - 0.5) out.bad.push(id + ' ' + row.dataset.l + ': label outside its row (' + vr.right.toFixed(0) + ' > ' + rr.right.toFixed(0) + ')');
+      if (vr.left < br.right - 0.5) out.bad.push(id + ' ' + row.dataset.l + ': label overlaps its bar');
+      var cl = row.querySelector('.clabel');
+      if (cl.scrollWidth > cl.clientWidth + 1) out.clipped.push(id + ' ' + row.dataset.l);
+    });
+    var btn = fig.querySelector('.tbtn'), cv = fig.querySelector('.cview'), tv = fig.querySelector('.tview');
+    btn.click();
+    var after1 = {chartHidden: cv.hidden, tableHidden: tv.hidden, text: btn.textContent, pressed: btn.getAttribute('aria-pressed')};
+    var tw = tv.querySelector('.tablewrap');
+    var rowsInTable = tv.querySelectorAll('tr').length - 1;
+    btn.click();
+    out.toggles.push({id: id, toTable: after1, back: {chartHidden: cv.hidden, tableHidden: tv.hidden, text: btn.textContent}, tableRows: rowsInTable, chartRows: fig.querySelectorAll('.crow').length});
+  });
+  // text that sticks out of its card or the viewport, outside scroll containers
+  var W = doc.documentElement.clientWidth, over = [];
+  doc.querySelectorAll('.side *, .media figcaption *, .slot *, .chart *').forEach(function (e) {
+    var r = e.getBoundingClientRect();
+    if (r.width && r.right > W + 1) {
+      var p = e.parentElement, clip = false;
+      while (p) { var o = getComputedStyle(p).overflowX; if (o === 'auto' || o === 'scroll' || o === 'hidden') { clip = true; break; } p = p.parentElement; }
+      if (!clip) over.push(e.tagName + '.' + e.className + ' ' + Math.round(r.right));
+    }
+  });
+  out.overflow = over.slice(0, 10);
+  out.scrollWidth = doc.documentElement.scrollWidth;
+  return out;
+}
+var f = document.getElementById('f');
+f.addEventListener('load', function () {
+  setTimeout(function () {
+    try { document.getElementById('o').textContent = JSON.stringify(check(f.contentDocument)); }
+    catch (e) { document.getElementById('o').textContent = 'ERROR ' + e + ' ' + e.stack; }
+  }, 1500);
+});
+</script>

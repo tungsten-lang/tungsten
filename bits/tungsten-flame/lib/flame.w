@@ -59,23 +59,23 @@ if opts.flag?("help") || opts.flag?("h")
 fl_duration = opts.get("duration")
 if fl_duration == nil
   fl_duration = "5"
-fl_duration = fl_duration.to_i
+fl_duration = fl_duration.to_s().to_i()
 fl_rate_raw = opts.get("rate")
 if fl_rate_raw == nil
   fl_rate_raw = ""
 fl_rate = nil
 if fl_rate_raw != ""
-  fl_rate = fl_rate_raw.to_i
+  fl_rate = fl_rate_raw.to_s().to_i()
 fl_top = opts.get("top")
 if fl_top == nil
   fl_top = "10"
-fl_top = fl_top.to_i
+fl_top = fl_top.to_s().to_i()
 fl_pid_raw = opts.get("pid")
 if fl_pid_raw == nil
   fl_pid_raw = ""
 fl_pid = nil
 if fl_pid_raw != ""
-  fl_pid = fl_pid_raw.to_i
+  fl_pid = fl_pid_raw.to_s().to_i()
 fl_focus = opts.get("focus")
 if fl_focus == nil
   fl_focus = ""

@@ -942,6 +942,11 @@
   -> eval_call(node, env)
     if interpreter_noinline_directive?(node)
       return nil
+    if interpreter_slab_freeze_directive?(node)
+      freeze_args = ast_get(node, :args)
+      if (freeze_args != nil && freeze_args.size() != 0) || ast_get(node, :block) != nil
+        raise "Tungsten." + ast_get(node, :name) + " takes no arguments or block"
+      return ccall("w_slab_freeze_safe")
     contract = interpreter_contract_name(node)
     if contract != nil
       if ast_get(node, :validated_program_contract) != true

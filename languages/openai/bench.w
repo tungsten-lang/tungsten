@@ -32,8 +32,8 @@ tok = load_tokenizer(vocab_path)
 
 # Freeze the string slab — vocab keys are already interned, encode-time
 # lookups now go through the lock-free intern table (runtime.c:940-958).
-# No slab mutex contention across parallel workers. Intended syntax once
-# the BUILTIN token is wired up: Tungsten.STOP_THE_INTERNS!
+# No slab mutex contention across parallel workers. Same as
+# Tungsten.FREEZE_THE_SLAB! (or NO_MORE_INTERNS!, THE_INTERNSHIP_IS_OVER!).
 freeze_slab()
 
 text = read_file(file)

@@ -261,4 +261,10 @@ if run_compiler check "$root/compiler/test/fixtures/nested_contract.w" > "$tmp/n
 fi
 grep -q 'must be a top-level entry-program declaration' "$tmp/nested.out"
 
+if run_compiler check "$root/compiler/test/fixtures/slab_freeze_args.w" > "$tmp/slab-args.out" 2>&1; then
+  echo "slab freeze with arguments unexpectedly compiled" >&2
+  exit 1
+fi
+grep -q 'Tungsten.FREEZE_THE_SLAB! takes no arguments or block' "$tmp/slab-args.out"
+
 echo "type facts: PASS"

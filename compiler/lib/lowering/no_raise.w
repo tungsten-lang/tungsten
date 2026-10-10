@@ -54,7 +54,7 @@
         return false
       i += 1
 
-  if node.receiver != nil && ast_kind(node.receiver) == :class_ref && node.receiver.name == "Tungsten" && node.name in ("PROTECT_THE_CORE!" "STOP_THE_PRESS!" "LOCK_THE_DOORS!")
+  if node.receiver != nil && ast_kind(node.receiver) == :class_ref && node.receiver.name == "Tungsten" && node.name in ("PROTECT_THE_CORE!" "STOP_THE_PRESS!" "LOCK_THE_DOORS!" "FREEZE_THE_SLAB!" "NO_MORE_INTERNS!" "THE_INTERNSHIP_IS_OVER!")
     return true
 
   ctor_ctx = {mod: mod, class_name: class_name}

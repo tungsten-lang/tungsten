@@ -1,5 +1,6 @@
 require "tungsten/core_ext/module"
 require "tungsten/core_ext/string"
+require "tungsten/core_ext/integer"
 
 module Tungsten::AST
   def self.intern_name(name)

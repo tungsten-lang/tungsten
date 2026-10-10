@@ -418,6 +418,7 @@ compiled_specs=(
   spec/numeric/gcd_spec.w
   spec/numeric/hypercomplex_mul_spec.w
   spec/numeric/int_spec.w
+  spec/numeric/int_popcount_spec.w
   spec/numeric/interval_spec.w
   spec/numeric/matrix_spec.w
   spec/numeric/operator_overload_spec.w

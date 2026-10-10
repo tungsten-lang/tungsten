@@ -404,3 +404,23 @@
       bl_n = bl_n / 2
       bl += 1
     bl
+
+  # Number of 1 bits in the magnitude (Python int.bit_count): 0 -> 0,
+  # 255 -> 8, -255 -> 8. Ruby has no equivalent. Splits into 32-bit chunks
+  # with `%` and `/` (not `&` and `>>`, which are i64-only) so BigInt
+  # receivers are exact; each chunk is at most 32 bits, so its count is a
+  # short loop on an immediate Int.
+  -> popcount
+    pc_n = self < 0 ? self.abs : self
+    pc = 0
+    while pc_n > 0
+      pc_w = pc_n % 4294967296
+      while pc_w > 0
+        pc += pc_w % 2
+        pc_w = pc_w / 2
+      pc_n = pc_n / 4294967296
+    pc
+
+  # Alias of popcount (Python spelling).
+  -> bit_count
+    self.popcount

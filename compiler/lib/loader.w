@@ -1148,7 +1148,7 @@ loader_parse_cache_state = {
       # on it would autoload Integer/BigInt into every block-using program
       # (including the compiler itself, which broke stage identity).
       bitwise_op_send = call_receiver != nil && call_name in ("&" "|" "^" "/" "%")
-      if bitwise_op_send || call_name in ("to_i" "prev" "succ" "next" "zero?" "even?" "odd?" "negative?" "positive?" "sq" "gcd" "lcm" "chr" "pow" "modpow" "factorial" "primorial" "digits" "isqrt" "bit_length" "to_s" "to_f" "abs" "prime?" "+" "-" "*")
+      if bitwise_op_send || call_name in ("to_i" "prev" "succ" "next" "zero?" "even?" "odd?" "negative?" "positive?" "sq" "gcd" "lcm" "chr" "pow" "modpow" "factorial" "primorial" "digits" "isqrt" "bit_length" "popcount" "bit_count" "to_s" "to_f" "abs" "prime?" "+" "-" "*")
         consider_autoload_name("Int", defined, registry, seen, pending)
         if call_name == "to_i" && @bigint_to_i_unresolved
           consider_autoload_name("BigInt", defined, registry, seen, pending)
@@ -1158,7 +1158,7 @@ loader_parse_cache_state = {
         # incremental cost of also loading it for the integer methods is small,
         # and it makes a standalone bigint-method program (e.g. `n.modpow(...)`
         # with no predicate) resolve instead of dispatching to Object.
-        if @bigint_predicates_unresolved && (bitwise_op_send || call_name in ("zero?" "even?" "odd?" "negative?" "positive?" "neg!" "abs!" "abs" "gcd" "lcm" "pow" "modpow" "digits" "isqrt" "bit_length" "prev" "succ" "next" "prime?" "to_f" "to_s" "+" "-" "*"))
+        if @bigint_predicates_unresolved && (bitwise_op_send || call_name in ("zero?" "even?" "odd?" "negative?" "positive?" "neg!" "abs!" "abs" "gcd" "lcm" "pow" "modpow" "digits" "isqrt" "bit_length" "popcount" "bit_count" "prev" "succ" "next" "prime?" "to_f" "to_s" "+" "-" "*"))
           consider_autoload_name("BigInt", defined, registry, seen, pending)
           @bigint_predicates_unresolved = false
 

@@ -674,8 +674,9 @@ declared there before they can be read or written.
 ## E_CONTRACT_ARITY
 
 A program contract (`Tungsten.PROTECT_THE_CORE!`, `Tungsten.STOP_THE_PRESS!`,
-`Tungsten.LOCK_THE_DOORS!`) was written with arguments or a block. Contracts
-are nullary markers.
+`Tungsten.LOCK_THE_DOORS!`) or a slab freeze (`Tungsten.FREEZE_THE_SLAB!`,
+`Tungsten.NO_MORE_INTERNS!`, `Tungsten.THE_INTERNSHIP_IS_OVER!`, all synonyms
+of `freeze_slab()`) was written with arguments or a block. Both are nullary.
 
 **Fix:** Write the bare call on its own line: `Tungsten.LOCK_THE_DOORS!`.
 

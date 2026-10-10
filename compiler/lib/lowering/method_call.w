@@ -543,6 +543,18 @@
       raise compile_error_for_node(:E_CONTRACT_TOP_LEVEL, "Tungsten." + method_name + " must be a top-level entry-program declaration", ctx[:source_path], node)
     return typed_value(:i64, w_nil.to_s())
 
+  # Tungsten.FREEZE_THE_SLAB!, Tungsten.NO_MORE_INTERNS! and
+  # Tungsten.THE_INTERNSHIP_IS_OVER! are statement spellings of freeze_slab().
+  # Unlike the contracts they are actions, legal wherever freeze_slab() is.
+  # Call the runtime directly so a user function named freeze_slab cannot
+  # capture them.
+  if recv_node != nil && is_ast_node?(recv_node) && ast_kind(recv_node) == :class_ref && recv_node.name == "Tungsten" && method_name in ("FREEZE_THE_SLAB!" "NO_MORE_INTERNS!" "THE_INTERNSHIP_IS_OVER!")
+    if (node.args != nil && node.args.size() != 0) || node.block != nil
+      raise compile_error_for_node(:E_CONTRACT_ARITY, "Tungsten." + method_name + " takes no arguments or block", ctx[:source_path], node)
+    freeze_tmp = next_temp(wfn)
+    emit_wire_call_direct_i64(wfn, nil, [], nil, nil, "w_slab_freeze_safe", nil, nil, freeze_tmp)
+    return typed_value(:i64, w_nil.to_s())
+
   # Unit-carrying tensor factory syntax is intentionally a type-level spelling
   # even though Tensor's implementation stores dtype/unit as runtime metadata:
   #

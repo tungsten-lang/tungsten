@@ -184,6 +184,18 @@
       return name
     nil
 
+  # Tungsten.FREEZE_THE_SLAB!, Tungsten.NO_MORE_INTERNS! and
+  # Tungsten.THE_INTERNSHIP_IS_OVER! are statement spellings of freeze_slab()
+  # (see lowering/method_call.w).
+  -> interpreter_slab_freeze_directive?(node)
+    if node == nil || !is_ast_node?(node) || ast_kind(node) != :call
+      return false
+    name = ast_get(node, :name)
+    if name in ("FREEZE_THE_SLAB!" "NO_MORE_INTERNS!" "THE_INTERNSHIP_IS_OVER!")
+      recv = ast_get(node, :receiver)
+      return recv != nil && is_ast_node?(recv) && ast_kind(recv) == :class_ref && ast_get(recv, :name) == "Tungsten"
+    false
+
   # `Tungsten.noinline!` is an emitted-code attribute (see lowering); the
   # tree walker treats the statement as a no-op.
   -> interpreter_noinline_directive?(node)

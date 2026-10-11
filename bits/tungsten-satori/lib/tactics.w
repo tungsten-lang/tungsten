@@ -334,7 +334,7 @@
       fail("unknown projection ." + field)
 
   -> proof_name?(goal, e)
-    if e.kind == :proj || e.kind == :anon
+    if e.kind == :proj || e.kind == :anon || e.kind == :by
       return true
     if e.kind == :id
       if e.s == "rfl" || e.s == "trivial"
@@ -346,6 +346,10 @@
     false
 
   -> proof_ast(goal, e, expected = nil)
+    if e.kind == :by
+      if expected == nil
+        fail("(by …) needs a known statement here")
+      return run_subproof(goal, expected, by_nodes(e.binders, [], 0))
     if e.kind == :proj
       return project_proof(proof_ast(goal, e.kids[0], nil), e.s)
     if e.kind == :id && e.s == "rfl" && expected != nil

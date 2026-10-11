@@ -85,8 +85,8 @@
         @numeric[t.name] = true
         if @fractional.has_key?(m.name)
           @fractional[t.name] = true
-      elsif !["nat", "int", "rat", "real"].include?(t.name)
-        if t.tag == :v || !@k.inductives.has_key?(t.name)
+      elsif t.tag == :c && !["nat", "int", "rat", "real"].include?(t.name)
+        if !@k.inductives.has_key?(t.name)
           raise "type error: expected a number type, got " + ty_show(t)
     @subst[m.name] = t
 
@@ -262,7 +262,11 @@
       sp = ast_spine(e)
       f = elab(sp[0])
       sp[1].each -> (x)
-        f = app(f, elab(x))
+        ft = resolve(type_of_meta(f))
+        if x.kind == :lam && ft.fun?
+          f = app(f, elab_lam_expected(x.binders, x.kids[0], 0, ft.dom))
+        else
+          f = app(f, elab(x))
       f
     when :binop
       elab_binop(e.s, e.kids[0], e.kids[1])
@@ -718,3 +722,22 @@
     f = finalize(t, false)
     check(f)
     f
+
++ Elab
+  # λ with binder types taken from the expected function type when not given.
+  -> elab_lam_expected(bs, body, i, exp)
+    if i >= bs.size
+      return elab(body)
+    e = resolve(exp)
+    v = nil
+    if bs[i].ty == nil && e.fun?
+      v = mk_var(bs[i].name, e.dom)
+    else
+      v = binder_var(bs[i])
+    push_local(bs[i].name, v)
+    nexp = fresh_meta
+    if e.fun?
+      nexp = e.cod
+    b = elab_lam_expected(bs, body, i + 1, nexp)
+    pop_local
+    mk_lam(v, b)

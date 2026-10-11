@@ -1,0 +1,11 @@
++ s1 : (∑ i < 5, i * i) = 30 := by decide
++ s2 : ∏ i < 5, (i + 1) = 120 := by decide
++ s3 : (∑ i < 4, (i : ℚ) / 2) = 3 := by decide
++ p1 : prime 97 ∧ ¬ prime 91 := by decide
++ g1 : gcd 84 36 = 12 := by decide
++ d1 : 7 ∣ 91 ∧ even 10 ∧ odd (7 : ℤ) := by decide
+opaque sqrt : ℝ → ℝ
+axiom sqrt_spec (x : ℝ) : 0 ≤ x → 0 ≤ sqrt x ∧ sqrt x * sqrt x = x
++ sq2 : sqrt 2 * sqrt 2 = 2
+  have h := sqrt_spec 2 (by norm_num)
+  exact h.2

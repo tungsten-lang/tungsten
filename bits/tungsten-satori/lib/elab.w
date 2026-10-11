@@ -554,6 +554,10 @@
     guard = nil
     if b.rel != nil
       guard = elab_guard(v, b.rel, b.bound)
+      # ∀ a < 5, …  with a literal bound: the binder defaults to ℕ (as decide expects), so a
+      # later ascription (a : ℤ) inserts a coercion instead of retyping the binder
+      if b.ty == nil && (b.rel == "<" || b.rel == "≤") && meta?(v.ty)
+        unify(v.ty, ty_nat)
     push_local(b.name, v)
     inner = elab_quant(q, bs, body, i + 1)
     pop_local

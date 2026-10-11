@@ -188,6 +188,7 @@
   auto :Solve,        "solve"
   auto :DenseSolution, "solve"
   auto :Optim,        "optim"
+  auto :LinProg,      "linprog"
   auto :Interpolate,  "interpolate"
   auto :SciIO,        "io"
   auto :Plot,      "plot"

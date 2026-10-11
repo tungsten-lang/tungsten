@@ -36,6 +36,7 @@ axiom mul_pos.nat (a b : ℕ) : 0 < a → 0 < b → 0 < a * b
 axiom zero_lt_one.nat : (0 : ℕ) < 1
 axiom abs_nonneg.nat (a : ℕ) : 0 ≤ abs a
 axiom abs_of_nonneg.nat (a : ℕ) : 0 ≤ a → abs a = a
+axiom lt_or_gt_of_ne.nat (a b : ℕ) : ¬ a = b → a < b ∨ b < a
 axiom lt_iff_add_one_le.nat (a b : ℕ) : a < b ↔ a + 1 ≤ b
 axiom div_add_mod.nat (a b : ℕ) : b * (a / b) + a % b = a
 axiom div_zero.nat (a : ℕ) : a / 0 = 0
@@ -76,6 +77,7 @@ axiom mul_pos.int (a b : ℤ) : 0 < a → 0 < b → 0 < a * b
 axiom zero_lt_one.int : (0 : ℤ) < 1
 axiom abs_nonneg.int (a : ℤ) : 0 ≤ abs a
 axiom abs_of_nonneg.int (a : ℤ) : 0 ≤ a → abs a = a
+axiom lt_or_gt_of_ne.int (a b : ℤ) : ¬ a = b → a < b ∨ b < a
 axiom add_neg.int (a : ℤ) : a + neg a = 0
 axiom sub_def.int (a b : ℤ) : a - b = a + neg b
 axiom abs_of_neg.int (a : ℤ) : a < 0 → abs a = neg a
@@ -120,6 +122,7 @@ axiom mul_pos.rat (a b : ℚ) : 0 < a → 0 < b → 0 < a * b
 axiom zero_lt_one.rat : (0 : ℚ) < 1
 axiom abs_nonneg.rat (a : ℚ) : 0 ≤ abs a
 axiom abs_of_nonneg.rat (a : ℚ) : 0 ≤ a → abs a = a
+axiom lt_or_gt_of_ne.rat (a b : ℚ) : ¬ a = b → a < b ∨ b < a
 axiom add_neg.rat (a : ℚ) : a + neg a = 0
 axiom sub_def.rat (a b : ℚ) : a - b = a + neg b
 axiom abs_of_neg.rat (a : ℚ) : a < 0 → abs a = neg a
@@ -162,6 +165,7 @@ axiom mul_pos.real (a b : ℝ) : 0 < a → 0 < b → 0 < a * b
 axiom zero_lt_one.real : (0 : ℝ) < 1
 axiom abs_nonneg.real (a : ℝ) : 0 ≤ abs a
 axiom abs_of_nonneg.real (a : ℝ) : 0 ≤ a → abs a = a
+axiom lt_or_gt_of_ne.real (a b : ℝ) : ¬ a = b → a < b ∨ b < a
 axiom add_neg.real (a : ℝ) : a + neg a = 0
 axiom sub_def.real (a b : ℝ) : a - b = a + neg b
 axiom abs_of_neg.real (a : ℝ) : a < 0 → abs a = neg a

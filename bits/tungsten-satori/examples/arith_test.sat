@@ -1,0 +1,4 @@
++ a1 (n : ℕ) (h : n ≠ 0) : 1 ≤ n := by linarith
++ a2 (x y : ℤ) (h1 : x ≠ y) (h2 : x ≤ y) : x < y := by linarith
++ a3 (a b : ℚ) (h : a < b) : a ≠ b := by linarith
++ a4 (m n : ℕ) (h1 : m + n = 10) (h2 : m ≠ 5) (h3 : n ≤ 5) : n < 5 := by linarith

@@ -44,7 +44,8 @@ ALL = [
   "mul_pos (a b : T) : 0 < a → 0 < b → 0 < a * b",
   "zero_lt_one : (0 : T) < 1",
   "abs_nonneg (a : T) : 0 ≤ abs a",
-  "abs_of_nonneg (a : T) : 0 ≤ a → abs a = a"
+  "abs_of_nonneg (a : T) : 0 ≤ a → abs a = a",
+  "lt_or_gt_of_ne (a b : T) : ¬ a = b → a < b ∨ b < a"
 ]
 
 RING = [

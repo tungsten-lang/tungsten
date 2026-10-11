@@ -88,6 +88,7 @@
     @d = @session.d
     @goals = []
     @hcount = 0
+    @split_ne = []
 
   -> fresh_hyp_name
     @hcount += 1
@@ -1472,6 +1473,33 @@
     false
 
   -> arith_prove(goal, extra)
+    c = goal.concl
+    # ¬P: assume P and refute
+    np = dest_unop(c, "¬")
+    if np != nil
+      inner = arith_prove(Goal.new(goal.fixes, goal.hyps + [["_neg", np]], @k.false_tm), extra)
+      return @k.not_intro(np, inner)
+    # split numeric disequalities a ≠ b into a < b ∨ b < a (at most 4 of them)
+    goal.hyps.each -> (h)
+      e = dest_unop(h[1], "¬")
+      if e != nil
+        d = dest_binop(e, "=")
+        if d != nil && numeric_type?(type_of(d[0])) && (extra.size < 100)
+          lem = @session.lemma_at("lt_or_gt_of_ne", type_of(d[0]))
+          if lem != nil && !@split_ne.include?(tm_key(h[1]))
+            if @split_ne.size < 4
+              @split_ne.push(tm_key(h[1]))
+              disj = @k.mp(@k.spec(d[1], @k.spec(d[0], lem)), @k.assume(h[1]))
+              pq = dest_binop(disj.concl, "∨")
+              g1 = Goal.new(goal.fixes, goal.hyps + [["_lt", pq[0]]], c)
+              g2 = Goal.new(goal.fixes, goal.hyps + [["_gt", pq[1]]], c)
+              t1 = arith_prove(g1, extra)
+              t2 = arith_prove(g2, extra)
+              @split_ne.pop
+              return @k.disj_cases(disj, t1, t2)
+    arith_prove_core(goal, extra)
+
+  -> arith_prove_core(goal, extra)
     c = goal.concl
     # negate goal into a comparison hypothesis
     hyps = []

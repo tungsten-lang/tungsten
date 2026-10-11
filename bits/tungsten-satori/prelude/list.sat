@@ -52,3 +52,9 @@ theorem length_append (xs ys : list α) : length (xs ++ ys) = length xs + length
 -> prod_list : list β → (β → α) → α
   | [], f => 1
   | x :: xs, f => f x * prod_list xs f
+
+-- membership unfolds under simp: x ∈ y :: ys ↔ x = y ∨ x ∈ ys, and x ∈ [] ↔ False
+@[simp] + mem_cons (x y : α) (ys : list α) : (x ∈ y :: ys) = (x = y ∨ x ∈ ys)
+  rfl
+@[simp] + mem_nil (x : α) : (x ∈ ([] : list α)) = False
+  rfl

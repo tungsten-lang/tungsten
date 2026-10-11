@@ -101,6 +101,12 @@ default to ℕ (decimals to ℚ).
 `sat` · `auto` · `specialize h a` · `symm` · `calc` · `funext x` · `subst h` ·
 `revert h` · `sorry` · `·` focuses a goal.
 
+* `induction x with n₁ n₂ …` introduces, case by case, every binder of each case:
+  constructor arguments, induction hypotheses, then the goal's own ∀/→ binders
+  (including hypotheses reverted because they mention x). The names are spent in that
+  order across all cases, so a base case's hypotheses are named first:
+  `induction cs with m h c cs ih m h` for a goal `∀ m, P cs m → Q cs m`. Unnamed binders
+  get default names.
 * `decide` evaluates a closed proposition in the kernel. Bounded quantifiers over
   literal ranges, literal lists, `Prop` and enumeration types expand finitely.
 * `sat` expands the hypotheses → goal implication to a propositional formula,

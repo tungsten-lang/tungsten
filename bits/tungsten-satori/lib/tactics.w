@@ -1207,7 +1207,7 @@
     rule = make_rule(@d, th, "rw")
     term = goal.concl
     if target_h != nil
-      term = goal.hyp(target_h)
+      term = hyp_or_fail(goal, target_h)
     eqth = rewrite_once(rule, term, goal)
     if eqth == nil
       fail("rw: pattern " + tm_show(rule.lhs) + " not found")
@@ -1215,7 +1215,7 @@
     if target_h == nil
       refine(g, [goal.with_concl(rhs)], ->(ts) @k.eq_mp(@k.sym(eqth), ts[0]))[0]
     else
-      old = goal.hyp(target_h)
+      old = hyp_or_fail(goal, target_h)
       ng = goal.without_hyp(target_h).add_hyp(target_h, rhs)
       refine(g, [ng], ->(ts) @d.prove_hyp(@k.eq_mp(eqth, @k.assume(old)), ts[0]))[0]
 
@@ -1372,7 +1372,7 @@
     prover = self
     s.discharger = ->(c) prover.try_arith_discharge(goal, c)
     if target_h != nil
-      old = goal.hyp(target_h)
+      old = hyp_or_fail(goal, target_h)
       eqth = s.simp_conv(old, 0)
       newp = dest_binop(eqth.concl, "=")[1]
       if is_const?(newp, "⊥")
@@ -1396,6 +1396,12 @@
     if th != nil
       close(refs[0], th)
     refs
+
+  -> hyp_or_fail(goal, name)
+    h = goal.hyp(name)
+    if h == nil
+      fail("unknown hypothesis " + name)
+    h
 
   -> try_arith_discharge(goal, c)
     begin
@@ -1428,7 +1434,7 @@
     s = Simp.new(@d, rules)
     goal = g.goal
     if target_h != nil
-      old = goal.hyp(target_h)
+      old = hyp_or_fail(goal, target_h)
       eqth = s.simp_conv(old, 0)
       newp = dest_binop(eqth.concl, "=")[1]
       ng = goal.without_hyp(target_h).add_hyp(target_h, newp)

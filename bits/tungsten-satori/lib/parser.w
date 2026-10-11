@@ -536,9 +536,16 @@
     while j < toks.size && toks[j].text != "\]"
       j += 1
     attr = toks[2].text
-    inner = parse_command(LLine.new(ln.indent, toks.slice(j + 1, toks.size - j - 1), ln.line), block, lines, from, to)
+    inner = parse_command(LLine.new(ln.indent, arr_sub(toks, j + 1, toks.size - j - 1), ln.line), block, lines, from, to)
     inner.text = attr
     return inner
+  # Tungsten-style shorthands:  + name : stmt  (theorem)   -> name ... (def)
+  if head.kind == :sym && (head.text == "+" || head.text == "→")
+    kw = "theorem"
+    if head.text == "→"
+      kw = "def"
+    t2 = [Tok.new(:kw, kw, head.line, head.col)] + arr_sub(toks, 1, toks.size - 1)
+    return parse_command(LLine.new(ln.indent, t2, ln.line), block, lines, from, to)
   if head.kind == :kw && head.text == "import"
     c = Cmd.new(:import)
     c.name = toks[1].text
@@ -553,7 +560,7 @@
   elsif head.kind == :sym && head.text == "#"
     c = Cmd.new(:hash)
     c.name = toks[1].text
-    c.body = toks.slice(2, toks.size - 2)
+    c.body = arr_sub(toks, 2, toks.size - 2)
   else
     raise "line " + ln.line.to_s + ": unknown command '" + head.text + "'"
   c.line = ln.line
@@ -573,16 +580,16 @@
   p = EParser.new(toks, i)
   c.binders = parse_cmd_binders(p)
   p.expect(":")
-  rest = toks.slice(p.pos, toks.size - p.pos)
+  rest = arr_sub(toks, p.pos, toks.size - p.pos)
   k = find_top(rest, ":=", 0)
   if k < 0
     c.ty = parse_expr_toks(rest)
     c.tactics = block
   else
-    c.ty = parse_expr_toks(rest.slice(0, k))
-    after = rest.slice(k + 1, rest.size - k - 1)
+    c.ty = parse_expr_toks(arr_sub(rest, 0, k))
+    after = arr_sub(rest, k + 1, rest.size - k - 1)
     if after.size > 0 && after[0].kind == :kw && after[0].text == "by"
-      inline = after.slice(1, after.size - 1)
+      inline = arr_sub(after, 1, after.size - 1)
       tacs = []
       if inline.size > 0
         split_top(inline, ";").each -> (part)
@@ -603,13 +610,13 @@
   if p.accept(":")
     k = find_top(toks, ":=", p.pos)
     if k < 0
-      c.ty = parse_type_toks(toks.slice(p.pos, toks.size - p.pos))
+      c.ty = parse_type_toks(arr_sub(toks, p.pos, toks.size - p.pos))
       p = EParser.new(toks, toks.size)
     else
-      c.ty = parse_type_toks(toks.slice(p.pos, k - p.pos))
+      c.ty = parse_type_toks(arr_sub(toks, p.pos, k - p.pos))
       p = EParser.new(toks, k)
   if p.accept(":=")
-    c.body = parse_expr_toks(toks.slice(p.pos, toks.size - p.pos))
+    c.body = parse_expr_toks(arr_sub(toks, p.pos, toks.size - p.pos))
   else
     # pattern equations:  | pats => rhs
     block.each -> (b)
@@ -617,11 +624,11 @@
       if bt[0].text != "|"
         raise "line " + b.line.to_s + ": expected '| pattern => value'"
       k = find_top(bt, "=>", 1)
-      lhs = split_top(bt.slice(1, k - 1), ",")
+      lhs = split_top(arr_sub(bt, 1, k - 1), ",")
       pats = []
       lhs.each -> (pt)
         pats.push(parse_expr_toks(pt))
-      rhs = parse_expr_toks(bt.slice(k + 1, bt.size - k - 1))
+      rhs = parse_expr_toks(arr_sub(bt, k + 1, bt.size - k - 1))
       c.eqns.push([pats, rhs])
   c
 
@@ -636,7 +643,7 @@
     i += 1
   alts = []
   if i < toks.size
-    split_top(toks.slice(i, toks.size - i), "|").each -> (part)
+    split_top(arr_sub(toks, i, toks.size - i), "|").each -> (part)
       if part.size > 0 && !(part.size == 1 && part[0].text == "where")
         alts.push(part)
   block.each -> (b)

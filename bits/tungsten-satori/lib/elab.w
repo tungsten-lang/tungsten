@@ -133,8 +133,10 @@
         ty_fun(elab_type_expr(e.kids[0]), elab_type_expr(e.kids[1]))
       else
         raise "not a type"
-    else
+    when :tid, :tapp, :tarrow, :tprod, :either
       elab_type(e)
+    else
+      raise "not a type"
 
   -> type_expr?(e)
     begin

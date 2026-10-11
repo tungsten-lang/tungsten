@@ -186,20 +186,24 @@ HASH_MOD = 1000000007
 # Terms
 
 + KTm
-  ro :tag, :name, :ty, :a, :b, :idx, :val, :h
+  ro :tag, :name, :ty, :a, :b, :idx, :val, :h, :cl
 
   # tag :var(name, ty)  :const(name, ty)  :app(a = fn, b = arg)
   #     :lam(name = hint, ty = binder type, b = body)  :bnd(idx, ty)
   #     :lit(val, ty)   val is an Int for nat/int, [num, den] for rat/real
   -> new(@tag, @name, @ty, @a, @b, @idx, @val)
+    @cl = true
     case @tag
     when :var
+      @cl = false
       @h = (str_hash(@name) * 31 + @ty.h + 1) % HASH_MOD
     when :const
       @h = (str_hash(@name) * 37 + @ty.h + 2) % HASH_MOD
     when :app
+      @cl = @a.cl && @b.cl
       @h = (@a.h * 41 + @b.h * 7 + 3) % HASH_MOD
     when :lam
+      @cl = @b.cl
       @h = (@ty.h * 43 + @b.h * 11 + 4) % HASH_MOD
     when :bnd
       @h = (@idx * 47 + 5) % HASH_MOD
@@ -518,10 +522,10 @@ HASH_MOD = 1000000007
   [n, d]
 
 -> q_add(x, y)
-  q_make(x[0] * y[1] + y[0] * x[1], x[1] * y[1])
+  q_make(zadd(x[0] * y[1], y[0] * x[1]), x[1] * y[1])
 
 -> q_sub(x, y)
-  q_make(x[0] * y[1] - y[0] * x[1], x[1] * y[1])
+  q_make(zsub(x[0] * y[1], y[0] * x[1]), x[1] * y[1])
 
 -> q_mul(x, y)
   q_make(x[0] * y[0], x[1] * y[1])
@@ -551,13 +555,13 @@ HASH_MOD = 1000000007
     return 0
   q = a / b
   if (a % b != 0) && ((a < 0) != (b < 0))
-    q = q - 1
+    q = zsub(q, 1)
   q
 
 -> int_fmod(a, b)
   if b == 0
     return a
-  a - b * int_fdiv(a, b)
+  zsub(a, b * int_fdiv(a, b))
 
 -> int_pow(a, e)
   r = 1
@@ -565,3 +569,37 @@ HASH_MOD = 1000000007
     r = r * a
     e -= 1
   r
+
+# ---------------------------------------------------------------------------
+# Overflow-safe integer addition. TODO(tungsten compiler): compiled Int + Int
+# and Int - Int wrap on i64 overflow instead of promoting to BigInt
+# (multiplication promotes correctly). Until that is fixed, kernel arithmetic
+# routes large operands through multiplication, which promotes: 4a and 4b
+# exceed i64, so the sum is formed in BigInt and the exact division by 4
+# keeps it there.
+BIG_GUARD = 2305843009213693952
+
+-> zadd(a, b)
+  if a.class_name == "Int" && b.class_name == "Int" && (a >= BIG_GUARD || a <= 0 - BIG_GUARD || b >= BIG_GUARD || b <= 0 - BIG_GUARD)
+    return (a * 4 + b * 4) / 4
+  a + b
+
+-> zsub(a, b)
+  if a.class_name == "Int" && b.class_name == "Int" && (a >= BIG_GUARD || a <= 0 - BIG_GUARD || b >= BIG_GUARD || b <= 0 - BIG_GUARD)
+    return (a * 4 - b * 4) / 4
+  a - b
+
+# Copy of a[start, start+len). Array#slice creates a registered view and the
+# runtime never prunes its view table (slicing a view scans every registered
+# view), which made long evaluations quadratic: see
+# ~/math/openai/TUNGSTEN_ISSUES.md #5. TODO(tungsten runtime): drop when fixed.
+-> arr_sub(a, start, len)
+  out = []
+  i = start
+  stop = start + len
+  if stop > a.size
+    stop = a.size
+  while i < stop
+    out.push(a[i])
+    i += 1
+  out

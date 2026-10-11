@@ -16,9 +16,15 @@ def sum : list ℕ → ℕ
   | [] => 0
   | x :: xs => x + sum xs
 
-def range : ℕ → list ℕ
-  | 0 => []
-  | n + 1 => append (range n) [n]
+def iota : ℕ → ℕ → list ℕ
+  | 0, k => []
+  | n + 1, k => k :: iota n (k + 1)
+
+def range (n : ℕ) : list ℕ := iota n 0
+
+def filter (p : α → Prop) : list α → list α
+  | [] => []
+  | x :: xs => if p x then x :: filter p xs else filter p xs
 
 def all (p : α → Prop) : list α → Prop
   | [] => True

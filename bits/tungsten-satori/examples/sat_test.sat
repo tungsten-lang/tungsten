@@ -1,0 +1,3 @@
+theorem php32 (p : ℕ → ℕ → Prop) : (∀ i < 3, ∃ j < 2, p i j) → (∀ j < 2, ∀ i < 3, ∀ k < 3, i < k → ¬ (p i j ∧ p k j)) → False := by sat
+
+theorem php32' (p : ℕ → ℕ → Prop) (h1 : ∀ i < 3, ∃ j < 2, p i j) (h2 : ∀ j < 2, ∀ i < 3, ∀ k < 3, i < k → ¬ (p i j ∧ p k j)) : False := by sat

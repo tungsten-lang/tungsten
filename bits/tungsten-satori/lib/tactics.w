@@ -108,8 +108,8 @@
     idx = 0
     while idx < @goals.size && !(@goals[idx] == g)
       idx += 1
-    rest_before = @goals.slice(0, idx)
-    rest_after = @goals.slice(idx + 1, @goals.size - idx - 1)
+    rest_before = arr_sub(@goals, 0, idx)
+    rest_after = arr_sub(@goals, idx + 1, @goals.size - idx - 1)
     @goals = rest_before + refs + rest_after
     if refs.size == 0
       g.solve(just.call([]))
@@ -174,7 +174,7 @@
       g = first_goal
       sub = Prover.new(@session)
       sub.goals = [g]
-      rest = toks.slice(1, toks.size - 1)
+      rest = arr_sub(toks, 1, toks.size - 1)
       nodes = []
       if rest.size > 0
         split_top(rest, ";").each -> (part)
@@ -186,7 +186,7 @@
       sub.run_block(nodes)
       if sub.goals.size > 0
         fail("line " + n.line.to_s + ": focused goal not closed:\n" + sub.goals[0].goal.show(@k))
-      @goals = @goals.slice(1, @goals.size - 1)
+      @goals = arr_sub(@goals, 1, @goals.size - 1)
       return
     parts = split_top(toks, ";")
     if parts.size > 1
@@ -208,7 +208,7 @@
 
   -> run_tactic(toks, block, line)
     name = toks[0].text
-    args = toks.slice(1, toks.size - 1)
+    args = arr_sub(toks, 1, toks.size - 1)
     g = first_goal
     case name
     when "intro", "intros"
@@ -311,7 +311,7 @@
     # projections h.1 h.2 h.mp h.mpr h.symm
     if name.include?(".")
       parts = name.split(".")
-      base = lookup_proof(goal, parts.slice(0, parts.size - 1).join("."))
+      base = lookup_proof(goal, arr_sub(parts, 0, parts.size - 1).join("."))
       if base != nil
         return project_proof(base, parts[parts.size - 1])
     nil
@@ -396,7 +396,7 @@
       if items.size == 2
         rest = proof_ast(goal, items[1], body)
       else
-        rest = anon_proof(goal, items.slice(1, items.size - 1), body)
+        rest = anon_proof(goal, arr_sub(items, 1, items.size - 1), body)
       rest = fit_concl(rest, body)
       return @k.exists_intro(c, w, rest)
     pq = dest_binop(c, "∧")
@@ -406,7 +406,7 @@
       if items.size == 2
         b = proof_ast(goal, items[1], pq[1])
       else
-        b = anon_proof(goal, items.slice(1, items.size - 1), pq[1])
+        b = anon_proof(goal, arr_sub(items, 1, items.size - 1), pq[1])
       return @k.conj(a, fit_concl(b, pq[1]))
     e = dest_binop(c, "=")
     if e != nil && type_of(e[0]).name == "bool" && items.size == 2
@@ -526,7 +526,7 @@
         j += 1
       if found < 0
         fail("cannot match " + tm_show(cur) + " with goal " + tm_show(target))
-      steps = steps.slice(0, found)
+      steps = arr_sub(steps, 0, found)
     # build the theorem
     thx = t
     if mt.ty.size > 0
@@ -807,23 +807,23 @@
     if args.size > 0 && args[0].kind == :id && args.size > 1 && (args[1].text == ":" || args[1].text == ":=")
       name = args[0].text
       i = 1
-    rest = args.slice(i, args.size - i)
+    rest = arr_sub(args, i, args.size - i)
     k = find_top(rest, ":=", 0)
     prop = nil
     proof_toks = nil
     if rest.size > 0 && rest[0].text == ":"
       if k < 0
-        prop = elab_term(goal, rest.slice(1, rest.size - 1), ty_bool)
+        prop = elab_term(goal, arr_sub(rest, 1, rest.size - 1), ty_bool)
       else
-        prop = elab_term(goal, rest.slice(1, k - 1), ty_bool)
-        proof_toks = rest.slice(k + 1, rest.size - k - 1)
+        prop = elab_term(goal, arr_sub(rest, 1, k - 1), ty_bool)
+        proof_toks = arr_sub(rest, k + 1, rest.size - k - 1)
     elsif rest.size > 0 && rest[0].text == ":="
-      proof_toks = rest.slice(1, rest.size - 1)
+      proof_toks = arr_sub(rest, 1, rest.size - 1)
     else
       fail("have: expected ':' or ':='")
     th = nil
     if proof_toks != nil && proof_toks.size > 0 && proof_toks[0].text == "by"
-      th = run_subproof(goal, prop, by_nodes(proof_toks.slice(1, proof_toks.size - 1), block, line))
+      th = run_subproof(goal, prop, by_nodes(arr_sub(proof_toks, 1, proof_toks.size - 1), block, line))
     elsif proof_toks != nil
       th = proof_expr(goal, proof_toks, prop)
       if prop != nil
@@ -867,8 +867,8 @@
     k = find_top(args, ":=", 0)
     if k < 0
       fail("obtain: expected 'pattern := proof'")
-    pat = args.slice(0, k)
-    pth = proof_expr(g.goal, args.slice(k + 1, args.size - k - 1))
+    pat = arr_sub(args, 0, k)
+    pth = proof_expr(g.goal, arr_sub(args, k + 1, args.size - k - 1))
     destruct(g, pth, pat)
 
   # Destructs theorem th (whose hyps are in g's context) according to a pattern.
@@ -877,17 +877,17 @@
     if pat.size == 0
       fail("empty pattern")
     alts = split_top(pat, "|")
-    if alts.size > 1 || (pat[0].text == "(" && split_top(pat.slice(1, pat.size - 2), "|").size > 1)
+    if alts.size > 1 || (pat[0].text == "(" && split_top(arr_sub(pat, 1, pat.size - 2), "|").size > 1)
       inner = pat
       if pat[0].text == "("
-        inner = pat.slice(1, pat.size - 2)
+        inner = arr_sub(pat, 1, pat.size - 2)
         alts = split_top(inner, "|")
       return destruct_or(g, th, alts)
     if pat[0].text == "⟨"
-      items = split_top(pat.slice(1, pat.size - 2), ",")
+      items = split_top(arr_sub(pat, 1, pat.size - 2), ",")
       return destruct_tuple(g, th, items)
     if pat[0].text == "("
-      return destruct(g, th, pat.slice(1, pat.size - 2))
+      return destruct(g, th, arr_sub(pat, 1, pat.size - 2))
     name = pat[0].text
     p = th.concl
     if name == "rfl"
@@ -938,14 +938,14 @@
       body = tm_instantiate(ex.b, v, 0)
       ng = Goal.new(goal.fixes + [[nm, v]], goal.hyps, goal.concl)
       refs = refine(g, [ng], ->(ts) @k.choose(v, th, ts[0]))
-      return destruct_tuple(refs[0], @k.assume(body), items.slice(1, items.size - 1))
+      return destruct_tuple(refs[0], @k.assume(body), arr_sub(items, 1, items.size - 1))
     pq = dest_binop(c, "∧")
     if pq != nil
       a = @k.conj1(th)
       b = @k.conj2(th)
       r = destruct(g, a, items[0])
       g2 = first_goal
-      return destruct_tuple(g2, b, items.slice(1, items.size - 1))
+      return destruct_tuple(g2, b, arr_sub(items, 1, items.size - 1))
     e = dest_binop(c, "=")
     if e != nil && type_of(e[0]).name == "bool"
       mp = project_proof(th, "mp")
@@ -1030,8 +1030,8 @@
     names = []
     target = args
     if wi >= 0
-      target = args.slice(0, wi)
-      args.slice(wi + 1, args.size - wi - 1).each -> (t)
+      target = arr_sub(args, 0, wi)
+      arr_sub(args, wi + 1, args.size - wi - 1).each -> (t)
         names.push(t.text)
     if target.size == 1 && goal.hyp(target[0].text) != nil
       th = @k.assume(goal.hyp(target[0].text))
@@ -1059,8 +1059,8 @@
     names = []
     target = args
     if wi >= 0
-      target = args.slice(0, wi)
-      args.slice(wi + 1, args.size - wi - 1).each -> (t)
+      target = arr_sub(args, 0, wi)
+      arr_sub(args, wi + 1, args.size - wi - 1).each -> (t)
         if t.text != "|" && t.text != "=>"
           names.push(t.text)
     tac_induction_impl(g, target, names, true)
@@ -1152,9 +1152,9 @@
     rs = args
     if at >= 0
       target_h = args[at + 1].text
-      rs = args.slice(0, at)
+      rs = arr_sub(args, 0, at)
     if rs.size > 0 && rs[0].text == "\["
-      rs = rs.slice(1, rs.size - 2)
+      rs = arr_sub(rs, 1, rs.size - 2)
     cur = g
     split_top(rs, ",").each -> (r)
       cur = rw_one(cur, r, target_h)
@@ -1173,7 +1173,7 @@
     rev = false
     if rtoks[0].text == "←" || rtoks[0].text == "<-"
       rev = true
-      rtoks = rtoks.slice(1, rtoks.size - 1)
+      rtoks = arr_sub(rtoks, 1, rtoks.size - 1)
     th = rule_theorem(goal, rtoks)
     if rev
       th = sym_rule(th)
@@ -1301,7 +1301,7 @@
     if toks.size > 0
       inner = toks
       if inner[0].text == "\["
-        inner = inner.slice(1, inner.size - 2)
+        inner = arr_sub(inner, 1, inner.size - 2)
       split_top(inner, ",").each -> (r)
         if r.size > 0
           if r[0].text == "*"
@@ -1311,7 +1311,7 @@
             rev = false
             if r[0].text == "←"
               rev = true
-              r = r.slice(1, r.size - 1)
+              r = arr_sub(r, 1, r.size - 1)
             nm = r[0].text
             if r.size == 1 && @session.k.defs.has_key?(nm)
               rules.push(make_rule(@d, @session.k.defs[nm], nm))
@@ -1331,11 +1331,11 @@
     rs = args
     if at >= 0
       target_h = args[at + 1].text
-      rs = args.slice(0, at)
+      rs = arr_sub(args, 0, at)
     only = false
     if rs.size > 0 && rs[0].text == "only"
       only = true
-      rs = rs.slice(1, rs.size - 1)
+      rs = arr_sub(rs, 1, rs.size - 1)
     rules = simp_rules_from(goal, rs, only)
     if all
       goal.hyps.each -> (h)
@@ -1386,7 +1386,7 @@
     names = args
     if at >= 0
       target_h = args[at + 1].text
-      names = args.slice(0, at)
+      names = arr_sub(args, 0, at)
     rules = []
     names.each -> (t)
       nm = t.text
@@ -1440,7 +1440,7 @@
     if args.size > 0
       inner = args
       if inner[0].text == "\["
-        inner = inner.slice(1, inner.size - 2)
+        inner = arr_sub(inner, 1, inner.size - 2)
       split_top(inner, ",").each -> (p)
         if p.size > 0
           extra.push(proof_expr(goal, p))
@@ -1602,7 +1602,7 @@
     c = g.goal.concl
     u = dest_unop(c, "cnf_unsat")
     if u == nil
-      fail("sat: goal must have the form cnf_unsat F (use a reflection lemma)")
+      return tac_sat_prop(g)
     ev = @k.compute(u)
     f = dest_binop(ev.concl, "=")[1]
     clauses = cnf_literal_value(f)
@@ -1734,17 +1734,17 @@
       k = find_top(st, ":=", 0)
       if k < 0
         fail("calc: each step needs ':= proof'")
-      rel_toks = st.slice(0, k)
+      rel_toks = arr_sub(st, 0, k)
       if rel_toks[0].text == "_" && prev_rhs != nil
-        rel_toks = rel_toks.slice(1, rel_toks.size - 1)
+        rel_toks = arr_sub(rel_toks, 1, rel_toks.size - 1)
         e = parse_expr_toks([Tok.new(:id, "_calc_prev_", 0, 0)] + rel_toks)
         rel = calc_elab(goal, e, prev_rhs)
       else
         rel = elab_term(goal, rel_toks, ty_bool)
-      ptoks = st.slice(k + 1, st.size - k - 1)
+      ptoks = arr_sub(st, k + 1, st.size - k - 1)
       th = nil
       if ptoks.size > 0 && ptoks[0].text == "by"
-        th = run_subproof(goal, rel, by_nodes(ptoks.slice(1, ptoks.size - 1), [], 0))
+        th = run_subproof(goal, rel, by_nodes(arr_sub(ptoks, 1, ptoks.size - 1), [], 0))
       else
         th = fit_concl(proof_expr(goal, ptoks, rel), rel)
       if acc == nil
@@ -1805,3 +1805,29 @@
     if pvars.has_key?(var_key(v))
       return nil
   t
+
++ Prover
+  # Expand bounded quantifiers over the hypotheses-to-goal implication into a
+  # propositional formula, then refute its negation with a checked LRAT proof.
+  -> tac_sat_prop(g)
+    goal = g.goal
+    big = goal.concl
+    i = goal.hyps.size - 1
+    while i >= 0
+      big = @k.bin("⇒", goal.hyps[i][1], big)
+      i -= 1
+    ev = @k.compute(big, false, true)
+    psi = dest_binop(ev.concl, "=")[1]
+    th = nil
+    if is_const?(psi, "⊤")
+      th = @d.eqt_elim(ev)
+    else
+      negpsi = @k.neg_tm(psi)
+      cls = tseitin_refutation_cnf(negpsi)
+      lrat = sat_solve_lrat(@session, cls)
+      nn = @k.prop_refute(negpsi, lrat)
+      psi_th = classical_by_contra(psi, @k.not_elim(nn, @k.assume(negpsi)))
+      th = @k.eq_mp(@k.sym(ev), psi_th)
+    goal.hyps.each -> (h)
+      th = @k.mp(th, @k.assume(h[1]))
+    close(g, th)

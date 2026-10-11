@@ -26,7 +26,18 @@ Run it from the Tungsten root (it needs the prelude and the SAT solver):
 
 ```sh
 bin/tungsten bits/tungsten-satori/bin/satori.w -- file.sat
+bits/tungsten-satori/bin/satori file.sat            # prebuilt release binary
+bits/tungsten-satori/bin/satori check -j 4 file.sat # split mode
 ```
+
+**Split mode** (`-j N`). Tungsten has no garbage collector, so a single process
+that checks many heavy theorems (large `decide`, `sat`) keeps all of their memory.
+With `-j N` every theorem is checked in its own process (`satori --only K`), N at a
+time, each under a memory and time watchdog (`SATORI_JOB_MEM_MB`, default 6144;
+`SATORI_JOB_SECONDS`, default 3600). A process admits the other theorems with a
+`split:NAME` tag. The driver replaces each such tag by the transitive tags of
+NAME's own check, so the verdict and trust tags match a single-process run. If
+a theorem fails, every theorem that used it is marked `uses-failed:NAME`.
 
 ## Logic and trust
 

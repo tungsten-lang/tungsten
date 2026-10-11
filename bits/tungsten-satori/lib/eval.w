@@ -388,6 +388,11 @@
 
   -> nat_rec_val(h, z, s, nv)
     if !nv.clo? && nv.tag == :lit
+      # a step function that ignores the recursive value (a case split): one step
+      if nv.val > 0
+        f1 = apply1(s, mk_nat(nv.val - 1))
+        if ignores_arg?(f1)
+          return apply1(f1, z)
       acc = z
       i = 0
       while i < nv.val
@@ -396,7 +401,10 @@
       return acc
     if !nv.clo? && nv.tag == :app && nv.a.tag == :const && nv.a.name == "succ"
       m = nv.b
-      return apply1(apply1(s, m), nat_rec_val(h, z, s, m))
+      f1 = apply1(s, m)
+      if ignores_arg?(f1)
+        return apply1(f1, z)
+      return apply1(f1, nat_rec_val(h, z, s, m))
     neutral(h, [z, s, nv])
 
   -> rec_owner(name)
@@ -437,9 +445,22 @@
           rv.push(vals[q])
           q += 1
         rv.push(cargs[j])
-        f = apply1(f, iota_or_neutral(h, rv))
+        # a case function that ignores its induction hypothesis (non-recursive case
+        # splits compiled from nested patterns) gets a placeholder: computing the
+        # unused recursive value eagerly made nested matches exponential
+        if ignores_arg?(f)
+          f = apply1(f, cargs[j])
+        else
+          f = apply1(f, iota_or_neutral(h, rv))
       j += 1
     apply_vals(f, vals, k + 1)
+
+  -> ignores_arg?(f)
+    if f.clo?
+      return !occurs_bnd(f.lam.b, 0)
+    if f.tag == :lam
+      return !occurs_bnd(f.b, 0)
+    false
 
   -> iota_or_neutral(h, vals)
     r = iota(h, vals)

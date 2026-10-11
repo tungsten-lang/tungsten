@@ -1549,16 +1549,24 @@
     # fold closed numeric subterms (1 / 2 ^ 4 ↦ 1/16) with simp's literal evaluation
     folder = Simp.new(@d, [])
     folded = []
+    bottom = nil
     hyps.each -> (h)
       begin
         eqth = folder.simp_conv(h.concl, 0)
         rhs = dest_binop(eqth.concl, "=")[1]
         if tm_eq(rhs, h.concl)
           folded.push(h)
-        else
+        elsif is_const?(rhs, "⊥")
+          # a closed hypothesis (or negated closed goal) that evaluates to false
+          bottom = @k.eq_mp(eqth, h)
+        elsif !is_const?(rhs, "⊤")
           folded.push(@k.eq_mp(eqth, h))
       rescue e
         folded.push(h)
+    if bottom != nil
+      if neg == nil
+        return bottom
+      return classical_by_contra(c, bottom)
     hyps = folded
     comps = []
     hyps.each -> (h)

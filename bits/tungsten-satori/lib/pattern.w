@@ -209,27 +209,28 @@
       fail("nested patterns are not supported; use a variable")
     a.s
 
-  # The case for constructor `ct` at the recursion position r. Equations
-  # compatible with ct (constructor ct or a variable at r) are kept in order;
-  # constructor patterns in the other positions are compiled to nested
-  # (non-recursive) recursor applications by match_tree, first match wins.
+  # The case for constructor `ct` at the recursion position r. Equations compatible
+  # with ct (constructor ct or a variable at r) are kept in order. The remaining
+  # positions and the constructor's own arguments form a pattern matrix that
+  # match_tree compiles to nested (non-recursive) recursor applications; patterns may
+  # nest (x :: y :: ys, (a, b), succ (succ n), [a, b]); the first matching equation wins.
   -> build_case(ct, r, others, other_tys, motive, fvar, params, arg_tys, rty)
     cname = ct[0]
     cargs = ct[1]
     eqs = []
     @c.eqns.each -> (eq)
-      cl = classify(eq[0][r], rty)
+      cl = classify_args(eq[0][r], rty)
       if cl == nil || cl[0] == cname
         eqs.push(eq)
     if eqs.size == 0
       fail("missing case for constructor " + cname)
-    first_cl = classify(eqs[0][0][r], rty)
+    first_cl = classify_args(eqs[0][0][r], rty)
     ys = []
     i = 0
     while i < cargs.size
       nm = "y" + i.to_s
-      if first_cl != nil && i < first_cl[1].size && first_cl[1][i] != "_"
-        nm = first_cl[1][i]
+      if first_cl != nil && i < first_cl[1].size && first_cl[1][i].kind == :id && var_pattern?(first_cl[1][i])
+        nm = first_cl[1][i].s
       ys.push(mk_var(nm, cargs[i]))
       i += 1
     ihs = []
@@ -252,48 +253,68 @@
     whole = mk_apps(mk_const_raw(cname_const(cname), ty_funs(cargs, rty)), ys)
     if cname == "zero"
       whole = mk_nat(0)
+    # columns: the other argument positions, then the constructor's arguments
+    cols = []
+    ctys = []
+    ovs.each -> (o)
+      cols.push(o)
+      ctys.push(o.ty)
+    ys.each -> (y)
+      cols.push(y)
+      ctys.push(y.ty)
+    rows = []
     envs = []
     eqs.each -> (eq)
+      row = []
+      others.each -> (oi)
+        row.push(eq[0][oi])
       env = []
-      pr = eq[0][r]
-      cl = classify(pr, rty)
+      cl = classify_args(eq[0][r], rty)
       if cl == nil
+        pr = eq[0][r]
         if pr.kind == :id
           env.push([pr.s, whole])
+        k = 0
+        while k < ys.size
+          row.push(ast(:hole, "_", []))
+          k += 1
       else
         k = 0
-        while k < cl[1].size && k < ys.size
-          if cl[1][k] != "_"
-            env.push([cl[1][k], ys[k]])
+        while k < ys.size
+          if k < cl[1].size
+            row.push(cl[1][k])
+          else
+            row.push(ast(:hole, "_", []))
           k += 1
+      rows.push(row)
       envs.push(env)
-    scrut = []
     split = []
-    ovs.each -> (o)
-      scrut.push(o)
+    cols.each -> (c)
       split.push(false)
-    body = match_tree(eqs, envs, others, scrut, split, fvar, params, motive, other_tys, 0)
+    body = match_tree(eqs, rows, envs, cols, ctys, split, fvar, params, motive, other_tys, 0)
     # replace recursive calls  F params.. args..  with  ih_j others..
     body = replace_rec(body, fvar, params, r, others, ys, rec_idx, ihs)
     if tm_free_in?(fvar, body)
-      fail("recursive call is not structural (must recurse on a constructor argument)")
+      fail("recursive call is not structural: recurse on a direct constructor argument (a call on a nested sub-pattern such as rest in x :: y :: rest needs a helper function)")
     inner = mk_lams(ovs, body)
     mk_lams(ys + ihs, inner)
 
-  -> match_tree(eqs, envs, others, scrut, split, fvar, params, motive, other_tys, depth)
+  # Compile the pattern matrix: rows[k][c] is equation k's pattern for column c (term
+  # cols[c] of type ctys[c]); split[c] marks columns already decomposed.
+  -> match_tree(eqs, rows, envs, cols, ctys, split, fvar, params, motive, other_tys, depth)
     if eqs.size == 0
       fail("missing case in a nested pattern")
-    eq = eqs[0]
-    col = -1
-    j = 0
-    while j < others.size && col < 0
-      if !split[j] && !var_pattern?(eq[0][others[j]])
-        col = j
-      j += 1
     res_ty = arg_tys_res(motive, other_tys)
+    row = rows[0]
+    col = -1
+    c = 0
+    while c < cols.size && col < 0
+      if !split[c] && classify_args(row[c], ctys[c]) != nil
+        col = c
+      c += 1
     if col < 0
-      return match_leaf(eq, envs[0], others, scrut, split, fvar, params, res_ty)
-    cty = other_tys[col]
+      return match_leaf(eqs[0], row, envs[0], cols, split, fvar, params, res_ty)
+    cty = ctys[col]
     cases = []
     ctor_table(cty).each -> (ct)
       zs = []
@@ -308,44 +329,59 @@
       if ct[0] == "zero"
         whole = mk_nat(0)
       eqs2 = []
+      rows2 = []
       envs2 = []
       k = 0
       while k < eqs.size
-        p = eqs[k][0][others[col]]
-        cl = classify(p, cty)
+        p = rows[k][col]
+        cl = classify_args(p, cty)
         if cl == nil || cl[0] == ct[0]
           env = []
-          envs[k].each -> (b)
-            env.push(b)
+          envs[k].each -> (bb)
+            env.push(bb)
+          nrow = []
+          rows[k].each -> (q)
+            nrow.push(q)
           if cl == nil
             if p.kind == :id
               env.push([p.s, whole])
+            i = 0
+            while i < zs.size
+              nrow.push(ast(:hole, "_", []))
+              i += 1
           else
-            q = 0
-            while q < cl[1].size && q < zs.size
-              if cl[1][q] != "_"
-                env.push([cl[1][q], zs[q]])
-              q += 1
+            i = 0
+            while i < zs.size
+              if i < cl[1].size
+                nrow.push(cl[1][i])
+              else
+                nrow.push(ast(:hole, "_", []))
+              i += 1
           eqs2.push(eqs[k])
+          rows2.push(nrow)
           envs2.push(env)
         k += 1
-      scrut2 = []
+      cols2 = []
+      ctys2 = []
       split2 = []
       j = 0
-      while j < scrut.size
-        if j == col
-          scrut2.push(whole)
-          split2.push(true)
-        else
-          scrut2.push(scrut[j])
-          split2.push(split[j])
+      while j < cols.size
+        cols2.push(cols[j])
+        ctys2.push(ctys[j])
+        split2.push(split[j] || j == col)
         j += 1
-      sub = match_tree(eqs2, envs2, others, scrut2, split2, fvar, params, motive, other_tys, depth + 1)
+      i = 0
+      while i < zs.size
+        cols2.push(zs[i])
+        ctys2.push(ct[1][i])
+        split2.push(false)
+        i += 1
+      sub = match_tree(eqs2, rows2, envs2, cols2, ctys2, split2, fvar, params, motive, other_tys, depth + 1)
       cases.push(mk_lams(zs + zihs, sub))
     rec2 = recursor(cty, res_ty, cases.size)
-    mk_app(mk_apps(rec2, cases), scrut[col])
+    mk_app(mk_apps(rec2, cases), cols[col])
 
-  -> match_leaf(eq, env, others, scrut, split, fvar, params, res_ty)
+  -> match_leaf(eq, row, env, cols, split, fvar, params, res_ty)
     @e.reset
     params.each -> (p)
       @e.push_local(p.name, p)
@@ -353,15 +389,52 @@
     env.each -> (b)
       @e.push_local(b[0], b[1])
     j = 0
-    while j < others.size
+    while j < cols.size
       if !split[j]
-        p = eq[0][others[j]]
+        p = row[j]
         if p.kind == :id
-          @e.push_local(p.s, scrut[j])
+          @e.push_local(p.s, cols[j])
       j += 1
     body = @e.elab(eq[1])
     @e.unify(@e.tyof(body), res_ty)
     @e.finalize(body, false)
+
+  # Like classify, but returns the argument patterns themselves (which may nest):
+  # nil for a variable or `_`, else [constructor name, [argument patterns]].
+  -> classify_args(p, rty)
+    if p.kind == :hole || (p.kind == :id && !@k.ctor_of.has_key?(p.s) && !(p.s == "zero" && rty.tag == :c && rty.name == "nat"))
+      return nil
+    if rty.tag == :c && rty.name == "nat"
+      if p.kind == :num
+        v = p.s.to_i
+        if v == 0
+          return ["zero", []]
+        return ["succ", [ast(:num, (v - 1).to_s, [])]]
+      if p.kind == :binop && p.s == "+" && p.kids[1].kind == :num
+        v = p.kids[1].s.to_i
+        if v == 1
+          return ["succ", [p.kids[0]]]
+        if v > 1
+          return ["succ", [ast(:binop, "+", [p.kids[0], ast(:num, (v - 1).to_s, [])])]]
+      if p.kind == :app && p.kids[0].kind == :id && p.kids[0].s == "succ"
+        return ["succ", [p.kids[1]]]
+      if p.kind == :id && p.s == "zero"
+        return ["zero", []]
+      fail("unsupported ℕ pattern (use 0, n + 1, succ n or a literal)")
+    if p.kind == :list
+      if p.kids.size == 0
+        return ["nil", []]
+      return ["cons", [p.kids[0], ast(:list, "", arr_sub(p.kids, 1, p.kids.size - 1))]]
+    if p.kind == :binop && p.s == "::"
+      return ["cons", [p.kids[0], p.kids[1]]]
+    if p.kind == :tuple && p.kids.size == 2
+      return ["pair", [p.kids[0], p.kids[1]]]
+    if p.kind == :id
+      return [p.s, []]
+    if p.kind == :app
+      sp = @e.ast_spine(p)
+      return [sp[0].s, sp[1]]
+    fail("unsupported pattern")
 
   -> cname_const(n)
     n
@@ -431,16 +504,32 @@
       eqn = @e.finalize(eqn, true)
       @e.check(eqn)
       e2 = dest_binop(eqn, "=")
-      th = @s.eq_by_compute(e2[0], e2[1])
-      vars = params + tm_frees(eqn).select ->(v) !params_has?(params, v)
-      thg = @s.d.gen_all(vars, th)
+      th = nil
+      begin
+        th = @s.eq_by_compute(e2[0], e2[1])
+      rescue err
+        # a catch-all equation after more specific ones (| xs => …) holds only on the
+        # inputs the earlier equations miss, so it is not an unconditional lemma: skip it
+        if idx == 0 || !has_var_column?(eq)
+          raise err
+        th = nil
       idx += 1
-      @s.add_theorem(name + ".eq_" + idx.to_s, thg)
-      out.push(thg)
+      if th != nil
+        vars = params + tm_frees(eqn).select ->(v) !params_has?(params, v)
+        thg = @s.d.gen_all(vars, th)
+        @s.add_theorem(name + ".eq_" + idx.to_s, thg)
+        out.push(thg)
     @s.set_eqns(name, out)
     out.each -> (t)
       @s.simp_rules.push(make_rule(@s.d, t, name))
     out
+
+  # does some argument of this equation use a variable or `_` pattern?
+  -> has_var_column?(eq)
+    eq[0].each -> (p)
+      if p.kind == :hole || (p.kind == :id && var_pattern?(p))
+        return true
+    false
 
   # variable names bound by a pattern (identifiers that are not constructors or constants)
   -> pat_names(p, out)

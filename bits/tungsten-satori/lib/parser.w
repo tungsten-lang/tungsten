@@ -561,6 +561,9 @@
 
 -> parse_command(ln, block, lines, from, to)
   toks = ln.toks
+  toks.each -> (t)
+    if t.kind == :lexerr
+      raise t.text
   head = toks[0]
   c = nil
   if head.kind == :sym && head.text == "@"

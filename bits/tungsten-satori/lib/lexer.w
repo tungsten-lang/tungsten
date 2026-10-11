@@ -199,7 +199,16 @@
   lineno = 0
   lines.each -> (raw)
     lineno += 1
-    r = lex_line(raw.chars, lineno)
+    r = nil
+    begin
+      r = lex_line(raw.chars, lineno)
+    rescue err
+      # keep the error as a token: the command containing it fails, the file goes on
+      ind = 0
+      cs = raw.chars
+      while ind < cs.size && cs[ind] == " "
+        ind += 1
+      r = [ind, [Tok.new(:lexerr, err.to_s, lineno, ind)]]
     toks = r[1]
     if toks.size > 0
       if cur != nil && (depth > 0 || continues_after?(cur.toks[cur.toks.size - 1]) || (r[0] > 0 && (continues_before?(toks[0]) || open_header?(cur)))) && !(toks[0].kind == :sym && toks[0].text == "|" && depth == 0)

@@ -97,6 +97,7 @@
   auto :DimerCovering, "combinatorics/dimer"
   auto :Kasteleyn, "combinatorics/kasteleyn"
   auto :Polyiamond, "combinatorics/polyiamond"
+  auto :IntegerPartition, "combinatorics/partition"
   auto :Lattice, "combinatorics/lattice_animal"
   auto :ExactCover, "combinatorics/exact_cover"
   auto :FiniteSimpleGraph, "combinatorics"

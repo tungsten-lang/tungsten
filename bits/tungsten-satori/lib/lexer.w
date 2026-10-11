@@ -1,7 +1,8 @@
 # Satori lexer: tokens plus layout.
 #
-# Physical lines are joined into logical lines while brackets are open or a
-# line ends with an infix operator, `:`, `:=` or `,`. Each logical line keeps
+# Physical lines are joined into logical lines while brackets are open, a
+# line ends with an infix operator, `:`, `:=` or `,`, or the next line starts
+# with an infix operator such as `=`, `→`, `∧`, `≤` or `:=`. Each logical line keeps
 # the indentation of its first physical line; the parser builds blocks from
 # indentation. `--` starts a comment.
 
@@ -148,6 +149,14 @@
     return false
   ["→", "↔", "∧", "∨", ":=", ":", ",", "+", "-", "*", "/", "=", "<", ">", "≤", "≥", "≠", "∈", "=>", "::", "++", "^", "(", "\[", "{", "⟨", "×", "∣", "⊆"].include?(t.text)
 
+# An indented line that starts with an infix operator continues the previous logical line
+# (multi-line statements: `+ thm : lhs` / `    = rhs`). `+` and `-` are excluded:
+# `+` starts a theorem and `-` may be a unary minus.
+-> continues_before?(t)
+  if t.kind != :sym
+    return false
+  ["=", "→", "↔", "∧", "∨", "≤", "≥", "<", ">", "≠", "∈", "*", "/", "++", "::", "∣", "⊆", "×", ":="].include?(t.text)
+
 -> bracket_delta(toks)
   d = 0
   toks.each -> (t)
@@ -170,7 +179,7 @@
     r = lex_line(raw.chars, lineno)
     toks = r[1]
     if toks.size > 0
-      if cur != nil && (depth > 0 || continues_after?(cur.toks[cur.toks.size - 1])) && !(toks[0].kind == :sym && toks[0].text == "|" && depth == 0)
+      if cur != nil && (depth > 0 || continues_after?(cur.toks[cur.toks.size - 1]) || (r[0] > 0 && continues_before?(toks[0]))) && !(toks[0].kind == :sym && toks[0].text == "|" && depth == 0)
         toks.each -> (t)
           cur.toks.push(t)
       else

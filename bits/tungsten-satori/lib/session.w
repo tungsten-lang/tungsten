@@ -3,7 +3,7 @@
 
 + Session
   ro :k, :d, :elab, :theorems, :simp_rules, :messages, :stats, :root
-  rw :prelude_mode, :quiet
+  rw :prelude_mode, :quiet, :only
 
   -> new(@root)
     @k = KKernel.new
@@ -22,6 +22,8 @@
     @stats = {"theorems" => 0, "defs" => 0, "axioms" => 0, "lines" => 0}
     @failures = 0
     @current_dir = "."
+    @only = nil
+    @thm_index = 0
 
   -> failures
     @failures
@@ -119,11 +121,19 @@
     cmds = parse_program(src)
     @stats["lines"] = @stats["lines"] + src.split("\n").size
     cmds.each -> (c)
+      target = false
+      if @only != nil && !@prelude_mode
+        if c.kind == :theorem || (c.kind == :attr && c.body != nil && c.body.kind == :theorem)
+          target = @thm_index + 1 == @only
+      if target
+        << "⟦" + @only.to_s + "⟧"
       begin
         exec(c)
       rescue e
         @failures += 1
         << ("✗ line " + c.line.to_s + " (" + c.kind.to_s + " " + c.name.to_s + "): " + e.to_s)
+      if target
+        << "⟦/" + @only.to_s + "⟧"
 
   # ---- commands ------------------------------------------------------------------------
 
@@ -292,6 +302,17 @@
     stmt = r[0]
     names = r[1]
     th = nil
+    if @only != nil && !@prelude_mode
+      @thm_index += 1
+      if @thm_index != @only
+        # split mode: another process checks this theorem
+        th = @k.admit_split(stmt, c.name)
+        add_theorem(c.name, th)
+        if c.text == "simp"
+          @simp_rules.push(make_rule(@d, th, c.name))
+        @stats["theorems"] = @stats["theorems"] + 1
+        say("⋯ split " + c.name)
+        return
     if c.tactics != nil
       th = prove_with_tactics(stmt, names, c.tactics)
     elsif c.body != nil

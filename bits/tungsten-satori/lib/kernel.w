@@ -515,6 +515,13 @@
   -> tagged(th, tag)
     thm(th.hyps, th.concl, tags_union(th.tags, [tag]))
 
+  # A statement checked by another `satori --only` process (split mode). The
+  # tag `split:NAME` propagates; the split driver replaces it by the tags of
+  # NAME's own check, so the final report is the same as a single-process run.
+  -> admit_split(p, name)
+    need_bool(p, "split")
+    thm([], p, ["split:" + name])
+
   # An admitted goal; the `sorry` tag propagates to every dependent theorem.
   -> sorry_thm(p)
     need_bool(p, "sorry")

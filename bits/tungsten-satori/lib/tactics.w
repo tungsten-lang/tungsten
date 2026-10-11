@@ -1445,10 +1445,21 @@
       fail("decide: proposition evaluates to " + tm_show(r))
     close(g, @d.eqt_elim(th))
 
+  # norm_num: closed numerals by evaluation; otherwise a ring identity, then linear
+  # arithmetic, and finally simp (which may leave a simplified goal)
   -> tac_norm_num(g, args)
     begin
       return tac_decide(g)
     rescue e
+      0
+    if dest_binop(g.goal.concl, "=") != nil
+      begin
+        return tac_ring(g)
+      rescue e2
+        0
+    begin
+      return tac_linarith(g, [])
+    rescue e3
       0
     tac_simp(g, args, false)
 

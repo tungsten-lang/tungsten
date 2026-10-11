@@ -5,109 +5,147 @@
 #   r[:x], r[:value]
 #
 # `c` has n entries, `a` is an array of m rows of n entries, `b` has m entries
-# (any signs). Bland's rule (smallest improving index, smallest leaving basis
-# index) guarantees termination; tolerances are absolute, 1e-11. Meant for the
-# small and medium dense problems of local optimization (sequential linear
-# programming), not for large sparse models.
+# (any signs). Dantzig's rule, switching to Bland's rule after many pivots so
+# that degenerate cycling cannot occur; absolute tolerances 1e-11.
+#
+# Allocation-free use in hot loops (Tungsten has no garbage collector):
+#   ws = LinProg.workspace(mmax, nmax)     # [t, basis, allowed, x]
+#   st = linprog_solve(a_flat, b, c, m, n, ws[0], ws[1], ws[2], ws[3])
+# with a_flat row-major m×n (f64[]), status 0 optimal, 1 unbounded, 2 infeasible,
+# the solution in ws[3][0..n−1] and the optimum returned by linprog_value(ws[0], m, n).
 
 + LinProg
+  -> .workspace(mmax, nmax)
+    w = nmax + mmax + 2
+    [f64[(mmax + 1) * w], i64[mmax + 1], i64[w], f64[nmax]]
+
   -> .maximize(c, a, b)
     n = c.size
     m = b.size
-    # columns: n originals, m slacks, 1 auxiliary, then the right-hand side
-    w = n + m + 2
-    t = f64[(m + 1) * w]
-    basis = i64[m + 1]
+    ws = LinProg.workspace(m, n)
+    af = f64[m * n + 1]
+    bf = f64[m + 1]
+    cf = f64[n + 1]
     i = 0
     while i < m
       row = a[i]
       j = 0
       while j < n
-        t[i * w + j] = ~1.0 * row[j]
+        af[i * n + j] = ~1.0 * row[j]
         j += 1
-      t[i * w + n + i] = ~1.0
-      t[i * w + n + m] = ~-1.0
-      t[i * w + w - 1] = ~1.0 * b[i]
-      basis[i] = n + i
+      bf[i] = ~1.0 * b[i]
       i += 1
-    # phase 1 if some b < 0: maximize −aux
-    worst = -1
-    wv = ~0.0
-    i = 0
-    while i < m
-      if t[i * w + w - 1] < wv
-        wv = t[i * w + w - 1]
-        worst = i
-      i += 1
-    allowed = i64[w]
-    j = 0
-    while j < w - 1
-      allowed[j] = 1
-      j += 1
-    if worst >= 0
-      j = 0
-      while j < w
-        t[m * w + j] = ~0.0
-        j += 1
-      t[m * w + n + m] = ~1.0
-      linprog_pivot(t, m + 1, w, worst, n + m)
-      basis[worst] = n + m
-      st = linprog_run(t, m, w, basis, allowed)
-      if st != 0 || t[m * w + w - 1] < ~-1.0e-9
-        return {:status => :infeasible, :x => nil, :value => nil}
-      # drive the auxiliary variable out of the basis
-      i = 0
-      while i < m
-        if basis[i] == n + m
-          j = 0
-          piv = -1
-          while j < n + m && piv < 0
-            v = t[i * w + j]
-            if v > ~1.0e-11 || v < ~-1.0e-11
-              piv = j
-            j += 1
-          if piv >= 0
-            linprog_pivot(t, m + 1, w, i, piv)
-            basis[i] = piv
-        i += 1
-    allowed[n + m] = 0
-    i = 0
-    while i <= m
-      t[i * w + n + m] = ~0.0
-      i += 1
-    # phase 2 objective row: −c, reduced against the current basis
-    j = 0
-    while j < w
-      t[m * w + j] = ~0.0
-      j += 1
     j = 0
     while j < n
-      t[m * w + j] = ~0.0 - c[j]
+      cf[j] = ~1.0 * c[j]
       j += 1
-    i = 0
-    while i < m
-      bj = basis[i]
-      f = t[m * w + bj]
-      if f != ~0.0
-        j = 0
-        while j < w
-          t[m * w + j] = t[m * w + j] - f * t[i * w + j]
-          j += 1
-      i += 1
-    st = linprog_run(t, m, w, basis, allowed)
+    st = linprog_solve(af, bf, cf, m, n, ws[0], ws[1], ws[2], ws[3])
+    if st == 2
+      return {:status => :infeasible, :x => nil, :value => nil}
     if st == 1
       return {:status => :unbounded, :x => nil, :value => nil}
     x = []
     j = 0
     while j < n
-      x.push(~0.0)
+      x.push(ws[3][j])
       j += 1
+    {:status => :optimal, :x => x, :value => linprog_value(ws[0], m, n)}
+
+-> linprog_value(t, m, n) (f64[] i64 i64) f64
+  w = n + m + 2
+  t[m * w + w - 1]
+
+-> linprog_solve(a, b, c, m, n, t, basis, allowed, x) (f64[] f64[] f64[] i64 i64 f64[] i64[] i64[] f64[]) i64
+  w = n + m + 2
+  i = 0
+  while i <= m
+    j = 0
+    while j < w
+      t[i * w + j] = ~0.0
+      j += 1
+    i += 1
+  i = 0
+  while i < m
+    j = 0
+    while j < n
+      t[i * w + j] = a[i * n + j]
+      j += 1
+    t[i * w + n + i] = ~1.0
+    t[i * w + n + m] = ~-1.0
+    t[i * w + w - 1] = b[i]
+    basis[i] = n + i
+    i += 1
+  j = 0
+  while j < w - 1
+    allowed[j] = 1
+    j += 1
+  worst = -1
+  wv = ~0.0
+  i = 0
+  while i < m
+    if t[i * w + w - 1] < wv
+      wv = t[i * w + w - 1]
+      worst = i
+    i += 1
+  if worst >= 0
+    t[m * w + n + m] = ~1.0
+    linprog_pivot(t, m + 1, w, worst, n + m)
+    basis[worst] = n + m
+    st = linprog_run(t, m, w, basis, allowed)
+    if st != 0
+      return 2
+    if t[m * w + w - 1] < ~-1.0e-9
+      return 2
     i = 0
     while i < m
-      if basis[i] < n
-        x[basis[i]] = t[i * w + w - 1]
+      if basis[i] == n + m
+        piv = -1
+        j = 0
+        while j < n + m && piv < 0
+          v = t[i * w + j]
+          if v > ~1.0e-11 || v < ~-1.0e-11
+            piv = j
+          j += 1
+        if piv >= 0
+          linprog_pivot(t, m + 1, w, i, piv)
+          basis[i] = piv
       i += 1
-    {:status => :optimal, :x => x, :value => t[m * w + w - 1]}
+  allowed[n + m] = 0
+  i = 0
+  while i <= m
+    t[i * w + n + m] = ~0.0
+    i += 1
+  j = 0
+  while j < w
+    t[m * w + j] = ~0.0
+    j += 1
+  j = 0
+  while j < n
+    t[m * w + j] = ~0.0 - c[j]
+    j += 1
+  i = 0
+  while i < m
+    bj = basis[i]
+    f = t[m * w + bj]
+    if f != ~0.0
+      j = 0
+      while j < w
+        t[m * w + j] = t[m * w + j] - f * t[i * w + j]
+        j += 1
+    i += 1
+  st = linprog_run(t, m, w, basis, allowed)
+  if st == 1
+    return 1
+  j = 0
+  while j < n
+    x[j] = ~0.0
+    j += 1
+  i = 0
+  while i < m
+    if basis[i] < n
+      x[basis[i]] = t[i * w + w - 1]
+    i += 1
+  0
 
 # pivot the tableau on (r, c): rows×w flat, last column the right-hand side
 -> linprog_pivot(t, rows, w, r, c) (f64[] i64 i64 i64 i64) i64
@@ -128,16 +166,27 @@
     i += 1
   0
 
-# simplex iterations with Bland's rule; 0 = optimal, 1 = unbounded
+# simplex iterations: Dantzig's rule, then Bland's rule after 20·(m + w) pivots;
+# 0 = optimal, 1 = unbounded
 -> linprog_run(t, m, w, basis, allowed) (f64[] i64 i64 i64[] i64[]) i64
   iter = 0
+  bland_after = 20 * (m + w)
   while iter < 1000000
     col = -1
-    j = 0
-    while j < w - 1 && col < 0
-      if allowed[j] == 1 && t[m * w + j] < ~-1.0e-11
-        col = j
-      j += 1
+    if iter < bland_after
+      most = ~-1.0e-11
+      j = 0
+      while j < w - 1
+        if allowed[j] == 1 && t[m * w + j] < most
+          most = t[m * w + j]
+          col = j
+        j += 1
+    else
+      j = 0
+      while j < w - 1 && col < 0
+        if allowed[j] == 1 && t[m * w + j] < ~-1.0e-11
+          col = j
+        j += 1
     if col < 0
       return 0
     row = -1

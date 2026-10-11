@@ -239,6 +239,8 @@
       tac_exfalso(g)
     when "by_contra", "by_contradiction"
       tac_by_contra(g, args)
+    when "by_cases"
+      tac_by_cases(g, args)
     when "contradiction"
       tac_contradiction(g)
     when "have"
@@ -768,6 +770,19 @@
       return refine(g, [ng], ->(ts) @k.not_intro(p, ts[0]))
     ng = Goal.new(goal.fixes, goal.hyps + [[hn, nc]], @k.false_tm)
     refine(g, [ng], ->(ts) classical_by_contra(c, ts[0]))
+
+  # by_cases h : P  — two goals, with h : P and with h : ¬P (excluded middle)
+  -> tac_by_cases(g, args)
+    goal = g.goal
+    name = "h"
+    rest = args
+    if args.size > 1 && args[0].kind == :id && args[1].text == ":"
+      name = args[0].text
+      rest = arr_sub(args, 2, args.size - 2)
+    p = elab_term(goal, rest, ty_bool)
+    g1 = goal.add_hyp(name, p)
+    g2 = goal.add_hyp(name, @k.neg_tm(p))
+    refine(g, [g1, g2], ->(ts) @k.disj_cases(@k.excluded_middle(p), ts[0], ts[1]))
 
   # from ¬c ⊢ ⊥ derive ⊢ c
   -> classical_by_contra(c, th)

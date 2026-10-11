@@ -64,6 +64,9 @@ SATORI_VERSION = "0.1.0"
   root = Env.get("SATORI_ROOT")
   if root == nil || root == ""
     root = Dir.pwd
+    # run from elsewhere (e.g. a project directory): use the standard checkout
+    if !File.exist?(root + "/bits/tungsten-satori/prelude/prelude.sat")
+      root = Env.get("HOME") + "/tungsten"
   failures = 0
   if jobs > 0
     files.each -> (f)

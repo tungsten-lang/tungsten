@@ -6,9 +6,11 @@
 #     | [] => 0
 #     | x :: xs => 1 + len xs
 #
-# Supported patterns at the recursion position: constructors applied to
-# variables (`[]`, `x :: xs`, `node l v r`, `0`, `n + 1`, `succ n`), or a
-# variable/`_` catch-all. Other positions take variables or `_`.
+# Supported patterns: constructors applied to variables (`[]`, `x :: xs`,
+# `node l v r`, `0`, `n + 1`, `succ n`), or a variable/`_` catch-all, in any
+# position. Recursion is structural on the first position holding a
+# constructor pattern; constructor patterns elsewhere become nested case
+# splits (first matching equation wins).
 
 + PatternDef
   -> new(@s, @c)
@@ -207,29 +209,27 @@
       fail("nested patterns are not supported; use a variable")
     a.s
 
+  # The case for constructor `ct` at the recursion position r. Equations
+  # compatible with ct (constructor ct or a variable at r) are kept in order;
+  # constructor patterns in the other positions are compiled to nested
+  # (non-recursive) recursor applications by match_tree, first match wins.
   -> build_case(ct, r, others, other_tys, motive, fvar, params, arg_tys, rty)
     cname = ct[0]
     cargs = ct[1]
-    # find the equation for this constructor
-    chosen = nil
-    names = nil
+    eqs = []
     @c.eqns.each -> (eq)
-      if chosen == nil
-        cl = classify(eq[0][r], rty)
-        if cl == nil
-          chosen = eq
-          names = nil
-        elsif cl[0] == cname
-          chosen = eq
-          names = cl[1]
-    if chosen == nil
+      cl = classify(eq[0][r], rty)
+      if cl == nil || cl[0] == cname
+        eqs.push(eq)
+    if eqs.size == 0
       fail("missing case for constructor " + cname)
+    first_cl = classify(eqs[0][0][r], rty)
     ys = []
     i = 0
     while i < cargs.size
       nm = "y" + i.to_s
-      if names != nil && i < names.size && names[i] != "_"
-        nm = names[i]
+      if first_cl != nil && i < first_cl[1].size && first_cl[1][i] != "_"
+        nm = first_cl[1][i]
       ys.push(mk_var(nm, cargs[i]))
       i += 1
     ihs = []
@@ -242,39 +242,126 @@
       i += 1
     ovs = []
     j = 0
-    others.each -> (oi)
-      pat = chosen[0][oi]
-      nm = "o" + j.to_s
-      if pat.kind == :id
+    while j < others.size
+      nm = "§o" + j.to_s
+      pat = eqs[0][0][others[j]]
+      if eqs.size == 1 && pat.kind == :id
         nm = pat.s
-      ovs.push(mk_var(nm, arg_tys[oi]))
+      ovs.push(mk_var(nm, arg_tys[others[j]]))
       j += 1
-    # elaborate the right-hand side
-    @e.reset
-    params.each -> (p)
-      @e.push_local(p.name, p)
-    @e.push_local(@c.name, fvar)
-    if names == nil
-      # variable pattern at r binds the whole constructor application
-      pr = chosen[0][r]
-      if pr.kind == :id
-        whole = mk_apps(mk_const_raw(cname_const(cname), ty_funs(cargs, rty)), ys)
-        if cname == "zero"
-          whole = mk_nat(0)
-        @e.push_local(pr.s, whole)
-    ys.each -> (y)
-      @e.push_local(y.name, y)
+    whole = mk_apps(mk_const_raw(cname_const(cname), ty_funs(cargs, rty)), ys)
+    if cname == "zero"
+      whole = mk_nat(0)
+    envs = []
+    eqs.each -> (eq)
+      env = []
+      pr = eq[0][r]
+      cl = classify(pr, rty)
+      if cl == nil
+        if pr.kind == :id
+          env.push([pr.s, whole])
+      else
+        k = 0
+        while k < cl[1].size && k < ys.size
+          if cl[1][k] != "_"
+            env.push([cl[1][k], ys[k]])
+          k += 1
+      envs.push(env)
+    scrut = []
+    split = []
     ovs.each -> (o)
-      @e.push_local(o.name, o)
-    body = @e.elab(chosen[1])
-    @e.unify(@e.tyof(body), arg_tys_res(motive, other_tys))
-    body = @e.finalize(body, false)
+      scrut.push(o)
+      split.push(false)
+    body = match_tree(eqs, envs, others, scrut, split, fvar, params, motive, other_tys, 0)
     # replace recursive calls  F params.. args..  with  ih_j others..
     body = replace_rec(body, fvar, params, r, others, ys, rec_idx, ihs)
     if tm_free_in?(fvar, body)
       fail("recursive call is not structural (must recurse on a constructor argument)")
     inner = mk_lams(ovs, body)
     mk_lams(ys + ihs, inner)
+
+  -> match_tree(eqs, envs, others, scrut, split, fvar, params, motive, other_tys, depth)
+    if eqs.size == 0
+      fail("missing case in a nested pattern")
+    eq = eqs[0]
+    col = -1
+    j = 0
+    while j < others.size && col < 0
+      if !split[j] && !var_pattern?(eq[0][others[j]])
+        col = j
+      j += 1
+    res_ty = arg_tys_res(motive, other_tys)
+    if col < 0
+      return match_leaf(eq, envs[0], others, scrut, split, fvar, params, res_ty)
+    cty = other_tys[col]
+    cases = []
+    ctor_table(cty).each -> (ct)
+      zs = []
+      zihs = []
+      i = 0
+      while i < ct[1].size
+        zs.push(mk_var("§z" + depth.to_s + "_" + i.to_s, ct[1][i]))
+        if ty_eq(ct[1][i], cty)
+          zihs.push(mk_var("§zih" + depth.to_s + "_" + i.to_s, res_ty))
+        i += 1
+      whole = mk_apps(mk_const_raw(cname_const(ct[0]), ty_funs(ct[1], cty)), zs)
+      if ct[0] == "zero"
+        whole = mk_nat(0)
+      eqs2 = []
+      envs2 = []
+      k = 0
+      while k < eqs.size
+        p = eqs[k][0][others[col]]
+        cl = classify(p, cty)
+        if cl == nil || cl[0] == ct[0]
+          env = []
+          envs[k].each -> (b)
+            env.push(b)
+          if cl == nil
+            if p.kind == :id
+              env.push([p.s, whole])
+          else
+            q = 0
+            while q < cl[1].size && q < zs.size
+              if cl[1][q] != "_"
+                env.push([cl[1][q], zs[q]])
+              q += 1
+          eqs2.push(eqs[k])
+          envs2.push(env)
+        k += 1
+      scrut2 = []
+      split2 = []
+      j = 0
+      while j < scrut.size
+        if j == col
+          scrut2.push(whole)
+          split2.push(true)
+        else
+          scrut2.push(scrut[j])
+          split2.push(split[j])
+        j += 1
+      sub = match_tree(eqs2, envs2, others, scrut2, split2, fvar, params, motive, other_tys, depth + 1)
+      cases.push(mk_lams(zs + zihs, sub))
+    rec2 = recursor(cty, res_ty, cases.size)
+    mk_app(mk_apps(rec2, cases), scrut[col])
+
+  -> match_leaf(eq, env, others, scrut, split, fvar, params, res_ty)
+    @e.reset
+    params.each -> (p)
+      @e.push_local(p.name, p)
+    @e.push_local(@c.name, fvar)
+    env.each -> (b)
+      @e.push_local(b[0], b[1])
+    j = 0
+    while j < others.size
+      if !split[j]
+        p = eq[0][others[j]]
+        if p.kind == :id
+          @e.push_local(p.s, scrut[j])
+      j += 1
+    body = @e.elab(eq[1])
+    @e.unify(@e.tyof(body), res_ty)
+    @e.finalize(body, false)
 
   -> cname_const(n)
     n

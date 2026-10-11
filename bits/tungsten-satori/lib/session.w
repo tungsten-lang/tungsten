@@ -378,4 +378,4 @@
     return "."
   if i == 0
     return "/"
-  cs.slice(0, i).join("")
+  arr_sub(cs, 0, i).join("")

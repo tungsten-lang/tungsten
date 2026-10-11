@@ -45,7 +45,7 @@ SATORI_VERSION = "0.1.0"
   stats = false
   if args[0] == "check" || args[0] == "stats"
     stats = args[0] == "stats"
-    files = args.slice(1, args.size - 1)
+    files = arr_sub(args, 1, args.size - 1)
   root = Env.get("SATORI_ROOT")
   if root == nil || root == ""
     root = Dir.pwd

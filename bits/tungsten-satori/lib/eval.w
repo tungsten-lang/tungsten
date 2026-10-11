@@ -10,10 +10,12 @@
 # Anything else is left as a neutral term.
 
 + KEval
-  -> new(@k, deep = false)
-    @fuel = 50000000
+  -> new(@k, deep = false, symbolic = false)
+    @fuel = 200000000
     @deep = deep
+    @symbolic = symbolic
     @fresh = 0
+    @memo = {}
 
   -> tick
     @fuel -= 1
@@ -56,17 +58,33 @@
     when :const
       eval_const(t)
     else
-      eval_app(t)
+      memo_eval_app(t)
 
   -> eval_const(t)
     if @k.defs.has_key?(t.name)
-      d = @k.defs[t.name]
-      e = dest_binop(d.concl, "=")
-      rhs = e[1]
-      m = {}
-      ty_match(e[0].ty, t.ty, m)
-      return eval(tm_inst_types(rhs, m))
+      return eval(def_body(t))
     t
+
+  # Definition body at the constant's type (cached per name and type).
+  -> def_body(t)
+    key = t.name + "@" + t.ty.key
+    if @defcache == nil
+      @defcache = {}
+    if @defcache.has_key?(key)
+      return @defcache[key]
+    d = @k.defs[t.name]
+    e = dest_binop(d.concl, "=")
+    rhs = e[1]
+    m = {}
+    ty_match(e[0].ty, t.ty, m)
+    nontrivial = false
+    m.keys.each -> (v)
+      if !(m[v].tag == :v && m[v].name == v)
+        nontrivial = true
+    if nontrivial
+      rhs = tm_inst_types(rhs, m)
+    @defcache[key] = rhs
+    rhs
 
   -> apply_all(f, args)
     r = f
@@ -80,7 +98,7 @@
     args = sp[1]
     if h.tag == :lam
       body = tm_instantiate(h.b, args[0], 0)
-      rest = args.slice(1, args.size - 1)
+      rest = arr_sub(args, 1, args.size - 1)
       return eval(apply_all(body, rest))
     if h.tag != :const
       hv = eval(h)
@@ -94,7 +112,7 @@
     # lazy forms
     if name == "ite" && args.size >= 3
       c = eval(args[0])
-      rest = args.slice(3, args.size - 3)
+      rest = arr_sub(args, 3, args.size - 3)
       if true?(c)
         return eval(apply_all(args[1], rest))
       if false?(c)
@@ -150,14 +168,14 @@
         while i < n.val
           acc = eval(mk_app_raw(mk_app_raw(s, mk_nat(i)), acc))
           i += 1
-        rest = args.slice(3, args.size - 3)
+        rest = arr_sub(args, 3, args.size - 3)
         return eval(apply_all(acc, rest))
       if n.tag == :app && n.a.tag == :const && n.a.name == "succ"
         m = n.b
-        rest = args.slice(3, args.size - 3)
+        rest = arr_sub(args, 3, args.size - 3)
         inner = apply_all(h, [args[0], args[1], m])
         return eval(apply_all(mk_app_raw(mk_app_raw(args[1], m), inner), rest))
-      ev = [eval(args[0]), eval(args[1]), n] + eval_list(args.slice(3, args.size - 3))
+      ev = [eval(args[0]), eval(args[1]), n] + eval_list(arr_sub(args, 3, args.size - 3))
       return apply_all(h, ev)
     if (name == "∀" || name == "∃") && args.size == 1 && args[0].tag == :lam
       r = eval_bounded(name, args[0])
@@ -221,7 +239,7 @@
     while ci < k && info.ctors[ci][0] != ch.name
       ci += 1
     cargs = sp[1]
-    recf = apply_all(h, ev.slice(0, k))
+    recf = apply_all(h, arr_sub(ev, 0, k))
     callargs = []
     cargs.each -> (a)
       callargs.push(a)
@@ -231,7 +249,7 @@
       if at.tag == :c && at.name == info.name
         callargs.push(mk_app_raw(recf, cargs[j]))
       j += 1
-    rest = ev.slice(k + 1, ev.size - k - 1)
+    rest = arr_sub(ev, k + 1, ev.size - k - 1)
     eval(apply_all(apply_all(ev[ci], callargs), rest))
 
   -> ctor_app?(t)
@@ -280,7 +298,7 @@
     v = x.val
     case name
     when "succ"
-      mk_lit(v + 1, ty_nat)
+      mk_lit(zadd(v, 1), ty_nat)
     when "neg"
       if rt.name == "int"
         mk_lit(0 - v, rt)
@@ -325,11 +343,11 @@
     if kind == "nat" || kind == "int"
       case name
       when "+"
-        return mk_lit(a + b, at)
+        return mk_lit(zadd(a, b), at)
       when "*"
         return mk_lit(a * b, at)
       when "-"
-        r = a - b
+        r = zsub(a, b)
         if kind == "nat" && r < 0
           r = 0
         return mk_lit(r, at)
@@ -438,19 +456,55 @@
           conn = nil
     if dom == nil
       return nil
+    residue = []
     dom.each -> (x)
       v = eval(tm_instantiate(rest, x, 0))
       if q == "∀"
         if false?(v)
           return ff
         if !true?(v)
-          return nil
+          if !@symbolic
+            return nil
+          residue.push(v)
       else
         if true?(v)
           return tt
         if !false?(v)
-          return nil
+          if !@symbolic
+            return nil
+          residue.push(v)
+    if residue.size > 0
+      conn2 = "∧"
+      if q == "∃"
+        conn2 = "∨"
+      c = mk_const_raw(conn2, ty_funs([ty_bool, ty_bool], ty_bool))
+      acc = residue[residue.size - 1]
+      i = residue.size - 2
+      while i >= 0
+        acc = mk_app_raw(mk_app_raw(c, residue[i]), acc)
+        i -= 1
+      return acc
     if q == "∀"
       tt
     else
       ff
+
++ KEval
+  # Applications without free variables are memoized (evaluation is a function).
+  -> memo_eval_app(t)
+    if !closed_term?(t)
+      return eval_app(t)
+    bucket = @memo[t.h]
+    if bucket != nil
+      bucket.each -> (pr)
+        if tm_eq(pr[0], t)
+          return pr[1]
+    else
+      bucket = []
+      @memo[t.h] = bucket
+    v = eval_app(t)
+    bucket.push([t, v])
+    v
+
+-> closed_term?(t)
+  t.cl

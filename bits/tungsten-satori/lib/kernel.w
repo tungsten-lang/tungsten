@@ -508,8 +508,8 @@
   # ---- trusted checkers ------------------------------------------------------
 
   # ⊢ t = v by evaluation.
-  -> compute(t, deep = false)
-    v = KEval.new(self, deep).eval(t)
+  -> compute(t, deep = false, symbolic = false)
+    v = KEval.new(self, deep, symbolic).eval(t)
     thm([], eq_tm(t, v), [])
 
   -> tagged(th, tag)
@@ -540,6 +540,17 @@
       raise "sat: LRAT refutation rejected"
     unsat = mk_const("cnf_unsat", ty_fun(type_of(cnf_tm), ty_bool))
     thm([], mk_app(unsat, cnf_tm), ["oracle:sat"])
+
+  # ⊢ ¬phi for a propositional formula phi whose Tseitin CNF (with phi asserted)
+  # has an LRAT refutation. Atoms are opaque, so this is sound for any atoms.
+  -> prop_refute(phi, lrat)
+    need_bool(phi, "prop_refute")
+    if !tm_closed_bound?(phi)
+      raise "prop_refute: loose bound variables"
+    cls = tseitin_refutation_cnf(phi)
+    if !lrat_check(cls, lrat)
+      raise "sat: LRAT refutation rejected"
+    thm([], neg_tm(phi), ["oracle:sat"])
 
   # Farkas certificate: theorems `a_i R_i b_i` (R ∈ <, ≤, =) at one ordered
   # numeric type and rational coefficients q_i (q_i ≥ 0 unless R_i is =) with

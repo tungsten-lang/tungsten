@@ -254,3 +254,109 @@
       return false
     val[unit] = true
   false
+
+# ---------------------------------------------------------------------------
+# Tseitin encoding of a propositional formula over opaque atoms.
+# Atoms are maximal subterms that are not ⊤ ⊥ ¬ ∧ ∨ ⇒, = on Prop, or
+# Prop-valued ite; equal atoms (structurally) share a variable. Returns
+# [clauses, root_literal, atom_count]. Equisatisfiable with the formula.
+
++ Tseitin
+  ro :clauses, :nvars
+  -> new
+    @clauses = []
+    @atoms = {}
+    @nvars = 0
+    @true_var = 0
+    @memo = {}
+
+  -> fresh
+    @nvars += 1
+    @nvars
+
+  -> truth_lit
+    if @true_var == 0
+      @true_var = fresh
+      @clauses.push([@true_var])
+    @true_var
+
+  -> enc(t)
+    if t.tag == :const && t.name == "⊤"
+      return truth_lit
+    if t.tag == :const && t.name == "⊥"
+      return 0 - truth_lit
+    u = dest_unop(t, "¬")
+    if u != nil
+      return 0 - enc(u)
+    bucket = @memo[t.h]
+    if bucket != nil
+      bucket.each -> (pr)
+        if tm_eq(pr[0], t)
+          return pr[1]
+    else
+      bucket = []
+      @memo[t.h] = bucket
+    lit = enc_gate(t)
+    bucket.push([t, lit])
+    lit
+
+  -> enc_gate(t)
+    b = dest_binop(t, "∧")
+    if b != nil
+      x = enc(b[0])
+      y = enc(b[1])
+      v = fresh
+      @clauses.push([0 - v, x])
+      @clauses.push([0 - v, y])
+      @clauses.push([v, 0 - x, 0 - y])
+      return v
+    b = dest_binop(t, "∨")
+    if b != nil
+      x = enc(b[0])
+      y = enc(b[1])
+      v = fresh
+      @clauses.push([0 - v, x, y])
+      @clauses.push([v, 0 - x])
+      @clauses.push([v, 0 - y])
+      return v
+    b = dest_binop(t, "⇒")
+    if b != nil
+      x = enc(b[0])
+      y = enc(b[1])
+      v = fresh
+      @clauses.push([0 - v, 0 - x, y])
+      @clauses.push([v, x])
+      @clauses.push([v, 0 - y])
+      return v
+    b = dest_binop(t, "=")
+    if b != nil && type_of(b[0]).tag == :c && type_of(b[0]).name == "bool"
+      x = enc(b[0])
+      y = enc(b[1])
+      v = fresh
+      @clauses.push([0 - v, 0 - x, y])
+      @clauses.push([0 - v, x, 0 - y])
+      @clauses.push([v, x, y])
+      @clauses.push([v, 0 - x, 0 - y])
+      return v
+    sp = strip_app(t)
+    if sp[0].tag == :const && sp[0].name == "ite" && sp[1].size == 3 && ty_eq(type_of(t), ty_bool)
+      c = enc(sp[1][0])
+      x = enc(sp[1][1])
+      y = enc(sp[1][2])
+      v = fresh
+      @clauses.push([0 - v, 0 - c, x])
+      @clauses.push([0 - v, c, y])
+      @clauses.push([v, 0 - c, 0 - x])
+      @clauses.push([v, c, 0 - y])
+      return v
+    # atom
+    fresh
+
+-> tseitin_refutation_cnf(phi)
+  ts = Tseitin.new
+  root = ts.enc(phi)
+  cls = []
+  ts.clauses.each -> (c)
+    cls.push(c)
+  cls.push([root])
+  cls

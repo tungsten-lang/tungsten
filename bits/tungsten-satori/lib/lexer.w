@@ -81,19 +81,19 @@
         while j < n && digit?(chars[j])
           j += 1
         kind = :dec
-      toks.push(Tok.new(kind, chars.slice(i, j - i).join("").gsub("_", ""), lineno, i))
+      toks.push(Tok.new(kind, arr_sub(chars, i, j - i).join("").gsub("_", ""), lineno, i))
       i = j
     elsif c == "\""
       j = i + 1
       while j < n && chars[j] != "\""
         j += 1
-      toks.push(Tok.new(:str, chars.slice(i + 1, j - i - 1).join(""), lineno, i))
+      toks.push(Tok.new(:str, arr_sub(chars, i + 1, j - i - 1).join(""), lineno, i))
       i = j + 1
     elsif ident_start?(c)
       j = i
       while j < n && (ident_char?(chars[j]) || (chars[j] == "." && j + 1 < n && (ident_start?(chars[j + 1]) || digit?(chars[j + 1])) && j > i))
         j += 1
-      w = chars.slice(i, j - i).join("")
+      w = arr_sub(chars, i, j - i).join("")
       if kws.include?(w)
         toks.push(Tok.new(:kw, w, lineno, i))
       else

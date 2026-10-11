@@ -1546,6 +1546,20 @@
     else
       neg = @k.neg_tm(c)
       hyps.push(@k.assume(neg))
+    # fold closed numeric subterms (1 / 2 ^ 4 ↦ 1/16) with simp's literal evaluation
+    folder = Simp.new(@d, [])
+    folded = []
+    hyps.each -> (h)
+      begin
+        eqth = folder.simp_conv(h.concl, 0)
+        rhs = dest_binop(eqth.concl, "=")[1]
+        if tm_eq(rhs, h.concl)
+          folded.push(h)
+        else
+          folded.push(@k.eq_mp(eqth, h))
+      rescue e
+        folded.push(h)
+    hyps = folded
     comps = []
     hyps.each -> (h)
       normalize_comparisons(h, comps)

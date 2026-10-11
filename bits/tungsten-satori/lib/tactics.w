@@ -342,11 +342,18 @@
     if e.kind == :id
       if e.s == "rfl" || e.s == "trivial"
         return true
-      return lookup_proof(goal, e.s) != nil
+      return !term_def?(goal, e.s) && lookup_proof(goal, e.s) != nil
     if e.kind == :app
       h = @session.elab.ast_spine(e)[0]
-      return h.kind == :id && goal.fixes.select(->(f) f[0] == h.s).size == 0 && lookup_proof(goal, h.s) != nil
+      return h.kind == :id && goal.fixes.select(->(f) f[0] == h.s).size == 0 && !term_def?(goal, h.s) && lookup_proof(goal, h.s) != nil
     false
+
+  # a defined function or constant (not a theorem or hypothesis): an argument
+  # `(f x)` built from it is a term, not a proof
+  -> term_def?(goal, name)
+    if goal.hyp(name) != nil || @session.theorems.has_key?(name)
+      return false
+    @k.defs.has_key?(name)
 
   -> proof_ast(goal, e, expected = nil)
     if e.kind == :by

@@ -446,7 +446,10 @@ HASH_MOD = 1000000007
   when :bnd
     mk_bnd(t.idx, ty_subst(t.ty, m))
   when :lit
-    mk_lit(t.val, ty_subst(t.ty, m))
+    nt = ty_subst(t.ty, m)
+    if nt.tag == :c && (nt.name == "rat" || nt.name == "real") && t.val.class_name != "Array"
+      return mk_lit([t.val, 1], nt)
+    mk_lit(t.val, nt)
   when :app
     mk_app_raw(tm_inst_types(t.a, m), tm_inst_types(t.b, m))
   else

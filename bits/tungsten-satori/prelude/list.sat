@@ -35,3 +35,20 @@ theorem length_append (xs ys : list α) : length (xs ++ ys) = length xs + length
   · simp [append, length]
   · simp [append, length, ih]
     ring
+
+-- big operators: ∑ i < n, f i  and  ∑ x ∈ l, f x  (∏ likewise)
+-> sum_below : ℕ → (ℕ → α) → α
+  | 0, f => 0
+  | n + 1, f => sum_below n f + f n
+
+-> prod_below : ℕ → (ℕ → α) → α
+  | 0, f => 1
+  | n + 1, f => prod_below n f * f n
+
+-> sum_list : list β → (β → α) → α
+  | [], f => 0
+  | x :: xs, f => f x + sum_list xs f
+
+-> prod_list : list β → (β → α) → α
+  | [], f => 1
+  | x :: xs, f => f x * prod_list xs f

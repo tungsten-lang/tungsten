@@ -18,7 +18,7 @@
   -> new(@indent, @toks, @line)
 
 -> sat_keywords
-  ["def", "theorem", "lemma", "example", "axiom", "inductive", "structure", "import",
+  ["opaque", "def", "theorem", "lemma", "example", "axiom", "inductive", "structure", "import",
    "fun", "λ", "if", "then", "else", "by", "have", "show", "calc", "let", "in",
    "instance", "notation", "variable", "open", "section", "end", "where", "at", "using", "with", "from", "match"]
 

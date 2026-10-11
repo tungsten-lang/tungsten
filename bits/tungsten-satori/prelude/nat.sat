@@ -7,3 +7,17 @@ theorem nat.induct (P : ℕ → Prop) : P 0 → (∀ n, P n → P (n + 1)) → �
     rw [succ_eq_add_one.nat]
     exact hs n hn
   exact nat_induct P h0 h
+
+-- divisibility, primes, gcd, min/max (decidable on literals)
+-> dvd (a b : α) : Prop := b % a = 0
+-> even (n : α) : Prop := n % 2 = 0
+-> odd (n : α) : Prop := n % 2 = 1
+-> prime (p : ℕ) : Prop := 2 ≤ p ∧ ∀ d < p, 2 ≤ d → ¬ (p % d = 0)
+-> min (a b : α) : α := if a ≤ b then a else b
+-> max (a b : α) : α := if a ≤ b then b else a
+
+-> gcd_aux : ℕ → ℕ → ℕ → ℕ
+  | 0, a, b => a
+  | k + 1, a, b => if b = 0 then a else gcd_aux k b (a % b)
+
+-> gcd (a b : ℕ) : ℕ := gcd_aux (a + b + 1) a b

@@ -249,6 +249,8 @@
     false
 
   -> parse_app
+    if is?("∑") || is?("∏")
+      return parse_bigop(next_tok.text)
     if is?("∀") || is?("∃") || (peek != nil && peek.kind == :kw && (peek.text == "fun" || peek.text == "if" || peek.text == "let"))
       return parse_binder_expr
     f = parse_postfix(parse_atom)
@@ -367,6 +369,20 @@
       return ast(:str, t.text, [])
     if t.text == "_"
       return ast(:hole, "_", [])
+    if t.kind == :kw && t.text == "by"
+      # tactic block inside a term: collect tokens up to the enclosing bracket
+      start = @pos
+      depth = 0
+      while @pos < @toks.size && !(depth == 0 && (@toks[@pos].text == ")" || @toks[@pos].text == "\]" || @toks[@pos].text == "⟩" || @toks[@pos].text == ","))
+        tx = @toks[@pos].text
+        if tx == "(" || tx == "\[" || tx == "⟨" || tx == "{"
+          depth += 1
+        if tx == ")" || tx == "\]" || tx == "⟩" || tx == "}"
+          depth -= 1
+        @pos += 1
+      n = ast(:by, "", [])
+      n.binders = arr_sub(@toks, start, @pos - start)
+      return n
     if t.text == "("
       if accept(")")
         return ast(:id, "unit_val", [])
@@ -553,6 +569,10 @@
     c = parse_theorem_cmd(toks, block)
   elsif head.kind == :kw && head.text == "def"
     c = parse_def_cmd(toks, block)
+  elsif head.kind == :kw && head.text == "opaque"
+    c = Cmd.new(:opaque)
+    c.name = toks[1].text
+    c.ty = parse_type_toks(arr_sub(toks, 3, toks.size - 3))
   elsif head.kind == :kw && head.text == "inductive"
     c = parse_inductive_cmd(toks, block)
   elsif head.kind == :kw && head.text == "structure"
@@ -702,3 +722,25 @@
       f = next_tok.text
       a = ast(:proj, f, [a])
     a
+
++ EParser
+  # ∑ i < n, body   ∑ x ∈ l, body   (and ∏) — sum_below n (fun i => body) / sum_list l (fun x => body)
+  -> parse_bigop(op)
+    name = next_tok.text
+    kind = "sum"
+    if op == "∏"
+      kind = "prod"
+    if accept("<")
+      bound = parse_cons
+      expect(",")
+      body = parse_add
+      lam = ast(:lam, "", [body])
+      lam.binders = [Binder.new(name, nil, nil, nil)]
+      return ast(:app, "", [ast(:app, "", [ast(:id, kind + "_below", []), bound]), lam])
+    expect("∈")
+    l = parse_cons
+    expect(",")
+    body = parse_add
+    lam = ast(:lam, "", [body])
+    lam.binders = [Binder.new(name, nil, nil, nil)]
+    ast(:app, "", [ast(:app, "", [ast(:id, kind + "_list", []), l]), lam])

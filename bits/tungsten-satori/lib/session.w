@@ -139,6 +139,11 @@
       exec_def(c)
     when :axiom
       exec_axiom(c)
+    when :opaque
+      @elab.reset
+      ty = @elab.elab_type(c.ty)
+      @k.declare_const(c.name, ty)
+      say("✓ opaque " + c.name + " : " + ty_show(ty))
     when :theorem
       exec_theorem(c)
     when :hash

@@ -186,13 +186,15 @@ HASH_MOD = 1000000007
 # Terms
 
 + KTm
-  ro :tag, :name, :ty, :a, :b, :idx, :val, :h, :cl
+  ro :tag, :name, :ty, :a, :b, :idx, :val, :h, :cl, :mx
 
   # tag :var(name, ty)  :const(name, ty)  :app(a = fn, b = arg)
   #     :lam(name = hint, ty = binder type, b = body)  :bnd(idx, ty)
   #     :lit(val, ty)   val is an Int for nat/int, [num, den] for rat/real
   -> new(@tag, @name, @ty, @a, @b, @idx, @val)
     @cl = true
+    # mx: 1 + the largest loose de Bruijn index (0 when locally closed)
+    @mx = 0
     case @tag
     when :var
       @cl = false
@@ -201,11 +203,17 @@ HASH_MOD = 1000000007
       @h = (str_hash(@name) * 37 + @ty.h + 2) % HASH_MOD
     when :app
       @cl = @a.cl && @b.cl
+      @mx = @a.mx
+      if @b.mx > @mx
+        @mx = @b.mx
       @h = (@a.h * 41 + @b.h * 7 + 3) % HASH_MOD
     when :lam
       @cl = @b.cl
+      if @b.mx > 1
+        @mx = @b.mx - 1
       @h = (@ty.h * 43 + @b.h * 11 + 4) % HASH_MOD
     when :bnd
+      @mx = @idx + 1
       @h = (@idx * 47 + 5) % HASH_MOD
     else
       @h = (str_hash(lit_key(@val)) * 53 + @ty.h + 6) % HASH_MOD
@@ -496,7 +504,7 @@ HASH_MOD = 1000000007
 
 # True when t has no loose bound variables.
 -> tm_closed_bound?(t)
-  !lam_count_bound(t, 0)
+  t.mx == 0
 
 # ---------------------------------------------------------------------------
 # Rationals over arbitrary-precision Int: [num, den], den > 0, reduced.

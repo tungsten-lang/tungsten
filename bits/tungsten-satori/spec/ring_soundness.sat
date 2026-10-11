@@ -1,0 +1,2 @@
+-- Must FAIL: ring must reject identities that are false as polynomials.
++ bad (a b : ℤ) : a * a + b = b * b + a := by ring

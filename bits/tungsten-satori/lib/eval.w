@@ -422,10 +422,15 @@
     f = vals[ci]
     cargs.each -> (a)
       f = apply1(f, a)
+    # recursive positions come from the DECLARED constructor signature: an
+    # argument is recursive iff its declared type is the inductive type itself
+    # (comparing runtime type names would misclassify e.g. x : list ℕ inside
+    # list (list ℕ))
+    self_ty = ty_con(info.name, info.params.map(->(p) ty_var(p)))
+    decl = info.ctors[ci][1]
     j = 0
     while j < cargs.size
-      at = type_of(cargs[j])
-      if at.tag == :c && at.name == info.name
+      if ty_eq(decl[j], self_ty)
         rv = []
         q = 0
         while q < k

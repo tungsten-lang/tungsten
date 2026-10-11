@@ -56,7 +56,11 @@
   if secs == nil || secs == ""
     secs = "600"
   lock = dir + "/.solver.lock"
-  guard = "while ! mkdir \"$5\" 2>/dev/null; do sleep 0.5; done; trap 'rmdir \"$5\"' EXIT; "
+  # the lock directory records its holder's PID; a waiter breaks a lock whose
+  # holder is dead (a SIGKILLed holder never runs its EXIT trap)
+  guard = "while ! mkdir \"$5\" 2>/dev/null; do h=$(cat \"$5/pid\" 2>/dev/null); "
+  guard = guard + "if test -n \"$h\" && ! kill -0 \"$h\" 2>/dev/null; then rm -rf \"$5\"; else sleep 0.5; fi; done; "
+  guard = guard + "echo $$ > \"$5/pid\"; trap 'rm -rf \"$5\"' EXIT; "
   guard = guard + "\"$0\" \"$1\" --lrat \"$2\" > \"$3\" 2>&1 & pid=$!; t=0; "
   guard = guard + "while kill -0 $pid 2>/dev/null; do r=$(ps -o rss= -p $pid 2>/dev/null | tr -d ' '); "
   guard = guard + "if test -n \"$r\" && test \"$r\" -gt $(( $4 * 1024 )); then kill -9 $pid; echo 'c satori: solver exceeded memory limit' >> \"$3\"; fi; "

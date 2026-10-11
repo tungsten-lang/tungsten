@@ -1,0 +1,6 @@
+.satori-cache/
+*.wc
+*.ll
+*.sidemap
+*.dSYM/
+bin/satori

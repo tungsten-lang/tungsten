@@ -1,0 +1,12 @@
+tungsten "tungsten-0.0.1"
+
+name        "tungsten-satori"
+version     "0.1.0"
+summary     "A concise proof language: classical higher-order logic with a small LCF kernel, checked SAT certificates, and evaluation"
+description "Satori is a Lean-like proof assistant with an indentation-based, Unicode surface syntax. Its trusted kernel is a natural-deduction presentation of classical higher-order logic with inductive types, a literal-arithmetic evaluator, and three small checkers (LRAT refutations, ring normal forms, Farkas certificates). Automation (simp, linarith, ring, sat, decide, auto) is untrusted and replays through the kernel."
+license     "MIT OR Apache-2.0"
+authors     ["Tungsten Language Project"]
+
+bit "tungsten-wassat", local: true
+
+executable  "satori", source: "bin/satori.w"

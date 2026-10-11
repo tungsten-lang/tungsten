@@ -1,0 +1,16 @@
+theorem imp_self (p : Prop) : p → p
+  intro h
+  exact h
+
+theorem and_swap (p q : Prop) : p ∧ q → q ∧ p
+  intro h
+  obtain ⟨hp, hq⟩ := h
+  exact ⟨hq, hp⟩
+
+theorem two_plus_two : 2 + 2 = 4 := by decide
+
+theorem small : ∀ n < 10, n * n < 100 := by decide
+
+example : (3 : ℤ) - 5 < 0 := by decide
+
+theorem sq (a b : ℤ) : (a + b) * (a + b) = a * a + 2 * a * b + b * b := by ring

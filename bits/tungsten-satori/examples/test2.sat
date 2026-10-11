@@ -1,0 +1,38 @@
+def double (n : ℕ) : ℕ := n + n
+
+theorem double_three : double 3 = 6 := by decide
+
+def fact : ℕ → ℕ
+  | 0 => 1
+  | n + 1 => (n + 1) * fact n
+
+#eval fact 10
+
+theorem fact5 : fact 5 = 120 := by decide
+
+def len : list α → ℕ
+  | [] => 0
+  | x :: xs => 1 + len xs
+
+#eval len [1, 2, 3, 4]
+
+def app : list α → list α → list α
+  | [] => fun ys => ys
+  | x :: xs => fun ys => x :: app xs ys
+
+theorem len_app (xs ys : list α) : len (app xs ys) = len xs + len ys
+  induction xs with x xs ih
+  · simp [app, len]
+  · simp [app, len, ih]
+    ring
+
+theorem tiny_unsat : cnf_unsat [[1, 2], [-1, 2], [1, -2], [-1, -2]] := by sat
+
+theorem em_test (p : Prop) : p ∨ ¬p
+  by_contra h
+  apply h
+  right
+  intro hp
+  apply h
+  left
+  exact hp

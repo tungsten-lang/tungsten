@@ -1,0 +1,9 @@
+-- Natural numbers: induction principle in n + 1 form and basic facts.
+
+theorem nat.induct (P : ℕ → Prop) : P 0 → (∀ n, P n → P (n + 1)) → ∀ n, P n
+  intro h0 hs
+  have h : ∀ n, P n → P (succ n)
+    intro n hn
+    rw [succ_eq_add_one.nat]
+    exact hs n hn
+  exact nat_induct P h0 h

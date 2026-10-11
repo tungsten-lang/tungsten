@@ -85,12 +85,20 @@
   # Binder types in commands may be propositions (hypotheses) or types.
   -> parse_expr_or_type
     save = @pos
+    ok = false
+    e = nil
     begin
       e = parse_expr
-      return ast(:either, "", [e])
+      t = peek
+      # a binder type must end at the closing bracket; `ℕ × ℕ` parses as a
+      # partial expression, so fall back to the type grammar
+      ok = t == nil || (t.kind == :sym && (t.text == ")" || t.text == "}" || t.text == ":=" || t.text == ","))
     rescue err
-      @pos = save
-      return parse_type
+      ok = false
+    if ok
+      return ast(:either, "", [e])
+    @pos = save
+    parse_type
 
   # ---- types ----------------------------------------------------------------
 
@@ -539,7 +547,15 @@
     j = i + 1
     while j < lines.size && lines[j].indent > ln.indent
       j += 1
-    cmds.push(parse_command(ln, build_blocks(lines, i + 1, j, ln.indent), lines, i + 1, j))
+    begin
+      cmds.push(parse_command(ln, build_blocks(lines, i + 1, j, ln.indent), lines, i + 1, j))
+    rescue err
+      # a parse error fails this command only; the rest of the file still runs
+      bad = Cmd.new(:parse_error)
+      bad.line = ln.line
+      bad.name = ""
+      bad.text = err.to_s
+      cmds.push(bad)
     i = j
   cmds
 

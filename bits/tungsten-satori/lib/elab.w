@@ -369,12 +369,27 @@
     raise "unknown identifier '" + n + "'"
 
   -> auto_name?(n)
+    if @auto_names != nil && @auto_names.has_key?(n)
+      return true
     c = n.chars[0]
     o = c.ord
     (o >= 97 && o <= 122) || (o >= 945 && o <= 969)
 
+  # pattern-variable names that may be auto-bound whatever their case
+  -> set_auto_names(names)
+    @auto_names = {}
+    names.each -> (n)
+      @auto_names[n] = true
+
+  -> clear_auto_names
+    @auto_names = nil
+
   -> project(t, field)
     ty = tyof(t)
+    if (field == "1" || field == "2") && ty.tag == :c && ty.name == "prod"
+      if field == "1"
+        return app(const_inst("fst"), t)
+      return app(const_inst("snd"), t)
     if ty.tag == :c && @fields.has_key?(ty.name)
       fname = ty.name + "." + field
       if @k.has_const?(fname)

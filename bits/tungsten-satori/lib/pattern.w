@@ -413,6 +413,10 @@
       @e.allow_auto = true
       params.each -> (p)
         @e.push_local(p.name, p)
+      pnames = []
+      eq[0].each -> (p)
+        pat_names(p, pnames)
+      @e.set_auto_names(pnames)
       lhs_ast = ast(:id, name, [])
       params.each -> (p)
         lhs_ast = ast(:app, "", [lhs_ast, ast(:id, p.name, [])])
@@ -422,6 +426,7 @@
       rhs = @e.elab(eq[1])
       @e.unify(@e.tyof(lhs), @e.tyof(rhs))
       @e.allow_auto = false
+      @e.clear_auto_names
       eqn = @e.app2("=", lhs, rhs)
       eqn = @e.finalize(eqn, true)
       @e.check(eqn)
@@ -435,6 +440,17 @@
     @s.set_eqns(name, out)
     out.each -> (t)
       @s.simp_rules.push(make_rule(@s.d, t, name))
+    out
+
+  # variable names bound by a pattern (identifiers that are not constructors or constants)
+  -> pat_names(p, out)
+    if p.kind == :id
+      if !@k.has_const?(p.s) && !@k.ctor_of.has_key?(p.s)
+        out.push(p.s)
+      return out
+    if p.kids != nil
+      p.kids.each -> (q)
+        pat_names(q, out)
     out
 
   -> pat_to_expr(p)

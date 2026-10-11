@@ -70,10 +70,14 @@
       raise "compute: evaluation budget exhausted"
 
   -> tt
-    mk_const_raw("⊤", ty_bool)
+    if @tt == nil
+      @tt = mk_const_raw("⊤", ty_bool)
+    @tt
 
   -> ff
-    mk_const_raw("⊥", ty_bool)
+    if @ff == nil
+      @ff = mk_const_raw("⊥", ty_bool)
+    @ff
 
   -> bool_val(b)
     if b

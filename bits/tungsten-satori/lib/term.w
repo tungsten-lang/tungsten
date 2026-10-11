@@ -236,7 +236,21 @@ HASH_MOD = 1000000007
 -> mk_bnd(i, ty)
   KTm.new(:bnd, nil, ty, nil, nil, i, nil)
 
+# Small ℕ/ℤ literals are shared (Tungsten has no tracing GC; evaluation would
+# otherwise allocate a fresh node for every intermediate number).
+LIT_CACHE = {}
+
 -> mk_lit(v, ty)
+  if v.class_name == "Int" && v > -2048 && v < 65536 && ty.tag == :c && (ty.name == "nat" || ty.name == "int")
+    key = v * 2
+    if ty.name == "int"
+      key = key + 1
+    c = LIT_CACHE[key]
+    if c != nil
+      return c
+    c = KTm.new(:lit, nil, ty, nil, nil, 0, v)
+    LIT_CACHE[key] = c
+    return c
   KTm.new(:lit, nil, ty, nil, nil, 0, v)
 
 -> mk_nat(n)

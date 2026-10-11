@@ -93,7 +93,7 @@ default to ℕ (decimals to ℚ).
 ## Tactics
 
 `intro x h` · `intros` · `exact e` · `apply thm args` · `assumption` · `rfl` ·
-`trivial` · `constructor` · `left` · `right` · `use t` · `exfalso` · `by_contra h` ·
+`trivial` · `constructor` · `left` · `right` · `use t` · `exfalso` · `by_contra h` · `by_cases h : P` ·
 `contradiction` · `have h : P := proof` / `have h : P` + block · `show P` ·
 `obtain ⟨x, hx⟩ := h` · `obtain a | b := h` · `cases h with …` ·
 `induction n with x xs ih` · `rw [h, ← g] at h'` · `simp [lemmas, *] at h` ·
@@ -110,6 +110,14 @@ default to ℕ (decimals to ℚ).
 * `linarith` runs Fourier–Motzkin and hands the kernel a Farkas certificate. For ℕ
   and ℤ it uses nonnegativity and `a < b ↔ a + 1 ≤ b`.
 * `ring` proves commutative-ring identities over ℕ ℤ ℚ ℝ.
+* `by_cases h : P` splits on excluded middle: one goal with `h : P`, one with `h : ¬P`.
+
+Layout: a statement may continue on indented lines that start with an infix
+operator (`=`, `→`, `∧`, `≤`, `:=`, …), and binder groups of a `+`/`->`/`axiom`
+header may continue on indented lines until the header's `:`. A parse or lexer
+error fails only its own command; the rest of the file is still checked.
+Pattern definitions accept constructor patterns in several argument positions
+(`| x :: xs, 0 => …`) and uppercase pattern variables.
 
 ## Prelude
 

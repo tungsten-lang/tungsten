@@ -160,3 +160,12 @@ theorem eq_comm (a b : α) : a = b ↔ b = a
   · intro h
     exfalso
     exact h
+
+-- pairs (α × β is written as a tuple type; (a, b) builds a pair)
+inductive prod (α β) | pair (a : α) (b : β)
+
+-> fst : α × β → α
+  | pair a b => a
+
+-> snd : α × β → β
+  | pair a b => b

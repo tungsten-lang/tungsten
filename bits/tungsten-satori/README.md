@@ -117,7 +117,9 @@ operator (`=`, `→`, `∧`, `≤`, `:=`, …), and binder groups of a `+`/`->`/
 header may continue on indented lines until the header's `:`. A parse or lexer
 error fails only its own command; the rest of the file is still checked.
 Pattern definitions accept constructor patterns in several argument positions
-(`| x :: xs, 0 => …`) and uppercase pattern variables.
+(`| x :: xs, 0 => …`), nested patterns (`x :: y :: ys`, `(a, b) :: rest`, `n + 2`,
+literal numbers and list literals) and uppercase pattern variables; the first
+matching equation wins. Recursive calls must be on a direct constructor argument.
 
 ## Prelude
 

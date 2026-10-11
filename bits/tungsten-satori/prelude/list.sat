@@ -1,0 +1,31 @@
+-- Lists: length, append, map, sum, range.
+
+def length : list α → ℕ
+  | [] => 0
+  | x :: xs => length xs + 1
+
+def append : list α → list α → list α
+  | [] => fun ys => ys
+  | x :: xs => fun ys => x :: append xs ys
+
+def map (f : α → β) : list α → list β
+  | [] => []
+  | x :: xs => f x :: map f xs
+
+def sum : list ℕ → ℕ
+  | [] => 0
+  | x :: xs => x + sum xs
+
+def range : ℕ → list ℕ
+  | 0 => []
+  | n + 1 => append (range n) [n]
+
+def all (p : α → Prop) : list α → Prop
+  | [] => True
+  | x :: xs => p x ∧ all p xs
+
+theorem length_append (xs ys : list α) : length (xs ++ ys) = length xs + length ys
+  induction xs with x xs ih
+  · simp [append, length]
+  · simp [append, length, ih]
+    ring

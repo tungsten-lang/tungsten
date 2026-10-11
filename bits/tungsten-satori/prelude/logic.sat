@@ -1,0 +1,162 @@
+-- Propositional and quantifier lemmas, proved from the kernel rules.
+
+@[simp] theorem not_not (p : Prop) : ¬¬p ↔ p
+  constructor
+  · intro h
+    by_contra hn
+    exact h hn
+  · intro hp hn
+    exact hn hp
+
+@[simp] theorem and_self (p : Prop) : p ∧ p ↔ p
+  constructor
+  · intro h
+    exact h.1
+  · intro h
+    exact ⟨h, h⟩
+
+@[simp] theorem or_self (p : Prop) : p ∨ p ↔ p
+  constructor
+  · intro h
+    obtain h1 | h2 := h
+    · exact h1
+    · exact h2
+  · intro h
+    left
+    exact h
+
+theorem and_comm (p q : Prop) : p ∧ q ↔ q ∧ p
+  constructor
+  · intro h
+    exact ⟨h.2, h.1⟩
+  · intro h
+    exact ⟨h.2, h.1⟩
+
+theorem or_comm (p q : Prop) : p ∨ q ↔ q ∨ p
+  constructor
+  · intro h
+    obtain a | b := h
+    · right; exact a
+    · left; exact b
+  · intro h
+    obtain a | b := h
+    · right; exact a
+    · left; exact b
+
+theorem not_and_or (p q : Prop) : ¬(p ∧ q) ↔ ¬p ∨ ¬q
+  constructor
+  · intro h
+    by_contra hn
+    apply h
+    constructor
+    · by_contra hp
+      apply hn
+      left
+      exact hp
+    · by_contra hq
+      apply hn
+      right
+      exact hq
+  · intro h hpq
+    obtain a | b := h
+    · exact a hpq.1
+    · exact b hpq.2
+
+@[simp] theorem not_or (p q : Prop) : ¬(p ∨ q) ↔ ¬p ∧ ¬q
+  constructor
+  · intro h
+    constructor
+    · intro hp
+      apply h
+      left
+      exact hp
+    · intro hq
+      apply h
+      right
+      exact hq
+  · intro h hpq
+    obtain a | b := hpq
+    · exact h.1 a
+    · exact h.2 b
+
+theorem imp_iff_not_or (p q : Prop) : (p → q) ↔ ¬p ∨ q
+  constructor
+  · intro h
+    by_contra hn
+    apply hn
+    left
+    intro hp
+    apply hn
+    right
+    exact h hp
+  · intro h hp
+    obtain a | b := h
+    · exfalso
+      exact a hp
+    · exact b
+
+theorem not_forall (P : α → Prop) : ¬(∀ x, P x) ↔ ∃ x, ¬P x
+  constructor
+  · intro h
+    by_contra hn
+    apply h
+    intro x
+    by_contra hx
+    apply hn
+    exact ⟨x, hx⟩
+  · intro h ha
+    obtain ⟨x, hx⟩ := h
+    exact hx (ha x)
+
+@[simp] theorem not_exists (P : α → Prop) : ¬(∃ x, P x) ↔ ∀ x, ¬P x
+  constructor
+  · intro h x hx
+    apply h
+    exact ⟨x, hx⟩
+  · intro h he
+    obtain ⟨x, hx⟩ := he
+    exact h x hx
+
+theorem forall_and (P Q : α → Prop) : (∀ x, P x ∧ Q x) ↔ (∀ x, P x) ∧ (∀ x, Q x)
+  constructor
+  · intro h
+    constructor
+    · intro x
+      exact (h x).1
+    · intro x
+      exact (h x).2
+  · intro h x
+    exact ⟨h.1 x, h.2 x⟩
+
+theorem exists_or (P Q : α → Prop) : (∃ x, P x ∨ Q x) ↔ (∃ x, P x) ∨ (∃ x, Q x)
+  constructor
+  · intro h
+    obtain ⟨x, hx⟩ := h
+    obtain a | b := hx
+    · left
+      exact ⟨x, a⟩
+    · right
+      exact ⟨x, b⟩
+  · intro h
+    obtain ⟨x, a⟩ | ⟨y, b⟩ := h
+    · use x
+      left
+      exact a
+    · use y
+      right
+      exact b
+
+theorem eq_comm (a b : α) : a = b ↔ b = a
+  constructor
+  · intro h
+    exact h.symm
+  · intro h
+    exact h.symm
+
+@[simp] theorem ne_self_false (a : α) : (a ≠ a) ↔ False
+  constructor
+  · intro h
+    exact h rfl
+  · intro h
+    exfalso
+    exact h

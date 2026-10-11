@@ -157,6 +157,29 @@
     return false
   ["=", "→", "↔", "∧", "∨", "≤", "≥", "<", ">", "≠", "∈", "*", "/", "++", "::", "∣", "⊆", "×", ":="].include?(t.text)
 
+# A command header (`+ name`, `-> name`, theorem/axiom/def/…) whose statement has
+# not reached its top-level `:` yet continues on the next indented line, so binders
+# may span lines:  `+ thm (a : ℕ)` / `    (h : a ≤ b) : …`.
+-> open_header?(line)
+  toks = line.toks
+  if toks.size == 0 || line.indent != 0
+    return false
+  h = toks[0]
+  hdr = (h.kind == :sym && (h.text == "+" || h.text == "→")) || (h.kind == :kw && ["theorem", "lemma", "axiom", "def", "opaque"].include?(h.text))
+  if !hdr
+    return false
+  d = 0
+  toks.each -> (t)
+    if t.kind == :sym
+      if t.text == "(" || t.text == "\[" || t.text == "{" || t.text == "⟨"
+        d += 1
+      elsif t.text == ")" || t.text == "\]" || t.text == "}" || t.text == "⟩"
+        d -= 1
+      elsif d == 0 && (t.text == ":" || t.text == ":=" || t.text == "|")
+        return false
+  # a pattern definition header `-> f : τ` has its colon; one without arguments ends here
+  true
+
 -> bracket_delta(toks)
   d = 0
   toks.each -> (t)
@@ -179,7 +202,7 @@
     r = lex_line(raw.chars, lineno)
     toks = r[1]
     if toks.size > 0
-      if cur != nil && (depth > 0 || continues_after?(cur.toks[cur.toks.size - 1]) || (r[0] > 0 && continues_before?(toks[0]))) && !(toks[0].kind == :sym && toks[0].text == "|" && depth == 0)
+      if cur != nil && (depth > 0 || continues_after?(cur.toks[cur.toks.size - 1]) || (r[0] > 0 && (continues_before?(toks[0]) || open_header?(cur)))) && !(toks[0].kind == :sym && toks[0].text == "|" && depth == 0)
         toks.each -> (t)
           cur.toks.push(t)
       else

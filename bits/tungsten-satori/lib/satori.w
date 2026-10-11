@@ -234,6 +234,20 @@ SATORI_VERSION = "0.1.0"
       << l
   dt = ccall("__w_clock") - t0
   info = ""
+  finished = false
+  skel.each -> (l)
+    if l.starts_with?("── ")
+      finished = true
+  if !finished
+    # the skeleton process died (crash, memory or time): never report OK
+    nfail += 1
+    << "✗ " + f + ": the elaboration process stopped before the end of the file"
+    tail = []
+    skel.each -> (l)
+      if l.starts_with?("unhandled") || l.starts_with?("satori-split:") || l.starts_with?("error")
+        tail.push(l)
+    if tail.size > 0
+      << "  " + tail.join(" ")
   skel.each -> (l)
     if l.starts_with?("── ")
       parts = l.split(" — ")

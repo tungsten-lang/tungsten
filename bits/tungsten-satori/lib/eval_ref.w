@@ -243,10 +243,11 @@
     callargs = []
     cargs.each -> (a)
       callargs.push(a)
+    self_ty = ty_con(info.name, info.params.map(->(p) ty_var(p)))
+    decl = info.ctors[ci][1]
     j = 0
     while j < cargs.size
-      at = type_of(cargs[j])
-      if at.tag == :c && at.name == info.name
+      if ty_eq(decl[j], self_ty)
         callargs.push(mk_app_raw(recf, cargs[j]))
       j += 1
     rest = arr_sub(ev, k + 1, ev.size - k - 1)

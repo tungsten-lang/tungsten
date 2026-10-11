@@ -323,6 +323,8 @@
       b = elab(e.kids[1])
       pop_local
       b
+    when :proj
+      project(elab(e.kids[0]), e.s)
     when :anon
       raise "anonymous constructor ⟨...⟩ needs a known structure type; use an ascription"
     when :hole

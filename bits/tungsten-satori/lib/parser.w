@@ -636,7 +636,10 @@
       c.ty = parse_type_toks(arr_sub(toks, p.pos, k - p.pos))
       p = EParser.new(toks, k)
   if p.accept(":=")
-    c.body = parse_expr_toks(arr_sub(toks, p.pos, toks.size - p.pos))
+    # the body may continue on more-indented lines below the definition
+    btoks = arr_sub(toks, p.pos, toks.size - p.pos)
+    flatten_block(block, btoks)
+    c.body = parse_expr_toks(btoks)
   else
     # pattern equations:  | pats => rhs
     block.each -> (b)
@@ -744,3 +747,10 @@
     lam = ast(:lam, "", [body])
     lam.binders = [Binder.new(name, nil, nil, nil)]
     ast(:app, "", [ast(:app, "", [ast(:id, kind + "_list", []), l]), lam])
+
+-> flatten_block(nodes, out)
+  nodes.each -> (n)
+    n.toks.each -> (t)
+      out.push(t)
+    flatten_block(n.block, out)
+  out

@@ -1,0 +1,18 @@
+import real
+import graph
+
++ exp_pos2 (x : ℝ) : 0 < exp x * exp x
+  have h := exp_pos x
+  exact mul_pos.real (exp x) (exp x) h h
+
+-- K4 is not 3-colorable, by SAT
+-> k4 (u v : ℕ) : Prop := ¬ (u = v)
++ k4_not_3col (x : ℕ → ℕ → Prop) : ¬ color_assignment 4 3 k4 x
+  intro h
+  sat
+
++ c5_3col : proper_coloring 5 3 (fun u v => (u + 1) % 5 = v ∨ (v + 1) % 5 = u) (fun v => if v = 4 then 2 else v % 2) := by decide
+
++ pair_test : fst (3, 4) + snd (3, 4) = 7 := by decide
++ es_test : edge_list_adj [(0, 1), (1, 2)] 2 1 := by decide
++ ham4 : hamiltonian_cycle 4 (fun u v => (u + 1) % 4 = v ∨ (v + 1) % 4 = u) [0, 1, 2, 3] := by decide

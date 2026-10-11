@@ -1,0 +1,47 @@
+-- Finite simple graphs on vertices 0..n-1 (import graph). A graph is a
+-- symmetric irreflexive adjacency predicate; everything is decidable on
+-- literal graphs, so `decide` and `sat` apply to concrete instances.
+
+-> simple (n : ℕ) (adj : ℕ → ℕ → Prop) : Prop :=
+  ∀ u < n, ∀ v < n, (adj u v ↔ adj v u) ∧ ¬ adj u u
+
+-> edge_list_adj (es : list (ℕ × ℕ)) (u v : ℕ) : Prop := (u, v) ∈ es ∨ (v, u) ∈ es
+
+-> proper_coloring (n k : ℕ) (adj : ℕ → ℕ → Prop) (c : ℕ → ℕ) : Prop :=
+  (∀ v < n, c v < k) ∧ ∀ u < n, ∀ v < n, adj u v → ¬ (c u = c v)
+
+-> colorable (n k : ℕ) (adj : ℕ → ℕ → Prop) : Prop := ∃ c, proper_coloring n k adj c
+
+-- colorability with an explicit 0/1 color indicator (sat-friendly form)
+-> color_assignment (n k : ℕ) (adj : ℕ → ℕ → Prop) (x : ℕ → ℕ → Prop) : Prop :=
+  (∀ v < n, ∃ i < k, x v i) ∧ ∀ u < n, ∀ v < n, adj u v → ∀ i < k, ¬ (x u i ∧ x v i)
+
+-> clique (adj : ℕ → ℕ → Prop) (s : list ℕ) : Prop := ∀ u ∈ s, ∀ v ∈ s, ¬ (u = v) → adj u v
+-> independent (adj : ℕ → ℕ → Prop) (s : list ℕ) : Prop := ∀ u ∈ s, ∀ v ∈ s, ¬ adj u v
+-> degree (n : ℕ) (adj : ℕ → ℕ → Prop) (v : ℕ) : ℕ := length (filter (fun u => adj v u) (range n))
+-> regular (n d : ℕ) (adj : ℕ → ℕ → Prop) : Prop := ∀ v < n, degree n adj v = d
+
+-- walks and cycles as vertex lists
+-> match_head (adj : ℕ → ℕ → Prop) (x : ℕ) : list ℕ → Prop
+  | [] => True
+  | y :: ys => adj x y
+
+-> consecutive (adj : ℕ → ℕ → Prop) : list ℕ → Prop
+  | [] => True
+  | x :: xs => match_head adj x xs ∧ consecutive adj xs
+
+-> last_or (d : ℕ) : list ℕ → ℕ
+  | [] => d
+  | x :: xs => last_or x xs
+
+-> head_or (d : ℕ) : list ℕ → ℕ
+  | [] => d
+  | x :: xs => x
+
+-> distinct_list : list ℕ → Prop
+  | [] => True
+  | x :: xs => ¬ (x ∈ xs) ∧ distinct_list xs
+
+-- a Hamiltonian cycle on n vertices, as a list starting at 0
+-> hamiltonian_cycle (n : ℕ) (adj : ℕ → ℕ → Prop) (c : list ℕ) : Prop :=
+  length c = n ∧ distinct_list c ∧ (∀ v ∈ c, v < n) ∧ consecutive adj c ∧ adj (last_or 0 c) (head_or 0 c)

@@ -1,0 +1,42 @@
+-- Real analysis vocabulary (import real). Definitions are given in full;
+-- the analytic facts below are FOUNDATIONAL axioms of ℝ and of the named
+-- functions (each is a standard theorem about the real numbers). Theorems that
+-- use them are not tagged, exactly like the ordered-field axioms in core.sat.
+
+-- order-completeness (least upper bounds)
+-> upper_bound (S : set ℝ) (b : ℝ) : Prop := ∀ x ∈ S, x ≤ b
+-> is_sup (S : set ℝ) (s : ℝ) : Prop := upper_bound S s ∧ ∀ b, upper_bound S b → s ≤ b
+axiom sup_exists (S : set ℝ) : (∃ x, S x) → (∃ b, upper_bound S b) → ∃ s, is_sup S s
+
+-- square root, exponential, logarithm, trigonometry
+opaque sqrt : ℝ → ℝ
+axiom sqrt_spec (x : ℝ) : 0 ≤ x → 0 ≤ sqrt x ∧ sqrt x * sqrt x = x
+axiom sqrt_nonneg (x : ℝ) : 0 ≤ sqrt x
+opaque exp : ℝ → ℝ
+opaque log : ℝ → ℝ
+axiom exp_pos (x : ℝ) : 0 < exp x
+axiom exp_add (x y : ℝ) : exp (x + y) = exp x * exp y
+axiom exp_zero : exp 0 = 1
+axiom log_exp (x : ℝ) : log (exp x) = x
+axiom exp_log (x : ℝ) : 0 < x → exp (log x) = x
+axiom exp_ge_one_add (x : ℝ) : 1 + x ≤ exp x
+opaque pi : ℝ
+axiom pi_bounds : 3.1415926 < pi ∧ pi < 3.1415927
+opaque sin : ℝ → ℝ
+opaque cos : ℝ → ℝ
+axiom sin_sq_add_cos_sq (x : ℝ) : sin x * sin x + cos x * cos x = 1
+axiom cos_add (x y : ℝ) : cos (x + y) = cos x * cos y - sin x * sin y
+axiom sin_add (x y : ℝ) : sin (x + y) = sin x * cos y + cos x * sin y
+axiom cos_zero : cos 0 = 1
+axiom sin_zero : sin 0 = 0
+
+-- sequences, limits, continuity, series
+-> tends_to (a : ℕ → ℝ) (L : ℝ) : Prop := ∀ ε : ℝ, 0 < ε → ∃ N : ℕ, ∀ n : ℕ, N ≤ n → abs (a n - L) < ε
+-> converges (a : ℕ → ℝ) : Prop := ∃ L, tends_to a L
+-> continuous_at (f : ℝ → ℝ) (x : ℝ) : Prop := ∀ ε : ℝ, 0 < ε → ∃ δ : ℝ, 0 < δ ∧ ∀ y : ℝ, abs (y - x) < δ → abs (f y - f x) < ε
+-> continuous (f : ℝ → ℝ) : Prop := ∀ x, continuous_at f x
+-> partial_sum (a : ℕ → ℝ) (n : ℕ) : ℝ := ∑ i < n, a i
+-> summable (a : ℕ → ℝ) : Prop := converges (partial_sum a)
+-> bounded_seq (a : ℕ → ℝ) : Prop := ∃ B : ℝ, ∀ n, abs (a n) ≤ B
+-> monotone_seq (a : ℕ → ℝ) : Prop := ∀ m n : ℕ, m ≤ n → a m ≤ a n
+axiom monotone_bounded_converges (a : ℕ → ℝ) : monotone_seq a → bounded_seq a → converges a

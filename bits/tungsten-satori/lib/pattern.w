@@ -21,13 +21,27 @@
   -> compile
     c = @c
     @e.reset
-    # parameters before the colon
-    params = []
-    c.binders.each -> (b)
-      params.push(mk_var(b.name, @e.elab_type(b.ty)))
     if c.ty == nil
       fail("pattern definitions need a type")
     fty = @e.elab_type(c.ty)
+    # Parameters before the colon become ordinary (variable) pattern arguments,
+    # so recursive calls may change them (e.g. accumulators).
+    if c.binders.size > 0
+      ptys = []
+      c.binders.each -> (b)
+        ptys.push(@e.elab_type(b.ty))
+      fty = ty_funs(ptys, fty)
+      neweqs = []
+      c.eqns.each -> (eq)
+        pats = []
+        c.binders.each -> (b)
+          pats.push(ast(:id, b.name, []))
+        eq[0].each -> (q)
+          pats.push(q)
+        neweqs.push([pats, eq[1]])
+      c.eqns = neweqs
+      c.binders = []
+    params = []
     nargs = c.eqns[0][0].size
     arg_tys = []
     t = fty

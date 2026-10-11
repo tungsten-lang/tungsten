@@ -525,8 +525,10 @@
     ty = type_of(lhs)
     if !["int", "rat", "real", "nat"].include?(ty.name)
       raise "ring: unsupported type " + ty_show(ty)
-    a = ring_normal(lhs, ty.name)
-    b = ring_normal(rhs, ty.name)
+    # one atom context for both sides: atoms must be numbered consistently
+    ctx = RingCtx.new(ty.name)
+    a = ring_norm(lhs, ty.name, ctx)
+    b = ring_norm(rhs, ty.name, ctx)
     if a == nil || b == nil || poly_key(a) != poly_key(b)
       raise "ring: sides are not equal as polynomials"
     thm([], eq_tm(lhs, rhs), ["oracle:ring"])

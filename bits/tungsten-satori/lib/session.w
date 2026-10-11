@@ -160,6 +160,8 @@
       exec_hash(c)
     when :attr
       exec(c.body)
+    when :parse_error
+      raise c.text
     else
       raise "unknown command"
 

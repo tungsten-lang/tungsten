@@ -45,11 +45,30 @@
   File.write(cnf, text)
   out = dir + "/" + key + ".out"
   solver = sat_solver_path(session)
-  p = Process.spawn(["/bin/sh", "-c", "exec \"$0\" \"$1\" --lrat \"$2\" > \"$3\" 2>&1", solver, cnf, proof, out])
+  # Resource guard (macOS has no enforceable ulimit -v): a single machine-wide
+  # lock serializes solves, and a watchdog kills the solver when its resident
+  # memory exceeds SATORI_SAT_MEM_MB (default 8192) or its run time exceeds
+  # SATORI_SAT_SECONDS (default 600).
+  mem = Env.get("SATORI_SAT_MEM_MB")
+  if mem == nil || mem == ""
+    mem = "8192"
+  secs = Env.get("SATORI_SAT_SECONDS")
+  if secs == nil || secs == ""
+    secs = "600"
+  lock = dir + "/.solver.lock"
+  guard = "while ! mkdir \"$5\" 2>/dev/null; do sleep 0.5; done; trap 'rmdir \"$5\"' EXIT; "
+  guard = guard + "\"$0\" \"$1\" --lrat \"$2\" > \"$3\" 2>&1 & pid=$!; t=0; "
+  guard = guard + "while kill -0 $pid 2>/dev/null; do r=$(ps -o rss= -p $pid 2>/dev/null | tr -d ' '); "
+  guard = guard + "if test -n \"$r\" && test \"$r\" -gt $(( $4 * 1024 )); then kill -9 $pid; echo 'c satori: solver exceeded memory limit' >> \"$3\"; fi; "
+  guard = guard + "if test $t -gt $(( $6 * 4 )); then kill -9 $pid; echo 'c satori: solver exceeded time limit' >> \"$3\"; fi; "
+  guard = guard + "sleep 0.25; t=$((t+1)); done; wait $pid"
+  p = Process.spawn(["/bin/sh", "-c", guard, solver, cnf, proof, out, mem, lock, secs])
   p.wait
   res = ""
   if File.exist?(out)
     res = File.read(out)
+  if res.include?("exceeded memory limit") || res.include?("exceeded time limit")
+    raise "sat: solver stopped (" + clauses.size.to_s + " clauses): " + res.split("\n").select(->(l) l.include?("satori:")).join(" ") + " — shrink the instance or raise SATORI_SAT_MEM_MB / SATORI_SAT_SECONDS"
   if !res.include?("UNSATISFIABLE")
     if res.include?("SATISFIABLE")
       raise "sat: the formula is satisfiable (the claim is false)"

@@ -7,7 +7,7 @@
     "+" => ["+", 65, :left], "-" => ["-", 65, :left], "*" => ["*", 70, :left],
     "/" => ["/", 70, :left], "%" => ["%", 70, :left], "^" => ["^", 75, :right],
     "cons" => ["::", 67, :right], "append" => ["++", 66, :right],
-    "mem" => ["∈", 50, :none], "dvd" => ["∣", 50, :none], "pair" => [",", 10, :right]
+    "mem" => ["∈", 50, :none], "dvd" => ["∣", 50, :none]
   }
 
 -> tm_show(t)
@@ -76,12 +76,43 @@
   if h.tag == :const
     nm = h.name
     if (nm == "∀" || nm == "∃" || nm == "ε") && args.size == 1 && args[0].tag == :lam
-      lam = args[0]
-      bn = pp_fresh(lam.name, names)
-      body = tm_pp(lam.b, names + [bn], 0)
-      return paren_if(nm + " " + bn + ", " + body, prec > 0)
+      bq = pp_bounded(nm, args[0], names, prec)
+      if bq != nil
+        return bq
+      # merge directly nested binders of the same kind:  ∀ x y, …
+      bns = []
+      cur = args[0]
+      nms = names
+      while true
+        bn = pp_fresh(cur.name, nms)
+        bns.push(bn)
+        nms = nms + [bn]
+        inner = cur.b
+        isp = strip_app(inner)
+        if nm != "ε" && isp[0].tag == :const && isp[0].name == nm && isp[1].size == 1 && isp[1][0].tag == :lam
+          cur = isp[1][0]
+        else
+          break
+      body = tm_pp(cur.b, nms, 0)
+      return paren_if(nm + " " + bns.join(" ") + ", " + body, prec > 0)
     if nm == "¬" && args.size == 1
+      e = dest_binop(args[0], "=")
+      if e != nil && type_of(e[0]).name != "bool"
+        return paren_if(tm_pp(e[0], names, 51) + " ≠ " + tm_pp(e[1], names, 51), prec > 50)
       return paren_if("¬" + tm_pp(args[0], names, 90), prec > 90)
+    if (nm == "sum_below" || nm == "prod_below" || nm == "sum_list" || nm == "prod_list") && args.size == 2 && args[1].tag == :lam
+      op = "∑"
+      if nm.starts_with?("prod")
+        op = "∏"
+      rel = " < "
+      if nm.ends_with?("list")
+        rel = " ∈ "
+      lam = args[1]
+      bn = pp_fresh(lam.name, names)
+      s2 = op + " " + bn + rel + tm_pp(args[0], names, 66) + ", " + tm_pp(lam.b, names + [bn], 66)
+      return paren_if(s2, prec > 65)
+    if nm == "pair" && args.size == 2
+      return "(" + tm_pp(args[0], names, 0) + ", " + tm_pp(args[1], names, 0) + ")"
     if nm == "neg" && args.size == 1
       return paren_if("-" + tm_pp(args[0], names, 90), prec > 90)
     if nm == "ite" && args.size == 3
@@ -106,3 +137,24 @@
   args.each -> (a)
     parts.push(tm_pp(a, names, 100))
   paren_if(parts.join(" "), prec >= 100)
+
+# ∀ x, x < t → P  ~>  ∀ x < t, P     ∃ x, x ∈ l ∧ P  ~>  ∃ x ∈ l, P
+-> pp_bounded(q, lam, names, prec)
+  conn = "⇒"
+  if q == "∃"
+    conn = "∧"
+  if q != "∀" && q != "∃"
+    return nil
+  g = dest_binop(lam.b, conn)
+  if g == nil
+    return nil
+  rels = [["<", " < "], ["≤", " ≤ "], ["mem", " ∈ "]]
+  out = nil
+  rels.each -> (r)
+    if out == nil
+      d = dest_binop(g[0], r[0])
+      if d != nil && d[0].tag == :bnd && d[0].idx == 0 && !lam_count_bound(d[1], 0)
+        bn = pp_fresh(lam.name, names)
+        bound = tm_pp(d[1], names + [bn], 66)
+        out = paren_if(q + " " + bn + r[1] + bound + ", " + tm_pp(g[1], names + [bn], 0), prec > 0)
+  out

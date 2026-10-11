@@ -1,0 +1,32 @@
+-- Order facts derived from the core axioms (proved, not assumed).
+
++ sq_nonneg.int (a : ℤ) : 0 ≤ a ^ 2
+  by_cases h : 0 ≤ a
+  · have e : a ^ 2 = a * a := by ring
+    rw [e]
+    exact mul_nonneg.int a a h h
+  · have h2 : 0 ≤ 0 - a := by linarith
+    have e : a ^ 2 = (0 - a) * (0 - a) := by ring
+    rw [e]
+    exact mul_nonneg.int (0 - a) (0 - a) h2 h2
+
++ sq_nonneg.rat (a : ℚ) : 0 ≤ a ^ 2
+  by_cases h : 0 ≤ a
+  · have e : a ^ 2 = a * a := by ring
+    rw [e]
+    exact mul_nonneg.rat a a h h
+  · have h2 : 0 ≤ 0 - a := by linarith
+    have e : a ^ 2 = (0 - a) * (0 - a) := by ring
+    rw [e]
+    exact mul_nonneg.rat (0 - a) (0 - a) h2 h2
+
++ sq_nonneg.real (a : ℝ) : 0 ≤ a ^ 2
+  by_cases h : 0 ≤ a
+  · have e : a ^ 2 = a * a := by ring
+    rw [e]
+    exact mul_nonneg.real a a h h
+  · have h2 : 0 ≤ 0 - a := by linarith
+    have e : a ^ 2 = (0 - a) * (0 - a) := by ring
+    rw [e]
+    exact mul_nonneg.real (0 - a) (0 - a) h2 h2
+

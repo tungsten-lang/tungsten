@@ -212,8 +212,22 @@ The same certificate check on ten centres fails, as it must.
   | 028 | the Gaussian-moat model (graph, endpoints) | 38 lines | ≈ 10 lines |
   | 021 | the Jacobsthal statement | 20 lines | 8 lines |
 
-  On equal statements Satori is never longer here. The ratio runs from about 1.3× (small definitions) to more than 20,000× (finite
-  certificates, where the evaluator and `sat` replace step-by-step kernel proofs).
+  On these rows Satori is never longer. The ratio runs from about 1.3× (small definitions) to more than 20,000× (finite
+  certificates, where the evaluator and `sat` replace step-by-step kernel proofs). These rows are computation-heavy, though, and
+  the systematic benchmark below shows they are not representative.
+* **Systematic benchmark: Satori is longer on elementary lemmas.** In `~/math/openai/benchmarks/like_for_like/`, 339 fully
+  proved Lean lemmas from 107 families were re-proved in Satori with the same statement and generality. All of them check,
+  with no axiom tags.
+
+  | | Lean + Mathlib | Satori |
+  |---|---|---|
+  | statement + proof lines | 2,306 | 4,642 |
+  | aggregate / median ratio Satori/Lean | | 2.00 / 1.71 |
+  | Satori shorter / equal / longer | | 61 / 25 / 253 |
+
+  Satori wins where `decide` evaluates what Lean proves by hand. It loses on everyday inequality, abs, min/max, pow, cast and
+  div/mod lemmas, where Mathlib's library and its `nlinarith`, `positivity`, `omega`, `field_simp` and `<;>` do the work that
+  Satori files redo by hand. The benchmark README lists every loss and its cause.
 * **What carries the concision:**
   - The evaluator decides bounded quantifiers and literal arithmetic, so finite checks are one `decide`.
   - `sat` turns combinatorial cores into a kernel-checked LRAT refutation.

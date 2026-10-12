@@ -157,7 +157,9 @@ Optional:
 
 ## Use: the OpenAI math families
 
-**Provenance.** Satori was designed and implemented for this project. Its first commit (996b71c7e, 2026-10-10 20:16) added the
+**Provenance.** Satori was designed and implemented for this project, in response to the owner's request (session
+3039114e, 2026-10-10 19:35 EDT) to "implement the general idea in a LEAN-like language … with a better, more concise syntax" and to
+"put the new proving language in bits/tungsten-satori". Its first commit (996b71c7e, 2026-10-10 20:16) added the
 kernel, evaluator and tactics, together with `core/svg` and `core/raster` for the families' figures. The owner's `+` / `->`
 declaration syntax and the symbolic `sat` tactic followed at 20:44 (f28267e2b). The first family (156, Borsuk) was committed at 20:49
 (`~/math` af0994ef). Everything since (26 commits: big operators, opaque constants, split mode, nested patterns, the prelude modules,

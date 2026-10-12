@@ -14,3 +14,21 @@ axiom a_false : (1 : ℕ) = 0
 + f9 : (2 : ℕ) = 3 := by
   have h : (1 : ℕ) = 0 := a_false
   linarith
+
+-- Parser traps that drop proof text (TUNGSTEN_ISSUES #98, #100, #105): they must fail closed, never pass a false goal.
++ t105 (x : ℚ) (h : 0 < x) : x < 0 :=
+  sorry_free_term_on_next_line
++ t100 (x : ℚ) (h : 0 < x) : x < 0 := by
+  calc x < 0 := by
+      linarith
++ t_have_only (x : ℚ) (h : 0 < x) : x < 0 := by
+  have k : x < 0
+  exact k
++ t98b (x : ℚ) (h : 0 < x) : x < 0 := by
+  by_cases c : x = 1
+  · have k : x < 0 := by
+      linarith
+    exact k
+  · have k : x < 0 := by
+      linarith
+    exact k

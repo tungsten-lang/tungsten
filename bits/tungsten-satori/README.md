@@ -207,7 +207,11 @@ Satori's claims are only as good as its kernel. Two spec files exercise the reje
   The ninth statement is derived from a deliberately false `axiom`. It checks, but it carries the tag `axiom:a_false`, which is how
   imported assumptions stay visible.
 
-Run them with `satori check -j 1 spec/must_fail.sat`. The expected verdict is `FAILED (8)`, with f9 checked and tagged. As of
+The file also holds four parser-trap cases (TUNGSTEN_ISSUES #98, #100, #105). In those, a proof block is dropped or misread, and
+the check fails closed with "unsolved goals" or an unknown name. A false goal is never admitted. Run them with
+`satori check -j 1 spec/must_fail.sat`. The expected verdict is `FAILED (12)`, with f9 checked and tagged.
+`spec/core_axioms_spec.w` evaluates the 194 foundational axioms on 4,575 random instances: 0 contradictions.
+`spec/kernel_smoke.w` exercises the inference rules. As of
 2026-10-12 all eight are refused for the stated reason. All 372 family files check, and every theorem in them carries its
 trust tags (`axiom:…`, `oracle:sat`, `oracle:ring`, `oracle:arith`).
 

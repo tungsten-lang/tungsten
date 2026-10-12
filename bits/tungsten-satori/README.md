@@ -193,6 +193,24 @@ has a `.sat` file that checks with `satori check -j 1`. `~/math/openai/SATORI_VS
   - Tungsten programs compute the certificates (inverse matrices, coset tables, Steenrod-algebra data, braid invariants) that Satori
     re-checks, so the heavy computation stays in Tungsten and only the check enters the kernel.
 
+## Soundness checks
+
+Satori's claims are only as good as its kernel. Two spec files exercise the rejection side:
+
+* `spec/ring_soundness.sat`: `ring` must reject an identity that is false as polynomials.
+* `spec/must_fail.sat`: nine false statements. Each must be refused:
+  - `decide` on false arithmetic, divisibility and bounded quantifiers;
+  - `ring` on (x + y)² = x² + y²;
+  - `linarith` on contradictory orderings and on x² ≥ x;
+  - `sat` on a satisfiable claim ("the formula is satisfiable").
+
+  The ninth statement is derived from a deliberately false `axiom`. It checks, but it carries the tag `axiom:a_false`, which is how
+  imported assumptions stay visible.
+
+Run them with `satori check -j 1 spec/must_fail.sat`. The expected verdict is `FAILED (8)`, with f9 checked and tagged. As of
+2026-10-12 all eight are refused for the stated reason. All 372 family files check, and every theorem in them carries its
+trust tags (`axiom:…`, `oracle:sat`, `oracle:ring`, `oracle:arith`).
+
 ## The SAT solver: decision
 
 The question was whether Satori should incorporate the SAT solver (the `tungsten-wassat` bit). The decision is to **incorporate it as

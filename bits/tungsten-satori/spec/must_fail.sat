@@ -1,0 +1,16 @@
+-- Every theorem in this file is FALSE; a sound checker must reject each one.
++ f1 : (1 : ℕ) = 2 := by decide
++ f2 (x y : ℚ) : (x + y) * (x + y) = x * x + y * y := by ring
++ f3 (x : ℚ) (h : 0 < x) : x < 0 := by linarith
++ f4 : ∀ n < 10, n * n < 50 := by decide
++ f5 (p : ℕ → ℕ → Prop) (h1 : ∀ i < 2, ∃ j < 2, p i j) : False := by sat
++ f6 (a b : ℚ) (h : a ≤ b) : b ≤ a := by linarith
++ f7 : (7 : ℕ) ∣ 50 := by decide
++ f8 (x : ℚ) : x * x ≥ x := by
+  have s0 : 0 ≤ x ^ 2 := sq_nonneg.rat x
+  have s1 : x ^ 2 = x * x := by ring
+  linarith
+axiom a_false : (1 : ℕ) = 0
++ f9 : (2 : ℕ) = 3 := by
+  have h : (1 : ℕ) = 0 := a_false
+  linarith

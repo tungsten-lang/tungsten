@@ -1,0 +1,33 @@
+-- Laurent polynomials with integer coefficients (import poly), as lists of (exponent, coefficient) pairs.
+-- Knot polynomials (Alexander, Jones), generating functions and characteristic polynomials in the OpenAI families are stated and
+-- checked in this form: the values and derivatives at 1 and −1 are computable, so conditions on them close by `decide`.
+
+-- value at t = 1, at t = −1, and the derivatives P′(1), P″(1), P‴(1) (falling factorials of the exponents)
+-> poly_at1 : list (ℤ × ℤ) → ℤ
+  | [] => 0
+  | m :: ms => snd m + poly_at1 ms
+-> poly_at_neg1 : list (ℤ × ℤ) → ℤ
+  | [] => 0
+  | m :: ms => snd m * (if fst m % 2 = 0 then 1 else -1) + poly_at_neg1 ms
+-> poly_d1 : list (ℤ × ℤ) → ℤ
+  | [] => 0
+  | m :: ms => snd m * fst m + poly_d1 ms
+-> poly_d2 : list (ℤ × ℤ) → ℤ
+  | [] => 0
+  | m :: ms => snd m * fst m * (fst m - 1) + poly_d2 ms
+-> poly_d3 : list (ℤ × ℤ) → ℤ
+  | [] => 0
+  | m :: ms => snd m * fst m * (fst m - 1) * (fst m - 2) + poly_d3 ms
+
+-- t ↦ 1/t (mirror image for knot polynomials) and t ↦ −t
+-> poly_mirror : list (ℤ × ℤ) → list (ℤ × ℤ)
+  | [] => []
+  | m :: ms => (0 - fst m, snd m) :: poly_mirror ms
+-> poly_neg_var : list (ℤ × ℤ) → list (ℤ × ℤ)
+  | [] => []
+  | m :: ms => (fst m, snd m * (if fst m % 2 = 0 then 1 else -1)) :: poly_neg_var ms
+
+-- every exponent lies in [−g, g] (e.g. deg Δ ≤ g for a genus-g knot)
+-> poly_within : ℤ → list (ℤ × ℤ) → Prop
+  | g, [] => True
+  | g, m :: ms => 0 - g ≤ fst m ∧ fst m ≤ g ∧ poly_within g ms

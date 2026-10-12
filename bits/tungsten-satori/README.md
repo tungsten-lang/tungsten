@@ -185,6 +185,24 @@ has a `.sat` file that checks with `satori check -j 1`. `~/math/openai/SATORI_VS
 
   These are the rows in the families' READMEs (`156-borsuk-nine`, `005-catalan-irrational`, `021-jacobsthal-quadratic`,
   `013-ostmann-goldbach`).
+* **Every like-for-like row in the family READMEs.** Each row below has the same statement proved, or the same object defined,
+  on both sides, collected from the "Satori vs Lean" sections of all 372 READMEs. Rows where Satori checks instances and Lean proves
+  the general case are excluded.
+
+  | family | statement or object | Lean | Satori |
+  |---|---|---|---|
+  | 005 | mod-101 matrix certificate, all 3·48² cells | 395,415 lines (`FiniteMatrices/`) | 72 one-line `decide` theorems |
+  | 156 | no ten-system exists | 66,297 lines (`FiniteCases/`) | 3 lines |
+  | 156 | the ten-system definition | ≈ 20 lines | 15 lines |
+  | 173 | Seymour's second-neighbourhood theorem from its two halves | 22 lines (`Main.lean`) | 12 lines |
+  | 173 | the model: oriented graph, first and second neighbourhoods, images | 313 lines | ≈ 20 lines |
+  | 050 | the ampleness inequalities | 384 lines (for the paper's b) | 25 lines (for every b ≥ 6) |
+  | 162 | hypergraph, cover, intersecting | 48 lines | 6 lines |
+  | 028 | the Gaussian-moat model (graph, endpoints) | 38 lines | ≈ 10 lines |
+  | 021 | the Jacobsthal statement | 20 lines | 8 lines |
+
+  On equal statements Satori is never longer here. The ratio runs from about 1.3× (small definitions) to more than 20,000× (finite
+  certificates, where the evaluator and `sat` replace step-by-step kernel proofs).
 * **What carries the concision:**
   - The evaluator decides bounded quantifiers and literal arithmetic, so finite checks are one `decide`.
   - `sat` turns combinatorial cores into a kernel-checked LRAT refutation.

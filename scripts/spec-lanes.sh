@@ -438,6 +438,7 @@ compiled_specs=(
   spec/core/character_spec.w
   spec/core/color_spec.w
   spec/core/combinatorics_coding_spec.w
+  spec/core/combinatorics_assignment_spec.w
   spec/core/combinatorics_graph_spec.w
   spec/core/crypto_crc32_spec.w
   spec/core/crypto_pbkdf2_spec.w

@@ -107,6 +107,7 @@
   auto :IntegerPartition, "combinatorics/partition"
   auto :Lattice, "combinatorics/lattice_animal"
   auto :ExactCover, "combinatorics/exact_cover"
+  auto :Assignment, "combinatorics/assignment"
   auto :FiniteSimpleGraph, "combinatorics"
   auto :GraphDegeneracyCertificate, "combinatorics"
   auto :CompleteGraphEdgeColoring, "combinatorics"

@@ -157,6 +157,12 @@ Optional:
 
 ## Use: the OpenAI math families
 
+**Provenance.** Satori was designed and implemented for this project. Its first commit (996b71c7e, 2026-10-10 20:16) added the
+kernel, evaluator and tactics, together with `core/svg` and `core/raster` for the families' figures. The owner's `+` / `->`
+declaration syntax and the symbolic `sat` tactic followed at 20:44 (f28267e2b). The first family (156, Borsuk) was committed at 20:49
+(`~/math` af0994ef). Everything since (26 commits: big operators, opaque constants, split mode, nested patterns, the prelude modules,
+soundness fixes) was driven by the families.
+
 Satori was written for one project: to restate the 372 result families of OpenAI's math release
 (`~/code/edge/openai/math`) in a language far more concise than Lean. Each family's rebuild in `~/math/openai/families/`
 has a `.sat` file that checks with `satori check -j 1`. `~/math/openai/SATORI_VS_LEAN.md` lists every family's line counts.

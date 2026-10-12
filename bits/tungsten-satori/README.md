@@ -143,6 +143,9 @@ Optional:
   degree regular consecutive distinct_list hamiltonian_cycle`.
   `color_assignment` is the sat-friendly colouring form, e.g.
   `+ k4 (x : ℕ → ℕ → Prop) : ¬ color_assignment 4 3 k4 x := by intro h; sat`.
+* `import poly`: Laurent polynomials as `(exponent, coefficient)` lists; `poly_at1 poly_at_neg1
+  poly_d1 poly_d2 poly_d3 poly_mirror poly_neg_var poly_within`. Conditions on knot polynomials and generating
+  functions then close by `decide` (e.g. the purely-cosmetic-surgery sieve in `~/math/openai/families/306-cosmetic-surgery`).
 
 ## Design notes
 
@@ -151,3 +154,52 @@ Optional:
 * The solver is an untrusted oracle with an independent checker, matching the
   original reason Wassat and Wrat are separate bits. Satori depends on the solver
   bit through its Bitfile only.
+
+## Use: the OpenAI math families
+
+Satori was written for one project: to restate the 372 result families of OpenAI's math release
+(`~/code/edge/openai/math`) in a language far more concise than Lean. Each family's rebuild in `~/math/openai/families/`
+has a `.sat` file that checks with `satori check -j 1`. `~/math/openai/SATORI_VS_LEAN.md` lists every family's line counts.
+
+* **All 372 files:** 26,473 non-blank, non-comment Satori lines in total (median 58 per family, 90th percentile 123).
+* **The 138 families with a Lean development in the release:** 11,640 Satori lines against 8,594,590 Lean lines. This aggregate is
+  *not* a like-for-like ratio. A Satori file imports the paper's deep analytic steps as named axioms (`axiom:` tags make that visible
+  in every theorem), while the Lean developments prove them.
+* **Like for like:** where both prove the same statement, the difference comes from the evaluator, the checked oracles and the
+  notation, not from omitted mathematics.
+
+  | statement | Lean (OpenAI) | Satori |
+  |---|---|---|
+  | Borsuk in dimension 9, finite core: no ten-system exists | `FiniteCases/`, 66,297 lines | 3 lines (`intro`, `obtain`, `sat`; LRAT re-checked by the kernel) |
+  | Catalan's constant, mod-101 matrix certificate | `FiniteMatrices/`, 395,415 lines | 72 `decide` theorems (plus a 201-line data file) |
+  | Jacobsthal's function, the statement | `Model.lean`, 20 lines | 8 lines |
+  | Ostmann's inverse Goldbach, main theorem from Lemma 2.2 and Theorem 2.3 | inside 609,199 lines | 3 tactic lines |
+
+  These are the rows in the families' READMEs (`156-borsuk-nine`, `005-catalan-irrational`, `021-jacobsthal-quadratic`,
+  `013-ostmann-goldbach`).
+* **What carries the concision:**
+  - The evaluator decides bounded quantifiers and literal arithmetic, so finite checks are one `decide`.
+  - `sat` turns combinatorial cores into a kernel-checked LRAT refutation.
+  - `ring` and `arith` (`linarith`) check certificates instead of replaying proofs.
+  - Higher-level predicate modules (`graph`, `real`, `poly`, `nat`) let statements say what the paper says.
+  - Tungsten programs compute the certificates (inverse matrices, coset tables, Steenrod-algebra data, braid invariants) that Satori
+    re-checks, so the heavy computation stays in Tungsten and only the check enters the kernel.
+
+## The SAT solver: decision
+
+The question was whether Satori should incorporate the SAT solver (the `tungsten-wassat` bit). The decision is to **incorporate it as
+an untrusted oracle, not into the trusted base**. Concretely:
+
+* `by sat` (`lib/satbridge.w`) expands the goal's bounded quantifiers into a propositional formula and Tseitin-encodes it. It calls
+  the solver (`$SATORI_SOLVER`, else `bits/tungsten-wassat/bin/wassat --lrat`) under a memory and time watchdog, and caches proofs by
+  content hash. **The kernel re-checks the LRAT refutation** (`checkers.w`), and the theorem carries the tag `oracle:sat`.
+* The solver stays a separate bit, referenced only from the Bitfile. A bug in the solver can make `sat` fail, but never makes a false
+  theorem check. The solver can also be optimized or replaced (any LRAT-producing solver works through `$SATORI_SOLVER`) without
+  touching the kernel. This is the same split as the original Wassat/Wrat pair.
+* Merging the solver's source into Satori was rejected: it would add a CDCL engine to the code that has to be trusted, for no gain in
+  what can be proved.
+* **Name.** The owner dislikes "wassat". The suggested replacement is **koan**: a short puzzle whose answer is checked, next to
+  Satori. Alternatives: *lantern*, *spar*. The rename is the owner's call and is not done here, because the bit's name is referenced
+  by other active projects (`~/math` SAT campaigns, DETOUR's SAT rollout, Lonely Runner certificates, the `.wrat` format). Satori itself
+  depends on the name in exactly two places, the Bitfile line and the default path in `satbridge.w`. After a rename, set
+  `SATORI_SOLVER` or update those two lines.

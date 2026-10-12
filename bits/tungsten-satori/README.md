@@ -204,7 +204,8 @@ an untrusted oracle, not into the trusted base**. Concretely:
   touching the kernel. This is the same split as the original Wassat/Wrat pair.
 * Merging the solver's source into Satori was rejected: it would add a CDCL engine to the code that has to be trusted, for no gain in
   what can be proved.
-* **Name.** The owner dislikes "wassat". The suggested replacement is **koan**: a short puzzle whose answer is checked, next to
+* **Name.** Decided by the owner on 2026-10-12: **keep "wassat" for now**. The rename proposal (koan, lantern, spar) was declined at
+  this time. For reference: the suggested replacement was **koan**: a short puzzle whose answer is checked, next to
   Satori. Alternatives: *lantern*, *spar*. The rename is the owner's call and is not done here, because the bit's name is referenced
   by other active projects (`~/math` SAT campaigns, DETOUR's SAT rollout, Lonely Runner certificates, the `.wrat` format). Satori itself
   depends on the name in exactly two places, the Bitfile line and the default path in `satbridge.w`. After a rename, set

@@ -948,9 +948,19 @@
     refs = refine(g, [g1, g2], ->(ts) @k.disj_cases(th, ts[0], ts[1]))
     r1 = refs[0]
     r2 = refs[1]
-    destruct(r1, @k.assume(pq[0]), first)
-    destruct(r2, @k.assume(pq[1]), rest)
-    0
+    l1 = destruct(r1, @k.assume(pq[0]), first)
+    l2 = destruct(r2, @k.assume(pq[1]), rest)
+    l1 + l2
+
+  # destruct returns the goals it leaves open; the rest of a ⟨…⟩ pattern continues on exactly those
+  # (never on the globally first goal, which inside `a | ⟨b, c⟩` is the other branch's goal).
+  -> destruct_rest(leaves, th, items)
+    out = []
+    i = 0
+    while i < leaves.size
+      out = out + destruct_tuple(leaves[i], th, items)
+      i += 1
+    out
 
   -> destruct_tuple(g, th, items)
     goal = g.goal
@@ -970,16 +980,12 @@
     if pq != nil
       a = @k.conj1(th)
       b = @k.conj2(th)
-      r = destruct(g, a, items[0])
-      g2 = first_goal
-      return destruct_tuple(g2, b, arr_sub(items, 1, items.size - 1))
+      return destruct_rest(destruct(g, a, items[0]), b, arr_sub(items, 1, items.size - 1))
     e = dest_binop(c, "=")
     if e != nil && type_of(e[0]).name == "bool"
       mp = project_proof(th, "mp")
       mpr = project_proof(th, "mpr")
-      destruct(g, mp, items[0])
-      g2 = first_goal
-      return destruct(g2, mpr, items[1])
+      return destruct_rest(destruct(g, mp, items[0]), mpr, arr_sub(items, 1, items.size - 1))
     fail("⟨...⟩ pattern needs ∃, ∧ or ↔, got " + tm_show(c))
 
   # h : x = t (x a fixed variable) — replace x by t everywhere.

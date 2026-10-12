@@ -169,6 +169,17 @@ Satori was written for one project: to restate the 372 result families of OpenAI
 (`~/code/edge/openai/math`) in a language far more concise than Lean. Each family's rebuild in `~/math/openai/families/`
 has a `.sat` file that checks with `satori check -j 1`. `~/math/openai/SATORI_VS_LEAN.md` lists every family's line counts.
 
+**A new result, kernel-checked.** `~/math/openai/families/156-borsuk-nine/borsuk_eleven.sat` proves
+`borsuk_number_eleven`: the Borsuk number of OpenAI's nine-dimensional projector set is exactly 11. OpenAI's paper leaves that
+value open. The file has 83 theorems, checks in 55 s, and its trust base is
+`[oracle:arith, oracle:ring, oracle:sat, axiom:minkowski_weyl, axiom:openai_cover_to_ten_system]`:
+- the 11-cell certificate is checked by `decide`;
+- the Voronoi and convexity argument is proved;
+- the textbook representation theorem enters as one generic axiom;
+- the lower bound uses OpenAI's own Lean reduction and the 3-line `no_ten_system`.
+
+The same certificate check on ten centres fails, as it must.
+
 * **All 372 files:** 26,473 non-blank, non-comment Satori lines in total (median 58 per family, 90th percentile 123).
 * **The 138 families with a Lean development in the release:** 11,640 Satori lines against 8,594,590 Lean lines. This aggregate is
   *not* a like-for-like ratio. A Satori file imports the paper's deep analytic steps as named axioms (`axiom:` tags make that visible
@@ -226,8 +237,16 @@ Satori's claims are only as good as its kernel. Two spec files exercise the reje
   imported assumptions stay visible.
 
 The file also holds four parser-trap cases (TUNGSTEN_ISSUES #98, #100, #105). In those, a proof block is dropped or misread, and
-the check fails closed with "unsolved goals" or an unknown name. A false goal is never admitted. Run them with
-`satori check -j 1 spec/must_fail.sat`. The expected verdict is `FAILED (12)`, with f9 checked and tagged.
+the check fails closed with "unsolved goals" or an unknown name. A false goal is never admitted.
+
+Two more cases (`leak4`, `leak5`) record a tactic bug found on 2026-10-12. `obtain ⟨a, b⟩ | ⟨c, d⟩` continued the second
+alternative's tuple on the globally first open goal, so `d` appeared in the first branch. Even before the fix
+(`destruct_rest` in `lib/tactics.w`), the kernel refused both false theorems: "proof leaves assumptions: 1 < 0 ∧ 1 < 0" and
+"x is free in hypothesis". The tactic layer is untrusted, and the kernel's assumption tracking caught the bug.
+
+Run the whole file with `satori check -j 1 spec/must_fail.sat`. The expected verdict is `FAILED (14)`, with f9 checked and
+tagged. Note that `check` starts its per-theorem workers from the installed `bits/tungsten-satori/bin/satori`, so a fix
+counts only after that binary is rebuilt.
 `spec/core_axioms_spec.w` evaluates the 194 foundational axioms on 4,575 random instances: 0 contradictions.
 `spec/kernel_smoke.w` exercises the inference rules. As of
 2026-10-12 all eight are refused for the stated reason. All 372 family files check, and every theorem in them carries its

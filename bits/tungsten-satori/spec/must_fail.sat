@@ -32,3 +32,20 @@ axiom a_false : (1 : ℕ) = 0
   · have k : x < 0 := by
       linarith
     exact k
+
+-- `obtain ⟨a, b⟩ | ⟨c, d⟩` once put the second branch's `d` into the first branch's context (fixed 2026-10-12 in
+-- lib/tactics.w, destruct_rest). Even with the bug, the kernel refused both: "proof leaves assumptions: 1 < 0 ∧ 1 < 0"
+-- and "x is free in hypothesis". x = 1 satisfies each hypothesis and refutes each goal.
++ leak4 (x : ℝ) (h : (0 ≤ x ∧ 0 ≤ x) ∨ (x < 0 ∧ x < 0)) : x < 0
+  obtain ⟨a, b⟩ | ⟨c, d⟩ := h
+  · linarith
+  · linarith
++ leak5 : (1 : ℝ) < 0
+  have h : ((0 : ℝ) ≤ 1 ∧ (0 : ℝ) ≤ 1) ∨ ((1 : ℝ) < 0 ∧ (1 : ℝ) < 0) := by
+    left
+    constructor
+    · norm_num
+    · norm_num
+  obtain ⟨a, b⟩ | ⟨c, d⟩ := h
+  · linarith
+  · linarith

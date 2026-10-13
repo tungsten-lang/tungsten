@@ -177,11 +177,16 @@
       index[steenrod_seq_key(b[i])] = i
       i += 1
     d += 1
-  {tmax: tmax, basis: basis, index: index, cache: {}}
+  # cache-key radices: every index < kw and every degree < kd, so the key below is collision-free
+  kw = 1
+  basis.each -> (bb)
+    if bb.size + 1 > kw
+      kw = bb.size + 1
+  {tmax: tmax, basis: basis, index: index, cache: {}, kw: kw, kd: tmax + 1}
 
 # product of basis elements (degree da, index ia) · (degree db, index ib) as a list of indices in degree da + db
 -> steenrod_mul(st, da, ia, db, ib)
-  key = ((da * 4096 + ia) * 64 + db) * 4096 + ib
+  key = ((da * st[:kw] + ia) * st[:kd] + db) * st[:kw] + ib
   c = st[:cache]
   if c.has_key?(key)
     return c[key]
@@ -770,11 +775,16 @@
       index[b[i]] = i
       i += 1
     d += 1
-  {p: p, tmax: tmax, basis: basis, index: index, cache: {}}
+  # cache-key radices: every index < kw and every degree < kd, so the key below is collision-free
+  kw = 1
+  basis.each -> (bb)
+    if bb.size + 1 > kw
+      kw = bb.size + 1
+  {p: p, tmax: tmax, basis: basis, index: index, cache: {}, kw: kw, kd: tmax + 1}
 
 # product of basis elements (da, ia)·(db, ib) as a list of [index in degree da + db, coefficient]
 -> steenrod_p_mul(st, da, ia, db, ib)
-  key = ((da * 4096 + ia) * 512 + db) * 4096 + ib
+  key = ((da * st[:kw] + ia) * st[:kd] + db) * st[:kw] + ib
   c = st[:cache]
   if c.has_key?(key)
     return c[key]

@@ -237,19 +237,22 @@ The same certificate check on ten centres fails, as it must.
   On these rows Satori is never longer. The ratio runs from about 1.3× (small definitions) to more than 20,000× (finite
   certificates, where the evaluator and `sat` replace step-by-step kernel proofs). These rows are computation-heavy, though, and
   the systematic benchmark below shows they are not representative.
-* **Systematic benchmark: Satori is longer on elementary lemmas.** In `~/math/openai/benchmarks/like_for_like/`, 339 fully
-  proved Lean lemmas from 107 families were re-proved in Satori with the same statement and generality. All of them check,
-  with no axiom tags.
+* **Systematic benchmark, two rounds.** In `~/math/openai/benchmarks/like_for_like/`, 339 fully proved Lean lemmas from
+  107 families were re-proved in Satori with the same statement and generality. All of them check, with no axiom tags.
+  - **Round 1** used the original Satori: no library, no `nlinarith`/`positivity`/`omega`. Satori came out **2.0× longer**.
+    Files re-proved abs, min/max, pow, cast and div/mod facts by hand.
+  - **Round 2** (`like_for_like_v2/`) re-proved the same 339 statements after `import arith` (561 proved lemmas) and the
+    new tactics were added. The coordinator checked the statements identical, all files checking, and no axioms.
 
-  | | Lean + Mathlib | Satori |
-  |---|---|---|
-  | statement + proof lines | 2,306 | 4,642 |
-  | aggregate / median ratio Satori/Lean | | 2.00 / 1.71 |
-  | Satori shorter / equal / longer | | 61 / 25 / 253 |
+  | | Lean + Mathlib | Satori round 1 | Satori round 2 |
+  |---|---|---|---|
+  | statement + proof lines | 2,306 | 4,642 | **1,293** |
+  | aggregate / median line ratio Satori/Lean | | 2.00 / 1.71 | **0.57 / 0.55** |
+  | non-whitespace characters (layout-independent) | 69,973 | 89,593 | **58,336** (0.83×) |
+  | Satori shorter / equal / longer (lines) | | 61 / 25 / 253 | **266 / 51 / 22** |
 
-  Satori wins where `decide` evaluates what Lean proves by hand. It loses on everyday inequality, abs, min/max, pow, cast and
-  div/mod lemmas, where Mathlib's library and its `nlinarith`, `positivity`, `omega`, `field_simp` and `<;>` do the work that
-  Satori files redo by hand. The benchmark README lists every loss and its cause.
+  The remaining 22 losses need library lemmas Satori lacks (`zero_pow`, prime divisibility, sinh/cosh, ℕ division) or
+  `field_simp`, `split_ifs` and `nlinarith` over ℕ. The round-2 README lists each loss and its cause.
 * **What carries the concision:**
   - The evaluator decides bounded quantifiers and literal arithmetic, so finite checks are one `decide`.
   - `sat` turns combinatorial cores into a kernel-checked LRAT refutation.

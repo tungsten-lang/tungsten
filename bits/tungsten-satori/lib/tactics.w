@@ -89,6 +89,9 @@
     @goals = []
     @hcount = 0
     @split_ne = []
+    @nl_mode = false
+    @omega_mode = false
+    @split_sub = []
 
   -> fresh_hyp_name
     @hcount += 1
@@ -177,24 +180,53 @@
       sub.goals = [g]
       rest = arr_sub(toks, 1, toks.size - 1)
       nodes = []
-      if rest.size > 0
-        split_top(rest, ";").each -> (part)
-          if part.size > 0
-            nodes.push(TacNode.new(part, [], n.line))
+      parts = semi_parts(rest)
+      # block lines indented deeper than the last inline tactic belong to it (`· have h : P` + its proof block)
+      owned = []
+      siblings = []
+      owning = parts.size > 0
+      col = 0
+      if parts.size > 0
+        col = parts[parts.size - 1][0].col
+      if parts.size > 0 && !block_tactic?(parts[parts.size - 1])
+        owning = false
       n.block.each -> (b)
+        if owning && b.toks.size > 0 && b.toks[0].col > col
+          owned.push(b)
+        else
+          owning = false
+          siblings.push(b)
+      pi = 0
+      while pi < parts.size
+        if pi == parts.size - 1
+          nodes.push(TacNode.new(parts[pi], owned, n.line))
+        else
+          nodes.push(TacNode.new(parts[pi], [], n.line))
+        pi += 1
+      siblings.each -> (b)
         nodes.push(b)
-      # the last inline tactic owns the nested block when the block is not separate
       sub.run_block(nodes)
       if sub.goals.size > 0
         fail("line " + n.line.to_s + ": focused goal not closed:\n" + sub.goals[0].goal.show(@k))
       @goals = arr_sub(@goals, 1, @goals.size - 1)
       return
-    parts = split_top(toks, ";")
-    if parts.size > 1
-      parts.each -> (p)
-        if p.size > 0
-          run_node(TacNode.new(p, [], n.line))
+    # t1 <;> t2 : run t2 on every goal t1 produces (left-associative)
+    k = find_top_last(toks, "<;>")
+    if k >= 0
+      run_then_all(arr_sub(toks, 0, k), arr_sub(toks, k + 1, toks.size - k - 1), n.line)
       run_block(n.block)
+      return
+    parts = semi_parts(toks)
+    if parts.size > 1
+      pi = 0
+      while pi < parts.size
+        if pi == parts.size - 1 && block_tactic?(parts[pi])
+          run_node(TacNode.new(parts[pi], n.block, n.line))
+        else
+          run_node(TacNode.new(parts[pi], [], n.line))
+        pi += 1
+      if !block_tactic?(parts[parts.size - 1])
+        run_block(n.block)
       return
     begin
       run_tactic(toks, n.block, n.line)
@@ -207,9 +239,78 @@
         msg = "line " + n.line.to_s + ": " + msg + state
       raise msg
 
+  -> find_top_last(toks, sym)
+    last = -1
+    k = find_top(toks, sym, 0)
+    while k >= 0
+      last = k
+      k = find_top(toks, sym, k + 1)
+    last
+
+  # runs t1 on the first goal, then t2 on each goal t1 left in its place
+  -> run_then_all(t1, t2, line)
+    before = @goals.size
+    run_node(TacNode.new(t1, [], line))
+    made = @goals.size - before + 1
+    if made < 0
+      made = 0
+    produced = arr_sub(@goals, 0, made)
+    rest = arr_sub(@goals, made, @goals.size - made)
+    out = []
+    produced.each -> (sg)
+      @goals = [sg]
+      run_node(TacNode.new(t2, [], line))
+      out = out + @goals
+    @goals = out + rest
+
+  # all_goals t : run t on every open goal
+  -> run_all_goals(t, line)
+    gs = @goals
+    out = []
+    gs.each -> (sg)
+      @goals = [sg]
+      run_node(TacNode.new(t, [], line))
+      out = out + @goals
+    @goals = out
+
+  # tactics that take an indented block as their own proof (`have h : P` + block, `calc` + steps)
+  -> block_tactic?(part)
+    if part.size == 0
+      return false
+    if part[0].text == "calc"
+      return true
+    if part[0].text != "have"
+      return false
+    find_top(part, ":=", 0) < 0 || part[part.size - 1].text == "by"
+
+  # Splits `t1; t2; …` at top-level semicolons, except that everything after a top-level `by` belongs to that `by`
+  # (`have h : P := by t1; t2` runs t1 and t2 on the subgoal, as `by_nodes` does).
+  -> semi_parts(toks)
+    k = find_top(toks, "by", 0)
+    if k < 0
+      out = []
+      split_top(toks, ";").each -> (p)
+        if p.size > 0
+          out.push(p)
+      return out
+    out = []
+    pre = split_top(arr_sub(toks, 0, k), ";")
+    i = 0
+    while i < pre.size - 1
+      if pre[i].size > 0
+        out.push(pre[i])
+      i += 1
+    last = []
+    if pre.size > 0
+      last = pre[pre.size - 1]
+    out.push(last + arr_sub(toks, k, toks.size - k))
+    out
+
   -> run_tactic(toks, block, line)
     name = toks[0].text
     args = arr_sub(toks, 1, toks.size - 1)
+    if name == "all_goals" || name == "any_goals"
+      return run_all_goals(args, line)
     g = first_goal
     case name
     when "intro", "intros"
@@ -265,8 +366,26 @@
       tac_norm_num(g, args)
     when "ring"
       tac_ring(g)
-    when "linarith", "arith", "omega", "positivity"
+    when "linarith", "arith"
       tac_linarith(g, args)
+    when "omega"
+      @omega_mode = true
+      begin
+        tac_linarith(g, args)
+      rescue e
+        @omega_mode = false
+        raise e
+      @omega_mode = false
+    when "positivity"
+      tac_positivity(g, args)
+    when "nlinarith"
+      @nl_mode = true
+      begin
+        tac_linarith(g, args)
+      rescue e
+        @nl_mode = false
+        raise e
+      @nl_mode = false
     when "sat"
       tac_sat(g)
     when "auto", "tauto", "aesop"
@@ -392,6 +511,10 @@
           fail("unknown hypothesis or theorem '" + head.s + "'")
         r = instantiate_to(goal, th, sp[1], expected, false)
         return r[0]
+      # `(thm a b).mpr h`: any other head is itself a proof expression
+      if head.kind == :proj || head.kind == :paren || head.kind == :app
+        r = instantiate_to(goal, proof_ast(goal, head, nil), sp[1], expected, false)
+        return r[0]
     if e.kind == :anon
       if expected == nil
         fail("⟨...⟩ needs a known goal")
@@ -497,15 +620,28 @@
     proofs = {}
     ai = 0
     si = 0
+    # ∀-steps filled out of order: Satori hoists every ∀ binder to the front of a statement, so in
+    # `thm L a ha u hu` (declared (L a) (ha) (u) (hu)) the term u arrives while the next step is the premise of ha's kind
+    filled = {}
+    maxused = -1
     while ai < args.size
       a = args[ai]
-      while si < steps.size && steps[si][0] == :all && proof_name?(goal, a)
+      isproof = proof_name?(goal, a)
+      while si < steps.size && (filled.has_key?(si) || (steps[si][0] == :all && isproof))
         si += 1
       if si >= steps.size
         fail("too many arguments")
       st = steps[si]
-      if st[0] == :all
-        v = st[1]
+      tstep = si
+      if st[0] != :all && !isproof
+        # the earliest ∀ binder still unbound (earlier ones may have been skipped by a proof argument)
+        j = 0
+        while j < steps.size && !(steps[j][0] == :all && !filled.has_key?(j) && !mt.tm.has_key?(var_key(steps[j][1])))
+          j += 1
+        if j < steps.size
+          tstep = j
+      if steps[tstep][0] == :all
+        v = steps[tstep][1]
         vt = ty_subst(v.ty, mt.ty)
         term = nil
         if vt.tag == :v && tvs.has_key?(vt.name)
@@ -514,8 +650,15 @@
           term = elab_term_ast(goal, a, vt)
         if !mt.m(v, term, 0)
           fail("argument has the wrong type")
-        si += 1
+        if tstep > maxused
+          maxused = tstep
+        if tstep == si
+          si += 1
+        else
+          filled[tstep] = true
       else
+        if si > maxused
+          maxused = si
         prem = st[1]
         prem_i = tm_subst(prem, mt.tm)
         pth = proof_ast(goal, a, closed_or_nil(prem_i, pvars))
@@ -546,6 +689,7 @@
     if mt.ty.size > 0
       thx = k.inst_type(thx, mt.ty)
     open = []
+    gens = []
     si = 0
     while si < steps.size
       st = steps[si]
@@ -553,6 +697,17 @@
         v = st[1]
         kk = var_key(v)
         if !mt.tm.has_key?(kk)
+          # partial application (`have k := thm a b`): nothing after this binder was supplied, so keep it quantified
+          if target == nil && si > maxused
+            return [regen(thx, gens), open]
+          if target == nil && !allow_open
+            # a later premise was supplied: instantiate with a fresh variable and generalize back at the end
+            fv = mk_var(fresh_name(v.name.slice(1, v.name.size - 1), avoid), ty_subst(v.ty, mt.ty))
+            avoid.push(fv)
+            gens.push(fv)
+            thx = k.spec(fv, thx)
+            si += 1
+            next
           if target != nil || !allow_open
             fail("cannot infer argument " + v.name.slice(1, v.name.size - 1) + " of the theorem")
           # leave universally quantified: stop here
@@ -576,12 +731,19 @@
         else
           if !allow_open
             if target == nil
-              return [thx, open]
+              return [regen(thx, gens), open]
             fail("missing proof of premise " + tm_show(prem))
           open.push(prem)
           thx = @d.undisch(thx)
       si += 1
-    [thx, open]
+    [regen(thx, gens), open]
+
+  -> regen(thx, gens)
+    i = gens.size - 1
+    while i >= 0
+      thx = @k.gen(gens[i], thx)
+      i -= 1
+    thx
 
   # ---------------------------------------------------------------------------
   # Tactics
@@ -1181,16 +1343,25 @@
   # rw [h1, ← h2, foo a] (at h)?
   -> tac_rw(g, args)
     at = find_top(args, "at", 0)
-    target_h = nil
+    targets = [nil]
     rs = args
     if at >= 0
-      target_h = args[at + 1].text
+      # `rw [...] at h1 h2 ⊢` rewrites every listed hypothesis (and the goal for ⊢)
+      targets = []
+      k = at + 1
+      while k < args.size
+        if args[k].text == "⊢"
+          targets.push(nil)
+        else
+          targets.push(args[k].text)
+        k += 1
       rs = arr_sub(args, 0, at)
     if rs.size > 0 && rs[0].text == "\["
       rs = arr_sub(rs, 1, rs.size - 2)
     cur = g
-    split_top(rs, ",").each -> (r)
-      cur = rw_one(cur, r, target_h)
+    targets.each -> (target_h)
+      split_top(rs, ",").each -> (r)
+        cur = rw_one(cur, r, target_h)
     # close goals of the form a = a or True
     begin
       c = cur.goal.concl
@@ -1424,6 +1595,14 @@
     target_h = nil
     names = args
     if at >= 0
+      # `unfold f at h1 h2` unfolds in each listed hypothesis
+      if args.size - at - 1 > 1
+        cur = g
+        k = at + 1
+        while k < args.size
+          cur = tac_unfold(cur, arr_sub(args, 0, at + 1) + [args[k]])[0]
+          k += 1
+        return [cur]
       target_h = args[at + 1].text
       names = arr_sub(args, 0, at)
     rules = []
@@ -1542,7 +1721,96 @@
               t2 = arith_prove(g2, extra)
               @split_ne.pop
               return @k.disj_cases(disj, t1, t2)
-    arith_prove_core(goal, extra)
+    # omega: split a truncated ℕ subtraction a - b into b ≤ a (a - b + b = a) and a ≤ b (a - b = 0), at most 3 deep
+    if @omega_mode && @split_sub.size < 3
+      s = find_nat_sub(goal, extra)
+      if s != nil
+        d = dest_binop(s, "-")
+        tot = @session.lemma_at("le_total", ty_nat)
+        sac = @session.lemma_at("sub_add_cancel", ty_nat)
+        sez = @session.lemma_at("sub_eq_zero", ty_nat)
+        if tot != nil && sac != nil && sez != nil
+          @split_sub.push(tm_key(s))
+          disj = @k.spec(d[0], @k.spec(d[1], tot))
+          pq = dest_binop(disj.concl, "∨")
+          f1 = @k.mp(@k.spec(d[1], @k.spec(d[0], sac)), @k.assume(pq[0]))
+          f2 = @k.mp(@k.spec(d[1], @k.spec(d[0], sez)), @k.assume(pq[1]))
+          begin
+            t1 = arith_prove(Goal.new(goal.fixes, goal.hyps + [["_ge", pq[0]]], c), extra + [f1])
+            t2 = arith_prove(Goal.new(goal.fixes, goal.hyps + [["_le", pq[1]]], c), extra + [f2])
+          rescue e
+            @split_sub.pop
+            raise e
+          @split_sub.pop
+          return @k.disj_cases(disj, t1, t2)
+    arith_prove_core(goal, extra + divmod_facts(goal, extra))
+
+  # the first ℕ subtraction a - b in the goal, hypotheses or extra facts that is not already being split
+  -> find_nat_sub(goal, extra)
+    ts = [goal.concl]
+    goal.hyps.each -> (h)
+      ts.push(h[1])
+    extra.each -> (t)
+      ts.push(t.concl)
+    found = nil
+    ts.each -> (t)
+      if found == nil
+        found = nat_sub_in(t)
+    found
+
+  -> nat_sub_in(t)
+    if t.tag != :app
+      return nil
+    sp = strip_app(t)
+    h = sp[0]
+    if h.tag == :const && h.name == "-" && sp[1].size == 2 && ty_eq(type_of(t), ty_nat) && !@split_sub.include?(tm_key(t))
+      return t
+    r = nil
+    sp[1].each -> (a)
+      if r == nil
+        r = nat_sub_in(a)
+    r
+
+  # x / k and x % k with a literal k > 0 (ℕ, ℤ): k * (x / k) + x % k = x, 0 ≤ x % k < k
+  -> divmod_facts(goal, extra)
+    ts = [goal.concl]
+    goal.hyps.each -> (h)
+      ts.push(h[1])
+    extra.each -> (t)
+      ts.push(t.concl)
+    seen = {}
+    out = []
+    ts.each -> (t)
+      collect_divmod(t, seen, out)
+    out
+
+  -> collect_divmod(t, seen, out)
+    if t.tag != :app
+      return 0
+    sp = strip_app(t)
+    h = sp[0]
+    sp[1].each -> (a)
+      collect_divmod(a, seen, out)
+    if h.tag == :const && (h.name == "/" || h.name == "%") && sp[1].size == 2
+      ty = type_of(t)
+      k = sp[1][1]
+      x = sp[1][0]
+      if (ty_eq(ty, ty_nat) || ty_eq(ty, ty_int)) && k.tag == :lit && k.val > 0
+        key = tm_key(x) + "/" + tm_key(k)
+        if !seen.has_key?(key)
+          seen[key] = true
+          begin
+            dam = @session.lemma_at("div_add_mod", ty)
+            mnn = @session.lemma_at("mod_nonneg", ty)
+            mlt = @session.lemma_at("mod_lt", ty)
+            lt = @k.mk_const("<", ty_funs([ty, ty], ty_bool))
+            kpos = arith_prove_core(Goal.new([], [], mk_apps(lt, [mk_lit(0, ty), k])), [])
+            out.push(@k.spec(k, @k.spec(x, dam)))
+            out.push(@k.mp(@k.spec(k, @k.spec(x, mnn)), kpos))
+            out.push(@k.mp(@k.spec(k, @k.spec(x, mlt)), kpos))
+          rescue e
+            0
+    0
 
   -> arith_prove_core(goal, extra)
     c = goal.concl
@@ -1600,6 +1868,8 @@
       ts2 = ts
       if ty.name == "nat"
         ts2 = ts + nat_nonneg(ts)
+      if @nl_mode && ty.name != "nat"
+        ts2 = ts2 + nl_products(ts, ty)
       if ty.name == "nat" || ty.name == "int"
         ts2 = integer_strengthen(ts2, ty)
       coeffs = fm_certificate(ts2, ty.name)
@@ -1609,6 +1879,109 @@
           return f
         return classical_by_contra(c, f)
     fail("linarith failed")
+
+  # positivity: sign facts of the goal's subterms (|x| ≥ 0, exp x > 0, √x ≥ 0, x^(2k) ≥ 0), then nlinarith
+  -> tac_positivity(g, args)
+    facts = []
+    seen = {}
+    pos_facts(g.goal.concl, facts, seen)
+    @nl_mode = true
+    begin
+      close(g, arith_prove(g.goal, facts))
+    rescue e
+      @nl_mode = false
+      raise e
+    @nl_mode = false
+
+  -> pos_facts(t, out, seen)
+    if t.tag != :app
+      return 0
+    sp = strip_app(t)
+    h = sp[0]
+    sp[1].each -> (a)
+      pos_facts(a, out, seen)
+    if h.tag != :const || seen.has_key?(tm_key(t))
+      return 0
+    seen[tm_key(t)] = true
+    ty = type_of(t)
+    args = sp[1]
+    begin
+      if h.name == "abs" && args.size == 1
+        l = @session.lemma_at("abs_nonneg", ty)
+        if l != nil
+          out.push(@k.spec(args[0], l))
+      elsif h.name == "exp" && args.size == 1
+        l = @session.theorem("exp_pos")
+        if l != nil
+          out.push(@k.spec(args[0], l))
+      elsif h.name == "sqrt" && args.size == 1
+        l = @session.theorem("sqrt_nonneg")
+        if l != nil
+          out.push(@k.spec(args[0], l))
+      elsif h.name == "^" && args.size == 2 && args[1].tag == :lit
+        n = args[1].val
+        l = @session.lemma_at("sq_nonneg", ty)
+        if l != nil && n.class_name == "Int" && n >= 2 && n % 2 == 0
+          base = args[0]
+          if n > 2
+            base = mk_apps(@k.mk_const("^", ty_funs([ty, ty_nat], ty)), [args[0], mk_lit(n / 2, ty_nat)])
+          out.push(@k.spec(base, l))
+    rescue e
+      0
+    0
+
+  # nlinarith: for each hypothesis a ≤ b (a < b) the fact 0 ≤ b - a (0 < b - a), then every pairwise product of those
+  # differences, proved with mul_nonneg / mul_pos. Linear arithmetic then treats the expanded monomials as atoms.
+  -> nl_products(ts, ty)
+    zero = nil
+    if ty.name == "int"
+      zero = mk_lit(0, ty)
+    else
+      zero = mk_lit([0, 1], ty)
+    minus = @k.mk_const("-", ty_funs([ty, ty], ty))
+    le = @k.mk_const("≤", ty_funs([ty, ty], ty_bool))
+    lt = @k.mk_const("<", ty_funs([ty, ty], ty_bool))
+    mn = @session.lemma_at("mul_nonneg", ty)
+    mp = @session.lemma_at("mul_pos", ty)
+    if mn == nil || mp == nil
+      return []
+    terms = []
+    nns = []
+    poss = []
+    saved = @nl_mode
+    @nl_mode = false
+    ts.each -> (t)
+      if terms.size < 24
+        d = dest_binop(t.concl, "≤")
+        strict = false
+        if d == nil
+          d = dest_binop(t.concl, "<")
+          strict = true
+        if d != nil
+          dt = mk_apps(minus, [d[1], d[0]])
+          begin
+            nn = arith_prove_core(Goal.new([], [], mk_apps(le, [zero, dt])), [t])
+            ps = nil
+            if strict
+              ps = arith_prove_core(Goal.new([], [], mk_apps(lt, [zero, dt])), [t])
+            terms.push(dt)
+            nns.push(nn)
+            poss.push(ps)
+          rescue e
+            0
+    @nl_mode = saved
+    out = []
+    i = 0
+    while i < terms.size
+      j = i
+      while j < terms.size
+        if poss[i] != nil && poss[j] != nil
+          out.push(@k.mp(@k.mp(@k.spec(terms[j], @k.spec(terms[i], mp)), poss[i]), poss[j]))
+        else
+          out.push(@k.mp(@k.mp(@k.spec(terms[j], @k.spec(terms[i], mn)), nns[i]), nns[j]))
+        j += 1
+      i += 1
+    out
 
   -> first_side(th)
     ["<", "≤", "="].each -> (r)
@@ -1663,6 +2036,9 @@
       if h.tag == :const && ["+", "*", "<", "≤", "="].include?(h.name)
         sp[1].each -> (a)
           collect_nat_atoms(a, seen, out, l)
+        # a product of naturals is a natural too: 0 ≤ x * y (linarith sees it as one monomial)
+        if h.name == "*" && ty_eq(type_of(p), ty_nat) && sp[1][0].tag != :lit && sp[1][1].tag != :lit
+          add_nat_atom(p, seen, out, l)
         return
       if h.tag == :const && h.name == "^"
         collect_nat_atoms(sp[1][0], seen, out, l)

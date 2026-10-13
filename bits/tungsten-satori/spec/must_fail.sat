@@ -49,3 +49,10 @@ axiom a_false : (1 : ℕ) = 0
   obtain ⟨a, b⟩ | ⟨c, d⟩ := h
   · linarith
   · linarith
+
+-- the 2026-10-12 tactics (nlinarith, positivity, omega, the simplex fallback): each statement is false
++ nl1 (x : ℝ) (h : 0 ≤ x) : x * x ≤ x := by nlinarith
++ pos1 (x : ℝ) : 0 < x ^ 2 := by positivity
++ om1 (a b : ℕ) : a - b + b = a := by omega
++ lp1 (a b c d e f g h k m n p : ℝ) (q1 : a ≤ b) (q2 : b ≤ c) (q3 : c ≤ d) (q4 : d ≤ e) (q5 : e ≤ f) (q6 : f ≤ g)
+    (q7 : g ≤ h) (q8 : h ≤ k) (q9 : k ≤ m) (q10 : m ≤ n) (q11 : n ≤ p) : p ≤ a := by linarith

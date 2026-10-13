@@ -88,6 +88,8 @@ CASTS = [
   "real_of_rat_mul (m n : ℚ) : real_of_rat (m * n) = real_of_rat m * real_of_rat n",
   "real_of_rat_le (m n : ℚ) : real_of_rat m ≤ real_of_rat n ↔ m ≤ n",
   "nat_of_int_of_nat (n : ℕ) : nat_of_int (int_of_nat n) = n",
+  "int_of_nat_of_int (z : ℤ) : 0 ≤ z → int_of_nat (nat_of_int z) = z",
+  "nat_of_int_nonpos (z : ℤ) : z ≤ 0 → nat_of_int z = 0",
   "floor_le (q : ℚ) : rat_of_int (floor q) ≤ q",
   "lt_floor_add_one (q : ℚ) : q < rat_of_int (floor q) + 1"
 ]

@@ -1,0 +1,113 @@
+-- Hyperbolic functions (import hyperbolic): Mathlib's Real.sinh and Real.cosh, defined from exp as in Real.sinh_eq and
+-- Real.cosh_eq, with their basic identities and inequalities. Proved from realx; this module adds no axioms. It is a
+-- separate module so that files that define their own sinh / cosh can still import realx.
+import realx
+
+-> sinh (x : ℝ) : ℝ := (exp x - exp (-x)) / 2
+-> cosh (x : ℝ) : ℝ := (exp x + exp (-x)) / 2
+
+-- Mathlib: Real.sinh_zero
++ sinh_zero : sinh 0 = 0
+  unfold sinh
+  ring
+-- Mathlib: Real.cosh_zero
++ cosh_zero : cosh 0 = 1
+  unfold cosh
+  rw [exp_zero]
+  ring
+-- Mathlib: Real.sinh_neg
++ sinh_neg (x : ℝ) : sinh (-x) = -sinh x
+  unfold sinh
+  rw [neg_neg.real]
+  ring
+-- Mathlib: Real.cosh_neg
++ cosh_neg (x : ℝ) : cosh (-x) = cosh x
+  unfold cosh
+  rw [neg_neg.real]
+  ring
+-- Mathlib: Real.cosh_add_sinh
++ cosh_add_sinh (x : ℝ) : cosh x + sinh x = exp x
+  unfold cosh sinh
+  ring
+-- Mathlib: Real.cosh_sub_sinh
++ cosh_sub_sinh (x : ℝ) : cosh x - sinh x = exp (-x)
+  unfold cosh sinh
+  ring
+-- Mathlib: Real.cosh_sq_sub_sinh_sq
++ cosh_sq_sub_sinh_sq (x : ℝ) : cosh x ^ 2 - sinh x ^ 2 = 1
+  unfold cosh sinh
+  linarith [exp_neg_mul' x]
+-- Mathlib: Real.cosh_add
++ cosh_add (x y : ℝ) : cosh (x + y) = cosh x * cosh y + sinh x * sinh y
+  unfold cosh sinh
+  rw [neg_add.real, exp_add, exp_add]
+  ring
+-- Mathlib: Real.sinh_add
++ sinh_add (x y : ℝ) : sinh (x + y) = sinh x * cosh y + cosh x * sinh y
+  unfold cosh sinh
+  rw [neg_add.real, exp_add, exp_add]
+  ring
+-- Mathlib: Real.cosh_pos
++ cosh_pos (x : ℝ) : 0 < cosh x
+  unfold cosh
+  linarith [exp_pos x, exp_pos (-x)]
+-- Mathlib: Real.one_le_cosh
++ one_le_cosh (x : ℝ) : 1 ≤ cosh x
+  unfold cosh
+  have m := exp_neg_mul' x
+  have k : exp x * (exp x * exp (-x)) = exp x := by rw [m]; ring
+  nlinarith [mul_nonneg.real (exp (-x)) ((exp x - 1) ^ 2) (by linarith [exp_pos (-x)]) (sq_nonneg.real (exp x - 1))]
+-- Mathlib: Real.sinh_lt_cosh
++ sinh_lt_cosh (x : ℝ) : sinh x < cosh x
+  unfold cosh sinh
+  linarith [exp_pos (-x)]
+-- Mathlib: Real.sinh_pos_iff
++ sinh_pos_iff (x : ℝ) : 0 < sinh x ↔ 0 < x
+  unfold sinh
+  constructor
+  · intro h
+    by_contra c
+    linarith [(exp_le_exp x (-x)).mpr (by linarith)]
+  · intro h
+    linarith [(exp_lt_exp (-x) x).mpr (by linarith)]
+-- Mathlib: Real.sinh_eq_zero
++ sinh_eq_zero (x : ℝ) : sinh x = 0 ↔ x = 0
+  unfold sinh
+  constructor
+  · intro h
+    linarith [(exp_le_exp x (-x)).mp (by linarith), (exp_le_exp (-x) x).mp (by linarith)]
+  · intro h
+    have e : -(0 : ℝ) = 0 := by ring
+    rw [h, e]
+    ring
+-- Mathlib: Real.sinh_ne_zero
++ sinh_ne_zero (x : ℝ) : sinh x ≠ 0 ↔ x ≠ 0
+  have k := sinh_eq_zero x
+  constructor
+  · intro h z
+    exact h (k.mpr z)
+  · intro h z
+    exact h (k.mp z)
+-- Mathlib: Real.self_lt_sinh_iff
+-- (for y > 0, exp y ≥ q = 1 + y + y²/2 and q² − 2yq − 1 = y⁴/4 > 0, so exp y − exp(−y) > 2y)
++ self_lt_sinh_iff (x : ℝ) : x < sinh x ↔ 0 < x
+  have pos : ∀ y : ℝ, 0 < y → y < sinh y
+    intro y hy
+    unfold sinh
+    have q := quadratic_le_exp_of_nonneg y (by linarith)
+    have m := exp_neg_mul' y
+    have p := exp_pos y
+    have f := mul_nonneg.real (exp y - (1 + y + y ^ 2 / 2)) (exp y + (1 + y + y ^ 2 / 2) - 2 * y) (by linarith) (by linarith [exp_ge_one_add y, sq_nonneg.real y])
+    have g : 2 * y * exp y < exp y * exp y - 1 := by linarith [pow_pos.real y 4 hy]
+    nlinarith
+  constructor
+  · intro h
+    by_contra c
+    by_cases z : x = 0
+    · rw [z, sinh_zero] at h
+      linarith
+    · have k := pos (-x) (by linarith)
+      rw [sinh_neg] at k
+      linarith
+  · intro h
+    exact pos x h

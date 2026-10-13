@@ -157,6 +157,14 @@ Optional:
   degree regular consecutive distinct_list hamiltonian_cycle`.
   `color_assignment` is the sat-friendly colouring form, e.g.
   `+ k4 (x : ℕ → ℕ → Prop) : ¬ color_assignment 4 3 k4 x := by intro h; sat`.
+* `import arith`: the elementary library (561 lemmas with `realx`, all proved, no axioms), stated per type with suffixes
+  `.nat .int .rat .real`: abs (`abs_mul`, `abs_add`, `abs_sub_le`, `abs_le`, …), min/max, products and order (`mul_le_mul`,
+  `sub_nonneg`, …), powers (`pow_add`, `pow_le_pow_left`, `one_le_pow`, `lt_two_pow`, …), ℕ/ℤ division and remainder
+  (`div_mod_unique`, `add_mul_mod`, `mod_two_cases`, …), field division (`div_le_iff`, `mul_div_cancel`, …), casts ℕ→ℤ→ℚ→ℝ
+  (`cast_add`, `cast_le`, `int_cast_pow`, …), `fact` and `choose` (Pascal, `choose_two`, `choose_mul_fact`, `choose_symm`),
+  sums (`sum_le`, `sum_telescope`, `geom_sum_mul`, …), Bernoulli's inequality. It costs about 0.8 s per theorem process to load.
+* `import realx`: `real` + `arith` + exp/log/sqrt facts (`exp_le_exp`, `exp_le_inv_one_sub`, `log_le_sub_one`, `sqrt_mul`, …)
+  and the Archimedean property of ℝ (`exists_nat_gt.real`, from `sup_exists`).
 * `import poly`: Laurent polynomials as `(exponent, coefficient)` lists; `poly_at1 poly_at_neg1
   poly_d1 poly_d2 poly_d3 poly_mirror poly_neg_var poly_within`. Conditions on knot polynomials and generating
   functions then close by `decide` (e.g. the purely-cosmetic-surgery sieve in `~/math/openai/families/306-cosmetic-surgery`).

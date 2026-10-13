@@ -1,0 +1,98 @@
+-- Uses of the arith and realx library modules: each theorem is the kind of elementary step that Satori files used to
+-- re-prove by hand (~/math/openai/benchmarks/like_for_like). Check with `satori check -j 1 spec/arith_spec.sat`.
+import arith
+import realx
+
+-- abs
++ dist_four (a b c d : ℝ) : |a - d| ≤ |a - b| + |b - c| + |c - d|
+  linarith [abs_sub_le.real a b d, abs_sub_le.real b c d]
+
++ near_one (x ε : ℝ) (h : |x - 1| < ε) : x < 1 + ε
+  linarith [(abs_lt.real (x - 1) ε).mp h]
+
++ abs_prod_le (x y : ℝ) (hx : |x| ≤ 2) (hy : |y| ≤ 3) : |x * y| ≤ 6
+  rw [abs_mul.real]
+  nlinarith [abs_nonneg.real x, abs_nonneg.real y]
+
++ abs_int_cases (z : ℤ) (h : |z| ≤ 1) : 0 - 1 ≤ z ∧ z ≤ 1 := (abs_le.int z 1).mp h
+
+-- min and max
++ clamp_le (x : ℤ) : min (max x 0) 10 ≤ 10 := min_le_right.int (max x 0) 10
+
++ min_max_sum (a b : ℕ) : min a b + max a b = a + b := min_add_max.nat a b
+
+-- powers
++ pow_step_down (x : ℝ) (n : ℕ) (h0 : 0 ≤ x) (h1 : x ≤ 1) : x ^ (n + 1) ≤ x ^ n :=
+  pow_le_pow_of_le_one.real x n (n + 1) h0 h1 (by linarith)
+
++ cube_strict_mono (a b : ℝ) (h0 : 0 ≤ a) (h : a < b) : a ^ 3 < b ^ 3 := pow_lt_pow_left.real a b 3 h0 h (by decide)
+
++ two_pow_big (n : ℕ) (h : 10 ≤ n) : 1000 < 2 ^ n
+  linarith [pow_le_pow_right.nat 2 10 n (by decide) h]
+
+-- division and remainder
++ shift_mod (n : ℕ) : (n + 3 * 7) % 3 = n % 3 := add_mul_mod.nat n 7 3
+
++ sq_mod_two (n : ℕ) : n ^ 2 % 2 = n % 2
+  rw [pow_mod.nat]
+  obtain e | e := mod_two_cases.nat n <;> rw [e] <;> decide
+
++ int_sq_mod_two (n : ℤ) : n * n % 2 = n % 2
+  rw [mul_mod.int n n 2 (by decide)]
+  obtain e | e := mod_two_cases.int n <;> rw [e] <;> decide
+
+-- field division
++ ratio_le_two (a b : ℝ) (hb : 0 < b) (h : a ≤ 2 * b) : a / b ≤ 2 := (div_le_iff.real a 2 b hb).mpr (by linarith)
+
++ harmonic_step (n : ℕ) : 1 / ((n : ℝ) + 2) < 1 / ((n : ℝ) + 1)
+  exact one_div_lt_one_div_of_lt.real ((n : ℝ) + 1) ((n : ℝ) + 2) (by linarith [cast_nonneg.real n]) (by linarith)
+
+-- casts
++ cast_lt_succ (m n : ℕ) (h : m < n) : (m : ℝ) + 1 ≤ (n : ℝ)
+  have k := (cast_le.real (m + 1) n).mpr (by linarith)
+  rw [cast_succ.real] at k
+  exact k
+
++ cast_square (n : ℕ) : ((n ^ 2 : ℕ) : ℝ) = (n : ℝ) ^ 2 := cast_pow.real n 2
+
++ bernoulli_half (n : ℕ) : 1 + (n : ℝ) / 2 ≤ (3 / 2) ^ n
+  linarith [one_add_mul_le_pow.real (1 / 2) n (by linarith)]
+
++ monic_discriminant (b c : ℝ) (h : ∀ x : ℝ, 0 ≤ x * x + b * x + c) : b * b ≤ 4 * c
+  linarith [discrim_le_zero.real 1 b c (by intro x; linarith [h x])]
+
+-- binomial coefficients
++ handshake (n : ℕ) : choose (n + 1) 2 * 2 = (n + 1) * n
+  linarith [choose_two_succ n]
+
++ choose_pred (n : ℕ) (h : 1 ≤ n) : choose n (n - 1) = n
+  rw [choose_symm n 1 h, choose_one_right]
+
+-- sums
++ sum_double (f : ℕ → ℝ) (n : ℕ) : ∑ i < n, 2 * f i = 2 * ∑ i < n, f i := sum_const_mul.real 2 f n
+
++ abs_sum_bound (f : ℕ → ℝ) (n : ℕ) (h : ∀ i < n, |f i| ≤ 1) : |∑ i < n, f i| ≤ (n : ℝ)
+  have k : ∑ i < n, |f i| ≤ ∑ i < n, (1 : ℝ) := sum_le.real (fun i => |f i|) (fun i => 1) n h
+  rw [sum_const.real] at k
+  linarith [abs_sum_le.real f n]
+
++ geom_lt (n : ℕ) : (∑ i < n, 2 ^ i) < 2 ^ n
+  linarith [geometric_sum_two.nat n]
+
+-- exp, log, sqrt, Archimedes
++ exp_le_two (x : ℝ) (h0 : 0 ≤ x) (h : x ≤ 1 / 2) : exp x ≤ 2
+  have k := exp_le_inv_one_sub x (by linarith)
+  have l := one_div_le_one_div_of_le.real (1 / 2) (1 - x) (by linarith) (by linarith)
+  linarith
+
++ log_square (x : ℝ) (hx : 0 < x) : log (x ^ 2) = 2 * log x
+  have e : ((2 : ℕ) : ℝ) = 2 := by decide
+  rw [log_pow x 2 hx, e]
+
++ sqrt_four : sqrt 4 = 2 := sqrt_eq_of_mul_self 4 2 (by linarith) (by ring)
+
++ archimedes_eps (ε : ℝ) (h : 0 < ε) : ∃ n : ℕ, 1 / ((n : ℝ) + 1) < ε
+  obtain ⟨n, hn⟩ := exists_nat_gt.real (1 / ε)
+  use n
+  have k := (div_lt_iff.real 1 (n : ℝ) ε h).mp hn
+  exact (div_lt_iff.real 1 ε ((n : ℝ) + 1) (by linarith [cast_nonneg.real n])).mpr (by linarith)

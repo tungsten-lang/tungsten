@@ -1,0 +1,2212 @@
+-- Elementary arithmetic library (import arith): the abs, min/max, power, division, cast, binomial and sum facts that
+-- Mathlib supplies and that Satori files kept re-proving (~/math/openai/benchmarks/like_for_like). Every lemma is
+-- proved from the foundational axioms in core.sat; this module adds no axioms.
+--
+-- Naming follows the prelude convention: a fact that holds on several number types is stated once per type with the
+-- suffix .nat .int .rat .real (lemma_at(base, ty) finds base.ty). Casts from ℕ are named by their target type
+-- (cast_add.real : ((m + n : ℕ) : ℝ) = (m : ℝ) + (n : ℝ)); casts from ℤ and ℚ are int_cast_*.T and rat_cast_*.real.
+-- Already in core.sat, so not repeated here: pow_zero.T, pow_succ.T, mod_lt.T, mod_nonneg.T, div_add_mod.T, div_zero.T,
+-- abs_nonneg.T, abs_of_nonneg.T, abs_of_neg.T, mul_inv_cancel.T, div_def.T, sub_add_cancel.nat and the one-step cast laws
+-- (int_of_nat_add, rat_of_int_le, real_of_rat_mul, …). sq_nonneg.T is in order.sat.
+--
+-- Sections: big-operator steps and induction from m · abs · min/max · products and order · powers ·
+-- ℕ/ℤ division and remainder · field division · casts · factorial and binomial coefficients · sums.
+-- Exponential, logarithm, square root and the Archimedean property of ℝ are in realx (import realx).
+
+-- ---- big operators: one step (∑ i < n, f i is sum_below n f; note ∑ i < n, f i + c parses as ∑ i < n, (f i + c)) ----
+@[simp] + sum_below_zero (f : ℕ → α) : ∑ i < 0, f i = 0 := by rfl
++ sum_below_succ (n : ℕ) (f : ℕ → α) : ∑ i < n + 1, f i = (∑ i < n, f i) + f n := by rfl
+@[simp] + prod_below_zero (f : ℕ → α) : ∏ i < 0, f i = 1 := by rfl
++ prod_below_succ (n : ℕ) (f : ℕ → α) : ∏ i < n + 1, f i = (∏ i < n, f i) * f n := by rfl
+
+-- induction from m (Mathlib's Nat.le_induction)
++ le_induction.nat (P : ℕ → Prop) (m : ℕ) (h0 : P m) (hs : ∀ n, m ≤ n → P n → P (n + 1)) : ∀ n, m ≤ n → P n
+  have k : ∀ d, P (m + d)
+    intro d
+    induction d with d ih
+    · rw [add_zero.nat]
+      exact h0
+    · rw [succ_eq_add_one.nat, ← add_assoc.nat]
+      exact hs (m + d) (by linarith) ih
+  intro n hn
+  have e : n = m + (n - m) := by linarith [sub_add_cancel.nat n m hn]
+  rw [e]
+  exact k (n - m)
+
+-- ---- absolute value (ℝ ℚ ℤ) -------------------------------------------------------------------------------------
+-- abs_cases.T is the workhorse: obtain ⟨e, h⟩ | ⟨e, h⟩ := abs_cases.T x <;> linarith
+-- ℝ
++ abs_cases.real (x : ℝ) : (|x| = x ∧ 0 ≤ x) ∨ (|x| = 0 - x ∧ x < 0)
+  by_cases h : 0 ≤ x
+  · left
+    exact ⟨abs_of_nonneg.real x h, h⟩
+  · right
+    have e := abs_of_neg.real x (by linarith)
+    have e2 : neg x = 0 - x := by ring
+    rw [e2] at e
+    exact ⟨e, by linarith⟩
++ abs_of_nonpos.real (x : ℝ) (h : x ≤ 0) : |x| = 0 - x
+  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.real x <;> linarith
++ abs_of_pos.real (x : ℝ) (h : 0 < x) : |x| = x
+  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.real x <;> linarith
++ le_abs_self.real (x : ℝ) : x ≤ |x|
+  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.real x <;> linarith
++ neg_le_abs.real (x : ℝ) : 0 - x ≤ |x|
+  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.real x <;> linarith
++ neg_abs_le.real (x : ℝ) : 0 - |x| ≤ x
+  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.real x <;> linarith
++ abs_le.real (x c : ℝ) : |x| ≤ c ↔ 0 - c ≤ x ∧ x ≤ c
+  constructor
+  · intro h
+    exact ⟨by linarith [neg_le_abs.real x], by linarith [le_abs_self.real x]⟩
+  · intro h
+    obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.real x <;> linarith
++ abs_lt.real (x c : ℝ) : |x| < c ↔ 0 - c < x ∧ x < c
+  constructor
+  · intro h
+    exact ⟨by linarith [neg_le_abs.real x], by linarith [le_abs_self.real x]⟩
+  · intro h
+    obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.real x <;> linarith
++ abs_le_of.real (x c : ℝ) (h : 0 - c ≤ x) (k : x ≤ c) : |x| ≤ c
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := abs_cases.real x <;> linarith
++ abs_lt_of.real (x c : ℝ) (h : 0 - c < x) (k : x < c) : |x| < c
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := abs_cases.real x <;> linarith
++ abs_neg.real (x : ℝ) : |0 - x| = |x|
+  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.real x <;> obtain ⟨f, l⟩ | ⟨f, l⟩ := abs_cases.real (0 - x) <;> linarith
++ abs_sub_comm.real (a b : ℝ) : |a - b| = |b - a|
+  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.real (a - b) <;> obtain ⟨f, l⟩ | ⟨f, l⟩ := abs_cases.real (b - a) <;> linarith
++ abs_mul.real (a b : ℝ) : |a * b| = |a| * |b|
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := abs_cases.real a <;> obtain ⟨f, k⟩ | ⟨f, k⟩ := abs_cases.real b <;> rw [e, f]
+  · rw [abs_of_nonneg.real (a * b) (mul_nonneg.real a b h k)]
+  · rw [abs_of_nonpos.real (a * b) (by linarith [mul_nonneg.real a (0 - b) h (by linarith)])]
+    ring
+  · rw [abs_of_nonpos.real (a * b) (by linarith [mul_nonneg.real (0 - a) b (by linarith) k])]
+    ring
+  · rw [abs_of_nonneg.real (a * b) (by linarith [mul_nonneg.real (0 - a) (0 - b) (by linarith) (by linarith)])]
+    ring
++ abs_add.real (a b : ℝ) : |a + b| ≤ |a| + |b|
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := abs_cases.real (a + b) <;> linarith [le_abs_self.real a, neg_le_abs.real a, le_abs_self.real b, neg_le_abs.real b]
++ abs_sub.real (a b : ℝ) : |a - b| ≤ |a| + |b|
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := abs_cases.real (a - b) <;> linarith [le_abs_self.real a, neg_le_abs.real a, le_abs_self.real b, neg_le_abs.real b]
++ abs_sub_le.real (a b c : ℝ) : |a - c| ≤ |a - b| + |b - c|
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := abs_cases.real (a - c) <;> linarith [le_abs_self.real (a - b), neg_le_abs.real (a - b), le_abs_self.real (b - c), neg_le_abs.real (b - c)]
++ abs_sub_abs_le_abs_sub.real (a b : ℝ) : |a| - |b| ≤ |a - b|
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := abs_cases.real a <;> linarith [le_abs_self.real (a - b), neg_le_abs.real (a - b), le_abs_self.real b, neg_le_abs.real b]
++ abs_abs_sub_abs_le.real (a b : ℝ) : | |a| - |b| | ≤ |a - b|
+  apply abs_le_of.real
+  · linarith [abs_sub_abs_le_abs_sub.real b a, abs_sub_comm.real a b]
+  · exact abs_sub_abs_le_abs_sub.real a b
++ abs_abs.real (x : ℝ) : | |x| | = |x|
+  exact abs_of_nonneg.real (abs x) (abs_nonneg.real x)
++ abs_pos.real (x : ℝ) (h : x ≠ 0) : 0 < |x|
+  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.real x <;> linarith
++ abs_sq.real (x : ℝ) : |x| * |x| = x * x
+  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.real x <;> rw [e] <;> ring
++ sq_abs.real (x : ℝ) : |x| ^ 2 = x ^ 2
+  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.real x <;> rw [e] <;> ring
++ abs_le_abs.real (a b : ℝ) (h : a ≤ b) (k : 0 - b ≤ a) : |a| ≤ |b|
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := abs_cases.real a <;> linarith [le_abs_self.real b, neg_le_abs.real b]
++ abs_le_abs_of_nonneg.real (a b : ℝ) (h : 0 ≤ a) (k : a ≤ b) : |a| ≤ |b|
+  rw [abs_of_nonneg.real a h, abs_of_nonneg.real b (by linarith)]
+  exact k
++ abs_eq_zero.real (x : ℝ) : |x| = 0 ↔ x = 0
+  constructor
+  · intro h
+    obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.real x <;> linarith
+  · intro h
+    rw [h]
+    decide
++ sq_le_sq.real (a b : ℝ) : a ^ 2 ≤ b ^ 2 ↔ |a| ≤ |b|
+  have e := sq_abs.real a
+  have f := sq_abs.real b
+  have p := abs_nonneg.real a
+  have q := abs_nonneg.real b
+  constructor <;> intro h <;> nlinarith
++ sq_lt_sq.real (a b : ℝ) : a ^ 2 < b ^ 2 ↔ |a| < |b|
+  have e := sq_abs.real a
+  have f := sq_abs.real b
+  have p := abs_nonneg.real a
+  have q := abs_nonneg.real b
+  constructor <;> intro h <;> nlinarith
++ abs_le_of_sq_le_sq.real (a b : ℝ) (h : a ^ 2 ≤ b ^ 2) (hb : 0 ≤ b) : |a| ≤ b
+  have k := (sq_le_sq.real a b).mp h
+  rw [abs_of_nonneg.real b hb] at k
+  exact k
++ abs_pow.real (a : ℝ) (n : ℕ) : |a ^ n| = |a| ^ n
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, pow_succ.real, pow_succ.real, abs_mul.real, ih]
+
+-- ℚ
++ abs_cases.rat (x : ℚ) : (|x| = x ∧ 0 ≤ x) ∨ (|x| = 0 - x ∧ x < 0)
+  by_cases h : 0 ≤ x
+  · left
+    exact ⟨abs_of_nonneg.rat x h, h⟩
+  · right
+    have e := abs_of_neg.rat x (by linarith)
+    have e2 : neg x = 0 - x := by ring
+    rw [e2] at e
+    exact ⟨e, by linarith⟩
++ abs_of_nonpos.rat (x : ℚ) (h : x ≤ 0) : |x| = 0 - x
+  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.rat x <;> linarith
++ abs_of_pos.rat (x : ℚ) (h : 0 < x) : |x| = x
+  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.rat x <;> linarith
++ le_abs_self.rat (x : ℚ) : x ≤ |x|
+  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.rat x <;> linarith
++ neg_le_abs.rat (x : ℚ) : 0 - x ≤ |x|
+  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.rat x <;> linarith
++ neg_abs_le.rat (x : ℚ) : 0 - |x| ≤ x
+  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.rat x <;> linarith
++ abs_le.rat (x c : ℚ) : |x| ≤ c ↔ 0 - c ≤ x ∧ x ≤ c
+  constructor
+  · intro h
+    exact ⟨by linarith [neg_le_abs.rat x], by linarith [le_abs_self.rat x]⟩
+  · intro h
+    obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.rat x <;> linarith
++ abs_lt.rat (x c : ℚ) : |x| < c ↔ 0 - c < x ∧ x < c
+  constructor
+  · intro h
+    exact ⟨by linarith [neg_le_abs.rat x], by linarith [le_abs_self.rat x]⟩
+  · intro h
+    obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.rat x <;> linarith
++ abs_le_of.rat (x c : ℚ) (h : 0 - c ≤ x) (k : x ≤ c) : |x| ≤ c
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := abs_cases.rat x <;> linarith
++ abs_lt_of.rat (x c : ℚ) (h : 0 - c < x) (k : x < c) : |x| < c
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := abs_cases.rat x <;> linarith
++ abs_neg.rat (x : ℚ) : |0 - x| = |x|
+  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.rat x <;> obtain ⟨f, l⟩ | ⟨f, l⟩ := abs_cases.rat (0 - x) <;> linarith
++ abs_sub_comm.rat (a b : ℚ) : |a - b| = |b - a|
+  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.rat (a - b) <;> obtain ⟨f, l⟩ | ⟨f, l⟩ := abs_cases.rat (b - a) <;> linarith
++ abs_mul.rat (a b : ℚ) : |a * b| = |a| * |b|
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := abs_cases.rat a <;> obtain ⟨f, k⟩ | ⟨f, k⟩ := abs_cases.rat b <;> rw [e, f]
+  · rw [abs_of_nonneg.rat (a * b) (mul_nonneg.rat a b h k)]
+  · rw [abs_of_nonpos.rat (a * b) (by linarith [mul_nonneg.rat a (0 - b) h (by linarith)])]
+    ring
+  · rw [abs_of_nonpos.rat (a * b) (by linarith [mul_nonneg.rat (0 - a) b (by linarith) k])]
+    ring
+  · rw [abs_of_nonneg.rat (a * b) (by linarith [mul_nonneg.rat (0 - a) (0 - b) (by linarith) (by linarith)])]
+    ring
++ abs_add.rat (a b : ℚ) : |a + b| ≤ |a| + |b|
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := abs_cases.rat (a + b) <;> linarith [le_abs_self.rat a, neg_le_abs.rat a, le_abs_self.rat b, neg_le_abs.rat b]
++ abs_sub.rat (a b : ℚ) : |a - b| ≤ |a| + |b|
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := abs_cases.rat (a - b) <;> linarith [le_abs_self.rat a, neg_le_abs.rat a, le_abs_self.rat b, neg_le_abs.rat b]
++ abs_sub_le.rat (a b c : ℚ) : |a - c| ≤ |a - b| + |b - c|
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := abs_cases.rat (a - c) <;> linarith [le_abs_self.rat (a - b), neg_le_abs.rat (a - b), le_abs_self.rat (b - c), neg_le_abs.rat (b - c)]
++ abs_sub_abs_le_abs_sub.rat (a b : ℚ) : |a| - |b| ≤ |a - b|
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := abs_cases.rat a <;> linarith [le_abs_self.rat (a - b), neg_le_abs.rat (a - b), le_abs_self.rat b, neg_le_abs.rat b]
++ abs_abs_sub_abs_le.rat (a b : ℚ) : | |a| - |b| | ≤ |a - b|
+  apply abs_le_of.rat
+  · linarith [abs_sub_abs_le_abs_sub.rat b a, abs_sub_comm.rat a b]
+  · exact abs_sub_abs_le_abs_sub.rat a b
++ abs_abs.rat (x : ℚ) : | |x| | = |x|
+  exact abs_of_nonneg.rat (abs x) (abs_nonneg.rat x)
++ abs_pos.rat (x : ℚ) (h : x ≠ 0) : 0 < |x|
+  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.rat x <;> linarith
++ abs_sq.rat (x : ℚ) : |x| * |x| = x * x
+  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.rat x <;> rw [e] <;> ring
++ sq_abs.rat (x : ℚ) : |x| ^ 2 = x ^ 2
+  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.rat x <;> rw [e] <;> ring
++ abs_le_abs.rat (a b : ℚ) (h : a ≤ b) (k : 0 - b ≤ a) : |a| ≤ |b|
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := abs_cases.rat a <;> linarith [le_abs_self.rat b, neg_le_abs.rat b]
++ abs_le_abs_of_nonneg.rat (a b : ℚ) (h : 0 ≤ a) (k : a ≤ b) : |a| ≤ |b|
+  rw [abs_of_nonneg.rat a h, abs_of_nonneg.rat b (by linarith)]
+  exact k
++ abs_eq_zero.rat (x : ℚ) : |x| = 0 ↔ x = 0
+  constructor
+  · intro h
+    obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.rat x <;> linarith
+  · intro h
+    rw [h]
+    decide
++ sq_le_sq.rat (a b : ℚ) : a ^ 2 ≤ b ^ 2 ↔ |a| ≤ |b|
+  have e := sq_abs.rat a
+  have f := sq_abs.rat b
+  have p := abs_nonneg.rat a
+  have q := abs_nonneg.rat b
+  constructor <;> intro h <;> nlinarith
++ sq_lt_sq.rat (a b : ℚ) : a ^ 2 < b ^ 2 ↔ |a| < |b|
+  have e := sq_abs.rat a
+  have f := sq_abs.rat b
+  have p := abs_nonneg.rat a
+  have q := abs_nonneg.rat b
+  constructor <;> intro h <;> nlinarith
++ abs_le_of_sq_le_sq.rat (a b : ℚ) (h : a ^ 2 ≤ b ^ 2) (hb : 0 ≤ b) : |a| ≤ b
+  have k := (sq_le_sq.rat a b).mp h
+  rw [abs_of_nonneg.rat b hb] at k
+  exact k
++ abs_pow.rat (a : ℚ) (n : ℕ) : |a ^ n| = |a| ^ n
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, pow_succ.rat, pow_succ.rat, abs_mul.rat, ih]
+
+-- ℤ
++ abs_cases.int (x : ℤ) : (|x| = x ∧ 0 ≤ x) ∨ (|x| = 0 - x ∧ x < 0)
+  by_cases h : 0 ≤ x
+  · left
+    exact ⟨abs_of_nonneg.int x h, h⟩
+  · right
+    have e := abs_of_neg.int x (by linarith)
+    have e2 : neg x = 0 - x := by ring
+    rw [e2] at e
+    exact ⟨e, by linarith⟩
++ abs_of_nonpos.int (x : ℤ) (h : x ≤ 0) : |x| = 0 - x
+  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.int x <;> linarith
++ abs_of_pos.int (x : ℤ) (h : 0 < x) : |x| = x
+  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.int x <;> linarith
++ le_abs_self.int (x : ℤ) : x ≤ |x|
+  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.int x <;> linarith
++ neg_le_abs.int (x : ℤ) : 0 - x ≤ |x|
+  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.int x <;> linarith
++ neg_abs_le.int (x : ℤ) : 0 - |x| ≤ x
+  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.int x <;> linarith
++ abs_le.int (x c : ℤ) : |x| ≤ c ↔ 0 - c ≤ x ∧ x ≤ c
+  constructor
+  · intro h
+    exact ⟨by linarith [neg_le_abs.int x], by linarith [le_abs_self.int x]⟩
+  · intro h
+    obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.int x <;> linarith
++ abs_lt.int (x c : ℤ) : |x| < c ↔ 0 - c < x ∧ x < c
+  constructor
+  · intro h
+    exact ⟨by linarith [neg_le_abs.int x], by linarith [le_abs_self.int x]⟩
+  · intro h
+    obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.int x <;> linarith
++ abs_le_of.int (x c : ℤ) (h : 0 - c ≤ x) (k : x ≤ c) : |x| ≤ c
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := abs_cases.int x <;> linarith
++ abs_lt_of.int (x c : ℤ) (h : 0 - c < x) (k : x < c) : |x| < c
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := abs_cases.int x <;> linarith
++ abs_neg.int (x : ℤ) : |0 - x| = |x|
+  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.int x <;> obtain ⟨f, l⟩ | ⟨f, l⟩ := abs_cases.int (0 - x) <;> linarith
++ abs_sub_comm.int (a b : ℤ) : |a - b| = |b - a|
+  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.int (a - b) <;> obtain ⟨f, l⟩ | ⟨f, l⟩ := abs_cases.int (b - a) <;> linarith
++ abs_mul.int (a b : ℤ) : |a * b| = |a| * |b|
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := abs_cases.int a <;> obtain ⟨f, k⟩ | ⟨f, k⟩ := abs_cases.int b <;> rw [e, f]
+  · rw [abs_of_nonneg.int (a * b) (mul_nonneg.int a b h k)]
+  · rw [abs_of_nonpos.int (a * b) (by linarith [mul_nonneg.int a (0 - b) h (by linarith)])]
+    ring
+  · rw [abs_of_nonpos.int (a * b) (by linarith [mul_nonneg.int (0 - a) b (by linarith) k])]
+    ring
+  · rw [abs_of_nonneg.int (a * b) (by linarith [mul_nonneg.int (0 - a) (0 - b) (by linarith) (by linarith)])]
+    ring
++ abs_add.int (a b : ℤ) : |a + b| ≤ |a| + |b|
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := abs_cases.int (a + b) <;> linarith [le_abs_self.int a, neg_le_abs.int a, le_abs_self.int b, neg_le_abs.int b]
++ abs_sub.int (a b : ℤ) : |a - b| ≤ |a| + |b|
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := abs_cases.int (a - b) <;> linarith [le_abs_self.int a, neg_le_abs.int a, le_abs_self.int b, neg_le_abs.int b]
++ abs_sub_le.int (a b c : ℤ) : |a - c| ≤ |a - b| + |b - c|
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := abs_cases.int (a - c) <;> linarith [le_abs_self.int (a - b), neg_le_abs.int (a - b), le_abs_self.int (b - c), neg_le_abs.int (b - c)]
++ abs_sub_abs_le_abs_sub.int (a b : ℤ) : |a| - |b| ≤ |a - b|
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := abs_cases.int a <;> linarith [le_abs_self.int (a - b), neg_le_abs.int (a - b), le_abs_self.int b, neg_le_abs.int b]
++ abs_abs_sub_abs_le.int (a b : ℤ) : | |a| - |b| | ≤ |a - b|
+  apply abs_le_of.int
+  · linarith [abs_sub_abs_le_abs_sub.int b a, abs_sub_comm.int a b]
+  · exact abs_sub_abs_le_abs_sub.int a b
++ abs_abs.int (x : ℤ) : | |x| | = |x|
+  exact abs_of_nonneg.int (abs x) (abs_nonneg.int x)
++ abs_pos.int (x : ℤ) (h : x ≠ 0) : 0 < |x|
+  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.int x <;> linarith
++ abs_sq.int (x : ℤ) : |x| * |x| = x * x
+  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.int x <;> rw [e] <;> ring
++ sq_abs.int (x : ℤ) : |x| ^ 2 = x ^ 2
+  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.int x <;> rw [e] <;> ring
++ abs_le_abs.int (a b : ℤ) (h : a ≤ b) (k : 0 - b ≤ a) : |a| ≤ |b|
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := abs_cases.int a <;> linarith [le_abs_self.int b, neg_le_abs.int b]
++ abs_le_abs_of_nonneg.int (a b : ℤ) (h : 0 ≤ a) (k : a ≤ b) : |a| ≤ |b|
+  rw [abs_of_nonneg.int a h, abs_of_nonneg.int b (by linarith)]
+  exact k
++ abs_eq_zero.int (x : ℤ) : |x| = 0 ↔ x = 0
+  constructor
+  · intro h
+    obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.int x <;> linarith
+  · intro h
+    rw [h]
+    decide
++ sq_le_sq.int (a b : ℤ) : a ^ 2 ≤ b ^ 2 ↔ |a| ≤ |b|
+  have e := sq_abs.int a
+  have f := sq_abs.int b
+  have p := abs_nonneg.int a
+  have q := abs_nonneg.int b
+  constructor <;> intro h <;> nlinarith
++ sq_lt_sq.int (a b : ℤ) : a ^ 2 < b ^ 2 ↔ |a| < |b|
+  have e := sq_abs.int a
+  have f := sq_abs.int b
+  have p := abs_nonneg.int a
+  have q := abs_nonneg.int b
+  constructor <;> intro h <;> nlinarith
++ abs_le_of_sq_le_sq.int (a b : ℤ) (h : a ^ 2 ≤ b ^ 2) (hb : 0 ≤ b) : |a| ≤ b
+  have k := (sq_le_sq.int a b).mp h
+  rw [abs_of_nonneg.int b hb] at k
+  exact k
++ abs_pow.int (a : ℤ) (n : ℕ) : |a ^ n| = |a| ^ n
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, pow_succ.int, pow_succ.int, abs_mul.int, ih]
+
+-- ---- min and max (ℝ ℚ ℤ ℕ; nat.sat defines them by if) ---------------------------------------------------
+-- min_cases.T / max_cases.T split a min or max into its two branches
+-- ℝ
++ min_cases.real (a b : ℝ) : (min a b = a ∧ a ≤ b) ∨ (min a b = b ∧ b < a)
+  by_cases h : a ≤ b
+  · left; exact ⟨by simp [min, h], h⟩
+  · right; exact ⟨by simp [min, h], by linarith⟩
++ max_cases.real (a b : ℝ) : (max a b = b ∧ a ≤ b) ∨ (max a b = a ∧ b < a)
+  by_cases h : a ≤ b
+  · left; exact ⟨by simp [max, h], h⟩
+  · right; exact ⟨by simp [max, h], by linarith⟩
++ min_le_left.real (a b : ℝ) : min a b ≤ a
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := min_cases.real a b <;> linarith
++ min_le_right.real (a b : ℝ) : min a b ≤ b
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := min_cases.real a b <;> linarith
++ le_min.real (a b c : ℝ) (h : c ≤ a) (k : c ≤ b) : c ≤ min a b
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := min_cases.real a b <;> linarith
++ lt_min.real (a b c : ℝ) (h : c < a) (k : c < b) : c < min a b
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := min_cases.real a b <;> linarith
++ le_min_iff.real (a b c : ℝ) : c ≤ min a b ↔ c ≤ a ∧ c ≤ b
+  constructor
+  · intro h; exact ⟨by linarith [min_le_left.real a b], by linarith [min_le_right.real a b]⟩
+  · intro h; exact le_min.real a b c h.1 h.2
++ min_eq_left.real (a b : ℝ) (h : a ≤ b) : min a b = a
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := min_cases.real a b <;> linarith
++ min_eq_right.real (a b : ℝ) (h : b ≤ a) : min a b = b
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := min_cases.real a b <;> linarith
++ min_comm.real (a b : ℝ) : min a b = min b a
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := min_cases.real a b <;> obtain ⟨f, k⟩ | ⟨f, k⟩ := min_cases.real b a <;> linarith
++ min_self.real (a : ℝ) : min a a = a
+  exact min_eq_left.real a a (le_refl.real a)
++ le_max_left.real (a b : ℝ) : a ≤ max a b
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := max_cases.real a b <;> linarith
++ le_max_right.real (a b : ℝ) : b ≤ max a b
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := max_cases.real a b <;> linarith
++ max_le.real (a b c : ℝ) (h : a ≤ c) (k : b ≤ c) : max a b ≤ c
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := max_cases.real a b <;> linarith
++ max_lt.real (a b c : ℝ) (h : a < c) (k : b < c) : max a b < c
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := max_cases.real a b <;> linarith
++ max_le_iff.real (a b c : ℝ) : max a b ≤ c ↔ a ≤ c ∧ b ≤ c
+  constructor
+  · intro h; exact ⟨by linarith [le_max_left.real a b], by linarith [le_max_right.real a b]⟩
+  · intro h; exact max_le.real a b c h.1 h.2
++ max_eq_left.real (a b : ℝ) (h : b ≤ a) : max a b = a
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := max_cases.real a b <;> linarith
++ max_eq_right.real (a b : ℝ) (h : a ≤ b) : max a b = b
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := max_cases.real a b <;> linarith
++ max_comm.real (a b : ℝ) : max a b = max b a
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := max_cases.real a b <;> obtain ⟨f, k⟩ | ⟨f, k⟩ := max_cases.real b a <;> linarith
++ max_self.real (a : ℝ) : max a a = a
+  exact max_eq_left.real a a (le_refl.real a)
++ min_le_max.real (a b : ℝ) : min a b ≤ max a b
+  linarith [min_le_left.real a b, le_max_left.real a b]
++ min_add_max.real (a b : ℝ) : min a b + max a b = a + b
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := min_cases.real a b <;> obtain ⟨f, k⟩ | ⟨f, k⟩ := max_cases.real a b <;> linarith
+
+-- ℚ
++ min_cases.rat (a b : ℚ) : (min a b = a ∧ a ≤ b) ∨ (min a b = b ∧ b < a)
+  by_cases h : a ≤ b
+  · left; exact ⟨by simp [min, h], h⟩
+  · right; exact ⟨by simp [min, h], by linarith⟩
++ max_cases.rat (a b : ℚ) : (max a b = b ∧ a ≤ b) ∨ (max a b = a ∧ b < a)
+  by_cases h : a ≤ b
+  · left; exact ⟨by simp [max, h], h⟩
+  · right; exact ⟨by simp [max, h], by linarith⟩
++ min_le_left.rat (a b : ℚ) : min a b ≤ a
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := min_cases.rat a b <;> linarith
++ min_le_right.rat (a b : ℚ) : min a b ≤ b
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := min_cases.rat a b <;> linarith
++ le_min.rat (a b c : ℚ) (h : c ≤ a) (k : c ≤ b) : c ≤ min a b
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := min_cases.rat a b <;> linarith
++ lt_min.rat (a b c : ℚ) (h : c < a) (k : c < b) : c < min a b
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := min_cases.rat a b <;> linarith
++ le_min_iff.rat (a b c : ℚ) : c ≤ min a b ↔ c ≤ a ∧ c ≤ b
+  constructor
+  · intro h; exact ⟨by linarith [min_le_left.rat a b], by linarith [min_le_right.rat a b]⟩
+  · intro h; exact le_min.rat a b c h.1 h.2
++ min_eq_left.rat (a b : ℚ) (h : a ≤ b) : min a b = a
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := min_cases.rat a b <;> linarith
++ min_eq_right.rat (a b : ℚ) (h : b ≤ a) : min a b = b
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := min_cases.rat a b <;> linarith
++ min_comm.rat (a b : ℚ) : min a b = min b a
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := min_cases.rat a b <;> obtain ⟨f, k⟩ | ⟨f, k⟩ := min_cases.rat b a <;> linarith
++ min_self.rat (a : ℚ) : min a a = a
+  exact min_eq_left.rat a a (le_refl.rat a)
++ le_max_left.rat (a b : ℚ) : a ≤ max a b
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := max_cases.rat a b <;> linarith
++ le_max_right.rat (a b : ℚ) : b ≤ max a b
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := max_cases.rat a b <;> linarith
++ max_le.rat (a b c : ℚ) (h : a ≤ c) (k : b ≤ c) : max a b ≤ c
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := max_cases.rat a b <;> linarith
++ max_lt.rat (a b c : ℚ) (h : a < c) (k : b < c) : max a b < c
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := max_cases.rat a b <;> linarith
++ max_le_iff.rat (a b c : ℚ) : max a b ≤ c ↔ a ≤ c ∧ b ≤ c
+  constructor
+  · intro h; exact ⟨by linarith [le_max_left.rat a b], by linarith [le_max_right.rat a b]⟩
+  · intro h; exact max_le.rat a b c h.1 h.2
++ max_eq_left.rat (a b : ℚ) (h : b ≤ a) : max a b = a
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := max_cases.rat a b <;> linarith
++ max_eq_right.rat (a b : ℚ) (h : a ≤ b) : max a b = b
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := max_cases.rat a b <;> linarith
++ max_comm.rat (a b : ℚ) : max a b = max b a
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := max_cases.rat a b <;> obtain ⟨f, k⟩ | ⟨f, k⟩ := max_cases.rat b a <;> linarith
++ max_self.rat (a : ℚ) : max a a = a
+  exact max_eq_left.rat a a (le_refl.rat a)
++ min_le_max.rat (a b : ℚ) : min a b ≤ max a b
+  linarith [min_le_left.rat a b, le_max_left.rat a b]
++ min_add_max.rat (a b : ℚ) : min a b + max a b = a + b
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := min_cases.rat a b <;> obtain ⟨f, k⟩ | ⟨f, k⟩ := max_cases.rat a b <;> linarith
+
+-- ℤ
++ min_cases.int (a b : ℤ) : (min a b = a ∧ a ≤ b) ∨ (min a b = b ∧ b < a)
+  by_cases h : a ≤ b
+  · left; exact ⟨by simp [min, h], h⟩
+  · right; exact ⟨by simp [min, h], by linarith⟩
++ max_cases.int (a b : ℤ) : (max a b = b ∧ a ≤ b) ∨ (max a b = a ∧ b < a)
+  by_cases h : a ≤ b
+  · left; exact ⟨by simp [max, h], h⟩
+  · right; exact ⟨by simp [max, h], by linarith⟩
++ min_le_left.int (a b : ℤ) : min a b ≤ a
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := min_cases.int a b <;> linarith
++ min_le_right.int (a b : ℤ) : min a b ≤ b
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := min_cases.int a b <;> linarith
++ le_min.int (a b c : ℤ) (h : c ≤ a) (k : c ≤ b) : c ≤ min a b
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := min_cases.int a b <;> linarith
++ lt_min.int (a b c : ℤ) (h : c < a) (k : c < b) : c < min a b
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := min_cases.int a b <;> linarith
++ le_min_iff.int (a b c : ℤ) : c ≤ min a b ↔ c ≤ a ∧ c ≤ b
+  constructor
+  · intro h; exact ⟨by linarith [min_le_left.int a b], by linarith [min_le_right.int a b]⟩
+  · intro h; exact le_min.int a b c h.1 h.2
++ min_eq_left.int (a b : ℤ) (h : a ≤ b) : min a b = a
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := min_cases.int a b <;> linarith
++ min_eq_right.int (a b : ℤ) (h : b ≤ a) : min a b = b
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := min_cases.int a b <;> linarith
++ min_comm.int (a b : ℤ) : min a b = min b a
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := min_cases.int a b <;> obtain ⟨f, k⟩ | ⟨f, k⟩ := min_cases.int b a <;> linarith
++ min_self.int (a : ℤ) : min a a = a
+  exact min_eq_left.int a a (le_refl.int a)
++ le_max_left.int (a b : ℤ) : a ≤ max a b
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := max_cases.int a b <;> linarith
++ le_max_right.int (a b : ℤ) : b ≤ max a b
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := max_cases.int a b <;> linarith
++ max_le.int (a b c : ℤ) (h : a ≤ c) (k : b ≤ c) : max a b ≤ c
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := max_cases.int a b <;> linarith
++ max_lt.int (a b c : ℤ) (h : a < c) (k : b < c) : max a b < c
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := max_cases.int a b <;> linarith
++ max_le_iff.int (a b c : ℤ) : max a b ≤ c ↔ a ≤ c ∧ b ≤ c
+  constructor
+  · intro h; exact ⟨by linarith [le_max_left.int a b], by linarith [le_max_right.int a b]⟩
+  · intro h; exact max_le.int a b c h.1 h.2
++ max_eq_left.int (a b : ℤ) (h : b ≤ a) : max a b = a
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := max_cases.int a b <;> linarith
++ max_eq_right.int (a b : ℤ) (h : a ≤ b) : max a b = b
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := max_cases.int a b <;> linarith
++ max_comm.int (a b : ℤ) : max a b = max b a
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := max_cases.int a b <;> obtain ⟨f, k⟩ | ⟨f, k⟩ := max_cases.int b a <;> linarith
++ max_self.int (a : ℤ) : max a a = a
+  exact max_eq_left.int a a (le_refl.int a)
++ min_le_max.int (a b : ℤ) : min a b ≤ max a b
+  linarith [min_le_left.int a b, le_max_left.int a b]
++ min_add_max.int (a b : ℤ) : min a b + max a b = a + b
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := min_cases.int a b <;> obtain ⟨f, k⟩ | ⟨f, k⟩ := max_cases.int a b <;> linarith
+
+-- ℕ
++ min_cases.nat (a b : ℕ) : (min a b = a ∧ a ≤ b) ∨ (min a b = b ∧ b < a)
+  by_cases h : a ≤ b
+  · left; exact ⟨by simp [min, h], h⟩
+  · right; exact ⟨by simp [min, h], by linarith⟩
++ max_cases.nat (a b : ℕ) : (max a b = b ∧ a ≤ b) ∨ (max a b = a ∧ b < a)
+  by_cases h : a ≤ b
+  · left; exact ⟨by simp [max, h], h⟩
+  · right; exact ⟨by simp [max, h], by linarith⟩
++ min_le_left.nat (a b : ℕ) : min a b ≤ a
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := min_cases.nat a b <;> linarith
++ min_le_right.nat (a b : ℕ) : min a b ≤ b
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := min_cases.nat a b <;> linarith
++ le_min.nat (a b c : ℕ) (h : c ≤ a) (k : c ≤ b) : c ≤ min a b
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := min_cases.nat a b <;> linarith
++ lt_min.nat (a b c : ℕ) (h : c < a) (k : c < b) : c < min a b
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := min_cases.nat a b <;> linarith
++ le_min_iff.nat (a b c : ℕ) : c ≤ min a b ↔ c ≤ a ∧ c ≤ b
+  constructor
+  · intro h; exact ⟨by linarith [min_le_left.nat a b], by linarith [min_le_right.nat a b]⟩
+  · intro h; exact le_min.nat a b c h.1 h.2
++ min_eq_left.nat (a b : ℕ) (h : a ≤ b) : min a b = a
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := min_cases.nat a b <;> linarith
++ min_eq_right.nat (a b : ℕ) (h : b ≤ a) : min a b = b
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := min_cases.nat a b <;> linarith
++ min_comm.nat (a b : ℕ) : min a b = min b a
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := min_cases.nat a b <;> obtain ⟨f, k⟩ | ⟨f, k⟩ := min_cases.nat b a <;> linarith
++ min_self.nat (a : ℕ) : min a a = a
+  exact min_eq_left.nat a a (le_refl.nat a)
++ le_max_left.nat (a b : ℕ) : a ≤ max a b
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := max_cases.nat a b <;> linarith
++ le_max_right.nat (a b : ℕ) : b ≤ max a b
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := max_cases.nat a b <;> linarith
++ max_le.nat (a b c : ℕ) (h : a ≤ c) (k : b ≤ c) : max a b ≤ c
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := max_cases.nat a b <;> linarith
++ max_lt.nat (a b c : ℕ) (h : a < c) (k : b < c) : max a b < c
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := max_cases.nat a b <;> linarith
++ max_le_iff.nat (a b c : ℕ) : max a b ≤ c ↔ a ≤ c ∧ b ≤ c
+  constructor
+  · intro h; exact ⟨by linarith [le_max_left.nat a b], by linarith [le_max_right.nat a b]⟩
+  · intro h; exact max_le.nat a b c h.1 h.2
++ max_eq_left.nat (a b : ℕ) (h : b ≤ a) : max a b = a
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := max_cases.nat a b <;> linarith
++ max_eq_right.nat (a b : ℕ) (h : a ≤ b) : max a b = b
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := max_cases.nat a b <;> linarith
++ max_comm.nat (a b : ℕ) : max a b = max b a
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := max_cases.nat a b <;> obtain ⟨f, k⟩ | ⟨f, k⟩ := max_cases.nat b a <;> linarith
++ max_self.nat (a : ℕ) : max a a = a
+  exact max_eq_left.nat a a (le_refl.nat a)
++ min_le_max.nat (a b : ℕ) : min a b ≤ max a b
+  linarith [min_le_left.nat a b, le_max_left.nat a b]
++ min_add_max.nat (a b : ℕ) : min a b + max a b = a + b
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := min_cases.nat a b <;> obtain ⟨f, k⟩ | ⟨f, k⟩ := max_cases.nat a b <;> linarith
+
+-- ---- products and order (ℝ ℚ ℤ ℕ) ----------------------------------------------------------------------------
+-- ℝ
++ sub_nonneg.real (a b : ℝ) : 0 ≤ a - b ↔ b ≤ a
+  constructor <;> intro h <;> linarith
++ sub_pos.real (a b : ℝ) : 0 < a - b ↔ b < a
+  constructor <;> intro h <;> linarith
++ mul_le_mul_of_nonneg_left.real (a b c : ℝ) (h : a ≤ b) (hc : 0 ≤ c) : c * a ≤ c * b
+  nlinarith
++ mul_le_mul_of_nonneg_right.real (a b c : ℝ) (h : a ≤ b) (hc : 0 ≤ c) : a * c ≤ b * c
+  nlinarith
++ mul_lt_mul_of_pos_left.real (a b c : ℝ) (h : a < b) (hc : 0 < c) : c * a < c * b
+  nlinarith
++ mul_lt_mul_of_pos_right.real (a b c : ℝ) (h : a < b) (hc : 0 < c) : a * c < b * c
+  nlinarith
++ mul_le_mul.real (a b c d : ℝ) (h : a ≤ b) (k : c ≤ d) (hc : 0 ≤ c) (hb : 0 ≤ b) : a * c ≤ b * d
+  nlinarith
++ mul_self_le_mul_self.real (a b : ℝ) (h : 0 ≤ a) (k : a ≤ b) : a * a ≤ b * b
+  nlinarith
++ mul_eq_zero.real (a b : ℝ) : a * b = 0 ↔ a = 0 ∨ b = 0
+  constructor
+  · intro h
+    by_cases ha : a = 0
+    · left; exact ha
+    · right; nlinarith
+  · intro h
+    obtain e | e := h <;> rw [e] <;> ring
++ mul_ne_zero.real (a b : ℝ) (ha : a ≠ 0) (hb : b ≠ 0) : a * b ≠ 0
+  intro h
+  obtain e | e := (mul_eq_zero.real a b).mp h
+  · exact ha e
+  · exact hb e
++ mul_pos_iff_of_pos_left.real (a b : ℝ) (ha : 0 < a) : 0 < a * b ↔ 0 < b
+  constructor <;> intro h <;> nlinarith
++ mul_nonneg_iff_of_pos_left.real (a b : ℝ) (ha : 0 < a) : 0 ≤ a * b ↔ 0 ≤ b
+  constructor <;> intro h <;> nlinarith
++ two_mul_le_add_sq.real (a b : ℝ) : 2 * a * b ≤ a ^ 2 + b ^ 2
+  nlinarith [sq_nonneg.real (a - b)]
+
+-- ℚ
++ sub_nonneg.rat (a b : ℚ) : 0 ≤ a - b ↔ b ≤ a
+  constructor <;> intro h <;> linarith
++ sub_pos.rat (a b : ℚ) : 0 < a - b ↔ b < a
+  constructor <;> intro h <;> linarith
++ mul_le_mul_of_nonneg_left.rat (a b c : ℚ) (h : a ≤ b) (hc : 0 ≤ c) : c * a ≤ c * b
+  nlinarith
++ mul_le_mul_of_nonneg_right.rat (a b c : ℚ) (h : a ≤ b) (hc : 0 ≤ c) : a * c ≤ b * c
+  nlinarith
++ mul_lt_mul_of_pos_left.rat (a b c : ℚ) (h : a < b) (hc : 0 < c) : c * a < c * b
+  nlinarith
++ mul_lt_mul_of_pos_right.rat (a b c : ℚ) (h : a < b) (hc : 0 < c) : a * c < b * c
+  nlinarith
++ mul_le_mul.rat (a b c d : ℚ) (h : a ≤ b) (k : c ≤ d) (hc : 0 ≤ c) (hb : 0 ≤ b) : a * c ≤ b * d
+  nlinarith
++ mul_self_le_mul_self.rat (a b : ℚ) (h : 0 ≤ a) (k : a ≤ b) : a * a ≤ b * b
+  nlinarith
++ mul_eq_zero.rat (a b : ℚ) : a * b = 0 ↔ a = 0 ∨ b = 0
+  constructor
+  · intro h
+    by_cases ha : a = 0
+    · left; exact ha
+    · right; nlinarith
+  · intro h
+    obtain e | e := h <;> rw [e] <;> ring
++ mul_ne_zero.rat (a b : ℚ) (ha : a ≠ 0) (hb : b ≠ 0) : a * b ≠ 0
+  intro h
+  obtain e | e := (mul_eq_zero.rat a b).mp h
+  · exact ha e
+  · exact hb e
++ mul_pos_iff_of_pos_left.rat (a b : ℚ) (ha : 0 < a) : 0 < a * b ↔ 0 < b
+  constructor <;> intro h <;> nlinarith
++ mul_nonneg_iff_of_pos_left.rat (a b : ℚ) (ha : 0 < a) : 0 ≤ a * b ↔ 0 ≤ b
+  constructor <;> intro h <;> nlinarith
++ two_mul_le_add_sq.rat (a b : ℚ) : 2 * a * b ≤ a ^ 2 + b ^ 2
+  nlinarith [sq_nonneg.rat (a - b)]
+
+-- ℤ
++ sub_nonneg.int (a b : ℤ) : 0 ≤ a - b ↔ b ≤ a
+  constructor <;> intro h <;> linarith
++ sub_pos.int (a b : ℤ) : 0 < a - b ↔ b < a
+  constructor <;> intro h <;> linarith
++ mul_le_mul_of_nonneg_left.int (a b c : ℤ) (h : a ≤ b) (hc : 0 ≤ c) : c * a ≤ c * b
+  nlinarith
++ mul_le_mul_of_nonneg_right.int (a b c : ℤ) (h : a ≤ b) (hc : 0 ≤ c) : a * c ≤ b * c
+  nlinarith
++ mul_lt_mul_of_pos_left.int (a b c : ℤ) (h : a < b) (hc : 0 < c) : c * a < c * b
+  nlinarith
++ mul_lt_mul_of_pos_right.int (a b c : ℤ) (h : a < b) (hc : 0 < c) : a * c < b * c
+  nlinarith
++ mul_le_mul.int (a b c d : ℤ) (h : a ≤ b) (k : c ≤ d) (hc : 0 ≤ c) (hb : 0 ≤ b) : a * c ≤ b * d
+  nlinarith
++ mul_self_le_mul_self.int (a b : ℤ) (h : 0 ≤ a) (k : a ≤ b) : a * a ≤ b * b
+  nlinarith
++ mul_eq_zero.int (a b : ℤ) : a * b = 0 ↔ a = 0 ∨ b = 0
+  constructor
+  · intro h
+    by_cases ha : a = 0
+    · left; exact ha
+    · right; nlinarith
+  · intro h
+    obtain e | e := h <;> rw [e] <;> ring
++ mul_ne_zero.int (a b : ℤ) (ha : a ≠ 0) (hb : b ≠ 0) : a * b ≠ 0
+  intro h
+  obtain e | e := (mul_eq_zero.int a b).mp h
+  · exact ha e
+  · exact hb e
++ mul_pos_iff_of_pos_left.int (a b : ℤ) (ha : 0 < a) : 0 < a * b ↔ 0 < b
+  constructor <;> intro h <;> nlinarith
++ mul_nonneg_iff_of_pos_left.int (a b : ℤ) (ha : 0 < a) : 0 ≤ a * b ↔ 0 ≤ b
+  constructor <;> intro h <;> nlinarith
++ two_mul_le_add_sq.int (a b : ℤ) : 2 * a * b ≤ a ^ 2 + b ^ 2
+  nlinarith [sq_nonneg.int (a - b)]
+
+-- ℕ (nlinarith does not run on ℕ, so these are the tools for ℕ products)
++ mul_le_mul_left.nat (k a b : ℕ) (h : a ≤ b) : k * a ≤ k * b
+  have e := sub_add_cancel.nat b a h
+  have q := left_distrib.nat k (b - a) a
+  rw [e] at q
+  linarith [zero_le.nat (k * (b - a))]
++ mul_le_mul_right.nat (k a b : ℕ) (h : a ≤ b) : a * k ≤ b * k
+  rw [mul_comm.nat a k, mul_comm.nat b k]
+  exact mul_le_mul_left.nat k a b h
++ mul_le_mul_of_nonneg_left.nat (a b c : ℕ) (h : a ≤ b) (hc : 0 ≤ c) : c * a ≤ c * b
+  exact mul_le_mul_left.nat c a b h
++ mul_le_mul_of_nonneg_right.nat (a b c : ℕ) (h : a ≤ b) (hc : 0 ≤ c) : a * c ≤ b * c
+  exact mul_le_mul_right.nat c a b h
++ mul_le_mul.nat (a b c d : ℕ) (h : a ≤ b) (k : c ≤ d) (hc : 0 ≤ c) (hb : 0 ≤ b) : a * c ≤ b * d
+  linarith [mul_le_mul_right.nat c a b h, mul_le_mul_left.nat b c d k]
++ mul_lt_mul_of_pos_left.nat (a b c : ℕ) (h : a < b) (hc : 0 < c) : c * a < c * b
+  have p := mul_le_mul_left.nat c (a + 1) b (by linarith)
+  have q := left_distrib.nat c a 1
+  linarith
++ mul_lt_mul_of_pos_right.nat (a b c : ℕ) (h : a < b) (hc : 0 < c) : a * c < b * c
+  rw [mul_comm.nat a c, mul_comm.nat b c]
+  exact mul_lt_mul_of_pos_left.nat a b c h hc
++ mul_self_le_mul_self.nat (a b : ℕ) (h : 0 ≤ a) (k : a ≤ b) : a * a ≤ b * b
+  exact mul_le_mul.nat a b a b k k h (by linarith)
++ mul_eq_zero.nat (a b : ℕ) : a * b = 0 ↔ a = 0 ∨ b = 0
+  constructor
+  · intro h
+    by_contra c
+    have p := mul_le_mul.nat 1 a 1 b (by by_contra d; apply c; left; linarith) (by by_contra d; apply c; right; linarith) (by linarith) (by linarith)
+    linarith
+  · intro h
+    obtain e | e := h <;> rw [e] <;> ring
+
+-- ---- powers (ℝ ℚ ℤ ℕ; exponents are ℕ) -----------------------------------------------------------------------
+-- ℝ
++ pow_one.real (a : ℝ) : a ^ 1 = a := by ring
++ pow_two.real (a : ℝ) : a ^ 2 = a * a := by ring
++ pow_succ_left.real (a : ℝ) (n : ℕ) : a ^ (n + 1) = a * a ^ n
+  rw [pow_succ.real]
+  ring
++ pow_add.real (a : ℝ) (m n : ℕ) : a ^ (m + n) = a ^ m * a ^ n
+  induction n with n ih
+  · rw [add_zero.nat, pow_zero.real]
+    ring
+  · rw [succ_eq_add_one.nat, ← add_assoc.nat, pow_succ.real, pow_succ.real, ih]
+    ring
++ pow_mul.real (a : ℝ) (m n : ℕ) : a ^ (m * n) = (a ^ m) ^ n
+  induction n with n ih
+  · rw [mul_zero.nat, pow_zero.real, pow_zero.real]
+  · rw [succ_eq_add_one.nat, left_distrib.nat, mul_one.nat, pow_add.real, ih, pow_succ.real]
++ mul_pow.real (a b : ℝ) (n : ℕ) : (a * b) ^ n = a ^ n * b ^ n
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, pow_succ.real, pow_succ.real, pow_succ.real, ih]
+    ring
++ pow_nonneg.real (a : ℝ) (n : ℕ) (h : 0 ≤ a) : 0 ≤ a ^ n
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, pow_succ.real]
+    exact mul_nonneg.real (a ^ n) a ih h
++ pow_pos.real (a : ℝ) (n : ℕ) (h : 0 < a) : 0 < a ^ n
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, pow_succ.real]
+    exact mul_pos.real (a ^ n) a ih h
++ one_le_pow.real (a : ℝ) (n : ℕ) (h : 1 ≤ a) : 1 ≤ a ^ n
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, pow_succ.real]
+    nlinarith
++ pow_le_one.real (a : ℝ) (n : ℕ) (h : 0 ≤ a) (k : a ≤ 1) : a ^ n ≤ 1
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, pow_succ.real]
+    nlinarith [pow_nonneg.real a n h]
++ pow_le_pow_left.real (a b : ℝ) (n : ℕ) (h : 0 ≤ a) (k : a ≤ b) : a ^ n ≤ b ^ n
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, pow_succ.real, pow_succ.real]
+    nlinarith [pow_nonneg.real a n h]
++ pow_le_pow_right.real (a : ℝ) (m n : ℕ) (h : 1 ≤ a) (k : m ≤ n) : a ^ m ≤ a ^ n
+  have e : n = m + (n - m) := by linarith [sub_add_cancel.nat n m k]
+  rw [e, pow_add.real]
+  nlinarith [one_le_pow.real a m h, one_le_pow.real a (n - m) h]
++ pow_le_pow_of_le_one.real (a : ℝ) (m n : ℕ) (h : 0 ≤ a) (l : a ≤ 1) (k : m ≤ n) : a ^ n ≤ a ^ m
+  have e : n = m + (n - m) := by linarith [sub_add_cancel.nat n m k]
+  rw [e, pow_add.real]
+  nlinarith [pow_nonneg.real a m h, pow_le_one.real a (n - m) h l]
++ pow_lt_pow_left.real (a b : ℝ) (n : ℕ) (h : 0 ≤ a) (k : a < b) (hn : n ≠ 0) : a ^ n < b ^ n
+  have e : n = n - 1 + 1 := by linarith [sub_add_cancel.nat n 1 (by linarith)]
+  rw [e, pow_succ.real, pow_succ.real]
+  nlinarith [pow_nonneg.real a (n - 1) h, pow_le_pow_left.real a b (n - 1) h (by linarith), pow_pos.real b (n - 1) (by linarith)]
++ pow_lt_pow_right.real (a : ℝ) (m n : ℕ) (h : 1 < a) (k : m < n) : a ^ m < a ^ n
+  have e : n = m + (n - m - 1) + 1 := by linarith [sub_add_cancel.nat n m (by linarith), sub_add_cancel.nat (n - m) 1 (by linarith [sub_add_cancel.nat n m (by linarith)])]
+  rw [e, pow_succ.real, pow_add.real]
+  have p := one_le_pow.real a m (by linarith)
+  have q := one_le_pow.real a (n - m - 1) (by linarith)
+  have r : a ^ m ≤ a ^ m * a ^ (n - m - 1) := by nlinarith
+  nlinarith
++ pow_eq_zero.real (a : ℝ) (n : ℕ) (h : a ^ n = 0) : a = 0
+  induction n with h n ih h
+  · simp at h
+  · rw [succ_eq_add_one.nat, pow_succ.real] at h
+    obtain e | e := (mul_eq_zero.real (a ^ n) a).mp h
+    · exact ih e
+    · exact e
++ sq_pos_of_ne_zero.real (a : ℝ) (h : a ≠ 0) : 0 < a ^ 2
+  by_contra c
+  exact h (pow_eq_zero.real a 2 (by linarith [sq_nonneg.real a]))
+
+-- ℚ
++ pow_one.rat (a : ℚ) : a ^ 1 = a := by ring
++ pow_two.rat (a : ℚ) : a ^ 2 = a * a := by ring
++ pow_succ_left.rat (a : ℚ) (n : ℕ) : a ^ (n + 1) = a * a ^ n
+  rw [pow_succ.rat]
+  ring
++ pow_add.rat (a : ℚ) (m n : ℕ) : a ^ (m + n) = a ^ m * a ^ n
+  induction n with n ih
+  · rw [add_zero.nat, pow_zero.rat]
+    ring
+  · rw [succ_eq_add_one.nat, ← add_assoc.nat, pow_succ.rat, pow_succ.rat, ih]
+    ring
++ pow_mul.rat (a : ℚ) (m n : ℕ) : a ^ (m * n) = (a ^ m) ^ n
+  induction n with n ih
+  · rw [mul_zero.nat, pow_zero.rat, pow_zero.rat]
+  · rw [succ_eq_add_one.nat, left_distrib.nat, mul_one.nat, pow_add.rat, ih, pow_succ.rat]
++ mul_pow.rat (a b : ℚ) (n : ℕ) : (a * b) ^ n = a ^ n * b ^ n
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, pow_succ.rat, pow_succ.rat, pow_succ.rat, ih]
+    ring
++ pow_nonneg.rat (a : ℚ) (n : ℕ) (h : 0 ≤ a) : 0 ≤ a ^ n
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, pow_succ.rat]
+    exact mul_nonneg.rat (a ^ n) a ih h
++ pow_pos.rat (a : ℚ) (n : ℕ) (h : 0 < a) : 0 < a ^ n
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, pow_succ.rat]
+    exact mul_pos.rat (a ^ n) a ih h
++ one_le_pow.rat (a : ℚ) (n : ℕ) (h : 1 ≤ a) : 1 ≤ a ^ n
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, pow_succ.rat]
+    nlinarith
++ pow_le_one.rat (a : ℚ) (n : ℕ) (h : 0 ≤ a) (k : a ≤ 1) : a ^ n ≤ 1
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, pow_succ.rat]
+    nlinarith [pow_nonneg.rat a n h]
++ pow_le_pow_left.rat (a b : ℚ) (n : ℕ) (h : 0 ≤ a) (k : a ≤ b) : a ^ n ≤ b ^ n
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, pow_succ.rat, pow_succ.rat]
+    nlinarith [pow_nonneg.rat a n h]
++ pow_le_pow_right.rat (a : ℚ) (m n : ℕ) (h : 1 ≤ a) (k : m ≤ n) : a ^ m ≤ a ^ n
+  have e : n = m + (n - m) := by linarith [sub_add_cancel.nat n m k]
+  rw [e, pow_add.rat]
+  nlinarith [one_le_pow.rat a m h, one_le_pow.rat a (n - m) h]
++ pow_le_pow_of_le_one.rat (a : ℚ) (m n : ℕ) (h : 0 ≤ a) (l : a ≤ 1) (k : m ≤ n) : a ^ n ≤ a ^ m
+  have e : n = m + (n - m) := by linarith [sub_add_cancel.nat n m k]
+  rw [e, pow_add.rat]
+  nlinarith [pow_nonneg.rat a m h, pow_le_one.rat a (n - m) h l]
++ pow_lt_pow_left.rat (a b : ℚ) (n : ℕ) (h : 0 ≤ a) (k : a < b) (hn : n ≠ 0) : a ^ n < b ^ n
+  have e : n = n - 1 + 1 := by linarith [sub_add_cancel.nat n 1 (by linarith)]
+  rw [e, pow_succ.rat, pow_succ.rat]
+  nlinarith [pow_nonneg.rat a (n - 1) h, pow_le_pow_left.rat a b (n - 1) h (by linarith), pow_pos.rat b (n - 1) (by linarith)]
++ pow_lt_pow_right.rat (a : ℚ) (m n : ℕ) (h : 1 < a) (k : m < n) : a ^ m < a ^ n
+  have e : n = m + (n - m - 1) + 1 := by linarith [sub_add_cancel.nat n m (by linarith), sub_add_cancel.nat (n - m) 1 (by linarith [sub_add_cancel.nat n m (by linarith)])]
+  rw [e, pow_succ.rat, pow_add.rat]
+  have p := one_le_pow.rat a m (by linarith)
+  have q := one_le_pow.rat a (n - m - 1) (by linarith)
+  have r : a ^ m ≤ a ^ m * a ^ (n - m - 1) := by nlinarith
+  nlinarith
++ pow_eq_zero.rat (a : ℚ) (n : ℕ) (h : a ^ n = 0) : a = 0
+  induction n with h n ih h
+  · simp at h
+  · rw [succ_eq_add_one.nat, pow_succ.rat] at h
+    obtain e | e := (mul_eq_zero.rat (a ^ n) a).mp h
+    · exact ih e
+    · exact e
++ sq_pos_of_ne_zero.rat (a : ℚ) (h : a ≠ 0) : 0 < a ^ 2
+  by_contra c
+  exact h (pow_eq_zero.rat a 2 (by linarith [sq_nonneg.rat a]))
+
+-- ℤ
++ pow_one.int (a : ℤ) : a ^ 1 = a := by ring
++ pow_two.int (a : ℤ) : a ^ 2 = a * a := by ring
++ pow_succ_left.int (a : ℤ) (n : ℕ) : a ^ (n + 1) = a * a ^ n
+  rw [pow_succ.int]
+  ring
++ pow_add.int (a : ℤ) (m n : ℕ) : a ^ (m + n) = a ^ m * a ^ n
+  induction n with n ih
+  · rw [add_zero.nat, pow_zero.int]
+    ring
+  · rw [succ_eq_add_one.nat, ← add_assoc.nat, pow_succ.int, pow_succ.int, ih]
+    ring
++ pow_mul.int (a : ℤ) (m n : ℕ) : a ^ (m * n) = (a ^ m) ^ n
+  induction n with n ih
+  · rw [mul_zero.nat, pow_zero.int, pow_zero.int]
+  · rw [succ_eq_add_one.nat, left_distrib.nat, mul_one.nat, pow_add.int, ih, pow_succ.int]
++ mul_pow.int (a b : ℤ) (n : ℕ) : (a * b) ^ n = a ^ n * b ^ n
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, pow_succ.int, pow_succ.int, pow_succ.int, ih]
+    ring
++ pow_nonneg.int (a : ℤ) (n : ℕ) (h : 0 ≤ a) : 0 ≤ a ^ n
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, pow_succ.int]
+    exact mul_nonneg.int (a ^ n) a ih h
++ pow_pos.int (a : ℤ) (n : ℕ) (h : 0 < a) : 0 < a ^ n
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, pow_succ.int]
+    exact mul_pos.int (a ^ n) a ih h
++ one_le_pow.int (a : ℤ) (n : ℕ) (h : 1 ≤ a) : 1 ≤ a ^ n
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, pow_succ.int]
+    nlinarith
++ pow_le_one.int (a : ℤ) (n : ℕ) (h : 0 ≤ a) (k : a ≤ 1) : a ^ n ≤ 1
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, pow_succ.int]
+    nlinarith [pow_nonneg.int a n h]
++ pow_le_pow_left.int (a b : ℤ) (n : ℕ) (h : 0 ≤ a) (k : a ≤ b) : a ^ n ≤ b ^ n
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, pow_succ.int, pow_succ.int]
+    nlinarith [pow_nonneg.int a n h]
++ pow_le_pow_right.int (a : ℤ) (m n : ℕ) (h : 1 ≤ a) (k : m ≤ n) : a ^ m ≤ a ^ n
+  have e : n = m + (n - m) := by linarith [sub_add_cancel.nat n m k]
+  rw [e, pow_add.int]
+  nlinarith [one_le_pow.int a m h, one_le_pow.int a (n - m) h]
++ pow_le_pow_of_le_one.int (a : ℤ) (m n : ℕ) (h : 0 ≤ a) (l : a ≤ 1) (k : m ≤ n) : a ^ n ≤ a ^ m
+  have e : n = m + (n - m) := by linarith [sub_add_cancel.nat n m k]
+  rw [e, pow_add.int]
+  nlinarith [pow_nonneg.int a m h, pow_le_one.int a (n - m) h l]
++ pow_lt_pow_left.int (a b : ℤ) (n : ℕ) (h : 0 ≤ a) (k : a < b) (hn : n ≠ 0) : a ^ n < b ^ n
+  have e : n = n - 1 + 1 := by linarith [sub_add_cancel.nat n 1 (by linarith)]
+  rw [e, pow_succ.int, pow_succ.int]
+  nlinarith [pow_nonneg.int a (n - 1) h, pow_le_pow_left.int a b (n - 1) h (by linarith), pow_pos.int b (n - 1) (by linarith)]
++ pow_lt_pow_right.int (a : ℤ) (m n : ℕ) (h : 1 < a) (k : m < n) : a ^ m < a ^ n
+  have e : n = m + (n - m - 1) + 1 := by linarith [sub_add_cancel.nat n m (by linarith), sub_add_cancel.nat (n - m) 1 (by linarith [sub_add_cancel.nat n m (by linarith)])]
+  rw [e, pow_succ.int, pow_add.int]
+  have p := one_le_pow.int a m (by linarith)
+  have q := one_le_pow.int a (n - m - 1) (by linarith)
+  have r : a ^ m ≤ a ^ m * a ^ (n - m - 1) := by nlinarith
+  nlinarith
++ pow_eq_zero.int (a : ℤ) (n : ℕ) (h : a ^ n = 0) : a = 0
+  induction n with h n ih h
+  · simp at h
+  · rw [succ_eq_add_one.nat, pow_succ.int] at h
+    obtain e | e := (mul_eq_zero.int (a ^ n) a).mp h
+    · exact ih e
+    · exact e
++ sq_pos_of_ne_zero.int (a : ℤ) (h : a ≠ 0) : 0 < a ^ 2
+  by_contra c
+  exact h (pow_eq_zero.int a 2 (by linarith [sq_nonneg.int a]))
+
+-- ℕ
++ pow_one.nat (a : ℕ) : a ^ 1 = a := by ring
++ pow_two.nat (a : ℕ) : a ^ 2 = a * a := by ring
++ pow_succ_left.nat (a : ℕ) (n : ℕ) : a ^ (n + 1) = a * a ^ n
+  rw [pow_succ.nat]
+  ring
++ pow_add.nat (a : ℕ) (m n : ℕ) : a ^ (m + n) = a ^ m * a ^ n
+  induction n with n ih
+  · rw [add_zero.nat, pow_zero.nat]
+    ring
+  · rw [succ_eq_add_one.nat, ← add_assoc.nat, pow_succ.nat, pow_succ.nat, ih]
+    ring
++ pow_mul.nat (a : ℕ) (m n : ℕ) : a ^ (m * n) = (a ^ m) ^ n
+  induction n with n ih
+  · rw [mul_zero.nat, pow_zero.nat, pow_zero.nat]
+  · rw [succ_eq_add_one.nat, left_distrib.nat, mul_one.nat, pow_add.nat, ih, pow_succ.nat]
++ mul_pow.nat (a b : ℕ) (n : ℕ) : (a * b) ^ n = a ^ n * b ^ n
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, pow_succ.nat, pow_succ.nat, pow_succ.nat, ih]
+    ring
++ pow_nonneg.nat (a : ℕ) (n : ℕ) (h : 0 ≤ a) : 0 ≤ a ^ n
+  exact zero_le.nat (a ^ n)
++ pow_pos.nat (a : ℕ) (n : ℕ) (h : 0 < a) : 0 < a ^ n
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, pow_succ.nat]
+    exact mul_pos.nat (a ^ n) a ih h
++ one_le_pow.nat (a : ℕ) (n : ℕ) (h : 1 ≤ a) : 1 ≤ a ^ n
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, pow_succ.nat]
+    linarith [mul_le_mul.nat 1 (a ^ n) 1 a ih h (by linarith) (by linarith)]
++ pow_le_one.nat (a : ℕ) (n : ℕ) (h : 0 ≤ a) (k : a ≤ 1) : a ^ n ≤ 1
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, pow_succ.nat]
+    linarith [mul_le_mul.nat (a ^ n) 1 a 1 ih k h (by linarith)]
++ pow_le_pow_left.nat (a b : ℕ) (n : ℕ) (h : 0 ≤ a) (k : a ≤ b) : a ^ n ≤ b ^ n
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, pow_succ.nat, pow_succ.nat]
+    exact mul_le_mul.nat (a ^ n) (b ^ n) a b ih k h (by linarith)
++ pow_le_pow_right.nat (a : ℕ) (m n : ℕ) (h : 1 ≤ a) (k : m ≤ n) : a ^ m ≤ a ^ n
+  have e : n = m + (n - m) := by linarith [sub_add_cancel.nat n m k]
+  rw [e, pow_add.nat]
+  linarith [mul_le_mul_left.nat (a ^ m) 1 (a ^ (n - m)) (one_le_pow.nat a (n - m) h)]
++ pow_lt_pow_left.nat (a b : ℕ) (n : ℕ) (h : 0 ≤ a) (k : a < b) (hn : n ≠ 0) : a ^ n < b ^ n
+  have e : n = n - 1 + 1 := by linarith [sub_add_cancel.nat n 1 (by linarith)]
+  rw [e, pow_succ.nat, pow_succ.nat]
+  have p := mul_le_mul_left.nat (b ^ (n - 1)) (a + 1) b (by linarith)
+  have q := mul_le_mul_right.nat a (a ^ (n - 1)) (b ^ (n - 1)) (pow_le_pow_left.nat a b (n - 1) h (by linarith))
+  have r := one_le_pow.nat b (n - 1) (by linarith)
+  linarith
++ pow_lt_pow_right.nat (a : ℕ) (m n : ℕ) (h : 1 < a) (k : m < n) : a ^ m < a ^ n
+  have e : n = m + (n - m - 1) + 1 := by linarith [sub_add_cancel.nat n m (by linarith), sub_add_cancel.nat (n - m) 1 (by linarith [sub_add_cancel.nat n m (by linarith)])]
+  rw [e, pow_succ.nat, pow_add.nat]
+  have p := one_le_pow.nat a m (by linarith)
+  have q := mul_le_mul_left.nat (a ^ m) 1 (a ^ (n - m - 1)) (one_le_pow.nat a (n - m - 1) (by linarith))
+  have r := mul_le_mul_left.nat (a ^ m * a ^ (n - m - 1)) 2 a (by linarith)
+  linarith
++ pow_eq_zero.nat (a : ℕ) (n : ℕ) (h : a ^ n = 0) : a = 0
+  induction n with h n ih h
+  · simp at h
+  · rw [succ_eq_add_one.nat, pow_succ.nat] at h
+    obtain e | e := (mul_eq_zero.nat (a ^ n) a).mp h
+    · exact ih e
+    · exact e
++ two_pow_pos.nat (n : ℕ) : 0 < 2 ^ n := pow_pos.nat 2 n (by decide)
++ one_le_two_pow.nat (n : ℕ) : 1 ≤ 2 ^ n := one_le_pow.nat 2 n (by decide)
++ lt_two_pow.nat (n : ℕ) : n < 2 ^ n
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, pow_succ.nat]
+    linarith
+
+-- ---- division and remainder on ℕ and ℤ -------------------------------------------------------------------------
+-- ℕ: n % 0 = n and n / 0 = 0, as in core's div_add_mod.nat and div_zero.nat
++ mod_zero.nat (n : ℕ) : n % 0 = n
+  linarith [div_add_mod.nat n 0]
++ mod_le.nat (n k : ℕ) : n % k ≤ n
+  linarith [div_add_mod.nat n k, zero_le.nat (k * (n / k))]
++ div_mul_le.nat (n k : ℕ) : k * (n / k) ≤ n
+  linarith [div_add_mod.nat n k]
++ lt_mul_div_succ.nat (n k : ℕ) (hk : 0 < k) : n < k * (n / k + 1)
+  linarith [div_add_mod.nat n k, mod_lt.nat n k hk, left_distrib.nat k (n / k) 1]
++ div_mod_unique.nat (n k q r : ℕ) (h : n = k * q + r) (hr : r < k) : q = n / k ∧ r = n % k
+  have d := div_add_mod.nat n k
+  have m := mod_lt.nat n k (by linarith)
+  have e : q = n / k
+    by_contra c
+    obtain l | l := lt_or_gt_of_ne.nat q (n / k) c
+    · linarith [mul_le_mul_left.nat k (q + 1) (n / k) (by linarith), left_distrib.nat k q 1]
+    · linarith [mul_le_mul_left.nat k (n / k + 1) q (by linarith), left_distrib.nat k (n / k) 1]
+  have f : k * q + n % k = n
+    rw [e]
+    exact d
+  exact ⟨e, by linarith⟩
++ add_mul_div.nat (a b k : ℕ) (hk : 0 < k) : (a + k * b) / k = a / k + b
+  have u := div_mod_unique.nat (a + k * b) k (a / k + b) (a % k) (by linarith [div_add_mod.nat a k, left_distrib.nat k (a / k) b]) (mod_lt.nat a k hk)
+  exact u.1.symm
++ add_mul_mod.nat (a b k : ℕ) : (a + k * b) % k = a % k
+  by_cases hk : k = 0
+  · rw [hk]
+    simp
+  · have u := div_mod_unique.nat (a + k * b) k (a / k + b) (a % k) (by linarith [div_add_mod.nat a k, left_distrib.nat k (a / k) b]) (mod_lt.nat a k (by linarith))
+    exact u.2.symm
++ mul_div_cancel_left.nat (k n : ℕ) (hk : 0 < k) : k * n / k = n
+  have u := div_mod_unique.nat (k * n) k n 0 (by linarith) hk
+  exact u.1.symm
++ mul_mod_right.nat (k n : ℕ) : k * n % k = 0
+  have e := add_mul_mod.nat 0 n k
+  rw [zero_add.nat] at e
+  rw [e]
+  by_cases hk : k = 0
+  · rw [hk]
+    decide
+  · exact (div_mod_unique.nat 0 k 0 0 (by linarith) (by linarith)).2.symm
++ mod_mod.nat (n k : ℕ) : n % k % k = n % k
+  by_cases hk : k = 0
+  · rw [hk, mod_zero.nat, mod_zero.nat]
+  · exact (div_mod_unique.nat (n % k) k 0 (n % k) (by linarith) (mod_lt.nat n k (by linarith))).2.symm
++ add_mod.nat (a b k : ℕ) : (a + b) % k = (a % k + b % k) % k
+  have e : a + b = a % k + b % k + k * (a / k + b / k)
+    linarith [div_add_mod.nat a k, div_add_mod.nat b k, left_distrib.nat k (a / k) (b / k)]
+  rw [e, add_mul_mod.nat]
++ mul_mod.nat (a b k : ℕ) : (a * b) % k = (a % k) * (b % k) % k
+  have e : (k * (a / k) + a % k) * (k * (b / k) + b % k) = a % k * (b % k) + k * (k * (a / k) * (b / k) + a / k * (b % k) + a % k * (b / k)) := by ring
+  rw [div_add_mod.nat a k, div_add_mod.nat b k] at e
+  rw [e, add_mul_mod.nat]
++ pow_mod.nat (a n k : ℕ) : a ^ n % k = (a % k) ^ n % k
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, pow_succ.nat, pow_succ.nat, mul_mod.nat (a ^ n) a k, ih, mul_mod.nat ((a % k) ^ n) (a % k) k, mod_mod.nat]
++ mod_two_cases.nat (n : ℕ) : n % 2 = 0 ∨ n % 2 = 1
+  have m := mod_lt.nat n 2 (by decide)
+  by_cases h : n % 2 = 0
+  · left; exact h
+  · right; linarith
++ even_or_odd.nat (n : ℕ) : even n ∨ odd n
+  unfold even odd
+  exact mod_two_cases.nat n
+
+-- ℤ: Euclidean division by a positive divisor
++ div_mul_le.int (n k : ℤ) (hk : 0 < k) : k * (n / k) ≤ n
+  linarith [div_add_mod.int n k, mod_nonneg.int n k hk]
++ lt_mul_div_succ.int (n k : ℤ) (hk : 0 < k) : n < k * (n / k + 1)
+  linarith [div_add_mod.int n k, mod_lt.int n k hk, left_distrib.int k (n / k) 1]
++ div_mod_unique.int (n k q r : ℤ) (h : n = k * q + r) (h0 : 0 ≤ r) (hr : r < k) : q = n / k ∧ r = n % k
+  have d := div_add_mod.int n k
+  have m0 := mod_nonneg.int n k (by linarith)
+  have m := mod_lt.int n k (by linarith)
+  have e : q = n / k
+    by_contra c
+    obtain l | l := lt_or_gt_of_ne.int q (n / k) c
+    · linarith [mul_le_mul_of_nonneg_left.int (q + 1) (n / k) k (by linarith) (by linarith)]
+    · linarith [mul_le_mul_of_nonneg_left.int (n / k + 1) q k (by linarith) (by linarith)]
+  have f : k * q + n % k = n
+    rw [e]
+    exact d
+  exact ⟨e, by linarith⟩
++ add_mul_div.int (a b k : ℤ) (hk : 0 < k) : (a + k * b) / k = a / k + b
+  have u := div_mod_unique.int (a + k * b) k (a / k + b) (a % k) (by linarith [div_add_mod.int a k, left_distrib.int k (a / k) b]) (mod_nonneg.int a k hk) (mod_lt.int a k hk)
+  exact u.1.symm
++ add_mul_mod.int (a b k : ℤ) (hk : 0 < k) : (a + k * b) % k = a % k
+  have u := div_mod_unique.int (a + k * b) k (a / k + b) (a % k) (by linarith [div_add_mod.int a k, left_distrib.int k (a / k) b]) (mod_nonneg.int a k hk) (mod_lt.int a k hk)
+  exact u.2.symm
++ mul_div_cancel_left.int (k n : ℤ) (hk : 0 < k) : k * n / k = n
+  exact (div_mod_unique.int (k * n) k n 0 (by linarith) (by linarith) hk).1.symm
++ mul_mod_right.int (k n : ℤ) (hk : 0 < k) : k * n % k = 0
+  exact (div_mod_unique.int (k * n) k n 0 (by linarith) (by linarith) hk).2.symm
++ mod_mod.int (n k : ℤ) (hk : 0 < k) : n % k % k = n % k
+  exact (div_mod_unique.int (n % k) k 0 (n % k) (by linarith) (mod_nonneg.int n k hk) (mod_lt.int n k hk)).2.symm
++ add_mod.int (a b k : ℤ) (hk : 0 < k) : (a + b) % k = (a % k + b % k) % k
+  have e : a + b = a % k + b % k + k * (a / k + b / k)
+    linarith [div_add_mod.int a k, div_add_mod.int b k, left_distrib.int k (a / k) (b / k)]
+  rw [e, add_mul_mod.int (a % k + b % k) (a / k + b / k) k hk]
++ mul_mod.int (a b k : ℤ) (hk : 0 < k) : (a * b) % k = (a % k) * (b % k) % k
+  have e : (k * (a / k) + a % k) * (k * (b / k) + b % k) = a % k * (b % k) + k * (k * (a / k) * (b / k) + a / k * (b % k) + a % k * (b / k)) := by ring
+  rw [div_add_mod.int a k, div_add_mod.int b k] at e
+  rw [e, add_mul_mod.int (a % k * (b % k)) (k * (a / k) * (b / k) + a / k * (b % k) + a % k * (b / k)) k hk]
++ mod_two_cases.int (n : ℤ) : n % 2 = 0 ∨ n % 2 = 1
+  have m0 := mod_nonneg.int n 2 (by decide)
+  have m := mod_lt.int n 2 (by decide)
+  by_cases h : n % 2 = 0
+  · left; exact h
+  · right; linarith
++ even_or_odd.int (n : ℤ) : even n ∨ odd n
+  unfold even odd
+  exact mod_two_cases.int n
+
+-- ---- field division (ℝ ℚ; a⁻¹ is 1 / a, and a / 0 = 0) ------------------------------------------------------
+-- ℝ
++ one_div_pos.real (a : ℝ) (h : 0 < a) : 0 < 1 / a
+  have m := mul_inv_cancel.real a (by linarith)
+  nlinarith
++ one_div_nonneg.real (a : ℝ) (h : 0 ≤ a) : 0 ≤ 1 / a
+  by_cases k : a = 0
+  · rw [k, div_zero.real]
+    linarith
+  · linarith [one_div_pos.real a (by linarith)]
++ one_div_neg.real (a : ℝ) (h : a < 0) : 1 / a < 0
+  have m := mul_inv_cancel.real a (by linarith)
+  nlinarith
++ eq_one_div_of_mul_eq_one.real (a b : ℝ) (h : a * b = 1) : b = 1 / a
+  have ha : a ≠ 0
+    intro z
+    rw [z] at h
+    linarith
+  have e : b * (a * (1 / a)) = a * b * (1 / a) := by ring
+  rw [mul_inv_cancel.real a ha, h] at e
+  linarith
++ one_div_one_div.real (a : ℝ) : 1 / (1 / a) = a
+  by_cases ha : a = 0
+  · rw [ha, div_zero.real, div_zero.real]
+  · have m := mul_inv_cancel.real a ha
+    rw [mul_comm.real] at m
+    exact (eq_one_div_of_mul_eq_one.real (1 / a) a m).symm
++ one_div_mul_one_div.real (a b : ℝ) : 1 / a * (1 / b) = 1 / (a * b)
+  by_cases ha : a = 0
+  · rw [ha, zero_mul.real, div_zero.real]
+    ring
+  · by_cases hb : b = 0
+    · rw [hb, mul_zero.real, div_zero.real]
+      ring
+    · have e : a * b * (1 / a * (1 / b)) = a * (1 / a) * (b * (1 / b)) := by ring
+      rw [mul_inv_cancel.real a ha, mul_inv_cancel.real b hb] at e
+      exact eq_one_div_of_mul_eq_one.real (a * b) (1 / a * (1 / b)) (by linarith)
++ div_self.real (a : ℝ) (h : a ≠ 0) : a / a = 1
+  rw [div_def.real]
+  exact mul_inv_cancel.real a h
++ mul_div_cancel.real (a b : ℝ) (h : b ≠ 0) : a / b * b = a
+  have e : a / b * b = a * (b * (1 / b)) := by rw [div_def.real]; ring
+  rw [e, mul_inv_cancel.real b h]
+  ring
++ mul_div_cancel_right.real (a b : ℝ) (h : b ≠ 0) : a * b / b = a
+  have e : a * b / b = a * (b * (1 / b)) := by rw [div_def.real]; ring
+  rw [e, mul_inv_cancel.real b h]
+  ring
++ mul_div_cancel_left.real (k n : ℝ) (h : k ≠ 0) : k * n / k = n
+  rw [mul_comm.real]
+  exact mul_div_cancel_right.real n k h
++ div_pos.real (a b : ℝ) (ha : 0 < a) (hb : 0 < b) : 0 < a / b
+  rw [div_def.real]
+  exact mul_pos.real a (1 / b) ha (one_div_pos.real b hb)
++ div_nonneg.real (a b : ℝ) (ha : 0 ≤ a) (hb : 0 ≤ b) : 0 ≤ a / b
+  rw [div_def.real]
+  exact mul_nonneg.real a (1 / b) ha (one_div_nonneg.real b hb)
++ div_le_div_of_nonneg_right.real (a b c : ℝ) (h : a ≤ b) (hc : 0 ≤ c) : a / c ≤ b / c
+  rw [div_def.real a c, div_def.real b c]
+  exact mul_le_mul_of_nonneg_right.real a b (1 / c) h (one_div_nonneg.real c hc)
++ div_lt_div_of_pos_right.real (a b c : ℝ) (h : a < b) (hc : 0 < c) : a / c < b / c
+  rw [div_def.real a c, div_def.real b c]
+  exact mul_lt_mul_of_pos_right.real a b (1 / c) h (one_div_pos.real c hc)
++ div_le_iff.real (a b c : ℝ) (hc : 0 < c) : a / c ≤ b ↔ a ≤ b * c
+  constructor
+  · intro h
+    linarith [mul_le_mul_of_nonneg_right.real (a / c) b c h (by linarith), mul_div_cancel.real a c (by linarith)]
+  · intro h
+    linarith [div_le_div_of_nonneg_right.real a (b * c) c h (by linarith), mul_div_cancel_right.real b c (by linarith)]
++ le_div_iff.real (a b c : ℝ) (hc : 0 < c) : a ≤ b / c ↔ a * c ≤ b
+  constructor
+  · intro h
+    linarith [mul_le_mul_of_nonneg_right.real a (b / c) c h (by linarith), mul_div_cancel.real b c (by linarith)]
+  · intro h
+    linarith [div_le_div_of_nonneg_right.real (a * c) b c h (by linarith), mul_div_cancel_right.real a c (by linarith)]
++ div_lt_iff.real (a b c : ℝ) (hc : 0 < c) : a / c < b ↔ a < b * c
+  constructor
+  · intro h
+    linarith [mul_lt_mul_of_pos_right.real (a / c) b c h hc, mul_div_cancel.real a c (by linarith)]
+  · intro h
+    linarith [div_lt_div_of_pos_right.real a (b * c) c h hc, mul_div_cancel_right.real b c (by linarith)]
++ lt_div_iff.real (a b c : ℝ) (hc : 0 < c) : a < b / c ↔ a * c < b
+  constructor
+  · intro h
+    linarith [mul_lt_mul_of_pos_right.real a (b / c) c h hc, mul_div_cancel.real b c (by linarith)]
+  · intro h
+    linarith [div_lt_div_of_pos_right.real (a * c) b c h hc, mul_div_cancel_right.real a c (by linarith)]
++ div_le_one.real (a b : ℝ) (hb : 0 < b) : a / b ≤ 1 ↔ a ≤ b
+  have k := div_le_iff.real a 1 b hb
+  constructor
+  · intro h
+    linarith [k.mp h]
+  · intro h
+    exact k.mpr (by linarith)
++ eq_div_iff.real (a b c : ℝ) (hc : c ≠ 0) : a = b / c ↔ a * c = b
+  constructor
+  · intro h
+    rw [h]
+    exact mul_div_cancel.real b c hc
+  · intro h
+    rw [← h]
+    exact (mul_div_cancel_right.real a c hc).symm
++ div_eq_iff.real (a b c : ℝ) (hc : c ≠ 0) : a / c = b ↔ a = b * c
+  constructor
+  · intro h
+    rw [← h]
+    exact (mul_div_cancel.real a c hc).symm
+  · intro h
+    rw [h]
+    exact mul_div_cancel_right.real b c hc
++ mul_div_assoc.real (a b c : ℝ) : a * b / c = a * (b / c)
+  rw [div_def.real (a * b) c, div_def.real b c]
+  ring
++ add_div.real (a b c : ℝ) : (a + b) / c = a / c + b / c
+  rw [div_def.real (a + b) c, div_def.real a c, div_def.real b c]
+  ring
++ sub_div.real (a b c : ℝ) : (a - b) / c = a / c - b / c
+  rw [div_def.real (a - b) c, div_def.real a c, div_def.real b c]
+  ring
++ div_div.real (a b c : ℝ) : a / b / c = a / (b * c)
+  have e := one_div_mul_one_div.real b c
+  rw [div_def.real (a / b) c, div_def.real a b, div_def.real a (b * c), ← e]
+  ring
++ div_mul_div.real (a b c d : ℝ) : a / b * (c / d) = a * c / (b * d)
+  have e := one_div_mul_one_div.real b d
+  rw [div_def.real a b, div_def.real c d, div_def.real (a * c) (b * d), ← e]
+  ring
++ div_add_div.real (a b c d : ℝ) (hb : b ≠ 0) (hd : d ≠ 0) : a / b + c / d = (a * d + b * c) / (b * d)
+  have e := one_div_mul_one_div.real b d
+  rw [div_def.real a b, div_def.real c d, div_def.real (a * d + b * c) (b * d), ← e]
+  have f : (a * d + b * c) * (1 / b * (1 / d)) = a * (1 / b) * (d * (1 / d)) + c * (1 / d) * (b * (1 / b)) := by ring
+  rw [mul_inv_cancel.real b hb, mul_inv_cancel.real d hd] at f
+  linarith
++ one_div_le_one_div_of_le.real (a b : ℝ) (ha : 0 < a) (h : a ≤ b) : 1 / b ≤ 1 / a
+  have p := mul_pos.real (1 / a) (1 / b) (one_div_pos.real a ha) (one_div_pos.real b (by linarith))
+  have k := mul_le_mul_of_nonneg_left.real a b (1 / a * (1 / b)) h (by linarith)
+  have e : 1 / a * (1 / b) * a = a * (1 / a) * (1 / b) := by ring
+  have f : 1 / a * (1 / b) * b = b * (1 / b) * (1 / a) := by ring
+  rw [mul_inv_cancel.real a (by linarith)] at e
+  rw [mul_inv_cancel.real b (by linarith)] at f
+  linarith
++ one_div_lt_one_div_of_lt.real (a b : ℝ) (ha : 0 < a) (h : a < b) : 1 / b < 1 / a
+  have p := mul_pos.real (1 / a) (1 / b) (one_div_pos.real a ha) (one_div_pos.real b (by linarith))
+  have k := mul_lt_mul_of_pos_left.real a b (1 / a * (1 / b)) h p
+  have e : 1 / a * (1 / b) * a = a * (1 / a) * (1 / b) := by ring
+  have f : 1 / a * (1 / b) * b = b * (1 / b) * (1 / a) := by ring
+  rw [mul_inv_cancel.real a (by linarith)] at e
+  rw [mul_inv_cancel.real b (by linarith)] at f
+  linarith
++ inv_le_inv.real (a b : ℝ) (ha : 0 < a) (hb : 0 < b) : 1 / a ≤ 1 / b ↔ b ≤ a
+  constructor
+  · intro h
+    by_contra c
+    linarith [one_div_lt_one_div_of_lt.real a b ha (by linarith)]
+  · intro h
+    exact one_div_le_one_div_of_le.real b a hb h
++ inv_lt_inv.real (a b : ℝ) (ha : 0 < a) (hb : 0 < b) : 1 / a < 1 / b ↔ b < a
+  constructor
+  · intro h
+    by_contra c
+    linarith [one_div_le_one_div_of_le.real a b ha (by linarith)]
+  · intro h
+    exact one_div_lt_one_div_of_lt.real b a hb h
++ div_le_div_of_nonneg_left.real (a b c : ℝ) (ha : 0 ≤ a) (hc : 0 < c) (h : c ≤ b) : a / b ≤ a / c
+  rw [div_def.real a b, div_def.real a c]
+  exact mul_le_mul_of_nonneg_left.real (1 / b) (1 / c) a (one_div_le_one_div_of_le.real c b hc h) ha
++ abs_div.real (a b : ℝ) : |a / b| = |a| / |b|
+  by_cases hb : b = 0
+  · have z : |(0 : ℝ)| = 0 := by decide
+    rw [hb, div_zero.real, z, div_zero.real]
+  · have p := abs_pos.real b hb
+    have e := mul_div_cancel.real a b hb
+    have f := abs_mul.real (a / b) b
+    rw [e] at f
+    exact (eq_div_iff.real (|a / b|) (|a|) (|b|) (by linarith)).mpr f.symm
+-- a quadratic that is nonnegative everywhere has nonpositive discriminant
++ discrim_le_zero.real (a b c : ℝ) (h : ∀ x : ℝ, 0 ≤ a * x * x + b * x + c) : b * b - 4 * a * c ≤ 0
+  by_cases ha : 0 < a
+  · have hx := h ((0 - b) / (2 * a))
+    have hy := mul_div_cancel.real (0 - b) (2 * a) (by linarith)
+    have e1 : (0 - b) / (2 * a) * (2 * a) * ((0 - b) / (2 * a) * (2 * a)) = (0 - b) * (0 - b) := by rw [hy]
+    have e2 : b * ((0 - b) / (2 * a) * (2 * a)) = b * (0 - b) := by rw [hy]
+    have p := mul_nonneg.real a (a * ((0 - b) / (2 * a)) * ((0 - b) / (2 * a)) + b * ((0 - b) / (2 * a)) + c) (by linarith) hx
+    linarith
+  · by_cases hz : a = 0
+    · rw [hz]
+      by_cases hb : b = 0
+      · rw [hb]
+        linarith
+      · have hx := h ((0 - c - 1) / b)
+        have hy := mul_div_cancel.real (0 - c - 1) b hb
+        rw [hz] at hx
+        linarith
+    · have pb := abs_nonneg.real b
+      have pc := abs_nonneg.real c
+      have hq := div_pos.real (|b| + |c| + 1) (0 - a) (by linarith) (by linarith)
+      have ht := mul_div_cancel.real (|b| + |c| + 1) (0 - a) (by linarith)
+      have e : (|b| + |c| + 1) / (0 - a) * (0 - a) * ((|b| + |c| + 1) / (0 - a)) = (|b| + |c| + 1) * ((|b| + |c| + 1) / (0 - a)) := by rw [ht]
+      have hx := h ((|b| + |c| + 1) / (0 - a) + 1)
+      have k1 := mul_le_mul_of_nonneg_right.real b (|b|) ((|b| + |c| + 1) / (0 - a) + 1) (le_abs_self.real b) (by linarith)
+      have k2 := le_abs_self.real c
+      have k3 := mul_nonneg.real (|c|) ((|b| + |c| + 1) / (0 - a)) pc (by linarith)
+      linarith
+
+-- ℚ
++ one_div_pos.rat (a : ℚ) (h : 0 < a) : 0 < 1 / a
+  have m := mul_inv_cancel.rat a (by linarith)
+  nlinarith
++ one_div_nonneg.rat (a : ℚ) (h : 0 ≤ a) : 0 ≤ 1 / a
+  by_cases k : a = 0
+  · rw [k, div_zero.rat]
+    linarith
+  · linarith [one_div_pos.rat a (by linarith)]
++ one_div_neg.rat (a : ℚ) (h : a < 0) : 1 / a < 0
+  have m := mul_inv_cancel.rat a (by linarith)
+  nlinarith
++ eq_one_div_of_mul_eq_one.rat (a b : ℚ) (h : a * b = 1) : b = 1 / a
+  have ha : a ≠ 0
+    intro z
+    rw [z] at h
+    linarith
+  have e : b * (a * (1 / a)) = a * b * (1 / a) := by ring
+  rw [mul_inv_cancel.rat a ha, h] at e
+  linarith
++ one_div_one_div.rat (a : ℚ) : 1 / (1 / a) = a
+  by_cases ha : a = 0
+  · rw [ha, div_zero.rat, div_zero.rat]
+  · have m := mul_inv_cancel.rat a ha
+    rw [mul_comm.rat] at m
+    exact (eq_one_div_of_mul_eq_one.rat (1 / a) a m).symm
++ one_div_mul_one_div.rat (a b : ℚ) : 1 / a * (1 / b) = 1 / (a * b)
+  by_cases ha : a = 0
+  · rw [ha, zero_mul.rat, div_zero.rat]
+    ring
+  · by_cases hb : b = 0
+    · rw [hb, mul_zero.rat, div_zero.rat]
+      ring
+    · have e : a * b * (1 / a * (1 / b)) = a * (1 / a) * (b * (1 / b)) := by ring
+      rw [mul_inv_cancel.rat a ha, mul_inv_cancel.rat b hb] at e
+      exact eq_one_div_of_mul_eq_one.rat (a * b) (1 / a * (1 / b)) (by linarith)
++ div_self.rat (a : ℚ) (h : a ≠ 0) : a / a = 1
+  rw [div_def.rat]
+  exact mul_inv_cancel.rat a h
++ mul_div_cancel.rat (a b : ℚ) (h : b ≠ 0) : a / b * b = a
+  have e : a / b * b = a * (b * (1 / b)) := by rw [div_def.rat]; ring
+  rw [e, mul_inv_cancel.rat b h]
+  ring
++ mul_div_cancel_right.rat (a b : ℚ) (h : b ≠ 0) : a * b / b = a
+  have e : a * b / b = a * (b * (1 / b)) := by rw [div_def.rat]; ring
+  rw [e, mul_inv_cancel.rat b h]
+  ring
++ mul_div_cancel_left.rat (k n : ℚ) (h : k ≠ 0) : k * n / k = n
+  rw [mul_comm.rat]
+  exact mul_div_cancel_right.rat n k h
++ div_pos.rat (a b : ℚ) (ha : 0 < a) (hb : 0 < b) : 0 < a / b
+  rw [div_def.rat]
+  exact mul_pos.rat a (1 / b) ha (one_div_pos.rat b hb)
++ div_nonneg.rat (a b : ℚ) (ha : 0 ≤ a) (hb : 0 ≤ b) : 0 ≤ a / b
+  rw [div_def.rat]
+  exact mul_nonneg.rat a (1 / b) ha (one_div_nonneg.rat b hb)
++ div_le_div_of_nonneg_right.rat (a b c : ℚ) (h : a ≤ b) (hc : 0 ≤ c) : a / c ≤ b / c
+  rw [div_def.rat a c, div_def.rat b c]
+  exact mul_le_mul_of_nonneg_right.rat a b (1 / c) h (one_div_nonneg.rat c hc)
++ div_lt_div_of_pos_right.rat (a b c : ℚ) (h : a < b) (hc : 0 < c) : a / c < b / c
+  rw [div_def.rat a c, div_def.rat b c]
+  exact mul_lt_mul_of_pos_right.rat a b (1 / c) h (one_div_pos.rat c hc)
++ div_le_iff.rat (a b c : ℚ) (hc : 0 < c) : a / c ≤ b ↔ a ≤ b * c
+  constructor
+  · intro h
+    linarith [mul_le_mul_of_nonneg_right.rat (a / c) b c h (by linarith), mul_div_cancel.rat a c (by linarith)]
+  · intro h
+    linarith [div_le_div_of_nonneg_right.rat a (b * c) c h (by linarith), mul_div_cancel_right.rat b c (by linarith)]
++ le_div_iff.rat (a b c : ℚ) (hc : 0 < c) : a ≤ b / c ↔ a * c ≤ b
+  constructor
+  · intro h
+    linarith [mul_le_mul_of_nonneg_right.rat a (b / c) c h (by linarith), mul_div_cancel.rat b c (by linarith)]
+  · intro h
+    linarith [div_le_div_of_nonneg_right.rat (a * c) b c h (by linarith), mul_div_cancel_right.rat a c (by linarith)]
++ div_lt_iff.rat (a b c : ℚ) (hc : 0 < c) : a / c < b ↔ a < b * c
+  constructor
+  · intro h
+    linarith [mul_lt_mul_of_pos_right.rat (a / c) b c h hc, mul_div_cancel.rat a c (by linarith)]
+  · intro h
+    linarith [div_lt_div_of_pos_right.rat a (b * c) c h hc, mul_div_cancel_right.rat b c (by linarith)]
++ lt_div_iff.rat (a b c : ℚ) (hc : 0 < c) : a < b / c ↔ a * c < b
+  constructor
+  · intro h
+    linarith [mul_lt_mul_of_pos_right.rat a (b / c) c h hc, mul_div_cancel.rat b c (by linarith)]
+  · intro h
+    linarith [div_lt_div_of_pos_right.rat (a * c) b c h hc, mul_div_cancel_right.rat a c (by linarith)]
++ div_le_one.rat (a b : ℚ) (hb : 0 < b) : a / b ≤ 1 ↔ a ≤ b
+  have k := div_le_iff.rat a 1 b hb
+  constructor
+  · intro h
+    linarith [k.mp h]
+  · intro h
+    exact k.mpr (by linarith)
++ eq_div_iff.rat (a b c : ℚ) (hc : c ≠ 0) : a = b / c ↔ a * c = b
+  constructor
+  · intro h
+    rw [h]
+    exact mul_div_cancel.rat b c hc
+  · intro h
+    rw [← h]
+    exact (mul_div_cancel_right.rat a c hc).symm
++ div_eq_iff.rat (a b c : ℚ) (hc : c ≠ 0) : a / c = b ↔ a = b * c
+  constructor
+  · intro h
+    rw [← h]
+    exact (mul_div_cancel.rat a c hc).symm
+  · intro h
+    rw [h]
+    exact mul_div_cancel_right.rat b c hc
++ mul_div_assoc.rat (a b c : ℚ) : a * b / c = a * (b / c)
+  rw [div_def.rat (a * b) c, div_def.rat b c]
+  ring
++ add_div.rat (a b c : ℚ) : (a + b) / c = a / c + b / c
+  rw [div_def.rat (a + b) c, div_def.rat a c, div_def.rat b c]
+  ring
++ sub_div.rat (a b c : ℚ) : (a - b) / c = a / c - b / c
+  rw [div_def.rat (a - b) c, div_def.rat a c, div_def.rat b c]
+  ring
++ div_div.rat (a b c : ℚ) : a / b / c = a / (b * c)
+  have e := one_div_mul_one_div.rat b c
+  rw [div_def.rat (a / b) c, div_def.rat a b, div_def.rat a (b * c), ← e]
+  ring
++ div_mul_div.rat (a b c d : ℚ) : a / b * (c / d) = a * c / (b * d)
+  have e := one_div_mul_one_div.rat b d
+  rw [div_def.rat a b, div_def.rat c d, div_def.rat (a * c) (b * d), ← e]
+  ring
++ div_add_div.rat (a b c d : ℚ) (hb : b ≠ 0) (hd : d ≠ 0) : a / b + c / d = (a * d + b * c) / (b * d)
+  have e := one_div_mul_one_div.rat b d
+  rw [div_def.rat a b, div_def.rat c d, div_def.rat (a * d + b * c) (b * d), ← e]
+  have f : (a * d + b * c) * (1 / b * (1 / d)) = a * (1 / b) * (d * (1 / d)) + c * (1 / d) * (b * (1 / b)) := by ring
+  rw [mul_inv_cancel.rat b hb, mul_inv_cancel.rat d hd] at f
+  linarith
++ one_div_le_one_div_of_le.rat (a b : ℚ) (ha : 0 < a) (h : a ≤ b) : 1 / b ≤ 1 / a
+  have p := mul_pos.rat (1 / a) (1 / b) (one_div_pos.rat a ha) (one_div_pos.rat b (by linarith))
+  have k := mul_le_mul_of_nonneg_left.rat a b (1 / a * (1 / b)) h (by linarith)
+  have e : 1 / a * (1 / b) * a = a * (1 / a) * (1 / b) := by ring
+  have f : 1 / a * (1 / b) * b = b * (1 / b) * (1 / a) := by ring
+  rw [mul_inv_cancel.rat a (by linarith)] at e
+  rw [mul_inv_cancel.rat b (by linarith)] at f
+  linarith
++ one_div_lt_one_div_of_lt.rat (a b : ℚ) (ha : 0 < a) (h : a < b) : 1 / b < 1 / a
+  have p := mul_pos.rat (1 / a) (1 / b) (one_div_pos.rat a ha) (one_div_pos.rat b (by linarith))
+  have k := mul_lt_mul_of_pos_left.rat a b (1 / a * (1 / b)) h p
+  have e : 1 / a * (1 / b) * a = a * (1 / a) * (1 / b) := by ring
+  have f : 1 / a * (1 / b) * b = b * (1 / b) * (1 / a) := by ring
+  rw [mul_inv_cancel.rat a (by linarith)] at e
+  rw [mul_inv_cancel.rat b (by linarith)] at f
+  linarith
++ inv_le_inv.rat (a b : ℚ) (ha : 0 < a) (hb : 0 < b) : 1 / a ≤ 1 / b ↔ b ≤ a
+  constructor
+  · intro h
+    by_contra c
+    linarith [one_div_lt_one_div_of_lt.rat a b ha (by linarith)]
+  · intro h
+    exact one_div_le_one_div_of_le.rat b a hb h
++ inv_lt_inv.rat (a b : ℚ) (ha : 0 < a) (hb : 0 < b) : 1 / a < 1 / b ↔ b < a
+  constructor
+  · intro h
+    by_contra c
+    linarith [one_div_le_one_div_of_le.rat a b ha (by linarith)]
+  · intro h
+    exact one_div_lt_one_div_of_lt.rat b a hb h
++ div_le_div_of_nonneg_left.rat (a b c : ℚ) (ha : 0 ≤ a) (hc : 0 < c) (h : c ≤ b) : a / b ≤ a / c
+  rw [div_def.rat a b, div_def.rat a c]
+  exact mul_le_mul_of_nonneg_left.rat (1 / b) (1 / c) a (one_div_le_one_div_of_le.rat c b hc h) ha
++ abs_div.rat (a b : ℚ) : |a / b| = |a| / |b|
+  by_cases hb : b = 0
+  · have z : |(0 : ℚ)| = 0 := by decide
+    rw [hb, div_zero.rat, z, div_zero.rat]
+  · have p := abs_pos.rat b hb
+    have e := mul_div_cancel.rat a b hb
+    have f := abs_mul.rat (a / b) b
+    rw [e] at f
+    exact (eq_div_iff.rat (|a / b|) (|a|) (|b|) (by linarith)).mpr f.symm
+-- a quadratic that is nonnegative everywhere has nonpositive discriminant
++ discrim_le_zero.rat (a b c : ℚ) (h : ∀ x : ℚ, 0 ≤ a * x * x + b * x + c) : b * b - 4 * a * c ≤ 0
+  by_cases ha : 0 < a
+  · have hx := h ((0 - b) / (2 * a))
+    have hy := mul_div_cancel.rat (0 - b) (2 * a) (by linarith)
+    have e1 : (0 - b) / (2 * a) * (2 * a) * ((0 - b) / (2 * a) * (2 * a)) = (0 - b) * (0 - b) := by rw [hy]
+    have e2 : b * ((0 - b) / (2 * a) * (2 * a)) = b * (0 - b) := by rw [hy]
+    have p := mul_nonneg.rat a (a * ((0 - b) / (2 * a)) * ((0 - b) / (2 * a)) + b * ((0 - b) / (2 * a)) + c) (by linarith) hx
+    linarith
+  · by_cases hz : a = 0
+    · rw [hz]
+      by_cases hb : b = 0
+      · rw [hb]
+        linarith
+      · have hx := h ((0 - c - 1) / b)
+        have hy := mul_div_cancel.rat (0 - c - 1) b hb
+        rw [hz] at hx
+        linarith
+    · have pb := abs_nonneg.rat b
+      have pc := abs_nonneg.rat c
+      have hq := div_pos.rat (|b| + |c| + 1) (0 - a) (by linarith) (by linarith)
+      have ht := mul_div_cancel.rat (|b| + |c| + 1) (0 - a) (by linarith)
+      have e : (|b| + |c| + 1) / (0 - a) * (0 - a) * ((|b| + |c| + 1) / (0 - a)) = (|b| + |c| + 1) * ((|b| + |c| + 1) / (0 - a)) := by rw [ht]
+      have hx := h ((|b| + |c| + 1) / (0 - a) + 1)
+      have k1 := mul_le_mul_of_nonneg_right.rat b (|b|) ((|b| + |c| + 1) / (0 - a) + 1) (le_abs_self.rat b) (by linarith)
+      have k2 := le_abs_self.rat c
+      have k3 := mul_nonneg.rat (|c|) ((|b| + |c| + 1) / (0 - a)) pc (by linarith)
+      linarith
+
+-- ---- casts ℕ → ℤ → ℚ → ℝ -----------------------------------------------------------------------------------------
+-- ℤ → ℚ
++ int_cast_zero.rat : ((0 : ℤ) : ℚ) = 0 := by decide
++ int_cast_one.rat : ((1 : ℤ) : ℚ) = 1 := by decide
++ int_cast_add.rat (m n : ℤ) : ((m + n : ℤ) : ℚ) = (m : ℚ) + (n : ℚ) := rat_of_int_add m n
++ int_cast_mul.rat (m n : ℤ) : ((m * n : ℤ) : ℚ) = (m : ℚ) * (n : ℚ) := rat_of_int_mul m n
++ int_cast_sub.rat (m n : ℤ) : ((m - n : ℤ) : ℚ) = (m : ℚ) - (n : ℚ)
+  have e := rat_of_int_add (m - n) n
+  have f : m - n + n = m := by ring
+  rw [f] at e
+  linarith
++ int_cast_le.rat (m n : ℤ) : (m : ℚ) ≤ (n : ℚ) ↔ m ≤ n := rat_of_int_le m n
++ int_cast_lt.rat (m n : ℤ) : (m : ℚ) < (n : ℚ) ↔ m < n
+  have k := rat_of_int_le n m
+  constructor
+  · intro h
+    by_contra c
+    linarith [k.mpr (by linarith)]
+  · intro h
+    by_contra c
+    linarith [k.mp (by linarith)]
++ int_cast_inj.rat (m n : ℤ) : (m : ℚ) = (n : ℚ) ↔ m = n
+  constructor
+  · intro h
+    linarith [(rat_of_int_le m n).mp (by linarith), (rat_of_int_le n m).mp (by linarith)]
+  · intro h
+    rw [h]
++ int_cast_nonneg.rat (z : ℤ) (h : 0 ≤ z) : 0 ≤ (z : ℚ)
+  have k := (rat_of_int_le 0 z).mpr h
+  rw [int_cast_zero.rat] at k
+  exact k
++ int_cast_pow.rat (m : ℤ) (n : ℕ) : ((m ^ n : ℤ) : ℚ) = (m : ℚ) ^ n
+  induction n with n ih
+  · rw [pow_zero.int, pow_zero.rat]
+    decide
+  · rw [succ_eq_add_one.nat, pow_succ.int, int_cast_mul.rat, ih, pow_succ.rat]
+-- ℚ → ℝ
++ rat_cast_zero.real : ((0 : ℚ) : ℝ) = 0 := by decide
++ rat_cast_one.real : ((1 : ℚ) : ℝ) = 1 := by decide
++ rat_cast_add.real (p q : ℚ) : ((p + q : ℚ) : ℝ) = (p : ℝ) + (q : ℝ) := real_of_rat_add p q
++ rat_cast_mul.real (p q : ℚ) : ((p * q : ℚ) : ℝ) = (p : ℝ) * (q : ℝ) := real_of_rat_mul p q
++ rat_cast_sub.real (p q : ℚ) : ((p - q : ℚ) : ℝ) = (p : ℝ) - (q : ℝ)
+  have e := real_of_rat_add (p - q) q
+  have f : p - q + q = p := by ring
+  rw [f] at e
+  linarith
++ rat_cast_le.real (p q : ℚ) : (p : ℝ) ≤ (q : ℝ) ↔ p ≤ q := real_of_rat_le p q
++ rat_cast_lt.real (p q : ℚ) : (p : ℝ) < (q : ℝ) ↔ p < q
+  have k := real_of_rat_le q p
+  constructor
+  · intro h
+    by_contra c
+    linarith [k.mpr (by linarith)]
+  · intro h
+    by_contra c
+    linarith [k.mp (by linarith)]
++ rat_cast_inj.real (p q : ℚ) : (p : ℝ) = (q : ℝ) ↔ p = q
+  constructor
+  · intro h
+    linarith [(real_of_rat_le p q).mp (by linarith), (real_of_rat_le q p).mp (by linarith)]
+  · intro h
+    rw [h]
++ rat_cast_nonneg.real (q : ℚ) (h : 0 ≤ q) : 0 ≤ (q : ℝ)
+  have k := (real_of_rat_le 0 q).mpr h
+  rw [rat_cast_zero.real] at k
+  exact k
++ rat_cast_pow.real (q : ℚ) (n : ℕ) : ((q ^ n : ℚ) : ℝ) = (q : ℝ) ^ n
+  induction n with n ih
+  · rw [pow_zero.rat, pow_zero.real]
+    decide
+  · rw [succ_eq_add_one.nat, pow_succ.rat, rat_cast_mul.real, ih, pow_succ.real]
++ rat_cast_one_div.real (q : ℚ) : ((1 / q : ℚ) : ℝ) = 1 / (q : ℝ)
+  by_cases hq : q = 0
+  · rw [hq]
+    decide
+  · have e := real_of_rat_mul q (1 / q)
+    rw [mul_inv_cancel.rat q hq, rat_cast_one.real] at e
+    exact eq_one_div_of_mul_eq_one.real (real_of_rat q) (real_of_rat (1 / q)) e.symm
++ rat_cast_div.real (p q : ℚ) : ((p / q : ℚ) : ℝ) = (p : ℝ) / (q : ℝ)
+  rw [div_def.rat, rat_cast_mul.real, rat_cast_one_div.real, div_def.real (real_of_rat p) (real_of_rat q)]
+-- ℤ → ℝ
++ int_cast_zero.real : ((0 : ℤ) : ℝ) = 0 := by decide
++ int_cast_one.real : ((1 : ℤ) : ℝ) = 1 := by decide
++ int_cast_add.real (m n : ℤ) : ((m + n : ℤ) : ℝ) = (m : ℝ) + (n : ℝ)
+  rw [rat_of_int_add, real_of_rat_add]
++ int_cast_mul.real (m n : ℤ) : ((m * n : ℤ) : ℝ) = (m : ℝ) * (n : ℝ)
+  rw [rat_of_int_mul, real_of_rat_mul]
++ int_cast_sub.real (m n : ℤ) : ((m - n : ℤ) : ℝ) = (m : ℝ) - (n : ℝ)
+  rw [int_cast_sub.rat, rat_cast_sub.real]
++ int_cast_le.real (m n : ℤ) : (m : ℝ) ≤ (n : ℝ) ↔ m ≤ n
+  constructor
+  · intro h
+    exact (rat_of_int_le m n).mp ((real_of_rat_le (rat_of_int m) (rat_of_int n)).mp h)
+  · intro h
+    exact (real_of_rat_le (rat_of_int m) (rat_of_int n)).mpr ((rat_of_int_le m n).mpr h)
++ int_cast_lt.real (m n : ℤ) : (m : ℝ) < (n : ℝ) ↔ m < n
+  constructor
+  · intro h
+    exact (int_cast_lt.rat m n).mp ((rat_cast_lt.real (rat_of_int m) (rat_of_int n)).mp h)
+  · intro h
+    exact (rat_cast_lt.real (rat_of_int m) (rat_of_int n)).mpr ((int_cast_lt.rat m n).mpr h)
++ int_cast_inj.real (m n : ℤ) : (m : ℝ) = (n : ℝ) ↔ m = n
+  constructor
+  · intro h
+    exact (int_cast_inj.rat m n).mp ((rat_cast_inj.real (rat_of_int m) (rat_of_int n)).mp h)
+  · intro h
+    rw [h]
++ int_cast_nonneg.real (z : ℤ) (h : 0 ≤ z) : 0 ≤ (z : ℝ)
+  exact rat_cast_nonneg.real (rat_of_int z) (int_cast_nonneg.rat z h)
++ int_cast_pow.real (m : ℤ) (n : ℕ) : ((m ^ n : ℤ) : ℝ) = (m : ℝ) ^ n
+  rw [int_cast_pow.rat, rat_cast_pow.real]
+-- ℕ → ℤ
++ cast_zero.int : ((0 : ℕ) : ℤ) = 0 := by decide
++ cast_one.int : ((1 : ℕ) : ℤ) = 1 := by decide
++ cast_add.int (m n : ℕ) : ((m + n : ℕ) : ℤ) = (m : ℤ) + (n : ℤ) := int_of_nat_add m n
++ cast_mul.int (m n : ℕ) : ((m * n : ℕ) : ℤ) = (m : ℤ) * (n : ℤ) := int_of_nat_mul m n
++ cast_succ.int (n : ℕ) : ((n + 1 : ℕ) : ℤ) = (n : ℤ) + 1
+  rw [cast_add.int, cast_one.int]
++ cast_sub.int (m n : ℕ) (h : n ≤ m) : ((m - n : ℕ) : ℤ) = (m : ℤ) - (n : ℤ)
+  have e := cast_add.int (m - n) n
+  rw [sub_add_cancel.nat m n h] at e
+  linarith
++ cast_le.int (m n : ℕ) : (m : ℤ) ≤ (n : ℤ) ↔ m ≤ n := int_of_nat_le m n
++ cast_lt.int (m n : ℕ) : (m : ℤ) < (n : ℤ) ↔ m < n
+  have k := int_of_nat_le n m
+  constructor
+  · intro h
+    by_contra c
+    linarith [k.mpr (by linarith)]
+  · intro h
+    by_contra c
+    linarith [k.mp (by linarith)]
++ cast_inj.int (m n : ℕ) : (m : ℤ) = (n : ℤ) ↔ m = n
+  constructor
+  · intro h
+    linarith [(int_of_nat_le m n).mp (by linarith), (int_of_nat_le n m).mp (by linarith)]
+  · intro h
+    rw [h]
++ cast_nonneg.int (n : ℕ) : 0 ≤ (n : ℤ) := int_of_nat_nonneg n
++ cast_pos.int (n : ℕ) : 0 < (n : ℤ) ↔ 0 < n
+  have k := cast_lt.int 0 n
+  rw [cast_zero.int] at k
+  exact k
++ cast_pow.int (m n : ℕ) : ((m ^ n : ℕ) : ℤ) = (m : ℤ) ^ n
+  induction n with n ih
+  · rw [pow_zero.nat, pow_zero.int]
+    decide
+  · rw [succ_eq_add_one.nat, pow_succ.nat, cast_mul.int, ih, pow_succ.int]
++ cast_sum.int (f : ℕ → ℕ) (n : ℕ) : ((∑ i < n, f i : ℕ) : ℤ) = ∑ i < n, (f i : ℤ)
+  induction n with n ih
+  · decide
+  · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, cast_add.int, ih]
+
+-- ℕ → ℚ
++ cast_zero.rat : ((0 : ℕ) : ℚ) = 0 := by decide
++ cast_one.rat : ((1 : ℕ) : ℚ) = 1 := by decide
++ cast_add.rat (m n : ℕ) : ((m + n : ℕ) : ℚ) = (m : ℚ) + (n : ℚ)
+  rw [cast_add.int, int_cast_add.rat]
++ cast_mul.rat (m n : ℕ) : ((m * n : ℕ) : ℚ) = (m : ℚ) * (n : ℚ)
+  rw [cast_mul.int, int_cast_mul.rat]
++ cast_succ.rat (n : ℕ) : ((n + 1 : ℕ) : ℚ) = (n : ℚ) + 1
+  rw [cast_add.rat, cast_one.rat]
++ cast_sub.rat (m n : ℕ) (h : n ≤ m) : ((m - n : ℕ) : ℚ) = (m : ℚ) - (n : ℚ)
+  have e := cast_add.rat (m - n) n
+  rw [sub_add_cancel.nat m n h] at e
+  linarith
++ cast_le.rat (m n : ℕ) : (m : ℚ) ≤ (n : ℚ) ↔ m ≤ n
+  constructor
+  · intro h
+    exact (cast_le.int m n).mp ((int_cast_le.rat (int_of_nat m) (int_of_nat n)).mp h)
+  · intro h
+    exact (int_cast_le.rat (int_of_nat m) (int_of_nat n)).mpr ((cast_le.int m n).mpr h)
++ cast_lt.rat (m n : ℕ) : (m : ℚ) < (n : ℚ) ↔ m < n
+  constructor
+  · intro h
+    exact (cast_lt.int m n).mp ((int_cast_lt.rat (int_of_nat m) (int_of_nat n)).mp h)
+  · intro h
+    exact (int_cast_lt.rat (int_of_nat m) (int_of_nat n)).mpr ((cast_lt.int m n).mpr h)
++ cast_inj.rat (m n : ℕ) : (m : ℚ) = (n : ℚ) ↔ m = n
+  constructor
+  · intro h
+    exact (cast_inj.int m n).mp ((int_cast_inj.rat (int_of_nat m) (int_of_nat n)).mp h)
+  · intro h
+    rw [h]
++ cast_nonneg.rat (n : ℕ) : 0 ≤ (n : ℚ)
+  exact int_cast_nonneg.rat (int_of_nat n) (int_of_nat_nonneg n)
++ cast_pos.rat (n : ℕ) : 0 < (n : ℚ) ↔ 0 < n
+  have k := cast_lt.rat 0 n
+  rw [cast_zero.rat] at k
+  exact k
++ cast_pow.rat (m n : ℕ) : ((m ^ n : ℕ) : ℚ) = (m : ℚ) ^ n
+  rw [cast_pow.int, int_cast_pow.rat]
++ cast_sum.rat (f : ℕ → ℕ) (n : ℕ) : ((∑ i < n, f i : ℕ) : ℚ) = ∑ i < n, (f i : ℚ)
+  induction n with n ih
+  · decide
+  · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, cast_add.rat, ih]
++ cast_div_le.rat (n k : ℕ) : ((n / k : ℕ) : ℚ) ≤ (n : ℚ) / (k : ℚ)
+  by_cases hk : k = 0
+  · rw [hk, div_zero.nat, cast_zero.rat, div_zero.rat]
+    linarith
+  · have p : 0 < (k : ℚ) := (cast_pos.rat k).mpr (by linarith)
+    have m := (cast_le.rat (k * (n / k)) n).mpr (div_mul_le.nat n k)
+    rw [cast_mul.rat] at m
+    exact (le_div_iff.rat (((n / k : ℕ)) : ℚ) (n : ℚ) (k : ℚ) p).mpr (by linarith)
+
+-- ℕ → ℝ
++ cast_zero.real : ((0 : ℕ) : ℝ) = 0 := by decide
++ cast_one.real : ((1 : ℕ) : ℝ) = 1 := by decide
++ cast_add.real (m n : ℕ) : ((m + n : ℕ) : ℝ) = (m : ℝ) + (n : ℝ)
+  rw [cast_add.int, int_cast_add.real]
++ cast_mul.real (m n : ℕ) : ((m * n : ℕ) : ℝ) = (m : ℝ) * (n : ℝ)
+  rw [cast_mul.int, int_cast_mul.real]
++ cast_succ.real (n : ℕ) : ((n + 1 : ℕ) : ℝ) = (n : ℝ) + 1
+  rw [cast_add.real, cast_one.real]
++ cast_sub.real (m n : ℕ) (h : n ≤ m) : ((m - n : ℕ) : ℝ) = (m : ℝ) - (n : ℝ)
+  have e := cast_add.real (m - n) n
+  rw [sub_add_cancel.nat m n h] at e
+  linarith
++ cast_le.real (m n : ℕ) : (m : ℝ) ≤ (n : ℝ) ↔ m ≤ n
+  constructor
+  · intro h
+    exact (cast_le.int m n).mp ((int_cast_le.real (int_of_nat m) (int_of_nat n)).mp h)
+  · intro h
+    exact (int_cast_le.real (int_of_nat m) (int_of_nat n)).mpr ((cast_le.int m n).mpr h)
++ cast_lt.real (m n : ℕ) : (m : ℝ) < (n : ℝ) ↔ m < n
+  constructor
+  · intro h
+    exact (cast_lt.int m n).mp ((int_cast_lt.real (int_of_nat m) (int_of_nat n)).mp h)
+  · intro h
+    exact (int_cast_lt.real (int_of_nat m) (int_of_nat n)).mpr ((cast_lt.int m n).mpr h)
++ cast_inj.real (m n : ℕ) : (m : ℝ) = (n : ℝ) ↔ m = n
+  constructor
+  · intro h
+    exact (cast_inj.int m n).mp ((int_cast_inj.real (int_of_nat m) (int_of_nat n)).mp h)
+  · intro h
+    rw [h]
++ cast_nonneg.real (n : ℕ) : 0 ≤ (n : ℝ)
+  exact int_cast_nonneg.real (int_of_nat n) (int_of_nat_nonneg n)
++ cast_pos.real (n : ℕ) : 0 < (n : ℝ) ↔ 0 < n
+  have k := cast_lt.real 0 n
+  rw [cast_zero.real] at k
+  exact k
++ cast_pow.real (m n : ℕ) : ((m ^ n : ℕ) : ℝ) = (m : ℝ) ^ n
+  rw [cast_pow.int, int_cast_pow.real]
++ cast_sum.real (f : ℕ → ℕ) (n : ℕ) : ((∑ i < n, f i : ℕ) : ℝ) = ∑ i < n, (f i : ℝ)
+  induction n with n ih
+  · decide
+  · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, cast_add.real, ih]
++ cast_div_le.real (n k : ℕ) : ((n / k : ℕ) : ℝ) ≤ (n : ℝ) / (k : ℝ)
+  by_cases hk : k = 0
+  · rw [hk, div_zero.nat, cast_zero.real, div_zero.real]
+    linarith
+  · have p : 0 < (k : ℝ) := (cast_pos.real k).mpr (by linarith)
+    have m := (cast_le.real (k * (n / k)) n).mpr (div_mul_le.nat n k)
+    rw [cast_mul.real] at m
+    exact (le_div_iff.real (((n / k : ℕ)) : ℝ) (n : ℝ) (k : ℝ) p).mpr (by linarith)
+
+-- Bernoulli's inequality
++ one_add_mul_le_pow.rat (a : ℚ) (n : ℕ) (h : 0 - 1 ≤ a) : 1 + (n : ℚ) * a ≤ (1 + a) ^ n
+  induction n with n ih
+  · rw [cast_zero.rat, pow_zero.rat]
+    linarith
+  · rw [succ_eq_add_one.nat, cast_succ.rat, pow_succ.rat]
+    have p := mul_nonneg.rat (n : ℚ) (a ^ 2) (cast_nonneg.rat n) (sq_nonneg.rat a)
+    nlinarith
++ one_add_mul_le_pow.real (a : ℝ) (n : ℕ) (h : 0 - 1 ≤ a) : 1 + (n : ℝ) * a ≤ (1 + a) ^ n
+  induction n with n ih
+  · rw [cast_zero.real, pow_zero.real]
+    linarith
+  · rw [succ_eq_add_one.nat, cast_succ.real, pow_succ.real]
+    have p := mul_nonneg.real (n : ℝ) (a ^ 2) (cast_nonneg.real n) (sq_nonneg.real a)
+    nlinarith
+
+-- the Archimedean property of ℚ (from floor); for ℝ see exists_nat_gt in realx (it needs completeness)
++ exists_nat_gt.rat (q : ℚ) : ∃ n : ℕ, q < (n : ℚ)
+  have k := lt_floor_add_one q
+  by_cases h : 0 ≤ floor q + 1
+  · use nat_of_int (floor q + 1)
+    rw [int_of_nat_of_int (floor q + 1) h, int_cast_add.rat, int_cast_one.rat]
+    exact k
+  · use 0
+    have l := (int_cast_le.rat (floor q + 1) 0).mpr (by linarith)
+    rw [int_cast_add.rat, int_cast_one.rat, int_cast_zero.rat] at l
+    have z : ((0 : ℕ) : ℚ) = 0 := by decide
+    rw [z]
+    linarith
+
+-- ---- factorial and binomial coefficients (choose by Pascal's rule) --------------------------------------------
+-> fact : ℕ → ℕ
+  | 0 => 1
+  | n + 1 => (n + 1) * fact n
+
+-> choose : ℕ → ℕ → ℕ
+  | 0, 0 => 1
+  | 0, k + 1 => 0
+  | n + 1, 0 => 1
+  | n + 1, k + 1 => choose n k + choose n (k + 1)
+
++ fact_zero : fact 0 = 1 := by rfl
++ fact_succ (n : ℕ) : fact (n + 1) = (n + 1) * fact n := by rfl
++ choose_zero_zero : choose 0 0 = 1 := by rfl
++ choose_zero_succ (k : ℕ) : choose 0 (k + 1) = 0 := by rfl
++ choose_succ_zero (n : ℕ) : choose (n + 1) 0 = 1 := by rfl
++ choose_succ_succ (n k : ℕ) : choose (n + 1) (k + 1) = choose n k + choose n (k + 1) := by rfl
+
++ fact_pos (n : ℕ) : 0 < fact n
+  induction n with n ih
+  · decide
+  · rw [succ_eq_add_one.nat, fact_succ]
+    exact mul_pos.nat (n + 1) (fact n) (by linarith) ih
++ fact_le_fact (m n : ℕ) (h : m ≤ n) : fact m ≤ fact n
+  have e : n = m + (n - m) := by linarith [sub_add_cancel.nat n m h]
+  rw [e]
+  have k : ∀ d, fact m ≤ fact (m + d)
+    intro d
+    induction d with d ih
+    · rw [add_zero.nat]
+      linarith
+    · rw [succ_eq_add_one.nat, ← add_assoc.nat, fact_succ]
+      linarith [mul_le_mul_right.nat (fact (m + d)) 1 (m + d + 1) (by linarith)]
+  exact k (n - m)
++ choose_zero_right (n : ℕ) : choose n 0 = 1
+  induction n with n ih
+  · rfl
+  · rfl
++ choose_eq_zero_of_lt (n : ℕ) : ∀ k, n < k → choose n k = 0
+  induction n with k h n ih k h
+  · have e : k = k - 1 + 1 := by linarith [sub_add_cancel.nat k 1 (by linarith)]
+    rw [e]
+    rfl
+  · rw [succ_eq_add_one.nat] at h
+    rw [succ_eq_add_one.nat]
+    have e : k = k - 1 + 1 := by linarith [sub_add_cancel.nat k 1 (by linarith)]
+    rw [e, choose_succ_succ, ih (k - 1) (by linarith), ih (k - 1 + 1) (by linarith)]
+    rfl
++ choose_self (n : ℕ) : choose n n = 1
+  induction n with n ih
+  · rfl
+  · rw [succ_eq_add_one.nat, choose_succ_succ, ih, choose_eq_zero_of_lt n (n + 1) (by linarith)]
+    rfl
++ choose_one_right (n : ℕ) : choose n 1 = n
+  induction n with n ih
+  · rfl
+  · rw [succ_eq_add_one.nat]
+    have e : choose (n + 1) 1 = choose n 0 + choose n 1 := by rfl
+    rw [e, choose_zero_right, ih]
+    ring
++ choose_two_succ (n : ℕ) : 2 * choose (n + 1) 2 = (n + 1) * n
+  induction n with n ih
+  · rfl
+  · rw [succ_eq_add_one.nat]
+    have e : choose (n + 1 + 1) 2 = choose (n + 1) 1 + choose (n + 1) 2 := by rfl
+    rw [e, choose_one_right]
+    linarith
++ choose_two (n : ℕ) : 2 * choose n 2 = n * (n - 1)
+  induction n with n ih
+  · rfl
+  · rw [succ_eq_add_one.nat]
+    have e : n + 1 - 1 = n := by linarith [sub_add_cancel.nat (n + 1) 1 (by linarith)]
+    rw [e]
+    exact choose_two_succ n
+
+-- n! = C(n, k) · k! · (n − k)!, hence the symmetry C(n, n − k) = C(n, k)
++ choose_mul_fact (n : ℕ) : ∀ k, k ≤ n → choose n k * fact k * fact (n - k) = fact n
+  induction n with k h n ih k h
+  · have e : k = 0 := by linarith
+    rw [e]
+    rfl
+  · rw [succ_eq_add_one.nat] at h
+    rw [succ_eq_add_one.nat]
+    induction k with h j ihk h
+    · have e : n + 1 - 0 = n + 1 := by linarith [sub_add_cancel.nat (n + 1) 0 (by linarith)]
+      rw [e, choose_zero_right, fact_zero]
+      ring
+    · rw [succ_eq_add_one.nat] at h
+      rw [succ_eq_add_one.nat]
+      have s : n + 1 - (j + 1) = n - j := by linarith [sub_add_cancel.nat (n + 1) (j + 1) h, sub_add_cancel.nat n j (by linarith)]
+      rw [choose_succ_succ, fact_succ j, fact_succ n, s]
+      have e1 : (j + 1) * (choose n j * fact j * fact (n - j)) = (j + 1) * fact n := by rw [ih j (by linarith)]
+      by_cases c : j + 1 ≤ n
+      · have i2 := ih (j + 1) c
+        rw [fact_succ j] at i2
+        have g : n - j = n - (j + 1) + 1 := by linarith [sub_add_cancel.nat n (j + 1) c, sub_add_cancel.nat n j (by linarith)]
+        have gG : fact (n - j) = (n - (j + 1) + 1) * fact (n - (j + 1))
+          rw [g, fact_succ]
+        have e2 : (n - (j + 1) + 1) * (choose n (j + 1) * ((j + 1) * fact j) * fact (n - (j + 1))) = (n - (j + 1) + 1) * fact n := by rw [i2]
+        have e3 : (choose n j + choose n (j + 1)) * ((j + 1) * fact j) * fact (n - j) = (j + 1) * (choose n j * fact j * fact (n - j)) + (n - (j + 1) + 1) * (choose n (j + 1) * ((j + 1) * fact j) * fact (n - (j + 1)))
+          rw [gG]
+          ring
+        have jd : j + 1 + (n - (j + 1) + 1) = n + 1 := by linarith [sub_add_cancel.nat n (j + 1) c]
+        have e4 : (j + 1 + (n - (j + 1) + 1)) * fact n = (n + 1) * fact n := by rw [jd]
+        linarith
+      · have jn : j = n := by linarith
+        rw [choose_eq_zero_of_lt n (j + 1) (by linarith)]
+        have e5 : (j + 1) * fact n = (n + 1) * fact n := by rw [jn]
+        linarith
++ choose_symm (n k : ℕ) (h : k ≤ n) : choose n (n - k) = choose n k
+  have a := choose_mul_fact n k h
+  have b := choose_mul_fact n (n - k) (by linarith [sub_add_cancel.nat n k h])
+  have e : n - (n - k) = k := by linarith [sub_add_cancel.nat n k h, sub_add_cancel.nat n (n - k) (by linarith [sub_add_cancel.nat n k h])]
+  rw [e] at b
+  have p := mul_pos.nat (fact k) (fact (n - k)) (fact_pos k) (fact_pos (n - k))
+  have q : choose n (n - k) * (fact k * fact (n - k)) = choose n k * (fact k * fact (n - k)) := by linarith
+  by_contra c
+  obtain l | l := lt_or_gt_of_ne.nat (choose n (n - k)) (choose n k) c
+  · linarith [mul_lt_mul_of_pos_right.nat (choose n (n - k)) (choose n k) (fact k * fact (n - k)) l p]
+  · linarith [mul_lt_mul_of_pos_right.nat (choose n k) (choose n (n - k)) (fact k * fact (n - k)) l p]
+
+-- ---- sums (∑ i < n, f i) ---------------------------------------------------------------------------------------
+-- ℝ
++ sum_add.real (f g : ℕ → ℝ) (n : ℕ) : ∑ i < n, (f i + g i) = (∑ i < n, f i) + ∑ i < n, g i
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, sum_below_succ, ih]
+    ring
++ sum_sub.real (f g : ℕ → ℝ) (n : ℕ) : ∑ i < n, (f i - g i) = (∑ i < n, f i) - ∑ i < n, g i
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, sum_below_succ, ih]
+    ring
++ sum_const_mul.real (c : ℝ) (f : ℕ → ℝ) (n : ℕ) : ∑ i < n, c * f i = c * ∑ i < n, f i
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, ih]
+    ring
++ sum_mul_const.real (c : ℝ) (f : ℕ → ℝ) (n : ℕ) : ∑ i < n, f i * c = (∑ i < n, f i) * c
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, ih]
+    ring
++ sum_const.real (c : ℝ) (n : ℕ) : ∑ i < n, c = (n : ℝ) * c
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, ih, cast_succ.real]
+    ring
++ sum_le.real (f g : ℕ → ℝ) (n : ℕ) (h : ∀ i < n, f i ≤ g i) : ∑ i < n, f i ≤ ∑ i < n, g i
+  induction n with h n ih h
+  · simp
+  · simp only [succ_eq_add_one.nat] at h
+    rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ]
+    have k := ih (by intro i hi; exact h i (by linarith))
+    linarith [h n (by linarith)]
++ sum_nonneg.real (f : ℕ → ℝ) (n : ℕ) (h : ∀ i < n, 0 ≤ f i) : 0 ≤ ∑ i < n, f i
+  induction n with h n ih h
+  · simp
+  · simp only [succ_eq_add_one.nat] at h
+    rw [succ_eq_add_one.nat, sum_below_succ]
+    have k := ih (by intro i hi; exact h i (by linarith))
+    linarith [h n (by linarith)]
++ abs_sum_le.real (f : ℕ → ℝ) (n : ℕ) : |∑ i < n, f i| ≤ ∑ i < n, |f i|
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ]
+    linarith [abs_add.real (∑ i < n, f i) (f n)]
++ sum_telescope.real (f : ℕ → ℝ) (n : ℕ) : ∑ i < n, (f (i + 1) - f i) = f n - f 0
+  induction n with n ih
+  · simp
+    ring
+  · rw [succ_eq_add_one.nat, sum_below_succ, ih]
+    ring
++ geom_sum_mul.real (x : ℝ) (n : ℕ) : (∑ i < n, x ^ i) * (x - 1) = x ^ n - 1
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, pow_succ.real x n]
+    linarith
++ single_le_sum.real (f : ℕ → ℝ) (n k : ℕ) (h : ∀ i < n, 0 ≤ f i) (hk : k < n) : f k ≤ ∑ i < n, f i
+  induction n with h hk n ih h hk
+  · linarith
+  · simp only [succ_eq_add_one.nat] at h
+    simp only [succ_eq_add_one.nat] at hk
+    rw [succ_eq_add_one.nat, sum_below_succ]
+    have hn := h n (by linarith)
+    have r : ∀ i < n, 0 ≤ f i := by intro i hi; exact h i (by linarith)
+    by_cases c : k < n
+    · linarith [ih r c]
+    · have e : k = n := by linarith
+      rw [e]
+      linarith [sum_nonneg.real f n r]
+
+-- ℚ
++ sum_add.rat (f g : ℕ → ℚ) (n : ℕ) : ∑ i < n, (f i + g i) = (∑ i < n, f i) + ∑ i < n, g i
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, sum_below_succ, ih]
+    ring
++ sum_sub.rat (f g : ℕ → ℚ) (n : ℕ) : ∑ i < n, (f i - g i) = (∑ i < n, f i) - ∑ i < n, g i
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, sum_below_succ, ih]
+    ring
++ sum_const_mul.rat (c : ℚ) (f : ℕ → ℚ) (n : ℕ) : ∑ i < n, c * f i = c * ∑ i < n, f i
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, ih]
+    ring
++ sum_mul_const.rat (c : ℚ) (f : ℕ → ℚ) (n : ℕ) : ∑ i < n, f i * c = (∑ i < n, f i) * c
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, ih]
+    ring
++ sum_const.rat (c : ℚ) (n : ℕ) : ∑ i < n, c = (n : ℚ) * c
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, ih, cast_succ.rat]
+    ring
++ sum_le.rat (f g : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, f i ≤ g i) : ∑ i < n, f i ≤ ∑ i < n, g i
+  induction n with h n ih h
+  · simp
+  · simp only [succ_eq_add_one.nat] at h
+    rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ]
+    have k := ih (by intro i hi; exact h i (by linarith))
+    linarith [h n (by linarith)]
++ sum_nonneg.rat (f : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, 0 ≤ f i) : 0 ≤ ∑ i < n, f i
+  induction n with h n ih h
+  · simp
+  · simp only [succ_eq_add_one.nat] at h
+    rw [succ_eq_add_one.nat, sum_below_succ]
+    have k := ih (by intro i hi; exact h i (by linarith))
+    linarith [h n (by linarith)]
++ abs_sum_le.rat (f : ℕ → ℚ) (n : ℕ) : |∑ i < n, f i| ≤ ∑ i < n, |f i|
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ]
+    linarith [abs_add.rat (∑ i < n, f i) (f n)]
++ sum_telescope.rat (f : ℕ → ℚ) (n : ℕ) : ∑ i < n, (f (i + 1) - f i) = f n - f 0
+  induction n with n ih
+  · simp
+    ring
+  · rw [succ_eq_add_one.nat, sum_below_succ, ih]
+    ring
++ geom_sum_mul.rat (x : ℚ) (n : ℕ) : (∑ i < n, x ^ i) * (x - 1) = x ^ n - 1
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, pow_succ.rat x n]
+    linarith
++ single_le_sum.rat (f : ℕ → ℚ) (n k : ℕ) (h : ∀ i < n, 0 ≤ f i) (hk : k < n) : f k ≤ ∑ i < n, f i
+  induction n with h hk n ih h hk
+  · linarith
+  · simp only [succ_eq_add_one.nat] at h
+    simp only [succ_eq_add_one.nat] at hk
+    rw [succ_eq_add_one.nat, sum_below_succ]
+    have hn := h n (by linarith)
+    have r : ∀ i < n, 0 ≤ f i := by intro i hi; exact h i (by linarith)
+    by_cases c : k < n
+    · linarith [ih r c]
+    · have e : k = n := by linarith
+      rw [e]
+      linarith [sum_nonneg.rat f n r]
+
+-- ℤ
++ sum_add.int (f g : ℕ → ℤ) (n : ℕ) : ∑ i < n, (f i + g i) = (∑ i < n, f i) + ∑ i < n, g i
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, sum_below_succ, ih]
+    ring
++ sum_sub.int (f g : ℕ → ℤ) (n : ℕ) : ∑ i < n, (f i - g i) = (∑ i < n, f i) - ∑ i < n, g i
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, sum_below_succ, ih]
+    ring
++ sum_const_mul.int (c : ℤ) (f : ℕ → ℤ) (n : ℕ) : ∑ i < n, c * f i = c * ∑ i < n, f i
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, ih]
+    ring
++ sum_mul_const.int (c : ℤ) (f : ℕ → ℤ) (n : ℕ) : ∑ i < n, f i * c = (∑ i < n, f i) * c
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, ih]
+    ring
++ sum_const.int (c : ℤ) (n : ℕ) : ∑ i < n, c = (n : ℤ) * c
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, ih, cast_succ.int]
+    ring
++ sum_le.int (f g : ℕ → ℤ) (n : ℕ) (h : ∀ i < n, f i ≤ g i) : ∑ i < n, f i ≤ ∑ i < n, g i
+  induction n with h n ih h
+  · simp
+  · simp only [succ_eq_add_one.nat] at h
+    rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ]
+    have k := ih (by intro i hi; exact h i (by linarith))
+    linarith [h n (by linarith)]
++ sum_nonneg.int (f : ℕ → ℤ) (n : ℕ) (h : ∀ i < n, 0 ≤ f i) : 0 ≤ ∑ i < n, f i
+  induction n with h n ih h
+  · simp
+  · simp only [succ_eq_add_one.nat] at h
+    rw [succ_eq_add_one.nat, sum_below_succ]
+    have k := ih (by intro i hi; exact h i (by linarith))
+    linarith [h n (by linarith)]
++ abs_sum_le.int (f : ℕ → ℤ) (n : ℕ) : |∑ i < n, f i| ≤ ∑ i < n, |f i|
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ]
+    linarith [abs_add.int (∑ i < n, f i) (f n)]
++ sum_telescope.int (f : ℕ → ℤ) (n : ℕ) : ∑ i < n, (f (i + 1) - f i) = f n - f 0
+  induction n with n ih
+  · simp
+    ring
+  · rw [succ_eq_add_one.nat, sum_below_succ, ih]
+    ring
++ geom_sum_mul.int (x : ℤ) (n : ℕ) : (∑ i < n, x ^ i) * (x - 1) = x ^ n - 1
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, pow_succ.int x n]
+    linarith
++ single_le_sum.int (f : ℕ → ℤ) (n k : ℕ) (h : ∀ i < n, 0 ≤ f i) (hk : k < n) : f k ≤ ∑ i < n, f i
+  induction n with h hk n ih h hk
+  · linarith
+  · simp only [succ_eq_add_one.nat] at h
+    simp only [succ_eq_add_one.nat] at hk
+    rw [succ_eq_add_one.nat, sum_below_succ]
+    have hn := h n (by linarith)
+    have r : ∀ i < n, 0 ≤ f i := by intro i hi; exact h i (by linarith)
+    by_cases c : k < n
+    · linarith [ih r c]
+    · have e : k = n := by linarith
+      rw [e]
+      linarith [sum_nonneg.int f n r]
+
+-- ℕ
++ sum_add.nat (f g : ℕ → ℕ) (n : ℕ) : ∑ i < n, (f i + g i) = (∑ i < n, f i) + ∑ i < n, g i
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, sum_below_succ, ih]
+    ring
++ sum_const_mul.nat (c : ℕ) (f : ℕ → ℕ) (n : ℕ) : ∑ i < n, c * f i = c * ∑ i < n, f i
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, ih]
+    ring
++ sum_mul_const.nat (c : ℕ) (f : ℕ → ℕ) (n : ℕ) : ∑ i < n, f i * c = (∑ i < n, f i) * c
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, ih]
+    ring
++ sum_const.nat (c : ℕ) (n : ℕ) : ∑ i < n, c = n * c
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, ih]
+    ring
++ sum_le.nat (f g : ℕ → ℕ) (n : ℕ) (h : ∀ i < n, f i ≤ g i) : ∑ i < n, f i ≤ ∑ i < n, g i
+  induction n with h n ih h
+  · simp
+  · simp only [succ_eq_add_one.nat] at h
+    rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ]
+    have k := ih (by intro i hi; exact h i (by linarith))
+    linarith [h n (by linarith)]
++ sum_nonneg.nat (f : ℕ → ℕ) (n : ℕ) (h : ∀ i < n, 0 ≤ f i) : 0 ≤ ∑ i < n, f i
+  exact zero_le.nat (∑ i < n, f i)
++ geometric_sum_two.nat (n : ℕ) : (∑ i < n, 2 ^ i) + 1 = 2 ^ n
+  induction n with n ih
+  · decide
+  · rw [succ_eq_add_one.nat, sum_below_succ, pow_succ.nat 2 n]
+    linarith
++ sum_range_succ_id_mul_two.nat (n : ℕ) : (∑ i < n + 1, i) * 2 = (n + 1) * n
+  induction n with n ih
+  · decide
+  · rw [succ_eq_add_one.nat, sum_below_succ]
+    linarith
++ sum_range_id_mul_two.nat (n : ℕ) : (∑ i < n, i) * 2 = n * (n - 1)
+  induction n with n ih
+  · decide
+  · rw [succ_eq_add_one.nat]
+    have e : n + 1 - 1 = n := by linarith [sub_add_cancel.nat (n + 1) 1 (by linarith)]
+    rw [e]
+    exact sum_range_succ_id_mul_two.nat n
++ single_le_sum.nat (f : ℕ → ℕ) (n k : ℕ) (h : ∀ i < n, 0 ≤ f i) (hk : k < n) : f k ≤ ∑ i < n, f i
+  induction n with h hk n ih h hk
+  · linarith
+  · simp only [succ_eq_add_one.nat] at h
+    simp only [succ_eq_add_one.nat] at hk
+    rw [succ_eq_add_one.nat, sum_below_succ]
+    have hn := h n (by linarith)
+    have r : ∀ i < n, 0 ≤ f i := by intro i hi; exact h i (by linarith)
+    by_cases c : k < n
+    · linarith [ih r c]
+    · have e : k = n := by linarith
+      rw [e]
+      linarith [sum_nonneg.nat f n r]

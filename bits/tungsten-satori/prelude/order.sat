@@ -30,3 +30,16 @@
     rw [e]
     exact mul_nonneg.real (0 - a) (0 - a) h2 h2
 
+
+-- (b − a)(d − c) ≥ 0 without truncated subtraction: nlinarith's product facts over ℕ
++ nl_cross.nat (a b c d : ℕ) (h : a ≤ b) (k : c ≤ d) : a * d + b * c ≤ a * c + b * d
+  have e1 := sub_add_cancel.nat b a h
+  have e2 := sub_add_cancel.nat d c k
+  have p := zero_le.nat ((b - a) * (d - c))
+  have q : (b - a + a) * (d - c + c) = (b - a) * (d - c) + (b - a) * c + a * (d - c) + a * c := by ring
+  have q2 : a * (d - c + c) = a * (d - c) + a * c := by ring
+  have q3 : (b - a + a) * c = (b - a) * c + a * c := by ring
+  rw [e1, e2] at q
+  rw [e2] at q2
+  rw [e1] at q3
+  linarith

@@ -56,3 +56,7 @@ axiom a_false : (1 : ℕ) = 0
 + om1 (a b : ℕ) : a - b + b = a := by omega
 + lp1 (a b c d e f g h k m n p : ℝ) (q1 : a ≤ b) (q2 : b ≤ c) (q3 : c ≤ d) (q4 : d ≤ e) (q5 : e ≤ f) (q6 : f ≤ g)
     (q7 : g ≤ h) (q8 : h ≤ k) (q9 : k ≤ m) (q10 : m ≤ n) (q11 : n ≤ p) : p ≤ a := by linarith
+
+-- round 3 (nlinarith over ℕ via nl_cross.nat, monomials of expanded ℕ powers): each statement is false
++ nlnat1 (n : ℕ) (hn : 5 ≤ n) : 36 ≤ n * n := by nlinarith
++ pownat1 (k : ℕ) : 2 ≤ (k + 1) ^ 2 := by linarith

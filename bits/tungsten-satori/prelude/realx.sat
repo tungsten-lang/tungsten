@@ -227,3 +227,97 @@ import arith
     rw [e]
     linarith
   linarith [hs.2 (s - 1) u]
+
+-- ---- exponential with unary minus, and Taylor-type bounds -----------------------------------------------------------
+-- exp_neg / exp_neg_mul above use 0 - x; these state the same facts with -x.
+-- Mathlib: Real.exp_neg
++ exp_neg' (x : ℝ) : exp (-x) = 1 / exp x
+  have e : -x = 0 - x := by ring
+  rw [e, exp_neg]
+-- Mathlib: Real.exp_neg with mul_inv_cancel₀ (exp_neg_mul with -x)
++ exp_neg_mul' (x : ℝ) : exp x * exp (-x) = 1
+  have e : -x = 0 - x := by ring
+  rw [e, exp_neg_mul]
+-- Mathlib: Real.exp_le_one_iff
++ exp_le_one_iff (x : ℝ) : exp x ≤ 1 ↔ x ≤ 0
+  have k := exp_le_exp x 0
+  rw [exp_zero] at k
+  exact k
+-- Mathlib: Real.exp_lt_one
++ exp_lt_one (x : ℝ) : exp x < 1 ↔ x < 0
+  have k := exp_lt_exp x 0
+  rw [exp_zero] at k
+  exact k
+-- Mathlib: Real.one_le_exp_iff
++ one_le_exp_iff (x : ℝ) : 1 ≤ exp x ↔ 0 ≤ x
+  have k := exp_le_exp 0 x
+  rw [exp_zero] at k
+  exact k
+
+-- Mathlib: Real.quadratic_le_exp_of_nonneg
+-- (exp x = exp(x/n)ⁿ ≥ (1 + x/n)ⁿ ≥ 1 + x + (1 − 1/n) x²/2 for every n, then the Archimedean property)
++ quadratic_le_exp_of_nonneg (x : ℝ) (hx : 0 ≤ x) : 1 + x + x ^ 2 / 2 ≤ exp x
+  have bin : ∀ a : ℝ, 0 ≤ a → ∀ n : ℕ, 2 + 2 * (n : ℝ) * a + (n : ℝ) * ((n : ℝ) - 1) * a ^ 2 ≤ 2 * (1 + a) ^ n
+    intro a ha n
+    induction n with n ih
+    · rw [cast_zero.real, pow_zero.real]
+      linarith
+    · rw [succ_eq_add_one.nat, cast_succ.real, pow_succ.real]
+      have nn : 0 ≤ (n : ℝ) * ((n : ℝ) - 1)
+        by_cases z : n = 0
+        · rw [z, cast_zero.real]
+          linarith
+        · have o := (cast_le.real 1 n).mpr (by omega)
+          rw [cast_one.real] at o
+          nlinarith
+      nlinarith [mul_nonneg.real ((n : ℝ) * ((n : ℝ) - 1)) (a ^ 3) nn (pow_nonneg.real a 3 ha), mul_nonneg.real (2 * (1 + a) ^ n - (2 + 2 * (n : ℝ) * a + (n : ℝ) * ((n : ℝ) - 1) * a ^ 2)) a (by linarith) ha]
+  by_contra c
+  have dpos : 0 < 1 + x + x ^ 2 / 2 - exp x := by linarith
+  obtain ⟨n, hn⟩ := exists_nat_gt.real (x ^ 2 / (2 * (1 + x + x ^ 2 / 2 - exp x)))
+  have k := (div_lt_iff.real (x ^ 2) (n : ℝ) (2 * (1 + x + x ^ 2 / 2 - exp x)) (by linarith)).mp hn
+  have npos : 0 < (n : ℝ) := by nlinarith [sq_nonneg.real x]
+  have na : (n : ℝ) * (x / (n : ℝ)) = x
+    rw [mul_comm.real]
+    exact mul_div_cancel.real x (n : ℝ) (by linarith)
+  have e := exp_nat_mul (x / (n : ℝ)) n
+  rw [na] at e
+  have an := div_nonneg.real x (n : ℝ) hx (by linarith)
+  have b := bin (x / (n : ℝ)) an n
+  have p := pow_le_pow_left.real (1 + x / (n : ℝ)) (exp (x / (n : ℝ))) n (by linarith) (exp_ge_one_add (x / (n : ℝ)))
+  rw [← e] at p
+  have q1 : ((n : ℝ) * (x / (n : ℝ))) ^ 2 = x ^ 2 := by rw [na]
+  have q2 : (n : ℝ) * (x / (n : ℝ)) * (x / (n : ℝ)) = x * (x / (n : ℝ)) := by rw [na]
+  have key : 2 * (1 + x + x ^ 2 / 2 - exp x) ≤ x * (x / (n : ℝ)) := by linarith
+  have m := mul_le_mul_of_nonneg_left.real (2 * (1 + x + x ^ 2 / 2 - exp x)) (x * (x / (n : ℝ))) (n : ℝ) key (by linarith)
+  have q3 : x * ((n : ℝ) * (x / (n : ℝ))) = x * x := by rw [na]
+  linarith
+
+-- Mathlib: Real.abs_exp_sub_one_sub_id_le
+-- (x ≤ 0: exp x ≤ 1/(1 − x); 0 < x ≤ 1: exp(−x) = exp(−x/6)⁶ ≥ (1 − x/6)⁶ and a Bernstein certificate for
+-- (1 + x + x²)(1 − x/6)⁶ ≥ 1 on [0, 1])
++ abs_exp_sub_one_sub_id_le (x : ℝ) (hx : |x| ≤ 1) : |exp x - 1 - x| ≤ x ^ 2
+  obtain ⟨hl, hu⟩ := (abs_le.real x 1).mp hx
+  have up : exp x ≤ 1 + x + x ^ 2
+    by_cases hneg : x ≤ 0
+    · have k := (div_le_iff.real 1 (1 + x + x ^ 2) (1 - x) (by linarith)).mpr (by linarith [mul_nonneg.real (x ^ 2) (0 - x) (sq_nonneg.real x) (by linarith)])
+      linarith [exp_le_inv_one_sub x (by linarith)]
+    · have e := exp_nat_mul (0 - x / 6) 6
+      have c : ((6 : ℕ) : ℝ) * (0 - x / 6) = 0 - x := by norm_num
+      rw [c] at e
+      have p := pow_le_pow_left.real (1 - x / 6) (exp (0 - x / 6)) 6 (by linarith) (by linarith [exp_ge_one_add (0 - x / 6)])
+      have m := mul_le_mul_of_nonneg_left.real ((1 - x / 6) ^ 6) (exp (0 - x)) (exp x) (by linarith) (exp_nonneg x)
+      have cert : 1 ≤ (1 + x + x ^ 2) * (1 - x / 6) ^ 6
+        have x0 : 0 ≤ x := by linarith
+        have a8 := pow_nonneg.real x 8 x0
+        have k0 := mul_nonneg.real (x ^ 2) ((1 - x) ^ 6) (pow_nonneg.real x 2 x0) (pow_nonneg.real (1 - x) 6 (by linarith))
+        have k1 := mul_nonneg.real (x ^ 3) ((1 - x) ^ 5) (pow_nonneg.real x 3 x0) (pow_nonneg.real (1 - x) 5 (by linarith))
+        have k2 := mul_nonneg.real (x ^ 4) ((1 - x) ^ 4) (pow_nonneg.real x 4 x0) (pow_nonneg.real (1 - x) 4 (by linarith))
+        have k3 := mul_nonneg.real (x ^ 5) ((1 - x) ^ 3) (pow_nonneg.real x 5 x0) (pow_nonneg.real (1 - x) 3 (by linarith))
+        have k4 := mul_nonneg.real (x ^ 6) ((1 - x) ^ 2) (pow_nonneg.real x 6 x0) (pow_nonneg.real (1 - x) 2 (by linarith))
+        linarith [mul_nonneg.real (x ^ 7) (1 - x) (pow_nonneg.real x 7 x0) (by linarith)]
+      by_contra d
+      have q := mul_lt_mul_of_pos_right.real (1 + x + x ^ 2) (exp x) ((1 - x / 6) ^ 6) (by linarith) (pow_pos.real (1 - x / 6) 6 (by linarith))
+      linarith [exp_neg_mul x]
+  apply abs_le_of.real
+  · linarith [exp_ge_one_add x, sq_nonneg.real x]
+  · linarith

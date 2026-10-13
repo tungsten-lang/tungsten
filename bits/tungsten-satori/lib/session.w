@@ -318,9 +318,32 @@
     if c.tactics != nil
       th = prove_with_tactics(stmt, names, c.tactics)
     elsif c.body != nil
-      p = Prover.new(self)
-      g = Goal.new([], [], stmt)
-      th = p.fit(GoalRef.new(g, nil, 0), p.proof_ast(g, c.body, stmt))
+      # `+ t (a : ℝ) (h : …) : stmt := proof` sees its binders: run it as `exact proof` after the binders are introduced;
+      # a whole-statement proof term (e.g. `fun a h => …`) still works through the direct route
+      th = nil
+      err = nil
+      if c.body.kind != :lam && names.size > 0
+        begin
+          p0 = Prover.new(self)
+          root = GoalRef.new(Goal.new([], [], stmt), nil, 0)
+          p0.goals = [root]
+          cur = root
+          names.each -> (nm)
+            cur = p0.intro1(cur, nm)
+          p0.close(cur, p0.fit(cur, p0.proof_ast(cur.goal, c.body, cur.goal.concl)))
+          th = root.thm
+        rescue e
+          err = e
+          th = nil
+      if th == nil
+        begin
+          p = Prover.new(self)
+          g = Goal.new([], [], stmt)
+          th = p.fit(GoalRef.new(g, nil, 0), p.proof_ast(g, c.body, stmt))
+        rescue e2
+          if err != nil
+            raise err
+          raise e2
     else
       raise "theorem without proof"
     if th.hyps.size > 0

@@ -281,6 +281,11 @@
   t = th
   if ren.size > 0
     t = k.inst_type(th, ren)
+  # variables already free before spec_all are constants of the context (e.g. `rw [pow_succ y n]` with local y, n);
+  # only the ∀-bound variables become pattern variables
+  fixed = {}
+  tm_frees(t.concl).each -> (v)
+    fixed[var_key(v)] = true
   t = d.spec_all(t)
   pvars = {}
   tm_frees(t.concl).each -> (v)
@@ -288,7 +293,7 @@
     t.hyps.each -> (h)
       if tm_free_in?(v, h)
         free_in_hyp = true
-    if !free_in_hyp
+    if !free_in_hyp && !fixed.has_key?(var_key(v))
       pvars[var_key(v)] = true
   conds = []
   c = t.concl

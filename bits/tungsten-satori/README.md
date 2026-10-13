@@ -98,6 +98,7 @@ default to ℕ (decimals to ℚ).
 `obtain ⟨x, hx⟩ := h` · `obtain a | b := h` · `cases h with …` ·
 `induction n with x xs ih` · `rw [h, ← g] at h'` · `simp [lemmas, *] at h` ·
 `simp only […]` · `unfold f` · `decide` · `norm_num` · `ring` · `linarith [extra]` ·
+`nlinarith [extra]` · `positivity` · `omega` · `t1 <;> t2` · `all_goals t` ·
 `sat` · `auto` · `specialize h a` · `symm` · `calc` · `funext x` · `subst h` ·
 `revert h` · `sorry` · `·` focuses a goal.
 
@@ -113,8 +114,21 @@ default to ℕ (decimals to ℚ).
   Tseitin-encodes it in the kernel, runs the external solver
   (`bits/tungsten-wassat/bin/wassat`, or `$SATORI_SOLVER`), and re-checks the LRAT
   refutation. Proofs are cached in `.satori-cache/` by CNF hash.
-* `linarith` runs Fourier–Motzkin and hands the kernel a Farkas certificate. For ℕ
-  and ℤ it uses nonnegativity and `a < b ↔ a + 1 ≤ b`.
+* `linarith` runs Fourier–Motzkin and hands the kernel a Farkas certificate. When elimination gets large (more than 12
+  rounds or 600 constraints), an exact two-phase simplex over the Farkas multipliers takes over, which is complete for linear
+  arithmetic. For ℕ and ℤ it uses nonnegativity (of variables and of products of non-literal factors) and
+  `a < b ↔ a + 1 ≤ b`. For `x / k` and `x % k` with a literal k > 0 it adds `k * (x / k) + x % k = x` and `0 ≤ x % k < k`.
+* `nlinarith` is `linarith` plus, for every pair of hypotheses `a ≤ b`, `c ≤ d` (including the negated goal), the product
+  fact `0 ≤ (b - a) * (d - c)` (`0 <` for strict pairs), each proved with `mul_nonneg` / `mul_pos`.
+* `positivity` collects sign facts of the goal's subterms (`|x|`, `exp x`, `√x`, even powers) and runs `nlinarith`.
+* `omega` is `linarith` with case splits on truncated ℕ subtraction `a - b` (`b ≤ a` with `a - b + b = a`, or `a ≤ b`
+  with `a - b = 0`), at most 3 deep.
+* `t1 <;> t2` runs `t2` on every goal `t1` leaves; `all_goals t` runs `t` on every open goal.
+* `have h : P := by t1; t2` runs both tactics on the subgoal. A block indented under `have h : P` (also on a `·` line) is
+  its proof. `rw [thm a b]` uses the given arguments (the rule's free variables are fixed, not patterns); `rw … at h1 h2`
+  and `unfold f at h1 h2` act on every listed hypothesis. A term proof `+ t (a : ℝ) (h : …) : … := thm a h` sees the
+  binders. In applications, term arguments may follow proof arguments (Satori hoists ∀ binders to the front), and
+  `have k := thm a` with later binders left open is a partial application. `a⁻¹` is `1 / a`.
 * `ring` proves commutative-ring identities over ℕ ℤ ℚ ℝ.
 * `by_cases h : P` splits on excluded middle: one goal with `h : P`, one with `h : ¬P`.
 

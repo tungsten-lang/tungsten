@@ -119,11 +119,15 @@ default to ℕ (decimals to ℚ).
   arithmetic. For ℕ and ℤ it uses nonnegativity (of variables and of products of non-literal factors) and
   `a < b ↔ a + 1 ≤ b`. For `x / k` and `x % k` with a literal k > 0 it adds `k * (x / k) + x % k = x` and `0 ≤ x % k < k`.
 * `nlinarith` is `linarith` plus, for every pair of hypotheses `a ≤ b`, `c ≤ d` (including the negated goal), the product
-  fact `0 ≤ (b - a) * (d - c)` (`0 <` for strict pairs), each proved with `mul_nonneg` / `mul_pos`.
+  fact `0 ≤ (b - a) * (d - c)` (`0 <` for strict pairs), each proved with `mul_nonneg` / `mul_pos`. Over ℕ, where `b - a`
+  truncates, it uses `a * d + b * c ≤ a * c + b * d` instead (the prelude lemma `nl_cross.nat`). `linarith` also knows that the
+  monomials of an expanded ℕ power such as `(k + 1) ^ 2` are ≥ 0.
 * `positivity` collects sign facts of the goal's subterms (`|x|`, `exp x`, `√x`, even powers) and runs `nlinarith`.
 * `omega` is `linarith` with case splits on truncated ℕ subtraction `a - b` (`b ≤ a` with `a - b + b = a`, or `a ≤ b`
   with `a - b = 0`), at most 3 deep.
-* `t1 <;> t2` runs `t2` on every goal `t1` leaves; `all_goals t` runs `t` on every open goal.
+* `t1 <;> t2` runs `t2` on every goal `t1` leaves (a line ending in `<;>` continues on the next indented line);
+  `all_goals t` runs `t`, which may contain `<;>`, on every open goal; `(t)` groups a tactic sequence. `at h1 h2 ⊢` lists may
+  include the goal.
 * `have h : P := by t1; t2` runs both tactics on the subgoal. A block indented under `have h : P` (also on a `·` line) is
   its proof. `rw [thm a b]` uses the given arguments (the rule's free variables are fixed, not patterns); `rw … at h1 h2`
   and `unfold f at h1 h2` act on every listed hypothesis. A term proof `+ t (a : ℝ) (h : …) : … := thm a h` sees the

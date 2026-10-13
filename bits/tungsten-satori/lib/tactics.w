@@ -210,6 +210,18 @@
         fail("line " + n.line.to_s + ": focused goal not closed:\n" + sub.goals[0].goal.show(@k))
       @goals = arr_sub(@goals, 1, @goals.size - 1)
       return
+    # a line ending in `<;>` continues on its first indented line: `t1 <;>` / `    t2`
+    if toks[toks.size - 1].text == "<;>" && n.block.size > 0
+      first = n.block[0]
+      return run_node(TacNode.new(toks + first.toks, first.block + arr_sub(n.block, 1, n.block.size - 1), n.line))
+    # (t): a parenthesized tactic sequence
+    if toks[0].text == "(" && find_top(toks, ")", 0) == toks.size - 1
+      return run_node(TacNode.new(arr_sub(toks, 1, toks.size - 2), n.block, n.line))
+    # all_goals t : t (which may itself contain <;>) on every open goal
+    if toks[0].text == "all_goals" || toks[0].text == "any_goals"
+      run_all_goals(arr_sub(toks, 1, toks.size - 1), n.line)
+      run_block(n.block)
+      return
     # t1 <;> t2 : run t2 on every goal t1 produces (left-associative)
     k = find_top_last(toks, "<;>")
     if k >= 0
@@ -1541,6 +1553,8 @@
   -> tac_simp(g, args, all)
     goal = g.goal
     at = find_top(args, "at", 0)
+    if at >= 0 && args.size - at - 1 == 1 && args[at + 1].text == "⊢"
+      return tac_simp(g, arr_sub(args, 0, at), all)
     target_h = nil
     rs = args
     if at >= 0 && args.size - at - 1 > 1
@@ -1548,7 +1562,11 @@
       cur = g
       k = at + 1
       while k < args.size
-        r = tac_simp(cur, arr_sub(args, 0, at + 1) + [args[k]], all)
+        r = nil
+        if args[k].text == "⊢"
+          r = tac_simp(cur, arr_sub(args, 0, at), all)
+        else
+          r = tac_simp(cur, arr_sub(args, 0, at + 1) + [args[k]], all)
         if r == nil || r.size == 0
           return r
         cur = r[0]
@@ -1613,6 +1631,8 @@
 
   -> tac_unfold(g, args)
     at = find_top(args, "at", 0)
+    if at >= 0 && args.size - at - 1 == 1 && args[at + 1].text == "⊢"
+      return tac_unfold(g, arr_sub(args, 0, at))
     target_h = nil
     names = args
     if at >= 0
@@ -1621,7 +1641,10 @@
         cur = g
         k = at + 1
         while k < args.size
-          cur = tac_unfold(cur, arr_sub(args, 0, at + 1) + [args[k]])[0]
+          if args[k].text == "⊢"
+            cur = tac_unfold(cur, arr_sub(args, 0, at))[0]
+          else
+            cur = tac_unfold(cur, arr_sub(args, 0, at + 1) + [args[k]])[0]
           k += 1
         return [cur]
       target_h = args[at + 1].text
@@ -1891,6 +1914,8 @@
         ts2 = ts + nat_nonneg(ts)
       if @nl_mode && ty.name != "nat"
         ts2 = ts2 + nl_products(ts, ty)
+      if @nl_mode && ty.name == "nat"
+        ts2 = ts2 + nl_products_nat(integer_strengthen(ts, ty))
       if ty.name == "nat" || ty.name == "int"
         ts2 = integer_strengthen(ts2, ty)
       coeffs = fm_certificate(ts2, ty.name)
@@ -2004,6 +2029,29 @@
       i += 1
     out
 
+  # nlinarith over ℕ: for hypotheses a ≤ b, c ≤ d the product fact a*d + b*c ≤ a*c + b*d (nl_cross.nat), i.e.
+  # (b - a)(d - c) ≥ 0 without truncated subtraction
+  -> nl_products_nat(ts)
+    lem = @session.theorem("nl_cross.nat")
+    if lem == nil
+      return []
+    les = []
+    ts.each -> (t)
+      if les.size < 24 && dest_binop(t.concl, "≤") != nil
+        les.push(t)
+    out = []
+    i = 0
+    while i < les.size
+      j = i
+      while j < les.size
+        p = dest_binop(les[i].concl, "≤")
+        q = dest_binop(les[j].concl, "≤")
+        inst = @k.spec(q[1], @k.spec(q[0], @k.spec(p[1], @k.spec(p[0], lem))))
+        out.push(@k.mp(@k.mp(inst, les[i]), les[j]))
+        j += 1
+      i += 1
+    out
+
   -> first_side(th)
     ["<", "≤", "="].each -> (r)
       d = dest_binop(th.concl, r)
@@ -2063,6 +2111,26 @@
         return
       if h.tag == :const && h.name == "^"
         collect_nat_atoms(sp[1][0], seen, out, l)
+        # (x + y + c)^n expands into monomials x^j and x*y: each is a natural, so ≥ 0
+        if ty_eq(type_of(p), ty_nat) && sp[1][1].tag == :lit && sp[1][1].val >= 2 && sp[1][0].tag == :app
+          atoms = []
+          nat_base_atoms(sp[1][0], atoms)
+          pw = @k.mk_const("^", ty_funs([ty_nat, ty_nat], ty_nat))
+          ml = @k.mk_const("*", ty_funs([ty_nat, ty_nat], ty_nat))
+          top = sp[1][1].val
+          if top > 8
+            top = 8
+          ai = 0
+          while ai < atoms.size && ai < 4
+            j = 2
+            while j <= top
+              add_nat_atom(mk_apps(pw, [atoms[ai], mk_lit(j, ty_nat)]), seen, out, l)
+              j += 1
+            bj = ai + 1
+            while bj < atoms.size && bj < 4
+              add_nat_atom(mk_apps(ml, [atoms[ai], atoms[bj]]), seen, out, l)
+              bj += 1
+            ai += 1
       if ty_eq(type_of(p), ty_nat)
         add_nat_atom(p, seen, out, l)
     when :var
@@ -2071,6 +2139,26 @@
     when :const
       if ty_eq(p.ty, ty_nat)
         add_nat_atom(p, seen, out, l)
+    0
+
+  # the non-arithmetic ℕ subterms (variables, applications) of a sum or product
+  -> nat_base_atoms(t, acc)
+    if t.tag == :app
+      sp = strip_app(t)
+      h = sp[0]
+      if h.tag == :const && (h.name == "+" || h.name == "*")
+        sp[1].each -> (a)
+          nat_base_atoms(a, acc)
+        return 0
+    if t.tag == :lit
+      return 0
+    if ty_eq(type_of(t), ty_nat)
+      dup = false
+      acc.each -> (x)
+        if tm_eq(x, t)
+          dup = true
+      if !dup
+        acc.push(t)
     0
 
   -> add_nat_atom(t, seen, out, l)

@@ -1403,7 +1403,13 @@
       if th == nil
         fail("unknown rule '" + e.s + "'")
       return th
-    r = instantiate_to(goal, lookup_proof(goal, @session.elab.ast_spine(e)[0].s), @session.elab.ast_spine(e)[1], nil, true)
+    hd = @session.elab.ast_spine(e)[0]
+    if hd.kind != :id
+      return proof_ast(goal, e, nil)
+    base = lookup_proof(goal, hd.s)
+    if base == nil
+      fail("unknown rule '" + hd.s + "'")
+    r = instantiate_to(goal, base, @session.elab.ast_spine(e)[1], nil, true)
     r[0]
 
   -> sym_rule(th)
@@ -1431,12 +1437,16 @@
   -> gen_free(u, t, th)
     out = u
     fv = []
+    # variables already free in the original rule (an instantiation such as `← sqa b`) stay fixed
+    pre = {}
+    tm_frees(th.concl).each -> (v)
+      pre[var_key(v)] = true
     tm_frees(u.concl).each -> (v)
       inhyp = false
       u.hyps.each -> (h)
         if tm_free_in?(v, h)
           inhyp = true
-      if !inhyp
+      if !inhyp && !pre.has_key?(var_key(v))
         fv.push(v)
     i = fv.size - 1
     while i >= 0
@@ -1533,6 +1543,17 @@
     at = find_top(args, "at", 0)
     target_h = nil
     rs = args
+    if at >= 0 && args.size - at - 1 > 1
+      # `simp [...] at h1 h2`: each listed hypothesis in turn (stops if one closes the goal)
+      cur = g
+      k = at + 1
+      while k < args.size
+        r = tac_simp(cur, arr_sub(args, 0, at + 1) + [args[k]], all)
+        if r == nil || r.size == 0
+          return r
+        cur = r[0]
+        k += 1
+      return [cur]
     if at >= 0
       target_h = args[at + 1].text
       rs = arr_sub(args, 0, at)

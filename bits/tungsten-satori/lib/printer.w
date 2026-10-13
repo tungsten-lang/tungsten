@@ -110,7 +110,8 @@
       lam = args[1]
       bn = pp_fresh(lam.name, names)
       s2 = op + " " + bn + rel + tm_pp(args[0], names, 66) + ", " + tm_pp(lam.b, names + [bn], 66)
-      return paren_if(s2, prec > 65)
+      # the body extends to the right, so any operator context needs parentheses: (∑ i < n, f i) + f n
+      return paren_if(s2, prec > 0)
     if nm == "pair" && args.size == 2
       return "(" + tm_pp(args[0], names, 0) + ", " + tm_pp(args[1], names, 0) + ")"
     if nm == "neg" && args.size == 1

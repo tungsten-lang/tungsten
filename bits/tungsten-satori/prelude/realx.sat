@@ -1,0 +1,229 @@
+-- Real-analysis facts (import realx): exponential, logarithm, square root and the Archimedean property of ℝ, proved
+-- from the foundational axioms of real.sat (exp_pos, exp_add, exp_zero, exp_ge_one_add, log_exp, exp_log, sqrt_spec,
+-- sqrt_nonneg, sup_exists) and the arith library. This module adds no axioms.
+import real
+import arith
+
+-- ---- exponential --------------------------------------------------------------------------------------------------
++ exp_nonneg (x : ℝ) : 0 ≤ exp x
+  linarith [exp_pos x]
+
++ exp_neg_mul (x : ℝ) : exp x * exp (0 - x) = 1
+  have e : x + (0 - x) = 0 := by ring
+  rw [← exp_add, e, exp_zero]
+
++ exp_neg (x : ℝ) : exp (0 - x) = 1 / exp x
+  exact eq_one_div_of_mul_eq_one.real (exp x) (exp (0 - x)) (exp_neg_mul x)
+
++ exp_sub (x y : ℝ) : exp (x - y) = exp x / exp y
+  have e : x - y = x + (0 - y) := by ring
+  rw [e, exp_add, exp_neg y, div_def.real (exp x) (exp y)]
+
++ one_lt_exp (x : ℝ) (h : 0 < x) : 1 < exp x
+  linarith [exp_ge_one_add x]
+
++ exp_lt_exp_of_lt (x y : ℝ) (h : x < y) : exp x < exp y
+  have e : x + (y - x) = y := by ring
+  have f : exp y = exp x * exp (y - x) := by rw [← exp_add, e]
+  rw [f]
+  nlinarith [exp_pos x, one_lt_exp (y - x) (by linarith)]
+
++ exp_lt_exp (x y : ℝ) : exp x < exp y ↔ x < y
+  constructor
+  · intro h
+    by_contra c
+    by_cases d : x = y
+    · rw [d] at h
+      linarith
+    · linarith [exp_lt_exp_of_lt y x (by linarith)]
+  · intro h
+    exact exp_lt_exp_of_lt x y h
+
++ exp_le_exp (x y : ℝ) : exp x ≤ exp y ↔ x ≤ y
+  constructor
+  · intro h
+    by_contra c
+    linarith [exp_lt_exp_of_lt y x (by linarith)]
+  · intro h
+    by_cases d : x = y
+    · rw [d]
+      linarith
+    · linarith [exp_lt_exp_of_lt x y (by linarith)]
+
+-- e^x ≤ 1 / (1 − x) for x < 1 (from 1 − x ≤ e^(−x))
++ exp_le_inv_one_sub (x : ℝ) (h : x < 1) : exp x ≤ 1 / (1 - x)
+  have a := exp_ge_one_add (0 - x)
+  rw [exp_neg x] at a
+  have b := one_div_le_one_div_of_le.real (1 - x) (1 / exp x) (by linarith) (by linarith)
+  rw [one_div_one_div.real] at b
+  exact b
+
++ exp_nat_mul (x : ℝ) (n : ℕ) : exp ((n : ℝ) * x) = exp x ^ n
+  induction n with n ih
+  · have e : ((0 : ℕ) : ℝ) * x = 0 := by rw [cast_zero.real]; ring
+    rw [e, exp_zero, pow_zero.real]
+  · have e : ((n : ℝ) + 1) * x = (n : ℝ) * x + x := by ring
+    rw [succ_eq_add_one.nat, cast_succ.real, pow_succ.real, ← ih, e, exp_add]
+
+-- ---- logarithm (log is the inverse of exp on (0, ∞)) -------------------------------------------------------------
++ log_one : log 1 = 0
+  have e := log_exp 0
+  rw [exp_zero] at e
+  exact e
+
++ log_mul (a b : ℝ) (ha : 0 < a) (hb : 0 < b) : log (a * b) = log a + log b
+  have e : a * b = exp (log a + log b) := by rw [exp_add, exp_log a ha, exp_log b hb]
+  rw [e, log_exp]
+
++ log_div (a b : ℝ) (ha : 0 < a) (hb : 0 < b) : log (a / b) = log a - log b
+  have e : a / b = exp (log a - log b) := by rw [exp_sub, exp_log a ha, exp_log b hb]
+  rw [e, log_exp]
+
++ log_pow (x : ℝ) (n : ℕ) (hx : 0 < x) : log (x ^ n) = (n : ℝ) * log x
+  have e : x ^ n = exp ((n : ℝ) * log x) := by rw [exp_nat_mul, exp_log x hx]
+  rw [e, log_exp]
+
++ log_lt_log (a b : ℝ) (ha : 0 < a) (hb : 0 < b) : log a < log b ↔ a < b
+  have k := exp_lt_exp (log a) (log b)
+  rw [exp_log a ha, exp_log b hb] at k
+  constructor
+  · intro h
+    exact k.mpr h
+  · intro h
+    exact k.mp h
+
++ log_le_log (a b : ℝ) (ha : 0 < a) (hb : 0 < b) : log a ≤ log b ↔ a ≤ b
+  have k := exp_le_exp (log a) (log b)
+  rw [exp_log a ha, exp_log b hb] at k
+  constructor
+  · intro h
+    exact k.mpr h
+  · intro h
+    exact k.mp h
+
++ log_le_sub_one (x : ℝ) (hx : 0 < x) : log x ≤ x - 1
+  have a := exp_ge_one_add (log x)
+  rw [exp_log x hx] at a
+  linarith
+
++ log_nonneg (x : ℝ) (h : 1 ≤ x) : 0 ≤ log x
+  have k := (log_le_log 1 x (by linarith) (by linarith)).mpr h
+  rw [log_one] at k
+  exact k
+
++ log_pos (x : ℝ) (h : 1 < x) : 0 < log x
+  have k := (log_lt_log 1 x (by linarith) (by linarith)).mpr h
+  rw [log_one] at k
+  exact k
+
++ log_neg (x : ℝ) (h0 : 0 < x) (h : x < 1) : log x < 0
+  have k := (log_lt_log x 1 h0 (by linarith)).mpr h
+  rw [log_one] at k
+  exact k
+
+-- ---- square root (sqrt is specified on [0, ∞) by sqrt_spec) -------------------------------------------------------
++ sq_sqrt (x : ℝ) (h : 0 ≤ x) : sqrt x ^ 2 = x
+  rw [pow_two.real]
+  exact (sqrt_spec x h).2
+
++ sqrt_eq_of_mul_self (x y : ℝ) (hy : 0 ≤ y) (h : y * y = x) : sqrt x = y
+  have k := (sqrt_spec x (by nlinarith)).2
+  have p := sqrt_nonneg x
+  nlinarith
+
++ sqrt_sq (x : ℝ) (h : 0 ≤ x) : sqrt (x ^ 2) = x
+  exact sqrt_eq_of_mul_self (x ^ 2) x h (by ring)
+
++ sqrt_sq_eq_abs (x : ℝ) : sqrt (x ^ 2) = |x|
+  exact sqrt_eq_of_mul_self (x ^ 2) (|x|) (abs_nonneg.real x) (by rw [abs_sq.real]; ring)
+
++ sqrt_zero : sqrt 0 = 0
+  exact sqrt_eq_of_mul_self 0 0 (by linarith) (by ring)
+
++ sqrt_one : sqrt 1 = 1
+  exact sqrt_eq_of_mul_self 1 1 (by linarith) (by ring)
+
++ sqrt_pos (x : ℝ) (h : 0 < x) : 0 < sqrt x
+  have k := (sqrt_spec x (by linarith)).2
+  have p := sqrt_nonneg x
+  by_contra c
+  have z : sqrt x = 0 := by linarith
+  rw [z] at k
+  linarith
+
++ sqrt_le_sqrt (x y : ℝ) (h0 : 0 ≤ x) (h : x ≤ y) : sqrt x ≤ sqrt y
+  have a := (sqrt_spec x h0).2
+  have b := (sqrt_spec y (by linarith)).2
+  have p := sqrt_nonneg x
+  have q := sqrt_nonneg y
+  nlinarith
+
++ sqrt_lt_sqrt (x y : ℝ) (h0 : 0 ≤ x) (h : x < y) : sqrt x < sqrt y
+  have a := (sqrt_spec x h0).2
+  have b := (sqrt_spec y (by linarith)).2
+  have p := sqrt_nonneg x
+  have q := sqrt_nonneg y
+  nlinarith
+
++ sqrt_mul (a b : ℝ) (ha : 0 ≤ a) (hb : 0 ≤ b) : sqrt (a * b) = sqrt a * sqrt b
+  have s := (sqrt_spec a ha).2
+  have t := (sqrt_spec b hb).2
+  have p := mul_nonneg.real (sqrt a) (sqrt b) (sqrt_nonneg a) (sqrt_nonneg b)
+  have e : sqrt a * sqrt b * (sqrt a * sqrt b) = sqrt a * sqrt a * (sqrt b * sqrt b) := by ring
+  rw [s, t] at e
+  exact sqrt_eq_of_mul_self (a * b) (sqrt a * sqrt b) p e
+
++ sqrt_le_iff (x y : ℝ) (hx : 0 ≤ x) (hy : 0 ≤ y) : sqrt x ≤ y ↔ x ≤ y ^ 2
+  have k := (sqrt_spec x hx).2
+  have p := sqrt_nonneg x
+  constructor <;> intro h <;> nlinarith
+
++ le_sqrt_iff (x y : ℝ) (hx : 0 ≤ x) (hy : 0 ≤ y) : y ≤ sqrt x ↔ y ^ 2 ≤ x
+  have k := (sqrt_spec x hx).2
+  have p := sqrt_nonneg x
+  constructor <;> intro h <;> nlinarith
+
+-- AM–GM for two terms
++ sqrt_mul_le_half_add (a b : ℝ) (ha : 0 ≤ a) (hb : 0 ≤ b) : sqrt (a * b) ≤ (a + b) / 2
+  have s := (sqrt_spec a ha).2
+  have t := (sqrt_spec b hb).2
+  rw [sqrt_mul a b ha hb]
+  nlinarith [sq_nonneg.real (sqrt a - sqrt b)]
+
+-- ---- the Archimedean property of ℝ (from completeness: a bounded ℕ would have a supremum s, but s − 1 < n gives
+-- n + 1 > s) ----------------------------------------------------------------------------------------------------------
++ exists_nat_gt.real (x : ℝ) : ∃ n : ℕ, x < (n : ℝ)
+  by_contra c
+  have hb : ∀ n : ℕ, (n : ℝ) ≤ x
+    intro n
+    by_contra d
+    exact c ⟨n, by linarith⟩
+  have ne : ∃ y, (fun y => ∃ n : ℕ, y = (n : ℝ)) y
+    use 0
+    show ∃ n : ℕ, (0 : ℝ) = (n : ℝ)
+    use 0
+  have bd : ∃ b, upper_bound (fun y => ∃ n : ℕ, y = (n : ℝ)) b
+    use x
+    unfold upper_bound
+    intro y hy
+    have k : ∃ n : ℕ, y = (n : ℝ) := hy
+    obtain ⟨n, e⟩ := k
+    rw [e]
+    exact hb n
+  obtain ⟨s, hs⟩ := sup_exists (fun y => ∃ n : ℕ, y = (n : ℝ)) ne bd
+  unfold is_sup at hs
+  have u : upper_bound (fun y => ∃ n : ℕ, y = (n : ℝ)) (s - 1)
+    unfold upper_bound
+    intro y hy
+    have k : ∃ n : ℕ, y = (n : ℝ) := hy
+    obtain ⟨n, e⟩ := k
+    have mem : (fun y => ∃ n : ℕ, y = (n : ℝ)) ((n + 1 : ℕ) : ℝ)
+      show ∃ j : ℕ, ((n + 1 : ℕ) : ℝ) = (j : ℝ)
+      use n + 1
+    have ub := hs.1
+    unfold upper_bound at ub
+    have m := ub ((n + 1 : ℕ) : ℝ) mem
+    rw [cast_succ.real] at m
+    rw [e]
+    linarith
+  linarith [hs.2 (s - 1) u]

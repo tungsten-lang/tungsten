@@ -377,6 +377,7 @@
   out << declare_fn("w_type_tables_lock_safe", wv, "")
   out << declare_fn("w_method_tables_lock_safe", wv, "")
   out << "declare void @w_value_free(i64)\n"
+  out << "declare void @w_value_release_loop(i64, i64, i64, i64, i64, i64)\n"
   out << "declare void @w_slab_init_static(ptr, i32)\n"
   out << "declare void @w_preflight()\n"
   out << "declare void @__w_loc_set_col(ptr, i32, i32)\n"

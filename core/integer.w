@@ -225,23 +225,45 @@
     raise "Integer#legendre: Euler criterion returned an invalid value"
 
   # Number of bits in the two's-complement representation, excluding sign
-  # (Ruby Integer#bit_length): 0 -> 0, 255 -> 8, 256 -> 9, -256 -> 8. Halving
-  # `/ 2` (not `>>`, which is i64-only) keeps it exact for BigInt receivers.
+  # (Ruby Integer#bit_length): 0 -> 0, 255 -> 8, 256 -> 9, -256 -> 8.
+  # Immediates halve at most 40 times.  Larger values binary-search the shift
+  # boundary with the runtime's exact BigInt shift (`>>` is i64-only in Core):
+  # O(log n) shifts.  Halving a BigInt bit by bit made n temporaries of up to
+  # n bits each -- quadratic time and memory (0.86 GB at 100,000 bits).
   -> bit_length
     bl_n = self < 0 ? self.abs - 1 : self
-    bl = 0
-    while bl_n > 0
-      bl_n = bl_n / 2
-      bl += 1
-    bl
+    if bl_n < 1_099_511_627_776
+      bl = 0
+      while bl_n > 0
+        bl_n = bl_n / 2
+        bl += 1
+      return bl
+    # bl_n >= 2^40: binary-search the smallest shift s with bl_n >> s == 0.
+    bl_lo = 40
+    bl_hi = 80
+    while ccall("w_bigint_shr", bl_n, bl_hi) != 0
+      bl_lo = bl_hi
+      bl_hi = bl_hi * 2
+    while bl_hi - bl_lo > 1
+      bl_mid = (bl_lo + bl_hi) / 2
+      if ccall("w_bigint_shr", bl_n, bl_mid) != 0
+        bl_lo = bl_mid
+      else
+        bl_hi = bl_mid
+    bl_hi
 
   # Number of 1 bits in the magnitude (Python int.bit_count): 0 -> 0,
-  # 255 -> 8, -255 -> 8. Ruby has no equivalent. Splits into 32-bit chunks
-  # with `%` and `/` (not `&` and `>>`, which are i64-only) so BigInt
-  # receivers are exact; each chunk is at most 32 bits, so its count is a
-  # short loop on an immediate Int.
+  # 255 -> 8, -255 -> 8. Ruby has no equivalent. Values of 2^40 and up split
+  # in half with the runtime's exact BigInt shifts and recurse (O(n log n));
+  # smaller values split into 32-bit chunks with `%` and `/` (`&` and `>>`
+  # are i64-only in Core), each counted by a short loop on an immediate Int.
   -> popcount
     pc_n = self < 0 ? self.abs : self
+    if pc_n >= 1_099_511_627_776
+      pc_half = pc_n.bit_length / 2
+      pc_high = ccall("w_bigint_shr", pc_n, pc_half)
+      pc_low = pc_n - ccall("w_bigint_shl", pc_high, pc_half)
+      return pc_low.popcount + pc_high.popcount
     pc = 0
     while pc_n > 0
       pc_w = pc_n % 4294967296

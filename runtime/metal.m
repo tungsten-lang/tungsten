@@ -69,6 +69,9 @@ static WMetalBuffer *as_metal_buffer(WValue v) {
     if (!w_is_obj(v) || w_subtag(v) != W_SUBTAG_GENERIC) return NULL;
     WMetalBuffer *b = (WMetalBuffer *)w_as_ptr(v);
     if (b->type != W_TYPE_METAL_BUFFER) return NULL;
+    /* A buffer released by w_metal_buffer_release has no handle; treating it
+     * as "not a buffer" makes every later use raise instead of touching NULL. */
+    if (b->handle == NULL) return NULL;
     return b;
 }
 
@@ -465,6 +468,24 @@ WValue w_metal_buffer_length(WValue buffer_v) {
     WMetalBuffer *b = as_metal_buffer(buffer_v);
     if (!b) w_raise(w_string("Metal.buffer.length: not a buffer"));
     return w_int(b->size);
+}
+
+/* Release a buffer's MTLBuffer now rather than at process exit.  Every Metal
+ * buffer shell owns one retain from its new...Buffer constructor and nothing
+ * else releases it, so a long-lived process that allocates per work item must
+ * call this.  The shell stays allocated (other values may still name it) but
+ * loses its handle, so later use raises.  Views and wrapped arrays created
+ * from the buffer must not be used after release; a no-copy wrap of a Tungsten
+ * array leaves the array's own memory alone. */
+WValue w_metal_buffer_release(WValue buffer_v) {
+    WMetalBuffer *b = as_metal_buffer(buffer_v);
+    if (!b) w_raise(w_string("Metal.buffer_release: not a live buffer"));
+    id<MTLBuffer> buf = (id<MTLBuffer>)b->handle;
+    b->handle = NULL;
+    b->size = 0;
+    b->offset = 0;
+    [buf release];
+    return W_NIL;
 }
 
 /* (#12) zero-copy WArray → MTLBuffer wrap. On Apple Silicon's

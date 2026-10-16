@@ -95,6 +95,14 @@
 -> metal_buffer_length(buffer)
   ccall("w_metal_buffer_length", buffer)
 
+# Release a buffer's Metal storage now instead of at process exit.  Buffers
+# are otherwise retained for the life of the process, so a long-lived worker
+# that allocates per work item must release them.  Using the buffer (or a view
+# of it) afterwards raises.  Declared `->`, never `fn`: a memoized release
+# would silently skip later calls.
+-> metal_buffer_release(buffer)
+  ccall("w_metal_buffer_release", buffer)
+
 # Write a single f32 / i32 into the buffer at element index `i`
 # (NOT byte offset). Index 0 is byte 0, index 1 is byte 4, etc.
 fn metal_buffer_write_f32(buffer, i, value)

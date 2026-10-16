@@ -1753,6 +1753,7 @@ WValue w_metal_library_from_file(WValue device, WValue path);
 WValue w_metal_pipeline_for(WValue library, WValue name);
 WValue w_metal_buffer_new(WValue device, WValue byte_length);
 WValue w_metal_buffer_length(WValue buffer);
+WValue w_metal_buffer_release(WValue buffer);
 /* (#12) zero-copy WArray → MTLBuffer wrap on unified memory. */
 WValue w_array_as_metal_buffer(WValue device, WValue arr);
 /* Zero-copy read-only mmap region -> MTLBuffer view with a binding offset. */

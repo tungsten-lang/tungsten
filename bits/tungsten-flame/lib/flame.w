@@ -28,6 +28,7 @@ use flame_filter
 use flame_threshold
 use flame_normalize
 use flame_split
+use ../../../compiler/lib/perf_inspect
 
 # ---- Read and parse the manpage ----
 # Prefer TUNGSTEN_ROOT (set by the CLI); __DIR__ is not always populated
@@ -108,6 +109,10 @@ fl_keeper      = opts.get("keeper")
 # function IPC/MPKI table); --counters cache / stalls pick the other
 # bundled templates. Argon stores `true` for the bare form.
 fl_alloc = opts.flag?("alloc")
+fl_inspect      = opts.flag?("inspect")
+fl_inspect_run  = opts.flag?("inspect_run")
+fl_inspect_json = opts.flag?("inspect_json")
+fl_no_inspect   = opts.flag?("no_inspect")
 fl_counters_raw = opts.get("counters")
 fl_counters = ""
 # Argon yields `false` for an absent optional-arg flag; only a present flag selects a set
@@ -136,6 +141,47 @@ fl_files       = opts.args
 fl_passthrough = opts.passthrough
 
 # Mode dispatch.
+
+# AST Performance Inspection mode (`flame --inspect FILE.w [MORE.w ...]`,
+# `--inspect-run`, or `--inspect-json`). Inspects AST loops for redundant
+# per-iteration fetches and loop-invariant evaluations without requiring
+# hardware sampling. With `--inspect-run`, also compiles and runs the
+# program with dynamic AST loop/fetch counters (`TUNGSTEN_PERF_INSTRUMENT=1`)
+# and merges exact runtime iteration and fetch counts into the report.
+if fl_inspect || fl_inspect_run || fl_inspect_json
+  if fl_files.size < 1
+    << "tungsten flame --inspect: need at least one .w source file"
+    exit(1)
+  ii = 0
+  while ii < fl_files.size
+    insp_file = fl_files[ii]
+    if !file?(insp_file)
+      << "tungsten flame --inspect: source not found: " + insp_file
+      exit(1)
+    pi_report = perf_inspect_file(insp_file)
+    dyn_loops = nil
+    dyn_sites = nil
+    if fl_inspect_run
+      insp_tmp = Tungsten:Flame:Sampler.mktmpdir
+      insp_bin = insp_tmp + "/inspect_bin"
+      comp_bin = Tungsten:Flame:Builder.compiler_bin()
+      comp_cmd = "TUNGSTEN_PERF_INSTRUMENT=1 " + Tungsten:Flame:Builder.shell_quote(comp_bin) + " compile --no-lto " + Tungsten:Flame:Builder.shell_quote(insp_file) + " --out " + Tungsten:Flame:Builder.shell_quote(insp_bin) + " >/dev/null 2>&1"
+      if system(comp_cmd)
+        run_cmd = Tungsten:Flame:Builder.shell_quote(insp_bin)
+        pi_arg_i = 0
+        while pi_arg_i < fl_passthrough.size
+          run_cmd = run_cmd + " " + Tungsten:Flame:Builder.shell_quote(fl_passthrough[pi_arg_i])
+          pi_arg_i = pi_arg_i + 1
+        dyn_out = capture(run_cmd + " 2>&1")
+        parsed_dyn = perf_parse_dynamic_output(dyn_out)
+        dyn_loops = parsed_dyn[0]
+        dyn_sites = parsed_dyn[1]
+    if fl_inspect_json
+      << JSON.encode(perf_inspect_json_safe(pi_report))
+    else
+      << perf_inspect_report_text(pi_report, !fl_silent, fl_top, nil, dyn_loops, dyn_sites)
+    ii = ii + 1
+  exit(0)
 
 # Folded-input mode: render an already-collected folded profile
 # (`flame --folded prof.folded -o out.svg`, `--speedscope`, or the plain
@@ -562,5 +608,14 @@ if fl_counters != "" && metrics.has_key?("instructions") && metrics.has_key?("cy
   cr_out = Tungsten:Flame:CounterRates.report(cr_metrics, fl_top, use_color)
   if cr_out != ""
     << cr_out
+
+# Automatic AST performance inspection for .w sources (unless --no-inspect):
+# correlates loop/fetch findings with the sampled hot functions so redundant
+# per-iteration fetches inside hot code bubble up immediately.
+if !fl_no_inspect && ext_argv.size == 0 && source.ends_with?(".w") && file?(source)
+  pi_report = perf_inspect_file(source)
+  if pi_report != nil && pi_report[:finding_count] > 0
+    hot_fns = Tungsten:Flame:FlameAnalyzer.hot_functions(tmpdir + "/" + primary + ".folded", fl_top)
+    << perf_inspect_report_text(pi_report, use_color, fl_top, hot_fns, nil, nil)
 
 exit(0)

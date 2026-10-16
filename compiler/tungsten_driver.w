@@ -19,6 +19,7 @@ use lib/return_inference
 use lib/compiler_gpu_emitter
 use lib/hashing
 use lib/optimization_report
+use lib/perf_inspect
 use lib/driver/ir
 use lib/driver/link
 use lib/driver/pipeline
@@ -42,6 +43,9 @@ if args.size() == 0
   << "  --emit-wire      Emit WIRE IR text instead of LLVM IR"
   << "  --optimizations  Explain lowering costs in the entry source"
   << "  --optimizations-json  Emit the explanation as JSON"
+  << "  --perf-inspect   Inspect AST loops for redundant per-iteration fetches"
+  << "  --perf-inspect-json   Emit the AST performance inspection report as JSON"
+  << "  --perf-instrument     Instrument AST loops and fetch sites with runtime counters"
   << "  --intern ALGO    Static slab encoding (raw or zstd)"
   << "  --no-lto         Disable link-time optimization"
   << "  --frame-pointers Keep frame pointers (for profiling/debugging)"
@@ -74,6 +78,9 @@ emit_wire      = false
 tags_mode      = false
 optimizations_mode = false
 optimizations_json = false
+perf_inspect_mode  = false
+perf_inspect_json  = false
+perf_instrument_mode = false
 verbose        = false
 show_ast       = false
 show_canonical_ast = false
@@ -145,6 +152,9 @@ while i < args.size()
     << "  --emit-wire      Emit WIRE IR text instead of LLVM IR"
     << "  --optimizations  Explain lowering costs in the entry source"
     << "  --optimizations-json  Emit the explanation as JSON"
+    << "  --perf-inspect   Inspect AST loops for redundant per-iteration fetches"
+    << "  --perf-inspect-json   Emit the AST performance inspection report as JSON"
+    << "  --perf-instrument     Instrument AST loops and fetch sites with runtime counters"
     << "  --intern ALGO    Static slab encoding (raw or zstd)"
     << "  --no-lto         Disable link-time optimization"
     << "  --lto            Whole-program LTO (leaner binary; default links a fast native runtime archive)"
@@ -182,6 +192,12 @@ while i < args.size()
     emit_wire = true
     optimizations_mode = true
     optimizations_json = arg == "--optimizations-json"
+  elsif arg in ("--perf-inspect" "--perf-inspect-json")
+    emit_wire = true
+    perf_inspect_mode = true
+    perf_inspect_json = arg == "--perf-inspect-json"
+  elsif arg == "--perf-instrument"
+    perf_instrument_mode = true
   elsif arg == "--no-lto"
     no_lto = true
   elsif arg == "--lto"

@@ -644,6 +644,15 @@ driver_homebrew_prefix_memo = {}
           write_file("/tmp/tungsten-stage0-ast-expressions-nonempty", "x")
   t_load = phase_elapsed(load_started_at)
 
+  if perf_inspect_mode
+    pi_report = perf_inspect_ast(ast, display_source_path(file_path))
+    << (perf_inspect_json ? JSON.encode(perf_inspect_json_safe(pi_report)) : perf_inspect_report_text(pi_report))
+    return nil
+
+  if perf_instrument_mode || env("TUNGSTEN_PERF_INSTRUMENT") == "1"
+    pi_report = perf_inspect_ast(ast, display_source_path(file_path))
+    perf_inspect_instrument_ast(ast, pi_report)
+
   if emit_wire
     wire_started_at = clock
     mod = compile_to_wire(ast, display_source_path(file_path), verbose, fast_mode, math_mode, loader.manifest_files())

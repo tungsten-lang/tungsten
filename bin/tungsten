@@ -571,7 +571,7 @@ fi
 # binary — the Ruby CLI's handling is stale. Falls back to Ruby only if the
 # compiled binary hasn't been built yet.
 case "$1" in
-  -c|--check|--ast|--canonical-ast|--lex|--tags|--optimizations|--optimizations-json)
+  -c|--check|--ast|--canonical-ast|--lex|--tags|--optimizations|--optimizations-json|--perf-inspect|--perf-inspect-json)
     if [ -x "$COMPILER" ]; then
       exec "$COMPILER" "$@"
     else

@@ -107,6 +107,15 @@
       return_type = parse_type_name_with_array_suffix().to_sym()
       skip_spaces()
 
+    # `-> f() (i64)`: an empty parameter list takes no parameter types, so a
+    # lone parenthesized type there is the return type.  The interpreter has
+    # always read it that way; since the 2026-07-25 typed-call arity check,
+    # native lowering instead saw a one-parameter signature and rejected every
+    # call with "no declared signature of 'f' accepts ()".
+    if return_type == nil && param_types != nil && params.empty? && param_types.size() == 1
+      return_type = param_types[0]
+      param_types = nil
+
     annotations_present = param_types != nil || return_type != nil
 
     # `:` is the inline-body introducer in both typed and

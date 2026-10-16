@@ -32,9 +32,12 @@ in Tungsten:Flame
     else
       "tungsten-compiler"
 
-  # Project root, computed relative to this file's location
-  # (`bits/tungsten-flame/lib/builder.w` → three levels up).
+  # Project root, computed from TUNGSTEN_ROOT or relative to this file's
+  # location (`bits/tungsten-flame/lib/builder.w` → three levels up).
   -> .project_root()
+    root = env("TUNGSTEN_ROOT")
+    if root != nil && root != ""
+      return root
     __DIR__ + "/../../.."
 
   # POSIX-safe single-quote escaping.

@@ -16,6 +16,10 @@ tungsten-flame(1) -- Make flame graphs
     --top N            Print the top N most expensive methods
     --counters [SET]   PMC counter profile: SET = rates (default), cache, stalls
     --alloc            Runtime allocation profile: per-kind counts and bytes
+    --inspect          AST performance inspection: loops and redundant fetches
+    --inspect-run      AST performance inspection with dynamic runtime counters
+    --inspect-json     Emit the AST performance inspection report as JSON
+    --no-inspect       Disable automatic AST performance inspection after profiling
 
     --lex              Only lexing
     --ruby             Profile the Ruby interpreter path

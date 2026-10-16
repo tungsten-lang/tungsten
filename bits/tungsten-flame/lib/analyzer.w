@@ -557,3 +557,67 @@ in Tungsten:Flame
       i = i + 1
     if minor_unresolved > 0
       << "    " + dim + "(+" + minor_unresolved.to_s() + " minor unresolved frames)" + reset
+
+  # Return a Hash of `{func_name => true}` for the top sampled functions in
+  # `stacks_file` (both leaf-self and inclusive frames), used by `flame.w` to
+  # highlight AST performance inspection findings that occur inside hot code.
+  -> .hot_functions(stacks_file, top_n)
+    hot = {}
+    folded = read_file(stacks_file)
+    if folded == nil
+      return hot
+    lines = folded.split("\n")
+    leaf_counts = {}
+    i = 0
+    while i < lines.size()
+      line = lines[i].strip()
+      if line.size() > 0
+        sp = line.rindex(" ")
+        if sp
+          stack = line.slice(0, sp)
+          count = line.slice(sp + 1, line.size()).to_i()
+        else
+          stack = line
+          count = 0
+        if !stack.include?("kevent") && !stack.include?("poll")
+          frames = stack.split(";")
+          leaf = frames.last()
+          plus_idx = leaf.rindex(" + ")
+          if plus_idx
+            rest = leaf.slice(plus_idx + 3, leaf.size())
+            if rest.size() > 0 && rest.to_i().to_s() == rest
+              leaf = leaf.slice(0, plus_idx)
+          backtick = leaf.rindex("`")
+          if backtick
+            leaf = leaf.slice(backtick + 1, leaf.size())
+          if leaf_counts.has_key?(leaf)
+            leaf_counts[leaf] = leaf_counts[leaf] + count
+          else
+            leaf_counts[leaf] = count
+      i = i + 1
+
+    sorted = []
+    leaf_counts.keys().each -> (func_name)
+      sorted.push([func_name, leaf_counts[func_name]])
+    j = 1
+    while j < sorted.size()
+      kp = sorted[j]
+      k = j - 1
+      while k >= 0 && sorted[k][1] < kp[1]
+        sorted[k + 1] = sorted[k]
+        k = k - 1
+      sorted[k + 1] = kp
+      j = j + 1
+
+    limit = top_n
+    if limit > sorted.size()
+      limit = sorted.size()
+    i = 0
+    while i < limit
+      fname = sorted[i][0]
+      hot[fname] = true
+      if fname.starts_with?("__w_")
+        hot[fname.slice(4, fname.size() - 4)] = true
+      i = i + 1
+    hot
+

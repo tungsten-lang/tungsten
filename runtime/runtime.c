@@ -13598,8 +13598,11 @@ WValue bigint_mul_any_routed(WValue a, WValue b, int route_mul1_1) {
      * sub-16-limb random hot path pays no extra comparisons. */
     WValue one = w_box_int(1);
     WValue negative_one = w_box_int(-1);
-    if (b == one) return a;
-    if (a == one) return b;
+    /* Identity results alias an operand: mark a BigInt shared so releasing
+     * the result (or the operand) only drops one alias, as every other
+     * identity return in this file does. */
+    if (b == one) return w_is_bigint(a) ? w_bigint_mark_shared_value(a) : a;
+    if (a == one) return w_is_bigint(b) ? w_bigint_mark_shared_value(b) : b;
     if (b == negative_one) return w_neg(a);
     if (a == negative_one) return w_neg(b);
 #endif
@@ -73712,6 +73715,34 @@ WValue w_freeze(WValue obj) {
  * boxed via w_int for a typed callee that unboxes on entry); without it,
  * every such call leaked one WBigint (75 MB/s in the 49-bit-mask
  * flip-graph walkers, 2026-07-02). */
+/* Release for loop-carried integers (compiler/lib/ownership.w,
+ * loop_carried_releases).  At the end of a loop iteration the compiler hands
+ * over the previous loop value `prev` and up to two intermediates of the
+ * iteration's arithmetic, all proven not to escape: they reach only integer
+ * arithmetic helpers, comparisons, and the loop phi.  `init` is the value the
+ * loop was entered with (possibly borrowed from the caller) and `next` the
+ * value that survives into the next iteration.
+ *
+ * Every value must be an integer: a non-integer result (Rational, Complex,
+ * Decimal, ...) of `+`, `*`, ... may hold an operand inside it, so the whole
+ * release is skipped then.  Only BigInts own storage.  A value equal to
+ * `init`, `next`, `prev` or an earlier intermediate is skipped: identical
+ * words are one allocation, and identity results of BigInt arithmetic carry
+ * a shared count, so releasing a distinct alias only drops that count. */
+void w_value_release_loop(int64_t extra, WValue init, WValue prev, WValue next,
+                          WValue t1, WValue t2) {
+    if (extra < 0 || extra > 2) return;
+    if (!w_is_integer_any(prev) || !w_is_integer_any(next)) return;
+    if (extra >= 1 && !w_is_integer_any(t1)) return;
+    if (extra >= 2 && !w_is_integer_any(t2)) return;
+    if (extra >= 1 && w_is_bigint(t1) && t1 != init && t1 != next && t1 != prev)
+        bigint_release_if_live(w_as_bigint(t1));
+    if (extra >= 2 && w_is_bigint(t2) && t2 != init && t2 != next && t2 != prev && t2 != t1)
+        bigint_release_if_live(w_as_bigint(t2));
+    if (w_is_bigint(prev) && prev != init && prev != next)
+        bigint_release_if_live(w_as_bigint(prev));
+}
+
 void w_value_free(WValue v) {
     if (w_is_heap_str(v)) {
         WString *ws = w_as_heap_str(v);

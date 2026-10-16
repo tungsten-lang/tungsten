@@ -544,4 +544,380 @@ use cfg
     func = mod[:functions][fi]
     if func[:blocks].size() > 0 && func[:incremental_core_frozen] != true
       insert_frees(func)
+      if env("TUNGSTEN_LOOP_RELEASE") != "0"
+        ignored = loop_carried_releases(func)
     fi += 1
+
+# ---------------------------------------------------------------------------
+# Loop-carried integer releases.
+#
+# The pass above frees only known constructors, and SSA conversion (cfg.w)
+# deliberately leaves every variable that needs a merge phi in its memory
+# slot, so a loop that carries an integer
+#
+#   while ...
+#     x = (x * x) % m
+#
+# kept every iteration's BigInt (and the x * x intermediate) until the process
+# exited: 40 KB per iteration at 100,000 bits, or a few hundred GB for one
+# long modular-squaring loop.
+#
+# For a variable slot V and a natural loop with one back edge (the latch ends
+# in a plain branch to the header, and the header has one predecessor outside
+# the loop), V qualifies when:
+#   - V is only loaded and stored (never address-taken or passed anywhere);
+#   - the loop body stores V exactly once, in a block that dominates the
+#     latch, and the stored value `next` is an integer-arithmetic helper result
+#     computed in the loop;
+#   - S, the set holding every value loaded from V in the loop plus `next`,
+#     closed under results of arithmetic helpers that read a member, is read
+#     only inside the loop and only by those helpers, by non-retaining
+#     consumers (comparisons, ...), or by the one store of `next` into V.
+#     Any other use - a store elsewhere, a method call, a return - and V is
+#     left alone.
+# The arithmetic helpers (`+ - * % / << >>` on WValues) never retain an
+# operand: they return a fresh value, an inline integer, or the operand with
+# its BigInt shared count raised.  The pass loads V's entry value at the end
+# of the preheader (`init`) and V's old value right before the store (`prev`),
+# then at the end of the latch calls w_value_release_loop (runtime.c), which
+# releases prev and up to two intermediates of S whose definitions dominate
+# the latch.  It skips the release when prev is init (the first iteration,
+# where init may be borrowed) or when any of the values is not an integer at
+# run time (a Rational or Complex result could hold an operand).
+# TUNGSTEN_LOOP_RELEASE=0 disables the pass.
+# ---------------------------------------------------------------------------
+
+-> loop_release_arith?(name)
+  name in ("__w_add_fast" "__w_sub_fast" "__w_mul_fast" "__w_mod_fast" "__w_div_fast" "__w_shl_fast" "__w_shr_fast" "w_add" "w_sub" "w_mul" "w_mod" "w_div" "w_bit_shl" "w_bit_shr")
+
+# Temp-like operand strings an instruction reads (its own :temp excluded), or
+# nil when a field holds a structure this scan does not understand.
+-> loop_release_operands(inst)
+  out = []
+  if ccall_nobox("w_is_wire_extern", inst) == 1
+    count = wire_field_count(inst)
+    fi = 0
+    while fi < count
+      sym = wire_field_symbol_at(inst, fi)
+      value = wire_field_value_at(inst, fi)
+      if sym != :temp && value != nil
+        if wire_sequence_field?(sym)
+          si = 0
+          while si < wire_sequence_size(value)
+            item = wire_sequence_get(value, si)
+            if type(item) == "String"
+              out.push(item)
+            elsif type(item) == "Hash"
+              if type(item[:value]) == "String"
+                out.push(item[:value])
+            elsif type(item) == "Array"
+              return nil
+            si += 1
+        elsif type(value) == "String"
+          out.push(value)
+        elsif type(value) == "Array" || type(value) == "Hash"
+          return nil
+      fi += 1
+    return out
+  if type(inst) != "Hash"
+    return nil
+  keys = inst.keys()
+  ki = 0
+  while ki < keys.size()
+    key = keys[ki]
+    value = inst[key]
+    if key != :temp && key != :op && value != nil
+      if type(value) == "String"
+        out.push(value)
+      elsif type(value) == "Array"
+        ai = 0
+        while ai < value.size()
+          item = value[ai]
+          if type(item) == "String"
+            out.push(item)
+          elsif type(item) == "Array" || type(item) == "Hash"
+            return nil
+          ai += 1
+      elsif type(value) == "Hash"
+        return nil
+    ki += 1
+  out
+
+# Blocks of the natural loop of the back edge tail -> header.
+-> loop_release_body(cfg, header, tail)
+  body = {}
+  body[header] = true
+  stack = [tail]
+  while stack.size() > 0
+    b = stack.pop()
+    if body[b] != true
+      body[b] = true
+      preds = cfg[:preds][b]
+      pi = 0
+      while pi < preds.size()
+        stack.push(preds[pi])
+        pi += 1
+  body
+
+-> loop_carried_releases(func)
+  blocks = func[:blocks]
+  slots = func[:var_slots]
+  return 0 if slots == nil || blocks.size() < 2 || has_setjmp(func)
+  slot_ptr = {}
+  snames = slots.keys()
+  sn = 0
+  while sn < snames.size()
+    slot_ptr[slots[snames[sn]]] = true
+    sn += 1
+  return 0 if snames.size() == 0
+
+  # Cheap pre-filter, linear and without a CFG: some arithmetic-helper result
+  # must be stored into a slot.  Most functions stop here.  (A store that
+  # precedes its definition in block order is missed, which only skips the
+  # optimization.)
+  arith_temps = {}
+  candidate = false
+  bi = 0
+  while bi < blocks.size() && !candidate
+    instrs = blocks[bi][:instructions]
+    ii = 0
+    while ii < instrs.size()
+      inst = instrs[ii]
+      k = wire_kind(inst)
+      if k == :call_direct_i64
+        if loop_release_arith?(wire_get(inst, :name)) && wire_get(inst, :temp) != nil
+          arith_temps[wire_get(inst, :temp)] = true
+      elsif k == :store_i64
+        if slot_ptr[wire_get(inst, :ptr)] == true && arith_temps[wire_get(inst, :value)] == true
+          candidate = true
+          break
+      ii += 1
+    bi += 1
+  return 0 if !candidate
+
+  cfg = build_cfg(func)
+  idom = compute_dominators(cfg)
+  # Back edges: retreating edges in reverse postorder whose target dominates
+  # the source.  Only retreating edges pay for a dominator walk; the generic
+  # find_loop_back_edges walks one for every edge, which took minutes on the
+  # largest functions of the bits.
+  rpo = compute_rpo(cfg)
+  rpo_index = rpo[:index]
+  edges = []
+  bi = 0
+  while bi < blocks.size()
+    bri = rpo_index[bi]
+    if bri != nil
+      succs = cfg[:succs][bi]
+      si = 0
+      while si < succs.size()
+        target = succs[si]
+        tri = rpo_index[target]
+        if tri != nil && tri <= bri && block_dominates?(idom, target, bi)
+          edges.push({header: target, tail: bi})
+        si += 1
+    bi += 1
+  return 0 if edges.size() == 0
+  back_count = {}
+  ei = 0
+  while ei < edges.size()
+    h = edges[ei][:header]
+    back_count[h] = back_count[h] == nil ? 1 : back_count[h] + 1
+    ei += 1
+
+  # One scan: temp definitions, operand uses, slot loads/stores, and slots
+  # referenced any other way (those are never candidates).
+  defs = {}
+  uses = {}
+  opaque = {}
+  loads = {}
+  stores = {}
+  bad_slot = {}
+  bi = 0
+  while bi < blocks.size()
+    instrs = blocks[bi][:instructions]
+    ii = 0
+    while ii < instrs.size()
+      inst = instrs[ii]
+      k = wire_kind(inst)
+      t = wire_get(inst, :temp)
+      if t != nil
+        defs[t] = [bi, ii]
+      slot_access = nil
+      if k in (:load_i64 :store_i64)
+        sp = wire_get(inst, :ptr)
+        if sp != nil && slot_ptr[sp] == true
+          slot_access = sp
+          if k == :load_i64
+            if loads[sp] == nil
+              loads[sp] = []
+            loads[sp].push([bi, ii, t])
+          else
+            if stores[sp] == nil
+              stores[sp] = []
+            stores[sp].push([bi, ii, wire_get(inst, :value)])
+      refs = loop_release_operands(inst)
+      if refs == nil
+        opaque[bi] = true
+      else
+        ri = 0
+        while ri < refs.size()
+          r = refs[ri]
+          if slot_ptr[r] == true && r != slot_access
+            bad_slot[r] = true
+          if uses[r] == nil
+            uses[r] = []
+          uses[r].push([bi, ii])
+          ri += 1
+      ii += 1
+    bi += 1
+
+  dbg = env("TUNGSTEN_LOOP_RELEASE_DEBUG") == "1"
+  inserted = 0
+  before_inst = {}
+  before_term = {}
+  ei = 0
+  while ei < edges.size()
+    h = edges[ei][:header]
+    l = edges[ei][:tail]
+    ei += 1
+    next if back_count[h] != 1
+    latch_instrs = blocks[l][:instructions]
+    next if latch_instrs.size() == 0
+    term = latch_instrs[latch_instrs.size() - 1]
+    next if wire_kind(term) != :br || wire_get(term, :label) != blocks[h][:label]
+    body = loop_release_body(cfg, h, l)
+    outside = []
+    hp = cfg[:preds][h]
+    hpi = 0
+    while hpi < hp.size()
+      outside.push(hp[hpi]) if body[hp[hpi]] != true
+      hpi += 1
+    next if outside.size() != 1
+    pre = outside[0]
+    clean = true
+    bkeys = body.keys()
+    bk = 0
+    while bk < bkeys.size()
+      clean = false if opaque[bkeys[bk]] == true
+      bk += 1
+    next if !clean
+
+    pkeys = stores.keys()
+    pk = 0
+    while pk < pkeys.size()
+      ptr = pkeys[pk]
+      pk += 1
+      next if bad_slot[ptr] == true
+      body_store = nil
+      store_count = 0
+      sl = stores[ptr]
+      sj = 0
+      while sj < sl.size()
+        if body[sl[sj][0]] == true
+          store_count += 1
+          body_store = sl[sj]
+        sj += 1
+      next if store_count != 1
+      sb = body_store[0]
+      nxt = body_store[2]
+      next if nxt == nil || !block_dominates?(idom, sb, l)
+      def_at = defs[nxt]
+      next if def_at == nil || body[def_at[0]] != true
+      def_inst = blocks[def_at[0]][:instructions][def_at[1]]
+      next if wire_kind(def_inst) != :call_direct_i64 || !loop_release_arith?(wire_get(def_inst, :name))
+
+      members = {}
+      work = [nxt]
+      members[nxt] = true
+      ll = loads[ptr]
+      lj = 0
+      while ll != nil && lj < ll.size()
+        if body[ll[lj][0]] == true && ll[lj][2] != nil && members[ll[lj][2]] != true
+          members[ll[lj][2]] = true
+          work.push(ll[lj][2])
+        lj += 1
+      inter = []
+      ok = true
+      while work.size() > 0 && ok
+        v = work.pop()
+        vuses = uses[v]
+        if vuses != nil
+          ui = 0
+          while ui < vuses.size() && ok
+            ub = vuses[ui][0]
+            uinst = blocks[ub][:instructions][vuses[ui][1]]
+            ui += 1
+            if body[ub] != true
+              ok = false
+              next
+            uk = wire_kind(uinst)
+            if uk == :store_i64
+              ok = false unless wire_get(uinst, :ptr) == ptr && wire_get(uinst, :value) == nxt && v == nxt
+            elsif uk == :call_direct_i64
+              uname = wire_get(uinst, :name)
+              if loop_release_arith?(uname)
+                r = wire_get(uinst, :temp)
+                if r == nil
+                  ok = false
+                elsif members[r] != true
+                  members[r] = true
+                  work.push(r)
+                  if r != nxt && block_dominates?(idom, ub, l)
+                    inter.push(r)
+              elsif !is_nonretaining_consumer(uname)
+                ok = false
+            else
+              ok = false
+      if dbg
+        ignored = ccall("w_eputs", "loop-release " + func[:name].to_s() + " slot=" + ptr.to_s() + " header=" + blocks[h][:label].to_s() + " ok=" + ok.to_s() + " members=" + members.keys().size().to_s() + " inter=" + inter.size().to_s())
+      next if !ok
+
+      init_tmp = next_temp(func)
+      prev_tmp = next_temp(func)
+      extra = inter.size()
+      extra = 2 if extra > 2
+      t1 = extra >= 1 ? inter[0] : "0"
+      t2 = extra >= 2 ? inter[1] : "0"
+      if before_term[pre] == nil
+        before_term[pre] = []
+      before_term[pre].push(wire_make_load_i64(ptr, init_tmp))
+      skey = sb.to_s() + ":" + body_store[1].to_s()
+      if before_inst[skey] == nil
+        before_inst[skey] = []
+      before_inst[skey].push(wire_make_load_i64(ptr, prev_tmp))
+      if before_term[l] == nil
+        before_term[l] = []
+      before_term[l].push(wire_make_call_direct_void([extra.to_s(), init_tmp, prev_tmp, nxt, t1, t2], "w_value_release_loop"))
+      inserted += 1
+
+  return 0 if inserted == 0
+  bi = 0
+  while bi < blocks.size()
+    instrs = blocks[bi][:instructions]
+    terms = before_term[bi]
+    touched = terms != nil
+    ii = 0
+    while ii < instrs.size() && !touched
+      touched = true if before_inst[bi.to_s() + ":" + ii.to_s()] != nil
+      ii += 1
+    if touched
+      rebuilt = []
+      ii = 0
+      while ii < instrs.size()
+        extra_before = before_inst[bi.to_s() + ":" + ii.to_s()]
+        if extra_before != nil
+          ei2 = 0
+          while ei2 < extra_before.size()
+            rebuilt.push(extra_before[ei2])
+            ei2 += 1
+        if terms != nil && ii == instrs.size() - 1
+          ti = 0
+          while ti < terms.size()
+            rebuilt.push(terms[ti])
+            ti += 1
+        rebuilt.push(instrs[ii])
+        ii += 1
+      blocks[bi][:instructions] = rebuilt
+    bi += 1
+  inserted

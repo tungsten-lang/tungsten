@@ -2841,6 +2841,25 @@ BN_FIXED_ADDSUB(
     "cset %[flag], hs")
 
 BN_FIXED_ADDSUB(
+    bn_add6_fixed,
+    "ldp x4, x5, [%[ap]]\n\t"
+    "ldp x6, x7, [%[ap], #16]\n\t"
+    "ldp x8, x9, [%[bp]]\n\t"
+    "ldp x10, x11, [%[bp], #16]\n\t",
+    "adds x12, x4, x8\n\t"
+    "adcs x13, x5, x9\n\t"
+    "adcs x14, x6, x10\n\t"
+    "adcs x15, x7, x11\n\t"
+    "stp x12, x13, [%[rp]]\n\t"
+    "stp x14, x15, [%[rp], #16]\n\t"
+    "ldp x4, x5, [%[ap], #32]\n\t"
+    "ldp x8, x9, [%[bp], #32]\n\t"
+    "adcs x12, x4, x8\n\t"
+    "adcs x13, x5, x9\n\t",
+    "stp x12, x13, [%[rp], #32]\n\t"
+    "cset %[flag], hs")
+
+BN_FIXED_ADDSUB(
     bn_add8_fixed,
     "ldp x4, x5, [%[ap]]\n\t"
     "ldp x6, x7, [%[ap], #16]\n\t"
@@ -2862,6 +2881,40 @@ BN_FIXED_ADDSUB(
     "adcs x15, x7, x11\n\t",
     "stp x12, x13, [%[rp], #32]\n\t"
     "stp x14, x15, [%[rp], #48]\n\t"
+    "cset %[flag], hs")
+
+BN_FIXED_ADDSUB(
+    bn_add12_fixed,
+    "ldp x4, x5, [%[ap]]\n\t"
+    "ldp x6, x7, [%[ap], #16]\n\t"
+    "ldp x8, x9, [%[bp]]\n\t"
+    "ldp x10, x11, [%[bp], #16]\n\t",
+    "adds x12, x4, x8\n\t"
+    "adcs x13, x5, x9\n\t"
+    "adcs x14, x6, x10\n\t"
+    "adcs x15, x7, x11\n\t"
+    "stp x12, x13, [%[rp]]\n\t"
+    "stp x14, x15, [%[rp], #16]\n\t"
+    "ldp x4, x5, [%[ap], #32]\n\t"
+    "ldp x6, x7, [%[ap], #48]\n\t"
+    "ldp x8, x9, [%[bp], #32]\n\t"
+    "ldp x10, x11, [%[bp], #48]\n\t"
+    "adcs x12, x4, x8\n\t"
+    "adcs x13, x5, x9\n\t"
+    "adcs x14, x6, x10\n\t"
+    "adcs x15, x7, x11\n\t"
+    "stp x12, x13, [%[rp], #32]\n\t"
+    "stp x14, x15, [%[rp], #48]\n\t"
+    "ldp x4, x5, [%[ap], #64]\n\t"
+    "ldp x6, x7, [%[ap], #80]\n\t"
+    "ldp x8, x9, [%[bp], #64]\n\t"
+    "ldp x10, x11, [%[bp], #80]\n\t"
+    "adcs x12, x4, x8\n\t"
+    "adcs x13, x5, x9\n\t"
+    "adcs x14, x6, x10\n\t"
+    "adcs x15, x7, x11\n\t",
+    "stp x12, x13, [%[rp], #64]\n\t"
+    "stp x14, x15, [%[rp], #80]\n\t"
     "cset %[flag], hs")
 
 BN_FIXED_ADDSUB(
@@ -3146,6 +3199,25 @@ BN_FIXED_ADDSUB(
     "cset %[flag], lo")
 
 BN_FIXED_ADDSUB(
+    bn_sub6_fixed,
+    "ldp x4, x5, [%[ap]]\n\t"
+    "ldp x6, x7, [%[ap], #16]\n\t"
+    "ldp x8, x9, [%[bp]]\n\t"
+    "ldp x10, x11, [%[bp], #16]\n\t",
+    "subs x12, x4, x8\n\t"
+    "sbcs x13, x5, x9\n\t"
+    "sbcs x14, x6, x10\n\t"
+    "sbcs x15, x7, x11\n\t"
+    "stp x12, x13, [%[rp]]\n\t"
+    "stp x14, x15, [%[rp], #16]\n\t"
+    "ldp x4, x5, [%[ap], #32]\n\t"
+    "ldp x8, x9, [%[bp], #32]\n\t"
+    "sbcs x12, x4, x8\n\t"
+    "sbcs x13, x5, x9\n\t",
+    "stp x12, x13, [%[rp], #32]\n\t"
+    "cset %[flag], lo")
+
+BN_FIXED_ADDSUB(
     bn_sub8_fixed,
     "ldp x4, x5, [%[ap]]\n\t"
     "ldp x6, x7, [%[ap], #16]\n\t"
@@ -3167,6 +3239,40 @@ BN_FIXED_ADDSUB(
     "sbcs x15, x7, x11\n\t",
     "stp x12, x13, [%[rp], #32]\n\t"
     "stp x14, x15, [%[rp], #48]\n\t"
+    "cset %[flag], lo")
+
+BN_FIXED_ADDSUB(
+    bn_sub12_fixed,
+    "ldp x4, x5, [%[ap]]\n\t"
+    "ldp x6, x7, [%[ap], #16]\n\t"
+    "ldp x8, x9, [%[bp]]\n\t"
+    "ldp x10, x11, [%[bp], #16]\n\t",
+    "subs x12, x4, x8\n\t"
+    "sbcs x13, x5, x9\n\t"
+    "sbcs x14, x6, x10\n\t"
+    "sbcs x15, x7, x11\n\t"
+    "stp x12, x13, [%[rp]]\n\t"
+    "stp x14, x15, [%[rp], #16]\n\t"
+    "ldp x4, x5, [%[ap], #32]\n\t"
+    "ldp x6, x7, [%[ap], #48]\n\t"
+    "ldp x8, x9, [%[bp], #32]\n\t"
+    "ldp x10, x11, [%[bp], #48]\n\t"
+    "sbcs x12, x4, x8\n\t"
+    "sbcs x13, x5, x9\n\t"
+    "sbcs x14, x6, x10\n\t"
+    "sbcs x15, x7, x11\n\t"
+    "stp x12, x13, [%[rp], #32]\n\t"
+    "stp x14, x15, [%[rp], #48]\n\t"
+    "ldp x4, x5, [%[ap], #64]\n\t"
+    "ldp x6, x7, [%[ap], #80]\n\t"
+    "ldp x8, x9, [%[bp], #64]\n\t"
+    "ldp x10, x11, [%[bp], #80]\n\t"
+    "sbcs x12, x4, x8\n\t"
+    "sbcs x13, x5, x9\n\t"
+    "sbcs x14, x6, x10\n\t"
+    "sbcs x15, x7, x11\n\t",
+    "stp x12, x13, [%[rp], #64]\n\t"
+    "stp x14, x15, [%[rp], #80]\n\t"
     "cset %[flag], lo")
 
 BN_FIXED_ADDSUB(
@@ -3237,6 +3343,62 @@ static __attribute__((noinline)) uint64_t bn_sub_csel_serial_fallback(
                          b + 16 * (bit)) << (bit)
 
 #if BN_ADDSUB_CSEL_ADD128
+static __attribute__((noinline)) uint64_t bn_add96_serial_fallback(
+    uint64_t *r, const uint64_t *a, const uint64_t *b) {
+    return bn_add_n(r, a, b, 96);
+}
+
+static __attribute__((noinline, BN_HOT_SECTION, aligned(64))) uint64_t
+bn_add96_carry_select(uint64_t *r, const uint64_t *a, const uint64_t *b) {
+    uint64_t carry_mask = 0;
+    BN_CSEL_CHUNK(bn_add16_fixed, 0);
+    BN_CSEL_CHUNK(bn_add16_fixed, 1);
+    BN_CSEL_CHUNK(bn_add16_fixed, 2);
+    BN_CSEL_CHUNK(bn_add16_fixed, 3);
+    BN_CSEL_CHUNK(bn_add16_fixed, 4);
+    BN_CSEL_CHUNK(bn_add16_fixed, 5);
+
+    uint64_t wrapped = 0;
+#if defined(__clang__)
+#pragma clang loop unroll(full)
+#endif
+    for (int32_t chunk = 1; chunk < 6; chunk++) {
+        uint64_t increment = (carry_mask >> (chunk - 1)) & 1U;
+        uint64_t old = r[16 * chunk];
+        uint64_t adjusted = old + increment;
+        r[16 * chunk] = adjusted;
+        wrapped |= (uint64_t)(adjusted == 0) & increment;
+    }
+    if (__builtin_expect(wrapped != 0, 0))
+        return bn_add96_serial_fallback(r, a, b);
+    return (carry_mask >> 5) & 1U;
+}
+
+static __attribute__((noinline, BN_HOT_SECTION, aligned(64))) uint64_t
+bn_sub96_carry_select(uint64_t *r, const uint64_t *a, const uint64_t *b) {
+    uint64_t carry_mask = 0;
+    BN_CSEL_CHUNK(bn_sub16_fixed, 0);
+    BN_CSEL_CHUNK(bn_sub16_fixed, 1);
+    BN_CSEL_CHUNK(bn_sub16_fixed, 2);
+    BN_CSEL_CHUNK(bn_sub16_fixed, 3);
+    BN_CSEL_CHUNK(bn_sub16_fixed, 4);
+    BN_CSEL_CHUNK(bn_sub16_fixed, 5);
+
+    uint64_t wrapped = 0;
+#if defined(__clang__)
+#pragma clang loop unroll(full)
+#endif
+    for (int32_t chunk = 1; chunk < 6; chunk++) {
+        uint64_t decrement = (carry_mask >> (chunk - 1)) & 1U;
+        uint64_t old = r[16 * chunk];
+        r[16 * chunk] = old - decrement;
+        wrapped |= (uint64_t)(old == 0) & decrement;
+    }
+    if (__builtin_expect(wrapped != 0, 0))
+        return bn_sub_csel_serial_fallback(r, a, b, 96);
+    return (carry_mask >> 5) & 1U;
+}
+
 static __attribute__((noinline)) uint64_t bn_add128_serial_fallback(
     uint64_t *r, const uint64_t *a, const uint64_t *b) {
     return bn_add_n(r, a, b, 128);
@@ -3383,7 +3545,9 @@ uint64_t bn_add_equal_fast(uint64_t *r, const uint64_t *a,
     if (len == 3) return bn_add3_fixed(r, a, b);
     if (len <= 64) {
         if (len == 4) return bn_add4_fixed(r, a, b);
+        if (len == 6) return bn_add6_fixed(r, a, b);
         if (len == 8) return bn_add8_fixed(r, a, b);
+        if (len == 12) return bn_add12_fixed(r, a, b);
         if (len == 16) return bn_add16_fixed(r, a, b);
         if (len == 24) return bn_add24_fixed(r, a, b);
         if (len == 32) return bn_add32_fixed(r, a, b);
@@ -3402,7 +3566,9 @@ uint64_t bn_sub_equal_fast(uint64_t *r, const uint64_t *a,
     if (len == 3) return bn_sub3_fixed(r, a, b);
     if (len <= 64) {
         if (len == 4) return bn_sub4_fixed(r, a, b);
+        if (len == 6) return bn_sub6_fixed(r, a, b);
         if (len == 8) return bn_sub8_fixed(r, a, b);
+        if (len == 12) return bn_sub12_fixed(r, a, b);
         if (len == 16) return bn_sub16_fixed(r, a, b);
         if (len == 24) return bn_sub24_fixed(r, a, b);
         if (len == 32) return bn_sub32_fixed(r, a, b);
@@ -3588,7 +3754,9 @@ WValue bigint_add_equal_fast(
 #if BN_ADDSUB_FIXED_KERNELS
     case 3: carry = bn_add3_fixed(dst, a, b); break;
     case 4: carry = bn_add4_fixed(dst, a, b); break;
+    case 6: carry = bn_add6_fixed(dst, a, b); break;
     case 8: carry = bn_add8_fixed(dst, a, b); break;
+    case 12: carry = bn_add12_fixed(dst, a, b); break;
     case 16: carry = bn_add16_fixed(dst, a, b); break;
     case 24: carry = bn_add24_fixed(dst, a, b); break;
     case 32:
@@ -3613,6 +3781,9 @@ WValue bigint_add_equal_fast(
         break;
 #endif
 #if BN_ADDSUB_CSEL_ADD128
+    case 96:
+        carry = bn_add96_carry_select(dst, a, b);
+        break;
     case 128:
         carry = bn_add128_carry_select(dst, a, b);
         break;
@@ -3675,7 +3846,9 @@ WValue bigint_sub_equal_fast(
 #if BN_ADDSUB_FIXED_KERNELS
     case 3: borrow = bn_sub3_fixed(dst, larger, smaller); break;
     case 4: borrow = bn_sub4_fixed(dst, larger, smaller); break;
+    case 6: borrow = bn_sub6_fixed(dst, larger, smaller); break;
     case 8: borrow = bn_sub8_fixed(dst, larger, smaller); break;
+    case 12: borrow = bn_sub12_fixed(dst, larger, smaller); break;
     case 16: borrow = bn_sub16_fixed(dst, larger, smaller); break;
     case 24: borrow = bn_sub24_fixed(dst, larger, smaller); break;
     case 32:
@@ -3700,6 +3873,9 @@ WValue bigint_sub_equal_fast(
         break;
 #endif
 #if BN_ADDSUB_CSEL128
+    case 96:
+        borrow = bn_sub96_carry_select(dst, larger, smaller);
+        break;
     case 128:
         borrow = bn_sub128_256_carry_select(
             dst, larger, smaller, 128);
@@ -4164,7 +4340,7 @@ static int bn_bench_runtime_div_recip_diff28;
 #endif
 #ifndef BN_KARA_SQ_PAR_THRESHOLD
 #if defined(__aarch64__)
-#define BN_KARA_SQ_PAR_THRESHOLD 128
+#define BN_KARA_SQ_PAR_THRESHOLD 192
 #else
 #define BN_KARA_SQ_PAR_THRESHOLD 512
 #endif
@@ -5002,6 +5178,49 @@ static uint64_t bn_mul_2_f24(uint64_t *rp, const uint64_t *up,
     );
 }
 #endif
+#define BN_M2_STEP1                                                       \
+    "ldr x4, [x1], #8\n\t"                                                \
+    "mul x8, x4, x2\n\t"                                                  \
+    "umulh x9, x4, x2\n\t"                                                \
+    "mul x10, x4, x3\n\t"                                                 \
+    "umulh x11, x4, x3\n\t"                                               \
+    "adds x8, x8, x16\n\t"                                                \
+    "adcs x16, x9, x17\n\t"                                               \
+    "adc x17, x11, xzr\n\t"                                               \
+    "adds x16, x16, x10\n\t"                                              \
+    "adc x17, x17, xzr\n\t"                                               \
+    "str x8, [x0], #8\n\t"
+
+__attribute__((naked, noinline, aligned(64), BN_HOT_SECTION))
+static uint64_t bn_mul_2(uint64_t *rp, const uint64_t *up, int32_t n,
+                         uint64_t v0, uint64_t v1) {
+    __asm__(
+        "mov w7, w2\n\t"
+        "mov x2, x3\n\t"
+        "mov x3, x4\n\t"
+        "mov x16, xzr\n\t"
+        "mov x17, xzr\n\t"
+        "tbz w7, #0, 1f\n\t"
+        BN_M2_STEP1
+        "1:\n\t"
+        "tbz w7, #1, 2f\n\t"
+        BN_M2_STEP1
+        BN_M2_STEP1
+        "2:\n\t"
+        "lsr x7, x7, #2\n\t"
+        "cbz x7, 4f\n\t"
+        "3:\n\t"
+        BN_AM2_PROD("ldp x4, x5, [x1], #32", "ldp x6, x16, [x1, #-16]")
+        BN_AM2_FOLD("stp x8, x9, [x0], #32", "stp x10, x11, [x0, #-16]")
+        "sub x7, x7, #1\n\t"
+        "cbnz x7, 3b\n\t"
+        "4:\n\t"
+        "str x16, [x0]\n\t"
+        "mov x0, x17\n\t"
+        "ret\n\t"
+    );
+}
+#undef BN_M2_STEP1
 #undef BN_AM2_PROD
 #undef BN_AM2_ACC
 #undef BN_AM2_FOLD
@@ -5015,6 +5234,10 @@ static inline uint64_t bn_addmul_2s(uint64_t *rp, const uint64_t *up,
                                     int32_t n, uint64_t v0, uint64_t v1,
                                     uint64_t seed) {
     return bn_addmul_2_ref(rp, up, n, v0, v1, seed);
+}
+static inline uint64_t bn_mul_2(uint64_t *rp, const uint64_t *up,
+                                int32_t n, uint64_t v0, uint64_t v1) {
+    return bn_mul_2_ref(rp, up, n, v0, v1);
 }
 #define BN_ADDMUL_2_FIXED_PORTABLE(N)                                     \
 static inline uint64_t bn_addmul_2_f##N(uint64_t *rp, const uint64_t *up, \
@@ -6946,6 +7169,21 @@ static void bigint_mul_schoolbook_into(uint64_t *out,
         for (int32_t k = 0; k < tot; k++) out[k] = 0;
         return;
     }
+#if BN_ADDMUL_2
+    if (na >= 2 && nb >= 4) {
+        int32_t i;
+        if (na & 1) {
+            out[nb] = bn_mul_1(out, b, nb, a[0]);
+            i = 1;
+        } else {
+            out[nb + 1] = bn_mul_2(out, b, nb, a[0], a[1]);
+            i = 2;
+        }
+        for (; i + 1 < na; i += 2)
+            out[i + nb + 1] = bn_addmul_2(out + i, b, nb, a[i], a[i + 1]);
+        return;
+    }
+#endif
     /* Row 0: write b·a[0] into out[0..nb), carry into out[nb]. */
     out[nb] = bn_mul_1(out, b, nb, a[0]);
     /* Rows 1..na-1: accumulate as usual. */
@@ -6962,13 +7200,14 @@ static void bigint_mul_schoolbook_into(uint64_t *out,
  * C = ((G<<1|cin)+P)^P (exact because G&P == 0).  Fully non-speculative and
  * branchless on data: all-propagate inputs (e.g. Mersenne limbs) run at the
  * same speed as random data.  Measured on Apple M5 Max: 1.15x over the ADCS
- * chain at 512 limbs, 1.31x at 1024, 1.39x at 2048.  A boxed threshold sweep
- * places the safe mixed-operation crossover at 288 limbs. */
+ * chain at 512 limbs, 1.31x at 1024, 1.39x at 2048.  With single-pass
+ * 16-limb carry-select blocks (BN_ADDSUB_WIDE_CSEL), the crossover drops to
+ * 128 limbs. */
 #ifndef BN_ADDSUB_NEON_HYBRID
 #define BN_ADDSUB_NEON_HYBRID 1
 #endif
 #ifndef BN_ADDSUB_NEON_HYBRID_MIN
-#define BN_ADDSUB_NEON_HYBRID_MIN 288
+#define BN_ADDSUB_NEON_HYBRID_MIN 128
 #endif
 /* Pass 1 can write a provisional result for pass 2 to correct, or retain only
  * its generate/propagate masks and let pass 2 write the final result once. */
@@ -7325,8 +7564,266 @@ static uint64_t bn_hyb_round(uint64_t *r, const uint64_t *a, const uint64_t *b,
     return carry;
 }
 
+#ifndef BN_ADDSUB_WIDE_CSEL
+#define BN_ADDSUB_WIDE_CSEL 1
+#endif
+
+#if BN_ADDSUB_WIDE_CSEL && BN_ADDSUB_FIXED_KERNELS
+static __attribute__((noinline)) uint64_t bn_add_csel_fixup(
+    uint64_t *r, uint64_t carry_mask, uint64_t cin, int32_t chunks) {
+    uint64_t adj_mask = (carry_mask << 1) | cin;
+    for (int32_t c = 0; c < chunks; c++)
+        r[16 * c] -= (adj_mask >> c) & 1U;
+    uint64_t carry = cin;
+    for (int32_t c = 0; c < chunks; c++) {
+        uint64_t g = (carry_mask >> c) & 1U;
+        if (carry) {
+            uint64_t *rc = r + 16 * c;
+            int32_t j = 0;
+            while (j < 16 && ++rc[j] == 0) j++;
+            carry = (j == 16) ? 1U : g;
+        } else {
+            carry = g;
+        }
+    }
+    return carry;
+}
+
+static __attribute__((noinline)) uint64_t bn_sub_csel_fixup(
+    uint64_t *r, uint64_t borrow_mask, uint64_t bin, int32_t chunks) {
+    uint64_t adj_mask = (borrow_mask << 1) | bin;
+    for (int32_t c = 0; c < chunks; c++)
+        r[16 * c] += (adj_mask >> c) & 1U;
+    uint64_t borrow = bin;
+    for (int32_t c = 0; c < chunks; c++) {
+        uint64_t g = (borrow_mask >> c) & 1U;
+        if (borrow) {
+            uint64_t *rc = r + 16 * c;
+            int32_t j = 0;
+            while (j < 16 && rc[j]-- == 0) j++;
+            borrow = (j == 16) ? 1U : g;
+        } else {
+            borrow = g;
+        }
+    }
+    return borrow;
+}
+
+#define BN_WIDE_CSEL_CHUNK(kernel, bit)                                   \
+    carry_mask |= kernel(r + 16 * (bit), a + 16 * (bit),                  \
+                         b + 16 * (bit)) << (bit)
+
+static inline __attribute__((always_inline)) uint64_t
+bn_add256_csel_seeded(uint64_t *r, const uint64_t *a, const uint64_t *b,
+                      uint64_t cin) {
+    uint64_t carry_mask = 0;
+    BN_WIDE_CSEL_CHUNK(bn_add16_fixed, 0);
+    BN_WIDE_CSEL_CHUNK(bn_add16_fixed, 1);
+    BN_WIDE_CSEL_CHUNK(bn_add16_fixed, 2);
+    BN_WIDE_CSEL_CHUNK(bn_add16_fixed, 3);
+    BN_WIDE_CSEL_CHUNK(bn_add16_fixed, 4);
+    BN_WIDE_CSEL_CHUNK(bn_add16_fixed, 5);
+    BN_WIDE_CSEL_CHUNK(bn_add16_fixed, 6);
+    BN_WIDE_CSEL_CHUNK(bn_add16_fixed, 7);
+    BN_WIDE_CSEL_CHUNK(bn_add16_fixed, 8);
+    BN_WIDE_CSEL_CHUNK(bn_add16_fixed, 9);
+    BN_WIDE_CSEL_CHUNK(bn_add16_fixed, 10);
+    BN_WIDE_CSEL_CHUNK(bn_add16_fixed, 11);
+    BN_WIDE_CSEL_CHUNK(bn_add16_fixed, 12);
+    BN_WIDE_CSEL_CHUNK(bn_add16_fixed, 13);
+    BN_WIDE_CSEL_CHUNK(bn_add16_fixed, 14);
+    BN_WIDE_CSEL_CHUNK(bn_add16_fixed, 15);
+    uint64_t adj_mask = (carry_mask << 1) | cin;
+    uint64_t wrapped = 0;
+#if defined(__clang__)
+#pragma clang loop unroll(full)
+#endif
+    for (int32_t chunk = 0; chunk < 16; chunk++) {
+        uint64_t inc = (adj_mask >> chunk) & 1U;
+        uint64_t old = r[16 * chunk];
+        uint64_t adjusted = old + inc;
+        r[16 * chunk] = adjusted;
+        wrapped |= (uint64_t)(adjusted == 0) & inc;
+    }
+    if (__builtin_expect(wrapped != 0, 0))
+        return bn_add_csel_fixup(r, carry_mask, cin, 16);
+    return (carry_mask >> 15) & 1U;
+}
+
+static inline __attribute__((always_inline)) uint64_t
+bn_add128_csel_seeded(uint64_t *r, const uint64_t *a, const uint64_t *b,
+                      uint64_t cin) {
+    uint64_t carry_mask = 0;
+    BN_WIDE_CSEL_CHUNK(bn_add16_fixed, 0);
+    BN_WIDE_CSEL_CHUNK(bn_add16_fixed, 1);
+    BN_WIDE_CSEL_CHUNK(bn_add16_fixed, 2);
+    BN_WIDE_CSEL_CHUNK(bn_add16_fixed, 3);
+    BN_WIDE_CSEL_CHUNK(bn_add16_fixed, 4);
+    BN_WIDE_CSEL_CHUNK(bn_add16_fixed, 5);
+    BN_WIDE_CSEL_CHUNK(bn_add16_fixed, 6);
+    BN_WIDE_CSEL_CHUNK(bn_add16_fixed, 7);
+    uint64_t adj_mask = (carry_mask << 1) | cin;
+    uint64_t wrapped = 0;
+#if defined(__clang__)
+#pragma clang loop unroll(full)
+#endif
+    for (int32_t chunk = 0; chunk < 8; chunk++) {
+        uint64_t inc = (adj_mask >> chunk) & 1U;
+        uint64_t old = r[16 * chunk];
+        uint64_t adjusted = old + inc;
+        r[16 * chunk] = adjusted;
+        wrapped |= (uint64_t)(adjusted == 0) & inc;
+    }
+    if (__builtin_expect(wrapped != 0, 0))
+        return bn_add_csel_fixup(r, carry_mask, cin, 8);
+    return (carry_mask >> 7) & 1U;
+}
+
+static inline __attribute__((always_inline)) uint64_t
+bn_add64_csel_seeded(uint64_t *r, const uint64_t *a, const uint64_t *b,
+                     uint64_t cin) {
+    uint64_t carry_mask = 0;
+    BN_WIDE_CSEL_CHUNK(bn_add16_fixed, 0);
+    BN_WIDE_CSEL_CHUNK(bn_add16_fixed, 1);
+    BN_WIDE_CSEL_CHUNK(bn_add16_fixed, 2);
+    BN_WIDE_CSEL_CHUNK(bn_add16_fixed, 3);
+    uint64_t adj_mask = (carry_mask << 1) | cin;
+    uint64_t wrapped = 0;
+#if defined(__clang__)
+#pragma clang loop unroll(full)
+#endif
+    for (int32_t chunk = 0; chunk < 4; chunk++) {
+        uint64_t inc = (adj_mask >> chunk) & 1U;
+        uint64_t old = r[16 * chunk];
+        uint64_t adjusted = old + inc;
+        r[16 * chunk] = adjusted;
+        wrapped |= (uint64_t)(adjusted == 0) & inc;
+    }
+    if (__builtin_expect(wrapped != 0, 0))
+        return bn_add_csel_fixup(r, carry_mask, cin, 4);
+    return (carry_mask >> 3) & 1U;
+}
+
+static inline __attribute__((always_inline)) uint64_t
+bn_sub256_csel_seeded(uint64_t *r, const uint64_t *a, const uint64_t *b,
+                      uint64_t bin) {
+    uint64_t carry_mask = 0;
+    BN_WIDE_CSEL_CHUNK(bn_sub16_fixed, 0);
+    BN_WIDE_CSEL_CHUNK(bn_sub16_fixed, 1);
+    BN_WIDE_CSEL_CHUNK(bn_sub16_fixed, 2);
+    BN_WIDE_CSEL_CHUNK(bn_sub16_fixed, 3);
+    BN_WIDE_CSEL_CHUNK(bn_sub16_fixed, 4);
+    BN_WIDE_CSEL_CHUNK(bn_sub16_fixed, 5);
+    BN_WIDE_CSEL_CHUNK(bn_sub16_fixed, 6);
+    BN_WIDE_CSEL_CHUNK(bn_sub16_fixed, 7);
+    BN_WIDE_CSEL_CHUNK(bn_sub16_fixed, 8);
+    BN_WIDE_CSEL_CHUNK(bn_sub16_fixed, 9);
+    BN_WIDE_CSEL_CHUNK(bn_sub16_fixed, 10);
+    BN_WIDE_CSEL_CHUNK(bn_sub16_fixed, 11);
+    BN_WIDE_CSEL_CHUNK(bn_sub16_fixed, 12);
+    BN_WIDE_CSEL_CHUNK(bn_sub16_fixed, 13);
+    BN_WIDE_CSEL_CHUNK(bn_sub16_fixed, 14);
+    BN_WIDE_CSEL_CHUNK(bn_sub16_fixed, 15);
+    uint64_t adj_mask = (carry_mask << 1) | bin;
+    uint64_t wrapped = 0;
+#if defined(__clang__)
+#pragma clang loop unroll(full)
+#endif
+    for (int32_t chunk = 0; chunk < 16; chunk++) {
+        uint64_t dec = (adj_mask >> chunk) & 1U;
+        uint64_t old = r[16 * chunk];
+        r[16 * chunk] = old - dec;
+        wrapped |= (uint64_t)(old == 0) & dec;
+    }
+    if (__builtin_expect(wrapped != 0, 0))
+        return bn_sub_csel_fixup(r, carry_mask, bin, 16);
+    return (carry_mask >> 15) & 1U;
+}
+
+static inline __attribute__((always_inline)) uint64_t
+bn_sub128_csel_seeded(uint64_t *r, const uint64_t *a, const uint64_t *b,
+                      uint64_t bin) {
+    uint64_t carry_mask = 0;
+    BN_WIDE_CSEL_CHUNK(bn_sub16_fixed, 0);
+    BN_WIDE_CSEL_CHUNK(bn_sub16_fixed, 1);
+    BN_WIDE_CSEL_CHUNK(bn_sub16_fixed, 2);
+    BN_WIDE_CSEL_CHUNK(bn_sub16_fixed, 3);
+    BN_WIDE_CSEL_CHUNK(bn_sub16_fixed, 4);
+    BN_WIDE_CSEL_CHUNK(bn_sub16_fixed, 5);
+    BN_WIDE_CSEL_CHUNK(bn_sub16_fixed, 6);
+    BN_WIDE_CSEL_CHUNK(bn_sub16_fixed, 7);
+    uint64_t adj_mask = (carry_mask << 1) | bin;
+    uint64_t wrapped = 0;
+#if defined(__clang__)
+#pragma clang loop unroll(full)
+#endif
+    for (int32_t chunk = 0; chunk < 8; chunk++) {
+        uint64_t dec = (adj_mask >> chunk) & 1U;
+        uint64_t old = r[16 * chunk];
+        r[16 * chunk] = old - dec;
+        wrapped |= (uint64_t)(old == 0) & dec;
+    }
+    if (__builtin_expect(wrapped != 0, 0))
+        return bn_sub_csel_fixup(r, carry_mask, bin, 8);
+    return (carry_mask >> 7) & 1U;
+}
+
+static inline __attribute__((always_inline)) uint64_t
+bn_sub64_csel_seeded(uint64_t *r, const uint64_t *a, const uint64_t *b,
+                     uint64_t bin) {
+    uint64_t carry_mask = 0;
+    BN_WIDE_CSEL_CHUNK(bn_sub16_fixed, 0);
+    BN_WIDE_CSEL_CHUNK(bn_sub16_fixed, 1);
+    BN_WIDE_CSEL_CHUNK(bn_sub16_fixed, 2);
+    BN_WIDE_CSEL_CHUNK(bn_sub16_fixed, 3);
+    uint64_t adj_mask = (carry_mask << 1) | bin;
+    uint64_t wrapped = 0;
+#if defined(__clang__)
+#pragma clang loop unroll(full)
+#endif
+    for (int32_t chunk = 0; chunk < 4; chunk++) {
+        uint64_t dec = (adj_mask >> chunk) & 1U;
+        uint64_t old = r[16 * chunk];
+        r[16 * chunk] = old - dec;
+        wrapped |= (uint64_t)(old == 0) & dec;
+    }
+    if (__builtin_expect(wrapped != 0, 0))
+        return bn_sub_csel_fixup(r, carry_mask, bin, 4);
+    return (carry_mask >> 3) & 1U;
+}
+
+#undef BN_WIDE_CSEL_CHUNK
+#endif
+
 static uint64_t bn_add_n_hybrid(uint64_t *r, const uint64_t *a,
                                 const uint64_t *b, int32_t n) {
+#if BN_ADDSUB_WIDE_CSEL && BN_ADDSUB_FIXED_KERNELS
+    uint64_t carry = 0;
+    while (n >= 256) {
+        carry = bn_add256_csel_seeded(r, a, b, carry);
+        r += 256;
+        a += 256;
+        b += 256;
+        n -= 256;
+    }
+    if (n >= 128) {
+        carry = bn_add128_csel_seeded(r, a, b, carry);
+        r += 128;
+        a += 128;
+        b += 128;
+        n -= 128;
+    }
+    if (n >= 64) {
+        carry = bn_add64_csel_seeded(r, a, b, carry);
+        r += 64;
+        a += 64;
+        b += 64;
+        n -= 64;
+    }
+    if (n > 0)
+        carry = bn_hyb_adcs_run(r, a, b, (uint64_t)n, carry);
+    return carry;
+#else
     uint64_t carry = 0;
     int64_t i = 0, total = n;
     while (i < total) {
@@ -7336,10 +7833,38 @@ static uint64_t bn_add_n_hybrid(uint64_t *r, const uint64_t *a,
         i += chunk;
     }
     return carry;
+#endif
 }
 
 static uint64_t bn_sub_n_hybrid(uint64_t *r, const uint64_t *a,
                                 const uint64_t *b, int32_t n) {
+#if BN_ADDSUB_WIDE_CSEL && BN_ADDSUB_FIXED_KERNELS
+    uint64_t borrow = 0;
+    while (n >= 256) {
+        borrow = bn_sub256_csel_seeded(r, a, b, borrow);
+        r += 256;
+        a += 256;
+        b += 256;
+        n -= 256;
+    }
+    if (n >= 128) {
+        borrow = bn_sub128_csel_seeded(r, a, b, borrow);
+        r += 128;
+        a += 128;
+        b += 128;
+        n -= 128;
+    }
+    if (n >= 64) {
+        borrow = bn_sub64_csel_seeded(r, a, b, borrow);
+        r += 64;
+        a += 64;
+        b += 64;
+        n -= 64;
+    }
+    if (n > 0)
+        borrow = bn_hyb_sbcs_run(r, a, b, (uint64_t)n, borrow);
+    return borrow;
+#else
     uint64_t borrow = 0;
     int64_t i = 0, total = n;
     while (i < total) {
@@ -7349,6 +7874,7 @@ static uint64_t bn_sub_n_hybrid(uint64_t *r, const uint64_t *a,
         i += chunk;
     }
     return borrow;
+#endif
 }
 #endif /* __aarch64__ && BN_ADDSUB_NEON_HYBRID */
 
@@ -8526,6 +9052,7 @@ typedef struct {
     int slot;
     uint64_t seen_generation;
     _Atomic uint64_t published_generation;
+    _Atomic uint64_t claimed_generation;
     _Atomic int parked;
     WToomPointJob job;
 } __attribute__((aligned(128))) WToomPoolWorker;
@@ -8671,6 +9198,25 @@ static void *bn_toom_pool_worker(void *arg) {
 #if BN_POOL_ULOCK
         broadcast_seen = generation;
 #endif
+        /* Claim this generation before reading worker->job.  If the caller
+         * already finished its own slice and stole this slot (setting
+         * claimed_generation >= generation), skip execution and loop back
+         * with a warm spin budget for the next published generation. */
+        uint64_t prev_claimed = atomic_load_explicit(
+            &worker->claimed_generation, memory_order_relaxed);
+        int claimed = 0;
+        while (prev_claimed < generation) {
+            if (atomic_compare_exchange_weak_explicit(
+                    &worker->claimed_generation, &prev_claimed, generation,
+                    memory_order_acquire, memory_order_relaxed)) {
+                claimed = 1;
+                break;
+            }
+        }
+        if (!claimed) {
+            spin_budget = pool->spin_long;
+            continue;
+        }
 #if BN_TOOM_POOL_STATS
         atomic_store_explicit(&bn_toom_pool_stats.first_seen_ns[worker->slot],
                               bn_pool_now_ns(), memory_order_relaxed);
@@ -8768,6 +9314,8 @@ static void bn_toom_pool_init(void) {
             atomic_load_explicit(&pool->generation, memory_order_relaxed);
         atomic_init(&pool->workers[i].published_generation,
                     pool->workers[i].seen_generation);
+        atomic_init(&pool->workers[i].claimed_generation,
+                    pool->workers[i].seen_generation);
         atomic_init(&pool->workers[i].parked, 0);
         pthread_t thread;
         if (pthread_create(&thread, &attr, bn_toom_pool_worker,
@@ -8856,11 +9404,40 @@ static int bn_toom_pool_run(WToomPointJob *jobs, int threads) {
     uint32_t pending = atomic_load_explicit(
         &pool->pending_workers, memory_order_acquire);
     if (pending) {
-        for (int spin = pool->join_spin; spin > 0; spin--) {
+        int steal_check = pool->join_spin > 2048 ? 2048 : pool->join_spin / 2;
+        for (int spin = 0; spin < pool->join_spin; spin++) {
             bn_toom_pool_spin_hint();
             pending = atomic_load_explicit(
                 &pool->pending_workers, memory_order_acquire);
             if (!pending) break;
+            if (spin == steal_check) {
+                /* If a worker still has not even claimed its mailbox after
+                 * jobs[0] plus ~15us of spinning, it is stuck in kernel wake
+                 * or preempted; steal its job rather than parking on it. */
+                for (int i = 0; i < workers_needed; i++) {
+                    uint64_t prev_claimed = atomic_load_explicit(
+                        &pool->workers[i].claimed_generation,
+                        memory_order_relaxed);
+                    int stolen = 0;
+                    while (prev_claimed < generation) {
+                        if (atomic_compare_exchange_weak_explicit(
+                                &pool->workers[i].claimed_generation,
+                                &prev_claimed, generation,
+                                memory_order_acq_rel, memory_order_relaxed)) {
+                            stolen = 1;
+                            break;
+                        }
+                    }
+                    if (stolen) {
+                        bn_toom_point_range(&jobs[i + 1]);
+                        atomic_fetch_sub_explicit(
+                            &pool->pending_workers, 1, memory_order_seq_cst);
+                    }
+                }
+                pending = atomic_load_explicit(
+                    &pool->pending_workers, memory_order_acquire);
+                if (!pending) break;
+            }
         }
         if (pending) {
             atomic_store_explicit(&pool->joiner_parked, 1,
@@ -11253,13 +11830,9 @@ static int bn_mul_rect4_parallel(
 
 __attribute__((noinline))
 static void bn_sqr_top_kara(uint64_t *out, const uint64_t *a, int32_t n) {
-    int32_t half = n >> 1, hin = n - half, slen = hin + 1;
-    size_t need = (size_t)(4 * slen);
-    uint64_t *sc = bn_ws_get(need);
-    int owned = 0;
-    if (!sc) { sc = (uint64_t *)malloc(need * sizeof(uint64_t)); owned = 1; }
+    /* 464 limbs covers bn_kara_sq's two-level recursion for any n <= 128. */
+    uint64_t sc[464];
     bn_kara_sq(out, a, n, sc);
-    if (owned) free(sc);
 }
 
 /* Public magnitude squaring with size dispatch.  out must have 2*na limbs. */
@@ -11291,6 +11864,11 @@ static void bigint_sqr_dispatch(uint64_t *out, const uint64_t *a, int32_t na) {
             bn_sqr_top_kara(out, a, na);
         else
             bn_sqr_school(out, a, na);
+        return;
+    }
+    if (na <= 128 && na < BN_KARA_SQ_PAR_THRESHOLD &&
+        na < BN_SQR_TOOM3_THRESHOLD) {
+        bn_sqr_top_kara(out, a, na);
         return;
     }
 
@@ -13839,10 +14417,46 @@ static uint64_t mag_div_wide_preinv_cached(uint64_t *quotient,
                                            const uint64_t *a, int32_t alen,
                                            uint64_t d,
                                            BnDivPreinvCache *cache) {
+    if (d >> 63) {
+        uint64_t dinv = bn_div_preinv_cached(d, cache);
+        uint64_t top = a[alen - 1];
+        uint64_t q_top = top >= d;
+        uint64_t rem = top - (q_top ? d : 0);
+        if (quotient) quotient[alen - 1] = q_top;
+        int32_t i = alen - 2;
+#if BN_DIV1_2WAY
+        if (quotient) {
+            for (; i >= 1; i -= 2) {
+                uint64_t low_hi = a[i];
+                uint64_t low_lo = a[i - 1];
+                quotient[i] = bn_div_qr_preinv(rem, low_hi, d, dinv, &rem);
+                quotient[i - 1] = bn_div_qr_preinv(rem, low_lo, d, dinv, &rem);
+            }
+            if (i == 0)
+                quotient[0] = bn_div_qr_preinv(rem, a[0], d, dinv, &rem);
+        } else {
+            for (; i >= 1; i -= 2) {
+                uint64_t low_hi = a[i];
+                uint64_t low_lo = a[i - 1];
+                (void)bn_div_qr_preinv(rem, low_hi, d, dinv, &rem);
+                (void)bn_div_qr_preinv(rem, low_lo, d, dinv, &rem);
+            }
+            if (i == 0)
+                (void)bn_div_qr_preinv(rem, a[0], d, dinv, &rem);
+        }
+#else
+        for (; i >= 0; i--) {
+            uint64_t q = bn_div_qr_preinv(rem, a[i], d, dinv, &rem);
+            if (quotient) quotient[i] = q;
+        }
+#endif
+        return rem;
+    }
     unsigned shift = (unsigned)__builtin_clzll(d);
+    unsigned rshift = 64 - shift;
     uint64_t normalized_d = d << shift;
     uint64_t dinv = bn_div_preinv_cached(normalized_d, cache);
-    uint64_t rem = shift ? a[alen - 1] >> (64 - shift) : 0;
+    uint64_t rem = a[alen - 1] >> rshift;
 #if BN_DIV1_2WAY
     /* Software-pipelined two-limbs-per-iteration form of the single-step
      * loop kept under the #else.  The remainder recurrence is inherently
@@ -13855,11 +14469,9 @@ static uint64_t mag_div_wide_preinv_cached(uint64_t *quotient,
      * the same `rem`, and each `low` word is formed exactly as below (no
      * cross-limb shift-in for limb 0). */
     int32_t i = alen - 1;
-    for (; i >= 1; i -= 2) {
-        uint64_t low_hi = a[i] << shift;
-        if (shift) low_hi |= a[i - 1] >> (64 - shift);
-        uint64_t low_lo = a[i - 1] << shift;
-        if (shift && i - 1 > 0) low_lo |= a[i - 2] >> (64 - shift);
+    for (; i >= 2; i -= 2) {
+        uint64_t low_hi = (a[i] << shift) | (a[i - 1] >> rshift);
+        uint64_t low_lo = (a[i - 1] << shift) | (a[i - 2] >> rshift);
         uint64_t q_hi =
             bn_div_qr_preinv(rem, low_hi, normalized_d, dinv, &rem);
         uint64_t q_lo =
@@ -13869,22 +14481,23 @@ static uint64_t mag_div_wide_preinv_cached(uint64_t *quotient,
             quotient[i - 1] = q_lo;
         }
     }
-    if (i == 0) {
-        uint64_t low = a[0] << shift;
+    for (; i >= 0; i--) {
+        uint64_t low = a[i] << shift;
+        if (i > 0) low |= a[i - 1] >> rshift;
         uint64_t q =
             bn_div_qr_preinv(rem, low, normalized_d, dinv, &rem);
-        if (quotient) quotient[0] = q;
+        if (quotient) quotient[i] = q;
     }
 #else
     for (int32_t i = alen - 1; i >= 0; i--) {
         uint64_t low = a[i] << shift;
-        if (shift && i > 0) low |= a[i - 1] >> (64 - shift);
+        if (i > 0) low |= a[i - 1] >> rshift;
         uint64_t q =
             bn_div_qr_preinv(rem, low, normalized_d, dinv, &rem);
         if (quotient) quotient[i] = q;
     }
 #endif
-    return shift ? rem >> shift : rem;
+    return rem >> shift;
 }
 
 static uint64_t mag_div_wide_preinv(uint64_t *quotient,
@@ -15921,7 +16534,7 @@ static void mag_divmod_bz(const uint64_t *u, int32_t ulen,
 #define BN_DIV_BARRETT_LOW_MUL_MAX 56
 #endif
 #ifndef BN_DIV_BARRETT_LOW_MUL_MIN
-#define BN_DIV_BARRETT_LOW_MUL_MIN 24
+#define BN_DIV_BARRETT_LOW_MUL_MIN 25
 #endif
 /* At exactly 64 divisor limbs the full two-product Barrett rung sits between
  * the triangular low-product range and the width where its products amortize;
@@ -15990,7 +16603,25 @@ static void bn_mul_low(
     }
     memset(rp, 0, (size_t)rn * sizeof(uint64_t));
     int32_t rows = an < rn ? an : rn;
-    for (int32_t i = 0; i < rows; i++) {
+    int32_t i = 0;
+#if defined(__aarch64__) && BN_SCHOOLBOOK_ADDMUL2
+    for (; i + 1 < rows; i += 2) {
+        int32_t row0 = bn < rn - i ? bn : rn - i;
+        int32_t row1 = bn < rn - (i + 1) ? bn : rn - (i + 1);
+        if (row1 < 8) break;
+        uint64_t carry = bn_addmul_2(rp + i, b, row1, a[i], a[i + 1]);
+        if (row0 > row1) {
+            rp[rn - 1] += a[i] * b[row1];
+        } else {
+            for (int32_t p = i + 1 + row1; carry && p < rn; p++) {
+                uint64_t old = rp[p];
+                rp[p] = old + carry;
+                carry = rp[p] < old;
+            }
+        }
+    }
+#endif
+    for (; i < rows; i++) {
         int32_t row = bn < rn - i ? bn : rn - i;
         uint64_t carry = bn_addmul_1(rp + i, b, row, a[i]);
         for (int32_t p = i + row; carry && p < rn; p++) {
@@ -16071,7 +16702,30 @@ static void bn_mul_low(
 static void bn_mulhi_base(uint64_t *rp, const uint64_t *a, const uint64_t *b,
                           int32_t n) {
     memset(rp, 0, (size_t)(n + 1) * sizeof(uint64_t));
-    for (int32_t i = 0; i < n; i++) {
+    int32_t i = 0;
+#if defined(__aarch64__) && BN_SCHOOLBOOK_ADDMUL2
+    if (n & 1) {
+        __uint128_t p0 = (__uint128_t)a[0] * b[n - 1];
+        rp[0] = (uint64_t)p0;
+        rp[1] = (uint64_t)(p0 >> 64);
+        i = 1;
+    }
+    for (; i + 1 < n; i += 2) {
+        uint64_t c = bn_addmul_2(rp, b + (n - 1 - i), i + 1, a[i], a[i + 1]);
+        rp[i + 2] = c;
+        __uint128_t diag = (__uint128_t)a[i + 1] * b[n - 2 - i] + rp[0];
+        rp[0] = (uint64_t)diag;
+        uint64_t cy = (uint64_t)(diag >> 64);
+        int32_t p = 1;
+        while (cy) {
+            uint64_t old = rp[p];
+            rp[p] = old + cy;
+            cy = rp[p] < old;
+            p++;
+        }
+    }
+#endif
+    for (; i < n; i++) {
         uint64_t c = bn_addmul_1(rp, b + (n - 1 - i), i + 1, a[i]);
         int32_t p = i + 1;
         while (c) {
@@ -16276,18 +16930,11 @@ static int mag_divmod_reciprocal_certified(
     if (r_out && !q_out && vlen >= BN_DIV_BARRETT_R_MIN) {
         size_t barrett_product_len = 2 * n + 2;
 
-/* Below this divisor width the two Barrett products sit at the parallel-Toom
- * floor.  The condvar pool's sleep/wake between them once cost more than
- * the split saved below 768 limbs; with the ulock mechanics and burst
- * linger the parallel products win from the Toom-3 parallel floor up
- * (mod@384 -43%, mod@512 -29%, mod@640 -41% in the forced A/B), so the
- * gate now simply tracks that floor on Apple arm64. */
+/* Below this divisor width the two Barrett products use the Mulders short
+ * product and sequential multiplication, avoiding worker-pool wake stalls
+ * in interleaved ABBA quartet blocks at 384..512 limbs. */
 #ifndef BN_DIV_RECIP_PAR_MIN
-#if defined(__aarch64__)
-#define BN_DIV_RECIP_PAR_MIN 344
-#else
 #define BN_DIV_RECIP_PAR_MIN 768
-#endif
 #endif
 /* In the forced-sequential band the q3 estimate comes from a Mulders short
  * product over one extra live limb of U and the FULL cached reciprocal
@@ -16365,11 +17012,25 @@ static int mag_divmod_reciprocal_certified(
                 }
             }
 #endif
-            if (vlen == 4)
+            if (vlen == 4) {
                 bigint_mul_schoolbook_into(product_out, q1, 5, mu, 5);
-            else
+            } else {
                 bigint_mul_dispatch(
-                    product_out, q1, vlen + 1, mu, vlen + 1);
+                    product_out + 2, q1 + 1, vlen, mu + 1, vlen);
+                __uint128_t p00 = (__uint128_t)q1[0] * mu[0];
+                product_out[0] = (uint64_t)p00;
+                product_out[1] = (uint64_t)(p00 >> 64);
+                uint64_t c1 = bn_addmul_1(product_out + 1, mu + 1, vlen, q1[0]);
+                uint64_t c2 = bn_addmul_1(product_out + 1, q1 + 1, vlen, mu[0]);
+                __uint128_t top = (__uint128_t)product_out[n + 1] + c1 + c2;
+                product_out[n + 1] = (uint64_t)top;
+                uint64_t cy = (uint64_t)(top >> 64);
+                for (size_t k = n + 2; cy && k < 2 * n + 2; k++) {
+                    uint64_t old = product_out[k];
+                    product_out[k] = old + cy;
+                    cy = product_out[k] < old;
+                }
+            }
             if (product_redirected)
                 memcpy(cache->product, product_out,
                        barrett_product_len * sizeof(uint64_t));
@@ -16400,18 +17061,23 @@ static int mag_divmod_reciprocal_certified(
                 verification_out, vlen + 1,
                 q3, q3_len, v, vlen);
         } else {
-            if (q3_len > 0) {
+            uint64_t q3_top = q3[n];
+            int32_t q3_lo_len = q3_len > vlen ? vlen : q3_len;
+            while (q3_lo_len > 0 && q3[q3_lo_len - 1] == 0)
+                q3_lo_len--;
+            if (q3_lo_len > 0) {
                 if (vlen == 4)
                     bigint_mul_schoolbook_into(
-                        verification_out, q3, q3_len, v, 4);
+                        verification_out, q3, q3_lo_len, v, 4);
                 else
                     bigint_mul_dispatch(
-                        verification_out, q3, q3_len, v, vlen);
+                        verification_out, q3, q3_lo_len, v, vlen);
             } else {
                 /* Only these live limbs feed the reduction below. */
                 memset(verification_out, 0,
                        (n + 1) * sizeof(uint64_t));
             }
+            verification_out[n] += q3_top * v[0];
         }
         if (verification_redirected)
             memcpy(cache->verification, verification_out,
@@ -16482,14 +17148,16 @@ static int mag_divmod_reciprocal_certified(
     _Static_assert(BN_DIV_RECIP_Q_GUARD_LIMBS == 1,
                    "the rp[1] headroom certificate is derived for g == 1");
 #ifndef BN_DIV_RECIP_MULHI_Q_MAX
-#define BN_DIV_RECIP_MULHI_Q_MAX 382
+#define BN_DIV_RECIP_MULHI_Q_MAX 510
 #endif
     const uint64_t *rp;
     if (vlen < BN_DIV_RECIP_MULHI_Q_MAX || bn_toom_parallel_depth) {
         /* rp = product[0..n+3); scratch above it (2n+4, never bn_ws). */
+        bn_toom_parallel_depth++;
         bn_mulhi_approx(cache->product, u + n - 2,
                         cache->reciprocal, vlen + 2,
                         cache->product + (n + 3));
+        bn_toom_parallel_depth--;
         rp = cache->product;
     } else {
         bigint_mul_dispatch(
@@ -16510,11 +17178,17 @@ static int mag_divmod_reciprocal_certified(
                     &cache->verification_cap,
                     verification_len))
                 return 0;
-            memset(cache->verification, 0,
-                   verification_len * sizeof(uint64_t));
-            bigint_mul_dispatch(
-                cache->verification,
-                q_limbs, q_len, v, vlen);
+            int32_t q_lo_len = q_len > vlen ? vlen : q_len;
+            while (q_lo_len > 0 && q_limbs[q_lo_len - 1] == 0)
+                q_lo_len--;
+            if (q_lo_len > 0) {
+                bigint_mul_dispatch(
+                    cache->verification,
+                    q_limbs, q_lo_len, v, vlen);
+            } else {
+                memset(cache->verification, 0,
+                       n * sizeof(uint64_t));
+            }
             WBigint *r = bigint_alloc_raw_hot(vlen);
             (void)bn_sub_n(
                 r->limbs, u, cache->verification, vlen);
@@ -19105,6 +19779,57 @@ static int mag_linear_comb_pair(uint64_t *rx, uint64_t *ry, int32_t n,
     gcd_profile_pair_limbs += (uint64_t)n;
 #endif
 #if BN_GCD_TWO_STEP_REPLAY
+    /* A 1-quotient Euclid step has either:
+     *   rx = x - q*y, ry = y  (ux=1, vx=q, uy=1, vy=0, from gcd_hgcd2)
+     * or
+     *   rx = x, ry = y - q*x  (ux=1, vx=0, uy=1, vy=q, from odd-step Lehmer).
+     * Handle both with one subtract/submul_1 and one memcpy instead of four
+     * scalar products per limb. */
+    if (ux == 1 && uy == 1 && (vx == 0 || vy == 0)) {
+        uint64_t borrow = 0;
+        if (vy == 0) {
+            if (vx == 1) {
+                borrow = bn_sub_n(rx, x, y, n);
+            } else if (vx != 0) {
+#if BN_GCD_FUSED_REPLAY_SUBMUL
+                if (n >= BN_GCD_FUSED_REPLAY_THRESHOLD) {
+                    borrow = bn_submul_from_1(rx, x, y, n, vx);
+                } else {
+                    memcpy(rx, x, (size_t)n * sizeof(uint64_t));
+                    borrow = bn_submul_1(rx, y, n, vx);
+                }
+#else
+                memcpy(rx, x, (size_t)n * sizeof(uint64_t));
+                borrow = bn_submul_1(rx, y, n, vx);
+#endif
+            } else {
+                memcpy(rx, x, (size_t)n * sizeof(uint64_t));
+            }
+            if (borrow) return 0;
+            memcpy(ry, y, (size_t)n * sizeof(uint64_t));
+        } else {
+            if (vy == 1) {
+                borrow = bn_sub_n(ry, y, x, n);
+            } else {
+#if BN_GCD_FUSED_REPLAY_SUBMUL
+                if (n >= BN_GCD_FUSED_REPLAY_THRESHOLD) {
+                    borrow = bn_submul_from_1(ry, y, x, n, vy);
+                } else {
+                    memcpy(ry, y, (size_t)n * sizeof(uint64_t));
+                    borrow = bn_submul_1(ry, x, n, vy);
+                }
+#else
+                memcpy(ry, y, (size_t)n * sizeof(uint64_t));
+                borrow = bn_submul_1(ry, x, n, vy);
+#endif
+            }
+            if (borrow) return 0;
+            memcpy(rx, x, (size_t)n * sizeof(uint64_t));
+        }
+        *rxlen = mag_norm_len(rx, n);
+        *rylen = mag_norm_len(ry, n);
+        return 1;
+    }
     /* A two-quotient Euclid matrix has the exact shape
      *
      *   [ 1,             -q1 ]
@@ -19173,7 +19898,7 @@ static int mag_linear_comb_pair(uint64_t *rx, uint64_t *ry, int32_t n,
  * operand size decreases.  Since det(M) is always +/-1, every accepted block
  * preserves gcd exactly. */
 #ifndef BN_GCD_HGCD_THRESHOLD
-#define BN_GCD_HGCD_THRESHOLD 1024
+#define BN_GCD_HGCD_THRESHOLD 768
 #endif
 #ifndef BN_GCD_HGCD_RECURSIVE_THRESHOLD
 #define BN_GCD_HGCD_RECURSIVE_THRESHOLD 512
@@ -19313,6 +20038,40 @@ static int gcd_matrix_product_tree(const uint64_t *leaves, int32_t count,
             uint64_t v = leaves[i];
             if (v) out[i][0] = v;
             ol[i] = v != 0;
+        }
+        return 1;
+    }
+    if (count == 2) {
+        const uint64_t *l = leaves;
+        const uint64_t *r = leaves + 4;
+        for (int row = 0; row < 2; row++) {
+            for (int col = 0; col < 2; col++) {
+                int oi = 2 * row + col;
+                __uint128_t pr0 = (__uint128_t)l[2 * row] * r[col];
+                __uint128_t pr1 = (__uint128_t)l[2 * row + 1] * r[2 + col];
+                __uint128_t sum = pr0 + pr1;
+                uint64_t c = sum < pr0;
+                uint64_t lo = (uint64_t)sum;
+                uint64_t hi = (uint64_t)(sum >> 64);
+                if (c) {
+                    if (cap < 3) return 0;
+                    out[oi][0] = lo;
+                    out[oi][1] = hi;
+                    out[oi][2] = 1;
+                    ol[oi] = 3;
+                } else if (hi) {
+                    if (cap < 2) return 0;
+                    out[oi][0] = lo;
+                    out[oi][1] = hi;
+                    ol[oi] = 2;
+                } else if (lo) {
+                    if (cap < 1) return 0;
+                    out[oi][0] = lo;
+                    ol[oi] = 1;
+                } else {
+                    ol[oi] = 0;
+                }
+            }
         }
         return 1;
     }
@@ -19602,6 +20361,57 @@ static int gcd_hgcd_block(const uint64_t *x, int32_t xlen,
             }
         }
 
+#if BN_GCD_HGCD2
+        if (hxl >= BN_GCD_HGCD2_MIN_LIMBS) {
+            uint64_t m[4];
+            int h2_steps = gcd_hgcd2_magnitudes(hx, hxl, hy, hyl, m);
+            if (h2_steps > 0) {
+#ifdef BN_GCD_PROFILE_COUNTS
+                gcd_profile_block_batches[allow_recursive ? 1 : 0]++;
+                gcd_profile_block_batch_limbs[allow_recursive ? 1 : 0] +=
+                    (uint64_t)hxl;
+#endif
+                int32_t hnxl, hnyl;
+                int valid;
+                if (!(h2_steps & 1)) {
+                    valid = mag_linear_comb_pair(
+                        hnx, hny, hxl, hx, hy,
+                        m[3], m[1], m[0], m[2], &hnxl, &hnyl);
+                } else {
+                    valid = mag_linear_comb_pair(
+                        hny, hnx, hxl, hx, hy,
+                        m[3], m[1], m[0], m[2], &hnyl, &hnxl);
+                }
+                if (valid) {
+                    if (matrix_count >= max_matrices) { GCD_PROF_FAIL(2); return 0; }
+                    uint64_t *leaf = leaves + (size_t)4 * matrix_count++;
+                    if (!(h2_steps & 1)) {
+                        leaf[0] = m[0]; leaf[1] = m[1];
+                        leaf[2] = m[2]; leaf[3] = m[3];
+                    } else {
+                        leaf[0] = m[1]; leaf[1] = m[0];
+                        leaf[2] = m[3]; leaf[3] = m[2];
+                        det = -det;
+                    }
+                    uint64_t *ht = hx; hx = hnx; hnx = ht;
+                    ht = hy; hy = hny; hny = ht;
+                    hxl = hnxl;
+                    hyl = hnyl;
+                    if (mag_cmp(hx, hxl, hy, hyl) < 0) {
+                        ht = hx; hx = hy; hy = ht;
+                        int32_t lt = hxl; hxl = hyl; hyl = lt;
+                        uint64_t t0 = leaf[0], t2 = leaf[2];
+                        leaf[0] = leaf[1]; leaf[1] = t0;
+                        leaf[2] = leaf[3]; leaf[3] = t2;
+                        det = -det;
+                    }
+                    success = 1;
+                    continue;
+                }
+            }
+        }
+#endif
+
         int64_t A, B, C, D;
         int steps = lehmer_simulate_magnitudes(
             hx, hxl, hy, hyl, &A, &B, &C, &D);
@@ -19645,9 +20455,9 @@ static int gcd_hgcd_block(const uint64_t *x, int32_t xlen,
         if (mag_cmp(hx, hxl, hy, hyl) < 0) {
             ht = hx; hx = hy; hy = ht;
             int32_t lt = hxl; hxl = hyl; hyl = lt;
-            if (matrix_count >= max_matrices) { GCD_PROF_FAIL(2); return 0; }
-            leaf = leaves + (size_t)4 * matrix_count++;
-            leaf[0] = 0; leaf[1] = 1; leaf[2] = 1; leaf[3] = 0;
+            uint64_t t0 = leaf[0], t2 = leaf[2];
+            leaf[0] = leaf[1]; leaf[1] = t0;
+            leaf[2] = leaf[3]; leaf[3] = t2;
             det = -det;
         }
         success = 1;
@@ -19965,13 +20775,17 @@ WValue bigint_gcd_mag(const uint64_t *al, int32_t an,
         int64_t A, B, C, D;
         int steps;
 #if BN_GCD_HGCD2
-        if (xlen >= BN_GCD_HGCD2_MIN_LIMBS && xlen < BN_GCD_HGCD_THRESHOLD) {
+        if (xlen >= BN_GCD_HGCD2_MIN_LIMBS) {
             uint64_t m[4];
             int32_t nxl, nyl;
             /* alpha = u11 x - u01 y, beta = u00 y - u10 x. */
-            if (gcd_hgcd2_magnitudes(x, xlen, y, ylen, m) > 0 &&
-                mag_linear_comb_pair(nx, ny, xlen, x, y,
-                                     m[3], m[1], m[0], m[2], &nxl, &nyl)) {
+            int h2_steps = gcd_hgcd2_magnitudes(x, xlen, y, ylen, m);
+            if (h2_steps > 0 &&
+                (!(h2_steps & 1)
+                    ? mag_linear_comb_pair(nx, ny, xlen, x, y,
+                                           m[3], m[1], m[0], m[2], &nxl, &nyl)
+                    : mag_linear_comb_pair(ny, nx, xlen, x, y,
+                                           m[3], m[1], m[0], m[2], &nyl, &nxl))) {
                 uint64_t *t;
                 int32_t tl;
                 t = x; x = nx; nx = t;
@@ -51477,8 +52291,8 @@ static inline WValue w_pow_int_mul(WValue x, WValue y) {
  * a**5 spent ~85% of its time outside the multiply kernels. */
 /* Kernel gate: every intermediate (and the result) is bounded by n*e
  * limbs, so one product cap sizes the stack buffers for any base/exponent
- * mix — 48-limb a**5 and 1-limb a**272 both qualify. */
-#define W_POW_SMALL_MAX_RESULT 272
+ * mix — 64-limb a**5 and 1-limb a**320 both qualify. */
+#define W_POW_SMALL_MAX_RESULT 320
 
 #ifndef W_POW5_BIGINT1
 #define W_POW5_BIGINT1 1

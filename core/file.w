@@ -119,8 +119,12 @@ use core/mmap
   -> .exists?(path)
     file_exists?(path)
 
+  # Regular-file test (follows symlinks, like stat(2)).  The former
+  # file_file?/file_symlink?/file_type helpers were never bridged, so these
+  # predicates read the stat payload's type name instead.
   -> .file?(path)
-    file_file?(path)
+    data = file_stat_data(path, true)
+    data != nil && data[14] == "file"
 
   -> .directory?(path)
     file_directory?(path)
@@ -129,13 +133,17 @@ use core/mmap
     file_directory?(path)
 
   -> .symlink?(path)
-    file_symlink?(path)
+    data = file_stat_data(path, false)
+    data != nil && data[14] == "symlink"
 
+  # "file", "directory", "symlink", "character", "block", "fifo", "socket"
+  # or "unknown" for the path itself (lstat), nil when it does not exist.
   -> .type(path)
-    file_type(path)
+    data = file_stat_data(path, false)
+    data == nil ? nil : data[14]
 
   -> .file_type(path)
-    file_type(path)
+    File.type(path)
 
   -> .size(path)
     file_size(path)

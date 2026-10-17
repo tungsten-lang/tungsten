@@ -1,3 +1,4 @@
+# spec: compiled
 # Top-level var demotion (lowering: main-only top-level vars skip the
 # @global mirror). A var is only demotable when NO reference escapes main:
 # fn bodies, stored lambdas, trait-provided methods, and interpolation

@@ -1,3 +1,4 @@
+# spec: compiled
 # Factorial's source dependencies matter as well as factorial itself.
 + Range
   -> reduce(init, &block)

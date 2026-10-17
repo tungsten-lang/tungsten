@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: Unsupported ccall_nobox 'w_bigint_alloc_hot16_raw' in interpreter
 # Compiled-only direct native/C differential for the exact sqr@5 leaf. Run
 # with TUNGSTEN_BIGINT_SRC_OPS=0: the public exact boundary is then pinned to
 # C, while this method still calls the strong native raw worker explicitly.

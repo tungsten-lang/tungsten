@@ -1,3 +1,4 @@
+# spec: compiled
 # Regression coverage for the lowering function-name index. The top-level
 # helper is appended after the index has seen the first class body, so the
 # second reopen exercises index catch-up before replacing the earlier method.

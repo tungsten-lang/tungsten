@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: Unsupported ccall_nobox 'w_is_wire_extern' in interpreter
 # Writable native-data view fields. A matching `$field = value` inside a
 # class method must update implicit `self` directly, return the converted raw
 # field value, and emit no runtime helper call.

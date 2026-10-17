@@ -1,3 +1,4 @@
+# spec: compiled
 # Deliberately no `use` and no plain array literal: :typed_array_new itself
 # must schedule Array's source method table.
 

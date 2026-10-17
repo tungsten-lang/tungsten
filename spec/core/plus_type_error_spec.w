@@ -1,3 +1,4 @@
+# spec: skip -- compiled: compile+run spec/core/plus_type_error_spec.w; interpreter: interpret spec/core/plus_type_error_spec.w
 # Strict `+`: mixing a String with a non-text value raises TypeError
 # instead of coercing through to_s ("5" + 3 used to yield "53").
 # Text-with-text concatenation (String/Char) and interpolation keep working.

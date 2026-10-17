@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: no block given
 # Polyform grids and shapes: square, hexagonal, iamond.
 # Run:
 #   bin/tungsten spec/core/tiling_grid_spec.w

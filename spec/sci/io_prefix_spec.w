@@ -1,3 +1,4 @@
+# spec: compiled
 # Bounded prefix reads used by SciIO format detection.
 
 use core/io

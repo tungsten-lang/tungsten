@@ -1,3 +1,4 @@
+# spec: compiled
 # Sandbox mode: the runtime gate over everything outside the process.
 #
 # Dual-mode by design, so one file covers both halves of the contract:

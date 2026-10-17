@@ -1,3 +1,4 @@
+# spec: compiled
 # Dogfood for the `recase [expr]` keyword — re-run the enclosing case.
 #
 #   recase expr  -> re-dispatch with expr as the new subject.

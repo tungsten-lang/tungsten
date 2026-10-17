@@ -1,3 +1,4 @@
+# spec: metal
 # Signed i32/i64 arrays use distinct ebits codes (33/66), but their Metal
 # buffers retain ordinary 4/8-byte element widths.
 

@@ -1,3 +1,4 @@
+# spec: wgsl-emit
 # Portable WGSL emit smoke. No WebGPU runtime or hardware is required: the
 # compiled host program inspects its generated sibling sidecar.
 

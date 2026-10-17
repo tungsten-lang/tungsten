@@ -1,3 +1,4 @@
+# spec: compiled
 # BigInt comparison support is linked independently of the BigInt class. Build
 # every heap integer through an opaque C boundary so this file contains no
 # BigInt class reference, large integer literal, or BigInt method call capable

@@ -1,3 +1,4 @@
+# spec: compiled
 # Literal-only autoload probe: no explicit Float import or class reference.
 
 -> check(name, got, expected)

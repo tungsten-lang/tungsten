@@ -1,3 +1,4 @@
+# spec: compiled
 # Exact/numeric checks for the initial spacetime models.
 #
 #   bin/tungsten run spec/core/relativity_geometry_spec.w

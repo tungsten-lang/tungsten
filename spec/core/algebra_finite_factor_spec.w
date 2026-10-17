@@ -1,3 +1,4 @@
+# spec: compiled slow -- interpreter: no block given
 # Complete finite-field polynomial-factorization regressions.
 # Run both ways:
 #   bin/tungsten run spec/core/algebra_finite_factor_spec.w

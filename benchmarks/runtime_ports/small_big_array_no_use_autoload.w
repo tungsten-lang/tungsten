@@ -1,3 +1,4 @@
+# spec: compiled
 # No `use` directives: this pins loader coverage for runtime-created receivers
 # whose class is visible only in a low-level C factory name, plus ordinary
 # constructor paths whose ClassRef already triggers core/tungsten autoload.

@@ -1,3 +1,4 @@
+# spec: compiled
 # SmallArray<T, N> — source-level fixed-size small-array type. `SmallArray<T,N>.new`
 # desugars (monomorphize.w rewrite_smallarray_generic_ctors) to the typed-array
 # literal `T[N]`, which stack-promotes to a HEADERLESS raw [N x T] alloca when the

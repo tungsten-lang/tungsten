@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: no block given
 # Newton polygons and certified nondegenerate Puiseux lifting.
 
 use algebra

@@ -1,3 +1,4 @@
+# spec: compiled
 # Deliberately no `use`: a plain literal must schedule Array before its source
 # query leaves are reached. Kept separate so another autoload trigger cannot
 # accidentally mask this one.

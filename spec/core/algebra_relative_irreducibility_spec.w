@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: no block given
 # Exact relative modular irreducibility over a number field.
 
 use algebra

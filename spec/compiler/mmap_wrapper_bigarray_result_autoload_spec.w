@@ -1,3 +1,4 @@
+# spec: skip -- compiled: clang: error: linker command failed with exit code 1 (use -v to see invocation); interpreter: Unsupported ccall 'w_mwr_fixture' in interpreter
 # No use and no BigArray spelling. Loading Mmap must discover that
 # __w_mmap_as_typed returns BigArray before cap/empty? dispatch.
 m = ccall("w_mwr_fixture", 64)

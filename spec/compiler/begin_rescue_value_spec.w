@@ -1,3 +1,4 @@
+# spec: compiled
 # begin/rescue is a VALUE expression: in value position (method tail, case
 # arm, if arm, assignment rhs) it produces the taken arm's last expression.
 # Before 2026-07-22 (round-3 bug 2) the compiled path lowered :begin as a

@@ -1,3 +1,4 @@
+# spec: interpreter
 # Tree-walker mirror for the raw String/Symbol#to_s source body.
 
 -> check(name, got, want)

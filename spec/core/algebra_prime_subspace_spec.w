@@ -1,3 +1,4 @@
+# spec: compiled slow
 # Canonical subspace arithmetic over prime fields.
 
 use algebra

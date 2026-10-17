@@ -1,3 +1,4 @@
+# spec: compiled
 # Time — time-of-day value (core/time.w).
 #
 # Run:

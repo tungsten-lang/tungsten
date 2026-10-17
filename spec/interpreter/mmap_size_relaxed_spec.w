@@ -1,3 +1,4 @@
+# spec: interpreter
 # Tree-walker parity for Mmap construction, type discovery, source size field,
 # and retained native methods after core/file becomes autoloadable.
 

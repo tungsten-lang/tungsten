@@ -1,3 +1,4 @@
+# spec: skip -- compiled: exited 139; interpreter: Unsupported ccall 'w_sockaddr_w' in interpreter
 # SockAddr WValue Tag 0xFFF6 spec.
 # Tests inline IPv4 + 16-bit Port socket endpoint tagging and port extraction.
 

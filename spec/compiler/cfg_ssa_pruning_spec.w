@@ -1,3 +1,4 @@
+# spec: compiled
 # Regression coverage for the conservative mem2reg phi-pruning pass.
 # `merged` is assigned on both sides of a branch and therefore must remain in
 # memory until liveness-pruned phi insertion exists. `straight` has one

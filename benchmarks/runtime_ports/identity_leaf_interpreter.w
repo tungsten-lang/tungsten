@@ -1,3 +1,4 @@
+# spec: interpreter
 # Candidate tree-walker smoke. No explicit core imports: primitive runtime-class
 # lookup must autoload Float and BigInt after their native identity ICs vanish.
 

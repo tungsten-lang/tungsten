@@ -1,3 +1,4 @@
+# spec: compiled slow
 # Exact odd-prime square classes in a number-field completion.
 
 use algebra

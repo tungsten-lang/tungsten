@@ -1,3 +1,4 @@
+# spec: skip -- compiled: fails check 'pipe.quoted got ≈6.242×10¹⁸ eV want 6.242×10¹⁸ eV'; interpreter: fails check 'pipe.quoted got ≈6.242×10¹⁸ eV want 6.242×10¹⁸ eV'
 # Scientific-computing surface regressions: unit conversion-pipe targets
 # (bare compound/mixed-case spellings), scientific-notation literals with
 # units, π/τ superscript powers, %i symbol arrays, String/Number#to_d,

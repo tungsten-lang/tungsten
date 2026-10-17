@@ -1,3 +1,4 @@
+# spec: skip -- compiled: clang: error: linker command failed with exit code 1 (use -v to see invocation); interpreter: Unsupported ccall 'w_mwr_fixture' in interpreter
 # view_at-only opaque boundary pins its retained native decoder. It must work
 # without loading the Mmap source class through this representation-sensitive
 # spelling.

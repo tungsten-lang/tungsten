@@ -1,3 +1,4 @@
+# spec: compiled
 # Typed-receiver direct routes for the string-allocation hot path
 # (lowering/method_call.w + ops.w + infer_type in lowering.w):
 #   int-typed  .to_s()      → w_to_s          (skips the IC dispatcher)

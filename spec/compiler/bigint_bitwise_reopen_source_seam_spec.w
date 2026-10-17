@@ -1,3 +1,4 @@
+# spec: compiled
 # A genuine plain BigInt operator reopen owns BigInt-left calls, but the
 # complete stable seam also serves reverse mixed integer pairs. Those calls
 # must stay on the raw helper instead of invoking a body whose receiver is not

@@ -1,3 +1,4 @@
+# spec: interpreter
 # Tree-walker coverage for the source-defined BigArray query leaves. The
 # interpreter's narrow w_big_array_view bridge exposes the real native header.
 

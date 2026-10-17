@@ -1,3 +1,4 @@
+# spec: compiled
 # Complete fans in Z^2 and the smooth toric surfaces they define, plus the
 # lattice-periodic triangulations of Mumford's toric degeneration.
 #   bin/tungsten -o /tmp/algebra-toric-fan-spec spec/core/algebra_toric_fan_spec.w

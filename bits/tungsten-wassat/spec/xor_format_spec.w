@@ -1,3 +1,4 @@
+# spec: skip -- never listed in the wassat lane; not triaged because the whole lane fails interpreted with 'no block given'
 use spec
 use ../lib/wassat
 

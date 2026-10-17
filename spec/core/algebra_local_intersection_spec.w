@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: no block given
 # Exact local plane-curve intersection multiplicities.
 
 use algebra

@@ -1,3 +1,4 @@
+# spec: compiled
 # Smith normal form: the HNF-first mod-determinant lane that `invariant_factors`
 # routes square matrices with n >= 40 through, plus the explicit lane entry
 # points.  Compiled lane only: `invariant_factors_hnf` calls

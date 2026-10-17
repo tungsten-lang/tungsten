@@ -1,3 +1,4 @@
+# spec: skip -- compiled: clang: error: linker command failed with exit code 1 (use -v to see invocation); interpreter: Unsupported ccall 'w_mwr_fixture' in interpreter
 # No use and deliberately unknown C factory name: call-name fallback must load
 # Mmap even though the receiver has no statically visible class.
 m = ccall("w_mwr_fixture", 64)

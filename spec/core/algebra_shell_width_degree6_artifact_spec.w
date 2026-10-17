@@ -1,3 +1,4 @@
+# spec: slow
 # Structural regression for the persisted degree-six shell-width S-class
 # relation witnesses. The opt-in native verifier performs the mathematical
 # replay.

@@ -1,3 +1,4 @@
+# spec: compiled
 # Parser-hot packed-token access and equality must decode values after Array
 # storage and retrieval. Production descriptors are tagless and fit in
 # Integer; the signed W_TAG_CHAR form additionally exercises exact BigInt

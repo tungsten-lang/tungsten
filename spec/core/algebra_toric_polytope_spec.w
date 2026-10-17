@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: no block given
 # Exact sparse Newton polytopes and homogenized Ehrhart cones.
 # Run in both engines:
 #   bin/tungsten run spec/core/algebra_toric_polytope_spec.w

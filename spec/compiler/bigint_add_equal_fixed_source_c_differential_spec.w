@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: Unsupported ccall_nobox 'w_bigint_alloc_hot8_raw' in interpreter
 # Compiled-only direct native/C differential for the exact add@4, add@8, and
 # add@16 leaves. The public C boundary stays available as an independent
 # oracle.

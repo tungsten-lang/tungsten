@@ -1,3 +1,4 @@
+# spec: compiled
 # Structural container equality: Array#== and Hash#== compare contents
 # (recursively) on every engine. Hash equality is order-INDEPENDENT —
 # insertion order is an iteration guarantee, not part of a hash's value.

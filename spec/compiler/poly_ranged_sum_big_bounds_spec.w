@@ -1,3 +1,4 @@
+# spec: compiled
 # Closed-form ranged sum (lowering/pipeline_fusion.w + poly_sum.w): the
 # Faulhaber fold of `range/Σ(P(x))` must be EXACT for range bounds past
 # 2^48, and must fire whether the range sits literally at the pipeline base

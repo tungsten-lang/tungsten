@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: fails check 'add reopened dispatch at 5'
 # The generic equal-width add/sub routes preserve open-world BigInt#+ and
 # BigInt#- replacements at both the ordinary operators and the source seams.
 

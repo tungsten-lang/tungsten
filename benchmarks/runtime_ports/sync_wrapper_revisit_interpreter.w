@@ -1,3 +1,4 @@
+# spec: interpreter
 # Tree-walker routing proof for the three synchronization source facades.
 # Atomic and Channel deliberately enter through native ccall factories; Thread
 # uses the interpreter's synchronous Thread.new model.

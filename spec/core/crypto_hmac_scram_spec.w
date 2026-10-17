@@ -1,3 +1,4 @@
+# spec: core
 # HMAC-SHA-2 (RFC 4231), PBKDF2-HMAC-SHA256 (RFC 7914-era published
 # vectors), and SCRAM-SHA-256 (RFC 7677 §3) conformance for
 # core/crypto/{hmac,pbkdf2,scram}.w. Self-checking; exits nonzero on the

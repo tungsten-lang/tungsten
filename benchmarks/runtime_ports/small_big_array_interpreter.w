@@ -1,3 +1,4 @@
+# spec: interpreter
 # Focused tree-walker coverage for the source-defined public leaves. The
 # interpreter's narrow ccall allowlist converts these fixture constructors to
 # the raw runtime ABI; compiled benchmark fixtures live in the sibling C file.

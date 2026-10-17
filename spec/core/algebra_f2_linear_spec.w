@@ -1,3 +1,4 @@
+# spec: slow
 # Replayable exact F2 linear algebra certificates.
 #
 #   bin/tungsten run spec/core/algebra_f2_linear_spec.w

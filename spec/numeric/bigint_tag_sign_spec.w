@@ -1,3 +1,4 @@
+# spec: fast
 # Tag-sign negation (encoding v4, R3): `-x` and `abs` on a BigInt hand out
 # the SAME buffer with the overlay bit (bit 47 of the boxed value) flipped —
 # O(1), zero allocation. The effective sign is header XOR overlay.

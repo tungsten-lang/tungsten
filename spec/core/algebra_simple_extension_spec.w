@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: undefined method 'degree' for
 # Exact certified simple extensions K[a]/(m), including finite towers and
 # polynomial/geometry interoperability.
 #

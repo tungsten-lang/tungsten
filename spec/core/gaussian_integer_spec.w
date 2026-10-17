@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: no block given
 # Z[i] as a Euclidean domain, and its unit group as the square lattice's
 # rotation group.
 #   bin/tungsten run spec/core/gaussian_integer_spec.w

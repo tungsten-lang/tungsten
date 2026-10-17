@@ -1,3 +1,4 @@
+# spec: skip -- compiled: clang: error: linker command failed with exit code 1 (use -v to see invocation); interpreter: Unsupported ccall 'w_strlen_fixture' in interpreter
 # Symbol has no distinct compiled dispatch key; unknown native Symbols must
 # reach String's shared 0xF9 source size body without loading symbol.w.
 -> probe(value)

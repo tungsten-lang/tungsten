@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: fails check '__DIR__ is relative: spec/compiler'
 # Native `__DIR__` must remain a usable deployment anchor when this source is
 # passed to the compiler by a relative path and the resulting binary is run
 # from another working directory.

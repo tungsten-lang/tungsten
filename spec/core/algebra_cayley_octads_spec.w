@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: fails check 'representation.certified: got false, want true'
 # Exact determinantal-representation and Cayley-octad replay using the Edge
 # quartic from Plaumann--Sturmfels--Vinzant, equations (1.5) and (3.6).
 #

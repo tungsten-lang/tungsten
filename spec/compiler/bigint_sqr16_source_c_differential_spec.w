@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: Unsupported ccall_nobox 'w_bigint_alloc_hot32_raw' in interpreter
 # Compiled-only direct native/C differential for the exact sqr@16 split leaf.
 # Build with BN_BIGINT_SQR16_SRC_DIRECT=0: the public exact boundary then stays
 # on C, while this spec calls the raw native worker explicitly.

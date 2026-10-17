@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: no block given
 # End-to-end exact arithmetic for the active shell-width quartic workflow.
 # The focused layer specs carry edge cases; this file pins the identities that
 # connect those layers in the research program.

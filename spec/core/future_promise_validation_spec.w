@@ -1,3 +1,4 @@
+# spec: core interpreter
 -> check(name, condition)
   if condition
     << "PASS " + name

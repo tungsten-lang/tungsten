@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: fails check 'worker 0 produced a wrong product'
 # Per-thread BigInt limb-arena isolation (BN_BIGINT_ARENA).
 #
 # Six workers run interleaved bignum product chains in parallel, each on its

@@ -1,3 +1,4 @@
+# spec: compiled fast
 # Guarded method-call devirtualization (lowering/method_call.w devirt_fn →
 # emitter :call_method_i64 dv.* arms). A local assigned `C.new(...)` gets an
 # exact-class fact; calls on it emit a class-id-guarded DIRECT call with the

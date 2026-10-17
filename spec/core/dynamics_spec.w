@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: Unsupported ccall 'w_blas_dgesv_rowmajor' in interpreter
 # core/dynamics — quantitative regressions against known results:
 # LinAlg eigen machinery, RK4/symplectic integration, fixed points and
 # stability classification, Lyapunov exponents (logistic ln 2, Hénon

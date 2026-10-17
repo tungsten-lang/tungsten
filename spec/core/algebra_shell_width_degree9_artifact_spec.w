@@ -1,3 +1,4 @@
+# spec: slow
 # Structural regression for the persisted degree-nine shell-width S-class
 # relation witnesses. This deliberately does not claim to prove the theorem:
 # the opt-in native verifier reconstructs the fields and exactly replays every

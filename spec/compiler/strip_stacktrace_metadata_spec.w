@@ -1,3 +1,4 @@
+# spec: compiled slow
 # Regression coverage for release-mode stacktrace metadata stripping and the
 # live-string compaction that follows it. The strip removes every location-set
 # pseudo-instruction, clears all location fields on survivors, and preserves

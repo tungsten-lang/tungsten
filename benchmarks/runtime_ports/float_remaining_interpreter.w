@@ -1,3 +1,4 @@
+# spec: interpreter
 # Tree-walker parity for source-only Float rounding/root/square leaves.
 
 # Surplus arguments are an error on both engines (E_LOWER_ARITY at compile

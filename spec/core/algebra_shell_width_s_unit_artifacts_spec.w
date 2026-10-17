@@ -1,3 +1,4 @@
+# spec: slow
 # Structural regressions for the three supplied shell-width S-unit generator
 # sets. The opt-in native verifier checks exact support, local characters,
 # full rank, isomorphic transfer, and the direct true-descent product space.

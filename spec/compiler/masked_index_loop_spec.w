@@ -1,3 +1,4 @@
+# spec: compiled
 # Masked/wraparound index loops — `tab[i & 1023]`, `tab[i % 1000]` — get
 # `llvm.loop.vectorize.enable=false` stamped on their latch (lowering/analysis.w
 # loop_masked_array_index? → control_flow.w lower_while → emitter :br novec).

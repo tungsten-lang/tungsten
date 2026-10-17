@@ -1,3 +1,4 @@
+# spec: compiled
 # Promotion determinism — compiled-engine semantics (wrap by design).
 #
 # (a) Raw-int promotion of a top-level var must not depend on the NAME of

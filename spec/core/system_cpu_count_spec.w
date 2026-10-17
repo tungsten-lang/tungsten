@@ -1,3 +1,4 @@
+# spec: compiled
 # System class methods resolve in compiled binaries.
 #
 # Regression for the 2026-07-22 fix: `System` was missing from the core

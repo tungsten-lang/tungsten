@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: weight-two Hecke operator certificate failed
 # Simultaneous exact Hecke eigenpackets, including a number-field packet.
 #
 # The packet dimensions and q-expansions are differential fixtures from

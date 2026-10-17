@@ -1,3 +1,4 @@
+# spec: compiled
 # Fused machine-int subscript capture: `x = recv[i] ## i64/u64` on an
 # untyped receiver lowers to w_index_raw_i64/u64 (typed integer arrays load
 # raw — no boxed temporary) instead of generic dispatch + w_to_i64/u64,

@@ -1,3 +1,4 @@
+# spec: compiled slow -- interpreter: no block given
 # Coronas, Heesch numbers and witness verification.
 # Run:
 #   bin/tungsten spec/core/tiling_corona_spec.w

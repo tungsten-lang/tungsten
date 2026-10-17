@@ -1,3 +1,4 @@
+# spec: compiled slow -- interpreter: no block given
 # Focused exact-polynomial regression identities.
 
 use core/algebra/field

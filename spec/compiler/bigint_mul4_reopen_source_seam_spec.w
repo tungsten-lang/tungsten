@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: fails check 'four-by-four reopened dispatch'
 # The distinct positive four-by-four route preserves an open-world BigInt#*
 # replacement at both the ordinary and dedicated source seams.
 

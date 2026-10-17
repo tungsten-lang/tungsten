@@ -1,3 +1,4 @@
+# spec: interpreter
 # The Eisenstein integers Z[w], w^2 + w + 1 = 0: norm, units, Euclidean
 # division, gcd, and the splitting of rational primes.
 #   bin/tungsten run spec/core/algebra_eisenstein_integer_spec.w

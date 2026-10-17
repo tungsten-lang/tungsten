@@ -1,3 +1,4 @@
+# spec: compiled
 # Control flow: if/elsif/else, while, case/when, suffix if, break.
 #
 # Run: `bin/tungsten -o /tmp/cf spec/core/control_flow_spec.w && /tmp/cf`

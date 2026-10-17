@@ -1,3 +1,4 @@
+# spec: core
 # Process.spawn must give posix_spawnp stable ownership of every argument.
 #
 # Inline strings are converted through a small runtime ring.  Retaining the

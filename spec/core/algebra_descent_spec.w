@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: fails check 'hyperflex.certified: got false, want true'
 # Certified finite Selmer kernel and BPS plane-quartic setup.
 #
 #   bin/tungsten run spec/core/algebra_descent_spec.w

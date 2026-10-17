@@ -1,3 +1,4 @@
+# spec: compiled
 # Interpolation vs the ANSI CSI prefix — language ruling 2026-07-22:
 # a [ immediately preceded by ESC (0x1B) never starts interpolation,
 # however the ESC got into the string (\e escape, \u001b escape). Brackets

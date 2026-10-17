@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: no block given
 # Certified plane-curve multiplicity, tangent cones, and ordinary points.
 
 use algebra

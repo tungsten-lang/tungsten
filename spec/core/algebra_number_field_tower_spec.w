@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: no block given
 # Irreducibility certificates through exact relative number-field towers.
 
 use algebra

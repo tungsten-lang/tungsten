@@ -1,3 +1,4 @@
+# spec: skip -- about 1.4 GB natively; run by hand until it is timed across the default suite
 # Independent Chabauty--Coleman run for the shell-width quartic at p = 5.
 # Native lane: at the default precision 26 every residue fits a machine word
 # and the run takes about two seconds and 1.4 GB; TUNGSTEN_COLEMAN_PRECISION=40

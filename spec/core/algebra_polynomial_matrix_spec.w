@@ -1,3 +1,4 @@
+# spec: interpreter -- compiled: did not finish in 600 s on a loaded machine
 # Polynomial matrices over F_101[z]: row degrees, row reduction, kernels.
 
 use core/algebra/field

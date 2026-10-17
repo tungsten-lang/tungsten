@@ -1,3 +1,4 @@
+# spec: core interpreter
 use core/http
 
 -> check(name, condition)

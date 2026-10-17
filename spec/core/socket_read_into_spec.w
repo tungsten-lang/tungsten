@@ -1,3 +1,4 @@
+# spec: core
 # Socket#read_into(buf, offset, n) / Socket#write_slice(buf, offset, len) —
 # the allocation-free pooled-buffer twins of read_exact / write_bytes
 # (added for tungsten-pg's pgwire read path). Loopback self-test: listener

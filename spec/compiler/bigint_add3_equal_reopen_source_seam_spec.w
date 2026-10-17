@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: fails check 'three-by-three reopened dispatch'
 # The positive three-by-three add route preserves an open-world BigInt#+
 # replacement at both the ordinary operator and stable source seam.
 

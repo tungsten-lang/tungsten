@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: Undefined method 'ccall_rawargs'
 use ../../compiler/lib/content_hash
 
 -> check(name, got, want)

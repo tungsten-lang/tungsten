@@ -1,3 +1,4 @@
+# spec: metal
 # P2.4 smoke: hand-tuned Q8_0 matvec @gpu kernel.
 #
 # Test case: N=4 output rows, k_dim=32 input cols (1 Q8_0 block per row).

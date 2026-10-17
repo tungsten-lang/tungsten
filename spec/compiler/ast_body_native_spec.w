@@ -1,3 +1,4 @@
+# spec: compiled
 # Packed AST child lists dispatch through the native Tungsten Body class after
 # the runtime 0xE6 IC table is removed.
 

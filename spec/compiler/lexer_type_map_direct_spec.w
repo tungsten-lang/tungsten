@@ -1,3 +1,4 @@
+# spec: skip -- scripts/bench-lexer-type-map.sh runs it
 # Exact semantic coverage for the Lexer token-symbol-to-id mapping. The
 # isolated direct-helper trial leaves these public methods available while
 # routing Lexer#emit and Lexer#emit_at through top-level helpers.

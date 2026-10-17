@@ -1,3 +1,4 @@
+# spec: compiled
 # A direct native constructor must independently register Mmap. Keep this file
 # free of File.mmap: the loader walks the whole AST, so combining both forms in
 # one spec would let the File trigger mask a broken native-return trigger.

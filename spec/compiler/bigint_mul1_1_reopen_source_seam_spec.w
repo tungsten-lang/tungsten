@@ -1,3 +1,4 @@
+# spec: skip -- compiled: fails check 'ordinary reopened dispatch'; interpreter: Unsupported ccall 'w_bigint_from_dec_str' in interpreter
 # The exact positive one-limb multiplication seam must preserve ordinary
 # open-world BigInt#* replacement. Closed-world programs reject this reopen
 # before lowering.

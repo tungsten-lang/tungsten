@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: Dedekind local certificate failed
 # Reduced residue algebras and primitive-idempotent certificates.
 
 use algebra

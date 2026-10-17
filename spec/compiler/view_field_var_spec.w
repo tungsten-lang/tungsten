@@ -1,3 +1,4 @@
+# spec: compiled
 # Dogfood for `var$field` — postfix view-decl field access on an explicit
 # receiver. Generalizes the implicit-`__self` `$field` accessor: any named
 # variable holding a runtime-backed view class can read its `- data` struct

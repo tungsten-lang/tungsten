@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: Unsupported ccall_nobox 'w_bigint_alloc_hot4_raw' in interpreter
 # Compiled-only direct native/C differential for the exact mul@2 leaf. Run
 # with TUNGSTEN_BIGINT_SRC_OPS=0: the public boundary is pinned to C, while
 # this method still calls the strong native raw worker explicitly.

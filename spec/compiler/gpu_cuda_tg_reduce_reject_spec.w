@@ -1,3 +1,4 @@
+# spec: cuda-reject
 # CUDA must reject threadgroup reductions until it has native helpers; emitting
 # the MSL __tg_sum_f32 call produces an undeclared symbol in nvcc.
 

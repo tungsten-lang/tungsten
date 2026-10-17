@@ -1,3 +1,4 @@
+# spec: compiled
 # Global sleep(): links and honors Int / Decimal / Float durations.
 #
 # Regression for the 2026-07-22 fix: bare `sleep(n)` lowered to `__w_sleep`,

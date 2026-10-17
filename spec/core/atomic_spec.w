@@ -1,3 +1,4 @@
+# spec: core interpreter
 use core/atomic
 
 -> check(name, condition)

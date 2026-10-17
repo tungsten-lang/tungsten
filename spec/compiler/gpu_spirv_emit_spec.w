@@ -1,3 +1,4 @@
+# spec: skip -- SPIR-V emission is not a dialect the driver accepts yet
 # SPIR-V / Vulkan GLSL GPU dialect emit spec.
 # Tests that `@gpu fn` AST lowering emits Vulkan GLSL / SPIR-V annotations.
 

@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: no block given
 # Exact arbitrary-degree number-field regressions.
 # Run both ways:
 #   bin/tungsten run spec/core/algebra_number_field_spec.w

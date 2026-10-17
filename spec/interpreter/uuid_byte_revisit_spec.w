@@ -1,3 +1,4 @@
+# spec: interpreter
 # Tree-walker parity for the source-backed UUID byte load and lazy core load.
 
 # Surplus arguments are an error on both engines (E_LOWER_ARITY at compile

@@ -1,3 +1,4 @@
+# spec: compiled
 # Block passthrough (C2): a trailing block on a method that declares no block
 # of its own is NOT consumed by that method — it iterates over the call's
 # RESULT (implicit `.each`). Methods that DO take a block still bind it.

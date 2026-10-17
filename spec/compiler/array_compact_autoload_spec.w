@@ -1,3 +1,4 @@
+# spec: compiled
 # Array#compact is source-defined. A value produced only at runtime must still
 # pull in core/array.w without an Array literal, class reference, or explicit
 # use declaration.

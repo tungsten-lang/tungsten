@@ -1,3 +1,4 @@
+# spec: skip -- compiled: Could not load 'core/string_native' (resolved to 'spec/interpreter/core/string_native.w'); interpreter: use: cannot load 'core/string_native' (resolved to spec/interpreter/core/string_native.w, from spec/interprete
 use core/string_native
 
 # Tree-walker gate for shared String/Symbol methods and primitive identity.

@@ -1,3 +1,4 @@
+# spec: compiled
 # Wide-arity direct functions (14+ params) that make calls must read their
 # LATE params intact — pins the round-3 bug-3 report (2026-07-22), which did
 # NOT reproduce on the fixed toolchain in any shape below; the corruption

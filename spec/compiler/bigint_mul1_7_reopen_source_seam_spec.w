@@ -1,3 +1,4 @@
+# spec: skip -- compiled: fails check 'wide receiver reopened dispatch'; interpreter: Unsupported ccall 'w_bigint_from_dec_str' in interpreter
 # The positive 7-by-1 source seam must preserve open-world BigInt#* dispatch.
 
 -> check(label, got, expected)

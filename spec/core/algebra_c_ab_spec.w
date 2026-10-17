@@ -1,3 +1,4 @@
+# spec: compiled slow
 # Exact C_ab one-point function spaces for the shell-width plane quartic.
 
 use algebra

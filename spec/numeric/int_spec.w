@@ -1,3 +1,4 @@
+# spec: compiled
 # Core Int number-theory regressions.
 # Run: `bin/tungsten -o /tmp/int-spec spec/numeric/int_spec.w && /tmp/int-spec`.
 

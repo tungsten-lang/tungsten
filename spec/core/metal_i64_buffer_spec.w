@@ -1,3 +1,4 @@
+# spec: skip -- Metal hardware spec that was never in the metal lane; not run on hardware yet
 # End-to-end 64-bit Metal integer smoke. This covers both pieces needed by
 # exact bit-mask search: device i64 buffers and threadgroup i64 scratch.
 

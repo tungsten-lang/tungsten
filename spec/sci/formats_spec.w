@@ -1,3 +1,4 @@
+# spec: skip -- compiled: exited 139; interpreter: Unsupported ccall 'w_sci_hdf5_write_datasets' in interpreter
 # Native multi-format I/O: HDF5 multi-ds, Parquet PLAIN, Zarr, NetCDF.
 # Run: bin/tungsten -o /tmp/fmts spec/sci/formats_spec.w && /tmp/fmts
 

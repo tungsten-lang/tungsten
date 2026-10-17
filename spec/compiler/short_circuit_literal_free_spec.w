@@ -1,3 +1,4 @@
+# spec: compiled
 # Free insertion versus short-circuit operands (ownership.w scope_pop).
 #
 # The right operand of `&&`/`||` lowers into its own block that the enclosing

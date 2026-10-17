@@ -1,3 +1,4 @@
+# spec: compiled slow
 # Exact degree-one places and the certified 2(Q-P) obstruction.
 # Run both ways:
 #   bin/tungsten run spec/core/algebra_divisors_spec.w

@@ -1,3 +1,4 @@
+# spec: compiled
 # PolyFast typed reduction lane: output identity against the slow path,
 # bail behavior, and key encoding round-trips.
 

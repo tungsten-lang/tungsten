@@ -1,3 +1,4 @@
+# spec: compiled slow -- interpreter: no block given
 # Certified finite etale quotients, CRT decompositions, units, idempotents,
 # trace, and norm.
 #

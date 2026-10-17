@@ -1,3 +1,4 @@
+# spec: skip -- compiled: runtime/sparse_bridge.c:13:10: fatal error: 'vecLib/Sparse/BLAS.h' file not found; interpreter: Unsupported ccall 'w_sparse_solve_qr_f64' in interpreter
 # Apple Sparse Solvers QR/Cholesky smoke (compiled — needs Accelerate).
 # Run: bin/tungsten -o /tmp/ssol spec/sci/sparse_solve_spec.w && /tmp/ssol
 #

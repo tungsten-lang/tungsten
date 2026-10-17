@@ -1,3 +1,4 @@
+# spec: interpreter -- compiled: did not finish in 600 s on a loaded machine
 # Specialization into smaller rings, re-embedding, and divisibility.
 
 use algebra

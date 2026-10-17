@@ -1,3 +1,4 @@
+# spec: compiled
 use ../../compiler/lib/ast
 use ../../compiler/lib/lexer
 use ../../compiler/lib/parser

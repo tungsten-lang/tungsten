@@ -1,3 +1,4 @@
+# spec: compiled
 # Elementwise fusion (lowering/ops.w try_fuse_elementwise): trees of f64[]
 # DOT ops (.+ .- .* ./) and array sin/cos/sqrt collapse into one raw loop —
 # no temporaries, no boxing — with kernel-identical semantics (scalar

@@ -1,3 +1,4 @@
+# spec: compiled
 # Array#join is source-defined, so values produced only at runtime must still
 # pull in core/array.w even when the program contains no Array literal or Array
 # class reference. The result bytes depend on the process arguments; merely

@@ -1,3 +1,4 @@
+# spec: compiled
 # Hash lookups must probe by CONTENT, never identity, across string storage
 # modes: a >=62-byte key crosses the rope/heap boundary, and literal keys
 # resolve to the frozen slab while runtime-built equals live on the heap.

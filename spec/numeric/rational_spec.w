@@ -1,3 +1,4 @@
+# spec: fast
 # Packed Rational core surface and arithmetic parity.
 # Run both ways:
 #   bin/tungsten run spec/numeric/rational_spec.w

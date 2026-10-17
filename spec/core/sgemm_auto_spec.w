@@ -1,3 +1,4 @@
+# spec: compiled
 # sgemm_auto — backend-selecting sgemm dispatch (core/sgemm_auto.w).
 #
 # METAL LANE, COMPILED ONLY. The module pulls in core/metal_sgemm and

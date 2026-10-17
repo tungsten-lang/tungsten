@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: did not finish in 600 s on a loaded machine
 # Truncated p-adic series, Newton-polygon zero counts, Weierstrass factors,
 # power sums, and Z/p^K kernels with a computed corank.
 #

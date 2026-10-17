@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: fails check 'six-by-six reopened dispatch'
 # The distinct positive six-by-six route preserves an open-world BigInt#*
 # replacement at both the ordinary and dedicated source seams.
 

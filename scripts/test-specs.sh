@@ -14,6 +14,13 @@ trap cleanup EXIT
 cd "$ROOT"
 mkdir -p "$TMP_ROOT"
 fail=0
+# Classifier functions only; the lanes are built after the job dispatch below,
+# so self-exec workers do not pay for discovery.
+SPEC_LANES_ROOT="$ROOT"
+SPEC_LANES_SKIP_BUILD=1
+# shellcheck source=spec-lanes.sh
+. "$ROOT/scripts/spec-lanes.sh"
+unset SPEC_LANES_SKIP_BUILD
 
 if [[ ! -x "$COMPILER" ]]; then
   echo "bin/tungsten-compiler is missing; run bin/tungsten build first." >&2
@@ -301,11 +308,11 @@ run_compiled_reject_spec() {
   local status
   local needle
 
-  case "$name" in
-    date_invalid_constructor) needle='Date.new expects one to seven arguments' ;;
-    decimal_invalid_constructor|decimal_invalid_zero_constructor) needle='Decimal.new is not a supported scalar constructor' ;;
-    *) record_failure_note "$name" "missing expected compiled rejection diagnostic"; return ;;
-  esac
+  needle="$(spec_header_text "$path" compiled-rejects)"
+  if [[ -z "$needle" ]]; then
+    record_failure_note "$name" 'missing "# spec: compiled-rejects -- TEXT" header'
+    return
+  fi
 
   echo "compile+reject $path"
   if ! "$TUNGSTEN" compile "$path" --out "$out" >/dev/null; then
@@ -334,11 +341,11 @@ run_interpreter_reject_spec() {
   local status
   local needle
 
-  case "$name" in
-    date_invalid_constructor) needle="'new' takes 1..7 arguments, got 0" ;;
-    decimal_invalid_constructor|decimal_invalid_zero_constructor) needle='Decimal.new is not a supported scalar constructor' ;;
-    *) record_failure_note "$name" "missing expected interpreted rejection diagnostic"; return ;;
-  esac
+  needle="$(spec_header_text "$path" interpreter-rejects)"
+  if [[ -z "$needle" ]]; then
+    record_failure_note "$name" 'missing "# spec: interpreter-rejects -- TEXT" header'
+    return
+  fi
 
   echo "run+reject $path"
   set +e
@@ -687,12 +694,10 @@ if [[ "${1:-}" == --job-* ]]; then
   exit "$fail"
 fi
 
-# Lane lists live in spec-lanes.sh so a file-list probe can fail closed
-# without compiling. Discovery is tracked-only: uncommitted scratch specs
-# must not change the suite.
-SPEC_LANES_ROOT="$ROOT"
-# shellcheck source=spec-lanes.sh
-. "$ROOT/scripts/spec-lanes.sh"
+# Lanes come from each spec's folder and `# spec:` header (see the top of
+# spec-lanes.sh). Discovery is tracked-only: uncommitted scratch specs must
+# not change the suite.
+spec_build_tracked_lanes
 
 if [[ "${BIT_SPECS_ONLY:-0}" != "1" ]]; then
   spec_classify_tracked

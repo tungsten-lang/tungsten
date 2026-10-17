@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: fails check 'fifteen-by-fifteen reopened dispatch'
 # The distinct positive fifteen-by-fifteen route preserves an open-world
 # BigInt#* replacement at both the ordinary and dedicated source seams.
 

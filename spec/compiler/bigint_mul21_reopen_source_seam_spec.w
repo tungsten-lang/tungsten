@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: fails check 'twenty-one-by-twenty-one reopened dispatch'
 # The distinct positive twenty-one-by-twenty-one route preserves an open-world
 # BigInt#* replacement at both the ordinary and dedicated source seams.
 

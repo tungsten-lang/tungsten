@@ -1,3 +1,4 @@
+# spec: compiled slow -- interpreter: fails check 'eq.polynomial_coerced_constant: got false, want true'
 # Engine-parity and exact-algorithm regressions for the algebra core.
 #
 # Covers the operator-dispatch fixes (`==`/`!=` on algebra values, overloaded

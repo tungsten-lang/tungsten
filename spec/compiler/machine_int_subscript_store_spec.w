@@ -1,3 +1,4 @@
+# spec: compiled
 # Fused machine-int subscript WRITE: `recv[i] = v` with v machine-int typed
 # and recv a plain untyped :var lowers to w_index_set_raw_i64/u64 — typed
 # integer arrays store raw (no boxed temporary; the old path heap-boxed

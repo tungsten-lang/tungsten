@@ -1,3 +1,4 @@
+# spec: compiled
 # Both argv spellings occur only inside nested method/block bodies. The
 # lowering prepass must still give main argc/argv parameters and emit one
 # argv_init before either method can execute.

@@ -1,3 +1,4 @@
+# spec: compiled
 # Regression: compound assignments to indexed typed-array parameters must
 # read and update those elements, not unrelated uninitialized locals.
 

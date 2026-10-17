@@ -1,3 +1,4 @@
+# spec: interpreter
 # Tree-walker parity for direct StringBuffer view-field size loads.
 
 # Surplus arguments are an error on both engines (E_LOWER_ARITY at compile

@@ -1,3 +1,4 @@
+# spec: compiled
 # Native String method dispatch and representation-invariant regressions.
 
 -> check(name, got, want)

@@ -1,3 +1,4 @@
+# spec: core
 # P1.4 zero-copy typed-array views — File.mmap → typed integer/float views.
 #
 # Expects /tmp/tungsten-mmap-view-smoke.bin to be prepopulated with 32

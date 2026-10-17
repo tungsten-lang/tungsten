@@ -1,3 +1,4 @@
+# spec: compiled
 # Structural coverage for production scalar dispatch lowering. These checks
 # cover the exact-source proof bits set by lowering: selected argc-one and
 # argc-two calls use scalar helpers and need no scratch, while otherwise-

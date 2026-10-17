@@ -1,3 +1,4 @@
+# spec: fast
 # `## int` values that promoted to a heap BigInt must never be unboxed raw.
 #
 # `:int` is the BOXED integer type — that is what distinguishes `## int` from

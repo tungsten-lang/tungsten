@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: fails check 'syntactic square'
 # Protected+locked exact-BigInt multiplication may test the committed
 # positive, distinct one-limb leaf before entering the polymorphic dispatcher.
 # Every neighboring shape must retain ordinary multiplication semantics.

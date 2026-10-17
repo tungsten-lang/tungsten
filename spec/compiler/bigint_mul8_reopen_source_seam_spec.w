@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: fails check 'eight-by-eight reopened dispatch'
 # The distinct positive eight-by-eight route preserves an open-world BigInt#*
 # replacement at both the ordinary and dedicated source seams.
 

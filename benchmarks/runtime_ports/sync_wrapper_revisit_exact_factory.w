@@ -1,3 +1,4 @@
+# spec: compiled
 # Exact native-result autoload probe. No public synchronization selector is
 # called: the WIRE class definitions must come solely from the loader's exact
 # factory-result map, not from method-name gates.

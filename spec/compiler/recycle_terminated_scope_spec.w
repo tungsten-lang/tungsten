@@ -1,3 +1,4 @@
+# spec: compiled
 # Regression coverage for path-local `## recycle` cleanup. A control transfer
 # must recycle every lexical scope it abandons, exactly once, while compilation
 # of a terminated branch must restore the scope stack before a sibling path is

@@ -1,3 +1,4 @@
+# spec: compiled
 # StringBuffer is byte-exact (runtime w_strbuf_append / w_strbuf_to_s).
 #
 # Both functions used to route through a C-string boundary: append recovered

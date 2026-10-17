@@ -1,3 +1,4 @@
+# spec: compiled
 # Deliberately no `use`, literal, typed-array syntax, or argv: exact native
 # factory return-type hooks must schedule Array on their own.
 

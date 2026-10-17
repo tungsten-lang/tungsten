@@ -1,3 +1,4 @@
+# spec: compiled
 # No `use` and no BigArray class reference: this file is autoloaded solely by
 # the exact w_big_array_view result-class hook.
 

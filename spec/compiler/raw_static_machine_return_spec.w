@@ -1,3 +1,4 @@
+# spec: compiled
 # Regression for raw machine-returning static calls feeding unhinted locals.
 # The u64 parameter and i64 return deliberately differ: the call consumes a raw
 # unsigned word but its result is a raw signed index, matching BitOps'

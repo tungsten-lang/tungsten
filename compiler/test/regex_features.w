@@ -1,3 +1,4 @@
+# spec: slow
 # Regression coverage for the pure-Tungsten regex engine (core/regex.w).
 #
 # COMPILED-ONLY + SELF-CONTAINED. The engine derives its private untagged i64[]

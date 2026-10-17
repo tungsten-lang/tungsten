@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: Unsupported ccall_nobox 'w_bigint_alloc_hot8_raw' in interpreter
 # Compiled-only direct native/C differential for the generic equal-width
 # add/sub leaves at every width from 5 through 23 (the fixed widths 8 and
 # 16 are exercised through the same generic wrapper here as a cross-check).

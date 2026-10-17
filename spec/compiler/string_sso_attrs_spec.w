@@ -1,3 +1,4 @@
+# spec: compiled
 # LLVM memory-effect contracts for SSO String helpers. The SSO-5 leaf is
 # scalar-only; public helpers remain conservative because rope fallback can
 # allocate and write the rope's cached flattened value.

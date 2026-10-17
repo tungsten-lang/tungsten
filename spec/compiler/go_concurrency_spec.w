@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: did not finish in 600 s on a loaded machine
 # go -> body concurrency spec.
 # Tests that `go -> body` parses and compiles as a goroutine task launch.
 

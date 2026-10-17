@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: fails check 'sixteen-by-sixteen reopened dispatch'
 # The distinct positive sixteen-by-sixteen route preserves an open-world
 # BigInt#* replacement at both the ordinary and dedicated source seams.
 

@@ -1,3 +1,4 @@
+# spec: compiled
 # Autoload must reach class references in EVERY syntactic position.
 #
 # `collect_autoload_refs` (compiler/lib/loader.w) walks the AST by probing a

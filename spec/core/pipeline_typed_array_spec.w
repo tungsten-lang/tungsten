@@ -1,3 +1,4 @@
+# spec: compiled
 # Fused slash-pipelines over TYPED arrays — correctness matrix.
 #
 # Regression spec for the 2026-08-28 fix: the fused pipeline loop read every

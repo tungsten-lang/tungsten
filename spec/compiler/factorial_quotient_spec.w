@@ -1,3 +1,4 @@
+# spec: compiled
 # Compiled-only cancellation regression. Expanding these factorials would
 # require a trillion iterations; lowering must retain only the small tail.
 -> check(name, got, want)

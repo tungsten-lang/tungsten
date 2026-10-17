@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: Unsupported ccall 'w_blas_ew_f64' in interpreter
 # Tensor unit tagging smoke (compiled).
 # Run: bin/tungsten -o /tmp/tunit spec/sci/tensor_unit_spec.w && /tmp/tunit
 

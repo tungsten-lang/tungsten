@@ -1,3 +1,4 @@
+# spec: compiled
 # w_bace_seed deliberately has no loader result mapping. The only operation
 # capable of scheduling BigArray here is the exact w_big_array_subview hook.
 

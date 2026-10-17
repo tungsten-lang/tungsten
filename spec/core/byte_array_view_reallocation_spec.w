@@ -1,3 +1,4 @@
+# spec: core
 # Regression: view stays correct after parent realloc.
 #
 # Before the view registry, taking a view + pushing into the parent

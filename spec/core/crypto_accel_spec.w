@@ -1,3 +1,4 @@
+# spec: core
 # Hardware-accelerated crypto surface: SHA-1, SHA-256/512 (hw compress paths),
 # SHA-3 / SHAKE, CRC-32 / CRC-32C, and AES-GCM. Every expectation is anchored to
 # an external reference (FIPS 180-4 / FIPS 202 vectors, zlib CRC, Go crypto/cipher

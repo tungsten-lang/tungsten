@@ -1,3 +1,4 @@
+# spec: skip -- needs the local OpenSSL server; scripts/test-http-tls.sh runs it
 # Local TLS integration. scripts/test-http-tls.sh supplies an OpenSSL server
 # whose certificate is trusted through SSL_CERT_FILE.
 

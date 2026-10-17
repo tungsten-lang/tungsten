@@ -1,3 +1,4 @@
+# spec: compiled slow
 # Complete dyadic square classes through the exact higher-unit filtration.
 
 use algebra

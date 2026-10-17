@@ -1,3 +1,4 @@
+# spec: compiled slow
 # Point-divisor spaces and first Khuri--Makdisi products on the shell quartic.
 
 use algebra

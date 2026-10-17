@@ -1,3 +1,4 @@
+# spec: compiled
 # Regression: an annotated machine-i64 instance-method result crossing the
 # runtime-dispatch boundary must be boxed.  Returning raw `1` verbatim makes
 # the runtime interpret the bits as the false WValue tag.  Ivar-backed getters

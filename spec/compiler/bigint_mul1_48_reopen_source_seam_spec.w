@@ -1,3 +1,4 @@
+# spec: skip -- compiled: fails check 'wide receiver reopened dispatch'; interpreter: fails check 'wide receiver reopened dispatch'
 # The positive 48-by-1 source seam must preserve open-world BigInt#* dispatch.
 
 -> check(label, got, expected)

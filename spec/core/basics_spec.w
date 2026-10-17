@@ -1,3 +1,4 @@
+# spec: compiled
 # Language basics: print, arithmetic, strings, interpolation.
 #
 # Run: `bin/tungsten -o /tmp/basics spec/core/basics_spec.w && /tmp/basics`

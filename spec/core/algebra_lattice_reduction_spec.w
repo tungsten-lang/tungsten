@@ -1,3 +1,4 @@
+# spec: compiled slow
 # Exact Gram-matrix LLL reduction and number-field ideal generators.
 
 use algebra

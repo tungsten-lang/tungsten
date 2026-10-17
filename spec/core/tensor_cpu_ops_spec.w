@@ -1,3 +1,4 @@
+# spec: compiled
 # CPU Tensor output-allocation and numeric-operation regression coverage.
 
 use core/blas

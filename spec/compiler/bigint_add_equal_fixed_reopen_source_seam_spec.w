@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: fails check 'four-by-four reopened dispatch'
 # The positive equal-width add@4/8/16 routes preserve an open-world BigInt#+
 # replacement at both the ordinary operator and stable source seam.
 

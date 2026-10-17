@@ -1,3 +1,4 @@
+# spec: compiled
 # Every boxed typed-array read entry point must decode u64/i64 with the same
 # signedness.  Keep these arrays above the 255-element stack-promotion cap so
 # this exercises the heap/runtime family rather than SmallArray inline loads.

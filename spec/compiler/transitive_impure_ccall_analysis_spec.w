@@ -1,3 +1,4 @@
+# spec: compiled
 # Focused source-call-graph coverage for transitive known-impure ccall
 # propagation. Use the same minimal lowering harness as the neighbouring
 # compiler analysis specs so the bootstrap supplies the packed-AST runtime.

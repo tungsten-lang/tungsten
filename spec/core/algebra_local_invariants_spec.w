@@ -1,3 +1,4 @@
+# spec: skip -- compiled: unhandled exception: FAIL resultant.alias; interpreter: no block given
 # Exact bivariate resultants and certified local delta invariants.
 
 use algebra

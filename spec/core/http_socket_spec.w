@@ -1,3 +1,4 @@
+# spec: core
 # Compiled loopback integration for core/http.w. The server uses a native OS
 # thread so it can accept and answer while HTTP.get blocks on the main thread.
 

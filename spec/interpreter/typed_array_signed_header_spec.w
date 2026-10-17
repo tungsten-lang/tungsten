@@ -1,3 +1,4 @@
+# spec: interpreter
 # The tree walker must preserve signed i32/i64 identity in the native typed
 # array header.  Keep sizes above the SmallArray promotion ceiling so this is
 # explicitly a heap-array decoder regression.

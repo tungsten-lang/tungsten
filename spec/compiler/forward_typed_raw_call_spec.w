@@ -1,3 +1,4 @@
+# spec: compiled
 # Regression: raw-call ABI selection must be independent of definition order.
 # A typed caller lowered before a raw-i64 callee used to box its arguments and
 # expect a boxed result; the later callee accepted/returned raw machine ints.

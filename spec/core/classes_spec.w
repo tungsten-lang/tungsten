@@ -1,3 +1,4 @@
+# spec: compiled
 # Classes, fields, methods, and inheritance.
 #
 # Run: `bin/tungsten -o /tmp/cls spec/core/classes_spec.w && /tmp/cls`

@@ -1,3 +1,4 @@
+# spec: fast
 # Cross-engine dogfood for TOP-LEVEL typed function overloads (gap 4).
 #
 # Declaring the same function name+arity more than once, distinguished by a

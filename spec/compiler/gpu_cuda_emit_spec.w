@@ -1,3 +1,4 @@
+# spec: cuda-emit
 # CUDA dialect emit smoke — `@gpu fn` → sibling .cu with expected markers.
 #
 # Compile with TUNGSTEN_GPU_DIALECTS=cuda (see scripts/test-specs.sh). The

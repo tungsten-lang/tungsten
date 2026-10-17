@@ -1,3 +1,4 @@
+# spec: interpreter
 # Tree-walker parity for Range methods. A range evaluates to the internal
 # hash {rt: :range, from:, to:, exclusive:}, and primitive_runtime_class used
 # to classify that as a plain Hash. Every name Hash also answers was then

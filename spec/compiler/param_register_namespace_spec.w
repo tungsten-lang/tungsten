@@ -1,3 +1,4 @@
+# spec: compiled
 # Source identifiers spelled like the compiler's own LLVM locals. Parameters
 # used to be emitted verbatim as `%<name>`, sharing one namespace with the
 # `%t<N>` temporaries wire.w mints, so `-> run(k, t0, t1)` defined `%t0` twice

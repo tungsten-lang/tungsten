@@ -1,3 +1,4 @@
+# spec: compiled
 # u64 x u64 multiply lowers to a raw wrapping LLVM `mul` when both operands
 # are raw-u64-typed — verified at the IR level 2026-07-22 for annotated
 # locals at top level, in functions, in Thread closures, and fed from

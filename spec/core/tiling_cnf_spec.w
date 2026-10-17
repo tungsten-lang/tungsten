@@ -1,3 +1,4 @@
+# spec: compiled slow -- interpreter: no block given
 # CNF encodings of corona questions.
 # Run:
 #   bin/tungsten spec/core/tiling_cnf_spec.w

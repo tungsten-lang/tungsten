@@ -1,3 +1,4 @@
+# spec: compiled
 # Independent stress coverage for the compiler's inline Array iterator CFG.
 # Every iterator body owns a lexical recycle scope. Normal continuation,
 # predicate short-circuit, break, next, raise, and non-local return must each

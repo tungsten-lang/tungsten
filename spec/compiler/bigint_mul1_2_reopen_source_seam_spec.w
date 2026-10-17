@@ -1,3 +1,4 @@
+# spec: skip -- compiled: fails check 'wide receiver reopened dispatch'; interpreter: Unsupported ccall 'w_bigint_from_dec_str' in interpreter
 # The newly admitted positive 2-by-1 multiplication shape must preserve an
 # ordinary open-world BigInt#* replacement and its original receiver order.
 

@@ -1,3 +1,4 @@
+# spec: core
 # ByteArray value-equality (ByteArray was lifted to WArray with
 # ebits=8; w_eq didn't have a bytes branch, so two ByteArrays with
 # identical content compared as false in compiled code).

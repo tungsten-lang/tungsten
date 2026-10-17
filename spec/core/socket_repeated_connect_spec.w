@@ -1,3 +1,4 @@
+# spec: core
 # Runtime-special class methods must not cache their empty source facade body.
 # Before this regression fix, the first Socket.connect at one compiled call
 # site returned a Socket and the second returned nil.

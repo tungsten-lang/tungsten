@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: undefined method 'dot' for [1.5, -3.25, 0.5, 2]
 # f16 typed-array kernels that only the compiled engine routes (dot/scale —
 # same engine surface as bf16; the interpreter has no IC rows for the float
 # array reduction/scale family). Run compiled: tungsten -o out <this>; ./out

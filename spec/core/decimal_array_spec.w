@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: no block given
 # %d[…] decimal array literals, %f32[…]/%f64[…] typed float array
 # literals, elementwise `| unit` pipes over arrays, scalar unit attach,
 # and Array statistics (mean/variance/stdev/median) incl. quantities.

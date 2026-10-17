@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: no block given
 # Polygons and Pick's theorem, lattice metric invariants, the Conway
 # criterion, and crystallographic restriction in n dimensions.
 #   bin/tungsten run spec/core/polygon_lattice_spec.w

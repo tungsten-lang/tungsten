@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: Undefined method 'raw_load_u32'
 # Compiled-only direct native/C differential for the exact mul1@40 leaf.
 # Build with BN_BIGINT_MUL1_40_SRC_DIRECT=0: public multiplication then stays
 # on C, while this spec calls the raw native worker explicitly.

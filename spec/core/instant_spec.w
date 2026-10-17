@@ -1,3 +1,4 @@
+# spec: compiled
 # Instant — millisecond-precision UTC timestamp (core/instant.w).
 #
 # Run:

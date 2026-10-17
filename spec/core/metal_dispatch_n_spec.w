@@ -1,3 +1,4 @@
+# spec: metal
 # P2.2 smoke: variable-buffer Metal dispatch via metal_dispatch_n.
 # Five buffers (a, b, c, out, n) bound at slots 0..4 in array order.
 # Compile with `--ll` so the .metal sidecar lands next to the .w.

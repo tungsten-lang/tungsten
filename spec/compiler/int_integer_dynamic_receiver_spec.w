@@ -1,3 +1,4 @@
+# spec: compiled
 # Generic Integer algorithms and Int's auto-promoting implementation must
 # survive erased receiver boundaries in both engines.
 

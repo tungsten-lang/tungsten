@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: no block given
 # Boundary words, the translation and Conway criteria, periodic tilings.
 # Run:
 #   bin/tungsten spec/core/tiling_criteria_spec.w

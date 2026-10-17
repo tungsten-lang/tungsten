@@ -1,3 +1,4 @@
+# spec: skip -- compiled: runtime/sparse_bridge.c:13:10: fatal error: 'vecLib/Sparse/BLAS.h' file not found; interpreter: Unsupported ccall 'w_sparse_spmv_f32' in interpreter
 # Apple SparseBLAS SpMV smoke (compiled — needs Accelerate).
 # Run: bin/tungsten -o /tmp/spmv spec/sci/sparse_accel_spec.w && /tmp/spmv
 

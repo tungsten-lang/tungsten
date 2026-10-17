@@ -1,3 +1,4 @@
+# spec: compiled
 # Stack-promoted SmallArray loads retain their element's full scalar type at a
 # boxing boundary.  In particular, u64/i64 values outside the immediate i48
 # payload must go through the unsigned/signed runtime bridges, while w64 slots

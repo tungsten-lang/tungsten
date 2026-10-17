@@ -1,3 +1,4 @@
+# spec: compiled
 # Date.in / Calendar: jurisdiction cutovers and Amsterdam +00:20.
 
 -> check(name, got, want)

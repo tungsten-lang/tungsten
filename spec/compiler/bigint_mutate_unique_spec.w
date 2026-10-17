@@ -1,3 +1,4 @@
+# spec: fast
 # Mutate-if-unique, stage 1 (E4). The compiler proves an accumulator's
 # value dies at its own supported `r = r op e` / compound assignment and
 # routes the boxed fallback through the matching in-place entry. This spec

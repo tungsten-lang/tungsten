@@ -1,3 +1,4 @@
+# spec: compiled
 use core/linalg
 
 -> expect(name, condition)

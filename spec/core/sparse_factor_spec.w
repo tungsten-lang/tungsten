@@ -1,3 +1,4 @@
+# spec: compiled
 # SparsePattern / SparseAnalysis / SparseFactor — factor reuse, numeric
 # refactorization, typed solve lane, analysis predictions, budget gate,
 # and LinAlg.slogdet.

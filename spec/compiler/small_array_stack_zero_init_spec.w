@@ -1,3 +1,4 @@
+# spec: compiled
 # Stack-promoted small typed arrays are zero-initialised, like every other
 # Tungsten array.
 #

@@ -1,3 +1,4 @@
+# spec: compiled
 # String#lchs returns complete tagged LexChar WValues. Its array therefore
 # uses w64 storage; i64 storage would numerically box a negative LexChar on a
 # generic read. The lexer keeps that w64[] contract on its ivar and explicitly

@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: Undefined method 'll'
 # Class-scoped embedded `ll` kernels: a typed `fn` whose body is a single
 # ll heredoc, INSIDE a class body, compiles to a class-mangled raw-ABI
 # kernel that sibling methods call by bare name through the raw path (no

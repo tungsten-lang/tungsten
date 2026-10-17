@@ -1,3 +1,4 @@
+# spec: interpreter
 # Tree-walker value parity for source-only Integer#to_i.
 
 # Surplus arguments are an error on both engines (E_LOWER_ARITY at compile

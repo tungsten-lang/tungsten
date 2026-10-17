@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: no block given
 # Certified good-reduction residue disks for the shell-width quartic.
 
 use algebra

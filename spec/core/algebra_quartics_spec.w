@@ -1,3 +1,4 @@
+# spec: compiled slow -- interpreter: no block given
 # Exact line restrictions, certified closed-place intersections, and
 # finite-field bitangent enumeration for the shell-width quartic.
 #

@@ -1,3 +1,4 @@
+# spec: slow
 # Canonical symbolic expressions, exact differentiation, active-value
 # evaluation, and the exact PolynomialRing bridge.
 #

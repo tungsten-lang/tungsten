@@ -1,3 +1,4 @@
+# spec: compiled
 use core/optim
 
 -> optim_check(name, condition)

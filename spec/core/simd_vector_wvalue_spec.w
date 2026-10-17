@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: Unsupported ccall 'w_vec2f_w' in interpreter
 # SIMD Vector WValue Tag 0xFFF2 & 0xFFF3 spec.
 
 v2 = ccall("w_vec2f_w", ~3.0, ~4.0)

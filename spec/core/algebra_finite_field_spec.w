@@ -1,3 +1,4 @@
+# spec: compiled slow -- interpreter: no block given
 # Exact finite-field regressions. Elements stay Integer-encoded; all arithmetic
 # is interpreted through the owning Field object.
 

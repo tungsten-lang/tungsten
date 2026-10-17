@@ -1,3 +1,4 @@
+# spec: slow
 # Symbolic expression interoperability with active calculus values, Complex,
 # and exact PolynomialRing values.
 #

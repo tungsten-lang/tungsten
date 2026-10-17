@@ -1,3 +1,4 @@
+# spec: compiled
 # OS — operating-system interface: commands, files, platform (core/os.w).
 #
 # Run:

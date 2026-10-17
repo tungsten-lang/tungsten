@@ -1,3 +1,4 @@
+# spec: compiled
 # Consumed BigInt +/- literal lowering. These functions intentionally keep
 # their accumulator local and non-escaping so the existing liveness proof may
 # select the raw-magnitude small-mut ABI. The alias/parameter/index controls

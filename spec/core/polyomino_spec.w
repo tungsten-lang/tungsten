@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: no block given
 # Discrete lattice geometry, polyomino enumeration, and exact cover.
 # Run in both engines:
 #   bin/tungsten run spec/core/polyomino_spec.w

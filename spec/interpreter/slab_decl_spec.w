@@ -1,3 +1,4 @@
+# spec: interpreter
 # Interpreter-path spec for the slab-declaration AST family (I7).
 #
 # The build always takes the COMPILED path, so the tree-walking interpreter

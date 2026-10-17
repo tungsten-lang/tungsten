@@ -1,3 +1,4 @@
+# spec: compiled
 # Conditional annotated reassign of an existing boxed variable (param or
 # boxed local) must not retype it to a raw machine slot — one branch would
 # hold raw bits while the other holds the boxed WValue, corrupting

@@ -1,3 +1,4 @@
+# spec: core
 # ByteArray.slice(start, len) — returns a new ByteArray containing the
 # requested byte range. ByteArray was lifted to WArray with
 # ebits=8; .slice wasn't on the array IC dispatch table, so calling it

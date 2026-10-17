@@ -1,3 +1,4 @@
+# spec: skip -- Metal hardware spec that was never in the metal lane; not run on hardware yet
 # A tensor-like unaligned byte range can remain file-backed: the runtime wraps
 # outward to VM pages and binds the leading byte offset to the Metal kernel.
 

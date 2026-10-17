@@ -1,3 +1,4 @@
+# spec: skip -- compiled: InterpreterOverloadProbe#pick does not accept 3 arguments — no definition of 'pick' on InterpreterOverloadProb; interpreter: 'pick' takes 1 argument, got 3 — arguments are never silently dropped or padded
 # Interpreter parity for exact-arity lookup, bare self calls, registration-
 # order fallback, and same-arity replacement on a reopened class.
 

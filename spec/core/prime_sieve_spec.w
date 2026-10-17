@@ -1,3 +1,4 @@
+# spec: compiled
 # PrimeSieve / Int.nth_prime / Int.primes / Int.prime_pi / fused `/prime? :count`
 # — known values (A006988, A006880) through the compiled two-tier mod-30 sieve.
 # Every check runs in well under a second; the ladder rungs are exercised on

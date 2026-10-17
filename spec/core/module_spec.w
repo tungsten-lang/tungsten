@@ -1,3 +1,4 @@
+# spec: interpreter
 # Module — the reflection surface declared in core/module.w.
 #
 # core/module.w cannot be loaded by either engine (see the BUG note below), so

@@ -1,3 +1,4 @@
+# spec: compiled
 # Automatic fused destination reuse is a compiler proof, not a source-level
 # assertion. These cases pin both sides of the proof boundary: a unique local
 # is consumed in place, while a bare alias forces ordinary fresh allocation.

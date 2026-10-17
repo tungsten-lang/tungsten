@@ -1,3 +1,4 @@
+# spec: compiled
 # A bare identifier inside a method body that names an instance method of the
 # class hierarchy is an implicit `self.name` CALL, and that call can raise.
 # Before 2026-09-22 the closed-world no-raise analysis (lowering/no_raise.w)

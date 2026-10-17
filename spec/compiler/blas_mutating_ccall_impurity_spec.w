@@ -1,3 +1,4 @@
+# spec: compiled
 use core/blas
 
 -> expect(name, condition)

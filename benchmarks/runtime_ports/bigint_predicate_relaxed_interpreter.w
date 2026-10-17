@@ -1,3 +1,4 @@
+# spec: interpreter
 # Tree-walker parity for direct BigInt signed-length and limb0 view fields.
 # Natural arithmetic always normalizes zero back to Integer, so the synthetic
 # size-zero/no-storage cases remain a compiled C-fixture gate.

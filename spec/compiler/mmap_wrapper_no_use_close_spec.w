@@ -1,3 +1,4 @@
+# spec: skip -- compiled: clang: error: linker command failed with exit code 1 (use -v to see invocation); interpreter: Unsupported ccall 'w_mwr_fixture' in interpreter
 # Close-only opaque boundary pins retained native dispatch. A broad `close`
 # autoload trigger would affect sockets, files, channels, and many user types.
 m = ccall("w_mwr_fixture", 64)

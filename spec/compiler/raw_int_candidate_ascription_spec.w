@@ -1,3 +1,4 @@
+# spec: compiled
 # Regression: a local read under a machine-int type ascription in argument
 # position (`f(x ## u64)`) is a VALUE use, not a storage escape, so it must
 # stay a raw-int promotion candidate.

@@ -1,3 +1,4 @@
+# spec: slow
 # Field and arbitrary-dimensional projective-space regressions.
 # The algebra orchestrator loads core/algebra/field and
 # core/algebra/projective before this file executes.

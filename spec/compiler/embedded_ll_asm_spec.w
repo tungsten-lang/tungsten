@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: Undefined method 'll'
 # Embedded LLVM IR (`ll <<~IR`) and AArch64 assembly (`asm <<~ASM`) function
 # bodies. A top-level typed fn whose entire body is one ll/asm call with a
 # string literal (heredocs lex raw — brackets never interpolate) becomes that

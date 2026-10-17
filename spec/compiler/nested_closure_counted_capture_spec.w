@@ -1,3 +1,4 @@
+# spec: compiled
 # Regression (block-capture flush): a machine-int local counted inside one
 # block closure (`npos`) and then CAPTURED into a second, nested-closure loop
 # must keep its live value at capture time.

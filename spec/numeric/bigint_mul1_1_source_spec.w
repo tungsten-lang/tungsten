@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: fails check 'minimum_heap_pair.value got 281474976710656 want 79228162514264619068520660992'
 # Distinct positive one-limb BigInt times positive one-limb BigInt. On macOS
 # ARM64 this is the exact native Tungsten port of bigint_mul_positive_11;
 # representation finishing remains the shared C boundary.

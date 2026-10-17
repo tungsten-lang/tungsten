@@ -1,3 +1,4 @@
+# spec: compiled
 # Stack-promoted small typed arrays must never escape their frame.
 #
 # `i64[N]` with N <= 255 and a packable element type is promoted to an LLVM

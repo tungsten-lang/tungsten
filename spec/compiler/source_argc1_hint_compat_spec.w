@@ -1,3 +1,4 @@
+# spec: compiled
 + HintedCompatTarget
   -> get(index)
     index + 100

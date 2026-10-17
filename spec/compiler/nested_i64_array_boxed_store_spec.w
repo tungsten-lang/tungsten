@@ -1,3 +1,4 @@
+# spec: compiled
 # Regression: indexing a generic portfolio erases the static element type of
 # the contained i64[].  Its subsequent dynamic `[]` therefore returns a boxed
 # Integer.  Values outside the immediate i48 range are heap BigInts; storing

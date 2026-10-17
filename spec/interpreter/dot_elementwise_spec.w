@@ -1,3 +1,4 @@
+# spec: interpreter
 # Dot-prefix elementwise operators under the TREE WALKER (`tungsten run`).
 # The compiled path lowers `.+ .- .* ./ .| .& .^ .<< .>>` to w_array_*_elem
 # runtime kernels (lowering/ops.w); the interpreter routes to the same kernels

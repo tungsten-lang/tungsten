@@ -1,3 +1,4 @@
+# spec: skip -- compiled: clang: error: linker command failed with exit code 1 (use -v to see invocation); interpreter: Unsupported ccall 'w_strlen_fixture' in interpreter
 # No import; the receiver crosses a parameter boundary and is a rope before
 # dispatch. Candidate source dispatch must autoload and flatten exactly once.
 -> probe(value)

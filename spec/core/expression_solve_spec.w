@@ -1,3 +1,4 @@
+# spec: slow
 # Polynomial-backed symbolic factorization and exact real solving.
 
 use algebra

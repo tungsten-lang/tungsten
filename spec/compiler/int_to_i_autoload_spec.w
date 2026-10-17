@@ -1,3 +1,4 @@
+# spec: compiled
 # Integer#to_i is source-only. Integer literals and locals must autoload its
 # class without an explicit `use core/integer`, while retaining native IC
 # compatibility for surplus arguments and trailing blocks.

@@ -1,3 +1,4 @@
+# spec: compiled slow
 # Exact homogeneous-map identities and certified canonical-height tails.
 
 use algebra

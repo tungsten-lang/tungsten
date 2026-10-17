@@ -1,3 +1,4 @@
+# spec: cuda-reject
 # CUDA must reject Metal simdgroup matrix calls instead of copying their names
 # verbatim into a .cu sidecar.
 

@@ -1,3 +1,4 @@
+# spec: compiled
 # String free-insertion / escape analysis (ownership.w is_heap_producer +
 # is_nonretaining_consumer, runtime w_int_to_s).
 #

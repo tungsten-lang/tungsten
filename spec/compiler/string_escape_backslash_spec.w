@@ -1,3 +1,4 @@
+# spec: compiled
 # Backslash escape coverage in string literals — function-local, module-level
 # constant, interpolation-adjacent, and torture combinations.
 #

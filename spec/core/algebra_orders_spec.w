@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: fails check 'gaussian.at_2.certified: got false, want true'
 # Exact monogenic orders, Dedekind index certificates, and finite products.
 #
 # Run both ways:

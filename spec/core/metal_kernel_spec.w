@@ -1,3 +1,4 @@
+# spec: metal
 # Kernel provenance smoke — `@gpu fn` end-to-end.
 #
 # Compiles add_one to MSL, runtime-compiles the .metal, builds a

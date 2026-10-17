@@ -1,3 +1,4 @@
+# spec: compiled
 # An explicit machine-int result type applies to every link in a nested
 # expression.  A boxed intermediate here turns the raw WValue tag into a
 # BigInt and then exposes the BigInt pointer as the result.

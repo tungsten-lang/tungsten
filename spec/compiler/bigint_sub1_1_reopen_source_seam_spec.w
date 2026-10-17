@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: Unsupported ccall 'w_bigint_from_dec_str' in interpreter
 # The narrow positive one-limb subtraction seam must preserve ordinary
 # open-world BigInt#- replacement, just like the complete minus seam.  Closed-
 # world programs reject this reopen before lowering.

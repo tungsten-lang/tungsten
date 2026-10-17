@@ -1,3 +1,4 @@
+# spec: interpreter -- compiled: runtime/sparse_bridge.c:13:10: fatal error: 'vecLib/Sparse/BLAS.h' file not found
 # Scientific computing smoke tests.
 # Run: bin/tungsten spec/sci/smoke_spec.w
 

@@ -1,3 +1,4 @@
+# spec: compiled slow
 # Certified real-root isolation over Q, refinable algebraic real values, and
 # the symbolic solve bridge. Run in interpreter and native engines.
 

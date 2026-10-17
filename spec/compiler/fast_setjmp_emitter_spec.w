@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: Unsupported ccall_nobox 'w_is_wire_extern' in interpreter
 use ../../compiler/lib/emitter
 
 -> check(name, ok)

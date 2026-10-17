@@ -1,3 +1,4 @@
+# spec: compiled
 # A `<<` at the START of a `->(params)` lambda body is a PUTS (print), not a
 # left-shift. The lexer classifies `<<` as LSHIFT after a value-type token and
 # PUTS_OP otherwise; the `)` closing a lambda param list is *not* a value, so

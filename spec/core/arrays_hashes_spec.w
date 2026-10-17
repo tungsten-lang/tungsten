@@ -1,3 +1,4 @@
+# spec: compiled
 # Array and hash operations.
 #
 # Run: `bin/tungsten -o /tmp/ah spec/core/arrays_hashes_spec.w && /tmp/ah`

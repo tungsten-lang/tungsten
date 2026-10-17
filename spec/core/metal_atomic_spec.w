@@ -1,3 +1,4 @@
+# spec: skip -- Metal hardware spec that was never in the metal lane; not run on hardware yet
 # Device-scope atomic primitives used by persistent FlipFleet kernel pools.
 
 use core/metal

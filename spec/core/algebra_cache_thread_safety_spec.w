@@ -1,3 +1,4 @@
+# spec: compiled
 # A Polynomial and ArithmeticCircuit are immutable during these calls, but
 # their one-entry MRU caches are intentionally contended by different keys.
 # The start gate makes every run exercise true overlap. Each worker validates

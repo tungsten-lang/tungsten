@@ -1,3 +1,4 @@
+# spec: compiled interpreter
 # No imports: predicate spellings must schedule BigInt even when the runtime
 # value arrives through a literal/promotion rather than a BigInt class ref.
 

@@ -1,3 +1,4 @@
+# spec: compiled
 # No explicit use. This digit-first UUID literal names no class, so loader
 # literal autoload is solely responsible for registering UUID#byte.
 

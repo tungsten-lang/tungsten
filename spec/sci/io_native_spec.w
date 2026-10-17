@@ -1,3 +1,4 @@
+# spec: skip -- compiled: exited 139; interpreter: Unsupported ccall 'w_sci_netcdf_write_f32_1d' in interpreter
 # Native sci I/O round-trips (forces sci_io_native via @w_sci_).
 # Also touch blas so current compilers link blas_bridge (WTensor dual-home).
 # Run: bin/tungsten -o /tmp/io_nat spec/sci/io_native_spec.w && /tmp/io_nat

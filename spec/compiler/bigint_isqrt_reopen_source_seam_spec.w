@@ -1,3 +1,4 @@
+# spec: compiled
 # The stable BigInt#isqrt seam must follow ordinary open-world method-table
 # replacement. PROTECT_THE_CORE! programs reject this reopen before lowering;
 # ordinary programs select the final plain definition, just like a method send.

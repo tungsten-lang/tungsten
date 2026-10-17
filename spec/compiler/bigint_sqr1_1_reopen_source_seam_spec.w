@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: Unsupported ccall 'w_bigint_from_dec_str' in interpreter
 # The one-limb square route enters the ordinary BigInt#* source seam first,
 # so an open-world replacement remains observable. Closed-world programs
 # reject this reopen before lowering.

@@ -1,3 +1,4 @@
+# spec: compiled
 # Focused coverage for the dedicated zero-argument inline-cache entry point.
 # The source-level checks exercise native-wrapper caches, exact arity-zero
 # source methods, inherited lookup, cache-key changes, nil-filled fallback to

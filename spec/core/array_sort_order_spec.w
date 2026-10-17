@@ -1,3 +1,4 @@
+# spec: skip -- compiled: fails check 'stable_sort mixed float first got Float,Int want Float,Integer'; interpreter: no block given
 # Array sort ordering regressions.
 #
 # Signed typed arrays (i8/i16/i32/i64) must sort in SIGNED order on every

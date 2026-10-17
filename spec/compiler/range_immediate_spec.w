@@ -1,3 +1,4 @@
+# spec: compiled
 # Immediate Range (Location mode 11) — compiled-engine end-to-end.
 #
 # Producers are wired: lower_range routes escaped range literals through

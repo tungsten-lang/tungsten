@@ -1,3 +1,4 @@
+# spec: metal
 # Cooperative Tensor GPU softmax correctness and shape-policy coverage.
 
 use core/tensor

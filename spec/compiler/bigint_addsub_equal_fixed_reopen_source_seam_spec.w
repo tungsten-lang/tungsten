@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: fails check 'add reopened dispatch at 2'
 # The positive equal-width add@2/24 and sub@2/3/4/8/16/24 routes preserve
 # open-world BigInt#+ and BigInt#- replacements at both the ordinary
 # operators and the stable source seams.

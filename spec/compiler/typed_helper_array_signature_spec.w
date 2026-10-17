@@ -1,3 +1,4 @@
+# spec: compiled
 # Regression: a typed top-level helper must resolve another typed function's
 # signature when the argument list mixes a user class, a typed array, and a
 # plain Array.  Falling back to the bare function name leaves an undefined

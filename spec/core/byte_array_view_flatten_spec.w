@@ -1,3 +1,4 @@
+# spec: core
 # Slice-of-slice flattening: v2 = v1.slice(...) registers v2 against
 # v1's root parent, not against v1. All views are siblings, never
 # children of one another. After a parent realloc, every sibling

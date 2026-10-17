@@ -1,3 +1,4 @@
+# spec: compiled
 # Regression coverage for the ownership pass's single-scan phi handling.
 # WIRE phi operands are flat value/label pairs. Every incoming value and the
 # result must be conservatively escaped in that scan, including values flowing

@@ -1,3 +1,4 @@
+# spec: compiled
 # Loop versioning for untyped-array element loops (lowering/analysis.w
 # loop_version_spec → control_flow.w lower_while_versioned). Qualifying
 # `while i < a.size` / `while i < n` loops lower twice behind a runtime

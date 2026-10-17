@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: fails check 'grow.sign_np got false want true'
 # Mutate-if-unique, stage 4 (E4 gap closure). Covers the growth arms of
 # w_bigint_add_mut/w_bigint_sub_mut (|b| > |a| in place and
 # allocate+release), the carry-past-capacity class crossing, the

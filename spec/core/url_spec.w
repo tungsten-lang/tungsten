@@ -1,3 +1,4 @@
+# spec: core interpreter
 use core/url
 
 -> check(name, condition)

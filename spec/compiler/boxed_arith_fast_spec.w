@@ -1,3 +1,4 @@
+# spec: compiled
 # Boxed-operator inline fast helpers (__w_mul/div/mod/band/bor/bxor/shl/shr_fast,
 # __w_int_fast/__w_to_i64_fast — emitter.w) routed via the lowering op map.
 # Pins the fast arms AND every slow-path semantic they must preserve:

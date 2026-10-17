@@ -1,3 +1,4 @@
+# spec: compiled
 # No explicit use. Both compiler-recognized constructor syntax and a native
 # return boundary must load/register StringBuffer before public size dispatch.
 

@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: fails check 'five-by-five reopened dispatch'
 # The distinct positive five-by-five route preserves an open-world BigInt#*
 # replacement at both the ordinary and dedicated source seams.
 

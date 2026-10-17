@@ -1,3 +1,4 @@
+# spec: compiled
 # Int#popcount / Int#bit_count: ones in the magnitude (Python int.bit_count).
 # Must agree on every engine and across the Int/BigInt boundary.
 

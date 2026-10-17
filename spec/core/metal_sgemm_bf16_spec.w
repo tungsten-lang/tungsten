@@ -1,3 +1,4 @@
+# spec: compiled
 # metal_sgemm_bf16 — bf16-input / fp32-accumulator Metal matmul (core/metal_sgemm_bf16.w).
 #
 # METAL LANE, COMPILED ONLY. Importing the module builds two pipelines at load

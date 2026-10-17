@@ -1,3 +1,4 @@
+# spec: compiled slow -- interpreter: no block given
 # Corona formulas solved by wassat and refutations checked by wrat: the
 # end-to-end route a Heesch-number certificate takes.
 # Run:

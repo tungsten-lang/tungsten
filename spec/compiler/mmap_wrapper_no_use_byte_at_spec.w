@@ -1,3 +1,4 @@
+# spec: skip -- compiled: clang: error: linker command failed with exit code 1 (use -v to see invocation); interpreter: Unsupported ccall 'w_mwr_fixture' in interpreter
 # byte_at-only opaque boundary pins retained native dispatch and its dedicated
 # missing-argument fatal surface without loading the Mmap source class.
 m = ccall("w_mwr_fixture", 64)

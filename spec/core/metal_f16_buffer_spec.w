@@ -1,3 +1,4 @@
+# spec: metal
 # P2.3 smoke: half/f16 input buffer in @gpu kernel. Reads f16, writes
 # f32 (free promotion in MSL). Compile with `--ll` so the .metal
 # sidecar lands next to the .w.

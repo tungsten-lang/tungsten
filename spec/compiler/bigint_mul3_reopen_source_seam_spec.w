@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: fails check 'three-by-three reopened dispatch'
 # The distinct positive three-by-three route preserves an open-world BigInt#*
 # replacement at both the ordinary and dedicated source seams.
 

@@ -1,3 +1,4 @@
+# spec: compiled
 # Constructor inline cache vs nested construction: Outer's init constructs
 # an Inner. The ctor IC must publish OUTER's init under Outer's call-site
 # key — publishing whatever init a NESTED `.new` selected (the TLS slot is

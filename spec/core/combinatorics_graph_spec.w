@@ -1,3 +1,4 @@
+# spec: compiled
 # FiniteSimpleGraph and the bounded Ramsey audit
 # (core/combinatorics/graph.w), against graphs whose invariants are known:
 # complete graphs, paths, stars, cycles, complete bipartite graphs and the

@@ -1,3 +1,4 @@
+# spec: compiled
 # Full BigInt bitwise support must link independently of the BigInt class.
 # Every heap integer enters through an opaque C boundary, and this file uses
 # only infix operators: there is no BigInt name, large integer literal,

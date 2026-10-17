@@ -4,20 +4,24 @@ Runnable Tungsten specs use the `*_spec.w` suffix. Keep files self-checking:
 they should print failures clearly and exit nonzero when a guarded behavior
 breaks.
 
-Every tracked `spec/**/*_spec.w` must be classified in `scripts/spec-lanes.sh`
-as a default lane (`compiled`, `interpreter`, CUDA/WGSL emit, or CUDA-reject),
-an existing opt-in gate (`core`, `metal`, `api`), or an explicit `exclude`.
-An unclassified tracked spec fails `scripts/test-specs.sh` and
-`scripts/spec-lanes.sh` the same way an unclassified bit spec fails. Discovery
-uses `git ls-files`, so an uncommitted scratch spec does not change the suite.
+A tracked `spec/**/*_spec.w` runs compiled and interpreted unless its folder
+or its own header says otherwise. `spec/parity/` specs run through the
+cross-engine transcript diff in `scripts/parity.sh`, and `spec/api/` specs run
+with `RUN_API_SPECS=1`. To change where a spec runs, put a `# spec:` line in
+its top comment block, such as `# spec: compiled -- why` or
+`# spec: skip -- why`. The full list of words is at the top of
+`scripts/spec-lanes.sh`, and `scripts/spec-lanes.sh --print-skips` lists every
+skipped spec with its reason. A malformed header fails `scripts/test-specs.sh`
+and `scripts/spec-lanes.sh`. Discovery uses `git ls-files`, so an uncommitted
+scratch spec does not change the suite.
 
 - `compiler/` - compiler and lowering regressions. Includes emit-only GPU
   dialect checks (e.g. `gpu_cuda_emit_spec.w`), which need no hardware.
 - `core/` - language, core runtime, and standard-library regressions.
   Language smoke specs (`basics_`, `control_flow_`, `classes_`,
   `arrays_hashes_`) run in the default compiled set. Heavier runtime specs
-  (ByteArray, mmap) need `RUN_CORE_SPECS=1`. `metal_*_spec.w` specs require
-  Apple Metal and are opt-in in the shell runner.
+  (ByteArray, mmap) carry `# spec: core` and need `RUN_CORE_SPECS=1`. Specs
+  tagged `# spec: metal` require Apple Metal and are opt-in in the shell runner.
 - `interpreter/` - specs that must run through `bin/tungsten run`.
 - `numeric/` - numeric tower and floating-point behavior specs.
 - `repl/` - PTY/system specs for the compiled REPL.

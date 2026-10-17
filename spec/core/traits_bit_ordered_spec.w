@@ -1,3 +1,4 @@
+# spec: compiled
 # BitOrdered trait (core/traits/bit_ordered.w): a class whose i64
 # `wvalue_bits` order IS its value order gets <=>, <, <=, >, >= from the
 # trait (nil <=> across classes), and — because the trait composes

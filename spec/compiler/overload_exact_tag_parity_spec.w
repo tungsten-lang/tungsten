@@ -1,3 +1,4 @@
+# spec: fast
 # Engine-parity spec for the exact-tag overload gate and its
 # HAND-COPIED interpreter mirror.
 #

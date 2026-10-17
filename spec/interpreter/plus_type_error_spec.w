@@ -1,3 +1,4 @@
+# spec: skip -- compiled: compile+run spec/interpreter/plus_type_error_spec.w; interpreter: interpret spec/interpreter/plus_type_error_spec.w
 # Interpreter parity for strict `+`: "5" + 3 and 5 + "3" raise a
 # TypeError instead of coercing. The interpreter's raise machinery is
 # string-based, so the rescued value is the "TypeError: ..." message.

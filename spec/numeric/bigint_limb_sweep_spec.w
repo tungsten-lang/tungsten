@@ -1,3 +1,4 @@
+# spec: fast
 # Limb-count sweep 1..64 through abs, neg, +, -, <<, >> with a to_s/from_s
 # round-trip at every width. The benchmark matrix's DEFAULT_SIZES jumps
 # 16 -> 24 -> 32, so 17..23 — exactly where hybrid capacity classes diverge

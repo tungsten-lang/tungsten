@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: fails check 'two-by-two reopened dispatch'
 # The distinct positive two-by-two route enters the ordinary BigInt#* source
 # seam first, so an open-world replacement remains observable. Closed-world
 # programs reject this reopen before lowering.

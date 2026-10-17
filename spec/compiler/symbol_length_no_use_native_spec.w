@@ -1,3 +1,4 @@
+# spec: skip -- compiled: clang: error: linker command failed with exit code 1 (use -v to see invocation); interpreter: Unsupported ccall 'w_strlen_fixture' in interpreter
 # Independent length-name gate for an unknown heap Symbol with embedded NUL.
 -> probe(value)
   value.length

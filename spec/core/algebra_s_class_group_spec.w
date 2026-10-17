@@ -1,3 +1,4 @@
+# spec: compiled slow
 # Unconditional S-class-group 2-torsion certificates.
 
 use algebra

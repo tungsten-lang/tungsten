@@ -1,3 +1,4 @@
+# spec: compiled
 # A method containing a `return` inside a block uses one setjmp/catch/exit
 # funnel. Recycle cleanup must still be path-sensitive: the non-local transfer
 # unwinds parent and block allocations at runtime, normal returns clean their

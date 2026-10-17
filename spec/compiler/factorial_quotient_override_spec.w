@@ -1,3 +1,4 @@
+# spec: compiled
 # A source override must disable cancellation, including the equal-bound fold.
 $factorial_calls = 0
 + Int

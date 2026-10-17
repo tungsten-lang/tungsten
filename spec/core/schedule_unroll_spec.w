@@ -1,3 +1,4 @@
+# spec: metal
 # @schedule unroll smoke — the schedule language end-to-end.
 #
 # scale4 doubles 4 elements per thread inside a while loop whose

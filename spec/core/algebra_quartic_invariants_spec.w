@@ -1,3 +1,4 @@
+# spec: compiled slow -- interpreter: no block given
 # Exact Macaulay-resultant and ternary-quartic discriminant regressions.
 # Run in both engines:
 #   bin/tungsten run spec/core/algebra_quartic_invariants_spec.w

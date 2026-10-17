@@ -1,3 +1,4 @@
+# spec: compiled
 # No explicit use: File.mmap must register Mmap's source-backed size method
 # after the native IC is removed. The direct native-return form has a separate
 # spec so neither whole-AST trigger can mask the other.

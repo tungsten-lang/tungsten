@@ -1,3 +1,4 @@
+# spec: compiled
 # Constructor protocol: `.new` with arguments requires a constructor.
 #
 # `-> new(...)` IS Tungsten's constructor (spec 5.3.1). `init` and

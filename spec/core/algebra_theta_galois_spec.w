@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: did not finish in 600 s on a loaded machine
 # Exact replay of the finite shell-width theta subgroup candidates.
 
 use algebra

@@ -1,3 +1,4 @@
+# spec: compiled
 # String#to_i promotes past i64 instead of saturating.
 #
 # Regression for the 2026-07-22 fix: the strtoll-based parse returned

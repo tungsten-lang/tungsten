@@ -1,3 +1,4 @@
+# spec: compiled
 # Consumed BigInt bitwise compound assignment. These literal-seeded locals
 # satisfy the compiler's liveness proof and therefore exercise the stable
 # preserve_most source seams in emitted IR. The value checks also pin language

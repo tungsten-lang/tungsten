@@ -1,3 +1,4 @@
+# spec: compiled
 # The discrete skeleton of "The (3,4,oo) modular family of 2-tori, completed
 # at its three special points, is a complex structure on S^6"
 # (https://alpo.ge/s6.pdf): the rank-four lattice representation of the

@@ -1,3 +1,4 @@
+# spec: compiled
 # Focused regression coverage for raw_int_candidate_map's monotone
 # fixed-point pruning.  The analyzer starts by assuming every untyped local
 # assignment is machine-int-shaped, then repeatedly removes invalid candidates

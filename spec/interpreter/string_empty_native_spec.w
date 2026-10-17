@@ -1,3 +1,4 @@
+# spec: interpreter
 # Tree-walker parity for the source-only String/Symbol#empty? method. Ropes
 # must be flattened before `$value` reaches the source body, just as compiled
 # cached dispatch does.

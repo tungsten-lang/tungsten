@@ -1,3 +1,4 @@
+# spec: fast
 -> check(name, got, want)
   if got == want
     << "PASS " + name

@@ -1,3 +1,4 @@
+# spec: compiled fast
 # Dogfood for floating-point math modes (strict / precise / fast) and the
 # `@strictmath` / `@fastmath` scoped block overrides.
 #

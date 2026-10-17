@@ -1,3 +1,4 @@
+# spec: compiled
 # Assignment (core/combinatorics/assignment.w): exact min-cost assignment with an
 # LP-duality optimality certificate, checked against brute force over all permutations.
 

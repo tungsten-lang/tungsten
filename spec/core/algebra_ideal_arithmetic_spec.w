@@ -1,3 +1,4 @@
+# spec: compiled slow
 # Canonical integral ideal arithmetic and certified Hermite normal forms.
 
 use algebra

@@ -1,3 +1,4 @@
+# spec: skip -- Metal hardware spec that was never in the metal lane; not run on hardware yet
 # End-to-end smoke for offline `.metallib` loading. The test driver compiles
 # `metal_metallib_spec.metal` once and passes its path as argv[0].
 

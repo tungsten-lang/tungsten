@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: Unsupported ccall_nobox 'w_bigint_alloc_hot16_raw' in interpreter
 # Compiled-only direct native/C differential for the exact mul@5 outer leaf.
 
 + BigInt

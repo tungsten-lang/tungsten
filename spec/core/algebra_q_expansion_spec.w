@@ -1,3 +1,4 @@
+# spec: slow
 # Exact q-expansion arithmetic and classical level-one modular forms.
 
 use algebra

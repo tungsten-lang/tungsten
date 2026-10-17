@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: undefined method 'numerator' for 7/3
 # Round-2 item 12: under LOCK_THE_DOORS! declared Rational and Date
 # receivers (dispatch keys without an inline-cache table) take the same
 # tag-guarded direct call BigInt does. (Instant and Char are covered by the

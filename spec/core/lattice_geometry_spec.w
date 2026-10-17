@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: unhandled exception: undefined method 'size' for 0 (int 0xfffa000000000000)
 # Lattice symmetry groups, animals in three lattices, dimer coverings,
 # digital geometry, and the plane symmetry classifications.
 #   bin/tungsten run spec/core/lattice_geometry_spec.w

@@ -1,3 +1,4 @@
+# spec: compiled slow -- interpreter: Dedekind local certificate failed
 # Certified prime decomposition in maximal orders and finite etale products.
 #
 # Run in the interpreter and native compiler.  The identities cover inert,

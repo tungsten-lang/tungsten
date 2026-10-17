@@ -1,3 +1,4 @@
+# spec: fast
 # B6: one-way disjointness of the bigint source-op seam.
 #
 # `w_add`/`w_sub`/`w_mul` admit a pair into the migrated source bodies via

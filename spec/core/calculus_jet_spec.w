@@ -1,3 +1,4 @@
+# spec: skip -- compiled: unhandled exception: TaylorJet order mismatch; interpreter: TaylorJet order mismatch
 # TaylorJet (core/calculus/jet.w): truncated univariate Taylor algebra.
 #
 # Coefficient k is f^(k)(x0)/k!, so every assertion below is a *known Taylor

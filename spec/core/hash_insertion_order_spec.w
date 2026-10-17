@@ -1,3 +1,4 @@
+# spec: compiled
 # Hash iteration order is insertion order — a guaranteed language semantic,
 # identical across the native runtime, the C VM stage-0 host, and the Ruby
 # tree-walker. Overwrites keep a key's position; a deleted-then-reinserted

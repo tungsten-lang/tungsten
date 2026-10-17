@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: no block given
 # Resultants and discriminants with respect to one variable in any arity.
 
 use core/algebra/field

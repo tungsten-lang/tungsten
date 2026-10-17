@@ -1,3 +1,4 @@
+# spec: skip -- compiled: Could not load 'core/string_native' (resolved to 'spec/compiler/core/string_native.w'); interpreter: use: cannot load 'core/string_native' (resolved to spec/compiler/core/string_native.w, from spec/compiler/stri
 use core/string_native
 
 + AtomicIdentityFacade

@@ -1,3 +1,4 @@
+# spec: compiled slow -- interpreter: no block given
 # Multivariate factorization over finite fields (Hensel lifting) regressions.
 # Run both ways:
 #   bin/tungsten run spec/core/algebra_polynomial_factor_multivariate_spec.w

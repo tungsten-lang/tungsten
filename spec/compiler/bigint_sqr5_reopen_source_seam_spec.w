@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: fails check 'five-limb square reopened dispatch'
 # The five-limb square route enters the ordinary BigInt#* source seam first,
 # so an open-world replacement remains observable. Closed-world programs
 # reject this reopen before lowering.

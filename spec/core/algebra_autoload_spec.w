@@ -1,3 +1,4 @@
+# spec: compiled slow
 # Public algebra names are discoverable through core/tungsten's autoload table.
 # This file deliberately does not say `use algebra`: the object API should
 # autoload, while mathematical source rewriting remains an explicit feature.

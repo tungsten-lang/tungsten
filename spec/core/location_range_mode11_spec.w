@@ -1,3 +1,4 @@
+# spec: skip -- compiled: fails check 'location.range_mode11_fid'; interpreter: Unsupported ccall 'w_location_range_w' in interpreter
 # Location mode 11 Range spec.
 # Tests inline location range encoding (file_id, start_offset, length).
 

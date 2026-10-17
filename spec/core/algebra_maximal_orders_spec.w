@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: no block given
 # Degree-generic Pohst-Zassenhaus Round 2 maximal orders.
 #
 # Run both ways:

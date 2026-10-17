@@ -1,3 +1,4 @@
+# spec: compiled slow
 # Exact arithmetic and replayable operation certificates for real algebraic
 # numbers. Run in interpreter and native engines.
 

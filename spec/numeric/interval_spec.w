@@ -1,3 +1,4 @@
+# spec: compiled
 # Interval arithmetic sign-partition regression.
 #
 # Multiplication has nine endpoint-sign combinations. Eight need only two

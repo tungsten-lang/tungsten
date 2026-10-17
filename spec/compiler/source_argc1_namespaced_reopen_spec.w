@@ -1,3 +1,4 @@
+# spec: skip -- scripts/test-source-argc1-exact-ivar.sh runs it
 in ProofNamespace
 
 + Target

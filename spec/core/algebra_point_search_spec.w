@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: no block given
 # Certified rational-point search for monotone plane quartics.
 #
 # Default regression (tree-walking interpreter and native compiler):

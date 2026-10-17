@@ -1,3 +1,4 @@
+# spec: fast
 # Host-parity spec for typed-overload selection (B1 / verification 7).
 #
 # The same source must select the same arms on every host that executes

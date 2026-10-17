@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: no block given
 # Exact finite local normalization packets and geometric branch counts.
 
 use algebra

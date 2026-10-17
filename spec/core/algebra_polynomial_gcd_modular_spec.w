@@ -1,3 +1,4 @@
+# spec: compiled slow -- interpreter: did not finish in 600 s on a loaded machine
 # Modular multivariate GCD over finite fields.
 
 use algebra

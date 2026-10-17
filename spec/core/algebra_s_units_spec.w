@@ -1,3 +1,4 @@
+# spec: compiled slow
 # Exact archimedean places and replay-certified S-unit square classes.
 
 use algebra

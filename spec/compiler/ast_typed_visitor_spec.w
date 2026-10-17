@@ -1,3 +1,4 @@
+# spec: compiled
 use ../../compiler/lib/ast
 
 -> check(name, got, expected)

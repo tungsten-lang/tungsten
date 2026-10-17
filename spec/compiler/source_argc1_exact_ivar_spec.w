@@ -1,3 +1,4 @@
+# spec: compiled
 + ExactArgcOneProbe
   -> get(index)
     index + 100

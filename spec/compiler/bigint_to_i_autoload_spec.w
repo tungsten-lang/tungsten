@@ -1,3 +1,4 @@
+# spec: compiled
 # BigInt#to_i is source-only. Heap integers must autoload BigInt without an
 # explicit core import and preserve the exact receiver allocation/bit pattern.
 

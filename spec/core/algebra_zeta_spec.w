@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: no block given
 # Exact finite-curve and zeta-function regressions for the shell-width
 # quartic. These values are independently reproduced by
 # /Users/erik/math/shell_width_remaining_canonical.py.

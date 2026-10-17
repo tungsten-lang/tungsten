@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: fails check 'sixteen-limb square reopened dispatch'
 # The sixteen-limb square route preserves an open-world BigInt#* replacement.
 
 -> check(label, got, expected)

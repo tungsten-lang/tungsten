@@ -1,3 +1,4 @@
+# spec: compiled
 # metal_sgemm — Tungsten-native tiled Metal matmul (core/metal_sgemm.w).
 #
 # METAL LANE, COMPILED ONLY. `use core/metal_sgemm` compiles and caches the

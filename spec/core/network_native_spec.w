@@ -1,3 +1,4 @@
+# spec: compiled
 # Native WNetAddr field access and source-defined IPv6/MAC behavior.
 
 -> check(name, got, want)

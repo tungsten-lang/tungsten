@@ -1,3 +1,4 @@
+# spec: compiled
 # Raw machine helpers must preserve their annotated ABI through explicit early
 # returns, cross-width casts, reassigned locals, and nested helper calls.
 

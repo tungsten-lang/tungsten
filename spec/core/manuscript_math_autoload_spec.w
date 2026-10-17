@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: no block given
 # Public autoloads for the manuscript-derived math models.  Deliberately no
 # feature-level `use`: each class must resolve through core/tungsten.w.
 

@@ -1,3 +1,4 @@
+# spec: compiled -- interpreter: fails check 'minimum_heap.value got 0 want 79228162514264337593543950336'
 # Pointer-identical one-limb BigInt squaring. On macOS ARM64 this is the
 # exact native Tungsten port of bigint_mul_positive_11's square arm.
 

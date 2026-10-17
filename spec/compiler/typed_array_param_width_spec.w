@@ -1,3 +1,4 @@
+# spec: compiled
 # Regression: a typed-array parameter's element WIDTH must be enforced across
 # the native-fn boundary.
 #

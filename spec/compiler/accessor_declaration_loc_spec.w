@@ -1,3 +1,4 @@
+# spec: compiled
 # Accessor methods synthesized from `ro` / `rw` declarations — a class-body
 # `ro :a, :b`, `rw :c`, or the constructor's trailing marker — must carry the
 # declaring line as their source location. They used to be built without a

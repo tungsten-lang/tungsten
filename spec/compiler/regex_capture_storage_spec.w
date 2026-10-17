@@ -1,3 +1,4 @@
+# spec: compiled
 # Literal-regex captures are dynamically sized; indices above nine must not be
 # truncated by the lexer or native runtime. A failed match clears prior TLS
 # captures on the same thread.

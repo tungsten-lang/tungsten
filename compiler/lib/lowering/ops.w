@@ -1569,7 +1569,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   if asts != nil
     asts.keys().each -> (k)
       if k.starts_with?(prefix)
-        if !definition_from_core?(asts[k])
+        if !definition_from_core?(asts[k]) && ast_get(asts[k], :overload_dispatcher) != true
           untouched = false
   cache[key] = untouched
   untouched
@@ -2482,9 +2482,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # `/` and `%` join: their seams route the whole positive 2n/n and 1-limb
   # divisor shapes natively and have no one-limb C-favored arm to protect.
   declared_bigint_op = op in (:PLUS :SLASH :PERCENT)
-  # `-` default OFF: the guarded route helps sub@1 but loses sub@2..64
-  # (r2 isolation). Opt in with TUNGSTEN_BIGINT_DECLARED_MINUS=1.
-  if !declared_bigint_op && op == :MINUS && env("TUNGSTEN_BIGINT_DECLARED_MINUS") == "1"
+  if !declared_bigint_op && op == :MINUS && env("TUNGSTEN_BIGINT_DECLARED_MINUS") != "0"
     declared_bigint_op = true
   if !declared_bigint_op && op in (:AMPERSAND :PIPE :CARET) && env("TUNGSTEN_BIGINT_DECLARED_BITWISE") != "0"
     declared_bigint_op = true
@@ -2862,7 +2860,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # limb kernels. Both operands are guarded (the slot may hold a demoted
   # int; the count may have promoted), and the slow arm is the ordinary
   # helper. Skipped when the program reopened BigInt#<< / #>>.
-  if op in (:LSHIFT :RSHIFT) && !bidir_mut && (lt == :BigInt || is_bigint_type(lt)) && env("TUNGSTEN_BIGINT_TYPED_SHIFT") == "1" && core_operator_untouched?(ctx[:mod], "BigInt", op == :LSHIFT ? "<<" : ">>")
+  if op in (:LSHIFT :RSHIFT) && !bidir_mut && (lt == :BigInt || is_bigint_type(lt)) && env("TUNGSTEN_BIGINT_TYPED_SHIFT") != "0" && core_operator_untouched?(ctx[:mod], "BigInt", op == :LSHIFT ? "<<" : ">>")
     sh_entry = overload_exact_tag_entry("BigInt")
     sh_m1 = next_temp(wfn)
     emit_wire_and_i64(wfn, lhs_reg, sh_entry[:mask], sh_m1)

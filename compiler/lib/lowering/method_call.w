@@ -185,24 +185,12 @@
     site_id = next_call_site_id(ctx[:mod])
   fast = next_temp(wfn)
   if intrinsic
-    # Both operands are guard-proven heap BigInts: one magnitude compare,
-    # then the sign boxed inline (int tag | sign & 2^48-1).
+    # Both operands are guard-proven heap BigInts: __w_bigint_compare_src
+    # already returns -1, 0, or 1, so box it inline (int tag | raw & 2^48-1).
     cmp_raw = next_temp(wfn)
     emit_wire_call_direct_i64(wfn, nil, args, nil, site_id, "__w_bigint_compare_src", node.col, node.line, cmp_raw)
-    cmp_zero = next_temp(wfn)
-    emit_wire_and_i64(wfn, cmp_raw, "0", cmp_zero)
-    cmp_gt = next_temp(wfn)
-    emit_wire_icmp_i64(wfn, cmp_raw, "sgt", "0", cmp_gt)
-    cmp_lt = next_temp(wfn)
-    emit_wire_icmp_i64(wfn, cmp_raw, "slt", "0", cmp_lt)
-    cmp_pos = next_temp(wfn)
-    emit_wire_select_i64(wfn, cmp_gt, cmp_zero, cmp_pos, "1")
-    cmp_neg = next_temp(wfn)
-    emit_wire_select_i64(wfn, cmp_lt, cmp_zero, cmp_neg, "-1")
-    cmp_sgn = next_temp(wfn)
-    emit_wire_add_i64(wfn, cmp_pos, cmp_neg, cmp_sgn)
     cmp_masked = next_temp(wfn)
-    emit_wire_and_i64(wfn, cmp_sgn, "281474976710655", cmp_masked)
+    emit_wire_and_i64(wfn, cmp_raw, "281474976710655", cmp_masked)
     emit_wire_xor_i64(wfn, cmp_masked, "-1688849860263936", fast)
   elsif core_fn == "w_bigint_abs_alias"
     emit_wire_call_direct_i64(wfn, nil, [receiver_reg], nil, site_id, core_fn, node.col, node.line, fast)

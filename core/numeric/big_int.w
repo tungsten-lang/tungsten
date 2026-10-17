@@ -5729,8 +5729,8 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
   -> *(other)(BigInt)
     an = (($value >> 47) & 1) == 1 ? 0 - $size : $size
     bn = ((other$value >> 47) & 1) == 1 ? 0 - other$size : other$size
-    am = an < 0 ? 0 - an : an
-    bm = bn < 0 ? 0 - bn : bn
+    am = $size < 0 ? 0 - $size : $size
+    bm = other$size < 0 ? 0 - other$size : other$size
 
     on macos && arm64
       # Exact C-shaped pointer-identical four-limb square. Preserve the
@@ -5761,66 +5761,67 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
           return wvalue_from_bits(
             __bigint_mul1_1_raw($value ## i64, other$value ## i64)
           )
-        # Exact C-shaped positive 1x1 leaf. Keep its selector behind the
-        # pre-existing out-of-band test so every multi-limb shape retains
-        # its prior hot path. Pointer-identical squaring and signed neighbors
-        # remain on C.
-        if an == 1 && bn == 1 && $value != other$value
-          return wvalue_from_bits(
-            __bigint_mul1_1_raw($value ## i64, other$value ## i64)
-          )
-        if (an == 2 && bn == 1) || (an == 1 && bn == 2)
-          return wvalue_from_bits(
-            __bigint_mul1_2_raw($value ## i64, other$value ## i64)
-          )
-        if (an == 3 && bn == 1) || (an == 1 && bn == 3)
-          return wvalue_from_bits(
-            __bigint_mul1_3_raw($value ## i64, other$value ## i64)
-          )
-        if (an == 4 && bn == 1) || (an == 1 && bn == 4)
-          return wvalue_from_bits(
-            __bigint_mul1_4_raw($value ## i64, other$value ## i64)
-          )
-        if (an == 5 && bn == 1) || (an == 1 && bn == 5)
-          return wvalue_from_bits(
-            __bigint_mul1_5_raw($value ## i64, other$value ## i64)
-          )
-        if (an == 6 && bn == 1) || (an == 1 && bn == 6)
-          return wvalue_from_bits(
-            __bigint_mul1_6_raw($value ## i64, other$value ## i64)
-          )
-        if (an == 7 && bn == 1) || (an == 1 && bn == 7)
-          return wvalue_from_bits(
-            __bigint_mul1_7_raw($value ## i64, other$value ## i64)
-          )
-        if (an == 8 && bn == 1) || (an == 1 && bn == 8)
-          return wvalue_from_bits(
-            __bigint_mul1_8_raw($value ## i64, other$value ## i64)
-          )
-        if (an == 16 && bn == 1) || (an == 1 && bn == 16)
-          return wvalue_from_bits(
-            __bigint_mul1_16_raw($value ## i64, other$value ## i64)
-          )
-        if (an == 24 && bn == 1) || (an == 1 && bn == 24)
-          return wvalue_from_bits(
-            __bigint_mul1_24_raw($value ## i64, other$value ## i64)
-          )
-        if (an == 32 && bn == 1) || (an == 1 && bn == 32)
-          return wvalue_from_bits(
-            __bigint_mul1_32_raw($value ## i64, other$value ## i64)
-          )
-        if (an == 40 && bn == 1) || (an == 1 && bn == 40)
-          return wvalue_from_bits(
-            __bigint_mul1_40_raw($value ## i64, other$value ## i64)
-          )
-        if (an == 48 && bn == 1) || (an == 1 && bn == 48)
-          return wvalue_from_bits(
-            __bigint_mul1_48_raw($value ## i64, other$value ## i64)
-          )
-        if (an == 64 && bn == 1) || (an == 1 && bn == 64)
-          return wvalue_from_bits(
-            __bigint_mul1_64_raw($value ## i64, other$value ## i64)
-          )
+        # Exact C-shaped positive 1x1 and Nx1 leaves. Gate on positive
+        # one-limb once, then switch on `an + bn` instead of cascading 14
+        # two-way width branches.
+        if an > 0 && bn > 0 && (an == 1 || bn == 1)
+          case an + bn
+          when 2
+            return wvalue_from_bits(
+              __bigint_mul1_1_raw($value ## i64, other$value ## i64)
+            )
+          when 3
+            return wvalue_from_bits(
+              __bigint_mul1_2_raw($value ## i64, other$value ## i64)
+            )
+          when 4
+            return wvalue_from_bits(
+              __bigint_mul1_3_raw($value ## i64, other$value ## i64)
+            )
+          when 5
+            return wvalue_from_bits(
+              __bigint_mul1_4_raw($value ## i64, other$value ## i64)
+            )
+          when 6
+            return wvalue_from_bits(
+              __bigint_mul1_5_raw($value ## i64, other$value ## i64)
+            )
+          when 7
+            return wvalue_from_bits(
+              __bigint_mul1_6_raw($value ## i64, other$value ## i64)
+            )
+          when 8
+            return wvalue_from_bits(
+              __bigint_mul1_7_raw($value ## i64, other$value ## i64)
+            )
+          when 9
+            return wvalue_from_bits(
+              __bigint_mul1_8_raw($value ## i64, other$value ## i64)
+            )
+          when 17
+            return wvalue_from_bits(
+              __bigint_mul1_16_raw($value ## i64, other$value ## i64)
+            )
+          when 25
+            return wvalue_from_bits(
+              __bigint_mul1_24_raw($value ## i64, other$value ## i64)
+            )
+          when 33
+            return wvalue_from_bits(
+              __bigint_mul1_32_raw($value ## i64, other$value ## i64)
+            )
+          when 41
+            return wvalue_from_bits(
+              __bigint_mul1_40_raw($value ## i64, other$value ## i64)
+            )
+          when 49
+            return wvalue_from_bits(
+              __bigint_mul1_48_raw($value ## i64, other$value ## i64)
+            )
+          when 65
+            return wvalue_from_bits(
+              __bigint_mul1_64_raw($value ## i64, other$value ## i64)
+            )
       return ccall("w_bigint_mul_builtin_exact", self, other)
     on macos && arm64
       # Exact C-shaped pointer-identical five-limb square. Place this new
@@ -6368,7 +6369,8 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
     # A negative left-shift count is an arithmetic right shift. If that
     # count covers the full magnitude, complete it from header metadata as
     # inline 0/-1 without reading a limb or entering the C shift kernel.
-    n = $size ## i64
+    raw_size = $size ## i64
+    n = raw_size
     flip = (($value >> 47) & 1) ## i64
     if flip == 1
       n = 0 - n
@@ -6378,9 +6380,7 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
       return ccall("w_bigint_mark_shared_value", self)
     if k < 0
       right_count = 0 - k
-      magnitude_limbs = n
-      if magnitude_limbs < 0
-        magnitude_limbs = 0 - magnitude_limbs
+      magnitude_limbs = raw_size < 0 ? 0 - raw_size : raw_size
       if right_count >= magnitude_limbs * 64
         int_tag = -1688849860263936 ## i64
         if n < 0
@@ -6418,7 +6418,8 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
     # limb. The one-limb arm is one load, one logical shift, and direct
     # NaN-boxing. The runtime seam admits exactly these subsets; explicit
     # sends repeat the guards here before taking them.
-    n = $size ## i64
+    raw_size = $size ## i64
+    n = raw_size
     flip = (($value >> 47) & 1) ## i64
     if flip == 1
       n = 0 - n
@@ -6426,9 +6427,7 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
     k = (k_payload - ((k_payload >> 47) << 48)) ## i64
     if k == 0
       return ccall("w_bigint_mark_shared_value", self)
-    magnitude_limbs = n
-    if magnitude_limbs < 0
-      magnitude_limbs = 0 - magnitude_limbs
+    magnitude_limbs = raw_size < 0 ? 0 - raw_size : raw_size
     int_tag = -1688849860263936 ## i64
     if k > 0
       if k >= magnitude_limbs * 64

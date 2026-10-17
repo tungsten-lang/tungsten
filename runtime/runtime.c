@@ -1031,6 +1031,12 @@ static inline int bigint_pool_bucket(uint32_t cap) {
     return cap > 1 ? 31 - __builtin_clz(cap) : 0;
 }
 
+static inline uint8_t bigint_pool_bucket_byte(uint32_t cap) {
+    return (cap > 0 && cap <= BN_BIGINT_POOL_MAX_CAP)
+               ? (uint8_t)bigint_pool_bucket(cap)
+               : 0xFFu;
+}
+
 static WBigint *bigint_pool_take(uint32_t min_cap) {
     WBigintPool *pool = &bigint_pool_state;
     if (min_cap > BN_BIGINT_POOL_MAX_CAP) return NULL;
@@ -1057,7 +1063,7 @@ static WBigint *bigint_pool_take(uint32_t min_cap) {
     }
     int hot_bucket =
         hot_word != 0 && bigint_hot_capacity(hot_word) >= min_cap
-            ? bigint_pool_bucket(bigint_hot_capacity(hot_word))
+            ? (int)hot->_pad[1]
             : BN_BIGINT_POOL_BUCKETS;
 #endif
     int first = bigint_pool_bucket(min_cap);
@@ -1111,7 +1117,7 @@ static WBigint *bigint_pool_take(uint32_t min_cap) {
     }
     int hot_bucket =
         hot_word != 0 && bigint_hot_capacity(hot_word) >= min_cap
-            ? bigint_pool_bucket(bigint_hot_capacity(hot_word))
+            ? (int)hot->_pad[1]
             : BN_BIGINT_POOL_BUCKETS;
 #endif
     int first = min_cap > 1 ? 32 - __builtin_clz(min_cap - 1) : 0;
@@ -1175,12 +1181,11 @@ static WBigint *bigint_pool_take(uint32_t min_cap) {
  * become the recurrent hot buffer. */
 static void bigint_release_cold(WBigint *b) {
     WBigintPool *pool = &bigint_pool_state;
-    uint32_t cap = b->cap;
-    if (cap == 0 || cap > BN_BIGINT_POOL_MAX_CAP) {
+    uint8_t bucket = b->_pad[1];
+    if (__builtin_expect(bucket >= BN_BIGINT_POOL_BUCKETS, 0)) {
         bigint_backing_free(b);
         return;
     }
-    int bucket = bigint_pool_bucket(cap);
     int count = pool->count[bucket];
     if (count >= BN_BIGINT_POOL_PER_BUCKET) {
         bigint_backing_free(b);
@@ -1413,6 +1418,10 @@ static void bigint_pool_release_thread(void) {
     pool->total = 0;
 }
 #else
+static inline uint8_t bigint_pool_bucket_byte(uint32_t cap) {
+    (void)cap;
+    return 0xFFu;
+}
 static inline WBigint *bigint_pool_take(uint32_t min_cap) {
     (void)min_cap;
     return NULL;
@@ -1500,6 +1509,7 @@ static WBigint *bigint_alloc(int32_t cap) {
      * each with several live — die with the size instead of NULL-deref. */
     if (!b) dief("out of memory allocating bigint (%u limbs)", alloc_cap);
     b->type = W_TYPE_BIGINT;  /* live allocation marker; dispatch uses the object subtag */
+    b->_pad[1] = bigint_pool_bucket_byte(alloc_cap);
     b->cap = alloc_cap;
     b->size = 0;
     return b;
@@ -1531,11 +1541,13 @@ static WBigint *bigint_alloc_raw(int32_t cap) {
 #if BN_BIGINT_ARENA_ACTIVE
     b->_pad[0] = BN_BIGINT_SRC_MALLOC;  /* fresh malloc: pads are garbage */
 #endif
+    b->_pad[1] = bigint_pool_bucket_byte(alloc_cap);
     b->size = 0;
     b->cap = alloc_cap;
 #else
     memset(b, 0, sizeof(WBigint));      /* zeroed pads = BN_BIGINT_SRC_MALLOC */
     b->type = W_TYPE_BIGINT;
+    b->_pad[1] = bigint_pool_bucket_byte(alloc_cap);
     b->cap = alloc_cap;
 #endif
     return b;
@@ -1555,6 +1567,7 @@ static WBigint *bigint_alloc_raw_fresh_capacity(uint32_t alloc_cap) {
 #if BN_BIGINT_ARENA_ACTIVE
     b->_pad[0] = BN_BIGINT_SRC_MALLOC;  /* fresh malloc: pads are garbage */
 #endif
+    b->_pad[1] = bigint_pool_bucket_byte(alloc_cap);
     b->size = 0;
     b->cap = alloc_cap;
     return b;
@@ -1811,7 +1824,7 @@ static void bn_arena_drain_remote(WBigintArena *a, int force) {
         while (head) {
             WBigint *b = (WBigint *)head;
             head = *(uintptr_t *)&b->limbs[0];
-            int bucket = bigint_pool_bucket(b->cap);
+            int bucket = b->_pad[1];
             *(WBigint **)&b->limbs[0] = a->free_head[bucket];
             a->free_head[bucket] = b;
         }
@@ -1862,6 +1875,7 @@ static WBigint *bigint_arena_take(uint32_t alloc_cap, int zero_limbs) {
     b->type = W_TYPE_BIGINT;
     b->shared = 0;
     b->_pad[0] = BN_BIGINT_SRC_ARENA;
+    b->_pad[1] = (uint8_t)bigint_pool_bucket(alloc_cap);
     b->size = 0;
     b->cap = alloc_cap;
     return b;
@@ -1873,7 +1887,7 @@ static void bigint_arena_free(WBigint *b) {
     b->type = 0;
     if (atomic_load_explicit(&c->owner, memory_order_acquire) ==
         (uintptr_t)a) {
-        int bucket = bigint_pool_bucket(b->cap);
+        int bucket = b->_pad[1];
         *(WBigint **)&b->limbs[0] = a->free_head[bucket];
         a->free_head[bucket] = b;
         atomic_fetch_sub_explicit(&c->outstanding, 1u, memory_order_relaxed);
@@ -61767,6 +61781,7 @@ WValue w_string_to_i_direct(WValue r) { return w_ic_string_to_i(r, NULL, 0); }
 WValue w_string_to_f_direct(WValue r) { return w_ic_string_to_f(r, NULL, 0); }
 WValue w_string_to_d_direct(WValue r) { return w_ic_string_to_d(r, NULL, 0); }
 
+__attribute__((always_inline))
 WValue w_bigint_alloc_hot(int64_t cap) {
     int64_t c = cap;
     if (c < 1) c = 1;
@@ -61787,6 +61802,7 @@ int64_t w_bigint_copy_tail_raw(
         n - i);
     return 0;
 }
+__attribute__((always_inline))
 WValue w_bigint_add1_wide_finish_raw(
     WValue v, int64_t length, int64_t carry) {
     if (length < 9 || length > INT32_MAX || (carry != 0 && carry != 1))
@@ -61811,6 +61827,7 @@ WValue w_bigint_add1_wide_finish_raw(
     r->size = n;
     return bigint_box(r);
 }
+__attribute__((always_inline))
 WValue w_bigint_add1_1_finish_raw(uint64_t sum, int64_t carry) {
     if (carry != 0 && carry != 1)
         die("w_bigint_add1_1_finish_raw: carry is not 0/1");
@@ -62274,9 +62291,11 @@ WValue w_bigint_mul1_64_finish_raw(WValue v, uint64_t carry) {
     r->size = 64 + (carry != 0);
     return v;
 }
+__attribute__((always_inline))
 WValue w_bigint_alloc_hot4_raw(void) {
     return bigint_box(bigint_alloc_raw_hot_exact(4U));
 }
+__attribute__((always_inline))
 WValue w_bigint_alloc_hot8_raw(void) {
     return bigint_box(bigint_alloc_raw_hot_exact(8U));
 }
@@ -62319,6 +62338,7 @@ WValue w_bigint_finish_add(WValue v, WValue signed_size) {
     b->size = (int32_t)w_to_i64(signed_size);
     return bigint_finish_mag_add(b);
 }
+__attribute__((always_inline))
 WValue w_bigint_finish_add_raw(WValue v, int64_t signed_size) {
     if (signed_size < INT32_MIN || signed_size > INT32_MAX)
         die("w_bigint_finish_add_raw: signed size is outside i32");
@@ -62326,6 +62346,7 @@ WValue w_bigint_finish_add_raw(WValue v, int64_t signed_size) {
     b->size = (int32_t)signed_size;
     return bigint_finish_mag_add(b);
 }
+__attribute__((always_inline))
 WValue w_bigint_add1_2_finish_raw(WValue v, uint64_t carry) {
     WBigint *r = w_as_bigint(v);
     if (__builtin_expect(carry != 0, 0)) {
@@ -62345,6 +62366,7 @@ WValue w_bigint_add1_2_finish_raw(WValue v, uint64_t carry) {
     r->size = 2;
     return bigint_box(r);
 }
+__attribute__((always_inline))
 WValue w_bigint_add1_3_finish_raw(WValue v, uint64_t carry) {
     WBigint *r = w_as_bigint(v);
     if (__builtin_expect(carry != 0, 0)) {
@@ -62476,6 +62498,7 @@ WValue w_bigint_sub2_equal_finish_raw(uint64_t low, uint64_t high,
     result->size = negative ? -2 : 2;
     return bigint_box(result);
 }
+__attribute__((always_inline))
 WValue w_bigint_add1_4_finish_raw(WValue v, uint64_t carry) {
     WBigint *r = w_as_bigint(v);
     if (__builtin_expect(carry != 0, 0)) {
@@ -62495,6 +62518,7 @@ WValue w_bigint_add1_4_finish_raw(WValue v, uint64_t carry) {
     r->size = 4;
     return bigint_box(r);
 }
+__attribute__((always_inline))
 WValue w_bigint_add1_5_finish_raw(WValue v, uint64_t carry) {
     WBigint *r = w_as_bigint(v);
     if (__builtin_expect(carry != 0, 0)) {
@@ -62514,6 +62538,7 @@ WValue w_bigint_add1_5_finish_raw(WValue v, uint64_t carry) {
     r->size = 5;
     return bigint_box(r);
 }
+__attribute__((always_inline))
 WValue w_bigint_add1_6_finish_raw(WValue v, uint64_t carry) {
     WBigint *r = w_as_bigint(v);
     if (__builtin_expect(carry != 0, 0)) {
@@ -62533,6 +62558,7 @@ WValue w_bigint_add1_6_finish_raw(WValue v, uint64_t carry) {
     r->size = 6;
     return bigint_box(r);
 }
+__attribute__((always_inline))
 WValue w_bigint_add1_7_finish_raw(WValue v, uint64_t carry) {
     WBigint *r = w_as_bigint(v);
     if (__builtin_expect(carry != 0, 0)) {
@@ -62552,6 +62578,7 @@ WValue w_bigint_add1_7_finish_raw(WValue v, uint64_t carry) {
     r->size = 7;
     return bigint_box(r);
 }
+__attribute__((always_inline))
 WValue w_bigint_add1_8_finish_raw(WValue v, uint64_t carry) {
     WBigint *r = w_as_bigint(v);
     if (__builtin_expect(carry != 0, 0)) {
@@ -62571,6 +62598,7 @@ WValue w_bigint_add1_8_finish_raw(WValue v, uint64_t carry) {
     r->size = 8;
     return bigint_box(r);
 }
+__attribute__((always_inline))
 WValue w_bigint_sub1_1_finish_raw(
     uint64_t magnitude, int64_t signed_size) {
     if (signed_size != -1 && signed_size != 1)
@@ -62597,6 +62625,7 @@ WValue w_bigint_sub1_2_finish_raw(WValue v) {
         return bigint_finish_mag_sub(r);
     return bigint_box(r);
 }
+__attribute__((always_inline))
 WValue w_bigint_sub1_3_finish_raw(WValue v) {
     WBigint *r = w_as_bigint(v);
     int32_t rlen = 3 - (r->limbs[2] == 0);
@@ -62605,6 +62634,7 @@ WValue w_bigint_sub1_3_finish_raw(WValue v) {
         return bigint_finish_mag_sub(r);
     return bigint_box(r);
 }
+__attribute__((always_inline))
 WValue w_bigint_sub1_4_finish_raw(WValue v) {
     WBigint *r = w_as_bigint(v);
     int32_t rlen = 4 - (r->limbs[3] == 0);
@@ -62613,6 +62643,7 @@ WValue w_bigint_sub1_4_finish_raw(WValue v) {
         return bigint_finish_mag_sub(r);
     return bigint_box(r);
 }
+__attribute__((always_inline))
 WValue w_bigint_sub1_5_finish_raw(WValue v) {
     WBigint *r = w_as_bigint(v);
     int32_t rlen = 5 - (r->limbs[4] == 0);
@@ -62621,6 +62652,7 @@ WValue w_bigint_sub1_5_finish_raw(WValue v) {
         return bigint_finish_mag_sub(r);
     return bigint_box(r);
 }
+__attribute__((always_inline))
 WValue w_bigint_sub1_6_finish_raw(WValue v) {
     WBigint *r = w_as_bigint(v);
     int32_t rlen = 6 - (r->limbs[5] == 0);
@@ -62629,6 +62661,7 @@ WValue w_bigint_sub1_6_finish_raw(WValue v) {
         return bigint_finish_mag_sub(r);
     return bigint_box(r);
 }
+__attribute__((always_inline))
 WValue w_bigint_sub1_7_finish_raw(WValue v) {
     WBigint *r = w_as_bigint(v);
     int32_t rlen = 7 - (r->limbs[6] == 0);
@@ -62637,6 +62670,7 @@ WValue w_bigint_sub1_7_finish_raw(WValue v) {
         return bigint_finish_mag_sub(r);
     return bigint_box(r);
 }
+__attribute__((always_inline))
 WValue w_bigint_sub1_8_finish_raw(WValue v) {
     WBigint *r = w_as_bigint(v);
     int32_t rlen = 8 - (r->limbs[7] == 0);
@@ -62650,6 +62684,7 @@ WValue w_bigint_finish_sub(WValue v, WValue signed_size) {
     b->size = (int32_t)w_to_i64(signed_size);
     return bigint_finish_mag_sub(b);
 }
+__attribute__((always_inline))
 WValue w_bigint_finish_sub_raw(WValue v, int64_t signed_size) {
     if (signed_size < INT32_MIN || signed_size > INT32_MAX)
         die("w_bigint_finish_sub_raw: signed size is outside i32");
@@ -62691,6 +62726,7 @@ WValue w_bigint_seal(WValue v, WValue signed_size) {
  * result width as a machine i64.  Allocation, canonicalization, demotion,
  * and recycler handoff remain runtime storage policy; the source operation
  * owns every mathematical limb written before this boundary. */
+__attribute__((always_inline))
 WValue w_bigint_seal_raw(WValue v, int64_t signed_size) {
     if (signed_size < INT32_MIN || signed_size > INT32_MAX)
         die("w_bigint_seal_raw: signed size is outside i32");

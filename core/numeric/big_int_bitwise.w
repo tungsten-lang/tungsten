@@ -428,6 +428,78 @@ fn __bigint_bw_and4(rp, ap, bp) (i64 i64 i64) i64
       ret i64 %top
   IR
 
+fn __bigint_bw_or4(rp, ap, bp) (i64 i64 i64) i64
+  ll <<~IR
+    entry:
+      %rq = inttoptr i64 %rp to ptr
+      %aq = inttoptr i64 %ap to ptr
+      %bq = inttoptr i64 %bp to ptr
+      %ag1 = getelementptr inbounds i64, ptr %aq, i64 2
+      %bg1 = getelementptr inbounds i64, ptr %bq, i64 2
+      %rg1 = getelementptr inbounds i64, ptr %rq, i64 2
+      %av0 = load <2 x i64>, ptr %aq, align 8
+      %bv0 = load <2 x i64>, ptr %bq, align 8
+      %av1 = load <2 x i64>, ptr %ag1, align 8
+      %bv1 = load <2 x i64>, ptr %bg1, align 8
+      %rv0 = or <2 x i64> %av0, %bv0
+      %rv1 = or <2 x i64> %av1, %bv1
+      store <2 x i64> %rv0, ptr %rq, align 8
+      store <2 x i64> %rv1, ptr %rg1, align 8
+      %top = extractelement <2 x i64> %rv1, i64 1
+      ret i64 %top
+  IR
+
+fn __bigint_bw_xor4(rp, ap, bp) (i64 i64 i64) i64
+  ll <<~IR
+    entry:
+      %rq = inttoptr i64 %rp to ptr
+      %aq = inttoptr i64 %ap to ptr
+      %bq = inttoptr i64 %bp to ptr
+      %ag1 = getelementptr inbounds i64, ptr %aq, i64 2
+      %bg1 = getelementptr inbounds i64, ptr %bq, i64 2
+      %rg1 = getelementptr inbounds i64, ptr %rq, i64 2
+      %av0 = load <2 x i64>, ptr %aq, align 8
+      %bv0 = load <2 x i64>, ptr %bq, align 8
+      %av1 = load <2 x i64>, ptr %ag1, align 8
+      %bv1 = load <2 x i64>, ptr %bg1, align 8
+      %rv0 = xor <2 x i64> %av0, %bv0
+      %rv1 = xor <2 x i64> %av1, %bv1
+      store <2 x i64> %rv0, ptr %rq, align 8
+      store <2 x i64> %rv1, ptr %rg1, align 8
+      %top = extractelement <2 x i64> %rv1, i64 1
+      ret i64 %top
+  IR
+
+fn __bigint_bw_load_and1(ap, bp) (i64 i64) i64
+  ll <<~IR
+    entry:
+      %aq = inttoptr i64 %ap to ptr
+      %bq = inttoptr i64 %bp to ptr
+      %a0 = load i64, ptr %aq, align 8
+      %b0 = load i64, ptr %bq, align 8
+      %r0 = and i64 %a0, %b0
+      ret i64 %r0
+  IR
+
+fn __bigint_bw_load_xor1(ap, bp) (i64 i64) i64
+  ll <<~IR
+    entry:
+      %aq = inttoptr i64 %ap to ptr
+      %bq = inttoptr i64 %bp to ptr
+      %a0 = load i64, ptr %aq, align 8
+      %b0 = load i64, ptr %bq, align 8
+      %r0 = xor i64 %a0, %b0
+      ret i64 %r0
+  IR
+
+fn __bigint_bw_store1(rp, r0) (i64 i64) i64
+  ll <<~IR
+    entry:
+      %rq = inttoptr i64 %rp to ptr
+      store i64 %r0, ptr %rq, align 8
+      ret i64 0
+  IR
+
 # One- and two-limb positive rows: the operands are heap BigInts whose only
 # limbs are the words themselves, so a fixed row beats the generic
 # sign/width kernel's dispatch. Each stores the row and returns its top word
@@ -542,12 +614,15 @@ fn __bigint_and_raw(a, b) (i64 i64) i64
   as = __bigint_bw_signed_size(a) ## i64
   bs = __bigint_bw_signed_size(b) ## i64
   if as == 1 && bs == 1 && aisbig && bisbig
-    result1 = ccall_nobox("w_bigint_alloc_hot", 1) ## i64
-    rp1 = (result1 & 140737488355327) + 16 ## i64
     ap1 = (a & 140737488355327) + 16 ## i64
     bp1 = (b & 140737488355327) + 16 ## i64
-    __bigint_bw_and1(rp1, ap1, bp1)
-    return ccall_nobox("w_bigint_seal_raw", result1, 1)
+    r0 = __bigint_bw_load_and1(ap1, bp1) ## i64
+    if r0 >= 0 && r0 <= 140737488355327
+      return -1688849860263936 | r0
+    result1 = ccall_nobox("w_bigint_alloc_hot", 1) ## i64
+    rp1 = (result1 & 140737488355327) + 16 ## i64
+    __bigint_bw_store1(rp1, r0)
+    return ccall_nobox("w_bigint_finish_add_raw", result1, 1)
   if as == 2 && bs == 2 && aisbig && bisbig
     result2 = ccall_nobox("w_bigint_alloc_hot", 2) ## i64
     rp2 = (result2 & 140737488355327) + 16 ## i64
@@ -619,10 +694,15 @@ fn __bigint_or_raw(a, b) (i64 i64) i64
     rp2 = (result2 & 140737488355327) + 16 ## i64
     ap2 = (a & 140737488355327) + 16 ## i64
     bp2 = (b & 140737488355327) + 16 ## i64
-    top2 = __bigint_bw_or2(rp2, ap2, bp2) ## i64
-    if top2 != 0
-      return ccall_nobox("w_bigint_finish_add_raw", result2, 2)
-    return ccall_nobox("w_bigint_seal_raw", result2, 2)
+    __bigint_bw_or2(rp2, ap2, bp2)
+    return ccall_nobox("w_bigint_finish_add_raw", result2, 2)
+  if as == 4 && bs == 4
+    result4 = ccall_nobox("w_bigint_alloc_hot", 4) ## i64
+    rp4 = (result4 & 140737488355327) + 16 ## i64
+    ap4 = (a & 140737488355327) + 16 ## i64
+    bp4 = (b & 140737488355327) + 16 ## i64
+    __bigint_bw_or4(rp4, ap4, bp4)
+    return ccall_nobox("w_bigint_finish_add_raw", result4, 4)
   amask = as >> 63 ## i64
   bmask = bs >> 63 ## i64
   alen = (as ^ amask) - amask ## i64
@@ -636,10 +716,9 @@ fn __bigint_or_raw(a, b) (i64 i64) i64
   rp = (result & 140737488355327) + 16 ## i64
   __bigint_bw_kernel(rp, a, b, as, bs, 1)
   rneg = as < 0 || bs < 0
-  signed_n = n ## i64
-  if rneg
-    signed_n = 0 - n
-  ccall_nobox("w_bigint_seal_raw", result, signed_n)
+  if !rneg
+    return ccall_nobox("w_bigint_finish_add_raw", result, n)
+  ccall_nobox("w_bigint_seal_raw", result, 0 - n)
 
 # x ^ x = 0 and x ^ 0 = x are allocation-free.  XOR of unlike signs is
 # negative; like signs are positive.
@@ -660,12 +739,15 @@ fn __bigint_xor_raw(a, b) (i64 i64) i64
   as = __bigint_bw_signed_size(a) ## i64
   bs = __bigint_bw_signed_size(b) ## i64
   if as == 1 && bs == 1 && aisbig && bisbig
-    result1 = ccall_nobox("w_bigint_alloc_hot", 1) ## i64
-    rp1 = (result1 & 140737488355327) + 16 ## i64
     ap1 = (a & 140737488355327) + 16 ## i64
     bp1 = (b & 140737488355327) + 16 ## i64
-    __bigint_bw_xor1(rp1, ap1, bp1)
-    return ccall_nobox("w_bigint_seal_raw", result1, 1)
+    r0 = __bigint_bw_load_xor1(ap1, bp1) ## i64
+    if r0 >= 0 && r0 <= 140737488355327
+      return -1688849860263936 | r0
+    result1 = ccall_nobox("w_bigint_alloc_hot", 1) ## i64
+    rp1 = (result1 & 140737488355327) + 16 ## i64
+    __bigint_bw_store1(rp1, r0)
+    return ccall_nobox("w_bigint_finish_add_raw", result1, 1)
   if as == 2 && bs == 2 && aisbig && bisbig
     result2 = ccall_nobox("w_bigint_alloc_hot", 2) ## i64
     rp2 = (result2 & 140737488355327) + 16 ## i64
@@ -675,6 +757,15 @@ fn __bigint_xor_raw(a, b) (i64 i64) i64
     if top2 != 0
       return ccall_nobox("w_bigint_finish_add_raw", result2, 2)
     return ccall_nobox("w_bigint_seal_raw", result2, 2)
+  if as == 4 && bs == 4
+    result4 = ccall_nobox("w_bigint_alloc_hot", 4) ## i64
+    rp4 = (result4 & 140737488355327) + 16 ## i64
+    ap4 = (a & 140737488355327) + 16 ## i64
+    bp4 = (b & 140737488355327) + 16 ## i64
+    top4 = __bigint_bw_xor4(rp4, ap4, bp4) ## i64
+    if top4 != 0
+      return ccall_nobox("w_bigint_finish_add_raw", result4, 4)
+    return ccall_nobox("w_bigint_seal_raw", result4, 4)
   amask = as >> 63 ## i64
   bmask = bs >> 63 ## i64
   alen = (as ^ amask) - amask ## i64

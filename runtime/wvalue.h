@@ -589,7 +589,8 @@ typedef struct {
                            earlier (UAF-proof). Mutating entries must treat
                            nonzero as "copy first". Same-thread only, like
                            the pool itself. Reset on fresh allocation. */
-    uint8_t  _pad[2];   /* align `size` at offset 4 */
+    uint8_t  _pad[2];   /* _pad[0]: alloc source (malloc=0, arena=1);
+                           _pad[1]: cached pool bucket (0xFF if unpoolable) */
     int32_t  size;      /* abs(size) = limb count; sign = number sign; 0 = zero */
     uint32_t cap;       /* allocated limbs */
     uint32_t _pad2;     /* align `limbs` at 8-byte boundary */

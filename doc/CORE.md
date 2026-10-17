@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(635 total), grouped by area, with its declaration, a one-line
+(657 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -16,7 +16,7 @@ summary from the source header, and a link to the source.
 | Class | Defined as | Summary | Source |
 |-------|-----------|---------|--------|
 | `Atomic` | `+ Atomic` | Atomic — a native signed-i64 atomic cell. | [`core/atomic.w`](../core/atomic.w) |
-| `Process` | `+ Process` | Child-process control: spawn / poll / wait / kill. | [`core/process.w`](../core/process.w) |
+| `Process` | `+ Process` | Child-process control: spawn / poll / wait / kill, plus exec. | [`core/process.w`](../core/process.w) |
 | `Array` | `+ Array` | Ordered, mutable collection of typed values. Element type chosen at | [`core/array.w`](../core/array.w) |
 | `Base64` | `+ Base64` | Base64 and Base64URL codecs (RFC 4648). | [`core/base64.w`](../core/base64.w) |
 | `BigArray` | `+ BigArray` | Same shape as Array, but i64 fields for >2^32 elements. Used for | [`core/big_array.w`](../core/big_array.w) |
@@ -38,6 +38,7 @@ summary from the source header, and a link to the source.
 | `Color` | `+ Color` | — | [`core/color.w`](../core/color.w) |
 | `Crypto` | `+ Crypto` | — | [`core/crypto.w`](../core/crypto.w) |
 | `Currency` | `+ Currency` | Currency — monetary value with currency symbol (tag 0xFFFD) | [`core/currency.w`](../core/currency.w) |
+| `Calendar` | `+ Calendar` | Calendar — a named jurisdiction or zone for Date.in/1. | [`core/calendar.w`](../core/calendar.w) |
 | `Date` | `+ Date` | Date — validated packed proleptic-Gregorian calendar and datetime values. | [`core/date.w`](../core/date.w) |
 | `Digest` | `+ Digest` | — | [`core/digest.w`](../core/digest.w) |
 | `Dir` | `+ Dir` | — | [`core/dir.w`](../core/dir.w) |
@@ -102,14 +103,23 @@ summary from the source header, and a link to the source.
 | `ToricFan2D` | `+ ToricFan2D` | Complete fans in the plane and the smooth toric surfaces they define, plus | [`core/algebra/toric_fan.w`](../core/algebra/toric_fan.w) |
 | `LatticeTriangulation` | `+ LatticeTriangulation` | A Z^2-periodic triangulation of the plane with vertex set Z^2 — the input | [`core/algebra/toric_fan.w`](../core/algebra/toric_fan.w) |
 | `FiniteLattice` | `+ FiniteLattice` | Finite lattices and Knaster-Tarski fixpoints. | [`core/algebra/finite_lattice.w`](../core/algebra/finite_lattice.w) |
+| `FdField` | `+ FdField` | ---- the field --------------------------------------------------------------- | [`core/algebra/fd_algebra.w`](../core/algebra/fd_algebra.w) |
+| `FdAlgebra` | `+ FdAlgebra` | ---- the algebra --------------------------------------------------------------- | [`core/algebra/fd_algebra.w`](../core/algebra/fd_algebra.w) |
+| `FdModule` | `+ FdModule` | A finite module given by the matrices of all basis vectors (column j of | [`core/algebra/fd_algebra.w`](../core/algebra/fd_algebra.w) |
+| `FdResolution` | `+ FdResolution` | Minimal projective resolution. Degree n has generators gens[n] (idempotent | [`core/algebra/fd_algebra.w`](../core/algebra/fd_algebra.w) |
+| `RoseGraph` | `+ RoseGraph` | ---- the graph --------------------------------------------------------------------- | [`core/algebra/coned_graphs.w`](../core/algebra/coned_graphs.w) |
+| `ConeAbelianization` | `+ ConeAbelianization` | Z^r modulo the lattice spanned by relation vectors, kept in Hermite form by | [`core/algebra/coned_graphs.w`](../core/algebra/coned_graphs.w) |
+| `CosetEnumeration` | `+ CosetEnumeration` | — | [`core/algebra/coset_enumeration.w`](../core/algebra/coset_enumeration.w) |
 | `Combinatorics` | — | — | [`core/combinatorics.w`](../core/combinatorics.w) |
 | `PolyominoEnumeration` | `+ PolyominoEnumeration` | Enumeration of polyominoes by cell count. | [`core/combinatorics/polyomino.w`](../core/combinatorics/polyomino.w) |
 | `LatticeAnimal` | `+ LatticeAnimal` | Enumeration of animals in a given lattice: grow shapes one cell at a time | [`core/combinatorics/lattice_animal.w`](../core/combinatorics/lattice_animal.w) |
 | `DimerCovering` | `+ DimerCovering` | Dimer coverings: counting the ways to tile a region with dominoes. | [`core/combinatorics/dimer.w`](../core/combinatorics/dimer.w) |
 | `Kasteleyn` | `+ Kasteleyn` | Kasteleyn's theorem: perfect matchings of a planar graph as a determinant. | [`core/combinatorics/kasteleyn.w`](../core/combinatorics/kasteleyn.w) |
 | `Polyiamond` | `+ Polyiamond` | Polyiamonds: edge-connected sets of triangles in the triangular grid. | [`core/combinatorics/polyiamond.w`](../core/combinatorics/polyiamond.w) |
+| `IntegerPartition` | `+ IntegerPartition` | Integer partitions, Young diagrams, and symmetric-group characters. | [`core/combinatorics/partition.w`](../core/combinatorics/partition.w) |
 | `Lattice` | `+ Lattice` | Lattice animals: finite edge-connected sets of cells in any lattice. | [`core/combinatorics/lattice_animal.w`](../core/combinatorics/lattice_animal.w) |
 | `ExactCover` | `+ ExactCover` | Exact cover by dancing links (Knuth's Algorithm X, DLX). | [`core/combinatorics/exact_cover.w`](../core/combinatorics/exact_cover.w) |
+| `Assignment` | `+ Assignment` | Exact minimum-cost assignment (the Hungarian method, shortest augmenting paths). | [`core/combinatorics/assignment.w`](../core/combinatorics/assignment.w) |
 | `FiniteSimpleGraph` | — | — | [`core/combinatorics.w`](../core/combinatorics.w) |
 | `GraphDegeneracyCertificate` | — | — | [`core/combinatorics.w`](../core/combinatorics.w) |
 | `CompleteGraphEdgeColoring` | — | — | [`core/combinatorics.w`](../core/combinatorics.w) |
@@ -198,10 +208,22 @@ summary from the source header, and a link to the source.
 | `Solve` | `+ Solve` | Solve — initial-value ODE solvers (SciPy solve_ivp analogue). | [`core/solve.w`](../core/solve.w) |
 | `DenseSolution` | `+ DenseSolution` | Continuous DP5(4) solution. Each accepted step keeps its size and the | [`core/solve.w`](../core/solve.w) |
 | `Optim` | `+ Optim` | Optim — scalar / vector optimization and root-finding (v0). | [`core/optim.w`](../core/optim.w) |
+| `LinProg` | `+ LinProg` | LinProg — dense linear programming by the two-phase simplex method. | [`core/linprog.w`](../core/linprog.w) |
 | `Interpolate` | `+ Interpolate` | Interpolate — interpolation and numerical quadrature. | [`core/interpolate.w`](../core/interpolate.w) |
 | `SciIO` | `+ SciIO` | SciIO — scientific data interchange (no system libhdf5/netcdf/arrow). | [`core/io.w`](../core/io.w) |
 | `Plot` | `+ Plot` | Plot — terminal sparklines / heatmaps (zero-dep). | [`core/plot.w`](../core/plot.w) |
 | `Plot3D` | `+ Plot3D` | Plot3D — interactive 3D visualization export for grid simulations. | [`core/plot3d.w`](../core/plot3d.w) |
+| `Raster` | `+ Raster` | Raster — an RGB pixel canvas with PNG and animated-GIF encoders. | [`core/raster.w`](../core/raster.w) |
+| `PngEncoder` | `+ PngEncoder` | -------------------------------------------------------------------------- | [`core/raster.w`](../core/raster.w) |
+| `GifAnimation` | `+ GifAnimation` | -------------------------------------------------------------------------- | [`core/raster.w`](../core/raster.w) |
+| `RasterFont` | `+ RasterFont` | -------------------------------------------------------------------------- | [`core/raster.w`](../core/raster.w) |
+| `Svg` | `+ Svg` | Svg — a small vector-figure builder. | [`core/svg.w`](../core/svg.w) |
+| `Motion` | `+ Motion` | — | [`core/motion.w`](../core/motion.w) |
+| `Ease` | `+ Ease` | Motion — motion graphics on top of Svg: easing curves, timing windows, | [`core/motion.w`](../core/motion.w) |
+| `Paint` | `+ Paint` | — | [`core/motion.w`](../core/motion.w) |
+| `Narration` | `+ Narration` | — | [`core/motion.w`](../core/motion.w) |
+| `View3D` | `+ View3D` | Scene3D — vector 3D on top of Svg: a camera (orthographic or perspective) | [`core/scene3d.w`](../core/scene3d.w) |
+| `Scene3D` | `+ Scene3D` | — | [`core/scene3d.w`](../core/scene3d.w) |
 | `ProofArtifacts` | `+ ProofArtifacts` | — | [`core/proof_artifact.w`](../core/proof_artifact.w) |
 | `ProofArtifactBundle` | `+ ProofArtifactBundle` | — | [`core/proof_artifact.w`](../core/proof_artifact.w) |
 | `Sparse` | `+ Sparse` | Module-level alias so `Sparse.eye` still works as a short name. | [`core/sparse.w`](../core/sparse.w) |

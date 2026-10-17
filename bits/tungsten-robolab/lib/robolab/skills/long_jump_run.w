@@ -114,6 +114,7 @@
     @to_side = ""
     @jumping = false
     @t_to = ~-1.0
+    @nat_step = ~0.0
     self
 
   # The jump's chunks on a running movement: RunSkill's loop ends with l_push
@@ -326,6 +327,13 @@
       @hk_spine = param("j_hk_spine", ~0.1, ~-0.4, ~0.8)
       @hk_drv = param("j_hk_drv", ~0.5, ~0.0, ~1.0)
       @hk_ease = ease_of(param("j_hk_ease", ~0.0, ~0.0, ~4.49))
+    @nat_on = @params.key?("j_nat") && @params["j_nat"] > ~0.5
+    @nat_c0 = ~-0.4314
+    @nat_cx = ~0.2606
+    @nat_cz = ~0.1702
+    @nat_c0 = @params["j_nat_c0"] if @params.key?("j_nat_c0")
+    @nat_cx = @params["j_nat_cx"] if @params.key?("j_nat_cx")
+    @nat_cz = @params["j_nat_cz"] if @params.key?("j_nat_cz")
     self
 
   -> ease_of(v)
@@ -381,7 +389,18 @@
   -> enter(f, st, sw, phase)
     super(f, st, sw, phase)
     touchdown(f, st) if phase == :land && !@jumping
+    nat_toe_off(f) if @nat_on && phase == :flight && !@jumping
     self
+
+  # Toe-off (the flight chunk is entered): the natural step of this flight from the COM's velocity.
+  -> nat_toe_off(f)
+    @nat_step = @nat_c0 + @nat_cx * f.com_vx + @nat_cz * f.at("com_vel", 2)
+    self
+
+  # The step the planner's nudge corrects the plan against: the running average step, or with `j_nat` the natural step predicted at toe-off.
+  -> step_ref
+    return @nat_step if @nat_on && @nat_step > ~1.0
+    @stride
 
   # The board the run-up plans against: the sensed foul line moved by the
   # check-mark shift j_board_shift (a params-file setting, m; default 0), so a
@@ -495,7 +514,7 @@
         joint_offset(off, st + "hip_flex", @pl_free_hip)
         joint_offset(off, st + "knee", @pl_free_knee)
       elsif @plan_n > 1
-        adj = clamp(@plan_step - @stride, ~0.0 - @st_max, @st_up)
+        adj = clamp(@plan_step - step_ref, ~0.0 - @st_max, @st_up)
         joint_offset(off, sw + "hip_flex", @st_w * adj / @leg_len)
       return off
     if st == @pen

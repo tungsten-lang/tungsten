@@ -17,8 +17,15 @@ scratchpad/**/*.pid
 scratchpad/**/*.sidemap
 scratchpad/**/*.o
 scratchpad/**/*.dylib
+scratchpad/btl/bin/
+scratchpad/btl/sdkid/
+scratchpad/**/ctl_*
+scratchpad/soccer4/cur/ctl
+scratchpad/lj2/robolab_long_jump_run.pre_c1
 scratchpad/abilities/preview/
 scratchpad/abilities/assets/
+scratchpad/anat5/lit/
+scratchpad/blowup/evalcache/
 MUJOCO_LOG.TXT
 dbg.png
 playground/arena/.lock

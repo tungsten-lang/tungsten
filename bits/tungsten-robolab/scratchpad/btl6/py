@@ -1,0 +1,4 @@
+#!/bin/bash
+# python with capped BLAS threads at nice 10 (coordinator rule 3 Oct 21:5x: machine oversubscribed); run from bits/tungsten-robolab
+export OMP_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
+exec nice -n 10 .venv/bin/python "$@"

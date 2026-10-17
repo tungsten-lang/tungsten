@@ -4257,6 +4257,13 @@ fn __bigint_times_general_raw(a, b, an, bn) (i64 i64 i64 i64) i64
   ccall_nobox("w_bigint_seal_raw", result, signed_total)
 
 on macos && arm64
+  fn __bigint_add1_1_raw(a, b) (i64 i64) i64
+    pair1 = __bigint_add1_1_sumcarry(a, b) ## u128
+    sum1 = pair1 ## u64
+    high1 = pair1 >> 64 ## u128
+    carry1 = high1 ## u64
+    ccall_nobox("w_bigint_add1_1_finish_raw", sum1 ## i64, carry1 ## i64)
+
   fn __bigint_add1_2_raw(a, b) (i64 i64) i64
     result = ccall_nobox("w_bigint_alloc_hot", 2) ## i64
     mask = 140737488355327 ## i64
@@ -4638,6 +4645,7 @@ fn __bigint_mul24_raw(a, b) (i64 i64) i64
 # shape gate has proved that exactly one operand has two limbs.
 on macos && arm64
   fn __bigint_mul1_2_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot4_raw") ## i64
     mask = 140737488355327 ## i64
     abase = a & mask
     bbase = b & mask
@@ -4647,7 +4655,6 @@ on macos && arm64
     if asize != 2
       wide = bbase ## i64
       word_box = abase ## i64
-    result = ccall_nobox("w_bigint_alloc_hot4_raw") ## i64
     rp = (result & mask) + 16 ## i64
     ap = wide + 16 ## i64
     word = raw_load_u64(word_box, 16) ## i64
@@ -4658,6 +4665,7 @@ on macos && arm64
   # receiver order observable, then this worker performs the same cap-four
   # allocation, serial C carry schedule, top write, and size publication.
   fn __bigint_mul1_3_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot4_raw") ## i64
     mask = 140737488355327 ## i64
     abase = a & mask
     bbase = b & mask
@@ -4667,7 +4675,6 @@ on macos && arm64
     if asize != 3
       wide = bbase ## i64
       word_box = abase ## i64
-    result = ccall_nobox("w_bigint_alloc_hot4_raw") ## i64
     rp = (result & mask) + 16 ## i64
     ap = wide + 16 ## i64
     word = raw_load_u64(word_box, 16) ## i64
@@ -4678,6 +4685,7 @@ on macos && arm64
   # order at the source seam, then reproduce C's capacity-eight allocation,
   # literal carry schedule, top write, and header publication.
   fn __bigint_mul1_4_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot8_raw") ## i64
     mask = 140737488355327 ## i64
     abase = a & mask
     bbase = b & mask
@@ -4687,7 +4695,6 @@ on macos && arm64
     if asize != 4
       wide = bbase ## i64
       word_box = abase ## i64
-    result = ccall_nobox("w_bigint_alloc_hot8_raw") ## i64
     rp = (result & mask) + 16 ## i64
     ap = wide + 16 ## i64
     word = raw_load_u64(word_box, 16) ## i64
@@ -4697,6 +4704,7 @@ on macos && arm64
   # Exact positive five-limb-by-one-limb scalar-word arm. Preserve receiver
   # order, capacity-eight allocation, serial carry recurrence, and size 5/6.
   fn __bigint_mul1_5_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot8_raw") ## i64
     mask = 140737488355327 ## i64
     abase = a & mask
     bbase = b & mask
@@ -4706,7 +4714,6 @@ on macos && arm64
     if asize != 5
       wide = bbase ## i64
       word_box = abase ## i64
-    result = ccall_nobox("w_bigint_alloc_hot8_raw") ## i64
     rp = (result & mask) + 16 ## i64
     ap = wide + 16 ## i64
     word = raw_load_u64(word_box, 16) ## i64
@@ -4715,6 +4722,7 @@ on macos && arm64
 
   # Exact positive six-limb-by-one-limb scalar-word arm.
   fn __bigint_mul1_6_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot8_raw") ## i64
     mask = 140737488355327 ## i64
     abase = a & mask
     bbase = b & mask
@@ -4724,7 +4732,6 @@ on macos && arm64
     if asize != 6
       wide = bbase ## i64
       word_box = abase ## i64
-    result = ccall_nobox("w_bigint_alloc_hot8_raw") ## i64
     rp = (result & mask) + 16 ## i64
     ap = wide + 16 ## i64
     word = raw_load_u64(word_box, 16) ## i64
@@ -4733,6 +4740,7 @@ on macos && arm64
 
   # Exact positive seven-limb-by-one-limb scalar-word arm.
   fn __bigint_mul1_7_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot8_raw") ## i64
     mask = 140737488355327 ## i64
     abase = a & mask
     bbase = b & mask
@@ -4742,7 +4750,6 @@ on macos && arm64
     if asize != 7
       wide = bbase ## i64
       word_box = abase ## i64
-    result = ccall_nobox("w_bigint_alloc_hot8_raw") ## i64
     rp = (result & mask) + 16 ## i64
     ap = wide + 16 ## i64
     word = raw_load_u64(word_box, 16) ## i64
@@ -4751,6 +4758,7 @@ on macos && arm64
 
   # Exact positive eight-limb-by-one-limb fixed scalar-word arm.
   fn __bigint_mul1_8_raw(a, b) (i64 i64) i64
+    result = ccall_nobox("w_bigint_alloc_hot16_raw") ## i64
     mask = 140737488355327 ## i64
     abase = a & mask
     bbase = b & mask
@@ -4760,7 +4768,6 @@ on macos && arm64
     if asize != 8
       wide = bbase ## i64
       word_box = abase ## i64
-    result = ccall_nobox("w_bigint_alloc_hot16_raw") ## i64
     rp = (result & mask) + 16 ## i64
     ap = wide + 16 ## i64
     word = raw_load_u64(word_box, 16) ## i64
@@ -5446,8 +5453,12 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
   # migration proceeds arm by arm, each with its own gate. See
   # benchmarks/runtime_ports/README.md.
   -> +(other)(BigInt)
-    an = ((     $value >> 47) & 1) == 1 ? 0 - $size      : $size
-    bn = ((other$value >> 47) & 1) == 1 ? 0 - other$size : other$size
+    an = $size ## i64
+    if (($value >> 47) & 1) == 1
+      an = 0 - an
+    bn = other$size ## i64
+    if ((other$value >> 47) & 1) == 1
+      bn = 0 - bn
 
     on macos && arm64
       # Complete scalar-word shapes before testing equal widths so existing
@@ -5455,17 +5466,8 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
       if bn == 1
         case an
           1 =>
-            pair1 = __bigint_add1_1_sumcarry(
-              $value ## i64, other$value ## i64
-            ) ## u128
-            sum1 = pair1 ## u64
-            high1 = pair1 >> 64 ## u128
-            carry1 = high1 ## u64
             return wvalue_from_bits(
-              ccall_nobox(
-                "w_bigint_add1_1_finish_raw",
-                sum1 ## i64, carry1 ## i64
-              ) ## i64
+              __bigint_add1_1_raw($value ## i64, other$value ## i64)
             )
           2 =>
             return wvalue_from_bits(
@@ -5495,36 +5497,35 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
             return wvalue_from_bits(
               __bigint_add1_8_raw($value ## i64, other$value ## i64)
             )
-          =>
-            if an > 8 && an <= 4096
-              wide_n = __bigint_effective_size_raw($value ## i64) ## i64
-              result = ccall_rawargs("w_bigint_alloc_hot", wide_n) ## BigInt
-              mask_wide = 140737488355312 ## i64
-              rp_wide = (result$value & mask_wide) + 16 ## i64
-              ap_wide = ($value & mask_wide) + 16 ## i64
-              word = other$limbs[0] ## u64
-              state = __bigint_add1_wide_prefix(
-                rp_wide, ap_wide, wide_n, word ## i64
+        if an > 8 && an <= 4096
+          wide_n = __bigint_effective_size_raw($value ## i64) ## i64
+          result = ccall_rawargs("w_bigint_alloc_hot", wide_n) ## BigInt
+          mask_wide = 140737488355312 ## i64
+          rp_wide = (result$value & mask_wide) + 16 ## i64
+          ap_wide = ($value & mask_wide) + 16 ## i64
+          word = other$limbs[0] ## u64
+          state = __bigint_add1_wide_prefix(
+            rp_wide, ap_wide, wide_n, word ## i64
+          ) ## i64
+          if state > wide_n
+            return wvalue_from_bits(
+              ccall_nobox(
+                "w_bigint_add1_wide_finish_raw",
+                result$value, wide_n, 1 ## i64
               ) ## i64
-              if state > wide_n
-                return wvalue_from_bits(
-                  ccall_nobox(
-                    "w_bigint_add1_wide_finish_raw",
-                    result$value, wide_n, 1 ## i64
-                  ) ## i64
-                )
-              if state < wide_n
-                ccall_nobox(
-                  "w_bigint_copy_tail_raw",
-                  rp_wide, ap_wide, state, wide_n
-                )
-              return wvalue_from_bits(
-                ccall_nobox(
-                  "w_bigint_add1_wide_finish_raw",
-                  result$value, wide_n, 0 ## i64
-                ) ## i64
-              )
-            return ccall("w_bigint_add", self, other)
+            )
+          if state < wide_n
+            ccall_nobox(
+              "w_bigint_copy_tail_raw",
+              rp_wide, ap_wide, state, wide_n
+            )
+          return wvalue_from_bits(
+            ccall_nobox(
+              "w_bigint_add1_wide_finish_raw",
+              result$value, wide_n, 0 ## i64
+            ) ## i64
+          )
+        return ccall("w_bigint_add", self, other)
 
       # Equal-width same-sign operands otherwise fall through a long generic
       # setup only to return to C's tuned equal-fast tree. Complete the
@@ -5592,8 +5593,12 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
     ccall("w_add", self, other)
 
   -> -(other)(BigInt)
-    an  = ((     $value >> 47) & 1) == 1 ? 0 - $size      : $size
-    bn0 = ((other$value >> 47) & 1) == 1 ? 0 - other$size : other$size
+    an = $size ## i64
+    if (($value >> 47) & 1) == 1
+      an = 0 - an
+    bn0 = other$size ## i64
+    if ((other$value >> 47) & 1) == 1
+      bn0 = 0 - bn0
 
     on macos && arm64
       # Complete scalar-word shapes with one word test and a width switch,
@@ -5634,37 +5639,36 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
             return wvalue_from_bits(
               __bigint_sub1_8_raw($value ## i64, other$value ## i64)
             )
-          =>
-            # Exact port of bigint_sub_word_into's wide arm.  Limbs 0 and 1 are
-            # always processed, deeper borrow propagation is rare, and the untouched
-            # suffix retains C's tuned overlap-copy helper through an inlinable raw
-            # boundary.  Allocation and shrink normalization remain in C order.
-            if an > 8 && an <= 4096
-              wide_n = __bigint_effective_size_raw($value ## i64) ## i64
-              result = ccall_rawargs("w_bigint_alloc_hot", wide_n) ## BigInt
-              mask_wide = 140737488355312 ## i64
-              rp_wide = (result$value & mask_wide) + 16 ## i64
-              ap_wide = ($value & mask_wide) + 16 ## i64
-              word = other$limbs[0] ## u64
-              i = __bigint_sub1_wide_prefix(
-                rp_wide, ap_wide, wide_n, word ## i64
-              ) ## i64
+        # Exact port of bigint_sub_word_into's wide arm.  Limbs 0 and 1 are
+        # always processed, deeper borrow propagation is rare, and the untouched
+        # suffix retains C's tuned overlap-copy helper through an inlinable raw
+        # boundary.  Allocation and shrink normalization remain in C order.
+        if an > 8 && an <= 4096
+          wide_n = __bigint_effective_size_raw($value ## i64) ## i64
+          result = ccall_rawargs("w_bigint_alloc_hot", wide_n) ## BigInt
+          mask_wide = 140737488355312 ## i64
+          rp_wide = (result$value & mask_wide) + 16 ## i64
+          ap_wide = ($value & mask_wide) + 16 ## i64
+          word = other$limbs[0] ## u64
+          i = __bigint_sub1_wide_prefix(
+            rp_wide, ap_wide, wide_n, word ## i64
+          ) ## i64
 
-              if i < wide_n
-                ccall_nobox(
-                  "w_bigint_copy_tail_raw", rp_wide, ap_wide, i, wide_n
-                )
+          if i < wide_n
+            ccall_nobox(
+              "w_bigint_copy_tail_raw", rp_wide, ap_wide, i, wide_n
+            )
 
-              rlen = wide_n ## i64
-              top_offset = (wide_n - 1) * 8 ## i64
-              if raw_load_u64(rp_wide, top_offset) == 0
-                rlen -= 1
-              if rlen < wide_n
-                return wvalue_from_bits(
-                  ccall_nobox("w_bigint_finish_sub_raw", result$value, rlen) ## i64
-                )
-              result$size = rlen
-              return result
+          rlen = wide_n ## i64
+          top_offset = (wide_n - 1) * 8 ## i64
+          if raw_load_u64(rp_wide, top_offset) == 0
+            rlen -= 1
+          if rlen < wide_n
+            return wvalue_from_bits(
+              ccall_nobox("w_bigint_finish_sub_raw", result$value, rlen) ## i64
+            )
+          result$size = rlen
+          return result
 
       # Equal-width same-raw-sign operands are bigint_sub_equal_fast's
       # domain. Complete the positive native leaves here (exact fixed kernels
@@ -5727,45 +5731,66 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
   # reach the kernel, so a zero result cannot occur here (both operands are
   # multi-limb, hence nonzero).
   -> *(other)(BigInt)
-    an = (($value >> 47) & 1) == 1 ? 0 - $size : $size
-    bn = ((other$value >> 47) & 1) == 1 ? 0 - other$size : other$size
-    am = $size < 0 ? 0 - $size : $size
-    bm = other$size < 0 ? 0 - other$size : other$size
-
-    on macos && arm64
-      # Exact C-shaped pointer-identical four-limb square. Preserve the
-      # literal fixed leaf before any native-only follow-up is considered.
-      if $value == other$value && $size == 4
-        return wvalue_from_bits(
-          __bigint_sqr4_raw($value ## i64, other$value ## i64)
-        )
-      # Exact C-shaped pointer-identical three-limb square. This is the
-      # literal next fixed leaf; signs and neighboring widths stay on C.
-      if $value == other$value && $size == 3
-        return wvalue_from_bits(
-          __bigint_sqr3_raw($value ## i64, other$value ## i64)
-        )
-      # Exact C-shaped pointer-identical two-limb square. The raw header
-      # check intentionally admits a tag-overlay negative just as C does;
-      # a true negative header and all wider squares remain on C.
-      if $value == other$value && $size == 2
-        return wvalue_from_bits(
-          __bigint_sqr2_raw($value ## i64, other$value ## i64)
-        )
-    if am < 2 || bm < 2 || am > 24 || bm > 24
+    raw_a = $size ## i64
+    if $value == other$value
       on macos && arm64
-        # Exact C-shaped pointer-identical one-limb square. The runtime
-        # source gate has already matched C's raw positive-header test;
-        # reuse the committed 64x64 product and result finisher verbatim.
-        if $value == other$value && $size == 1
+        case raw_a
+        when 1
           return wvalue_from_bits(
             __bigint_mul1_1_raw($value ## i64, other$value ## i64)
           )
+        when 2
+          return wvalue_from_bits(
+            __bigint_sqr2_raw($value ## i64, other$value ## i64)
+          )
+        when 3
+          return wvalue_from_bits(
+            __bigint_sqr3_raw($value ## i64, other$value ## i64)
+          )
+        when 4
+          return wvalue_from_bits(
+            __bigint_sqr4_raw($value ## i64, other$value ## i64)
+          )
+        when 5
+          return wvalue_from_bits(
+            __bigint_sqr5_raw($value ## i64, other$value ## i64)
+          )
+        when 6
+          return wvalue_from_bits(
+            __bigint_sqr6_raw($value ## i64, other$value ## i64)
+          )
+        when 7
+          return wvalue_from_bits(
+            __bigint_sqr7_raw($value ## i64, other$value ## i64)
+          )
+        when 8
+          return wvalue_from_bits(
+            __bigint_sqr8_raw($value ## i64, other$value ## i64)
+          )
+      return ccall("w_bigint_mul_builtin_exact", self, other)
+
+    raw_b = other$size ## i64
+    an = raw_a ## i64
+    if (($value >> 47) & 1) == 1
+      an = 0 - raw_a
+    bn = raw_b ## i64
+    if ((other$value >> 47) & 1) == 1
+      bn = 0 - raw_b
+    am = raw_a ## i64
+    if raw_a < 0
+      am = 0 - raw_a
+    bm = raw_b ## i64
+    if raw_b < 0
+      bm = 0 - raw_b
+
+    if am < 2 || bm < 2 || am > 24 || bm > 24
+      on macos && arm64
         # Exact C-shaped positive 1x1 and Nx1 leaves. Gate on positive
         # one-limb once, then switch on `an + bn` instead of cascading 14
         # two-way width branches.
         if an > 0 && bn > 0 && (an == 1 || bn == 1)
-          case an + bn
+          sum_ab = an + bn ## i64
+          case sum_ab
           when 2
             return wvalue_from_bits(
               __bigint_mul1_1_raw($value ## i64, other$value ## i64)
@@ -5822,32 +5847,6 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
             return wvalue_from_bits(
               __bigint_mul1_64_raw($value ## i64, other$value ## i64)
             )
-      return ccall("w_bigint_mul_builtin_exact", self, other)
-    on macos && arm64
-      # Exact C-shaped pointer-identical five-limb square. Place this new
-      # checkpoint after the existing one-limb/out-of-band return so the
-      # committed sqr@1..4 selector paths remain instruction-identical.
-      if $value == other$value && $size == 5
-        return wvalue_from_bits(
-          __bigint_sqr5_raw($value ## i64, other$value ## i64)
-        )
-      # Continue the literal fixed-square sequence without changing the
-      # already-committed one- through five-limb routes.
-      if $value == other$value && $size == 6
-        return wvalue_from_bits(
-          __bigint_sqr6_raw($value ## i64, other$value ## i64)
-        )
-      if $value == other$value && $size == 7
-        return wvalue_from_bits(
-          __bigint_sqr7_raw($value ## i64, other$value ## i64)
-        )
-      if $value == other$value && $size == 8
-        return wvalue_from_bits(
-          __bigint_sqr8_raw($value ## i64, other$value ## i64)
-        )
-    # Every remaining square (identical boxed bits, flip included) keeps C's
-    # dedicated path, mirroring bigint_mul_src_shape's a == b exclusion.
-    if $value == other$value
       return ccall("w_bigint_mul_builtin_exact", self, other)
 
     # Out-of-line schoolbook body (see __bigint_times_general_raw): keeps
@@ -5939,22 +5938,26 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
   # bigint_bitwise_src_shape — the gate and these bails must stay
   # disjoint or w_bit_and would re-enter this body.
   -> &(other)(BigInt)
-    an = (($value >> 47) & 1) == 1 ? 0 - $size : $size
-    bn = ((other$value >> 47) & 1) == 1 ? 0 - other$size : other$size
+    an = $size ## i64
+    if (($value >> 47) & 1) == 1
+      an = 0 - an
+    bn = other$size ## i64
+    if ((other$value >> 47) & 1) == 1
+      bn = 0 - bn
     if an < 2 || bn < 2 || an > 4096 || bn > 4096 || $value == other$value
       return ccall("w_bit_and", self, other)
 
-    n = an
+    n = an ## i64
     if bn < an
       n = bn
 
-    mask = 140737488355312
-    pa = ($value & mask) + 16
-    pb = (other$value & mask) + 16
-    result = ccall("w_bigint_alloc_boxed", n) ## BigInt
-    rp = (result$value & mask) + 16
-    __bigint_bw_and(rp ## i64, pa ## i64, pb ## i64, n ## i64)
-    ccall("w_bigint_seal", result, n)
+    mask = 140737488355312 ## i64
+    pa = ($value & mask) + 16 ## i64
+    pb = (other$value & mask) + 16 ## i64
+    result = ccall_rawargs("w_bigint_alloc_hot", n) ## BigInt
+    rp = (result$value & mask) + 16 ## i64
+    __bigint_bw_and(rp, pa, pb, n)
+    ccall("w_bigint_seal_raw", result, n)
 
   -> &(other)(Number)
     ccall("w_bit_and", self, other)
@@ -6076,29 +6079,34 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
   # its top limb is the longer operand's (nonzero on normalized inputs),
   # so seal's trim scan exits immediately.
   -> |(other)(BigInt)
-    an = (($value >> 47) & 1) == 1 ? 0 - $size : $size
-    bn = ((other$value >> 47) & 1) == 1 ? 0 - other$size : other$size
+    an = $size ## i64
+    if (($value >> 47) & 1) == 1
+      an = 0 - an
+    bn = other$size ## i64
+    if ((other$value >> 47) & 1) == 1
+      bn = 0 - bn
     if an < 2 || bn < 2 || an > 4096 || bn > 4096 || $value == other$value
       return ccall("w_bit_or", self, other)
 
-    mask = 140737488355312
-    pa = ($value & mask) + 16
-    pb = (other$value & mask) + 16
+    mask = 140737488355312 ## i64
+    pa = ($value & mask) + 16 ## i64
+    pb = (other$value & mask) + 16 ## i64
 
-    lp = pa
-    ln = an
-    sp = pb
-    sn = bn
+    lp = pa ## i64
+    ln = an ## i64
+    sp = pb ## i64
+    sn = bn ## i64
     if an < bn
       lp = pb
       ln = bn
       sp = pa
       sn = an
 
-    result = ccall("w_bigint_alloc_boxed", ln) ## BigInt
-    rp = (result$value & mask) + 16
-    __bigint_bw_or_uneq(rp ## i64, lp ## i64, ln ## i64, sp ## i64, sn ## i64)
-    ccall("w_bigint_seal", result, ln)
+    result = ccall_rawargs("w_bigint_alloc_hot", ln) ## BigInt
+    rp = (result$value & mask) + 16 ## i64
+    __bigint_bw_or_uneq(rp, lp, ln, sp, sn)
+    result$size = ln
+    result
 
   -> |(other)(Number)
     ccall("w_bit_or", self, other)
@@ -6238,29 +6246,33 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
   # (identical pairs never reach here — the gate excludes a == b, whose
   # x ^ x = 0 stays on C's O(1) identity arm).
   -> ^(other)(BigInt)
-    an = (($value >> 47) & 1) == 1 ? 0 - $size : $size
-    bn = ((other$value >> 47) & 1) == 1 ? 0 - other$size : other$size
+    an = $size ## i64
+    if (($value >> 47) & 1) == 1
+      an = 0 - an
+    bn = other$size ## i64
+    if ((other$value >> 47) & 1) == 1
+      bn = 0 - bn
     if an < 2 || bn < 2 || an > 4096 || bn > 4096 || $value == other$value
       return ccall("w_bit_xor", self, other)
 
-    mask = 140737488355312
-    pa = ($value & mask) + 16
-    pb = (other$value & mask) + 16
+    mask = 140737488355312 ## i64
+    pa = ($value & mask) + 16 ## i64
+    pb = (other$value & mask) + 16 ## i64
 
-    lp = pa
-    ln = an
-    sp = pb
-    sn = bn
+    lp = pa ## i64
+    ln = an ## i64
+    sp = pb ## i64
+    sn = bn ## i64
     if an < bn
       lp = pb
       ln = bn
       sp = pa
       sn = an
 
-    result = ccall("w_bigint_alloc_boxed", ln) ## BigInt
-    rp = (result$value & mask) + 16
-    __bigint_bw_xor_uneq(rp ## i64, lp ## i64, ln ## i64, sp ## i64, sn ## i64)
-    ccall("w_bigint_seal", result, ln)
+    result = ccall_rawargs("w_bigint_alloc_hot", ln) ## BigInt
+    rp = (result$value & mask) + 16 ## i64
+    __bigint_bw_xor_uneq(rp, lp, ln, sp, sn)
+    ccall("w_bigint_seal_raw", result, ln)
 
   -> ^(other)(Number)
     ccall("w_bit_xor", self, other)
@@ -6370,7 +6382,7 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
     # count covers the full magnitude, complete it from header metadata as
     # inline 0/-1 without reading a limb or entering the C shift kernel.
     raw_size = $size ## i64
-    n = raw_size
+    n = raw_size ## i64
     flip = (($value >> 47) & 1) ## i64
     if flip == 1
       n = 0 - n
@@ -6379,8 +6391,10 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
     if k == 0
       return ccall("w_bigint_mark_shared_value", self)
     if k < 0
-      right_count = 0 - k
-      magnitude_limbs = raw_size < 0 ? 0 - raw_size : raw_size
+      right_count = 0 - k ## i64
+      magnitude_limbs = raw_size ## i64
+      if raw_size < 0
+        magnitude_limbs = 0 - raw_size
       if right_count >= magnitude_limbs * 64
         int_tag = -1688849860263936 ## i64
         if n < 0
@@ -6419,7 +6433,7 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
     # NaN-boxing. The runtime seam admits exactly these subsets; explicit
     # sends repeat the guards here before taking them.
     raw_size = $size ## i64
-    n = raw_size
+    n = raw_size ## i64
     flip = (($value >> 47) & 1) ## i64
     if flip == 1
       n = 0 - n
@@ -6427,7 +6441,9 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
     k = (k_payload - ((k_payload >> 47) << 48)) ## i64
     if k == 0
       return ccall("w_bigint_mark_shared_value", self)
-    magnitude_limbs = raw_size < 0 ? 0 - raw_size : raw_size
+    magnitude_limbs = raw_size ## i64
+    if raw_size < 0
+      magnitude_limbs = 0 - raw_size
     int_tag = -1688849860263936 ## i64
     if k > 0
       if k >= magnitude_limbs * 64
@@ -6459,7 +6475,7 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
     # demote without allocating: load that normalized top limb, apply its
     # residual 0..63-bit shift, and form the inline result directly.
     if n > 1
-      top_start = (n - 1) * 64
+      top_start = (n - 1) * 64 ## i64
       if k >= top_start
         magnitude = __bigint_shr_u64($limbs[n - 1] ## u64, k - top_start) ## u64
         if magnitude <= 140737488355327
@@ -6468,10 +6484,10 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
     # rounding. The discarded-limb sticky test is unrolled through four limbs;
     # any discarded bit increments the result magnitude before negative boxing.
     if n < -1 && n >= -4
-      limb_count = 0 - n
-      top_start = (limb_count - 1) * 64
+      limb_count = 0 - n ## i64
+      top_start = (limb_count - 1) * 64 ## i64
       if k >= top_start
-        residual = k - top_start
+        residual = k - top_start ## i64
         top = $limbs[limb_count - 1] ## u64
         magnitude = __bigint_shr_u64(top, residual) ## u64
         sticky = 0 ## i64
@@ -6497,10 +6513,10 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
     # already proven without a scan: either the residual top bits or limb zero
     # is nonzero. Unknown-sticky sparse shapes retain the tuned C scan.
     if n < -4
-      limb_count = 0 - n
-      top_start = (limb_count - 1) * 64
+      limb_count = 0 - n ## i64
+      top_start = (limb_count - 1) * 64 ## i64
       if k >= top_start
-        residual = k - top_start
+        residual = k - top_start ## i64
         top = $limbs[limb_count - 1] ## u64
         magnitude = __bigint_shr_u64(top, residual) ## u64
         sticky = 0 ## i64
@@ -6588,12 +6604,11 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
           high = high128 ## u64
           if high == 0
             return ccall("w_u64", low)
-          boxed_two = wvalue_from_bits((-1688849860263936 | 2) ## i64)
-          result = ccall("w_bigint_alloc_boxed", boxed_two) ## BigInt
+          result = ccall_rawargs("w_bigint_alloc_hot", 2) ## BigInt
           result$limbs[0] = low
           result$limbs[1] = high
           result$size = 2
-          return ccall("w_bigint_seal_raw", result, 2)
+          return result
       ccall("w_bigint_gcd", self, other)
 
   # Least common multiple. One-limb BigInt pairs stay raw through GCD, exact

@@ -62726,7 +62726,6 @@ WValue w_bigint_seal(WValue v, WValue signed_size) {
  * result width as a machine i64.  Allocation, canonicalization, demotion,
  * and recycler handoff remain runtime storage policy; the source operation
  * owns every mathematical limb written before this boundary. */
-__attribute__((always_inline))
 WValue w_bigint_seal_raw(WValue v, int64_t signed_size) {
     if (signed_size < INT32_MIN || signed_size > INT32_MAX)
         die("w_bigint_seal_raw: signed size is outside i32");
@@ -75274,6 +75273,10 @@ void w_value_release_loop(int64_t extra, WValue init, WValue prev, WValue next,
 }
 
 void w_value_free(WValue v) {
+    if (w_is_bigint(v)) {
+        bigint_release_if_live(w_as_bigint(v));
+        return;
+    }
     if (w_is_heap_str(v)) {
         WString *ws = w_as_heap_str(v);
         /* Park small blocks for the decimal formatters instead of freeing:
@@ -75286,10 +75289,6 @@ void w_value_free(WValue v) {
             return;
         }
         free(ws);
-        return;
-    }
-    if (w_is_bigint(v)) {
-        bigint_release_if_live(w_as_bigint(v));
         return;
     }
     /* Array (W_SUBTAG_ARRAY). w_array_new mints calloc(WArray) + calloc(slots)

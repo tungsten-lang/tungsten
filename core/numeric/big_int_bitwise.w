@@ -13,6 +13,7 @@
 #   0 = and, 1 = or, 2 = xor.
 fn __bigint_bw_kernel(rp, a, b, as, bs, op) (i64 i64 i64 i64 i64 i64) i64
   ll <<~IR
+    ; tungsten:noinline
     entry:
       %rq = inttoptr i64 %rp to ptr
 
@@ -585,20 +586,399 @@ fn __bigint_bw_xor2(rp, ap, bp) (i64 i64 i64) i64
       ret i64 %top
   IR
 
+fn __bigint_bw_publish_size(result, size) (i64 i64) i64
+  ll <<~IR
+    entry:
+      %ptr = and i64 %result, 140737488355327
+      %szbits = add nuw nsw i64 %ptr, 4
+      %szptr = inttoptr i64 %szbits to ptr
+      %sz32 = trunc i64 %size to i32
+      store i32 %sz32, ptr %szptr, align 4
+      ret i64 %result
+  IR
+
+fn __bigint_bw_and_eq(rp, ap, bp, n) (i64 i64 i64 i64) i64
+  ll <<~IR
+    entry:
+      %rq = inttoptr i64 %rp to ptr
+      %aq = inttoptr i64 %ap to ptr
+      %bq = inttoptr i64 %bp to ptr
+      switch i64 %n, label %general [
+        i64 1, label %one
+        i64 2, label %two
+        i64 4, label %four
+        i64 8, label %eight
+      ]
+    one:
+      %a1 = load i64, ptr %aq, align 8
+      %b1 = load i64, ptr %bq, align 8
+      %r1 = and i64 %a1, %b1
+      store i64 %r1, ptr %rq, align 8
+      ret i64 %r1
+    two:
+      %av2 = load <2 x i64>, ptr %aq, align 8
+      %bv2 = load <2 x i64>, ptr %bq, align 8
+      %rv2 = and <2 x i64> %av2, %bv2
+      store <2 x i64> %rv2, ptr %rq, align 8
+      %top2 = extractelement <2 x i64> %rv2, i64 1
+      ret i64 %top2
+    four:
+      %ap4.1 = getelementptr inbounds i64, ptr %aq, i64 2
+      %bp4.1 = getelementptr inbounds i64, ptr %bq, i64 2
+      %rp4.1 = getelementptr inbounds i64, ptr %rq, i64 2
+      %av4.0 = load <2 x i64>, ptr %aq, align 8
+      %bv4.0 = load <2 x i64>, ptr %bq, align 8
+      %av4.1 = load <2 x i64>, ptr %ap4.1, align 8
+      %bv4.1 = load <2 x i64>, ptr %bp4.1, align 8
+      %rv4.0 = and <2 x i64> %av4.0, %bv4.0
+      %rv4.1 = and <2 x i64> %av4.1, %bv4.1
+      store <2 x i64> %rv4.0, ptr %rq, align 8
+      store <2 x i64> %rv4.1, ptr %rp4.1, align 8
+      %top4 = extractelement <2 x i64> %rv4.1, i64 1
+      ret i64 %top4
+    eight:
+      %ap8.1 = getelementptr inbounds i64, ptr %aq, i64 2
+      %bp8.1 = getelementptr inbounds i64, ptr %bq, i64 2
+      %rp8.1 = getelementptr inbounds i64, ptr %rq, i64 2
+      %ap8.2 = getelementptr inbounds i64, ptr %aq, i64 4
+      %bp8.2 = getelementptr inbounds i64, ptr %bq, i64 4
+      %rp8.2 = getelementptr inbounds i64, ptr %rq, i64 4
+      %ap8.3 = getelementptr inbounds i64, ptr %aq, i64 6
+      %bp8.3 = getelementptr inbounds i64, ptr %bq, i64 6
+      %rp8.3 = getelementptr inbounds i64, ptr %rq, i64 6
+      %av8.0 = load <2 x i64>, ptr %aq, align 8
+      %bv8.0 = load <2 x i64>, ptr %bq, align 8
+      %av8.1 = load <2 x i64>, ptr %ap8.1, align 8
+      %bv8.1 = load <2 x i64>, ptr %bp8.1, align 8
+      %av8.2 = load <2 x i64>, ptr %ap8.2, align 8
+      %bv8.2 = load <2 x i64>, ptr %bp8.2, align 8
+      %av8.3 = load <2 x i64>, ptr %ap8.3, align 8
+      %bv8.3 = load <2 x i64>, ptr %bp8.3, align 8
+      %rv8.0 = and <2 x i64> %av8.0, %bv8.0
+      %rv8.1 = and <2 x i64> %av8.1, %bv8.1
+      %rv8.2 = and <2 x i64> %av8.2, %bv8.2
+      %rv8.3 = and <2 x i64> %av8.3, %bv8.3
+      store <2 x i64> %rv8.0, ptr %rq, align 8
+      store <2 x i64> %rv8.1, ptr %rp8.1, align 8
+      store <2 x i64> %rv8.2, ptr %rp8.2, align 8
+      store <2 x i64> %rv8.3, ptr %rp8.3, align 8
+      %top8 = extractelement <2 x i64> %rv8.3, i64 1
+      ret i64 %top8
+    general:
+      %n4 = and i64 %n, -4
+      %has4 = icmp ne i64 %n4, 0
+      br i1 %has4, label %v4, label %mid
+    v4:
+      %i = phi i64 [ 0, %general ], [ %inext, %v4 ]
+      %i2 = or i64 %i, 2
+      %ag0 = getelementptr inbounds i64, ptr %aq, i64 %i
+      %bg0 = getelementptr inbounds i64, ptr %bq, i64 %i
+      %rg0 = getelementptr inbounds i64, ptr %rq, i64 %i
+      %ag1 = getelementptr inbounds i64, ptr %aq, i64 %i2
+      %bg1 = getelementptr inbounds i64, ptr %bq, i64 %i2
+      %rg1 = getelementptr inbounds i64, ptr %rq, i64 %i2
+      %av0 = load <2 x i64>, ptr %ag0, align 8
+      %bv0 = load <2 x i64>, ptr %bg0, align 8
+      %av1 = load <2 x i64>, ptr %ag1, align 8
+      %bv1 = load <2 x i64>, ptr %bg1, align 8
+      %rv0 = and <2 x i64> %av0, %bv0
+      %rv1 = and <2 x i64> %av1, %bv1
+      store <2 x i64> %rv0, ptr %rg0, align 8
+      store <2 x i64> %rv1, ptr %rg1, align 8
+      %inext = add nuw nsw i64 %i, 4
+      %done4 = icmp eq i64 %inext, %n4
+      br i1 %done4, label %mid, label %v4
+    mid:
+      %j = phi i64 [ 0, %general ], [ %n4, %v4 ]
+      %rem = sub i64 %n, %j
+      %has2 = icmp uge i64 %rem, 2
+      br i1 %has2, label %pair, label %oddchk
+    pair:
+      %pag = getelementptr inbounds i64, ptr %aq, i64 %j
+      %pbg = getelementptr inbounds i64, ptr %bq, i64 %j
+      %prg = getelementptr inbounds i64, ptr %rq, i64 %j
+      %pav = load <2 x i64>, ptr %pag, align 8
+      %pbv = load <2 x i64>, ptr %pbg, align 8
+      %prv = and <2 x i64> %pav, %pbv
+      store <2 x i64> %prv, ptr %prg, align 8
+      %jp = add nuw nsw i64 %j, 2
+      br label %oddchk
+    oddchk:
+      %k = phi i64 [ %jp, %pair ], [ %j, %mid ]
+      %hasodd = icmp ult i64 %k, %n
+      br i1 %hasodd, label %scalar, label %finish
+    scalar:
+      %sag = getelementptr inbounds i64, ptr %aq, i64 %k
+      %sbg = getelementptr inbounds i64, ptr %bq, i64 %k
+      %srg = getelementptr inbounds i64, ptr %rq, i64 %k
+      %sav = load i64, ptr %sag, align 8
+      %sbv = load i64, ptr %sbg, align 8
+      %srv = and i64 %sav, %sbv
+      store i64 %srv, ptr %srg, align 8
+      br label %finish
+    finish:
+      %topi = sub nuw nsw i64 %n, 1
+      %topg = getelementptr inbounds i64, ptr %rq, i64 %topi
+      %top = load i64, ptr %topg, align 8
+      ret i64 %top
+  IR
+
+fn __bigint_bw_or_eq(rp, ap, bp, n) (i64 i64 i64 i64) i64
+  ll <<~IR
+    entry:
+      %rq = inttoptr i64 %rp to ptr
+      %aq = inttoptr i64 %ap to ptr
+      %bq = inttoptr i64 %bp to ptr
+      switch i64 %n, label %general [
+        i64 1, label %one
+        i64 2, label %two
+        i64 4, label %four
+        i64 8, label %eight
+      ]
+    one:
+      %a1 = load i64, ptr %aq, align 8
+      %b1 = load i64, ptr %bq, align 8
+      %r1 = or i64 %a1, %b1
+      store i64 %r1, ptr %rq, align 8
+      ret i64 0
+    two:
+      %av2 = load <2 x i64>, ptr %aq, align 8
+      %bv2 = load <2 x i64>, ptr %bq, align 8
+      %rv2 = or <2 x i64> %av2, %bv2
+      store <2 x i64> %rv2, ptr %rq, align 8
+      ret i64 0
+    four:
+      %ap4.1 = getelementptr inbounds i64, ptr %aq, i64 2
+      %bp4.1 = getelementptr inbounds i64, ptr %bq, i64 2
+      %rp4.1 = getelementptr inbounds i64, ptr %rq, i64 2
+      %av4.0 = load <2 x i64>, ptr %aq, align 8
+      %bv4.0 = load <2 x i64>, ptr %bq, align 8
+      %av4.1 = load <2 x i64>, ptr %ap4.1, align 8
+      %bv4.1 = load <2 x i64>, ptr %bp4.1, align 8
+      %rv4.0 = or <2 x i64> %av4.0, %bv4.0
+      %rv4.1 = or <2 x i64> %av4.1, %bv4.1
+      store <2 x i64> %rv4.0, ptr %rq, align 8
+      store <2 x i64> %rv4.1, ptr %rp4.1, align 8
+      ret i64 0
+    eight:
+      %ap8.1 = getelementptr inbounds i64, ptr %aq, i64 2
+      %bp8.1 = getelementptr inbounds i64, ptr %bq, i64 2
+      %rp8.1 = getelementptr inbounds i64, ptr %rq, i64 2
+      %ap8.2 = getelementptr inbounds i64, ptr %aq, i64 4
+      %bp8.2 = getelementptr inbounds i64, ptr %bq, i64 4
+      %rp8.2 = getelementptr inbounds i64, ptr %rq, i64 4
+      %ap8.3 = getelementptr inbounds i64, ptr %aq, i64 6
+      %bp8.3 = getelementptr inbounds i64, ptr %bq, i64 6
+      %rp8.3 = getelementptr inbounds i64, ptr %rq, i64 6
+      %av8.0 = load <2 x i64>, ptr %aq, align 8
+      %bv8.0 = load <2 x i64>, ptr %bq, align 8
+      %av8.1 = load <2 x i64>, ptr %ap8.1, align 8
+      %bv8.1 = load <2 x i64>, ptr %bp8.1, align 8
+      %av8.2 = load <2 x i64>, ptr %ap8.2, align 8
+      %bv8.2 = load <2 x i64>, ptr %bp8.2, align 8
+      %av8.3 = load <2 x i64>, ptr %ap8.3, align 8
+      %bv8.3 = load <2 x i64>, ptr %bp8.3, align 8
+      %rv8.0 = or <2 x i64> %av8.0, %bv8.0
+      %rv8.1 = or <2 x i64> %av8.1, %bv8.1
+      %rv8.2 = or <2 x i64> %av8.2, %bv8.2
+      %rv8.3 = or <2 x i64> %av8.3, %bv8.3
+      store <2 x i64> %rv8.0, ptr %rq, align 8
+      store <2 x i64> %rv8.1, ptr %rp8.1, align 8
+      store <2 x i64> %rv8.2, ptr %rp8.2, align 8
+      store <2 x i64> %rv8.3, ptr %rp8.3, align 8
+      ret i64 0
+    general:
+      %n4 = and i64 %n, -4
+      %has4 = icmp ne i64 %n4, 0
+      br i1 %has4, label %v4, label %mid
+    v4:
+      %i = phi i64 [ 0, %general ], [ %inext, %v4 ]
+      %i2 = or i64 %i, 2
+      %ag0 = getelementptr inbounds i64, ptr %aq, i64 %i
+      %bg0 = getelementptr inbounds i64, ptr %bq, i64 %i
+      %rg0 = getelementptr inbounds i64, ptr %rq, i64 %i
+      %ag1 = getelementptr inbounds i64, ptr %aq, i64 %i2
+      %bg1 = getelementptr inbounds i64, ptr %bq, i64 %i2
+      %rg1 = getelementptr inbounds i64, ptr %rq, i64 %i2
+      %av0 = load <2 x i64>, ptr %ag0, align 8
+      %bv0 = load <2 x i64>, ptr %bg0, align 8
+      %av1 = load <2 x i64>, ptr %ag1, align 8
+      %bv1 = load <2 x i64>, ptr %bg1, align 8
+      %rv0 = or <2 x i64> %av0, %bv0
+      %rv1 = or <2 x i64> %av1, %bv1
+      store <2 x i64> %rv0, ptr %rg0, align 8
+      store <2 x i64> %rv1, ptr %rg1, align 8
+      %inext = add nuw nsw i64 %i, 4
+      %done4 = icmp eq i64 %inext, %n4
+      br i1 %done4, label %mid, label %v4
+    mid:
+      %j = phi i64 [ 0, %general ], [ %n4, %v4 ]
+      %rem = sub i64 %n, %j
+      %has2 = icmp uge i64 %rem, 2
+      br i1 %has2, label %pair, label %oddchk
+    pair:
+      %pag = getelementptr inbounds i64, ptr %aq, i64 %j
+      %pbg = getelementptr inbounds i64, ptr %bq, i64 %j
+      %prg = getelementptr inbounds i64, ptr %rq, i64 %j
+      %pav = load <2 x i64>, ptr %pag, align 8
+      %pbv = load <2 x i64>, ptr %pbg, align 8
+      %prv = or <2 x i64> %pav, %pbv
+      store <2 x i64> %prv, ptr %prg, align 8
+      %jp = add nuw nsw i64 %j, 2
+      br label %oddchk
+    oddchk:
+      %k = phi i64 [ %jp, %pair ], [ %j, %mid ]
+      %hasodd = icmp ult i64 %k, %n
+      br i1 %hasodd, label %scalar, label %exit
+    scalar:
+      %sag = getelementptr inbounds i64, ptr %aq, i64 %k
+      %sbg = getelementptr inbounds i64, ptr %bq, i64 %k
+      %srg = getelementptr inbounds i64, ptr %rq, i64 %k
+      %sav = load i64, ptr %sag, align 8
+      %sbv = load i64, ptr %sbg, align 8
+      %srv = or i64 %sav, %sbv
+      store i64 %srv, ptr %srg, align 8
+      br label %exit
+    exit:
+      ret i64 0
+  IR
+
+fn __bigint_bw_xor_eq(rp, ap, bp, n) (i64 i64 i64 i64) i64
+  ll <<~IR
+    entry:
+      %rq = inttoptr i64 %rp to ptr
+      %aq = inttoptr i64 %ap to ptr
+      %bq = inttoptr i64 %bp to ptr
+      switch i64 %n, label %general [
+        i64 1, label %one
+        i64 2, label %two
+        i64 4, label %four
+        i64 8, label %eight
+      ]
+    one:
+      %a1 = load i64, ptr %aq, align 8
+      %b1 = load i64, ptr %bq, align 8
+      %r1 = xor i64 %a1, %b1
+      store i64 %r1, ptr %rq, align 8
+      ret i64 %r1
+    two:
+      %av2 = load <2 x i64>, ptr %aq, align 8
+      %bv2 = load <2 x i64>, ptr %bq, align 8
+      %rv2 = xor <2 x i64> %av2, %bv2
+      store <2 x i64> %rv2, ptr %rq, align 8
+      %top2 = extractelement <2 x i64> %rv2, i64 1
+      ret i64 %top2
+    four:
+      %ap4.1 = getelementptr inbounds i64, ptr %aq, i64 2
+      %bp4.1 = getelementptr inbounds i64, ptr %bq, i64 2
+      %rp4.1 = getelementptr inbounds i64, ptr %rq, i64 2
+      %av4.0 = load <2 x i64>, ptr %aq, align 8
+      %bv4.0 = load <2 x i64>, ptr %bq, align 8
+      %av4.1 = load <2 x i64>, ptr %ap4.1, align 8
+      %bv4.1 = load <2 x i64>, ptr %bp4.1, align 8
+      %rv4.0 = xor <2 x i64> %av4.0, %bv4.0
+      %rv4.1 = xor <2 x i64> %av4.1, %bv4.1
+      store <2 x i64> %rv4.0, ptr %rq, align 8
+      store <2 x i64> %rv4.1, ptr %rp4.1, align 8
+      %top4 = extractelement <2 x i64> %rv4.1, i64 1
+      ret i64 %top4
+    eight:
+      %ap8.1 = getelementptr inbounds i64, ptr %aq, i64 2
+      %bp8.1 = getelementptr inbounds i64, ptr %bq, i64 2
+      %rp8.1 = getelementptr inbounds i64, ptr %rq, i64 2
+      %ap8.2 = getelementptr inbounds i64, ptr %aq, i64 4
+      %bp8.2 = getelementptr inbounds i64, ptr %bq, i64 4
+      %rp8.2 = getelementptr inbounds i64, ptr %rq, i64 4
+      %ap8.3 = getelementptr inbounds i64, ptr %aq, i64 6
+      %bp8.3 = getelementptr inbounds i64, ptr %bq, i64 6
+      %rp8.3 = getelementptr inbounds i64, ptr %rq, i64 6
+      %av8.0 = load <2 x i64>, ptr %aq, align 8
+      %bv8.0 = load <2 x i64>, ptr %bq, align 8
+      %av8.1 = load <2 x i64>, ptr %ap8.1, align 8
+      %bv8.1 = load <2 x i64>, ptr %bp8.1, align 8
+      %av8.2 = load <2 x i64>, ptr %ap8.2, align 8
+      %bv8.2 = load <2 x i64>, ptr %bp8.2, align 8
+      %av8.3 = load <2 x i64>, ptr %ap8.3, align 8
+      %bv8.3 = load <2 x i64>, ptr %bp8.3, align 8
+      %rv8.0 = xor <2 x i64> %av8.0, %bv8.0
+      %rv8.1 = xor <2 x i64> %av8.1, %bv8.1
+      %rv8.2 = xor <2 x i64> %av8.2, %bv8.2
+      %rv8.3 = xor <2 x i64> %av8.3, %bv8.3
+      store <2 x i64> %rv8.0, ptr %rq, align 8
+      store <2 x i64> %rv8.1, ptr %rp8.1, align 8
+      store <2 x i64> %rv8.2, ptr %rp8.2, align 8
+      store <2 x i64> %rv8.3, ptr %rp8.3, align 8
+      %top8 = extractelement <2 x i64> %rv8.3, i64 1
+      ret i64 %top8
+    general:
+      %n4 = and i64 %n, -4
+      %has4 = icmp ne i64 %n4, 0
+      br i1 %has4, label %v4, label %mid
+    v4:
+      %i = phi i64 [ 0, %general ], [ %inext, %v4 ]
+      %i2 = or i64 %i, 2
+      %ag0 = getelementptr inbounds i64, ptr %aq, i64 %i
+      %bg0 = getelementptr inbounds i64, ptr %bq, i64 %i
+      %rg0 = getelementptr inbounds i64, ptr %rq, i64 %i
+      %ag1 = getelementptr inbounds i64, ptr %aq, i64 %i2
+      %bg1 = getelementptr inbounds i64, ptr %bq, i64 %i2
+      %rg1 = getelementptr inbounds i64, ptr %rq, i64 %i2
+      %av0 = load <2 x i64>, ptr %ag0, align 8
+      %bv0 = load <2 x i64>, ptr %bg0, align 8
+      %av1 = load <2 x i64>, ptr %ag1, align 8
+      %bv1 = load <2 x i64>, ptr %bg1, align 8
+      %rv0 = xor <2 x i64> %av0, %bv0
+      %rv1 = xor <2 x i64> %av1, %bv1
+      store <2 x i64> %rv0, ptr %rg0, align 8
+      store <2 x i64> %rv1, ptr %rg1, align 8
+      %inext = add nuw nsw i64 %i, 4
+      %done4 = icmp eq i64 %inext, %n4
+      br i1 %done4, label %mid, label %v4
+    mid:
+      %j = phi i64 [ 0, %general ], [ %n4, %v4 ]
+      %rem = sub i64 %n, %j
+      %has2 = icmp uge i64 %rem, 2
+      br i1 %has2, label %pair, label %oddchk
+    pair:
+      %pag = getelementptr inbounds i64, ptr %aq, i64 %j
+      %pbg = getelementptr inbounds i64, ptr %bq, i64 %j
+      %prg = getelementptr inbounds i64, ptr %rq, i64 %j
+      %pav = load <2 x i64>, ptr %pag, align 8
+      %pbv = load <2 x i64>, ptr %pbg, align 8
+      %prv = xor <2 x i64> %pav, %pbv
+      store <2 x i64> %prv, ptr %prg, align 8
+      %jp = add nuw nsw i64 %j, 2
+      br label %oddchk
+    oddchk:
+      %k = phi i64 [ %jp, %pair ], [ %j, %mid ]
+      %hasodd = icmp ult i64 %k, %n
+      br i1 %hasodd, label %scalar, label %finish
+    scalar:
+      %sag = getelementptr inbounds i64, ptr %aq, i64 %k
+      %sbg = getelementptr inbounds i64, ptr %bq, i64 %k
+      %srg = getelementptr inbounds i64, ptr %rq, i64 %k
+      %sav = load i64, ptr %sag, align 8
+      %sbv = load i64, ptr %sbg, align 8
+      %srv = xor i64 %sav, %sbv
+      store i64 %srv, ptr %srg, align 8
+      br label %finish
+    finish:
+      %topi = sub nuw nsw i64 %n, 1
+      %topg = getelementptr inbounds i64, ptr %rq, i64 %topi
+      %top = load i64, ptr %topg, align 8
+      ret i64 %top
+  IR
+
 # x & x = x, x & -1 = x, and x & 0 = 0 are allocation-free.  Returning a
 # heap operand marks the shared buffer before publishing the alias.
-# The one- and two-limb fast paths below read limbs through heap pointers,
-# so they apply only when BOTH operands are heap BigInts.  __bigint_bw_signed_size
-# also answers 1 for an inline (nanboxed) positive integer, and a mixed
-# BigInt/inline pair used to take the pointer path and dereference the
-# inline word (SIGSEGV in __bigint_xor_raw from a boxed u64 hash fold).  The
-# general __bigint_bw_kernel selects a stack copy for inline operands and is
-# the correct route for every mixed case.
-fn __bigint_and_raw(a, b) (i64 i64) i64
+# The equal-width positive fast path below reads limbs through heap pointers,
+# so it applies only when BOTH operands are overlay-clear heap BigInts.
+# The general __bigint_bw_kernel selects a stack copy for inline operands and
+# is the correct route for every mixed, unequal-width, or negative case.
+fn __bigint_and_slow_raw(a, b) (i64 i64) i64
+  Tungsten.noinline!
   zero = -1688849860263936 ## i64
   negative_one = -1407374883553281 ## i64
-  if a == b
-    return ccall_nobox("w_bigint_mark_shared_value", a)
   if a == zero || b == zero
     return zero
   if a == negative_one
@@ -613,34 +993,6 @@ fn __bigint_and_raw(a, b) (i64 i64) i64
 
   as = __bigint_bw_signed_size(a) ## i64
   bs = __bigint_bw_signed_size(b) ## i64
-  if as == 1 && bs == 1 && aisbig && bisbig
-    ap1 = (a & 140737488355327) + 16 ## i64
-    bp1 = (b & 140737488355327) + 16 ## i64
-    r0 = __bigint_bw_load_and1(ap1, bp1) ## i64
-    if r0 >= 0 && r0 <= 140737488355327
-      return -1688849860263936 | r0
-    result1 = ccall_nobox("w_bigint_alloc_hot", 1) ## i64
-    rp1 = (result1 & 140737488355327) + 16 ## i64
-    __bigint_bw_store1(rp1, r0)
-    return ccall_nobox("w_bigint_finish_add_raw", result1, 1)
-  if as == 2 && bs == 2 && aisbig && bisbig
-    result2 = ccall_nobox("w_bigint_alloc_hot", 2) ## i64
-    rp2 = (result2 & 140737488355327) + 16 ## i64
-    ap2 = (a & 140737488355327) + 16 ## i64
-    bp2 = (b & 140737488355327) + 16 ## i64
-    top2 = __bigint_bw_and2(rp2, ap2, bp2) ## i64
-    if top2 != 0
-      return ccall_nobox("w_bigint_finish_add_raw", result2, 2)
-    return ccall_nobox("w_bigint_seal_raw", result2, 2)
-  if as == 4 && bs == 4
-    result4 = ccall_nobox("w_bigint_alloc_hot", 4) ## i64
-    rp4 = (result4 & 140737488355327) + 16 ## i64
-    ap4 = (a & 140737488355327) + 16 ## i64
-    bp4 = (b & 140737488355327) + 16 ## i64
-    top4 = __bigint_bw_and4(rp4, ap4, bp4) ## i64
-    if top4 != 0
-      return ccall_nobox("w_bigint_finish_add_raw", result4, 4)
-    return ccall_nobox("w_bigint_seal_raw", result4, 4)
   amask = as >> 63 ## i64
   bmask = bs >> 63 ## i64
   alen = (as ^ amask) - amask ## i64
@@ -662,12 +1014,35 @@ fn __bigint_and_raw(a, b) (i64 i64) i64
     signed_n = 0 - n
   ccall_nobox("w_bigint_seal_raw", result, signed_n)
 
-# x | x = x, x | 0 = x, and x | -1 = -1 are allocation-free.
-fn __bigint_or_raw(a, b) (i64 i64) i64
-  zero = -1688849860263936 ## i64
-  negative_one = -1407374883553281 ## i64
+fn __bigint_and_raw(a, b) (i64 i64) i64
   if a == b
     return ccall_nobox("w_bigint_mark_shared_value", a)
+  if (((a ^ -1407374883553280) | (b ^ -1407374883553280)) & -140737488355328) == 0
+    aptr = a & 140737488355327 ## i64
+    bptr = b & 140737488355327 ## i64
+    as_raw = raw_load_u32(aptr, 4) ## i64
+    bs_raw = raw_load_u32(bptr, 4) ## i64
+    as_pos = (as_raw << 32) >> 32 ## i64
+    if as_raw == bs_raw && as_pos > 0
+      ap = aptr + 16 ## i64
+      bp = bptr + 16 ## i64
+      if as_pos == 1
+        r0 = __bigint_bw_load_and1(ap, bp) ## i64
+        if r0 >= 0 && r0 <= 140737488355327
+          return -1688849860263936 | r0
+      result_eq = ccall_nobox("w_bigint_alloc_hot", as_pos) ## i64
+      rp_eq = (result_eq & 140737488355327) + 16 ## i64
+      top_eq = __bigint_bw_and_eq(rp_eq, ap, bp, as_pos) ## i64
+      if top_eq != 0
+        return __bigint_bw_publish_size(result_eq, as_pos)
+      return ccall_nobox("w_bigint_seal_raw", result_eq, as_pos)
+  __bigint_and_slow_raw(a, b)
+
+# x | x = x, x | 0 = x, and x | -1 = -1 are allocation-free.
+fn __bigint_or_slow_raw(a, b) (i64 i64) i64
+  Tungsten.noinline!
+  zero = -1688849860263936 ## i64
+  negative_one = -1407374883553281 ## i64
   if a == zero
     return ccall_nobox("w_bigint_mark_shared_value", b)
   if b == zero
@@ -682,27 +1057,6 @@ fn __bigint_or_raw(a, b) (i64 i64) i64
 
   as = __bigint_bw_signed_size(a) ## i64
   bs = __bigint_bw_signed_size(b) ## i64
-  if as == 1 && bs == 1 && aisbig && bisbig
-    result1 = ccall_nobox("w_bigint_alloc_hot", 1) ## i64
-    rp1 = (result1 & 140737488355327) + 16 ## i64
-    ap1 = (a & 140737488355327) + 16 ## i64
-    bp1 = (b & 140737488355327) + 16 ## i64
-    __bigint_bw_or1(rp1, ap1, bp1)
-    return ccall_nobox("w_bigint_finish_add_raw", result1, 1)
-  if as == 2 && bs == 2 && aisbig && bisbig
-    result2 = ccall_nobox("w_bigint_alloc_hot", 2) ## i64
-    rp2 = (result2 & 140737488355327) + 16 ## i64
-    ap2 = (a & 140737488355327) + 16 ## i64
-    bp2 = (b & 140737488355327) + 16 ## i64
-    __bigint_bw_or2(rp2, ap2, bp2)
-    return ccall_nobox("w_bigint_finish_add_raw", result2, 2)
-  if as == 4 && bs == 4
-    result4 = ccall_nobox("w_bigint_alloc_hot", 4) ## i64
-    rp4 = (result4 & 140737488355327) + 16 ## i64
-    ap4 = (a & 140737488355327) + 16 ## i64
-    bp4 = (b & 140737488355327) + 16 ## i64
-    __bigint_bw_or4(rp4, ap4, bp4)
-    return ccall_nobox("w_bigint_finish_add_raw", result4, 4)
   amask = as >> 63 ## i64
   bmask = bs >> 63 ## i64
   alen = (as ^ amask) - amask ## i64
@@ -720,12 +1074,29 @@ fn __bigint_or_raw(a, b) (i64 i64) i64
     return ccall_nobox("w_bigint_finish_add_raw", result, n)
   ccall_nobox("w_bigint_seal_raw", result, 0 - n)
 
+fn __bigint_or_raw(a, b) (i64 i64) i64
+  if a == b
+    return ccall_nobox("w_bigint_mark_shared_value", a)
+  if (((a ^ -1407374883553280) | (b ^ -1407374883553280)) & -140737488355328) == 0
+    aptr = a & 140737488355327 ## i64
+    bptr = b & 140737488355327 ## i64
+    as_raw = raw_load_u32(aptr, 4) ## i64
+    bs_raw = raw_load_u32(bptr, 4) ## i64
+    as_pos = (as_raw << 32) >> 32 ## i64
+    if as_raw == bs_raw && as_pos > 0
+      result_eq = ccall_nobox("w_bigint_alloc_hot", as_pos) ## i64
+      rp_eq = (result_eq & 140737488355327) + 16 ## i64
+      ap = aptr + 16 ## i64
+      bp = bptr + 16 ## i64
+      __bigint_bw_or_eq(rp_eq, ap, bp, as_pos)
+      return __bigint_bw_publish_size(result_eq, as_pos)
+  __bigint_or_slow_raw(a, b)
+
 # x ^ x = 0 and x ^ 0 = x are allocation-free.  XOR of unlike signs is
 # negative; like signs are positive.
-fn __bigint_xor_raw(a, b) (i64 i64) i64
+fn __bigint_xor_slow_raw(a, b) (i64 i64) i64
+  Tungsten.noinline!
   zero = -1688849860263936 ## i64
-  if a == b
-    return zero
   if a == zero
     return ccall_nobox("w_bigint_mark_shared_value", b)
   if b == zero
@@ -738,34 +1109,6 @@ fn __bigint_xor_raw(a, b) (i64 i64) i64
 
   as = __bigint_bw_signed_size(a) ## i64
   bs = __bigint_bw_signed_size(b) ## i64
-  if as == 1 && bs == 1 && aisbig && bisbig
-    ap1 = (a & 140737488355327) + 16 ## i64
-    bp1 = (b & 140737488355327) + 16 ## i64
-    r0 = __bigint_bw_load_xor1(ap1, bp1) ## i64
-    if r0 >= 0 && r0 <= 140737488355327
-      return -1688849860263936 | r0
-    result1 = ccall_nobox("w_bigint_alloc_hot", 1) ## i64
-    rp1 = (result1 & 140737488355327) + 16 ## i64
-    __bigint_bw_store1(rp1, r0)
-    return ccall_nobox("w_bigint_finish_add_raw", result1, 1)
-  if as == 2 && bs == 2 && aisbig && bisbig
-    result2 = ccall_nobox("w_bigint_alloc_hot", 2) ## i64
-    rp2 = (result2 & 140737488355327) + 16 ## i64
-    ap2 = (a & 140737488355327) + 16 ## i64
-    bp2 = (b & 140737488355327) + 16 ## i64
-    top2 = __bigint_bw_xor2(rp2, ap2, bp2) ## i64
-    if top2 != 0
-      return ccall_nobox("w_bigint_finish_add_raw", result2, 2)
-    return ccall_nobox("w_bigint_seal_raw", result2, 2)
-  if as == 4 && bs == 4
-    result4 = ccall_nobox("w_bigint_alloc_hot", 4) ## i64
-    rp4 = (result4 & 140737488355327) + 16 ## i64
-    ap4 = (a & 140737488355327) + 16 ## i64
-    bp4 = (b & 140737488355327) + 16 ## i64
-    top4 = __bigint_bw_xor4(rp4, ap4, bp4) ## i64
-    if top4 != 0
-      return ccall_nobox("w_bigint_finish_add_raw", result4, 4)
-    return ccall_nobox("w_bigint_seal_raw", result4, 4)
   amask = as >> 63 ## i64
   bmask = bs >> 63 ## i64
   alen = (as ^ amask) - amask ## i64
@@ -783,6 +1126,30 @@ fn __bigint_xor_raw(a, b) (i64 i64) i64
   if rneg
     signed_n = 0 - n
   ccall_nobox("w_bigint_seal_raw", result, signed_n)
+
+fn __bigint_xor_raw(a, b) (i64 i64) i64
+  if a == b
+    return -1688849860263936
+  if (((a ^ -1407374883553280) | (b ^ -1407374883553280)) & -140737488355328) == 0
+    aptr = a & 140737488355327 ## i64
+    bptr = b & 140737488355327 ## i64
+    as_raw = raw_load_u32(aptr, 4) ## i64
+    bs_raw = raw_load_u32(bptr, 4) ## i64
+    as_pos = (as_raw << 32) >> 32 ## i64
+    if as_raw == bs_raw && as_pos > 0
+      ap = aptr + 16 ## i64
+      bp = bptr + 16 ## i64
+      if as_pos == 1
+        r0 = __bigint_bw_load_xor1(ap, bp) ## i64
+        if r0 >= 0 && r0 <= 140737488355327
+          return -1688849860263936 | r0
+      result_eq = ccall_nobox("w_bigint_alloc_hot", as_pos) ## i64
+      rp_eq = (result_eq & 140737488355327) + 16 ## i64
+      top_eq = __bigint_bw_xor_eq(rp_eq, ap, bp, as_pos) ## i64
+      if top_eq != 0
+        return __bigint_bw_publish_size(result_eq, as_pos)
+      return ccall_nobox("w_bigint_seal_raw", result_eq, as_pos)
+  __bigint_xor_slow_raw(a, b)
 
 # The consumed ABI can be selected for an opaque local whose dynamic value is
 # not an integer.  Keep coercion and error policy at the public runtime entry;

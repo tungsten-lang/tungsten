@@ -9,7 +9,19 @@
 #   s.write("fig.svg")                     # s.write_png("fig.png") via rsvg-convert
 #
 # Attribute hashes accept: fill, stroke, width (stroke width), opacity,
-# dash, anchor (text-anchor), size (font size), weight, family, class, transform.
+# dash, anchor (text-anchor), size (font size), weight, family, class, transform,
+# linecap, linejoin, fill_opacity, stroke_opacity, dash_offset, spacing
+# (letter-spacing), style (font-style), baseline (dominant-baseline), rx (corner
+# radius), id, filter and clip (ids of a filter / clipPath defined with the
+# helpers below, written as url(#id)).
+#
+# Definitions for gradients, blur/glow filters and clip rectangles:
+#
+#   s.linear_gradient("sky", 0, 0, 0, 1, [[0, "#0b1018", 1], [1, "#1b2636", 1]])
+#   s.rect(0, 0, 400, 300, fill: "url(#sky)")
+#   s.glow_filter("glow", 6)
+#   s.circle(200, 150, 10, fill: "#4fd1ff", filter: "glow")
+#   s.text_runs(20, 40, [["x = ", {}], ["42", {fill: "#ffc24b", weight: "bold"}]], size: 24)
 
 + Svg
   ro :width, :height
@@ -62,6 +74,28 @@
       out = out + " transform=\"[opts[:transform]]\""
     if opts.has_key?(:linecap)
       out = out + " stroke-linecap=\"[opts[:linecap]]\""
+    if opts.has_key?(:linejoin)
+      out = out + " stroke-linejoin=\"[opts[:linejoin]]\""
+    if opts.has_key?(:fill_opacity)
+      out = out + " fill-opacity=\"[Svg.num(opts[:fill_opacity])]\""
+    if opts.has_key?(:stroke_opacity)
+      out = out + " stroke-opacity=\"[Svg.num(opts[:stroke_opacity])]\""
+    if opts.has_key?(:dash_offset)
+      out = out + " stroke-dashoffset=\"[Svg.num(opts[:dash_offset])]\""
+    if opts.has_key?(:spacing)
+      out = out + " letter-spacing=\"[Svg.num(opts[:spacing])]\""
+    if opts.has_key?(:style)
+      out = out + " font-style=\"[opts[:style]]\""
+    if opts.has_key?(:baseline)
+      out = out + " dominant-baseline=\"[opts[:baseline]]\""
+    if opts.has_key?(:rx)
+      out = out + " rx=\"[Svg.num(opts[:rx])]\""
+    if opts.has_key?(:id)
+      out = out + " id=\"[opts[:id]]\""
+    if opts.has_key?(:filter)
+      out = out + " filter=\"url(#[opts[:filter]])\""
+    if opts.has_key?(:clip)
+      out = out + " clip-path=\"url(#[opts[:clip]])\""
     out
 
   -> raw(s)
@@ -105,6 +139,45 @@
 
   -> group_close
     raw("</g>")
+
+  -> ellipse(cx, cy, rx, ry, opts = {})
+    raw("<ellipse cx=\"[Svg.num(cx)]\" cy=\"[Svg.num(cy)]\" rx=\"[Svg.num(rx)]\" ry=\"[Svg.num(ry)]\"[attrs(opts)]/>")
+
+  # One <text> whose pieces carry their own attributes: runs = [[string, opts], ...].
+  # The outer opts (position anchor, size, family, ...) apply to the whole line.
+  -> text_runs(x, y, runs, opts = {})
+    if !opts.has_key?(:family)
+      opts[:family] = "Helvetica, Arial, sans-serif"
+    parts = []
+    runs.each -> (r)
+      parts.push("<tspan[attrs(r[1])]>[Svg.esc(r[0])]</tspan>")
+    body = parts.join("")
+    raw("<text x=\"[Svg.num(x)]\" y=\"[Svg.num(y)]\" xml:space=\"preserve\"[attrs(opts)]>[body]</text>")
+
+  # stops = [[offset 0..1, color, opacity], ...]; coordinates are fractions of the
+  # filled shape's bounding box
+  -> stop_list(stops)
+    parts = []
+    stops.each -> (st)
+      parts.push("<stop offset=\"[Svg.num(st[0])]\" stop-color=\"[st[1]]\" stop-opacity=\"[Svg.num(st[2])]\"/>")
+    parts.join("")
+
+  -> linear_gradient(id, x1, y1, x2, y2, stops)
+    raw("<defs><linearGradient id=\"[id]\" x1=\"[Svg.num(x1)]\" y1=\"[Svg.num(y1)]\" x2=\"[Svg.num(x2)]\" y2=\"[Svg.num(y2)]\">[stop_list(stops)]</linearGradient></defs>")
+
+  -> radial_gradient(id, cx, cy, r, stops)
+    raw("<defs><radialGradient id=\"[id]\" cx=\"[Svg.num(cx)]\" cy=\"[Svg.num(cy)]\" r=\"[Svg.num(r)]\">[stop_list(stops)]</radialGradient></defs>")
+
+  # a Gaussian blur of the element itself
+  -> blur_filter(id, deviation)
+    raw("<defs><filter id=\"[id]\" x=\"-50%\" y=\"-50%\" width=\"200%\" height=\"200%\"><feGaussianBlur stdDeviation=\"[Svg.num(deviation)]\"/></filter></defs>")
+
+  # the element drawn over its own blurred halo
+  -> glow_filter(id, deviation)
+    raw("<defs><filter id=\"[id]\" x=\"-50%\" y=\"-50%\" width=\"200%\" height=\"200%\"><feGaussianBlur in=\"SourceGraphic\" stdDeviation=\"[Svg.num(deviation)]\" result=\"b\"/><feMerge><feMergeNode in=\"b\"/><feMergeNode in=\"SourceGraphic\"/></feMerge></filter></defs>")
+
+  -> clip_rect(id, x, y, w, h)
+    raw("<defs><clipPath id=\"[id]\"><rect x=\"[Svg.num(x)]\" y=\"[Svg.num(y)]\" width=\"[Svg.num(w)]\" height=\"[Svg.num(h)]\"/></clipPath></defs>")
 
   -> to_s
     head = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"[@width]\" height=\"[@height]\" viewBox=\"[@view]\">\n"

@@ -222,4 +222,43 @@ eis_check("to_s.forms",
           eis(1, 2).to_s == "1 + 2w" && eis(1, -2).to_s == "1 - 2w" &&
           eis(3, 0).to_s == "3" && eis(0, 2).to_s == "2w" && zero.to_s == "0")
 
+# --- Powers, cube roots, norm circles, plane points ---------------------------
+eis_check("power.small", eis(3, 1).power(0) == one && eis(3, 1).power(1) == eis(3, 1) &&
+          eis(3, 1).power(2) == eis(8, 5) && eis(3, 1).power(3) == eis(19, 18))
+eis_check("power.omega_cubed", w.power(3) == one && w.power(5) == w * w)
+# (m + n w)^3 = (m^3 - 3mn^2 + n^3) + 3mn(m - n) w
+eis_check("power.cube_expansion", eis(5, -2).power(3) == eis(125 - 3 * 5 * 4 - 8, 3 * 5 * (-2) * 7))
+found = eis(19, 18).cube_root_up_to_unit
+eis_check("cube_root.found", found[0] == one && found[1].power(3) == eis(19, 18) && found[1].norm == 7)
+twisted = w * eis(4, -1).power(3)
+root = twisted.cube_root_up_to_unit
+eis_check("cube_root.with_unit", root != nil && root[0] * root[1].power(3) == twisted)
+# 7 (3 + w) has the cube norm 343 but shares the prime 3 + w with its conjugate
+eis_check("cube_root.cube_norm_not_cube", (eis(7, 0) * eis(3, 1)).norm == 343 &&
+          (eis(7, 0) * eis(3, 1)).cube_root_up_to_unit == nil)
+eis_check("cube_root.non_cube_norm", eis(3, 1).cube_root_up_to_unit == nil)
+eis_check("of_norm.counts", EisensteinInteger.of_norm(1).size == 6 && EisensteinInteger.of_norm(2).size == 0 &&
+          EisensteinInteger.of_norm(3).size == 6 && EisensteinInteger.of_norm(5).size == 0 &&
+          EisensteinInteger.of_norm(7).size == 12 && EisensteinInteger.of_norm(49).size == 18)
+eis_check("of_norm.members", EisensteinInteger.of_norm(13).all? ->(z) z.norm == 13)
+# the radius-k centered hexagon has 3k^2 + 3k + 1 points, the shell count (k+1)^3 - k^3
+hex_ok = true
+k = 0
+while k <= 6
+  count = 0
+  a = 0 - k
+  while a <= k
+    b = 0 - k
+    while b <= k
+      count += 1 if eis(a, b).hex_radius <= k
+      b += 1
+    a += 1
+  hex_ok = false if count != (k + 1) * (k + 1) * (k + 1) - k * k * k
+  # ... and it is the norm of (k + 1) - k w
+  hex_ok = false if eis(k + 1, 0 - k).norm != count
+  k += 1
+eis_check("hex_radius.centered_hexagon_counts", hex_ok)
+p = eis(2, 3).plane_point
+eis_check("plane_point.norm_is_squared_length", (p[0] * p[0] + p[1] * p[1] - ~7.0).abs < ~0.000000001)
+
 << "algebra_eisenstein_integer_spec: all checks passed"

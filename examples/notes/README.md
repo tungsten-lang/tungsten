@@ -6,11 +6,11 @@ Run from the repository root:
 python3 scripts/run-notes-demo.py
 ```
 
-To include standard HDF5, Parquet and Arrow outputs, use the optional environment
-from `experiments/science-interop/requirements.txt`:
+To also run an independent external Python check (`h5py` / `pyarrow`) on the
+generated `samples.h5`, `samples.parquet`, and `samples.arrow` outputs:
 
 ```sh
-python3 scripts/run-notes-demo.py --science-python build/venv-science/bin/python
+uv run --with h5py --with numpy --with pyarrow python3 scripts/run-notes-demo.py
 ```
 
 The runner prints a new run directory's manifest and `.tnotes` document, then
@@ -24,8 +24,9 @@ The example:
    custom object's `to_notes` table, line plot and small-matrix result.
 2. Builds the same typed numerical source for WASM and runs it in Node.
 3. Checks every native/WASM value against an independent integer reference.
-4. Optionally writes genuine HDF5, Parquet and Arrow IPC files and reopens each
-   with an independent h5py/PyArrow check.
+4. Writes genuine HDF5, Parquet and Arrow IPC files natively in Tungsten (and
+   optionally reopens each with an independent `h5py`/PyArrow check when
+   `--science-python` is supplied).
 5. Adds a **finite checked** certificate block only after those checks pass,
    validates the document using the native app decoder, and opens it.
 

@@ -42,14 +42,13 @@ blocks = [
 ]
 Notes.write(ARGV[0] + "/producer.tnotes", "One experiment, inspectable results", blocks)
 
-if env("TUNGSTEN_SCIENCE_PYTHON") != nil
-  SciIO.write_hdf5_standard(ARGV[0] + "/samples.h5", {
-    "samples": {dtype: "float64", shape: [21, 2], values: flat, attributes: {formula: "(x + 1)^2"}}
-  })
-  table = {rows: 21, columns: [
-    {name: "x", dtype: "int64", nullable: false, values: xs},
-    {name: "y", dtype: "int64", nullable: false, values: ys}
-  ]}
-  SciIO.write_parquet_standard(ARGV[0] + "/samples.parquet", table)
-  SciIO.write_arrow_ipc(ARGV[0] + "/samples.arrow", table)
+SciIO.write_hdf5_standard(ARGV[0] + "/samples.h5", {
+  "samples": {dtype: "float64", shape: [21, 2], values: flat, attributes: {formula: "(x + 1)^2"}}
+})
+table = {rows: 21, columns: [
+  {name: "x", dtype: "int64", nullable: false, values: xs},
+  {name: "y", dtype: "int64", nullable: false, values: ys}
+]}
+SciIO.write_parquet_standard(ARGV[0] + "/samples.parquet", table)
+SciIO.write_arrow_ipc(ARGV[0] + "/samples.arrow", table)
 << "Produced 21 samples"

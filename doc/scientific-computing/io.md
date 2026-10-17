@@ -29,16 +29,19 @@
 contiguous numeric subset, including endian conversion. It does not implement
 a general chunk/filter reader. TH5C/TH5D writers remain Tungsten-specific.
 
-**Optional standard-format bridge**
+**Standard-format interchange (`core/io/interop`)**
 
-Explicitly import `core/io/interop` and configure `TUNGSTEN_SCIENCE_PYTHON` with
-h5py. `SciIO.read_hdf5_dataset` returns shape/dtype/values/attribute records;
-`SciIO.write_hdf5_standard` writes genuine HDF5 readable by independent tools.
-This supports compressed multidimensional datasets through h5py, with explicit
-copy/size/type limits. See [the contract and test](../../experiments/science-interop/README.md).
-The same optional import provides standard Parquet and Arrow IPC file methods,
-including nulls and schema metadata. TPAR remains a separate native format.
-Core's default native path still requires no system scientific I/O libraries.
+Explicitly import `core/io/interop` for pure-Tungsten standard HDF5, Apache
+Parquet, and Apache Arrow IPC file reading and writing with zero external
+Python or C library dependencies. `SciIO.read_hdf5_dataset` returns
+shape/dtype/values/attribute records (including compressed chunked datasets,
+endian conversion, and attributes); `SciIO.write_hdf5_standard` writes genuine
+HDF5 readable by independent tools (`h5py`, etc.). The same module provides
+`SciIO.read_parquet_standard`, `SciIO.write_parquet_standard`,
+`SciIO.read_arrow_ipc`, and `SciIO.write_arrow_ipc`, including nulls,
+dictionary-encoded pages, and schema/field metadata. See
+[the contract and tests](../../experiments/science-interop/README.md).
+TPAR and TH5C/TH5D remain separate lightweight formats in `core/io`.
 
 ## Format status
 

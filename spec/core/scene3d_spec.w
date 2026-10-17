@@ -4,8 +4,6 @@
 #   bin/tungsten run --interpret spec/core/scene3d_spec.w
 #   bin/tungsten -o /tmp/scene3d_spec spec/core/scene3d_spec.w && /tmp/scene3d_spec
 
-use scene3d
-
 -> s3_check(name, condition)
   raise "FAIL " + name if !condition
   << "PASS " + name

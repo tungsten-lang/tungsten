@@ -41,15 +41,21 @@ manifest={'schema_version':1,'run_id':run_id,'title':'Tungsten Notes numerical s
  'provenance_scope':'entry/key sources, git state, tool/binary and output hashes; not a complete archived dependency closure',
  'verification':{'status':'not_run','scope':'21 specific polynomial samples; no general theorem claim'}}
 for path in ['examples/notes/experiment.w','experiments/wasm/kernels.w','core/notes.w','core/numeric/mat3.w',
-             'core/io/interop.w','runtime/science_interop.py','scripts/wasm.py','scripts/run-notes-demo.py']:
+             'core/io/interop.w','scripts/wasm.py','scripts/run-notes-demo.py']:
  manifest['source_files'][path]=sha(ROOT/path)
 status=0
 try:
     env=dict(os.environ);env.pop('TUNGSTEN_SCIENCE_PYTHON',None)
-    if args.science_python:
-        env['TUNGSTEN_SCIENCE_PYTHON']=str(args.science_python.absolute())
-        manifest['optional_python']=str(args.science_python.absolute())
-        manifest['optional_versions']=json.loads(command([args.science_python,'-c',
+    sci_py=str(args.science_python.absolute()) if args.science_python else None
+    if not sci_py:
+        try:
+            import h5py,numpy,pyarrow
+            sci_py=sys.executable
+        except ImportError:
+            pass
+    if sci_py:
+        manifest['optional_python']=sci_py
+        manifest['optional_versions']=json.loads(command([sci_py,'-c',
           'import json,numpy,h5py,pyarrow;print(json.dumps({"numpy":numpy.__version__,"h5py":h5py.__version__,"pyarrow":pyarrow.__version__}))'],'versions'))
     command([ROOT/'bin/tungsten-compiler','compile',ROOT/'examples/notes/experiment.w','--out',OUT/'experiment','--release','--no-lto'],'compile')
     command([OUT/'experiment',OUT],'native',env)
@@ -66,7 +72,7 @@ console.log(JSON.stringify(rows));
     native=document['blocks'][1]['rows']
     expected=[[str(x),str((x+1)**2)] for x in range(-10,11)]
     if native!=expected or wasm!=expected:raise RuntimeError('native/WASM/reference sample mismatch')
-    if args.science_python:
+    if sci_py:
         checker=OUT/'check-formats.py'
         checker.write_text('''import sys,h5py,numpy as np,pyarrow.parquet as pq,pyarrow.ipc as ipc
 from pathlib import Path
@@ -76,7 +82,7 @@ assert pq.read_table(p/'samples.parquet').to_pydict()=={'x':xs,'y':ys}
 with ipc.open_file(p/'samples.arrow') as f: assert f.read_all().to_pydict()=={'x':xs,'y':ys}
 print('Independent HDF5/Parquet/Arrow checks passed')
 ''')
-        command([args.science_python,checker,OUT],'format-check')
+        command([sci_py,checker,OUT],'format-check')
     evidence={'schema_version':1,'verifier':'notes-sample-v1','verifier_sha256':sha(__file__),
               'scope':'21 explicit integer samples x=-10..10', 'status':'passed','rows':expected,
               'native_binary_sha256':sha(OUT/'experiment'),'wasm_sha256':sha(OUT/'polynomial.wasm'),

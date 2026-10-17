@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import json
+"""Independent PyArrow Parquet/Arrow fixtures -> compiled Tungsten (native SciIO) -> PyArrow."""
 import os
 from pathlib import Path
 import subprocess
@@ -16,7 +16,7 @@ schema=pa.schema([
 table=pa.Table.from_arrays([pa.array([1.25,None,3.5]),pa.array(['α','',None]),
  pa.array([2**63+9,None,7],type=pa.uint64()),pa.array([True,False,True])],schema=schema)
 pq.write_table(table,OUT/'foreign.parquet',compression='gzip',use_dictionary=True)
-for name in ('written.parquet','written.arrow','from-arrow.parquet'):
+for name in ('written.parquet','written.arrow','from-arrow.parquet','bad.parquet'):
  (OUT/name).unlink(missing_ok=True)
 source=OUT/'roundtrip.w'
 source.write_text('''use core/io/interop
@@ -27,25 +27,34 @@ SciIO.write_parquet_standard(ARGV[1], record)
 SciIO.write_arrow_ipc(ARGV[2], record)
 from_arrow = SciIO.read_arrow_ipc(ARGV[2])
 SciIO.write_parquet_standard(ARGV[3], from_arrow)
+
+bad_tables = [
+  {columns: [{name: "x", dtype: "int64", values: [nil], nullable: false}]},
+  {columns: [{name: "x", dtype: "int64", values: [1]}, {name: "y", dtype: "int64", values: []}]}
+]
+i = 0
+while i < bad_tables.size
+  rejected = false
+  begin
+    SciIO.write_parquet_standard(ARGV[4], bad_tables[i])
+  rescue error
+    rejected = true
+  if !rejected
+    raise "malformed table accepted"
+  i += 1
 << "PASS"
 ''')
 def run(args):
- p=subprocess.run([str(a) for a in args],cwd=ROOT,text=True,capture_output=True,timeout=90,
- env={**os.environ,'TUNGSTEN_SCIENCE_PYTHON':str(ROOT/'build/venv-science/bin/python')})
+ env=dict(os.environ)
+ env.pop('TUNGSTEN_SCIENCE_PYTHON',None)
+ p=subprocess.run([str(a) for a in args],cwd=ROOT,text=True,capture_output=True,timeout=90,env=env)
  assert p.returncode==0,p.stdout+p.stderr
  return p.stdout
 run([ROOT/'bin/tungsten-compiler','compile',source,'--out',OUT/'roundtrip','--no-lto'])
-assert 'PASS' in run([OUT/'roundtrip',OUT/'foreign.parquet',OUT/'written.parquet',OUT/'written.arrow',OUT/'from-arrow.parquet'])
+assert 'PASS' in run([OUT/'roundtrip',OUT/'foreign.parquet',OUT/'written.parquet',OUT/'written.arrow',OUT/'from-arrow.parquet',OUT/'bad.parquet'])
+assert not (OUT/'bad.parquet').exists()
 for name in ('written.parquet','from-arrow.parquet'):
  assert pq.read_table(OUT/name).equals(table,check_metadata=True)
 with ipc.open_file(OUT/'written.arrow') as file:
  assert file.read_all().equals(table,check_metadata=True)
-# Malformed nullable/length records must never produce a destination.
-request=OUT/'request.json';response=OUT/'response.json';target=OUT/'bad.parquet'
-for columns in ([{'name':'x','dtype':'int64','values':[None],'nullable':False}],
- [{'name':'x','dtype':'int64','values':[1]},{'name':'y','dtype':'int64','values':[]}]):
- target.unlink(missing_ok=True)
- request.write_text(json.dumps({'version':1,'operation':'parquet_write','path':str(target),'table':{'columns':columns}}))
- run([ROOT/'build/venv-science/bin/python',ROOT/'runtime/science_interop.py',request,response])
- assert json.loads(response.read_text())['ok'] is False and not target.exists()
 print('PASS: independent Parquet -> Tungsten -> Parquet/Arrow -> Tungsten -> Parquet; exact schema/metadata/null/uint64/unicode parity and invalid records')

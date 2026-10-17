@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Independent h5py fixtures -> compiled Tungsten -> standard HDF5 -> h5py."""
-import json
+"""Independent h5py fixtures -> compiled Tungsten (native SciIO) -> standard HDF5 -> h5py."""
 import os
 from pathlib import Path
 import subprocess
@@ -11,7 +10,9 @@ OUT=ROOT/'build/reports/hdf5-interop'
 OUT.mkdir(parents=True,exist_ok=True)
 foreign=OUT/'foreign.h5'
 result=OUT/'written.h5'
+invalid=OUT/'invalid.h5'
 result.unlink(missing_ok=True)
+invalid.unlink(missing_ok=True)
 with h5py.File(foreign,'w',libver='latest') as file:
  d=file.create_dataset('nested/measurements',data=np.arange(24,dtype='>f8').reshape(2,3,4),chunks=(1,3,4),compression='gzip')
  d.attrs['unit']='kelvin';d.attrs['run']=17
@@ -34,15 +35,34 @@ rescue error
   rejected = true
 if !rejected
   raise "existing destination overwritten"
+
+invalids = [
+  {dtype: "float64", shape: [2], values: [1]},
+  {dtype: "uint64", shape: [1], values: [-1]},
+  {dtype: "float32", shape: [1], values: [~1.0e100]},
+  {dtype: "complex128", shape: [1], values: [1]}
+]
+i = 0
+while i < invalids.size
+  ok = false
+  begin
+    SciIO.write_hdf5_standard(ARGV[2], {"data": invalids[i]})
+  rescue error
+    ok = true
+  if !ok
+    raise "invalid record was accepted"
+  i += 1
 << "PASS"
 ''')
 def run(args):
- p=subprocess.run([str(a) for a in args],cwd=ROOT,text=True,capture_output=True,timeout=90,
-  env={**os.environ,'TUNGSTEN_SCIENCE_PYTHON':str(ROOT/'build/venv-science/bin/python')})
+ env=dict(os.environ)
+ env.pop('TUNGSTEN_SCIENCE_PYTHON',None)
+ p=subprocess.run([str(a) for a in args],cwd=ROOT,text=True,capture_output=True,timeout=90,env=env)
  assert p.returncode==0,p.stdout+p.stderr
  return p.stdout
 run([ROOT/'bin/tungsten-compiler','compile',source,'--out',OUT/'roundtrip','--no-lto'])
-assert 'PASS' in run([OUT/'roundtrip',foreign,result])
+assert 'PASS' in run([OUT/'roundtrip',foreign,result,invalid])
+assert not invalid.exists()
 with h5py.File(result,'r') as file:
  np.testing.assert_array_equal(file['copied'][:],np.arange(24).reshape(2,3,4))
  assert file['copied'].attrs['unit']=='kelvin' and file['copied'].attrs['run']==17
@@ -51,17 +71,4 @@ with h5py.File(result,'r') as file:
  assert file['scalar'].shape==() and file['scalar'][()]==42
  assert file['big'][0]==2**63+9
 print('PASS: independent compressed/big-endian HDF5, rank-3 shape, attributes, empty/scalar/uint64, no overwrite')
-for record in [
- {'dtype':'float64','shape':[2],'values':[1]},
- {'dtype':'uint64','shape':[1],'values':[-1]},
- {'dtype':'float32','shape':[1],'values':[1e100]},
- {'dtype':'complex128','shape':[1],'values':[1]},
-]:
- target=OUT/'invalid.h5'
- target.unlink(missing_ok=True)
- request=OUT/'request.json';response=OUT/'response.json'
- request.write_text(json.dumps({'version':1,'operation':'hdf5_write','path':str(target),'datasets':{'data':record}}))
- run([ROOT/'build/venv-science/bin/python',ROOT/'runtime/science_interop.py',request,response])
- assert json.loads(response.read_text())['ok'] is False
- assert not target.exists()
 print('PASS: malformed shape, integer range, float overflow and unsupported dtype rejected before publication')

@@ -157,6 +157,79 @@
     return false if root * root != n
     root.prime? && root % 3 == 2
 
+  # self^n for n >= 0, by repeated squaring.
+  -> power(n)
+    raise "power needs a nonnegative integer exponent" if n < 0
+    result = EisensteinInteger.one
+    base = self
+    e = n
+    while e > 0
+      result = result * base if e % 2 == 1
+      base = base * base
+      e = e / 2
+    result
+
+  # The point in the complex plane: 1 is (1, 0) and omega is (-1/2, sqrt(3)/2),
+  # so the lattice has unit spacing and N is the squared distance from 0.
+  -> plane_point
+    [@a - @b / ~2.0, @b * ~0.8660254037844386]
+
+  # Hexagonal ring index: the radius-k centered hexagon is exactly the set
+  # with hex_radius <= k, and ring j > 0 holds 6j points.
+  -> hex_radius
+    hi = 0
+    hi = @a if @a > hi
+    hi = @b if @b > hi
+    lo = 0
+    lo = @a if @a < lo
+    lo = @b if @b < lo
+    hi - lo
+
+  # Every element of norm n, in lexicographic order of (a, b). Since
+  # 4N = (2a - b)^2 + 3b^2, the search box is |b| <= 2 sqrt(n/3).
+  -> .of_norm(n)
+    out = []
+    return out if n < 0
+    if n == 0
+      out.push(EisensteinInteger.zero)
+      return out
+    bmax = 0
+    bmax += 1 while 3 * (bmax + 1) * (bmax + 1) <= 4 * n
+    amax = bmax + 1
+    amax += 1 while (amax - bmax) * (amax - bmax) <= 4 * n
+    a = 0 - amax
+    while a <= amax
+      b = 0 - bmax
+      while b <= bmax
+        out.push(EisensteinInteger.new(a, b)) if a * a - a * b + b * b == n
+        b += 1
+      a += 1
+    out
+
+  # [unit, root] with self = unit * root^3, or nil when self is not a unit
+  # times a cube. The root's norm is the integer cube root of N(self), so the
+  # search is over one norm circle. Each answer is checked by multiplication.
+  # Units are tried in the order of `units`, so a true cube comes back with
+  # the unit 1 (the root is then fixed up to a cube root of unity).
+  -> cube_root_up_to_unit
+    return [EisensteinInteger.one, EisensteinInteger.zero] if zero?
+    n = norm
+    c = 0
+    c += 1 while (c + 1) * (c + 1) * (c + 1) <= n
+    return nil if c * c * c != n
+    circle = EisensteinInteger.of_norm(c)
+    units = EisensteinInteger.units
+    ui = 0
+    while ui < units.size
+      ri = 0
+      while ri < circle.size
+        r = circle[ri]
+        if units[ui] * r * r * r == self
+          return [units[ui], r]
+        ri += 1
+      ui += 1
+    nil
+
   -> to_s
     return "[@a]" if @b == 0
     return "[@b]w" if @a == 0

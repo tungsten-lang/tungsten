@@ -48,12 +48,42 @@ OPERATIONS = (
     "sub1",
     "mul1",
     "div1",
+    "mod1",
+    "not",
+    "tdiv",
+    "tmod",
+    "cdiv",
+    "cmod",
+    "divexact",
+    "divisible",
+    "iroot",
+    "psquare",
+    "invmod",
+    "jacobi",
+    "kronecker",
+    "bitlen",
+    "popcnt",
+    "hamdist",
+    "scan1",
+    "scan0",
+    "tstbit",
+    "setbit",
+    "clrbit",
+    "combit",
+    "cmpabs",
 )
 # Per-operation limb-count ceilings: pow results grow to 5N limbs, and the
 # powmod lane mirrors Tungsten's naive square-and-multiply (O(bits)
 # multiplications), which would break the target-time calibration above
 # these sizes.
-SIZE_CAPS = {"pow": 256, "powmod": 128}
+SIZE_CAPS = {
+    "pow": 256,
+    "powmod": 128,
+    "iroot": 512,
+    "invmod": 512,
+    "jacobi": 512,
+    "kronecker": 512,
+}
 POW_EXPONENT = 5
 POWMOD_M_SEED = 0xA4093822299F31D0
 # Above this, the harness switches to median-of-reps + interquartile spread:
@@ -148,11 +178,59 @@ RATIO_LABELS = {
     "tungsten_native": "W/native",
     "gmp": "W/GMP",
 }
-# The V8 lane is limited to operations V8 ships as BigInt builtins: a
-# hand-written JS gcd/lcm/isqrt/powmod would measure the harness author's
-# algorithm rather than V8's, so those cells are reported unsupported.
+# External lanes only benchmark operations that each competitor library
+# provides directly, rather than benchmarking hand-written multi-step
+# workarounds in the harness.
 EXTERNAL_UNSUPPORTED = {
-    "node": frozenset({"gcd", "lcm", "isqrt", "powmod"}),
+    "python": frozenset({"iroot", "jacobi", "kronecker"}),
+    "rust": frozenset({"jacobi", "kronecker"}),
+    "odin": frozenset({"cdiv", "cmod", "popcnt", "hamdist", "scan0"}),
+    "go": frozenset(
+        {
+            "cdiv",
+            "cmod",
+            "iroot",
+            "psquare",
+            "kronecker",
+            "popcnt",
+            "hamdist",
+            "scan0",
+        }
+    ),
+    "node": frozenset(
+        {
+            "gcd",
+            "lcm",
+            "isqrt",
+            "powmod",
+            "cdiv",
+            "cmod",
+            "iroot",
+            "psquare",
+            "invmod",
+            "jacobi",
+            "kronecker",
+            "bitlen",
+            "popcnt",
+            "hamdist",
+            "scan1",
+            "scan0",
+        }
+    ),
+    "boost": frozenset(
+        {
+            "cdiv",
+            "cmod",
+            "iroot",
+            "psquare",
+            "invmod",
+            "jacobi",
+            "kronecker",
+            "popcnt",
+            "hamdist",
+            "scan0",
+        }
+    ),
 }
 DEFAULT_EXTERNAL_CELL_TIMEOUT_SECONDS = 30.0
 # Paired Tungsten-native measurement.  The native lane is its own binary, so
@@ -282,14 +360,36 @@ def operands(operation: str, limbs: int) -> tuple[int, int]:
     # isqrt reads a 2N-limb operand (N-limb result); cmp compares values
     # that differ only in the lowest limb (forcing a full-length scan);
     # abs takes a negative operand.
-    a_limbs = 2 * limbs if operation in ("div", "mod", "isqrt") else limbs
+    a_limbs = (
+        2 * limbs
+        if operation
+        in (
+            "div",
+            "mod",
+            "isqrt",
+            "tdiv",
+            "tmod",
+            "cdiv",
+            "cmod",
+            "divisible",
+            "psquare",
+        )
+        else limbs
+    )
     a = operand(a_limbs, 0x243F6A8885A308D3 ^ limbs)
-    if operation == "cmp":
+    if operation in ("cmp", "cmpabs"):
         b = a ^ 1
-    elif operation in ("add1", "sub1", "mul1", "div1"):
+    elif operation in ("add1", "sub1", "mul1", "div1", "mod1"):
         b = operand(1, 0x13198A2E03707344 ^ limbs)
     else:
         b = operand(limbs, 0x13198A2E03707344 ^ limbs)
+    if operation == "divexact":
+        a = a * b
+    elif operation == "invmod":
+        while math.gcd(a, b) != 1:
+            b += 2
+    elif operation == "setbit":
+        a &= ~(1 << 13)
     if operation == "abs":
         a = -a
     return a, b
@@ -325,13 +425,25 @@ def time_python(operation: str, a: int, b: int, iterations: int) -> float:
         for _ in range(iterations):
             result = a * a
             previous = result
-    elif operation in ("div", "div1"):
+    elif operation in ("div", "div1", "tdiv", "divexact"):
         for _ in range(iterations):
             result = a // b
             previous = result
-    elif operation == "mod":
+    elif operation in ("mod", "mod1", "tmod"):
         for _ in range(iterations):
             result = a % b
+            previous = result
+    elif operation == "cdiv":
+        for _ in range(iterations):
+            result = -(-a // b)
+            previous = result
+    elif operation == "cmod":
+        for _ in range(iterations):
+            result = -((-a) % b)
+            previous = result
+    elif operation == "divisible":
+        for _ in range(iterations):
+            result = int(a % b == 0)
             previous = result
     elif operation == "gcd":
         for _ in range(iterations):
@@ -349,6 +461,10 @@ def time_python(operation: str, a: int, b: int, iterations: int) -> float:
         for _ in range(iterations):
             result = a ^ b
             previous = result
+    elif operation == "not":
+        for _ in range(iterations):
+            result = ~a
+            previous = result
     elif operation == "shl":
         for _ in range(iterations):
             result = a << 13
@@ -357,7 +473,7 @@ def time_python(operation: str, a: int, b: int, iterations: int) -> float:
         for _ in range(iterations):
             result = a >> 13
             previous = result
-    elif operation == "cmp":
+    elif operation in ("cmp", "cmpabs"):
         # Accumulate counters so the comparisons cannot be folded away.
         below = 0
         above = 0
@@ -383,6 +499,10 @@ def time_python(operation: str, a: int, b: int, iterations: int) -> float:
         for _ in range(iterations):
             result = pow(a, b, modulus)
             previous = result
+    elif operation == "invmod":
+        for _ in range(iterations):
+            result = pow(a, -1, b)
+            previous = result
     elif operation == "lcm":
         for _ in range(iterations):
             result = math.lcm(a, b)
@@ -390,6 +510,47 @@ def time_python(operation: str, a: int, b: int, iterations: int) -> float:
     elif operation == "isqrt":
         for _ in range(iterations):
             result = math.isqrt(a)
+            previous = result
+    elif operation == "psquare":
+        for _ in range(iterations):
+            root = math.isqrt(a)
+            result = int(root * root == a)
+            previous = result
+    elif operation == "bitlen":
+        for _ in range(iterations):
+            result = a.bit_length()
+            previous = result
+    elif operation == "popcnt":
+        for _ in range(iterations):
+            result = a.bit_count()
+            previous = result
+    elif operation == "hamdist":
+        for _ in range(iterations):
+            result = (a ^ b).bit_count()
+            previous = result
+    elif operation == "scan1":
+        for _ in range(iterations):
+            result = (a & -a).bit_length() - 1
+            previous = result
+    elif operation == "scan0":
+        for _ in range(iterations):
+            result = (~a & (a + 1)).bit_length() - 1
+            previous = result
+    elif operation == "tstbit":
+        for _ in range(iterations):
+            result = (a >> 13) & 1
+            previous = result
+    elif operation == "setbit":
+        for _ in range(iterations):
+            result = a | (1 << 13)
+            previous = result
+    elif operation == "clrbit":
+        for _ in range(iterations):
+            result = a & ~1
+            previous = result
+    elif operation == "combit":
+        for _ in range(iterations):
+            result = a ^ (1 << 13)
             previous = result
     elif operation == "tostr":
         for _ in range(iterations):
@@ -506,6 +667,11 @@ def time_python_case(
     row: dict[str, Any], runs: int, target_ns: int
 ) -> None:
     operation = row["operation"]
+    if operation in EXTERNAL_UNSUPPORTED.get("python", ()):
+        row["python_status"] = "unsupported"
+        row.pop("tungsten_over_python", None)
+        row.pop("python_ns", None)
+        return
     limbs = row["limbs"]
     a, b = operands(operation, limbs)
     iterations = calibrate_python(operation, a, b, target_ns)

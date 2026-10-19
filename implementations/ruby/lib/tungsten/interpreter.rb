@@ -3498,6 +3498,8 @@ module Tungsten
     end
 
     def try_autoload_core(name)
+      return (@classes["BigInt"] ||= (@classes["Integer"] || try_autoload_core("Integer"))) if name.to_s == "BigInt"
+
       base_dir = @current_file ? File.dirname(@current_file) : Dir.pwd
       root = find_project_root(base_dir)
       return nil unless root
@@ -5023,6 +5025,10 @@ module Tungsten
         end
       when "prime?"
         recv.is_a?(::Integer) && no_call_args?(arg_nodes) ? tungsten_int_prime?(recv) : NO_DIRECT_CALL
+      when "nextprime", "next_prime"
+        recv.is_a?(::Integer) && no_call_args?(arg_nodes) ? tungsten_nextprime(recv) : NO_DIRECT_CALL
+      when "prevprime", "prev_prime"
+        recv.is_a?(::Integer) && no_call_args?(arg_nodes) ? tungsten_prevprime(recv) : NO_DIRECT_CALL
       when "chars"
         recv.is_a?(::String) && no_call_args?(arg_nodes) ? recv.chars : NO_DIRECT_CALL
       when "bytes"
@@ -5555,6 +5561,35 @@ module Tungsten
       obj
     end
 
+    def tungsten_nextprime(n)
+      return 2 if n < 2
+      return 3 if n == 2
+      cand = (n + 1) | 1
+      cand += 2 until tungsten_int_prime?(cand)
+      cand
+    end
+
+    def tungsten_prevprime(n)
+      raise Tungsten::DomainError, "prevprime requires argument > 2" if n <= 2
+      return 2 if n == 3
+      cand = (n - 1) | 1
+      cand -= 2 if cand >= n
+      cand -= 2 while cand >= 3 && !tungsten_int_prime?(cand)
+      cand
+    end
+
+    def tungsten_factorial(n)
+      raise Tungsten::DomainError, "factorial of negative number" if n < 0
+      return 1 if n <= 1
+      (2..n).reduce(1, :*)
+    end
+
+    def tungsten_primorial(n)
+      raise Tungsten::DomainError, "primorial of negative number" if n < 0
+      return 1 if n < 2
+      (2..n).reduce(1) { |acc, item| tungsten_int_prime?(item) ? acc * item : acc }
+    end
+
     def dispatch_interpreted_ccall(args, node = nil)
       runtime_error("ccall requires a runtime function name", node: node) if args.empty?
       cname = args[0].to_s
@@ -5571,6 +5606,118 @@ module Tungsten
       when "w_date_today"
         runtime_error("w_date_today expects no arguments", node: node) unless args.size == 1
         Date.today
+      when "w_bigint_gcd"
+        args[1].gcd(args[2])
+      when "w_bigint_lcm"
+        args[1].lcm(args[2])
+      when "bigint_powmod_any"
+        args[1].modpow(args[2], args[3])
+      when "w_bigint_prime_q"
+        tungsten_int_prime?(args[1])
+      when "bigint_isqrt_any"
+        args[1].isqrt
+      when "w_bigint_shl", "w_bit_shl"
+        args[1] << args[2]
+      when "w_bigint_shr", "w_bit_shr"
+        args[1] >> args[2]
+      when "w_bigint_divmod"
+        args[1].fdivmod(args[2])
+      when "w_bigint_tdiv"
+        args[1].tdiv(args[2])
+      when "w_bigint_tmod"
+        args[1].tmod(args[2])
+      when "w_bigint_tdivmod"
+        args[1].tdivmod(args[2])
+      when "w_bigint_fdiv"
+        args[1].fdiv(args[2])
+      when "w_bigint_fmod"
+        args[1].fmod(args[2])
+      when "w_bigint_fdivmod"
+        args[1].fdivmod(args[2])
+      when "w_bigint_cdiv"
+        args[1].cdiv(args[2])
+      when "w_bigint_cmod"
+        args[1].cmod(args[2])
+      when "w_bigint_cdivmod"
+        args[1].cdivmod(args[2])
+      when "w_bigint_divexact"
+        args[1].divexact(args[2])
+      when "w_bigint_divisible_p"
+        args[1].divisible?(args[2])
+      when "w_bigint_congruent_p"
+        args[1].congruent?(args[2], args[3])
+      when "w_bigint_isqrt_rem"
+        args[1].isqrt_rem
+      when "w_bigint_iroot"
+        args[1].iroot(args[2])
+      when "w_bigint_iroot_rem"
+        args[1].iroot_rem(args[2])
+      when "w_bigint_perfect_square_p"
+        args[1].perfect_square?
+      when "w_bigint_perfect_power_p"
+        args[1].perfect_power?
+      when "w_bigint_gcdext"
+        args[1].gcdext(args[2])
+      when "w_bigint_invmod"
+        args[1].invmod(args[2])
+      when "w_bigint_jacobi"
+        args[1].jacobi(args[2])
+      when "w_bigint_kronecker"
+        args[1].kronecker(args[2])
+      when "w_bigint_nextprime"
+        tungsten_nextprime(args[1])
+      when "w_bigint_prevprime"
+        tungsten_prevprime(args[1])
+      when "w_bigint_remove"
+        args[1].remove_factor(args[2])
+      when "w_bigint_fac_ui"
+        tungsten_factorial(args[1])
+      when "w_bigint_2fac_ui"
+        args[1].double_factorial
+      when "w_bigint_mfac_uiui"
+        args[1].multifactorial(args[2])
+      when "w_bigint_primorial_ui"
+        tungsten_primorial(args[1])
+      when "w_bigint_bin_ui"
+        args[1].binomial(args[2])
+      when "w_bigint_fib_ui"
+        args[1].fib
+      when "w_bigint_fib2_ui"
+        args[1].fib2
+      when "w_bigint_lucnum_ui"
+        args[1].lucas
+      when "w_bigint_lucnum2_ui"
+        args[1].lucas2
+      when "w_bigint_bit_length"
+        args[1].bit_length
+      when "w_bigint_sizeinbase"
+        args[1].sizeinbase(args[2])
+      when "w_bigint_popcount"
+        args[1].popcount
+      when "w_bigint_hamdist"
+        args[1].hamdist(args[2])
+      when "w_bigint_scan1"
+        args[1].scan1(args[2])
+      when "w_bigint_scan0"
+        args[1].scan0(args[2])
+      when "w_bigint_trailing_zeros"
+        args[1].trailing_zeros
+      when "w_bigint_tstbit"
+        args[1].tstbit(args[2])
+      when "w_bigint_bit_set_p"
+        args[1].bit_set?(args[2])
+      when "w_bigint_setbit"
+        args[1].setbit(args[2])
+      when "w_bigint_clrbit"
+        args[1].clrbit(args[2])
+      when "w_bigint_combit"
+        args[1].combit(args[2])
+      when "w_bigint_cmpabs"
+        args[1].cmpabs(args[2])
+      when "w_bigint_to_bytes"
+        args[1].to_bytes(args[2])
+      when "w_bigint_from_bytes"
+        Integer.from_bytes(args[1], args[2])
       else
         runtime_error("undefined method 'ccall'", node: node, length: 5)
       end

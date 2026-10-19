@@ -1159,7 +1159,30 @@ enum {
     BENCH_BOXED_ADD1,
     BENCH_BOXED_SUB1,
     BENCH_BOXED_MUL1,
-    BENCH_BOXED_DIV1
+    BENCH_BOXED_DIV1,
+    BENCH_BOXED_MOD1,
+    BENCH_BOXED_NOT,
+    BENCH_BOXED_TDIV,
+    BENCH_BOXED_TMOD,
+    BENCH_BOXED_CDIV,
+    BENCH_BOXED_CMOD,
+    BENCH_BOXED_DIVEXACT,
+    BENCH_BOXED_DIVISIBLE,
+    BENCH_BOXED_IROOT,
+    BENCH_BOXED_PSQUARE,
+    BENCH_BOXED_INVMOD,
+    BENCH_BOXED_JACOBI,
+    BENCH_BOXED_KRONECKER,
+    BENCH_BOXED_BITLEN,
+    BENCH_BOXED_POPCNT,
+    BENCH_BOXED_HAMDIST,
+    BENCH_BOXED_SCAN1,
+    BENCH_BOXED_SCAN0,
+    BENCH_BOXED_TSTBIT,
+    BENCH_BOXED_SETBIT,
+    BENCH_BOXED_CLRBIT,
+    BENCH_BOXED_COMBIT,
+    BENCH_BOXED_CMPABS
 };
 
 /* Benchmark-only copies of the retired runtime C handlers. They remain an
@@ -1320,6 +1343,29 @@ static int bench_boxed_op_parse(const char *name) {
     if (strcmp(name, "isqrt") == 0) return BENCH_BOXED_ISQRT;
     if (strcmp(name, "tostr") == 0) return BENCH_BOXED_TOSTR;
     if (strcmp(name, "fromstr") == 0) return BENCH_BOXED_FROMSTR;
+    if (strcmp(name, "mod1") == 0) return BENCH_BOXED_MOD1;
+    if (strcmp(name, "not") == 0) return BENCH_BOXED_NOT;
+    if (strcmp(name, "tdiv") == 0) return BENCH_BOXED_TDIV;
+    if (strcmp(name, "tmod") == 0) return BENCH_BOXED_TMOD;
+    if (strcmp(name, "cdiv") == 0) return BENCH_BOXED_CDIV;
+    if (strcmp(name, "cmod") == 0) return BENCH_BOXED_CMOD;
+    if (strcmp(name, "divexact") == 0) return BENCH_BOXED_DIVEXACT;
+    if (strcmp(name, "divisible") == 0) return BENCH_BOXED_DIVISIBLE;
+    if (strcmp(name, "iroot") == 0) return BENCH_BOXED_IROOT;
+    if (strcmp(name, "psquare") == 0) return BENCH_BOXED_PSQUARE;
+    if (strcmp(name, "invmod") == 0) return BENCH_BOXED_INVMOD;
+    if (strcmp(name, "jacobi") == 0) return BENCH_BOXED_JACOBI;
+    if (strcmp(name, "kronecker") == 0) return BENCH_BOXED_KRONECKER;
+    if (strcmp(name, "bitlen") == 0) return BENCH_BOXED_BITLEN;
+    if (strcmp(name, "popcnt") == 0) return BENCH_BOXED_POPCNT;
+    if (strcmp(name, "hamdist") == 0) return BENCH_BOXED_HAMDIST;
+    if (strcmp(name, "scan1") == 0) return BENCH_BOXED_SCAN1;
+    if (strcmp(name, "scan0") == 0) return BENCH_BOXED_SCAN0;
+    if (strcmp(name, "tstbit") == 0) return BENCH_BOXED_TSTBIT;
+    if (strcmp(name, "setbit") == 0) return BENCH_BOXED_SETBIT;
+    if (strcmp(name, "clrbit") == 0) return BENCH_BOXED_CLRBIT;
+    if (strcmp(name, "combit") == 0) return BENCH_BOXED_COMBIT;
+    if (strcmp(name, "cmpabs") == 0) return BENCH_BOXED_CMPABS;
     return -1;
 }
 
@@ -1327,7 +1373,10 @@ static int32_t bench_boxed_a_limbs(int op, int32_t limbs) {
     /* div/mod keep their historical 2N/N shape; isqrt takes a 2N-limb
      * operand so the result is N limbs (the row's size column). */
     if (op == BENCH_BOXED_DIV || op == BENCH_BOXED_MOD ||
-        op == BENCH_BOXED_ISQRT)
+        op == BENCH_BOXED_ISQRT || op == BENCH_BOXED_TDIV ||
+        op == BENCH_BOXED_TMOD || op == BENCH_BOXED_CDIV ||
+        op == BENCH_BOXED_CMOD || op == BENCH_BOXED_DIVISIBLE ||
+        op == BENCH_BOXED_PSQUARE)
         return 2 * limbs;
     return limbs;
 }
@@ -1365,7 +1414,7 @@ static void bench_boxed_operands(int op, int32_t limbs,
     WValue a = bench_bigint(bench_boxed_a_limbs(op, limbs),
                             0x243f6a8885a308d3ULL ^ (uint64_t)limbs);
     WValue b;
-    if (op == BENCH_BOXED_CMP) {
+    if (op == BENCH_BOXED_CMP || op == BENCH_BOXED_CMPABS) {
         b = bench_clone_integer(a);
 #if BENCH_CMP_SHAPE == 0
         w_as_bigint(b)->limbs[0] ^= 1ULL;
@@ -1383,10 +1432,22 @@ static void bench_boxed_operands(int op, int32_t limbs,
     } else {
         int32_t b_limbs =
             (op == BENCH_BOXED_ADD1 || op == BENCH_BOXED_SUB1 ||
-             op == BENCH_BOXED_MUL1 || op == BENCH_BOXED_DIV1)
+             op == BENCH_BOXED_MUL1 || op == BENCH_BOXED_DIV1 ||
+             op == BENCH_BOXED_MOD1)
                 ? 1
                 : limbs;
         b = bench_bigint(b_limbs, 0x13198a2e03707344ULL ^ (uint64_t)limbs);
+    }
+    if (op == BENCH_BOXED_DIVEXACT) {
+        WValue prod = bigint_mul_any(a, b);
+        if (w_is_bigint(a)) w_value_free(a);
+        a = prod;
+    } else if (op == BENCH_BOXED_INVMOD) {
+        while (bigint_gcd_any(a, b) != w_box_int(1)) {
+            w_as_bigint(b)->limbs[0] += 2ULL;
+        }
+    } else if (op == BENCH_BOXED_SETBIT) {
+        w_as_bigint(a)->limbs[0] &= ~(1ULL << 13);
     }
 #if BENCH_ADDSUB_ZERO_PREFIX > 0
     if (op == BENCH_BOXED_ADD || op == BENCH_BOXED_SUB) {
@@ -1535,12 +1596,26 @@ static WValue bench_boxed_op_apply(int op, WValue a, WValue b) {
         return bigint_mul_ui_any(a, w_as_bigint(b)->limbs[0]);
     case BENCH_BOXED_DIV1:
         return bigint_div_ui_any(a, w_as_bigint(b)->limbs[0]);
+    case BENCH_BOXED_MOD1:
+        return bigint_mod_ui_any(a, w_as_bigint(b)->limbs[0]);
 #else
     case BENCH_BOXED_ADD1: return bigint_add_any(a, b);
     case BENCH_BOXED_SUB1: return bigint_sub_any(a, b);
     case BENCH_BOXED_MUL1: return bigint_mul_any(a, b);
     case BENCH_BOXED_DIV1: return bigint_div_any(a, b);
+    case BENCH_BOXED_MOD1: return bigint_mod_any(a, b);
 #endif
+    case BENCH_BOXED_NOT:  return bigint_not_any(a);
+    case BENCH_BOXED_TDIV: return w_bigint_tdiv(a, b);
+    case BENCH_BOXED_TMOD: return w_bigint_tmod(a, b);
+    case BENCH_BOXED_CDIV: return w_bigint_cdiv(a, b);
+    case BENCH_BOXED_CMOD: return w_bigint_cmod(a, b);
+    case BENCH_BOXED_DIVEXACT: return w_bigint_divexact(a, b);
+    case BENCH_BOXED_IROOT: return w_bigint_iroot(a, w_box_int(3));
+    case BENCH_BOXED_INVMOD: return w_bigint_invmod(a, b);
+    case BENCH_BOXED_SETBIT: return bigint_setbit_ui_any(a, 13ULL);
+    case BENCH_BOXED_CLRBIT: return bigint_clrbit_ui_any(a, 0ULL);
+    case BENCH_BOXED_COMBIT: return bigint_combit_ui_any(a, 13ULL);
     default: die("unknown boxed-result benchmark operation");
     }
     return W_NIL;
@@ -1558,10 +1633,17 @@ static WValue bench_boxed_op_apply(int op, WValue a, WValue b) {
  * not included in bench_sink's iteration-index stream.
  */
 static int bench_boxed_warm_chunk(int op, int32_t limbs) {
-    if (op == BENCH_BOXED_POWMOD) return 1;
-    if (op == BENCH_BOXED_ISQRT && limbs >= 4) return 1;
+    if (op == BENCH_BOXED_POWMOD || op == BENCH_BOXED_INVMOD ||
+        op == BENCH_BOXED_IROOT)
+        return 1;
+    if ((op == BENCH_BOXED_ISQRT || op == BENCH_BOXED_PSQUARE ||
+         op == BENCH_BOXED_JACOBI || op == BENCH_BOXED_KRONECKER) && limbs >= 4)
+        return 1;
     if (op == BENCH_BOXED_LCM && limbs >= 16) return 1;
     if ((op == BENCH_BOXED_DIV || op == BENCH_BOXED_MOD ||
+         op == BENCH_BOXED_TDIV || op == BENCH_BOXED_TMOD ||
+         op == BENCH_BOXED_CDIV || op == BENCH_BOXED_CMOD ||
+         op == BENCH_BOXED_DIVEXACT || op == BENCH_BOXED_DIVISIBLE ||
          op == BENCH_BOXED_GCD) && limbs >= 128)
         return 1;
     if ((op == BENCH_BOXED_MUL || op == BENCH_BOXED_SQR) && limbs >= 256)
@@ -1830,6 +1912,22 @@ DEFINE_BENCH_LANE(powmod, bigint_powmod_any(a, b, m))
 DEFINE_BENCH_LANE(lcm, w_ic_integer_lcm(a, &b, 1))
 DEFINE_BENCH_LANE(isqrt, bigint_isqrt_any(a))
 DEFINE_BENCH_LANE(fromstr, w_bigint_from_dec_str(parse_input))
+#if BENCH_TUNGSTEN_WORD_API
+DEFINE_BENCH_LANE(mod1, bigint_mod_ui_any(a, word))
+#else
+DEFINE_BENCH_LANE(mod1, bigint_mod_any(a, b))
+#endif
+DEFINE_BENCH_LANE(bnot, bigint_not_any(a))
+DEFINE_BENCH_LANE(tdiv, w_bigint_tdiv(a, b))
+DEFINE_BENCH_LANE(tmod, w_bigint_tmod(a, b))
+DEFINE_BENCH_LANE(cdiv, w_bigint_cdiv(a, b))
+DEFINE_BENCH_LANE(cmod, w_bigint_cmod(a, b))
+DEFINE_BENCH_LANE(divexact, w_bigint_divexact(a, b))
+DEFINE_BENCH_LANE(iroot, w_bigint_iroot(a, w_box_int(3)))
+DEFINE_BENCH_LANE(invmod, w_bigint_invmod(a, b))
+DEFINE_BENCH_LANE(setbit, bigint_setbit_ui_any(a, 13ULL))
+DEFINE_BENCH_LANE(clrbit, bigint_clrbit_ui_any(a, 0ULL))
+DEFINE_BENCH_LANE(combit, bigint_combit_ui_any(a, 13ULL))
 
 /* cmp needs an anti-hoist barrier (bigint_compare is a same-TU static;
  * without one clang hoists the loop-invariant compare out of the loop).
@@ -1856,29 +1954,41 @@ static inline WValue bench_launder_value(WValue v) {
     return v;
 }
 
-static double __attribute__((noinline, aligned(128)))
-bench_lane_cmp(BenchLaneCtx *cx) {
-    WValue a = cx->a;
-    WValue b = cx->b;
-    uint64_t sink = 0;
-    if (cx->warm_chunk > 0) {
-        double warm_start = bench_now();
-        do {
-            for (int warm_i = 0; warm_i < cx->warm_chunk; warm_i++)
-                sink ^= (uint64_t)bigint_compare(bench_launder_value(a),
-                                                 bench_launder_value(b));
-        } while (bench_now() - warm_start < bench_warm_seconds);
-    }
-    int iters = cx->iters;
-    double timed_start = bench_now();
-    for (int timed_i = 0; timed_i < iters; timed_i++)
-        sink ^= (uint64_t)bigint_compare(bench_launder_value(a),
-                                         bench_launder_value(b)) ^
-                (uint64_t)timed_i;
-    double elapsed = bench_now() - timed_start;
-    bench_sink ^= sink;
-    return elapsed;
+#define DEFINE_BENCH_SCALAR_LANE(NAME, EXPR)                               \
+static double __attribute__((noinline, aligned(128)))                      \
+bench_lane_##NAME(BenchLaneCtx *cx) {                                      \
+    WValue a = cx->a;                                                      \
+    WValue b = cx->b;                                                      \
+    (void)a; (void)b;                                                      \
+    uint64_t sink = 0;                                                     \
+    if (cx->warm_chunk > 0) {                                              \
+        double warm_start = bench_now();                                   \
+        do {                                                               \
+            for (int warm_i = 0; warm_i < cx->warm_chunk; warm_i++)        \
+                sink ^= (uint64_t)(int64_t)(EXPR);                         \
+        } while (bench_now() - warm_start < bench_warm_seconds);           \
+    }                                                                      \
+    int iters = cx->iters;                                                 \
+    double timed_start = bench_now();                                      \
+    for (int timed_i = 0; timed_i < iters; timed_i++)                      \
+        sink ^= (uint64_t)(int64_t)(EXPR) ^ (uint64_t)timed_i;             \
+    double elapsed = bench_now() - timed_start;                            \
+    bench_sink ^= sink;                                                    \
+    return elapsed;                                                        \
 }
+
+DEFINE_BENCH_SCALAR_LANE(cmp, bigint_compare(bench_launder_value(a), bench_launder_value(b)))
+DEFINE_BENCH_SCALAR_LANE(cmpabs, bigint_cmpabs_c(bench_launder_value(a), bench_launder_value(b)))
+DEFINE_BENCH_SCALAR_LANE(divisible, bigint_divisible_p_c(bench_launder_value(a), bench_launder_value(b)))
+DEFINE_BENCH_SCALAR_LANE(psquare, bigint_perfect_square_p_c(bench_launder_value(a)))
+DEFINE_BENCH_SCALAR_LANE(jacobi, bigint_jacobi_c(bench_launder_value(a), bench_launder_value(b)))
+DEFINE_BENCH_SCALAR_LANE(kronecker, bigint_kronecker_c(bench_launder_value(a), bench_launder_value(b)))
+DEFINE_BENCH_SCALAR_LANE(bitlen, bigint_bit_length_c(bench_launder_value(a)))
+DEFINE_BENCH_SCALAR_LANE(popcnt, bigint_popcount_c(bench_launder_value(a)))
+DEFINE_BENCH_SCALAR_LANE(hamdist, bigint_hamdist_c(bench_launder_value(a), bench_launder_value(b)))
+DEFINE_BENCH_SCALAR_LANE(scan1, bigint_scan1_c(bench_launder_value(a), 0))
+DEFINE_BENCH_SCALAR_LANE(scan0, bigint_scan0_c(bench_launder_value(a), 0))
+DEFINE_BENCH_SCALAR_LANE(tstbit, bigint_test_bit_c(bench_launder_value(a), 13))
 
 /* tostr frees its string result every iteration (mirrors str(a) with no
  * retained previous). */
@@ -1973,6 +2083,29 @@ static double bench_boxed_lane_run(int op, BenchLaneCtx *cx) {
     case BENCH_BOXED_ISQRT:  return bench_lane_isqrt(cx);
     case BENCH_BOXED_FROMSTR: return bench_lane_fromstr(cx);
     case BENCH_BOXED_TOSTR:  return bench_lane_tostr(cx);
+    case BENCH_BOXED_MOD1:   return bench_lane_mod1(cx);
+    case BENCH_BOXED_NOT:    return bench_lane_bnot(cx);
+    case BENCH_BOXED_TDIV:   return bench_lane_tdiv(cx);
+    case BENCH_BOXED_TMOD:   return bench_lane_tmod(cx);
+    case BENCH_BOXED_CDIV:   return bench_lane_cdiv(cx);
+    case BENCH_BOXED_CMOD:   return bench_lane_cmod(cx);
+    case BENCH_BOXED_DIVEXACT: return bench_lane_divexact(cx);
+    case BENCH_BOXED_DIVISIBLE: return bench_lane_divisible(cx);
+    case BENCH_BOXED_IROOT:  return bench_lane_iroot(cx);
+    case BENCH_BOXED_PSQUARE: return bench_lane_psquare(cx);
+    case BENCH_BOXED_INVMOD: return bench_lane_invmod(cx);
+    case BENCH_BOXED_JACOBI: return bench_lane_jacobi(cx);
+    case BENCH_BOXED_KRONECKER: return bench_lane_kronecker(cx);
+    case BENCH_BOXED_BITLEN: return bench_lane_bitlen(cx);
+    case BENCH_BOXED_POPCNT: return bench_lane_popcnt(cx);
+    case BENCH_BOXED_HAMDIST: return bench_lane_hamdist(cx);
+    case BENCH_BOXED_SCAN1:  return bench_lane_scan1(cx);
+    case BENCH_BOXED_SCAN0:  return bench_lane_scan0(cx);
+    case BENCH_BOXED_TSTBIT: return bench_lane_tstbit(cx);
+    case BENCH_BOXED_SETBIT: return bench_lane_setbit(cx);
+    case BENCH_BOXED_CLRBIT: return bench_lane_clrbit(cx);
+    case BENCH_BOXED_COMBIT: return bench_lane_combit(cx);
+    case BENCH_BOXED_CMPABS: return bench_lane_cmpabs(cx);
     default:
         die("unknown boxed-result benchmark operation");
     }
@@ -4636,6 +4769,18 @@ static void bench_gmp_boxed_apply(
     case BENCH_BOXED_SUB1: mpz_sub_ui(out, a, mpz_get_ui(b)); break;
     case BENCH_BOXED_MUL1: mpz_mul_ui(out, a, mpz_get_ui(b)); break;
     case BENCH_BOXED_DIV1: mpz_tdiv_q_ui(out, a, mpz_get_ui(b)); break;
+    case BENCH_BOXED_MOD1: mpz_fdiv_r_ui(out, a, mpz_get_ui(b)); break;
+    case BENCH_BOXED_NOT:  mpz_com(out, a); break;
+    case BENCH_BOXED_TDIV: mpz_tdiv_q(out, a, b); break;
+    case BENCH_BOXED_TMOD: mpz_tdiv_r(out, a, b); break;
+    case BENCH_BOXED_CDIV: mpz_cdiv_q(out, a, b); break;
+    case BENCH_BOXED_CMOD: mpz_cdiv_r(out, a, b); break;
+    case BENCH_BOXED_DIVEXACT: mpz_divexact(out, a, b); break;
+    case BENCH_BOXED_IROOT: mpz_root(out, a, 3); break;
+    case BENCH_BOXED_INVMOD: mpz_invert(out, a, b); break;
+    case BENCH_BOXED_SETBIT: mpz_set(out, a); mpz_setbit(out, 13); break;
+    case BENCH_BOXED_CLRBIT: mpz_set(out, a); mpz_clrbit(out, 0); break;
+    case BENCH_BOXED_COMBIT: mpz_set(out, a); mpz_combit(out, 13); break;
     default: die("unknown GMP boxed benchmark operation");
     }
 }
@@ -4655,6 +4800,73 @@ static void check_boxed_op_against_gmp(int op, int32_t limbs) {
         int gm = mpz_cmp(za, zb);
         if ((tw > 0) != (gm > 0) || (tw < 0) != (gm < 0))
             die("boxed cmp mismatch vs GMP");
+        break;
+    }
+    case BENCH_BOXED_CMPABS: {
+        int64_t tw = w_to_i64(w_bigint_cmpabs(a, b));
+        int gm = mpz_cmpabs(za, zb);
+        if ((tw > 0) != (gm > 0) || (tw < 0) != (gm < 0))
+            die("boxed cmpabs mismatch vs GMP");
+        break;
+    }
+    case BENCH_BOXED_DIVISIBLE: {
+        int tw = (w_bigint_divisible_p(a, b) == W_TRUE);
+        int gm = (mpz_divisible_p(za, zb) != 0);
+        if (tw != gm) die("boxed divisible mismatch vs GMP");
+        break;
+    }
+    case BENCH_BOXED_PSQUARE: {
+        int tw = (w_bigint_perfect_square_p(a) == W_TRUE);
+        int gm = (mpz_perfect_square_p(za) != 0);
+        if (tw != gm) die("boxed psquare mismatch vs GMP");
+        break;
+    }
+    case BENCH_BOXED_JACOBI: {
+        int64_t tw = w_to_i64(w_bigint_jacobi(a, b));
+        int gm = mpz_jacobi(za, zb);
+        if (tw != (int64_t)gm) die("boxed jacobi mismatch vs GMP");
+        break;
+    }
+    case BENCH_BOXED_KRONECKER: {
+        int64_t tw = w_to_i64(w_bigint_kronecker(a, b));
+        int gm = mpz_kronecker(za, zb);
+        if (tw != (int64_t)gm) die("boxed kronecker mismatch vs GMP");
+        break;
+    }
+    case BENCH_BOXED_BITLEN: {
+        int64_t tw = w_to_i64(w_bigint_bit_length(a));
+        size_t gm = mpz_sizeinbase(za, 2);
+        if (tw != (int64_t)gm) die("boxed bitlen mismatch vs GMP");
+        break;
+    }
+    case BENCH_BOXED_POPCNT: {
+        int64_t tw = w_to_i64(w_bigint_popcount(a));
+        mp_bitcnt_t gm = mpz_popcount(za);
+        if (tw != (int64_t)gm) die("boxed popcnt mismatch vs GMP");
+        break;
+    }
+    case BENCH_BOXED_HAMDIST: {
+        int64_t tw = w_to_i64(w_bigint_hamdist(a, b));
+        mp_bitcnt_t gm = mpz_hamdist(za, zb);
+        if (tw != (int64_t)gm) die("boxed hamdist mismatch vs GMP");
+        break;
+    }
+    case BENCH_BOXED_SCAN1: {
+        int64_t tw = w_to_i64(w_bigint_scan1(a, w_box_int(0)));
+        mp_bitcnt_t gm = mpz_scan1(za, 0);
+        if (tw != (int64_t)gm) die("boxed scan1 mismatch vs GMP");
+        break;
+    }
+    case BENCH_BOXED_SCAN0: {
+        int64_t tw = w_to_i64(w_bigint_scan0(a, w_box_int(0)));
+        mp_bitcnt_t gm = mpz_scan0(za, 0);
+        if (tw != (int64_t)gm) die("boxed scan0 mismatch vs GMP");
+        break;
+    }
+    case BENCH_BOXED_TSTBIT: {
+        int64_t tw = w_to_i64(w_bigint_tstbit(a, w_box_int(13)));
+        int gm = mpz_tstbit(za, 13);
+        if (tw != (int64_t)gm) die("boxed tstbit mismatch vs GMP");
         break;
     }
     case BENCH_BOXED_NEG: {
@@ -4825,6 +5037,7 @@ DEFINE_GMP_LANE(add1,   mpz_add_ui(r, a, w))
 DEFINE_GMP_LANE(sub1,   mpz_sub_ui(r, a, w))
 DEFINE_GMP_LANE(mul1,   mpz_mul_ui(r, a, w))
 DEFINE_GMP_LANE(div1,   mpz_tdiv_q_ui(r, a, w))
+DEFINE_GMP_LANE(mod1,   mpz_fdiv_r_ui(r, a, w))
 DEFINE_GMP_LANE(neg,    mpz_neg(r, a))
 DEFINE_GMP_LANE(abs,    mpz_abs(r, a))
 /* in-place: GMP's own O(1) path (no copy when dest == source) */
@@ -4835,6 +5048,17 @@ DEFINE_GMP_LANE(powmod, mpz_powm(r, a, b, m))
 DEFINE_GMP_LANE(lcm,    mpz_lcm(r, a, b))
 DEFINE_GMP_LANE(isqrt,  mpz_sqrt(r, a))
 DEFINE_GMP_LANE(fromstr, mpz_set_str(r, dec, 10))
+DEFINE_GMP_LANE(bnot,   mpz_com(r, a))
+DEFINE_GMP_LANE(tdiv,   mpz_tdiv_q(r, a, b))
+DEFINE_GMP_LANE(tmod,   mpz_tdiv_r(r, a, b))
+DEFINE_GMP_LANE(cdiv,   mpz_cdiv_q(r, a, b))
+DEFINE_GMP_LANE(cmod,   mpz_cdiv_r(r, a, b))
+DEFINE_GMP_LANE(divexact, mpz_divexact(r, a, b))
+DEFINE_GMP_LANE(iroot,  mpz_root(r, a, 3))
+DEFINE_GMP_LANE(invmod, mpz_invert(r, a, b))
+DEFINE_GMP_LANE(setbit, mpz_set(r, a); mpz_setbit(r, 13))
+DEFINE_GMP_LANE(clrbit, mpz_set(r, a); mpz_clrbit(r, 0))
+DEFINE_GMP_LANE(combit, mpz_set(r, a); mpz_combit(r, 13))
 
 /* Mirror of bench_lane_cmp's measurement discipline (see its comment):
  * both operands laundered through the register asm barrier plus a
@@ -4848,30 +5072,42 @@ static inline mpz_ptr bench_launder_mpz(mpz_ptr p) {
     return p;
 }
 
-static double __attribute__((noinline, aligned(128)))
-bench_gmp_lane_cmp(GmpLaneCtx *cx) {
-    mpz_ptr a = cx->a;
-    mpz_ptr b = cx->b;
-    uint64_t sink = 0;
-    int warm_chunk = cx->warm_chunk;
-    if (warm_chunk > 0) {
-        double warm_start = bench_now();
-        do {
-            for (int warm_i = 0; warm_i < warm_chunk; warm_i++)
-                sink ^= (uint64_t)(int64_t)mpz_cmp(bench_launder_mpz(a),
-                                                   bench_launder_mpz(b));
-        } while (bench_now() - warm_start < bench_warm_seconds);
-    }
-    int iters = cx->iters;
-    double timed_start = bench_now();
-    for (int timed_i = 0; timed_i < iters; timed_i++)
-        sink ^= (uint64_t)(int64_t)mpz_cmp(bench_launder_mpz(a),
-                                           bench_launder_mpz(b)) ^
-                (uint64_t)timed_i;
-    double elapsed = bench_now() - timed_start;
-    bench_sink ^= sink;
-    return elapsed;
+#define DEFINE_GMP_SCALAR_LANE(NAME, EXPR)                                 \
+static double __attribute__((noinline, aligned(128)))                      \
+bench_gmp_lane_##NAME(GmpLaneCtx *cx) {                                    \
+    mpz_ptr a = cx->a;                                                     \
+    mpz_ptr b = cx->b;                                                     \
+    (void)a; (void)b;                                                      \
+    uint64_t sink = 0;                                                     \
+    int warm_chunk = cx->warm_chunk;                                       \
+    if (warm_chunk > 0) {                                                  \
+        double warm_start = bench_now();                                   \
+        do {                                                               \
+            for (int warm_i = 0; warm_i < warm_chunk; warm_i++)            \
+                sink ^= (uint64_t)(int64_t)(EXPR);                         \
+        } while (bench_now() - warm_start < bench_warm_seconds);           \
+    }                                                                      \
+    int iters = cx->iters;                                                 \
+    double timed_start = bench_now();                                      \
+    for (int timed_i = 0; timed_i < iters; timed_i++)                      \
+        sink ^= (uint64_t)(int64_t)(EXPR) ^ (uint64_t)timed_i;             \
+    double elapsed = bench_now() - timed_start;                            \
+    bench_sink ^= sink;                                                    \
+    return elapsed;                                                        \
 }
+
+DEFINE_GMP_SCALAR_LANE(cmp, mpz_cmp(bench_launder_mpz(a), bench_launder_mpz(b)))
+DEFINE_GMP_SCALAR_LANE(cmpabs, mpz_cmpabs(bench_launder_mpz(a), bench_launder_mpz(b)))
+DEFINE_GMP_SCALAR_LANE(divisible, mpz_divisible_p(bench_launder_mpz(a), bench_launder_mpz(b)) != 0)
+DEFINE_GMP_SCALAR_LANE(psquare, mpz_perfect_square_p(bench_launder_mpz(a)) != 0)
+DEFINE_GMP_SCALAR_LANE(jacobi, mpz_jacobi(bench_launder_mpz(a), bench_launder_mpz(b)))
+DEFINE_GMP_SCALAR_LANE(kronecker, mpz_kronecker(bench_launder_mpz(a), bench_launder_mpz(b)))
+DEFINE_GMP_SCALAR_LANE(bitlen, mpz_sizeinbase(bench_launder_mpz(a), 2))
+DEFINE_GMP_SCALAR_LANE(popcnt, mpz_popcount(bench_launder_mpz(a)))
+DEFINE_GMP_SCALAR_LANE(hamdist, mpz_hamdist(bench_launder_mpz(a), bench_launder_mpz(b)))
+DEFINE_GMP_SCALAR_LANE(scan1, mpz_scan1(bench_launder_mpz(a), 0))
+DEFINE_GMP_SCALAR_LANE(scan0, mpz_scan0(bench_launder_mpz(a), 0))
+DEFINE_GMP_SCALAR_LANE(tstbit, mpz_tstbit(bench_launder_mpz(a), 13))
 
 /* Mirror of the Tungsten lane: convert, observe, free every iteration
  * through GMP's own allocator hooks. */
@@ -4970,6 +5206,7 @@ static double bench_gmp_lane_run(int op, GmpLaneCtx *cx) {
     case BENCH_BOXED_SUB1:     return bench_gmp_lane_sub1(cx);
     case BENCH_BOXED_MUL1:     return bench_gmp_lane_mul1(cx);
     case BENCH_BOXED_DIV1:     return bench_gmp_lane_div1(cx);
+    case BENCH_BOXED_MOD1:     return bench_gmp_lane_mod1(cx);
     case BENCH_BOXED_CMP:      return bench_gmp_lane_cmp(cx);
     case BENCH_BOXED_NEG:      return bench_gmp_lane_neg(cx);
     case BENCH_BOXED_ABS:      return bench_gmp_lane_abs(cx);
@@ -4981,6 +5218,28 @@ static double bench_gmp_lane_run(int op, GmpLaneCtx *cx) {
     case BENCH_BOXED_ISQRT:    return bench_gmp_lane_isqrt(cx);
     case BENCH_BOXED_FROMSTR:  return bench_gmp_lane_fromstr(cx);
     case BENCH_BOXED_TOSTR:    return bench_gmp_lane_tostr(cx);
+    case BENCH_BOXED_NOT:      return bench_gmp_lane_bnot(cx);
+    case BENCH_BOXED_TDIV:     return bench_gmp_lane_tdiv(cx);
+    case BENCH_BOXED_TMOD:     return bench_gmp_lane_tmod(cx);
+    case BENCH_BOXED_CDIV:     return bench_gmp_lane_cdiv(cx);
+    case BENCH_BOXED_CMOD:     return bench_gmp_lane_cmod(cx);
+    case BENCH_BOXED_DIVEXACT: return bench_gmp_lane_divexact(cx);
+    case BENCH_BOXED_DIVISIBLE: return bench_gmp_lane_divisible(cx);
+    case BENCH_BOXED_IROOT:    return bench_gmp_lane_iroot(cx);
+    case BENCH_BOXED_PSQUARE:  return bench_gmp_lane_psquare(cx);
+    case BENCH_BOXED_INVMOD:   return bench_gmp_lane_invmod(cx);
+    case BENCH_BOXED_JACOBI:   return bench_gmp_lane_jacobi(cx);
+    case BENCH_BOXED_KRONECKER: return bench_gmp_lane_kronecker(cx);
+    case BENCH_BOXED_BITLEN:   return bench_gmp_lane_bitlen(cx);
+    case BENCH_BOXED_POPCNT:   return bench_gmp_lane_popcnt(cx);
+    case BENCH_BOXED_HAMDIST:  return bench_gmp_lane_hamdist(cx);
+    case BENCH_BOXED_SCAN1:    return bench_gmp_lane_scan1(cx);
+    case BENCH_BOXED_SCAN0:    return bench_gmp_lane_scan0(cx);
+    case BENCH_BOXED_TSTBIT:   return bench_gmp_lane_tstbit(cx);
+    case BENCH_BOXED_SETBIT:   return bench_gmp_lane_setbit(cx);
+    case BENCH_BOXED_CLRBIT:   return bench_gmp_lane_clrbit(cx);
+    case BENCH_BOXED_COMBIT:   return bench_gmp_lane_combit(cx);
+    case BENCH_BOXED_CMPABS:   return bench_gmp_lane_cmpabs(cx);
     default:
         die("unknown GMP boxed benchmark operation");
     }

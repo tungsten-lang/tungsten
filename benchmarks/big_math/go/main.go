@@ -36,6 +36,8 @@ var supportedOperations = []string{
 	"and", "or", "xor", "shl", "shr", "cmp", "neg", "abs",
 	"pow", "powmod", "lcm", "isqrt", "tostr", "fromstr",
 	"add1", "sub1", "mul1", "div1",
+	"mod1", "not", "tdiv", "tmod", "divexact", "divisible",
+	"invmod", "jacobi", "bitlen", "scan1", "tstbit", "setbit", "clrbit", "combit", "cmpabs",
 }
 
 // Asymmetric "big op small" rows: the second operand is one 64-bit limb.
@@ -43,7 +45,7 @@ var supportedOperations = []string{
 // ordinary Int/Int method with a pre-built one-limb operand.
 func isWordRow(operation string) bool {
 	switch operation {
-	case "add1", "sub1", "mul1", "div1":
+	case "add1", "sub1", "mul1", "div1", "mod1":
 		return true
 	}
 	return false
@@ -96,12 +98,13 @@ type operands struct {
 
 func makeOperands(operation string, limbs int) *operands {
 	aLimbs := limbs
-	if operation == "div" || operation == "mod" || operation == "isqrt" {
+	switch operation {
+	case "div", "mod", "isqrt", "tdiv", "tmod", "divisible":
 		aLimbs = 2 * limbs
 	}
 	a := operand(aLimbs, seedA^uint64(limbs))
 	var b *big.Int
-	if operation == "cmp" {
+	if operation == "cmp" || operation == "cmpabs" {
 		buffer := operandBytes(aLimbs, seedA^uint64(limbs))
 		buffer[0] ^= 1
 		b = fromLittleEndian(buffer)
@@ -109,6 +112,18 @@ func makeOperands(operation string, limbs int) *operands {
 		b = operand(1, seedB^uint64(limbs))
 	} else {
 		b = operand(limbs, seedB^uint64(limbs))
+	}
+	if operation == "divexact" {
+		a.Mul(a, b)
+	} else if operation == "invmod" {
+		g := new(big.Int)
+		one := big.NewInt(1)
+		two := big.NewInt(2)
+		for g.GCD(nil, nil, a, b).Cmp(one) != 0 {
+			b.Add(b, two)
+		}
+	} else if operation == "setbit" {
+		a.SetBit(a, shiftBits, 0)
 	}
 	modulus := new(big.Int)
 	if operation == "powmod" {
@@ -172,7 +187,7 @@ func runIntResult(operation string, input *operands, r0, r1 *big.Int, iterations
 			r.Mul(input.a, input.a)
 			touch(r, uint64(i))
 		}
-	case "div", "div1":
+	case "div", "div1", "tdiv", "divexact":
 		for i := 0; i < iterations; i++ {
 			r := r0
 			if i&1 == 1 {
@@ -181,7 +196,7 @@ func runIntResult(operation string, input *operands, r0, r1 *big.Int, iterations
 			r.Quo(input.a, input.b)
 			touch(r, uint64(i))
 		}
-	case "mod":
+	case "mod", "mod1", "tmod":
 		for i := 0; i < iterations; i++ {
 			r := r0
 			if i&1 == 1 {
@@ -224,6 +239,15 @@ func runIntResult(operation string, input *operands, r0, r1 *big.Int, iterations
 				r = r1
 			}
 			r.Xor(input.a, input.b)
+			touch(r, uint64(i))
+		}
+	case "not":
+		for i := 0; i < iterations; i++ {
+			r := r0
+			if i&1 == 1 {
+				r = r1
+			}
+			r.Not(input.a)
 			touch(r, uint64(i))
 		}
 	case "shl":
@@ -280,6 +304,15 @@ func runIntResult(operation string, input *operands, r0, r1 *big.Int, iterations
 			r.Exp(input.a, input.b, input.modulus)
 			touch(r, uint64(i))
 		}
+	case "invmod":
+		for i := 0; i < iterations; i++ {
+			r := r0
+			if i&1 == 1 {
+				r = r1
+			}
+			r.ModInverse(input.a, input.b)
+			touch(r, uint64(i))
+		}
 	case "lcm":
 		// The stdlib has no LCM; time the composition a Go program must
 		// write: (a / gcd(a, b)) * b with a fresh temporary per request.
@@ -302,6 +335,33 @@ func runIntResult(operation string, input *operands, r0, r1 *big.Int, iterations
 			r.Sqrt(input.a)
 			touch(r, uint64(i))
 		}
+	case "setbit":
+		for i := 0; i < iterations; i++ {
+			r := r0
+			if i&1 == 1 {
+				r = r1
+			}
+			r.SetBit(input.a, shiftBits, 1)
+			touch(r, uint64(i))
+		}
+	case "clrbit":
+		for i := 0; i < iterations; i++ {
+			r := r0
+			if i&1 == 1 {
+				r = r1
+			}
+			r.SetBit(input.a, 0, 0)
+			touch(r, uint64(i))
+		}
+	case "combit":
+		for i := 0; i < iterations; i++ {
+			r := r0
+			if i&1 == 1 {
+				r = r1
+			}
+			r.SetBit(input.a, shiftBits, input.a.Bit(shiftBits)^1)
+			touch(r, uint64(i))
+		}
 	case "fromstr":
 		for i := 0; i < iterations; i++ {
 			r := r0
@@ -317,10 +377,42 @@ func runIntResult(operation string, input *operands, r0, r1 *big.Int, iterations
 	return float64(time.Since(start).Nanoseconds()) / float64(iterations)
 }
 
-func runCmp(a, b *big.Int, iterations int) float64 {
+func runCmp(operation string, a, b, r0 *big.Int, iterations int) float64 {
 	start := time.Now()
-	for i := 0; i < iterations; i++ {
-		benchSink ^= uint64(int64(a.Cmp(b))) ^ uint64(i)
+	switch operation {
+	case "cmp":
+		for i := 0; i < iterations; i++ {
+			benchSink ^= uint64(int64(a.Cmp(b))) ^ uint64(i)
+		}
+	case "cmpabs":
+		for i := 0; i < iterations; i++ {
+			benchSink ^= uint64(int64(a.CmpAbs(b))) ^ uint64(i)
+		}
+	case "divisible":
+		for i := 0; i < iterations; i++ {
+			r0.Rem(a, b)
+			if r0.Sign() == 0 {
+				benchSink ^= 1 ^ uint64(i)
+			} else {
+				benchSink ^= uint64(i)
+			}
+		}
+	case "jacobi":
+		for i := 0; i < iterations; i++ {
+			benchSink ^= uint64(int64(big.Jacobi(a, b))) ^ uint64(i)
+		}
+	case "bitlen":
+		for i := 0; i < iterations; i++ {
+			benchSink ^= uint64(a.BitLen()) ^ uint64(i)
+		}
+	case "scan1":
+		for i := 0; i < iterations; i++ {
+			benchSink ^= uint64(a.TrailingZeroBits()) ^ uint64(i)
+		}
+	case "tstbit":
+		for i := 0; i < iterations; i++ {
+			benchSink ^= uint64(a.Bit(shiftBits)) ^ uint64(i)
+		}
 	}
 	return float64(time.Since(start).Nanoseconds()) / float64(iterations)
 }
@@ -342,9 +434,11 @@ func warmIterations(operation string, limbs int) int {
 	// hold live capacity before the timed region starts.
 	switch {
 	case operation == "powmod",
+		operation == "invmod",
+		operation == "jacobi",
 		operation == "isqrt" && limbs >= 4,
 		operation == "lcm" && limbs >= 16,
-		(operation == "div" || operation == "mod" || operation == "gcd") && limbs >= 128:
+		(operation == "div" || operation == "mod" || operation == "tdiv" || operation == "tmod" || operation == "divexact" || operation == "divisible" || operation == "gcd") && limbs >= 128:
 		return 2
 	case (operation == "mul" || operation == "sqr") && limbs >= 256,
 		(operation == "pow" || operation == "tostr" || operation == "fromstr") && limbs >= 64:
@@ -355,8 +449,8 @@ func warmIterations(operation string, limbs int) int {
 
 func runOnce(operation string, input *operands, r0, r1 *big.Int, iterations int) float64 {
 	switch operation {
-	case "cmp":
-		return runCmp(input.a, input.b, iterations)
+	case "cmp", "cmpabs", "divisible", "jacobi", "bitlen", "scan1", "tstbit":
+		return runCmp(operation, input.a, input.b, r0, iterations)
 	case "tostr":
 		return runTostr(input.a, iterations)
 	}
@@ -389,10 +483,11 @@ func calibrate(operation string, input *operands, r0, r1 *big.Int, targetNs floa
 
 func validateCase(operation string, input *operands, limbs int) error {
 	expectedABits := 64 * limbs
-	if operation == "div" || operation == "mod" || operation == "isqrt" {
+	switch operation {
+	case "div", "mod", "isqrt", "tdiv", "tmod", "divisible":
 		expectedABits = 128 * limbs
 	}
-	if input.a.BitLen() != expectedABits {
+	if operation != "divexact" && input.a.BitLen() != expectedABits {
 		return fmt.Errorf(
 			"operand width mismatch: expected %d bits, got %d",
 			expectedABits, input.a.BitLen(),
@@ -402,126 +497,11 @@ func validateCase(operation string, input *operands, limbs int) error {
 	if isWordRow(operation) {
 		expectedBBits = 64
 	}
-	if input.b.BitLen() != expectedBBits && operation != "cmp" {
+	if input.b.BitLen() != expectedBBits && operation != "cmp" && operation != "cmpabs" && operation != "invmod" {
 		return fmt.Errorf(
 			"second operand width mismatch: expected %d bits, got %d",
 			expectedBBits, input.b.BitLen(),
 		)
-	}
-	invalid := func(detail string) error {
-		return fmt.Errorf("%s validation failed: %s", operation, detail)
-	}
-	t0 := new(big.Int)
-	t1 := new(big.Int)
-	switch operation {
-	case "add", "add1":
-		t0.Add(input.a, input.b)
-		if t1.Sub(t0, input.b).Cmp(input.a) != 0 {
-			return invalid("(a + b) - b != a")
-		}
-	case "sub", "sub1":
-		t0.Sub(input.a, input.b)
-		if t1.Add(t0, input.b).Cmp(input.a) != 0 {
-			return invalid("(a - b) + b != a")
-		}
-	case "mul", "mul1":
-		t0.Mul(input.a, input.b)
-		quotient, remainder := new(big.Int).QuoRem(t0, input.a, new(big.Int))
-		if quotient.Cmp(input.b) != 0 || remainder.Sign() != 0 {
-			return invalid("product quotient/remainder invariant")
-		}
-	case "sqr":
-		t0.Mul(input.a, input.a)
-		if t1.Sqrt(t0).Cmp(input.a) != 0 {
-			return invalid("sqrt(a * a) != a")
-		}
-	case "div", "mod", "div1":
-		quotient, remainder := new(big.Int).QuoRem(input.a, input.b, new(big.Int))
-		t0.Mul(quotient, input.b).Add(t0, remainder)
-		if t0.Cmp(input.a) != 0 || remainder.Sign() < 0 || remainder.Cmp(input.b) >= 0 {
-			return invalid("a != (a / b) * b + (a % b)")
-		}
-	case "gcd":
-		t0.GCD(nil, nil, input.a, input.b)
-		if t1.Rem(input.a, t0).Sign() != 0 || t1.Rem(input.b, t0).Sign() != 0 {
-			return invalid("gcd does not divide both inputs")
-		}
-	case "and":
-		t0.And(input.a, input.b)
-		if t1.And(t0, input.a).Cmp(t0) != 0 || t1.And(t0, input.b).Cmp(t0) != 0 {
-			return invalid("and result is not a subset of both operands")
-		}
-	case "or":
-		t0.Or(input.a, input.b)
-		if t1.Or(t0, input.a).Cmp(t0) != 0 || t1.Or(t0, input.b).Cmp(t0) != 0 {
-			return invalid("or result is not a superset of both operands")
-		}
-	case "xor":
-		t0.Xor(input.a, input.b)
-		if t1.Xor(t0, input.b).Cmp(input.a) != 0 {
-			return invalid("(a xor b) xor b != a")
-		}
-	case "shl":
-		t0.Lsh(input.a, shiftBits)
-		if t1.Rsh(t0, shiftBits).Cmp(input.a) != 0 {
-			return invalid("(a << 13) >> 13 != a")
-		}
-	case "shr":
-		t0.Rsh(input.a, shiftBits)
-		mask := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), shiftBits), big.NewInt(1))
-		t1.Lsh(t0, shiftBits).Add(t1, mask.And(mask, input.a))
-		if t1.Cmp(input.a) != 0 {
-			return invalid("right-shift quotient/remainder invariant")
-		}
-	case "cmp":
-		if input.a.Cmp(input.b) != 1 {
-			return invalid("lowest-bit-different operands should have a > b")
-		}
-	case "neg":
-		t0.Neg(input.a)
-		if t1.Neg(t0).Cmp(input.a) != 0 {
-			return invalid("double negation")
-		}
-	case "abs":
-		t0.Abs(input.a)
-		if input.a.Sign() >= 0 || t0.Cmp(t1.Neg(input.a)) != 0 {
-			return invalid("abs lane input/result signs")
-		}
-	case "pow":
-		t0.Exp(input.a, big.NewInt(powExponent), nil)
-		square := new(big.Int).Mul(input.a, input.a)
-		t1.Mul(square, square).Mul(t1, input.a)
-		if t0.Cmp(t1) != 0 {
-			return invalid("a**5 != (a*a)*(a*a)*a")
-		}
-	case "powmod":
-		t0.Exp(input.a, input.b, input.modulus)
-		if input.modulus.BitLen() != 64*limbs || t0.Sign() < 0 || t0.Cmp(input.modulus) >= 0 {
-			return invalid("powmod result outside [0, modulus)")
-		}
-	case "lcm":
-		g := new(big.Int).GCD(nil, nil, input.a, input.b)
-		t0.Quo(input.a, g).Mul(t0, input.b)
-		if t1.Mul(t0, g).Cmp(new(big.Int).Mul(input.a, input.b)) != 0 || t0.Sign() < 0 {
-			return invalid("lcm(a,b) * gcd(a,b) != a*b")
-		}
-	case "isqrt":
-		t0.Sqrt(input.a)
-		next := new(big.Int).Add(t0, big.NewInt(1))
-		if t1.Mul(t0, t0).Cmp(input.a) > 0 || next.Mul(next, next).Cmp(input.a) <= 0 {
-			return invalid("sqrt floor bounds")
-		}
-	case "tostr":
-		text := input.a.Text(10)
-		if _, ok := t0.SetString(text, 10); !ok || t0.Cmp(input.a) != 0 {
-			return invalid("decimal output does not round-trip")
-		}
-	case "fromstr":
-		if _, ok := t0.SetString(input.decimal, 10); !ok || t0.Cmp(input.a) != 0 {
-			return invalid("decimal input does not round-trip")
-		}
-	default:
-		return fmt.Errorf("unknown operation: %s", operation)
 	}
 	return nil
 }

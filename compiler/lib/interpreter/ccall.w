@@ -465,6 +465,104 @@
       return ccall("w_bigint_mark_shared_value", args[1])
     when "w_bigint_shared_value"
       return ccall("w_bigint_shared_value", args[1])
+    when "w_bigint_divmod"
+      return ccall("w_bigint_divmod", args[1], args[2])
+    when "w_bigint_tdiv"
+      return ccall("w_bigint_tdiv", args[1], args[2])
+    when "w_bigint_tmod"
+      return ccall("w_bigint_tmod", args[1], args[2])
+    when "w_bigint_tdivmod"
+      return ccall("w_bigint_tdivmod", args[1], args[2])
+    when "w_bigint_fdiv"
+      return ccall("w_bigint_fdiv", args[1], args[2])
+    when "w_bigint_fmod"
+      return ccall("w_bigint_fmod", args[1], args[2])
+    when "w_bigint_fdivmod"
+      return ccall("w_bigint_fdivmod", args[1], args[2])
+    when "w_bigint_cdiv"
+      return ccall("w_bigint_cdiv", args[1], args[2])
+    when "w_bigint_cmod"
+      return ccall("w_bigint_cmod", args[1], args[2])
+    when "w_bigint_cdivmod"
+      return ccall("w_bigint_cdivmod", args[1], args[2])
+    when "w_bigint_divexact"
+      return ccall("w_bigint_divexact", args[1], args[2])
+    when "w_bigint_divisible_p"
+      return ccall("w_bigint_divisible_p", args[1], args[2])
+    when "w_bigint_congruent_p"
+      return ccall("w_bigint_congruent_p", args[1], args[2], args[3])
+    when "w_bigint_isqrt_rem"
+      return ccall("w_bigint_isqrt_rem", args[1])
+    when "w_bigint_iroot"
+      return ccall("w_bigint_iroot", args[1], args[2])
+    when "w_bigint_iroot_rem"
+      return ccall("w_bigint_iroot_rem", args[1], args[2])
+    when "w_bigint_perfect_square_p"
+      return ccall("w_bigint_perfect_square_p", args[1])
+    when "w_bigint_perfect_power_p"
+      return ccall("w_bigint_perfect_power_p", args[1])
+    when "w_bigint_gcdext"
+      return ccall("w_bigint_gcdext", args[1], args[2])
+    when "w_bigint_invmod"
+      return ccall("w_bigint_invmod", args[1], args[2])
+    when "w_bigint_jacobi"
+      return ccall("w_bigint_jacobi", args[1], args[2])
+    when "w_bigint_kronecker"
+      return ccall("w_bigint_kronecker", args[1], args[2])
+    when "w_bigint_nextprime"
+      return ccall("w_bigint_nextprime", args[1])
+    when "w_bigint_prevprime"
+      return ccall("w_bigint_prevprime", args[1])
+    when "w_bigint_remove"
+      return ccall("w_bigint_remove", args[1], args[2])
+    when "w_bigint_fac_ui"
+      return ccall("w_bigint_fac_ui", args[1])
+    when "w_bigint_2fac_ui"
+      return ccall("w_bigint_2fac_ui", args[1])
+    when "w_bigint_mfac_uiui"
+      return ccall("w_bigint_mfac_uiui", args[1], args[2])
+    when "w_bigint_primorial_ui"
+      return ccall("w_bigint_primorial_ui", args[1])
+    when "w_bigint_bin_ui"
+      return ccall("w_bigint_bin_ui", args[1], args[2])
+    when "w_bigint_fib_ui"
+      return ccall("w_bigint_fib_ui", args[1])
+    when "w_bigint_fib2_ui"
+      return ccall("w_bigint_fib2_ui", args[1])
+    when "w_bigint_lucnum_ui"
+      return ccall("w_bigint_lucnum_ui", args[1])
+    when "w_bigint_lucnum2_ui"
+      return ccall("w_bigint_lucnum2_ui", args[1])
+    when "w_bigint_bit_length"
+      return ccall("w_bigint_bit_length", args[1])
+    when "w_bigint_sizeinbase"
+      return ccall("w_bigint_sizeinbase", args[1], args[2])
+    when "w_bigint_popcount"
+      return ccall("w_bigint_popcount", args[1])
+    when "w_bigint_hamdist"
+      return ccall("w_bigint_hamdist", args[1], args[2])
+    when "w_bigint_scan1"
+      return ccall("w_bigint_scan1", args[1], args[2])
+    when "w_bigint_scan0"
+      return ccall("w_bigint_scan0", args[1], args[2])
+    when "w_bigint_trailing_zeros"
+      return ccall("w_bigint_trailing_zeros", args[1])
+    when "w_bigint_tstbit"
+      return ccall("w_bigint_tstbit", args[1], args[2])
+    when "w_bigint_bit_set_p"
+      return ccall("w_bigint_bit_set_p", args[1], args[2])
+    when "w_bigint_setbit"
+      return ccall("w_bigint_setbit", args[1], args[2])
+    when "w_bigint_clrbit"
+      return ccall("w_bigint_clrbit", args[1], args[2])
+    when "w_bigint_combit"
+      return ccall("w_bigint_combit", args[1], args[2])
+    when "w_bigint_cmpabs"
+      return ccall("w_bigint_cmpabs", args[1], args[2])
+    when "w_bigint_to_bytes"
+      return ccall("w_bigint_to_bytes", args[1], args[2])
+    when "w_bigint_from_bytes"
+      return ccall("w_bigint_from_bytes", args[1], args[2])
     when "w_str_to_sym"
       return ccall("w_str_to_sym", args[1])
     when "w_algebra_rewrite_source"

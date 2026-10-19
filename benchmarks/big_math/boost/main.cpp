@@ -40,14 +40,17 @@ const char* const kSupportedOperations[] = {
     "add", "sub", "mul", "sqr", "div", "mod", "gcd",
     "and", "or",  "xor", "shl", "shr", "cmp", "neg", "abs",
     "pow", "powmod", "lcm", "isqrt", "tostr", "fromstr",
-    "add1", "sub1", "mul1", "div1",
+    "add1", "sub1", "mul1", "div1", "mod1",
+    "not", "tdiv", "tmod", "divexact", "divisible",
+    "bitlen", "scan1", "tstbit", "setbit", "clrbit", "combit", "cmpabs",
 };
 
 // Asymmetric "big op small" rows: the second operand is one 64-bit limb,
 // and the lane times cpp_int's builtin-integer operator overloads.
 bool is_word_row(const std::string& operation) {
   return operation == "add1" || operation == "sub1" ||
-         operation == "mul1" || operation == "div1";
+         operation == "mul1" || operation == "div1" ||
+         operation == "mod1";
 }
 
 volatile std::uint64_t bench_sink;
@@ -115,11 +118,12 @@ Operands make_operands(const std::string& operation, std::size_t limbs) {
   Operands input;
   input.row_limbs = limbs;
   std::size_t a_limbs = limbs;
-  if (operation == "div" || operation == "mod" || operation == "isqrt") {
+  if (operation == "div" || operation == "mod" || operation == "isqrt" ||
+      operation == "tdiv" || operation == "tmod") {
     a_limbs = 2 * limbs;
   }
   input.a = operand(a_limbs, kSeedA ^ limbs);
-  if (operation == "cmp") {
+  if (operation == "cmp" || operation == "cmpabs") {
     input.b = input.a ^ 1;
   } else if (is_word_row(operation)) {
     input.b = operand(1, kSeedB ^ limbs);
@@ -130,8 +134,15 @@ Operands make_operands(const std::string& operation, std::size_t limbs) {
   if (operation == "powmod") {
     input.modulus = operand(limbs, kPowmodMSeed ^ limbs);
   }
-  if (operation == "abs") {
+  if (operation == "abs" || operation == "tdiv" || operation == "tmod" ||
+      operation == "cmpabs") {
     input.a = -input.a;
+  }
+  if (operation == "divexact" || operation == "divisible") {
+    input.a = input.a * input.b;
+  }
+  if (operation == "scan1") {
+    input.a = input.a << kShiftBits;
   }
   if (operation == "fromstr") {
     input.decimal = input.a.str();
@@ -174,11 +185,11 @@ ApplyFn apply_for(const std::string& operation) {
     return [](const cpp_int& a, const cpp_int&, const cpp_int&,
               const std::string&, std::uint64_t) { return cpp_int(a * a); };
   }
-  if (operation == "div") {
+  if (operation == "div" || operation == "tdiv" || operation == "divexact") {
     return [](const cpp_int& a, const cpp_int& b, const cpp_int&,
               const std::string&, std::uint64_t) { return cpp_int(a / b); };
   }
-  if (operation == "mod") {
+  if (operation == "mod" || operation == "tmod") {
     return [](const cpp_int& a, const cpp_int& b, const cpp_int&,
               const std::string&, std::uint64_t) { return cpp_int(a % b); };
   }
@@ -199,6 +210,10 @@ ApplyFn apply_for(const std::string& operation) {
   if (operation == "xor") {
     return [](const cpp_int& a, const cpp_int& b, const cpp_int&,
               const std::string&, std::uint64_t) { return cpp_int(a ^ b); };
+  }
+  if (operation == "not") {
+    return [](const cpp_int& a, const cpp_int&, const cpp_int&,
+              const std::string&, std::uint64_t) { return cpp_int(~a); };
   }
   if (operation == "shl") {
     return [](const cpp_int& a, const cpp_int&, const cpp_int&,
@@ -272,6 +287,36 @@ ApplyFn apply_for(const std::string& operation) {
       return cpp_int(a / word);
     };
   }
+  if (operation == "mod1") {
+    return [](const cpp_int& a, const cpp_int&, const cpp_int&,
+              const std::string&, std::uint64_t word) {
+      return cpp_int(a % word);
+    };
+  }
+  if (operation == "setbit") {
+    return [](const cpp_int& a, const cpp_int&, const cpp_int&,
+              const std::string&, std::uint64_t) {
+      cpp_int result = a;
+      boost::multiprecision::bit_set(result, kShiftBits);
+      return result;
+    };
+  }
+  if (operation == "clrbit") {
+    return [](const cpp_int& a, const cpp_int&, const cpp_int&,
+              const std::string&, std::uint64_t) {
+      cpp_int result = a;
+      boost::multiprecision::bit_unset(result, kShiftBits);
+      return result;
+    };
+  }
+  if (operation == "combit") {
+    return [](const cpp_int& a, const cpp_int&, const cpp_int&,
+              const std::string&, std::uint64_t) {
+      cpp_int result = a;
+      boost::multiprecision::bit_flip(result, kShiftBits);
+      return result;
+    };
+  }
   return nullptr;
 }
 
@@ -294,15 +339,51 @@ double bench_bigint(const Operands& input, long iterations, ApplyFn apply) {
   return elapsed / static_cast<double>(iterations);
 }
 
-double bench_cmp(const Operands& input, long iterations) {
+using ScalarFn = std::uint64_t (*)(const cpp_int&, const cpp_int&);
+
+ScalarFn scalar_for(const std::string& operation) {
+  if (operation == "cmp") {
+    return [](const cpp_int& a, const cpp_int& b) {
+      return static_cast<std::uint64_t>(static_cast<std::int64_t>(a.compare(b)));
+    };
+  }
+  if (operation == "cmpabs") {
+    return [](const cpp_int& a, const cpp_int& b) {
+      return static_cast<std::uint64_t>(
+          static_cast<std::int64_t>(a.backend().compare_unsigned(b.backend())));
+    };
+  }
+  if (operation == "divisible") {
+    return [](const cpp_int& a, const cpp_int& b) {
+      return static_cast<std::uint64_t>(cpp_int(a % b).is_zero() ? 1 : 0);
+    };
+  }
+  if (operation == "bitlen") {
+    return [](const cpp_int& a, const cpp_int&) {
+      return static_cast<std::uint64_t>(boost::multiprecision::msb(a) + 1);
+    };
+  }
+  if (operation == "scan1") {
+    return [](const cpp_int& a, const cpp_int&) {
+      return static_cast<std::uint64_t>(boost::multiprecision::lsb(a));
+    };
+  }
+  if (operation == "tstbit") {
+    return [](const cpp_int& a, const cpp_int&) {
+      return static_cast<std::uint64_t>(
+          boost::multiprecision::bit_test(a, kShiftBits) ? 1 : 0);
+    };
+  }
+  return nullptr;
+}
+
+double bench_scalar(const Operands& input, long iterations, ScalarFn apply) {
   std::uint64_t sink = 0;
   const double start = now_ns();
   for (long index = 0; index < iterations; ++index) {
     const cpp_int& a = *launder_pointer(&input.a);
     const cpp_int& b = *launder_pointer(&input.b);
-    sink ^= static_cast<std::uint64_t>(static_cast<std::int64_t>(
-                a.compare(b))) +
-            static_cast<std::uint64_t>(index);
+    sink ^= apply(a, b) + static_cast<std::uint64_t>(index);
   }
   const double elapsed = now_ns() - start;
   bench_sink ^= sink;
@@ -329,7 +410,9 @@ long warm_iterations(const std::string& operation, std::size_t limbs) {
   // Match the native harness's cheap/expensive warm-up granularity.
   if (operation == "powmod" || (operation == "isqrt" && limbs >= 4) ||
       (operation == "lcm" && limbs >= 16) ||
-      ((operation == "div" || operation == "mod" || operation == "gcd") &&
+      ((operation == "div" || operation == "mod" || operation == "tdiv" ||
+        operation == "tmod" || operation == "divexact" ||
+        operation == "divisible" || operation == "gcd") &&
        limbs >= 128)) {
     return 1;
   }
@@ -344,8 +427,8 @@ long warm_iterations(const std::string& operation, std::size_t limbs) {
 
 double run_once(const std::string& operation, const Operands& input,
                 long iterations) {
-  if (operation == "cmp") {
-    return bench_cmp(input, iterations);
+  if (ScalarFn scalar = scalar_for(operation)) {
+    return bench_scalar(input, iterations, scalar);
   }
   if (operation == "tostr") {
     return bench_tostr(input, iterations);
@@ -387,16 +470,19 @@ long calibrate(const std::string& operation, const Operands& input,
 bool validate_case(const std::string& operation, const Operands& input,
                    std::size_t limbs, std::string& error) {
   std::size_t expected_a_bits = 64 * limbs;
-  if (operation == "div" || operation == "mod" || operation == "isqrt") {
+  if (operation == "div" || operation == "mod" || operation == "isqrt" ||
+      operation == "tdiv" || operation == "tmod") {
     expected_a_bits = 128 * limbs;
   }
-  if (bit_length(input.a) != expected_a_bits) {
+  if (operation != "divexact" && operation != "divisible" &&
+      operation != "scan1" && bit_length(input.a) != expected_a_bits) {
     error = "operand width mismatch";
     return false;
   }
   const std::size_t expected_b_bits =
       is_word_row(operation) ? 64 : 64 * limbs;
-  if (operation != "cmp" && bit_length(input.b) != expected_b_bits) {
+  if (operation != "cmp" && operation != "cmpabs" &&
+      bit_length(input.b) != expected_b_bits) {
     error = "second operand width mismatch";
     return false;
   }
@@ -426,6 +512,18 @@ bool validate_case(const std::string& operation, const Operands& input,
     return cpp_int(quotient * b + remainder) == a && remainder >= 0 &&
            remainder < b;
   }
+  if (operation == "tdiv" || operation == "tmod") {
+    const cpp_int quotient = a / b;
+    const cpp_int remainder = a % b;
+    return cpp_int(quotient * b + remainder) == a && remainder <= 0;
+  }
+  if (operation == "divexact") {
+    const cpp_int quotient = a / b;
+    return cpp_int(quotient * b) == a;
+  }
+  if (operation == "divisible") {
+    return cpp_int(a % b).is_zero();
+  }
   if (operation == "gcd") {
     const cpp_int result = boost::multiprecision::gcd(a, b);
     return cpp_int(a % result) == 0 && cpp_int(b % result) == 0;
@@ -441,6 +539,9 @@ bool validate_case(const std::string& operation, const Operands& input,
   if (operation == "xor") {
     return cpp_int(cpp_int(a ^ b) ^ b) == a;
   }
+  if (operation == "not") {
+    return cpp_int(~cpp_int(~a)) == a;
+  }
   if (operation == "shl") {
     return cpp_int(cpp_int(a << kShiftBits) >> kShiftBits) == a;
   }
@@ -451,6 +552,9 @@ bool validate_case(const std::string& operation, const Operands& input,
   }
   if (operation == "cmp") {
     return a.compare(b) == 1;
+  }
+  if (operation == "cmpabs") {
+    return a.backend().compare_unsigned(b.backend()) == 1;
   }
   if (operation == "neg") {
     return cpp_int(-cpp_int(-a)) == a;
@@ -495,11 +599,36 @@ bool validate_case(const std::string& operation, const Operands& input,
     return cpp_int(product / input.b_word) == a &&
            cpp_int(product % input.b_word) == 0;
   }
-  if (operation == "div1") {
+  if (operation == "div1" || operation == "mod1") {
     const cpp_int quotient = a / input.b_word;
     const cpp_int remainder = a % input.b_word;
     return cpp_int(quotient * input.b_word + remainder) == a &&
            remainder >= 0 && remainder < cpp_int(input.b_word);
+  }
+  if (operation == "bitlen") {
+    return boost::multiprecision::msb(a) + 1 == 64 * limbs;
+  }
+  if (operation == "scan1") {
+    return boost::multiprecision::lsb(a) == kShiftBits;
+  }
+  if (operation == "tstbit") {
+    return boost::multiprecision::bit_test(a, 0);
+  }
+  if (operation == "setbit") {
+    cpp_int result = a;
+    boost::multiprecision::bit_set(result, kShiftBits);
+    return boost::multiprecision::bit_test(result, kShiftBits);
+  }
+  if (operation == "clrbit") {
+    cpp_int result = a;
+    boost::multiprecision::bit_unset(result, kShiftBits);
+    return !boost::multiprecision::bit_test(result, kShiftBits);
+  }
+  if (operation == "combit") {
+    cpp_int result = a;
+    boost::multiprecision::bit_flip(result, kShiftBits);
+    boost::multiprecision::bit_flip(result, kShiftBits);
+    return result == a;
   }
   error = "unknown operation: " + operation;
   return false;

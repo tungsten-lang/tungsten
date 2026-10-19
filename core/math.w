@@ -189,3 +189,72 @@
       ~-1.5707963267948966
     else
       ~0.0
+
+  -> .gcd(a, b)
+    ccall("w_bigint_gcd", a, b)
+
+  -> .lcm(a, b)
+    ccall("w_bigint_lcm", a, b)
+
+  -> .gcdext(a, b)
+    ccall("w_bigint_gcdext", a, b)
+
+  -> .isqrt(n)
+    n.isqrt
+
+  -> .isqrt_rem(n)
+    ccall("w_bigint_isqrt_rem", n)
+
+  -> .iroot(a, n)
+    ccall("w_bigint_iroot", a, n)
+
+  -> .iroot_rem(a, n)
+    ccall("w_bigint_iroot_rem", a, n)
+
+  -> .factorial(n)
+    ccall("w_bigint_fac_ui", n)
+
+  -> .double_factorial(n)
+    ccall("w_bigint_2fac_ui", n)
+
+  -> .multifactorial(n, m)
+    ccall("w_bigint_mfac_uiui", n, m)
+
+  -> .primorial(n)
+    ccall("w_bigint_primorial_ui", n)
+
+  -> .binomial(n, k)
+    ccall("w_bigint_bin_ui", n, k)
+
+  -> .choose(n, k)
+    ccall("w_bigint_bin_ui", n, k)
+
+  -> .fib(n)
+    ccall("w_bigint_fib_ui", n)
+
+  -> .fib2(n)
+    ccall("w_bigint_fib2_ui", n)
+
+  -> .lucas(n)
+    ccall("w_bigint_lucnum_ui", n)
+
+  -> .lucas2(n)
+    ccall("w_bigint_lucnum2_ui", n)
+
+  -> .jacobi(a, n)
+    ccall("w_bigint_jacobi", a, n)
+
+  -> .kronecker(a, b)
+    ccall("w_bigint_kronecker", a, b)
+
+  -> .nextprime(n)
+    ccall("w_bigint_nextprime", n)
+
+  -> .prevprime(n)
+    ccall("w_bigint_prevprime", n)
+
+  -> .invmod(a, m)
+    ccall("w_bigint_invmod", a, m)
+
+  -> .powmod(b, e, m)
+    ccall("bigint_powmod_any", b, e, m)

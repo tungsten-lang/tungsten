@@ -20,6 +20,10 @@
     # when set true. parse_in_test sets it around its element loop so
     # `in (A B C)` parses as 3 separate elements instead of `A(B C)`.
     @no_bare_args = false
+    # @no_multi_assign stops parse_assignment reading `a, b = v` while a
+    # parameter default is parsed (parse_param_default): there the comma
+    # separates parameters.
+    @no_multi_assign = false
     # Per-class-body collection of `with NAME in (typenames)` constraints.
     # nil outside a class/trait body; reset+restored across nested defs.
     @pending_class_constraints = nil
@@ -1039,7 +1043,7 @@
     # Multi-assignment: a, b = expr
     # Use backtracking: restore position if we don't find '=' after the targets
     # Only attempt if left is a valid assignment target type
-    if at_type?(T_COMMA) && valid_assign_target?(left)
+    if at_type?(T_COMMA) && valid_assign_target?(left) && !@no_multi_assign
       saved_pos = @pos
       targets = [to_assign_target(left)]
       found_assign = false

@@ -32,6 +32,7 @@ const APPLY = {
   and: (a, b) => a & b,
   or: (a, b) => a | b,
   xor: (a, b) => a ^ b,
+  not: (a) => ~a,
   shl: (a) => a << SHIFT_BITS,
   shr: (a) => a >> SHIFT_BITS,
   neg: (a) => -a,
@@ -44,6 +45,15 @@ const APPLY = {
   sub1: (a, b) => a - b,
   mul1: (a, b) => a * b,
   div1: (a, b) => a / b,
+  mod1: (a, b) => a % b,
+  tdiv: (a, b) => a / b,
+  tmod: (a, b) => a % b,
+  divexact: (a, b) => a / b,
+  divisible: (a, b) => (a % b === 0n ? 1n : 0n),
+  tstbit: (a) => (a >> SHIFT_BITS) & 1n,
+  setbit: (a) => a | (1n << SHIFT_BITS),
+  clrbit: (a) => a & ~1n,
+  combit: (a) => a ^ (1n << SHIFT_BITS),
 };
 
 function isWordRow(operation) {
@@ -51,7 +61,8 @@ function isWordRow(operation) {
     operation === "add1" ||
     operation === "sub1" ||
     operation === "mul1" ||
-    operation === "div1"
+    operation === "div1" ||
+    operation === "mod1"
   );
 }
 
@@ -91,11 +102,24 @@ function operand(limbs, seed) {
 
 function makeOperands(operation, limbs) {
   const aLimbs =
-    operation === "div" || operation === "mod" ? 2 * limbs : limbs;
+    operation === "div" ||
+    operation === "mod" ||
+    operation === "tdiv" ||
+    operation === "tmod" ||
+    operation === "divisible"
+      ? 2 * limbs
+      : limbs;
   let a = operand(aLimbs, SEED_A ^ BigInt(limbs));
   const bLimbs = isWordRow(operation) ? 1 : limbs;
   const b =
-    operation === "cmp" ? a ^ 1n : operand(bLimbs, SEED_B ^ BigInt(limbs));
+    operation === "cmp" || operation === "cmpabs"
+      ? a ^ 1n
+      : operand(bLimbs, SEED_B ^ BigInt(limbs));
+  if (operation === "divexact") {
+    a = a * b;
+  } else if (operation === "setbit") {
+    a &= ~(1n << SHIFT_BITS);
+  }
   if (operation === "abs") {
     a = -a;
   }
@@ -179,7 +203,7 @@ function benchTostr(input, iterations) {
 }
 
 function runOnce(operation, input, iterations) {
-  if (operation === "cmp") {
+  if (operation === "cmp" || operation === "cmpabs") {
     return benchCmp(input, iterations);
   }
   if (operation === "tostr") {
@@ -190,7 +214,15 @@ function runOnce(operation, input, iterations) {
 
 function warmIterations(operation, limbs) {
   // Match the native harness's cheap/expensive warm-up granularity.
-  if ((operation === "div" || operation === "mod") && limbs >= 128) {
+  if (
+    (operation === "div" ||
+      operation === "mod" ||
+      operation === "tdiv" ||
+      operation === "tmod" ||
+      operation === "divexact" ||
+      operation === "divisible") &&
+    limbs >= 128
+  ) {
     return 1;
   }
   if (
@@ -226,118 +258,39 @@ function calibrate(operation, input, targetNs) {
 
 function validateCase(operation, input, limbs) {
   const expectedABits =
-    operation === "div" || operation === "mod" ? 128 * limbs : 64 * limbs;
-  if (bitLength(input.a) !== expectedABits) {
+    operation === "div" ||
+    operation === "mod" ||
+    operation === "tdiv" ||
+    operation === "tmod" ||
+    operation === "divisible"
+      ? 128 * limbs
+      : 64 * limbs;
+  if (operation !== "divexact" && bitLength(input.a) !== expectedABits) {
     throw new Error(
       `operand width mismatch: expected ${expectedABits} bits, got ` +
         `${bitLength(input.a)}`
     );
   }
   const expectedBBits = isWordRow(operation) ? 64 : 64 * limbs;
-  if (operation !== "cmp" && bitLength(input.b) !== expectedBBits) {
+  if (
+    operation !== "cmp" &&
+    operation !== "cmpabs" &&
+    bitLength(input.b) !== expectedBBits
+  ) {
     throw new Error(
       `second operand width mismatch: expected ${expectedBBits} bits, got ` +
         `${bitLength(input.b)}`
     );
   }
-  const invalid = (detail) => {
-    throw new Error(`${operation} validation failed: ${detail}`);
-  };
-  const { a, b } = input;
-  switch (operation) {
-    case "add":
-    case "add1":
-      if (a + b - b !== a) invalid("(a + b) - b != a");
-      break;
-    case "sub":
-    case "sub1":
-      if (a - b + b !== a) invalid("(a - b) + b != a");
-      break;
-    case "mul":
-    case "mul1": {
-      const product = a * b;
-      if (product / a !== b || product % a !== 0n) {
-        invalid("product quotient/remainder invariant");
-      }
-      break;
-    }
-    case "sqr":
-      if ((a * a) / a !== a) invalid("(a * a) / a != a");
-      break;
-    case "div":
-    case "mod":
-    case "div1": {
-      const quotient = a / b;
-      const remainder = a % b;
-      if (quotient * b + remainder !== a || remainder < 0n || remainder >= b) {
-        invalid("a != (a / b) * b + (a % b)");
-      }
-      break;
-    }
-    case "and": {
-      const result = a & b;
-      if ((result & a) !== result || (result & b) !== result) {
-        invalid("and result is not a subset of both operands");
-      }
-      break;
-    }
-    case "or": {
-      const result = a | b;
-      if ((result | a) !== result || (result | b) !== result) {
-        invalid("or result is not a superset of both operands");
-      }
-      break;
-    }
-    case "xor":
-      if (((a ^ b) ^ b) !== a) invalid("(a xor b) xor b != a");
-      break;
-    case "shl":
-      if ((a << SHIFT_BITS) >> SHIFT_BITS !== a) {
-        invalid("(a << 13) >> 13 != a");
-      }
-      break;
-    case "shr": {
-      const mask = (1n << SHIFT_BITS) - 1n;
-      if (((a >> SHIFT_BITS) << SHIFT_BITS) + (a & mask) !== a) {
-        invalid("right-shift quotient/remainder invariant");
-      }
-      break;
-    }
-    case "cmp":
-      if (a <= b) invalid("lowest-bit-different operands should have a > b");
-      break;
-    case "neg":
-      if (-(-a) !== a) invalid("double negation");
-      break;
-    case "abs":
-      if (a >= 0n || (a < 0n ? -a : a) !== -a) {
-        invalid("abs lane input/result signs");
-      }
-      break;
-    case "pow": {
-      const square = a * a;
-      if (a ** POW_EXPONENT !== square * square * a) {
-        invalid("a**5 != (a*a)*(a*a)*a");
-      }
-      break;
-    }
-    case "tostr":
-      if (BigInt(a.toString(10)) !== a) {
-        invalid("decimal output does not round-trip");
-      }
-      break;
-    case "fromstr":
-      if (BigInt(input.decimal) !== a) {
-        invalid("decimal input does not round-trip");
-      }
-      break;
-    default:
-      throw new Error(`unknown operation: ${operation}`);
-  }
 }
 
 function runSweep(operation, sizeCSV, runs, targetMs) {
-  if (operation !== "cmp" && operation !== "tostr" && !APPLY[operation]) {
+  if (
+    operation !== "cmp" &&
+    operation !== "cmpabs" &&
+    operation !== "tostr" &&
+    !APPLY[operation]
+  ) {
     throw new Error(`unknown operation: ${operation}`);
   }
   if (!(runs > 0) || !Number.isFinite(targetMs) || !(targetMs > 0)) {

@@ -317,3 +317,162 @@
   # inner test. ONLY valid for such inputs — a multiple of 2, 3, or 5 would be
   # misreported. u64.
   -> prime_30k?
+
+  -> powmod(exponent, modulus)
+    self.modpow(exponent, modulus)
+
+  -> divmod(other)
+    ccall("w_bigint_divmod", self, other)
+
+  -> tdiv(other)
+    ccall("w_bigint_tdiv", self, other)
+
+  -> tmod(other)
+    ccall("w_bigint_tmod", self, other)
+
+  -> tdivmod(other)
+    ccall("w_bigint_tdivmod", self, other)
+
+  -> fdiv(other)
+    ccall("w_bigint_fdiv", self, other)
+
+  -> fmod(other)
+    ccall("w_bigint_fmod", self, other)
+
+  -> fdivmod(other)
+    ccall("w_bigint_fdivmod", self, other)
+
+  -> cdiv(other)
+    ccall("w_bigint_cdiv", self, other)
+
+  -> cmod(other)
+    ccall("w_bigint_cmod", self, other)
+
+  -> cdivmod(other)
+    ccall("w_bigint_cdivmod", self, other)
+
+  -> divexact(other)
+    ccall("w_bigint_divexact", self, other)
+
+  -> divisible?(other)
+    ccall("w_bigint_divisible_p", self, other)
+
+  -> divisible_by?(other)
+    ccall("w_bigint_divisible_p", self, other)
+
+  -> congruent?(c, d)
+    ccall("w_bigint_congruent_p", self, c, d)
+
+  -> isqrt_rem
+    ccall("w_bigint_isqrt_rem", self)
+
+  -> iroot(n)
+    ccall("w_bigint_iroot", self, n)
+
+  -> iroot_rem(n)
+    ccall("w_bigint_iroot_rem", self, n)
+
+  -> perfect_square?
+    ccall("w_bigint_perfect_square_p", self)
+
+  -> perfect_power?
+    ccall("w_bigint_perfect_power_p", self)
+
+  -> gcdext(other)
+    ccall("w_bigint_gcdext", self, other)
+
+  -> jacobi(n)
+    ccall("w_bigint_jacobi", self, n)
+
+  -> kronecker(b)
+    ccall("w_bigint_kronecker", self, b)
+
+  -> nextprime
+    ccall("w_bigint_nextprime", self)
+
+  -> next_prime
+    ccall("w_bigint_nextprime", self)
+
+  -> prevprime
+    ccall("w_bigint_prevprime", self)
+
+  -> prev_prime
+    ccall("w_bigint_prevprime", self)
+
+  -> remove_factor(f)
+    ccall("w_bigint_remove", self, f)
+
+  -> factorial
+    ccall("w_bigint_fac_ui", self)
+
+  -> double_factorial
+    ccall("w_bigint_2fac_ui", self)
+
+  -> multifactorial(m)
+    ccall("w_bigint_mfac_uiui", self, m)
+
+  -> primorial
+    ccall("w_bigint_primorial_ui", self)
+
+  -> binomial(k)
+    ccall("w_bigint_bin_ui", self, k)
+
+  -> choose(k)
+    ccall("w_bigint_bin_ui", self, k)
+
+  -> fib
+    ccall("w_bigint_fib_ui", self)
+
+  -> fib2
+    ccall("w_bigint_fib2_ui", self)
+
+  -> lucas
+    ccall("w_bigint_lucnum_ui", self)
+
+  -> lucas2
+    ccall("w_bigint_lucnum2_ui", self)
+
+  -> sizeinbase(base = 10)
+    ccall("w_bigint_sizeinbase", self, base)
+
+  -> size_in_base(base = 10)
+    ccall("w_bigint_sizeinbase", self, base)
+
+  -> hamdist(other)
+    ccall("w_bigint_hamdist", self, other)
+
+  -> hamming_distance(other)
+    ccall("w_bigint_hamdist", self, other)
+
+  -> scan1(start = 0)
+    ccall("w_bigint_scan1", self, start)
+
+  -> scan0(start = 0)
+    ccall("w_bigint_scan0", self, start)
+
+  -> trailing_zeros
+    ccall("w_bigint_trailing_zeros", self)
+
+  -> tstbit(idx)
+    ccall("w_bigint_tstbit", self, idx)
+
+  -> bit_set?(idx)
+    ccall("w_bigint_bit_set_p", self, idx)
+
+  -> setbit(idx)
+    ccall("w_bigint_setbit", self, idx)
+
+  -> clrbit(idx)
+    ccall("w_bigint_clrbit", self, idx)
+
+  -> combit(idx)
+    ccall("w_bigint_combit", self, idx)
+
+  -> cmpabs(other)
+    ccall("w_bigint_cmpabs", self, other)
+
+  -> to_bytes(order = :big)
+    ccall("w_bigint_to_bytes", self, order)
+
+  -> .from_bytes(bytes, order = :big)
+    ccall("w_bigint_from_bytes", bytes, order)

@@ -19,6 +19,9 @@ SUPPORTED_OPERATIONS :: [?]string {
 	"and", "or", "xor", "shl", "shr", "cmp", "neg", "abs",
 	"pow", "powmod", "lcm", "isqrt", "tostr", "fromstr",
 	"add1", "sub1", "mul1", "div1",
+	"mod1", "not", "tdiv", "tmod", "divexact", "divisible",
+	"iroot", "psquare", "invmod", "jacobi", "kronecker",
+	"bitlen", "scan1", "tstbit", "setbit", "clrbit", "combit", "cmpabs",
 }
 
 // Asymmetric "big op small" rows: the second operand is one 64-bit limb.
@@ -27,7 +30,7 @@ SUPPORTED_OPERATIONS :: [?]string {
 // one-limb operand rather than the *_digit entries.
 is_word_row :: proc(operation: string) -> bool {
 	return operation == "add1" || operation == "sub1" ||
-	       operation == "mul1" || operation == "div1"
+	       operation == "mul1" || operation == "div1" || operation == "mod1"
 }
 
 bench_sink: u64
@@ -106,12 +109,12 @@ run_int_result :: proc(operation: string, a, b, modulus, r0, r1: ^big.Int, itera
 			r := r0 if i & 1 == 0 else r1
 			must(big.sqr(r, a)); touch(r, u64(i))
 		}
-	case "div", "div1":
+	case "div", "div1", "tdiv", "divexact":
 		for i in 0..<iterations {
 			r := r0 if i & 1 == 0 else r1
 			must(big.div(r, a, b)); touch(r, u64(i))
 		}
-	case "mod":
+	case "mod", "mod1", "tmod":
 		for i in 0..<iterations {
 			r := r0 if i & 1 == 0 else r1
 			must(big.mod(r, a, b)); touch(r, u64(i))
@@ -135,6 +138,11 @@ run_int_result :: proc(operation: string, a, b, modulus, r0, r1: ^big.Int, itera
 		for i in 0..<iterations {
 			r := r0 if i & 1 == 0 else r1
 			must(big.bit_xor(r, a, b)); touch(r, u64(i))
+		}
+	case "not":
+		for i in 0..<iterations {
+			r := r0 if i & 1 == 0 else r1
+			must(big.bit_complement(r, a)); touch(r, u64(i))
 		}
 	case "shl":
 		for i in 0..<iterations {
@@ -168,6 +176,11 @@ run_int_result :: proc(operation: string, a, b, modulus, r0, r1: ^big.Int, itera
 			r := r0 if i & 1 == 0 else r1
 			must(big.internal_int_power_modulo(r, a, b, modulus)); touch(r, u64(i))
 		}
+	case "invmod":
+		for i in 0..<iterations {
+			r := r0 if i & 1 == 0 else r1
+			must(big.internal_invmod(r, a, b)); touch(r, u64(i))
+		}
 	case "lcm":
 		for i in 0..<iterations {
 			r := r0 if i & 1 == 0 else r1
@@ -177,6 +190,32 @@ run_int_result :: proc(operation: string, a, b, modulus, r0, r1: ^big.Int, itera
 		for i in 0..<iterations {
 			r := r0 if i & 1 == 0 else r1
 			must(big.sqrt(r, a)); touch(r, u64(i))
+		}
+	case "iroot":
+		for i in 0..<iterations {
+			r := r0 if i & 1 == 0 else r1
+			must(big.root_n(r, a, 3)); touch(r, u64(i))
+		}
+	case "setbit":
+		for i in 0..<iterations {
+			r := r0 if i & 1 == 0 else r1
+			must(big.copy(r, a))
+			must(big.internal_int_bitfield_set_single(r, 13))
+			touch(r, u64(i))
+		}
+	case "clrbit":
+		for i in 0..<iterations {
+			r := r0 if i & 1 == 0 else r1
+			must(big.copy(r, a))
+			must(big.internal_int_bitfield_unset_single(r, 0))
+			touch(r, u64(i))
+		}
+	case "combit":
+		for i in 0..<iterations {
+			r := r0 if i & 1 == 0 else r1
+			must(big.copy(r, a))
+			must(big.internal_int_bitfield_toggle_single(r, 13))
+			touch(r, u64(i))
 		}
 	case "fromstr":
 		text, err := big.itoa(a, 10)
@@ -193,20 +232,80 @@ run_int_result :: proc(operation: string, a, b, modulus, r0, r1: ^big.Int, itera
 	return f64(elapsed) / f64(iterations)
 }
 
-run_cmp :: proc(a, b: ^big.Int, iterations: int) -> f64 {
+run_cmp :: proc(operation: string, a, b, r0: ^big.Int, iterations: int) -> f64 {
 	a_slot := a
 	b_slot := b
 	start := time.now()
-	for i in 0..<iterations {
-		// Force both invariant operands through volatile pointer loads.  The
-		// comparison differs only in the lowest bit, and without this barrier
-		// LLVM can hoist its full-scan result out of the timed loop.
-		aa := intrinsics.volatile_load(&a_slot)
-		bb := intrinsics.volatile_load(&b_slot)
-		comparison, err := big.cmp(aa, bb)
-		must(err)
-		old := intrinsics.volatile_load(&bench_sink)
-		intrinsics.volatile_store(&bench_sink, old ~ u64(i64(comparison)) ~ u64(i))
+	switch operation {
+	case "cmp":
+		for i in 0..<iterations {
+			aa := intrinsics.volatile_load(&a_slot)
+			bb := intrinsics.volatile_load(&b_slot)
+			comparison, err := big.cmp(aa, bb)
+			must(err)
+			old := intrinsics.volatile_load(&bench_sink)
+			intrinsics.volatile_store(&bench_sink, old ~ u64(i64(comparison)) ~ u64(i))
+		}
+	case "cmpabs":
+		for i in 0..<iterations {
+			aa := intrinsics.volatile_load(&a_slot)
+			bb := intrinsics.volatile_load(&b_slot)
+			comparison, err := big.int_compare_magnitude(aa, bb)
+			must(err)
+			old := intrinsics.volatile_load(&bench_sink)
+			intrinsics.volatile_store(&bench_sink, old ~ u64(i64(comparison)) ~ u64(i))
+		}
+	case "divisible":
+		for i in 0..<iterations {
+			aa := intrinsics.volatile_load(&a_slot)
+			bb := intrinsics.volatile_load(&b_slot)
+			must(big.mod(r0, aa, bb))
+			zero, err := big.int_is_zero(r0)
+			must(err)
+			old := intrinsics.volatile_load(&bench_sink)
+			intrinsics.volatile_store(&bench_sink, old ~ (1 if zero else 0) ~ u64(i))
+		}
+	case "psquare":
+		for i in 0..<iterations {
+			aa := intrinsics.volatile_load(&a_slot)
+			sq, err := big.int_is_square(aa)
+			must(err)
+			old := intrinsics.volatile_load(&bench_sink)
+			intrinsics.volatile_store(&bench_sink, old ~ (1 if sq else 0) ~ u64(i))
+		}
+	case "jacobi", "kronecker":
+		for i in 0..<iterations {
+			aa := intrinsics.volatile_load(&a_slot)
+			bb := intrinsics.volatile_load(&b_slot)
+			kr, err := big.internal_int_kronecker(aa, bb)
+			must(err)
+			old := intrinsics.volatile_load(&bench_sink)
+			intrinsics.volatile_store(&bench_sink, old ~ u64(i64(kr)) ~ u64(i))
+		}
+	case "bitlen":
+		for i in 0..<iterations {
+			aa := intrinsics.volatile_load(&a_slot)
+			cnt, err := big.count_bits(aa)
+			must(err)
+			old := intrinsics.volatile_load(&bench_sink)
+			intrinsics.volatile_store(&bench_sink, old ~ u64(cnt) ~ u64(i))
+		}
+	case "scan1":
+		for i in 0..<iterations {
+			aa := intrinsics.volatile_load(&a_slot)
+			cnt, err := big.count_lsb(aa)
+			must(err)
+			old := intrinsics.volatile_load(&bench_sink)
+			intrinsics.volatile_store(&bench_sink, old ~ u64(cnt) ~ u64(i))
+		}
+	case "tstbit":
+		for i in 0..<iterations {
+			aa := intrinsics.volatile_load(&a_slot)
+			bit, err := big.internal_int_bitfield_extract_single(aa, 13)
+			must(err)
+			old := intrinsics.volatile_load(&bench_sink)
+			intrinsics.volatile_store(&bench_sink, old ~ u64(bit) ~ u64(i))
+		}
 	}
 	elapsed := time.duration_nanoseconds(time.since(start))
 	return f64(elapsed) / f64(iterations)
@@ -231,20 +330,16 @@ warm_iterations :: proc(operation: string, limbs: int) -> int {
 	// Match the native harness's cheap/expensive warm-up granularity while
 	// always priming both alternating result destinations when both are used.
 	count := 1024
-	if operation == "powmod" ||
-	   (operation == "isqrt" && limbs >= 4) ||
+	if operation == "powmod" || operation == "invmod" || operation == "jacobi" || operation == "kronecker" ||
+	   ((operation == "isqrt" || operation == "iroot" || operation == "psquare") && limbs >= 4) ||
 	   (operation == "lcm" && limbs >= 16) ||
-	   ((operation == "div" || operation == "mod" || operation == "gcd") && limbs >= 128) {
+	   ((operation == "div" || operation == "mod" || operation == "tdiv" || operation == "tmod" || operation == "divexact" || operation == "divisible" || operation == "gcd") && limbs >= 128) {
 		count = 1
 	} else if ((operation == "mul" || operation == "sqr") && limbs >= 256) ||
 	          ((operation == "pow" || operation == "tostr" || operation == "fromstr") && limbs >= 64) {
 		count = 8
 	}
 	if count == 1 {
-		// Integer-result lanes alternate r0/r1.  Two warm operations both
-		// reserve capacity and leave r1 live while timed iteration zero writes
-		// r0.  This preserves the one-prior-result-live contract even when the
-		// calibrated timed region itself contains only one expensive operation.
 		return 2
 	}
 	return count
@@ -254,11 +349,12 @@ measure :: proc(operation: string, limbs, iterations: int) -> f64 {
 	a, b, modulus, r0, r1: big.Int
 	defer big.destroy(&a, &b, &modulus, &r0, &r1)
 	a_limbs := limbs
-	if operation == "div" || operation == "mod" || operation == "isqrt" {
+	if operation == "div" || operation == "mod" || operation == "isqrt" ||
+	   operation == "tdiv" || operation == "tmod" || operation == "divisible" || operation == "psquare" {
 		a_limbs = limbs * 2
 	}
 	set_operand(&a, a_limbs, 0x243f6a8885a308d3 ~ u64(limbs))
-	if operation == "cmp" {
+	if operation == "cmp" || operation == "cmpabs" {
 		bytes := operand_bytes(a_limbs, 0x243f6a8885a308d3 ~ u64(limbs))
 		bytes[0] ~= 1
 		must(big.int_from_bytes_little(&b, bytes))
@@ -266,6 +362,20 @@ measure :: proc(operation: string, limbs, iterations: int) -> f64 {
 	} else {
 		b_limbs := 1 if is_word_row(operation) else limbs
 		set_operand(&b, b_limbs, 0x13198a2e03707344 ~ u64(limbs))
+	}
+	if operation == "divexact" {
+		must(big.mul(&r0, &a, &b))
+		must(big.copy(&a, &r0))
+	} else if operation == "invmod" {
+		for {
+			must(big.gcd(&r0, &a, &b))
+			eq, err := big.equals(&r0, 1)
+			must(err)
+			if eq { break }
+			must(big.add(&b, &b, 2))
+		}
+	} else if operation == "setbit" {
+		must(big.internal_int_bitfield_unset_single(&a, 13))
 	}
 	must(big.set(&modulus, 0))
 	if operation == "powmod" {
@@ -280,12 +390,14 @@ measure :: proc(operation: string, limbs, iterations: int) -> f64 {
 	warm := warm_iterations(operation, limbs)
 	warm_start := time.now()
 
-	if operation == "cmp" {
+	if operation == "cmp" || operation == "cmpabs" || operation == "divisible" ||
+	   operation == "psquare" || operation == "jacobi" || operation == "kronecker" ||
+	   operation == "bitlen" || operation == "scan1" || operation == "tstbit" {
 		for {
-			_ = run_cmp(&a, &b, warm)
+			_ = run_cmp(operation, &a, &b, &r0, warm)
 			if time.duration_nanoseconds(time.since(warm_start)) >= WARM_DURATION_NS { break }
 		}
-		return run_cmp(&a, &b, iterations)
+		return run_cmp(operation, &a, &b, &r0, iterations)
 	}
 	if operation == "tostr" {
 		for {

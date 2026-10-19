@@ -332,6 +332,297 @@ fn __bench_launder(x) (i64) i64
     i += 1
   finish_sample(started, iterations, result, checksum)
 
+-> time_not(a, iterations)(BigInt i64)
+  result = nil
+  checksum = 0 ## i64
+  i = 0 ## i64
+  started = thread_cpu_ns()
+  while i < iterations
+    next_result = ccall("w_bigint_not", a)
+    checksum += (wvalue_bits(next_result) & 255) + i
+    release_value(result)
+    result = next_result
+    i += 1
+  finish_sample(started, iterations, result, checksum)
+
+-> time_tdiv(a, b, iterations)(BigInt BigInt i64)
+  result = nil
+  checksum = 0 ## i64
+  i = 0 ## i64
+  started = thread_cpu_ns()
+  while i < iterations
+    next_result = ccall("w_bigint_tdiv", a, b)
+    checksum += (wvalue_bits(next_result) & 255) + i
+    release_value(result)
+    result = next_result
+    i += 1
+  finish_sample(started, iterations, result, checksum)
+
+-> time_tmod(a, b, iterations)(BigInt BigInt i64)
+  result = nil
+  checksum = 0 ## i64
+  i = 0 ## i64
+  started = thread_cpu_ns()
+  while i < iterations
+    next_result = ccall("w_bigint_tmod", a, b)
+    checksum += (wvalue_bits(next_result) & 255) + i
+    release_value(result)
+    result = next_result
+    i += 1
+  finish_sample(started, iterations, result, checksum)
+
+-> time_cdiv(a, b, iterations)(BigInt BigInt i64)
+  result = nil
+  checksum = 0 ## i64
+  i = 0 ## i64
+  started = thread_cpu_ns()
+  while i < iterations
+    next_result = ccall("w_bigint_cdiv", a, b)
+    checksum += (wvalue_bits(next_result) & 255) + i
+    release_value(result)
+    result = next_result
+    i += 1
+  finish_sample(started, iterations, result, checksum)
+
+-> time_cmod(a, b, iterations)(BigInt BigInt i64)
+  result = nil
+  checksum = 0 ## i64
+  i = 0 ## i64
+  started = thread_cpu_ns()
+  while i < iterations
+    next_result = ccall("w_bigint_cmod", a, b)
+    checksum += (wvalue_bits(next_result) & 255) + i
+    release_value(result)
+    result = next_result
+    i += 1
+  finish_sample(started, iterations, result, checksum)
+
+-> time_divexact(a, b, iterations)(BigInt BigInt i64)
+  result = nil
+  checksum = 0 ## i64
+  i = 0 ## i64
+  started = thread_cpu_ns()
+  while i < iterations
+    next_result = ccall("w_bigint_divexact", a, b)
+    checksum += (wvalue_bits(next_result) & 255) + i
+    release_value(result)
+    result = next_result
+    i += 1
+  finish_sample(started, iterations, result, checksum)
+
+-> time_divisible(a, b, iterations)(BigInt BigInt i64)
+  result = nil
+  checksum = 0 ## i64
+  i = 0 ## i64
+  started = thread_cpu_ns()
+  while i < iterations
+    la = wvalue_from_bits(__bench_launder(wvalue_bits(a))) ## big
+    lb = wvalue_from_bits(__bench_launder(wvalue_bits(b))) ## big
+    next_result = ccall("w_bigint_divisible_p", la, lb)
+    checksum += (wvalue_bits(next_result) & 255) + i
+    result = next_result
+    i += 1
+  finish_sample(started, iterations, result, checksum)
+
+-> time_iroot(a, iterations)(BigInt i64)
+  result = nil
+  checksum = 0 ## i64
+  i = 0 ## i64
+  started = thread_cpu_ns()
+  while i < iterations
+    next_result = ccall("w_bigint_iroot", a, 3)
+    checksum += (wvalue_bits(next_result) & 255) + i
+    release_value(result)
+    result = next_result
+    i += 1
+  finish_sample(started, iterations, result, checksum)
+
+-> time_psquare(a, iterations)(BigInt i64)
+  result = nil
+  checksum = 0 ## i64
+  i = 0 ## i64
+  started = thread_cpu_ns()
+  while i < iterations
+    la = wvalue_from_bits(__bench_launder(wvalue_bits(a))) ## big
+    next_result = ccall("w_bigint_perfect_square_p", la)
+    checksum += (wvalue_bits(next_result) & 255) + i
+    result = next_result
+    i += 1
+  finish_sample(started, iterations, result, checksum)
+
+-> time_invmod(a, b, iterations)(BigInt BigInt i64)
+  result = nil
+  checksum = 0 ## i64
+  i = 0 ## i64
+  started = thread_cpu_ns()
+  while i < iterations
+    next_result = ccall("w_bigint_invmod", a, b)
+    checksum += (wvalue_bits(next_result) & 255) + i
+    release_value(result)
+    result = next_result
+    i += 1
+  finish_sample(started, iterations, result, checksum)
+
+-> time_jacobi(a, b, iterations)(BigInt BigInt i64)
+  result = nil
+  checksum = 0 ## i64
+  i = 0 ## i64
+  started = thread_cpu_ns()
+  while i < iterations
+    la = wvalue_from_bits(__bench_launder(wvalue_bits(a))) ## big
+    lb = wvalue_from_bits(__bench_launder(wvalue_bits(b))) ## big
+    next_result = ccall("w_bigint_jacobi", la, lb)
+    checksum += (wvalue_bits(next_result) & 255) + i
+    result = next_result
+    i += 1
+  finish_sample(started, iterations, result, checksum)
+
+-> time_kronecker(a, b, iterations)(BigInt BigInt i64)
+  result = nil
+  checksum = 0 ## i64
+  i = 0 ## i64
+  started = thread_cpu_ns()
+  while i < iterations
+    la = wvalue_from_bits(__bench_launder(wvalue_bits(a))) ## big
+    lb = wvalue_from_bits(__bench_launder(wvalue_bits(b))) ## big
+    next_result = ccall("w_bigint_kronecker", la, lb)
+    checksum += (wvalue_bits(next_result) & 255) + i
+    result = next_result
+    i += 1
+  finish_sample(started, iterations, result, checksum)
+
+-> time_bitlen(a, iterations)(BigInt i64)
+  result = nil
+  checksum = 0 ## i64
+  i = 0 ## i64
+  started = thread_cpu_ns()
+  while i < iterations
+    la = wvalue_from_bits(__bench_launder(wvalue_bits(a))) ## big
+    next_result = ccall("w_bigint_bit_length", la)
+    checksum += (wvalue_bits(next_result) & 255) + i
+    result = next_result
+    i += 1
+  finish_sample(started, iterations, result, checksum)
+
+-> time_popcnt(a, iterations)(BigInt i64)
+  result = nil
+  checksum = 0 ## i64
+  i = 0 ## i64
+  started = thread_cpu_ns()
+  while i < iterations
+    la = wvalue_from_bits(__bench_launder(wvalue_bits(a))) ## big
+    next_result = ccall("w_bigint_popcount", la)
+    checksum += (wvalue_bits(next_result) & 255) + i
+    result = next_result
+    i += 1
+  finish_sample(started, iterations, result, checksum)
+
+-> time_hamdist(a, b, iterations)(BigInt BigInt i64)
+  result = nil
+  checksum = 0 ## i64
+  i = 0 ## i64
+  started = thread_cpu_ns()
+  while i < iterations
+    la = wvalue_from_bits(__bench_launder(wvalue_bits(a))) ## big
+    lb = wvalue_from_bits(__bench_launder(wvalue_bits(b))) ## big
+    next_result = ccall("w_bigint_hamdist", la, lb)
+    checksum += (wvalue_bits(next_result) & 255) + i
+    result = next_result
+    i += 1
+  finish_sample(started, iterations, result, checksum)
+
+-> time_scan1(a, iterations)(BigInt i64)
+  result = nil
+  checksum = 0 ## i64
+  i = 0 ## i64
+  started = thread_cpu_ns()
+  while i < iterations
+    la = wvalue_from_bits(__bench_launder(wvalue_bits(a))) ## big
+    next_result = ccall("w_bigint_scan1", la, 0)
+    checksum += (wvalue_bits(next_result) & 255) + i
+    result = next_result
+    i += 1
+  finish_sample(started, iterations, result, checksum)
+
+-> time_scan0(a, iterations)(BigInt i64)
+  result = nil
+  checksum = 0 ## i64
+  i = 0 ## i64
+  started = thread_cpu_ns()
+  while i < iterations
+    la = wvalue_from_bits(__bench_launder(wvalue_bits(a))) ## big
+    next_result = ccall("w_bigint_scan0", la, 0)
+    checksum += (wvalue_bits(next_result) & 255) + i
+    result = next_result
+    i += 1
+  finish_sample(started, iterations, result, checksum)
+
+-> time_tstbit(a, iterations)(BigInt i64)
+  result = nil
+  checksum = 0 ## i64
+  i = 0 ## i64
+  started = thread_cpu_ns()
+  while i < iterations
+    la = wvalue_from_bits(__bench_launder(wvalue_bits(a))) ## big
+    next_result = ccall("w_bigint_tstbit", la, SHIFT_BITS)
+    checksum += (wvalue_bits(next_result) & 255) + i
+    result = next_result
+    i += 1
+  finish_sample(started, iterations, result, checksum)
+
+-> time_setbit(a, iterations)(BigInt i64)
+  result = nil
+  checksum = 0 ## i64
+  i = 0 ## i64
+  started = thread_cpu_ns()
+  while i < iterations
+    next_result = ccall("w_bigint_setbit", a, SHIFT_BITS)
+    checksum += (wvalue_bits(next_result) & 255) + i
+    release_value(result)
+    result = next_result
+    i += 1
+  finish_sample(started, iterations, result, checksum)
+
+-> time_clrbit(a, iterations)(BigInt i64)
+  result = nil
+  checksum = 0 ## i64
+  i = 0 ## i64
+  started = thread_cpu_ns()
+  while i < iterations
+    next_result = ccall("w_bigint_clrbit", a, 0)
+    checksum += (wvalue_bits(next_result) & 255) + i
+    release_value(result)
+    result = next_result
+    i += 1
+  finish_sample(started, iterations, result, checksum)
+
+-> time_combit(a, iterations)(BigInt i64)
+  result = nil
+  checksum = 0 ## i64
+  i = 0 ## i64
+  started = thread_cpu_ns()
+  while i < iterations
+    next_result = ccall("w_bigint_combit", a, SHIFT_BITS)
+    checksum += (wvalue_bits(next_result) & 255) + i
+    release_value(result)
+    result = next_result
+    i += 1
+  finish_sample(started, iterations, result, checksum)
+
+-> time_cmpabs(a, b, iterations)(BigInt BigInt i64)
+  result = nil
+  checksum = 0 ## i64
+  i = 0 ## i64
+  started = thread_cpu_ns()
+  while i < iterations
+    la = wvalue_from_bits(__bench_launder(wvalue_bits(a))) ## big
+    lb = wvalue_from_bits(__bench_launder(wvalue_bits(b))) ## big
+    next_result = ccall("w_bigint_cmpabs", la, lb)
+    checksum += (wvalue_bits(next_result) & 255) + i
+    result = next_result
+    i += 1
+  finish_sample(started, iterations, result, checksum)
+
 -> measure(operation, a, b, modulus, decimal, iterations)
   if operation == "add" || operation == "add1"
     return time_add(a, b, iterations)
@@ -343,7 +634,7 @@ fn __bench_launder(x) (i64) i64
     return time_sqr(a, iterations)
   if operation == "div" || operation == "div1"
     return time_div(a, b, iterations)
-  if operation == "mod"
+  if operation == "mod" || operation == "mod1"
     return time_mod(a, b, iterations)
   if operation == "gcd"
     return time_gcd(a, b, iterations)
@@ -375,16 +666,60 @@ fn __bench_launder(x) (i64) i64
     return time_tostr(a, iterations)
   if operation == "fromstr"
     return time_fromstr(decimal, iterations)
+  if operation == "not"
+    return time_not(a, iterations)
+  if operation == "tdiv"
+    return time_tdiv(a, b, iterations)
+  if operation == "tmod"
+    return time_tmod(a, b, iterations)
+  if operation == "cdiv"
+    return time_cdiv(a, b, iterations)
+  if operation == "cmod"
+    return time_cmod(a, b, iterations)
+  if operation == "divexact"
+    return time_divexact(a, b, iterations)
+  if operation == "divisible"
+    return time_divisible(a, b, iterations)
+  if operation == "iroot"
+    return time_iroot(a, iterations)
+  if operation == "psquare"
+    return time_psquare(a, iterations)
+  if operation == "invmod"
+    return time_invmod(a, b, iterations)
+  if operation == "jacobi"
+    return time_jacobi(a, b, iterations)
+  if operation == "kronecker"
+    return time_kronecker(a, b, iterations)
+  if operation == "bitlen"
+    return time_bitlen(a, iterations)
+  if operation == "popcnt"
+    return time_popcnt(a, iterations)
+  if operation == "hamdist"
+    return time_hamdist(a, b, iterations)
+  if operation == "scan1"
+    return time_scan1(a, iterations)
+  if operation == "scan0"
+    return time_scan0(a, iterations)
+  if operation == "tstbit"
+    return time_tstbit(a, iterations)
+  if operation == "setbit"
+    return time_setbit(a, iterations)
+  if operation == "clrbit"
+    return time_clrbit(a, iterations)
+  if operation == "combit"
+    return time_combit(a, iterations)
+  if operation == "cmpabs"
+    return time_cmpabs(a, b, iterations)
   raise "unknown bignum benchmark operation: " + operation
 
 -> warm_chunk(operation, limbs)
-  if operation == "powmod"
+  if operation in ("powmod" "invmod" "iroot")
     return 1
-  if operation == "isqrt" && limbs >= 4
+  if operation in ("isqrt" "psquare" "jacobi" "kronecker") && limbs >= 4
     return 1
   if operation == "lcm" && limbs >= 16
     return 1
-  if operation in ("div" "mod" "gcd") && limbs >= 128
+  if operation in ("div" "mod" "tdiv" "tmod" "cdiv" "cmod" "divexact" "divisible" "gcd") && limbs >= 128
     return 1
   if operation in ("mul" "sqr") && limbs >= 256
     return 8
@@ -418,7 +753,7 @@ fn __bench_launder(x) (i64) i64
   return a * b if operation == "mul" || operation == "mul1"
   return a * a if operation == "sqr"
   return a / b if operation == "div" || operation == "div1"
-  return a % b if operation == "mod"
+  return a % b if operation == "mod" || operation == "mod1"
   return ccall("w_bigint_gcd", a, b) if operation == "gcd"
   return a & b if operation == "and"
   return a | b if operation == "or"
@@ -434,6 +769,28 @@ fn __bench_launder(x) (i64) i64
   return ccall("__w_bigint_isqrt_src", a) if operation == "isqrt"
   return a.to_s() if operation == "tostr"
   return decimal.to_i if operation == "fromstr"
+  return ccall("w_bigint_not", a) if operation == "not"
+  return ccall("w_bigint_tdiv", a, b) if operation == "tdiv"
+  return ccall("w_bigint_tmod", a, b) if operation == "tmod"
+  return ccall("w_bigint_cdiv", a, b) if operation == "cdiv"
+  return ccall("w_bigint_cmod", a, b) if operation == "cmod"
+  return ccall("w_bigint_divexact", a, b) if operation == "divexact"
+  return ccall("w_bigint_divisible_p", a, b) if operation == "divisible"
+  return ccall("w_bigint_iroot", a, 3) if operation == "iroot"
+  return ccall("w_bigint_perfect_square_p", a) if operation == "psquare"
+  return ccall("w_bigint_invmod", a, b) if operation == "invmod"
+  return ccall("w_bigint_jacobi", a, b) if operation == "jacobi"
+  return ccall("w_bigint_kronecker", a, b) if operation == "kronecker"
+  return ccall("w_bigint_bit_length", a) if operation == "bitlen"
+  return ccall("w_bigint_popcount", a) if operation == "popcnt"
+  return ccall("w_bigint_hamdist", a, b) if operation == "hamdist"
+  return ccall("w_bigint_scan1", a, 0) if operation == "scan1"
+  return ccall("w_bigint_scan0", a, 0) if operation == "scan0"
+  return ccall("w_bigint_tstbit", a, SHIFT_BITS) if operation == "tstbit"
+  return ccall("w_bigint_setbit", a, SHIFT_BITS) if operation == "setbit"
+  return ccall("w_bigint_clrbit", a, 0) if operation == "clrbit"
+  return ccall("w_bigint_combit", a, SHIFT_BITS) if operation == "combit"
+  return ccall("w_bigint_cmpabs", a, b) if operation == "cmpabs"
   raise "unknown bignum benchmark operation: " + operation
 
 -> build_operands(operation, limbs)
@@ -447,7 +804,11 @@ fn __bench_launder(x) (i64) i64
   operations = [
     "add", "sub", "mul", "sqr", "div", "mod", "gcd", "and", "or",
     "xor", "shl", "shr", "cmp", "neg", "abs", "pow", "powmod", "lcm",
-    "isqrt", "tostr", "fromstr", "add1", "sub1", "mul1", "div1"
+    "isqrt", "tostr", "fromstr", "add1", "sub1", "mul1", "div1",
+    "mod1", "not", "tdiv", "tmod", "cdiv", "cmod", "divexact",
+    "divisible", "iroot", "psquare", "invmod", "jacobi", "kronecker",
+    "bitlen", "popcnt", "hamdist", "scan1", "scan0", "tstbit",
+    "setbit", "clrbit", "combit", "cmpabs"
   ]
   i = 0
   while i < operations.size

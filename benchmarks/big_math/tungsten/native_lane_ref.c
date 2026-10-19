@@ -74,25 +74,58 @@ WValue w_bench_tungsten_native_operand(
     if (which == 0) {
         if (native_operation_is(operation_value, "div") ||
             native_operation_is(operation_value, "mod") ||
-            native_operation_is(operation_value, "isqrt"))
+            native_operation_is(operation_value, "isqrt") ||
+            native_operation_is(operation_value, "tdiv") ||
+            native_operation_is(operation_value, "tmod") ||
+            native_operation_is(operation_value, "cdiv") ||
+            native_operation_is(operation_value, "cmod") ||
+            native_operation_is(operation_value, "divisible") ||
+            native_operation_is(operation_value, "psquare"))
             limbs *= 2;
         seed = UINT64_C(0x243f6a8885a308d3) ^ (uint64_t)row_limbs;
     } else {
         if (native_operation_is(operation_value, "add1") ||
             native_operation_is(operation_value, "sub1") ||
             native_operation_is(operation_value, "mul1") ||
-            native_operation_is(operation_value, "div1"))
+            native_operation_is(operation_value, "div1") ||
+            native_operation_is(operation_value, "mod1"))
             limbs = 1;
         seed = UINT64_C(0x13198a2e03707344) ^ (uint64_t)row_limbs;
-        if (native_operation_is(operation_value, "cmp"))
+        if (native_operation_is(operation_value, "cmp") ||
+            native_operation_is(operation_value, "cmpabs"))
             seed = UINT64_C(0x243f6a8885a308d3) ^ (uint64_t)row_limbs;
     }
 
     WValue value = native_bigint(limbs, seed);
-    if (which == 1 && native_operation_is(operation_value, "cmp"))
+    if (which == 1 && (native_operation_is(operation_value, "cmp") ||
+                       native_operation_is(operation_value, "cmpabs")))
         w_as_bigint(value)->limbs[0] ^= UINT64_C(1);
     if (which == 0 && native_operation_is(operation_value, "abs"))
         w_as_bigint(value)->size = -w_as_bigint(value)->size;
+    if (which == 0 && native_operation_is(operation_value, "divexact")) {
+        WValue b_val = native_bigint(
+            row_limbs, UINT64_C(0x13198a2e03707344) ^ (uint64_t)row_limbs
+        );
+        WValue prod = w_mul(value, b_val);
+        w_value_free(value);
+        w_value_free(b_val);
+        value = prod;
+    }
+    if (which == 0 && native_operation_is(operation_value, "setbit"))
+        w_as_bigint(value)->limbs[0] &= ~(UINT64_C(1) << 13);
+    if (which == 1 && native_operation_is(operation_value, "invmod")) {
+        WValue a_val = native_bigint(
+            row_limbs, UINT64_C(0x243f6a8885a308d3) ^ (uint64_t)row_limbs
+        );
+        while (1) {
+            WValue g = w_bigint_gcd(a_val, value);
+            int is_one = (g == w_int(1));
+            w_value_free(g);
+            if (is_one) break;
+            w_as_bigint(value)->limbs[0] += 2;
+        }
+        w_value_free(a_val);
+    }
     return value;
 }
 
@@ -142,7 +175,8 @@ WValue w_bench_tungsten_native_reference(
     if (native_operation_is(operation, "div") ||
         native_operation_is(operation, "div1"))
         return w_bigint_div(a, b);
-    if (native_operation_is(operation, "mod"))
+    if (native_operation_is(operation, "mod") ||
+        native_operation_is(operation, "mod1"))
         return w_bigint_mod(a, b);
     if (native_operation_is(operation, "gcd"))
         return w_bigint_gcd(a, b);
@@ -174,5 +208,49 @@ WValue w_bench_tungsten_native_reference(
         return w_bigint_to_s(a, w_int(10));
     if (native_operation_is(operation, "fromstr"))
         return w_bigint_from_dec_str(decimal);
+    if (native_operation_is(operation, "not"))
+        return w_bigint_not(a);
+    if (native_operation_is(operation, "tdiv"))
+        return w_bigint_tdiv(a, b);
+    if (native_operation_is(operation, "tmod"))
+        return w_bigint_tmod(a, b);
+    if (native_operation_is(operation, "cdiv"))
+        return w_bigint_cdiv(a, b);
+    if (native_operation_is(operation, "cmod"))
+        return w_bigint_cmod(a, b);
+    if (native_operation_is(operation, "divexact"))
+        return w_bigint_divexact(a, b);
+    if (native_operation_is(operation, "divisible"))
+        return w_bigint_divisible_p(a, b);
+    if (native_operation_is(operation, "iroot"))
+        return w_bigint_iroot(a, w_int(3));
+    if (native_operation_is(operation, "psquare"))
+        return w_bigint_perfect_square_p(a);
+    if (native_operation_is(operation, "invmod"))
+        return w_bigint_invmod(a, b);
+    if (native_operation_is(operation, "jacobi"))
+        return w_bigint_jacobi(a, b);
+    if (native_operation_is(operation, "kronecker"))
+        return w_bigint_kronecker(a, b);
+    if (native_operation_is(operation, "bitlen"))
+        return w_bigint_bit_length(a);
+    if (native_operation_is(operation, "popcnt"))
+        return w_bigint_popcount(a);
+    if (native_operation_is(operation, "hamdist"))
+        return w_bigint_hamdist(a, b);
+    if (native_operation_is(operation, "scan1"))
+        return w_bigint_scan1(a, w_int(0));
+    if (native_operation_is(operation, "scan0"))
+        return w_bigint_scan0(a, w_int(0));
+    if (native_operation_is(operation, "tstbit"))
+        return w_bigint_tstbit(a, w_int(13));
+    if (native_operation_is(operation, "setbit"))
+        return w_bigint_setbit(a, w_int(13));
+    if (native_operation_is(operation, "clrbit"))
+        return w_bigint_clrbit(a, w_int(0));
+    if (native_operation_is(operation, "combit"))
+        return w_bigint_combit(a, w_int(13));
+    if (native_operation_is(operation, "cmpabs"))
+        return w_bigint_cmpabs(a, b);
     abort();
 }

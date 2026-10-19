@@ -207,6 +207,8 @@
   auto :GifAnimation, "raster"
   auto :RasterFont,   "raster"
   auto :Svg,          "svg"
+  auto :ColorSpace,   "color_space"
+  auto :Transfer,     "color_space"
   auto :Motion,       "motion"
   auto :Ease,         "motion"
   auto :Paint,        "motion"

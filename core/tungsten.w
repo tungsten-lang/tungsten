@@ -209,6 +209,8 @@
   auto :Svg,          "svg"
   auto :ColorSpace,   "color_space"
   auto :Transfer,     "color_space"
+  auto :YCbCr,        "ycbcr"
+  auto :YuvFrame,     "ycbcr"
   auto :Motion,       "motion"
   auto :Ease,         "motion"
   auto :Paint,        "motion"

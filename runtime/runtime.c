@@ -952,6 +952,181 @@ static inline void w_allocprof(int kind, long long bytes) {
     }
 }
 
+/* ---- Memory ceiling (TUNGSTEN_MEMORY_LIMIT) ----
+ * Compiled programs have no GC, so a leak grows until the machine runs out of
+ * memory, and on macOS that ends in a watchdog kernel panic rather than an
+ * OOM kill. A detached thread samples this process's physical footprint
+ * (compressed pages included, unlike RSS) every 100 ms and exits with status
+ * 137 once it passes the limit: 8 GiB by default; TUNGSTEN_MEMORY_LIMIT=32G
+ * raises it (K/M/G/T suffix, a bare number is MiB) and =off disables the
+ * watch. A process holding at least 1 GiB also exits when the whole system is
+ * down to its last 5% of memory, so many processes that each stay under the
+ * limit cannot exhaust the machine together. Nothing on the allocation paths
+ * changes. */
+#if defined(__APPLE__) || defined(__linux__)
+#ifdef __APPLE__
+#include <mach/mach.h>
+#endif
+
+#define W_MEMWATCH_DEFAULT_LIMIT ((uint64_t)8 << 30)
+#define W_MEMWATCH_SYSTEM_FLOOR_PCT 5
+#define W_MEMWATCH_SYSTEM_MIN_FOOTPRINT ((uint64_t)1 << 30)
+#define W_MEMWATCH_PERIOD_US 100000
+
+static uint64_t g_memwatch_limit;
+
+#ifdef __linux__
+/* The kB value of the first "<key>" line of a /proc file, or -1. */
+static long long w_memwatch_proc_kb(const char *path, const char *key) {
+    FILE *f = fopen(path, "r");
+    if (!f) return -1;
+    char line[256];
+    size_t klen = strlen(key);
+    long long kb = -1;
+    while (fgets(line, sizeof(line), f)) {
+        if (strncmp(line, key, klen) == 0) {
+            kb = strtoll(line + klen, NULL, 10);
+            break;
+        }
+    }
+    fclose(f);
+    return kb;
+}
+#endif
+
+/* Bytes of physical memory charged to this process, or 0 if unknown. */
+static uint64_t w_memwatch_footprint(void) {
+#ifdef __APPLE__
+    task_vm_info_data_t info;
+    mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+    if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&info,
+                  &count) != KERN_SUCCESS)
+        return 0;
+    return info.phys_footprint;
+#else
+    long long rss = w_memwatch_proc_kb("/proc/self/status", "VmRSS:");
+    long long swap = w_memwatch_proc_kb("/proc/self/status", "VmSwap:");
+    if (rss < 0) return 0;
+    return ((uint64_t)rss + (uint64_t)(swap > 0 ? swap : 0)) * 1024;
+#endif
+}
+
+/* Percent of system memory still available, or -1 if unknown. */
+static int w_memwatch_system_available_pct(void) {
+#ifdef __APPLE__
+    int level = 0;
+    size_t len = sizeof(level);
+    if (sysctlbyname("kern.memorystatus_level", &level, &len, NULL, 0) != 0)
+        return -1;
+    return level;
+#else
+    long long total = w_memwatch_proc_kb("/proc/meminfo", "MemTotal:");
+    long long avail = w_memwatch_proc_kb("/proc/meminfo", "MemAvailable:");
+    if (total <= 0 || avail < 0) return -1;
+    return (int)(avail * 100 / total);
+#endif
+}
+
+/* "8G", "512M", "1.5T", "16GiB", "65536" (bare: MiB); "off", "none", "0":
+ * no limit (*out = 0). Returns 0 when the text is malformed. */
+static int w_memwatch_parse(const char *s, uint64_t *out) {
+    if (strcasecmp(s, "off") == 0 || strcasecmp(s, "none") == 0 ||
+        strcasecmp(s, "unlimited") == 0) {
+        *out = 0;
+        return 1;
+    }
+    char *end = NULL;
+    double v = strtod(s, &end);
+    if (end == s || !(v >= 0)) return 0;
+    double unit = 1024.0 * 1024.0;
+    switch (*end) {
+    case 'k': case 'K': unit = 1024.0; end++; break;
+    case 'm': case 'M': unit = 1024.0 * 1024.0; end++; break;
+    case 'g': case 'G': unit = 1024.0 * 1024.0 * 1024.0; end++; break;
+    case 't': case 'T': unit = 1024.0 * 1024.0 * 1024.0 * 1024.0; end++; break;
+    default: break;
+    }
+    if (*end == 'i') end++;
+    if (*end == 'b' || *end == 'B') end++;
+    if (*end != '\0') return 0;
+    *out = (uint64_t)(v * unit);
+    return 1;
+}
+
+__attribute__((noreturn))
+static void w_memwatch_exit(const char *why) {
+    char msg[768];
+    int n = snprintf(msg, sizeof(msg),
+        "tungsten: %s\n"
+        "tungsten: exiting before the machine runs out of memory. If this "
+        "program really needs more, raise the limit, e.g. "
+        "TUNGSTEN_MEMORY_LIMIT=32G (or =off); if it should not, it is "
+        "probably leaking.\n", why);
+    if (n > 0) {
+        ssize_t w = write(STDERR_FILENO, msg,
+                          (size_t)n < sizeof(msg) ? (size_t)n : sizeof(msg) - 1);
+        (void)w;
+    }
+    _exit(137);
+}
+
+static void *w_memwatch_main(void *arg) {
+    (void)arg;
+#ifdef __APPLE__
+    pthread_setname_np("tungsten-memwatch");
+#endif
+    const double gib = 1024.0 * 1024.0 * 1024.0;
+    char why[256];
+    for (;;) {
+        usleep(W_MEMWATCH_PERIOD_US);
+        uint64_t fp = w_memwatch_footprint();
+        if (g_memwatch_limit && fp > g_memwatch_limit) {
+            snprintf(why, sizeof(why),
+                     "memory limit exceeded: this process uses %.1f GiB "
+                     "(TUNGSTEN_MEMORY_LIMIT %.1f GiB)",
+                     (double)fp / gib, (double)g_memwatch_limit / gib);
+            w_memwatch_exit(why);
+        }
+        if (fp >= W_MEMWATCH_SYSTEM_MIN_FOOTPRINT) {
+            int pct = w_memwatch_system_available_pct();
+            if (pct >= 0 && pct < W_MEMWATCH_SYSTEM_FLOOR_PCT) {
+                snprintf(why, sizeof(why),
+                         "system memory nearly exhausted (%d%% available) "
+                         "and this process uses %.1f GiB",
+                         pct, (double)fp / gib);
+                w_memwatch_exit(why);
+            }
+        }
+    }
+    return NULL;
+}
+
+__attribute__((constructor))
+static void w_memwatch_start(void) {
+    uint64_t limit = W_MEMWATCH_DEFAULT_LIMIT;
+    const char *e = getenv("TUNGSTEN_MEMORY_LIMIT");
+    if (e && *e) {
+        uint64_t parsed;
+        if (w_memwatch_parse(e, &parsed)) {
+            if (parsed == 0) return;
+            limit = parsed;
+        } else {
+            fprintf(stderr, "tungsten: ignoring malformed TUNGSTEN_MEMORY_LIMIT"
+                            "=%s (want e.g. 16G, 512M or off); limit stays "
+                            "8G\n", e);
+        }
+    }
+    g_memwatch_limit = limit;
+    pthread_attr_t attr;
+    if (pthread_attr_init(&attr) != 0) return;
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    pthread_attr_setstacksize(&attr, 64 * 1024);
+    pthread_t t;
+    pthread_create(&t, &attr, w_memwatch_main, NULL);
+    pthread_attr_destroy(&attr);
+}
+#endif /* __APPLE__ || __linux__ */
+
 #if BN_BIGINT_ARENA_ACTIVE
 static WBigint *bigint_arena_take(uint32_t alloc_cap, int zero_limbs);
 static void bigint_arena_free(WBigint *b);

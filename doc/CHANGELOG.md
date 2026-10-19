@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Compiled programs have a memory ceiling** — with no GC, a leak in a
+  compiled program grew until the machine ran out of memory; on macOS that
+  ended in a watchdog kernel panic, not an OOM kill. Parallel sweeps leaking
+  BigInt temporaries at about 10 GB/s took a 128 GB Mac down three times in one
+  night. A runtime thread now samples the process's physical footprint every
+  100 ms and exits with status 137 past `TUNGSTEN_MEMORY_LIMIT` (default `8G`;
+  `off` disables it). A process holding 1 GiB or more also exits when the
+  system is down to its last 5% of memory, so many processes that each stay
+  under the limit cannot exhaust the machine together. The allocation paths
+  are untouched; startup cost is one thread.
+
 - **A parameter named `t0` compiles** — WIRE emitted each parameter as
   `%<name>`, in the one LLVM namespace per function that the compiler's own
   `%t<N>` temporaries share, so `-> run(k, t0, t1)` died in clang with

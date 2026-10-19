@@ -145,6 +145,17 @@ If you see RSS climb:
 2. Then consider whether values escape in a way that disables free insertion.
 3. Only then turn `TUNGSTEN_FREE` as a diagnostic.
 
+A compiled program never grows without bound: past 8 GiB of physical memory
+(compressed pages included) the runtime prints
+`tungsten: memory limit exceeded` and exits with status 137. It also exits
+once it holds 1 GiB or more and the system has under 5% of its memory left.
+A program that really needs more raises the limit:
+
+```bash
+TUNGSTEN_MEMORY_LIMIT=32G ./out      # K/M/G/T suffix; a bare number is MiB
+TUNGSTEN_MEMORY_LIMIT=off ./out      # no ceiling
+```
+
 ---
 
 ## 8. GPU is a subset (`@gpu fn`)

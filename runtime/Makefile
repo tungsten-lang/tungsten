@@ -31,7 +31,9 @@ ifeq ($(UNAME_S),Darwin)
   METAL_SRC = metal.m graphics.m hid_bridge.m blas_bridge.c
   METAL_LDFLAGS = -framework Metal -framework Foundation -framework AppKit -framework QuartzCore -framework CoreGraphics -framework IOKit -framework CoreFoundation
   BLAS_LDFLAGS = -framework Accelerate
-  PLATFORM_LDFLAGS = $(METAL_LDFLAGS) $(BLAS_LDFLAGS)
+  # quartz.c: the CoreGraphics/CoreText/ImageIO drawing bridge (core/canvas.w).
+  QUARTZ_LDFLAGS = -framework CoreText -framework ImageIO
+  PLATFORM_LDFLAGS = $(METAL_LDFLAGS) $(BLAS_LDFLAGS) $(QUARTZ_LDFLAGS)
 else ifeq ($(UNAME_S),Linux)
   EVENT_SRC = event_epoll.c
   METAL_SRC =
@@ -60,8 +62,11 @@ else
 endif
 
 # Common runtime sources (core + terminal input + event/TLS + optional companions)
-RUNTIME_SRCS = runtime.c terminal_input.c ssmr_witness.c lexchar_tables.c unicode_tables.c $(EVENT_SRC) $(TLS_IMPL) aks.c $(METAL_SRC)
-RUNTIME_DEPS = runtime.c terminal_input.c ssmr_witness.c runtime.h wvalue.h ast_schema_generated.h event_loop.h $(EVENT_SRC) $(TLS_IMPL) aks.c $(METAL_SRC)
+# quartz.c builds everywhere: the real drawing bridge on darwin, raising
+# "Canvas needs macOS" stubs elsewhere.
+QUARTZ_SRC = quartz.c
+RUNTIME_SRCS = runtime.c terminal_input.c ssmr_witness.c lexchar_tables.c unicode_tables.c $(EVENT_SRC) $(TLS_IMPL) aks.c $(METAL_SRC) $(QUARTZ_SRC)
+RUNTIME_DEPS = runtime.c terminal_input.c ssmr_witness.c runtime.h wvalue.h ast_schema_generated.h event_loop.h $(EVENT_SRC) $(TLS_IMPL) aks.c $(METAL_SRC) $(QUARTZ_SRC) quartz.h
 RUNTIME_CFLAGS = $(WARN_FLAGS) $(GC_CFLAGS) $(TLS_CFLAGS) $(ONIG_CFLAGS)
 RUNTIME_LDFLAGS = $(GC_LDFLAGS) $(TLS_LDFLAGS) $(ONIG_LDFLAGS) $(PLATFORM_LDFLAGS)
 
@@ -69,8 +74,8 @@ RUNTIME_LDFLAGS = $(GC_LDFLAGS) $(TLS_LDFLAGS) $(ONIG_LDFLAGS) $(PLATFORM_LDFLAG
 # Produces an executable next to the .ll file
 compile: $(SRC:.ll=)
 
-%: %.ll $(RUNTIME_DIR)runtime.c $(RUNTIME_DIR)terminal_input.c $(RUNTIME_DIR)$(EVENT_SRC) $(RUNTIME_DIR)$(TLS_IMPL) $(RUNTIME_DIR)aks.c $(addprefix $(RUNTIME_DIR),$(METAL_SRC))
-	$(CLANG) -O2 $(RUNTIME_CFLAGS) $(RUNTIME_DIR)runtime.c $(RUNTIME_DIR)terminal_input.c $(RUNTIME_DIR)$(EVENT_SRC) $(RUNTIME_DIR)$(TLS_IMPL) $(RUNTIME_DIR)aks.c $(addprefix $(RUNTIME_DIR),$(METAL_SRC)) $< $(RUNTIME_LDFLAGS) -o $@
+%: %.ll $(RUNTIME_DIR)runtime.c $(RUNTIME_DIR)terminal_input.c $(RUNTIME_DIR)$(EVENT_SRC) $(RUNTIME_DIR)$(TLS_IMPL) $(RUNTIME_DIR)aks.c $(addprefix $(RUNTIME_DIR),$(METAL_SRC) $(QUARTZ_SRC))
+	$(CLANG) -O2 $(RUNTIME_CFLAGS) $(RUNTIME_DIR)runtime.c $(RUNTIME_DIR)terminal_input.c $(RUNTIME_DIR)$(EVENT_SRC) $(RUNTIME_DIR)$(TLS_IMPL) $(RUNTIME_DIR)aks.c $(addprefix $(RUNTIME_DIR),$(METAL_SRC) $(QUARTZ_SRC)) $< $(RUNTIME_LDFLAGS) -o $@
 
 # Build the split runtime objects for callers that do not use RUNTIME_SRCS.
 runtime-objects: runtime.o terminal_input.o

@@ -42,6 +42,7 @@ of every theorem for which that claim might be useful.
 | SAT-backed finite certificates | `tungsten-wassat` producer + `tungsten-wrat` checker | [certified-mathematics.md](certified-mathematics.md) |
 | Hash-bound external proof artifacts | `ProofArtifactBundle` | [certified-mathematics.md](certified-mathematics.md) |
 | Plots | `core/plot.w`, `tungsten-drawille` | [scientific-computing/plot.md](scientific-computing/plot.md) |
+| Colour spaces, transfer functions, Rec.709 video frames | `ColorSpace`, `Transfer`, `YCbCr`, `YuvFrame`, `Rec709` | [color.md](color.md) |
 
 Bare `π`, `τ`, `ϕ`/`φ`, `ℯ`, and `ℇ` are numeric `Float` constants. Exact
 symbolic work uses `Expression.pi` and `Expression.e`; these remain named

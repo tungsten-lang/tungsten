@@ -522,13 +522,13 @@
       advance()
       default = nil
       if !at_type?(T_COMMA) && !at_type?(T_RPAREN)
-        default = parse_expression()
+        default = parse_param_default()
       return Tungsten:AST:Param.new(param_name, default, ivar_assign, true, false, false)
 
     default = nil
     if at_type?(T_ASSIGN)
       advance()
-      default = parse_expression()
+      default = parse_param_default()
 
     # Inline ## type ascription on a constructor param: `(@components ## T[4])`.
     # v0 consumes the hint but does not surface it on the Param node —
@@ -539,6 +539,16 @@
       advance()
 
     Tungsten:AST:Param.new(param_name, default, ivar_assign)
+
+  # A parameter's default value ends at the next `,` or `)`: in
+  # `-> f(a, b = g(), c = 2)` the `, c = 2` is the next parameter, not a
+  # multiple assignment `g(), c = 2` (which swallowed parameter c).
+  -> parse_param_default
+    prev = @no_multi_assign
+    @no_multi_assign = true
+    value = parse_expression()
+    @no_multi_assign = prev
+    value
 
   -> parse_data_field
     pointer = false

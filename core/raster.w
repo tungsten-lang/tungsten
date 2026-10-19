@@ -17,6 +17,10 @@
 # LZ77 deflate stream; GIF output is 8-bit indexed LZW with an infinite-loop
 # extension. Frames with more than 256 distinct colors are quantized to a
 # 6x7x6 color cube.
+#
+# A PNG carries no colour-space chunks unless asked: `r.write_png(path,
+# "srgb")` (or "rec709", "display_p3", "linear_srgb", a ColorSpace or a Cicp)
+# tags it; see PngEncoder.color_chunks.
 
 + Raster
   ro :width, :height, :pixels
@@ -147,11 +151,12 @@
   -> .rgb(r, g, b)
     r.to_i * 65536 + g.to_i * 256 + b.to_i
 
-  -> to_png
-    PngEncoder.encode(@pixels, @width, @height)
+  # color: nil (untagged) or a colour-space tag, as PngEncoder.encode takes.
+  -> to_png(color = nil)
+    PngEncoder.encode(@pixels, @width, @height, color)
 
-  -> write_png(path)
-    File.write_bytes(path, to_png)
+  -> write_png(path, color = nil)
+    File.write_bytes(path, to_png(color))
     path
 
 
@@ -371,7 +376,15 @@
 # PNG: RGB8, adaptive filters, zlib(fixed-Huffman deflate), CRC-32, Adler-32.
 
 + PngEncoder
-  -> .encode(pixels, width, height)
+  # color: nil for no colour-space chunks (the output is unchanged), else a
+  # tag for color_chunks.
+  -> .encode(pixels, width, height, color = nil)
+    tags = PngEncoder.color_chunks(color)
+    extra = 0
+    t = 0
+    while t < tags.size
+      extra += 12 + tags[t][1].size
+      t += 1
     stride = width * 3 + 1
     raw = u8[stride * height]
     png_filter_rows(pixels, width, height, raw)
@@ -380,7 +393,7 @@
     head = i64[32768]
     prev = i64[32768]
     zlen = png_zlib(raw, stride * height, z, head, prev)
-    out = u8[zlen + 57]
+    out = u8[zlen + 57 + extra]
     pos = png_write_signature(out)
     ihdr = u8[13]
     png_put32(ihdr, 0, width)
@@ -393,10 +406,66 @@
     crc = i64[256]
     png_crc_table(crc)
     pos = png_chunk(out, pos, 1229472850, ihdr, 13, crc)
+    t = 0
+    while t < tags.size
+      pos = png_chunk(out, pos, tags[t][0], tags[t][1], tags[t][1].size, crc)
+      t += 1
     pos = png_chunk(out, pos, 1229209940, z, zlen, crc)
     empty = u8[1]
     pos = png_chunk(out, pos, 1229278788, empty, 0, crc)
     out
+
+  # Colour-space chunks [[type, data], ...] for a tag, written after IHDR
+  # (PNG 3rd edition: all before IDAT):
+  #   nil            none
+  #   "srgb"         cHRM (BT.709 primaries, D65), gAMA 45455, sRGB (perceptual):
+  #                  the set libpng writes for sRGB
+  #   "display_p3"   cHRM (P3, D65), gAMA 45455, cICP 12/13/0/1
+  #   "rec709"       cHRM (BT.709, D65), cICP 1/1/0/1 (no gAMA: none matches
+  #                  BT.709 / BT.1886 exactly)
+  #   "linear_srgb"  cHRM (BT.709, D65), gAMA 100000, cICP 1/8/0/1
+  #   a Cicp         cICP alone; its matrix must be 0 (PNG holds RGB)
+  # cICP (ITU-T H.273 code points) takes precedence over the others in a
+  # decoder that reads it; the named spaces use Cicp.for (matrix 0, full range).
+  -> .color_chunks(color)
+    if color == nil
+      return []
+    if color.is_a?(Cicp)
+      if !color.rgb?
+        raise ArgumentError, "PNG cICP needs matrix coefficients 0 (RGB), got [color]; use Cicp.for(space)"
+      return [[1665745744, png_bytes(color.to_a)]]
+    space = ColorSpace.named(color)
+    p = space.primaries
+    w = space.white
+    chrm = u8[32]
+    vals = [w[0], w[1], p[0], p[1], p[2], p[3], p[4], p[5]]
+    k = 0
+    while k < 8
+      png_put32(chrm, 4 * k, (vals[k] * ~100000.0).round.to_i)
+      k += 1
+    chunks = [[1665684045, chrm]]
+    gama = 0
+    if space.transfer == :srgb
+      gama = 45455
+    elsif space.transfer == :linear
+      gama = 100000
+    if gama > 0
+      g = u8[4]
+      png_put32(g, 0, gama)
+      chunks.push([1732332865, g])
+    if space.name == "srgb"
+      chunks.push([1934772034, png_bytes([0])])
+    else
+      chunks.push([1665745744, png_bytes(Cicp.for(space).to_a)])
+    chunks
+
+-> png_bytes(list)
+  out = u8[list.size]
+  k = 0
+  while k < list.size
+    out[k] = list[k]
+    k += 1
+  out
 
 -> png_write_signature(out) (u8[]) i64
   out[0] = 137

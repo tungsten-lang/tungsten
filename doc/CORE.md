@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(657 total), grouped by area, with its declaration, a one-line
+(659 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -218,6 +218,8 @@ summary from the source header, and a link to the source.
 | `GifAnimation` | `+ GifAnimation` | -------------------------------------------------------------------------- | [`core/raster.w`](../core/raster.w) |
 | `RasterFont` | `+ RasterFont` | -------------------------------------------------------------------------- | [`core/raster.w`](../core/raster.w) |
 | `Svg` | `+ Svg` | Svg — a small vector-figure builder. | [`core/svg.w`](../core/svg.w) |
+| `ColorSpace` | `+ ColorSpace` | ColorSpace — RGB colour spaces (primaries, white point and transfer | [`core/color_space.w`](../core/color_space.w) |
+| `Transfer` | `+ Transfer` | Transfer — the sRGB, BT.709 and BT.1886 transfer functions and their | [`core/color_space.w`](../core/color_space.w) |
 | `Motion` | `+ Motion` | — | [`core/motion.w`](../core/motion.w) |
 | `Ease` | `+ Ease` | Motion — motion graphics on top of Svg: easing curves, timing windows, | [`core/motion.w`](../core/motion.w) |
 | `Paint` | `+ Paint` | — | [`core/motion.w`](../core/motion.w) |

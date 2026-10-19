@@ -75447,6 +75447,48 @@ void w_value_release_loop(int64_t extra, WValue init, WValue prev, WValue next,
         bigint_release_if_live(w_as_bigint(prev));
 }
 
+/* Compiler-emitted (ownership.w, int_temp_releases) after the last use of an
+ * integer temporary: `t` is the result of an integer-arithmetic helper (or of
+ * a function int_fresh_returns proved returns one), and
+ * every use of it reads it without keeping it.  Integer arithmetic never
+ * retains an operand (it returns a fresh value, an inline integer, or the
+ * operand with its BigInt shared count raised), but other kinds can: a
+ * Rational may hold a BigInt numerator, a user operator may return an
+ * unmarked alias.  So `t` is released only when it and each of the `n`
+ * witnesses (the operands that produced `t` and the other operands of the
+ * operations that read it) are integers.  The inline wrapper
+ * __w_int_temp_release reaches this only for a BigInt `t`. */
+void w_int_temp_release(int64_t n, WValue t, WValue w1, WValue w2, WValue w3) {
+    if (!w_is_bigint(t) || n < 0 || n > 3) return;
+    /* A witness that is `t` itself is a call result that may be the very
+     * argument handed back unmarked: then nothing is dead. */
+    if (n >= 1 && (w1 == t || !w_is_integer_any(w1))) return;
+    if (n >= 2 && (w2 == t || !w_is_integer_any(w2))) return;
+    if (n >= 3 && (w3 == t || !w_is_integer_any(w3))) return;
+    bigint_release_if_live(w_as_bigint(t));
+}
+
+/* Compiler-emitted (ownership.w, int_fresh_returns) right after an
+ * arithmetic result that a fresh-returning function returns.  With integer
+ * operands it is fresh or an operand already marked shared; otherwise a
+ * user operator may have handed back an alias it never marked, so a BigInt
+ * result gets a shared mark and a caller's release only drops it. */
+void w_int_result_seal(WValue r, WValue a, WValue b) {
+    if (!w_is_bigint(r)) return;
+    if (w_is_integer_any(a) && w_is_integer_any(b)) return;
+    w_bigint_mark_shared(w_as_bigint(r));
+}
+
+/* Compiler-emitted (ownership.w, owned_slot_releases) after a call that read
+ * a slot-held integer `v` and returned `r`: when `r` may still hold `v` -- it
+ * is `v` itself, possibly unmarked, or a non-integer that can contain it --
+ * `v` gets a shared mark, so the slot's later release only drops it. */
+void w_int_alias_seal(WValue v, WValue r) {
+    if (!w_is_bigint(v)) return;
+    if (r != v && w_is_integer_any(r)) return;
+    w_bigint_mark_shared(w_as_bigint(v));
+}
+
 void w_value_free(WValue v) {
     if (w_is_bigint(v)) {
         bigint_release_if_live(w_as_bigint(v));

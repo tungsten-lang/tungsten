@@ -138,12 +138,23 @@ By default the compiler inserts `free` for non-escaping heap values
 TUNGSTEN_FREE=0 bin/tungsten -o out file.w   # disable free insertion
 ```
 
+Integer temporaries, loop variables' old values, fresh arrays/strings/hashes
+returned by your own functions, and top-level script variables are released
+too. What is still kept until exit: values stored into containers (an
+overwritten `a[i]`, nested arrays), values a helper hands back from its
+arguments (`max(a, b)`-style), ropes from long string concatenation, objects
+and closures created in a loop, and anything in a module that redefines a core
+Integer or container method.
+
 If you see RSS climb:
 
 1. Check for a boxed `:int` / BigInt path (`## int`, `**`, huge `to_i`) — not
    ordinary untyped i64 arithmetic.
-2. Then consider whether values escape in a way that disables free insertion.
-3. Only then turn `TUNGSTEN_FREE` as a diagnostic.
+2. Then consider whether values escape in a way that disables free insertion
+   (stored in a container, returned through a helper, captured by a block).
+3. Only then turn `TUNGSTEN_FREE` as a diagnostic; `TUNGSTEN_INT_TEMP_RELEASE=0`,
+   `TUNGSTEN_SLOT_RELEASE=0` and `TUNGSTEN_FRESH_HEAP=0` switch off the newer
+   releases one at a time.
 
 A compiled program never grows without bound: past 8 GiB of physical memory
 (compressed pages included) the runtime prints

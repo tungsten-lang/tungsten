@@ -293,8 +293,17 @@ use target
   # pinning a caller's argument (or a guarded `Cls.new` result) as escaped
   # when the callee provably never retains that parameter.
   esc_started_at = clock()
+  # Dead global writes (ownership.w): read by mark_escapes and the releases.
+  write_only_globals(mod)
   escape_pass(mod)
   t_escape = clock() - esc_started_at
+  # Integer releases (ownership.w) rely on core Integer semantics; a module
+  # that never sets this (a pass run on its own) gets none of them.
+  mod[:integer_contract_intact] = !integer_contract_reopened?(mod)
+  mod[:container_contract_intact] = !container_contract_reopened?(mod)
+  # Fresh heap results (ownership.w): ownership_analyze treats calls to these
+  # functions as producers, so it must run first.
+  fresh_heap_returns(mod)
 
   ownership_started_at = clock()
   ownership_jobs = ownership_parallel_job_count(mod)

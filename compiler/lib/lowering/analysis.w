@@ -1498,6 +1498,63 @@
     return false
   core_source_path?(ast_get(node, :source_path))
 
+# Does the program replace one of the Integer methods the ownership pass's
+# integer releases rely on (ownership.w, int_temp_releases)?  Those assume
+# core semantics: an arithmetic result is fresh or a shared-marked operand,
+# and the readers keep nothing.  A reopen that only adds new methods is fine.
+# Same for the read-only container methods (runtime_types.w
+# container_reader_method?): a fresh Array/String/Hash passed to one stays
+# owned by the caller.
+-> container_contract_reopened?(mod)
+  asts = mod[:class_method_asts]
+  if asts == nil
+    return false
+  keys = asts.keys()
+  ki = 0
+  while ki < keys.size()
+    k = keys[ki]
+    ki += 1
+    dot = k.index(".")
+    next if dot == nil
+    cls = k.slice(0, dot)
+    kind = nil
+    kind = :array if cls == "Array"
+    kind = :string if cls == "String"
+    kind = :hash if cls == "Hash"
+    next if kind == nil && !(cls in ("Enumerable" "Comparable"))
+    sel = k.slice(dot + 1, k.size() - dot - 1)
+    slash = sel.index("/")
+    sel = sel.slice(0, slash) if slash != nil
+    hit = false
+    if kind != nil
+      hit = container_reader_method?(kind, sel)
+    else
+      hit = container_reader_method?(:array, sel) || container_reader_method?(:string, sel) || container_reader_method?(:hash, sel)
+    if hit && !definition_from_core?(asts[k]) && ast_get(asts[k], :overload_dispatcher) != true
+      return true
+  false
+
+-> integer_contract_reopened?(mod)
+  asts = mod[:class_method_asts]
+  if asts == nil
+    return false
+  keys = asts.keys()
+  ki = 0
+  while ki < keys.size()
+    k = keys[ki]
+    ki += 1
+    dot = k.index(".")
+    next if dot == nil
+    cls = k.slice(0, dot)
+    next if !(cls in ("Integer" "Int" "BigInt" "Numeric" "Comparable"))
+    sel = k.slice(dot + 1, k.size() - dot - 1)
+    slash = sel.index("/")
+    sel = sel.slice(0, slash) if slash != nil
+    if sel in ("+" "-" "*" "/" "%" "**" "<<" ">>" "&" "|" "^" "~" "-@" "+@" "<=>" "==" "!=" "<" ">" "<=" ">=" "===" "eql?" "equal?" "coerce" "div" "mod" "modulo" "divmod" "quo" "pow" "to_int" "to_i") || int_temp_reader_method?(sel)
+      if !definition_from_core?(asts[k]) && ast_get(asts[k], :overload_dispatcher) != true
+        return true
+  false
+
 # Count writes to lexical locals across control flow and nested blocks, while
 # stopping at nested method/type definitions (fresh scopes). LOCK_THE_DOORS
 # may remove a receiver-class guard only when the constructor binding has one

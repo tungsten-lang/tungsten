@@ -812,6 +812,10 @@
     when "w_array_to_f32"
       return ccall("w_array_to_f32", args[1])
 
+    # Canvas (core/canvas.w) draws through the CoreGraphics/CoreText bridge in
+    # runtime/quartz.c, which only compiled programs link — like Metal.
+    if cname.starts_with?("w_cg_")
+      raise "Canvas is compiled-only: [cname] belongs to the CoreGraphics/CoreText bridge (runtime/quartz.c), which the tree-walking interpreter cannot call; run the program compiled (bin/tungsten file.w) instead of with --interpret"
     raise "Unsupported ccall '[cname]' in interpreter"
 
   -> interpreted_thread?(value)

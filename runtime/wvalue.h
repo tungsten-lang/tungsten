@@ -617,6 +617,10 @@ static inline WBigint *w_as_bigint(WValue v) {
     return (WBigint *)((void *)(uintptr_t)(v & 0x00007FFFFFFFFFFFULL));
 }
 
+static inline WBigint *w_as_bigint_pos(WValue v) {
+    return (WBigint *)((void *)(uintptr_t)(v ^ W_TAG_BIGINT));
+}
+
 /* The ONLY legal way to read a boxed bigint's signed size: composes the
  * header sign with the tag-sign overlay. Returns the struct for limb
  * access. */

@@ -4,6 +4,7 @@
 |-------|------|------|
 | **PlotExt** | `core/plot.w` | sparklines, ASCII heatmap, coarse line |
 | **drawille** | `bits/tungsten-drawille` | braille canvas, polynomial `Plot` |
+| **Canvas** | `core/canvas.w` | native raster drawing: paths, gradients, images, text, PNG ([../canvas.md](../canvas.md)) |
 
 ```
 use core/plot

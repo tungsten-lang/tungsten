@@ -1957,6 +1957,7 @@ typedef struct CGImg {
 static CGImg   *g_images[CG_MAX_IMAGES];
 static uint32_t g_image_gen[CG_MAX_IMAGES];
 static int      g_image_live;
+static int      g_image_hi;       /* one past the highest slot ever used */
 static size_t   g_image_bytes;
 static size_t   g_image_budget = (size_t)4 << 30;   /* 4 GiB of decoded pixels */
 static pthread_mutex_t g_img_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -2023,6 +2024,7 @@ static WValue cg_img_register(CGImg *im) {
     for (int i = 0; i < CG_MAX_IMAGES; i++) {
         if (!g_images[i]) { slot = i; break; }
     }
+    if (slot >= g_image_hi) g_image_hi = slot + 1;
     if (slot < 0) {
         pthread_mutex_unlock(&g_img_lock);
         cg_img_free(im);
@@ -2036,7 +2038,7 @@ static WValue cg_img_register(CGImg *im) {
     g_image_bytes += cg_img_total(im);
     /* Over budget: drop least-recently-loaded path images (not this one).
      * Their handles go stale and raise if used again. */
-    for (int i = 0; i < CG_MAX_IMAGES && g_image_bytes > g_image_budget; i++) {
+    for (int i = 0; i < g_image_hi && g_image_bytes > g_image_budget; i++) {
         if (i != slot && g_images[i] && g_images[i]->path) cg_img_unregister(i);
     }
     pthread_mutex_unlock(&g_img_lock);
@@ -2053,7 +2055,7 @@ WValue w_cg_image_load(WValue pathv) {
     if (stat(path, &st) != 0) cg_raise("Canvas.image: cannot read %s", path);
     int64_t mt = (int64_t)st.st_mtimespec.tv_sec * 1000000000LL + st.st_mtimespec.tv_nsec;
     pthread_mutex_lock(&g_img_lock);
-    for (int i = 0; i < CG_MAX_IMAGES; i++) {
+    for (int i = 0; i < g_image_hi; i++) {
         CGImg *im = g_images[i];
         if (im && im->path && strcmp(im->path, path) == 0) {
             if (im->mtime_ns == mt && im->fsize == (int64_t)st.st_size) {
@@ -2287,7 +2289,7 @@ WValue w_cg_image_release(WValue imv) {
 WValue w_cg_image_purge(void) {
     pthread_mutex_lock(&g_img_lock);
     int n = 0;
-    for (int i = 0; i < CG_MAX_IMAGES; i++) {
+    for (int i = 0; i < g_image_hi; i++) {
         if (g_images[i]) { cg_img_unregister(i); n++; }
     }
     pthread_mutex_unlock(&g_img_lock);

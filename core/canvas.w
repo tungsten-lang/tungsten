@@ -46,33 +46,6 @@
 # cached by path (Canvas.load_image), so a still drawn on 10,000 frames costs
 # one decode. There are no finalizers: close a canvas you are done with.
 
-+ CanvasGradient
-  ro :kind, :coords, :stops, :units, :spread
-
-  -> new(@kind, @coords, @stops, @units, @spread)
-
-  -> bbox?
-    @units == "bbox" || @units == :bbox
-
-+ CanvasImage
-  ro :handle, :width, :height, :path
-
-  -> new(@handle, @width, @height, @path)
-
-  # The image's colour space selector ("srgb", "display_p3", …) or ICC name.
-  -> space
-    ccall("w_cg_image_info", @handle, "space")
-
-  # Decoded RGBA8 (unpremultiplied, in the image's own colour space) as a
-  # ByteArray of width * height * 4.
-  -> bytes
-    ccall("w_cg_image_bytes", @handle)
-
-  # Drop the decoded pixels now (the cache also evicts past 4 GiB).
-  -> release
-    ccall("w_cg_image_release", @handle)
-    nil
-
 + Canvas
   ro :width, :height, :scale, :space, :handle
 
@@ -81,10 +54,9 @@
   -> new(@width, @height, opts = {})
     @scale = opts[:scale]
     @scale = 1 if @scale == nil
-    @space = opts[:space]
-    @space = "srgb" if @space == nil
     @closed = false
-    @handle = ccall("w_cg_canvas_new", @width, @height, @scale, @space, opts[:depth], opts[:manage])
+    @handle = ccall("w_cg_canvas_new", @width, @height, @scale, opts[:space], opts[:depth], opts[:manage])
+    @space = ccall("w_cg_canvas_info", @handle, "space")
     bg = opts[:background]
     if bg != nil
       ccall("w_cg_clear", @handle, bg)
@@ -628,3 +600,34 @@
     paint_gradient("fill", g, fo * op, false)
     ccall("w_cg_restore", @handle)
     self
+
+# CanvasGradient — a linear or radial gradient for Canvas fills and strokes
+# (Canvas.linear / Canvas.radial); plain data, no native resources.
++ CanvasGradient
+  ro :kind, :coords, :stops, :units, :spread
+
+  -> new(@kind, @coords, @stops, @units, @spread)
+
+  -> bbox?
+    @units == "bbox" || @units == :bbox
+
+# CanvasImage — a decoded image held by the Canvas image cache
+# (Canvas.load_image, Canvas#snapshot).
++ CanvasImage
+  ro :handle, :width, :height, :path
+
+  -> new(@handle, @width, @height, @path)
+
+  # The image's colour space selector ("srgb", "display_p3", …) or ICC name.
+  -> space
+    ccall("w_cg_image_info", @handle, "space")
+
+  # Decoded RGBA8 (unpremultiplied, in the image's own colour space) as a
+  # ByteArray of width * height * 4.
+  -> bytes
+    ccall("w_cg_image_bytes", @handle)
+
+  # Drop the decoded pixels now (the cache also evicts past 4 GiB).
+  -> release
+    ccall("w_cg_image_release", @handle)
+    nil

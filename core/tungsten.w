@@ -211,6 +211,8 @@
   auto :Transfer,     "color_space"
   auto :YCbCr,        "ycbcr"
   auto :YuvFrame,     "ycbcr"
+  auto :Cicp,         "rec709"
+  auto :Rec709,       "rec709"
   auto :Motion,       "motion"
   auto :Ease,         "motion"
   auto :Paint,        "motion"

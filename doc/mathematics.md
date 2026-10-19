@@ -420,7 +420,8 @@ The intended stack is:
 2. a timeline with keyframes, easing, morphs, traces, and mathematical
    object correspondences;
 3. SVG/HTML Canvas for interactive documentation, plus GPU rendering and
-   deterministic video/image export;
+   deterministic video/image export (native raster frames: `Canvas`, see
+   [canvas.md](canvas.md));
 4. LaTeX-quality formula layout and stable glyph-to-glyph transforms;
 5. notebook/document hooks so examples and diagrams are rebuilt and tested;
 6. accessibility metadata, captions, reduced-motion variants, and static

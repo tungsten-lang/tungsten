@@ -1293,6 +1293,13 @@
         v = @env.get(name)
       if type(v) == "Array" && v.size() == 2 && is_ast_node?(v[1]) && ast_kind(v[1]) == :block
         return call_block(v, args)
+      # A local that holds no closure, reached through a zero-argument call:
+      # the parser always reads a bare `ro` / `rw` as a call (so the accessor
+      # marker after a constructor parses), and `x()` cannot be told from `x`.
+      # Read the variable, as the compiled lowering does (lowering/calls.w),
+      # unless a method, function or class of that name takes precedence.
+      if args.size() == 0 && block == nil && implicit_self_method(current_self(), name, 0, false, args) == nil && !@env.defined?("__method__" + name) && !@classes.has_key?(name)
+        return v
 
     # Method on current self — checked before the generic builtin table so a
     # user's own method (or top-level function, below) wins over a same-named

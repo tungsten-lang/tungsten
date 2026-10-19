@@ -107,6 +107,14 @@
 -> ll_needs_sparse(text)
   ll_code_has(text, "@w_sparse_")
 
+# The CoreGraphics/CoreText/ImageIO drawing bridge behind core/canvas.w
+# (runtime/quartz.c). Its own gate, not the Apple one: a Canvas program must
+# not pull in Metal/AppKit, and a Metal program must not pull in CoreText or
+# ImageIO. Non-Apple targets link the same file, which there compiles to
+# raising "needs macOS" stubs.
+-> ll_needs_quartz(text)
+  ll_code_has(text, "@w_cg_")
+
 -> ll_needs_sci_io(text)
   ll_code_has(text, "@w_sci_")
 

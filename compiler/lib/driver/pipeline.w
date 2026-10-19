@@ -303,10 +303,7 @@
   # source is a cheap conservative invalidation rule and avoids duplicating the
   # feature-gating logic here. Missing optional files are represented too.
   runtime_dir = resolve_runtime_dir()
-  companions = ["ssmr_witness.c", "lexchar_tables.c", "unicode_tables.c", "blas_bridge.c",
-                "sparse_bridge.c", "metal.m", "graphics.m", "hid_bridge.m",
-                "sci_io_native.c", "tensor_bridge.c", "openblas_bridge.c",
-                zstd_runtime_source()]
+  companions = runtime_companion_sources()
   i = 0
   while i < companions.size()
     path = runtime_dir + companions[i]
@@ -314,6 +311,15 @@
     rows.push(path + ":" + (mt == nil ? "missing" : mt.to_s()))
     i += 1
   rows.join("|")
+
+# Gated runtime sources link_binary adds as explicit sources when a program's
+# IR needs them (plus the headers only they include). Both binary caches key
+# on their mtimes, so editing a bridge rebuilds the programs that link it.
+-> runtime_companion_sources
+  ["ssmr_witness.c", "lexchar_tables.c", "unicode_tables.c", "blas_bridge.c",
+   "sparse_bridge.c", "metal.m", "graphics.m", "hid_bridge.m", "quartz.c", "quartz.h",
+   "sci_io_native.c", "tensor_bridge.c", "openblas_bridge.c",
+   zstd_runtime_source()]
 
 -> link_artifact_cache_runtime_identity(runtime_objs)
   if runtime_objs == nil
@@ -434,6 +440,16 @@
   while ri < rt.size()
     parts.push(rt[ri][1].to_s() + "\t" + rt[ri][0])
     ri += 1
+  # Gated companions (metal.m, quartz.c, …) are compiled into the binary at
+  # link time, not into the runtime archive the rows above cover.
+  companion_dir = resolve_runtime_dir()
+  companions = runtime_companion_sources()
+  ci = 0
+  while ci < companions.size()
+    cm = file_mtime_ns(companion_dir + companions[ci])
+    if cm != nil
+      parts.push(cm.to_s() + "\t" + companion_dir + companions[ci])
+    ci += 1
   # @gpu sidecars are emitted next to the SOURCE; recording them as rows
   # means a deleted sidecar mtimes to nil at probe time and forces the
   # rebuild that regenerates it.

@@ -659,6 +659,12 @@ run_cache_lifecycle_test() {
   touch "$ROOT/runtime/runtime.c"
   cache_lifecycle_step "touched runtime source misses" no 1 "$src" "$out"
 
+  # Gated companions (metal.m, quartz.c, …) are compiled into binaries at link
+  # time, outside the runtime archive; the cache must still see their edits.
+  cache_lifecycle_step "unchanged companions hit" yes 1 "$src" "$out"
+  touch "$ROOT/runtime/quartz.c"
+  cache_lifecycle_step "touched runtime companion misses" no 1 "$src" "$out"
+
   cache_lifecycle_step "TUNGSTEN_INCREMENTAL=0 misses" no 0 "$src" "$out"
 
   # A ~200-char nested output path: slot names hash the absolute paths, so

@@ -268,6 +268,7 @@ followed by `/bin/clang`; Tungsten does not assume a Homebrew install root.
 | `TUNGSTEN_MARCH_ARGS` | derived from CPU              | Legacy low-level override for clang CPU flags. Prefer `--cpu` or `[build] cpu`. |
 | `TUNGSTEN_CARRY_UNROLL` | 8                           | LLVM unroll count for `addcarry`/`subborrow` loops. Accepts 0 through 64; 0 disables the hint. |
 | `TUNGSTEN_BACKTRACE`  | off                           | Set to `1` to include full C backtrace in error dumps (defaults to only Tungsten-level frames).             |
+| `TUNGSTEN_MEMORY_LIMIT` | `8G`                        | Runtime memory ceiling for compiled programs: past it, the process exits with status 137 instead of exhausting the machine. Suffix K/M/G/T (bare number: MiB); `off` disables it. A process using 1 GiB or more also exits when the system has under 5% of its memory left. |
 
 ## Contributing
 

@@ -56,7 +56,7 @@
 # operand (a side effect), so this list must never be used to justify
 # dead-call elimination, reordering, or CSE — only escape marking.
 -> is_pure_builtin(name)
-  name in ("w_add" "w_sub" "w_mul" "w_div" "w_mod" "w_eq" "w_neq" "w_eq_lit" "w_neq_lit" "w_lt" "w_gt" "w_lte" "w_gte" "__w_eq_fast" "__w_neq_fast" "__w_eq_lit_fast" "__w_neq_lit_fast" "__w_lt_fast" "__w_gt_fast" "__w_lte_fast" "__w_gte_fast" "w_bit_and" "w_bit_or" "w_bit_xor" "w_bit_shl" "w_bit_shr" "w_negate" "w_not" "w_to_s" "w_int_to_s" "w_to_i" "w_to_f" "w_string" "w_str_to_sym" "w_str_concat" "w_str_concat_free_rhs" "w_str_concat_free_lhs" "w_str_length" "w_string_byte_length" "__w_type" "w_hash_new" "w_array_new" "w_box_int_checked" "w_wire_sequence_from_array")
+  name in ("__w_add_fast" "__w_sub_fast" "__w_mul_fast" "__w_div_fast" "__w_mod_fast" "__w_shl_fast" "__w_shr_fast" "__w_band_fast" "__w_bor_fast" "__w_bxor_fast" "w_bigint_shr" "w_bigint_shl" "w_bigint_add" "w_bigint_sub" "w_bigint_div" "w_bigint_mod" "w_bigint_mul_builtin_exact" "w_add" "w_sub" "w_mul" "w_div" "w_mod" "w_eq" "w_neq" "w_eq_lit" "w_neq_lit" "w_lt" "w_gt" "w_lte" "w_gte" "__w_eq_fast" "__w_neq_fast" "__w_eq_lit_fast" "__w_neq_lit_fast" "__w_lt_fast" "__w_gt_fast" "__w_lte_fast" "__w_gte_fast" "w_bit_and" "w_bit_or" "w_bit_xor" "w_bit_shl" "w_bit_shr" "w_negate" "w_not" "w_to_s" "w_int_to_s" "w_to_i" "w_to_f" "w_string" "w_str_to_sym" "w_str_concat" "w_str_concat_free_rhs" "w_str_concat_free_lhs" "w_str_length" "w_string_byte_length" "__w_type" "w_hash_new" "w_array_new" "w_box_int_checked" "w_wire_sequence_from_array")
 
 # Param index for a WIRE value: a parameter register itself, or a temp the
 # forward derivation walk below traced back to one. nil when unrelated.
@@ -82,6 +82,12 @@
   state[:param_escaped][src] = true
   if stored
     state[:param_stored][src] = true
+    state[:param_int_stored][src] = true
+    state[:param_kind_stored][:array][src] = true
+    state[:param_kind_stored][:string][src] = true
+    state[:param_kind_stored][:hash][src] = true
+  else
+    state[:param_returned][src] = true
   nil
 
 -> escape_mark_args(args, stored, state)
@@ -143,24 +149,40 @@
 # every instruction that can retain a value there must mark a param-derived
 # value here. Derivation is tracked forward through phis, selects, results
 # of pure builtins, and results of callees that return a parameter.
--> escape_analyze(func, mod, fn_escs)
+-> escape_analyze(func, mod, fn_escs, strings = nil)
   params = func[:params]
   if params == nil
     return nil
 
   param_escaped = []
   param_stored = []
+  # Stored assuming the argument is an Integer: a read-only Integer method
+  # called on it (`v.bit_length`) then keeps nothing (ownership.w,
+  # int_temp_releases, decides when an argument is known to be one).
+  param_int_stored = []
+  # Stored assuming the argument is a core Array / String / Hash: read-only
+  # core methods (runtime_types.w container_reader_method?) keep nothing.
+  param_kind_stored = {array: [], string: [], hash: []}
+  # Flows into the result (returned or derived into it).
+  param_returned = []
   param_idx = {}
   pi = 0
   while pi < params.size()
     param_escaped.push(false)
     param_stored.push(false)
+    param_int_stored.push(false)
+    param_kind_stored[:array].push(false)
+    param_kind_stored[:string].push(false)
+    param_kind_stored[:hash].push(false)
+    param_returned.push(false)
     param_idx[llvm_param_reg(params[pi])] = pi
     pi += 1
 
-  state = {param_escaped: param_escaped, param_stored: param_stored, param_idx: param_idx, temp_from_param: {}}
+  state = {param_escaped: param_escaped, param_stored: param_stored, param_int_stored: param_int_stored, param_kind_stored: param_kind_stored, param_returned: param_returned, param_idx: param_idx, temp_from_param: {}}
   temp_from_param = state[:temp_from_param]
   has_side_effects = false
+  # temp -> text of the string/symbol constant it holds (method names)
+  name_texts = {}
 
   bi = 0
   while bi < func[:blocks].size()
@@ -197,7 +219,18 @@
       elsif op in (:call_direct_i64 :call_direct_void)
         call_name = wire_get(inst, :name)
         args = wire_get(inst, :args)
-        if is_consuming_builtin(call_name)
+        kept = container_store_first_kept(call_name)
+        if call_name in ("w_array_get" "w_array_get_i64" "w_array_idx_i64" "__w_array_get_i64_fast" "__w_array_idx_i64_fast")
+          # an element read: the container is neither kept nor returned
+          ignored = nil
+        elsif kept != nil
+          # The container keeps the stored key/value, not itself; the result
+          # (nil or the stored value) may alias the value.
+          ai = kept
+          while args != nil && ai < wire_sequence_size(args)
+            escape_mark_value(wire_sequence_get(args, ai), true, state)
+            ai += 1
+        elsif is_consuming_builtin(call_name)
           escape_mark_args(args, true, state)
           escape_derive_result_from_args(inst, args, state)
         elsif is_pure_builtin(call_name)
@@ -214,6 +247,17 @@
                 if callee_escs != nil && callee_escs[:escs] != nil && ai < callee_escs[:escs].size()
                   known = true
                   stored_list = callee_escs[:stored_escs]
+                  int_list = callee_escs[:int_stored_escs]
+                  if int_list == nil || ai >= int_list.size() || int_list[ai] == true
+                    param_int_stored[src] = true
+                  kl = callee_escs[:kind_stored_escs]
+                  kinds = [:array, :string, :hash]
+                  kk = 0
+                  while kk < kinds.size()
+                    kv = kl == nil ? nil : kl[kinds[kk]]
+                    if kv == nil || ai >= kv.size() || kv[ai] == true
+                      param_kind_stored[kinds[kk]][src] = true
+                    kk += 1
                   if stored_list == nil || ai >= stored_list.size() || stored_list[ai] == true
                     param_escaped[src] = true
                     param_stored[src] = true
@@ -224,6 +268,10 @@
                 if !known
                   param_escaped[src] = true
                   param_stored[src] = true
+                  param_int_stored[src] = true
+                  param_kind_stored[:array][src] = true
+                  param_kind_stored[:string][src] = true
+                  param_kind_stored[:hash][src] = true
               ai += 1
           if is_impure_call(call_name)
             has_side_effects = true
@@ -231,7 +279,27 @@
       elsif op == :call_method_i64
         has_side_effects = true
         escape_mark_args(wire_get(inst, :args), true, state)
-        escape_mark_value(wire_get(inst, :receiver), true, state)
+        receiver = wire_get(inst, :receiver)
+        mv = wire_get(inst, :method_name_val)
+        mname = name_texts[mv]
+        if mname == nil && strings != nil && type(mv) == "String" && mv.starts_with?("u0x")
+          mname = strings[mv]
+        src = escape_param_source(receiver, temp_from_param, param_idx)
+        if src != nil
+          # Stored for any receiver kind, but a read-only method of an
+          # Integer or a core container keeps nothing: those flags stay clear.
+          param_escaped[src] = true
+          param_stored[src] = true
+          param_int_stored[src] = true if mname == nil || !int_temp_reader_method?(mname)
+          kinds = [:array, :string, :hash]
+          kk = 0
+          while kk < kinds.size()
+            param_kind_stored[kinds[kk]][src] = true if mname == nil || !container_reader_method?(kinds[kk], mname)
+            kk += 1
+
+      elsif op in (:string_i64 :symbol_i64)
+        if wire_get(inst, :temp) != nil && strings != nil
+          name_texts[wire_get(inst, :temp)] = strings[wire_get(inst, :string_id)]
 
       elsif op == :ret_i64
         escape_mark_value(wire_get(inst, :value), false, state)
@@ -312,6 +380,9 @@
   fn_escs[func[:name]] = {
     escs: param_escaped,
     stored_escs: param_stored,
+    int_stored_escs: param_int_stored,
+    kind_stored_escs: param_kind_stored,
+    ret_escs: param_returned,
     pure: !has_side_effects,
     param_count: params.size()
   }
@@ -392,11 +463,12 @@
         fi += 1
 
   # Analyze in topological order
+  strings = int_temp_string_texts(mod)
   oi = 0
   while oi < order.size()
     func = functions[order[oi]]
     if func[:blocks].size() > 0
-      escape_analyze(func, mod, fn_escs)
+      escape_analyze(func, mod, fn_escs, strings)
     oi += 1
 
   mod[:fn_escs] = fn_escs

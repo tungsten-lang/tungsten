@@ -568,6 +568,12 @@
     used_runtime_fns["w_slab_init_static"] = true
 
   decls_out = filter_runtime_decls(declare_runtime(), used_runtime_fns, embedded_ir_text.to_s()) + seam_decls.to_s()
+  if used_runtime_fns["__w_int_temp_release"] == true
+    decls_out = decls_out + "declare void @w_int_temp_release(i64, i64, i64, i64, i64) nounwind\n" + int_temp_release_helper_ir() + "\n"
+  if used_runtime_fns["__w_int_alias_seal"] == true
+    decls_out = decls_out + "declare void @w_int_alias_seal(i64, i64) nounwind\n" + int_alias_seal_helper_ir() + "\n"
+  if used_runtime_fns["__w_int_result_seal"] == true
+    decls_out = decls_out + "declare void @w_int_result_seal(i64, i64, i64) nounwind\n" + int_result_seal_helper_ir() + "\n"
   if ccall_needed.has_key?("__w_bigint_sqr4_locked_exact") || ccall_needed.has_key?("__w_bigint_sqr5_locked_exact")
     # Keep the large exact sqr@4 worker and its size test behind one outlined
     # default-path call. Inlining either into the locked caller makes LLVM

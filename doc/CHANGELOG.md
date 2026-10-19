@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+- **Compiled programs free far more of what they allocate** — with no GC, the
+  compiler freed only known constructors' results that never left a scope,
+  plus a few BigInt loop shapes. Everything else lived until exit: the inner
+  `x * x` of `x * x + 1`, both sides of `a * 3 < a * 2`, the result of a
+  helper like `sq(x)`, every value a loop variable held, every array a helper
+  such as `zeros(n)` built, and every value of a top-level script loop. One
+  research sweep leaked about 10 GB/s per process and took a 128 GB Mac down
+  three times in a night. The ownership pass (`compiler/lib/ownership.w`)
+  now releases:
+  - integer temporaries after their last read (`int_temp_releases`), when
+    they and the operands that produced and consumed them are integers at run
+    time -- core integer arithmetic never keeps an operand;
+  - results of functions that return a fresh integer or a fresh
+    Array/String/Hash (`int_fresh_returns`, `fresh_heap_returns`), and
+    arguments a callee provably does not keep (escape summaries now record
+    what a parameter keeps when it is an Integer or a core container);
+  - a variable's old value on each assignment and its last value on return
+    (`owned_slot_releases`), with integers held by several variables
+    reference-counted through the BigInt shared count;
+  - top-level script variables, whose module-global copy nothing reads
+    (`write_only_globals`).
+  A program that redefines a core Integer or container method the releases
+  rely on keeps the old behaviour for that kind. On the crash-era sweep one
+  search went from 8.6 GB to 0.2 GB and ran three times faster; the
+  `bench bignum` native lane is unchanged within noise. `TUNGSTEN_INT_TEMP_RELEASE=0`,
+  `TUNGSTEN_SLOT_RELEASE=0` and `TUNGSTEN_FRESH_HEAP=0` turn the new releases
+  off for diagnosis. Pinned in `spec/compiler/int_temp_release_spec.w`,
+  `int_contract_reopen_spec.w`, `top_level_release_spec.w` and
+  `fresh_heap_release_spec.w`.
+
 - **Compiled programs have a memory ceiling** — with no GC, a leak in a
   compiled program grew until the machine ran out of memory; on macOS that
   ended in a watchdog kernel panic, not an OOM kill. Parallel sweeps leaking
@@ -13,6 +43,7 @@
   under the limit cannot exhaust the machine together. The allocation paths
   are untouched; startup cost is one thread.
 
+||||||| /tmp/base_33353.md
 - **A parameter named `t0` compiles** — WIRE emitted each parameter as
   `%<name>`, in the one LLVM namespace per function that the compiler's own
   `%t<N>` temporaries share, so `-> run(k, t0, t1)` died in clang with

@@ -39,8 +39,30 @@ use cfg
     # ignores) — an independent result for every call, like w_int_to_s.
     # w_array_new_uninit_sized backs `[a, b, c]` literals (slots filled by
     # __w_array_lit_store below): a fresh owned WArray, freed like w_array_new.
-    return name in ("w_string" "w_hash_new" "w_array_new" "w_array_new_uninit_sized" "w_strbuf_new" "w_str_concat" "w_str_concat_free_rhs" "w_str_concat_free_lhs" "w_str_concat_own" "w_int_to_s" "w_string_repeat")
+    # w_array_new_empty backs `[]`: a fresh owned WArray (or a recycled one
+    # reset to fresh), freed like w_array_new.
+    return name in ("w_string" "w_hash_new" "w_array_new" "w_array_new_empty" "w_array_new_uninit_sized" "w_strbuf_new" "w_str_concat" "w_str_concat_free_rhs" "w_str_concat_free_lhs" "w_str_concat_own" "w_int_to_s" "w_string_repeat")
   false
+
+# Container writes: the container keeps the stored key/value but not itself,
+# and the result (nil or the stored value) never aliases the container.
+# Index of the first argument the container retains, or nil.
+-> container_store_first_kept(name)
+  if name == "w_array_push"
+    return 1
+  if name == "w_hash_set"
+    return 1
+  if name == "w_array_set"
+    return 2
+  nil
+
+# A direct call to a source function that returns a fresh heap value nothing
+# else holds (fresh_heap_returns), so the caller owns the result.
+-> fresh_heap_call?(inst, mod)
+  if mod == nil || wire_kind(inst) != :call_direct_i64
+    return false
+  fresh = mod[:fresh_heap_fns]
+  fresh != nil && fresh[wire_get(inst, :name)] == true
 
 # Runtime calls that only READ their arguments: no argument pointer is
 # stored anywhere, so passing a value to one of these must not pin it as
@@ -57,8 +79,10 @@ use cfg
 # NOT here, deliberately: w_str_concat (retains both sides in a rope
 # node past 61 bytes), w_str_append (may realloc its receiver's buffer
 # into the result), w_hash_set / w_array_push (store the value).
+# Element reads (w_array_get and its typed fast forms) return an element or
+# nil, never the array or a view of it (views come only from slice_view).
 -> is_nonretaining_consumer(name)
-  name in ("w_string_byte_length" "w_hash_get" "w_eq" "w_neq" "w_eq_lit" "w_neq_lit" "__w_streq_fast" "__w_streq2_fast" "__w_eq_fast" "__w_neq_fast" "__w_eq_lit_fast" "__w_neq_lit_fast" "__w_lt_fast" "__w_gt_fast" "__w_lte_fast" "__w_gte_fast" "w_string_index" "w_string_rindex" "w_string_count" "w_string_repeat" "__w_string_byte_length_fast" "w_wire_sequence_from_array")
+  name in ("w_array_get" "w_array_get_i64" "w_array_idx_i64" "__w_array_get_i64_fast" "__w_array_idx_i64_fast" "w_string_byte_length" "w_hash_get" "w_eq" "w_neq" "w_eq_lit" "w_neq_lit" "__w_streq_fast" "__w_streq2_fast" "__w_eq_fast" "__w_neq_fast" "__w_eq_lit_fast" "__w_neq_lit_fast" "__w_lt_fast" "__w_gt_fast" "__w_lte_fast" "__w_gte_fast" "w_string_index" "w_string_rindex" "w_string_count" "w_string_repeat" "__w_string_byte_length_fast" "w_wire_sequence_from_array")
 
 # Per-parameter escape summary of a source function (escape.w, run before
 # this pass): {escs: [stored-or-returned per param], stored_escs: [stored
@@ -76,15 +100,28 @@ use cfg
 # merely read and stays owned by the caller. Anything outside the summary's
 # range escapes. `first` is the parameter index of args[0] (1 when the
 # receiver was marked separately as parameter 0).
--> mark_args_by_summary(args, first, summary, escaped)
+# A fresh core Array/String/Hash argument (a known producer) is judged by the
+# summary for its kind (escape.w kind_stored_escs: stored assuming that kind,
+# so read-only core methods on it keep nothing) plus ret_escs (returned).
+-> mark_args_by_summary(args, first, summary, escaped, producers = nil, mod = nil)
   if args == nil
     return nil
   escs = summary[:escs]
+  kinds = summary[:kind_stored_escs]
+  rets = summary[:ret_escs]
   i = 0
   while i < wire_sequence_size(args)
     pi = first + i
-    if escs == nil || pi >= escs.size() || escs[pi] == true
-      escaped[wire_sequence_get(args, i)] = true
+    arg = wire_sequence_get(args, i)
+    kind = nil
+    if producers != nil && producers[arg] != nil && kinds != nil && rets != nil
+      kind = heap_producer_kind(producers[arg][:instruction], mod)
+    if kind != nil
+      ks = kinds[kind]
+      if ks == nil || pi >= ks.size() || ks[pi] == true || pi >= rets.size() || rets[pi] == true
+        escaped[arg] = true
+    elsif escs == nil || pi >= escs.size() || escs[pi] == true
+      escaped[arg] = true
     i += 1
   nil
 
@@ -118,7 +155,23 @@ use cfg
 # already classified as heap producers to {op:, block:, class:}; a guarded
 # devirtualized call on a construct-produced receiver of the same class is
 # certain to take its direct arm, so the callee's summary applies.
--> mark_escapes(inst, escaped, mod, producers)
+# :array / :string / :hash for a known constructor's result -- or a fresh
+# heap function's, whose kind fresh_heap_returns records -- else nil.
+-> heap_producer_kind(inst, mod = nil)
+  if inst == nil || wire_kind(inst) != :call_direct_i64
+    return nil
+  name = wire_get(inst, :name)
+  if mod != nil && mod[:fresh_heap_kinds] != nil && mod[:fresh_heap_kinds][name] != nil
+    return mod[:fresh_heap_kinds][name]
+  if name in ("w_array_new" "w_array_new_empty" "w_array_new_uninit_sized")
+    return :array
+  if name in ("w_string" "w_str_concat" "w_str_concat_free_rhs" "w_str_concat_free_lhs" "w_str_concat_own" "w_int_to_s" "w_string_repeat")
+    return :string
+  if name == "w_hash_new"
+    return :hash
+  nil
+
+-> mark_escapes(inst, escaped, mod, producers, names = nil)
   op = wire_kind(inst)
 
   if op in (:call_direct_i64 :call_direct_void)
@@ -131,8 +184,17 @@ use cfg
     # parameters it stores or returns pin their arguments.
     summary = fn_escape_summary(mod, wire_get(inst, :name))
     if summary != nil
-      mark_args_by_summary(wire_get(inst, :args), 0, summary, escaped)
+      mark_args_by_summary(wire_get(inst, :args), 0, summary, escaped, producers, mod)
       return nil
+    if op == :call_direct_i64
+      kept = container_store_first_kept(wire_get(inst, :name))
+      if kept != nil
+        args = wire_get(inst, :args)
+        i = kept
+        while args != nil && i < wire_sequence_size(args)
+          escaped[wire_sequence_get(args, i)] = true
+          i += 1
+        return nil
     # `__w_array_lit_store(arr, idx, val)` writes val into a slot of the
     # array literal being built: the VALUE is retained (by the array), the
     # array itself is not. Marking the array escaped here pinned every
@@ -166,8 +228,22 @@ use cfg
             escaped[receiver] = true
           mark_args_by_summary(wire_get(inst, :args), 1, summary, escaped)
           return nil
+    # A read-only core method on a fresh Array/String/Hash keeps nothing of
+    # the receiver (the arguments still escape below).
+    reader = false
+    if receiver != nil && producers != nil && producers[receiver] != nil && names != nil && mod != nil && mod[:container_contract_intact] == true
+      kind = heap_producer_kind(producers[receiver][:instruction], mod)
+      mv = wire_get(inst, :method_name_val)
+      mname = names[mv]
+      reader = kind != nil && mname != nil && container_reader_method?(kind, mname)
+      if reader
+        ai = 0
+        args = wire_get(inst, :args)
+        while args != nil && ai < wire_sequence_size(args)
+          reader = false if wire_sequence_get(args, ai) == receiver
+          ai += 1
     # Receiver and all args escape (dynamic dispatch)
-    if receiver != nil
+    if receiver != nil && !reader
       escaped[receiver] = true
     args = wire_get(inst, :args)
     if args != nil
@@ -192,7 +268,9 @@ use cfg
     return nil
 
   if op == :store_global
-    escaped[wire_get(inst, :value)] = true
+    wo = mod == nil ? nil : mod[:write_only_globals]
+    if wo == nil || wo[wire_get(inst, :name)] != true
+      escaped[wire_get(inst, :value)] = true
     return nil
 
   if op == :store_ptr
@@ -332,6 +410,15 @@ use cfg
   # temp → class name for :load_class results; construct_producer_class
   # needs to know that a construct's receiver IS the guarded class.
   class_temps = {}
+  # method-name constant (temp or immediate) -> text, for mark_escapes
+  names = {}
+  texts = mod == nil ? nil : mod[:string_texts]
+  if texts != nil
+    tk = texts.keys()
+    ti = 0
+    while ti < tk.size()
+      names[tk[ti]] = texts[tk[ti]] if type(tk[ti]) == "String"
+      ti += 1
 
   # Walk blocks in order (sufficient for monotonic analysis)
   bi = 0
@@ -345,6 +432,8 @@ use cfg
 
       if op == :load_class && wire_get(inst, :temp) != nil
         class_temps[wire_get(inst, :temp)] = wire_get(inst, :class_name)
+      if op in (:string_i64 :symbol_i64) && wire_get(inst, :temp) != nil && texts != nil
+        names[wire_get(inst, :temp)] = texts[wire_get(inst, :string_id)]
 
       # Scope tracking
       if op == :scope_push
@@ -389,7 +478,7 @@ use cfg
         # Value producers: record and track in current scope
         if wire_get(inst, :temp) != nil
           producer_class = nil
-          is_producer = is_heap_producer(inst)
+          is_producer = is_heap_producer(inst) || fresh_heap_call?(inst, mod)
           if !is_producer && op == :call_method_i64
             producer_class = construct_producer_class(inst, mod, class_temps)
             is_producer = producer_class != nil
@@ -411,7 +500,7 @@ use cfg
           if op in (:load_i64 :load_global :load_class :load_ptr)
             escaped[wire_get(inst, :temp)] = true
         # Mark escapes for this instruction
-        mark_escapes(inst, escaped, mod, producers)
+        mark_escapes(inst, escaped, mod, producers, names)
 
       ii += 1
     bi += 1
@@ -420,6 +509,7 @@ use cfg
 
 # Entry point: analyze all functions in the module.
 -> ownership_pass(mod)
+  mod[:string_texts] = int_temp_string_texts(mod)
   fi = 0
   while fi < mod[:functions].size()
     func = mod[:functions][fi]
@@ -461,6 +551,7 @@ use cfg
   true
 
 -> ownership_pass_parallel(mod, jobs)
+  mod[:string_texts] = int_temp_string_texts(mod)
   state = {
     functions: mod[:functions],
     mod: mod,
@@ -539,6 +630,9 @@ use cfg
 
 # Entry point for free insertion across all functions.
 -> free_insertion_pass(mod)
+  int_temps = nil
+  strings = nil
+  fresh = nil
   fi = 0
   while fi < mod[:functions].size()
     func = mod[:functions][fi]
@@ -546,6 +640,16 @@ use cfg
       insert_frees(func)
       if env("TUNGSTEN_LOOP_RELEASE") != "0"
         ignored = loop_carried_releases(func)
+      if int_temps == nil
+        int_temps = env("TUNGSTEN_INT_TEMP_RELEASE") != "0" && mod[:integer_contract_intact] == true
+        if int_temps
+          strings = int_temp_string_texts(mod)
+          mod[:method_table] = module_method_table(mod, strings)
+          fresh = int_fresh_returns(mod)
+      if int_temps && env("TUNGSTEN_SLOT_RELEASE") != "0"
+        ignored = owned_slot_releases(func, mod, fresh, strings)
+      if int_temps
+        ignored = int_temp_releases(func, strings, fresh, mod)
     fi += 1
 
 # ---------------------------------------------------------------------------
@@ -921,3 +1025,1167 @@ use cfg
       blocks[bi][:instructions] = rebuilt
     bi += 1
   inserted
+
+# ---------------------------------------------------------------------------
+# Dead integer temporaries.
+#
+# An integer-arithmetic result that is only read dies at its last read, but
+# nothing released it: `y = x * x + 1` dropped x * x, `if a * 3 < a * 2`
+# dropped both products, `(x * x).bit_length` dropped the square.  Each
+# stayed allocated until the process exited -- about 10 GB/s in a sweep that
+# lived on such expressions.
+#
+# For a temp t defined by an arithmetic helper whose every use sits in t's
+# own block and only reads t -- another arithmetic helper, a comparison, a
+# truthiness test, to_s, or a known read-only Integer method on t -- the pass
+# calls __w_int_temp_release right after the last use (right after the
+# definition when t is never read).  The runtime releases t only when it is
+# a BigInt and every witness is an integer: the operands t was computed from
+# and the other operands of the arithmetic helpers that read it.  With
+# integer operands the helpers run core integer arithmetic, which never
+# retains an operand (see loop_carried_releases above), so t is dead; any
+# other kind skips the release.  Uses by anything else -- a store, a phi, a
+# return, a call that might keep t -- leave t alone, which also keeps clear
+# of the releases the passes above insert (w_value_release_loop's operands
+# are uses of exactly that kind).  A release that cannot run because a read
+# raised only leaks.  Functions with setjmp, or with an instruction whose
+# operands the scan cannot list, are skipped.
+#
+# Calls extend both ends.  t may be an argument of a direct call to a source
+# function whose escape summary says it never stores that parameter when it
+# is an Integer (escape.w int_stored_escs); the call's result is then a
+# witness too, since a returned integer cannot contain t, and the runtime
+# never releases t when a witness is t itself (an unmarked returned
+# parameter).  And t may be the result of a call to a function whose every
+# return is a fresh integer (int_fresh_returns below), so `sq(x)` dropped or
+# only compared is released like `x * x`.
+# TUNGSTEN_INT_TEMP_RELEASE=0 disables the pass.
+# ---------------------------------------------------------------------------
+
+# The arithmetic helpers plus the runtime's BigInt entries that core reaches
+# through ccall (BigInt#bit_length's shift probes, ...): the same core
+# arithmetic, so the same fresh-or-marked contract.
+-> int_temp_arith?(name)
+  loop_release_arith?(name) || name in ("__w_band_fast" "__w_bor_fast" "__w_bxor_fast" "w_bit_and" "w_bit_or" "w_bit_xor" "w_bigint_shr" "w_bigint_shl" "w_bigint_add" "w_bigint_sub" "w_bigint_div" "w_bigint_mod" "w_bigint_mul_builtin_exact")
+
+# Direct calls, besides the arithmetic helpers, that read an Integer operand
+# and return a value that does not hold it: comparisons and decimal text.
+-> int_temp_reader?(name)
+  name in ("w_eq" "w_neq" "w_eq_lit" "w_neq_lit" "w_lt" "w_gt" "w_lte" "w_gte" "__w_eq_fast" "__w_neq_fast" "__w_eq_lit_fast" "__w_neq_lit_fast" "__w_lt_fast" "__w_gt_fast" "__w_lte_fast" "__w_gte_fast" "__w_eq0_big_fast" "__w_lt0_big_fast" "__w_gt0_big_fast" "__w_lte0_big_fast" "__w_gte0_big_fast" "w_to_s" "w_int_to_s")
+
+# string_id -> text, for reading the method name of a call_method_i64, plus
+# immediate text -> name for the reader methods short enough to be inlined.
+-> int_temp_string_texts(mod)
+  texts = {}
+  names = reader_method_names()
+  ni = 0
+  while ni < names.size()
+    imm = inline_name_text(names[ni])
+    texts[imm] = names[ni] if imm != nil
+    ni += 1
+  strs = mod[:strings]
+  if strs == nil
+    return texts
+  si = 0
+  while si < strs.size()
+    texts[strs[si][:id]] = strs[si][:text]
+    si += 1
+  texts
+
+# The method name a call_method_i64 names through a string/symbol constant
+# or, for names of at most 5 bytes, an immediate.
+-> int_temp_method_name(inst, defs, blocks, strings)
+  mv = wire_get(inst, :method_name_val)
+  if mv == nil
+    return nil
+  if type(mv) == "String" && mv.starts_with?("u0x")
+    return strings[mv]
+  if defs[mv] == nil
+    return nil
+  d = defs[mv]
+  dinst = blocks[d[0]][:instructions][d[1]]
+  if !(wire_kind(dinst) in (:string_i64 :symbol_i64))
+    return nil
+  strings[wire_get(dinst, :string_id)]
+
+-> int_temp_producer?(name, fresh)
+  int_temp_arith?(name) || (fresh != nil && fresh[name] == true)
+
+-> int_temp_releases(func, strings, fresh, mod)
+  blocks = func[:blocks]
+  return 0 if blocks.size() == 0
+  # Cheap pre-filter: most functions never produce an integer temporary.
+  found = false
+  bi = 0
+  while bi < blocks.size() && !found
+    instrs = blocks[bi][:instructions]
+    ii = 0
+    while ii < instrs.size()
+      inst = instrs[ii]
+      if ((wire_kind(inst) == :call_direct_i64 && int_temp_producer?(wire_get(inst, :name), fresh)) || int_fresh_source?(inst)) && wire_get(inst, :temp) != nil
+        found = true
+        break
+      ii += 1
+    bi += 1
+  return 0 if !found || has_setjmp(func)
+
+  defs = {}
+  uses = {}
+  known_int = {}
+  arith = []
+  bi = 0
+  while bi < blocks.size()
+    instrs = blocks[bi][:instructions]
+    ii = 0
+    while ii < instrs.size()
+      inst = instrs[ii]
+      k = wire_kind(inst)
+      t = wire_get(inst, :temp)
+      if t != nil
+        defs[t] = [bi, ii]
+        if k == :nanbox_int
+          known_int[t] = true
+        elsif (k == :call_direct_i64 && int_temp_producer?(wire_get(inst, :name), fresh)) || int_fresh_source?(inst)
+          arith.push(t)
+      refs = loop_release_operands(inst)
+      if refs == nil
+        if env("TUNGSTEN_INT_TEMP_RELEASE_DEBUG") == "1"
+          ignored = ccall("w_eputs", "int-temp " + func[:name].to_s() + " skipped: opaque " + k.to_s())
+        return 0
+      ri = 0
+      while ri < refs.size()
+        r = refs[ri]
+        if uses[r] == nil
+          uses[r] = []
+        uses[r].push([bi, ii])
+        ri += 1
+      ii += 1
+    bi += 1
+
+  # after[block][index] = releases to insert after that instruction
+  after = {}
+  inserted = 0
+  ai = 0
+  while ai < arith.size()
+    t = arith[ai]
+    ai += 1
+    tb = defs[t][0]
+    tinst = blocks[tb][:instructions][defs[t][1]]
+    witnesses = []
+    # A fresh-returning callee sealed its result (int_fresh_returns) and a
+    # parsed or literal BigInt is new, so only an arithmetic helper's
+    # operands are witnesses.
+    if wire_kind(tinst) == :call_direct_i64 && int_temp_arith?(wire_get(tinst, :name))
+      targs = wire_get(tinst, :args)
+      wi = 0
+      while wi < wire_sequence_size(targs)
+        witnesses.push(wire_sequence_get(targs, wi))
+        wi += 1
+    last = defs[t][1]
+    ok = true
+    tuses = uses[t]
+    ui = 0
+    while tuses != nil && ui < tuses.size() && ok
+      ub = tuses[ui][0]
+      uix = tuses[ui][1]
+      ui += 1
+      if ub != tb || uix <= defs[t][1]
+        ok = false
+        next
+      last = uix if uix > last
+      uinst = blocks[ub][:instructions][uix]
+      uk = wire_kind(uinst)
+      if uk == :truthy_inline
+        next
+      if uk == :call_direct_void && wire_get(uinst, :name) in ("__w_int_result_seal" "__w_int_alias_seal")
+        next
+      if mod[:write_only_globals] != nil && dead_global_store?(uinst, mod[:write_only_globals])
+        next
+      if uk == :call_direct_i64
+        uname = wire_get(uinst, :name)
+        if int_temp_arith?(uname)
+          uargs = wire_get(uinst, :args)
+          wj = 0
+          while wj < wire_sequence_size(uargs)
+            witnesses.push(wire_sequence_get(uargs, wj))
+            wj += 1
+          next
+        next if int_temp_reader?(uname)
+        # A source function that keeps no Integer argument in this position.
+        summary = fn_escape_summary(mod, uname)
+        ints = summary == nil ? nil : summary[:int_stored_escs]
+        uargs = wire_get(uinst, :args)
+        if ints == nil || uargs == nil
+          ok = false
+          next
+        wj = 0
+        while ok && wj < wire_sequence_size(uargs)
+          if wire_sequence_get(uargs, wj) == t && (wj >= ints.size() || ints[wj] == true)
+            ok = false
+          wj += 1
+        if ok && wire_get(uinst, :temp) != nil
+          witnesses.push(wire_get(uinst, :temp))
+        next
+      if uk == :call_method_i64
+        how = int_method_read?(uinst, t, mod, strings, defs, blocks)
+        if how != nil
+          # receiver (when t is only an argument) and result are witnesses
+          witnesses.push(how) if how != true
+          witnesses.push(wire_get(uinst, :temp)) if wire_get(uinst, :temp) != nil
+          next
+        ok = false if wire_get(uinst, :receiver) != t
+        uargs = wire_get(uinst, :args)
+        wj = 0
+        while ok && wj < wire_sequence_size(uargs)
+          ok = false if wire_sequence_get(uargs, wj) == t
+          wj += 1
+        ok = false if ok && wire_get(uinst, :temp_args_val) == t
+        if ok
+          mname = int_temp_method_name(uinst, defs, blocks, strings)
+          ok = false if mname == nil || !int_temp_reader_method?(mname)
+        next
+      ok = false
+    next if !ok
+
+    # Integer constants need no check; t itself is checked anyway.
+    checks = []
+    wi = 0
+    while wi < witnesses.size()
+      w = witnesses[wi]
+      wi += 1
+      next if w == t || known_int[w] == true || checks.include?(w)
+      checks.push(w)
+    if checks.size() > 3
+      if env("TUNGSTEN_INT_TEMP_RELEASE_DEBUG") == "1"
+        ignored = ccall("w_eputs", "int-temp " + func[:name].to_s() + " " + t + ": " + checks.size().to_s() + " witnesses")
+      next
+    args = [checks.size().to_s(), t]
+    wi = 0
+    while wi < 3
+      args.push(wi < checks.size() ? checks[wi] : "0")
+      wi += 1
+    key = tb.to_s() + ":" + last.to_s()
+    if after[key] == nil
+      after[key] = []
+    after[key].push(wire_make_call_direct_void(args, "__w_int_temp_release"))
+    inserted += 1
+
+  return 0 if inserted == 0
+  bi = 0
+  while bi < blocks.size()
+    instrs = blocks[bi][:instructions]
+    touched = false
+    ii = 0
+    while ii < instrs.size() && !touched
+      touched = true if after[bi.to_s() + ":" + ii.to_s()] != nil
+      ii += 1
+    if touched
+      rebuilt = []
+      ii = 0
+      while ii < instrs.size()
+        rebuilt.push(instrs[ii])
+        extra = after[bi.to_s() + ":" + ii.to_s()]
+        if extra != nil
+          ei = 0
+          while ei < extra.size()
+            rebuilt.push(extra[ei])
+            ei += 1
+        ii += 1
+      blocks[bi][:instructions] = rebuilt
+    bi += 1
+  if env("TUNGSTEN_INT_TEMP_RELEASE_DEBUG") == "1"
+    ignored = ccall("w_eputs", "int-temp " + func[:name].to_s() + " released " + inserted.to_s())
+  inserted
+
+# Functions whose every return is a fresh integer: the result of an integer
+# arithmetic helper or of another such function, read in the function only
+# by the integer readers int_temp_releases accepts.  Their callers may then
+# release the result (`sq(x)` dropped, compared, fed to arithmetic) like a
+# helper's.  An arithmetic result whose operands were not both integers may
+# be an unmarked alias handed back by a user operator, so right after each
+# returned helper result the function calls __w_int_result_seal, which marks
+# a BigInt result shared in that case; the release then only drops the mark.
+# Returns name -> true.  Memoized calls go through memo_call_*, never a
+# direct call, so a cached result is never taken for a fresh one.
+-> int_fresh_returns(mod)
+  fresh = {}
+  cands = []
+  funcs = mod[:functions]
+  fi = 0
+  while fi < funcs.size()
+    func = funcs[fi]
+    fi += 1
+    next if func[:blocks].size() == 0 || func[:incremental_core_frozen] == true
+    cand = int_fresh_candidate(func)
+    if cand != nil
+      cands.push(cand)
+  # Optimistic fixed point would admit mutual recursion with no base case;
+  # grow from nothing instead, a callee at a time.
+  changed = true
+  while changed
+    changed = false
+    ci = 0
+    while ci < cands.size()
+      c = cands[ci]
+      ci += 1
+      next if fresh[c[:name]] == true
+      ok = true
+      ki = 0
+      while ok && ki < c[:callees].size()
+        ok = false if fresh[c[:callees][ki]] != true
+        ki += 1
+      if ok
+        fresh[c[:name]] = true
+        changed = true
+  ci = 0
+  while ci < cands.size()
+    c = cands[ci]
+    ci += 1
+    if fresh[c[:name]] == true
+      int_fresh_insert_seals(c)
+  fresh
+
+# {name:, func:, callees: [...], seals: [[block, index, temp, args], ...]} when
+# every ret_i64 returns an arithmetic-helper result or a direct call's result
+# (fresh only if every callee turns out fresh), each read here only by
+# integer readers; nil otherwise.
+-> int_fresh_candidate(func)
+  blocks = func[:blocks]
+  return nil if has_setjmp(func)
+  rets = []
+  bi = 0
+  while bi < blocks.size()
+    instrs = blocks[bi][:instructions]
+    ii = 0
+    while ii < instrs.size()
+      k = wire_kind(instrs[ii])
+      if k == :ret_i64
+        rets.push(wire_get(instrs[ii], :value))
+      elsif k == :ret_void || k == :ret_i32
+        return nil
+      ii += 1
+    bi += 1
+  return nil if rets.size() == 0
+  defs = {}
+  uses = {}
+  bi = 0
+  while bi < blocks.size()
+    instrs = blocks[bi][:instructions]
+    ii = 0
+    while ii < instrs.size()
+      inst = instrs[ii]
+      t = wire_get(inst, :temp)
+      if t != nil
+        defs[t] = [bi, ii]
+      refs = loop_release_operands(inst)
+      return nil if refs == nil
+      ri = 0
+      while ri < refs.size()
+        if uses[refs[ri]] == nil
+          uses[refs[ri]] = []
+        uses[refs[ri]].push([bi, ii])
+        ri += 1
+      ii += 1
+    bi += 1
+  callees = []
+  seals = []
+  ri = 0
+  while ri < rets.size()
+    v = rets[ri]
+    ri += 1
+    d = defs[v]
+    return nil if d == nil
+    dinst = blocks[d[0]][:instructions][d[1]]
+    return nil if wire_kind(dinst) != :call_direct_i64
+    dname = wire_get(dinst, :name)
+    vuses = uses[v]
+    ui = 0
+    while vuses != nil && ui < vuses.size()
+      uinst = blocks[vuses[ui][0]][:instructions][vuses[ui][1]]
+      ui += 1
+      uk = wire_kind(uinst)
+      next if uk == :ret_i64 || uk == :truthy_inline
+      if uk == :call_direct_i64
+        uname = wire_get(uinst, :name)
+        next if int_temp_arith?(uname) || int_temp_reader?(uname)
+      return nil
+    if int_temp_arith?(dname)
+      args = wire_get(dinst, :args)
+      a = wire_sequence_size(args) > 0 ? wire_sequence_get(args, 0) : v
+      b = wire_sequence_size(args) > 1 ? wire_sequence_get(args, 1) : a
+      dup = false
+      sj = 0
+      while sj < seals.size()
+        dup = true if seals[sj][2] == v
+        sj += 1
+      seals.push([d[0], d[1], v, a, b]) if !dup
+    elsif dname == func[:name]
+      return nil
+    else
+      callees.push(dname) if !callees.include?(dname)
+  {name: func[:name], func: func, callees: callees, seals: seals}
+
+-> int_fresh_insert_seals(c)
+  blocks = c[:func][:blocks]
+  after = {}
+  si = 0
+  while si < c[:seals].size()
+    sl = c[:seals][si]
+    si += 1
+    key = sl[0].to_s() + ":" + sl[1].to_s()
+    if after[key] == nil
+      after[key] = []
+    after[key].push(wire_make_call_direct_void([sl[2], sl[3], sl[4]], "__w_int_result_seal"))
+  bi = 0
+  while bi < blocks.size()
+    instrs = blocks[bi][:instructions]
+    touched = false
+    ii = 0
+    while ii < instrs.size() && !touched
+      touched = true if after[bi.to_s() + ":" + ii.to_s()] != nil
+      ii += 1
+    if touched
+      rebuilt = []
+      ii = 0
+      while ii < instrs.size()
+        rebuilt.push(instrs[ii])
+        extra = after[bi.to_s() + ":" + ii.to_s()]
+        if extra != nil
+          ei = 0
+          while ei < extra.size()
+            rebuilt.push(extra[ei])
+            ei += 1
+        ii += 1
+      blocks[bi][:instructions] = rebuilt
+    bi += 1
+  nil
+
+# ---------------------------------------------------------------------------
+# Owned variable slots.
+#
+# cfg.w keeps every variable that needs a merge phi in its memory slot, so a
+# local assigned in a loop -- `y = sq(x)`, `a = zeros(12)`, `s = label(i)` --
+# is a slot, and the passes above see only stores and loads.  Every value
+# such a slot ever held stayed allocated until the process exited.
+#
+# A slot V of a function owns its values when:
+#   - V is only loaded and stored: not a closure cell, not referenced by any
+#     other instruction;
+#   - every stored value is fresh -- an integer temporary (an arithmetic
+#     helper's result or a fresh-returning call's) or a known heap
+#     constructor's result (is_heap_producer), never both kinds in one slot --
+#     or nil, and its only other uses read it without keeping it;
+#   - every value loaded from V is only read: for integers, by the readers
+#     int_temp_releases accepts (arithmetic helpers, comparisons, read-only
+#     Integer methods, calls that keep no Integer argument); for heap values,
+#     by is_nonretaining_consumer calls and by calls whose escape summary
+#     neither stores nor returns that argument.  A load that is returned,
+#     stored, captured or passed anywhere else disqualifies V.
+# The pass then stores nil into V at entry, releases V's old value right
+# after each store, and releases its final value before each return.  An
+# integer stored from a helper is sealed first (__w_int_result_seal, so an
+# alias from non-integer operands carries a mark), and a load read by a
+# helper with operands not known to be integers, or passed to a call, is
+# marked shared when the read could have kept it (__w_int_result_seal on the
+# load, __w_int_alias_seal with the call's result): the later release then
+# only drops the mark.  Heap values go through w_value_free.  Slots that the
+# assignment-time releases (assign.w), the BigInt _dest/_mut entries or the
+# loop-carried pass above already manage read V's loads through calls that
+# are none of the above, so they never qualify.  A path that leaves through a
+# raise skips the releases and only leaks.
+# TUNGSTEN_SLOT_RELEASE=0 disables the pass.
+# ---------------------------------------------------------------------------
+
+-> owned_slot_releases(func, mod, fresh, strings)
+  blocks = func[:blocks]
+  slots = func[:var_slots]
+  return 0 if slots == nil || blocks.size() < 1 || has_setjmp(func)
+  heap_cells = func[:heap_slot_names]
+  promoted = func[:promoted_vars]
+  cand = {}
+  names = slots.keys()
+  ni = 0
+  while ni < names.size()
+    ptr = slots[names[ni]]
+    if ptr.starts_with?("%v") && (heap_cells == nil || heap_cells[names[ni]] != true) && (promoted == nil || promoted[ptr] == nil)
+      cand[ptr] = true
+    ni += 1
+  return 0 if cand.keys().size() == 0
+  wo = mod[:write_only_globals]
+  wo = {} if wo == nil
+
+  defs = {}
+  uses = {}
+  loads = {}
+  stores = {}
+  bad = {}
+  rets = []
+  bi = 0
+  while bi < blocks.size()
+    instrs = blocks[bi][:instructions]
+    ii = 0
+    while ii < instrs.size()
+      inst = instrs[ii]
+      k = wire_kind(inst)
+      t = wire_get(inst, :temp)
+      if t != nil
+        defs[t] = [bi, ii]
+      if k in (:ret_i64 :ret_i32 :ret_void)
+        rets.push([bi, ii])
+      access = nil
+      if k in (:load_i64 :store_i64)
+        sp = wire_get(inst, :ptr)
+        if sp != nil && cand[sp] == true
+          access = sp
+          if k == :load_i64
+            loads[sp] = [] if loads[sp] == nil
+            loads[sp].push([bi, ii, t])
+          else
+            stores[sp] = [] if stores[sp] == nil
+            stores[sp].push([bi, ii, wire_get(inst, :value)])
+      refs = loop_release_operands(inst)
+      return 0 if refs == nil
+      ri = 0
+      while ri < refs.size()
+        r = refs[ri]
+        bad[r] = true if cand[r] == true && r != access
+        uses[r] = [] if uses[r] == nil
+        uses[r].push([bi, ii])
+        ri += 1
+      ii += 1
+    bi += 1
+  return 0 if rets.size() == 0
+
+  known_int = {}
+  dk = defs.keys()
+  di = 0
+  while di < dk.size()
+    d = defs[dk[di]]
+    known_int[dk[di]] = true if wire_kind(blocks[d[0]][:instructions][d[1]]) == :nanbox_int
+    di += 1
+
+  ctx = {blocks: blocks, defs: defs, uses: uses, cand: cand, wo: wo, known_int: known_int, fresh: fresh, strings: strings, mod: mod}
+  info = {}
+  sk = stores.keys()
+  si = 0
+  while si < sk.size()
+    ptr = sk[si]
+    si += 1
+    next if bad[ptr] == true
+    plan = owned_slot_plan(ptr, stores[ptr], loads[ptr], ctx)
+    info[ptr] = plan if plan != nil
+  # A cell sharing values with a cell that is not owned loses them too.
+  changed = true
+  while changed
+    changed = false
+    ik = info.keys()
+    ki = 0
+    while ki < ik.size()
+      ptr = ik[ki]
+      ki += 1
+      next if info[ptr] == nil
+      dl = info[ptr][:deps].keys()
+      dj = 0
+      while dj < dl.size()
+        if info[dl[dj]] == nil
+          info[ptr] = nil
+          changed = true
+          break
+        dj += 1
+  owned = []
+  ik = info.keys()
+  ki = 0
+  while ki < ik.size()
+    owned.push(ik[ki]) if info[ik[ki]] != nil
+    ki += 1
+  return 0 if owned.size() == 0
+
+  # Edits, keyed "block:index": before[] / after[] lists of instructions.
+  before = {}
+  after = {}
+  sealed = {}
+  shared = {}
+  oi = 0
+  while oi < owned.size()
+    ptr = owned[oi]
+    plan = info[ptr]
+    oi += 1
+    heap = plan[:kind] == :heap
+    # nil at entry: the final release must never read an unset slot
+    owned_slot_edit(before, "0:0", wire_make_store_i64(ptr, "0"))
+    pm = 0
+    while pm < plan[:pre_marks].size()
+      owned_slot_edit(before, plan[:pre_marks][pm][0], plan[:pre_marks][pm][1])
+      pm += 1
+    sl = stores[ptr]
+    sj = 0
+    while sj < sl.size()
+      st = sl[sj]
+      sj += 1
+      key = st[0].to_s() + ":" + st[1].to_s()
+      v = st[2]
+      seal = plan[:seals][v]
+      if seal != nil && sealed[v] != true && defs[v] != nil
+        sealed[v] = true
+        dkey = defs[v][0].to_s() + ":" + defs[v][1].to_s()
+        owned_slot_edit(after, dkey, wire_make_call_direct_void([v, seal[0], seal[1]], "__w_int_result_seal"))
+      # an integer stored in several owned cells: one shared mark per extra
+      # cell, right after its definition (dominates every store)
+      n = plan[:cells_of][v]
+      if n != nil && n > 1 && shared[v] != true && defs[v] != nil
+        shared[v] = true
+        dkey = defs[v][0].to_s() + ":" + defs[v][1].to_s()
+        mi = 1
+        while mi < n
+          owned_slot_edit(after, dkey, wire_make_call_direct_void([v, v], "__w_int_alias_seal"))
+          mi += 1
+      old = next_temp(func)
+      owned_slot_edit(before, key, wire_make_load_i64(ptr, old))
+      owned_slot_edit(after, key, owned_slot_release(old, heap))
+    ri = 0
+    while ri < rets.size()
+      key = rets[ri][0].to_s() + ":" + rets[ri][1].to_s()
+      ri += 1
+      next if plan[:transfers][key] == true
+      fin = next_temp(func)
+      owned_slot_edit(before, key, wire_make_load_i64(ptr, fin))
+      owned_slot_edit(before, key, owned_slot_release(fin, heap))
+    ci = 0
+    while ci < plan[:marks].size()
+      m = plan[:marks][ci]
+      ci += 1
+      owned_slot_edit(after, m[0], m[1])
+
+  bi = 0
+  while bi < blocks.size()
+    instrs = blocks[bi][:instructions]
+    rebuilt = []
+    ii = 0
+    while ii < instrs.size()
+      key = bi.to_s() + ":" + ii.to_s()
+      pre = before[key]
+      if pre != nil
+        pj = 0
+        while pj < pre.size()
+          rebuilt.push(pre[pj])
+          pj += 1
+      rebuilt.push(instrs[ii])
+      post = after[key]
+      if post != nil
+        pj = 0
+        while pj < post.size()
+          rebuilt.push(post[pj])
+          pj += 1
+      ii += 1
+    blocks[bi][:instructions] = rebuilt
+    bi += 1
+  if env("TUNGSTEN_SLOT_RELEASE_DEBUG") == "1"
+    ignored = ccall("w_eputs", "slot-release " + func[:name].to_s() + " owned " + owned.size().to_s())
+  owned.size()
+
+-> owned_slot_edit(table, key, inst)
+  table[key] = [] if table[key] == nil
+  table[key].push(inst)
+  nil
+
+-> owned_slot_release(value, heap)
+  if heap
+    return wire_make_free_value(value)
+  wire_make_call_direct_void(["0", value, "0", "0", "0"], "__w_int_temp_release")
+
+# A fresh integer that is not an arithmetic result: a parsed or literal BigInt.
+-> int_fresh_source?(inst)
+  k = wire_kind(inst)
+  return true if k == :bigint_literal_i64
+  k == :call_direct_i64 && wire_get(inst, :name) == "w_bigint_from_dec_str"
+
+# Is `inst` a store of a value into a global nothing ever loads?
+-> dead_global_store?(inst, wo)
+  wire_kind(inst) == :store_global && wo[wire_get(inst, :name)] == true
+
+# nil, or {kind: :int|:heap, seals: {stored temp -> [a, b]}, marks: [[key, inst]],
+# deps: {other cell -> true}, cells_of: {stored temp -> owned stores of it}}
+-> owned_slot_plan(ptr, sl, ll, ctx)
+  blocks = ctx[:blocks]
+  defs = ctx[:defs]
+  uses = ctx[:uses]
+  cand = ctx[:cand]
+  wo = ctx[:wo]
+  kind = :nil
+  seals = {}
+  marks = []
+  pre_marks = []
+  borrowed = []
+  transfers = {}
+  deps = {}
+  cells_of = {}
+  si = 0
+  while si < sl.size()
+    v = sl[si][2]
+    skey = sl[si][0].to_s() + ":" + sl[si][1].to_s()
+    si += 1
+    next if v == "0"
+    d = defs[v]
+    if d == nil
+      # a parameter: borrowed, see below
+      borrowed.push([skey, v])
+      next
+    dinst = blocks[d[0]][:instructions][d[1]]
+    dk = wire_kind(dinst)
+    vkind = nil
+    if dk == :nanbox_int
+      next
+    elsif dk == :load_i64 && cand[wire_get(dinst, :ptr)] == true
+      # a copy of another cell's integer: one more holder, so one more mark;
+      # that cell's plan checks the load's other uses
+      vkind = :int
+      deps[wire_get(dinst, :ptr)] = true
+      lkey = d[0].to_s() + ":" + d[1].to_s()
+      marks.push([lkey, wire_make_call_direct_void([v, v], "__w_int_alias_seal")])
+      return nil if kind != :nil && kind != vkind
+      kind = vkind
+      next
+    elsif dk == :call_direct_i64 && int_temp_producer?(wire_get(dinst, :name), ctx[:fresh])
+      vkind = :int
+      if int_temp_arith?(wire_get(dinst, :name))
+        args = wire_get(dinst, :args)
+        a = wire_sequence_size(args) > 0 ? wire_sequence_get(args, 0) : v
+        b = wire_sequence_size(args) > 1 ? wire_sequence_get(args, 1) : a
+        seals[v] = [a, b]
+    elsif int_fresh_source?(dinst)
+      vkind = :int
+    elsif dk == :call_direct_i64 && (is_heap_producer(dinst) || fresh_heap_call?(dinst, ctx[:mod]))
+      vkind = :heap
+    else
+      # Not fresh (a parameter, a call's or method's result, ...): an integer
+      # cell may still hold it as one more counted holder -- a shared mark
+      # right before the store, so the cell's release only drops that mark.
+      # Marks and releases touch BigInts only, so a non-integer is unaffected.
+      borrowed.push([skey, v])
+      next
+    return nil if kind != :nil && kind != vkind
+    kind = vkind
+    # the stored temp: plain reads, plus stores into owned cells (one per
+    # cell for a heap value)
+    vuses = uses[v]
+    n = 0
+    ui = 0
+    while vuses != nil && ui < vuses.size()
+      uinst = blocks[vuses[ui][0]][:instructions][vuses[ui][1]]
+      ui += 1
+      if wire_kind(uinst) == :store_i64
+        return nil if wire_get(uinst, :value) != v
+        target = wire_get(uinst, :ptr)
+        return nil if cand[target] != true
+        deps[target] = true if target != ptr
+        n += 1
+        next
+      next if dead_global_store?(uinst, wo)
+      return nil if !owned_slot_plain_read?(uinst, v, kind, ctx[:strings], defs, blocks, ctx[:mod])
+      if kind == :int && wire_kind(uinst) == :call_method_i64
+        how = int_method_read?(uinst, v, ctx[:mod], ctx[:strings], defs, blocks)
+        if how != nil
+          vkey = vuses[ui - 1][0].to_s() + ":" + vuses[ui - 1][1].to_s()
+          if how != true
+            marks.push([vkey, wire_make_call_direct_void([v, how, how], "__w_int_result_seal")])
+          if wire_get(uinst, :temp) != nil
+            marks.push([vkey, wire_make_call_direct_void([v, wire_get(uinst, :temp)], "__w_int_alias_seal")])
+      elsif kind == :int && wire_kind(uinst) == :call_direct_i64 && wire_get(uinst, :temp) != nil && !int_temp_arith?(wire_get(uinst, :name)) && !int_temp_reader?(wire_get(uinst, :name))
+        vkey = vuses[ui - 1][0].to_s() + ":" + vuses[ui - 1][1].to_s()
+        marks.push([vkey, wire_make_call_direct_void([v, wire_get(uinst, :temp)], "__w_int_alias_seal")])
+    return nil if n < 1 || (kind == :heap && n != 1)
+    cells_of[v] = n
+  return nil if kind == :nil
+  if borrowed.size() > 0
+    return nil if kind != :int
+    bi2 = 0
+    while bi2 < borrowed.size()
+      pre_marks.push([borrowed[bi2][0], wire_make_call_direct_void([borrowed[bi2][1], borrowed[bi2][1]], "__w_int_alias_seal")])
+      bi2 += 1
+  li = 0
+  while ll != nil && li < ll.size()
+    l = ll[li][2]
+    li += 1
+    next if l == nil
+    luses = uses[l]
+    ui = 0
+    while luses != nil && ui < luses.size()
+      ub = luses[ui][0]
+      uix = luses[ui][1]
+      ui += 1
+      uinst = blocks[ub][:instructions][uix]
+      key = ub.to_s() + ":" + uix.to_s()
+      uk = wire_kind(uinst)
+      next if dead_global_store?(uinst, wo)
+      if uk == :ret_i64 && wire_get(uinst, :value) == l
+        # returned: the caller takes the current value over, so that return
+        # skips this cell's final release; earlier values are still ours
+        transfers[key] = true
+        next
+      if uk == :store_i64 && wire_get(uinst, :value) == l
+        # copied into another cell: fine for integers when that cell is owned
+        target = wire_get(uinst, :ptr)
+        return nil if kind != :int || cand[target] != true
+        deps[target] = true
+        next
+      if kind == :int && uk == :call_direct_i64
+        uname = wire_get(uinst, :name)
+        if int_temp_arith?(uname)
+          # other operands not known to be integers: mark the load if one is not
+          others = []
+          uargs = wire_get(uinst, :args)
+          wj = 0
+          while wj < wire_sequence_size(uargs)
+            o = wire_sequence_get(uargs, wj)
+            others.push(o) if o != l && ctx[:known_int][o] != true
+            wj += 1
+          if others.size() > 0
+            b = others.size() > 1 ? others[1] : others[0]
+            marks.push([key, wire_make_call_direct_void([l, others[0], b], "__w_int_result_seal")])
+          next
+        next if int_temp_reader?(uname)
+      if !owned_slot_plain_read?(uinst, l, kind, ctx[:strings], defs, blocks, ctx[:mod])
+        return nil
+      if uk == :call_direct_i64 && wire_get(uinst, :temp) != nil && !(kind == :int && int_temp_reader?(wire_get(uinst, :name)))
+        if kind == :int
+          marks.push([key, wire_make_call_direct_void([l, wire_get(uinst, :temp)], "__w_int_alias_seal")])
+      if uk == :call_method_i64 && kind == :int
+        how = int_method_read?(uinst, l, ctx[:mod], ctx[:strings], defs, blocks)
+        if how != nil
+          if how != true
+            # an argument: kept only if the receiver was not an Integer
+            marks.push([key, wire_make_call_direct_void([l, how, how], "__w_int_result_seal")])
+          if wire_get(uinst, :temp) != nil
+            marks.push([key, wire_make_call_direct_void([l, wire_get(uinst, :temp)], "__w_int_alias_seal")])
+  {kind: kind, seals: seals, marks: marks, pre_marks: pre_marks, deps: deps, cells_of: cells_of, transfers: transfers}
+
+# Does `inst` only read `v` (a value of a slot of `kind`) without keeping it?
+-> owned_slot_plain_read?(inst, v, kind, strings, defs, blocks, mod)
+  k = wire_kind(inst)
+  return true if k == :truthy_inline
+  if k == :call_direct_i64
+    name = wire_get(inst, :name)
+    if kind == :int
+      return true if int_temp_arith?(name) || int_temp_reader?(name)
+    else
+      return true if is_nonretaining_consumer(name)
+    summary = fn_escape_summary(mod, name)
+    return false if summary == nil
+    flags = kind == :int ? summary[:int_stored_escs] : summary[:escs]
+    return false if flags == nil
+    args = wire_get(inst, :args)
+    return false if args == nil
+    ai = 0
+    while ai < wire_sequence_size(args)
+      if wire_sequence_get(args, ai) == v && (ai >= flags.size() || flags[ai] == true)
+        return false
+      ai += 1
+    return true
+  if k == :call_method_i64 && kind == :int
+    if wire_get(inst, :receiver) == v
+      args = wire_get(inst, :args)
+      plain = true
+      ai = 0
+      while ai < wire_sequence_size(args)
+        plain = false if wire_sequence_get(args, ai) == v
+        ai += 1
+      plain = false if wire_get(inst, :temp_args_val) == v
+      mname = int_temp_method_name(inst, defs, blocks, strings)
+      return true if plain && mname != nil && int_temp_reader_method?(mname)
+    return int_method_read?(inst, v, mod, strings, defs, blocks) != nil
+  false
+
+
+# ---------------------------------------------------------------------------
+# Fresh heap results.
+#
+# `a = zeros(12)`, `c = copy_list(base)`, `s = label(i)`: the callee builds a
+# new array or string and returns it, and the caller drops it -- but only
+# known runtime constructors counted as producers, so every such result was
+# kept until exit.  A source function returns a fresh heap value when every
+# ret_i64 returns either a known constructor's result (is_heap_producer) or
+# the result of another such function, and nothing in the function other
+# than the return lets that value escape (mark_escapes over every other
+# instruction, with the escape summaries).  Callers then treat its result as
+# a producer: freed at scope end when it does not escape there, or owned by
+# a variable slot (owned_slot_releases).  Computed callee first, growing from
+# nothing, so recursion without a base case never qualifies.  Memoized calls
+# go through memo_call_*, never a direct call.  Sets mod[:fresh_heap_fns].
+# ---------------------------------------------------------------------------
+-> fresh_heap_returns(mod)
+  fresh = {}
+  kinds = {}
+  mod[:fresh_heap_fns] = fresh
+  mod[:fresh_heap_kinds] = kinds
+  return fresh if env("TUNGSTEN_FREE") == "0" || env("TUNGSTEN_FRESH_HEAP") == "0"
+  cands = []
+  funcs = mod[:functions]
+  fi = 0
+  while fi < funcs.size()
+    func = funcs[fi]
+    fi += 1
+    next if func[:blocks].size() == 0 || func[:incremental_core_frozen] == true
+    cand = fresh_heap_candidate(func, mod)
+    cands.push(cand) if cand != nil
+  changed = true
+  while changed
+    changed = false
+    ci = 0
+    while ci < cands.size()
+      c = cands[ci]
+      ci += 1
+      next if fresh[c[:name]] == true
+      ok = true
+      ki = 0
+      while ok && ki < c[:callees].size()
+        ok = false if fresh[c[:callees][ki]] != true
+        ki += 1
+      if ok
+        fresh[c[:name]] = true
+        changed = true
+        # one kind for every return (own constructors and fresh callees
+        # alike), else unknown
+        kind = c[:own_kind]
+        ki = 0
+        while ki < c[:callees].size()
+          ck = kinds[c[:callees][ki]]
+          if ck == nil
+            kind = :mixed
+          elsif kind == nil
+            kind = ck
+          elsif ck != kind
+            kind = :mixed
+          ki += 1
+        kinds[c[:name]] = kind if kind != nil && kind != :mixed
+  fresh
+
+-> fresh_heap_candidate(func, mod)
+  blocks = func[:blocks]
+  rets = []
+  defs = {}
+  bi = 0
+  while bi < blocks.size()
+    instrs = blocks[bi][:instructions]
+    ii = 0
+    while ii < instrs.size()
+      inst = instrs[ii]
+      k = wire_kind(inst)
+      if k == :ret_i64
+        rets.push(wire_get(inst, :value))
+      elsif k in (:ret_void :ret_i32 :setjmp)
+        return nil
+      t = wire_get(inst, :temp)
+      defs[t] = inst if t != nil
+      ii += 1
+    bi += 1
+  return nil if rets.size() == 0
+  callees = []
+  own_kind = nil
+  mixed = false
+  ri = 0
+  while ri < rets.size()
+    d = defs[rets[ri]]
+    ri += 1
+    return nil if d == nil || wire_kind(d) != :call_direct_i64
+    if is_heap_producer(d)
+      k = heap_producer_kind(d)
+      if own_kind == nil
+        own_kind = k
+      elsif k != own_kind
+        mixed = true
+      next
+    name = wire_get(d, :name)
+    return nil if name == func[:name] || fn_escape_summary(mod, name) == nil
+    callees.push(name) if !callees.include?(name)
+  # Every use but the returns: does a returned value escape?
+  escaped = {}
+  bi = 0
+  while bi < blocks.size()
+    instrs = blocks[bi][:instructions]
+    ii = 0
+    while ii < instrs.size()
+      inst = instrs[ii]
+      k = wire_kind(inst)
+      if k == :phi_ssa
+        incoming = wire_get(inst, :incoming)
+        pi = 0
+        while incoming != nil && pi < wire_sequence_size(incoming)
+          escaped[wire_sequence_get(incoming, pi)] = true
+          pi += 2
+      elsif k != :ret_i64
+        mark_escapes(inst, escaped, mod, nil)
+      ii += 1
+    bi += 1
+  ri = 0
+  while ri < rets.size()
+    return nil if escaped[rets[ri]] == true
+    ri += 1
+  own_kind = :mixed if mixed
+  {name: func[:name], callees: callees, own_kind: own_kind}
+
+# Globals some function stores and no function ever loads.  A top-level
+# variable is a module global mirrored into a local slot of main, which then
+# reads only the slot, so its global copy is a dead write: storing a value
+# there neither keeps it alive for anyone nor needs releasing.  The globals
+# are internal to the module, so its functions (frozen core ones included)
+# are every possible reader.  Sets mod[:write_only_globals].
+-> write_only_globals(mod)
+  stored = {}
+  loaded = {}
+  funcs = mod[:functions]
+  fi = 0
+  while fi < funcs.size()
+    blocks = funcs[fi][:blocks]
+    fi += 1
+    bi = 0
+    while bi < blocks.size()
+      instrs = blocks[bi][:instructions]
+      ii = 0
+      while ii < instrs.size()
+        k = wire_kind(instrs[ii])
+        if k == :store_global
+          stored[wire_get(instrs[ii], :name)] = true
+        elsif k == :load_global
+          loaded[wire_get(instrs[ii], :name)] = true
+        ii += 1
+      bi += 1
+  wo = {}
+  sk = stored.keys()
+  si = 0
+  while si < sk.size()
+    wo[sk[si]] = true if loaded[sk[si]] != true
+    si += 1
+  mod[:write_only_globals] = wo
+  wo
+
+# ---------------------------------------------------------------------------
+# Integer values passed to methods.
+#
+# A loop that calls a program's own BigInt method on its values -- a script
+# reopening BigInt with `-> mulmod(m)` and calling `x.mulmod(m)` -- pinned
+# every value it called it on.  Releases only ever act on BigInts, so the
+# method that matters is the one a BigInt receiver dispatches to, which the
+# module registers with class_add_method.  module_method_table collects
+# those registrations; int_method_read? accepts the call when:
+#   - the value is the receiver: BigInt's definition (else Integer's) of that
+#     name and arity is the only candidate and its escape summary keeps
+#     neither an Integer self nor the value as an argument;
+#   - the value is an argument: every BigInt / Integer / Int definition of
+#     that name and arity keeps nothing in that position, and the caller
+#     marks the value at run time when the receiver turns out not to be an
+#     Integer (so a user class's method can never be the one that kept it).
+# The caller also marks the value when the call's result may be it.  A module
+# that defines method_missing or adds methods at run time gets none of this.
+# ---------------------------------------------------------------------------
+-> module_method_table(mod, texts)
+  table = {}
+  funcs = mod[:functions]
+  fi = 0
+  while fi < funcs.size()
+    blocks = funcs[fi][:blocks]
+    fi += 1
+    cls_of = {}
+    bi = 0
+    while bi < blocks.size()
+      instrs = blocks[bi][:instructions]
+      ii = 0
+      while ii < instrs.size()
+        inst = instrs[ii]
+        ii += 1
+        k = wire_kind(inst)
+        if k == :load_class && wire_get(inst, :temp) != nil
+          cls_of[wire_get(inst, :temp)] = wire_get(inst, :class_name)
+        elsif k == :class_new && wire_get(inst, :temp) != nil
+          cls_of[wire_get(inst, :temp)] = texts[wire_get(inst, :name_str_id)]
+        elsif k == :class_add_method
+          name = texts[wire_get(inst, :method_str_id)]
+          if name == nil || name == "method_missing" || name == "respond_to_missing?"
+            table[:dynamic] = true
+          else
+            table[name] = [] if table[name] == nil
+            table[name].push({cls: cls_of[wire_get(inst, :class_temp)], fname: wire_get(inst, :fn_name), arity: wire_get(inst, :arity), min: wire_get(inst, :min_arity), splat: wire_get(inst, :splat_index)})
+            imm = inline_name_text(name)
+            texts[imm] = name if imm != nil
+        elsif k == :call_direct_i64
+          cn = wire_get(inst, :name)
+          if cn != nil && (cn.index("define_method") != nil || cn.index("add_method") != nil || cn.index("method_missing") != nil)
+            table[:dynamic] = true
+      bi += 1
+  table
+
+# The registrations of `name` on class `cls` that take `arity` arguments
+# (self included).
+-> method_entries_for(table, name, cls, arity)
+  out = []
+  es = table[name]
+  return out if es == nil
+  ei = 0
+  while ei < es.size()
+    e = es[ei]
+    ei += 1
+    next if e[:cls] != cls
+    hi = e[:arity]
+    lo = e[:min] == nil ? hi : e[:min]
+    if e[:splat] != nil && e[:splat] >= 0
+      out.push(e) if arity >= lo
+    elsif arity >= lo && arity <= hi
+      out.push(e)
+  out
+
+# Does the method keep nothing in parameter position `pos` (0 = self) when
+# that argument is an Integer?
+-> method_keeps_no_int?(mod, e, pos)
+  return false if e[:splat] != nil && e[:splat] >= 0
+  summary = fn_escape_summary(mod, e[:fname])
+  return false if summary == nil
+  ints = summary[:int_stored_escs]
+  ints != nil && pos < ints.size() && ints[pos] != true
+
+# nil when the call may keep `v`; else the receiver when `v` is only an
+# argument (the caller marks `v` unless the receiver is an Integer), or
+# true when `v` is the receiver.
+-> int_method_read?(inst, v, mod, strings, defs, blocks)
+  table = mod[:method_table]
+  return nil if table == nil || table[:dynamic] == true
+  name = int_temp_method_name(inst, defs, blocks, strings)
+  return nil if name == nil
+  args = wire_get(inst, :args)
+  argc = wire_sequence_size(args)
+  arity = argc + 1
+  return nil if wire_get(inst, :temp_args_val) == v
+  positions = []
+  ai = 0
+  while ai < argc
+    positions.push(ai + 1) if wire_sequence_get(args, ai) == v
+    ai += 1
+  receiver = wire_get(inst, :receiver)
+  if receiver == v
+    targets = method_entries_for(table, name, "BigInt", arity)
+    targets = method_entries_for(table, name, "Integer", arity) if targets.size() == 0
+    return nil if targets.size() != 1
+    return nil if !method_keeps_no_int?(mod, targets[0], 0)
+    pi = 0
+    while pi < positions.size()
+      return nil if !method_keeps_no_int?(mod, targets[0], positions[pi])
+      pi += 1
+    return true
+  return nil if positions.size() == 0
+  all = []
+  ci = 0
+  classes = ["BigInt", "Integer", "Int"]
+  while ci < classes.size()
+    es = method_entries_for(table, name, classes[ci], arity)
+    ej = 0
+    while ej < es.size()
+      all.push(es[ej])
+      ej += 1
+    ci += 1
+  return nil if all.size() == 0
+  ei = 0
+  while ei < all.size()
+    pi = 0
+    while pi < positions.size()
+      return nil if !method_keeps_no_int?(mod, all[ei], positions[pi])
+      pi += 1
+    ei += 1
+  receiver

@@ -1468,6 +1468,60 @@
   out << "}\n"
   out.to_s()
 
+# Release of a dead integer temporary (ownership.w, int_temp_releases): only a
+# heap BigInt owns storage, so inline ints and every other kind fall through
+# on one tag test and the runtime call (which checks the witnesses) is taken
+# only for BigInts.
+-> int_temp_release_helper_ir()
+  out = StringBuffer(480)
+  out << "define private void @__w_int_temp_release(i64 %n, i64 %t, i64 %w1, i64 %w2, i64 %w3) alwaysinline nounwind {\n"
+  out << "entry:\n"
+  out << "  %tag = and i64 %t, -281474976710656\n"
+  out << "  %big = icmp eq i64 %tag, -1407374883553280\n"
+  out << "  br i1 %big, label %release, label %done\n"
+  out << "release:\n"
+  out << "  call void @w_int_temp_release(i64 %n, i64 %t, i64 %w1, i64 %w2, i64 %w3)\n"
+  out << "  br label %done\n"
+  out << "done:\n"
+  out << "  ret void\n"
+  out << "}\n"
+  out.to_s()
+
+# Seal of an integer result a fresh-returning function hands back
+# (ownership.w, int_fresh_returns): only a BigInt result can need a shared
+# mark, so everything else falls through on one tag test.
+-> int_result_seal_helper_ir()
+  out = StringBuffer(400)
+  out << "define private void @__w_int_result_seal(i64 %r, i64 %a, i64 %b) alwaysinline nounwind {\n"
+  out << "entry:\n"
+  out << "  %tag = and i64 %r, -281474976710656\n"
+  out << "  %big = icmp eq i64 %tag, -1407374883553280\n"
+  out << "  br i1 %big, label %seal, label %done\n"
+  out << "seal:\n"
+  out << "  call void @w_int_result_seal(i64 %r, i64 %a, i64 %b)\n"
+  out << "  br label %done\n"
+  out << "done:\n"
+  out << "  ret void\n"
+  out << "}\n"
+  out.to_s()
+
+# Mark a slot-held BigInt shared when a call it was passed to may have handed
+# it back (ownership.w, owned_slot_releases): only a BigInt can need it.
+-> int_alias_seal_helper_ir()
+  out = StringBuffer(400)
+  out << "define private void @__w_int_alias_seal(i64 %v, i64 %r) alwaysinline nounwind {\n"
+  out << "entry:\n"
+  out << "  %tag = and i64 %v, -281474976710656\n"
+  out << "  %big = icmp eq i64 %tag, -1407374883553280\n"
+  out << "  br i1 %big, label %seal, label %done\n"
+  out << "seal:\n"
+  out << "  call void @w_int_alias_seal(i64 %v, i64 %r)\n"
+  out << "  br label %done\n"
+  out << "done:\n"
+  out << "  ret void\n"
+  out << "}\n"
+  out.to_s()
+
 # Array-literal slot store: the literal was just allocated at exact size by
 # w_array_new_uninit_sized (fresh, unaliased, start == 0, i < size), so the
 # store is a bare slots[i] = val with no grow check or ebits dispatch.

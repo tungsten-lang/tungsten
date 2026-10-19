@@ -44,3 +44,42 @@ w_tag_mask     = ((0 - 1) << 48) ## i64
 
 -> machine_i64_text(value) (i64)
   "u0x" + ccall("w_int_to_hex_str", value)
+
+# Integer methods whose result never holds the receiver (abs, to_i and
+# nonzero? can return it, so they are not here).  The ownership pass's
+# integer releases (ownership.w) treat these as plain reads; lowering
+# (integer_contract_reopened?) keeps them off when a program redefines one.
+-> int_temp_reader_method?(name)
+  name in ("bit_length" "to_s" "to_f" "even?" "odd?" "zero?" "positive?" "negative?" "popcount" "bit_count" "hash" "sign" "digits")
+
+# Read-only methods of core containers: the result never holds the receiver
+# (to_s, to_sym and the mutators can, so they are not here).  A call to one
+# does not pin a fresh Array/String/Hash receiver (ownership.w mark_escapes);
+# lowering (container_contract_reopened?) keeps them off when a program
+# redefines one.
+-> container_reader_method?(kind, name)
+  if kind == :array
+    return name in ("size" "length" "empty?" "count" "first" "last" "include?" "index" "sum" "min" "max" "join" "inspect" "[]")
+  if kind == :string
+    return name in ("size" "length" "bytesize" "empty?" "include?" "index" "start_with?" "end_with?" "to_i" "to_f" "inspect")
+  if kind == :hash
+    return name in ("size" "length" "empty?" "key?" "has_key?" "include?" "fetch" "[]")
+  false
+
+# Every method name a reader list above names.
+-> reader_method_names
+  ["bit_length", "to_s", "to_f", "even?", "odd?", "zero?", "positive?", "negative?", "popcount", "bit_count", "hash", "sign", "digits", "size", "length", "bytesize", "empty?", "count", "first", "last", "include?", "index", "sum", "min", "max", "join", "inspect", "start_with?", "end_with?", "to_i", "key?", "has_key?", "fetch", "[]"]
+
+# The WIRE text of the immediate a name of at most 5 bytes lowers to
+# (lower_string's SSO-5 encoding): method names that short reach a
+# call_method_i64 as this constant, not as a string_i64 temp.  nil when longer.
+-> inline_name_text(name)
+  bytes = name.bytes()
+  if bytes.size() > 5
+    return nil
+  v = (w_tag_stringsym + bytes.size() * 2) ## i64
+  i = 0
+  while i < bytes.size()
+    v = (v + bytes[i] * (1 << (4 + 8 * i))) ## i64
+    i += 1
+  machine_i64_text(v)

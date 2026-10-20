@@ -12,6 +12,8 @@
 # folded-stack format wants root-to-leaf, so we reverse before joining.
 # Identical stacks get merged with summed sample counts.
 
+use folded
+
 in Tungsten:Flame
 
 + PerfScript
@@ -42,16 +44,7 @@ in Tungsten:Flame
             current.push(frame)
       i = i + 1
     self.flush(current, stacks)
-
-    keys = stacks.keys()
-    sorted_keys = self.sort_strings(keys)
-    out = []
-    j = 0
-    while j < sorted_keys.size()
-      k = sorted_keys[j]
-      out.push(k + " " + stacks[k].to_s())
-      j = j + 1
-    out.join("\n")
+    Tungsten:Flame:Folded.emit(stacks)
 
   -> .flush(frames, stacks)
     if frames.size() == 0
@@ -65,14 +58,7 @@ in Tungsten:Flame
   # "addr function+offset (lib_path)" → "function".
   # "addr [unknown] ..." → "[unknown]".
   -> .parse_frame(s)
-    parts = s.split(" ")
-    # Filter empties from runs of whitespace.
-    nonempty = []
-    pi = 0
-    while pi < parts.size()
-      if parts[pi].size() > 0
-        nonempty.push(parts[pi])
-      pi = pi + 1
+    nonempty = s.split(" ").select -> (p) p.size() > 0
     if nonempty.size() < 2
       return nil
     name = nonempty[1]
@@ -82,22 +68,3 @@ in Tungsten:Flame
     if name.size() == 0
       return nil
     name
-
-  # Tungsten hashes preserve insertion order, but our test compares to a
-  # checked-in golden file. Sort lexicographically for reproducibility.
-  -> .sort_strings(xs)
-    arr = []
-    i = 0
-    while i < xs.size()
-      arr.push(xs[i])
-      i = i + 1
-    j = 1
-    while j < arr.size()
-      key = arr[j]
-      k = j - 1
-      while k >= 0 && arr[k] > key
-        arr[k + 1] = arr[k]
-        k = k - 1
-      arr[k + 1] = key
-      j = j + 1
-    arr

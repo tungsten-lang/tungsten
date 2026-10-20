@@ -14,6 +14,7 @@ tungsten-flame(1) -- Make flame graphs
 -d, --duration N       Profiling seconds (default: 5)
     --rate N           Sample frequency in Hz (auto if omitted)
     --top N            Print the top N most expensive methods
+-e, --eval CODE        Evaluate and profile inline Tungsten code
     --counters [SET]   PMC counter profile: SET = rates (default), cache, stalls
     --alloc            Runtime allocation profile: per-kind counts and bytes
     --inspect          AST performance inspection: loops and redundant fetches

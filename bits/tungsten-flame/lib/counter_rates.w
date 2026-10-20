@@ -1,18 +1,7 @@
 # counter_rates.w — Per-function IPC / miss-rate table from counter
 # folded stacks.
-#
-# `flame --counters` (the "rates" set) records instructions and cycles
-# alongside the miss families, all attributed to the same sampled
-# stacks. That pairing is what turns raw event counts into rates: for
-# each function we can divide its miss events by its own instructions —
-# misses per kilo-instruction (MPKI) — and its instructions by its own
-# cycles (IPC). Raw counts say where events happened; rates say which
-# code is actually cache-hostile, independent of how hot it is.
-#
-# Input is the { metric_name => folded_text } dict the sampler returns
-# (after sidemap rewriting), so the math keys off the same self-count
-# convention the analyzer displays: a function's count is the events
-# attributed to samples where it was the leaf frame.
+
+use folded
 
 in Tungsten:Flame
 
@@ -21,7 +10,7 @@ in Tungsten:Flame
   # Render the per-function rates table. Requires the "instructions"
   # and "cycles" metrics (the rates template records both); every other
   # metric present becomes a per-kilo-instruction column. Returns "" if
-  # the required metrics are missing or empty — callers skip printing.
+  # the required metrics are missing or empty.
   -> .report(folded_by_metric, top_n, color)
     if !folded_by_metric.has_key?("instructions") || !folded_by_metric.has_key?("cycles")
       return ""
@@ -34,8 +23,6 @@ in Tungsten:Flame
     if inst_total == 0 || cyc_total == 0
       return ""
 
-    # Miss columns: every metric except the two denominators, in the
-    # dict's slot order.
     miss_names = []
     folded_by_metric.keys().each -> (mname)
       if mname != "instructions" && mname != "cycles"
@@ -51,19 +38,10 @@ in Tungsten:Flame
     reset = color ? "\e[0m" : ""
     fn_color = color ? "\e[38;5;67m" : ""
 
-    # Rank functions by self instructions.
     ranked = []
     inst_counts.keys().each -> (fname)
       ranked.push([fname, inst_counts[fname]])
-    j = 1
-    while j < ranked.size()
-      kp = ranked[j]
-      k = j - 1
-      while k >= 0 && ranked[k][1] < kp[1]
-        ranked[k + 1] = ranked[k]
-        k = k - 1
-      ranked[k + 1] = kp
-      j = j + 1
+    ranked = ranked.sort_by -> (p) -p[1]
 
     name_w = 36
     out = []
@@ -111,8 +89,6 @@ in Tungsten:Flame
     out.join("\n")
 
   # Leaf self-counts for one folded text: [ { fn => count }, total ].
-  # Leaf normalization mirrors the analyzer: drop " + N" offsets, strip
-  # the "lib`" prefix, skip kevent/poll wait stacks.
   -> .self_counts(folded_text)
     counts = {}
     total = 0
@@ -127,17 +103,9 @@ in Tungsten:Flame
         if sp != nil
           stack = line.slice(0, sp)
           count = line.slice(sp + 1, line.size()).to_i()
-          if !stack.include?("kevent") && !stack.include?("poll")
+          if !Tungsten:Flame:Folded.idle_stack?(stack)
             frames = stack.split(";")
-            leaf = frames.last()
-            plus_idx = leaf.rindex(" + ")
-            if plus_idx
-              rest = leaf.slice(plus_idx + 3, leaf.size())
-              if rest.size() > 0 && rest.to_i().to_s() == rest
-                leaf = leaf.slice(0, plus_idx)
-            backtick = leaf.rindex("`")
-            if backtick
-              leaf = leaf.slice(backtick + 1, leaf.size())
+            leaf = Tungsten:Flame:Folded.normalize_frame(frames.last())
             if counts.has_key?(leaf)
               counts[leaf] = counts[leaf] + count
             else
@@ -146,8 +114,6 @@ in Tungsten:Flame
       i = i + 1
     [counts, total]
 
-  # Short column labels for the known metric names; anything else keeps
-  # its own name with a /KI suffix.
   -> .column_label(metric_name)
     if metric_name == "L1-dcache-load-misses"
       return "L1d-ld/KI"
@@ -163,13 +129,11 @@ in Tungsten:Flame
       return "L2TLB/KI"
     metric_name + "/KI"
 
-  # "1234" (a value scaled x10) -> "123.4"
   -> .fmt_x10(x10)
     whole = x10 / 10
     frac = x10 - whole * 10
     whole.to_s() + "." + frac.to_s()
 
-  # "1234" (a value scaled x100) -> "12.34"
   -> .fmt_x100(x100)
     whole = x100 / 100
     frac = x100 - whole * 100
@@ -179,16 +143,10 @@ in Tungsten:Flame
     whole.to_s() + "." + frac_s
 
   -> .pad_left(s, w)
-    out = s.to_s()
-    while out.size() < w
-      out = " " + out
-    out
+    Tungsten:Flame:Folded.pad_left(s, w)
 
   -> .pad_right(s, w)
-    out = s.to_s()
-    while out.size() < w
-      out = out + " "
-    out
+    Tungsten:Flame:Folded.pad_right(s, w)
 
   -> .truncate(s, w)
     if s.size() <= w

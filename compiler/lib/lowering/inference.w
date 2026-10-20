@@ -268,6 +268,13 @@
       if math_intrinsic_runtime_name(node.name, node.args.size()) != nil
         return :float
     recv_t = infer_type(node.receiver, var_types, fn_return_types, infer_maps)
+    if (node.args == nil || node.args.size() == 0) && node.block == nil
+      if node.name == "sqrt" && (recv_t == :float || recv_t == :f64 || is_machine_int_type(recv_t))
+        return :float
+      if node.name in ("sin" "cos" "tan" "exp" "log") && (recv_t == :float || recv_t == :f64)
+        return :float
+      if node.name in ("zero?" "nonzero?" "one?" "even?" "odd?" "positive?" "negative?") && is_integer_like_type(recv_t)
+        return :bool
     if node.name == "to_i" && node.args != nil && node.args.size() == 0
       # String#to_i is an arbitrary-precision Int. A known String receiver
       # (literal, string local, or to_s) stays :int so the next arithmetic

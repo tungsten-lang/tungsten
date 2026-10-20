@@ -91,10 +91,6 @@
 
 -> machine_unbox_fn(t)
   case t
-  when :u64
-    "w_to_u64"
-  when :raw_u64
-    "w_to_u64"
   when :i128
     "w_to_i128"
   when :raw_i128
@@ -2045,6 +2041,37 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # whole preamble is a no-op. Concat semantics (rope over 61 bytes,
   # canonical w_string_n below) are w_add's own string arm.
   if op == :PLUS && lt == :string && rt == :string
+    r_int_recv = fused_int_to_s_receiver(node.right, ctx)
+    if r_int_recv != nil
+      lhs = lower_expression(ctx, node.left)
+      lhs_reg = ensure_i64_value(wfn, lhs)
+      lhs_last = last_emitted_instruction(wfn)
+      own_lhs = 0
+      if env("TUNGSTEN_FREE") != "0" && fresh_string_operand?(node.left, lhs_last, lhs_reg)
+        own_lhs = 1
+      int_tv = lower_expression(ctx, r_int_recv)
+      temp = next_temp(wfn)
+      if int_tv[:type] in (:raw_int :raw_i64)
+        emit_wire_call_direct_i64(wfn, nil, [lhs_reg, int_tv[:value], own_lhs.to_s()], nil, nil, "w_str_concat_i64", nil, nil, temp)
+      else
+        int_reg = ensure_i64_value(wfn, int_tv)
+        emit_wire_call_direct_i64(wfn, nil, [lhs_reg, int_reg, own_lhs.to_s()], nil, nil, "w_str_concat_int_wv", nil, nil, temp)
+      return typed_value(:i64, temp)
+    l_int_recv = fused_int_to_s_receiver(node.left, ctx)
+    if l_int_recv != nil
+      int_tv = lower_expression(ctx, l_int_recv)
+      int_is_raw = int_tv[:type] in (:raw_int :raw_i64)
+      int_arg = int_is_raw ? int_tv[:value] : ensure_i64_value(wfn, int_tv)
+      rhs = lower_expression(ctx, node.right)
+      rhs_reg = ensure_i64_value(wfn, rhs)
+      rhs_last = last_emitted_instruction(wfn)
+      own_rhs = 0
+      if env("TUNGSTEN_FREE") != "0" && fresh_string_operand?(node.right, rhs_last, rhs_reg)
+        own_rhs = 1
+      temp = next_temp(wfn)
+      cname = int_is_raw ? "w_i64_concat_str" : "w_int_wv_concat_str"
+      emit_wire_call_direct_i64(wfn, nil, [int_arg, rhs_reg, own_rhs.to_s()], nil, nil, cname, nil, nil, temp)
+      return typed_value(:i64, temp)
     lhs = lower_expression(ctx, node.left)
     lhs_reg = ensure_i64_value(wfn, lhs)
     lhs_last = last_emitted_instruction(wfn)
@@ -2067,18 +2094,6 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     if own_mask != 0
       emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg, own_mask.to_s()], nil, nil, "w_str_concat_own", nil, nil, temp)
       return typed_value(:i64, temp)
-    # `pre + i.to_s()`: when the RHS is syntactically an anonymous call
-    # whose lowering's LAST emitted instruction is a guaranteed-fresh
-    # string producer with this very temp (w_int_to_s mints an
-    # independent heap string per call), no name can alias it and this
-    # concat is its only consumer — route through the freeing variant so
-    # the intermediate doesn't leak (str_concat primitive: 482MB RSS at
-    # 30M iterations from exactly this temp). Both syntactic anonymity
-    # AND last-instruction identity are required: a bare var RHS
-    # binding-forwards an earlier temp that IS nameable.
-    # TUNGSTEN_FREE=0 is the documented kill switch for ALL compiler-inserted
-    # frees — the concat variants must honor it too or corruption triage
-    # can't rule them out.
     cname = "w_str_concat"
     if env("TUNGSTEN_FREE") != "0" && node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :call
       li = last_emitted_instruction(wfn)
@@ -4153,6 +4168,22 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
 # never a var, ivar, self, or global that a name could alias), and the last
 # instruction its lowering emitted is a direct call to a producer that mints
 # an independent heap string per call, writing exactly this register.
+-> fused_int_to_s_receiver(node, ctx)
+  if node == nil || !is_ast_node?(node) || ast_kind(node) != :call
+    return nil
+  if node.name != "to_s" || node.block != nil
+    return nil
+  args = node.args
+  if args != nil && args.size() != 0
+    return nil
+  recv = node.receiver
+  if recv == nil
+    return nil
+  rt = infer_type(recv, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+  if rt in (:int :i64 :i32 :i16 :i8 :i4 :u32 :u16 :u8 :u4 :raw_int :raw_i64)
+    return recv
+  nil
+
 -> fresh_string_operand?(operand_node, last_inst, reg)
   if operand_node == nil || !is_ast_node?(operand_node)
     return false
@@ -4162,4 +4193,4 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     return false
   if wire_get(last_inst, :temp) != reg
     return false
-  wire_get(last_inst, :name) in ("w_int_to_s" "w_string_repeat" "w_str_concat" "w_str_concat_free_lhs" "w_str_concat_free_rhs" "w_str_concat_own")
+  wire_get(last_inst, :name) in ("w_int_to_s" "w_string_repeat" "w_str_concat" "w_str_concat_free_lhs" "w_str_concat_free_rhs" "w_str_concat_own" "w_str_concat_i64" "w_i64_concat_str" "w_str_concat_int_wv" "w_int_wv_concat_str")

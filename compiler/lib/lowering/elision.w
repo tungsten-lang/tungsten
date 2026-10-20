@@ -411,3 +411,224 @@
       return false
     j += 1
   true
+
+# --- Scalar Replacement of Aggregates (SROA) for non-escaping instances ------
+#
+# When a local `o = Cls.new(a0, a1, ...)` in statement position is assigned
+# once in the enclosing function, all of its reads occur later in the same
+# statement list as 0-arg pure ivar reader calls (`o.x`), and `Cls#new` only
+# initializes `@ivar` fields from its positional parameters, we can elide the
+# heap WObject allocation, constructor call, reader dispatch, and recycle by
+# binding scalar slots for each read field directly.
+
+-> sroa_var_use_count(node, name)
+  if node == nil
+    return 0
+  if type(node) == "Array"
+    total = 0
+    n_node = node.size()
+    i = 0
+    while i < n_node
+      total += sroa_var_use_count(node[i], name)
+      i += 1
+    return total
+  if !is_ast_node?(node)
+    return 0
+  k = ast_kind(node)
+  if k in (:method_def :fn_def :class_def :module_def :trait_def)
+    return 0
+  if k == :var && node.name == name
+    return 1
+  if k == :assign
+    target = node.target
+    total = sroa_var_use_count(node.value, name)
+    if target != nil && !(is_ast_node?(target) && ast_kind(target) == :var && target.name == name)
+      total += sroa_var_use_count(target, name)
+    return total
+  total = 0
+  if k == :call && node.receiver == nil && node.name == name
+    total += 1
+  kids = ast_children(node)
+  n_kids = kids.size()
+  i = 0
+  while i < n_kids
+    total += sroa_var_use_count(kids[i], name)
+    i += 1
+  total
+
+-> sroa_reader_ivar_name(mod, cls_name, mname, has_trailing_ro, ctor_params)
+  method_asts = mod[:class_method_asts]
+  if method_asts == nil
+    return nil
+  r_ast = method_asts[cls_name + "." + mname + "/0"]
+  if r_ast == nil
+    r_ast = method_asts[cls_name + "." + mname]
+  if r_ast != nil && is_ast_node?(r_ast)
+    rparams = r_ast.params
+    if rparams != nil && rparams.size() > 0
+      return nil
+    rbody = r_ast.body
+    if rbody == nil || rbody.size() != 1
+      return nil
+    st0 = rbody[0]
+    if st0 != nil && is_ast_node?(st0) && ast_kind(st0) == :ivar
+      return st0.name
+    return nil
+  if has_trailing_ro && ctor_params != nil
+    n_cparams = ctor_params.size()
+    pi = 0
+    while pi < n_cparams
+      p = ctor_params[pi]
+      if is_ast_node?(p) && p.ivar_assign == true && p.name == mname
+        return "@" + mname
+      pi += 1
+  nil
+
+-> sroa_collect_readers(node, name, cls_name, ivar_to_param_idx, has_trailing_ro, ctor_params, mod, reader_to_param_idx)
+  if node == nil
+    return true
+  if type(node) == "Array"
+    n_node = node.size()
+    i = 0
+    while i < n_node
+      if !sroa_collect_readers(node[i], name, cls_name, ivar_to_param_idx, has_trailing_ro, ctor_params, mod, reader_to_param_idx)
+        return false
+      i += 1
+    return true
+  if !is_ast_node?(node)
+    return true
+  k = ast_kind(node)
+  if k in (:method_def :fn_def :class_def :module_def :trait_def)
+    return true
+  if k == :var
+    return node.name != name
+  if k == :block
+    return sroa_var_use_count(node, name) == 0
+  if k == :call
+    if node.receiver == nil && node.name == name
+      return false
+    recv = node.receiver
+    if recv != nil && is_ast_node?(recv) && ast_kind(recv) == :var && recv.name == name
+      if node.block != nil
+        return false
+      cargs = node.args
+      if cargs != nil && cargs.size() > 0
+        return false
+      mname = node.name
+      ivar_name = sroa_reader_ivar_name(mod, cls_name, mname, has_trailing_ro, ctor_params)
+      if ivar_name == nil
+        return false
+      param_idx = ivar_to_param_idx[ivar_name]
+      if param_idx == nil
+        return false
+      reader_to_param_idx[mname] = param_idx
+      return true
+  kids = ast_children(node)
+  n_kids = kids.size()
+  i = 0
+  while i < n_kids
+    if !sroa_collect_readers(kids[i], name, cls_name, ivar_to_param_idx, has_trailing_ro, ctor_params, mod, reader_to_param_idx)
+      return false
+    i += 1
+  true
+
+-> sroa_analyze_assign(ctx, name, cls_name, value)
+  wfn = ctx[:func]
+  if wfn == nil || wfn[:name] == "main"
+    return nil
+  fn_body = ctx[:fn_body]
+  stmts = ctx[:enclosing_stmts]
+  idx = ctx[:enclosing_stmt_idx]
+  if fn_body == nil || stmts == nil || idx == nil
+    return nil
+  if wfn[:var_slots][name] != nil || ctx[:bindings][name] != nil || ctx[:var_types][name] != nil
+    return nil
+  if wfn[:params].include?(name)
+    return nil
+  if ctx[:unboxed_vars] != nil && ctx[:unboxed_vars][name] != nil
+    return nil
+  mod = ctx[:mod]
+  if mod[:top_level_vars] != nil && mod[:top_level_vars][name] == true
+    return nil
+  if mod[:class_super_names] != nil && mod[:class_super_names][cls_name] != nil
+    return nil
+  if mod[:view_layouts] != nil && mod[:view_layouts][cls_name] != nil
+    return nil
+  if value == nil || !is_ast_node?(value) || ast_kind(value) != :call || value.block != nil
+    return nil
+  cargs = value.args
+  nargs = cargs != nil ? cargs.size() : 0
+  method_asts = mod[:class_method_asts]
+  if method_asts == nil
+    return nil
+  ctor_ast = method_asts[cls_name + ".new/" + nargs.to_s()]
+  if ctor_ast == nil || !is_ast_node?(ctor_ast)
+    return nil
+  cparams = ctor_ast.params
+  if cparams == nil || cparams.size() != nargs
+    return nil
+  param_idx_by_name = {}
+  ivar_to_param_idx = {}
+  pi = 0
+  while pi < nargs
+    p = cparams[pi]
+    if !is_ast_node?(p) || p.default != nil || p.keyword == true || p.splat == true || p.block_param == true
+      return nil
+    pname = p.name
+    param_idx_by_name[pname] = pi
+    if p.ivar_assign == true
+      ivar_to_param_idx["@" + pname] = pi
+    pi += 1
+  cbody = ctor_ast.body
+  has_trailing_ro = false
+  if cbody != nil
+    n_cbody = cbody.size()
+    bi = 0
+    while bi < n_cbody
+      st = cbody[bi]
+      if st == nil || !is_ast_node?(st)
+        return nil
+      sk = ast_kind(st)
+      if sk == :self_ref
+        nil
+      elsif sk == :call
+        st_name = st.name
+        st_args = st.args
+        if st.receiver == nil && (st_name == "ro" || st_name == "rw") && (st_args == nil || st_args.size() == 0)
+          has_trailing_ro = true
+        else
+          return nil
+      elsif sk == :assign
+        st_target = st.target
+        st_val = st.value
+        if st.type_hint == nil && st_target != nil && is_ast_node?(st_target) && ast_kind(st_target) == :ivar && st_val != nil && is_ast_node?(st_val) && ast_kind(st_val) == :var
+          src_pi = param_idx_by_name[st_val.name]
+          if src_pi == nil
+            return nil
+          ivar_to_param_idx[st_target.name] = src_pi
+        else
+          return nil
+      else
+        return nil
+      bi += 1
+  if ivar_to_param_idx.size() == 0
+    return nil
+  if range_elision_assign_count(fn_body, name) != 1
+    return nil
+  total_uses = sroa_var_use_count(fn_body, name)
+  tail_uses = 0
+  n_stmts = stmts.size()
+  j = idx + 1
+  while j < n_stmts
+    tail_uses += sroa_var_use_count(stmts[j], name)
+    j += 1
+  if total_uses != tail_uses
+    return nil
+  reader_to_param_idx = {}
+  j = idx + 1
+  while j < n_stmts
+    if !sroa_collect_readers(stmts[j], name, cls_name, ivar_to_param_idx, has_trailing_ro, cparams, mod, reader_to_param_idx)
+      return nil
+    j += 1
+  {readers: reader_to_param_idx}
+

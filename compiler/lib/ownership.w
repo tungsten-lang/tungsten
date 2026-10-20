@@ -41,7 +41,7 @@ use cfg
     # __w_array_lit_store below): a fresh owned WArray, freed like w_array_new.
     # w_array_new_empty backs `[]`: a fresh owned WArray (or a recycled one
     # reset to fresh), freed like w_array_new.
-    return name in ("w_string" "w_hash_new" "w_array_new" "w_array_new_empty" "w_array_new_uninit_sized" "w_strbuf_new" "w_str_concat" "w_str_concat_free_rhs" "w_str_concat_free_lhs" "w_str_concat_own" "w_int_to_s" "w_string_repeat")
+    return name in ("w_string" "w_hash_new" "w_array_new" "w_array_new_empty" "w_array_new_uninit_sized" "w_strbuf_new" "w_str_concat" "w_str_concat_free_rhs" "w_str_concat_free_lhs" "w_str_concat_own" "w_str_concat_i64" "w_i64_concat_str" "w_str_concat_int_wv" "w_int_wv_concat_str" "w_int_to_s" "w_string_repeat")
   false
 
 # Container writes: the container keeps the stored key/value but not itself,

@@ -750,6 +750,59 @@
     if stmt_position && range_assign_elidable?(ctx, name, node.value)
       return typed_value(:i64, w_nil.to_s())
 
+  if ctx[:sroa_bindings] != nil
+    ctx[:sroa_bindings][name] = nil
+  if stmt_position && node.type_hint == nil && ctor_cls != nil && fact != nil && fact[:certainty] == :exact && source_constructor_returns_exact_class?(ctx[:mod], ctor_cls) && env("TUNGSTEN_SROA") != "0"
+    sroa_plan = sroa_analyze_assign(ctx, name, ctor_cls, node.value)
+    if sroa_plan != nil
+      sroa_cargs = node.value.args
+      n_sroa_cargs = sroa_cargs != nil ? sroa_cargs.size() : 0
+      sroa_readers = sroa_plan[:readers]
+      sroa_rkeys = sroa_readers.keys()
+      n_sroa_rkeys = sroa_rkeys.size()
+      sroa_used_params = {}
+      sri = 0
+      while sri < n_sroa_rkeys
+        sroa_used_params[sroa_readers[sroa_rkeys[sri]]] = true
+        sri += 1
+      sroa_arg_tvs = []
+      sai = 0
+      while sai < n_sroa_cargs
+        sroa_carg = sroa_cargs[sai]
+        if sroa_used_params[sai] == true || !range_binding_pure_bound?(sroa_carg)
+          sroa_arg_tvs.push(lower_expression(ctx, sroa_carg))
+        else
+          sroa_arg_tvs.push(nil)
+        sai += 1
+      sroa_fields = {}
+      sroa_uid = next_label(wfn, "sroa")
+      sri = 0
+      while sri < n_sroa_rkeys
+        sroa_mname = sroa_rkeys[sri]
+        sroa_pidx = sroa_readers[sroa_mname]
+        sroa_tv = sroa_arg_tvs[sroa_pidx]
+        sroa_tv_type = sroa_tv[:type]
+        sroa_arg_node = sroa_cargs[sroa_pidx]
+        sroa_slot_key = "__sroa." + sroa_uid + "." + sroa_mname
+        if sroa_tv_type in (:raw_int :raw_i64 :raw_u64) && !(is_ast_node?(sroa_arg_node) && ast_kind(sroa_arg_node) == :int && sroa_tv_type != :raw_int)
+          sroa_slot = ensure_var_slot(wfn, sroa_slot_key, "i64")
+          emit_wire_store_i64(wfn, sroa_slot, sroa_tv[:value])
+          sroa_fields[sroa_mname] = {slot: sroa_slot, type: sroa_tv_type, op: :load_i64}
+        elsif sroa_tv_type == :raw_f64
+          sroa_slot = ensure_var_slot(wfn, sroa_slot_key, "double")
+          emit_wire_store_double(wfn, sroa_slot, sroa_tv[:value])
+          sroa_fields[sroa_mname] = {slot: sroa_slot, type: :raw_f64, op: :load_double}
+        else
+          sroa_boxed = ensure_i64_value(wfn, sroa_tv)
+          sroa_slot = ensure_var_slot(wfn, sroa_slot_key, "i64")
+          emit_wire_store_i64(wfn, sroa_slot, sroa_boxed)
+          sroa_fields[sroa_mname] = {slot: sroa_slot, type: :i64, op: :load_i64}
+        sri += 1
+      if ctx[:sroa_bindings] == nil
+        ctx[:sroa_bindings] = {}
+      ctx[:sroa_bindings][name] = sroa_fields
+      return typed_value(:i64, w_nil.to_s())
+
   # Closure-escape (#61): stash block-literal RHS so a later
   # `arr.each(cb)` substitutes the block at the call site and inlines
   # via the existing .each handler. Same shape as range_bindings —

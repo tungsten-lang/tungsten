@@ -47,6 +47,7 @@
   # Collect all call targets that need declarations, and track used runtime functions
   ccall_needed = {}
   used_runtime_fns = {}
+  max_ascope_slots = 0
   # Verbatim `ll <<~IR` bodies, concatenated: their `@name(` call targets are
   # invisible to the instruction scan below (see embedded_ir_calls?).
   embedded_ir_text = StringBuffer(256)
@@ -61,6 +62,9 @@
       ii = 0
       while ii < blk[:instructions].size()
         inst = blk[:instructions][ii]
+        ascope = wire_get(inst, :ascope)
+        if ascope != nil && ascope + 1 > max_ascope_slots
+          max_ascope_slots = ascope + 1
         if wire_kind(inst) == :call_direct_i64 && wire_get(inst, :name) != nil
           iname = wire_get(inst, :name)
           if !known_fns.has_key?(iname) && !ccall_needed.has_key?(iname)
@@ -859,7 +863,7 @@
 
   attr_groups_out = emit_function_attr_groups(attr_groups)
 
-  header + decls_out + globals_out.to_s() + strings_out + fn_out.to_s() + fn_meta_out + call_site_out + llvm_used_out + attr_groups_out + tbaa_metadata_defs() + novec_loop_md_defs() + ewscope_md_defs() + alias_scope_md_defs()
+  header + decls_out + globals_out.to_s() + strings_out + fn_out.to_s() + fn_meta_out + call_site_out + llvm_used_out + attr_groups_out + tbaa_metadata_defs() + novec_loop_md_defs() + ewscope_md_defs() + alias_scope_md_defs(max_ascope_slots)
 
 # -- Emit a single function --
 

@@ -372,6 +372,10 @@
   out << declare_fn("w_to_s", wv, wv)
   out << declare_fn("w_str_concat", wv, wv2)
   out << declare_fn("w_str_concat_own", wv, wv3)
+  out << declare_fn("w_str_concat_i64", wv, wv3)
+  out << declare_fn("w_i64_concat_str", wv, wv3)
+  out << declare_fn("w_str_concat_int_wv", wv, wv3)
+  out << declare_fn("w_int_wv_concat_str", wv, wv3)
   out << declare_fn("w_str_append", wv, wv2)
   out << declare_fn("w_slab_freeze_safe", wv, "")
   out << declare_fn("w_type_tables_lock_safe", wv, "")
@@ -1389,11 +1393,12 @@
   out << "  %sa = shl i64 %a, 16\n"
   out << "  %pa = ashr i64 %sa, 16\n"
   out << "  %r = " + llvm_op + " i64 %pa, %pb\n"
-  out << "  %rs = shl i64 %r, 16\n"
-  out << "  %rb = ashr i64 %rs, 16\n"
-  out << "  %fit = icmp eq i64 %rb, %r\n"
-  out << "  br i1 %fit, label %box, label %slow, !prof !31411\n"
-  out << "box:\n"
+  if llvm_op != "srem"
+    out << "  %rs = shl i64 %r, 16\n"
+    out << "  %rb = ashr i64 %rs, 16\n"
+    out << "  %fit = icmp eq i64 %rb, %r\n"
+    out << "  br i1 %fit, label %box, label %slow, !prof !31411\n"
+    out << "box:\n"
   out << "  %m = and i64 %r, 281474976710655\n"
   out << "  %v = or i64 %m, -1688849860263936\n"
   out << "  ret i64 %v\n"

@@ -29,8 +29,9 @@
   # unblocker for the hot-loop story.
   result = []
   keys = compound_vars.keys()
+  n_keys = keys.size()
   i = 0
-  while i < keys.size()
+  while i < n_keys
     name = keys[i]
     loop_vt = var_types[name]
     if (loop_vt == :int || is_machine_int_type(loop_vt) || loop_vt == :raw_int || loop_vt == :raw_i64) && assigned_vars[name] == nil
@@ -54,16 +55,19 @@
 -> scan_loop_vars(nodes, compound_vars, assigned_vars, var_types)
   if nodes == nil
     return nil
+  n_nodes = nodes.size()
   i = 0
-  while i < nodes.size()
+  while i < n_nodes
     node = nodes[i]
     if node == nil
       i += 1
       next
     t = ast_kind(node)
-    if t == :compound_assign
-      if ast_kind(node.target) == :var
-        # Only keep a var unboxable if its compound-assign RHS is
+    if t == :compound_assign || t == :assign
+      ntarget = node.target
+      if ast_kind(ntarget) == :var
+        ntarget_name = ntarget.name
+        # Only keep a var unboxable if its assign/compound-assign RHS is
         # int-shaped. A non-int RHS — e.g. an accumulator summing f64
         # (`acc += item * components[i]` in Vector#dot) — must stay a
         # boxed WValue so the runtime `w_add` promotes int+double; raw
@@ -71,29 +75,20 @@
         # "expected int, got numeric". Route those to assigned_vars so
         # the unbox filter below skips them.
         if int_shaped_node?(node.value, var_types)
-          compound_vars[node.target.name] = true
+          compound_vars[ntarget_name] = true
         else
-          assigned_vars[node.target.name] = true
-    elsif t == :assign
-      if ast_kind(node.target) == :var
-        # Mirror the compound-assign rule: a plain reassignment whose RHS is
-        # int-shaped (machine-int) can stay in a raw i64/u64 slot under the
-        # silent-wrap semantics — e.g. an NTT/PRP accumulator
-        # `s = (s * a + c) % p`. Only a non-int-shaped RHS (f64, bigint-
-        # promoting, boxed value) disqualifies the var from unboxing.
-        if int_shaped_node?(node.value, var_types)
-          compound_vars[node.target.name] = true
-        else
-          assigned_vars[node.target.name] = true
+          assigned_vars[ntarget_name] = true
     # Recurse into if branches but NOT into nested while loops
     # (nested loops get their own unboxing pass)
     if t == :if
       scan_loop_vars(node.then_body, compound_vars, assigned_vars, var_types)
       scan_loop_vars(node.else_body, compound_vars, assigned_vars, var_types)
-      if node.elsif_clauses != nil
+      elsifs = node.elsif_clauses
+      if elsifs != nil
+        n_elsifs = elsifs.size()
         j = 0
-        while j < node.elsif_clauses.size()
-          clause = node.elsif_clauses[j]
+        while j < n_elsifs
+          clause = elsifs[j]
           scan_loop_vars(clause[1], compound_vars, assigned_vars, var_types)
           j += 1
     # For nested while: mark all modified vars as assigned (disqualify from outer unboxing)
@@ -123,8 +118,9 @@
     return nil
   node_type = type(node)
   if node_type == "Array"
+    n_node = node.size()
     i = 0
-    while i < node.size()
+    while i < n_node
       mark_subtree_escape(node[i], records)
       i += 1
     return nil
@@ -246,8 +242,9 @@
   when :puts
     # node.value is a list of print-args; each escapes (consumed by print).
     vals = node.value
+    n_vals = vals.size()
     i = 0
-    while i < vals.size()
+    while i < n_vals
       mark_subtree_escape(vals[i], records)
       i += 1
 
@@ -312,8 +309,9 @@
 -> free_bound_copy(bound)
   copy = {}
   ks = bound.keys()
+  n_ks = ks.size()
   i = 0
-  while i < ks.size()
+  while i < n_ks
     copy[ks[i]] = true
     i += 1
   copy
@@ -332,8 +330,9 @@
 -> free_bind_params(params, bound)
   if params == nil
     return nil
+  n_params = params.size()
   i = 0
-  while i < params.size()
+  while i < n_params
     free_bind_name(params[i], bound)
     i += 1
   nil
@@ -342,8 +341,9 @@
   bound = {}
   params = def_node.params
   if params != nil
+    n_params = params.size()
     i = 0
-    while i < params.size()
+    while i < n_params
       p = params[i]
       free_bind_name(p, bound)
       # Defaults evaluate in a scope with no binds established yet —
@@ -360,8 +360,9 @@
   if type(list) != "Array"
     free_scan_node(list, bound, records)
     return nil
+  n_list = list.size()
   i = 0
-  while i < list.size()
+  while i < n_list
     free_scan_node(list[i], bound, records)
     i += 1
   nil
@@ -370,8 +371,9 @@
   if node == nil
     return nil
   if type(node) == "Array"
+    n_node = node.size()
     i = 0
-    while i < node.size()
+    while i < n_node
       free_scan_node(node[i], bound, records)
       i += 1
     return nil
@@ -411,8 +413,9 @@
     free_scan_node(node.value, bound, records)
     targets = node.targets
     if targets != nil
+      n_targets = targets.size()
       i = 0
-      while i < targets.size()
+      while i < n_targets
         tg = targets[i]
         if tg != nil && is_ast_node?(tg) && ast_kind(tg) == :var
           bound[tg.name] = true
@@ -440,10 +443,12 @@
   when :if
     free_scan_node(node.condition, bound, records)
     free_scan_list(node.then_body, free_bound_copy(bound), records)
-    if node.elsif_clauses != nil
+    elsifs = node.elsif_clauses
+    if elsifs != nil
+      n_elsifs = elsifs.size()
       j = 0
-      while j < node.elsif_clauses.size()
-        clause = node.elsif_clauses[j]
+      while j < n_elsifs
+        clause = elsifs[j]
         if clause != nil && type(clause) == "Array" && clause.size() >= 2
           # An elsif condition only runs when earlier arms failed, so its
           # binds dominate this arm's body but never the code after the if.
@@ -458,18 +463,22 @@
     free_scan_list(node.body, free_bound_copy(bound), records)
 
   when :case
-    if node.whens != nil
+    whens = node.whens
+    if whens != nil
+      n_whens = whens.size()
       j = 0
-      while j < node.whens.size()
-        w = node.whens[j]
+      while j < n_whens
+        w = whens[j]
         if w != nil
           # A when-condition only runs when earlier arms failed — its binds
           # dominate this arm's body but never the code after the case.
           w_bound = free_bound_copy(bound)
-          if w.conditions != nil
+          w_conds = w.conditions
+          if w_conds != nil
+            n_w_conds = w_conds.size()
             k = 0
-            while k < w.conditions.size()
-              free_scan_node(w.conditions[k], w_bound, records)
+            while k < n_w_conds
+              free_scan_node(w_conds[k], w_bound, records)
               k += 1
           free_scan_list(w.body, w_bound, records)
         j += 1
@@ -478,10 +487,12 @@
   when :case_value
     if node.subject != nil
       free_scan_node(node.subject, bound, records)
-    if node.arms != nil
+    arms = node.arms
+    if arms != nil
+      n_arms = arms.size()
       j = 0
-      while j < node.arms.size()
-        a = node.arms[j]
+      while j < n_arms
+        a = arms[j]
         if a != nil
           free_scan_list(a.body, free_bound_copy(bound), records)
         j += 1
@@ -529,8 +540,9 @@
   when :puts
     vals = node.value
     if vals != nil
+      n_vals = vals.size()
       i = 0
-      while i < vals.size()
+      while i < n_vals
         free_scan_node(vals[i], bound, records)
         i += 1
 
@@ -580,7 +592,8 @@
   # Built-in constructors are intercepted before known-static dispatch.  A
   # same-named registry entry therefore does not prove which implementation
   # lower_method_call will select.
-  if node.name == "new"
+  node_name = node.name
+  if node_name == "new"
     return nil
 
   recv = node.receiver
@@ -601,12 +614,13 @@
   if methods == nil
     return nil
   recv_name = recv.name
-  info = known_static_method_for(mod, recv_name + "." + node.name, node.args.size())
+  n_node_args = node.args.size()
+  info = known_static_method_for(mod, recv_name + "." + node_name, n_node_args)
 
   # Mirror lower_method_call's inherited-static lookup. Only real static
   # entries participate in the superclass walk; the same registry also holds
   # typed instance methods used for `self.foo` devirtualization.
-  if info == nil && node.name != "new"
+  if info == nil && node_name != "new"
     classes = mod[:known_classes]
     supers = mod[:class_super_names]
     if classes != nil && supers != nil && classes[recv_name] != nil
@@ -616,7 +630,7 @@
         current = supers[current]
         if current == nil
           break
-        candidate = known_static_method_for(mod, current + "." + node.name, node.args.size())
+        candidate = known_static_method_for(mod, current + "." + node_name, n_node_args)
         if candidate != nil && candidate[:is_static] == true
           info = candidate
         guard += 1
@@ -730,8 +744,9 @@
 -> collect_raw_candidate_names_list(nodes, names, hints, declared_types)
   if nodes == nil
     return nil
+  n_nodes = nodes.size()
   i = 0
-  while i < nodes.size()
+  while i < n_nodes
     collect_raw_candidate_names_node(nodes[i], names, hints, declared_types)
     i += 1
 
@@ -768,10 +783,12 @@
     collect_raw_candidate_names_node(node.condition, names, hints, declared_types)
     collect_raw_candidate_names_list(node.then_body, names, hints, declared_types)
     collect_raw_candidate_names_list(node.else_body, names, hints, declared_types)
-    if node.elsif_clauses != nil
+    elsifs = node.elsif_clauses
+    if elsifs != nil
+      n_elsifs = elsifs.size()
       j = 0
-      while j < node.elsif_clauses.size()
-        clause = node.elsif_clauses[j]
+      while j < n_elsifs
+        clause = elsifs[j]
         if clause != nil && type(clause) == "Array" && clause.size() >= 2
           collect_raw_candidate_names_node(clause[0], names, hints, declared_types)
           collect_raw_candidate_names_list(clause[1], names, hints, declared_types)
@@ -783,16 +800,24 @@
     collect_raw_candidate_names_list(node.body, names, hints, declared_types)
     return nil
 
+  when :with
+    collect_raw_candidate_names_list(node.body, names, hints, declared_types)
+    return nil
+
   when :case
-    if node.whens != nil
+    whens = node.whens
+    if whens != nil
+      n_whens = whens.size()
       j = 0
-      while j < node.whens.size()
-        w = node.whens[j]
+      while j < n_whens
+        w = whens[j]
         if w != nil
-          if w.conditions != nil
+          w_conds = w.conditions
+          if w_conds != nil
+            n_w_conds = w_conds.size()
             k = 0
-            while k < w.conditions.size()
-              collect_raw_candidate_names_node(w.conditions[k], names, hints, declared_types)
+            while k < n_w_conds
+              collect_raw_candidate_names_node(w_conds[k], names, hints, declared_types)
               k += 1
           collect_raw_candidate_names_list(w.body, names, hints, declared_types)
         j += 1
@@ -801,10 +826,12 @@
 
   when :case_value
     collect_raw_candidate_names_node(node.subject, names, hints, declared_types)
-    if node.arms != nil
+    arms = node.arms
+    if arms != nil
+      n_arms = arms.size()
       j = 0
-      while j < node.arms.size()
-        arm = node.arms[j]
+      while j < n_arms
+        arm = arms[j]
         if arm != nil
           collect_raw_candidate_names_node(arm.pattern, names, hints, declared_types)
           collect_raw_candidate_names_node(arm.guard, names, hints, declared_types)
@@ -829,10 +856,12 @@
 
   when :call
     collect_raw_candidate_names_node(node.receiver, names, hints, declared_types)
-    if node.args != nil
+    nargs = node.args
+    if nargs != nil
+      n_nargs = nargs.size()
       i = 0
-      while i < node.args.size()
-        collect_raw_candidate_names_node(node.args[i], names, hints, declared_types)
+      while i < n_nargs
+        collect_raw_candidate_names_node(nargs[i], names, hints, declared_types)
         i += 1
     if node.block != nil
       collect_raw_candidate_names_node(node.block, names, hints, declared_types)
@@ -844,8 +873,9 @@
 -> visit_promote_list(nodes, records, declared_types, mod = nil)
   if nodes == nil
     return nil
+  n_nodes = nodes.size()
   i = 0
-  while i < nodes.size()
+  while i < n_nodes
     visit_promote_node(nodes[i], records, declared_types, mod)
     i += 1
 
@@ -930,8 +960,9 @@
   when :string_interp
     parts = node.parts
     if parts != nil
+      n_parts = parts.size()
       i = 0
-      while i < parts.size()
+      while i < n_parts
         mark_subtree_escape(parts[i], records)
         i += 1
     return nil
@@ -986,13 +1017,16 @@
     # candidates stay boxed. Declared `## i64` locals are not promotion
     # candidates and keep the raw path (`ccall("w_int", n)` idiom).
     is_plain_ccall = name == "ccall" && node.receiver == nil
-    if node.args != nil
+    nargs = node.args
+    if nargs != nil
+      n_nargs = nargs.size()
       i = 0
-      while i < node.args.size()
+      while i < n_nargs
+        arg_i = nargs[i]
         if is_plain_ccall
-          mark_subtree_escape(node.args[i], records)
+          mark_subtree_escape(arg_i, records)
         else
-          visit_promote_node(node.args[i], records, declared_types, mod)
+          visit_promote_node(arg_i, records, declared_types, mod)
         i += 1
     if node.block != nil
       inl = inlined_iterator_elem_type(node, declared_types)
@@ -1036,8 +1070,9 @@
   when :puts
     vals = node.value
     if vals != nil
+      n_vals = vals.size()
       j = 0
-      while j < vals.size()
+      while j < n_vals
         visit_promote_node(vals[j], records, declared_types, mod)
         j += 1
     return nil
@@ -1051,10 +1086,12 @@
     visit_promote_node(node.condition, records, declared_types, mod)
     visit_promote_list(node.then_body, records, declared_types, mod)
     visit_promote_list(node.else_body, records, declared_types, mod)
-    if node.elsif_clauses != nil
+    elsifs = node.elsif_clauses
+    if elsifs != nil
+      n_elsifs = elsifs.size()
       j = 0
-      while j < node.elsif_clauses.size()
-        clause = node.elsif_clauses[j]
+      while j < n_elsifs
+        clause = elsifs[j]
         if clause != nil && type(clause) == "Array" && clause.size() >= 2
           visit_promote_node(clause[0], records, declared_types, mod)
           visit_promote_list(clause[1], records, declared_types, mod)
@@ -1066,16 +1103,57 @@
     visit_promote_list(node.body, records, declared_types, mod)
     return nil
 
+  when :with
+    wbindings = node.bindings
+    saved_keys = []
+    saved_had = []
+    saved_vals = []
+    if wbindings != nil
+      n_wb = wbindings.size()
+      wi = 0
+      while wi < n_wb
+        wb = wbindings[wi]
+        if wb != nil
+          wvar = wb[0]
+          wcoll = wb[1]
+          if wcoll != nil && is_ast_node?(wcoll) && ast_kind(wcoll) == :range
+            visit_promote_node(wcoll.from, records, declared_types, mod)
+            visit_promote_node(wcoll.to, records, declared_types, mod)
+            if wvar != nil && is_ast_node?(wvar) && ast_kind(wvar) == :var && wvar.name != nil
+              wname = wvar.name
+              saved_keys.push(wname)
+              saved_had.push(declared_types.has_key?(wname))
+              saved_vals.push(declared_types[wname])
+              declared_types[wname] = :i64
+          else
+            visit_promote_node(wcoll, records, declared_types, mod)
+        wi += 1
+    visit_promote_list(node.body, records, declared_types, mod)
+    n_saved = saved_keys.size()
+    si = n_saved - 1
+    while si >= 0
+      sk = saved_keys[si]
+      if saved_had[si]
+        declared_types[sk] = saved_vals[si]
+      else
+        declared_types.delete(sk)
+      si -= 1
+    return nil
+
   when :case
-    if node.whens != nil
+    whens = node.whens
+    if whens != nil
+      n_whens = whens.size()
       j = 0
-      while j < node.whens.size()
-        w = node.whens[j]
+      while j < n_whens
+        w = whens[j]
         if w != nil
-          if w.conditions != nil
+          w_conds = w.conditions
+          if w_conds != nil
+            n_w_conds = w_conds.size()
             k = 0
-            while k < w.conditions.size()
-              visit_promote_node(w.conditions[k], records, declared_types, mod)
+            while k < n_w_conds
+              visit_promote_node(w_conds[k], records, declared_types, mod)
               k += 1
           visit_promote_list(w.body, records, declared_types, mod)
         j += 1
@@ -1085,10 +1163,12 @@
   when :case_value
     if node.subject != nil
       visit_promote_node(node.subject, records, declared_types, mod)
-    if node.arms != nil
+    arms = node.arms
+    if arms != nil
+      n_arms = arms.size()
       j = 0
-      while j < node.arms.size()
-        a = node.arms[j]
+      while j < n_arms
+        a = arms[j]
         if a != nil
           visit_promote_list(a.body, records, declared_types, mod)
         j += 1
@@ -1151,6 +1231,10 @@
   promoted = {}
   iter = 0
   changed = true
+  dkeys = declared_types.keys()
+  n_dkeys = dkeys.size()
+  n_body = body != nil ? body.size() : 0
+  last_body_stmt = n_body > 0 ? body[n_body - 1] : nil
   # Iterative widening: each pass uses last pass's promotions as known
   # machine-int types. New candidates surface when an earlier-promoted
   # var's reference unblocks a downstream RHS. Capped at 10 iterations
@@ -1160,14 +1244,15 @@
     iter += 1
     # Build the "known machine-int" view: declared types plus promotions.
     known = {}
-    dkeys = declared_types.keys()
     dki = 0
-    while dki < dkeys.size()
-      known[dkeys[dki]] = declared_types[dkeys[dki]]
+    while dki < n_dkeys
+      dk = dkeys[dki]
+      known[dk] = declared_types[dk]
       dki += 1
     pkeys = promoted.keys()
+    n_pkeys = pkeys.size()
     ppi = 0
-    while ppi < pkeys.size()
+    while ppi < n_pkeys
       known[pkeys[ppi]] = :i64
       ppi += 1
 
@@ -1176,16 +1261,15 @@
 
     # The last value-producing statement in the body is the function's
     # implicit return. Treat it as escape (return slot expects WValue).
-    if body != nil && body.size() > 0
-      last = body[body.size() - 1]
-      if last != nil && is_ast_node?(last)
-        lt = ast_kind(last)
-        if lt in (:var :binary_op :unary_op :int :call)
-          mark_subtree_escape(last, records)
+    if last_body_stmt != nil && is_ast_node?(last_body_stmt)
+      lt = ast_kind(last_body_stmt)
+      if lt in (:var :binary_op :unary_op :int :call)
+        mark_subtree_escape(last_body_stmt, records)
 
     names = records.keys()
+    n_names = names.size()
     i = 0
-    while i < names.size()
+    while i < n_names
       name = names[i]
       rec = records[name]
       if rec[:has_int_assign] == true && rec[:has_other_assign] != true && rec[:has_escape] != true && declared_types[name] == nil && promoted[name] != true
@@ -1211,22 +1295,26 @@
   # declared_types is immutable during this analysis.  Reuse its key list
   # across fixed-point rounds instead of materializing it every time.
   declared_names = declared_types.keys()
+  n_declared_names = declared_names.size()
   hinted_names = hinted.keys()
+  n_hinted_names = hinted_names.size()
   loop
     known = {}
     dki = 0
-    while dki < declared_names.size()
-      known[declared_names[dki]] = declared_types[declared_names[dki]]
+    while dki < n_declared_names
+      dn = declared_names[dki]
+      known[dn] = declared_types[dn]
       dki += 1
     # `## i64`-hinted assigns are authoritative machine-int facts, like
     # declared types — they persist across rounds rather than competing as
     # candidates.
     hki = 0
-    while hki < hinted_names.size()
+    while hki < n_hinted_names
       known[hinted_names[hki]] = :i64
       hki += 1
+    n_cand_names = candidate_names.size()
     cki = 0
-    while cki < candidate_names.size()
+    while cki < n_cand_names
       known[candidate_names[cki]] = :i64
       cki += 1
 
@@ -1242,7 +1330,7 @@
     next_candidates = {}
     kept = 0
     i = 0
-    while i < candidate_names.size()
+    while i < n_cand_names
       name = candidate_names[i]
       rec = records[name]
       # Mirror analyze_int_promotions's filter: a var that escapes (passed to
@@ -1263,7 +1351,7 @@
     # an empty subset is terminal too.  This replaces two key-list allocations
     # and two membership scans per round, and avoids rescanning the body after
     # the last candidate is removed.
-    if kept == 0 || kept == candidate_names.size()
+    if kept == 0 || kept == n_cand_names
       return next_candidates
     candidates = next_candidates
     candidate_names = candidates.keys()
@@ -1274,18 +1362,21 @@
   assigned = {}
   scan_assigns_for_params(body, assigned)
   result = []
+  n_param_names = param_names.size()
   i = 0
-  while i < param_names.size()
-    if assigned[param_names[i]] == true
-      result.push(param_names[i])
+  while i < n_param_names
+    pname = param_names[i]
+    if assigned[pname] == true
+      result.push(pname)
     i += 1
   result
 
 -> scan_assigns_for_params(nodes, assigned)
   if nodes == nil
     return nil
+  n_nodes = nodes.size()
   i = 0
-  while i < nodes.size()
+  while i < n_nodes
     node = nodes[i]
     if node == nil
       i += 1
@@ -1296,34 +1387,38 @@
       i += 1
       next
     case t
-    when :assign
-      if ast_kind(node.target) == :var
-        assigned[node.target.name] = true
-    when :compound_assign
-      if ast_kind(node.target) == :var
-        assigned[node.target.name] = true
+    when :assign, :compound_assign
+      ntarget = node.target
+      if ast_kind(ntarget) == :var
+        assigned[ntarget.name] = true
     when :if
       scan_assigns_for_params(node.then_body, assigned)
       scan_assigns_for_params(node.else_body, assigned)
-      if node.elsif_clauses != nil
+      elsifs = node.elsif_clauses
+      if elsifs != nil
+        n_elsifs = elsifs.size()
         j = 0
-        while j < node.elsif_clauses.size()
-          scan_assigns_for_params(node.elsif_clauses[j][1], assigned)
+        while j < n_elsifs
+          scan_assigns_for_params(elsifs[j][1], assigned)
           j += 1
     when :while
       scan_assigns_for_params(node.body, assigned)
     when :case
-      if node.clauses != nil
+      clauses = node.clauses
+      if clauses != nil
+        n_clauses = clauses.size()
         j = 0
-        while j < node.clauses.size()
-          scan_assigns_for_params(node.clauses[j].body, assigned)
+        while j < n_clauses
+          scan_assigns_for_params(clauses[j].body, assigned)
           j += 1
       scan_assigns_for_params(node.else_body, assigned)
     when :case_value
-      if node.arms != nil
+      arms = node.arms
+      if arms != nil
+        n_arms = arms.size()
         j = 0
-        while j < node.arms.size()
-          scan_assigns_for_params(node.arms[j].body, assigned)
+        while j < n_arms
+          scan_assigns_for_params(arms[j].body, assigned)
           j += 1
       scan_assigns_for_params(node.else_body, assigned)
     i += 1
@@ -1342,8 +1437,9 @@
   if body == nil || param_names == nil || param_names.size() == 0
     return {}
   names = {}
+  n_param_names = param_names.size()
   i = 0
-  while i < param_names.size()
+  while i < n_param_names
     names[param_names[i]] = true
     i += 1
   hints = {}
@@ -1353,8 +1449,9 @@
 -> scan_param_machine_hints(nodes, names, hints)
   if nodes == nil
     return nil
+  n_nodes = nodes.size()
   i = 0
-  while i < nodes.size()
+  while i < n_nodes
     node = nodes[i]
     if node == nil
       i += 1
@@ -1366,16 +1463,21 @@
       next
     case t
     when :assign
-      if ast_kind(node.target) == :var && names[node.target.name] == true && node.type_hint != nil
-        if node.type_hint in ("i64" "u64") && hints[node.target.name] == nil
-          hints[node.target.name] = node.type_hint.to_sym()
+      ntarget = node.target
+      nhint = node.type_hint
+      if ast_kind(ntarget) == :var && nhint != nil
+        ntarget_name = ntarget.name
+        if names[ntarget_name] == true && nhint in ("i64" "u64") && hints[ntarget_name] == nil
+          hints[ntarget_name] = nhint.to_sym()
     when :if
       scan_param_machine_hints(node.then_body, names, hints)
       scan_param_machine_hints(node.else_body, names, hints)
-      if node.elsif_clauses != nil
+      elsifs = node.elsif_clauses
+      if elsifs != nil
+        n_elsifs = elsifs.size()
         j = 0
-        while j < node.elsif_clauses.size()
-          scan_param_machine_hints(node.elsif_clauses[j][1], names, hints)
+        while j < n_elsifs
+          scan_param_machine_hints(elsifs[j][1], names, hints)
           j += 1
     when :while
       scan_param_machine_hints(node.body, names, hints)
@@ -1384,17 +1486,21 @@
       scan_param_machine_hints(node.rescue_body, names, hints)
       scan_param_machine_hints(node.ensure_body, names, hints)
     when :case
-      if node.clauses != nil
+      clauses = node.clauses
+      if clauses != nil
+        n_clauses = clauses.size()
         j = 0
-        while j < node.clauses.size()
-          scan_param_machine_hints(node.clauses[j].body, names, hints)
+        while j < n_clauses
+          scan_param_machine_hints(clauses[j].body, names, hints)
           j += 1
       scan_param_machine_hints(node.else_body, names, hints)
     when :case_value
-      if node.arms != nil
+      arms = node.arms
+      if arms != nil
+        n_arms = arms.size()
         j = 0
-        while j < node.arms.size()
-          scan_param_machine_hints(node.arms[j].body, names, hints)
+        while j < n_arms
+          scan_param_machine_hints(arms[j].body, names, hints)
           j += 1
       scan_param_machine_hints(node.else_body, names, hints)
     i += 1
@@ -1434,15 +1540,17 @@
         return true
       args = ast_get(node, :args)
       if args != nil && type(args) == "Array"
+        n_args = args.size()
         ai = 0
-        while ai < args.size()
+        while ai < n_args
           if spawns_escaping_closure?(args[ai])
             return true
           ai += 1
       return false
   kids = ast_children(node)
+  n_kids = kids.size()
   ki = 0
-  while ki < kids.size()
+  while ki < n_kids
     if spawns_escaping_closure?(kids[ki])
       return true
     ki += 1
@@ -1451,8 +1559,9 @@
 -> spawns_escaping_closure_in_body?(body)
   if body == nil || type(body) != "Array"
     return false
+  n_body = body.size()
   i = 0
-  while i < body.size()
+  while i < n_body
     if spawns_escaping_closure?(body[i])
       return true
     i += 1
@@ -1566,8 +1675,9 @@
   if node == nil
     return nil
   if type(node) == "Array"
+    n_node = node.size()
     i = 0
-    while i < node.size()
+    while i < n_node
       count_local_assignments(node[i], counts)
       i += 1
     return nil
@@ -1576,35 +1686,29 @@
   kind = ast_kind(node)
   if kind in (:fn_def :method_def :class_def :module_def :trait_def :gpu_kernel_def)
     return nil
-  if kind == :assign
+  if kind == :assign || kind == :compound_assign
     target = node.target
     if target != nil && is_ast_node?(target) && ast_kind(target) == :var
-      old = counts[target.name]
+      tname = target.name
+      old = counts[tname]
       if old == nil
         old = 0
-      counts[target.name] = old + 1
-    count_local_assignments(node.value, counts)
-    return nil
-  if kind == :compound_assign
-    target = node.target
-    if target != nil && is_ast_node?(target) && ast_kind(target) == :var
-      old = counts[target.name]
-      if old == nil
-        old = 0
-      counts[target.name] = old + 1
+      counts[tname] = old + 1
     count_local_assignments(node.value, counts)
     return nil
   if kind == :multi_assign
     targets = node.targets
     if targets != nil
+      n_targets = targets.size()
       i = 0
-      while i < targets.size()
+      while i < n_targets
         target = targets[i]
         if target != nil && is_ast_node?(target) && ast_kind(target) == :var
-          old = counts[target.name]
+          tname = target.name
+          old = counts[tname]
           if old == nil
             old = 0
-          counts[target.name] = old + 1
+          counts[tname] = old + 1
         i += 1
     count_local_assignments(node.value, counts)
     return nil
@@ -1626,8 +1730,9 @@
     return nil
 
   kids = ast_children(node)
+  n_kids = kids.size()
   i = 0
-  while i < kids.size()
+  while i < n_kids
     count_local_assignments(kids[i], counts)
     i += 1
   nil
@@ -1641,8 +1746,9 @@
   result = {}
   if body == nil || type(body) != "Array"
     return result
+  n_body = body.size()
   i = 0
-  while i < body.size()
+  while i < n_body
     node = body[i]
     if node != nil && is_ast_node?(node) && ast_kind(node) == :assign
       target = node.target
@@ -1677,6 +1783,138 @@
     return nil
   param_infer_whitelist_type(ks[0])
 
+-> all_observed_params_int?(params, obs, child_var_types)
+  if params == nil || obs == nil || params.size() == 0 || params.size() != obs.size()
+    return false
+  pidx = 0
+  while pidx < params.size()
+    p = params[pidx]
+    if is_ast_node?(p) && (p.block_param == true || p.default != nil || p.keyword == true || p.splat == true)
+      return false
+    pname = param_runtime_name(p)
+    if child_var_types[pname] != nil
+      return false
+    obs_set = obs[pidx]
+    if obs_set == nil
+      return false
+    ks = obs_set.keys()
+    if ks.size() == 0
+      return false
+    ki = 0
+    while ki < ks.size()
+      kt = ks[ki]
+      if !(kt in (:int :i64 :raw_int :raw_i64))
+        return false
+      ki += 1
+    pidx += 1
+  true
+
+-> non_expanding_int_expr?(expr, known_vars, guarded_nonzero_var)
+  if expr == nil || !is_ast_node?(expr)
+    return false
+  k = ast_kind(expr)
+  if k == :var
+    return known_vars[expr.name] == true
+  if k == :int
+    return expr.value != nil && type(expr.value) == "Int"
+  if k == :binary_op
+    op = expr.op
+    if op in (:AMPERSAND :PIPE :CARET :RSHIFT)
+      return non_expanding_int_expr?(expr.left, known_vars, guarded_nonzero_var) && non_expanding_int_expr?(expr.right, known_vars, guarded_nonzero_var)
+    if op == :PERCENT
+      if !non_expanding_int_expr?(expr.left, known_vars, guarded_nonzero_var)
+        return false
+      r = expr.right
+      if r == nil || !is_ast_node?(r)
+        return false
+      rk = ast_kind(r)
+      if rk == :int
+        return r.value != nil && type(r.value) == "Int" && r.value != 0
+      if rk == :var
+        return r.name != nil && r.name == guarded_nonzero_var && known_vars[r.name] == true
+      return false
+  false
+
+-> non_expanding_int_cmp?(cond, known_vars, guarded_nonzero_var)
+  if cond == nil || !is_ast_node?(cond) || ast_kind(cond) != :binary_op
+    return false
+  if !(cond.op in (:EQ :NEQ :LT :GT :LTE :GTE))
+    return false
+  non_expanding_int_expr?(cond.left, known_vars, guarded_nonzero_var) && non_expanding_int_expr?(cond.right, known_vars, guarded_nonzero_var)
+
+-> while_nonzero_guard_var(cond, known_vars)
+  if cond == nil || !is_ast_node?(cond) || ast_kind(cond) != :binary_op
+    return nil
+  if !(cond.op in (:NEQ :GT))
+    return nil
+  l = cond.left
+  r = cond.right
+  if l != nil && is_ast_node?(l) && ast_kind(l) == :var && known_vars[l.name] == true
+    if r != nil && is_ast_node?(r) && ast_kind(r) == :int && r.value == 0
+      return l.name
+  nil
+
+-> non_expanding_int_stmts?(stmts, known_vars, guarded_nonzero_var, allow_tail_expr)
+  if stmts == nil || stmts.size() == 0
+    return false
+  gvar = guarded_nonzero_var
+  n = stmts.size()
+  i = 0
+  while i < n
+    st = stmts[i]
+    if st == nil || !is_ast_node?(st)
+      return false
+    k = ast_kind(st)
+    if k == :assign
+      t = st.target
+      if t == nil || !is_ast_node?(t) || ast_kind(t) != :var || t.name == nil
+        return false
+      if !non_expanding_int_expr?(st.value, known_vars, gvar)
+        return false
+      known_vars[t.name] = true
+      if gvar != nil && t.name == gvar
+        gvar = nil
+    elsif k == :return
+      if st.value == nil || !non_expanding_int_expr?(st.value, known_vars, gvar)
+        return false
+    elsif k == :while
+      if !non_expanding_int_cmp?(st.condition, known_vars, gvar)
+        return false
+      wgvar = while_nonzero_guard_var(st.condition, known_vars)
+      if !non_expanding_int_stmts?(st.body, known_vars, wgvar, false)
+        return false
+      gvar = nil
+    elsif k == :if
+      if st.elsif_clauses != nil && st.elsif_clauses.size() > 0
+        return false
+      if !non_expanding_int_cmp?(st.condition, known_vars, gvar)
+        return false
+      if !non_expanding_int_stmts?(st.then_body, known_vars, gvar, allow_tail_expr && i == n - 1)
+        return false
+      if st.else_body != nil && !non_expanding_int_stmts?(st.else_body, known_vars, gvar, allow_tail_expr && i == n - 1)
+        return false
+      gvar = nil
+    elsif allow_tail_expr && i == n - 1
+      if !non_expanding_int_expr?(st, known_vars, gvar)
+        return false
+    else
+      return false
+    i += 1
+  true
+
+-> body_is_non_expanding_int?(body, params)
+  if body == nil || params == nil || params.size() == 0
+    return false
+  known_vars = {}
+  i = 0
+  while i < params.size()
+    p = params[i]
+    if is_ast_node?(p) && (p.block_param == true || p.default != nil || p.keyword == true || p.splat == true)
+      return false
+    known_vars[param_runtime_name(p)] = true
+    i += 1
+  non_expanding_int_stmts?(body, known_vars, nil, true)
+
 # Inlined twin of calls.w's call_args_has_kwargs? (that worker is `use`d
 # after analysis, so it is not referenceable here): a kwargs group is a
 # single trailing hash_literal marked from_kwargs.
@@ -1690,7 +1928,8 @@
   if env("TUNGSTEN_PARAM_INFER") == "0"
     return nil
   mod[:observed_param_types] = {}
-  mod[:param_infer_bailed] = {}
+  param_infer_bailed = {}
+  mod[:param_infer_bailed] = param_infer_bailed
   if expressions == nil
     return nil
 
@@ -1701,21 +1940,23 @@
   user_candidates = {}
   core_set = {}
   if core_expressions != nil
+    n_core_exprs = core_expressions.size()
     csi = 0
-    while csi < core_expressions.size()
+    while csi < n_core_exprs
       core_set[core_expressions[csi]] = true
       csi += 1
   seen = {}
   candidate_expressions = expressions
   if mod[:program_index] != nil
     candidate_expressions = mod[:program_index][:top_level_functions]
+  n_cand_exprs = candidate_expressions.size()
   i = 0
-  while i < candidate_expressions.size()
+  while i < n_cand_exprs
     expr = candidate_expressions[i]
     if expr != nil && is_ast_node?(expr) && ast_kind(expr) in (:fn_def :method_def)
       eligible_owner = !definition_from_core?(expr) || core_expressions != nil
-      if expr.is_class_method != true && expr.param_types == nil && expr.name != nil && eligible_owner
-        nm = expr.name
+      nm = expr.name
+      if expr.is_class_method != true && expr.param_types == nil && nm != nil && eligible_owner
         if seen[nm] == nil
           seen[nm] = true
           candidates[nm] = expr
@@ -1727,7 +1968,7 @@
           # Observation storage is name-keyed today. A cross-boundary
           # same-name overload therefore stays boxed rather than allowing one
           # partition's evidence to specialize the other's parameters.
-          mod[:param_infer_bailed][nm] = true
+          param_infer_bailed[nm] = true
     i += 1
 
   # (2)+(3) One complete walk of the whole program: record call-site arg
@@ -1735,26 +1976,32 @@
   top_local = mod[:top_level_static_types]
   if top_local == nil
     top_local = {}
+  n_exprs = expressions.size()
   ci = 0
-  while ci < expressions.size()
+  while ci < n_exprs
+    expr_ci = expressions[ci]
     visible_candidates = candidates
     visible_local = top_local
     if core_expressions != nil
-      if core_set[expressions[ci]] == true
+      if core_set[expr_ci] == true
         visible_candidates = core_candidates
         if core_top_local != nil
           visible_local = core_top_local
       else
         visible_candidates = user_candidates
-    pi_walk(expressions[ci], visible_local, visible_candidates, mod)
+    elsif definition_from_core?(expr_ci)
+      ci += 1
+      next
+    pi_walk(expr_ci, visible_local, visible_candidates, mod)
     ci += 1
   nil
 
 -> pi_walk_stmts(stmts, local, candidates, mod)
   if stmts == nil
     return nil
+  n_stmts = stmts.size()
   i = 0
-  while i < stmts.size()
+  while i < n_stmts
     pi_walk(stmts[i], local, candidates, mod)
     i += 1
   nil
@@ -1766,28 +2013,35 @@
   # Leaf: a candidate name appearing as a plain var is a first-class
   # reference (direct calls store the name as an attribute, not a var).
   if k == :var
-    if candidates[node.name] != nil
-      mod[:param_infer_bailed][node.name] = true
+    nname = node.name
+    if candidates[nname] != nil
+      mod[:param_infer_bailed][nname] = true
     return nil
   if k == :symbol
     sv = ast_get(node, :value)
-    if sv != nil && candidates[sv.to_s()] != nil
-      mod[:param_infer_bailed][sv.to_s()] = true
+    if sv != nil
+      sv_s = sv.to_s()
+      if candidates[sv_s] != nil
+        mod[:param_infer_bailed][sv_s] = true
     return nil
   # Nested def: fresh scope, params unknown (they shadow any outer name).
   if k in (:fn_def :method_def)
     inner = {}
-    pi_collect_local_types(node.body, inner, mod)
-    pi_walk_stmts(node.body, inner, candidates, mod)
+    nbody = node.body
+    pi_collect_local_types(nbody, inner, mod)
+    pi_walk_stmts(nbody, inner, candidates, mod)
     return nil
   # Direct call to a candidate: record its arguments' inferred types.
-  if k == :call && node.receiver == nil && node.name != nil && candidates[node.name] != nil
-    pi_record_call(candidates[node.name], node, local, mod)
+  if k == :call && node.receiver == nil
+    nname = node.name
+    if nname != nil && candidates[nname] != nil
+      pi_record_call(candidates[nname], node, local, mod)
   # Recurse into every child (args, receiver, bodies, …) — completeness is
   # required so no call site or value-reference is missed.
   kids = ast_children(node)
+  n_kids = kids.size()
   ki = 0
-  while ki < kids.size()
+  while ki < n_kids
     pi_walk(kids[ki], local, candidates, mod)
     ki += 1
   nil
@@ -1798,37 +2052,64 @@
 -> pi_collect_local_types(stmts, local, mod)
   if stmts == nil
     return nil
+  n_stmts = stmts.size()
+  fn_ret_types = mod[:fn_return_types]
   i = 0
-  while i < stmts.size()
+  while i < n_stmts
     node = stmts[i]
     if node != nil && is_ast_node?(node)
       k = ast_kind(node)
-      if k == :assign && node.target != nil && is_ast_node?(node.target) && ast_kind(node.target) == :var
-        t = infer_type(node.value, local, mod[:fn_return_types], nil)
-        if t != nil
-          local[node.target.name] = normalize_type_symbol(t)
+      if k == :assign
+        ntarget = node.target
+        if ntarget != nil && is_ast_node?(ntarget) && ast_kind(ntarget) == :var
+          t = infer_type(node.value, local, fn_ret_types, nil)
+          if t != nil
+            local[ntarget.name] = normalize_type_symbol(t)
       if k == :if
         pi_collect_local_types(node.then_body, local, mod)
         pi_collect_local_types(node.else_body, local, mod)
-        if node.elsif_clauses != nil
+        elsifs = node.elsif_clauses
+        if elsifs != nil
+          n_elsifs = elsifs.size()
           j = 0
-          while j < node.elsif_clauses.size()
-            pi_collect_local_types(node.elsif_clauses[j][1], local, mod)
+          while j < n_elsifs
+            pi_collect_local_types(elsifs[j][1], local, mod)
             j += 1
       if k == :while
         pi_collect_local_types(node.body, local, mod)
+      if k == :with
+        wbindings = node.bindings
+        if wbindings != nil
+          n_wb = wbindings.size()
+          wi = 0
+          while wi < n_wb
+            wb = wbindings[wi]
+            if wb != nil
+              wvar = wb[0]
+              wcoll = wb[1]
+              if wvar != nil && is_ast_node?(wvar) && ast_kind(wvar) == :var && wvar.name != nil && wcoll != nil && is_ast_node?(wcoll) && ast_kind(wcoll) == :range
+                ft = infer_type(wcoll.from, local, fn_ret_types, nil)
+                tt = infer_type(wcoll.to, local, fn_ret_types, nil)
+                if ft in (:int :i64) && tt in (:int :i64)
+                  local[wvar.name] = :int
+            wi += 1
+        pi_collect_local_types(node.body, local, mod)
       if k == :case
-        if node.clauses != nil
+        clauses = node.clauses
+        if clauses != nil
+          n_clauses = clauses.size()
           j = 0
-          while j < node.clauses.size()
-            pi_collect_local_types(node.clauses[j].body, local, mod)
+          while j < n_clauses
+            pi_collect_local_types(clauses[j].body, local, mod)
             j += 1
         pi_collect_local_types(node.else_body, local, mod)
       if k == :case_value
-        if node.arms != nil
+        arms = node.arms
+        if arms != nil
+          n_arms = arms.size()
           j = 0
-          while j < node.arms.size()
-            pi_collect_local_types(node.arms[j].body, local, mod)
+          while j < n_arms
+            pi_collect_local_types(arms[j].body, local, mod)
             j += 1
         pi_collect_local_types(node.else_body, local, mod)
     i += 1
@@ -1838,29 +2119,33 @@
 # bailing the whole callee on arity / kwargs mismatch.
 -> pi_record_call(def_node, call_node, local, mod)
   nm = def_node.name
-  if mod[:param_infer_bailed][nm] == true
+  param_infer_bailed = mod[:param_infer_bailed]
+  if param_infer_bailed[nm] == true
     return nil
   params = def_node.params
   if params == nil
-    mod[:param_infer_bailed][nm] = true
+    param_infer_bailed[nm] = true
     return nil
   args = call_node.args
   if args == nil
     args = []
-  if args.size() != params.size() || pi_args_have_kwargs?(args)
-    mod[:param_infer_bailed][nm] = true
+  n_params = params.size()
+  n_args = args.size()
+  if n_args != n_params || pi_args_have_kwargs?(args)
+    param_infer_bailed[nm] = true
     return nil
   obs = mod[:observed_param_types][nm]
   if obs == nil
     obs = []
     j = 0
-    while j < params.size()
+    while j < n_params
       obs.push({})
       j += 1
     mod[:observed_param_types][nm] = obs
+  fn_ret_types = mod[:fn_return_types]
   ai = 0
-  while ai < args.size()
-    at = infer_type(args[ai], local, mod[:fn_return_types], nil)
+  while ai < n_args
+    at = infer_type(args[ai], local, fn_ret_types, nil)
     key = :unknown
     if at != nil
       key = normalize_type_symbol(at)
@@ -1888,8 +2173,9 @@
 -> loop_masked_array_index?(nodes, assigned)
   if nodes == nil
     return false
+  n_nodes = nodes.size()
   i = 0
-  while i < nodes.size()
+  while i < n_nodes
     if expr_masked_array_index?(nodes[i], assigned)
       return true
     i += 1
@@ -1923,8 +2209,9 @@
       return true
     ec = node.elsif_clauses
     if ec != nil
+      n_ec = ec.size()
       j = 0
-      while j < ec.size()
+      while j < n_ec
         clause = ec[j]
         if expr_masked_array_index?(clause[0], assigned)
           return true
@@ -1993,8 +2280,9 @@
 -> loop_has_carry_intrinsic?(nodes)
   if nodes == nil
     return false
+  n_nodes = nodes.size()
   i = 0
-  while i < nodes.size()
+  while i < n_nodes
     if expr_has_carry_intrinsic?(nodes[i])
       return true
     i += 1
@@ -2005,9 +2293,10 @@
     return false
   case ast_kind(node)
   when :call
-    if node.receiver == nil && (node.name == "addcarry" || node.name == "subborrow")
+    nrecv = node.receiver
+    if nrecv == nil && (node.name == "addcarry" || node.name == "subborrow")
       return true
-    if node.receiver != nil && is_ast_node?(node.receiver) && expr_has_carry_intrinsic?(node.receiver)
+    if nrecv != nil && is_ast_node?(nrecv) && expr_has_carry_intrinsic?(nrecv)
       return true
     return loop_has_carry_intrinsic?(node.args)
   when :assign, :compound_assign
@@ -2025,8 +2314,9 @@
       return true
     ec = node.elsif_clauses
     if ec != nil
+      n_ec = ec.size()
       j = 0
-      while j < ec.size()
+      while j < n_ec
         clause = ec[j]
         if expr_has_carry_intrinsic?(clause[0])
           return true
@@ -2111,8 +2401,9 @@
 -> lv_walk_body(nodes, st, var_types)
   if nodes == nil || st[:ok] != true
     return nil
+  n_nodes = nodes.size()
   i = 0
-  while i < nodes.size()
+  while i < n_nodes
     lv_walk_stmt(nodes[i], st, var_types)
     i += 1
   nil
@@ -2168,8 +2459,9 @@
     lv_walk_body(node.else_body, st, var_types)
     ec = node.elsif_clauses
     if ec != nil
+      n_ec = ec.size()
       j = 0
-      while j < ec.size()
+      while j < n_ec
         clause = ec[j]
         lv_walk_expr(clause[0], st, var_types)
         lv_walk_body(clause[1], st, var_types)
@@ -2186,8 +2478,9 @@
     return nil
   if !is_ast_node?(node)
     if type(node) == "Array"
+      n_node = node.size()
       i = 0
-      while i < node.size()
+      while i < n_node
         lv_walk_expr(node[i], st, var_types)
         i += 1
     return nil
@@ -2307,8 +2600,9 @@
     return nil
   if !is_ast_node?(node)
     if type(node) == "Array"
+      n_node = node.size()
       i = 0
-      while i < node.size()
+      while i < n_node
         fused_reuse_walk(node[i], var_name, st)
         i += 1
     return nil
@@ -2321,11 +2615,12 @@
     target = node.target
     if target != nil && is_ast_node?(target) && ast_kind(target) == :var && target.name == var_name
       st[:assigns] = st[:assigns] + 1
+      nval = node.value
       if st[:assigns] == 1
-        if !fused_reuse_seed?(node.value)
+        if !fused_reuse_seed?(nval)
           st[:ok] = false
       else
-        if ast_get(node.value, :reuse_safe) == true || !fused_reuse_tree?(node.value)
+        if ast_get(nval, :reuse_safe) == true || !fused_reuse_tree?(nval)
           st[:ok] = false
         else
           st[:updates].push(node)
@@ -2350,8 +2645,9 @@
   if keys == nil
     st[:ok] = false
     return nil
+  n_keys = keys.size()
   i = 0
-  while i < keys.size()
+  while i < n_keys
     fused_reuse_walk(ast_get(node, keys[i]), var_name, st)
     i += 1
   nil
@@ -2361,8 +2657,9 @@
   if body == nil || type(body) != "Array"
     return nil
   seeds = []
+  n_body = body.size()
   i = 0
-  while i < body.size()
+  while i < n_body
     node = body[i]
     if node != nil && is_ast_node?(node) && ast_kind(node) == :assign
       target = node.target
@@ -2370,16 +2667,20 @@
         seeds.push({name: target.name, node: node})
     i += 1
 
+  n_seeds = seeds.size()
   si = 0
-  while si < seeds.size()
+  while si < n_seeds
     candidate = seeds[si]
     st = {ok: true, assigns: 0, updates: []}
     fused_reuse_walk(body, candidate[:name], st)
-    if st[:ok] == true && st[:assigns] > 1 && st[:updates].size() > 0
+    updates = st[:updates]
+    n_updates = updates.size()
+    if st[:ok] == true && st[:assigns] > 1 && n_updates > 0
       ui = 0
-      while ui < st[:updates].size()
-        ast_set(st[:updates][ui], :auto_reuse_safe, true)
-        ast_set(st[:updates][ui].value, :auto_reuse_target, true)
+      while ui < n_updates
+        upd = updates[ui]
+        ast_set(upd, :auto_reuse_safe, true)
+        ast_set(upd.value, :auto_reuse_target, true)
         ui += 1
     si += 1
   nil
@@ -2412,8 +2713,9 @@
   if node == nil
     return nil
   if type(node) == "Array"
+    n_node = node.size()
     i = 0
-    while i < node.size()
+    while i < n_node
       mut_mark_all_dead(node[i], dead)
       i += 1
     return nil
@@ -2487,7 +2789,8 @@
     return false
   if !(node.op in (:PLUS :MINUS :STAR :SLASH :PERCENT))
     return false
-  node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :var && node.left.name == name
+  nleft = node.left
+  nleft != nil && is_ast_node?(nleft) && ast_kind(nleft) == :var && nleft.name == name
 
 # ==== Word-overwrite destination shape (E4 stage 3) ====
 #
@@ -2517,12 +2820,14 @@
     return nil
   if !(node.op in (:PLUS :MINUS :STAR))
     return nil
-  if !(bigint_word_dest_leaf?(node.left, name) && bigint_word_dest_leaf?(node.right, name))
+  nleft = node.left
+  nright = node.right
+  if !(bigint_word_dest_leaf?(nleft, name) && bigint_word_dest_leaf?(nright, name))
     return nil
   # at least one side must be a var — an all-literal RHS is a seed
   # (mut_literal_leaves_only? claims it first), never an overwrite that
   # wants the dying buffer
-  if ast_kind(node.left) != :var && ast_kind(node.right) != :var
+  if ast_kind(nleft) != :var && ast_kind(nright) != :var
     return nil
   node
 
@@ -2537,16 +2842,19 @@
 -> mut_tail_reader_call?(node)
   if node == nil || !is_ast_node?(node) || ast_kind(node) != :call
     return false
-  if node.block != nil || node.receiver == nil || !is_ast_node?(node.receiver)
+  nrecv = node.receiver
+  if node.block != nil || nrecv == nil || !is_ast_node?(nrecv)
     return false
   if !(node.name in ("to_s" "to_f" "bit_length" "abs" "zero?" "even?" "odd?" "negative?" "positive?" "hash" "inspect"))
     return false
-  if !mut_pure_arith_rhs?(node.receiver)
+  if !mut_pure_arith_rhs?(nrecv)
     return false
-  if node.args != nil
+  nargs = node.args
+  if nargs != nil
+    n_nargs = nargs.size()
     j = 0
-    while j < node.args.size()
-      if !mut_pure_arith_rhs?(node.args[j])
+    while j < n_nargs
+      if !mut_pure_arith_rhs?(nargs[j])
         return false
       j += 1
   true
@@ -2598,23 +2906,27 @@
 -> mut_walk_stmts(body, assigned, dead, seeds, depth)
   if body == nil
     return nil
+  n_body = body.size()
+  last_idx = n_body - 1
   i = 0
-  while i < body.size()
+  while i < n_body
     st = body[i]
     if st == nil || !is_ast_node?(st)
       i += 1
       next
     k = ast_kind(st)
+    st_val = st.value
+    st_tgt = st.target
     # The LAST top-level statement of a body handing the var itself back
     # (implicit `r` or `return r`) is the ownership transfer that ends the
     # scope: nothing follows that could mutate or release the buffer the
     # caller now holds, so it does not disqualify r. Any earlier return, or
     # one nested in control flow, still kills (fail closed).
-    if depth == 0 && i == body.size() - 1
+    if depth == 0 && i == last_idx
       if k == :var
         i += 1
         next
-      if k == :return && st.value != nil && is_ast_node?(st.value) && ast_kind(st.value) == :var
+      if k == :return && st_val != nil && is_ast_node?(st_val) && ast_kind(st_val) == :var
         i += 1
         next
       # A final read-only use of the candidate — a non-retaining Core
@@ -2624,9 +2936,11 @@
       if mut_tail_reader?(st)
         i += 1
         next
-    if k == :assign && st.target != nil && is_ast_node?(st.target) && ast_kind(st.target) == :var
-      name = st.target.name
-      if mut_self_compound_rhs?(st.value, name)
+    if k == :assign && st_tgt != nil && is_ast_node?(st_tgt) && ast_kind(st_tgt) == :var
+      name = st_tgt.name
+      if st.type_hint != nil && !(st.type_hint in ("big" "bigint" "bignum"))
+        dead[name] = true
+      if mut_self_compound_rhs?(st_val, name)
         # A self-update does not establish ownership. In particular, a
         # parameter may still be referenced by its caller; only a prior
         # literal-only local seed proves this scope owns the buffer it may
@@ -2634,8 +2948,8 @@
         if assigned[name] != true
           dead[name] = true
         # the right operand is an ordinary read position
-        mut_walk_expr(st.value.right, assigned, dead)
-      elsif mut_literal_leaves_only?(st.value)
+        mut_walk_expr(st_val.right, assigned, dead)
+      elsif mut_literal_leaves_only?(st_val)
         assigned[name] = true
         # Word-overwrite admission (below) demands a DOMINATING seed: a
         # direct top-level statement of this body, textually earlier. That
@@ -2646,15 +2960,15 @@
         # a conditionally-executed seed would let it read an undef slot.
         if depth == 0
           seeds[name] = true
-      elsif bigint_word_dest_rhs_shape(st.value, name) != nil
+      elsif bigint_word_dest_rhs_shape(st_val, name) != nil
         # Word-overwrite shape (E4 stage 3): `r = a op w` consumes r's OLD
         # value as the op's destination. Admitted only over a dominating
         # literal seed; the RHS operands are ordinary read positions
         # (leaves exclude the target itself).
         if seeds[name] != true
           dead[name] = true
-        mut_walk_expr(st.value, assigned, dead)
-      elsif seeds[name] == true && ast_kind(st.value) in (:binary_op :unary_op) && mut_pure_arith_rhs?(st.value)
+        mut_walk_expr(st_val, assigned, dead)
+      elsif seeds[name] == true && ast_kind(st_val) in (:binary_op :unary_op) && mut_pure_arith_rhs?(st_val)
         # Loop-carried overwrite (E4 stage 4): `r = <arithmetic>` where every
         # leaf is a literal or a plain var read. The dominating literal seed
         # proves this scope owns whatever r held, and a pure arithmetic RHS
@@ -2662,28 +2976,28 @@
         # alias they hand back. r's OLD value is therefore dead once the RHS
         # has been computed and lowering releases it (assign.w). Reads of r
         # inside the RHS are ordinary operand positions.
-        mut_walk_expr(st.value, assigned, dead)
+        mut_walk_expr(st_val, assigned, dead)
       else
         dead[name] = true
         # A bare-var RHS is a plain slot copy — an alias minted with NO
         # runtime entry involved, so no shared mark can guard it. The
         # SOURCE var dies too (`y = r` then `r += 1` must not move y).
-        if st.value != nil && is_ast_node?(st.value) && ast_kind(st.value) == :var
-          dead[st.value.name] = true
-        mut_walk_expr(st.value, assigned, dead)
-    elsif k == :compound_assign && st.target != nil && is_ast_node?(st.target) && ast_kind(st.target) == :var
-      name = st.target.name
+        if st_val != nil && is_ast_node?(st_val) && ast_kind(st_val) == :var
+          dead[st_val.name] = true
+        mut_walk_expr(st_val, assigned, dead)
+    elsif k == :compound_assign && st_tgt != nil && is_ast_node?(st_tgt) && ast_kind(st_tgt) == :var
+      name = st_tgt.name
       if st.op in (:PLUS :MINUS :STAR :SLASH :PERCENT :AMPERSAND :PIPE :CARET :LSHIFT :RSHIFT)
         # Multiplication and division join once their mutating entries make
         # every identity return dying-receiver-owned or shared-marked, the
         # same invariant that admits PLUS/MINUS.
         if assigned[name] != true
           dead[name] = true
-        mut_walk_expr(st.value, assigned, dead)
+        mut_walk_expr(st_val, assigned, dead)
       else
         # any other compound op keeps failing closed
         dead[name] = true
-        mut_walk_expr(st.value, assigned, dead)
+        mut_walk_expr(st_val, assigned, dead)
     elsif k == :while
       mut_walk_expr(st.condition, assigned, dead)
       mut_walk_stmts(st.body, assigned, dead, seeds, depth + 1)
@@ -2691,10 +3005,12 @@
       mut_walk_expr(st.condition, assigned, dead)
       mut_walk_stmts(st.then_body, assigned, dead, seeds, depth + 1)
       mut_walk_stmts(st.else_body, assigned, dead, seeds, depth + 1)
-      if st.elsif_clauses != nil
+      elsifs = st.elsif_clauses
+      if elsifs != nil
+        n_elsifs = elsifs.size()
         j = 0
-        while j < st.elsif_clauses.size()
-          clause = st.elsif_clauses[j]
+        while j < n_elsifs
+          clause = elsifs[j]
           mut_walk_expr(clause[0], assigned, dead)
           mut_walk_stmts(clause[1], assigned, dead, seeds, depth + 1)
           j += 1
@@ -2712,7 +3028,7 @@
     i += 1
   nil
 
--> mut_accumulator_candidates(body, raw_int_candidates = nil)
+-> mut_accumulator_candidates(body, raw_int_candidates = nil, declared_types = nil)
   # Reproducible performance control: production/default compilation keeps
   # mutate-if-unique enabled, while the BigInt loop A/B can force ordinary
   # immutable result churn from the same source program.
@@ -2725,13 +3041,14 @@
   if dead["__scope_poisoned__"] == true
     return result
   assigned.keys().each -> (name)
-    # A raw-promoted local (raw_int_candidate_map) lives in a machine-int
-    # slot; the mutate-if-unique and sum-chunk seams read and write the same
-    # slot as a boxed WValue. Both analyses claiming one var (`n = 0; while
-    # …; n += a[z]; …; k * 8 - n`) stored a raw 0 that the chunk flush then
-    # added as nil. Raw promotion wins: it is the cheaper codegen and its
-    # overflow path already handles the widening the seams exist for.
-    if dead[name] != true && (raw_int_candidates == nil || raw_int_candidates[name] != true)
+    # A raw-promoted local (raw_int_candidate_map) or explicitly machine-typed
+    # local (declared_types) lives in a machine-int slot; the mutate-if-unique
+    # and sum-chunk seams read and write the same slot as a boxed WValue. Both
+    # analyses claiming one var (`n = 0; while …; n += a[z]; …; k * 8 - n` or
+    # `## u64: steps; steps = 0; while …; steps += 1`) stored a raw 0 that the
+    # chunk flush then added as nil. Raw promotion and declared machine types
+    # win: only untyped boxed locals or explicit `## big` locals qualify.
+    if dead[name] != true && (raw_int_candidates == nil || raw_int_candidates[name] != true) && (declared_types == nil || declared_types[name] == nil || is_bigint_type(declared_types[name]))
       result[name] = true
   result
 
@@ -2752,12 +3069,16 @@
   if st == nil || !is_ast_node?(st)
     return nil
   k = ast_kind(st)
-  if k == :compound_assign && st.target != nil && is_ast_node?(st.target) && ast_kind(st.target) == :var && st.op in (:PLUS :MINUS)
-    return st.target.name
-  if k == :assign && st.target != nil && is_ast_node?(st.target) && ast_kind(st.target) == :var
+  st_tgt = st.target
+  if k == :compound_assign && st_tgt != nil && is_ast_node?(st_tgt) && ast_kind(st_tgt) == :var && st.op in (:PLUS :MINUS)
+    return st_tgt.name
+  if k == :assign && st_tgt != nil && is_ast_node?(st_tgt) && ast_kind(st_tgt) == :var
     v = st.value
-    if v != nil && is_ast_node?(v) && ast_kind(v) == :binary_op && v.op in (:PLUS :MINUS) && v.left != nil && is_ast_node?(v.left) && ast_kind(v.left) == :var && v.left.name == st.target.name
-      return st.target.name
+    if v != nil && is_ast_node?(v) && ast_kind(v) == :binary_op && v.op in (:PLUS :MINUS)
+      vleft = v.left
+      st_tgt_name = st_tgt.name
+      if vleft != nil && is_ast_node?(vleft) && ast_kind(vleft) == :var && vleft.name == st_tgt_name
+        return st_tgt_name
   nil
 
 -> sum_chunk_addend(st)
@@ -2766,34 +3087,41 @@
   st.value.right
 
 -> sum_chunk_var(node, mut_accumulators, declared_types, mod)
-  if mut_accumulators == nil || node.body == nil
+  nbody = node.body
+  if mut_accumulators == nil || nbody == nil
     return nil
   # gather accumulation counts per var over direct body statements
   counts = {}
+  n_nbody = nbody.size()
+  ncond = node.condition
   i = 0
-  while i < node.body.size()
-    nm = sum_chunk_accum_stmt_var(node.body[i])
+  while i < n_nbody
+    nm = sum_chunk_accum_stmt_var(nbody[i])
     if nm != nil
-      if counts[nm] == nil
-        counts[nm] = 0
-      counts[nm] = counts[nm] + 1
+      old_c = counts[nm]
+      if old_c == nil
+        old_c = 0
+      counts[nm] = old_c + 1
     i += 1
   candidates = counts.keys()
+  n_candidates = candidates.size()
   ci = 0
-  while ci < candidates.size()
+  while ci < n_candidates
     name = candidates[ci]
     ci += 1
     if mut_accumulators[name] != true
       next
+    if declared_types != nil && declared_types[name] != nil && !is_bigint_type(declared_types[name])
+      next
     ok = true
     refs = {}
     # the condition must not read r
-    mut_mark_all_dead(node.condition, refs)
+    mut_mark_all_dead(ncond, refs)
     if refs[name] == true || refs["__scope_poisoned__"] == true
       next
     j = 0
-    while j < node.body.size()
-      st = node.body[j]
+    while j < n_nbody
+      st = nbody[j]
       j += 1
       if sum_chunk_accum_stmt_var(st) == name
         addend = sum_chunk_addend(st)
@@ -2848,11 +3176,14 @@
     return nil
   if !(ast_kind(s1) == :assign && ast_kind(s2) == :assign && ast_kind(s3) == :assign)
     return nil
-  if !(ast_kind(s1.target) == :var && ast_kind(s2.target) == :var && ast_kind(s3.target) == :var)
+  s1_tgt = s1.target
+  s2_tgt = s2.target
+  s3_tgt = s3.target
+  if !(ast_kind(s1_tgt) == :var && ast_kind(s2_tgt) == :var && ast_kind(s3_tgt) == :var)
     return nil
-  t_name = s1.target.name
-  a_name = s2.target.name
-  b_name = s3.target.name
+  t_name = s1_tgt.name
+  a_name = s2_tgt.name
+  b_name = s3_tgt.name
   if t_name == a_name || t_name == b_name || a_name == b_name
     return nil
   # s1: t = a + b (either operand order), or t = a - b (E4 stage 4 —
@@ -2862,42 +3193,52 @@
   v1 = s1.value
   if v1 == nil || !is_ast_node?(v1) || ast_kind(v1) != :binary_op
     return nil
-  if !(v1.op == :PLUS || (v1.op == :MINUS && env("TUNGSTEN_BIGINT_SUB_DEST") != "0"))
+  v1_op = v1.op
+  if !(v1_op == :PLUS || (v1_op == :MINUS && env("TUNGSTEN_BIGINT_SUB_DEST") != "0"))
     return nil
-  if v1.left == nil || v1.right == nil || !is_ast_node?(v1.left) || !is_ast_node?(v1.right)
+  v1_left = v1.left
+  v1_right = v1.right
+  if v1_left == nil || v1_right == nil || !is_ast_node?(v1_left) || !is_ast_node?(v1_right)
     return nil
-  if ast_kind(v1.left) != :var || ast_kind(v1.right) != :var
+  if ast_kind(v1_left) != :var || ast_kind(v1_right) != :var
     return nil
-  n1 = v1.left.name
-  n2 = v1.right.name
-  if v1.op == :PLUS
+  n1 = v1_left.name
+  n2 = v1_right.name
+  if v1_op == :PLUS
     if !((n1 == a_name && n2 == b_name) || (n1 == b_name && n2 == a_name))
       return nil
   else
     if !(n1 == a_name && n2 == b_name)
       return nil
   # s2: a = b
-  if s2.value == nil || !is_ast_node?(s2.value) || ast_kind(s2.value) != :var || s2.value.name != b_name
+  s2_val = s2.value
+  if s2_val == nil || !is_ast_node?(s2_val) || ast_kind(s2_val) != :var || s2_val.name != b_name
     return nil
   # s3: b = t
-  if s3.value == nil || !is_ast_node?(s3.value) || ast_kind(s3.value) != :var || s3.value.name != t_name
+  s3_val = s3.value
+  if s3_val == nil || !is_ast_node?(s3_val) || ast_kind(s3_val) != :var || s3_val.name != t_name
     return nil
-  {t: t_name, a: a_name, b: b_name, index: i, op: v1.op}
+  {t: t_name, a: a_name, b: b_name, index: i, op: v1_op}
 
 -> rotation_shape_spec(node)
-  if node.body == nil
+  nbody = node.body
+  if nbody == nil
     return nil
+  n_nbody = nbody.size()
+  ncond = node.condition
   i = 0
-  while i < node.body.size()
-    spec = rotation_triple_at(node.body, i)
+  while i < n_nbody
+    spec = rotation_triple_at(nbody, i)
     if spec != nil
       # isolation: t/a/b referenced nowhere else in body or condition
       refs = {}
-      mut_mark_all_dead(node.condition, refs)
+      mut_mark_all_dead(ncond, refs)
+      spec_idx = spec[:index]
+      spec_end = spec_idx + 2
       j = 0
-      while j < node.body.size()
-        if j < spec[:index] || j > spec[:index] + 2
-          mut_mark_all_dead(node.body[j], refs)
+      while j < n_nbody
+        if j < spec_idx || j > spec_end
+          mut_mark_all_dead(nbody[j], refs)
         j += 1
       if refs["__scope_poisoned__"] != true && refs[spec[:t]] != true && refs[spec[:a]] != true && refs[spec[:b]] != true
         return spec

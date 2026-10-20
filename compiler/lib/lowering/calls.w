@@ -49,9 +49,11 @@
     return true
   if ctx[:unboxed_vars] != nil && ctx[:unboxed_vars][name] != nil
     return true
+  params = wfn[:params]
+  nparams = params.size()
   i = 0
-  while i < wfn[:params].size()
-    if wfn[:params][i] == name
+  while i < nparams
+    if params[i] == name
       return true
     i += 1
   if ctx[:mod][:top_level_vars] != nil && ctx[:mod][:top_level_vars][name] == true
@@ -201,8 +203,9 @@
       exit(1)
     target = target_node.value
     call_args = []
+    nargs = args.size()
     i = 1
-    while i < args.size()
+    while i < nargs
       arg_tv = lower_expression(ctx, args[i])
       call_args.push(ensure_i64_value(wfn, arg_tv))
       i += 1
@@ -958,7 +961,8 @@
     # Field values are arbitrary WValues stored at slot offsets 0..N-1.
     field_vals = []
     i = 2
-    while i < args.size()
+    nargs = args.size()
+    while i < nargs
       f_tv = lower_expression(ctx, args[i])
       field_vals.push(ensure_i64_value(wfn, f_tv))
       i += 1
@@ -1017,18 +1021,20 @@
       exit(1)
 
     # Register the function for declaration in emitter
-    ctx[:mod][:ccall_fns][fn_name] = args.size() - 1
+    nargs = args.size()
+    ctx[:mod][:ccall_fns][fn_name] = nargs - 1
 
     # Lower remaining args — pass raw machine ints directly (no boxing)
     lowered_args = []
     lowered_arg_types = []
     i = 1
-    while i < args.size()
+    while i < nargs
       arg_tv = lower_expression(ctx, args[i])
-      if arg_tv[:type] in (:raw_int :raw_i64 :raw_u64)
+      arg_tv_type = arg_tv[:type]
+      if arg_tv_type in (:raw_int :raw_i64 :raw_u64)
         lowered_args.push(arg_tv[:value])
         lowered_arg_types.push("i64")
-      elsif arg_tv[:type] in (:raw_i128 :raw_u128)
+      elsif arg_tv_type in (:raw_i128 :raw_u128)
         lowered_args.push(arg_tv[:value])
         lowered_arg_types.push("i128")
       else
@@ -1061,7 +1067,8 @@
     if fn_name == wfn[:name]
       << "ccall_nobox: target '" + fn_name + "' is the enclosing fn's own compiled symbol (top-level `fn " + ("" + wfn[:source_method]) + "` mangles to `__w_" + ("" + wfn[:source_method]) + "`) — the call would recurse forever; rename the fn"
       exit(1)
-    ctx[:mod][:ccall_fns][fn_name] = args.size() - 1
+    nargs = args.size()
+    ctx[:mod][:ccall_fns][fn_name] = nargs - 1
 
     # Float rounding source methods spell their historical boundary as
     #
@@ -1072,7 +1079,7 @@
     # it raw: unbox the original operand once, call the same libm function,
     # and emit the same fptosi operation Clang uses for the old C handler's
     # `(int64_t)` cast. The outer source-level w_int retains exact boxing.
-    if fn_name == "w_numeric_to_i64" && args.size() == 2
+    if fn_name == "w_numeric_to_i64" && nargs == 2
       math_call = args[1]
       if math_call != nil && ast_kind(math_call) == :call && math_call.block == nil && math_call.args != nil && math_call.args.size() == 1 && math_call.name in ("floor" "ceil" "round")
         math_recv = math_call.receiver
@@ -1090,12 +1097,13 @@
     lowered_args = []
     lowered_arg_types = []
     i = 1
-    while i < args.size()
+    while i < nargs
       arg_tv = lower_expression(ctx, args[i])
-      if arg_tv[:type] in (:raw_int :raw_i64 :raw_u64)
+      arg_tv_type = arg_tv[:type]
+      if arg_tv_type in (:raw_int :raw_i64 :raw_u64)
         lowered_args.push(arg_tv[:value])
         lowered_arg_types.push("i64")
-      elsif arg_tv[:type] in (:raw_i128 :raw_u128)
+      elsif arg_tv_type in (:raw_i128 :raw_u128)
         lowered_args.push(arg_tv[:value])
         lowered_arg_types.push("i128")
       else
@@ -1133,16 +1141,18 @@
       << "ccall_rawargs: first argument must be a string literal"
       exit(1)
     fn_name = fn_node.value
-    ctx[:mod][:ccall_fns][fn_name] = args.size() - 1
+    nargs = args.size()
+    ctx[:mod][:ccall_fns][fn_name] = nargs - 1
     lowered_args = []
     lowered_arg_types = []
     i = 1
-    while i < args.size()
+    while i < nargs
       arg_tv = lower_expression(ctx, args[i])
-      if arg_tv[:type] in (:raw_int :raw_i64 :raw_u64)
+      arg_tv_type = arg_tv[:type]
+      if arg_tv_type in (:raw_int :raw_i64 :raw_u64)
         lowered_args.push(arg_tv[:value])
         lowered_arg_types.push("i64")
-      elsif arg_tv[:type] in (:raw_i128 :raw_u128)
+      elsif arg_tv_type in (:raw_i128 :raw_u128)
         lowered_args.push(arg_tv[:value])
         lowered_arg_types.push("i128")
       else
@@ -1158,6 +1168,7 @@
   # argument types are unknown or no exact overload exists, the normal call path
   # below handles the expression.
   if args != nil && args.size() > 0
+    nargs = args.size()
     arg_types = inferred_arg_types(args, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
     typed_key = typed_call_signature_key(name, arg_types)
     typed_target = ctx[:mod][:known_calls][typed_key]
@@ -1169,14 +1180,17 @@
         pkinds = ctx[:mod][:raw_fn_param_kinds][typed_key]
         arg_regs = []
         i = 0
-        while i < args.size()
+        while i < nargs
           arg_tv = lower_expression(ctx, args[i])
           # Mixed raw ABI: typed-array params take the boxed handle as-is;
           # scalar params take raw machine ints; embedded ll/asm kernels take
           # the start-corrected element-0 data address.
-          if pkinds != nil && pkinds[i] == :arr
+          pkind = nil
+          if pkinds != nil
+            pkind = pkinds[i]
+          if pkind == :arr
             arg_regs.push(ensure_i64_value(wfn, arg_tv))
-          elsif pkinds != nil && pkinds[i] == :arrptr
+          elsif pkind == :arrptr
             handle = ensure_i64_value(wfn, arg_tv)
             tda = next_temp(wfn)
             emit_wire_ta_data_addr(wfn, tda, handle)
@@ -1187,6 +1201,8 @@
         temp = next_temp(wfn)
         raw_return = ctx[:mod][:fn_return_types][typed_key]
         emit_wire_dynamic_4(wfn, machine_call_return_op(raw_return), :arg_types, nil, :args, arg_regs, :name, typed_target, :temp, temp)
+        if raw_return == :bool
+          return typed_value(:i64, temp)
         if is_u128_type(raw_return)
           return typed_value(:raw_u128, temp)
         if is_i128_type(raw_return)
@@ -1198,7 +1214,7 @@
       arg_regs = []
       fresh_boxes = []
       i = 0
-      while i < args.size()
+      while i < nargs
         val = lower_expression(ctx, args[i])
         reg = ensure_i64_value(wfn, val)
         # A raw machine int boxed here may mint a heap bigint (>2^47 via
@@ -1215,20 +1231,22 @@
       temp = next_temp(wfn)
       emit_wire_call_direct_i64(wfn, nil, arg_regs, nil, nil, typed_target, nil, nil, temp)
       fb = 0
-      while fb < fresh_boxes.size()
+      n_fb = fresh_boxes.size()
+      while fb < n_fb
         emit_wire_free_value(wfn, fresh_boxes[fb])
         fb += 1
       return typed_value(:i64, temp)
 
     has_unknown_arg = false
     ati = 0
-    while ati < arg_types.size()
+    n_at = arg_types.size()
+    while ati < n_at
       if arg_types[ati] == nil
         has_unknown_arg = true
       ati += 1
 
     if has_unknown_arg && ctx[:mod][:known_calls][name] == nil
-      arity_key = typed_overload_arity_key(name, args.size())
+      arity_key = typed_overload_arity_key(name, nargs)
       if ctx[:mod][:known_typed_overload_counts][arity_key] == 1
         fallback_key = ctx[:mod][:known_unique_typed_overload_keys][arity_key]
         fallback_target = ctx[:mod][:known_calls][fallback_key]
@@ -1244,11 +1262,14 @@
             pkinds = ctx[:mod][:raw_fn_param_kinds][fallback_key]
             arg_regs = []
             i = 0
-            while i < args.size()
+            while i < nargs
               arg_tv = lower_expression(ctx, args[i])
-              if pkinds != nil && pkinds[i] == :arr
+              pkind = nil
+              if pkinds != nil
+                pkind = pkinds[i]
+              if pkind == :arr
                 arg_regs.push(guard_typed_array_arg(ctx, ensure_i64_value(wfn, arg_tv), fallback_types[i], arg_types[i], name, i))
-              elsif pkinds != nil && pkinds[i] == :arrptr
+              elsif pkind == :arrptr
                 handle = guard_typed_array_arg(ctx, ensure_i64_value(wfn, arg_tv), fallback_types[i], arg_types[i], name, i)
                 tda = next_temp(wfn)
                 emit_wire_ta_data_addr(wfn, tda, handle)
@@ -1259,6 +1280,8 @@
             temp = next_temp(wfn)
             raw_return = ctx[:mod][:fn_return_types][fallback_key]
             emit_wire_dynamic_4(wfn, machine_call_return_op(raw_return), :arg_types, nil, :args, arg_regs, :name, fallback_target, :temp, temp)
+            if raw_return == :bool
+              return typed_value(:i64, temp)
             if is_u128_type(raw_return)
               return typed_value(:raw_u128, temp)
             if is_i128_type(raw_return)
@@ -1270,7 +1293,7 @@
           arg_regs = []
           fresh_boxes = []
           i = 0
-          while i < args.size()
+          while i < nargs
             val = lower_expression(ctx, args[i])
             reg = ensure_i64_value(wfn, val)
             # TUNGSTEN_FREE=0 kill switch — same rationale as the typed
@@ -1284,7 +1307,8 @@
           temp = next_temp(wfn)
           emit_wire_call_direct_i64(wfn, nil, arg_regs, nil, nil, fallback_target, nil, nil, temp)
           fb = 0
-          while fb < fresh_boxes.size()
+          n_fb = fresh_boxes.size()
+          while fb < n_fb
             emit_wire_free_value(wfn, fresh_boxes[fb])
             fb += 1
           return typed_value(:i64, temp)
@@ -1313,13 +1337,14 @@
     # read. Without this, a non-closure local — e.g. an int param used as an
     # array index `arr[ro]` — emits w_closure_call_0 on a non-closure and dies
     # at runtime with "expected closure".
-    if args.size() == 0 && node.block == nil && (ctx[:closure_bindings] == nil || ctx[:closure_bindings][name] == nil)
+    nargs = args.size()
+    if nargs == 0 && node.block == nil && (ctx[:closure_bindings] == nil || ctx[:closure_bindings][name] == nil)
       return lower_var(ctx, Tungsten:AST:Var.new(name))
     closure_tv = lower_var(ctx, Tungsten:AST:Var.new(name))
     closure_reg = ensure_i64_value(wfn, closure_tv)
     arg_regs = []
     i = 0
-    while i < args.size()
+    while i < nargs
       val = lower_expression(ctx, args[i])
       arg_regs.push(ensure_i64_value(wfn, val))
       i += 1
@@ -1351,17 +1376,22 @@
     pkinds = ctx[:mod][:raw_fn_param_kinds][name]
     arg_regs = []
     i = 0
-    while i < args.size()
-      arg_tv = lower_expression(ctx, args[i])
-      if pkinds != nil && pkinds[i] == :arr
+    nargs = args.size()
+    while i < nargs
+      arg_node = args[i]
+      arg_tv = lower_expression(ctx, arg_node)
+      pkind = nil
+      if pkinds != nil
+        pkind = pkinds[i]
+      if pkind == :arr
         arg_regs.push(ensure_i64_value(wfn, arg_tv))
-      elsif pkinds != nil && pkinds[i] == :arrptr
+      elsif pkind == :arrptr
         handle = ensure_i64_value(wfn, arg_tv)
         tda = next_temp(wfn)
         emit_wire_ta_data_addr(wfn, tda, handle)
         arg_regs.push(tda)
       else
-        arg_type = infer_type(args[i], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+        arg_type = infer_type(arg_node, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
         arg_regs.push(ensure_raw_machine_int(wfn, arg_tv, :i64, arg_type))
       i += 1
     expected_raw = ctx[:mod][:known_fn_param_counts][name]
@@ -1374,6 +1404,8 @@
     # Preserve unsignedness across the raw call boundary: a u64-returning
     # callee's value must later box via w_u64, not the signed int fast path
     # (which prints values >= 2^63 as negative).
+    if raw_return == :bool
+      return typed_value(:i64, temp)
     if is_u128_type(raw_return)
       return typed_value(:raw_u128, temp)
     if is_i128_type(raw_return)
@@ -1405,7 +1437,8 @@
   else
     arg_regs = []
     i = 0
-    while i < args.size()
+    nargs = args.size()
+    while i < nargs
       val = lower_expression(ctx, args[i])
       arg_regs.push(ensure_i64_value(wfn, val))
       i += 1
@@ -1538,21 +1571,23 @@
   wfn = ctx[:func]
   source_regs = []
   i = 0
-  while i < args.size()
+  nargs = args.size()
+  while i < nargs
     val = lower_expression(ctx, args[i])
     source_regs.push(ensure_i64_value(wfn, val))
     i += 1
 
+  n_source = source_regs.size()
   out = []
   i = 0
   while i < splat_index
-    if i < source_regs.size()
+    if i < n_source
       out.push(source_regs[i])
     else
       out.push(w_nil.to_s())
     i += 1
 
-  rest_count = source_regs.size() - param_count + 1
+  rest_count = n_source - param_count + 1
   if rest_count < 0
     rest_count = 0
   rest = next_temp(wfn)
@@ -1569,8 +1604,8 @@
 
   i = splat_index + 1
   while i < param_count
-    source_index = source_regs.size() - param_count + i
-    if source_index >= 0 && source_index < source_regs.size()
+    source_index = n_source - param_count + i
+    if source_index >= 0 && source_index < n_source
       out.push(source_regs[source_index])
     else
       out.push(w_nil.to_s())
@@ -1592,14 +1627,17 @@
       pack_count -= 1
     packed = lower_splat_call_arg_regs(ctx, call_args, static_info[:splat_index], pack_count)
     pi = 0
-    while pi < packed.size()
+    n_packed = packed.size()
+    while pi < n_packed
       arg_regs.push(packed[pi])
       pi += 1
   else
     i = 0
-    while i < call_args.size()
+    n_call_args = call_args.size()
+    is_raw_abi = static_info[:raw_abi] == true
+    while i < n_call_args
       param_type = static_param_type(static_info, i)
-      if static_info[:raw_abi] == true && is_machine_int64_type(param_type)
+      if is_raw_abi && is_machine_int64_type(param_type)
         arg_regs.push(lower_machine_int_expression(ctx, call_args[i], param_type))
       else
         arg_val = lower_expression(ctx, call_args[i])
@@ -1626,12 +1664,15 @@
   # applicable when arity ≤ 2 (the runtime exposes memo_call0/1/2_i64
   # variants); over that, fall back to a direct call.
   static_key = nil
+  static_fn_name = static_info[:fn_name]
   if block == nil && static_info[:from_fn] == true && arg_regs.size() <= 2 && !call_args_has_kwargs?(args)
-    keys = ctx[:mod][:known_pure_calls].keys()
+    pure_calls = ctx[:mod][:known_pure_calls]
+    keys = pure_calls.keys()
     ki = 0
-    while ki < keys.size()
+    n_keys = keys.size()
+    while ki < n_keys
       k = keys[ki]
-      if ctx[:mod][:known_pure_calls][k] == static_info[:fn_name]
+      if pure_calls[k] == static_fn_name
         static_key = k
         break
       ki += 1
@@ -1641,13 +1682,13 @@
     memo_ptr = next_temp(wfn)
     emit_wire_load_memo_ptr(wfn, memo_global, memo_ptr)
     if arg_regs.size() == 1
-      emit_wire_memo_call1_i64(wfn, arg_regs, static_info[:fn_name], memo_ptr, temp)
+      emit_wire_memo_call1_i64(wfn, arg_regs, static_fn_name, memo_ptr, temp)
     elsif arg_regs.size() == 2
-      emit_wire_memo_call2_i64(wfn, arg_regs, static_info[:fn_name], memo_ptr, temp)
+      emit_wire_memo_call2_i64(wfn, arg_regs, static_fn_name, memo_ptr, temp)
     else
-      emit_wire_memo_call0_i64(wfn, static_info[:fn_name], memo_ptr, temp)
+      emit_wire_memo_call0_i64(wfn, static_fn_name, memo_ptr, temp)
   else
-    emit_wire_call_direct_i64(wfn, nil, arg_regs, nil, nil, static_info[:fn_name], nil, nil, temp)
+    emit_wire_call_direct_i64(wfn, nil, arg_regs, nil, nil, static_fn_name, nil, nil, temp)
 
   static_return_type = static_info[:return_type]
   if static_return_type != nil && is_machine_int64_type(static_return_type)
@@ -1717,7 +1758,8 @@
     iterator_unboxed_vars = {}
     unboxed_names = outer_unboxed_vars.keys()
     uni = 0
-    while uni < unboxed_names.size()
+    n_unboxed = unboxed_names.size()
+    while uni < n_unboxed
       unboxed_name = unboxed_names[uni]
       if unboxed_name != param_name
         iterator_unboxed_vars[unboxed_name] = outer_unboxed_vars[unboxed_name]
@@ -1759,7 +1801,8 @@
     # ->(a, b): destructure the yielded element across the declared params
     # (Ruby proc semantics; missing → nil), matching w_closure_call_1.
     dpi = 0
-    while dpi < iter_bparams.size()
+    n_bparams = iter_bparams.size()
+    while dpi < n_bparams
       dp_name = iter_bparams[dpi]
       if is_ast_node?(dp_name)
         dp_name = dp_name.name
@@ -1780,22 +1823,24 @@
 
   body = block.body
   if body != nil && body.size() > 0
+    n_body = body.size()
     if method_name == "each"
       bi = 0
-      while bi < body.size()
+      while bi < n_body
         if block_terminated(wfn)
           break
         lower_statement(ctx, body[bi])
         bi += 1
     else
       bi = 0
-      while bi < body.size() - 1
+      n_body_m1 = n_body - 1
+      while bi < n_body_m1
         if block_terminated(wfn)
           break
         lower_statement(ctx, body[bi])
         bi += 1
       if !block_terminated(wfn)
-        pred_val = lower_expression(ctx, body[body.size() - 1])
+        pred_val = lower_expression(ctx, body[n_body_m1])
       if !block_terminated(wfn)
         if pred_val[:type] == :i1
           pred_bool = pred_val[:value]
@@ -1944,7 +1989,8 @@
   names = []
   new_args = []
   i = 0
-  while i < args.size()
+  nargs = args.size()
+  while i < nargs
     a = args[i]
     if is_ast_node?(a) && ast_kind(a) == :var && a.name == "_"
       pname = "__pa" + (names.size() + 1).to_s()

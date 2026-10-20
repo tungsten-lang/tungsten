@@ -57,14 +57,19 @@
   current = class_name
   suffix = "." + method_name + "/" + arg_count.to_s()
   guard = 0
+  method_asts = mod[:class_method_asts]
+  super_names = mod[:class_super_names]
   while current != nil && guard < 64
     key = current + suffix
-    method_ast = mod[:class_method_asts][key]
+    method_ast = method_asts[key]
     if method_ast != nil
       # A bodyless declaration (`-> ord` on Char, `Number#<=>`) is
       # implemented by a runtime intrinsic or a subclass the walk has
       # already passed; its compiled stub is not the runtime's selection.
-      if !is_ast_node?(method_ast) || method_ast.body == nil || method_ast.body.size() == 0
+      if !is_ast_node?(method_ast)
+        return nil
+      mbody = method_ast.body
+      if mbody == nil || mbody.size() == 0
         return nil
       return mod[:class_method_fn_names][key]
     # Runtime lookup probes this class's own table before walking to the
@@ -75,16 +80,17 @@
     # runtime selects first. Fail closed on that shape.
     if locked_range_entry_covers?(mod, current, method_name, arg_count)
       return nil
-    current = mod[:class_super_names][current]
+    current = super_names[current]
     guard += 1
   nil
 
 -> locked_range_entry_covers?(mod, class_name, method_name, arg_count)
   prefix = class_name + "." + method_name + "/"
   params = 0
+  method_asts = mod[:class_method_asts]
   while params <= arg_count + 8
     if params != arg_count
-      method_ast = mod[:class_method_asts][prefix + params.to_s()]
+      method_ast = method_asts[prefix + params.to_s()]
       if method_ast != nil && is_ast_node?(method_ast)
         if method_splat_index(method_ast) >= 0 || params > arg_count
           if method_min_runtime_arity(method_ast) <= arg_count + 1
@@ -177,7 +183,8 @@
   start_block(wfn, fast_label)
   args = [receiver_reg]
   i = 0
-  while i < arg_regs.size()
+  n_arg_regs = arg_regs.size()
+  while i < n_arg_regs
     args.push(arg_regs[i])
     i += 1
   site_id = nil
@@ -223,15 +230,17 @@
   if target == nil
     return nil
   class_names = mod[:known_classes].keys()
+  super_names = mod[:class_super_names]
   ci = 0
-  while ci < class_names.size()
+  n_class_names = class_names.size()
+  while ci < n_class_names
     candidate = class_names[ci]
     if candidate != class_name
       current = candidate
       descendant = false
       guard = 0
       while current != nil && guard < 64
-        current = mod[:class_super_names][current]
+        current = super_names[current]
         if current == class_name
           descendant = true
           break
@@ -258,21 +267,25 @@
   arities = []
   cur = recv_name
   guard = 0
+  static_methods = mod[:known_static_methods]
+  super_names = mod[:class_super_names]
   while cur != nil && guard < 64
     k = 0
     while k <= 16
-      info = mod[:known_static_methods][cur + "." + method_name + "/" + k.to_s()]
+      info = static_methods[cur + "." + method_name + "/" + k.to_s()]
       if info != nil && info[:is_static] == true
         # The registry only indexes the FIXED arities of a def; a `*rest`
         # splat or a block parameter makes the real maximum open-ended, so
         # such a static is never checked here (nil = no contract known).
-        if (info[:splat_index] != nil && info[:splat_index] >= 0) || (info[:block_param_index] != nil && info[:block_param_index] >= 0) || info[:accepts_block] == true
+        splat_idx = info[:splat_index]
+        blk_idx = info[:block_param_index]
+        if (splat_idx != nil && splat_idx >= 0) || (blk_idx != nil && blk_idx >= 0) || info[:accepts_block] == true
           return nil
         arities.push(k)
       k += 1
     if arities.size() > 0
       return arities
-    cur = mod[:class_super_names][cur]
+    cur = super_names[cur]
     guard += 1
   arities
 
@@ -283,13 +296,14 @@
   if arities == nil || arities.size() == 0
     return nil
   i = 0
-  while i < arities.size()
+  n_arities = arities.size()
+  while i < n_arities
     if arities[i] == argc
       return nil
     i += 1
   accepted = arities[0].to_s()
-  if arities.size() > 1
-    accepted = arities[0].to_s() + ".." + arities[arities.size() - 1].to_s()
+  if n_arities > 1
+    accepted = arities[0].to_s() + ".." + arities[n_arities - 1].to_s()
   raise compile_error_for_node(:E_LOWER_ARITY, recv_name + "." + method_name + " takes " + accepted + " argument" + (accepted == "1" ? "" : "s") + ", got " + argc.to_s() + " — arguments are never silently dropped or padded", ctx[:source_path], node)
 
 -> check_instance_method_arity(ctx, node, fact, method_name, argc)
@@ -302,29 +316,32 @@
   # under the template name; their registry shape is not the plain one this
   # walk understands, so they are not checked here.
   ci = 0
-  while ci < classes.size()
+  n_classes = classes.size()
+  while ci < n_classes
     if classes[ci].include?("$")
       return nil
     ci += 1
   mod = ctx[:mod]
+  method_asts = mod[:class_method_asts]
+  super_names = mod[:class_super_names]
   found_any = false
   ci = 0
-  while ci < classes.size()
+  while ci < n_classes
     cur = classes[ci]
     guard = 0
     while cur != nil && guard < 64
-      base = mod[:class_method_asts][cur + "." + method_name]
+      base = method_asts[cur + "." + method_name]
       if base != nil
         found_any = true
         if def_accepts_arg_count?(base, argc)
           return nil
         k = 0
         while k <= 16
-          alt = mod[:class_method_asts][cur + "." + method_name + "/" + k.to_s()]
+          alt = method_asts[cur + "." + method_name + "/" + k.to_s()]
           if alt != nil && def_accepts_arg_count?(alt, argc)
             return nil
           k += 1
-      cur = mod[:class_super_names][cur]
+      cur = super_names[cur]
       guard += 1
     ci += 1
   if !found_any
@@ -342,15 +359,17 @@
   if fact[:certainty] != :exact
     return nil
   classes = class_set_fact_classes(fact)
-  if classes.size() == 0
+  n_classes = classes.size()
+  if n_classes == 0
     return nil
   targets = []
   i = 0
-  while i < classes.size()
-    fn_name = locked_direct_method_fn(mod, classes[i], method_name, arg_count)
+  while i < n_classes
+    cls_name = classes[i]
+    fn_name = locked_direct_method_fn(mod, cls_name, method_name, arg_count)
     if fn_name == nil
       return nil
-    targets.push({class_name: classes[i], fn_name: fn_name})
+    targets.push({class_name: cls_name, fn_name: fn_name})
     i += 1
   targets
 
@@ -359,7 +378,8 @@
     return false
   fn_name = targets[0][:fn_name]
   i = 1
-  while i < targets.size()
+  n_targets = targets.size()
+  while i < n_targets
     if targets[i][:fn_name] != fn_name
       return false
     i += 1
@@ -368,7 +388,8 @@
 -> emit_locked_direct_method_call(ctx, node, receiver_reg, arg_regs, fn_name)
   args = [receiver_reg]
   i = 0
-  while i < arg_regs.size()
+  n_arg_regs = arg_regs.size()
+  while i < n_arg_regs
     args.push(arg_regs[i])
     i += 1
   site_id = nil
@@ -395,7 +416,8 @@
 -> super_target_fn(mod, class_name, method_name, argc)
   if class_name == nil || method_name == nil
     return nil
-  current = mod[:class_super_names][class_name]
+  super_names = mod[:class_super_names]
+  current = super_names[class_name]
   key_suffix = "." + method_name + "/" + argc.to_s()
   guard = 0
   while current != nil && guard < 64
@@ -412,7 +434,7 @@
       if owner_ast == nil || owner_ast.is_class_method != true
         return hit
       return nil
-    current = mod[:class_super_names][current]
+    current = super_names[current]
     guard += 1
   nil
 
@@ -429,14 +451,15 @@
   args = node.args
   if args == nil
     args = []
+  n_args = args.size()
   fn_name = nil
   if ctx[:is_class_method] != true
-    fn_name = super_target_fn(ctx[:mod], ctx[:class_name], ctx[:method_name], args.size())
+    fn_name = super_target_fn(ctx[:mod], ctx[:class_name], ctx[:method_name], n_args)
   if fn_name == nil
     return typed_value(:i64, w_nil.to_s())
   call_args = [ensure_i64_value(wfn, lower_var(ctx, Tungsten:AST:Var.new("__self")))]
   i = 0
-  while i < args.size()
+  while i < n_args
     call_args.push(ensure_i64_value(wfn, lower_expression(ctx, args[i])))
     i += 1
   temp = next_temp(wfn)
@@ -452,22 +475,23 @@
   class_value = next_temp(wfn)
   emit_wire_call_direct_i64(wfn, nil, [receiver_reg], nil, nil, "w_class_of", nil, nil, class_value)
 
+  n_targets = targets.size()
   arm_labels = []
   i = 0
-  while i < targets.size()
+  while i < n_targets
     arm_labels.push(next_label(wfn, "classset.arm"))
     i += 1
   fail_label = next_label(wfn, "classset.fail")
   done_label = next_label(wfn, "classset.done")
 
   i = 0
-  while i < targets.size()
+  while i < n_targets
     class_temp = next_temp(wfn)
     emit_wire_load_class(wfn, targets[i][:class_name], class_temp)
     same = next_temp(wfn)
     emit_wire_icmp_i64(wfn, class_value, "eq", class_temp, same)
     next_check = fail_label
-    if i + 1 < targets.size()
+    if i + 1 < n_targets
       next_check = next_label(wfn, "classset.check")
     emit_wire_cond_br(wfn, same, next_check, nil, arm_labels[i])
     if next_check != fail_label
@@ -475,21 +499,25 @@
     i += 1
 
   incoming = []
+  n_arg_regs = arg_regs.size()
+  node_line = node.line
+  node_col = node.col
   i = 0
-  while i < targets.size()
-    start_block(wfn, arm_labels[i])
+  while i < n_targets
+    arm_label = arm_labels[i]
+    start_block(wfn, arm_label)
     args = [receiver_reg]
     ai = 0
-    while ai < arg_regs.size()
+    while ai < n_arg_regs
       args.push(arg_regs[ai])
       ai += 1
     site_id = nil
-    if node.line != nil
+    if node_line != nil
       site_id = next_call_site_id(ctx[:mod])
     arm_temp = next_temp(wfn)
-    emit_wire_call_direct_i64(wfn, nil, args, nil, site_id, targets[i][:fn_name], node.col, node.line, arm_temp)
+    emit_wire_call_direct_i64(wfn, nil, args, nil, site_id, targets[i][:fn_name], node_col, node_line, arm_temp)
     incoming.push(arm_temp)
-    incoming.push(arm_labels[i])
+    incoming.push(arm_label)
     emit_wire_br(wfn, done_label, nil, nil)
     i += 1
 
@@ -670,6 +698,28 @@
           synthetic = Tungsten:AST:Call.new(recv_node, method_name, new_args, bound)
           return lower_method_call(ctx, synthetic)
 
+  # SROA (scalar replacement of aggregates) field read: when `o = Cls.new(...)`
+  # was elided into scalar slots for each read field, `o.<reader>` loads the
+  # scalar slot directly without allocating or touching heap memory.
+  if recv_node != nil && is_ast_node?(recv_node) && ast_kind(recv_node) == :var && node.block == nil && (node.args == nil || node.args.size() == 0) && ctx[:sroa_bindings] != nil
+    sroa_map = ctx[:sroa_bindings][recv_node.name]
+    if sroa_map != nil
+      sroa_info = sroa_map[method_name]
+      if sroa_info != nil
+        temp = next_temp(wfn)
+        if sroa_info[:op] == :load_double
+          emit_wire_dynamic_2(wfn, :load_double, :ptr, sroa_info[:slot], :temp, temp)
+        else
+          emit_wire_load_i64(wfn, sroa_info[:slot], temp)
+        return typed_value(sroa_info[:type], temp)
+
+  # Multi-stage method-chain pipeline fusion: `.map` / `.select` / `.reject`
+  # chains (or single-stage feeding `.sum` / `.count` / `.size` / `.min` /
+  # `.max` / `.product`) fuse into a single zero-intermediate-array loop.
+  fused_chain_tv = try_lower_method_chain_pipeline(ctx, node)
+  if fused_chain_tv != nil
+    return fused_chain_tv
+
   # Thread.new -> ... creates an OS thread around the block closure. Thread is a
   # runtime primitive, so bypass class lookup here just like Atomic.new.
   if recv_node != nil && ast_kind(recv_node) in (:var :call :class_ref) && recv_node.name == "Thread" && method_name == "new" && node.block != nil
@@ -726,12 +776,37 @@
   # otherwise box/unbox-round-trips through w_method_call every iteration.
   # Gated on a float recv_type so the receiver is lowered exactly once here;
   # ensure_raw_f64 handles a raw or boxed float operand.
-  if recv_node != nil && node.block == nil && (node.args == nil || node.args.size() == 0) && (recv_type == :float || recv_type == :f64) && method_name in ("sqrt" "sin" "cos" "tan" "exp" "log")
+  if recv_node != nil && node.block == nil && (node.args == nil || node.args.size() == 0) && (recv_type == :float || recv_type == :f64 || (method_name == "sqrt" && is_machine_int_type(recv_type))) && method_name in ("sqrt" "sin" "cos" "tan" "exp" "log")
     fv = lower_expression(ctx, recv_node)
     fraw = ensure_raw_f64(wfn, fv)
     ftmp = next_temp(wfn)
     emit_wire_call_libm_f64(wfn, nil, method_name, nil, ftmp, fraw)
     return typed_value(:raw_f64, ftmp)
+
+  if recv_node != nil && node.block == nil && (node.args == nil || node.args.size() == 0) && (recv_type == :float || recv_type == :f64) && method_name == "to_i"
+    fv = lower_expression(ctx, recv_node)
+    fraw = ensure_raw_f64(wfn, fv)
+    itmp = next_temp(wfn)
+    emit_wire_fptosi_f64_i64(wfn, itmp, fraw)
+    return typed_value(:raw_i64, itmp)
+
+  if recv_node != nil && node.block == nil && (node.args == nil || node.args.size() == 0) && is_integer_like_type(recv_type) && method_name in ("zero?" "nonzero?" "one?" "even?" "odd?" "positive?" "negative?") && core_operator_untouched?(ctx[:mod], "Int", method_name) && core_operator_untouched?(ctx[:mod], "Integer", method_name)
+    zero_lit = Tungsten:AST:Int.new(0)
+    one_lit = Tungsten:AST:Int.new(1)
+    if method_name == "zero?"
+      return lower_binary_op(ctx, Tungsten:AST:BinaryOp.new(recv_node, :EQ, zero_lit))
+    if method_name == "nonzero?"
+      return lower_binary_op(ctx, Tungsten:AST:BinaryOp.new(recv_node, :NEQ, zero_lit))
+    if method_name == "one?"
+      return lower_binary_op(ctx, Tungsten:AST:BinaryOp.new(recv_node, :EQ, one_lit))
+    if method_name == "positive?"
+      return lower_binary_op(ctx, Tungsten:AST:BinaryOp.new(recv_node, :GT, zero_lit))
+    if method_name == "negative?"
+      return lower_binary_op(ctx, Tungsten:AST:BinaryOp.new(recv_node, :LT, zero_lit))
+    if method_name == "even?"
+      return lower_binary_op(ctx, Tungsten:AST:BinaryOp.new(Tungsten:AST:BinaryOp.new(recv_node, :AMPERSAND, one_lit), :EQ, zero_lit))
+    if method_name == "odd?"
+      return lower_binary_op(ctx, Tungsten:AST:BinaryOp.new(Tungsten:AST:BinaryOp.new(recv_node, :AMPERSAND, one_lit), :NEQ, zero_lit))
 
   # Quantity is an immediate/domain runtime value rather than a heap Instance,
   # so its metadata/equivalence methods lower directly instead of entering the
@@ -778,23 +853,25 @@
   # non-literal elements keep the Array#to_f32/to_f64 converter path.
   if recv_node != nil && node.block == nil && (node.args == nil || node.args.size() == 0) && method_name in ("to_f64" "to_f32") && ast_kind(recv_node) == :array
     pfa_els = recv_node.elements
+    n_pfa_els = pfa_els.size()
     pfa_all_float = true
     pfa_i = 0
-    while pfa_i < pfa_els.size()
-      if !is_ast_node?(pfa_els[pfa_i]) || ast_kind(pfa_els[pfa_i]) != :float
+    while pfa_i < n_pfa_els
+      pfa_el = pfa_els[pfa_i]
+      if !is_ast_node?(pfa_el) || ast_kind(pfa_el) != :float
         pfa_all_float = false
       pfa_i += 1
     if pfa_all_float
       pfa_bits = "-64"
       if method_name == "to_f32"
         pfa_bits = "-32"
-      pfa_cap = pfa_els.size()
+      pfa_cap = n_pfa_els
       if pfa_cap < 1
         pfa_cap = 1
       pfa_arr = next_temp(wfn)
       emit_wire_call_direct_i64(wfn, nil, [pfa_bits, pfa_cap.to_s()], nil, nil, "w_array_new", nil, nil, pfa_arr)
       pfa_i = 0
-      while pfa_i < pfa_els.size()
+      while pfa_i < n_pfa_els
         pfa_val = ensure_i64_value(wfn, lower_expression(ctx, pfa_els[pfa_i]))
         pfa_tmp = next_temp(wfn)
         emit_wire_call_direct_i64(wfn, nil, [pfa_arr, pfa_val], nil, nil, "w_array_push", nil, nil, pfa_tmp)
@@ -865,9 +942,11 @@
             type_hint_val = elem_value_type.to_s()
           v_assign = Tungsten:AST:Assign.new(Tungsten:AST:Var.new(param_name), subscript_call, type_hint_val)
           new_body = [v_assign]
+          blk_body = block.body
+          n_blk_body = blk_body.size()
           bi = 0
-          while bi < block.body.size()
-            new_body.push(block.body[bi])
+          while bi < n_blk_body
+            new_body.push(blk_body[bi])
             bi += 1
           # Use a bare string for the param (not a :param hash) — matches
           # the AST shape the parser produces for explicit block params,
@@ -1024,11 +1103,13 @@
     # method declares `&` or uses yield. Methods without a block slot, and raw
     # workers whose closure ABI is not specialized, retain dynamic dispatch.
     static_key = recv_name + "." + method_name
-    static_info = known_static_method_for(ctx[:mod], static_key, node.args.size())
+    cmod = ctx[:mod]
+    n_node_args = node.args.size()
+    static_info = known_static_method_for(cmod, static_key, n_node_args)
     if static_info != nil && node.block != nil
-      if static_info[:accepts_block] != true || static_info[:raw_abi] == true || node.args.size() >= static_info[:arity] - 1
+      if static_info[:accepts_block] != true || static_info[:raw_abi] == true || n_node_args >= static_info[:arity] - 1
         static_info = nil
-    if static_info == nil && method_name != "new" && ctx[:mod][:known_classes][recv_name] != nil
+    if static_info == nil && method_name != "new" && cmod[:known_classes][recv_name] != nil
       # Class methods are inherited: on a miss for a KNOWN class receiver,
       # walk the superclass chain (compile-time; the hierarchy is closed at
       # lowering) and direct-call the defining ancestor's static. The
@@ -1045,24 +1126,25 @@
       # allocate-then-dispatch path.
       cur = recv_name
       guard = 0
+      super_names = cmod[:class_super_names]
       while static_info == nil && guard < 64
-        sup = ctx[:mod][:class_super_names][cur]
+        sup = super_names[cur]
         if sup == nil
           break
         cur = sup
-        candidate = known_static_method_for(ctx[:mod], cur + "." + method_name, node.args.size())
+        candidate = known_static_method_for(cmod, cur + "." + method_name, n_node_args)
         if candidate != nil && candidate[:is_static] == true
-          if node.block == nil || (candidate[:accepts_block] == true && candidate[:raw_abi] != true && node.args.size() < candidate[:arity] - 1)
+          if node.block == nil || (candidate[:accepts_block] == true && candidate[:raw_abi] != true && n_node_args < candidate[:arity] - 1)
             static_info = candidate
         guard += 1
     # An exact-arity registry miss on a class that declares this static at
     # some other arity is an arity error, not a reason to fall back to
     # dynamic dispatch (which would drop or nil-pad the arguments).
-    if static_info == nil && method_name != "new" && ctx[:mod][:known_classes][recv_name] != nil
-      check_static_method_arity_miss(ctx, node, recv_name, method_name, node.args.size())
+    if static_info == nil && method_name != "new" && cmod[:known_classes][recv_name] != nil
+      check_static_method_arity_miss(ctx, node, recv_name, method_name, n_node_args)
     math_intrinsic_runtime = nil
     if recv_name == "Math"
-      math_intrinsic_runtime = math_intrinsic_runtime_name(method_name, node.args.size())
+      math_intrinsic_runtime = math_intrinsic_runtime_name(method_name, n_node_args)
     lower_math_intrinsic = math_intrinsic_runtime != nil
     if static_info != nil && !lower_math_intrinsic
       return lower_direct_static_method_call(ctx, static_info, recv_node, node.args, node.block)
@@ -1083,36 +1165,41 @@
     # w_method_lookup does. Classes with no `-> new` anywhere are left to the
     # runtime's own constructor diagnostic (it raises when arguments are
     # passed with nothing to receive them).
-    if method_name == "new" && node.block == nil && ctx[:mod][:known_classes][recv_name] != nil
+    if method_name == "new" && node.block == nil && cmod[:known_classes][recv_name] != nil
       ctor_ast = nil
       cur_cls = recv_name
       guard = 0
+      method_asts = cmod[:class_method_asts]
+      super_names = cmod[:class_super_names]
+      new_arity_suffix = ".new/" + n_node_args.to_s()
       while ctor_ast == nil && cur_cls != nil && guard < 64
-        ctor_ast = ctx[:mod][:class_method_asts][cur_cls + ".new/" + node.args.size().to_s()]
+        ctor_ast = method_asts[cur_cls + new_arity_suffix]
         if ctor_ast == nil
-          ctor_ast = ctx[:mod][:class_method_asts][cur_cls + ".new"]
-        cur_cls = ctx[:mod][:class_super_names][cur_cls]
+          ctor_ast = method_asts[cur_cls + ".new"]
+        cur_cls = super_names[cur_cls]
         guard += 1
       if ctor_ast != nil && ctor_ast.params != nil
+        ctor_params = ctor_ast.params
+        n_ctor_params = ctor_params.size()
         required = 0
         variadic = false
         pi = 0
-        while pi < ctor_ast.params.size()
-          p = ctor_ast.params[pi]
+        while pi < n_ctor_params
+          p = ctor_params[pi]
           if is_ast_node?(p)
             if p.splat == true
               variadic = true
             if p.default == nil && p.keyword != true && p.block_param != true && p.splat != true && !variadic
               required += 1
           pi += 1
-        if !variadic && node.args.size() < required
-          raise compile_error_for_node(:E_LOWER_CTOR_ARITY, recv_name + ".new requires " + required.to_s() + " argument" + (required == 1 ? "" : "s") + ", got " + node.args.size().to_s() + " — a missing constructor argument is padded with nil, leaving the field unset", ctx[:source_path], node)
+        if !variadic && n_node_args < required
+          raise compile_error_for_node(:E_LOWER_CTOR_ARITY, recv_name + ".new requires " + required.to_s() + " argument" + (required == 1 ? "" : "s") + ", got " + n_node_args.to_s() + " — a missing constructor argument is padded with nil, leaving the field unset", ctx[:source_path], node)
         # Too MANY arguments is an error as well (the dispatcher would drop
         # the extras). The fallback base-key AST above may be just ONE of
         # several arity overloads of `new`, so decide against every `new`
         # definition on the chain (same helper as instance methods).
         if !variadic
-          check_instance_method_arity(ctx, node, {class_name: recv_name, certainty: :exact}, "new", node.args.size())
+          check_instance_method_arity(ctx, node, {class_name: recv_name, certainty: :exact}, "new", n_node_args)
 
     # File module methods → direct runtime calls
     if recv_name == "File"
@@ -1174,13 +1261,14 @@
         emit_wire_call_direct_i64(wfn, nil, [path_reg], nil, nil, "__w_file_expand_path", nil, nil, temp)
         return typed_value(:i64, temp)
       if method_name == "join"
-        if args.size() == 0
+        n_args = args.size()
+        if n_args == 0
           empty = Tungsten:AST:String.new("")
           return lower_expression(ctx, empty)
         first = lower_expression(ctx, args[0])
         joined_reg = ensure_i64_value(wfn, first)
         i = 1
-        while i < args.size()
+        while i < n_args
           val = lower_expression(ctx, args[i])
           next_reg = ensure_i64_value(wfn, val)
           temp = next_temp(wfn)
@@ -1353,12 +1441,14 @@
       ctx[:var_types][param_name] = :int
 
     # Lower block body inline
-    if block.body != nil
+    blk_body = block.body
+    if blk_body != nil
+      n_blk_body = blk_body.size()
       bi = 0
-      while bi < block.body.size()
+      while bi < n_blk_body
         if block_terminated(wfn)
           break
-        lower_statement(ctx, block.body[bi])
+        lower_statement(ctx, blk_body[bi])
         bi += 1
 
     if !block_terminated(wfn)
@@ -1368,8 +1458,9 @@
       back_label = body_label
       body_blk = current_block(wfn)
       body_instrs = body_blk[:instructions]
+      n_body_instrs = body_instrs.size()
       bi2 = 0
-      while bi2 < body_instrs.size()
+      while bi2 < n_body_instrs
         inst2 = body_instrs[bi2]
         if wire_kind(inst2) in (:add_i48_checked :sub_i48_checked :mul_i48_checked)
           back_label = "ovf.merge." + inst2[:block_id].to_s()
@@ -1380,16 +1471,21 @@
 
       # Patch the phi's back-edge label
       hdr_block = nil
+      wfn_blocks = wfn[:blocks]
+      n_wfn_blocks = wfn_blocks.size()
       bi = 0
-      while bi < wfn[:blocks].size()
-        if wfn[:blocks][bi][:label] == header_label
-          hdr_block = wfn[:blocks][bi]
+      while bi < n_wfn_blocks
+        cand_blk = wfn_blocks[bi]
+        if cand_blk[:label] == header_label
+          hdr_block = cand_blk
           break
         bi += 1
       if hdr_block != nil
+        hdr_instrs = hdr_block[:instructions]
+        n_hdr_instrs = hdr_instrs.size()
         pi = 0
-        while pi < hdr_block[:instructions].size()
-          inst = hdr_block[:instructions][pi]
+        while pi < n_hdr_instrs
+          inst = hdr_instrs[pi]
           if wire_kind(inst) == :phi_i64 && wire_get(inst, :b_label) == body_label
             wire_set(inst, :b_label, back_label)
           pi += 1
@@ -2373,9 +2469,11 @@
       positional_block_arg = false
       if method_takes_block && !caller_has_block
         positional_count = 0
+        m_params = method_ast.params
+        n_m_params = m_params.size()
         mpi = 0
-        while mpi < method_ast.params.size()
-          if method_ast.params[mpi].block_param != true
+        while mpi < n_m_params
+          if m_params[mpi].block_param != true
             positional_count += 1
           mpi += 1
         positional_block_arg = node.args.size() == positional_count + 1
@@ -2403,9 +2501,11 @@
             receiver_val = lower_expression(ctx, recv_node)
             receiver_reg = ensure_i64_value(wfn, receiver_val)
             spec_args = [receiver_reg]
+            node_args = node.args
+            n_node_args = node_args.size()
             si = 0
-            while si < node.args.size()
-              arg_val = lower_expression(ctx, node.args[si])
+            while si < n_node_args
+              arg_val = lower_expression(ctx, node_args[si])
               spec_args.push(ensure_i64_value(wfn, arg_val))
               si += 1
             # No closure arg — yields are inlined into the body.
@@ -2420,9 +2520,11 @@
           receiver_val = lower_expression(ctx, recv_node)
           receiver_reg = ensure_i64_value(wfn, receiver_val)
           spec_args = [receiver_reg]
+          node_args = node.args
+          n_node_args = node_args.size()
           si = 0
-          while si < node.args.size()
-            arg_val = lower_expression(ctx, node.args[si])
+          while si < n_node_args
+            arg_val = lower_expression(ctx, node_args[si])
             spec_args.push(ensure_i64_value(wfn, arg_val))
             si += 1
           if caller_has_block
@@ -2460,9 +2562,10 @@
 
   # Lower args
   call_args = node.args
+  n_call_args = call_args.size()
   arg_regs = []
   i = 0
-  while i < call_args.size()
+  while i < n_call_args
     val = lower_expression(ctx, call_args[i])
     arg_regs.push(ensure_i64_value(wfn, val))
     i += 1
@@ -2485,12 +2588,12 @@
   if ctx[:mod][:method_tables_locked] == true && node.block == nil
     core_fact = receiver_core_tagged_class_fact(ctx, recv_type)
     if core_fact != nil
-      core_fn = locked_direct_method_fn(ctx[:mod], core_fact[:class_name], method_name, node.args.size())
+      core_fn = locked_direct_method_fn(ctx[:mod], core_fact[:class_name], method_name, n_call_args)
       if core_fn != nil
         core_intrinsic = core_tagged_spaceship_intrinsic?(ctx, node, method_name, core_fn)
         # BigInt#abs from Core is an O(1) alias flip; call the runtime alias
         # entry instead of the compiled source worker.
-        if core_fact[:class_name] == "BigInt" && method_name == "abs" && node.args.size() == 0 && env("TUNGSTEN_BIGINT_TYPED_ABS") != "0" && core_operator_untouched?(ctx[:mod], "BigInt", "abs")
+        if core_fact[:class_name] == "BigInt" && method_name == "abs" && n_call_args == 0 && env("TUNGSTEN_BIGINT_TYPED_ABS") != "0" && core_operator_untouched?(ctx[:mod], "BigInt", "abs")
           core_fn = "w_bigint_abs_alias"
         core_guard = emit_core_tag_guard_fast_arm(ctx, node, receiver_reg, arg_regs, core_fn, core_fact[:entry], core_intrinsic)
   if core_guard == nil && ctx[:mod][:method_tables_locked] == true && node.block == nil
@@ -2498,9 +2601,9 @@
     if locked_fact == nil
       locked_fact = receiver_source_class_fact(ctx, recv_node)
     if locked_fact != nil && locked_fact[:stable] == true
-      targets = locked_class_set_targets(ctx[:mod], locked_fact, method_name, node.args.size())
+      targets = locked_class_set_targets(ctx[:mod], locked_fact, method_name, n_call_args)
       if targets == nil && locked_fact[:certainty] == :exact
-        check_instance_method_arity(ctx, node, locked_fact, method_name, node.args.size())
+        check_instance_method_arity(ctx, node, locked_fact, method_name, n_call_args)
       if targets != nil && targets.size() > 0
         if targets.size() == 1 || locked_targets_share_fn?(targets)
           return emit_locked_direct_method_call(ctx, node, receiver_reg, arg_regs, targets[0][:fn_name])
@@ -2546,6 +2649,7 @@
   construct_fn = nil
   construct_class = nil
   if node.block == nil && recv_node != nil && is_ast_node?(recv_node)
+    cmod = ctx[:mod]
     exact_cls = nil
     rk2 = ast_kind(recv_node)
     class_fact = receiver_source_class_fact(ctx, recv_node)
@@ -2577,14 +2681,14 @@
           # normally.
           if ctx[:class_name] != nil && ctx[:class_name].starts_with?(declared_name + "$")
             declared_name = ctx[:class_name]
-          if normal_source_instance_class?(ctx[:mod], declared_name)
+          if normal_source_instance_class?(cmod, declared_name)
             exact_cls = declared_name
     elsif rk2 == :ivar && ctx[:class_name] != nil
-      exact_ivars2 = ctx[:mod][:exact_source_ivar_types][ctx[:class_name]]
+      exact_ivars2 = cmod[:exact_source_ivar_types][ctx[:class_name]]
       if exact_ivars2 != nil
         exact_cls = exact_ivars2[recv_node.name]
     if exact_cls != nil
-      dfn = ctx[:mod][:class_method_fn_names][exact_cls + "." + method_name + "/" + node.args.size().to_s()]
+      dfn = cmod[:class_method_fn_names][exact_cls + "." + method_name + "/" + n_call_args.to_s()]
       if dfn != nil
         devirt_fn = dfn
         devirt_class = exact_cls
@@ -2604,29 +2708,33 @@
     # one WObject per iteration.
     construct_owner = nil
     if method_name == "new" && node.block == nil
-      if rk2 == :var && recv_node.name == "class" && ctx[:class_name] != nil && normal_source_instance_class?(ctx[:mod], ctx[:class_name])
+      if rk2 == :var && recv_node.name == "class" && ctx[:class_name] != nil && normal_source_instance_class?(cmod, ctx[:class_name])
         construct_owner = ctx[:class_name]
       elsif rk2 == :class_ref && recv_node.name != nil
-        construct_owner = resolve_exact_source_class_name(ctx[:mod], ctx[:class_name], recv_node.name)
+        construct_owner = resolve_exact_source_class_name(cmod, ctx[:class_name], recv_node.name)
     if construct_owner != nil
       static_new = false
       scan_class = construct_owner
       guard = 0
+      class_static_new = cmod[:class_static_new]
+      super_names = cmod[:class_super_names]
       while scan_class != nil && guard < 64
-        if ctx[:mod][:class_static_new][scan_class] == true
+        if class_static_new[scan_class] == true
           static_new = true
           break
-        scan_class = ctx[:mod][:class_super_names][scan_class]
+        scan_class = super_names[scan_class]
         guard += 1
       ctor_owner = construct_owner
       guard = 0
+      ctor_fn_names = cmod[:class_constructor_fn_names]
+      new_arity_suffix = ".new/" + n_call_args.to_s()
       while !static_new && ctor_owner != nil && guard < 64
-        ctor_fn = ctx[:mod][:class_constructor_fn_names][ctor_owner + ".new/" + node.args.size().to_s()]
+        ctor_fn = ctor_fn_names[ctor_owner + new_arity_suffix]
         if ctor_fn != nil
           construct_fn = ctor_fn
-          construct_class = construct_owner
+          construct_class = ctor_owner
           break
-        ctor_owner = ctx[:mod][:class_super_names][ctor_owner]
+        ctor_owner = super_names[ctor_owner]
         guard += 1
 
   wire_record_dynamic_method_call(wfn, method_name, arg_regs.size())
@@ -2635,7 +2743,7 @@
   # contract. The send remains overridable, so verify the returned storage
   # width once before carrying that declared type into `b = @1.elements;
   # b[i]`; this keeps subclasses safe without paying dispatch per element.
-  if recv_type != nil && node.args.size() == 0 && ctx[:mod][:view_layouts] != nil
+  if recv_type != nil && n_call_args == 0 && ctx[:mod][:view_layouts] != nil
     recv_layout = ctx[:mod][:view_layouts][recv_type.to_s()]
     if recv_layout != nil
       recv_field = recv_layout[method_name]

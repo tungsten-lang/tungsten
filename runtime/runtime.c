@@ -2249,13 +2249,30 @@ WValue bigint_finish_one_limb_sized(uint64_t magnitude, int32_t signed_size) {
 static inline __attribute__((always_inline))
 WValue bigint_finish_sub1_positive_one_limb_sized(
     uint64_t magnitude, int32_t signed_size) {
-    if (magnitude <= (uint64_t)W_INT48_MAX) {
+    if (__builtin_expect(magnitude <= (uint64_t)W_INT48_MAX, 0)) {
         int64_t value = (int64_t)magnitude;
         return w_box_int(signed_size < 0 ? -value : value);
     }
     WBigint *result = bigint_alloc_raw_hot_sub1_exact_one();
     result->limbs[0] = magnitude;
     result->size = signed_size;
+    return bigint_box(result);
+}
+
+static inline __attribute__((always_inline))
+WValue bigint_add1_positive_one_limb(uint64_t a, uint64_t word) {
+    uint64_t sum = a + word;
+    uint64_t carry = sum < a;
+    if (__builtin_expect(carry != 0, 1)) {
+        WBigint *result = bigint_alloc_raw_hot_exact(2U);
+        result->limbs[0] = sum;
+        result->limbs[1] = 1;
+        result->size = 2;
+        return bigint_box(result);
+    }
+    WBigint *result = bigint_alloc_raw_hot_sub1_exact_one();
+    result->limbs[0] = sum;
+    result->size = 1;
     return bigint_box(result);
 }
 
@@ -2841,41 +2858,8 @@ static const uint64_t *integer_limbs(WValue v, uint64_t *stack_limb, int32_t *ou
 #ifndef BN_ADD_UI_POSITIVE_11_AFTER
 #define BN_ADD_UI_POSITIVE_11_AFTER 1
 #endif
-static inline __attribute__((always_inline))
-WValue bigint_add_ui_any(WValue a, uint64_t word) {
-    if (word == 0) {
-        if (w_is_bigint(a)) w_bigint_mark_shared(w_as_bigint(a));
-        return a;
-    }
-#if BN_WORD_UI_POSITIVE_FAST
-    /* Tag and sign in one compare: bit 47 is the tag-sign overlay and sits
-     * immediately below the 16 tag bits, so (v >> 47) is a single constant
-     * exactly for positive bigints. */
-    if ((a >> 47) == (W_TAG_BIGINT >> 47)) {
-        WBigint *ba = w_as_bigint(a);
-        int32_t n = ba->size;
-#if defined(__aarch64__) && BN_ADDSUB_WORD_A64_FIXED
-        if (n == 3) {
-            WBigint *r = bigint_alloc_raw_hot_exact(4U);
-            uint64_t carry = bn_add_word3_a64_fixed(r->limbs, ba->limbs, word);
-            r->limbs[3] = carry;
-            r->size = 3 + (int32_t)carry;
-            return bigint_box(r);
-        }
-#endif
-        if (n >= 2) {
-            WBigint *r = bigint_alloc_raw_hot(n);
-            return bigint_add_word_into(ba->limbs, n, 0, word, r);
-        }
-#if BN_ADD_UI_POSITIVE_11_AFTER
-        /* Keep the one-limb leaf after the wide return so the streamed hot
-         * path does not acquire another predicate or a larger live block. */
-        if (n == 1)
-            return bigint_add_one_limb_magnitudes(
-                ba->limbs[0], 0, word, 0);
-#endif
-    }
-#endif
+static __attribute__((noinline))
+WValue bigint_add_ui_cold(WValue a, uint64_t word) {
     uint64_t scratch;
     int32_t alen;
     const uint64_t *al = integer_limbs(a, &scratch, &alen);
@@ -2889,7 +2873,7 @@ WValue bigint_add_ui_any(WValue a, uint64_t word) {
 }
 
 static inline __attribute__((always_inline))
-WValue bigint_sub_ui_any(WValue a, uint64_t word) {
+WValue bigint_add_ui_any(WValue a, uint64_t word) {
     if (word == 0) {
         if (w_is_bigint(a)) w_bigint_mark_shared(w_as_bigint(a));
         return a;
@@ -2898,31 +2882,35 @@ WValue bigint_sub_ui_any(WValue a, uint64_t word) {
     /* Tag and sign in one compare: bit 47 is the tag-sign overlay and sits
      * immediately below the 16 tag bits, so (v >> 47) is a single constant
      * exactly for positive bigints. */
-    if ((a >> 47) == (W_TAG_BIGINT >> 47)) {
+    if (__builtin_expect((a >> 47) == (W_TAG_BIGINT >> 47), 1)) {
         WBigint *ba = w_as_bigint(a);
         int32_t n = ba->size;
-#if defined(__aarch64__) && BN_ADDSUB_WORD_A64_FIXED
-        if (n == 3) {
-            WBigint *r = bigint_alloc_raw_hot_exact(4U);
-            uint64_t top_zero = bn_sub_word3_a64_fixed(r->limbs, ba->limbs, word);
-            r->size = 3 - (int32_t)top_zero;
-            return bigint_box(r);
-        }
-#endif
         if (n >= 2) {
+#if defined(__aarch64__) && BN_ADDSUB_WORD_A64_FIXED
+            if (n == 3) {
+                WBigint *r = bigint_alloc_raw_hot_exact(4U);
+                uint64_t carry = bn_add_word3_a64_fixed(r->limbs, ba->limbs, word);
+                r->limbs[3] = carry;
+                r->size = 3 + (int32_t)carry;
+                return bigint_box(r);
+            }
+#endif
             WBigint *r = bigint_alloc_raw_hot(n);
-            return bigint_sub_word_into(r, ba->limbs, n, 0, word);
+            return bigint_add_word_into(ba->limbs, n, 0, word, r);
         }
 #if BN_ADD_UI_POSITIVE_11_AFTER
-        /* Same layout rule as the add entry: the one-limb leaf sits after
-         * the wide return so the streamed hot path does not acquire another
-         * predicate — without this, one-limb subtracts fell through to the
-         * generic decode and re-derived the operand view. */
-        if (n == 1)
-            return bigint_sub1_positive_one_limb(ba->limbs[0], word);
+        /* Keep the one-limb leaf after the wide return so the streamed hot
+         * path does not acquire another predicate or a larger live block. */
+        if (__builtin_expect(n == 1, 1))
+            return bigint_add1_positive_one_limb(ba->limbs[0], word);
 #endif
     }
 #endif
+    return bigint_add_ui_cold(a, word);
+}
+
+static __attribute__((noinline))
+WValue bigint_sub_ui_cold(WValue a, uint64_t word) {
     uint64_t scratch;
     int32_t alen;
     const uint64_t *al = integer_limbs(a, &scratch, &alen);
@@ -2933,6 +2921,44 @@ WValue bigint_sub_ui_any(WValue a, uint64_t word) {
         return bigint_add_one_limb_magnitudes(
             al[0], negative, word, 1);
     return bigint_addsub_word(al, n, negative, word, 1);
+}
+
+static inline __attribute__((always_inline))
+WValue bigint_sub_ui_any(WValue a, uint64_t word) {
+    if (word == 0) {
+        if (w_is_bigint(a)) w_bigint_mark_shared(w_as_bigint(a));
+        return a;
+    }
+#if BN_WORD_UI_POSITIVE_FAST
+    /* Tag and sign in one compare: bit 47 is the tag-sign overlay and sits
+     * immediately below the 16 tag bits, so (v >> 47) is a single constant
+     * exactly for positive bigints. */
+    if (__builtin_expect((a >> 47) == (W_TAG_BIGINT >> 47), 1)) {
+        WBigint *ba = w_as_bigint(a);
+        int32_t n = ba->size;
+        if (n >= 2) {
+#if defined(__aarch64__) && BN_ADDSUB_WORD_A64_FIXED
+            if (n == 3) {
+                WBigint *r = bigint_alloc_raw_hot_exact(4U);
+                uint64_t top_zero = bn_sub_word3_a64_fixed(r->limbs, ba->limbs, word);
+                r->size = 3 - (int32_t)top_zero;
+                return bigint_box(r);
+            }
+#endif
+            WBigint *r = bigint_alloc_raw_hot(n);
+            return bigint_sub_word_into(r, ba->limbs, n, 0, word);
+        }
+#if BN_ADD_UI_POSITIVE_11_AFTER
+        /* Same layout rule as the add entry: the one-limb leaf sits after
+         * the wide return so the streamed hot path does not acquire another
+         * predicate — without this, one-limb subtracts fell through to the
+         * generic decode and re-derived the operand view. */
+        if (__builtin_expect(n == 1, 1))
+            return bigint_sub1_positive_one_limb(ba->limbs[0], word);
+#endif
+    }
+#endif
+    return bigint_sub_ui_cold(a, word);
 }
 
 /* ---- Magnitude operations (unsigned) ---- */
@@ -3250,10 +3276,11 @@ BN_FIXED_ADDSUB(                                                          \
     next_op " x15, x7, x11\n\t",                                        \
     "stp x12, x13, [%[rp], #160]\n\t"                                   \
     "stp x14, x15, [%[rp], #176]\n\t"                                   \
-    "cset %[flag], " condition)
+    condition)
 
-BN_FIXED_ADDSUB24(bn_add24_fixed, "adds", "adcs", "hs")
-BN_FIXED_ADDSUB24(bn_sub24_fixed, "subs", "sbcs", "lo")
+BN_FIXED_ADDSUB24(bn_add24_fixed, "adds", "adcs", "cset %[flag], hs")
+BN_FIXED_ADDSUB24(bn_sub24_fixed, "subs", "sbcs", "cset %[flag], lo")
+BN_FIXED_ADDSUB24(bn_sub24_top_fixed, "subs", "sbcs", "mov %[flag], x15")
 
 #undef BN_FIXED_ADDSUB24
 
@@ -3270,7 +3297,7 @@ BN_FIXED_ADDSUB24(bn_sub24_fixed, "subs", "sbcs", "lo")
     "stp x12, x13, [%[rp], #" #base "]\n\t"                              \
     "stp x14, x15, [%[rp], #" #base "+16]\n\t"
 
-#define BN_FIXED_ADDSUB32(name, first_op, next_op, condition)             \
+#define BN_FIXED_ADDSUB32(name, first_op, next_op, finish_insn)            \
 BN_FIXED_ADDSUB(                                                          \
     name,                                                                 \
     "ldp x4, x5, [%[ap]]\n\t"                                           \
@@ -3299,10 +3326,11 @@ BN_FIXED_ADDSUB(                                                          \
     next_op " x15, x7, x11\n\t",                                        \
     "stp x12, x13, [%[rp], #224]\n\t"                                   \
     "stp x14, x15, [%[rp], #240]\n\t"                                   \
-    "cset %[flag], " condition)
+    finish_insn)
 
-BN_FIXED_ADDSUB32(bn_add32_fixed, "adds", "adcs", "hs")
-BN_FIXED_ADDSUB32(bn_sub32_fixed, "subs", "sbcs", "lo")
+BN_FIXED_ADDSUB32(bn_add32_fixed, "adds", "adcs", "cset %[flag], hs")
+BN_FIXED_ADDSUB32(bn_sub32_fixed, "subs", "sbcs", "cset %[flag], lo")
+BN_FIXED_ADDSUB32(bn_sub32_top_fixed, "subs", "sbcs", "mov %[flag], x15")
 
 #undef BN_FIXED_ADDSUB32
 
@@ -3320,7 +3348,7 @@ BN_FIXED_ADDSUB32(bn_sub32_fixed, "subs", "sbcs", "lo")
     "stp x12, x13, [%[rp]]\n\t"                                         \
     "stp x14, x15, [%[rp], #16]\n\t"
 
-#define BN_FIXED_ADDSUB_TAIL(next_op, base, condition)                    \
+#define BN_FIXED_ADDSUB_TAIL(next_op, base, finish_insn)                   \
     "ldp x4, x5, [%[ap], #" #base "]\n\t"                               \
     "ldp x6, x7, [%[ap], #" #base "+16]\n\t"                            \
     "ldp x8, x9, [%[bp], #" #base "]\n\t"                               \
@@ -3331,9 +3359,9 @@ BN_FIXED_ADDSUB32(bn_sub32_fixed, "subs", "sbcs", "lo")
     next_op " x15, x7, x11\n\t"                                         \
     "stp x12, x13, [%[rp], #" #base "]\n\t"                             \
     "stp x14, x15, [%[rp], #" #base "+16]\n\t"                          \
-    "cset %[flag], " condition
+    finish_insn
 
-#define BN_FIXED_ADDSUB40(name, first_op, next_op, condition)             \
+#define BN_FIXED_ADDSUB40(name, first_op, next_op, finish_insn)            \
 BN_FIXED_ADDSUB(                                                          \
     name,                                                                 \
     BN_FIXED_ADDSUB_HEAD(first_op, next_op),                              \
@@ -3345,9 +3373,9 @@ BN_FIXED_ADDSUB(                                                          \
     BN_FIXED_ADDSUB32_GROUP(next_op, 192)                                 \
     BN_FIXED_ADDSUB32_GROUP(next_op, 224)                                 \
     BN_FIXED_ADDSUB32_GROUP(next_op, 256),                                \
-    BN_FIXED_ADDSUB_TAIL(next_op, 288, condition))
+    BN_FIXED_ADDSUB_TAIL(next_op, 288, finish_insn))
 
-#define BN_FIXED_ADDSUB48(name, first_op, next_op, condition)             \
+#define BN_FIXED_ADDSUB48(name, first_op, next_op, finish_insn)            \
 BN_FIXED_ADDSUB(                                                          \
     name,                                                                 \
     BN_FIXED_ADDSUB_HEAD(first_op, next_op),                              \
@@ -3361,9 +3389,9 @@ BN_FIXED_ADDSUB(                                                          \
     BN_FIXED_ADDSUB32_GROUP(next_op, 256)                                 \
     BN_FIXED_ADDSUB32_GROUP(next_op, 288)                                 \
     BN_FIXED_ADDSUB32_GROUP(next_op, 320),                                \
-    BN_FIXED_ADDSUB_TAIL(next_op, 352, condition))
+    BN_FIXED_ADDSUB_TAIL(next_op, 352, finish_insn))
 
-#define BN_FIXED_ADDSUB64(name, first_op, next_op, condition)             \
+#define BN_FIXED_ADDSUB64(name, first_op, next_op, finish_insn)            \
 BN_FIXED_ADDSUB(                                                          \
     name,                                                                 \
     BN_FIXED_ADDSUB_HEAD(first_op, next_op),                              \
@@ -3381,14 +3409,17 @@ BN_FIXED_ADDSUB(                                                          \
     BN_FIXED_ADDSUB32_GROUP(next_op, 384)                                 \
     BN_FIXED_ADDSUB32_GROUP(next_op, 416)                                 \
     BN_FIXED_ADDSUB32_GROUP(next_op, 448),                                \
-    BN_FIXED_ADDSUB_TAIL(next_op, 480, condition))
+    BN_FIXED_ADDSUB_TAIL(next_op, 480, finish_insn))
 
-BN_FIXED_ADDSUB40(bn_add40_fixed, "adds", "adcs", "hs")
-BN_FIXED_ADDSUB40(bn_sub40_fixed, "subs", "sbcs", "lo")
-BN_FIXED_ADDSUB48(bn_add48_fixed, "adds", "adcs", "hs")
-BN_FIXED_ADDSUB48(bn_sub48_fixed, "subs", "sbcs", "lo")
-BN_FIXED_ADDSUB64(bn_add64_fixed, "adds", "adcs", "hs")
-BN_FIXED_ADDSUB64(bn_sub64_fixed, "subs", "sbcs", "lo")
+BN_FIXED_ADDSUB40(bn_add40_fixed, "adds", "adcs", "cset %[flag], hs")
+BN_FIXED_ADDSUB40(bn_sub40_fixed, "subs", "sbcs", "cset %[flag], lo")
+BN_FIXED_ADDSUB40(bn_sub40_top_fixed, "subs", "sbcs", "mov %[flag], x15")
+BN_FIXED_ADDSUB48(bn_add48_fixed, "adds", "adcs", "cset %[flag], hs")
+BN_FIXED_ADDSUB48(bn_sub48_fixed, "subs", "sbcs", "cset %[flag], lo")
+BN_FIXED_ADDSUB48(bn_sub48_top_fixed, "subs", "sbcs", "mov %[flag], x15")
+BN_FIXED_ADDSUB64(bn_add64_fixed, "adds", "adcs", "cset %[flag], hs")
+BN_FIXED_ADDSUB64(bn_sub64_fixed, "subs", "sbcs", "cset %[flag], lo")
+BN_FIXED_ADDSUB64(bn_sub64_top_fixed, "subs", "sbcs", "mov %[flag], x15")
 
 #undef BN_FIXED_ADDSUB40
 #undef BN_FIXED_ADDSUB48
@@ -3397,153 +3428,179 @@ BN_FIXED_ADDSUB64(bn_sub64_fixed, "subs", "sbcs", "lo")
 #undef BN_FIXED_ADDSUB_TAIL
 #undef BN_FIXED_ADDSUB32_GROUP
 
-BN_FIXED_ADDSUB(
-    bn_sub3_fixed,
-    "ldp x4, x5, [%[ap]]\n\t"
-    "ldr x6, [%[ap], #16]\n\t"
-    "ldp x8, x9, [%[bp]]\n\t"
-    "ldr x10, [%[bp], #16]\n\t",
-    "subs x12, x4, x8\n\t"
-    "sbcs x13, x5, x9\n\t"
-    "sbcs x14, x6, x10\n\t",
-    "stp x12, x13, [%[rp]]\n\t"
-    "str x14, [%[rp], #16]\n\t"
-    "cset %[flag], lo")
+#define BN_FIXED_SUB3(name, finish_insn)                                  \
+BN_FIXED_ADDSUB(                                                          \
+    name,                                                                 \
+    "ldp x4, x5, [%[ap]]\n\t"                                           \
+    "ldr x6, [%[ap], #16]\n\t"                                          \
+    "ldp x8, x9, [%[bp]]\n\t"                                           \
+    "ldr x10, [%[bp], #16]\n\t",                                        \
+    "subs x12, x4, x8\n\t"                                              \
+    "sbcs x13, x5, x9\n\t"                                              \
+    "sbcs x14, x6, x10\n\t",                                            \
+    "stp x12, x13, [%[rp]]\n\t"                                         \
+    "str x14, [%[rp], #16]\n\t"                                         \
+    finish_insn)
 
-BN_FIXED_ADDSUB(
-    bn_sub4_fixed,
-    "ldp x4, x5, [%[ap]]\n\t"
-    "ldp x6, x7, [%[ap], #16]\n\t"
-    "ldp x8, x9, [%[bp]]\n\t"
-    "ldp x10, x11, [%[bp], #16]\n\t",
-    "subs x12, x4, x8\n\t"
-    "sbcs x13, x5, x9\n\t"
-    "sbcs x14, x6, x10\n\t"
-    "sbcs x15, x7, x11\n\t",
-    "stp x12, x13, [%[rp]]\n\t"
-    "stp x14, x15, [%[rp], #16]\n\t"
-    "cset %[flag], lo")
+#define BN_FIXED_SUB4(name, finish_insn)                                  \
+BN_FIXED_ADDSUB(                                                          \
+    name,                                                                 \
+    "ldp x4, x5, [%[ap]]\n\t"                                           \
+    "ldp x6, x7, [%[ap], #16]\n\t"                                      \
+    "ldp x8, x9, [%[bp]]\n\t"                                           \
+    "ldp x10, x11, [%[bp], #16]\n\t",                                   \
+    "subs x12, x4, x8\n\t"                                              \
+    "sbcs x13, x5, x9\n\t"                                              \
+    "sbcs x14, x6, x10\n\t"                                             \
+    "sbcs x15, x7, x11\n\t",                                            \
+    "stp x12, x13, [%[rp]]\n\t"                                         \
+    "stp x14, x15, [%[rp], #16]\n\t"                                    \
+    finish_insn)
 
-BN_FIXED_ADDSUB(
-    bn_sub6_fixed,
-    "ldp x4, x5, [%[ap]]\n\t"
-    "ldp x6, x7, [%[ap], #16]\n\t"
-    "ldp x8, x9, [%[bp]]\n\t"
-    "ldp x10, x11, [%[bp], #16]\n\t",
-    "subs x12, x4, x8\n\t"
-    "sbcs x13, x5, x9\n\t"
-    "sbcs x14, x6, x10\n\t"
-    "sbcs x15, x7, x11\n\t"
-    "stp x12, x13, [%[rp]]\n\t"
-    "stp x14, x15, [%[rp], #16]\n\t"
-    "ldp x4, x5, [%[ap], #32]\n\t"
-    "ldp x8, x9, [%[bp], #32]\n\t"
-    "sbcs x12, x4, x8\n\t"
-    "sbcs x13, x5, x9\n\t",
-    "stp x12, x13, [%[rp], #32]\n\t"
-    "cset %[flag], lo")
+#define BN_FIXED_SUB6(name, finish_insn)                                  \
+BN_FIXED_ADDSUB(                                                          \
+    name,                                                                 \
+    "ldp x4, x5, [%[ap]]\n\t"                                           \
+    "ldp x6, x7, [%[ap], #16]\n\t"                                      \
+    "ldp x8, x9, [%[bp]]\n\t"                                           \
+    "ldp x10, x11, [%[bp], #16]\n\t",                                   \
+    "subs x12, x4, x8\n\t"                                              \
+    "sbcs x13, x5, x9\n\t"                                              \
+    "sbcs x14, x6, x10\n\t"                                             \
+    "sbcs x15, x7, x11\n\t"                                             \
+    "stp x12, x13, [%[rp]]\n\t"                                         \
+    "stp x14, x15, [%[rp], #16]\n\t"                                    \
+    "ldp x4, x5, [%[ap], #32]\n\t"                                      \
+    "ldp x8, x9, [%[bp], #32]\n\t"                                      \
+    "sbcs x12, x4, x8\n\t"                                              \
+    "sbcs x13, x5, x9\n\t",                                             \
+    "stp x12, x13, [%[rp], #32]\n\t"                                    \
+    finish_insn)
 
-BN_FIXED_ADDSUB(
-    bn_sub8_fixed,
-    "ldp x4, x5, [%[ap]]\n\t"
-    "ldp x6, x7, [%[ap], #16]\n\t"
-    "ldp x8, x9, [%[bp]]\n\t"
-    "ldp x10, x11, [%[bp], #16]\n\t",
-    "subs x12, x4, x8\n\t"
-    "sbcs x13, x5, x9\n\t"
-    "sbcs x14, x6, x10\n\t"
-    "sbcs x15, x7, x11\n\t"
-    "stp x12, x13, [%[rp]]\n\t"
-    "stp x14, x15, [%[rp], #16]\n\t"
-    "ldp x4, x5, [%[ap], #32]\n\t"
-    "ldp x6, x7, [%[ap], #48]\n\t"
-    "ldp x8, x9, [%[bp], #32]\n\t"
-    "ldp x10, x11, [%[bp], #48]\n\t"
-    "sbcs x12, x4, x8\n\t"
-    "sbcs x13, x5, x9\n\t"
-    "sbcs x14, x6, x10\n\t"
-    "sbcs x15, x7, x11\n\t",
-    "stp x12, x13, [%[rp], #32]\n\t"
-    "stp x14, x15, [%[rp], #48]\n\t"
-    "cset %[flag], lo")
+#define BN_FIXED_SUB8(name, finish_insn)                                  \
+BN_FIXED_ADDSUB(                                                          \
+    name,                                                                 \
+    "ldp x4, x5, [%[ap]]\n\t"                                           \
+    "ldp x6, x7, [%[ap], #16]\n\t"                                      \
+    "ldp x8, x9, [%[bp]]\n\t"                                           \
+    "ldp x10, x11, [%[bp], #16]\n\t",                                   \
+    "subs x12, x4, x8\n\t"                                              \
+    "sbcs x13, x5, x9\n\t"                                              \
+    "sbcs x14, x6, x10\n\t"                                             \
+    "sbcs x15, x7, x11\n\t"                                             \
+    "stp x12, x13, [%[rp]]\n\t"                                         \
+    "stp x14, x15, [%[rp], #16]\n\t"                                    \
+    "ldp x4, x5, [%[ap], #32]\n\t"                                      \
+    "ldp x6, x7, [%[ap], #48]\n\t"                                      \
+    "ldp x8, x9, [%[bp], #32]\n\t"                                      \
+    "ldp x10, x11, [%[bp], #48]\n\t"                                    \
+    "sbcs x12, x4, x8\n\t"                                              \
+    "sbcs x13, x5, x9\n\t"                                              \
+    "sbcs x14, x6, x10\n\t"                                             \
+    "sbcs x15, x7, x11\n\t",                                            \
+    "stp x12, x13, [%[rp], #32]\n\t"                                    \
+    "stp x14, x15, [%[rp], #48]\n\t"                                    \
+    finish_insn)
 
-BN_FIXED_ADDSUB(
-    bn_sub12_fixed,
-    "ldp x4, x5, [%[ap]]\n\t"
-    "ldp x6, x7, [%[ap], #16]\n\t"
-    "ldp x8, x9, [%[bp]]\n\t"
-    "ldp x10, x11, [%[bp], #16]\n\t",
-    "subs x12, x4, x8\n\t"
-    "sbcs x13, x5, x9\n\t"
-    "sbcs x14, x6, x10\n\t"
-    "sbcs x15, x7, x11\n\t"
-    "stp x12, x13, [%[rp]]\n\t"
-    "stp x14, x15, [%[rp], #16]\n\t"
-    "ldp x4, x5, [%[ap], #32]\n\t"
-    "ldp x6, x7, [%[ap], #48]\n\t"
-    "ldp x8, x9, [%[bp], #32]\n\t"
-    "ldp x10, x11, [%[bp], #48]\n\t"
-    "sbcs x12, x4, x8\n\t"
-    "sbcs x13, x5, x9\n\t"
-    "sbcs x14, x6, x10\n\t"
-    "sbcs x15, x7, x11\n\t"
-    "stp x12, x13, [%[rp], #32]\n\t"
-    "stp x14, x15, [%[rp], #48]\n\t"
-    "ldp x4, x5, [%[ap], #64]\n\t"
-    "ldp x6, x7, [%[ap], #80]\n\t"
-    "ldp x8, x9, [%[bp], #64]\n\t"
-    "ldp x10, x11, [%[bp], #80]\n\t"
-    "sbcs x12, x4, x8\n\t"
-    "sbcs x13, x5, x9\n\t"
-    "sbcs x14, x6, x10\n\t"
-    "sbcs x15, x7, x11\n\t",
-    "stp x12, x13, [%[rp], #64]\n\t"
-    "stp x14, x15, [%[rp], #80]\n\t"
-    "cset %[flag], lo")
+#define BN_FIXED_SUB12(name, finish_insn)                                 \
+BN_FIXED_ADDSUB(                                                          \
+    name,                                                                 \
+    "ldp x4, x5, [%[ap]]\n\t"                                           \
+    "ldp x6, x7, [%[ap], #16]\n\t"                                      \
+    "ldp x8, x9, [%[bp]]\n\t"                                           \
+    "ldp x10, x11, [%[bp], #16]\n\t",                                   \
+    "subs x12, x4, x8\n\t"                                              \
+    "sbcs x13, x5, x9\n\t"                                              \
+    "sbcs x14, x6, x10\n\t"                                             \
+    "sbcs x15, x7, x11\n\t"                                             \
+    "stp x12, x13, [%[rp]]\n\t"                                         \
+    "stp x14, x15, [%[rp], #16]\n\t"                                    \
+    "ldp x4, x5, [%[ap], #32]\n\t"                                      \
+    "ldp x6, x7, [%[ap], #48]\n\t"                                      \
+    "ldp x8, x9, [%[bp], #32]\n\t"                                      \
+    "ldp x10, x11, [%[bp], #48]\n\t"                                    \
+    "sbcs x12, x4, x8\n\t"                                              \
+    "sbcs x13, x5, x9\n\t"                                              \
+    "sbcs x14, x6, x10\n\t"                                             \
+    "sbcs x15, x7, x11\n\t"                                             \
+    "stp x12, x13, [%[rp], #32]\n\t"                                    \
+    "stp x14, x15, [%[rp], #48]\n\t"                                    \
+    "ldp x4, x5, [%[ap], #64]\n\t"                                      \
+    "ldp x6, x7, [%[ap], #80]\n\t"                                      \
+    "ldp x8, x9, [%[bp], #64]\n\t"                                      \
+    "ldp x10, x11, [%[bp], #80]\n\t"                                    \
+    "sbcs x12, x4, x8\n\t"                                              \
+    "sbcs x13, x5, x9\n\t"                                              \
+    "sbcs x14, x6, x10\n\t"                                             \
+    "sbcs x15, x7, x11\n\t",                                            \
+    "stp x12, x13, [%[rp], #64]\n\t"                                    \
+    "stp x14, x15, [%[rp], #80]\n\t"                                    \
+    finish_insn)
 
-BN_FIXED_ADDSUB(
-    bn_sub16_fixed,
-    "ldp x4, x5, [%[ap]]\n\t"
-    "ldp x6, x7, [%[ap], #16]\n\t"
-    "ldp x8, x9, [%[bp]]\n\t"
-    "ldp x10, x11, [%[bp], #16]\n\t",
-    "subs x12, x4, x8\n\t"
-    "sbcs x13, x5, x9\n\t"
-    "sbcs x14, x6, x10\n\t"
-    "sbcs x15, x7, x11\n\t"
-    "stp x12, x13, [%[rp]]\n\t"
-    "stp x14, x15, [%[rp], #16]\n\t"
-    "ldp x4, x5, [%[ap], #32]\n\t"
-    "ldp x6, x7, [%[ap], #48]\n\t"
-    "ldp x8, x9, [%[bp], #32]\n\t"
-    "ldp x10, x11, [%[bp], #48]\n\t"
-    "sbcs x12, x4, x8\n\t"
-    "sbcs x13, x5, x9\n\t"
-    "sbcs x14, x6, x10\n\t"
-    "sbcs x15, x7, x11\n\t"
-    "stp x12, x13, [%[rp], #32]\n\t"
-    "stp x14, x15, [%[rp], #48]\n\t"
-    "ldp x4, x5, [%[ap], #64]\n\t"
-    "ldp x6, x7, [%[ap], #80]\n\t"
-    "ldp x8, x9, [%[bp], #64]\n\t"
-    "ldp x10, x11, [%[bp], #80]\n\t"
-    "sbcs x12, x4, x8\n\t"
-    "sbcs x13, x5, x9\n\t"
-    "sbcs x14, x6, x10\n\t"
-    "sbcs x15, x7, x11\n\t"
-    "stp x12, x13, [%[rp], #64]\n\t"
-    "stp x14, x15, [%[rp], #80]\n\t"
-    "ldp x4, x5, [%[ap], #96]\n\t"
-    "ldp x6, x7, [%[ap], #112]\n\t"
-    "ldp x8, x9, [%[bp], #96]\n\t"
-    "ldp x10, x11, [%[bp], #112]\n\t"
-    "sbcs x12, x4, x8\n\t"
-    "sbcs x13, x5, x9\n\t"
-    "sbcs x14, x6, x10\n\t"
-    "sbcs x15, x7, x11\n\t",
-    "stp x12, x13, [%[rp], #96]\n\t"
-    "stp x14, x15, [%[rp], #112]\n\t"
-    "cset %[flag], lo")
+#define BN_FIXED_SUB16(name, finish_insn)                                 \
+BN_FIXED_ADDSUB(                                                          \
+    name,                                                                 \
+    "ldp x4, x5, [%[ap]]\n\t"                                           \
+    "ldp x6, x7, [%[ap], #16]\n\t"                                      \
+    "ldp x8, x9, [%[bp]]\n\t"                                           \
+    "ldp x10, x11, [%[bp], #16]\n\t",                                   \
+    "subs x12, x4, x8\n\t"                                              \
+    "sbcs x13, x5, x9\n\t"                                              \
+    "sbcs x14, x6, x10\n\t"                                             \
+    "sbcs x15, x7, x11\n\t"                                             \
+    "stp x12, x13, [%[rp]]\n\t"                                         \
+    "stp x14, x15, [%[rp], #16]\n\t"                                    \
+    "ldp x4, x5, [%[ap], #32]\n\t"                                      \
+    "ldp x6, x7, [%[ap], #48]\n\t"                                      \
+    "ldp x8, x9, [%[bp], #32]\n\t"                                      \
+    "ldp x10, x11, [%[bp], #48]\n\t"                                    \
+    "sbcs x12, x4, x8\n\t"                                              \
+    "sbcs x13, x5, x9\n\t"                                              \
+    "sbcs x14, x6, x10\n\t"                                             \
+    "sbcs x15, x7, x11\n\t"                                             \
+    "stp x12, x13, [%[rp], #32]\n\t"                                    \
+    "stp x14, x15, [%[rp], #48]\n\t"                                    \
+    "ldp x4, x5, [%[ap], #64]\n\t"                                      \
+    "ldp x6, x7, [%[ap], #80]\n\t"                                      \
+    "ldp x8, x9, [%[bp], #64]\n\t"                                      \
+    "ldp x10, x11, [%[bp], #80]\n\t"                                    \
+    "sbcs x12, x4, x8\n\t"                                              \
+    "sbcs x13, x5, x9\n\t"                                              \
+    "sbcs x14, x6, x10\n\t"                                             \
+    "sbcs x15, x7, x11\n\t"                                             \
+    "stp x12, x13, [%[rp], #64]\n\t"                                    \
+    "stp x14, x15, [%[rp], #80]\n\t"                                    \
+    "ldp x4, x5, [%[ap], #96]\n\t"                                      \
+    "ldp x6, x7, [%[ap], #112]\n\t"                                     \
+    "ldp x8, x9, [%[bp], #96]\n\t"                                      \
+    "ldp x10, x11, [%[bp], #112]\n\t"                                   \
+    "sbcs x12, x4, x8\n\t"                                              \
+    "sbcs x13, x5, x9\n\t"                                              \
+    "sbcs x14, x6, x10\n\t"                                             \
+    "sbcs x15, x7, x11\n\t",                                            \
+    "stp x12, x13, [%[rp], #96]\n\t"                                    \
+    "stp x14, x15, [%[rp], #112]\n\t"                                   \
+    finish_insn)
+
+BN_FIXED_SUB3(bn_sub3_fixed, "cset %[flag], lo")
+BN_FIXED_SUB3(bn_sub3_top_fixed, "mov %[flag], x14")
+BN_FIXED_SUB4(bn_sub4_fixed, "cset %[flag], lo")
+BN_FIXED_SUB4(bn_sub4_top_fixed, "mov %[flag], x15")
+BN_FIXED_SUB6(bn_sub6_fixed, "cset %[flag], lo")
+BN_FIXED_SUB6(bn_sub6_top_fixed, "mov %[flag], x13")
+BN_FIXED_SUB8(bn_sub8_fixed, "cset %[flag], lo")
+BN_FIXED_SUB8(bn_sub8_top_fixed, "mov %[flag], x15")
+BN_FIXED_SUB12(bn_sub12_fixed, "cset %[flag], lo")
+BN_FIXED_SUB12(bn_sub12_top_fixed, "mov %[flag], x15")
+BN_FIXED_SUB16(bn_sub16_fixed, "cset %[flag], lo")
+BN_FIXED_SUB16(bn_sub16_top_fixed, "mov %[flag], x15")
+
+#undef BN_FIXED_SUB3
+#undef BN_FIXED_SUB4
+#undef BN_FIXED_SUB6
+#undef BN_FIXED_SUB8
+#undef BN_FIXED_SUB12
+#undef BN_FIXED_SUB16
 
 #if BN_ADDSUB_CSEL128 || BN_ADDSUB_CSEL_ADD128 || BN_ADDSUB_CSEL256
 #if BN_ADDSUB_CSEL256
@@ -4066,51 +4123,54 @@ WValue bigint_sub_equal_fast(
     WBigint *r = bigint_alloc_raw_hot(len);
 #endif
     uint64_t *dst = r->limbs;
-    uint64_t borrow;
+    uint64_t top;
 #if defined(__aarch64__)
     switch (len) {
 #if BN_ADDSUB_FIXED_KERNELS
-    case 3: borrow = bn_sub3_fixed(dst, larger, smaller); break;
-    case 4: borrow = bn_sub4_fixed(dst, larger, smaller); break;
-    case 6: borrow = bn_sub6_fixed(dst, larger, smaller); break;
-    case 8: borrow = bn_sub8_fixed(dst, larger, smaller); break;
-    case 12: borrow = bn_sub12_fixed(dst, larger, smaller); break;
-    case 16: borrow = bn_sub16_fixed(dst, larger, smaller); break;
-    case 24: borrow = bn_sub24_fixed(dst, larger, smaller); break;
+    case 3: top = bn_sub3_top_fixed(dst, larger, smaller); break;
+    case 4: top = bn_sub4_top_fixed(dst, larger, smaller); break;
+    case 6: top = bn_sub6_top_fixed(dst, larger, smaller); break;
+    case 8: top = bn_sub8_top_fixed(dst, larger, smaller); break;
+    case 12: top = bn_sub12_top_fixed(dst, larger, smaller); break;
+    case 16: top = bn_sub16_top_fixed(dst, larger, smaller); break;
+    case 24: top = bn_sub24_top_fixed(dst, larger, smaller); break;
     case 32:
         BN_ADDSUB_REHOME_IF_HAZARD(r, larger, smaller);
         dst = r->limbs;
-        borrow = bn_sub32_fixed(dst, larger, smaller);
+        top = bn_sub32_top_fixed(dst, larger, smaller);
         break;
     case 40:
         BN_ADDSUB_REHOME_IF_HAZARD(r, larger, smaller);
         dst = r->limbs;
-        borrow = bn_sub40_fixed(dst, larger, smaller);
+        top = bn_sub40_top_fixed(dst, larger, smaller);
         break;
     case 48:
         BN_ADDSUB_REHOME_IF_HAZARD(r, larger, smaller);
         dst = r->limbs;
-        borrow = bn_sub48_fixed(dst, larger, smaller);
+        top = bn_sub48_top_fixed(dst, larger, smaller);
         break;
     case 64:
         BN_ADDSUB_REHOME_IF_HAZARD(r, larger, smaller);
         dst = r->limbs;
-        borrow = bn_sub64_fixed(dst, larger, smaller);
+        top = bn_sub64_top_fixed(dst, larger, smaller);
         break;
 #endif
 #if BN_ADDSUB_CSEL128
     case 96:
-        borrow = bn_sub96_carry_select(dst, larger, smaller);
+        (void)bn_sub96_carry_select(dst, larger, smaller);
+        top = dst[95];
         break;
     case 128:
-        borrow = bn_sub128_256_carry_select(
+        (void)bn_sub128_256_carry_select(
             dst, larger, smaller, 128);
+        top = dst[127];
         break;
 #endif
 #if BN_ADDSUB_CSEL256
     case 256:
-        borrow = bn_sub128_256_carry_select(
+        (void)bn_sub128_256_carry_select(
             dst, larger, smaller, 256);
+        top = dst[255];
         break;
 #endif
     default:
@@ -4122,7 +4182,8 @@ WValue bigint_sub_equal_fast(
             BN_ADDSUB_REHOME_IF_HAZARD(r, larger, smaller);
             dst = r->limbs;
         }
-        borrow = bn_sub_n(dst, larger, smaller, len);
+        (void)bn_sub_n(dst, larger, smaller, len);
+        top = dst[len - 1];
         break;
     }
 #else
@@ -4134,10 +4195,9 @@ WValue bigint_sub_equal_fast(
         BN_ADDSUB_REHOME_IF_HAZARD(r, larger, smaller);
         dst = r->limbs;
     }
-    borrow = bn_sub_equal_fast(dst, larger, smaller, len);
+    (void)bn_sub_equal_fast(dst, larger, smaller, len);
+    top = dst[len - 1];
 #endif
-    (void)borrow;
-    uint64_t top = dst[len - 1];
     if (top != 0) {
         r->size = negative ? -len : len;
         return bigint_box(r);
@@ -22686,7 +22746,7 @@ static int32_t w_dec_write(const uint64_t *xl, int32_t xlen, char *dst, int32_t 
  * parking only defers the free(). At most one block per thread is parked
  * (<= ~50 bytes), reclaimed by the OS at thread exit. W_STR_PARK_MAX is
  * solely a recycler policy; it is not a String representation boundary. */
-#define W_STR_PARK_MAX 44
+#define W_STR_PARK_MAX 61
 static __thread WString *w_str_park = NULL;
 static __thread uint32_t w_str_park_cap = 0;
 
@@ -22696,19 +22756,28 @@ static __thread uint32_t w_str_park_cap = 0;
  * match a slab literal ("123456" is the obvious case), but String equality
  * and hashing are representation-independent, so canonical slab identity is
  * not required. Avoiding the hash/lookup favors the much more common miss. */
-static inline WValue w_string_small_fresh(const char *s, size_t len) {
+static inline WValue w_string_small_fresh_known_ascii(const char *s, size_t len, int ascii) {
     if (len <= 5) return w_box_inline_str(s, len);
     WString *ws = w_str_park;
-    if (ws != NULL && len <= (size_t)w_str_park_cap) {
+    if (ws != NULL) {
         w_str_park = NULL;
+        if (len > (size_t)w_str_park_cap) {
+            free(ws);
+            ws = (WString *)malloc(sizeof(WString) + len + 1);
+        }
     } else {
         ws = (WString *)malloc(sizeof(WString) + len + 1);
     }
-    w_heap_string_set_meta(ws, (uint32_t)len,
-                           w_bytes_ascii_p((const uint8_t *)s, len));
+    w_heap_string_set_meta(ws, (uint32_t)len, ascii);
     memcpy(ws->data, s, len);
     ws->data[len] = '\0';
     return w_box_heap_str(ws);
+}
+
+static inline WValue w_string_small_fresh(const char *s, size_t len) {
+    if (len <= 5) return w_box_inline_str(s, len);
+    return w_string_small_fresh_known_ascii(
+        s, len, w_bytes_ascii_p((const uint8_t *)s, len));
 }
 
 /* A normalized one-limb BigInt is a full unsigned 64-bit magnitude plus a
@@ -45837,6 +45906,40 @@ WValue bignum_shl_positive_small(const WBigint *a, unsigned k) {
         ((uintptr_t)src - (uintptr_t)dst) & 4095u;
     int descend = BN_SHIFT_DESCEND_ON_LOW
         ? page_delta < 2048u : page_delta >= 2048u;
+#if defined(__aarch64__)
+    if (n > 64 && (n & 1) == 0) {
+        int64x2_t left_count = vdupq_n_s64((int64_t)k);
+        int64x2_t right_count = vdupq_n_s64((int64_t)k - 64);
+        int32_t pairs = (n >> 1) - 1;
+        if (descend) {
+            uint64x2_t higher = vld1q_u64(src + n - 2);
+            dst[n - 1] = (src[n - 1] << k) | (src[n - 2] >> (64U - k));
+            for (int32_t pair = pairs - 1; pair >= 0; pair--) {
+                uint64x2_t lower = vld1q_u64(src + 2 * pair);
+                uint64x2_t current = vextq_u64(lower, higher, 1);
+                vst1q_u64(
+                    dst + 2 * pair + 1,
+                    vorrq_u64(
+                        vshlq_u64(current, left_count),
+                        vshlq_u64(lower, right_count)));
+                higher = lower;
+            }
+        } else {
+            uint64x2_t previous = vld1q_u64(src);
+            for (int32_t pair = 0; pair < pairs; pair++) {
+                uint64x2_t next = vld1q_u64(src + 2 * pair + 2);
+                uint64x2_t current = vextq_u64(previous, next, 1);
+                vst1q_u64(
+                    dst + 2 * pair + 1,
+                    vorrq_u64(
+                        vshlq_u64(current, left_count),
+                        vshlq_u64(previous, right_count)));
+                previous = next;
+            }
+            dst[n - 1] = (src[n - 1] << k) | (src[n - 2] >> (64U - k));
+        }
+    } else
+#endif
     if (descend) {
         uint64_t current = src[n - 1];
         for (int32_t i = n - 1; i >= 1; i--) {
@@ -45946,7 +46049,7 @@ WValue bignum_shl_generic(WValue a, int64_t k) {
         uint64_t low = (uint64_t)shifted;
         uint64_t high = (uint64_t)(shifted >> 64);
         if (high == 0) return bigint_finish_one_limb(low, neg);
-        WBigint *result = bigint_alloc_raw(2);
+        WBigint *result = bigint_alloc_raw_hot(2);
         result->limbs[0] = low;
         result->limbs[1] = high;
         result->size = neg ? -2 : 2;
@@ -45958,7 +46061,7 @@ WValue bignum_shl_generic(WValue a, int64_t k) {
     int64_t outn64 = (int64_t)nmag + limb_shift + 1;
     if (outn64 > (int64_t)INT32_MAX) { w_raise(w_string("shift result too large")); return W_NIL; }
     int32_t outn = (int32_t)outn64;
-    WBigint *r = bigint_alloc_raw(outn);
+    WBigint *r = bigint_alloc_raw_hot(outn);
     for (int64_t j = 0; j < limb_shift; j++) r->limbs[j] = 0;
     if (bit_shift == 0) {
         memcpy(r->limbs + limb_shift, ma, (size_t)nmag * sizeof(uint64_t));
@@ -46024,8 +46127,7 @@ WValue bignum_shl(WValue a, int64_t k) {
         if (big->size == 40)
             return bignum_shl_positive_40(big, (unsigned)k);
 #endif
-        if (big->size > 6 &&
-            big->size <= BN_SHL_POSITIVE_SMALL_MAX)
+        if (big->size > 6)
             return bignum_shl_positive_small(big, (unsigned)k);
     }
 #endif
@@ -46070,7 +46172,7 @@ WValue bignum_shr_generic(WValue a, int64_t k) {
      * shifts request exactly the published width instead of crossing a
      * power-of-two pool boundary (for example 64 -> 128 limbs). */
     int32_t alloc_n = neg ? outn + 1 : outn;
-    WBigint *r = bigint_alloc_raw(alloc_n);
+    WBigint *r = bigint_alloc_raw_hot(alloc_n);
     /* Write the shifted window directly.  Copy-then-bn_shrk traversed the
      * magnitude twice and consumed twice the memory bandwidth. */
     if (bit_shift == 0) {
@@ -47739,13 +47841,10 @@ static const char w_itoa_pairs[201] =
     "6061626364656667686970717273747576777879"
     "8081828384858687888990919293949596979899";
 
-/* Fast int-to-string without snprintf. Handles all int48 values.
- * Returns SSO-5 for ≤5 digits, heap/slab string for longer. */
-static inline WValue w_int_to_str(int64_t n) {
-    char buf[21];  /* max int48: 15 digits + sign + NUL */
+static inline char *w_format_i64_stack(int64_t n, char buf[21], size_t *out_len) {
     int neg = 0;
     uint64_t u;
-    if (n < 0) { neg = 1; u = (uint64_t)(-n); }
+    if (n < 0) { neg = 1; u = (uint64_t)(-(uint64_t)n); }
     else { u = (uint64_t)n; }
 
     /* Write digits in reverse, two at a time via the pair table */
@@ -47764,10 +47863,18 @@ static inline WValue w_int_to_str(int64_t n) {
         *--p = '0' + (char)u;
     }
     if (neg) *--p = '-';
+    *out_len = (size_t)(buf + 20 - p);
+    return p;
+}
 
-    size_t len = (size_t)(buf + 20 - p);
+/* Fast int-to-string without snprintf. Handles all int48 values.
+ * Returns SSO-5 for ≤5 digits, heap/slab string for longer. */
+static inline WValue w_int_to_str(int64_t n) {
+    char buf[21];
+    size_t len;
+    char *p = w_format_i64_stack(n, buf, &len);
     if (len <= 5) return w_box_inline_str(p, len);
-    return w_string_small_fresh(p, len);
+    return w_string_small_fresh_known_ascii(p, len, 1);
 }
 
 /* Format duration from nanoseconds into buf. Returns pointer past last char. */
@@ -48462,6 +48569,157 @@ WValue w_str_concat_free_lhs(WValue a, WValue b) {
     if (r != a && !w_is_rope(r) && w_is_heap_str(a))
         free(w_as_heap_str(a));
     return r;
+}
+
+WValue w_int_to_s(WValue r);
+void w_value_free(WValue v);
+
+/* Fused `str + int.to_s()` and `int.to_s() + str`: format the signed 64-bit
+ * integer directly into a stack buffer and concatenate in one pass without
+ * allocating an intermediate WString or probing the frozen slab intern table. */
+WValue w_str_concat_i64(WValue a, int64_t n, WValue own_a) {
+    char ibuf[21];
+    size_t bl;
+    const char *bd = w_format_i64_stack(n, ibuf, &bl);
+    if (w_is_inline_str(a)) {
+        size_t al = (size_t)((a >> 1) & 7);
+        size_t total = al + bl;
+        if (total <= 5) {
+            uint64_t v = (a & ~0xEULL) | ((uint64_t)total << 1);
+            for (size_t i = 0; i < bl; i++)
+                v |= ((uint64_t)(uint8_t)bd[i]) << (4 + 8 * (al + i));
+            return v;
+        }
+        WString *ws = w_str_park;
+        if (ws != NULL) {
+            w_str_park = NULL;
+            if (total > (size_t)w_str_park_cap) {
+                free(ws);
+                ws = (WString *)malloc(sizeof(WString) + total + 1);
+            }
+        } else {
+            ws = (WString *)malloc(sizeof(WString) + total + 1);
+        }
+        w_heap_string_set_meta(ws, (uint32_t)total, w_inline_str_ascii_p(a));
+        for (size_t i = 0; i < al; i++)
+            ws->data[i] = (char)((a >> (4 + 8 * i)) & 0xFF);
+        memcpy(ws->data + al, bd, bl);
+        ws->data[total] = '\0';
+        return w_box_heap_str(ws);
+    }
+    char abuf[6];
+    const char *ad;
+    size_t al;
+    WValue fa = w_is_rope(a) ? w_rope_flatten(a) : a;
+    w_str_data(fa, abuf, &ad, &al);
+    size_t total = al + bl;
+    if (total <= 5) {
+        char sso[6];
+        memcpy(sso, ad, al);
+        memcpy(sso + al, bd, bl);
+        sso[total] = '\0';
+        if (own_a && w_is_heap_str(a)) w_value_free(a);
+        return w_box_inline_str(sso, total);
+    }
+    if (al > W_STRING_LEN_MASK || bl > W_STRING_LEN_MASK - al)
+        die("string exceeds 31-bit byte length limit");
+    WString *ws = w_str_park;
+    if (ws != NULL) {
+        w_str_park = NULL;
+        if (total > (size_t)w_str_park_cap) {
+            free(ws);
+            ws = (WString *)malloc(sizeof(WString) + total + 1);
+        }
+    } else {
+        ws = (WString *)malloc(sizeof(WString) + total + 1);
+    }
+    w_heap_string_set_meta(ws, (uint32_t)total, w_string_ascii_p(fa));
+    memcpy(ws->data, ad, al);
+    memcpy(ws->data + al, bd, bl);
+    ws->data[total] = '\0';
+    WValue r = w_box_heap_str(ws);
+    if (own_a && r != a && w_is_heap_str(a)) w_value_free(a);
+    return r;
+}
+
+WValue w_i64_concat_str(int64_t n, WValue b, WValue own_b) {
+    char ibuf[21];
+    size_t al;
+    const char *ad = w_format_i64_stack(n, ibuf, &al);
+    if (w_is_inline_str(b)) {
+        size_t bl = (size_t)((b >> 1) & 7);
+        size_t total = al + bl;
+        if (total <= 5) {
+            uint64_t v = W_TAG_STRINGSYM | ((uint64_t)total << 1) |
+                         (((b >> 4) & 0xFFFFFFFFFFULL) << (4 + 8 * al));
+            for (size_t i = 0; i < al; i++)
+                v |= ((uint64_t)(uint8_t)ad[i]) << (4 + 8 * i);
+            return v;
+        }
+        WString *ws = w_str_park;
+        if (ws != NULL) {
+            w_str_park = NULL;
+            if (total > (size_t)w_str_park_cap) {
+                free(ws);
+                ws = (WString *)malloc(sizeof(WString) + total + 1);
+            }
+        } else {
+            ws = (WString *)malloc(sizeof(WString) + total + 1);
+        }
+        w_heap_string_set_meta(ws, (uint32_t)total, w_inline_str_ascii_p(b));
+        memcpy(ws->data, ad, al);
+        for (size_t i = 0; i < bl; i++)
+            ws->data[al + i] = (char)((b >> (4 + 8 * i)) & 0xFF);
+        ws->data[total] = '\0';
+        return w_box_heap_str(ws);
+    }
+    char bbuf[6];
+    const char *bd;
+    size_t bl;
+    WValue fb = w_is_rope(b) ? w_rope_flatten(b) : b;
+    w_str_data(fb, bbuf, &bd, &bl);
+    size_t total = al + bl;
+    if (total <= 5) {
+        char sso[6];
+        memcpy(sso, ad, al);
+        memcpy(sso + al, bd, bl);
+        sso[total] = '\0';
+        if (own_b && w_is_heap_str(b)) w_value_free(b);
+        return w_box_inline_str(sso, total);
+    }
+    if (al > W_STRING_LEN_MASK || bl > W_STRING_LEN_MASK - al)
+        die("string exceeds 31-bit byte length limit");
+    WString *ws = w_str_park;
+    if (ws != NULL) {
+        w_str_park = NULL;
+        if (total > (size_t)w_str_park_cap) {
+            free(ws);
+            ws = (WString *)malloc(sizeof(WString) + total + 1);
+        }
+    } else {
+        ws = (WString *)malloc(sizeof(WString) + total + 1);
+    }
+    w_heap_string_set_meta(ws, (uint32_t)total, w_string_ascii_p(fb));
+    memcpy(ws->data, ad, al);
+    memcpy(ws->data + al, bd, bl);
+    ws->data[total] = '\0';
+    WValue r = w_box_heap_str(ws);
+    if (own_b && r != b && w_is_heap_str(b)) w_value_free(b);
+    return r;
+}
+
+WValue w_str_concat_int_wv(WValue a, WValue b_int, WValue own_a) {
+    if (w_is_int(b_int))
+        return w_str_concat_i64(a, w_as_int(b_int), own_a);
+    WValue bs = w_int_to_s(b_int);
+    return w_str_concat_own(a, bs, (own_a ? 1 : 0) | 2);
+}
+
+WValue w_int_wv_concat_str(WValue a_int, WValue b, WValue own_b) {
+    if (w_is_int(a_int))
+        return w_i64_concat_str(w_as_int(a_int), b, own_b);
+    WValue as = w_int_to_s(a_int);
+    return w_str_concat_own(as, b, 1 | (own_b ? 2 : 0));
 }
 
 /* Mutable append to a heap string. Grows via realloc if needed.
@@ -52685,6 +52943,11 @@ WValue w_switch_canonical(WValue v) {
     w_str_data(v, tmp, &s, &len);
     if (len > 5) {
         if (((v >> 1) & 0x7) == 6) return v & ~(0x3FULL << 28);
+        if (len <= W_SLAB_SSO2_MAX && !is_sym) {
+            WValue existing = w_slab_lookup_existing(
+                s, len, w_hash_wyhash((const uint8_t *)s, len));
+            if (existing != W_UNDEF) return existing & ~(0x3FULL << 28);
+        }
         return v;
     }
     WValue out = w_box_inline_str(s, len);
@@ -62130,14 +62393,19 @@ __attribute__((always_inline))
 WValue w_bigint_add1_1_finish_raw(uint64_t sum, int64_t carry) {
     if (carry != 0 && carry != 1)
         die("w_bigint_add1_1_finish_raw: carry is not 0/1");
-    if (__builtin_expect(carry != 0, 0)) {
+    if (__builtin_expect(carry != 0, 1)) {
         WBigint *result = bigint_alloc_raw_hot_exact(2U);
         result->limbs[0] = sum;
         result->limbs[1] = 1;
         result->size = 2;
         return bigint_box(result);
     }
-    return bigint_finish_one_limb(sum, 0);
+    if (__builtin_expect(sum <= (uint64_t)W_INT48_MAX, 0))
+        return w_box_int((int64_t)sum);
+    WBigint *result = bigint_alloc_raw_hot_sub1_exact_one();
+    result->limbs[0] = sum;
+    result->size = 1;
+    return bigint_box(result);
 }
 __attribute__((always_inline))
 WValue w_bigint_mul1_1_finish_raw(uint64_t low, uint64_t high) {
@@ -62784,6 +63052,20 @@ WValue w_bigint_sub_equal_finish_raw(WValue v, int64_t len, int64_t negative) {
     if (negative && r->size > 0) r->size = -r->size;
     return bigint_finish_mag_sub(r);
 }
+__attribute__((always_inline))
+WValue w_bigint_sub_equal_top_finish_raw(WValue v, int64_t len,
+                                         int64_t negative, uint64_t top) {
+    WBigint *r = w_as_bigint(v);
+    int32_t n = (int32_t)len;
+    if (__builtin_expect(top != 0, 1)) {
+        r->size = negative ? -n : n;
+        return v;
+    }
+    r->size = n;
+    while (r->size > 0 && r->limbs[r->size - 1] == 0) r->size--;
+    if (negative && r->size > 0) r->size = -r->size;
+    return bigint_finish_mag_sub(r);
+}
 /* Match bigint_add_two_limb_magnitudes' opposite-sign arm exactly: a zero
  * high limb demotes through bigint_finish_one_limb, otherwise the hot
  * two-limb take is published with the larger operand's sign. */
@@ -62902,7 +63184,7 @@ WValue w_bigint_sub1_1_finish_raw(
     uint64_t magnitude, int64_t signed_size) {
     if (signed_size != -1 && signed_size != 1)
         die("w_bigint_sub1_1_finish_raw: signed size is not +/-1");
-    if (magnitude <= (uint64_t)W_INT48_MAX) {
+    if (__builtin_expect(magnitude <= (uint64_t)W_INT48_MAX, 0)) {
         int64_t value = (int64_t)magnitude;
         return w_box_int(signed_size < 0 ? -value : value);
     }
@@ -69051,8 +69333,18 @@ invoke_static_method:
 
 #define MEMO_MAGIC "WMEM"
 
-/* FNV-1a hash over raw WValue key bytes */
-static uint64_t memo_hash(WValue *args, int arity) {
+/* Fast 64-bit word mixer for 1-arg and 2-arg memo keys, FNV-1a fallback */
+static inline uint64_t memo_hash(WValue *args, int arity) {
+    if (arity == 1) {
+        uint64_t x = (uint64_t)args[0] ^ 0x9e3779b97f4a7c15ULL;
+        x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
+        return x ^ (x >> 27);
+    }
+    if (arity == 2) {
+        uint64_t x = ((uint64_t)args[0] * 0x9e3779b97f4a7c15ULL) ^ (uint64_t)args[1];
+        x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
+        return x ^ (x >> 27);
+    }
     uint64_t h = 14695981039346656037ULL;
     const uint8_t *p = (const uint8_t *)args;
     int nbytes = arity * (int)sizeof(WValue);
@@ -69143,6 +69435,8 @@ void *w_memo_init(const char *sha) {
     t->arity = 0;
     t->count = 0;
     t->cap = 0;
+    t->hits = 0;
+    t->disabled = 0;
     t->keys = NULL;
     t->values = NULL;
     memset(t->sha, 0, 17);
@@ -69157,6 +69451,7 @@ void *w_memo_init(const char *sha) {
 
 WValue w_memo_lookup(void *table, WValue *args, int arity) {
     WMemoTable *t = (WMemoTable *)table;
+    if (t->disabled) return W_MEMO_MISS;
     if (t->arity == 0 && arity != 0) t->arity = arity;
     if (!t->keys) memo_alloc(t, 256);
 
@@ -69171,7 +69466,10 @@ WValue w_memo_lookup(void *table, WValue *args, int arity) {
         for (int j = 0; j < arity; j++) {
             if (k[j] != args[j]) { match = 0; break; }
         }
-        if (match) return t->values[idx];
+        if (match) {
+            t->hits++;
+            return t->values[idx];
+        }
         idx = (idx + 1) & mask;
     }
 
@@ -69180,9 +69478,14 @@ WValue w_memo_lookup(void *table, WValue *args, int arity) {
 
 void w_memo_store(void *table, WValue *args, int arity, WValue result) {
     WMemoTable *t = (WMemoTable *)table;
+    if (t->disabled) return;
     if (t->arity == 0 && arity != 0) t->arity = arity;
     if (!t->keys) memo_alloc(t, 256);
 
+    if (t->count >= 4096 && (int64_t)t->hits * 64 < (int64_t)t->count) {
+        t->disabled = 1;
+        return;
+    }
     if (t->count >= MEMO_MAX_ENTRIES) return;
 
     if ((t->count + 1) * MEMO_HT_LOAD_DEN > t->cap * MEMO_HT_LOAD_NUM) {
@@ -69241,6 +69544,7 @@ WValue __w_memo_call0_i64(void *table, WValue (*fn)(void)) {
 }
 
 WValue __w_memo_call1_i64(void *table, WValue (*fn)(WValue), WValue arg0) {
+    if (((WMemoTable *)table)->disabled) return fn(arg0);
     WValue args[1] = {arg0};
     WValue cached = w_memo_lookup(table, args, 1);
     if (cached != W_MEMO_MISS) return cached;
@@ -69250,6 +69554,7 @@ WValue __w_memo_call1_i64(void *table, WValue (*fn)(WValue), WValue arg0) {
 }
 
 WValue __w_memo_call2_i64(void *table, WValue (*fn)(WValue, WValue), WValue arg0, WValue arg1) {
+    if (((WMemoTable *)table)->disabled) return fn(arg0, arg1);
     WValue args[2] = {arg0, arg1};
     WValue cached = w_memo_lookup(table, args, 2);
     if (cached != W_MEMO_MISS) return cached;
@@ -75602,6 +75907,102 @@ WValue w_array_shuffle(WValue arr) {
     }
     for (int64_t i = 0; i < n; i++) w_array_set(result, w_int(i), buf[i]);
     free(buf);
+    return result;
+}
+
+static inline int w_uniq_needs_linear_eq(WValue v) {
+    return w_is_array(v) || w_is_hash(v) || w_is_bytes(v) ||
+           w_is_instance(v) || w_is_date(v) || is_quantity_any(v) ||
+           w_is_ipv6(v) || w_is_mac(v);
+}
+
+WValue w_array_uniq(WValue arr) {
+    WArray *sa = w_as_array(arr);
+    int64_t n = sa->size;
+    if (n <= 0) return w_array_new_empty();
+    WValue result = w_array_new(65, n);
+    WArray *da = w_as_array(result);
+    if (n == 1) {
+        da->slots[0] = array_slot_load_decoded(sa, 0);
+        da->size = 1;
+        return result;
+    }
+    int is_w64 = (sa->ebits == 65);
+    WValue *src_slots = sa->slots + sa->start;
+    if (n <= 8) {
+        int64_t out_len = 0;
+        for (int64_t i = 0; i < n; i++) {
+            WValue v = is_w64 ? src_slots[i] : array_slot_load_decoded(sa, i);
+            int seen = 0;
+            if (__builtin_expect(v != W_BIASED_NAN, 1)) {
+                for (int64_t j = 0; j < out_len; j++) {
+                    WValue k = da->slots[j];
+                    if (k == v || (!w_both_ints(k, v) && w_eq(k, v) == W_TRUE)) {
+                        seen = 1;
+                        break;
+                    }
+                }
+            }
+            if (!seen) da->slots[out_len++] = v;
+        }
+        da->size = (int32_t)out_len;
+        return result;
+    }
+    uint64_t cap = 16;
+    while (cap < (uint64_t)n * 2) cap <<= 1;
+    uint64_t mask = cap - 1;
+    int32_t stack_ht[512];
+    int32_t *ht = (cap <= 512) ? stack_ht : (int32_t *)malloc(cap * sizeof(int32_t));
+    memset(ht, 0xFF, cap * sizeof(int32_t));
+
+    int64_t out_len = 0;
+    int has_instance = 0;
+
+    for (int64_t i = 0; i < n; i++) {
+        WValue v = is_w64 ? src_slots[i] : array_slot_load_decoded(sa, i);
+        if (__builtin_expect(v == W_BIASED_NAN, 0)) {
+            da->slots[out_len++] = v;
+            continue;
+        }
+        if (__builtin_expect(has_instance || w_uniq_needs_linear_eq(v), 0)) {
+            if (w_is_instance(v)) has_instance = 1;
+            int seen = 0;
+            for (int64_t j = 0; j < out_len; j++) {
+                if (w_eq(da->slots[j], v) == W_TRUE) {
+                    seen = 1;
+                    break;
+                }
+            }
+            if (!seen) {
+                int32_t new_d = (int32_t)out_len++;
+                da->slots[new_d] = v;
+                if (!w_uniq_needs_linear_eq(v)) {
+                    uint64_t idx = w_hash_value_fast(v) & mask;
+                    while (ht[idx] >= 0) idx = (idx + 1) & mask;
+                    ht[idx] = new_d;
+                }
+            }
+            continue;
+        }
+        uint64_t idx = w_hash_value_fast(v) & mask;
+        for (;;) {
+            int32_t d = ht[idx];
+            if (d < 0) {
+                int32_t new_d = (int32_t)out_len++;
+                ht[idx] = new_d;
+                da->slots[new_d] = v;
+                break;
+            }
+            WValue slot_key = da->slots[d];
+            if (__builtin_expect(slot_key == v, 1) ||
+                (w_both_ints(slot_key, v) ? 0 : w_hash_key_eq(slot_key, v))) {
+                break;
+            }
+            idx = (idx + 1) & mask;
+        }
+    }
+    if (ht != stack_ht) free(ht);
+    da->size = (int32_t)out_len;
     return result;
 }
 

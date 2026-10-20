@@ -3249,7 +3249,7 @@ on macos && arm64
     ll <<~IR
       ; tungsten:noinline
       entry:
-        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldr x6, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldr x10, [${3:x}, #16]\0Asubs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Astp x12, x13, [${1:x}]\0Astr x14, [${1:x}, #16]\0Acset ${0:x}, lo", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
+        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldr x6, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldr x10, [${3:x}, #16]\0Asubs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Astp x12, x13, [${1:x}]\0Astr x14, [${1:x}, #16]\0Amov ${0:x}, x14", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
         ret i64 %flag
     IR
 
@@ -3257,7 +3257,7 @@ on macos && arm64
     ll <<~IR
       ; tungsten:noinline
       entry:
-        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldp x6, x7, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldp x10, x11, [${3:x}, #16]\0Asubs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}]\0Astp x14, x15, [${1:x}, #16]\0Acset ${0:x}, lo", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
+        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldp x6, x7, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldp x10, x11, [${3:x}, #16]\0Asubs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}]\0Astp x14, x15, [${1:x}, #16]\0Amov ${0:x}, x15", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
         ret i64 %flag
     IR
 
@@ -3265,7 +3265,7 @@ on macos && arm64
     ll <<~IR
       ; tungsten:noinline
       entry:
-        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldp x6, x7, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldp x10, x11, [${3:x}, #16]\0Asubs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}]\0Astp x14, x15, [${1:x}, #16]\0Aldp x4, x5, [${2:x}, #32]\0Aldp x6, x7, [${2:x}, #48]\0Aldp x8, x9, [${3:x}, #32]\0Aldp x10, x11, [${3:x}, #48]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #32]\0Astp x14, x15, [${1:x}, #48]\0Acset ${0:x}, lo", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
+        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldp x6, x7, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldp x10, x11, [${3:x}, #16]\0Asubs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}]\0Astp x14, x15, [${1:x}, #16]\0Aldp x4, x5, [${2:x}, #32]\0Aldp x6, x7, [${2:x}, #48]\0Aldp x8, x9, [${3:x}, #32]\0Aldp x10, x11, [${3:x}, #48]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #32]\0Astp x14, x15, [${1:x}, #48]\0Amov ${0:x}, x15", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
         ret i64 %flag
     IR
 
@@ -3273,7 +3273,7 @@ on macos && arm64
     ll <<~IR
       ; tungsten:noinline
       entry:
-        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldp x6, x7, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldp x10, x11, [${3:x}, #16]\0Asubs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}]\0Astp x14, x15, [${1:x}, #16]\0Aldp x4, x5, [${2:x}, #32]\0Aldp x6, x7, [${2:x}, #48]\0Aldp x8, x9, [${3:x}, #32]\0Aldp x10, x11, [${3:x}, #48]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #32]\0Astp x14, x15, [${1:x}, #48]\0Aldp x4, x5, [${2:x}, #64]\0Aldp x6, x7, [${2:x}, #80]\0Aldp x8, x9, [${3:x}, #64]\0Aldp x10, x11, [${3:x}, #80]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #64]\0Astp x14, x15, [${1:x}, #80]\0Aldp x4, x5, [${2:x}, #96]\0Aldp x6, x7, [${2:x}, #112]\0Aldp x8, x9, [${3:x}, #96]\0Aldp x10, x11, [${3:x}, #112]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #96]\0Astp x14, x15, [${1:x}, #112]\0Acset ${0:x}, lo", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
+        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldp x6, x7, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldp x10, x11, [${3:x}, #16]\0Asubs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}]\0Astp x14, x15, [${1:x}, #16]\0Aldp x4, x5, [${2:x}, #32]\0Aldp x6, x7, [${2:x}, #48]\0Aldp x8, x9, [${3:x}, #32]\0Aldp x10, x11, [${3:x}, #48]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #32]\0Astp x14, x15, [${1:x}, #48]\0Aldp x4, x5, [${2:x}, #64]\0Aldp x6, x7, [${2:x}, #80]\0Aldp x8, x9, [${3:x}, #64]\0Aldp x10, x11, [${3:x}, #80]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #64]\0Astp x14, x15, [${1:x}, #80]\0Aldp x4, x5, [${2:x}, #96]\0Aldp x6, x7, [${2:x}, #112]\0Aldp x8, x9, [${3:x}, #96]\0Aldp x10, x11, [${3:x}, #112]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #96]\0Astp x14, x15, [${1:x}, #112]\0Amov ${0:x}, x15", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
         ret i64 %flag
     IR
 
@@ -3281,7 +3281,7 @@ on macos && arm64
     ll <<~IR
       ; tungsten:noinline
       entry:
-        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldp x6, x7, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldp x10, x11, [${3:x}, #16]\0Asubs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}]\0Astp x14, x15, [${1:x}, #16]\0Aldp x4, x5, [${2:x}, #32]\0Aldp x6, x7, [${2:x}, #48]\0Aldp x8, x9, [${3:x}, #32]\0Aldp x10, x11, [${3:x}, #48]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #32]\0Astp x14, x15, [${1:x}, #48]\0Aldp x4, x5, [${2:x}, #64]\0Aldp x6, x7, [${2:x}, #80]\0Aldp x8, x9, [${3:x}, #64]\0Aldp x10, x11, [${3:x}, #80]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #64]\0Astp x14, x15, [${1:x}, #80]\0Aldp x4, x5, [${2:x}, #96]\0Aldp x6, x7, [${2:x}, #112]\0Aldp x8, x9, [${3:x}, #96]\0Aldp x10, x11, [${3:x}, #112]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #96]\0Astp x14, x15, [${1:x}, #112]\0Aldp x4, x5, [${2:x}, #128]\0Aldp x6, x7, [${2:x}, #144]\0Aldp x8, x9, [${3:x}, #128]\0Aldp x10, x11, [${3:x}, #144]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #128]\0Astp x14, x15, [${1:x}, #144]\0Aldp x4, x5, [${2:x}, #160]\0Aldp x6, x7, [${2:x}, #176]\0Aldp x8, x9, [${3:x}, #160]\0Aldp x10, x11, [${3:x}, #176]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #160]\0Astp x14, x15, [${1:x}, #176]\0Acset ${0:x}, lo", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
+        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldp x6, x7, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldp x10, x11, [${3:x}, #16]\0Asubs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}]\0Astp x14, x15, [${1:x}, #16]\0Aldp x4, x5, [${2:x}, #32]\0Aldp x6, x7, [${2:x}, #48]\0Aldp x8, x9, [${3:x}, #32]\0Aldp x10, x11, [${3:x}, #48]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #32]\0Astp x14, x15, [${1:x}, #48]\0Aldp x4, x5, [${2:x}, #64]\0Aldp x6, x7, [${2:x}, #80]\0Aldp x8, x9, [${3:x}, #64]\0Aldp x10, x11, [${3:x}, #80]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #64]\0Astp x14, x15, [${1:x}, #80]\0Aldp x4, x5, [${2:x}, #96]\0Aldp x6, x7, [${2:x}, #112]\0Aldp x8, x9, [${3:x}, #96]\0Aldp x10, x11, [${3:x}, #112]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #96]\0Astp x14, x15, [${1:x}, #112]\0Aldp x4, x5, [${2:x}, #128]\0Aldp x6, x7, [${2:x}, #144]\0Aldp x8, x9, [${3:x}, #128]\0Aldp x10, x11, [${3:x}, #144]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #128]\0Astp x14, x15, [${1:x}, #144]\0Aldp x4, x5, [${2:x}, #160]\0Aldp x6, x7, [${2:x}, #176]\0Aldp x8, x9, [${3:x}, #160]\0Aldp x10, x11, [${3:x}, #176]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #160]\0Astp x14, x15, [${1:x}, #176]\0Amov ${0:x}, x15", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
         ret i64 %flag
     IR
 
@@ -3293,7 +3293,7 @@ on macos && arm64
     ll <<~IR
       ; tungsten:noinline
       entry:
-        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldp x6, x7, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldp x10, x11, [${3:x}, #16]\0Asubs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}]\0Astp x14, x15, [${1:x}, #16]\0Aldp x4, x5, [${2:x}, #32]\0Aldp x6, x7, [${2:x}, #48]\0Aldp x8, x9, [${3:x}, #32]\0Aldp x10, x11, [${3:x}, #48]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #32]\0Astp x14, x15, [${1:x}, #48]\0Aldp x4, x5, [${2:x}, #64]\0Aldp x6, x7, [${2:x}, #80]\0Aldp x8, x9, [${3:x}, #64]\0Aldp x10, x11, [${3:x}, #80]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #64]\0Astp x14, x15, [${1:x}, #80]\0Aldp x4, x5, [${2:x}, #96]\0Aldp x6, x7, [${2:x}, #112]\0Aldp x8, x9, [${3:x}, #96]\0Aldp x10, x11, [${3:x}, #112]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #96]\0Astp x14, x15, [${1:x}, #112]\0Aldr x4, [${2:x}, #128]\0Aldr x8, [${3:x}, #128]\0Asbcs x12, x4, x8\0Astr x12, [${1:x}, #128]\0Acset ${0:x}, lo", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
+        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldp x6, x7, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldp x10, x11, [${3:x}, #16]\0Asubs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}]\0Astp x14, x15, [${1:x}, #16]\0Aldp x4, x5, [${2:x}, #32]\0Aldp x6, x7, [${2:x}, #48]\0Aldp x8, x9, [${3:x}, #32]\0Aldp x10, x11, [${3:x}, #48]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #32]\0Astp x14, x15, [${1:x}, #48]\0Aldp x4, x5, [${2:x}, #64]\0Aldp x6, x7, [${2:x}, #80]\0Aldp x8, x9, [${3:x}, #64]\0Aldp x10, x11, [${3:x}, #80]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #64]\0Astp x14, x15, [${1:x}, #80]\0Aldp x4, x5, [${2:x}, #96]\0Aldp x6, x7, [${2:x}, #112]\0Aldp x8, x9, [${3:x}, #96]\0Aldp x10, x11, [${3:x}, #112]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #96]\0Astp x14, x15, [${1:x}, #112]\0Aldr x4, [${2:x}, #128]\0Aldr x8, [${3:x}, #128]\0Asbcs x12, x4, x8\0Astr x12, [${1:x}, #128]\0Amov ${0:x}, x12", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
         ret i64 %flag
     IR
 
@@ -3301,7 +3301,7 @@ on macos && arm64
     ll <<~IR
       ; tungsten:noinline
       entry:
-        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldp x6, x7, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldp x10, x11, [${3:x}, #16]\0Asubs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}]\0Astp x14, x15, [${1:x}, #16]\0Aldp x4, x5, [${2:x}, #32]\0Aldp x6, x7, [${2:x}, #48]\0Aldp x8, x9, [${3:x}, #32]\0Aldp x10, x11, [${3:x}, #48]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #32]\0Astp x14, x15, [${1:x}, #48]\0Aldp x4, x5, [${2:x}, #64]\0Aldp x6, x7, [${2:x}, #80]\0Aldp x8, x9, [${3:x}, #64]\0Aldp x10, x11, [${3:x}, #80]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #64]\0Astp x14, x15, [${1:x}, #80]\0Aldp x4, x5, [${2:x}, #96]\0Aldp x6, x7, [${2:x}, #112]\0Aldp x8, x9, [${3:x}, #96]\0Aldp x10, x11, [${3:x}, #112]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #96]\0Astp x14, x15, [${1:x}, #112]\0Aldp x4, x5, [${2:x}, #128]\0Aldp x8, x9, [${3:x}, #128]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Astp x12, x13, [${1:x}, #128]\0Acset ${0:x}, lo", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
+        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldp x6, x7, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldp x10, x11, [${3:x}, #16]\0Asubs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}]\0Astp x14, x15, [${1:x}, #16]\0Aldp x4, x5, [${2:x}, #32]\0Aldp x6, x7, [${2:x}, #48]\0Aldp x8, x9, [${3:x}, #32]\0Aldp x10, x11, [${3:x}, #48]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #32]\0Astp x14, x15, [${1:x}, #48]\0Aldp x4, x5, [${2:x}, #64]\0Aldp x6, x7, [${2:x}, #80]\0Aldp x8, x9, [${3:x}, #64]\0Aldp x10, x11, [${3:x}, #80]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #64]\0Astp x14, x15, [${1:x}, #80]\0Aldp x4, x5, [${2:x}, #96]\0Aldp x6, x7, [${2:x}, #112]\0Aldp x8, x9, [${3:x}, #96]\0Aldp x10, x11, [${3:x}, #112]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #96]\0Astp x14, x15, [${1:x}, #112]\0Aldp x4, x5, [${2:x}, #128]\0Aldp x8, x9, [${3:x}, #128]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Astp x12, x13, [${1:x}, #128]\0Amov ${0:x}, x13", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
         ret i64 %flag
     IR
 
@@ -3309,7 +3309,7 @@ on macos && arm64
     ll <<~IR
       ; tungsten:noinline
       entry:
-        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldp x6, x7, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldp x10, x11, [${3:x}, #16]\0Asubs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}]\0Astp x14, x15, [${1:x}, #16]\0Aldp x4, x5, [${2:x}, #32]\0Aldp x6, x7, [${2:x}, #48]\0Aldp x8, x9, [${3:x}, #32]\0Aldp x10, x11, [${3:x}, #48]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #32]\0Astp x14, x15, [${1:x}, #48]\0Aldp x4, x5, [${2:x}, #64]\0Aldp x6, x7, [${2:x}, #80]\0Aldp x8, x9, [${3:x}, #64]\0Aldp x10, x11, [${3:x}, #80]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #64]\0Astp x14, x15, [${1:x}, #80]\0Aldp x4, x5, [${2:x}, #96]\0Aldp x6, x7, [${2:x}, #112]\0Aldp x8, x9, [${3:x}, #96]\0Aldp x10, x11, [${3:x}, #112]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #96]\0Astp x14, x15, [${1:x}, #112]\0Aldp x4, x5, [${2:x}, #128]\0Aldp x8, x9, [${3:x}, #128]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Astp x12, x13, [${1:x}, #128]\0Aldr x4, [${2:x}, #144]\0Aldr x8, [${3:x}, #144]\0Asbcs x12, x4, x8\0Astr x12, [${1:x}, #144]\0Acset ${0:x}, lo", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
+        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldp x6, x7, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldp x10, x11, [${3:x}, #16]\0Asubs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}]\0Astp x14, x15, [${1:x}, #16]\0Aldp x4, x5, [${2:x}, #32]\0Aldp x6, x7, [${2:x}, #48]\0Aldp x8, x9, [${3:x}, #32]\0Aldp x10, x11, [${3:x}, #48]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #32]\0Astp x14, x15, [${1:x}, #48]\0Aldp x4, x5, [${2:x}, #64]\0Aldp x6, x7, [${2:x}, #80]\0Aldp x8, x9, [${3:x}, #64]\0Aldp x10, x11, [${3:x}, #80]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #64]\0Astp x14, x15, [${1:x}, #80]\0Aldp x4, x5, [${2:x}, #96]\0Aldp x6, x7, [${2:x}, #112]\0Aldp x8, x9, [${3:x}, #96]\0Aldp x10, x11, [${3:x}, #112]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #96]\0Astp x14, x15, [${1:x}, #112]\0Aldp x4, x5, [${2:x}, #128]\0Aldp x8, x9, [${3:x}, #128]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Astp x12, x13, [${1:x}, #128]\0Aldr x4, [${2:x}, #144]\0Aldr x8, [${3:x}, #144]\0Asbcs x12, x4, x8\0Astr x12, [${1:x}, #144]\0Amov ${0:x}, x12", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
         ret i64 %flag
     IR
 
@@ -3317,7 +3317,7 @@ on macos && arm64
     ll <<~IR
       ; tungsten:noinline
       entry:
-        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldp x6, x7, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldp x10, x11, [${3:x}, #16]\0Asubs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}]\0Astp x14, x15, [${1:x}, #16]\0Aldp x4, x5, [${2:x}, #32]\0Aldp x6, x7, [${2:x}, #48]\0Aldp x8, x9, [${3:x}, #32]\0Aldp x10, x11, [${3:x}, #48]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #32]\0Astp x14, x15, [${1:x}, #48]\0Aldp x4, x5, [${2:x}, #64]\0Aldp x6, x7, [${2:x}, #80]\0Aldp x8, x9, [${3:x}, #64]\0Aldp x10, x11, [${3:x}, #80]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #64]\0Astp x14, x15, [${1:x}, #80]\0Aldp x4, x5, [${2:x}, #96]\0Aldp x6, x7, [${2:x}, #112]\0Aldp x8, x9, [${3:x}, #96]\0Aldp x10, x11, [${3:x}, #112]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #96]\0Astp x14, x15, [${1:x}, #112]\0Aldp x4, x5, [${2:x}, #128]\0Aldp x6, x7, [${2:x}, #144]\0Aldp x8, x9, [${3:x}, #128]\0Aldp x10, x11, [${3:x}, #144]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #128]\0Astp x14, x15, [${1:x}, #144]\0Acset ${0:x}, lo", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
+        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldp x6, x7, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldp x10, x11, [${3:x}, #16]\0Asubs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}]\0Astp x14, x15, [${1:x}, #16]\0Aldp x4, x5, [${2:x}, #32]\0Aldp x6, x7, [${2:x}, #48]\0Aldp x8, x9, [${3:x}, #32]\0Aldp x10, x11, [${3:x}, #48]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #32]\0Astp x14, x15, [${1:x}, #48]\0Aldp x4, x5, [${2:x}, #64]\0Aldp x6, x7, [${2:x}, #80]\0Aldp x8, x9, [${3:x}, #64]\0Aldp x10, x11, [${3:x}, #80]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #64]\0Astp x14, x15, [${1:x}, #80]\0Aldp x4, x5, [${2:x}, #96]\0Aldp x6, x7, [${2:x}, #112]\0Aldp x8, x9, [${3:x}, #96]\0Aldp x10, x11, [${3:x}, #112]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #96]\0Astp x14, x15, [${1:x}, #112]\0Aldp x4, x5, [${2:x}, #128]\0Aldp x6, x7, [${2:x}, #144]\0Aldp x8, x9, [${3:x}, #128]\0Aldp x10, x11, [${3:x}, #144]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #128]\0Astp x14, x15, [${1:x}, #144]\0Amov ${0:x}, x15", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
         ret i64 %flag
     IR
 
@@ -3325,7 +3325,7 @@ on macos && arm64
     ll <<~IR
       ; tungsten:noinline
       entry:
-        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldp x6, x7, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldp x10, x11, [${3:x}, #16]\0Asubs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}]\0Astp x14, x15, [${1:x}, #16]\0Aldp x4, x5, [${2:x}, #32]\0Aldp x6, x7, [${2:x}, #48]\0Aldp x8, x9, [${3:x}, #32]\0Aldp x10, x11, [${3:x}, #48]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #32]\0Astp x14, x15, [${1:x}, #48]\0Aldp x4, x5, [${2:x}, #64]\0Aldp x6, x7, [${2:x}, #80]\0Aldp x8, x9, [${3:x}, #64]\0Aldp x10, x11, [${3:x}, #80]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #64]\0Astp x14, x15, [${1:x}, #80]\0Aldp x4, x5, [${2:x}, #96]\0Aldp x6, x7, [${2:x}, #112]\0Aldp x8, x9, [${3:x}, #96]\0Aldp x10, x11, [${3:x}, #112]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #96]\0Astp x14, x15, [${1:x}, #112]\0Aldp x4, x5, [${2:x}, #128]\0Aldp x6, x7, [${2:x}, #144]\0Aldp x8, x9, [${3:x}, #128]\0Aldp x10, x11, [${3:x}, #144]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #128]\0Astp x14, x15, [${1:x}, #144]\0Aldr x4, [${2:x}, #160]\0Aldr x8, [${3:x}, #160]\0Asbcs x12, x4, x8\0Astr x12, [${1:x}, #160]\0Acset ${0:x}, lo", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
+        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldp x6, x7, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldp x10, x11, [${3:x}, #16]\0Asubs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}]\0Astp x14, x15, [${1:x}, #16]\0Aldp x4, x5, [${2:x}, #32]\0Aldp x6, x7, [${2:x}, #48]\0Aldp x8, x9, [${3:x}, #32]\0Aldp x10, x11, [${3:x}, #48]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #32]\0Astp x14, x15, [${1:x}, #48]\0Aldp x4, x5, [${2:x}, #64]\0Aldp x6, x7, [${2:x}, #80]\0Aldp x8, x9, [${3:x}, #64]\0Aldp x10, x11, [${3:x}, #80]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #64]\0Astp x14, x15, [${1:x}, #80]\0Aldp x4, x5, [${2:x}, #96]\0Aldp x6, x7, [${2:x}, #112]\0Aldp x8, x9, [${3:x}, #96]\0Aldp x10, x11, [${3:x}, #112]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #96]\0Astp x14, x15, [${1:x}, #112]\0Aldp x4, x5, [${2:x}, #128]\0Aldp x6, x7, [${2:x}, #144]\0Aldp x8, x9, [${3:x}, #128]\0Aldp x10, x11, [${3:x}, #144]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #128]\0Astp x14, x15, [${1:x}, #144]\0Aldr x4, [${2:x}, #160]\0Aldr x8, [${3:x}, #160]\0Asbcs x12, x4, x8\0Astr x12, [${1:x}, #160]\0Amov ${0:x}, x12", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
         ret i64 %flag
     IR
 
@@ -3333,7 +3333,7 @@ on macos && arm64
     ll <<~IR
       ; tungsten:noinline
       entry:
-        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldp x6, x7, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldp x10, x11, [${3:x}, #16]\0Asubs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}]\0Astp x14, x15, [${1:x}, #16]\0Aldp x4, x5, [${2:x}, #32]\0Aldp x6, x7, [${2:x}, #48]\0Aldp x8, x9, [${3:x}, #32]\0Aldp x10, x11, [${3:x}, #48]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #32]\0Astp x14, x15, [${1:x}, #48]\0Aldp x4, x5, [${2:x}, #64]\0Aldp x6, x7, [${2:x}, #80]\0Aldp x8, x9, [${3:x}, #64]\0Aldp x10, x11, [${3:x}, #80]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #64]\0Astp x14, x15, [${1:x}, #80]\0Aldp x4, x5, [${2:x}, #96]\0Aldp x6, x7, [${2:x}, #112]\0Aldp x8, x9, [${3:x}, #96]\0Aldp x10, x11, [${3:x}, #112]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #96]\0Astp x14, x15, [${1:x}, #112]\0Aldp x4, x5, [${2:x}, #128]\0Aldp x6, x7, [${2:x}, #144]\0Aldp x8, x9, [${3:x}, #128]\0Aldp x10, x11, [${3:x}, #144]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #128]\0Astp x14, x15, [${1:x}, #144]\0Aldp x4, x5, [${2:x}, #160]\0Aldp x8, x9, [${3:x}, #160]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Astp x12, x13, [${1:x}, #160]\0Acset ${0:x}, lo", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
+        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldp x6, x7, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldp x10, x11, [${3:x}, #16]\0Asubs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}]\0Astp x14, x15, [${1:x}, #16]\0Aldp x4, x5, [${2:x}, #32]\0Aldp x6, x7, [${2:x}, #48]\0Aldp x8, x9, [${3:x}, #32]\0Aldp x10, x11, [${3:x}, #48]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #32]\0Astp x14, x15, [${1:x}, #48]\0Aldp x4, x5, [${2:x}, #64]\0Aldp x6, x7, [${2:x}, #80]\0Aldp x8, x9, [${3:x}, #64]\0Aldp x10, x11, [${3:x}, #80]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #64]\0Astp x14, x15, [${1:x}, #80]\0Aldp x4, x5, [${2:x}, #96]\0Aldp x6, x7, [${2:x}, #112]\0Aldp x8, x9, [${3:x}, #96]\0Aldp x10, x11, [${3:x}, #112]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #96]\0Astp x14, x15, [${1:x}, #112]\0Aldp x4, x5, [${2:x}, #128]\0Aldp x6, x7, [${2:x}, #144]\0Aldp x8, x9, [${3:x}, #128]\0Aldp x10, x11, [${3:x}, #144]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #128]\0Astp x14, x15, [${1:x}, #144]\0Aldp x4, x5, [${2:x}, #160]\0Aldp x8, x9, [${3:x}, #160]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Astp x12, x13, [${1:x}, #160]\0Amov ${0:x}, x13", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
         ret i64 %flag
     IR
 
@@ -3341,7 +3341,7 @@ on macos && arm64
     ll <<~IR
       ; tungsten:noinline
       entry:
-        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldp x6, x7, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldp x10, x11, [${3:x}, #16]\0Asubs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}]\0Astp x14, x15, [${1:x}, #16]\0Aldp x4, x5, [${2:x}, #32]\0Aldp x6, x7, [${2:x}, #48]\0Aldp x8, x9, [${3:x}, #32]\0Aldp x10, x11, [${3:x}, #48]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #32]\0Astp x14, x15, [${1:x}, #48]\0Aldp x4, x5, [${2:x}, #64]\0Aldp x6, x7, [${2:x}, #80]\0Aldp x8, x9, [${3:x}, #64]\0Aldp x10, x11, [${3:x}, #80]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #64]\0Astp x14, x15, [${1:x}, #80]\0Aldp x4, x5, [${2:x}, #96]\0Aldp x6, x7, [${2:x}, #112]\0Aldp x8, x9, [${3:x}, #96]\0Aldp x10, x11, [${3:x}, #112]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #96]\0Astp x14, x15, [${1:x}, #112]\0Aldp x4, x5, [${2:x}, #128]\0Aldp x6, x7, [${2:x}, #144]\0Aldp x8, x9, [${3:x}, #128]\0Aldp x10, x11, [${3:x}, #144]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #128]\0Astp x14, x15, [${1:x}, #144]\0Aldp x4, x5, [${2:x}, #160]\0Aldp x8, x9, [${3:x}, #160]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Astp x12, x13, [${1:x}, #160]\0Aldr x4, [${2:x}, #176]\0Aldr x8, [${3:x}, #176]\0Asbcs x12, x4, x8\0Astr x12, [${1:x}, #176]\0Acset ${0:x}, lo", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
+        %flag = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldp x6, x7, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldp x10, x11, [${3:x}, #16]\0Asubs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}]\0Astp x14, x15, [${1:x}, #16]\0Aldp x4, x5, [${2:x}, #32]\0Aldp x6, x7, [${2:x}, #48]\0Aldp x8, x9, [${3:x}, #32]\0Aldp x10, x11, [${3:x}, #48]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #32]\0Astp x14, x15, [${1:x}, #48]\0Aldp x4, x5, [${2:x}, #64]\0Aldp x6, x7, [${2:x}, #80]\0Aldp x8, x9, [${3:x}, #64]\0Aldp x10, x11, [${3:x}, #80]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #64]\0Astp x14, x15, [${1:x}, #80]\0Aldp x4, x5, [${2:x}, #96]\0Aldp x6, x7, [${2:x}, #112]\0Aldp x8, x9, [${3:x}, #96]\0Aldp x10, x11, [${3:x}, #112]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #96]\0Astp x14, x15, [${1:x}, #112]\0Aldp x4, x5, [${2:x}, #128]\0Aldp x6, x7, [${2:x}, #144]\0Aldp x8, x9, [${3:x}, #128]\0Aldp x10, x11, [${3:x}, #144]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Asbcs x14, x6, x10\0Asbcs x15, x7, x11\0Astp x12, x13, [${1:x}, #128]\0Astp x14, x15, [${1:x}, #144]\0Aldp x4, x5, [${2:x}, #160]\0Aldp x8, x9, [${3:x}, #160]\0Asbcs x12, x4, x8\0Asbcs x13, x5, x9\0Astp x12, x13, [${1:x}, #160]\0Aldr x4, [${2:x}, #176]\0Aldr x8, [${3:x}, #176]\0Asbcs x12, x4, x8\0Astr x12, [${1:x}, #176]\0Amov ${0:x}, x12", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
         ret i64 %flag
     IR
 
@@ -3936,8 +3936,8 @@ on macos && arm64
       negative = 1
     result = ccall_nobox("w_bigint_alloc_hot4_raw") ## i64
     rp = (result & mask) + 16 ## i64
-    __bigint_sub3_equal_exact(rp, lp, sp)
-    ccall_nobox("w_bigint_sub_equal_finish_raw", result, 3, negative)
+    top = __bigint_sub3_equal_exact(rp, lp, sp) ## i64
+    ccall_nobox("w_bigint_sub_equal_top_finish_raw", result, 3, negative, top)
 
   # Exact C-shaped positive equal-width sub@4 (bigint_sub_any's boxed equal
   # route into bigint_sub_equal_fast): compare, the hot take in 4's
@@ -3959,8 +3959,8 @@ on macos && arm64
       negative = 1
     result = ccall_nobox("w_bigint_alloc_hot4_raw") ## i64
     rp = (result & mask) + 16 ## i64
-    __bigint_sub4_equal_exact(rp, lp, sp)
-    ccall_nobox("w_bigint_sub_equal_finish_raw", result, 4, negative)
+    top = __bigint_sub4_equal_exact(rp, lp, sp) ## i64
+    ccall_nobox("w_bigint_sub_equal_top_finish_raw", result, 4, negative, top)
 
   # Exact C-shaped positive equal-width sub@8 (bigint_sub_any's boxed equal
   # route into bigint_sub_equal_fast): compare, the hot take in 8's
@@ -3982,8 +3982,8 @@ on macos && arm64
       negative = 1
     result = ccall_nobox("w_bigint_alloc_hot8_raw") ## i64
     rp = (result & mask) + 16 ## i64
-    __bigint_sub8_equal_exact(rp, lp, sp)
-    ccall_nobox("w_bigint_sub_equal_finish_raw", result, 8, negative)
+    top = __bigint_sub8_equal_exact(rp, lp, sp) ## i64
+    ccall_nobox("w_bigint_sub_equal_top_finish_raw", result, 8, negative, top)
 
   # Exact C-shaped positive equal-width sub@16 (bigint_sub_any's boxed equal
   # route into bigint_sub_equal_fast): compare, the hot take in 16's
@@ -4005,8 +4005,8 @@ on macos && arm64
       negative = 1
     result = ccall_nobox("w_bigint_alloc_hot16_raw") ## i64
     rp = (result & mask) + 16 ## i64
-    __bigint_sub16_equal_exact(rp, lp, sp)
-    ccall_nobox("w_bigint_sub_equal_finish_raw", result, 16, negative)
+    top = __bigint_sub16_equal_exact(rp, lp, sp) ## i64
+    ccall_nobox("w_bigint_sub_equal_top_finish_raw", result, 16, negative, top)
 
   # Exact C-shaped positive equal-width sub@24 (bigint_sub_any's boxed equal
   # route into bigint_sub_equal_fast): compare, the hot take in 24's
@@ -4028,8 +4028,8 @@ on macos && arm64
       negative = 1
     result = ccall_nobox("w_bigint_alloc_hot32_exact_raw") ## i64
     rp = (result & mask) + 16 ## i64
-    __bigint_sub24_equal_exact(rp, lp, sp)
-    ccall_nobox("w_bigint_sub_equal_finish_raw", result, 24, negative)
+    top = __bigint_sub24_equal_exact(rp, lp, sp) ## i64
+    ccall_nobox("w_bigint_sub_equal_top_finish_raw", result, 24, negative, top)
 
   # Exact C-shaped positive sub@2 (bigint_add_two_limb_magnitudes,
   # opposite-sign arm): the two-limb compare, larger minus smaller, then C's
@@ -4118,23 +4118,24 @@ on macos && arm64
     # overhead measured 5-8% behind C's blocked loop, so those widths take
     # straight-line chains.
     if n >= 17
+      top = 0 ## i64
       case n
         17 =>
-          __bigint_sub17_equal_exact(rp, lp, sp)
+          top = __bigint_sub17_equal_exact(rp, lp, sp) ## i64
         18 =>
-          __bigint_sub18_equal_exact(rp, lp, sp)
+          top = __bigint_sub18_equal_exact(rp, lp, sp) ## i64
         19 =>
-          __bigint_sub19_equal_exact(rp, lp, sp)
+          top = __bigint_sub19_equal_exact(rp, lp, sp) ## i64
         20 =>
-          __bigint_sub20_equal_exact(rp, lp, sp)
+          top = __bigint_sub20_equal_exact(rp, lp, sp) ## i64
         21 =>
-          __bigint_sub21_equal_exact(rp, lp, sp)
+          top = __bigint_sub21_equal_exact(rp, lp, sp) ## i64
         22 =>
-          __bigint_sub22_equal_exact(rp, lp, sp)
+          top = __bigint_sub22_equal_exact(rp, lp, sp) ## i64
         23 =>
-          __bigint_sub23_equal_exact(rp, lp, sp)
-    else
-      asm_sub_no(rp, 0, lp, 0, sp, 0, n)
+          top = __bigint_sub23_equal_exact(rp, lp, sp) ## i64
+      return ccall_nobox("w_bigint_sub_equal_top_finish_raw", result, n, negative, top)
+    asm_sub_no(rp, 0, lp, 0, sp, 0, n)
     ccall_nobox("w_bigint_sub_equal_finish_raw", result, n, negative)
 
 # Out-of-line generic body shared by BigInt#+ and BigInt#-: unequal
@@ -4329,6 +4330,7 @@ on macos && arm64
 # hot-slot policy.
 fn __bigint_sub1_1_magnitude(ap, bp) (i64 i64) i64
   ll <<~IR
+    ; tungsten:alwaysinline
     entry:
       %aptr = inttoptr i64 %ap to ptr
       %bptr = inttoptr i64 %bp to ptr
@@ -4349,9 +4351,9 @@ fn __bigint_sub1_1_raw(a, b) (i64 i64) i64
   word = raw_load_u64(bp, 0) ## u64
   lt = av < word
   magnitude = __bigint_sub1_1_magnitude(ap, bp) ## i64
-  signed_size = lt ? 0 - 1 : 1
+  signed_size = (lt ? 0 - 1 : 1) ## i64
   ccall_nobox(
-    "w_bigint_sub1_1_finish_raw", magnitude, signed_size ## i64
+    "w_bigint_sub1_1_finish_raw", magnitude, signed_size
   )
 
 # Exact positive one-limb multiply leaf. The generic runtime gate and typed
@@ -5464,11 +5466,11 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
       # Complete scalar-word shapes before testing equal widths so existing
       # add1 callers pay no new dispatch work.
       if bn == 1
+        if an == 1
+          return wvalue_from_bits(
+            __bigint_add1_1_raw($value ## i64, other$value ## i64)
+          )
         case an
-          1 =>
-            return wvalue_from_bits(
-              __bigint_add1_1_raw($value ## i64, other$value ## i64)
-            )
           2 =>
             return wvalue_from_bits(
               __bigint_add1_2_raw($value ## i64, other$value ## i64)
@@ -5606,11 +5608,11 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
       # compares ahead of the equal-width leaves measured as a 10-15% tax on
       # every equal-width subtraction.
       if bn0 == 1
+        if an == 1
+          return wvalue_from_bits(
+            __bigint_sub1_1_raw($value ## i64, other$value ## i64)
+          )
         case an
-          1 =>
-            return wvalue_from_bits(
-              __bigint_sub1_1_raw($value ## i64, other$value ## i64)
-            )
           2 =>
             return wvalue_from_bits(
               __bigint_sub1_2_raw($value ## i64, other$value ## i64)
@@ -6381,16 +6383,16 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
     # A negative left-shift count is an arithmetic right shift. If that
     # count covers the full magnitude, complete it from header metadata as
     # inline 0/-1 without reading a limb or entering the C shift kernel.
-    raw_size = $size ## i64
-    n = raw_size ## i64
-    flip = (($value >> 47) & 1) ## i64
-    if flip == 1
-      n = 0 - n
     k_payload = (other$value & 0xFFFFFFFFFFFF) ## i64
     k = (k_payload - ((k_payload >> 47) << 48)) ## i64
     if k == 0
       return ccall("w_bigint_mark_shared_value", self)
     if k < 0
+      raw_size = $size ## i64
+      n = raw_size ## i64
+      flip = (($value >> 47) & 1) ## i64
+      if flip == 1
+        n = 0 - n
       right_count = 0 - k ## i64
       magnitude_limbs = raw_size ## i64
       if raw_size < 0
@@ -6400,26 +6402,6 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
         if n < 0
           return wvalue_from_bits((int_tag | 281474976710655) ## i64)
         return wvalue_from_bits(int_tag)
-    # Above the runtime's fixed-width left-shift rungs, complete a positive
-    # sub-limb shift in source: one recycled allocation, one raw funnel pass,
-    # and direct publication of the already-normalized result width. This is
-    # retained only through the same-binary-measured 65..224-limb band.
-    if n > 64 && n <= 224 && k > 0 && k < 64
-      carry = __bigint_shr_u64($limbs[n - 1] ## u64, 64 - k) ## u64
-      outn = n ## i64
-      if carry != 0
-        outn = outn + 1 ## i64
-      result = ccall_rawargs("w_bigint_alloc_hot", outn) ## BigInt
-      mask = 140737488355312 ## i64
-      sp = (($value & mask) + 16) ## i64
-      rp = ((result$value & mask) + 16) ## i64
-      __bigint_shl_positive_funnel(
-        rp ## i64, sp ## i64, n ## i64, k ## i64
-      )
-      if carry != 0
-        result$limbs[n] = carry
-      result$size = outn
-      return result
     ccall("w_bigint_shl", self, other)
 
   -> <<(other)(Number)

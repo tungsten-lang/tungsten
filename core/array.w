@@ -214,12 +214,24 @@
       i += 1
     out
 
-  # Quadratic seen-scan over the result, matching the former C handler: `==`
-  # equality, first occurrence wins. A hash-set would change which values
-  # collapse together (hash-key equality), so this stays faithful.
+  # Deduplicate preserving `==` equality and first-occurrence order. Small
+  # arrays (n <= 8) stay on the inline seen-scan (with 0/1/2-element fast
+  # paths); larger arrays dispatch to `w_array_uniq`, which uses an O(n)
+  # open-addressed hash index for hash-exact scalars and falls back to `w_eq`
+  # for NaN, structural containers, and user instances.
   -> uniq
-    out = []
     n = $size ## i64
+    if n == 0
+      return []
+    if n == 1
+      return [self[0]]
+    if n == 2
+      a = self[0]
+      b = self[1]
+      return a == b ? [a] : [a, b]
+    if n > 8
+      return ccall("w_array_uniq", self)
+    out = []
     i = 0
     while i < n
       value = self[i]
@@ -302,8 +314,9 @@
 
     # The first live-size pass validates every raw to_s result. Lengths remain
     # deliberately unused: exact preallocation was slower than default growth.
+    n = $size
     i = 0
-    while i < $size
+    while i < n
       text = ccall("w_to_s", self[i])
       text_length = ccall_nobox("w_stringy_c_length", text) ## i64
       i += 1
@@ -311,7 +324,7 @@
     # Allocate only the returned output buffer, after validation has finished.
     out = StringBuffer() ## recycle
     i = 0
-    while i < $size
+    while i < n
       if i > 0
         ccall("w_strbuf_append", out, separator)
       text = ccall("w_to_s", self[i])
@@ -528,11 +541,13 @@
         j = mid
         k = left
         while i < mid && j < right
-          if &(src[i], src[j]) <= 0
-            dst[k] = src[i]
+          vi = src[i]
+          vj = src[j]
+          if &(vi, vj) <= 0
+            dst[k] = vi
             i += 1
           else
-            dst[k] = src[j]
+            dst[k] = vj
             j += 1
           k += 1
         while i < mid
@@ -675,11 +690,12 @@
     cw_cur = [self[0]]
     cw_i = 1
     while cw_i < cw_n
-      if &(self[cw_i - 1], self[cw_i])
-        cw_cur.push(self[cw_i])
+      cw_v = self[cw_i]
+      if &(self[cw_i - 1], cw_v)
+        cw_cur.push(cw_v)
       else
         cw_out.push(cw_cur)
-        cw_cur = [self[cw_i]]
+        cw_cur = [cw_v]
       cw_i += 1
     cw_out.push(cw_cur)
     cw_out

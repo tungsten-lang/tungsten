@@ -3,6 +3,7 @@
 # Run: bin/tungsten bits/tungsten-flame/spec/parsing_spec.w
 
 use spec
+use folded
 use builder
 use perf_script
 use xctrace_xml
@@ -839,5 +840,28 @@ describe "FlameSplit" ->
     folded = Tungsten:Flame:SampleCollapse.collapse(lines.join("\n"))
     expect(Tungsten:Flame:FlameSplit.roots(folded).join(",")).to eq("Thread_1,Thread_2")
     expect(Tungsten:Flame:FlameSplit.select(folded, "Thread_2")).to eq("Thread_2;spin 5")
+
+describe "Folded" ->
+  it "matches idle frames on normalized frame names without dropping poll_events" ->
+    expect(Tungsten:Flame:Folded.idle_stack?("main;libsystem_kernel.dylib`kevent")).to eq(true)
+    expect(Tungsten:Flame:Folded.idle_stack?("main;poll")).to eq(true)
+    expect(Tungsten:Flame:Folded.idle_stack?("main;poll_events;compute")).to eq(false)
+    expect(Tungsten:Flame:Folded.idle_stack?("main;kevent_loop;work")).to eq(false)
+
+  it "identifies infra entry-point frames while keeping main" ->
+    expect(Tungsten:Flame:Folded.infra_leaf?("start")).to eq(true)
+    expect(Tungsten:Flame:Folded.infra_leaf?("dyld`start")).to eq(true)
+    expect(Tungsten:Flame:Folded.infra_leaf?("main")).to eq(false)
+    expect(Tungsten:Flame:Folded.infra_leaf?("compute")).to eq(false)
+
+  it "includes both top self and top inclusive frames in hot_functions" ->
+    tmp = "/tmp/tungsten_hot_fn_spec.folded"
+    write_file(tmp, "start;orchestrate;leaf_a 60\nstart;orchestrate;leaf_b 40\n")
+    hot = Tungsten:Flame:FlameAnalyzer.hot_functions(tmp, 2)
+    expect(hot.has_key?("leaf_a")).to eq(true)
+    expect(hot.has_key?("leaf_b")).to eq(true)
+    expect(hot.has_key?("orchestrate")).to eq(true)
+    expect(hot.has_key?("start")).to eq(false)
+    system("rm -f " + tmp)
 
 spec_summary

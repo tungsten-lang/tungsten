@@ -10,6 +10,7 @@
 # (Tungsten:Flame:Sampler etc.). Argon is a root-namespace class.
 
 use argon
+use folded
 use sidemap
 use analyzer
 use counter_rates
@@ -29,6 +30,18 @@ use flame_threshold
 use flame_normalize
 use flame_split
 use ../../../compiler/lib/perf_inspect
+
+fn apply_folded_pipeline(text, fl_root, fl_grep, fl_prune, fl_subtree, fl_collapse_recursion, fl_rewrite, fl_threshold)
+  out = text
+  if fl_root != ""
+    out = Tungsten:Flame:FlameSplit.select(out, fl_root)
+  if fl_grep != "" || fl_prune != "" || fl_subtree != ""
+    out = Tungsten:Flame:FlameFilter.apply(out, fl_grep, fl_prune, fl_subtree)
+  if fl_rewrite != "" || fl_collapse_recursion
+    out = Tungsten:Flame:FlameNormalize.apply(out, fl_collapse_recursion, fl_rewrite)
+  if fl_threshold != ""
+    out = Tungsten:Flame:FlameThreshold.collapse(out, Tungsten:Flame:FlameThreshold.parse_pct_x10(fl_threshold))
+  out
 
 # ---- Read and parse the manpage ----
 # Prefer TUNGSTEN_ROOT (set by the CLI); __DIR__ is not always populated
@@ -77,6 +90,10 @@ if fl_pid_raw == nil
 fl_pid = nil
 if fl_pid_raw != ""
   fl_pid = fl_pid_raw.to_s().to_i()
+fl_eval_raw = opts.get("eval")
+fl_eval = ""
+if fl_eval_raw != nil && fl_eval_raw != false && fl_eval_raw.to_s() != "" && fl_eval_raw.to_s() != "false"
+  fl_eval = fl_eval_raw.to_s()
 fl_focus = opts.get("focus")
 if fl_focus == nil
   fl_focus = ""
@@ -140,6 +157,9 @@ fl_split       = opts.flag?("split")
 fl_files       = opts.args
 fl_passthrough = opts.passthrough
 
+has_filter_flags = fl_root != "" || fl_grep != "" || fl_prune != "" || fl_subtree != "" || fl_threshold != "" || fl_rewrite != "" || fl_collapse_recursion
+has_live_target = fl_eval != "" || fl_pid != nil || fl_ruby || fl_lex || fl_parse || fl_execution || fl_passthrough.size > 0 || (fl_files.size > 0 && fl_files[0].ends_with?(".w"))
+
 # Mode dispatch.
 
 # AST Performance Inspection mode (`flame --inspect FILE.w [MORE.w ...]`,
@@ -149,20 +169,30 @@ fl_passthrough = opts.passthrough
 # program with dynamic AST loop/fetch counters (`TUNGSTEN_PERF_INSTRUMENT=1`)
 # and merges exact runtime iteration and fetch counts into the report.
 if fl_inspect || fl_inspect_run || fl_inspect_json
-  if fl_files.size < 1
+  insp_tmp = nil
+  insp_targets = fl_files
+  if insp_targets.size == 0 && fl_eval != ""
+    insp_tmp = Tungsten:Flame:Sampler.mktmpdir
+    eval_insp = insp_tmp + "/eval.w"
+    write_file(eval_insp, fl_eval + "\n")
+    insp_targets = [eval_insp]
+  if insp_targets.size < 1
     << "tungsten flame --inspect: need at least one .w source file"
     exit(1)
   ii = 0
-  while ii < fl_files.size
-    insp_file = fl_files[ii]
+  while ii < insp_targets.size
+    insp_file = insp_targets[ii]
     if !file?(insp_file)
+      if insp_tmp != nil
+        Tungsten:Flame:Sampler.rmtree(insp_tmp)
       << "tungsten flame --inspect: source not found: " + insp_file
       exit(1)
     pi_report = perf_inspect_file(insp_file)
     dyn_loops = nil
     dyn_sites = nil
     if fl_inspect_run
-      insp_tmp = Tungsten:Flame:Sampler.mktmpdir
+      if insp_tmp == nil
+        insp_tmp = Tungsten:Flame:Sampler.mktmpdir
       insp_bin = insp_tmp + "/inspect_bin"
       comp_bin = Tungsten:Flame:Builder.compiler_bin()
       comp_cmd = "TUNGSTEN_PERF_INSTRUMENT=1 " + Tungsten:Flame:Builder.shell_quote(comp_bin) + " compile --no-lto " + Tungsten:Flame:Builder.shell_quote(insp_file) + " --out " + Tungsten:Flame:Builder.shell_quote(insp_bin) + " >/dev/null 2>&1"
@@ -181,6 +211,8 @@ if fl_inspect || fl_inspect_run || fl_inspect_json
     else
       << perf_inspect_report_text(pi_report, !fl_silent, fl_top, nil, dyn_loops, dyn_sites)
     ii = ii + 1
+  if insp_tmp != nil
+    Tungsten:Flame:Sampler.rmtree(insp_tmp)
   exit(0)
 
 # Folded-input mode: render an already-collected folded profile
@@ -191,13 +223,15 @@ if fl_inspect || fl_inspect_run || fl_inspect_json
 # folded text; --sidemap rewrites the compiler's `__wy_<hash>` symbols to real
 # names when the converter could not. Pure text — no compile, no profiling.
 if fl_folded_in != nil && fl_folded_in != ""
-  folded_in = read_file(fl_folded_in)
+  folded_in = Tungsten:Flame:Folded.read_input(fl_folded_in)
   if folded_in == nil
     << "tungsten flame --folded: cannot read " + fl_folded_in
     exit(1)
   if fl_sidemap_in != nil && fl_sidemap_in != ""
     folded_in = Tungsten:Flame:Sidemap.rewrite_folded(folded_in, Tungsten:Flame:Sidemap.load(fl_sidemap_in))
-  in_name = Tungsten:Flame:Sampler.basename_noext(fl_folded_in)
+  if has_filter_flags
+    folded_in = apply_folded_pipeline(folded_in, fl_root, fl_grep, fl_prune, fl_subtree, fl_collapse_recursion, fl_rewrite, fl_threshold)
+  in_name = (fl_folded_in == "-") ? "stdin" : Tungsten:Flame:Sampler.basename_noext(fl_folded_in)
   if fl_speedscope
     ss_path = (fl_output != "") ? fl_output : ("flame_" + in_name + ".speedscope.json")
     write_file(ss_path, Tungsten:Flame:Speedscope.export(folded_in, in_name))
@@ -208,9 +242,11 @@ if fl_folded_in != nil && fl_folded_in != ""
     write_file(fl_output, Tungsten:Flame:FlameSvg.render(folded_in, "Flame Graph — " + in_name))
     if !fl_silent
       << "wrote flame graph: " + fl_output
-  folded_tmp = Tungsten:Flame:Sampler.mktmpdir + "/" + in_name + ".folded"
+  ftmp_dir = Tungsten:Flame:Sampler.mktmpdir
+  folded_tmp = ftmp_dir + "/" + in_name + ".folded"
   write_file(folded_tmp, folded_in)
   Tungsten:Flame:FlameAnalyzer.display_metric(folded_tmp, fl_top, "general", fl_focus, !fl_silent, "samples")
+  Tungsten:Flame:Sampler.rmtree(ftmp_dir)
   exit(0)
 
 # Differential mode: compare two already-collected folded profiles
@@ -224,14 +260,17 @@ if fl_diff
     exit(1)
   before_path = fl_files[0]
   after_path = fl_files[1]
-  before_text = read_file(before_path)
+  before_text = Tungsten:Flame:Folded.read_input(before_path)
   if before_text == nil
     << "tungsten flame: cannot read " + before_path
     exit(1)
-  after_text = read_file(after_path)
+  after_text = Tungsten:Flame:Folded.read_input(after_path)
   if after_text == nil
     << "tungsten flame: cannot read " + after_path
     exit(1)
+  if has_filter_flags
+    before_text = apply_folded_pipeline(before_text, fl_root, fl_grep, fl_prune, fl_subtree, fl_collapse_recursion, fl_rewrite, fl_threshold)
+    after_text = apply_folded_pipeline(after_text, fl_root, fl_grep, fl_prune, fl_subtree, fl_collapse_recursion, fl_rewrite, fl_threshold)
   << Tungsten:Flame:FlameDiff.report(before_text, after_text, fl_top, !fl_silent)
   if fl_output != ""
     write_file(fl_output, Tungsten:Flame:FlameDiff.diff_normalized(before_text, after_text))
@@ -253,7 +292,7 @@ if fl_hot
   combined = ""
   hi = 0
   while hi < fl_files.size
-    ftext = read_file(fl_files[hi])
+    ftext = Tungsten:Flame:Folded.read_input(fl_files[hi])
     if ftext == nil
       << "tungsten flame: cannot read " + fl_files[hi]
       exit(1)
@@ -261,6 +300,8 @@ if fl_hot
       combined = combined + "\n"
     combined = combined + ftext
     hi = hi + 1
+  if has_filter_flags
+    combined = apply_folded_pipeline(combined, fl_root, fl_grep, fl_prune, fl_subtree, fl_collapse_recursion, fl_rewrite, fl_threshold)
   << Tungsten:Flame:HotFrames.report(combined, fl_top, !fl_silent)
   exit(0)
 
@@ -279,7 +320,7 @@ if fl_collapse_sample
   combined = ""
   ci = 0
   while ci < fl_files.size
-    stext = read_file(fl_files[ci])
+    stext = Tungsten:Flame:Folded.read_input(fl_files[ci])
     if stext == nil
       << "tungsten flame: cannot read " + fl_files[ci]
       exit(1)
@@ -289,6 +330,8 @@ if fl_collapse_sample
         combined = combined + "\n"
       combined = combined + folded_one
     ci = ci + 1
+  if has_filter_flags
+    combined = apply_folded_pipeline(combined, fl_root, fl_grep, fl_prune, fl_subtree, fl_collapse_recursion, fl_rewrite, fl_threshold)
   if fl_output != ""
     write_file(fl_output, combined)
     if !fl_silent
@@ -313,7 +356,7 @@ if fl_collapse_dtrace
   combined = ""
   di = 0
   while di < fl_files.size
-    dtext = read_file(fl_files[di])
+    dtext = Tungsten:Flame:Folded.read_input(fl_files[di])
     if dtext == nil
       << "tungsten flame: cannot read " + fl_files[di]
       exit(1)
@@ -323,6 +366,8 @@ if fl_collapse_dtrace
         combined = combined + "\n"
       combined = combined + folded_one
     di = di + 1
+  if has_filter_flags
+    combined = apply_folded_pipeline(combined, fl_root, fl_grep, fl_prune, fl_subtree, fl_collapse_recursion, fl_rewrite, fl_threshold)
   if fl_output != ""
     write_file(fl_output, combined)
     if !fl_silent
@@ -347,7 +392,7 @@ if fl_trace_event
   combined = ""
   ti = 0
   while ti < fl_files.size
-    ftext = read_file(fl_files[ti])
+    ftext = Tungsten:Flame:Folded.read_input(fl_files[ti])
     if ftext == nil
       << "tungsten flame: cannot read " + fl_files[ti]
       exit(1)
@@ -355,7 +400,9 @@ if fl_trace_event
       combined = combined + "\n"
     combined = combined + ftext
     ti = ti + 1
-  te_name = Tungsten:Flame:Sampler.basename_noext(fl_files[0])
+  if has_filter_flags
+    combined = apply_folded_pipeline(combined, fl_root, fl_grep, fl_prune, fl_subtree, fl_collapse_recursion, fl_rewrite, fl_threshold)
+  te_name = (fl_files[0] == "-") ? "stdin" : Tungsten:Flame:Sampler.basename_noext(fl_files[0])
   te_json = Tungsten:Flame:TraceEvent.export(combined, te_name)
   if fl_output != ""
     write_file(fl_output, te_json)
@@ -385,14 +432,14 @@ if fl_trace_event
 # (concatenated folded text sums duplicate stacks), so N runs partition as one.
 # Select emits folded text — pipe it into any other view
 # (`flame --root Thread_1 x.folded > t1.folded`).
-if fl_split || fl_root != ""
+if fl_split || (fl_root != "" && !has_live_target)
   if fl_files.size < 1
     << "tungsten flame --split: need at least one folded file"
     exit(1)
   combined = ""
   si = 0
   while si < fl_files.size
-    ftext = read_file(fl_files[si])
+    ftext = Tungsten:Flame:Folded.read_input(fl_files[si])
     if ftext == nil
       << "tungsten flame: cannot read " + fl_files[si]
       exit(1)
@@ -408,6 +455,7 @@ if fl_split || fl_root != ""
       << "tungsten flame --root: no stacks with root frame: " + fl_root
       << "(run `flame --split` on the same file to list the roots it has)"
       exit(1)
+    selected = apply_folded_pipeline(selected, "", fl_grep, fl_prune, fl_subtree, fl_collapse_recursion, fl_rewrite, fl_threshold)
     if fl_output != ""
       write_file(fl_output, selected)
       if !fl_silent
@@ -447,25 +495,16 @@ if fl_split || fl_root != ""
 # `--collapse-recursion`, merge frame-name variants with `--rewrite RULES`),
 # or fold the sub-PCT% long tail into an "(other)" node (`--threshold PCT`).
 # Like --diff / --hot, a pure folded-text mode (no compile, no profiling) that
-# works on any folded stacks. The steps compose in a fixed order (pattern
-# filters, then normalize, then the threshold collapse), so
-# `flame --subtree parse --collapse-recursion --threshold 1 x.folded` zooms,
-# folds the recursive staircase, then de-noises. Emits folded text — pipe it
-# into another view (`flame --grep parse x.folded > sub.folded`). With -o the
-# result is written to the file instead of stdout.
-if fl_grep != "" || fl_prune != "" || fl_subtree != "" || fl_threshold != "" || fl_rewrite != "" || fl_collapse_recursion
+# works on any folded stacks when no live-profiling target is present.
+if !has_live_target && (fl_grep != "" || fl_prune != "" || fl_subtree != "" || fl_threshold != "" || fl_rewrite != "" || fl_collapse_recursion)
   if fl_files.size < 1
     << "tungsten flame: filter needs one folded file"
     exit(1)
-  ftext = read_file(fl_files[0])
+  ftext = Tungsten:Flame:Folded.read_input(fl_files[0])
   if ftext == nil
     << "tungsten flame: cannot read " + fl_files[0]
     exit(1)
-  filtered = Tungsten:Flame:FlameFilter.apply(ftext, fl_grep, fl_prune, fl_subtree)
-  if fl_rewrite != "" || fl_collapse_recursion
-    filtered = Tungsten:Flame:FlameNormalize.apply(filtered, fl_collapse_recursion, fl_rewrite)
-  if fl_threshold != ""
-    filtered = Tungsten:Flame:FlameThreshold.collapse(filtered, Tungsten:Flame:FlameThreshold.parse_pct_x10(fl_threshold))
+  filtered = apply_folded_pipeline(ftext, fl_root, fl_grep, fl_prune, fl_subtree, fl_collapse_recursion, fl_rewrite, fl_threshold)
   if fl_output != ""
     write_file(fl_output, filtered)
     if !fl_silent
@@ -474,16 +513,7 @@ if fl_grep != "" || fl_prune != "" || fl_subtree != "" || fl_threshold != "" || 
     << filtered
   exit(0)
 
-if fl_pid != nil
-  << "TODO: attach to pid " + fl_pid.to_s + " for " + fl_duration.to_s + "s"
-  exit(0)
-
-
-if fl_lex
-  << "TODO: profile lexer over " + fl_files.size.to_s + " file(s)"
-  exit(0)
-
-if fl_files.size == 0 && fl_passthrough.size == 0
+if fl_files.size == 0 && fl_passthrough.size == 0 && fl_eval == "" && fl_pid == nil && !fl_ruby && !fl_lex && !fl_parse
   << "tungsten flame v0.3.0"
   << ""
   help_text = cli.help
@@ -491,44 +521,140 @@ if fl_files.size == 0 && fl_passthrough.size == 0
     << help_text
   exit(0)
 
-if fl_ruby
-  << "TODO: profile ruby interpreter on " + fl_files[0]
-  exit(0)
-
-# ---- Compile + profile + display ----
-# Two entries into the same pipeline: a .w source (compile first), or an
-# external command after `--` (profile as-is; symbols resolve through the
-# sidemap the compiler wrote next to the target binary at build time).
-ext_argv = fl_passthrough
-source = ext_argv.size > 0 ? ext_argv[0] : fl_files[0]
-if !file?(source)
-  << "tungsten flame: source not found: " + source
-  exit(1)
+# ---- Live profiling pipeline ----
+# Supports:
+#   1. --pid PID                  Attach to running process
+#   2. --ruby [FILE.w | -e CODE]  Profile the Ruby interpreter (stackprof / backtrace_locations)
+#   3. --lex / --parse            Profile lexing or parsing of FILE.w... or -e CODE
+#   4. FILE.w [-- ARGS...]        Compile FILE.w (or -e CODE) and profile execution
+#   5. -- COMMAND [ARGS...]       Profile an arbitrary external command
 
 tmpdir = Tungsten:Flame:Sampler.mktmpdir
-
-if fl_build_only
-  build_out = (fl_output != "") ? fl_output : ("flame_" + Tungsten:Flame:Sampler.basename_noext(source))
-  ok = Tungsten:Flame:Builder.compile(source, build_out)
-  if !ok
-    << "tungsten flame: build failed"
-    exit(1)
-  << "built " + build_out
-  exit(0)
+eval_path = nil
+if fl_eval != ""
+  eval_path = tmpdir + "/eval.w"
+  write_file(eval_path, fl_eval + "\n")
 
 bin_path = tmpdir + "/flame_bin"
+source = ""
+source_label = "profile"
+category_set = "general"
 metrics = nil
-if ext_argv.size > 0
-  bin_path = source
-  metrics = Tungsten:Flame:Sampler.profile_cmd(ext_argv, fl_duration, fl_rate, fl_counters)
-else
-  build_ok = Tungsten:Flame:Builder.compile(source, bin_path)
+inspect_target = nil
+
+if fl_pid != nil
+  source_label = "pid_" + fl_pid.to_s()
+  category_set = (fl_sidemap_in != nil && fl_sidemap_in != "") ? "general" : "external"
+  metrics = Tungsten:Flame:Sampler.profile_pid(fl_pid, fl_duration, fl_rate, fl_counters)
+elsif fl_ruby
+  target_w = (eval_path != nil) ? eval_path : ((fl_files.size > 0) ? fl_files[0] : "")
+  if target_w == ""
+    Tungsten:Flame:Sampler.rmtree(tmpdir)
+    << "tungsten flame --ruby: need a .w source file or -e CODE"
+    exit(1)
+  if !file?(target_w)
+    Tungsten:Flame:Sampler.rmtree(tmpdir)
+    << "tungsten flame: source not found: " + target_w
+    exit(1)
+  ruby_phase = "general"
+  if fl_lex
+    ruby_phase = "lex"
+  elsif fl_parse
+    ruby_phase = "parse"
+  elsif fl_execution
+    ruby_phase = "execution"
+  source = target_w
+  source_label = (eval_path != nil) ? "eval" : Tungsten:Flame:Sampler.basename_noext(target_w)
+  category_set = "ruby"
+  metrics = Tungsten:Flame:Sampler.profile_ruby(target_w, fl_passthrough, fl_duration, fl_rate, ruby_phase)
+elsif fl_lex || fl_parse
+  target_files = []
+  if eval_path != nil
+    target_files.push(eval_path)
+  tfi = 0
+  while tfi < fl_files.size
+    if !file?(fl_files[tfi])
+      Tungsten:Flame:Sampler.rmtree(tmpdir)
+      << "tungsten flame: source not found: " + fl_files[tfi]
+      exit(1)
+    target_files.push(fl_files[tfi])
+    tfi = tfi + 1
+  drv_mode = fl_lex ? "lex" : "parse"
+  if target_files.size == 0
+    Tungsten:Flame:Sampler.rmtree(tmpdir)
+    << "tungsten flame --" + drv_mode + ": need at least one .w file or -e CODE"
+    exit(1)
+  driver_src = nil
+  if root != nil && root != ""
+    driver_src = root + "/bits/tungsten-flame/lib/lex_driver.w"
+  if (driver_src == nil || !file?(driver_src)) && __DIR__ != nil
+    driver_src = __DIR__ + "/lex_driver.w"
+  if driver_src == nil || !file?(driver_src)
+    Tungsten:Flame:Sampler.rmtree(tmpdir)
+    << "tungsten flame: could not locate lex_driver.w"
+    exit(1)
+  source = target_files[0]
+  base_lbl = (eval_path != nil) ? "eval" : Tungsten:Flame:Sampler.basename_noext(target_files[0])
+  source_label = base_lbl + "_" + drv_mode
+  if fl_build_only
+    build_out = (fl_output != "") ? fl_output : ("flame_" + source_label)
+    ok = Tungsten:Flame:Builder.compile(driver_src, build_out)
+    Tungsten:Flame:Sampler.rmtree(tmpdir)
+    if !ok
+      << "tungsten flame: build failed"
+      exit(1)
+    << "built " + build_out
+    exit(0)
+  build_ok = Tungsten:Flame:Builder.compile(driver_src, bin_path)
   if !build_ok
+    Tungsten:Flame:Sampler.rmtree(tmpdir)
     << "tungsten flame: build failed"
     exit(1)
-  metrics = Tungsten:Flame:Sampler.profile(bin_path, fl_duration, fl_rate, fl_counters)
+  drv_argv = [bin_path, drv_mode, (fl_duration * 1000).to_s()] + target_files
+  category_set = fl_lex ? "lexer" : "general"
+  metrics = Tungsten:Flame:Sampler.profile_cmd(drv_argv, fl_duration, fl_rate, fl_counters, fl_alloc)
+elsif fl_files.size > 0 || eval_path != nil
+  source = (eval_path != nil) ? eval_path : fl_files[0]
+  if !file?(source)
+    Tungsten:Flame:Sampler.rmtree(tmpdir)
+    << "tungsten flame: source not found: " + source
+    exit(1)
+  source_label = (eval_path != nil) ? "eval" : Tungsten:Flame:Sampler.basename_noext(source)
+  if fl_build_only
+    build_out = (fl_output != "") ? fl_output : ("flame_" + source_label)
+    ok = Tungsten:Flame:Builder.compile(source, build_out)
+    Tungsten:Flame:Sampler.rmtree(tmpdir)
+    if !ok
+      << "tungsten flame: build failed"
+      exit(1)
+    << "built " + build_out
+    exit(0)
+  build_ok = Tungsten:Flame:Builder.compile(source, bin_path)
+  if !build_ok
+    Tungsten:Flame:Sampler.rmtree(tmpdir)
+    << "tungsten flame: build failed"
+    exit(1)
+  run_argv = [bin_path] + fl_passthrough
+  category_set = "general"
+  inspect_target = source
+  metrics = Tungsten:Flame:Sampler.profile_cmd(run_argv, fl_duration, fl_rate, fl_counters, fl_alloc)
+else
+  # External command mode: `tungsten flame [options] -- COMMAND [ARGS...]`
+  ext_argv = fl_passthrough
+  source = ext_argv[0]
+  if !file?(source)
+    Tungsten:Flame:Sampler.rmtree(tmpdir)
+    << "tungsten flame: source not found: " + source
+    exit(1)
+  bin_path = source
+  source_label = Tungsten:Flame:Sampler.basename_noext(source)
+  has_smap = file?(bin_path + ".sidemap") || (fl_sidemap_in != nil && fl_sidemap_in != "")
+  category_set = has_smap ? "general" : "external"
+  metrics = Tungsten:Flame:Sampler.profile_cmd(ext_argv, fl_duration, fl_rate, fl_counters, fl_alloc)
+
 metric_names = metrics.keys
 if metric_names.size == 0
+  Tungsten:Flame:Sampler.rmtree(tmpdir)
   << "tungsten flame: profiling produced no samples"
   exit(1)
 
@@ -548,15 +674,20 @@ if !metrics.has_key?(primary)
       primary = metric_names[0]
 
 # Map deduped `__wy_*` symbols back to real names via the sidemap the
-# compiler wrote next to the binary we just built, then write each
-# metric to its own folded file under tmpdir. Rewriting the folded
-# text itself (not just the display) means SVG flame graphs and any
-# later consumer of the .folded files inherit the real names too.
-wy_names = Tungsten:Flame:Sidemap.load(bin_path + ".sidemap")
+# compiler wrote next to the binary we just built (or --sidemap), apply any
+# filter flags (--grep, --prune, --subtree, --collapse-recursion, --rewrite,
+# --threshold, --root), and write each metric to its own folded file under
+# tmpdir. Rewriting the folded text itself means SVG flame graphs and any
+# later consumer of the .folded files inherit the real names and filters too.
+smap_path = (fl_sidemap_in != nil && fl_sidemap_in != "") ? fl_sidemap_in : (bin_path + ".sidemap")
+wy_names = Tungsten:Flame:Sidemap.load(smap_path)
 i = 0
 while i < metric_names.size
   m = metric_names[i]
-  write_file(tmpdir + "/" + m + ".folded", Tungsten:Flame:Sidemap.rewrite_folded(metrics[m], wy_names))
+  rewritten = Tungsten:Flame:Sidemap.rewrite_folded(metrics[m], wy_names)
+  if has_filter_flags
+    rewritten = apply_folded_pipeline(rewritten, fl_root, fl_grep, fl_prune, fl_subtree, fl_collapse_recursion, fl_rewrite, fl_threshold)
+  write_file(tmpdir + "/" + m + ".folded", rewritten)
   i = i + 1
 
 # Interactive output for the primary metric, from its sidemap-rewritten
@@ -568,9 +699,9 @@ while i < metric_names.size
 # -o writes the self-contained SVG flame graph (the namesake output; `-o`
 # with no extension still produces a valid SVG).
 if fl_speedscope
-  ss_path = (fl_output != "") ? fl_output : ("flame_" + Tungsten:Flame:Sampler.basename_noext(source) + ".speedscope.json")
+  ss_path = (fl_output != "") ? fl_output : ("flame_" + source_label + ".speedscope.json")
   primary_folded = read_file(tmpdir + "/" + primary + ".folded")
-  ss_name = Tungsten:Flame:Sampler.basename_noext(source) + " (" + primary + ")"
+  ss_name = source_label + " (" + primary + ")"
   write_file(ss_path, Tungsten:Flame:Speedscope.export(primary_folded, ss_name))
   if !fl_silent
     << "wrote speedscope profile: " + ss_path
@@ -578,13 +709,13 @@ if fl_speedscope
 elsif fl_output != ""
   svg_path = fl_output
   primary_folded = read_file(tmpdir + "/" + primary + ".folded")
-  svg_title = "Flame Graph — " + Tungsten:Flame:Sampler.basename_noext(source) + " (" + primary + ")"
+  svg_title = "Flame Graph — " + source_label + " (" + primary + ")"
   write_file(svg_path, Tungsten:Flame:FlameSvg.render(primary_folded, svg_title))
   if !fl_silent
     << "wrote flame graph: " + svg_path
 
 # Full breakdown for primary metric (Top + caller/callee + categories).
-Tungsten:Flame:FlameAnalyzer.display_metric(tmpdir + "/" + primary + ".folded", fl_top, "general", fl_focus, use_color, primary)
+Tungsten:Flame:FlameAnalyzer.display_metric(tmpdir + "/" + primary + ".folded", fl_top, category_set, fl_focus, use_color, primary)
 
 # Compact Top-N per secondary metric.
 i = 0
@@ -612,10 +743,11 @@ if fl_counters != "" && metrics.has_key?("instructions") && metrics.has_key?("cy
 # Automatic AST performance inspection for .w sources (unless --no-inspect):
 # correlates loop/fetch findings with the sampled hot functions so redundant
 # per-iteration fetches inside hot code bubble up immediately.
-if !fl_no_inspect && ext_argv.size == 0 && source.ends_with?(".w") && file?(source)
-  pi_report = perf_inspect_file(source)
+if !fl_no_inspect && inspect_target != nil && inspect_target.ends_with?(".w") && file?(inspect_target)
+  pi_report = perf_inspect_file(inspect_target)
   if pi_report != nil && pi_report[:finding_count] > 0
     hot_fns = Tungsten:Flame:FlameAnalyzer.hot_functions(tmpdir + "/" + primary + ".folded", fl_top)
     << perf_inspect_report_text(pi_report, use_color, fl_top, hot_fns, nil, nil)
 
+Tungsten:Flame:Sampler.rmtree(tmpdir)
 exit(0)

@@ -1,19 +1,4 @@
 # xctrace_xml.w — Parse xctrace XML export into folded stacks.
-#
-# xctrace's `--xpath ...time-sample...` export produces XML where each
-# <row> is one sample. The cp-user-callstack column is a <kperf-bt>
-# element that's either an inline definition (`id="N"`) with a child
-# <text-addresses> holding space-separated decimal address values, or
-# a reference (`ref="N"`) pointing back to an earlier inline.
-#
-# This module:
-#   1. Scans the XML once, building a dict mapping kperf-bt id → addresses.
-#   2. Walks <row>s, resolves each row's user-stack reference.
-#   3. Emits folded format with addresses as frame names. (No
-#      symbolication yet — that's a clean follow-up using `atos -o BIN`.)
-#
-# Output: same format PerfScript.collapse produces, so the analyzer
-# treats both Linux and macOS sources identically.
 
 in Tungsten:Flame
 
@@ -24,7 +9,6 @@ in Tungsten:Flame
     addrs_by_id = self.parse_kperf_bts(xml_text)
 
     # 2. Walk rows, accumulate folded stacks (still as hex addresses).
-    # Split once so each row is a small, self-contained chunk.
     folded = {}
     row_chunks = xml_text.split("<row>")
     ri = 1
@@ -36,19 +20,17 @@ in Tungsten:Flame
 
       addrs = self.row_user_stack(row, addrs_by_id)
       if addrs != nil && addrs.size() > 0
-        folded_stack = self.reverse(addrs).join(";")
+        folded_stack = addrs.reverse().join(";")
         if folded.has_key?(folded_stack)
           folded[folded_stack] = folded[folded_stack] + 1
         else
           folded[folded_stack] = 1
 
-    # 3. Symbolicate via atos. Collect every unique address that appears
-    #    in any folded stack, run `atos -o BIN` in one batch, build a
-    #    dict, then rewrite each folded stack with symbol names.
+    # 3. Symbolicate via atos in one batch.
     sym = self.symbolicate(folded.keys(), binary_path, load_addr)
 
     out = []
-    keys = self.sort_strings(folded.keys())
+    keys = folded.keys().sort()
     i = 0
     while i < keys.size()
       raw_stack = keys[i]
@@ -67,17 +49,11 @@ in Tungsten:Flame
     out.join("\n")
 
   # Collect unique addresses from folded-stack keys, run atos once, return
-  # a dict mapping address-string → symbol-name. Addresses that atos can't
-  # resolve (kernel, system libs without dSYMs) stay out of the dict so
-  # the caller falls back to the raw hex.
-  # `load_addr` is the binary's runtime __TEXT load address ("0x...", or
-  # "" when unknown) — trace addresses are ASLR-slid, so atos needs -l
-  # to map them back into the binary.
+  # a dict mapping address-string → symbol-name.
   -> .symbolicate(stack_keys, binary_path, load_addr)
     result = {}
     if binary_path == nil || binary_path == ""
       return result
-    # Gather unique addresses
     addr_set = {}
     i = 0
     while i < stack_keys.size()
@@ -90,7 +66,6 @@ in Tungsten:Flame
     addrs = addr_set.keys()
     if addrs.size() == 0
       return result
-    # Build batch atos command
     bin_q = Tungsten:Flame:Builder.shell_quote(binary_path)
     cmd = "atos -o " + bin_q
     if load_addr != nil && load_addr != ""
@@ -103,13 +78,10 @@ in Tungsten:Flame
     if out_text == nil
       return result
     lines = out_text.split("\n")
-    # Each line is either a symbol like "name (in BIN) (file:line)" or the
-    # address itself if atos couldn't resolve. Strip the trailing parens.
     k = 0
     while k < lines.size() && k < addrs.size()
       line = lines[k].strip()
       if line.size() > 0 && !line.starts_with?("0x")
-        # Strip " (in ...)" and any trailing " (...)"
         paren = line.index(" (")
         if paren != nil
           line = line.slice(0, paren)
@@ -117,14 +89,7 @@ in Tungsten:Flame
           result[addrs[k]] = line
       k = k + 1
 
-    # Second pass: addresses the main-binary atos couldn't name are
-    # almost always dyld-shared-cache addresses (system libraries).
-    # The shared cache is mapped at one per-boot-constant slide in
-    # EVERY process, so symbolicating those addresses against our own
-    # live process resolves them correctly — one batched
-    # `atos -p <own pid>` call, no dSYMs or runtime helpers needed.
-    # Addresses outside the cache (the profiled binary's private ASLR
-    # range) echo back as bare hex and simply stay unresolved.
+    # Second pass: resolve dyld-shared-cache addresses against our own live PID.
     unresolved = []
     u = 0
     while u < addrs.size()
@@ -150,15 +115,9 @@ in Tungsten:Flame
             k = k + 1
     result
 
-  # Our own PID. capture() runs its command via `sh -c`, so $PPID
-  # inside that shell is this process.
   -> .own_pid()
     capture("echo $PPID").strip()
 
-  # Hex "0x..." string → integer value. Returns 0 when malformed or
-  # longer than 12 hex digits (2^48) — kernel pointers ("0xfffffe...")
-  # would overflow boxed-Int accumulation, and no user-space address
-  # we care about is that high.
   -> .hex_to_int(s)
     if !s.starts_with?("0x") || s.size() > 14
       return 0
@@ -187,33 +146,16 @@ in Tungsten:Flame
       i = i + 1
     n
 
-  # True when `addr_str` lies inside the arm64 dyld shared region
-  # (base 0x180000000, well under 0x1000000000). Only these addresses
-  # are safe to hand to `atos -p <own pid>`: the shared region sits at
-  # one per-boot-constant slide in every process, while anything else
-  # (the profiled binary, its on-disk dyld) lives at that process's
-  # private ASLR slide — resolving those against our own mappings
-  # could produce confidently wrong names. On non-arm64 hosts nothing
-  # matches and the second pass simply never runs.
   -> .shared_cache_addr?(addr_str)
     n = self.hex_to_int(addr_str)
     n >= 6442450944 && n < 68719476736
 
-  # One `atos -p` output line → frame name, or nil when unresolved
-  # (atos echoes unresolvable addresses back as bare hex).
-  #   "kevent (in libsystem_kernel.dylib) + 8"
-  #     → "libsystem_kernel.dylib`kevent"
-  # The lib`symbol form is the Instruments convention the analyzer
-  # already strips for display (rindex("`")) while categorizers still
-  # see the library name in the raw frame (e.g. libsystem_kernel →
-  # the syscall category).
   -> .parse_atos_system_line(line)
     s = line.strip()
     if s.size() == 0 || s.starts_with?("0x")
       return nil
     paren = s.index(" (in ")
     if paren == nil
-      # Named but no library info — keep the symbol up to any " (".
       p2 = s.index(" (")
       if p2 != nil
         return s.slice(0, p2)
@@ -226,36 +168,18 @@ in Tungsten:Flame
     lib = rest.slice(0, close)
     lib + "`" + sym
 
-  # Multi-metric collapse over the kdebug-counters-with-time-sample schema.
-  # `metric_names` maps slot index N to a user-facing metric label.
-  # Apple's PMC export duplicates the values (8 events → 16 columns), so
-  # we only read the first n_metrics slots.
-  #
-  # Counter values are cumulative per-(thread, core). When a thread moves
-  # cores, the new core's counter reading isn't comparable to the prior
-  # one — we treat that as "no baseline yet" and start fresh for that key.
+  # Multi-metric collapse over the kdebug-counters-with-*-sample schema.
   -> .collapse_counters(xml_text, binary_path, load_addr, metric_names)
     addrs_by_id = self.parse_kperf_bts(xml_text)
     n_metrics = metric_names.size()
-
-    # Per-core previous counter snapshot. PMC readings are cumulative
-    # per CORE, not per thread: a Running row's delta is everything the
-    # core counted since its previous row, whichever thread was on it.
-    # Keying by thread:core paired samples across other threads' turns on
-    # the core (their counts landed in this thread's delta) and drowned
-    # the signal; keying by core alone attributes each interval once.
     prev_vals = {}
 
-    # Per-metric stack → cumulative-delta dict.
     folded_by_metric = {}
     i = 0
     while i < n_metrics
       folded_by_metric[metric_names[i]] = {}
       i = i + 1
 
-    # Track thread-state ids that correspond to "Running". The XML
-    # exports only the first occurrence of a given state with its label;
-    # subsequent rows reference the id via `<thread-state ref="N"/>`.
     running_ids = {}
 
     row_chunks = xml_text.split("<row>")
@@ -280,7 +204,7 @@ in Tungsten:Flame
           key = core_key
           if addrs != nil && addrs.size() > 0 && prev_vals.has_key?(key)
             prev = prev_vals[key]
-            folded_stack = self.reverse(addrs).join(";")
+            folded_stack = addrs.reverse().join(";")
             m = 0
             while m < n_metrics
               delta = pmc_vals[m] - prev[m]
@@ -294,22 +218,22 @@ in Tungsten:Flame
               m = m + 1
           prev_vals[key] = pmc_vals
 
-    # Symbolicate all unique addresses across every metric in one batch.
-    all_keys = []
+    # Deduplicate stack keys across metrics before symbolicating in one batch.
+    seen_stacks = {}
     mi = 0
     while mi < n_metrics
       fd = folded_by_metric[metric_names[mi]]
       fd.keys().each -> (k)
-        all_keys.push(k)
+        seen_stacks[k] = true
       mi = mi + 1
-    sym = self.symbolicate(all_keys, binary_path, load_addr)
+    sym = self.symbolicate(seen_stacks.keys(), binary_path, load_addr)
 
     result = {}
     mi = 0
     while mi < n_metrics
       name = metric_names[mi]
       fd = folded_by_metric[name]
-      keys = self.sort_strings(fd.keys())
+      keys = fd.keys().sort()
       lines = []
       ki = 0
       while ki < keys.size()
@@ -330,24 +254,8 @@ in Tungsten:Flame
       mi = mi + 1
     result
 
-  # Multi-metric collapse over the counters-profile schema (the table
-  # `flame --counters` records). Each row is one sample carrying:
-  #   - a thread column whose first occurrence inlines the display name
-  #     ("Main Thread (0x...) (<proc>, pid: N)"), later rows ref it;
-  #   - a tagged-backtrace (inline <backtrace> with <frame addr="0x..">
-  #     children, leaf first; repeated stacks use ref);
-  #   - a pmc-events array of per-thread interval DELTAS — the counts
-  #     since the thread's previous sample, already differenced by
-  #     Instruments at context-switch boundaries.
-  # Because deltas are per-thread, each row is self-contained: add its
-  # values to its stack, done. The table includes every process on the
-  # system, so rows are filtered to threads whose inline name contains
-  # `proc_marker` ("(<binary basename>, pid:").
+  # Multi-metric collapse over the counters-profile schema.
   -> .collapse_counter_profile(xml_text, binary_path, load_addr, metric_names, proc_marker)
-    # The tagged-backtrace fmt attribute embeds a multi-byte arrow;
-    # under the Ruby interpreter String#index and slice then disagree
-    # on offsets (chars vs bytes) past it. Fold to ASCII so every
-    # offset below is unit-consistent.
     xml_text = xml_text.split("←").join("-")
     n_metrics = metric_names.size()
 
@@ -375,7 +283,7 @@ in Tungsten:Flame
       if is_target && frames != nil && frames.size() > 0
         pmc_vals = self.extract_pmc_values(row)
         if pmc_vals.size() >= n_metrics
-          folded_stack = self.reverse(frames).join(";")
+          folded_stack = frames.reverse().join(";")
           m = 0
           while m < n_metrics
             delta = pmc_vals[m]
@@ -388,22 +296,22 @@ in Tungsten:Flame
                 fd[folded_stack] = delta
             m = m + 1
 
-    # Symbolicate all unique addresses across every metric in one batch.
-    all_keys = []
+    # Deduplicate stack keys across metrics before symbolicating in one batch.
+    seen_stacks = {}
     mi = 0
     while mi < n_metrics
       fd = folded_by_metric[metric_names[mi]]
       fd.keys().each -> (k)
-        all_keys.push(k)
+        seen_stacks[k] = true
       mi = mi + 1
-    sym = self.symbolicate(all_keys, binary_path, load_addr)
+    sym = self.symbolicate(seen_stacks.keys(), binary_path, load_addr)
 
     result = {}
     mi = 0
     while mi < n_metrics
       name = metric_names[mi]
       fd = folded_by_metric[name]
-      keys = self.sort_strings(fd.keys())
+      keys = fd.keys().sort()
       lines = []
       ki = 0
       while ki < keys.size()
@@ -424,10 +332,6 @@ in Tungsten:Flame
       mi = mi + 1
     result
 
-  # Resolve whether `row`'s thread belongs to the target process.
-  # Inline `<thread id="N" fmt="...">` definitions are memoized into
-  # `thread_is_target` (true when the fmt carries `proc_marker`);
-  # `<thread ref="N"/>` rows look the answer up. Unknown -> false.
   -> .row_thread_is_target(row, thread_is_target, proc_marker)
     dp = row.index("<thread id=\"")
     if dp != nil
@@ -455,12 +359,6 @@ in Tungsten:Flame
           return thread_is_target[rid]
     false
 
-  # Frame list (leaf first) for a counters-profile row: the inline
-  # `<tagged-backtrace id="N">...<frame ... addr="0x..."/>...` children
-  # (memoized into bt_by_id), or `<tagged-backtrace ref="N"/>` looked
-  # up from an earlier inline. Returns nil when the row has no stack.
-  # The addr attribute is used rather than name: name is the display
-  # form and can be the return address +/-1.
   -> .row_profile_stack(row, bt_by_id)
     dp = row.index("<tagged-backtrace id=\"")
     if dp != nil
@@ -495,9 +393,6 @@ in Tungsten:Flame
           return bt_by_id[rid]
     nil
 
-  # Find the first `<thread...>` or `<core...>` opening tag in `row` and
-  # return its `id="..."` or `ref="..."` value as a string. Returns "?"
-  # if neither attribute is present.
   -> .extract_tag_key(row, tag_prefix)
     pos = row.index(tag_prefix)
     if pos == nil
@@ -521,8 +416,6 @@ in Tungsten:Flame
       return "?"
     rest.slice(0, q)
 
-  # Parse the text content of a `<pmc-events>VALUES</pmc-events>` element
-  # into a list of integers. Returns empty list if not present.
   -> .extract_pmc_values(row)
     pos = row.index("<pmc-events")
     if pos == nil
@@ -544,22 +437,7 @@ in Tungsten:Flame
       pi = pi + 1
     out
 
-  # Walk all inline `<kperf-bt id="N" ...>...</kperf-bt>` blocks and
-  # return { N => [frames, leaf first] }.
-  #
-  # Inside a kperf-bt:
-  #   - `<text-address ...>` (singular) is the sample PC — the leaf frame.
-  #     Its fmt attribute already carries the hex form ("0x...").
-  #   - `<text-addresses ...>` (plural) holds the caller frames as
-  #     space-separated decimal values, zero-terminated. Repeated stacks
-  #     share it via `<text-addresses ref="N"/>`, so inline definitions
-  #     are memoized in ta_by_id / pc_by_id and refs resolved from there.
-  #   - Single-frame stacks duplicate the PC in the plural list, so a
-  #     leading caller equal to the PC is dropped.
   -> .parse_kperf_bts(xml)
-    # Split once so every scan below is bounded by one block rather than
-    # the whole multi-MB export. kperf-bt blocks never nest, so each
-    # piece holds one block.
     ta_by_id = {}
     pc_by_id = {}
     result = {}
@@ -576,10 +454,7 @@ in Tungsten:Flame
       i = i + 1
     result
 
-  # Resolve one kperf-bt block's frame list (leaf first). Memoizes any
-  # inline text-address(es) definitions into pc_by_id / ta_by_id.
   -> .block_stack(block, ta_by_id, pc_by_id)
-    # Leaf PC: inline `<text-address id="N" fmt="0x...">` or `<text-address ref="N"/>`.
     pc = nil
     ip = block.index("<text-address id=\"")
     if ip != nil
@@ -602,7 +477,6 @@ in Tungsten:Flame
           if pc_by_id.has_key?(rid)
             pc = pc_by_id[rid]
 
-    # Caller frames: inline `<text-addresses id="N" ...>VALS</...>` or ref.
     callers = []
     tp = block.index("<text-addresses id=\"")
     if tp != nil
@@ -640,17 +514,9 @@ in Tungsten:Flame
       ci = ci + 1
     frames
 
-  # For a <row>...</row> chunk, return the user-stack as a list of
-  # address strings, or nil if unresolvable.
   -> .row_user_stack(row, addrs_by_id)
-    # First check for an inline kperf-bt with text-addresses — these
-    # ARE the user-stack (the inline form). Take the LAST one in the
-    # row (kernel comes first, user second).
     bts = self.all_kperf_refs(row)
     if bts.size() == 0
-      # counters-profile rows don't carry kperf-bt at all: their stack is
-      # <tagged-backtrace><backtrace><frame addr="0x..."/> (leaf first),
-      # with later rows referencing the tagged wrapper by ref.
       return self.row_tagged_stack(row, addrs_by_id)
     last = bts[bts.size() - 1]
     if addrs_by_id.has_key?(last)
@@ -658,11 +524,6 @@ in Tungsten:Flame
     else
       nil
 
-  # Parse a counters-profile row's <tagged-backtrace> stack. Frames are
-  # <frame ... addr="0x..."/> in leaf-first order; the whole wrapper is
-  # memoized into addrs_by_id under its id (the export's id space is
-  # document-unique, so sharing the dict with kperf ids is safe) and
-  # later rows resolve through <tagged-backtrace ref="N"/>.
   -> .row_tagged_stack(row, addrs_by_id)
     tp = row.index("<tagged-backtrace ref=\"")
     if tp != nil
@@ -703,7 +564,6 @@ in Tungsten:Flame
     addrs_by_id[tid2] = addrs
     addrs
 
-  # Return the list of every kperf-bt id or ref string in `row`.
   -> .all_kperf_refs(row)
     refs = []
     cur = 0
@@ -711,7 +571,6 @@ in Tungsten:Flame
       pos = self.find_from(row, "<kperf-bt", cur)
       if pos == nil
         break
-      # Look for id="N" or ref="N"
       gt = self.find_from(row, ">", pos)
       if gt == nil
         break
@@ -731,78 +590,17 @@ in Tungsten:Flame
       cur = gt + 1
     refs
 
-  # Find `needle` in `haystack` starting from `start`, returning the
-  # byte position or nil — String#index with a start offset. (Slicing
-  # the tail here copied the remaining multi-MB document on every call:
-  # quadratic, OOM-killed on 1e12 traces.)
   -> .find_from(haystack, needle, start)
     haystack.index(needle, start)
-
-  -> .reverse(arr)
-    out = []
-    i = arr.size() - 1
-    while i >= 0
-      out.push(arr[i])
-      i = i - 1
-    out
-
-  -> .sort_strings(xs)
-    arr = []
-    i = 0
-    while i < xs.size()
-      arr.push(xs[i])
-      i = i + 1
-    j = 1
-    while j < arr.size()
-      key = arr[j]
-      k = j - 1
-      while k >= 0 && arr[k] > key
-        arr[k + 1] = arr[k]
-        k = k - 1
-      arr[k + 1] = key
-      j = j + 1
-    arr
 
   -> .dec_to_hex(dec_str)
     n = dec_str.to_i()
     if n == 0
       return "0"
+    digits = "0123456789abcdef"
     out = ""
     while n > 0
       d = n % 16
-      c = "0"
-      if d == 0
-        c = "0"
-      elsif d == 1
-        c = "1"
-      elsif d == 2
-        c = "2"
-      elsif d == 3
-        c = "3"
-      elsif d == 4
-        c = "4"
-      elsif d == 5
-        c = "5"
-      elsif d == 6
-        c = "6"
-      elsif d == 7
-        c = "7"
-      elsif d == 8
-        c = "8"
-      elsif d == 9
-        c = "9"
-      elsif d == 10
-        c = "a"
-      elsif d == 11
-        c = "b"
-      elsif d == 12
-        c = "c"
-      elsif d == 13
-        c = "d"
-      elsif d == 14
-        c = "e"
-      elsif d == 15
-        c = "f"
-      out = c + out
+      out = digits.slice(d, 1) + out
       n = n / 16
     out

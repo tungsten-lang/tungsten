@@ -1,30 +1,6 @@
 # flame_svg.w — Render folded stacks as an interactive SVG flame graph.
-#
-# This is the tool's namesake output: it turns folded-stack text
-# ("root;mid;leaf <count>" per line, the same format PerfScript.collapse
-# and XctraceXml.collapse produce) into a self-contained SVG flame graph
-# that any browser or SVG viewer can open.
-#
-# Layout follows the canonical (Brendan Gregg) convention:
-#   - Frames are laid out bottom-up: the first frame of each stack sits on
-#     the bottom row, the stack grows upward.
-#   - A frame's width is proportional to its inclusive sample count.
-#   - Children are left-aligned within their parent's span and sorted by
-#     name, so identical prefixes across stacks merge into one wide frame
-#     and the picture is deterministic.
-#   - A frame wider than the sum of its children shows the exposed strip as
-#     self time — no synthetic "all" root is inserted (faithful to
-#     flamegraph.pl: the bottom row is the real base frames).
-#
-# Interactivity is self-contained, no external assets:
-#   - Every frame carries a native <title> tooltip (function, sample count,
-#     percentage) — works on hover in any viewer, JS or not.
-#   - An embedded script gives click-to-zoom (a frame fills the width, its
-#     subtree rescales, everything else hides) and click-to-reset. Each
-#     frame stores its sample-space bounds in data-x0/data-x1 so the script
-#     recomputes pixel geometry without re-parsing the tree. The static
-#     positions Tungsten emits already match zoom(0,1), so the graph is
-#     correct with scripting disabled.
+
+use folded
 
 in Tungsten:Flame
 
@@ -75,50 +51,16 @@ in Tungsten:Flame
     out.push("</svg>")
     out.join("")
 
-  # ---- Tree construction ----
+  # ---- Tree construction (delegated to Folded) ----
 
-  # Parse folded text into a frame tree. Root is a virtual container at
-  # depth -1 whose children are the real depth-0 base frames.
   -> .build_tree(folded_text)
-    root = { name: "root", count: 0, depth: -1, children: [] }
-    lines = folded_text.split("\n")
-    i = 0
-    while i < lines.size()
-      line = lines[i].strip()
-      if line.size() > 0
-        sp = line.rindex(" ")
-        stack = line
-        count = 0
-        if sp != nil
-          stack = line.slice(0, sp)
-          count = line.slice(sp + 1, line.size()).to_i()
-        if count > 0
-          self.insert_stack(root, stack.split(";"), count)
-      i = i + 1
-    root
+    Tungsten:Flame:Folded.build_tree(folded_text)
 
   -> .insert_stack(root, frames, count)
-    root[:count] = root[:count] + count
-    node = root
-    fi = 0
-    while fi < frames.size()
-      name = frames[fi]
-      child = self.find_child(node, name)
-      if child == nil
-        child = { name: name, count: 0, depth: node[:depth] + 1, children: [] }
-        node[:children].push(child)
-      child[:count] = child[:count] + count
-      node = child
-      fi = fi + 1
+    Tungsten:Flame:Folded.insert_stack(root, frames, count)
 
   -> .find_child(node, name)
-    kids = node[:children]
-    i = 0
-    while i < kids.size()
-      if kids[i][:name] == name
-        return kids[i]
-      i = i + 1
-    nil
+    Tungsten:Flame:Folded.find_child(node, name)
 
   # Deepest depth in the subtree rooted at `node`.
   -> .max_depth(node)
@@ -132,28 +74,11 @@ in Tungsten:Flame
       i = i + 1
     md
 
-  # Children sorted by name (stable, deterministic output).
   -> .sort_children(kids)
-    arr = []
-    i = 0
-    while i < kids.size()
-      arr.push(kids[i])
-      i = i + 1
-    j = 1
-    while j < arr.size()
-      key = arr[j]
-      k = j - 1
-      while k >= 0 && arr[k][:name] > key[:name]
-        arr[k + 1] = arr[k]
-        k = k - 1
-      arr[k + 1] = key
-      j = j + 1
-    arr
+    Tungsten:Flame:Folded.sort_children(kids)
 
   # ---- SVG emission ----
 
-  # Emit every child of `node`, laid out left-to-right starting at
-  # `x_start` (sample-space). Returns the concatenated SVG fragment.
   -> .emit_children(node, x_start, total, plot_w, margin, max_d, frame_h, top)
     parts = []
     kids = self.sort_children(node[:children])
@@ -167,9 +92,6 @@ in Tungsten:Flame
       i = i + 1
     parts.join("")
 
-  # One frame: a <g> holding a colored <rect> (with a <title> tooltip) and,
-  # when it fits, a truncated <text> label. `x_start` is the frame's left
-  # edge in sample units; its span is [x_start, x_start + count).
   -> .emit_frame(node, x_start, total, plot_w, margin, max_d, frame_h, top)
     name = node[:name]
     count = node[:count]
@@ -195,9 +117,6 @@ in Tungsten:Flame
 
   # ---- Formatting helpers ----
 
-  # Longest prefix of `name` that fits a `pw`-pixel-wide frame (~7px/char
-  # at 12px Verdana, minus a little padding). Empty string when nothing
-  # legible fits. Truncated names get a ".." suffix.
   -> .fit_label(name, pw)
     max = (pw - 6) / 7
     if max < 3
@@ -209,15 +128,9 @@ in Tungsten:Flame
       return ""
     name.slice(0, keep) + ".."
 
-  # Percentage with one decimal, via integer math (no BigDecimal notation).
   -> .fmt_pct(n, total)
-    pct_x10 = n * 1000 / total
-    whole = pct_x10 / 10
-    frac = pct_x10 - whole * 10
-    whole.to_s() + "." + frac.to_s()
+    Tungsten:Flame:Folded.fmt_pct(n, total)
 
-  # value/total as a decimal string in [0, 1], six fractional digits — the
-  # sample-space bound the zoom script parses back with parseFloat.
   -> .frac_str(value, total)
     if value >= total
       return "1"
@@ -229,13 +142,9 @@ in Tungsten:Flame
       s = "0" + s
     "0." + s
 
-  # Escape the five characters that would otherwise break XML markup.
   -> .xml_escape(s)
     s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
 
-  # Deterministic warm ("hot") fill for a frame name: reds/oranges/yellows,
-  # like flamegraph.pl, but seeded from the name so a symbol always gets the
-  # same color across runs and across metrics.
   -> .color_for(name)
     h = self.name_hash(name)
     r = 205 + (h % 51)
@@ -266,9 +175,6 @@ in Tungsten:Flame
   -> .svg_style
     "<style>\n.frame rect { stroke: rgba(0,0,0,0.15); stroke-width: 0.5px; cursor: pointer; }\n.frame:hover rect { stroke: #000; stroke-width: 1px; }\ntext { font-family: Verdana, Helvetica, Arial, sans-serif; fill: #111; }\n#title { font-size: 17px; font-weight: bold; text-anchor: middle; }\n#details, #info { font-size: 12px; fill: #555; }\n.frame text { pointer-events: none; }\n</style>\n"
 
-  # Click-to-zoom / click-to-reset. Literal square brackets are escaped
-  # (\[ \]) because unescaped brackets interpolate inside a .w string; the
-  # JS lives in a CDATA section so its <, > and & are literal in the XML.
   -> .svg_script(margin, plot_w)
     js = "var mx=" + margin.to_s() + ",plotW=" + plot_w.to_s() + ";"
     js = js + "function fr(){return document.getElementsByClassName('frame');}"

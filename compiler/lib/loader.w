@@ -1586,7 +1586,8 @@ loader_parse_cache_state = {
         resolved = base_dir + "/" + resolved
 
     if !resolved.ends_with?(".w") && !resolved.ends_with?(".w0")
-      resolved += ".w"
+      if file?(resolved + ".w") || from_file != nil || !file?(resolved)
+        resolved += ".w"
 
     if file?(resolved)
       return normalize_load_path(resolved)

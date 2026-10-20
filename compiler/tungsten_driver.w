@@ -183,7 +183,11 @@ while i < args.size()
   elsif arg in ("--out" "-o")
     i += 1
     out_path = args[i]
-  elsif arg == "--emit-wire"
+  elsif arg.starts_with?("--out=")
+    out_path = arg.slice(6, arg.size() - 6)
+  elsif arg.starts_with?("-o=")
+    out_path = arg.slice(3, arg.size() - 3)
+  elsif arg == "--emit-wire" || arg == "--wire"
     emit_wire = true
   elsif arg == "--tags"
     emit_wire = true
@@ -210,9 +214,9 @@ while i < args.size()
       exit 1
   elsif arg == "--frame-pointers"
     frame_pointers = true
-  elsif arg == "--release"
+  elsif arg == "--release" || arg == "-r"
     release_mode = true
-  elsif arg == "--debug"
+  elsif arg == "--debug" || arg == "-d"
     debug_requested = true
   elsif arg == "--no-debug"
     no_debug_requested = true
@@ -297,7 +301,7 @@ while i < args.size()
     verbose = true
     if !args.include?("--optimizations-json")
       << "tungsten version 2026.07.04"
-  elsif arg == "--ast"
+  elsif arg == "--ast" || arg == "--parse"
     show_ast = true
   elsif arg == "--canonical-ast"
     show_canonical_ast = true
@@ -315,9 +319,11 @@ while i < args.size()
     hot_mode = true
   elsif arg == "--interpret"
     interpret_mode = true
-  elsif arg == "-e"
+  elsif arg == "-e" || arg == "--eval"
     i += 1
     eval_code = args[i]
+  elsif arg.starts_with?("--eval=")
+    eval_code = arg.slice(7, arg.size() - 7)
   elsif arg == "run"
     command = "run"
   elsif arg == "check" || arg == "-c" || arg == "--check"
@@ -511,7 +517,18 @@ if eval_code != nil
 
   eval_status = 0
   begin
-    if interpret_mode
+    if command == "check"
+      eval_path = materialize_eval_source(eval_code)
+      eval_source_alias = eval_path
+      check_one(eval_path, verbose)
+      system("rm -f " + dev_runtime_shell_quote(eval_path))
+    elsif emit_wire || emit_ll_only
+      eval_path = materialize_eval_source(eval_code)
+      eval_source_alias = eval_path
+      if !compile_one(eval_path, out_path, emit_wire, verbose, intern_algo, emit_ll_only)
+        eval_status = 1
+      system("rm -f " + dev_runtime_shell_quote(eval_path))
+    elsif interpret_mode
       interp = Interpreter.new(script_args)
       interp.run(eval_code, "(eval)")
     else

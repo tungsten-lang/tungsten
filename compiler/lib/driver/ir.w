@@ -404,19 +404,25 @@ driver_homebrew_prefix_memo = {}
     raise "Could not create LLVM scratch directory " + ll_dir
   ll_dir
 
+-> source_stem_ll_name(file_path)
+  base = file_path.split("/").last()
+  if base.ends_with?(".w")
+    return base.replace(".w", ".ll")
+  base + ".ll"
+
 -> implicit_ll_path(file_path)
   ll_dir = implicit_ll_root()
   build_dir = capture("mktemp -d " + dev_runtime_shell_quote(ll_dir + "/compile.XXXXXX") + " 2>/dev/null").strip()
   if build_dir == ""
     raise "Could not create a private LLVM scratch directory under " + ll_dir
-  build_dir + "/" + file_path.split("/").last().replace(".w", ".ll")
+  build_dir + "/" + source_stem_ll_name(file_path)
 
 -> uses_implicit_ll_path
   explicit = env("TUNGSTEN_LL_PATH")
   (explicit == nil || explicit == "") && !keep_ll
 
 -> publish_implicit_ll_path(ll_path, file_path)
-  stable_path = implicit_ll_root() + "/" + file_path.split("/").last().replace(".w", ".ll")
+  stable_path = implicit_ll_root() + "/" + source_stem_ll_name(file_path)
   ok = system("mv -f " + dev_runtime_shell_quote(ll_path) + " " + dev_runtime_shell_quote(stable_path)) == true
   done_path = ll_path + ".done"
   if file?(done_path)

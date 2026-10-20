@@ -341,6 +341,8 @@ use parser
         rname = perf_base_receiver_name(node.args[0])
         if rname != nil
           mutated_recvs[rname] = true
+  if k == :if && node.elsif_clauses != nil
+    perf_collect_mutations(node.elsif_clauses, mutated_vars, mutated_recvs)
   kids = ast_children(node)
   i = 0
   while i < kids.size()

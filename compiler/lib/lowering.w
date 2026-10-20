@@ -59,15 +59,18 @@ use lowering/definitions
 # a string literal. We can't use s.to_i directly because Tungsten's
 # .to_i is forgiving ("abc".to_i = 0) — we'd silently swallow typos.
 -> build_define_is_int?(s)
-  if s == nil || s.size() == 0
+  if s == nil
+    return false
+  n_s = s.size()
+  if n_s == 0
     return false
   start = 0
   if s.slice(0, 1) == "-"
     start = 1
-    if s.size() == 1
+    if n_s == 1
       return false
   i = start
-  while i < s.size()
+  while i < n_s
     c = s.slice(i, 1)
     if c < "0" || c > "9"
       return false
@@ -103,8 +106,9 @@ use lowering/definitions
   if raw == nil || raw == ""
     return defs
   pairs = raw.split(";")
+  n_pairs = pairs.size()
   i = 0
-  while i < pairs.size()
+  while i < n_pairs
     pair = pairs[i]
     eq = pair.index("=")
     if eq != nil && eq > 0
@@ -185,9 +189,11 @@ use lowering/definitions
   # directly (no nanbox at the call site, no nanunbox at fn entry,
   # no nanbox on return). Detected during lower_method_def.
   mod[:raw_callable_fns] = {}
+  n_builtin_classes = builtin_classes.size()
+  builtin_class_names = mod[:builtin_class_names]
   bi = 0
-  while bi < builtin_classes.size()
-    mod[:builtin_class_names][builtin_classes[bi]] = true
+  while bi < n_builtin_classes
+    builtin_class_names[builtin_classes[bi]] = true
     bi += 1
 
   # Runtime intrinsic methods that consume their own trailing block. They are
@@ -283,32 +289,41 @@ use lowering/definitions
   check_duplicate_fn_defs(expressions, source_path)
   # Collect methods and process class/module defs in a single walk.
   inferable_methods = []
+  n_exprs = expressions.size()
   ei = 0
-  while ei < expressions.size()
+  while ei < n_exprs
     expr = expressions[ei]
+    expr_kind = ast_kind(expr)
+    expr_name = expr.name
     # `constant_alias "WC"` — the parser stamped the declaring file's `in`
     # namespace as a second string arg (parser.w), so registration needs no
     # file context. Collected in this prepass so aliases resolve in every
     # method body regardless of statement order; the statement itself stays
     # a no-op in lower_statement (pass_registry.w).
-    if ast_kind(expr) == :call && expr.receiver == nil && expr.name == "constant_alias"
+    if expr_kind == :call && expr.receiver == nil && expr_name == "constant_alias"
       ca_args = expr.args
-      if ca_args != nil && ca_args.size() == 2 && ast_kind(ca_args[0]) == :string && ast_kind(ca_args[1]) == :string
-        mod[:constant_aliases][ca_args[0].value] = ca_args[1].value
-    if ast_kind(expr) == :trait_def
-      mod[:known_traits][expr.name] = expr
-    if ast_kind(expr) in (:method_def :fn_def)
+      if ca_args != nil && ca_args.size() == 2
+        ca0 = ca_args[0]
+        ca1 = ca_args[1]
+        if ast_kind(ca0) == :string && ast_kind(ca1) == :string
+          mod[:constant_aliases][ca0.value] = ca1.value
+    if expr_kind == :trait_def
+      mod[:known_traits][expr_name] = expr
+    if expr_kind in (:method_def :fn_def)
+      expr_params = expr.params
+      n_expr_params = expr_params.size()
       call_key = method_call_key_for_def(expr)
       fn_name = function_name_for_def(expr)
-      param_count = expr.params.size()
+      param_count = n_expr_params
       analysis = method_lowering_analysis(expr)
-      if analysis[:yield_block_name] == "__block"
+      yield_blk_name = analysis[:yield_block_name]
+      if yield_blk_name == "__block"
         param_count += 1
       # Record every method NAME that takes a block (declares `&` or yields).
       # The call-site block-passthrough rewrite consults this set: a trailing
       # block on a name that's NOT here iterates the call's result instead.
-      if analysis[:yield_block_name] != nil || explicit_block_param_name(expr.params) != nil
-        mod[:block_method_names][expr.name] = true
+      if yield_blk_name != nil || explicit_block_param_name(expr_params) != nil
+        mod[:block_method_names][expr_name] = true
       mod[:known_calls][call_key] = fn_name
       mod[:known_fn_param_counts][call_key] = param_count
       mod[:known_fn_defs][call_key] = expr
@@ -316,31 +331,32 @@ use lowering/definitions
       if splat_index >= 0
         mod[:known_fn_splat_info][call_key] = {
           splat_index: splat_index,
-          param_count: expr.params.size(),
+          param_count: n_expr_params,
           block_param_index: method_block_param_index(expr)
         }
       # `use math/globals`: an untyped top-level fn that exactly delegates
       # to the same-named Math intrinsic registers as an alias, so call
       # sites can lower as the intrinsic itself — raw f64 operands reach
       # libm directly instead of boxing through the wrapper fn.
-      if expr.param_types == nil && math_intrinsic_runtime_name(expr.name, expr.params.size()) != nil
+      if expr.param_types == nil && math_intrinsic_runtime_name(expr_name, n_expr_params) != nil
         if math_global_alias_def?(expr)
           if mod[:math_alias_fns] == nil
             mod[:math_alias_fns] = {}
-          mod[:math_alias_fns][expr.name] = true
+          mod[:math_alias_fns][expr_name] = true
       if expr.param_types != nil
-        arity_key = typed_overload_arity_key(expr.name, expr.params.size())
-        overload_count = mod[:known_typed_overload_counts][arity_key]
+        arity_key = typed_overload_arity_key(expr_name, n_expr_params)
+        overload_counts = mod[:known_typed_overload_counts]
+        overload_count = overload_counts[arity_key]
         if overload_count == nil
           overload_count = 0
-        mod[:known_typed_overload_counts][arity_key] = overload_count + 1
+        overload_counts[arity_key] = overload_count + 1
         mod[:known_unique_typed_overload_keys][arity_key] = call_key
         mod[:known_unique_typed_overload_param_types][arity_key] = expr.param_types
       if expr.return_type != nil
         mod[:fn_return_types][call_key] = normalize_type_symbol(expr.return_type)
       else
         inferable_methods.push(expr)
-      if ast_kind(expr) == :fn_def
+      if expr_kind == :fn_def
         # Skip memoization for fns whose body contains a ccall to a
         # known-impure C function (Metal allocators, syscalls, etc.).
         # Memoizing those would alias every call to the same retained
@@ -350,18 +366,19 @@ use lowering/definitions
         expr.calls_impure_ccall = impure_ccall
         if !impure_ccall
           mod[:known_pure_calls][call_key] = fn_name
-          if mod[:fn_memo_tables][call_key] == nil
-            mod[:fn_memo_tables][call_key] = fn_name + ".memo"
-    if ast_kind(expr) in (:class_def :module_def)
+          memo_tables = mod[:fn_memo_tables]
+          if memo_tables[call_key] == nil
+            memo_tables[call_key] = fn_name + ".memo"
+    if expr_kind in (:class_def :module_def)
       # Skip generic templates from known_classes / builtin marking —
       # they're not real classes. The specialization pass synthesizes
       # concrete defs that go through this path normally.
-      if ast_kind(expr) == :class_def && expr.type_params != nil
+      if expr_kind == :class_def && expr.type_params != nil
         if mod[:generic_class_templates] == nil
           mod[:generic_class_templates] = {}
-        mod[:generic_class_templates][expr.name] = expr
+        mod[:generic_class_templates][expr_name] = expr
       else
-        mod[:known_classes][expr.name] = expr
+        mod[:known_classes][expr_name] = expr
         if expr.superclass != nil
           mark_builtin_class_used(mod, expr.superclass)
     ei += 1
@@ -375,19 +392,22 @@ use lowering/definitions
   plan = return_inference_sccs(inferable_methods)
   components = plan[:components]
   defs = plan[:definitions]
+  fn_return_types = mod[:fn_return_types]
+  n_components = components.size()
   ci = 0
-  while ci < components.size()
+  while ci < n_components
     component = components[ci]
+    n_comp = component.size()
     iter = 0
-    max_iter = component.size() + 2
+    max_iter = n_comp + 2
     changed = true
     while changed && iter < max_iter
       changed = false
       im = 0
-      while im < component.size()
+      while im < n_comp
         m = defs[component[im]]
         call_key = method_call_key_for_def(m)
-        old_rt = mod[:fn_return_types][call_key]
+        old_rt = fn_return_types[call_key]
         # Seed inference with declared param types (canonical spelling) and
         # `## i64`-style body hints. With an empty map, a typed fn whose tail
         # expression flows through hinted locals inferred nil — its callers
@@ -395,18 +415,21 @@ use lowering/definitions
         # op that consumed the call result (w_int + w_add per index expression
         # in the flip-graph walkers).
         pmap = {}
-        if m.param_types != nil && m.params != nil
-          pts2 = m.param_types
+        pts2 = m.param_types
+        m_params = m.params
+        if pts2 != nil && m_params != nil
+          n_pts2 = pts2.size()
+          n_m_params = m_params.size()
           pi2 = 0
-          while pi2 < pts2.size() && pi2 < m.params.size()
-            pmap[param_runtime_name(m.params[pi2])] = canonical_signature_type(pts2[pi2])
+          while pi2 < n_pts2 && pi2 < n_m_params
+            pmap[param_runtime_name(m_params[pi2])] = canonical_signature_type(pts2[pi2])
             pi2 += 1
         enriched = enrich_int_locals(m.body, pmap)
-        new_rt = infer_return_type(m, enriched, mod[:fn_return_types], lowering_infer_maps)
+        new_rt = infer_return_type(m, enriched, fn_return_types, lowering_infer_maps)
         if new_rt == nil
-          new_rt = infer_return_type_evidence(m, enriched, mod[:fn_return_types], lowering_infer_maps)
+          new_rt = infer_return_type_evidence(m, enriched, fn_return_types, lowering_infer_maps)
         if new_rt != nil && new_rt != old_rt
-          mod[:fn_return_types][call_key] = normalize_type_symbol(new_rt)
+          fn_return_types[call_key] = normalize_type_symbol(new_rt)
           changed = true
         im += 1
       iter += 1
@@ -416,10 +439,13 @@ use lowering/definitions
 # Emit startup init calls for the built-in runtime classes a program
 # actually uses (mark_builtin_runtime_class_uses fills the used set).
 -> emit_builtin_class_inits(main_fn, mod)
+  bc_order = mod[:builtin_class_order]
+  n_bc_order = bc_order.size()
+  used_bc = mod[:used_builtin_classes]
   bci = 0
-  while bci < mod[:builtin_class_order].size()
-    bc_name = mod[:builtin_class_order][bci]
-    if mod[:used_builtin_classes][bc_name] == true
+  while bci < n_bc_order
+    bc_name = bc_order[bci]
+    if used_bc[bc_name] == true
       bc_str_id = module_string_constant(mod, bc_name)
       bc_byte_len = utf8_byte_length(bc_name) + 1
       emit_wire_builtin_class_init(main_fn, bc_name, bc_byte_len, bc_str_id)
@@ -442,8 +468,9 @@ use lowering/definitions
   else
     runtime_class_names = {}
     pending_class_exprs = []
+    n_exprs = expressions.size()
     ci = 0
-    while ci < expressions.size()
+    while ci < n_exprs
       expr = expressions[ci]
       is_generic_template = ast_kind(expr) == :class_def && expr.type_params != nil
       if !is_generic_template && ast_kind(expr) in (:class_def :module_def)
@@ -453,18 +480,22 @@ use lowering/definitions
 
   ordered_class_exprs = []
   ordered_class_names = {}
-  while pending_class_exprs.size() > 0
+  known_classes = mod[:known_classes]
+  while true
+    n_pending = pending_class_exprs.size()
+    if n_pending == 0
+      break
     next_pending = []
     blocked_names = {}
     progressed = false
     ci = 0
-    while ci < pending_class_exprs.size()
+    while ci < n_pending
       expr = pending_class_exprs[ci]
       cname = expr.name
       ready = blocked_names[cname] != true
       if ready && ordered_class_names[cname] == nil
         order_super = expr.superclass
-        if order_super != nil && !order_super.include?(":") && mod[:known_classes][order_super] == nil
+        if order_super != nil && !order_super.include?(":") && known_classes[order_super] == nil
           ns_super = resolve_class_in_namespace(mod, cname, order_super)
           if ns_super != nil
             order_super = ns_super
@@ -496,8 +527,12 @@ use lowering/definitions
 # canonical one in mod[:known_classes] (which is the last-registered).
 -> register_classes(main_fn, mod, ordered_class_exprs)
   processed_classes = {}
+  known_classes = mod[:known_classes]
+  fn_return_types = mod[:fn_return_types]
+  memo_tables = mod[:fn_memo_tables]
+  n_ordered = ordered_class_exprs.size()
   ci = 0
-  while ci < ordered_class_exprs.size()
+  while ci < n_ordered
     expr = ordered_class_exprs[ci]
     if ast_kind(expr) in (:class_def :module_def)
       cname = expr.name
@@ -514,7 +549,7 @@ use lowering/definitions
         # `Tungsten:Bit:Command`. Bare names that already name a class or
         # a runtime builtin (StandardError, …) pass through unchanged.
         super_name = expr.superclass
-        if super_name != nil && !super_name.include?(":") && mod[:known_classes][super_name] == nil
+        if super_name != nil && !super_name.include?(":") && known_classes[super_name] == nil
           ns_super = resolve_class_in_namespace(mod, cname, super_name)
           if ns_super != nil
             super_name = ns_super
@@ -543,27 +578,32 @@ use lowering/definitions
         # kind symbol comes from the constructor-return-type map
         # (register_ast_constructor_return_types); kind_id_table turns
         # it into the integer the runtime indexes by.
-        ast_kind_sym = mod[:fn_return_types][cname + ".new"]
-        if ast_kind_sym != nil && kind_id_table[ast_kind_sym] != nil
-          emit_wire_node_kind_class_register(main_fn, cls_temp, kind_id_table[ast_kind_sym])
+        ast_kind_sym = fn_return_types[cname + ".new"]
+        if ast_kind_sym != nil
+          kind_id = kind_id_table[ast_kind_sym]
+          if kind_id != nil
+            emit_wire_node_kind_class_register(main_fn, cls_temp, kind_id)
 
         # Inherit superclass ivar offsets for this class's fresh layout.
         # Use the namespace-resolved super_name so a cross-file parent's
         # ivar layout is found (bare expr.superclass may not be a key).
         ivar_offsets = {}
         offset = 0
-        if super_name != nil && mod[:known_classes][super_name] != nil
-          super_node = mod[:known_classes][super_name]
-          super_offsets = ast_ivar_offsets_get(super_node)
-          if super_offsets != nil
-            super_keys = super_offsets.keys()
-            ski = 0
-            while ski < super_keys.size()
-              k = super_keys[ski]
-              ivar_offsets[k] = super_offsets[k]
-              if super_offsets[k] >= offset
-                offset = super_offsets[k] + 1
-              ski += 1
+        if super_name != nil
+          super_node = known_classes[super_name]
+          if super_node != nil
+            super_offsets = ast_ivar_offsets_get(super_node)
+            if super_offsets != nil
+              super_keys = super_offsets.keys()
+              n_super_keys = super_keys.size()
+              ski = 0
+              while ski < n_super_keys
+                k = super_keys[ski]
+                so_k = super_offsets[k]
+                ivar_offsets[k] = so_k
+                if so_k >= offset
+                  offset = so_k + 1
+                ski += 1
         processed_classes[cname] = {ivar_offsets: ivar_offsets, offset: offset}
 
       ivar_state = processed_classes[cname]
@@ -598,8 +638,9 @@ use lowering/definitions
 
       # Append any local ivars not already present (additive on reopen).
       local_ivars = collect_class_ivars(class_body)
+      n_local_ivars = local_ivars.size()
       li = 0
-      while li < local_ivars.size()
+      while li < n_local_ivars
         iname = local_ivars[li]
         if ivar_offsets[iname] == nil
           ivar_offsets[iname] = offset
@@ -615,17 +656,23 @@ use lowering/definitions
       # Propagate the merged layout to the canonical class_node so later
       # lowering stages (which look up ivar offsets via known_classes) see
       # the same picture regardless of which class_def is canonical.
-      canonical = mod[:known_classes][cname]
+      canonical = known_classes[cname]
       if canonical != nil
         ast_ivar_offsets_set(canonical, ivar_offsets)
         ast_ivar_count_set(canonical, offset)
 
       # Register methods and accessors from THIS body.
       if class_body != nil
+        n_class_body = class_body.size()
         mi2 = 0
-        while mi2 < class_body.size()
+        while mi2 < n_class_body
           mnode = class_body[mi2]
-          if ast_kind(mnode) == :method_def
+          mnode_kind = ast_kind(mnode)
+          mnode_name = mnode.name
+          if mnode_kind == :method_def
+            mnode_params = mnode.params
+            n_mnode_params = mnode_params.size()
+            mnode_body = mnode.body
             # Record class methods that take a block (declare `&` or use
             # `yield`) in the global block-method name set, exactly as the
             # top-level fn-def walk does. Without this, a trailing block on
@@ -633,17 +680,17 @@ use lowering/definitions
             # was mis-routed by method_takes_no_block? into an implicit
             # `.each` on the RESULT, so the method ran with no block and
             # `yield` died with "expected closure".
-            if method_lowering_analysis(mnode)[:yield_block_name] != nil || explicit_block_param_name(mnode.params) != nil
-              mod[:block_method_names][mnode.name] = true
+            if method_lowering_analysis(mnode)[:yield_block_name] != nil || explicit_block_param_name(mnode_params) != nil
+              mod[:block_method_names][mnode_name] = true
             if mnode.is_class_method == true
               register_static_method(main_fn, mod, cname, mnode)
               if mnode.return_type != nil
                 static_rt = normalize_type_symbol(mnode.return_type)
-                static_key = cname + "." + mnode.name
-                mod[:fn_return_types][static_key] = static_rt
+                static_key = cname + "." + mnode_name
+                fn_return_types[static_key] = static_rt
                 # Bodyless (abstract/intrinsic) statics are not in the
                 # direct-dispatch registry — see register_static_method.
-                static_info = known_static_method_for(mod, static_key, mnode.params.size())
+                static_info = known_static_method_for(mod, static_key, n_mnode_params)
                 if static_info != nil
                   static_info[:return_type] = static_rt
             elsif mnode.from_fn == true && mnode.param_types != nil && embedded_body_directive(mnode) != nil
@@ -658,19 +705,22 @@ use lowering/definitions
               # accessors for the @-bound params (lower_class_def emits the
               # bodies via desugar_trailing_accessors; this pre-pass makes
               # dispatch see the symbols, mirroring the class-body ro arm).
-              if mnode.body != nil
+              if mnode_body != nil
+                n_mnode_body = mnode_body.size()
                 tmi = 0
-                while tmi < mnode.body.size()
-                  tst = mnode.body[tmi]
-                  if is_ast_node?(tst) && ast_kind(tst) == :call && tst.receiver == nil && (ast_get(tst, :name) == "ro" || ast_get(tst, :name) == "rw") && (tst.args == nil || tst.args.size() == 0)
-                    tpi = 0
-                    while tpi < mnode.params.size()
-                      tp = mnode.params[tpi]
-                      if ast_get(tp, :ivar_assign) == true
-                        register_class_method(main_fn, mod, cname, ast_get(tp, :name), 1)
-                        if ast_get(tst, :name) == "rw"
-                          register_class_method(main_fn, mod, cname, ast_get(tp, :name) + "=", 2)
-                      tpi += 1
+                while tmi < n_mnode_body
+                  tst = mnode_body[tmi]
+                  if is_ast_node?(tst) && ast_kind(tst) == :call && tst.receiver == nil && (ast_get(tst, :name) == "ro" || ast_get(tst, :name) == "rw")
+                    tst_args = tst.args
+                    if tst_args == nil || tst_args.size() == 0
+                      tpi = 0
+                      while tpi < n_mnode_params
+                        tp = mnode_params[tpi]
+                        if ast_get(tp, :ivar_assign) == true
+                          register_class_method(main_fn, mod, cname, ast_get(tp, :name), 1)
+                          if ast_get(tst, :name) == "rw"
+                            register_class_method(main_fn, mod, cname, ast_get(tp, :name) + "=", 2)
+                        tpi += 1
                   tmi += 1
               # Type-annotated instance methods get a static-dispatch
               # entry so `self.foo()` calls inside the same class
@@ -681,10 +731,10 @@ use lowering/definitions
               # — same caching behavior as top-level fn defs.
               if mnode.return_type != nil
                 static_rt = normalize_type_symbol(mnode.return_type)
-                static_key = cname + "." + mnode.name
+                static_key = cname + "." + mnode_name
                 inst_fn_name = class_method_function_name(cname, mnode)
                 inst_raw_abi = static_method_raw_abi?(mnode)
-                mod[:fn_return_types][static_key] = static_rt
+                fn_return_types[static_key] = static_rt
                 info = {
                   fn_name: inst_fn_name,
                   method_fn_name: inst_fn_name,
@@ -694,27 +744,30 @@ use lowering/definitions
                   raw_abi: inst_raw_abi,
                   from_fn: mnode.from_fn == true,
                   accepts_block: false,
-                  param_count: mnode.params.size(),
+                  param_count: n_mnode_params,
                   splat_index: method_splat_index(mnode),
                   block_param_index: method_block_param_index(mnode)
                 }
-                register_known_static_method_info(mod, static_key, info, mnode.params.size(), mnode.params.size())
+                register_known_static_method_info(mod, static_key, info, n_mnode_params, n_mnode_params)
                 if mnode.from_fn == true
-                  impure_ccall = fn_body_calls_impure_ccall?(mnode.body)
+                  impure_ccall = fn_body_calls_impure_ccall?(mnode_body)
                   mnode.calls_impure_ccall = impure_ccall
                   if !impure_ccall
                     mod[:known_pure_calls][static_key] = inst_fn_name
-                    if mod[:fn_memo_tables][static_key] == nil
-                      mod[:fn_memo_tables][static_key] = inst_fn_name + ".memo"
-          elsif ast_kind(mnode) == :call && mnode.name in ("ro" "rw")
+                    if memo_tables[static_key] == nil
+                      memo_tables[static_key] = inst_fn_name + ".memo"
+          if mnode_kind == :call && mnode_name in ("ro" "rw")
+            mnode_args = mnode.args
+            n_mnode_args = mnode_args.size()
+            mnode_is_rw = mnode_name == "rw"
             ai = 0
-            while ai < mnode.args.size()
-              field = mnode.args[ai].value
+            while ai < n_mnode_args
+              field = mnode_args[ai].value
               register_class_method(main_fn, mod, cname, field, 1)
-              if mnode.name == "rw"
+              if mnode_is_rw
                 register_class_method(main_fn, mod, cname, field + "=", 2)
               ai += 1
-          elsif ast_kind(mnode) == :view_decl && ast_get(mnode, :kind) == "struct"
+          if mnode_kind == :view_decl && ast_get(mnode, :kind) == "struct"
             # Data block (`- data; T components[4]`) — register a method
             # per field so bare `components` resolves at dispatch time.
             # lower_class_def emits the corresponding getter body; this
@@ -725,24 +778,28 @@ use lowering/definitions
             # reference getters that are never emitted.
             if cname != "BigInt"
               vd_layout = ast_get(mnode, :count)
-              if vd_layout != nil && type(vd_layout) == "Hash" && vd_layout[:fields] != nil
-                vdf = 0
-                while vdf < vd_layout[:fields].size()
-                  vfname = vd_layout[:fields][vdf][:name]
-                  # Data getters are synthesized later by lower_class_def.
-                  # Keep their ASTs out of class_method_asts (that registry
-                  # feeds exact-ivar write analysis), but record the same
-                  # plain ABI symbol in the independent devirtualization
-                  # index so exact-class call sites can guard and call it.
-                  # Fields that synthesize NO accessor (see
-                  # data_field_getter_body — a native class's pointer and
-                  # fixed-array fields) must be skipped here for the same
-                  # reason BigInt is: the symbol would never be emitted.
-                  if data_field_getter_body(cname, vfname, vd_layout[:fields][vdf][:type]) != nil
-                    register_class_method(main_fn, mod, cname, vfname, 1)
-                    vgetter = Tungsten:AST:MethodDef.new(vfname, [], [])
-                    mod[:class_method_fn_names][cname + "." + vfname + "/0"] = class_method_function_name(cname, vgetter)
-                  vdf += 1
+              if vd_layout != nil && type(vd_layout) == "Hash"
+                vd_fields = vd_layout[:fields]
+                if vd_fields != nil
+                  n_vd_fields = vd_fields.size()
+                  vdf = 0
+                  while vdf < n_vd_fields
+                    vfield = vd_fields[vdf]
+                    vfname = vfield[:name]
+                    # Data getters are synthesized later by lower_class_def.
+                    # Keep their ASTs out of class_method_asts (that registry
+                    # feeds exact-ivar write analysis), but record the same
+                    # plain ABI symbol in the independent devirtualization
+                    # index so exact-class call sites can guard and call it.
+                    # Fields that synthesize NO accessor (see
+                    # data_field_getter_body — a native class's pointer and
+                    # fixed-array fields) must be skipped here for the same
+                    # reason BigInt is: the symbol would never be emitted.
+                    if data_field_getter_body(cname, vfname, vfield[:type]) != nil
+                      register_class_method(main_fn, mod, cname, vfname, 1)
+                      vgetter = Tungsten:AST:MethodDef.new(vfname, [], [])
+                      mod[:class_method_fn_names][cname + "." + vfname + "/0"] = class_method_function_name(cname, vgetter)
+                    vdf += 1
           mi2 += 1
     ci += 1
   nil
@@ -753,9 +810,10 @@ use lowering/definitions
 -> prepend_custom_unit_registrations(main_fn, mod)
   if mod[:custom_units] != nil && mod[:custom_units].size() > 0
     cu_keys = mod[:custom_units].keys()
+    n_cu_keys = cu_keys.size()
     reg_instructions = []
     cui = 0
-    while cui < cu_keys.size()
+    while cui < n_cu_keys
       unit_name = cu_keys[cui]
       unit_id = mod[:custom_units][unit_name]
       str_id = module_string_constant(mod, unit_name)
@@ -766,12 +824,14 @@ use lowering/definitions
     cu_entry = main_fn[:blocks][0]
     cu_old = cu_entry[:instructions]
     cu_new = []
+    n_reg_instrs = reg_instructions.size()
     cui = 0
-    while cui < reg_instructions.size()
+    while cui < n_reg_instrs
       cu_new.push(reg_instructions[cui])
       cui += 1
+    n_cu_old = cu_old.size()
     cui = 0
-    while cui < cu_old.size()
+    while cui < n_cu_old
       cu_new.push(cu_old[cui])
       cui += 1
     cu_entry[:instructions] = cu_new
@@ -806,12 +866,14 @@ use lowering/definitions
   lock_seen = false
   known_types = {}
   core_keys = {}
+  n_exprs = expressions.size()
   i = 0
-  while i < expressions.size()
+  while i < n_exprs
     node = expressions[i]
     contract = lowering_contract_name(node)
     if contract != nil
-      if node.args == nil || node.args.size() != 0 || node.block != nil
+      node_args = node.args
+      if node_args == nil || node_args.size() != 0 || node.block != nil
         raise compile_error_for_node(:E_CONTRACT_ARITY, "Tungsten." + contract + " takes no arguments or block", source_path, node)
       if contract == "PROTECT_THE_CORE!"
         mod[:protect_core] = true
@@ -831,20 +893,24 @@ use lowering/definitions
         if path == nil
           path = source_path
         raise compile_error_for_node(:E_CONTRACT_LOCK_ORDER, "method and type definitions must appear before Tungsten.LOCK_THE_DOORS!", path, node)
-      elsif stop_seen && ast_kind(node) in (:class_def :module_def :trait_def) && known_types[node.name] != true
+      node_kind = ast_kind(node)
+      node_name = nil
+      if node_kind in (:class_def :module_def :trait_def)
+        node_name = node.name
+      if stop_seen && node_name != nil && known_types[node_name] != true
         path = ast_get(node, :source_path)
         if path == nil
           path = source_path
         raise compile_error_for_node(:E_CONTRACT_TYPE_ORDER, "new type definitions must appear before Tungsten.STOP_THE_PRESS!", path, node)
       if key != nil && definition_from_core?(node)
         core_keys[key] = true
-      if ast_kind(node) in (:class_def :module_def :trait_def)
-        known_types[node.name] = true
+      if node_name != nil
+        known_types[node_name] = true
     i += 1
 
   if mod[:protect_core] == true
     i = 0
-    while i < expressions.size()
+    while i < n_exprs
       node = expressions[i]
       key = lowering_definition_key(node)
       if key != nil && !definition_from_core?(node) && core_keys[key] == true
@@ -862,8 +928,9 @@ use lowering/definitions
 # source invariants are carried only once the class is actually in the AST.
 -> require_bigint_source_seams(mod, expressions)
   has_bigint = false
+  n_exprs = expressions.size()
   i = 0
-  while i < expressions.size()
+  while i < n_exprs
     expr = expressions[i]
     if ast_kind(expr) == :class_def && expr.name == "BigInt"
       has_bigint = true
@@ -987,6 +1054,10 @@ use lowering/definitions
   # top-level static types just collected; consumed in
   # populate_definition_var_types when each body is lowered below.
   collect_param_type_observations(mod, ast.expressions, core_expressions, mod[:core_top_level_static_types])
+  if core_expressions != nil
+    preregister_top_level_raw_abis(mod, user_expressions)
+  else
+    preregister_top_level_raw_abis(mod, ast.expressions)
 
   # ARGV use is discovered by the combined runtime-use walk below. Build the
   # function first, then attach argc/argv before emission if that walk finds a
@@ -1157,20 +1228,26 @@ use lowering/definitions
     else
       out = out + "core reuse: monolithic fallback (" + mod[:core_reuse_fallback_reason] + ")\n\n"
 
+  mod_fns = mod[:functions]
+  n_mod_fns = mod_fns.size()
   i = 0
-  while i < mod[:functions].size()
-    wfn = mod[:functions][i]
+  while i < n_mod_fns
+    wfn = mod_fns[i]
     out = out + "function " + wfn[:name] + "("
     out = out + wfn[:params].join(", ")
     out = out + ") -> " + wfn[:return_type] + "\n"
 
+    wfn_blocks = wfn[:blocks]
+    n_wfn_blocks = wfn_blocks.size()
     j = 0
-    while j < wfn[:blocks].size()
-      blk = wfn[:blocks][j]
+    while j < n_wfn_blocks
+      blk = wfn_blocks[j]
       out = out + "  " + blk[:label] + ":\n"
+      blk_instrs = blk[:instructions]
+      n_blk_instrs = blk_instrs.size()
       k = 0
-      while k < blk[:instructions].size()
-        inst = blk[:instructions][k]
+      while k < n_blk_instrs
+        inst = blk_instrs[k]
         out = out + "    " + wire_kind(inst).to_s()
         # Print key fields
         if wire_get(inst, :temp) != nil
@@ -1219,10 +1296,11 @@ use lowering/definitions
   bargs = b.args
   if bargs == nil || params == nil
     return false
-  if bargs.size() != params.size()
+  n_bargs = bargs.size()
+  if n_bargs != params.size()
     return false
   i = 0
-  while i < bargs.size()
+  while i < n_bargs
     a = bargs[i]
     if !is_ast_node?(a) || ast_kind(a) != :var
       return false

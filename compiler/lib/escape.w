@@ -138,7 +138,7 @@
 # Concat variants that RELEASE or take ownership of an operand: an argument
 # handed to one of these is consumed, never merely read.
 -> is_consuming_builtin(name)
-  name in ("w_str_concat_free_lhs" "w_str_concat_free_rhs" "w_str_concat_own")
+  name in ("w_str_concat_free_lhs" "w_str_concat_free_rhs" "w_str_concat_own" "w_str_concat_i64" "w_i64_concat_str" "w_str_concat_int_wv" "w_int_wv_concat_str")
 
 # Analyze one function: which parameters escape (stored somewhere that
 # outlives the call, or returned) and whether the function is pure.

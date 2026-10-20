@@ -596,6 +596,491 @@
   start_block(wfn, done_label)
   nil
 
+-> licm_expr_equiv?(a, b)
+  if a == nil && b == nil
+    return true
+  if a == nil || b == nil
+    return false
+  if !is_ast_node?(a) || !is_ast_node?(b)
+    return a == b
+  ka = ast_kind(a)
+  kb = ast_kind(b)
+  if ka == :class_ref
+    ka = :var
+  if kb == :class_ref
+    kb = :var
+  if ka != kb
+    return false
+  case ka
+  when :var, :ivar, :cvar, :gvar
+    return a.name == b.name
+  when :int, :string, :symbol, :bool, :float, :char
+    return a.value == b.value
+  when :call
+    if a.name != b.name || a.block != nil || b.block != nil
+      return false
+    if !licm_expr_equiv?(a.receiver, b.receiver)
+      return false
+    a_args = a.args
+    b_args = b.args
+    na = a_args == nil ? 0 : a_args.size()
+    nb = b_args == nil ? 0 : b_args.size()
+    if na != nb
+      return false
+    i = 0
+    while i < na
+      if !licm_expr_equiv?(a_args[i], b_args[i])
+        return false
+      i += 1
+    return true
+  else
+    return false
+
+-> licm_indexed_ivar?(ctx, ivar_name)
+  cname = ctx[:class_name]
+  if cname == nil || ctx[:is_class_method] == true
+    return false
+  class_node = ctx[:mod][:known_classes][cname]
+  if class_node == nil
+    return false
+  offsets = ast_ivar_offsets_get(class_node)
+  if offsets == nil
+    return false
+  offsets[ivar_name] != nil
+
+-> licm_recv_type(ctx, recv)
+  if recv == nil || !is_ast_node?(recv)
+    return nil
+  rk = ast_kind(recv)
+  if rk == :var
+    return ctx[:var_types][recv.name]
+  if rk == :ivar
+    cname = ctx[:class_name]
+    if cname != nil
+      class_ivars = ctx[:mod][:ivar_types][cname]
+      if class_ivars != nil
+        return class_ivars[recv.name]
+  nil
+
+-> licm_scan_expr_list(list, st, var_types, escape)
+  if list == nil || st[:abort] == true
+    return nil
+  prev = st[:in_escape]
+  st[:in_escape] = escape
+  n_list = list.size()
+  i = 0
+  while i < n_list
+    licm_scan_expr(list[i], st, var_types)
+    i += 1
+  st[:in_escape] = prev
+  nil
+
+-> licm_scan_expr(node, st, var_types)
+  if node == nil || st[:abort] == true
+    return nil
+  if !is_ast_node?(node)
+    if type(node) == "Array"
+      licm_scan_expr_list(node, st, var_types, st[:in_escape])
+    return nil
+  k = ast_kind(node)
+  if k in (:var :ivar)
+    if st[:in_escape] == true
+      nm = node.name
+      st[:unsafe_size][nm] = true
+      st[:unsafe_elem][nm] = true
+    return nil
+  if k in (:int :float :bool :nil_lit :string :symbol :char :cvar :gvar :class_ref)
+    return nil
+  if k == :self_ref
+    st[:self_mutated] = true
+    return nil
+  case k
+  when :binary_op, :and, :or, :target_and, :target_or
+    licm_scan_expr(node.left, st, var_types)
+    licm_scan_expr(node.right, st, var_types)
+  when :unary_op, :not
+    licm_scan_expr(node.operand, st, var_types)
+  when :type_ascription
+    licm_scan_expr(node.expression, st, var_types)
+  when :in_test
+    licm_scan_expr(node.lhs, st, var_types)
+    licm_scan_expr_list(node.elements, st, var_types, false)
+  when :string_interp
+    licm_scan_expr_list(node.parts, st, var_types, true)
+  when :array
+    licm_scan_expr_list(node.elements, st, var_types, true)
+  when :call
+    if node.block != nil
+      st[:self_mutated] = true
+      st[:abort] = true
+      return nil
+    recv = node.receiver
+    nm = node.name
+    args = node.args
+    if recv == nil
+      if !(nm in ("ast_kind" "ast_get" "is_ast_node?" "type" "typeof" "ccall_nobox" "raw_load_u8" "raw_load_u32" "raw_load_u64" "popcount" "cttz" "array_load_u64" "wvalue_bits" "wvalue_from_bits" "min" "max" "abs" "sqrt"))
+        st[:self_mutated] = true
+      pure_arg_call = nm in ("ast_kind" "is_ast_node?" "type" "typeof" "wvalue_bits" "min" "max" "abs" "sqrt")
+      licm_scan_expr_list(args, st, var_types, !pure_arg_call)
+      return nil
+    if !is_ast_node?(recv)
+      st[:abort] = true
+      return nil
+    rk = ast_kind(recv)
+    if rk in (:var :ivar :class_ref)
+      rname = recv.name
+      if nm in ("[]" "\[]" "size" "length" "empty?" "first" "last" "include?" "index" "slice" "get_byte" "codepoint_at" "byte_slice" "keys" "values" "has_key?" "key?" "bytes" "chars" "to_s" "to_i" "to_f" "ord" "chr" "starts_with?" "ends_with?")
+        licm_scan_expr_list(args, st, var_types, false)
+        return nil
+      if nm in ("[]=" "\[]=") && args != nil && args.size() == 2
+        st[:unsafe_elem][rname] = true
+        rvt = var_types[rname]
+        if !(rvt == :array || is_typed_array_type?(rvt))
+          st[:unsafe_size][rname] = true
+        licm_scan_expr(args[0], st, var_types)
+        prev_esc = st[:in_escape]
+        st[:in_escape] = true
+        licm_scan_expr(args[1], st, var_types)
+        st[:in_escape] = prev_esc
+        return nil
+      st[:unsafe_size][rname] = true
+      st[:unsafe_elem][rname] = true
+      if !(nm in ("push" "<<" "pop" "shift" "unshift" "delete" "delete_at" "clear" "concat" "append"))
+        st[:self_mutated] = true
+      licm_scan_expr_list(args, st, var_types, true)
+      return nil
+    st[:self_mutated] = true
+    prev_esc = st[:in_escape]
+    st[:in_escape] = true
+    licm_scan_expr(recv, st, var_types)
+    st[:in_escape] = prev_esc
+    licm_scan_expr_list(args, st, var_types, true)
+  else
+    st[:abort] = true
+  nil
+
+-> licm_scan_stmts(nodes, st, var_types)
+  if nodes == nil || st[:abort] == true
+    return nil
+  n_nodes = nodes.size()
+  i = 0
+  while i < n_nodes
+    node = nodes[i]
+    if node != nil && is_ast_node?(node)
+      k = ast_kind(node)
+      case k
+      when :assign, :compound_assign
+        tgt = node.target
+        if tgt != nil && is_ast_node?(tgt) && ast_kind(tgt) in (:var :ivar)
+          tname = tgt.name
+          st[:assigned][tname] = true
+          st[:unsafe_size][tname] = true
+          st[:unsafe_elem][tname] = true
+          nval = node.value
+          if nval != nil && is_ast_node?(nval) && ast_kind(nval) in (:var :ivar)
+            vname = nval.name
+            st[:unsafe_size][vname] = true
+            st[:unsafe_elem][vname] = true
+          licm_scan_expr(nval, st, var_types)
+        else
+          st[:abort] = true
+      when :if
+        licm_scan_expr(node.condition, st, var_types)
+        licm_scan_stmts(node.then_body, st, var_types)
+        licm_scan_stmts(node.else_body, st, var_types)
+        elsifs = node.elsif_clauses
+        if elsifs != nil
+          n_elsifs = elsifs.size()
+          j = 0
+          while j < n_elsifs
+            clause = elsifs[j]
+            licm_scan_expr(clause[0], st, var_types)
+            licm_scan_stmts(clause[1], st, var_types)
+            j += 1
+      when :while
+        licm_scan_expr(node.condition, st, var_types)
+        licm_scan_stmts(node.body, st, var_types)
+      when :break, :next
+        nil
+      when :return, :print
+        prev_esc = st[:in_escape]
+        st[:in_escape] = true
+        licm_scan_expr(node.value, st, var_types)
+        st[:in_escape] = prev_esc
+      when :puts
+        licm_scan_expr_list(node.value, st, var_types, true)
+      else
+        licm_scan_expr(node, st, var_types)
+    i += 1
+  nil
+
+-> licm_add_candidate(candidates, kind, expr, recv_type)
+  n_cands = candidates.size()
+  i = 0
+  while i < n_cands
+    if licm_expr_equiv?(candidates[i][:expr], expr)
+      return nil
+    i += 1
+  candidates.push({kind: kind, expr: expr, recv_type: recv_type, var: nil, var_node: nil})
+  nil
+
+-> licm_collect_uncond(ctx, node, in_call_recv, st, candidates)
+  if node == nil || !is_ast_node?(node)
+    return nil
+  k = ast_kind(node)
+  case k
+  when :binary_op
+    licm_collect_uncond(ctx, node.left, false, st, candidates)
+    licm_collect_uncond(ctx, node.right, false, st, candidates)
+  when :unary_op, :not
+    licm_collect_uncond(ctx, node.operand, false, st, candidates)
+  when :and, :or, :target_and, :target_or
+    licm_collect_uncond(ctx, node.left, false, st, candidates)
+  when :type_ascription
+    licm_collect_uncond(ctx, node.expression, false, st, candidates)
+  when :ivar
+    if !in_call_recv && st[:self_mutated] != true && st[:assigned][node.name] == nil && licm_indexed_ivar?(ctx, node.name)
+      licm_add_candidate(candidates, :ivar, node, nil)
+  when :call
+    if node.block != nil
+      return nil
+    recv = node.receiver
+    licm_collect_uncond(ctx, recv, true, st, candidates)
+    args = node.args
+    n_args = args == nil ? 0 : args.size()
+    i = 0
+    while i < n_args
+      licm_collect_uncond(ctx, args[i], false, st, candidates)
+      i += 1
+    if recv == nil || !is_ast_node?(recv)
+      return nil
+    rk = ast_kind(recv)
+    rname = recv.name
+    nm = node.name
+    if n_args == 0 && nm in ("size" "length")
+      if rk == :var && st[:assigned][rname] == nil && st[:unsafe_size][rname] == nil
+        licm_add_candidate(candidates, :size, node, licm_recv_type(ctx, recv))
+      elsif rk == :ivar && st[:self_mutated] != true && st[:assigned][rname] == nil && st[:unsafe_size][rname] == nil && licm_indexed_ivar?(ctx, rname)
+        licm_add_candidate(candidates, :size, node, licm_recv_type(ctx, recv))
+    elsif n_args == 1 && nm in ("[]" "\[]")
+      idx = args[0]
+      if idx != nil && is_ast_node?(idx)
+        ik = ast_kind(idx)
+        idx_inv = (ik in (:int :string :symbol)) || (ik == :var && st[:assigned][idx.name] == nil)
+        if idx_inv
+          if rk == :var && st[:assigned][rname] == nil && st[:unsafe_elem][rname] == nil
+            licm_add_candidate(candidates, :elem, node, licm_recv_type(ctx, recv))
+          elsif rk == :ivar && st[:self_mutated] != true && st[:assigned][rname] == nil && st[:unsafe_elem][rname] == nil && licm_indexed_ivar?(ctx, rname)
+            licm_add_candidate(candidates, :elem, node, licm_recv_type(ctx, recv))
+  nil
+
+-> licm_match_candidate(node, candidates)
+  if node == nil || !is_ast_node?(node)
+    return nil
+  i = candidates.size() - 1
+  while i >= 0
+    cand = candidates[i]
+    if licm_expr_equiv?(node, cand[:expr])
+      return cand[:var_node]
+    i -= 1
+  nil
+
+-> licm_rewrite_slot(parent, field, candidates, undo)
+  child = ast_get(parent, field)
+  if child == nil || !is_ast_node?(child)
+    return nil
+  matched = licm_match_candidate(child, candidates)
+  if matched != nil
+    undo.push({node: parent, field: field, old: child})
+    ast_set(parent, field, matched)
+    return nil
+  licm_rewrite_expr_in_place(child, candidates, undo)
+
+-> licm_rewrite_array_slot(parent, field, candidates, undo)
+  arr = ast_get(parent, field)
+  if arr == nil || type(arr) != "Array"
+    return nil
+  n_arr = arr.size()
+  if n_arr == 0
+    return nil
+  changed = false
+  rebuilt = []
+  i = 0
+  while i < n_arr
+    elt = arr[i]
+    if elt != nil && is_ast_node?(elt)
+      matched = licm_match_candidate(elt, candidates)
+      if matched != nil
+        rebuilt.push(matched)
+        changed = true
+      else
+        licm_rewrite_expr_in_place(elt, candidates, undo)
+        rebuilt.push(elt)
+    else
+      rebuilt.push(elt)
+    i += 1
+  if changed
+    undo.push({node: parent, field: field, old: arr})
+    ast_set(parent, field, rebuilt)
+  nil
+
+-> licm_rewrite_if_in_place(node, candidates, undo)
+  licm_rewrite_slot(node, :condition, candidates, undo)
+  licm_rewrite_stmts(node.then_body, candidates, undo)
+  licm_rewrite_stmts(node.else_body, candidates, undo)
+  elsifs = node.elsif_clauses
+  if elsifs != nil
+    n_elsifs = elsifs.size()
+    changed = false
+    rebuilt = []
+    i = 0
+    while i < n_elsifs
+      clause = elsifs[i]
+      cond = clause[0]
+      body = clause[1]
+      licm_rewrite_stmts(body, candidates, undo)
+      matched = licm_match_candidate(cond, candidates)
+      if matched != nil
+        rebuilt.push([matched, body])
+        changed = true
+      else
+        licm_rewrite_expr_in_place(cond, candidates, undo)
+        rebuilt.push(clause)
+      i += 1
+    if changed
+      undo.push({node: node, field: :elsif_clauses, old: elsifs})
+      ast_set(node, :elsif_clauses, rebuilt)
+  nil
+
+-> licm_rewrite_expr_in_place(node, candidates, undo)
+  if node == nil || !is_ast_node?(node)
+    return nil
+  k = ast_kind(node)
+  case k
+  when :binary_op, :and, :or, :target_and, :target_or
+    licm_rewrite_slot(node, :left, candidates, undo)
+    licm_rewrite_slot(node, :right, candidates, undo)
+  when :unary_op, :not
+    licm_rewrite_slot(node, :operand, candidates, undo)
+  when :type_ascription
+    licm_rewrite_slot(node, :expression, candidates, undo)
+  when :in_test
+    licm_rewrite_slot(node, :lhs, candidates, undo)
+    licm_rewrite_array_slot(node, :elements, candidates, undo)
+  when :string_interp
+    licm_rewrite_array_slot(node, :parts, candidates, undo)
+  when :array
+    licm_rewrite_array_slot(node, :elements, candidates, undo)
+  when :call
+    recv = node.receiver
+    if recv != nil && is_ast_node?(recv) && ast_kind(recv) != :ivar
+      licm_rewrite_slot(node, :receiver, candidates, undo)
+    licm_rewrite_array_slot(node, :args, candidates, undo)
+  when :if
+    licm_rewrite_if_in_place(node, candidates, undo)
+  nil
+
+-> licm_rewrite_stmts(nodes, candidates, undo)
+  if nodes == nil
+    return nil
+  n_nodes = nodes.size()
+  i = 0
+  while i < n_nodes
+    st = nodes[i]
+    if st != nil && is_ast_node?(st)
+      k = ast_kind(st)
+      case k
+      when :assign, :compound_assign
+        licm_rewrite_slot(st, :value, candidates, undo)
+      when :if
+        licm_rewrite_if_in_place(st, candidates, undo)
+      when :while
+        licm_rewrite_slot(st, :condition, candidates, undo)
+        licm_rewrite_stmts(st.body, candidates, undo)
+      when :return, :print
+        licm_rewrite_slot(st, :value, candidates, undo)
+      when :puts
+        licm_rewrite_array_slot(st, :value, candidates, undo)
+      else
+        licm_rewrite_expr_in_place(st, candidates, undo)
+    i += 1
+  nil
+
+-> licm_restore_undo(undo)
+  i = undo.size() - 1
+  while i >= 0
+    u = undo[i]
+    ast_set(u[:node], u[:field], u[:old])
+    i -= 1
+  nil
+
+-> licm_hoist_while(ctx, node, loop_assigned, static_cond)
+  self_mut = ctx[:class_name] == nil || ctx[:is_class_method] == true
+  st = {
+    abort: false,
+    self_mutated: self_mut,
+    in_escape: false,
+    unsafe_size: {},
+    unsafe_elem: {},
+    assigned: loop_assigned
+  }
+  vtypes = ctx[:var_types]
+  licm_scan_expr(node.condition, st, vtypes)
+  licm_scan_stmts(node.body, st, vtypes)
+  if st[:abort] == true
+    return nil
+  candidates = []
+  if static_cond == nil
+    licm_collect_uncond(ctx, node.condition, false, st, candidates)
+  elsif static_cond == :true && node.body != nil && node.body.size() > 0
+    first_stmt = node.body[0]
+    if first_stmt != nil && is_ast_node?(first_stmt)
+      fk = ast_kind(first_stmt)
+      if fk == :if
+        licm_collect_uncond(ctx, first_stmt.condition, false, st, candidates)
+      elsif fk in (:assign :compound_assign)
+        licm_collect_uncond(ctx, first_stmt.value, false, st, candidates)
+  n_cands = candidates.size()
+  if n_cands == 0
+    return nil
+  wfn = ctx[:func]
+  fn_rets = ctx[:mod][:fn_return_types]
+  ci = 0
+  while ci < n_cands
+    cand = candidates[ci]
+    licm_id = wfn[:next_temp]
+    wfn[:next_temp] = licm_id + 1
+    licm_var = "__licm_" + licm_id.to_s()
+    cand[:var] = licm_var
+    cand[:var_node] = Tungsten:AST:Var.new(licm_var)
+    hexpr = cand[:expr]
+    h_inferred = infer_type(hexpr, vtypes, fn_rets, lowering_infer_maps)
+    tv = lower_expression(ctx, hexpr)
+    tv_type = tv[:type]
+    crecv_t = cand[:recv_type]
+    if tv_type in (:raw_int :raw_i64)
+      raw_slot = ensure_var_slot(wfn, licm_var, "i64")
+      emit_wire_store_i64(wfn, raw_slot, tv[:value])
+      vtypes[licm_var] = :i64
+    elsif cand[:kind] == :size && (crecv_t in (:array :string :string_buffer :hash :bool_array) || is_array_type?(crecv_t))
+      raw_val = ensure_raw_int(wfn, tv)
+      raw_slot = ensure_var_slot(wfn, licm_var, "i64")
+      emit_wire_store_i64(wfn, raw_slot, raw_val)
+      vtypes[licm_var] = :i64
+    else
+      reg = ensure_i64_value(wfn, tv)
+      slot = ensure_var_slot(wfn, licm_var)
+      emit_wire_store_i64(wfn, slot, reg)
+      if tv_type != nil && tv_type != :i64 && !is_raw_int_storage_type(tv_type) && !is_machine_float_type(tv_type)
+        vtypes[licm_var] = tv_type
+      elsif h_inferred != nil && !is_raw_int_storage_type(h_inferred) && !is_machine_float_type(h_inferred)
+        vtypes[licm_var] = h_inferred
+    ci += 1
+  undo = []
+  licm_rewrite_slot(node, :condition, candidates, undo)
+  licm_rewrite_stmts(node.body, candidates, undo)
+  undo
+
 -> lower_while_core(ctx, node)
   wfn = ctx[:func]
 
@@ -609,10 +1094,11 @@
 
   # Find variables safe to keep unboxed (only compound-assigned ints, no full assigns)
   unboxable = find_unboxable_loop_vars(node.body, node.condition, ctx[:var_types])
+  loop_assigned = find_loop_assigned_vars(node.body, node.condition)
   # Wraparound array indexing (`tab[i & 1023]`) defeats LLVM's loop
   # vectorizer — it mis-peels the loop ~2.6x slower than its own unroller.
   # Stamp the latch to opt just this loop out; see loop_masked_array_index?.
-  loop_novec = loop_masked_array_index?(node.body, find_loop_assigned_vars(node.body, node.condition))
+  loop_novec = loop_masked_array_index?(node.body, loop_assigned)
   # Carry-chain kernels (addcarry/subborrow in the body) get an explicit
   # `llvm.loop.unroll.count` — LLVM won't unroll them on its own and the carry
   # flag spills across the back-edge; see loop_has_carry_intrinsic?. Keep the
@@ -634,8 +1120,9 @@
   # Set up raw alloca slots: unbox current value, store raw.
   # For machine-int-typed vars (i64 etc.), the var slot already holds
   # a raw i64 — just reuse it directly; no __raw_ alloca needed.
+  n_unboxable = unboxable.size()
   ui = 0
-  while ui < unboxable.size()
+  while ui < n_unboxable
     vname = unboxable[ui]
     vtype = ctx[:var_types][vname]
     if is_machine_int_type(vtype) || vtype == :raw_int || vtype == :raw_i64
@@ -656,18 +1143,24 @@
   # Nested loops still need to see outer raw counters; inner loop vars override by name.
   if prev_unboxed != nil
     prev_names = prev_unboxed.keys()
+    n_prev = prev_names.size()
     ui = 0
-    while ui < prev_names.size()
+    while ui < n_prev
       name = prev_names[ui]
       active_unboxed[name] = prev_unboxed[name]
       ui += 1
   unames = unboxed.keys()
+  n_unames = unames.size()
   ui = 0
-  while ui < unames.size()
+  while ui < n_unames
     name = unames[ui]
     active_unboxed[name] = unboxed[name]
     ui += 1
   ctx[:unboxed_vars] = active_unboxed
+
+  licm_undo = nil
+  if env("TUNGSTEN_LICM") != "0"
+    licm_undo = licm_hoist_while(ctx, node, loop_assigned, static_cond)
 
   cond_label = next_label(wfn, "while.cond")
   body_label = next_label(wfn, "while.body")
@@ -722,9 +1215,8 @@
   # accumulated value can exceed the 48-bit nanbox payload range.
   # Inline nanbox would mask to 48 bits and truncate. w_int handles
   # any i64 correctly, promoting to bigint when needed.
-  unames = unboxed.keys()
   ui = 0
-  while ui < unames.size()
+  while ui < n_unames
     vname = unames[ui]
     vtype = ctx[:var_types][vname]
     already_raw = is_machine_int_type(vtype) || vtype == :raw_int || vtype == :raw_i64
@@ -747,16 +1239,19 @@
   # got singleton"). A var not assigned in the loop keeps its binding, which is
   # still valid: its defining register dominates the loop-exit block.
   if ctx[:bindings] != nil && ctx[:bindings].size() > 0
-    loop_assigned = find_loop_assigned_vars(node.body, node.condition)
     kept = {}
     bkeys = ctx[:bindings].keys()
+    n_bkeys = bkeys.size()
     bi = 0
-    while bi < bkeys.size()
+    while bi < n_bkeys
       bname = bkeys[bi]
       if loop_assigned[bname] == nil
         kept[bname] = ctx[:bindings][bname]
       bi += 1
     ctx[:bindings] = kept
+
+  if licm_undo != nil
+    licm_restore_undo(licm_undo)
 
   ctx[:unboxed_vars] = prev_unboxed
   nil

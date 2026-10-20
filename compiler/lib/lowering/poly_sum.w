@@ -237,8 +237,9 @@
     body = ast_get(expr, :body)
     if params == nil || params.size() != 1 || body == nil || body.size() != 1
       return nil
-    # Block params are bare name strings (parse_lambda pushes identifiers).
-    return poly_of_expr(ctx, body[0], "" + params[0], depth + 1)
+    p0 = params[0]
+    pname = is_ast_node?(p0) ? p0.name : "" + p0
+    return poly_of_expr(ctx, body[0], pname, depth + 1)
   nil
 
 # Emit Σ_k cₖ·(Σ_{x∈range, parity} xᵏ) = the closed-form ranged sum of a

@@ -109,6 +109,8 @@
   if op == "count"
     inc = Tungsten:AST:BinaryOp.new(Tungsten:AST:Var.new(acc_name), :PLUS, Tungsten:AST:Int.new(1))
     return Tungsten:AST:If.new(Tungsten:AST:Var.new(cur_name), [inc], [], [Tungsten:AST:Var.new(acc_name)])
+  if op == "__size"
+    return Tungsten:AST:BinaryOp.new(Tungsten:AST:Var.new(acc_name), :PLUS, Tungsten:AST:Int.new(1))
   Tungsten:AST:Call.new(Tungsten:AST:Var.new(acc_name), op, [Tungsten:AST:Var.new(cur_name)], nil)
 
 -> bind_slot_value(ctx, wfn, name, value_reg)
@@ -134,6 +136,77 @@
   reg = ensure_i64_value(wfn, tval)
   bind_slot_value(ctx, wfn, name, reg)
   reg
+
+-> lower_pipeline_block_stage(ctx, wfn, sfunc, cur_name, cur_reg, uid, si)
+  bparams = ast_get(sfunc, :params)
+  bbody = ast_get(sfunc, :body)
+  bp_name = nil
+  if bparams != nil && bparams.size() >= 1
+    p0 = bparams[0]
+    if is_ast_node?(p0)
+      bp_name = "" + p0.name
+    else
+      bp_name = "" + p0
+  saved_slot = nil
+  saved_slot_type = nil
+  saved_has_vtype = false
+  saved_vtype = nil
+  saved_binding = nil
+  saved_unboxed = nil
+  if bp_name != nil
+    saved_slot = wfn[:var_slots][bp_name]
+    saved_slot_type = wfn[:var_slot_types][bp_name]
+    saved_has_vtype = ctx[:var_types].has_key?(bp_name)
+    if saved_has_vtype
+      saved_vtype = ctx[:var_types][bp_name]
+    saved_binding = ctx[:bindings][bp_name]
+    if ctx[:unboxed_vars] != nil
+      saved_unboxed = ctx[:unboxed_vars][bp_name]
+      ctx[:unboxed_vars][bp_name] = nil
+    p_key = "__pipe_bp." + uid + "." + si.to_s()
+    is_f64 = ctx[:var_types][cur_name] == :f64
+    p_slot_type = is_f64 ? "double" : "i64"
+    p_ptr = ensure_var_slot(wfn, p_key, p_slot_type)
+    wfn[:var_slots][bp_name] = p_ptr
+    wfn[:var_slot_types][bp_name] = p_slot_type
+    ctx[:bindings][bp_name] = nil
+    if is_f64
+      emit_wire_dynamic_2(wfn, :store_double, :value, cur_reg, :ptr, p_ptr)
+      ctx[:var_types][bp_name] = :f64
+    else
+      emit_wire_store_i64(wfn, p_ptr, cur_reg)
+      ctx[:var_types][bp_name] = nil
+  tval = nil
+  if bbody != nil && bbody.size() > 0
+    nb = bbody.size()
+    bi = 0
+    while bi < nb - 1
+      lower_statement(ctx, bbody[bi])
+      bi += 1
+    tval = lower_expression(ctx, bbody[nb - 1])
+  if bp_name != nil
+    if saved_slot != nil
+      wfn[:var_slots][bp_name] = saved_slot
+    else
+      wfn[:var_slots].delete(bp_name)
+    if saved_slot_type != nil
+      wfn[:var_slot_types][bp_name] = saved_slot_type
+    else
+      wfn[:var_slot_types].delete(bp_name)
+    if saved_has_vtype
+      ctx[:var_types][bp_name] = saved_vtype
+    else
+      ctx[:var_types].delete(bp_name)
+    if saved_binding != nil
+      ctx[:bindings][bp_name] = saved_binding
+    else
+      ctx[:bindings].delete(bp_name)
+    if ctx[:unboxed_vars] != nil
+      if saved_unboxed != nil
+        ctx[:unboxed_vars][bp_name] = saved_unboxed
+      else
+        ctx[:unboxed_vars].delete(bp_name)
+  tval
 
 # Box the current element register when the slot is in raw-f64 mode; a
 # no-op passthrough otherwise. Used where a WValue is mandatory (detect
@@ -211,7 +284,8 @@
           else
             cf_poly = poly_compose(fp, cf_poly)
         elsif skn == :select || skn == :reject
-          pname = ast_get(ast_get(st, :func), :name)
+          st_fn = ast_get(st, :func)
+          pname = (st_fn != nil && is_ast_node?(st_fn) && ast_kind(st_fn) == :call) ? ast_get(st_fn, :name) : nil
           # filter-kind + predicate → which VALUE parity survives. reject is
           # the complement of select. Only one parity filter is foldable.
           want_even = nil
@@ -281,7 +355,9 @@
   # filter or extra stage changes what's counted → falls through to the loop).
   count_pred = nil
   if is_reduce && terminal == "count" && is_range && !has_take && stages.size() == 1 && ast_get(stages[0], :kind) == :map
-    count_pred = ast_get(ast_get(stages[0], :func), :name)
+    st0_fn = ast_get(stages[0], :func)
+    if st0_fn != nil && is_ast_node?(st0_fn) && ast_kind(st0_fn) == :call
+      count_pred = ast_get(st0_fn, :name)
   wheel12_hi = nil
   if count_pred == "prime_12k?"
     wheel12_hi = wheel12_prime_hi_ast(base)
@@ -422,7 +498,12 @@
     acc_ptr = ensure_var_slot(wfn, acc_name)
     seen_ptr = ensure_var_slot(wfn, seen_name)
     emit_wire_store_i64(wfn, seen_ptr, w_false.to_s())
-    emit_wire_store_i64(wfn, acc_ptr, w_nil.to_s())
+    init_acc = w_nil.to_s()
+    if terminal in ("sum" "count" "__size")
+      init_acc = ensure_i64_value(wfn, lower_expression(ctx, Tungsten:AST:Int.new(0)))
+    elsif terminal == "product"
+      init_acc = ensure_i64_value(wfn, lower_expression(ctx, Tungsten:AST:Int.new(1)))
+    emit_wire_store_i64(wfn, acc_ptr, init_acc)
   else
     out_arr = next_temp(wfn)
     emit_wire_call_direct_i64(wfn, nil, [], nil, nil, "w_array_new_empty", nil, nil, out_arr)
@@ -438,6 +519,9 @@
     emit_wire_store_i64(wfn, take_ptr, take_raw)
 
   materialize_bindings(ctx)
+  outer_pipe_bindings = ctx[:bindings]
+  if outer_pipe_bindings.size() > 0
+    ctx[:bindings] = {}
 
   pre = next_label(wfn, "pipe.pre")
   hdr = next_label(wfn, "pipe.hdr")
@@ -508,10 +592,18 @@
     skind = ast_get(stage, :kind)
     sfunc = ast_get(stage, :func)
     if skind == :select || skind == :reject
-      pred_val = lower_expression(ctx, pipeline_pred_node(sfunc, cur_name))
-      pred_reg = ensure_i64_value(wfn, pred_val)
-      pred_bool = next_temp(wfn)
-      emit_wire_truthy_inline(wfn, pred_bool, pred_reg)
+      pred_val = nil
+      if ast_kind(sfunc) == :block
+        pred_val = lower_pipeline_block_stage(ctx, wfn, sfunc, cur_name, cur_reg, uid, si)
+      else
+        pred_val = lower_expression(ctx, pipeline_pred_node(sfunc, cur_name))
+      pred_bool = nil
+      if pred_val[:type] == :i1
+        pred_bool = pred_val[:value]
+      else
+        pred_reg = ensure_i64_value(wfn, pred_val)
+        pred_bool = next_temp(wfn)
+        emit_wire_truthy_inline(wfn, pred_bool, pred_reg)
       keep = next_label(wfn, "pipe.keep")
       if skind == :select
         emit_wire_cond_br(wfn, pred_bool, inc, nil, keep)
@@ -521,18 +613,7 @@
     elsif ast_kind(sfunc) == :block
       # Inline a `map(-> (x) body)` lambda: bind its param to the current
       # element, then lower the body in place (no closure allocation).
-      bparams = ast_get(sfunc, :params)
-      bbody = ast_get(sfunc, :body)
-      if bparams != nil && bparams.size() >= 1
-        if ctx[:var_types][cur_name] == :f64
-          pipeline_bind_cur(ctx, wfn, "" + bparams[0], typed_value(:raw_f64, cur_reg))
-        else
-          bind_slot_value(ctx, wfn, "" + bparams[0], cur_reg)
-      bi = 0
-      tval = nil
-      while bi < bbody.size()
-        tval = lower_expression(ctx, bbody[bi])
-        bi = bi + 1
+      tval = lower_pipeline_block_stage(ctx, wfn, sfunc, cur_name, cur_reg, uid, si)
       cur_reg = pipeline_bind_cur(ctx, wfn, cur_name, tval)
     else
       tval = lower_expression(ctx, pipeline_transform_node(ast_get(sfunc, :name), ast_get(sfunc, :args), cur_name))
@@ -574,6 +655,9 @@
       # element here.
       seed_val = lower_expression(ctx, Tungsten:AST:If.new(Tungsten:AST:Var.new(cur_name), [Tungsten:AST:Int.new(1)], [], [Tungsten:AST:Int.new(0)]))
       emit_wire_store_i64(wfn, acc_ptr3, ensure_i64_value(wfn, seed_val))
+    elsif terminal == "__size"
+      seed_one = lower_expression(ctx, Tungsten:AST:Int.new(1))
+      emit_wire_store_i64(wfn, acc_ptr3, ensure_i64_value(wfn, seed_one))
     elsif acc_raw
       emit_wire_dynamic_2(wfn, :store_double, :value, cur_reg, :ptr, acc_ptr3)
     else
@@ -622,21 +706,157 @@
   emit_wire_br(wfn, hdr, nil, nil)
 
   start_block(wfn, exit_l)
+  ctx[:bindings] = outer_pipe_bindings
   if is_reduce || is_detect
     result = next_temp(wfn)
     if acc_raw
       # Box the raw accumulator once at the boundary. An empty source never
-      # seeded the slot (it still holds the w_nil bits stored at setup), so
-      # select on the seen flag to preserve the `[] :max == nil` contract.
+      # seeded the slot (it still holds the init_acc bits stored at setup), so
+      # select on the seen flag to preserve the empty-source contract.
       emit_wire_dynamic_2(wfn, :load_double, :ptr, ensure_var_slot(wfn, acc_name), :temp, result)
       boxed_tv = nanbox_float_emit(wfn, result)
       seen_exit = next_temp(wfn)
       emit_wire_load_i64(wfn, ensure_var_slot(wfn, seen_name), seen_exit)
       seen_exit_bool = next_temp(wfn)
       emit_wire_truthy_inline(wfn, seen_exit_bool, seen_exit)
+      empty_acc = w_nil.to_s()
+      if terminal == "sum"
+        empty_acc = ensure_i64_value(wfn, lower_expression(ctx, Tungsten:AST:Int.new(0)))
+      elsif terminal == "product"
+        empty_acc = ensure_i64_value(wfn, lower_expression(ctx, Tungsten:AST:Int.new(1)))
       final = next_temp(wfn)
-      emit_wire_select_i64(wfn, seen_exit_bool, w_nil.to_s(), final, boxed_tv[:value])
+      emit_wire_select_i64(wfn, seen_exit_bool, empty_acc, final, boxed_tv[:value])
       return typed_value(:i64, final)
     emit_wire_load_i64(wfn, ensure_var_slot(wfn, acc_name), result)
     return typed_value(:i64, result)
   typed_value(:i64, out_arr)
+
+-> pipeline_block_has_control_transfer?(node)
+  if node == nil
+    return false
+  if type(node) == "Array"
+    n_node = node.size()
+    i = 0
+    while i < n_node
+      if pipeline_block_has_control_transfer?(node[i])
+        return true
+      i += 1
+    return false
+  if !is_ast_node?(node)
+    return false
+  k = ast_kind(node)
+  if k in (:method_def :fn_def :class_def :module_def :trait_def :block)
+    return false
+  if k in (:return :break :next :redo :yield)
+    return true
+  if k == :while
+    return has_nonlocal_block_return([node])
+  kids = ast_children(node)
+  n_kids = kids.size()
+  i = 0
+  while i < n_kids
+    if pipeline_block_has_control_transfer?(kids[i])
+      return true
+    i += 1
+  false
+
+-> pipeline_fusable_block?(blk)
+  if blk == nil || !is_ast_node?(blk) || ast_kind(blk) != :block
+    return false
+  bparams = ast_get(blk, :params)
+  if bparams == nil || bparams.size() != 1
+    return false
+  p0 = bparams[0]
+  if is_ast_node?(p0)
+    if p0.default != nil || p0.splat == true || p0.keyword == true || p0.block_param == true || p0.ivar_assign == true
+      return false
+  bbody = ast_get(blk, :body)
+  if bbody == nil || bbody.size() == 0
+    return false
+  if block_spawns_escaping_closure?(blk)
+    return false
+  if pipeline_block_has_control_transfer?(bbody)
+    return false
+  true
+
+-> pipeline_extract_call_stage(node)
+  if node == nil || !is_ast_node?(node) || ast_kind(node) != :call
+    return nil
+  if node.receiver == nil
+    return nil
+  mname = node.name
+  if !(mname in ("map" "select" "reject"))
+    return nil
+  cargs = node.args
+  nargs = cargs != nil ? cargs.size() : 0
+  blk = node.block
+  sfunc = nil
+  if blk != nil && nargs == 0
+    if pipeline_fusable_block?(blk)
+      sfunc = blk
+  elsif blk == nil && nargs == 1
+    arg0 = cargs[0]
+    if arg0 != nil && is_ast_node?(arg0)
+      ak = ast_kind(arg0)
+      if ak == :block
+        if pipeline_fusable_block?(arg0)
+          sfunc = arg0
+      elsif ak == :symbol
+        sfunc = Tungsten:AST:Call.new(nil, "" + ast_get(arg0, :value), [], nil)
+  if sfunc == nil
+    return nil
+  {kind: mname.to_sym(), func: sfunc, source: node.receiver}
+
+-> try_lower_method_chain_pipeline(ctx, node)
+  if env("TUNGSTEN_PIPELINE_FUSION") == "0"
+    return nil
+  if node == nil || !is_ast_node?(node) || ast_kind(node) != :call || node.receiver == nil
+    return nil
+  terminal = nil
+  cur = node
+  mname = node.name
+  cargs = node.args
+  nargs = cargs != nil ? cargs.size() : 0
+  if node.block == nil && nargs == 0 && mname in ("sum" "count" "size" "min" "max")
+    terminal = mname
+    if mname in ("count" "size")
+      terminal = "__size"
+    cur = node.receiver
+  outer = []
+  while cur != nil && is_ast_node?(cur)
+    ck = ast_kind(cur)
+    if ck == :map
+      outer.push({kind: ast_get(cur, :kind), func: ast_get(cur, :func)})
+      cur = ast_get(cur, :source)
+    else
+      st = pipeline_extract_call_stage(cur)
+      if st == nil
+        break
+      outer.push({kind: st[:kind], func: st[:func]})
+      cur = st[:source]
+  if outer.size() == 0
+    return nil
+  if terminal == nil && outer.size() < 2
+    return nil
+  if cur != nil && is_ast_node?(cur) && ast_kind(cur) == :call && ast_get(cur, :name) == "lazy" && cur.receiver != nil
+    la = ast_get(cur, :args)
+    if la == nil || la.size() == 0
+      cur = cur.receiver
+  if cur == nil || !is_ast_node?(cur)
+    return nil
+  base_k = ast_kind(cur)
+  is_range_base = base_k == :range || (base_k == :var && ctx[:range_bindings] != nil && ctx[:range_bindings][cur.name] != nil)
+  base_t = receiver_static_type(ctx, cur)
+  is_array_base = base_k == :array || base_t == :array || is_typed_array_type?(base_t)
+  if !is_range_base && !is_array_base
+    return nil
+  pipe_node = cur
+  i = outer.size() - 1
+  while i >= 0
+    st_info = outer[i]
+    pipe_node = Tungsten:AST:Map.new(pipe_node, st_info[:func], st_info[:kind])
+    i -= 1
+  if terminal != nil
+    pipe_node = Tungsten:AST:Calc.new(terminal, pipe_node, :auto)
+  lower_pipeline(ctx, pipe_node)
+

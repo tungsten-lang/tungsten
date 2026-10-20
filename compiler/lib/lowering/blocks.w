@@ -717,6 +717,7 @@
     method_name: ctx[:method_name],
     bindings: {},
     unboxed_vars: {},
+    fn_body: block.body,
     local_assignment_counts: local_assignment_counts(block.body),
     straight_line_local_assignments: straight_line_local_assignments(block.body),
     verbose: ctx[:verbose],

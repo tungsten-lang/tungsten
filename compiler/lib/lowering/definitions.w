@@ -431,7 +431,7 @@
           while j < n.elsif_clauses.size()
             scan_int_local_assigns(n.elsif_clauses[j][1], m)
             j += 1
-      if t == :while
+      if t == :while || t == :with
         scan_int_local_assigns(n.body, m)
     i += 1
 
@@ -699,6 +699,11 @@
               if seed != nil
                 child_var_types[pname] = seed
           pidx += 1
+        if !definition_from_core?(node) && all_observed_params_int?(node.params, obs, child_var_types) && body_is_non_expanding_int?(node.body, node.params)
+          pidx = 0
+          while pidx < node.params.size()
+            child_var_types[param_runtime_name(node.params[pidx])] = :i64
+            pidx += 1
 
   fname = node.name
   if fname != nil && (fname.starts_with?("hot_") || fname.starts_with?("bench_"))
@@ -716,9 +721,10 @@
 # the raw ABI.
 -> definition_raw_abi_flags(node, top_level, fn_return_types, rt, child_var_types)
   rt_int_ok = (rt == nil) || int_compatible_return_type?(rt)
+  rt_bool_ok = (rt == :bool && node.param_types != nil && node.return_type != nil)
   enriched_types = enrich_int_locals(node.body, child_var_types)
   body_int_ok = body_returns_only_int?(node.body, enriched_types, fn_return_types)
-  raw_i64_sig = top_level && rt_int_ok && body_int_ok && (all_params_i64?(node.params, child_var_types) || mixed_raw_params?(node.params, child_var_types))
+  raw_i64_sig = top_level && ((rt_int_ok && body_int_ok) || rt_bool_ok) && (all_params_i64?(node.params, child_var_types) || mixed_raw_params?(node.params, child_var_types))
   raw_int_sig = !raw_i64_sig && top_level && rt_int_ok && body_int_ok && all_params_machine_int?(node.params, child_var_types) && body_is_param_passthrough?(node.body, node.params)
   [raw_i64_sig, raw_int_sig]
 
@@ -955,6 +961,7 @@
     method_name: name,
     bindings: {},
     unboxed_vars: {},
+    fn_body: body,
     local_assignment_counts: local_assignment_counts(body),
     straight_line_local_assignments: straight_line_local_assignments(body),
     verbose: ctx[:verbose],
@@ -1022,14 +1029,15 @@
   raw_int_sig = raw_abi_flags[1]
   # Decided after the raw ABI: a raw-i64 fn returns its value unboxed, so a
   # returned local is not an escape and may stay in a raw slot.
-  child_ctx[:raw_int_candidates] = raw_int_candidate_map(body, child_var_types, mod, raw_i64_sig)
-  child_ctx[:mut_accumulators] = mut_accumulator_candidates(body, child_ctx[:raw_int_candidates])
+  raw_int_return = raw_i64_sig && rt != :bool
+  child_ctx[:raw_int_candidates] = raw_int_candidate_map(body, child_var_types, mod, raw_int_return)
+  child_ctx[:mut_accumulators] = mut_accumulator_candidates(body, child_ctx[:raw_int_candidates], child_var_types)
   if raw_i64_sig
     new_fn[:raw_i64_signature] = true
     # ensure_return_value reads raw_return_type — explicit `return X`
     # statements need to produce raw too, not just the implicit-return
     # path at function tail.
-    new_fn[:raw_return_type] = :i64
+    new_fn[:raw_return_type] = rt == :bool ? :bool : :i64
     mod[:raw_callable_fns][call_key] = fn_name
     # Callers consult the per-param kinds: :scalar args pass raw machine
     # ints, :arr args pass the typed-array handle unchanged.
@@ -1205,7 +1213,7 @@
         # Raw-i64 ABI: return as raw int (no nanbox). Callers receive raw
         # and use the value directly. For non-raw fns, ensure_i64_value
         # boxes when the result was raw, matches WValue ABI.
-        if raw_i64_sig || raw_int_sig
+        if (raw_i64_sig || raw_int_sig) && new_fn[:raw_return_type] != :bool
           result_type = infer_type(last, child_var_types, mod[:fn_return_types], lowering_infer_maps)
           ret_raw_type = new_fn[:raw_return_type]
           if ret_raw_type == nil
@@ -2233,6 +2241,7 @@
     method_name: name,
     bindings: {},
     unboxed_vars: {},
+    fn_body: body,
     local_assignment_counts: local_assignment_counts(body),
     straight_line_local_assignments: straight_line_local_assignments(body),
     verbose: ctx[:verbose],
@@ -2313,7 +2322,7 @@
       spi += 1
   child_ctx[:tag_facts] = tag_facts
 
-  child_ctx[:mut_accumulators] = mut_accumulator_candidates(body, child_ctx[:raw_int_candidates])
+  child_ctx[:mut_accumulators] = mut_accumulator_candidates(body, child_ctx[:raw_int_candidates], child_var_types)
 
   block_return_buf = nil
   if needs_block_return

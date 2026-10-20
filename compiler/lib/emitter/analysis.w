@@ -2,9 +2,10 @@
 
 -> filter_runtime_decls(decls, used_fns, embedded_ir)
   lines = decls.split("\n")
+  nlines = lines.size()
   out = StringBuffer(decls.size())
   i = 0
-  while i < lines.size()
+  while i < nlines
     line = lines[i]
     if line != ""
       name = runtime_decl_name(line)
@@ -57,12 +58,15 @@
 
 -> emit_function_attr_groups(attr_groups)
   texts = attr_groups[:texts]
-  if texts == nil || texts.size() == 0
+  if texts == nil
     return ""
-  out = StringBuffer(texts.size() * 180 + 16)
+  ntexts = texts.size()
+  if ntexts == 0
+    return ""
+  out = StringBuffer(ntexts * 180 + 16)
   out << "\n"
   i = 0
-  while i < texts.size()
+  while i < ntexts
     out << "attributes #"
     out << i.to_s()
     out << " = { "
@@ -273,20 +277,27 @@ alias_scope_max_slots = 32
     return ""
   ", !alias.scope !" + (3000041 + slot).to_s() + ", !noalias !" + (3000081 + slot).to_s()
 
--> alias_scope_md_defs()
-  o = StringBuffer(4096)
+-> alias_scope_md_defs(nslots = alias_scope_max_slots)
+  if nslots == nil || nslots <= 0
+    return ""
+  if nslots < 2
+    nslots = 2
+  if nslots > alias_scope_max_slots
+    nslots = alias_scope_max_slots
+  o = StringBuffer(256)
   o << "!3000000 = distinct !{!3000000, !\"tungsten.params\"}\n"
   k = 0
-  while k < alias_scope_max_slots
-    o << "!" + (3000001 + k).to_s() + " = distinct !{!" + (3000001 + k).to_s() + ", !3000000}\n"
+  while k < nslots
+    sk = (3000001 + k).to_s()
+    o << "!" + sk + " = distinct !{!" + sk + ", !3000000}\n"
     k += 1
   k = 0
-  while k < alias_scope_max_slots
+  while k < nslots
     o << "!" + (3000041 + k).to_s() + " = !{!" + (3000001 + k).to_s() + "}\n"
     o << "!" + (3000081 + k).to_s() + " = !{"
     j = 0
     first = true
-    while j < alias_scope_max_slots
+    while j < nslots
       if j != k
         if !first
           o << ", "
@@ -332,16 +343,23 @@ function_emit_cache_state = {
 -> function_emit_cache_persistent_valid?(entry, key)
   if type(entry) != "Hash" || entry[:version] != "core-render-v1" || entry[:key] != key || type(entry[:functions]) != "Hash"
     return false
-  names = entry[:functions].keys()
+  fns = entry[:functions]
+  names = fns.keys()
+  nnames = names.size()
   i = 0
-  while i < names.size()
+  while i < nnames
     name = names[i]
-    item = entry[:functions][name]
-    if type(name) != "String" || type(item) != "Hash" || item[:name] != name || type(item[:text]) != "String" || type(item[:ptr_ids]) != "Array"
+    item = fns[name]
+    if type(name) != "String" || type(item) != "Hash"
       return false
+    ptr_ids = item[:ptr_ids]
+    if item[:name] != name || type(item[:text]) != "String" || type(ptr_ids) != "Array"
+      return false
+    npids = ptr_ids.size()
     j = 0
-    while j < item[:ptr_ids].size()
-      if type(item[:ptr_ids][j]) != "Int" || item[:ptr_ids][j] < 0
+    while j < npids
+      pid = ptr_ids[j]
+      if type(pid) != "Int" || pid < 0
         return false
       j += 1
     i += 1
@@ -390,8 +408,9 @@ function_emit_cache_state = {
     mod[:no_static_slab] == true,
     fp_flags
   ]
+  nfields = fields.size()
   i = 0
-  while i < fields.size()
+  while i < nfields
     out << function_emit_cache_field(fields[i])
     i += 1
   out.to_s()
@@ -467,11 +486,14 @@ function_emit_cache_state = {
   nil
 
 -> function_emit_cache_safe?(f)
+  blocks = f[:blocks]
+  nblocks = blocks.size()
   bi = 0
-  while bi < f[:blocks].size()
-    instrs = f[:blocks][bi][:instructions]
+  while bi < nblocks
+    instrs = blocks[bi][:instructions]
+    ninstrs = instrs.size()
     ii = 0
-    while ii < instrs.size()
+    while ii < ninstrs
       inst = instrs[ii]
       if wire_get(inst, :ewscope) != nil
         return false
@@ -484,8 +506,9 @@ function_emit_cache_state = {
   true
 
 -> function_emit_cache_merge_ptr_ids(used_ptr_ids, ptr_ids)
+  n = ptr_ids.size()
   i = 0
-  while i < ptr_ids.size()
+  while i < n
     used_ptr_ids[ptr_ids[i]] = true
     i += 1
   nil
@@ -790,18 +813,24 @@ function_emit_cache_state = {
   sites = []
   files = {}
   next_file_id = 0
+  fns = mod[:functions]
+  nfns = fns.size()
   fi = 0
-  while fi < mod[:functions].size()
-    f = mod[:functions][fi]
+  while fi < nfns
+    f = fns[fi]
     fn_path = f[:source_path]
     if fn_path == nil
       fn_path = "<unknown>"
+    blocks = f[:blocks]
+    nblocks = blocks.size()
     bi = 0
-    while bi < f[:blocks].size()
-      blk = f[:blocks][bi]
+    while bi < nblocks
+      blk = blocks[bi]
+      instrs = blk[:instructions]
+      ninstrs = instrs.size()
       ii = 0
-      while ii < blk[:instructions].size()
-        inst = blk[:instructions][ii]
+      while ii < ninstrs
+        inst = instrs[ii]
         if wire_get(inst, :src_line) != nil
           ret_label = nil
           site_ic_id = nil
@@ -835,16 +864,18 @@ function_emit_cache_state = {
 -> emit_call_site_table(mod)
   info = collect_call_sites(mod)
   sites = info[:sites]
+  nsites = sites.size()
   files = info[:files]
-  out = StringBuffer(sites.size() * 120 + 512)
+  out = StringBuffer(nsites * 120 + 512)
   lbr = "\["
   rbr = "]"
 
   # One private constant per unique source file path. Ids are assigned
   # first-seen, so the hash's insertion order IS id order (spec §4.2.3).
   file_keys = files.keys()
+  nfkeys = file_keys.size()
   fi = 0
-  while fi < file_keys.size()
+  while fi < nfkeys
     k = file_keys[fi]
     bl = utf8_byte_length(k) + 1
     out << "@.wcs.file."
@@ -858,23 +889,23 @@ function_emit_cache_state = {
     out << escape_llvm_string(k)
     out << "\\00\", align 1\n"
     fi += 1
-  if file_keys.size() > 0
+  if nfkeys > 0
     out << "\n"
 
   # The call-site array.
   out << "@__w_call_site = constant "
   out << lbr
-  out << sites.size().to_s()
+  out << nsites.to_s()
   out << " x { ptr, ptr, i32, i32 }"
   out << rbr
-  if sites.size() == 0
+  if nsites == 0
     out << " zeroinitializer\n"
   else
     out << " "
     out << lbr
     out << "\n"
     si = 0
-    while si < sites.size()
+    while si < nsites
       s = sites[si]
       out << "  { ptr, ptr, i32, i32 } { ptr blockaddress(@"
       out << s[:fn_name]
@@ -887,14 +918,14 @@ function_emit_cache_state = {
       out << ", i32 "
       out << s[:col].to_s()
       out << " }"
-      if si < sites.size() - 1
+      if si < nsites - 1
         out << ","
       out << "\n"
       si += 1
     out << rbr
     out << "\n"
   out << "@__w_call_site_count = constant i32 "
-  out << sites.size().to_s()
+  out << nsites.to_s()
   out << "\n\n"
 
   # IC-site companion table, indexed by IC slot id. The blockaddress keys
@@ -905,7 +936,7 @@ function_emit_cache_state = {
   # (file, line, col) through this table via __w_ic_base().
   max_ic = -1
   si = 0
-  while si < sites.size()
+  while si < nsites
     s_ic = sites[si][:ic_id]
     if s_ic != nil && s_ic > max_ic
       max_ic = s_ic
@@ -917,21 +948,23 @@ function_emit_cache_state = {
       rows.push(nil)
       ri += 1
     si = 0
-    while si < sites.size()
+    while si < nsites
       s = sites[si]
-      if s[:ic_id] != nil
-        rows[s[:ic_id]] = s
+      s_ic = s[:ic_id]
+      if s_ic != nil
+        rows[s_ic] = s
       si += 1
+    nrows = rows.size()
     out << "@__w_ic_site = constant "
     out << lbr
-    out << rows.size().to_s()
+    out << nrows.to_s()
     out << " x { ptr, i32, i32 }"
     out << rbr
     out << " "
     out << lbr
     out << "\n"
     ri = 0
-    while ri < rows.size()
+    while ri < nrows
       r = rows[ri]
       if r == nil
         out << "  { ptr, i32, i32 } { ptr null, i32 0, i32 0 }"
@@ -943,14 +976,14 @@ function_emit_cache_state = {
         out << ", i32 "
         out << r[:col].to_s()
         out << " }"
-      if ri < rows.size() - 1
+      if ri < nrows - 1
         out << ","
       out << "\n"
       ri += 1
     out << rbr
     out << "\n"
     out << "@__w_ic_site_count = constant i32 "
-    out << rows.size().to_s()
+    out << nrows.to_s()
     out << "\n\n"
     # Per-thread IC base accessor: @.ic is thread_local, so slot ADDRESSES
     # cannot appear in a constant initializer and differ per thread. The
@@ -1005,14 +1038,16 @@ function_emit_cache_state = {
 
 -> emit_fn_meta_table(mod)
   fns = mod[:functions]
-  out = StringBuffer(fns.size() * 200 + 256)
+  nfns = fns.size()
+  out = StringBuffer(nfns * 200 + 256)
   lbr = "\["
   rbr = "]"
 
   # Per-fn private string constants for display name + source file.
   i = 0
-  while i < fns.size()
+  while i < nfns
     f = fns[i]
+    istr = i.to_s()
     display = fn_meta_display_name(f)
     file_str = f[:source_path]
     if file_str == nil
@@ -1021,7 +1056,7 @@ function_emit_cache_state = {
     file_bl = utf8_byte_length(file_str) + 1
 
     out << "@.wfm."
-    out << i.to_s()
+    out << istr
     out << ".n = private unnamed_addr constant "
     out << lbr
     out << name_bl.to_s()
@@ -1032,7 +1067,7 @@ function_emit_cache_state = {
     out << "\\00\", align 1\n"
 
     out << "@.wfm."
-    out << i.to_s()
+    out << istr
     out << ".f = private unnamed_addr constant "
     out << lbr
     out << file_bl.to_s()
@@ -1042,50 +1077,52 @@ function_emit_cache_state = {
     out << escape_llvm_string(file_str)
     out << "\\00\", align 1\n"
     i += 1
-  if fns.size() > 0
+  if nfns > 0
     out << "\n"
 
   # The meta table itself.
   out << "@__w_fn_meta = constant "
   out << lbr
-  out << fns.size().to_s()
+  out << nfns.to_s()
   out << " x { ptr, ptr, ptr, i32, i32 }"
   out << rbr
-  if fns.size() == 0
+  if nfns == 0
     out << " zeroinitializer\n"
   else
     out << " "
     out << lbr
     out << "\n"
     i = 0
-    while i < fns.size()
+    while i < nfns
       f = fns[i]
+      istr = i.to_s()
+      skind = f[:source_kind]
       line = f[:source_line]
       if line == nil
-        if f[:source_kind] == :entry
+        if skind == :entry
           line = 1
         else
           line = 0
-      kind_int = fn_meta_kind_to_int(f[:source_kind])
+      kind_int = fn_meta_kind_to_int(skind)
       out << "  { ptr, ptr, ptr, i32, i32 } { ptr @"
       out << f[:name]
       out << ", ptr @.wfm."
-      out << i.to_s()
+      out << istr
       out << ".f, ptr @.wfm."
-      out << i.to_s()
+      out << istr
       out << ".n, i32 "
       out << line.to_s()
       out << ", i32 "
       out << kind_int.to_s()
       out << " }"
-      if i < fns.size() - 1
+      if i < nfns - 1
         out << ","
       out << "\n"
       i += 1
     out << rbr
     out << "\n"
   out << "@__w_fn_meta_count = constant i32 "
-  out << fns.size().to_s()
+  out << nfns.to_s()
   out << "\n\n"
 
   out.to_s()
@@ -1105,14 +1142,19 @@ function_emit_cache_state = {
 
 -> collect_address_taken_functions(mod)
   taken = {}
+  fns = mod[:functions]
+  nfns = fns.size()
   fi = 0
-  while fi < mod[:functions].size()
-    func = mod[:functions][fi]
+  while fi < nfns
+    func = fns[fi]
+    blocks = func[:blocks]
+    nblocks = blocks.size()
     bi = 0
-    while bi < func[:blocks].size()
-      instrs = func[:blocks][bi][:instructions]
+    while bi < nblocks
+      instrs = blocks[bi][:instructions]
+      ninstrs = instrs.size()
       ii = 0
-      while ii < instrs.size()
+      while ii < ninstrs
         inst = instrs[ii]
         fname = address_taken_function_for_inst(inst)
         if fname != nil
@@ -1155,9 +1197,11 @@ function_emit_cache_state = {
   address_taken = collect_address_taken_functions(mod)
   fastcc_names = {}
   count = 0
+  fns = mod[:functions]
+  nfns = fns.size()
   fi = 0
-  while fi < mod[:functions].size()
-    func = mod[:functions][fi]
+  while fi < nfns
+    func = fns[fi]
     if internal_fastcc_candidate?(func, address_taken)
       func[:call_conv] = "fastcc"
       fastcc_names[func[:name]] = true
@@ -1165,13 +1209,16 @@ function_emit_cache_state = {
     fi += 1
 
   fi = 0
-  while fi < mod[:functions].size()
-    func = mod[:functions][fi]
+  while fi < nfns
+    func = fns[fi]
+    blocks = func[:blocks]
+    nblocks = blocks.size()
     bi = 0
-    while bi < func[:blocks].size()
-      instrs = func[:blocks][bi][:instructions]
+    while bi < nblocks
+      instrs = blocks[bi][:instructions]
+      ninstrs = instrs.size()
       ii = 0
-      while ii < instrs.size()
+      while ii < ninstrs
         inst = instrs[ii]
         if fastcc_direct_call_op?(wire_kind(inst)) && fastcc_names[wire_get(inst, :name)] == true
           wire_set(inst, :call_conv, "fastcc")
@@ -1239,57 +1286,66 @@ function_emit_cache_state = {
   if hashes == nil || symbols == nil
     return out
   names = hashes.keys()
+  nnames = names.size()
   i = 0
-  while i < names.size()
-    hash = wire_fn_hash_get(hashes, names[i])
+  while i < nnames
+    nm = names[i]
+    hash = wire_fn_hash_get(hashes, nm)
     if wire_hash_symbol_get(symbols, hash) == symbol
-      out.push(names[i] + "=" + hash)
+      out.push(nm + "=" + hash)
     i += 1
   out
 
 -> verify_wire_call_contracts(mod)
   contracts = {}
   target_details = {}
+  fns = mod[:functions]
+  nfns = fns.size()
   tfi = 0
-  while tfi < mod[:functions].size()
-    target_func = mod[:functions][tfi]
+  while tfi < nfns
+    target_func = fns[tfi]
+    tf_name = target_func[:name]
     target_name = target_func[:original_name]
     if target_name == nil
-      target_name = target_func[:name]
+      target_name = tf_name
     target_arity = 0
-    if target_func[:params] != nil
-      target_arity = target_func[:params].size()
-    target_details[target_func[:name]] = target_name + "/" + target_arity.to_s()
+    tf_params = target_func[:params]
+    if tf_params != nil
+      target_arity = tf_params.size()
+    target_details[tf_name] = target_name + "/" + target_arity.to_s()
     tfi += 1
   fi = 0
-  while fi < mod[:functions].size()
-    func = mod[:functions][fi]
+  while fi < nfns
+    func = fns[fi]
+    current_name = func[:original_name]
+    if current_name == nil
+      current_name = func[:name]
+    blocks = func[:blocks]
+    nblocks = blocks.size()
     bi = 0
-    while bi < func[:blocks].size()
-      instructions = func[:blocks][bi][:instructions]
+    while bi < nblocks
+      instructions = blocks[bi][:instructions]
+      ninstrs = instructions.size()
       ii = 0
-      while ii < instructions.size()
+      while ii < ninstrs
         inst = instructions[ii]
         contract = wire_direct_call_contract(inst)
         if contract != nil && wire_get(inst, :name) != nil
-          prior = contracts[wire_get(inst, :name)]
-          if prior != nil && prior[:contract] != contract
-            prior_name = prior[:function]
-            current_name = func[:original_name]
-            if current_name == nil
-              current_name = func[:name]
-            target_detail = target_details[wire_get(inst, :name)]
-            if target_detail == nil
-              target_detail = "external"
-            origins = wire_symbol_origins(mod, wire_get(inst, :name))
-            origin_detail = ""
-            if origins.size() > 0
-              origin_detail = "; origins " + origins.join(", ")
-            return "WIRE call contract mismatch for @" + wire_get(inst, :name) + " (" + target_detail + origin_detail + "): " + prior[:contract] + " in @" + prior_name + " vs " + contract + " in @" + current_name
-          current_name = func[:original_name]
-          if current_name == nil
-            current_name = func[:name]
-          contracts[wire_get(inst, :name)] = {contract: contract, function: current_name}
+          iname = wire_get(inst, :name)
+          prior = contracts[iname]
+          if prior != nil
+            prior_contract = prior[:contract]
+            if prior_contract != contract
+              prior_name = prior[:function]
+              target_detail = target_details[iname]
+              if target_detail == nil
+                target_detail = "external"
+              origins = wire_symbol_origins(mod, iname)
+              origin_detail = ""
+              if origins.size() > 0
+                origin_detail = "; origins " + origins.join(", ")
+              return "WIRE call contract mismatch for @" + iname + " (" + target_detail + origin_detail + "): " + prior_contract + " in @" + prior_name + " vs " + contract + " in @" + current_name
+          contracts[iname] = {contract: contract, function: current_name}
         ii += 1
       bi += 1
     fi += 1

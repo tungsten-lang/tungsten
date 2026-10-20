@@ -206,18 +206,25 @@
     if part[0] == :str
       str_tv = lower_string(ctx, Tungsten:AST:String.new(part[1]))
       part_reg = ensure_i64_value(wfn, str_tv)
+      part_fresh = false
     else
+      part_type = infer_type(part[1], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
       expr_tv = lower_expression(ctx, part[1])
+      if result != nil && part_type in (:int :i64 :i32 :i16 :i8 :i4 :u32 :u16 :u8 :u4 :raw_int :raw_i64)
+        concat = next_temp(wfn)
+        own_lhs = (env("TUNGSTEN_FREE") != "0" && i >= 2 && result_is_chain) ? 1 : 0
+        if expr_tv[:type] in (:raw_int :raw_i64)
+          emit_wire_call_direct_i64(wfn, nil, [result, expr_tv[:value], own_lhs.to_s()], nil, nil, "w_str_concat_i64", nil, nil, concat)
+        else
+          expr_reg = ensure_i64_value(wfn, expr_tv)
+          emit_wire_call_direct_i64(wfn, nil, [result, expr_reg, own_lhs.to_s()], nil, nil, "w_str_concat_int_wv", nil, nil, concat)
+        result = concat
+        result_is_chain = true
+        i += 1
+        next
       expr_reg = ensure_i64_value(wfn, expr_tv)
       part_reg = next_temp(wfn)
-      # An integer part stringifies through w_int_to_s, which mints an
-      # independent heap string per call (w_to_s may hand back its argument
-      # or a rope's cached flat, so its result can never be owned). That
-      # makes the part a fresh anonymous producer the concat below may
-      # release — `"[i]"` in a loop leaked one heap string per 6+ digit
-      # integer.
       part_fresh = false
-      part_type = infer_type(part[1], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
       if is_integer_like_type(part_type)
         emit_wire_call_direct_i64(wfn, nil, [expr_reg], nil, nil, "w_int_to_s", nil, nil, part_reg)
         part_fresh = true
@@ -227,13 +234,6 @@
       result = part_reg
     else
       concat = next_temp(wfn)
-      # Owned operands: a chain link's `result` is the PREVIOUS concat's
-      # temp — anonymous by construction (interpolation builds it; no user
-      # name exists) and consumed only here — and a fresh integer part is
-      # likewise consumed only here. w_str_concat_own releases each owned
-      # heap operand after copying it out (flattening instead of building a
-      # rope past 61 bytes), so an N-part interpolation leaks nothing.
-      # env gate: TUNGSTEN_FREE=0 must silence every compiler-inserted free.
       own_mask = 0
       if env("TUNGSTEN_FREE") != "0"
         if i >= 2 && result_is_chain

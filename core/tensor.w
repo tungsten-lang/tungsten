@@ -33,7 +33,7 @@ use core/metal
 # COMPUTE, the payoff of "plays nicely with the Metal 4 tensor". `\[\[ \]\]`
 # escapes the attribute syntax from Tungsten string interpolation.
 
--> build_tensor_m4_kernel(elem, kname)
+-> build_tensor_m4_kernel(elem, out_elem, kname)
   s = StringBuffer(2048)
   s << "#include <metal_stdlib>\n"
   s << "#include <MetalPerformancePrimitives/MetalPerformancePrimitives.h>\n"
@@ -43,7 +43,7 @@ use core/metal
   s << "kernel void " + kname + "(\n"
   s << "    tensor<device " + elem + ", dextents<int32_t, 2>> A \[\[buffer(0)\]\],\n"
   s << "    tensor<device " + elem + ", dextents<int32_t, 2>> B \[\[buffer(1)\]\],\n"
-  s << "    tensor<device float, dextents<int32_t, 2>> C \[\[buffer(2)\]\],\n"
+  s << "    tensor<device " + out_elem + ", dextents<int32_t, 2>> C \[\[buffer(2)\]\],\n"
   s << "    uint2 tgid \[\[threadgroup_position_in_grid\]\]\n"
   s << ") {\n"
   s << "    constexpr auto desc = matmul2d_descriptor(\n"
@@ -63,17 +63,24 @@ TENSOR_M4 = {}
 -> tensor_m4_state(dt)
   key = :f16
   elem = "half"
+  out_elem = "float"
   kname = "f16_matmul_m4"
   if dt == 121
     key = :bf16
     elem = "bfloat"
+    out_elem = "float"
     kname = "bf16_matmul_m4"
+  elsif dt == 45
+    key = :i8
+    elem = "int8_t"
+    out_elem = "int32_t"
+    kname = "i8_matmul_m4"
   if TENSOR_M4[key] == nil
     device = metal_device()
     compiler = metal4_compiler(device)
     queue = metal4_queue(device)
     alloc = metal4_allocator(device)
-    lib = metal_compile_source(device, build_tensor_m4_kernel(elem, kname))
+    lib = metal_compile_source(device, build_tensor_m4_kernel(elem, out_elem, kname))
     pipe = metal4_pipeline(compiler, lib, kname, 128, 1, 1)
     TENSOR_M4[key] = {:device => device, :queue => queue, :alloc => alloc, :pipe => pipe}
   TENSOR_M4[key]
@@ -195,6 +202,15 @@ TENSOR_EW = {}
   -> .storage_f64(n)
     ccall("w_array_new_aligned", -64, n)
 
+  -> .storage_i32(n)
+    ccall("w_array_new_aligned", 33, n)
+
+  -> .storage_i8(n)
+    ccall("w_array_new_aligned", 108, n)
+
+  -> .storage_u8(n)
+    ccall("w_array_new_aligned", 8, n)
+
   -> .storage_sgemm(a, b, c, m, n, k)
     ccall("w_blas_sgemm_nn", a, b, c, m, n, k)
 
@@ -266,7 +282,7 @@ TENSOR_EW = {}
   # Two overloads:
   #   Tensor.zeros(device, dtype, shape)  — Metal shared buffer (GPU face)
   #   Tensor.zeros(shape)                 — CPU f32 WArray (no Metal)
-  #   Tensor.zeros_cpu(dtype, shape)      — CPU f32/f64 typed path
+  #   Tensor.zeros_cpu(dtype, shape)      — CPU f32/f64/i32/i8/u8 typed path
   -> .zeros(device, dtype, shape)
     nbytes = Tensor.byte_size(dtype, shape)
     buffer = metal_buffer(device, nbytes)
@@ -277,11 +293,19 @@ TENSOR_EW = {}
   # have to reimplement f64_array packing just to use a dense Tensor.
   -> .cpu_zeros(dtype, shape)
     n = Tensor.elem_count(shape)
-    arr = Tensor.storage_f32(n)
-    if dtype == Tensor.f64
+    arr = nil
+    if dtype == Tensor.f32
+      arr = Tensor.storage_f32(n)
+    elsif dtype == Tensor.f64
       arr = Tensor.storage_f64(n)
-    elsif dtype != Tensor.f32
-      raise "Tensor.cpu_zeros: supported CPU dtypes are f32 and f64"
+    elsif dtype == Tensor.i32
+      arr = Tensor.storage_i32(n)
+    elsif dtype == Tensor.i8
+      arr = Tensor.storage_i8(n)
+    elsif dtype == Tensor.u8
+      arr = Tensor.storage_u8(n)
+    else
+      raise "Tensor.cpu_zeros: supported CPU dtypes are f32, f64, i32, i8, and u8"
     # w_array_new_aligned returns mmap-backed demand-zero storage with
     # size = cap = n.  Touching every element here only faults and dirties
     # pages that zero readers and full-overwrite kernels can leave lazy.
@@ -393,12 +417,13 @@ TENSOR_EW = {}
     result = Tensor.cpu_zeros(dtype, [nr, nc])
     i = 0
     while i < nr
+      row_i = rows[i]
       j = 0
       while j < nc
         # The result was just allocated packed and CPU-backed, so avoid a
         # coordinate Array plus dynamic .set for every table cell. General
         # strided writes still go through .set elsewhere.
-        result.buffer[i * nc + j] = rows[i][j].to_f
+        result.buffer[i * nc + j] = row_i[j].to_f
         j = j + 1
       i = i + 1
     result
@@ -429,8 +454,9 @@ TENSOR_EW = {}
 
   -> .elem_count(shape)
     n = 1
+    r = shape.size()
     i = 0
-    while i < shape.size()
+    while i < r
       n = n * shape[i]
       i = i + 1
     n
@@ -462,8 +488,9 @@ TENSOR_EW = {}
   -> .column_major_strides(shape)
     s = []
     acc = 1
+    r = shape.size()
     i = 0
-    while i < shape.size()
+    while i < r
       s = s.push(acc)
       acc = acc * shape[i]
       i = i + 1
@@ -511,17 +538,19 @@ TENSOR_EW = {}
       raise "Tensor.to_rows: requires a rank-2 tensor"
     rows = []
     packed_cpu = device == :cpu && self.contiguous?
+    nr = shape[0]
+    nc = shape[1]
     i = 0
-    while i < shape[0]
+    while i < nr
       row = []
       j = 0
-      while j < shape[1]
+      while j < nc
         # from_rows/matmul outputs are the common packed CPU case. Read their
         # typed storage directly, but retain the stride-aware route for views
         # (including transpose and column-major wrapping).
         value = nil
         if packed_cpu
-          value = buffer[offset + i * shape[1] + j]
+          value = buffer[offset + i * nc + j]
         else
           value = self.at([i, j])
         row = row.push(value)
@@ -548,8 +577,9 @@ TENSOR_EW = {}
     es = strides
     new_shape = []
     new_strides = []
+    naxes = axes.size()
     i = 0
-    while i < axes.size()
+    while i < naxes
       ax = axes[i]
       new_shape = new_shape.push(shape[ax])
       new_strides = new_strides.push(es[ax])
@@ -630,8 +660,9 @@ TENSOR_EW = {}
   -> slice(axis, start, len)
     es = strides
     new_shape = []
+    r = shape.size()
     i = 0
-    while i < shape.size()
+    while i < r
       if i == axis
         new_shape = new_shape.push(len)
       else
@@ -685,8 +716,9 @@ TENSOR_EW = {}
   # NumPy/PyTorch use). offset + Σ indices[k]·strides[k].
   -> flat_index(indices)
     flat = offset
+    n = indices.size()
     i = 0
-    while i < indices.size()
+    while i < n
       flat = flat + indices[i] * strides[i]
       i = i + 1
     flat
@@ -710,7 +742,9 @@ TENSOR_EW = {}
       16  => metal_buffer_read_f16(buffer, i)
       121 => metal_buffer_read_bf16(buffer, i)
       29  => metal_buffer_read_i32(buffer, i)
-      => raise "Tensor.read_flat: dtype " + dtype.to_s + " has no CPU path (f32/f16/bf16/i32 only)"
+      45  => metal_buffer_view(buffer, 108, i + 1)[i]
+      49  => metal_buffer_view(buffer, 8, i + 1)[i]
+      => raise "Tensor.read_flat: dtype " + dtype.to_s + " has no CPU path (f32/f16/bf16/i32/i8/u8 only)"
 
   -> write_flat(i, value)
     if device == :cpu
@@ -721,7 +755,13 @@ TENSOR_EW = {}
       16  => metal_buffer_write_f16(buffer, i, value)
       121 => metal_buffer_write_bf16(buffer, i, value)
       29  => metal_buffer_write_i32(buffer, i, value)
-      => raise "Tensor.write_flat: dtype " + dtype.to_s + " has no CPU path (f32/f16/bf16/i32 only)"
+      45  =>
+        v = metal_buffer_view(buffer, 108, i + 1)
+        v[i] = value
+      49  =>
+        v = metal_buffer_view(buffer, 8, i + 1)
+        v[i] = value
+      => raise "Tensor.write_flat: dtype " + dtype.to_s + " has no CPU path (f32/f16/bf16/i32/i8/u8 only)"
 
   # ---- matmul ----
 
@@ -815,9 +855,10 @@ TENSOR_EW = {}
   # O(size·rank) — a correct reference; GPU elementwise kernels are a follow-up.
 
   -> .same_shape(sa, sb)
-    return false if sa.size != sb.size
+    nsa = sa.size
+    return false if nsa != sb.size
     k = 0
-    while k < sa.size
+    while k < nsa
       return false if sa[k] != sb[k]
       k += 1
     true
@@ -856,10 +897,12 @@ TENSOR_EW = {}
     ps = Tensor.packed_strides(shape)
     coord = []
     rem = flat
+    r = shape.size()
     k = 0
-    while k < shape.size()
-      coord = coord.push(rem / ps[k])
-      rem = rem % ps[k]
+    while k < r
+      psk = ps[k]
+      coord = coord.push(rem / psk)
+      rem = rem % psk
       k = k + 1
     coord
 
@@ -884,9 +927,10 @@ TENSOR_EW = {}
     return false if device != :cpu
     return false if offset != 0
     ps = Tensor.packed_strides(shape)
-    return false if strides.size != ps.size
+    nps = ps.size
+    return false if strides.size != nps
     k = 0
-    while k < ps.size
+    while k < nps
       return false if strides[k] != ps[k]
       k += 1
     true
@@ -952,10 +996,11 @@ TENSOR_EW = {}
     left + "/" + right
 
   -> .shapes_equal?(a, b)
-    if a.size() != b.size()
+    na = a.size()
+    if na != b.size()
       return false
     i = 0
-    while i < a.size()
+    while i < na
       if a[i] != b[i]
         return false
       i = i + 1
@@ -1123,9 +1168,10 @@ TENSOR_EW = {}
   # output coord (which has one fewer dimension).
   -> .insert_axis(coord, axis, val)
     out = []
+    nc = coord.size() + 1
     k = 0
     ci = 0
-    while k < coord.size() + 1
+    while k < nc
       if k == axis
         out = out.push(val)
       else
@@ -1137,8 +1183,9 @@ TENSOR_EW = {}
   # Shape with `axis` removed.
   -> drop_axis_shape(axis)
     oshape = []
+    r = shape.size()
     k = 0
-    while k < shape.size()
+    while k < r
       if k != axis
         oshape = oshape.push(shape[k])
       k = k + 1
@@ -1196,15 +1243,14 @@ TENSOR_EW = {}
 
   # ---- GPU linear layer (Metal 4 cooperative tensors) ----
   #
-  # x.linear(weight): x is [M,K] f16, weight is [N,K] f16 (the ML weight layout,
-  # out×in) → fresh [M,N] f32 = x · weight^T, computed on the GPU through the
-  # `.metal_tensor` faces of x, weight, and the result. The buffers (residency)
-  # and the tensors (argument table) of ONE allocation each are bound into a
-  # single MTL4 dispatch — the same share-and-both property proved earlier, now
-  # driving real compute.
+  # x.linear(weight): x is [M,K], weight is [N,K] (the ML weight layout, out×in)
+  # → fresh [M,N] = x · weight^T:
+  #   - f16 (16) or bf16 (121) → [M,N] f32 (3) via M5 Neural Accelerator matmul2d
+  #   - i8  (45)               → [M,N] i32 (29) via M5 Neural Accelerator matmul2d
+  #     (or exact integer dot product when both operands are on :cpu)
   -> linear(weight)
-    if dtype != 16 && dtype != 121
-      raise "Tensor.linear: x must be f16 or bf16"
+    if dtype != 16 && dtype != 121 && dtype != 45
+      raise "Tensor.linear: x must be f16, bf16, or i8"
     if weight.dtype != dtype
       raise "Tensor.linear: weight dtype must match x"
     if self.rank != 2 || weight.rank != 2
@@ -1218,8 +1264,28 @@ TENSOR_EW = {}
     if weight.shape[1] != k
       raise "Tensor.linear: weight must be [N, K] with matching K"
     n = weight.shape[0]
+    if device == :cpu && weight.device == :cpu
+      if dtype != 45
+        raise "Tensor.linear: CPU path supports i8 (use .matmul for CPU f32/f64)"
+      out_cpu = Tensor.zeros_cpu(Tensor.i32, [m, n])
+      r = 0
+      while r < m
+        row_base = offset + r * k
+        c = 0
+        while c < n
+          w_base = weight.offset + c * k
+          acc = 0
+          t = 0
+          while t < k
+            acc = acc + buffer[row_base + t] * weight.buffer[w_base + t]
+            t += 1
+          out_cpu.buffer[r * n + c] = acc
+          c += 1
+        r += 1
+      return out_cpu
+    out_dtype = dtype == 45 ? 29 : 3
     st = tensor_m4_state(dtype)
-    result = Tensor.zeros(device, 3, [m, n])
+    result = Tensor.zeros(device, out_dtype, [m, n])
     argtable = metal4_argtable(device, 3)
     metal4_argtable_set_tensor(argtable, 0, self.metal_tensor)
     metal4_argtable_set_tensor(argtable, 1, weight.metal_tensor)
@@ -1228,6 +1294,67 @@ TENSOR_EW = {}
     n_tg_x = (m + 63) / 64
     n_tg_y = (n + 31) / 32
     metal4_dispatch_groups_3d(st[:queue], st[:alloc], st[:pipe], argtable, resources, 0, n_tg_x, n_tg_y, 1, 128, 1, 1)
+    result
+
+  # Orthonormal Fast Walsh-Hadamard Transform (or Signed Block-Hadamard Transform
+  # when `block_size > 0`) along the innermost axis of a rank-1 or rank-2 Tensor.
+  # - Forward (`inverse == false`): y_b = H_B (s_b ⊙ x_b)
+  # - Inverse (`inverse == true`):  x_b = s_b ⊙ (H_B y_b)
+  -> fwht(block_size = 0, signs = nil, inverse = false)
+    if self.rank != 1 && self.rank != 2
+      raise "Tensor.fwht: requires a rank-1 or rank-2 tensor"
+    cols = self.rank == 1 ? shape[0] : shape[1]
+    rows = self.rank == 1 ? 1 : shape[0]
+    bsize = block_size <= 0 ? cols : block_size
+    if bsize <= 0 || (bsize & (bsize - 1)) != 0
+      raise "Tensor.fwht: block_size must be a positive power of 2"
+    if cols <= 0 || (cols % bsize) != 0
+      raise "Tensor.fwht: last dimension must be divisible by block_size"
+    if signs != nil && signs.size() != cols
+      raise "Tensor.fwht: signs length must equal last dimension"
+    result = Tensor.zeros_like(self, shape, unit)
+    scale = ~1.0 / Math.sqrt(bsize.to_f)
+    work = Tensor.storage_f64(cols)
+    r = 0
+    while r < rows
+      c = 0
+      while c < cols
+        v = (self.rank == 1 ? self.at([c]) : self.at([r, c])).to_f
+        if signs != nil && !inverse
+          sv = type(signs) == "Tensor" ? signs.at([c]).to_f : signs[c].to_f
+          v = v * sv
+        work[c] = v
+        c += 1
+      b = 0
+      while b < cols
+        h = 1
+        while h < bsize
+          i = b
+          block_end = b + bsize
+          while i < block_end
+            j = i
+            limit = i + h
+            while j < limit
+              x = work[j]
+              y = work[j + h]
+              work[j] = x + y
+              work[j + h] = x - y
+              j += 1
+            i += h * 2
+          h = h * 2
+        b += bsize
+      c = 0
+      while c < cols
+        v = work[c] * scale
+        if signs != nil && inverse
+          sv = type(signs) == "Tensor" ? signs.at([c]).to_f : signs[c].to_f
+          v = v * sv
+        if self.rank == 1
+          result.set([c], v)
+        else
+          result.set([r, c], v)
+        c += 1
+      r += 1
     result
 
   # ---- unary elementwise (CPU reference) ----

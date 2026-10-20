@@ -19,7 +19,7 @@
 #include <metal_stdlib>
 using namespace metal;
 
-constant int MULTI_MAX_TOK = 8;
+constant int MULTI_MAX_TOK = 16;
 constant int MULTI_MAX_DECODE_POS = 2051;
 
 static inline float bf16_multi_to_f32(ushort b) {
@@ -302,4 +302,82 @@ kernel void gated_delta_multi(
     if (lane == 0) y[v_off] = acc;
   }
   for (int i = 0; i < per_lane; ++i) state_out[state_off + dk0 + i] = state[i];
+}
+
+// Verify-width attention q/k preparation in one kernel (Qwen35VerifyQKNormRoPE):
+//   - RMSNorm of each 256-wide q head (read in-place from the 512-wide gated
+//     query projection) and 256-wide k head
+//   - Non-traditional partial RoPE (ROPE_DIMS leading dims, e.g. 64) using
+//     simd_shuffle_xor(y[0][j], HALF_ROT / 4) across lanes
+//   - Head-major transpose into [1, heads, L, 256] for SDPA / FlashAttention.
+// One simdgroup (32 threads) per (head, row): grid = (1, Q_HEADS + KV_HEADS, L).
+[[max_total_threads_per_threadgroup(32)]]
+kernel void qwen35_verify_qk_norm_rope(
+  device const float *q_proj [[buffer(0)]],
+  device const float *k_proj [[buffer(1)]],
+  device const float *q_weight [[buffer(2)]],
+  device const float *k_weight [[buffer(3)]],
+  device const float *eps [[buffer(4)]],
+  device const int *offset [[buffer(5)]],
+  device const float *rope_base [[buffer(6)]],
+  device float *q_out [[buffer(7)]],
+  device float *k_out [[buffer(8)]],
+  constant int &q_heads [[buffer(9)]],
+  constant int &kv_heads [[buffer(10)]],
+  constant int &rope_dims [[buffer(11)]],
+  constant int &L_in [[buffer(12)]],
+  uint lane [[thread_index_in_simdgroup]],
+  uint3 tgid [[threadgroup_position_in_grid]]
+) {
+  #pragma clang fp reassociate(off)
+  #pragma clang fp contract(off)
+  constexpr uint D = 256;
+  const uint HALF_ROT = uint(rope_dims) / 2u;
+  const uint head = tgid.y;
+  const uint t = tgid.z;
+  const uint L = uint(L_in);
+  const bool is_q = head < uint(q_heads);
+  const uint h = is_q ? head : (head - uint(q_heads));
+  const device float *src = is_q
+    ? (q_proj + (t * uint(q_heads) + h) * (2u * D))
+    : (k_proj + (t * uint(kv_heads) + h) * D);
+  const device float *w = is_q ? q_weight : k_weight;
+  const float epsilon = eps[is_q ? 0 : 1];
+  float x[2][4];
+  float acc[2] = {0.0f, 0.0f};
+  for (uint part = 0; part < 2u; ++part) {
+    for (uint j = 0; j < 4u; ++j) {
+      x[part][j] = src[part * 128u + lane * 4u + j];
+      acc[part] = metal::fma(x[part][j], x[part][j], acc[part]);
+    }
+  }
+  const float total = simd_sum(acc[0]) + simd_sum(acc[1]);
+  const float inv = metal::precise::rsqrt(total / float(D) + epsilon);
+  float y[2][4];
+  for (uint part = 0; part < 2u; ++part) {
+    for (uint j = 0; j < 4u; ++j) {
+      y[part][j] = w[part * 128u + lane * 4u + j] * (x[part][j] * inv);
+    }
+  }
+  const float position = 1.0f * static_cast<float>(int(t) + offset[0]);
+  const float base = rope_base[0];
+  for (uint j = 0; j < 4u; ++j) {
+    const float partner = simd_shuffle_xor(y[0][j], ushort(HALF_ROT / 4u));
+    const uint dim = lane * 4u + j;
+    if (dim < uint(rope_dims)) {
+      const uint p = dim < HALF_ROT ? dim : (dim - HALF_ROT);
+      const float d = static_cast<float>(p) / static_cast<float>(HALF_ROT);
+      const float inv_freq = metal::exp2(-d * base);
+      const float theta = position * inv_freq;
+      const float costheta = metal::fast::cos(theta);
+      const float sintheta = metal::fast::sin(theta);
+      y[0][j] = dim < HALF_ROT
+        ? metal::fma(y[0][j], costheta, -(partner * sintheta))
+        : metal::fma(partner, sintheta, y[0][j] * costheta);
+    }
+  }
+  device float *dst = (is_q ? q_out : k_out) + (h * L + t) * D;
+  for (uint part = 0; part < 2u; ++part) {
+    for (uint j = 0; j < 4u; ++j) dst[part * 128u + lane * 4u + j] = y[part][j];
+  }
 }

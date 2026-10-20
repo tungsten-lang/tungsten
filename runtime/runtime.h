@@ -990,6 +990,8 @@ WValue w_bigint_add_equal_finish_raw(WValue v, int64_t len, uint64_t carry);
 WValue w_bigint_uneq_add_finish_raw(WValue v, int64_t len, uint64_t carry,
                                     int64_t negative);
 WValue w_bigint_sub_equal_finish_raw(WValue v, int64_t len, int64_t negative);
+WValue w_bigint_sub_equal_top_finish_raw(WValue v, int64_t len,
+                                         int64_t negative, uint64_t top);
 WValue w_bigint_sub2_equal_finish_raw(uint64_t low, uint64_t high,
                                       int64_t negative);
 WValue w_bigint_add1_4_finish_raw(WValue v, uint64_t carry);
@@ -1037,6 +1039,10 @@ WValue w_gte(WValue a, WValue b);
 
 /* ---- String ---- */
 WValue w_str_concat(WValue a, WValue b);
+WValue w_str_concat_i64(WValue a, int64_t n, WValue own_a);
+WValue w_i64_concat_str(int64_t n, WValue b, WValue own_b);
+WValue w_str_concat_int_wv(WValue a, WValue b_int, WValue own_a);
+WValue w_int_wv_concat_str(WValue a_int, WValue b, WValue own_b);
 WValue w_string_idx_raw(WValue str, int64_t index);
 WValue w_string_slice_raw(WValue str, int64_t start, int64_t len);
 int64_t w_parser_chars_equal_ascii(WValue chars, int64_t off, int64_t len, WValue lit);
@@ -1428,6 +1434,8 @@ typedef struct {
     int arity;
     int count;
     int cap;       /* allocated slots (renamed from cap) */
+    int hits;
+    int disabled;
     char sha[17];
 } WMemoTable;
 
@@ -2243,6 +2251,7 @@ WValue w_array_skasort(WValue arr);
 WValue w_array_wolfsort(WValue arr);
 WValue w_array_ipnsort(WValue arr);
 WValue w_array_shuffle(WValue arr);
+WValue w_array_uniq(WValue arr);
 WValue w_array_min_signed(WValue arr);
 WValue w_array_min_unsigned(WValue arr);
 WValue w_array_min_float(WValue arr);

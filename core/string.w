@@ -372,22 +372,24 @@
   -> tr(from, to)
     tr_from = from.chars
     tr_to = to.chars
+    tr_from_n = tr_from.size
+    tr_to_n = tr_to.size
     tr_out = StringBuffer(size)
     self.chars.each -> (c)
       tr_idx = -1
       tr_fi = 0
-      while tr_fi < tr_from.size
+      while tr_fi < tr_from_n
         if tr_from[tr_fi] == c
           tr_idx = tr_fi
-          tr_fi = tr_from.size
+          tr_fi = tr_from_n
         else
           tr_fi += 1
       if tr_idx < 0
         tr_out << c
-      elsif tr_to.size > 0
+      elsif tr_to_n > 0
         tr_ti = tr_idx
-        if tr_ti >= tr_to.size
-          tr_ti = tr_to.size - 1
+        if tr_ti >= tr_to_n
+          tr_ti = tr_to_n - 1
         tr_out << tr_to[tr_ti]
     tr_out.to_s
 
@@ -526,20 +528,22 @@
   -> levenshtein(other)
     lv_s = self.codepoints.to_a
     lv_t = other.codepoints.to_a
-    if lv_s.size == 0
-      return lv_t.size
-    if lv_t.size == 0
-      return lv_s.size
+    lv_sn = lv_s.size
     lv_n = lv_t.size
+    if lv_sn == 0
+      return lv_n
+    if lv_n == 0
+      return lv_sn
     prev = (0..lv_n).to_a
     curr = Array.new(lv_n + 1, 0)
     lv_i = 0
-    while lv_i < lv_s.size
+    while lv_i < lv_sn
       curr[0] = lv_i + 1
+      lv_si = lv_s[lv_i]
       lv_j = 0
       while lv_j < lv_n
         lv_cost = 1
-        if lv_s[lv_i] == lv_t[lv_j]
+        if lv_si == lv_t[lv_j]
           lv_cost = 0
         lv_ins = curr[lv_j] + 1
         lv_del = prev[lv_j + 1] + 1

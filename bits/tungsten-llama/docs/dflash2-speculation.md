@@ -240,3 +240,25 @@ the drafter (better proposals) and the target-path kernels (cheaper verify).
 - Any greedy-argmax-reuse mechanism under temperature.
 - Vocabulary shrink below the compact set, probe fraction below 0.15, shortlists
   wider than 32 — unchanged from lessons-2.
+
+---
+
+## 8. 2026-10-17 Update: Full DFlash 2 (`DF2Fast`) 16-Row M5 NAX Port (`4.09x` Bonsai2-9B Track)
+
+All kernels from the `Layr-Labs/mlxfast-bonsai2-9b-engine` DFlash 2 + Bonsai 2 9B stack (`origin/main` @ `20b3aa0`, `4.092670x` speedup on Apple M5 Max) have been ported into `bits/tungsten-llama/lib/kernels/`:
+
+1. **`lib/kernels/qwen3_6/dflash2_draft.metal` (`DRAFT_MAX_TOK = 16`):**
+   - `df2_act_q8` / `df2_act_q8_swiglu` + `df2_i8_matmul1..3` (8-bit g32 `int8 × u8` M5 NAX `16×32×32` matmul2d).
+   - `df2_act_q8g{64,128}{,_swiglu,_hm}` + `df2_act_q8g{64,128}_conv0` + `df2_w4g{64,128}_{1,2,3}` (in-memory $L_2$-optimal re-quantized 4-bit g64/g128 `int8 × u4` M5 NAX `16×32×G` matmul2d with fused `dynConv(part: 0)` and direct head-major `o_proj` input).
+   - `df2_qkv_norm_rope`, `df2_ctx_kv_norm_rope`, and `df2_qkv_all_norm_rope` (fused `qNorm` + `kNorm` + `YarnRoPE` + head-major transpose for both block and context).
+   - `df2_dyn_conv_rms_4096` (fused `dynConv(part: 1, residual)` + 4096-wide `RMSNorm`).
+   - `df2_topk16_mb8` + `df2_selector_mb8` (8-block/row parallel top-16 + single-block top-16 merge and rank-256 codebook walk).
+2. **`lib/kernels/na/int8_hadamard_matmul_na.metal`:**
+   - 4096-wide 3-pass radix-16 Signed Block-Hadamard transform fused with boundary ops (`residual + RMSNorm`, Layer-0 2-bit embedding dequant + inverse Hadamard + `RMSNorm`, GDN per-head gated `RMSNorm`, attention head-major gate, `SwiGLU`) + group-128 `int8` quantizer.
+   - `bonsai_q8_prompt_matmul_nax_sg1..3` (64×64 prefill tile) and `bonsai_q8_verify_matmul_nax_fast1..3` (16×32 verify tile) on M5 NAX `int8` tensor ops.
+3. **`lib/kernels/na/exact_verify_head_na.metal`:**
+   - Certified zero-flip two-stage `int8` NAX screen + exact FP32 shortlist rescore (`hadamard_xhead_bounds`, `hadamard_xhead_select_scan`, `hadamard_xhead_select_rescore`, `hadamard_xhead_select_merge`).
+4. **`lib/kernels/qwen3_6/gdn_fused.metal` & `lib/kernels/qwen3_6/decode_multi.metal`:**
+   - `qwen35_gdn_verify_fused` (16-row single-launch GDN verify), `qwen35_gdn_register_simd_state_only` (fast rollback replay), `qwen35_gdn_dense_ba_rows`, and `qwen35_verify_qk_norm_rope`.
+
+See [`bonsai2-9b-int8-nax-hadamard.md`](bonsai2-9b-int8-nax-hadamard.md) for the full technical reference.

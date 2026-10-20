@@ -309,15 +309,27 @@
     "float2"
   elsif sym in (:f16x4 :half4)
     "half4"
+  elsif sym in (:f16x2 :half2)
+    "half2"
   elsif sym in (:i32x4 :int4)
     "int4"
   elsif sym in (:u32x4 :uint4)
     "uint4"
+  elsif sym in (:i16x4 :short4)
+    "short4"
+  elsif sym in (:u16x4 :ushort4)
+    "ushort4"
+  elsif sym in (:i8x4 :char4)
+    "char4"
+  elsif sym in (:u8x4 :uchar4)
+    "uchar4"
   # Brain-float — Apple Silicon Metal 3.1+.
   elsif sym in (:bf16 :bfloat)
     "bfloat"
   elsif sym in (:bf16x4 :bfloat4)
     "bfloat4"
+  elsif sym in (:bf16x2 :bfloat2)
+    "bfloat2"
   # Hypercomplex tower. Math-Quaternion (scalar-first) does NOT map to
   # float4 — its layout doesn't match Metal's float4.w convention; call
   # `.to_metal` first to get a QuaternionMetal. Octonion and Sedenion
@@ -700,7 +712,13 @@
   32768
 
 -> gpu_record_shared_allocation(ctx, name, size)
-  bytes_per_element = name == "shared_i64" ? 8 : 4
+  bytes_per_element = 4
+  if name == "shared_i64"
+    bytes_per_element = 8
+  elsif name == "shared_f16"
+    bytes_per_element = 2
+  elsif name == "shared_i8" || name == "shared_u8"
+    bytes_per_element = 1
   previous = ctx[:shared_bytes]
   if previous == nil
     previous = 0
@@ -853,7 +871,7 @@
       out << sname
       out << ";\n"
       return nil
-    if vrecv != nil && is_ast_node?(vrecv) && ast_kind(vrecv) == :var && vrecv.name == "gpu" && (vname == "shared_f32" || vname == "shared_i32" || vname == "shared_i64")
+    if vrecv != nil && is_ast_node?(vrecv) && ast_kind(vrecv) == :var && vrecv.name == "gpu" && (vname == "shared_f32" || vname == "shared_i32" || vname == "shared_i64" || vname == "shared_f16" || vname == "shared_i8" || vname == "shared_u8")
       shared_size = gpu_shared_size(ctx[:node], value, ctx[:dialect])
       gpu_record_shared_allocation(ctx, vname, shared_size)
       sname = target.name
@@ -865,6 +883,15 @@
       elsif vname == "shared_i64"
         elt = "long"
         atype = "i64\[]".to_sym()
+      elsif vname == "shared_f16"
+        elt = ctx[:dialect] == "cuda" ? "__half" : "half"
+        atype = "f16\[]".to_sym()
+      elsif vname == "shared_i8"
+        elt = "char"
+        atype = "i8\[]".to_sym()
+      elsif vname == "shared_u8"
+        elt = ctx[:dialect] == "cuda" ? "unsigned char" : "uchar"
+        atype = "u8\[]".to_sym()
       ctx[:var_types][sname] = atype
       ctx[:array_bounds][sname] = shared_size
       ctx[:address_spaces][sname] = "threadgroup"
@@ -1293,13 +1320,60 @@
     if gpu_extra_intrinsic?(name)
       return name.to_s() + "(" + gpu_arglist(ctx, args) + ")"
     # SIMD-group reductions: `simd_sum(x)`, `simd_max(x)`, `simd_min(x)`,
-    # `simd_prefix_inclusive_sum(x)`. Operate within a 32-lane SIMD group.
+    # `simd_prefix_inclusive_sum(x)`, `simd_broadcast_first(x)`. Operate within a 32-lane SIMD group / warp.
     if name in ("simd_sum" "simd_max" "simd_min" "simd_prefix_inclusive_sum" "simd_broadcast_first")
-      if ctx[:dialect] == "cuda"
-        gpu_kernel_error(ctx[:node], "`" + name + "` is Metal-only; CUDA warp lowering is not implemented")
       if args.size() != 1
         gpu_kernel_error(ctx[:node], "`" + name + "` takes 1 arg")
+      if ctx[:dialect] == "cuda"
+        if name == "simd_sum"
+          return "__w_cuda_simd_sum(" + emit_expr(ctx, args[0]) + ")"
+        if name == "simd_max"
+          return "__w_cuda_simd_max(" + emit_expr(ctx, args[0]) + ")"
+        if name == "simd_min"
+          return "__w_cuda_simd_min(" + emit_expr(ctx, args[0]) + ")"
+        if name == "simd_broadcast_first"
+          return "__shfl_sync(0xffffffffu, " + emit_expr(ctx, args[0]) + ", 0, 32)"
+        gpu_kernel_error(ctx[:node], "`" + name + "` is Metal-only; CUDA warp lowering is not implemented")
       return name + "(" + emit_expr(ctx, args[0]) + ")"
+    # SIMD-group 2-argument lane shuffles & broadcasts:
+    # `simd_shuffle_xor(x, mask)`, `simd_shuffle(x, lane)`,
+    # `simd_shuffle_down(x, delta)`, `simd_shuffle_up(x, delta)`, `simd_broadcast(x, lane)`.
+    # Fundamental for Fast Walsh-Hadamard Transforms (radix-16 / radix-32 butterfly)
+    # and register-resident warp reductions on both Metal and CUDA (`__shfl_*_sync`).
+    if name in ("simd_shuffle_xor" "simd_shuffle" "simd_shuffle_down" "simd_shuffle_up" "simd_broadcast")
+      if args.size() != 2
+        gpu_kernel_error(ctx[:node], "`" + name + "` takes 2 args")
+      a0 = emit_expr(ctx, args[0])
+      a1 = emit_expr(ctx, args[1])
+      if ctx[:dialect] == "cuda"
+        if name == "simd_shuffle_xor"
+          return "__shfl_xor_sync(0xffffffffu, " + a0 + ", " + a1 + ", 32)"
+        if name == "simd_shuffle" || name == "simd_broadcast"
+          return "__shfl_sync(0xffffffffu, " + a0 + ", " + a1 + ", 32)"
+        if name == "simd_shuffle_down"
+          return "__shfl_down_sync(0xffffffffu, " + a0 + ", " + a1 + ", 32)"
+        if name == "simd_shuffle_up"
+          return "__shfl_up_sync(0xffffffffu, " + a0 + ", " + a1 + ", 32)"
+      return name + "(" + a0 + ", " + a1 + ")"
+    # Packed 4x int8 dot-product accumulate (`dp4a(a, b, c)`) and 4-byte LUT permute (`byte_perm(x, y, s)`).
+    if name == "dp4a"
+      if args.size() != 3
+        gpu_kernel_error(ctx[:node], "`dp4a` takes 3 args (a, b, c)")
+      a0 = emit_expr(ctx, args[0])
+      a1 = emit_expr(ctx, args[1])
+      a2 = emit_expr(ctx, args[2])
+      if ctx[:dialect] == "cuda"
+        return "__dp4a(" + a0 + ", " + a1 + ", " + a2 + ")"
+      return "(int(as_type<char4>(" + a0 + ").x) * int(as_type<char4>(" + a1 + ").x) + int(as_type<char4>(" + a0 + ").y) * int(as_type<char4>(" + a1 + ").y) + int(as_type<char4>(" + a0 + ").z) * int(as_type<char4>(" + a1 + ").z) + int(as_type<char4>(" + a0 + ").w) * int(as_type<char4>(" + a1 + ").w) + (" + a2 + "))"
+    if name == "byte_perm"
+      if args.size() != 3
+        gpu_kernel_error(ctx[:node], "`byte_perm` takes 3 args (x, y, selector)")
+      a0 = emit_expr(ctx, args[0])
+      a1 = emit_expr(ctx, args[1])
+      a2 = emit_expr(ctx, args[2])
+      if ctx[:dialect] == "cuda"
+        return "__byte_perm(" + a0 + ", " + a1 + ", " + a2 + ")"
+      gpu_kernel_error(ctx[:node], "`byte_perm` is CUDA-only (`__byte_perm`)")
     # Threadgroup-wide reductions: `tg_sum(x)`, `tg_max(x)`, `tg_min(x)`.
     # Operate across the entire threadgroup (up to 1024 threads / 32
     # simdgroups). Routed by inferred arg type to the right helper +
@@ -1421,12 +1495,12 @@
 # MSL math intrinsics passed through by name (beyond the core
 # sqrt/abs/floor/ceil/exp/log/sin/cos already handled inline above).
 -> gpu_extra_intrinsic?(name)
-  name in ("min" "max" "clamp" "mix" "step" "smoothstep" "fract" "sign" "rsqrt" "pow" "exp2" "log2" "tan" "asin" "acos" "atan" "atan2" "sinh" "cosh" "tanh" "dot" "cross" "normalize" "length" "distance" "reflect" "refract" "fmod" "saturate" "round" "trunc" "powr")
+  name in ("min" "max" "clamp" "mix" "step" "smoothstep" "fract" "sign" "rsqrt" "pow" "exp2" "log2" "tan" "asin" "acos" "atan" "atan2" "sinh" "cosh" "tanh" "dot" "cross" "normalize" "length" "distance" "reflect" "refract" "fmod" "saturate" "round" "trunc" "powr" "fma" "popcount" "clz" "ctz")
 
 # Intrinsics whose result type matches their (first vector) argument —
 # used by type inference so shader locals rarely need explicit hints.
 -> gpu_vec_preserving?(name)
-  name in ("normalize" "cross" "reflect" "refract" "min" "max" "clamp" "mix" "abs" "floor" "ceil" "fract" "sign" "step" "smoothstep" "saturate" "pow" "sqrt" "sin" "cos" "exp" "log" "rsqrt" "tan" "tanh" "fmod" "round" "trunc")
+  name in ("normalize" "cross" "reflect" "refract" "min" "max" "clamp" "mix" "abs" "floor" "ceil" "fract" "sign" "step" "smoothstep" "saturate" "pow" "sqrt" "sin" "cos" "exp" "log" "rsqrt" "tan" "tanh" "fmod" "round" "trunc" "fma")
 
 -> gpu_is_vec_type?(t)
   t in (:vec2 :vec3 :vec4 :float2 :float3 :float4 :half4 :f32x4 :f32x2 :i32x4 :u32x4)
@@ -1484,12 +1558,16 @@
       :i32
     else
       nil
-  elsif t == :call && node.receiver == nil && node.name in ("simd_sum" "simd_max" "simd_min" "simd_prefix_inclusive_sum" "simd_broadcast_first" "tg_sum" "tg_max" "tg_min")
-    # simd_*(x) and tg_*(x) return the same scalar type as x.
+  elsif t == :call && node.receiver == nil && node.name in ("simd_sum" "simd_max" "simd_min" "simd_prefix_inclusive_sum" "simd_broadcast_first" "simd_shuffle_xor" "simd_shuffle" "simd_shuffle_down" "simd_shuffle_up" "simd_broadcast" "tg_sum" "tg_max" "tg_min")
+    # simd_*(x, ...) and tg_*(x) return the same scalar type as x.
     if node.args != nil && node.args.size() >= 1
       infer_expr_type(ctx, node.args[0])
     else
       nil
+  elsif t == :call && node.receiver == nil && node.name == "dp4a"
+    :i32
+  elsif t == :call && node.receiver == nil && node.name == "byte_perm"
+    :u32
   elsif t == :call && node.receiver == nil && node.name == "simdgroup_float8x8"
     # simdgroup_float8x8(...) constructor → :sg_f32
     :sg_f32

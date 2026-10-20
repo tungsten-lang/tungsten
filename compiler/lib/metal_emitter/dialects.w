@@ -10,8 +10,12 @@
 -> cuda_type_name(msl_name)
   if msl_name == "bfloat"
     return "__nv_bfloat16"
+  if msl_name == "bfloat2"
+    return "__nv_bfloat162"
   if msl_name == "half"
     return "__half"
+  if msl_name == "half2"
+    return "__half2"
   if msl_name == "long"
     return "long long"
   if msl_name == "ulong"
@@ -22,7 +26,7 @@
     return "unsigned short"
   if msl_name == "uint"
     return "unsigned int"
-  if msl_name in ("char" "short" "int" "float" "float2" "float3" "float4" "int4" "uint4" "bool")
+  if msl_name in ("char" "short" "int" "float" "float2" "float3" "float4" "int4" "uint4" "short4" "ushort4" "char4" "uchar4" "bool")
     return msl_name
   nil
 
@@ -175,10 +179,18 @@
     shared_bytes: 0
   }
   body = node.body
+  n = body.size()
   body_out = StringBuffer(256)
   bi = 0
-  while bi < body.size()
-    emit_stmt(body_out, ctx, body[bi])
+  while bi < n
+    stmt = body[bi]
+    if bi == n - 1 && gpu_is_value_expr?(stmt)
+      emit_indent(body_out, ctx)
+      body_out << "return "
+      body_out << emit_expr(ctx, stmt)
+      body_out << ";\n"
+    else
+      emit_stmt(body_out, ctx, stmt)
     bi += 1
   gpu_emit_hoisted(out, ctx)
   out << body_out.to_s()
@@ -192,11 +204,18 @@
   out << "// Tungsten @gpu kernel output (CUDA C dialect) — do not edit by hand\n"
   out << "#include <cuda_runtime.h>\n"
   out << "#include <cuda_bf16.h>\n"
+  out << "#include <cuda_fp16.h>\n"
   out << "#include <device_launch_parameters.h>\n"
   out << "#include <mma.h>\n"
   out << "using namespace nvcuda;\n\n"
-  # Cooperative-group / shared-memory helpers used by gpu.barrier etc.
-  out << "__device__ inline void __w_gpu_barrier() { __syncthreads(); }\n\n"
+  # Cooperative-group / shared-memory / warp-reduction helpers.
+  out << "__device__ inline void __w_gpu_barrier() { __syncthreads(); }\n"
+  out << "__device__ inline float __w_cuda_simd_sum(float v) { #pragma unroll\n  for (int m = 16; m > 0; m >>= 1) v += __shfl_xor_sync(0xffffffffu, v, m, 32); return v; }\n"
+  out << "__device__ inline int __w_cuda_simd_sum(int v) { #pragma unroll\n  for (int m = 16; m > 0; m >>= 1) v += __shfl_xor_sync(0xffffffffu, v, m, 32); return v; }\n"
+  out << "__device__ inline float __w_cuda_simd_max(float v) { #pragma unroll\n  for (int m = 16; m > 0; m >>= 1) { float o = __shfl_xor_sync(0xffffffffu, v, m, 32); v = v > o ? v : o; } return v; }\n"
+  out << "__device__ inline int __w_cuda_simd_max(int v) { #pragma unroll\n  for (int m = 16; m > 0; m >>= 1) { int o = __shfl_xor_sync(0xffffffffu, v, m, 32); v = v > o ? v : o; } return v; }\n"
+  out << "__device__ inline float __w_cuda_simd_min(float v) { #pragma unroll\n  for (int m = 16; m > 0; m >>= 1) { float o = __shfl_xor_sync(0xffffffffu, v, m, 32); v = v < o ? v : o; } return v; }\n"
+  out << "__device__ inline int __w_cuda_simd_min(int v) { #pragma unroll\n  for (int m = 16; m > 0; m >>= 1) { int o = __shfl_xor_sync(0xffffffffu, v, m, 32); v = v < o ? v : o; } return v; }\n\n"
   gpu_fns = {}
   i = 0
   while i < kernels.size()

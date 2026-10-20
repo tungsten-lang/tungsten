@@ -63,12 +63,13 @@
   # List convenience lane. Factorization remains reused; only the RHS/output
   # boundary allocation and conversion occur per solve.
   -> solve(rhs)
-    raise "DenseLUFactor.solve: RHS length must equal dimension" if rhs.size() != @dimension
-    out_flat = ccall("w_array_new_aligned", -64, @dimension)
+    dim = @dimension
+    raise "DenseLUFactor.solve: RHS length must equal dimension" if rhs.size() != dim
+    out_flat = ccall("w_array_new_aligned", -64, dim)
     solve_into(rhs, out_flat)
     out = []
     i = 0
-    while i < @dimension
+    while i < dim
       out.push(out_flat[i])
       i += 1
     out
@@ -89,13 +90,16 @@
   -> solve_many(rhses)
     return [] if rhses.size() == 0
     count = rhses.size()
-    flat = ccall("w_array_new_aligned", -64, @dimension * count)
+    dim = @dimension
+    flat = ccall("w_array_new_aligned", -64, dim * count)
     r = 0
     while r < count
-      raise "DenseLUFactor.solve_many: RHS length must equal dimension" if rhses[r].size() != @dimension
+      rhs_r = rhses[r]
+      raise "DenseLUFactor.solve_many: RHS length must equal dimension" if rhs_r.size() != dim
+      base = r * dim
       i = 0
-      while i < @dimension
-        flat[r * @dimension + i] = rhses[r][i] + ~0.0
+      while i < dim
+        flat[base + i] = rhs_r[i] + ~0.0
         i += 1
       r += 1
     solve_many_into(flat, flat, count)
@@ -103,9 +107,10 @@
     r = 0
     while r < count
       row = []
+      base = r * dim
       i = 0
-      while i < @dimension
-        row.push(flat[r * @dimension + i])
+      while i < dim
+        row.push(flat[base + i])
         i += 1
       out.push(row)
       r += 1
@@ -127,12 +132,13 @@
     out
 
   -> solve(rhs)
-    raise "DenseCholeskyFactor.solve: RHS length must equal dimension" if rhs.size() != @dimension
-    out_flat = ccall("w_array_new_aligned", -64, @dimension)
+    dim = @dimension
+    raise "DenseCholeskyFactor.solve: RHS length must equal dimension" if rhs.size() != dim
+    out_flat = ccall("w_array_new_aligned", -64, dim)
     solve_into(rhs, out_flat)
     out = []
     i = 0
-    while i < @dimension
+    while i < dim
       out.push(out_flat[i])
       i += 1
     out
@@ -150,13 +156,16 @@
   -> solve_many(rhses)
     return [] if rhses.size() == 0
     count = rhses.size()
-    flat = ccall("w_array_new_aligned", -64, @dimension * count)
+    dim = @dimension
+    flat = ccall("w_array_new_aligned", -64, dim * count)
     r = 0
     while r < count
-      raise "DenseCholeskyFactor.solve_many: RHS length must equal dimension" if rhses[r].size() != @dimension
+      rhs_r = rhses[r]
+      raise "DenseCholeskyFactor.solve_many: RHS length must equal dimension" if rhs_r.size() != dim
+      base = r * dim
       i = 0
-      while i < @dimension
-        flat[r * @dimension + i] = rhses[r][i] + ~0.0
+      while i < dim
+        flat[base + i] = rhs_r[i] + ~0.0
         i += 1
       r += 1
     solve_many_into(flat, flat, count)
@@ -164,9 +173,10 @@
     r = 0
     while r < count
       row = []
+      base = r * dim
       i = 0
-      while i < @dimension
-        row.push(flat[r * @dimension + i])
+      while i < dim
+        row.push(flat[base + i])
         i += 1
       out.push(row)
       r += 1
@@ -195,8 +205,9 @@
     workspace = ccall("w_array_new_aligned", -64, @rows)
     solve_into(rhs, workspace)
     out = []
+    cols = @columns
     i = 0
-    while i < @columns
+    while i < cols
       out.push(workspace[i])
       i += 1
     out
@@ -216,13 +227,17 @@
   -> solve_many(rhses)
     return [] if rhses.size() == 0
     count = rhses.size()
-    workspace = ccall("w_array_new_aligned", -64, @rows * count)
+    nrows = @rows
+    ncols = @columns
+    workspace = ccall("w_array_new_aligned", -64, nrows * count)
     r = 0
     while r < count
-      raise "DenseQRFactor.solve_many: RHS length must equal rows" if rhses[r].size() != @rows
+      rhs_r = rhses[r]
+      raise "DenseQRFactor.solve_many: RHS length must equal rows" if rhs_r.size() != nrows
+      base = r * nrows
       i = 0
-      while i < @rows
-        workspace[r * @rows + i] = rhses[r][i] + ~0.0
+      while i < nrows
+        workspace[base + i] = rhs_r[i] + ~0.0
         i += 1
       r += 1
     solve_many_into(workspace, workspace, count)
@@ -230,9 +245,10 @@
     r = 0
     while r < count
       solution = []
+      base = r * nrows
       i = 0
-      while i < @columns
-        solution.push(workspace[r * @rows + i])
+      while i < ncols
+        solution.push(workspace[base + i])
         i += 1
       out.push(solution)
       r += 1
@@ -340,22 +356,25 @@
     out = LinAlg.zeros(m, n)
     i = 0
     while i < m
+      ai = a[i]
+      oi = out[i]
       j = 0
       while j < n
         s = ~0.0
         t = 0
         while t < k
-          s = s + a[i][t] * b[t][j]
+          s = s + ai[t] * b[t][j]
           t = t + 1
-        out[i][j] = s
+        oi[j] = s
         j = j + 1
       i = i + 1
     out
 
   -> .dot(u, v)
     s = ~0.0
+    n = u.size()
     i = 0
-    while i < u.size()
+    while i < n
       s = s + u[i] * v[i]
       i = i + 1
     s
@@ -415,9 +434,10 @@
     flat = ccall("w_array_new_aligned", -64, m * n)
     i = 0
     while i < m
+      ai = a[i]
       j = 0
       while j < n
-        flat[j * m + i] = a[i][j] + ~0.0
+        flat[j * m + i] = ai[j] + ~0.0
         j += 1
       i += 1
     tau = ccall("w_array_new_aligned", -64, n)
@@ -460,7 +480,8 @@
     k = 0
     while k < n
       piv = k
-      maxv = aw[k][k]
+      awk = aw[k]
+      maxv = awk[k]
       if maxv < ~0.0
         maxv = ~0.0 - maxv
       i = k + 1
@@ -475,20 +496,24 @@
       if maxv == ~0.0
         raise "LinAlg.solve: singular"
       if piv != k
-        tmp = aw[k]
-        aw[k] = aw[piv]
+        tmp = awk
+        awk = aw[piv]
+        aw[k] = awk
         aw[piv] = tmp
         tb = bw[k]
         bw[k] = bw[piv]
         bw[piv] = tb
+      awkk = awk[k]
+      bwk = bw[k]
       i = k + 1
       while i < n
-        f = aw[i][k] / aw[k][k]
+        awi = aw[i]
+        f = awi[k] / awkk
         j = k
         while j < n
-          aw[i][j] = aw[i][j] - f * aw[k][j]
+          awi[j] = awi[j] - f * awk[j]
           j = j + 1
-        bw[i] = bw[i] - f * bw[k]
+        bw[i] = bw[i] - f * bwk
         i = i + 1
       k = k + 1
     x = []
@@ -498,23 +523,27 @@
       i = i + 1
     i = n - 1
     while i >= 0
+      awi = aw[i]
       s = bw[i]
       j = i + 1
       while j < n
-        s = s - aw[i][j] * x[j]
+        s = s - awi[j] * x[j]
         j = j + 1
-      x[i] = s / aw[i][i]
+      x[i] = s / awi[i]
       i = i - 1
     x
 
   -> .copy_mat(a)
     out = []
+    na = a.size()
     i = 0
-    while i < a.size()
+    while i < na
+      ai = a[i]
+      nai = ai.size()
       row = []
       j = 0
-      while j < a[i].size()
-        row = row.push(a[i][j] + ~0.0)
+      while j < nai
+        row = row.push(ai[j] + ~0.0)
         j = j + 1
       out = out.push(row)
       i = i + 1
@@ -529,7 +558,8 @@
     k = 0
     while k < n
       piv = k
-      maxv = aw[k][k]
+      awk = aw[k]
+      maxv = awk[k]
       if maxv < ~0.0
         maxv = ~0.0 - maxv
       i = k + 1
@@ -545,15 +575,18 @@
         return ~0.0
       if piv != k
         sign = ~0.0 - sign
-        tmp = aw[k]
-        aw[k] = aw[piv]
+        tmp = awk
+        awk = aw[piv]
+        aw[k] = awk
         aw[piv] = tmp
+      awkk = awk[k]
       i = k + 1
       while i < n
-        f = aw[i][k] / aw[k][k]
+        awi = aw[i]
+        f = awi[k] / awkk
         j = k
         while j < n
-          aw[i][j] = aw[i][j] - f * aw[k][j]
+          awi[j] = awi[j] - f * awk[j]
           j = j + 1
         i = i + 1
       k = k + 1
@@ -593,19 +626,22 @@
     L = LinAlg.zeros(n, n)
     i = 0
     while i < n
+      ai = a[i]
+      li = L[i]
       j = 0
       while j <= i
-        s = a[i][j]
+        s = ai[j]
+        lj = L[j]
         k = 0
         while k < j
-          s = s - L[i][k] * L[j][k]
+          s = s - li[k] * lj[k]
           k = k + 1
         if i == j
           if s <= ~0.0
             raise "LinAlg.cholesky: not SPD"
-          L[i][j] = Math.sqrt(s)
+          li[j] = Math.sqrt(s)
         else
-          L[i][j] = s / L[j][j]
+          li[j] = s / lj[j]
         j = j + 1
       i = i + 1
     L
@@ -616,17 +652,19 @@
     out = LinAlg.zeros(n, m)
     i = 0
     while i < m
+      ai = a[i]
       j = 0
       while j < n
-        out[j][i] = a[i][j]
+        out[j][i] = ai[j]
         j = j + 1
       i = i + 1
     out
 
   -> .mat_vec(a, v)
     out = []
+    na = a.size()
     i = 0
-    while i < a.size()
+    while i < na
       out = out.push(LinAlg.dot(a[i], v))
       i = i + 1
     out
@@ -652,9 +690,10 @@
     flat = ccall("w_array_new_aligned", -64, m * n)
     i = 0
     while i < m
+      ai = a[i]
       j = 0
       while j < n
-        flat[j * m + i] = a[i][j] + ~0.0
+        flat[j * m + i] = ai[j] + ~0.0
         j += 1
       i += 1
     qflat = ccall("w_array_new_aligned", -64, m * n)
@@ -707,25 +746,29 @@
       source_sq = ~0.0
       t = 0
       while t < m
-        source_sq += q[t][j] * q[t][j]
+        qtj = q[t][j]
+        source_sq += qtj * qtj
         t += 1
       i = 0
       while i < j
         s = ~0.0
         t = 0
         while t < m
-          s = s + q[t][i] * q[t][j]
+          qt = q[t]
+          s = s + qt[i] * qt[j]
           t = t + 1
         r[i][j] = s
         t = 0
         while t < m
-          q[t][j] = q[t][j] - s * q[t][i]
+          qt = q[t]
+          qt[j] = qt[j] - s * qt[i]
           t = t + 1
         i = i + 1
       s = ~0.0
       t = 0
       while t < m
-        s = s + q[t][j] * q[t][j]
+        qtj = q[t][j]
+        s = s + qtj * qtj
         t = t + 1
       nrm = Math.sqrt(s)
       tolerance = Math.sqrt(source_sq) * ~0.00000000000001
@@ -733,7 +776,8 @@
         r[j][j] = nrm
         t = 0
         while t < m
-          q[t][j] = q[t][j] / nrm
+          qt = q[t]
+          qt[j] = qt[j] / nrm
           t = t + 1
       else
         r[j][j] = ~0.0
@@ -763,7 +807,8 @@
       coeffs = coeffs.push(ck)
       i = 0
       while i < n
-        m[i][i] = m[i][i] + ck
+        mi = m[i]
+        mi[i] = mi[i] + ck
         i = i + 1
       k = k + 1
     coeffs
@@ -776,9 +821,10 @@
     if n < 1
       return []
     c = []
+    c0_raw = coeffs[0]
     i = 0
     while i <= n
-      c = c.push(coeffs[i] / coeffs[0])
+      c = c.push(coeffs[i] / c0_raw)
       i = i + 1
     bound = ~0.0
     i = 1
@@ -798,17 +844,20 @@
       zr = zr.push(bound * Math.cos(ang))
       zi = zi.push(bound * Math.sin(ang))
       k = k + 1
+    c0 = c[0]
     iter = 0
     while iter < 400
       moved = ~0.0
       k = 0
       while k < n
-        pr = c[0]
+        zrk = zr[k]
+        zik = zi[k]
+        pr = c0
         pim = ~0.0
         i = 1
         while i <= n
-          t = pr * zr[k] - pim * zi[k] + c[i]
-          pim = pr * zi[k] + pim * zr[k]
+          t = pr * zrk - pim * zik + c[i]
+          pim = pr * zik + pim * zrk
           pr = t
           i = i + 1
         dr = ~1.0
@@ -816,8 +865,8 @@
         j = 0
         while j < n
           if j != k
-            xr = zr[k] - zr[j]
-            xi = zi[k] - zi[j]
+            xr = zrk - zr[j]
+            xi = zik - zi[j]
             t = dr * xr - dim * xi
             dim = dr * xi + dim * xr
             dr = t
@@ -826,8 +875,8 @@
         if den > ~0.0
           qr = (pr * dr + pim * dim) / den
           qi = (pim * dr - pr * dim) / den
-          zr[k] = zr[k] - qr
-          zi[k] = zi[k] - qi
+          zr[k] = zrk - qr
+          zi[k] = zik - qi
           step = Math.hypot(qr, qi)
           if step > moved
             moved = step
@@ -861,7 +910,8 @@
     shifted = LinAlg.copy_mat(a)
     i = 0
     while i < n
-      shifted[i][i] = shifted[i][i] + ~1.0e-8
+      si = shifted[i]
+      si[i] = si[i] + ~1.0e-8
       i = i + 1
     v = []
     i = 0
@@ -913,9 +963,10 @@
     flat = []
     i = 0
     while i < n
+      ai = a[i]
       j = 0
       while j < n
-        flat = flat.push(a[i][j] + ~0.0)
+        flat = flat.push(ai[j] + ~0.0)
         j = j + 1
       i = i + 1
     af = flat.to_f64
@@ -957,9 +1008,10 @@
     flat = ccall("w_array_new_aligned", -64, m * n)
     i = 0
     while i < m
+      ai = a[i]
       j = 0
       while j < n
-        flat[j * m + i] = a[i][j] + ~0.0
+        flat[j * m + i] = ai[j] + ~0.0
         j += 1
       i += 1
     count = m < n ? m : n
@@ -990,9 +1042,10 @@
     flat = ccall("w_array_new_aligned", -64, m * n)
     i = 0
     while i < m
+      ai = a[i]
       j = 0
       while j < n
-        value = a[i][j].to_f
+        value = ai[j].to_f
         raise "LinAlg.svd: entries must be finite" if !value.finite?
         flat[j * m + i] = value
         j += 1
@@ -1008,13 +1061,14 @@
     j = 0
     while j < k
       s.push(values[j])
+      vtr = vt[j]
       i = 0
       while i < m
         u[i][j] = uf[j * m + i]
         i += 1
       i = 0
       while i < n
-        vt[j][i] = vf[i * k + j]
+        vtr[i] = vf[i * k + j]
         i += 1
       j += 1
     [u, s, vt]
@@ -1030,9 +1084,10 @@
     flat = ccall("w_array_new_aligned", -64, m * n)
     i = 0
     while i < m
+      ai = a[i]
       j = 0
       while j < n
-        flat[j * m + i] = a[i][j] + ~0.0
+        flat[j * m + i] = ai[j] + ~0.0
         j += 1
       i += 1
     rhs = ccall("w_array_new_aligned", -64, m)
@@ -1047,5 +1102,138 @@
     i = 0
     while i < n
       out.push(rhs[i])
+      i += 1
+    out
+
+  # True when `n` is a positive power of 2 (1, 2, 4, 8, …, 4096, …).
+  -> .power_of_two?(n)
+    n > 0 && (n & (n - 1)) == 0
+
+  # Fast Walsh-Hadamard Transform (FWHT) of a 1-D vector `v` of power-of-2
+  # length `n` in O(n log n) additions/subtractions.
+  # When `normalize` is true (default), scales by 1/sqrt(n) so the transform
+  # is symmetric orthonormal and involutory (H_n = H_n^T = H_n^-1), matching
+  # the Hadamard rotation used in 2-bit/4-bit/8-bit LLM quantization.
+  -> .fwht(v, normalize = true)
+    n = v.size()
+    raise "LinAlg.fwht: length must be a positive power of 2" if !LinAlg.power_of_two?(n)
+    out = []
+    i = 0
+    while i < n
+      out.push(v[i] + ~0.0)
+      i += 1
+    h = 1
+    while h < n
+      i = 0
+      while i < n
+        j = i
+        limit = i + h
+        while j < limit
+          x = out[j]
+          y = out[j + h]
+          out[j] = x + y
+          out[j + h] = x - y
+          j += 1
+        i += h * 2
+      h = h * 2
+    if normalize
+      scale = ~1.0 / Math.sqrt(n.to_f)
+      i = 0
+      while i < n
+        out[i] = out[i] * scale
+        i += 1
+    out
+
+  # Row-wise Fast Walsh-Hadamard Transform over a rectangular matrix `a`.
+  -> .fwht_rows(a, normalize = true)
+    m = LinAlg.rows(a)
+    return [] if m == 0
+    n = LinAlg.cols(a)
+    raise "LinAlg.fwht_rows: column count must be a positive power of 2" if !LinAlg.power_of_two?(n)
+    out = []
+    r = 0
+    while r < m
+      ar = a[r]
+      raise "LinAlg.fwht_rows: rows must be rectangular" if ar.size() != n
+      out.push(LinAlg.fwht(ar, normalize))
+      r += 1
+    out
+
+  # Orthonormal Signed Block-Hadamard Transform along rows of `a` with block
+  # width `block_size` (e.g. 128 or 4096 in Bonsai 2 / Qwen3.5 / DFlash 2).
+  # - Forward (`inverse == false`): y_b = H_B (s_b ⊙ x_b)
+  # - Inverse (`inverse == true`):  x_b = s_b ⊙ (H_B y_b)
+  # Because H_B is symmetric orthonormal (H_B^2 = I) and s_i in {-1, +1},
+  # the inverse exactly recovers `a`.
+  -> .block_fwht_rows(a, block_size, signs = nil, inverse = false)
+    m = LinAlg.rows(a)
+    return [] if m == 0
+    n = LinAlg.cols(a)
+    raise "LinAlg.block_fwht_rows: block_size must be a positive power of 2" if !LinAlg.power_of_two?(block_size)
+    raise "LinAlg.block_fwht_rows: column count must be divisible by block_size" if n == 0 || (n % block_size) != 0
+    if signs != nil && signs.size() != n
+      raise "LinAlg.block_fwht_rows: signs length must equal column count"
+    scale = ~1.0 / Math.sqrt(block_size.to_f)
+    out = []
+    r = 0
+    while r < m
+      row = a[r]
+      raise "LinAlg.block_fwht_rows: rows must be rectangular" if row.size() != n
+      out_row = []
+      c = 0
+      while c < n
+        v = row[c] + ~0.0
+        if signs != nil && !inverse
+          v = v * signs[c]
+        out_row.push(v)
+        c += 1
+      b = 0
+      while b < n
+        h = 1
+        while h < block_size
+          i = b
+          block_end = b + block_size
+          while i < block_end
+            j = i
+            limit = i + h
+            while j < limit
+              x = out_row[j]
+              y = out_row[j + h]
+              out_row[j] = x + y
+              out_row[j + h] = x - y
+              j += 1
+            i += h * 2
+          h = h * 2
+        b += block_size
+      c = 0
+      while c < n
+        v = out_row[c] * scale
+        if signs != nil && inverse
+          v = v * signs[c]
+        out_row[c] = v
+        c += 1
+      out.push(out_row)
+      r += 1
+    out
+
+  # Sylvester's Walsh-Hadamard matrix H_n of order `n` (power of 2).
+  # Entries are +1/-1 when `normalize == false`, or ±1/sqrt(n) when true.
+  -> .hadamard_matrix(n, normalize = false)
+    raise "LinAlg.hadamard_matrix: n must be a positive power of 2" if !LinAlg.power_of_two?(n)
+    scale = normalize ? (~1.0 / Math.sqrt(n.to_f)) : ~1.0
+    out = []
+    i = 0
+    while i < n
+      row = []
+      j = 0
+      while j < n
+        bits = i & j
+        parity = 0
+        while bits > 0
+          parity = parity ^ (bits & 1)
+          bits = bits >> 1
+        row.push(parity == 0 ? scale : (~0.0 - scale))
+        j += 1
+      out.push(row)
       i += 1
     out

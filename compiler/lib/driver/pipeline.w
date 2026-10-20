@@ -484,7 +484,7 @@
 
 -> compile_one(file_path, out_path, emit_wire, verbose, intern_algo, emit_ll_only_arg = false, quiet = false)
   if out_path == nil
-    out_path = file_path.replace(".w", ".wc")
+    out_path = file_path.ends_with?(".w") ? file_path.replace(".w", ".wc") : (file_path + ".wc")
 
   # Cache probe: full binary path only (no --emit-wire/--emit-ll/--ll and
   # no TUNGSTEN_LL_PATH/TUNGSTEN_LL_DONE_MARKER — those flows consume

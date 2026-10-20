@@ -392,7 +392,7 @@ if (opts.flag?("help") || opts.flag?("h")) && command == nil
   opts.help!
 
 # Developer option: force the Ruby tree-walking interpreter.
-if opts.flag?("ruby")
+if opts.flag?("ruby") && command != "flame" && command != "fire"
   exec_ruby_driver()
 
 case command

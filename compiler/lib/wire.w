@@ -474,6 +474,7 @@ wire_block_record_fields = [:label, :instructions]
   blocks = f[:blocks]
   # Build redirect map: empty block label → next non-empty block label
   redirect = {}
+  has_redirect = false
   bi = 0
   while bi < blocks.size()
     if blocks[bi][:instructions].size() == 0
@@ -483,8 +484,9 @@ wire_block_record_fields = [:label, :instructions]
         ni += 1
       if ni < blocks.size()
         redirect[blocks[bi][:label]] = blocks[ni][:label]
+        has_redirect = true
     bi += 1
-  if redirect.keys().size() == 0
+  if !has_redirect
     return nil
   # Rewrite branch targets
   bi = 0
@@ -493,21 +495,28 @@ wire_block_record_fields = [:label, :instructions]
     ii = 0
     while ii < instrs.size()
       inst = instrs[ii]
-      if wire_get(inst, :label) != nil && redirect[wire_get(inst, :label)] != nil
-        wire_set(inst, :label, redirect[wire_get(inst, :label)])
-      if wire_get(inst, :then_label) != nil && redirect[wire_get(inst, :then_label)] != nil
-        wire_set(inst, :then_label, redirect[wire_get(inst, :then_label)])
-      if wire_get(inst, :else_label) != nil && redirect[wire_get(inst, :else_label)] != nil
-        wire_set(inst, :else_label, redirect[wire_get(inst, :else_label)])
-      # Phi incoming labels
-      incoming = wire_get(inst, :incoming)
-      if incoming != nil
-        pi = 0
-        while pi < wire_sequence_size(incoming)
-          lbl = wire_sequence_get(incoming, pi + 1)
-          if redirect[lbl] != nil
-            wire_sequence_set(incoming, pi + 1, redirect[lbl])
-          pi += 2
+      op = wire_kind(inst)
+      if op == :br
+        lbl = wire_get(inst, :label)
+        if lbl != nil && redirect[lbl] != nil
+          wire_set(inst, :label, redirect[lbl])
+      elsif op == :cond_br
+        tlbl = wire_get(inst, :then_label)
+        if tlbl != nil && redirect[tlbl] != nil
+          wire_set(inst, :then_label, redirect[tlbl])
+        elbl = wire_get(inst, :else_label)
+        if elbl != nil && redirect[elbl] != nil
+          wire_set(inst, :else_label, redirect[elbl])
+      elsif op == :phi_ssa
+        # Phi incoming labels
+        incoming = wire_get(inst, :incoming)
+        if incoming != nil
+          pi = 0
+          while pi < wire_sequence_size(incoming)
+            lbl = wire_sequence_get(incoming, pi + 1)
+            if redirect[lbl] != nil
+              wire_sequence_set(incoming, pi + 1, redirect[lbl])
+            pi += 2
       ii += 1
     bi += 1
   # Remove empty blocks
@@ -677,7 +686,8 @@ wire_block_record_fields = [:label, :instructions]
     ii = 0
     while ii < instrs.size()
       inst = instrs[ii]
-      if wire_kind(inst) == :ret_i64 || wire_kind(inst) == :ret_i32 || wire_kind(inst) == :ret_void
+      op = wire_kind(inst)
+      if op == :ret_i64 || op == :ret_i32 || op == :ret_void
         fnbody = stack[0]
         recycle_count = wire_get(inst, :function_recycle_count)
         if recycle_count == nil
@@ -733,9 +743,9 @@ wire_block_record_fields = [:label, :instructions]
   # Reapply the accumulated substitutions function-wide so cross-block uses
   # of eliminated-load temps get rewritten too. Chains (a → b where b was
   # itself forwarded) are resolved by following the map to a fixpoint.
-  if global_subst.keys().size() > 0
+  if global_subst.size() > 0
     resolved = resolve_subst_chains(global_subst)
-    rcount = resolved.keys().size()
+    rcount = resolved.size()
     bi = 0
     while bi < f[:blocks].size()
       instrs = f[:blocks][bi][:instructions]
@@ -780,6 +790,7 @@ wire_block_record_fields = [:label, :instructions]
 
 -> cse_block(block, global_subst = nil)
   known = {}
+  has_known = false
   escaped = {}
   subst = {}
   subst_count = 0
@@ -788,39 +799,51 @@ wire_block_record_fields = [:label, :instructions]
   i = 0
   instrs = block[:instructions]
   while i < instrs.size()
-    inst = apply_subst(instrs[i], subst, subst_count)
+    inst = instrs[i]
+    if subst_count > 0
+      inst = apply_subst(inst, subst, subst_count)
+    op = wire_kind(inst)
 
-    if wire_kind(inst) in (:store_i64 :store_i128 :store_float :store_double)
-      if escaped[wire_get(inst, :ptr)] != true
-        known[wire_get(inst, :ptr)] = wire_get(inst, :value)
-      else
-        known[wire_get(inst, :ptr)] = nil
+    if op in (:store_i64 :store_i128 :store_float :store_double)
+      ptr = wire_get(inst, :ptr)
+      if escaped[ptr] != true
+        known[ptr] = wire_get(inst, :value)
+        has_known = true
+      elsif has_known
+        known[ptr] = nil
       new_instrs.push(inst)
-    elsif wire_kind(inst) in (:load_i64 :load_i128 :load_float :load_double)
-      kv = known[wire_get(inst, :ptr)]
-      if kv != nil
-        # Value is known — record substitution, skip the load
-        subst[wire_get(inst, :temp)] = kv
-        subst_count += 1
-        # Also record function-wide so cross-block uses of this temp
-        # (which cse_block's local subst never reaches) get rewritten in
-        # optimize_function's reapply pass.
-        if global_subst != nil
-          global_subst[wire_get(inst, :temp)] = kv
+    elsif op in (:load_i64 :load_i128 :load_float :load_double)
+      if has_known
+        kv = known[wire_get(inst, :ptr)]
+        if kv != nil
+          # Value is known — record substitution, skip the load
+          temp = wire_get(inst, :temp)
+          subst[temp] = kv
+          subst_count += 1
+          # Also record function-wide so cross-block uses of this temp
+          # (which cse_block's local subst never reaches) get rewritten in
+          # optimize_function's reapply pass.
+          if global_subst != nil
+            global_subst[temp] = kv
+        else
+          new_instrs.push(inst)
       else
         new_instrs.push(inst)
-    elsif wire_kind(inst) == :ptr_to_i64
+    elsif op == :ptr_to_i64
       # Address-of escape: any pointer whose address is taken can be
       # mutated through aliasing (closures, callee, indirect store). Mark
       # the slot as escaped and drop all known values so subsequent loads
       # always re-fetch from memory.
       escaped[wire_get(inst, :value)] = true
-      known = {}
+      if has_known
+        known = {}
+        has_known = false
       new_instrs.push(inst)
-    elsif wire_kind(inst) in (:call_direct_i64 :call_direct_i128 :call_direct_void :call_direct_ptr :call_direct_i64_ptr1 :call_direct_void_ptr1 :call_method_i64 :call_indirect_i64 :memo_call0_i64 :memo_call1_i64 :memo_call2_i64 :call_reuse_or_new_array :call_reuse_or_new_hash :call_reuse_or_new_typed :call_reuse_or_new_strbuf :call_reuse_and_drain_or_new_hash :call_recycle_or_new_array :call_recycle_or_new_hash :call_recycle_or_new_typed :call_recycle_or_new_strbuf :call_recycle_array :call_recycle_hash :call_recycle_typed :call_recycle_strbuf)
+    elsif has_known && op in (:call_direct_i64 :call_direct_i128 :call_direct_void :call_direct_ptr :call_direct_i64_ptr1 :call_direct_void_ptr1 :call_method_i64 :call_indirect_i64 :memo_call0_i64 :memo_call1_i64 :memo_call2_i64 :call_reuse_or_new_array :call_reuse_or_new_hash :call_reuse_or_new_typed :call_reuse_or_new_strbuf :call_reuse_and_drain_or_new_hash :call_recycle_or_new_array :call_recycle_or_new_hash :call_recycle_or_new_typed :call_recycle_or_new_strbuf :call_recycle_array :call_recycle_hash :call_recycle_typed :call_recycle_strbuf)
       # Calls may mutate any escaped slot. Drop known values so subsequent
       # loads observe writes performed by the callee or its closures.
       known = {}
+      has_known = false
       new_instrs.push(inst)
     else
       new_instrs.push(inst)
@@ -844,9 +867,209 @@ wire_block_record_fields = [:label, :instructions]
 
 -> apply_subst(inst, subst, subst_count = nil)
   if subst_count == nil
-    subst_count = subst.keys().size()
+    subst_count = subst.size()
   if subst_count == 0
     return inst
+  op = wire_kind(inst)
+  # Fast-path the hottest opcodes in frequency order.
+  if op == :call_direct_i64 || op == :call_direct_void || op == :call_direct_ptr || op == :call_direct_i128
+    args = wire_get(inst, :args)
+    if args != nil
+      result = inst
+      cloned = false
+      new_args = nil
+      ai = 0
+      while ai < wire_sequence_size(args)
+        arg = wire_sequence_get(args, ai)
+        rep = subst[arg]
+        if rep != nil
+          if cloned == false
+            result = clone_inst(inst)
+            cloned = true
+          if new_args == nil
+            new_args = []
+            ci = 0
+            while ci < ai
+              new_args.push(wire_sequence_get(args, ci))
+              ci += 1
+          new_args.push(rep)
+        elsif new_args != nil
+          new_args.push(arg)
+        ai += 1
+      if new_args != nil
+        wire_set(result, :args, wire_sequence(new_args))
+      return result
+    return inst
+  if op == :load_i64 || op == :load_double || op == :load_float || op == :load_i128
+    val = wire_get(inst, :ptr)
+    if val != nil
+      rep = subst[val]
+      if rep != nil
+        result = clone_inst(inst)
+        wire_set(result, :ptr, rep)
+        return result
+    return inst
+  if op == :store_i64 || op == :store_double || op == :store_float || op == :store_i128
+    result = inst
+    cloned = false
+    val = wire_get(inst, :value)
+    if val != nil
+      rep = subst[val]
+      if rep != nil
+        result = clone_inst(inst)
+        cloned = true
+        wire_set(result, :value, rep)
+    val = wire_get(inst, :ptr)
+    if val != nil
+      rep = subst[val]
+      if rep != nil
+        if cloned == false
+          result = clone_inst(inst)
+        wire_set(result, :ptr, rep)
+    return result
+  if op == :br || op == :ret_void || op == :string_i64 || op == :symbol_i64 || op == :call_loc_set_col || op == :load_class || op == :load_global || op == :const_float
+    return inst
+  if op == :cond_br
+    val = wire_get(inst, :cond)
+    if val != nil
+      rep = subst[val]
+      if rep != nil
+        result = clone_inst(inst)
+        wire_set(result, :cond, rep)
+        return result
+    return inst
+  if op == :ret_i64 || op == :icmp_ne_zero || op == :not_i1 || op == :nanbox_bool || op == :truthy_inline || op == :free_value || op == :ptr_to_i64 || op == :i64_to_ptr
+    val = wire_get(inst, :value)
+    if val != nil
+      rep = subst[val]
+      if rep != nil
+        result = clone_inst(inst)
+        wire_set(result, :value, rep)
+        return result
+    return inst
+  if op == :call_method_i64
+    result = inst
+    cloned = false
+    val = wire_get(inst, :receiver)
+    if val != nil
+      rep = subst[val]
+      if rep != nil
+        result = clone_inst(inst)
+        cloned = true
+        wire_set(result, :receiver, rep)
+    args = wire_get(inst, :args)
+    if args != nil
+      new_args = nil
+      ai = 0
+      while ai < wire_sequence_size(args)
+        arg = wire_sequence_get(args, ai)
+        rep = subst[arg]
+        if rep != nil
+          if cloned == false
+            result = clone_inst(inst)
+            cloned = true
+          if new_args == nil
+            new_args = []
+            ci = 0
+            while ci < ai
+              new_args.push(wire_sequence_get(args, ci))
+              ci += 1
+          new_args.push(rep)
+        elsif new_args != nil
+          new_args.push(arg)
+        ai += 1
+      if new_args != nil
+        wire_set(result, :args, wire_sequence(new_args))
+    return result
+  if op == :add_i64 || op == :sub_i64 || op == :mul_i64 || op == :icmp_i64 || op == :icmp_ne_i64 || op == :and_i1 || op == :or_i1 || op == :fadd_f64 || op == :fsub_f64 || op == :fmul_f64 || op == :fdiv_f64 || op == :fcmp_f64
+    result = inst
+    cloned = false
+    val = wire_get(inst, :lhs)
+    if val != nil
+      rep = subst[val]
+      if rep != nil
+        result = clone_inst(inst)
+        cloned = true
+        wire_set(result, :lhs, rep)
+    val = wire_get(inst, :rhs)
+    if val != nil
+      rep = subst[val]
+      if rep != nil
+        if cloned == false
+          result = clone_inst(inst)
+        wire_set(result, :rhs, rep)
+    return result
+  if op == :nanbox_int || op == :nanbox_float
+    val = wire_get(inst, :raw)
+    if val != nil
+      rep = subst[val]
+      if rep != nil
+        result = clone_inst(inst)
+        wire_set(result, :raw, rep)
+        return result
+    return inst
+  if op == :nanunbox_int || op == :nanunbox_float
+    val = wire_get(inst, :boxed)
+    if val != nil
+      rep = subst[val]
+      if rep != nil
+        result = clone_inst(inst)
+        wire_set(result, :boxed, rep)
+        return result
+    return inst
+  if op == :ivar_get || op == :ivar_get_idx
+    val = wire_get(inst, :self_reg)
+    if val != nil
+      rep = subst[val]
+      if rep != nil
+        result = clone_inst(inst)
+        wire_set(result, :self_reg, rep)
+        return result
+    return inst
+  if op == :ivar_set || op == :ivar_set_idx
+    result = inst
+    cloned = false
+    val = wire_get(inst, :value)
+    if val != nil
+      rep = subst[val]
+      if rep != nil
+        result = clone_inst(inst)
+        cloned = true
+        wire_set(result, :value, rep)
+    val = wire_get(inst, :self_reg)
+    if val != nil
+      rep = subst[val]
+      if rep != nil
+        if cloned == false
+          result = clone_inst(inst)
+        wire_set(result, :self_reg, rep)
+    return result
+  if op == :select_i64
+    result = inst
+    cloned = false
+    val = wire_get(inst, :cond)
+    if val != nil
+      rep = subst[val]
+      if rep != nil
+        result = clone_inst(inst)
+        cloned = true
+        wire_set(result, :cond, rep)
+    val = wire_get(inst, :then_val)
+    if val != nil
+      rep = subst[val]
+      if rep != nil
+        if cloned == false
+          result = clone_inst(inst)
+          cloned = true
+        wire_set(result, :then_val, rep)
+    val = wire_get(inst, :else_val)
+    if val != nil
+      rep = subst[val]
+      if rep != nil
+        if cloned == false
+          result = clone_inst(inst)
+        wire_set(result, :else_val, rep)
+    return result
   result = inst
   cloned = false
   val = wire_get(inst, :value)
@@ -1034,6 +1257,15 @@ wire_block_record_fields = [:label, :instructions]
         result = clone_inst(inst)
         cloned = true
       result[:idx] = rep
+  if op == :bool_array_set_inline || op == :bool_array_set_byte_inline
+    val = wire_get(inst, :val)
+    if val != nil
+      rep = subst[val]
+      if rep != nil
+        if cloned == false
+          result = clone_inst(inst)
+          cloned = true
+        wire_set(result, :val, rep)
   # Substitute within s[] scratch array
   sarr = wire_get(inst, :s)
   if sarr != nil
@@ -1064,7 +1296,7 @@ wire_block_record_fields = [:label, :instructions]
   # CSE-forwarded machine-int local passed as an asm-builtin operand (e.g.
   # asm_add_no's n) kept referencing the eliminated load's temp — clang
   # rejected the IR with `use of undefined value %tN`.
-  if wire_kind(inst) in (:asm_add_n :asm_add_no :asm_sub_no :asm_addmul1 :asm_mulbase :asm_neon_umull :asm_neon_redc :asm_neon_redc4 :asm_neon_madd4 :asm_neon_msub4 :asm_neon_gadd2 :asm_neon_ntt_stage :asm_gold_stage :asm_gold_stage_inv :asm_add_uneq :asm_sub_uneq)
+  if op in (:asm_add_n :asm_add_no :asm_sub_no :asm_addmul1 :asm_mulbase :asm_neon_umull :asm_neon_redc :asm_neon_redc4 :asm_neon_madd4 :asm_neon_msub4 :asm_neon_gadd2 :asm_neon_ntt_stage :asm_gold_stage :asm_gold_stage_inv :asm_add_uneq :asm_sub_uneq)
     asm_fields = [:outp, :ap, :bp, :vp, :twp, :ivp, :n, :ooff, :aoff, :boff, :bsc, :na, :nb, :hq]
     fi = 0
     while fi < asm_fields.size()
@@ -1111,6 +1343,7 @@ wire_block_record_fields = [:label, :instructions]
 -> dead_store_elim(block)
   prev_store = {}
   dead_set = {}
+  has_dead = false
   # Slots whose address has been taken (ptr_to_i64) may be loaded later
   # through a captured inttoptr — e.g. `i = 0; each { use i }; i = 1`.
   # DSE must not kill stores to escaped slots: the intervening use is
@@ -1121,20 +1354,24 @@ wire_block_record_fields = [:label, :instructions]
   instrs = block[:instructions]
   while i < instrs.size()
     inst = instrs[i]
-    if wire_kind(inst) in (:store_i64 :store_i128 :store_float :store_double)
-      prev = prev_store[wire_get(inst, :ptr)]
-      if prev != nil && escaped[wire_get(inst, :ptr)] != true
+    op = wire_kind(inst)
+    if op in (:store_i64 :store_i128 :store_float :store_double)
+      ptr = wire_get(inst, :ptr)
+      prev = prev_store[ptr]
+      if prev != nil && escaped[ptr] != true
         dead_set[prev] = true
-      prev_store[wire_get(inst, :ptr)] = i
-    elsif wire_kind(inst) in (:load_i64 :load_i128 :load_float :load_double)
+        has_dead = true
+      prev_store[ptr] = i
+    elsif op in (:load_i64 :load_i128 :load_float :load_double)
       # Load makes the previous store to this slot live
       prev_store[wire_get(inst, :ptr)] = nil
-    elsif wire_kind(inst) == :ptr_to_i64
-      escaped[wire_get(inst, :value)] = true
-      prev_store[wire_get(inst, :value)] = nil
+    elsif op == :ptr_to_i64
+      val = wire_get(inst, :value)
+      escaped[val] = true
+      prev_store[val] = nil
     i += 1
 
-  if dead_set.keys().size() == 0
+  if !has_dead
     return
 
   new_instrs = []
@@ -1150,32 +1387,39 @@ wire_block_record_fields = [:label, :instructions]
 # slots from var_slots and strip their orphaned stores.
 
 -> prune_dead_allocas(f)
+  if f[:var_slots].size() == 0
+    return
+
   # Collect all ptrs that appear in load instructions
   loaded = {}
   i = 0
   while i < f[:blocks].size()
     blk = f[:blocks][i]
+    instrs = blk[:instructions]
     j = 0
-    while j < blk[:instructions].size()
-      inst = blk[:instructions][j]
-      if wire_kind(inst) in (:load_i64 :load_i128 :load_float :load_double)
+    while j < instrs.size()
+      inst = instrs[j]
+      op = wire_kind(inst)
+      if op in (:load_i64 :load_i128 :load_float :load_double)
         loaded[wire_get(inst, :ptr)] = true
-      elsif wire_kind(inst) == :ptr_to_i64
+      elsif op == :ptr_to_i64
         loaded[wire_get(inst, :value)] = true
       j += 1
     i += 1
 
   # Identify dead slots (stored but never loaded)
   dead = {}
+  has_dead = false
   slot_names = f[:var_slots].keys()
   i = 0
   while i < slot_names.size()
     ptr = f[:var_slots][slot_names[i]]
     if ptr.starts_with?("%v") && loaded[ptr] != true
       dead[ptr] = true
+      has_dead = true
     i += 1
 
-  if dead.keys().size() == 0
+  if !has_dead
     return
 
   # Rebuild var_slots without dead entries
@@ -1196,11 +1440,13 @@ wire_block_record_fields = [:label, :instructions]
   i = 0
   while i < f[:blocks].size()
     blk = f[:blocks][i]
+    instrs = blk[:instructions]
     new_instrs = []
     j = 0
-    while j < blk[:instructions].size()
-      inst = blk[:instructions][j]
-      if ((wire_kind(inst) != :store_i64 && wire_kind(inst) != :store_i128 && wire_kind(inst) != :store_float && wire_kind(inst) != :store_double) || dead[wire_get(inst, :ptr)] != true)
+    while j < instrs.size()
+      inst = instrs[j]
+      op = wire_kind(inst)
+      if ((op != :store_i64 && op != :store_i128 && op != :store_float && op != :store_double) || dead[wire_get(inst, :ptr)] != true)
         new_instrs.push(inst)
       j += 1
     blk[:instructions] = new_instrs

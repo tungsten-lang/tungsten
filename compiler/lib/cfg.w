@@ -57,12 +57,12 @@ use wire
     i += 1
 
   # Pass 2: edges from terminators
-  succs = {}
-  preds = {}
+  succs = []
+  preds = []
   i = 0
   while i < n
-    succs[i] = []
-    preds[i] = []
+    succs.push([])
+    preds.push([])
     i += 1
 
   i = 0
@@ -72,13 +72,13 @@ use wire
       last = instrs[instrs.size() - 1]
       op = wire_kind(last)
       if op == :br
-        target = label_map[last[:label]]
+        target = label_map[wire_get(last, :label)]
         if target != nil
           succs[i].push(target)
           preds[target].push(i)
       elsif op == :cond_br
-        then_idx = label_map[last[:then_label]]
-        else_idx = label_map[last[:else_label]]
+        then_idx = label_map[wire_get(last, :then_label)]
+        else_idx = label_map[wire_get(last, :else_label)]
         if then_idx != nil
           succs[i].push(then_idx)
           preds[then_idx].push(i)
@@ -86,7 +86,7 @@ use wire
           succs[i].push(else_idx)
           preds[else_idx].push(i)
       elsif op == :switch_i64
-        default_idx = label_map[last[:default_label]]
+        default_idx = label_map[wire_get(last, :default_label)]
         if default_idx != nil
           succs[i].push(default_idx)
           preds[default_idx].push(i)
@@ -106,7 +106,11 @@ use wire
 
 -> compute_rpo(cfg)
   n = cfg[:num_blocks]
-  visited = {}
+  visited = []
+  i = 0
+  while i < n
+    visited.push(false)
+    i += 1
   postorder = []
 
   # Iterative DFS using explicit stack
@@ -140,7 +144,11 @@ use wire
     i -= 1
 
   # Block → RPO index
-  rpo_index = {}
+  rpo_index = []
+  i = 0
+  while i < n
+    rpo_index.push(0)
+    i += 1
   i = 0
   while i < rpo.size()
     rpo_index[rpo[i]] = i
@@ -208,12 +216,12 @@ use wire
 
 -> compute_dominance_frontiers(cfg, idom)
   n = cfg[:num_blocks]
-  df = {}
-  df_seen = {}
+  df = []
+  df_seen = []
   i = 0
   while i < n
-    df[i] = []
-    df_seen[i] = {}
+    df.push([])
+    df_seen.push({})
     i += 1
 
   i = 0
@@ -291,9 +299,9 @@ use wire
   index = ccall("w_atomic_add", state[:cursor], u0xFFFA000000000001)
   while index < functions.size()
     func = functions[index]
-    if func[:blocks].size() > 0 && func[:incremental_core_frozen] != true && !has_overflow_checked(func)
+    if func[:blocks].size() > 0 && func[:incremental_core_frozen] != true
       promotable = find_promotable_vars(func)
-      if promotable.keys().size() > 0
+      if promotable.size() > 0
         state[:promotables][index] = promotable
         state[:analyses][index] = analyze_function(func)
     index = ccall("w_atomic_add", state[:cursor], u0xFFFA000000000001)
@@ -321,39 +329,50 @@ use wire
 
 # ── SSA Conversion (mem2reg) ──────────────────────────────────────────
 
+-> ssa_default_val_for_ptr(func, promotable, ptr)
+  slot_types = func[:var_slot_types]
+  if slot_types != nil && promotable[ptr] != nil
+    st = slot_types[promotable[ptr]]
+    if st == "double" || st == "float"
+      return "0.0"
+    if st == "i128"
+      return "0"
+  w_nil.to_s()
+
 # Identify var_slots that can be promoted to SSA registers.
-# A slot is promotable if it's only accessed via store_i64 and load_i64
-# (not via pointer operations like store_ptr, load_ptr, gep_array, or calls).
+# A slot is promotable if it's only accessed via typed scalar store/load
+# matching its slot type (not via pointer operations like store_ptr, load_ptr,
+# gep_array, or calls). Also checks for setjmp and overflow-checked ops in the
+# same instruction walk.
 
 -> find_promotable_vars(func)
   slots = func[:var_slots]
-  if slots == nil
+  if slots == nil || slots.size() == 0
     return {}
   # Don't promote vars in the top-level function (they have global stores)
   if func[:is_toplevel] == true
     return {}
-  # A longjmp resumes inside this function at a landing pad the CFG believes
-  # is reachable only from the setjmp; promoted slots would lose every write
-  # made in the guarded region. See has_setjmp above.
-  if has_setjmp(func)
-    return {}
-  # Start assuming all are promotable
+  # Start assuming eligible scalar slots are promotable
   promotable = {}
+  has_cand = false
   slot_names = slots.keys()
   si = 0
   while si < slot_names.size()
     name = slot_names[si]
     ptr = slots[name]
-    slot_type = nil
-    if func[:var_slot_types] != nil
+    slot_type = "i64"
+    if func[:var_slot_types] != nil && func[:var_slot_types][name] != nil
       slot_type = func[:var_slot_types][name]
     if name.starts_with?("__sc_result.")
       promotable[ptr] = false
-    elsif ptr.starts_with?("%v") && (slot_type == nil || slot_type == "i64")
+    elsif ptr.starts_with?("%v") && (slot_type == "i64" || slot_type == "double" || slot_type == "float" || slot_type == "i128")
       promotable[ptr] = true
+      has_cand = true
     si += 1
+  if !has_cand
+    return {}
 
-  # Scan all instructions for non-load/store uses of slot pointers
+  # Scan all instructions for setjmp/overflow-checked ops and non-load/store uses
   bi = 0
   while bi < func[:blocks].size()
     instrs = func[:blocks][bi][:instructions]
@@ -361,30 +380,40 @@ use wire
     while ii < instrs.size()
       inst = instrs[ii]
       op = wire_kind(inst)
-      # store_i64 and load_i64 are OK — skip them
-      if op != :store_i64 && op != :load_i64
-        # Check if any slot pointer appears in any field of this instruction
-        if op == :store_ptr && promotable[wire_get(inst, :dest)] == true
-          promotable[wire_get(inst, :dest)] = false
-        if op == :load_ptr && promotable[wire_get(inst, :ptr)] == true
-          promotable[wire_get(inst, :ptr)] = false
-        if op == :ptr_to_i64 && promotable[wire_get(inst, :value)] == true
-          promotable[wire_get(inst, :value)] = false
-        # Call args: if a slot pointer is passed, it's address-taken
-        if wire_get(inst, :args) != nil
-          ai = 0
+      if op != :store_i64 && op != :load_i64 && op != :store_double && op != :load_double && op != :store_float && op != :load_float && op != :store_i128 && op != :load_i128
+        if op == :setjmp || op == :add_i48_checked || op == :sub_i48_checked || op == :mul_i48_checked
+          return {}
+        if op == :call_direct_i64 || op == :call_direct_void || op == :call_method_i64 || op == :call_direct_ptr || op == :call_direct_i128 || op == :memo_call1_i64 || op == :memo_call2_i64
+          # Call args: if a slot pointer is passed, it's address-taken
           args = wire_get(inst, :args)
-          while ai < wire_sequence_size(args)
-            arg = wire_sequence_get(args, ai)
-            if promotable[arg] == true
-              promotable[arg] = false
-            ai += 1
+          if args != nil
+            ai = 0
+            while ai < wire_sequence_size(args)
+              arg = wire_sequence_get(args, ai)
+              if promotable[arg] == true
+                promotable[arg] = false
+              ai += 1
+        elsif op == :ptr_to_i64
+          val = wire_get(inst, :value)
+          if promotable[val] == true
+            promotable[val] = false
+        elsif op == :store_ptr
+          dest = wire_get(inst, :dest)
+          if promotable[dest] == true
+            promotable[dest] = false
+        elsif op == :load_ptr
+          ptr = wire_get(inst, :ptr)
+          if promotable[ptr] == true
+            promotable[ptr] = false
+        elsif op == :call_direct_i64_ptr1 || op == :call_direct_void_ptr1
+          arg = wire_get(inst, :arg)
+          if promotable[arg] == true
+            promotable[arg] = false
       ii += 1
     bi += 1
 
   # Return set of promotable pointer names
   result = {}
-  slot_names = slots.keys()
   si = 0
   while si < slot_names.size()
     ptr = slots[slot_names[si]]
@@ -403,9 +432,10 @@ use wire
     ii = 0
     while ii < instrs.size()
       inst = instrs[ii]
-      if wire_kind(inst) == :store_i64
-        if promotable[wire_get(inst, :ptr)] != nil
-          ptr = wire_get(inst, :ptr)
+      op = wire_kind(inst)
+      if op in (:store_i64 :store_double :store_float :store_i128)
+        ptr = wire_get(inst, :ptr)
+        if promotable[ptr] != nil
           if defs[ptr] == nil
             defs[ptr] = []
           defs[ptr].push(bi)
@@ -470,10 +500,10 @@ use wire
   setup_started_at = nil
   if rename_profile != nil
     setup_started_at = clock()
-  dom_children = {}
+  dom_children = []
   i = 0
   while i < n
-    dom_children[i] = []
+    dom_children.push([])
     i += 1
   i = 1
   while i < n
@@ -528,7 +558,11 @@ use wire
   # phase 1: pop definitions (restore stacks)
   stack = [[0, 0]]
   stack_push_counts = {}  # block_index → {ptr → push_count}
-  visited = {}
+  visited = []
+  i = 0
+  while i < n
+    visited.push(false)
+    i += 1
 
   while stack.size() > 0
     top = stack[stack.size() - 1]
@@ -594,7 +628,7 @@ use wire
         inst = apply_subst(inst, subst, subst_count)
       op = wire_kind(inst)
 
-      if op == :store_i64 && promotable[wire_get(inst, :ptr)] != nil
+      if op in (:store_i64 :store_double :store_float :store_i128) && promotable[wire_get(inst, :ptr)] != nil
         # Store to promotable var: push new definition, skip instruction
         ptr = wire_get(inst, :ptr)
         current_def[ptr].push(wire_get(inst, :value))
@@ -603,14 +637,14 @@ use wire
           pushes[ptr] = 1
         else
           pushes[ptr] = push_count + 1
-      elsif op == :load_i64 && promotable[wire_get(inst, :ptr)] != nil
+      elsif op in (:load_i64 :load_double :load_float :load_i128) && promotable[wire_get(inst, :ptr)] != nil
         # Load from promotable var: substitute directly, skip instruction
         ptr = wire_get(inst, :ptr)
         def_stack = current_def[ptr]
         if def_stack.size() > 0
           subst[wire_get(inst, :temp)] = def_stack[def_stack.size() - 1]
         else
-          subst[wire_get(inst, :temp)] = w_nil.to_s()
+          subst[wire_get(inst, :temp)] = ssa_default_val_for_ptr(func, promotable, ptr)
         subst_count += 1
       else
         new_instrs.push(inst)
@@ -636,9 +670,11 @@ use wire
         while ppi < pphi.size()
           ptr = pphi[ppi]
           def_stack = current_def[ptr]
-          val = w_nil.to_s()
+          val = nil
           if def_stack.size() > 0
             val = def_stack[def_stack.size() - 1]
+          else
+            val = ssa_default_val_for_ptr(func, promotable, ptr)
           if phi_incoming[succ][ptr] == nil
             phi_incoming[succ][ptr] = []
           phi_incoming[succ][ptr].push(val)
@@ -677,12 +713,13 @@ use wire
         if u_subst_count > 0
           inst = apply_subst(inst, u_subst, u_subst_count)
         op = wire_kind(inst)
-        if op == :store_i64 && promotable[wire_get(inst, :ptr)] != nil
+        if op in (:store_i64 :store_double :store_float :store_i128) && promotable[wire_get(inst, :ptr)] != nil
           local_defs[wire_get(inst, :ptr)] = wire_get(inst, :value)
-        elsif op == :load_i64 && promotable[wire_get(inst, :ptr)] != nil
-          val = local_defs[wire_get(inst, :ptr)]
+        elsif op in (:load_i64 :load_double :load_float :load_i128) && promotable[wire_get(inst, :ptr)] != nil
+          ptr = wire_get(inst, :ptr)
+          val = local_defs[ptr]
           if val == nil
-            val = w_nil.to_s()
+            val = ssa_default_val_for_ptr(func, promotable, ptr)
           u_subst[wire_get(inst, :temp)] = val
           u_subst_count += 1
         else
@@ -736,21 +773,17 @@ use wire
 -> ssa_convert(func, cfg_analysis, profile = nil, precomputed_promotable = nil)
   promotable = precomputed_promotable
   if promotable == nil
-    # Standalone callers retain the original safety checks. The main compiler
-    # precomputes these before building the otherwise-unneeded CFG.
-    if has_overflow_checked(func)
-      return nil
     promotable_started_at = nil
     if profile != nil
       promotable_started_at = clock()
     promotable = find_promotable_vars(func)
     if profile != nil
       profile[:promotable_secs] = profile[:promotable_secs] + (clock() - promotable_started_at)
-  if promotable.keys().size() == 0
+  if promotable.size() == 0
     return nil
   if profile != nil
     profile[:ssa_functions] = profile[:ssa_functions] + 1
-    profile[:promotable_var_count] = profile[:promotable_var_count] + promotable.keys().size()
+    profile[:promotable_var_count] = profile[:promotable_var_count] + promotable.size()
   var_defs_started_at = nil
   if profile != nil
     var_defs_started_at = clock()
@@ -768,7 +801,7 @@ use wire
   # not yet live-in pruned. If a slot needs a merge phi, leave that slot in
   # memory until the phi pass grows proper liveness; otherwise a phi temp can
   # be pushed as the current def and later skipped during emission.
-  if phi_placements.keys().size() > 0
+  if phi_placements.size() > 0
     phi_ptrs = {}
     phi_blocks = phi_placements.keys()
     pbi = 0
@@ -790,7 +823,7 @@ use wire
       pi += 1
 
     promotable = pruned
-    if promotable.keys().size() == 0
+    if promotable.size() == 0
       return nil
 
     # Phi placement is independent per variable. Every variable with a phi

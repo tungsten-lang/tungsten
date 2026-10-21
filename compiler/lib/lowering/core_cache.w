@@ -441,44 +441,61 @@ incremental_core_cache_state = {
     i += 1
   index
 
+-> incremental_core_cache_inst_string_field(op)
+  if op == :string_i64 || op == :symbol_i64 || op == :bigint_literal_i64 || op == :const_uuid || op == :const_ipv6
+    return :string_id
+  if op == :ivar_get || op == :ivar_set || op == :register_unit
+    return :str_id
+  if op == :class_new || op == :builtin_class_init
+    return :name_str_id
+  if op == :class_add_method || op == :class_add_static_method
+    return :method_str_id
+  if op == :call_loc_set_col
+    return :file_str_id
+  if op == :class_add_ivar
+    return :ivar_str_id
+  nil
+
 -> incremental_core_cache_collect_inst_strings(inst, text_by_id, texts)
-  fields = [:string_id, :str_id, :name_str_id, :method_str_id, :file_str_id, :ivar_str_id]
-  i = 0
-  while i < fields.size()
-    id = wire_get(inst, fields[i])
+  op = wire_kind(inst)
+  field = incremental_core_cache_inst_string_field(op)
+  if field != nil
+    id = wire_get(inst, field)
     if id != nil && text_by_id[id] != nil
       texts[text_by_id[id]] = true
-    i += 1
-  cases = wire_get(inst, :cases)
-  if cases != nil
-    i = 0
-    while i < wire_sequence_size(cases)
-      item = wire_sequence_get(cases, i)
-      id = item[:string_id]
-      if id != nil && text_by_id[id] != nil
-        texts[text_by_id[id]] = true
-      i += 1
+    return nil
+  if op == :switch_i64
+    cases = wire_get(inst, :cases)
+    if cases != nil
+      i = 0
+      while i < wire_sequence_size(cases)
+        item = wire_sequence_get(cases, i)
+        id = item[:string_id]
+        if id != nil && text_by_id[id] != nil
+          texts[text_by_id[id]] = true
+        i += 1
   nil
 
 -> incremental_core_cache_rewrite_inst_strings(inst, remap)
-  fields = [:string_id, :str_id, :name_str_id, :method_str_id, :file_str_id, :ivar_str_id]
-  i = 0
-  while i < fields.size()
-    old_id = wire_get(inst, fields[i])
+  op = wire_kind(inst)
+  field = incremental_core_cache_inst_string_field(op)
+  if field != nil
+    old_id = wire_get(inst, field)
     if old_id != nil
       new_id = remap[old_id]
       if new_id != nil && new_id != old_id
-        wire_set(inst, fields[i], new_id)
-    i += 1
-  cases = wire_get(inst, :cases)
-  if cases != nil
-    i = 0
-    while i < wire_sequence_size(cases)
-      item = wire_sequence_get(cases, i)
-      old_id = item[:string_id]
-      if old_id != nil && remap[old_id] != nil
-        item[:string_id] = remap[old_id]
-      i += 1
+        wire_set(inst, field, new_id)
+    return nil
+  if op == :switch_i64
+    cases = wire_get(inst, :cases)
+    if cases != nil
+      i = 0
+      while i < wire_sequence_size(cases)
+        item = wire_sequence_get(cases, i)
+        old_id = item[:string_id]
+        if old_id != nil && remap[old_id] != nil
+          item[:string_id] = remap[old_id]
+        i += 1
   nil
 
 # Cached instructions embed module string ids. Put every Core-referenced text

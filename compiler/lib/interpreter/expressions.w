@@ -161,7 +161,7 @@
     # inside Hypercomplex#** fell through to the primitive `left * right` arm,
     # which fed a whole object into the runtime multiply and died in as_int.
     if type(left) == "Hash" && left.has_key?(:rt) && left[:rt] == :object
-      opn = binop_method_name(op)
+      opn = object_binop_method_name(op, left)
       if opn != nil
         return dispatch_method(left, opn, [right], nil, nil)
     if op == :PLUS
@@ -466,7 +466,7 @@
     # covers the hypercomplex tower, Vec/Mat, etc. Arithmetic/bitwise here and
     # `==`/`!=` just below; ordering comparisons were handled above.
     if type(left) == "Hash" && left.has_key?(:rt) && left[:rt] == :object
-      opn = binop_method_name(op)
+      opn = object_binop_method_name(op, left)
       if opn != nil
         return dispatch_method(left, opn, [right], nil, nil)
       # `==` dispatches to a BODIED user `==` override, mirroring runtime
@@ -599,9 +599,20 @@
       return "|"
     if op == :CARET
       return "^"
+    # `obj << x` calls the class's own `<<` (FileHandle, Table, ...), like the
+    # compiled w_bit_shl.
+    if op == :LSHIFT
+      return "<<"
     if op == :HADAMARD
       return "⊙"
     nil
+
+  # The operator method an object operand answers. A class without its own
+  # `<<` keeps the `+` fallback, like the compiled w_bit_shl → w_add route.
+  -> object_binop_method_name(op, obj)
+    if op == :LSHIFT && lookup_method(obj[:w_class], "<<") == nil
+      return "+"
+    binop_method_name(op)
 
   # Range#/ (step): materialize `(a..b) / n` as [a, a+n, a+2n, ...] while
   # < b (or <= b for an inclusive range). Mirrors the compiled path's

@@ -46441,6 +46441,15 @@ WValue w_bit_shl(WValue a, WValue b) {
      * w_add, whose array branch (w_array_add_elem) does an ELEMENTWISE add and
      * returns a NEW array, so `a << x` left `a` unchanged. */
     if (w_is_array(a)) { w_array_push(a, b); return a; }
+    /* A user class that defines `<<` gets a.<<(b), as w_add routes `+`.
+     * Falling through to w_add sent `handle << "text"` to the class's `+`
+     * ("undefined method '+'") even when the class defines `<<`; a class
+     * without its own `<<` keeps the `+` fallback below. */
+    if (w_is_instance(a)) {
+        WValue shl_name = w_string("<<");
+        if (w_method_lookup(g_class_table[((WObject *)w_as_ptr(a))->class_id], shl_name))
+            return w_method_call_fast(a, shl_name, &b, 1);
+    }
     /* Non-integer LHS or non-int shift count: preserve the overloaded `<<`
      * fallback. */
     if (!w_is_integer_any(a) || !w_is_int(b)) return w_add(a, b);

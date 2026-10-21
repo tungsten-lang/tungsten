@@ -244,8 +244,12 @@
   when :compound_assign
     return lower_compound_assign(ctx, node)
   when :if
-    # if-expression (inline if)
+    # if-expression (inline if). Arms that share a 64-bit machine-int type
+    # (infer_type's :if arm) merge raw, like the operands of a raw binary op.
     materialize_bindings(ctx)
+    if_type = infer_type(node, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+    if if_type in (:i64 :u64)
+      return lower_if_expr(ctx, node, if_type)
     return lower_if_expr(ctx, node)
   when :case
     materialize_bindings(ctx)

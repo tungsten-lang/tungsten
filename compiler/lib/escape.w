@@ -116,6 +116,8 @@
     ai += 1
   nil
 
+escape_derive_fields = [:value, :boxed, :raw, :arr, :base, :ptr, :lhs, :rhs]
+
 # Alias-carrying operand fields of value-producing ops the main walk has no
 # specific rule for: conversions (:value, :boxed, :raw), container and
 # pointer bases (:arr, :base, :ptr), and arithmetic that may be pointer
@@ -125,10 +127,9 @@
   temp = wire_get(inst, :temp)
   if temp == nil
     return nil
-  fields = [:value, :boxed, :raw, :arr, :base, :ptr, :lhs, :rhs]
   fi = 0
-  while fi < fields.size()
-    src = escape_param_source(wire_get(inst, fields[fi]), state[:temp_from_param], state[:param_idx])
+  while fi < escape_derive_fields.size()
+    src = escape_param_source(wire_get(inst, escape_derive_fields[fi]), state[:temp_from_param], state[:param_idx])
     if src != nil
       state[:temp_from_param][temp] = src
       return nil
@@ -251,13 +252,20 @@
                   if int_list == nil || ai >= int_list.size() || int_list[ai] == true
                     param_int_stored[src] = true
                   kl = callee_escs[:kind_stored_escs]
-                  kinds = [:array, :string, :hash]
-                  kk = 0
-                  while kk < kinds.size()
-                    kv = kl == nil ? nil : kl[kinds[kk]]
-                    if kv == nil || ai >= kv.size() || kv[ai] == true
-                      param_kind_stored[kinds[kk]][src] = true
-                    kk += 1
+                  if kl == nil
+                    param_kind_stored[:array][src] = true
+                    param_kind_stored[:string][src] = true
+                    param_kind_stored[:hash][src] = true
+                  else
+                    kv_a = kl[:array]
+                    if kv_a == nil || ai >= kv_a.size() || kv_a[ai] == true
+                      param_kind_stored[:array][src] = true
+                    kv_s = kl[:string]
+                    if kv_s == nil || ai >= kv_s.size() || kv_s[ai] == true
+                      param_kind_stored[:string][src] = true
+                    kv_h = kl[:hash]
+                    if kv_h == nil || ai >= kv_h.size() || kv_h[ai] == true
+                      param_kind_stored[:hash][src] = true
                   if stored_list == nil || ai >= stored_list.size() || stored_list[ai] == true
                     param_escaped[src] = true
                     param_stored[src] = true
@@ -291,11 +299,9 @@
           param_escaped[src] = true
           param_stored[src] = true
           param_int_stored[src] = true if mname == nil || !int_temp_reader_method?(mname)
-          kinds = [:array, :string, :hash]
-          kk = 0
-          while kk < kinds.size()
-            param_kind_stored[kinds[kk]][src] = true if mname == nil || !container_reader_method?(kinds[kk], mname)
-            kk += 1
+          param_kind_stored[:array][src] = true if mname == nil || !container_reader_method?(:array, mname)
+          param_kind_stored[:string][src] = true if mname == nil || !container_reader_method?(:string, mname)
+          param_kind_stored[:hash][src] = true if mname == nil || !container_reader_method?(:hash, mname)
 
       elsif op in (:string_i64 :symbol_i64)
         if wire_get(inst, :temp) != nil && strings != nil
@@ -354,6 +360,36 @@
         has_side_effects = true
         escape_mark_value(wire_get(inst, :super_reg), true, state)
 
+      elsif op in (:br :cond_br :scope_push :scope_pop :alloca_i64 :ret_void :ret_i32 :unreachable :load_global :load_class :free_value)
+        ignored = nil
+
+      elsif op in (:load_i64 :load_ptr)
+        src = escape_param_source(wire_get(inst, :ptr), temp_from_param, param_idx)
+        if src != nil && wire_get(inst, :temp) != nil
+          temp_from_param[wire_get(inst, :temp)] = src
+
+      elsif op in (:truthy_inline :nanbox_bool :not_i1 :zext_i1_i64)
+        src = escape_param_source(wire_get(inst, :value), temp_from_param, param_idx)
+        if src != nil && wire_get(inst, :temp) != nil
+          temp_from_param[wire_get(inst, :temp)] = src
+
+      elsif op == :nanbox_int
+        src = escape_param_source(wire_get(inst, :raw), temp_from_param, param_idx)
+        if src != nil && wire_get(inst, :temp) != nil
+          temp_from_param[wire_get(inst, :temp)] = src
+
+      elsif op == :nanunbox_int
+        src = escape_param_source(wire_get(inst, :boxed), temp_from_param, param_idx)
+        if src != nil && wire_get(inst, :temp) != nil
+          temp_from_param[wire_get(inst, :temp)] = src
+
+      elsif op in (:icmp_i64 :add_i64 :sub_i64 :mul_i64 :sdiv_i64 :srem_i64 :and_i64 :or_i64 :xor_i64 :shl_i64 :ashr_i64 :lshr_i64 :and_i1 :or_i1)
+        src = escape_param_source(wire_get(inst, :lhs), temp_from_param, param_idx)
+        if src == nil
+          src = escape_param_source(wire_get(inst, :rhs), temp_from_param, param_idx)
+        if src != nil && wire_get(inst, :temp) != nil
+          temp_from_param[wire_get(inst, :temp)] = src
+
       else
         # Catch-all for every other instruction shape. Any op that carries
         # an argument list or a receiver is a call the rules above do not
@@ -400,10 +436,12 @@
     fn_map[functions[fi][:name]] = fi
     fi += 1
 
-  # Collect call edges: which functions call which
-  calls_to = {}  # fn_name → [callee_name, ...]
+  # Collect call edges: which functions call which (by function index)
+  n_funcs = functions.size()
+  calls_to = []
+  processed = []
   fi = 0
-  while fi < functions.size()
+  while fi < n_funcs
     func = functions[fi]
     edges = []
     bi = 0
@@ -413,57 +451,62 @@
       while ii < instrs.size()
         inst = instrs[ii]
         if wire_kind(inst) in (:call_direct_i64 :call_direct_void)
-          if fn_map[wire_get(inst, :name)] != nil
+          callee_idx = fn_map[wire_get(inst, :name)]
+          if callee_idx != nil
             found = false
             ei = 0
             while ei < edges.size()
-              if edges[ei] == wire_get(inst, :name)
+              if edges[ei] == callee_idx
                 found = true
+                break
               ei += 1
             if !found
-              edges.push(wire_get(inst, :name))
+              edges.push(callee_idx)
         ii += 1
       bi += 1
-    calls_to[func[:name]] = edges
+    calls_to.push(edges)
+    processed.push(false)
     fi += 1
 
   # Topological sort: process functions with no unprocessed callees first
-  processed = {}
   order = []
   # Simple iterative topo sort: keep scanning until all processed
-  remaining = functions.size()
+  remaining = n_funcs
   while remaining > 0
     progress = false
     fi = 0
-    while fi < functions.size()
-      func = functions[fi]
-      if processed[func[:name]] != true
+    while fi < n_funcs
+      if !processed[fi]
         # Check if all callees are processed
-        edges = calls_to[func[:name]]
+        edges = calls_to[fi]
         all_done = true
         ei = 0
         while ei < edges.size()
-          if processed[edges[ei]] != true
+          if !processed[edges[ei]]
             all_done = false
+            break
           ei += 1
         if all_done
           order.push(fi)
-          processed[func[:name]] = true
+          processed[fi] = true
           remaining = remaining - 1
           progress = true
       fi += 1
     if !progress
       # Cycle detected (recursion): process remaining in any order
       fi = 0
-      while fi < functions.size()
-        if processed[functions[fi][:name]] != true
+      while fi < n_funcs
+        if !processed[fi]
           order.push(fi)
-          processed[functions[fi][:name]] = true
+          processed[fi] = true
           remaining = remaining - 1
         fi += 1
 
   # Analyze in topological order
-  strings = int_temp_string_texts(mod)
+  strings = mod[:string_texts]
+  if strings == nil
+    strings = int_temp_string_texts(mod)
+    mod[:string_texts] = strings
   oi = 0
   while oi < order.size()
     func = functions[order[oi]]

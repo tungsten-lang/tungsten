@@ -131,26 +131,21 @@ use target
       ii = 0
       while ii < instrs.size()
         inst = instrs[ii]
-        if inst[:string_id] != nil
-          live[inst[:string_id]] = true
-        if inst[:str_id] != nil
-          live[inst[:str_id]] = true
-        if inst[:name_str_id] != nil
-          live[inst[:name_str_id]] = true
-        if inst[:method_str_id] != nil
-          live[inst[:method_str_id]] = true
-        if inst[:file_str_id] != nil
-          live[inst[:file_str_id]] = true
-        if inst[:ivar_str_id] != nil
-          live[inst[:ivar_str_id]] = true
-        cases = wire_get(inst, :cases)
-        if cases != nil
-          ci = 0
-          while ci < wire_sequence_size(cases)
-            case_item = wire_sequence_get(cases, ci)
-            if case_item[:string_id] != nil
-              live[case_item[:string_id]] = true
-            ci += 1
+        op = wire_kind(inst)
+        field = incremental_core_cache_inst_string_field(op)
+        if field != nil
+          sid = wire_get(inst, field)
+          if sid != nil
+            live[sid] = true
+        elsif op == :switch_i64
+          cases = wire_get(inst, :cases)
+          if cases != nil
+            ci = 0
+            while ci < wire_sequence_size(cases)
+              case_item = wire_sequence_get(cases, ci)
+              if case_item[:string_id] != nil
+                live[case_item[:string_id]] = true
+              ci += 1
         ii += 1
       bi += 1
     fi += 1
@@ -185,26 +180,21 @@ use target
       ii = 0
       while ii < instrs.size()
         inst = instrs[ii]
-        if inst[:string_id] != nil && remap[inst[:string_id]] != inst[:string_id]
-          inst[:string_id] = remap[inst[:string_id]]
-        if inst[:str_id] != nil && remap[inst[:str_id]] != inst[:str_id]
-          inst[:str_id] = remap[inst[:str_id]]
-        if inst[:name_str_id] != nil && remap[inst[:name_str_id]] != inst[:name_str_id]
-          inst[:name_str_id] = remap[inst[:name_str_id]]
-        if inst[:method_str_id] != nil && remap[inst[:method_str_id]] != inst[:method_str_id]
-          inst[:method_str_id] = remap[inst[:method_str_id]]
-        if inst[:file_str_id] != nil && remap[inst[:file_str_id]] != inst[:file_str_id]
-          inst[:file_str_id] = remap[inst[:file_str_id]]
-        if inst[:ivar_str_id] != nil && remap[inst[:ivar_str_id]] != inst[:ivar_str_id]
-          inst[:ivar_str_id] = remap[inst[:ivar_str_id]]
-        cases = wire_get(inst, :cases)
-        if cases != nil
-          ci = 0
-          while ci < wire_sequence_size(cases)
-            case_item = wire_sequence_get(cases, ci)
-            if case_item[:string_id] != nil && remap[case_item[:string_id]] != case_item[:string_id]
-              case_item[:string_id] = remap[case_item[:string_id]]
-            ci += 1
+        op = wire_kind(inst)
+        field = incremental_core_cache_inst_string_field(op)
+        if field != nil
+          old_id = wire_get(inst, field)
+          if old_id != nil && remap[old_id] != old_id
+            wire_set(inst, field, remap[old_id])
+        elsif op == :switch_i64
+          cases = wire_get(inst, :cases)
+          if cases != nil
+            ci = 0
+            while ci < wire_sequence_size(cases)
+              case_item = wire_sequence_get(cases, ci)
+              if case_item[:string_id] != nil && remap[case_item[:string_id]] != case_item[:string_id]
+                case_item[:string_id] = remap[case_item[:string_id]]
+              ci += 1
         ii += 1
       bi += 1
     fi += 1
@@ -275,9 +265,9 @@ use target
             ssa_converted.push(func[:name])
           func[:cfg_analysis] = analysis
           ssa_convert(func, analysis, nil, promotable)
-      elsif !has_overflow_checked(func)
+      else
         promotable = find_promotable_vars(func)
-        if promotable.keys().size() > 0
+        if promotable.size() > 0
           if ssa_report != nil && ssa_report != ""
             ssa_converted.push(func[:name])
           analysis = analyze_function(func)

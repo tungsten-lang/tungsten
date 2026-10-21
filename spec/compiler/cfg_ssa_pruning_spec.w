@@ -31,4 +31,44 @@ check("mixed phi false branch", mixed_phi_and_straight(0), 37)
 
 check("no-local function", no_local_constant(), 42)
 
+# Dominating double/float/i128 variable slots should also be promoted across
+# blocks by mem2reg while merged slots stay in memory.
+-> mixed_double_phi_and_straight(flag, x) (i64 f64) f64
+  merged = ~1.5
+  straight = x * ~2.0
+  if flag > 0
+    merged = ~2.5
+  else
+    merged = ~3.5
+  merged + straight
+
+check("mixed double phi true branch", mixed_double_phi_and_straight(1, ~4.0), ~10.5)
+check("mixed double phi false branch", mixed_double_phi_and_straight(0, ~4.0), ~11.5)
+
+-> mixed_float_phi_and_straight(flag) (i64) f64
+  x = ~4.0 : f32
+  merged = (x + ~1.0) : f32
+  straight = (x * ~2.0) : f32
+  if flag > 0
+    merged = (x + ~2.0) : f32
+  else
+    merged = (x + ~3.0) : f32
+  merged + straight
+
+check("mixed float phi true branch", mixed_float_phi_and_straight(1), ~14.0)
+check("mixed float phi false branch", mixed_float_phi_and_straight(0), ~15.0)
+
+-> mixed_i128_phi_and_straight(flag) (i64) i64
+  x = 5 : i128
+  merged = (x + 1) : i128
+  straight = (x * 3) : i128
+  if flag > 0
+    merged = (x + 10) : i128
+  else
+    merged = (x + 20) : i128
+  merged + straight
+
+check("mixed i128 phi true branch", mixed_i128_phi_and_straight(1), 30)
+check("mixed i128 phi false branch", mixed_i128_phi_and_straight(0), 40)
+
 << "PASS cfg ssa pruning"

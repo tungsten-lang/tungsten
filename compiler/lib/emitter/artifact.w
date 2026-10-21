@@ -59,17 +59,20 @@
     bi = 0
     while bi < wfunc[:blocks].size()
       blk = wfunc[:blocks][bi]
+      instrs = blk[:instructions]
       ii = 0
-      while ii < blk[:instructions].size()
-        inst = blk[:instructions][ii]
-        ascope = wire_get(inst, :ascope)
-        if ascope != nil && ascope + 1 > max_ascope_slots
-          max_ascope_slots = ascope + 1
-        if wire_kind(inst) == :call_direct_i64 && wire_get(inst, :name) != nil
+      while ii < instrs.size()
+        inst = instrs[ii]
+        op = wire_kind(inst)
+        if op in (:typed_array_get_inline :typed_array_set_inline :typed_array_compound_op_inline :typed_array_load_u64 :typed_array_store_u64)
+          ascope = wire_get(inst, :ascope)
+          if ascope != nil && ascope + 1 > max_ascope_slots
+            max_ascope_slots = ascope + 1
+        elsif op == :call_direct_i64
           iname = wire_get(inst, :name)
-          if !known_fns.has_key?(iname) && !ccall_needed.has_key?(iname)
+          if iname != nil && !known_fns.has_key?(iname) && !ccall_needed.has_key?(iname)
             ccall_needed[iname] = wire_sequence_size(wire_get(inst, :args))
-        if wire_kind(inst) == :call_num_to_f64 && !ccall_needed.has_key?("__w_num_to_f64_fast")
+        elsif op == :call_num_to_f64 && !ccall_needed.has_key?("__w_num_to_f64_fast")
           ccall_needed["__w_num_to_f64_fast"] = 1
         fns = runtime_fns_for_inst(inst, mod[:string_wvalues])
         if fns != nil
@@ -1054,16 +1057,19 @@
   bi = 0
   while bi < f[:blocks].size()
     blk = f[:blocks][bi]
+    instrs = blk[:instructions]
     ji = 0
-    while ji < blk[:instructions].size()
-      inst = blk[:instructions][ji]
-      if wire_kind(inst) == :setjmp
+    while ji < instrs.size()
+      inst = instrs[ji]
+      op = wire_kind(inst)
+      if op == :setjmp
         volatile_slots = true
-      if wire_kind(inst) == :call_method_i64 && wire_get(inst, :args) != nil
-        argc = wire_sequence_size(wire_get(inst, :args))
-        needs_scratch = argc > 0 && !scalar_source_call?(inst)
-        if needs_scratch && argc > max_mcall_argc
-          max_mcall_argc = argc
+      elsif op == :call_method_i64
+        args = wire_get(inst, :args)
+        if args != nil
+          argc = wire_sequence_size(args)
+          if argc > max_mcall_argc && !scalar_source_call?(inst)
+            max_mcall_argc = argc
       ji += 1
     bi += 1
 

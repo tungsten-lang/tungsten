@@ -335,6 +335,67 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
     buf << ";"
     return nil
 
+  if op in (:load_i64 :alloca_i64 :load_ptr)
+    buf << "p"
+    buf << wire_get(inst, :ptr)
+    buf << ";"
+    return nil
+
+  if op in (:store_i64 :store_ptr)
+    encode_val(buf, wire_get(inst, :value), temp_map)
+    buf << "p"
+    buf << wire_get(inst, :ptr)
+    buf << ";"
+    return nil
+
+  if op in (:truthy_inline :nanbox_bool :free_value :not_i1 :zext_i1_i64 :trunc_i64_i32)
+    encode_val(buf, wire_get(inst, :value), temp_map)
+    buf << ";"
+    return nil
+
+  if op == :nanbox_int
+    buf << "r"
+    buf << wire_get(inst, :raw).to_s()
+    buf << ";"
+    return nil
+
+  if op in (:nanunbox_int :scope_push :scope_pop :ret_void :unreachable)
+    buf << ";"
+    return nil
+
+  if op in (:add_i64 :sub_i64 :mul_i64 :sdiv_i64 :srem_i64 :and_i64 :or_i64 :xor_i64 :shl_i64 :ashr_i64 :lshr_i64 :and_i1 :or_i1)
+    encode_val(buf, wire_get(inst, :lhs), temp_map)
+    encode_val(buf, wire_get(inst, :rhs), temp_map)
+    buf << ";"
+    return nil
+
+  if op == :icmp_i64
+    encode_val(buf, wire_get(inst, :lhs), temp_map)
+    encode_val(buf, wire_get(inst, :rhs), temp_map)
+    buf << "P"
+    buf << wire_get(inst, :pred)
+    buf << ";"
+    return nil
+
+  if op == :load_global
+    buf << "N"
+    buf << wire_get(inst, :name)
+    buf << ";"
+    return nil
+
+  if op == :store_global
+    encode_val(buf, wire_get(inst, :value), temp_map)
+    buf << "N"
+    buf << wire_get(inst, :name)
+    buf << ";"
+    return nil
+
+  if op == :load_class
+    buf << "C"
+    buf << wire_get(inst, :class_name)
+    buf << ";"
+    return nil
+
   # Generic: encode known operand fields
   if wire_get(inst, :value) != nil
     encode_val(buf, wire_get(inst, :value), temp_map)
@@ -614,12 +675,10 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
   live = nil
   inst_refs = nil
   case_refs = nil
-  string_fields = nil
   if release_mode
     live = {}
     inst_refs = []
     case_refs = []
-    string_fields = [:string_id, :str_id, :name_str_id, :method_str_id, :file_str_id, :ivar_str_id]
     core_prefix = mod[:incremental_core_string_count]
     if core_prefix == nil
       core_prefix = 0
@@ -645,71 +704,89 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
         keep = !release_mode || op != :call_loc_set_col
         if keep
           # Rewrite callee names.
-          if op in (:call_direct_i64 :call_direct_i128 :call_direct_void :call_direct_ptr)
+          if op in (:call_direct_i64 :call_direct_i128 :call_direct_void :call_direct_ptr :fn_addr_i64)
             replacement = rename_map_get(rename_map, wire_get(inst, :name))
             if replacement != nil
               wire_set(inst, :name, replacement)
-          if op == :closure_new
+          elsif op in (:closure_new :memo_call0_i64 :memo_call1_i64 :memo_call2_i64 :class_add_method :class_add_static_method)
             replacement = rename_map_get(rename_map, wire_get(inst, :fn_name))
             if replacement != nil
               wire_set(inst, :fn_name, replacement)
-          # Devirtualized direct-call target on an IC dispatch site — the
-          # method function gets compact-symbol renamed like any function.
-          if op == :call_method_i64 && wire_get(inst, :devirt_fn) != nil
-            replacement = rename_map_get(rename_map, wire_get(inst, :devirt_fn))
-            if replacement != nil
-              wire_set(inst, :devirt_fn, replacement)
-          if op == :call_method_i64 && wire_get(inst, :construct_fn) != nil
-            replacement = rename_map_get(rename_map, wire_get(inst, :construct_fn))
-            if replacement != nil
-              wire_set(inst, :construct_fn, replacement)
-          # Fused-loop worker address (ptrtoint ptr @name) — the referenced
-          # worker gets compact-symbol renamed like any function.
-          if op == :fn_addr_i64
-            replacement = rename_map_get(rename_map, wire_get(inst, :name))
-            if replacement != nil
-              wire_set(inst, :name, replacement)
-          if op in (:memo_call0_i64 :memo_call1_i64 :memo_call2_i64)
-            replacement = rename_map_get(rename_map, wire_get(inst, :fn_name))
-            if replacement != nil
-              wire_set(inst, :fn_name, replacement)
-          if op in (:class_add_method :class_add_static_method)
-            replacement = rename_map_get(rename_map, wire_get(inst, :fn_name))
-            if replacement != nil
-              wire_set(inst, :fn_name, replacement)
-          if global_rename != nil && wire_get(inst, :global) != nil
-            replacement = global_rename[wire_get(inst, :global)]
-            if replacement != nil
-              wire_set(inst, :global, replacement)
+          elsif op == :call_method_i64
+            # Devirtualized direct-call target on an IC dispatch site — the
+            # method function gets compact-symbol renamed like any function.
+            devirt_fn = wire_get(inst, :devirt_fn)
+            if devirt_fn != nil
+              replacement = rename_map_get(rename_map, devirt_fn)
+              if replacement != nil
+                wire_set(inst, :devirt_fn, replacement)
+            construct_fn = wire_get(inst, :construct_fn)
+            if construct_fn != nil
+              replacement = rename_map_get(rename_map, construct_fn)
+              if replacement != nil
+                wire_set(inst, :construct_fn, replacement)
+          elsif global_rename != nil && (op == :load_memo_ptr || op == :store_memo_ptr)
+            gname = wire_get(inst, :global)
+            if gname != nil
+              replacement = global_rename[gname]
+              if replacement != nil
+                wire_set(inst, :global, replacement)
 
           if release_mode
-            if wire_get(inst, :src_line) != nil
-              wire_set(inst, :src_line, nil)
-            if wire_get(inst, :src_col) != nil
-              wire_set(inst, :src_col, nil)
-            if wire_get(inst, :loc_site_id) != nil
-              wire_set(inst, :loc_site_id, nil)
-            sfi = 0
-            while sfi < string_fields.size()
-              field = string_fields[sfi]
-              old_id = wire_get(inst, field)
+            if op in (:call_direct_i64 :call_direct_i128 :call_direct_void :call_direct_ptr :call_direct_i64_ptr1 :call_direct_void_ptr1 :call_method_i64)
+              if wire_get(inst, :src_line) != nil
+                wire_set(inst, :src_line, nil)
+              if wire_get(inst, :src_col) != nil
+                wire_set(inst, :src_col, nil)
+              if wire_get(inst, :loc_site_id) != nil
+                wire_set(inst, :loc_site_id, nil)
+            elsif op in (:string_i64 :symbol_i64 :bigint_literal_i64 :const_uuid :const_ipv6)
+              old_id = wire_get(inst, :string_id)
               if old_id != nil
                 live[old_id] = true
                 inst_refs.push(inst)
-                inst_refs.push(field)
+                inst_refs.push(:string_id)
                 inst_refs.push(old_id)
-              sfi += 1
-            cases = wire_get(inst, :cases)
-            if cases != nil
-              ci = 0
-              while ci < wire_sequence_size(cases)
-                item = wire_sequence_get(cases, ci)
-                old_id = item[:string_id]
-                if old_id != nil
-                  live[old_id] = true
-                  case_refs.push(item)
-                  case_refs.push(old_id)
-                ci += 1
+            elsif op in (:ivar_get :ivar_set :register_unit)
+              old_id = wire_get(inst, :str_id)
+              if old_id != nil
+                live[old_id] = true
+                inst_refs.push(inst)
+                inst_refs.push(:str_id)
+                inst_refs.push(old_id)
+            elsif op in (:class_new :builtin_class_init)
+              old_id = wire_get(inst, :name_str_id)
+              if old_id != nil
+                live[old_id] = true
+                inst_refs.push(inst)
+                inst_refs.push(:name_str_id)
+                inst_refs.push(old_id)
+            elsif op in (:class_add_method :class_add_static_method)
+              old_id = wire_get(inst, :method_str_id)
+              if old_id != nil
+                live[old_id] = true
+                inst_refs.push(inst)
+                inst_refs.push(:method_str_id)
+                inst_refs.push(old_id)
+            elsif op == :class_add_ivar
+              old_id = wire_get(inst, :ivar_str_id)
+              if old_id != nil
+                live[old_id] = true
+                inst_refs.push(inst)
+                inst_refs.push(:ivar_str_id)
+                inst_refs.push(old_id)
+            elsif op == :switch_i64
+              cases = wire_get(inst, :cases)
+              if cases != nil
+                ci = 0
+                while ci < wire_sequence_size(cases)
+                  item = wire_sequence_get(cases, ci)
+                  old_id = item[:string_id]
+                  if old_id != nil
+                    live[old_id] = true
+                    case_refs.push(item)
+                    case_refs.push(old_id)
+                  ci += 1
             retained.push(inst)
         ii += 1
       if release_mode

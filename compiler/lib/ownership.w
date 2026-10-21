@@ -375,6 +375,9 @@ use cfg
     escaped[wire_get(inst, :value)] = true
     return nil
 
+  if op in (:load_i64 :alloca_i64 :nanbox_int :nanunbox_int :nanbox_bool :truthy_inline :icmp_i64 :add_i64 :sub_i64 :mul_i64 :sdiv_i64 :srem_i64 :and_i64 :or_i64 :xor_i64 :shl_i64 :ashr_i64 :lshr_i64 :br :cond_br :string_i64 :symbol_i64 :load_global :load_class :load_ptr :and_i1 :or_i1 :not_i1 :zext_i1_i64)
+    return nil
+
   # Catch-all: any other op carrying an argument list or receiver is a call
   # this pass does not know by name (typed raw-ABI ccall_rawargs targets are
   # emitted through wire_make_dynamic_N with a return-type-specific kind).
@@ -509,7 +512,8 @@ use cfg
 
 # Entry point: analyze all functions in the module.
 -> ownership_pass(mod)
-  mod[:string_texts] = int_temp_string_texts(mod)
+  if mod[:string_texts] == nil
+    mod[:string_texts] = int_temp_string_texts(mod)
   fi = 0
   while fi < mod[:functions].size()
     func = mod[:functions][fi]
@@ -551,7 +555,8 @@ use cfg
   true
 
 -> ownership_pass_parallel(mod, jobs)
-  mod[:string_texts] = int_temp_string_texts(mod)
+  if mod[:string_texts] == nil
+    mod[:string_texts] = int_temp_string_texts(mod)
   state = {
     functions: mod[:functions],
     mod: mod,
@@ -589,6 +594,8 @@ use cfg
     return nil
   escaped = own[:escaped]
   producers = own[:producers]
+  if producers.keys().size() == 0
+    return nil
   scope_locals = own[:scope_locals]
   func_scope = own[:func_scope]
 
@@ -643,7 +650,9 @@ use cfg
       if int_temps == nil
         int_temps = env("TUNGSTEN_INT_TEMP_RELEASE") != "0" && mod[:integer_contract_intact] == true
         if int_temps
-          strings = int_temp_string_texts(mod)
+          strings = mod[:string_texts]
+          if strings == nil
+            strings = int_temp_string_texts(mod)
           mod[:method_table] = module_method_table(mod, strings)
           fresh = int_fresh_returns(mod)
       if int_temps && env("TUNGSTEN_SLOT_RELEASE") != "0"
@@ -1351,22 +1360,33 @@ use cfg
 # integer readers; nil otherwise.
 -> int_fresh_candidate(func)
   blocks = func[:blocks]
-  return nil if has_setjmp(func)
   rets = []
+  defs = {}
   bi = 0
   while bi < blocks.size()
     instrs = blocks[bi][:instructions]
     ii = 0
     while ii < instrs.size()
-      k = wire_kind(instrs[ii])
+      inst = instrs[ii]
+      k = wire_kind(inst)
       if k == :ret_i64
-        rets.push(wire_get(instrs[ii], :value))
-      elsif k == :ret_void || k == :ret_i32
+        rets.push(wire_get(inst, :value))
+      elsif k == :ret_void || k == :ret_i32 || k == :setjmp
         return nil
+      elsif k == :call_direct_i64
+        t = wire_get(inst, :temp)
+        if t != nil
+          defs[t] = [bi, ii]
       ii += 1
     bi += 1
   return nil if rets.size() == 0
-  defs = {}
+  ri = 0
+  while ri < rets.size()
+    d = defs[rets[ri]]
+    return nil if d == nil
+    dinst = blocks[d[0]][:instructions][d[1]]
+    return nil if wire_get(dinst, :name) == func[:name]
+    ri += 1
   uses = {}
   bi = 0
   while bi < blocks.size()
@@ -1374,9 +1394,6 @@ use cfg
     ii = 0
     while ii < instrs.size()
       inst = instrs[ii]
-      t = wire_get(inst, :temp)
-      if t != nil
-        defs[t] = [bi, ii]
       refs = loop_release_operands(inst)
       return nil if refs == nil
       ri = 0
@@ -1499,7 +1516,7 @@ use cfg
 -> owned_slot_releases(func, mod, fresh, strings)
   blocks = func[:blocks]
   slots = func[:var_slots]
-  return 0 if slots == nil || blocks.size() < 1 || has_setjmp(func)
+  return 0 if slots == nil || blocks.size() < 1
   heap_cells = func[:heap_slot_names]
   promoted = func[:promoted_vars]
   cand = {}
@@ -1511,6 +1528,26 @@ use cfg
       cand[ptr] = true
     ni += 1
   return 0 if cand.keys().size() == 0
+  has_producer = false
+  has_cand_store = false
+  bi = 0
+  while bi < blocks.size() && !(has_producer && has_cand_store)
+    instrs = blocks[bi][:instructions]
+    ii = 0
+    while ii < instrs.size()
+      inst = instrs[ii]
+      k = wire_kind(inst)
+      if k == :store_i64 && cand[wire_get(inst, :ptr)] == true
+        has_cand_store = true
+      elsif k == :bigint_literal_i64 && wire_get(inst, :temp) != nil
+        has_producer = true
+      elsif k == :call_direct_i64 && wire_get(inst, :temp) != nil
+        cname = wire_get(inst, :name)
+        if int_temp_producer?(cname, fresh) || is_heap_producer(inst) || fresh_heap_call?(inst, mod) || cname == "w_bigint_from_dec_str"
+          has_producer = true
+      ii += 1
+    bi += 1
+  return 0 if !has_producer || !has_cand_store || has_setjmp(func)
   wo = mod[:write_only_globals]
   wo = {} if wo == nil
 
@@ -1974,8 +2011,9 @@ use cfg
         rets.push(wire_get(inst, :value))
       elsif k in (:ret_void :ret_i32 :setjmp)
         return nil
-      t = wire_get(inst, :temp)
-      defs[t] = inst if t != nil
+      elsif k == :call_direct_i64
+        t = wire_get(inst, :temp)
+        defs[t] = inst if t != nil
       ii += 1
     bi += 1
   return nil if rets.size() == 0

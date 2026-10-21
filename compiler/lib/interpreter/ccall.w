@@ -69,6 +69,43 @@
       if args.size() != 3
         raise "__w_read_file_prefix expects a path and byte limit"
       return ccall("__w_read_file_prefix", args[1], args[2])
+    # FileHandle (core/file.w) stdio primitives.
+    when "__w_file_handle_open"
+      if args.size() != 3
+        raise "__w_file_handle_open expects a path and mode"
+      return ccall("__w_file_handle_open", args[1], args[2])
+    when "__w_file_handle_write"
+      if args.size() != 3
+        raise "__w_file_handle_write expects a handle and data"
+      return ccall("__w_file_handle_write", args[1], args[2])
+    when "__w_file_handle_read"
+      if args.size() != 3
+        raise "__w_file_handle_read expects a handle and length"
+      return ccall("__w_file_handle_read", args[1], args[2])
+    when "__w_file_handle_gets"
+      if args.size() != 3
+        raise "__w_file_handle_gets expects a handle and chomp flag"
+      return ccall("__w_file_handle_gets", args[1], args[2])
+    when "__w_file_handle_flush"
+      if args.size() != 2
+        raise "__w_file_handle_flush expects a handle"
+      return ccall("__w_file_handle_flush", args[1])
+    when "__w_file_handle_close"
+      if args.size() != 2
+        raise "__w_file_handle_close expects a handle"
+      return ccall("__w_file_handle_close", args[1])
+    when "__w_file_handle_seek"
+      if args.size() != 4
+        raise "__w_file_handle_seek expects a handle, offset and whence"
+      return ccall("__w_file_handle_seek", args[1], args[2], args[3])
+    when "__w_file_handle_tell"
+      if args.size() != 2
+        raise "__w_file_handle_tell expects a handle"
+      return ccall("__w_file_handle_tell", args[1])
+    when "__w_file_handle_eof"
+      if args.size() != 2
+        raise "__w_file_handle_eof expects a handle"
+      return ccall("__w_file_handle_eof", args[1])
     when "w_chan_new"
       if args.size() != 2
         raise "w_chan_new expects one capacity"

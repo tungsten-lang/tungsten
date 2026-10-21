@@ -34,6 +34,7 @@
   auto :Float,        "float"
   auto :File,         "file"
   auto :FileStat,     "file"
+  auto :FileHandle,   "file"
   auto :Future,       "future"
   auto :FutureState,  "future"
   auto :Hash,         "hash"

@@ -1,4 +1,3 @@
-# spec: compiled -- the tree-walker hands a trailing block on any method outside its iterator list to an implicit .each (pre-existing; Tempfile.create's block fails the same way in file_stat_tempfile_spec)
 # File.open returns a FileHandle (core/file.w) on every engine. Compiled code
 # used to die with "undefined method 'file_open' for File" (2026-10-21): only
 # the Ruby implementation had a file_open builtin, so only it could stream a

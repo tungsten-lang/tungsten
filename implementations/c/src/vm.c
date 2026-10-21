@@ -177,11 +177,98 @@ static TcRuntimeHash *cvar_table = NULL;
   X(RUNTIME_IDENTITY, "runtime_identity") \
   X(WYHASH64_HEX_STRING, "wyhash64_hex_string") \
   X(LOAD_PROGRAM_AST, "load_program_ast")            \
-  X(RAISE,          "raise")
+  X(RAISE,          "raise")          \
+  X(KIND,           "kind")           \
+  X(LOC,            "loc")            \
+  X(LOC_END,        "loc_end")        \
+  X(LINE,           "line")           \
+  X(COL,            "col")            \
+  X(END_LINE,       "end_line")       \
+  X(END_COL,        "end_col")        \
+  X(SPAN_LENGTH,    "span_length")    \
+  X(LOWERING_ANALYSIS, "lowering_analysis") \
+  X(LOWERING_ANALYSIS_SET, "lowering_analysis=") \
+  X(FREEZE,         "freeze")         \
+  X(FROZEN_Q,       "frozen?")        \
+  X(LLVM_SAFE_NAME, "llvm_safe_name")
 
 #define X(c_name, str) static const char *NAME_##c_name = NULL;
 BUILTIN_NAMES
 #undef X
+
+static TcValue SYM_NODE = W_NIL;
+static TcValue SYM_VALUE = W_NIL;
+static TcValue SYM_INDEX = W_NIL;
+static TcValue SYM_LOWERING_ANALYSIS = W_NIL;
+static TcValue SYM_IVAR_OFFSETS = W_NIL;
+static TcValue SYM_IVAR_COUNT = W_NIL;
+static TcValue SYM_LOC = W_NIL;
+static TcValue SYM_LOC_END = W_NIL;
+static TcValue SYM_OP = W_NIL;
+static TcValue SYM_TYPE = W_NIL;
+static TcValue SYM_BLOCKS = W_NIL;
+static TcValue SYM_NEXT_TEMP = W_NIL;
+static TcValue SYM_I64 = W_NIL;
+static TcValue SYM_RAW_I64 = W_NIL;
+static TcValue SYM_RAW_INT = W_NIL;
+static TcValue SYM_U64 = W_NIL;
+static TcValue SYM_RAW_U64 = W_NIL;
+static TcValue SYM_I128 = W_NIL;
+static TcValue SYM_RAW_I128 = W_NIL;
+static TcValue SYM_U128 = W_NIL;
+static TcValue SYM_RAW_U128 = W_NIL;
+
+static TcValue TYPE_STR_NIL = W_NIL;
+static TcValue TYPE_STR_BOOL = W_NIL;
+static TcValue TYPE_STR_INT = W_NIL;
+static TcValue TYPE_STR_ARRAY = W_NIL;
+static TcValue TYPE_STR_WVALUE = W_NIL;
+static TcValue TYPE_STR_STRING = W_NIL;
+static TcValue TYPE_STR_SYMBOL = W_NIL;
+static TcValue TYPE_STR_RANGE = W_NIL;
+static TcValue TYPE_STR_HASH = W_NIL;
+static TcValue TYPE_STR_OBJECT = W_NIL;
+
+static TcValue g_ast_kind_sym[W_AST_KIND_MAX + 1];
+static TcValue g_ast_field_sym[W_AST_KIND_MAX + 1][10];
+static TcValue g_temp_strs[1024];
+
+static int make_static_type_str(const char *lit, TcValue *out, TcError *err) {
+  size_t len = strlen(lit);
+  char *copy = tc_heap_string_alloc(len, 1, err);
+  if (!copy) return 0;
+  memcpy(copy, lit, len);
+  *out = tc_box_string_bytes(copy, len, 0);
+  return 1;
+}
+
+static int intern_sym_const(const char *s, size_t len, TcValue *out) {
+  const char *p = tc_intern(s, len);
+  if (!p) return 0;
+  *out = tc_box_symbol_bytes(p, len, 0);
+  return 1;
+}
+
+TC_ALWAYS_INLINE int is_llvm_safe_ascii(TcValue v) {
+  if (tc_kind(v) != TC_VAL_STRING) return 0;
+  const char *s = tc_str_bytes_only(v);
+  size_t n = tc_str_len(v);
+  for (size_t i = 0; i < n; i++) {
+    unsigned char c = (unsigned char)s[i];
+    int ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+             (c >= '0' && c <= '9') || c == '_' || c == '.' || c == '$' || c == '-';
+    if (!ok) return 0;
+    if (c == '_' && i + 8 < n && s[i + 1] == 'u' && s[i + 8] == '_') {
+      int hex = 1;
+      for (size_t j = i + 2; j < i + 8; j++) {
+        unsigned char hc = (unsigned char)s[j];
+        if (!((hc >= '0' && hc <= '9') || (hc >= 'a' && hc <= 'f'))) { hex = 0; break; }
+      }
+      if (hex) return 0;
+    }
+  }
+  return 1;
+}
 
 static int builtin_names_ready = 0;
 static int intern_builtin_names(TcError *err) {
@@ -195,6 +282,69 @@ static int intern_builtin_names(TcError *err) {
   } while (0);
   BUILTIN_NAMES
 #undef X
+  if (!intern_sym_const("node", 4, &SYM_NODE) ||
+      !intern_sym_const("value", 5, &SYM_VALUE) ||
+      !intern_sym_const("index", 5, &SYM_INDEX) ||
+      !intern_sym_const("lowering_analysis", 17, &SYM_LOWERING_ANALYSIS) ||
+      !intern_sym_const("ivar_offsets", 12, &SYM_IVAR_OFFSETS) ||
+      !intern_sym_const("ivar_count", 10, &SYM_IVAR_COUNT) ||
+      !intern_sym_const("op", 2, &SYM_OP) ||
+      !intern_sym_const("type", 4, &SYM_TYPE) ||
+      !intern_sym_const("blocks", 6, &SYM_BLOCKS) ||
+      !intern_sym_const("next_temp", 9, &SYM_NEXT_TEMP) ||
+      !intern_sym_const("i64", 3, &SYM_I64) ||
+      !intern_sym_const("raw_i64", 7, &SYM_RAW_I64) ||
+      !intern_sym_const("raw_int", 7, &SYM_RAW_INT) ||
+      !intern_sym_const("u64", 3, &SYM_U64) ||
+      !intern_sym_const("raw_u64", 7, &SYM_RAW_U64) ||
+      !intern_sym_const("i128", 4, &SYM_I128) ||
+      !intern_sym_const("raw_i128", 8, &SYM_RAW_I128) ||
+      !intern_sym_const("u128", 4, &SYM_U128) ||
+      !intern_sym_const("raw_u128", 8, &SYM_RAW_U128)) {
+    tc_error_set(err, "builtin symbol intern failed");
+    return 0;
+  }
+  SYM_LOC = tc_box_symbol_bytes(NAME_LOC, 3, 0);
+  SYM_LOC_END = tc_box_symbol_bytes(NAME_LOC_END, 7, 0);
+
+  for (int ti = 0; ti < 1024; ti++) {
+    char tbuf[16];
+    snprintf(tbuf, sizeof(tbuf), "%%t%d", ti);
+    if (!make_static_type_str(tbuf, &g_temp_strs[ti], err)) return 0;
+  }
+
+  if (!make_static_type_str("NilClass", &TYPE_STR_NIL, err) ||
+      !make_static_type_str("Boolean", &TYPE_STR_BOOL, err) ||
+      !make_static_type_str("Int", &TYPE_STR_INT, err) ||
+      !make_static_type_str("Array", &TYPE_STR_ARRAY, err) ||
+      !make_static_type_str("WValue", &TYPE_STR_WVALUE, err) ||
+      !make_static_type_str("String", &TYPE_STR_STRING, err) ||
+      !make_static_type_str("Symbol", &TYPE_STR_SYMBOL, err) ||
+      !make_static_type_str("Range", &TYPE_STR_RANGE, err) ||
+      !make_static_type_str("Hash", &TYPE_STR_HASH, err) ||
+      !make_static_type_str("Object", &TYPE_STR_OBJECT, err)) {
+    return 0;
+  }
+
+  for (int k = 1; k <= (int)W_AST_KIND_MAX; k++) {
+    const char *kname = W_AST_KIND_NAME[k];
+    if (kname) {
+      size_t klen = strlen(kname);
+      const char *ki = tc_intern(kname, klen);
+      if (!ki) return 0;
+      g_ast_kind_sym[k] = tc_box_symbol_bytes(ki, klen, 0);
+    }
+    for (uint8_t fi = 0; fi < W_AST_KIND_FIELD_COUNT[k]; fi++) {
+      const char *fname = W_AST_KIND_FIELDS[k][fi];
+      if (fname) {
+        size_t flen = strlen(fname);
+        const char *f_intern = tc_intern(fname, flen);
+        if (!f_intern) return 0;
+        g_ast_field_sym[k][fi] = tc_box_symbol_bytes(f_intern, flen, 0);
+      }
+    }
+  }
+
   builtin_names_ready = 1;
   return 1;
 }
@@ -218,13 +368,24 @@ static int hash_has_key_text(TcRuntimeHash *hash, const char *text) {
  * or the interpreter shape {rt: :range}. type() reports Range. */
 static int hash_is_range(TcRuntimeHash *hash) {
   if (!hash) return 0;
-  if (hash_has_key_text(hash, "__range__")) return 1;
-  for (uint32_t i = 0; i < hash->used; i++) {
-    TcValue k = hash->keys[i];
-    if (k == TC_HASH_TOMBSTONE) continue;
-    if (value_text_eq(k, "rt") && value_text_eq(hash->values[i], "range")) return 1;
+  if (hash->flags & TC_HASH_FLAG_RANGE_CHECKED) {
+    return (hash->flags & TC_HASH_FLAG_IS_RANGE) != 0;
   }
-  return 0;
+  int is_r = 0;
+  if (hash_has_key_text(hash, "__range__")) {
+    is_r = 1;
+  } else {
+    for (uint32_t i = 0; i < hash->used; i++) {
+      TcValue k = hash->keys[i];
+      if (k == TC_HASH_TOMBSTONE) continue;
+      if (value_text_eq(k, "rt") && value_text_eq(hash->values[i], "range")) {
+        is_r = 1;
+        break;
+      }
+    }
+  }
+  hash->flags |= TC_HASH_FLAG_RANGE_CHECKED | (is_r ? TC_HASH_FLAG_IS_RANGE : 0);
+  return is_r;
 }
 
 static int object_is_class(TcRuntimeObject *object, const char *class_name, size_t class_name_len) {
@@ -254,10 +415,6 @@ char *tc_heap_string_alloc(size_t len, int interned, TcError *err) {
   string->interned = interned ? 1 : 0;
   string->bytes[len] = '\0';
   return string->bytes;
-}
-
-TcHeapString *tc_heap_string_header(const char *bytes) {
-  return (TcHeapString *)(void *)((char *)bytes - offsetof(TcHeapString, bytes));
 }
 
 // No-GC mode: free transients (not interned, never freed); free everything
@@ -305,15 +462,14 @@ static TcValue pop(TcVm *vm) {
 // range (w_tag_int = 0xFFFA000000000000 etc.); without the spill they
 // silently truncate to 0 in w_box_int and the lowering's `v |= w_tag_*`
 // produces unboxed payloads that segfault at runtime.
-TcValue tc_box_int(int64_t value) {
-  if (value >= W_INT48_MIN && value <= W_INT48_MAX) return w_box_int(value);
+TcValue tc_box_int_slow(int64_t value) {
   TcHeapInt *box = (TcHeapInt *)calloc(1, sizeof(TcHeapInt));
   if (!box) return W_NIL;
   box->value = value;
   return w_box_ptr(box, TC_TAG_HEAP_INT);
 }
 
-static TcValue int_value(int64_t value) {
+TC_ALWAYS_INLINE TcValue int_value(int64_t value) {
   return tc_box_int(value);
 }
 
@@ -373,11 +529,11 @@ static const char *frame_function_name(const TcVm *vm, size_t back, size_t *len_
   return fn->name;
 }
 
-static int falsey(TcValue value) {
+TC_ALWAYS_INLINE int falsey(TcValue value) {
   return value == W_NIL || value == W_FALSE;
 }
 
-static int value_equal(TcValue a, TcValue b) {
+TC_ALWAYS_INLINE int value_equal(TcValue a, TcValue b) {
   // Almost every WValue kind has canonical bit identity: singletons,
   // inline ints, packed values, arrays/hashes/objects, and interned symbols.
   // Only stringy values, heap ints, and scalar AST wrappers need content
@@ -385,11 +541,19 @@ static int value_equal(TcValue a, TcValue b) {
   // two tc_kind calls in this very hot hash-probe/equality path.
   if (a == W_BIASED_NAN || b == W_BIASED_NAN) return 0;
   if (a == b) return 1;
-  if (w_is_stringy(a) && w_is_stringy(b)) {
-    if (w_is_symbol(a) != w_is_symbol(b)) return 0;
-    if (tc_str_bytes_only(a) == tc_str_bytes_only(b) && tc_str_len(a) == tc_str_len(b)) return 1;
-    return tc_str_len(a) == tc_str_len(b) &&
-           memcmp(tc_str_bytes_only(a), tc_str_bytes_only(b), tc_str_len(a)) == 0;
+  if (w_is_string(a) && w_is_string(b)) {
+    size_t la = tc_str_len(a);
+    if (la != tc_str_len(b)) return 0;
+    const char *ba = tc_str_bytes_only(a);
+    const char *bb = tc_str_bytes_only(b);
+    return ba == bb || memcmp(ba, bb, la) == 0;
+  }
+  if (w_is_symbol(a) && w_is_symbol(b)) {
+    const char *ba = tc_str_bytes_only(a);
+    const char *bb = tc_str_bytes_only(b);
+    if (ba == bb) return 1;
+    size_t la = tc_str_len(a);
+    return la == tc_str_len(b) && memcmp(ba, bb, la) == 0;
   }
 
   // Different inline/packed values are already known unequal. Heap-backed
@@ -1468,26 +1632,29 @@ static inline uint64_t splitmix64(uint64_t v) {
 //   everything else: splitmix64 of the bit pattern
 // Stays kind-aligned with native so the same key lands in the same slot
 // in both implementations — that's what makes hash iteration order match.
-static uint64_t hash_value64(TcValue value) {
+TC_ALWAYS_INLINE uint64_t hash_value64(TcValue value) {
+  if (w_is_symbol(value)) {
+    const char *bytes = tc_str_bytes_only(value);
+    TcHeapString *hs = tc_heap_string_header(bytes);
+    uint64_t h = hs->cached_hash;
+    if (__builtin_expect(h != 0, 1)) return h;
+    h = wyhash((const uint8_t *)bytes, hs->len) ^ 0x9e3779b97f4a7c15ULL;
+    hs->cached_hash = h;
+    return h;
+  }
+  if (w_is_string(value)) {
+    const char *bytes = tc_str_bytes_only(value);
+    TcHeapString *hs = tc_heap_string_header(bytes);
+    uint64_t h = hs->cached_hash;
+    if (__builtin_expect(h != 0, 1)) return h;
+    h = wyhash((const uint8_t *)bytes, hs->len);
+    hs->cached_hash = h;
+    return h;
+  }
+  if (w_is_int(value)) {
+    return splitmix64((uint64_t)w_as_int(value));
+  }
   switch (tc_kind(value)) {
-    case TC_VAL_STRING: {
-      const char *bytes = tc_str_bytes_only(value);
-      TcHeapString *hs = tc_heap_string_header(bytes);
-      uint64_t h = hs->cached_hash;
-      if (h) return h;
-      h = wyhash((const uint8_t *)bytes, hs->len);
-      hs->cached_hash = h;
-      return h;
-    }
-    case TC_VAL_SYMBOL: {
-      const char *bytes = tc_str_bytes_only(value);
-      TcHeapString *hs = tc_heap_string_header(bytes);
-      uint64_t h = hs->cached_hash;
-      if (h) return h;
-      h = wyhash((const uint8_t *)bytes, hs->len) ^ 0x9e3779b97f4a7c15ULL;
-      hs->cached_hash = h;
-      return h;
-    }
     case TC_VAL_AST:
       switch (tc_as_ast_ptr(&value)->kind) {
         case TC_AST_STRING:
@@ -1548,7 +1715,7 @@ static int64_t hash_find_slot(TcRuntimeHash *hash, TcValue key, int64_t *dense_o
 
 // Read-only probe: dense offset of key, or -1. Skips the insertion-slot
 // bookkeeping hash_find_slot carries. Mirrors runtime.c:w_hash_probe.
-static inline int64_t hash_probe(TcRuntimeHash *hash, TcValue key) {
+TC_ALWAYS_INLINE int64_t hash_probe(TcRuntimeHash *hash, TcValue key) {
   size_t mask = hash->cap - 1;
   size_t idx = (size_t)hash_value64(key) & mask;
   for (size_t probes = 0; probes < hash->cap; probes++) {
@@ -1623,8 +1790,8 @@ static int ast_to_runtime(TcAstValue *ast, TcValue *out, TcError *err);
 // output as TC_VAL_AST (arena-allocated, immutable). User code that puts
 // AST nodes into a runtime hash/array and later mutates them via `[]=`
 // would silently no-op, so convert at the store boundary.
-static int promote_ast_value(TcValue *value, TcError *err) {
-  if (tc_kind(*value) != TC_VAL_AST) return 1;
+TC_ALWAYS_INLINE int promote_ast_value(TcValue *value, TcError *err) {
+  if (__builtin_expect(tc_kind(*value) != TC_VAL_AST, 1)) return 1;
   TcAstValue *ast = tc_as_ast_ptr(value);
   if (ast->kind != TC_AST_HASH && ast->kind != TC_AST_ARRAY) return 1;
   return ast_to_runtime(ast, value, err);
@@ -1656,6 +1823,13 @@ static int hash_set_value(TcRuntimeHash *hash, TcValue key, TcValue value, TcErr
       return 0;
     }
   }
+  hash->flags &= ~(TC_HASH_FLAG_RANGE_CHECKED | TC_HASH_FLAG_IS_RANGE);
+  if (key == SYM_NODE) {
+    if (value != W_NIL) hash->flags |= TC_HASH_FLAG_HAS_NODE;
+    else hash->flags &= ~TC_HASH_FLAG_HAS_NODE;
+    if (w_is_symbol(value)) hash->flags |= TC_HASH_FLAG_IS_AST;
+    else hash->flags &= ~TC_HASH_FLAG_IS_AST;
+  }
   if (dense >= 0) {
     // Overwrite keeps the key's insertion position.
     hash->values[dense] = value;
@@ -1669,7 +1843,7 @@ static int hash_set_value(TcRuntimeHash *hash, TcValue key, TcValue value, TcErr
   return 1;
 }
 
-static TcValue hash_get_value(TcRuntimeHash *hash, TcValue key) {
+TC_ALWAYS_INLINE TcValue hash_get_value(TcRuntimeHash *hash, TcValue key) {
   if (!hash || hash->cap == 0) return tc_box_nil();
   int64_t dense = hash_probe(hash, key);
   return dense >= 0 ? hash->values[dense] : tc_box_nil();
@@ -1680,6 +1854,10 @@ static TcValue hash_delete_value(TcRuntimeHash *hash, TcValue key) {
   int64_t dense = -1;
   int64_t slot = hash_find_slot(hash, key, &dense);
   if (dense < 0) return tc_box_nil();
+  hash->flags &= ~(TC_HASH_FLAG_RANGE_CHECKED | TC_HASH_FLAG_IS_RANGE);
+  if (key == SYM_NODE) {
+    hash->flags &= ~(TC_HASH_FLAG_HAS_NODE | TC_HASH_FLAG_IS_AST);
+  }
   TcValue removed = hash->values[dense];
   hash->keys[dense] = TC_HASH_TOMBSTONE;  // dense hole; compacted on rebuild
   hash->values[dense] = tc_box_nil();
@@ -1977,6 +2155,146 @@ static const char *value_type_name(TcValue value) {
       return "NilClass";
   }
   return "Object";
+}
+
+TC_ALWAYS_INLINE int tc_type_of_value(TcValue value, TcValue *out, TcError *err) {
+  switch (tc_kind(value)) {
+    case TC_VAL_NIL:    *out = TYPE_STR_NIL; return 1;
+    case TC_VAL_WVALUE:
+      if (value == W_TRUE || value == W_FALSE) { *out = TYPE_STR_BOOL; return 1; }
+      if (w_is_int(value)) { *out = TYPE_STR_INT; return 1; }
+      if (w_is_wire_sequence(value)) { *out = TYPE_STR_ARRAY; return 1; }
+      *out = TYPE_STR_WVALUE;
+      return 1;
+    case TC_VAL_INT:    *out = TYPE_STR_INT; return 1;
+    case TC_VAL_STRING: *out = TYPE_STR_STRING; return 1;
+    case TC_VAL_SYMBOL: *out = TYPE_STR_SYMBOL; return 1;
+    case TC_VAL_ARRAY:  *out = TYPE_STR_ARRAY; return 1;
+    case TC_VAL_HASH:
+      *out = hash_is_range(tc_as_hash(value)) ? TYPE_STR_RANGE : TYPE_STR_HASH;
+      return 1;
+    case TC_VAL_OBJECT: {
+      TcRuntimeObject *obj = tc_as_object(value);
+      if (!obj || !obj->class_name) { *out = TYPE_STR_OBJECT; return 1; }
+      return make_string_value(obj->class_name, obj->class_name_len, out, err);
+    }
+    case TC_VAL_AST:
+      switch (tc_as_ast_ptr(&value)->kind) {
+        case TC_AST_ARRAY:  *out = TYPE_STR_ARRAY; return 1;
+        case TC_AST_HASH:   *out = TYPE_STR_HASH; return 1;
+        case TC_AST_STRING: *out = TYPE_STR_STRING; return 1;
+        case TC_AST_SYMBOL: *out = TYPE_STR_SYMBOL; return 1;
+        case TC_AST_INT:    *out = TYPE_STR_INT; return 1;
+        case TC_AST_BOOL:   *out = TYPE_STR_BOOL; return 1;
+        default:            *out = TYPE_STR_NIL; return 1;
+      }
+  }
+  *out = TYPE_STR_OBJECT;
+  return 1;
+}
+
+TC_ALWAYS_INLINE TcValue tc_packed_node_kind(WValue node) {
+  int kid = w_node_kind(node);
+  if (kid >= 1 && kid <= (int)W_AST_KIND_MAX) return g_ast_kind_sym[kid];
+  return W_NIL;
+}
+
+TC_ALWAYS_INLINE TcValue tc_packed_node_get(WValue node, TcValue sym) {
+  int kid = w_node_kind(node);
+  if (kid >= 1 && kid <= (int)W_AST_KIND_MAX) {
+    uint8_t storage = W_AST_KIND_STORAGE[kid];
+    if (storage == W_AST_STORAGE_SLAB || storage == W_AST_STORAGE_CACHED) {
+      uint8_t count = W_AST_KIND_FIELD_COUNT[kid];
+      const TcValue *fields = g_ast_field_sym[kid];
+      for (uint8_t i = 0; i < count; i++) {
+        if (fields[i] == sym) return w_node_field_load(node, (int64_t)i);
+      }
+    } else if (storage == W_AST_STORAGE_INTERN) {
+      if (g_ast_field_sym[kid][0] == sym) {
+        uint64_t sv = w_ast_intern_value_of((uint64_t)node);
+        return sv != 0 ? (TcValue)sv : W_NIL;
+      }
+    } else if (storage == W_AST_STORAGE_INLINE) {
+      if (g_ast_field_sym[kid][0] == sym) {
+        return int_value((int64_t)w_node_offset(node));
+      }
+    }
+  }
+  if (sym == SYM_LOWERING_ANALYSIS) return w_ast_analysis_get(node);
+  if (sym == SYM_IVAR_OFFSETS)      return w_ast_ivar_offsets_get(node);
+  if (sym == SYM_IVAR_COUNT)        return w_ast_ivar_count_get(node);
+  return w_ast_sparse_get(node, (int64_t)sym);
+}
+
+TC_ALWAYS_INLINE TcValue tc_packed_node_set(WValue node, TcValue sym, TcValue value) {
+  int kid = w_node_kind(node);
+  if (kid >= 1 && kid <= (int)W_AST_KIND_MAX) {
+    uint8_t storage = W_AST_KIND_STORAGE[kid];
+    if (storage == W_AST_STORAGE_SLAB || storage == W_AST_STORAGE_CACHED) {
+      uint8_t count = W_AST_KIND_FIELD_COUNT[kid];
+      const TcValue *fields = g_ast_field_sym[kid];
+      for (uint8_t i = 0; i < count; i++) {
+        if (fields[i] == sym) {
+          w_node_field_store(node, (int64_t)i, value);
+          return value;
+        }
+      }
+    } else if (storage == W_AST_STORAGE_INTERN || storage == W_AST_STORAGE_INLINE) {
+      if (g_ast_field_sym[kid][0] == sym) return value;
+    }
+  }
+  if (sym == SYM_LOWERING_ANALYSIS) return w_ast_analysis_set(node, value);
+  if (sym == SYM_IVAR_OFFSETS)      return w_ast_ivar_offsets_set(node, value);
+  if (sym == SYM_IVAR_COUNT)        return w_ast_ivar_count_set(node, value);
+  return w_ast_sparse_set(node, (int64_t)sym, value);
+}
+
+TC_ALWAYS_INLINE TcValue tc_ast_kind(TcValue node) {
+  if (node == W_NIL) return W_NIL;
+  if (w_is_node(node)) return tc_packed_node_kind(node);
+  if (tc_kind(node) == TC_VAL_HASH) {
+    TcRuntimeHash *h = tc_as_hash(node);
+    if (!h || !(h->flags & TC_HASH_FLAG_HAS_NODE)) return W_NIL;
+    if (h->used > 0 && h->keys[0] == SYM_NODE) return h->values[0];
+    return hash_get_value(h, SYM_NODE);
+  }
+  return W_NIL;
+}
+
+TC_ALWAYS_INLINE TcValue tc_ast_get(TcValue node, TcValue sym) {
+  if (node == W_NIL) return W_NIL;
+  if (w_is_node(node)) return tc_packed_node_get(node, sym);
+  if (tc_kind(node) == TC_VAL_HASH) {
+    TcRuntimeHash *h = tc_as_hash(node);
+    return h ? hash_get_value(h, sym) : W_NIL;
+  }
+  return W_NIL;
+}
+
+TC_ALWAYS_INLINE int tc_ast_set(TcValue node, TcValue sym, TcValue value, TcValue *out, TcError *err) {
+  if (node == W_NIL) { *out = W_NIL; return 1; }
+  if (w_is_node(node)) {
+    *out = tc_packed_node_set(node, sym, value);
+    return 1;
+  }
+  if (tc_kind(node) == TC_VAL_HASH) {
+    TcRuntimeHash *h = tc_as_hash(node);
+    if (h && !hash_set_value(h, sym, value, err)) return 0;
+    *out = value;
+    return 1;
+  }
+  *out = value;
+  return 1;
+}
+
+TC_ALWAYS_INLINE int tc_is_ast_node(TcValue x) {
+  if (x == W_NIL) return 0;
+  if (w_is_node(x)) return 1;
+  if (tc_kind(x) == TC_VAL_HASH) {
+    TcRuntimeHash *h = tc_as_hash(x);
+    return h && (h->flags & TC_HASH_FLAG_HAS_NODE) != 0;
+  }
+  return 0;
 }
 
 static int ast_hash_lookup(TcAstValue ast, TcValue key, TcValue *out, TcError *err);
@@ -2559,6 +2877,12 @@ int tc_vm_run_args_status(const TcChunk *chunk, int argc, char **argv, TcValue *
     return 0;
   }
 
+  int wire_kind_symbols_slot = find_local_slot(chunk, "wire_kind_symbols", 17);
+  int wire_kind_ids_slot = find_local_slot(chunk, "wire_kind_ids", 13);
+  int slab_child_offsets_slot = find_local_slot(chunk, "slab_child_offsets_table", 24);
+  int slab_child_keys_slot = find_local_slot(chunk, "slab_child_keys_table", 21);
+  int kind_id_table_slot = find_local_slot(chunk, "kind_id_table", 13);
+
   // Threaded dispatch (computed goto). Each handler ends with NEXT()
   // which dispatches the next instruction directly via a label table —
   // no centralized switch, so each handler gets its own branch-predictor
@@ -2608,6 +2932,54 @@ int tc_vm_run_args_status(const TcChunk *chunk, int argc, char **argv, TcValue *
     [TC_OP_CVAR_SET]      = &&L_CVAR_SET,
     [TC_OP_TYPED_ARRAY]   = &&L_TYPED_ARRAY,
     [TC_OP_CASE_MATCH]    = &&L_CASE_MATCH,
+    [TC_OP_TYPE_OF]               = &&L_TYPE_OF,
+    [TC_OP_AST_KIND]              = &&L_AST_KIND,
+    [TC_OP_AST_GET]               = &&L_AST_GET,
+    [TC_OP_AST_SET]               = &&L_AST_SET,
+    [TC_OP_IS_AST_NODE]           = &&L_IS_AST_NODE,
+    [TC_OP_IS_AST_NODE_FULL]      = &&L_IS_AST_NODE_FULL,
+    [TC_OP_NODE_IS]               = &&L_NODE_IS,
+    [TC_OP_NODE_KIND]             = &&L_NODE_KIND,
+    [TC_OP_NODE_OFFSET]           = &&L_NODE_OFFSET,
+    [TC_OP_NODE_FIELD_LOAD]       = &&L_NODE_FIELD_LOAD,
+    [TC_OP_NODE_FIELD_STORE]      = &&L_NODE_FIELD_STORE,
+    [TC_OP_NODE_INTERN_STR]       = &&L_NODE_INTERN_STR,
+    [TC_OP_NODE_KIND_SYM]         = &&L_NODE_KIND_SYM,
+    [TC_OP_WIRE_ALLOC]            = &&L_WIRE_ALLOC,
+    [TC_OP_WIRE_ALLOC_RESERVE]    = &&L_WIRE_ALLOC_RESERVE,
+    [TC_OP_WIRE_FIELD_STORE_AT]   = &&L_WIRE_FIELD_STORE_AT,
+    [TC_OP_WIRE_FIELD_LOAD]       = &&L_WIRE_FIELD_LOAD,
+    [TC_OP_WIRE_FIELD_LOAD_NIL]   = &&L_WIRE_FIELD_LOAD_NIL,
+    [TC_OP_WIRE_FIELD_STORE]      = &&L_WIRE_FIELD_STORE,
+    [TC_OP_WIRE_FIELD_COUNT]      = &&L_WIRE_FIELD_COUNT,
+    [TC_OP_WIRE_FIELD_SYM_AT]     = &&L_WIRE_FIELD_SYM_AT,
+    [TC_OP_WIRE_FIELD_VAL_AT]     = &&L_WIRE_FIELD_VAL_AT,
+    [TC_OP_WIRE_KIND]             = &&L_WIRE_KIND,
+    [TC_OP_WIRE_IS]               = &&L_WIRE_IS,
+    [TC_OP_NUMERIC_TO_I64]        = &&L_NUMERIC_TO_I64,
+    [TC_OP_IN_SYM_TABLE]          = &&L_IN_SYM_TABLE,
+    [TC_OP_WIRE_KIND_SYM]         = &&L_WIRE_KIND_SYM,
+    [TC_OP_WIRE_SCHEMA_KIND_SYM]  = &&L_WIRE_SCHEMA_KIND_SYM,
+    [TC_OP_WIRE_KIND_ID]          = &&L_WIRE_KIND_ID,
+    [TC_OP_WIRE_SEQ_SIZE]         = &&L_WIRE_SEQ_SIZE,
+    [TC_OP_WIRE_SEQ_GET]          = &&L_WIRE_SEQ_GET,
+    [TC_OP_WIRE_SEQ_SET]          = &&L_WIRE_SEQ_SET,
+    [TC_OP_WIRE_SEQ_FROM_ARR]     = &&L_WIRE_SEQ_FROM_ARR,
+    [TC_OP_AST_CHILDREN]          = &&L_AST_CHILDREN,
+    [TC_OP_PARSER_TOK_TYPE]       = &&L_PARSER_TOK_TYPE,
+    [TC_OP_PARSER_TOK_OFF]        = &&L_PARSER_TOK_OFF,
+    [TC_OP_PARSER_TOK_LEN]        = &&L_PARSER_TOK_LEN,
+    [TC_OP_CURRENT_BLOCK]         = &&L_CURRENT_BLOCK,
+    [TC_OP_NEXT_TEMP]             = &&L_NEXT_TEMP,
+    [TC_OP_TYPED_VALUE]           = &&L_TYPED_VALUE,
+    [TC_OP_NORM_TEMP]             = &&L_NORM_TEMP,
+    [TC_OP_IS_I64_TYPE]           = &&L_IS_I64_TYPE,
+    [TC_OP_IS_U64_TYPE]           = &&L_IS_U64_TYPE,
+    [TC_OP_IS_I128_TYPE]          = &&L_IS_I128_TYPE,
+    [TC_OP_IS_U128_TYPE]          = &&L_IS_U128_TYPE,
+    [TC_OP_IS_MACHINE_INT_TYPE]   = &&L_IS_MACHINE_INT_TYPE,
+    [TC_OP_IS_MACHINE_INT128_TYPE]= &&L_IS_MACHINE_INT128_TYPE,
+    [TC_OP_IS_MACHINE_INT64_TYPE] = &&L_IS_MACHINE_INT64_TYPE,
   };
 
   size_t op_ip = 0;
@@ -2736,6 +3108,567 @@ int tc_vm_run_args_status(const TcChunk *chunk, int argc, char **argv, TcValue *
       }
       L_NOP:
         NEXT_FAST();  // no stack mutation
+      L_TYPE_OF: {
+        TcValue out;
+        if (!tc_type_of_value(tos, &out, err)) goto cleanup_fail;
+        vm.stack[vm.sp - 1] = (tos = out);
+        NEXT_FAST();
+      }
+      L_AST_KIND: {
+        vm.stack[vm.sp - 1] = (tos = tc_ast_kind(tos));
+        NEXT_FAST();
+      }
+      L_AST_GET: {
+        TcValue sym = tos;
+        TcValue node = vm.stack[vm.sp - 2];
+        vm.sp--;
+        vm.stack[vm.sp - 1] = (tos = tc_ast_get(node, sym));
+        NEXT_FAST();
+      }
+      L_AST_SET: {
+        TcValue val = tos;
+        TcValue sym = vm.stack[vm.sp - 2];
+        TcValue node = vm.stack[vm.sp - 3];
+        vm.sp -= 2;
+        TcValue out;
+        if (!tc_ast_set(node, sym, val, &out, err)) goto cleanup_fail;
+        vm.stack[vm.sp - 1] = (tos = out);
+        NEXT_FAST();
+      }
+      L_IS_AST_NODE: {
+        vm.stack[vm.sp - 1] = (tos = tc_is_ast_node(tos) ? W_TRUE : W_FALSE);
+        NEXT_FAST();
+      }
+      L_IS_AST_NODE_FULL: {
+        TcValue node_sym = tos;
+        TcValue x = vm.stack[vm.sp - 2];
+        vm.sp--;
+        int r = 0;
+        if (x != W_NIL) {
+          if (w_is_node(x)) {
+            r = 1;
+          } else if (tc_kind(x) == TC_VAL_HASH) {
+            TcRuntimeHash *h = tc_as_hash(x);
+            if (h) {
+              if (node_sym == SYM_NODE) {
+                r = (h->flags & TC_HASH_FLAG_HAS_NODE) != 0;
+              } else {
+                r = hash_get_value(h, node_sym) != W_NIL;
+              }
+            }
+          }
+        }
+        vm.stack[vm.sp - 1] = (tos = int_value(r));
+        NEXT_FAST();
+      }
+      L_NODE_IS: {
+        vm.stack[vm.sp - 1] = (tos = int_value(w_is_node(tos) ? 1 : 0));
+        NEXT_FAST();
+      }
+      L_NODE_KIND: {
+        vm.stack[vm.sp - 1] = (tos = int_value((int64_t)w_node_kind(tos)));
+        NEXT_FAST();
+      }
+      L_NODE_OFFSET: {
+        vm.stack[vm.sp - 1] = (tos = int_value((int64_t)w_node_offset(tos)));
+        NEXT_FAST();
+      }
+      L_NODE_FIELD_LOAD: {
+        int64_t off = value_is_int(tos) ? value_as_int(tos) : 0;
+        WValue wnode = vm.stack[vm.sp - 2];
+        vm.sp--;
+        vm.stack[vm.sp - 1] = (tos = w_node_field_load(wnode, off));
+        NEXT_FAST();
+      }
+      L_NODE_FIELD_STORE: {
+        WValue val = tos;
+        int64_t off = value_is_int(vm.stack[vm.sp - 2]) ? value_as_int(vm.stack[vm.sp - 2]) : 0;
+        WValue wnode = vm.stack[vm.sp - 3];
+        vm.sp -= 2;
+        w_node_field_store(wnode, off, val);
+        vm.stack[vm.sp - 1] = (tos = W_NIL);
+        NEXT_FAST();
+      }
+      L_NODE_INTERN_STR: {
+        uint64_t sv = w_ast_intern_value_of((uint64_t)tos);
+        vm.stack[vm.sp - 1] = (tos = sv != 0 ? (TcValue)sv : W_NIL);
+        NEXT_FAST();
+      }
+      L_NODE_KIND_SYM: {
+        TcValue table = tos;
+        WValue node = vm.stack[vm.sp - 2];
+        vm.sp--;
+        (void)table;
+        vm.stack[vm.sp - 1] = (tos = tc_packed_node_kind(node));
+        NEXT_FAST();
+      }
+      L_WIRE_ALLOC: {
+        int64_t fields = value_is_int(tos) ? value_as_int(tos) : (int64_t)tos;
+        TcValue k_v = vm.stack[vm.sp - 2];
+        int64_t kind = value_is_int(k_v) ? value_as_int(k_v) : (int64_t)k_v;
+        vm.sp--;
+        vm.stack[vm.sp - 1] = (tos = w_wire_alloc(kind, fields));
+        NEXT_FAST();
+      }
+      L_WIRE_ALLOC_RESERVE: {
+        int64_t spare = value_is_int(tos) ? value_as_int(tos) : (int64_t)tos;
+        TcValue f_v = vm.stack[vm.sp - 2];
+        TcValue k_v = vm.stack[vm.sp - 3];
+        int64_t fields = value_is_int(f_v) ? value_as_int(f_v) : (int64_t)f_v;
+        int64_t kind = value_is_int(k_v) ? value_as_int(k_v) : (int64_t)k_v;
+        vm.sp -= 2;
+        vm.stack[vm.sp - 1] = (tos = w_wire_alloc_reserve(kind, fields, spare));
+        NEXT_FAST();
+      }
+      L_WIRE_FIELD_STORE_AT: {
+        WValue val = tos;
+        WValue sym = vm.stack[vm.sp - 2];
+        TcValue idx_v = vm.stack[vm.sp - 3];
+        WValue wire = vm.stack[vm.sp - 4];
+        int64_t idx = value_is_int(idx_v) ? value_as_int(idx_v) : (int64_t)idx_v;
+        vm.sp -= 3;
+        vm.stack[vm.sp - 1] = (tos = w_wire_field_store_at(wire, idx, sym, val));
+        NEXT_FAST();
+      }
+      L_WIRE_FIELD_LOAD: {
+        WValue sym = tos;
+        WValue wire = vm.stack[vm.sp - 2];
+        vm.sp--;
+        vm.stack[vm.sp - 1] = (tos = w_wire_field_load(wire, sym));
+        NEXT_FAST();
+      }
+      L_WIRE_FIELD_LOAD_NIL: {
+        WValue sym = tos;
+        WValue wire = vm.stack[vm.sp - 2];
+        vm.sp--;
+        vm.stack[vm.sp - 1] = (tos = w_wire_field_load_nil(wire, sym));
+        NEXT_FAST();
+      }
+      L_WIRE_FIELD_STORE: {
+        WValue val = tos;
+        WValue sym = vm.stack[vm.sp - 2];
+        WValue wire = vm.stack[vm.sp - 3];
+        vm.sp -= 2;
+        vm.stack[vm.sp - 1] = (tos = w_wire_field_store(wire, sym, val));
+        NEXT_FAST();
+      }
+      L_WIRE_FIELD_COUNT: {
+        vm.stack[vm.sp - 1] = (tos = int_value(w_wire_field_count(tos)));
+        NEXT_FAST();
+      }
+      L_WIRE_FIELD_SYM_AT: {
+        int64_t idx = value_is_int(tos) ? value_as_int(tos) : (int64_t)tos;
+        WValue wire = vm.stack[vm.sp - 2];
+        vm.sp--;
+        vm.stack[vm.sp - 1] = (tos = w_wire_field_symbol_at(wire, idx));
+        NEXT_FAST();
+      }
+      L_WIRE_FIELD_VAL_AT: {
+        int64_t idx = value_is_int(tos) ? value_as_int(tos) : (int64_t)tos;
+        WValue wire = vm.stack[vm.sp - 2];
+        vm.sp--;
+        vm.stack[vm.sp - 1] = (tos = w_wire_field_value_at(wire, idx));
+        NEXT_FAST();
+      }
+      L_WIRE_KIND: {
+        vm.stack[vm.sp - 1] = (tos = int_value(w_wire_kind_extern(tos)));
+        NEXT_FAST();
+      }
+      L_WIRE_IS: {
+        vm.stack[vm.sp - 1] = (tos = int_value(w_is_wire_extern(tos)));
+        NEXT_FAST();
+      }
+      L_NUMERIC_TO_I64: {
+        int64_t raw = value_is_int(tos) ? value_as_int(tos) : (int64_t)tos;
+        vm.stack[vm.sp - 1] = (tos = int_value(raw));
+        NEXT_FAST();
+      }
+      L_IN_SYM_TABLE: {
+        uint32_t tid = read_u32_at(&chunk->code[vm.ip]);
+        vm.ip += 4;
+        const TcCaseTable *table = &chunk->case_tables[tid];
+        TcValue subject = tos;
+        int matched = 0;
+        if (tc_kind(subject) == TC_VAL_SYMBOL) {
+          const char *bytes = tc_str_bytes_only(subject);
+          if (table->hash_keys) {
+            uint32_t slot = (uint32_t)(((uintptr_t)bytes >> 3) * 2654435761u) & table->hash_mask;
+            while (table->hash_keys[slot]) {
+              if (table->hash_keys[slot] == bytes) {
+                matched = 1;
+                break;
+              }
+              slot = (slot + 1u) & table->hash_mask;
+            }
+          } else {
+            for (uint32_t i = 0; i < table->count; i++) {
+              if (table->keys[i] == bytes) {
+                matched = 1;
+                break;
+              }
+            }
+          }
+        }
+        vm.stack[vm.sp - 1] = (tos = matched ? W_TRUE : W_FALSE);
+        NEXT_FAST();
+      }
+      L_WIRE_KIND_SYM: {
+        TcValue inst = tos;
+        int64_t id = w_wire_kind_extern(inst);
+        TcValue out = W_NIL;
+        if (id > 0 && wire_kind_symbols_slot >= 0) {
+          TcValue syms_v = vm.locals[wire_kind_symbols_slot];
+          if (tc_kind(syms_v) == TC_VAL_ARRAY && tc_as_array(syms_v) &&
+              id < tc_as_array(syms_v)->size) {
+            out = tc_as_array(syms_v)->slots[id];
+          }
+        } else if (id == 0) {
+          if (w_is_wire(inst)) {
+            out = w_wire_field_load_nil(inst, SYM_OP);
+          } else if (tc_kind(inst) == TC_VAL_HASH && tc_as_hash(inst)) {
+            out = hash_get_value(tc_as_hash(inst), SYM_OP);
+          }
+        }
+        vm.stack[vm.sp - 1] = (tos = out);
+        NEXT_FAST();
+      }
+      L_WIRE_SCHEMA_KIND_SYM: {
+        int64_t id = value_is_int(tos) ? value_as_int(tos) : 0;
+        TcValue out = W_NIL;
+        if (id > 0 && wire_kind_symbols_slot >= 0) {
+          TcValue syms_v = vm.locals[wire_kind_symbols_slot];
+          if (tc_kind(syms_v) == TC_VAL_ARRAY && tc_as_array(syms_v) &&
+              id < tc_as_array(syms_v)->size) {
+            out = tc_as_array(syms_v)->slots[id];
+          }
+        }
+        vm.stack[vm.sp - 1] = (tos = out);
+        NEXT_FAST();
+      }
+      L_WIRE_KIND_ID: {
+        TcValue op_sym = tos;
+        TcValue out = W_NIL;
+        if (wire_kind_ids_slot >= 0 && tc_kind(vm.locals[wire_kind_ids_slot]) == TC_VAL_HASH &&
+            tc_as_hash(vm.locals[wire_kind_ids_slot])) {
+          TcRuntimeHash *ids = tc_as_hash(vm.locals[wire_kind_ids_slot]);
+          if (ids->count == 0 && wire_kind_symbols_slot >= 0 &&
+              tc_kind(vm.locals[wire_kind_symbols_slot]) == TC_VAL_ARRAY &&
+              tc_as_array(vm.locals[wire_kind_symbols_slot])) {
+            TcRuntimeArray *syms = tc_as_array(vm.locals[wire_kind_symbols_slot]);
+            for (int32_t i = 1; i < syms->size; i++) {
+              if (!hash_set_value(ids, syms->slots[i], int_value(i), err)) goto cleanup_fail;
+            }
+          }
+          out = hash_get_value(ids, op_sym);
+        }
+        if (out == W_NIL) {
+          tc_error_set(err, "WIRE opcode is missing from wire_schema.w");
+          goto cleanup_fail;
+        }
+        vm.stack[vm.sp - 1] = (tos = out);
+        NEXT_FAST();
+      }
+      L_WIRE_SEQ_SIZE: {
+        TcValue v = tos;
+        int64_t sz = 0;
+        if (v != W_NIL) {
+          if (!w_is_wire_sequence(v)) {
+            tc_error_set(err, "w_wire_sequence_size expects a WIRE sequence");
+            goto cleanup_fail;
+          }
+          sz = w_wire_sequence_size(v);
+        }
+        vm.stack[vm.sp - 1] = (tos = int_value(sz));
+        NEXT_FAST();
+      }
+      L_WIRE_SEQ_GET: {
+        int64_t idx = value_is_int(tos) ? value_as_int(tos) : (int64_t)tos;
+        WValue seq = vm.stack[vm.sp - 2];
+        vm.sp--;
+        vm.stack[vm.sp - 1] = (tos = w_wire_sequence_get(seq, idx));
+        NEXT_FAST();
+      }
+      L_WIRE_SEQ_SET: {
+        WValue item = tos;
+        TcValue idx_v = vm.stack[vm.sp - 2];
+        WValue seq = vm.stack[vm.sp - 3];
+        int64_t idx = value_is_int(idx_v) ? value_as_int(idx_v) : (int64_t)idx_v;
+        vm.sp -= 2;
+        vm.stack[vm.sp - 1] = (tos = w_wire_sequence_set(seq, idx, item));
+        NEXT_FAST();
+      }
+      L_WIRE_SEQ_FROM_ARR: {
+        TcValue v = tos;
+        TcValue out = W_NIL;
+        if (v == W_NIL) {
+          out = W_NIL;
+        } else if (w_is_wire_sequence(v)) {
+          out = v;
+        } else if (tc_kind(v) == TC_VAL_ARRAY && tc_as_array(v)) {
+          TcRuntimeArray *arr = tc_as_array(v);
+          out = w_wire_sequence_alloc(arr->size);
+          for (int32_t i = 0; i < arr->size; i++) {
+            w_wire_sequence_set(out, i, arr->slots[i]);
+          }
+        } else {
+          tc_error_set(err, "w_wire_sequence_from_array expects an Array");
+          goto cleanup_fail;
+        }
+        vm.stack[vm.sp - 1] = (tos = out);
+        NEXT_FAST();
+      }
+      L_AST_CHILDREN: {
+        TcValue node = tos;
+        TcRuntimeArray *offsets_tbl = (slab_child_offsets_slot >= 0 &&
+            tc_kind(vm.locals[slab_child_offsets_slot]) == TC_VAL_ARRAY)
+            ? tc_as_array(vm.locals[slab_child_offsets_slot]) : NULL;
+        TcValue empty_arr = (offsets_tbl && offsets_tbl->size > 15)
+            ? offsets_tbl->slots[15] : W_NIL;
+        if (node == W_NIL || !offsets_tbl) {
+          if (empty_arr == W_NIL) {
+            TcRuntimeArray *a = runtime_array_new(0, err);
+            if (!a) goto cleanup_fail;
+            empty_arr = tc_box_array(a);
+          }
+          vm.stack[vm.sp - 1] = (tos = empty_arr);
+          NEXT_FAST();
+        }
+        int packed = w_is_node(node);
+        int64_t kid = -1;
+        if (packed) {
+          kid = (int64_t)w_node_kind(node);
+        } else {
+          TcValue k = tc_ast_kind(node);
+          if (k != W_NIL && kind_id_table_slot >= 0 &&
+              tc_kind(vm.locals[kind_id_table_slot]) == TC_VAL_HASH &&
+              tc_as_hash(vm.locals[kind_id_table_slot])) {
+            TcValue kv = hash_get_value(tc_as_hash(vm.locals[kind_id_table_slot]), k);
+            if (value_is_int(kv)) kid = value_as_int(kv);
+          }
+        }
+        if (kid < 1 || kid > (int64_t)W_AST_KIND_MAX || kid >= offsets_tbl->size) {
+          vm.stack[vm.sp - 1] = (tos = empty_arr);
+          NEXT_FAST();
+        }
+        TcValue offsets_v = offsets_tbl->slots[kid];
+        if (tc_kind(offsets_v) != TC_VAL_ARRAY || !tc_as_array(offsets_v)) {
+          vm.stack[vm.sp - 1] = (tos = empty_arr);
+          NEXT_FAST();
+        }
+        TcRuntimeArray *offsets = tc_as_array(offsets_v);
+        int32_t n_off = offsets->size;
+        if (n_off == 0) {
+          vm.stack[vm.sp - 1] = (tos = offsets_v);
+          NEXT_FAST();
+        }
+        TcRuntimeArray *out = NULL;
+        if (packed) {
+          for (int32_t i = 0; i < n_off; i++) {
+            int64_t off = value_as_int(offsets->slots[i]);
+            TcValue v = w_node_field_load(node, off);
+            if (v != W_NIL) {
+              if (tc_is_ast_node(v)) {
+                if (!out) {
+                  out = runtime_array_new(0, err);
+                  if (!out) goto cleanup_fail;
+                }
+                if (!runtime_array_ensure_cap(out, (size_t)out->size + 1, err)) goto cleanup_fail;
+                out->slots[out->size++] = v;
+              } else if (tc_kind(v) == TC_VAL_ARRAY && tc_as_array(v)) {
+                TcRuntimeArray *va = tc_as_array(v);
+                for (int32_t j = 0; j < va->size; j++) {
+                  TcValue elt = va->slots[j];
+                  if (tc_is_ast_node(elt)) {
+                    if (!out) {
+                      out = runtime_array_new((size_t)va->size, err);
+                      if (!out) goto cleanup_fail;
+                      out->size = 0;
+                    }
+                    if (!runtime_array_ensure_cap(out, (size_t)out->size + 1, err)) goto cleanup_fail;
+                    out->slots[out->size++] = elt;
+                  }
+                }
+              }
+            }
+          }
+        } else if (tc_kind(node) == TC_VAL_HASH && tc_as_hash(node) && slab_child_keys_slot >= 0 &&
+                   tc_kind(vm.locals[slab_child_keys_slot]) == TC_VAL_ARRAY &&
+                   tc_as_array(vm.locals[slab_child_keys_slot])) {
+          TcRuntimeHash *nh = tc_as_hash(node);
+          TcRuntimeArray *keys_tbl = tc_as_array(vm.locals[slab_child_keys_slot]);
+          if (kid < keys_tbl->size && tc_kind(keys_tbl->slots[kid]) == TC_VAL_ARRAY &&
+              tc_as_array(keys_tbl->slots[kid])) {
+            TcRuntimeArray *keys = tc_as_array(keys_tbl->slots[kid]);
+            for (int32_t i = 0; i < n_off && i < keys->size; i++) {
+              TcValue v = hash_get_value(nh, keys->slots[i]);
+              if (v != W_NIL) {
+                if (tc_is_ast_node(v)) {
+                  if (!out) {
+                    out = runtime_array_new(0, err);
+                    if (!out) goto cleanup_fail;
+                  }
+                  if (!runtime_array_ensure_cap(out, (size_t)out->size + 1, err)) goto cleanup_fail;
+                  out->slots[out->size++] = v;
+                } else if (tc_kind(v) == TC_VAL_ARRAY && tc_as_array(v)) {
+                  TcRuntimeArray *va = tc_as_array(v);
+                  for (int32_t j = 0; j < va->size; j++) {
+                    TcValue elt = va->slots[j];
+                    if (tc_is_ast_node(elt)) {
+                      if (!out) {
+                        out = runtime_array_new((size_t)va->size, err);
+                        if (!out) goto cleanup_fail;
+                        out->size = 0;
+                      }
+                      if (!runtime_array_ensure_cap(out, (size_t)out->size + 1, err)) goto cleanup_fail;
+                      out->slots[out->size++] = elt;
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        vm.stack[vm.sp - 1] = (tos = out ? tc_box_array(out) : empty_arr);
+        NEXT_FAST();
+      }
+      L_PARSER_TOK_TYPE: {
+        int64_t raw = value_is_int(tos) ? value_as_int(tos) : (int64_t)tos;
+        vm.stack[vm.sp - 1] = (tos = int_value((raw >> 38) & 0xFF));
+        NEXT_FAST();
+      }
+      L_PARSER_TOK_OFF: {
+        int64_t raw = value_is_int(tos) ? value_as_int(tos) : (int64_t)tos;
+        vm.stack[vm.sp - 1] = (tos = int_value((raw >> 2) & 0xFFFFFF));
+        NEXT_FAST();
+      }
+      L_PARSER_TOK_LEN: {
+        int64_t raw = value_is_int(tos) ? value_as_int(tos) : (int64_t)tos;
+        vm.stack[vm.sp - 1] = (tos = int_value((raw >> 26) & 0xFFF));
+        NEXT_FAST();
+      }
+      L_CURRENT_BLOCK: {
+        TcValue f = tos;
+        TcValue blocks_v = W_NIL;
+        if (w_is_wire(f)) {
+          blocks_v = w_wire_field_load(f, SYM_BLOCKS);
+        } else if (tc_kind(f) == TC_VAL_HASH && tc_as_hash(f)) {
+          blocks_v = hash_get_value(tc_as_hash(f), SYM_BLOCKS);
+        }
+        TcValue out = W_NIL;
+        if (tc_kind(blocks_v) == TC_VAL_ARRAY && tc_as_array(blocks_v) &&
+            tc_as_array(blocks_v)->size > 0) {
+          TcRuntimeArray *arr = tc_as_array(blocks_v);
+          out = arr->slots[arr->size - 1];
+        }
+        vm.stack[vm.sp - 1] = (tos = out);
+        NEXT_FAST();
+      }
+      L_NEXT_TEMP: {
+        TcValue f = tos;
+        int64_t n = 0;
+        if (w_is_wire(f)) {
+          TcValue nv = w_wire_field_load(f, SYM_NEXT_TEMP);
+          n = value_is_int(nv) ? value_as_int(nv) : 0;
+          w_wire_field_store(f, SYM_NEXT_TEMP, int_value(n + 1));
+        } else if (tc_kind(f) == TC_VAL_HASH && tc_as_hash(f)) {
+          TcValue nv = hash_get_value(tc_as_hash(f), SYM_NEXT_TEMP);
+          n = value_is_int(nv) ? value_as_int(nv) : 0;
+          if (!hash_set_value(tc_as_hash(f), SYM_NEXT_TEMP, int_value(n + 1), err)) goto cleanup_fail;
+        }
+        TcValue out;
+        if (n >= 0 && n < 1024 && g_temp_strs[n] != W_NIL) {
+          out = g_temp_strs[n];
+        } else {
+          char buf[32];
+          int len = snprintf(buf, sizeof(buf), "%%t%lld", (long long)n);
+          if (!make_string_value(buf, (size_t)len, &out, err)) goto cleanup_fail;
+        }
+        vm.stack[vm.sp - 1] = (tos = out);
+        NEXT_FAST();
+      }
+      L_TYPED_VALUE: {
+        WValue val = tos;
+        WValue type_sym = vm.stack[vm.sp - 2];
+        vm.sp--;
+        WValue handle = w_wire_alloc_reserve(268, 2, 0);
+        w_wire_field_store_at(handle, 0, SYM_TYPE, type_sym);
+        w_wire_field_store_at(handle, 1, SYM_VALUE, val);
+        vm.stack[vm.sp - 1] = (tos = handle);
+        NEXT_FAST();
+      }
+      L_NORM_TEMP: {
+        TcValue temp_map = tos;
+        TcValue name = vm.stack[vm.sp - 2];
+        vm.sp--;
+        if (name == W_NIL) {
+          vm.stack[vm.sp - 1] = (tos = int_value(-1));
+          NEXT_FAST();
+        }
+        if (tc_kind(name) != TC_VAL_STRING ||
+            tc_kind(temp_map) != TC_VAL_ARRAY || !tc_as_array(temp_map) ||
+            tc_as_array(temp_map)->size != 3) {
+          tc_error_set(err, "w_content_temp_norm received invalid state");
+          goto cleanup_fail;
+        }
+        TcRuntimeArray *state = tc_as_array(temp_map);
+        TcRuntimeArray *dense = tc_as_array(state->slots[0]);
+        TcRuntimeHash *fallback = tc_as_hash(state->slots[1]);
+        int64_t ordinal = content_temp_ordinal(name);
+        TcValue out = (ordinal >= 0 && ordinal < dense->size)
+                          ? dense->slots[ordinal]
+                          : hash_get_value(fallback, name);
+        if (out == W_NIL) {
+          int64_t next = value_as_int(state->slots[2]);
+          out = int_value(next);
+          if (ordinal >= 0 && ordinal < dense->size) {
+            dense->slots[ordinal] = out;
+          } else if (!hash_set_value(fallback, name, out, err)) {
+            goto cleanup_fail;
+          }
+          state->slots[2] = int_value(next + 1);
+        }
+        vm.stack[vm.sp - 1] = (tos = out);
+        NEXT_FAST();
+      }
+      L_IS_I64_TYPE: {
+        int r = (tos == SYM_I64 || tos == SYM_RAW_I64 || tos == SYM_RAW_INT);
+        vm.stack[vm.sp - 1] = (tos = r ? W_TRUE : W_FALSE);
+        NEXT_FAST();
+      }
+      L_IS_U64_TYPE: {
+        int r = (tos == SYM_U64 || tos == SYM_RAW_U64);
+        vm.stack[vm.sp - 1] = (tos = r ? W_TRUE : W_FALSE);
+        NEXT_FAST();
+      }
+      L_IS_I128_TYPE: {
+        int r = (tos == SYM_I128 || tos == SYM_RAW_I128);
+        vm.stack[vm.sp - 1] = (tos = r ? W_TRUE : W_FALSE);
+        NEXT_FAST();
+      }
+      L_IS_U128_TYPE: {
+        int r = (tos == SYM_U128 || tos == SYM_RAW_U128);
+        vm.stack[vm.sp - 1] = (tos = r ? W_TRUE : W_FALSE);
+        NEXT_FAST();
+      }
+      L_IS_MACHINE_INT128_TYPE: {
+        int r = (tos == SYM_I128 || tos == SYM_RAW_I128 || tos == SYM_U128 || tos == SYM_RAW_U128);
+        vm.stack[vm.sp - 1] = (tos = r ? W_TRUE : W_FALSE);
+        NEXT_FAST();
+      }
+      L_IS_MACHINE_INT64_TYPE: {
+        int r = (tos == SYM_I64 || tos == SYM_RAW_I64 || tos == SYM_RAW_INT ||
+                 tos == SYM_U64 || tos == SYM_RAW_U64);
+        vm.stack[vm.sp - 1] = (tos = r ? W_TRUE : W_FALSE);
+        NEXT_FAST();
+      }
+      L_IS_MACHINE_INT_TYPE: {
+        int r = (tos == SYM_I64 || tos == SYM_RAW_I64 || tos == SYM_RAW_INT ||
+                 tos == SYM_U64 || tos == SYM_RAW_U64 ||
+                 tos == SYM_I128 || tos == SYM_RAW_I128 ||
+                 tos == SYM_U128 || tos == SYM_RAW_U128);
+        vm.stack[vm.sp - 1] = (tos = r ? W_TRUE : W_FALSE);
+        NEXT_FAST();
+      }
       L_IVAR_GET: {
         // self is bound by vm_call_function on every method call into a
         // local slot named "self". The slot index is stable across the
@@ -2812,10 +3745,21 @@ int tc_vm_run_args_status(const TcChunk *chunk, int argc, char **argv, TcValue *
         uint32_t target = table->default_target;
         if (tc_kind(subject) == TC_VAL_SYMBOL) {
           const char *bytes = tc_str_bytes_only(subject);
-          for (uint32_t i = 0; i < table->count; i++) {
-            if (table->keys[i] == bytes) {
-              target = table->targets[i];
-              break;
+          if (table->hash_keys) {
+            uint32_t slot = (uint32_t)(((uintptr_t)bytes >> 3) * 2654435761u) & table->hash_mask;
+            while (table->hash_keys[slot]) {
+              if (table->hash_keys[slot] == bytes) {
+                target = table->hash_targets[slot];
+                break;
+              }
+              slot = (slot + 1u) & table->hash_mask;
+            }
+          } else {
+            for (uint32_t i = 0; i < table->count; i++) {
+              if (table->keys[i] == bytes) {
+                target = table->targets[i];
+                break;
+              }
             }
           }
         }
@@ -2841,6 +3785,8 @@ int tc_vm_run_args_status(const TcChunk *chunk, int argc, char **argv, TcValue *
             } else if (w_is_wire(receiver)) {
               out = w_wire_field_load(receiver, arg);
               if (out == W_UNDEF) out = tc_box_nil();
+            } else if (w_is_node(receiver)) {
+              out = tc_packed_node_get(receiver, arg);
             } else {
               out = tc_box_nil();
             }
@@ -2999,6 +3945,8 @@ int tc_vm_run_args_status(const TcChunk *chunk, int argc, char **argv, TcValue *
             } else if (w_is_wire(receiver)) {
               out = w_wire_field_load(receiver, arg);
               if (out == W_UNDEF) out = tc_box_nil();
+            } else if (w_is_node(receiver)) {
+              out = tc_packed_node_get(receiver, arg);
             } else {
               out = tc_box_nil();
             }

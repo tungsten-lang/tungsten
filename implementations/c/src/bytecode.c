@@ -49,6 +49,8 @@ void tc_chunk_free(TcChunk *chunk) {
     // keys point into the global intern table; do not free.
     free(chunk->case_tables[i].keys);
     free(chunk->case_tables[i].targets);
+    free(chunk->case_tables[i].hash_keys);
+    free(chunk->case_tables[i].hash_targets);
   }
   free(chunk->case_tables);
   // slab_class_names entries are interned bytes (owned by tc_intern); don't free them
@@ -341,6 +343,9 @@ int tc_chunk_alloc_case_table(TcChunk *chunk, uint32_t count, TcError *err) {
   }
   table->count = count;
   table->default_target = 0;
+  table->hash_keys = NULL;
+  table->hash_targets = NULL;
+  table->hash_mask = 0;
   return (int)chunk->case_table_count++;
 }
 
@@ -431,6 +436,17 @@ int tc_chunk_add_const(TcChunk *chunk, TcValue value, TcError *err) {
   // hash table so it's O(1) amortized; a previous attempt with linear
   // scan added more compile time than it saved at runtime.
   if (tc_kind(value) == TC_VAL_STRING || tc_kind(value) == TC_VAL_SYMBOL) {
+    if (chunk->const_dedup_cap == 0 ||
+        chunk->const_count * 2 >= chunk->const_dedup_cap) {
+      if (!const_dedup_grow(chunk, err)) return -1;
+    }
+    size_t slot;
+    uint32_t found = const_dedup_lookup(chunk, (int)tc_kind(value), tc_str_bytes_only(value), tc_str_len(value), &slot);
+    if (found) {
+      // Caller's bytes buffer is now redundant — free if it owned the copy.
+      if (tc_managed(value)) tc_heap_string_release(tc_str_bytes_only(value));
+      return (int)(found - 1);
+    }
     // Symbols go through the global intern pool so every TC_VAL_SYMBOL
     // produced anywhere — chunk consts, AST values, runtime conversions —
     // shares one canonical bytes buffer. Strings stay as-is here (the
@@ -445,20 +461,7 @@ int tc_chunk_add_const(TcChunk *chunk, TcValue value, TcError *err) {
         tc_heap_string_release(tc_str_bytes_only(value));
       }
       // Replace the value with one that owns the interned bytes (managed=0).
-      // Post-flip the (managed) flag moves into the TcHeapString header,
-      // so this rewrite naturally drops it.
       value = tc_box_symbol_bytes(interned, tc_str_len(value), 0);
-    }
-    if (chunk->const_dedup_cap == 0 ||
-        chunk->const_count * 2 >= chunk->const_dedup_cap) {
-      if (!const_dedup_grow(chunk, err)) return -1;
-    }
-    size_t slot;
-    uint32_t found = const_dedup_lookup(chunk, (int)tc_kind(value), tc_str_bytes_only(value), tc_str_len(value), &slot);
-    if (found) {
-      // Caller's bytes buffer is now redundant — free if it owned the copy.
-      if (tc_managed(value)) tc_heap_string_release(tc_str_bytes_only(value));
-      return (int)(found - 1);
     }
     if (chunk->const_count == chunk->const_cap) {
       size_t cap = chunk->const_cap ? chunk->const_cap * 2 : 32;
@@ -655,12 +658,48 @@ static size_t opcode_size(uint8_t op) {
     case TC_OP_SIZE_OF_LOCAL: return 5;  // op + u32 slot
     case TC_OP_LOAD_EQ_CONST_BR: return 13; // op + u32 slot + u32 const_id + u32 target
     case TC_OP_CASE_SYM_LINEAR: return 5; // op + u32 table_id
+    case TC_OP_IN_SYM_TABLE: return 5;   // op + u32 table_id
     case TC_OP_IVAR_GET:                 // op + u32 name_id
     case TC_OP_IVAR_SET:                 // op + u32 name_id
     case TC_OP_CVAR_GET:                 // op + u32 name_id
     case TC_OP_CVAR_SET: return 5;       // op + u32 name_id
     default: return 1;                   // single-byte ops (ADD/SUB/.../RETURN/POP/NOP/TYPED_ARRAY/CASE_MATCH/...)
   }
+}
+
+static int is_receiverless_builtin(const char *name, size_t len) {
+  if (len > 4 && memcmp(name + len - 4, ".new", 4) == 0) return 1;
+  static const char *const builtins[] = {
+      "wvalue_bits",
+      "ARGV",
+      "slab_alloc_init",
+      "ccall_nobox",
+      "ccall_rawargs",
+      "ccall",
+      "exit",
+      "raise",
+      "env",
+      "file?",
+      "file_mtime_ns",
+      "file_stat_data",
+      "digest_file64",
+      "runtime_identity",
+      "clock",
+      "type",
+      "StringBuffer",
+      "wyhash64_hex_string",
+      "read_file",
+      "write_file",
+      "system",
+      "capture",
+      "Tungsten.PROTECT_THE_CORE!",
+      "Tungsten.STOP_THE_PRESS!",
+      "Tungsten.LOCK_THE_DOORS!",
+  };
+  for (size_t i = 0; i < sizeof(builtins) / sizeof(builtins[0]); i++) {
+    if (strlen(builtins[i]) == len && memcmp(builtins[i], name, len) == 0) return 1;
+  }
+  return 0;
 }
 
 void tc_chunk_compute_touched(TcChunk *chunk) {
@@ -782,6 +821,7 @@ void tc_chunk_compute_touched(TcChunk *chunk) {
         continue;
       }
       if (!chunk->fn_for_const) continue;
+      if (is_receiverless_builtin(call_name, call_name_len)) continue;
       // Linear walk over functions is O(NxM); only happens once per
       // chunk, so it's fine. Breaking out of the inner loop on first
       // match is the only reason this is even tolerable.
@@ -798,6 +838,36 @@ void tc_chunk_compute_touched(TcChunk *chunk) {
     chunk->method_ic_class = (const char **)calloc(chunk->const_count, sizeof(const char *));
     chunk->method_ic_class_len = (size_t *)calloc(chunk->const_count, sizeof(size_t));
     chunk->method_ic_fn = (TcFunction **)calloc(chunk->const_count, sizeof(TcFunction *));
+  }
+
+  for (size_t i = 0; i < chunk->case_table_count; i++) {
+    TcCaseTable *t = &chunk->case_tables[i];
+    if (t->count > 4 && !t->hash_keys) {
+      uint32_t cap = 16;
+      while (cap < t->count * 2) cap *= 2;
+      t->hash_keys = (const char **)calloc(cap, sizeof(const char *));
+      t->hash_targets = (uint32_t *)calloc(cap, sizeof(uint32_t));
+      if (t->hash_keys && t->hash_targets) {
+        t->hash_mask = cap - 1u;
+        for (uint32_t j = 0; j < t->count; j++) {
+          const char *k = t->keys[j];
+          if (!k) continue;
+          uint32_t slot = (uint32_t)(((uintptr_t)k >> 3) * 2654435761u) & t->hash_mask;
+          while (t->hash_keys[slot] && t->hash_keys[slot] != k) {
+            slot = (slot + 1u) & t->hash_mask;
+          }
+          if (!t->hash_keys[slot]) {
+            t->hash_keys[slot] = k;
+            t->hash_targets[slot] = t->targets[j];
+          }
+        }
+      } else {
+        free(t->hash_keys);
+        free(t->hash_targets);
+        t->hash_keys = NULL;
+        t->hash_targets = NULL;
+      }
+    }
   }
 }
 
@@ -1046,6 +1116,54 @@ static const char *op_name(uint8_t op) {
     case TC_OP_INDEX_LL: return "INDEX_LL";
     case TC_OP_SIZE_OF_LOCAL: return "SIZE_OF_LOCAL";
     case TC_OP_LOAD_EQ_CONST_BR: return "LOAD_EQ_CONST_BR";
+    case TC_OP_TYPE_OF: return "TYPE_OF";
+    case TC_OP_AST_KIND: return "AST_KIND";
+    case TC_OP_AST_GET: return "AST_GET";
+    case TC_OP_AST_SET: return "AST_SET";
+    case TC_OP_IS_AST_NODE: return "IS_AST_NODE";
+    case TC_OP_IS_AST_NODE_FULL: return "IS_AST_NODE_FULL";
+    case TC_OP_NODE_IS: return "NODE_IS";
+    case TC_OP_NODE_KIND: return "NODE_KIND";
+    case TC_OP_NODE_OFFSET: return "NODE_OFFSET";
+    case TC_OP_NODE_FIELD_LOAD: return "NODE_FIELD_LOAD";
+    case TC_OP_NODE_FIELD_STORE: return "NODE_FIELD_STORE";
+    case TC_OP_NODE_INTERN_STR: return "NODE_INTERN_STR";
+    case TC_OP_NODE_KIND_SYM: return "NODE_KIND_SYM";
+    case TC_OP_WIRE_ALLOC: return "WIRE_ALLOC";
+    case TC_OP_WIRE_ALLOC_RESERVE: return "WIRE_ALLOC_RESERVE";
+    case TC_OP_WIRE_FIELD_STORE_AT: return "WIRE_FIELD_STORE_AT";
+    case TC_OP_WIRE_FIELD_LOAD: return "WIRE_FIELD_LOAD";
+    case TC_OP_WIRE_FIELD_LOAD_NIL: return "WIRE_FIELD_LOAD_NIL";
+    case TC_OP_WIRE_FIELD_STORE: return "WIRE_FIELD_STORE";
+    case TC_OP_WIRE_FIELD_COUNT: return "WIRE_FIELD_COUNT";
+    case TC_OP_WIRE_FIELD_SYM_AT: return "WIRE_FIELD_SYM_AT";
+    case TC_OP_WIRE_FIELD_VAL_AT: return "WIRE_FIELD_VAL_AT";
+    case TC_OP_WIRE_KIND: return "WIRE_KIND";
+    case TC_OP_WIRE_IS: return "WIRE_IS";
+    case TC_OP_NUMERIC_TO_I64: return "NUMERIC_TO_I64";
+    case TC_OP_IN_SYM_TABLE: return "IN_SYM_TABLE";
+    case TC_OP_WIRE_KIND_SYM: return "WIRE_KIND_SYM";
+    case TC_OP_WIRE_SCHEMA_KIND_SYM: return "WIRE_SCHEMA_KIND_SYM";
+    case TC_OP_WIRE_KIND_ID: return "WIRE_KIND_ID";
+    case TC_OP_WIRE_SEQ_SIZE: return "WIRE_SEQ_SIZE";
+    case TC_OP_WIRE_SEQ_GET: return "WIRE_SEQ_GET";
+    case TC_OP_WIRE_SEQ_SET: return "WIRE_SEQ_SET";
+    case TC_OP_WIRE_SEQ_FROM_ARR: return "WIRE_SEQ_FROM_ARR";
+    case TC_OP_AST_CHILDREN: return "AST_CHILDREN";
+    case TC_OP_PARSER_TOK_TYPE: return "PARSER_TOK_TYPE";
+    case TC_OP_PARSER_TOK_OFF: return "PARSER_TOK_OFF";
+    case TC_OP_PARSER_TOK_LEN: return "PARSER_TOK_LEN";
+    case TC_OP_CURRENT_BLOCK: return "CURRENT_BLOCK";
+    case TC_OP_NEXT_TEMP: return "NEXT_TEMP";
+    case TC_OP_TYPED_VALUE: return "TYPED_VALUE";
+    case TC_OP_NORM_TEMP: return "NORM_TEMP";
+    case TC_OP_IS_I64_TYPE: return "IS_I64_TYPE";
+    case TC_OP_IS_U64_TYPE: return "IS_U64_TYPE";
+    case TC_OP_IS_I128_TYPE: return "IS_I128_TYPE";
+    case TC_OP_IS_U128_TYPE: return "IS_U128_TYPE";
+    case TC_OP_IS_MACHINE_INT_TYPE: return "IS_MACHINE_INT_TYPE";
+    case TC_OP_IS_MACHINE_INT128_TYPE: return "IS_MACHINE_INT128_TYPE";
+    case TC_OP_IS_MACHINE_INT64_TYPE: return "IS_MACHINE_INT64_TYPE";
     default: return "?";
   }
 }

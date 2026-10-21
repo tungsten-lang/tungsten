@@ -82,11 +82,13 @@ static int emit_call_op(TcChunk *chunk, const char *name, size_t name_len, size_
   // shares one canonical bytes pointer. The L_CALL builtin matchers
   // use ptr-equality against pre-interned static handles, replacing
   // the memcmp chain.
-  char *name_copy = tc_heap_string_alloc(name_len, 0, err);
-  if (!name_copy) return 0;
-  memcpy(name_copy, name, name_len);
+  const char *interned = tc_intern(name, name_len);
+  if (!interned) {
+    tc_error_set(err, "call name intern failed");
+    return 0;
+  }
   int name_id = tc_chunk_add_const(
-      chunk, tc_box_symbol_bytes(name_copy, name_len, 1), err);
+      chunk, tc_box_symbol_bytes(interned, name_len, 0), err);
   if (name_id < 0) return 0;
   return tc_emit_op(chunk, TC_OP_CALL, err) &&
          tc_emit_u32(chunk, (uint32_t)name_id, err) &&
@@ -159,10 +161,12 @@ static int compile_function_def(TcAstValue node, const char *prefix, size_t pref
 // tc_chunk_add_const → tc_intern), so the runtime reads the canonical
 // pointer when L_IVAR_GET / L_IVAR_SET indexes the consts.
 static int emit_symbol_const(TcChunk *chunk, const char *bytes, size_t len, TcError *err) {
-  char *copy = tc_heap_string_alloc(len, 0, err);
-  if (!copy) return -1;
-  memcpy(copy, bytes, len);
-  return tc_chunk_add_const(chunk, tc_box_symbol_bytes(copy, len, 1), err);
+  const char *interned = tc_intern(bytes, len);
+  if (!interned) {
+    tc_error_set(err, "symbol intern failed");
+    return -1;
+  }
+  return tc_chunk_add_const(chunk, tc_box_symbol_bytes(interned, len, 0), err);
 }
 
 static int compile_var(TcAstValue node, TcChunk *chunk, TcError *err) {
@@ -677,6 +681,16 @@ static int compile_on_guard(TcAstValue node, TcChunk *chunk, TcError *err) {
   return emit_nil(chunk, err);
 }
 
+// Returns 1 if `pattern` is a `:symbol` AST node (the case-arm shape we
+// can route through the CASE_SYM_LINEAR fast path). The pattern's
+// `value` field carries the sym's UTF-8 bytes; the caller will intern
+// those bytes to get a canonical pointer for the table key.
+static int is_symbol_literal(TcAstValue pattern) {
+  if (!ast_node_is(pattern, "symbol")) return 0;
+  TcAstValue *value = ast_get(pattern, "value");
+  return value && value->kind == TC_AST_STRING;
+}
+
 static int compile_in_test(TcAstValue node, TcChunk *chunk, TcError *err) {
   TcAstValue *lhs = ast_get(node, "lhs");
   TcAstValue *elements = ast_get(node, "elements");
@@ -685,6 +699,31 @@ static int compile_in_test(TcAstValue node, TcChunk *chunk, TcError *err) {
     return 0;
   }
   size_t count = elements->as.array->count;
+  if (count > 0) {
+    int all_syms = 1;
+    for (size_t i = 0; i < count; i++) {
+      if (!is_symbol_literal(elements->as.array->items[i])) {
+        all_syms = 0;
+        break;
+      }
+    }
+    if (all_syms) {
+      int table_id = tc_chunk_alloc_case_table(chunk, (uint32_t)count, err);
+      if (table_id < 0) return 0;
+      for (size_t i = 0; i < count; i++) {
+        TcAstValue *val = ast_get(elements->as.array->items[i], "value");
+        const char *interned = tc_intern(val->as.string.bytes, val->as.string.len);
+        if (!interned) {
+          tc_error_set(err, "in_test sym intern failed");
+          return 0;
+        }
+        chunk->case_tables[table_id].keys[i] = interned;
+        chunk->case_tables[table_id].targets[i] = 1;
+      }
+      return compile_expr(*lhs, chunk, err) &&
+             tc_emit_op_u32(chunk, TC_OP_IN_SYM_TABLE, (uint32_t)table_id, err);
+    }
+  }
   size_t *end_jumps = count ? (size_t *)calloc(count, sizeof(size_t)) : NULL;
   if (count && !end_jumps) {
     tc_error_set(err, "in_test jump allocation failed");
@@ -710,16 +749,6 @@ static int compile_in_test(TcAstValue node, TcChunk *chunk, TcError *err) {
   for (size_t i = 0; i < count; i++) patch_jump(chunk, end_jumps[i], chunk->count);
   free(end_jumps);
   return 1;
-}
-
-// Returns 1 if `pattern` is a `:symbol` AST node (the case-arm shape we
-// can route through the CASE_SYM_LINEAR fast path). The pattern's
-// `value` field carries the sym's UTF-8 bytes; the caller will intern
-// those bytes to get a canonical pointer for the table key.
-static int is_symbol_literal(TcAstValue pattern) {
-  if (!ast_node_is(pattern, "symbol")) return 0;
-  TcAstValue *value = ast_get(pattern, "value");
-  return value && value->kind == TC_AST_STRING;
 }
 
 // True if every arm pattern + every when condition is a sym literal.
@@ -756,7 +785,7 @@ static int case_value_is_sym_only(TcAstValue *arms, TcAstValue *whens) {
 // (~3 dispatches per arm) with one dispatch that jumps directly to
 // the matched body. Targets the `case t when :var ...` shape that
 // dominates compiler/lib/lowering.w.
-static int compile_case_sym_linear(int subject_slot, TcAstValue *arms, TcAstValue *whens,
+static int compile_case_sym_linear(TcAstValue *arms, TcAstValue *whens,
                                    TcAstValue *else_body, TcChunk *chunk, TcError *err) {
   size_t total = 0;
   if (arms && arms->kind == TC_AST_ARRAY) total += arms->as.array->count;
@@ -770,9 +799,8 @@ static int compile_case_sym_linear(int subject_slot, TcAstValue *arms, TcAstValu
   int table_id = tc_chunk_alloc_case_table(chunk, (uint32_t)total, err);
   if (table_id < 0) return 0;
 
-  // LOAD_LOCAL subject ; CASE_SYM_LINEAR table_id
-  if (!tc_emit_op_u32(chunk, TC_OP_LOAD_LOCAL, (uint32_t)subject_slot, err) ||
-      !tc_emit_op_u32(chunk, TC_OP_CASE_SYM_LINEAR, (uint32_t)table_id, err)) {
+  // Subject is already on TOS; CASE_SYM_LINEAR pops it directly.
+  if (!tc_emit_op_u32(chunk, TC_OP_CASE_SYM_LINEAR, (uint32_t)table_id, err)) {
     return 0;
   }
 
@@ -884,18 +912,20 @@ static int compile_case_value(TcAstValue node, TcChunk *chunk, TcError *err) {
     return 0;
   }
 
+  // Sym-only fast path: every arm pattern is a sym literal → one
+  // CASE_SYM_LINEAR dispatch instead of an N-arm chain, without allocating
+  // a __case_subject_%u local slot.
+  if (case_value_is_sym_only(arms, whens)) {
+    if (!compile_expr(*subject, chunk, err)) return 0;
+    return compile_case_sym_linear(arms, whens, else_body, chunk, err);
+  }
+
   int subject_slot = tc_chunk_local(chunk, subject_name, strlen(subject_name), err);
   if (subject_slot < 0) return 0;
   if (!compile_expr(*subject, chunk, err) ||
       !tc_emit_op_u32(chunk, TC_OP_STORE_LOCAL, (uint32_t)subject_slot, err) ||
       !tc_emit_op(chunk, TC_OP_POP, err)) {
     return 0;
-  }
-
-  // Sym-only fast path: every arm pattern is a sym literal → one
-  // CASE_SYM_LINEAR dispatch instead of an N-arm chain.
-  if (case_value_is_sym_only(arms, whens)) {
-    return compile_case_sym_linear(subject_slot, arms, whens, else_body, chunk, err);
   }
 
   size_t arms_count = (arms && arms->kind == TC_AST_ARRAY) ? arms->as.array->count : 0;
@@ -1251,6 +1281,21 @@ static int compile_hash(TcAstValue node, TcChunk *chunk, TcError *err) {
   return tc_emit_op_u32(chunk, TC_OP_HASH, (uint32_t)entries->as.array->count, err);
 }
 
+static int ast_string_unquoted_eq(TcAstValue node, const char *lit) {
+  if (!ast_node_is(node, "string")) return 0;
+  TcAstValue *val = ast_get(node, "value");
+  if (!val || val->kind != TC_AST_STRING) return 0;
+  const char *bytes = val->as.string.bytes;
+  size_t len = val->as.string.len;
+  if (len >= 2 && ((bytes[0] == '"' && bytes[len - 1] == '"') ||
+                   (bytes[0] == '\'' && bytes[len - 1] == '\''))) {
+    bytes++;
+    len -= 2;
+  }
+  size_t lit_len = strlen(lit);
+  return len == lit_len && memcmp(bytes, lit, lit_len) == 0;
+}
+
 static int compile_call(TcAstValue node, TcChunk *chunk, TcError *err) {
   TcAstValue *receiver = ast_get(node, "receiver");
   TcAstValue *name = ast_get(node, "name");
@@ -1301,6 +1346,52 @@ static int compile_call(TcAstValue node, TcChunk *chunk, TcError *err) {
     }
   }
   int has_receiver = receiver && receiver->kind != TC_AST_NIL;
+  if (!has_receiver && args->as.array->count >= 1 &&
+      (ast_text_eq(*name, "ccall") || ast_text_eq(*name, "ccall_nobox") ||
+       ast_text_eq(*name, "ccall_rawargs"))) {
+    size_t argc = args->as.array->count;
+    TcAstValue target = args->as.array->items[0];
+    uint8_t ccall_op = 0;
+    if (argc == 2 && ast_string_unquoted_eq(target, "w_is_node_extern")) ccall_op = TC_OP_NODE_IS;
+    else if (argc == 2 && ast_string_unquoted_eq(target, "w_node_kind_extern")) ccall_op = TC_OP_NODE_KIND;
+    else if (argc == 2 && ast_string_unquoted_eq(target, "w_node_offset_extern")) ccall_op = TC_OP_NODE_OFFSET;
+    else if (argc == 3 && ast_string_unquoted_eq(target, "w_node_field_load")) ccall_op = TC_OP_NODE_FIELD_LOAD;
+    else if (argc == 4 && ast_string_unquoted_eq(target, "w_node_field_store")) ccall_op = TC_OP_NODE_FIELD_STORE;
+    else if (argc == 2 && ast_string_unquoted_eq(target, "w_ast_intern_str_of")) ccall_op = TC_OP_NODE_INTERN_STR;
+    else if (argc == 3 && ast_string_unquoted_eq(target, "w_node_kind_sym")) ccall_op = TC_OP_NODE_KIND_SYM;
+    else if (argc == 3 && ast_string_unquoted_eq(target, "w_is_ast_node_full")) ccall_op = TC_OP_IS_AST_NODE_FULL;
+    else if (argc == 3 && ast_string_unquoted_eq(target, "w_wire_alloc")) ccall_op = TC_OP_WIRE_ALLOC;
+    else if (argc == 4 && ast_string_unquoted_eq(target, "w_wire_alloc_reserve")) ccall_op = TC_OP_WIRE_ALLOC_RESERVE;
+    else if (argc == 5 && ast_string_unquoted_eq(target, "w_wire_field_store_at")) ccall_op = TC_OP_WIRE_FIELD_STORE_AT;
+    else if (argc == 3 && ast_string_unquoted_eq(target, "w_wire_field_load")) ccall_op = TC_OP_WIRE_FIELD_LOAD;
+    else if (argc == 3 && ast_string_unquoted_eq(target, "w_wire_field_load_nil")) ccall_op = TC_OP_WIRE_FIELD_LOAD_NIL;
+    else if (argc == 4 && ast_string_unquoted_eq(target, "w_wire_field_store")) ccall_op = TC_OP_WIRE_FIELD_STORE;
+    else if (argc == 2 && ast_string_unquoted_eq(target, "w_wire_field_count")) ccall_op = TC_OP_WIRE_FIELD_COUNT;
+    else if (argc == 3 && ast_string_unquoted_eq(target, "w_wire_field_symbol_at")) ccall_op = TC_OP_WIRE_FIELD_SYM_AT;
+    else if (argc == 3 && ast_string_unquoted_eq(target, "w_wire_field_value_at")) ccall_op = TC_OP_WIRE_FIELD_VAL_AT;
+    else if (argc == 2 && ast_string_unquoted_eq(target, "w_wire_kind_extern")) ccall_op = TC_OP_WIRE_KIND;
+    else if (argc == 2 && ast_string_unquoted_eq(target, "w_is_wire_extern")) ccall_op = TC_OP_WIRE_IS;
+    else if (argc == 2 && ast_string_unquoted_eq(target, "w_numeric_to_i64")) ccall_op = TC_OP_NUMERIC_TO_I64;
+    else if (argc == 2 && ast_string_unquoted_eq(target, "w_wire_sequence_size")) ccall_op = TC_OP_WIRE_SEQ_SIZE;
+    else if (argc == 3 && ast_string_unquoted_eq(target, "w_wire_sequence_get")) ccall_op = TC_OP_WIRE_SEQ_GET;
+    else if (argc == 4 && ast_string_unquoted_eq(target, "w_wire_sequence_set")) ccall_op = TC_OP_WIRE_SEQ_SET;
+    else if (argc == 2 && ast_string_unquoted_eq(target, "w_wire_sequence_from_array")) ccall_op = TC_OP_WIRE_SEQ_FROM_ARR;
+    else if (argc == 3 && ast_string_unquoted_eq(target, "w_content_temp_norm")) ccall_op = TC_OP_NORM_TEMP;
+    if (ccall_op != 0) {
+      for (size_t i = 1; i < argc; i++) {
+        if (!compile_expr(args->as.array->items[i], chunk, err)) return 0;
+      }
+      return tc_emit_op(chunk, ccall_op, err);
+    }
+  }
+  if (!has_receiver && args->as.array->count == 1 && ast_text_eq(*name, "at_type?")) {
+    int cid = emit_symbol_const(chunk, "current_packed", 14, err);
+    if (cid < 0) return 0;
+    return tc_emit_op_u32(chunk, TC_OP_IVAR_GET, (uint32_t)cid, err) &&
+           tc_emit_op(chunk, TC_OP_PARSER_TOK_TYPE, err) &&
+           compile_expr(args->as.array->items[0], chunk, err) &&
+           tc_emit_op(chunk, TC_OP_EQ, err);
+  }
   if (has_receiver && !compile_expr(*receiver, chunk, err)) return 0;
   for (size_t i = 0; i < args->as.array->count; i++) {
     if (!compile_expr(args->as.array->items[i], chunk, err)) return 0;
@@ -1313,6 +1404,41 @@ static int compile_call(TcAstValue node, TcChunk *chunk, TcError *err) {
     size_t argc = args->as.array->count;
     if (argc == 1 && ast_text_eq(*name, "[]"))   return tc_emit_op(chunk, TC_OP_INDEX, err);
     if (argc == 0 && ast_text_eq(*name, "size")) return tc_emit_op(chunk, TC_OP_SIZE_OF, err);
+  } else {
+    size_t argc = args->as.array->count;
+    if (argc == 1 && ast_text_eq(*name, "type"))                    return tc_emit_op(chunk, TC_OP_TYPE_OF, err);
+    if (argc == 1 && ast_text_eq(*name, "ast_kind"))                return tc_emit_op(chunk, TC_OP_AST_KIND, err);
+    if (argc == 2 && ast_text_eq(*name, "ast_get"))                 return tc_emit_op(chunk, TC_OP_AST_GET, err);
+    if (argc == 3 && ast_text_eq(*name, "ast_set"))                 return tc_emit_op(chunk, TC_OP_AST_SET, err);
+    if (argc == 1 && ast_text_eq(*name, "is_ast_node?"))            return tc_emit_op(chunk, TC_OP_IS_AST_NODE, err);
+    if (argc == 1 && ast_text_eq(*name, "ast_children"))            return tc_emit_op(chunk, TC_OP_AST_CHILDREN, err);
+    if (argc == 2 && ast_text_eq(*name, "wire_get"))                return tc_emit_op(chunk, TC_OP_WIRE_FIELD_LOAD_NIL, err);
+    if (argc == 3 && ast_text_eq(*name, "wire_set"))                return tc_emit_op(chunk, TC_OP_WIRE_FIELD_STORE, err);
+    if (argc == 1 && ast_text_eq(*name, "wire_field_count"))        return tc_emit_op(chunk, TC_OP_WIRE_FIELD_COUNT, err);
+    if (argc == 2 && ast_text_eq(*name, "wire_field_symbol_at"))    return tc_emit_op(chunk, TC_OP_WIRE_FIELD_SYM_AT, err);
+    if (argc == 2 && ast_text_eq(*name, "wire_field_value_at"))     return tc_emit_op(chunk, TC_OP_WIRE_FIELD_VAL_AT, err);
+    if (argc == 1 && ast_text_eq(*name, "wire_kind"))               return tc_emit_op(chunk, TC_OP_WIRE_KIND_SYM, err);
+    if (argc == 1 && ast_text_eq(*name, "wire_schema_kind_symbol")) return tc_emit_op(chunk, TC_OP_WIRE_SCHEMA_KIND_SYM, err);
+    if (argc == 1 && (ast_text_eq(*name, "wire_kind_id") || ast_text_eq(*name, "wire_schema_kind_id")))
+      return tc_emit_op(chunk, TC_OP_WIRE_KIND_ID, err);
+    if (argc == 1 && ast_text_eq(*name, "wire_sequence_size"))      return tc_emit_op(chunk, TC_OP_WIRE_SEQ_SIZE, err);
+    if (argc == 2 && ast_text_eq(*name, "wire_sequence_get"))       return tc_emit_op(chunk, TC_OP_WIRE_SEQ_GET, err);
+    if (argc == 3 && ast_text_eq(*name, "wire_sequence_set"))       return tc_emit_op(chunk, TC_OP_WIRE_SEQ_SET, err);
+    if (argc == 1 && ast_text_eq(*name, "wire_sequence"))           return tc_emit_op(chunk, TC_OP_WIRE_SEQ_FROM_ARR, err);
+    if (argc == 1 && ast_text_eq(*name, "parser_tok_type"))         return tc_emit_op(chunk, TC_OP_PARSER_TOK_TYPE, err);
+    if (argc == 1 && ast_text_eq(*name, "parser_tok_off"))          return tc_emit_op(chunk, TC_OP_PARSER_TOK_OFF, err);
+    if (argc == 1 && ast_text_eq(*name, "parser_tok_len"))          return tc_emit_op(chunk, TC_OP_PARSER_TOK_LEN, err);
+    if (argc == 1 && ast_text_eq(*name, "current_block"))           return tc_emit_op(chunk, TC_OP_CURRENT_BLOCK, err);
+    if (argc == 1 && ast_text_eq(*name, "next_temp"))               return tc_emit_op(chunk, TC_OP_NEXT_TEMP, err);
+    if (argc == 2 && ast_text_eq(*name, "typed_value"))             return tc_emit_op(chunk, TC_OP_TYPED_VALUE, err);
+    if (argc == 2 && ast_text_eq(*name, "norm_temp"))               return tc_emit_op(chunk, TC_OP_NORM_TEMP, err);
+    if (argc == 1 && ast_text_eq(*name, "is_i64_type"))             return tc_emit_op(chunk, TC_OP_IS_I64_TYPE, err);
+    if (argc == 1 && ast_text_eq(*name, "is_u64_type"))             return tc_emit_op(chunk, TC_OP_IS_U64_TYPE, err);
+    if (argc == 1 && ast_text_eq(*name, "is_i128_type"))            return tc_emit_op(chunk, TC_OP_IS_I128_TYPE, err);
+    if (argc == 1 && ast_text_eq(*name, "is_u128_type"))            return tc_emit_op(chunk, TC_OP_IS_U128_TYPE, err);
+    if (argc == 1 && ast_text_eq(*name, "is_machine_int_type"))     return tc_emit_op(chunk, TC_OP_IS_MACHINE_INT_TYPE, err);
+    if (argc == 1 && ast_text_eq(*name, "is_machine_int128_type"))  return tc_emit_op(chunk, TC_OP_IS_MACHINE_INT128_TYPE, err);
+    if (argc == 1 && ast_text_eq(*name, "is_machine_int64_type"))   return tc_emit_op(chunk, TC_OP_IS_MACHINE_INT64_TYPE, err);
   }
 
   return emit_call_op(chunk, name->as.string.bytes, name->as.string.len, args->as.array->count, has_receiver, err);
@@ -1425,10 +1551,12 @@ static int compile_expr(TcAstValue node, TcChunk *chunk, TcError *err) {
       tc_error_set(err, "symbol node missing value");
       return 0;
     }
-    char *text = tc_heap_string_alloc(value->as.string.len, 0, err);
-    if (!text) return 0;
-    memcpy(text, value->as.string.bytes, value->as.string.len);
-    return emit_const(chunk, tc_box_symbol_bytes(text, value->as.string.len, 0), err);
+    const char *interned = tc_intern(value->as.string.bytes, value->as.string.len);
+    if (!interned) {
+      tc_error_set(err, "symbol intern failed");
+      return 0;
+    }
+    return emit_const(chunk, tc_box_symbol_bytes(interned, value->as.string.len, 0), err);
   }
   if (ast_node_is(node, "bool")) {
     TcAstValue *value = ast_get(node, "value");

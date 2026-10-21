@@ -158,6 +158,55 @@ enum {
   // way the native-compiled output does (the equality-only path always
   // returned false because 65 != the range-hash sentinel).
   TC_OP_CASE_MATCH,
+  // Single-byte intrinsics for hot compiler operations:
+  TC_OP_TYPE_OF,
+  TC_OP_AST_KIND,
+  TC_OP_AST_GET,
+  TC_OP_AST_SET,
+  TC_OP_IS_AST_NODE,
+  TC_OP_IS_AST_NODE_FULL,
+  TC_OP_NODE_IS,
+  TC_OP_NODE_KIND,
+  TC_OP_NODE_OFFSET,
+  TC_OP_NODE_FIELD_LOAD,
+  TC_OP_NODE_FIELD_STORE,
+  TC_OP_NODE_INTERN_STR,
+  TC_OP_NODE_KIND_SYM,
+  TC_OP_WIRE_ALLOC,
+  TC_OP_WIRE_ALLOC_RESERVE,
+  TC_OP_WIRE_FIELD_STORE_AT,
+  TC_OP_WIRE_FIELD_LOAD,
+  TC_OP_WIRE_FIELD_LOAD_NIL,
+  TC_OP_WIRE_FIELD_STORE,
+  TC_OP_WIRE_FIELD_COUNT,
+  TC_OP_WIRE_FIELD_SYM_AT,
+  TC_OP_WIRE_FIELD_VAL_AT,
+  TC_OP_WIRE_KIND,
+  TC_OP_WIRE_IS,
+  TC_OP_NUMERIC_TO_I64,
+  TC_OP_IN_SYM_TABLE,
+  TC_OP_WIRE_KIND_SYM,
+  TC_OP_WIRE_SCHEMA_KIND_SYM,
+  TC_OP_WIRE_KIND_ID,
+  TC_OP_WIRE_SEQ_SIZE,
+  TC_OP_WIRE_SEQ_GET,
+  TC_OP_WIRE_SEQ_SET,
+  TC_OP_WIRE_SEQ_FROM_ARR,
+  TC_OP_AST_CHILDREN,
+  TC_OP_PARSER_TOK_TYPE,
+  TC_OP_PARSER_TOK_OFF,
+  TC_OP_PARSER_TOK_LEN,
+  TC_OP_CURRENT_BLOCK,
+  TC_OP_NEXT_TEMP,
+  TC_OP_TYPED_VALUE,
+  TC_OP_NORM_TEMP,
+  TC_OP_IS_I64_TYPE,
+  TC_OP_IS_U64_TYPE,
+  TC_OP_IS_I128_TYPE,
+  TC_OP_IS_U128_TYPE,
+  TC_OP_IS_MACHINE_INT_TYPE,
+  TC_OP_IS_MACHINE_INT128_TYPE,
+  TC_OP_IS_MACHINE_INT64_TYPE,
 };
 
 typedef struct {
@@ -411,12 +460,20 @@ struct TcHeapString {
   char bytes[];
 };
 
+#if defined(__GNUC__) || defined(__clang__)
+#define TC_ALWAYS_INLINE static inline __attribute__((always_inline))
+#else
+#define TC_ALWAYS_INLINE static inline
+#endif
+
 // Allocate a TcHeapString sized for `len` bytes (caller fills bytes[]).
 // `interned=0` registers in the GC heap-string list; `interned=1` keeps
 // it out of GC bookkeeping (lives until process exit).
 char *tc_heap_string_alloc(size_t len, int interned, TcError *err);
 // Recover the header from any pointer returned by tc_heap_string_alloc.
-TcHeapString *tc_heap_string_header(const char *bytes);
+TC_ALWAYS_INLINE TcHeapString *tc_heap_string_header(const char *bytes) {
+  return (TcHeapString *)(void *)((char *)bytes - offsetof(TcHeapString, bytes));
+}
 // Free a heap string IF it's not interned. Used by chunk teardown.
 void tc_heap_string_release(const char *bytes);
 
@@ -449,32 +506,31 @@ typedef WValue TcValue;
                               // no collision either way.)
 
 // ── Constructors ─────────────────────────────────────────────────────────
-static inline TcValue tc_box_nil(void)         { return W_NIL; }
-static inline TcValue tc_box_bool(int b)       { return b ? W_TRUE : W_FALSE; }
-static inline TcValue tc_box_wvalue(WValue w)  { return w; }
-// Out-of-line so the heap-int spillover path stays out of the hot path's
-// instruction footprint. ~5 literals across the bootstrap exceed 48 bits
-// (the NaN-boxing tag constants in compiler/lib/runtime_types.w —
-// w_tag_int = 0xFFFA000000000000, etc.). Without this spillover those
-// literals silently truncate to 0 in w_box_int, the lowering's `v |=
-// w_tag_int` collapses to `v |= 0`, and the bootstrap binary segfaults
-// on its first WValue access.
-TcValue tc_box_int(int64_t v);
-static inline TcValue tc_box_array(TcRuntimeArray *p)   { return w_box_ptr(p, TC_TAG_ARRAY); }
-static inline TcValue tc_box_hash(TcRuntimeHash *p)     { return w_box_ptr(p, TC_TAG_HASH); }
-static inline TcValue tc_box_object(TcRuntimeObject *p) { return w_box_ptr(p, TC_TAG_OBJECT); }
+TC_ALWAYS_INLINE TcValue tc_box_nil(void)         { return W_NIL; }
+TC_ALWAYS_INLINE TcValue tc_box_bool(int b)       { return b ? W_TRUE : W_FALSE; }
+TC_ALWAYS_INLINE TcValue tc_box_wvalue(WValue w)  { return w; }
+// Out-of-line slow path so the heap-int spillover stays out of the hot path's
+// instruction footprint while 48-bit inline ints box in 2 instructions.
+TcValue tc_box_int_slow(int64_t v);
+TC_ALWAYS_INLINE TcValue tc_box_int(int64_t v) {
+  if (__builtin_expect(v >= W_INT48_MIN && v <= W_INT48_MAX, 1)) return w_box_int(v);
+  return tc_box_int_slow(v);
+}
+TC_ALWAYS_INLINE TcValue tc_box_array(TcRuntimeArray *p)   { return w_box_ptr(p, TC_TAG_ARRAY); }
+TC_ALWAYS_INLINE TcValue tc_box_hash(TcRuntimeHash *p)     { return w_box_ptr(p, TC_TAG_HASH); }
+TC_ALWAYS_INLINE TcValue tc_box_object(TcRuntimeObject *p) { return w_box_ptr(p, TC_TAG_OBJECT); }
 
 // String/symbol constructors — every `bytes` argument MUST point into a
 // TcHeapString.bytes flex array (guaranteed by the const-pool migration in
 // the prior commit). The `managed` arg is now ignored: ownership lives in
 // the TcHeapString.interned flag, not on the value.
-static inline TcValue tc_box_string_bytes(const char *bytes, size_t len, int managed) {
+TC_ALWAYS_INLINE TcValue tc_box_string_bytes(const char *bytes, size_t len, int managed) {
   (void)managed;
   TcHeapString *ws = tc_heap_string_header(bytes);
   (void)len;  // the header carries len; checked by w_as_heap_str consumers.
   return w_box_heap_str((struct WString *)ws);
 }
-static inline TcValue tc_box_symbol_bytes(const char *bytes, size_t len, int managed) {
+TC_ALWAYS_INLINE TcValue tc_box_symbol_bytes(const char *bytes, size_t len, int managed) {
   (void)managed;
   TcHeapString *ws = tc_heap_string_header(bytes);
   (void)len;
@@ -490,7 +546,7 @@ typedef struct TcHeapInt {
 } TcHeapInt;
 
 // ── Accessors ────────────────────────────────────────────────────────────
-static inline TcValueKind tc_kind(TcValue v) {
+TC_ALWAYS_INLINE TcValueKind tc_kind(TcValue v) {
   if (v == W_NIL) return TC_VAL_NIL;
   if (v == W_TRUE || v == W_FALSE) return TC_VAL_WVALUE;
   if (w_is_int(v))    return TC_VAL_INT;
@@ -509,7 +565,7 @@ static inline TcValueKind tc_kind(TcValue v) {
   return TC_VAL_WVALUE;  // doubles, instants, chars, durations, packed types
 }
 
-static inline int tc_managed(TcValue v) {
+TC_ALWAYS_INLINE int tc_managed(TcValue v) {
   // Heap-string transient flag. The TcHeapString header tells us; for non-
   // string/sym kinds the answer is 0 (other heap structs live in their own
   // GC lists, not tracked by this flag).
@@ -522,30 +578,30 @@ static inline int tc_managed(TcValue v) {
 // heap-boxed (TC_TAG_HEAP_INT, 64-bit) representations. The W_TAG_INT
 // fast path is the common case; only the ~5 NaN-boxing tag literals
 // from runtime_types.w take the heap path during the bootstrap.
-static inline int64_t tc_as_int(TcValue v) {
-  if (w_is_int(v)) return w_as_int(v);
+TC_ALWAYS_INLINE int64_t tc_as_int(TcValue v) {
+  if (__builtin_expect(w_is_int(v), 1)) return w_as_int(v);
   return ((TcHeapInt *)w_as_ptr(v))->value;
 }
-static inline WValue  tc_as_wvalue(TcValue v)          { return v; }
-static inline TcRuntimeArray  *tc_as_array(TcValue v)  { return (TcRuntimeArray *)w_as_ptr(v); }
-static inline TcRuntimeHash   *tc_as_hash(TcValue v)   { return (TcRuntimeHash *)w_as_ptr(v); }
-static inline TcRuntimeObject *tc_as_object(TcValue v) { return (TcRuntimeObject *)w_as_ptr(v); }
-static inline TcAstValue *tc_as_ast_ptr(TcValue *v)    { return (TcAstValue *)w_as_ptr(*v); }
+TC_ALWAYS_INLINE WValue  tc_as_wvalue(TcValue v)          { return v; }
+TC_ALWAYS_INLINE TcRuntimeArray  *tc_as_array(TcValue v)  { return (TcRuntimeArray *)w_as_ptr(v); }
+TC_ALWAYS_INLINE TcRuntimeHash   *tc_as_hash(TcValue v)   { return (TcRuntimeHash *)w_as_ptr(v); }
+TC_ALWAYS_INLINE TcRuntimeObject *tc_as_object(TcValue v) { return (TcRuntimeObject *)w_as_ptr(v); }
+TC_ALWAYS_INLINE TcAstValue *tc_as_ast_ptr(TcValue *v)    { return (TcAstValue *)w_as_ptr(*v); }
 
 // String access. The `inline_buf` argument on tc_str_bytes() is reserved
 // for a future post-flip optimization where ≤5-byte strings are tag-
 // packed; today every string is heap-allocated so the buffer goes unused.
-static inline const char *tc_str_bytes(TcValue v, char inline_buf[6], size_t *len_out) {
+TC_ALWAYS_INLINE const char *tc_str_bytes(TcValue v, char inline_buf[6], size_t *len_out) {
   (void)inline_buf;
   TcHeapString *ws = (TcHeapString *)w_as_heap_str(v);
   if (len_out) *len_out = ws->len;
   return ws->bytes;
 }
-static inline const char *tc_str_bytes_only(TcValue v) {
+TC_ALWAYS_INLINE const char *tc_str_bytes_only(TcValue v) {
   TcHeapString *ws = (TcHeapString *)w_as_heap_str(v);
   return ws->bytes;
 }
-static inline size_t tc_str_len(TcValue v) {
+TC_ALWAYS_INLINE size_t tc_str_len(TcValue v) {
   TcHeapString *ws = (TcHeapString *)w_as_heap_str(v);
   return ws->len;
 }
@@ -610,7 +666,11 @@ struct TcRuntimeHash {
 };
 
 #define TC_HASH_SLOT_EMPTY (-1)
-#define TC_HASH_FLAG_FROZEN (1u << 0)
+#define TC_HASH_FLAG_FROZEN        (1u << 0)
+#define TC_HASH_FLAG_RANGE_CHECKED (1u << 1)
+#define TC_HASH_FLAG_IS_RANGE      (1u << 2)
+#define TC_HASH_FLAG_IS_AST        (1u << 3)
+#define TC_HASH_FLAG_HAS_NODE      (1u << 4)
 #define TC_HASH_SLOT_TOMB  (-2)
 
 // Dense-hole sentinel — same as runtime/wvalue.h's W_MEMO_MISS, a
@@ -685,6 +745,9 @@ typedef struct {
   uint32_t *targets;
   uint32_t count;
   uint32_t default_target;
+  const char **hash_keys;
+  uint32_t *hash_targets;
+  uint32_t hash_mask;
 } TcCaseTable;
 
 typedef struct {

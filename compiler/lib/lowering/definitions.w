@@ -313,19 +313,20 @@
   when :return
     return has_yield_in_node(node.value)
   when :if
-    if has_yield_node(node.then_body)
+    # Conditions count too: `block? ? a : b` and `if block?` need the slot.
+    if has_yield_in_node(node.condition) || has_yield_node(node.then_body)
       return true
     if node.elsif_clauses != nil
       i = 0
       while i < node.elsif_clauses.size()
-        if has_yield_node(node.elsif_clauses[i][1])
+        if has_yield_in_node(node.elsif_clauses[i][0]) || has_yield_node(node.elsif_clauses[i][1])
           return true
         i += 1
     if has_yield_node(node.else_body)
       return true
     return false
   when :while
-    return has_yield_node(node.body)
+    return has_yield_in_node(node.condition) || has_yield_node(node.body)
   when :with, :parallel_with
     return has_yield_node(node.body)
   when :assign, :compound_assign

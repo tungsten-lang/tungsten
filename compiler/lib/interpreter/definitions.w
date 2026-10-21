@@ -51,6 +51,7 @@
   -> register_instance_method(w_class, w_method)
     if @method_tables_locked
       raise "method tables are locked by Tungsten.LOCK_THE_DOORS!"
+    note_block_method(w_method)
     method_name = w_method[:name]
     if w_class[:method_overloads] == nil
       w_class[:method_overloads] = {}
@@ -100,6 +101,7 @@
   -> register_interpreted_class_method(w_class, w_method)
     if @method_tables_locked
       raise "method tables are locked by Tungsten.LOCK_THE_DOORS!"
+    note_block_method(w_method)
     method_name = w_method[:name]
     if w_class[:class_method_overloads] == nil
       w_class[:class_method_overloads] = {}
@@ -145,6 +147,7 @@
   -> register_global_method(w_method)
     if @method_tables_locked
       raise "method tables are locked by Tungsten.LOCK_THE_DOORS!"
+    note_block_method(w_method)
     method_name = w_method[:name]
     overloads = @function_overloads[method_name]
     if overloads == nil

@@ -424,6 +424,22 @@
       ot = infer_type(node.operand, var_types, fn_return_types, infer_maps)
       if ot == :float || ot == :f64 || ast_kind(node.operand) == :int
         return ot
+  # The value of a two-way conditional (`c ? a : b`, or an if/else whose arms
+  # are single expressions) is one of its arms (closed-form). When both arms
+  # are the same 64-bit machine int, so is the result; lower_expression then
+  # merges the arms raw (lower_if_expr's machine path) and a following
+  # `q * q` stays a native multiply. Without this a ternary over `i64[]`
+  # loads boxed its result, and every operation it fed went through the
+  # promoting w_* helpers, turning values past 2^47 into heap BigInts.
+  when :if
+    then_body = node.then_body
+    else_body = node.else_body
+    elsifs = node.elsif_clauses
+    if (elsifs == nil || elsifs.size() == 0) && then_body != nil && then_body.size() == 1 && else_body != nil && else_body.size() == 1
+      tt = infer_type(then_body[0], var_types, fn_return_types, infer_maps)
+      if tt in (:i64 :u64) && infer_type(else_body[0], var_types, fn_return_types, infer_maps) == tt
+        return tt
+    return nil
   else
     nil
 

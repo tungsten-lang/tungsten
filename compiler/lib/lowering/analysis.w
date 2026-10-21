@@ -743,6 +743,16 @@
     # checked __w_shl_fast instead, so a shift-bearing chain must stay boxed.
     if op in (:PLUS :MINUS :STAR :SLASH :PERCENT :AMPERSAND :PIPE :CARET :RSHIFT)
       return int_shaped_node?(node.left, declared_types, mod) && int_shaped_node?(node.right, declared_types, mod)
+  # `c ? a : b` (an if/else with single-expression arms) is one of its arms,
+  # so `x = c ? lo[i] : hi[i]` promotes exactly like the statement form
+  # `if c / x = lo[i] / else / x = hi[i]` (infer_type's :if arm types it).
+  when :if
+    then_body = node.then_body
+    else_body = node.else_body
+    elsifs = node.elsif_clauses
+    if (elsifs == nil || elsifs.size() == 0) && then_body != nil && then_body.size() == 1 && else_body != nil && else_body.size() == 1
+      return int_shaped_node?(then_body[0], declared_types, mod) && int_shaped_node?(else_body[0], declared_types, mod)
+    return false
   else
     false
 

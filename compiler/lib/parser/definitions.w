@@ -59,6 +59,7 @@
         arity = advance_value().to_i()
 
     params = []
+    push_type_name_scope()
 
     if name_tok_type == T_BLOCK_CALL
       # `&(`'s paren is part of the fused token — parse the param list
@@ -196,6 +197,7 @@
         bfi += 1
       body_with_fallthrough.push(fallthrough)
       body = body_with_fallthrough.finish()
+    pop_type_name_scope()
 
     result = Tungsten:AST:MethodDef.new(base_name, params, body, type_hints, is_class_method)
     result.loc = make_loc_offset(method_off)
@@ -311,6 +313,7 @@
     params = []
     param_types = nil
     return_type = nil
+    push_type_name_scope()
 
     if at_type?(T_LPAREN)
       advance()
@@ -345,6 +348,7 @@
       body = []
     else
       body = [parse_expression()]
+    pop_type_name_scope()
 
     # Inside a class body, `fn` is an alias for `->` — produce a
     # method_def so the class machinery registers it as an instance
@@ -387,6 +391,7 @@
     expect_kw("fn")
     name = expect_type_value(T_ID)
     params = []
+    push_type_name_scope()
     if at_type?(T_LPAREN)
       advance()
       while !at_type?(T_RPAREN)
@@ -401,6 +406,7 @@
       body = []
     else
       body = [parse_expression()]
+    pop_type_name_scope()
     result = Tungsten:AST:GpuKernelDef.new(name, params, body, "gpu", type_hints)
     result.loc = make_loc_offset(attr_off)
     result.loc_end = make_end_loc()
@@ -515,7 +521,10 @@
       param_name = ivar.slice(1, ivar.size() - 1)
       ivar_assign = true
     else
+      type_spelled = at_type?(T_TYPE)
       param_name = expect_identifier_name_value()
+      if type_spelled
+        bind_type_name(param_name)
 
     # Keyword param: name: or name: default
     if at_type?(T_COLON)
@@ -989,6 +998,8 @@
             advance()
           params.push(expect_identifier_name_value())
         else
+          if at_type?(T_TYPE)
+            bind_type_name(current_value())
           params.push(expect_identifier_name_value())
         match_type?(T_COMMA)
       expect_type(T_RPAREN)
@@ -1212,6 +1223,8 @@
     if at_type?(T_PIPE)
       advance()
       while !at_type?(T_PIPE)
+        if at_type?(T_TYPE)
+          bind_type_name(current_value())
         params.push(expect_identifier_name_value())
         match_type?(T_COMMA)
       expect_type(T_PIPE)

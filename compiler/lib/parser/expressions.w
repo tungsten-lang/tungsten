@@ -833,8 +833,9 @@
       advance()
       return Tungsten:AST:MagicConstant.new("DIR", loc, make_end_loc())
 
-    # Typed array: i128[1000]
-    if at_type?(T_TYPE) && peek_type() == T_LBRACKET
+    # Typed array: i128[1000]. A local or parameter spelled like the type
+    # (`u1 = [~0.0, ~1.0]`) is a variable instead: `u1[1]` indexes it.
+    if at_type?(T_TYPE) && peek_type() == T_LBRACKET && !bound_type_name?(current_value())
       type_name = advance_value()
       expect_type(T_LBRACKET)
       size = parse_expression()

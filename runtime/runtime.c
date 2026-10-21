@@ -46441,6 +46441,15 @@ WValue w_bit_shl(WValue a, WValue b) {
      * w_add, whose array branch (w_array_add_elem) does an ELEMENTWISE add and
      * returns a NEW array, so `a << x` left `a` unchanged. */
     if (w_is_array(a)) { w_array_push(a, b); return a; }
+    /* A user class that defines `<<` gets a.<<(b), as w_add routes `+`.
+     * Falling through to w_add sent `handle << "text"` to the class's `+`
+     * ("undefined method '+'") even when the class defines `<<`; a class
+     * without its own `<<` keeps the `+` fallback below. */
+    if (w_is_instance(a)) {
+        WValue shl_name = w_string("<<");
+        if (w_method_lookup(g_class_table[((WObject *)w_as_ptr(a))->class_id], shl_name))
+            return w_method_call_fast(a, shl_name, &b, 1);
+    }
     /* Non-integer LHS or non-int shift count: preserve the overloaded `<<`
      * fallback. */
     if (!w_is_integer_any(a) || !w_is_int(b)) return w_add(a, b);
@@ -69162,7 +69171,9 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
              * method called with N>1 args builds its argument from the
              * receiver's own class when the constructor arity matches —
              * p.distance(2, 3, 4) â¡ p.distance(Point.new(2, 3, 4)). */
-            if (expected == 1 && args->size > 1) {
+            /* A `*rest` parameter already takes every argument (the Ruby
+             * implementation's rule), so it never wraps them. */
+            if (expected == 1 && args->size > 1 && m->splat_index_plus_one == 0) {
                 WClass *k = g_class_table[obj->class_id];
                 if (w_method_lookup_arity(k, WN_new, args->size + 1)) {
                     WValue cls = w_box_ptr(k, W_SUBTAG_CLASS);

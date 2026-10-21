@@ -48,6 +48,8 @@
       return typed_array_etype_to_sym(array_etype)
     return normalize_type_symbol(hint)
   case t
+  when :var
+    return var_types[node.name]
   when :int
     if node.format == :hex
       v = node.value
@@ -72,17 +74,27 @@
     # side-effect-free (the :hex arm's precedent).
     if node.format == :dec_big
       return :int
-    if infer_boxed_mode?
+    if infer_maps[:boxed_mode] == true
       return :int
     return :i64
-  when :wvalue
-    return nil
-  when :float
-    return :float
-  when :decimal
-    return :decimal
+  when :string, :string_interp
+    return :string
+  when :symbol
+    return :symbol
   when :bool
     return :bool
+  when :float
+    return :float
+  when :array
+    return :array
+  when :hash_literal
+    return :hash
+  when :self_ref
+    return var_types["__self"]
+  when :wvalue
+    return nil
+  when :decimal
+    return :decimal
   when :typed_array_new, :typed_array
     if node.element_type == "bool" || node.element_type == "u1" || node.element_type == "i1"
       return :bool_array
@@ -97,12 +109,6 @@
     if etype in ("u8" "i8" "u16" "i16" "u32" "i32" "u64" "i64" "f64" "f32" "f16" "bf16" "w64")
       return typed_array_etype_to_sym(etype)
     return :array
-  when :array
-    return :array
-  when :hash_literal
-    return :hash
-  when :string, :string_interp
-    return :string
   when :regex
     return :regex
   when :date, :datetime
@@ -129,11 +135,6 @@
     return :quantity
   when :uuid
     return :uuid
-  when :symbol
-    return :symbol
-  when :var
-    n = node.name
-    return var_types[n]
   when :gvar
     n = node.name
     # `$value` is parsed as a GVar, then lower_gvar exposes the receiver's raw
@@ -155,8 +156,6 @@
     if node.field == "value"
       return :raw_i64
     return nil
-  when :self_ref
-    return var_types["__self"]
   when :call
     if node.receiver == nil
       if node.name == "StringBuffer"
@@ -181,7 +180,7 @@
       if node.name == "ccall_rawargs"
         return :value
       args = node.args
-      if args != nil
+      if args != nil && args.size() > 0 && fn_return_types.size() > 0 && (infer_maps[:typed_fn_return_names] == nil || infer_maps[:typed_fn_return_names][node.name] == true)
         arg_types = inferred_arg_types(args, var_types, fn_return_types, infer_maps)
         typed_key = typed_call_signature_key(node.name, arg_types)
         typed_rt = fn_return_types[typed_key]
@@ -392,7 +391,7 @@
         # the ENCLOSING op: `(0 - <big literal>) * 3` kept the guarded
         # subtract but then ran `mul i64` on its possibly-boxed result.
         # Mirrors lower_binary_op's promotable_int_operand exclusion.
-        if lt == :int || rt == :int || infer_boxed_mode?
+        if lt == :int || rt == :int || infer_maps[:boxed_mode] == true
           return :int
         mt = machine_int_result_type(lt, rt)
         if mt != nil

@@ -544,7 +544,9 @@
     int_op_map: int_op_map,
     cmp_op_map: cmp_op_map,
     float_op_map: float_op_map,
-    fcmp_op_map: fcmp_op_map
+    fcmp_op_map: fcmp_op_map,
+    boxed_mode: env("TUNGSTEN_INFER") == "boxed",
+    typed_fn_return_names: {}
   }
 
 lowering_op_map = init_op_map()

@@ -98,6 +98,8 @@
 -> method_call_key_for_def(node)
   if node.param_types == nil
     return node.name
+  if lowering_infer_maps != nil && lowering_infer_maps[:typed_fn_return_names] != nil
+    lowering_infer_maps[:typed_fn_return_names][node.name] = true
   typed_call_signature_key(node.name, node.param_types)
 
 -> mangle_type_signature(types)

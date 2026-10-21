@@ -720,13 +720,24 @@
 # cannot make a forward call use the boxed ABI while its eventual callee uses
 # the raw ABI.
 -> definition_raw_abi_flags(node, top_level, fn_return_types, rt, child_var_types)
+  if !top_level || child_var_types.size() == 0
+    return [false, false]
   rt_int_ok = (rt == nil) || int_compatible_return_type?(rt)
   rt_bool_ok = (rt == :bool && node.param_types != nil && node.return_type != nil)
+  if !rt_int_ok && !rt_bool_ok
+    return [false, false]
+  params = node.params
+  i64_or_mixed = all_params_i64?(params, child_var_types) || mixed_raw_params?(params, child_var_types)
+  machine_int_passthrough = !i64_or_mixed && rt_int_ok && all_params_machine_int?(params, child_var_types) && body_is_param_passthrough?(node.body, params)
+  if !i64_or_mixed && !machine_int_passthrough
+    return [false, false]
+  if i64_or_mixed && rt_bool_ok
+    return [true, false]
   enriched_types = enrich_int_locals(node.body, child_var_types)
   body_int_ok = body_returns_only_int?(node.body, enriched_types, fn_return_types)
-  raw_i64_sig = top_level && ((rt_int_ok && body_int_ok) || rt_bool_ok) && (all_params_i64?(node.params, child_var_types) || mixed_raw_params?(node.params, child_var_types))
-  raw_int_sig = !raw_i64_sig && top_level && rt_int_ok && body_int_ok && all_params_machine_int?(node.params, child_var_types) && body_is_param_passthrough?(node.body, node.params)
-  [raw_i64_sig, raw_int_sig]
+  if !body_int_ok
+    return [false, false]
+  [i64_or_mixed, machine_int_passthrough]
 
 # Decide every top-level definition's ABI before lowering any body.  Previously
 # raw_callable_fns was populated only as definitions were encountered, so a
@@ -833,7 +844,7 @@
         call_key = method_call_key_for_def(node)
         mod[:raw_callable_fns][call_key] = function_name_for_def(node)
         mod[:raw_fn_param_kinds][call_key] = embedded_param_kinds(node, child_var_types, nil, embedded[0])
-      else
+      elsif child_var_types.size() > 0
         rt = nil
         if node.return_type != nil
           rt = normalize_type_symbol(node.return_type)

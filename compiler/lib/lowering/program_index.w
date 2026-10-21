@@ -8,8 +8,9 @@
   if value == nil
     return nil
   if type(value) == "Array"
+    n_val = value.size()
     i = 0
-    while i < value.size()
+    while i < n_val
       program_index_walk_value(value[i], index, mod, in_nested)
       i += 1
     return nil
@@ -17,21 +18,38 @@
     return nil
 
   kind = ast_kind(value)
-  nested = in_nested
-  if kind in (:fn_def :method_def :class_def :module_def :trait_def :block)
-    nested = true
-
+  if kind in (:int :string :symbol :bool :nil_val :float :ivar :cvar :gvar :self_ref :break :next :param)
+    return nil
   if kind in (:var :class_ref)
     name = value.name
     if kind == :var
-      if nested && name != nil
+      if in_nested && name != nil
         index[:extern_var_refs][name] = true
       if name == "ARGV"
         index[:uses_argv] = true
     if name != nil && mod[:builtin_class_names][name] == true
       index[:builtin_class_names][name] = true
+    return nil
+
+  nested = in_nested
+  if kind in (:fn_def :method_def :class_def :module_def :trait_def :block)
+    nested = true
   elsif kind == :call && value.receiver == nil && value.name == "argv"
     index[:uses_argv] = true
+
+  if ccall_nobox("w_is_node_extern", value) == 1
+    kid = ccall_nobox("w_node_kind_extern", value)
+    if kid == nil || kid < 1 || kid > KIND_MAX
+      return nil
+    offsets = slab_child_offsets_table[kid]
+    if offsets == nil
+      return nil
+    n_off = offsets.size()
+    i = 0
+    while i < n_off
+      program_index_walk_value(ccall_nobox("w_node_field_load", value, offsets[i]), index, mod, nested)
+      i += 1
+    return nil
 
   kid = kind_id_table[kind]
   if kid == nil

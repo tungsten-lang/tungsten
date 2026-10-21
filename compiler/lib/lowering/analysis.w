@@ -2947,13 +2947,15 @@
 # must never default to safe.
 
 -> mut_mark_all_dead(node, dead)
-  if node == nil
+  if node == nil || dead["__scope_poisoned__"] == true
     return nil
   if type(node) == "Array"
     n_node = node.size()
     i = 0
     while i < n_node
       mut_mark_all_dead(node[i], dead)
+      if dead["__scope_poisoned__"] == true
+        return nil
       i += 1
     return nil
   if !is_ast_node?(node)
@@ -3147,6 +3149,8 @@
   last_idx = n_body - 1
   i = 0
   while i < n_body
+    if dead["__scope_poisoned__"] == true
+      return nil
     st = body[i]
     if st == nil || !is_ast_node?(st)
       i += 1

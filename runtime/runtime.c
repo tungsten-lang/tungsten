@@ -54027,6 +54027,125 @@ WValue __w_append_file(WValue path_val, WValue content_val) {
     return w_write_file_mode(path_val, content_val, "ab");
 }
 
+/* ---- File handles: File.open / FileHandle (core/file.w) ----
+ * The compiled engine had no file_open at all, so File.open died with
+ * "undefined method 'file_open'". A FileHandle keeps its FILE * as an
+ * Integer; these are its stdio primitives (the tree-walking interpreter
+ * forwards the same ccalls, the Ruby implementation shims them). */
+WValue __w_file_handle_open(WValue path_val, WValue mode_val) {
+    const char *path = as_str(path_val);
+    const char *mode = as_str(mode_val);
+    if (strpbrk(mode, "wa+") != NULL) w_sandbox_gate("write_file", path);
+    if (strpbrk(mode, "r+") != NULL) w_sandbox_gate("read_file", path);
+    FILE *f = fopen(path, mode);
+    if (!f) return W_NIL;
+    return w_int((int64_t)(uintptr_t)f);
+}
+
+static FILE *w_file_handle_ptr(WValue handle_val) {
+    FILE *f = (FILE *)(uintptr_t)w_to_i64(handle_val);
+    if (!f) w_raise(w_string("FileHandle: closed stream"));
+    return f;
+}
+
+/* Bytes written, or nil when `data` is neither text nor a u8 array (the
+ * caller then writes data.to_s). */
+WValue __w_file_handle_write(WValue handle_val, WValue data_val) {
+    FILE *f = w_file_handle_ptr(handle_val);
+    const char *data;
+    size_t len;
+    char inline_buf[6];
+    if (w_is_bytes(data_val)) {
+        WArray *a = w_as_array(data_val);
+        data = (const char *)a->slots + a->start;
+        len = (size_t)a->size;
+    } else if (w_is_stringy(data_val) || w_is_rope(data_val)) {
+        w_str_data(data_val, inline_buf, &data, &len);
+    } else {
+        return W_NIL;
+    }
+    size_t wrote = len > 0 ? fwrite(data, 1, len, f) : 0;
+    if (wrote != len) w_raise(w_string("FileHandle#write: short write"));
+    return w_int((int64_t)wrote);
+}
+
+/* read(): the rest of the file ("" at EOF). read(n): up to n bytes, nil at
+ * EOF -- Ruby's IO#read contract, which the Ruby implementation follows. */
+WValue __w_file_handle_read(WValue handle_val, WValue length_val) {
+    FILE *f = w_file_handle_ptr(handle_val);
+    if (length_val != W_NIL) {
+        int64_t want = w_to_i64(length_val);
+        if (want < 0) w_raise(w_string("FileHandle#read: negative length"));
+        if (want > INT32_MAX) w_raise(w_string("FileHandle#read: length exceeds string capacity"));
+        if (want == 0) return w_string_n("", 0);
+        char *buf = malloc((size_t)want);
+        size_t got = fread(buf, 1, (size_t)want, f);
+        WValue out = got == 0 ? W_NIL : w_string_n(buf, got);
+        free(buf);
+        return out;
+    }
+    size_t cap = 4096, len = 0;
+    char *buf = malloc(cap);
+    for (;;) {
+        size_t got = fread(buf + len, 1, cap - len, f);
+        len += got;
+        if (len < cap) break;
+        cap *= 2;
+        buf = realloc(buf, cap);
+    }
+    WValue out = w_string_n(buf, len);
+    free(buf);
+    return out;
+}
+
+/* The next line, or nil at EOF. chomp drops the line ending ("\n", "\r\n"
+ * or a final "\r"), like Ruby's String#chomp in the Ruby implementation;
+ * each_line keeps it. */
+WValue __w_file_handle_gets(WValue handle_val, WValue chomp_val) {
+    FILE *f = w_file_handle_ptr(handle_val);
+    char *line = NULL;
+    size_t cap = 0;
+    ssize_t n = getline(&line, &cap, f);
+    if (n < 0) {
+        free(line);
+        return W_NIL;
+    }
+    if (w_truthy(chomp_val) && n > 0) {
+        if (line[n - 1] == '\n') n--;
+        if (n > 0 && line[n - 1] == '\r') n--;
+    }
+    WValue out = w_string_n(line, (size_t)n);
+    free(line);
+    return out;
+}
+
+WValue __w_file_handle_flush(WValue handle_val) {
+    return w_bool(fflush(w_file_handle_ptr(handle_val)) == 0);
+}
+
+WValue __w_file_handle_close(WValue handle_val) {
+    return w_bool(fclose(w_file_handle_ptr(handle_val)) == 0);
+}
+
+WValue __w_file_handle_seek(WValue handle_val, WValue offset_val, WValue whence_val) {
+    FILE *f = w_file_handle_ptr(handle_val);
+    int64_t whence = w_to_i64(whence_val);
+    int how = whence == 1 ? SEEK_CUR : (whence == 2 ? SEEK_END : SEEK_SET);
+    return w_bool(fseeko(f, (off_t)w_to_i64(offset_val), how) == 0);
+}
+
+WValue __w_file_handle_tell(WValue handle_val) {
+    return w_int((int64_t)ftello(w_file_handle_ptr(handle_val)));
+}
+
+WValue __w_file_handle_eof(WValue handle_val) {
+    FILE *f = w_file_handle_ptr(handle_val);
+    int c = fgetc(f);
+    if (c == EOF) return W_TRUE;
+    ungetc(c, f);
+    return W_FALSE;
+}
+
 /* write_file_bytes_n(path, bytes, n): write the first n bytes of a byte
  * array (n clamped to its size). Lets a reusable buffer be written without
  * an exact-size copy — the prime-list writer emits ~1 GB files from one

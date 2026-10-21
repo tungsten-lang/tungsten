@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(666 total), grouped by area, with its declaration, a one-line
+(667 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -50,6 +50,7 @@ summary from the source header, and a link to the source.
 | `Float` | `+ Float` | Float — IEEE 754 double (quiet NaN range) | [`core/float.w`](../core/float.w) |
 | `File` | `+ File` | File — whole-file I/O, metadata, paths, and filesystem operations. | [`core/file.w`](../core/file.w) |
 | `FileStat` | `+ FileStat` | FileStat — portable POSIX file metadata with nanosecond timestamps. | [`core/file.w`](../core/file.w) |
+| `FileHandle` | `+ FileHandle` | FileHandle — an open file from File.open, read and written incrementally | [`core/file.w`](../core/file.w) |
 | `Future` | `+ Future` | Future — read-only handle for asynchronous settlement and composition. | [`core/future.w`](../core/future.w) |
 | `FutureState` | `+ FutureState` | Future/Promise shared state and read-only Future facade. | [`core/future.w`](../core/future.w) |
 | `Hash` | `+ Hash` | — | [`core/hash.w`](../core/hash.w) |

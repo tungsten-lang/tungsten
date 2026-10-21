@@ -217,11 +217,9 @@ use wire
 -> compute_dominance_frontiers(cfg, idom)
   n = cfg[:num_blocks]
   df = []
-  df_seen = []
   i = 0
   while i < n
     df.push([])
-    df_seen.push({})
     i += 1
 
   i = 0
@@ -232,9 +230,9 @@ use wire
       while pi < p.size()
         runner = p[pi]
         while runner != idom[i] && runner != -1
-          if df_seen[runner][i] != true
-            df_seen[runner][i] = true
-            df[runner].push(i)
+          r_df = df[runner]
+          if r_df.size() == 0 || r_df[r_df.size() - 1] != i
+            r_df.push(i)
           runner = idom[runner]
         pi += 1
     i += 1
@@ -264,6 +262,13 @@ use wire
 # Full analysis for one function.
 
 -> analyze_function(func)
+  if func[:blocks].size() == 1
+    return {
+      cfg: {label_map: {func[:blocks][0][:label] => 0}, succs: [[]], preds: [[]], num_blocks: 1},
+      idom: [0],
+      dominance_frontiers: [[]],
+      loops: []
+    }
   cfg = build_cfg(func)
   idom = compute_dominators(cfg)
   df = compute_dominance_frontiers(cfg, idom)
@@ -381,8 +386,6 @@ use wire
       inst = instrs[ii]
       op = wire_kind(inst)
       if op != :store_i64 && op != :load_i64 && op != :store_double && op != :load_double && op != :store_float && op != :load_float && op != :store_i128 && op != :load_i128
-        if op == :setjmp || op == :add_i48_checked || op == :sub_i48_checked || op == :mul_i48_checked
-          return {}
         if op == :call_direct_i64 || op == :call_direct_void || op == :call_method_i64 || op == :call_direct_ptr || op == :call_direct_i128 || op == :memo_call1_i64 || op == :memo_call2_i64
           # Call args: if a slot pointer is passed, it's address-taken
           args = wire_get(inst, :args)
@@ -390,9 +393,14 @@ use wire
             ai = 0
             while ai < wire_sequence_size(args)
               arg = wire_sequence_get(args, ai)
-              if promotable[arg] == true
+              if type(arg) == "String" && arg.byte_at(1) == 118 && promotable[arg] == true
                 promotable[arg] = false
               ai += 1
+        elsif op == :br || op == :cond_br || op == :ret_i64 || op == :ret_void || op == :string_i64 || op == :symbol_i64 || op == :call_loc_set_col
+          ii += 1
+          next
+        elsif op == :setjmp || op == :add_i48_checked || op == :sub_i48_checked || op == :mul_i48_checked
+          return {}
         elsif op == :ptr_to_i64
           val = wire_get(inst, :value)
           if promotable[val] == true
@@ -426,6 +434,7 @@ use wire
 
 -> find_var_defs(func, promotable)
   defs = {}  # ptr → [block_index, ...]
+  last_def = {}
   bi = 0
   while bi < func[:blocks].size()
     instrs = func[:blocks][bi][:instructions]
@@ -433,9 +442,10 @@ use wire
     while ii < instrs.size()
       inst = instrs[ii]
       op = wire_kind(inst)
-      if op in (:store_i64 :store_double :store_float :store_i128)
+      if op == :store_i64 || op == :store_double || op == :store_float || op == :store_i128
         ptr = wire_get(inst, :ptr)
-        if promotable[ptr] != nil
+        if promotable[ptr] != nil && last_def[ptr] != bi
+          last_def[ptr] = bi
           if defs[ptr] == nil
             defs[ptr] = []
           defs[ptr].push(bi)
@@ -443,46 +453,156 @@ use wire
     bi += 1
   defs
 
+# Scan blocks once to collect deduplicated definition blocks (`var_defs`) and
+# upward-exposed load blocks (`ue_loads`) for promotable variables.
+-> find_var_defs_and_ue_loads(func, promotable)
+  defs = {}
+  ue_loads = {}
+  last_def = {}
+  last_ue = {}
+  has_non_entry_def = false
+  bi = 0
+  while bi < func[:blocks].size()
+    instrs = func[:blocks][bi][:instructions]
+    ii = 0
+    while ii < instrs.size()
+      inst = instrs[ii]
+      op = wire_kind(inst)
+      if op == :store_i64 || op == :store_double || op == :store_float || op == :store_i128
+        ptr = wire_get(inst, :ptr)
+        if promotable[ptr] != nil && last_def[ptr] != bi
+          last_def[ptr] = bi
+          if defs[ptr] == nil
+            defs[ptr] = []
+          defs[ptr].push(bi)
+          if bi > 0
+            has_non_entry_def = true
+      elsif op == :load_i64 || op == :load_double || op == :load_float || op == :load_i128
+        ptr = wire_get(inst, :ptr)
+        if promotable[ptr] != nil && last_def[ptr] != bi && last_ue[ptr] != bi
+          last_ue[ptr] = bi
+          if ue_loads[ptr] == nil
+            ue_loads[ptr] = []
+          ue_loads[ptr].push(bi)
+      ii += 1
+    bi += 1
+  {defs: defs, ue_loads: ue_loads, has_non_entry_def: has_non_entry_def}
+
 # Place phi nodes at dominance frontiers for each variable.
 # Returns phi_placements: block_index → [{ptr, temp}, ...]
 
--> place_phi_nodes(func, promotable, var_defs, df)
+-> place_phi_nodes(func, promotable, var_defs, df, ue_loads = nil, cfg = nil)
   placements = {}  # block_index → [ptr, ...]
   ptrs = promotable.keys()
+  preds = cfg == nil ? nil : cfg[:preds]
   pi = 0
   while pi < ptrs.size()
     ptr = ptrs[pi]
     vd = var_defs[ptr]
     if vd != nil
-      vd_set = {}
-      # Worklist: blocks that define this var
-      worklist = []
+      # Fast check: if no definition block has a dominance frontier (e.g.
+      # variables defined only in entry block 0), no phi node can ever be placed.
+      has_df = false
       di = 0
       while di < vd.size()
-        worklist.push(vd[di])
-        vd_set[vd[di]] = true
+        frontiers = df[vd[di]]
+        if frontiers != nil && frontiers.size() > 0
+          has_df = true
+          break
         di += 1
-      placed = {}  # blocks where phi already placed
-      wi = 0
-      while wi < worklist.size()
-        block_idx = worklist[wi]
-        frontiers = df[block_idx]
-        if frontiers != nil
-          fi = 0
-          while fi < frontiers.size()
-            fb = frontiers[fi]
-            if placed[fb] != true
-              placed[fb] = true
-              if placements[fb] == nil
-                placements[fb] = []
-              placements[fb].push(ptr)
-              # If this block didn't already define the var, add to worklist
-              if vd_set[fb] != true
-                worklist.push(fb)
-            fi += 1
-        wi += 1
+      if has_df
+        # Live-in pruning: if upward-exposed load blocks are provided, only
+        # place phis at dominance-frontier blocks where `ptr` is live-in.
+        live_in = nil
+        skip_var = false
+        if ue_loads != nil && preds != nil
+          ue = ue_loads[ptr]
+          if ue == nil
+            skip_var = true
+          else
+            kill_set = {}
+            di = 0
+            while di < vd.size()
+              kill_set[vd[di]] = true
+              di += 1
+            live_in = {}
+            lw = []
+            ui = 0
+            while ui < ue.size()
+              u = ue[ui]
+              live_in[u] = true
+              lw.push(u)
+              ui += 1
+            lwi = 0
+            while lwi < lw.size()
+              curr = lw[lwi]
+              lwi += 1
+              cpreds = preds[curr]
+              cpi = 0
+              while cpi < cpreds.size()
+                pred = cpreds[cpi]
+                if kill_set[pred] != true && live_in[pred] != true
+                  live_in[pred] = true
+                  lw.push(pred)
+                cpi += 1
+        if !skip_var
+          vd_set = {}
+          worklist = []
+          di = 0
+          while di < vd.size()
+            worklist.push(vd[di])
+            vd_set[vd[di]] = true
+            di += 1
+          placed = {}  # blocks where phi already placed
+          wi = 0
+          while wi < worklist.size()
+            block_idx = worklist[wi]
+            frontiers = df[block_idx]
+            if frontiers != nil
+              fi = 0
+              while fi < frontiers.size()
+                fb = frontiers[fi]
+                if placed[fb] != true && (live_in == nil || live_in[fb] == true)
+                  placed[fb] = true
+                  if placements[fb] == nil
+                    placements[fb] = []
+                  placements[fb].push(ptr)
+                  # If this block didn't already define the var, add to worklist
+                  if vd_set[fb] != true
+                    worklist.push(fb)
+                fi += 1
+            wi += 1
     pi += 1
   placements
+
+# Fast single-block mem2reg rename (no CFG, dominator tree, or phi nodes needed).
+
+-> ssa_rename_single_block(func, promotable)
+  instrs = func[:blocks][0][:instructions]
+  new_instrs = []
+  current_val = {}
+  subst = {}
+  subst_count = 0
+  ii = 0
+  while ii < instrs.size()
+    inst = instrs[ii]
+    if subst_count > 0
+      inst = apply_subst(inst, subst, subst_count)
+    op = wire_kind(inst)
+    if (op == :store_i64 || op == :store_double || op == :store_float || op == :store_i128) && promotable[wire_get(inst, :ptr)] != nil
+      current_val[wire_get(inst, :ptr)] = wire_get(inst, :value)
+    elsif (op == :load_i64 || op == :load_double || op == :load_float || op == :load_i128) && promotable[wire_get(inst, :ptr)] != nil
+      ptr = wire_get(inst, :ptr)
+      val = current_val[ptr]
+      if val == nil
+        val = ssa_default_val_for_ptr(func, promotable, ptr)
+      subst[wire_get(inst, :temp)] = val
+      subst_count += 1
+    else
+      new_instrs.push(inst)
+    ii += 1
+  func[:blocks][0][:instructions] = new_instrs
+  func[:promoted_vars] = promotable
 
 # Rename variables: walk dominator tree, replace store/load with SSA values.
 # Inserts phi_ssa instructions at block starts and fills in incoming values.
@@ -492,6 +612,7 @@ use wire
   idom = cfg_analysis[:idom]
   blocks = func[:blocks]
   n = blocks.size()
+  has_phis = phi_placements.size() > 0
   rename_profile = nil
   if cfg_analysis[:ssa_rename_profile] != nil
     rename_profile = cfg_analysis[:ssa_rename_profile]
@@ -523,18 +644,19 @@ use wire
   phi_temps = {}
 
   # Pre-assign temps for all phi nodes
-  bi = 0
-  while bi < n
-    if phi_placements[bi] != nil
-      phi_temps[bi] = {}
-      pphi = phi_placements[bi]
-      ppi = 0
-      while ppi < pphi.size()
-        ptr = pphi[ppi]
-        temp = next_temp(func)
-        phi_temps[bi][ptr] = temp
-        ppi += 1
-    bi += 1
+  if has_phis
+    bi = 0
+    while bi < n
+      if phi_placements[bi] != nil
+        phi_temps[bi] = {}
+        pphi = phi_placements[bi]
+        ppi = 0
+        while ppi < pphi.size()
+          ptr = pphi[ppi]
+          temp = next_temp(func)
+          phi_temps[bi][ptr] = temp
+          ppi += 1
+      bi += 1
   if rename_profile != nil
     rename_profile[:setup_secs] = rename_profile[:setup_secs] + (clock() - setup_started_at)
 
@@ -542,22 +664,15 @@ use wire
   phi_incoming = {}
 
   # Function-wide load-elimination subst (temp → replacement value).
-  # SSA temp names are unique within a function and are only defined once,
-  # so a substitution recorded in any block remains valid for every other
-  # block. Lowering may capture a load's temp name and reference it in a
-  # later block (e.g. `receiver_reg` for an array iter passed into the body
-  # block); without function-wide substitution, the cross-block use stays
-  # as the eliminated load's name and LLVM verifier rejects with
-  # "use of undefined value '%tN'".
   subst = {}
   subst_count = 0
 
   # DFS walk of dominator tree (iterative)
-  # Stack entries: [block_index, phase]
+  # Stack entries: [block_index, phase, trail_mark]
   # phase 0: process block, push children
-  # phase 1: pop definitions (restore stacks)
-  stack = [[0, 0]]
-  stack_push_counts = {}  # block_index → {ptr → push_count}
+  # phase 1: pop definitions from def_trail back to trail_mark
+  stack = [[0, 0, 0]]
+  def_trail = []
   visited = []
   i = 0
   while i < n
@@ -574,18 +689,11 @@ use wire
       restore_started_at = nil
       if rename_profile != nil
         restore_started_at = clock()
+      trail_mark = top[2]
       stack.pop()
-      pushes = stack_push_counts[block_idx]
-      if pushes != nil
-        dptrs = pushes.keys()
-        di = 0
-        while di < dptrs.size()
-          dp = dptrs[di]
-          to_pop = pushes[dp]
-          while to_pop > 0
-            current_def[dp].pop()
-            to_pop -= 1
-          di += 1
+      while def_trail.size() > trail_mark
+        dp = def_trail.pop()
+        current_def[dp].pop()
       if rename_profile != nil
         rename_profile[:restore_secs] = rename_profile[:restore_secs] + (clock() - restore_started_at)
       next
@@ -595,26 +703,21 @@ use wire
       stack.pop()
       next
     top[1] = 1  # mark for phase 1 on return
+    top[2] = def_trail.size()
     visited[block_idx] = true
 
-    pushes = {}
-    stack_push_counts[block_idx] = pushes
-
     # Push phi definitions
-    if phi_temps[block_idx] != nil
+    if has_phis && phi_temps[block_idx] != nil
       pphi = phi_placements[block_idx]
       ppi = 0
       while ppi < pphi.size()
         ptr = pphi[ppi]
         temp = phi_temps[block_idx][ptr]
         current_def[ptr].push(temp)
-        pushes[ptr] = 1
+        def_trail.push(ptr)
         ppi += 1
 
     # Process instructions: replace stores and loads with direct substitution.
-    # The substitution map is function-wide (declared above the DFS) so
-    # cross-block uses of eliminated load temps get rewritten when those
-    # blocks are visited.
     instrs = blocks[block_idx][:instructions]
     new_instrs = []
     instrs_started_at = nil
@@ -628,16 +731,12 @@ use wire
         inst = apply_subst(inst, subst, subst_count)
       op = wire_kind(inst)
 
-      if op in (:store_i64 :store_double :store_float :store_i128) && promotable[wire_get(inst, :ptr)] != nil
+      if (op == :store_i64 || op == :store_double || op == :store_float || op == :store_i128) && promotable[wire_get(inst, :ptr)] != nil
         # Store to promotable var: push new definition, skip instruction
         ptr = wire_get(inst, :ptr)
         current_def[ptr].push(wire_get(inst, :value))
-        push_count = pushes[ptr]
-        if push_count == nil
-          pushes[ptr] = 1
-        else
-          pushes[ptr] = push_count + 1
-      elsif op in (:load_i64 :load_double :load_float :load_i128) && promotable[wire_get(inst, :ptr)] != nil
+        def_trail.push(ptr)
+      elsif (op == :load_i64 || op == :load_double || op == :load_float || op == :load_i128) && promotable[wire_get(inst, :ptr)] != nil
         # Load from promotable var: substitute directly, skip instruction
         ptr = wire_get(inst, :ptr)
         def_stack = current_def[ptr]
@@ -655,34 +754,35 @@ use wire
     blocks[block_idx][:instructions] = new_instrs
 
     # Fill in phi incoming values for successor blocks
-    successors = cfg[:succs][block_idx]
-    incoming_started_at = nil
-    if rename_profile != nil
-      incoming_started_at = clock()
-    si = 0
-    while si < successors.size()
-      succ = successors[si]
-      if phi_temps[succ] != nil
-        if phi_incoming[succ] == nil
-          phi_incoming[succ] = {}
-        pphi = phi_placements[succ]
-        ppi = 0
-        while ppi < pphi.size()
-          ptr = pphi[ppi]
-          def_stack = current_def[ptr]
-          val = nil
-          if def_stack.size() > 0
-            val = def_stack[def_stack.size() - 1]
-          else
-            val = ssa_default_val_for_ptr(func, promotable, ptr)
-          if phi_incoming[succ][ptr] == nil
-            phi_incoming[succ][ptr] = []
-          phi_incoming[succ][ptr].push(val)
-          phi_incoming[succ][ptr].push(blocks[block_idx][:label])
-          ppi += 1
-      si += 1
-    if rename_profile != nil
-      rename_profile[:incoming_secs] = rename_profile[:incoming_secs] + (clock() - incoming_started_at)
+    if has_phis
+      successors = cfg[:succs][block_idx]
+      incoming_started_at = nil
+      if rename_profile != nil
+        incoming_started_at = clock()
+      si = 0
+      while si < successors.size()
+        succ = successors[si]
+        if phi_temps[succ] != nil
+          if phi_incoming[succ] == nil
+            phi_incoming[succ] = {}
+          pphi = phi_placements[succ]
+          ppi = 0
+          while ppi < pphi.size()
+            ptr = pphi[ppi]
+            def_stack = current_def[ptr]
+            val = nil
+            if def_stack.size() > 0
+              val = def_stack[def_stack.size() - 1]
+            else
+              val = ssa_default_val_for_ptr(func, promotable, ptr)
+            if phi_incoming[succ][ptr] == nil
+              phi_incoming[succ][ptr] = []
+            phi_incoming[succ][ptr].push(val)
+            phi_incoming[succ][ptr].push(blocks[block_idx][:label])
+            ppi += 1
+        si += 1
+      if rename_profile != nil
+        rename_profile[:incoming_secs] = rename_profile[:incoming_secs] + (clock() - incoming_started_at)
 
     # Push children in reverse order (so leftmost child is processed first)
     children = dom_children[block_idx]
@@ -690,15 +790,10 @@ use wire
     while ci >= 0
       child = children[ci]
       if visited[child] != true
-        stack.push([child, 0])
+        stack.push([child, 0, 0])
       ci -= 1
 
-  # Conservatively rewrite any unreachable blocks too. They are outside the
-  # dominator walk, so leaving promotable load/store pairs behind would make
-  # the emitter skip allocas while still emitting raw %vN references.
-  # Uses a separate per-block subst (`u_subst`) — unreachable blocks can't
-  # observe the function-wide subst from the DFS path, and any temps they
-  # reference would be undefined anyway.
+  # Conservatively rewrite any unreachable blocks too.
   bi = 0
   while bi < n
     if visited[bi] != true
@@ -713,9 +808,9 @@ use wire
         if u_subst_count > 0
           inst = apply_subst(inst, u_subst, u_subst_count)
         op = wire_kind(inst)
-        if op in (:store_i64 :store_double :store_float :store_i128) && promotable[wire_get(inst, :ptr)] != nil
+        if (op == :store_i64 || op == :store_double || op == :store_float || op == :store_i128) && promotable[wire_get(inst, :ptr)] != nil
           local_defs[wire_get(inst, :ptr)] = wire_get(inst, :value)
-        elsif op in (:load_i64 :load_double :load_float :load_i128) && promotable[wire_get(inst, :ptr)] != nil
+        elsif (op == :load_i64 || op == :load_double || op == :load_float || op == :load_i128) && promotable[wire_get(inst, :ptr)] != nil
           ptr = wire_get(inst, :ptr)
           val = local_defs[ptr]
           if val == nil
@@ -729,41 +824,41 @@ use wire
     bi += 1
 
   # Insert phi_ssa instructions at block starts (validate incoming count)
-  emit_phi_started_at = nil
-  if rename_profile != nil
-    emit_phi_started_at = clock()
-  bi = 0
-  while bi < n
-    if phi_temps[bi] != nil
-      pphi = phi_placements[bi]
-      pred_count = cfg[:preds][bi].size()
-      phi_instrs = []
-      ppi = 0
-      while ppi < pphi.size()
-        ptr = pphi[ppi]
-        temp = phi_temps[bi][ptr]
-        incoming = []
-        if phi_incoming[bi] != nil && phi_incoming[bi][ptr] != nil
-          incoming = phi_incoming[bi][ptr]
-        # Always emit phi if there are incoming values
-        if incoming.size() > 0
-          phi_instrs.push(wire_make_phi_ssa(incoming, temp))
-        ppi += 1
-      # Prepend phi instructions before existing block instructions
-      old_instrs = blocks[bi][:instructions]
-      new_block_instrs = []
-      pii = 0
-      while pii < phi_instrs.size()
-        new_block_instrs.push(phi_instrs[pii])
-        pii += 1
-      oii = 0
-      while oii < old_instrs.size()
-        new_block_instrs.push(old_instrs[oii])
-        oii += 1
-      blocks[bi][:instructions] = new_block_instrs
-    bi += 1
-  if rename_profile != nil
-    rename_profile[:emit_phi_secs] = rename_profile[:emit_phi_secs] + (clock() - emit_phi_started_at)
+  if has_phis
+    emit_phi_started_at = nil
+    if rename_profile != nil
+      emit_phi_started_at = clock()
+    bi = 0
+    while bi < n
+      if phi_temps[bi] != nil
+        pphi = phi_placements[bi]
+        phi_instrs = []
+        ppi = 0
+        while ppi < pphi.size()
+          ptr = pphi[ppi]
+          temp = phi_temps[bi][ptr]
+          incoming = []
+          if phi_incoming[bi] != nil && phi_incoming[bi][ptr] != nil
+            incoming = phi_incoming[bi][ptr]
+          # Always emit phi if there are incoming values
+          if incoming.size() > 0
+            phi_instrs.push(wire_make_phi_ssa(incoming, temp))
+          ppi += 1
+        # Prepend phi instructions before existing block instructions
+        old_instrs = blocks[bi][:instructions]
+        new_block_instrs = []
+        pii = 0
+        while pii < phi_instrs.size()
+          new_block_instrs.push(phi_instrs[pii])
+          pii += 1
+        oii = 0
+        while oii < old_instrs.size()
+          new_block_instrs.push(old_instrs[oii])
+          oii += 1
+        blocks[bi][:instructions] = new_block_instrs
+      bi += 1
+    if rename_profile != nil
+      rename_profile[:emit_phi_secs] = rename_profile[:emit_phi_secs] + (clock() - emit_phi_started_at)
 
   # Mark promoted vars so emitter skips their allocas
   func[:promoted_vars] = promotable
@@ -784,23 +879,36 @@ use wire
   if profile != nil
     profile[:ssa_functions] = profile[:ssa_functions] + 1
     profile[:promotable_var_count] = profile[:promotable_var_count] + promotable.size()
+  if func[:blocks].size() == 1
+    rename_started_at = nil
+    if profile != nil
+      rename_started_at = clock()
+    ssa_rename_single_block(func, promotable)
+    if profile != nil
+      profile[:rename_secs] = profile[:rename_secs] + (clock() - rename_started_at)
+    return nil
   var_defs_started_at = nil
   if profile != nil
     var_defs_started_at = clock()
-  var_defs = find_var_defs(func, promotable)
+  scan_info = find_var_defs_and_ue_loads(func, promotable)
+  var_defs = scan_info[:defs]
+  ue_loads = scan_info[:ue_loads]
   if profile != nil
     profile[:var_defs_secs] = profile[:var_defs_secs] + (clock() - var_defs_started_at)
   df = cfg_analysis[:dominance_frontiers]
   phi_started_at = nil
   if profile != nil
     phi_started_at = clock()
-  phi_placements = place_phi_nodes(func, promotable, var_defs, df)
+  phi_placements = {}
+  if scan_info[:has_non_entry_def]
+    phi_placements = place_phi_nodes(func, promotable, var_defs, df, ue_loads, cfg_analysis[:cfg])
 
-  # This mem2reg pass is intentionally conservative: the rename step can
-  # substitute straight-line load/store traffic safely, but phi placement is
-  # not yet live-in pruned. If a slot needs a merge phi, leave that slot in
-  # memory until the phi pass grows proper liveness; otherwise a phi temp can
-  # be pushed as the current def and later skipped during emission.
+  # This mem2reg pass substitutes dominating load/store traffic directly and
+  # uses live-in pruned phi placement to detect variables that genuinely merge
+  # across control-flow joins. Variables that require a live merge phi stay in
+  # memory (allowing loop_carried_releases / owned_slot_releases to manage heap
+  # lifetimes and LLVM's mem2reg to construct typed phis), while branch-local
+  # or loop-body-local variables that are dead at joins are promoted.
   if phi_placements.size() > 0
     phi_ptrs = {}
     phi_blocks = phi_placements.keys()

@@ -348,4 +348,60 @@ assert_empty(
   raw_int_candidate_map(raw_bare_assign, {"seed": :u64}, raw_bare_mod)
 )
 
+raw_scan_def = Tungsten:AST:MethodDef.new(
+  "raw_scan",
+  [Tungsten:AST:Param.new("seed")],
+  [Tungsten:AST:Var.new("seed")]
+)
+proven_bare_mod = {
+  known_static_methods: {},
+  known_classes: {},
+  class_super_names: {},
+  raw_callable_fns: {"raw_scan": "__w_raw_scan"},
+  fn_return_types: {"raw_scan": :i64},
+  known_fn_defs: {"raw_scan": raw_scan_def},
+  known_fn_param_counts: {"raw_scan": 1},
+  known_fn_overloads: {}
+}
+assert_candidate(
+  "proven top-level raw call promotes result",
+  raw_int_candidate_map(raw_bare_assign, {"seed": :u64}, proven_bare_mod),
+  "result"
+)
+
+# Tail-recursive contraction (`b.zero? ? a : gcd(b, a % b)`) is recognized as a
+# non-expanding integer body when self_name is supplied, while arbitrary helper
+# calls or multiple self-calls are rejected.
+gcd_tail_body = [
+  Tungsten:AST:If.new(
+    Tungsten:AST:Call.new(Tungsten:AST:Var.new("b"), "zero?", []),
+    [Tungsten:AST:Var.new("a")],
+    [],
+    [
+      Tungsten:AST:Call.new(
+        nil,
+        "gcd_rec",
+        [
+          Tungsten:AST:Var.new("b"),
+          Tungsten:AST:BinaryOp.new(
+            Tungsten:AST:Var.new("a"),
+            :PERCENT,
+            Tungsten:AST:Var.new("b")
+          )
+        ]
+      )
+    ]
+  )
+]
+gcd_params = [Tungsten:AST:Param.new("a"), Tungsten:AST:Param.new("b")]
+if !body_is_non_expanding_int?(gcd_tail_body, gcd_params, "gcd_rec")
+  << "FAIL tail-recursive gcd should be non-expanding int"
+  exit(1)
+<< "PASS tail-recursive gcd non-expanding int"
+
+if body_is_non_expanding_int?(gcd_tail_body, gcd_params, "other_fn")
+  << "FAIL non-self call in gcd body must be rejected"
+  exit(1)
+<< "PASS non-self call rejected in non-expanding int"
+
 << "PASS raw int candidate fixed point"

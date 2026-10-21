@@ -699,7 +699,7 @@
               if seed != nil
                 child_var_types[pname] = seed
           pidx += 1
-        if !definition_from_core?(node) && all_observed_params_int?(node.params, obs, child_var_types) && body_is_non_expanding_int?(node.body, node.params)
+        if !definition_from_core?(node) && all_observed_params_int?(node.params, obs, child_var_types) && body_is_non_expanding_int?(node.body, node.params, node.name)
           pidx = 0
           while pidx < node.params.size()
             child_var_types[param_runtime_name(node.params[pidx])] = :i64
@@ -845,6 +845,8 @@
           mod[:raw_callable_fns][call_key] = function_name_for_def(node)
           if flags[0]
             mod[:raw_fn_param_kinds][call_key] = raw_param_kinds(node.params, child_var_types)
+            if mod[:fn_return_types][call_key] == nil && rt != :bool
+              mod[:fn_return_types][call_key] = :i64
     i += 1
   nil
 
@@ -1042,6 +1044,8 @@
     # Callers consult the per-param kinds: :scalar args pass raw machine
     # ints, :arr args pass the typed-array handle unchanged.
     mod[:raw_fn_param_kinds][call_key] = raw_param_kinds(params, child_var_types)
+    if mod[:fn_return_types][call_key] == nil && rt != :bool
+      mod[:fn_return_types][call_key] = :i64
   if raw_int_sig
     # Sub-i64 / unsigned int variants. Fn body for these annotated
     # identity fns only. These lower to a passthrough at the LLVM level
@@ -1209,17 +1213,21 @@
         lower_statement(child_ctx, last)
       else
         # Expression — lower and return its value
-        result = lower_expression(child_ctx, last)
         # Raw-i64 ABI: return as raw int (no nanbox). Callers receive raw
         # and use the value directly. For non-raw fns, ensure_i64_value
         # boxes when the result was raw, matches WValue ABI.
         if (raw_i64_sig || raw_int_sig) && new_fn[:raw_return_type] != :bool
-          result_type = infer_type(last, child_var_types, mod[:fn_return_types], lowering_infer_maps)
           ret_raw_type = new_fn[:raw_return_type]
           if ret_raw_type == nil
             ret_raw_type = :i64
+          if last_t == :if && last.else_body != nil && last.else_body.size() > 0
+            result = lower_if_expr(child_ctx, last, ret_raw_type)
+          else
+            result = lower_expression(child_ctx, last)
+          result_type = infer_type(last, child_var_types, mod[:fn_return_types], lowering_infer_maps)
           result_reg = ensure_raw_machine_int(new_fn, result, ret_raw_type, result_type)
         else
+          result = lower_expression(child_ctx, last)
           result_reg = ensure_i64_value(new_fn, result)
         if new_fn[:exit_label] != nil && new_fn[:result_slot] != nil
           emit_recycles_above_depth(new_fn, 0)

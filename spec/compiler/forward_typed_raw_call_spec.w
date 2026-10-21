@@ -40,4 +40,18 @@ uvalues = u32[1]
 uvalues[0] = 4000000000
 forward_raw_expect("u32 passthrough", forward_u32_caller(uvalues[0]), 4000000000)
 
+# Unannotated tail-recursive non-expanding integer helper called from a :with
+# loop: inductive call-site parameter inference + non-expanding body inference
+# promote both the helper ABI and the caller's loop accumulator to raw i64.
+-> unannotated_tail_gcd(a, b)
+  b.zero? ? a : unannotated_tail_gcd(b, a % b)
+
+-> sum_tail_gcd(n)
+  total = 0
+  with i in 1..n, j in 1..n
+    total += unannotated_tail_gcd(i, j)
+  total
+
+forward_raw_expect("inductive tail-recursive raw call in with loop", sum_tail_gcd(20), 880)
+
 << "PASS forward typed raw calls"

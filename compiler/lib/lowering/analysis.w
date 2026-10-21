@@ -91,8 +91,8 @@
           clause = elsifs[j]
           scan_loop_vars(clause[1], compound_vars, assigned_vars, var_types)
           j += 1
-    # For nested while: mark all modified vars as assigned (disqualify from outer unboxing)
-    if t == :while
+    # For nested while/with: mark all modified vars as assigned (disqualify from outer unboxing)
+    if t == :while || t == :with
       scan_loop_vars(node.body, assigned_vars, assigned_vars, var_types)
     i += 1
 
@@ -462,6 +462,20 @@
     free_scan_node(node.condition, bound, records)
     free_scan_list(node.body, free_bound_copy(bound), records)
 
+  when :with, :parallel_with
+    w_bound = free_bound_copy(bound)
+    wbindings = node.bindings
+    if wbindings != nil
+      n_wb = wbindings.size()
+      wi = 0
+      while wi < n_wb
+        wb = wbindings[wi]
+        if wb != nil
+          free_scan_node(wb[1], w_bound, records)
+          free_bind_name(wb[0], w_bound)
+        wi += 1
+    free_scan_list(node.body, w_bound, records)
+
   when :case
     whens = node.whens
     if whens != nil
@@ -598,11 +612,12 @@
 
   recv = node.receiver
   if recv == nil
-    # Bare calls have several resolution lanes before the raw top-level
-    # fallback (intrinsics and typed overloads among them).  Proving that the
-    # name exists in raw_callable_fns is therefore insufficient to prove which
-    # callee lower_call will select.  Keep this analysis conservative until it
-    # can mirror that complete resolver.
+    if mod[:raw_callable_fns] != nil && mod[:raw_callable_fns][node_name] != nil && (mod[:known_fn_overloads] == nil || mod[:known_fn_overloads][node_name] == nil)
+      fn_def = mod[:known_fn_defs] == nil ? nil : mod[:known_fn_defs][node_name]
+      if fn_def != nil && !definition_from_core?(fn_def) && node.args != nil && mod[:known_fn_param_counts][node_name] == node.args.size() && !pi_args_have_kwargs?(node.args)
+        rt = mod[:fn_return_types] == nil ? nil : mod[:fn_return_types][node_name]
+        if is_machine_int64_type(rt)
+          return rt
     return nil
 
   # Mirror lower_method_call's direct-static receiver shapes exactly. Parser
@@ -991,9 +1006,15 @@
     # ran w_to_i64 on a raw pointer and died ("expected int, got object").
     is_raw_load = name in ("raw_load_u8" "raw_load_u32" "raw_load_u64" "raw_store_u8" "popcount" "cttz" "array_load_u64" "array_store_u64" "prefetch") && node.receiver == nil
     args_are_values = is_index_call || is_raw_ccall || is_raw_load || ((name == "mulhi" || name == "addcarry" || name == "subborrow") && node.receiver == nil && node.args != nil && node.args.size() == 2)
-    # Receiver of any method call needs WValue at the dispatch boundary.
+    # Receiver of any method call needs WValue at the dispatch boundary,
+    # except for 0-arg integer predicates/conversions that lower directly on
+    # raw machine ints in lower_method_call.
+    is_raw_recv_method = node.receiver != nil && node.block == nil && (node.args == nil || node.args.size() == 0) && name in ("zero?" "nonzero?" "one?" "even?" "odd?" "positive?" "negative?" "to_i" "sqrt")
     if node.receiver != nil
-      mark_subtree_escape(node.receiver, records)
+      if is_raw_recv_method
+        visit_promote_node(node.receiver, records, declared_types, mod)
+      else
+        mark_subtree_escape(node.receiver, records)
     # Argument position is a VALUE use, not a storage escape: a raw-int
     # slot passed as an argument is boxed at the call site
     # (ensure_i64_value → checked w_int, which promotes >i48 to BigInt),
@@ -1403,6 +1424,17 @@
           j += 1
     when :while
       scan_assigns_for_params(node.body, assigned)
+    when :with, :parallel_with
+      wbindings = node.bindings
+      if wbindings != nil
+        n_wb = wbindings.size()
+        wi = 0
+        while wi < n_wb
+          wb = wbindings[wi]
+          if wb != nil && wb[0] != nil && is_ast_node?(wb[0]) && ast_kind(wb[0]) == :var && wb[0].name != nil
+            assigned[wb[0].name] = true
+          wi += 1
+      scan_assigns_for_params(node.body, assigned)
     when :case
       clauses = node.clauses
       if clauses != nil
@@ -1479,7 +1511,7 @@
         while j < n_elsifs
           scan_param_machine_hints(elsifs[j][1], names, hints)
           j += 1
-    when :while
+    when :while, :with, :parallel_with
       scan_param_machine_hints(node.body, names, hints)
     when :begin
       scan_param_machine_hints(node.body, names, hints)
@@ -1809,7 +1841,7 @@
     pidx += 1
   true
 
--> non_expanding_int_expr?(expr, known_vars, guarded_nonzero_var)
+-> non_expanding_int_expr?(expr, known_vars, guarded_nonzero_var, state = nil, allow_self_call = false)
   if expr == nil || !is_ast_node?(expr)
     return false
   k = ast_kind(expr)
@@ -1820,9 +1852,9 @@
   if k == :binary_op
     op = expr.op
     if op in (:AMPERSAND :PIPE :CARET :RSHIFT)
-      return non_expanding_int_expr?(expr.left, known_vars, guarded_nonzero_var) && non_expanding_int_expr?(expr.right, known_vars, guarded_nonzero_var)
+      return non_expanding_int_expr?(expr.left, known_vars, guarded_nonzero_var, state, false) && non_expanding_int_expr?(expr.right, known_vars, guarded_nonzero_var, state, false)
     if op == :PERCENT
-      if !non_expanding_int_expr?(expr.left, known_vars, guarded_nonzero_var)
+      if !non_expanding_int_expr?(expr.left, known_vars, guarded_nonzero_var, state, false)
         return false
       r = expr.right
       if r == nil || !is_ast_node?(r)
@@ -1833,28 +1865,99 @@
       if rk == :var
         return r.name != nil && r.name == guarded_nonzero_var && known_vars[r.name] == true
       return false
+  if k == :call && allow_self_call && state != nil && state[:self_name] != nil
+    if expr.receiver == nil && expr.block == nil && expr.name == state[:self_name]
+      args = expr.args
+      if args != nil && args.size() == state[:arity] && state[:self_calls] == 0
+        state[:self_calls] = 1
+        ai = 0
+        while ai < args.size()
+          if !non_expanding_int_expr?(args[ai], known_vars, guarded_nonzero_var, state, false)
+            return false
+          ai += 1
+        return true
+  if k == :if && allow_self_call
+    if expr.elsif_clauses != nil && expr.elsif_clauses.size() > 0
+      return false
+    if expr.then_body == nil || expr.else_body == nil
+      return false
+    if !non_expanding_int_cmp?(expr.condition, known_vars, guarded_nonzero_var, state)
+      return false
+    then_gvar = if_then_nonzero_guard_var(expr.condition, known_vars)
+    if then_gvar == nil
+      then_gvar = guarded_nonzero_var
+    else_gvar = if_else_nonzero_guard_var(expr.condition, known_vars)
+    if else_gvar == nil
+      else_gvar = guarded_nonzero_var
+    return non_expanding_int_stmts?(expr.then_body, known_vars, then_gvar, true, state) && non_expanding_int_stmts?(expr.else_body, known_vars, else_gvar, true, state)
   false
 
--> non_expanding_int_cmp?(cond, known_vars, guarded_nonzero_var)
-  if cond == nil || !is_ast_node?(cond) || ast_kind(cond) != :binary_op
+-> non_expanding_int_cmp?(cond, known_vars, guarded_nonzero_var, state = nil)
+  if cond == nil || !is_ast_node?(cond)
     return false
-  if !(cond.op in (:EQ :NEQ :LT :GT :LTE :GTE))
-    return false
-  non_expanding_int_expr?(cond.left, known_vars, guarded_nonzero_var) && non_expanding_int_expr?(cond.right, known_vars, guarded_nonzero_var)
+  ck = ast_kind(cond)
+  if ck == :binary_op
+    if !(cond.op in (:EQ :NEQ :LT :GT :LTE :GTE))
+      return false
+    return non_expanding_int_expr?(cond.left, known_vars, guarded_nonzero_var, state, false) && non_expanding_int_expr?(cond.right, known_vars, guarded_nonzero_var, state, false)
+  if ck == :call && cond.receiver != nil && cond.block == nil && (cond.args == nil || cond.args.size() == 0)
+    if cond.name in ("zero?" "nonzero?" "one?" "even?" "odd?" "positive?" "negative?")
+      return non_expanding_int_expr?(cond.receiver, known_vars, guarded_nonzero_var, state, false)
+  false
 
--> while_nonzero_guard_var(cond, known_vars)
-  if cond == nil || !is_ast_node?(cond) || ast_kind(cond) != :binary_op
+-> if_then_nonzero_guard_var(cond, known_vars)
+  if cond == nil || !is_ast_node?(cond)
     return nil
-  if !(cond.op in (:NEQ :GT))
+  ck = ast_kind(cond)
+  if ck == :binary_op
+    if cond.op in (:NEQ :GT)
+      l = cond.left
+      r = cond.right
+      if l != nil && is_ast_node?(l) && ast_kind(l) == :var && known_vars[l.name] == true
+        if r != nil && is_ast_node?(r) && ast_kind(r) == :int && r.value == 0
+          return l.name
+      if cond.op == :NEQ && r != nil && is_ast_node?(r) && ast_kind(r) == :var && known_vars[r.name] == true
+        if l != nil && is_ast_node?(l) && ast_kind(l) == :int && l.value == 0
+          return r.name
     return nil
-  l = cond.left
-  r = cond.right
-  if l != nil && is_ast_node?(l) && ast_kind(l) == :var && known_vars[l.name] == true
-    if r != nil && is_ast_node?(r) && ast_kind(r) == :int && r.value == 0
-      return l.name
+  if ck == :call && cond.receiver != nil && cond.block == nil && (cond.args == nil || cond.args.size() == 0)
+    if cond.name in ("nonzero?" "positive?" "one?" "odd?")
+      recv = cond.receiver
+      if is_ast_node?(recv) && ast_kind(recv) == :var && known_vars[recv.name] == true
+        return recv.name
   nil
 
--> non_expanding_int_stmts?(stmts, known_vars, guarded_nonzero_var, allow_tail_expr)
+-> if_else_nonzero_guard_var(cond, known_vars)
+  if cond == nil || !is_ast_node?(cond)
+    return nil
+  ck = ast_kind(cond)
+  if ck == :binary_op && cond.op == :EQ
+    l = cond.left
+    r = cond.right
+    if l != nil && is_ast_node?(l) && ast_kind(l) == :var && known_vars[l.name] == true
+      if r != nil && is_ast_node?(r) && ast_kind(r) == :int && r.value == 0
+        return l.name
+    if r != nil && is_ast_node?(r) && ast_kind(r) == :var && known_vars[r.name] == true
+      if l != nil && is_ast_node?(l) && ast_kind(l) == :int && l.value == 0
+        return r.name
+    return nil
+  if ck == :call && cond.receiver != nil && cond.block == nil && (cond.args == nil || cond.args.size() == 0)
+    if cond.name == "zero?"
+      recv = cond.receiver
+      if is_ast_node?(recv) && ast_kind(recv) == :var && known_vars[recv.name] == true
+        return recv.name
+  nil
+
+-> while_nonzero_guard_var(cond, known_vars)
+  if_then_nonzero_guard_var(cond, known_vars)
+
+-> stmts_end_with_return?(stmts)
+  if stmts == nil || stmts.size() == 0
+    return false
+  last = stmts[stmts.size() - 1]
+  last != nil && is_ast_node?(last) && ast_kind(last) == :return
+
+-> non_expanding_int_stmts?(stmts, known_vars, guarded_nonzero_var, allow_tail_expr, state = nil)
   if stmts == nil || stmts.size() == 0
     return false
   gvar = guarded_nonzero_var
@@ -1869,40 +1972,49 @@
       t = st.target
       if t == nil || !is_ast_node?(t) || ast_kind(t) != :var || t.name == nil
         return false
-      if !non_expanding_int_expr?(st.value, known_vars, gvar)
+      if !non_expanding_int_expr?(st.value, known_vars, gvar, state, false)
         return false
       known_vars[t.name] = true
       if gvar != nil && t.name == gvar
         gvar = nil
     elsif k == :return
-      if st.value == nil || !non_expanding_int_expr?(st.value, known_vars, gvar)
+      if st.value == nil || !non_expanding_int_expr?(st.value, known_vars, gvar, state, true)
         return false
     elsif k == :while
-      if !non_expanding_int_cmp?(st.condition, known_vars, gvar)
+      if !non_expanding_int_cmp?(st.condition, known_vars, gvar, state)
         return false
       wgvar = while_nonzero_guard_var(st.condition, known_vars)
-      if !non_expanding_int_stmts?(st.body, known_vars, wgvar, false)
+      if !non_expanding_int_stmts?(st.body, known_vars, wgvar, false, state)
         return false
       gvar = nil
     elsif k == :if
       if st.elsif_clauses != nil && st.elsif_clauses.size() > 0
         return false
-      if !non_expanding_int_cmp?(st.condition, known_vars, gvar)
+      if !non_expanding_int_cmp?(st.condition, known_vars, gvar, state)
         return false
-      if !non_expanding_int_stmts?(st.then_body, known_vars, gvar, allow_tail_expr && i == n - 1)
+      then_gvar = if_then_nonzero_guard_var(st.condition, known_vars)
+      if then_gvar == nil
+        then_gvar = gvar
+      else_gvar = if_else_nonzero_guard_var(st.condition, known_vars)
+      if else_gvar == nil
+        else_gvar = gvar
+      if !non_expanding_int_stmts?(st.then_body, known_vars, then_gvar, allow_tail_expr && i == n - 1, state)
         return false
-      if st.else_body != nil && !non_expanding_int_stmts?(st.else_body, known_vars, gvar, allow_tail_expr && i == n - 1)
+      if st.else_body != nil && !non_expanding_int_stmts?(st.else_body, known_vars, else_gvar, allow_tail_expr && i == n - 1, state)
         return false
-      gvar = nil
+      if st.else_body == nil && stmts_end_with_return?(st.then_body)
+        gvar = else_gvar
+      else
+        gvar = nil
     elsif allow_tail_expr && i == n - 1
-      if !non_expanding_int_expr?(st, known_vars, gvar)
+      if !non_expanding_int_expr?(st, known_vars, gvar, state, true)
         return false
     else
       return false
     i += 1
   true
 
--> body_is_non_expanding_int?(body, params)
+-> body_is_non_expanding_int?(body, params, self_name = nil)
   if body == nil || params == nil || params.size() == 0
     return false
   known_vars = {}
@@ -1913,7 +2025,8 @@
       return false
     known_vars[param_runtime_name(p)] = true
     i += 1
-  non_expanding_int_stmts?(body, known_vars, nil, true)
+  state = {self_name: self_name, arity: params.size(), self_calls: 0}
+  non_expanding_int_stmts?(body, known_vars, nil, true, state)
 
 # Inlined twin of calls.w's call_args_has_kwargs? (that worker is `use`d
 # after analysis, so it is not referenceable here): a kwargs group is a
@@ -1924,12 +2037,31 @@
   last = args[args.size() - 1]
   last != nil && is_ast_node?(last) && ast_kind(last) == :hash_literal && last.from_kwargs == true
 
+-> pi_tentative_param_type(obs_set)
+  if obs_set == nil
+    return nil
+  ks = obs_set.keys()
+  if ks.size() == 0
+    return nil
+  if ks.size() == 1
+    return ks[0]
+  all_int = true
+  i = 0
+  while i < ks.size()
+    if !(ks[i] in (:int :i64 :raw_int :raw_i64))
+      all_int = false
+    i += 1
+  if all_int
+    return :int
+  nil
+
 -> collect_param_type_observations(mod, expressions, core_expressions = nil, core_top_local = nil)
   if env("TUNGSTEN_PARAM_INFER") == "0"
     return nil
   mod[:observed_param_types] = {}
   param_infer_bailed = {}
   mod[:param_infer_bailed] = param_infer_bailed
+  mod[:pi_self_calls] = {}
   if expressions == nil
     return nil
 
@@ -1992,21 +2124,62 @@
     elsif definition_from_core?(expr_ci)
       ci += 1
       next
-    pi_walk(expr_ci, visible_local, visible_candidates, mod)
+    pi_walk(expr_ci, visible_local, visible_candidates, mod, nil)
     ci += 1
+
+  # Inductive verification for direct self-recursive calls: if all external
+  # call sites pass a consistent type tuple, verify that under that parameter
+  # typing every self-call in the function body preserves the same types.
+  self_calls = mod[:pi_self_calls]
+  if self_calls != nil
+    skeys = self_calls.keys()
+    ski = 0
+    while ski < skeys.size()
+      snm = skeys[ski]
+      ski += 1
+      def_node = candidates[snm]
+      obs = mod[:observed_param_types][snm]
+      if def_node != nil && param_infer_bailed[snm] != true && obs != nil && def_node.params != nil && obs.size() == def_node.params.size()
+        param_names = []
+        pi = 0
+        while pi < def_node.params.size()
+          param_names.push(param_runtime_name(def_node.params[pi]))
+          pi += 1
+        reassigned = find_reassigned_params(def_node.body, param_names)
+        reassigned_set = {}
+        ri = 0
+        while ri < reassigned.size()
+          reassigned_set[reassigned[ri]] = true
+          ri += 1
+        inner = {}
+        pi = 0
+        while pi < param_names.size()
+          pname = param_names[pi]
+          if reassigned_set[pname] != true
+            t_seed = pi_tentative_param_type(obs[pi])
+            if t_seed != nil
+              inner[pname] = t_seed
+          pi += 1
+        pi_collect_local_types(def_node.body, inner, mod)
+        sc_list = self_calls[snm]
+        sci = 0
+        while sci < sc_list.size()
+          pi_record_call(def_node, sc_list[sci], inner, mod)
+          sci += 1
+  mod[:pi_self_calls] = nil
   nil
 
--> pi_walk_stmts(stmts, local, candidates, mod)
+-> pi_walk_stmts(stmts, local, candidates, mod, enclosing_fn = nil)
   if stmts == nil
     return nil
   n_stmts = stmts.size()
   i = 0
   while i < n_stmts
-    pi_walk(stmts[i], local, candidates, mod)
+    pi_walk(stmts[i], local, candidates, mod, enclosing_fn)
     i += 1
   nil
 
--> pi_walk(node, local, candidates, mod)
+-> pi_walk(node, local, candidates, mod, enclosing_fn = nil)
   if node == nil || !is_ast_node?(node)
     return nil
   k = ast_kind(node)
@@ -2029,20 +2202,78 @@
     inner = {}
     nbody = node.body
     pi_collect_local_types(nbody, inner, mod)
-    pi_walk_stmts(nbody, inner, candidates, mod)
+    next_enclosing = nil
+    if node.name != nil && candidates[node.name] == node
+      next_enclosing = node.name
+    pi_walk_stmts(nbody, inner, candidates, mod, next_enclosing)
     return nil
   # Direct call to a candidate: record its arguments' inferred types.
   if k == :call && node.receiver == nil
     nname = node.name
     if nname != nil && candidates[nname] != nil
-      pi_record_call(candidates[nname], node, local, mod)
+      if enclosing_fn != nil && nname == enclosing_fn
+        sc = mod[:pi_self_calls][nname]
+        if sc == nil
+          sc = []
+          mod[:pi_self_calls][nname] = sc
+        sc.push(node)
+      else
+        pi_record_call(candidates[nname], node, local, mod)
+  if k == :with
+    wbindings = node.bindings
+    saved_keys = []
+    saved_had = []
+    saved_vals = []
+    if wbindings != nil
+      n_wb = wbindings.size()
+      wi = 0
+      while wi < n_wb
+        wb = wbindings[wi]
+        if wb != nil
+          wvar = wb[0]
+          wcoll = wb[1]
+          pi_walk(wcoll, local, candidates, mod, enclosing_fn)
+          if wvar != nil && is_ast_node?(wvar) && ast_kind(wvar) == :var && wvar.name != nil && wcoll != nil && is_ast_node?(wcoll) && ast_kind(wcoll) == :range
+            ft = infer_type(wcoll.from, local, mod[:fn_return_types], nil)
+            if ft in (:int :i64)
+              wname = wvar.name
+              saved_keys.push(wname)
+              saved_had.push(local.has_key?(wname))
+              saved_vals.push(local[wname])
+              local[wname] = :int
+        wi += 1
+    pi_walk_stmts(node.body, local, candidates, mod, enclosing_fn)
+    si = saved_keys.size() - 1
+    while si >= 0
+      skey = saved_keys[si]
+      if saved_had[si]
+        local[skey] = saved_vals[si]
+      else
+        local.delete(skey)
+      si -= 1
+    return nil
+  if k == :call && node.name == "each" && node.receiver != nil && is_ast_node?(node.receiver) && ast_kind(node.receiver) == :range && node.block != nil && is_ast_node?(node.block) && ast_kind(node.block) == :block
+    pi_walk(node.receiver, local, candidates, mod, enclosing_fn)
+    ft = infer_type(node.receiver.from, local, mod[:fn_return_types], nil)
+    tt = infer_type(node.receiver.to, local, mod[:fn_return_types], nil)
+    pname = iterator_block_param_name(node.block)
+    if pname != nil && ft in (:int :i64) && tt in (:int :i64)
+      had_key = local.has_key?(pname)
+      old_val = local[pname]
+      local[pname] = :int
+      pi_walk_stmts(node.block.body, local, candidates, mod, enclosing_fn)
+      if had_key
+        local[pname] = old_val
+      else
+        local.delete(pname)
+      return nil
   # Recurse into every child (args, receiver, bodies, …) — completeness is
   # required so no call site or value-reference is missed.
   kids = ast_children(node)
   n_kids = kids.size()
   ki = 0
   while ki < n_kids
-    pi_walk(kids[ki], local, candidates, mod)
+    pi_walk(kids[ki], local, candidates, mod, enclosing_fn)
     ki += 1
   nil
 
@@ -2089,11 +2320,17 @@
               wcoll = wb[1]
               if wvar != nil && is_ast_node?(wvar) && ast_kind(wvar) == :var && wvar.name != nil && wcoll != nil && is_ast_node?(wcoll) && ast_kind(wcoll) == :range
                 ft = infer_type(wcoll.from, local, fn_ret_types, nil)
-                tt = infer_type(wcoll.to, local, fn_ret_types, nil)
-                if ft in (:int :i64) && tt in (:int :i64)
+                if ft in (:int :i64)
                   local[wvar.name] = :int
             wi += 1
         pi_collect_local_types(node.body, local, mod)
+      if k == :call && node.name == "each" && node.receiver != nil && is_ast_node?(node.receiver) && ast_kind(node.receiver) == :range && node.block != nil && is_ast_node?(node.block) && ast_kind(node.block) == :block
+        ft = infer_type(node.receiver.from, local, fn_ret_types, nil)
+        tt = infer_type(node.receiver.to, local, fn_ret_types, nil)
+        pname = iterator_block_param_name(node.block)
+        if pname != nil && ft in (:int :i64) && tt in (:int :i64)
+          local[pname] = :int
+        pi_collect_local_types(node.block.body, local, mod)
       if k == :case
         clauses = node.clauses
         if clauses != nil

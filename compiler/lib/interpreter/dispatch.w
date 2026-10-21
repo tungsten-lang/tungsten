@@ -126,8 +126,9 @@
         # method called with N>1 args builds its argument from the
         # receiver's own class when the constructor arity matches —
         # p.distance(2, 3, 4) ≡ p.distance(Point.new(2, 3, 4)). Mirrors
-        # the runtime dispatch rule.
-        if args.size() > 1 && m[:params] != nil && m[:params].size() == 1
+        # the runtime dispatch rule. A `*rest` parameter already takes every
+        # argument, so it never wraps them.
+        if args.size() > 1 && m[:params] != nil && m[:params].size() == 1 && ast_get(m[:params][0], :splat) != true
           ctor = lookup_method(recv[:w_class], "new")
           if ctor != nil && ctor[:params] != nil && ctor[:params].size() == args.size()
             inst = instantiate(recv[:w_class], args, env)

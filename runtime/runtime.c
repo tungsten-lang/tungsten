@@ -69162,7 +69162,9 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
              * method called with N>1 args builds its argument from the
              * receiver's own class when the constructor arity matches —
              * p.distance(2, 3, 4) â¡ p.distance(Point.new(2, 3, 4)). */
-            if (expected == 1 && args->size > 1) {
+            /* A `*rest` parameter already takes every argument (the Ruby
+             * implementation's rule), so it never wraps them. */
+            if (expected == 1 && args->size > 1 && m->splat_index_plus_one == 0) {
                 WClass *k = g_class_table[obj->class_id];
                 if (w_method_lookup_arity(k, WN_new, args->size + 1)) {
                     WValue cls = w_box_ptr(k, W_SUBTAG_CLASS);

@@ -126,8 +126,9 @@
         # method called with N>1 args builds its argument from the
         # receiver's own class when the constructor arity matches —
         # p.distance(2, 3, 4) ≡ p.distance(Point.new(2, 3, 4)). Mirrors
-        # the runtime dispatch rule.
-        if args.size() > 1 && m[:params] != nil && m[:params].size() == 1
+        # the runtime dispatch rule. A `*rest` parameter already takes every
+        # argument, so it never wraps them.
+        if args.size() > 1 && m[:params] != nil && m[:params].size() == 1 && ast_get(m[:params][0], :splat) != true
           ctor = lookup_method(recv[:w_class], "new")
           if ctor != nil && ctor[:params] != nil && ctor[:params].size() == args.size()
             inst = instantiate(recv[:w_class], args, env)
@@ -710,6 +711,43 @@
     i = 0
     while i < params.size()
       if ast_get(params[i], :block_param) == true
+        return true
+      i += 1
+    false
+
+  # Record the NAME of a method that takes a block (declares `&`, or uses
+  # `yield` / `block?`), as lowering fills mod[:block_method_names]. A trailing
+  # block on a call of that name is then passed to it instead of iterating the
+  # call's result (interpreter_method_takes_no_block?).
+  -> note_block_method(m)
+    if method_takes_block?(m) || body_uses_block?(m[:body])
+      @block_method_names[m[:name]] = true
+
+  -> body_uses_block?(nodes)
+    if nodes == nil
+      return false
+    i = 0
+    while i < nodes.size()
+      if node_uses_block?(nodes[i])
+        return true
+      i += 1
+    false
+
+  -> node_uses_block?(node)
+    if node == nil || !is_ast_node?(node)
+      return false
+    k = ast_kind(node)
+    if k == :yield
+      return true
+    if k in (:var :call) && ast_get(node, :name) in ("block?" "block_given?")
+      return true
+    # A nested definition's `yield` is its own.
+    if k in (:method_def :fn_def :class_def :module_def)
+      return false
+    kids = ast_children(node)
+    i = 0
+    while i < kids.size()
+      if node_uses_block?(kids[i])
         return true
       i += 1
     false

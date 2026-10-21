@@ -54027,6 +54027,125 @@ WValue __w_append_file(WValue path_val, WValue content_val) {
     return w_write_file_mode(path_val, content_val, "ab");
 }
 
+/* ---- File handles: File.open / FileHandle (core/file.w) ----
+ * The compiled engine had no file_open at all, so File.open died with
+ * "undefined method 'file_open'". A FileHandle keeps its FILE * as an
+ * Integer; these are its stdio primitives (the tree-walking interpreter
+ * forwards the same ccalls, the Ruby implementation shims them). */
+WValue __w_file_handle_open(WValue path_val, WValue mode_val) {
+    const char *path = as_str(path_val);
+    const char *mode = as_str(mode_val);
+    if (strpbrk(mode, "wa+") != NULL) w_sandbox_gate("write_file", path);
+    if (strpbrk(mode, "r+") != NULL) w_sandbox_gate("read_file", path);
+    FILE *f = fopen(path, mode);
+    if (!f) return W_NIL;
+    return w_int((int64_t)(uintptr_t)f);
+}
+
+static FILE *w_file_handle_ptr(WValue handle_val) {
+    FILE *f = (FILE *)(uintptr_t)w_to_i64(handle_val);
+    if (!f) w_raise(w_string("FileHandle: closed stream"));
+    return f;
+}
+
+/* Bytes written, or nil when `data` is neither text nor a u8 array (the
+ * caller then writes data.to_s). */
+WValue __w_file_handle_write(WValue handle_val, WValue data_val) {
+    FILE *f = w_file_handle_ptr(handle_val);
+    const char *data;
+    size_t len;
+    char inline_buf[6];
+    if (w_is_bytes(data_val)) {
+        WArray *a = w_as_array(data_val);
+        data = (const char *)a->slots + a->start;
+        len = (size_t)a->size;
+    } else if (w_is_stringy(data_val) || w_is_rope(data_val)) {
+        w_str_data(data_val, inline_buf, &data, &len);
+    } else {
+        return W_NIL;
+    }
+    size_t wrote = len > 0 ? fwrite(data, 1, len, f) : 0;
+    if (wrote != len) w_raise(w_string("FileHandle#write: short write"));
+    return w_int((int64_t)wrote);
+}
+
+/* read(): the rest of the file ("" at EOF). read(n): up to n bytes, nil at
+ * EOF -- Ruby's IO#read contract, which the Ruby implementation follows. */
+WValue __w_file_handle_read(WValue handle_val, WValue length_val) {
+    FILE *f = w_file_handle_ptr(handle_val);
+    if (length_val != W_NIL) {
+        int64_t want = w_to_i64(length_val);
+        if (want < 0) w_raise(w_string("FileHandle#read: negative length"));
+        if (want > INT32_MAX) w_raise(w_string("FileHandle#read: length exceeds string capacity"));
+        if (want == 0) return w_string_n("", 0);
+        char *buf = malloc((size_t)want);
+        size_t got = fread(buf, 1, (size_t)want, f);
+        WValue out = got == 0 ? W_NIL : w_string_n(buf, got);
+        free(buf);
+        return out;
+    }
+    size_t cap = 4096, len = 0;
+    char *buf = malloc(cap);
+    for (;;) {
+        size_t got = fread(buf + len, 1, cap - len, f);
+        len += got;
+        if (len < cap) break;
+        cap *= 2;
+        buf = realloc(buf, cap);
+    }
+    WValue out = w_string_n(buf, len);
+    free(buf);
+    return out;
+}
+
+/* The next line, or nil at EOF. chomp drops the line ending ("\n", "\r\n"
+ * or a final "\r"), like Ruby's String#chomp in the Ruby implementation;
+ * each_line keeps it. */
+WValue __w_file_handle_gets(WValue handle_val, WValue chomp_val) {
+    FILE *f = w_file_handle_ptr(handle_val);
+    char *line = NULL;
+    size_t cap = 0;
+    ssize_t n = getline(&line, &cap, f);
+    if (n < 0) {
+        free(line);
+        return W_NIL;
+    }
+    if (w_truthy(chomp_val) && n > 0) {
+        if (line[n - 1] == '\n') n--;
+        if (n > 0 && line[n - 1] == '\r') n--;
+    }
+    WValue out = w_string_n(line, (size_t)n);
+    free(line);
+    return out;
+}
+
+WValue __w_file_handle_flush(WValue handle_val) {
+    return w_bool(fflush(w_file_handle_ptr(handle_val)) == 0);
+}
+
+WValue __w_file_handle_close(WValue handle_val) {
+    return w_bool(fclose(w_file_handle_ptr(handle_val)) == 0);
+}
+
+WValue __w_file_handle_seek(WValue handle_val, WValue offset_val, WValue whence_val) {
+    FILE *f = w_file_handle_ptr(handle_val);
+    int64_t whence = w_to_i64(whence_val);
+    int how = whence == 1 ? SEEK_CUR : (whence == 2 ? SEEK_END : SEEK_SET);
+    return w_bool(fseeko(f, (off_t)w_to_i64(offset_val), how) == 0);
+}
+
+WValue __w_file_handle_tell(WValue handle_val) {
+    return w_int((int64_t)ftello(w_file_handle_ptr(handle_val)));
+}
+
+WValue __w_file_handle_eof(WValue handle_val) {
+    FILE *f = w_file_handle_ptr(handle_val);
+    int c = fgetc(f);
+    if (c == EOF) return W_TRUE;
+    ungetc(c, f);
+    return W_FALSE;
+}
+
 /* write_file_bytes_n(path, bytes, n): write the first n bytes of a byte
  * array (n clamped to its size). Lets a reusable buffer be written without
  * an exact-size copy — the prime-list writer emits ~1 GB files from one
@@ -71586,6 +71705,45 @@ WValue w_array_new_inline_uninit_sized(int64_t element_bits, int64_t n) {
  * which inline-mode Strings have no stable pointer for. Anything that is not
  * one of the three array tiers passes through untouched: this guard is about
  * element width, not about type-checking the handle. */
+
+/* The callee body indexes a WArray: a W_TAG_ARRAY box over the i32
+ * start/size header with `slots` at offset 16. A BigArray (the i64-field tier
+ * that Mmap#as_u8 and the other mmap views return) is boxed and laid out
+ * differently, so passing one straight through made the callee read its header
+ * as a WArray and segfault. Hand the callee a zero-copy WArray view of the same
+ * elements instead: writes reach the BigArray's storage, and push/grow on the
+ * view raise as on any view. Views are cached per thread by source, so a loop
+ * passing the same BigArray allocates one header; every hit refreshes it,
+ * since an owned BigArray may have grown or moved since. An evicted view is
+ * left alive (the callee may have kept it). */
+#define W_PARAM_VIEW_CACHE 16
+static __thread struct { WBigArray *src; WArray *view; }
+    w_param_view_cache[W_PARAM_VIEW_CACHE];
+
+static WValue w_big_array_param_view(WValue arr, WValue site_v) {
+    WBigArray *b = (WBigArray *)w_as_ptr(arr);
+    if (b->start < 0 || b->size < 0 || b->start > INT32_MAX ||
+        b->size > (int64_t)INT32_MAX - b->start) {
+        w_raise(w_str_concat(site_v, w_string(
+            ", but received a BigArray with more than INT32_MAX elements, "
+            "which a typed-array parameter cannot view")));
+    }
+    size_t h = ((uintptr_t)b >> 4) & (W_PARAM_VIEW_CACHE - 1);
+    WArray *a = w_param_view_cache[h].src == b ? w_param_view_cache[h].view : NULL;
+    if (!a) {
+        a = calloc(1, sizeof(WArray));
+        w_param_view_cache[h].src = b;
+        w_param_view_cache[h].view = a;
+    }
+    a->flags = W_FLAG_VIEW;
+    a->ebits = (int8_t)b->ebits;
+    a->start = (int32_t)b->start;
+    a->size = (int32_t)b->size;
+    a->cap = (int32_t)(b->start + b->size);
+    a->slots = (WValue *)b->slots;
+    return w_box_array(a);
+}
+
 WValue w_check_array_ebits(WValue arr, int64_t want_bits, int64_t want_poly,
                            WValue site_v) {
     int64_t got_ebits;
@@ -71594,13 +71752,18 @@ WValue w_check_array_ebits(WValue arr, int64_t want_bits, int64_t want_poly,
     } else if (w_is_small_array(arr)) {
         got_ebits = (int64_t)((WSmallArray *)w_as_ptr(arr))->ebits;
     } else if (w_is_big_array(arr)) {
-        got_ebits = (int64_t)((WBigArray *)w_as_ptr(arr))->ebits;
+        /* WBigArray keeps the signed ebits code in a uint8_t (f64's -64 is
+         * stored as 192); read it back the way WArray's int8_t holds it. */
+        got_ebits = (int64_t)(int8_t)((WBigArray *)w_as_ptr(arr))->ebits;
     } else {
         return arr;
     }
     int got_poly = (got_ebits == 65);
     int64_t got_bits = array_storage_bits(got_ebits);
-    if (got_poly == (want_poly != 0) && got_bits == want_bits) return arr;
+    if (got_poly == (want_poly != 0) && got_bits == want_bits) {
+        if (w_is_big_array(arr)) return w_big_array_param_view(arr, site_v);
+        return arr;
+    }
 
     char tail[224];
     if (got_poly) {

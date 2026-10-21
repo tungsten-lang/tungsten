@@ -66,14 +66,18 @@ use core/mmap
 
 # File — whole-file I/O, metadata, paths, and filesystem operations.
 + File
-  # Managed handles
+  # Managed handles. With a block the handle is closed when the block exits
+  # (even by raise), and the block's value is returned.
   -> .open(path, *args)
     mode = args.size > 0 ? args[0] : "r"
+    handle = FileHandle.new(path, mode)
     if block?
-      file_open(path, mode) -> (file)
-        yield file
-    else
-      file_open(path, mode)
+      begin
+        result = yield handle
+      ensure
+        handle.close()
+      return result
+    handle
 
   # Whole-file reads/writes. The runtime readers answer nil when the path
   # cannot be opened or read; surface that as FileNotFound (an IOError) so a
@@ -101,10 +105,13 @@ use core/mmap
   -> .write(path, *args)
     if block?
       mode = args.size > 0 ? args[0] : "w"
-      file_open(path, mode) -> (file)
-        yield file
-    else
-      write_file(path, args[0])
+      handle = FileHandle.new(path, mode)
+      begin
+        result = yield handle
+      ensure
+        handle.close()
+      return result
+    write_file(path, args[0])
 
   -> .write_bytes(path, data)
     write_file_bytes(path, data)
@@ -350,6 +357,128 @@ use core/mmap
 
   -> .extname(path)
     file_extname(path)
+
+# FileHandle — an open file from File.open, read and written incrementally
+# (fopen modes: "r", "w", "a", "r+", "w+", "a+", with an optional "b").
+# The stdio stream lives in the runtime (__w_file_handle_*); @fp is its
+# handle, nil once closed.
++ FileHandle
+  -> new(@path, @mode = "r")
+    @fp = ccall("__w_file_handle_open", @path, @mode)
+    if @fp == nil
+      raise FileNotFound.new("File.open: cannot open " + @path.to_s + " (mode " + @mode.to_s + ")")
+
+  ro :path
+  ro :mode
+
+  -> stream
+    raise IOError.new("closed stream: " + @path.to_s) if @fp == nil
+    @fp
+
+  # Writes a String or u8 array as is and anything else as its to_s;
+  # answers the byte count.
+  -> write(data)
+    written = ccall("__w_file_handle_write", self.stream(), data)
+    if written == nil
+      written = ccall("__w_file_handle_write", self.stream(), data.to_s)
+    written
+
+  -> <<(data)
+    self.write(data)
+    self
+
+  -> puts(*items)
+    if items.size == 0
+      self.write("\n")
+    i = 0
+    while i < items.size
+      text = items[i] == nil ? "nil" : items[i].to_s
+      self.write(text)
+      if !text.ends_with?("\n")
+        self.write("\n")
+      i += 1
+    self
+
+  # read: the rest of the file ("" at its end); read(n): up to n bytes, nil
+  # at the end.
+  -> read(length = nil)
+    ccall("__w_file_handle_read", self.stream(), length)
+
+  -> read_bytes(length = nil)
+    self.read(length)
+
+  # The next line without its line ending, or nil at the end of the file.
+  -> gets
+    ccall("__w_file_handle_gets", self.stream(), true)
+
+  # Yields each remaining line, line ending included.
+  -> each_line(&)
+    line = ccall("__w_file_handle_gets", self.stream(), false)
+    while line != nil
+      yield line
+      line = ccall("__w_file_handle_gets", self.stream(), false)
+    self
+
+  -> flush
+    ccall("__w_file_handle_flush", self.stream())
+    self
+
+  -> close
+    if @fp != nil
+      fp = @fp
+      @fp = nil
+      ccall("__w_file_handle_close", fp)
+    nil
+
+  -> closed?
+    @fp == nil
+
+  # whence: 0 from the start, 1 from the current position, 2 from the end.
+  -> seek(offset, whence = 0)
+    ccall("__w_file_handle_seek", self.stream(), offset, whence)
+    self
+
+  -> rewind
+    self.seek(0)
+
+  -> tell
+    ccall("__w_file_handle_tell", self.stream())
+
+  -> eof?
+    ccall("__w_file_handle_eof", self.stream())
+
+  # The file's size on disk, including writes still buffered here.
+  -> size
+    self.flush() if @fp != nil
+    n = File.size(@path)
+    n == nil ? 0 : n
+
+  -> mtime_ns
+    File.mtime_ns(@path)
+
+  -> type
+    File.type(@path)
+
+  -> file_type
+    File.type(@path)
+
+  -> exist?
+    File.exist?(@path)
+
+  -> exists?
+    File.exist?(@path)
+
+  -> file?
+    File.file?(@path)
+
+  -> directory?
+    File.directory?(@path)
+
+  -> symlink?
+    File.symlink?(@path)
+
+  -> to_s
+    @path.to_s
 
 # Tempfile — a securely-created, path-owning temporary file.
 # `create` with a block is the preferred

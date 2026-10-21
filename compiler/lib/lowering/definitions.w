@@ -1169,6 +1169,11 @@
         emit_wire_dynamic_2(new_fn, machine_store_op(child_var_types[pname]), :ptr, ptr, :value, raw)
       else
         emit_wire_store_i64(new_fn, ptr, llvm_param_reg(pname))
+    # The slot is now the parameter's only home. A binding left behind holds
+    # the ENTRY value: reads already prefer the slot, but materialize_bindings
+    # (run before every if/while) stored it back over the slot, so
+    # `size -= 1` followed by an `if` returned the old size.
+    child_ctx[:bindings][pname] = nil
     pi += 1
 
   captured_params = find_captured_params_in_body(body, param_names_list)
@@ -1191,6 +1196,8 @@
         emit_wire_dynamic_2(new_fn, machine_store_op(child_var_types[pname]), :ptr, ptr, :value, raw)
       else
         emit_wire_store_i64(new_fn, ptr, llvm_param_reg(pname))
+      # As above: the slot supersedes the entry binding.
+      child_ctx[:bindings][pname] = nil
     pi += 1
 
   # Lower body with implicit return for last expression
@@ -2442,6 +2449,9 @@
         emit_wire_dynamic_2(new_fn, machine_store_op(child_var_types[pname]), :ptr, ptr, :value, raw)
       else
         emit_wire_store_i64(new_fn, ptr, llvm_param_reg(pname))
+    # As in lower_method_def: the slot supersedes the entry binding, which
+    # materialize_bindings would otherwise store back over a compound write.
+    child_ctx[:bindings][pname] = nil
     pi += 1
 
   captured_params = find_captured_params_in_body(body, param_names)
@@ -2464,6 +2474,8 @@
         emit_wire_dynamic_2(new_fn, machine_store_op(child_var_types[pname]), :ptr, ptr, :value, raw)
       else
         emit_wire_store_i64(new_fn, ptr, llvm_param_reg(pname))
+      # As in lower_method_def: the slot supersedes the entry binding.
+      child_ctx[:bindings][pname] = nil
     pi += 1
 
   # Lower body with implicit return for last expression

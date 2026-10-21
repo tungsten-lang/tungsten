@@ -444,7 +444,21 @@ use cfg
       if op == :scope_push
         scope_stack.push({id: wire_get(inst, :id), temps: []})
       elsif op == :scope_pop
-        if scope_stack.size() > 0
+        # Match the pop to its push by id. A scope whose block ends in
+        # break/next/return/raise never emits its pop (emit_scope_pop is
+        # skipped once the block is terminated), so a positional pop here
+        # closed that dangling inner scope instead, and the real scope stayed
+        # open: producers born AFTER it (an array literal after a `while`
+        # whose `if` breaks) were then released at its pop, ahead of their
+        # definition ("Instruction does not dominate all uses"). Unwind the
+        # dangling scopes; with no pop of their own they release nothing.
+        pop_id = wire_get(inst, :id)
+        match_at = scope_stack.size() - 1
+        while match_at >= 0 && scope_stack[match_at][:id] != pop_id
+          match_at -= 1
+        if match_at >= 0
+          while scope_stack.size() > match_at + 1
+            scope_stack.pop()
           scope = scope_stack.pop()
           # A producer born in a block that does not dominate this pop — the
           # right operand of a short-circuit `&&`/`||`, for instance, which

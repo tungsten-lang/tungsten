@@ -21,12 +21,6 @@ use cfg
 # Only track KNOWN constructors, not arbitrary call results.
 -> is_heap_producer(inst)
   op = wire_kind(inst)
-  # string_i64 creates interned slab strings — NOT freeable
-  # class_new creates classes that live forever — NOT freeable
-  if op == :closure_new
-    return true
-  if op in (:const_float :const_decimal :const_currency :const_quantity :const_duration_ns :const_duration_months_ms :const_uuid)
-    return true
   # Known heap-allocating runtime calls. w_int_to_s (typed-receiver to_s
   # route) is here and w_to_s is NOT: w_to_s returns its argument for
   # string inputs and a rope's cached flat for rope inputs, so freeing
@@ -42,6 +36,14 @@ use cfg
     # w_array_new_empty backs `[]`: a fresh owned WArray (or a recycled one
     # reset to fresh), freed like w_array_new.
     return name in ("w_string" "w_hash_new" "w_array_new" "w_array_new_empty" "w_array_new_uninit_sized" "w_strbuf_new" "w_str_concat" "w_str_concat_free_rhs" "w_str_concat_free_lhs" "w_str_concat_own" "w_str_concat_i64" "w_i64_concat_str" "w_str_concat_int_wv" "w_int_wv_concat_str" "w_int_to_s" "w_string_repeat")
+  if op == :load_i64 || op == :call_method_i64 || op == :string_i64 || op == :symbol_i64 || op == :load_global || op == :load_class || op == :icmp_i64 || op == :add_i64 || op == :sub_i64 || op == :truthy_inline
+    return false
+  # string_i64 creates interned slab strings — NOT freeable
+  # class_new creates classes that live forever — NOT freeable
+  if op == :closure_new
+    return true
+  if op in (:const_float :const_decimal :const_currency :const_quantity :const_duration_ns :const_duration_months_ms :const_uuid)
+    return true
   false
 
 # Container writes: the container keeps the stored key/value but not itself,
@@ -235,6 +237,8 @@ use cfg
       kind = heap_producer_kind(producers[receiver][:instruction], mod)
       mv = wire_get(inst, :method_name_val)
       mname = names[mv]
+      if mname == nil && mod[:string_texts] != nil && type(mv) == "String" && mv.starts_with?("u0x")
+        mname = mod[:string_texts][mv]
       reader = kind != nil && mname != nil && container_reader_method?(kind, mname)
       if reader
         ai = 0
@@ -251,6 +255,14 @@ use cfg
       while i < wire_sequence_size(args)
         escaped[wire_sequence_get(args, i)] = true
         i += 1
+    return nil
+
+  if op == :store_i64
+    # Non-promoted var store: value escapes (can't track through memory)
+    escaped[wire_get(inst, :value)] = true
+    return nil
+
+  if op == :load_i64 || op == :br || op == :cond_br || op == :ret_void || op == :string_i64 || op == :symbol_i64 || op == :call_loc_set_col || op == :load_global || op == :load_class || op == :icmp_i64 || op == :add_i64 || op == :sub_i64 || op == :truthy_inline || op == :nanbox_int || op == :nanunbox_int || op == :nanbox_bool
     return nil
 
   if op == :ret_i64
@@ -280,11 +292,6 @@ use cfg
   if op == :closure_new
     if wire_get(inst, :captures_ptr) != nil
       escaped[wire_get(inst, :captures_ptr)] = true
-    return nil
-
-  if op == :store_i64
-    # Non-promoted var store: value escapes (can't track through memory)
-    escaped[wire_get(inst, :value)] = true
     return nil
 
   # I/O: puts and print consume their value argument
@@ -413,15 +420,10 @@ use cfg
   # temp → class name for :load_class results; construct_producer_class
   # needs to know that a construct's receiver IS the guarded class.
   class_temps = {}
-  # method-name constant (temp or immediate) -> text, for mark_escapes
+  # method-name constant temp -> text, for mark_escapes (immediate u0x... names
+  # are looked up directly in mod[:string_texts]).
   names = {}
   texts = mod == nil ? nil : mod[:string_texts]
-  if texts != nil
-    tk = texts.keys()
-    ti = 0
-    while ti < tk.size()
-      names[tk[ti]] = texts[tk[ti]] if type(tk[ti]) == "String"
-      ti += 1
 
   # Walk blocks in order (sufficient for monotonic analysis)
   bi = 0
@@ -594,20 +596,32 @@ use cfg
     return nil
   escaped = own[:escaped]
   producers = own[:producers]
-  if producers.keys().size() == 0
+  if producers.size() == 0
     return nil
   scope_locals = own[:scope_locals]
   func_scope = own[:func_scope]
+  has_freeable_func_scope = false
+  if func_scope != nil
+    fi = 0
+    while fi < func_scope.size()
+      temp = func_scope[fi]
+      if escaped[temp] != true && producers[temp] != nil
+        has_freeable_func_scope = true
+        break
+      fi += 1
+  if !has_freeable_func_scope && scope_locals.size() == 0
+    return nil
 
   blocks = func[:blocks]
   bi = 0
   while bi < blocks.size()
     instrs = blocks[bi][:instructions]
-    new_instrs = []
+    new_instrs = nil
     ii = 0
     while ii < instrs.size()
       inst = instrs[ii]
-      if wire_kind(inst) == :scope_pop
+      op = wire_kind(inst)
+      if op == :scope_pop
         # Free non-escaped heap values from this scope
         sid = wire_get(inst, :id)
         locals = scope_locals[sid]
@@ -616,6 +630,12 @@ use cfg
           while li < locals.size()
             temp = locals[li]
             if escaped[temp] != true && producers[temp] != nil
+              if new_instrs == nil
+                new_instrs = []
+                ci = 0
+                while ci < ii
+                  new_instrs.push(instrs[ci])
+                  ci += 1
               new_instrs.push(release_dead_producer(temp, producers[temp]))
             li += 1
       # Function-body scope: free non-escaped entry-block producers right
@@ -623,16 +643,24 @@ use cfg
       # values are defined on all paths and (being non-escaped) dead here.
       # Only one ret runs per call, so freeing before each is not a double
       # free at runtime.
-      if wire_kind(inst) in (:ret_i64 :ret_i32 :ret_void) && func_scope != nil
+      elsif has_freeable_func_scope && (op == :ret_i64 || op == :ret_i32 || op == :ret_void)
         fi = 0
         while fi < func_scope.size()
           temp = func_scope[fi]
           if escaped[temp] != true && producers[temp] != nil
+            if new_instrs == nil
+              new_instrs = []
+              ci = 0
+              while ci < ii
+                new_instrs.push(instrs[ci])
+                ci += 1
             new_instrs.push(release_dead_producer(temp, producers[temp]))
           fi += 1
-      new_instrs.push(inst)
+      if new_instrs != nil
+        new_instrs.push(inst)
       ii += 1
-    blocks[bi][:instructions] = new_instrs
+    if new_instrs != nil
+      blocks[bi][:instructions] = new_instrs
     bi += 1
 
 # Entry point for free insertion across all functions.
@@ -708,6 +736,56 @@ use cfg
 -> loop_release_operands(inst)
   out = []
   if ccall_nobox("w_is_wire_extern", inst) == 1
+    op = wire_kind(inst)
+    if op == :call_direct_i64 || op == :call_direct_void || op == :call_direct_ptr || op == :call_direct_i128
+      args = wire_get(inst, :args)
+      if args != nil
+        si = 0
+        while si < wire_sequence_size(args)
+          item = wire_sequence_get(args, si)
+          if type(item) == "String" && item.size() > 0 && item.byte_at(0) == 37
+            out.push(item)
+          si += 1
+      return out
+    if op == :load_i64 || op == :load_double || op == :load_float || op == :load_i128
+      ptr = wire_get(inst, :ptr)
+      if type(ptr) == "String" && ptr.size() > 0 && ptr.byte_at(0) == 37
+        out.push(ptr)
+      return out
+    if op == :store_i64 || op == :store_double || op == :store_float || op == :store_i128
+      ptr = wire_get(inst, :ptr)
+      if type(ptr) == "String" && ptr.size() > 0 && ptr.byte_at(0) == 37
+        out.push(ptr)
+      val = wire_get(inst, :value)
+      if type(val) == "String" && val.size() > 0 && val.byte_at(0) == 37
+        out.push(val)
+      return out
+    if op == :br || op == :ret_void || op == :string_i64 || op == :symbol_i64 || op == :call_loc_set_col || op == :load_class || op == :load_global || op == :scope_push || op == :scope_pop || op == :cleanup_pop
+      return out
+    if op == :cond_br
+      cond = wire_get(inst, :cond)
+      if type(cond) == "String" && cond.size() > 0 && cond.byte_at(0) == 37
+        out.push(cond)
+      return out
+    if op == :call_method_i64
+      rec = wire_get(inst, :receiver)
+      if type(rec) == "String" && rec.size() > 0 && rec.byte_at(0) == 37
+        out.push(rec)
+      mv = wire_get(inst, :method_name_val)
+      if type(mv) == "String" && mv.size() > 0 && mv.byte_at(0) == 37
+        out.push(mv)
+      tav = wire_get(inst, :temp_args_val)
+      if type(tav) == "String" && tav.size() > 0 && tav.byte_at(0) == 37
+        out.push(tav)
+      args = wire_get(inst, :args)
+      if args != nil
+        si = 0
+        while si < wire_sequence_size(args)
+          item = wire_sequence_get(args, si)
+          if type(item) == "String" && item.size() > 0 && item.byte_at(0) == 37
+            out.push(item)
+          si += 1
+      return out
     count = wire_field_count(inst)
     fi = 0
     while fi < count
@@ -719,15 +797,18 @@ use cfg
           while si < wire_sequence_size(value)
             item = wire_sequence_get(value, si)
             if type(item) == "String"
-              out.push(item)
+              if item.size() > 0 && item.byte_at(0) == 37
+                out.push(item)
             elsif type(item) == "Hash"
-              if type(item[:value]) == "String"
-                out.push(item[:value])
+              iv = item[:value]
+              if type(iv) == "String" && iv.size() > 0 && iv.byte_at(0) == 37
+                out.push(iv)
             elsif type(item) == "Array"
               return nil
             si += 1
         elsif type(value) == "String"
-          out.push(value)
+          if value.size() > 0 && value.byte_at(0) == 37
+            out.push(value)
         elsif type(value) == "Array" || type(value) == "Hash"
           return nil
       fi += 1
@@ -775,14 +856,13 @@ use cfg
 -> loop_carried_releases(func)
   blocks = func[:blocks]
   slots = func[:var_slots]
-  return 0 if slots == nil || blocks.size() < 2 || has_setjmp(func)
+  return 0 if slots == nil || slots.size() == 0 || blocks.size() < 2
   slot_ptr = {}
   snames = slots.keys()
   sn = 0
   while sn < snames.size()
     slot_ptr[slots[snames[sn]]] = true
     sn += 1
-  return 0 if snames.size() == 0
 
   # Cheap pre-filter, linear and without a CFG: some arithmetic-helper result
   # must be stored into a slot.  Most functions stop here.  (A store that
@@ -797,6 +877,8 @@ use cfg
     while ii < instrs.size()
       inst = instrs[ii]
       k = wire_kind(inst)
+      if k == :setjmp
+        return 0
       if k == :call_direct_i64
         if loop_release_arith?(wire_get(inst, :name)) && wire_get(inst, :temp) != nil
           arith_temps[wire_get(inst, :temp)] = true
@@ -806,7 +888,7 @@ use cfg
           break
       ii += 1
     bi += 1
-  return 0 if !candidate
+  return 0 if !candidate || has_setjmp(func)
 
   cfg = build_cfg(func)
   idom = compute_dominators(cfg)
@@ -1320,12 +1402,19 @@ use cfg
   fresh = {}
   cands = []
   funcs = mod[:functions]
+  fn_names = {}
+  fi = 0
+  while fi < funcs.size()
+    func = funcs[fi]
+    fi += 1
+    if func[:blocks].size() > 0 && func[:incremental_core_frozen] != true
+      fn_names[func[:name]] = true
   fi = 0
   while fi < funcs.size()
     func = funcs[fi]
     fi += 1
     next if func[:blocks].size() == 0 || func[:incremental_core_frozen] == true
-    cand = int_fresh_candidate(func)
+    cand = int_fresh_candidate(func, fn_names)
     if cand != nil
       cands.push(cand)
   # Optimistic fixed point would admit mutual recursion with no base case;
@@ -1358,7 +1447,7 @@ use cfg
 # every ret_i64 returns an arithmetic-helper result or a direct call's result
 # (fresh only if every callee turns out fresh), each read here only by
 # integer readers; nil otherwise.
--> int_fresh_candidate(func)
+-> int_fresh_candidate(func, fn_names = nil)
   blocks = func[:blocks]
   rets = []
   defs = {}
@@ -1380,12 +1469,18 @@ use cfg
       ii += 1
     bi += 1
   return nil if rets.size() == 0
+  ret_set = {}
   ri = 0
   while ri < rets.size()
-    d = defs[rets[ri]]
+    rv = rets[ri]
+    d = defs[rv]
     return nil if d == nil
     dinst = blocks[d[0]][:instructions][d[1]]
-    return nil if wire_get(dinst, :name) == func[:name]
+    dname = wire_get(dinst, :name)
+    return nil if dname == func[:name]
+    if fn_names != nil && !int_temp_arith?(dname) && fn_names[dname] != true
+      return nil
+    ret_set[rv] = true
     ri += 1
   uses = {}
   bi = 0
@@ -1398,9 +1493,11 @@ use cfg
       return nil if refs == nil
       ri = 0
       while ri < refs.size()
-        if uses[refs[ri]] == nil
-          uses[refs[ri]] = []
-        uses[refs[ri]].push([bi, ii])
+        r = refs[ri]
+        if ret_set[r] == true
+          if uses[r] == nil
+            uses[r] = []
+          uses[r].push([bi, ii])
         ri += 1
       ii += 1
     bi += 1
@@ -1516,38 +1613,53 @@ use cfg
 -> owned_slot_releases(func, mod, fresh, strings)
   blocks = func[:blocks]
   slots = func[:var_slots]
-  return 0 if slots == nil || blocks.size() < 1
+  return 0 if slots == nil || slots.size() == 0 || blocks.size() < 1
   heap_cells = func[:heap_slot_names]
   promoted = func[:promoted_vars]
   cand = {}
+  has_cand = false
   names = slots.keys()
   ni = 0
   while ni < names.size()
     ptr = slots[names[ni]]
     if ptr.starts_with?("%v") && (heap_cells == nil || heap_cells[names[ni]] != true) && (promoted == nil || promoted[ptr] == nil)
       cand[ptr] = true
+      has_cand = true
     ni += 1
-  return 0 if cand.keys().size() == 0
+  return 0 if !has_cand
+  producer_temps = {}
   has_producer = false
-  has_cand_store = false
+  stored_vals = []
   bi = 0
-  while bi < blocks.size() && !(has_producer && has_cand_store)
+  while bi < blocks.size()
     instrs = blocks[bi][:instructions]
     ii = 0
     while ii < instrs.size()
       inst = instrs[ii]
       k = wire_kind(inst)
+      if k == :setjmp
+        return 0
       if k == :store_i64 && cand[wire_get(inst, :ptr)] == true
-        has_cand_store = true
+        stored_vals.push(wire_get(inst, :value))
       elsif k == :bigint_literal_i64 && wire_get(inst, :temp) != nil
+        producer_temps[wire_get(inst, :temp)] = true
         has_producer = true
       elsif k == :call_direct_i64 && wire_get(inst, :temp) != nil
         cname = wire_get(inst, :name)
         if int_temp_producer?(cname, fresh) || is_heap_producer(inst) || fresh_heap_call?(inst, mod) || cname == "w_bigint_from_dec_str"
+          producer_temps[wire_get(inst, :temp)] = true
           has_producer = true
       ii += 1
     bi += 1
-  return 0 if !has_producer || !has_cand_store || has_setjmp(func)
+  return 0 if !has_producer || stored_vals.size() == 0
+  has_producer_store = false
+  svi = 0
+  while svi < stored_vals.size()
+    if producer_temps[stored_vals[svi]] == true
+      has_producer_store = true
+      break
+    svi += 1
+  return 0 if !has_producer_store
   wo = mod[:write_only_globals]
   wo = {} if wo == nil
 
@@ -2122,7 +2234,7 @@ use cfg
   while fi < funcs.size()
     blocks = funcs[fi][:blocks]
     fi += 1
-    cls_of = {}
+    cls_of = nil
     bi = 0
     while bi < blocks.size()
       instrs = blocks[bi][:instructions]
@@ -2131,23 +2243,31 @@ use cfg
         inst = instrs[ii]
         ii += 1
         k = wire_kind(inst)
-        if k == :load_class && wire_get(inst, :temp) != nil
-          cls_of[wire_get(inst, :temp)] = wire_get(inst, :class_name)
-        elsif k == :class_new && wire_get(inst, :temp) != nil
-          cls_of[wire_get(inst, :temp)] = texts[wire_get(inst, :name_str_id)]
+        if k == :call_direct_i64
+          if table[:dynamic] != true
+            cn = wire_get(inst, :name)
+            if cn != nil && (cn.index("define_method") != nil || cn.index("add_method") != nil || cn.index("method_missing") != nil)
+              table[:dynamic] = true
+        elsif k == :load_class
+          t = wire_get(inst, :temp)
+          if t != nil
+            cls_of = {} if cls_of == nil
+            cls_of[t] = wire_get(inst, :class_name)
+        elsif k == :class_new
+          t = wire_get(inst, :temp)
+          if t != nil
+            cls_of = {} if cls_of == nil
+            cls_of[t] = texts[wire_get(inst, :name_str_id)]
         elsif k == :class_add_method
           name = texts[wire_get(inst, :method_str_id)]
           if name == nil || name == "method_missing" || name == "respond_to_missing?"
             table[:dynamic] = true
           else
             table[name] = [] if table[name] == nil
-            table[name].push({cls: cls_of[wire_get(inst, :class_temp)], fname: wire_get(inst, :fn_name), arity: wire_get(inst, :arity), min: wire_get(inst, :min_arity), splat: wire_get(inst, :splat_index)})
+            cls_name = cls_of != nil ? cls_of[wire_get(inst, :class_temp)] : nil
+            table[name].push({cls: cls_name, fname: wire_get(inst, :fn_name), arity: wire_get(inst, :arity), min: wire_get(inst, :min_arity), splat: wire_get(inst, :splat_index)})
             imm = inline_name_text(name)
             texts[imm] = name if imm != nil
-        elsif k == :call_direct_i64
-          cn = wire_get(inst, :name)
-          if cn != nil && (cn.index("define_method") != nil || cn.index("add_method") != nil || cn.index("method_missing") != nil)
-            table[:dynamic] = true
       bi += 1
   table
 

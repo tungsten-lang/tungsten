@@ -5718,6 +5718,35 @@ module Tungsten
         args[1].to_bytes(args[2])
       when "w_bigint_from_bytes"
         Integer.from_bytes(args[1], args[2])
+      # FileHandle (core/file.w): the handle is a Ruby IO here.
+      when "__w_file_handle_open"
+        begin
+          ::File.open(Runtime::Builtins.path_string(args[1]), args[2].to_s)
+        rescue SystemCallError
+          nil
+        end
+      when "__w_file_handle_write"
+        case args[2]
+        when String then args[1].write(args[2])
+        when Tungsten::ByteArray then args[1].write(args[2].bytes.pack("C*"))
+        end
+      when "__w_file_handle_read"
+        args[2].nil? ? args[1].read : args[1].read(args[2].to_i)
+      when "__w_file_handle_gets"
+        line = args[1].gets
+        line && args[2] ? line.chomp : line
+      when "__w_file_handle_flush"
+        args[1].flush
+        true
+      when "__w_file_handle_close"
+        args[1].close
+        true
+      when "__w_file_handle_seek"
+        args[1].seek(args[2].to_i, args[3].to_i).zero?
+      when "__w_file_handle_tell"
+        args[1].tell
+      when "__w_file_handle_eof"
+        args[1].eof?
       else
         runtime_error("undefined method 'ccall'", node: node, length: 5)
       end

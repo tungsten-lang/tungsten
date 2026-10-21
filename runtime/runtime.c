@@ -71705,6 +71705,45 @@ WValue w_array_new_inline_uninit_sized(int64_t element_bits, int64_t n) {
  * which inline-mode Strings have no stable pointer for. Anything that is not
  * one of the three array tiers passes through untouched: this guard is about
  * element width, not about type-checking the handle. */
+
+/* The callee body indexes a WArray: a W_TAG_ARRAY box over the i32
+ * start/size header with `slots` at offset 16. A BigArray (the i64-field tier
+ * that Mmap#as_u8 and the other mmap views return) is boxed and laid out
+ * differently, so passing one straight through made the callee read its header
+ * as a WArray and segfault. Hand the callee a zero-copy WArray view of the same
+ * elements instead: writes reach the BigArray's storage, and push/grow on the
+ * view raise as on any view. Views are cached per thread by source, so a loop
+ * passing the same BigArray allocates one header; every hit refreshes it,
+ * since an owned BigArray may have grown or moved since. An evicted view is
+ * left alive (the callee may have kept it). */
+#define W_PARAM_VIEW_CACHE 16
+static __thread struct { WBigArray *src; WArray *view; }
+    w_param_view_cache[W_PARAM_VIEW_CACHE];
+
+static WValue w_big_array_param_view(WValue arr, WValue site_v) {
+    WBigArray *b = (WBigArray *)w_as_ptr(arr);
+    if (b->start < 0 || b->size < 0 || b->start > INT32_MAX ||
+        b->size > (int64_t)INT32_MAX - b->start) {
+        w_raise(w_str_concat(site_v, w_string(
+            ", but received a BigArray with more than INT32_MAX elements, "
+            "which a typed-array parameter cannot view")));
+    }
+    size_t h = ((uintptr_t)b >> 4) & (W_PARAM_VIEW_CACHE - 1);
+    WArray *a = w_param_view_cache[h].src == b ? w_param_view_cache[h].view : NULL;
+    if (!a) {
+        a = calloc(1, sizeof(WArray));
+        w_param_view_cache[h].src = b;
+        w_param_view_cache[h].view = a;
+    }
+    a->flags = W_FLAG_VIEW;
+    a->ebits = (int8_t)b->ebits;
+    a->start = (int32_t)b->start;
+    a->size = (int32_t)b->size;
+    a->cap = (int32_t)(b->start + b->size);
+    a->slots = (WValue *)b->slots;
+    return w_box_array(a);
+}
+
 WValue w_check_array_ebits(WValue arr, int64_t want_bits, int64_t want_poly,
                            WValue site_v) {
     int64_t got_ebits;
@@ -71713,13 +71752,18 @@ WValue w_check_array_ebits(WValue arr, int64_t want_bits, int64_t want_poly,
     } else if (w_is_small_array(arr)) {
         got_ebits = (int64_t)((WSmallArray *)w_as_ptr(arr))->ebits;
     } else if (w_is_big_array(arr)) {
-        got_ebits = (int64_t)((WBigArray *)w_as_ptr(arr))->ebits;
+        /* WBigArray keeps the signed ebits code in a uint8_t (f64's -64 is
+         * stored as 192); read it back the way WArray's int8_t holds it. */
+        got_ebits = (int64_t)(int8_t)((WBigArray *)w_as_ptr(arr))->ebits;
     } else {
         return arr;
     }
     int got_poly = (got_ebits == 65);
     int64_t got_bits = array_storage_bits(got_ebits);
-    if (got_poly == (want_poly != 0) && got_bits == want_bits) return arr;
+    if (got_poly == (want_poly != 0) && got_bits == want_bits) {
+        if (w_is_big_array(arr)) return w_big_array_param_view(arr, site_v);
+        return arr;
+    }
 
     char tail[224];
     if (got_poly) {

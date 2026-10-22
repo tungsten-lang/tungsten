@@ -1413,6 +1413,18 @@ WValue w_media_mux_set(WValue mv, WValue keyv, WValue v) {
         m->chpl = v > 1;
         return W_NIL;
     }
+    if (!strcmp(k, "cancel")) {
+        /* abandon the file: stop the writer, delete what it wrote */
+        char path[4096], tmp[4200];
+        snprintf(path, sizeof path, "%s", m->path);
+        snprintf(tmp, sizeof tmp, "%s", m->tmp);
+        int started = m->started;
+        w_media_handle_drop(mv, W_MEDIA_KIND_MUX);
+        a_mux_free(m);
+        if (started) unlink(path);
+        unlink(tmp);
+        return W_TRUE;
+    }
     if (!strcmp(k, "chapters")) {
         int n = 0;
         AChapter *ch = a_chapters_from(v, &n, "Mux");

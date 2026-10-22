@@ -65,13 +65,14 @@ r = MediaVerify.check(TMP + "/ch.mov", chapters: late, tc_start: nil)
 check("MOV (PCM, no timecode): chapter track with a first chapter after frame 0 (empty edit)", passes(r))
 
 msg = nil
+mx = Mux.new(TMP + "/x.mp4", rate: [24, 1])
 begin
-  m = Mux.new(TMP + "/x.mp4", rate: [24, 1])
-  m.chapter("b", 10)
-  m.chapter("a", 5)
+  mx.chapter("b", 10)
+  mx.chapter("a", 5)
 rescue e
   msg = e.to_s
-check("chapters must ascend", msg != nil && msg.index("not after") != nil)
+mx.cancel
+check("chapters must ascend; Mux#cancel abandons a mux", msg != nil && msg.index("not after") != nil && !File.exist?(TMP + "/x.mp4"))
 
 MediaVerify.sync_test(TMP + "/plain.mp4", seconds: 4)
 n = Mux.chapterize(TMP + "/plain.mp4", TMP + "/plain_ch.mp4", [["Intro", 0], ["Middle", 48]])
@@ -134,18 +135,18 @@ check("Mux.chapterize refuses a file that already has chapters", msg != nil && m
 backends = Scaler.backends
 check("Scaler backends: cpu always, metal and vimage on this Mac", backends.include?("cpu") && backends.include?("metal") && backends.include?("vimage"))
 
-["lanczos3", "bicubic", "bilinear"].each ->(fl)
-  sc = Scaler.new(96, 54, 37, 20, filter: fl, backend: :cpu)
+["lanczos3", "bicubic", "bilinear"].each ->(flt)
+  wsc = Scaler.new(96, 54, 37, 20, filter: flt, backend: :cpu)
   ok = true
-  sc.weights(:x).each ->(row)
-    s = ~0.0
-    k = 1
-    while k < row.size
-      s = s + row[k]
-      k += 1
-    ok = false if (s - ~1.0).abs > ~0.000001
-  sc.free
-  check("[fl] weights sum to 1 on every output column", ok)
+  wsc.weights(:x).each ->(wrow)
+    ws = ~0.0
+    wk = 1
+    while wk < wrow.size
+      ws = ws + wrow[wk]
+      wk += 1
+    ok = false if (ws - ~1.0).abs > ~0.000001
+  wsc.free
+  check("[flt] weights sum to 1 on every output column", ok)
 
 src = ramp(64, 36)
 same = Scaler.new(64, 36, 64, 36, backend: :cpu).scale(src)
@@ -215,13 +216,13 @@ while i < 64
   row[i * 4 + 3] = 255
   i += 1
 out = Scaler.new(64, 1, 40, 1, backend: :cpu).scale(row)
-sc = ~64.0 / ~40.0
-xc = (~17.0 + ~0.5) * sc - ~0.5
+scl = ~64.0 / ~40.0
+xc = (~17.0 + ~0.5) * scl - ~0.5
 s = ~0.0
 wsum = ~0.0
-k = (xc - ~3.0 * sc).floor.to_i
-while k <= (xc + ~3.0 * sc).ceil.to_i
-  wt = lanczos((k.to_f - xc) / sc)
+k = (xc - ~3.0 * scl).floor.to_i
+while k <= (xc + ~3.0 * scl).ceil.to_i
+  wt = lanczos((k.to_f - xc) / scl)
   kk = k < 0 ? 0 : (k > 63 ? 63 : k)
   s = s + wt * row[kk * 4].to_f
   wsum = wsum + wt
@@ -288,10 +289,10 @@ img = ramp(1920, 1080)
   dh = sz[1]
   nb = dw * dh * 4
   c = Scaler.new(1920, 1080, dw, dh, backend: :cpu).scale(img)
-  m = Scaler.new(1920, 1080, dw, dh, backend: :metal).scale(img)
-  v = Scaler.new(1920, 1080, dw, dh, backend: :vimage).scale(img)
-  check("1920x1080 -> [dw]x[dh]: Metal = CPU within 1 code ([maxdiff(m, c, nb)])", maxdiff(m, c, nb) <= 1)
-  check("1920x1080 -> [dw]x[dh]: vImage's own Lanczos close to ours (RMS [(rms(v, c, nb) * ~100.0).round.to_f / ~100.0])", rms(v, c, nb) < ~2.5)
+  me = Scaler.new(1920, 1080, dw, dh, backend: :metal).scale(img)
+  vi = Scaler.new(1920, 1080, dw, dh, backend: :vimage).scale(img)
+  check("1920x1080 -> [dw]x[dh]: Metal = CPU within 1 code ([maxdiff(me, c, nb)])", maxdiff(me, c, nb) <= 1)
+  check("1920x1080 -> [dw]x[dh]: vImage's own Lanczos close to ours (RMS [(rms(vi, c, nb) * ~100.0).round.to_f / ~100.0])", rms(vi, c, nb) < ~2.5)
 msg = nil
 begin
   Scaler.new(1920, 1080, 1080, 1920, fit: :cover, backend: :vimage)
@@ -307,7 +308,7 @@ while k < 24
   enc.encode(src720)
   k += 1
 seg = enc.segment
-check("VideoEncoder source: [1280, 720] encodes 640x360 frames ([enc.stats[:scale_backend]])", seg.frames == 24 && seg.width == 640 && seg.height == 360)
+check("VideoEncoder source: \[1280, 720] encodes 640x360 frames ([enc.stats[:scale_backend]])", seg.frames == 24 && seg.width == 640 && seg.height == 360)
 seg.release
 enc.close
 
@@ -337,11 +338,11 @@ while b != nil
   b = dec.read
   k += 1
   if k % 48 == 0
-    s = enc.segment
-    p = TMP + "/seg[segs.size].hevc"
-    s.save(p)
-    s.release
-    segs << p
+    sg = enc.segment
+    sp = TMP + "/seg[segs.size].hevc"
+    sg.save(sp)
+    sg.release
+    segs << sp
 dec.close
 enc.close
 dec = VideoDecoder.new(segs, format: :nv12)
@@ -360,21 +361,21 @@ check("VideoDecoder over 5 segment files: 240 frames, flashes [fl]", lum.size ==
 
 # ---- transcodes ----
 r = Transcode.run(TMP + "/ch.mp4", TMP + "/a480.mp4", width: 854, height: 480, quality: ~0.7)
-v = MediaVerify.check(TMP + "/a480.mp4", sync: true, flashes: t[:flashes], chapters: chaps, tc_start: "01:00:00:00", frames: 240)
+vr = MediaVerify.check(TMP + "/a480.mp4", sync: true, flashes: t[:flashes], chapters: chaps, tc_start: "01:00:00:00", frames: 240)
 check("transcode Y'CbCr path 720p HEVC -> 480p H.264, AAC passthrough: chapters, tmcd, sync, colour all pass ([r[:duplicated]] repeated, [r[:dropped]] dropped)",
-      passes(v) && r[:duplicated] == 0 && r[:dropped] == 0 && r[:via] == "yuv")
+      passes(vr) && r[:duplicated] == 0 && r[:dropped] == 0 && r[:via] == "yuv")
 r = Transcode.run(TMP + "/ch.mp4", TMP + "/b480.mp4", width: 854, height: 480, via: :rgb, audio: :aac, audio_kbps: 128)
-v = MediaVerify.check(TMP + "/b480.mp4", sync: true, flashes: t[:flashes], chapters: chaps, tc_start: "01:00:00:00", frames: 240)
-check("transcode RGB path with AAC re-encode passes every check", passes(v) && r[:via] == "rgb")
+vr = MediaVerify.check(TMP + "/b480.mp4", sync: true, flashes: t[:flashes], chapters: chaps, tc_start: "01:00:00:00", frames: 240)
+check("transcode RGB path with AAC re-encode passes every check", passes(vr) && r[:via] == "rgb")
 r = Transcode.run(TMP + "/ch.mp4", TMP + "/range.mp4", start: 30, frames: 120, width: 640, height: 360)
-v = MediaVerify.check(TMP + "/range.mp4", sync: true, flashes: [30, 78], chapters: [["Second — π and Wolfenbüttel", 0]], tc_start: "01:00:01:06", frames: 120)
-check("a range (frames 30-149) shifts the flashes, clicks, chapters and timecode", passes(v))
+vr = MediaVerify.check(TMP + "/range.mp4", sync: true, flashes: [30, 78], chapters: [["Second — π and Wolfenbüttel", 0]], tc_start: "01:00:01:06", frames: 120)
+check("a range (frames 30-149) shifts the flashes, clicks, chapters and timecode", passes(vr))
 r = Transcode.run(segs, TMP + "/vert.mp4", rate: [24, 1], audio_src: t[:wav], preset: :vertical_pad, chapters: chaps)
-v = Transcode.check(TMP + "/vert.mp4", preset: :vertical_pad, sync: true, flashes: t[:flashes], chapters: chaps, tc_start: "00:00:00:00", frames: 240)
-check("segments + WAV -> vertical_pad (1080x1920 H.264, bars): every check and the preset's codec/level", passes(v))
+vr = Transcode.check(TMP + "/vert.mp4", preset: :vertical_pad, sync: true, flashes: t[:flashes], chapters: chaps, tc_start: "00:00:00:00", frames: 240)
+check("segments + WAV -> vertical_pad (1080x1920 H.264, bars): every check and the preset's codec/level", passes(vr))
 r = Transcode.run(TMP + "/ch.mp4", TMP + "/share.mp4", preset: :share)
-v = Transcode.check(TMP + "/share.mp4", preset: :share, sync: true, flashes: t[:flashes], chapters: chaps, tc_start: "01:00:00:00", frames: 240)
-check("share preset (1280x720 H.264 2.5 Mb/s, AAC 128k): every check, level within 4.0", passes(v))
+vr = Transcode.check(TMP + "/share.mp4", preset: :share, sync: true, flashes: t[:flashes], chapters: chaps, tc_start: "01:00:00:00", frames: 240)
+check("share preset (1280x720 H.264 2.5 Mb/s, AAC 128k): every check, level within 4.0", passes(vr))
 
 # ---- levels ----
 check("H.264 minimum levels: 720p30 3.1, 1080p30 4.0, 1080p60 4.2, 2160p30 5.1, 2160p60 5.2",
@@ -385,7 +386,7 @@ check("H.264 cannot hold 8K; HEVC 4320p30 needs level 6",
       Transcode.min_level("h264", 7680, 4320, [30, 1]) == nil && Transcode.min_level("hevc", 7680, 4320, [30, 1])[0] == "6")
 check("presets: the ladder 480p..4320p, verticals and share", Transcode.presets.keys.size == 10 && Transcode.preset("4k")[:width] == 3840 && Transcode.preset("8k")[:codec] == "hevc")
 
-st = VideoEncoder.stats
-check("no native leak (encoders, segments, muxes)", st[:encoders] == 0 && st[:segments] == 0 && st[:muxes] == 0)
+stats = VideoEncoder.stats
+check("no native leak (encoders, segments, muxes)", stats[:encoders] == 0 && stats[:segments] == 0 && stats[:muxes] == 0)
 OS.system("rm -rf " + TMP)
 << "ALL PASS media_transcode_spec ([passed.load()] checks)"

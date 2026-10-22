@@ -85,6 +85,10 @@
   -> chapters
     @chapters
 
+  # Abandon the file: the writer stops and what it wrote is deleted.
+  -> cancel
+    ccall("w_media_mux_set", @handle, "cancel", true)
+
   # Add chapters to an existing movie (no chapter track yet) without
   # re-encoding or re-muxing: the moov gets the chapter track (and chpl for
   # MP4) and moves to the front; the media data is copied once. rate:

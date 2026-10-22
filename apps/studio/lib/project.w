@@ -127,7 +127,7 @@ use resolve
       d = d + "  background(svg)\n  draw_" + mod + "(svg, db, t, len)\n  prog = Motion.clamp01(t / len)\n"
       d = d + "  if anim_id != \"title\"\n    svg.line(0, 1078, ~1920.0 * prog, 1078, {stroke: c_gold, width: 4, stroke_opacity: ~0.65})\n"
       d = d + "  dip = ~1.0 - sm(t, ~0.0, ~0.35) * (~1.0 - sm(t, len - ~0.38, ~0.35))\n  if dip > ~0.003\n    svg.rect(0, 0, 1920, 1080, {fill: c_bg, fill_opacity: dip})\n  svg.write_png(path)\n  0\n"
-    d = d + "\n-> main(args)\n  dir = args[0]\n  anim_id = args[1]\n  dur = args[2].to_f\n  first = args[3].to_i\n  last = args[4].to_i\n  outdir = args[5]\n"
+    d = d + "\n-> main(args)\n  dir = args\[0\]\n  anim_id = args\[1\]\n  dur = args\[2\].to_f\n  first = args\[3\].to_i\n  last = args\[4\].to_i\n  outdir = args\[5\]\n"
     d = d + "  db = load_db(dir, anim_id)\n  f = first\n  while f <= last\n    t = (f + ~0.0) / ~24.0\n"
     d = d + "    render_one(db, anim_id, t, dur, outdir + \"/\" + Motion.pad(f, 5) + \".png\")\n    f += 1\n  0\n\n"
     d = d + "args = \[\]\ni_arg = 0\nwhile i_arg < ARGV.size\n  if ARGV\[i_arg\] != \"--\"\n    args.push(ARGV\[i_arg\])\n  i_arg += 1\nmain(args)\n"

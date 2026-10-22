@@ -49,13 +49,22 @@ if args[0] == "--mux-only"
     sg = VideoSegment.load(fp)
     counts.push(sg.frames)
     sg.release
+  # Cycle through the full-length segments; a shorter one only ends the file.
+  longest = 0
+  counts.each ->(n)
+    longest = n if n > longest
+  full = []
+  j = 0
+  while j < counts.size
+    full.push(j) if counts[j] == longest
+    j += 1
   t0 = clock()
   mux = Mux.new(out, rate: rate, audio: flag(args, "--audio", nil), frames: total)
   done = 0
   k = 0
   appended = 0
   while done < total
-    idx = k % files.size
+    idx = full[k % full.size]
     if done + counts[idx] > total
       # find a segment that fits the remainder exactly
       idx = -1

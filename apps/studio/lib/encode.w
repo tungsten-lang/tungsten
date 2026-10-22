@@ -18,12 +18,20 @@ use render
   -> name
 
 + MediaSegmentEncoder < SegmentEncoder
+  # per_segment: a fresh VideoToolbox session for every segment. One session encoding several segments carries
+  # state across the forced IDRs, so the same frames can come out as different (equally good) bytes depending on
+  # what that session encoded before; a fresh session makes a segment a function of its frames alone.
   -> new(@w, @h, @num, @den, @codec, @quality)
-    @enc = VideoEncoder.new(@w, @h, {codec: @codec, rate: [@num, @den], quality: @quality, input: :rgb24})
+    @per_segment = env("STUDIO_VT_SESSION") != "shared"
+    @enc = nil
+    @enc = new_session() if !@per_segment
     @pending = nil
     @pending_path = nil
     @path = nil
     @n = 0
+
+  -> new_session
+    VideoEncoder.new(@w, @h, {codec: @codec, rate: [@num, @den], quality: @quality, input: :rgb24})
 
   -> name
     "videotoolbox-" + @codec.to_s
@@ -31,6 +39,7 @@ use render
   -> open(path, n)
     @path = path
     @n = n
+    @enc = new_session() if @per_segment
     self
 
   -> write(rgb)
@@ -43,6 +52,10 @@ use render
     ok = flush()
     @pending = seg
     @pending_path = @path
+    if @per_segment
+      ok = flush()
+      @enc.close
+      @enc = nil
     ok
 
   -> flush
@@ -58,7 +71,7 @@ use render
 
   -> finish
     ok = flush()
-    @enc.close
+    @enc.close if @enc != nil
     ok
 
 + FfmpegSegmentEncoder < SegmentEncoder
@@ -113,8 +126,10 @@ use render
     return {"backend" => "ffmpeg", "ext" => "mp4", "id" => "ffmpeg-libx264:crf18:medium:g48:closed:bt709-1-1-1:tv:left:yuv420p"}
   codec = get(e, "codec", "hevc")
   q = to_f(get(e, "quality", ~0.75))
+  sess = "session-per-segment"
+  sess = "shared-session" if env("STUDIO_VT_SESSION") == "shared"
   {"backend" => "videotoolbox", "codec" => codec, "quality" => q, "ext" => codec,
-   "id" => "vt:" + codec + ":q" + fixed6(q) + ":reorder:bt709-1-1-1:tv:left:420v"}
+   "id" => "vt:" + codec + ":q" + fixed6(q) + ":reorder:bt709-1-1-1:tv:left:420v:" + sess}
 
 -> make_encoder(r, spec, fifo)
   if spec["backend"] == "ffmpeg"

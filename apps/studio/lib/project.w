@@ -3,9 +3,10 @@
 
 use base
 use resolve
+use encode
 
 + Project
-  ro :ep, :path, :dir, :root, :build, :cut, :resolved, :asset_sha
+  ro :ep, :path, :dir, :root, :build, :cut, :resolved, :asset_sha, :encoder
 
   -> new(@path, @cut)
     @path = File.expand_path(@path)
@@ -16,6 +17,9 @@ use resolve
     mkdir_p(@build + "/" + @cut)
     @asset_sha = {}
     @resolved = nil
+    @encoder = encoder_spec(@ep["cuts"][@cut])
+    ENCODER["id"] = @encoder["id"]
+    SEGMENT_EXT["ext"] = @encoder["ext"]
 
   -> asset_path(key)
     a = @ep["assets"][key]
@@ -178,8 +182,17 @@ use resolve
     @resolved = r.resolve
     @resolved
 
+  # Outputs of this document under build/<cut>/: episode.json writes timeline.resolved.json, mix.wav, master.mp4;
+  # a variant (edit.json) writes edit.timeline.resolved.json, edit.mix.wav, ... and shares the segment cache.
+  -> out_path(name)
+    stem = base_of(@path)
+    stem = stem.slice(0, stem.size - 5) if stem.ends_with?(".json")
+    pre = ""
+    pre = stem + "." if stem != "episode"
+    @build + "/" + @cut + "/" + pre + name
+
   -> resolved_path
-    @build + "/" + @cut + "/timeline.resolved.json"
+    out_path("timeline.resolved.json")
 
   -> write_resolved(path)
     write_text(path, resolved_json(@resolved))

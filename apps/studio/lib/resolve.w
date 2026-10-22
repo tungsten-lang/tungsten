@@ -15,8 +15,8 @@ SEG_MAX = 48
 COMPOSITOR = 3
 # Renderer versions, per kind: bump one when its pixels change, and only that kind's segments re-render.
 RENDERER = {"still" => 3, "clip" => 3, "frames" => 1, "program" => 1, "card" => 2, "black" => 1, "group" => 3, "fade_out" => 1}
-# Encoder settings in force (the segment key covers them).
-ENCODER_ID = "ffmpeg-libx264:crf18:medium:g48:closed:bt709-1-1-1:tv:left:yuv420p"
+# Encoder settings in force (the segment key covers them): set from encoder_spec by the project.
+ENCODER = {"id" => "vt:hevc:q0.750000:reorder:bt709-1-1-1:tv:left:420v"}
 
 # Normalise a word as tools/cues.py does: lower case, keep only a-z0-9.
 -> norm_word(w)
@@ -211,7 +211,7 @@ ENCODER_ID = "ffmpeg-libx264:crf18:medium:g48:closed:bt709-1-1-1:tv:left:yuv420p
     @out = {"schema" => "studio.resolved/1", "episode" => @ep["id"], "cut" => @cut_name,
             "rate" => [@num, @den], "sr" => @sr, "w" => @cut["w"], "h" => @cut["h"],
             "tc_start" => get(@cut, "tc_start", "00:00:00:00"), "frames" => @frames, "samples" => total_samples,
-            "end_ms" => end_ms, "seed" => @seed, "encoder" => ENCODER_ID,
+            "end_ms" => end_ms, "seed" => @seed, "encoder" => ENCODER["id"],
             "tracks" => [{"id" => "V1", "kind" => "video", "items" => v1},
                          {"id" => "V4", "kind" => "video", "role" => "fades", "items" => v4},
                          {"id" => "A1", "kind" => "audio", "role" => "narration", "items" => a1},
@@ -459,7 +459,7 @@ ENCODER_ID = "ffmpeg-libx264:crf18:medium:g48:closed:bt709-1-1-1:tv:left:yuv420p
       s = a
       while s < b
         n = [SEG_MAX, b - s].min
-        parts = [ENCODER_ID, COMPOSITOR, @cut["w"], @cut["h"], @num, @den, n]
+        parts = [ENCODER["id"], COMPOSITOR, @cut["w"], @cut["h"], @num, @den, n]
         names = []
         x[2].each ->(e)
           it = entry_item(e)

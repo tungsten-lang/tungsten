@@ -201,7 +201,8 @@ use audio
     w = @r["w"]
     h = @r["h"]
     fmt = "<format id=\"r1\""
-    fmt = fmt + " name=\"FFVideoFormat" + h.to_s + "p" + fps_i.to_s + "\"" if @den == 1
+    # Final Cut's own name only for its standard 16:9 sizes; other sizes are described by their attributes alone
+    fmt = fmt + " name=\"FFVideoFormat" + h.to_s + "p" + fps_i.to_s + "\"" if @den == 1 && w * 9 == h * 16
     fmt = fmt + " frameDuration=\"" + fx_rat(@den, @num) + "\" width=\"" + w.to_s + "\" height=\"" + h.to_s + "\" colorSpace=\"1-1-1 (Rec. 709)\"/>"
     lines = []
     lines.push("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")

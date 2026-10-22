@@ -21,7 +21,7 @@ use render
   # per_segment: a fresh VideoToolbox session for every segment. One session encoding several segments carries
   # state across the forced IDRs, so the same frames can come out as different (equally good) bytes depending on
   # what that session encoded before; a fresh session makes a segment a function of its frames alone.
-  -> new(@w, @h, @num, @den, @codec, @quality)
+  -> new(@w, @h, @num, @den, @codec, @quality, @bitrate)
     @per_segment = env("STUDIO_VT_SESSION") != "shared"
     @enc = nil
     @enc = new_session() if !@per_segment
@@ -31,6 +31,7 @@ use render
     @n = 0
 
   -> new_session
+    return VideoEncoder.new(@w, @h, {codec: @codec, rate: [@num, @den], bitrate: @bitrate, input: :rgb24}) if @bitrate != nil
     VideoEncoder.new(@w, @h, {codec: @codec, rate: [@num, @den], quality: @quality, input: :rgb24})
 
   -> name
@@ -128,13 +129,18 @@ use render
   q = to_f(get(e, "quality", ~0.75))
   sess = "session-per-segment"
   sess = "shared-session" if env("STUDIO_VT_SESSION") == "shared"
+  # a target bitrate (bits per second, averaged over each segment) instead of constant quality
+  br = get(e, "bitrate", nil)
+  if br != nil
+    return {"backend" => "videotoolbox", "codec" => codec, "quality" => q, "bitrate" => br, "ext" => codec,
+            "id" => "vt:" + codec + ":b" + br.to_s + ":reorder:bt709-1-1-1:tv:left:420v:" + sess}
   {"backend" => "videotoolbox", "codec" => codec, "quality" => q, "ext" => codec,
    "id" => "vt:" + codec + ":q" + fixed6(q) + ":reorder:bt709-1-1-1:tv:left:420v:" + sess}
 
 -> make_encoder(r, spec, fifo)
   if spec["backend"] == "ffmpeg"
     return FfmpegSegmentEncoder.new(r["w"], r["h"], r["rate"][0], r["rate"][1], fifo)
-  MediaSegmentEncoder.new(r["w"], r["h"], r["rate"][0], r["rate"][1], spec["codec"], spec["quality"])
+  MediaSegmentEncoder.new(r["w"], r["h"], r["rate"][0], r["rate"][1], spec["codec"], spec["quality"], get(spec, "bitrate", nil))
 
 # STUDIO_SEGMENTS overrides the cache directory (benchmarks render a span fresh without touching the cache).
 -> segment_dir(build)

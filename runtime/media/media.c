@@ -305,71 +305,72 @@ static inline void m_chroma_exact(const MConv *c, const MTaps *ht, const MTaps *
 /* ---- fixed point with an exact fallback near rounding ties ----
  *
  * code = floor(Y* + 1/2) where Y* = Ys (kr r' + kg g' + kb b') + Yo. In
- * 2^-30 fixed point, v = cR r + cG g + cB b + O with each coefficient rounded,
- * so |v - (Y* + 1/2) 2^30| <= (r + g + b + 1) / 2 + tiny <= 384. The double
- * reference is within ~1e-13 of Y*. Where v's fraction is at least GUARD
- * (2^12) from a multiple of 2^30 both round the same way; otherwise the
- * sample is recomputed with the reference arithmetic. Chroma: the tap sums
- * are integers S (weights scaled to integers summing to D), Cb* =
- * Cs ((1 - kb) Sb - kr Sr - kg Sg) / (cbd D 255) + Co, coefficient error
- * <= (Sr + Sg + Sb + 1) / 2 <= 6200 units, GUARD 2^15. About one sample in
- * 10^5 takes the exact path. */
+ * 2^-22 fixed point, v = cR r + cG g + cB b + O (32-bit, so four lanes a
+ * vector), each coefficient rounded, so |v - (Y* + 1/2) 2^22| <= (r + g + b
+ * + 1) / 2 + tiny <= 384. The double reference is within ~1e-13 of Y*. Where
+ * v's fraction is at least YGUARD (2^10) from a multiple of 2^22 both round
+ * the same way; otherwise the sample is recomputed with the reference
+ * arithmetic. Chroma: the tap sums are integers S (weights scaled to integers
+ * summing to D), Cb* = Cs ((1 - kb) Sb - kr Sr - kg Sg) / (cbd D 255) + Co,
+ * computed modulo 2^32 (the result is positive and below 2^32), coefficient
+ * error <= (Sr + Sg + Sb + 1) / 2 <= 6200 units, CGUARD 2^13. Roughly one
+ * luma sample in 2000 and one chroma sample in 250 take the exact path. */
 
-#define M_FIX 30
-#define M_FIX_MASK ((1ull << M_FIX) - 1)
-#define M_YGUARD (1ull << 12)
-#define M_CGUARD (1ull << 15)
+#define M_FIX 22
+#define M_FIX_MASK ((1u << M_FIX) - 1)
+#define M_YGUARD (1u << 10)
+#define M_CGUARD (1u << 13)
 
 typedef struct {
-    uint32_t yr, yg, yb;                /* luma, per code value */
-    uint64_t yo;
-    uint32_t cbb, cbr, cbg, crr, crg, crb;   /* chroma, per unit of tap sum */
-    uint64_t co;
+    uint32_t yr, yg, yb, yo;                     /* luma, per code value */
+    uint32_t cbb, cbr, cbg, crr, crg, crb, co;   /* chroma, per unit of tap sum */
     int D;
 } MFix;
 
-static uint64_t m_fixc(double v) { return (uint64_t)llround(v * (double)(1ull << M_FIX)); }
+static uint32_t m_fixc(double v) { return (uint32_t)llround(v * (double)(1u << M_FIX)); }
 
 static void m_fix_init(const MConv *c, int D, MFix *f) {
     double m = c->bits == 8 ? 1.0 : 4.0;
     double ys = 219.0 * m, yo = 16.0 * m, cs = 224.0 * m, co = 128.0 * m;
-    f->yr = (uint32_t)m_fixc(ys * g_kr / 255.0);
-    f->yg = (uint32_t)m_fixc(ys * g_kg / 255.0);
-    f->yb = (uint32_t)m_fixc(ys * g_kb / 255.0);
+    f->yr = m_fixc(ys * g_kr / 255.0);
+    f->yg = m_fixc(ys * g_kg / 255.0);
+    f->yb = m_fixc(ys * g_kb / 255.0);
     f->yo = m_fixc(yo + 0.5);
     double cbd = 2.0 * (1.0 - g_kb), crd = 2.0 * (1.0 - g_kr);
     double u = 255.0 * (double)D;
-    f->cbb = (uint32_t)m_fixc(cs * (1.0 - g_kb) / (cbd * u));
-    f->cbr = (uint32_t)m_fixc(cs * g_kr / (cbd * u));
-    f->cbg = (uint32_t)m_fixc(cs * g_kg / (cbd * u));
-    f->crr = (uint32_t)m_fixc(cs * (1.0 - g_kr) / (crd * u));
-    f->crg = (uint32_t)m_fixc(cs * g_kg / (crd * u));
-    f->crb = (uint32_t)m_fixc(cs * g_kb / (crd * u));
+    f->cbb = m_fixc(cs * (1.0 - g_kb) / (cbd * u));
+    f->cbr = m_fixc(cs * g_kr / (cbd * u));
+    f->cbg = m_fixc(cs * g_kg / (cbd * u));
+    f->crr = m_fixc(cs * (1.0 - g_kr) / (crd * u));
+    f->crg = m_fixc(cs * g_kg / (crd * u));
+    f->crb = m_fixc(cs * g_kb / (crd * u));
     f->co = m_fixc(co + 0.5);
     f->D = D;
 }
 
-static inline int m_near_tie(uint64_t v, uint64_t guard) {
-    uint64_t fr = v & M_FIX_MASK;
-    return fr < guard || fr > M_FIX_MASK - guard;
-}
+/* 1 when v's fraction lies within guard of a multiple of 2^M_FIX. */
+#define M_TIE(v, guard) ((uint8_t)((((v) & M_FIX_MASK) - (guard)) > (M_FIX_MASK - 2 * (guard))))
 
 /* The fixed-point luma loop for one layout; the constant byte offsets let
- * the compiler vectorize it (ld3/ld4 + widening multiplies). Returns
- * nonzero when some pixel of the row lies near a tie. */
-#define M_LUMA_LOOP(NAME, BPP, RO, GO, BO)                                                    \
-    static uint64_t NAME(const uint8_t *s, int w, const MFix *f, uint8_t *o8, uint16_t *o16) {  \
-        uint64_t tie = 0;                                                                     \
-        uint32_t yr = f->yr, yg = f->yg, yb = f->yb;                                          \
-        uint64_t yo = f->yo;                                                                  \
-        for (int x = 0; x < w; x++) {                                                         \
-            const uint8_t *p = s + (size_t)x * BPP;                                           \
-            uint64_t v = (uint64_t)yr * p[RO] + (uint64_t)yg * p[GO] + (uint64_t)yb * p[BO] + yo; \
-            if (o8) o8[x] = (uint8_t)(v >> M_FIX);                                            \
-            else o16[x] = (uint16_t)((v >> M_FIX) << 6);                                      \
-            tie |= (uint64_t)(((v & M_FIX_MASK) - M_YGUARD) > (M_FIX_MASK - 2 * M_YGUARD));   \
-        }                                                                                     \
-        return tie;                                                                           \
+ * the compiler vectorize it. tie[x] flags the pixels to redo exactly. */
+#define M_LUMA_LOOP(NAME, BPP, RO, GO, BO)                                                            \
+    static void NAME(const uint8_t *s, int w, const MFix *f, uint8_t *o8, uint16_t *o16, uint8_t *tie) { \
+        uint32_t yr = f->yr, yg = f->yg, yb = f->yb, yo = f->yo;                                      \
+        if (o8) {                                                                                     \
+            for (int x = 0; x < w; x++) {                                                             \
+                const uint8_t *p = s + (size_t)x * BPP;                                               \
+                uint32_t v = yr * p[RO] + yg * p[GO] + yb * p[BO] + yo;                               \
+                o8[x] = (uint8_t)(v >> M_FIX);                                                        \
+                tie[x] = M_TIE(v, M_YGUARD);                                                          \
+            }                                                                                         \
+        } else {                                                                                      \
+            for (int x = 0; x < w; x++) {                                                             \
+                const uint8_t *p = s + (size_t)x * BPP;                                               \
+                uint32_t v = yr * p[RO] + yg * p[GO] + yb * p[BO] + yo;                               \
+                o16[x] = (uint16_t)((v >> M_FIX) << 6);                                               \
+                tie[x] = M_TIE(v, M_YGUARD);                                                          \
+            }                                                                                         \
+        }                                                                                             \
     }
 M_LUMA_LOOP(m_luma_rgba, 4, 0, 1, 2)
 M_LUMA_LOOP(m_luma_bgra, 4, 2, 1, 0)
@@ -378,24 +379,32 @@ M_LUMA_LOOP(m_luma_rgb24, 3, 0, 1, 2)
 M_LUMA_LOOP(m_luma_bgr24, 3, 2, 1, 0)
 #undef M_LUMA_LOOP
 
+/* Index of the next nonzero flag at or after x (n when none), 8 at a time. */
+static inline int m_next_flag(const uint8_t *t, int x, int n) {
+    while (x < n && ((uintptr_t)(t + x) & 7)) { if (t[x]) return x; x++; }
+    while (x + 8 <= n) {
+        uint64_t q;
+        memcpy(&q, t + x, 8);
+        if (q) break;
+        x += 8;
+    }
+    while (x < n && !t[x]) x++;
+    return x;
+}
+
 /* One luma row: fixed point, then the rare near-tie pixels exactly. */
-static void m_luma_row(const MConv *c, const MFix *f, int y) {
+static void m_luma_row(const MConv *c, const MFix *f, int y, uint8_t *tie) {
     const uint8_t *s = c->src + (size_t)y * c->sstride;
     int w = c->w;
     uint8_t *o8 = c->bits == 8 ? c->yp + (size_t)y * c->ystride : NULL;
     uint16_t *o16 = c->bits == 8 ? NULL : (uint16_t *)(void *)(c->yp + (size_t)y * c->ystride);
-    uint64_t tie;
-    if (c->bpp == 4 && c->ro == 0) tie = m_luma_rgba(s, w, f, o8, o16);
-    else if (c->bpp == 4 && c->ro == 2) tie = m_luma_bgra(s, w, f, o8, o16);
-    else if (c->bpp == 4) tie = m_luma_argb(s, w, f, o8, o16);
-    else if (c->ro == 0) tie = m_luma_rgb24(s, w, f, o8, o16);
-    else tie = m_luma_bgr24(s, w, f, o8, o16);
-    if (!tie) return;
-    for (int x = 0; x < w; x++) {
-        const uint8_t *p = s + (size_t)x * (size_t)c->bpp;
-        uint64_t v = (uint64_t)f->yr * p[c->ro] + (uint64_t)f->yg * p[c->go] + (uint64_t)f->yb * p[c->bo] + f->yo;
-        if (!m_near_tie(v, M_YGUARD)) continue;
-        int code = m_luma_exact(c, p);
+    if (c->bpp == 4 && c->ro == 0) m_luma_rgba(s, w, f, o8, o16, tie);
+    else if (c->bpp == 4 && c->ro == 2) m_luma_bgra(s, w, f, o8, o16, tie);
+    else if (c->bpp == 4) m_luma_argb(s, w, f, o8, o16, tie);
+    else if (c->ro == 0) m_luma_rgb24(s, w, f, o8, o16, tie);
+    else m_luma_bgr24(s, w, f, o8, o16, tie);
+    for (int x = m_next_flag(tie, 0, w); x < w; x = m_next_flag(tie, x + 1, w)) {
+        int code = m_luma_exact(c, s + (size_t)x * (size_t)c->bpp);
         if (o8) o8[x] = (uint8_t)code;
         else o16[x] = (uint16_t)(code << 6);
     }
@@ -439,10 +448,11 @@ static void m_conv_band(void *ctx, size_t band) {
     int bpp = c->bpp, ro = c->ro, go = c->go, bo = c->bo, w = c->w;
     int left420 = vt.n == 2 && ht.n == 3, left422 = vt.n == 1 && ht.n == 3;
     uint32_t *Sr = malloc(sizeof(uint32_t) * (size_t)cw * 3), *Sg = Sr + cw, *Sb = Sg + cw;
+    uint8_t *tie = malloc((size_t)w + 16);
     for (int j = j0; j < j1; j++) {
         for (int k = 0; k < c->vsub; k++) {
             int y = j * c->vsub + k;
-            if (y < c->h) m_luma_row(c, &f, y);
+            if (y < c->h) m_luma_row(c, &f, y, tie);
         }
         /* integer tap sums */
         if (left420 || left422) {
@@ -489,25 +499,32 @@ static void m_conv_band(void *ctx, size_t band) {
             }
         }
         uint8_t *o8 = c->cp + (size_t)j * c->cstride;
-        uint64_t tie = 0;
-        for (int i = 0; i < cw; i++) {
-            uint64_t vb = f.co + (uint64_t)f.cbb * Sb[i] - (uint64_t)f.cbr * Sr[i] - (uint64_t)f.cbg * Sg[i];
-            uint64_t vr = f.co + (uint64_t)f.crr * Sr[i] - (uint64_t)f.crg * Sg[i] - (uint64_t)f.crb * Sb[i];
-            m_put_c(c, o8, i, (int)(vb >> M_FIX), (int)(vr >> M_FIX));
-            tie |= (uint64_t)(((vb & M_FIX_MASK) - M_CGUARD) > (M_FIX_MASK - 2 * M_CGUARD));
-            tie |= (uint64_t)(((vr & M_FIX_MASK) - M_CGUARD) > (M_FIX_MASK - 2 * M_CGUARD));
-        }
-        if (tie)
+        uint32_t co = f.co, cbb = f.cbb, cbr = f.cbr, cbg = f.cbg, crr = f.crr, crg = f.crg, crb = f.crb;
+        if (c->bits == 8) {
             for (int i = 0; i < cw; i++) {
-                uint64_t vb = f.co + (uint64_t)f.cbb * Sb[i] - (uint64_t)f.cbr * Sr[i] - (uint64_t)f.cbg * Sg[i];
-                uint64_t vr = f.co + (uint64_t)f.crr * Sr[i] - (uint64_t)f.crg * Sg[i] - (uint64_t)f.crb * Sb[i];
-                if (m_near_tie(vb, M_CGUARD) || m_near_tie(vr, M_CGUARD)) {
-                    int cb, cr;
-                    m_chroma_exact(c, &ht, &vt, i, j, &cb, &cr);
-                    m_put_c(c, o8, i, cb, cr);
-                }
+                uint32_t vb = co + cbb * Sb[i] - cbr * Sr[i] - cbg * Sg[i];
+                uint32_t vr = co + crr * Sr[i] - crg * Sg[i] - crb * Sb[i];
+                o8[2 * i] = (uint8_t)(vb >> M_FIX);
+                o8[2 * i + 1] = (uint8_t)(vr >> M_FIX);
+                tie[i] = M_TIE(vb, M_CGUARD) | M_TIE(vr, M_CGUARD);
             }
+        } else {
+            uint16_t *o16 = (uint16_t *)(void *)o8;
+            for (int i = 0; i < cw; i++) {
+                uint32_t vb = co + cbb * Sb[i] - cbr * Sr[i] - cbg * Sg[i];
+                uint32_t vr = co + crr * Sr[i] - crg * Sg[i] - crb * Sb[i];
+                o16[2 * i] = (uint16_t)((vb >> M_FIX) << 6);
+                o16[2 * i + 1] = (uint16_t)((vr >> M_FIX) << 6);
+                tie[i] = M_TIE(vb, M_CGUARD) | M_TIE(vr, M_CGUARD);
+            }
+        }
+        for (int i = m_next_flag(tie, 0, cw); i < cw; i = m_next_flag(tie, i + 1, cw)) {
+            int cb, cr;
+            m_chroma_exact(c, &ht, &vt, i, j, &cb, &cr);
+            m_put_c(c, o8, i, cb, cr);
+        }
     }
+    free(tie);
     free(Sr);
 }
 

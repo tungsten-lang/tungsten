@@ -11,8 +11,9 @@
 # Checks (each one {name:, ok:, detail:}):
 #   video     one video track, one sample description, every sample read
 #   cfr       every sample lasts den/num s exactly; nominal rate matches
-#   pts       sorted PTS are exactly frame x den/num (integers in the track
-#             timescale), starting at 0
+#   pts       sorted presentation times (sample PTS through the track's edit
+#             list) are exactly frame x den/num, integers in the track
+#             timescale, starting at 0
 #   frames    the frame count (when frames: is given)
 #   timecode  a tmcd track associated with the video, starting at tc_start,
 #             drop-frame flag and frame quanta right for the rate, spanning
@@ -91,8 +92,14 @@
     first_bad = -1
     pts = f[:pts]
     first_pts = nil
+    shift = f[:video_edit_offset] == nil ? 0 : f[:video_edit_offset]
     if pts != nil && ticks > 0
       sorted = pts.sort
+      if shift != 0
+        k = 0
+        while k < sorted.size
+          sorted[k] = sorted[k] + shift
+          k += 1
       first_pts = sorted.size > 0 ? sorted[0] : nil
       i = 0
       while i < sorted.size
@@ -100,7 +107,7 @@
           bad_pts += 1
           first_bad = i if first_bad < 0
         i += 1
-    pdetail = "[frames] PTS checked against frame x [ticks]/[ts]: [bad_pts] off"
+    pdetail = "[frames] PTS (through the edit list, [shift] ticks) checked against frame x [ticks]/[ts]: [bad_pts] off"
     pdetail = pdetail + " (first at sample [first_bad]; the first PTS is [first_pts] ticks)" if first_bad >= 0
     pdetail = pdetail + ", [f[:inexact_times]] not representable in the track timescale" if f[:inexact_times] != nil && f[:inexact_times] > 0
     checks << {name: "pts", ok: ticks > 0 && bad_pts == 0 && f[:inexact_times] == 0 && frames > 0, detail: pdetail}
@@ -280,7 +287,7 @@
   # click (a 9-sample raised-cosine peak) at the first audio sample of each
   # flash frame. Options: rate ([24, 1]), seconds (10), width (1280), height
   # (720), codec (:h264), quality (0.8), gop (48), audio_codec, tc_start
-  # ("00:00:00:00"), wav (path.wav), promise (true: tell the mux the frame
+  # ("00:00:00:00"), wav (path.wav), reorder (the encoder's default), promise (true: tell the mux the frame
   # count up front). Returns {path:, frames:, flashes:,
   # clicks:, sample_rate:, wav:, mux:}.
   -> .sync_test(path, opts = {})
@@ -308,7 +315,7 @@
     media_paint(dark, w, h, 0, bars)
     media_paint(lit, w, h, 255, bars)
     enc = VideoEncoder.new(w, h, codec: MediaVerify.opt(opts, :codec, "h264"), rate: rate, gop: gop,
-                           quality: MediaVerify.opt(opts, :quality, ~0.8))
+                           quality: MediaVerify.opt(opts, :quality, ~0.8), reorder: MediaVerify.opt(opts, :reorder, nil))
     segs = []
     k = 0
     f = 0

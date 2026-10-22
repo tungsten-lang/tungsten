@@ -694,7 +694,10 @@ static void a_mux_start(AMux *m, WMediaSegment *s) {
     m->fourcc = s->fourcc;
     m->width = s->width;
     m->height = s->height;
+    /* Reserve the DTS delay up front: later segments may reorder deeper
+     * than the first (a 1-frame segment needs none). */
     m->delay = s->reorder;
+    if ((s->flags & W_MEDIA_SEG_REORDER) && m->delay < W_MEDIA_REORDER_DELAY) m->delay = W_MEDIA_REORDER_DELAY;
     m->video = [[AVAssetWriterInput alloc] initWithMediaType:AVMediaTypeVideo outputSettings:nil sourceFormatHint:m->vfmt];
     m->video.expectsMediaDataInRealTime = NO;
     m->video.mediaTimeScale = m->ts;
@@ -821,7 +824,7 @@ WValue w_media_mux_append(WValue mv, WValue sv) {
         else if (!a_fmt_compatible(m->vfmt, (CMFormatDescriptionRef)s->format))
             a_mux_fail(m, "segment at frame %lld was encoded with different settings (codec, size, colour or parameter sets differ from the first segment); re-encode it with the master's settings", (long long)m->frames);
         if (s->reorder > m->delay)
-            a_mux_fail(m, "segment at frame %lld needs a DTS delay of %d frames, more than the first segment's %d", (long long)m->frames, (int)s->reorder, (int)m->delay);
+            a_mux_fail(m, "segment at frame %lld needs a DTS delay of %d frames, more than the %d this file reserved (from its first segment)", (long long)m->frames, (int)s->reorder, (int)m->delay);
         /* decode-order sorted PTS, for DTS = sorted - delay */
         int32_t *sorted = malloc(sizeof(int32_t) * (size_t)s->n);
         for (int i = 0; i < s->n; i++) sorted[i] = s->s[i].pts;
@@ -993,6 +996,16 @@ WValue w_media_probe(WValue pathv, WValue samplesv, WValue audiov) {
             out = w_array_push(out, a_pair("video_start", a_time(v.timeRange.start)));
             out = w_array_push(out, a_pair("video_duration", a_time(v.timeRange.duration)));
             out = w_array_push(out, a_pair("video_edits", w_int((int64_t)v.segments.count)));
+            /* Passthrough reads report media-time PTS; the first edit maps
+             * them to the presentation timeline (B-frame files start their
+             * media at the DTS delay). */
+            int64_t edit_offset = 0;
+            if (v.segments.count >= 1) {
+                CMTimeMapping tm = v.segments.firstObject.timeMapping;
+                CMTime d = CMTimeSubtract(tm.target.start, tm.source.start);
+                edit_offset = CMTimeConvertScale(d, v.naturalTimeScale, kCMTimeRoundingMethod_Default).value;
+            }
+            out = w_array_push(out, a_pair("video_edit_offset", w_int(edit_offset)));
             out = w_array_push(out, a_pair("timecode_associated", w_int((int64_t)[v associatedTracksOfType:AVTrackAssociationTypeTimecode].count)));
             if (fd) {
                 uint32_t sub = CMFormatDescriptionGetMediaSubType(fd);

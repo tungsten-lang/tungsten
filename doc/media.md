@@ -76,6 +76,7 @@ that rounds to the nearest frame is `705600000 · den / 2`, which is `num · FPF
 | `gop` | 48 | keyframe backstop for segments longer than this |
 | `input` | `:rgba` | `:rgba`, `:bgra`, `:argb`, `:rgb24`, `:bgr24` |
 | `siting` | `:left` | 4:2:0/4:2:2 chroma siting: `:left`, `:center`, `:topleft` |
+| `reorder` | true | B-frames inside a segment (H.264/HEVC); false keeps decode order = presentation order |
 | `speed` | false | ask VideoToolbox to favour speed over quality |
 
 | Call | Does |
@@ -94,10 +95,19 @@ Frames are R'G'B' code values. They are converted to Y'CbCr in
 `runtime/media/media.c`, not inside VideoToolbox, so the matrix, range and
 siting are explicit: the BT.709 matrix (Kr 0.2126, Kb 0.0722), limited range
 (8-bit Y' 16-235, C 16-240; 10-bit 64-940, 64-960), chroma filtered `[1 2 1]/4`
-on co-sited axes and `[1 1]/2` on midway axes. The arithmetic is `core/ycbcr.w`'s,
-operation for operation in double precision, so the planes are bit-for-bit
-`YuvFrame.from_rgba(...)` (checked in `spec/core/media_spec.w`). H.264 and HEVC
-take 4:2:0 (`420v`, or `x420` for `:hevc10`); ProRes takes 10-bit 4:2:2 (`x422`).
+on co-sited axes and `[1 1]/2` on midway axes. H.264 and HEVC take 4:2:0
+(`420v`, or `x420` for `:hevc10`); ProRes takes 10-bit 4:2:2 (`x422`).
+
+The planes are bit-for-bit `YuvFrame.from_rgba(...)` as the compiled engine
+computes it. Codes are computed in 2^-30 fixed point (about 0.5 ms of wall
+time, 2-3 ms of CPU, per 1080p frame); a sample whose fixed-point value lies
+within a guard band of a rounding tie (far wider than the fixed-point error
+bound; about one sample in 10^5) is recomputed with `core/ycbcr.w`'s double
+arithmetic. `spec/core/media_spec.w` checks a frame holding every 8-bit RGB
+triple. Note that compiled Tungsten fuses `a * b + c` in typed float code into
+a fused multiply-add and the interpreter does not, so the two engines'
+`YuvFrame` can differ by one code on such near-tie inputs; the converter
+follows the compiled engine.
 
 The pixel buffers, the session and the format description carry BT.709
 primaries, transfer and matrix (1/1/1), limited range and the chroma
@@ -109,8 +119,11 @@ luma shift (red: BT.709 Y'CbCr 63/102/240, BT.601 81/90/240).
 ### Segments and parameter sets
 
 A segment is one closed GOP: the first frame is a forced IDR (H.264 NAL 5,
-HEVC IDR_N_LP), and frames are never reordered (no B-frames), so decode order
-is presentation order and nothing refers across a segment boundary. Frames are
+HEVC IDR_N_LP), and B-frames (`reorder: true`, the default) only reorder frames
+inside it, so nothing refers across a segment boundary. With reordering the
+keyframe backstop doubles to 2 × `gop`, because VideoToolbox plans keyframes a
+mini-GOP ahead and would otherwise add one a few frames before each forced
+IDR. Frames are
 encoded asynchronously: `segment` returns at once, and the first use of the
 segment (`frames`, `save`, `Mux#append`) waits for its samples. Keep encoding
 the next segment before saving the previous one to keep the hardware busy.
@@ -161,6 +174,11 @@ audio_source_samples:, video_bytes:, file_bytes:}`.
   frame), 25 uses 25000, 24000/1001 uses 24000 (1001 ticks), 30000/1001 and
   60000/1001 use 30000 and 60000. Every sample lasts exactly one frame, so the
   file is constant frame rate with exact timestamps.
+- **B-frames.** Decode timestamps are the segment's sorted PTS minus a delay
+  fixed for the whole file (4 frames when the first segment was encoded with
+  reordering, enough for VideoToolbox's B-pyramid, whose measured depth is 2),
+  so DTS rise monotonically across segments of any length; AVAssetWriter
+  stores the shift as an edit list, which players and `MediaVerify` apply.
 - **Audio.** The WAV is fed in 100 ms buffers interleaved with the video and
   padded with silence or trimmed to exactly `Timecode.samples(frames, rate,
   wav_rate)` samples. AVAssetWriter's AAC edit list hides the encoder priming
@@ -188,7 +206,7 @@ when absent), `frames`, `tc_start` (nil: no timecode expected), `drop`, `audio`
 | --- | --- |
 | video | one video track, one sample description, every sample read |
 | cfr | every sample lasts den/num s exactly; the nominal rate matches |
-| pts | the sorted PTS are exactly `frame × ticks`, from 0, all representable |
+| pts | the sorted presentation times (sample PTS through the edit list) are exactly `frame × ticks`, from 0, all representable |
 | frames | the count equals `frames:` |
 | timecode | one `tmcd` track associated with the video, starting at `tc_start`, drop flag and quanta right for the rate, spanning every frame |
 | audio | audio starts at 0, lasts as long as the video, decodes to exactly `Timecode.samples(frames)` samples |

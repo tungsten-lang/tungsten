@@ -6,13 +6,15 @@
 #
 # Checks: the RGB -> Y'CbCr converter is bit-for-bit YuvFrame (BT.709,
 # limited range, each siting, 8 and 10 bits, 4:2:0 and 4:2:2, RGBA/BGRA/RGB24
-# input); a segment starts with an IDR and never reorders; two encoders with
+# input, every 8-bit RGB triple); a segment starts with an IDR and B-frames
+# stay inside it; two encoders with
 # equal settings emit byte-identical parameter sets, so their segments share
 # one sample description; segment files round-trip; masters at 24, 24000/1001
 # and 30000/1001 (drop-frame tmcd) in MP4/AAC and MOV/PCM pass every
 # MediaVerify check, including the flash/click sync test (+-1 sample, 0
 # frames) and the colour bars (BT.709, not BT.601); a segment from other
-# settings is refused; 10-bit HEVC and ProRes masters verify; no native leak.
+# settings is refused; 59.94 drop-frame, 10-bit HEVC and ProRes masters
+# verify; no native leak.
 #
 # Run:
 #   bin/tungsten spec/core/media_spec.w
@@ -108,6 +110,39 @@ while y < H
     x += 1
   y += 1
 check("converter honours the stride", same_bytes?(ccall("w_media_convert", padded, W, H, W * 4 + 40, "rgba", "nv12", "left"), ref))
+# Every 8-bit RGB triple once (a 4096 x 4096 frame, shuffled by an odd
+# multiplier so chroma neighbourhoods vary): the converter computes codes in
+# fixed point and redoes the few within a guard band of a rounding tie with
+# YuvFrame's double arithmetic; this exercises that path across the whole
+# luma domain and 4.2M chroma samples, 8 and 10 bit.
+-> all_rgb(n) (i64) u8[]
+  px = u8[n * n * 4]
+  i = 0
+  while i < n * n
+    v = (i * 2654435761) & 16777215
+    o = i * 4
+    px[o] = (v >> 16) & 255
+    px[o + 1] = (v >> 8) & 255
+    px[o + 2] = v & 255
+    px[o + 3] = 255
+    i += 1
+  px
+
+# (ccall takes integer literals as raw machine words, so sizes go through a
+# method, as the media classes' own calls do.)
+-> convert(px, w, h, stride, input, output, siting)
+  ccall("w_media_convert", px, w, h, stride, input, output, siting)
+
+N = 4096
+big = all_rgb(N)
+check("every RGB triple: converter == YuvFrame, 8-bit 4:2:0",
+      same_bytes?(convert(big, N, N, N * 4, "rgba", "nv12", "left"), YuvFrame.from_rgba(big, N, N).to_nv12))
+check("every RGB triple: converter == YuvFrame, 10-bit 4:2:2",
+      same_bytes?(convert(big, N, N, N * 4, "rgba", "p210", "left"), YuvFrame.from_rgba(big, N, N, {chroma: :yuv422, bits: 10}).to_bytes("p210")))
+check("every RGB triple: converter == YuvFrame, 8-bit 4:2:0 topleft",
+      same_bytes?(convert(big, N, N, N * 4, "rgba", "nv12", "topleft"), YuvFrame.from_rgba(big, N, N, {siting: :topleft}).to_nv12))
+big = nil
+
 q = YCbCr.bt709
 red = q.encode_rgb8(255, 0, 0)
 check("BT.709 red is Y'CbCr 63/102/240 (BT.601 would be 81/90/240)", red == [63, 102, 240])
@@ -137,7 +172,7 @@ while k < 8
   k += 1
 
 -> encode_segments(codec, lengths, frames, opts)
-  enc = VideoEncoder.new(640, 360, codec: codec, rate: opts[:rate], quality: opts[:quality], gop: 48)
+  enc = VideoEncoder.new(640, 360, codec: codec, rate: opts[:rate], quality: opts[:quality], gop: 48, reorder: opts[:reorder])
   segs = []
   f = 0
   lengths.each ->(n)
@@ -160,13 +195,13 @@ while k < 8
     off += 4 + len
   0 - 1
 
-segs = encode_segments("h264", [48, 1, 20], frames, {rate: [24, 1], quality: ~0.6})
+segs = encode_segments("h264", [48, 1, 20], frames, {rate: [24, 1], quality: ~0.6, reorder: false})
 check("three segments of 48, 1 and 20 frames", segs[0].frames == 48 && segs[1].frames == 1 && segs[2].frames == 20)
 check("each segment has exactly one sync sample, first", segs.all? ->(s) s.keyframes == 1 && s.sync[0] == 1)
 check("H.264 segments start with an IDR slice (NAL 5)", segs.all? ->(s) first_vcl_nal(s.sample(0), false) == 5)
 check("no reordering: decode order is presentation order", segs[0].pts == (0...48).to_a)
 check("parameter sets are identical across segments", segs[0].param_sets == segs[1].param_sets && segs[1].param_sets == segs[2].param_sets)
-other = encode_segments("h264", [5], frames, {rate: [24, 1], quality: ~0.6})
+other = encode_segments("h264", [5], frames, {rate: [24, 1], quality: ~0.6, reorder: false})
 check("a second encoder with the same settings emits byte-identical SPS/PPS", other[0].param_sets == segs[0].param_sets && other[0].format == segs[0].format)
 sps = ccall("w_media_parse_sps", segs[0].param_sets, false)
 facts = {}
@@ -188,6 +223,22 @@ hother = encode_segments("hevc", [2], frames, {rate: [24000, 1001], quality: ~0.
 check("HEVC: a second encoder emits byte-identical VPS/SPS/PPS", hother[0].param_sets == hsegs[0].param_sets)
 hq = encode_segments("hevc", [2], frames, {rate: [24000, 1001], quality: ~0.9})
 check("HEVC parameter sets depend on quality (so the mux must refuse mixing)", hq[0].param_sets != hsegs[0].param_sets)
+
+# B-frames inside segments: still one IDR per segment, all frames 0..n-1.
+rsegs = encode_segments("hevc", [48, 1, 30], frames, {rate: [24, 1], quality: ~0.7, reorder: true})
+check("reordering: one sync sample per segment, first", rsegs.all? ->(s) s.keyframes == 1 && s.sync[0] == 1)
+check("reordering: decode order differs from presentation order", rsegs[0].pts != (0...48).to_a && rsegs[0].pts.sort == (0...48).to_a)
+rmp4 = TMP + "/reorder.mp4"
+mux = Mux.new(rmp4, rate: [24, 1])
+mux.append(rsegs[1])
+mux.append(rsegs[0])
+mux.append(rsegs[2])
+mux.close
+rv = MediaVerify.check(rmp4, rate: [24, 1], frames: 79, audio: false)
+<< MediaVerify.format(rv)
+check("a reordered master starting with a 1-frame segment verifies (DTS delay reserved, edit list applied)", rv[:ok])
+rsegs.each ->(s)
+  s.release
 
 # ---- a master from segments of two encoders ----
 mp4 = TMP + "/concat.mp4"
@@ -230,8 +281,12 @@ check("23.976 MP4 HEVC + AAC, tmcd from 01:00:00:00",
       sync_master("sync23976.mp4", {rate: [24000, 1001], seconds: 6, width: 640, height: 360, codec: :hevc, tc_start: "01:00:00:00"}))
 check("29.97 MOV + 24-bit PCM, drop-frame tmcd from 00:59:59;00",
       sync_master("sync2997.mov", {rate: [30000, 1001], seconds: 6, width: 640, height: 360, tc_start: "00:59:59;00"}))
+check("59.94 MP4 + AAC, drop-frame tmcd from 00:00:00;00",
+      sync_master("sync5994.mp4", {rate: [60000, 1001], seconds: 3, width: 640, height: 360, tc_start: "00:00:00;00"}))
 check("10-bit HEVC MOV verifies, bars at 10 bits",
       sync_master("sync10.mov", {rate: [25, 1], seconds: 4, width: 640, height: 360, codec: :hevc10}))
+check("H.264 without B-frames (reorder: false), MP4 + AAC",
+      sync_master("syncnb.mp4", {rate: [24, 1], seconds: 5, width: 640, height: 360, reorder: false}))
 check("ProRes 422 HQ MOV verifies",
       sync_master("syncpr.mov", {rate: [24, 1], seconds: 3, width: 640, height: 360, codec: :prores422hq}))
 

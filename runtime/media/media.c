@@ -10,9 +10,11 @@
  * converted here, not inside VideoToolbox, so the matrix, range and chroma
  * siting are ours and checkable: BT.709 (Kr 0.2126, Kb 0.0722), limited
  * range, chroma siting "left" by default (H.264/HEVC chroma_sample_loc_type
- * 0). The arithmetic is core/ycbcr.w's, operation for operation in double
- * precision with FP contraction off, so a frame converted here is bit-for-bit
- * YuvFrame.from_rgba(...) (spec/core/media_spec.w checks it).
+ * 0). Codes are computed in fixed point; the few samples whose value lies
+ * near a rounding tie are recomputed with core/ycbcr.w's double arithmetic
+ * (as the compiled engine evaluates it), so a frame converted here is
+ * bit-for-bit YuvFrame.from_rgba(...) on the compiled engine:
+ * spec/core/media_spec.w checks every 8-bit RGB triple.
  *
  * Segments. An encoder forces an IDR on the first frame of each segment and
  * never reorders frames (no B-frames), so a segment is a closed GOP whose
@@ -38,7 +40,8 @@
 /* Every exported entry point must be listed in media.h: the stub half is
  * generated from those lists. */
 #pragma clang diagnostic error "-Wmissing-prototypes"
-/* Bit-exact with core/ycbcr.w: no fused multiply-adds in the converter. */
+/* Bit-exact with core/ycbcr.w: no implicit fused multiply-adds; the exact
+ * fallback calls fma() exactly where compiled Tungsten fuses. */
 #pragma clang fp contract(off)
 
 #include <CoreFoundation/CoreFoundation.h>
@@ -221,7 +224,7 @@ typedef struct {
     int            bands;
 } MConv;
 
-static double g_lut[256], g_tr[256], g_tg[256], g_tb[256];
+static double g_lut[256];
 static double g_kr, g_kg, g_kb;
 static pthread_once_t g_lut_once = PTHREAD_ONCE_INIT;
 
@@ -231,20 +234,7 @@ static void m_lut_init(void) {
     g_kg = 1.0 - g_kr - g_kb;
     for (int k = 0; k < 256; k++) {
         g_lut[k] = (double)k / 255.0;
-        g_tr[k] = g_kr * g_lut[k];
-        g_tg[k] = g_kg * g_lut[k];
-        g_tb[k] = g_kb * g_lut[k];
     }
-}
-
-/* H.273 Round for x >= 0 (every code here is positive): Floor(x + 0.5). */
-static inline int64_t m_round_pos(double x) { return (int64_t)(x + 0.5); }
-
-static inline int m_code(double e, double scale, double offset, int lo, int hi) {
-    int64_t c = m_round_pos(e * scale + offset);
-    if (c < lo) return lo;
-    if (c > hi) return hi;
-    return (int)c;
 }
 
 /* Decimation taps around the luma sample under each chroma sample, as
@@ -264,81 +254,261 @@ static void m_taps(int sub, int cosited, MTaps *t) {
     }
 }
 
+/* ---- exact reference arithmetic (core/ycbcr.w, operation for operation) ----
+ *
+ * Compiled Tungsten contracts `a * b + c` in typed f64 code into a fused
+ * multiply-add (llvm.fmuladd), as C does with contraction on: in YuvFrame's
+ * kernels `kr r + kg g + kb b` is fmuladd(kb, b, kr r + kg g) and the
+ * quantizer's `e * scale + offset` is fmuladd(e, scale, offset). The
+ * tree-walking interpreter does not fuse, so on a near-tie input the two
+ * engines' YuvFrame can differ by one code. This mirrors the compiled
+ * kernels (the spec checks every RGB triple against them). */
+
+static inline int m_luma_exact(const MConv *c, const uint8_t *p) {
+    double e = g_kr * g_lut[p[c->ro]] + g_kg * g_lut[p[c->go]];
+    e = fma(g_kb, g_lut[p[c->bo]], e);
+    if (c->bits == 8) {
+        int64_t v = (int64_t)(fma(e, 219.0, 16.0) + 0.5);
+        return (int)(v < 1 ? 1 : v > 254 ? 254 : v);
+    }
+    int64_t v = (int64_t)(fma(e, 876.0, 64.0) + 0.5);
+    return (int)(v < 4 ? 4 : v > 1019 ? 1019 : v);
+}
+
+/* Cb, Cr of chroma sample (i, j): the taps summed in YuvFrame's order. */
+static inline void m_chroma_exact(const MConv *c, const MTaps *ht, const MTaps *vt, int i, int j, int *cbo, int *cro) {
+    double sr = 0.0, sg = 0.0, sb = 0.0;
+    for (int b = 0; b < vt->n; b++) {
+        int yy = j * c->vsub + vt->off[b];
+        yy = yy < 0 ? 0 : yy > c->h - 1 ? c->h - 1 : yy;
+        const uint8_t *row = c->src + (size_t)yy * c->sstride;
+        for (int a = 0; a < ht->n; a++) {
+            int xx = i * c->hsub + ht->off[a];
+            xx = xx < 0 ? 0 : xx > c->w - 1 ? c->w - 1 : xx;
+            double wt = ht->wt[a] * vt->wt[b];
+            const uint8_t *p = row + (size_t)xx * (size_t)c->bpp;
+            sr += wt * g_lut[p[c->ro]];
+            sg += wt * g_lut[p[c->go]];
+            sb += wt * g_lut[p[c->bo]];
+        }
+    }
+    double yv = fma(g_kb, sb, g_kr * sr + g_kg * sg);
+    double cbd = 2.0 * (1.0 - g_kb), crd = 2.0 * (1.0 - g_kr);
+    double cs = c->bits == 8 ? 224.0 : 896.0, co = c->bits == 8 ? 128.0 : 512.0;
+    int lo = c->bits == 8 ? 1 : 4, hi = c->bits == 8 ? 254 : 1019;
+    int64_t cb = (int64_t)(fma((sb - yv) / cbd, cs, co) + 0.5);
+    int64_t cr = (int64_t)(fma((sr - yv) / crd, cs, co) + 0.5);
+    *cbo = (int)(cb < lo ? lo : cb > hi ? hi : cb);
+    *cro = (int)(cr < lo ? lo : cr > hi ? hi : cr);
+}
+
+/* ---- fixed point with an exact fallback near rounding ties ----
+ *
+ * code = floor(Y* + 1/2) where Y* = Ys (kr r' + kg g' + kb b') + Yo. In
+ * 2^-30 fixed point, v = cR r + cG g + cB b + O with each coefficient rounded,
+ * so |v - (Y* + 1/2) 2^30| <= (r + g + b + 1) / 2 + tiny <= 384. The double
+ * reference is within ~1e-13 of Y*. Where v's fraction is at least GUARD
+ * (2^12) from a multiple of 2^30 both round the same way; otherwise the
+ * sample is recomputed with the reference arithmetic. Chroma: the tap sums
+ * are integers S (weights scaled to integers summing to D), Cb* =
+ * Cs ((1 - kb) Sb - kr Sr - kg Sg) / (cbd D 255) + Co, coefficient error
+ * <= (Sr + Sg + Sb + 1) / 2 <= 6200 units, GUARD 2^15. About one sample in
+ * 10^5 takes the exact path. */
+
+#define M_FIX 30
+#define M_FIX_MASK ((1ull << M_FIX) - 1)
+#define M_YGUARD (1ull << 12)
+#define M_CGUARD (1ull << 15)
+
+typedef struct {
+    uint32_t yr, yg, yb;                /* luma, per code value */
+    uint64_t yo;
+    uint32_t cbb, cbr, cbg, crr, crg, crb;   /* chroma, per unit of tap sum */
+    uint64_t co;
+    int D;
+} MFix;
+
+static uint64_t m_fixc(double v) { return (uint64_t)llround(v * (double)(1ull << M_FIX)); }
+
+static void m_fix_init(const MConv *c, int D, MFix *f) {
+    double m = c->bits == 8 ? 1.0 : 4.0;
+    double ys = 219.0 * m, yo = 16.0 * m, cs = 224.0 * m, co = 128.0 * m;
+    f->yr = (uint32_t)m_fixc(ys * g_kr / 255.0);
+    f->yg = (uint32_t)m_fixc(ys * g_kg / 255.0);
+    f->yb = (uint32_t)m_fixc(ys * g_kb / 255.0);
+    f->yo = m_fixc(yo + 0.5);
+    double cbd = 2.0 * (1.0 - g_kb), crd = 2.0 * (1.0 - g_kr);
+    double u = 255.0 * (double)D;
+    f->cbb = (uint32_t)m_fixc(cs * (1.0 - g_kb) / (cbd * u));
+    f->cbr = (uint32_t)m_fixc(cs * g_kr / (cbd * u));
+    f->cbg = (uint32_t)m_fixc(cs * g_kg / (cbd * u));
+    f->crr = (uint32_t)m_fixc(cs * (1.0 - g_kr) / (crd * u));
+    f->crg = (uint32_t)m_fixc(cs * g_kg / (crd * u));
+    f->crb = (uint32_t)m_fixc(cs * g_kb / (crd * u));
+    f->co = m_fixc(co + 0.5);
+    f->D = D;
+}
+
+static inline int m_near_tie(uint64_t v, uint64_t guard) {
+    uint64_t fr = v & M_FIX_MASK;
+    return fr < guard || fr > M_FIX_MASK - guard;
+}
+
+/* The fixed-point luma loop for one layout; the constant byte offsets let
+ * the compiler vectorize it (ld3/ld4 + widening multiplies). Returns
+ * nonzero when some pixel of the row lies near a tie. */
+#define M_LUMA_LOOP(NAME, BPP, RO, GO, BO)                                                    \
+    static uint64_t NAME(const uint8_t *s, int w, const MFix *f, uint8_t *o8, uint16_t *o16) {  \
+        uint64_t tie = 0;                                                                     \
+        uint32_t yr = f->yr, yg = f->yg, yb = f->yb;                                          \
+        uint64_t yo = f->yo;                                                                  \
+        for (int x = 0; x < w; x++) {                                                         \
+            const uint8_t *p = s + (size_t)x * BPP;                                           \
+            uint64_t v = (uint64_t)yr * p[RO] + (uint64_t)yg * p[GO] + (uint64_t)yb * p[BO] + yo; \
+            if (o8) o8[x] = (uint8_t)(v >> M_FIX);                                            \
+            else o16[x] = (uint16_t)((v >> M_FIX) << 6);                                      \
+            tie |= (uint64_t)(((v & M_FIX_MASK) - M_YGUARD) > (M_FIX_MASK - 2 * M_YGUARD));   \
+        }                                                                                     \
+        return tie;                                                                           \
+    }
+M_LUMA_LOOP(m_luma_rgba, 4, 0, 1, 2)
+M_LUMA_LOOP(m_luma_bgra, 4, 2, 1, 0)
+M_LUMA_LOOP(m_luma_argb, 4, 1, 2, 3)
+M_LUMA_LOOP(m_luma_rgb24, 3, 0, 1, 2)
+M_LUMA_LOOP(m_luma_bgr24, 3, 2, 1, 0)
+#undef M_LUMA_LOOP
+
+/* One luma row: fixed point, then the rare near-tie pixels exactly. */
+static void m_luma_row(const MConv *c, const MFix *f, int y) {
+    const uint8_t *s = c->src + (size_t)y * c->sstride;
+    int w = c->w;
+    uint8_t *o8 = c->bits == 8 ? c->yp + (size_t)y * c->ystride : NULL;
+    uint16_t *o16 = c->bits == 8 ? NULL : (uint16_t *)(void *)(c->yp + (size_t)y * c->ystride);
+    uint64_t tie;
+    if (c->bpp == 4 && c->ro == 0) tie = m_luma_rgba(s, w, f, o8, o16);
+    else if (c->bpp == 4 && c->ro == 2) tie = m_luma_bgra(s, w, f, o8, o16);
+    else if (c->bpp == 4) tie = m_luma_argb(s, w, f, o8, o16);
+    else if (c->ro == 0) tie = m_luma_rgb24(s, w, f, o8, o16);
+    else tie = m_luma_bgr24(s, w, f, o8, o16);
+    if (!tie) return;
+    for (int x = 0; x < w; x++) {
+        const uint8_t *p = s + (size_t)x * (size_t)c->bpp;
+        uint64_t v = (uint64_t)f->yr * p[c->ro] + (uint64_t)f->yg * p[c->go] + (uint64_t)f->yb * p[c->bo] + f->yo;
+        if (!m_near_tie(v, M_YGUARD)) continue;
+        int code = m_luma_exact(c, p);
+        if (o8) o8[x] = (uint8_t)code;
+        else o16[x] = (uint16_t)(code << 6);
+    }
+}
+
+static inline void m_put_c(const MConv *c, uint8_t *o8, int i, int cb, int cr) {
+    if (c->bits == 8) {
+        o8[2 * i] = (uint8_t)cb;
+        o8[2 * i + 1] = (uint8_t)cr;
+    } else {
+        uint16_t *o16 = (uint16_t *)(void *)o8;
+        o16[2 * i] = (uint16_t)(cb << 6);
+        o16[2 * i + 1] = (uint16_t)(cr << 6);
+    }
+}
+
+/* Integer tap weights (scaled so the smallest is 1) and their sum. */
+static int m_int_taps(const MTaps *t, int *iw) {
+    double mn = t->wt[0];
+    for (int a = 1; a < t->n; a++) if (t->wt[a] < mn) mn = t->wt[a];
+    int sum = 0;
+    for (int a = 0; a < t->n; a++) { iw[a] = (int)(t->wt[a] / mn + 0.5); sum += iw[a]; }
+    return sum;
+}
+
+/* A band of chroma rows and the luma rows under them. */
 static void m_conv_band(void *ctx, size_t band) {
     const MConv *c = ctx;
-    int bits = c->bits;
-    double ys = 219.0 * (bits == 10 ? 4.0 : 1.0), yo = 16.0 * (bits == 10 ? 4.0 : 1.0);
-    double cs = 224.0 * (bits == 10 ? 4.0 : 1.0), co = 128.0 * (bits == 10 ? 4.0 : 1.0);
-    int lo = bits == 10 ? 4 : 1, hi = bits == 10 ? 1019 : 254;
     int ch = (c->h + c->vsub - 1) / c->vsub;
     int cw = (c->w + c->hsub - 1) / c->hsub;
     int j0 = (int)((int64_t)ch * (int64_t)band / c->bands);
     int j1 = (int)((int64_t)ch * (int64_t)(band + 1) / c->bands);
-    /* Luma rows covered by these chroma rows. */
-    int y0 = j0 * c->vsub, y1 = j1 * c->vsub;
-    if (y1 > c->h) y1 = c->h;
-    for (int y = y0; y < y1; y++) {
-        const uint8_t *s = c->src + (size_t)y * c->sstride;
-        if (bits == 8) {
-            uint8_t *o = c->yp + (size_t)y * c->ystride;
-            for (int x = 0; x < c->w; x++) {
-                const uint8_t *p = s + (size_t)x * c->bpp;
-                double e = g_tr[p[c->ro]] + g_tg[p[c->go]];
-                e = e + g_tb[p[c->bo]];
-                o[x] = (uint8_t)m_code(e, ys, yo, lo, hi);
-            }
-        } else {
-            uint16_t *o = (uint16_t *)(void *)(c->yp + (size_t)y * c->ystride);
-            for (int x = 0; x < c->w; x++) {
-                const uint8_t *p = s + (size_t)x * c->bpp;
-                double e = g_tr[p[c->ro]] + g_tg[p[c->go]];
-                e = e + g_tb[p[c->bo]];
-                o[x] = (uint16_t)(m_code(e, ys, yo, lo, hi) << 6);
-            }
-        }
-    }
+    if (j0 >= j1) return;
     MTaps ht, vt;
     m_taps(c->hsub, c->siting != M_SITE_CENTER, &ht);
     m_taps(c->vsub, c->siting == M_SITE_TOPLEFT, &vt);
-    double cbd = 2.0 * (1.0 - g_kb), crd = 2.0 * (1.0 - g_kr);
+    int hw[3], vw[3];
+    int D = m_int_taps(&ht, hw) * m_int_taps(&vt, vw);
+    MFix f;
+    m_fix_init(c, D, &f);
+    int bpp = c->bpp, ro = c->ro, go = c->go, bo = c->bo, w = c->w;
+    int left420 = vt.n == 2 && ht.n == 3, left422 = vt.n == 1 && ht.n == 3;
+    uint32_t *Sr = malloc(sizeof(uint32_t) * (size_t)cw * 3), *Sg = Sr + cw, *Sb = Sg + cw;
     for (int j = j0; j < j1; j++) {
-        const uint8_t *rows[3];
-        double vw[3];
-        for (int b = 0; b < vt.n; b++) {
-            int yy = j * c->vsub + vt.off[b];
-            if (yy < 0) yy = 0;
-            if (yy > c->h - 1) yy = c->h - 1;
-            rows[b] = c->src + (size_t)yy * c->sstride;
-            vw[b] = vt.wt[b];
+        for (int k = 0; k < c->vsub; k++) {
+            int y = j * c->vsub + k;
+            if (y < c->h) m_luma_row(c, &f, y);
+        }
+        /* integer tap sums */
+        if (left420 || left422) {
+            const uint8_t *r0 = c->src + (size_t)(j * c->vsub) * c->sstride;
+            int y1 = j * c->vsub + 1;
+            const uint8_t *r1 = left420 ? c->src + (size_t)(y1 > c->h - 1 ? c->h - 1 : y1) * c->sstride : r0;
+            /* first and last columns clamp; the rest run straight */
+            for (int i = 0; i < cw; i++) {
+                int x = 2 * i, xl = x > 0 ? x - 1 : 0, xr = x + 1 < w ? x + 1 : w - 1;
+                const uint8_t *a0 = r0 + (size_t)xl * bpp, *b0 = r0 + (size_t)x * bpp, *c0 = r0 + (size_t)xr * bpp;
+                const uint8_t *a1 = r1 + (size_t)xl * bpp, *b1 = r1 + (size_t)x * bpp, *c1 = r1 + (size_t)xr * bpp;
+                uint32_t sr = (uint32_t)a0[ro] + 2u * b0[ro] + c0[ro];
+                uint32_t sg = (uint32_t)a0[go] + 2u * b0[go] + c0[go];
+                uint32_t sb = (uint32_t)a0[bo] + 2u * b0[bo] + c0[bo];
+                if (left420) {
+                    sr += (uint32_t)a1[ro] + 2u * b1[ro] + c1[ro];
+                    sg += (uint32_t)a1[go] + 2u * b1[go] + c1[go];
+                    sb += (uint32_t)a1[bo] + 2u * b1[bo] + c1[bo];
+                }
+                Sr[i] = sr;
+                Sg[i] = sg;
+                Sb[i] = sb;
+            }
+        } else {
+            for (int i = 0; i < cw; i++) {
+                uint32_t sr = 0, sg = 0, sb = 0;
+                for (int b = 0; b < vt.n; b++) {
+                    int yy = j * c->vsub + vt.off[b];
+                    yy = yy < 0 ? 0 : yy > c->h - 1 ? c->h - 1 : yy;
+                    const uint8_t *row = c->src + (size_t)yy * c->sstride;
+                    for (int a = 0; a < ht.n; a++) {
+                        int xx = i * c->hsub + ht.off[a];
+                        xx = xx < 0 ? 0 : xx > w - 1 ? w - 1 : xx;
+                        const uint8_t *p = row + (size_t)xx * bpp;
+                        uint32_t wt = (uint32_t)(hw[a] * vw[b]);
+                        sr += wt * p[ro];
+                        sg += wt * p[go];
+                        sb += wt * p[bo];
+                    }
+                }
+                Sr[i] = sr;
+                Sg[i] = sg;
+                Sb[i] = sb;
+            }
         }
         uint8_t *o8 = c->cp + (size_t)j * c->cstride;
-        uint16_t *o16 = (uint16_t *)(void *)o8;
+        uint64_t tie = 0;
         for (int i = 0; i < cw; i++) {
-            double sr = 0.0, sg = 0.0, sb = 0.0;
-            for (int b = 0; b < vt.n; b++) {
-                for (int a = 0; a < ht.n; a++) {
-                    int xx = i * c->hsub + ht.off[a];
-                    if (xx < 0) xx = 0;
-                    if (xx > c->w - 1) xx = c->w - 1;
-                    double wt = ht.wt[a] * vw[b];
-                    const uint8_t *p = rows[b] + (size_t)xx * c->bpp;
-                    sr += wt * g_lut[p[c->ro]];
-                    sg += wt * g_lut[p[c->go]];
-                    sb += wt * g_lut[p[c->bo]];
+            uint64_t vb = f.co + (uint64_t)f.cbb * Sb[i] - (uint64_t)f.cbr * Sr[i] - (uint64_t)f.cbg * Sg[i];
+            uint64_t vr = f.co + (uint64_t)f.crr * Sr[i] - (uint64_t)f.crg * Sg[i] - (uint64_t)f.crb * Sb[i];
+            m_put_c(c, o8, i, (int)(vb >> M_FIX), (int)(vr >> M_FIX));
+            tie |= (uint64_t)(((vb & M_FIX_MASK) - M_CGUARD) > (M_FIX_MASK - 2 * M_CGUARD));
+            tie |= (uint64_t)(((vr & M_FIX_MASK) - M_CGUARD) > (M_FIX_MASK - 2 * M_CGUARD));
+        }
+        if (tie)
+            for (int i = 0; i < cw; i++) {
+                uint64_t vb = f.co + (uint64_t)f.cbb * Sb[i] - (uint64_t)f.cbr * Sr[i] - (uint64_t)f.cbg * Sg[i];
+                uint64_t vr = f.co + (uint64_t)f.crr * Sr[i] - (uint64_t)f.crg * Sg[i] - (uint64_t)f.crb * Sb[i];
+                if (m_near_tie(vb, M_CGUARD) || m_near_tie(vr, M_CGUARD)) {
+                    int cb, cr;
+                    m_chroma_exact(c, &ht, &vt, i, j, &cb, &cr);
+                    m_put_c(c, o8, i, cb, cr);
                 }
             }
-            double yv = g_kr * sr + g_kg * sg + g_kb * sb;
-            int cb = m_code((sb - yv) / cbd, cs, co, lo, hi);
-            int cr = m_code((sr - yv) / crd, cs, co, lo, hi);
-            if (bits == 8) {
-                o8[2 * i] = (uint8_t)cb;
-                o8[2 * i + 1] = (uint8_t)cr;
-            } else {
-                o16[2 * i] = (uint16_t)(cb << 6);
-                o16[2 * i + 1] = (uint16_t)(cr << 6);
-            }
-        }
     }
+    free(Sr);
 }
 
 static void m_convert(MConv *c) {
@@ -720,8 +890,10 @@ WValue w_media_encoder_new(WValue wv, WValue hv, WValue codecv, WValue numv, WVa
     if (codec->quality_ok) {
         m_set(vt, kVTCompressionPropertyKey_AllowFrameReordering, e->reorder ? kCFBooleanTrue : kCFBooleanFalse, "AllowFrameReordering", 1);
         /* Keyframes are forced at segment starts; the interval is a backstop
-         * for segments longer than gop frames. */
-        m_set_num(vt, kVTCompressionPropertyKey_MaxKeyFrameInterval, e->gop, 1, "MaxKeyFrameInterval");
+         * for segments longer than gop frames. With reordering VideoToolbox
+         * plans keyframes a mini-GOP ahead and would put an extra one a few
+         * frames before a forced IDR at gop, so the backstop doubles. */
+        m_set_num(vt, kVTCompressionPropertyKey_MaxKeyFrameInterval, e->reorder ? 2 * e->gop : e->gop, 1, "MaxKeyFrameInterval");
         if (codec->type == kCMVideoCodecType_HEVC) m_set(vt, kVTCompressionPropertyKey_AllowOpenGOP, kCFBooleanFalse, "AllowOpenGOP", 0);
         if (codec->type == kCMVideoCodecType_H264) m_set(vt, kVTCompressionPropertyKey_H264EntropyMode, kVTH264EntropyMode_CABAC, "H264EntropyMode", 0);
         if (e->bitrate > 0) m_set_num(vt, kVTCompressionPropertyKey_AverageBitRate, (double)e->bitrate, 1, "AverageBitRate");
@@ -764,6 +936,7 @@ WValue w_media_encoder_encode(WValue ev, WValue srcv, WValue offv, WValue stride
         s->rate_den = e->den;
         s->first_global = e->next;
         s->enc = e;
+        s->flags = e->reorder && e->codec->quality_ok ? W_MEDIA_SEG_REORDER : 0;
         e->cur = s;
     }
     WMediaSegment *s = e->cur;
@@ -933,6 +1106,7 @@ WValue w_media_segment_info(WValue sv, WValue keyv) {
     if (!strcmp(k, "width")) return w_int(s->width);
     if (!strcmp(k, "height")) return w_int(s->height);
     if (!strcmp(k, "reorder")) return w_int(s->reorder);
+    if (!strcmp(k, "flags")) return w_int(s->flags);
     if (!strcmp(k, "codec")) {
         char f[5];
         m_fourcc_str(s->fourcc, f);
@@ -1023,6 +1197,7 @@ WValue w_media_segment_save(WValue sv, WValue pathv) {
     m_put32(hdr + 36, (uint32_t)flen);
     m_put64(hdr + 40, s->len);
     m_put32(hdr + 48, (uint32_t)s->reorder);
+    m_put32(hdr + 52, s->flags);
     uint8_t *rec = calloc((size_t)(s->n ? s->n : 1), 24);
     for (int i = 0; i < s->n; i++) {
         uint8_t *r = rec + 24 * (size_t)i;
@@ -1073,6 +1248,7 @@ WValue w_media_segment_load(WValue pathv) {
     s->rate_num = (int32_t)m_get32(hdr + 24);
     s->rate_den = (int32_t)m_get32(hdr + 28);
     s->reorder = (int32_t)m_get32(hdr + 48);
+    s->flags = m_get32(hdr + 52);
     uint8_t *fmt = malloc(flen ? flen : 1);
     uint8_t *rec = malloc(24 * (size_t)(n ? n : 1));
     s->data = malloc(dlen ? dlen : 1);

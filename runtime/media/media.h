@@ -81,6 +81,11 @@ W_MEDIA_CCALLS(W_MEDIA_PROTOTYPE)
 
 #if defined(__APPLE__) && defined(WVALUE_H)
 
+/* WMediaSegment.flags: encoded with frame reordering (B-frames) allowed, so
+ * a mux must reserve W_MEDIA_REORDER_DELAY frames of DTS delay up front. */
+#define W_MEDIA_SEG_REORDER   1u
+#define W_MEDIA_REORDER_DELAY 4
+
 /* Handle kinds in the shared registry. */
 enum { W_MEDIA_KIND_ENCODER = 1, W_MEDIA_KIND_SEGMENT = 2, W_MEDIA_KIND_MUX = 3 };
 
@@ -107,6 +112,7 @@ typedef struct WMediaSegment {
     uint8_t      *data;
     size_t        len, dcap;
     int32_t       reorder;     /* max (sorted pts - pts) over samples: the DTS delay needed */
+    uint32_t      flags;       /* W_MEDIA_SEG_* */
     /* Encoding state: frames are emitted asynchronously by VideoToolbox. */
     int32_t       submitted, emitted, finished;
     int32_t       err;         /* first OSStatus error, or a W_MEDIA_ERR_* code */

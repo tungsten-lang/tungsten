@@ -2,7 +2,7 @@
 #
 #   bin/tungsten media verify FILE [--rate 24/1] [--frames N] [--tc HH:MM:SS:FF | --no-tc]
 #                                  [--no-audio] [--sync] [--flashes 12,60,...] [--bars]
-#                                  [--siting left] [--no-faststart] [--json]
+#                                  [--siting left] [--no-faststart] [--chapters FILE] [--json]
 #   bin/tungsten media sync-test OUT [--rate 24/1] [--seconds 10] [--size 1280x720]
 #                                    [--codec h264] [--tc HH:MM:SS:FF] [--audio aac|pcm]
 #   bin/tungsten media probe FILE      raw AVFoundation facts
@@ -23,7 +23,7 @@
 # verify, transcode --verify and preset exit 0 when every check passes, 1 otherwise.
 
 -> usage
-  << "usage: tungsten media verify FILE \[--rate N/D] \[--frames N] \[--tc HH:MM:SS:FF | --no-tc] \[--no-audio] \[--sync] \[--flashes a,b,...] \[--bars] \[--siting S] \[--no-faststart] \[--json]"
+  << "usage: tungsten media verify FILE \[--rate N/D] \[--frames N] \[--tc HH:MM:SS:FF | --no-tc] \[--no-audio] \[--sync] \[--flashes a,b,...] \[--bars] \[--siting S] \[--no-faststart] \[--chapters FILE] \[--json]"
   << "       tungsten media sync-test OUT \[--rate N/D] \[--seconds S] \[--size WxH] \[--codec C] \[--tc HH:MM:SS:FF] \[--audio aac|pcm]"
   << "       tungsten media probe FILE"
   << "       tungsten media codecs"
@@ -303,10 +303,16 @@ if cmd == "verify"
       opts[:faststart] = false
     elsif a == "--json"
       json = true
+    elsif a == "--chapters"
+      opts[:chapters_file] = flag_value(args, i)
+      i += 1
     else
       << "unknown option [a]"
       exit(2)
     i += 1
+  if opts[:chapters_file] != nil
+    crate = opts[:rate] != nil ? Timecode.rate(opts[:rate]) : Transcode.source_facts(path)[:rate]
+    opts[:chapters] = read_chapters(opts[:chapters_file], crate)
   r = MediaVerify.check(path, opts)
   if json
     checks = []

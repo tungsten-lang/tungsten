@@ -91,6 +91,8 @@
     ccall("w_media_decoder_close", @handle)
 
 
+# Transcode — decode, scale, encode and mux in one pass: share copies, 4K masters,
+# the resolution ladder and verticals, with chapters, timecode and audio carried through.
 + Transcode
   -> .opt(opts, key, fallback)
     if opts == nil || !opts.has_key?(key) || opts[key] == nil

@@ -343,6 +343,11 @@ WValue   w_body_arena_get(uint32_t offset, uint32_t i);
  * (all raw i64 on the call boundary). */
 WValue w_node_field_load(WValue wnode, int64_t ivar_offset);
 WValue w_node_field_store(WValue wnode, int64_t ivar_offset, WValue value);
+WValue w_ast_kind(WValue node);
+WValue w_ast_get(WValue node, WValue sym);
+WValue w_ast_set(WValue node, WValue sym, WValue value);
+WValue w_is_ast_node(WValue x);
+WValue w_ast_children(WValue node);
 
 /* ---- Dynamic array ---- */
 /* Pool-flag bit: set when array is currently held in a recycle pool. Prevents
@@ -726,6 +731,8 @@ int64_t w_loc_line_for_offset(int64_t file_id, int64_t offset);
 int64_t w_loc_col_for_offset(int64_t file_id, int64_t offset);
 int64_t w_unbox_location_file_id_extern(WValue value);
 int64_t w_unbox_location_offset_extern(WValue value);
+WValue w_location_line(WValue raw);
+WValue w_location_col(WValue raw);
 
 /* ---- Instant (dedicated 0xFFF8 tag) ---- */
 WValue w_instant_now(void);

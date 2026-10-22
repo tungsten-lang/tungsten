@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(667 total), grouped by area, with its declaration, a one-line
+(673 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -222,6 +222,12 @@ summary from the source header, and a link to the source.
 | `Canvas` | `+ Canvas` | Canvas — native vector drawing (CoreGraphics + CoreText + ImageIO) into an RGBA bitmap. | [`core/canvas.w`](../core/canvas.w) |
 | `CanvasGradient` | `+ CanvasGradient` | CanvasGradient — a linear or radial gradient for Canvas fills and strokes | [`core/canvas.w`](../core/canvas.w) |
 | `CanvasImage` | `+ CanvasImage` | CanvasImage — a decoded image held by the Canvas image cache | [`core/canvas.w`](../core/canvas.w) |
+| `Timecode` | `+ Timecode` | Timecode and Flicks — integer time for video: frame rates as [num, den], | [`core/media/timecode.w`](../core/media/timecode.w) |
+| `Flicks` | `+ Flicks` | — | [`core/media/timecode.w`](../core/media/timecode.w) |
+| `VideoEncoder` | `+ VideoEncoder` | VideoEncoder — VideoToolbox H.264 / HEVC / ProRes from RGBA frames, emitted | [`core/media/video_encoder.w`](../core/media/video_encoder.w) |
+| `VideoSegment` | `+ VideoSegment` | VideoSegment — one closed GOP: compressed samples in decode order plus the | [`core/media/video_encoder.w`](../core/media/video_encoder.w) |
+| `Mux` | `+ Mux` | Mux — an MP4 or MOV master from encoded segments, audio and timecode, with | [`core/media/mux.w`](../core/media/mux.w) |
+| `MediaVerify` | `+ MediaVerify` | MediaVerify — read a master back with AVFoundation and check the A/V | [`core/media/verify.w`](../core/media/verify.w) |
 | `ColorSpace` | `+ ColorSpace` | ColorSpace — RGB colour spaces (primaries, white point and transfer | [`core/color_space.w`](../core/color_space.w) |
 | `Transfer` | `+ Transfer` | Transfer — the sRGB, BT.709 and BT.1886 transfer functions and their | [`core/color_space.w`](../core/color_space.w) |
 | `YCbCr` | `+ YCbCr` | YCbCr — R'G'B' <-> Y'CbCr for a matrix (Kr, Kb), bit depth and range. | [`core/ycbcr.w`](../core/ycbcr.w) |

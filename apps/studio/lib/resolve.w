@@ -22,6 +22,11 @@ RENDERER = {"still" => 3, "clip" => 3, "frames" => 2, "program" => 1, "card" => 
 # Encoder settings in force (the segment key covers them): set from encoder_spec by the project.
 ENCODER = {"id" => "vt:hevc:q0.750000:reorder:bt709-1-1-1:tv:left:420v"}
 FL_MS = 705600
+# The grade implementation in force (lib/grade.w), set by the project. It enters the recipe of every kind that is
+# graded, so frame and segment keys say which implementation made the pixels; the CPU reference adds nothing (keys
+# made before the Metal grade existed stay valid).
+GRADE = {"id" => "cpu"}
+GRADED = {"still" => true, "clip" => true, "group" => true}
 
 # Normalise a word as tools/cues.py does: lower case, keep only a-z0-9.
 -> norm_word(w)
@@ -431,7 +436,9 @@ FL_MS = 705600
     else
       die("unknown shot kind " + kind.to_s)
     deps = deps.sort
-    recipe = hash_of({"kind" => kind, "v" => RENDERER[kind], "id" => s["id"], "seed" => @seed, "p" => p, "deps" => deps})
+    rh = {"kind" => kind, "v" => RENDERER[kind], "id" => s["id"], "seed" => @seed, "p" => p, "deps" => deps}
+    rh["grade"] = GRADE["id"] if GRADED[kind] == true && GRADE["id"] != "cpu"
+    recipe = hash_of(rh)
     {"id" => s["id"], "kind" => kind, "params" => p, "trans_in" => get(s, "trans_in", {"kind" => "cut", "frames" => 0}),
      "recipe" => recipe, "deps" => deps}
 

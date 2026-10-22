@@ -152,6 +152,16 @@ case "$1" in
     shift
     exec bash "$ROOT/bin/commands/debug.sh" "$@"
     ;;
+  # media: verify/probe masters and write sync tests (bin/commands/media.w,
+  # core/media). Media is compiled-only, so it runs through the compiler.
+  media)
+    shift
+    if [ ! -x "$COMPILER" ]; then
+      echo "tungsten media: build the compiler first — bin/tungsten build" >&2
+      exit 1
+    fi
+    exec "$COMPILER" run "$ROOT/bin/commands/media.w" -- "$@"
+    ;;
   # build: the Tungsten orchestrator (bin/commands/build.w), compiled on
   # demand like tungsten.wc. Needs an existing compiler — a fresh clone
   # bootstraps first. --ruby/--spinel remain developer options inside it.

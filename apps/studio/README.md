@@ -17,7 +17,11 @@ Tungsten.
     studio mix <episode.json>                            # → build/<cut>/mix.wav and a loudness report
     studio mux <episode.json>                            # → build/<cut>/master.mp4 (passthrough), .srt, chapters.txt
     studio verify <master> [--resolved path]             # CFR, PTS, tmcd, A/V length, colour tags, sync
+    studio gradecheck <episode.json> <from> <to> [--step N]   # Metal grade vs the CPU reference, per code value
     studio selftest | raw | gc
+
+`STUDIO_GRADE=cpu|metal` (or `"grade_impl"` in the cut) picks the per-pixel grade; the default is Metal when a device
+is present. The CPU path (`lib/raster.w`) stays the reference.
 
 `build/` sits next to the episode file. Heavy runs (render, mix) belong under the machine's heavy-job lock and memory
 guard. Use `--max-frames 400` to keep each hold short.

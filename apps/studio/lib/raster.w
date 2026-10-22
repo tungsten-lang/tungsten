@@ -715,7 +715,6 @@
     y += 1
   0
 
-# (integer locals before the casts: see selftest in render.w)
 -> rs_mix_rgb(a, b, stride, w, h, t, out) (i64 i64 i64 i64 i64 f64 u8[]) i64
   s = ~1.0 - t
   y = 0
@@ -727,25 +726,19 @@
       p = row + x * 4
       c = 0
       while c < 3
-        ia = raw_load_u8(a, p + c)
-        ib = raw_load_u8(b, p + c)
-        v = (ia ## f64) * s + (ib ## f64) * t
-        q = Math.floor(v + ~0.5) ## i64
-        out[o + c] = q
+        v = (raw_load_u8(a, p + c) ## f64) * s + (raw_load_u8(b, p + c) ## f64) * t
+        out[o + c] = Math.floor(v + ~0.5) ## i64
         c += 1
       o += 3
       x += 1
     y += 1
   0
 
-# (the element goes through an integer local: see selftest in render.w)
 -> rs_scale_rgb(out, n, s) (u8[] i64 f64) i64
   i = 0
   while i < n
-    x = out[i]
-    v = (x ## f64) * s
-    q = Math.floor(v + ~0.5) ## i64
-    out[i] = q
+    v = (out[i] ## f64) * s
+    out[i] = Math.floor(v + ~0.5) ## i64
     i += 1
   0
 

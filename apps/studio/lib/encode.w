@@ -1,8 +1,9 @@
 # studio/encode — segments: the encoder interface, the interim ffmpeg adapter, and the segment renderer.
 #
-# A segment is one closed GOP (IDR first) of <= 48 frames, stored as build/segments/<key>.mp4. The engine only
-# talks to SegmentEncoder; FfmpegSegmentEncoder is the interim back end (raw RGB24 through a FIFO into libx264,
-# BT.709 matrix, limited range, left chroma siting, all tagged) until core/media's VideoToolbox encoder lands.
+# A segment is one closed GOP (IDR first) of <= 48 frames, stored as build/segments/<key>.<ext>. The engine only
+# talks to SegmentEncoder. MediaSegmentEncoder is core/media's VideoToolbox encoder (HEVC, quality 0.75 by
+# default: libx264 crf 18's VMAF); FfmpegSegmentEncoder, the interim back end (raw RGB24 through a FIFO into
+# libx264), stays for the comparison (`--encoder ffmpeg`).
 
 use base
 use render
@@ -15,6 +16,50 @@ use render
   # close: finish; true when the segment is complete and in place
   -> close
   -> name
+
++ MediaSegmentEncoder < SegmentEncoder
+  -> new(@w, @h, @num, @den, @codec, @quality)
+    @enc = VideoEncoder.new(@w, @h, {codec: @codec, rate: [@num, @den], quality: @quality, input: :rgb24})
+    @pending = nil
+    @pending_path = nil
+    @path = nil
+    @n = 0
+
+  -> name
+    "videotoolbox-" + @codec.to_s
+
+  -> open(path, n)
+    @path = path
+    @n = n
+    self
+
+  -> write(rgb)
+    @enc.encode(rgb, @w * 3)
+
+  # The GOP closes now; its samples are saved after the next segment's frames have gone in (the first use of a
+  # segment waits for the hardware), or at finish.
+  -> close
+    seg = @enc.segment
+    ok = flush()
+    @pending = seg
+    @pending_path = @path
+    ok
+
+  -> flush
+    return true if @pending == nil
+    seg = @pending
+    path = @pending_path
+    @pending = nil
+    die("segment " + path + ": " + seg.frames.to_s + " frames, expected more") if seg.frames <= 0
+    seg.save(path + ".part")
+    seg.release
+    File.rename(path + ".part", path)
+    true
+
+  -> finish
+    ok = flush()
+    @enc.close
+    ok
 
 + FfmpegSegmentEncoder < SegmentEncoder
   -> new(@w, @h, @num, @den, @fifo)
@@ -56,8 +101,30 @@ use render
     File.rename(@part, @path)
     true
 
+  -> finish
+    true
+
+# Encoder in force: VideoToolbox HEVC 0.75 unless the cut says otherwise or STUDIO_ENCODER=ffmpeg.
+-> encoder_spec(cut)
+  e = get(cut, "encoder", {})
+  name = env("STUDIO_ENCODER")
+  name = get(e, "backend", "videotoolbox") if name == nil || name == ""
+  if name == "ffmpeg"
+    return {"backend" => "ffmpeg", "ext" => "mp4", "id" => "ffmpeg-libx264:crf18:medium:g48:closed:bt709-1-1-1:tv:left:yuv420p"}
+  codec = get(e, "codec", "hevc")
+  q = to_f(get(e, "quality", ~0.75))
+  {"backend" => "videotoolbox", "codec" => codec, "quality" => q, "ext" => codec,
+   "id" => "vt:" + codec + ":q" + fixed6(q) + ":reorder:bt709-1-1-1:tv:left:420v"}
+
+-> make_encoder(r, spec, fifo)
+  if spec["backend"] == "ffmpeg"
+    return FfmpegSegmentEncoder.new(r["w"], r["h"], r["rate"][0], r["rate"][1], fifo)
+  MediaSegmentEncoder.new(r["w"], r["h"], r["rate"][0], r["rate"][1], spec["codec"], spec["quality"])
+
 -> segment_path(build, key)
-  build + "/segments/" + key + ".mp4"
+  build + "/segments/" + key + "." + get(SEGMENT_EXT, "ext", "hevc")
+
+SEGMENT_EXT = {"ext" => "hevc"}
 
 # Render a list of segments (indices into r["segments"]) through an encoder. Returns frames rendered.
 -> render_segments(eng, enc, r, build, idxs)
@@ -76,10 +143,17 @@ use render
         f += 1
       die("segment " + s["key"] + " failed") if !enc.close
       total += s["n"]
+  enc.finish
   total
 
 # Decode frame k of a stored segment (interim: ffmpeg) to a PNG or raw yuv420p, for `studio frame`.
 -> decode_segment_frame(path, k, out, yuv)
+  if path.ends_with?(".hevc") || path.ends_with?(".h264")
+    wrap = out + ".seg.mp4"
+    m = Mux.new(wrap, {rate: [24, 1], tc_start: nil})
+    m.append_file(path)
+    m.close
+    path = wrap
   sel = "select=eq(n\\," + k.to_s + ")"
   if yuv
     cmd = "ffmpeg -nostdin -y -v error -i " + shq(path) + " -vf " + shq(sel) + " -fps_mode passthrough -frames:v 1 -pix_fmt yuv420p -f rawvideo " + shq(out)

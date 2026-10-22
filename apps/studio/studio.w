@@ -39,8 +39,8 @@ use lib/mux
   out = opt(args, "--out", p.resolved_path)
   p.write_resolved(out)
   base = p.build + "/" + p.cut + "/"
-  write_text(base + "captions.srt", srt_text(r))
-  write_text(base + "chapters.txt", chapters_text(r))
+  write_text(p.out_path("captions.srt"), srt_text(r))
+  write_text(p.out_path("chapters.txt"), chapters_text(r))
   v1 = r["tracks"][0]["items"]
   << "resolved " + r["frames"].to_s + " frames (" + timecode(r["frames"], r["rate"][0], r["rate"][1]) + "), " + v1.size.to_s + " shots, " + r["intervals"].size.to_s + " intervals, " + r["segments"].size.to_s + " segments, " + r["samples"].to_s + " samples"
   << "assets " + (t1 - t0).to_s + " ms, resolve " + (t2 - t1).to_s + " ms -> " + out
@@ -138,7 +138,7 @@ STUDIO_BIN_DEFAULT = "/Users/erik/tungsten-worktrees/engine/apps/studio/bin/stud
   mkdir_p(p.build + "/tmp")
   if jobs <= 1
     eng = Engine.new(p, r)
-    enc = FfmpegSegmentEncoder.new(r["w"], r["h"], r["rate"][0], r["rate"][1], p.build + "/tmp/fifo." + run_token())
+    enc = make_encoder(r, p.encoder, p.build + "/tmp/fifo." + run_token())
     render_segments(eng, enc, r, p.build, take)
     eng.close
   else
@@ -182,7 +182,7 @@ STUDIO_BIN_DEFAULT = "/Users/erik/tungsten-worktrees/engine/apps/studio/bin/stud
   File.read(args[3]).split(",").each ->(x)
     idxs.push(x.to_i)
   eng = Engine.new(p, r)
-  enc = FfmpegSegmentEncoder.new(r["w"], r["h"], r["rate"][0], r["rate"][1], args[3] + ".fifo")
+  enc = make_encoder(r, p.encoder, args[3] + ".fifo")
   render_segments(eng, enc, r, p.build, idxs)
   eng.close
   File.delete(args[3])

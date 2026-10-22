@@ -1218,10 +1218,10 @@ SR48 = 48000
   p = Project.new(args[1], (args.size > 3 && args[2] == "--cut") ? args[3] : "full")
   p.verify_assets(true)
   r = p.resolve
-  out = p.build + "/" + p.cut + "/mix.wav"
+  out = p.out_path("mix.wav")
   m = Mixer.new(p, r)
   rep = m.mix(out)
-  write_text(p.build + "/" + p.cut + "/mix_report.json", JSON.encode(rep))
+  write_text(p.out_path("mix_report.json"), JSON.encode(rep))
   << "mix: " + rep["samples"].to_s + " samples (" + timecode(r["frames"], r["rate"][0], r["rate"][1]) + "), " + rep["lines"].to_s + " lines, " + rep["cues"].to_s + " cues; " + fixed6(rep["lufs_premaster"]) + " LUFS + " + fixed6(rep["gain_db"]) + " dB -> " + fixed6(rep["lufs"]) + " LUFS, true peak " + fixed6(rep["true_peak_dbtp"]) + " dBTP -> " + out
   << "mix timing ms: " + JSON.encode(rep["ms"])
   0

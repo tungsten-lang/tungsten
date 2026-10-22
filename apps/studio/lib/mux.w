@@ -2,7 +2,8 @@
 # track from tc_start and chapters, plus the SRT and YouTube chapter list generated from the resolved timeline;
 # and `studio verify`, which checks the A/V contract of TIMELINE.md §2 on any master.
 #
-# Interim back end: the ffmpeg CLI (concat demuxer with -c copy, AAC). core/media's AVAssetWriter mux replaces it.
+# Back end: core/media's Mux (AVAssetWriter passthrough, AAC, tmcd). Segments from the interim ffmpeg encoder
+# (--encoder ffmpeg) are joined with the ffmpeg concat demuxer instead, for the comparison.
 
 use base
 use project
@@ -11,7 +12,7 @@ use encode
 -> mux_master(p, r, out, opts)
   segs = r["segments"]
   base = p.build + "/" + p.cut
-  lst = base + "/segments.txt"
+  lst = p.out_path("segments.txt")
   lines = []
   nfr = 0
   limit = get(opts, "frames", r["frames"])
@@ -33,11 +34,25 @@ use encode
     if m["frame"] < nfr
       meta = meta + "\n[CHAPTER]\nTIMEBASE=" + r["rate"][1].to_s + "/" + r["rate"][0].to_s + "\nSTART=" + m["frame"].to_s + "\nEND=" + [e, nfr].min.to_s + "\ntitle=" + m["title"] + "\n"
     mi += 1
-  mfile = base + "/chapters.ffmeta"
+  mfile = p.out_path("chapters.ffmeta")
   write_text(mfile, meta)
-  wav = base + "/mix.wav"
+  wav = p.out_path("mix.wav")
   audio = File.exist?(wav) && get(opts, "audio", true)
   part = out + ".part.mp4"
+  if p.encoder["backend"] != "ffmpeg"
+    t0 = clock_ms()
+    m = nil
+    if audio
+      m = Mux.new(part, {rate: r["rate"], audio: wav, tc_start: get(r, "tc_start", "00:00:00:00"), frames: nfr})
+    else
+      m = Mux.new(part, {rate: r["rate"], tc_start: get(r, "tc_start", "00:00:00:00"), frames: nfr})
+    segs.each ->(s)
+      m.append_file(segment_path(p.build, s["key"])) if s["f0"] < limit
+    res = m.close
+    File.rename(part, out)
+    write_text(p.out_path("captions.srt"), srt_text(r))
+    write_text(p.out_path("chapters.txt"), chapters_text(r))
+    return [res[:frames], clock_ms() - t0, res]
   cmd = "ffmpeg -nostdin -y -v error -f concat -safe 0 -i " + shq(lst)
   cmd = cmd + " -i " + shq(wav) if audio
   cmd = cmd + " -f ffmetadata -i " + shq(mfile)
@@ -51,8 +66,8 @@ use encode
   t0 = clock_ms()
   die("mux failed") if !OS.system(cmd)
   File.rename(part, out)
-  write_text(base + "/captions.srt", srt_text(r))
-  write_text(base + "/chapters.txt", chapters_text(r))
+  write_text(p.out_path("captions.srt"), srt_text(r))
+  write_text(p.out_path("chapters.txt"), chapters_text(r))
   [nfr, clock_ms() - t0]
 
 -> cmd_mux(args)
@@ -60,13 +75,14 @@ use encode
   p.verify_assets(true)
   r = p.resolve
   p.write_resolved(p.resolved_path)
-  out = opt_arg(args, "--out", p.build + "/" + p.cut + "/master.mp4")
+  out = opt_arg(args, "--out", p.out_path("master.mp4"))
   opts = {}
   fr = opt_arg(args, "--frames", nil)
   opts["frames"] = fr.to_i if fr != nil
   opts["audio"] = false if args.include?("--no-audio")
   res = mux_master(p, r, out, opts)
   << "mux: " + res[0].to_s + " frames from " + r["segments"].size.to_s + " segments (passthrough) + mix -> " + out + " in " + res[1].to_s + " ms"
+  << "mux facts: " + res[2].to_s if res.size > 2
   0
 
 -> opt_arg(args, name, default)
@@ -107,8 +123,14 @@ use encode
   nfr = opt_arg(args, "--frames", r["frames"].to_s).to_i
   res = []
   << "verify " + master
+  mv = MediaVerify.check(master, {rate: [num, den], frames: nfr, tc_start: r["tc_start"]})
+  << "MediaVerify (core/media, AVFoundation):"
+  << MediaVerify.format(mv)
+  mv[:checks].each ->(c)
+    res.push(["media:" + c[:name].to_s, c[:ok], c[:detail]])
+  << "studio checks (ffprobe):"
   v = OS.capture("ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height,r_frame_rate,avg_frame_rate,time_base,nb_frames,color_range,color_space,color_transfer,color_primaries,chroma_location -of default=nw=1 " + shq(master))
-  check(res, "video stream", probe_val(v, "codec_name") == "h264" && probe_val(v, "width") == r["w"].to_s && probe_val(v, "height") == r["h"].to_s, probe_val(v, "codec_name").to_s + " " + probe_val(v, "width").to_s + "x" + probe_val(v, "height").to_s)
+  check(res, "video stream", (probe_val(v, "codec_name") == "h264" || probe_val(v, "codec_name") == "hevc") && probe_val(v, "width") == r["w"].to_s && probe_val(v, "height") == r["h"].to_s, probe_val(v, "codec_name").to_s + " " + probe_val(v, "width").to_s + "x" + probe_val(v, "height").to_s)
   rate = num.to_s + "/" + den.to_s
   check(res, "CFR " + rate, probe_val(v, "r_frame_rate") == rate && probe_val(v, "avg_frame_rate") == rate, "r_frame_rate " + probe_val(v, "r_frame_rate").to_s + ", avg " + probe_val(v, "avg_frame_rate").to_s)
   check(res, "frame count", probe_val(v, "nb_frames") == nfr.to_s, probe_val(v, "nb_frames").to_s + " of " + nfr.to_s)

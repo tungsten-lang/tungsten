@@ -56,14 +56,13 @@ use lib/mux
     << "  render \[" + rg[0].to_s + ", " + rg[1].to_s + ") " + (rg[1] - rg[0]).to_s + " frames: " + rg[2].join(" ")
   0
 
-STUDIO_BIN_DEFAULT = "/Users/erik/tungsten-worktrees/engine/apps/studio/bin/studio"
-
 -> run_token
   Crypto.sha256(clock().to_s + ":" + Crypto.random_bytes(8).to_s).slice(0, 10)
 
+# Workers are this binary (STUDIO_BIN overrides).
 -> studio_bin
   b = env("STUDIO_BIN")
-  return STUDIO_BIN_DEFAULT if b == nil || b == ""
+  return System.executable_path if b == nil || b == ""
   b
 
 # studio frame <episode.json> <f> [--png out] [--yuv out] [--fresh]: one frame, from its stored segment (decoded)
@@ -77,8 +76,11 @@ STUDIO_BIN_DEFAULT = "/Users/erik/tungsten-worktrees/engine/apps/studio/bin/stud
   out = opt(args, "--png", nil)
   yuv = opt(args, "--yuv", nil)
   seg = nil
-  r["segments"].each ->(s)
-    seg = s if s["f0"] <= f && f < s["f0"] + s["n"]
+  si = 0
+  segs = r["segments"]
+  while si < segs.size && seg == nil
+    seg = segs[si] if segs[si]["f0"] <= f && f < segs[si]["f0"] + segs[si]["n"]
+    si += 1 if seg == nil
   sp = segment_path(p.build, seg["key"])
   tc = timecode(f, r["rate"][0], r["rate"][1])
   if !flag?(args, "--fresh") && File.exist?(sp)
@@ -88,8 +90,7 @@ STUDIO_BIN_DEFAULT = "/Users/erik/tungsten-worktrees/engine/apps/studio/bin/stud
     die("decode failed") if !decode_segment_frame(sp, f - seg["f0"], target, yuv != nil)
     << "frame " + f.to_s + " (" + tc + ") from segment " + seg["key"].slice(0, 12) + " +" + (f - seg["f0"]).to_s + " -> " + target
     return 0
-  r["tracks"][0]["items"].each ->(it)
-    p.ensure_program(it, r["rate"][0], r["rate"][1]) if it["kind"] == "program"
+  p.ensure_program_frames(r, [si], 1)
   eng = Engine.new(p, r)
   t0 = clock_ms()
   eng.frame_into(f)
@@ -109,8 +110,6 @@ STUDIO_BIN_DEFAULT = "/Users/erik/tungsten-worktrees/engine/apps/studio/bin/stud
   p.verify_assets(true)
   r = p.resolve
   p.write_resolved(p.resolved_path)
-  r["tracks"][0]["items"].each ->(it)
-    p.ensure_program(it, r["rate"][0], r["rate"][1]) if it["kind"] == "program"
   jobs = opt(args, "--jobs", "1").to_i
   budget = opt(args, "--max-frames", "400").to_i
   lo = opt(args, "--from", "0").to_i
@@ -136,6 +135,8 @@ STUDIO_BIN_DEFAULT = "/Users/erik/tungsten-worktrees/engine/apps/studio/bin/stud
     << "render: nothing to do (" + segs.size.to_s + " segments in place)"
     return 0
   mkdir_p(p.build + "/tmp")
+  # program frames these segments need, rendered first (the programs run `jobs` at a time)
+  p.ensure_program_frames(r, take, jobs)
   if jobs <= 1
     eng = Engine.new(p, r)
     enc = make_encoder(r, p.encoder, p.build + "/tmp/fifo." + run_token())
@@ -182,6 +183,12 @@ STUDIO_BIN_DEFAULT = "/Users/erik/tungsten-worktrees/engine/apps/studio/bin/stud
   r = p.resolve
   a = args[2].to_i
   b = args[3].to_i
+  idxs = []
+  si = 0
+  r["segments"].each ->(s)
+    idxs.push(si) if s["f0"] < b && s["f0"] + s["n"] > a
+    si += 1
+  p.ensure_program_frames(r, idxs, 1)
   eng = Engine.new(p, r)
   fh = FileHandle.new(args[4], "wb")
   f = a

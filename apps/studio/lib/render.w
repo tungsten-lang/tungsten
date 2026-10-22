@@ -3,11 +3,19 @@
 # Binary-search the interval table, render each active item at its item-local frame into a layer canvas, and
 # composite (dissolve, fade-in, the V4 fades) into packed RGB24. Nothing carries from one frame to the next except
 # caches of pure precomputations keyed by their owners (decoded images, grain and vignette planes per style, the
-# rain/fog/particle fields per item, the bars and cards per item), so any worker renders any frame in any order
-# with identical bits. Ports every feature of tools/render.py; the differences are listed in TIMELINE.md §6.
+# rain/fog/particle fields per item, the mattes and cards per item), so any worker renders any frame in any order
+# with identical bits.
+#
+# The primitives are generic: a still under a camera move, a clip (frame sequences joined by crossfades, played
+# against the item's time), a group of panes, a frame sequence, a program's frames, a card (background + overlay
+# elements), black; dissolves, fades and wipes; a parameterised grade (grain, vignette, bloom); overlay elements on
+# the matte and timed text over the picture (lib/overlay.w). Everything that makes a series look like itself (the
+# grade's numbers, the camera curves, the bars, the supers, the cards) arrives as data in the episode's styles and
+# items.
 
 use base
 use raster
+use overlay
 
 -> smooth(a)
   a = ~0.0 if a < ~0.0
@@ -22,75 +30,80 @@ use raster
 -> ease(u)
   u * ~0.6 + ~0.4 * (~0.5 - ~0.5 * Math.cos(~3.141592653589793 * u))
 
-# render.py camera(): zoom and centre of a move at progress u over a shot of dur seconds.
--> camera_at(move, u, dur, fx, fy)
-  amp = ~0.035 + ~0.010 * dur
-  amp = ~0.15 if amp > ~0.15
-  e = ease(u)
-  if move == "push" || move == "pull"
-    z = ~1.0 + amp * e
-    z = ~1.0 + amp * (~1.0 - e) if move == "pull"
-    k = (z - ~1.0) / [amp, ~0.000001].max
-    return [z, ~0.5 + (fx - ~0.5) * ~0.5 * k, ~0.5 + (fy - ~0.5) * ~0.5 * k]
-  if move == "pan_l" || move == "pan_r"
-    span = ~0.035 + ~0.004 * dur
-    d = ~1.0
-    d = ~0.0 - ~1.0 if move == "pan_l"
-    return [~1.10, ~0.5 + d * span * (e - ~0.5), ~0.5]
-  if move == "tilt_u" || move == "tilt_d"
-    span = ~0.03 + ~0.004 * dur
-    d = ~1.0
-    d = ~0.0 - ~1.0 if move == "tilt_u"
-    return [~1.12, ~0.5, fy + d * span * (e - ~0.5)]
-  if move == "drift"
-    return [~1.04 + ~0.05 * e, ~0.5 + ~0.02 * (e - ~0.5), ~0.5 - ~0.012 * (e - ~0.5)]
-  [~1.02 + ~0.025 * e, ~0.5, ~0.5]
+# One axis of a travelling move: its base (the centre, the focus, or the centre pulled toward the focus by a
+# weight) plus a travel: "span" (s0 + s1 * dur, across e - 0.5) or "edge" (a fraction of the margin the zoom
+# leaves, (1 - 1/z) / 2, across 2e - 1), times dir.
+-> cam_axis(ax, f, z, e, dur)
+  return ~0.5 if ax == nil
+  b = get(ax, "base", "center")
+  base = ~0.5
+  if b == "focus"
+    base = f
+  elsif b != "center"
+    base = ~0.5 + (f - ~0.5) * to_f(b)
+  d = to_f(get(ax, "dir", 1))
+  if ax["span"] != nil
+    sp = ax["span"]
+    span = to_f(sp[0]) + to_f(sp[1]) * dur
+    return base + d * span * (e - ~0.5)
+  if ax["edge"] != nil
+    r = (~1.0 - ~1.0 / z) / ~2.0 * to_f(ax["edge"])
+    return base + d * r * (~2.0 * e - ~1.0)
+  base
 
--> status_color(label)
-  u = label.upcase
-  return [125, 220, 138] if u.starts_with?("ARTIFACT")
-  return [242, 193, 78] if u.starts_with?("THEOREM")
-  return [78, 161, 255] if u.starts_with?("EARLY")
-  return [242, 193, 78] if u.starts_with?("ARISTOTLE")
-  return [255, 138, 91] if u.starts_with?("LATE")
-  return [255, 107, 107] if u.starts_with?("LEGEND")
-  return [179, 157, 255] if u.starts_with?("MODERN")
-  [239, 234, 225]
+# A camera move at progress u over a shot of dur seconds: [zoom, centre x, centre y]. The curves come from the
+# style's "camera" table, one entry per move: zoom moves {amp: [base, per second, max], focus_k, reverse} drift
+# toward the focus as they zoom; travelling moves {z: [z0, z1], x: axis, y: axis} (see cam_axis).
+-> camera_at(cs, move, u, dur, fx, fy)
+  die("the style has no camera table") if cs == nil
+  m = cs[move]
+  m = cs["static"] if m == nil
+  die("no camera move " + move.to_s + " in the style") if m == nil
+  e = ease(u)
+  if m["amp"] != nil
+    am = m["amp"]
+    amp = to_f(am[0]) + to_f(am[1]) * dur
+    amp = to_f(am[2]) if amp > to_f(am[2])
+    z = ~1.0 + amp * e
+    z = ~1.0 + amp * (~1.0 - e) if get(m, "reverse", false)
+    k = (z - ~1.0) / [amp, ~0.000001].max
+    fk = to_f(m["focus_k"])
+    return [z, ~0.5 + (fx - ~0.5) * fk * k, ~0.5 + (fy - ~0.5) * fk * k]
+  zz = m["z"]
+  z = to_f(zz[0]) + to_f(zz[1]) * e
+  [z, cam_axis(m["x"], fx, z, e, dur), cam_axis(m["y"], fy, z, e, dur)]
+
+# Position k of a clip's sequence: its parts played in order, each seam a crossfade of xf frames (the outgoing
+# part's last xf frames under the incoming part's first xf). Returns [[part, frame index, weight], ...].
+-> seq_len(parts, xf)
+  n = 0
+  parts.each ->(pt)
+    n += pt["count"]
+  n - xf * (parts.size - 1)
+
+-> seq_entry(parts, xf, k)
+  last = parts.size - 1
+  i = 0
+  while i <= last
+    pt = parts[i]
+    st = 0
+    st = xf if i > 0
+    en = pt["count"]
+    en = pt["count"] - xf if i < last
+    solo = en - st
+    return [[i, pt["first"] + st + k, ~1.0]] if k < solo
+    k -= solo
+    if i < last
+      if k < xf
+        w = (k + 1 + ~0.0) / (xf + 1 + ~0.0)
+        return [[i, pt["first"] + pt["count"] - xf + k, ~1.0 - w], [i + 1, parts[i + 1]["first"] + k, w]]
+      k -= xf
+    i += 1
+  lp = parts[last]
+  [[last, lp["first"] + lp["count"] - 1, ~1.0]]
 
 -> rgb(c)
   [(c[0] + ~0.0) / ~255.0, (c[1] + ~0.0) / ~255.0, (c[2] + ~0.0) / ~255.0]
-
--> rgb_scaled(c, a)
-  [(c[0] + ~0.0) * a / ~255.0, (c[1] + ~0.0) * a / ~255.0, (c[2] + ~0.0) * a / ~255.0]
-
-# Python round(): half to even.
--> round_even(x)
-  f = Math.floor(x)
-  d = x - f
-  return f.to_i + 1 if d > ~0.5
-  return f.to_i if d < ~0.5
-  return f.to_i if f.to_i % 2 == 0
-  f.to_i + 1
-
-# render.py gap_text: centuries as Decimal(gap / 100) quantized half up (the exact value of the double), decades
-# with Python's round.
--> gap_text(gap)
-  if gap >= 100
-    tenths = gap / 10
-    r = gap % 10
-    if r > 5
-      tenths += 1
-    elsif r == 5
-      x = (gap + ~0.0) / ~100.0
-      tenths += 1 if exact_sign_mul_sub(x, ~100.0, gap + ~0.0) >= 0
-    return (tenths / 10).to_s + "." + (tenths % 10).to_s + " centuries later"
-  if gap >= 5
-    return "~" + (round_even((gap + ~0.0) / ~10.0) * 10).to_s + " years later"
-  "contemporary"
-
--> dotted(s)
-  return "" if s == nil
-  s.gsub("·", "•")
 
 + Engine
   ro :out, :w, :h, :frames_rendered
@@ -102,7 +115,9 @@ use raster
     @den = @r["rate"][1]
     @fps = (@num + ~0.0) / (@den + ~0.0)
     @seed = @r["seed"]
-    act = @proj.ep["cuts"][@r["cut"]]["picture"]["active"]
+    act = [0, 0, @w, @h]
+    pic = @proj.cut_cfg(@r["cut"])["picture"]
+    act = pic["active"] if pic != nil && pic["active"] != nil
     @ax0 = act[0]
     @bar_y = act[1]
     @aw = act[2]
@@ -148,7 +163,7 @@ use raster
     @planes = {}
     @fields = {}
     @parts = {}
-    @bars = {}
+    @mattes = {}
     @cards = {}
     @panes = {}
     @images = {}
@@ -163,7 +178,7 @@ use raster
     @act_b.close
     @layer0.close
     @layer1.close
-    @bars.values.each ->(c)
+    @mattes.values.each ->(c)
       c.close
     @cards.values.each ->(c)
       c.close
@@ -205,6 +220,9 @@ use raster
         @images.delete(old)
     img
 
+  -> overlay_image(key)
+    still(key)
+
   # Frame-sequence images (clips, animations, program caches): an LRU of 4, released as they fall out.
   -> seq_image(path)
     img = @seq[path]
@@ -219,19 +237,14 @@ use raster
         @seq.delete(old)
     img
 
-  -> seq_path(dir, pattern, first, idx)
-    # pattern "%05d.png": digits and extension
-    digits = pattern.slice(2, 1).to_i
-    ext = pattern.slice(4, pattern.size - 4)
-    dir + "/" + pad_int(first + idx, digits) + ext
-
   -> asset_seq_path(key, idx)
     a = @proj.ep["assets"][key]
     seq_path(@proj.asset_path(key), a["pattern"], a["first"], idx)
 
   # ------------------------------------------------------------------------------------------ planes
 
-  # Grain (10 planes) and vignette for a style, keyed by the style's own hash.
+  # Grain (count planes) and vignette for a style. The grain's random field is keyed by the grain's own
+  # parameters, so an unrelated change to the style (a camera curve) leaves it alone.
   -> planes(st)
     sk = hash_of(st)
     pl = @planes[sk]
@@ -242,12 +255,14 @@ use raster
       rs_vignette(@aw, @ah, to_f(vg["amount"]), to_f(vg["x"]), to_f(vg["y"]), to_f(vg["clip"]), to_f(vg["power"]), vig)
       gr = st["grain"]
       cnt = gr["count"]
+      var = to_f(get(gr, "blur_var", ~0.49))
+      gkey = id60("grain:" + hash_of(gr))
       tmp = f32[n]
       grains = []
       g = 0
       while g < cnt
         buf = f32[n]
-        rs_grain_tex(rng_key(@seed, id60("grain:" + sk), g, P_GRAIN), @aw, @ah, buf, tmp)
+        rs_grain_tex(rng_key(@seed, gkey, g, P_GRAIN), @aw, @ah, var, buf, tmp)
         grains.push(buf)
         g += 1
       pl = [vig, grains]
@@ -259,6 +274,7 @@ use raster
     st_t = gd["shadow_tint"]
     hl_t = gd["highlight_tint"]
     bl = gd["bloom"]
+    die("the grade's bloom grid is fixed at 1/8 size (bloom.down = 8)") if get(bl, "down", 8) != 8
     bt = bl["tint"]
     gr = st["grain"]
     @gp[0] = to_f(st_t[0])
@@ -316,99 +332,31 @@ use raster
       @parts[it["id"]] = t
     t
 
-  # ------------------------------------------------------------------------------------------ text
+  # ------------------------------------------------------------------------------------------ matte
 
-  # PIL anchor "lm" / "rm": the box's vertical middle between ascender and descender sits at y.
-  -> text_mid(c, x, y, s, size, family, weight, col, anchor)
-    m = c.measure_text(s, {size: size, family: family, weight: weight})
-    base = y + (m[:ascent] - m[:descent]) / ~2.0
-    c.text(x, base, s, {size: size, family: family, weight: weight, fill: col, anchor: anchor})
-
-  -> draw_bars(c, bar, st)
-    return nil if bar == nil
-    bs = st["bars"]
-    fam = bs["family"]
-    wt = bs["weight"]
-    place = dotted(bar["place"])
-    text_mid(c, 64, 76, place, bs["place_size"], fam, wt, rgb([148, 158, 176]), "start") if place != ""
-    lbl = dotted(bar["label"])
-    col = status_color(lbl)
-    gtxt = nil
-    gap = 0
-    if bar["ey"] != nil && bar["sy"] != nil
-      gap = bar["sy"] - bar["ey"]
-      gap = 0 if gap < 0
-      gtxt = dotted(bar["src"]) + "   •   " + gap_text(gap)
-    right_edge = ~1856.0
-    right_edge = right_edge - c.text_width(gtxt, {size: bs["gap_size"], family: fam, weight: wt}) - ~48.0 if gtxt != nil
-    if lbl != ""
-      c.circle(~74.5, ~1012.5, ~7.5, {fill: rgb(col)})
-      size = bs["label_size"]
-      while c.text_width(lbl, {size: size, family: fam, weight: wt}) > right_edge - ~94.0 && size > 15
-        size -= 1
-      text_mid(c, 94, 1012, lbl, size, fam, wt, rgb([235, 230, 220]), "start")
-    if gtxt != nil
-      text_mid(c, 1856, 1000, gtxt, bs["gap_size"], fam, wt, rgb([195, 202, 215]), "end")
-      bw = ~0.0
-      if gap <= 300
-        bw = gap * ~1.4
-      else
-        bw = ~420.0 + (gap - 300) * ~0.11
-      bw = ~24.0 if bw < ~24.0
-      bw = ~500.0 if bw > ~500.0
-      x0 = 1856 - bw.to_i
-      c.line(x0, ~1028.5, 1856, ~1028.5, {stroke: rgb(col), width: 3})
-      c.circle(x0 + ~0.5, ~1028.5, ~4.5, {fill: rgb([239, 234, 225])})
-      c.circle(~1856.5, ~1028.5, ~5.5, {fill: rgb(col)})
-    nil
-
-  # The letterbox of an item with its source bar, drawn once over black.
-  -> bars_canvas(it, bar, st)
-    c = @bars[it["id"]]
+  # The full frame around the active picture (the letterbox) with its static overlay elements, drawn once over
+  # the matte colour.
+  -> matte_canvas(it, matte)
+    c = @mattes[it["id"]]
     if c == nil
       c = Canvas.new(@w, @h)
-      c.clear("#000000")
-      draw_bars(c, bar, st)
+      c.clear(get(matte, "fill", "#000000"))
+      ov_draw(c, get(matte, "elements", nil), ~1.0, self) if matte != nil
       c.data_pointer
-      @bars[it["id"]] = c
+      @mattes[it["id"]] = c
     c
 
-  -> put_letterbox(it, bar, st, layer_ptr)
-    bc = bars_canvas(it, bar, st)
-    src = bc.data_pointer
+  -> put_matte(it, matte, layer_ptr)
+    return nil if @bar_y == 0 && @ah == @h
+    src = matte_canvas(it, matte).data_pointer
     rs_copy_rows(src, layer_ptr, @lstride, 0, @bar_y)
     rs_copy_rows(src, layer_ptr, @lstride, @bar_y + @ah, @h)
 
-  -> draw_supers(layer, p, st, lt)
-    sus = get(p, "supers", [])
-    return nil if sus.size == 0
-    ss = st["super"]
-    cps = to_f(ss["cps_ms"]) / ~1000.0
-    fade = to_f(ss["fade_ms"]) / ~1000.0
-    sus.each ->(s)
-      at = to_f(s[0]) / ~1000.0
-      dur = to_f(s[1]) / ~1000.0
-      ls = lt - at
-      if ls >= ~0.0 && ls < dur
-        text = s[2]
-        nch = (ls / cps).floor.to_i + 1
-        nch = text.size if nch > text.size
-        alpha = ~1.0
-        alpha = [~0.0, (dur - ls) / fade].max if ls >= dur - fade
-        col = rgb_scaled([242, 215, 145], alpha)
-        y = @bar_y + @ah - 66
-        part = text.slice(0, nch)
-        if alpha > ~0.25
-          layer.text(88, y, part, {size: ss["size"], family: ss["family"], fill: col, stroke: "#000000", width: 8, linejoin: "round"})
-        else
-          layer.text(88, y, part, {size: ss["size"], family: ss["family"], fill: col})
-    nil
-
   # ------------------------------------------------------------------------------------------ sources
 
-  # render.py render_source(): a crop of zoom z around (cx, cy) (+ jitter in source pixels), resampled to the
-  # active picture. Drawn as the whole image under a sub-pixel transform (a CoreGraphics crop rect would round to
-  # whole source pixels and make slow moves step).
+  # A crop of zoom z around (cx, cy) (+ jitter in source pixels), resampled to the active picture. Drawn as the
+  # whole image under a sub-pixel transform (a CoreGraphics crop rect would round to whole source pixels and make
+  # slow moves step).
   -> draw_source(canvas, img, z, cx, cy, jx, jy, flip)
     iw = img.width + ~0.0
     ih = img.height + ~0.0
@@ -434,7 +382,7 @@ use raster
     canvas.restore if flip
     nil
 
-  # The triptych's tall panes (render.py pane_source): a pw x ph crop at zoom z around (cx, cy).
+  # A pw x ph crop at zoom z around (cx, cy), framed for the pane's own aspect (tall triptych panes).
   -> draw_pane_source(canvas, img, pw, ph, z, cx, cy)
     iw = img.width + ~0.0
     ih = img.height + ~0.0
@@ -471,12 +419,12 @@ use raster
   -> draw_frames(it, k, layer, lptr)
     p = it["params"]
     cnt = p["count"]
-    idx = k
+    idx = k + get(p, "in", 0)
     idx = 0 if idx < 0
     idx = cnt - 1 if idx > cnt - 1
     path = ""
     if it["kind"] == "program"
-      path = seq_path(@proj.build + "/programs/" + p["source_sha"], "%05d.png", 0, idx)
+      path = @proj.program_frame(p, idx)
     else
       path = asset_seq_path(p["src"], idx)
     img = seq_image(path)
@@ -493,52 +441,141 @@ use raster
     rs_copy_rows(c.data_pointer, lptr, @lstride, 0, @h)
     nil
 
-  # render.py make_cards(): ink paper (a 1/4-size random field, up-sampled and blurred ~3 px) and spaced type.
+  # A card: a background (a colour, optionally with an ink-paper texture: a 1/down-size random field, up-sampled,
+  # box-blurred by the listed radii, tinted and added) and overlay elements.
   -> make_card(it)
     p = it["params"]
-    lay = p["layout"]
-    st = p["style"]
+    bg = p["bg"]
     c = Canvas.new(@w, @h)
-    n = @w * @h
-    paper = f32[n]
-    tmp = f32[n]
-    small = f64[(@w / 4) * (@h / 4)]
-    rng_fill_uniform(rng_key(@seed, id60("card-paper"), get(st, "paper_seed", 3), P_PAPER), (@w / 4) * (@h / 4), small)
-    rs_upsample(small, @w / 4, @h / 4, @w, @h, paper)
-    rs_box_rows(paper, tmp, @w, @h, 3)
-    rs_box_cols(tmp, paper, @w, @h, 3)
-    rs_box_rows(paper, tmp, @w, @h, 3)
-    rs_box_cols(tmp, paper, @w, @h, 3)
-    rs_box_rows(paper, tmp, @w, @h, 2)
-    rs_box_cols(tmp, paper, @w, @h, 2)
-    rs_card_base(paper, @w, @h, c.data_pointer, c.stride)
-    fam = get(st, "family", "Baskerville")
-    cx = (@w + ~0.0) / ~2.0
-    cy = (@h + ~0.0) / ~2.0
-    gold = rgb([242, 193, 78])
-    cream = rgb([236, 232, 225])
-    muted = rgb([150, 160, 175])
-    if lay["layout"] == "title"
-      spaced(c, cx, cy - ~70.0, lay["kicker"], 26, fam, gold, 8)
-      spaced(c, cx, cy + ~12.0, lay["title"], 66, fam, cream, 12)
-      c.line(cx - ~140.0, cy + ~48.5, cx + ~140.0, cy + ~48.5, {stroke: gold, width: 2})
-      spaced(c, cx, cy + ~104.0, lay["subtitle"], 28, fam, muted, 7)
+    col = get(bg, "color", [~0.0, ~0.0, ~0.0])
+    pp = bg["paper"]
+    if pp != nil
+      n = @w * @h
+      paper = f32[n]
+      tmp = f32[n]
+      dn = get(pp, "down", 4)
+      sw = @w / dn
+      sh = @h / dn
+      small = f64[sw * sh]
+      rng_fill_uniform(rng_key(@seed, id60(get(pp, "key", "card-paper")), get(pp, "seed", 3), P_PAPER), sw * sh, small)
+      rs_upsample(small, sw, sh, @w, @h, paper)
+      get(pp, "blur", []).each ->(r)
+        rs_box_rows(paper, tmp, @w, @h, r)
+        rs_box_cols(tmp, paper, @w, @h, r)
+      tint = pp["tint"]
+      rs_card_base(paper, @w, @h, c.data_pointer, c.stride, to_f(col[0]), to_f(col[1]), to_f(col[2]), to_f(pp["amount"]), to_f(tint[0]), to_f(tint[1]), to_f(tint[2]))
     else
-      rows = lay["rows"]
-      y = cy - (rows.size - 1) * ~36.0
-      rows.each ->(r)
-        c.text(cx - ~28.0, y, r[0], {size: 24, family: fam, fill: muted, anchor: "end"})
-        c.text(cx + ~28.0, y, r[1], {size: 32, family: fam, style: "italic", fill: cream, anchor: "start"})
-        y += ~72.0
+      c.clear([to_f(col[0]), to_f(col[1]), to_f(col[2])])
+    ov_draw(c, p["elements"], ~1.0, self)
     c.data_pointer
     c
 
-  # render.py draw_spaced: letter-spaced type centred on cx, baseline y (PIL drew it glyph by glyph, so the
-  # width is the advances plus spacing between, not after, the glyphs).
-  -> spaced(c, cx, y, s, size, fam, col, sp)
-    tw = c.text_width(s, {size: size, family: fam, spacing: sp})
-    total = tw - sp
-    c.text(cx - total / ~2.0, y, s, {size: size, family: fam, fill: col, spacing: sp, anchor: "start"})
+  # Jitter (style jitter_px, a counter-based normal per frame) plus the style's shakes: "hit" after each shake
+  # cue near the item, "open" at the item's start when its fx list has "shake".
+  -> jitter(it, st, p, k, lt)
+    jk = rng_key(@seed, item_key(it), k, P_JITTER)
+    jit = to_f(get(st, "jitter_px", ~0.3))
+    jx = rng_n(jk, 0) * jit
+    jy = rng_n(jk, 1) * jit
+    sk = get(st, "shake", nil)
+    if sk != nil
+      h = sk["hit"]
+      if h != nil
+        hs = to_f(h["s"])
+        get(p, "shakes", []).each ->(sm)
+          ds = lt - to_f(sm) / ~1000.0
+          if ds >= ~0.0 && ds < hs
+            kk = (~1.0 - ds / hs) * (~1.0 - ds / hs)
+            jx += Math.sin(ds * to_f(h["fx"])) * to_f(h["ax"]) * kk
+            jy += Math.cos(ds * to_f(h["fy"])) * to_f(h["ay"]) * kk
+      o = sk["open"]
+      if o != nil && get(p, "fx", []).include?("shake")
+        os = to_f(o["s"])
+        if lt < os
+          kk = (~1.0 - lt / os) * (~1.0 - lt / os)
+          jx += Math.sin(lt * to_f(o["fx"])) * to_f(o["ax"]) * kk
+          jy += Math.cos(lt * to_f(o["fy"])) * to_f(o["ay"]) * kk
+    [jx, jy]
+
+  # Draw clip sequence entries (lists of [part, frame, weight]) blended into @wb.
+  -> clip_frame_path(clip, e)
+    asset_seq_path(clip["parts"][e[0]]["src"], e[1])
+
+  -> load_clip_mix(clip, ws, z, jx, jy)
+    if ws.size == 1
+      draw_source(@act_a, seq_image(clip_frame_path(clip, ws[0])), z, ~0.5, ~0.5, jx, jy, false)
+      rs_load(@act_a.data_pointer, @astride, @aw, @ah, @wb)
+      return nil
+    if ws.size == 2
+      draw_source(@act_a, seq_image(clip_frame_path(clip, ws[0])), z, ~0.5, ~0.5, jx, jy, false)
+      draw_source(@act_b, seq_image(clip_frame_path(clip, ws[1])), z, ~0.5, ~0.5, jx, jy, false)
+      rs_lerp2(@act_a.data_pointer, @act_b.data_pointer, @astride, @aw, @ah, to_f(ws[1][2]), @wb)
+      return nil
+    rs_zero(@wb, @aw * @ah * 3)
+    ws.each ->(e)
+      if e[2] > ~0.0
+        draw_source(@act_a, seq_image(clip_frame_path(clip, e)), z, ~0.5, ~0.5, jx, jy, false)
+        rs_accum(@act_a.data_pointer, @astride, @aw, @ah, to_f(e[2]), @wb)
+    nil
+
+  # The weights of position pos of the sequence: entry k0 alone, or k0 and k0 + 1 mixed by the fraction.
+  -> clip_weights(clip, n, k0, k1, wgt, blend)
+    xf = clip["xf"]
+    a = seq_entry(clip["parts"], xf, k0)
+    return a if !(blend && wgt > ~0.02 && k1 != k0)
+    b = seq_entry(clip["parts"], xf, k1)
+    if a.size == 1 && b.size == 1
+      # two plain frames: the pair blend (lerp a -> b by wgt)
+      return [[a[0][0], a[0][1], ~1.0 - wgt], [b[0][0], b[0][1], wgt]]
+    out = []
+    a.each ->(e)
+      out.push([e[0], e[1], e[2] * (~1.0 - wgt)])
+    b.each ->(e)
+      out.push([e[0], e[1], e[2] * wgt])
+    out
+
+  -> draw_clip(it, p, clip, lt, dur, jx, jy)
+    n = seq_len(clip["parts"], clip["xf"])
+    cfps = to_f(get(clip, "fps", 24))
+    at = to_f(clip["at_ms"]) / ~1000.0
+    avail = [dur - at + to_f(get(clip, "add_ms", 0)) / ~1000.0, ~0.5].max
+    sp = clip["speed"]
+    speed = (n + ~0.0) / cfps / avail
+    speed = to_f(sp[0]) if speed < to_f(sp[0])
+    speed = to_f(sp[1]) if speed > to_f(sp[1])
+    if lt >= at
+      pos = (lt - at) * cfps * speed
+      hold = clip["hold"]
+      if hold != nil && pos >= (n - 1) + ~0.0
+        # past its last frame: hold it, pushing in slowly
+        t_end = (n - 1 + ~0.0) / cfps / speed
+        v = clamp01((lt - at - t_end) / [avail - t_end, ~0.5].max)
+        ec = ease(clamp01((n - 1 + ~0.0) / cfps / speed / avail))
+        z = to_f(hold["z0"]) + to_f(hold["dz"]) * ec + to_f(hold["push"]) * (~0.5 - ~0.5 * Math.cos(~3.141592653589793 * v))
+        load_clip_mix(clip, seq_entry(clip["parts"], clip["xf"], n - 1), z, jx, jy)
+        return nil
+      pos = (n - 1) + ~0.0 if pos > (n - 1) + ~0.0
+      k0 = pos.floor.to_i
+      k1 = [n - 1, k0 + 1].min
+      wgt = pos - k0
+      zm = clip["zoom"]
+      e = ease(clamp01((lt - at) / avail))
+      z = to_f(zm["z0"]) + to_f(zm["dz"]) * e
+      z = to_f(zm["z0"]) + to_f(zm["dz"]) * (~1.0 - e) if get(zm, "reverse", false)
+      load_clip_mix(clip, clip_weights(clip, n, k0, k1, wgt, get(clip, "blend", true)), z, jx, jy)
+      return nil
+    # before the clip starts: the still, pulling back so that it lands on the clip's first frame at `at`
+    pre = get(clip, "pre", {})
+    z = ~1.0 + to_f(get(pre, "zoom", ~0.0)) * (~1.0 - ease(clamp01(lt / [at, ~0.5].max)))
+    draw_source(@act_a, still(p["src"]), z, ~0.5, ~0.5, jx, jy, false)
+    xf = to_f(get(pre, "xf_ms", 500)) / ~1000.0
+    if lt > at - xf
+      a = smooth((lt - (at - xf)) / xf)
+      draw_source(@act_b, seq_image(clip_frame_path(clip, seq_entry(clip["parts"], clip["xf"], 0)[0])), ~1.0, ~0.5, ~0.5, jx, jy, false)
+      rs_lerp2(@act_a.data_pointer, @act_b.data_pointer, @astride, @aw, @ah, a, @wb)
+    else
+      rs_load(@act_a.data_pointer, @astride, @aw, @ah, @wb)
+    nil
 
   -> draw_still(it, k, layer, lptr)
     p = it["params"]
@@ -553,56 +590,16 @@ use raster
     fy = to_f(foc[1])
     flip = get(cam, "flip", false)
     ik = item_key(it)
-    jk = rng_key(@seed, ik, k, P_JITTER)
-    jit = to_f(get(st, "jitter_px", ~0.3))
-    jx = rng_n(jk, 0) * jit
-    jy = rng_n(jk, 1) * jit
-    get(p, "shakes", []).each ->(sm)
-      ds = lt - to_f(sm) / ~1000.0
-      if ds >= ~0.0 && ds < ~0.65
-        kk = (~1.0 - ds / ~0.65) * (~1.0 - ds / ~0.65)
-        jx += Math.sin(ds * ~85.0) * ~14.0 * kk
-        jy += Math.cos(ds * ~73.0) * ~9.0 * kk
+    jj = jitter(it, st, p, k, lt)
+    jx = jj[0]
+    jy = jj[1]
     fxl = get(p, "fx", [])
-    if fxl.include?("shake") && lt < ~0.6
-      kk = (~1.0 - lt / ~0.6) * (~1.0 - lt / ~0.6)
-      jx += Math.sin(lt * ~80.0) * ~10.0 * kk
-      jy += Math.cos(lt * ~70.0) * ~7.0 * kk
     clip = p["clip"]
     wipe = p["wipe"]
     if clip != nil
-      n = clip["count"]
-      cfps = to_f(get(clip, "fps", 24))
-      at = to_f(clip["at_ms"]) / ~1000.0
-      avail = [dur - at, ~0.5].max
-      speed = (n + ~0.0) / cfps / avail
-      speed = to_f(clip["min_speed"]) if speed < to_f(clip["min_speed"])
-      speed = to_f(clip["max_speed"]) if speed > to_f(clip["max_speed"])
-      if lt >= at
-        pos = (lt - at) * cfps * speed
-        pos = (n - 1) + ~0.0 if pos > (n - 1) + ~0.0
-        k0 = pos.floor.to_i
-        k1 = [n - 1, k0 + 1].min
-        wgt = pos - k0
-        z = ~1.0 + ~0.02 * ease(clamp01((lt - at) / avail))
-        draw_source(@act_a, seq_image(asset_seq_path(clip["src"], k0)), z, ~0.5, ~0.5, jx, jy, false)
-        if get(clip, "blend", true) && wgt > ~0.02 && k1 != k0
-          draw_source(@act_b, seq_image(asset_seq_path(clip["src"], k1)), z, ~0.5, ~0.5, jx, jy, false)
-          rs_lerp2(@act_a.data_pointer, @act_b.data_pointer, @astride, @aw, @ah, wgt, @wb)
-        else
-          rs_load(@act_a.data_pointer, @astride, @aw, @ah, @wb)
-      else
-        z = ~1.0 + ~0.07 * (~1.0 - ease(clamp01(lt / [at, ~0.5].max)))
-        draw_source(@act_a, still(p["src"]), z, ~0.5, ~0.5, jx, jy, false)
-        xf = to_f(get(clip, "xf_in_ms", 500)) / ~1000.0
-        if lt > at - xf
-          a = smooth((lt - (at - xf)) / xf)
-          draw_source(@act_b, seq_image(asset_seq_path(clip["src"], 0)), ~1.0, ~0.5, ~0.5, jx, jy, false)
-          rs_lerp2(@act_a.data_pointer, @act_b.data_pointer, @astride, @aw, @ah, a, @wb)
-        else
-          rs_load(@act_a.data_pointer, @astride, @aw, @ah, @wb)
+      draw_clip(it, p, clip, lt, dur, jx, jy)
     elsif wipe != nil
-      zc = camera_at(move, u, dur, fx, fy)
+      zc = camera_at(st["camera"], move, u, dur, fx, fy)
       draw_source(@act_a, still(p["src"]), zc[0], zc[1], zc[2], jx, jy, false)
       draw_source(@act_b, still(wipe["src"]), zc[0], zc[1], zc[2], jx, jy, false)
       t0 = to_f(wipe["at_ms"]) / ~1000.0
@@ -612,7 +609,7 @@ use raster
       glow = 1 if pw > ~0.0 && pw < ~1.0
       rs_wipe(@act_a.data_pointer, @act_b.data_pointer, @astride, @aw, @ah, pos, glow, @wb)
     else
-      zc = camera_at(move, u, dur, fx, fy)
+      zc = camera_at(st["camera"], move, u, dur, fx, fy)
       draw_source(@act_a, still(p["src"]), zc[0], zc[1], zc[2], jx, jy, flip)
       rs_load(@act_a.data_pointer, @astride, @aw, @ah, @wb)
     nn = @aw * @ah * 3
@@ -633,8 +630,8 @@ use raster
       rs_particles(@wb, @aw, @ah, particle_table(it), 110, lt, 0, @pbuf, @bbuf, @gk)
     rs_clip(@wb, nn)
     grade_into(st, it, k, 0, @aw, @ah, 0, 0, ~1.0, lptr, @ax0, @bar_y)
-    put_letterbox(it, p["bar"], st, lptr)
-    draw_supers(layer, p, st, lt)
+    put_matte(it, p["matte"], lptr)
+    ov_draw_timed(layer, p["overlays"], lt)
     nil
 
   # Grade the working image (w x h, sampling vignette/grain from column vx0) into the layer at (ox, oy).
@@ -664,15 +661,16 @@ use raster
       @panes[key] = c
     c
 
-  # render.py render_triptych: three tall panes fading in on their phrases, each graded alone, with labels.
+  # A group of panes (the triptych): each pane fades in at its phrase (less a lead), its source framed for the
+  # pane ("pane") or for the whole picture with a window cut out of it ("picture"), graded alone with its bottom
+  # rows shaded, and its overlay elements (a dot, a label) drawn at the pane's alpha.
   -> draw_group(it, k, layer, lptr)
     p = it["params"]
     st = p["style"]
     lt = (k + ~0.0) / @fps
     dur = [to_f(p["dur_ms"]) / ~1000.0, ~0.5].max
     rs_fill_rows(lptr, @lstride, @w, 0, @h, 0, 0, 0)
-    bs = st["bars"]
-    kids = p["children"]
+    kids = p["panes"]
     ci = 0
     while ci < kids.size
       ch = kids[ci]
@@ -680,24 +678,33 @@ use raster
       pw = pane[2]
       ph = pane[3]
       t0 = ~0.0
-      t0 = to_f(ch["at_ms"]) / ~1000.0 - ~0.4 if ch["at_ms"] != 0
-      a = smooth((lt - t0) / ~0.8)
+      t0 = to_f(ch["at_ms"]) / ~1000.0 - to_f(get(ch, "lead_ms", 0)) / ~1000.0 if ch["at_ms"] != 0
+      a = smooth((lt - t0) / (to_f(get(ch, "fade_ms", 800)) / ~1000.0))
       if a > ~0.0
-        pc = pane_canvas(pw, ph)
-        z = ~1.03 + ~0.06 * ease(clamp01((lt - t0) / [dur - t0, ~1.0].max))
-        draw_pane_source(pc, still(ch["src"]), pw, ph, z, ~0.5, ~0.42)
-        rs_load(pc.data_pointer, pc.stride, pw, ph, @wb)
-        grade_into_alpha(st, it, k, ci + 1, pw, ph, a, lptr, pane[0], @bar_y + pane[1])
-        cdot = rgb_scaled([255, 138, 91], a)
-        ctxt = rgb_scaled([238, 234, 225], a)
-        layer.circle(pane[0] + ~24.5, @bar_y + ph - ~35.5, ~6.5, {fill: cdot})
-        text_mid(layer, pane[0] + 40, @bar_y + ph - 36, ch["label"], bs["pane_size"], bs["family"], bs["weight"], ctxt, "start")
+        zm = ch["zoom"]
+        u = clamp01(lt / dur)
+        u = clamp01((lt - t0) / [dur - t0, ~1.0].max) if get(zm, "basis", "t0") == "t0"
+        z = to_f(zm["z0"]) + to_f(zm["dz"]) * ease(u)
+        foc = get(ch, "focus", [~0.5, ~0.45])
+        fr = get(ch, "frame", {})
+        vx0 = 0
+        if get(fr, "mode", "pane") == "picture"
+          vx0 = fr["x"]
+          draw_source(@act_a, still(ch["src"]), z, to_f(foc[0]), to_f(foc[1]), ~0.0, ~0.0, false)
+          rs_load(@act_a.data_pointer + vx0 * 4, @astride, pw, ph, @wb)
+        else
+          pc = pane_canvas(pw, ph)
+          draw_pane_source(pc, still(ch["src"]), pw, ph, z, to_f(foc[0]), to_f(foc[1]))
+          rs_load(pc.data_pointer, pc.stride, pw, ph, @wb)
+        sh = get(ch, "shade", {"rows" => 0, "to" => ~1.0})
+        grade_into_alpha(st, it, k, ci + 1, pw, ph, a, vx0, sh["rows"], to_f(sh["to"]), lptr, pane[0], @bar_y + pane[1])
+        ov_draw(layer, ch["elements"], a, self)
       ci += 1
     layer.data_pointer
-    put_letterbox(it, p["bar"], st, lptr)
+    put_matte(it, p["matte"], lptr)
     nil
 
-  -> grade_into_alpha(st, it, k, salt, w, h, alpha, lptr, ox, oy)
+  -> grade_into_alpha(st, it, k, salt, w, h, alpha, vx0, fade_rows, fade_to, lptr, ox, oy)
     pl = planes(st)
     sigma = load_gp(st)
     gw = w / 8
@@ -712,7 +719,7 @@ use raster
     gox = gox + @aw if gox < 0
     goy = rng_bits(gk, salt * 3 + 2) % @ah
     goy = goy + @ah if goy < 0
-    rs_grade2(@wb, @lb, w, h, @grid, gw, gh, @gp, pl[0], grains[gi], @aw, @ah, 0, gox, goy, 96, ~0.2, alpha, lptr, @lstride, ox, oy)
+    rs_grade2(@wb, @lb, w, h, @grid, gw, gh, @gp, pl[0], grains[gi], @aw, @ah, vx0, gox, goy, fade_rows, fade_to, alpha, lptr, @lstride, ox, oy)
     nil
 
   # ------------------------------------------------------------------------------------------ frame
@@ -763,6 +770,12 @@ use raster
     c.write_png(path)
     c.close
     path
+
+# Path of frame idx of a sequence: pattern "%05d.png" (digits and extension), numbered from first.
+-> seq_path(dir, pattern, first, idx)
+  digits = pattern.slice(2, 1).to_i
+  ext = pattern.slice(4, pattern.size - 4)
+  dir + "/" + pad_int(first + idx, digits) + ext
 
 -> rs_rgb_to_canvas(src, w, h, dst, stride) (u8[] i64 i64 i64 i64) i64
   y = 0

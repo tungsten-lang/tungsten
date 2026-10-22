@@ -43,7 +43,10 @@ use encode
   if p.encoder["backend"] != "ffmpeg"
     t0 = clock_ms()
     m = nil
-    if audio
+    kb = get(p.cut_cfg(p.cut), "audio_kbps", nil)
+    if audio && kb != nil
+      m = Mux.new(part, {rate: r["rate"], audio: wav, audio_kbps: kb, tc_start: get(r, "tc_start", "00:00:00:00"), frames: nfr})
+    elsif audio
       m = Mux.new(part, {rate: r["rate"], audio: wav, tc_start: get(r, "tc_start", "00:00:00:00"), frames: nfr})
     else
       m = Mux.new(part, {rate: r["rate"], tc_start: get(r, "tc_start", "00:00:00:00"), frames: nfr})

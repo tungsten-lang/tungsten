@@ -168,10 +168,10 @@ SEGMENT_EXT = {"ext" => "hevc"}
   total
 
 # Decode frame k of a stored segment (interim: ffmpeg) to a PNG or raw yuv420p, for `studio frame`.
--> decode_segment_frame(path, k, out, yuv)
+-> decode_segment_frame(path, k, out, yuv, rate)
   if path.ends_with?(".hevc") || path.ends_with?(".h264")
     wrap = out + ".seg.mp4"
-    m = Mux.new(wrap, {rate: [24, 1], tc_start: nil})
+    m = Mux.new(wrap, {rate: rate, tc_start: nil})
     m.append_file(path)
     m.close
     path = wrap

@@ -72,7 +72,7 @@ FL_MS = 705600
 + Resolver
   ro :out, :num, :den, :sr, :frames
 
-  -> new(@ep, @cut_name, @assets_sha, @counts)
+  -> new(@ep, @cut_name, @assets_sha, @counts, @pcaps)
     @cut = @ep["cuts"][@cut_name]
     die("no cut " + @cut_name.to_s) if @cut == nil
     @num = @cut["rate"][0]
@@ -304,6 +304,20 @@ FL_MS = 705600
     a1 = audio_lines()
     cues_out = audio_cues()
     subs = subtitles()
+    # captions a program writes for its own frames, on the shots that ask for them
+    i = 0
+    while i < shots.size
+      s = shots[i]
+      if get(s, "captions_from_program", false)
+        pc = nil
+        pc = @pcaps[s["source_sha"]] if @pcaps != nil
+        die("shot " + s["id"] + ": its program wrote no captions") if pc == nil
+        t0 = starts[i] - get(s, "in", 0) * @fpf
+        pc.each ->(c)
+          subs.push({"line" => nil, "from_ms" => ms_of(t0 + c[0] * FL_MS + FL_MS / 2), "to_ms" => ms_of(t0 + c[1] * FL_MS + FL_MS / 2), "text" => c[2]})
+      i += 1
+    subs = subs.sort ->(x, y)
+      x["from_ms"] <=> y["from_ms"]
     markers = chapters(v1)
     iv = intervals(v1, v4)
     segs = segments(iv)

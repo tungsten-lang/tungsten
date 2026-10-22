@@ -7,6 +7,7 @@
 #   studio mix <episode.json>                           -> build/<cut>/mix.wav (+ loudness report)
 #   studio mux <episode.json>                           -> build/<cut>/master.mp4, .srt, chapters.txt
 #   studio verify <master> [--resolved path]
+#   studio fcpxml <episode.json> [--cut full] [--out path] [--master path] -> FCPXML 1.11
 #
 # Build: bin/tungsten -o apps/studio/bin/studio apps/studio/studio.w (under the heavy lock).
 
@@ -17,7 +18,9 @@ use lib/raster
 use lib/render
 use lib/encode
 use lib/audio
+use lib/mixplain
 use lib/mux
+use lib/fcpxml
 
 -> opt(args, name, default)
   i = 0
@@ -87,7 +90,7 @@ use lib/mux
     target = out
     target = yuv if yuv != nil
     target = p.build + "/frame.png" if target == nil
-    die("decode failed") if !decode_segment_frame(sp, f - seg["f0"], target, yuv != nil)
+    die("decode failed") if !decode_segment_frame(sp, f - seg["f0"], target, yuv != nil, r["rate"])
     << "frame " + f.to_s + " (" + tc + ") from segment " + seg["key"].slice(0, 12) + " +" + (f - seg["f0"]).to_s + " -> " + target
     return 0
   p.ensure_program_frames(r, [si], 1)
@@ -237,7 +240,7 @@ use lib/mux
 
 -> main(args)
   if args.size == 0
-    << "usage: studio resolve|diff|frame|render|worker|mix|mux|verify ..."
+    << "usage: studio resolve|diff|frame|render|worker|mix|mux|verify|fcpxml|raw|gc|selftest ..."
     return 2
   c = args[0]
   return cmd_resolve(args) if c == "resolve"
@@ -245,9 +248,10 @@ use lib/mux
   return cmd_frame(args) if c == "frame"
   return cmd_render(args) if c == "render"
   return cmd_worker(args) if c == "worker"
-  return cmd_mix(args) if c == "mix"
+  return cmd_mix_any(args) if c == "mix"
   return cmd_mux(args) if c == "mux"
   return cmd_verify(args) if c == "verify"
+  return cmd_fcpxml(args) if c == "fcpxml"
   return selftest() if c == "selftest"
   return cmd_raw(args) if c == "raw"
   return cmd_gc(args) if c == "gc"

@@ -293,6 +293,17 @@ use encode
     t = expand(pr["spec"]["frames"], h, p["dur_ms"], nil, nil)
     seq_path(dir_of(t), base_of(t), 0, idx)
 
+  # A program frame that exists and ends with its PNG IEND chunk (a run killed mid-write leaves a short file).
+  -> frame_complete?(path)
+    return false if !File.exist?(path)
+    n = File.size(path)
+    return false if n < 57
+    m = File.mmap(path)
+    v = m.as_u8
+    ok = v[n - 8] == 73 && v[n - 7] == 69 && v[n - 6] == 78 && v[n - 5] == 68
+    m.close
+    ok
+
   # Render the frames of program items that the given segments need and that are not cached: the missing frame
   # indices of each run, in contiguous ranges split over up to `jobs` processes.
   -> ensure_program_frames(r, seg_idxs, jobs)
@@ -333,7 +344,7 @@ use encode
       dm = p["dur_ms"]
       miss = []
       need[key][1].keys.sort.each ->(idx)
-        miss.push(idx) if !File.exist?(program_frame(p, idx))
+        miss.push(idx) if !frame_complete?(program_frame(p, idx))
       if miss.size > 0
         mkdir_p(dir_of(program_frame(p, 0)))
         # contiguous runs, then cut into about `jobs` pieces

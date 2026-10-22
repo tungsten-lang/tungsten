@@ -121,15 +121,21 @@ use render
     return FfmpegSegmentEncoder.new(r["w"], r["h"], r["rate"][0], r["rate"][1], fifo)
   MediaSegmentEncoder.new(r["w"], r["h"], r["rate"][0], r["rate"][1], spec["codec"], spec["quality"])
 
+# STUDIO_SEGMENTS overrides the cache directory (benchmarks render a span fresh without touching the cache).
+-> segment_dir(build)
+  d = env("STUDIO_SEGMENTS")
+  return d if d != nil && d != ""
+  build + "/segments"
+
 -> segment_path(build, key)
-  build + "/segments/" + key + "." + get(SEGMENT_EXT, "ext", "hevc")
+  segment_dir(build) + "/" + key + "." + get(SEGMENT_EXT, "ext", "hevc")
 
 SEGMENT_EXT = {"ext" => "hevc"}
 
 # Render a list of segments (indices into r["segments"]) through an encoder. Returns frames rendered.
 -> render_segments(eng, enc, r, build, idxs)
   segs = r["segments"]
-  mkdir_p(build + "/segments")
+  mkdir_p(segment_dir(build))
   total = 0
   idxs.each ->(i)
     s = segs[i]

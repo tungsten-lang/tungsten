@@ -1214,13 +1214,32 @@ SR48 = 48000
     i += 1
   maxtp
 
+# The mix is a pure function of the resolved audio tracks, the mix settings, the loudness target and the audio
+# assets, so it is cached under that hash (build/audio/mix_<key>.wav): an edit that leaves the sound alone
+# (a camera move) reuses it.
+-> mix_key(p, r)
+  shas = {}
+  p.ep["assets"].keys.each ->(k)
+    shas[k] = p.asset_sha[k] if get(p.ep["assets"][k], "kind", "") == "audio"
+  hash_of({"v" => 3, "sr" => r["sr"], "samples" => r["samples"], "a1" => r["tracks"][2]["items"], "a3" => r["tracks"][3]["items"],
+           "mix" => p.ep["mix"], "loudness" => p.ep["cuts"][r["cut"]]["loudness"], "assets" => shas, "seed" => r["seed"]})
+
 -> cmd_mix(args)
   p = Project.new(args[1], (args.size > 3 && args[2] == "--cut") ? args[3] : "full")
   p.verify_assets(true)
   r = p.resolve
   out = p.out_path("mix.wav")
+  key = mix_key(p, r)
+  cached = p.build + "/audio/mix_" + key + ".wav"
+  if File.exist?(cached) && File.exist?(cached + ".json")
+    OS.system("rm -f " + shq(out) + " && ln " + shq(cached) + " " + shq(out))
+    write_text(p.out_path("mix_report.json"), File.read(cached + ".json"))
+    << "mix: unchanged audio (" + key.slice(0, 12) + "), reused " + cached
+    return 0
   m = Mixer.new(p, r)
-  rep = m.mix(out)
+  rep = m.mix(cached)
+  write_text(cached + ".json", JSON.encode(rep))
+  OS.system("rm -f " + shq(out) + " && ln " + shq(cached) + " " + shq(out))
   write_text(p.out_path("mix_report.json"), JSON.encode(rep))
   << "mix: " + rep["samples"].to_s + " samples (" + timecode(r["frames"], r["rate"][0], r["rate"][1]) + "), " + rep["lines"].to_s + " lines, " + rep["cues"].to_s + " cues; " + fixed6(rep["lufs_premaster"]) + " LUFS + " + fixed6(rep["gain_db"]) + " dB -> " + fixed6(rep["lufs"]) + " LUFS, true peak " + fixed6(rep["true_peak_dbtp"]) + " dBTP -> " + out
   << "mix timing ms: " + JSON.encode(rep["ms"])

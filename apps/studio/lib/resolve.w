@@ -14,7 +14,7 @@ SEG_MAX = 48
 # The compositor (transitions, fades, packing) is part of every frame key.
 COMPOSITOR = 3
 # Renderer versions, per kind: bump one when its pixels change, and only that kind's segments re-render.
-RENDERER = {"still" => 3, "clip" => 3, "frames" => 1, "program" => 1, "card" => 2, "black" => 1, "group" => 3, "fade_out" => 1}
+RENDERER = {"still" => 3, "clip" => 3, "frames" => 2, "program" => 1, "card" => 3, "black" => 1, "group" => 3, "fade_out" => 1}
 # Encoder settings in force (the segment key covers them): set from encoder_spec by the project.
 ENCODER = {"id" => "vt:hevc:q0.750000:reorder:bt709-1-1-1:tv:left:420v"}
 
@@ -264,10 +264,10 @@ ENCODER = {"id" => "vt:hevc:q0.750000:reorder:bt709-1-1-1:tv:left:420v"}
         su.push([x[0] - t0, x[1], x[2]]) if x[0] + x[1] > t0 && x[0] < t1 + 2000
       p["supers"] = su
     elsif kind == "frames"
+      # a frame sequence shows frame k at local frame k: its duration is not part of what it draws
       a = asset(s["src"])
       deps.push(asset_sha(s["src"]))
-      p["src"] = s["src"]
-      p["count"] = a["count"]
+      p = {"src" => s["src"], "count" => a["count"]}
     elsif kind == "program"
       die("program shot " + s["id"] + " has no source hash (Project.prepare_programs)") if s["source_sha"] == nil
       p["program"] = s["program"]
@@ -279,8 +279,7 @@ ENCODER = {"id" => "vt:hevc:q0.750000:reorder:bt709-1-1-1:tv:left:420v"}
       get(s, "deps", []).each ->(d)
         deps.push(asset_sha(d))
     elsif kind == "card"
-      p["layout"] = s["layout"]
-      p["style"] = style(s["style"])
+      p = {"layout" => s["layout"], "style" => style(s["style"])}
     elsif kind == "group"
       kids = []
       s["children"].each ->(ch)

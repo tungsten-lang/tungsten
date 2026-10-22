@@ -123,6 +123,7 @@
   blas_needed = ll_needs_blas(ll_probe_text)
   sparse_needed = ll_needs_sparse(ll_probe_text)
   quartz_needed = ll_needs_quartz(ll_probe_text)
+  media_needed = ll_needs_media(ll_probe_text)
   sci_io_needed = ll_needs_sci_io(ll_probe_text)
   wtensor_needed = ll_needs_wtensor(ll_probe_text)
   cuda_needed = ll_needs_cuda(ll_probe_text)
@@ -280,7 +281,7 @@
   # the native archive compiles nothing, and clang warns on the unused -I.
   runtime_dir = resolve_runtime_dir
   target_os = detect_target()[:os]
-  compiles_c = runtime_objs == nil || prime_needed || lexchars_needed || unicode_needed || sci_io_needed || wtensor_needed || quartz_needed || extra_c_includes.size() > 0
+  compiles_c = runtime_objs == nil || prime_needed || lexchars_needed || unicode_needed || sci_io_needed || wtensor_needed || quartz_needed || media_needed || extra_c_includes.size() > 0
   if target_os == "macos" && (blas_needed || sparse_needed || bridges_needed)
     compiles_c = true
   if target_os == "linux" && blas_needed
@@ -359,6 +360,15 @@
   if quartz_needed
     clang_cmd << gated_dir
     clang_cmd << "quartz.c "
+  # Media bridge: media.c everywhere (VideoToolbox encoder and segments on
+  # macOS, "media needs macOS" stubs elsewhere), media_avf.m (AVAssetWriter
+  # mux, AVAssetReader probes) on macOS only.
+  if media_needed
+    clang_cmd << gated_dir
+    clang_cmd << "media/media.c "
+    if detect_target()[:os] == "macos"
+      clang_cmd << gated_dir
+      clang_cmd << "media/media_avf.m "
   # Pure-C sci I/O (no system HDF5/NetCDF/Arrow) — all platforms.
   if sci_io_needed
     clang_cmd << gated_dir
@@ -428,6 +438,8 @@
       clang_cmd << " -framework Accelerate"
     if quartz_needed
       clang_cmd << " -framework CoreGraphics -framework CoreText -framework ImageIO -framework CoreFoundation"
+    if media_needed
+      clang_cmd << " -framework VideoToolbox -framework CoreMedia -framework CoreVideo -framework AVFoundation -framework AudioToolbox -framework Foundation -framework CoreFoundation"
     if mlx_needed
       clang_cmd << " "
       clang_cmd << mlx_ldflags()

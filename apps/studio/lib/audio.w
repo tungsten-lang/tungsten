@@ -298,6 +298,75 @@ Q28 = ~268435456.0
     i += 1
   0
 
+# Four biquads in cascade, sample by sample (cs: b0 b1 b2 a1 a2 per stage): the same arithmetic as four
+# biquad_run passes, but the stages' recursions overlap. An unused stage is the identity (1 0 0 0 0), exact.
+-> biquad4_run(x, n, cs) (f64[] i64 f64[]) i64
+  p0 = cs[0]
+  p1 = cs[1]
+  p2 = cs[2]
+  p3 = cs[3]
+  p4 = cs[4]
+  q0 = cs[5]
+  q1 = cs[6]
+  q2 = cs[7]
+  q3 = cs[8]
+  q4 = cs[9]
+  r0 = cs[10]
+  r1 = cs[11]
+  r2 = cs[12]
+  r3 = cs[13]
+  r4 = cs[14]
+  s0 = cs[15]
+  s1 = cs[16]
+  s2 = cs[17]
+  s3 = cs[18]
+  s4 = cs[19]
+  ax1 = ~0.0
+  ax2 = ~0.0
+  ay1 = ~0.0
+  ay2 = ~0.0
+  bx1 = ~0.0
+  bx2 = ~0.0
+  by1 = ~0.0
+  by2 = ~0.0
+  cx1 = ~0.0
+  cx2 = ~0.0
+  cy1 = ~0.0
+  cy2 = ~0.0
+  dx1 = ~0.0
+  dx2 = ~0.0
+  dy1 = ~0.0
+  dy2 = ~0.0
+  i = 0
+  while i < n
+    v = x[i]
+    y = p0 * v + p1 * ax1 + p2 * ax2 - p3 * ay1 - p4 * ay2
+    ax2 = ax1
+    ax1 = v
+    ay2 = ay1
+    ay1 = y
+    v = y
+    y = q0 * v + q1 * bx1 + q2 * bx2 - q3 * by1 - q4 * by2
+    bx2 = bx1
+    bx1 = v
+    by2 = by1
+    by1 = y
+    v = y
+    y = r0 * v + r1 * cx1 + r2 * cx2 - r3 * cy1 - r4 * cy2
+    cx2 = cx1
+    cx1 = v
+    cy2 = cy1
+    cy1 = y
+    v = y
+    y = s0 * v + s1 * dx1 + s2 * dx2 - s3 * dy1 - s4 * dy2
+    dx2 = dx1
+    dx1 = v
+    dy2 = dy1
+    dy1 = y
+    x[i] = y
+    i += 1
+  0
+
 # ffmpeg af_deesser.c (Airwindows DeEss), output mode.
 -> deesser_run(x, n, inten, maxi, freq, sr) (f64[] i64 f64 f64 f64 i64) i64
   srf = sr ## f64
@@ -1464,18 +1533,45 @@ Q28 = ~268435456.0
     info = wav_info(decoded(key))
     info[1] / (4 * info[2])
 
+  # Run a filter chain in place; consecutive biquads go four at a time through biquad4_run.
   -> chain(spec, x, n)
+    cs = f64[20]
+    nq = 0
     spec.each ->(f)
       k = f[0]
-      if k == "deesser"
-        deesser_run(x, n, to_f(f[1]), to_f(f[2]), to_f(f[3]), @sr)
-      elsif k == "compressor"
-        compressor_run(x, n, db_lin(to_f(f[1])), to_f(f[2]), to_f(f[3]), to_f(f[4]), to_f(f[5]), ~2.82843, @sr)
+      if k == "deesser" || k == "compressor"
+        flush_biquads(cs, nq, x, n)
+        nq = 0
+        if k == "deesser"
+          deesser_run(x, n, to_f(f[1]), to_f(f[2]), to_f(f[3]), @sr)
+        else
+          compressor_run(x, n, db_lin(to_f(f[1])), to_f(f[2]), to_f(f[3]), to_f(f[4]), to_f(f[5]), ~2.82843, @sr)
       else
         gain = ~0.0
         gain = to_f(f[3]) if f.size > 3
         c = biquad_design(k, to_f(f[1]), to_f(f[2]), gain, @sr + ~0.0)
-        biquad_run(x, n, c[0], c[1], c[2], c[3], c[4])
+        j = 0
+        while j < 5
+          cs[nq * 5 + j] = c[j]
+          j += 1
+        nq += 1
+        if nq == 4
+          flush_biquads(cs, nq, x, n)
+          nq = 0
+    flush_biquads(cs, nq, x, n)
+    nil
+
+  -> flush_biquads(cs, nq, x, n)
+    return nil if nq == 0
+    q = nq
+    while q < 4
+      cs[q * 5] = ~1.0
+      cs[q * 5 + 1] = ~0.0
+      cs[q * 5 + 2] = ~0.0
+      cs[q * 5 + 3] = ~0.0
+      cs[q * 5 + 4] = ~0.0
+      q += 1
+    biquad4_run(x, n, cs)
     nil
 
   -> rms_gain(n, target_db, max_db)

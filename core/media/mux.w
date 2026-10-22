@@ -28,14 +28,26 @@
 # none), drop-frame for 30000/1001 and 60000/1001 unless drop: false, with the
 # 24-hour flag, one sample spanning the whole video. faststart: true (default)
 # puts the moov before the media data.
+#
+# Chapters: chapters: [[title, first frame], ...] (ascending; or add them one
+# at a time with #chapter before close) become a QuickTime chapter track: a
+# disabled text track, one sample per chapter lasting until the next (the
+# last until the end), referenced from the video and audio tracks through
+# 'chap', which AVFoundation reads as chapterMetadataGroups and ffprobe as
+# chapters. Starts are exact frames (the track uses the video's timescale);
+# a first chapter after frame 0 sits behind an empty edit. MP4s also get a
+# Nero chpl box in moov/udta (100 ns starts, titles cut to 255 bytes, at
+# most 255 chapters) for players that read only that; chpl: false leaves it
+# out.
 
 + Mux
-  ro :path, :rate, :format, :frames, :tc_start, :drop
+  ro :path, :rate, :format, :frames, :tc_start, :drop, :handle
 
   # Mux.new(path, rate: [24, 1], format: nil (from the extension), audio: nil,
   # audio_codec: nil, audio_kbps: nil, tc_start: "00:00:00:00", drop: nil,
-  # faststart: true, frames: nil). frames: promises the total frame count, so
-  # the audio is fed exactly (close raises if a different count arrived).
+  # faststart: true, frames: nil, chapters: nil, chpl: true). frames:
+  # promises the total frame count, so the audio is fed exactly (close
+  # raises if a different count arrived).
   -> new(@path, opts = {})
     @rate = Timecode.rate(Mux.opt(opts, :rate, [24, 1]))
     @format = Mux.opt(opts, :format, nil)
@@ -56,6 +68,39 @@
     fmt = @format == nil ? nil : @format.to_s
     @handle = ccall("w_media_mux_new", @path, fmt, @rate[0], @rate[1], opts[:audio], opts[:audio_codec], opts[:audio_kbps],
                     tc_frame, @drop, Timecode.quanta(@rate), Mux.opt(opts, :faststart, true), opts[:frames])
+    @chapters = []
+    if opts != nil && opts.has_key?(:chapters) && opts[:chapters] != nil
+      opts[:chapters].each ->(c)
+        chapter(c[0], c[1])
+    if opts != nil && opts.has_key?(:chpl) && opts[:chpl] != nil
+      ccall("w_media_mux_set", @handle, "chpl", opts[:chpl])
+
+  # Add a chapter starting at `frame` (frames must ascend). Returns the count.
+  -> chapter(title, frame)
+    if @chapters.size > 0 && frame <= @chapters[@chapters.size - 1][1]
+      raise "Mux#chapter: '[title]' at frame [frame] is not after the previous chapter (frame [@chapters[@chapters.size - 1][1]])"
+    @chapters << [title.to_s, frame]
+    @chapters.size
+
+  -> chapters
+    @chapters
+
+  # Abandon the file: the writer stops and what it wrote is deleted.
+  -> cancel
+    ccall("w_media_mux_set", @handle, "cancel", true)
+
+  # Add chapters to an existing movie (no chapter track yet) without
+  # re-encoding or re-muxing: the moov gets the chapter track (and chpl for
+  # MP4) and moves to the front; the media data is copied once. rate:
+  # defaults to the video's frame duration. Returns the chapter count.
+  #   Mux.chapterize("master.mp4", "master.chapters.mp4", [["Opening", 0], ["Act I", 587]])
+  -> .chapterize(src, dst, chapters, opts = {})
+    r = Mux.opt(opts, :rate, nil)
+    if r == nil
+      md = MediaVerify.facts(src, false, false)[:min_frame_duration]
+      raise "Mux.chapterize: [src] has no video frame duration; pass rate:" if md == nil
+      r = [md[1], md[0]]
+    ccall("w_media_chapterize", src, dst, chapters, Timecode.rate(r))
 
   -> .opt(opts, key, fallback)
     if opts == nil || !opts.has_key?(key) || opts[key] == nil
@@ -79,5 +124,7 @@
   # Finish the file. Returns {frames:, audio_samples:, audio_source_samples:,
   # video_bytes:, file_bytes:}.
   -> close
+    if @chapters.size > 0
+      ccall("w_media_mux_set", @handle, "chapters", @chapters)
     r = ccall("w_media_mux_close", @handle)
     {frames: r[0], audio_samples: r[1], audio_source_samples: r[2], video_bytes: r[3], file_bytes: r[4]}

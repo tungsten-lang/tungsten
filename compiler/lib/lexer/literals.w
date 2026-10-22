@@ -140,19 +140,34 @@
         scan_vigesimal()
         return nil
     # Decimal
-    num = ""
-    while @pos < @chars.size() && (is_digit?(@lc[@pos]) || @chars[@pos] == "_")
-      num += @chars[@pos]
+    num_start = @pos
+    while @pos < @char_count && (is_digit?(@lc[@pos]) || @chars[@pos] == "_")
       @pos += 1
+    num = slice_chars(num_start, @pos - num_start)
+
+    # Fast exit for plain integers followed by delimiter/operator characters
+    # that cannot start a time (:), float/IPv4 (.), scientific (e/E), power (^),
+    # date (-), percentage (%), rational (/), currency suffix, duration, or unit.
+    if @pos >= @char_count
+      emit(:INT, num)
+      return nil
+    ncp = lc_cp(@lc[@pos])
+    if ncp < 128 && !is_alpha?(@lc[@pos]) && ncp != 46 && ncp != 32 && ncp != 58 && ncp != 45 && ncp != 37 && ncp != 47 && ncp != 94
+      emit(:INT, num)
+      return nil
+    if ncp == 32 && (@pos + 1 >= @char_count || !unit_alpha_at?(@pos + 1))
+      emit(:INT, num)
+      return nil
+
     # Standalone time: HH:MM:SS (1-2 digit hour 0-23, colon, minute digit 0-5)
-    if num.size() <= 2 && @pos < @chars.size() && @chars[@pos] == ":"
+    if num.size() <= 2 && @pos < @char_count && @chars[@pos] == ":"
       hour_val = num.to_i()
-      if hour_val <= 23 && @pos + 1 < @chars.size() && is_digit?(@lc[@pos + 1]) && @chars[@pos + 1] <= "5"
+      if hour_val <= 23 && @pos + 1 < @char_count && is_digit?(@lc[@pos + 1]) && @chars[@pos + 1] <= "5"
         if try_scan_time_after_hour(num)
           return nil
 
     # IPv4: N.N.N.N where first octet 0-255 (MUST check before float to prevent 192.168 → decimal)
-    if num.size() <= 3 && @pos < @chars.size() && @chars[@pos] == "." && @pos + 1 < @chars.size() && is_digit?(@lc[@pos + 1])
+    if num.size() <= 3 && @pos < @char_count && @chars[@pos] == "." && @pos + 1 < @char_count && is_digit?(@lc[@pos + 1])
       ip_val = num.to_i()
       if ip_val <= 255
         if try_scan_ipv4(num)
@@ -160,28 +175,23 @@
 
     # Check for float: '.' followed by a digit (lookahead prevents 1..2 range misparse)
     is_float = false
-    if @pos < @chars.size() && @chars[@pos] == "." && @pos + 1 < @chars.size() && is_digit?(@lc[@pos + 1])
-      num += "."
+    if @pos < @char_count && @chars[@pos] == "." && @pos + 1 < @char_count && is_digit?(@lc[@pos + 1])
       @pos += 1
       is_float = true
-      while @pos < @chars.size() && (is_digit?(@lc[@pos]) || @chars[@pos] == "_")
-        num += @chars[@pos]
+      while @pos < @char_count && (is_digit?(@lc[@pos]) || @chars[@pos] == "_")
         @pos += 1
+      num = slice_chars(num_start, @pos - num_start)
 
     # Scientific notation: 2e46, 1.5e-3
-    if @pos < @chars.size() && (@chars[@pos] == "e" || @chars[@pos] == "E")
+    if @pos < @char_count && (@chars[@pos] == "e" || @chars[@pos] == "E")
       e_pos = @pos + 1
-      if e_pos < @chars.size() && (@chars[e_pos] == "+" || @chars[e_pos] == "-")
+      if e_pos < @char_count && (@chars[e_pos] == "+" || @chars[e_pos] == "-")
         e_pos += 1
-      if e_pos < @chars.size() && is_digit?(@lc[e_pos])
-        num += @chars[@pos]
-        @pos += 1
-        if @pos < @chars.size() && (@chars[@pos] == "+" || @chars[@pos] == "-")
-          num += @chars[@pos]
+      if e_pos < @char_count && is_digit?(@lc[e_pos])
+        @pos = e_pos
+        while @pos < @char_count && is_digit?(@lc[@pos])
           @pos += 1
-        while @pos < @chars.size() && is_digit?(@lc[@pos])
-          num += @chars[@pos]
-          @pos += 1
+        num = slice_chars(num_start, @pos - num_start)
         is_float = true
 
     # Power notation: 2^46 (no space before ^, becomes integer)
@@ -247,7 +257,7 @@
     # unknown words after a number stay ordinary tokens, so `10 frogs` and
     # `10 m / 2` (where the trailing `/` makes the suffix unknown) are
     # untouched. `in` is excluded from the table (membership keyword).
-    if @pos + 1 < @chars.size() && @chars[@pos] == " " && unit_alpha_at?(@pos + 1)
+    if @pos + 1 < @char_count && @chars[@pos] == " " && unit_alpha_at?(@pos + 1)
       spaced_save = @pos
       @pos += 1
       unit = scan_known_unit_phrase()
@@ -256,10 +266,11 @@
         return nil
       # `in` is inches UNLESS a parenthesized tuple follows — membership
       # (`3 in (1 2 3)`) always parenthesizes its right-hand side.
-      unit = scan_unit_suffix()
-      if unit == "in" && !next_nonspace_is_lparen?()
-        emit(:QUANTITY, [num, unit])
-        return nil
+      if @pos + 1 < @char_count && @chars[@pos] == "i" && @chars[@pos + 1] == "n"
+        unit = scan_unit_suffix()
+        if unit == "in" && !next_nonspace_is_lparen?()
+          emit(:QUANTITY, [num, unit])
+          return nil
       @pos = spaced_save
 
     if is_float
@@ -268,37 +279,25 @@
     emit(:INT, num)
 
   -> scan_hex
-    num = ""
-    num += @chars[@pos]
-    @pos += 1
-    num += @chars[@pos]
-    @pos += 1
-    while @pos < @chars.size() && (is_hex_char?(@lc[@pos]) || @chars[@pos] == "_")
-      num += @chars[@pos]
+    start_pos = @pos
+    @pos += 2
+    while @pos < @char_count && (is_hex_char?(@lc[@pos]) || @chars[@pos] == "_")
       @pos += 1
-    emit(:INT, num)
+    emit(:INT, slice_chars(start_pos, @pos - start_pos))
 
   -> scan_bin
-    num = ""
-    num += @chars[@pos]
-    @pos += 1
-    num += @chars[@pos]
-    @pos += 1
-    while @pos < @chars.size() && (@chars[@pos] == "0" || @chars[@pos] == "1" || @chars[@pos] == "_")
-      num += @chars[@pos]
+    start_pos = @pos
+    @pos += 2
+    while @pos < @char_count && (@chars[@pos] == "0" || @chars[@pos] == "1" || @chars[@pos] == "_")
       @pos += 1
-    emit(:INT, num)
+    emit(:INT, slice_chars(start_pos, @pos - start_pos))
 
   -> scan_oct
-    num = ""
-    num += @chars[@pos]
-    @pos += 1
-    num += @chars[@pos]
-    @pos += 1
-    while @pos < @chars.size() && (@chars[@pos] >= "0" && @chars[@pos] <= "7" || @chars[@pos] == "_")
-      num += @chars[@pos]
+    start_pos = @pos
+    @pos += 2
+    while @pos < @char_count && (@chars[@pos] >= "0" && @chars[@pos] <= "7" || @chars[@pos] == "_")
       @pos += 1
-    emit(:INT, num)
+    emit(:INT, slice_chars(start_pos, @pos - start_pos))
 
   -> is_radix_digit?(lc, radix)
     cp = lc_cp(lc)
@@ -389,26 +388,24 @@
     # V = version [1-8], v = variant [89aAbB]
     if @pos + 36 > @char_count
       return false
-    # After the UUID, next char must not continue an identifier
-    if @pos + 36 < @char_count && is_name_char?(@lc[@pos + 36])
-      return false
     p = @pos
+    if @chars[p + 8] != "-" || @chars[p + 13] != "-" || @chars[p + 18] != "-" || @chars[p + 23] != "-"
+      return false
+    # After the UUID, next char must not continue an identifier
+    if p + 36 < @char_count && is_name_char?(@lc[p + 36])
+      return false
     # 8 hex digits
     i = 0
     while i < 8
       if !is_hex_char?(@lc[p + i])
         return false
       i += 1
-    if @chars[p + 8] != "-"
-      return false
     # 4 hex digits
     i = 0
     while i < 4
       if !is_hex_char?(@lc[p + 9 + i])
         return false
       i += 1
-    if @chars[p + 13] != "-"
-      return false
     # version nibble [1-8]
     v = @chars[p + 14]
     if v < "1" || v > "8"
@@ -419,8 +416,6 @@
       if !is_hex_char?(@lc[p + 15 + i])
         return false
       i += 1
-    if @chars[p + 18] != "-"
-      return false
     # variant nibble [89aAbB]
     if !is_uuid_variant_char?(@lc[p + 19])
       return false
@@ -430,8 +425,6 @@
       if !is_hex_char?(@lc[p + 20 + i])
         return false
       i += 1
-    if @chars[p + 23] != "-"
-      return false
     # 12 hex digits
     i = 0
     while i < 12
@@ -439,11 +432,7 @@
         return false
       i += 1
     # Valid UUID — consume it
-    value = ""
-    i = 0
-    while i < 36
-      value = value + @chars[p + i]
-      i += 1
+    value = slice_chars(p, 36)
     @pos = p + 36
     emit(:UUID, value)
     true
@@ -533,20 +522,20 @@
 
   -> peek_duration_unit
     # Look ahead for a duration unit at current position
-    if @pos >= @chars.size()
+    if @pos >= @char_count || !is_lower?(@lc[@pos])
       return nil
     ch = @chars[@pos]
     # Two-char units first: mo, ms, ns
-    if @pos + 1 < @chars.size()
-      two = ch + @chars[@pos + 1]
-      if two == "mo" || two == "ms" || two == "ns"
+    if (ch == "m" || ch == "n") && @pos + 1 < @char_count
+      nch = @chars[@pos + 1]
+      if (ch == "m" && (nch == "o" || nch == "s")) || (ch == "n" && nch == "s")
         # Make sure it's not followed by more alpha (e.g. "mol")
-        if @pos + 2 >= @chars.size() || !is_alpha?(@lc[@pos + 2])
-          return two
+        if @pos + 2 >= @char_count || !is_alpha?(@lc[@pos + 2])
+          return ch + nch
     # Single-char units: y, w, d, h, m, s
     if ch == "y" || ch == "w" || ch == "d" || ch == "h" || ch == "m" || ch == "s"
       # Make sure not followed by alpha (e.g. 'm' not followed by 'o' for 'mo')
-      if @pos + 1 >= @chars.size() || !is_alpha?(@lc[@pos + 1])
+      if @pos + 1 >= @char_count || !is_alpha?(@lc[@pos + 1])
         return ch
     nil
 
@@ -586,24 +575,33 @@
   # quantity: only a prefix accepted by known_unit_name? is committed.
   -> scan_known_unit_phrase
     saved_pos = @pos
-    candidate = ""
     last_unit = nil
     last_pos = saved_pos
-    while @pos < @chars.size()
+    first_word_checked = false
+    limit = saved_pos + 40
+    if limit > @char_count
+      limit = @char_count
+    while @pos < limit
       ch = @chars[@pos]
-      allowed = unit_alpha_at?(@pos) || ch in ("_" "/" "·" "*" "^" "-" "'" " " "(" ")") || (ch >= "0" && ch <= "9" && candidate.size() > 0) || is_subscript?(ch) || is_superscript_char?(ch)
+      allowed = unit_alpha_at?(@pos) || ch in ("_" "/" "·" "*" "^" "-" "'" " " "(" ")") || (ch >= "0" && ch <= "9" && @pos > saved_pos) || is_subscript?(ch) || is_superscript_char?(ch)
       break if !allowed
-      candidate += ch
       @pos += 1
       # Only commit a unit match at a word boundary: if the next char is an
       # ASCII letter, `candidate` is a prefix of a longer identifier/keyword
       # (e.g. "u" inside "unless", "m" inside "min") and must not be taken as
       # a unit. The scan continues, so a full-word unit ("min", "meters") is
       # still matched; a bare keyword after a number ("2 unless x") is not.
-      next_is_letter = @pos < @chars.size() && is_alpha?(@lc[@pos])
-      if known_unit_name?(candidate) && !next_is_letter
-        last_unit = "" + candidate
-        last_pos = @pos
+      next_is_letter = @pos < @char_count && is_alpha?(@lc[@pos])
+      if !next_is_letter
+        candidate = slice_chars(saved_pos, @pos - saved_pos)
+        if !first_word_checked
+          first_word_checked = true
+          if candidate != "in" && (is_keyword?(candidate) || candidate == "and" || candidate == "or")
+            @pos = saved_pos
+            return nil
+        if known_unit_name?(candidate)
+          last_unit = candidate
+          last_pos = @pos
     if last_unit != nil
       @pos = last_pos
       return last_unit
@@ -910,6 +908,21 @@
     # a scope/namespace reference, not the all-zeros address — bail and let the
     # class reference keep its tokens. ("::" is not a Tungsten operator.)
     if @pos > 0 && is_name_char?(@lc[@pos - 1])
+      return false
+    # Every valid IPv6 literal begins with either "::" or a 1-4 hex-digit
+    # group followed by ":". Bail out before scanning digits or allocating a
+    # candidate string when no colon appears in the first 5 characters.
+    has_colon = false
+    ci = @pos
+    cend = @pos + 4
+    if cend >= @char_count
+      cend = @char_count - 1
+    while ci <= cend
+      if lc_cp(@lc[ci]) == 58
+        has_colon = true
+        break
+      ci += 1
+    if !has_colon
       return false
     p = @pos
     # Maximal address body: RFC 5952 lowercase hex digits, ':' and '.' — the

@@ -113,11 +113,15 @@ use encode
   #               "patch": [[find, replace], ...],          optional literal substitutions (each must match)
   #               "append": "...",                          optional text appended (a dispatcher)
   #               "data": ["data/cues.csv", ...],           files the frames depend on (hashed into the key)
-  #               "link": {"exclude": ["frames", "out"]},   optional: run in a work dir that links the root's entries
+  #               "link": {"from": ".", "exclude": ["frames", "out"]},   optional: run in a work dir that links the
+  #                                                         entries of a folder (relative to the root)
   #               "run": ["{root}", "title", "{dur}", "{first}", "{last}", "{dir}"],   argv after the binary
   #               "frames": "{dir}/%05d.png",              where frame k lands
-  #               "count": "dur" | {"run": ["info", "{work}"]}}   the frame count: round(duration x rate), or
+  #               "count": "dur" | {"run": ["info", "{work}"]},   the frame count: round(duration x rate), or
   #                                                         the last line the program prints for these arguments
+  #               "captions": {"run": ["srt", "{work}"], "file": "{work}/out/captions.srt"}}   optional: captions the
+  #                                                         program writes for its frames (a shot opts in with
+  #                                                         "captions_from_program": true)
   # Placeholders: {root} the episode root, {dir} the run's cache directory, {work} its linked work directory,
   # {dur} the item's duration in seconds, {first} {last} the frame range (inclusive).
   -> compiler_path
@@ -170,6 +174,7 @@ use encode
   -> prepare_programs
     @programs = {}
     @counts = {}
+    @pcaps = {}
     cache_path = @build + "/programs/counts.json"
     counts = {}
     counts = JSON.parse(File.read(cache_path)) if File.exist?(cache_path)
@@ -194,7 +199,26 @@ use encode
             mkdir_p(@build + "/programs")
             write_text(cache_path, JSON.encode(counts))
           @counts[h] = counts[ck]
+        if spec["captions"] != nil
+          @pcaps[h] = program_captions(h, ph, spec["captions"])
     nil
+
+  # Captions a program writes for its own frames (an SRT file, after running it with the given arguments), as
+  # [from ms, to ms, text] from the program's frame 0; cached under the program hash and the arguments.
+  -> program_captions(h, ph, cs)
+    path = @build + "/programs/captions_" + sha(ph + "\n" + canon(cs)) + ".json"
+    return JSON.parse(File.read(path)) if File.exist?(path)
+    bin = program_bin(h)
+    cmd = shq(bin)
+    cs["run"].each ->(a)
+      cmd = cmd + " " + shq(expand(a, h, nil, nil, nil))
+    f = expand(cs["file"], h, nil, nil, nil)
+    die("program captions failed: " + cmd) if !OS.system(cmd + " > /dev/null 2>&1") || !File.exist?(f)
+    out = parse_srt(File.read(f))
+    mkdir_p(@build + "/programs")
+    write_text(path, JSON.encode(out))
+    << "program " + h.slice(0, 12) + ": " + out.size.to_s + " captions"
+    out
 
   -> file_sha(path)
     OS.capture("shasum -a 256 " + shq(path)).slice(0, 64)
@@ -234,9 +258,10 @@ use encode
     if !File.exist?(w + "/.linked")
       mkdir_p(w)
       ex = get(lk, "exclude", [])
-      File.entries(@root).each ->(nm)
+      src = File.expand_path(path_join(@root, get(lk, "from", ".")))
+      File.entries(src).each ->(nm)
         if nm != "." && nm != ".." && !ex.include?(nm)
-          OS.system("ln -sfn " + shq(@root + "/" + nm) + " " + shq(w + "/" + nm))
+          OS.system("ln -sfn " + shq(src + "/" + nm) + " " + shq(w + "/" + nm))
       write_text(w + "/.linked", "")
     w
 
@@ -351,7 +376,7 @@ use encode
 
   -> resolve
     prepare_programs() if @programs == nil
-    r = Resolver.new(@ep, @cut, @asset_sha, @counts)
+    r = Resolver.new(@ep, @cut, @asset_sha, @counts, @pcaps)
     @resolved = r.resolve
     @resolved
 
@@ -455,6 +480,31 @@ use encode
     out.push(n.to_s + "\n" + srt_time(s["from_ms"]) + " --> " + srt_time(s["to_ms"]) + "\n" + s["text"] + "\n")
     n += 1
   out.join("\n")
+
+# SubRip text -> [[from ms, to ms, text], ...].
+-> srt_ms(t)
+  h = t.slice(0, 2).to_i
+  m = t.slice(3, 2).to_i
+  sec = t.slice(6, 2).to_i
+  f = t.slice(9, 3).to_i
+  ((h * 60 + m) * 60 + sec) * 1000 + f
+
+-> parse_srt(text)
+  out = []
+  text.gsub("\r", "").split("\n\n").each ->(blk)
+    ls = []
+    blk.split("\n").each ->(x)
+      ls.push(x) if x != ""
+    if ls.size >= 3 && ls[1].index(" --> ") != nil
+      a = srt_ms(ls[1].slice(0, 12))
+      b = srt_ms(ls[1].slice(17, 12))
+      body = ls[2]
+      k = 3
+      while k < ls.size
+        body = body + "\n" + ls[k]
+        k += 1
+      out.push([a, b, body])
+  out
 
 -> chapters_text(r)
   out = ""

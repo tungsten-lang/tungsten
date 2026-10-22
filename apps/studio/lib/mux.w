@@ -16,8 +16,9 @@ use encode
   lines = []
   nfr = 0
   limit = get(opts, "frames", r["frames"])
+  lo = get(opts, "from", 0)
   segs.each ->(s)
-    if s["f0"] < limit
+    if s["f0"] < limit && s["f0"] + s["n"] > lo
       sp = segment_path(p.build, s["key"])
       die("segment missing: " + s["key"] + " at frame " + s["f0"].to_s + " (run studio render)") if !File.exist?(sp)
       lines.push("file '" + sp + "'")
@@ -47,7 +48,7 @@ use encode
     else
       m = Mux.new(part, {rate: r["rate"], tc_start: get(r, "tc_start", "00:00:00:00"), frames: nfr})
     segs.each ->(s)
-      m.append_file(segment_path(p.build, s["key"])) if s["f0"] < limit
+      m.append_file(segment_path(p.build, s["key"])) if s["f0"] < limit && s["f0"] + s["n"] > lo
     res = m.close
     File.rename(part, out)
     write_text(p.out_path("captions.srt"), srt_text(r))
@@ -79,6 +80,10 @@ use encode
   opts = {}
   fr = opt_arg(args, "--frames", nil)
   opts["frames"] = fr.to_i if fr != nil
+  fr = opt_arg(args, "--to", nil)
+  opts["frames"] = fr.to_i if fr != nil
+  fr = opt_arg(args, "--from", nil)
+  opts["from"] = fr.to_i if fr != nil
   opts["audio"] = false if args.include?("--no-audio")
   res = mux_master(p, r, out, opts)
   << "mux: " + res[0].to_s + " frames from " + r["segments"].size.to_s + " segments (passthrough) + mix -> " + out + " in " + res[1].to_s + " ms"

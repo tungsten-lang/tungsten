@@ -49,23 +49,43 @@ use audio
     nb = k_weight_blocks(bus, n, zs, sub)
     before = integrated_lufs(zs, nb)
     gain_db = target - before
-    bus_scale(bus, n * 2, db_lin(gain_db))
+    # The limiter takes the peaks back down, so the level can land under the target (narration has high crest
+    # factors): a second pass from the unlimited bus adds what the first fell short by.
+    orig = f32[n * 2]
+    copy_f32(bus, orig, n * 2)
     h = f64[48]
     tp_taps(h)
     g = f32[n]
-    tp_pre = tp_gain(bus, n, h, ceil, g)
     w = @sr / 1000 * 2
-    limit_apply(bus, n, g, w, ~1.0 - Math.exp((~0.0 - ~1.0) / (~0.1 * @sr)))
-    nb = k_weight_blocks(bus, n, zs, sub)
-    after = integrated_lufs(zs, nb)
+    rel = ~1.0 - Math.exp((~0.0 - ~1.0) / (~0.1 * @sr))
+    tp_pre = ~0.0
+    after = ~0.0
+    npass = 0
+    while npass < 3
+      copy_f32(orig, bus, n * 2) if npass > 0
+      bus_scale(bus, n * 2, db_lin(gain_db))
+      tp_pre = tp_gain(bus, n, h, ceil, g)
+      limit_apply(bus, n, g, w, rel)
+      nb = k_weight_blocks(bus, n, zs, sub)
+      after = integrated_lufs(zs, nb)
+      npass += 1
+      npass = 3 if (after - target).abs < ~0.05
+      gain_db = gain_db + (target - after)
     tp_post = true_peak(bus, n, h, ceil * ~0.5)
     t3 = clock_ms()
     write_wav_s24(out, bus, n, @sr)
     t4 = clock_ms()
     {"samples" => n, "lines" => lines.size, "cues" => @r["tracks"][3]["items"].size, "lufs_premaster" => before,
-     "gain_db" => gain_db, "lufs" => after, "true_peak_dbtp" => ~20.0 * Math.log(tp_post) * ~0.4342944819032518,
+     "gain_db" => gain_db - (target - after), "lufs" => after, "true_peak_dbtp" => ~20.0 * Math.log(tp_post) * ~0.4342944819032518,
      "true_peak_before_limit_dbtp" => ~20.0 * Math.log(tp_pre) * ~0.4342944819032518,
      "ms" => {"narration" => t1 - t0, "cues" => t2 - t1, "loudness" => t3 - t2, "write" => t4 - t3}}
+
+-> copy_f32(a, b, n) (f32[] f32[] i64) i64
+  i = 0
+  while i < n
+    b[i] = a[i]
+    i += 1
+  0
 
 # studio mix: the plain mix for episodes that ask for it, else lib/audio.w's chain (cmd_mix).
 -> cmd_mix_any(args)
@@ -75,7 +95,8 @@ use audio
   p.verify_assets(true)
   r = p.resolve
   out = p.out_path("mix.wav")
-  key = mix_key(p, r)
+  # the plain mixer's own version is part of its cache key
+  key = sha(mix_key(p, r) + ":plain-mix-2")
   cached = p.build + "/audio/mix_" + key + ".wav"
   if File.exist?(cached) && File.exist?(cached + ".json")
     OS.system("rm -f " + shq(out) + " && ln " + shq(cached) + " " + shq(out))

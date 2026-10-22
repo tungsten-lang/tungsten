@@ -1182,13 +1182,13 @@
         i = 0
         while i < nargs
           arg_tv = lower_expression(ctx, args[i])
-          # Mixed raw ABI: typed-array params take the boxed handle as-is;
-          # scalar params take raw machine ints; embedded ll/asm kernels take
-          # the start-corrected element-0 data address.
+          # Mixed raw ABI: typed-array and float params take the boxed value
+          # as-is; scalar params take raw machine ints; embedded ll/asm kernels
+          # take the start-corrected element-0 data address.
           pkind = nil
           if pkinds != nil
             pkind = pkinds[i]
-          if pkind == :arr
+          if pkind == :arr || pkind == :boxed
             arg_regs.push(ensure_i64_value(wfn, arg_tv))
           elsif pkind == :arrptr
             handle = ensure_i64_value(wfn, arg_tv)
@@ -1269,6 +1269,8 @@
                 pkind = pkinds[i]
               if pkind == :arr
                 arg_regs.push(guard_typed_array_arg(ctx, ensure_i64_value(wfn, arg_tv), fallback_types[i], arg_types[i], name, i))
+              elsif pkind == :boxed
+                arg_regs.push(ensure_i64_value(wfn, arg_tv))
               elsif pkind == :arrptr
                 handle = guard_typed_array_arg(ctx, ensure_i64_value(wfn, arg_tv), fallback_types[i], arg_types[i], name, i)
                 tda = next_temp(wfn)
@@ -1383,7 +1385,7 @@
       pkind = nil
       if pkinds != nil
         pkind = pkinds[i]
-      if pkind == :arr
+      if pkind == :arr || pkind == :boxed
         arg_regs.push(ensure_i64_value(wfn, arg_tv))
       elsif pkind == :arrptr
         handle = ensure_i64_value(wfn, arg_tv)

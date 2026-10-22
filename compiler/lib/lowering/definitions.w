@@ -391,17 +391,41 @@
 # a fn that returns a COMPUTED local (`hi = mulhi(a,b); hi`) infers nil at the tail
 # and is wrongly denied the raw ABI — boxing/truncating its u64 params. int_shaped_node?
 # is conservative (clearly-int exprs only), so this only marks definitely-int locals.
--> enrich_int_locals(body, base)
+# With fn_return_types, a local bound to a typed-signature call whose declared or
+# inferred return is a 64-bit machine int counts too (see typed_call_machine_int_type).
+-> enrich_int_locals(body, base, fn_return_types = nil)
   m = {}
   ks = base.keys()
   ki = 0
   while ki < ks.size()
     m[ks[ki]] = base[ks[ki]]
     ki += 1
-  scan_int_local_assigns(body, m)
+  scan_int_local_assigns(body, m, fn_return_types)
   m
 
--> scan_int_local_assigns(nodes, m)
+# A bare call that resolves to a typed-signature overload returning a 64-bit
+# machine int. The raw-ABI prepass runs before every callee's ABI is known, so
+# this reads the overload's return type, never raw_callable_fns: the answer must
+# not depend on definition order. The tail check (body_returns_only_int?) already
+# trusts the same fn_return_types entry for a tail call; this extends it to a
+# local that carries such a call's result to the tail (`x = mix(a); mix(x ^ b)`).
+-> typed_call_machine_int_type(node, var_types, fn_return_types)
+  if fn_return_types == nil || node == nil || !is_ast_node?(node) || ast_kind(node) != :call
+    return nil
+  if node.receiver != nil || node.block != nil
+    return nil
+  args = node.args
+  if args == nil || args.size() == 0
+    return nil
+  typed_key = typed_call_signature_key(node.name, inferred_arg_types(args, var_types, fn_return_types, lowering_infer_maps))
+  if typed_key == node.name
+    return nil
+  rt = normalize_type_symbol(fn_return_types[typed_key])
+  if is_machine_int64_type(rt)
+    return rt
+  nil
+
+-> scan_int_local_assigns(nodes, m, fn_return_types = nil)
   if nodes == nil
     return nil
   i = 0
@@ -424,16 +448,20 @@
             m[name] = hint_type
           elsif int_shaped_node?(n.value, m)
             m[name] = :i64
+          else
+            call_rt = typed_call_machine_int_type(n.value, m, fn_return_types)
+            if call_rt != nil
+              m[name] = call_rt
       if t == :if
-        scan_int_local_assigns(n.then_body, m)
-        scan_int_local_assigns(n.else_body, m)
+        scan_int_local_assigns(n.then_body, m, fn_return_types)
+        scan_int_local_assigns(n.else_body, m, fn_return_types)
         if n.elsif_clauses != nil
           j = 0
           while j < n.elsif_clauses.size()
-            scan_int_local_assigns(n.elsif_clauses[j][1], m)
+            scan_int_local_assigns(n.elsif_clauses[j][1], m, fn_return_types)
             j += 1
       if t == :while || t == :with
-        scan_int_local_assigns(n.body, m)
+        scan_int_local_assigns(n.body, m, fn_return_types)
     i += 1
 
 # Type-shape predicate for return values. Accepts any int-compatible
@@ -516,11 +544,18 @@
 # (arrays..., scalars...) fns spent ~45% of runtime in w_int/w_to_i64
 # round-trips, w_add on boxed returns, and bigint alloc/free churn for
 # scalar args >2^47.
--> mixed_raw_params?(params, child_var_types)
+# floats_ok (declared typed signatures only): f64/f32 params join the raw ABI
+# as :boxed kinds. The callee reads a float param through its boxed WValue under
+# either ABI (nothing is unboxed at entry), so the caller passes the same boxed
+# float it always did; only the scalar ints and the int return go raw. Before,
+# one float param sent the whole signature to the boxed ABI: `(f64[] i64 f64)
+# i64` returned every result through w_int, a heap BigInt from 2^47 up.
+-> mixed_raw_params?(params, child_var_types, floats_ok = false)
   if params == nil || params.size() == 0
     return false
   has_scalar = false
   has_array = false
+  has_float = false
   i = 0
   while i < params.size()
     p = params[i]
@@ -532,11 +567,15 @@
       has_scalar = true
     elsif is_typed_array_type?(pt)
       has_array = true
+    elsif floats_ok && pt in (:f64 :f32)
+      has_float = true
     else
       return false
     i += 1
-  has_array
+  has_array || has_float
 
+# Per-param raw ABI kinds: :scalar passes a raw machine int, :arr the typed-array
+# handle unchanged, :boxed a float's boxed WValue unchanged.
 -> raw_param_kinds(params, child_var_types)
   kinds = []
   i = 0
@@ -545,6 +584,8 @@
     pt = child_var_types[pname]
     if is_typed_array_type?(pt)
       kinds.push(:arr)
+    elsif pt in (:f64 :f32)
+      kinds.push(:boxed)
     else
       kinds.push(:scalar)
     i += 1
@@ -728,13 +769,13 @@
   if !rt_int_ok && !rt_bool_ok
     return [false, false]
   params = node.params
-  i64_or_mixed = all_params_i64?(params, child_var_types) || mixed_raw_params?(params, child_var_types)
+  i64_or_mixed = all_params_i64?(params, child_var_types) || mixed_raw_params?(params, child_var_types, node.param_types != nil)
   machine_int_passthrough = !i64_or_mixed && rt_int_ok && all_params_machine_int?(params, child_var_types) && body_is_param_passthrough?(node.body, params)
   if !i64_or_mixed && !machine_int_passthrough
     return [false, false]
   if i64_or_mixed && rt_bool_ok
     return [true, false]
-  enriched_types = enrich_int_locals(node.body, child_var_types)
+  enriched_types = enrich_int_locals(node.body, child_var_types, fn_return_types)
   body_int_ok = body_returns_only_int?(node.body, enriched_types, fn_return_types)
   if !body_int_ok
     return [false, false]

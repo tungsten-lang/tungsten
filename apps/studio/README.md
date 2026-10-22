@@ -190,5 +190,20 @@ mix 74 s, the mux 11 s. `verify` passes 16/16. 20 random `frame` outputs are bit
 decode. Changing one camera move re-renders 11 of 1,232 segments (6.5 s). See `doc/media.md` for the encoder,
 mux and verifier.
 
+Other episodes (2026-10-22, engine/generalise; details in `~/projects/studio/TIMELINE.md` §7):
+
+- **Profiles: Apollonius, Diophantus & Hypatia** (56,148 frames, 1080p24): timing 0 ms drift against the legacy
+  timeline, SRT identical, SSIM 0.934 against the shipped master (stills 0.914, programs and frame sequences 0.999),
+  `verify` 17/17 with 44 chapters; a 1,200-frame span in 10.6 s / 28 CPU-s (Metal grade) against the Python
+  renderer's 66.9 s / 142 CPU-s; one camera move re-renders 22 of 1,242 segments.
+- **openai/math 191-heilbronn** (10,125 frames at 2160p30, plus its 1080x1920 Short): teaser, title card, video and
+  outro as four `program` items rendered at 4K natively (bit-identical to the old pipeline's frames), plain mix at
+  -14 LUFS, both SRTs byte-identical to the shipped ones, SSIM 0.998, `verify` 17/17. Not faster than ffmpeg here:
+  libx264 encodes these flat 4K frames at ~140 fps against the engine's ~70 fps decode + composite + encode, and
+  the program frames dominate either way.
+- **Archimedes again, after the look became data:** 135 frames byte-identical (pre-encode RGB) to the previous
+  engine apart from the re-keyed grain; with `STUDIO_GRADE=cpu` its recipes and segment keys are unchanged by the
+  Metal-grade merge.
+
 The importers, comparison and benchmark scripts that produced these numbers (and the episode-specific layout of
 the Profiles look) live in `~/projects/studio/tools` and `~/projects/studio/styles`.

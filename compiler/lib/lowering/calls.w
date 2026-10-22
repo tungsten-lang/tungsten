@@ -357,6 +357,55 @@
     return typed_value(:raw_i64, tc)
 
   # NEON whole-butterfly DIT NTT stage — asm_neon_ntt_stage(v, stw, nblocks, halfq):
+  # Fast C runtime intrinsics for core AST field/kind/location accessors when
+  # the AST schema is loaded (`slab_offset_for_id` is defined in the module).
+  # Preserves the Tungsten definitions in ast.w for Stage 0 C VM, --interpret,
+  # and --ruby without needing new ccall stubs.
+  if receiver == nil && node.block == nil && args != nil && ctx[:mod][:known_fn_defs]["slab_offset_for_id"] != nil && !name_is_local_var?(wfn, ctx, name)
+    if name == "ast_get" && args.size() == 2
+      n_tv = lower_expression(ctx, args[0])
+      n_reg = ensure_i64_value(wfn, n_tv)
+      s_tv = lower_expression(ctx, args[1])
+      s_reg = ensure_i64_value(wfn, s_tv)
+      t = next_temp(wfn)
+      emit_wire_call_direct_i64(wfn, nil, [n_reg, s_reg], nil, nil, "w_ast_get", nil, nil, t)
+      return typed_value(:i64, t)
+    if name == "ast_set" && args.size() == 3
+      n_tv = lower_expression(ctx, args[0])
+      n_reg = ensure_i64_value(wfn, n_tv)
+      s_tv = lower_expression(ctx, args[1])
+      s_reg = ensure_i64_value(wfn, s_tv)
+      v_tv = lower_expression(ctx, args[2])
+      v_reg = ensure_i64_value(wfn, v_tv)
+      t = next_temp(wfn)
+      emit_wire_call_direct_i64(wfn, nil, [n_reg, s_reg, v_reg], nil, nil, "w_ast_set", nil, nil, t)
+      return typed_value(:i64, t)
+    if name == "ast_kind" && args.size() == 1
+      n_tv = lower_expression(ctx, args[0])
+      n_reg = ensure_i64_value(wfn, n_tv)
+      t = next_temp(wfn)
+      emit_wire_call_direct_i64(wfn, nil, [n_reg], nil, nil, "w_ast_kind", nil, nil, t)
+      return typed_value(:i64, t)
+    if name == "is_ast_node?" && args.size() == 1
+      n_tv = lower_expression(ctx, args[0])
+      n_reg = ensure_i64_value(wfn, n_tv)
+      t = next_temp(wfn)
+      emit_wire_call_direct_i64(wfn, nil, [n_reg], nil, nil, "w_is_ast_node", nil, nil, t)
+      return typed_value(:i64, t)
+    if name == "ast_children" && args.size() == 1
+      n_tv = lower_expression(ctx, args[0])
+      n_reg = ensure_i64_value(wfn, n_tv)
+      t = next_temp(wfn)
+      emit_wire_call_direct_i64(wfn, nil, [n_reg], nil, nil, "w_ast_children", nil, nil, t)
+      return typed_value(:i64, t)
+    if (name == "location_line" || name == "location_col") && args.size() == 1
+      r_tv = lower_expression(ctx, args[0])
+      r_reg = ensure_i64_value(wfn, r_tv)
+      t = next_temp(wfn)
+      c_fn = name == "location_line" ? "w_location_line" : "w_location_col"
+      emit_wire_call_direct_i64(wfn, nil, [r_reg], nil, nil, c_fn, nil, nil, t)
+      return typed_value(:i64, t)
+
   # v=coeffs 4xu32/16B, stw=per-stage twiddles, nblocks=llen/len, halfq=half/4.
   if name == "asm_neon_ntt_stage" && receiver == nil && args != nil && args.size() == 4
     vv = lower_expression(ctx, args[0])

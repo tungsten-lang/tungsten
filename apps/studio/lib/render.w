@@ -8,6 +8,7 @@
 
 use base
 use raster
+use grade
 
 -> smooth(a)
   a = ~0.0 if a < ~0.0
@@ -145,6 +146,9 @@ use raster
       @gk[j] = @gk[j] / gs
       j += 1
     @out = u8[@w * @h * 3]
+    # the per-pixel look (lib/grade.w): the CPU reference or the Metal kernels, as GRADE says
+    @fx = CpuGrade.new(@aw, @ah, @wb, @lb, @grid, @gcnt, @gtmp, @gp, @pbuf, @bbuf, @gk)
+    @fx = MetalGrade.new(@aw, @ah, @gk, @gp) if GRADE["id"] != "cpu"
     @planes = {}
     @fields = {}
     @parts = {}
@@ -250,7 +254,7 @@ use raster
         rs_grain_tex(rng_key(@seed, id60("grain:" + sk), g, P_GRAIN), @aw, @ah, buf, tmp)
         grains.push(buf)
         g += 1
-      pl = [vig, grains]
+      pl = [vig, grains, sk]
       @planes[sk] = pl
     pl
 
@@ -588,9 +592,9 @@ use raster
         draw_source(@act_a, seq_image(asset_seq_path(clip["src"], k0)), z, ~0.5, ~0.5, jx, jy, false)
         if get(clip, "blend", true) && wgt > ~0.02 && k1 != k0
           draw_source(@act_b, seq_image(asset_seq_path(clip["src"], k1)), z, ~0.5, ~0.5, jx, jy, false)
-          rs_lerp2(@act_a.data_pointer, @act_b.data_pointer, @astride, @aw, @ah, wgt, @wb)
+          @fx.lerp2(@act_a.data_pointer, @act_b.data_pointer, @astride, @aw, @ah, wgt)
         else
-          rs_load(@act_a.data_pointer, @astride, @aw, @ah, @wb)
+          @fx.load(@act_a.data_pointer, @astride, @aw, @ah)
       else
         z = ~1.0 + ~0.07 * (~1.0 - ease(clamp01(lt / [at, ~0.5].max)))
         draw_source(@act_a, still(p["src"]), z, ~0.5, ~0.5, jx, jy, false)
@@ -598,9 +602,9 @@ use raster
         if lt > at - xf
           a = smooth((lt - (at - xf)) / xf)
           draw_source(@act_b, seq_image(asset_seq_path(clip["src"], 0)), ~1.0, ~0.5, ~0.5, jx, jy, false)
-          rs_lerp2(@act_a.data_pointer, @act_b.data_pointer, @astride, @aw, @ah, a, @wb)
+          @fx.lerp2(@act_a.data_pointer, @act_b.data_pointer, @astride, @aw, @ah, a)
         else
-          rs_load(@act_a.data_pointer, @astride, @aw, @ah, @wb)
+          @fx.load(@act_a.data_pointer, @astride, @aw, @ah)
     elsif wipe != nil
       zc = camera_at(move, u, dur, fx, fy)
       draw_source(@act_a, still(p["src"]), zc[0], zc[1], zc[2], jx, jy, false)
@@ -610,28 +614,28 @@ use raster
       pos = (~0.0 - ~80.0) + pw * (@aw + ~160.0)
       glow = 0
       glow = 1 if pw > ~0.0 && pw < ~1.0
-      rs_wipe(@act_a.data_pointer, @act_b.data_pointer, @astride, @aw, @ah, pos, glow, @wb)
+      @fx.wipe(@act_a.data_pointer, @act_b.data_pointer, @astride, @aw, @ah, pos, glow)
     else
       zc = camera_at(move, u, dur, fx, fy)
       draw_source(@act_a, still(p["src"]), zc[0], zc[1], zc[2], jx, jy, flip)
-      rs_load(@act_a.data_pointer, @astride, @aw, @ah, @wb)
+      @fx.load(@act_a.data_pointer, @astride, @aw, @ah)
     nn = @aw * @ah * 3
     if fxl.include?("flicker")
       fl = ~1.0 - ~0.06 * (~0.5 + ~0.5 * Math.sin(lt * ~21.0 + Math.sin(lt * ~6.5) * ~3.0))
       fl = fl - ~0.14 if rng_bits(rng_key(@seed, ik, k, P_FLICKER), 0) % 97 < 3
-      rs_scale(@wb, nn, fl)
+      @fx.scale(nn, fl)
     if fxl.include?("rain")
       h2 = @ah * 2
       off = (lt * ~1400.0).floor.to_i % h2
-      rs_rain(@wb, @aw, @ah, rain_field(it), h2, off)
+      @fx.rain(rain_field(it), "rain:" + it["id"], h2, off)
     if fxl.include?("fog")
       off = (lt * ~22.0).floor.to_i % @aw
-      rs_fog(@wb, @aw, @ah, fog_field(it), @aw * 2, off)
+      @fx.fog(fog_field(it), "fog:" + it["id"], @aw * 2, off)
     if fxl.include?("snow")
-      rs_particles(@wb, @aw, @ah, particle_table(it), 240, lt, 1, @pbuf, @bbuf, @gk)
+      @fx.particles(particle_table(it), 240, lt, 1)
     if fxl.include?("dust") || fxl.include?("embers")
-      rs_particles(@wb, @aw, @ah, particle_table(it), 110, lt, 0, @pbuf, @bbuf, @gk)
-    rs_clip(@wb, nn)
+      @fx.particles(particle_table(it), 110, lt, 0)
+    @fx.clip(nn)
     grade_into(st, it, k, 0, @aw, @ah, 0, 0, ~1.0, lptr, @ax0, @bar_y)
     put_letterbox(it, p["bar"], st, lptr)
     draw_supers(layer, p, st, lt)
@@ -641,10 +645,6 @@ use raster
   -> grade_into(st, it, k, salt, w, h, vx0, fade_rows, fade_to, lptr, ox, oy)
     pl = planes(st)
     sigma = load_gp(st)
-    gw = w / 8
-    gh = h / 8
-    rs_grade1(@wb, w, h, @lb, @grid, @gcnt, gw, gh, @gp[15])
-    rs_blur_grid(@grid, @gtmp, gw, gh, sigma)
     gk = rng_key(@seed, item_key(it), k, P_GRAIN)
     grains = pl[1]
     gi = rng_bits(gk, salt * 3) % grains.size
@@ -653,7 +653,7 @@ use raster
     gox = gox + @aw if gox < 0
     goy = rng_bits(gk, salt * 3 + 2) % @ah
     goy = goy + @ah if goy < 0
-    rs_grade2(@wb, @lb, w, h, @grid, gw, gh, @gp, pl[0], grains[gi], @aw, @ah, vx0, gox, goy, fade_rows, fade_to, ~1.0, lptr, @lstride, ox, oy)
+    @fx.grade(pl, gi, gox, goy, sigma, w, h, vx0, fade_rows, fade_to, ~1.0, lptr, @lstride, ox, oy)
     nil
 
   -> pane_canvas(pw, ph)
@@ -686,7 +686,7 @@ use raster
         pc = pane_canvas(pw, ph)
         z = ~1.03 + ~0.06 * ease(clamp01((lt - t0) / [dur - t0, ~1.0].max))
         draw_pane_source(pc, still(ch["src"]), pw, ph, z, ~0.5, ~0.42)
-        rs_load(pc.data_pointer, pc.stride, pw, ph, @wb)
+        @fx.load(pc.data_pointer, pc.stride, pw, ph)
         grade_into_alpha(st, it, k, ci + 1, pw, ph, a, lptr, pane[0], @bar_y + pane[1])
         cdot = rgb_scaled([255, 138, 91], a)
         ctxt = rgb_scaled([238, 234, 225], a)
@@ -700,10 +700,6 @@ use raster
   -> grade_into_alpha(st, it, k, salt, w, h, alpha, lptr, ox, oy)
     pl = planes(st)
     sigma = load_gp(st)
-    gw = w / 8
-    gh = h / 8
-    rs_grade1(@wb, w, h, @lb, @grid, @gcnt, gw, gh, @gp[15])
-    rs_blur_grid(@grid, @gtmp, gw, gh, sigma)
     gk = rng_key(@seed, item_key(it), k, P_GRAIN)
     grains = pl[1]
     gi = rng_bits(gk, salt * 3) % grains.size
@@ -712,7 +708,7 @@ use raster
     gox = gox + @aw if gox < 0
     goy = rng_bits(gk, salt * 3 + 2) % @ah
     goy = goy + @ah if goy < 0
-    rs_grade2(@wb, @lb, w, h, @grid, gw, gh, @gp, pl[0], grains[gi], @aw, @ah, 0, gox, goy, 96, ~0.2, alpha, lptr, @lstride, ox, oy)
+    @fx.grade(pl, gi, gox, goy, sigma, w, h, 0, 96, ~0.2, alpha, lptr, @lstride, ox, oy)
     nil
 
   # ------------------------------------------------------------------------------------------ frame

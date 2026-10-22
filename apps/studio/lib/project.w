@@ -4,6 +4,7 @@
 use base
 use resolve
 use encode
+use grade
 
 + Project
   ro :ep, :path, :dir, :root, :build, :cut, :resolved, :asset_sha, :encoder
@@ -20,6 +21,7 @@ use encode
     @encoder = encoder_spec(@ep["cuts"][@cut])
     ENCODER["id"] = @encoder["id"]
     SEGMENT_EXT["ext"] = @encoder["ext"]
+    GRADE["id"] = grade_impl(@ep["cuts"][@cut])
 
   -> asset_path(key)
     a = @ep["assets"][key]

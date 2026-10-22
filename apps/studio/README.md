@@ -15,7 +15,8 @@ assembles masters by passthrough mux, with no ffmpeg. It is the video-processing
     studio frame <episode.json> <f> [--png out] [--fresh]
     studio render <episode.json> [--cut full] [--jobs N] [--max-frames N] [--from F --to F]   # missing segments only
     studio mix <episode.json> [--cut full]               # → build/<cut>/mix.wav and a loudness report
-    studio mux <episode.json> [--cut full]               # → build/<cut>/master.mp4 (passthrough), .srt, chapters.txt
+    studio mux <episode.json> [--cut full]               # → build/<cut>/master.mp4 (passthrough, chapter track), .srt
+    studio share <episode.json> [--cut full] [--preset share]   # → build/<cut>/share.mp4 (Transcode, checked)
     studio verify <master> --resolved <path>             # CFR, PTS, tmcd, A/V length, colour tags, sync
     studio fcpxml <episode.json> [--cut full]            # → build/<cut>/timeline.fcpxml (FCPXML 1.11)
     studio raw <episode.json> <from> <to> <path>         # pre-encode RGB24 frames, for comparisons
@@ -89,6 +90,10 @@ last one `tail_ms` longer). Explicit `captions` are anchored; program captions a
 ducking), or, with `"mix": {"mode": "plain"}`, places every take and cue as it is (cut at a cue's `until`)
 (lib/mixplain.w). Both end in BS.1770 integrated loudness, a linear gain to the cut's target and a 4x true-peak
 limiter, 24-bit WAV exactly the picture's length. The cut's `audio_kbps` sets the master's AAC rate.
+
+**Masters.** `studio mux` appends the segments (no re-encode) with the mix, a `tmcd` track and the resolved
+chapters as a QuickTime chapter track plus Nero `chpl` (exact frames); `studio verify` checks them. `studio share`
+transcodes the master with `Transcode` (any preset; chapters and timecode carried) and checks the copy.
 
 **FCPXML.** `studio fcpxml` writes FCPXML 1.11: rational times from the integers (frame f = f·den/num s, sample s =
 s/sr s); the picture on the spine (one clip of the master per item, named by its id, a note with kind, transition and

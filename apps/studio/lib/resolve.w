@@ -534,17 +534,24 @@ FL_MS = 705600
   # Chapters: at a shot's first frame, or at an anchor (snapped); the time is floored to the second.
   -> chapters(v1)
     out = []
-    section("markers").each ->(m)
+    ms = section("markers")
+    mi = 0
+    while mi < ms.size
+      m = ms[mi]
       if m["kind"] == "chapter"
+        at = m["at"]
         f = nil
-        if m["at"].is_a?(String)
-          v1.each ->(it)
-            f = it["f0"] if it["id"] == m["at"]
-          die("chapter at unknown shot " + m["at"].to_s) if f == nil
+        if at.is_a?(String)
+          k = 0
+          while k < v1.size
+            f = v1[k]["f0"] if v1[k]["id"] == at
+            k += 1
+          die("chapter at unknown shot " + at) if f == nil
         else
-          f = snap_flicks(anchor_fl(m["at"]), @num, @den)
+          f = snap_flicks(anchor_fl(at), @num, @den)
         sec = f * @den / @num
         out.push({"id" => m["id"], "title" => m["title"], "frame" => f, "sec" => sec, "tc" => timecode(f, @num, @den)})
+      mi += 1
     out
 
   # ------------------------------------------------------------------------------------------ 4. intervals

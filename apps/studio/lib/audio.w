@@ -2,17 +2,38 @@
 #
 # Port of the episode's tools/mix.py without ffmpeg: MP3s are decoded once by macOS afconvert into
 # build/audio/<sha256>.wav (48 kHz float), then every filter of the legacy chains runs here — RBJ biquads (the
-# ffmpeg highpass/lowpass/equalizer/treble designs), ffmpeg's deesser and acompressor algorithms, the FFT
-# split-band de-esser, noise-IR reverb by FFT convolution, looping with crossfades, sample-exact placement,
-# block ducking — then EBU R128 normalisation (BS.1770-4 integrated loudness, linear gain to the cut's target)
-# with a 4x-oversampled true-peak limiter, written as 48 kHz / 24-bit PCM exactly as long as the picture.
+# ffmpeg highpass/lowpass/equalizer/treble designs), ffmpeg's deesser and acompressor algorithms, the split-band
+# de-esser (a linear-phase FIR by block convolution), noise-IR reverb by FFT convolution, looping with crossfades,
+# sample-exact placement, block ducking — then EBU R128 normalisation (BS.1770-4 integrated loudness, linear gain to
+# the cut's target) with a 4x-oversampled true-peak limiter, written as 48 kHz / 24-bit PCM exactly as long as the
+# picture.
+#
+# Caches (build/audio/): every narration take's whole chain (EQ, de-ess, compression, gain, split-band de-ess,
+# reverb, pan) is stored once as take_<key>.wav under H(take SHA-256, chain parameters, seed, DSP_VERSION), and
+# every cue source's filter chain as cue_<key>.wav, both as 32-bit fixed point (Q3.28: 2^-29 resolution, ±8 range).
+# A nudge or ripple re-places cached takes and re-runs only the bus stages. The cold path computes a take, stores
+# it and places it from the stored file, so cold and cached mixes are bit-identical.
 
 use base
 
 SR48 = 48000
+# Bump when the bytes of a processed take or cue chain change (it is part of their cache keys).
+DSP_VERSION = "studio-dsp/2"
+# The split-band de-esser's FIR: 2 * DEESS_HALF + 1 taps (+-0.68 s), applied by overlap-add with DEESS_FFT-point
+# transforms (blocks of DEESS_FFT - 2 * DEESS_HALF samples). Against the legacy whole-take FFT on a 137 s take the
+# de-essed signal differs by at most 3.5e-8 (0.3 LSB at 24 bits); half 8192 gives 2.7 LSB, 16384 0.9 LSB.
+DEESS_HALF = 32768
+DEESS_FFT = 131072
+# Reverb overlap-add transform size (blocks of REVERB_FFT - irn + 1 samples); the same plan as the de-esser's.
+REVERB_FFT = 131072
+# Q3.28 fixed point for cached audio.
+Q28 = ~268435456.0
 
 -> db_lin(x)
   Math.exp(x * ~0.11512925464970229)
+
+-> ms_of(seconds)
+  (seconds * ~1000.0).round.to_i
 
 # ---------------------------------------------------------------------------------------------- WAV
 
@@ -306,7 +327,10 @@ SR48 = 48000
     sense = ~1.0 + intensity * intensity * sense
     sense = intensity if sense > intensity
     recovery = ~1.0 + (~0.01 / sense)
-    offset = ~1.0 - sample.abs
+    # |sample| spelled out: `.abs` in a typed function is a boxed method call (~55 ns)
+    sa = sample
+    sa = ~0.0 - sample if sample < ~0.0
+    offset = ~1.0 - sa
     if flip != 0
       ia = ia * (~1.0 - offset * iir) + sample * (offset * iir)
       if ra < sense
@@ -346,7 +370,7 @@ SR48 = 48000
   slope_lin = ~0.0
   i = 0
   while i < n
-    a = x[i].abs
+    a = x[i]
     a = a * a
     if a > slope_lin
       slope_lin = slope_lin + (a - slope_lin) * ac
@@ -388,7 +412,8 @@ SR48 = 48000
   p = ~0.0
   i = 0
   while i < n
-    v = x[i].abs
+    v = x[i]
+    v = ~0.0 - v if v < ~0.0
     p = v if v > p
     i += 1
   p
@@ -435,58 +460,231 @@ SR48 = 48000
   need
 
 # ---------------------------------------------------------------------------------------------- FFT
+# Complex FFT of n = 2^k points on split re/im f64 arrays, for fast convolution only. The forward transform is
+# decimation in frequency (natural order in, digit-reversed order out) and the inverse its mirror, decimation in
+# time (that order in, natural order out, unscaled): spectra are only ever multiplied point by point, so no
+# bit-reversal pass is needed. Radix-4 stages from the full span down, one radix-2 stage last when k is odd; the
+# twiddles of every stage are precomputed contiguously (6 doubles per butterfly: cos/sin of j, 2j and 3j turns of
+# 2 pi / span), so each stage reads them in order. Real signals go two per transform (see fir_ola_pairs).
 
--> fft_tables(n, cs, sn) (i64 f64[] f64[]) i64
-  i = 0
-  while i < n / 2
-    a = ~6.283185307179586 * (i ## f64) / (n ## f64)
-    cs[i] = Math.cos(a)
-    sn[i] = Math.sin(a)
-    i += 1
+# Size of the twiddle table of an n-point plan.
+-> fft4_table_size(n)
+  s = 0
+  span = n
+  while span >= 8
+    s += (span / 4) * 6
+    span = span / 4
+  s + 6
+
+-> fft4_twiddles(n, tw) (i64 f64[]) i64
+  o = 0
+  span = n
+  while span >= 8
+    q = span / 4
+    j = 0
+    while j < q
+      a = ~6.283185307179586 * (j ## f64) / (span ## f64)
+      tw[o] = Math.cos(a)
+      tw[o + 1] = Math.sin(a)
+      tw[o + 2] = Math.cos(a * ~2.0)
+      tw[o + 3] = Math.sin(a * ~2.0)
+      tw[o + 4] = Math.cos(a * ~3.0)
+      tw[o + 5] = Math.sin(a * ~3.0)
+      o += 6
+      j += 1
+    span = span / 4
+  o
+
+# One radix-4 DIF stage of span >= 8 over the whole array, twiddles from tw[to]: for each group, the four
+# quarter sequences a, b, c, d become z_m = sum_p x_p (-i)^(p m), times w^(m j), in place.
+-> fft4_dif(re, im, n, span, tw, to) (f64[] f64[] i64 i64 f64[] i64) i64
+  q = span / 4
+  s = 0
+  while s < n
+    j = 0
+    t = to
+    i0 = s
+    while j < q
+      i1 = i0 + q
+      i2 = i1 + q
+      i3 = i2 + q
+      ar = re[i0]
+      ai = im[i0]
+      br = re[i1]
+      bi = im[i1]
+      cr = re[i2]
+      ci = im[i2]
+      dr = re[i3]
+      di = im[i3]
+      t0r = ar + cr
+      t0i = ai + ci
+      t1r = ar - cr
+      t1i = ai - ci
+      t2r = br + dr
+      t2i = bi + di
+      t3r = br - dr
+      t3i = bi - di
+      re[i0] = t0r + t2r
+      im[i0] = t0i + t2i
+      z1r = t1r + t3i
+      z1i = t1i - t3r
+      z2r = t0r - t2r
+      z2i = t0i - t2i
+      z3r = t1r - t3i
+      z3i = t1i + t3r
+      w1r = tw[t]
+      w1i = tw[t + 1]
+      w2r = tw[t + 2]
+      w2i = tw[t + 3]
+      w3r = tw[t + 4]
+      w3i = tw[t + 5]
+      re[i1] = z1r * w1r + z1i * w1i
+      im[i1] = z1i * w1r - z1r * w1i
+      re[i2] = z2r * w2r + z2i * w2i
+      im[i2] = z2i * w2r - z2r * w2i
+      re[i3] = z3r * w3r + z3i * w3i
+      im[i3] = z3i * w3r - z3r * w3i
+      t += 6
+      i0 += 1
+      j += 1
+    s += span
   0
 
-# In-place iterative radix-2 FFT of length n (power of 2); inv != 0 for the inverse (unscaled). cs/sn hold the
-# twiddles of a larger power of two; ts = that size / n.
--> fft_run(re, im, n, inv, cs, sn, ts) (f64[] f64[] i64 i64 f64[] f64[] i64) i64
-  j = 0
-  i = 0
-  while i < n
-    if i < j
-      t = re[i]
-      re[i] = re[j]
-      re[j] = t
-      t = im[i]
-      im[i] = im[j]
-      im[j] = t
-    m = n / 2
-    while m >= 1 && j >= m
-      j = j - m
-      m = m / 2
-    j = j + m
-    i += 1
-  len = 2
-  while len <= n
-    half = len / 2
-    step = n / len
-    s = 0
-    while s < n
-      k = 0
-      while k < half
-        wr = cs[k * step * ts]
-        wi = sn[k * step * ts]
-        if inv == 0
-          wi = ~0.0 - wi
-        a = s + k
-        b = a + half
-        tr = re[b] * wr - im[b] * wi
-        ti = re[b] * wi + im[b] * wr
-        re[b] = re[a] - tr
-        im[b] = im[a] - ti
-        re[a] = re[a] + tr
-        im[a] = im[a] + ti
-        k += 1
-      s += len
-    len = len * 2
+# The mirror DIT stage (inverse direction, unscaled).
+-> fft4_dit(re, im, n, span, tw, to) (f64[] f64[] i64 i64 f64[] i64) i64
+  q = span / 4
+  s = 0
+  while s < n
+    j = 0
+    t = to
+    i0 = s
+    while j < q
+      i1 = i0 + q
+      i2 = i1 + q
+      i3 = i2 + q
+      w1r = tw[t]
+      w1i = tw[t + 1]
+      w2r = tw[t + 2]
+      w2i = tw[t + 3]
+      w3r = tw[t + 4]
+      w3i = tw[t + 5]
+      z1r = re[i1]
+      z1i = im[i1]
+      z2r = re[i2]
+      z2i = im[i2]
+      z3r = re[i3]
+      z3i = im[i3]
+      u1r = z1r * w1r - z1i * w1i
+      u1i = z1i * w1r + z1r * w1i
+      u2r = z2r * w2r - z2i * w2i
+      u2i = z2i * w2r + z2r * w2i
+      u3r = z3r * w3r - z3i * w3i
+      u3i = z3i * w3r + z3r * w3i
+      ar = re[i0]
+      ai = im[i0]
+      p0r = ar + u2r
+      p0i = ai + u2i
+      p1r = ar - u2r
+      p1i = ai - u2i
+      p2r = u1r + u3r
+      p2i = u1i + u3i
+      p3r = u1r - u3r
+      p3i = u1i - u3i
+      re[i0] = p0r + p2r
+      im[i0] = p0i + p2i
+      re[i2] = p0r - p2r
+      im[i2] = p0i - p2i
+      re[i1] = p1r - p3i
+      im[i1] = p1i + p3r
+      re[i3] = p1r + p3i
+      im[i3] = p1i - p3r
+      t += 6
+      i0 += 1
+      j += 1
+    s += span
+  0
+
+# The last radix-4 stage (span 4, no twiddles); dir 0 forward, 1 inverse.
+-> fft4_last4(re, im, n, dir) (f64[] f64[] i64 i64) i64
+  s = 0
+  while s < n
+    ar = re[s]
+    ai = im[s]
+    br = re[s + 1]
+    bi = im[s + 1]
+    cr = re[s + 2]
+    ci = im[s + 2]
+    dr = re[s + 3]
+    di = im[s + 3]
+    p0r = ar + cr
+    p0i = ai + ci
+    p1r = ar - cr
+    p1i = ai - ci
+    p2r = br + dr
+    p2i = bi + di
+    p3r = br - dr
+    p3i = bi - di
+    re[s] = p0r + p2r
+    im[s] = p0i + p2i
+    re[s + 2] = p0r - p2r
+    im[s + 2] = p0i - p2i
+    if dir == 0
+      re[s + 1] = p1r + p3i
+      im[s + 1] = p1i - p3r
+      re[s + 3] = p1r - p3i
+      im[s + 3] = p1i + p3r
+    else
+      re[s + 1] = p1r - p3i
+      im[s + 1] = p1i + p3r
+      re[s + 3] = p1r + p3i
+      im[s + 3] = p1i - p3r
+    s += 4
+  0
+
+# Radix-2 butterflies on adjacent pairs (the extra stage when log2 n is odd; its own inverse up to a factor 2).
+-> fft4_last2(re, im, n) (f64[] f64[] i64) i64
+  s = 0
+  while s < n
+    ar = re[s]
+    ai = im[s]
+    br = re[s + 1]
+    bi = im[s + 1]
+    re[s] = ar + br
+    im[s] = ai + bi
+    re[s + 1] = ar - br
+    im[s + 1] = ai - bi
+    s += 2
+  0
+
+-> fft4_forward(re, im, n, tw) (f64[] f64[] i64 f64[]) i64
+  span = n
+  to = 0
+  while span >= 8
+    fft4_dif(re, im, n, span, tw, to)
+    to += (span / 4) * 6
+    span = span / 4
+  if span == 4
+    fft4_last4(re, im, n, 0)
+  elsif span == 2
+    fft4_last2(re, im, n)
+  0
+
+# Inverse of fft4_forward times n.
+-> fft4_inverse(re, im, n, tw) (f64[] f64[] i64 f64[]) i64
+  span = n
+  to = 0
+  while span >= 8
+    to += (span / 4) * 6
+    span = span / 4
+  if span == 4
+    fft4_last4(re, im, n, 1)
+  elsif span == 2
+    fft4_last2(re, im, n)
+  span = span * 4
+  while span <= n
+    to -= (span / 4) * 6
+    fft4_dit(re, im, n, span, tw, to)
+    span = span * 4
   0
 
 -> zero_run(x, a, b) (f64[] i64 i64) i64
@@ -503,23 +701,92 @@ SR48 = 48000
     i += 1
   0
 
-# tools/mix.py deess_dynamic: split at ~3.4 kHz with a linear-phase frequency weighting (FFT), follow the high
-# and low band block RMS (32 samples) with attack/release, and clamp the high band against the body.
--> deess_hi_split(re, im, nfft, sr, cross) (f64[] f64[] i64 i64 f64) i64
-  k = 0
-  while k <= nfft / 2
-    fr = (k ## f64) * (sr ## f64) / (nfft ## f64)
-    w = (fr - (cross - ~400.0)) / ~800.0
-    w = ~0.0 if w < ~0.0
-    w = ~1.0 if w > ~1.0
-    re[k] = re[k] * w
-    im[k] = im[k] * w
-    if k > 0 && k < nfft / 2
-      re[nfft - k] = re[nfft - k] * w
-      im[nfft - k] = im[nfft - k] * w
-    k += 1
+# Two real blocks into one complex transform input: zr = x[sa, sa + la), zi = x[sb, sb + lb), zero-padded to nfft.
+-> pack_pair(x, sa, la, sb, lb, zr, zi, nfft) (f64[] i64 i64 i64 i64 f64[] f64[] i64) i64
+  i = 0
+  while i < la
+    zr[i] = x[sa + i]
+    i += 1
+  while i < nfft
+    zr[i] = ~0.0
+    i += 1
+  i = 0
+  while i < lb
+    zi[i] = x[sb + i]
+    i += 1
+  while i < nfft
+    zi[i] = ~0.0
+    i += 1
   0
 
+# out[p0 + j] += y[j] for j in [0, m), clipped to [0, n).
+-> add_run(out, n, y, p0, m) (f64[] i64 f64[] i64 i64) i64
+  j = 0
+  j = 0 - p0 if p0 < 0
+  e = m
+  e = n - p0 if p0 + m > n
+  while j < e
+    out[p0 + j] = out[p0 + j] + y[j]
+    j += 1
+  0
+
+# The split-band de-esser's high band filter: tools/mix.py weighted the whole take's spectrum by
+# w(f) = clip((f - (cross - 400)) / 800, 0, 1), a zero-phase high-pass with a linear ramp from cross - 400 to
+# cross + 400 Hz. Its impulse response is delta - h_lp with the trapezoid low-pass
+#   h_lp(t) = sin(pi (f1 + f2) t) / (pi t) * sin(pi (f2 - f1) t) / (pi (f2 - f1) t),   h_lp(0) = f1 + f2
+# (f in cycles per sample; band-limited, so the sampled sequence has exactly that spectrum). Truncated to
+# |t| <= half, delayed by half (causal), zero-padded to nfft, transformed and scaled by 1 / nfft into hr/hi.
+-> deess_fir_spectrum(cross, sr, half, nfft, tw, hr, hi) (f64 i64 i64 i64 f64[] f64[] f64[]) i64
+  f1 = (cross - ~400.0) / (sr ## f64)
+  f2 = (cross + ~400.0) / (sr ## f64)
+  pi = ~3.141592653589793
+  zero_run(hr, 0, nfft)
+  zero_run(hi, 0, nfft)
+  t = 0 - half
+  while t <= half
+    v = f1 + f2
+    if t != 0
+      tf = t ## f64
+      v = Math.sin(pi * (f1 + f2) * tf) / (pi * tf) * (Math.sin(pi * (f2 - f1) * tf) / (pi * (f2 - f1) * tf))
+    h = ~0.0 - v
+    h = ~1.0 - v if t == 0
+    hr[t + half] = h
+    t += 1
+  fft4_forward(hr, hi, nfft, tw)
+  s = ~1.0 / (nfft ## f64)
+  i = 0
+  while i < nfft
+    hr[i] = hr[i] * s
+    hi[i] = hi[i] * s
+    i += 1
+  0
+
+# out = x (*) h for a real FIR h of 2 half + 1 taps centred on tap half (spectrum hr/hi from deess_fir_spectrum),
+# by overlap-add: blocks of nfft - 2 half samples, two per transform (x_a + i x_b: h is real, so the real part of
+# the product's inverse is x_a (*) h and the imaginary part x_b (*) h), one forward and one inverse per pair.
+-> fir_ola_pairs(x, n, hr, hi, nfft, half, tw, zr, zi, out) (f64[] i64 f64[] f64[] i64 i64 f64[] f64[] f64[] f64[]) i64
+  blk = nfft - 2 * half
+  zero_run(out, 0, n)
+  st = 0
+  while st < n
+    la = blk
+    la = n - st if st + la > n
+    sb = st + blk
+    lb = 0
+    if sb < n
+      lb = blk
+      lb = n - sb if sb + lb > n
+    pack_pair(x, st, la, sb, lb, zr, zi, nfft)
+    fft4_forward(zr, zi, nfft, tw)
+    cmul_run(zr, zi, hr, hi, nfft)
+    fft4_inverse(zr, zi, nfft, tw)
+    add_run(out, n, zr, st - half, la + 2 * half)
+    add_run(out, n, zi, sb - half, lb + 2 * half) if lb > 0
+    st += 2 * blk
+  0
+
+# tools/mix.py deess_dynamic: the high band (above) and the body, block RMS (32 samples) with attack/release, and
+# the high band clamped against the body.
 -> deess_apply(x, hi, n, sr, max_ratio, abs_lim, env_a, env_b) (f64[] f64[] i64 i64 f64 f64 f64[] f64[]) i64
   step = 32
   m = n / step
@@ -605,26 +872,168 @@ SR48 = 48000
     i += 1
   0
 
+# (ar, ai) = (re, im) * (h1r, h1i); (re, im) *= (h0r, h0i): one spectrum times two kernels.
+-> cmul2_run(re, im, h0r, h0i, h1r, h1i, ar, ai, n) (f64[] f64[] f64[] f64[] f64[] f64[] f64[] f64[] i64) i64
+  i = 0
+  while i < n
+    xr = re[i]
+    xi = im[i]
+    ar[i] = xr * h1r[i] - xi * h1i[i]
+    ai[i] = xr * h1i[i] + xi * h1r[i]
+    re[i] = xr * h0r[i] - xi * h0i[i]
+    im[i] = xr * h0i[i] + xi * h0r[i]
+    i += 1
+  0
+
+# Reverb by overlap-add (tools/mix.py: dry * (1 - wet / 2) + wet * x (*) ir_c, times pan_c): blocks of
+# nfft - irn + 1 samples, two blocks per forward transform (the IRs are real, so the real and imaginary parts of
+# each inverse are the two blocks' outputs) and one inverse per channel. h0/h1 are the channels' IR spectra,
+# scaled by 1 / nfft. outl/outr get total = n + irn - 1 samples.
+-> reverb_ola_pairs(x, n, h0r, h0i, h1r, h1i, irn, nfft, tw, zr, zi, ar, ai, outl, outr, total, wet, pl, pr) (f64[] i64 f64[] f64[] f64[] f64[] i64 i64 f64[] f64[] f64[] f64[] f64[] f64[] f64[] i64 f64 f64 f64) i64
+  zero_run(outl, 0, total)
+  zero_run(outr, 0, total)
+  blk = nfft - irn + 1
+  st = 0
+  while st < n
+    la = blk
+    la = n - st if st + la > n
+    sb = st + blk
+    lb = 0
+    if sb < n
+      lb = blk
+      lb = n - sb if sb + lb > n
+    pack_pair(x, st, la, sb, lb, zr, zi, nfft)
+    fft4_forward(zr, zi, nfft, tw)
+    cmul2_run(zr, zi, h0r, h0i, h1r, h1i, ar, ai, nfft)
+    fft4_inverse(zr, zi, nfft, tw)
+    fft4_inverse(ar, ai, nfft, tw)
+    add_run(outl, total, zr, st, la + irn - 1)
+    add_run(outr, total, ar, st, la + irn - 1)
+    if lb > 0
+      add_run(outl, total, zi, sb, lb + irn - 1)
+      add_run(outr, total, ai, sb, lb + irn - 1)
+    st += 2 * blk
+  dry = ~1.0 - wet * ~0.5
+  i = 0
+  while i < total
+    d = ~0.0
+    d = x[i] if i < n
+    outl[i] = (d * dry + outl[i] * wet) * pl
+    outr[i] = (d * dry + outr[i] * wet) * pr
+    i += 1
+  0
+
 # ---------------------------------------------------------------------------------------------- bus
 
 # Add (left, right) * gain into the interleaved bus at sample s0 (clipped to the bus), with an optional duck:
-# the gain is multiplied by db(depth * duck[sample / 64]) when depth != 0.
+# the gain is multiplied by db(depth * duck[sample / 64]) when depth != 0 (computed once per 64-sample block).
 -> place_run(bus, nbus, left, right, n, s0, gain, duck, nduck, depth) (f32[] i64 f64[] f64[] i64 i64 f64 f64[] i64 f64) i64
+  i = 0
+  if s0 < 0
+    i = 0 - s0
+  cb = -1
+  g = gain
+  while i < n && s0 + i < nbus
+    p = s0 + i
+    if depth != ~0.0
+      b = p / 64
+      if b != cb
+        cb = b
+        d = ~0.0
+        d = duck[b] if b < nduck
+        g = gain * Math.exp(depth * d * ~0.11512925464970229)
+    bus[p * 2] = ((bus[p * 2] ## f64) + left[i] * g) ## f32
+    bus[p * 2 + 1] = ((bus[p * 2 + 1] ## f64) + right[i] * g) ## f32
+    i += 1
+  0
+
+# Add n stereo frames of Q3.28 audio (interleaved i32, a cached take) into the bus at sample s0.
+-> place_q28(bus, nbus, src, n, s0) (f32[] i64 i32[] i64 i64) i64
+  sc = ~1.0 / ~268435456.0
   i = 0
   if s0 < 0
     i = 0 - s0
   while i < n && s0 + i < nbus
     p = s0 + i
-    g = gain
-    if depth != ~0.0
-      b = p / 64
-      d = ~0.0
-      d = duck[b] if b < nduck
-      g = g * Math.exp(depth * d * ~0.11512925464970229)
-    bus[p * 2] = ((bus[p * 2] ## f64) + left[i] * g) ## f32
-    bus[p * 2 + 1] = ((bus[p * 2 + 1] ## f64) + right[i] * g) ## f32
+    a = src[i * 2]
+    b = src[i * 2 + 1]
+    bus[p * 2] = ((bus[p * 2] ## f64) + (a ## f64) * sc) ## f32
+    bus[p * 2 + 1] = ((bus[p * 2 + 1] ## f64) + (b ## f64) * sc) ## f32
     i += 1
   0
+
+# Q3.28 interleaved stereo -> planar f64 (exact).
+-> q28_planar(src, n, left, right) (i32[] i64 f64[] f64[]) i64
+  sc = ~1.0 / ~268435456.0
+  i = 0
+  while i < n
+    a = src[i * 2]
+    b = src[i * 2 + 1]
+    left[i] = (a ## f64) * sc
+    right[i] = (b ## f64) * sc
+    i += 1
+  0
+
+# Planar f64 frames [f0, f0 + n) -> interleaved little-endian Q3.28 bytes (rounded, saturated); returns the
+# number of saturated samples.
+-> pack_q28(left, right, f0, n, buf) (f64[] f64[] i64 i64 u8[]) i64
+  sat = 0
+  i = 0
+  while i < n * 2
+    v = left[f0 + i / 2]
+    v = right[f0 + i / 2] if i % 2 == 1
+    v = v * ~268435456.0
+    if v > ~2147483647.0
+      v = ~2147483647.0
+      sat += 1
+    if v < (~0.0 - ~2147483648.0)
+      v = ~0.0 - ~2147483648.0
+      sat += 1
+    q = Math.floor(v + ~0.5) ## i64
+    q = 2147483647 if q > 2147483647
+    q = q + 4294967296 if q < 0
+    buf[i * 4] = q & 255
+    buf[i * 4 + 1] = (q >> 8) & 255
+    buf[i * 4 + 2] = (q >> 16) & 255
+    buf[i * 4 + 3] = (q >> 24) & 255
+    i += 1
+  sat
+
+# A stereo 32-bit PCM WAV of Q3.28 samples from planar f64 (the take and cue caches), written atomically.
+-> write_wav_q28(path, left, right, frames, rate)
+  data = frames * 8
+  hdr = u8[44]
+  bytes = [82, 73, 70, 70] + le32(36 + data) + [87, 65, 86, 69, 102, 109, 116, 32] + le32(16) + [1, 0, 2, 0] + le32(rate) + le32(rate * 8) + [8, 0, 32, 0, 100, 97, 116, 97] + le32(data)
+  i = 0
+  while i < 44
+    hdr[i] = bytes[i]
+    i += 1
+  tmp = path + ".part"
+  fh = FileHandle.new(tmp, "wb")
+  fh.write(hdr)
+  blk = 131072
+  buf = u8[blk * 8]
+  sat = 0
+  f = 0
+  while f < frames
+    n = [blk, frames - f].min
+    if n < blk
+      buf = u8[n * 8]
+    sat += pack_q28(left, right, f, n, buf)
+    fh.write(buf)
+    f += n
+  fh.close
+  File.rename(tmp, path)
+  << "mix: warning: " + sat.to_s + " samples saturated in " + path if sat > 0
+  path
+
+# [i32 view of the interleaved samples, frames, mmap] of a Q3.28 WAV (keep the mmap open while using the view).
+-> read_wav_q28(path)
+  info = wav_info(path)
+  die("expected a 32-bit stereo PCM cache: " + path) if info[5] || info[4] != 32 || info[2] != 2
+  m = File.mmap(path)
+  frames = info[1] / 8
+  [m.view_at(info[0], 33, frames * 2), frames, m]
 
 # tools/mix.py ducking: block max of mean |vo| over 64 samples, attack/release follower, duck = clip(env / full).
 -> duck_env(bus, nbus, out, nb, attack, release, full, sr) (f32[] i64 f64[] i64 f64 f64 f64 i64) i64
@@ -638,7 +1047,11 @@ SR48 = 48000
     e = i + 64
     e = nbus if e > nbus
     while i < e
-      v = ((bus[i * 2] ## f64).abs + (bus[i * 2 + 1] ## f64).abs) * ~0.5
+      a = bus[i * 2] ## f64
+      a = ~0.0 - a if a < ~0.0
+      c = bus[i * 2 + 1] ## f64
+      c = ~0.0 - c if c < ~0.0
+      v = (a + c) * ~0.5
       mx = v if v > mx
       i += 1
     if mx > acc
@@ -655,7 +1068,8 @@ SR48 = 48000
   p = ~0.0
   i = 0
   while i < n
-    v = (bus[i] ## f64).abs
+    v = bus[i] ## f64
+    v = ~0.0 - v if v < ~0.0
     p = v if v > p
     i += 1
   p
@@ -669,7 +1083,8 @@ SR48 = 48000
 
 # ---------------------------------------------------------------------------------------------- loudness
 
-# BS.1770-4 K-weighted mean square per 100 ms sub-block (both channels summed), into zs.
+# BS.1770-4 K-weighted mean square per 100 ms sub-block (both channels summed), into zs. The two channels' filter
+# recursions run interleaved (independent dependency chains), each summed per sub-block, then added.
 -> k_weight_blocks(bus, n, zs, sub) (f32[] i64 f64[] i64) i64
   # 48 kHz coefficients from the recommendation (stage 1 shelf, stage 2 high-pass)
   sb0 = ~1.53512485958697
@@ -683,40 +1098,55 @@ SR48 = 48000
   ha1 = (~0.0 - ~1.99004745483398)
   ha2 = ~0.99007225036621
   nb = n / sub
+  ax1 = ~0.0
+  ax2 = ~0.0
+  ay1 = ~0.0
+  ay2 = ~0.0
+  au1 = ~0.0
+  au2 = ~0.0
+  av1 = ~0.0
+  av2 = ~0.0
+  bx1 = ~0.0
+  bx2 = ~0.0
+  by1 = ~0.0
+  by2 = ~0.0
+  bu1 = ~0.0
+  bu2 = ~0.0
+  bv1 = ~0.0
+  bv2 = ~0.0
   b = 0
   while b < nb
-    zs[b] = ~0.0
-    b += 1
-  c = 0
-  while c < 2
-    x1 = ~0.0
-    x2 = ~0.0
-    y1 = ~0.0
-    y2 = ~0.0
-    u1 = ~0.0
-    u2 = ~0.0
-    v1 = ~0.0
-    v2 = ~0.0
-    i = 0
-    while i < nb * sub
-      x = bus[i * 2 + c] ## f64
-      y = sb0 * x + sb1 * x1 + sb2 * x2 - sa1 * y1 - sa2 * y2
-      x2 = x1
-      x1 = x
-      y2 = y1
-      y1 = y
-      v = hb0 * y + hb1 * u1 + hb2 * u2 - ha1 * v1 - ha2 * v2
-      u2 = u1
-      u1 = y
-      v2 = v1
-      v1 = v
-      b = i / sub
-      zs[b] = zs[b] + v * v
+    s0 = ~0.0
+    s1 = ~0.0
+    i = b * sub
+    e = i + sub
+    while i < e
+      xa = bus[i * 2] ## f64
+      xb = bus[i * 2 + 1] ## f64
+      ya = sb0 * xa + sb1 * ax1 + sb2 * ax2 - sa1 * ay1 - sa2 * ay2
+      yb = sb0 * xb + sb1 * bx1 + sb2 * bx2 - sa1 * by1 - sa2 * by2
+      ax2 = ax1
+      ax1 = xa
+      ay2 = ay1
+      ay1 = ya
+      bx2 = bx1
+      bx1 = xb
+      by2 = by1
+      by1 = yb
+      va = hb0 * ya + hb1 * au1 + hb2 * au2 - ha1 * av1 - ha2 * av2
+      vb = hb0 * yb + hb1 * bu1 + hb2 * bu2 - ha1 * bv1 - ha2 * bv2
+      au2 = au1
+      au1 = ya
+      av2 = av1
+      av1 = va
+      bu2 = bu1
+      bu1 = yb
+      bv2 = bv1
+      bv1 = vb
+      s0 = s0 + va * va
+      s1 = s1 + vb * vb
       i += 1
-    c += 1
-  b = 0
-  while b < nb
-    zs[b] = zs[b] / (sub ## f64)
+    zs[b] = (s0 + s1) / (sub ## f64)
     b += 1
   nb
 
@@ -768,17 +1198,77 @@ SR48 = 48000
     p += 1
   0
 
+# The bound on a 4x-interpolated value from the largest |sample| in its 12-tap window: the largest sum of |taps|
+# over the phases, inflated past any rounding of the 12-term sums.
+-> tp_bound(h) (f64[]) f64
+  best = ~0.0
+  p = 0
+  while p < 4
+    s = ~0.0
+    k = 0
+    while k < 12
+      v = h[p * 12 + k]
+      v = ~0.0 - v if v < ~0.0
+      s = s + v
+      k += 1
+    best = s if s > best
+    p += 1
+  best * (~1.0 + ~1.0e-9)
+
+# Max |sample| of channel c over each of nsub 16-sample sub-blocks starting at base (clipped to [0, n)), into
+# sm[off ...].
+-> sub_max(bus, n, c, base, nsub, sm, off) (f32[] i64 i64 i64 i64 f64[] i64) i64
+  j = 0
+  while j < nsub
+    a = base + j * 16
+    e = a + 16
+    a = 0 if a < 0
+    e = n if e > n
+    m = ~0.0
+    i = a
+    while i < e
+      v = bus[i * 2 + c] ## f64
+      v = ~0.0 - v if v < ~0.0
+      m = v if v > m
+      i += 1
+    sm[off + j] = m
+    j += 1
+  0
+
+# One channel's 4x-oversampled peak at sample i (6 <= i < n - 6): the sample and the four interpolation phases.
+-> tp_at(bus, i, c, h) (f32[] i64 i64 f64[]) f64
+  tp = bus[i * 2 + c] ## f64
+  tp = ~0.0 - tp if tp < ~0.0
+  p = 0
+  while p < 4
+    acc = ~0.0
+    k = 0
+    while k < 12
+      acc = acc + (bus[(i + k - 5) * 2 + c] ## f64) * h[p * 12 + k]
+      k += 1
+    acc = ~0.0 - acc if acc < ~0.0
+    tp = acc if acc > tp
+    p += 1
+  tp
+
 # Per sample, the gain that keeps the 4x-oversampled peak of both channels at or under ceil (1 where it already
-# is), into g (n entries). Only windows whose sample peak could exceed ceil after interpolation are evaluated.
+# is), into g (n entries); returns the largest peak seen. Only 256-sample blocks whose sample peak nearby could
+# exceed ceil after interpolation are evaluated, and inside them only samples whose 12-tap window can reach
+# min(ceil, the running maximum) (tp_bound): a skipped sample would have gain 1 and could not raise the maximum,
+# so the gains and the maximum equal those of evaluating every sample of those blocks.
 -> tp_gain(bus, n, h, ceil, g) (f32[] i64 f64[] f64 f32[]) f64
+  bound = tp_bound(h)
   maxtp = ~0.0
   safe = ceil / ~1.7
   nb = n / 256 + 1
   bm = f64[nb]
+  sm = f64[36]
   i = 0
   while i < n
-    v = (bus[i * 2] ## f64).abs
-    w = (bus[i * 2 + 1] ## f64).abs
+    v = bus[i * 2] ## f64
+    v = ~0.0 - v if v < ~0.0
+    w = bus[i * 2 + 1] ## f64
+    w = ~0.0 - w if w < ~0.0
     v = w if w > v
     b = i / 256
     bm[b] = v if v > bm[b]
@@ -797,23 +1287,23 @@ SR48 = 48000
         g[i] = ~1.0 ## f32
         i += 1
     else
+      base = lo - 16
+      sub_max(bus, n, 0, base, 18, sm, 0)
+      sub_max(bus, n, 1, base, 18, sm, 18)
       i = lo
       while i < hi
         gi = ~1.0
         c = 0
         while c < 2
-          tp = (bus[i * 2 + c] ## f64).abs
+          tp = bus[i * 2 + c] ## f64
+          tp = ~0.0 - tp if tp < ~0.0
           if i >= 6 && i + 6 < n
-            p = 0
-            while p < 4
-              acc = ~0.0
-              k = 0
-              while k < 12
-                acc = acc + (bus[(i + k - 5) * 2 + c] ## f64) * h[p * 12 + k]
-                k += 1
-              acc = acc.abs
-              tp = acc if acc > tp
-              p += 1
+            wm = sm[c * 18 + (i - 5 - base) / 16]
+            w2 = sm[c * 18 + (i + 6 - base) / 16]
+            wm = w2 if w2 > wm
+            lim = ceil
+            lim = maxtp if maxtp < lim
+            tp = tp_at(bus, i, c, h) if wm * bound > lim
           maxtp = tp if tp > maxtp
           q = ~1.0
           q = ceil / tp if tp > ceil
@@ -875,6 +1365,11 @@ SR48 = 48000
     mkdir_p(@dir)
     @cap = 0
     @report = {}
+    @tm = f64[8]
+    @takes_cached = 0
+    @takes_made = 0
+    @cues_made = 0
+    @tw_d = nil
 
   # Decode an asset once into build/audio/<sha>.wav (48 kHz float). MP3s are gapless-trimmed first: afconvert
   # ignores the LAME/Info header, so the native-rate decode keeps the encoder delay (576 samples on these files,
@@ -900,15 +1395,32 @@ SR48 = 48000
       File.rename(out + ".part", out)
     out
 
-  # Every scratch buffer is allocated once, at the largest size any take or cue needs (an array that is
-  # reassigned is not freed until exit, so growing on demand would keep every old size alive).
+  -> asset_sha(key)
+    sha = @proj.asset_sha[key]
+    sha = @proj.ep["assets"][key]["sha256"] if sha == nil
+    sha
+
+  # A narration take's whole chain is cached under this key: the take's content and every parameter its
+  # processing reads (the reverb IR is drawn from the seed).
+  -> take_key(it)
+    v = @mixcfg["voices"][it["spk"]]
+    vo = @mixcfg["vo"]
+    hash_of({"dsp" => DSP_VERSION, "kind" => "take", "sr" => @sr, "seed" => @seed, "take" => asset_sha(it["src"]),
+             "chain" => v["chain"], "gain_db" => v["gain_db"], "pan" => v["pan"], "reverb" => v["reverb"],
+             "rms_db" => vo["rms_db"], "max_gain_db" => vo["max_gain_db"], "deess" => vo["deess"],
+             "fir" => [DEESS_HALF, DEESS_FFT, REVERB_FFT]})
+
+  -> take_path(it)
+    @dir + "/take_" + take_key(it) + ".wav"
+
+  # Every scratch buffer is allocated once, at the largest size any uncached take or any cue needs (an array that
+  # is reassigned is not freed until exit, so growing on demand would keep every old size alive).
   -> prepare
-    cap = 0
-    mfft = 1
+    cap = @sr * 4
     @r["tracks"][2]["items"].each ->(it)
-      fr = frames_of(it["src"])
-      cap = [cap, fr + @sr * 2].max
-      mfft = [mfft, fft_size(fr)].max
+      if !File.exist?(take_path(it))
+        fr = frames_of(it["src"])
+        cap = [cap, fr + @sr * 2].max
     @r["tracks"][3]["items"].each ->(c)
       fr = frames_of(c["src"])
       need = fr + @sr * 2
@@ -917,26 +1429,28 @@ SR48 = 48000
       elsif c["kind"] == "amb"
         need = [need, c["s1"] - c["s0"] + (to_f(@mixcfg["amb"]["post_ms"]) * @sr / ~1000.0).to_i + 16].max
       cap = [cap, need].max
-    mfft = [mfft, 131072].max
     @cap = cap
     @l = f64[cap]
     @rr = f64[cap]
     @tl = f64[cap]
     @tr = f64[cap]
     @env = f64[cap / 32 + 2]
-    @mfft = mfft
-    @re = f64[mfft]
-    @im = f64[mfft]
-    @cs = f64[mfft / 2]
-    @sn = f64[mfft / 2]
-    fft_tables(mfft, @cs, @sn)
-    @blk = 131072
-    @bre = f64[@blk]
-    @bim = f64[@blk]
-    @bre2 = f64[@blk]
-    @bim2 = f64[@blk]
     @ir = f64[@sr * 2]
     @irspec = {}
+    @dkspec = {}
+    nil
+
+  # The FFT plan and work arrays, made on the first take that is not cached.
+  -> ensure_fft
+    if @tw_d == nil
+      die("DEESS_FFT and REVERB_FFT share one plan") if DEESS_FFT != REVERB_FFT
+      @tw_d = f64[fft4_table_size(DEESS_FFT)]
+      fft4_twiddles(DEESS_FFT, @tw_d)
+      @tw_r = @tw_d
+      @zr = f64[REVERB_FFT]
+      @zi = f64[REVERB_FFT]
+      @ar = f64[REVERB_FFT]
+      @ai = f64[REVERB_FFT]
     nil
 
   -> load(key, cap)
@@ -972,53 +1486,100 @@ SR48 = 48000
     pk = [peak_abs(@l, n), peak_abs(@rr, n)].max + ~1.0e-9
     [db_lin(target_db) / pk, db_lin(max_db)].min
 
-  -> fft_size(n)
-    m = 1
-    m = m * 2 while m < n
-    m
-
-  # The spectrum (at the overlap-add block size) of a voice's noise IR for one channel, made once.
+  # The spectrum (at the overlap-add transform size, scaled by 1 / size) of a voice's noise IR for one channel,
+  # made once.
   -> ir_spectrum(rev, c)
     key = rev[0].to_s + ":" + rev[2].to_s + ":" + c.to_s
     sp = @irspec[key]
     if sp == nil
       irn = (to_f(rev[0]) * @sr / ~1000.0).to_i
       make_ir(rng_key(@seed, id60("ir:" + rev[0].to_s + ":" + rev[2].to_s), c, P_IR), irn, to_f(rev[0]) / ~1000.0, to_f(rev[2]), @sr, @ir)
-      hr = f64[@blk]
-      hi = f64[@blk]
+      hr = f64[REVERB_FFT]
+      hi = f64[REVERB_FFT]
       copy_run(@ir, hr, irn)
-      fft_run(hr, hi, @blk, 0, @cs, @sn, @mfft / @blk)
+      fft4_forward(hr, hi, REVERB_FFT, @tw_r)
+      scale_run(hr, REVERB_FFT, ~1.0 / (REVERB_FFT + ~0.0))
+      scale_run(hi, REVERB_FFT, ~1.0 / (REVERB_FFT + ~0.0))
       sp = [hr, hi, irn]
       @irspec[key] = sp
     sp
 
-  # One narration line: chain -> rms -> split-band de-ess (FFT) -> pan -> reverb (overlap-add) -> place.
-  -> place_line(it, bus)
+  # The de-esser's high-band FIR spectrum for a crossover, made once.
+  -> deess_spectrum(cross)
+    key = cross.to_s
+    sp = @dkspec[key]
+    if sp == nil
+      hr = f64[DEESS_FFT]
+      hi = f64[DEESS_FFT]
+      deess_fir_spectrum(cross, @sr, DEESS_HALF, DEESS_FFT, @tw_d, hr, hi)
+      sp = [hr, hi]
+      @dkspec[key] = sp
+    sp
+
+  # One narration take through its whole chain: EQ/de-ess/compressor chain (mono, as the legacy chain ran on the
+  # mono file) -> rms gain -> split-band de-ess (linear-phase FIR) -> reverb and pan (overlap-add), stored as
+  # build/audio/take_<key>.wav (Q3.28 stereo) unless it is there already. Returns the path.
+  -> take_file(it)
+    path = take_path(it)
+    if File.exist?(path)
+      @takes_cached += 1
+      return path
     v = @mixcfg["voices"][it["spk"]]
     vo = @mixcfg["vo"]
+    ensure_fft()
+    c0 = clock()
     n = load(it["src"], 0)
-    # mono processing: the legacy chain ran on the mono file before upmixing
     chain(v["chain"], @l, n)
     g = rms_gain_mono(n, to_f(vo["rms_db"]), to_f(vo["max_gain_db"])) * db_lin(to_f(v["gain_db"]))
     scale_run(@l, n, g)
+    c1 = clock()
     de = vo["deess"]
-    m = fft_size(n)
-    copy_run(@l, @re, n)
-    zero_run(@re, n, m)
-    zero_run(@im, 0, m)
-    fft_run(@re, @im, m, 0, @cs, @sn, @mfft / m)
-    deess_hi_split(@re, @im, m, @sr, to_f(de["cross_hz"]))
-    fft_run(@re, @im, m, 1, @cs, @sn, @mfft / m)
-    scale_run(@re, m, ~1.0 / m)
-    deess_apply(@l, @re, n, @sr, to_f(de["max_ratio"]), db_lin(to_f(de["abs_db"])), @env, @env)
+    dk = deess_spectrum(to_f(de["cross_hz"]))
+    fir_ola_pairs(@l, n, dk[0], dk[1], DEESS_FFT, DEESS_HALF, @tw_d, @zr, @zi, @tl)
+    deess_apply(@l, @tl, n, @sr, to_f(de["max_ratio"]), db_lin(to_f(de["abs_db"])), @env, @env)
+    c2 = clock()
     rev = v["reverb"]
     s0 = ir_spectrum(rev, 0)
     s1 = ir_spectrum(rev, 1)
     irn = s0[2]
     total = n + irn - 1
-    ola_reverb(@l, n, s0[0], s0[1], s1[0], s1[1], irn, @blk, @cs, @sn, @mfft / @blk, @bre, @bim, @bre2, @bim2, @tl, @tr, total, to_f(rev[1]), to_f(v["pan"][0]), to_f(v["pan"][1]))
-    place_run(bus, @n, @tl, @tr, total, it["s0"], ~1.0, @l, 0, ~0.0)
+    reverb_ola_pairs(@l, n, s0[0], s0[1], s1[0], s1[1], irn, REVERB_FFT, @tw_r, @zr, @zi, @ar, @ai, @tl, @tr, total, to_f(rev[1]), to_f(v["pan"][0]), to_f(v["pan"][1]))
+    c3 = clock()
+    write_wav_q28(path, @tl, @tr, total, @sr)
+    c4 = clock()
+    @tm[0] = @tm[0] + (c1 - c0)
+    @tm[1] = @tm[1] + (c2 - c1)
+    @tm[2] = @tm[2] + (c3 - c2)
+    @tm[3] = @tm[3] + (c4 - c3)
+    @takes_made += 1
+    path
+
+  # One narration line: its processed take (cached or made now), placed from the stored file either way.
+  -> place_line(it, bus)
+    path = take_file(it)
+    c0 = clock()
+    q = read_wav_q28(path)
+    place_q28(bus, @n, q[0], q[1], it["s0"])
+    q[2].close
+    @tm[4] = @tm[4] + (clock() - c0)
     nil
+
+  # A cue source after its filter chain (both channels), from build/audio/cue_<key>.wav or made and stored now;
+  # loaded into @l/@rr. Returns its frames.
+  -> load_chained(key, spec, cap)
+    k = hash_of({"dsp" => DSP_VERSION, "kind" => "cue", "sr" => @sr, "src" => asset_sha(key), "chain" => spec})
+    path = @dir + "/cue_" + k + ".wav"
+    if !File.exist?(path)
+      n = load(key, cap)
+      chain(spec, @l, n)
+      chain(spec, @rr, n)
+      write_wav_q28(path, @l, @rr, n, @sr)
+      @cues_made += 1
+    q = read_wav_q28(path)
+    die("scratch too small for " + key) if q[1] + @sr > @cap || cap > @cap
+    q28_planar(q[0], q[1], @l, @rr)
+    q[2].close
+    q[1]
 
   -> rms_gain_mono(n, target_db, max_db)
     r = Math.sqrt(sumsq(@l, n) / (n + ~0.0) + ~1.0e-12)
@@ -1038,11 +1599,10 @@ SR48 = 48000
       cap = c["s1"] - c["s0"] + (to_f(get(c, "fade_out_ms", 2000)) * sr / ~1000.0).to_i + sr + 16
     elsif k == "amb"
       cap = c["s1"] - c["s0"] + (to_f(@mixcfg["amb"]["post_ms"]) * sr / ~1000.0).to_i + 16
-    n = load(c["src"], cap)
+    n = 0
     if k == "music"
       mc = @mixcfg["music"]
-      chain(mc["chain"], @l, n)
-      chain(mc["chain"], @rr, n)
+      n = load_chained(c["src"], mc["chain"], cap)
       fo = (to_f(get(c, "fade_out_ms", 2000)) * sr / ~1000.0).to_i
       seg = c["s1"] - c["s0"] + fo
       need = seg + sr
@@ -1059,8 +1619,7 @@ SR48 = 48000
       place_run(bus, @n, @l, @rr, seg, c["s0"], gain, duck, nduck, to_f(@mixcfg["duck"]["music_db"]))
     elsif k == "amb"
       ac = @mixcfg["amb"]
-      chain(ac["chain"], @l, n)
-      chain(ac["chain"], @rr, n)
+      n = load_chained(c["src"], ac["chain"], cap)
       g = rms_gain(n, to_f(ac["rms_db"]), to_f(ac["max_gain_db"]))
       need = c["s1"] - c["s0"] + (to_f(ac["post_ms"]) * sr / ~1000.0).to_i
       xf = (~1.5 * sr).to_i
@@ -1075,19 +1634,18 @@ SR48 = 48000
     elsif k == "sfx"
       if c["filter"] == "tone"
         tc = @mixcfg["tone"]
-        chain(tc["chain"], @l, n)
-        chain(tc["chain"], @rr, n)
+        n = load_chained(c["src"], tc["chain"], cap)
         g = rms_gain(n, to_f(tc["rms_db"]), to_f(tc["max_gain_db"]))
       else
         sc = @mixcfg["sfx"]
-        chain(sc["chain"], @l, n)
-        chain(sc["chain"], @rr, n)
+        n = load_chained(c["src"], sc["chain"], cap)
         g = peak_gain(n, to_f(sc["peak_db"]), to_f(sc["max_gain_db"]))
       sc2 = @mixcfg["sfx"]
       fade_run(@l, n, (to_f(sc2["fade_in_ms"]) * sr / ~1000.0).to_i, (to_f(sc2["fade_out_ms"]) * sr / ~1000.0).to_i)
       fade_run(@rr, n, (to_f(sc2["fade_in_ms"]) * sr / ~1000.0).to_i, (to_f(sc2["fade_out_ms"]) * sr / ~1000.0).to_i)
       place_run(bus, @n, @l, @rr, n, c["s0"], g * db_lin(to_f(c["gain_db"])), duck, 0, ~0.0)
     elsif k == "audio"
+      n = load(c["src"], cap)
       g = rms_gain(n, to_f(get(c["norm"], "rms_db", (~0.0 - ~19.0))), ~14.0)
       fi = (to_f(get(c, "fade_in_ms", 50)) * sr / ~1000.0).to_i
       fo = (to_f(get(c, "fade_out_ms", 250)) * sr / ~1000.0).to_i
@@ -1122,6 +1680,7 @@ SR48 = 48000
     ceil = db_lin(to_f(loud["tp"]))
     sub = @sr / 10
     zs = f64[n / sub + 1]
+    q0 = clock()
     nb = k_weight_blocks(bus, n, zs, sub)
     before = integrated_lufs(zs, nb)
     gain_db = target - before
@@ -1129,89 +1688,64 @@ SR48 = 48000
     h = f64[48]
     tp_taps(h)
     g = f32[n]
+    q1 = clock()
     tp_pre = tp_gain(bus, n, h, ceil, g)
+    q2 = clock()
     w = @sr / 1000 * 2
     limit_apply(bus, n, g, w, ~1.0 - Math.exp((~0.0 - ~1.0) / (~0.1 * @sr)))
+    q3 = clock()
     nb = k_weight_blocks(bus, n, zs, sub)
     after = integrated_lufs(zs, nb)
+    q4 = clock()
     tp_post = true_peak(bus, n, h, ceil * ~0.5)
+    q5 = clock()
     t3 = clock_ms()
     write_wav_s24(out, bus, n, @sr)
     t4 = clock_ms()
     {"samples" => n, "lines" => lines.size, "cues" => @r["tracks"][3]["items"].size, "lufs_premaster" => before,
      "gain_db" => gain_db, "lufs" => after, "true_peak_dbtp" => ~20.0 * Math.log(tp_post) * ~0.4342944819032518,
      "true_peak_before_limit_dbtp" => ~20.0 * Math.log(tp_pre) * ~0.4342944819032518,
-     "ms" => {"narration" => t1 - t0, "cues" => t2 - t1, "loudness" => t3 - t2, "write" => t4 - t3}}
+     "takes" => {"cached" => @takes_cached, "made" => @takes_made}, "cue_chains_made" => @cues_made,
+     "ms" => {"narration" => t1 - t0, "cues" => t2 - t1, "loudness" => t3 - t2, "write" => t4 - t3},
+     "detail_ms" => {"take_chain" => ms_of(@tm[0]), "take_deess" => ms_of(@tm[1]), "take_reverb" => ms_of(@tm[2]),
+                     "take_store" => ms_of(@tm[3]), "take_place" => ms_of(@tm[4]), "kweight_gain" => ms_of(q1 - q0),
+                     "tp_gain" => ms_of(q2 - q1), "limiter" => ms_of(q3 - q2), "kweight_after" => ms_of(q4 - q3),
+                     "true_peak" => ms_of(q5 - q4)}}
 
-# Reverb by overlap-add: blocks of blk - irn + 1 samples, FFT once, multiply by each channel's IR spectrum,
-# inverse, accumulate. outl/outr = (dry * (1 - wet / 2) + wet * x (*) ir_c) * pan_c, total = n + irn - 1 samples.
--> ola_reverb(x, n, h0r, h0i, h1r, h1i, irn, blk, cs, sn, ts, bre, bim, bre2, bim2, outl, outr, total, wet, pl, pr) (f64[] i64 f64[] f64[] f64[] f64[] i64 i64 f64[] f64[] i64 f64[] f64[] f64[] f64[] f64[] f64[] i64 f64 f64 f64) i64
-  zero_run(outl, 0, total)
-  zero_run(outr, 0, total)
-  lb = blk - irn + 1
-  inv = ~1.0 / (blk ## f64)
-  st = 0
-  while st < n
-    len = lb
-    len = n - st if st + len > n
-    i = 0
-    while i < blk
-      v = ~0.0
-      v = x[st + i] if i < len
-      bre[i] = v
-      bim[i] = ~0.0
-      i += 1
-    fft_run(bre, bim, blk, 0, cs, sn, ts)
-    i = 0
-    while i < blk
-      bre2[i] = bre[i] * h1r[i] - bim[i] * h1i[i]
-      bim2[i] = bre[i] * h1i[i] + bim[i] * h1r[i]
-      r = bre[i] * h0r[i] - bim[i] * h0i[i]
-      q = bre[i] * h0i[i] + bim[i] * h0r[i]
-      bre[i] = r
-      bim[i] = q
-      i += 1
-    fft_run(bre, bim, blk, 1, cs, sn, ts)
-    fft_run(bre2, bim2, blk, 1, cs, sn, ts)
-    i = 0
-    while i < len + irn - 1 && st + i < total
-      outl[st + i] = outl[st + i] + bre[i] * inv
-      outr[st + i] = outr[st + i] + bre2[i] * inv
-      i += 1
-    st += lb
-  dry = ~1.0 - wet * ~0.5
-  i = 0
-  while i < total
-    d = ~0.0
-    d = x[i] if i < n
-    outl[i] = (d * dry + outl[i] * wet) * pl
-    outr[i] = (d * dry + outr[i] * wet) * pr
-    i += 1
-  0
-
-# True peak (4x oversampled, both channels) over the whole bus, evaluating interpolation wherever the sample
-# peak nearby is above `floor`.
+# True peak (4x oversampled, both channels) over the whole bus, evaluating interpolation wherever the sample is
+# above `floor` and its 12-tap window can exceed the running maximum (the same maximum as evaluating them all).
 -> true_peak(bus, n, h, floor) (f32[] i64 f64[] f64) f64
+  bound = tp_bound(h)
   maxtp = ~0.0
-  i = 6
-  while i + 6 < n
-    c = 0
-    while c < 2
-      x0 = (bus[i * 2 + c] ## f64).abs
-      maxtp = x0 if x0 > maxtp
-      if x0 > floor
-        p = 0
-        while p < 4
-          acc = ~0.0
-          k = 0
-          while k < 12
-            acc = acc + (bus[(i + k - 5) * 2 + c] ## f64) * h[p * 12 + k]
-            k += 1
-          acc = acc.abs
-          maxtp = acc if acc > maxtp
-          p += 1
-      c += 1
-    i += 1
+  sm = f64[36]
+  lo = 0
+  while lo < n
+    hi = lo + 256
+    hi = n if hi > n
+    base = lo - 16
+    have = 0
+    i = lo
+    i = 6 if i < 6
+    while i < hi && i + 6 < n
+      c = 0
+      while c < 2
+        x0 = bus[i * 2 + c] ## f64
+        x0 = ~0.0 - x0 if x0 < ~0.0
+        maxtp = x0 if x0 > maxtp
+        if x0 > floor
+          if have == 0
+            sub_max(bus, n, 0, base, 18, sm, 0)
+            sub_max(bus, n, 1, base, 18, sm, 18)
+            have = 1
+          wm = sm[c * 18 + (i - 5 - base) / 16]
+          w2 = sm[c * 18 + (i + 6 - base) / 16]
+          wm = w2 if w2 > wm
+          if wm * bound > maxtp
+            tp = tp_at(bus, i, c, h)
+            maxtp = tp if tp > maxtp
+        c += 1
+      i += 1
+    lo = hi
   maxtp
 
 # The mix is a pure function of the resolved audio tracks, the mix settings, the loudness target and the audio
@@ -1221,7 +1755,7 @@ SR48 = 48000
   shas = {}
   p.ep["assets"].keys.each ->(k)
     shas[k] = p.asset_sha[k] if get(p.ep["assets"][k], "kind", "") == "audio"
-  hash_of({"v" => 3, "sr" => r["sr"], "samples" => r["samples"], "a1" => r["tracks"][2]["items"], "a3" => r["tracks"][3]["items"],
+  hash_of({"v" => 4, "dsp" => DSP_VERSION, "sr" => r["sr"], "samples" => r["samples"], "a1" => r["tracks"][2]["items"], "a3" => r["tracks"][3]["items"],
            "mix" => p.ep["mix"], "loudness" => p.ep["cuts"][r["cut"]]["loudness"], "assets" => shas, "seed" => r["seed"]})
 
 -> cmd_mix(args)
@@ -1242,5 +1776,5 @@ SR48 = 48000
   OS.system("rm -f " + shq(out) + " && ln " + shq(cached) + " " + shq(out))
   write_text(p.out_path("mix_report.json"), JSON.encode(rep))
   << "mix: " + rep["samples"].to_s + " samples (" + timecode(r["frames"], r["rate"][0], r["rate"][1]) + "), " + rep["lines"].to_s + " lines, " + rep["cues"].to_s + " cues; " + fixed6(rep["lufs_premaster"]) + " LUFS + " + fixed6(rep["gain_db"]) + " dB -> " + fixed6(rep["lufs"]) + " LUFS, true peak " + fixed6(rep["true_peak_dbtp"]) + " dBTP -> " + out
-  << "mix timing ms: " + JSON.encode(rep["ms"])
+  << "mix timing ms: " + JSON.encode(rep["ms"]) + "; takes " + rep["takes"]["cached"].to_s + " cached, " + rep["takes"]["made"].to_s + " made; " + JSON.encode(rep["detail_ms"])
   0

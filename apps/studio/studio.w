@@ -174,6 +174,46 @@ STUDIO_BIN_DEFAULT = "/Users/erik/tungsten-worktrees/engine/apps/studio/bin/stud
   << "render: " + tf.to_s + " frames in " + take.size.to_s + " segments, " + dt.to_s + " ms (" + ((tf * 1000) / [dt, 1].max).to_s + " fps); " + (missing_frames - tf).to_s + " frames (" + (missing.size - take.size).to_s + " segments) still missing"
   0
 
+# studio raw <episode.json> <from> <to> <path>: frames [from, to) as packed RGB24 into path (a file or a FIFO),
+# the pre-encode reference for quality metrics.
+-> cmd_raw(args)
+  p = Project.new(args[1], opt(args, "--cut", "full"))
+  p.verify_assets(true)
+  r = p.resolve
+  a = args[2].to_i
+  b = args[3].to_i
+  eng = Engine.new(p, r)
+  fh = FileHandle.new(args[4], "wb")
+  f = a
+  while f < b
+    fh.write(eng.frame_into(f))
+    f += 1
+  fh.close
+  eng.close
+  0
+
+# studio gc <episode.json> [--dry]: delete stored segments that no resolved timeline in build/<cut>/ references.
+-> cmd_gc(args)
+  p = Project.new(args[1], opt(args, "--cut", "full"))
+  keep = {}
+  dir = p.build + "/" + p.cut
+  File.entries(dir).each ->(nm)
+    if nm.ends_with?("timeline.resolved.json")
+      r = JSON.parse(File.read(dir + "/" + nm))
+      r["segments"].each ->(s)
+        keep[s["key"]] = 1
+  sd = segment_dir(p.build)
+  gone = 0
+  bytes = 0
+  File.entries(sd).each ->(nm)
+    dot = nm.index(".")
+    if dot != nil && keep[nm.slice(0, dot)] == nil
+      bytes += File.size(sd + "/" + nm)
+      File.delete(sd + "/" + nm) if !flag?(args, "--dry")
+      gone += 1
+  << "gc: " + keep.size.to_s + " segments referenced, " + gone.to_s + " unreferenced (" + (bytes / 1048576).to_s + " MB) " + (flag?(args, "--dry") ? "found" : "deleted")
+  0
+
 # studio worker <episode.json> <cut> <jobfile>: render the listed segments (spawned by render).
 -> cmd_worker(args)
   p = Project.new(args[1], args[2])
@@ -202,6 +242,8 @@ STUDIO_BIN_DEFAULT = "/Users/erik/tungsten-worktrees/engine/apps/studio/bin/stud
   return cmd_mux(args) if c == "mux"
   return cmd_verify(args) if c == "verify"
   return selftest() if c == "selftest"
+  return cmd_raw(args) if c == "raw"
+  return cmd_gc(args) if c == "gc"
   << "unknown command " + c
   2
 

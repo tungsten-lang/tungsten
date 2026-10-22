@@ -11,7 +11,7 @@ S=${STUDIO_BIN:-$HOME/tungsten-worktrees/engine/apps/studio/bin/studio}
 : > $LOG
 while true; do
   out=$(STUDIO_SEGMENTS=$SEG STUDIO_ENCODER=$ENC lockf -k $L caffeinate -i /usr/bin/time -l $G 16384 1200 $S render $E --from $A --to $B --jobs $J --max-frames 400 2>&1)
-  echo "$out" | grep -E "render:|  real|  user|  sys|maximum resident|peak memory|rror|failed|guard:" >> $LOG
+  echo "$out" | grep -E "render:|[0-9] real|maximum resident|peak memory|rror|failed|guard:" >> $LOG
   echo "$out" | grep -q "nothing to do" && break
   echo "$out" | grep -qE "render: [0-9]+ frames" || { echo FAILED >> $LOG; echo "$out" | tail >> $LOG; break; }
 done

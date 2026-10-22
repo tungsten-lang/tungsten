@@ -29,6 +29,11 @@
 #   bars      (bars: true, files from sync_test) the decoded Y'CbCr of each bar
 #             matches BT.709 limited-range codes (and not BT.601's), and the
 #             RGB a player gets back is the RGB encoded
+#   chapters  (chapters: [[title, frame], ...]) AVFoundation's chapter groups
+#             (the 'chap' text track) have exactly these titles, each
+#             starting at frame x den/num s and lasting until the next
+#             chapter (the last until the end); in an MP4 the Nero chpl box
+#             agrees too (starts rounded to 100 ns; chpl: false skips it)
 
 + MediaVerify
   -> .opt(opts, key, fallback)
@@ -176,6 +181,9 @@
     if MediaVerify.opt(opts, :faststart, true)
       checks << {name: "faststart", ok: f[:moov_first] == true, detail: "moov before mdat: [f[:moov_first]] (brand [f[:brand]])"}
 
+    if opts != nil && opts.has_key?(:chapters) && opts[:chapters] != nil && rate != nil
+      checks << MediaVerify.chapter_check(f, rate, frames, opts[:chapters], MediaVerify.opt(opts, :chpl, f[:brand] != "qt  "))
+
     if MediaVerify.opt(opts, :sync, false) && rate != nil
       checks << MediaVerify.sync_check(path, rate, opts)
     if MediaVerify.opt(opts, :bars, false)
@@ -185,6 +193,50 @@
     checks.each ->(c)
       ok = false if !c[:ok]
     {ok: ok, path: path, rate: rate, frames: frames, checks: checks, facts: f}
+
+  # Chapters against [[title, frame], ...]: AVFoundation's groups (exact
+  # rational starts and durations) and, for MP4, the Nero chpl box.
+  -> .chapter_check(f, rate, frames, want, chpl)
+    got = f[:chapters] == nil ? [] : f[:chapters]
+    bad = ""
+    if got.size != want.size
+      bad = "[got.size] chapter(s), expected [want.size]"
+    i = 0
+    while bad == "" && i < want.size
+      g = got[i]
+      w = want[i]
+      e = i + 1 < want.size ? want[i + 1][1] : frames
+      st = g[1]
+      du = g[2]
+      if g[0] != w[0]
+        bad = "chapter [i + 1] is titled '[g[0]]', expected '[w[0]]'"
+      elsif st == nil || st[0] * rate[0] != w[1] * rate[1] * st[1]
+        bad = "chapter [i + 1] ('[w[0]]') starts at [st == nil ? "?" : st[0].to_s + "/" + st[1].to_s] s, expected frame [w[1]]"
+      elsif du == nil || du[0] * rate[0] != (e - w[1]) * rate[1] * du[1]
+        bad = "chapter [i + 1] ('[w[0]]') lasts [du == nil ? "?" : du[0].to_s + "/" + du[1].to_s] s, expected [e - w[1]] frames"
+      i += 1
+    detail = "[got.size] chapter(s) through AVFoundation ([f[:text_tracks]] text track(s))"
+    if bad == "" && chpl
+      cp = f[:chpl] == nil ? [] : f[:chpl]
+      n = want.size > 255 ? 255 : want.size
+      if cp.size != n
+        bad = "chpl holds [cp.size] chapter(s), expected [n]"
+      k = 0
+      while bad == "" && k < n
+        t = want[k][0].to_s
+        hns = (want[k][1] * rate[1] * 10000000 * 2 + rate[0]) / (2 * rate[0])
+        if t.bytes.size <= 255 && cp[k][0] != t
+          bad = "chpl chapter [k + 1] is titled '[cp[k][0]]', expected '[t]'"
+        elsif cp[k][1] != hns
+          bad = "chpl chapter [k + 1] starts at [cp[k][1]] x 100 ns, expected [hns]"
+        k += 1
+      detail = detail + ", [cp.size] in chpl"
+    if bad == ""
+      first = want.size > 0 ? Timecode.to_smpte(want[0][1], rate) : "-"
+      detail = detail + "; titles, exact starts and durations match (first at [first])"
+    else
+      detail = detail + "; " + bad
+    {name: "chapters", ok: bad == "", detail: detail}
 
   -> .near(a, b, tol)
     d = a.to_f - b.to_f
@@ -288,7 +340,7 @@
   # flash frame. Options: rate ([24, 1]), seconds (10), width (1280), height
   # (720), codec (:h264), quality (0.8), gop (48), audio_codec, tc_start
   # ("00:00:00:00"), wav (path.wav), reorder (the encoder's default), promise (true: tell the mux the frame
-  # count up front). Returns {path:, frames:, flashes:,
+  # count up front), chapters ([[title, frame], ...]). Returns {path:, frames:, flashes:,
   # clicks:, sample_rate:, wav:, mux:}.
   -> .sync_test(path, opts = {})
     rate = Timecode.rate(MediaVerify.opt(opts, :rate, [24, 1]))
@@ -337,7 +389,8 @@
     MediaVerify.write_click_wav(wav, n, sr, clicks)
     promise = MediaVerify.opt(opts, :promise, true) ? total : nil
     mux = Mux.new(path, rate: rate, audio: wav, audio_codec: MediaVerify.opt(opts, :audio_codec, nil),
-                  tc_start: MediaVerify.opt(opts, :tc_start, "00:00:00:00"), frames: promise)
+                  tc_start: MediaVerify.opt(opts, :tc_start, "00:00:00:00"), frames: promise,
+                  chapters: MediaVerify.opt(opts, :chapters, nil))
     segs.each ->(s)
       mux.append(s)
       s.release

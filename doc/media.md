@@ -252,4 +252,45 @@ bin/tungsten media tc 56001 24/1        # 00:38:53:09
 
 ## Performance
 
-See `benchmarks/media/` for the harness and the numbers against the ffmpeg CLI.
+`benchmarks/media/run.sh` (with `encode_bench.w` built `--release`) encodes the
+same raw frames with each contender and scores the output with libvmaf
+(VMAF v0.6.1 and SSIM, luma) against those frames, after converting both to
+BT.709 4:2:0 (each output is first decoded with the matrix it was encoded
+with, so the untagged BT.601 libx264 file is not penalised for its tags).
+
+Apple M5 Max, macOS 27, 2026-10-22: 2,400 frames (100 s, two runs of 1,200)
+of the Archimedes & Eratosthenes episode at 29:00-30:40 (catapults, iron
+hand), 1920 x 1080 at 24 fps, decoded once to RGB24. Wall and CPU (user + sys)
+are `/usr/bin/time -l`; memory is the peak footprint (encode_bench maps the
+raw file, so its resident size counts page cache). VideoEncoder numbers
+include its RGB -> Y'CbCr conversion, segmenting, the mux, the tmcd patch
+and faststart.
+
+| Encoder | Wall s | CPU s | Memory MB | Output MB | VMAF | SSIM |
+| --- | --- | --- | --- | --- | --- | --- |
+| ffmpeg libx264 `-preset medium -crf 18 -x264-params keyint=48` (today's master) | 13.34 | 194.0 | 1028 | 186.5 | 96.91 | 0.99885 |
+| ffmpeg `h264_videotoolbox -q:v 75` | 4.80 | 8.5 | 178 | 251.5 | 96.80 | 0.99852 |
+| ffmpeg `hevc_videotoolbox -q:v 73` | 4.98 | 8.5 | 172 | 170.2 | 96.37 | 0.99810 |
+| VideoEncoder H.264, quality 0.75 | 5.56 | 9.4 | 127 | 211.9 | 96.89 | 0.99860 |
+| VideoEncoder H.264, quality 0.80 | 6.39 | 9.4 | 222 | 314.3 | 97.79 | 0.99920 |
+| VideoEncoder HEVC, quality 0.73 | 5.21 | 9.5 | 73 | 133.2 | 96.35 | 0.99812 |
+| VideoEncoder HEVC, quality 0.75 | 5.26 | 9.4 | 77 | 159.8 | 96.83 | 0.99846 |
+| VideoEncoder HEVC, quality 0.80 | 5.27 | 9.2 | 193 | 263.1 | 97.85 | 0.99918 |
+
+- At libx264's VMAF, HEVC at quality 0.75 is 2.5 times faster, uses 21 times
+  less CPU and 13 times less memory, and its file is 14% smaller; H.264 at
+  0.75 matches the VMAF with a file 14% larger.
+- VideoToolbox's quality setting is coarse: 0.74 and 0.75 give the same
+  stream. B-frames (`reorder: true`) are what make HEVC smaller than libx264:
+  at the same quality they cut 13% (H.264) to 19% (HEVC), and against
+  ffmpeg's own VideoToolbox encoders at equal VMAF the files are 16-22%
+  smaller.
+- CPU per 1080p frame is about 3.9 ms, of which about 1 ms is page faults on
+  the mapped input and 1-2 ms the conversion (0.4 ms wall on 16 threads).
+  ffmpeg's VideoToolbox path, converting with swscale, uses 3.5 ms.
+- Two encoder sessions in one thread are slower than one (312 against 460
+  fps): one session keeps the media engine busy.
+- Passthrough mux of a 39-minute master from segment files: 1,167 segments
+  (56,002 frames, 3.1 GB HEVC) in 1.9 s with a 41 MB footprint, including the
+  tmcd patch and the faststart rewrite; 9.4 s with 39 minutes of PCM encoded
+  to AAC. `MediaVerify.check` on that master takes 2 s and passes every check.

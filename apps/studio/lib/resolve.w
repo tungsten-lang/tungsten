@@ -12,7 +12,7 @@
 
 SEG_MAX = 48
 # The compositor (transitions, fades, packing) is part of every frame key.
-COMPOSITOR = 2
+COMPOSITOR = 3
 # Renderer versions, per kind: bump one when its pixels change, and only that kind's segments re-render.
 RENDERER = {"still" => 3, "clip" => 3, "frames" => 1, "program" => 1, "card" => 2, "black" => 1, "group" => 3, "fade_out" => 1}
 # Encoder settings in force (the segment key covers them).

@@ -86,7 +86,9 @@ for it, sh in zip(v1, T["shots"]):
         tag = f"{it['id'].replace(':', '_')}_{k:05d}"
         # same absolute frame: both pictures then sit within half a frame of the same instant (comparing the same
         # local frame would put the legacy content up to a whole frame ahead where its cut was rounded up)
-        legacy = decode(LEGACY, it["f0"] + k, "bt601", OUT / f"{tag}_legacy.png")
+        # frame sequences (animations) are compared at the same local frame: their content is indexed by it
+        lf = lf0 + k if it["kind"] in ("frames", "program") else it["f0"] + k
+        legacy = decode(LEGACY, lf, "bt601", OUT / f"{tag}_legacy.png")
         if MINE == "fresh":
             p = OUT / f"{tag}_mine.png"
             subprocess.check_call([STUDIO, "frame", str(EP / "studio/episode.json"), str(it["f0"] + k), "--fresh", "--png",
@@ -95,7 +97,7 @@ for it, sh in zip(v1, T["shots"]):
         else:
             mine = decode(MINE, it["f0"] + k, "bt709", OUT / f"{tag}_mine.png")
         s = ssim(legacy, mine)
-        vals.append({"k": k, "frame": it["f0"] + k, "legacy_local": it["f0"] + k - lf0, "ssim": round(s, 4)})
+        vals.append({"k": k, "frame": it["f0"] + k, "legacy_frame": lf, "ssim": round(s, 4)})
         if not keep:
             for suf in ("_legacy.png", "_mine.png"):
                 (OUT / (tag + suf)).unlink(missing_ok=True)

@@ -313,7 +313,10 @@ use encode
   out = []
   n = 1
   subs.each ->(s)
-    out.push(n.to_s + "\n" + srt_time(s["from_ms"]) + " --> " + srt_time(s["to_ms"]) + "\n" + wrap_text(s["text"], 48).join("\n") + "\n")
+    # narration cues wrap at 48 columns (textwrap); the outro's own captions are written as they are (tools/srt.py)
+    body = s["text"]
+    body = wrap_text(s["text"], 48).join("\n") if s["line"] != nil
+    out.push(n.to_s + "\n" + srt_time(s["from_ms"]) + " --> " + srt_time(s["to_ms"]) + "\n" + body + "\n")
     n += 1
   out.join("\n")
 

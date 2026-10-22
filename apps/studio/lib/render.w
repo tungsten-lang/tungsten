@@ -472,6 +472,7 @@ use raster
     p = it["params"]
     cnt = p["count"]
     idx = k
+    idx = 0 if idx < 0
     idx = cnt - 1 if idx > cnt - 1
     path = ""
     if it["kind"] == "program"

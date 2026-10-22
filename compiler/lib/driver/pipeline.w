@@ -318,6 +318,7 @@
 -> runtime_companion_sources
   ["ssmr_witness.c", "lexchar_tables.c", "unicode_tables.c", "blas_bridge.c",
    "sparse_bridge.c", "metal.m", "graphics.m", "hid_bridge.m", "quartz.c", "quartz.h",
+   "media/media.c", "media/media_avf.m", "media/media.h",
    "sci_io_native.c", "tensor_bridge.c", "openblas_bridge.c",
    zstd_runtime_source()]
 

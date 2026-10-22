@@ -41,10 +41,48 @@
   (wvalue_bits(lc) & 32) != 0 || is_upper?(lc)
 
 -> is_keyword?(word)
-  word == "begin" || word == "break" || word == "case" || word == "else" || word == "elsif" || word == "ensure" || word == "exit" || word == "extern" || word == "false" || word == "fn" || word == "go" || word == "if" || word == "in" || word == "is" || word == "loop" || word == "module" || word == "nil" || word == "next" || word == "on" || word == "parallel" || word == "raise" || word == "recase" || word == "rescue" || word == "return" || word == "self" || word == "super" || word == "then" || word == "trait" || word == "true" || word == "unless" || word == "until" || word == "use" || word == "when" || word == "while" || word == "with" || word == "yield"
+  n = word.size()
+  if n < 2 || n > 8 || n == 7
+    return false
+  case n
+  when 2
+    word == "if" || word == "in" || word == "fn" || word == "is" || word == "on" || word == "go"
+  when 3
+    word == "nil" || word == "use"
+  when 4
+    word == "else" || word == "true" || word == "self" || word == "when" || word == "case" || word == "next" || word == "with" || word == "then" || word == "loop" || word == "exit"
+  when 5
+    word == "while" || word == "false" || word == "elsif" || word == "break" || word == "raise" || word == "begin" || word == "super" || word == "trait" || word == "until" || word == "yield"
+  when 6
+    word == "return" || word == "rescue" || word == "unless" || word == "ensure" || word == "module" || word == "extern" || word == "recase"
+  when 8
+    word == "parallel"
+  else
+    false
 
 -> is_type_name?(word)
-  word == "bool" || word == "int" || word == "integer" || word == "string" || word == "string_buffer" || word == "i1" || word == "i4" || word == "i8" || word == "i16" || word == "i32" || word == "i64" || word == "i128" || word == "u1" || word == "u4" || word == "u8" || word == "u16" || word == "u32" || word == "u64" || word == "u128" || word == "w64" || word == "f16" || word == "f32" || word == "f64" || word == "f80" || word == "f128" || word == "f256" || word == "d128" || word == "c32" || word == "c64" || word == "c128" || word == "bigint" || word == "bigdecimal" || word == "bf16" || word == "tf32" || word == "fp8" || word == "fp4" || word == "nf4" || word == "mxfp8" || word == "mxfp6" || word == "mxfp4" || word == "mxint8" || word == "posit8" || word == "posit16" || word == "posit32" || word == "posit64"
+  n = word.size()
+  if n < 2 || n > 13
+    return false
+  case n
+  when 2
+    word == "i8" || word == "u8" || word == "i1" || word == "i4" || word == "u1" || word == "u4"
+  when 3
+    word == "i64" || word == "i32" || word == "f64" || word == "f32" || word == "u64" || word == "u32" || word == "w64" || word == "int" || word == "i16" || word == "u16" || word == "f16" || word == "f80" || word == "c32" || word == "c64" || word == "fp8" || word == "fp4" || word == "nf4"
+  when 4
+    word == "bool" || word == "i128" || word == "u128" || word == "f128" || word == "f256" || word == "d128" || word == "c128" || word == "bf16" || word == "tf32"
+  when 5
+    word == "mxfp8" || word == "mxfp6" || word == "mxfp4"
+  when 6
+    word == "string" || word == "bigint" || word == "mxint8" || word == "posit8"
+  when 7
+    word == "integer" || word == "posit16" || word == "posit32" || word == "posit64"
+  when 10
+    word == "bigdecimal"
+  when 13
+    word == "string_buffer"
+  else
+    false
 
 -> is_currency_prefix?(ch)
   ch == "$" || ch == "€" || ch == "£" || ch == "¥" || ch == "₹" || ch == "₩" || ch == "₿" || ch == "₽" || ch == "฿"
@@ -80,7 +118,9 @@
   is_alpha?(lc) || is_digit?(lc) || cp == 43 || cp == 47 || cp == 61
 
 -> is_value_type?(type)
-  type == :INT || type == :FLOAT || type == :DECIMAL || type == :STRING || type == :STRING_INTERP || type == :REGEX || type == :REGEX_CAPTURE || type == :SYMBOL || type == :NAME || type == :ID || type == :IVAR || type == :CVAR || type == :GLOBAL || type == :RPAREN || type == :RBRACKET || type == :RBRACE || type == :MAGIC_FILE || type == :MAGIC_LINE || type == :MAGIC_DIR || type == :UUID || type == :CURRENCY || type == :QUANTITY || type == :DURATION || type == :WVALUE || type == :BYTE_ARRAY || type == :BYTE_ARRAY_INTERP || type == :DATE || type == :DATETIME || type == :TIME || type == :MONTH || type == :IP4 || type == :CIDR4 || type == :IP6 || type == :CIDR6 || type == :RATIONAL || type == :CHAR || type == :CODEPOINT || type == :KEY || type == :WORD_ARRAY || type == :SYMBOL_ARRAY || type == :BASE32 || type == :BASE58 || type == :BASE64 || type == :PARG || type == :SUPERSCRIPT || type == :EXPONENT || type == :COLOR || type == :SELF_REF || type == :CONSTANT || type == :TYPE
+  if type == nil || type == :NEWLINE || type == :INDENT || type == :DEDENT || type == :LPAREN || type == :COMMA || type == :ASSIGN || type == :COLON || type == :LBRACKET || type == :ARROW || type == :KEYWORD || type == :PUTS_OP || type == :EQ || type == :NEQ || type == :AND || type == :OR || type == :PLUS || type == :MINUS || type == :STAR || type == :SLASH || type == :LT || type == :GT || type == :LTE || type == :GTE || type == :LBRACE
+    return false
+  type == :ID || type == :RPAREN || type == :INT || type == :STRING || type == :IVAR || type == :SYMBOL || type == :NAME || type == :CONSTANT || type == :RBRACKET || type == :FLOAT || type == :DECIMAL || type == :TYPE || type == :RBRACE || type == :STRING_INTERP || type == :GLOBAL || type == :CVAR || type == :REGEX || type == :REGEX_CAPTURE || type == :MAGIC_FILE || type == :MAGIC_LINE || type == :MAGIC_DIR || type == :UUID || type == :CURRENCY || type == :QUANTITY || type == :DURATION || type == :WVALUE || type == :BYTE_ARRAY || type == :BYTE_ARRAY_INTERP || type == :DATE || type == :DATETIME || type == :TIME || type == :MONTH || type == :IP4 || type == :CIDR4 || type == :IP6 || type == :CIDR6 || type == :RATIONAL || type == :CHAR || type == :CODEPOINT || type == :KEY || type == :WORD_ARRAY || type == :SYMBOL_ARRAY || type == :BASE32 || type == :BASE58 || type == :BASE64 || type == :PARG || type == :SUPERSCRIPT || type == :EXPONENT || type == :COLOR || type == :SELF_REF
 
 -> strip_bash_shebang(source)
   # Polyglot scripts begin with `#!/usr/bin/env bash` then an `exec` line

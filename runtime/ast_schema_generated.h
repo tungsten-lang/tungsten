@@ -52,6 +52,21 @@ static const uint8_t W_AST_KIND_STORAGE[W_AST_KIND_MAX + 1] = {
     W_AST_STORAGE_INTERN, W_AST_STORAGE_SLAB, W_AST_STORAGE_SLAB, W_AST_STORAGE_SLAB, W_AST_STORAGE_SLAB
 };
 
+#ifdef W_AST_SCHEMA_INCLUDE_AST_MASK
+static const uint8_t W_AST_KIND_AST_MASK[W_AST_KIND_MAX + 1] = {
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 3, 1, 7, 15, 5, 3, 0, 0, 1, 1, 13, 3, 7, 7, 0,
+    0, 4, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 3, 2, 0,
+    14, 1, 30, 1, 15, 3, 0, 0, 0, 0, 0, 4, 0, 0, 14, 2,
+    0, 3, 0, 0, 1, 7, 3, 3, 2, 0, 3, 1, 1, 1, 0, 1,
+    3, 0, 0, 0, 3, 1, 13, 4, 0, 0, 1, 1, 0, 0, 1, 3,
+    0, 1, 3, 0, 2, 0, 2, 2, 2, 0, 0, 0, 1, 0, 0, 0,
+    0, 3, 3, 3, 1, 0, 1, 3, 3, 0, 1, 4, 3, 2, 0, 1,
+    0, 1, 0, 0, 1
+};
+#endif
+
 #ifdef W_AST_SCHEMA_INCLUDE_NAMES
 #include <stddef.h>
 

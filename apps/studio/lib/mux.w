@@ -17,8 +17,10 @@ use encode
   nfr = 0
   limit = get(opts, "frames", r["frames"])
   lo = get(opts, "from", 0)
+  fbase = nil
   segs.each ->(s)
     if s["f0"] < limit && s["f0"] + s["n"] > lo
+      fbase = s["f0"] if fbase == nil
       sp = segment_path(p.build, s["key"])
       die("segment missing: " + s["key"] + " at frame " + s["f0"].to_s + " (run studio render)") if !File.exist?(sp)
       lines.push("file '" + sp + "'")
@@ -42,14 +44,15 @@ use encode
   part = out + ".part.mp4"
   if p.encoder["backend"] != "ffmpeg"
     t0 = clock_ms()
-    m = nil
-    kb = get(p.cut_cfg(p.cut), "audio_kbps", nil)
-    if audio && kb != nil
-      m = Mux.new(part, {rate: r["rate"], audio: wav, audio_kbps: kb, tc_start: get(r, "tc_start", "00:00:00:00"), frames: nfr})
-    elsif audio
-      m = Mux.new(part, {rate: r["rate"], audio: wav, tc_start: get(r, "tc_start", "00:00:00:00"), frames: nfr})
-    else
-      m = Mux.new(part, {rate: r["rate"], tc_start: get(r, "tc_start", "00:00:00:00"), frames: nfr})
+    mo = {rate: r["rate"], tc_start: get(r, "tc_start", "00:00:00:00"), frames: nfr}
+    if audio
+      mo[:audio] = wav
+      kb = get(p.cut_cfg(p.cut), "audio_kbps", nil)
+      mo[:audio_kbps] = kb if kb != nil
+    # chapters: a QuickTime chapter track (and Nero chpl) at each chapter's first frame
+    chs = chapter_list(r, fbase, nfr)
+    mo[:chapters] = chs if chs.size > 0
+    m = Mux.new(part, mo)
     segs.each ->(s)
       m.append_file(segment_path(p.build, s["key"])) if s["f0"] < limit && s["f0"] + s["n"] > lo
     res = m.close
@@ -73,6 +76,36 @@ use encode
   write_text(p.out_path("captions.srt"), srt_text(r))
   write_text(p.out_path("chapters.txt"), chapters_text(r))
   [nfr, clock_ms() - t0]
+
+# The resolved chapters as [[title, frame], ...] for a master covering frames [lo, lo + n).
+-> chapter_list(r, lo, n)
+  out = []
+  r["tracks"][5]["items"].each ->(m)
+    f = m["frame"] - lo
+    out.push([m["title"], f]) if f >= 0 && f < n
+  out
+
+# studio share <episode.json> [--cut full] [--preset share]: the share copy (720p H.264 + AAC by default) transcoded
+# from the master, chapters and timecode carried, then checked.
+-> cmd_share(args)
+  p = Project.new(args[1], opt_arg(args, "--cut", "full"))
+  r = JSON.parse(File.read(p.resolved_path))
+  src = opt_arg(args, "--master", p.out_path("master.mp4"))
+  preset = opt_arg(args, "--preset", "share")
+  out = opt_arg(args, "--out", p.out_path(preset + ".mp4"))
+  die("no master " + src + " (run studio mux)") if !File.exist?(src)
+  t0 = clock_ms()
+  res = Transcode.run(src, out, {preset: preset})
+  dt = clock_ms() - t0
+  << "share: " + res[:frames].to_s + " frames in " + dt.to_s + " ms (" + res[:fps].to_s + " fps), " + (res[:file_bytes] / 1048576).to_s + " MB -> " + out
+  chs = chapter_list(r, 0, r["frames"])
+  ck = nil
+  if chs.size > 0
+    ck = Transcode.check(out, {preset: preset, frames: r["frames"], tc_start: r["tc_start"], chapters: chs})
+  else
+    ck = Transcode.check(out, {preset: preset, frames: r["frames"], tc_start: r["tc_start"]})
+  << MediaVerify.format(ck)
+  ck[:ok] ? 0 : 1
 
 -> cmd_mux(args)
   p = Project.new(args[1], opt_arg(args, "--cut", "full"))
@@ -131,7 +164,10 @@ use encode
   nfr = opt_arg(args, "--frames", r["frames"].to_s).to_i
   res = []
   << "verify " + master
-  mv = MediaVerify.check(master, {rate: [num, den], frames: nfr, tc_start: r["tc_start"]})
+  vo = {rate: [num, den], frames: nfr, tc_start: r["tc_start"]}
+  chs = chapter_list(r, 0, nfr)
+  vo[:chapters] = chs if chs.size > 0
+  mv = MediaVerify.check(master, vo)
   << "MediaVerify (core/media, AVFoundation):"
   << MediaVerify.format(mv)
   mv[:checks].each ->(c)

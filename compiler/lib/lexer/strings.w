@@ -1,6 +1,22 @@
 + Lexer
 
   -> scan_string
+    if @lc != nil
+      lc = @lc ## i64[]
+      p = @pos
+      n = @char_count
+      while p < n
+        cp = (lc[p] >> 18) & 0x1FFFFF
+        if cp == 34
+          val = slice_chars(@pos, p - @pos)
+          @col += (p - @pos) + 1
+          @pos = p + 1
+          emit_same_id(:STRING, val)
+          return nil
+        if cp == 92 || cp == 91 || cp == 10
+          break
+        p += 1
+
     str = ""
     parts = []
     has_interp = false
@@ -633,32 +649,95 @@
     indents = i64[1024]
     count = tungsten_tokenize_fast64(lc, lc.size(), packed, indents)
 
+    packed_tokens = @packed_tokens
+    values = @values
+    chars = @chars
     i = 0
     while i < count
       # Every field lives in bits 0-45, so descriptors remain inline Ints
       # after crossing from the raw staging buffer into @packed_tokens.
-      materialize_packed_token(packed[i])
+      bits = packed[i]
+      type_id = (bits >> 38) & 0xFF
+      if type_id == 25
+        off = (bits >> 2) & 0xFFFFFF
+        if off >= @sup_skip_to
+          @current_packed_tok = bits
+          packed_tokens.push(bits)
+          len = (bits >> 26) & 0xFFF
+          if len == 1
+            values.push(chars[off])
+          else
+            values.push(slice_chars(off, len))
+          @token_count += 1
+      elsif type_id == 8
+        off = (bits >> 2) & 0xFFFFFF
+        if off >= @sup_skip_to
+          @current_packed_tok = bits
+          packed_tokens.push(bits)
+          values.push(nil)
+          @token_count += 1
+          @last_token_type = :NEWLINE
+          @last_token_value = nil
+          @after_lambda_params = false
+          @regex_capture_scope = false
+      elsif type_id == 9
+        off = (bits >> 2) & 0xFFFFFF
+        if off >= @sup_skip_to
+          @current_packed_tok = bits
+          packed_tokens.push(bits)
+          values.push(nil)
+          @token_count += 1
+          @last_token_type = :INDENT
+          @last_token_value = nil
+          @after_lambda_params = false
+      elsif type_id == 10
+        off = (bits >> 2) & 0xFFFFFF
+        if off >= @sup_skip_to
+          @current_packed_tok = bits
+          packed_tokens.push(bits)
+          values.push(nil)
+          @token_count += 1
+          @last_token_type = :DEDENT
+          @last_token_value = nil
+          @after_lambda_params = false
+      else
+        materialize_packed_token(bits)
       i += 1
 
     @token_count
 
   -> build_line_index
-    @line_at = []
-    @col_at = []
-    line = 1
-    col = 1
-    i = 0
-    while i < @char_count
-      @line_at.push(line)
-      @col_at.push(col)
-      if @chars[i] == "\n"
-        line += 1
-        col = 1
-      else
-        col += 1
-      i += 1
-    @line_at.push(line)
-    @col_at.push(col)
+    n = @char_count ## i64
+    line_at = w64[n + 1]
+    col_at = w64[n + 1]
+    line = 1 ## i64
+    col = 1 ## i64
+    i = 0 ## i64
+    if @lc != nil
+      lc = @lc ## i64[]
+      while i < n
+        line_at[i] = line
+        col_at[i] = col
+        if ((lc[i] >> 18) & 0x1FFFFF) == 10
+          line += 1
+          col = 1
+        else
+          col += 1
+        i += 1
+    else
+      while i < n
+        line_at[i] = line
+        col_at[i] = col
+        if @chars[i] == "\n"
+          line += 1
+          col = 1
+        else
+          col += 1
+        i += 1
+    line_at[n] = line
+    col_at[n] = col
+    @line_at = line_at
+    @col_at = col_at
 
   ## i64: tok
   -> packed_type_id(tok)
@@ -673,10 +752,21 @@
     (tok >> 26) & 0xFFF
 
   -> slice_chars(off, len)
-    out = StringBuffer(len)
-    i = 0
-    while i < len && off + i < @char_count
-      out << @chars[off + i]
+    if len <= 0
+      return ""
+    chars = @chars
+    n = @char_count
+    if len == 1 && off < n
+      return chars[off]
+    if len == 2 && off + 1 < n
+      return chars[off] + chars[off + 1]
+    out = StringBuffer(len) ## reuse
+    i = off
+    limit = off + len
+    if limit > n
+      limit = n
+    while i < limit
+      out << chars[i]
       i += 1
     out.to_s()
 

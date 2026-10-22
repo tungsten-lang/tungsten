@@ -204,16 +204,19 @@ use lib/fcpxml
   eng.close
   0
 
-# studio gc <episode.json> [--dry]: delete stored segments that no resolved timeline in build/<cut>/ references.
+# studio gc <episode.json> [--dry]: delete stored segments that no resolved timeline of any cut (build/*/)
+# references (the cuts share one segment store).
 -> cmd_gc(args)
   p = Project.new(args[1], opt(args, "--cut", "full"))
   keep = {}
-  dir = p.build + "/" + p.cut
-  File.entries(dir).each ->(nm)
-    if nm.ends_with?("timeline.resolved.json")
-      r = JSON.parse(File.read(dir + "/" + nm))
-      r["segments"].each ->(s)
-        keep[s["key"]] = 1
+  File.entries(p.build).each ->(cd)
+    dir = p.build + "/" + cd
+    if cd != "." && cd != ".." && cd != "segments" && File.directory?(dir)
+      File.entries(dir).each ->(nm)
+        if nm.ends_with?("timeline.resolved.json")
+          r = JSON.parse(File.read(dir + "/" + nm))
+          r["segments"].each ->(s)
+            keep[s["key"]] = 1
   sd = segment_dir(p.build)
   gone = 0
   bytes = 0

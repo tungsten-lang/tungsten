@@ -22,29 +22,16 @@
     y += 1
   0
 
--> rs_zero(wb, n) (f32[] i64) i64
-  i = 0
-  while i < n
-    wb[i] = ~0.0 ## f32
-    i += 1
-  0
-
-# wb += t * src (a weighted image of a clip's crossfaded seam)
--> rs_accum(src, stride, w, h, t, wb) (i64 i64 i64 i64 f64 f32[]) i64
+# Copy a w x h window starting at column x0 of one RGBA8 buffer into another (the picture-framed triptych pane).
+-> rs_copy_window(src, sstride, x0, dst, dstride, w, h) (i64 i64 i64 i64 i64 i64 i64) i64
   y = 0
   while y < h
-    row = y * stride
-    o = y * w * 3
-    x = 0
-    while x < w
-      p = row + x * 4
-      c = 0
-      while c < 3
-        v = raw_load_u8(src, p + c) ## f64
-        wb[o + c] = ((wb[o + c] ## f64) + v * t * ~0.00392156862745098) ## f32
-        c += 1
-      o += 3
-      x += 1
+    a = y * sstride + x0 * 4
+    b = y * dstride
+    i = 0
+    while i < w * 4
+      raw_store_u8(dst, b + i, raw_load_u8(src, a + i))
+      i += 1
     y += 1
   0
 

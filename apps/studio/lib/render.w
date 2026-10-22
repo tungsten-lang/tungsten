@@ -16,6 +16,7 @@
 use base
 use raster
 use overlay
+use grade
 
 -> smooth(a)
   a = ~0.0 if a < ~0.0
@@ -160,6 +161,9 @@ use overlay
       @gk[j] = @gk[j] / gs
       j += 1
     @out = u8[@w * @h * 3]
+    # the per-pixel look (lib/grade.w): the CPU reference or the Metal kernels, as GRADE says
+    @fx = CpuGrade.new(@aw, @ah, @wb, @lb, @grid, @gcnt, @gtmp, @gp, @pbuf, @bbuf, @gk)
+    @fx = MetalGrade.new(@aw, @ah, @gk, @gp) if GRADE["id"] != "cpu"
     @planes = {}
     @fields = {}
     @parts = {}
@@ -265,7 +269,7 @@ use overlay
         rs_grain_tex(rng_key(@seed, gkey, g, P_GRAIN), @aw, @ah, var, buf, tmp)
         grains.push(buf)
         g += 1
-      pl = [vig, grains]
+      pl = [vig, grains, sk]
       @planes[sk] = pl
     pl
 
@@ -497,25 +501,48 @@ use overlay
           jy += Math.cos(lt * to_f(o["fy"])) * to_f(o["ay"]) * kk
     [jx, jy]
 
-  # Draw clip sequence entries (lists of [part, frame, weight]) blended into @wb.
+  # Draw clip sequence entries (lists of [part, frame, weight]) blended, and load them into the grade module.
   -> clip_frame_path(clip, e)
     asset_seq_path(clip["parts"][e[0]]["src"], e[1])
 
   -> load_clip_mix(clip, ws, z, jx, jy)
     if ws.size == 1
       draw_source(@act_a, seq_image(clip_frame_path(clip, ws[0])), z, ~0.5, ~0.5, jx, jy, false)
-      rs_load(@act_a.data_pointer, @astride, @aw, @ah, @wb)
+      @fx.load(@act_a.data_pointer, @astride, @aw, @ah)
       return nil
     if ws.size == 2
       draw_source(@act_a, seq_image(clip_frame_path(clip, ws[0])), z, ~0.5, ~0.5, jx, jy, false)
       draw_source(@act_b, seq_image(clip_frame_path(clip, ws[1])), z, ~0.5, ~0.5, jx, jy, false)
-      rs_lerp2(@act_a.data_pointer, @act_b.data_pointer, @astride, @aw, @ah, to_f(ws[1][2]), @wb)
+      @fx.lerp2(@act_a.data_pointer, @act_b.data_pointer, @astride, @aw, @ah, to_f(ws[1][2]))
       return nil
-    rs_zero(@wb, @aw * @ah * 3)
+    # three or four frames (a crossfaded seam blended with the next position): each drawn over the running mix at
+    # its share of the weight so far, so the canvas holds the weighted average
+    acc = ~0.0
     ws.each ->(e)
-      if e[2] > ~0.0
-        draw_source(@act_a, seq_image(clip_frame_path(clip, e)), z, ~0.5, ~0.5, jx, jy, false)
-        rs_accum(@act_a.data_pointer, @astride, @aw, @ah, to_f(e[2]), @wb)
+      w = to_f(e[2])
+      if w > ~0.0
+        acc += w
+        draw_source_alpha(@act_a, seq_image(clip_frame_path(clip, e)), z, jx, jy, w / acc)
+    @fx.load(@act_a.data_pointer, @astride, @aw, @ah)
+    nil
+
+  # draw_source at an opacity (the camera of a clip: centred, no flip)
+  -> draw_source_alpha(canvas, img, z, jx, jy, alpha)
+    iw = img.width + ~0.0
+    ih = img.height + ~0.0
+    ar = (@aw + ~0.0) / (@ah + ~0.0)
+    bw = iw
+    bh = iw / ar
+    if bh > ih
+      bh = ih
+      bw = ih * ar
+    z = ~1.012 if z < ~1.012
+    cw = bw / z
+    ch = bh / z
+    x0 = [[~0.5 * iw - cw / ~2.0 + jx, ~0.0].max, iw - cw].min
+    y0 = [[~0.5 * ih - ch / ~2.0 + jy, ~0.0].max, ih - ch].min
+    s = (@aw + ~0.0) / cw
+    canvas.image(img, ~0.0 - x0 * s, ~0.0 - y0 * s, iw * s, ih * s, {fit: :fill, quality: :high, opacity: alpha})
     nil
 
   # The weights of position pos of the sequence: entry k0 alone, or k0 and k0 + 1 mixed by the fraction.
@@ -572,9 +599,9 @@ use overlay
     if lt > at - xf
       a = smooth((lt - (at - xf)) / xf)
       draw_source(@act_b, seq_image(clip_frame_path(clip, seq_entry(clip["parts"], clip["xf"], 0)[0])), ~1.0, ~0.5, ~0.5, jx, jy, false)
-      rs_lerp2(@act_a.data_pointer, @act_b.data_pointer, @astride, @aw, @ah, a, @wb)
+      @fx.lerp2(@act_a.data_pointer, @act_b.data_pointer, @astride, @aw, @ah, a)
     else
-      rs_load(@act_a.data_pointer, @astride, @aw, @ah, @wb)
+      @fx.load(@act_a.data_pointer, @astride, @aw, @ah)
     nil
 
   -> draw_still(it, k, layer, lptr)
@@ -607,28 +634,28 @@ use overlay
       pos = (~0.0 - ~80.0) + pw * (@aw + ~160.0)
       glow = 0
       glow = 1 if pw > ~0.0 && pw < ~1.0
-      rs_wipe(@act_a.data_pointer, @act_b.data_pointer, @astride, @aw, @ah, pos, glow, @wb)
+      @fx.wipe(@act_a.data_pointer, @act_b.data_pointer, @astride, @aw, @ah, pos, glow)
     else
       zc = camera_at(st["camera"], move, u, dur, fx, fy)
       draw_source(@act_a, still(p["src"]), zc[0], zc[1], zc[2], jx, jy, flip)
-      rs_load(@act_a.data_pointer, @astride, @aw, @ah, @wb)
+      @fx.load(@act_a.data_pointer, @astride, @aw, @ah)
     nn = @aw * @ah * 3
     if fxl.include?("flicker")
       fl = ~1.0 - ~0.06 * (~0.5 + ~0.5 * Math.sin(lt * ~21.0 + Math.sin(lt * ~6.5) * ~3.0))
       fl = fl - ~0.14 if rng_bits(rng_key(@seed, ik, k, P_FLICKER), 0) % 97 < 3
-      rs_scale(@wb, nn, fl)
+      @fx.scale(nn, fl)
     if fxl.include?("rain")
       h2 = @ah * 2
       off = (lt * ~1400.0).floor.to_i % h2
-      rs_rain(@wb, @aw, @ah, rain_field(it), h2, off)
+      @fx.rain(rain_field(it), "rain:" + it["id"], h2, off)
     if fxl.include?("fog")
       off = (lt * ~22.0).floor.to_i % @aw
-      rs_fog(@wb, @aw, @ah, fog_field(it), @aw * 2, off)
+      @fx.fog(fog_field(it), "fog:" + it["id"], @aw * 2, off)
     if fxl.include?("snow")
-      rs_particles(@wb, @aw, @ah, particle_table(it), 240, lt, 1, @pbuf, @bbuf, @gk)
+      @fx.particles(particle_table(it), 240, lt, 1)
     if fxl.include?("dust") || fxl.include?("embers")
-      rs_particles(@wb, @aw, @ah, particle_table(it), 110, lt, 0, @pbuf, @bbuf, @gk)
-    rs_clip(@wb, nn)
+      @fx.particles(particle_table(it), 110, lt, 0)
+    @fx.clip(nn)
     grade_into(st, it, k, 0, @aw, @ah, 0, 0, ~1.0, lptr, @ax0, @bar_y)
     put_matte(it, p["matte"], lptr)
     ov_draw_timed(layer, p["overlays"], lt)
@@ -638,10 +665,6 @@ use overlay
   -> grade_into(st, it, k, salt, w, h, vx0, fade_rows, fade_to, lptr, ox, oy)
     pl = planes(st)
     sigma = load_gp(st)
-    gw = w / 8
-    gh = h / 8
-    rs_grade1(@wb, w, h, @lb, @grid, @gcnt, gw, gh, @gp[15])
-    rs_blur_grid(@grid, @gtmp, gw, gh, sigma)
     gk = rng_key(@seed, item_key(it), k, P_GRAIN)
     grains = pl[1]
     gi = rng_bits(gk, salt * 3) % grains.size
@@ -650,7 +673,7 @@ use overlay
     gox = gox + @aw if gox < 0
     goy = rng_bits(gk, salt * 3 + 2) % @ah
     goy = goy + @ah if goy < 0
-    rs_grade2(@wb, @lb, w, h, @grid, gw, gh, @gp, pl[0], grains[gi], @aw, @ah, vx0, gox, goy, fade_rows, fade_to, ~1.0, lptr, @lstride, ox, oy)
+    @fx.grade(pl, gi, gox, goy, sigma, w, h, vx0, fade_rows, fade_to, ~1.0, lptr, @lstride, ox, oy)
     nil
 
   -> pane_canvas(pw, ph)
@@ -688,14 +711,14 @@ use overlay
         foc = get(ch, "focus", [~0.5, ~0.45])
         fr = get(ch, "frame", {})
         vx0 = 0
+        pc = pane_canvas(pw, ph)
         if get(fr, "mode", "pane") == "picture"
           vx0 = fr["x"]
           draw_source(@act_a, still(ch["src"]), z, to_f(foc[0]), to_f(foc[1]), ~0.0, ~0.0, false)
-          rs_load(@act_a.data_pointer + vx0 * 4, @astride, pw, ph, @wb)
+          rs_copy_window(@act_a.data_pointer, @astride, vx0, pc.data_pointer, pc.stride, pw, ph)
         else
-          pc = pane_canvas(pw, ph)
           draw_pane_source(pc, still(ch["src"]), pw, ph, z, to_f(foc[0]), to_f(foc[1]))
-          rs_load(pc.data_pointer, pc.stride, pw, ph, @wb)
+        @fx.load(pc.data_pointer, pc.stride, pw, ph)
         sh = get(ch, "shade", {"rows" => 0, "to" => ~1.0})
         grade_into_alpha(st, it, k, ci + 1, pw, ph, a, vx0, sh["rows"], to_f(sh["to"]), lptr, pane[0], @bar_y + pane[1])
         ov_draw(layer, ch["elements"], a, self)
@@ -707,10 +730,6 @@ use overlay
   -> grade_into_alpha(st, it, k, salt, w, h, alpha, vx0, fade_rows, fade_to, lptr, ox, oy)
     pl = planes(st)
     sigma = load_gp(st)
-    gw = w / 8
-    gh = h / 8
-    rs_grade1(@wb, w, h, @lb, @grid, @gcnt, gw, gh, @gp[15])
-    rs_blur_grid(@grid, @gtmp, gw, gh, sigma)
     gk = rng_key(@seed, item_key(it), k, P_GRAIN)
     grains = pl[1]
     gi = rng_bits(gk, salt * 3) % grains.size
@@ -719,7 +738,7 @@ use overlay
     gox = gox + @aw if gox < 0
     goy = rng_bits(gk, salt * 3 + 2) % @ah
     goy = goy + @ah if goy < 0
-    rs_grade2(@wb, @lb, w, h, @grid, gw, gh, @gp, pl[0], grains[gi], @aw, @ah, vx0, gox, goy, fade_rows, fade_to, alpha, lptr, @lstride, ox, oy)
+    @fx.grade(pl, gi, gox, goy, sigma, w, h, vx0, fade_rows, fade_to, alpha, lptr, @lstride, ox, oy)
     nil
 
   # ------------------------------------------------------------------------------------------ frame

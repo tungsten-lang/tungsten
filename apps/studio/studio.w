@@ -9,6 +9,7 @@
 #   studio verify <master> [--resolved path]
 #   studio fcpxml <episode.json> [--cut full] [--out path] [--master path] -> FCPXML 1.11
 #   studio share <episode.json> [--cut full] [--preset share]  -> build/<cut>/share.mp4 (Transcode from the master)
+#   studio gradecheck <episode.json> <from> <to> [--step N]   -> Metal grade vs the CPU reference
 #
 # Build: bin/tungsten -o apps/studio/bin/studio apps/studio/studio.w (under the heavy lock).
 
@@ -239,9 +240,76 @@ use lib/fcpxml
   File.delete(args[3])
   0
 
+# studio gradecheck <episode.json> <from> <to> [--step N]: frames rendered by the CPU reference grade and by the
+# Metal grade side by side (same process, nothing written); the largest code-value difference, how many values
+# differ, and each implementation's render time.
+-> cmd_gradecheck(args)
+  p = Project.new(args[1], opt(args, "--cut", "full"))
+  p.verify_assets(true)
+  r = p.resolve
+  a = args[2].to_i
+  b = args[3].to_i
+  step = opt(args, "--step", "1").to_i
+  idxs = []
+  si = 0
+  r["segments"].each ->(s)
+    idxs.push(si) if s["f0"] < b && s["f0"] + s["n"] > a
+    si += 1
+  p.ensure_program_frames(r, idxs, 1)
+  GRADE["id"] = "cpu"
+  ec = Engine.new(p, r)
+  GRADE["id"] = METAL_GRADE_ID
+  em = Engine.new(p, r)
+  n = r["w"] * r["h"] * 3
+  st = i64[4]
+  tc = ~0.0
+  tm = ~0.0
+  frames = 0
+  worst = 0
+  worst_f = -1
+  f = a
+  while f < b
+    c0 = clock()
+    oc = ec.frame_into(f)
+    c1 = clock()
+    om = em.frame_into(f)
+    c2 = clock()
+    tc += c1 - c0
+    tm += c2 - c1
+    d = gc_compare(oc, om, n, st)
+    if d > worst
+      worst = d
+      worst_f = f
+    frames += 1
+    f += step
+  ec.close
+  em.close
+  tot = n * frames + ~0.0
+  << "gradecheck " + frames.to_s + " frames in \[" + a.to_s + ", " + b.to_s + ") step " + step.to_s + ": max |diff| " + worst.to_s + " code values (frame " + worst_f.to_s + "); values differing by 1: " + st[1].to_s + " (" + fixed6(~100.0 * st[1] / tot) + "%), by more: " + st[2].to_s
+  << "render ms per frame: cpu grade " + fixed6(tc * ~1000.0 / frames) + ", metal grade " + fixed6(tm * ~1000.0 / frames)
+  worst <= 1 ? 0 : 1
+
+# Byte comparison of two RGB24 frames: st[1] += values off by one, st[2] += values off by more; returns the max.
+-> gc_compare(x, y, n, st) (u8[] u8[] i64 i64[]) i64
+  m = 0
+  i = 0
+  while i < n
+    p = x[i]
+    q = y[i]
+    d = p - q
+    d = q - p if d < 0
+    if d > 0
+      m = d if d > m
+      if d == 1
+        st[1] = st[1] + 1
+      else
+        st[2] = st[2] + 1
+    i += 1
+  m
+
 -> main(args)
   if args.size == 0
-    << "usage: studio resolve|diff|frame|render|worker|mix|mux|verify|fcpxml|share|raw|gc|selftest ..."
+    << "usage: studio resolve|diff|frame|render|worker|mix|mux|verify|fcpxml|share|raw|gc|gradecheck|selftest ..."
     return 2
   c = args[0]
   return cmd_resolve(args) if c == "resolve"
@@ -257,6 +325,7 @@ use lib/fcpxml
   return selftest() if c == "selftest"
   return cmd_raw(args) if c == "raw"
   return cmd_gc(args) if c == "gc"
+  return cmd_gradecheck(args) if c == "gradecheck"
   << "unknown command " + c
   2
 

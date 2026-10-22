@@ -10,6 +10,18 @@ use base
 use audio
 
 + PlainMixer < Mixer
+  # Scratch for the longest take or cue (no voice chains, so no cached takes and no FFT plan).
+  -> prepare
+    cap = @sr * 4
+    @r["tracks"][2]["items"].each ->(it)
+      cap = [cap, frames_of(it["src"]) + @sr * 2].max
+    @r["tracks"][3]["items"].each ->(c)
+      cap = [cap, frames_of(c["src"]) + @sr * 2].max
+    @cap = cap
+    @l = f64[cap]
+    @rr = f64[cap]
+    nil
+
   # One source at a sample offset: n samples (cut to `limit` when given), linear gain, optional fades.
   -> place_plain(src, s0, limit, gain_db, fade_in_ms, fade_out_ms, bus)
     n = load(src, 0)

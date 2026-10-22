@@ -855,6 +855,10 @@
     # runtime/quartz.c, which only compiled programs link — like Metal.
     if cname.starts_with?("w_cg_")
       raise "Canvas is compiled-only: [cname] belongs to the CoreGraphics/CoreText bridge (runtime/quartz.c), which the tree-walking interpreter cannot call; run the program compiled (bin/tungsten file.w) instead of with --interpret"
+    # core/media encodes and muxes through runtime/media (VideoToolbox and
+    # AVFoundation), which only compiled programs link.
+    if cname.starts_with?("w_media_")
+      raise "media is compiled-only: [cname] belongs to the VideoToolbox/AVFoundation bridge (runtime/media), which the tree-walking interpreter cannot call; run the program compiled (bin/tungsten file.w) instead of with --interpret"
     raise "Unsupported ccall '[cname]' in interpreter"
 
   -> interpreted_thread?(value)

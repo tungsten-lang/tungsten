@@ -115,6 +115,14 @@
 -> ll_needs_quartz(text)
   ll_code_has(text, "@w_cg_")
 
+# The VideoToolbox/AVFoundation media bridge behind core/media
+# (runtime/media/media.c + media_avf.m). Its own gate, like quartz: a media
+# program pulls in VideoToolbox/CoreMedia/AVFoundation and nothing else, and
+# Canvas or Metal programs never link them. Non-Apple targets link media.c
+# alone, which there compiles to raising "needs macOS" stubs.
+-> ll_needs_media(text)
+  ll_code_has(text, "@w_media_")
+
 -> ll_needs_sci_io(text)
   ll_code_has(text, "@w_sci_")
 

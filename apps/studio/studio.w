@@ -8,6 +8,7 @@
 #   studio mux <episode.json>                           -> build/<cut>/master.mp4, .srt, chapters.txt
 #   studio verify <master> [--resolved path]
 #   studio fcpxml <episode.json> [--cut full] [--out path] [--master path] -> FCPXML 1.11
+#   studio share <episode.json> [--cut full] [--preset share]  -> build/<cut>/share.mp4 (Transcode from the master)
 #
 # Build: bin/tungsten -o apps/studio/bin/studio apps/studio/studio.w (under the heavy lock).
 
@@ -240,7 +241,7 @@ use lib/fcpxml
 
 -> main(args)
   if args.size == 0
-    << "usage: studio resolve|diff|frame|render|worker|mix|mux|verify|fcpxml|raw|gc|selftest ..."
+    << "usage: studio resolve|diff|frame|render|worker|mix|mux|verify|fcpxml|share|raw|gc|selftest ..."
     return 2
   c = args[0]
   return cmd_resolve(args) if c == "resolve"
@@ -252,6 +253,7 @@ use lib/fcpxml
   return cmd_mux(args) if c == "mux"
   return cmd_verify(args) if c == "verify"
   return cmd_fcpxml(args) if c == "fcpxml"
+  return cmd_share(args) if c == "share"
   return selftest() if c == "selftest"
   return cmd_raw(args) if c == "raw"
   return cmd_gc(args) if c == "gc"

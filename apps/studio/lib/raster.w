@@ -22,6 +22,32 @@
     y += 1
   0
 
+-> rs_zero(wb, n) (f32[] i64) i64
+  i = 0
+  while i < n
+    wb[i] = ~0.0 ## f32
+    i += 1
+  0
+
+# wb += t * src (a weighted image of a clip's crossfaded seam)
+-> rs_accum(src, stride, w, h, t, wb) (i64 i64 i64 i64 f64 f32[]) i64
+  y = 0
+  while y < h
+    row = y * stride
+    o = y * w * 3
+    x = 0
+    while x < w
+      p = row + x * 4
+      c = 0
+      while c < 3
+        v = raw_load_u8(src, p + c) ## f64
+        wb[o + c] = ((wb[o + c] ## f64) + v * t * ~0.00392156862745098) ## f32
+        c += 1
+      o += 3
+      x += 1
+    y += 1
+  0
+
 # wb = a * (1 - t) + b * t
 -> rs_lerp2(a, b, stride, w, h, t, wb) (i64 i64 i64 i64 i64 f64 f32[]) i64
   s = ~1.0 - t
@@ -498,8 +524,9 @@
 # ---------------------------------------------------------------------------------------------- planes
 # Precomputed fields, all keyed by (seed, owner, purpose) through the counter RNG.
 
-# Grain texture: N(0, 1) clipped as render.py's uint8 round trip ([-3.2, 3.175]), blurred sigma 0.7 (5 taps).
--> rs_grain_tex(key, w, h, buf, tmp) (i64 i64 i64 f32[] f32[]) i64
+# Grain texture: N(0, 1) clipped as render.py's uint8 round trip ([-3.2, 3.175]), blurred by a 5-tap gaussian of
+# variance var (0.49: sigma 0.7).
+-> rs_grain_tex(key, w, h, var, buf, tmp) (i64 i64 i64 f64 f32[] f32[]) i64
   n = w * h
   rng_fill_normals(key, n, tmp)
   i = 0
@@ -511,8 +538,8 @@
       tmp[i] = ~3.175 ## f32
     i += 1
   k0 = ~1.0
-  k1 = Math.exp((~0.0 - ~1.0) / (~2.0 * ~0.49))
-  k2 = Math.exp((~0.0 - ~4.0) / (~2.0 * ~0.49))
+  k1 = Math.exp((~0.0 - ~1.0) / (~2.0 * var))
+  k2 = Math.exp((~0.0 - ~4.0) / (~2.0 * var))
   ks = k0 + ~2.0 * k1 + ~2.0 * k2
   k0 = k0 / ks
   k1 = k1 / ks
@@ -772,16 +799,16 @@
     y += 1
   0
 
-# The card background: base colour + paper * 0.05 * [0.6, 0.85, 1.0], written opaque into a canvas.
--> rs_card_base(paper, w, h, dst, stride) (f32[] i64 i64 i64 i64) i64
+# A card background: base colour (br, bg, bb) + paper * amount * tint, written opaque into a canvas.
+-> rs_card_base(paper, w, h, dst, stride, br, bg, bb, amount, tr, tg, tb) (f32[] i64 i64 i64 i64 f64 f64 f64 f64 f64 f64 f64) i64
   y = 0
   while y < h
     x = 0
     while x < w
-      pv = (paper[y * w + x] ## f64) * ~0.05
-      r = ~0.04 + pv * ~0.6
-      g = ~0.055 + pv * ~0.85
-      b = ~0.085 + pv
+      pv = (paper[y * w + x] ## f64) * amount
+      r = br + pv * tr
+      g = bg + pv * tg
+      b = bb + pv * tb
       p = y * stride + x * 4
       raw_store_u8(dst, p, Math.floor(r * ~255.0) ## i64)
       raw_store_u8(dst, p + 1, Math.floor(g * ~255.0) ## i64)
@@ -789,20 +816,4 @@
       raw_store_u8(dst, p + 3, 255)
       x += 1
     y += 1
-  0
-
-# Error-free product (Dekker/Veltkamp): sign of x * m - n, exactly, for the bars' centuries rounding (render.py
-# quantized Decimal(gap / 100), the exact value of the double, half up).
--> exact_sign_mul_sub(x, m, n) (f64 f64 f64) i64
-  p = x * m
-  c = ~134217729.0 * x
-  xh = c - (c - x)
-  xl = x - xh
-  c2 = ~134217729.0 * m
-  mh = c2 - (c2 - m)
-  ml = m - mh
-  e = ((xh * mh - p) + xh * ml + xl * mh) + xl * ml
-  d = (p - n) + e
-  return 1 if d > ~0.0
-  return -1 if d < ~0.0
   0

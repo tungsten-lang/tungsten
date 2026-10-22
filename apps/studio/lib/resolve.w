@@ -1,11 +1,15 @@
 # studio/resolve — the source document (episode.json, authored) -> the resolved timeline (derived).
 #
-# TIMELINE.md §3. The resolver is a pure function: integer milliseconds in, integer frames and samples out.
-#   1. lines: each line's speech window from its anchor (previous line's end + gap_ms, + nudge_ms). Others see a
-#      line at its nudged position when it ripples, at its un-nudged position when it does not.
-#   2. shots: start = anchor (a line edge + ms, the start, or another shot); end = the next shot's start. The
-#      picture boundary is snap(start): round half up to a frame.
-#   3. items: parameters in item-local time (phrases, shakes, supers become ms from the item's exact start) and a
+# TIMELINE.md §3. The resolver is a pure function: integer milliseconds and frames in, integer frames and samples
+# out. Every instant is held in flicks (1/705,600,000 s), which are exact for milliseconds, every common frame rate
+# and every audio rate, so an anchor may add milliseconds and frames freely.
+#   1. lines: each line's speech window from its anchor (previous line's end, the start, or a shot) + gap_ms,
+#      + nudge_ms. Others see a line at its nudged position when it ripples, at its un-nudged position when not.
+#   2. shots: start = anchor (a line edge or phrase + ms, the start, or another shot's start or end + ms + frames);
+#      end = the next shot's start. The picture boundary is snap(start): round half up to a frame. A shot with an
+#      explicit length (`frames`, or `"program"`: its program's frame count) also has an end edge to anchor on.
+#      Lines and shots resolve lazily, so either may anchor on the other.
+#   3. items: parameters in item-local time (phrases, shakes, overlays become ms from the item's exact start) and a
 #      recipe hash over kind, parameters, dependency hashes and the kind's renderer version.
 #   4. intervals: the edit decision table, constant active sets; segments: <= 48-frame runs aligned to each
 #      interval's start, keyed by what they show in item-local time.
@@ -17,6 +21,7 @@ COMPOSITOR = 3
 RENDERER = {"still" => 3, "clip" => 3, "frames" => 2, "program" => 1, "card" => 3, "black" => 1, "group" => 3, "fade_out" => 1}
 # Encoder settings in force (the segment key covers them): set from encoder_spec by the project.
 ENCODER = {"id" => "vt:hevc:q0.750000:reorder:bt709-1-1-1:tv:left:420v"}
+FL_MS = 705600
 
 # Normalise a word as tools/cues.py does: lower case, keep only a-z0-9.
 -> norm_word(w)
@@ -37,21 +42,59 @@ ENCODER = {"id" => "vt:hevc:q0.750000:reorder:bt709-1-1-1:tv:left:420v"}
     out.push(w) if w != ""
   out
 
+# words[a...b] joined by single spaces.
+-> join_words(words, a, b)
+  out = ""
+  i = a
+  while i < b
+    out = out + " " if i > a
+    out = out + words[i]
+    i += 1
+  out
+
+# Index of the first word of `phrase` in `words` (normalised), or -1.
+-> find_phrase(words, phrase)
+  target = []
+  split_words(phrase).each ->(w)
+    nw = norm_word(w)
+    target.push(nw) if nw != ""
+  i = 0
+  while i + target.size <= words.size
+    ok = true
+    j = 0
+    while j < target.size && ok
+      ok = false if norm_word(words[i + j]) != target[j]
+      j += 1
+    return i if ok
+    i += 1
+  -1
+
 + Resolver
   ro :out, :num, :den, :sr, :frames
 
-  -> new(@ep, @cut_name, @assets_sha)
+  -> new(@ep, @cut_name, @assets_sha, @counts)
     @cut = @ep["cuts"][@cut_name]
     die("no cut " + @cut_name.to_s) if @cut == nil
     @num = @cut["rate"][0]
     @den = @cut["rate"][1]
+    @fpf = FLICKS * @den / @num
     @sr = @cut["sr"]
     @seed = get(@ep, "seed", 1)
     @assets = @ep["assets"]
     @lines = {}
+    @line_src = {}
     @line_list = []
-    @shot_ms = {}
+    @shot_src = {}
+    @shot_fl = {}
+    @busy = {}
     @out = nil
+
+  # A cut may carry its own lines, shots, cues, captions and markers; otherwise the episode's are used.
+  -> section(k)
+    v = @cut[k]
+    v = @ep[k] if v == nil
+    v = [] if v == nil
+    v
 
   -> asset(key)
     a = @assets[key]
@@ -64,50 +107,107 @@ ENCODER = {"id" => "vt:hevc:q0.750000:reorder:bt709-1-1-1:tv:left:420v"}
     s = asset(key)["sha256"] if s == nil
     s
 
-  # ------------------------------------------------------------------------------------------ 1. lines
-  -> resolve_lines
-    @ep["lines"].each ->(l)
-      take = asset(l["take"])
-      sp = take["speech_ms"]
-      lead = sp[0]
-      tail = sp[1]
-      after = l["after"]
-      ref = after["ref"]
-      base = 0
-      if ref != "start"
-        r = @lines[ref]
-        die("line " + l["id"] + ": after unknown or later line " + ref.to_s) if r == nil
-        base = r["seen_end"]
-      nominal = base + after["gap_ms"]
-      actual = nominal + get(l, "nudge_ms", 0)
-      len = tail - lead
-      rl = {"id" => l["id"], "spk" => l["spk"], "text" => l["text"], "take" => l["take"], "lead" => lead,
-            "start" => actual, "end" => actual + len, "nominal_start" => nominal, "nominal_end" => nominal + len,
-            "words_ms" => get(take, "words_ms", [])}
-      if get(l, "ripple", true)
-        rl["seen_start"] = actual
-        rl["seen_end"] = actual + len
-      else
-        rl["seen_start"] = nominal
-        rl["seen_end"] = nominal + len
-      @lines[l["id"]] = rl
-      @line_list.push(rl)
+  -> ms_of(fl)
+    q = fl / FL_MS
+    q -= 1 if fl % FL_MS != 0 && fl < 0
+    q
 
-  # An anchor in ms: {ref: line|start, edge: start|end, ms} or {shot: id, ms}.
-  -> anchor_ms(a)
+  -> samples_of_fl(fl)
+    fl / (FLICKS / @sr)
+
+  # ------------------------------------------------------------------------------------------ 1. lines
+  -> line(id)
+    r = @lines[id]
+    return r if r != nil
+    l = @line_src[id]
+    die("unknown line " + id.to_s) if l == nil
+    die("anchor cycle through line " + id.to_s) if @busy[id] != nil
+    @busy[id] = 1
+    take = asset(l["take"])
+    sp = take["speech_ms"]
+    lead = sp[0]
+    tail = sp[1]
+    after = l["after"]
+    base = 0
+    if after["shot"] != nil
+      base = anchor_fl(after)
+    elsif get(after, "ref", "start") != "start"
+      base = line(after["ref"])["seen_end_fl"]
+    nominal = base + get(after, "gap_ms", 0) * FL_MS
+    actual = nominal + get(l, "nudge_ms", 0) * FL_MS
+    len = (tail - lead) * FL_MS
+    rl = {"id" => l["id"], "spk" => l["spk"], "text" => l["text"], "take" => l["take"], "lead" => lead,
+          "start_fl" => actual, "end_fl" => actual + len, "nominal_fl" => nominal,
+          "start" => ms_of(actual), "end" => ms_of(actual + len), "nominal_start" => ms_of(nominal),
+          "words_ms" => get(take, "words_ms", []), "words_end_ms" => get(take, "words_end_ms", []),
+          "cc" => l["cc"], "gain_db" => get(l, "gain_db", 0)}
+    if get(l, "ripple", true)
+      rl["seen_start_fl"] = actual
+      rl["seen_end_fl"] = actual + len
+    else
+      rl["seen_start_fl"] = nominal
+      rl["seen_end_fl"] = nominal + len
+    @busy.delete(id)
+    @lines[id] = rl
+    rl
+
+  -> resolve_lines
+    section("lines").each ->(l)
+      @line_src[l["id"]] = l
+    section("lines").each ->(l)
+      @line_list.push(line(l["id"]))
+
+  # ------------------------------------------------------------------------------------------ anchors
+  # An anchor, in flicks: {ref: line|start, edge: start|end, phrase, ms, frames} or {shot: id, edge, ms, frames}.
+  -> anchor_fl(a)
     die("missing anchor") if a == nil
-    off = get(a, "ms", 0)
+    off = get(a, "ms", 0) * FL_MS + get(a, "frames", 0) * @fpf
     if a["shot"] != nil
-      s = @shot_ms[a["shot"]]
-      die("anchor on unknown shot " + a["shot"].to_s) if s == nil
-      return s + off
+      return shot_edge_fl(a["shot"], get(a, "edge", "start")) + off
     ref = get(a, "ref", "start")
     return off if ref == "start"
-    r = @lines[ref]
-    die("anchor on unknown line " + ref.to_s) if r == nil
+    r = line(ref)
+    if a["phrase"] != nil
+      words = split_words(r["text"])
+      k = find_phrase(words, a["phrase"])
+      die("phrase not in line " + ref + ": " + a["phrase"]) if k < 0
+      ws = r["words_ms"]
+      die("line " + ref + " has no word times for its phrase") if ws.size == 0
+      w = ws[[k, ws.size - 1].min]
+      return r["seen_start_fl"] + (w - r["lead"]) * FL_MS + off
     if get(a, "edge", "start") == "end"
-      return r["seen_end"] + off
-    r["seen_start"] + off
+      return r["seen_end_fl"] + off
+    r["seen_start_fl"] + off
+
+  -> shot_start_fl(id)
+    t = @shot_fl[id]
+    return t if t != nil
+    s = @shot_src[id]
+    die("anchor on unknown shot " + id.to_s) if s == nil
+    die("anchor cycle through shot " + id.to_s) if @busy["shot:" + id] != nil
+    @busy["shot:" + id] = 1
+    t = anchor_fl(s["at"])
+    @busy.delete("shot:" + id)
+    @shot_fl[id] = t
+    t
+
+  # The explicit length of a shot in frames (nil when it simply runs to the next shot).
+  -> shot_frames(s)
+    n = s["frames"]
+    return nil if n == nil
+    if n == "program"
+      c = nil
+      c = @counts[s["source_sha"]] if @counts != nil
+      die("shot " + s["id"] + ": its program's frame count is unknown") if c == nil
+      return c
+    n
+
+  -> shot_edge_fl(id, edge)
+    t = shot_start_fl(id)
+    return t if edge != "end"
+    n = shot_frames(@shot_src[id])
+    die("shot " + id.to_s + " has no explicit length to anchor on its end") if n == nil
+    t + n * @fpf
 
   # Words spoken in [t0 - 500, t1) as (absolute ms, word), the window tools/cues.py uses for a shot.
   -> words_between(t0, t1)
@@ -145,50 +245,50 @@ ENCODER = {"id" => "vt:hevc:q0.750000:reorder:bt709-1-1-1:tv:left:420v"}
 
   # ------------------------------------------------------------------------------------------ 2. shots
   -> resolve
+    shots = section("shots")
+    shots.each ->(s)
+      @shot_src[s["id"]] = s
     resolve_lines()
-    shots = @ep["shots"]
     starts = []
     shots.each ->(s)
-      t = anchor_ms(s["at"])
-      @shot_ms[s["id"]] = t
-      starts.push(t)
-    end_ms = anchor_ms(@cut["end"])
+      starts.push(shot_start_fl(s["id"]))
+    end_fl = anchor_fl(@cut["end"])
     i = 1
     while i < starts.size
       die("shot " + shots[i]["id"] + " starts before " + shots[i - 1]["id"]) if starts[i] <= starts[i - 1]
       i += 1
-    @frames = snap_ms(end_ms, @num, @den)
+    @frames = snap_flicks(end_fl, @num, @den)
     total_samples = samples_of_frames(@frames, @sr, @num, @den)
 
-    # shake times (sfx cues flagged shake) and supers, absolute ms
+    # shake times (sfx cues flagged shake) and timed overlays (supers), absolute flicks
     shakes = []
-    supers = []
-    @ep["cues"].each ->(c)
+    overlays = []
+    section("cues").each ->(c)
       if c["kind"] == "sfx" && get(c, "shake", false)
-        shakes.push(anchor_ms(c["at"]))
-      if c["kind"] == "super"
-        supers.push([anchor_ms(c["at"]), c["ms"], c["text"]])
+        shakes.push(anchor_fl(c["at"]))
+      if c["kind"] == "overlay"
+        overlays.push([anchor_fl(c["at"]), c["ms"], c])
 
     v1 = []
     i = 0
     while i < shots.size
       s = shots[i]
       t0 = starts[i]
-      t1 = i + 1 < shots.size ? starts[i + 1] : end_ms
-      f0 = snap_ms(t0, @num, @den)
-      f1 = i + 1 < shots.size ? snap_ms(t1, @num, @den) : @frames
+      t1 = i + 1 < shots.size ? starts[i + 1] : end_fl
+      f0 = snap_flicks(t0, @num, @den)
+      f1 = i + 1 < shots.size ? snap_flicks(t1, @num, @den) : @frames
       die("shot " + s["id"] + " is shorter than a frame") if f1 <= f0
-      item = item_for(s, t0, t1, shakes, supers)
+      item = item_for(s, t0, t1, shakes, overlays)
       item["f0"] = f0
       item["f1"] = f1
-      item["t0_ms"] = t0
-      item["t1_ms"] = t1
-      item["flicks0"] = flicks_of_ms(t0)
+      item["t0_ms"] = ms_of(t0)
+      item["t1_ms"] = ms_of(t1)
+      item["flicks0"] = t0
       v1.push(item)
       i += 1
 
     v4 = []
-    @ep["cues"].each ->(c)
+    section("cues").each ->(c)
       if c["kind"] == "fade_out"
         n = c["frames"]
         fe = @frames
@@ -202,7 +302,7 @@ ENCODER = {"id" => "vt:hevc:q0.750000:reorder:bt709-1-1-1:tv:left:420v"}
                  "recipe" => hash_of({"kind" => "fade_out", "v" => RENDERER["fade_out"], "p" => p})})
 
     a1 = audio_lines()
-    cues_out = audio_cues(end_ms)
+    cues_out = audio_cues()
     subs = subtitles()
     markers = chapters(v1)
     iv = intervals(v1, v4)
@@ -211,7 +311,7 @@ ENCODER = {"id" => "vt:hevc:q0.750000:reorder:bt709-1-1-1:tv:left:420v"}
     @out = {"schema" => "studio.resolved/1", "episode" => @ep["id"], "cut" => @cut_name,
             "rate" => [@num, @den], "sr" => @sr, "w" => @cut["w"], "h" => @cut["h"],
             "tc_start" => get(@cut, "tc_start", "00:00:00:00"), "frames" => @frames, "samples" => total_samples,
-            "end_ms" => end_ms, "seed" => @seed, "encoder" => ENCODER["id"],
+            "end_ms" => ms_of(end_fl), "seed" => @seed, "encoder" => ENCODER["id"],
             "tracks" => [{"id" => "V1", "kind" => "video", "items" => v1},
                          {"id" => "V4", "kind" => "video", "role" => "fades", "items" => v4},
                          {"id" => "A1", "kind" => "audio", "role" => "narration", "items" => a1},
@@ -228,8 +328,27 @@ ENCODER = {"id" => "vt:hevc:q0.750000:reorder:bt709-1-1-1:tv:left:420v"}
     die("unknown style " + name.to_s) if st == nil
     st
 
-  -> item_for(s, t0, t1, shakes, supers)
+  # Shakes and timed overlays near an item, in item-local ms (they may fall before 0 or after dur: the item is
+  # also drawn as the outgoing side of the next item's dissolve).
+  -> near(p, kind, t0, t1, shakes, overlays)
+    sh = []
+    shakes.each ->(t)
+      sh.push(ms_of(t - t0)) if t >= t0 - 1000 * FL_MS && t < t1 + 2000 * FL_MS
+    p["shakes"] = sh
+    su = []
+    overlays.each ->(x)
+      c = x[2]
+      if get(c, "on", ["still", "clip"]).include?(kind)
+        if x[0] + x[1] * FL_MS > t0 && x[0] < t1 + 2000 * FL_MS
+          su.push([ms_of(x[0] - t0), x[1], {"el" => c["el"], "reveal_ms" => get(c, "reveal_ms", 0), "fade_ms" => get(c, "fade_ms", 0),
+                                           "stroke_min_alpha" => get(c, "stroke_min_alpha", 0)}])
+    p["overlays"] = su
+    p
+
+  -> item_for(s, t0f, t1f, shakes, overlays)
     kind = s["kind"]
+    t0 = ms_of(t0f)
+    t1 = ms_of(t1f)
     dur = t1 - t0
     p = {"dur_ms" => dur}
     deps = []
@@ -239,7 +358,7 @@ ENCODER = {"id" => "vt:hevc:q0.750000:reorder:bt709-1-1-1:tv:left:420v"}
       p["camera"] = s["camera"]
       p["fx"] = get(s, "fx", [])
       p["style"] = style(s["style"])
-      p["bar"] = s["bar"]
+      p["matte"] = s["matte"]
       if s["wipe"] != nil
         w = s["wipe"]
         deps.push(asset_sha(w["src"]))
@@ -247,51 +366,52 @@ ENCODER = {"id" => "vt:hevc:q0.750000:reorder:bt709-1-1-1:tv:left:420v"}
         p["wipe"] = {"src" => w["src"], "at_ms" => at, "ms" => w["ms"]}
       if s["clip"] != nil
         c = s["clip"]
-        ca = asset(c["src"])
-        deps.push(asset_sha(c["src"]))
+        parts = []
+        c["parts"].each ->(pt)
+          ca = asset(pt["src"])
+          deps.push(asset_sha(pt["src"]))
+          parts.push({"src" => pt["src"], "first" => get(pt, "first", 0), "count" => get(pt, "count", ca["count"] - get(pt, "first", 0))})
         at = 0
         at = phrase_local(c["at"]["phrase"], t0, t1, 0) if c["at"] != nil
-        p["clip"] = {"src" => c["src"], "count" => ca["count"], "fps" => c["fps"], "min_speed" => c["min_speed"],
-                     "max_speed" => c["max_speed"], "blend" => c["blend"], "xf_in_ms" => c["xf_in_ms"], "at_ms" => at}
-      # shakes and supers near the item, in item-local ms (they may fall before 0 or after dur: the item is
-      # also drawn as the outgoing side of the next item's dissolve)
-      sh = []
-      shakes.each ->(t)
-        sh.push(t - t0) if t >= t0 - 1000 && t < t1 + 2000
-      p["shakes"] = sh
-      su = []
-      supers.each ->(x)
-        su.push([x[0] - t0, x[1], x[2]]) if x[0] + x[1] > t0 && x[0] < t1 + 2000
-      p["supers"] = su
+        p["clip"] = {"parts" => parts, "xf" => get(c, "xf", 0), "fps" => get(c, "fps", @num / @den), "at_ms" => at,
+                     "speed" => c["speed"], "add_ms" => get(c, "add_ms", 0), "blend" => get(c, "blend", true),
+                     "pre" => c["pre"], "zoom" => c["zoom"], "hold" => c["hold"]}
+      near(p, kind, t0f, t1f, shakes, overlays)
     elsif kind == "frames"
       # a frame sequence shows frame k at local frame k: its duration is not part of what it draws
       a = asset(s["src"])
       deps.push(asset_sha(s["src"]))
       p = {"src" => s["src"], "count" => a["count"]}
+      p["in"] = s["in"] if s["in"] != nil
     elsif kind == "program"
       die("program shot " + s["id"] + " has no source hash (Project.prepare_programs)") if s["source_sha"] == nil
-      p["program"] = s["program"]
-      p["source_sha"] = s["source_sha"]
-      # frames the program renders: round(duration x rate), as the legacy scene runner counted them, so a
-      # one-frame snap of the cut does not change the program's output
-      p["count"] = (dur * @num * 2 + 1000 * @den) / (2000 * @den)
+      # frames the program renders: its own count, or round(duration x rate) (the legacy scene runner's count), so
+      # a one-frame snap of the cut does not change the program's output
+      n = nil
+      n = @counts[s["source_sha"]] if @counts != nil
+      n = (dur * @num * 2 + 1000 * @den) / (2000 * @den) if n == nil
+      p = {"source_sha" => s["source_sha"], "count" => n}
+      p["in"] = s["in"] if s["in"] != nil
+      p["dur_ms"] = dur if get(s, "program_dur", false)
       deps.push(s["source_sha"])
       get(s, "deps", []).each ->(d)
         deps.push(asset_sha(d))
     elsif kind == "card"
-      p = {"layout" => s["layout"], "style" => style(s["style"])}
+      p = {"bg" => s["bg"], "elements" => s["elements"]}
     elsif kind == "group"
-      kids = []
-      s["children"].each ->(ch)
+      panes = []
+      s["panes"].each ->(ch)
         deps.push(asset_sha(ch["src"]))
         at = 0
-        at = phrase_local(ch["at"]["phrase"], t0, t1, 0) if ch["at"] != nil
-        kids.push({"id" => ch["id"], "src" => ch["src"], "label" => ch["label"], "pane" => ch["pane"], "at_ms" => at})
-      p["layout"] = s["layout"]
-      p["children"] = kids
-      p["camera"] = s["camera"]
+        at = phrase_local(ch["at"]["phrase"], t0, t1, get(ch, "default_ms", 0)) if ch["at"] != nil
+        q = {}
+        ch.keys.each ->(k)
+          q[k] = ch[k] if k != "at" && k != "default_ms"
+        q["at_ms"] = at
+        panes.push(q)
+      p["panes"] = panes
       p["style"] = style(s["style"])
-      p["bar"] = s["bar"]
+      p["matte"] = s["matte"]
     elsif kind == "black"
       p = {}
     else
@@ -305,86 +425,110 @@ ENCODER = {"id" => "vt:hevc:q0.750000:reorder:bt709-1-1-1:tv:left:420v"}
   -> audio_lines
     out = []
     @line_list.each ->(l)
-      s0 = samples_of_ms(l["start"] - l["lead"], @sr)
-      out.push({"id" => l["id"], "spk" => l["spk"], "src" => l["take"], "s0" => s0, "speech_ms" => [l["start"], l["end"]],
-                "nominal_ms" => l["nominal_start"], "gain_db" => 0, "flicks" => flicks_of_ms(l["start"])})
+      s0 = samples_of_fl(l["start_fl"] - l["lead"] * FL_MS)
+      it = {"id" => l["id"], "spk" => l["spk"], "src" => l["take"], "s0" => s0, "speech_ms" => [l["start"], l["end"]],
+            "nominal_ms" => l["nominal_start"], "gain_db" => l["gain_db"], "flicks" => l["start_fl"]}
+      out.push(it)
     out
 
-  -> audio_cues(end_ms)
+  -> audio_cues
     out = []
-    @ep["cues"].each ->(c)
+    section("cues").each ->(c)
       k = c["kind"]
       if k == "sfx"
-        t = anchor_ms(c["at"])
-        out.push({"id" => c["id"], "kind" => k, "src" => c["src"], "name" => c["name"], "s0" => samples_of_ms(t, @sr),
+        t = anchor_fl(c["at"])
+        out.push({"id" => c["id"], "kind" => k, "src" => c["src"], "name" => c["name"], "s0" => samples_of_fl(t),
                   "gain_db" => c["gain_db"], "filter" => c["filter"]})
       elsif k == "amb" || k == "music"
-        a = anchor_ms(c["from"])
-        b = anchor_ms(c["to"])
-        o = {"id" => c["id"], "kind" => k, "src" => c["src"], "name" => c["name"], "s0" => samples_of_ms(a, @sr),
-             "s1" => samples_of_ms(b, @sr), "gain_db" => c["gain_db"]}
+        a = anchor_fl(c["from"])
+        b = anchor_fl(c["to"])
+        o = {"id" => c["id"], "kind" => k, "src" => c["src"], "name" => c["name"], "s0" => samples_of_fl(a),
+             "s1" => samples_of_fl(b), "gain_db" => c["gain_db"]}
         o["fade_in_ms"] = c["fade_in_ms"] if c["fade_in_ms"] != nil
         o["fade_out_ms"] = c["fade_out_ms"] if c["fade_out_ms"] != nil
         out.push(o)
       elsif k == "audio"
-        t = anchor_ms(c["at"])
-        out.push({"id" => c["id"], "kind" => k, "src" => c["src"], "s0" => samples_of_ms(t, @sr), "gain_db" => c["gain_db"],
-                  "norm" => c["norm"], "fade_in_ms" => c["fade_in_ms"], "fade_out_ms" => c["fade_out_ms"]})
+        t = anchor_fl(c["at"])
+        o = {"id" => c["id"], "kind" => k, "src" => c["src"], "s0" => samples_of_fl(t), "gain_db" => c["gain_db"],
+             "norm" => c["norm"], "fade_in_ms" => c["fade_in_ms"], "fade_out_ms" => c["fade_out_ms"]}
+        # `until`: the cue is cut (padded with nothing) at this anchor
+        o["s1"] = samples_of_fl(anchor_fl(c["until"])) if c["until"] != nil
+        out.push(o)
     out
 
-  # SubRip cues, as tools/srt.py built them: sentence-ish chunks timed by the take's word starts.
+  # SubRip cues from the lines' caption chunks. A chunk is {w: [first word, end word), text}: its text is laid out
+  # by the author (wrapping, speaker labels); its times come from the take's word times, so it follows a nudge or
+  # a re-take. Timing rules (cut "caption_timing"):
+  #   starts: a chunk runs from its first word's start (the line's start for the first) to the next chunk's first
+  #           word (the line's end for the last), at least min_ms; a take without word times splits the line's
+  #           time by characters (tools/srt.py of the first Profiles episodes)
+  #   spans:  a chunk runs from its first word's start to its last word's end, held to gap_ms before the next
+  #           chunk, the last one tail_ms longer
   -> subtitles
     out = []
-    labels = {"ARCHIMEDES" => 1, "ERATOSTHENES" => 1, "HIERON" => 1, "MARCELLUS" => 1, "SOLDIER" => 1, "CICERO" => 1}
+    cfg = get(@cut, "caption_timing", {})
+    mode = get(cfg, "timing", "starts")
     @line_list.each ->(l)
-      words = split_words(l["text"])
-      at = l["start"] - l["lead"]
-      ws = []
-      l["words_ms"].each ->(w)
-        ws.push(at + w)
-      aligned = ws.size >= words.size
-      chunks = []
-      cur = []
-      words.each ->(w)
-        cur.push(w)
-        ln = cur.join(" ").size
-        last = w.slice(w.size - 1, 1)
-        if (ln > 76 && ".,;—?!".include?(last)) || (ln >= 40 && ".?!".include?(last))
-          chunks.push(cur)
-          cur = []
-      chunks.push(cur) if cur.size > 0
-      total = 0
-      chunks.each ->(c)
-        total += c.join(" ").size
-      t = l["start"]
-      wi = 0
-      ci = 0
-      while ci < chunks.size
-        c = chunks[ci]
-        d = (l["end"] - l["start"]) * c.join(" ").size / total
-        if aligned
-          t = ci == 0 ? l["start"] : [t, ws[wi]].max
-          nxt = ci + 1 < chunks.size ? ws[wi + c.size] : l["end"]
-          d = [500, nxt - t].max
-        wi += c.size
-        txt = c.join(" ")
-        txt = "\[" + l["spk"] + "\] " + txt if labels[l["spk"]] != nil && ci == 0
-        out.push({"line" => l["id"], "from_ms" => t, "to_ms" => t + d, "text" => txt})
-        t += d
-        ci += 1
-    get(@ep, "captions", []).each ->(c)
-      t0 = anchor_ms(c["at"])
-      out.push({"line" => nil, "from_ms" => t0 + c["from_ms"], "to_ms" => t0 + c["to_ms"], "text" => c["text"]})
+      cc = l["cc"]
+      if cc != nil && cc.size > 0
+        words = split_words(l["text"])
+        at = l["start"] - l["lead"]
+        ws = []
+        l["words_ms"].each ->(w)
+          ws.push(at + w)
+        we = []
+        l["words_end_ms"].each ->(w)
+          we.push(at + w)
+        if mode == "spans"
+          ci = 0
+          while ci < cc.size
+            c = cc[ci]
+            a = ws[c["w"][0]]
+            b = we[c["w"][1] - 1]
+            if ci + 1 < cc.size
+              b = [b, ws[cc[ci + 1]["w"][0]] - get(cfg, "gap_ms", 50)].max
+            else
+              b += get(cfg, "tail_ms", 250)
+            out.push({"line" => l["id"], "from_ms" => a, "to_ms" => b, "text" => c["text"]})
+            ci += 1
+        else
+          aligned = ws.size >= words.size
+          lens = []
+          total = 0
+          cc.each ->(c)
+            n = join_words(words, c["w"][0], c["w"][1]).size
+            lens.push(n)
+            total += n
+          t = l["start"]
+          ci = 0
+          while ci < cc.size
+            c = cc[ci]
+            wi = c["w"][0]
+            d = (l["end"] - l["start"]) * lens[ci] / total
+            if aligned
+              t = ci == 0 ? l["start"] : [t, ws[wi]].max
+              nxt = ci + 1 < cc.size ? ws[c["w"][1]] : l["end"]
+              d = [get(cfg, "min_ms", 500), nxt - t].max
+            out.push({"line" => l["id"], "from_ms" => t, "to_ms" => t + d, "text" => c["text"]})
+            t += d
+            ci += 1
+    section("captions").each ->(c)
+      t0 = anchor_fl(c["at"])
+      out.push({"line" => nil, "from_ms" => ms_of(t0 + c["from_ms"] * FL_MS + FL_MS / 2), "to_ms" => ms_of(t0 + c["to_ms"] * FL_MS + FL_MS / 2), "text" => c["text"]})
     out
 
+  # Chapters: at a shot's first frame, or at an anchor (snapped); the time is floored to the second.
   -> chapters(v1)
     out = []
-    get(@ep, "markers", []).each ->(m)
+    section("markers").each ->(m)
       if m["kind"] == "chapter"
         f = nil
-        v1.each ->(it)
-          f = it["f0"] if it["id"] == m["at"]
-        die("chapter at unknown shot " + m["at"].to_s) if f == nil
+        if m["at"].is_a?(String)
+          v1.each ->(it)
+            f = it["f0"] if it["id"] == m["at"]
+          die("chapter at unknown shot " + m["at"].to_s) if f == nil
+        else
+          f = snap_flicks(anchor_fl(m["at"]), @num, @den)
         sec = f * @den / @num
         out.push({"id" => m["id"], "title" => m["title"], "frame" => f, "sec" => sec, "tc" => timecode(f, @num, @den)})
     out

@@ -161,6 +161,8 @@ typedef struct {
     int *codepoint_ends;
     WRegexBoundary *boundaries;
     WValue subject;
+    WValue last_regex;
+    int handoff_ready;
     int count;
     int capacity;
     int registered;
@@ -173,6 +175,8 @@ typedef struct {
 } WRegexCaptureState;
 
 static __thread WRegexCaptureState g_regex_capture_state;
+static __thread WRegexMatch *w_regex_match_park = NULL;
+static __thread int32_t w_regex_match_park_cap = 0;
 static pthread_key_t g_regex_capture_key;
 static pthread_once_t g_regex_capture_key_once = PTHREAD_ONCE_INIT;
 
@@ -191,6 +195,11 @@ static void w_regex_capture_state_destroy(void *opaque) {
     free(state->matches);
 #endif
     memset(state, 0, sizeof(*state));
+    if (w_regex_match_park) {
+        free(w_regex_match_park);
+        w_regex_match_park = NULL;
+        w_regex_match_park_cap = 0;
+    }
 }
 
 static void w_regex_capture_key_init(void) {
@@ -221,15 +230,11 @@ static void w_regex_prepare_captures(int count) {
                                     sizeof(WRegexBoundary) * (size_t)next * 2);
         state->capacity = next;
     }
-    for (int i = 0; i < count; i++) {
-        state->captures[i] = W_NIL;
-        state->starts[i] = -1;
-        state->ends[i] = -1;
-        state->codepoint_starts[i] = -1;
-        state->codepoint_ends[i] = -1;
-    }
     state->count = count;
-    if (count == 0) state->subject = W_NIL;
+    if (count == 0) {
+        state->subject = W_NIL;
+        state->handoff_ready = 0;
+    }
 }
 
 static void w_regex_store_capture(int idx, const char *subject, int start, int end) {
@@ -279,10 +284,357 @@ static unsigned int w_regex_compile_options(const char *options) {
     return flags;
 }
 
+typedef struct {
+    uint8_t op;      /* 1=SAVE, 2=BYTE, 3=CLASS, 4=BOL, 5=EOL, 6=MATCH */
+    uint8_t byte;    /* literal byte or class index */
+    int16_t slot;    /* save slot */
+    int32_t min;     /* min repetitions */
+    int32_t max;     /* max repetitions (INT32_MAX = unbounded) */
+} WFastRegexInst;
+
+typedef struct {
+    int ninst;
+    int ncap;
+    int nclass;
+    int pf_kind;     /* 0=none, 1=single byte, 2=bitmap */
+    uint8_t pf_byte;
+    uint64_t pf_bm[4];
+    WFastRegexInst insts[64];
+    uint64_t classes[16][4];
+} WFastRegexProg;
+
+static void w_fast_bm_set(uint64_t bm[4], uint8_t c) {
+    bm[c >> 6] |= (1ULL << (c & 63));
+}
+
+static void w_fast_bm_set_range(uint64_t bm[4], uint8_t lo, uint8_t hi) {
+    for (unsigned int c = lo; c <= hi; c++) w_fast_bm_set(bm, (uint8_t)c);
+}
+
+static void w_fast_bm_shorthand(uint64_t bm[4], char s) {
+    uint64_t tmp[4] = {0, 0, 0, 0};
+    if (s == 'd' || s == 'D') {
+        w_fast_bm_set_range(tmp, '0', '9');
+    } else if (s == 'w' || s == 'W') {
+        w_fast_bm_set_range(tmp, '0', '9');
+        w_fast_bm_set_range(tmp, 'A', 'Z');
+        w_fast_bm_set_range(tmp, 'a', 'z');
+        w_fast_bm_set(tmp, '_');
+    } else if (s == 's' || s == 'S') {
+        w_fast_bm_set(tmp, ' ');
+        w_fast_bm_set(tmp, '\t');
+        w_fast_bm_set(tmp, '\n');
+        w_fast_bm_set(tmp, '\r');
+        w_fast_bm_set(tmp, '\v');
+        w_fast_bm_set(tmp, '\f');
+    }
+    if (s == 'D' || s == 'W' || s == 'S') {
+        for (int k = 0; k < 4; k++) bm[k] |= ~tmp[k];
+    } else {
+        for (int k = 0; k < 4; k++) bm[k] |= tmp[k];
+    }
+}
+
+static WFastRegexProg *w_fast_regex_compile(const char *pat, const char *options) {
+    if (options && options[0] != '\0') return NULL;
+    size_t plen = strlen(pat);
+    if (plen == 0 || !w_bytes_ascii_p((const uint8_t *)pat, plen)) return NULL;
+    WFastRegexProg prog;
+    memset(&prog, 0, sizeof(prog));
+    int ngroup = 1;
+    int grp_stack[32];
+    int grp_sp = 0;
+
+    prog.insts[prog.ninst++] = (WFastRegexInst){1, 0, 0, 0, 0};
+    size_t i = 0;
+    while (i < plen) {
+        if (prog.ninst >= 60) return NULL;
+        char c = pat[i];
+        if (c == '(') {
+            int cap = -1;
+            if (i + 1 < plen && pat[i + 1] == '?') {
+                if (i + 2 < plen && pat[i + 2] == ':') {
+                    i += 3;
+                } else if (i + 2 < plen && pat[i + 2] == '<') {
+                    i += 3;
+                    while (i < plen && pat[i] != '>') i++;
+                    if (i >= plen) return NULL;
+                    i++;
+                    cap = ngroup++;
+                } else {
+                    return NULL;
+                }
+            } else {
+                i++;
+                cap = ngroup++;
+            }
+            if (grp_sp >= 32 || ngroup > 32) return NULL;
+            grp_stack[grp_sp++] = cap;
+            if (cap >= 0)
+                prog.insts[prog.ninst++] = (WFastRegexInst){1, 0, (int16_t)(cap * 2), 0, 0};
+            continue;
+        }
+        if (c == ')') {
+            if (grp_sp <= 0) return NULL;
+            int cap = grp_stack[--grp_sp];
+            i++;
+            if (i < plen && (pat[i] == '*' || pat[i] == '+' || pat[i] == '?' || pat[i] == '{'))
+                return NULL;
+            if (cap >= 0)
+                prog.insts[prog.ninst++] = (WFastRegexInst){1, 0, (int16_t)(cap * 2 + 1), 0, 0};
+            continue;
+        }
+        if (c == '|') return NULL;
+        if (c == '^') {
+            i++;
+            if (i < plen && (pat[i] == '*' || pat[i] == '+' || pat[i] == '?' || pat[i] == '{'))
+                return NULL;
+            prog.insts[prog.ninst++] = (WFastRegexInst){4, 0, 0, 0, 0};
+            continue;
+        }
+        if (c == '$') {
+            i++;
+            if (i < plen && (pat[i] == '*' || pat[i] == '+' || pat[i] == '?' || pat[i] == '{'))
+                return NULL;
+            prog.insts[prog.ninst++] = (WFastRegexInst){5, 0, 0, 0, 0};
+            continue;
+        }
+        uint8_t op = 2;
+        uint8_t bval = 0;
+        uint64_t bm[4] = {0, 0, 0, 0};
+        if (c == '.') {
+            i++;
+            op = 3;
+            bm[0] = ~0ULL & ~(1ULL << '\n');
+            bm[1] = ~0ULL;
+            bm[2] = ~0ULL;
+            bm[3] = ~0ULL;
+        } else if (c == '\\') {
+            i++;
+            if (i >= plen) return NULL;
+            char e = pat[i++];
+            if (e == 'd' || e == 'D' || e == 'w' || e == 'W' || e == 's' || e == 'S') {
+                op = 3;
+                w_fast_bm_shorthand(bm, e);
+            } else if ((e >= '0' && e <= '9') || e == 'b' || e == 'B' || e == 'A' || e == 'Z' || e == 'z') {
+                return NULL;
+            } else {
+                op = 2;
+                bval = (uint8_t)(e == 'n' ? '\n' : (e == 't' ? '\t' : (e == 'r' ? '\r' : e)));
+            }
+        } else if (c == '[') {
+            i++;
+            int neg = 0;
+            if (i < plen && pat[i] == '^') { neg = 1; i++; }
+            if (i < plen && pat[i] == ']') { w_fast_bm_set(bm, ']'); i++; }
+            while (i < plen && pat[i] != ']') {
+                if (pat[i] == '[' && i + 1 < plen && pat[i + 1] == ':') return NULL;
+                uint8_t lo;
+                if (pat[i] == '\\') {
+                    i++;
+                    if (i >= plen) return NULL;
+                    char e = pat[i++];
+                    if (e == 'd' || e == 'D' || e == 'w' || e == 'W' || e == 's' || e == 'S') {
+                        w_fast_bm_shorthand(bm, e);
+                        continue;
+                    }
+                    lo = (uint8_t)(e == 'n' ? '\n' : (e == 't' ? '\t' : (e == 'r' ? '\r' : e)));
+                } else {
+                    lo = (uint8_t)pat[i++];
+                }
+                if (i + 1 < plen && pat[i] == '-' && pat[i + 1] != ']') {
+                    i++;
+                    uint8_t hi;
+                    if (pat[i] == '\\') {
+                        i++;
+                        if (i >= plen) return NULL;
+                        char e = pat[i++];
+                        if (e == 'd' || e == 'D' || e == 'w' || e == 'W' || e == 's' || e == 'S')
+                            return NULL;
+                        hi = (uint8_t)(e == 'n' ? '\n' : (e == 't' ? '\t' : (e == 'r' ? '\r' : e)));
+                    } else {
+                        hi = (uint8_t)pat[i++];
+                    }
+                    if (lo > hi) return NULL;
+                    w_fast_bm_set_range(bm, lo, hi);
+                } else {
+                    w_fast_bm_set(bm, lo);
+                }
+            }
+            if (i >= plen || pat[i] != ']') return NULL;
+            i++;
+            if (neg) {
+                for (int k = 0; k < 4; k++) bm[k] = ~bm[k];
+            }
+            op = 3;
+        } else {
+            i++;
+            op = 2;
+            bval = (uint8_t)c;
+        }
+
+        int32_t min = 1, max = 1;
+        if (i < plen) {
+            if (pat[i] == '*') { min = 0; max = INT32_MAX; i++; }
+            else if (pat[i] == '+') { min = 1; max = INT32_MAX; i++; }
+            else if (pat[i] == '?') { min = 0; max = 1; i++; }
+            else if (pat[i] == '{') {
+                size_t q = i + 1;
+                if (q >= plen || pat[q] < '0' || pat[q] > '9') return NULL;
+                int32_t lo = 0;
+                while (q < plen && pat[q] >= '0' && pat[q] <= '9') {
+                    lo = lo * 10 + (pat[q++] - '0');
+                    if (lo > 65535) return NULL;
+                }
+                int32_t hi = lo;
+                if (q < plen && pat[q] == ',') {
+                    q++;
+                    if (q < plen && pat[q] == '}') {
+                        hi = INT32_MAX;
+                    } else {
+                        if (q >= plen || pat[q] < '0' || pat[q] > '9') return NULL;
+                        hi = 0;
+                        while (q < plen && pat[q] >= '0' && pat[q] <= '9') {
+                            hi = hi * 10 + (pat[q++] - '0');
+                            if (hi > 65535) return NULL;
+                        }
+                    }
+                }
+                if (q >= plen || pat[q] != '}' || lo > hi) return NULL;
+                min = lo;
+                max = hi;
+                i = q + 1;
+            }
+            if (i < plen && (pat[i] == '?' || pat[i] == '+' || pat[i] == '*'))
+                return NULL;
+        }
+        if (op == 3) {
+            if (prog.nclass >= 16) return NULL;
+            bval = (uint8_t)prog.nclass++;
+            memcpy(prog.classes[bval], bm, sizeof(bm));
+        }
+        prog.insts[prog.ninst++] = (WFastRegexInst){op, bval, 0, min, max};
+    }
+    if (grp_sp != 0) return NULL;
+    prog.insts[prog.ninst++] = (WFastRegexInst){1, 0, 1, 0, 0};
+    prog.insts[prog.ninst++] = (WFastRegexInst){6, 0, 0, 0, 0};
+    prog.ncap = ngroup;
+
+    /* Verify every variable-length quantifier is non-backtracking. */
+    for (int k = 0; k < prog.ninst; k++) {
+        WFastRegexInst *in = &prog.insts[k];
+        if ((in->op == 2 || in->op == 3) && in->min < in->max) {
+            uint64_t my_bm[4] = {0, 0, 0, 0};
+            if (in->op == 2) w_fast_bm_set(my_bm, in->byte);
+            else memcpy(my_bm, prog.classes[in->byte], sizeof(my_bm));
+
+            int m = k + 1;
+            while (m < prog.ninst && prog.insts[m].op == 1) m++;
+            if (m >= prog.ninst) return NULL;
+            WFastRegexInst *nx = &prog.insts[m];
+            if (nx->op == 6) {
+                /* Trailing greedy match before MATCH is always deterministic. */
+            } else if (nx->op == 2 && nx->min >= 1) {
+                if ((my_bm[nx->byte >> 6] >> (nx->byte & 63)) & 1) return NULL;
+            } else if (nx->op == 3 && nx->min >= 1) {
+                uint64_t *nbm = prog.classes[nx->byte];
+                if ((my_bm[0] & nbm[0]) | (my_bm[1] & nbm[1]) |
+                    (my_bm[2] & nbm[2]) | (my_bm[3] & nbm[3]))
+                    return NULL;
+            } else {
+                return NULL;
+            }
+        }
+    }
+
+    /* Extract first-character prefilter. */
+    for (int k = 0; k < prog.ninst; k++) {
+        WFastRegexInst *in = &prog.insts[k];
+        if (in->op == 1 || in->op == 4) continue;
+        if (in->op == 2 && in->min >= 1) {
+            prog.pf_kind = 1;
+            prog.pf_byte = in->byte;
+        } else if (in->op == 3 && in->min >= 1) {
+            prog.pf_kind = 2;
+            memcpy(prog.pf_bm, prog.classes[in->byte], sizeof(prog.pf_bm));
+        }
+        break;
+    }
+
+    WFastRegexProg *out = (WFastRegexProg *)malloc(sizeof(WFastRegexProg));
+    *out = prog;
+    return out;
+}
+
+static int w_fast_regex_exec(const WFastRegexProg *prog, const uint8_t *s,
+                             size_t slen, size_t search_from, int *out_slots) {
+    size_t pos = search_from;
+    const WFastRegexInst *insts = prog->insts;
+    int ninst = prog->ninst;
+    while (pos <= slen) {
+        if (prog->pf_kind == 1) {
+            if (pos >= slen) return 0;
+            const uint8_t *p = (const uint8_t *)memchr(s + pos, prog->pf_byte, slen - pos);
+            if (!p) return 0;
+            pos = (size_t)(p - s);
+        } else if (prog->pf_kind == 2) {
+            const uint64_t *bm = prog->pf_bm;
+            while (pos < slen && !((bm[s[pos] >> 6] >> (s[pos] & 63)) & 1)) pos++;
+            if (pos >= slen) return 0;
+        }
+        size_t sp = pos;
+        int ok = 1;
+        for (int pc = 0; pc < ninst; pc++) {
+            const WFastRegexInst *in = &insts[pc];
+            switch (in->op) {
+                case 1: /* SAVE */
+                    out_slots[in->slot] = (int)sp;
+                    break;
+                case 2: { /* BYTE */
+                    uint8_t want = in->byte;
+                    size_t min = (size_t)in->min, max = (size_t)in->max;
+                    size_t avail = slen - sp;
+                    if (avail < min) { ok = 0; break; }
+                    size_t lim = avail < max ? avail : max;
+                    size_t k = 0;
+                    while (k < lim && s[sp + k] == want) k++;
+                    if (k < min) { ok = 0; break; }
+                    sp += k;
+                    break;
+                }
+                case 3: { /* CLASS */
+                    const uint64_t *bm = prog->classes[in->byte];
+                    size_t min = (size_t)in->min, max = (size_t)in->max;
+                    size_t avail = slen - sp;
+                    if (avail < min) { ok = 0; break; }
+                    size_t lim = avail < max ? avail : max;
+                    size_t k = 0;
+                    while (k < lim && ((bm[s[sp + k] >> 6] >> (s[sp + k] & 63)) & 1)) k++;
+                    if (k < min) { ok = 0; break; }
+                    sp += k;
+                    break;
+                }
+                case 4: /* BOL */
+                    if (sp != 0) ok = 0;
+                    break;
+                case 5: /* EOL */
+                    if (sp != slen) ok = 0;
+                    break;
+                case 6: /* MATCH */
+                    return 1;
+            }
+            if (!ok) break;
+        }
+        if (ok) return 1;
+        pos++;
+    }
+    return 0;
+}
+
 WValue w_regex_new(WValue pattern_val, WValue options_val) {
     const char *pattern = as_str(pattern_val);
     const char *options = as_str(options_val);
-    WRegex *rx = calloc(1, sizeof(WRegex));
+    WRegex *rx = calloc(1, sizeof(WRegex) + sizeof(WFastRegexProg *));
     rx->pattern = strdup(pattern);
     rx->options = strdup(options);
     rx->name_to_group = w_hash_new();
@@ -314,6 +666,7 @@ WValue w_regex_new(WValue pattern_val, WValue options_val) {
     }
     rx->compiled = (void *)reg;
 #endif
+    *(WFastRegexProg **)(rx + 1) = w_fast_regex_compile(rx->pattern, rx->options);
     return w_box_ptr(rx, W_SUBTAG_REGEX);
 }
 
@@ -321,34 +674,64 @@ WValue w_regex_match(WValue regex_val, WValue subject_val) {
     if (!w_is_regex(regex_val)) die("regex match requires a regex");
     WRegex *rx = (WRegex *)w_as_ptr(regex_val);
     if (w_is_rope(subject_val)) subject_val = w_rope_flatten(subject_val);
-    const char *subject = as_str(subject_val);
-    w_regex_prepare_captures(0);
+    char sbuf[6];
+    const char *subject;
+    size_t slen;
+    w_str_data(subject_val, sbuf, &subject, &slen);
+    WRegexCaptureState *state = &g_regex_capture_state;
+    state->handoff_ready = 0;
+    WFastRegexProg *fast = *(WFastRegexProg **)(rx + 1);
+    if (fast && w_string_ascii_p(subject_val)) {
+        int slots[64];
+        if (w_fast_regex_exec(fast, (const uint8_t *)subject, slen, 0, slots)) {
+            int cap_count = fast->ncap;
+            w_regex_prepare_captures(cap_count);
+            state->subject = subject_val;
+            state->last_regex = regex_val;
+            state->handoff_ready = 1;
+            for (int i = 0; i < cap_count; i++) {
+                w_regex_store_capture(i, subject, slots[i * 2], slots[i * 2 + 1]);
+            }
+            return W_TRUE;
+        }
+        w_regex_prepare_captures(0);
+        return W_FALSE;
+    }
 #ifdef TUNGSTEN_ONIG
     OnigRegex reg = (OnigRegex)rx->compiled;
     const OnigUChar *start = (const OnigUChar *)subject;
-    const OnigUChar *end = start + strlen(subject);
-    WRegexCaptureState *state = &g_regex_capture_state;
+    const OnigUChar *end = start + slen;
     if (!state->region) state->region = onig_region_new();
     OnigRegion *region = state->region;
-    onig_region_clear(region);
     int rc = onig_search(reg, start, end, start, end, region, ONIG_OPTION_NONE);
     if (rc >= 0) {
         int cap_count = region->num_regs;
         w_regex_prepare_captures(cap_count);
         state->subject = subject_val;
+        state->last_regex = regex_val;
+        state->handoff_ready = 1;
         for (int i = 0; i < cap_count; i++) {
-            w_regex_store_capture(i, subject, region->beg[i], region->end[i]);
+            int b = region->beg[i], e = region->end[i];
+            if (b >= 0 && e >= b) {
+                w_regex_store_capture(i, subject, b, e);
+            } else {
+                state->captures[i] = W_NIL;
+                state->starts[i] = -1;
+                state->ends[i] = -1;
+            }
         }
         return W_TRUE;
     }
-    if (rc == ONIG_MISMATCH) return W_FALSE;
+    if (rc == ONIG_MISMATCH) {
+        w_regex_prepare_captures(0);
+        return W_FALSE;
+    }
     OnigUChar msg[ONIG_MAX_ERROR_MESSAGE_LEN];
     onig_error_code_to_str(msg, rc);
     dief("regex match failed for /%s/: %s", rx->pattern, (const char *)msg);
 #else
     regex_t *reg = (regex_t *)rx->compiled;
     size_t cap_count = reg->re_nsub + 1;
-    WRegexCaptureState *state = &g_regex_capture_state;
     if (cap_count > state->matches_capacity) {
         state->matches = realloc(state->matches,
                                  cap_count * sizeof(regmatch_t));
@@ -359,9 +742,16 @@ WValue w_regex_match(WValue regex_val, WValue subject_val) {
     if (rc == 0) {
         w_regex_prepare_captures((int)cap_count);
         state->subject = subject_val;
+        state->last_regex = regex_val;
+        state->handoff_ready = 1;
         for (size_t i = 0; i < cap_count; i++) {
-            if (matches[i].rm_so >= 0)
+            if (matches[i].rm_so >= 0) {
                 w_regex_store_capture((int)i, subject, (int)matches[i].rm_so, (int)matches[i].rm_eo);
+            } else {
+                state->captures[i] = W_NIL;
+                state->starts[i] = -1;
+                state->ends[i] = -1;
+            }
         }
         return W_TRUE;
     }
@@ -390,20 +780,32 @@ static int w_regex_boundary_compare(const void *lhs, const void *rhs) {
 static void w_regex_compute_codepoint_offsets(WRegexCaptureState *state,
                                               const char *subject) {
     int boundary_count = 0;
+    WRegexBoundary *b = state->boundaries;
     for (int i = 0; i < state->count; i++) {
         if (state->starts[i] < 0) continue;
-        state->boundaries[boundary_count++] =
-            (WRegexBoundary){state->starts[i], i, 0};
-        state->boundaries[boundary_count++] =
-            (WRegexBoundary){state->ends[i], i, 1};
+        b[boundary_count++] = (WRegexBoundary){state->starts[i], i, 0};
+        b[boundary_count++] = (WRegexBoundary){state->ends[i], i, 1};
     }
-    qsort(state->boundaries, (size_t)boundary_count,
-          sizeof(WRegexBoundary), w_regex_boundary_compare);
+    if (boundary_count <= 32) {
+        for (int i = 1; i < boundary_count; i++) {
+            WRegexBoundary cur = b[i];
+            int j = i - 1;
+            while (j >= 0 && (b[j].byte_offset > cur.byte_offset ||
+                   (b[j].byte_offset == cur.byte_offset && b[j].is_end > cur.is_end))) {
+                b[j + 1] = b[j];
+                j--;
+            }
+            b[j + 1] = cur;
+        }
+    } else {
+        qsort(b, (size_t)boundary_count,
+              sizeof(WRegexBoundary), w_regex_boundary_compare);
+    }
 
     int byte_offset = 0;
     int codepoint_offset = 0;
     for (int i = 0; i < boundary_count; i++) {
-        WRegexBoundary boundary = state->boundaries[i];
+        WRegexBoundary boundary = b[i];
         while (byte_offset < boundary.byte_offset) {
             if (((unsigned char)subject[byte_offset] & 0xC0u) != 0x80u)
                 codepoint_offset++;
@@ -426,6 +828,9 @@ static WValue w_regex_materialize_slice(WValue subject, WValue value) {
     int length = w_unbox_slice_length(value);
     if ((size_t)offset > byte_size || (size_t)length > byte_size - (size_t)offset)
         return W_NIL;
+    if (length <= 5) return w_box_inline_str(bytes + offset, (size_t)length);
+    if (w_string_ascii_p(subject))
+        return w_string_n_known_ascii(bytes + offset, (size_t)length, 1);
     return w_string_n(bytes + offset, (size_t)length);
 }
 
@@ -451,20 +856,58 @@ static int w_regex_collect_name(const OnigUChar *name, const OnigUChar *name_end
  * costs can be profiled independently. */
 static WValue w_regex_match_data_from_state(WValue regex_val) {
     WRegexCaptureState *state = &g_regex_capture_state;
-    const char *subject = as_str(state->subject);
-    w_regex_compute_codepoint_offsets(state, subject);
-    WValue groups = w_array_new_inline(65, state->count);
-    WValue offsets = w_array_new_inline(65, state->count);
-    WArray *group_array = w_as_array(groups);
-    WArray *offset_array = w_as_array(offsets);
-    for (int i = 0; i < state->count; i++) {
+    int ascii = w_string_ascii_p(state->subject);
+    if (!ascii) {
+        char sbuf[6];
+        const char *subject;
+        size_t slen;
+        w_str_data(state->subject, sbuf, &subject, &slen);
+        w_regex_compute_codepoint_offsets(state, subject);
+    }
+    int count = state->count;
+    WRegexMatch *match = NULL;
+    WArray *group_array = NULL;
+    WArray *offset_array = NULL;
+    if (w_regex_match_park && count <= w_regex_match_park_cap) {
+        match = w_regex_match_park;
+        w_regex_match_park = NULL;
+        w_regex_match_park_cap = 0;
+        group_array = w_as_array(match->groups);
+        offset_array = w_as_array(match->offsets);
+        group_array->size = count;
+        offset_array->size = count;
+    } else {
+        int32_t cap = count > 8 ? count : 8;
+        size_t arr_bytes = (sizeof(WArray) + (size_t)cap * sizeof(WValue) + 15) & ~(size_t)15;
+        uint8_t *block = (uint8_t *)malloc(sizeof(WRegexMatch) + 2 * arr_bytes);
+        match = (WRegexMatch *)block;
+        group_array = (WArray *)(block + sizeof(WRegexMatch));
+        offset_array = (WArray *)(block + sizeof(WRegexMatch) + arr_bytes);
+        group_array->ebits = 65;
+        group_array->flags = W_FLAG_OWNED | W_FLAG_INLINE | W_FLAG_POOLED;
+        group_array->start = 0;
+        group_array->size = count;
+        group_array->cap = cap;
+        group_array->slots = (WValue *)(group_array + 1);
+        offset_array->ebits = 65;
+        offset_array->flags = W_FLAG_OWNED | W_FLAG_INLINE | W_FLAG_POOLED;
+        offset_array->start = 0;
+        offset_array->size = count;
+        offset_array->cap = cap;
+        offset_array->slots = (WValue *)(offset_array + 1);
+        match->groups = w_box_array(group_array);
+        match->offsets = w_box_array(offset_array);
+    }
+    const int *cp_starts = ascii ? state->starts : state->codepoint_starts;
+    const int *cp_ends = ascii ? state->ends : state->codepoint_ends;
+    for (int i = 0; i < count; i++) {
         group_array->slots[i] = state->captures[i];
         if (state->starts[i] < 0) {
             offset_array->slots[i] = W_NIL;
             continue;
         }
-        int start = state->codepoint_starts[i];
-        int end = state->codepoint_ends[i];
+        int start = cp_starts[i];
+        int end = cp_ends[i];
         int length = end - start;
         if (start <= 0xFFFFFF && length <= 0x3FFF) {
             offset_array->slots[i] = w_box_slice(length, start);
@@ -478,16 +921,19 @@ static WValue w_regex_match_data_from_state(WValue regex_val) {
     }
 
     WRegex *rx = (WRegex *)w_as_ptr(regex_val);
-    WRegexMatch *match = calloc(1, sizeof(WRegexMatch));
     match->subject = state->subject;
-    match->groups = groups;
-    match->offsets = offsets;
     match->name_to_group = rx->name_to_group;
     return w_box_ptr(match, W_SUBTAG_REGEX_MATCH);
 }
 
 WValue w_regex_match_data(WValue regex_val, WValue subject_val) {
+    WRegexCaptureState *state = &g_regex_capture_state;
+    if (state->handoff_ready && state->last_regex == regex_val && state->subject == subject_val) {
+        state->handoff_ready = 0;
+        return w_regex_match_data_from_state(regex_val);
+    }
     if (w_regex_match(regex_val, subject_val) != W_TRUE) return W_NIL;
+    state->handoff_ready = 0;
     return w_regex_match_data_from_state(regex_val);
 }
 
@@ -26192,7 +26638,13 @@ static inline uint64_t w_lexchar_cached_t(uint32_t cp, const uint64_t (*blocks)[
     return blocks[index[cp >> 8]][cp & 0xFF];
 }
 
+static WValue g_ascii_char_box[128];
+
 WValue w_box_char(uint32_t codepoint) {
+    if (codepoint < 128) {
+        WValue cached = g_ascii_char_box[codepoint];
+        if (cached) return cached;
+    }
     if (codepoint >= 0x110000) codepoint = 0xFFFD; /* replacement char */
     uint32_t meta = w_char_lookup(codepoint);
 
@@ -26218,11 +26670,13 @@ WValue w_box_char(uint32_t codepoint) {
        compare is a codepoint compare; \d\w\s at the LSB for a single-mask test:
        [cp 25-45][emoji 24][printable 23][digit_value 19-22][case_delta 10-18]
        [width 8-9][category 3-7][\s 2][\w 1][\d 0] */
-    return W_TAG_CHAR | (3ULL << 46) |  /* subtype 11 = Char */
-           ((uint64_t)codepoint << 25) |
-           (emoji << 24) | (printable << 23) |
-           (digit_v << 19) | (case_d << 10) | (width << 8) |
-           (category << 3) | (rs << 2) | (rw << 1) | rd;
+    WValue res = W_TAG_CHAR | (3ULL << 46) |  /* subtype 11 = Char */
+                 ((uint64_t)codepoint << 25) |
+                 (emoji << 24) | (printable << 23) |
+                 (digit_v << 19) | (case_d << 10) | (width << 8) |
+                 (category << 3) | (rs << 2) | (rw << 1) | rd;
+    if (codepoint < 128) g_ascii_char_box[codepoint] = res;
+    return res;
 }
 
 /* Encode codepoint as UTF-8, return number of bytes written */
@@ -39244,46 +39698,106 @@ WValue w_regex_scan(WValue regex_val, WValue subject_val) {
     if (!w_is_regex(regex_val)) die("scan requires a regex");
     WRegex *rx = (WRegex *)w_as_ptr(regex_val);
     if (w_is_rope(subject_val)) subject_val = w_rope_flatten(subject_val);
-    const char *subject = as_str(subject_val);
-    size_t slen = strlen(subject);
-    WValue out = w_array_new(65, 8);
+    char sbuf[6];
+    const char *subject;
+    size_t slen;
+    w_str_data(subject_val, sbuf, &subject, &slen);
+    int ascii = w_string_ascii_p(subject_val);
+    WValue out = w_array_new(65, 32);
+    WFastRegexProg *fast = *(WFastRegexProg **)(rx + 1);
+    if (fast && ascii) {
+        size_t cap_count = (size_t)fast->ncap;
+        int slots[64];
+        size_t pos = 0;
+        while (pos <= slen) {
+            if (!w_fast_regex_exec(fast, (const uint8_t *)subject, slen, pos, slots))
+                break;
+            size_t nb = (size_t)slots[0];
+            size_t ne = (size_t)slots[1];
+            if (cap_count > 1) {
+                WValue caps = w_array_new_inline(65, (int64_t)cap_count - 1);
+                WArray *cap_arr = w_as_array(caps);
+                for (size_t i = 1; i < cap_count; i++) {
+                    if (slots[2 * i] >= 0) {
+                        size_t clen = (size_t)(slots[2 * i + 1] - slots[2 * i]);
+                        const char *cp_ptr = subject + slots[2 * i];
+                        cap_arr->slots[i - 1] = clen <= 5
+                            ? w_box_inline_str(cp_ptr, clen)
+                            : w_string_n_known_ascii(cp_ptr, clen, 1);
+                    } else {
+                        cap_arr->slots[i - 1] = W_NIL;
+                    }
+                }
+                w_array_push(out, caps);
+            } else {
+                size_t clen = ne - nb;
+                const char *cp_ptr = subject + nb;
+                w_array_push(out, clen <= 5
+                    ? w_box_inline_str(cp_ptr, clen)
+                    : w_string_n_known_ascii(cp_ptr, clen, 1));
+            }
+            if (ne == nb) {
+                if (ne >= slen) break;
+                pos = ne + 1;
+            } else {
+                pos = ne;
+            }
+        }
+        return out;
+    }
+    WRegexCaptureState *state = &g_regex_capture_state;
 #ifdef TUNGSTEN_ONIG
     OnigRegex reg = (OnigRegex)rx->compiled;
     const OnigUChar *ostart = (const OnigUChar *)subject;
     const OnigUChar *oend = ostart + slen;
-    OnigRegion *region = onig_region_new();
+    if (!state->region) state->region = onig_region_new();
+    OnigRegion *region = state->region;
     size_t pos = 0;
     while (pos <= slen) {
-        onig_region_clear(region);
         int rc = onig_search(reg, ostart, oend, ostart + pos, oend, region,
                              ONIG_OPTION_NONE);
         if (rc < 0) break;
         int nb = region->beg[0], ne = region->end[0];
         if (region->num_regs > 1) {
-            WValue caps = w_array_new(65, region->num_regs - 1);
+            int ncaps = region->num_regs - 1;
+            WValue caps = w_array_new_inline(65, ncaps);
+            WArray *cap_arr = w_as_array(caps);
             for (int i = 1; i < region->num_regs; i++) {
-                if (region->beg[i] >= 0)
-                    w_array_push(caps, w_string_n(subject + region->beg[i],
-                                                  (size_t)(region->end[i] - region->beg[i])));
-                else
-                    w_array_push(caps, W_NIL);
+                if (region->beg[i] >= 0) {
+                    size_t clen = (size_t)(region->end[i] - region->beg[i]);
+                    const char *cp_ptr = subject + region->beg[i];
+                    cap_arr->slots[i - 1] = clen <= 5
+                        ? w_box_inline_str(cp_ptr, clen)
+                        : (ascii ? w_string_n_known_ascii(cp_ptr, clen, 1)
+                                 : w_string_n(cp_ptr, clen));
+                } else {
+                    cap_arr->slots[i - 1] = W_NIL;
+                }
             }
             w_array_push(out, caps);
         } else {
-            w_array_push(out, w_string_n(subject + nb, (size_t)(ne - nb)));
+            size_t clen = (size_t)(ne - nb);
+            const char *cp_ptr = subject + nb;
+            w_array_push(out, clen <= 5
+                ? w_box_inline_str(cp_ptr, clen)
+                : (ascii ? w_string_n_known_ascii(cp_ptr, clen, 1)
+                         : w_string_n(cp_ptr, clen)));
         }
         if (ne == nb) {
             if ((size_t)ne >= slen) break;
-            pos = (size_t)ne + w_utf8_index_width(subject + ne, slen - (size_t)ne);
+            pos = (size_t)ne + (ascii ? 1 : w_utf8_index_width(subject + ne, slen - (size_t)ne));
         } else {
             pos = (size_t)ne;
         }
     }
-    onig_region_free(region, 1);
 #else
     regex_t *reg = (regex_t *)rx->compiled;
     size_t cap_count = reg->re_nsub + 1;
-    regmatch_t *matches = malloc(cap_count * sizeof(regmatch_t));
+    if (cap_count > state->matches_capacity) {
+        state->matches = realloc(state->matches, cap_count * sizeof(regmatch_t));
+        state->matches_capacity = cap_count;
+    }
+    regmatch_t *matches = state->matches;
     size_t pos = 0;
     while (pos <= slen) {
         int rc = regexec(reg, subject + pos, cap_count, matches,
@@ -39292,26 +39806,36 @@ WValue w_regex_scan(WValue regex_val, WValue subject_val) {
         size_t nb = pos + (size_t)matches[0].rm_so;
         size_t ne = pos + (size_t)matches[0].rm_eo;
         if (cap_count > 1) {
-            WValue caps = w_array_new(65, (int64_t)cap_count - 1);
+            WValue caps = w_array_new_inline(65, (int64_t)cap_count - 1);
+            WArray *cap_arr = w_as_array(caps);
             for (size_t i = 1; i < cap_count; i++) {
-                if (matches[i].rm_so >= 0)
-                    w_array_push(caps, w_string_n(subject + pos + matches[i].rm_so,
-                                                  (size_t)(matches[i].rm_eo - matches[i].rm_so)));
-                else
-                    w_array_push(caps, W_NIL);
+                if (matches[i].rm_so >= 0) {
+                    size_t clen = (size_t)(matches[i].rm_eo - matches[i].rm_so);
+                    const char *cp_ptr = subject + pos + matches[i].rm_so;
+                    cap_arr->slots[i - 1] = clen <= 5
+                        ? w_box_inline_str(cp_ptr, clen)
+                        : (ascii ? w_string_n_known_ascii(cp_ptr, clen, 1)
+                                 : w_string_n(cp_ptr, clen));
+                } else {
+                    cap_arr->slots[i - 1] = W_NIL;
+                }
             }
             w_array_push(out, caps);
         } else {
-            w_array_push(out, w_string_n(subject + nb, ne - nb));
+            size_t clen = ne - nb;
+            const char *cp_ptr = subject + nb;
+            w_array_push(out, clen <= 5
+                ? w_box_inline_str(cp_ptr, clen)
+                : (ascii ? w_string_n_known_ascii(cp_ptr, clen, 1)
+                         : w_string_n(cp_ptr, clen)));
         }
         if (ne == nb) {
             if (ne >= slen) break;
-            pos = ne + w_utf8_index_width(subject + ne, slen - ne);
+            pos = ne + (ascii ? 1 : w_utf8_index_width(subject + ne, slen - ne));
         } else {
             pos = ne;
         }
     }
-    free(matches);
 #endif
     return out;
 }
@@ -49110,6 +49634,52 @@ static WValue w_string_levenshtein(WValue a_v, WValue b_v) {
     return w_int(ans);
 }
 
+static inline WValue w_string_from_code_span(const int64_t *data, int64_t n,
+                                             int64_t start, int64_t len) {
+    if (start < 0) start = 0;
+    if (start >= n || len <= 0) return w_box_inline_str("", 0);
+    if (start + len > n) len = n - start;
+    if (len <= 5) {
+        uint64_t v = W_TAG_STRINGSYM | ((uint64_t)len << 1);
+        uint32_t all_cp = 0;
+        for (int64_t i = 0; i < len; i++) {
+            uint32_t cp = (uint32_t)(((uint64_t)data[start + i] >> 25) & 0x1FFFFF);
+            all_cp |= cp;
+            v |= ((uint64_t)(cp & 0xFF)) << (4 + 8 * i);
+        }
+        if (all_cp < 0x80) return v;
+    }
+    char sbuf[512];
+    size_t cap = (size_t)len * 4 + 1;
+    char *buf = cap <= sizeof(sbuf) ? sbuf : (char *)malloc(cap);
+    size_t pos = 0;
+    int ascii = 1;
+    for (int64_t i = start; i < start + len; i++) {
+        uint32_t cp = (uint32_t)(((uint64_t)data[i] >> 25) & 0x1FFFFF);
+        if (cp < 0x80) {
+            buf[pos++] = (char)cp;
+        } else if (cp < 0x800) {
+            ascii = 0;
+            buf[pos++] = (char)(0xC0 | (cp >> 6));
+            buf[pos++] = (char)(0x80 | (cp & 0x3F));
+        } else if (cp < 0x10000) {
+            ascii = 0;
+            buf[pos++] = (char)(0xE0 | (cp >> 12));
+            buf[pos++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+            buf[pos++] = (char)(0x80 | (cp & 0x3F));
+        } else {
+            ascii = 0;
+            buf[pos++] = (char)(0xF0 | (cp >> 18));
+            buf[pos++] = (char)(0x80 | ((cp >> 12) & 0x3F));
+            buf[pos++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+            buf[pos++] = (char)(0x80 | (cp & 0x3F));
+        }
+    }
+    buf[pos] = '\0';
+    if (buf == sbuf) return w_string_n_known_ascii(sbuf, pos, ascii);
+    return w_string_take_known_ascii(buf, pos, ascii);
+}
+
 WValue w_string_from_codes(WValue arr_v, WValue start_v, WValue len_v) {
     if (w_is_stringy(arr_v) || w_is_rope(arr_v)) {
         if (w_is_stringy(len_v) || w_is_rope(len_v))
@@ -49119,37 +49689,28 @@ WValue w_string_from_codes(WValue arr_v, WValue start_v, WValue len_v) {
         if (op == -2) return w_string_ascii_squeeze_set(arr_v, start_v);
         if (op == -3) return w_string_levenshtein(arr_v, start_v);
     }
-    int64_t start = w_to_i64(start_v);
-    int64_t len = w_to_i64(len_v);
     WArray *ta = w_as_array(arr_v);
     int64_t n = ta->size;
-    if (start < 0) start = 0;
-    if (start >= n || len <= 0) return w_string("");
-    if (start + len > n) len = n - start;
     const int64_t *data = (const int64_t *)ta->slots;
-
-    char *buf = malloc((size_t)len * 4 + 1);   /* 4 bytes/codepoint upper bound */
-    size_t pos = 0;
-    for (int64_t i = start; i < start + len; i++) {
-        uint32_t cp = (uint32_t)(((uint64_t)data[i] >> 25) & 0x1FFFFF);
-        if (cp < 0x80) {
-            buf[pos++] = (char)cp;
-        } else if (cp < 0x800) {
-            buf[pos++] = (char)(0xC0 | (cp >> 6));
-            buf[pos++] = (char)(0x80 | (cp & 0x3F));
-        } else if (cp < 0x10000) {
-            buf[pos++] = (char)(0xE0 | (cp >> 12));
-            buf[pos++] = (char)(0x80 | ((cp >> 6) & 0x3F));
-            buf[pos++] = (char)(0x80 | (cp & 0x3F));
-        } else {
-            buf[pos++] = (char)(0xF0 | (cp >> 18));
-            buf[pos++] = (char)(0x80 | ((cp >> 12) & 0x3F));
-            buf[pos++] = (char)(0x80 | ((cp >> 6) & 0x3F));
-            buf[pos++] = (char)(0x80 | (cp & 0x3F));
+    if (w_is_array(start_v)) {
+        WArray *sa = w_as_array(start_v);
+        const int64_t *saved = (const int64_t *)sa->slots;
+        int64_t ncap = w_to_i64(len_v);
+        WValue out = w_array_new_inline(65, ncap);
+        WArray *oa = w_as_array(out);
+        for (int64_t g = 0; g < ncap; g++) {
+            int64_t a = saved[g * 2];
+            int64_t b = saved[g * 2 + 1];
+            if (a >= 0 && b >= 0)
+                oa->slots[g] = w_string_from_code_span(data, n, a, b - a);
+            else
+                oa->slots[g] = W_NIL;
         }
+        return out;
     }
-    buf[pos] = '\0';
-    return w_string_take(buf, pos);
+    int64_t start = w_to_i64(start_v);
+    int64_t len = w_to_i64(len_v);
+    return w_string_from_code_span(data, n, start, len);
 }
 
 /* Regex prefilter scans over its decoded i64[] Char payloads (tag/subtype bits
@@ -49158,21 +49719,337 @@ WValue w_string_from_codes(WValue arr_v, WValue start_v, WValue len_v) {
  * return n if none. Raw int64 array access in C replaces the hot per-position
  * Tungsten loop, whose boxed @subj[i] access dominated (~13 ns/position). */
 WValue w_regex_scan_char(WValue subj, WValue start_v, WValue n_v, WValue cp_v) {
+    if (w_is_stringy(subj) || w_is_rope(subj)) {
+        char buf[6]; const char *str; size_t str_len;
+        w_str_data(subj, buf, &str, &str_len);
+        if (w_string_ascii_p(subj)) {
+            WValue result = w_array_new_inline(64, (int64_t)str_len);
+            WArray *ta = w_as_array(result);
+            int64_t *data = (int64_t *)ta->slots;
+            const unsigned char *p = (const unsigned char *)str;
+            for (size_t i = 0; i < str_len; i++)
+                data[i] = (int64_t)(w_box_char(p[i]) & 0x3FFFFFFFFFFFULL);
+            return result;
+        }
+        size_t count = 0;
+        const unsigned char *scan = (const unsigned char *)str;
+        size_t scan_rem = str_len;
+        while (scan_rem > 0) {
+            int clen = *scan < 0x80 ? 1 : (*scan < 0xE0 ? 2 : (*scan < 0xF0 ? 3 : 4));
+            if ((size_t)clen > scan_rem) clen = (int)scan_rem;
+            scan += clen;
+            scan_rem -= (size_t)clen;
+            count++;
+        }
+        WValue result = w_array_new_inline(64, (int64_t)count);
+        WArray *ta = w_as_array(result);
+        int64_t *data = (int64_t *)ta->slots;
+        const unsigned char *p = (const unsigned char *)str;
+        size_t remaining = str_len;
+        size_t idx = 0;
+        while (remaining > 0) {
+            uint32_t cp;
+            int clen;
+            if (*p < 0x80)        { cp = *p;                 clen = 1; }
+            else if (*p < 0xE0)   { cp = (*p & 0x1F) << 6;   clen = 2; }
+            else if (*p < 0xF0)   { cp = (*p & 0x0F) << 12;  clen = 3; }
+            else                  { cp = (*p & 0x07) << 18;  clen = 4; }
+            for (int k = 1; k < clen && k < (int)remaining; k++)
+                cp |= (p[k] & 0x3F) << (6 * (clen - 1 - k));
+            if ((size_t)clen > remaining) clen = (int)remaining;
+            data[idx++] = (int64_t)(w_box_char(cp) & 0x3FFFFFFFFFFFULL);
+            p += clen;
+            remaining -= (size_t)clen;
+        }
+        return result;
+    }
     WArray *ta = w_as_array(subj);
     const uint64_t *data = (const uint64_t *)ta->slots;
     int64_t start = w_to_i64(start_v);
     int64_t n = w_to_i64(n_v);
+    if (w_is_array(cp_v)) {
+        WArray *la = w_as_array(cp_v);
+        const uint64_t *lit = (const uint64_t *)la->slots;
+        int64_t llen = la->size;
+        if (llen <= 0) return w_int(start);
+        int64_t limit = n - llen;
+        uint64_t first = lit[0];
+        uint64_t last = lit[llen - 1];
+        for (int64_t i = start; i <= limit; i++) {
+            if (data[i] == first && data[i + llen - 1] == last) {
+                int64_t j = 1;
+                while (j < llen - 1 && data[i + j] == lit[j]) j++;
+                if (j >= llen - 1) return w_int(i);
+            }
+        }
+        return w_int(n);
+    }
     uint64_t cp = (uint64_t)w_to_i64(cp_v); /* codepoint int (Char WValue args mangle over ccall) */
     while (start < n && ((data[start] >> 25) & 0x1FFFFF) != cp) start++;
     return w_int(start);
 }
 
+typedef struct {
+    const int64_t *subj;
+    int64_t n;
+    const int64_t *ops;
+    const int64_t *args_a;
+    const int64_t *branches;
+    WArray *classes;
+    int64_t *saved;
+    int64_t *guard;
+    int64_t nl;
+} WRegexVmCtx;
+
+static inline int w_regex_vm_class_match(WArray *classes, int64_t cls_idx, int64_t lx) {
+    WArray *ca = w_as_array(classes->slots[cls_idx]);
+    const int64_t *c = (const int64_t *)ca->slots;
+    int neg = (c[0] == 1);
+    int64_t pos_f = c[1];
+    if (pos_f != 0 && (lx & pos_f) != 0) return !neg;
+    int64_t neg_f = c[2];
+    if (neg_f != 0) {
+        if (((neg_f & 1) != 0 && (lx & 1) == 0) ||
+            ((neg_f & 2) != 0 && (lx & 2) == 0) ||
+            ((neg_f & 4) != 0 && (lx & 4) == 0))
+            return !neg;
+    }
+    int64_t cn = ca->size;
+    for (int64_t i = 3; i < cn; i += 2) {
+        if (lx >= c[i] && lx <= c[i + 1]) return !neg;
+    }
+    return neg;
+}
+
+static int64_t w_regex_vm_run(const WRegexVmCtx *ctx, int64_t pc, int64_t sp) {
+    const int64_t *subj = ctx->subj;
+    int64_t n = ctx->n;
+    const int64_t *ops = ctx->ops;
+    const int64_t *args_a = ctx->args_a;
+    const int64_t *branches = ctx->branches;
+    WArray *classes = ctx->classes;
+    int64_t *saved = ctx->saved;
+    int64_t *guard = ctx->guard;
+    int64_t nl = ctx->nl;
+    int64_t u_slot[16];
+    int64_t u_val[16];
+    int u_cnt = 0;
+
+    for (;;) {
+        switch (ops[pc]) {
+            case 1: /* OP_CHAR */
+                if (sp < n && subj[sp] == args_a[pc]) { pc++; sp++; continue; }
+                goto fail;
+            case 2: /* OP_ANY */
+                if (sp < n && subj[sp] != nl) { pc++; sp++; continue; }
+                goto fail;
+            case 3: /* OP_CLASS */
+                if (sp < n && w_regex_vm_class_match(classes, args_a[pc], subj[sp])) {
+                    pc++; sp++; continue;
+                }
+                goto fail;
+            case 4: /* OP_MATCH */
+                return sp;
+            case 5: /* OP_JMP */
+                pc = args_a[pc];
+                continue;
+            case 6: { /* OP_SPLIT */
+                int64_t r = w_regex_vm_run(ctx, args_a[pc], sp);
+                if (r >= 0) return r;
+                pc = branches[pc];
+                continue;
+            }
+            case 7: { /* OP_SAVE */
+                int64_t slot = args_a[pc];
+                int64_t nop = ops[pc + 1];
+                if (nop == 4) {
+                    saved[slot] = sp;
+                    return sp;
+                }
+                if (nop == 7 && ops[pc + 2] == 4) {
+                    saved[slot] = sp;
+                    saved[args_a[pc + 1]] = sp;
+                    return sp;
+                }
+                int64_t old = saved[slot];
+                if (u_cnt < 16) {
+                    u_slot[u_cnt] = slot;
+                    u_val[u_cnt] = old;
+                    u_cnt++;
+                    saved[slot] = sp;
+                    pc++;
+                    continue;
+                }
+                saved[slot] = sp;
+                int64_t r = w_regex_vm_run(ctx, pc + 1, sp);
+                if (r >= 0) return r;
+                saved[slot] = old;
+                goto fail;
+            }
+            case 8: /* OP_BOL */
+                if (sp == 0 || subj[sp - 1] == nl) { pc++; continue; }
+                goto fail;
+            case 9: /* OP_EOL */
+                if (sp == n || subj[sp] == nl) { pc++; continue; }
+                goto fail;
+            case 10: { /* OP_WORDB */
+                int before = (sp > 0 && (subj[sp - 1] & 2) != 0);
+                int after = (sp < n && (subj[sp] & 2) != 0);
+                int wb = (before != after);
+                if (wb != (args_a[pc] == 1)) goto fail;
+                pc++;
+                continue;
+            }
+            case 11: { /* OP_FLAG */
+                int64_t mask = args_a[pc];
+                if (branches[pc] == 0) {
+                    if (sp < n && (subj[sp] & mask) != 0) { pc++; sp++; continue; }
+                } else {
+                    if (sp < n && (subj[sp] & mask) == 0) { pc++; sp++; continue; }
+                }
+                goto fail;
+            }
+            case 12: { /* OP_MARK */
+                int64_t g = args_a[pc];
+                int64_t old = guard[g];
+                guard[g] = sp;
+                int64_t r = w_regex_vm_run(ctx, pc + 1, sp);
+                if (r >= 0) return r;
+                guard[g] = old;
+                goto fail;
+            }
+            case 13: /* OP_GUARD */
+                if (sp == guard[args_a[pc]]) goto fail;
+                pc++;
+                continue;
+            case 14:   /* OP_REP_G */
+            case 15:   /* OP_REP_L */
+            case 16: { /* OP_REP_NB */
+                int64_t rop = ops[pc];
+                int64_t tpc = args_a[pc];
+                int64_t top = ops[tpc];
+                int64_t e = sp;
+                if (top == 11) {
+                    int64_t mask = args_a[tpc];
+                    if (branches[tpc] == 0) {
+                        while (e < n && (subj[e] & mask) != 0) e++;
+                    } else {
+                        while (e < n && (subj[e] & mask) == 0) e++;
+                    }
+                } else if (top == 1) {
+                    int64_t want = args_a[tpc];
+                    while (e < n && subj[e] == want) e++;
+                } else if (top == 2) {
+                    while (e < n && subj[e] != nl) e++;
+                } else if (top == 3) {
+                    int64_t cidx = args_a[tpc];
+                    while (e < n && w_regex_vm_class_match(classes, cidx, subj[e])) e++;
+                }
+                int64_t cont = branches[pc];
+                if (rop == 16) {
+                    sp = e;
+                    pc = cont;
+                    continue;
+                }
+                if (rop == 14) {
+                    for (int64_t pos = e; pos >= sp; pos--) {
+                        int64_t r = w_regex_vm_run(ctx, cont, pos);
+                        if (r >= 0) return r;
+                    }
+                } else {
+                    for (int64_t pos = sp; pos <= e; pos++) {
+                        int64_t r = w_regex_vm_run(ctx, cont, pos);
+                        if (r >= 0) return r;
+                    }
+                }
+                goto fail;
+            }
+            default:
+                goto fail;
+        }
+    }
+fail:
+    while (u_cnt > 0) {
+        --u_cnt;
+        saved[u_slot[u_cnt]] = u_val[u_cnt];
+    }
+    return -1;
+}
+
 WValue w_regex_scan_flag(WValue subj, WValue start_v, WValue n_v, WValue flag_v) {
     WArray *ta = w_as_array(subj);
+    if (w_is_array(n_v)) {
+        WValue *vm = w_as_array(n_v)->slots;
+        WArray *saved_arr = w_as_array(flag_v);
+        WArray *guard_arr = w_as_array(vm[5]);
+        WRegexVmCtx ctx;
+        ctx.subj = (const int64_t *)ta->slots;
+        ctx.n = ta->size;
+        ctx.ops = (const int64_t *)w_as_array(vm[0])->slots;
+        ctx.args_a = (const int64_t *)w_as_array(vm[1])->slots;
+        ctx.branches = (const int64_t *)w_as_array(vm[2])->slots;
+        ctx.classes = w_as_array(vm[3]);
+        ctx.saved = (int64_t *)saved_arr->slots;
+        ctx.guard = (int64_t *)guard_arr->slots;
+        ctx.nl = w_to_i64(vm[6]);
+        int64_t pf_kind = w_to_i64(vm[7]);
+        int64_t pf_char = w_to_i64(vm[8]);
+        int64_t pf_flag = w_to_i64(vm[9]);
+        WArray *pf_set_arr = w_as_array(vm[10]);
+        const int64_t *pf_set = (const int64_t *)pf_set_arr->slots;
+        int64_t pf_set_n = pf_set_arr->size;
+        WArray *pf_lit_arr = w_as_array(vm[11]);
+        const int64_t *pf_lit = (const int64_t *)pf_lit_arr->slots;
+        int64_t pf_lit_n = pf_lit_arr->size;
+
+        for (int64_t i = 0; i < guard_arr->size; i++) ctx.guard[i] = -1;
+        for (int64_t i = 0; i < saved_arr->size; i++) ctx.saved[i] = -1;
+
+        int64_t start = w_to_i64(start_v);
+        int64_t n = ctx.n;
+        const int64_t *data = ctx.subj;
+        while (start <= n) {
+            if (pf_kind != 0) {
+                if (pf_kind == 1) {
+                    while (start < n && data[start] != pf_char) start++;
+                } else if (pf_kind == 2) {
+                    while (start < n && (data[start] & pf_flag) == 0) start++;
+                } else if (pf_kind == 3) {
+                    while (start < n) {
+                        int64_t ch = data[start];
+                        if (pf_flag != 0 && (ch & pf_flag) != 0) break;
+                        int hit = 0;
+                        for (int64_t j = 0; j < pf_set_n; j++) {
+                            if (pf_set[j] == ch) { hit = 1; break; }
+                        }
+                        if (hit) break;
+                        start++;
+                    }
+                } else if (pf_kind == 4) {
+                    int64_t limit = n - pf_lit_n;
+                    int64_t first = pf_lit[0];
+                    int64_t last = pf_lit[pf_lit_n - 1];
+                    int64_t i = start;
+                    start = n;
+                    for (; i <= limit; i++) {
+                        if (data[i] == first && data[i + pf_lit_n - 1] == last) {
+                            int64_t j = 1;
+                            while (j < pf_lit_n - 1 && data[i + j] == pf_lit[j]) j++;
+                            if (j >= pf_lit_n - 1) { start = i; break; }
+                        }
+                    }
+                }
+                if (start >= n) return W_NIL;
+            }
+            if (w_regex_vm_run(&ctx, 0, start) >= 0) return flag_v;
+            start++;
+        }
+        return W_NIL;
+    }
     const uint64_t *data = (const uint64_t *)ta->slots;
     int64_t start = w_to_i64(start_v);
     int64_t n = w_to_i64(n_v);
-    uint64_t flag = (uint64_t)w_to_i64(flag_v);
+    uint64_t flag = (uint64_t)(w_is_int(flag_v) ? w_as_int(flag_v) : (int64_t)flag_v);
     while (start < n && (data[start] & flag) == 0) start++;
     return w_int(start);
 }
@@ -58655,6 +59532,15 @@ static WValue w_ic_string_codes(WValue r, WValue *a, int c) {
     (void)a; (void)c;
     char buf[6]; const char *str; size_t str_len;
     w_str_data(r, buf, &str, &str_len);
+    if (w_string_ascii_p(r)) {
+        WValue result = w_array_new_inline(64, (int64_t)str_len);
+        WArray *ta = w_as_array(result);
+        int64_t *data = (int64_t *)ta->slots;
+        const unsigned char *p = (const unsigned char *)str;
+        for (size_t i = 0; i < str_len; i++)
+            data[i] = (int64_t)w_box_char(p[i]);
+        return result;
+    }
     /* Pre-count codepoints for exact allocation */
     size_t count = 0;
     const unsigned char *scan = (const unsigned char *)str;
@@ -58670,9 +59556,8 @@ static WValue w_ic_string_codes(WValue r, WValue *a, int c) {
         scan_rem -= clen;
         count++;
     }
-    WValue result = w_array_new(64, (int64_t)count);
+    WValue result = w_array_new_inline(64, (int64_t)count);
     WArray *ta = w_as_array(result);
-    ta->size = (int64_t)count;
     int64_t *data = (int64_t *)ta->slots;
     const unsigned char *p = (const unsigned char *)str;
     size_t remaining = str_len;
@@ -67979,11 +68864,15 @@ static WValue w_regex_match_offset_at(WRegexMatch *match, int64_t index) {
 }
 
 static int64_t w_regex_match_group_index(WRegexMatch *match, WValue key) {
+    if (w_is_int(key)) return w_as_int(key);
     if (w_is_integer_any(key)) return w_to_i64(key);
     if (!w_is_stringy(key)) return INT64_MIN;
-    WValue name = w_is_symbol(key) ? w_string(as_str(key)) : key;
-    if (w_hash_has_key(match->name_to_group, name) != W_TRUE) return INT64_MIN;
-    return w_to_i64(w_hash_get(match->name_to_group, name));
+    WHash *names = (WHash *)w_as_ptr(match->name_to_group);
+    if (!names || names->count == 0) return INT64_MIN;
+    WValue name = w_is_symbol(key) ? (key & ~(WValue)1) : key;
+    WValue val = w_hash_get(match->name_to_group, name);
+    if (val == W_NIL) return INT64_MIN;
+    return w_to_i64(val);
 }
 static WValue w_ic_regex_match_idx(WValue r, WValue *a, int c) {
     if (c < 1) die("RegexMatch#[] requires 1 argument");
@@ -68000,18 +68889,29 @@ static WValue w_ic_regex_match_offset(WValue r, WValue *a, int c) {
     return w_regex_match_offset_at(match, index);
 }
 static WValue w_ic_regex_match_begin_offset(WValue r, WValue *a, int c) {
-    WValue key = c > 0 ? a[0] : w_int(0);
-    WValue span_args[1] = {key};
-    WValue span = w_ic_regex_match_offset(r, span_args, 1);
-    if (span == W_NIL) return W_NIL;
-    return w_regex_match_array_at(span, 0);
+    WRegexMatch *match = as_regex_match(r);
+    int64_t index = c > 0 ? w_regex_match_group_index(match, a[0]) : 0;
+    if (index == INT64_MIN) return W_NIL;
+    WArray *offsets = w_as_array(match->offsets);
+    index = w_regex_match_normalize_index(offsets, index);
+    if (index < 0 || index >= offsets->size) return W_NIL;
+    WValue value = offsets->slots[index];
+    if (value == W_NIL) return W_NIL;
+    if (w_is_slice(value)) return w_int(w_unbox_slice_offset(value));
+    return w_regex_match_array_at(value, 0);
 }
 static WValue w_ic_regex_match_end_offset(WValue r, WValue *a, int c) {
-    WValue key = c > 0 ? a[0] : w_int(0);
-    WValue span_args[1] = {key};
-    WValue span = w_ic_regex_match_offset(r, span_args, 1);
-    if (span == W_NIL) return W_NIL;
-    return w_regex_match_array_at(span, 1);
+    WRegexMatch *match = as_regex_match(r);
+    int64_t index = c > 0 ? w_regex_match_group_index(match, a[0]) : 0;
+    if (index == INT64_MIN) return W_NIL;
+    WArray *offsets = w_as_array(match->offsets);
+    index = w_regex_match_normalize_index(offsets, index);
+    if (index < 0 || index >= offsets->size) return W_NIL;
+    WValue value = offsets->slots[index];
+    if (value == W_NIL) return W_NIL;
+    if (w_is_slice(value))
+        return w_int(w_unbox_slice_offset(value) + w_unbox_slice_length(value));
+    return w_regex_match_array_at(value, 1);
 }
 static WValue w_ic_regex_match_match(WValue r, WValue *a, int c) {
     (void)a; (void)c;
@@ -80617,6 +81517,8 @@ void w_value_free(WValue v) {
         return;
     }
     if (w_is_heap_str(v)) {
+        if (g_regex_capture_state.subject == v)
+            g_regex_capture_state.handoff_ready = 0;
         WString *ws = w_as_heap_str(v);
         /* Park small blocks for the decimal formatters instead of freeing:
          * see w_string_small_fresh.  One slot per thread; an occupied slot
@@ -80712,6 +81614,16 @@ void w_value_free(WValue v) {
      * retained by ordinary escaping ownership and is never freed recursively. */
     if (w_is_regex_match(v)) {
         WRegexMatch *match = (WRegexMatch *)w_as_ptr(v);
+        if (w_regex_match_park == NULL) {
+            WArray *ga = w_as_array(match->groups);
+            WArray *oa = w_as_array(match->offsets);
+            if ((ga->flags & W_FLAG_INLINE) && (oa->flags & W_FLAG_INLINE) &&
+                ga->cap == oa->cap && ga->cap > 0 && ga->cap <= 16) {
+                w_regex_match_park = match;
+                w_regex_match_park_cap = ga->cap;
+                return;
+            }
+        }
         w_value_free(match->groups);
         w_value_free(match->offsets);
         free(match);

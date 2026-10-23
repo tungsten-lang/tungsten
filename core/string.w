@@ -671,6 +671,8 @@
   # advance one code point. The body dispatches dynamically so this file
   # never autoloads the regex engine itself.
   -> scan(pattern)
+    if ccall_nobox("w_is_native_regex", pattern) == 1
+      return ccall("w_regex_scan", pattern, self)
     out = []
     if type(pattern) == "String"
       sc_len = pattern.size
@@ -685,8 +687,6 @@
         out.push(sc_pat)
         sc_i = sc_pos + sc_len
       return out
-    if ccall_nobox("w_is_native_regex", pattern) == 1
-      return ccall("w_regex_scan", pattern, self)
     sc_pos = 0
     loop
       m = pattern.match_data_from(self, sc_pos)

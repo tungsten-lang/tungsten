@@ -91,11 +91,11 @@
   # avoids allocating and invoking a second iterator closure for every nested
   # Array while the flattening algorithm itself remains in Enumerable.
   -> __enumerable_append_to(out)
+    n = $size ## i64
     i = 0
-    n = self.size
     while i < n
       out.push(self[i])
-      i++
+      i += 1
     out
 
   # Array#[] handles the pointer math (e.g. $start + sizeof($ebits) * i)
@@ -110,22 +110,42 @@
   # adds work. Both methods deliberately return ordinary polymorphic Arrays,
   # matching the former runtime handlers for typed and view receivers.
   -> compact
-    out = []
     n = $size ## i64
+    if n == 0
+      return []
+    keep = 0
+    i = 0
+    while i < n
+      if self[i] != nil
+        keep += 1
+      i += 1
+    if keep == 0
+      return []
+    out = Array.new(keep)
+    if keep == n
+      i = 0
+      while i < n
+        out[i] = self[i]
+        i += 1
+      return out
+    j = 0
     i = 0
     while i < n
       value = self[i]
       if value != nil
-        out.push(value)
+        out[j] = value
+        j += 1
       i += 1
     out
 
   -> dup
-    out = []
     n = $size ## i64
+    if n == 0
+      return []
+    out = Array.new(n)
     i = 0
     while i < n
-      out.push(self[i])
+      out[i] = self[i]
       i += 1
     out
 
@@ -135,33 +155,45 @@
   # polymorphic Arrays for typed and view receivers. Benchmarked at parity
   # with the retired C handlers; see benchmarks/builtins/.
   -> take(count)
-    out = []
     n = $size ## i64
-    n = count if count < n
+    k = count ## i64
+    if k <= 0 || n == 0
+      return []
+    if k > n
+      k = n
+    out = Array.new(k)
     i = 0
-    while i < n
-      out.push(self[i])
+    while i < k
+      out[i] = self[i]
       i += 1
     out
 
   -> drop(count)
-    out = []
     n = $size ## i64
-    i = count ## i64
-    if i < 0
-      i = 0
-    while i < n
-      out.push(self[i])
+    k = count ## i64
+    if k < 0
+      k = 0
+    if k >= n
+      return []
+    m = n - k
+    out = Array.new(m)
+    i = 0
+    while i < m
+      out[i] = self[k + i]
       i += 1
     out
 
   -> reverse
-    out = []
     n = $size ## i64
-    i = n - 1
-    while i >= 0
-      out.push(self[i])
-      i -= 1
+    if n == 0
+      return []
+    out = Array.new(n)
+    i = 0
+    j = n - 1
+    while i < n
+      out[i] = self[j]
+      i += 1
+      j -= 1
     out
 
   # Remove and return the element at idx, shifting the tail down and
@@ -178,7 +210,8 @@
     if i < 0 || i >= n
       return nil
     removed = self[i]
-    while i < n - 1
+    last = n - 1
+    while i < last
       self[i] = self[i + 1]
       i += 1
     pop
@@ -195,7 +228,6 @@
     copy(start, size - start)
 
   -> copy(start, count)
-    out = []
     n = $size ## i64
     s = start ## i64
     if s < 0
@@ -207,10 +239,12 @@
       len = 0
     if s + len > n
       len = n - s
-    stop = s + len
-    i = s
-    while i < stop
-      out.push(self[i])
+    if len <= 0
+      return []
+    out = Array.new(len)
+    i = 0
+    while i < len
+      out[i] = self[s + i]
       i += 1
     out
 
@@ -259,8 +293,10 @@
     i = 1
     while i < n
       value = self[i]
-      lo = value if value < lo
-      hi = value if value > hi
+      if value < lo
+        lo = value
+      elsif value > hi
+        hi = value
       i += 1
     [lo, hi]
 
@@ -311,24 +347,18 @@
     # Preserve the former C implementation's eager separator validation and
     # exact strlen boundary without copying into throwaway buffers.
     separator_length = ccall_nobox("w_stringy_c_length", separator) ## i64
-
-    # The first live-size pass validates every raw to_s result. Lengths remain
-    # deliberately unused: exact preallocation was slower than default growth.
-    n = $size
-    i = 0
-    while i < n
-      text = ccall("w_to_s", self[i])
-      text_length = ccall_nobox("w_stringy_c_length", text) ## i64
-      i += 1
-
-    # Allocate only the returned output buffer, after validation has finished.
+    n = $size ## i64
+    if n == 0
+      return ""
     out = StringBuffer() ## recycle
     i = 0
     while i < n
-      if i > 0
+      if i > 0 && separator_length > 0
         ccall("w_strbuf_append", out, separator)
       text = ccall("w_to_s", self[i])
-      ccall("w_strbuf_append", out, text)
+      text_length = ccall_nobox("w_stringy_c_length", text) ## i64
+      if text_length > 0
+        ccall("w_strbuf_append", out, text)
       i += 1
 
     result = ccall("w_strbuf_to_s", out)
@@ -350,9 +380,23 @@
   # `## T[n]` at call sites re-types the polymorphic result. Non-mutating.
   # The hypercomplex tower's Cayley–Dickson `*` joins its two halves here.
   -> concat/1
-    out = []
-    self.each -> (x)
-      out.push(x)
+    if @1.is_a?(Array)
+      n1 = $size ## i64
+      n2 = @1.size ## i64
+      total = n1 + n2
+      if total == 0
+        return []
+      out = Array.new(total)
+      i = 0
+      while i < n1
+        out[i] = self[i]
+        i += 1
+      j = 0
+      while j < n2
+        out[n1 + j] = @1[j]
+        j += 1
+      return out
+    out = dup
     @1.each -> (x)
       out.push(x)
     out
@@ -461,8 +505,7 @@
       self.__mergesort_copy -> (a, b)
         &(a, b)
     else
-      self.__mergesort_copy -> (a, b)
-        a <=> b
+      ccall("w_array_stable_sort", self)
 
   # In-place counterparts: sort into a copy through the same machinery,
   # then write the ordered elements back through `[]=` (preserves the
@@ -488,6 +531,9 @@
   # Dispatch note: like `sort`, the compiled engine intercepts every call
   # through the WN_stable_sort IC row (blockless → w_array_stable_sort,
   # block → w_array_sort_block) — this body runs on the interpreter only.
+  -> stable_sort
+    ccall("w_array_stable_sort", self)
+
   -> stable_sort(&)
     if block?
       self.__mergesort_copy -> (a, b)
@@ -500,9 +546,7 @@
   # `sort!` (whose compiled fast path is an unstable qsort), this
   # spelling guarantees stability on every path.
   -> mergesort!
-    sorted = self.__mergesort_copy -> (a, b)
-      a <=> b
-    self.__replace_elements(sorted)
+    self.__replace_elements(ccall("w_array_stable_sort", self))
 
   -> mergesort!(&)
     sorted = self.__mergesort_copy -> (a, b)
@@ -515,18 +559,10 @@
   # Runtime::Builtins.array_mergesort_copy.
   -> __mergesort_copy(&)
     n = size
-    src = []
-    i = 0
-    while i < n
-      src.push(self[i])
-      i += 1
+    src = dup
     if n < 2
       return src
-    dst = []
-    i = 0
-    while i < n
-      dst.push(nil)
-      i += 1
+    dst = Array.new(n)
     width = 1
     while width < n
       left = 0
@@ -568,7 +604,7 @@
   # Overwrite self element-by-element from `other` (same length assumed;
   # used by the in-place sorts, whose copies preserve the length).
   -> __replace_elements(other)
-    n = size
+    n = $size ## i64
     i = 0
     while i < n
       self[i] = other[i]
@@ -610,71 +646,115 @@
   # [4,1,2,3]. Pure Tungsten (the former `array_rotate` intrinsic does not
   # exist). `%` is C-style here, so normalize a negative offset into [0, n).
   -> rotate(count = 1)
-    ro_n = size
+    ro_n = $size ## i64
     if ro_n == 0
       return []
-    ro_k = count % ro_n
+    ro_k = (count ## i64) % ro_n
     if ro_k < 0
       ro_k = ro_k + ro_n
-    ro_out = []
+    ro_out = Array.new(ro_n)
+    ro_tail = ro_n - ro_k
     ro_i = 0
-    while ro_i < ro_n
-      ro_out.push(self[(ro_i + ro_k) % ro_n])
+    while ro_i < ro_tail
+      ro_out[ro_i] = self[ro_k + ro_i]
       ro_i += 1
+    ro_j = 0
+    while ro_j < ro_k
+      ro_out[ro_tail + ro_j] = self[ro_j]
+      ro_j += 1
     ro_out
 
-  # In-place rotate: overwrite self with the rotated order and return self.
+  # In-place rotate: three-reversal algorithm in-place, zero allocation.
   -> rotate!(count = 1)
-    ro_r = rotate(count)
-    ro_j = 0
-    while ro_j < size
-      self[ro_j] = ro_r[ro_j]
-      ro_j += 1
+    ro_n = $size ## i64
+    if ro_n <= 1
+      return self
+    ro_k = (count ## i64) % ro_n
+    if ro_k < 0
+      ro_k = ro_k + ro_n
+    if ro_k == 0
+      return self
+    lo = 0
+    hi = ro_k - 1
+    while lo < hi
+      tmp = self[lo]
+      self[lo] = self[hi]
+      self[hi] = tmp
+      lo += 1
+      hi -= 1
+    lo = ro_k
+    hi = ro_n - 1
+    while lo < hi
+      tmp = self[lo]
+      self[lo] = self[hi]
+      self[hi] = tmp
+      lo += 1
+      hi -= 1
+    lo = 0
+    hi = ro_n - 1
+    while lo < hi
+      tmp = self[lo]
+      self[lo] = self[hi]
+      self[hi] = tmp
+      lo += 1
+      hi -= 1
     self
+
+  -> __flatten_into(out, depth)
+    fl_n = $size ## i64
+    fl_i = 0
+    if depth == 0
+      while fl_i < fl_n
+        out.push(self[fl_i])
+        fl_i += 1
+      return out
+    next_depth = depth < 0 ? -1 : depth - 1
+    while fl_i < fl_n
+      fl_x = self[fl_i]
+      if fl_x.is_a?(Array)
+        fl_x.__flatten_into(out, next_depth)
+      else
+        out.push(fl_x)
+      fl_i += 1
+    out
 
   # Recursively flatten nested arrays into a single flat array. Each element
   # that is itself an Array is expanded (at every depth); non-Array elements
   # pass through. Returns a new array; the receiver is untouched.
   -> flatten
-    out = []
-    self.each -> (x)
-      if x.is_a?(Array)
-        x.flatten.each -> (y)
-          out.push(y)
-      else
-        out.push(x)
-    out
+    __flatten_into([], -1)
 
   # Flatten only `depth` levels of nesting (Ruby-style). depth <= 0 is a
   # shallow copy; each level peels one layer of Array nesting.
   -> flatten(depth)
     if depth <= 0
       return dup
-    out = []
-    self.each -> (x)
-      if x.is_a?(Array)
-        x.flatten(depth - 1).each -> (y)
-          out.push(y)
-      else
-        out.push(x)
-    out
+    __flatten_into([], depth)
 
   # Transpose a rectangular array of rows (array of equal-length arrays):
   # result[c][r] == self[r][c]. Empty receiver returns []. Assumes rows are
   # equal length (uses the first row's width), matching typical matrix/table
   # use.
   -> transpose
-    if size == 0
+    tr_rows = $size ## i64
+    if tr_rows == 0
       return []
-    tr_cols = self[0].size
-    tr_out = []
+    tr_cols = self[0].size ## i64
+    if tr_cols == 0
+      return []
+    tr_out = Array.new(tr_cols)
     tr_c = 0
     while tr_c < tr_cols
-      tr_row = []
-      self.each -> (r)
-        tr_row.push(r[tr_c])
-      tr_out.push(tr_row)
+      tr_out[tr_c] = Array.new(tr_rows)
       tr_c += 1
+    tr_r = 0
+    while tr_r < tr_rows
+      row = self[tr_r]
+      tr_c = 0
+      while tr_c < tr_cols
+        tr_out[tr_c][tr_r] = row[tr_c]
+        tr_c += 1
+      tr_r += 1
     tr_out
 
   # Split into runs of consecutive elements: a new chunk begins whenever the

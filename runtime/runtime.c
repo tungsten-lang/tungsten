@@ -26705,12 +26705,21 @@ static int utf8_encode(uint32_t cp, char *buf) {
 /* ---- Decimal ---- */
 
 /* Normalize: strip trailing zeros from significand, adjusting scale */
-static void decimal_normalize(int64_t *sig, int *scale) {
-    if (*sig == 0) { *scale = 0; return; }
-    while (*sig % 10 == 0 && *scale < W_DECIMAL_SCALE_MAX) {
-        *sig /= 10;
-        (*scale)++;
+static inline void decimal_normalize(int64_t *sig, int *scale) {
+    int64_t s = *sig;
+    if ((s & 1) != 0) return;
+    if (s == 0) { *scale = 0; return; }
+    int sc = *scale;
+    while ((s & 15) == 0 && sc <= W_DECIMAL_SCALE_MAX - 4 && s % 10000 == 0) {
+        s /= 10000;
+        sc += 4;
     }
+    while ((s & 1) == 0 && sc < W_DECIMAL_SCALE_MAX && s % 10 == 0) {
+        s /= 10;
+        sc++;
+    }
+    *sig = s;
+    *scale = sc;
 }
 
 /* n / d as a decimal significand. Fractional digits are appended to the
@@ -26825,16 +26834,37 @@ WValue w_quantity_delta(WValue quantity, WValue origin) {
 
 WValue w_quantity_origin(WValue quantity) { return quantity_origin_value(quantity); }
 
+static const int64_t w_dec_pow10_table[19] = {
+    1LL, 10LL, 100LL, 1000LL, 10000LL, 100000LL,
+    1000000LL, 10000000LL, 100000000LL, 1000000000LL,
+    10000000000LL, 100000000000LL, 1000000000000LL,
+    10000000000000LL, 100000000000000LL, 1000000000000000LL,
+    10000000000000000LL, 100000000000000000LL, 1000000000000000000LL
+};
+
 /* Align two decimals to the same scale (the lower/more-negative one) */
 static void decimal_align(__int128 *a_sig, int *a_scale,
                           __int128 *b_sig, int *b_scale) {
-    while (*a_scale > *b_scale) {
-        *a_sig *= 10;
-        (*a_scale)--;
-    }
-    while (*b_scale > *a_scale) {
-        *b_sig *= 10;
-        (*b_scale)--;
+    int as = *a_scale, bs = *b_scale;
+    if (as == bs) return;
+    if (as > bs) {
+        int diff = as - bs;
+        if (diff <= 18) {
+            *a_sig *= (__int128)w_dec_pow10_table[diff];
+            *a_scale = bs;
+            return;
+        }
+        while (as > bs) { *a_sig *= 10; as--; }
+        *a_scale = as;
+    } else {
+        int diff = bs - as;
+        if (diff <= 18) {
+            *b_sig *= (__int128)w_dec_pow10_table[diff];
+            *b_scale = as;
+            return;
+        }
+        while (bs > as) { *b_sig *= 10; bs--; }
+        *b_scale = bs;
     }
 }
 
@@ -26845,13 +26875,32 @@ static int decimal_i128_fits_i64(__int128 v) {
     return v <= (__int128)INT64_MAX && v >= (__int128)INT64_MIN;
 }
 
+static inline int decimal_try_extract_fast(WValue v, int64_t *sig, int *scale) {
+    if (__builtin_expect(w_is_decimal(v), 1)) {
+        *sig = w_unbox_decimal_sig(v);
+        *scale = w_unbox_decimal_scale(v);
+        return 1;
+    }
+    WDomainHeap *d = w_as_domain(v);
+    if (__builtin_expect((d->domain_flags & W_DECFLAG_BIGSIG) == 0, 1)) {
+        *sig = d->sig;
+        *scale = d->scale;
+        return 1;
+    }
+    return 0;
+}
+
 WValue w_decimal_add(WValue a, WValue b) {
-    if (decimal_is_bigsig(a) || decimal_is_bigsig(b))
-        return decimal_big_add(a, b, 0);
     int64_t a_sig64, b_sig64;
     int a_scale, b_scale;
-    decimal_extract(a, &a_sig64, &a_scale);
-    decimal_extract(b, &b_sig64, &b_scale);
+    if (__builtin_expect(!decimal_try_extract_fast(a, &a_sig64, &a_scale) ||
+                         !decimal_try_extract_fast(b, &b_sig64, &b_scale), 0))
+        return decimal_big_add(a, b, 0);
+    if (a_scale == b_scale) {
+        __int128 r = (__int128)a_sig64 + b_sig64;
+        if (!decimal_i128_fits_i64(r)) return decimal_big_add(a, b, 0);
+        return w_decimal((int64_t)r, a_scale);
+    }
     int gap = a_scale > b_scale ? a_scale - b_scale : b_scale - a_scale;
     if (gap > 18) return decimal_big_add(a, b, 0);
     __int128 a_sig = a_sig64, b_sig = b_sig64;
@@ -26862,12 +26911,16 @@ WValue w_decimal_add(WValue a, WValue b) {
 }
 
 WValue w_decimal_sub(WValue a, WValue b) {
-    if (decimal_is_bigsig(a) || decimal_is_bigsig(b))
-        return decimal_big_add(a, b, 1);
     int64_t a_sig64, b_sig64;
     int a_scale, b_scale;
-    decimal_extract(a, &a_sig64, &a_scale);
-    decimal_extract(b, &b_sig64, &b_scale);
+    if (__builtin_expect(!decimal_try_extract_fast(a, &a_sig64, &a_scale) ||
+                         !decimal_try_extract_fast(b, &b_sig64, &b_scale), 0))
+        return decimal_big_add(a, b, 1);
+    if (a_scale == b_scale) {
+        __int128 r = (__int128)a_sig64 - b_sig64;
+        if (!decimal_i128_fits_i64(r)) return decimal_big_add(a, b, 1);
+        return w_decimal((int64_t)r, a_scale);
+    }
     int gap = a_scale > b_scale ? a_scale - b_scale : b_scale - a_scale;
     if (gap > 18) return decimal_big_add(a, b, 1);
     __int128 a_sig = a_sig64, b_sig = b_sig64;
@@ -26878,12 +26931,11 @@ WValue w_decimal_sub(WValue a, WValue b) {
 }
 
 WValue w_decimal_mul(WValue a, WValue b) {
-    if (decimal_is_bigsig(a) || decimal_is_bigsig(b))
-        return decimal_big_mul(a, b);
     int64_t a_sig64, b_sig64;
     int a_scale, b_scale;
-    decimal_extract(a, &a_sig64, &a_scale);
-    decimal_extract(b, &b_sig64, &b_scale);
+    if (__builtin_expect(!decimal_try_extract_fast(a, &a_sig64, &a_scale) ||
+                         !decimal_try_extract_fast(b, &b_sig64, &b_scale), 0))
+        return decimal_big_mul(a, b);
     __int128 sig = (__int128)a_sig64 * b_sig64;
     int scale = a_scale + b_scale;
     if (!decimal_i128_fits_i64(sig)) return decimal_big_mul(a, b);
@@ -26912,12 +26964,23 @@ WValue w_decimal_div(WValue a, WValue b) {
 }
 
 static int decimal_compare(WValue a, WValue b) {
-    if (decimal_is_bigsig(a) || decimal_is_bigsig(b))
-        return decimal_big_compare(a, b);
     int64_t a_sig64, b_sig64;
     int a_scale, b_scale;
-    decimal_extract(a, &a_sig64, &a_scale);
-    decimal_extract(b, &b_sig64, &b_scale);
+    if (__builtin_expect(w_is_decimal(a) && w_is_decimal(b), 1)) {
+        a_sig64 = w_unbox_decimal_sig(a);
+        a_scale = w_unbox_decimal_scale(a);
+        b_sig64 = w_unbox_decimal_sig(b);
+        b_scale = w_unbox_decimal_scale(b);
+        if (a_scale == b_scale)
+            return (a_sig64 > b_sig64) - (a_sig64 < b_sig64);
+    } else {
+        if (decimal_is_bigsig(a) || decimal_is_bigsig(b))
+            return decimal_big_compare(a, b);
+        decimal_extract(a, &a_sig64, &a_scale);
+        decimal_extract(b, &b_sig64, &b_scale);
+        if (a_scale == b_scale)
+            return (a_sig64 > b_sig64) - (a_sig64 < b_sig64);
+    }
     int gap = a_scale > b_scale ? a_scale - b_scale : b_scale - a_scale;
     if (gap > 18) return decimal_big_compare(a, b);
     __int128 a_sig = a_sig64, b_sig = b_sig64;
@@ -26945,8 +27008,9 @@ static const char *currency_symbols[] = {
 
 static WValue domain_heap_alloc(uint8_t type, int64_t sig, int32_t scale,
                                  int32_t extra, int64_t extra2) {
-    WDomainHeap *d = calloc(1, sizeof(WDomainHeap));
+    WDomainHeap *d = malloc(sizeof(WDomainHeap));
     d->domain_type = type;
+    d->domain_flags = 0;
     d->sig = sig;
     d->scale = scale;
     d->extra = extra;
@@ -44706,6 +44770,10 @@ WValue w_add(WValue a, WValue b) {
      * operations orders of magnitude heavier. */
     if (w_both_ints(a, b))
         return w_box_int_checked(w_as_int(a) + w_as_int(b));
+    if (w_is_double(a) && w_is_double(b))
+        return w_float(w_as_double(a) + w_as_double(b));
+    if (is_decimal_any(a) && is_decimal_any(b))
+        return w_decimal_add(a, b);
     if (w_both_integers_any(a, b)) {
         int src_off = g_bigint_src_ops_off;
         if (__builtin_expect(src_off < 0, 0)) src_off = bigint_src_ops_resolve();
@@ -44718,8 +44786,6 @@ WValue w_add(WValue a, WValue b) {
     /* StringBuffer << value → in-place append, return buffer */
     if (w_is_strbuf(a))
         return w_strbuf_append(a, w_to_s(b));
-    if (is_decimal_any(a) && is_decimal_any(b))
-        return w_decimal_add(a, b);
     if (is_decimal_any(a) && w_is_int(b))
         return w_decimal_add(a, w_decimal(w_as_int(b), 0));
     if (w_is_int(a) && is_decimal_any(b))
@@ -44842,6 +44908,10 @@ WValue w_sub(WValue a, WValue b) {
      * fires. */
     if (w_both_ints(a, b))
         return w_box_int_checked(w_as_int(a) - w_as_int(b));
+    if (w_is_double(a) && w_is_double(b))
+        return w_float(w_as_double(a) - w_as_double(b));
+    if (is_decimal_any(a) && is_decimal_any(b))
+        return w_decimal_sub(a, b);
     if (w_both_integers_any(a, b)) {
         /* Weak-linkage source routing, exactly like w_add's `+` arm. */
         int src_off = g_bigint_src_ops_off;
@@ -44855,8 +44925,6 @@ WValue w_sub(WValue a, WValue b) {
         return bigint_sub_any(a, b);
     }
     if (w_is_array(a) && w_is_plain_scalar_num(b)) return w_array_sub_elem(a, b);
-    if (is_decimal_any(a) && is_decimal_any(b))
-        return w_decimal_sub(a, b);
     if (is_decimal_any(a) && w_is_int(b))
         return w_decimal_sub(a, w_decimal(w_as_int(b), 0));
     if (w_is_int(a) && is_decimal_any(b))
@@ -44953,6 +45021,10 @@ WValue w_mul(WValue a, WValue b) {
             return w_box_int((int64_t)r);
         return bigint_from_i128(r);
     }
+    if (w_is_double(a) && w_is_double(b))
+        return w_float(w_as_double(a) * w_as_double(b));
+    if (is_decimal_any(a) && is_decimal_any(b))
+        return w_decimal_mul(a, b);
     if (w_both_integers_any(a, b))
     {
         int src_off = g_bigint_src_ops_off;
@@ -44967,8 +45039,6 @@ WValue w_mul(WValue a, WValue b) {
 #endif
     }
     if (w_is_array(a) && w_is_plain_scalar_num(b)) return w_array_mul_elem(a, b);
-    if (is_decimal_any(a) && is_decimal_any(b))
-        return w_decimal_mul(a, b);
     /* decimal * int or int * decimal → promote int to decimal */
     if (is_decimal_any(a) && w_is_int(b))
         return w_decimal_mul(a, w_decimal(w_as_int(b), 0));
@@ -45525,13 +45595,20 @@ static inline int bigint_divmod_src_shape(WValue a, WValue b) {
 }
 
 WValue w_div(WValue a, WValue b) {
-    if (w_is_array(a) && w_is_plain_scalar_num(b)) return w_array_div_elem(a, b);
+    if (w_both_ints(a, b)) {
+        int64_t bv = w_as_int(b);
+        if (bv == 0) die_as("ZeroDivisionError", "division by zero");
+        return w_box_int_checked(w_as_int(a) / bv);
+    }
+    if (w_is_double(a) && w_is_double(b))
+        return w_float(w_as_double(a) / w_as_double(b));
     if (is_decimal_any(a) && is_decimal_any(b))
         return w_decimal_div(a, b);
     if (is_decimal_any(a) && w_is_int(b))
         return w_decimal_div(a, w_decimal(w_as_int(b), 0));
     if (w_is_int(a) && is_decimal_any(b))
         return w_decimal_div(w_decimal(w_as_int(a), 0), b);
+    if (w_is_array(a) && w_is_plain_scalar_num(b)) return w_array_div_elem(a, b);
     /* quantity / quantity — dimensional algebra (ft² ÷ ft → ft; ft ÷ ft → ratio) */
     if (is_quantity_any(a) && is_quantity_any(b))
         return w_quantity_div(a, b);
@@ -45574,11 +45651,6 @@ WValue w_div(WValue a, WValue b) {
     }
     if (is_currency_any(a) && (w_is_int(b) || is_decimal_any(b) || w_is_double(b)))
         return w_currency_div_scalar(a, b);
-    if (w_both_ints(a, b)) {
-        int64_t bv = w_as_int(b);
-        if (bv == 0) die_as("ZeroDivisionError", "division by zero");
-        return w_box_int_checked(w_as_int(a) / bv);
-    }
     if (w_both_integers_any(a, b)) {
         int src_off = g_bigint_src_ops_off;
         if (__builtin_expect(src_off < 0, 0)) src_off = bigint_src_ops_resolve();
@@ -45656,6 +45728,13 @@ static WValue w_string_format(WValue fmt_v, WValue arg_v) {
 }
 
 WValue w_mod(WValue a, WValue b) {
+    if (w_both_ints(a, b)) {
+        int64_t bv = w_as_int(b);
+        if (bv == 0) die("modulo by zero");
+        return w_box_int_checked(w_as_int(a) % bv);
+    }
+    if (w_is_double(a) && w_is_double(b))
+        return w_float(fmod(w_as_double(a), w_as_double(b)));
     if (w_is_string(a) || w_is_rope(a))
         return w_string_format(a, b);
     /* Preserve user-defined operator dispatch when the RHS is a Float. */
@@ -45664,11 +45743,6 @@ WValue w_mod(WValue a, WValue b) {
     if (w_is_double(a) || w_is_double(b)) {
         /* IEEE remainder: a zero divisor is NaN, not a language error. */
         return w_float(fmod(as_numeric_double(a), as_numeric_double(b)));
-    }
-    if (w_both_ints(a, b)) {
-        int64_t bv = w_as_int(b);
-        if (bv == 0) die("modulo by zero");
-        return w_box_int_checked(w_as_int(a) % bv);
     }
     if (w_both_integers_any(a, b)) {
         int src_off = g_bigint_src_ops_off;
@@ -48506,6 +48580,8 @@ static int decimal_mixed_compare(WValue a, WValue b, int *supported) {
 WValue w_lt(WValue a, WValue b) {
     if (w_both_ints(a, b))
         return w_bool(w_as_int(a) < w_as_int(b));
+    if (w_is_double(a) && w_is_double(b))
+        return w_bool(w_as_double(a) < w_as_double(b));
 
     /* Chars: codepoint-ordered raw compare (same tag, codepoint in high bits). */
     if (w_is_char(a) && w_is_char(b)) return w_bool(a < b);
@@ -48578,6 +48654,11 @@ WValue w_spaceship(WValue a, WValue b) {
         int64_t x = w_as_int(a), y = w_as_int(b);
         return w_int(x < y ? -1 : (x > y ? 1 : 0));
     }
+    if (w_is_double(a) && w_is_double(b)) {
+        double x = w_as_double(a), y = w_as_double(b);
+        if (x != x || y != y) return W_NIL;
+        return w_int(x < y ? -1 : (x > y ? 1 : 0));
+    }
     if (w_is_char(a) && w_is_char(b))
         return w_int(a < b ? -1 : (a > b ? 1 : 0));
     if (w_both_integers_any(a, b)) {
@@ -48637,6 +48718,8 @@ WValue w_spaceship(WValue a, WValue b) {
 WValue w_gt(WValue a, WValue b) {
     if (w_both_ints(a, b))
         return w_bool(w_as_int(a) > w_as_int(b));
+    if (w_is_double(a) && w_is_double(b))
+        return w_bool(w_as_double(a) > w_as_double(b));
 
     if (w_is_char(a) && w_is_char(b)) return w_bool(a > b);
 
@@ -48691,6 +48774,8 @@ WValue w_gt(WValue a, WValue b) {
 WValue w_lte(WValue a, WValue b) {
     if (w_both_ints(a, b))
         return w_bool(w_as_int(a) <= w_as_int(b));
+    if (w_is_double(a) && w_is_double(b))
+        return w_bool(w_as_double(a) <= w_as_double(b));
 
     if (w_is_char(a) && w_is_char(b)) return w_bool(a <= b);
 
@@ -48745,6 +48830,8 @@ WValue w_lte(WValue a, WValue b) {
 WValue w_gte(WValue a, WValue b) {
     if (w_both_ints(a, b))
         return w_bool(w_as_int(a) >= w_as_int(b));
+    if (w_is_double(a) && w_is_double(b))
+        return w_bool(w_as_double(a) >= w_as_double(b));
 
     if (w_is_char(a) && w_is_char(b)) return w_bool(a >= b);
 
@@ -54634,6 +54721,26 @@ static void w_typenames_init(void) {
 
 WValue __w_type(WValue v) {
     if (__builtin_expect(!g_typenames_ready, 0)) w_typenames_init();
+    uint64_t hi = v >> 48;
+    if (hi == 0xFFFA) return g_tn_int;
+    if (hi == 0xFFF4) return g_tn_array;
+    if (hi == 0xFFF9) return (v & 1) ? g_tn_symbol : g_tn_string;
+    if (hi == 0) {
+        if (v == W_NIL) return g_tn_nil;
+        if (v == W_FALSE || v == W_TRUE) return g_tn_bool;
+        if (v >= 0x10) {
+            uint64_t st = v & 0xF;
+            if (st == W_SUBTAG_HASH) return g_tn_hash;
+            if (st == W_SUBTAG_STRBUF) return g_tn_strbuf;
+            if (st == W_SUBTAG_REGEX) return g_tn_regex;
+            if (st == W_SUBTAG_REGEX_MATCH) return g_tn_regex_match;
+            if (st == W_SUBTAG_RANGE) return g_tn_range;
+            if (st == W_SUBTAG_SMALL_ARRAY) return g_tn_small_array;
+            if (st == W_SUBTAG_UUID) return g_tn_uuid;
+            if (st == W_SUBTAG_CLASS) return g_tn_class;
+        }
+    }
+    if (w_is_double(v)) return g_tn_float;
     if (w_is_nil(v))    return g_tn_nil;
     if (w_is_bool(v))   return g_tn_bool;
     if (w_is_int(v))    return g_tn_int;
@@ -58052,26 +58159,45 @@ static int w_primitive_is_a_type_name(WValue recv, const char *tn, size_t tn_len
  * looking up `is_a?` for every overloaded operator invocation. */
 WValue w_value_is_a(WValue recv, WValue target) {
     /* Class-object target: walk instance ancestry by class_id. */
-    if (w_is_class(target)) {
+    if (__builtin_expect(w_is_class(target), 1)) {
         WClass *tc = (WClass *)w_as_ptr(target);
         if (w_is_instance(recv)) {
             WClass *k = g_class_table[((WObject *)w_as_ptr(recv))->class_id];
             while (k) {
-                if (k->class_id == tc->class_id) return w_bool(1);
+                if (k->class_id == tc->class_id) return W_TRUE;
                 k = k->superclass;
             }
-            return w_bool(0);
+            return W_FALSE;
         }
-        if (w_is_class(recv)) return w_bool(0);
+        if (w_is_class(recv)) return W_FALSE;
+        const char *tn = tc->name;
+        if (w_is_int(recv)) {
+            if (tn[0] == 'I' && tn[1] == 'n' && tn[2] == 't') {
+                if (tn[3] == '\0' || (tn[3] == 'e' && tn[4] == 'g' && tn[5] == 'e' && tn[6] == 'r' && tn[7] == '\0'))
+                    return W_TRUE;
+            }
+            if (tn[0] == 'R' && strcmp(tn, "Real") == 0) return W_TRUE;
+            if (tn[0] == 'N' && strcmp(tn, "Number") == 0) return W_TRUE;
+            return W_FALSE;
+        }
+        if (w_is_array(recv)) {
+            return w_bool(tn[0] == 'A' && tn[1] == 'r' && tn[2] == 'r' && tn[3] == 'a' && tn[4] == 'y' && tn[5] == '\0');
+        }
+        if (w_is_double(recv)) {
+            if (tn[0] == 'F' && strcmp(tn, "Float") == 0) return W_TRUE;
+            if (tn[0] == 'R' && strcmp(tn, "Real") == 0) return W_TRUE;
+            if (tn[0] == 'N' && strcmp(tn, "Number") == 0) return W_TRUE;
+            return W_FALSE;
+        }
+        if (w_is_string(recv)) {
+            return w_bool(tn[0] == 'S' && strcmp(tn, "String") == 0);
+        }
         const char *pn =
-            w_is_int(recv) ? "Int" :
-            w_is_double(recv) ? "Float" :
-            w_is_string(recv) ? "String" :
             w_is_symbol(recv) ? "Symbol" :
-            (w_is_array(recv) || w_is_body(recv) || w_is_wire_sequence(recv)) ? "Array" :
+            (w_is_body(recv) || w_is_wire_sequence(recv)) ? "Array" :
             w_is_bool(recv) ? "Boolean" : NULL;
-        return w_bool((pn && strcmp(pn, tc->name) == 0) ||
-                      w_primitive_is_a_type_name(recv, tc->name, strlen(tc->name)));
+        return w_bool((pn && strcmp(pn, tn) == 0) ||
+                      w_primitive_is_a_type_name(recv, tn, strlen(tn)));
     }
 
     /* String target: compare generic specializations by base name. Resolve
@@ -58252,6 +58378,10 @@ static int w_value_compare(const void *ap, const void *bp) {
     if (w_is_string(a) && w_is_string(b)) {
         return strcmp(as_str(a), as_str(b));
     }
+    /* Both decimals */
+    if (is_decimal_any(a) && is_decimal_any(b)) {
+        return decimal_compare(a, b);
+    }
     /* Both arrays: order lexicographically by content (so `[[k,v],…].sort`
      * and sort_by's decorated pairs order by their first element / key). */
     if (w_is_array(a) && w_is_array(b)) {
@@ -58265,14 +58395,25 @@ static int w_value_compare(const void *ap, const void *bp) {
  * w_value_compare per element; arrays being sorted are small (decorated
  * pairs), so the per-element w_int index boxing is negligible. */
 static int w_array_lex_compare(WValue a, WValue b) {
-    int64_t na = (int64_t)(w_as_array(a))->size;
-    int64_t nb = (int64_t)(w_as_array(b))->size;
+    WArray *aa = w_as_array(a);
+    WArray *ba = w_as_array(b);
+    int64_t na = (int64_t)aa->size;
+    int64_t nb = (int64_t)ba->size;
     int64_t n = na < nb ? na : nb;
-    for (int64_t i = 0; i < n; i++) {
-        WValue ea = w_array_get(a, w_int(i));
-        WValue eb = w_array_get(b, w_int(i));
-        int c = w_value_compare(&ea, &eb);
-        if (c != 0) return c;
+    if (aa->ebits == 65 && ba->ebits == 65) {
+        const WValue *as = aa->slots + aa->start;
+        const WValue *bs = ba->slots + ba->start;
+        for (int64_t i = 0; i < n; i++) {
+            int c = w_value_compare(&as[i], &bs[i]);
+            if (c != 0) return c;
+        }
+    } else {
+        for (int64_t i = 0; i < n; i++) {
+            WValue ea = array_slot_load_decoded(aa, i);
+            WValue eb = array_slot_load_decoded(ba, i);
+            int c = w_value_compare(&ea, &eb);
+            if (c != 0) return c;
+        }
     }
     return (na > nb) - (na < nb);
 }
@@ -58687,6 +58828,185 @@ static WValue w_ic_array_clear(WValue r, WValue *a, int c) {
     arr->size = 0;
     return r;
 }
+static inline int w_array_can_u64_scan(WValue v) {
+    return w_is_int(v) || w_is_nil(v) || w_is_bool(v) || w_is_char(v);
+}
+
+static inline int w_array_str_eq_heap_tail4(const WString *ws, const char *ns, uint32_t nlen, uint32_t ntail) {
+    if (w_heap_string_len(ws) != nlen) return 0;
+    uint32_t vtail;
+    memcpy(&vtail, ws->data + nlen - 4, 4);
+    return vtail == ntail && memcmp(ws->data, ns, nlen) == 0;
+}
+
+static int64_t w_array_scan_eq_w64(const WValue *slots, int32_t n, WValue needle, int rev) {
+    if (w_array_can_u64_scan(needle)) {
+        return rev ? w_u64_scan_eq_rev((const uint64_t *)slots, n, (uint64_t)needle)
+                   : w_u64_scan_eq((const uint64_t *)slots, n, (uint64_t)needle);
+    }
+    if (w_is_stringy(needle)) {
+        size_t nmode = (needle >> 1) & 7;
+        uint64_t heap_tag = W_TAG_STRINGSYM | (7ULL << 1) | (needle & 1);
+        if (nmode <= 5) {
+            if (!rev) {
+                for (int32_t i = 0; i < n; i++) {
+                    WValue v = slots[i];
+                    if (v == needle) return i;
+                    if (__builtin_expect((v & (W_TAG_MASK | 0xFULL)) == heap_tag || w_is_obj(v), 0)) {
+                        if (w_eq(v, needle) == W_TRUE) return i;
+                    }
+                }
+            } else {
+                for (int32_t i = n - 1; i >= 0; i--) {
+                    WValue v = slots[i];
+                    if (v == needle) return i;
+                    if (__builtin_expect((v & (W_TAG_MASK | 0xFULL)) == heap_tag || w_is_obj(v), 0)) {
+                        if (w_eq(v, needle) == W_TRUE) return i;
+                    }
+                }
+            }
+            return -1;
+        }
+        if (nmode == 6) {
+            uint64_t needle_canon = needle & ~UINT64_C(0x3F0000000);
+            char nbuf[6];
+            const char *ns;
+            size_t nlen_sz;
+            w_str_data(needle, nbuf, &ns, &nlen_sz);
+            uint32_t nlen = (uint32_t)nlen_sz;
+            uint32_t ntail = 0;
+            if (nlen >= 4) memcpy(&ntail, ns + nlen - 4, 4);
+            if (!rev) {
+                for (int32_t i = 0; i < n; i++) {
+                    WValue v = slots[i];
+                    if ((v & ~UINT64_C(0x3F0000000)) == needle_canon) return i;
+                    if ((v & (W_TAG_MASK | 0xFULL)) == heap_tag && nlen >= 4) {
+                        if (w_array_str_eq_heap_tail4(w_as_heap_str(v), ns, nlen, ntail)) return i;
+                    } else if (__builtin_expect((v & (W_TAG_MASK | 0xFULL)) == heap_tag || w_is_obj(v), 0)) {
+                        if (w_eq(v, needle) == W_TRUE) return i;
+                    }
+                }
+            } else {
+                for (int32_t i = n - 1; i >= 0; i--) {
+                    WValue v = slots[i];
+                    if ((v & ~UINT64_C(0x3F0000000)) == needle_canon) return i;
+                    if ((v & (W_TAG_MASK | 0xFULL)) == heap_tag && nlen >= 4) {
+                        if (w_array_str_eq_heap_tail4(w_as_heap_str(v), ns, nlen, ntail)) return i;
+                    } else if (__builtin_expect((v & (W_TAG_MASK | 0xFULL)) == heap_tag || w_is_obj(v), 0)) {
+                        if (w_eq(v, needle) == W_TRUE) return i;
+                    }
+                }
+            }
+            return -1;
+        }
+        if (nmode == 7) {
+            const WString *nws = w_as_heap_str(needle);
+            uint32_t nlen = w_heap_string_len(nws);
+            if (nlen >= 4) {
+                const char *ns = nws->data;
+                uint32_t ntail;
+                memcpy(&ntail, ns + nlen - 4, 4);
+                uint64_t slab_tag = W_TAG_STRINGSYM | (6ULL << 1) | (needle & 1);
+                if (!rev) {
+                    for (int32_t i = 0; i < n; i++) {
+                        WValue v = slots[i];
+                        if (v == needle) return i;
+                        if ((v & (W_TAG_MASK | 0xFULL)) == heap_tag) {
+                            if (w_array_str_eq_heap_tail4(w_as_heap_str(v), ns, nlen, ntail)) return i;
+                        } else if (__builtin_expect((v & (W_TAG_MASK | 0xFULL)) == slab_tag || w_is_obj(v), 0)) {
+                            if (w_eq(v, needle) == W_TRUE) return i;
+                        }
+                    }
+                } else {
+                    for (int32_t i = n - 1; i >= 0; i--) {
+                        WValue v = slots[i];
+                        if (v == needle) return i;
+                        if ((v & (W_TAG_MASK | 0xFULL)) == heap_tag) {
+                            if (w_array_str_eq_heap_tail4(w_as_heap_str(v), ns, nlen, ntail)) return i;
+                        } else if (__builtin_expect((v & (W_TAG_MASK | 0xFULL)) == slab_tag || w_is_obj(v), 0)) {
+                            if (w_eq(v, needle) == W_TRUE) return i;
+                        }
+                    }
+                }
+                return -1;
+            }
+        }
+    }
+    if (!rev) {
+        for (int32_t i = 0; i < n; i++)
+            if (w_eq(slots[i], needle) == W_TRUE) return i;
+    } else {
+        for (int32_t i = n - 1; i >= 0; i--)
+            if (w_eq(slots[i], needle) == W_TRUE) return i;
+    }
+    return -1;
+}
+
+static int64_t w_array_count_eq_w64(const WValue *slots, int32_t n, WValue needle) {
+    if (w_array_can_u64_scan(needle)) {
+        return w_u64_scan_count((const uint64_t *)slots, n, (uint64_t)needle);
+    }
+    if (w_is_stringy(needle)) {
+        size_t nmode = (needle >> 1) & 7;
+        uint64_t heap_tag = W_TAG_STRINGSYM | (7ULL << 1) | (needle & 1);
+        int64_t count = 0;
+        if (nmode <= 5) {
+            for (int32_t i = 0; i < n; i++) {
+                WValue v = slots[i];
+                if (v == needle) count++;
+                else if (__builtin_expect((v & (W_TAG_MASK | 0xFULL)) == heap_tag || w_is_obj(v), 0)) {
+                    if (w_eq(v, needle) == W_TRUE) count++;
+                }
+            }
+            return count;
+        }
+        if (nmode == 6) {
+            uint64_t needle_canon = needle & ~UINT64_C(0x3F0000000);
+            char nbuf[6];
+            const char *ns;
+            size_t nlen_sz;
+            w_str_data(needle, nbuf, &ns, &nlen_sz);
+            uint32_t nlen = (uint32_t)nlen_sz;
+            uint32_t ntail = 0;
+            if (nlen >= 4) memcpy(&ntail, ns + nlen - 4, 4);
+            for (int32_t i = 0; i < n; i++) {
+                WValue v = slots[i];
+                if ((v & ~UINT64_C(0x3F0000000)) == needle_canon) count++;
+                else if ((v & (W_TAG_MASK | 0xFULL)) == heap_tag && nlen >= 4) {
+                    if (w_array_str_eq_heap_tail4(w_as_heap_str(v), ns, nlen, ntail)) count++;
+                } else if (__builtin_expect((v & (W_TAG_MASK | 0xFULL)) == heap_tag || w_is_obj(v), 0)) {
+                    if (w_eq(v, needle) == W_TRUE) count++;
+                }
+            }
+            return count;
+        }
+        if (nmode == 7) {
+            const WString *nws = w_as_heap_str(needle);
+            uint32_t nlen = w_heap_string_len(nws);
+            if (nlen >= 4) {
+                const char *ns = nws->data;
+                uint32_t ntail;
+                memcpy(&ntail, ns + nlen - 4, 4);
+                uint64_t slab_tag = W_TAG_STRINGSYM | (6ULL << 1) | (needle & 1);
+                for (int32_t i = 0; i < n; i++) {
+                    WValue v = slots[i];
+                    if (v == needle) count++;
+                    else if ((v & (W_TAG_MASK | 0xFULL)) == heap_tag) {
+                        if (w_array_str_eq_heap_tail4(w_as_heap_str(v), ns, nlen, ntail)) count++;
+                    } else if (__builtin_expect((v & (W_TAG_MASK | 0xFULL)) == slab_tag || w_is_obj(v), 0)) {
+                        if (w_eq(v, needle) == W_TRUE) count++;
+                    }
+                }
+                return count;
+            }
+        }
+    }
+    int64_t count = 0;
+    for (int32_t i = 0; i < n; i++)
+        if (w_eq(slots[i], needle) == W_TRUE) count++;
+    return count;
+}
+
 static WValue w_ic_array_include(WValue r, WValue *a, int c) {
     (void)c;
     WArray *arr = as_array(r);
@@ -58697,9 +59017,8 @@ static WValue w_ic_array_include(WValue r, WValue *a, int c) {
             : w_u1_index_unset((const uint8_t *)arr->slots + (arr->start >> 3), arr->size);
         return idx < 0 ? W_FALSE : W_TRUE;
     }
-    if (arr->ebits == 65 && w_is_int(a[0])) {
-        int64_t idx = w_u64_scan_eq((const uint64_t *)arr->slots + arr->start,
-                                     arr->size, (uint64_t)a[0]);
+    if (arr->ebits == 65) {
+        int64_t idx = w_array_scan_eq_w64(arr->slots + arr->start, arr->size, a[0], 0);
         return idx < 0 ? W_FALSE : W_TRUE;
     }
     if (w_is_int(a[0])) {
@@ -58724,15 +59043,6 @@ static WValue w_ic_array_include(WValue r, WValue *a, int c) {
                                          arr->size, (uint32_t)needle);
             return idx < 0 ? W_FALSE : W_TRUE;
         }
-    }
-    /* Polymorphic / non-u8 path: arr->slots is WValue* only when ebits=65
-     * (the w64 polymorphic bucket). Typed arrays contain raw scalar bit
-     * patterns—even u64 at the same physical width—so direct slots[] indexing
-     * misinterprets them as tagged WValues. Use the array-tier accessor. */
-    if (arr->ebits == 65) {
-        for (int32_t i = 0; i < arr->size; i++)
-            if (w_eq(arr->slots[arr->start + i], a[0]) == W_TRUE) return W_TRUE;
-        return W_FALSE;
     }
     for (int32_t i = 0; i < arr->size; i++)
         if (w_eq(array_slot_load_decoded(arr, i), a[0]) == W_TRUE) return W_TRUE;
@@ -58773,10 +59083,41 @@ static WValue w_ic_array_min(WValue r, WValue *a, int c) {
     (void)a; (void)c;
     WArray *arr = w_as_array(r);
     if (arr->ebits == 65) {
-        if (arr->size == 0) return W_NIL;
-        WValue best = array_slot_load_decoded(arr, 0);
-        for (int32_t i = 1; i < arr->size; i++) {
-            WValue v = array_slot_load_decoded(arr, i);
+        int32_t n = arr->size;
+        if (n == 0) return W_NIL;
+        const WValue *slots = arr->slots + arr->start;
+        WValue best = slots[0];
+        int32_t i = 1;
+        if (w_is_int(best)) {
+            int64_t best_i = w_as_int(best);
+            for (; i < n; i++) {
+                WValue v = slots[i];
+                if (__builtin_expect(!w_is_int(v), 0)) break;
+                int64_t vi = w_as_int(v);
+                if (vi < best_i) { best_i = vi; best = v; }
+            }
+        } else if (w_is_double(best)) {
+            double best_d = w_as_double(best);
+            for (; i < n; i++) {
+                WValue v = slots[i];
+                if (__builtin_expect(!w_is_double(v), 0)) break;
+                double vd = w_as_double(v);
+                if (vd < best_d) { best_d = vd; best = v; }
+            }
+        } else if (w_is_decimal(best)) {
+            int64_t best_sig = w_unbox_decimal_sig(best);
+            int best_sc = w_unbox_decimal_scale(best);
+            for (; i < n; i++) {
+                WValue v = slots[i];
+                if (__builtin_expect(!w_is_decimal(v), 0)) break;
+                int64_t vsig = w_unbox_decimal_sig(v);
+                int vsc = w_unbox_decimal_scale(v);
+                int cmp = (vsc == best_sc) ? ((vsig > best_sig) - (vsig < best_sig)) : decimal_compare(v, best);
+                if (cmp < 0) { best = v; best_sig = vsig; best_sc = vsc; }
+            }
+        }
+        for (; i < n; i++) {
+            WValue v = slots[i];
             if (w_value_compare(&v, &best) < 0) best = v;
         }
         return best;
@@ -58789,10 +59130,41 @@ static WValue w_ic_array_max(WValue r, WValue *a, int c) {
     (void)a; (void)c;
     WArray *arr = w_as_array(r);
     if (arr->ebits == 65) {
-        if (arr->size == 0) return W_NIL;
-        WValue best = array_slot_load_decoded(arr, 0);
-        for (int32_t i = 1; i < arr->size; i++) {
-            WValue v = array_slot_load_decoded(arr, i);
+        int32_t n = arr->size;
+        if (n == 0) return W_NIL;
+        const WValue *slots = arr->slots + arr->start;
+        WValue best = slots[0];
+        int32_t i = 1;
+        if (w_is_int(best)) {
+            int64_t best_i = w_as_int(best);
+            for (; i < n; i++) {
+                WValue v = slots[i];
+                if (__builtin_expect(!w_is_int(v), 0)) break;
+                int64_t vi = w_as_int(v);
+                if (vi > best_i) { best_i = vi; best = v; }
+            }
+        } else if (w_is_double(best)) {
+            double best_d = w_as_double(best);
+            for (; i < n; i++) {
+                WValue v = slots[i];
+                if (__builtin_expect(!w_is_double(v), 0)) break;
+                double vd = w_as_double(v);
+                if (vd > best_d) { best_d = vd; best = v; }
+            }
+        } else if (w_is_decimal(best)) {
+            int64_t best_sig = w_unbox_decimal_sig(best);
+            int best_sc = w_unbox_decimal_scale(best);
+            for (; i < n; i++) {
+                WValue v = slots[i];
+                if (__builtin_expect(!w_is_decimal(v), 0)) break;
+                int64_t vsig = w_unbox_decimal_sig(v);
+                int vsc = w_unbox_decimal_scale(v);
+                int cmp = (vsc == best_sc) ? ((vsig > best_sig) - (vsig < best_sig)) : decimal_compare(v, best);
+                if (cmp > 0) { best = v; best_sig = vsig; best_sc = vsc; }
+            }
+        }
+        for (; i < n; i++) {
+            WValue v = slots[i];
             if (w_value_compare(&v, &best) > 0) best = v;
         }
         return best;
@@ -58808,17 +59180,64 @@ static WValue w_ic_array_sum(WValue r, WValue *a, int c) {
     WValue init = (c >= 1) ? a[0] : w_box_int(0);
     WArray *arr = w_as_array(r);
     if (arr->ebits == 65) {
-        /* Polymorphic WValue storage may contain ints, floats, decimals, or a
-         * mix, so accumulate through w_add. Packed u64 (ebits=64) uses the
-         * faster unsigned __int128 reducer below; WArray's INT32_MAX capacity
-         * bounds its maximum possible u64 sum below 2^95. The old
-         * `total += w_as_int(elem)` read float/decimal WValue bits as an int
-         * and returned garbage (e.g. [1.0,2.0,3.0].sum -> 768). The inline
-         * fast entry keeps the common all-Int loop out of polymorphic
-         * dispatch and falls through to w_add for mixed values or overflow. */
+        int32_t n = arr->size;
+        if (n == 0) return init;
+        const WValue *slots = arr->slots + arr->start;
+        if (w_is_int(init) && w_is_int(slots[0])) {
+            __int128 isum = w_as_int(init);
+            int32_t i = 0;
+            for (; i < n; i++) {
+                WValue v = slots[i];
+                if (__builtin_expect(!w_is_int(v), 0)) break;
+                isum += w_as_int(v);
+            }
+            WValue acc = w_i128(isum);
+            for (; i < n; i++) acc = w_add_fast(acc, slots[i]);
+            return acc;
+        }
+        if ((init == w_box_int(0) || w_is_decimal(init)) && w_is_decimal(slots[0])) {
+            __int128 dsum = (init == w_box_int(0)) ? 0 : w_unbox_decimal_sig(init);
+            int dscale = (init == w_box_int(0)) ? w_unbox_decimal_scale(slots[0]) : w_unbox_decimal_scale(init);
+            int32_t i = 0;
+            for (; i < n; i++) {
+                WValue v = slots[i];
+                if (__builtin_expect(!w_is_decimal(v), 0)) break;
+                int64_t vsig = w_unbox_decimal_sig(v);
+                int vscale = w_unbox_decimal_scale(v);
+                if (vscale == dscale) {
+                    dsum += vsig;
+                    if (__builtin_expect(!decimal_i128_fits_i64(dsum), 0)) { dsum -= vsig; break; }
+                } else {
+                    int gap = dscale > vscale ? dscale - vscale : vscale - dscale;
+                    if (__builtin_expect(gap > 18, 0)) break;
+                    __int128 as = dsum, bs = vsig;
+                    int asc = dscale, bsc = vscale;
+                    decimal_align(&as, &asc, &bs, &bsc);
+                    __int128 rsum = as + bs;
+                    if (__builtin_expect(!decimal_i128_fits_i64(rsum), 0)) break;
+                    dsum = rsum;
+                    dscale = asc;
+                }
+            }
+            WValue acc = (i == 0) ? init : w_decimal((int64_t)dsum, dscale);
+            for (; i < n; i++) acc = w_add_fast(acc, slots[i]);
+            return acc;
+        }
+        if ((init == w_box_int(0) || w_is_double(init)) && w_is_double(slots[0])) {
+            double fsum = (init == w_box_int(0)) ? 0.0 : w_as_double(init);
+            int32_t i = 0;
+            for (; i < n; i++) {
+                WValue v = slots[i];
+                if (__builtin_expect(!w_is_double(v), 0)) break;
+                fsum += w_as_double(v);
+            }
+            WValue acc = (i == 0) ? init : w_float(fsum);
+            for (; i < n; i++) acc = w_add_fast(acc, slots[i]);
+            return acc;
+        }
         WValue acc = init;
-        for (int32_t i = 0; i < arr->size; i++)
-            acc = w_add_fast(acc, array_slot_load_decoded(arr, i));
+        for (int32_t i = 0; i < n; i++)
+            acc = w_add_fast(acc, slots[i]);
         return acc;
     }
     WValue total = array_is_float(arr) ? w_array_sum_float(r)
@@ -58832,14 +59251,7 @@ static WValue w_ic_array_fastsum(WValue r, WValue *a, int c) {
     (void)a; (void)c;
     WArray *arr = w_as_array(r);
     if (arr->ebits == 65) {
-        /* Same hazard as w_ic_array_sum above: polymorphic WValue storage is
-         * neither float nor signed-int, so the unsigned reducer would
-         * accumulate raw NaN-box bit patterns. The fast entry preserves
-         * generic fallback while specializing the common Int case. */
-        WValue acc = w_box_int(0);
-        for (int32_t i = 0; i < arr->size; i++)
-            acc = w_add_fast(acc, array_slot_load_decoded(arr, i));
-        return acc;
+        return w_ic_array_sum(r, NULL, 0);
     }
     return array_is_float(arr) ? w_array_fastsum_float(r)
          : array_is_signed_int(arr) ? w_array_sum_signed(r)
@@ -58925,8 +59337,14 @@ static WValue w_ic_array_count(WValue r, WValue *a, int c) {
     if (c >= 1 && w_is_closure(a[c - 1])) {
         WClosure *cl = as_closure(a[c - 1]);
         int64_t n = 0;
-        for (int32_t i = 0; i < arr->size; i++)
-            if (w_truthy(call_closure_1(cl, array_slot_load_decoded(arr, i)))) n++;
+        if (arr->ebits == 65) {
+            const WValue *slots = arr->slots + arr->start;
+            for (int32_t i = 0; i < arr->size; i++)
+                if (w_truthy(call_closure_1(cl, slots[i]))) n++;
+        } else {
+            for (int32_t i = 0; i < arr->size; i++)
+                if (w_truthy(call_closure_1(cl, array_slot_load_decoded(arr, i)))) n++;
+        }
         return w_int(n);
     }
     if (c >= 1) {
@@ -58934,9 +59352,8 @@ static WValue w_ic_array_count(WValue r, WValue *a, int c) {
             int64_t set_bits = w_u1_count_set((const uint8_t *)arr->slots + (arr->start >> 3), arr->size);
             return w_int(a[0] == W_TRUE ? set_bits : (arr->size - set_bits));
         }
-        if (arr->ebits == 65 && w_is_int(a[0])) {
-            return w_int(w_u64_scan_count((const uint64_t *)arr->slots + arr->start,
-                                           arr->size, (uint64_t)a[0]));
+        if (arr->ebits == 65) {
+            return w_int(w_array_count_eq_w64(arr->slots + arr->start, arr->size, a[0]));
         }
         if (w_is_int(a[0])) {
             int64_t needle = w_as_int(a[0]);
@@ -58965,8 +59382,14 @@ static WValue w_ic_array_find_index(WValue r, WValue *a, int c) {
     if (c < 1) return W_NIL;
     if (w_is_closure(a[c - 1])) {
         WClosure *cl = as_closure(a[c - 1]);
-        for (int32_t i = 0; i < arr->size; i++)
-            if (w_truthy(call_closure_1(cl, array_slot_load_decoded(arr, i)))) return w_int(i);
+        if (arr->ebits == 65) {
+            const WValue *slots = arr->slots + arr->start;
+            for (int32_t i = 0; i < arr->size; i++)
+                if (w_truthy(call_closure_1(cl, slots[i]))) return w_int(i);
+        } else {
+            for (int32_t i = 0; i < arr->size; i++)
+                if (w_truthy(call_closure_1(cl, array_slot_load_decoded(arr, i)))) return w_int(i);
+        }
         return W_NIL;
     }
     if (arr->ebits == 1 && (a[0] == W_TRUE || a[0] == W_FALSE) && (arr->start & 7) == 0) {
@@ -58975,9 +59398,8 @@ static WValue w_ic_array_find_index(WValue r, WValue *a, int c) {
             : w_u1_index_unset((const uint8_t *)arr->slots + (arr->start >> 3), arr->size);
         return idx < 0 ? W_NIL : w_int(idx);
     }
-    if (arr->ebits == 65 && w_is_int(a[0])) {
-        int64_t idx = w_u64_scan_eq((const uint64_t *)arr->slots + arr->start,
-                                    arr->size, (uint64_t)a[0]);
+    if (arr->ebits == 65) {
+        int64_t idx = w_array_scan_eq_w64(arr->slots + arr->start, arr->size, a[0], 0);
         return idx < 0 ? W_NIL : w_int(idx);
     }
     if (w_is_int(a[0])) {
@@ -59010,9 +59432,8 @@ static WValue w_ic_array_find_index(WValue r, WValue *a, int c) {
 static WValue w_ic_array_last_index(WValue r, WValue *a, int c) {
     if (c < 1) return W_NIL;
     WArray *arr = as_array(r);
-    if (arr->ebits == 65 && w_is_int(a[0])) {
-        int64_t idx = w_u64_scan_eq_rev((const uint64_t *)arr->slots + arr->start,
-                                         arr->size, (uint64_t)a[0]);
+    if (arr->ebits == 65) {
+        int64_t idx = w_array_scan_eq_w64(arr->slots + arr->start, arr->size, a[0], 1);
         return idx < 0 ? W_NIL : w_int(idx);
     }
     if (w_is_int(a[0])) {
@@ -59059,17 +59480,35 @@ static WValue w_ic_array_replace_byte(WValue r, WValue *a, int c) {
     w_raise(w_string("replace_byte!: only valid on u8 arrays with byte arguments [0,255]"));
     return W_NIL;
 }
-static WValue w_ic_array_delete_at(WValue r, WValue *a, int c) {
-    if (c < 1) return W_NIL;
+static WValue w_array_delete_at_fast(WValue r, int64_t idx) {
     WArray *arr = as_array(r);
-    int64_t idx = w_as_int(a[0]);
-    if (idx < 0) idx = arr->size + idx;
-    if (idx < 0 || idx >= arr->size) return W_NIL;
+    int64_t n = arr->size;
+    if (idx < 0) idx += n;
+    if (idx < 0 || idx >= n) return W_NIL;
     WValue removed = array_slot_load_decoded(arr, idx);
-    for (int32_t i = (int32_t)idx; i < arr->size - 1; i++)
-        w_array_set(r, w_int(i), array_slot_load_decoded(arr, i + 1));
+    int64_t tail = n - 1 - idx;
+    if (tail > 0) {
+        if (arr->ebits == 65) {
+            WValue *p = arr->slots + arr->start + idx;
+            memmove(p, p + 1, (size_t)tail * sizeof(WValue));
+        } else {
+            int64_t bits = array_storage_bits(arr->ebits);
+            if (bits >= 8) {
+                size_t elem_sz = (size_t)(bits / 8);
+                uint8_t *p = (uint8_t *)arr->slots + (size_t)(arr->start + idx) * elem_sz;
+                memmove(p, p + elem_sz, (size_t)tail * elem_sz);
+            } else {
+                for (int64_t i = idx; i < n - 1; i++)
+                    w_array_set(r, w_int(i), array_slot_load_decoded(arr, i + 1));
+            }
+        }
+    }
     arr->size--;
     return removed;
+}
+static WValue w_ic_array_delete_at(WValue r, WValue *a, int c) {
+    if (c < 1) return W_NIL;
+    return w_array_delete_at_fast(r, w_as_int(a[0]));
 }
 
 /* Array storage iterator and the leaf collection ops that remain native. */
@@ -59077,16 +59516,33 @@ static WValue w_ic_array_each(WValue r, WValue *a, int c) {
     if (c < 1 || !w_is_closure(a[c - 1])) die("each requires a block");
     WClosure *cl = as_closure(a[c - 1]);
     WArray *arr = as_array(r);
-    for (int32_t i = 0; i < arr->size; i++)
-        call_closure_1(cl, array_slot_load_decoded(arr, i));
+    if (arr->ebits == 65) {
+        for (int32_t i = 0; i < arr->size; i++)
+            call_closure_1(cl, arr->slots[arr->start + i]);
+    } else {
+        for (int32_t i = 0; i < arr->size; i++)
+            call_closure_1(cl, array_slot_load_decoded(arr, i));
+    }
     return r;
 }
 static WValue w_ic_array_any_q(WValue r, WValue *a, int c) {
     WArray *arr = as_array(r);
     if (c >= 1 && w_is_closure(a[c - 1])) {
         WClosure *cl = as_closure(a[c - 1]);
+        if (arr->ebits == 65) {
+            const WValue *slots = arr->slots + arr->start;
+            for (int32_t i = 0; i < arr->size; i++)
+                if (w_truthy(call_closure_1(cl, slots[i]))) return W_TRUE;
+        } else {
+            for (int32_t i = 0; i < arr->size; i++)
+                if (w_truthy(call_closure_1(cl, array_slot_load_decoded(arr, i)))) return W_TRUE;
+        }
+        return W_FALSE;
+    }
+    if (arr->ebits == 65) {
+        const WValue *slots = arr->slots + arr->start;
         for (int32_t i = 0; i < arr->size; i++)
-            if (w_truthy(call_closure_1(cl, array_slot_load_decoded(arr, i)))) return W_TRUE;
+            if (w_truthy(slots[i])) return W_TRUE;
         return W_FALSE;
     }
     for (int32_t i = 0; i < arr->size; i++)
@@ -59097,8 +59553,20 @@ static WValue w_ic_array_all_q(WValue r, WValue *a, int c) {
     WArray *arr = as_array(r);
     if (c >= 1 && w_is_closure(a[c - 1])) {
         WClosure *cl = as_closure(a[c - 1]);
+        if (arr->ebits == 65) {
+            const WValue *slots = arr->slots + arr->start;
+            for (int32_t i = 0; i < arr->size; i++)
+                if (!w_truthy(call_closure_1(cl, slots[i]))) return W_FALSE;
+        } else {
+            for (int32_t i = 0; i < arr->size; i++)
+                if (!w_truthy(call_closure_1(cl, array_slot_load_decoded(arr, i)))) return W_FALSE;
+        }
+        return W_TRUE;
+    }
+    if (arr->ebits == 65) {
+        const WValue *slots = arr->slots + arr->start;
         for (int32_t i = 0; i < arr->size; i++)
-            if (!w_truthy(call_closure_1(cl, array_slot_load_decoded(arr, i)))) return W_FALSE;
+            if (!w_truthy(slots[i])) return W_FALSE;
         return W_TRUE;
     }
     for (int32_t i = 0; i < arr->size; i++)
@@ -59109,8 +59577,20 @@ static WValue w_ic_array_none_q(WValue r, WValue *a, int c) {
     WArray *arr = as_array(r);
     if (c >= 1 && w_is_closure(a[c - 1])) {
         WClosure *cl = as_closure(a[c - 1]);
+        if (arr->ebits == 65) {
+            const WValue *slots = arr->slots + arr->start;
+            for (int32_t i = 0; i < arr->size; i++)
+                if (w_truthy(call_closure_1(cl, slots[i]))) return W_FALSE;
+        } else {
+            for (int32_t i = 0; i < arr->size; i++)
+                if (w_truthy(call_closure_1(cl, array_slot_load_decoded(arr, i)))) return W_FALSE;
+        }
+        return W_TRUE;
+    }
+    if (arr->ebits == 65) {
+        const WValue *slots = arr->slots + arr->start;
         for (int32_t i = 0; i < arr->size; i++)
-            if (w_truthy(call_closure_1(cl, array_slot_load_decoded(arr, i)))) return W_FALSE;
+            if (w_truthy(slots[i])) return W_FALSE;
         return W_TRUE;
     }
     for (int32_t i = 0; i < arr->size; i++)
@@ -59118,61 +59598,134 @@ static WValue w_ic_array_none_q(WValue r, WValue *a, int c) {
     return W_TRUE;
 }
 /* uniq, take, drop, minmax. */
+static WValue w_array_take_poly(WValue r, int64_t count) {
+    WArray *arr = as_array(r);
+    int64_t n = arr->size;
+    if (count < n) n = count;
+    if (n <= 0) return w_array_new_empty();
+    WValue out = w_array_new_inline(65, n);
+    WValue *dst = w_as_array(out)->slots;
+    if (arr->ebits == 65) {
+        memcpy(dst, arr->slots + arr->start, (size_t)n * sizeof(WValue));
+    } else {
+        for (int64_t i = 0; i < n; i++) dst[i] = array_slot_load_decoded(arr, i);
+    }
+    return out;
+}
+static WValue w_array_drop_poly(WValue r, int64_t count) {
+    WArray *arr = as_array(r);
+    int64_t n = arr->size;
+    int64_t s = count < 0 ? 0 : count;
+    if (s >= n) return w_array_new_empty();
+    int64_t len = n - s;
+    WValue out = w_array_new_inline(65, len);
+    WValue *dst = w_as_array(out)->slots;
+    if (arr->ebits == 65) {
+        memcpy(dst, arr->slots + arr->start + s, (size_t)len * sizeof(WValue));
+    } else {
+        for (int64_t i = 0; i < len; i++) dst[i] = array_slot_load_decoded(arr, s + i);
+    }
+    return out;
+}
+static WValue w_array_copy_slice_poly(WArray *arr, int64_t start, int64_t len) {
+    if (len <= 0) return w_array_new_empty();
+    WValue out = w_array_new_inline(65, len);
+    WValue *dst = w_as_array(out)->slots;
+    if (arr->ebits == 65) {
+        memcpy(dst, arr->slots + arr->start + start, (size_t)len * sizeof(WValue));
+    } else {
+        for (int64_t i = 0; i < len; i++) dst[i] = array_slot_load_decoded(arr, start + i);
+    }
+    return out;
+}
+static WValue w_array_reverse_poly(WValue r) {
+    WArray *arr = as_array(r);
+    int32_t n = arr->size;
+    if (n <= 0) return w_array_new_empty();
+    WValue out = w_array_new_inline(65, n);
+    WValue *dst = w_as_array(out)->slots;
+    if (arr->ebits == 65) {
+        const WValue *src = arr->slots + arr->start;
+        for (int32_t i = 0; i < n; i++) dst[i] = src[n - 1 - i];
+    } else {
+        for (int32_t i = 0; i < n; i++) dst[i] = array_slot_load_decoded(arr, n - 1 - i);
+    }
+    return out;
+}
 static WValue w_ic_array_uniq(WValue r, WValue *a, int c) {
     (void)a; (void)c;
-    WArray *arr = as_array(r);
-    WValue result_arr = w_array_new_empty();
-    WArray *dst = as_array(result_arr);
-    for (int32_t i = 0; i < arr->size; i++) {
-        WValue v = array_slot_load_decoded(arr, i);
-        int seen = 0;
-        for (int32_t j = 0; j < dst->size; j++) {
-            if (w_eq(dst->slots[dst->start + j], v) == W_TRUE) { seen = 1; break; }
-        }
-        if (!seen) w_array_push(result_arr, v);
-    }
-    return result_arr;
+    return w_array_uniq(r);
 }
 static WValue w_ic_array_take(WValue r, WValue *a, int c) {
     if (c < 1) die("take requires 1 argument");
-    WArray *arr = as_array(r);
-    int64_t n = w_as_int(a[0]);
-    if (n < 0) n = 0;
-    if (n > arr->size) n = arr->size;
-    WValue result_arr = w_array_new_empty();
-    for (int32_t i = 0; i < n; i++)
-        w_array_push(result_arr, array_slot_load_decoded(arr, i));
-    return result_arr;
+    return w_array_take_poly(r, w_as_int(a[0]));
 }
 static WValue w_ic_array_drop(WValue r, WValue *a, int c) {
     if (c < 1) die("drop requires 1 argument");
-    WArray *arr = as_array(r);
-    int64_t n = w_as_int(a[0]);
-    if (n < 0) n = 0;
-    if (n > arr->size) n = arr->size;
-    WValue result_arr = w_array_new_empty();
-    for (int32_t i = n; i < arr->size; i++)
-        w_array_push(result_arr, array_slot_load_decoded(arr, i));
-    return result_arr;
+    return w_array_drop_poly(r, w_as_int(a[0]));
 }
 static WValue w_ic_array_minmax(WValue r, WValue *a, int c) {
     (void)a; (void)c;
     WArray *arr = as_array(r);
-    WValue result_arr = w_array_new_empty();
-    if (arr->size == 0) {
-        w_array_push(result_arr, W_NIL);
-        w_array_push(result_arr, W_NIL);
+    WValue result_arr = w_array_new_inline(65, 2);
+    WValue *res_slots = w_as_array(result_arr)->slots;
+    int32_t n = arr->size;
+    if (n == 0) {
+        res_slots[0] = W_NIL;
+        res_slots[1] = W_NIL;
         return result_arr;
     }
-    WValue lo = array_slot_load_decoded(arr, 0);
-    WValue hi = lo;
-    for (int32_t i = 1; i < arr->size; i++) {
-        WValue v = array_slot_load_decoded(arr, i);
+    if (arr->ebits != 65) {
+        res_slots[0] = array_is_float(arr) ? w_array_min_float(r)
+                     : array_is_signed_int(arr) ? w_array_min_signed(r)
+                                                : w_array_min_unsigned(r);
+        res_slots[1] = array_is_float(arr) ? w_array_max_float(r)
+                     : array_is_signed_int(arr) ? w_array_max_signed(r)
+                                                : w_array_max_unsigned(r);
+        return result_arr;
+    }
+    const WValue *slots = arr->slots + arr->start;
+    WValue lo = slots[0], hi = lo;
+    int32_t i = 1;
+    if (w_is_int(lo)) {
+        int64_t lo_i = w_as_int(lo), hi_i = lo_i;
+        for (; i < n; i++) {
+            WValue v = slots[i];
+            if (__builtin_expect(!w_is_int(v), 0)) break;
+            int64_t vi = w_as_int(v);
+            if (vi < lo_i) { lo_i = vi; lo = v; }
+            if (vi > hi_i) { hi_i = vi; hi = v; }
+        }
+    } else if (w_is_double(lo)) {
+        double lo_d = w_as_double(lo), hi_d = lo_d;
+        for (; i < n; i++) {
+            WValue v = slots[i];
+            if (__builtin_expect(!w_is_double(v), 0)) break;
+            double vd = w_as_double(v);
+            if (vd < lo_d) { lo_d = vd; lo = v; }
+            if (vd > hi_d) { hi_d = vd; hi = v; }
+        }
+    } else if (w_is_decimal(lo)) {
+        int64_t lo_sig = w_unbox_decimal_sig(lo), hi_sig = lo_sig;
+        int lo_sc = w_unbox_decimal_scale(lo), hi_sc = lo_sc;
+        for (; i < n; i++) {
+            WValue v = slots[i];
+            if (__builtin_expect(!w_is_decimal(v), 0)) break;
+            int64_t vsig = w_unbox_decimal_sig(v);
+            int vsc = w_unbox_decimal_scale(v);
+            int cmp_lo = (vsc == lo_sc) ? ((vsig > lo_sig) - (vsig < lo_sig)) : decimal_compare(v, lo);
+            if (cmp_lo < 0) { lo = v; lo_sig = vsig; lo_sc = vsc; }
+            int cmp_hi = (vsc == hi_sc) ? ((vsig > hi_sig) - (vsig < hi_sig)) : decimal_compare(v, hi);
+            if (cmp_hi > 0) { hi = v; hi_sig = vsig; hi_sc = vsc; }
+        }
+    }
+    for (; i < n; i++) {
+        WValue v = slots[i];
         if (w_value_compare(&v, &lo) < 0) lo = v;
         if (w_value_compare(&v, &hi) > 0) hi = v;
     }
-    w_array_push(result_arr, lo);
-    w_array_push(result_arr, hi);
+    res_slots[0] = lo;
+    res_slots[1] = hi;
     return result_arr;
 }
 
@@ -59199,11 +59752,7 @@ static WValue w_ic_array_stable_sort(WValue r, WValue *a, int c) {
 }
 static WValue w_ic_array_reverse(WValue r, WValue *a, int c) {
     (void)a; (void)c;
-    WArray *arr = as_array(r);
-    WValue new_arr = w_array_new_empty();
-    for (int32_t i = arr->size - 1; i >= 0; i--)
-        w_array_push(new_arr, array_slot_load_decoded(arr, i));
-    return new_arr;
+    return w_array_reverse_poly(r);
 }
 static WValue w_ic_array_copy(WValue r, WValue *a, int c) {
     if (c < 1) die("copy requires at least 1 argument");
@@ -59214,10 +59763,7 @@ static WValue w_ic_array_copy(WValue r, WValue *a, int c) {
     if (start < 0) start = 0;
     if (len < 0) len = 0;
     if (start + len > arr->size) len = arr->size - start;
-    WValue new_arr = w_array_new_empty();
-    for (int64_t i = start; i < start + len; i++)
-        w_array_push(new_arr, array_slot_load_decoded(arr, i));
-    return new_arr;
+    return w_array_copy_slice_poly(arr, start, len);
 }
 
 /* `.slice(start, len)` — zero-copy view into the receiver's storage.
@@ -70364,6 +70910,13 @@ static int w_builtin_static_precedes_source(WValue recv, WValue name) {
 #endif
 }
 
+static WValue w_ic_universal_is_a(WValue r, WValue *a, int c) {
+    return c >= 1 ? w_value_is_a(r, a[0]) : W_FALSE;
+}
+static WValue w_ic_universal_spaceship(WValue r, WValue *a, int c) {
+    return c >= 1 ? w_spaceship(r, a[0]) : W_NIL;
+}
+
 /* Out-of-line slow path: cache miss → full dispatch + populate IC.
  * Only runs on first call per call site (or on type-change); the hot
  * fast path lives in w_method_call_cached below and is inlined into
@@ -70405,6 +70958,17 @@ WValue w_method_call_slow(WValue recv, WValue name, WValue *args_ptr, int argc,
         return w_type_class_method_call(type_method, recv, &stack_args);
     }
 
+    if (key < 0x100 && argc >= 1) {
+        if (name == WN_is_a_q || w_hash_key_eq(name, WN_is_a_q)) {
+            w_ic_publish(cache, key, (void *)w_ic_universal_is_a, -1);
+            return w_value_is_a(recv, args_ptr[0]);
+        }
+        if (name == WN_spaceship || w_hash_key_eq(name, WN_spaceship)) {
+            w_ic_publish(cache, key, (void *)w_ic_universal_spaceship, -1);
+            return w_spaceship(recv, args_ptr[0]);
+        }
+    }
+
     g_generic_ctor_selected = NULL;
     g_generic_ctor_recv = 0;
     g_last_miss_slot = (void *)cache;
@@ -70418,6 +70982,8 @@ WValue w_method_call_slow(WValue recv, WValue name, WValue *args_ptr, int argc,
         if (!m) m = w_method_lookup(g_class_table[obj->class_id], name);
         if (m && m->splat_index_plus_one == 0 && m->arity - 1 <= W_METHOD_SPREAD_MAX) {
             w_ic_publish(cache, key, m->fn_ptr, m->arity - 1 /* subtract self */);
+        } else if (!m && argc >= 1 && (name == WN_is_a_q || w_hash_key_eq(name, WN_is_a_q))) {
+            w_ic_publish(cache, key, (void *)w_ic_universal_is_a, -1);
         }
     } else if (w_is_class(recv) &&
                (!w_hash_key_eq(name, WN_new) ||
@@ -70430,6 +70996,8 @@ WValue w_method_call_slow(WValue recv, WValue name, WValue *args_ptr, int argc,
         if (!m) m = w_static_method_lookup(klass, name);
         if (m && m->splat_index_plus_one == 0 && m->arity - 1 <= W_METHOD_SPREAD_MAX) {
             w_ic_publish(cache, key, m->fn_ptr, m->arity - 1 /* subtract class receiver */);
+        } else if (!m && argc >= 1 && (name == WN_is_a_q || w_hash_key_eq(name, WN_is_a_q))) {
+            w_ic_publish(cache, key, (void *)w_ic_universal_is_a, -1);
         }
     } else if (w_is_class(recv)) {
         /* Constructor: allocate-then-init can't ride a plain fn_ptr cache
@@ -73356,8 +73924,8 @@ static inline int64_t array_read_signed(WArray *a, int64_t i);
  * via forward declaration from w_method_dispatch up the file. */
 static WValue array_slot_load_decoded(WArray *a, int64_t i) {
     int64_t abs_idx = a->start + i;
-    if (array_is_wvalue(a)) {
-        return (WValue)array_read(a, abs_idx);
+    if (__builtin_expect(a->ebits == 65, 1)) {
+        return a->slots[abs_idx];
     }
     if (array_is_float(a)) {
         return w_float(array_read_float(a, abs_idx));
@@ -73403,8 +73971,8 @@ static inline void array_write_float(WArray *a, int64_t i, double val) {
 }
 
 static inline void array_write_boxed(WArray *a, int64_t i, WValue val) {
-    if (array_is_wvalue(a)) {
-        array_write(a, i, (uint64_t)val);
+    if (__builtin_expect(a->ebits == 65, 1)) {
+        a->slots[i] = val;
     } else if (array_is_float(a)) {
         array_write_float(a, i, as_numeric_double(val));
     } else if (a->ebits == 1) {
@@ -73691,6 +74259,15 @@ WValue w_array_reuse_or_new(WValue *slot, int64_t element_bits, int64_t cap) {
 static int w_array_has_views(WValue parent);
 
 WValue w_array_push(WValue arr, WValue val) {
+    if (__builtin_expect(w_is_array(arr), 1)) {
+        WArray *a = w_as_array(arr);
+        int32_t idx = a->start + a->size;
+        if (__builtin_expect(a->ebits == 65 && idx < a->cap && (a->flags & W_FLAG_OWNED), 1)) {
+            a->slots[idx] = val;
+            a->size++;
+            return arr;
+        }
+    }
     if (w_is_body(arr)) {
         w_raise_error_named("FrozenError", "push: cannot mutate an AST body reference (immutable once frozen)");
     }
@@ -74591,7 +75168,10 @@ static WViewNode *w_view_find(WValue parent) {
     return NULL;
 }
 
+static int g_any_views_registered = 0;
+
 static int w_array_has_views(WValue parent) {
+    if (__builtin_expect(!g_any_views_registered, 1)) return 0;
     WViewNode *node = w_view_find(parent);
     return node != NULL && node->count > 0;
 }
@@ -74625,6 +75205,7 @@ static WValue w_view_find_root(WValue maybe_view) {
 }
 
 void w_register_view(WValue parent, WValue view) {
+    g_any_views_registered = 1;
     /* If `parent` is itself a view, flatten: attach the new view to the
      * original owner so we never build deep view chains. */
     WArray *parent_arr = w_as_array(parent);
@@ -74832,6 +75413,19 @@ WValue w_array_fill(WValue arr, WValue val) {
 }
 
 WValue w_array_new_filled(WValue size_v, WValue fill) {
+    if (__builtin_expect(w_is_int(size_v), 1)) {
+        int64_t size = w_as_int(size_v);
+        if (__builtin_expect((uint64_t)size <= (uint64_t)INT32_MAX, 1)) {
+            WValue arr = w_array_new_inline(65, size);
+            WValue *slots = w_as_array(arr)->slots;
+            if (fill == 0) {
+                memset(slots, 0, (size_t)size * sizeof(WValue));
+            } else {
+                for (int64_t i = 0; i < size; i++) slots[i] = fill;
+            }
+            return arr;
+        }
+    }
     if (!w_is_int(size_v) && !w_is_bigint(size_v)) {
         w_raise(w_string("Array.new size must be an Integer"));
     }
@@ -74842,8 +75436,14 @@ WValue w_array_new_filled(WValue size_v, WValue fill) {
     if (size > INT32_MAX) {
         w_raise(w_string("Array.new size exceeds INT32_MAX — use BigArray"));
     }
-    WValue arr = w_array_zeros(65, size);
-    return w_array_fill(arr, fill);
+    WValue arr = w_array_new_inline(65, size);
+    WValue *slots = w_as_array(arr)->slots;
+    if (fill == 0) {
+        memset(slots, 0, (size_t)size * sizeof(WValue));
+    } else {
+        for (int64_t i = 0; i < size; i++) slots[i] = fill;
+    }
+    return arr;
 }
 
 WValue w_array_pop(WValue arr) {
@@ -74929,12 +75529,14 @@ WValue w_array_unshift(WValue arr, WValue val) {
 }
 
 WValue w_array_get(WValue arr, WValue index) {
-    /* `[]` lowers to an unconditional direct call regardless of the
-     * receiver's inferred static type (method_call.w has no recv_type
-     * gate on "[]"), so this is the one place that must recognize a
-     * packed AST body reference transparently — every `node.body[i]`
-     * across the compiler reaches here without going through any
-     * type-aware dispatch. */
+    if (__builtin_expect(w_is_array(arr), 1)) {
+        WArray *a = w_as_array(arr);
+        int64_t i = w_as_int(index);
+        if (i < 0) i += a->size;
+        if ((uint64_t)i >= (uint64_t)a->size) return W_NIL;
+        if (__builtin_expect(a->ebits == 65, 1)) return a->slots[a->start + i];
+        return array_slot_load_decoded(a, i);
+    }
     if (w_is_wire_sequence(arr))
         return w_wire_sequence_get(arr, w_as_int(index));
     if (w_is_body(arr)) {
@@ -74944,12 +75546,6 @@ WValue w_array_get(WValue arr, WValue index) {
         if (i < 0 || (uint32_t)i >= len) return W_NIL;
         return w_body_arena_get(w_unbox_body_offset(arr), (uint32_t)i);
     }
-    /* Immediate Range (Location mode 11). The fused pipeline loop reads a
-     * base WITHOUT a proven static type (a captured var, a parameter, a
-     * call result) through this kind-dispatching helper, and since
-     * lower_range mints the packed Range instead of an eager boxed-int
-     * Array, such a base can be a Range. Same semantics as core/range.w's
-     * Range#[]: negative index counts from the end, nil out of bounds. */
     if (w_is_range_imm(arr)) {
         int64_t n = w_range_imm_size(arr);
         int64_t i = w_as_int(index);
@@ -75062,6 +75658,13 @@ int64_t w_index_raw_u64(WValue recv, WValue idx) {
 /* Raw-index twin of w_array_get, same negative-wrap and nil-on-OOB
  * semantics — emitted when the index is already a raw machine int. */
 WValue w_array_get_i64(WValue arr, int64_t i) {
+    if (__builtin_expect(w_is_array(arr), 1)) {
+        WArray *a = w_as_array(arr);
+        if (i < 0) i += a->size;
+        if ((uint64_t)i >= (uint64_t)a->size) return W_NIL;
+        if (__builtin_expect(a->ebits == 65, 1)) return a->slots[a->start + i];
+        return array_slot_load_decoded(a, i);
+    }
     if (w_is_wire_sequence(arr)) return w_wire_sequence_get(arr, i);
     if (w_is_body(arr)) {
         uint32_t len = w_unbox_body_length(arr);
@@ -75079,9 +75682,9 @@ WValue w_array_get_i64(WValue arr, int64_t i) {
  * bounds, ebits-aware store, and size bump. `arr` is a validated WArray. */
 static WValue w_array_write_at(WArray *a, int64_t i, WValue val) {
     if (i < 0) i += a->size;
-    if (i < 0 || i >= a->cap) return val;
-    if (array_is_wvalue(a)) {
-        array_write(a, a->start + i, (uint64_t)val);
+    if ((uint64_t)i >= (uint64_t)a->cap) return val;
+    if (__builtin_expect(a->ebits == 65, 1)) {
+        a->slots[a->start + i] = val;
         if (i >= a->size) a->size = i + 1;
         return val;
     }
@@ -75123,11 +75726,8 @@ static WValue w_array_write_at(WArray *a, int64_t i, WValue val) {
 }
 
 WValue w_array_set(WValue arr, WValue index, WValue val) {
-    /* Mirrors w_array_get's unconditional-call situation — `[]=` also
-     * has no recv_type gate. Packed AST body references are immutable
-     * once frozen (a rewrite constructs a new list, same discipline as
-     * node-kind changes), so raise rather than corrupt if this is ever
-     * hit; the audited call sites never do. */
+    if (__builtin_expect(w_is_array(arr), 1))
+        return w_array_write_at(w_as_array(arr), w_as_int(index), val);
     if (w_is_wire_sequence(arr))
         return w_wire_sequence_set(arr, w_as_int(index), val);
     if (w_is_body(arr)) {
@@ -75141,6 +75741,8 @@ WValue w_array_set(WValue arr, WValue index, WValue val) {
  * is always a real WArray (never a packed body ref), so the body check and
  * the w_as_int unbox both drop out. Saves the w_int box at the call site too. */
 WValue w_array_set_i64(WValue arr, int64_t i, WValue val) {
+    if (__builtin_expect(w_is_array(arr), 1))
+        return w_array_write_at(w_as_array(arr), i, val);
     if (w_is_wire_sequence(arr)) return w_wire_sequence_set(arr, i, val);
     return w_array_write_at(w_as_array(arr), i, val);
 }
@@ -75148,6 +75750,12 @@ WValue w_array_set_i64(WValue arr, int64_t i, WValue val) {
 /* Unchecked WN_idx / WN_idxset for Array tier. No negative-
  * index normalization, no bounds check. Caller proves bounds. */
 WValue w_array_idx(WValue arr, WValue index) {
+    if (__builtin_expect(w_is_array(arr), 1)) {
+        WArray *a = w_as_array(arr);
+        int64_t i = w_as_int(index);
+        if (__builtin_expect(a->ebits == 65, 1)) return a->slots[a->start + i];
+        return array_slot_load_decoded(a, i);
+    }
     if (w_is_wire_sequence(arr))
         return w_wire_sequence_get(arr, w_as_int(index));
     WArray *a = w_as_array(arr);
@@ -75159,14 +75767,28 @@ WValue w_array_idx(WValue arr, WValue index) {
  * already a raw machine int, saving a w_int box + w_as_int unbox per element
  * in hot array loops (core/array.w method bodies). */
 WValue w_array_idx_i64(WValue arr, int64_t i) {
+    if (__builtin_expect(w_is_array(arr), 1)) {
+        WArray *a = w_as_array(arr);
+        if (__builtin_expect(a->ebits == 65, 1)) return a->slots[a->start + i];
+        return array_slot_load_decoded(a, i);
+    }
     if (w_is_wire_sequence(arr)) return w_wire_sequence_get(arr, i);
     WArray *a = w_as_array(arr);
     return array_slot_load_decoded(a, i);
 }
 
 WValue w_array_idxset(WValue arr, WValue index, WValue val) {
-    if (w_is_wire_sequence(arr))
+    if (__builtin_expect(w_is_array(arr), 1)) {
+        WArray *a = w_as_array(arr);
+        int64_t i = w_as_int(index);
+        if (__builtin_expect(a->ebits == 65, 1)) {
+            a->slots[a->start + i] = val;
+            if (i >= a->size) a->size = i + 1;
+            return val;
+        }
+    } else if (w_is_wire_sequence(arr)) {
         return w_wire_sequence_set(arr, w_as_int(index), val);
+    }
     WArray *a = w_as_array(arr);
     int64_t i = w_as_int(index);
     if (array_is_wvalue(a)) {
@@ -75225,15 +75847,10 @@ int64_t w_array_get_unchecked_raw(WValue arr, int64_t i) {
 }
 
 WValue w_array_size(WValue arr) {
-    /* `.size` is only direct-called (bypassing IC dispatch) when static
-     * type inference proves the receiver is :array — AST body-typed
-     * fields never infer that way today, so they fall through to the
-     * Tungsten:AST:Body type class instead. Handled here too in case that
-     * ever changes, matching w_array_get's defensive symmetry. */
+    if (__builtin_expect(w_is_array(arr), 1))
+        return w_int(w_as_array(arr)->size);
     if (w_is_wire_sequence(arr)) return w_int(w_wire_sequence_size(arr));
     if (w_is_body(arr)) return w_int(w_unbox_body_length(arr));
-    /* Immediate Range: the fused pipeline's untyped-base path sizes its
-     * source here before indexing it through w_array_get (see there). */
     if (w_is_range_imm(arr)) return w_int(w_range_imm_size(arr));
     WArray *a = w_as_array(arr);
     return w_int(a->size);
@@ -77480,7 +78097,9 @@ static void w_stable_merge_wvalues(WValue *a, int64_t n) {
 
 static WValue w_array_sort_impl(WValue arr, int stable) {
     WArray *src = w_as_array(arr);
-    WValue result = w_array_new(src->ebits, src->size);
+    int64_t bits = array_storage_bits(src->ebits);
+    WValue result = (bits >= 8) ? w_array_new_inline(src->ebits, src->size)
+                                : w_array_new(src->ebits, src->size);
     WArray *dst = w_as_array(result);
     int64_t nbytes = array_byte_size(src->ebits, src->size);
     int64_t src_off = array_byte_size(src->ebits, src->start);
@@ -77488,43 +78107,65 @@ static WValue w_array_sort_impl(WValue arr, int stable) {
     dst->size = src->size;
     int64_t sz = dst->size;
     if (dst->ebits == 65) {
-        /* Polymorphic slots. A homogeneous array of small ints (every plain
-         * `[3, 1, 2]` literal) or of doubles sorts through the typed kernels
-         * on a decoded key buffer — both element kinds are immediates, so
-         * decode and re-encode are pure bit math, ~4x faster at scale than
-         * qsort bouncing through w_value_compare. One classifying scan;
-         * mixed or heap-element arrays keep the general comparator path. */
         WValue *slots = (WValue *)dst->slots;
         if (sz > 1) {
-            int all_int = 1, all_dbl = 1;
-            for (int64_t i = 0; i < sz && (all_int | all_dbl); i++) {
-                all_int &= w_is_int(slots[i]);
-                all_dbl &= w_is_double(slots[i]);
-            }
-            uint64_t *keys = (all_int | all_dbl)
-                ? (uint64_t *)malloc((size_t)sz * sizeof(uint64_t)) : NULL;
-            if (keys) {
-                if (all_int) {
-                    for (int64_t i = 0; i < sz; i++)
-                        keys[i] = (uint64_t)w_as_int(slots[i]) ^ 0x8000000000000000ULL;
-                    if (w_ta_use_radix(64, sz)) rdx_sort_u64(keys, sz); else ipn_sort_u64(keys, sz);
-                    for (int64_t i = 0; i < sz; i++)
-                        slots[i] = w_int((int64_t)(keys[i] ^ 0x8000000000000000ULL));
-                } else {
-                    for (int64_t i = 0; i < sz; i++) {
-                        double d = w_as_double(slots[i]);
-                        memcpy(&keys[i], &d, sizeof(double));
-                    }
-                    w_ta_f64_enc(keys, sz);
-                    if (w_ta_use_radix(64, sz)) rdx_sort_u64(keys, sz); else ipn_sort_u64(keys, sz);
-                    w_ta_f64_dec(keys, sz);
-                    for (int64_t i = 0; i < sz; i++) {
-                        double d;
-                        memcpy(&d, &keys[i], sizeof(double));
-                        slots[i] = w_box_double(d);
+            int all_int = 1, all_dbl = 1, all_dec = 1;
+            int min_sc = 100, max_sc = -100;
+            for (int64_t i = 0; i < sz && (all_int | all_dbl | all_dec); i++) {
+                WValue v = slots[i];
+                all_int &= w_is_int(v);
+                all_dbl &= w_is_double(v);
+                if (all_dec) {
+                    if (w_is_decimal(v)) {
+                        int sc = w_unbox_decimal_scale(v);
+                        if (sc < min_sc) min_sc = sc;
+                        if (sc > max_sc) max_sc = sc;
+                    } else {
+                        all_dec = 0;
                     }
                 }
-                free(keys);
+            }
+            if (all_int) {
+                uint64_t *u = (uint64_t *)slots;
+                for (int64_t i = 0; i < sz; i++)
+                    u[i] ^= UINT64_C(0x0000800000000000);
+                if (w_ta_use_radix(64, sz)) rdx_sort_u64(u, sz); else ipn_sort_u64(u, sz);
+                for (int64_t i = 0; i < sz; i++)
+                    u[i] ^= UINT64_C(0x0000800000000000);
+                return result;
+            }
+            if (all_dbl) {
+                uint64_t *u = (uint64_t *)slots;
+                for (int64_t i = 0; i < sz; i++) {
+                    double d = w_as_double(slots[i]);
+                    memcpy(&u[i], &d, sizeof(double));
+                }
+                w_ta_f64_enc(u, sz);
+                if (w_ta_use_radix(64, sz)) rdx_sort_u64(u, sz); else ipn_sort_u64(u, sz);
+                w_ta_f64_dec(u, sz);
+                for (int64_t i = 0; i < sz; i++) {
+                    double d;
+                    memcpy(&d, &u[i], sizeof(double));
+                    slots[i] = w_box_double(d);
+                }
+                return result;
+            }
+            if (all_dec && max_sc - min_sc <= 7) {
+                static const int64_t p10[8] = {
+                    1LL, 10LL, 100LL, 1000LL, 10000LL, 100000LL, 1000000LL, 10000000LL
+                };
+                uint64_t *u = (uint64_t *)slots;
+                for (int64_t i = 0; i < sz; i++) {
+                    int64_t sig = w_unbox_decimal_sig(slots[i]);
+                    int sc = w_unbox_decimal_scale(slots[i]);
+                    int64_t ssig = sig * p10[sc - min_sc];
+                    u[i] = (uint64_t)ssig ^ UINT64_C(0x8000000000000000);
+                }
+                if (w_ta_use_radix(64, sz)) rdx_sort_u64(u, sz); else ipn_sort_u64(u, sz);
+                for (int64_t i = 0; i < sz; i++) {
+                    int64_t ssig = (int64_t)(u[i] ^ UINT64_C(0x8000000000000000));
+                    slots[i] = w_decimal(ssig, min_sc);
+                }
                 return result;
             }
         }
@@ -77554,7 +78195,6 @@ static WValue w_array_sort_impl(WValue arr, int stable) {
         }
         return result;
     }
-    int64_t bits = array_storage_bits(dst->ebits);
     int use_radix = w_ta_use_radix(bits, sz);
     int is_signed = array_is_signed_int(dst);
     if (is_signed) w_ta_sign_flip(dst->slots, bits, sz);
@@ -77600,7 +78240,7 @@ WValue w_array_ipnsort(WValue arr) {
     if (src->ebits == 65 || array_is_float(src) || array_storage_bits(src->ebits) == 4) {
         return w_array_sort(arr);
     }
-    WValue result = w_array_new(src->ebits, src->size);
+    WValue result = w_array_new_inline(src->ebits, src->size);
     WArray *dst = w_as_array(result);
     int64_t nbytes = array_byte_size(src->ebits, src->size);
     int64_t src_off = array_byte_size(src->ebits, src->start);
@@ -77895,7 +78535,7 @@ WValue w_array_uniq(WValue arr) {
     WArray *sa = w_as_array(arr);
     int64_t n = sa->size;
     if (n <= 0) return w_array_new_empty();
-    WValue result = w_array_new(65, n);
+    WValue result = w_array_new_inline(65, n);
     WArray *da = w_as_array(result);
     if (n == 1) {
         da->slots[0] = array_slot_load_decoded(sa, 0);
@@ -77932,8 +78572,28 @@ WValue w_array_uniq(WValue arr) {
 
     int64_t out_len = 0;
     int has_instance = 0;
+    int64_t i = 0;
 
-    for (int64_t i = 0; i < n; i++) {
+    if (is_w64 && w_is_int(src_slots[0])) {
+        for (; i < n; i++) {
+            WValue v = src_slots[i];
+            if (__builtin_expect(!w_is_int(v), 0)) break;
+            uint64_t idx = w_hash_splitmix64(v) & mask;
+            for (;;) {
+                int32_t d = ht[idx];
+                if (d < 0) {
+                    int32_t new_d = (int32_t)out_len++;
+                    ht[idx] = new_d;
+                    da->slots[new_d] = v;
+                    break;
+                }
+                if (da->slots[d] == v) break;
+                idx = (idx + 1) & mask;
+            }
+        }
+    }
+
+    for (; i < n; i++) {
         WValue v = is_w64 ? src_slots[i] : array_slot_load_decoded(sa, i);
         if (__builtin_expect(v == W_BIASED_NAN, 0)) {
             da->slots[out_len++] = v;

@@ -46,29 +46,44 @@ check("mixed double phi true branch", mixed_double_phi_and_straight(1, ~4.0), ~1
 check("mixed double phi false branch", mixed_double_phi_and_straight(0, ~4.0), ~11.5)
 
 -> mixed_float_phi_and_straight(flag) (i64) f64
-  x = ~4.0 : f32
-  merged = (x + ~1.0) : f32
-  straight = (x * ~2.0) : f32
+  x = ~4.0 ## f32
+  merged = (x + ~1.0) ## f32
+  straight = (x * ~2.0) ## f32
   if flag > 0
-    merged = (x + ~2.0) : f32
+    merged = (x + ~2.0) ## f32
   else
-    merged = (x + ~3.0) : f32
+    merged = (x + ~3.0) ## f32
   merged + straight
 
 check("mixed float phi true branch", mixed_float_phi_and_straight(1), ~14.0)
 check("mixed float phi false branch", mixed_float_phi_and_straight(0), ~15.0)
 
 -> mixed_i128_phi_and_straight(flag) (i64) i64
-  x = 5 : i128
-  merged = (x + 1) : i128
-  straight = (x * 3) : i128
+  x = 5 ## i128
+  merged = (x + 1) ## i128
+  straight = (x * 3) ## i128
   if flag > 0
-    merged = (x + 10) : i128
+    merged = (x + 10) ## i128
   else
-    merged = (x + 20) : i128
+    merged = (x + 20) ## i128
   merged + straight
 
 check("mixed i128 phi true branch", mixed_i128_phi_and_straight(1), 30)
 check("mixed i128 phi false branch", mixed_i128_phi_and_straight(0), 40)
+
+# Branch-local variables (not live-in at the join block) have their join phis
+# pruned by live-in liveness and are promoted to SSA registers.
+-> branch_local_pruned_phi(flag, x) (i64 i64) i64
+  res = x
+  if flag > 0
+    branch_only = x * 3 + 1
+    res = branch_only + 2
+  else
+    other_only = x * 5 + 1
+    res = other_only + 4
+  res
+
+check("branch local pruned phi true", branch_local_pruned_phi(1, 10), 33)
+check("branch local pruned phi false", branch_local_pruned_phi(0, 10), 55)
 
 << "PASS cfg ssa pruning"

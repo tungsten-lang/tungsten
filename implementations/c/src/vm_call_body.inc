@@ -5,37 +5,159 @@
         // CALL_DISCARD-only setup (skipping the NOP padding byte and
         // setting the discard_return flag) — by the time control reaches
         // this body, every reference is the same regardless of variant.
-        uint32_t name_id = read_u32(&vm);
-        uint32_t argc = read_u32(&vm);
-        uint32_t has_receiver = read_u32(&vm);
+        uint32_t name_id = read_u32_at(&chunk->code[vm.ip]);
+        uint32_t argc = read_u32_at(&chunk->code[vm.ip + 4]);
+        uint32_t has_receiver = read_u32_at(&chunk->code[vm.ip + 8]);
         // CALL_DISCARD has a single NOP byte of padding right after the
         // operands. The label-prelude defines DISCARD_NOP_BYTES as 0
         // (CALL) or 1 (CALL_DISCARD); the compiler folds the addition.
-        vm.ip += DISCARD_NOP_BYTES;
-        if (name_id >= chunk->const_count || tc_kind(chunk->consts[name_id]) != TC_VAL_SYMBOL) {
+        vm.ip += 12 + DISCARD_NOP_BYTES;
+        if (__builtin_expect(name_id >= chunk->const_count || tc_kind(chunk->consts[name_id]) != TC_VAL_SYMBOL, 0)) {
           tc_error_set(err, "call name constant out of range");
           goto cleanup_fail;
         }
-        TcValue stack_args[8];
+        size_t total_pop = (size_t)argc + (has_receiver ? 1u : 0u);
+        TcValue receiver = W_NIL;
         TcValue *args = NULL;
-        int args_heap = 0;
-        if (argc > 0) {
-          if (argc <= sizeof(stack_args) / sizeof(stack_args[0])) {
-            args = stack_args;
+        TcValue zero_args[8] = {0};
+        if (__builtin_expect(vm.sp >= total_pop, 1)) {
+          vm.sp -= total_pop;
+          if (has_receiver) {
+            receiver = vm.stack[vm.sp];
+            args = &vm.stack[vm.sp + 1];
           } else {
-            args = (TcValue *)calloc(argc, sizeof(TcValue));
-            args_heap = 1;
-            if (!args) {
-              tc_error_set(err, "call argument allocation failed");
+            args = &vm.stack[vm.sp];
+          }
+        } else {
+          for (uint32_t i = argc; i > 0; i--) {
+            TcValue v = pop(&vm);
+            if (i - 1 < 8) zero_args[i - 1] = v;
+          }
+          receiver = has_receiver ? pop(&vm) : tc_box_nil();
+          args = zero_args;
+        }
+#define FREE_ARGS() do {} while (0)
+        TcValue name_sym = chunk->consts[name_id];
+        const char *name = tc_str_bytes_only(name_sym);
+        size_t name_len = tc_str_len(name_sym);
+
+        if (!has_receiver) {
+          if (name == NAME_LLVM_SAFE_NAME && argc == 1 && is_llvm_safe_ascii(args[0])) {
+            vm.stack[vm.sp++] = args[0];
+            CNEXT();
+          }
+          TcFunction *fast_fn = chunk->fn_for_const ? chunk->fn_for_const[name_id] : NULL;
+          if (__builtin_expect(fast_fn != NULL, 1)) {
+            if (fast_fn->overloaded) fast_fn = tc_select_overload(chunk, fast_fn, args, argc);
+            if (!vm_call_function(&vm, fast_fn, args, argc, tc_box_nil(), 0,
+                                  tc_box_nil(), 0, err)) {
               goto cleanup_fail;
+            }
+            NEXT();
+          }
+        } else {
+          if (w_is_node(receiver)) {
+            if (argc == 0) {
+              TcValue out = W_UNDEF;
+              if (name == NAME_KIND) {
+                out = tc_packed_node_kind(receiver);
+              } else if (name == NAME_LOWERING_ANALYSIS) {
+                out = w_ast_analysis_get(receiver);
+              } else if (name == NAME_LOC) {
+                TcValue raw = tc_packed_node_get(receiver, SYM_LOC);
+                out = (raw == W_NIL || raw == 0 || raw == w_box_int(0)) ? W_NIL : raw;
+              } else if (name == NAME_LOC_END) {
+                TcValue raw = tc_packed_node_get(receiver, SYM_LOC_END);
+                out = (raw == W_NIL || raw == 0 || raw == w_box_int(0)) ? W_NIL : raw;
+              } else if (name != NAME_LINE && name != NAME_COL &&
+                         name != NAME_END_LINE && name != NAME_END_COL &&
+                         name != NAME_SPAN_LENGTH && name != NAME_TO_S &&
+                         name != NAME_TYPE) {
+                out = tc_packed_node_get(receiver, name_sym);
+              }
+              if (out != W_UNDEF) {
+                vm.stack[vm.sp++] = out;
+                CNEXT();
+              }
+            } else if (argc == 1) {
+              if (name == NAME_BRACKETS) {
+                vm.stack[vm.sp++] = tc_packed_node_get(receiver, args[0]);
+                CNEXT();
+              } else if (name == NAME_LOWERING_ANALYSIS_SET) {
+                vm.stack[vm.sp++] = w_ast_analysis_set(receiver, args[0]);
+                CNEXT();
+              } else if (name_len > 1 && name[name_len - 1] == '=') {
+                const char *interned = tc_intern(name, name_len - 1);
+                if (interned) {
+                  TcValue field_sym = tc_box_symbol_bytes(interned, name_len - 1, 0);
+                  vm.stack[vm.sp++] = tc_packed_node_set(receiver, field_sym, args[0]);
+                  CNEXT();
+                }
+              }
+            } else if (argc == 2 && name == NAME_BRACKETS_SET) {
+              vm.stack[vm.sp++] = tc_packed_node_set(receiver, args[0], args[1]);
+              CNEXT();
+            }
+          } else if (vm.fast_parse_enabled && tc_kind(receiver) == TC_VAL_HASH) {
+            TcRuntimeHash *h = tc_as_hash(receiver);
+            if (h && (h->flags & TC_HASH_FLAG_IS_AST)) {
+              if (argc == 0 && name != NAME_KEYS && name != NAME_VALUES &&
+                  name != NAME_SIZE && name != NAME_TO_S &&
+                  name != NAME_FREEZE && name != NAME_FROZEN_Q &&
+                  name != NAME_EMPTY_Q) {
+                TcValue out;
+                if (name == NAME_KIND) {
+                  out = (h->used > 0 && h->keys[0] == SYM_NODE)
+                            ? h->values[0]
+                            : hash_get_value(h, SYM_NODE);
+                } else {
+                  out = hash_get_value(h, name_sym);
+                }
+                vm.stack[vm.sp++] = out;
+                CNEXT();
+              } else if (argc == 1 && name_len > 1 && name[name_len - 1] == '=') {
+                size_t field_len = name_len - 1;
+                const char *interned = tc_intern(name, field_len);
+                if (interned) {
+                  TcValue key_v = tc_box_symbol_bytes(interned, field_len, 0);
+                  TcValue set_val = args[0];
+                  if (!hash_set_value(h, key_v, set_val, err)) goto cleanup_fail;
+                  vm.stack[vm.sp++] = set_val;
+                  CNEXT();
+                }
+              }
+            }
+          } else if (tc_kind(receiver) == TC_VAL_OBJECT && tc_as_object(receiver)) {
+            TcRuntimeObject *obj = tc_as_object(receiver);
+            if (!object_is_class(obj, NAME_STRING_BUFFER, 12) &&
+                name != NAME_TO_S &&
+                !(vm.fast_parse_enabled && name == NAME_LOAD_PROGRAM_AST)) {
+              const char *cn = obj->class_name;
+              size_t cn_len = obj->class_name_len;
+              TcFunction *fn = NULL;
+              if (chunk->method_ic_class &&
+                  chunk->method_ic_class[name_id] == cn &&
+                  chunk->method_ic_class_len[name_id] == cn_len) {
+                fn = chunk->method_ic_fn[name_id];
+              } else {
+                fn = tc_chunk_find_method(chunk, cn, cn_len, name, name_len);
+                if (fn && chunk->method_ic_class) {
+                  chunk->method_ic_class[name_id] = cn;
+                  chunk->method_ic_class_len[name_id] = cn_len;
+                  chunk->method_ic_fn[name_id] = fn;
+                }
+              }
+              if (fn && fn->overloaded) fn = tc_select_overload(chunk, fn, args, argc);
+              if (fn) {
+                if (!vm_call_function(&vm, fn, args, argc, receiver, 1,
+                                      tc_box_nil(), 0, err)) {
+                  goto cleanup_fail;
+                }
+                NEXT();
+              }
             }
           }
         }
-#define FREE_ARGS() do { if (args_heap) free(args); } while (0)
-        for (uint32_t i = argc; i > 0; i--) args[i - 1] = pop(&vm);
-        TcValue receiver = has_receiver ? pop(&vm) : tc_box_nil();
-        const char *name = tc_str_bytes_only(chunk->consts[name_id]);
-        size_t name_len = tc_str_len(chunk->consts[name_id]);
 
         /* Startup registry validation uses byte bounds and strict UTF-8 on
          * stage 0 as well as in the native compiler. */

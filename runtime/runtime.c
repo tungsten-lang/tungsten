@@ -4,6 +4,8 @@
 #endif
 
 #include "runtime.h"
+#define W_AST_SCHEMA_INCLUDE_NAMES 1
+#define W_AST_SCHEMA_INCLUDE_AST_MASK 1
 #include "ast_schema_generated.h"
 #include "ssmr_witness.h"
 
@@ -24225,7 +24227,13 @@ static uint32_t w_sparse_alloc_record(void) {
     return g_sparse_rec_cur++;
 }
 
+static inline WValue w_sym_canonical_fast(WValue sym) {
+    if (((sym >> 1) & 0x7) == 6) return sym & ~(0x3FULL << 28);
+    return sym;
+}
+
 WValue w_ast_sparse_set(WValue node, int64_t sym, WValue value) {
+    sym = (int64_t)w_sym_canonical_fast((WValue)sym);
     switch (w_typed_sparse_kind(sym)) {
         case W_TYPED_SPARSE_ANALYSIS: return w_ast_analysis_set(node, value);
         case W_TYPED_SPARSE_IVAR_OFFSETS: return w_ast_ivar_offsets_set(node, value);
@@ -24254,6 +24262,7 @@ WValue w_ast_sparse_set(WValue node, int64_t sym, WValue value) {
 }
 
 WValue w_ast_sparse_get(WValue node, int64_t sym) {
+    sym = (int64_t)w_sym_canonical_fast((WValue)sym);
     switch (w_typed_sparse_kind(sym)) {
         case W_TYPED_SPARSE_ANALYSIS: return w_ast_analysis_get(node);
         case W_TYPED_SPARSE_IVAR_OFFSETS: return w_ast_ivar_offsets_get(node);
@@ -24700,6 +24709,239 @@ int64_t w_node_kind_extern(WValue wnode) {
  * WValues and Hash-shape AST nodes no longer exist. */
 int64_t w_is_node_extern(WValue v) {
     return w_is_node(v) ? 1 : 0;
+}
+
+static int g_ast_syms_ready = 0;
+static WValue g_ast_node_key_sym = 0;
+static WValue g_ast_empty_children = 0;
+static WValue g_ast_kind_sym[W_AST_KIND_MAX + 1];
+static WValue g_ast_field_sym[W_AST_KIND_MAX + 1][W_AST_KIND_MAX_FIELDS];
+
+static void w_ast_syms_init(void) {
+    if (g_ast_syms_ready) return;
+    g_ast_node_key_sym = w_sym_canonical_fast(w_symbol("node"));
+    g_ast_empty_children = w_array_new(65, 0);
+    g_ast_kind_sym[0] = W_NIL;
+    for (uint32_t k = 1; k <= W_AST_KIND_MAX; k++) {
+        const char *kname = (k == 19) ? "return" : W_AST_KIND_NAME[k];
+        g_ast_kind_sym[k] = kname ? w_sym_canonical_fast(w_symbol(kname)) : W_NIL;
+        uint8_t fc = W_AST_KIND_FIELD_COUNT[k];
+        for (uint8_t i = 0; i < fc; i++) {
+            const char *fname = W_AST_KIND_FIELDS[k][i];
+            g_ast_field_sym[k][i] = fname ? w_sym_canonical_fast(w_symbol(fname)) : 0;
+        }
+    }
+    g_ast_syms_ready = 1;
+}
+
+WValue w_ast_kind(WValue node) {
+    if (node == W_NIL) return W_NIL;
+    if (__builtin_expect(!g_ast_syms_ready, 0)) w_ast_syms_init();
+    if (__builtin_expect(w_is_node(node), 1)) {
+        int kid = w_node_kind(node);
+        if ((unsigned)kid <= W_AST_KIND_MAX) return g_ast_kind_sym[kid];
+        return W_NIL;
+    }
+    if (w_is_hash(node)) {
+        return w_hash_get(node, g_ast_node_key_sym);
+    }
+    int kid = w_node_kind(node);
+    if (kid >= 0 && kid <= (int)W_AST_KIND_MAX) return g_ast_kind_sym[kid];
+    return W_NIL;
+}
+
+WValue w_ast_get(WValue node, WValue sym) {
+    if (node == W_NIL) return W_NIL;
+    if (__builtin_expect(w_is_node(node), 1)) {
+        int kid = w_node_kind(node);
+        if (__builtin_expect((unsigned)(kid - 1) < W_AST_KIND_MAX, 1)) {
+            if (__builtin_expect(!g_ast_syms_ready, 0)) w_ast_syms_init();
+            WValue csym = w_sym_canonical_fast(sym);
+            uint8_t st = W_AST_KIND_STORAGE[kid];
+            if (st == W_AST_STORAGE_SLAB || st == W_AST_STORAGE_CACHED) {
+                uint8_t fc = W_AST_KIND_FIELD_COUNT[kid];
+                const WValue *fsyms = g_ast_field_sym[kid];
+                for (uint8_t i = 0; i < fc; i++) {
+                    if (fsyms[i] == csym) {
+                        return g_node_arena.base[w_node_offset(node) + i];
+                    }
+                }
+            } else if (st == W_AST_STORAGE_INTERN) {
+                if (g_ast_field_sym[kid][0] == csym) {
+                    return w_ast_intern_str_of(node);
+                }
+            } else if (st == W_AST_STORAGE_INLINE) {
+                if (g_ast_field_sym[kid][0] == csym) {
+                    return w_int((int64_t)w_node_offset(node));
+                }
+            }
+            return w_ast_sparse_get(node, (int64_t)csym);
+        }
+        return w_ast_sparse_get(node, (int64_t)sym);
+    }
+    if (w_is_hash(node)) {
+        return w_hash_get(node, sym);
+    }
+    return W_NIL;
+}
+
+WValue w_ast_set(WValue node, WValue sym, WValue value) {
+    if (node == W_NIL) return W_NIL;
+    if (__builtin_expect(w_is_node(node), 1)) {
+        int kid = w_node_kind(node);
+        if (__builtin_expect((unsigned)(kid - 1) < W_AST_KIND_MAX, 1)) {
+            if (__builtin_expect(!g_ast_syms_ready, 0)) w_ast_syms_init();
+            WValue csym = w_sym_canonical_fast(sym);
+            uint8_t st = W_AST_KIND_STORAGE[kid];
+            if (st == W_AST_STORAGE_SLAB || st == W_AST_STORAGE_CACHED) {
+                uint8_t fc = W_AST_KIND_FIELD_COUNT[kid];
+                const WValue *fsyms = g_ast_field_sym[kid];
+                for (uint8_t i = 0; i < fc; i++) {
+                    if (fsyms[i] == csym) {
+                        value = w_ast_freeze_if_array(value);
+                        g_node_arena.base[w_node_offset(node) + i] = value;
+                        return value;
+                    }
+                }
+            } else if (st == W_AST_STORAGE_INTERN || st == W_AST_STORAGE_INLINE) {
+                if (g_ast_field_sym[kid][0] == csym) {
+                    return value;
+                }
+            }
+            return w_ast_sparse_set(node, (int64_t)csym, value);
+        }
+        return w_ast_sparse_set(node, (int64_t)sym, value);
+    }
+    if (w_is_hash(node)) {
+        w_hash_set(node, sym, value);
+        return value;
+    }
+    return value;
+}
+
+static inline int w_is_ast_node_inline(WValue x) {
+    if (x == W_NIL || x == 0) return 0;
+    if (w_is_node(x)) return 1;
+    if (__builtin_expect(w_is_hash(x), 0)) {
+        WValue v = w_hash_get(x, g_ast_node_key_sym);
+        return (v != 0 && v != W_NIL) ? 1 : 0;
+    }
+    return 0;
+}
+
+WValue w_is_ast_node(WValue x) {
+    if (x == W_NIL || x == 0) return W_FALSE;
+    if (w_is_node(x)) return W_TRUE;
+    if (__builtin_expect(w_is_hash(x), 0)) {
+        if (__builtin_expect(!g_ast_syms_ready, 0)) w_ast_syms_init();
+        WValue v = w_hash_get(x, g_ast_node_key_sym);
+        return (v != 0 && v != W_NIL) ? W_TRUE : W_FALSE;
+    }
+    return W_FALSE;
+}
+
+typedef struct {
+    WValue *data;
+    int64_t size;
+    int64_t cap;
+    WValue inline_buf[64];
+} WAstChildBuf;
+
+static inline void w_ast_child_buf_push(WAstChildBuf *buf, WValue v) {
+    if (__builtin_expect(buf->size == buf->cap, 0)) {
+        int64_t new_cap = buf->cap * 2;
+        if (buf->data == buf->inline_buf) {
+            WValue *nb = (WValue *)malloc((size_t)new_cap * sizeof(WValue));
+            memcpy(nb, buf->inline_buf, (size_t)buf->size * sizeof(WValue));
+            buf->data = nb;
+        } else {
+            buf->data = (WValue *)realloc(buf->data, (size_t)new_cap * sizeof(WValue));
+        }
+        buf->cap = new_cap;
+    }
+    buf->data[buf->size++] = v;
+}
+
+static inline void w_ast_child_buf_collect_field(WAstChildBuf *buf, WValue v) {
+    if (v == W_NIL || v == 0) return;
+    if (w_is_ast_node_inline(v)) {
+        w_ast_child_buf_push(buf, v);
+    } else if (w_is_body(v)) {
+        uint32_t b_len = w_unbox_body_length(v);
+        const WValue *b_elts = g_body_arena_base + w_unbox_body_offset(v);
+        for (uint32_t j = 0; j < b_len; j++) {
+            WValue elt = b_elts[j];
+            if (w_is_ast_node_inline(elt)) {
+                w_ast_child_buf_push(buf, elt);
+            }
+        }
+    } else if (w_is_array(v)) {
+        WArray *arr = w_as_array(v);
+        if (arr->ebits == 65) {
+            int32_t a_len = arr->size;
+            const WValue *a_elts = arr->slots + arr->start;
+            for (int32_t j = 0; j < a_len; j++) {
+                WValue elt = a_elts[j];
+                if (w_is_ast_node_inline(elt)) {
+                    w_ast_child_buf_push(buf, elt);
+                }
+            }
+        }
+    }
+}
+
+WValue w_ast_children(WValue node) {
+    if (__builtin_expect(!g_ast_syms_ready, 0)) w_ast_syms_init();
+    if (node == W_NIL || node == 0) return g_ast_empty_children;
+    if (__builtin_expect(w_is_node(node), 1)) {
+        int kid = w_node_kind(node);
+        if ((unsigned)(kid - 1) >= W_AST_KIND_MAX) return g_ast_empty_children;
+        uint32_t mask = W_AST_KIND_AST_MASK[kid];
+        if (mask == 0) return g_ast_empty_children;
+        const WValue *slots = g_node_arena.base + w_node_offset(node);
+        WAstChildBuf buf;
+        buf.data = buf.inline_buf;
+        buf.size = 0;
+        buf.cap = 64;
+        while (mask != 0) {
+            int idx = __builtin_ctz(mask);
+            mask &= mask - 1;
+            w_ast_child_buf_collect_field(&buf, slots[idx]);
+        }
+        if (buf.size == 0) return g_ast_empty_children;
+        WValue out = w_array_new_inline(65, buf.size);
+        memcpy(w_as_array(out)->slots, buf.data, (size_t)buf.size * sizeof(WValue));
+        if (buf.data != buf.inline_buf) free(buf.data);
+        return out;
+    }
+    if (w_is_hash(node)) {
+        WValue ksym = w_sym_canonical_fast(w_hash_get(node, g_ast_node_key_sym));
+        if (ksym == W_NIL || ksym == 0) return g_ast_empty_children;
+        int kid = 0;
+        for (int k = 1; k <= (int)W_AST_KIND_MAX; k++) {
+            if (W_AST_KIND_AST_MASK[k] != 0 && g_ast_kind_sym[k] == ksym) {
+                kid = k;
+                break;
+            }
+        }
+        if (kid == 0) return g_ast_empty_children;
+        uint32_t mask = W_AST_KIND_AST_MASK[kid];
+        WAstChildBuf buf;
+        buf.data = buf.inline_buf;
+        buf.size = 0;
+        buf.cap = 64;
+        while (mask != 0) {
+            int idx = __builtin_ctz(mask);
+            mask &= mask - 1;
+            w_ast_child_buf_collect_field(&buf, w_hash_get(node, g_ast_field_sym[kid][idx]));
+        }
+        if (buf.size == 0) return g_ast_empty_children;
+        WValue out = w_array_new_inline(65, buf.size);
+        memcpy(w_as_array(out)->slots, buf.data, (size_t)buf.size * sizeof(WValue));
+        if (buf.data != buf.inline_buf) free(buf.data);
+        return out;
+    }
+    return g_ast_empty_children;
 }
 
 /* Linkable wrappers around the inline w_box_token / w_unbox_token_*
@@ -40533,6 +40775,26 @@ int64_t w_loc_col_for_offset(int64_t file_id, int64_t offset) {
     return t->col_at[offset];
 }
 
+WValue w_location_line(WValue raw) {
+    if (raw == W_NIL || raw == 0 || raw == w_box_int(0)) return W_NIL;
+    uint32_t file_id = (uint32_t)w_unbox_location_file_id(raw);
+    uint32_t offset = (uint32_t)w_unbox_location_offset(raw);
+    if (file_id < 1 || file_id > g_loc_file_count) return w_box_int(-1);
+    WLocFileTable *t = &g_loc_files[file_id - 1];
+    if (offset >= t->len) return w_box_int(-1);
+    return w_box_int((int64_t)t->line_at[offset]);
+}
+
+WValue w_location_col(WValue raw) {
+    if (raw == W_NIL || raw == 0 || raw == w_box_int(0)) return W_NIL;
+    uint32_t file_id = (uint32_t)w_unbox_location_file_id(raw);
+    uint32_t offset = (uint32_t)w_unbox_location_offset(raw);
+    if (file_id < 1 || file_id > g_loc_file_count) return w_box_int(-1);
+    WLocFileTable *t = &g_loc_files[file_id - 1];
+    if (offset >= t->len) return w_box_int(-1);
+    return w_box_int((int64_t)t->col_at[offset]);
+}
+
 static __thread const char *w_current_tungsten_file = NULL;
 static __thread int w_current_tungsten_line = 0;
 static __thread int w_current_tungsten_col  = 0;
@@ -46441,6 +46703,15 @@ WValue w_bit_shl(WValue a, WValue b) {
      * w_add, whose array branch (w_array_add_elem) does an ELEMENTWISE add and
      * returns a NEW array, so `a << x` left `a` unchanged. */
     if (w_is_array(a)) { w_array_push(a, b); return a; }
+    /* A user class that defines `<<` gets a.<<(b), as w_add routes `+`.
+     * Falling through to w_add sent `handle << "text"` to the class's `+`
+     * ("undefined method '+'") even when the class defines `<<`; a class
+     * without its own `<<` keeps the `+` fallback below. */
+    if (w_is_instance(a)) {
+        WValue shl_name = w_string("<<");
+        if (w_method_lookup(g_class_table[((WObject *)w_as_ptr(a))->class_id], shl_name))
+            return w_method_call_fast(a, shl_name, &b, 1);
+    }
     /* Non-integer LHS or non-int shift count: preserve the overloaded `<<`
      * fallback. */
     if (!w_is_integer_any(a) || !w_is_int(b)) return w_add(a, b);
@@ -52243,6 +52514,9 @@ static void w_method_table_mutation_end(void) {
     pthread_mutex_unlock(&g_method_table_barrier_mutex);
 }
 
+static uint8_t g_class_is_node_kind[W_MAX_CLASSES] = {0};
+static uint8_t g_any_node_kind_has_methods = 0;
+
 void w_class_add_method(WValue klass_val, const char *name, void *fn_ptr, int arity) {
     w_class_add_method_wv(klass_val, w_string(name), fn_ptr, arity);
 }
@@ -52260,6 +52534,8 @@ void w_class_add_method_range_wv(WValue klass_val, WValue name, void *fn_ptr,
     m->arity = arity;
     m->min_arity = min_arity;
     m->splat_index_plus_one = 0;
+    if (klass->class_id < W_MAX_CLASSES && g_class_is_node_kind[klass->class_id])
+        g_any_node_kind_has_methods = 1;
     w_method_table_mutation_end();
 }
 
@@ -52272,6 +52548,8 @@ void w_class_add_method_splat_wv(WValue klass_val, WValue name, void *fn_ptr,
     m->arity = arity;
     m->min_arity = min_arity;
     m->splat_index_plus_one = splat_index + 1;
+    if (klass->class_id < W_MAX_CLASSES && g_class_is_node_kind[klass->class_id])
+        g_any_node_kind_has_methods = 1;
     w_method_table_mutation_end();
 }
 
@@ -56720,7 +56998,9 @@ uint64_t w_dispatch_key(WValue v) {
         uint64_t subtype = (v >> 45) & 0x7;
         if (subtype == W_PACKED_NODE) {
             if (w_is_wire(v)) return 0xE8u;
-            return 0x400000000ULL | (uint64_t)w_node_kind(v);
+            if (__builtin_expect(g_any_node_kind_has_methods, 0))
+                return 0x400000000ULL | (uint64_t)w_node_kind(v);
+            return 0xE0u | W_PACKED_NODE;
         }
         if (subtype == W_PACKED_LOCATION && ((v >> 43) & 0x3) == 0x3)
             return W_SUBTAG_RANGE;
@@ -56837,7 +57117,7 @@ WValue w_class_of(WValue v) {
      * treated AST child lists as Arrays (see __w_type above). Skip the Body
      * type-class registration here so `.class` follows that Array facade too.
      * Method dispatch still uses the 0xE6 key in w_method_dispatch. */
-    int cacheable = !w_is_body(v) && !w_is_wire(v) && key < 256;
+    int cacheable = !w_is_body(v) && !w_is_wire(v) && !w_is_node(v) && key < 256;
     unsigned public_slot = 0;
     if (cacheable) {
         public_slot = (unsigned)key | ((unsigned)(v & 1u) << 8);
@@ -56893,6 +57173,8 @@ static uint16_t g_node_kind_class[256] = {0};
 void w_node_kind_class_register_wv(int32_t kind, WValue klass) {
     WClass *c = as_class(klass);
     g_node_kind_class[kind & 0xFF] = c->class_id + 1;
+    if (c->class_id < W_MAX_CLASSES) g_class_is_node_kind[c->class_id] = 1;
+    if (c->method_count > 0) g_any_node_kind_has_methods = 1;
 }
 
 static WMethod *w_type_class_method(uint16_t class_id, WValue name, int argc) {
@@ -68568,7 +68850,10 @@ static WMethod *w_cacheable_type_class_method(WValue recv, WValue name,
     if (w_is_array(recv)) {
         cid_slot = g_type_class[key];
     } else if (w_is_node(recv)) {
-        cid_slot = g_node_kind_class[w_node_kind(recv) & 0xFF];
+        if (!g_any_node_kind_has_methods)
+            cid_slot = g_type_class[0xE0u | W_PACKED_NODE];
+        if (!cid_slot)
+            cid_slot = g_node_kind_class[w_node_kind(recv) & 0xFF];
     } else if (key < 256) {
         if (name == WN_to_s && w_is_obj(recv) &&
             w_subtag(recv) == W_SUBTAG_UUID)
@@ -69162,7 +69447,9 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
              * method called with N>1 args builds its argument from the
              * receiver's own class when the constructor arity matches —
              * p.distance(2, 3, 4) â¡ p.distance(Point.new(2, 3, 4)). */
-            if (expected == 1 && args->size > 1) {
+            /* A `*rest` parameter already takes every argument (the Ruby
+             * implementation's rule), so it never wraps them. */
+            if (expected == 1 && args->size > 1 && m->splat_index_plus_one == 0) {
                 WClass *k = g_class_table[obj->class_id];
                 if (w_method_lookup_arity(k, WN_new, args->size + 1)) {
                     WValue cls = w_box_ptr(k, W_SUBTAG_CLASS);

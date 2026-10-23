@@ -161,7 +161,7 @@
     # inside Hypercomplex#** fell through to the primitive `left * right` arm,
     # which fed a whole object into the runtime multiply and died in as_int.
     if type(left) == "Hash" && left.has_key?(:rt) && left[:rt] == :object
-      opn = binop_method_name(op)
+      opn = object_binop_method_name(op, left)
       if opn != nil
         return dispatch_method(left, opn, [right], nil, nil)
     if op == :PLUS
@@ -466,7 +466,7 @@
     # covers the hypercomplex tower, Vec/Mat, etc. Arithmetic/bitwise here and
     # `==`/`!=` just below; ordering comparisons were handled above.
     if type(left) == "Hash" && left.has_key?(:rt) && left[:rt] == :object
-      opn = binop_method_name(op)
+      opn = object_binop_method_name(op, left)
       if opn != nil
         return dispatch_method(left, opn, [right], nil, nil)
       # `==` dispatches to a BODIED user `==` override, mirroring runtime
@@ -599,9 +599,20 @@
       return "|"
     if op == :CARET
       return "^"
+    # `obj << x` calls the class's own `<<` (FileHandle, Table, ...), like the
+    # compiled w_bit_shl.
+    if op == :LSHIFT
+      return "<<"
     if op == :HADAMARD
       return "⊙"
     nil
+
+  # The operator method an object operand answers. A class without its own
+  # `<<` keeps the `+` fallback, like the compiled w_bit_shl → w_add route.
+  -> object_binop_method_name(op, obj)
+    if op == :LSHIFT && lookup_method(obj[:w_class], "<<") == nil
+      return "+"
+    binop_method_name(op)
 
   # Range#/ (step): materialize `(a..b) / n` as [a, a+n, a+2n, ...] while
   # < b (or <= b for an inclusive range). Mirrors the compiled path's
@@ -1024,6 +1035,11 @@
         explicit_recv = evaluate(ast_get(recv_node, :receiver), env)
         return ccall("w_native_data_elem_set", explicit_recv, "limbs", args[0], args[1])
       recv = evaluate(ast_get(node, :receiver), env)
+      # Evaluating the receiver can autoload its class (`File` loads
+      # core/file.w) and so register its block-taking methods: decide the
+      # block route only now.
+      passthrough = block != nil && interpreter_method_takes_no_block?(method_name)
+      call_block = passthrough ? nil : block
       # The parser transfers `Mat2<f64>.identity`'s type arguments from the
       # class-ref receiver onto the call node. Keep them scoped to this class
       # send so `## T` inside the class method (and a nested `class.new`) can
@@ -1051,7 +1067,9 @@
     result
 
   # Trailing block on a method that declares no block of its own iterates
-  # the call's RESULT (implicit `.each`). Mirrors lowering/method_call.w.
+  # the call's RESULT (implicit `.each`). Mirrors lowering's
+  # method_takes_no_block?: a name some definition declares a block for
+  # (note_block_method) receives the block, as do the iterator names.
   -> interpreter_method_takes_no_block?(mname)
     if mname == nil
       return false
@@ -1059,6 +1077,8 @@
     if !((c0 >= "a" && c0 <= "z") || c0 == "_")
       return false
     if mname == "new"
+      return false
+    if @block_method_names[mname] == true
       return false
     if mname in ("each" "map" "select" "reject" "filter" "filter_map" "find" "find_index" "detect" "all?" "any?" "none?" "count" "reduce" "inject" "flat_map" "each_with_index" "map_with_index" "group_by" "partition" "each_slice" "each_cons" "each_with_object" "chunk_while" "take_while" "drop_while" "sort" "sort_by" "min_by" "max_by" "sum" "zip" "times" "upto" "downto" "step" "cycle" "tap" "then" "loop" "serve_http")
       return false
@@ -1343,16 +1363,3 @@
 
     raise_typed("NoMethodError", "Undefined method '[name]'")
 
-  # Trailing block on a method that declares no block of its own iterates
-  # the call's RESULT (implicit `.each`). Mirrors lowering/method_call.w.
-  -> interpreter_method_takes_no_block?(mname)
-    if mname == nil
-      return false
-    c0 = mname[0]
-    if !((c0 >= "a" && c0 <= "z") || c0 == "_")
-      return false
-    if mname == "new"
-      return false
-    if mname in ("each" "map" "select" "reject" "filter" "filter_map" "find" "find_index" "detect" "all?" "any?" "none?" "count" "reduce" "inject" "flat_map" "each_with_index" "map_with_index" "group_by" "partition" "each_slice" "each_cons" "each_with_object" "chunk_while" "take_while" "drop_while" "sort" "sort_by" "min_by" "max_by" "sum" "zip" "times" "upto" "downto" "step" "cycle" "tap" "then" "loop" "serve_http")
-      return false
-    true

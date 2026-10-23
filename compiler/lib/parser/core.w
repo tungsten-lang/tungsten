@@ -33,6 +33,9 @@
     # listed here are struct references, NOT class references; downstream
     # passes can use this set to distinguish them once they need to.
     @struct_names = {}
+    # Locals and parameters spelled like a type name (`u1`, `i8`, `f64`),
+    # one scope per method/fn body (see bind_type_name).
+    @bound_type_names = [{}]
     # Register this file's per-codepoint line/col tables (already
     # built by the lexer) under a small file_id, so FileOffset
     # locations constructed below can be resolved back to line/col
@@ -48,6 +51,34 @@
 
   -> struct_name?(name)
     @struct_names[name] == true
+
+  # A local or parameter may be spelled like a type name (`u1 = [...]`, a
+  # parameter `u8`). From its binding on it is a variable, so `u1[i]` indexes
+  # it instead of allocating a `u1[i]` typed array (parse_primary). Only
+  # type-spelled names are recorded. A method/fn body opens a scope; blocks
+  # and lambdas bind into the enclosing one, and lookups see every enclosing
+  # scope, since bodies read top-level variables.
+  -> bind_type_name(name)
+    @bound_type_names[@bound_type_names.size() - 1][name] = true
+
+  -> bound_type_name?(name)
+    i = @bound_type_names.size() - 1
+    while i >= 0
+      if @bound_type_names[i][name] == true
+        return true
+      i -= 1
+    false
+
+  -> push_type_name_scope
+    @bound_type_names.push({})
+
+  -> pop_type_name_scope
+    @bound_type_names.pop()
+
+  # Record the target of an assignment whose first token was a type name.
+  -> bind_type_spelled_target(type_spelled, target)
+    if type_spelled && ast_kind(target) == :var
+      bind_type_name(target.name)
 
   # Raw accessors for packed token descriptors. Production values fit the
   # inline-Int payload. Normalize once so the helpers also accept tagged Token
@@ -1089,6 +1120,9 @@
     expr
 
   -> parse_assignment
+    # A target spelled like a type name (`u1 = [...]`) binds it as a local;
+    # read the first token before parse_ternary consumes it.
+    type_spelled = @current_type == T_TYPE
     left = parse_ternary()
     t = @current_type
     if t < 90 && t != T_COMMA && t != T_TYPE_HINT
@@ -1158,6 +1192,7 @@
             axis_part = axis_part.slice(1, axis_part.size() - 1)
           axis_name = axis_part
       target = to_assign_target(left)
+      bind_type_spelled_target(type_spelled, target)
       result = Tungsten:AST:Assign.new(target, value, hint)
       if axis_name != nil
         result.axis_name = axis_name
@@ -1243,6 +1278,7 @@
       advance()
       value = parse_assignment()
       target = to_assign_target(left)
+      bind_type_spelled_target(type_spelled, target)
       return Tungsten:AST:Assign.new(target, Tungsten:AST:Or.new(left, value))
 
     # Swap: `a <> b` exchanges two variables. Desugars to the same
@@ -1300,7 +1336,9 @@
       advance()
       advance()
       value = parse_assignment()
-      return Tungsten:AST:Assign.new(to_assign_target(left), value, hint)
+      target = to_assign_target(left)
+      bind_type_spelled_target(type_spelled, target)
+      return Tungsten:AST:Assign.new(target, value, hint)
 
     left
 

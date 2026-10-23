@@ -680,6 +680,102 @@ TENSOR_EW = {}
     else
       result = Tensor.zeros_like(self, shape, unit)
       n = self.size
+      if device == :cpu && strides.size() == shape.size()
+        src = buffer
+        dst = result.buffer
+        off = offset
+        r = shape.size()
+        if r == 1
+          s0 = strides[0]
+          i = 0
+          while i < n
+            dst[i] = src[off + i * s0]
+            i = i + 1
+          return result
+        elsif r == 2
+          n0 = shape[0]
+          n1 = shape[1]
+          s0 = strides[0]
+          s1 = strides[1]
+          if s0 == 1 && s1 == n0 && (dtype == Tensor.f32 || dtype == Tensor.f64)
+            Tensor.storage_reduce_last(dtype, src, dst, off, n1, n0, 3)
+            return result
+          idx = 0
+          i = 0
+          while i < n0
+            r0 = off + i * s0
+            j = 0
+            while j < n1
+              dst[idx] = src[r0 + j * s1]
+              idx = idx + 1
+              j = j + 1
+            i = i + 1
+          return result
+        elsif r == 3
+          n0 = shape[0]
+          n1 = shape[1]
+          n2 = shape[2]
+          s0 = strides[0]
+          s1 = strides[1]
+          s2 = strides[2]
+          idx = 0
+          i = 0
+          while i < n0
+            r0 = off + i * s0
+            j = 0
+            while j < n1
+              r1 = r0 + j * s1
+              k = 0
+              while k < n2
+                dst[idx] = src[r1 + k * s2]
+                idx = idx + 1
+                k = k + 1
+              j = j + 1
+            i = i + 1
+          return result
+        elsif r == 4
+          n0 = shape[0]
+          n1 = shape[1]
+          n2 = shape[2]
+          n3 = shape[3]
+          s0 = strides[0]
+          s1 = strides[1]
+          s2 = strides[2]
+          s3 = strides[3]
+          idx = 0
+          i = 0
+          while i < n0
+            r0 = off + i * s0
+            j = 0
+            while j < n1
+              r1 = r0 + j * s1
+              k = 0
+              while k < n2
+                r2 = r1 + k * s2
+                m = 0
+                while m < n3
+                  dst[idx] = src[r2 + m * s3]
+                  idx = idx + 1
+                  m = m + 1
+                k = k + 1
+              j = j + 1
+            i = i + 1
+          return result
+        ps = Tensor.packed_strides(shape)
+        fi = 0
+        while fi < n
+          rem = fi
+          s_idx = off
+          k = 0
+          while k < r
+            psk = ps[k]
+            coord_k = rem / psk
+            rem = rem % psk
+            s_idx = s_idx + coord_k * strides[k]
+            k = k + 1
+          dst[fi] = src[s_idx]
+          fi = fi + 1
+        return result
       fi = 0
       while fi < n
         c = Tensor.unravel(fi, shape)
@@ -921,19 +1017,90 @@ TENSOR_EW = {}
       ai = ai + 1
     coord
 
+  # Effective element strides of an input under right-aligned broadcasting
+  # to `out_rank` axes (size-1 axes and leading padded axes get stride 0).
+  -> .broadcast_strides(in_shape, in_strides, out_rank)
+    ra = in_shape.size()
+    off = out_rank - ra
+    out = []
+    k = 0
+    while k < out_rank
+      if k < off
+        out = out.push(0)
+      else
+        ai = k - off
+        if in_shape[ai] == 1
+          out = out.push(0)
+        else
+          out = out.push(in_strides[ai])
+      k = k + 1
+    out
+
   # True when the tensor's data is a plain packed row-major CPU buffer
   # starting at element 0 — the layout the vDSP fast lane requires.
   -> packed_cpu?
     return false if device != :cpu
     return false if offset != 0
-    ps = Tensor.packed_strides(shape)
-    nps = ps.size
-    return false if strides.size != nps
-    k = 0
-    while k < nps
-      return false if strides[k] != ps[k]
-      k += 1
-    true
+    self.contiguous?
+
+  -> cpu_binop_flat(other, result, total, kind)
+    src_a = buffer
+    src_b = other.buffer
+    dst = result.buffer
+    off_a = offset
+    off_b = other.offset
+    i = 0
+    if kind == 0
+      while i < total
+        dst[i] = src_a[off_a + i] + src_b[off_b + i]
+        i = i + 1
+    elsif kind == 1
+      while i < total
+        dst[i] = src_a[off_a + i] - src_b[off_b + i]
+        i = i + 1
+    elsif kind == 2
+      while i < total
+        dst[i] = src_a[off_a + i] * src_b[off_b + i]
+        i = i + 1
+    else
+      while i < total
+        dst[i] = src_a[off_a + i] / src_b[off_b + i]
+        i = i + 1
+    result
+
+  -> cpu_binop_bcast_2d(other, result, oshape, astrides, bstrides, kind)
+    src_a = buffer
+    src_b = other.buffer
+    dst = result.buffer
+    off_a = offset
+    off_b = other.offset
+    n0 = oshape[0]
+    n1 = oshape[1]
+    as0 = astrides[0]
+    as1 = astrides[1]
+    bs0 = bstrides[0]
+    bs1 = bstrides[1]
+    idx = 0
+    i = 0
+    while i < n0
+      ra = off_a + i * as0
+      rb = off_b + i * bs0
+      j = 0
+      while j < n1
+        av = src_a[ra + j * as1]
+        bv = src_b[rb + j * bs1]
+        rv = av + bv
+        if kind == 1
+          rv = av - bv
+        elsif kind == 2
+          rv = av * bv
+        elsif kind == 3
+          rv = av / bv
+        dst[idx] = rv
+        idx = idx + 1
+        j = j + 1
+      i = i + 1
+    result
 
   # kind: 0=add 1=sub 2=mul 3=div
   -> binop(other, kind)
@@ -944,19 +1111,72 @@ TENSOR_EW = {}
     # (which allocates a coordinate array per element) and run one vDSP
     # call over the raw buffers — identical arithmetic, identical result
     # layout, ~SIMD-rate instead of ~290 ns/element.
-    if (dtype == 3 || dtype == 64) && Tensor.same_shape(shape, other.shape)
-      if packed_cpu? && other.packed_cpu?
+    if device == :cpu && other.device == :cpu && Tensor.same_shape(shape, other.shape)
+      if self.contiguous? && other.contiguous?
         fast = Tensor.zeros_like(self, shape, result_unit)
         total = Tensor.elem_count(shape)
-        if dtype == 3
-          ccall("w_blas_ew_f32", kind, buffer, other.buffer, fast.buffer, total)
-        else
-          ccall("w_blas_ew_f64", kind, buffer, other.buffer, fast.buffer, total)
-        return fast
+        if offset == 0 && other.offset == 0 && (dtype == 3 || dtype == 64)
+          if dtype == 3
+            ccall("w_blas_ew_f32", kind, buffer, other.buffer, fast.buffer, total)
+          else
+            ccall("w_blas_ew_f64", kind, buffer, other.buffer, fast.buffer, total)
+          return fast
+        return self.cpu_binop_flat(other, fast, total, kind)
     oshape = Tensor.broadcast_shape(shape, other.shape)
     result = Tensor.zeros_like(self, oshape, result_unit)
     r = oshape.size()
     total = Tensor.elem_count(oshape)
+    if device == :cpu && other.device == :cpu && strides.size() == shape.size() && other.strides.size() == other.shape.size()
+      astrides = Tensor.broadcast_strides(shape, strides, r)
+      bstrides = Tensor.broadcast_strides(other.shape, other.strides, r)
+      if r == 2
+        if offset == 0 && other.offset == 0 && (dtype == 3 || dtype == 64)
+          n0 = oshape[0]
+          n1 = oshape[1]
+          if astrides[1] == 1 && astrides[0] == n1 && bstrides[0] == 0 && bstrides[1] == 1 && n1 > 0
+            if dtype == 3
+              ccall("w_blas_ew_f32", kind + 4, buffer, other.buffer, result.buffer, total)
+            else
+              ccall("w_blas_ew_f64", kind + 4, buffer, other.buffer, result.buffer, total)
+            return result
+          if astrides[1] == 1 && astrides[0] == n1 && bstrides[0] == 1 && bstrides[1] == 0 && n0 > 0
+            if dtype == 3
+              ccall("w_blas_ew_f32", kind + 8, buffer, other.buffer, result.buffer, total)
+            else
+              ccall("w_blas_ew_f64", kind + 8, buffer, other.buffer, result.buffer, total)
+            return result
+        return self.cpu_binop_bcast_2d(other, result, oshape, astrides, bstrides, kind)
+      src_a = buffer
+      src_b = other.buffer
+      dst = result.buffer
+      off_a = offset
+      off_b = other.offset
+      ps = Tensor.packed_strides(oshape)
+      fi = 0
+      while fi < total
+        rem = fi
+        ia = off_a
+        ib = off_b
+        k = 0
+        while k < r
+          psk = ps[k]
+          ck = rem / psk
+          rem = rem % psk
+          ia = ia + ck * astrides[k]
+          ib = ib + ck * bstrides[k]
+          k = k + 1
+        av = src_a[ia]
+        bv = src_b[ib]
+        rv = av + bv
+        if kind == 1
+          rv = av - bv
+        elsif kind == 2
+          rv = av * bv
+        elsif kind == 3
+          rv = av / bv
+        dst[fi] = rv
+        fi = fi + 1
+      return result
     fi = 0
     while fi < total
       ocoord = Tensor.unravel(fi, oshape)
@@ -1102,6 +1322,24 @@ TENSOR_EW = {}
     self.elementwise(other, 0)
   -> add_mut(other)
     total = self.size
+    if device == :cpu && self.contiguous?
+      dst = buffer
+      off = offset
+      if type(other) == "Tensor"
+        if other.device == :cpu && other.contiguous? && Tensor.same_shape(shape, other.shape)
+          src = other.buffer
+          src_off = other.offset
+          i = 0
+          while i < total
+            dst[off + i] = dst[off + i] + src[src_off + i]
+            i = i + 1
+          return self
+      else
+        i = 0
+        while i < total
+          dst[off + i] = dst[off + i] + other
+          i = i + 1
+        return self
     fi = 0
     while fi < total
       ocoord = Tensor.unravel(fi, shape)
@@ -1124,6 +1362,18 @@ TENSOR_EW = {}
     # an MTLDevice.
     result = Tensor.zeros_like(self, shape, nil)
     total = self.size
+    if device == :cpu && self.contiguous?
+      if dtype == Tensor.f32 || dtype == Tensor.f64
+        Tensor.storage_unary_view(dtype, buffer, result.buffer, offset, total, s.to_f)
+        return result
+      src = buffer
+      dst = result.buffer
+      off = offset
+      i = 0
+      while i < total
+        dst[i] = src[off + i] * s
+        i = i + 1
+      return result
     fi = 0
     while fi < total
       ocoord = Tensor.unravel(fi, shape)
@@ -1201,6 +1451,39 @@ TENSOR_EW = {}
     if device == :cpu && self.contiguous? && axis == self.rank - 1 && (dtype == Tensor.f32 || dtype == Tensor.f64)
       Tensor.storage_reduce_last(dtype, buffer, result.buffer, offset, total, axis_len, 0)
       return result
+    if device == :cpu && self.contiguous?
+      outer = 1
+      k = 0
+      while k < axis
+        outer = outer * shape[k]
+        k = k + 1
+      inner = 1
+      k = axis + 1
+      r = shape.size()
+      while k < r
+        inner = inner * shape[k]
+        k = k + 1
+      if (dtype == Tensor.f32 || dtype == Tensor.f64) && inner > 0
+        Tensor.storage_reduce_last(dtype, buffer, result.buffer, offset, total, axis_len, (inner << 2))
+        return result
+      src = buffer
+      dst = result.buffer
+      off = offset
+      oi = 0
+      while oi < outer
+        base_out = oi * inner
+        base_in = off + oi * axis_len * inner
+        ij = 0
+        while ij < inner
+          acc = ~0.0
+          a = 0
+          while a < axis_len
+            acc = acc + src[base_in + a * inner + ij]
+            a = a + 1
+          dst[base_out + ij] = acc
+          ij = ij + 1
+        oi = oi + 1
+      return result
     fi = 0
     while fi < total
       ocoord = Tensor.unravel(fi, oshape)
@@ -1222,6 +1505,41 @@ TENSOR_EW = {}
     total = Tensor.elem_count(oshape)
     if axis_len > 0 && device == :cpu && self.contiguous? && axis == self.rank - 1 && (dtype == Tensor.f32 || dtype == Tensor.f64)
       Tensor.storage_reduce_last(dtype, buffer, result.buffer, offset, total, axis_len, 1)
+      return result
+    if axis_len > 0 && device == :cpu && self.contiguous?
+      outer = 1
+      k = 0
+      while k < axis
+        outer = outer * shape[k]
+        k = k + 1
+      inner = 1
+      k = axis + 1
+      r = shape.size()
+      while k < r
+        inner = inner * shape[k]
+        k = k + 1
+      if (dtype == Tensor.f32 || dtype == Tensor.f64) && inner > 0
+        Tensor.storage_reduce_last(dtype, buffer, result.buffer, offset, total, axis_len, (inner << 2) | 1)
+        return result
+      src = buffer
+      dst = result.buffer
+      off = offset
+      oi = 0
+      while oi < outer
+        base_out = oi * inner
+        base_in = off + oi * axis_len * inner
+        ij = 0
+        while ij < inner
+          best = src[base_in + ij]
+          a = 1
+          while a < axis_len
+            v = src[base_in + a * inner + ij]
+            if v > best
+              best = v
+            a = a + 1
+          dst[base_out + ij] = best
+          ij = ij + 1
+        oi = oi + 1
       return result
     fi = 0
     while fi < total
@@ -1314,15 +1632,64 @@ TENSOR_EW = {}
       raise "Tensor.fwht: signs length must equal last dimension"
     result = Tensor.zeros_like(self, shape, unit)
     scale = ~1.0 / Math.sqrt(bsize.to_f)
-    work = Tensor.storage_f64(cols)
+    work = f64[cols]
+    has_signs = signs != nil
+    sign_work = f64[has_signs ? cols : 1]
+    if has_signs
+      is_t = type(signs) == "Tensor"
+      c = 0
+      while c < cols
+        sign_work[c] = is_t ? signs.at([c]).to_f : signs[c].to_f
+        c += 1
+    if device == :cpu && self.contiguous?
+      src = buffer
+      dst = result.buffer
+      off = offset
+      r = 0
+      while r < rows
+        row_in = off + r * cols
+        row_out = r * cols
+        c = 0
+        while c < cols
+          v = src[row_in + c].to_f
+          if has_signs && !inverse
+            v = v * sign_work[c]
+          work[c] = v
+          c += 1
+        b = 0
+        while b < cols
+          h = 1
+          while h < bsize
+            i = b
+            block_end = b + bsize
+            while i < block_end
+              j = i
+              limit = i + h
+              while j < limit
+                x = work[j]
+                y = work[j + h]
+                work[j] = x + y
+                work[j + h] = x - y
+                j += 1
+              i += h * 2
+            h = h * 2
+          b += bsize
+        c = 0
+        while c < cols
+          v = work[c] * scale
+          if has_signs && inverse
+            v = v * sign_work[c]
+          dst[row_out + c] = v
+          c += 1
+        r += 1
+      return result
     r = 0
     while r < rows
       c = 0
       while c < cols
         v = (self.rank == 1 ? self.at([c]) : self.at([r, c])).to_f
-        if signs != nil && !inverse
-          sv = type(signs) == "Tensor" ? signs.at([c]).to_f : signs[c].to_f
-          v = v * sv
+        if has_signs && !inverse
+          v = v * sign_work[c]
         work[c] = v
         c += 1
       b = 0
@@ -1346,9 +1713,8 @@ TENSOR_EW = {}
       c = 0
       while c < cols
         v = work[c] * scale
-        if signs != nil && inverse
-          sv = type(signs) == "Tensor" ? signs.at([c]).to_f : signs[c].to_f
-          v = v * sv
+        if has_signs && inverse
+          v = v * sign_work[c]
         if self.rank == 1
           result.set([c], v)
         else
@@ -1456,6 +1822,78 @@ TENSOR_EW = {}
       return self.gpu_softmax_rows()
     result = Tensor.zeros_like(self, shape, nil)
     axis_len = shape[axis]
+    if axis_len > 0 && device == :cpu && self.contiguous?
+      src = buffer
+      dst = result.buffer
+      off = offset
+      outer = 1
+      k = 0
+      while k < axis
+        outer = outer * shape[k]
+        k = k + 1
+      inner = 1
+      k = axis + 1
+      r = shape.size()
+      while k < r
+        inner = inner * shape[k]
+        k = k + 1
+      if inner == 1
+        if dtype == Tensor.f32 || dtype == Tensor.f64
+          Tensor.storage_reduce_last(dtype, src, dst, off, outer, axis_len, 2)
+          return result
+        row = 0
+        while row < outer
+          r_in = off + row * axis_len
+          r_out = row * axis_len
+          mx = src[r_in]
+          a = 1
+          while a < axis_len
+            v = src[r_in + a]
+            if v > mx
+              mx = v
+            a = a + 1
+          sm = ~0.0
+          a = 0
+          while a < axis_len
+            e = Math.exp(src[r_in + a] - mx)
+            dst[r_out + a] = e
+            sm = sm + e
+            a = a + 1
+          a = 0
+          while a < axis_len
+            dst[r_out + a] = dst[r_out + a] / sm
+            a = a + 1
+          row = row + 1
+        return result
+      oi = 0
+      while oi < outer
+        base_out = oi * axis_len * inner
+        base_in = off + base_out
+        ij = 0
+        while ij < inner
+          mx = src[base_in + ij]
+          a = 1
+          while a < axis_len
+            v = src[base_in + a * inner + ij]
+            if v > mx
+              mx = v
+            a = a + 1
+          sm = ~0.0
+          a = 0
+          while a < axis_len
+            idx = a * inner + ij
+            e = Math.exp(src[base_in + idx] - mx)
+            dst[base_out + idx] = e
+            sm = sm + e
+            a = a + 1
+          a = 0
+          while a < axis_len
+            idx = base_out + a * inner + ij
+            dst[idx] = dst[idx] / sm
+            a = a + 1
+          ij = ij + 1
+        oi = oi + 1
+      return result
     oshape = self.drop_axis_shape(axis)
     outer = Tensor.elem_count(oshape)
     fi = 0

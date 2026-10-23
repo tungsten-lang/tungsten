@@ -14,9 +14,8 @@
 + ExactIntegerLinearAlgebra
   -> .integer_value?(value)
     name = value.class_name
-    integer = name == "Integer" || name == "Int"
-    integer = true if name == "BigInt"
-    integer
+    return true if name == "Int" || name == "BigInt" || name == "Integer"
+    false
 
   # Fraction-free Bareiss elimination.  Every division is exact; this avoids
   # constructing rational temporaries for integral multiplication matrices.
@@ -718,7 +717,11 @@
     gram_matrix.each -> (source)
       row = []
       source.each -> (entry)
-        row.push(Rational.coerce(entry).to_f)
+        ename = entry.class_name
+        if ename == "Int" || ename == "Float"
+          row.push(entry + ~0.0)
+        else
+          row.push(Rational.coerce(entry).to_f)
       @gram_matrix.push(row)
     @basis = []
     source_basis.each -> (source)
@@ -766,44 +769,76 @@
     value.abs < ~1.0e300
 
   -> inner_product(left, right)
+    n = @basis.size
     value = ~0.0
     i = 0
-    while i < rank
-      j = 0
-      while j < rank
-        left_value = left[i] + ~0.0
-        right_value = right[j] + ~0.0
-        value += left_value * @gram_matrix[i][j] * right_value
-        j += 1
+    while i < n
+      left_value = left[i] + ~0.0
+      if left_value != ~0.0
+        g_row = @gram_matrix[i]
+        row_sum = ~0.0
+        j = 0
+        while j < n
+          row_sum += g_row[j] * (right[j] + ~0.0)
+          j += 1
+        value += left_value * row_sum
       i += 1
     value
 
   -> gram_schmidt
+    n = @basis.size
     stars = []
+    g_stars = []
     mu = []
     norms = []
     i = 0
-    while i < rank
+    while i < n
+      bi = @basis[i]
       star = []
-      @basis[i].each -> (entry)
-        star.push(entry + ~0.0)
+      c = 0
+      while c < n
+        star.push(bi[c] + ~0.0)
+        c += 1
       row = []
-      rank.times -> row.push(~0.0)
+      c = 0
+      while c < n
+        row.push(~0.0)
+        c += 1
       j = 0
       while j < i
-        return nil if norms[j] == ~0.0
-        coefficient = inner_product(
-          @basis[i], stars[j]) / norms[j]
+        nj = norms[j]
+        return nil if nj == ~0.0
+        gs_j = g_stars[j]
+        dot = ~0.0
+        c = 0
+        while c < n
+          dot += (bi[c] + ~0.0) * gs_j[c]
+          c += 1
+        coefficient = dot / nj
         return nil if !finite_float?(coefficient)
         row[j] = coefficient
+        star_j = stars[j]
         coordinate = 0
-        while coordinate < rank
-          star[coordinate] -= coefficient * stars[j][coordinate]
+        while coordinate < n
+          star[coordinate] -= coefficient * star_j[coordinate]
           coordinate += 1
         j += 1
-      norm = inner_product(star, star)
+      g_star = []
+      norm = ~0.0
+      r = 0
+      while r < n
+        g_row = @gram_matrix[r]
+        s = ~0.0
+        c = 0
+        while c < n
+          s += g_row[c] * star[c]
+          c += 1
+        g_star.push(s)
+        norm += star[r] * s
+        r += 1
       return nil if !finite_float?(norm) || norm <= ~0.0
       stars.push(star)
+      g_stars.push(g_star)
       mu.push(row)
       norms.push(norm)
       i += 1
@@ -821,13 +856,20 @@
   # and norms are unchanged, so rebuilding the full decomposition here is
   # unnecessary.
   -> incremental_size_reduce(mu, k, j, quotient)
-    @basis[k] = subtract_multiple(
-      @basis[k], @basis[j], quotient)
+    bk = @basis[k]
+    bj = @basis[j]
+    n = bk.size
+    c = 0
+    while c < n
+      bk[c] = bk[c] - quotient * bj[c]
+      c += 1
+    mu_k = mu[k]
+    mu_j = mu[j]
     l = 0
     while l < j
-      mu[k][l] = mu[k][l] - quotient * mu[j][l]
+      mu_k[l] = mu_k[l] - quotient * mu_j[l]
       l += 1
-    mu[k][j] = mu[k][j] - quotient
+    mu_k[j] = mu_k[j] - quotient
 
   # Classical LLL adjacent-exchange update for an arbitrary positive-definite
   # inner product. Returns false if floating arithmetic leaves the valid

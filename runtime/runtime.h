@@ -2607,7 +2607,7 @@ _Static_assert(offsetof(WRope, left) == 8,
                "Rope ASCII flag must remain inside existing header padding");
 
 static inline int w_is_rope(WValue v) {
-    return w_is_obj(v) && w_subtag(v) == W_SUBTAG_GENERIC &&
+    return __builtin_expect((v & 0xFFFF00000000000FULL) == 0 && v >= 0x10, 0) &&
            ((WRope *)w_as_ptr(v))->type == W_TYPE_ROPE;
 }
 

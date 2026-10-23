@@ -43,17 +43,25 @@ use core/numeric/float
         raise "SparseMatrix index is out of bounds"
       raw = values[k]
       name = raw.class_name
-      valid = Integer.value?(raw) || name == "Rational" || name == "Float" || name == "Decimal"
       value = nil
-      begin
-        if valid
-          text = raw.to_s
-          valid = text != nil && text.class_name == "String"
-        value = raw.to_f if valid
-        valid = valid && value != nil && value.class_name == "Float"
-        valid = !value.nan? && !value.infinite? if valid
-      rescue error
-        valid = false
+      valid = false
+      if name == "Float"
+        value = raw
+        valid = !value.nan? && !value.infinite?
+      elsif name == "Int"
+        value = raw.to_f
+        valid = !value.nan? && !value.infinite?
+      else
+        valid = Integer.value?(raw) || name == "Rational" || name == "Decimal"
+        begin
+          if valid
+            text = raw.to_s
+            valid = text != nil && text.class_name == "String"
+          value = raw.to_f if valid
+          valid = valid && value != nil && value.class_name == "Float"
+          valid = !value.nan? && !value.infinite? if valid
+        rescue error
+          valid = false
       raise "SparseMatrix values must be finite real values" if !valid
       key = row*cols + col
       if sums.has_key?(key)
@@ -187,7 +195,7 @@ use core/numeric/float
     @data_typed = nil
     self
 
-  ro :rows, :cols
+  ro :rows, :cols, :indptr, :indices, :data
   -> format
     @fmt
   -> nnz
@@ -195,46 +203,32 @@ use core/numeric/float
       return @data.size()
     @values.size()
 
+  -> as_csr_canonical(rows, cols, indptr, indices, data)
+    @fmt = :csr
+    @rows = rows
+    @cols = cols
+    @indptr = indptr
+    @indices = indices
+    @data = data
+    @row_idx = nil
+    @col_idx = nil
+    @values = nil
+    @data_typed = nil
+    self
+
   -> to_csr
     if @fmt == :csr
       return self
-    counts = []
-    i = 0
-    while i < @rows
-      counts = counts.push(0)
-      i = i + 1
-    k = 0
-    while k < @values.size()
-      r = @row_idx[k]
-      counts[r] = counts[r] + 1
-      k = k + 1
-    indptr = [0]
-    i = 0
-    while i < @rows
-      indptr = indptr.push(indptr[i] + counts[i])
-      i = i + 1
     nnz = @values.size()
-    indices = []
-    data = []
-    i = 0
-    while i < nnz
-      indices = indices.push(0)
-      data = data.push(~0.0)
-      i = i + 1
-    write_at = []
-    i = 0
-    while i < @rows
-      write_at = write_at.push(indptr[i])
-      i = i + 1
+    pointers = [0]
+    row = 0
     k = 0
-    while k < nnz
-      r = @row_idx[k]
-      p = write_at[r]
-      indices[p] = @col_idx[k]
-      data[p] = @values[k]
-      write_at[r] = p + 1
-      k = k + 1
-    SparseMatrix.csr(@rows, @cols, indptr, indices, data)
+    while row < @rows
+      while k < nnz && @row_idx[k] == row
+        k += 1
+      pointers.push(k)
+      row += 1
+    SparseMatrix.new().as_csr_canonical(@rows, @cols, pointers, @col_idx.dup, @values.dup)
 
   # y = A x  — pure path; Accelerate SparseBLAS when ccall available
   -> matvec(x)
@@ -244,20 +238,19 @@ use core/numeric/float
     # try native SpMV (f32 typed arrays) when bridge linked
     # pure path always works for list Float
     y = []
+    ip = a.indptr
+    ix = a.indices
+    dv = a.data
+    nrows = a.rows
     i = 0
-    while i < a.rows
-      y = y.push(~0.0)
-      i = i + 1
-    i = 0
-    while i < a.rows
+    while i < nrows
       s = ~0.0
-      p = a.indptr_at(i)
-      pend = a.indptr_at(i + 1)
+      p = ip[i]
+      pend = ip[i + 1]
       while p < pend
-        j = a.indices_at(p)
-        s = s + a.data_at(p) * x[j]
+        s = s + dv[p] * x[ix[p]]
         p = p + 1
-      y[i] = s
+      y.push(s)
       i = i + 1
     y
 

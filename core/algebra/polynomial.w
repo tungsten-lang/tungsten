@@ -746,22 +746,44 @@
     plan = substitution_plan(index)
     groups = plan[0]
     maximum_power = plan[1]
+    fastmod = @ring.fastmod
+    if fastmod != nil && plan.size == 6
+      group_offsets = plan[2]
+      flat_coeffs = plan[3]
+      flat_powers = plan[4]
+      group_exps = plan[5]
+      n_groups = group_exps.size
+      powers_buf = i64[maximum_power + 1]
+      group_vals = i64[n_groups]
+      poly_subst_fastmod_kernel(
+        group_offsets, flat_coeffs, flat_powers, n_groups,
+        scalar, maximum_power, fastmod, powers_buf, group_vals)
+      out = []
+      g = 0
+      while g < n_groups
+        v = group_vals[g]
+        if v != 0
+          out.push([v, group_exps[g]])
+        g += 1
+      return Polynomial.new(@ring, out, true)
     powers = [@ring.field.one]
     power = 1
     while power <= maximum_power
       powers.push(field_mul(powers[power - 1], scalar))
       power += 1
     out = []
+    n_groups = groups.size
     group_index = 0
-    while group_index < groups.size
+    while group_index < n_groups
       group = groups[group_index]
-      pieces = group[1]
+      coeffs = group[1]
+      exp_powers = group[2]
+      n_pieces = coeffs.size
       coefficient = @ring.field.zero
       piece_index = 0
-      while piece_index < pieces.size
-        piece = pieces[piece_index]
+      while piece_index < n_pieces
         coefficient = field_add(
-          coefficient, field_mul(piece[0], powers[piece[1]]))
+          coefficient, field_mul(coeffs[piece_index], powers[exp_powers[piece_index]]))
         piece_index += 1
       if !field_zero?(coefficient)
         out.push([coefficient, group[0]])
@@ -793,10 +815,11 @@
       if by_exponents.key?(key)
         group = by_exponents[key]
       else
-        group = [exponents, []]
+        group = [exponents, [], []]
         by_exponents[key] = group
         groups.push(group)
-      group[1].push([term[0], power])
+      group[1].push(term[0])
+      group[2].push(power)
 
     # Sort once; every later evaluation can use the trusted constructor even
     # when cancellation removes complete groups.
@@ -809,7 +832,34 @@
         groups[j] = temporary
         j -= 1
       i += 1
-    plan = [groups, maximum_power]
+    plan = nil
+    if @ring.fastmod != nil && groups.size > 0
+      n_groups = groups.size
+      n_terms = @terms.size
+      group_offsets = i64[n_groups + 1]
+      flat_coeffs = i64[n_terms]
+      flat_powers = i64[n_terms]
+      group_exps = []
+      cursor = 0
+      g = 0
+      while g < n_groups
+        group = groups[g]
+        group_exps.push(group[0])
+        group_offsets[g] = cursor
+        coeffs = group[1]
+        exp_powers = group[2]
+        n_pieces = coeffs.size
+        p = 0
+        while p < n_pieces
+          flat_coeffs[cursor] = coeffs[p]
+          flat_powers[cursor] = exp_powers[p]
+          cursor += 1
+          p += 1
+        g += 1
+      group_offsets[n_groups] = cursor
+      plan = [groups, maximum_power, group_offsets, flat_coeffs, flat_powers, group_exps]
+    else
+      plan = [groups, maximum_power]
     @substitution_plan_cache = [index, plan]
     plan
 
@@ -1264,3 +1314,38 @@
 
   -> generators
     @ring.generators
+
+-> poly_subst_fastmod_kernel(group_offsets, flat_coeffs, flat_powers, n_groups, scalar, max_pow, fastmod, powers_buf, group_vals) (i64[] i64[] i64[] i64 i64 i64 i64 i64[] i64[]) i64
+  powers_buf[0] = 1
+  prev = 1
+  p = 1
+  while p <= max_pow
+    prev = (prev * scalar) % fastmod
+    powers_buf[p] = prev
+    p = p + 1
+  g = 0
+  if fastmod <= 67108864
+    while g < n_groups
+      idx = group_offsets[g]
+      stop = group_offsets[g + 1]
+      acc = 0
+      step = 0
+      while idx < stop
+        acc = acc + flat_coeffs[idx] * powers_buf[flat_powers[idx]]
+        step = step + 1
+        if (step & 255) == 0
+          acc = acc % fastmod
+        idx = idx + 1
+      group_vals[g] = acc % fastmod
+      g = g + 1
+  else
+    while g < n_groups
+      idx = group_offsets[g]
+      stop = group_offsets[g + 1]
+      acc = 0
+      while idx < stop
+        acc = (acc + flat_coeffs[idx] * powers_buf[flat_powers[idx]]) % fastmod
+        idx = idx + 1
+      group_vals[g] = acc
+      g = g + 1
+  0

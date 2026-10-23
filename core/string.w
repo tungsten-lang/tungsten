@@ -92,20 +92,7 @@
           sw_v = sw_v ^ (32 << sw_sh)
         sw_i += 1
       return wvalue_from_bits(sw_v)
-    sw_n = ccall_nobox("w_string_byte_length", self) ## i64
-    sw_out = u8[sw_n + 1]
-    sw_src = ccall_nobox("w_string_data_ptr", self) ## i64
-    sw_dst = ccall_nobox("w_u8_live_data_ptr", sw_out) ## i64
-    sw_i = 0
-    while sw_i < sw_n
-      sw_b = raw_load_u8(sw_src, sw_i) ## i64
-      if sw_b >= 97 && sw_b <= 122
-        sw_b -= 32
-      elsif sw_b >= 65 && sw_b <= 90
-        sw_b += 32
-      raw_store_u8(sw_dst, sw_i, sw_b)
-      sw_i += 1
-    ccall("w_string_take_byte_array", sw_out, sw_n)
+    ccall("w_string_take_byte_array", self, -3)
 
   # First byte upcased, every later byte downcased — the former C handler's
   # exact ASCII semantics ("hello World" -> "Hello world").
@@ -123,20 +110,7 @@
           cp_v = cp_v ^ (32 << cp_sh)
         cp_i += 1
       return wvalue_from_bits(cp_v)
-    cp_n = ccall_nobox("w_string_byte_length", self) ## i64
-    cp_out = u8[cp_n + 1]
-    cp_src = ccall_nobox("w_string_data_ptr", self) ## i64
-    cp_dst = ccall_nobox("w_u8_live_data_ptr", cp_out) ## i64
-    cp_i = 0
-    while cp_i < cp_n
-      cp_b = raw_load_u8(cp_src, cp_i) ## i64
-      if cp_i == 0 && cp_b >= 97 && cp_b <= 122
-        cp_b -= 32
-      elsif cp_i > 0 && cp_b >= 65 && cp_b <= 90
-        cp_b += 32
-      raw_store_u8(cp_dst, cp_i, cp_b)
-      cp_i += 1
-    ccall("w_string_take_byte_array", cp_out, cp_n)
+    ccall("w_string_take_byte_array", self, -4)
 
   # Reverse by CODEPOINT (multibyte UTF-8 sequences keep their byte order),
   # ported from the former C IC handler. Inline receivers (<= 5 bytes)
@@ -244,18 +218,7 @@
           uc_v = uc_v ^ (32 << uc_sh)
         uc_i += 1
       return wvalue_from_bits(uc_v)
-    uc_n = ccall_nobox("w_string_byte_length", self) ## i64
-    uc_out = u8[uc_n + 1]
-    uc_src = ccall_nobox("w_string_data_ptr", self) ## i64
-    uc_dst = ccall_nobox("w_u8_live_data_ptr", uc_out) ## i64
-    uc_i = 0
-    while uc_i < uc_n
-      uc_b = raw_load_u8(uc_src, uc_i) ## i64
-      if uc_b >= 97 && uc_b <= 122
-        uc_b -= 32
-      raw_store_u8(uc_dst, uc_i, uc_b)
-      uc_i += 1
-    ccall("w_string_take_byte_array", uc_out, uc_n)
+    ccall("w_string_take_byte_array", self, -1)
 
   # ASCII lowercase (A-Z -> a-z); mirror of upcase.
   -> downcase
@@ -270,18 +233,7 @@
           dc_v = dc_v ^ (32 << dc_sh)
         dc_i += 1
       return wvalue_from_bits(dc_v)
-    dc_n = ccall_nobox("w_string_byte_length", self) ## i64
-    dc_out = u8[dc_n + 1]
-    dc_src = ccall_nobox("w_string_data_ptr", self) ## i64
-    dc_dst = ccall_nobox("w_u8_live_data_ptr", dc_out) ## i64
-    dc_i = 0
-    while dc_i < dc_n
-      dc_b = raw_load_u8(dc_src, dc_i) ## i64
-      if dc_b >= 65 && dc_b <= 90
-        dc_b += 32
-      raw_store_u8(dc_dst, dc_i, dc_b)
-      dc_i += 1
-    ccall("w_string_take_byte_array", dc_out, dc_n)
+    ccall("w_string_take_byte_array", self, -2)
 
   # Padding / alignment. Width is measured in BYTES (like size), so these
   # align ASCII exactly — the dominant use (tables, columns, CLI output). A
@@ -292,7 +244,11 @@
     if pl_n >= width
       return to_s
     pl_need = width - pl_n
-    pl_fill = (pad * pl_need).slice(0, pl_need)
+    pl_pn = pad.size
+    if pl_pn == 1
+      return (pad * pl_need) + to_s
+    pl_reps = (pl_need + pl_pn - 1) / pl_pn
+    pl_fill = (pad * pl_reps).slice(0, pl_need)
     pl_fill + to_s
 
   -> rpad(width, pad = " ")
@@ -300,25 +256,19 @@
     if pr_n >= width
       return to_s
     pr_need = width - pr_n
-    pr_fill = (pad * pr_need).slice(0, pr_need)
+    pr_pn = pad.size
+    if pr_pn == 1
+      return to_s + (pad * pr_need)
+    pr_reps = (pr_need + pr_pn - 1) / pr_pn
+    pr_fill = (pad * pr_reps).slice(0, pr_need)
     to_s + pr_fill
 
   # Ruby aliases: ljust pads on the right, rjust on the left.
   -> ljust(width, pad = " ")
-    plj_n = size
-    if plj_n >= width
-      return to_s
-    plj_need = width - plj_n
-    plj_fill = (pad * plj_need).slice(0, plj_need)
-    to_s + plj_fill
+    rpad(width, pad)
 
   -> rjust(width, pad = " ")
-    prj_n = size
-    if prj_n >= width
-      return to_s
-    prj_need = width - prj_n
-    prj_fill = (pad * prj_need).slice(0, prj_need)
-    prj_fill + to_s
+    lpad(width, pad)
 
   # Center within `width`; when the total padding is odd the extra byte goes
   # on the right, matching Ruby String#center.
@@ -329,53 +279,71 @@
     ce_total = width - ce_n
     ce_left = ce_total / 2
     ce_right = ce_total - ce_left
-    ce_lf = (pad * ce_left).slice(0, ce_left)
-    ce_rf = (pad * ce_right).slice(0, ce_right)
+    ce_pn = pad.size
+    if ce_pn == 1
+      ce_rf = pad * ce_right
+      if ce_left == 0
+        return to_s + ce_rf
+      ce_lf = ce_left == ce_right ? ce_rf : (pad * ce_left)
+      return ce_lf + to_s + ce_rf
+    ce_rreps = (ce_right + ce_pn - 1) / ce_pn
+    ce_rf = (pad * ce_rreps).slice(0, ce_right)
+    if ce_left == 0
+      return to_s + ce_rf
+    ce_lf = ce_left == ce_right ? ce_rf : ce_rf.slice(0, ce_left)
     ce_lf + to_s + ce_rf
 
   # Remove every character that appears in `set` (Ruby String#delete). `set`
   # is a character SET, not a substring — "hello".delete("lo") -> "he".
-  # Codepoint-based via chars, so multibyte content is preserved.
+  # Codepoint-based, with a fast byte path when both strings are ASCII.
   -> delete(set)
-    del_out = StringBuffer(size)
-    self.chars.each -> (c)
+    if ascii? && set.ascii?
+      return ccall("w_string_from_codes", self, set, -1)
+    del_buf = StringBuffer(size)
+    self.each_character -> (c)
       if !set.include?(c)
-        del_out << c
-    del_out.to_s
+        del_buf << c
+    del_buf.to_s
 
   # Collapse runs of the same character to one (Ruby String#squeeze):
   # "aaabbbcc" -> "abc".
   -> squeeze
-    sq_out = StringBuffer(size)
-    sq_prev = nil
-    self.chars.each -> (c)
-      if c != sq_prev
-        sq_out << c
-      sq_prev = c
-    sq_out.to_s
+    if ascii?
+      return ccall("w_string_take_byte_array", self, -5)
+    sq_buf = StringBuffer(size)
+    sq_prev_c = nil
+    self.each_character -> (c)
+      if c != sq_prev_c
+        sq_buf << c
+      sq_prev_c = c
+    sq_buf.to_s
 
   # Squeeze only runs of characters that appear in `set`
   # ("aaabbb".squeeze("a") -> "abbb").
   -> squeeze(set)
-    sqs_out = StringBuffer(size)
-    sqs_prev = nil
-    self.chars.each -> (c)
-      if !(c == sqs_prev && set.include?(c))
-        sqs_out << c
-      sqs_prev = c
-    sqs_out.to_s
+    if ascii? && set.ascii?
+      return ccall("w_string_from_codes", self, set, -2)
+    sqs_buf = StringBuffer(size)
+    sqs_prev_c = nil
+    self.each_character -> (c)
+      if !(c == sqs_prev_c && set.include?(c))
+        sqs_buf << c
+      sqs_prev_c = c
+    sqs_buf.to_s
 
   # Translate characters: each character in `from` maps to the one at the same
   # position in `to`; a shorter `to` repeats its last character, an empty `to`
   # deletes (Ruby String#tr). Literal character lists only — the range (a-z)
   # and negation (^x) shorthands are not yet supported.
   -> tr(from, to)
+    if ascii? && from.ascii? && to.ascii?
+      return ccall("w_string_from_codes", self, from, to)
     tr_from = from.chars
     tr_to = to.chars
     tr_from_n = tr_from.size
     tr_to_n = tr_to.size
-    tr_out = StringBuffer(size)
-    self.chars.each -> (c)
+    tr_buf = StringBuffer(size)
+    self.each_character -> (c)
       tr_idx = -1
       tr_fi = 0
       while tr_fi < tr_from_n
@@ -385,13 +353,13 @@
         else
           tr_fi += 1
       if tr_idx < 0
-        tr_out << c
+        tr_buf << c
       elsif tr_to_n > 0
         tr_ti = tr_idx
         if tr_ti >= tr_to_n
           tr_ti = tr_to_n - 1
-        tr_out << tr_to[tr_ti]
-    tr_out.to_s
+        tr_buf << tr_to[tr_ti]
+    tr_buf.to_s
 
   # True when every byte is ASCII (< 0x80). Inline receivers derive it from
   # the payload high bits in-register (bits 11/19/27/35/43); slab, heap, and
@@ -408,10 +376,21 @@
   # \t \n \v \f \r, bytes 9-13). Any other byte — multibyte UTF-8 included —
   # is not blank.
   -> blank?
+    bl_v = ($value & -2) ## i64
+    bl_mode = (bl_v >> 1) & 7
+    if bl_mode <= 5
+      bl_i = 0
+      while bl_i < bl_mode
+        bl_b = (bl_v >> (4 + 8 * bl_i)) & 0xFF
+        if bl_b != 32 && (bl_b < 9 || bl_b > 13)
+          return false
+        bl_i += 1
+      return true
     bl_n = ccall_nobox("w_string_byte_length", self) ## i64
+    bl_p = ccall_nobox("w_string_data_ptr", self) ## i64
     bl_i = 0
     while bl_i < bl_n
-      bl_b = self.byte_at(bl_i)
+      bl_b = raw_load_u8(bl_p, bl_i) ## i64
       if bl_b != 32 && (bl_b < 9 || bl_b > 13)
         return false
       bl_i += 1
@@ -468,10 +447,43 @@
   -> each_codepoint(&block)
     if !block?
       return StringCodepoints.new(self)
+    ecp_v = ($value & -2) ## i64
+    ecp_mode = (ecp_v >> 1) & 7
+    if ecp_mode <= 5
+      ecp_i = 0
+      while ecp_i < ecp_mode
+        ecp_b0 = (ecp_v >> (4 + 8 * ecp_i)) & 0xFF
+        ecp_len = 1
+        ecp_cp = ecp_b0
+        if ecp_b0 >= 240
+          ecp_len = 4
+          ecp_cp = ecp_b0 & 7
+        elsif ecp_b0 >= 224
+          ecp_len = 3
+          ecp_cp = ecp_b0 & 15
+        elsif ecp_b0 >= 192
+          ecp_len = 2
+          ecp_cp = ecp_b0 & 31
+        if ecp_len > ecp_mode - ecp_i
+          ecp_len = ecp_mode - ecp_i
+        ecp_k = 1
+        while ecp_k < ecp_len
+          ecp_cp = (ecp_cp << 6) | (((ecp_v >> (4 + 8 * (ecp_i + ecp_k))) & 0xFF) & 63)
+          ecp_k += 1
+        block(ecp_cp)
+        ecp_i += ecp_len
+      return self
     ecp_n = ccall_nobox("w_string_byte_length", self) ## i64
+    ecp_p = ccall_nobox("w_string_data_ptr", self) ## i64
+    if ccall_nobox("w_string_is_ascii", self) == 1
+      ecp_i = 0
+      while ecp_i < ecp_n
+        block(raw_load_u8(ecp_p, ecp_i))
+        ecp_i += 1
+      return self
     ecp_i = 0
     while ecp_i < ecp_n
-      ecp_b0 = self.byte_at(ecp_i)
+      ecp_b0 = raw_load_u8(ecp_p, ecp_i) ## i64
       ecp_len = 1
       ecp_cp = ecp_b0
       if ecp_b0 >= 240
@@ -487,7 +499,7 @@
         ecp_len = ecp_n - ecp_i
       ecp_k = 1
       while ecp_k < ecp_len
-        ecp_cp = (ecp_cp << 6) | (self.byte_at(ecp_i + ecp_k) & 63)
+        ecp_cp = (ecp_cp << 6) | ((raw_load_u8(ecp_p, ecp_i + ecp_k) ## i64) & 63)
         ecp_k += 1
       block(ecp_cp)
       ecp_i += ecp_len
@@ -501,14 +513,13 @@
       return StringLines.new(self)
     el_n = ccall_nobox("w_string_byte_length", self) ## i64
     el_start = 0
-    el_i = 0
-    while el_i < el_n
-      if self.byte_at(el_i) == 10
-        block(self.slice(el_start, el_i - el_start + 1))
-        el_start = el_i + 1
-      el_i += 1
-    if el_start < el_n
-      block(self.slice(el_start, el_n - el_start))
+    while el_start < el_n
+      el_nl = self.index("\n", el_start)
+      if el_nl == nil
+        block(self.slice(el_start, el_n - el_start))
+        return self
+      block(self.slice(el_start, el_nl - el_start + 1))
+      el_start = el_nl + 1
     self
 
   # Eager Array of lines (trailing newlines included).
@@ -524,53 +535,53 @@
     include?(sub)
 
   # Levenshtein edit distance between self and other, by code point.
-  # Two rolling rows of the classic dynamic-programming matrix.
   -> levenshtein(other)
-    lv_s = self.codepoints.to_a
-    lv_t = other.codepoints.to_a
-    lv_sn = lv_s.size
-    lv_n = lv_t.size
-    if lv_sn == 0
-      return lv_n
-    if lv_n == 0
-      return lv_sn
-    prev = (0..lv_n).to_a
-    curr = Array.new(lv_n + 1, 0)
-    lv_i = 0
-    while lv_i < lv_sn
-      curr[0] = lv_i + 1
-      lv_si = lv_s[lv_i]
-      lv_j = 0
-      while lv_j < lv_n
-        lv_cost = 1
-        if lv_si == lv_t[lv_j]
-          lv_cost = 0
-        lv_ins = curr[lv_j] + 1
-        lv_del = prev[lv_j + 1] + 1
-        lv_sub = prev[lv_j] + lv_cost
-        lv_m = lv_ins
-        if lv_del < lv_m
-          lv_m = lv_del
-        if lv_sub < lv_m
-          lv_m = lv_sub
-        curr[lv_j + 1] = lv_m
-        lv_j += 1
-      lv_swap = prev
-      prev = curr
-      curr = lv_swap
-      lv_i += 1
-    prev[lv_n]
+    ccall("w_string_from_codes", self, other, -3)
 
   # Yield each character (a single-code-point String) in order; returns
-  # self. Without a block, returns the lazy StringCharacters view. Same
-  # clamped lead-byte walk as each_codepoint; slices stay byte-exact.
+  # self. Without a block, returns the lazy StringCharacters view. Each
+  # character is 1..4 bytes and is constructed directly as an inline-mode
+  # String in register bits without slice allocations.
   -> each_character(&block)
     if !block?
       return StringCharacters.new(self)
+    ech_tag = -1_970_324_836_974_592 ## i64
+    ech_v = ($value & -2) ## i64
+    ech_mode = (ech_v >> 1) & 7
+    if ech_mode <= 5
+      ech_i = 0
+      while ech_i < ech_mode
+        ech_b0 = (ech_v >> (4 + 8 * ech_i)) & 0xFF
+        ech_len = 1
+        if ech_b0 >= 240
+          ech_len = 4
+        elsif ech_b0 >= 224
+          ech_len = 3
+        elsif ech_b0 >= 192
+          ech_len = 2
+        if ech_len > ech_mode - ech_i
+          ech_len = ech_mode - ech_i
+        ech_pay = 0 ## i64
+        ech_k = 0
+        while ech_k < ech_len
+          ech_pay = ech_pay | (((ech_v >> (4 + 8 * (ech_i + ech_k))) & 0xFF) << (4 + 8 * ech_k))
+          ech_k += 1
+        block(wvalue_from_bits((ech_tag | (ech_len << 1) | ech_pay) ## i64))
+        ech_i += ech_len
+      return self
     ech_n = ccall_nobox("w_string_byte_length", self) ## i64
+    ech_p = ccall_nobox("w_string_data_ptr", self) ## i64
+    if ccall_nobox("w_string_is_ascii", self) == 1
+      ech_base1 = (ech_tag | 2) ## i64
+      ech_i = 0
+      while ech_i < ech_n
+        ech_b0 = raw_load_u8(ech_p, ech_i) ## i64
+        block(wvalue_from_bits((ech_base1 | (ech_b0 << 4)) ## i64))
+        ech_i += 1
+      return self
     ech_i = 0
     while ech_i < ech_n
-      ech_b0 = self.byte_at(ech_i)
+      ech_b0 = raw_load_u8(ech_p, ech_i) ## i64
       ech_len = 1
       if ech_b0 >= 240
         ech_len = 4
@@ -580,7 +591,13 @@
         ech_len = 2
       if ech_len > ech_n - ech_i
         ech_len = ech_n - ech_i
-      block(self.slice(ech_i, ech_len))
+      ech_pay = (ech_b0 << 4) ## i64
+      ech_k = 1
+      while ech_k < ech_len
+        ech_bk = raw_load_u8(ech_p, ech_i + ech_k) ## i64
+        ech_pay = ech_pay | (ech_bk << (4 + 8 * ech_k))
+        ech_k += 1
+      block(wvalue_from_bits((ech_tag | (ech_len << 1) | ech_pay) ## i64))
       ech_i += ech_len
     self
 
@@ -659,14 +676,14 @@
       sc_len = pattern.size
       if sc_len == 0
         return out
-      sc_n = ccall_nobox("w_string_byte_length", self) ## i64
+      sc_pat = pattern.to_s
       sc_i = 0
-      while sc_i + sc_len <= sc_n
-        if self.slice(sc_i, sc_len) == pattern
-          out.push(pattern.to_s)
-          sc_i += sc_len
-        else
-          sc_i += 1
+      loop
+        sc_pos = self.index(sc_pat, sc_i)
+        if sc_pos == nil
+          break
+        out.push(sc_pat)
+        sc_i = sc_pos + sc_len
       return out
     if ccall_nobox("w_is_native_regex", pattern) == 1
       return ccall("w_regex_scan", pattern, self)
@@ -798,8 +815,8 @@
           return 0x211D
         when 90
           return 0x2124
-      az_upper = [0x1D400, 0x1D434, 0x1D468, 0x1D49C, 0x1D4D0, 0x1D504, 0x1D56C, 0x1D538, 0x1D5A0, 0x1D5D4, 0x1D608, 0x1D63C, 0x1D670]
-      return az_upper[style - 1] + (cp - 65)
+      az_k = style == 7 ? 7 : (style == 8 ? 6 : (style - 1))
+      return 0x1D400 + 52 * az_k + (cp - 65)
     if cp >= 97 && cp <= 122
       if style == 2 && cp == 104
         return 0x210E
@@ -811,8 +828,8 @@
           return 0x210A
         when 111
           return 0x2134
-      az_lower = [0x1D41A, 0x1D44E, 0x1D482, 0x1D4B6, 0x1D4EA, 0x1D51E, 0x1D586, 0x1D552, 0x1D5BA, 0x1D5EE, 0x1D622, 0x1D656, 0x1D68A]
-      return az_lower[style - 1] + (cp - 97)
+      az_k = style == 7 ? 7 : (style == 8 ? 6 : (style - 1))
+      return 0x1D41A + 52 * az_k + (cp - 97)
     if cp >= 48 && cp <= 57
       if style == 1
         return 0x1D7CE + (cp - 48)
@@ -830,23 +847,27 @@
 
   # snake_case (or kebab-case / spaced words) to CamelCase.
   -> camelize
-    cm_out = StringBuffer(size)
+    if ascii?
+      return ccall("w_string_take_byte_array", self, -6)
+    cm_buf = StringBuffer(size)
     cm_up = true
-    self.chars.each -> (c)
+    self.each_character -> (c)
       if c == "_" || c == "-" || c == " "
         cm_up = true
       elsif cm_up
-        cm_out << c.upcase
+        cm_buf << c.upcase
         cm_up = false
       else
-        cm_out << c
-    cm_out.to_s
+        cm_buf << c
+    cm_buf.to_s
 
   # CamelCase to snake_case, splitting acronym runs at the last capital
   # ("HTTPServer" -> "http_server"); dashes normalize to underscores.
   -> underscore
+    if ascii?
+      return ccall("w_string_take_byte_array", self, -7)
     us_chars = self.chars
-    us_out = StringBuffer(size + 8)
+    us_buf = StringBuffer(size + 8)
     us_n = us_chars.size
     us_i = 0
     while us_i < us_n
@@ -863,14 +884,14 @@
         us_prev_upper = us_prev >= 65 && us_prev <= 90
         us_next_lower = us_next >= 97 && us_next <= 122
         if us_i > 0 && (us_prev_soft || (us_prev_upper && us_next_lower))
-          us_out << "_"
-        us_out << (us_o + 32).chr
+          us_buf << "_"
+        us_buf << (us_o + 32).chr
       elsif us_c == "-"
-        us_out << "_"
+        us_buf << "_"
       else
-        us_out << us_c
+        us_buf << us_c
       us_i += 1
-    us_out.to_s
+    us_buf.to_s
 
   # Alias for underscore (one dispatch hop; cosmetic spelling).
   -> snakecase

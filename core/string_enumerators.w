@@ -66,8 +66,11 @@
       block(cp)
     self
 
-  # Code points are variable-width, so counting is one UTF-8 walk.
+  # Code points are variable-width, so non-ASCII counting is one UTF-8 walk;
+  # ASCII strings have 1 byte per code point so size is O(1).
   -> size
+    if @source.ascii?
+      return @source.size
     sz = 0
     @source.each_codepoint -> (cp)
       sz += 1
@@ -84,10 +87,9 @@
     self
 
   -> size
-    sz = 0
-    @source.each_character -> (c)
-      sz += 1
-    sz
+    if @source.ascii?
+      return @source.size
+    @source.codepoints.size
 
 + StringGraphemes
   is Enumerable
@@ -116,7 +118,15 @@
     self
 
   -> size
-    sz = 0
-    @source.each_line -> (l)
-      sz += 1
-    sz
+    sl_n = @source.size
+    if sl_n == 0
+      return 0
+    sl_cnt = 0
+    sl_pos = 0
+    while sl_pos < sl_n
+      sl_nl = @source.index("\n", sl_pos)
+      if sl_nl == nil
+        return sl_cnt + 1
+      sl_cnt += 1
+      sl_pos = sl_nl + 1
+    sl_cnt

@@ -559,9 +559,11 @@
         return parse_lambda()
       return parse_method_def()
 
-    # Typed array: i128[1000] / bare type name
+    # Typed array: i128[1000] / bare type name. A local or parameter
+    # spelled like the type (`u1 = [~0.0, ~1.0]`) is a variable instead:
+    # the Var below lets the postfix loop parse `u1[1]` as an index.
     if t == T_TYPE
-      if peek_type() == T_LBRACKET
+      if peek_type() == T_LBRACKET && !bound_type_name?(current_value())
         type_name = advance_value()
         expect_type(T_LBRACKET)
         size = parse_expression()

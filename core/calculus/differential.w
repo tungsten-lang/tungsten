@@ -18,23 +18,44 @@
         raise "Differential Hessian must be square"
       i += 1
 
+  -> new(@value, @gradient, @hessian, trusted)
+    if !trusted
+      if @gradient.class_name != "Array" || @hessian.class_name != "Array"
+        raise "Differential needs Array gradient and Hessian"
+      @gradient = Calculus.copy_vector(@gradient)
+      @hessian = Calculus.copy_matrix(@hessian)
+      if @hessian.size != @gradient.size
+        raise "Differential Hessian dimension mismatch"
+      i = 0
+      while i < @hessian.size
+        if @hessian[i].size != @gradient.size
+          raise "Differential Hessian must be square"
+        i += 1
+
   -> .constant(value, dimension)
     Differential.new(
       value,
       Calculus.zero_vector(dimension),
-      Calculus.zero_matrix(dimension))
+      Calculus.zero_matrix(dimension),
+      true)
 
   -> .variable(value, dimension, index)
     if index < 0 || index >= dimension
       raise "Differential variable index is out of range"
     gradient = Calculus.zero_vector(dimension)
     gradient[index] = ~1.0
-    Differential.new(value, gradient, Calculus.zero_matrix(dimension))
+    Differential.new(value, gradient, Calculus.zero_matrix(dimension), true)
 
   ro :value
 
   -> dimension
     @gradient.size
+
+  -> raw_gradient
+    @gradient
+
+  -> raw_hessian
+    @hessian
 
   -> gradient
     Calculus.copy_vector(@gradient)
@@ -51,58 +72,87 @@
 
   -> +(other)
     rhs = self.coerce(other)
-    # The public accessors return defensive copies. Hoist each one once:
-    # calling rhs.hessian inside the cell loop copied the full d-by-d matrix
-    # for every output cell, turning addition into O(d^4) work.
-    rhs_gradient = rhs.gradient
-    rhs_hessian = rhs.hessian
+    rhs_gradient = rhs.raw_gradient
+    rhs_hessian = rhs.raw_hessian
+    dim = @gradient.size
     gradient = []
-    hessian = Calculus.zero_matrix(self.dimension)
+    hessian = []
     i = 0
-    while i < self.dimension
+    while i < dim
       gradient.push(@gradient[i] + rhs_gradient[i])
+      lhs_row = @hessian[i]
+      rhs_row = rhs_hessian[i]
+      row = []
       j = 0
-      while j < self.dimension
-        hessian[i][j] = @hessian[i][j] + rhs_hessian[i][j]
+      while j < dim
+        row.push(lhs_row[j] + rhs_row[j])
         j += 1
+      hessian.push(row)
       i += 1
-    Differential.new(@value + rhs.value, gradient, hessian)
+    Differential.new(@value + rhs.value, gradient, hessian, true)
 
   -> -(other)
     rhs = self.coerce(other)
+    rhs_gradient = rhs.raw_gradient
+    rhs_hessian = rhs.raw_hessian
+    dim = @gradient.size
     gradient = []
-    hessian = Calculus.zero_matrix(self.dimension)
-    rhs_gradient = rhs.gradient
-    rhs_hessian = rhs.hessian
+    hessian = []
     i = 0
-    while i < self.dimension
+    while i < dim
       gradient.push(@gradient[i] - rhs_gradient[i])
+      lhs_row = @hessian[i]
+      rhs_row = rhs_hessian[i]
+      row = []
       j = 0
-      while j < self.dimension
-        hessian[i][j] = @hessian[i][j] - rhs_hessian[i][j]
+      while j < dim
+        row.push(lhs_row[j] - rhs_row[j])
         j += 1
+      hessian.push(row)
       i += 1
-    Differential.new(@value - rhs.value, gradient, hessian)
+    Differential.new(@value - rhs.value, gradient, hessian, true)
 
   -> -@
-    Differential.constant(~0.0, self.dimension) - self
+    dim = @gradient.size
+    gradient = []
+    hessian = []
+    i = 0
+    while i < dim
+      gradient.push(~0.0 - @gradient[i])
+      lhs_row = @hessian[i]
+      row = []
+      j = 0
+      while j < dim
+        row.push(~0.0 - lhs_row[j])
+        j += 1
+      hessian.push(row)
+      i += 1
+    Differential.new(~0.0 - @value, gradient, hessian, true)
 
   -> *(other)
     rhs = self.coerce(other)
-    rhs_gradient = rhs.gradient
-    rhs_hessian = rhs.hessian
+    rhs_val = rhs.value
+    rhs_gradient = rhs.raw_gradient
+    rhs_hessian = rhs.raw_hessian
+    dim = @gradient.size
     gradient = []
-    hessian = Calculus.zero_matrix(self.dimension)
+    hessian = []
     i = 0
-    while i < self.dimension
-      gradient.push(@gradient[i] * rhs.value + @value * rhs_gradient[i])
+    while i < dim
+      gi = @gradient[i]
+      rgi = rhs_gradient[i]
+      gradient.push(gi * rhs_val + @value * rgi)
+      lhs_row = @hessian[i]
+      rhs_row = rhs_hessian[i]
+      row = []
       j = 0
-      while j < self.dimension
-        value = @hessian[i][j] * rhs.value + @value * rhs_hessian[i][j] + @gradient[i] * rhs_gradient[j] + rhs_gradient[i] * @gradient[j]
-        hessian[i][j] = value
+      while j < dim
+        value = lhs_row[j] * rhs_val + @value * rhs_row[j] + gi * rhs_gradient[j] + rgi * @gradient[j]
+        row.push(value)
         j += 1
+      hessian.push(row)
       i += 1
-    Differential.new(@value * rhs.value, gradient, hessian)
+    Differential.new(@value * rhs_val, gradient, hessian, true)
 
   -> scale(scalar)
     self.unary_transform(@value * scalar, scalar, ~0.0)
@@ -119,18 +169,24 @@
     self * self.coerce(other).reciprocal
 
   -> unary_transform(result_value, first_derivative, second_derivative)
+    dim = @gradient.size
     gradient = []
-    hessian = Calculus.zero_matrix(self.dimension)
+    hessian = []
     i = 0
-    while i < self.dimension
-      gradient.push(first_derivative * @gradient[i])
+    while i < dim
+      gi = @gradient[i]
+      gradient.push(first_derivative * gi)
+      s_gi = second_derivative * gi
+      lhs_row = @hessian[i]
+      row = []
       j = 0
-      while j < self.dimension
-        cell_value = second_derivative * @gradient[i] * @gradient[j] + first_derivative * @hessian[i][j]
-        hessian[i][j] = cell_value
+      while j < dim
+        cell_value = s_gi * @gradient[j] + first_derivative * lhs_row[j]
+        row.push(cell_value)
         j += 1
+      hessian.push(row)
       i += 1
-    Differential.new(result_value, gradient, hessian)
+    Differential.new(result_value, gradient, hessian, true)
 
   -> exp
     value = Math.exp(@value)

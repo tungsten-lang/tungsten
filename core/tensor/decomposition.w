@@ -65,12 +65,38 @@ use core/linalg
   # Snapshot views in logical row-major order; never overwrite caller storage.
   -> .copy_tensor(t)
     TensorDecomposition.validate(t)
+    n = t.size
+    if t.contiguous?
+      out = Tensor.zeros_cpu(Tensor.f64, TensorDecomposition.copy_list(t.shape))
+      src = t.buffer
+      dst = out.buffer
+      off = t.offset
+      i = 0
+      while i < n
+        x = src[off + i].to_f
+        raise "tensor decomposition requires finite entries" if !x.finite?
+        dst[i] = x
+        i += 1
+      out.unit = t.unit
+      return out
+    packed = t.contiguous
+    out = nil
+    if packed.dtype == Tensor.f64
+      out = Tensor.new(:cpu, packed.buffer, Tensor.f64, TensorDecomposition.copy_list(t.shape), packed.strides, 0, t.unit)
+      buf = out.buffer
+      i = 0
+      while i < n
+        raise "tensor decomposition requires finite entries" if !buf[i].finite?
+        i += 1
+      return out
     out = Tensor.zeros_cpu(Tensor.f64, TensorDecomposition.copy_list(t.shape))
+    src = packed.buffer
+    dst = out.buffer
     i = 0
-    while i < t.size
-      x = t.at(Tensor.unravel(i, t.shape)).to_f
+    while i < n
+      x = src[i].to_f
       raise "tensor decomposition requires finite entries" if !x.finite?
-      out.buffer[i] = x
+      dst[i] = x
       i += 1
     out.unit = t.unit
     out
@@ -79,20 +105,57 @@ use core/linalg
   -> .normalized(t)
     out = TensorDecomposition.copy_tensor(t)
     scale = ~0.0
+    buf = out.buffer
+    n = out.size
     i = 0
-    while i < out.size
-      scale = out.buffer[i].abs if out.buffer[i].abs > scale
+    while i < n
+      v = buf[i].abs
+      scale = v if v > scale
       i += 1
     if scale > ~0.0
+      inv = ~1.0 / scale
       i = 0
-      while i < out.size
-        out.buffer[i] /= scale
+      while i < n
+        buf[i] = buf[i] * inv
         i += 1
     out.unit = nil
     [out, scale]
 
   -> .relative_error(a, b)
     raise "decomposition residual shape mismatch" if !Tensor.same_shape(a.shape, b.shape)
+    pa = a.device == :cpu && a.contiguous? ? a : a.contiguous
+    pb = b.device == :cpu && b.contiguous? ? b : b.contiguous
+    if pa.device == :cpu && pb.device == :cpu && pa.contiguous? && pb.contiguous?
+      sa = pa.buffer
+      sb = pb.buffer
+      oa = pa.offset
+      ob = pb.offset
+      n = pa.size
+      max_scale = ~0.0
+      i = 0
+      while i < n
+        av = sa[oa + i].to_f
+        bv = sb[ob + i].to_f
+        raise "tensor decomposition numerical breakdown" if !bv.finite?
+        aa = av.abs
+        ba = bv.abs
+        max_scale = aa if aa > max_scale
+        max_scale = ba if ba > max_scale
+        i += 1
+      return ~0.0 if max_scale == ~0.0
+      inv = ~1.0 / max_scale
+      err_sq = ~0.0
+      den_sq = ~0.0
+      i = 0
+      while i < n
+        av = sa[oa + i].to_f * inv
+        bv = sb[ob + i].to_f * inv
+        d = av - bv
+        err_sq += d * d
+        den_sq += av * av
+        i += 1
+      return Math.sqrt(err_sq) * max_scale if den_sq == ~0.0
+      return Math.sqrt(err_sq / den_sq)
     error = ~0.0
     denominator = ~0.0
     i = 0
@@ -154,27 +217,46 @@ use core/linalg
     rank = weights.size
     raise "CP requires at least one component" if rank == 0
     shape = []
+    packed_factors = []
     factors.each -> (f)
       TensorDecomposition.validate(f)
       if f.rank != 2 || f.shape[1] != rank || f.unit != nil
         raise "CP factor widths must match weights and factors must be dimensionless"
       shape.push(f.shape[0])
+      packed_factors.push(f.contiguous? ? f : f.contiguous)
     out = Tensor.zeros_cpu(Tensor.f64, shape)
+    dst = out.buffer
+    n_out = out.size
+    n_modes = packed_factors.size
+    ps = Tensor.packed_strides(shape)
+    w_buf = f64[rank]
+    r = 0
+    while r < rank
+      w_buf[r] = weights[r].to_f
+      r += 1
+    coord = i32[n_modes]
     i = 0
-    while i < out.size
-      coord = Tensor.unravel(i, shape)
+    while i < n_out
+      rem = i
+      m = 0
+      while m < n_modes
+        psm = ps[m]
+        coord[m] = rem / psm
+        rem = rem % psm
+        m += 1
       value = ~0.0
       r = 0
       while r < rank
-        term = weights[r].to_f
+        term = w_buf[r]
         m = 0
-        while m < factors.size
-          term *= factors[m].at([coord[m], r])
+        while m < n_modes
+          fm = packed_factors[m]
+          term *= fm.buffer[fm.offset + coord[m] * rank + r]
           m += 1
         value += term
         r += 1
       raise "CP reconstruction overflow or nonfinite factors" if !value.finite?
-      out.buffer[i] = value
+      dst[i] = value
       i += 1
     out
 
@@ -190,48 +272,111 @@ use core/linalg
   # Khatri-Rao product excluding one mode, matching unfold's column order.
   -> .design(factors, mode)
     shape = []
-    axes = []
+    active_factors = []
     m = 0
     while m < factors.size
       if m != mode
-        shape.push(factors[m].shape[0])
-        axes.push(m)
+        fm = factors[m]
+        shape.push(fm.shape[0])
+        active_factors.push(fm.contiguous? ? fm : fm.contiguous)
       m += 1
     rank = factors[0].shape[1]
-    out = Tensor.zeros_cpu(Tensor.f64, [Tensor.elem_count(shape), rank])
+    nrows = Tensor.elem_count(shape)
+    out = Tensor.zeros_cpu(Tensor.f64, [nrows, rank])
+    dst = out.buffer
+    n_active = active_factors.size
+    ps = Tensor.packed_strides(shape)
+    coord = i32[n_active]
     i = 0
-    while i < out.shape[0]
-      coord = Tensor.unravel(i, shape)
+    while i < nrows
+      rem = i
+      j = 0
+      while j < n_active
+        psj = ps[j]
+        coord[j] = rem / psj
+        rem = rem % psj
+        j += 1
+      row_base = i * rank
       r = 0
       while r < rank
         value = ~1.0
         j = 0
-        while j < axes.size
-          value *= factors[axes[j]].at([coord[j], r])
+        while j < n_active
+          fj = active_factors[j]
+          value *= fj.buffer[fj.offset + coord[j] * rank + r]
           j += 1
-        out.buffer[i * rank + r] = value
+        dst[row_base + r] = value
         r += 1
       i += 1
     out
 
+  # Direct thin SVD over a CPU f64 rank-2 Tensor without nested-row boxing.
+  -> .svd_tensor(matrix)
+    m = matrix.shape[0]
+    n = matrix.shape[1]
+    k = m < n ? m : n
+    if k == 0
+      return [Tensor.zeros_cpu(Tensor.f64, [m, 0]), Tensor.storage_f64(0), Tensor.zeros_cpu(Tensor.f64, [0, n])]
+    flat = Tensor.storage_f64(m * n)
+    src = matrix.buffer
+    off = matrix.offset
+    i = 0
+    while i < m
+      row_base = off + i * n
+      j = 0
+      while j < n
+        value = src[row_base + j].to_f
+        raise "LinAlg.svd: entries must be finite" if !value.finite?
+        flat[j * m + i] = value
+        j += 1
+      i += 1
+    values = Tensor.storage_f64(k)
+    uf = Tensor.storage_f64(m * k)
+    vf = Tensor.storage_f64(k * n)
+    info = ccall("w_blas_dgesdd_thin", flat, values, uf, vf, m, n)
+    raise "LinAlg.svd: LAPACK failed with info=" + info.to_s if info != 0
+    u = Tensor.zeros_cpu(Tensor.f64, [m, k])
+    vt = Tensor.zeros_cpu(Tensor.f64, [k, n])
+    ub = u.buffer
+    vtb = vt.buffer
+    j = 0
+    while j < k
+      col_base = j * m
+      i = 0
+      while i < m
+        ub[i * k + j] = uf[col_base + i]
+        i += 1
+      vt_row = j * n
+      i = 0
+      while i < n
+        vtb[vt_row + i] = vf[i * k + j]
+        i += 1
+      j += 1
+    [u, values, vt]
+
   # Solve all RHS at once using a truncated SVD, including deficient/wide
   # design matrices. Avoid normal equations and their squared conditioning.
   -> .solve_mode(design, rhs, rcond)
-    svd = LinAlg.svd(design.to_rows)
-    u = Tensor.from_rows(svd[0], Tensor.f64)
+    svd = TensorDecomposition.svd_tensor(design)
+    u = svd[0]
     values = svd[1]
-    vt = Tensor.from_rows(svd[2], Tensor.f64)
+    vt = svd[2]
     projected = rhs.matmul(u)
+    k = values.size
     cutoff = values[0] * rcond
+    pb = projected.buffer
+    rows = projected.shape[0]
     i = 0
-    while i < projected.shape[0]
+    while i < rows
+      row_base = i * k
       j = 0
-      while j < values.size
-        index = i * values.size + j
-        if values[j] > cutoff
-          projected.buffer[index] /= values[j]
+      while j < k
+        index = row_base + j
+        vj = values[j]
+        if vj > cutoff
+          pb[index] = pb[index] / vj
         else
-          projected.buffer[index] = ~0.0
+          pb[index] = ~0.0
         j += 1
       i += 1
     projected.matmul(vt)
@@ -326,16 +471,18 @@ use core/linalg
   # Complete a thin left singular basis when requested rank exceeds the
   # unfolding's column count (e.g. full Tucker ranks of an 8×2×2 tensor).
   -> .left_basis(matrix, rank)
-    svd = LinAlg.svd(matrix.to_rows)
+    svd = TensorDecomposition.svd_tensor(matrix)
     thin = svd[0]
+    thin_buf = thin.buffer
     available = svd[1].size
     rows = matrix.shape[0]
     out = Tensor.zeros_cpu(Tensor.f64, [rows, rank])
+    out_buf = out.buffer
     col = 0
     while col < rank && col < available
       i = 0
       while i < rows
-        out.set([i, col], thin[i][col])
+        out_buf[i * rank + col] = thin_buf[i * available + col]
         i += 1
       col += 1
     axis = 0
@@ -351,18 +498,18 @@ use core/linalg
           dot = ~0.0
           i = 0
           while i < rows
-            dot += v[i] * out.at([i, j])
+            dot += v[i] * out_buf[i * rank + j]
             i += 1
           i = 0
           while i < rows
-            v[i] -= dot * out.at([i, j])
+            v[i] -= dot * out_buf[i * rank + j]
             i += 1
           j += 1
       length = LinAlg.norm(v)
       if length > ~1e-10
         i = 0
         while i < rows
-          out.set([i, col], v[i] / length)
+          out_buf[i * rank + col] = v[i] / length
           i += 1
         col += 1
       axis += 1

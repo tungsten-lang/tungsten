@@ -163,45 +163,35 @@ static int parse_file_ast(const char *path, const unsigned char *flags, size_t f
   return ok;
 }
 
-static int compile_use_definitions(TcAstValue ast, const char *path, const unsigned char *flags, size_t flags_len,
-                                   PathSet *seen, TcChunk *chunk, TcError *err) {
-  TcAstValue *exprs = main_ast_get(ast, "expressions");
-  if (!exprs || exprs->kind != TC_AST_ARRAY) return 1;
+typedef struct {
+  TcAstValue *items;
+  size_t count;
+  size_t cap;
+} UseAstList;
 
-  for (size_t i = 0; i < exprs->as.array->count; i++) {
-    TcAstValue expr = exprs->as.array->items[i];
-    if (!main_ast_node_is(expr, "use")) continue;
-    TcAstValue *use = main_ast_get(expr, "path");
-    if (!use || use->kind != TC_AST_STRING) continue;
-    char *use_path = resolve_use_path(path, use->as.string.bytes, use->as.string.len, err);
-    if (!use_path) return 0;
-    if (path_set_contains(seen, use_path)) {
-      free(use_path);
-      continue;
-    }
-    if (!path_set_add(seen, use_path, err)) {
-      free(use_path);
+static void use_ast_list_free(UseAstList *list) {
+  for (size_t i = 0; i < list->count; i++) tc_ast_free(list->items[i]);
+  free(list->items);
+  memset(list, 0, sizeof(*list));
+}
+
+static int use_ast_list_push(UseAstList *list, TcAstValue ast, TcError *err) {
+  if (list->count == list->cap) {
+    size_t cap = list->cap ? list->cap * 2 : 32;
+    TcAstValue *items = (TcAstValue *)realloc(list->items, cap * sizeof(TcAstValue));
+    if (!items) {
+      tc_error_set(err, "use AST list allocation failed");
       return 0;
     }
-    TcAstValue use_ast;
-    if (!parse_file_ast(use_path, flags, flags_len, &use_ast, err)) {
-      free(use_path);
-      return 0;
-    }
-    if (!compile_use_definitions(use_ast, use_path, flags, flags_len, seen, chunk, err) ||
-        !tc_compile_ast_definitions(use_ast, chunk, err)) {
-      tc_ast_free(use_ast);
-      free(use_path);
-      return 0;
-    }
-    tc_ast_free(use_ast);
-    free(use_path);
+    list->items = items;
+    list->cap = cap;
   }
+  list->items[list->count++] = ast;
   return 1;
 }
 
 static int compile_use_initializers(TcAstValue ast, const char *path, const unsigned char *flags, size_t flags_len,
-                                    PathSet *seen, TcChunk *chunk, TcError *err) {
+                                    PathSet *seen, UseAstList *use_asts, TcChunk *chunk, TcError *err) {
   TcAstValue *exprs = main_ast_get(ast, "expressions");
   if (!exprs || exprs->kind != TC_AST_ARRAY) return 1;
 
@@ -225,13 +215,13 @@ static int compile_use_initializers(TcAstValue ast, const char *path, const unsi
       free(use_path);
       return 0;
     }
-    if (!compile_use_initializers(use_ast, use_path, flags, flags_len, seen, chunk, err) ||
-        !tc_compile_ast_initializers(use_ast, chunk, err)) {
+    if (!compile_use_initializers(use_ast, use_path, flags, flags_len, seen, use_asts, chunk, err) ||
+        !tc_compile_ast_initializers(use_ast, chunk, err) ||
+        !use_ast_list_push(use_asts, use_ast, err)) {
       tc_ast_free(use_ast);
       free(use_path);
       return 0;
     }
-    tc_ast_free(use_ast);
     free(use_path);
   }
   return 1;
@@ -404,11 +394,13 @@ int main(int argc, char **argv) {
     tc_source_free(&source);
     goto fail;
   }
+  UseAstList use_asts = {0};
   if (path) {
     PathSet seen = {0};
     if (!path_set_add(&seen, path, &err) ||
-        !compile_use_initializers(ast, path, flags, flags_len, &seen, &chunk, &err)) {
+        !compile_use_initializers(ast, path, flags, flags_len, &seen, &use_asts, &chunk, &err)) {
       path_set_free(&seen);
+      use_ast_list_free(&use_asts);
       tc_ast_free(ast);
       tc_chunk_free(&chunk);
       tc_syntax_tokens_free(&syntax_tokens);
@@ -419,6 +411,7 @@ int main(int argc, char **argv) {
     path_set_free(&seen);
   }
   if (!tc_compile_ast(ast, &chunk, &err)) {
+    use_ast_list_free(&use_asts);
     tc_ast_free(ast);
     tc_chunk_free(&chunk);
     tc_syntax_tokens_free(&syntax_tokens);
@@ -426,11 +419,9 @@ int main(int argc, char **argv) {
     tc_source_free(&source);
     goto fail;
   }
-  if (path) {
-    PathSet seen = {0};
-    if (!path_set_add(&seen, path, &err) ||
-        !compile_use_definitions(ast, path, flags, flags_len, &seen, &chunk, &err)) {
-      path_set_free(&seen);
+  for (size_t i = 0; i < use_asts.count; i++) {
+    if (!tc_compile_ast_definitions(use_asts.items[i], &chunk, &err)) {
+      use_ast_list_free(&use_asts);
       tc_ast_free(ast);
       tc_chunk_free(&chunk);
       tc_syntax_tokens_free(&syntax_tokens);
@@ -438,8 +429,8 @@ int main(int argc, char **argv) {
       tc_source_free(&source);
       goto fail;
     }
-    path_set_free(&seen);
   }
+  use_ast_list_free(&use_asts);
   tc_ast_free(ast);
   tc_chunk_peephole(&chunk);
   tc_chunk_compute_touched(&chunk);

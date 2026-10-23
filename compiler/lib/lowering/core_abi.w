@@ -11,13 +11,16 @@
 -> core_source_path?(path)
   if path == nil
     return false
-  text = "" + path
+  if path.starts_with?("core/")
+    return true
+  if path.byte_at(0) != 47
+    return false
   root = env("TUNGSTEN_ROOT")
   if root != nil
     prefix = root + "/core/"
-    if text.size() >= prefix.size() && text.slice(0, prefix.size()) == prefix
+    if path.starts_with?(prefix)
       return true
-  text.size() >= 5 && text.slice(0, 5) == "core/"
+  false
 
 -> stable_core_partition_expressions(expressions)
   core = []

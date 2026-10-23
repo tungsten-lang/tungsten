@@ -289,19 +289,20 @@
 # Collect stackable candidates in this scope. Skips anything inside a loop or
 # block body (alloca-in-loop would grow the stack). Does not descend into nested
 # method/fn definitions — those are separate scopes.
--> collect_ta_candidates(node, in_loop, out)
+-> collect_ta_candidates(node, in_loop, out, nested_scopes)
   if node == nil
     return nil
   if type(node) == "Array"
     i = 0
     while i < node.size()
-      collect_ta_candidates(node[i], in_loop, out)
+      collect_ta_candidates(node[i], in_loop, out, nested_scopes)
       i += 1
     return nil
   if !is_ast_node?(node)
     return nil
   k = ast_kind(node)
   if k == :method_def || k == :fn_def
+    nested_scopes.push(ast_get(node, :body))
     return nil
   if !in_loop && is_stackable_ta_assign?(node)
     out.push({var: node.target.name, node: node.value})
@@ -315,7 +316,7 @@
     ci_loop = child_loop
     if is_ast_node?(c) && ast_kind(c) == :block
       ci_loop = true
-    collect_ta_candidates(c, ci_loop, out)
+    collect_ta_candidates(c, ci_loop, out, nested_scopes)
     j += 1
   nil
 
@@ -433,36 +434,18 @@
   if type(scope_body) != "Array"
     return nil
   cands = []
-  collect_ta_candidates(scope_body, false, cands)
+  nested_scopes = []
+  collect_ta_candidates(scope_body, false, cands, nested_scopes)
   ci = 0
   while ci < cands.size()
     c = cands[ci]
     if typed_array_var_stack_safe?(scope_body, c[:var])
       c[:node].stack_safe = true
     ci += 1
-  recurse_ta_scopes(scope_body)
-  nil
-
--> recurse_ta_scopes(node)
-  if node == nil
-    return nil
-  if type(node) == "Array"
-    i = 0
-    while i < node.size()
-      recurse_ta_scopes(node[i])
-      i += 1
-    return nil
-  if !is_ast_node?(node)
-    return nil
-  k = ast_kind(node)
-  if k == :method_def || k == :fn_def
-    mark_stackable_typed_arrays(ast_get(node, :body))
-    return nil
-  ch = ast_children(node)
-  j = 0
-  while j < ch.size()
-    recurse_ta_scopes(ch[j])
-    j += 1
+  si = 0
+  while si < nested_scopes.size()
+    mark_stackable_typed_arrays(nested_scopes[si])
+    si += 1
   nil
 
 # Gap #2: walk every method body of every class, find ivar
@@ -474,6 +457,8 @@
   ivar_types = {}
   ivar_conflicts = {}
   ast_keys = mod[:class_method_asts].keys()
+  prev_cname = nil
+  prev_ast = nil
   ki = 0
   while ki < ast_keys.size()
     key = ast_keys[ki]
@@ -483,8 +468,11 @@
     if ivar_types[cname] == nil
       ivar_types[cname] = {}
       ivar_conflicts[cname] = {}
-    record_ivar_param_types(method_ast, cname, ivar_types, ivar_conflicts)
-    walk_ivar_assigns(method_ast.body, cname, ivar_types, ivar_conflicts, mod)
+    if !(cname == prev_cname && method_ast == prev_ast)
+      prev_cname = cname
+      prev_ast = method_ast
+      record_ivar_param_types(method_ast, cname, ivar_types, ivar_conflicts)
+      walk_ivar_assigns(method_ast.body, cname, ivar_types, ivar_conflicts, mod)
     ki += 1
   # Conflicted ivars get nil-marked so the dispatch lookup bails cleanly.
   conflict_keys = ivar_conflicts.keys()
@@ -571,6 +559,8 @@
         inheritance_classes[super_name] = true
       si += 1
   ast_keys = mod[:class_method_asts].keys()
+  prev_cname = nil
+  prev_ast = nil
   ki = 0
   while ki < ast_keys.size()
     key = ast_keys[ki]
@@ -581,18 +571,21 @@
       conflicts[cname] = {}
     if inheritance_classes[cname] != true
       method_ast = mod[:class_method_asts][key]
-      # `-> new(@field)` is an implicit arbitrary caller-to-ivar write and has
-      # no assignment node in the body. It must invalidate an exact-class fact
-      # just like an explicit `@field = value`.
-      params = method_ast.params
-      if params != nil
-        pi = 0
-        while pi < params.size()
-          param = params[pi]
-          if param.ivar_assign == true
-            record_exact_source_ivar_write(cname, "@" + param.name, nil, exact_types, conflicts)
-          pi += 1
-      walk_exact_source_ivar_writes(method_ast.body, cname, exact_types, conflicts, mod)
+      if !(cname == prev_cname && method_ast == prev_ast)
+        prev_cname = cname
+        prev_ast = method_ast
+        # `-> new(@field)` is an implicit arbitrary caller-to-ivar write and has
+        # no assignment node in the body. It must invalidate an exact-class fact
+        # just like an explicit `@field = value`.
+        params = method_ast.params
+        if params != nil
+          pi = 0
+          while pi < params.size()
+            param = params[pi]
+            if param.ivar_assign == true
+              record_exact_source_ivar_write(cname, "@" + param.name, nil, exact_types, conflicts)
+            pi += 1
+        walk_exact_source_ivar_writes(method_ast.body, cname, exact_types, conflicts, mod)
     ki += 1
   mod[:exact_source_ivar_types] = exact_types
 
@@ -1997,6 +1990,8 @@
   if !is_ast_node?(node)
     return nil
   nk = ast_kind(node)
+  if nk in (:int :string :symbol :bool :nil_val :float :var :ivar :cvar :gvar :self_ref :class_ref :break :next :param)
+    return nil
   if nk == :call && node.name == "new" && node.receiver != nil && ast_kind(node.receiver) == :class_ref && node.receiver.name == "SmallArray"
     ta = node.type_args
     if ta != nil && ta.size() == 2 && small_array_elem_type?(ta[0]) && numeric_str?(ta[1])
@@ -2005,55 +2000,78 @@
       # allows up to 4096 elements (vs 255 for an auto-promoted `i32[N]` literal).
       ast_set(ta_node, :stack_explicit, true)
       return ta_node
-  kid = kind_id_table[nk]
-  if kid == nil
+  packed = ccall_nobox("w_is_node_extern", node) == 1
+  kid = nil
+  if packed
+    kid = ccall_nobox("w_node_kind_extern", node)
+  else
+    kid = kind_id_table[nk]
+  if kid == nil || kid < 1 || kid > KIND_MAX
     return nil
-  schema = slab_offset_table_data[kid]
-  if schema == nil
+  offsets = slab_child_offsets_table[kid]
+  if offsets == nil
     return nil
-  ks = schema.keys()
+  n_off = offsets.size()
+  if n_off == 0
+    return nil
+  keys = slab_child_keys_table[kid]
   i = 0
-  while i < ks.size()
-    k = ks[i]
-    v = ast_get(node, k)
-    if is_ast_node?(v)
-      replaced = rewrite_smallarray_ctor_node(v)
-      if replaced != nil
-        ast_set(node, k, replaced)
-    elsif type(v) == "Array"
-      any_replaced = false
-      rebuilt = []
-      j = 0
-      while j < v.size()
-        elt = v[j]
-        if is_ast_node?(elt)
-          replaced = rewrite_smallarray_ctor_node(elt)
-          if replaced != nil
-            rebuilt.push(replaced)
-            any_replaced = true
-          else
+  while i < n_off
+    v = nil
+    if packed
+      v = ccall_nobox("w_node_field_load", node, offsets[i])
+    else
+      v = ast_get(node, keys[i])
+    if v != nil
+      if is_ast_node?(v)
+        replaced = rewrite_smallarray_ctor_node(v)
+        if replaced != nil
+          ast_set(node, keys[i], replaced)
+      elsif type(v) == "Array"
+        n_v = v.size()
+        rebuilt = nil
+        j = 0
+        while j < n_v
+          elt = v[j]
+          if is_ast_node?(elt)
+            replaced = rewrite_smallarray_ctor_node(elt)
+            if replaced != nil
+              if rebuilt == nil
+                rebuilt = []
+                k = 0
+                while k < j
+                  rebuilt.push(v[k])
+                  k += 1
+              rebuilt.push(replaced)
+            elsif rebuilt != nil
+              rebuilt.push(elt)
+          elsif rebuilt != nil
             rebuilt.push(elt)
-        else
-          rebuilt.push(elt)
-        j += 1
-      if any_replaced
-        ast_set(node, k, rebuilt)
+          j += 1
+        if rebuilt != nil
+          ast_set(node, keys[i], rebuilt)
     i += 1
   nil
 
 -> rewrite_smallarray_generic_ctors(ast)
   exprs = ast.expressions
-  any_replaced = false
-  rebuilt = []
+  n_exprs = exprs.size()
+  rebuilt = nil
   i = 0
-  while i < exprs.size()
-    replaced = rewrite_smallarray_ctor_node(exprs[i])
+  while i < n_exprs
+    elt = exprs[i]
+    replaced = rewrite_smallarray_ctor_node(elt)
     if replaced != nil
+      if rebuilt == nil
+        rebuilt = []
+        k = 0
+        while k < i
+          rebuilt.push(exprs[k])
+          k += 1
       rebuilt.push(replaced)
-      any_replaced = true
-    else
-      rebuilt.push(exprs[i])
+    elsif rebuilt != nil
+      rebuilt.push(elt)
     i += 1
-  if any_replaced
+  if rebuilt != nil
     ast.expressions = rebuilt
   nil

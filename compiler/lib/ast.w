@@ -616,9 +616,8 @@ in Tungsten:AST
 
 # Compatibility collector for callers that need indexing or child count.
 -> ast_children(node)
-  out = []
   if node == nil
-    return out
+    return slab_child_offsets_table[15]
   packed = ccall_nobox("w_is_node_extern", node) == 1
   kid = nil
   if packed
@@ -628,29 +627,57 @@ in Tungsten:AST
     if k != nil
       kid = kind_id_table[k]
   if kid == nil || kid < 1 || kid > KIND_MAX
-    return out
+    return slab_child_offsets_table[15]
   offsets = slab_child_offsets_table[kid]
-  keys = slab_child_keys_table[kid]
   if offsets == nil
-    return out
-  i = 0
-  while i < offsets.size()
-    v = nil
-    if packed
+    return slab_child_offsets_table[15]
+  n_off = offsets.size()
+  if n_off == 0
+    return offsets
+  out = nil
+  if packed
+    i = 0
+    while i < n_off
       v = ccall_nobox("w_node_field_load", node, offsets[i])
-    elsif type(node) == "Hash"
+      if v != nil
+        if is_ast_node?(v)
+          if out == nil
+            out = []
+          out.push(v)
+        elsif type(v) == "Array"
+          n_v = v.size()
+          j = 0
+          while j < n_v
+            elt = v[j]
+            if is_ast_node?(elt)
+              if out == nil
+                out = []
+              out.push(elt)
+            j += 1
+      i += 1
+  elsif type(node) == "Hash"
+    keys = slab_child_keys_table[kid]
+    i = 0
+    while i < n_off
       v = node[keys[i]]
-    if v != nil
-      if is_ast_node?(v)
-        out.push(v)
-      elsif type(v) == "Array"
-        j = 0
-        while j < v.size()
-          elt = v[j]
-          if is_ast_node?(elt)
-            out.push(elt)
-          j += 1
-    i += 1
+      if v != nil
+        if is_ast_node?(v)
+          if out == nil
+            out = []
+          out.push(v)
+        elsif type(v) == "Array"
+          n_v = v.size()
+          j = 0
+          while j < n_v
+            elt = v[j]
+            if is_ast_node?(elt)
+              if out == nil
+                out = []
+              out.push(elt)
+            j += 1
+      i += 1
+  if out == nil
+    return slab_child_offsets_table[15]
   out
 
 # Render a slab AST node as an indented tree for `--ast`. Each node prints

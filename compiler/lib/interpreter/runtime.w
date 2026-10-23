@@ -32,6 +32,8 @@
     @core_protected = false
     @type_tables_locked = false
     @method_tables_locked = false
+    # Names of methods that take a block (note_block_method).
+    @block_method_names = {}
     if argv_values == nil
       argv_values = interpreter_process_argv()
     if argv_values == nil

@@ -189,6 +189,8 @@ use lowering/definitions
   # directly (no nanbox at the call site, no nanunbox at fn entry,
   # no nanbox on return). Detected during lower_method_def.
   mod[:raw_callable_fns] = {}
+  lowering_infer_maps[:boxed_mode] = env("TUNGSTEN_INFER") == "boxed"
+  lowering_infer_maps[:typed_fn_return_names] = {}
   n_builtin_classes = builtin_classes.size()
   builtin_class_names = mod[:builtin_class_names]
   bi = 0

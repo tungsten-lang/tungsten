@@ -483,7 +483,9 @@
     @im[i]
 
   -> probability(i)
-    @re[i] * @re[i] + @im[i] * @im[i]
+    r = @re[i]
+    m = @im[i]
+    r * r + m * m
 
   # Total probability. Should stay at 1 for a unitary circuit; drift is a
   # useful check on a hand-written gate.
@@ -491,17 +493,23 @@
     total = 0.0
     i = 0
     while i < @dim
-      total = total + probability(i)
+      r = @re[i]
+      m = @im[i]
+      total = total + r * r + m * m
       i += 1
     total
 
   # Index of the basis state carrying the largest probability.
   -> most_likely
     best = 0
-    best_p = probability(0)
+    r0 = @re[0]
+    m0 = @im[0]
+    best_p = r0 * r0 + m0 * m0
     i = 1
     while i < @dim
-      p = probability(i)
+      ri = @re[i]
+      mi = @im[i]
+      p = ri * ri + mi * mi
       if p > best_p
         best_p = p
         best = i
@@ -510,27 +518,34 @@
 
   # True when bit `q` of basis index `i` is set.
   -> .bit_set?(i, q)
-    (i / (1 << q)) % 2 == 1
+    ((i >> q) & 1) == 1
 
   # Swap the amplitudes of every pair of basis states that differ only in
   # the target bit, subject to the control bits being set. This single
   # primitive implements X, CX and CCX.
   -> flip(c1, c2, target)
+    no_q = QuantumCircuit.no_qubit
+    target_mask = 1 << target
+    ctrl_mask = 0
+    if c1 != no_q
+      ctrl_mask = ctrl_mask | (1 << c1)
+    if c2 != no_q
+      ctrl_mask = ctrl_mask | (1 << c2)
+    check_mask = target_mask | ctrl_mask
+    re = @re
+    im = @im
+    dim = @dim
     i = 0
-    while i < @dim
-      # Visit each pair once, from the member whose target bit is 0.
-      if !QuantumState.bit_set?(i, target)
-        ok = true
-        ok = false if c1 != QuantumCircuit.no_qubit && !QuantumState.bit_set?(i, c1)
-        ok = false if c2 != QuantumCircuit.no_qubit && !QuantumState.bit_set?(i, c2)
-        if ok
-          j = i + (1 << target)
-          tr = @re[i]
-          ti = @im[i]
-          @re[i] = @re[j]
-          @im[i] = @im[j]
-          @re[j] = tr
-          @im[j] = ti
+    while i < dim
+      # Visit each pair once, from the member whose target bit is 0 and controls are 1.
+      if (i & check_mask) == ctrl_mask
+        j = i | target_mask
+        tr = re[i]
+        ti = im[i]
+        re[i] = re[j]
+        im[i] = im[j]
+        re[j] = tr
+        im[j] = ti
       i += 1
     self
 
@@ -539,33 +554,43 @@
   -> phase_shift(c1, c2, target, turns)
     cos_t = Math.cos(Math.pi * turns / 4.0)
     sin_t = Math.sin(Math.pi * turns / 4.0)
+    no_q = QuantumCircuit.no_qubit
+    req_mask = 1 << target
+    if c1 != no_q
+      req_mask = req_mask | (1 << c1)
+    if c2 != no_q
+      req_mask = req_mask | (1 << c2)
+    re = @re
+    im = @im
+    dim = @dim
     i = 0
-    while i < @dim
-      ok = QuantumState.bit_set?(i, target)
-      ok = false if c1 != QuantumCircuit.no_qubit && !QuantumState.bit_set?(i, c1)
-      ok = false if c2 != QuantumCircuit.no_qubit && !QuantumState.bit_set?(i, c2)
-      if ok
-        r = @re[i]
-        m = @im[i]
-        @re[i] = r * cos_t - m * sin_t
-        @im[i] = r * sin_t + m * cos_t
+    while i < dim
+      if (i & req_mask) == req_mask
+        r = re[i]
+        m = im[i]
+        re[i] = r * cos_t - m * sin_t
+        im[i] = r * sin_t + m * cos_t
       i += 1
     self
 
   -> hadamard(target)
     inv = 1.0 / Math.sqrt(2.0)
+    target_mask = 1 << target
+    re = @re
+    im = @im
+    dim = @dim
     i = 0
-    while i < @dim
-      if !QuantumState.bit_set?(i, target)
-        j = i + (1 << target)
-        ar = @re[i]
-        ai = @im[i]
-        br = @re[j]
-        bi = @im[j]
-        @re[i] = (ar + br) * inv
-        @im[i] = (ai + bi) * inv
-        @re[j] = (ar - br) * inv
-        @im[j] = (ai - bi) * inv
+    while i < dim
+      if (i & target_mask) == 0
+        j = i | target_mask
+        ar = re[i]
+        ai = im[i]
+        br = re[j]
+        bi = im[j]
+        re[i] = (ar + br) * inv
+        im[i] = (ai + bi) * inv
+        re[j] = (ar - br) * inv
+        im[j] = (ai - bi) * inv
       i += 1
     self
 

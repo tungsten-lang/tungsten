@@ -10,7 +10,6 @@
 #include "runtime.h"
 #include "wvalue.h"
 #include <Accelerate/Accelerate.h>
-#include <vecLib/Sparse/BLAS.h>
 #include <string.h>
 #include <stdlib.h>
 

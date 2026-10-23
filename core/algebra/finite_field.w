@@ -18,7 +18,7 @@
 
   -> initialize_finite_field(characteristic, modulus)
     characteristic_class = characteristic.class_name
-    if characteristic_class != "Integer" && characteristic_class != "Int" && characteristic_class != "BigInt"
+    if characteristic_class != "Int" && characteristic_class != "BigInt" && characteristic_class != "Integer"
       raise "finite-field characteristic must be an integer"
     if characteristic < 2 || !characteristic.prime?
       raise "finite-field characteristic must be prime"
@@ -37,6 +37,7 @@
     @multiplication_table = nil
     @inverse_table = nil
     @frobenius_table = nil
+    @inverse_frobenius_table = nil
     self
 
   ro :characteristic, :degree, :order, :modulus
@@ -115,7 +116,7 @@
   # Internal arithmetic already returns an encoded residue in [0, order).
   -> normalize_element(value)
     value_class = value.class_name
-    if value_class == "Integer" || value_class == "Int" || value_class == "BigInt"
+    if value_class == "Int" || value_class == "BigInt" || value_class == "Integer"
       return value if value >= 0 && value < @order
     coerce(value)
 
@@ -153,7 +154,10 @@
   -> add(left, right)
     a = normalize_element(left)
     b = normalize_element(right)
-    return base_residue(a + b) if @degree == 1
+    return a ^ b if @characteristic == 2
+    if @degree == 1
+      s = a + b
+      return s >= @characteristic ? s - @characteristic : s
     p = @characteristic
     a0 = a % p
     b0 = b % p
@@ -172,7 +176,9 @@
 
   -> negate(value)
     a = normalize_element(value)
-    return base_residue(0 - a) if @degree == 1
+    return a if @characteristic == 2
+    if @degree == 1
+      return a == 0 ? 0 : @characteristic - a
     p = @characteristic
     result = 0
     place = 1
@@ -185,6 +191,10 @@
     result
 
   -> subtract(left, right)
+    return normalize_element(left) ^ normalize_element(right) if @characteristic == 2
+    if @degree == 1
+      d = normalize_element(left) - normalize_element(right)
+      return d < 0 ? d + @characteristic : d
     add(left, negate(right))
 
   -> multiply(left, right)
@@ -281,19 +291,26 @@
     # norm, and projective-normalization hot paths.
     inverses = []
     frobenius_values = []
-    @order.times ->
+    inv_frobenius_values = []
+    i = 0
+    while i < @order
       inverses.push(0)
       frobenius_values.push(0)
+      inv_frobenius_values.push(0)
+      i += 1
     value = 1
     while value < @order
       candidate = 1
       while @multiplication_table[value * @order + candidate] != 1
         candidate += 1
       inverses[value] = candidate
-      frobenius_values[value] = power(value, @characteristic)
+      frob = power(value, @characteristic)
+      frobenius_values[value] = frob
+      inv_frobenius_values[frob] = value
       value += 1
     @inverse_table = inverses
     @frobenius_table = frobenius_values
+    @inverse_frobenius_table = inv_frobenius_values
     self
 
   -> arithmetic_prepared?
@@ -301,7 +318,7 @@
 
   -> power(value, exponent)
     exponent_class = exponent.class_name
-    if exponent_class != "Integer" && exponent_class != "Int" && exponent_class != "BigInt"
+    if exponent_class != "Int" && exponent_class != "BigInt" && exponent_class != "Integer"
       raise "finite-field exponent must be an integer"
     return power(inverse(value), 0 - exponent) if exponent < 0
     result = one
@@ -339,6 +356,7 @@
     element = normalize_element(value)
     raise "division by zero in finite field" if element == 0
     return @inverse_table[element] if @inverse_table != nil
+    return element.invmod(@characteristic) if @degree == 1
     power(element, @order - 2)
 
   # Invert a nonzero batch with one field inversion.  The output Array first
@@ -357,6 +375,28 @@
         raise "division by zero in finite-field inverse batch" if element == 0
         output.push(@inverse_table[element])
         i += 1
+      return output
+    if @degree == 1
+      p = @characteristic
+      first = normalize_element(values[0])
+      raise "division by zero in finite-field inverse batch" if first == 0
+      output.push(first)
+      prev = first
+      i = 1
+      while i < count
+        element = normalize_element(values[i])
+        raise "division by zero in finite-field inverse batch" if element == 0
+        prev = (prev * element) % p
+        output.push(prev)
+        i += 1
+      suffix_inverse = prev.invmod(p)
+      i = count - 1
+      while i > 0
+        element = normalize_element(values[i])
+        output[i] = (output[i - 1] * suffix_inverse) % p
+        suffix_inverse = (suffix_inverse * element) % p
+        i -= 1
+      output[0] = suffix_inverse
       return output
     first = normalize_element(values[0])
     raise "division by zero in finite-field inverse batch" if first == 0
@@ -382,11 +422,13 @@
 
   -> frobenius(value, iterations = 1)
     iteration_class = iterations.class_name
-    if iteration_class != "Integer" && iteration_class != "Int" && iteration_class != "BigInt"
+    if iteration_class != "Int" && iteration_class != "BigInt" && iteration_class != "Integer"
       raise "Frobenius iteration count must be an integer"
     raise "Frobenius iteration count must be nonnegative" if iterations < 0
     result = normalize_element(value)
     return result if prime_field?
+    if iterations == 1 && @frobenius_table != nil
+      return @frobenius_table[result]
     remaining = iterations % @degree
     while remaining > 0
       if @frobenius_table != nil
@@ -398,12 +440,15 @@
 
   -> inverse_frobenius(value, iterations = 1)
     iteration_class = iterations.class_name
-    if iteration_class != "Integer" && iteration_class != "Int" && iteration_class != "BigInt"
+    if iteration_class != "Int" && iteration_class != "BigInt" && iteration_class != "Integer"
       raise "inverse Frobenius iteration count must be an integer"
     raise "inverse Frobenius iteration count must be nonnegative" if iterations < 0
-    return normalize_element(value) if prime_field?
+    result = normalize_element(value)
+    return result if prime_field?
+    if iterations == 1 && @inverse_frobenius_table != nil
+      return @inverse_frobenius_table[result]
     reduced = iterations % @degree
-    frobenius(value, reduced == 0 ? 0 : @degree - reduced)
+    frobenius(result, reduced == 0 ? 0 : @degree - reduced)
 
   -> frobenius_orbit(value)
     element = normalize_element(value)

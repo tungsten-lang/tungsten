@@ -46,14 +46,9 @@ check("percentile below 0 clamps", Stats.percentile(five, ~-5.0) == ~1.0)
 check("percentile 100", Stats.percentile(five, ~100.0) == ~5.0)
 check("percentile above 100 clamps", Stats.percentile(five, ~150.0) == ~5.0)
 check("percentile empty", Stats.percentile([], ~50.0) == ~0.0)
-# BUG: any percentile strictly between 0 and 100 returns the minimum. `Stats.percentile`
-# indexes `ys[loi]` where `loi = Math.floor(rank)` is a Float, and a Float array subscript
-# silently reads element 0 instead of truncating (or raising) on both engines.
-# Repro: printf 'a = [10, 20, 30]\n<< a[Math.floor(~2.0)]\n' > /tmp/f.w &&
-#        bin/tungsten run --interpret /tmp/f.w    # prints 10, expected 30
-# check("percentile 50", Stats.percentile(five, ~50.0) == ~3.0)
-# check("percentile on a rank", Stats.percentile(five, ~25.0) == ~2.0)
-# check("percentile interpolates", near(Stats.percentile(five, ~10.0), ~1.4, ~1.0e-12))
+check("percentile 50", Stats.percentile(five, ~50.0) == ~3.0)
+check("percentile on a rank", Stats.percentile(five, ~25.0) == ~2.0)
+check("percentile interpolates", near(Stats.percentile(five, ~10.0), ~1.4, ~1.0e-12))
 
 # ---- normal ----
 check("norm_pdf 0", near(Stats.norm_pdf(~0.0), ~0.3989422804014327, ~1.0e-15))

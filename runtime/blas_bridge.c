@@ -603,7 +603,13 @@ WValue w_blas_reduce_view(WValue dtype_wval, WValue a_wval,
 }
 
 /* Reduce the packed last axis into a packed output array in one bridge call.
- * This removes one coordinate Array allocation per input element. */
+ * kind:
+ *   0 = sum along last axis (out size = rows)
+ *   1 = max along last axis (out size = rows)
+ *   2 = softmax along last axis (out size = rows * cols)
+ *   3 = 2D matrix transpose of [rows, cols] into [cols, rows] (out size = rows * cols)
+ *   >= 4: strided axis reduction with inner = kind >> 2, op = kind & 3 (0=sum, 1=max),
+ *         where rows = outer * inner and cols = axis_len. */
 WValue w_blas_reduce_last(WValue dtype_wval, WValue a_wval, WValue out_wval,
                           WValue offset_wval, WValue rows_wval,
                           WValue cols_wval, WValue kind_wval) {
@@ -614,14 +620,74 @@ WValue w_blas_reduce_last(WValue dtype_wval, WValue a_wval, WValue out_wval,
     int64_t rows = w_as_int(rows_wval);
     int64_t cols = w_as_int(cols_wval);
     int64_t kind = w_as_int(kind_wval);
+    int64_t need_out = (kind == 2 || kind == 3) ? (rows * cols) : rows;
     if (offset < 0 || rows < 0 || cols < 0 || offset + rows * cols > a->size ||
-        rows > out->size || kind < 0 || kind > 1) {
+        need_out > out->size || kind < 0) {
         w_raise(w_string("blas_reduce_last: invalid shape, offset, or kind"));
         return W_NIL;
     }
     if (dtype == 64) {
         double *p = (double *)a->slots + a->start + offset;
         double *o = (double *)out->slots + out->start;
+        if (kind == 2) {
+            if (cols <= 0) return out_wval;
+            for (int64_t row = 0; row < rows; row++) {
+                double *rp = p + row * cols;
+                double *op = o + row * cols;
+                double mx = rp[0];
+                for (int64_t col = 1; col < cols; col++) if (rp[col] > mx) mx = rp[col];
+                for (int64_t col = 0; col < cols; col++) op[col] = rp[col] - mx;
+                if (cols <= INT_MAX) {
+                    int cn = (int)cols;
+                    vvexp(op, op, &cn);
+                } else {
+                    for (int64_t col = 0; col < cols; col++) op[col] = exp(op[col]);
+                }
+                double sm = 0.0;
+                for (int64_t col = 0; col < cols; col++) sm += op[col];
+                for (int64_t col = 0; col < cols; col++) op[col] /= sm;
+            }
+            return out_wval;
+        }
+        if (kind == 3) {
+            if (rows > 0 && cols > 0) {
+                vDSP_mtransD(p, 1, o, 1, (vDSP_Length)cols, (vDSP_Length)rows);
+            }
+            return out_wval;
+        }
+        if (kind >= 4) {
+            int64_t inner = kind >> 2;
+            int64_t op = kind & 3;
+            if (inner <= 0 || (rows % inner) != 0 || op > 1) {
+                w_raise(w_string("blas_reduce_last: invalid axis reduction kind"));
+                return W_NIL;
+            }
+            int64_t outer = rows / inner;
+            for (int64_t oi = 0; oi < outer; oi++) {
+                double *out_slice = o + oi * inner;
+                double *in_base = p + oi * cols * inner;
+                if (op == 0) {
+                    if (cols == 0) {
+                        for (int64_t ij = 0; ij < inner; ij++) out_slice[ij] = 0.0;
+                    } else {
+                        for (int64_t ij = 0; ij < inner; ij++) out_slice[ij] = in_base[ij];
+                        for (int64_t c = 1; c < cols; c++) {
+                            double *rp = in_base + c * inner;
+                            for (int64_t ij = 0; ij < inner; ij++) out_slice[ij] += rp[ij];
+                        }
+                    }
+                } else if (cols > 0) {
+                    for (int64_t ij = 0; ij < inner; ij++) out_slice[ij] = in_base[ij];
+                    for (int64_t c = 1; c < cols; c++) {
+                        double *rp = in_base + c * inner;
+                        for (int64_t ij = 0; ij < inner; ij++) {
+                            if (rp[ij] > out_slice[ij]) out_slice[ij] = rp[ij];
+                        }
+                    }
+                }
+            }
+            return out_wval;
+        }
         for (int64_t row = 0; row < rows; row++) {
             double result = 0.0;
             if (kind == 0) {
@@ -640,6 +706,62 @@ WValue w_blas_reduce_last(WValue dtype_wval, WValue a_wval, WValue out_wval,
     if (dtype == 3) {
         float *p = (float *)a->slots + a->start + offset;
         float *o = (float *)out->slots + out->start;
+        if (kind == 2) {
+            if (cols <= 0) return out_wval;
+            for (int64_t row = 0; row < rows; row++) {
+                float *rp = p + row * cols;
+                float *op = o + row * cols;
+                float mx = rp[0];
+                for (int64_t col = 1; col < cols; col++) if (rp[col] > mx) mx = rp[col];
+                for (int64_t col = 0; col < cols; col++) op[col] = rp[col] - mx;
+                if (cols <= INT_MAX) {
+                    int cn = (int)cols;
+                    vvexpf(op, op, &cn);
+                } else {
+                    for (int64_t col = 0; col < cols; col++) op[col] = expf(op[col]);
+                }
+                double sm = 0.0;
+                for (int64_t col = 0; col < cols; col++) sm += (double)op[col];
+                float inv = (float)(1.0 / sm);
+                for (int64_t col = 0; col < cols; col++) op[col] *= inv;
+            }
+            return out_wval;
+        }
+        if (kind == 3) {
+            if (rows > 0 && cols > 0) {
+                vDSP_mtrans(p, 1, o, 1, (vDSP_Length)cols, (vDSP_Length)rows);
+            }
+            return out_wval;
+        }
+        if (kind >= 4) {
+            int64_t inner = kind >> 2;
+            int64_t op = kind & 3;
+            if (inner <= 0 || (rows % inner) != 0 || op > 1) {
+                w_raise(w_string("blas_reduce_last: invalid axis reduction kind"));
+                return W_NIL;
+            }
+            int64_t outer = rows / inner;
+            for (int64_t oi = 0; oi < outer; oi++) {
+                float *out_slice = o + oi * inner;
+                float *in_base = p + oi * cols * inner;
+                if (op == 0) {
+                    for (int64_t ij = 0; ij < inner; ij++) {
+                        double sum = 0.0;
+                        for (int64_t c = 0; c < cols; c++) sum += (double)in_base[c * inner + ij];
+                        out_slice[ij] = (float)sum;
+                    }
+                } else if (cols > 0) {
+                    for (int64_t ij = 0; ij < inner; ij++) out_slice[ij] = in_base[ij];
+                    for (int64_t c = 1; c < cols; c++) {
+                        float *rp = in_base + c * inner;
+                        for (int64_t ij = 0; ij < inner; ij++) {
+                            if (rp[ij] > out_slice[ij]) out_slice[ij] = rp[ij];
+                        }
+                    }
+                }
+            }
+            return out_wval;
+        }
         for (int64_t row = 0; row < rows; row++) {
             float *rp = p + row * cols;
             if (kind == 0) {
@@ -741,7 +863,7 @@ W_BLAS_F64_UNARY(w_blas_vtan_f64, vvtan)
 #undef W_BLAS_F64_UNARY
 
 /* Packed Tensor unary operations with an input element offset.
- * kind: 0=neg, 1=relu, 2=abs, 3=sqrt, 4=square, 5=exp. */
+ * kind: 0=neg, 1=relu, 2=abs, 3=sqrt, 4=square, 5=exp, or Float scalar for scale. */
 WValue w_blas_unary_view(WValue dtype_wval, WValue a_wval,
                          WValue out_wval, WValue offset_wval,
                          WValue n_wval, WValue kind_wval) {
@@ -750,6 +872,28 @@ WValue w_blas_unary_view(WValue dtype_wval, WValue a_wval,
     int64_t dtype = w_as_int(dtype_wval);
     int64_t offset = w_as_int(offset_wval);
     int64_t n64 = w_as_int(n_wval);
+    if (w_is_double(kind_wval)) {
+        if (offset < 0 || n64 < 0 || offset + n64 > a->size || n64 > out->size) {
+            w_raise(w_string("blas_unary_view: invalid offset or length"));
+            return W_NIL;
+        }
+        double scale = w_as_double(kind_wval);
+        if (dtype == 64) {
+            double *p = (double *)a->slots + a->start + offset;
+            double *o = (double *)out->slots + out->start;
+            vDSP_vsmulD(p, 1, &scale, o, 1, (vDSP_Length)n64);
+            return out_wval;
+        }
+        if (dtype == 3) {
+            float *p = (float *)a->slots + a->start + offset;
+            float *o = (float *)out->slots + out->start;
+            float scale_f = (float)scale;
+            vDSP_vsmul(p, 1, &scale_f, o, 1, (vDSP_Length)n64);
+            return out_wval;
+        }
+        w_raise(w_string("blas_unary_view: dtype must be f32 or f64"));
+        return W_NIL;
+    }
     int64_t kind = w_as_int(kind_wval);
     if (offset < 0 || n64 < 0 || offset + n64 > a->size || n64 > out->size ||
         kind < 0 || kind > 5 || n64 > INT_MAX) {
@@ -860,6 +1004,37 @@ WValue w_blas_ew_f32(WValue k_wval, WValue a_wval, WValue b_wval, WValue out_wva
     float *o = blas_f32_ptr(out_wval, &lo);
     int64_t n = w_as_int(n_wval);
     int64_t kind = w_as_int(k_wval);
+    if (kind >= 4 && kind <= 7 && lb > 0 && n > 0 && n <= la && n <= lo && (n % lb) == 0) {
+        int64_t rows = n / lb;
+        int64_t op = kind - 4;
+        for (int64_t r = 0; r < rows; r++) {
+            float *ra = a + r * lb;
+            float *ro = o + r * lb;
+            switch (op) {
+            case 0: vDSP_vadd(ra, 1, b, 1, ro, 1, (vDSP_Length)lb); break;
+            case 1: vDSP_vsub(b, 1, ra, 1, ro, 1, (vDSP_Length)lb); break;
+            case 2: vDSP_vmul(ra, 1, b, 1, ro, 1, (vDSP_Length)lb); break;
+            case 3: vDSP_vdiv(b, 1, ra, 1, ro, 1, (vDSP_Length)lb); break;
+            }
+        }
+        return out_wval;
+    }
+    if (kind >= 8 && kind <= 11 && lb > 0 && n > 0 && n <= la && n <= lo && (n % lb) == 0) {
+        int64_t cols = n / lb;
+        int64_t op = kind - 8;
+        for (int64_t r = 0; r < lb; r++) {
+            float *ra = a + r * cols;
+            float *ro = o + r * cols;
+            float bv = b[r];
+            switch (op) {
+            case 0: vDSP_vsadd(ra, 1, &bv, ro, 1, (vDSP_Length)cols); break;
+            case 1: { float nbv = -bv; vDSP_vsadd(ra, 1, &nbv, ro, 1, (vDSP_Length)cols); break; }
+            case 2: vDSP_vsmul(ra, 1, &bv, ro, 1, (vDSP_Length)cols); break;
+            case 3: vDSP_vsdiv(ra, 1, &bv, ro, 1, (vDSP_Length)cols); break;
+            }
+        }
+        return out_wval;
+    }
     int64_t mn = la < lb ? la : lb;
     if (lo < mn) mn = lo;
     if (n <= 0 || n > mn) n = mn;
@@ -880,6 +1055,37 @@ WValue w_blas_ew_f64(WValue k_wval, WValue a_wval, WValue b_wval, WValue out_wva
     double *o = blas_f64_ptr(out_wval, &lo);
     int64_t n = w_as_int(n_wval);
     int64_t kind = w_as_int(k_wval);
+    if (kind >= 4 && kind <= 7 && lb > 0 && n > 0 && n <= la && n <= lo && (n % lb) == 0) {
+        int64_t rows = n / lb;
+        int64_t op = kind - 4;
+        for (int64_t r = 0; r < rows; r++) {
+            double *ra = a + r * lb;
+            double *ro = o + r * lb;
+            switch (op) {
+            case 0: vDSP_vaddD(ra, 1, b, 1, ro, 1, (vDSP_Length)lb); break;
+            case 1: vDSP_vsubD(b, 1, ra, 1, ro, 1, (vDSP_Length)lb); break;
+            case 2: vDSP_vmulD(ra, 1, b, 1, ro, 1, (vDSP_Length)lb); break;
+            case 3: vDSP_vdivD(b, 1, ra, 1, ro, 1, (vDSP_Length)lb); break;
+            }
+        }
+        return out_wval;
+    }
+    if (kind >= 8 && kind <= 11 && lb > 0 && n > 0 && n <= la && n <= lo && (n % lb) == 0) {
+        int64_t cols = n / lb;
+        int64_t op = kind - 8;
+        for (int64_t r = 0; r < lb; r++) {
+            double *ra = a + r * cols;
+            double *ro = o + r * cols;
+            double bv = b[r];
+            switch (op) {
+            case 0: vDSP_vsaddD(ra, 1, &bv, ro, 1, (vDSP_Length)cols); break;
+            case 1: { double nbv = -bv; vDSP_vsaddD(ra, 1, &nbv, ro, 1, (vDSP_Length)cols); break; }
+            case 2: vDSP_vsmulD(ra, 1, &bv, ro, 1, (vDSP_Length)cols); break;
+            case 3: vDSP_vsdivD(ra, 1, &bv, ro, 1, (vDSP_Length)cols); break;
+            }
+        }
+        return out_wval;
+    }
     int64_t mn = la < lb ? la : lb;
     if (lo < mn) mn = lo;
     if (n <= 0 || n > mn) n = mn;

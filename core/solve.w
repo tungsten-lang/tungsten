@@ -25,18 +25,20 @@
 
   -> .clone_y(y)
     out = []
+    n = y.size()
     i = 0
-    while i < y.size()
-      out = out.push(y[i] + ~0.0)
+    while i < n
+      out.push(y[i] + ~0.0)
       i = i + 1
     out
 
   -> .axpy(a, x, y)
     # y + a*x
     out = []
+    n = y.size()
     i = 0
-    while i < y.size()
-      out = out.push(y[i] + a * x[i])
+    while i < n
+      out.push(y[i] + a * x[i])
       i = i + 1
     out
 
@@ -52,22 +54,26 @@
       dy = f(t, y)
       y = Solve.axpy(h, dy, y)
       t = t + h
-      ts = ts.push(t)
-      ys = ys.push(Solve.clone_y(y))
+      ts.push(t)
+      ys.push(Solve.clone_y(y))
     {:t => ts, :y => ys}
 
   -> .rk4_step(f, t, y, h)
+    half_h = h * ~0.5
+    t_mid = t + half_h
     k1 = f(t, y)
-    y2 = Solve.axpy(h / ~2.0, k1, y)
-    k2 = f(t + h / ~2.0, y2)
-    y3 = Solve.axpy(h / ~2.0, k2, y)
-    k3 = f(t + h / ~2.0, y3)
+    y2 = Solve.axpy(half_h, k1, y)
+    k2 = f(t_mid, y2)
+    y3 = Solve.axpy(half_h, k2, y)
+    k3 = f(t_mid, y3)
     y4 = Solve.axpy(h, k3, y)
     k4 = f(t + h, y4)
     out = []
+    h6 = h / ~6.0
+    n = y.size()
     i = 0
-    while i < y.size()
-      out = out.push(y[i] + (h / ~6.0) * (k1[i] + ~2.0 * k2[i] + ~2.0 * k3[i] + k4[i]))
+    while i < n
+      out.push(y[i] + h6 * (k1[i] + ~2.0 * k2[i] + ~2.0 * k3[i] + k4[i]))
       i = i + 1
     out
 
@@ -82,21 +88,59 @@
         h = t_stop - t
       y = Solve.rk4_step(f, t, y, h)
       t = t + h
-      ts = ts.push(t)
-      ys = ys.push(Solve.clone_y(y))
+      ts.push(t)
+      ys.push(Solve.clone_y(y))
     {:t => ts, :y => ys}
 
   # y + h·Σ coefs[j]·ks[j], fresh array — one DP stage combination.
   -> .comb(y, h, coefs, ks)
     out = []
+    n = y.size()
+    nc = coefs.size()
     i = 0
-    while i < y.size()
+    while i < n
       s = ~0.0
       j = 0
-      while j < coefs.size()
+      while j < nc
         s = s + coefs[j] * ks[j][i]
         j = j + 1
-      out = out.push(y[i] + h * s)
+      out.push(y[i] + h * s)
+      i = i + 1
+    out
+
+  -> .comb2(y, h, c1, k1, c2, k2)
+    out = []
+    n = y.size()
+    i = 0
+    while i < n
+      out.push(y[i] + h * (c1 * k1[i] + c2 * k2[i]))
+      i = i + 1
+    out
+
+  -> .comb3(y, h, c1, k1, c2, k2, c3, k3)
+    out = []
+    n = y.size()
+    i = 0
+    while i < n
+      out.push(y[i] + h * (c1 * k1[i] + c2 * k2[i] + c3 * k3[i]))
+      i = i + 1
+    out
+
+  -> .comb4(y, h, c1, k1, c2, k2, c3, k3, c4, k4)
+    out = []
+    n = y.size()
+    i = 0
+    while i < n
+      out.push(y[i] + h * (c1 * k1[i] + c2 * k2[i] + c3 * k3[i] + c4 * k4[i]))
+      i = i + 1
+    out
+
+  -> .comb5(y, h, c1, k1, c2, k2, c3, k3, c4, k4, c5, k5)
+    out = []
+    n = y.size()
+    i = 0
+    while i < n
+      out.push(y[i] + h * (c1 * k1[i] + c2 * k2[i] + c3 * k3[i] + c4 * k4[i] + c5 * k5[i]))
       i = i + 1
     out
 
@@ -152,19 +196,21 @@
     e6 = ~22.0 / ~525.0
     e7 = ~0.0 - ~1.0 / ~40.0
     k1 = f(t, y)
+    dim = y.size()
+    c5_t = ~8.0 / ~9.0
     while t < t_stop
       if t + h > t_stop
         h = t_stop - t
-      k2 = f(t + h * a21, Solve.comb(y, h, [a21], [k1]))
-      k3 = f(t + h * ~0.3, Solve.comb(y, h, [a31, a32], [k1, k2]))
-      k4 = f(t + h * ~0.8, Solve.comb(y, h, [a41, a42, a43], [k1, k2, k3]))
-      k5 = f(t + h * (~8.0 / ~9.0), Solve.comb(y, h, [a51, a52, a53, a54], [k1, k2, k3, k4]))
-      k6 = f(t + h, Solve.comb(y, h, [a61, a62, a63, a64, a65], [k1, k2, k3, k4, k5]))
-      y_new = Solve.comb(y, h, [a71, a73, a74, a75, a76], [k1, k3, k4, k5, k6])
+      k2 = f(t + h * a21, Solve.axpy(h * a21, k1, y))
+      k3 = f(t + h * ~0.3, Solve.comb2(y, h, a31, k1, a32, k2))
+      k4 = f(t + h * ~0.8, Solve.comb3(y, h, a41, k1, a42, k2, a43, k3))
+      k5 = f(t + h * c5_t, Solve.comb4(y, h, a51, k1, a52, k2, a53, k3, a54, k4))
+      k6 = f(t + h, Solve.comb5(y, h, a61, k1, a62, k2, a63, k3, a64, k4, a65, k5))
+      y_new = Solve.comb5(y, h, a71, k1, a73, k3, a74, k4, a75, k5, a76, k6)
       k7 = f(t + h, y_new)
       err = ~0.0
       i = 0
-      while i < y.size()
+      while i < dim
         e = h * (e1 * k1[i] + e3 * k3[i] + e4 * k4[i] + e5 * k5[i] + e6 * k6[i] + e7 * k7[i])
         if e < ~0.0
           e = ~0.0 - e
@@ -182,13 +228,13 @@
         i = i + 1
       if err <= ~1.0 || h < ~1.0e-12
         if record
-          hs = hs.push(h)
-          ks = ks.push([k1, k2, k3, k4, k5, k6, k7])
+          hs.push(h)
+          ks.push([k1, k2, k3, k4, k5, k6, k7])
         y = y_new
         k1 = k7
         t = t + h
-        ts = ts.push(t)
-        ys = ys.push(Solve.clone_y(y))
+        ts.push(t)
+        ys.push(Solve.clone_y(y))
         if err < ~1.0e-10
           err = ~1.0e-10
         fac = safety * Math.pow(~1.0 / err, ~0.2)
@@ -271,20 +317,28 @@
     b6 = th2 * (p62 + theta * (p63 + theta * p64))
     b7 = th2 * (p72 + theta * (p73 + theta * p74))
     kk = @ks[lo]
+    k0 = kk[0]
+    k2 = kk[2]
+    k3 = kk[3]
+    k4 = kk[4]
+    k5 = kk[5]
+    k6 = kk[6]
     base = @ys[lo]
+    dim = base.size()
     out = []
     i = 0
-    while i < base.size()
-      s = b1 * kk[0][i] + b3 * kk[2][i] + b4 * kk[3][i] + b5 * kk[4][i] + b6 * kk[5][i] + b7 * kk[6][i]
-      out = out.push(base[i] + h * s)
+    while i < dim
+      s = b1 * k0[i] + b3 * k2[i] + b4 * k3[i] + b5 * k4[i] + b6 * k5[i] + b7 * k6[i]
+      out.push(base[i] + h * s)
       i = i + 1
     out
 
   # Sample many times at once: [at(t) for each t].
   -> at_many(tqs)
     out = []
+    n = tqs.size()
     i = 0
-    while i < tqs.size()
-      out = out.push(at(tqs[i]))
+    while i < n
+      out.push(at(tqs[i]))
       i = i + 1
     out

@@ -649,23 +649,31 @@
   -> .transpose(a)
     m = LinAlg.rows(a)
     n = LinAlg.cols(a)
-    out = LinAlg.zeros(n, m)
-    i = 0
-    while i < m
-      ai = a[i]
-      j = 0
-      while j < n
-        out[j][i] = ai[j]
-        j = j + 1
-      i = i + 1
+    out = []
+    j = 0
+    while j < n
+      row = []
+      i = 0
+      while i < m
+        row.push(a[i][j])
+        i = i + 1
+      out.push(row)
+      j = j + 1
     out
 
   -> .mat_vec(a, v)
     out = []
     na = a.size()
+    nv = v.size()
     i = 0
     while i < na
-      out = out.push(LinAlg.dot(a[i], v))
+      ai = a[i]
+      s = ~0.0
+      j = 0
+      while j < nv
+        s = s + ai[j] * v[j]
+        j = j + 1
+      out = out.push(s)
       i = i + 1
     out
 
@@ -960,16 +968,7 @@
   # pair the wr/wi outputs.
   -> .eigenvalues_lapack(a)
     n = LinAlg.rows(a)
-    flat = []
-    i = 0
-    while i < n
-      ai = a[i]
-      j = 0
-      while j < n
-        flat = flat.push(ai[j] + ~0.0)
-        j = j + 1
-      i = i + 1
-    af = flat.to_f64
+    af = LinAlg.flatten_square(a, n)
     wr = f64[n]
     wi = f64[n]
     info = ccall("w_blas_dgeev", af, wr, wi, n)
@@ -1117,10 +1116,10 @@
   -> .fwht(v, normalize = true)
     n = v.size()
     raise "LinAlg.fwht: length must be a positive power of 2" if !LinAlg.power_of_two?(n)
-    out = []
+    work = f64[n]
     i = 0
     while i < n
-      out.push(v[i] + ~0.0)
+      work[i] = v[i] + ~0.0
       i += 1
     h = 1
     while h < n
@@ -1129,18 +1128,24 @@
         j = i
         limit = i + h
         while j < limit
-          x = out[j]
-          y = out[j + h]
-          out[j] = x + y
-          out[j + h] = x - y
+          x = work[j]
+          y = work[j + h]
+          work[j] = x + y
+          work[j + h] = x - y
           j += 1
         i += h * 2
       h = h * 2
+    out = []
     if normalize
       scale = ~1.0 / Math.sqrt(n.to_f)
       i = 0
       while i < n
-        out[i] = out[i] * scale
+        out.push(work[i] * scale)
+        i += 1
+    else
+      i = 0
+      while i < n
+        out.push(work[i])
         i += 1
     out
 
@@ -1150,12 +1155,43 @@
     return [] if m == 0
     n = LinAlg.cols(a)
     raise "LinAlg.fwht_rows: column count must be a positive power of 2" if !LinAlg.power_of_two?(n)
+    work = f64[n]
+    scale = normalize ? (~1.0 / Math.sqrt(n.to_f)) : ~1.0
     out = []
     r = 0
     while r < m
       ar = a[r]
       raise "LinAlg.fwht_rows: rows must be rectangular" if ar.size() != n
-      out.push(LinAlg.fwht(ar, normalize))
+      i = 0
+      while i < n
+        work[i] = ar[i] + ~0.0
+        i += 1
+      h = 1
+      while h < n
+        i = 0
+        while i < n
+          j = i
+          limit = i + h
+          while j < limit
+            x = work[j]
+            y = work[j + h]
+            work[j] = x + y
+            work[j + h] = x - y
+            j += 1
+          i += h * 2
+        h = h * 2
+      row_out = []
+      if normalize
+        i = 0
+        while i < n
+          row_out.push(work[i] * scale)
+          i += 1
+      else
+        i = 0
+        while i < n
+          row_out.push(work[i])
+          i += 1
+      out.push(row_out)
       r += 1
     out
 
@@ -1174,18 +1210,25 @@
     if signs != nil && signs.size() != n
       raise "LinAlg.block_fwht_rows: signs length must equal column count"
     scale = ~1.0 / Math.sqrt(block_size.to_f)
+    work = f64[n]
+    has_signs = signs != nil
+    sign_work = f64[has_signs ? n : 1]
+    if has_signs
+      c = 0
+      while c < n
+        sign_work[c] = signs[c] + ~0.0
+        c += 1
     out = []
     r = 0
     while r < m
       row = a[r]
       raise "LinAlg.block_fwht_rows: rows must be rectangular" if row.size() != n
-      out_row = []
       c = 0
       while c < n
         v = row[c] + ~0.0
-        if signs != nil && !inverse
-          v = v * signs[c]
-        out_row.push(v)
+        if has_signs && !inverse
+          v = v * sign_work[c]
+        work[c] = v
         c += 1
       b = 0
       while b < n
@@ -1197,20 +1240,21 @@
             j = i
             limit = i + h
             while j < limit
-              x = out_row[j]
-              y = out_row[j + h]
-              out_row[j] = x + y
-              out_row[j + h] = x - y
+              x = work[j]
+              y = work[j + h]
+              work[j] = x + y
+              work[j + h] = x - y
               j += 1
             i += h * 2
           h = h * 2
         b += block_size
+      out_row = []
       c = 0
       while c < n
-        v = out_row[c] * scale
-        if signs != nil && inverse
-          v = v * signs[c]
-        out_row[c] = v
+        v = work[c] * scale
+        if has_signs && inverse
+          v = v * sign_work[c]
+        out_row.push(v)
         c += 1
       out.push(out_row)
       r += 1

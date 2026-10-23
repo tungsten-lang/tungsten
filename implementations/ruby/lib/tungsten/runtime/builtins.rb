@@ -1757,12 +1757,16 @@ module Tungsten
           array_rotate_in_place!(recv, args[0] || 1)
         end
 
-        interpreter.define_method_builtin("flatten") do |recv, _args, _block|
-          recv.flatten
+        interpreter.define_method_builtin("flatten") do |recv, args, _block|
+          args.empty? ? recv.flatten : recv.flatten(args[0].to_i)
         end
 
-        interpreter.define_method_builtin("uniq") do |recv, _args, _block|
-          recv.uniq
+        interpreter.define_method_builtin("uniq") do |recv, _args, block|
+          block ? recv.uniq { |item| block.call(item) } : recv.uniq
+        end
+
+        interpreter.define_method_builtin("uniq_by") do |recv, _args, block|
+          recv.uniq { |item| block.call(item) }
         end
 
         interpreter.define_method_builtin("join") do |recv, args, _block|

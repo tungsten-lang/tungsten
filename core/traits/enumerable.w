@@ -134,6 +134,16 @@ trait Enumerable
           out.push(item)
   # @todo initialize type of array
   -> find(&block)
+    mode = __enumerable_iteration_mode
+    if mode == 1
+      i = 0
+      n = self.size
+      while i < n
+        item = self[i]
+        if block(item)
+          return item
+        i++
+      return nil
     pairs = __enumerable_yields_pair?
     found = nil
     consumer = -> (first, second)
@@ -396,21 +406,72 @@ trait Enumerable
   # comparable. Relies on Array#<=> / w_value_compare ordering arrays by
   # content (the [key, index, …] prefix).
   -> sort_by(&block)
+    mode = __enumerable_iteration_mode
+    if mode == 1
+      n = self.size
+      if n == 0
+        return []
+      k0 = block(self[0])
+      if n == 1
+        return [self[0]]
+      if n <= 65536 && type(k0) == "Int" && k0 >= -2147483648 && k0 <= 2147483647
+        packed = Array.new(n)
+        packed[0] = (k0 << 16) + 0
+        all_small_int = true
+        i = 1
+        while i < n
+          ki = block(self[i])
+          if type(ki) == "Int" && ki >= -2147483648 && ki <= 2147483647
+            packed[i] = (ki << 16) + i
+            i += 1
+          else
+            all_small_int = false
+            break
+        if all_small_int
+          sorted_packed = packed.sort
+          out = Array.new(n)
+          j = 0
+          while j < n
+            out[j] = self[sorted_packed[j] & 65535]
+            j += 1
+          return out
+        decorated = Array.new(n)
+        j = 0
+        while j < i
+          orig_k = packed[j] >> 16
+          decorated[j] = [orig_k, j, self[j]]
+          j += 1
+        decorated[i] = [ki, i, self[i]]
+        i += 1
+        while i < n
+          decorated[i] = [block(self[i]), i, self[i]]
+          i += 1
+        sorted = decorated.sort
+        out = Array.new(n)
+        j = 0
+        while j < n
+          out[j] = sorted[j][2]
+          j += 1
+        return out
+      decorated = Array.new(n)
+      decorated[0] = [k0, 0, self[0]]
+      i = 1
+      while i < n
+        decorated[i] = [block(self[i]), i, self[i]]
+        i += 1
+      sorted = decorated.sort
+      out = Array.new(n)
+      j = 0
+      while j < n
+        out[j] = sorted[j][2]
+        j += 1
+      return out
     decorated = []
     idx = 0
-    mode = __enumerable_iteration_mode
     if mode == 2
       self.each -> (first, second)
         decorated.push([block(first, second), idx, [first, second]])
         idx = idx + 1
-    elsif mode == 1
-      i = 0
-      n = self.size
-      while i < n
-        item = self[i]
-        decorated.push([block(item), idx, item])
-        idx = idx + 1
-        i++
     else
       self.each -> (item)
         decorated.push([block(item), idx, item])
@@ -494,17 +555,24 @@ trait Enumerable
         block(item, i)
         i++
     self
-  -> map_with_index/& []
-    pairs = __enumerable_yields_pair?
-    i = 0
-    consumer = -> (first, second)
-      if pairs
-        out.push &([first, second], i)
-      else
-        out.push &(first, i)
-      i++
-
-    __enumerable_each(consumer)
+  -> map_with_index(&block) []
+    mode = __enumerable_iteration_mode
+    if mode == 2
+      i = 0
+      self.each -> (first, second)
+        out.push(block([first, second], i))
+        i++
+    elsif mode == 1
+      i = 0
+      n = self.size
+      while i < n
+        out.push(block(self[i], i))
+        i++
+    else
+      i = 0
+      self.each -> (item)
+        out.push(block(item, i))
+        i++
   -> join(sep = "") ""
     pairs = __enumerable_yields_pair?
     first_item = true
@@ -550,6 +618,18 @@ trait Enumerable
   # Prefix of elements for which the block holds; stops collecting at the
   # first element that fails (the `taking` latch mirrors Ruby's take_while).
   -> take_while(&block) []
+    mode = __enumerable_iteration_mode
+    if mode == 1
+      i = 0
+      n = self.size
+      while i < n
+        item = self[i]
+        if block(item)
+          out.push(item)
+          i++
+        else
+          return out
+      return out
     pairs = __enumerable_yields_pair?
     consumer = -> (first, second)
       item = first
@@ -566,6 +646,19 @@ trait Enumerable
   # Suffix of elements from the first one that fails the block onward. Drops
   # while the block holds, then keeps everything (Ruby drop_while).
   -> drop_while(&block) []
+    mode = __enumerable_iteration_mode
+    if mode == 1
+      i = 0
+      n = self.size
+      while i < n
+        item = self[i]
+        if !block(item)
+          while i < n
+            out.push(self[i])
+            i++
+          return out
+        i++
+      return out
     pairs = __enumerable_yields_pair?
     dropping = true
     consumer = -> (first, second)
@@ -583,30 +676,44 @@ trait Enumerable
   # Call block(element, memo) for each element and return memo — the standard
   # accumulate-into-a-mutable-object fold (Ruby each_with_object).
   -> each_with_object(memo, &block)
-    pairs = __enumerable_yields_pair?
-    consumer = -> (first, second)
-      item = first
-      if pairs
-        item = [first, second]
-      block(item, memo)
-
-    __enumerable_each(consumer)
+    mode = __enumerable_iteration_mode
+    if mode == 2
+      self.each -> (first, second)
+        block([first, second], memo)
+    elsif mode == 1
+      i = 0
+      n = self.size
+      while i < n
+        block(self[i], memo)
+        i++
+    else
+      self.each -> (item)
+        block(item, memo)
     memo
 
   # Map, then keep only truthy results, in a single pass (Ruby filter_map).
   # A block result of nil or false is dropped; everything else (incl. 0, "",
   # []) is kept, matching Tungsten's nil/false-only falsiness.
   -> filter_map(&block) []
-    pairs = __enumerable_yields_pair?
-    consumer = -> (first, second)
-      item = first
-      if pairs
-        item = [first, second]
-      fm_r = block(item)
-      if fm_r
-        out.push(fm_r)
-
-    __enumerable_each(consumer)
+    mode = __enumerable_iteration_mode
+    if mode == 2
+      self.each -> (first, second)
+        fm_r = block([first, second])
+        if fm_r
+          out.push(fm_r)
+    elsif mode == 1
+      i = 0
+      n = self.size
+      while i < n
+        fm_r = block(self[i])
+        if fm_r
+          out.push(fm_r)
+        i++
+    else
+      self.each -> (item)
+        fm_r = block(item)
+        if fm_r
+          out.push(fm_r)
 
   -> empty?
     found = false
@@ -636,18 +743,31 @@ trait Enumerable
   # the same key. Keeps the first element seen for each key (order-preserving).
   # The key block runs once per element; keys are compared via the seen hash.
   -> uniq_by(&block) []
-    pairs = __enumerable_yields_pair?
     seen = {}
-    consumer = -> (first, second)
-      item = first
-      if pairs
+    mode = __enumerable_iteration_mode
+    if mode == 2
+      self.each -> (first, second)
         item = [first, second]
-      k = block(item)
-      if !seen.has_key?(k)
-        seen[k] = true
-        out.push(item)
-
-    __enumerable_each(consumer)
+        k = block(item)
+        if !seen.has_key?(k)
+          seen[k] = true
+          out.push(item)
+    elsif mode == 1
+      i = 0
+      n = self.size
+      while i < n
+        item = self[i]
+        k = block(item)
+        if !seen.has_key?(k)
+          seen[k] = true
+          out.push(item)
+        i++
+    else
+      self.each -> (item)
+        k = block(item)
+        if !seen.has_key?(k)
+          seen[k] = true
+          out.push(item)
   -> group_by(&block) groups={}
     mode = __enumerable_iteration_mode
     if mode == 2
@@ -711,6 +831,19 @@ trait Enumerable
     [yes, no]
 
   -> zip/1 []
+    if __enumerable_iteration_mode == 1
+      b = @1.to_a
+      na = self.size ## i64
+      nb = b.size ## i64
+      maxsize = na > nb ? na : nb
+      if maxsize == 0
+        return []
+      res = Array.new(maxsize)
+      i = 0
+      while i < maxsize
+        res[i] = [self[i], b[i]]
+        i += 1
+      return res
     a = to_a
     b = @1.to_a
     maxsize = [a.size, b.size].max
@@ -724,7 +857,14 @@ trait Enumerable
       out.push arr[i]
       i--
 
-  -> each_slice(n, &)
+  -> each_slice(n, &block)
+    if __enumerable_iteration_mode == 1
+      i = 0
+      sz = self.size
+      while i < sz
+        block(self.copy(i, n))
+        i += n
+      return nil
     pairs = __enumerable_yields_pair?
     slice = []
     consumer = -> (first, second)
@@ -733,13 +873,20 @@ trait Enumerable
       else
         slice.push(first)
       if slice.size == n
-        &(slice)
+        block(slice)
         slice = []
     __enumerable_each(consumer)
     if slice.size > 0
-      &(slice)
+      block(slice)
 
-  -> each_cons(n, &)
+  -> each_cons(n, &block)
+    if __enumerable_iteration_mode == 1
+      i = 0
+      stop = self.size - n
+      while i <= stop
+        block(self.copy(i, n))
+        i += 1
+      return nil
     pairs = __enumerable_yields_pair?
     buf = []
     consumer = -> (first, second)
@@ -750,7 +897,7 @@ trait Enumerable
       if buf.size > n
         buf = buf.drop(1)
       if buf.size == n
-        &(buf.to_a)
+        block(buf.to_a)
 
     __enumerable_each(consumer)
   -> tally() counts={}

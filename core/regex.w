@@ -44,6 +44,7 @@
   OP_REP_L = 15  # match template, never fallen into), b = continuation pc. Consumes
                  # all matches in a tight loop, then backtracks by position — depth-1
                  # instead of one recursive run() frame per repetition. _L is lazy.
+  OP_REP_NB = 16 # non-backtracking greedy X* (possessive): continuation cannot match body
 
   # Char classflag bits at the LSB (must match the runtime Char layout).
   FLAG_D = 1     # \d
@@ -56,11 +57,12 @@
 
   -> new(@source, @opts = nil, @lang = nil)
     # Flat parallel program arrays (faster than an array of [op,a,b] tuples):
-    # @op[pc] opcode, @a[pc] first operand (Char payload / class / target / slot),
+    # @op[pc] opcode, @a[pc] first operand (Char payload / class idx / target / slot),
     # @b[pc] second operand (the SPLIT alternate target).
     @op = i64[0]
-    @a = []
+    @a = i64[0]
     @b = i64[0]
+    @classes = []
     @ngroup = 1                 # group 0 is the whole match
     @group_names = {}           # String name -> numbered capture index
     @nguard = 0                 # progress-guard slots for nullable-body loops
@@ -71,8 +73,11 @@
     emit(OP_SAVE, 1, 0)
     emit(OP_MATCH, 0, 0)
     @ncap = @ngroup
+    @saved = make_saved()
+    @guard = i64[@nguard]
     @subj_key = nil             # last subject decoded into @subj (decode cache)
     compute_prefilter()         # first-char prefilter (depends only on the program)
+    @vm = [@op, @a, @b, @classes, @saved, @guard, @nl, @pf_kind, @pf_char, @pf_flag, @pf_set, @pf_lit]
 
   ro :source
 
@@ -343,7 +348,41 @@
       if f != nil
         emit(OP_FLAG, f[0], f[1])
       else
-        emit(OP_CLASS, node, 0)
+        cls_arr = i64[0]
+        if node[:neg]
+          cls_arr.push(1)
+        else
+          cls_arr.push(0)
+        pos_f = 0 ## i64
+        neg_f = 0 ## i64
+        sets = node[:sets]
+        si = 0
+        while si < sets.size()
+          st = sets[si]
+          if st == "d"
+            pos_f = pos_f | FLAG_D
+          elsif st == "D"
+            neg_f = neg_f | FLAG_D
+          elsif st == "w"
+            pos_f = pos_f | FLAG_W
+          elsif st == "W"
+            neg_f = neg_f | FLAG_W
+          elsif st == "s"
+            pos_f = pos_f | FLAG_S
+          elsif st == "S"
+            neg_f = neg_f | FLAG_S
+          si = si + 1
+        cls_arr.push(pos_f)
+        cls_arr.push(neg_f)
+        ranges = node[:ranges]
+        ri = 0
+        while ri < ranges.size()
+          rng = ranges[ri]
+          cls_arr.push(rng[0])
+          cls_arr.push(rng[1])
+          ri = ri + 1
+        @classes.push(cls_arr)
+        emit(OP_CLASS, @classes.size() - 1, 0)
     elsif k == :bol
       emit(OP_BOL, 0, 0)
     elsif k == :eol
@@ -552,6 +591,29 @@
     skip
 
   -> compute_prefilter
+    ops = @op ## i64[]
+    args_a = @a ## i64[]
+    branches = @b ## i64[]
+    opc = 0 ## i64
+    while opc < ops.size()
+      if ops[opc] == OP_REP_G
+        tpc = args_a[opc]
+        npc = branches[opc]
+        while npc < ops.size() && ops[npc] == OP_SAVE
+          npc = npc + 1
+        if npc < ops.size()
+          nop = ops[npc]
+          if nop == OP_MATCH
+            ops[opc] = OP_REP_NB
+          elsif nop == OP_CHAR
+            if !consume_at?(tpc, args_a[npc])
+              ops[opc] = OP_REP_NB
+          elsif nop == OP_FLAG && branches[npc] == 0 && ops[tpc] == OP_FLAG && branches[tpc] == 0
+            m1 = args_a[tpc]
+            m2 = args_a[npc]
+            if (m1 & m2) == 0 && ((m1 | m2) & FLAG_S) != 0
+              ops[opc] = OP_REP_NB
+      opc = opc + 1
     @pf_kind = 0
     @pf_char = 0
     @pf_flag = 0
@@ -598,6 +660,7 @@
   # consuming op (the pattern can match empty, so every position is a candidate).
   -> collect_first(pc, seen)
     ops = @op ## i64[]
+    args_a = @a ## i64[]
     branches = @b ## i64[]
     pc = pc ## i64
     if seen[pc]
@@ -607,18 +670,18 @@
     if op == OP_SAVE || op == OP_MARK || op == OP_GUARD || op == OP_BOL || op == OP_WORDB
       collect_first(pc + 1, seen)
     elsif op == OP_JMP
-      collect_first(@a[pc], seen)
+      collect_first(args_a[pc], seen)
     elsif op == OP_SPLIT
-      collect_first(@a[pc], seen)
+      collect_first(args_a[pc], seen)
       collect_first(branches[pc], seen)
-    elsif op == OP_REP_G || op == OP_REP_L
-      collect_first(@a[pc], seen)    # the loop body (a start char)
+    elsif op == OP_REP_G || op == OP_REP_L || op == OP_REP_NB
+      collect_first(args_a[pc], seen)    # the loop body (a start char)
       collect_first(branches[pc], seen)    # the continuation (zero-iteration case)
     elsif op == OP_CHAR
-      @pf_set.push(@a[pc])
+      @pf_set.push(args_a[pc])
     elsif op == OP_FLAG
       if branches[pc] == 0
-        @pf_flag = @pf_flag | (@a[pc] ## i64)
+        @pf_flag = @pf_flag | args_a[pc]
       else
         @cf_ok = false               # negated \D\W\S — enumerating is infeasible
     elsif op == OP_MATCH
@@ -660,35 +723,11 @@
   # jump by skip[char one past the window] (len+1 when that char isn't in the
   # prefix). Returns the next candidate position, or n if none remain.
   -> pf_bm_search(start, n)
-    subj = @subj ## i64[]
-    lit = @pf_lit ## i64[]
-    llen = lit.size() ## i64
-    i = start ## i64
-    n = n ## i64
-    while i + llen <= n
-      j = 0
-      while j < llen && subj[i + j] == lit[j]
-        j = j + 1
-      if j == llen
-        return i
-      nxt = i + llen
-      if nxt >= n
-        return n
-      sk = @pf_skip[(subj[nxt] >> 25) & 2097151]
-      if sk == nil
-        sk = llen + 1
-      i = i + sk
-    n
+    ccall("w_regex_scan_char", @subj, start, n, @pf_lit)
 
   # Returns [whole, cap1, cap2, …] for the leftmost match, or nil.
   -> decode_subject(subject)
-    chars = subject.codes() ## i64[]
-    decoded = i64[chars.size()]
-    i = 0 ## i64
-    while i < chars.size()
-      decoded[i] = chars[i] & CHAR_PAYLOAD_MASK
-      i = i + 1
-    decoded
+    ccall("w_regex_scan_char", subject, 0, 0, 0)
 
   -> find_saved(subject)
     find_saved_from(subject, 0)
@@ -701,24 +740,7 @@
     if subject != @subj_key
       @subj = decode_subject(subject)
       @subj_key = subject
-    subj = @subj ## i64[]
-    n = subj.size() ## i64
-    @guard = i64[0]             # entry sp per nullable-loop guard slot
-    i = 0 ## i64
-    while i < @nguard
-      @guard.push(-1)
-      i = i + 1
-    start = from ## i64
-    while start <= n
-      start = pf_advance(start, n)
-      if @pf_kind != 0 && start >= n
-        return nil              # no remaining candidate start positions
-      saved = make_saved()
-      e = run(0, start, saved)
-      if e >= 0
-        return saved
-      start = start + 1
-    nil
+    ccall("w_regex_scan_flag", @subj, from, @vm, @saved)
 
   # Compatibility API: group 0 followed by numbered captures.
   -> match(subject)
@@ -736,7 +758,7 @@
     RegexMatch.new(build_result(saved), build_offsets(saved), @group_names)
 
   -> match?(subject)
-    match(subject) != nil
+    find_saved(subject) != nil
 
   # Structured match starting at a codepoint offset — String#scan's engine.
   # `^` still anchors to position 0, so a scan past it simply stops matching.
@@ -757,31 +779,16 @@
   # Build each group's text from the matched payload span (codepoint = lx >> 25),
   # so we never re-decode the whole subject.
   -> build_result(saved)
-    saved = saved ## i64[]
-    out = []
-    g = 0 ## i64
-    while g < @ncap
-      a = saved[g * 2]
-      b = saved[g * 2 + 1]
-      if a >= 0 && b >= 0
-        out.push(span_str(a, b))
-      else
-        out.push(nil)
-      g = g + 1
-    out
+    ccall("w_string_from_codes", @subj, saved, @ncap)
 
   -> build_offsets(saved)
     saved = saved ## i64[]
-    out = []
-    g = 0 ## i64
-    while g < @ncap
-      a = saved[g * 2]
-      b = saved[g * 2 + 1]
-      if a >= 0 && b >= 0
-        out.push([a, b])
-      else
-        out.push(nil)
-      g = g + 1
+    n = saved.size() ## i64
+    out = i64[n]
+    i = 0 ## i64
+    while i < n
+      out[i] = saved[i]
+      i = i + 1
     out
 
   # Materialize the match span [a, b) — a window into the decoded codepoint
@@ -796,51 +803,109 @@
   -> run(pc, sp, saved)
     subj = @subj ## i64[]
     ops = @op ## i64[]
+    args_a = @a ## i64[]
     branches = @b ## i64[]
     guard = @guard ## i64[]
     saved = saved ## i64[]
+    nl = @nl ## i64
     pc = pc ## i64
     sp = sp ## i64
     n = subj.size() ## i64
+    u_cnt = 0 ## i64
+    u_s0 = 0 ## i64
+    u_v0 = 0 ## i64
+    u_s1 = 0 ## i64
+    u_v1 = 0 ## i64
+    u_s2 = 0 ## i64
+    u_v2 = 0 ## i64
+    u_s3 = 0 ## i64
+    u_v3 = 0 ## i64
+    res = -1 ## i64
     while true
       op = ops[pc]
       if op == OP_CHAR
-        want = @a[pc] ## i64
-        if sp < n && subj[sp] == want
+        if sp < n && subj[sp] == args_a[pc]
           pc = pc + 1
           sp = sp + 1
         else
-          return -1
+          break
       elsif op == OP_FLAG
-        mask = @a[pc] ## i64
-        hit = sp < n && (subj[sp] & mask) != 0
-        if branches[pc] == 1
-          hit = sp < n && !hit
-        if hit
-          pc = pc + 1
-          sp = sp + 1
+        mask = args_a[pc]
+        if branches[pc] == 0
+          if sp < n && (subj[sp] & mask) != 0
+            pc = pc + 1
+            sp = sp + 1
+          else
+            break
         else
-          return -1
+          if sp < n && (subj[sp] & mask) == 0
+            pc = pc + 1
+            sp = sp + 1
+          else
+            break
       elsif op == OP_ANY
-        if sp < n && subj[sp] != (@nl ## i64)
+        if sp < n && subj[sp] != nl
           pc = pc + 1
           sp = sp + 1
         else
-          return -1
+          break
       elsif op == OP_CLASS
-        if sp < n && class_match?(@a[pc], subj[sp])
+        if sp < n && class_match?(args_a[pc], subj[sp])
           pc = pc + 1
           sp = sp + 1
         else
-          return -1
+          break
+      elsif op == OP_REP_NB
+        tpc = args_a[pc]
+        top = ops[tpc]
+        e = sp
+        if top == OP_FLAG
+          mask = args_a[tpc]
+          if branches[tpc] == 0
+            while e < n && (subj[e] & mask) != 0
+              e = e + 1
+          else
+            while e < n && (subj[e] & mask) == 0
+              e = e + 1
+        elsif top == OP_CHAR
+          want = args_a[tpc]
+          while e < n && subj[e] == want
+            e = e + 1
+        elsif top == OP_ANY
+          while e < n && subj[e] != nl
+            e = e + 1
+        elsif top == OP_CLASS
+          cidx = args_a[tpc]
+          while e < n && class_match?(cidx, subj[e])
+            e = e + 1
+        sp = e
+        pc = branches[pc]
       elsif op == OP_REP_G
         # Greedy X*: consume every match in a tight loop, then try the
         # continuation from the longest match down — depth-1, not one recursive
         # frame per repetition. @a = body template pc, @b = continuation pc.
-        tpc = @a[pc] ## i64
+        tpc = args_a[pc]
+        top = ops[tpc]
         e = sp
-        while e < n && consume_at?(tpc, subj[e])
-          e = e + 1
+        if top == OP_FLAG
+          mask = args_a[tpc]
+          if branches[tpc] == 0
+            while e < n && (subj[e] & mask) != 0
+              e = e + 1
+          else
+            while e < n && (subj[e] & mask) == 0
+              e = e + 1
+        elsif top == OP_CHAR
+          want = args_a[tpc]
+          while e < n && subj[e] == want
+            e = e + 1
+        elsif top == OP_ANY
+          while e < n && subj[e] != nl
+            e = e + 1
+        elsif top == OP_CLASS
+          cidx = args_a[tpc]
+          while e < n && class_match?(cidx, subj[e])
+            e = e + 1
         cont = branches[pc]
         pos = e
         while pos >= sp
@@ -848,13 +913,31 @@
           if r >= 0
             return r
           pos = pos - 1
-        return -1
+        break
       elsif op == OP_REP_L
         # Lazy X*: shortest match first.
-        tpc = @a[pc] ## i64
+        tpc = args_a[pc]
+        top = ops[tpc]
         e = sp
-        while e < n && consume_at?(tpc, subj[e])
-          e = e + 1
+        if top == OP_FLAG
+          mask = args_a[tpc]
+          if branches[tpc] == 0
+            while e < n && (subj[e] & mask) != 0
+              e = e + 1
+          else
+            while e < n && (subj[e] & mask) == 0
+              e = e + 1
+        elsif top == OP_CHAR
+          want = args_a[tpc]
+          while e < n && subj[e] == want
+            e = e + 1
+        elsif top == OP_ANY
+          while e < n && subj[e] != nl
+            e = e + 1
+        elsif top == OP_CLASS
+          cidx = args_a[tpc]
+          while e < n && class_match?(cidx, subj[e])
+            e = e + 1
         cont = branches[pc]
         pos = sp
         while pos <= e
@@ -862,60 +945,94 @@
           if r >= 0
             return r
           pos = pos + 1
-        return -1
+        break
       elsif op == OP_MATCH
         return sp
       elsif op == OP_JMP
-        pc = @a[pc] ## i64
+        pc = args_a[pc]
       elsif op == OP_SPLIT
-        r = run(@a[pc] ## i64, sp, saved)
+        r = run(args_a[pc], sp, saved)
         if r >= 0
           return r
         pc = branches[pc]
       elsif op == OP_SAVE
-        slot = @a[pc] ## i64
+        slot = args_a[pc]
+        nop = ops[pc + 1]
+        if nop == OP_MATCH
+          saved[slot] = sp
+          return sp
+        if nop == OP_SAVE && ops[pc + 2] == OP_MATCH
+          saved[slot] = sp
+          saved[args_a[pc + 1]] = sp
+          return sp
         old = saved[slot]
-        saved[slot] = sp
-        r = run(pc + 1, sp, saved)
-        if r >= 0
-          return r
-        saved[slot] = old
-        return -1
+        if u_cnt < 4
+          if u_cnt == 0
+            u_s0 = slot
+            u_v0 = old
+          elsif u_cnt == 1
+            u_s1 = slot
+            u_v1 = old
+          elsif u_cnt == 2
+            u_s2 = slot
+            u_v2 = old
+          else
+            u_s3 = slot
+            u_v3 = old
+          u_cnt = u_cnt + 1
+          saved[slot] = sp
+          pc = pc + 1
+        else
+          saved[slot] = sp
+          r = run(pc + 1, sp, saved)
+          if r >= 0
+            return r
+          saved[slot] = old
+          break
       elsif op == OP_MARK
-        g = @a[pc] ## i64
+        g = args_a[pc]
         old = guard[g]
         guard[g] = sp
         r = run(pc + 1, sp, saved)
         if r >= 0
           return r
         guard[g] = old
-        return -1
+        break
       elsif op == OP_GUARD
-        g = @a[pc] ## i64
+        g = args_a[pc]
         if sp == guard[g]
-          return -1
+          break
         pc = pc + 1
       elsif op == OP_BOL
-        if sp == 0 || subj[sp - 1] == (@nl ## i64)
+        if sp == 0 || subj[sp - 1] == nl
           pc = pc + 1
         else
-          return -1
+          break
       elsif op == OP_EOL
-        if sp == n || subj[sp] == (@nl ## i64)
+        if sp == n || subj[sp] == nl
           pc = pc + 1
         else
-          return -1
+          break
       elsif op == OP_WORDB
         # Spell this without a Bool local: the current local type pass can
         # otherwise merge that Bool with the raw-i64 VM temporaries.
         if at_word_boundary?(sp)
-          if @a[pc] != 1
-            return -1
-        elsif @a[pc] == 1
-          return -1
+          if args_a[pc] != 1
+            break
+        elsif args_a[pc] == 1
+          break
         pc = pc + 1
       else
-        return -1
+        break
+    if u_cnt >= 4
+      saved[u_s3] = u_v3
+    if u_cnt >= 3
+      saved[u_s2] = u_v2
+    if u_cnt >= 2
+      saved[u_s1] = u_v1
+    if u_cnt >= 1
+      saved[u_s0] = u_v0
+    res
 
   -> at_word_boundary?(sp)
     subj = @subj ## i64[]
@@ -932,41 +1049,46 @@
   # test against one Char, without advancing — mirrors run()'s consuming cases.
   -> consume_at?(pc, ch)
     ops = @op ## i64[]
+    args_a = @a ## i64[]
     branches = @b ## i64[]
     pc = pc ## i64
     ch = ch ## i64
     op = ops[pc]
     if op == OP_CHAR
-      return ch == (@a[pc] ## i64)
+      return ch == args_a[pc]
     if op == OP_FLAG
-      hit = (ch & (@a[pc] ## i64)) != 0
+      hit = (ch & args_a[pc]) != 0
       if branches[pc] == 1
         return !hit
       return hit
     if op == OP_ANY
-      return ch != (@nl ## i64)
+      nl = @nl ## i64
+      return ch != nl
     if op == OP_CLASS
-      return class_match?(@a[pc], ch)
+      return class_match?(args_a[pc], ch)
     false
 
   -> class_match?(cls, lx)
+    c = @classes[cls] ## i64[]
     lx = lx ## i64
-    # Membership is a disjunction over ranges and shorthand sets, so the answer
-    # is known on the FIRST hit — return immediately instead of scanning the
-    # rest. `neg` flips the verdict once: a member of [^…] is a non-match.
-    neg = cls[:neg]
-    ranges = cls[:ranges]
-    i = 0
-    while i < ranges.size()
-      if lx >= ranges[i][0] && lx <= ranges[i][1]
+    neg = c[0] == 1
+    pos_f = c[1]
+    if pos_f != 0 && (lx & pos_f) != 0
+      return !neg
+    neg_f = c[2]
+    if neg_f != 0
+      if (neg_f & FLAG_D) != 0 && (lx & FLAG_D) == 0
         return !neg
-      i = i + 1
-    sets = cls[:sets]
-    i = 0
-    while i < sets.size()
-      if set_match?(sets[i], lx)
+      if (neg_f & FLAG_W) != 0 && (lx & FLAG_W) == 0
         return !neg
-      i = i + 1
+      if (neg_f & FLAG_S) != 0 && (lx & FLAG_S) == 0
+        return !neg
+    n = c.size() ## i64
+    i = 3 ## i64
+    while i < n
+      if lx >= c[i] && lx <= c[i + 1]
+        return !neg
+      i = i + 2
     neg
 
   # \d \w \s and their negations — a single flag-bit test on the lexint.
@@ -991,6 +1113,8 @@
   -> new(@groups, @offsets, @name_to_group)
 
   -> group_index(key)
+    if key == 0
+      return 0
     kind = key.class_name
     if kind == "Int" || kind == "Integer" || kind == "BigInt"
       return key
@@ -1012,19 +1136,47 @@
     index = group_index(key)
     if index == nil
       return nil
-    @offsets[index]
+    offs = @offsets ## i64[]
+    idx = index ## i64
+    if idx < 0
+      idx = idx + @groups.size()
+    if idx < 0 || idx * 2 + 1 >= offs.size()
+      return nil
+    a = offs[idx * 2]
+    b = offs[idx * 2 + 1]
+    if a < 0 || b < 0
+      return nil
+    [a, b]
 
   -> begin_offset(key = 0)
-    span = offset(key)
-    if span == nil
+    index = group_index(key)
+    if index == nil
       return nil
-    span[0]
+    offs = @offsets ## i64[]
+    idx = index ## i64
+    if idx < 0
+      idx = idx + @groups.size()
+    if idx < 0 || idx * 2 + 1 >= offs.size()
+      return nil
+    a = offs[idx * 2]
+    if a < 0
+      return nil
+    a
 
   -> end_offset(key = 0)
-    span = offset(key)
-    if span == nil
+    index = group_index(key)
+    if index == nil
       return nil
-    span[1]
+    offs = @offsets ## i64[]
+    idx = index ## i64
+    if idx < 0
+      idx = idx + @groups.size()
+    if idx < 0 || idx * 2 + 1 >= offs.size()
+      return nil
+    b = offs[idx * 2 + 1]
+    if b < 0
+      return nil
+    b
 
   -> match
     @groups[0]
@@ -1052,7 +1204,7 @@
   -> named_offsets
     out = {}
     @name_to_group.each -> (name, index)
-      out[name] = @offsets[index]
+      out[name] = offset(index)
     out
 
   -> to_a

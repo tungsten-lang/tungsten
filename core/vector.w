@@ -62,10 +62,12 @@
     negate
 
   -> +/1
-    class.new(components.zip(@1.components).map -> item[0] + item[1])
+    other_comps = @1.components
+    class.new((0...components.size).map -> components[i] + other_comps[i])
 
   -> -/1
-    class.new(components.zip(@1.components).map -> item[0] - item[1])
+    other_comps = @1.components
+    class.new((0...components.size).map -> components[i] - other_comps[i])
 
   # Multiplication is type-dispatched at the call site:
   #
@@ -79,7 +81,8 @@
 
   # Hadamard (componentwise) product — same convention as GLSL/MSL.
   -> */1(Vector)
-    class.new(components.zip(@1.components).map -> item[0] * item[1])
+    other_comps = @1.components
+    class.new((0...components.size).map -> components[i] * other_comps[i])
 
   # Scalar multiplication.
   -> */1(Number)
@@ -88,7 +91,8 @@
 
   # Explicit Hadamard alias — `v1 ⊙ v2` lowers to this method.
   -> ⊙/1
-    class.new(components.zip(@1.components).map -> item[0] * item[1])
+    other_comps = @1.components
+    class.new((0...components.size).map -> components[i] * other_comps[i])
 
   # Latin alias for callers who prefer ASCII.
   -> hadamard/1
@@ -96,7 +100,8 @@
 
   # Hadamard division — type-dispatched parallel of `*`.
   -> //1(Vector)
-    class.new(components.zip(@1.components).map -> item[0] / item[1])
+    other_comps = @1.components
+    class.new((0...components.size).map -> components[i] / other_comps[i])
 
   -> //1(Number)
     scalar = @1

@@ -7,6 +7,9 @@
 #   studio mix <episode.json>                           -> build/<cut>/mix.wav (+ loudness report)
 #   studio mux <episode.json>                           -> build/<cut>/master.mp4, .srt, chapters.txt
 #   studio verify <master> [--resolved path]
+#   studio fcpxml <episode.json> [--cut full] [--out path] [--master path] -> FCPXML 1.11
+#   studio share <episode.json> [--cut full] [--preset share]  -> build/<cut>/share.mp4 (Transcode from the master)
+#   studio gradecheck <episode.json> <from> <to> [--step N]   -> Metal grade vs the CPU reference
 #
 # Build: bin/tungsten -o apps/studio/bin/studio apps/studio/studio.w (under the heavy lock).
 
@@ -17,7 +20,9 @@ use lib/raster
 use lib/render
 use lib/encode
 use lib/audio
+use lib/mixplain
 use lib/mux
+use lib/fcpxml
 
 -> opt(args, name, default)
   i = 0
@@ -56,14 +61,13 @@ use lib/mux
     << "  render \[" + rg[0].to_s + ", " + rg[1].to_s + ") " + (rg[1] - rg[0]).to_s + " frames: " + rg[2].join(" ")
   0
 
-STUDIO_BIN_DEFAULT = "/Users/erik/tungsten-worktrees/engine/apps/studio/bin/studio"
-
 -> run_token
   Crypto.sha256(clock().to_s + ":" + Crypto.random_bytes(8).to_s).slice(0, 10)
 
+# Workers are this binary (STUDIO_BIN overrides).
 -> studio_bin
   b = env("STUDIO_BIN")
-  return STUDIO_BIN_DEFAULT if b == nil || b == ""
+  return System.executable_path if b == nil || b == ""
   b
 
 # studio frame <episode.json> <f> [--png out] [--yuv out] [--fresh]: one frame, from its stored segment (decoded)
@@ -77,19 +81,21 @@ STUDIO_BIN_DEFAULT = "/Users/erik/tungsten-worktrees/engine/apps/studio/bin/stud
   out = opt(args, "--png", nil)
   yuv = opt(args, "--yuv", nil)
   seg = nil
-  r["segments"].each ->(s)
-    seg = s if s["f0"] <= f && f < s["f0"] + s["n"]
+  si = 0
+  segs = r["segments"]
+  while si < segs.size && seg == nil
+    seg = segs[si] if segs[si]["f0"] <= f && f < segs[si]["f0"] + segs[si]["n"]
+    si += 1 if seg == nil
   sp = segment_path(p.build, seg["key"])
   tc = timecode(f, r["rate"][0], r["rate"][1])
   if !flag?(args, "--fresh") && File.exist?(sp)
     target = out
     target = yuv if yuv != nil
     target = p.build + "/frame.png" if target == nil
-    die("decode failed") if !decode_segment_frame(sp, f - seg["f0"], target, yuv != nil)
+    die("decode failed") if !decode_segment_frame(sp, f - seg["f0"], target, yuv != nil, r["rate"])
     << "frame " + f.to_s + " (" + tc + ") from segment " + seg["key"].slice(0, 12) + " +" + (f - seg["f0"]).to_s + " -> " + target
     return 0
-  r["tracks"][0]["items"].each ->(it)
-    p.ensure_program(it, r["rate"][0], r["rate"][1]) if it["kind"] == "program"
+  p.ensure_program_frames(r, [si], 1)
   eng = Engine.new(p, r)
   t0 = clock_ms()
   eng.frame_into(f)
@@ -109,8 +115,6 @@ STUDIO_BIN_DEFAULT = "/Users/erik/tungsten-worktrees/engine/apps/studio/bin/stud
   p.verify_assets(true)
   r = p.resolve
   p.write_resolved(p.resolved_path)
-  r["tracks"][0]["items"].each ->(it)
-    p.ensure_program(it, r["rate"][0], r["rate"][1]) if it["kind"] == "program"
   jobs = opt(args, "--jobs", "1").to_i
   budget = opt(args, "--max-frames", "400").to_i
   lo = opt(args, "--from", "0").to_i
@@ -136,6 +140,8 @@ STUDIO_BIN_DEFAULT = "/Users/erik/tungsten-worktrees/engine/apps/studio/bin/stud
     << "render: nothing to do (" + segs.size.to_s + " segments in place)"
     return 0
   mkdir_p(p.build + "/tmp")
+  # program frames these segments need, rendered first (the programs run `jobs` at a time)
+  p.ensure_program_frames(r, take, jobs)
   if jobs <= 1
     eng = Engine.new(p, r)
     enc = make_encoder(r, p.encoder, p.build + "/tmp/fifo." + run_token())
@@ -182,6 +188,12 @@ STUDIO_BIN_DEFAULT = "/Users/erik/tungsten-worktrees/engine/apps/studio/bin/stud
   r = p.resolve
   a = args[2].to_i
   b = args[3].to_i
+  idxs = []
+  si = 0
+  r["segments"].each ->(s)
+    idxs.push(si) if s["f0"] < b && s["f0"] + s["n"] > a
+    si += 1
+  p.ensure_program_frames(r, idxs, 1)
   eng = Engine.new(p, r)
   fh = FileHandle.new(args[4], "wb")
   f = a
@@ -192,16 +204,19 @@ STUDIO_BIN_DEFAULT = "/Users/erik/tungsten-worktrees/engine/apps/studio/bin/stud
   eng.close
   0
 
-# studio gc <episode.json> [--dry]: delete stored segments that no resolved timeline in build/<cut>/ references.
+# studio gc <episode.json> [--dry]: delete stored segments that no resolved timeline of any cut (build/*/)
+# references (the cuts share one segment store).
 -> cmd_gc(args)
   p = Project.new(args[1], opt(args, "--cut", "full"))
   keep = {}
-  dir = p.build + "/" + p.cut
-  File.entries(dir).each ->(nm)
-    if nm.ends_with?("timeline.resolved.json")
-      r = JSON.parse(File.read(dir + "/" + nm))
-      r["segments"].each ->(s)
-        keep[s["key"]] = 1
+  File.entries(p.build).each ->(cd)
+    dir = p.build + "/" + cd
+    if cd != "." && cd != ".." && cd != "segments" && File.directory?(dir)
+      File.entries(dir).each ->(nm)
+        if nm.ends_with?("timeline.resolved.json")
+          r = JSON.parse(File.read(dir + "/" + nm))
+          r["segments"].each ->(s)
+            keep[s["key"]] = 1
   sd = segment_dir(p.build)
   gone = 0
   bytes = 0
@@ -228,9 +243,76 @@ STUDIO_BIN_DEFAULT = "/Users/erik/tungsten-worktrees/engine/apps/studio/bin/stud
   File.delete(args[3])
   0
 
+# studio gradecheck <episode.json> <from> <to> [--step N]: frames rendered by the CPU reference grade and by the
+# Metal grade side by side (same process, nothing written); the largest code-value difference, how many values
+# differ, and each implementation's render time.
+-> cmd_gradecheck(args)
+  p = Project.new(args[1], opt(args, "--cut", "full"))
+  p.verify_assets(true)
+  r = p.resolve
+  a = args[2].to_i
+  b = args[3].to_i
+  step = opt(args, "--step", "1").to_i
+  idxs = []
+  si = 0
+  r["segments"].each ->(s)
+    idxs.push(si) if s["f0"] < b && s["f0"] + s["n"] > a
+    si += 1
+  p.ensure_program_frames(r, idxs, 1)
+  GRADE["id"] = "cpu"
+  ec = Engine.new(p, r)
+  GRADE["id"] = METAL_GRADE_ID
+  em = Engine.new(p, r)
+  n = r["w"] * r["h"] * 3
+  st = i64[4]
+  tc = ~0.0
+  tm = ~0.0
+  frames = 0
+  worst = 0
+  worst_f = -1
+  f = a
+  while f < b
+    c0 = clock()
+    oc = ec.frame_into(f)
+    c1 = clock()
+    om = em.frame_into(f)
+    c2 = clock()
+    tc += c1 - c0
+    tm += c2 - c1
+    d = gc_compare(oc, om, n, st)
+    if d > worst
+      worst = d
+      worst_f = f
+    frames += 1
+    f += step
+  ec.close
+  em.close
+  tot = n * frames + ~0.0
+  << "gradecheck " + frames.to_s + " frames in \[" + a.to_s + ", " + b.to_s + ") step " + step.to_s + ": max |diff| " + worst.to_s + " code values (frame " + worst_f.to_s + "); values differing by 1: " + st[1].to_s + " (" + fixed6(~100.0 * st[1] / tot) + "%), by more: " + st[2].to_s
+  << "render ms per frame: cpu grade " + fixed6(tc * ~1000.0 / frames) + ", metal grade " + fixed6(tm * ~1000.0 / frames)
+  worst <= 1 ? 0 : 1
+
+# Byte comparison of two RGB24 frames: st[1] += values off by one, st[2] += values off by more; returns the max.
+-> gc_compare(x, y, n, st) (u8[] u8[] i64 i64[]) i64
+  m = 0
+  i = 0
+  while i < n
+    p = x[i]
+    q = y[i]
+    d = p - q
+    d = q - p if d < 0
+    if d > 0
+      m = d if d > m
+      if d == 1
+        st[1] = st[1] + 1
+      else
+        st[2] = st[2] + 1
+    i += 1
+  m
+
 -> main(args)
   if args.size == 0
-    << "usage: studio resolve|diff|frame|render|worker|mix|mux|verify ..."
+    << "usage: studio resolve|diff|frame|render|worker|mix|mux|verify|fcpxml|share|raw|gc|gradecheck|selftest ..."
     return 2
   c = args[0]
   return cmd_resolve(args) if c == "resolve"
@@ -238,12 +320,15 @@ STUDIO_BIN_DEFAULT = "/Users/erik/tungsten-worktrees/engine/apps/studio/bin/stud
   return cmd_frame(args) if c == "frame"
   return cmd_render(args) if c == "render"
   return cmd_worker(args) if c == "worker"
-  return cmd_mix(args) if c == "mix"
+  return cmd_mix_any(args) if c == "mix"
   return cmd_mux(args) if c == "mux"
   return cmd_verify(args) if c == "verify"
+  return cmd_fcpxml(args) if c == "fcpxml"
+  return cmd_share(args) if c == "share"
   return selftest() if c == "selftest"
   return cmd_raw(args) if c == "raw"
   return cmd_gc(args) if c == "gc"
+  return cmd_gradecheck(args) if c == "gradecheck"
   << "unknown command " + c
   2
 

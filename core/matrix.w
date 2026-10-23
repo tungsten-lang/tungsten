@@ -47,7 +47,8 @@
     negate
 
   -> +/1
-    class.new(elements.zip(@1.elements).map -> item[0] + item[1])
+    other_elems = @1.elements
+    class.new((0...elements.size).map -> elements[i] + other_elems[i])
 
   -> add_mut(other)
     i = 0
@@ -57,7 +58,8 @@
     self
 
   -> -/1
-    class.new(elements.zip(@1.elements).map -> item[0] - item[1])
+    other_elems = @1.elements
+    class.new((0...elements.size).map -> elements[i] - other_elems[i])
 
   # Scalar multiplication.
   -> */1(Number)
@@ -72,7 +74,8 @@
   # the elementwise product of two matrices of the SAME shape. Distinct
   # from `A * B` which is the standard matrix product.
   -> ⊙/1
-    class.new(elements.zip(@1.elements).map -> item[0] * item[1])
+    other_elems = @1.elements
+    class.new((0...elements.size).map -> elements[i] * other_elems[i])
 
   -> hadamard/1
     self ⊙ @1

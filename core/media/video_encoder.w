@@ -32,6 +32,12 @@
 # equal VMAF they are 13% (H.264) to 19% (HEVC) smaller; false keeps decode
 # order equal to presentation order.
 #
+# Scaling: source: [w, h] takes frames of that size (RGBA or BGRA) and
+# scales each one to the encoder's size before conversion (Scaler: filter:
+# :lanczos3, fit: :stretch / :contain / :cover, crop:, rect:, fill:,
+# scale_backend: :auto), e.g. a 4K master from 1080p renders:
+#   VideoEncoder.new(3840, 2160, codec: :hevc, source: [1920, 1080])
+#
 # Segments: every #segment call closes the open GOP. Its first frame is a
 # forced IDR and no frame of a segment refers outside it (B-frames only
 # reorder within it), so each segment is self-contained. Parameter sets live
@@ -44,11 +50,11 @@
 # keep encoding the next segment before saving the last one.
 
 + VideoEncoder
-  ro :width, :height, :codec, :rate, :input, :handle
+  ro :width, :height, :codec, :rate, :input, :handle, :source
 
   # VideoEncoder.new(width, height, codec: :h264, rate: [24, 1], quality: nil,
   # bitrate: nil, gop: 48, input: :rgba, siting: :left, reorder: true,
-  # speed: false)
+  # speed: false, source: nil, filter: :lanczos3, fit: :stretch)
   -> new(@width, @height, opts = {})
     @codec = VideoEncoder.opt(opts, :codec, "h264").to_s
     @rate = Timecode.rate(VideoEncoder.opt(opts, :rate, [24, 1]))
@@ -58,6 +64,17 @@
     @handle = ccall("w_media_encoder_new", @width, @height, @codec, @rate[0], @rate[1], opts[:quality], opts[:bitrate],
                     VideoEncoder.opt(opts, :gop, 48), @input, siting, VideoEncoder.opt(opts, :reorder, true),
                     VideoEncoder.opt(opts, :speed, false))
+    @source = nil
+    src = VideoEncoder.opt(opts, :source, nil)
+    if src != nil
+      sw = src[0]
+      sh = src[1]
+      g = Scaler.fit(sw, sh, @width, @height, VideoEncoder.opt(opts, :fit, "stretch"))
+      spec = [sw, sh, VideoEncoder.opt(opts, :filter, "lanczos3").to_s, VideoEncoder.opt(opts, :crop, g[:crop]),
+              VideoEncoder.opt(opts, :rect, g[:rect]), VideoEncoder.opt(opts, :fill, [0, 0, 0, 255]),
+              VideoEncoder.opt(opts, :scale_backend, "auto").to_s]
+      ccall("w_media_encoder_set", @handle, "source", spec)
+      @source = [sw, sh]
 
   -> .opt(opts, key, fallback)
     if opts == nil || !opts.has_key?(key) || opts[key] == nil
@@ -96,9 +113,11 @@
   -> segments
     ccall("w_media_encoder_info", @handle, "segments")
 
-  # {frames:, segments:, pixel_format:, bits:, convert_s:, submit_s:, wait_s:}
+  # {frames:, segments:, pixel_format:, bits:, convert_s:, submit_s:, wait_s:,
+  # scale_s:, scale_backend:}
   -> stats
     {frames: frames, segments: segments, pixel_format: ccall("w_media_encoder_info", @handle, "pixel_format"),
+     scale_s: ccall("w_media_encoder_info", @handle, "scale_s"), scale_backend: ccall("w_media_encoder_info", @handle, "scale_backend"),
      bits: ccall("w_media_encoder_info", @handle, "bits"),
      convert_s: ccall("w_media_encoder_info", @handle, "convert_s"),
      submit_s: ccall("w_media_encoder_info", @handle, "submit_s"),

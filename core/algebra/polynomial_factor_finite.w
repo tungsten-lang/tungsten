@@ -90,22 +90,34 @@
   # Digits are already packed elements of the owning finite field, so raw
   # monomial construction is required.
   -> finite_factor_candidate(code, maximum_degree)
-    field = @ring.field
+    order = @ring.field.order
     remaining = code
     terms = []
     exponent = 0
-    while exponent < maximum_degree
-      coefficient = remaining % field.order
-      if !field.zero?(coefficient)
-        terms.push([
-          field.element_from_index(coefficient), [exponent]
-        ])
-      remaining = remaining / field.order
-      exponent += 1
-    # Digits arrive from low to high exponent. Reversing once yields the
-    # canonical descending term order and avoids allocating/merging one new
-    # Polynomial for every nonzero digit.
-    Polynomial.new(@ring, terms.reverse, true)
+    if order == 2
+      while exponent < maximum_degree && remaining > 0
+        if (remaining & 1) != 0
+          terms.push([1, [exponent]])
+        remaining = remaining >> 1
+        exponent += 1
+    else
+      while exponent < maximum_degree && remaining > 0
+        coefficient = remaining % order
+        if coefficient != 0
+          terms.push([coefficient, [exponent]])
+        remaining = remaining / order
+        exponent += 1
+    # Digits arrive from low to high exponent. Reversing in-place yields the
+    # canonical descending term order and avoids allocating a second Array.
+    lo = 0
+    hi = terms.size - 1
+    while lo < hi
+      tmp = terms[lo]
+      terms[lo] = terms[hi]
+      terms[hi] = tmp
+      lo += 1
+      hi -= 1
+    Polynomial.new(@ring, terms, true)
 
   -> proper_finite_factor?(factor, polynomial)
     factor.degree > 0 && factor.degree < polynomial.degree

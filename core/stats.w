@@ -46,44 +46,28 @@ use core/special
     n = xs.size()
     if n == 0
       return ~0.0
-    ys = []
+    ys = f64[n]
     i = 0
     while i < n
-      ys = ys.push(xs[i])
+      ys[i] = xs[i]
       i = i + 1
-    # insertion sort
-    i = 1
-    while i < n
-      key = ys[i]
-      j = i - 1
-      while j >= 0 && ys[j] > key
-        ys[j + 1] = ys[j]
-        j = j - 1
-      ys[j + 1] = key
-      i = i + 1
-    if n % 2 == 1
-      return ys[n / 2]
-    (ys[n / 2 - 1] + ys[n / 2]) / ~2.0
+    stats_sort_f64(ys, n)
+    mid = n >> 1
+    if (n & 1) == 1
+      return ys[mid]
+    (ys[mid - 1] + ys[mid]) * ~0.5
 
   -> .percentile(xs, p)
     # p in [0,100]
     n = xs.size()
     if n == 0
       return ~0.0
-    ys = []
+    ys = f64[n]
     i = 0
     while i < n
-      ys = ys.push(xs[i])
+      ys[i] = xs[i]
       i = i + 1
-    i = 1
-    while i < n
-      key = ys[i]
-      j = i - 1
-      while j >= 0 && ys[j] > key
-        ys[j + 1] = ys[j]
-        j = j - 1
-      ys[j + 1] = key
-      i = i + 1
+    stats_sort_f64(ys, n)
     if p <= ~0.0
       return ys[0]
     if p >= ~100.0
@@ -91,8 +75,8 @@ use core/special
     rank = (p / ~100.0) * (n - ~1.0)
     lo = Math.floor(rank)
     hi = Math.ceil(rank)
-    loi = lo
-    hii = hi
+    loi = lo.to_i()
+    hii = hi.to_i()
     if loi == hii
       return ys[loi]
     w = rank - lo
@@ -239,3 +223,20 @@ use core/special
     if random < p
       return 1
     0
+
+-> stats_sort_f64(ys, n) (f64[] i64) i64
+  gap = 1
+  while gap * 3 + 1 < n
+    gap = gap * 3 + 1
+  while gap >= 1
+    i = gap
+    while i < n
+      key = ys[i]
+      j = i - gap
+      while j >= 0 && ys[j] > key
+        ys[j + gap] = ys[j]
+        j = j - gap
+      ys[j + gap] = key
+      i = i + 1
+    gap = gap / 3
+  0

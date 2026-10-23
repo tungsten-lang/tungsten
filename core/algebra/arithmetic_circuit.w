@@ -16,6 +16,9 @@ use core/combinatorics/support
 
   ro :kind, :payload
 
+  -> raw_inputs
+    @inputs
+
   -> inputs
     Combinatorics.copy_vector(@inputs)
 
@@ -104,9 +107,10 @@ use core/combinatorics/support
     require_node(index)
 
   -> assignment_value(assignments, name)
-    if assignments.class_name != "Hash" || !assignments.has_key?(name)
-      raise "missing arithmetic-circuit variable assignment: " + name.to_s
-    assignments[name]
+    if assignments.class_name == "Hash"
+      val = assignments[name]
+      return val if val != nil || assignments.has_key?(name)
+    raise "missing arithmetic-circuit variable assignment: " + name.to_s
 
   -> values_at(assignments, output = nil)
     target = require_output(output)
@@ -116,32 +120,59 @@ use core/combinatorics/support
     left_inputs = tape[2]
     right_inputs = tape[3]
     payloads = tape[4]
+    n_inst = node_indices.size
+    n_nodes = @nodes.size
     values = []
-    @nodes.size.times -> values.push(nil)
+    if n_inst == n_nodes
+      instruction = 0
+      while instruction < n_inst
+        opcode = opcodes[instruction]
+        if opcode == 2
+          values.push(values[left_inputs[instruction]] + values[right_inputs[instruction]])
+        elsif opcode == 4
+          values.push(values[left_inputs[instruction]] * values[right_inputs[instruction]])
+        elsif opcode == 3
+          values.push(values[left_inputs[instruction]] - values[right_inputs[instruction]])
+        elsif opcode == 0
+          values.push(payloads[instruction])
+        elsif opcode == 1
+          values.push(assignment_value(assignments, payloads[instruction]))
+        elsif opcode == 6
+          values.push(0 - values[left_inputs[instruction]])
+        elsif opcode == 5
+          denominator = values[right_inputs[instruction]]
+          if denominator == 0
+            raise "arithmetic circuit is undefined: division by zero"
+          values.push(values[left_inputs[instruction]] / denominator)
+        else
+          raise "unsupported arithmetic-circuit opcode"
+        instruction += 1
+      return values
+    i = 0
+    while i < n_nodes
+      values.push(nil)
+      i += 1
     instruction = 0
-    while instruction < node_indices.size
+    while instruction < n_inst
       index = node_indices[instruction]
       opcode = opcodes[instruction]
-      left = left_inputs[instruction]
-      right = right_inputs[instruction]
-      payload = payloads[instruction]
-      if opcode == 0
-        values[index] = payload
-      elsif opcode == 1
-        values[index] = assignment_value(assignments, payload)
-      elsif opcode == 2
-        values[index] = values[left] + values[right]
-      elsif opcode == 3
-        values[index] = values[left] - values[right]
+      if opcode == 2
+        values[index] = values[left_inputs[instruction]] + values[right_inputs[instruction]]
       elsif opcode == 4
-        values[index] = values[left] * values[right]
+        values[index] = values[left_inputs[instruction]] * values[right_inputs[instruction]]
+      elsif opcode == 3
+        values[index] = values[left_inputs[instruction]] - values[right_inputs[instruction]]
+      elsif opcode == 0
+        values[index] = payloads[instruction]
+      elsif opcode == 1
+        values[index] = assignment_value(assignments, payloads[instruction])
+      elsif opcode == 6
+        values[index] = 0 - values[left_inputs[instruction]]
       elsif opcode == 5
-        denominator = values[right]
+        denominator = values[right_inputs[instruction]]
         if denominator == 0
           raise "arithmetic circuit is undefined: division by zero"
-        values[index] = values[left] / denominator
-      elsif opcode == 6
-        values[index] = 0 - values[left]
+        values[index] = values[left_inputs[instruction]] / denominator
       else
         raise "unsupported arithmetic-circuit opcode"
       instruction += 1
@@ -152,7 +183,11 @@ use core/combinatorics/support
   # workspace invalid and evaluate_into will reject it.
   -> evaluation_workspace
     values = []
-    @nodes.size.times -> values.push(nil)
+    n_nodes = @nodes.size
+    i = 0
+    while i < n_nodes
+      values.push(nil)
+      i += 1
     values
 
   # Column-major scratch for one batch. Each reachable node owns a column of
@@ -162,10 +197,16 @@ use core/combinatorics/support
     Combinatorics.require_nonnegative_integer(
       batch_size, "arithmetic-circuit evaluation batch size")
     columns = []
-    @nodes.size.times ->
+    n_nodes = @nodes.size
+    i = 0
+    while i < n_nodes
       column = []
-      batch_size.times -> column.push(nil)
+      j = 0
+      while j < batch_size
+        column.push(nil)
+        j += 1
       columns.push(column)
+      i += 1
     columns
 
   # Evaluate the selected output while reusing caller-owned node storage.
@@ -181,30 +222,28 @@ use core/combinatorics/support
     left_inputs = tape[2]
     right_inputs = tape[3]
     payloads = tape[4]
+    n_inst = node_indices.size
     instruction = 0
-    while instruction < node_indices.size
+    while instruction < n_inst
       index = node_indices[instruction]
       opcode = opcodes[instruction]
-      left = left_inputs[instruction]
-      right = right_inputs[instruction]
-      payload = payloads[instruction]
-      if opcode == 0
-        values[index] = payload
-      elsif opcode == 1
-        values[index] = assignment_value(assignments, payload)
-      elsif opcode == 2
-        values[index] = values[left] + values[right]
-      elsif opcode == 3
-        values[index] = values[left] - values[right]
+      if opcode == 2
+        values[index] = values[left_inputs[instruction]] + values[right_inputs[instruction]]
       elsif opcode == 4
-        values[index] = values[left] * values[right]
+        values[index] = values[left_inputs[instruction]] * values[right_inputs[instruction]]
+      elsif opcode == 3
+        values[index] = values[left_inputs[instruction]] - values[right_inputs[instruction]]
+      elsif opcode == 0
+        values[index] = payloads[instruction]
+      elsif opcode == 1
+        values[index] = assignment_value(assignments, payloads[instruction])
+      elsif opcode == 6
+        values[index] = 0 - values[left_inputs[instruction]]
       elsif opcode == 5
-        denominator = values[right]
+        denominator = values[right_inputs[instruction]]
         if denominator == 0
           raise "arithmetic circuit is undefined: division by zero"
-        values[index] = values[left] / denominator
-      elsif opcode == 6
-        values[index] = 0 - values[left]
+        values[index] = values[left_inputs[instruction]] / denominator
       else
         raise "unsupported arithmetic-circuit opcode"
       instruction += 1
@@ -312,7 +351,7 @@ use core/combinatorics/support
       if reachable[index]
         current = @nodes[index]
         kind = current.kind
-        inputs = current.inputs
+        inputs = current.raw_inputs
         opcode = -1
         if kind == :constant
           opcode = 0
@@ -336,11 +375,56 @@ use core/combinatorics/support
         right_inputs.push(inputs.size > 1 ? inputs[1] : -1)
         payloads.push(current.payload)
       index += 1
-    tape = [node_indices, opcodes, left_inputs, right_inputs, payloads]
+    fast_plan = build_linear_i64_plan(node_indices, opcodes, left_inputs, right_inputs, payloads)
+    tape = [node_indices, opcodes, left_inputs, right_inputs, payloads, fast_plan]
     # One-entry MRU keeps repeated evaluation allocation-free without an O(n^2)
     # cache when callers probe many different output nodes.
     @evaluation_tape_cache = [target, tape]
     tape
+
+  -> build_linear_i64_plan(node_indices, opcodes, left_inputs, right_inputs, payloads)
+    n_inst = node_indices.size
+    return nil if n_inst == 0 || n_inst > 65536
+    i = 0
+    while i < n_inst
+      op = opcodes[i]
+      return nil if op == 4 || op == 5
+      if op == 0
+        pay = payloads[i]
+        return nil if pay.class_name != "Int" || pay <= -1000000000000 || pay >= 1000000000000
+      i += 1
+    n_nodes = @nodes.size
+    slot_of = i64[n_nodes]
+    i = 0
+    while i < n_inst
+      slot_of[node_indices[i]] = i
+      i += 1
+    op_i64 = i64[n_inst]
+    left_i64 = i64[n_inst]
+    right_i64 = i64[n_inst]
+    pay_i64 = i64[n_inst]
+    var_names = []
+    var_index = {}
+    i = 0
+    while i < n_inst
+      op = opcodes[i]
+      op_i64[i] = op
+      li = left_inputs[i]
+      ri = right_inputs[i]
+      left_i64[i] = li >= 0 ? slot_of[li] : -1
+      right_i64[i] = ri >= 0 ? slot_of[ri] : -1
+      if op == 0
+        pay_i64[i] = payloads[i]
+      elsif op == 1
+        vname = payloads[i]
+        vi = var_index[vname]
+        if vi == nil
+          vi = var_names.size
+          var_names.push(vname)
+          var_index[vname] = vi
+        pay_i64[i] = vi
+      i += 1
+    [n_inst, var_names, op_i64, left_i64, right_i64, pay_i64]
 
   # Inspection returns owned columns. The evaluator consumes its selected tape
   # directly so repeated execution remains allocation-free, while callers
@@ -348,19 +432,49 @@ use core/combinatorics/support
   -> evaluation_tape(target)
     tape = ensure_evaluation_tape(require_node(target))
     out = []
-    tape.each -> (column)
-      out.push(column.dup)
+    i = 0
+    while i < 5
+      out.push(tape[i].dup)
+      i += 1
     out
 
+  -> evaluate_scalar(assignments, target)
+    tape = ensure_evaluation_tape(target)
+    fast_plan = tape[5]
+    if fast_plan != nil && assignments.class_name == "Hash"
+      n_inst = fast_plan[0]
+      var_names = fast_plan[1]
+      n_vars = var_names.size
+      var_vals = i64[n_vars > 0 ? n_vars : 1]
+      all_int = true
+      vi = 0
+      while vi < n_vars
+        vname = var_names[vi]
+        val = assignments[vname]
+        if val == nil
+          if !assignments.has_key?(vname)
+            raise "missing arithmetic-circuit variable assignment: " + vname.to_s
+          all_int = false
+          break
+        if val.class_name != "Int" || val <= -1000000000000 || val >= 1000000000000
+          all_int = false
+          break
+        var_vals[vi] = val
+        vi += 1
+      if all_int
+        vals_buf = i64[n_inst]
+        return ac_eval_linear_i64(
+          fast_plan[2], fast_plan[3], fast_plan[4], fast_plan[5],
+          var_vals, vals_buf, n_inst)
+    values_at(assignments, target)[target]
+
   -> evaluate(assignments)
-    index = require_output(nil)
-    values_at(assignments, index)[index]
+    evaluate_scalar(assignments, require_output(nil))
 
   -> evaluate_at(record)
     if record.class_name != "Array" || record.size != 2
       raise "evaluate_at needs assignments and an output index"
-    index = require_output(record[1])
-    values_at(record[0], index)[index]
+    evaluate_scalar(record[0], require_output(record[1]))
 
   -> defined_at?(assignments)
     begin
@@ -385,13 +499,14 @@ use core/combinatorics/support
     target = require_output(output)
     depths = []
     @nodes.each -> (current)
-      if current.inputs.size == 0
+      inputs = current.raw_inputs
+      if inputs.size == 0
         depths.push(0)
-      elsif current.inputs.size == 1
-        depths.push(depths[current.inputs[0]] + 1)
+      elsif inputs.size == 1
+        depths.push(depths[inputs[0]] + 1)
       else
-        left = depths[current.inputs[0]]
-        right = depths[current.inputs[1]]
+        left = depths[inputs[0]]
+        right = depths[inputs[1]]
         maximum = left > right ? left : right
         depths.push(maximum + 1)
     depths[target]
@@ -411,15 +526,22 @@ use core/combinatorics/support
     target = require_output(output)
     reachable = reachable_mask(target)
     references = []
-    @nodes.size.times -> references.push(0)
+    n_nodes = @nodes.size
     i = 0
-    while i < @nodes.size
-      if reachable[i]
-        @nodes[i].inputs.each -> (child)
-          references[child] += 1
+    while i < n_nodes
+      references.push(0)
       i += 1
     i = 0
-    while i < @nodes.size
+    while i < n_nodes
+      if reachable[i]
+        inputs = @nodes[i].raw_inputs
+        j = 0
+        while j < inputs.size
+          references[inputs[j]] += 1
+          j += 1
+      i += 1
+    i = 0
+    while i < n_nodes
       if reachable[i] && i != target && references[i] > 1
         return false
       i += 1
@@ -433,14 +555,15 @@ use core/combinatorics/support
     index = 0
     while index < @nodes.size
       current = @nodes[index]
+      inputs = current.raw_inputs
       if !reachable[index]
         sizes.push(nil)
-      elsif current.inputs.size == 0
+      elsif inputs.size == 0
         sizes.push(0)
-      elsif current.inputs.size == 1
-        sizes.push(sizes[current.inputs[0]] + 1)
+      elsif inputs.size == 1
+        sizes.push(sizes[inputs[0]] + 1)
       else
-        size = sizes[current.inputs[0]] + sizes[current.inputs[1]] + 1
+        size = sizes[inputs[0]] + sizes[inputs[1]] + 1
         if size > limit
           raise "expanded arithmetic formula exceeds its explicit size limit"
         sizes.push(size)
@@ -459,7 +582,7 @@ use core/combinatorics/support
         degrees.push(nil)
       else
         kind = current.kind
-        inputs = current.inputs
+        inputs = current.raw_inputs
         if kind == :constant
           degrees.push(0)
         elsif kind == :variable
@@ -498,14 +621,21 @@ use core/combinatorics/support
 
   -> reachable_mask(target)
     reachable = []
-    @nodes.size.times -> reachable.push(false)
+    n_nodes = @nodes.size
+    i = 0
+    while i < n_nodes
+      reachable.push(false)
+      i += 1
     stack = [target]
     while stack.size > 0
       index = stack.pop
       if !reachable[index]
         reachable[index] = true
-        @nodes[index].inputs.each -> (child)
-          stack.push(child)
+        inputs = @nodes[index].raw_inputs
+        j = 0
+        while j < inputs.size
+          stack.push(inputs[j])
+          j += 1
     reachable
 
 
@@ -540,3 +670,20 @@ use core/combinatorics/support
     rescue error
       return false
     value == @claimed_value
+
+-> ac_eval_linear_i64(opcodes, lefts, rights, payloads, var_vals, vals, n_inst) (i64[] i64[] i64[] i64[] i64[] i64[] i64) i64
+  i = 0
+  while i < n_inst
+    op = opcodes[i]
+    if op == 2
+      vals[i] = vals[lefts[i]] + vals[rights[i]]
+    elsif op == 3
+      vals[i] = vals[lefts[i]] - vals[rights[i]]
+    elsif op == 0
+      vals[i] = payloads[i]
+    elsif op == 1
+      vals[i] = var_vals[payloads[i]]
+    else
+      vals[i] = 0 - vals[lefts[i]]
+    i = i + 1
+  vals[n_inst - 1]

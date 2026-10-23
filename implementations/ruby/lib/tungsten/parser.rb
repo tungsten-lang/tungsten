@@ -1353,7 +1353,10 @@ module Tungsten
       when :TYPE
         type_name = @token.value
         next_token
-        if @token.type?(:"[")
+        # A local or parameter spelled like the type (`u8 = [1, 2]`) is a
+        # variable: `u8[1]` indexes it. Every enclosing scope counts, as in
+        # the compiled parser (method bodies read top-level variables).
+        if @token.type?(:"[") && @scopes.none? { |scope| scope.include?(type_name.to_s) }
           # Typed array: i128[1000]
           next_token_skip_whitespace
           size = parse_assignment_no_control

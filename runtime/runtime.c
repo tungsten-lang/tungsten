@@ -161,6 +161,8 @@ typedef struct {
     int *codepoint_ends;
     WRegexBoundary *boundaries;
     WValue subject;
+    WValue last_regex;
+    int handoff_ready;
     int count;
     int capacity;
     int registered;
@@ -173,6 +175,8 @@ typedef struct {
 } WRegexCaptureState;
 
 static __thread WRegexCaptureState g_regex_capture_state;
+static __thread WRegexMatch *w_regex_match_park = NULL;
+static __thread int32_t w_regex_match_park_cap = 0;
 static pthread_key_t g_regex_capture_key;
 static pthread_once_t g_regex_capture_key_once = PTHREAD_ONCE_INIT;
 
@@ -191,6 +195,11 @@ static void w_regex_capture_state_destroy(void *opaque) {
     free(state->matches);
 #endif
     memset(state, 0, sizeof(*state));
+    if (w_regex_match_park) {
+        free(w_regex_match_park);
+        w_regex_match_park = NULL;
+        w_regex_match_park_cap = 0;
+    }
 }
 
 static void w_regex_capture_key_init(void) {
@@ -221,15 +230,11 @@ static void w_regex_prepare_captures(int count) {
                                     sizeof(WRegexBoundary) * (size_t)next * 2);
         state->capacity = next;
     }
-    for (int i = 0; i < count; i++) {
-        state->captures[i] = W_NIL;
-        state->starts[i] = -1;
-        state->ends[i] = -1;
-        state->codepoint_starts[i] = -1;
-        state->codepoint_ends[i] = -1;
-    }
     state->count = count;
-    if (count == 0) state->subject = W_NIL;
+    if (count == 0) {
+        state->subject = W_NIL;
+        state->handoff_ready = 0;
+    }
 }
 
 static void w_regex_store_capture(int idx, const char *subject, int start, int end) {
@@ -279,10 +284,357 @@ static unsigned int w_regex_compile_options(const char *options) {
     return flags;
 }
 
+typedef struct {
+    uint8_t op;      /* 1=SAVE, 2=BYTE, 3=CLASS, 4=BOL, 5=EOL, 6=MATCH */
+    uint8_t byte;    /* literal byte or class index */
+    int16_t slot;    /* save slot */
+    int32_t min;     /* min repetitions */
+    int32_t max;     /* max repetitions (INT32_MAX = unbounded) */
+} WFastRegexInst;
+
+typedef struct {
+    int ninst;
+    int ncap;
+    int nclass;
+    int pf_kind;     /* 0=none, 1=single byte, 2=bitmap */
+    uint8_t pf_byte;
+    uint64_t pf_bm[4];
+    WFastRegexInst insts[64];
+    uint64_t classes[16][4];
+} WFastRegexProg;
+
+static void w_fast_bm_set(uint64_t bm[4], uint8_t c) {
+    bm[c >> 6] |= (1ULL << (c & 63));
+}
+
+static void w_fast_bm_set_range(uint64_t bm[4], uint8_t lo, uint8_t hi) {
+    for (unsigned int c = lo; c <= hi; c++) w_fast_bm_set(bm, (uint8_t)c);
+}
+
+static void w_fast_bm_shorthand(uint64_t bm[4], char s) {
+    uint64_t tmp[4] = {0, 0, 0, 0};
+    if (s == 'd' || s == 'D') {
+        w_fast_bm_set_range(tmp, '0', '9');
+    } else if (s == 'w' || s == 'W') {
+        w_fast_bm_set_range(tmp, '0', '9');
+        w_fast_bm_set_range(tmp, 'A', 'Z');
+        w_fast_bm_set_range(tmp, 'a', 'z');
+        w_fast_bm_set(tmp, '_');
+    } else if (s == 's' || s == 'S') {
+        w_fast_bm_set(tmp, ' ');
+        w_fast_bm_set(tmp, '\t');
+        w_fast_bm_set(tmp, '\n');
+        w_fast_bm_set(tmp, '\r');
+        w_fast_bm_set(tmp, '\v');
+        w_fast_bm_set(tmp, '\f');
+    }
+    if (s == 'D' || s == 'W' || s == 'S') {
+        for (int k = 0; k < 4; k++) bm[k] |= ~tmp[k];
+    } else {
+        for (int k = 0; k < 4; k++) bm[k] |= tmp[k];
+    }
+}
+
+static WFastRegexProg *w_fast_regex_compile(const char *pat, const char *options) {
+    if (options && options[0] != '\0') return NULL;
+    size_t plen = strlen(pat);
+    if (plen == 0 || !w_bytes_ascii_p((const uint8_t *)pat, plen)) return NULL;
+    WFastRegexProg prog;
+    memset(&prog, 0, sizeof(prog));
+    int ngroup = 1;
+    int grp_stack[32];
+    int grp_sp = 0;
+
+    prog.insts[prog.ninst++] = (WFastRegexInst){1, 0, 0, 0, 0};
+    size_t i = 0;
+    while (i < plen) {
+        if (prog.ninst >= 60) return NULL;
+        char c = pat[i];
+        if (c == '(') {
+            int cap = -1;
+            if (i + 1 < plen && pat[i + 1] == '?') {
+                if (i + 2 < plen && pat[i + 2] == ':') {
+                    i += 3;
+                } else if (i + 2 < plen && pat[i + 2] == '<') {
+                    i += 3;
+                    while (i < plen && pat[i] != '>') i++;
+                    if (i >= plen) return NULL;
+                    i++;
+                    cap = ngroup++;
+                } else {
+                    return NULL;
+                }
+            } else {
+                i++;
+                cap = ngroup++;
+            }
+            if (grp_sp >= 32 || ngroup > 32) return NULL;
+            grp_stack[grp_sp++] = cap;
+            if (cap >= 0)
+                prog.insts[prog.ninst++] = (WFastRegexInst){1, 0, (int16_t)(cap * 2), 0, 0};
+            continue;
+        }
+        if (c == ')') {
+            if (grp_sp <= 0) return NULL;
+            int cap = grp_stack[--grp_sp];
+            i++;
+            if (i < plen && (pat[i] == '*' || pat[i] == '+' || pat[i] == '?' || pat[i] == '{'))
+                return NULL;
+            if (cap >= 0)
+                prog.insts[prog.ninst++] = (WFastRegexInst){1, 0, (int16_t)(cap * 2 + 1), 0, 0};
+            continue;
+        }
+        if (c == '|') return NULL;
+        if (c == '^') {
+            i++;
+            if (i < plen && (pat[i] == '*' || pat[i] == '+' || pat[i] == '?' || pat[i] == '{'))
+                return NULL;
+            prog.insts[prog.ninst++] = (WFastRegexInst){4, 0, 0, 0, 0};
+            continue;
+        }
+        if (c == '$') {
+            i++;
+            if (i < plen && (pat[i] == '*' || pat[i] == '+' || pat[i] == '?' || pat[i] == '{'))
+                return NULL;
+            prog.insts[prog.ninst++] = (WFastRegexInst){5, 0, 0, 0, 0};
+            continue;
+        }
+        uint8_t op = 2;
+        uint8_t bval = 0;
+        uint64_t bm[4] = {0, 0, 0, 0};
+        if (c == '.') {
+            i++;
+            op = 3;
+            bm[0] = ~0ULL & ~(1ULL << '\n');
+            bm[1] = ~0ULL;
+            bm[2] = ~0ULL;
+            bm[3] = ~0ULL;
+        } else if (c == '\\') {
+            i++;
+            if (i >= plen) return NULL;
+            char e = pat[i++];
+            if (e == 'd' || e == 'D' || e == 'w' || e == 'W' || e == 's' || e == 'S') {
+                op = 3;
+                w_fast_bm_shorthand(bm, e);
+            } else if ((e >= '0' && e <= '9') || e == 'b' || e == 'B' || e == 'A' || e == 'Z' || e == 'z') {
+                return NULL;
+            } else {
+                op = 2;
+                bval = (uint8_t)(e == 'n' ? '\n' : (e == 't' ? '\t' : (e == 'r' ? '\r' : e)));
+            }
+        } else if (c == '[') {
+            i++;
+            int neg = 0;
+            if (i < plen && pat[i] == '^') { neg = 1; i++; }
+            if (i < plen && pat[i] == ']') { w_fast_bm_set(bm, ']'); i++; }
+            while (i < plen && pat[i] != ']') {
+                if (pat[i] == '[' && i + 1 < plen && pat[i + 1] == ':') return NULL;
+                uint8_t lo;
+                if (pat[i] == '\\') {
+                    i++;
+                    if (i >= plen) return NULL;
+                    char e = pat[i++];
+                    if (e == 'd' || e == 'D' || e == 'w' || e == 'W' || e == 's' || e == 'S') {
+                        w_fast_bm_shorthand(bm, e);
+                        continue;
+                    }
+                    lo = (uint8_t)(e == 'n' ? '\n' : (e == 't' ? '\t' : (e == 'r' ? '\r' : e)));
+                } else {
+                    lo = (uint8_t)pat[i++];
+                }
+                if (i + 1 < plen && pat[i] == '-' && pat[i + 1] != ']') {
+                    i++;
+                    uint8_t hi;
+                    if (pat[i] == '\\') {
+                        i++;
+                        if (i >= plen) return NULL;
+                        char e = pat[i++];
+                        if (e == 'd' || e == 'D' || e == 'w' || e == 'W' || e == 's' || e == 'S')
+                            return NULL;
+                        hi = (uint8_t)(e == 'n' ? '\n' : (e == 't' ? '\t' : (e == 'r' ? '\r' : e)));
+                    } else {
+                        hi = (uint8_t)pat[i++];
+                    }
+                    if (lo > hi) return NULL;
+                    w_fast_bm_set_range(bm, lo, hi);
+                } else {
+                    w_fast_bm_set(bm, lo);
+                }
+            }
+            if (i >= plen || pat[i] != ']') return NULL;
+            i++;
+            if (neg) {
+                for (int k = 0; k < 4; k++) bm[k] = ~bm[k];
+            }
+            op = 3;
+        } else {
+            i++;
+            op = 2;
+            bval = (uint8_t)c;
+        }
+
+        int32_t min = 1, max = 1;
+        if (i < plen) {
+            if (pat[i] == '*') { min = 0; max = INT32_MAX; i++; }
+            else if (pat[i] == '+') { min = 1; max = INT32_MAX; i++; }
+            else if (pat[i] == '?') { min = 0; max = 1; i++; }
+            else if (pat[i] == '{') {
+                size_t q = i + 1;
+                if (q >= plen || pat[q] < '0' || pat[q] > '9') return NULL;
+                int32_t lo = 0;
+                while (q < plen && pat[q] >= '0' && pat[q] <= '9') {
+                    lo = lo * 10 + (pat[q++] - '0');
+                    if (lo > 65535) return NULL;
+                }
+                int32_t hi = lo;
+                if (q < plen && pat[q] == ',') {
+                    q++;
+                    if (q < plen && pat[q] == '}') {
+                        hi = INT32_MAX;
+                    } else {
+                        if (q >= plen || pat[q] < '0' || pat[q] > '9') return NULL;
+                        hi = 0;
+                        while (q < plen && pat[q] >= '0' && pat[q] <= '9') {
+                            hi = hi * 10 + (pat[q++] - '0');
+                            if (hi > 65535) return NULL;
+                        }
+                    }
+                }
+                if (q >= plen || pat[q] != '}' || lo > hi) return NULL;
+                min = lo;
+                max = hi;
+                i = q + 1;
+            }
+            if (i < plen && (pat[i] == '?' || pat[i] == '+' || pat[i] == '*'))
+                return NULL;
+        }
+        if (op == 3) {
+            if (prog.nclass >= 16) return NULL;
+            bval = (uint8_t)prog.nclass++;
+            memcpy(prog.classes[bval], bm, sizeof(bm));
+        }
+        prog.insts[prog.ninst++] = (WFastRegexInst){op, bval, 0, min, max};
+    }
+    if (grp_sp != 0) return NULL;
+    prog.insts[prog.ninst++] = (WFastRegexInst){1, 0, 1, 0, 0};
+    prog.insts[prog.ninst++] = (WFastRegexInst){6, 0, 0, 0, 0};
+    prog.ncap = ngroup;
+
+    /* Verify every variable-length quantifier is non-backtracking. */
+    for (int k = 0; k < prog.ninst; k++) {
+        WFastRegexInst *in = &prog.insts[k];
+        if ((in->op == 2 || in->op == 3) && in->min < in->max) {
+            uint64_t my_bm[4] = {0, 0, 0, 0};
+            if (in->op == 2) w_fast_bm_set(my_bm, in->byte);
+            else memcpy(my_bm, prog.classes[in->byte], sizeof(my_bm));
+
+            int m = k + 1;
+            while (m < prog.ninst && prog.insts[m].op == 1) m++;
+            if (m >= prog.ninst) return NULL;
+            WFastRegexInst *nx = &prog.insts[m];
+            if (nx->op == 6) {
+                /* Trailing greedy match before MATCH is always deterministic. */
+            } else if (nx->op == 2 && nx->min >= 1) {
+                if ((my_bm[nx->byte >> 6] >> (nx->byte & 63)) & 1) return NULL;
+            } else if (nx->op == 3 && nx->min >= 1) {
+                uint64_t *nbm = prog.classes[nx->byte];
+                if ((my_bm[0] & nbm[0]) | (my_bm[1] & nbm[1]) |
+                    (my_bm[2] & nbm[2]) | (my_bm[3] & nbm[3]))
+                    return NULL;
+            } else {
+                return NULL;
+            }
+        }
+    }
+
+    /* Extract first-character prefilter. */
+    for (int k = 0; k < prog.ninst; k++) {
+        WFastRegexInst *in = &prog.insts[k];
+        if (in->op == 1 || in->op == 4) continue;
+        if (in->op == 2 && in->min >= 1) {
+            prog.pf_kind = 1;
+            prog.pf_byte = in->byte;
+        } else if (in->op == 3 && in->min >= 1) {
+            prog.pf_kind = 2;
+            memcpy(prog.pf_bm, prog.classes[in->byte], sizeof(prog.pf_bm));
+        }
+        break;
+    }
+
+    WFastRegexProg *out = (WFastRegexProg *)malloc(sizeof(WFastRegexProg));
+    *out = prog;
+    return out;
+}
+
+static int w_fast_regex_exec(const WFastRegexProg *prog, const uint8_t *s,
+                             size_t slen, size_t search_from, int *out_slots) {
+    size_t pos = search_from;
+    const WFastRegexInst *insts = prog->insts;
+    int ninst = prog->ninst;
+    while (pos <= slen) {
+        if (prog->pf_kind == 1) {
+            if (pos >= slen) return 0;
+            const uint8_t *p = (const uint8_t *)memchr(s + pos, prog->pf_byte, slen - pos);
+            if (!p) return 0;
+            pos = (size_t)(p - s);
+        } else if (prog->pf_kind == 2) {
+            const uint64_t *bm = prog->pf_bm;
+            while (pos < slen && !((bm[s[pos] >> 6] >> (s[pos] & 63)) & 1)) pos++;
+            if (pos >= slen) return 0;
+        }
+        size_t sp = pos;
+        int ok = 1;
+        for (int pc = 0; pc < ninst; pc++) {
+            const WFastRegexInst *in = &insts[pc];
+            switch (in->op) {
+                case 1: /* SAVE */
+                    out_slots[in->slot] = (int)sp;
+                    break;
+                case 2: { /* BYTE */
+                    uint8_t want = in->byte;
+                    size_t min = (size_t)in->min, max = (size_t)in->max;
+                    size_t avail = slen - sp;
+                    if (avail < min) { ok = 0; break; }
+                    size_t lim = avail < max ? avail : max;
+                    size_t k = 0;
+                    while (k < lim && s[sp + k] == want) k++;
+                    if (k < min) { ok = 0; break; }
+                    sp += k;
+                    break;
+                }
+                case 3: { /* CLASS */
+                    const uint64_t *bm = prog->classes[in->byte];
+                    size_t min = (size_t)in->min, max = (size_t)in->max;
+                    size_t avail = slen - sp;
+                    if (avail < min) { ok = 0; break; }
+                    size_t lim = avail < max ? avail : max;
+                    size_t k = 0;
+                    while (k < lim && ((bm[s[sp + k] >> 6] >> (s[sp + k] & 63)) & 1)) k++;
+                    if (k < min) { ok = 0; break; }
+                    sp += k;
+                    break;
+                }
+                case 4: /* BOL */
+                    if (sp != 0) ok = 0;
+                    break;
+                case 5: /* EOL */
+                    if (sp != slen) ok = 0;
+                    break;
+                case 6: /* MATCH */
+                    return 1;
+            }
+            if (!ok) break;
+        }
+        if (ok) return 1;
+        pos++;
+    }
+    return 0;
+}
+
 WValue w_regex_new(WValue pattern_val, WValue options_val) {
     const char *pattern = as_str(pattern_val);
     const char *options = as_str(options_val);
-    WRegex *rx = calloc(1, sizeof(WRegex));
+    WRegex *rx = calloc(1, sizeof(WRegex) + sizeof(WFastRegexProg *));
     rx->pattern = strdup(pattern);
     rx->options = strdup(options);
     rx->name_to_group = w_hash_new();
@@ -314,6 +666,7 @@ WValue w_regex_new(WValue pattern_val, WValue options_val) {
     }
     rx->compiled = (void *)reg;
 #endif
+    *(WFastRegexProg **)(rx + 1) = w_fast_regex_compile(rx->pattern, rx->options);
     return w_box_ptr(rx, W_SUBTAG_REGEX);
 }
 
@@ -321,34 +674,64 @@ WValue w_regex_match(WValue regex_val, WValue subject_val) {
     if (!w_is_regex(regex_val)) die("regex match requires a regex");
     WRegex *rx = (WRegex *)w_as_ptr(regex_val);
     if (w_is_rope(subject_val)) subject_val = w_rope_flatten(subject_val);
-    const char *subject = as_str(subject_val);
-    w_regex_prepare_captures(0);
+    char sbuf[6];
+    const char *subject;
+    size_t slen;
+    w_str_data(subject_val, sbuf, &subject, &slen);
+    WRegexCaptureState *state = &g_regex_capture_state;
+    state->handoff_ready = 0;
+    WFastRegexProg *fast = *(WFastRegexProg **)(rx + 1);
+    if (fast && w_string_ascii_p(subject_val)) {
+        int slots[64];
+        if (w_fast_regex_exec(fast, (const uint8_t *)subject, slen, 0, slots)) {
+            int cap_count = fast->ncap;
+            w_regex_prepare_captures(cap_count);
+            state->subject = subject_val;
+            state->last_regex = regex_val;
+            state->handoff_ready = 1;
+            for (int i = 0; i < cap_count; i++) {
+                w_regex_store_capture(i, subject, slots[i * 2], slots[i * 2 + 1]);
+            }
+            return W_TRUE;
+        }
+        w_regex_prepare_captures(0);
+        return W_FALSE;
+    }
 #ifdef TUNGSTEN_ONIG
     OnigRegex reg = (OnigRegex)rx->compiled;
     const OnigUChar *start = (const OnigUChar *)subject;
-    const OnigUChar *end = start + strlen(subject);
-    WRegexCaptureState *state = &g_regex_capture_state;
+    const OnigUChar *end = start + slen;
     if (!state->region) state->region = onig_region_new();
     OnigRegion *region = state->region;
-    onig_region_clear(region);
     int rc = onig_search(reg, start, end, start, end, region, ONIG_OPTION_NONE);
     if (rc >= 0) {
         int cap_count = region->num_regs;
         w_regex_prepare_captures(cap_count);
         state->subject = subject_val;
+        state->last_regex = regex_val;
+        state->handoff_ready = 1;
         for (int i = 0; i < cap_count; i++) {
-            w_regex_store_capture(i, subject, region->beg[i], region->end[i]);
+            int b = region->beg[i], e = region->end[i];
+            if (b >= 0 && e >= b) {
+                w_regex_store_capture(i, subject, b, e);
+            } else {
+                state->captures[i] = W_NIL;
+                state->starts[i] = -1;
+                state->ends[i] = -1;
+            }
         }
         return W_TRUE;
     }
-    if (rc == ONIG_MISMATCH) return W_FALSE;
+    if (rc == ONIG_MISMATCH) {
+        w_regex_prepare_captures(0);
+        return W_FALSE;
+    }
     OnigUChar msg[ONIG_MAX_ERROR_MESSAGE_LEN];
     onig_error_code_to_str(msg, rc);
     dief("regex match failed for /%s/: %s", rx->pattern, (const char *)msg);
 #else
     regex_t *reg = (regex_t *)rx->compiled;
     size_t cap_count = reg->re_nsub + 1;
-    WRegexCaptureState *state = &g_regex_capture_state;
     if (cap_count > state->matches_capacity) {
         state->matches = realloc(state->matches,
                                  cap_count * sizeof(regmatch_t));
@@ -359,9 +742,16 @@ WValue w_regex_match(WValue regex_val, WValue subject_val) {
     if (rc == 0) {
         w_regex_prepare_captures((int)cap_count);
         state->subject = subject_val;
+        state->last_regex = regex_val;
+        state->handoff_ready = 1;
         for (size_t i = 0; i < cap_count; i++) {
-            if (matches[i].rm_so >= 0)
+            if (matches[i].rm_so >= 0) {
                 w_regex_store_capture((int)i, subject, (int)matches[i].rm_so, (int)matches[i].rm_eo);
+            } else {
+                state->captures[i] = W_NIL;
+                state->starts[i] = -1;
+                state->ends[i] = -1;
+            }
         }
         return W_TRUE;
     }
@@ -390,20 +780,32 @@ static int w_regex_boundary_compare(const void *lhs, const void *rhs) {
 static void w_regex_compute_codepoint_offsets(WRegexCaptureState *state,
                                               const char *subject) {
     int boundary_count = 0;
+    WRegexBoundary *b = state->boundaries;
     for (int i = 0; i < state->count; i++) {
         if (state->starts[i] < 0) continue;
-        state->boundaries[boundary_count++] =
-            (WRegexBoundary){state->starts[i], i, 0};
-        state->boundaries[boundary_count++] =
-            (WRegexBoundary){state->ends[i], i, 1};
+        b[boundary_count++] = (WRegexBoundary){state->starts[i], i, 0};
+        b[boundary_count++] = (WRegexBoundary){state->ends[i], i, 1};
     }
-    qsort(state->boundaries, (size_t)boundary_count,
-          sizeof(WRegexBoundary), w_regex_boundary_compare);
+    if (boundary_count <= 32) {
+        for (int i = 1; i < boundary_count; i++) {
+            WRegexBoundary cur = b[i];
+            int j = i - 1;
+            while (j >= 0 && (b[j].byte_offset > cur.byte_offset ||
+                   (b[j].byte_offset == cur.byte_offset && b[j].is_end > cur.is_end))) {
+                b[j + 1] = b[j];
+                j--;
+            }
+            b[j + 1] = cur;
+        }
+    } else {
+        qsort(b, (size_t)boundary_count,
+              sizeof(WRegexBoundary), w_regex_boundary_compare);
+    }
 
     int byte_offset = 0;
     int codepoint_offset = 0;
     for (int i = 0; i < boundary_count; i++) {
-        WRegexBoundary boundary = state->boundaries[i];
+        WRegexBoundary boundary = b[i];
         while (byte_offset < boundary.byte_offset) {
             if (((unsigned char)subject[byte_offset] & 0xC0u) != 0x80u)
                 codepoint_offset++;
@@ -426,6 +828,9 @@ static WValue w_regex_materialize_slice(WValue subject, WValue value) {
     int length = w_unbox_slice_length(value);
     if ((size_t)offset > byte_size || (size_t)length > byte_size - (size_t)offset)
         return W_NIL;
+    if (length <= 5) return w_box_inline_str(bytes + offset, (size_t)length);
+    if (w_string_ascii_p(subject))
+        return w_string_n_known_ascii(bytes + offset, (size_t)length, 1);
     return w_string_n(bytes + offset, (size_t)length);
 }
 
@@ -451,20 +856,58 @@ static int w_regex_collect_name(const OnigUChar *name, const OnigUChar *name_end
  * costs can be profiled independently. */
 static WValue w_regex_match_data_from_state(WValue regex_val) {
     WRegexCaptureState *state = &g_regex_capture_state;
-    const char *subject = as_str(state->subject);
-    w_regex_compute_codepoint_offsets(state, subject);
-    WValue groups = w_array_new_inline(65, state->count);
-    WValue offsets = w_array_new_inline(65, state->count);
-    WArray *group_array = w_as_array(groups);
-    WArray *offset_array = w_as_array(offsets);
-    for (int i = 0; i < state->count; i++) {
+    int ascii = w_string_ascii_p(state->subject);
+    if (!ascii) {
+        char sbuf[6];
+        const char *subject;
+        size_t slen;
+        w_str_data(state->subject, sbuf, &subject, &slen);
+        w_regex_compute_codepoint_offsets(state, subject);
+    }
+    int count = state->count;
+    WRegexMatch *match = NULL;
+    WArray *group_array = NULL;
+    WArray *offset_array = NULL;
+    if (w_regex_match_park && count <= w_regex_match_park_cap) {
+        match = w_regex_match_park;
+        w_regex_match_park = NULL;
+        w_regex_match_park_cap = 0;
+        group_array = w_as_array(match->groups);
+        offset_array = w_as_array(match->offsets);
+        group_array->size = count;
+        offset_array->size = count;
+    } else {
+        int32_t cap = count > 8 ? count : 8;
+        size_t arr_bytes = (sizeof(WArray) + (size_t)cap * sizeof(WValue) + 15) & ~(size_t)15;
+        uint8_t *block = (uint8_t *)malloc(sizeof(WRegexMatch) + 2 * arr_bytes);
+        match = (WRegexMatch *)block;
+        group_array = (WArray *)(block + sizeof(WRegexMatch));
+        offset_array = (WArray *)(block + sizeof(WRegexMatch) + arr_bytes);
+        group_array->ebits = 65;
+        group_array->flags = W_FLAG_OWNED | W_FLAG_INLINE | W_FLAG_POOLED;
+        group_array->start = 0;
+        group_array->size = count;
+        group_array->cap = cap;
+        group_array->slots = (WValue *)(group_array + 1);
+        offset_array->ebits = 65;
+        offset_array->flags = W_FLAG_OWNED | W_FLAG_INLINE | W_FLAG_POOLED;
+        offset_array->start = 0;
+        offset_array->size = count;
+        offset_array->cap = cap;
+        offset_array->slots = (WValue *)(offset_array + 1);
+        match->groups = w_box_array(group_array);
+        match->offsets = w_box_array(offset_array);
+    }
+    const int *cp_starts = ascii ? state->starts : state->codepoint_starts;
+    const int *cp_ends = ascii ? state->ends : state->codepoint_ends;
+    for (int i = 0; i < count; i++) {
         group_array->slots[i] = state->captures[i];
         if (state->starts[i] < 0) {
             offset_array->slots[i] = W_NIL;
             continue;
         }
-        int start = state->codepoint_starts[i];
-        int end = state->codepoint_ends[i];
+        int start = cp_starts[i];
+        int end = cp_ends[i];
         int length = end - start;
         if (start <= 0xFFFFFF && length <= 0x3FFF) {
             offset_array->slots[i] = w_box_slice(length, start);
@@ -478,16 +921,19 @@ static WValue w_regex_match_data_from_state(WValue regex_val) {
     }
 
     WRegex *rx = (WRegex *)w_as_ptr(regex_val);
-    WRegexMatch *match = calloc(1, sizeof(WRegexMatch));
     match->subject = state->subject;
-    match->groups = groups;
-    match->offsets = offsets;
     match->name_to_group = rx->name_to_group;
     return w_box_ptr(match, W_SUBTAG_REGEX_MATCH);
 }
 
 WValue w_regex_match_data(WValue regex_val, WValue subject_val) {
+    WRegexCaptureState *state = &g_regex_capture_state;
+    if (state->handoff_ready && state->last_regex == regex_val && state->subject == subject_val) {
+        state->handoff_ready = 0;
+        return w_regex_match_data_from_state(regex_val);
+    }
     if (w_regex_match(regex_val, subject_val) != W_TRUE) return W_NIL;
+    state->handoff_ready = 0;
     return w_regex_match_data_from_state(regex_val);
 }
 
@@ -23247,29 +23693,27 @@ void w_node_arena_init(void) {
 WWireArena g_wire_arena = { .generation = 1 };
 static const uint32_t g_wire_initial_cap_words = 262144;
 
-#define W_WIRE_FIELD_CACHE_SIZE 8192u
-typedef struct {
-    uint16_t kind;
-    uint16_t index;
-    WValue sym;
-} WWireFieldCacheEntry;
-/* Emission can read independent frozen functions concurrently. Field lookup
- * is logically read-only, but this small accelerator writes its last-seen
- * entry; keep it per thread so those speculative writes cannot race.
- *
- * The cache is schema-shaped rather than record-shaped. Generated WIRE
- * constructors give every opcode one canonical field order, so learning
- * (:call_direct_i64, :temp) once applies to every direct call in every later
- * pass. The load/store paths still verify the symbol at the cached ordinal;
- * compatibility records with a different layout therefore fall back to the
- * linear scan instead of trusting stale schema state. */
-static _Thread_local WWireFieldCacheEntry g_wire_field_cache[W_WIRE_FIELD_CACHE_SIZE];
+#define W_WIRE_FIELD_CACHE_SIZE 4096u
+/* Emission can read independent frozen functions concurrently. Each entry is
+ * a single relaxed-atomic 64-bit word packing (kind:16, index:16, sym_tag:32).
+ * Positive hits still verify the symbol at the cached ordinal in the record
+ * itself; the tag is only used by the wire_function (kind 265) negative-prefix
+ * skip so speculative writes across threads cannot race or tear. */
+static _Atomic uint64_t g_wire_field_cache[W_WIRE_FIELD_CACHE_SIZE];
 
-static inline WWireFieldCacheEntry *w_wire_field_cache_entry(uint16_t kind,
-                                                              WValue sym) {
+static inline _Atomic uint64_t *w_wire_field_cache_slot(uint16_t kind,
+                                                        WValue sym) {
     uint64_t mixed = (uint64_t)kind * 2654435761u;
     mixed ^= (uint64_t)sym ^ ((uint64_t)sym >> 32);
     return &g_wire_field_cache[mixed & (W_WIRE_FIELD_CACHE_SIZE - 1u)];
+}
+
+static inline uint32_t w_wire_sym_tag(WValue sym) {
+    return (uint32_t)(sym ^ (sym >> 20));
+}
+
+static inline uint64_t w_wire_cache_pack(uint16_t kind, uint16_t index, WValue sym) {
+    return (uint64_t)kind | ((uint64_t)index << 16) | ((uint64_t)w_wire_sym_tag(sym) << 32);
 }
 
 static inline uint32_t w_wire_record_count(uint64_t off) {
@@ -23336,15 +23780,24 @@ static WValue w_wire_fixed_record_new(int kind, int field_count,
     WValue wire = w_wire_alloc_reserve(kind, field_count, spare_fields);
     uint32_t off = (uint32_t)w_wire_offset(wire);
     uint32_t cap = w_wire_record_capacity(off);
+    const WValue *syms = &fields->slots[fields->start];
+    WValue *dst = &g_wire_arena.base[off + 1u];
     for (int i = 0; i < field_count; i++) {
-        WValue sym = fields->slots[fields->start + i];
+        WValue sym = syms[i];
         if (!w_is_symbol(sym)) die("WIRE fixed record field is not a Symbol");
-        g_wire_arena.base[off + 1u + (uint32_t)i * 2u] = sym;
-        g_wire_arena.base[off + 2u + (uint32_t)i * 2u] = values[i];
-        WWireFieldCacheEntry *cached = w_wire_field_cache_entry((uint16_t)kind, sym);
-        cached->kind = (uint16_t)kind;
-        cached->index = (uint16_t)i;
-        cached->sym = sym;
+        dst[i * 2] = sym;
+        dst[i * 2 + 1] = values[i];
+    }
+    if (field_count > 4) {
+        _Atomic uint64_t *first = w_wire_field_cache_slot((uint16_t)kind, syms[0]);
+        uint64_t entry = atomic_load_explicit(first, memory_order_relaxed);
+        if ((uint16_t)entry != (uint16_t)kind || (uint32_t)(entry >> 32) != w_wire_sym_tag(syms[0])) {
+            for (int i = 0; i < field_count; i++) {
+                WValue sym = syms[i];
+                _Atomic uint64_t *slot = w_wire_field_cache_slot((uint16_t)kind, sym);
+                atomic_store_explicit(slot, w_wire_cache_pack((uint16_t)kind, (uint16_t)i, sym), memory_order_relaxed);
+            }
+        }
     }
     w_wire_record_header(off, (uint32_t)field_count, cap);
     return wire;
@@ -23570,7 +24023,6 @@ static WValue w_wire_canonical_field_value(WValue wire, WValue sym,
 
 WValue w_wire_field_store_at(WValue wire, int64_t index, WValue sym, WValue value) {
     uint64_t off = w_wire_checked_offset(wire);
-    uint16_t kind = (uint16_t)w_wire_kind(wire);
     uint32_t cap = w_wire_record_capacity(off);
     if (index < 0 || (uint64_t)index >= cap)
         die("w_wire_field_store_at: index exceeds record capacity");
@@ -23580,37 +24032,70 @@ WValue w_wire_field_store_at(WValue wire, int64_t index, WValue sym, WValue valu
     g_wire_arena.base[off + 2 + idx * 2] = value;
     uint32_t count = w_wire_record_count(off);
     if (idx >= count) w_wire_record_header(off, idx + 1, cap);
-    WWireFieldCacheEntry *cached = w_wire_field_cache_entry(kind, sym);
-    cached->kind = kind;
-    cached->index = (uint16_t)idx;
-    cached->sym = sym;
+    if (idx >= 4) {
+        uint16_t kind = (uint16_t)w_wire_kind(wire);
+        _Atomic uint64_t *slot = w_wire_field_cache_slot(kind, sym);
+        atomic_store_explicit(slot, w_wire_cache_pack(kind, (uint16_t)idx, sym), memory_order_relaxed);
+    }
     return wire;
 }
 
-WValue w_wire_field_load(WValue wire, WValue sym) {
-    uint64_t off = w_wire_checked_offset(wire);
-    uint16_t kind = (uint16_t)w_wire_kind(wire);
-    uint32_t count = w_wire_record_count(off);
-    WWireFieldCacheEntry *cached = w_wire_field_cache_entry(kind, sym);
-    if (cached->kind == kind && cached->sym == sym &&
-        cached->index < count &&
-        g_wire_arena.base[off + 1 + (uint32_t)cached->index * 2] == sym) {
-        return g_wire_arena.base[off + 2 + (uint32_t)cached->index * 2];
+__attribute__((noinline, cold))
+static WValue w_wire_field_load_invalid(WValue wire) {
+    w_wire_checked_offset(wire);
+    return W_NIL;
+}
+
+static inline __attribute__((always_inline)) WValue w_wire_field_load_inline(WValue wire, WValue sym, WValue missing_val) {
+    uint64_t cursor = g_wire_arena.cursor;
+    uint64_t off = w_wire_offset(wire);
+    if (__builtin_expect(!w_is_wire(wire) || w_is_wire_sequence(wire) || off == 0 || off >= cursor, 0))
+        return w_wire_field_load_invalid(wire);
+    const WValue *rec = &g_wire_arena.base[off];
+    uint64_t hdr = rec[0];
+    uint32_t count = (uint32_t)hdr;
+    uint32_t cap = (uint32_t)(hdr >> 32);
+    if (__builtin_expect(off + 1u + (uint64_t)cap * 2u > cursor, 0))
+        return w_wire_field_load_invalid(wire);
+    const WValue *pairs = rec + 1;
+    if (__builtin_expect(count <= 4, 1)) {
+        if (count > 0 && pairs[0] == sym) return pairs[1];
+        if (count > 1 && pairs[2] == sym) return pairs[3];
+        if (count > 2 && pairs[4] == sym) return pairs[5];
+        if (count > 3 && pairs[6] == sym) return pairs[7];
+        return missing_val;
     }
-    for (uint32_t i = 0; i < count; i++) {
-        if (g_wire_arena.base[off + 1 + i * 2] == sym) {
-            cached->kind = kind;
-            cached->index = (uint16_t)i;
-            cached->sym = sym;
-            return g_wire_arena.base[off + 2 + i * 2];
+    uint16_t kind = (uint16_t)w_wire_kind(wire);
+    _Atomic uint64_t *slot = w_wire_field_cache_slot(kind, sym);
+    uint64_t entry = atomic_load_explicit(slot, memory_order_relaxed);
+    uint32_t cidx = (uint16_t)(entry >> 16);
+    if (__builtin_expect(cidx < count && pairs[cidx * 2] == sym, 1)) {
+        return pairs[cidx * 2 + 1];
+    }
+    uint32_t start = 0;
+    if (kind == 265 && count >= 25 && (uint16_t)entry == 265 &&
+        cidx >= 25 && (uint32_t)(entry >> 32) == w_wire_sym_tag(sym)) {
+        if (count == 25) return missing_val;
+        start = 25;
+    }
+    for (uint32_t i = start; i < count; i++) {
+        if (pairs[i * 2] == sym) {
+            atomic_store_explicit(slot, w_wire_cache_pack(kind, (uint16_t)i, sym), memory_order_relaxed);
+            return pairs[i * 2 + 1];
         }
     }
-    return W_UNDEF;
+    if (kind == 265 && count >= 25 && start == 0) {
+        atomic_store_explicit(slot, w_wire_cache_pack(265, 25, sym), memory_order_relaxed);
+    }
+    return missing_val;
+}
+
+WValue w_wire_field_load(WValue wire, WValue sym) {
+    return w_wire_field_load_inline(wire, sym, W_UNDEF);
 }
 
 WValue w_wire_field_load_nil(WValue wire, WValue sym) {
-    WValue value = w_wire_field_load(wire, sym);
-    return value == W_UNDEF ? W_NIL : value;
+    return w_wire_field_load_inline(wire, sym, W_NIL);
 }
 
 int64_t w_wire_field_count(WValue wire) {
@@ -23640,19 +24125,17 @@ WValue w_wire_field_store(WValue wire, WValue sym, WValue value) {
     value = w_wire_canonical_field_value(wire, sym, value);
     uint32_t count = w_wire_record_count(off);
     uint32_t cap = w_wire_record_capacity(off);
-    WWireFieldCacheEntry *cached = w_wire_field_cache_entry(kind, sym);
-    if (cached->kind == kind && cached->sym == sym &&
-        cached->index < count &&
-        g_wire_arena.base[off + 1 + (uint32_t)cached->index * 2] == sym) {
-        g_wire_arena.base[off + 2 + (uint32_t)cached->index * 2] = value;
+    _Atomic uint64_t *slot = w_wire_field_cache_slot(kind, sym);
+    uint64_t entry = atomic_load_explicit(slot, memory_order_relaxed);
+    uint32_t cidx = (uint16_t)(entry >> 16);
+    if (cidx < count && g_wire_arena.base[off + 1 + cidx * 2] == sym) {
+        g_wire_arena.base[off + 2 + cidx * 2] = value;
         return value;
     }
     for (uint32_t i = 0; i < count; i++) {
         if (g_wire_arena.base[off + 1 + i * 2] == sym) {
             g_wire_arena.base[off + 2 + i * 2] = value;
-            cached->kind = kind;
-            cached->index = (uint16_t)i;
-            cached->sym = sym;
+            atomic_store_explicit(slot, w_wire_cache_pack(kind, (uint16_t)i, sym), memory_order_relaxed);
             return value;
         }
     }
@@ -23661,9 +24144,7 @@ WValue w_wire_field_store(WValue wire, WValue sym, WValue value) {
     g_wire_arena.base[off + 1 + count * 2] = sym;
     g_wire_arena.base[off + 2 + count * 2] = value;
     w_wire_record_header(off, count + 1, cap);
-    cached->kind = kind;
-    cached->index = (uint16_t)count;
-    cached->sym = sym;
+    atomic_store_explicit(slot, w_wire_cache_pack(kind, (uint16_t)count, sym), memory_order_relaxed);
     return value;
 }
 
@@ -23976,11 +24457,11 @@ enum {
 /* Preserve ast_get/ast_set's general symbol API while the compiler's hot
  * call sites use direct typed helpers. A tiny raw-symbol cache makes content
  * decoding a once-per-symbol operation. */
-static uint8_t w_typed_sparse_kind(int64_t sym) {
+static inline uint8_t w_typed_sparse_kind(int64_t sym) {
     struct WTypedSparseCacheEntry { int64_t sym; uint8_t kind; };
-    static struct WTypedSparseCacheEntry cache[32];
-    uint32_t slot = (uint32_t)(w_sparse_hash((uint64_t)sym) & 31u);
-    if (cache[slot].sym == sym) return cache[slot].kind;
+    static struct WTypedSparseCacheEntry cache[64];
+    uint32_t slot = (uint32_t)((((uint64_t)sym >> 4) ^ ((uint64_t)sym >> 12)) & 63u);
+    if (__builtin_expect(cache[slot].sym == sym, 1)) return cache[slot].kind;
     char inline_buf[6];
     const char *name;
     size_t len;
@@ -24120,12 +24601,31 @@ void w_ast_sparse_init(void) {
     g_sparse_rec_cur = 0;
 }
 
+static uint64_t g_sparse_sym_bloom = 0;
+static uint64_t g_sparse_pair_bloom[64];
+
+static inline uint64_t w_sparse_sym_bit(uint64_t sym) {
+    return 1ULL << (((sym >> 4) ^ (sym >> 10) ^ (sym >> 16)) & 63u);
+}
+
+static inline void w_sparse_pair_bloom_add(uint64_t node, uint64_t sym) {
+    uint64_t h = (node >> 4) ^ (node >> 18) ^ ((sym >> 4) * 0x9e3779b97f4a7c15ULL);
+    g_sparse_pair_bloom[(h >> 6) & 63u] |= 1ULL << (h & 63u);
+}
+
+static inline int w_sparse_pair_bloom_may_contain(uint64_t node, uint64_t sym) {
+    uint64_t h = (node >> 4) ^ (node >> 18) ^ ((sym >> 4) * 0x9e3779b97f4a7c15ULL);
+    return (g_sparse_pair_bloom[(h >> 6) & 63u] & (1ULL << (h & 63u))) != 0;
+}
+
 void w_ast_sparse_reset(void) {
     if (g_sparse_map.keys) {
         memset(g_sparse_map.keys, 0, g_sparse_map.cap * sizeof(uint64_t));
     }
     g_sparse_map.count = 0;
     g_sparse_rec_cur = 0;
+    g_sparse_sym_bloom = 0;
+    memset(g_sparse_pair_bloom, 0, sizeof(g_sparse_pair_bloom));
     if (g_analysis_sidecar.keys) {
         memset(g_analysis_sidecar.keys, 0,
                (size_t)g_analysis_sidecar.cap * sizeof(uint64_t));
@@ -24149,6 +24649,7 @@ WValue w_ast_analysis_set(WValue node, WValue value) {
 }
 
 WValue w_ast_analysis_get(WValue node) {
+    if (g_analysis_sidecar.count == 0) return W_NIL;
     uint32_t slot = w_sidecar_find(g_analysis_sidecar.keys,
                                    g_analysis_sidecar.cap, (uint64_t)node);
     return slot == W_SPARSE_END ? W_NIL : g_analysis_sidecar.values[slot];
@@ -24162,6 +24663,7 @@ WValue w_ast_ivar_offsets_set(WValue node, WValue value) {
 }
 
 WValue w_ast_ivar_offsets_get(WValue node) {
+    if (g_class_layout_sidecar.count == 0) return W_NIL;
     uint32_t slot = w_sidecar_find(g_class_layout_sidecar.keys,
                                    g_class_layout_sidecar.cap, (uint64_t)node);
     if (slot == W_SPARSE_END || !(g_class_layout_sidecar.values[slot].present & 1u)) {
@@ -24178,6 +24680,7 @@ WValue w_ast_ivar_count_set(WValue node, WValue value) {
 }
 
 WValue w_ast_ivar_count_get(WValue node) {
+    if (g_class_layout_sidecar.count == 0) return W_NIL;
     uint32_t slot = w_sidecar_find(g_class_layout_sidecar.keys,
                                    g_class_layout_sidecar.cap, (uint64_t)node);
     if (slot == W_SPARSE_END || !(g_class_layout_sidecar.values[slot].present & 2u)) {
@@ -24187,7 +24690,7 @@ WValue w_ast_ivar_count_get(WValue node) {
 }
 
 static uint32_t w_sparse_find(uint64_t node) {
-    if (g_sparse_map.cap == 0) return W_SPARSE_END;
+    if (g_sparse_map.count == 0) return W_SPARSE_END;
     uint32_t mask = g_sparse_map.cap - 1;
     uint32_t slot = (uint32_t)(w_sparse_hash(node) & mask);
     while (g_sparse_map.keys[slot] != 0) {
@@ -24240,6 +24743,8 @@ WValue w_ast_sparse_set(WValue node, int64_t sym, WValue value) {
         case W_TYPED_SPARSE_IVAR_COUNT: return w_ast_ivar_count_set(node, value);
         default: break;
     }
+    g_sparse_sym_bloom |= w_sparse_sym_bit((uint64_t)sym);
+    w_sparse_pair_bloom_add((uint64_t)node, (uint64_t)sym);
     value = w_ast_freeze_if_array(value);   /* child lists live in the extra arena */
     uint32_t slot = w_sparse_find_or_insert((uint64_t)node);
     uint32_t rec_idx = g_sparse_map.heads[slot];
@@ -24263,12 +24768,22 @@ WValue w_ast_sparse_set(WValue node, int64_t sym, WValue value) {
 
 WValue w_ast_sparse_get(WValue node, int64_t sym) {
     sym = (int64_t)w_sym_canonical_fast((WValue)sym);
+    if (__builtin_expect((g_sparse_sym_bloom & w_sparse_sym_bit((uint64_t)sym)) == 0, 1)) {
+        switch (w_typed_sparse_kind(sym)) {
+            case W_TYPED_SPARSE_ANALYSIS: return w_ast_analysis_get(node);
+            case W_TYPED_SPARSE_IVAR_OFFSETS: return w_ast_ivar_offsets_get(node);
+            case W_TYPED_SPARSE_IVAR_COUNT: return w_ast_ivar_count_get(node);
+            default: return W_NIL;
+        }
+    }
     switch (w_typed_sparse_kind(sym)) {
         case W_TYPED_SPARSE_ANALYSIS: return w_ast_analysis_get(node);
         case W_TYPED_SPARSE_IVAR_OFFSETS: return w_ast_ivar_offsets_get(node);
         case W_TYPED_SPARSE_IVAR_COUNT: return w_ast_ivar_count_get(node);
         default: break;
     }
+    if (__builtin_expect(!w_sparse_pair_bloom_may_contain((uint64_t)node, (uint64_t)sym), 1))
+        return W_NIL;
     uint32_t slot = w_sparse_find((uint64_t)node);
     if (slot == W_SPARSE_END) return W_NIL;
     uint32_t rec_idx = g_sparse_map.heads[slot];
@@ -24750,12 +25265,18 @@ WValue w_ast_kind(WValue node) {
     return W_NIL;
 }
 
+__attribute__((noinline, cold))
+static WValue w_ast_get_slow_init(WValue node, WValue sym) {
+    w_ast_syms_init();
+    return w_ast_get(node, sym);
+}
+
 WValue w_ast_get(WValue node, WValue sym) {
     if (node == W_NIL) return W_NIL;
     if (__builtin_expect(w_is_node(node), 1)) {
         int kid = w_node_kind(node);
         if (__builtin_expect((unsigned)(kid - 1) < W_AST_KIND_MAX, 1)) {
-            if (__builtin_expect(!g_ast_syms_ready, 0)) w_ast_syms_init();
+            if (__builtin_expect(!g_ast_syms_ready, 0)) return w_ast_get_slow_init(node, sym);
             WValue csym = w_sym_canonical_fast(sym);
             uint8_t st = W_AST_KIND_STORAGE[kid];
             if (st == W_AST_STORAGE_SLAB || st == W_AST_STORAGE_CACHED) {
@@ -26117,7 +26638,13 @@ static inline uint64_t w_lexchar_cached_t(uint32_t cp, const uint64_t (*blocks)[
     return blocks[index[cp >> 8]][cp & 0xFF];
 }
 
+static WValue g_ascii_char_box[128];
+
 WValue w_box_char(uint32_t codepoint) {
+    if (codepoint < 128) {
+        WValue cached = g_ascii_char_box[codepoint];
+        if (cached) return cached;
+    }
     if (codepoint >= 0x110000) codepoint = 0xFFFD; /* replacement char */
     uint32_t meta = w_char_lookup(codepoint);
 
@@ -26143,11 +26670,13 @@ WValue w_box_char(uint32_t codepoint) {
        compare is a codepoint compare; \d\w\s at the LSB for a single-mask test:
        [cp 25-45][emoji 24][printable 23][digit_value 19-22][case_delta 10-18]
        [width 8-9][category 3-7][\s 2][\w 1][\d 0] */
-    return W_TAG_CHAR | (3ULL << 46) |  /* subtype 11 = Char */
-           ((uint64_t)codepoint << 25) |
-           (emoji << 24) | (printable << 23) |
-           (digit_v << 19) | (case_d << 10) | (width << 8) |
-           (category << 3) | (rs << 2) | (rw << 1) | rd;
+    WValue res = W_TAG_CHAR | (3ULL << 46) |  /* subtype 11 = Char */
+                 ((uint64_t)codepoint << 25) |
+                 (emoji << 24) | (printable << 23) |
+                 (digit_v << 19) | (case_d << 10) | (width << 8) |
+                 (category << 3) | (rs << 2) | (rw << 1) | rd;
+    if (codepoint < 128) g_ascii_char_box[codepoint] = res;
+    return res;
 }
 
 /* Encode codepoint as UTF-8, return number of bytes written */
@@ -39169,46 +39698,106 @@ WValue w_regex_scan(WValue regex_val, WValue subject_val) {
     if (!w_is_regex(regex_val)) die("scan requires a regex");
     WRegex *rx = (WRegex *)w_as_ptr(regex_val);
     if (w_is_rope(subject_val)) subject_val = w_rope_flatten(subject_val);
-    const char *subject = as_str(subject_val);
-    size_t slen = strlen(subject);
-    WValue out = w_array_new(65, 8);
+    char sbuf[6];
+    const char *subject;
+    size_t slen;
+    w_str_data(subject_val, sbuf, &subject, &slen);
+    int ascii = w_string_ascii_p(subject_val);
+    WValue out = w_array_new(65, 32);
+    WFastRegexProg *fast = *(WFastRegexProg **)(rx + 1);
+    if (fast && ascii) {
+        size_t cap_count = (size_t)fast->ncap;
+        int slots[64];
+        size_t pos = 0;
+        while (pos <= slen) {
+            if (!w_fast_regex_exec(fast, (const uint8_t *)subject, slen, pos, slots))
+                break;
+            size_t nb = (size_t)slots[0];
+            size_t ne = (size_t)slots[1];
+            if (cap_count > 1) {
+                WValue caps = w_array_new_inline(65, (int64_t)cap_count - 1);
+                WArray *cap_arr = w_as_array(caps);
+                for (size_t i = 1; i < cap_count; i++) {
+                    if (slots[2 * i] >= 0) {
+                        size_t clen = (size_t)(slots[2 * i + 1] - slots[2 * i]);
+                        const char *cp_ptr = subject + slots[2 * i];
+                        cap_arr->slots[i - 1] = clen <= 5
+                            ? w_box_inline_str(cp_ptr, clen)
+                            : w_string_n_known_ascii(cp_ptr, clen, 1);
+                    } else {
+                        cap_arr->slots[i - 1] = W_NIL;
+                    }
+                }
+                w_array_push(out, caps);
+            } else {
+                size_t clen = ne - nb;
+                const char *cp_ptr = subject + nb;
+                w_array_push(out, clen <= 5
+                    ? w_box_inline_str(cp_ptr, clen)
+                    : w_string_n_known_ascii(cp_ptr, clen, 1));
+            }
+            if (ne == nb) {
+                if (ne >= slen) break;
+                pos = ne + 1;
+            } else {
+                pos = ne;
+            }
+        }
+        return out;
+    }
+    WRegexCaptureState *state = &g_regex_capture_state;
 #ifdef TUNGSTEN_ONIG
     OnigRegex reg = (OnigRegex)rx->compiled;
     const OnigUChar *ostart = (const OnigUChar *)subject;
     const OnigUChar *oend = ostart + slen;
-    OnigRegion *region = onig_region_new();
+    if (!state->region) state->region = onig_region_new();
+    OnigRegion *region = state->region;
     size_t pos = 0;
     while (pos <= slen) {
-        onig_region_clear(region);
         int rc = onig_search(reg, ostart, oend, ostart + pos, oend, region,
                              ONIG_OPTION_NONE);
         if (rc < 0) break;
         int nb = region->beg[0], ne = region->end[0];
         if (region->num_regs > 1) {
-            WValue caps = w_array_new(65, region->num_regs - 1);
+            int ncaps = region->num_regs - 1;
+            WValue caps = w_array_new_inline(65, ncaps);
+            WArray *cap_arr = w_as_array(caps);
             for (int i = 1; i < region->num_regs; i++) {
-                if (region->beg[i] >= 0)
-                    w_array_push(caps, w_string_n(subject + region->beg[i],
-                                                  (size_t)(region->end[i] - region->beg[i])));
-                else
-                    w_array_push(caps, W_NIL);
+                if (region->beg[i] >= 0) {
+                    size_t clen = (size_t)(region->end[i] - region->beg[i]);
+                    const char *cp_ptr = subject + region->beg[i];
+                    cap_arr->slots[i - 1] = clen <= 5
+                        ? w_box_inline_str(cp_ptr, clen)
+                        : (ascii ? w_string_n_known_ascii(cp_ptr, clen, 1)
+                                 : w_string_n(cp_ptr, clen));
+                } else {
+                    cap_arr->slots[i - 1] = W_NIL;
+                }
             }
             w_array_push(out, caps);
         } else {
-            w_array_push(out, w_string_n(subject + nb, (size_t)(ne - nb)));
+            size_t clen = (size_t)(ne - nb);
+            const char *cp_ptr = subject + nb;
+            w_array_push(out, clen <= 5
+                ? w_box_inline_str(cp_ptr, clen)
+                : (ascii ? w_string_n_known_ascii(cp_ptr, clen, 1)
+                         : w_string_n(cp_ptr, clen)));
         }
         if (ne == nb) {
             if ((size_t)ne >= slen) break;
-            pos = (size_t)ne + w_utf8_index_width(subject + ne, slen - (size_t)ne);
+            pos = (size_t)ne + (ascii ? 1 : w_utf8_index_width(subject + ne, slen - (size_t)ne));
         } else {
             pos = (size_t)ne;
         }
     }
-    onig_region_free(region, 1);
 #else
     regex_t *reg = (regex_t *)rx->compiled;
     size_t cap_count = reg->re_nsub + 1;
-    regmatch_t *matches = malloc(cap_count * sizeof(regmatch_t));
+    if (cap_count > state->matches_capacity) {
+        state->matches = realloc(state->matches, cap_count * sizeof(regmatch_t));
+        state->matches_capacity = cap_count;
+    }
+    regmatch_t *matches = state->matches;
     size_t pos = 0;
     while (pos <= slen) {
         int rc = regexec(reg, subject + pos, cap_count, matches,
@@ -39217,26 +39806,36 @@ WValue w_regex_scan(WValue regex_val, WValue subject_val) {
         size_t nb = pos + (size_t)matches[0].rm_so;
         size_t ne = pos + (size_t)matches[0].rm_eo;
         if (cap_count > 1) {
-            WValue caps = w_array_new(65, (int64_t)cap_count - 1);
+            WValue caps = w_array_new_inline(65, (int64_t)cap_count - 1);
+            WArray *cap_arr = w_as_array(caps);
             for (size_t i = 1; i < cap_count; i++) {
-                if (matches[i].rm_so >= 0)
-                    w_array_push(caps, w_string_n(subject + pos + matches[i].rm_so,
-                                                  (size_t)(matches[i].rm_eo - matches[i].rm_so)));
-                else
-                    w_array_push(caps, W_NIL);
+                if (matches[i].rm_so >= 0) {
+                    size_t clen = (size_t)(matches[i].rm_eo - matches[i].rm_so);
+                    const char *cp_ptr = subject + pos + matches[i].rm_so;
+                    cap_arr->slots[i - 1] = clen <= 5
+                        ? w_box_inline_str(cp_ptr, clen)
+                        : (ascii ? w_string_n_known_ascii(cp_ptr, clen, 1)
+                                 : w_string_n(cp_ptr, clen));
+                } else {
+                    cap_arr->slots[i - 1] = W_NIL;
+                }
             }
             w_array_push(out, caps);
         } else {
-            w_array_push(out, w_string_n(subject + nb, ne - nb));
+            size_t clen = ne - nb;
+            const char *cp_ptr = subject + nb;
+            w_array_push(out, clen <= 5
+                ? w_box_inline_str(cp_ptr, clen)
+                : (ascii ? w_string_n_known_ascii(cp_ptr, clen, 1)
+                         : w_string_n(cp_ptr, clen)));
         }
         if (ne == nb) {
             if (ne >= slen) break;
-            pos = ne + w_utf8_index_width(subject + ne, slen - ne);
+            pos = ne + (ascii ? 1 : w_utf8_index_width(subject + ne, slen - ne));
         } else {
             pos = ne;
         }
     }
-    free(matches);
 #endif
     return out;
 }
@@ -39606,16 +40205,165 @@ static size_t w_ascii_rtrim_len(const char *str, size_t len) {
     return end;
 }
 
-static WValue w_string_ascii_case(WValue recv, int upper) {
+static inline const char *w_mem_search(const char *hay, size_t hay_len,
+                                       const char *needle, size_t needle_len) {
+    if (needle_len == 0) return hay;
+    if (needle_len > hay_len) return NULL;
+    if (needle_len == 1) {
+        int64_t rel = w_byte_scan_eq((const uint8_t *)hay, (int64_t)hay_len, (uint8_t)needle[0]);
+        return rel >= 0 ? hay + rel : NULL;
+    }
+    size_t limit = hay_len - needle_len + 1;
+    uint8_t first = (uint8_t)needle[0];
+    uint8_t last = (uint8_t)needle[needle_len - 1];
+    size_t i = 0;
+#ifdef __aarch64__
+    if (limit >= 16) {
+        uint8x16_t v_first = vdupq_n_u8(first);
+        uint8x16_t v_last = vdupq_n_u8(last);
+        size_t end16 = limit - 16;
+        while (i <= end16) {
+            uint8x16_t b0 = vld1q_u8((const uint8_t *)hay + i);
+            uint8x16_t b1 = vld1q_u8((const uint8_t *)hay + i + needle_len - 1);
+            uint8x16_t eq = vandq_u8(vceqq_u8(b0, v_first), vceqq_u8(b1, v_last));
+            if (vmaxvq_u8(eq) != 0) {
+                uint64_t m = vget_lane_u64(
+                    vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(eq), 4)), 0);
+                while (m != 0) {
+                    int lane = __builtin_ctzll(m) >> 2;
+                    if (needle_len == 2 ||
+                        (needle_len == 3 ? hay[i + lane + 1] == needle[1]
+                                         : memcmp(hay + i + lane + 1, needle + 1, needle_len - 2) == 0))
+                        return hay + i + lane;
+                    m &= ~(0xFULL << (lane << 2));
+                }
+            }
+            i += 16;
+        }
+    }
+#endif
+    for (; i < limit; i++) {
+        if ((uint8_t)hay[i] == first && (uint8_t)hay[i + needle_len - 1] == last &&
+            (needle_len == 2 || memcmp(hay + i + 1, needle + 1, needle_len - 2) == 0))
+            return hay + i;
+    }
+    return NULL;
+}
+
+static inline int64_t w_mem_rsearch(const char *hay, size_t max_start,
+                                    const char *needle, size_t needle_len) {
+    uint8_t first = (uint8_t)needle[0];
+    size_t i = max_start + 1;
+    if (needle_len == 1) {
+#ifdef __aarch64__
+        if (i >= 16) {
+            uint8x16_t v_first = vdupq_n_u8(first);
+            while (i >= 16) {
+                uint8x16_t v = vld1q_u8((const uint8_t *)hay + i - 16);
+                uint8x16_t cmp = vceqq_u8(v, v_first);
+                if (vmaxvq_u8(cmp) != 0) {
+                    uint64_t m = vget_lane_u64(
+                        vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(cmp), 4)), 0);
+                    int lane = 15 - (__builtin_clzll(m) >> 2);
+                    return (int64_t)(i - 16 + (size_t)lane);
+                }
+                i -= 16;
+            }
+        }
+#endif
+        while (i-- > 0) {
+            if ((uint8_t)hay[i] == first) return (int64_t)i;
+        }
+        return -1;
+    }
+    uint8_t last = (uint8_t)needle[needle_len - 1];
+#ifdef __aarch64__
+    if (i >= 16) {
+        uint8x16_t v_first = vdupq_n_u8(first);
+        uint8x16_t v_last = vdupq_n_u8(last);
+        while (i >= 16) {
+            size_t base = i - 16;
+            uint8x16_t b0 = vld1q_u8((const uint8_t *)hay + base);
+            uint8x16_t b1 = vld1q_u8((const uint8_t *)hay + base + needle_len - 1);
+            uint8x16_t eq = vandq_u8(vceqq_u8(b0, v_first), vceqq_u8(b1, v_last));
+            if (vmaxvq_u8(eq) != 0) {
+                uint64_t m = vget_lane_u64(
+                    vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(eq), 4)), 0);
+                while (m != 0) {
+                    int lane = 15 - (__builtin_clzll(m) >> 2);
+                    if (needle_len == 2 ||
+                        (needle_len == 3 ? hay[base + lane + 1] == needle[1]
+                                         : memcmp(hay + base + lane + 1, needle + 1, needle_len - 2) == 0))
+                        return (int64_t)(base + (size_t)lane);
+                    m &= ~(0xFULL << (lane << 2));
+                }
+            }
+            i -= 16;
+        }
+    }
+#endif
+    while (i-- > 0) {
+        if ((uint8_t)hay[i] == first && (uint8_t)hay[i + needle_len - 1] == last &&
+            (needle_len == 2 || memcmp(hay + i + 1, needle + 1, needle_len - 2) == 0))
+            return (int64_t)i;
+    }
+    return -1;
+}
+
+static void w_ascii_swapcase_copy(char *dst, const char *src, size_t len) {
+    size_t i = 0;
+#ifdef __aarch64__
+    uint8x16_t lo_a = vdupq_n_u8('a'), hi_z = vdupq_n_u8('z');
+    uint8x16_t lo_A = vdupq_n_u8('A'), hi_Z = vdupq_n_u8('Z');
+    uint8x16_t bit  = vdupq_n_u8(0x20);
+    while (i + 16 <= len) {
+        uint8x16_t v = vld1q_u8((const uint8_t *)src + i);
+        uint8x16_t is_low = vandq_u8(vcgeq_u8(v, lo_a), vcleq_u8(v, hi_z));
+        uint8x16_t is_up  = vandq_u8(vcgeq_u8(v, lo_A), vcleq_u8(v, hi_Z));
+        uint8x16_t flip   = vandq_u8(vorrq_u8(is_low, is_up), bit);
+        vst1q_u8((uint8_t *)dst + i, veorq_u8(v, flip));
+        i += 16;
+    }
+#endif
+    while (i < len) {
+        unsigned char ch = (unsigned char)src[i];
+        if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')) ch ^= 0x20;
+        dst[i] = (char)ch;
+        i++;
+    }
+}
+
+static void w_ascii_capitalize_copy(char *dst, const char *src, size_t len) {
+    if (len == 0) return;
+    unsigned char ch0 = (unsigned char)src[0];
+    if (ch0 >= 'a' && ch0 <= 'z') ch0 = (unsigned char)(ch0 - 32);
+    dst[0] = (char)ch0;
+    if (len > 1) w_ascii_case_copy(dst + 1, src + 1, len - 1, 0);
+}
+
+/* mode: 0=downcase, 1=upcase, 2=swapcase, 3=capitalize */
+static WValue w_string_ascii_case(WValue recv, int mode) {
     if (w_is_rope(recv)) recv = w_rope_flatten(recv);
     char _sbuf[6];
     const char *str;
     size_t str_len;
     w_str_data(recv, _sbuf, &str, &str_len);
-    char *result = malloc(str_len + 1);
-    w_ascii_case_copy(result, str, str_len, upper);
-    result[str_len] = '\0';
-    return w_string_take(result, str_len);
+    int ascii = w_string_ascii_p(recv);
+    if (str_len <= W_SLAB_SSO2_MAX) {
+        char sbuf[W_SLAB_SSO2_MAX + 1];
+        if (mode == 2) w_ascii_swapcase_copy(sbuf, str, str_len);
+        else if (mode == 3) w_ascii_capitalize_copy(sbuf, str, str_len);
+        else w_ascii_case_copy(sbuf, str, str_len, mode);
+        sbuf[str_len] = '\0';
+        return w_string_n_known_ascii(sbuf, str_len, ascii);
+    }
+    WString *ws = malloc(sizeof(WString) + str_len + 1);
+    w_heap_string_set_meta(ws, (uint32_t)str_len, ascii);
+    if (mode == 2) w_ascii_swapcase_copy(ws->data, str, str_len);
+    else if (mode == 3) w_ascii_capitalize_copy(ws->data, str, str_len);
+    else w_ascii_case_copy(ws->data, str, str_len, mode);
+    ws->data[str_len] = '\0';
+    return w_box_heap_str(ws);
 }
 
 static WValue w_string_trim_ascii(WValue recv, int trim_left, int trim_right) {
@@ -39626,6 +40374,9 @@ static WValue w_string_trim_ascii(WValue recv, int trim_left, int trim_right) {
     w_str_data(recv, _sbuf, &str, &str_len);
     size_t start = trim_left ? w_ascii_ltrim_offset(str, str_len) : 0;
     size_t end = trim_right ? w_ascii_rtrim_len(str + start, str_len - start) + start : str_len;
+    if (start == 0 && end == str_len && w_is_string(recv)) return recv;
+    if (w_string_ascii_p(recv))
+        return w_string_n_known_ascii(str + start, end - start, 1);
     return w_string_n(str + start, end - start);
 }
 
@@ -39635,17 +40386,21 @@ static WValue w_string_split_byte(WValue recv, uint8_t sep) {
     const char *str;
     size_t str_len;
     w_str_data(recv, _sbuf, &str, &str_len);
+    int ascii = w_string_ascii_p(recv);
     WValue result = w_array_new_empty();
     size_t start = 0;
     while (start < str_len) {
         int64_t rel = w_byte_scan_eq((const uint8_t *)str + start, (int64_t)(str_len - start), sep);
         if (rel < 0) {
-            w_array_push(result, w_string_n(str + start, str_len - start));
+            size_t tail = str_len - start;
+            w_array_push(result, ascii ? w_string_n_known_ascii(str + start, tail, 1)
+                                       : w_string_n(str + start, tail));
             return result;
         }
-        w_array_push(result, w_string_n(str + start, (size_t)rel));
+        w_array_push(result, ascii ? w_string_n_known_ascii(str + start, (size_t)rel, 1)
+                                   : w_string_n(str + start, (size_t)rel));
         start += (size_t)rel + 1;
-        if (start == str_len) w_array_push(result, w_string(""));
+        if (start == str_len) w_array_push(result, w_box_inline_str("", 0));
     }
     return result;
 }
@@ -39667,13 +40422,12 @@ WValue w_string_slice_raw(WValue str, int64_t start, int64_t len) {
 
     if (start < 0) start = (int64_t)slen + start;
     if (start < 0) start = 0;
-    if (start >= (int64_t)slen || len <= 0) return w_string("");
+    if (start >= (int64_t)slen || len <= 0) return w_box_inline_str("", 0);
     if (start + len > (int64_t)slen) len = (int64_t)slen - start;
-
-    char *result = malloc((size_t)len + 1);
-    memcpy(result, s + start, (size_t)len);
-    result[(size_t)len] = '\0';
-    return w_string_take(result, (size_t)len);
+    if (start == 0 && (size_t)len == slen && w_is_string(str)) return str;
+    if (w_string_ascii_p(str))
+        return w_string_n_known_ascii(s + start, (size_t)len, 1);
+    return w_string_n(s + start, (size_t)len);
 }
 
 /* Convert source string to typed w64 array of NaN-boxed LexChar values.
@@ -41781,22 +42535,36 @@ static uint64_t w_hash_value(WValue v) {
 
 static int w_hash_key_eq(WValue a, WValue b) {
     if (a == b) return 1;
-    if ((w_is_rope(a) || w_is_stringy(a)) && (w_is_rope(b) || w_is_stringy(b))) {
-        if (w_is_symbol(a) != w_is_symbol(b)) return 0;
-        /* Slab aliases can differ only in their optional cached-length bits.
-         * Equal slab content has one interned index, so retain that fast path.
-         * Heap strings are deliberately allowed to equal slab literals (for
-         * example numeric to_s results), so mixed storage modes fall through
-         * to the structural comparison. */
-        if (!w_is_rope(a) && !w_is_rope(b)) {
+    if (a < 0x10 || b < 0x10) return 0;
+    if (__builtin_expect(w_is_stringy(a), 1)) {
+        if (__builtin_expect(w_is_stringy(b), 1)) {
+            if (w_is_symbol(a) != w_is_symbol(b)) return 0;
             size_t amode = (a >> 1) & 7;
             size_t bmode = (b >> 1) & 7;
             if (amode == 6 && bmode == 6)
                 return w_as_slab_index(a) == w_as_slab_index(b);
-            if (amode <= 5 && bmode <= 5) return 0;
-            if ((amode <= 5 && bmode == 6) ||
-                (bmode <= 5 && amode == 6)) return 0;
+            if (amode < 7 && bmode < 7) return 0;
+            char ba[6], bb[6];
+            const char *sa, *sb;
+            size_t la, lb;
+            w_str_data(a, ba, &sa, &la);
+            w_str_data(b, bb, &sb, &lb);
+            return la == lb && memcmp(sa, sb, la) == 0;
         }
+        if (w_is_rope(b) && !w_is_symbol(a))
+            return w_string_compare(a, b) == 0;
+        return 0;
+    }
+    if (__builtin_expect(w_is_stringy(b), 1)) {
+        if (w_is_rope(a) && !w_is_symbol(b))
+            return w_string_compare(a, b) == 0;
+        return 0;
+    }
+    if (w_both_ints(a, b)) return 0;
+    if ((a & 0xFFFFE00000000000ULL) == (W_TAG_PACKED | ((uint64_t)W_PACKED_NODE << 45)) ||
+        (b & 0xFFFFE00000000000ULL) == (W_TAG_PACKED | ((uint64_t)W_PACKED_NODE << 45)))
+        return 0;
+    if (w_is_rope(a) && w_is_rope(b)) {
         return w_string_compare(a, b) == 0;
     }
     /* Structural equality for integer keys, matching == and the content
@@ -47229,6 +47997,15 @@ static inline int w_str_cmp(WValue a, WValue b) {
     return c ? c : (int)((la > lb) - (la < lb));
 }
 
+static inline int w_str_eq(WValue a, WValue b) {
+    char ba[6], bb[6];
+    const char *sa, *sb;
+    size_t la, lb;
+    w_str_data(a, ba, &sa, &la);
+    w_str_data(b, bb, &sb, &lb);
+    return la == lb && memcmp(sa, sb, la) == 0;
+}
+
 /* Compare string-like values by content without forcing ropes to cache a
  * flattened string. Uses scratch buffers for rope materialization and
  * length-aware memcmp for the actual comparison. */
@@ -47315,16 +48092,43 @@ WValue w_eq(WValue a, WValue b) {
 
     /* Chars are canonical by bit pattern (one WValue per codepoint+metadata);
      * a != b above means different chars. Short-circuits the type chain. */
-    if (w_is_char(a) && w_is_char(b))
+    if (w_is_char(a))
         return W_FALSE;
 
-    /* Inline strings/symbols are canonical by bit pattern (modes 0-5).
-     * Every runtime constructor must keep <=5-byte text inline, while slab
-     * and heap text start at six bytes, so differing representations cannot
-     * compare equal here. Slab values are not themselves bit-canonical
-     * because an alias may carry a cached length. */
-    if (w_is_inline(a) && w_is_stringy(b)) return W_FALSE;
-    if (w_is_inline(b) && w_is_stringy(a)) return W_FALSE;
+    /* Strings and symbols: handle before the numeric tower so string/symbol
+     * inequality never pays rational/decimal/exact-tower probes.
+     * - Inline strings/symbols (modes 0-5) are canonical by bit pattern, and
+     *   slab/heap text starts at six bytes, so any inline operand with a != b
+     *   cannot match another string/symbol.
+     * - Mode-6 slab aliases can differ only in their optional cached-length
+     *   bits (bits 28..33); equal slab content shares one interned slab index.
+     * - Mixed slab/heap or heap/heap pairs compare by length + bytes. */
+    if (w_is_stringy(a)) {
+        if (w_is_stringy(b)) {
+            if (((a ^ b) & 1) != 0) return W_FALSE;
+            size_t amode = (a >> 1) & 7;
+            size_t bmode = (b >> 1) & 7;
+            if (amode <= 5 || bmode <= 5) return W_FALSE;
+            if (amode == 6 && bmode == 6)
+                return w_bool(w_as_slab_index(a) == w_as_slab_index(b));
+            return w_bool(w_str_eq(a, b));
+        }
+        if (!w_is_symbol(a) && w_is_rope(b))
+            return w_bool(w_string_compare(a, b) == 0);
+        return W_FALSE;
+    }
+    if (w_is_stringy(b)) {
+        if (!w_is_symbol(b) && w_is_rope(a))
+            return w_bool(w_string_compare(a, b) == 0);
+        if (!w_is_instance(a))
+            return W_FALSE;
+    }
+
+    if (w_both_ints(a, b))
+        return W_FALSE;
+
+    if ((a & 0xFFFFE00000000000ULL) == (W_TAG_PACKED | ((uint64_t)W_PACKED_NODE << 45)))
+        return W_FALSE;
 
     /* Bigint equality */
     if (w_both_integers_any(a, b))
@@ -48644,30 +49448,227 @@ WValue w_string_from_codepoint(WValue cp_v) {
  * words. The tag may be present (String#codes) or stripped (Regex's private
  * i64[] payload); both retain the codepoint in bits 25..45. One allocation,
  * O(len) encode — the fast replacement for O(len^2) concatenation. */
-WValue w_string_from_codes(WValue arr_v, WValue start_v, WValue len_v) {
-    int64_t start = w_to_i64(start_v);
-    int64_t len = w_to_i64(len_v);
-    WArray *ta = w_as_array(arr_v);
-    int64_t n = ta->size;
-    if (start < 0) start = 0;
-    if (start >= n || len <= 0) return w_string("");
-    if (start + len > n) len = n - start;
-    const int64_t *data = (const int64_t *)ta->slots;
+static WValue w_string_ascii_delete(WValue recv, WValue set_v) {
+    if (w_is_rope(recv)) recv = w_rope_flatten(recv);
+    if (w_is_rope(set_v)) set_v = w_rope_flatten(set_v);
+    char sbuf6[6], setbuf6[6];
+    const char *str, *set;
+    size_t str_len, set_len;
+    w_str_data(recv, sbuf6, &str, &str_len);
+    w_str_data(set_v, setbuf6, &set, &set_len);
+    if (str_len == 0 || set_len == 0) return recv & ~1ULL;
+    uint64_t mask[4] = {0, 0, 0, 0};
+    for (size_t k = 0; k < set_len; k++) {
+        uint8_t sb = (uint8_t)set[k];
+        mask[sb >> 6] |= (1ULL << (sb & 63));
+    }
+    char stack_out[256];
+    char *dst = str_len < sizeof(stack_out) ? stack_out : (char *)malloc(str_len + 1);
+    size_t w = 0;
+    for (size_t i = 0; i < str_len; i++) {
+        uint8_t b = (uint8_t)str[i];
+        if (!((mask[b >> 6] >> (b & 63)) & 1ULL)) dst[w++] = (char)b;
+    }
+    if (w == str_len) {
+        if (dst != stack_out) free(dst);
+        return recv & ~1ULL;
+    }
+    dst[w] = '\0';
+    WValue res = w_string_n_known_ascii(dst, w, 1);
+    if (dst != stack_out) free(dst);
+    return res;
+}
 
-    char *buf = malloc((size_t)len * 4 + 1);   /* 4 bytes/codepoint upper bound */
+static WValue w_string_ascii_squeeze_set(WValue recv, WValue set_v) {
+    if (w_is_rope(recv)) recv = w_rope_flatten(recv);
+    if (w_is_rope(set_v)) set_v = w_rope_flatten(set_v);
+    char sbuf6[6], setbuf6[6];
+    const char *str, *set;
+    size_t str_len, set_len;
+    w_str_data(recv, sbuf6, &str, &str_len);
+    w_str_data(set_v, setbuf6, &set, &set_len);
+    if (str_len <= 1 || set_len == 0) return recv & ~1ULL;
+    uint64_t mask[4] = {0, 0, 0, 0};
+    for (size_t k = 0; k < set_len; k++) {
+        uint8_t sb = (uint8_t)set[k];
+        mask[sb >> 6] |= (1ULL << (sb & 63));
+    }
+    char stack_out[256];
+    char *dst = str_len < sizeof(stack_out) ? stack_out : (char *)malloc(str_len + 1);
+    size_t w = 0;
+    int prev = -1;
+    for (size_t i = 0; i < str_len; i++) {
+        uint8_t b = (uint8_t)str[i];
+        if ((int)b == prev && ((mask[b >> 6] >> (b & 63)) & 1ULL)) continue;
+        dst[w++] = (char)b;
+        prev = (int)b;
+    }
+    if (w == str_len) {
+        if (dst != stack_out) free(dst);
+        return recv & ~1ULL;
+    }
+    dst[w] = '\0';
+    WValue res = w_string_n_known_ascii(dst, w, 1);
+    if (dst != stack_out) free(dst);
+    return res;
+}
+
+static WValue w_string_ascii_tr(WValue recv, WValue from_v, WValue to_v) {
+    if (w_is_rope(recv)) recv = w_rope_flatten(recv);
+    if (w_is_rope(from_v)) from_v = w_rope_flatten(from_v);
+    if (w_is_rope(to_v)) to_v = w_rope_flatten(to_v);
+    char sbuf6[6], fbuf6[6], tbuf6[6];
+    const char *str, *from, *to;
+    size_t str_len, from_len, to_len;
+    w_str_data(recv, sbuf6, &str, &str_len);
+    w_str_data(from_v, fbuf6, &from, &from_len);
+    w_str_data(to_v, tbuf6, &to, &to_len);
+    if (str_len == 0 || from_len == 0) return recv & ~1ULL;
+    if (to_len == 0) return w_string_ascii_delete(recv, from_v);
+    uint8_t map[256];
+    for (int c = 0; c < 256; c++) map[c] = (uint8_t)c;
+    for (size_t fi = from_len; fi-- > 0; ) {
+        uint8_t fb = (uint8_t)from[fi];
+        uint8_t tb = (uint8_t)to[fi < to_len ? fi : (to_len - 1)];
+        map[fb] = tb;
+    }
+    if (str_len <= W_SLAB_SSO2_MAX) {
+        char sbuf[W_SLAB_SSO2_MAX + 1];
+        for (size_t i = 0; i < str_len; i++) sbuf[i] = (char)map[(uint8_t)str[i]];
+        sbuf[str_len] = '\0';
+        return w_string_n_known_ascii(sbuf, str_len, 1);
+    }
+    WString *ws = malloc(sizeof(WString) + str_len + 1);
+    w_heap_string_set_meta(ws, (uint32_t)str_len, 1);
+    for (size_t i = 0; i < str_len; i++) ws->data[i] = (char)map[(uint8_t)str[i]];
+    ws->data[str_len] = '\0';
+    return w_box_heap_str(ws);
+}
+
+static WValue w_string_levenshtein(WValue a_v, WValue b_v) {
+    if (a_v == b_v) return w_int(0);
+    if (w_is_rope(a_v)) a_v = w_rope_flatten(a_v);
+    if (w_is_rope(b_v)) b_v = w_rope_flatten(b_v);
+    char abuf6[6], bbuf6[6];
+    const char *sa, *sb;
+    size_t la, lb;
+    w_str_data(a_v, abuf6, &sa, &la);
+    w_str_data(b_v, bbuf6, &sb, &lb);
+    if (la == lb && memcmp(sa, sb, la) == 0) return w_int(0);
+    if (w_string_ascii_p(a_v) && w_string_ascii_p(b_v)) {
+        while (la > 0 && lb > 0 && *sa == *sb) { sa++; sb++; la--; lb--; }
+        while (la > 0 && lb > 0 && sa[la - 1] == sb[lb - 1]) { la--; lb--; }
+        if (la == 0) return w_int((int64_t)lb);
+        if (lb == 0) return w_int((int64_t)la);
+        if (lb > la) {
+            const char *ts = sa; sa = sb; sb = ts;
+            size_t tl = la; la = lb; lb = tl;
+        }
+        int32_t srow[257];
+        int32_t *row = lb <= 256 ? srow : (int32_t *)malloc((lb + 1) * sizeof(int32_t));
+        for (size_t j = 0; j <= lb; j++) row[j] = (int32_t)j;
+        for (size_t i = 0; i < la; i++) {
+            uint8_t ca = (uint8_t)sa[i];
+            int32_t prev_diag = row[0];
+            row[0] = (int32_t)(i + 1);
+            for (size_t j = 0; j < lb; j++) {
+                int32_t old_rj1 = row[j + 1];
+                int32_t sub = prev_diag + (ca == (uint8_t)sb[j] ? 0 : 1);
+                int32_t ins = row[j] + 1;
+                int32_t del = old_rj1 + 1;
+                int32_t m = ins < del ? ins : del;
+                if (sub < m) m = sub;
+                row[j + 1] = m;
+                prev_diag = old_rj1;
+            }
+        }
+        int64_t ans = row[lb];
+        if (row != srow) free(row);
+        return w_int(ans);
+    }
+    uint32_t scp_a[256], scp_b[256];
+    uint32_t *ca = la <= 256 ? scp_a : (uint32_t *)malloc(la * sizeof(uint32_t));
+    uint32_t *cb = lb <= 256 ? scp_b : (uint32_t *)malloc(lb * sizeof(uint32_t));
+    size_t na = 0, nb = 0;
+    for (size_t p = 0; p < la; ) {
+        size_t w;
+        ca[na++] = w_un_decode_at(sa, la, p, &w);
+        p += w;
+    }
+    for (size_t p = 0; p < lb; ) {
+        size_t w;
+        cb[nb++] = w_un_decode_at(sb, lb, p, &w);
+        p += w;
+    }
+    size_t pa = 0;
+    while (pa < na && pa < nb && ca[pa] == cb[pa]) pa++;
+    while (na > pa && nb > pa && ca[na - 1] == cb[nb - 1]) { na--; nb--; }
+    size_t ma = na - pa, mb = nb - pa;
+    if (ma == 0 || mb == 0) {
+        if (ca != scp_a) free(ca);
+        if (cb != scp_b) free(cb);
+        return w_int((int64_t)(ma + mb));
+    }
+    int32_t srow[257];
+    int32_t *row = mb <= 256 ? srow : (int32_t *)malloc((mb + 1) * sizeof(int32_t));
+    for (size_t j = 0; j <= mb; j++) row[j] = (int32_t)j;
+    for (size_t i = 0; i < ma; i++) {
+        uint32_t cpi = ca[pa + i];
+        int32_t prev_diag = row[0];
+        row[0] = (int32_t)(i + 1);
+        for (size_t j = 0; j < mb; j++) {
+            int32_t old_rj1 = row[j + 1];
+            int32_t sub = prev_diag + (cpi == cb[pa + j] ? 0 : 1);
+            int32_t ins = row[j] + 1;
+            int32_t del = old_rj1 + 1;
+            int32_t m = ins < del ? ins : del;
+            if (sub < m) m = sub;
+            row[j + 1] = m;
+            prev_diag = old_rj1;
+        }
+    }
+    int64_t ans = row[mb];
+    if (row != srow) free(row);
+    if (ca != scp_a) free(ca);
+    if (cb != scp_b) free(cb);
+    return w_int(ans);
+}
+
+static inline WValue w_string_from_code_span(const int64_t *data, int64_t n,
+                                             int64_t start, int64_t len) {
+    if (start < 0) start = 0;
+    if (start >= n || len <= 0) return w_box_inline_str("", 0);
+    if (start + len > n) len = n - start;
+    if (len <= 5) {
+        uint64_t v = W_TAG_STRINGSYM | ((uint64_t)len << 1);
+        uint32_t all_cp = 0;
+        for (int64_t i = 0; i < len; i++) {
+            uint32_t cp = (uint32_t)(((uint64_t)data[start + i] >> 25) & 0x1FFFFF);
+            all_cp |= cp;
+            v |= ((uint64_t)(cp & 0xFF)) << (4 + 8 * i);
+        }
+        if (all_cp < 0x80) return v;
+    }
+    char sbuf[512];
+    size_t cap = (size_t)len * 4 + 1;
+    char *buf = cap <= sizeof(sbuf) ? sbuf : (char *)malloc(cap);
     size_t pos = 0;
+    int ascii = 1;
     for (int64_t i = start; i < start + len; i++) {
         uint32_t cp = (uint32_t)(((uint64_t)data[i] >> 25) & 0x1FFFFF);
         if (cp < 0x80) {
             buf[pos++] = (char)cp;
         } else if (cp < 0x800) {
+            ascii = 0;
             buf[pos++] = (char)(0xC0 | (cp >> 6));
             buf[pos++] = (char)(0x80 | (cp & 0x3F));
         } else if (cp < 0x10000) {
+            ascii = 0;
             buf[pos++] = (char)(0xE0 | (cp >> 12));
             buf[pos++] = (char)(0x80 | ((cp >> 6) & 0x3F));
             buf[pos++] = (char)(0x80 | (cp & 0x3F));
         } else {
+            ascii = 0;
             buf[pos++] = (char)(0xF0 | (cp >> 18));
             buf[pos++] = (char)(0x80 | ((cp >> 12) & 0x3F));
             buf[pos++] = (char)(0x80 | ((cp >> 6) & 0x3F));
@@ -48675,7 +49676,41 @@ WValue w_string_from_codes(WValue arr_v, WValue start_v, WValue len_v) {
         }
     }
     buf[pos] = '\0';
-    return w_string_take(buf, pos);
+    if (buf == sbuf) return w_string_n_known_ascii(sbuf, pos, ascii);
+    return w_string_take_known_ascii(buf, pos, ascii);
+}
+
+WValue w_string_from_codes(WValue arr_v, WValue start_v, WValue len_v) {
+    if (w_is_stringy(arr_v) || w_is_rope(arr_v)) {
+        if (w_is_stringy(len_v) || w_is_rope(len_v))
+            return w_string_ascii_tr(arr_v, start_v, len_v);
+        int64_t op = w_as_int(len_v);
+        if (op == -1) return w_string_ascii_delete(arr_v, start_v);
+        if (op == -2) return w_string_ascii_squeeze_set(arr_v, start_v);
+        if (op == -3) return w_string_levenshtein(arr_v, start_v);
+    }
+    WArray *ta = w_as_array(arr_v);
+    int64_t n = ta->size;
+    const int64_t *data = (const int64_t *)ta->slots;
+    if (w_is_array(start_v)) {
+        WArray *sa = w_as_array(start_v);
+        const int64_t *saved = (const int64_t *)sa->slots;
+        int64_t ncap = w_to_i64(len_v);
+        WValue out = w_array_new_inline(65, ncap);
+        WArray *oa = w_as_array(out);
+        for (int64_t g = 0; g < ncap; g++) {
+            int64_t a = saved[g * 2];
+            int64_t b = saved[g * 2 + 1];
+            if (a >= 0 && b >= 0)
+                oa->slots[g] = w_string_from_code_span(data, n, a, b - a);
+            else
+                oa->slots[g] = W_NIL;
+        }
+        return out;
+    }
+    int64_t start = w_to_i64(start_v);
+    int64_t len = w_to_i64(len_v);
+    return w_string_from_code_span(data, n, start, len);
 }
 
 /* Regex prefilter scans over its decoded i64[] Char payloads (tag/subtype bits
@@ -48684,21 +49719,337 @@ WValue w_string_from_codes(WValue arr_v, WValue start_v, WValue len_v) {
  * return n if none. Raw int64 array access in C replaces the hot per-position
  * Tungsten loop, whose boxed @subj[i] access dominated (~13 ns/position). */
 WValue w_regex_scan_char(WValue subj, WValue start_v, WValue n_v, WValue cp_v) {
+    if (w_is_stringy(subj) || w_is_rope(subj)) {
+        char buf[6]; const char *str; size_t str_len;
+        w_str_data(subj, buf, &str, &str_len);
+        if (w_string_ascii_p(subj)) {
+            WValue result = w_array_new_inline(64, (int64_t)str_len);
+            WArray *ta = w_as_array(result);
+            int64_t *data = (int64_t *)ta->slots;
+            const unsigned char *p = (const unsigned char *)str;
+            for (size_t i = 0; i < str_len; i++)
+                data[i] = (int64_t)(w_box_char(p[i]) & 0x3FFFFFFFFFFFULL);
+            return result;
+        }
+        size_t count = 0;
+        const unsigned char *scan = (const unsigned char *)str;
+        size_t scan_rem = str_len;
+        while (scan_rem > 0) {
+            int clen = *scan < 0x80 ? 1 : (*scan < 0xE0 ? 2 : (*scan < 0xF0 ? 3 : 4));
+            if ((size_t)clen > scan_rem) clen = (int)scan_rem;
+            scan += clen;
+            scan_rem -= (size_t)clen;
+            count++;
+        }
+        WValue result = w_array_new_inline(64, (int64_t)count);
+        WArray *ta = w_as_array(result);
+        int64_t *data = (int64_t *)ta->slots;
+        const unsigned char *p = (const unsigned char *)str;
+        size_t remaining = str_len;
+        size_t idx = 0;
+        while (remaining > 0) {
+            uint32_t cp;
+            int clen;
+            if (*p < 0x80)        { cp = *p;                 clen = 1; }
+            else if (*p < 0xE0)   { cp = (*p & 0x1F) << 6;   clen = 2; }
+            else if (*p < 0xF0)   { cp = (*p & 0x0F) << 12;  clen = 3; }
+            else                  { cp = (*p & 0x07) << 18;  clen = 4; }
+            for (int k = 1; k < clen && k < (int)remaining; k++)
+                cp |= (p[k] & 0x3F) << (6 * (clen - 1 - k));
+            if ((size_t)clen > remaining) clen = (int)remaining;
+            data[idx++] = (int64_t)(w_box_char(cp) & 0x3FFFFFFFFFFFULL);
+            p += clen;
+            remaining -= (size_t)clen;
+        }
+        return result;
+    }
     WArray *ta = w_as_array(subj);
     const uint64_t *data = (const uint64_t *)ta->slots;
     int64_t start = w_to_i64(start_v);
     int64_t n = w_to_i64(n_v);
+    if (w_is_array(cp_v)) {
+        WArray *la = w_as_array(cp_v);
+        const uint64_t *lit = (const uint64_t *)la->slots;
+        int64_t llen = la->size;
+        if (llen <= 0) return w_int(start);
+        int64_t limit = n - llen;
+        uint64_t first = lit[0];
+        uint64_t last = lit[llen - 1];
+        for (int64_t i = start; i <= limit; i++) {
+            if (data[i] == first && data[i + llen - 1] == last) {
+                int64_t j = 1;
+                while (j < llen - 1 && data[i + j] == lit[j]) j++;
+                if (j >= llen - 1) return w_int(i);
+            }
+        }
+        return w_int(n);
+    }
     uint64_t cp = (uint64_t)w_to_i64(cp_v); /* codepoint int (Char WValue args mangle over ccall) */
     while (start < n && ((data[start] >> 25) & 0x1FFFFF) != cp) start++;
     return w_int(start);
 }
 
+typedef struct {
+    const int64_t *subj;
+    int64_t n;
+    const int64_t *ops;
+    const int64_t *args_a;
+    const int64_t *branches;
+    WArray *classes;
+    int64_t *saved;
+    int64_t *guard;
+    int64_t nl;
+} WRegexVmCtx;
+
+static inline int w_regex_vm_class_match(WArray *classes, int64_t cls_idx, int64_t lx) {
+    WArray *ca = w_as_array(classes->slots[cls_idx]);
+    const int64_t *c = (const int64_t *)ca->slots;
+    int neg = (c[0] == 1);
+    int64_t pos_f = c[1];
+    if (pos_f != 0 && (lx & pos_f) != 0) return !neg;
+    int64_t neg_f = c[2];
+    if (neg_f != 0) {
+        if (((neg_f & 1) != 0 && (lx & 1) == 0) ||
+            ((neg_f & 2) != 0 && (lx & 2) == 0) ||
+            ((neg_f & 4) != 0 && (lx & 4) == 0))
+            return !neg;
+    }
+    int64_t cn = ca->size;
+    for (int64_t i = 3; i < cn; i += 2) {
+        if (lx >= c[i] && lx <= c[i + 1]) return !neg;
+    }
+    return neg;
+}
+
+static int64_t w_regex_vm_run(const WRegexVmCtx *ctx, int64_t pc, int64_t sp) {
+    const int64_t *subj = ctx->subj;
+    int64_t n = ctx->n;
+    const int64_t *ops = ctx->ops;
+    const int64_t *args_a = ctx->args_a;
+    const int64_t *branches = ctx->branches;
+    WArray *classes = ctx->classes;
+    int64_t *saved = ctx->saved;
+    int64_t *guard = ctx->guard;
+    int64_t nl = ctx->nl;
+    int64_t u_slot[16];
+    int64_t u_val[16];
+    int u_cnt = 0;
+
+    for (;;) {
+        switch (ops[pc]) {
+            case 1: /* OP_CHAR */
+                if (sp < n && subj[sp] == args_a[pc]) { pc++; sp++; continue; }
+                goto fail;
+            case 2: /* OP_ANY */
+                if (sp < n && subj[sp] != nl) { pc++; sp++; continue; }
+                goto fail;
+            case 3: /* OP_CLASS */
+                if (sp < n && w_regex_vm_class_match(classes, args_a[pc], subj[sp])) {
+                    pc++; sp++; continue;
+                }
+                goto fail;
+            case 4: /* OP_MATCH */
+                return sp;
+            case 5: /* OP_JMP */
+                pc = args_a[pc];
+                continue;
+            case 6: { /* OP_SPLIT */
+                int64_t r = w_regex_vm_run(ctx, args_a[pc], sp);
+                if (r >= 0) return r;
+                pc = branches[pc];
+                continue;
+            }
+            case 7: { /* OP_SAVE */
+                int64_t slot = args_a[pc];
+                int64_t nop = ops[pc + 1];
+                if (nop == 4) {
+                    saved[slot] = sp;
+                    return sp;
+                }
+                if (nop == 7 && ops[pc + 2] == 4) {
+                    saved[slot] = sp;
+                    saved[args_a[pc + 1]] = sp;
+                    return sp;
+                }
+                int64_t old = saved[slot];
+                if (u_cnt < 16) {
+                    u_slot[u_cnt] = slot;
+                    u_val[u_cnt] = old;
+                    u_cnt++;
+                    saved[slot] = sp;
+                    pc++;
+                    continue;
+                }
+                saved[slot] = sp;
+                int64_t r = w_regex_vm_run(ctx, pc + 1, sp);
+                if (r >= 0) return r;
+                saved[slot] = old;
+                goto fail;
+            }
+            case 8: /* OP_BOL */
+                if (sp == 0 || subj[sp - 1] == nl) { pc++; continue; }
+                goto fail;
+            case 9: /* OP_EOL */
+                if (sp == n || subj[sp] == nl) { pc++; continue; }
+                goto fail;
+            case 10: { /* OP_WORDB */
+                int before = (sp > 0 && (subj[sp - 1] & 2) != 0);
+                int after = (sp < n && (subj[sp] & 2) != 0);
+                int wb = (before != after);
+                if (wb != (args_a[pc] == 1)) goto fail;
+                pc++;
+                continue;
+            }
+            case 11: { /* OP_FLAG */
+                int64_t mask = args_a[pc];
+                if (branches[pc] == 0) {
+                    if (sp < n && (subj[sp] & mask) != 0) { pc++; sp++; continue; }
+                } else {
+                    if (sp < n && (subj[sp] & mask) == 0) { pc++; sp++; continue; }
+                }
+                goto fail;
+            }
+            case 12: { /* OP_MARK */
+                int64_t g = args_a[pc];
+                int64_t old = guard[g];
+                guard[g] = sp;
+                int64_t r = w_regex_vm_run(ctx, pc + 1, sp);
+                if (r >= 0) return r;
+                guard[g] = old;
+                goto fail;
+            }
+            case 13: /* OP_GUARD */
+                if (sp == guard[args_a[pc]]) goto fail;
+                pc++;
+                continue;
+            case 14:   /* OP_REP_G */
+            case 15:   /* OP_REP_L */
+            case 16: { /* OP_REP_NB */
+                int64_t rop = ops[pc];
+                int64_t tpc = args_a[pc];
+                int64_t top = ops[tpc];
+                int64_t e = sp;
+                if (top == 11) {
+                    int64_t mask = args_a[tpc];
+                    if (branches[tpc] == 0) {
+                        while (e < n && (subj[e] & mask) != 0) e++;
+                    } else {
+                        while (e < n && (subj[e] & mask) == 0) e++;
+                    }
+                } else if (top == 1) {
+                    int64_t want = args_a[tpc];
+                    while (e < n && subj[e] == want) e++;
+                } else if (top == 2) {
+                    while (e < n && subj[e] != nl) e++;
+                } else if (top == 3) {
+                    int64_t cidx = args_a[tpc];
+                    while (e < n && w_regex_vm_class_match(classes, cidx, subj[e])) e++;
+                }
+                int64_t cont = branches[pc];
+                if (rop == 16) {
+                    sp = e;
+                    pc = cont;
+                    continue;
+                }
+                if (rop == 14) {
+                    for (int64_t pos = e; pos >= sp; pos--) {
+                        int64_t r = w_regex_vm_run(ctx, cont, pos);
+                        if (r >= 0) return r;
+                    }
+                } else {
+                    for (int64_t pos = sp; pos <= e; pos++) {
+                        int64_t r = w_regex_vm_run(ctx, cont, pos);
+                        if (r >= 0) return r;
+                    }
+                }
+                goto fail;
+            }
+            default:
+                goto fail;
+        }
+    }
+fail:
+    while (u_cnt > 0) {
+        --u_cnt;
+        saved[u_slot[u_cnt]] = u_val[u_cnt];
+    }
+    return -1;
+}
+
 WValue w_regex_scan_flag(WValue subj, WValue start_v, WValue n_v, WValue flag_v) {
     WArray *ta = w_as_array(subj);
+    if (w_is_array(n_v)) {
+        WValue *vm = w_as_array(n_v)->slots;
+        WArray *saved_arr = w_as_array(flag_v);
+        WArray *guard_arr = w_as_array(vm[5]);
+        WRegexVmCtx ctx;
+        ctx.subj = (const int64_t *)ta->slots;
+        ctx.n = ta->size;
+        ctx.ops = (const int64_t *)w_as_array(vm[0])->slots;
+        ctx.args_a = (const int64_t *)w_as_array(vm[1])->slots;
+        ctx.branches = (const int64_t *)w_as_array(vm[2])->slots;
+        ctx.classes = w_as_array(vm[3]);
+        ctx.saved = (int64_t *)saved_arr->slots;
+        ctx.guard = (int64_t *)guard_arr->slots;
+        ctx.nl = w_to_i64(vm[6]);
+        int64_t pf_kind = w_to_i64(vm[7]);
+        int64_t pf_char = w_to_i64(vm[8]);
+        int64_t pf_flag = w_to_i64(vm[9]);
+        WArray *pf_set_arr = w_as_array(vm[10]);
+        const int64_t *pf_set = (const int64_t *)pf_set_arr->slots;
+        int64_t pf_set_n = pf_set_arr->size;
+        WArray *pf_lit_arr = w_as_array(vm[11]);
+        const int64_t *pf_lit = (const int64_t *)pf_lit_arr->slots;
+        int64_t pf_lit_n = pf_lit_arr->size;
+
+        for (int64_t i = 0; i < guard_arr->size; i++) ctx.guard[i] = -1;
+        for (int64_t i = 0; i < saved_arr->size; i++) ctx.saved[i] = -1;
+
+        int64_t start = w_to_i64(start_v);
+        int64_t n = ctx.n;
+        const int64_t *data = ctx.subj;
+        while (start <= n) {
+            if (pf_kind != 0) {
+                if (pf_kind == 1) {
+                    while (start < n && data[start] != pf_char) start++;
+                } else if (pf_kind == 2) {
+                    while (start < n && (data[start] & pf_flag) == 0) start++;
+                } else if (pf_kind == 3) {
+                    while (start < n) {
+                        int64_t ch = data[start];
+                        if (pf_flag != 0 && (ch & pf_flag) != 0) break;
+                        int hit = 0;
+                        for (int64_t j = 0; j < pf_set_n; j++) {
+                            if (pf_set[j] == ch) { hit = 1; break; }
+                        }
+                        if (hit) break;
+                        start++;
+                    }
+                } else if (pf_kind == 4) {
+                    int64_t limit = n - pf_lit_n;
+                    int64_t first = pf_lit[0];
+                    int64_t last = pf_lit[pf_lit_n - 1];
+                    int64_t i = start;
+                    start = n;
+                    for (; i <= limit; i++) {
+                        if (data[i] == first && data[i + pf_lit_n - 1] == last) {
+                            int64_t j = 1;
+                            while (j < pf_lit_n - 1 && data[i + j] == pf_lit[j]) j++;
+                            if (j >= pf_lit_n - 1) { start = i; break; }
+                        }
+                    }
+                }
+                if (start >= n) return W_NIL;
+            }
+            if (w_regex_vm_run(&ctx, 0, start) >= 0) return flag_v;
+            start++;
+        }
+        return W_NIL;
+    }
     const uint64_t *data = (const uint64_t *)ta->slots;
     int64_t start = w_to_i64(start_v);
     int64_t n = w_to_i64(n_v);
-    uint64_t flag = (uint64_t)w_to_i64(flag_v);
+    uint64_t flag = (uint64_t)(w_is_int(flag_v) ? w_as_int(flag_v) : (int64_t)flag_v);
     while (start < n && (data[start] & flag) == 0) start++;
     return w_int(start);
 }
@@ -51702,6 +53053,8 @@ static int64_t w_hash_find_slot(WHash *hash, WValue key, int64_t *dense_out) {
     uint64_t mask = (uint64_t)(hash->cap - 1);
     uint64_t idx = w_hash_value_fast(key) & mask;
     int64_t first_tombstone = -1;
+    uint64_t key_cmp_mask = w_is_slab(key) ? ~0x3F0000000ULL : ~0ULL;
+    WValue key_masked = key & key_cmp_mask;
     for (uint32_t probes = 0; probes < hash->cap; probes++) {
         int32_t d = hash->index[idx];
         if (d == W_HASH_SLOT_EMPTY) {
@@ -51717,7 +53070,7 @@ static int64_t w_hash_find_slot(WHash *hash, WValue key, int64_t *dense_out) {
              * on the delegated compare. Live index slots never reference a
              * hole, so dense keys need no sentinel checks here. */
             WValue slot_key = hash->keys[d];
-            if ((slot_key == key && key >= 0x10) || w_hash_key_eq(slot_key, key)) {
+            if (((slot_key & key_cmp_mask) == key_masked && key >= 0x10) || w_hash_key_eq(slot_key, key)) {
                 *dense_out = (int64_t)d;
                 return (int64_t)idx;
             }
@@ -51734,12 +53087,14 @@ static int64_t w_hash_find_slot(WHash *hash, WValue key, int64_t *dense_out) {
 static inline int64_t w_hash_probe(WHash *hash, WValue key) {
     uint64_t mask = (uint64_t)(hash->cap - 1);
     uint64_t idx = w_hash_value_fast(key) & mask;
+    uint64_t key_cmp_mask = w_is_slab(key) ? ~0x3F0000000ULL : ~0ULL;
+    WValue key_masked = key & key_cmp_mask;
     for (uint32_t probes = 0; probes < hash->cap; probes++) {
         int32_t d = hash->index[idx];
         if (d == W_HASH_SLOT_EMPTY) return -1;
         if (__builtin_expect(d >= 0, 1)) {
             WValue slot_key = hash->keys[d];
-            if (__builtin_expect(slot_key == key && key >= 0x10, 1) || w_hash_key_eq(slot_key, key))
+            if (__builtin_expect((slot_key & key_cmp_mask) == key_masked && key >= 0x10, 1) || w_hash_key_eq(slot_key, key))
                 return (int64_t)d;
         }
         idx = (idx + 1) & mask;
@@ -56942,12 +58297,12 @@ WValue w_method_call_fast(WValue recv, WValue name, WValue *args_ptr, int argc) 
 
 /* ---- Monomorphic inline cache ---- */
 
-__attribute__((noinline, cold))
-static uint64_t w_dispatch_key_obj_nonhash(WValue v, uint64_t subtag) {
-    if (subtag == W_SUBTAG_INSTANCE) {
+static inline __attribute__((always_inline)) uint64_t w_dispatch_key_obj_nonhash(WValue v, uint64_t subtag) {
+    if (__builtin_expect(subtag == W_SUBTAG_INSTANCE, 1)) {
         WObject *obj = (WObject *)w_as_ptr(v);
         return 0x100000000ULL | (uint64_t)obj->class_id;
     }
+    if (subtag == W_SUBTAG_STRBUF) return W_SUBTAG_STRBUF;
     if (subtag == W_SUBTAG_CLASS) {
         WClass *klass = (WClass *)w_as_ptr(v);
         return 0x200000000ULL | (uint64_t)klass->class_id;
@@ -56973,7 +58328,7 @@ static uint64_t w_dispatch_key_obj_nonhash(WValue v, uint64_t subtag) {
     return subtag;
 }
 
-uint64_t w_dispatch_key(WValue v) {
+static inline __attribute__((always_inline)) uint64_t w_dispatch_key_inline(WValue v) {
     /* Inline-cache key 0 is reserved for an empty/in-flight cache entry.
      * Give nil its own stable nonzero identity so source methods registered
      * on Nil can participate in type-class dispatch and be cached. Other
@@ -57033,6 +58388,10 @@ uint64_t w_dispatch_key(WValue v) {
     if (hi == 0xFFF8) return 0xF8u;                     /* instant */
     if (hi < 0xFFF9) return 0xFF;                       /* double (<= 0xFFF1; 0xFFF5, 0xFFF7 free) */
     return (uint64_t)(hi & 0xFF);                       /* tagged: int=0xFA, string=0xF9 */
+}
+
+uint64_t w_dispatch_key(WValue v) {
+    return w_dispatch_key_inline(v);
 }
 
 /* ---- Type class table: dispatch key → class_id for Tungsten-defined methods ---- */
@@ -57986,22 +59345,29 @@ static WValue w_ic_string_prepend(WValue r, WValue *a, int c) {
 }
 static WValue w_ic_string_include(WValue r, WValue *a, int c) {
     if (c < 1) die("include? requires 1 argument");
-    return w_bool(strstr(as_str(r), as_str(a[0])) != NULL);
+    char sbuf[6]; const char *s; size_t slen;
+    w_str_data(r, sbuf, &s, &slen);
+    char nbuf[6]; const char *needle; size_t nlen;
+    w_str_data(a[0], nbuf, &needle, &nlen);
+    return w_bool(w_mem_search(s, slen, needle, nlen) != NULL);
 }
 static WValue w_ic_string_starts_with(WValue r, WValue *a, int c) {
     if (c < 1) die("starts_with? requires 1 argument");
-    const char *s = as_str(r);
-    const char *prefix = as_str(a[0]);
-    return w_bool(strncmp(s, prefix, strlen(prefix)) == 0);
+    char sbuf[6]; const char *s; size_t slen;
+    w_str_data(r, sbuf, &s, &slen);
+    char pbuf[6]; const char *prefix; size_t plen;
+    w_str_data(a[0], pbuf, &prefix, &plen);
+    if (plen > slen) return W_FALSE;
+    return w_bool(memcmp(s, prefix, plen) == 0);
 }
 static WValue w_ic_string_ends_with(WValue r, WValue *a, int c) {
     if (c < 1) die("ends_with? requires 1 argument");
-    const char *s = as_str(r);
-    size_t slen = strlen(s);
-    const char *suffix = as_str(a[0]);
-    size_t sufflen = strlen(suffix);
+    char sbuf[6]; const char *s; size_t slen;
+    w_str_data(r, sbuf, &s, &slen);
+    char sfbuf[6]; const char *suffix; size_t sufflen;
+    w_str_data(a[0], sfbuf, &suffix, &sufflen);
     if (sufflen > slen) return W_FALSE;
-    return w_bool(strcmp(s + slen - sufflen, suffix) == 0);
+    return w_bool(memcmp(s + slen - sufflen, suffix, sufflen) == 0);
 }
 static WValue w_ic_string_ascii_q(WValue r, WValue *a, int c) {
     (void)a; (void)c;
@@ -58027,24 +59393,35 @@ static WValue w_ic_string_matchop(WValue r, WValue *a, int c) {
 }
 /* String UTF-8 / parse / mutate / convert. */
 WValue w_string_chars(WValue r) {
+    if (w_is_rope(r)) r = w_rope_flatten(r);
     char buf[6]; const char *str; size_t str_len;
     w_str_data(r, buf, &str, &str_len);
-    WValue result = w_array_new_empty();
+    if (str_len == 0) return w_array_new_empty();
+    WValue result = w_array_new_inline(65, (int64_t)str_len);
+    WArray *ta = w_as_array(result);
+    WValue *slots = ta->slots;
+    if (w_string_ascii_p(r)) {
+        const uint8_t *p = (const uint8_t *)str;
+        for (size_t i = 0; i < str_len; i++) {
+            slots[i] = W_TAG_STRINGSYM | (1ULL << 1) | ((uint64_t)p[i] << 4);
+        }
+        ta->size = (int32_t)str_len;
+        return result;
+    }
     const unsigned char *p = (const unsigned char *)str;
     size_t remaining = str_len;
+    size_t idx = 0;
     while (remaining > 0) {
         int clen = 1;
         if (*p >= 0xF0) clen = 4;
         else if (*p >= 0xE0) clen = 3;
         else if (*p >= 0xC0) clen = 2;
         if ((size_t)clen > remaining) clen = (int)remaining;
-        char cbuf[5];
-        memcpy(cbuf, p, clen);
-        cbuf[clen] = '\0';
-        w_array_push(result, w_string(cbuf));
+        slots[idx++] = w_box_inline_str((const char *)p, (size_t)clen);
         p += clen;
         remaining -= clen;
     }
+    ta->size = (int32_t)idx;
     return result;
 }
 
@@ -58106,27 +59483,44 @@ static WValue w_ic_string_chars(WValue r, WValue *a, int c) {
  * delegate its slab/heap case here (one malloc + intern, no WArray-header
  * allocation) while owning the zero-alloc inline fast path itself. */
 WValue w_string_reverse(WValue r) {
+    if (w_is_rope(r)) r = w_rope_flatten(r);
     char buf[6]; const char *str; size_t str_len;
     w_str_data(r, buf, &str, &str_len);
-    char *out = malloc(str_len + 1);
-    const unsigned char *p = (const unsigned char *)str;
-    size_t remaining = str_len;
-    size_t write_pos = str_len;
-    while (remaining > 0) {
-        int clen = 1;
-        if (*p >= 0xF0) clen = 4;
-        else if (*p >= 0xE0) clen = 3;
-        else if (*p >= 0xC0) clen = 2;
-        if ((size_t)clen > remaining) clen = (int)remaining;
-        write_pos -= clen;
-        memcpy(out + write_pos, p, clen);
-        p += clen;
-        remaining -= clen;
+    if (str_len <= 1) return r & ~1ULL;
+    int ascii = w_string_ascii_p(r);
+    char sbuf[W_SLAB_SSO2_MAX + 1];
+    WString *ws = NULL;
+    char *out;
+    if (str_len <= W_SLAB_SSO2_MAX) {
+        out = sbuf;
+    } else {
+        ws = malloc(sizeof(WString) + str_len + 1);
+        w_heap_string_set_meta(ws, (uint32_t)str_len, ascii);
+        out = ws->data;
+    }
+    if (ascii) {
+        for (size_t i = 0; i < str_len; i++) {
+            out[i] = str[str_len - 1 - i];
+        }
+    } else {
+        const unsigned char *p = (const unsigned char *)str;
+        size_t remaining = str_len;
+        size_t write_pos = str_len;
+        while (remaining > 0) {
+            int clen = 1;
+            if (*p >= 0xF0) clen = 4;
+            else if (*p >= 0xE0) clen = 3;
+            else if (*p >= 0xC0) clen = 2;
+            if ((size_t)clen > remaining) clen = (int)remaining;
+            write_pos -= (size_t)clen;
+            memcpy(out + write_pos, p, (size_t)clen);
+            p += clen;
+            remaining -= (size_t)clen;
+        }
     }
     out[str_len] = '\0';
-    WValue result = w_string_n(out, str_len);
-    free(out);
-    return result;
+    if (ws) return w_box_heap_str(ws);
+    return w_string_n_known_ascii(sbuf, str_len, ascii);
 }
 
 static WValue w_ic_string_reverse(WValue r, WValue *a, int c) {
@@ -58138,6 +59532,15 @@ static WValue w_ic_string_codes(WValue r, WValue *a, int c) {
     (void)a; (void)c;
     char buf[6]; const char *str; size_t str_len;
     w_str_data(r, buf, &str, &str_len);
+    if (w_string_ascii_p(r)) {
+        WValue result = w_array_new_inline(64, (int64_t)str_len);
+        WArray *ta = w_as_array(result);
+        int64_t *data = (int64_t *)ta->slots;
+        const unsigned char *p = (const unsigned char *)str;
+        for (size_t i = 0; i < str_len; i++)
+            data[i] = (int64_t)w_box_char(p[i]);
+        return result;
+    }
     /* Pre-count codepoints for exact allocation */
     size_t count = 0;
     const unsigned char *scan = (const unsigned char *)str;
@@ -58153,9 +59556,8 @@ static WValue w_ic_string_codes(WValue r, WValue *a, int c) {
         scan_rem -= clen;
         count++;
     }
-    WValue result = w_array_new(64, (int64_t)count);
+    WValue result = w_array_new_inline(64, (int64_t)count);
     WArray *ta = w_as_array(result);
-    ta->size = (int64_t)count;
     int64_t *data = (int64_t *)ta->slots;
     const unsigned char *p = (const unsigned char *)str;
     size_t remaining = str_len;
@@ -58210,33 +59612,27 @@ static WValue w_ic_string_bytes(WValue r, WValue *a, int c) {
     (void)a; (void)c;
     char buf[6]; const char *str; size_t str_len;
     w_str_data(r, buf, &str, &str_len);
-    WValue result = w_array_new_empty();
+    if (str_len == 0) return w_array_new_empty();
+    WValue result = w_array_new_inline(65, (int64_t)str_len);
+    WArray *ta = w_as_array(result);
+    WValue *slots = ta->slots;
     for (size_t i = 0; i < str_len; i++)
-        w_array_push(result, w_int((uint8_t)str[i]));
+        slots[i] = w_box_int((uint8_t)str[i]);
+    ta->size = (int32_t)str_len;
     return result;
 }
 static WValue w_ic_string_slice(WValue r, WValue *a, int c) {
-    char buf[6]; const char *str; size_t str_len;
-    w_str_data(r, buf, &str, &str_len);
     if (c >= 2) {
-        int64_t start = w_as_int(a[0]);
-        int64_t len = w_as_int(a[1]);
-        if (start < 0) start = (int64_t)str_len + start;
-        if (start < 0) start = 0;
-        if (start >= (int64_t)str_len) return w_string("");
-        if (len < 0) len = 0;
-        if (start + len > (int64_t)str_len) len = (int64_t)str_len - start;
-        char *result = malloc(len + 1);
-        memcpy(result, str + start, len);
-        result[len] = '\0';
-        return w_string_take(result, len);
+        return w_string_slice_raw(r, w_as_int(a[0]), w_as_int(a[1]));
     }
     if (c >= 1) {
+        if (w_is_rope(r)) r = w_rope_flatten(r);
+        char buf[6]; const char *str; size_t str_len;
+        w_str_data(r, buf, &str, &str_len);
         int64_t start = w_as_int(a[0]);
         if (start < 0) start = (int64_t)str_len + start;
-        if (start < 0 || start >= (int64_t)str_len) return w_string("");
-        char ch[2] = {str[start], '\0'};
-        return w_string(ch);
+        if (start < 0 || start >= (int64_t)str_len) return w_box_inline_str("", 0);
+        return w_box_inline_str(str + start, 1);
     }
     return W_NIL;
 }
@@ -58357,6 +59753,7 @@ static WValue w_ic_string_to_sym(WValue r, WValue *a, int c) {
     return w_str_to_sym(r);
 }
 static WValue w_ic_string_split(WValue r, WValue *a, int c) {
+    if (w_is_rope(r)) r = w_rope_flatten(r);
     char buf[6]; const char *str; size_t str_len;
     w_str_data(r, buf, &str, &str_len);
     const char *sep = " ";
@@ -58364,48 +59761,106 @@ static WValue w_ic_string_split(WValue r, WValue *a, int c) {
     char sep_buf[6];
     if (c > 0) w_str_data(a[0], sep_buf, &sep, &sep_len);
     if (sep_len == 1) return w_string_split_byte(r, (uint8_t)sep[0]);
+    if (sep_len == 0) return w_string_chars(r);
+    int ascii = w_string_ascii_p(r);
     WValue result = w_array_new_empty();
-    const char *p = str;
-    while (*p) {
-        const char *found = strstr(p, sep);
-        if (!found) { w_array_push(result, w_string(p)); break; }
-        size_t chunk = found - p;
-        char *part = malloc(chunk + 1);
-        memcpy(part, p, chunk);
-        part[chunk] = '\0';
-        w_array_push(result, w_string_take(part, chunk));
-        p = found + sep_len;
-        if (*p == '\0') w_array_push(result, w_string(""));
+    size_t start = 0;
+    while (start < str_len) {
+        const char *found = w_mem_search(str + start, str_len - start, sep, sep_len);
+        if (!found) {
+            size_t tail = str_len - start;
+            w_array_push(result, ascii ? w_string_n_known_ascii(str + start, tail, 1)
+                                       : w_string_n(str + start, tail));
+            break;
+        }
+        size_t chunk = (size_t)(found - (str + start));
+        w_array_push(result, ascii ? w_string_n_known_ascii(str + start, chunk, 1)
+                                   : w_string_n(str + start, chunk));
+        start += chunk + sep_len;
+        if (start == str_len) w_array_push(result, w_box_inline_str("", 0));
     }
     return result;
 }
 static WValue w_ic_string_replace(WValue r, WValue *a, int c) {
     if (c < 2) die("replace requires 2 arguments");
+    if (w_is_rope(r)) r = w_rope_flatten(r);
     char buf[6]; const char *str; size_t str_len;
     w_str_data(r, buf, &str, &str_len);
-    const char *old_s = as_str(a[0]);
-    const char *new_s = as_str(a[1]);
-    size_t old_len = strlen(old_s);
-    size_t new_len = strlen(new_s);
-    int count = 0;
-    const char *p = str;
-    while ((p = strstr(p, old_s)) != NULL) { count++; p += old_len; }
-    size_t result_len = strlen(str) + count * (new_len - old_len);
-    char *result = malloc(result_len + 1);
+    char obuf[6]; const char *old_s; size_t old_len;
+    w_str_data(a[0], obuf, &old_s, &old_len);
+    if (old_len == 0 || old_len > str_len) return r & ~1ULL;
+    char nbuf[6]; const char *new_s; size_t new_len;
+    w_str_data(a[1], nbuf, &new_s, &new_len);
+
+    size_t match_offs[64];
+    size_t count = 0;
+    size_t pos = 0;
+    while (pos + old_len <= str_len) {
+        const char *found = w_mem_search(str + pos, str_len - pos, old_s, old_len);
+        if (!found) break;
+        size_t m = (size_t)(found - str);
+        if (count < 64) match_offs[count] = m;
+        count++;
+        pos = m + old_len;
+    }
+    if (count == 0) return r & ~1ULL;
+
+    size_t result_len = str_len + count * new_len - count * old_len;
+    int known_ascii = w_string_ascii_p(r) && w_string_ascii_p(a[1]);
+    char sbuf[W_SLAB_SSO2_MAX + 1];
+    WString *ws = NULL;
+    char *result;
+    if (result_len <= W_SLAB_SSO2_MAX) {
+        result = sbuf;
+    } else {
+        ws = malloc(sizeof(WString) + result_len + 1);
+        result = ws->data;
+    }
     char *out = result;
-    p = str;
-    while (*p) {
-        const char *found = strstr(p, old_s);
-        if (!found) { strcpy(out, p); break; }
-        size_t chunk = found - p;
-        memcpy(out, p, chunk);
-        out += chunk;
-        memcpy(out, new_s, new_len);
-        out += new_len;
-        p = found + old_len;
+    size_t src_pos = 0;
+    size_t cached = count <= 64 ? count : 64;
+    for (size_t k = 0; k < cached; k++) {
+        size_t m = match_offs[k];
+        size_t chunk = m - src_pos;
+        if (chunk > 0) {
+            memcpy(out, str + src_pos, chunk);
+            out += chunk;
+        }
+        if (new_len > 0) {
+            memcpy(out, new_s, new_len);
+            out += new_len;
+        }
+        src_pos = m + old_len;
+    }
+    if (count > 64) {
+        while (src_pos + old_len <= str_len) {
+            const char *found = w_mem_search(str + src_pos, str_len - src_pos, old_s, old_len);
+            if (!found) break;
+            size_t m = (size_t)(found - str);
+            size_t chunk = m - src_pos;
+            if (chunk > 0) {
+                memcpy(out, str + src_pos, chunk);
+                out += chunk;
+            }
+            if (new_len > 0) {
+                memcpy(out, new_s, new_len);
+                out += new_len;
+            }
+            src_pos = m + old_len;
+        }
+    }
+    if (src_pos < str_len) {
+        size_t tail = str_len - src_pos;
+        memcpy(out, str + src_pos, tail);
+        out += tail;
     }
     result[result_len] = '\0';
-    return w_string_take(result, result_len);
+    int ascii = known_ascii ? 1 : w_bytes_ascii_p((const uint8_t *)result, result_len);
+    if (ws) {
+        w_heap_string_set_meta(ws, (uint32_t)result_len, ascii);
+        return w_box_heap_str(ws);
+    }
+    return w_string_n_known_ascii(sbuf, result_len, ascii);
 }
 static WValue w_ic_string_index(WValue r, WValue *a, int c) {
     if (c < 1) die("index requires 1 argument");
@@ -58420,13 +59875,7 @@ static WValue w_ic_string_index(WValue r, WValue *a, int c) {
         offset = (size_t)off;
     }
     if (needle_len == 0) return w_int((int64_t)offset);
-    if (needle_len == 1) {
-        int64_t rel = w_byte_scan_eq((const uint8_t *)str + offset,
-                                     (int64_t)(str_len - offset), (uint8_t)needle[0]);
-        if (rel >= 0) return w_int((int64_t)offset + rel);
-        return W_NIL;
-    }
-    const char *found = strstr(str + offset, needle);
+    const char *found = w_mem_search(str + offset, str_len - offset, needle, needle_len);
     if (found) return w_int((int64_t)(found - str));
     return W_NIL;
 }
@@ -67415,11 +68864,15 @@ static WValue w_regex_match_offset_at(WRegexMatch *match, int64_t index) {
 }
 
 static int64_t w_regex_match_group_index(WRegexMatch *match, WValue key) {
+    if (w_is_int(key)) return w_as_int(key);
     if (w_is_integer_any(key)) return w_to_i64(key);
     if (!w_is_stringy(key)) return INT64_MIN;
-    WValue name = w_is_symbol(key) ? w_string(as_str(key)) : key;
-    if (w_hash_has_key(match->name_to_group, name) != W_TRUE) return INT64_MIN;
-    return w_to_i64(w_hash_get(match->name_to_group, name));
+    WHash *names = (WHash *)w_as_ptr(match->name_to_group);
+    if (!names || names->count == 0) return INT64_MIN;
+    WValue name = w_is_symbol(key) ? (key & ~(WValue)1) : key;
+    WValue val = w_hash_get(match->name_to_group, name);
+    if (val == W_NIL) return INT64_MIN;
+    return w_to_i64(val);
 }
 static WValue w_ic_regex_match_idx(WValue r, WValue *a, int c) {
     if (c < 1) die("RegexMatch#[] requires 1 argument");
@@ -67436,18 +68889,29 @@ static WValue w_ic_regex_match_offset(WValue r, WValue *a, int c) {
     return w_regex_match_offset_at(match, index);
 }
 static WValue w_ic_regex_match_begin_offset(WValue r, WValue *a, int c) {
-    WValue key = c > 0 ? a[0] : w_int(0);
-    WValue span_args[1] = {key};
-    WValue span = w_ic_regex_match_offset(r, span_args, 1);
-    if (span == W_NIL) return W_NIL;
-    return w_regex_match_array_at(span, 0);
+    WRegexMatch *match = as_regex_match(r);
+    int64_t index = c > 0 ? w_regex_match_group_index(match, a[0]) : 0;
+    if (index == INT64_MIN) return W_NIL;
+    WArray *offsets = w_as_array(match->offsets);
+    index = w_regex_match_normalize_index(offsets, index);
+    if (index < 0 || index >= offsets->size) return W_NIL;
+    WValue value = offsets->slots[index];
+    if (value == W_NIL) return W_NIL;
+    if (w_is_slice(value)) return w_int(w_unbox_slice_offset(value));
+    return w_regex_match_array_at(value, 0);
 }
 static WValue w_ic_regex_match_end_offset(WValue r, WValue *a, int c) {
-    WValue key = c > 0 ? a[0] : w_int(0);
-    WValue span_args[1] = {key};
-    WValue span = w_ic_regex_match_offset(r, span_args, 1);
-    if (span == W_NIL) return W_NIL;
-    return w_regex_match_array_at(span, 1);
+    WRegexMatch *match = as_regex_match(r);
+    int64_t index = c > 0 ? w_regex_match_group_index(match, a[0]) : 0;
+    if (index == INT64_MIN) return W_NIL;
+    WArray *offsets = w_as_array(match->offsets);
+    index = w_regex_match_normalize_index(offsets, index);
+    if (index < 0 || index >= offsets->size) return W_NIL;
+    WValue value = offsets->slots[index];
+    if (value == W_NIL) return W_NIL;
+    if (w_is_slice(value))
+        return w_int(w_unbox_slice_offset(value) + w_unbox_slice_length(value));
+    return w_regex_match_array_at(value, 1);
 }
 static WValue w_ic_regex_match_match(WValue r, WValue *a, int c) {
     (void)a; (void)c;
@@ -67640,12 +69104,13 @@ static WValue w_ic_strbuf_idx(WValue r, WValue *a, int c) {
     int64_t idx = w_as_int(a[0]);
     if (idx < 0) idx += sb->size;
     if (idx < 0 || idx >= sb->size) return W_NIL;
-    return w_string_n(sb->data + idx, 1);
+    return w_box_inline_str(sb->data + idx, 1);
 }
 static WValue w_ic_strbuf_clear(WValue r, WValue *a, int c) {
     (void)a;
     if (c != 0) die("StringBuffer#clear expects no arguments");
     WStrBuf *sb = (WStrBuf *)w_as_ptr(r);
+    sb->flags = W_STRBUF_FLAG_ASCII;
     sb->size = 0;
     sb->data[0] = '\0';
     return r;
@@ -67660,11 +69125,7 @@ static WValue w_ic_strbuf_include(WValue r, WValue *a, int c) {
     WStrBuf *sb = (WStrBuf *)w_as_ptr(r);
     char inline_buf[6]; const char *needle; size_t needle_size;
     w_str_data(a[0], inline_buf, &needle, &needle_size);
-    if (needle_size == 0) return W_TRUE;
-    if ((int64_t)needle_size > sb->size) return W_FALSE;
-    for (int64_t i = 0; i <= sb->size - (int64_t)needle_size; i++)
-        if (memcmp(sb->data + i, needle, needle_size) == 0) return W_TRUE;
-    return W_FALSE;
+    return w_bool(w_mem_search(sb->data, (size_t)sb->size, needle, needle_size) != NULL);
 }
 static WValue w_ic_strbuf_starts_with(WValue r, WValue *a, int c) {
     if (c != 1) die("StringBuffer#starts_with? expects 1 argument");
@@ -68990,6 +70451,7 @@ WValue w_method_call_slow(WValue recv, WValue name, WValue *args_ptr, int argc,
  * guard proved recv is the exact class whose generic-path init was
  * published; allocate and run init directly. Init's return value is
  * discarded and the fresh instance returned, mirroring the generic path. */
+__attribute__((noinline))
 static WValue w_construct_cached(WValue recv, void *fn, int expected, WValue *a) {
     WValue obj = w_object_new(recv);
     typedef WValue (*fn0)(WValue);
@@ -69016,6 +70478,18 @@ static WValue w_construct_cached(WValue recv, void *fn, int expected, WValue *a)
     return obj;
 }
 
+__attribute__((noinline, cold))
+static WValue w_method_call_cached_rope(WValue recv, WValue name, WValue *args_ptr, int argc, WInlineCache *cache) {
+    recv = w_rope_flatten(recv);
+    return w_method_call_cached(recv, name, args_ptr, argc, cache);
+}
+
+__attribute__((noinline, cold))
+static WValue w_method_call_cached_0_rope(WValue recv, WValue name, WInlineCache *cache) {
+    recv = w_rope_flatten(recv);
+    return w_method_call_cached_0(recv, name, cache);
+}
+
 /* Inline-cached method dispatch — fast path. Plain `inline` lets LTO
  * decide; with thousands of dispatch sites in the self-hosted compiler,
  * forcing always_inline blows up IR size and quadratic-times the LTO
@@ -69023,9 +70497,10 @@ static WValue w_construct_cached(WValue recv, void *fn, int expected, WValue *a)
 inline
 WValue w_method_call_cached(WValue recv, WValue name, WValue *args_ptr, int argc, WInlineCache *cache) {
     /* Flatten ropes before dispatch so IC sees a string type */
-    if (__builtin_expect(w_is_rope(recv), 0)) recv = w_rope_flatten(recv);
+    if (__builtin_expect(w_is_rope(recv), 0))
+        return w_method_call_cached_rope(recv, name, args_ptr, argc, cache);
 
-    uint64_t key = w_dispatch_key(recv);
+    uint64_t key = w_dispatch_key_inline(recv);
 
     /* Cache hit — direct call. Seqlock-lite read: fields are only valid
      * if type_key matches BOTH before and after reading them (see the
@@ -69035,33 +70510,43 @@ WValue w_method_call_cached(WValue recv, WValue name, WValue *args_ptr, int argc
     int32_t car = cache->arity;
     if (__builtin_expect(key == tk && fn != NULL &&
             key == atomic_load_explicit(&cache->type_key, memory_order_acquire), 1)) {
-        if (car <= -2) {
+        if (__builtin_expect(car == -1, 1)) {
+            return ((WValue(*)(WValue, WValue*, int))fn)(recv, args_ptr, argc);
+        }
+        if (__builtin_expect(car >= 0, 1)) {
+            typedef WValue (*fn0)(WValue);
+            typedef WValue (*fn1)(WValue, WValue);
+            typedef WValue (*fn2)(WValue, WValue, WValue);
+            typedef WValue (*fn3)(WValue, WValue, WValue, WValue);
+            typedef WValue (*fn4)(WValue, WValue, WValue, WValue, WValue);
+            if (__builtin_expect(car == argc, 1)) {
+                switch (car) {
+                    case 0: return ((fn0)fn)(recv);
+                    case 1: return ((fn1)fn)(recv, args_ptr[0]);
+                    case 2: return ((fn2)fn)(recv, args_ptr[0], args_ptr[1]);
+                    case 3: return ((fn3)fn)(recv, args_ptr[0], args_ptr[1], args_ptr[2]);
+                    case 4: return ((fn4)fn)(recv, args_ptr[0], args_ptr[1], args_ptr[2], args_ptr[3]);
+                    default: break;
+                }
+            } else {
+                WValue a0 = argc > 0 ? args_ptr[0] : W_NIL;
+                WValue a1 = argc > 1 ? args_ptr[1] : W_NIL;
+                WValue a2 = argc > 2 ? args_ptr[2] : W_NIL;
+                WValue a3 = argc > 3 ? args_ptr[3] : W_NIL;
+                switch (car) {
+                    case 0: return ((fn0)fn)(recv);
+                    case 1: return ((fn1)fn)(recv, a0);
+                    case 2: return ((fn2)fn)(recv, a0, a1);
+                    case 3: return ((fn3)fn)(recv, a0, a1, a2);
+                    case 4: return ((fn4)fn)(recv, a0, a1, a2, a3);
+                    default: break;
+                }
+            }
+        } else {
             /* Cached constructor: arity code -(2+argc). Same-argc sites hit
              * the direct allocate+init; a changed argc (splat) goes slow. */
             if (-car - 2 == argc)
                 return w_construct_cached(recv, fn, argc, args_ptr);
-            return w_method_call_slow(recv, name, args_ptr, argc, cache, key);
-        }
-        if (car < 0) {
-            return ((WValue(*)(WValue, WValue*, int))fn)(recv, args_ptr, argc);
-        }
-        /* User method: dispatch by arity */
-        int expected = car;
-        WValue a[8];
-        for (int i = 0; i < expected && i < 8; i++)
-            a[i] = (i < argc) ? args_ptr[i] : W_NIL;
-        typedef WValue (*fn0)(WValue);
-        typedef WValue (*fn1)(WValue, WValue);
-        typedef WValue (*fn2)(WValue, WValue, WValue);
-        typedef WValue (*fn3)(WValue, WValue, WValue, WValue);
-        typedef WValue (*fn4)(WValue, WValue, WValue, WValue, WValue);
-        switch (expected) {
-            case 0: return ((fn0)fn)(recv);
-            case 1: return ((fn1)fn)(recv, a[0]);
-            case 2: return ((fn2)fn)(recv, a[0], a[1]);
-            case 3: return ((fn3)fn)(recv, a[0], a[1], a[2]);
-            case 4: return ((fn4)fn)(recv, a[0], a[1], a[2], a[3]);
-            default: break;
         }
     }
 
@@ -69080,9 +70565,10 @@ WValue w_method_call_cached(WValue recv, WValue name, WValue *args_ptr, int argc
 inline
 WValue w_method_call_cached_0(WValue recv, WValue name, WInlineCache *cache) {
     /* Flatten ropes before dispatch so IC sees a string type. */
-    if (__builtin_expect(w_is_rope(recv), 0)) recv = w_rope_flatten(recv);
+    if (__builtin_expect(w_is_rope(recv), 0))
+        return w_method_call_cached_0_rope(recv, name, cache);
 
-    uint64_t key = w_dispatch_key(recv);
+    uint64_t key = w_dispatch_key_inline(recv);
 
     /* Seqlock-lite read — see the publication contract in runtime.h. */
     uint64_t tk = atomic_load_explicit(&cache->type_key, memory_order_acquire);
@@ -69090,24 +70576,24 @@ WValue w_method_call_cached_0(WValue recv, WValue name, WInlineCache *cache) {
     int32_t car = cache->arity;
     if (__builtin_expect(key == tk && fn != NULL &&
             key == atomic_load_explicit(&cache->type_key, memory_order_acquire), 1)) {
+        if (__builtin_expect(car == 0, 1)) {
+            typedef WValue (*fn0)(WValue);
+            return ((fn0)fn)(recv);
+        }
+        if (car == -1) {
+            return ((WValue(*)(WValue, WValue*, int))fn)(recv, NULL, 0);
+        }
         if (car <= -2) {
             /* Cached zero-arg constructor (arity code -2): allocate + init. */
             if (car == -2)
                 return w_construct_cached(recv, fn, 0, NULL);
             return w_method_call_slow(recv, name, NULL, 0, cache, key);
         }
-        if (car < 0) {
-            return ((WValue(*)(WValue, WValue*, int))fn)(recv, NULL, 0);
-        }
 
-        typedef WValue (*fn0)(WValue);
         typedef WValue (*fn1)(WValue, WValue);
         typedef WValue (*fn2)(WValue, WValue, WValue);
         typedef WValue (*fn3)(WValue, WValue, WValue, WValue);
         typedef WValue (*fn4)(WValue, WValue, WValue, WValue, WValue);
-
-        if (__builtin_expect(car == 0, 1))
-            return ((fn0)fn)(recv);
 
         switch (car) {
             case 1: return ((fn1)fn)(recv, W_NIL);
@@ -69198,15 +70684,63 @@ WValue w_string_count(WValue recv, WValue needle_v) {
     const char *needle;
     size_t needle_len;
     w_str_data(needle_v, _nbuf, &needle, &needle_len);
-    if (needle_len == 0) return w_int(0);
+    if (needle_len == 0 || needle_len > str_len) return w_int(0);
     if (needle_len == 1)
         return w_int(w_byte_scan_count_threaded((const uint8_t *)str, (int64_t)str_len, (uint8_t)needle[0]));
     int64_t count = 0;
-    const char *p = str;
-    while ((p = strstr(p, needle)) != NULL) {
-        count++;
-        p += needle_len;
+#ifdef __aarch64__
+    size_t limit = str_len - needle_len + 1;
+    uint8_t first = (uint8_t)needle[0];
+    uint8_t last = (uint8_t)needle[needle_len - 1];
+    size_t i = 0;
+    size_t next_allowed = 0;
+    if (limit >= 16) {
+        uint8x16_t v_first = vdupq_n_u8(first);
+        uint8x16_t v_last = vdupq_n_u8(last);
+        size_t end16 = limit - 16;
+        while (i <= end16) {
+            uint8x16_t vf = vld1q_u8((const uint8_t *)str + i);
+            uint8x16_t vl = vld1q_u8((const uint8_t *)str + i + needle_len - 1);
+            uint8x16_t eq = vandq_u8(vceqq_u8(vf, v_first), vceqq_u8(vl, v_last));
+            if (vmaxvq_u8(eq) != 0) {
+                uint8x8_t narrowed = vshrn_n_u16(vreinterpretq_u16_u8(eq), 4);
+                uint64_t mask = vget_lane_u64(vreinterpret_u64_u8(narrowed), 0);
+                while (mask != 0) {
+                    int lane = __builtin_ctzll(mask) >> 2;
+                    size_t pos = i + (size_t)lane;
+                    if (pos >= next_allowed &&
+                        (needle_len == 2 || memcmp(str + pos + 1, needle + 1, needle_len - 2) == 0)) {
+                        count++;
+                        next_allowed = pos + needle_len;
+                    }
+                    mask &= mask - 1;
+                }
+            }
+            i += 16;
+            if (next_allowed > i && next_allowed <= end16) i = next_allowed;
+        }
     }
+    if (i < next_allowed) i = next_allowed;
+    while (i < limit) {
+        if ((uint8_t)str[i] == first && (uint8_t)str[i + needle_len - 1] == last &&
+            (needle_len == 2 || memcmp(str + i + 1, needle + 1, needle_len - 2) == 0)) {
+            count++;
+            i += needle_len;
+        } else {
+            i++;
+        }
+    }
+#else
+    const char *p = str;
+    size_t rem = str_len;
+    const char *hit;
+    while ((hit = w_mem_search(p, rem, needle, needle_len)) != NULL) {
+        count++;
+        size_t adv = (size_t)(hit - p) + needle_len;
+        p += adv;
+        rem -= adv;
+    }
+#endif
     return w_int(count);
 }
 
@@ -69227,12 +70761,7 @@ WValue w_string_index(WValue recv, WValue needle_v, WValue offset_v) {
         offset = (size_t)off;
     }
     if (needle_len == 0) return w_int((int64_t)offset);
-    if (needle_len == 1) {
-        int64_t rel = w_byte_scan_eq((const uint8_t *)str + offset, (int64_t)(str_len - offset), (uint8_t)needle[0]);
-        if (rel >= 0) return w_int((int64_t)offset + rel);
-        return W_NIL;
-    }
-    const char *found = strstr(str + offset, needle);
+    const char *found = w_mem_search(str + offset, str_len - offset, needle, needle_len);
     if (found) return w_int((int64_t)(found - str));
     return W_NIL;
 }
@@ -69257,12 +70786,10 @@ WValue w_string_rindex(WValue recv, WValue needle_v, WValue pos_v) {
     }
     if (needle_len == 0) return w_int((int64_t)limit);
     if (needle_len > str_len) return W_NIL;
-    size_t start = str_len - needle_len;
-    if (limit < start) start = limit;
-    for (size_t i = start + 1; i-- > 0; ) {
-        if (memcmp(str + i, needle, needle_len) == 0) return w_int((int64_t)i);
-    }
-    return W_NIL;
+    size_t hay_len = str_len;
+    if (limit < str_len - needle_len) hay_len = limit + needle_len;
+    int64_t found = w_mem_rsearch(str, hay_len, needle, needle_len);
+    return found >= 0 ? w_int(found) : W_NIL;
 }
 
 WValue w_string_repeat(WValue recv, WValue count_v) {
@@ -72960,10 +74487,8 @@ WValue w_string_slice_range(WValue str, WValue from_v, WValue to_v,
         bend = p;
     }
     size_t len = bend - bstart;
-    char *result = malloc(len + 1);
-    memcpy(result, s + bstart, len);
-    result[len] = '\0';
-    return w_string_take(result, len);
+    if (ascii) return w_string_n_known_ascii(s + bstart, len, 1);
+    return w_string_n(s + bstart, len);
 }
 
 WValue w_array_view_range(WValue arr, WValue from_v, WValue to_v, WValue exclusive_v) {
@@ -76963,7 +78488,108 @@ int64_t w_string_data_ptr(WValue v) {
  * array is left empty with its buffer relinquished to w_string_take. Any
  * shape this can't own safely (view, shifted start, undersized) falls back
  * to the copying constructor. */
+static WValue w_string_ascii_squeeze(WValue recv) {
+    if (w_is_rope(recv)) recv = w_rope_flatten(recv);
+    char sbuf6[6];
+    const char *str;
+    size_t str_len;
+    w_str_data(recv, sbuf6, &str, &str_len);
+    if (str_len <= 1) return recv & ~1ULL;
+    char stack_out[256];
+    char *dst = str_len < sizeof(stack_out) ? stack_out : (char *)malloc(str_len + 1);
+    size_t w = 0;
+    int prev = -1;
+    for (size_t i = 0; i < str_len; i++) {
+        uint8_t b = (uint8_t)str[i];
+        if ((int)b != prev) {
+            dst[w++] = (char)b;
+            prev = (int)b;
+        }
+    }
+    if (w == str_len) {
+        if (dst != stack_out) free(dst);
+        return recv & ~1ULL;
+    }
+    dst[w] = '\0';
+    WValue res = w_string_n_known_ascii(dst, w, 1);
+    if (dst != stack_out) free(dst);
+    return res;
+}
+
+static WValue w_string_ascii_camelize(WValue recv) {
+    if (w_is_rope(recv)) recv = w_rope_flatten(recv);
+    char sbuf6[6];
+    const char *str;
+    size_t str_len;
+    w_str_data(recv, sbuf6, &str, &str_len);
+    if (str_len == 0) return recv & ~1ULL;
+    char stack_out[256];
+    char *dst = str_len < sizeof(stack_out) ? stack_out : (char *)malloc(str_len + 1);
+    size_t w = 0;
+    int up = 1;
+    for (size_t i = 0; i < str_len; i++) {
+        uint8_t b = (uint8_t)str[i];
+        if (b == '_' || b == '-' || b == ' ') {
+            up = 1;
+        } else {
+            if (up) {
+                if (b >= 'a' && b <= 'z') b -= 32;
+                up = 0;
+            }
+            dst[w++] = (char)b;
+        }
+    }
+    dst[w] = '\0';
+    WValue res = w_string_n_known_ascii(dst, w, 1);
+    if (dst != stack_out) free(dst);
+    return res;
+}
+
+static WValue w_string_ascii_underscore(WValue recv) {
+    if (w_is_rope(recv)) recv = w_rope_flatten(recv);
+    char sbuf6[6];
+    const char *str;
+    size_t str_len;
+    w_str_data(recv, sbuf6, &str, &str_len);
+    if (str_len == 0) return recv & ~1ULL;
+    char stack_out[512];
+    char *dst = (str_len * 2 < sizeof(stack_out)) ? stack_out : (char *)malloc(str_len * 2 + 1);
+    size_t w = 0;
+    for (size_t i = 0; i < str_len; i++) {
+        uint8_t o = (uint8_t)str[i];
+        if (o >= 'A' && o <= 'Z') {
+            if (i > 0) {
+                uint8_t prev = (uint8_t)str[i - 1];
+                uint8_t next = (i + 1 < str_len) ? (uint8_t)str[i + 1] : 0;
+                int prev_soft = (prev >= 'a' && prev <= 'z') || (prev >= '0' && prev <= '9');
+                int prev_upper = (prev >= 'A' && prev <= 'Z');
+                int next_lower = (next >= 'a' && next <= 'z');
+                if (prev_soft || (prev_upper && next_lower)) dst[w++] = '_';
+            }
+            dst[w++] = (char)(o + 32);
+        } else if (o == '-') {
+            dst[w++] = '_';
+        } else {
+            dst[w++] = (char)o;
+        }
+    }
+    dst[w] = '\0';
+    WValue res = w_string_n_known_ascii(dst, w, 1);
+    if (dst != stack_out) free(dst);
+    return res;
+}
+
 WValue w_string_take_byte_array(WValue bytes, WValue len_wv) {
+    if (w_is_stringy(bytes) || w_is_rope(bytes)) {
+        int64_t mode = w_as_int(len_wv);
+        if (mode == -1) return w_string_ascii_case(bytes, 1);
+        if (mode == -2) return w_string_ascii_case(bytes, 0);
+        if (mode == -3) return w_string_ascii_case(bytes, 2);
+        if (mode == -4) return w_string_ascii_case(bytes, 3);
+        if (mode == -5) return w_string_ascii_squeeze(bytes);
+        if (mode == -6) return w_string_ascii_camelize(bytes);
+        if (mode == -7) return w_string_ascii_underscore(bytes);
+    }
     WArray *a = as_bytes_arr(bytes);
     int64_t len = w_as_int(len_wv);
     if (len < 0) len = 0;
@@ -79891,6 +81517,8 @@ void w_value_free(WValue v) {
         return;
     }
     if (w_is_heap_str(v)) {
+        if (g_regex_capture_state.subject == v)
+            g_regex_capture_state.handoff_ready = 0;
         WString *ws = w_as_heap_str(v);
         /* Park small blocks for the decimal formatters instead of freeing:
          * see w_string_small_fresh.  One slot per thread; an occupied slot
@@ -79986,6 +81614,16 @@ void w_value_free(WValue v) {
      * retained by ordinary escaping ownership and is never freed recursively. */
     if (w_is_regex_match(v)) {
         WRegexMatch *match = (WRegexMatch *)w_as_ptr(v);
+        if (w_regex_match_park == NULL) {
+            WArray *ga = w_as_array(match->groups);
+            WArray *oa = w_as_array(match->offsets);
+            if ((ga->flags & W_FLAG_INLINE) && (oa->flags & W_FLAG_INLINE) &&
+                ga->cap == oa->cap && ga->cap > 0 && ga->cap <= 16) {
+                w_regex_match_park = match;
+                w_regex_match_park_cap = ga->cap;
+                return;
+            }
+        }
         w_value_free(match->groups);
         w_value_free(match->offsets);
         free(match);

@@ -334,6 +334,15 @@
       # int, mirroring the is_array_type? size rule above.
       if node.name == "size" && (node.args == nil || node.args.size() == 0)
         return :i64
+    if recv_t == :hash
+      if node.name in ("keys" "values") && (node.args == nil || node.args.size() == 0)
+        return :array
+      if node.name in ("has_key?" "key?" "empty?" "include?")
+        return :bool
+      if node.name in ("size" "length") && (node.args == nil || node.args.size() == 0)
+        return :i64
+      if node.name in ("merge" "merge!" "update" "dup" "invert" "transform_values" "transform_keys")
+        return :hash
     return nil
   when :binary_op
     lt = infer_type(node.left, var_types, fn_return_types, infer_maps)

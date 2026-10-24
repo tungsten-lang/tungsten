@@ -42608,6 +42608,13 @@ static int w_hash_key_eq(WValue a, WValue b) {
             if (amode == 6 && bmode == 6)
                 return w_as_slab_index(a) == w_as_slab_index(b);
             if (amode < 7 && bmode < 7) return 0;
+            if (amode == 7 && bmode == 7) {
+                const WString *wa = w_as_heap_str(a);
+                const WString *wb = w_as_heap_str(b);
+                uint32_t la = w_heap_string_len(wa);
+                if (la != w_heap_string_len(wb)) return 0;
+                return memcmp(wa->data, wb->data, la) == 0;
+            }
             char ba[6], bb[6];
             const char *sa, *sb;
             size_t la, lb;
@@ -53118,18 +53125,32 @@ static void w_hash_allocate_storage(WHash *hash, int64_t cap) {
  * are bit-identical to w_hash_value's for every input — this only skips
  * the call and its branch prelude on the hot kinds. */
 static inline uint64_t w_hash_value_fast(WValue key) {
-    if (w_is_stringy(key)) {
+    if (__builtin_expect(w_is_int(key), 1))
+        return w_hash_splitmix64(key);
+    if (__builtin_expect(w_is_stringy(key), 1)) {
         size_t mode = (key >> 1) & 7;
         if (mode <= 5) return w_hash_splitmix64(key);
-        if (mode == 6 && g_slab_content_hashes) {
+        if (mode == 6 && __builtin_expect(g_slab_content_hashes != NULL, 1)) {
             uint64_t h = g_slab_content_hashes[w_as_slab_index(key)];
             if (w_is_symbol(key)) h ^= 0x9e3779b97f4a7c15ULL;
             return h;
         }
+        if (mode == 7) {
+            const WString *ws = w_as_heap_str(key);
+            return w_hash_text_bytes((const uint8_t *)ws->data, w_heap_string_len(ws), (int)(key & 1));
+        }
     }
-    if (w_is_int(key))
-        return w_hash_splitmix64(key);
     return w_hash_value(key);
+}
+
+static inline int w_hash_key_eq_fast(WValue slot_key, WValue key, uint64_t key_cmp_mask, WValue key_masked) {
+    if (__builtin_expect((slot_key & key_cmp_mask) == key_masked && key >= 0x10, 1)) return 1;
+    if (w_both_ints(slot_key, key)) return 0;
+    if (w_is_stringy(key) && ((key >> 1) & 7) <= 6) {
+        if (w_is_stringy(slot_key) && ((slot_key >> 1) & 7) <= 6) return 0;
+        if (!w_is_stringy(slot_key) && !w_is_rope(slot_key)) return 0;
+    }
+    return w_hash_key_eq(slot_key, key);
 }
 
 /* Probe the index table for key. Returns the index-table slot where the
@@ -53157,7 +53178,7 @@ static int64_t w_hash_find_slot(WHash *hash, WValue key, int64_t *dense_out) {
              * on the delegated compare. Live index slots never reference a
              * hole, so dense keys need no sentinel checks here. */
             WValue slot_key = hash->keys[d];
-            if (((slot_key & key_cmp_mask) == key_masked && key >= 0x10) || w_hash_key_eq(slot_key, key)) {
+            if (w_hash_key_eq_fast(slot_key, key, key_cmp_mask, key_masked)) {
                 *dense_out = (int64_t)d;
                 return (int64_t)idx;
             }
@@ -53174,17 +53195,22 @@ static int64_t w_hash_find_slot(WHash *hash, WValue key, int64_t *dense_out) {
 static inline int64_t w_hash_probe(WHash *hash, WValue key) {
     uint64_t mask = (uint64_t)(hash->cap - 1);
     uint64_t idx = w_hash_value_fast(key) & mask;
+    int32_t d0 = hash->index[idx];
+    if (d0 == W_HASH_SLOT_EMPTY) return -1;
+    if (__builtin_expect(d0 >= 0 && hash->keys[d0] == key && key >= 0x10, 1))
+        return (int64_t)d0;
     uint64_t key_cmp_mask = w_is_slab(key) ? ~0x3F0000000ULL : ~0ULL;
     WValue key_masked = key & key_cmp_mask;
-    for (uint32_t probes = 0; probes < hash->cap; probes++) {
+    if (d0 >= 0 && w_hash_key_eq_fast(hash->keys[d0], key, key_cmp_mask, key_masked))
+        return (int64_t)d0;
+    for (uint32_t probes = 1; probes < hash->cap; probes++) {
+        idx = (idx + 1) & mask;
         int32_t d = hash->index[idx];
         if (d == W_HASH_SLOT_EMPTY) return -1;
         if (__builtin_expect(d >= 0, 1)) {
-            WValue slot_key = hash->keys[d];
-            if (__builtin_expect((slot_key & key_cmp_mask) == key_masked && key >= 0x10, 1) || w_hash_key_eq(slot_key, key))
+            if (w_hash_key_eq_fast(hash->keys[d], key, key_cmp_mask, key_masked))
                 return (int64_t)d;
         }
-        idx = (idx + 1) & mask;
     }
     return -1;
 }
@@ -53198,16 +53224,26 @@ static void w_hash_rebuild(WHash *hash, int64_t new_capacity) {
         WValue *old_keys = hash->keys;
         WValue *old_values = hash->values;
         uint32_t old_used = hash->used;
+        uint32_t old_count = hash->count;
         w_hash_allocate_storage(hash, new_capacity);
-        uint32_t w = 0;
-        for (uint32_t i = 0; i < old_used; i++) {
-            if (old_keys[i] == W_MEMO_MISS) continue;
-            hash->keys[w] = old_keys[i];
-            hash->values[w] = old_values[i];
-            w++;
+        if (__builtin_expect(old_used == old_count, 1)) {
+            if (old_used > 0) {
+                memcpy(hash->keys, old_keys, (size_t)old_used * sizeof(WValue));
+                memcpy(hash->values, old_values, (size_t)old_used * sizeof(WValue));
+            }
+            hash->used = old_used;
+            hash->count = old_used;
+        } else {
+            uint32_t w = 0;
+            for (uint32_t i = 0; i < old_used; i++) {
+                if (old_keys[i] == W_MEMO_MISS) continue;
+                hash->keys[w] = old_keys[i];
+                hash->values[w] = old_values[i];
+                w++;
+            }
+            hash->used = w;
+            hash->count = w;
         }
-        hash->used = w;
-        hash->count = w;
         free(old_keys);  /* block base — frees old values/index too */
     } else {
         uint32_t w = 0;
@@ -53359,6 +53395,23 @@ WValue w_hash_set(WValue hash_val, WValue key, WValue val) {
         return W_NIL;
     }
     w_hash_prepare_set(hash);
+    {
+        uint64_t mask = (uint64_t)(hash->cap - 1);
+        uint64_t idx = w_hash_value_fast(key) & mask;
+        int32_t d0 = hash->index[idx];
+        if (d0 == W_HASH_SLOT_EMPTY) {
+            uint32_t d = hash->used++;
+            hash->keys[d] = key;
+            hash->values[d] = val;
+            hash->index[idx] = (int32_t)d;
+            hash->count++;
+            return val;
+        }
+        if (__builtin_expect(d0 >= 0 && hash->keys[d0] == key && key >= 0x10, 1)) {
+            hash->values[d0] = val;
+            return val;
+        }
+    }
     int64_t dense = -1;
     int64_t slot = w_hash_find_slot(hash, key, &dense);
     if (slot < 0) {
@@ -53544,18 +53597,35 @@ W_KWARGS_SLOT_FN(11)
 
 WValue w_hash_keys(WValue hash_val) {
     WHash *hash = as_hash(hash_val);
-    WValue arr = w_array_new_empty();
-    for (uint32_t i = 0; i < hash->used; i++) {
-        if (hash->keys[i] != W_MEMO_MISS) w_array_push(arr, hash->keys[i]);
+    uint32_t count = hash->count;
+    if (count == 0) return w_array_new_empty();
+    WValue arr = w_array_new_inline(65, (int64_t)count);
+    WValue *slots = w_as_array(arr)->slots;
+    if (__builtin_expect(hash->used == count, 1)) {
+        memcpy(slots, hash->keys, (size_t)count * sizeof(WValue));
+    } else {
+        uint32_t w = 0;
+        for (uint32_t i = 0; i < hash->used; i++) {
+            WValue k = hash->keys[i];
+            if (k != W_MEMO_MISS) slots[w++] = k;
+        }
     }
     return arr;
 }
 
 WValue w_hash_values(WValue hash_val) {
     WHash *hash = as_hash(hash_val);
-    WValue arr = w_array_new_empty();
-    for (uint32_t i = 0; i < hash->used; i++) {
-        if (hash->keys[i] != W_MEMO_MISS) w_array_push(arr, hash->values[i]);
+    uint32_t count = hash->count;
+    if (count == 0) return w_array_new_empty();
+    WValue arr = w_array_new_inline(65, (int64_t)count);
+    WValue *slots = w_as_array(arr)->slots;
+    if (__builtin_expect(hash->used == count, 1)) {
+        memcpy(slots, hash->values, (size_t)count * sizeof(WValue));
+    } else {
+        uint32_t w = 0;
+        for (uint32_t i = 0; i < hash->used; i++) {
+            if (hash->keys[i] != W_MEMO_MISS) slots[w++] = hash->values[i];
+        }
     }
     return arr;
 }
@@ -69696,11 +69766,36 @@ static WValue w_ic_hash_values(WValue r, WValue *a, int c) {
 }
 static WValue w_ic_hash_merge_bang(WValue r, WValue *a, int c) {
     if (c < 1 || !w_is_hash(a[0])) die("merge! requires 1 hash argument");
-    if (as_hash(r)->flags & W_HASH_FLAG_FROZEN) {
+    WHash *self = as_hash(r);
+    if (self->flags & W_HASH_FLAG_FROZEN) {
         w_raise_error_named("FrozenError", "cannot modify frozen Hash");
         return W_NIL;
     }
     WHash *other = as_hash(a[0]);
+    if (other->count == 0) return r;
+    if (self->count == 0 && self->iter_depth == 0 && other != self) {
+        int64_t dense_cap = w_hash_dense_cap(other->cap);
+        size_t block_bytes = (size_t)(dense_cap * 2) * sizeof(WValue) + (size_t)other->cap * sizeof(int32_t);
+        if (self->cap != other->cap) {
+            free(self->keys);
+            uint8_t *block = malloc(block_bytes);
+            memcpy(block, other->keys, block_bytes);
+            self->cap = other->cap;
+            self->keys = (WValue *)block;
+            self->values = (WValue *)(block + dense_cap * sizeof(WValue));
+            self->index = (int32_t *)(block + 2 * dense_cap * sizeof(WValue));
+        } else {
+            memcpy(self->keys, other->keys, block_bytes);
+        }
+        self->count = other->count;
+        self->used = other->used;
+        return r;
+    }
+    if (self->iter_depth == 0 && (int64_t)other->count * 4 >= (int64_t)self->cap * 3) {
+        int64_t min_cap = self->cap;
+        while ((int64_t)other->count * 4 >= min_cap * 3) min_cap *= 2;
+        if (min_cap > (int64_t)self->cap) w_hash_rebuild(self, min_cap);
+    }
     for (uint32_t i = 0; i < other->used; i++) {
         if (other->keys[i] != W_MEMO_MISS)
             w_hash_set(r, other->keys[i], other->values[i]);
@@ -69724,9 +69819,14 @@ static WValue w_ic_hash_each(WValue r, WValue *a, int c) {
     /* A user block can raise or non-locally return. The shared unwind stack
      * makes the guard exception-safe without installing a setjmp per each. */
     w_cleanup_push(r, w_hash_each_leave);
+    WClosure *cl = (WClosure *)w_as_ptr(cl_v);
+    typedef WValue (*fn_t)(WValue *, WValue, WValue);
+    fn_t fn = (fn_t)cl->fn_ptr;
+    WValue *caps = cl->captures;
     for (uint32_t i = 0; i < hash->used; i++) {
-        if (hash->keys[i] != W_MEMO_MISS)
-            w_closure_call_2(cl_v, hash->keys[i], hash->values[i]);
+        WValue k = hash->keys[i];
+        if (k != W_MEMO_MISS)
+            fn(caps, k, hash->values[i]);
     }
     w_cleanup_pop();
     w_hash_each_leave(r);

@@ -36,8 +36,8 @@ use core/calculus/radial_mellin
 
 + Calculus
   -> .integer?(value)
-    name = value.class_name
-    name == "Integer" || name == "Int" || name == "BigInt"
+    t = type(value)
+    t == "Int" || t == "Integer" || t == "BigInt"
 
   -> .jvp(f, point, tangent)
     Autodiff.jvp(f, point, tangent)
@@ -53,41 +53,63 @@ use core/calculus/radial_mellin
       raise "calculus order must be a nonnegative integer"
     order
 
-  -> .copy_vector(values)
-    out = []
-    values.each -> out.push(item)
-    out
+  -> .copy_vector(values_in)
+    values = values_in ## Array
+    values.dup
 
-  -> .copy_matrix(values)
+  -> .copy_matrix(values_in)
+    values = values_in ## Array
+    n = values.size
     out = []
-    values.each -> out.push(Calculus.copy_vector(item))
+    i = 0
+    while i < n
+      row = values[i] ## Array
+      out.push(row.dup)
+      i += 1
     out
 
   -> .zero_vector(size)
     out = []
-    size.times -> out.push(~0.0)
+    i = 0
+    while i < size
+      out.push(~0.0)
+      i += 1
     out
 
   -> .zero_matrix(size)
     out = []
-    size.times -> out.push(Calculus.zero_vector(size))
+    i = 0
+    while i < size
+      out.push(Calculus.zero_vector(size))
+      i += 1
     out
 
   -> .abs(value)
+    if type(value) == "Float"
+      v = value ## f64
+      return v < ~0.0 ? ~0.0 - v : v
     value < ~0.0 ? ~0.0 - value : value
 
   -> .finite_f64?(value)
-    return false if value.class_name != "Float"
-    !value.nan? && !value.infinite?
+    return false if type(value) != "Float"
+    f = value ## f64
+    f - f == ~0.0
 
   -> .within_tolerance?(error, magnitude, abs_tol, rel_tol)
-    return false if !Calculus.finite_f64?(error) || error < ~0.0
-    return true if error <= abs_tol
-    return false if magnitude == ~0.0 || rel_tol == ~0.0
-    error / magnitude <= rel_tol
+    return false if !Calculus.finite_f64?(error)
+    err = error ## f64
+    return false if err < ~0.0
+    atol = abs_tol ## f64
+    return true if err <= atol
+    mag = magnitude ## f64
+    rtol = rel_tol ## f64
+    return false if mag == ~0.0 || rtol == ~0.0
+    err / mag <= rtol
 
-  -> .midpoint(a, b)
-    ~0.5*a + ~0.5*b
+  -> .midpoint(a_in, b_in)
+    a = a_in ## f64
+    b = b_in ## f64
+    ~0.5 * a + ~0.5 * b
 
   # Saturation is used only for diagnostic bounds, never computed values.
   -> .bounded_error(value)
@@ -99,7 +121,9 @@ use core/calculus/radial_mellin
     value.respond_to?("components") && value.respond_to?("abs")
 
   -> .finite_scalar?(value)
-    return Calculus.finite_f64?(value) if value.class_name == "Float"
+    if type(value) == "Float"
+      f = value ## f64
+      return f - f == ~0.0
     return false if !Calculus.scalar_value?(value)
     if value.respond_to?("components")
       values = value.components
@@ -122,6 +146,9 @@ use core/calculus/radial_mellin
   # Norm used by numerical error estimators. Unlike `abs`, this also accepts
   # Complex and the normed Hypercomplex types.
   -> .magnitude(value)
+    if type(value) == "Float"
+      v = value ## f64
+      return v < ~0.0 ? ~0.0 - v : v
     value.abs
 
   -> .certified_exp(value, tolerance = nil,
@@ -160,6 +187,10 @@ use core/calculus/radial_mellin
       tolerance, term_limit)
 
   -> .scale_value(value, scalar)
+    if type(value) == "Float" && type(scalar) == "Float"
+      v = value ## f64
+      s = scalar ## f64
+      return v * s
     return value.scale(scalar) if value.respond_to?("scale")
     value * scalar
 

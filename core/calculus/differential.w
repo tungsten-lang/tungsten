@@ -64,62 +64,108 @@
     Calculus.copy_matrix(@hessian)
 
   -> coerce(other)
-    if other.class_name == "Differential"
+    if type(other) == "Differential"
       if other.dimension != self.dimension
         raise "Differential dimension mismatch"
       return other
     Differential.constant(other, self.dimension)
 
   -> +(other)
+    if type(other) != "Differential"
+      return Differential.new(@value + other, @gradient.dup, Calculus.copy_matrix(@hessian), true)
     rhs = self.coerce(other)
-    rhs_gradient = rhs.raw_gradient
-    rhs_hessian = rhs.raw_hessian
-    dim = @gradient.size
+    g = @gradient ## Array
+    h = @hessian ## Array
+    rhs_gradient = rhs.raw_gradient ## Array
+    rhs_hessian = rhs.raw_hessian ## Array
+    dim = g.size
     gradient = []
     hessian = []
-    i = 0
-    while i < dim
-      gradient.push(@gradient[i] + rhs_gradient[i])
-      lhs_row = @hessian[i]
-      rhs_row = rhs_hessian[i]
-      row = []
-      j = 0
-      while j < dim
-        row.push(lhs_row[j] + rhs_row[j])
-        j += 1
-      hessian.push(row)
-      i += 1
+    if type(@value) == "Float" && type(rhs.value) == "Float"
+      i = 0
+      while i < dim
+        gi = g[i] ## f64
+        rgi = rhs_gradient[i] ## f64
+        gradient.push(gi + rgi)
+        lhs_row = h[i] ## Array
+        rhs_row = rhs_hessian[i] ## Array
+        row = []
+        j = 0
+        while j < dim
+          lj = lhs_row[j] ## f64
+          rj = rhs_row[j] ## f64
+          row.push(lj + rj)
+          j += 1
+        hessian.push(row)
+        i += 1
+    else
+      i = 0
+      while i < dim
+        gradient.push(g[i] + rhs_gradient[i])
+        lhs_row = h[i] ## Array
+        rhs_row = rhs_hessian[i] ## Array
+        row = []
+        j = 0
+        while j < dim
+          row.push(lhs_row[j] + rhs_row[j])
+          j += 1
+        hessian.push(row)
+        i += 1
     Differential.new(@value + rhs.value, gradient, hessian, true)
 
   -> -(other)
+    if type(other) != "Differential"
+      return Differential.new(@value - other, @gradient.dup, Calculus.copy_matrix(@hessian), true)
     rhs = self.coerce(other)
-    rhs_gradient = rhs.raw_gradient
-    rhs_hessian = rhs.raw_hessian
-    dim = @gradient.size
+    g = @gradient ## Array
+    h = @hessian ## Array
+    rhs_gradient = rhs.raw_gradient ## Array
+    rhs_hessian = rhs.raw_hessian ## Array
+    dim = g.size
     gradient = []
     hessian = []
-    i = 0
-    while i < dim
-      gradient.push(@gradient[i] - rhs_gradient[i])
-      lhs_row = @hessian[i]
-      rhs_row = rhs_hessian[i]
-      row = []
-      j = 0
-      while j < dim
-        row.push(lhs_row[j] - rhs_row[j])
-        j += 1
-      hessian.push(row)
-      i += 1
+    if type(@value) == "Float" && type(rhs.value) == "Float"
+      i = 0
+      while i < dim
+        gi = g[i] ## f64
+        rgi = rhs_gradient[i] ## f64
+        gradient.push(gi - rgi)
+        lhs_row = h[i] ## Array
+        rhs_row = rhs_hessian[i] ## Array
+        row = []
+        j = 0
+        while j < dim
+          lj = lhs_row[j] ## f64
+          rj = rhs_row[j] ## f64
+          row.push(lj - rj)
+          j += 1
+        hessian.push(row)
+        i += 1
+    else
+      i = 0
+      while i < dim
+        gradient.push(g[i] - rhs_gradient[i])
+        lhs_row = h[i] ## Array
+        rhs_row = rhs_hessian[i] ## Array
+        row = []
+        j = 0
+        while j < dim
+          row.push(lhs_row[j] - rhs_row[j])
+          j += 1
+        hessian.push(row)
+        i += 1
     Differential.new(@value - rhs.value, gradient, hessian, true)
 
   -> -@
-    dim = @gradient.size
+    g = @gradient ## Array
+    h = @hessian ## Array
+    dim = g.size
     gradient = []
     hessian = []
     i = 0
     while i < dim
-      gradient.push(~0.0 - @gradient[i])
-      lhs_row = @hessian[i]
+      gradient.push(~0.0 - g[i])
+      lhs_row = h[i] ## Array
       row = []
       j = 0
       while j < dim
@@ -130,24 +176,51 @@
     Differential.new(~0.0 - @value, gradient, hessian, true)
 
   -> *(other)
+    if type(other) != "Differential"
+      return self.scale(other)
     rhs = self.coerce(other)
     rhs_val = rhs.value
-    rhs_gradient = rhs.raw_gradient
-    rhs_hessian = rhs.raw_hessian
-    dim = @gradient.size
+    g = @gradient ## Array
+    h = @hessian ## Array
+    rhs_gradient = rhs.raw_gradient ## Array
+    rhs_hessian = rhs.raw_hessian ## Array
+    dim = g.size
     gradient = []
     hessian = []
+    if type(@value) == "Float" && type(rhs_val) == "Float"
+      vf = @value ## f64
+      rvf = rhs_val ## f64
+      i = 0
+      while i < dim
+        gi = g[i] ## f64
+        rgi = rhs_gradient[i] ## f64
+        gradient.push(gi * rvf + vf * rgi)
+        lhs_row = h[i] ## Array
+        rhs_row = rhs_hessian[i] ## Array
+        row = []
+        j = 0
+        while j < dim
+          lj = lhs_row[j] ## f64
+          rj = rhs_row[j] ## f64
+          gj = g[j] ## f64
+          rgj = rhs_gradient[j] ## f64
+          value = lj * rvf + vf * rj + gi * rgj + rgi * gj
+          row.push(value)
+          j += 1
+        hessian.push(row)
+        i += 1
+      return Differential.new(vf * rvf, gradient, hessian, true)
     i = 0
     while i < dim
-      gi = @gradient[i]
+      gi = g[i]
       rgi = rhs_gradient[i]
       gradient.push(gi * rhs_val + @value * rgi)
-      lhs_row = @hessian[i]
-      rhs_row = rhs_hessian[i]
+      lhs_row = h[i] ## Array
+      rhs_row = rhs_hessian[i] ## Array
       row = []
       j = 0
       while j < dim
-        value = lhs_row[j] * rhs_val + @value * rhs_row[j] + gi * rhs_gradient[j] + rgi * @gradient[j]
+        value = lhs_row[j] * rhs_val + @value * rhs_row[j] + gi * rhs_gradient[j] + rgi * g[j]
         row.push(value)
         j += 1
       hessian.push(row)
@@ -169,19 +242,41 @@
     self * self.coerce(other).reciprocal
 
   -> unary_transform(result_value, first_derivative, second_derivative)
-    dim = @gradient.size
+    g = @gradient ## Array
+    h = @hessian ## Array
+    dim = g.size
     gradient = []
     hessian = []
+    if type(first_derivative) == "Float" && type(second_derivative) == "Float" && (dim == 0 || type(g[0]) == "Float")
+      fd = first_derivative ## f64
+      sd = second_derivative ## f64
+      i = 0
+      while i < dim
+        gi = g[i] ## f64
+        gradient.push(fd * gi)
+        s_gi = sd * gi
+        lhs_row = h[i] ## Array
+        row = []
+        j = 0
+        while j < dim
+          gj = g[j] ## f64
+          lj = lhs_row[j] ## f64
+          cell_value = s_gi * gj + fd * lj
+          row.push(cell_value)
+          j += 1
+        hessian.push(row)
+        i += 1
+      return Differential.new(result_value, gradient, hessian, true)
     i = 0
     while i < dim
-      gi = @gradient[i]
+      gi = g[i]
       gradient.push(first_derivative * gi)
       s_gi = second_derivative * gi
-      lhs_row = @hessian[i]
+      lhs_row = h[i] ## Array
       row = []
       j = 0
       while j < dim
-        cell_value = s_gi * @gradient[j] + first_derivative * lhs_row[j]
+        cell_value = s_gi * g[j] + first_derivative * lhs_row[j]
         row.push(cell_value)
         j += 1
       hessian.push(row)

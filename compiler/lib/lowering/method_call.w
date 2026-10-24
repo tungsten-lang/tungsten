@@ -1656,12 +1656,13 @@
       emit_wire_call_direct_i64(wfn, nil, [receiver_reg, start_raw, len_raw], nil, nil, "w_string_slice_raw", nil, nil, temp)
       return typed_value(:string, temp)
 
-  # Hash subscripts: a :hash-typed receiver reaches w_hash_get / w_hash_set
-  # directly. The IC handlers (w_ic_hash_get/set) are literal one-line
-  # wrappers over the same functions, so missing-key nil, default values,
-  # and insertion order are identical — the dispatch-key probe and the
-  # args-array trampoline were the entire cost (~45% of hash_get).
-  if recv_type == :hash && node.block == nil
+  # Hash subscripts and core primitives: a :hash-typed receiver (or `self`
+  # inside a Hash instance method) reaches w_hash_get / w_hash_set /
+  # w_hash_has_key / w_hash_keys / w_hash_values / w_hash_delete directly.
+  # The IC handlers are literal one-line wrappers over the same functions,
+  # so missing-key nil, default values, and insertion order are identical —
+  # the dispatch-key probe and the args-array trampoline were the entire cost.
+  if (recv_type == :hash || (ast_kind(recv_node) == :self_ref && ctx[:class_name] == "Hash" && !ctx[:is_class_method])) && node.block == nil
     if method_name == "\[]" && node.args.size() == 1
       receiver_val = lower_expression(ctx, recv_node)
       receiver_reg = ensure_i64_value(wfn, receiver_val)
@@ -1679,6 +1680,34 @@
       val_reg = ensure_i64_value(wfn, val_val)
       temp = next_temp(wfn)
       emit_wire_call_direct_i64(wfn, nil, [receiver_reg, key_reg, val_reg], nil, nil, "w_hash_set", nil, nil, temp)
+      return typed_value(:i64, temp)
+    if method_name in ("has_key?" "key?") && node.args.size() == 1
+      receiver_val = lower_expression(ctx, recv_node)
+      receiver_reg = ensure_i64_value(wfn, receiver_val)
+      key_val = lower_expression(ctx, node.args[0])
+      key_reg = ensure_i64_value(wfn, key_val)
+      temp = next_temp(wfn)
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg, key_reg], nil, nil, "w_hash_has_key", nil, nil, temp)
+      return typed_value(:i64, temp)
+    if method_name == "keys" && node.args.size() == 0
+      receiver_val = lower_expression(ctx, recv_node)
+      receiver_reg = ensure_i64_value(wfn, receiver_val)
+      temp = next_temp(wfn)
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg], nil, nil, "w_hash_keys", nil, nil, temp)
+      return typed_value(:i64, temp)
+    if method_name == "values" && node.args.size() == 0
+      receiver_val = lower_expression(ctx, recv_node)
+      receiver_reg = ensure_i64_value(wfn, receiver_val)
+      temp = next_temp(wfn)
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg], nil, nil, "w_hash_values", nil, nil, temp)
+      return typed_value(:i64, temp)
+    if method_name == "delete" && node.args.size() == 1
+      receiver_val = lower_expression(ctx, recv_node)
+      receiver_reg = ensure_i64_value(wfn, receiver_val)
+      key_val = lower_expression(ctx, node.args[0])
+      key_reg = ensure_i64_value(wfn, key_val)
+      temp = next_temp(wfn)
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg, key_reg], nil, nil, "w_hash_delete", nil, nil, temp)
       return typed_value(:i64, temp)
 
   # Direct builtins for StringBuffer operations when receiver type is known.

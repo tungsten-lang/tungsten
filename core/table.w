@@ -135,20 +135,24 @@ use core/file
     while j < names.size
       cols.push([])
       j += 1
+    n_records = records.size
+    n_names = names.size
     r = start
-    while r < records.size
-      record = records[r]
+    while r < n_records
+      record = records[r] ## Array
+      rec_size = record.size
       # A trailing newline yields one empty record; drop it rather than
       # inventing a row of nils.
-      if record.size == 1 && record[0] == "" && names.size > 1
+      if rec_size == 1 && record[0] == "" && n_names > 1
         r += 1
         next
       j = 0
-      while j < names.size
+      while j < n_names
         raw = nil
-        if j < record.size
+        if j < rec_size
           raw = record[j]
-        cols[j].push(Table.parse_field(raw, infer))
+        col_j = cols[j] ## Array
+        col_j.push(Table.parse_field(raw, infer))
         j += 1
       r += 1
     Table.build(names, cols, nil)
@@ -192,9 +196,16 @@ use core/file
   -> .parse_field(raw, infer)
     return nil if raw == nil
     return raw if !infer
-    s = raw.strip
-    return nil if s == ""
-    kind = Table.numeric_literal(s)
+    s = raw ## String
+    view = ccall("w_string_bytes_view", s) ## u8[]
+    n = view.size ## i64
+    return nil if n == 0
+    if view[0] <= 32 || view[n - 1] <= 32
+      s = s.strip
+      view = ccall("w_string_bytes_view", s) ## u8[]
+      n = view.size ## i64
+      return nil if n == 0
+    kind = Table.numeric_literal_b(view, n)
     return s.to_i if kind == :int
     return s.to_d if kind == :decimal
     raw
@@ -203,19 +214,27 @@ use core/file
   # String#to_d both answer 0 for a non-numeric string and so cannot be used
   # to decide whether a field is a number at all.
   -> .numeric_literal(s)
-    n = s.size
+    str = s ## String
+    view = ccall("w_string_bytes_view", str) ## u8[]
+    n = view.size ## i64
+    return :none if n == 0
+    Table.numeric_literal_b(view, n)
+
+  -> .numeric_literal_b(view, len)
+    v = view ## u8[]
+    n = len ## i64
     return :none if n == 0
     i = 0
-    lead = s[0]
-    if lead == "-" || lead == "+"
+    lead = v[0]
+    if lead == 45 || lead == 43
       i = 1
     digits = 0
     dots = 0
     while i < n
-      ch = s[i]
-      if "0123456789".contains?(ch)
+      b = v[i]
+      if b >= 48 && b <= 57
         digits += 1
-      elsif ch == "."
+      elsif b == 46
         dots += 1
       else
         return :none
@@ -665,26 +684,30 @@ use core/file
     x & 4_611_686_018_427_387_903
 
   -> __rows_at(idxs)
+    idx_arr = idxs ## Array
+    n_idxs = idx_arr.size
     cols = []
     j = 0
-    while j < @names.size
-      col = @cols[j]
+    n_cols = @names.size
+    while j < n_cols
+      col = @cols[j] ## Array
       out = []
       i = 0
-      while i < idxs.size
-        out.push(col[idxs[i]])
+      while i < n_idxs
+        out.push(col[idx_arr[i]])
         i += 1
       cols.push(out)
       j += 1
     labels = nil
     if @index != nil
+      idx_src = @index ## Array
       labels = []
       i = 0
-      while i < idxs.size
-        labels.push(@index[idxs[i]])
+      while i < n_idxs
+        labels.push(idx_src[idx_arr[i]])
         i += 1
     t = Table.build(@names.dup, cols, labels)
-    t.__set_rows(idxs.size)
+    t.__set_rows(n_idxs)
     t
 
   # Keeps @rows honest for a zero-column table.
@@ -855,6 +878,31 @@ use core/file
     while i < keys.size
       positions.push(__require(keys[i]))
       i += 1
+    if positions.size == 1 && @rows > 0 && @rows <= 65536 && type(@cols[positions[0]][0]) == "Int"
+      col = @cols[positions[0]] ## Array
+      packed = []
+      ok = true
+      i = 0
+      while i < @rows
+        v = col[i]
+        if type(v) != "Int" || v < -1_000_000_000 || v > 1_000_000_000
+          ok = false
+          break
+        vi = v ## i64
+        if descending
+          packed.push((-vi) * 65536 + i)
+        else
+          packed.push(vi * 65536 + i)
+        i += 1
+      if ok
+        ordered_p = packed.sort ## Array
+        idxs = []
+        i = 0
+        while i < @rows
+          oi = ordered_p[i] ## i64
+          idxs.push(oi & 65535)
+          i += 1
+        return __rows_at(idxs)
     decorated = []
     i = 0
     while i < @rows
@@ -1421,26 +1469,50 @@ use core/file
     while i < keys.size
       positions.push(__require(keys[i]))
       i += 1
+    if positions.size == 1
+      col = @cols[positions[0]] ## Array
+      group_labels = []
+      bucket_list = []
+      buckets = {}
+      i = 0
+      while i < @rows
+        v = col[i]
+        b = buckets[v]
+        if b == nil
+          b = [i]
+          buckets[v] = b
+          group_labels.push(v)
+          bucket_list.push(b)
+        else
+          ba = b ## Array
+          ba.push(i)
+        i += 1
+      groups = []
+      i = 0
+      while i < bucket_list.size
+        groups.push(__rows_at(bucket_list[i]))
+        i += 1
+      return TableGroups.new(keys, group_labels, groups)
     order = []
     labels = {}
     buckets = {}
     i = 0
     while i < @rows
       sig = __signature(positions, i)
-      if !buckets.has_key?(sig)
-        buckets[sig] = []
+      b = buckets[sig]
+      if b == nil
+        b = [i]
+        buckets[sig] = b
         order.push(sig)
-        label = nil
-        if positions.size == 1
-          label = @cols[positions[0]][i]
-        else
-          label = []
-          j = 0
-          while j < positions.size
-            label.push(@cols[positions[j]][i])
-            j += 1
+        label = []
+        j = 0
+        while j < positions.size
+          label.push(@cols[positions[j]][i])
+          j += 1
         labels[sig] = label
-      buckets[sig].push(i)
+      else
+        ba = b ## Array
+        ba.push(i)
       i += 1
     group_labels = []
     groups = []
@@ -1481,53 +1553,92 @@ use core/file
       names.push(out_name)
       i += 1
     right_index = {}
-    i = 0
-    while i < other.size
-      sig = other.__signature(right_pos, i)
-      right_index[sig] = [] if !right_index.has_key?(sig)
-      right_index[sig].push(i)
-      i += 1
     left_rows = []
     right_rows = []
-    i = 0
-    while i < @rows
-      sig = __signature(left_pos, i)
-      if right_index.has_key?(sig)
-        matches = right_index[sig]
-        k = 0
-        while k < matches.size
+    if keys.size == 1
+      lcol = @cols[left_pos[0]] ## Array
+      rcol = other.column(keys[0]) ## Array
+      rsize = other.size
+      i = 0
+      while i < rsize
+        v = rcol[i]
+        b = right_index[v]
+        if b == nil
+          right_index[v] = [i]
+        else
+          ba = b ## Array
+          ba.push(i)
+        i += 1
+      i = 0
+      while i < @rows
+        v = lcol[i]
+        matches = right_index[v]
+        if matches != nil
+          m_arr = matches ## Array
+          msize = m_arr.size
+          k = 0
+          while k < msize
+            left_rows.push(i)
+            right_rows.push(m_arr[k])
+            k += 1
+        elsif kind == :left
           left_rows.push(i)
-          right_rows.push(matches[k])
-          k += 1
-      elsif kind == :left
-        left_rows.push(i)
-        right_rows.push(-1)
-      i += 1
+          right_rows.push(-1)
+        i += 1
+    else
+      i = 0
+      while i < other.size
+        sig = other.__signature(right_pos, i)
+        b = right_index[sig]
+        if b == nil
+          right_index[sig] = [i]
+        else
+          ba = b ## Array
+          ba.push(i)
+        i += 1
+      i = 0
+      while i < @rows
+        sig = __signature(left_pos, i)
+        matches = right_index[sig]
+        if matches != nil
+          m_arr = matches ## Array
+          k = 0
+          while k < m_arr.size
+            left_rows.push(i)
+            right_rows.push(m_arr[k])
+            k += 1
+        elsif kind == :left
+          left_rows.push(i)
+          right_rows.push(-1)
+        i += 1
+    n_left = left_rows.size
     cols = []
     j = 0
     while j < @names.size
+      src_col = @cols[j] ## Array
       col = []
       i = 0
-      while i < left_rows.size
-        col.push(@cols[j][left_rows[i]])
+      while i < n_left
+        col.push(src_col[left_rows[i]])
         i += 1
       cols.push(col)
       j += 1
     j = 0
     while j < carried.size
-      source = other.column(carried[j])
+      source = other.column(carried[j]) ## Array
       col = []
       i = 0
-      while i < right_rows.size
-        if right_rows[i] < 0
+      while i < n_left
+        ri = right_rows[i] ## i64
+        if ri < 0
           col.push(nil)
         else
-          col.push(source[right_rows[i]])
+          col.push(source[ri])
         i += 1
       cols.push(col)
       j += 1
     t = Table.build(names, cols, nil)
-    t.__set_rows(left_rows.size)
+    t.__set_rows(n_left)
     t
 
   -> inner_join(other, key)
@@ -2275,54 +2386,149 @@ use core/file
     to_csv(",")
 
   -> to_csv(separator)
-    out = ""
+    buf = StringBuffer(64)
+    n_cols = @names.size
     j = 0
-    while j < @names.size
-      out += separator if j > 0
-      out += Table.csv_field(@names[j].to_s, separator)
+    while j < n_cols
+      buf << separator if j > 0
+      Table.csv_field_into(@names[j].to_s, separator, buf)
       j += 1
-    out += "\n"
+    buf << "\n"
     i = 0
     while i < @rows
       j = 0
-      while j < @names.size
-        out += separator if j > 0
-        out += Table.csv_field(Table.render(@cols[j][i]), separator)
+      while j < n_cols
+        buf << separator if j > 0
+        Table.csv_field_into(Table.render(@cols[j][i]), separator, buf)
         j += 1
-      out += "\n"
+      buf << "\n"
       i += 1
-    out
+    buf.to_s
+
+  -> .csv_field_into(s, separator, buf_in)
+    buf = buf_in ## StringBuffer
+    str = s ## String
+    sep = separator ## String
+    view = ccall("w_string_bytes_view", str) ## u8[]
+    n = view.size ## i64
+    if n == 0
+      return nil
+    sep_view = ccall("w_string_bytes_view", sep) ## u8[]
+    sep_n = sep_view.size ## i64
+    sep_b = sep_view[0]
+    needs = false
+    if sep_n == 1
+      i = 0
+      while i < n
+        b = view[i]
+        if b == sep_b || b == 34 || b == 10 || b == 13
+          needs = true
+          break
+        i += 1
+    else
+      needs = true if str.contains?(sep)
+      needs = true if str.contains?("\"")
+      needs = true if str.contains?("\n")
+      needs = true if str.contains?("\r")
+    if !needs
+      buf << str
+      return nil
+    buf << "\""
+    run_start = 0
+    i = 0
+    while i < n
+      if view[i] == 34
+        buf << str.slice(run_start, i - run_start) if i > run_start
+        buf << "\"\""
+        run_start = i + 1
+      i += 1
+    buf << str.slice(run_start, n - run_start) if n > run_start
+    buf << "\""
+    nil
 
   -> .csv_field(s, separator)
-    needs = false
-    needs = true if s.contains?(separator)
-    needs = true if s.contains?("\"")
-    needs = true if s.contains?("\n")
-    needs = true if s.contains?("\r")
-    return s if !needs
-    out = "\""
-    i = 0
-    while i < s.size
-      ch = s[i]
-      out += "\"" if ch == "\""
-      out += ch
-      i += 1
-    out + "\""
+    buf = StringBuffer(32)
+    Table.csv_field_into(s, separator, buf)
+    buf.to_s
 
   -> to_json
-    out = "\["
+    buf = StringBuffer(64)
+    buf << "\["
+    n_cols = @names.size
+    key_prefixes = []
+    j = 0
+    while j < n_cols
+      pbuf = StringBuffer(32)
+      if j == 0
+        pbuf << "{"
+      else
+        pbuf << ","
+      Table.json_string_into(@names[j].to_s, pbuf)
+      pbuf << ":"
+      key_prefixes.push(pbuf.to_s)
+      j += 1
     i = 0
     while i < @rows
-      out += "," if i > 0
-      out += "{"
-      j = 0
-      while j < @names.size
-        out += "," if j > 0
-        out += Table.json_string(@names[j].to_s) + ":" + Table.json_value(@cols[j][i])
-        j += 1
-      out += "}"
+      buf << "," if i > 0
+      if n_cols == 0
+        buf << "{}"
+      else
+        j = 0
+        while j < n_cols
+          buf << key_prefixes[j]
+          Table.json_value_into(@cols[j][i], buf)
+          j += 1
+        buf << "}"
       i += 1
-    out + "\]"
+    buf << "\]"
+    buf.to_s
+
+  -> .json_value_into(v, buf_in)
+    buf = buf_in ## StringBuffer
+    if v == nil
+      buf << "null"
+      return nil
+    if v == true
+      buf << "true"
+      return nil
+    if v == false
+      buf << "false"
+      return nil
+    if Table.numeric?(v)
+      buf << v.to_s
+      return nil
+    Table.json_string_into(v.to_s, buf)
+
+  -> .json_string_into(s, buf_in)
+    buf = buf_in ## StringBuffer
+    str = s ## String
+    view = ccall("w_string_bytes_view", str) ## u8[]
+    n = view.size ## i64
+    buf << "\""
+    run_start = 0
+    i = 0
+    while i < n
+      b = view[i]
+      if b == 34 || b == 92 || b == 10 || b == 13 || b == 9
+        buf << str.slice(run_start, i - run_start) if i > run_start
+        if b == 34
+          buf << "\\\""
+        elsif b == 92
+          buf << "\\\\"
+        elsif b == 10
+          buf << "\\n"
+        elsif b == 13
+          buf << "\\r"
+        else
+          buf << "\\t"
+        run_start = i + 1
+      i += 1
+    if run_start == 0
+      buf << str
+    elsif n > run_start
+      buf << str.slice(run_start, n - run_start)
+    buf << "\""
+    nil
 
   -> .json_value(v)
     return "null" if v == nil
@@ -2332,24 +2538,9 @@ use core/file
     Table.json_string(v.to_s)
 
   -> .json_string(s)
-    out = "\""
-    i = 0
-    while i < s.size
-      ch = s[i]
-      if ch == "\""
-        out += "\\\""
-      elsif ch == "\\"
-        out += "\\\\"
-      elsif ch == "\n"
-        out += "\\n"
-      elsif ch == "\r"
-        out += "\\r"
-      elsif ch == "\t"
-        out += "\\t"
-      else
-        out += ch
-      i += 1
-    out + "\""
+    buf = StringBuffer(32)
+    Table.json_string_into(s, buf)
+    buf.to_s
 
   -> to_html
     out = "<table>\n  <thead>\n    <tr>"

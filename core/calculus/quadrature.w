@@ -72,16 +72,25 @@
 
 + Calculus
   -> .simpson(a, b, fa, fm, fb)
-    sixth_width = b / ~6.0 - a / ~6.0
+    af = a ## f64
+    bf = b ## f64
+    sixth_width = bf / ~6.0 - af / ~6.0
+    if type(fa) == "Float" && type(fm) == "Float" && type(fb) == "Float"
+      faf = fa ## f64
+      fmf = fm ## f64
+      fbf = fb ## f64
+      return faf * sixth_width + fmf * (~4.0 * sixth_width) + fbf * sixth_width
     Calculus.scale_value(fa, sixth_width) + Calculus.scale_value(fm, ~4.0*sixth_width) + Calculus.scale_value(fb, sixth_width)
 
   # Internal return tuple:
   # [corrected value, error estimate, new evaluations, leaf intervals, status]
   -> .adaptive_simpson(f, a, b, fa, fm, fb, whole, tolerance, depth)
-    middle = Calculus.midpoint(a, b)
-    left_middle = Calculus.midpoint(a, middle)
-    right_middle = Calculus.midpoint(middle, b)
-    if left_middle == a || left_middle == middle || right_middle == middle || right_middle == b
+    af = a ## f64
+    bf = b ## f64
+    middle = ~0.5 * af + ~0.5 * bf
+    left_middle = ~0.5 * af + ~0.5 * middle
+    right_middle = ~0.5 * middle + ~0.5 * bf
+    if left_middle == af || left_middle == middle || right_middle == middle || right_middle == bf
       return [whole, ~1.7976931348623157e308, 0, 1, :precision_limit]
     fl = f(left_middle)
     if !Calculus.finite_scalar?(fl)
@@ -89,39 +98,67 @@
     fr = f(right_middle)
     if !Calculus.finite_scalar?(fr)
       return [whole, ~1.7976931348623157e308, 2, 1, :nonfinite_integrand]
-    left = Calculus.simpson(a, middle, fa, fl, fm)
-    right = Calculus.simpson(middle, b, fm, fr, fb)
-    if !Calculus.finite_scalar?(left) || !Calculus.finite_scalar?(right)
-      return [whole, ~1.7976931348623157e308, 2, 1, :nonfinite_arithmetic]
-    delta = left + right - whole
-    error = Calculus.magnitude(delta) / ~15.0
-    corrected = left + right + Calculus.scale_value(delta, ~1.0 / ~15.0)
-    if !Calculus.finite_scalar?(corrected) || !Calculus.finite_f64?(error)
-      return [whole, ~1.7976931348623157e308, 2, 1, :nonfinite_arithmetic]
-
-    if error <= tolerance
-      return [corrected, error, 2, 2, :converged]
-    if depth <= 0
-      return [corrected, error, 2, 2, :max_depth]
+    if type(whole) == "Float" && type(fa) == "Float" && type(fm) == "Float" && type(fb) == "Float" && type(fl) == "Float" && type(fr) == "Float"
+      faf = fa ## f64
+      fmf = fm ## f64
+      fbf = fb ## f64
+      flf = fl ## f64
+      frf = fr ## f64
+      wf = whole ## f64
+      tolf = tolerance ## f64
+      sw_l = middle / ~6.0 - af / ~6.0
+      left = faf * sw_l + flf * (~4.0 * sw_l) + fmf * sw_l
+      sw_r = bf / ~6.0 - middle / ~6.0
+      right = fmf * sw_r + frf * (~4.0 * sw_r) + fbf * sw_r
+      if left - left != ~0.0 || right - right != ~0.0
+        return [whole, ~1.7976931348623157e308, 2, 1, :nonfinite_arithmetic]
+      delta = left + right - wf
+      abs_delta = delta < ~0.0 ? ~0.0 - delta : delta
+      error = abs_delta / ~15.0
+      corrected = left + right + delta * (~1.0 / ~15.0)
+      if corrected - corrected != ~0.0 || error - error != ~0.0
+        return [whole, ~1.7976931348623157e308, 2, 1, :nonfinite_arithmetic]
+      if error <= tolf
+        return [corrected, error, 2, 2, :converged]
+      if depth <= 0
+        return [corrected, error, 2, 2, :max_depth]
+      half_tol = tolf / ~2.0
+    else
+      left = Calculus.simpson(a, middle, fa, fl, fm)
+      right = Calculus.simpson(middle, b, fm, fr, fb)
+      if !Calculus.finite_scalar?(left) || !Calculus.finite_scalar?(right)
+        return [whole, ~1.7976931348623157e308, 2, 1, :nonfinite_arithmetic]
+      delta = left + right - whole
+      error = Calculus.magnitude(delta) / ~15.0
+      corrected = left + right + Calculus.scale_value(delta, ~1.0 / ~15.0)
+      if !Calculus.finite_scalar?(corrected) || !Calculus.finite_f64?(error)
+        return [whole, ~1.7976931348623157e308, 2, 1, :nonfinite_arithmetic]
+      if error <= tolerance
+        return [corrected, error, 2, 2, :converged]
+      if depth <= 0
+        return [corrected, error, 2, 2, :max_depth]
+      half_tol = tolerance / ~2.0
 
     left_result = Calculus.adaptive_simpson(
-      f, a, middle, fa, fl, fm, left, tolerance / ~2.0, depth - 1)
-    if left_result[4] != :converged && left_result[4] != :max_depth
-      return [corrected, error, 2 + left_result[2], 2, left_result[4]]
+      f, a, middle, fa, fl, fm, left, half_tol, depth - 1)
+    lr = left_result ## Array
+    if lr[4] != :converged && lr[4] != :max_depth
+      return [corrected, error, 2 + lr[2], 2, lr[4]]
     right_result = Calculus.adaptive_simpson(
-      f, middle, b, fm, fr, fb, right, tolerance / ~2.0, depth - 1)
-    if right_result[4] != :converged && right_result[4] != :max_depth
-      return [corrected, error, 2 + left_result[2] + right_result[2], 2, right_result[4]]
-    combined = left_result[0] + right_result[0]
-    combined_error = left_result[1] + right_result[1]
+      f, middle, b, fm, fr, fb, right, half_tol, depth - 1)
+    rr = right_result ## Array
+    if rr[4] != :converged && rr[4] != :max_depth
+      return [corrected, error, 2 + lr[2] + rr[2], 2, rr[4]]
+    combined = lr[0] + rr[0]
+    combined_error = lr[1] + rr[1]
     if !Calculus.finite_scalar?(combined) || !Calculus.finite_f64?(combined_error)
-      return [corrected, error, 2 + left_result[2] + right_result[2], 2, :nonfinite_arithmetic]
+      return [corrected, error, 2 + lr[2] + rr[2], 2, :nonfinite_arithmetic]
     [
       combined,
       combined_error,
-      2 + left_result[2] + right_result[2],
-      left_result[3] + right_result[3],
-      left_result[4] == :converged && right_result[4] == :converged ? :converged : :max_depth
+      2 + lr[2] + rr[2],
+      lr[3] + rr[3],
+      lr[4] == :converged && rr[4] == :converged ? :converged : :max_depth
     ]
 
   -> .integrate(f, lower, upper,

@@ -13,29 +13,36 @@
     target
 
   -> .gk15_compensated_values(values)
+    vals = values ## Array
+    n = vals.size
     total = ~0.0
     correction = ~0.0
     i = 0
-    while i < values.size
-      value = values[i]
-      return nil if !Calculus.finite_f64?(value)
+    while i < n
+      value = vals[i] ## f64
+      return nil if value - value != ~0.0
       updated = total + value
-      if Calculus.abs(total) >= Calculus.abs(value)
+      abs_total = total < ~0.0 ? ~0.0 - total : total
+      abs_val = value < ~0.0 ? ~0.0 - value : value
+      if abs_total >= abs_val
         correction += (total - updated) + value
       else
         correction += (value - updated) + total
-      return nil if !Calculus.finite_f64?(updated)
-      return nil if !Calculus.finite_f64?(correction)
+      return nil if updated - updated != ~0.0
+      return nil if correction - correction != ~0.0
       total = updated
       i += 1
     combined = total + correction
-    return nil if !Calculus.finite_f64?(combined)
+    return nil if combined - combined != ~0.0
     combined
 
   -> .gk15_safe_term(scale, sample)
-    term = scale * sample
-    if scale != ~0.0 && sample != ~0.0
-      return nil if Calculus.abs(term) < ~2.2250738585072014e-308
+    sc = scale ## f64
+    sm = sample ## f64
+    term = sc * sm
+    if sc != ~0.0 && sm != ~0.0
+      abs_term = term < ~0.0 ? ~0.0 - term : term
+      return nil if abs_term < ~2.2250738585072014e-308
     term
 
   # Internal panel tuple:
@@ -70,24 +77,29 @@
 
   -> .gk15_panel(f, a, b, rule = nil)
     rule = Calculus.gk15_rule if rule == nil
-    nodes = rule[0]
-    kronrod_weights = rule[1]
-    gauss_weights = rule[2]
+    rule_arr = rule ## Array
+    nodes = rule_arr[0] ## Array
+    kronrod_weights = rule_arr[1] ## Array
+    gauss_weights = rule_arr[2] ## Array
+    nodes_size = nodes.size
 
-    center = ~0.5 * a + ~0.5 * b
-    half = ~0.5 * b - ~0.5 * a
-    representable = Calculus.finite_f64?(center)
-    representable = false if !Calculus.finite_f64?(half)
+    af = a ## f64
+    bf = b ## f64
+    center = ~0.5 * af + ~0.5 * bf
+    half = ~0.5 * bf - ~0.5 * af
+    representable = center - center == ~0.0
+    representable = false if half - half != ~0.0
     representable = false if half <= ~0.0
-    representable = false if center == a || center == b
+    representable = false if center == af || center == bf
     i = 0
-    while i < nodes.size && representable
-      offset = half * nodes[i]
+    while i < nodes_size && representable
+      nd = nodes[i] ## f64
+      offset = half * nd
       left = center - offset
       right = center + offset
-      representable = false if !Calculus.finite_f64?(left)
-      representable = false if !Calculus.finite_f64?(right)
-      representable = false if left <= a || right >= b
+      representable = false if left - left != ~0.0
+      representable = false if right - right != ~0.0
+      representable = false if left <= af || right >= bf
       representable = false if left == center || right == center
       representable = false if left == right
       i += 1
@@ -98,26 +110,31 @@
     # Kronrod rules identically, hiding an error far above the requested
     # tolerance. A future normalized-sample kernel can recover this region;
     # the f64 rule must not claim convergence there today.
-    smallest_mapped_weight = half * kronrod_weights[0]
+    kw0 = kronrod_weights[0] ## f64
+    smallest_mapped_weight = half * kw0
     if smallest_mapped_weight < ~2.2250738585072014e-308
       return [a, b, nil, nil, nil, nil, nil, :precision_limit, 0]
 
-    fc = f(center)
-    if fc.class_name != "Float"
+    fc_raw = f(center)
+    if type(fc_raw) != "Float"
       return [a, b, nil, nil, nil, nil, nil, :unsupported_sample_type, 1]
-    if !Calculus.finite_f64?(fc)
+    fc = fc_raw ## f64
+    if fc - fc != ~0.0
       return [a, b, nil, nil, nil, nil, nil,
               :nonfinite_integrand, 1]
 
-    abs_half = Calculus.abs(half)
+    abs_half = half < ~0.0 ? ~0.0 - half : half
+    kw7 = kronrod_weights[7] ## f64
+    gw3 = gauss_weights[3] ## f64
+    abs_fc = fc < ~0.0 ? ~0.0 - fc : fc
     kronrod_center = Calculus.gk15_safe_term(
-      half * kronrod_weights[7], fc)
+      half * kw7, fc)
     gauss_center = Calculus.gk15_safe_term(
-      half * gauss_weights[3], fc)
+      half * gw3, fc)
     mean_center = Calculus.gk15_safe_term(
-      ~0.5 * kronrod_weights[7], fc)
+      ~0.5 * kw7, fc)
     resabs_center = Calculus.gk15_safe_term(
-      abs_half * kronrod_weights[7], Calculus.abs(fc))
+      abs_half * kw7, abs_fc)
     center_terms_valid = kronrod_center != nil && gauss_center != nil
     center_terms_valid = false if mean_center == nil || resabs_center == nil
     if !center_terms_valid
@@ -131,36 +148,40 @@
     right_values = []
 
     i = 0
-    while i < nodes.size
-      offset = half * nodes[i]
-      fl = f(center - offset)
-      if fl.class_name != "Float"
+    while i < nodes_size
+      nd = nodes[i] ## f64
+      offset = half * nd
+      fl_raw = f(center - offset)
+      if type(fl_raw) != "Float"
         return [a, b, nil, nil, nil, nil, nil, :unsupported_sample_type, 2 + 2*i]
-      if !Calculus.finite_f64?(fl)
+      fl = fl_raw ## f64
+      if fl - fl != ~0.0
         return [a, b, nil, nil, nil, nil, nil, :nonfinite_integrand, 2 + 2*i]
-      fr = f(center + offset)
-      if fr.class_name != "Float"
+      fr_raw = f(center + offset)
+      if type(fr_raw) != "Float"
         return [a, b, nil, nil, nil, nil, nil, :unsupported_sample_type, 3 + 2*i]
-      samples_finite = Calculus.finite_f64?(fl)
-      samples_finite = false if !Calculus.finite_f64?(fr)
-      if !samples_finite
+      fr = fr_raw ## f64
+      if fr - fr != ~0.0
         count = 1 + 2 * (i + 1)
         return [a, b, nil, nil, nil, nil, nil,
                 :nonfinite_integrand, count]
 
       left_values.push(fl)
       right_values.push(fr)
-      kronrod_scale = half * kronrod_weights[i]
-      mean_scale = ~0.5 * kronrod_weights[i]
-      resabs_scale = abs_half * kronrod_weights[i]
+      kwi = kronrod_weights[i] ## f64
+      kronrod_scale = half * kwi
+      mean_scale = ~0.5 * kwi
+      resabs_scale = abs_half * kwi
       kronrod_left = Calculus.gk15_safe_term(kronrod_scale, fl)
       kronrod_right = Calculus.gk15_safe_term(kronrod_scale, fr)
       mean_left = Calculus.gk15_safe_term(mean_scale, fl)
       mean_right = Calculus.gk15_safe_term(mean_scale, fr)
+      abs_fl = fl < ~0.0 ? ~0.0 - fl : fl
+      abs_fr = fr < ~0.0 ? ~0.0 - fr : fr
       resabs_left = Calculus.gk15_safe_term(
-        resabs_scale, Calculus.abs(fl))
+        resabs_scale, abs_fl)
       resabs_right = Calculus.gk15_safe_term(
-        resabs_scale, Calculus.abs(fr))
+        resabs_scale, abs_fr)
       terms_valid = kronrod_left != nil && kronrod_right != nil
       terms_valid = false if mean_left == nil || mean_right == nil
       terms_valid = false if resabs_left == nil || resabs_right == nil
@@ -175,15 +196,18 @@
       resabs_terms.push(resabs_left)
       resabs_terms.push(resabs_right)
       if i == 1
-        gauss_scale = half * gauss_weights[0]
+        gw0 = gauss_weights[0] ## f64
+        gauss_scale = half * gw0
         gauss_left = Calculus.gk15_safe_term(gauss_scale, fl)
         gauss_right = Calculus.gk15_safe_term(gauss_scale, fr)
       elsif i == 3
-        gauss_scale = half * gauss_weights[1]
+        gw1 = gauss_weights[1] ## f64
+        gauss_scale = half * gw1
         gauss_left = Calculus.gk15_safe_term(gauss_scale, fl)
         gauss_right = Calculus.gk15_safe_term(gauss_scale, fr)
       elsif i == 5
-        gauss_scale = half * gauss_weights[2]
+        gw2 = gauss_weights[2] ## f64
+        gauss_scale = half * gw2
         gauss_left = Calculus.gk15_safe_term(gauss_scale, fl)
         gauss_right = Calculus.gk15_safe_term(gauss_scale, fr)
       else
@@ -208,19 +232,23 @@
       return [a, b, nil, nil, nil, nil, nil,
               :nonfinite_arithmetic, 15]
 
+    mean_f = mean ## f64
     resasc_center = Calculus.gk15_safe_term(
-      abs_half * kronrod_weights[7], Calculus.abs(fc - mean))
+      abs_half * kw7, Calculus.abs(fc - mean_f))
     if resasc_center == nil
       return [a, b, nil, nil, nil, nil, nil,
               :precision_limit, 15]
     resasc_terms = [resasc_center]
     i = 0
-    while i < nodes.size
-      resasc_scale = abs_half * kronrod_weights[i]
+    while i < nodes_size
+      kwi = kronrod_weights[i] ## f64
+      resasc_scale = abs_half * kwi
+      lvi = left_values[i] ## f64
+      rvi = right_values[i] ## f64
       resasc_left = Calculus.gk15_safe_term(
-        resasc_scale, Calculus.abs(left_values[i] - mean))
+        resasc_scale, Calculus.abs(lvi - mean_f))
       resasc_right = Calculus.gk15_safe_term(
-        resasc_scale, Calculus.abs(right_values[i] - mean))
+        resasc_scale, Calculus.abs(rvi - mean_f))
       if resasc_left == nil || resasc_right == nil
         return [a, b, nil, nil, nil, nil, nil,
                 :precision_limit, 15]
@@ -232,53 +260,70 @@
       return [a, b, nil, nil, nil, nil, nil,
               :nonfinite_arithmetic, 15]
 
-    error = Calculus.abs(kronrod - gauss)
-    if resasc != ~0.0 && error != ~0.0
-      ratio = error / resasc
-      if !Calculus.finite_f64?(ratio) || ratio >= ~0.005
+    kronrod_f = kronrod ## f64
+    gauss_f = gauss ## f64
+    resabs_f = resabs ## f64
+    resasc_f = resasc ## f64
+    error = Calculus.abs(kronrod_f - gauss_f)
+    if resasc_f != ~0.0 && error != ~0.0
+      ratio = error / resasc_f
+      if ratio - ratio != ~0.0 || ratio >= ~0.005
         scaled = ~1.0
       else
         scaled = Math.pow(~200.0 * ratio, ~1.5)
-      error = resasc * scaled
-    roundoff_floor = ~1.1102230246251565e-14 * resabs
+      error = resasc_f * scaled
+    roundoff_floor = ~1.1102230246251565e-14 * resabs_f
     error = roundoff_floor if roundoff_floor > error
 
-    arithmetic_valid = Calculus.finite_f64?(kronrod)
-    arithmetic_valid = false if !Calculus.finite_f64?(gauss)
-    arithmetic_valid = false if !Calculus.finite_f64?(resabs)
-    arithmetic_valid = false if !Calculus.finite_f64?(resasc)
-    arithmetic_valid = false if !Calculus.finite_f64?(error)
+    arithmetic_valid = kronrod_f - kronrod_f == ~0.0
+    arithmetic_valid = false if gauss_f - gauss_f != ~0.0
+    arithmetic_valid = false if resabs_f - resabs_f != ~0.0
+    arithmetic_valid = false if resasc_f - resasc_f != ~0.0
+    arithmetic_valid = false if error - error != ~0.0
     if !arithmetic_valid
       return [a, b, nil, nil, nil, nil, nil,
               :nonfinite_arithmetic, 15]
-    [a, b, kronrod, gauss, error, resabs, resasc, :ok, 15]
+    [a, b, kronrod_f, gauss_f, error, resabs_f, resasc_f, :ok, 15]
 
   -> .gk15_largest_error_index(panels)
+    p_arr = panels ## Array
+    n = p_arr.size
     best = 0
+    p_best = p_arr[0] ## Array
+    best_err = p_best[4] ## f64
     i = 1
-    while i < panels.size
-      best = i if panels[i][4] > panels[best][4]
+    while i < n
+      pi = p_arr[i] ## Array
+      ei = pi[4] ## f64
+      if ei > best_err
+        best = i
+        best_err = ei
       i += 1
     best
 
   -> .gk15_compensated_total(panels, field)
+    p_arr = panels ## Array
+    n = p_arr.size
     total = ~0.0
     correction = ~0.0
     i = 0
-    while i < panels.size
-      value = panels[i][field]
-      return nil if !Calculus.finite_f64?(value)
+    while i < n
+      pi = p_arr[i] ## Array
+      value = pi[field] ## f64
+      return nil if value - value != ~0.0
       updated = total + value
-      if Calculus.abs(total) >= Calculus.abs(value)
+      abs_total = total < ~0.0 ? ~0.0 - total : total
+      abs_val = value < ~0.0 ? ~0.0 - value : value
+      if abs_total >= abs_val
         correction += (total - updated) + value
       else
         correction += (value - updated) + total
-      return nil if !Calculus.finite_f64?(updated)
-      return nil if !Calculus.finite_f64?(correction)
+      return nil if updated - updated != ~0.0
+      return nil if correction - correction != ~0.0
       total = updated
       i += 1
     combined = total + correction
-    return nil if !Calculus.finite_f64?(combined)
+    return nil if combined - combined != ~0.0
     combined
 
   -> .gk15_result(sign, panels, value, companion, error, resabs,
@@ -304,16 +349,20 @@
       estimate_available, complete_coverage)
 
   -> .gk15_accumulate(state, value)
-    total = state[0]
-    updated = total + value
-    correction = state[1]
-    if Calculus.abs(total) >= Calculus.abs(value)
-      correction += (total - updated) + value
+    st = state ## Array
+    total = st[0] ## f64
+    val = value ## f64
+    updated = total + val
+    correction = st[1] ## f64
+    abs_total = total < ~0.0 ? ~0.0 - total : total
+    abs_val = val < ~0.0 ? ~0.0 - val : val
+    if abs_total >= abs_val
+      correction += (total - updated) + val
     else
-      correction += (value - updated) + total
-    state[0] = updated
-    state[1] = correction
-    Calculus.finite_f64?(updated) && Calculus.finite_f64?(correction)
+      correction += (val - updated) + total
+    st[0] = updated
+    st[1] = correction
+    updated - updated == ~0.0 && correction - correction == ~0.0
 
   -> .gk15_rebuild(panels)
     totals = []
@@ -326,11 +375,15 @@
     totals
 
   -> .gk15_totals_values(totals)
+    t_arr = totals ## Array
     out = []
     i = 0
     while i < 4
-      value = totals[i][0] + totals[i][1]
-      return nil if !Calculus.finite_f64?(value)
+      ti = t_arr[i] ## Array
+      t0 = ti[0] ## f64
+      t1 = ti[1] ## f64
+      value = t0 + t1
+      return nil if value - value != ~0.0
       return nil if i >= 2 && value < ~0.0
       out.push(value)
       i += 1
@@ -339,34 +392,40 @@
   # Stable priority: largest error, then lowest original active-array slot.
   # Left children retain the parent's slot, exactly matching the old scan.
   -> .gk15_precedes?(panels, a, b)
-    ea = panels[a][4]
-    eb = panels[b][4]
+    p_arr = panels ## Array
+    pa = p_arr[a] ## Array
+    pb = p_arr[b] ## Array
+    ea = pa[4] ## f64
+    eb = pb[4] ## f64
     ea > eb || (ea == eb && a < b)
 
   -> .gk15_heap_push(heap, panels, index)
-    heap.push(index)
-    child = heap.size - 1
+    hp = heap ## Array
+    hp.push(index)
+    child = hp.size - 1
     while child > 0
       parent = (child - 1) / 2
-      return heap if !Calculus.gk15_precedes?(panels, heap[child], heap[parent])
-      temporary = heap[parent]
-      heap[parent] = heap[child]
-      heap[child] = temporary
+      return hp if !Calculus.gk15_precedes?(panels, hp[child], hp[parent])
+      temporary = hp[parent]
+      hp[parent] = hp[child]
+      hp[child] = temporary
       child = parent
-    heap
+    hp
 
   -> .gk15_heap_down(heap, panels)
+    hp = heap ## Array
+    n = hp.size
     parent = 0
-    while 2*parent + 1 < heap.size
+    while 2*parent + 1 < n
       child = 2*parent + 1
-      if child + 1 < heap.size && Calculus.gk15_precedes?(panels, heap[child + 1], heap[child])
+      if child + 1 < n && Calculus.gk15_precedes?(panels, hp[child + 1], hp[child])
         child += 1
-      return heap if !Calculus.gk15_precedes?(panels, heap[child], heap[parent])
-      temporary = heap[parent]
-      heap[parent] = heap[child]
-      heap[child] = temporary
+      return hp if !Calculus.gk15_precedes?(panels, hp[child], hp[parent])
+      temporary = hp[parent]
+      hp[parent] = hp[child]
+      hp[child] = temporary
       parent = child
-    heap
+    hp
 
   -> .integrate_gk15(f, lower, upper,
                       abs_tol = ~1.0e-10, rel_tol = ~1.0e-10,

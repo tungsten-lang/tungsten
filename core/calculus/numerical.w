@@ -96,14 +96,14 @@
         f0 = f(x)
         evaluations += 1
         center_cache.push(f0) if center_cache != nil
-      return [nil, evaluations, :unsupported_sample_type, nil, nil] if f0.class_name != "Float"
+      return [nil, evaluations, :unsupported_sample_type, nil, nil] if type(f0) != "Float"
       return [nil, evaluations, :nonfinite_sample, nil, nil] if !Calculus.finite_f64?(f0)
       values.push(f0)
     i = 1
     while i < points.size
       value = f(points[i])
       evaluations += 1
-      return [nil, evaluations, :unsupported_sample_type, nil, nil] if value.class_name != "Float"
+      return [nil, evaluations, :unsupported_sample_type, nil, nil] if type(value) != "Float"
       return [nil, evaluations, :nonfinite_sample, nil, nil] if !Calculus.finite_f64?(value)
       values.push(value)
       i += 1

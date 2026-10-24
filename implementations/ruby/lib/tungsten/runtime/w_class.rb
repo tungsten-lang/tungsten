@@ -150,7 +150,8 @@ module Tungsten
         required -= 1 if method.splat_index
         return argc >= required if method.splat_index
 
-        argc >= required && argc <= params.size
+        max = params.size + (method.block_param ? 1 : 0)
+        argc >= required && argc <= max
       end
 
       def register_overload(name, method, table = @method_overloads)

@@ -1777,7 +1777,7 @@ module Tungsten
             class_method = !expr.receiver.nil?
             w_method = Runtime::WMethod.new(expr.name, expr.args, body, w_class,
                                             splat_index: expr.splat_index, param_types: expr.param_types,
-                                            class_method: class_method)
+                                            class_method: class_method, block_param: expr.block)
             if class_method
               w_class.define_class_method(expr.name.to_s, w_method)
             else
@@ -2126,7 +2126,10 @@ module Tungsten
             end
           )
         end
-        block.closure_env = @env if block
+        if block
+          block.closure_env = @env
+          block.closure_block = @current_block
+        end
 
         if recv.is_a?(Quantity) && node.name == "of"
           substance = evaluate(node.args[0]).to_s
@@ -2359,28 +2362,41 @@ module Tungsten
           if self_obj.is_a?(Runtime::WClass)
             if (overloads = typed_overload_group(self_obj, name))
               block = node.block
-              block.closure_env = @env if block
+              if block
+          block.closure_env = @env
+          block.closure_block = @current_block
+        end
               return dispatch_typed_overload(self_obj, self_obj, overloads, node, block)
             end
 
-            method = resolve_w_method(node, self_obj, name)
+            method = self_obj.lookup_class_method(name.to_s, argc: (node.args || EMPTY_ARGS).size) ||
+                     resolve_w_method(node, self_obj, name)
             if method
               block = node.block
-              block.closure_env = @env if block
+              if block
+          block.closure_env = @env
+          block.closure_block = @current_block
+        end
               return call_w_method_from_nodes(self_obj, method, node.args, block, call_node: node)
             end
           elsif self_obj.is_a?(Runtime::WObject)
             owner = self_obj.w_class
             if (overloads = typed_overload_group(owner, name))
               block = node.block
-              block.closure_env = @env if block
+              if block
+          block.closure_env = @env
+          block.closure_block = @current_block
+        end
               return dispatch_typed_overload(self_obj, owner, overloads, node, block)
             end
 
             method = resolve_w_method(node, owner, name)
             if method
               block = node.block
-              block.closure_env = @env if block
+              if block
+          block.closure_env = @env
+          block.closure_block = @current_block
+        end
               return call_w_method_from_nodes(self_obj, method, node.args, block, call_node: node)
             end
           end
@@ -2392,7 +2408,10 @@ module Tungsten
           if func.is_a?(Tungsten::AST::Def)
             profile_visit_call("local #{name}") if @profile_enabled
             block = node.block
-            block.closure_env = @env if block
+            if block
+          block.closure_env = @env
+          block.closure_block = @current_block
+        end
             return call_method(func, node.args, block)
           end
         end
@@ -2400,7 +2419,10 @@ module Tungsten
         if (builtin = @builtins[name])
           profile_visit_call("builtin #{name}") if @profile_enabled
           block = node.block
-          block.closure_env = @env if block
+          if block
+          block.closure_env = @env
+          block.closure_block = @current_block
+        end
           args = evaluate_args(node.args)
           return invoke_builtin(builtin, nil, args, block)
         end
@@ -2411,18 +2433,25 @@ module Tungsten
           if (overloads = typed_overload_group(self_obj, name))
             profile_visit_call("#{self_obj.name}##{name}") if @profile_enabled
             block = node.block
-            block.closure_env = @env if block
+            if block
+          block.closure_env = @env
+          block.closure_block = @current_block
+        end
             return dispatch_typed_overload(self_obj, self_obj, overloads, node, block)
           end
 
-          method = resolve_w_method(node, self_obj, name)
+          method = self_obj.lookup_class_method(name.to_s, argc: (node.args || EMPTY_ARGS).size) ||
+                   resolve_w_method(node, self_obj, name)
           if method
             profile_visit_call("#{self_obj.name}##{name}") if @profile_enabled
             if !@profile_enabled && @env.barrier? && !@env.defined_locally_or_in_scope?(name)
               node.cached_local_miss_shape = @env.lookup_shape
             end
             block = node.block
-            block.closure_env = @env if block
+            if block
+          block.closure_env = @env
+          block.closure_block = @current_block
+        end
             return call_w_method_from_nodes(self_obj, method, node.args, block, call_node: node)
           end
         elsif self_obj.is_a?(Runtime::WObject)
@@ -2430,7 +2459,10 @@ module Tungsten
           if (overloads = typed_overload_group(owner, name))
             profile_visit_call("#{owner.name}##{name}") if @profile_enabled
             block = node.block
-            block.closure_env = @env if block
+            if block
+          block.closure_env = @env
+          block.closure_block = @current_block
+        end
             return dispatch_typed_overload(self_obj, owner, overloads, node, block)
           end
 
@@ -2441,7 +2473,10 @@ module Tungsten
               node.cached_local_miss_shape = @env.lookup_shape
             end
             block = node.block
-            block.closure_env = @env if block
+            if block
+          block.closure_env = @env
+          block.closure_block = @current_block
+        end
             return call_w_method_from_nodes(self_obj, method, node.args, block, call_node: node)
           end
         end
@@ -3049,10 +3084,13 @@ module Tungsten
 
     def execute_bound_block(block, env)
       old_env = @env
+      old_block = @current_block
       @env = env
+      @current_block = block.closure_block if block.closure_env
       begin
         catch_next_if_needed(block.body) { evaluate(block.body) }
       ensure
+        @current_block = old_block
         @env = old_env
       end
     end
@@ -3100,7 +3138,15 @@ module Tungsten
       params = method.params || EMPTY_ARGS
       method_env = new_param_env(@env, params, method, barrier: true)
 
+      if method.block_param && !block && args.size > params.size && args.last.is_a?(Tungsten::AST::Def)
+        args = args.dup
+        block = args.pop
+      end
+
       bind_params(method_env, params, args, method.splat_index)
+      if method.block_param && method.block_param.name.to_s != "&"
+        method_env.set(method.block_param.name.to_s, block)
+      end
 
       execute_bound_w_method(recv, method, method_env, block, call_node)
     end
@@ -3120,12 +3166,19 @@ module Tungsten
       params = method.params || EMPTY_ARGS
       method_env = new_param_env(@env, params, method, barrier: true)
 
-      if bind_exact_small_args_from_nodes(method_env, params, arg_nodes, method.splat_index, nil)
+      if !method.block_param && bind_exact_small_args_from_nodes(method_env, params, arg_nodes, method.splat_index, nil)
         return execute_bound_w_method(recv, method, method_env, block, call_node)
       end
 
       args = evaluate_args(arg_nodes)
+      if method.block_param && !block && args.size > params.size && args.last.is_a?(Tungsten::AST::Def)
+        args = args.dup
+        block = args.pop
+      end
       bind_params(method_env, params, args, method.splat_index)
+      if method.block_param && method.block_param.name.to_s != "&"
+        method_env.set(method.block_param.name.to_s, block)
+      end
 
       execute_bound_w_method(recv, method, method_env, block, call_node)
     end
@@ -4482,7 +4535,7 @@ module Tungsten
       # Implicit self dispatch for bare names (no parens) inside class/instance methods
       self_obj = @self_stack.last
       if self_obj.is_a?(Runtime::WClass)
-        method = resolve_w_method(node, self_obj, name)
+        method = self_obj.lookup_class_method(name.to_s, argc: 0) || resolve_w_method(node, self_obj, name)
         if method
           return call_w_method_from_nodes(self_obj, method, [], nil, call_node: node)
         end
@@ -4559,7 +4612,8 @@ module Tungsten
 
       expand_on_guards(node.body).each do |expr|
         if expr.is_a?(Tungsten::AST::Def)
-          w_method = Runtime::WMethod.new(expr.name, expr.args, expr.body, w_trait, splat_index: expr.splat_index)
+          w_method = Runtime::WMethod.new(expr.name, expr.args, expr.body, w_trait,
+                                          splat_index: expr.splat_index, block_param: expr.block)
           w_trait.define_method(expr.name.to_s, w_method)
         elsif accessor_declaration?(expr)
           define_accessor(w_trait, expr)
@@ -4598,7 +4652,8 @@ module Tungsten
 
       expand_on_guards(node.body).each do |expr|
         if expr.is_a?(Tungsten::AST::Def)
-          w_method = Runtime::WMethod.new(expr.name, expr.args, expr.body, w_module, splat_index: expr.splat_index)
+          w_method = Runtime::WMethod.new(expr.name, expr.args, expr.body, w_module,
+                                          splat_index: expr.splat_index, block_param: expr.block)
           w_module.define_method(expr.name.to_s, w_method)
         else
           evaluate(expr)
@@ -5747,6 +5802,8 @@ module Tungsten
         args[1].tell
       when "__w_file_handle_eof"
         args[1].eof?
+      when "w_string_bytes_view"
+        args[1].to_s.bytes
       else
         runtime_error("undefined method 'ccall'", node: node, length: 5)
       end

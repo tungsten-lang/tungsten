@@ -23,71 +23,108 @@
   ro :value, :eps
 
   -> +(other)
-    if other.class_name == "Dual"
-      return Dual.new(@value + other.value, @eps + other.eps)
-    Dual.new(@value + other, @eps)
+    v1 = @value ## f64
+    e1 = @eps ## f64
+    if type(other) == "Dual"
+      v2 = other.value ## f64
+      e2 = other.eps ## f64
+      return Dual.new(v1 + v2, e1 + e2)
+    o = Autodiff.finite_real(other) ## f64
+    Dual.new(v1 + o, e1)
 
   -> -(other)
-    if other.class_name == "Dual"
-      return Dual.new(@value - other.value, @eps - other.eps)
-    Dual.new(@value - other, @eps)
+    v1 = @value ## f64
+    e1 = @eps ## f64
+    if type(other) == "Dual"
+      v2 = other.value ## f64
+      e2 = other.eps ## f64
+      return Dual.new(v1 - v2, e1 - e2)
+    o = Autodiff.finite_real(other) ## f64
+    Dual.new(v1 - o, e1)
 
   -> -@
-    Dual.new(~0.0 - @value, ~0.0 - @eps)
+    v1 = @value ## f64
+    e1 = @eps ## f64
+    Dual.new(~0.0 - v1, ~0.0 - e1)
 
   -> *(other)
-    if other.class_name == "Dual"
+    v1 = @value ## f64
+    e1 = @eps ## f64
+    if type(other) == "Dual"
       # (u+u'ε)(v+v'ε) = uv + (u'v + uv')ε
-      return Dual.new(@value * other.value, @eps * other.value + @value * other.eps)
-    Dual.new(@value * other, @eps * other)
+      v2 = other.value ## f64
+      e2 = other.eps ## f64
+      return Dual.new(v1 * v2, e1 * v2 + v1 * e2)
+    o = Autodiff.finite_real(other) ## f64
+    Dual.new(v1 * o, e1 * o)
 
   -> /(other)
-    if other.class_name == "Dual"
-      v = other.value
-      raise "Dual division by zero" if v == ~0.0
-      quotient = @value / v
-      return Dual.new(quotient, (@eps - quotient * other.eps) / v)
+    v1 = @value ## f64
+    e1 = @eps ## f64
+    if type(other) == "Dual"
+      v2 = other.value ## f64
+      raise "Dual division by zero" if v2 == ~0.0
+      e2 = other.eps ## f64
+      quotient = v1 / v2
+      return Dual.new(quotient, (e1 - quotient * e2) / v2)
     raise "Dual division by zero" if other == ~0.0
-    Dual.new(@value / other, @eps / other)
+    o = Autodiff.finite_real(other) ## f64
+    Dual.new(v1 / o, e1 / o)
 
   -> sqrt
-    raise "Dual.sqrt outside real differentiable domain" if @value <= ~0.0
-    s = Math.sqrt(@value)
-    Dual.new(s, @eps / (~2.0 * s))
+    v1 = @value ## f64
+    e1 = @eps ## f64
+    raise "Dual.sqrt outside real differentiable domain" if v1 <= ~0.0
+    s = Math.sqrt(v1) ## f64
+    Dual.new(s, e1 / (~2.0 * s))
 
   -> exp
-    e = Math.exp(@value)
-    Dual.new(e, e * @eps)
+    v1 = @value ## f64
+    e1 = @eps ## f64
+    e = Math.exp(v1) ## f64
+    Dual.new(e, e * e1)
 
   -> log
-    raise "Dual.log outside real differentiable domain" if @value <= ~0.0
-    Dual.new(Math.log(@value), @eps / @value)
+    v1 = @value ## f64
+    e1 = @eps ## f64
+    raise "Dual.log outside real differentiable domain" if v1 <= ~0.0
+    Dual.new(Math.log(v1), e1 / v1)
 
   -> sin
-    Dual.new(Math.sin(@value), Math.cos(@value) * @eps)
+    v1 = @value ## f64
+    e1 = @eps ## f64
+    Dual.new(Math.sin(v1), Math.cos(v1) * e1)
 
   -> cos
-    Dual.new(Math.cos(@value), ~0.0 - Math.sin(@value) * @eps)
+    v1 = @value ## f64
+    e1 = @eps ## f64
+    Dual.new(Math.cos(v1), ~0.0 - Math.sin(v1) * e1)
 
   -> tanh
-    t = Math.tanh(@value)
-    Dual.new(t, (~1.0 - t * t) * @eps)
+    v1 = @value ## f64
+    e1 = @eps ## f64
+    t = Math.tanh(v1) ## f64
+    Dual.new(t, (~1.0 - t * t) * e1)
 
   -> pow(n)
     # x^n for constant n
-    n = Autodiff.finite_real(n)
-    return Dual.const(~1.0) if n == ~0.0
-    return self if n == ~1.0
-    if (@value <= ~0.0 && n != Math.floor(n)) || (@value == ~0.0 && n < ~0.0)
+    nf = Autodiff.finite_real(n) ## f64
+    return Dual.const(~1.0) if nf == ~0.0
+    return self if nf == ~1.0
+    v1 = @value ## f64
+    e1 = @eps ## f64
+    if (v1 <= ~0.0 && nf != Math.floor(nf)) || (v1 == ~0.0 && nf < ~0.0)
       raise "Dual.pow outside real differentiable domain"
-    Dual.new(Math.pow(@value, n), n * Math.pow(@value, n - ~1.0) * @eps)
+    Dual.new(v1 ** nf, nf * (v1 ** (nf - ~1.0)) * e1)
 
   -> **(n)
     self.pow(n)
 
   -> scale(scalar)
-    scalar = Autodiff.finite_real(scalar)
-    Dual.new(@value * scalar, @eps * scalar)
+    sf = Autodiff.finite_real(scalar) ## f64
+    v1 = @value ## f64
+    e1 = @eps ## f64
+    Dual.new(v1 * sf, e1 * sf)
 
   -> to_s
     "Dual(" + @value.to_s() + ", " + @eps.to_s() + ")"
@@ -98,108 +135,211 @@
 + Tape
   -> new
     @vals = []
-    @parents = []  # each: [op, i, j] j=-1 if unary
+    @ops = []
+    @arg_a = []
+    @arg_b = []
     @grads = []
     self
 
   -> const(v)
-    idx = @vals.size()
-    @vals = @vals.push(v)
-    @parents = @parents.push([0, -1, -1])
-    @grads = @grads.push(~0.0)
+    vals = @vals ## Array
+    ops = @ops ## Array
+    arg_a = @arg_a ## Array
+    arg_b = @arg_b ## Array
+    grads = @grads ## Array
+    idx = vals.size
+    vals.push(v)
+    ops.push(0)
+    arg_a.push(-1)
+    arg_b.push(-1)
+    grads.push(~0.0)
     idx
 
   -> var(v)
     const(v)  # same storage; seed grads externally
 
   -> add(i, j)
-    idx = @vals.size()
-    @vals = @vals.push(@vals[i] + @vals[j])
-    @parents = @parents.push([1, i, j])
-    @grads = @grads.push(~0.0)
+    vals = @vals ## Array
+    ops = @ops ## Array
+    arg_a = @arg_a ## Array
+    arg_b = @arg_b ## Array
+    grads = @grads ## Array
+    idx = vals.size
+    va = vals[i] ## f64
+    vb = vals[j] ## f64
+    vals.push(va + vb)
+    ops.push(1)
+    arg_a.push(i)
+    arg_b.push(j)
+    grads.push(~0.0)
     idx
 
   -> mul(i, j)
-    idx = @vals.size()
-    @vals = @vals.push(@vals[i] * @vals[j])
-    @parents = @parents.push([2, i, j])
-    @grads = @grads.push(~0.0)
+    vals = @vals ## Array
+    ops = @ops ## Array
+    arg_a = @arg_a ## Array
+    arg_b = @arg_b ## Array
+    grads = @grads ## Array
+    idx = vals.size
+    va = vals[i] ## f64
+    vb = vals[j] ## f64
+    vals.push(va * vb)
+    ops.push(2)
+    arg_a.push(i)
+    arg_b.push(j)
+    grads.push(~0.0)
     idx
 
   -> sub(i, j)
-    idx = @vals.size()
-    @vals = @vals.push(@vals[i] - @vals[j])
-    @parents = @parents.push([3, i, j])
-    @grads = @grads.push(~0.0)
+    vals = @vals ## Array
+    ops = @ops ## Array
+    arg_a = @arg_a ## Array
+    arg_b = @arg_b ## Array
+    grads = @grads ## Array
+    idx = vals.size
+    va = vals[i] ## f64
+    vb = vals[j] ## f64
+    vals.push(va - vb)
+    ops.push(3)
+    arg_a.push(i)
+    arg_b.push(j)
+    grads.push(~0.0)
     idx
 
   -> div(i, j)
-    raise "Tape division by zero" if @vals[j] == ~0.0
-    idx = @vals.size()
-    @vals = @vals.push(@vals[i] / @vals[j])
-    @parents = @parents.push([4, i, j])
-    @grads = @grads.push(~0.0)
+    vals = @vals ## Array
+    ops = @ops ## Array
+    arg_a = @arg_a ## Array
+    arg_b = @arg_b ## Array
+    grads = @grads ## Array
+    vb = vals[j] ## f64
+    raise "Tape division by zero" if vb == ~0.0
+    va = vals[i] ## f64
+    idx = vals.size
+    vals.push(va / vb)
+    ops.push(4)
+    arg_a.push(i)
+    arg_b.push(j)
+    grads.push(~0.0)
     idx
 
   -> neg(i)
-    idx = @vals.size()
-    @vals = @vals.push(~0.0 - @vals[i])
-    @parents = @parents.push([5, i, -1])
-    @grads = @grads.push(~0.0)
+    vals = @vals ## Array
+    ops = @ops ## Array
+    arg_a = @arg_a ## Array
+    arg_b = @arg_b ## Array
+    grads = @grads ## Array
+    va = vals[i] ## f64
+    idx = vals.size
+    vals.push(~0.0 - va)
+    ops.push(5)
+    arg_a.push(i)
+    arg_b.push(-1)
+    grads.push(~0.0)
     idx
 
   -> exp(i)
-    idx = @vals.size()
-    @vals = @vals.push(Math.exp(@vals[i]))
-    @parents = @parents.push([6, i, -1])
-    @grads = @grads.push(~0.0)
+    vals = @vals ## Array
+    ops = @ops ## Array
+    arg_a = @arg_a ## Array
+    arg_b = @arg_b ## Array
+    grads = @grads ## Array
+    va = vals[i] ## f64
+    idx = vals.size
+    vals.push(Math.exp(va))
+    ops.push(6)
+    arg_a.push(i)
+    arg_b.push(-1)
+    grads.push(~0.0)
     idx
 
   -> log(i)
-    raise "Tape.log outside real differentiable domain" if @vals[i] <= ~0.0
-    idx = @vals.size()
-    @vals = @vals.push(Math.log(@vals[i]))
-    @parents = @parents.push([7, i, -1])
-    @grads = @grads.push(~0.0)
+    vals = @vals ## Array
+    ops = @ops ## Array
+    arg_a = @arg_a ## Array
+    arg_b = @arg_b ## Array
+    grads = @grads ## Array
+    va = vals[i] ## f64
+    raise "Tape.log outside real differentiable domain" if va <= ~0.0
+    idx = vals.size
+    vals.push(Math.log(va))
+    ops.push(7)
+    arg_a.push(i)
+    arg_b.push(-1)
+    grads.push(~0.0)
     idx
 
   -> sin(i)
-    idx = @vals.size()
-    @vals = @vals.push(Math.sin(@vals[i]))
-    @parents = @parents.push([8, i, -1])
-    @grads = @grads.push(~0.0)
+    vals = @vals ## Array
+    ops = @ops ## Array
+    arg_a = @arg_a ## Array
+    arg_b = @arg_b ## Array
+    grads = @grads ## Array
+    va = vals[i] ## f64
+    idx = vals.size
+    vals.push(Math.sin(va))
+    ops.push(8)
+    arg_a.push(i)
+    arg_b.push(-1)
+    grads.push(~0.0)
     idx
 
   -> cos(i)
-    idx = @vals.size()
-    @vals = @vals.push(Math.cos(@vals[i]))
-    @parents = @parents.push([9, i, -1])
-    @grads = @grads.push(~0.0)
+    vals = @vals ## Array
+    ops = @ops ## Array
+    arg_a = @arg_a ## Array
+    arg_b = @arg_b ## Array
+    grads = @grads ## Array
+    va = vals[i] ## f64
+    idx = vals.size
+    vals.push(Math.cos(va))
+    ops.push(9)
+    arg_a.push(i)
+    arg_b.push(-1)
+    grads.push(~0.0)
     idx
 
   -> sqrt(i)
-    raise "Tape.sqrt outside real differentiable domain" if @vals[i] <= ~0.0
-    idx = @vals.size()
-    @vals = @vals.push(Math.sqrt(@vals[i]))
-    @parents = @parents.push([10, i, -1])
-    @grads = @grads.push(~0.0)
+    vals = @vals ## Array
+    ops = @ops ## Array
+    arg_a = @arg_a ## Array
+    arg_b = @arg_b ## Array
+    grads = @grads ## Array
+    va = vals[i] ## f64
+    raise "Tape.sqrt outside real differentiable domain" if va <= ~0.0
+    idx = vals.size
+    vals.push(Math.sqrt(va))
+    ops.push(10)
+    arg_a.push(i)
+    arg_b.push(-1)
+    grads.push(~0.0)
     idx
 
   -> value(i)
-    @vals[i]
+    vals = @vals ## Array
+    vals[i]
 
   -> size
-    @vals.size
+    vals = @vals ## Array
+    vals.size
 
   -> grad(i)
-    @grads[i]
+    grads = @grads ## Array
+    grads[i]
 
   # A primitive with an explicit local derivative, used by TapeValue methods.
   -> unary(i, value, derivative)
-    index = @vals.size
-    @vals.push(value)
-    @parents.push([11, i, -1, derivative])
-    @grads.push(~0.0)
+    vals = @vals ## Array
+    ops = @ops ## Array
+    arg_a = @arg_a ## Array
+    arg_b = @arg_b ## Array
+    grads = @grads ## Array
+    index = vals.size
+    vals.push(value)
+    ops.push(11)
+    arg_a.push(i)
+    arg_b.push(derivative)
+    grads.push(~0.0)
     index
 
   # Traverse only the output's ancestors. Validate all local weights even
@@ -207,132 +347,181 @@
   -> reverse(out_idx)
     self.reverse_many([out_idx], [~1.0])
 
-  -> reverse_many(outputs, seeds)
+  -> reverse_many(outputs_in, seeds_in)
+    outputs = outputs_in ## Array
+    seeds = seeds_in ## Array
     if outputs.size != seeds.size
       raise "Tape output/seed size mismatch"
-    n = @vals.size
+    vals = @vals ## Array
+    ops = @ops ## Array
+    arg_a = @arg_a ## Array
+    arg_b = @arg_b ## Array
+    grads = @grads ## Array
+    n = vals.size
     reachable = []
-    n.times -> reachable.push(false)
     i = 0
     while i < n
-      @grads[i] = ~0.0
+      reachable.push(false)
+      grads[i] = ~0.0
       i += 1
     i = 0
-    while i < outputs.size
+    n_out = outputs.size
+    while i < n_out
       index = outputs[i]
-      name = index.class_name
-      if (name != "Integer" && name != "Int" && name != "BigInt") || index < 0 || index >= n
+      t_idx = type(index)
+      if (t_idx != "Int" && t_idx != "Integer" && t_idx != "BigInt") || index < 0 || index >= n
         raise "Tape output index out of range"
-      seed = Autodiff.finite_real(seeds[i])
+      seed = Autodiff.finite_real(seeds[i]) ## f64
       reachable[index] = true
-      @grads[index] += seed
+      gi = grads[index] ## f64
+      grads[index] = gi + seed
       i += 1
     k = n - 1
     while k >= 0
       if reachable[k]
-        Autodiff.finite_real(@vals[k])
-        p = @parents[k]
-        op = p[0]
-        a = p[1]
-        b = p[2]
+        vk = Autodiff.finite_real(vals[k]) ## f64
+        op = ops[k] ## i64
+        a = arg_a[k] ## i64
+        b = -1
         wa = ~0.0
         wb = ~0.0
         if op == 1
+          b = arg_b[k] ## i64
           wa = ~1.0
           wb = ~1.0
         elsif op == 2
-          wa = @vals[b]
-          wb = @vals[a]
+          b = arg_b[k] ## i64
+          wa = vals[b] ## f64
+          wb = vals[a] ## f64
         elsif op == 3
+          b = arg_b[k] ## i64
           wa = ~1.0
           wb = ~-1.0
         elsif op == 4
-          wa = ~1.0 / @vals[b]
-          wb = (~0.0 - @vals[k]) / @vals[b]
+          b = arg_b[k] ## i64
+          vb = vals[b] ## f64
+          wa = ~1.0 / vb
+          wb = (~0.0 - vk) / vb
         elsif op == 5
           wa = ~-1.0
         elsif op == 6
-          wa = @vals[k]
+          wa = vk
         elsif op == 7
-          wa = ~1.0 / @vals[a]
+          va = vals[a] ## f64
+          wa = ~1.0 / va
         elsif op == 8
-          wa = Math.cos(@vals[a])
+          va = vals[a] ## f64
+          wa = Math.cos(va) ## f64
         elsif op == 9
-          wa = ~0.0 - Math.sin(@vals[a])
+          va = vals[a] ## f64
+          wa = ~0.0 - Math.sin(va)
         elsif op == 10
-          wa = (~0.5 / @vals[k])
+          wa = ~0.5 / vk
         elsif op == 11
-          wa = p[3]
-        Autodiff.finite_real(wa)
-        Autodiff.finite_real(wb)
-        g = Autodiff.finite_real(@grads[k])
+          wa = Autodiff.finite_real(arg_b[k]) ## f64
+        if wa - wa != ~0.0 || wb - wb != ~0.0
+          raise "Autodiff encountered a nonfinite value or derivative"
+        g = Autodiff.finite_real(grads[k]) ## f64
         if a >= 0
           reachable[a] = true
-          @grads[a] += g*wa if g != ~0.0
+          if g != ~0.0
+            ga = grads[a] ## f64
+            grads[a] = ga + g * wa
         if b >= 0
           reachable[b] = true
-          @grads[b] += g*wb if g != ~0.0
+          if g != ~0.0
+            gb = grads[b] ## f64
+            grads[b] = gb + g * wb
       k -= 1
     self
 + Autodiff
   -> .finite_real(value)
-    name = value.class_name
-    if name != "Float" && name != "Integer" && name != "Int" && name != "BigInt" && name != "Rational"
+    t = type(value)
+    if t == "Float"
+      f = value ## f64
+      if f - f != ~0.0
+        raise "Autodiff encountered a nonfinite value or derivative"
+      return value
+    if t != "Int" && t != "Integer" && t != "BigInt" && t != "Rational"
       raise "Autodiff requires finite real scalars"
     scalar = value + ~0.0
-    if scalar.nan? || scalar.infinite?
+    sf = scalar ## f64
+    if sf - sf != ~0.0
       raise "Autodiff encountered a nonfinite value or derivative"
     scalar
 
   -> .validate_vectors(point, tangent)
-    if point.class_name != "Array" || tangent.class_name != "Array" || point.size != tangent.size
+    if type(point) != "Array" || type(tangent) != "Array" || point.size != tangent.size
       raise "Autodiff point and tangent must be equal-sized Arrays"
-    point.each -> Autodiff.finite_real(item)
-    tangent.each -> Autodiff.finite_real(item)
+    pt = point ## Array
+    tg = tangent ## Array
+    n = pt.size
+    i = 0
+    while i < n
+      Autodiff.finite_real(pt[i])
+      Autodiff.finite_real(tg[i])
+      i += 1
 
-  -> .jvp(f, point, tangent)
-    Autodiff.validate_vectors(point, tangent)
+  -> .jvp(f, point_in, tangent_in)
+    Autodiff.validate_vectors(point_in, tangent_in)
+    point = point_in ## Array
+    tangent = tangent_in ## Array
+    n = point.size
     variables = []
     i = 0
-    while i < point.size
+    while i < n
       variables.push(Dual.new(point[i], tangent[i]))
       i += 1
     result = f(variables)
-    vector = result.class_name == "Array"
+    vector = type(result) == "Array"
     outputs = vector ? result : [result]
+    out_arr = outputs ## Array
+    n_out = out_arr.size
     values = []
     derivatives = []
-    outputs.each ->
-      if item.class_name == "Dual"
+    i = 0
+    while i < n_out
+      item = out_arr[i]
+      if type(item) == "Dual"
         values.push(Autodiff.finite_real(item.value))
         derivatives.push(Autodiff.finite_real(item.eps))
       else
         values.push(Autodiff.finite_real(item))
         derivatives.push(~0.0)
+      i += 1
     {"value": vector ? values : values[0], "jvp": vector ? derivatives : derivatives[0]}
 
-  -> .vjp(f, point, cotangent)
-    if point.class_name != "Array"
+  -> .vjp(f, point_in, cotangent)
+    if type(point_in) != "Array"
       raise "Autodiff point must be an Array"
+    point = point_in ## Array
+    n_pt = point.size
     tape = Tape.new
     variables = []
     input_indices = []
-    point.each ->
-      index = tape.var(Autodiff.finite_real(item))
+    i = 0
+    while i < n_pt
+      index = tape.var(Autodiff.finite_real(point[i]))
       input_indices.push(index)
       variables.push(TapeValue.new(tape, index))
+      i += 1
     result = f(variables)
-    vector = result.class_name == "Array"
-    if vector != (cotangent.class_name == "Array")
+    vector = type(result) == "Array"
+    if vector != (type(cotangent) == "Array")
       raise "Autodiff cotangent must match scalar/vector output shape"
-    outputs = vector ? result : [result]
-    seeds = vector ? cotangent : [cotangent]
-    if outputs.size != seeds.size
+    outputs_raw = vector ? result : [result]
+    seeds_raw = vector ? cotangent : [cotangent]
+    outputs = outputs_raw ## Array
+    seeds = seeds_raw ## Array
+    n_out = outputs.size
+    if n_out != seeds.size
       raise "Autodiff output/cotangent size mismatch"
     values = []
     indices = []
-    outputs.each ->
-      if item.class_name == "TapeValue"
+    i = 0
+    while i < n_out
+      item = outputs[i]
+      if type(item) == "TapeValue"
         raise "Autodiff output belongs to another tape" if item.tape != tape
         indices.push(item.index)
         values.push(item.value)
@@ -340,8 +529,13 @@
         value = Autodiff.finite_real(item)
         indices.push(tape.const(value))
         values.push(value)
+      i += 1
     tape.reverse_many(indices, seeds)
-    gradient = input_indices.map -> Autodiff.finite_real(tape.grad(item))
+    gradient = []
+    i = 0
+    while i < n_pt
+      gradient.push(Autodiff.finite_real(tape.grad(input_indices[i])))
+      i += 1
     {"value": vector ? values : values[0], "vjp": gradient}
 
   # Forward-mode derivative of f at x (f takes Dual, returns Dual).
@@ -360,61 +554,64 @@
     result.value
 
 + TapeValue
-  -> new(@tape, @index)
-    name = @index.class_name
-    if @tape.class_name != "Tape" || (name != "Integer" && name != "Int" && name != "BigInt")
-      raise "TapeValue needs a Tape and integer index"
-    if @index < 0 || @index >= @tape.size
-      raise "TapeValue index out of range"
+  -> new(@tape, @index, trusted = false)
+    if !trusted
+      t_idx = type(@index)
+      if type(@tape) != "Tape" || (t_idx != "Int" && t_idx != "Integer" && t_idx != "BigInt")
+        raise "TapeValue needs a Tape and integer index"
+      if @index < 0 || @index >= @tape.size
+        raise "TapeValue index out of range"
     self
   ro :tape, :index
   -> value
     @tape.value(@index)
   -> coerce(other)
-    if other.class_name == "TapeValue"
+    if type(other) == "TapeValue"
       raise "cannot combine different autodiff tapes" if other.tape != @tape
       return other
-    TapeValue.new(@tape, @tape.const(Autodiff.finite_real(other)))
+    TapeValue.new(@tape, @tape.const(Autodiff.finite_real(other)), true)
+  -> coerce_index(other)
+    if type(other) == "TapeValue"
+      raise "cannot combine different autodiff tapes" if other.tape != @tape
+      return other.index
+    @tape.const(Autodiff.finite_real(other))
   -> +(other)
-    rhs = self.coerce(other)
-    TapeValue.new(@tape, @tape.add(@index, rhs.index))
+    TapeValue.new(@tape, @tape.add(@index, self.coerce_index(other)), true)
   -> -(other)
-    rhs = self.coerce(other)
-    TapeValue.new(@tape, @tape.sub(@index, rhs.index))
+    TapeValue.new(@tape, @tape.sub(@index, self.coerce_index(other)), true)
   -> *(other)
-    rhs = self.coerce(other)
-    TapeValue.new(@tape, @tape.mul(@index, rhs.index))
+    TapeValue.new(@tape, @tape.mul(@index, self.coerce_index(other)), true)
   -> /(other)
-    rhs = self.coerce(other)
-    TapeValue.new(@tape, @tape.div(@index, rhs.index))
+    TapeValue.new(@tape, @tape.div(@index, self.coerce_index(other)), true)
   -> -@
-    TapeValue.new(@tape, @tape.neg(@index))
+    TapeValue.new(@tape, @tape.neg(@index), true)
   -> scale(scalar)
-    rhs = self.coerce(Autodiff.finite_real(scalar))
-    TapeValue.new(@tape, @tape.mul(@index, rhs.index))
+    r_idx = @tape.const(Autodiff.finite_real(scalar))
+    TapeValue.new(@tape, @tape.mul(@index, r_idx), true)
   -> exp
-    TapeValue.new(@tape, @tape.exp(@index))
+    TapeValue.new(@tape, @tape.exp(@index), true)
   -> log
-    TapeValue.new(@tape, @tape.log(@index))
+    TapeValue.new(@tape, @tape.log(@index), true)
   -> sqrt
-    TapeValue.new(@tape, @tape.sqrt(@index))
+    TapeValue.new(@tape, @tape.sqrt(@index), true)
   -> sin
-    TapeValue.new(@tape, @tape.sin(@index))
+    TapeValue.new(@tape, @tape.sin(@index), true)
   -> cos
-    TapeValue.new(@tape, @tape.cos(@index))
+    TapeValue.new(@tape, @tape.cos(@index), true)
   -> tanh
-    value = Math.tanh(self.value)
-    TapeValue.new(@tape, @tape.unary(@index, value, ~1.0 - value*value))
+    v = self.value ## f64
+    value = Math.tanh(v)
+    TapeValue.new(@tape, @tape.unary(@index, value, ~1.0 - value*value), true)
   -> pow(exponent)
-    exponent = Autodiff.finite_real(exponent)
-    if exponent == ~0.0
-      return TapeValue.new(@tape, @tape.const(~1.0))
-    return self if exponent == ~1.0
-    value = self.value
-    if (value <= ~0.0 && exponent != Math.floor(exponent)) || (value == ~0.0 && exponent < ~0.0)
+    ef = Autodiff.finite_real(exponent) ## f64
+    if ef == ~0.0
+      return TapeValue.new(@tape, @tape.const(~1.0), true)
+    return self if ef == ~1.0
+    v = self.value ## f64
+    if (v <= ~0.0 && ef != Math.floor(ef)) || (v == ~0.0 && ef < ~0.0)
       raise "TapeValue.pow outside real differentiable domain"
-    primal = Math.pow(value, exponent)
-    derivative = exponent * Math.pow(value, exponent - ~1.0)
-    TapeValue.new(@tape, @tape.unary(@index, primal, derivative))
+    primal = v ** ef
+    derivative = ef * (v ** (ef - ~1.0))
+    TapeValue.new(@tape, @tape.unary(@index, primal, derivative), true)
   -> **(exponent)
     self.pow(exponent)

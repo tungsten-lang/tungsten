@@ -19,7 +19,7 @@ module Tungsten::AST
   end
 
   class Node
-    attr_accessor :parent, :closure_env, :memo_cache, :cache_path
+    attr_accessor :parent, :closure_env, :closure_block, :memo_cache, :cache_path
     attr_reader   :doc
 
     def self.inherited(klass)

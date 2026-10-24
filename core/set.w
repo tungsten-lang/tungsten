@@ -13,9 +13,17 @@
     @storage = {}
 
   -> new(elements)
-    @storage = {}
-    elements.each -> (element)
-      @storage[element] = true
+    s = {}
+    if type(elements) == "Array"
+      n = elements.size
+      i = 0
+      while i < n
+        s[elements[i]] = true
+        i += 1
+    else
+      elements.each -> (element)
+        s[element] = true
+    @storage = s
 
   -> new(@storage, trusted)
 
@@ -45,34 +53,65 @@
   # Operator forms route to the Tungsten-flavored `union` / `intersect` / `diff`.
   -> union(other)
     out = {}
-    @storage.each -> (element, _)
-      out[element] = true
-    other.storage.each -> (element, _)
-      out[element] = true
+    out.merge!(@storage)
+    out.merge!(other.storage)
     Set.new(out, true)
   -> intersect(other)
     out = {}
-    other_s = other.storage
-    @storage.each -> (element, _)
-      if other_s.has_key?(element)
-        out[element] = true
+    s = @storage ## hash
+    other_s = other.storage ## hash
+    if s.size <= other_s.size
+      elements = s.keys
+      n = elements.size
+      i = 0
+      while i < n
+        el = elements[i]
+        if other_s.has_key?(el)
+          out[el] = true
+        i += 1
+    else
+      elements = other_s.keys
+      n = elements.size
+      i = 0
+      while i < n
+        el = elements[i]
+        if s.has_key?(el)
+          out[el] = true
+        i += 1
     Set.new(out, true)
   -> diff(other)
     out = {}
-    other_s = other.storage
-    @storage.each -> (element, _)
-      if !other_s.has_key?(element)
-        out[element] = true
+    s = @storage ## hash
+    other_s = other.storage ## hash
+    elements = s.keys
+    n = elements.size
+    i = 0
+    while i < n
+      el = elements[i]
+      if !other_s.has_key?(el)
+        out[el] = true
+      i += 1
     Set.new(out, true)
   -> symmetric_diff(other)
     out = {}
-    other_s = other.storage
-    @storage.each -> (element, _)
-      if !other_s.has_key?(element)
-        out[element] = true
-    other_s.each -> (element, _)
-      if !@storage.has_key?(element)
-        out[element] = true
+    s = @storage ## hash
+    other_s = other.storage ## hash
+    elements = s.keys
+    n = elements.size
+    i = 0
+    while i < n
+      el = elements[i]
+      if !other_s.has_key?(el)
+        out[el] = true
+      i += 1
+    other_elements = other_s.keys
+    m = other_elements.size
+    j = 0
+    while j < m
+      el = other_elements[j]
+      if !s.has_key?(el)
+        out[el] = true
+      j += 1
     Set.new(out, true)
 
   # Operator forms (`a | b`, `a & b`, `a - b`, `a ^ b`) route to the named
@@ -89,10 +128,13 @@
   # ---- relations ----
   -> subset?(other)
     return false if self.size > other.size
-    elements = self.to_a
+    s = @storage ## hash
+    other_s = other.storage ## hash
+    elements = s.keys
+    n = elements.size
     i = 0
-    while i < elements.size
-      return false if !other.include?(elements[i])
+    while i < n
+      return false if !other_s.has_key?(elements[i])
       i += 1
     true
   -> superset?(other)
@@ -103,27 +145,32 @@
     other.proper_subset?(self)
   -> disjoint?(other)
     return true if self.empty? || other.empty?
-    elements = self.to_a
+    if self.size > other.size
+      return other.disjoint?(self)
+    s = @storage ## hash
+    other_s = other.storage ## hash
+    elements = s.keys
+    n = elements.size
     i = 0
-    while i < elements.size
-      return false if other.include?(elements[i])
+    while i < n
+      return false if other_s.has_key?(elements[i])
       i += 1
     true
 
   # ---- mutation (returns new Set; sets are immutable values) ----
   -> add(element)
-    return self if @storage.has_key?(element)
+    s = @storage ## hash
+    return self if s.has_key?(element)
     storage = {}
-    @storage.each -> (k, _)
-      storage[k] = true
+    storage.merge!(s)
     storage[element] = true
     Set.new(storage, true)
   -> remove(element)
-    return self if !@storage.has_key?(element)
+    s = @storage ## hash
+    return self if !s.has_key?(element)
     storage = {}
-    @storage.each -> (k, _)
-      if k != element
-        storage[k] = true
+    storage.merge!(s)
+    storage.delete(element)
     Set.new(storage, true)
 
   # ---- conversion ----
@@ -132,13 +179,11 @@
   -> to_array
     self.to_a
   -> to_multiset
+    Multiset.from_array(self.to_a)
 
   -> each(&)
-    keys = @storage.keys
-    i = 0
-    while i < keys.size
-      &(keys[i])
-      i += 1
+    @storage.each -> (k, _)
+      &(k)
     self
 
   # ---- comparison: subset gives a partial order ----

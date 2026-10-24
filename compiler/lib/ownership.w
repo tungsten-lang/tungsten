@@ -17,6 +17,23 @@ use cfg
       return true
   false
 
+-> init_heap_producer_calls_map()
+  m = {}
+  names = [
+    "w_string", "w_hash_new", "w_array_new", "w_array_new_empty", "w_array_new_uninit_sized",
+    "w_hash_keys", "w_hash_values",
+    "w_strbuf_new", "w_str_concat", "w_str_concat_free_rhs", "w_str_concat_free_lhs",
+    "w_str_concat_own", "w_str_concat_i64", "w_i64_concat_str", "w_str_concat_int_wv",
+    "w_int_wv_concat_str", "w_int_to_s", "w_string_repeat"
+  ]
+  i = 0
+  while i < names.size()
+    m[names[i]] = true
+    i += 1
+  m
+
+heap_producer_calls_map = init_heap_producer_calls_map()
+
 # Does this instruction produce a value that definitely heap-allocates?
 # Only track KNOWN constructors, not arbitrary call results.
 -> is_heap_producer(inst)
@@ -27,15 +44,7 @@ use cfg
   # its "fresh" result can free storage someone else still owns.
   # w_int_to_s guarantees an independent result for every input.
   if op == :call_direct_i64
-    name = wire_get(inst, :name)
-    # w_string_repeat mallocs a fresh WString for results past the inline
-    # limit (and returns an inline/slab value below it, which w_value_free
-    # ignores) — an independent result for every call, like w_int_to_s.
-    # w_array_new_uninit_sized backs `[a, b, c]` literals (slots filled by
-    # __w_array_lit_store below): a fresh owned WArray, freed like w_array_new.
-    # w_array_new_empty backs `[]`: a fresh owned WArray (or a recycled one
-    # reset to fresh), freed like w_array_new.
-    return name in ("w_string" "w_hash_new" "w_array_new" "w_array_new_empty" "w_array_new_uninit_sized" "w_strbuf_new" "w_str_concat" "w_str_concat_free_rhs" "w_str_concat_free_lhs" "w_str_concat_own" "w_str_concat_i64" "w_i64_concat_str" "w_str_concat_int_wv" "w_int_wv_concat_str" "w_int_to_s" "w_string_repeat")
+    return heap_producer_calls_map[wire_get(inst, :name)] == true
   if op == :load_i64 || op == :call_method_i64 || op == :string_i64 || op == :symbol_i64 || op == :load_global || op == :load_class || op == :icmp_i64 || op == :add_i64 || op == :sub_i64 || op == :truthy_inline
     return false
   # string_i64 creates interned slab strings — NOT freeable
@@ -83,8 +92,27 @@ use cfg
 # into the result), w_hash_set / w_array_push (store the value).
 # Element reads (w_array_get and its typed fast forms) return an element or
 # nil, never the array or a view of it (views come only from slice_view).
+-> init_nonretaining_consumers_map()
+  m = {}
+  names = [
+    "w_array_get", "w_array_get_i64", "w_array_idx_i64", "__w_array_get_i64_fast", "__w_array_idx_i64_fast",
+    "w_string_byte_length", "w_hash_get", "w_hash_has_key", "w_hash_keys", "w_hash_values",
+    "w_eq", "w_neq", "w_eq_lit", "w_neq_lit", "__w_streq_fast", "__w_streq2_fast",
+    "__w_eq_fast", "__w_neq_fast", "__w_eq_lit_fast", "__w_neq_lit_fast",
+    "__w_lt_fast", "__w_gt_fast", "__w_lte_fast", "__w_gte_fast",
+    "w_string_index", "w_string_rindex", "w_string_count", "w_string_repeat",
+    "__w_string_byte_length_fast", "w_wire_sequence_from_array"
+  ]
+  i = 0
+  while i < names.size()
+    m[names[i]] = true
+    i += 1
+  m
+
+nonretaining_consumers_map = init_nonretaining_consumers_map()
+
 -> is_nonretaining_consumer(name)
-  name in ("w_array_get" "w_array_get_i64" "w_array_idx_i64" "__w_array_get_i64_fast" "__w_array_idx_i64_fast" "w_string_byte_length" "w_hash_get" "w_eq" "w_neq" "w_eq_lit" "w_neq_lit" "__w_streq_fast" "__w_streq2_fast" "__w_eq_fast" "__w_neq_fast" "__w_eq_lit_fast" "__w_neq_lit_fast" "__w_lt_fast" "__w_gt_fast" "__w_lte_fast" "__w_gte_fast" "w_string_index" "w_string_rindex" "w_string_count" "w_string_repeat" "__w_string_byte_length_fast" "w_wire_sequence_from_array")
+  nonretaining_consumers_map[name] == true
 
 # Per-parameter escape summary of a source function (escape.w, run before
 # this pass): {escs: [stored-or-returned per param], stored_escs: [stored
@@ -165,7 +193,7 @@ use cfg
   name = wire_get(inst, :name)
   if mod != nil && mod[:fresh_heap_kinds] != nil && mod[:fresh_heap_kinds][name] != nil
     return mod[:fresh_heap_kinds][name]
-  if name in ("w_array_new" "w_array_new_empty" "w_array_new_uninit_sized")
+  if name in ("w_array_new" "w_array_new_empty" "w_array_new_uninit_sized" "w_hash_keys" "w_hash_values")
     return :array
   if name in ("w_string" "w_str_concat" "w_str_concat_free_rhs" "w_str_concat_free_lhs" "w_str_concat_own" "w_int_to_s" "w_string_repeat")
     return :string
@@ -742,8 +770,23 @@ use cfg
 # TUNGSTEN_LOOP_RELEASE=0 disables the pass.
 # ---------------------------------------------------------------------------
 
+-> init_loop_release_arith_map()
+  m = {}
+  names = [
+    "__w_add_fast", "__w_sub_fast", "__w_mul_fast", "__w_mod_fast", "__w_div_fast",
+    "__w_shl_fast", "__w_shr_fast", "w_add", "w_sub", "w_mul", "w_mod", "w_div",
+    "w_bit_shl", "w_bit_shr"
+  ]
+  i = 0
+  while i < names.size()
+    m[names[i]] = true
+    i += 1
+  m
+
+loop_release_arith_map = init_loop_release_arith_map()
+
 -> loop_release_arith?(name)
-  name in ("__w_add_fast" "__w_sub_fast" "__w_mul_fast" "__w_mod_fast" "__w_div_fast" "__w_shl_fast" "__w_shr_fast" "w_add" "w_sub" "w_mul" "w_mod" "w_div" "w_bit_shl" "w_bit_shr")
+  loop_release_arith_map[name] == true
 
 # Temp-like operand strings an instruction reads (its own :temp excluded), or
 # nil when a field holds a structure this scan does not understand.
@@ -780,6 +823,32 @@ use cfg
       cond = wire_get(inst, :cond)
       if type(cond) == "String" && cond.size() > 0 && cond.byte_at(0) == 37
         out.push(cond)
+      return out
+    if op == :ret_i64 || op == :truthy_inline || op == :store_global || op == :free_value
+      val = wire_get(inst, :value)
+      if type(val) == "String" && val.size() > 0 && val.byte_at(0) == 37
+        out.push(val)
+      return out
+    if op == :alloca_i64
+      ptr = wire_get(inst, :ptr)
+      if type(ptr) == "String" && ptr.size() > 0 && ptr.byte_at(0) == 37
+        out.push(ptr)
+      return out
+    if op == :add_i64 || op == :sub_i64 || op == :mul_i64 || op == :sdiv_i64 || op == :srem_i64 || op == :icmp_i64 || op == :and_i64 || op == :or_i64 || op == :xor_i64 || op == :shl_i64 || op == :ashr_i64
+      lhs = wire_get(inst, :lhs)
+      if type(lhs) == "String" && lhs.size() > 0 && lhs.byte_at(0) == 37
+        out.push(lhs)
+      rhs = wire_get(inst, :rhs)
+      if type(rhs) == "String" && rhs.size() > 0 && rhs.byte_at(0) == 37
+        out.push(rhs)
+      return out
+    if op == :nanbox_int
+      raw = wire_get(inst, :raw)
+      if type(raw) == "String" && raw.size() > 0 && raw.byte_at(0) == 37
+        out.push(raw)
+      tm = wire_get(inst, :temp_masked)
+      if type(tm) == "String" && tm.size() > 0 && tm.byte_at(0) == 37
+        out.push(tm)
       return out
     if op == :call_method_i64
       rec = wire_get(inst, :receiver)
@@ -1091,10 +1160,11 @@ use cfg
       if before_term[pre] == nil
         before_term[pre] = []
       before_term[pre].push(wire_make_load_i64(ptr, init_tmp))
-      skey = sb.to_s() + ":" + body_store[1].to_s()
+      skey = (sb << 20) + body_store[1]
       if before_inst[skey] == nil
         before_inst[skey] = []
       before_inst[skey].push(wire_make_load_i64(ptr, prev_tmp))
+      before_inst[-(sb + 1)] = true
       if before_term[l] == nil
         before_term[l] = []
       before_term[l].push(wire_make_call_direct_void([extra.to_s(), init_tmp, prev_tmp, nxt, t1, t2], "w_value_release_loop"))
@@ -1105,16 +1175,13 @@ use cfg
   while bi < blocks.size()
     instrs = blocks[bi][:instructions]
     terms = before_term[bi]
-    touched = terms != nil
-    ii = 0
-    while ii < instrs.size() && !touched
-      touched = true if before_inst[bi.to_s() + ":" + ii.to_s()] != nil
-      ii += 1
+    touched = terms != nil || before_inst[-(bi + 1)] == true
     if touched
       rebuilt = []
+      bbase = bi << 20
       ii = 0
       while ii < instrs.size()
-        extra_before = before_inst[bi.to_s() + ":" + ii.to_s()]
+        extra_before = before_inst[bbase + ii]
         if extra_before != nil
           ei2 = 0
           while ei2 < extra_before.size()
@@ -1170,13 +1237,47 @@ use cfg
 # The arithmetic helpers plus the runtime's BigInt entries that core reaches
 # through ccall (BigInt#bit_length's shift probes, ...): the same core
 # arithmetic, so the same fresh-or-marked contract.
+-> init_int_temp_arith_map()
+  m = init_loop_release_arith_map()
+  names = [
+    "__w_band_fast", "__w_bor_fast", "__w_bxor_fast",
+    "w_bit_and", "w_bit_or", "w_bit_xor",
+    "w_bigint_shr", "w_bigint_shl", "w_bigint_add", "w_bigint_sub",
+    "w_bigint_div", "w_bigint_mod", "w_bigint_mul_builtin_exact"
+  ]
+  i = 0
+  while i < names.size()
+    m[names[i]] = true
+    i += 1
+  m
+
+int_temp_arith_map = init_int_temp_arith_map()
+
 -> int_temp_arith?(name)
-  loop_release_arith?(name) || name in ("__w_band_fast" "__w_bor_fast" "__w_bxor_fast" "w_bit_and" "w_bit_or" "w_bit_xor" "w_bigint_shr" "w_bigint_shl" "w_bigint_add" "w_bigint_sub" "w_bigint_div" "w_bigint_mod" "w_bigint_mul_builtin_exact")
+  int_temp_arith_map[name] == true
+
+-> init_int_temp_reader_map()
+  m = {}
+  names = [
+    "w_eq", "w_neq", "w_eq_lit", "w_neq_lit", "w_lt", "w_gt", "w_lte", "w_gte",
+    "__w_eq_fast", "__w_neq_fast", "__w_eq_lit_fast", "__w_neq_lit_fast",
+    "__w_lt_fast", "__w_gt_fast", "__w_lte_fast", "__w_gte_fast",
+    "__w_eq0_big_fast", "__w_lt0_big_fast", "__w_gt0_big_fast", "__w_lte0_big_fast", "__w_gte0_big_fast",
+    "__w_streq_fast", "__w_streq2_fast",
+    "w_to_s", "w_int_to_s"
+  ]
+  i = 0
+  while i < names.size()
+    m[names[i]] = true
+    i += 1
+  m
+
+int_temp_reader_map = init_int_temp_reader_map()
 
 # Direct calls, besides the arithmetic helpers, that read an Integer operand
 # and return a value that does not hold it: comparisons and decimal text.
 -> int_temp_reader?(name)
-  name in ("w_eq" "w_neq" "w_eq_lit" "w_neq_lit" "w_lt" "w_gt" "w_lte" "w_gte" "__w_eq_fast" "__w_neq_fast" "__w_eq_lit_fast" "__w_neq_lit_fast" "__w_lt_fast" "__w_gt_fast" "__w_lte_fast" "__w_gte_fast" "__w_eq0_big_fast" "__w_lt0_big_fast" "__w_gt0_big_fast" "__w_lte0_big_fast" "__w_gte0_big_fast" "w_to_s" "w_int_to_s")
+  int_temp_reader_map[name] == true
 
 # string_id -> text, for reading the method name of a call_method_i64, plus
 # immediate text -> name for the reader methods short enough to be inlined.
@@ -1205,10 +1306,10 @@ use cfg
     return nil
   if type(mv) == "String" && mv.starts_with?("u0x")
     return strings[mv]
-  if defs[mv] == nil
-    return nil
   d = defs[mv]
-  dinst = blocks[d[0]][:instructions][d[1]]
+  if d == nil
+    return nil
+  dinst = blocks[d >> 20][:instructions][d & 0xFFFFF]
   if !(wire_kind(dinst) in (:string_i64 :symbol_i64))
     return nil
   strings[wire_get(dinst, :string_id)]
@@ -1241,13 +1342,15 @@ use cfg
   bi = 0
   while bi < blocks.size()
     instrs = blocks[bi][:instructions]
+    bbase = bi << 20
     ii = 0
     while ii < instrs.size()
       inst = instrs[ii]
       k = wire_kind(inst)
       t = wire_get(inst, :temp)
+      loc = bbase + ii
       if t != nil
-        defs[t] = [bi, ii]
+        defs[t] = loc
         if k == :nanbox_int
           known_int[t] = true
         elsif (k == :call_direct_i64 && int_temp_producer?(wire_get(inst, :name), fresh)) || int_fresh_source?(inst)
@@ -1262,7 +1365,7 @@ use cfg
         r = refs[ri]
         if uses[r] == nil
           uses[r] = []
-        uses[r].push([bi, ii])
+        uses[r].push(loc)
         ri += 1
       ii += 1
     bi += 1
@@ -1274,8 +1377,10 @@ use cfg
   while ai < arith.size()
     t = arith[ai]
     ai += 1
-    tb = defs[t][0]
-    tinst = blocks[tb][:instructions][defs[t][1]]
+    dloc = defs[t]
+    tb = dloc >> 20
+    tix = dloc & 0xFFFFF
+    tinst = blocks[tb][:instructions][tix]
     witnesses = []
     # A fresh-returning callee sealed its result (int_fresh_returns) and a
     # parsed or literal BigInt is new, so only an arithmetic helper's
@@ -1286,15 +1391,16 @@ use cfg
       while wi < wire_sequence_size(targs)
         witnesses.push(wire_sequence_get(targs, wi))
         wi += 1
-    last = defs[t][1]
+    last = tix
     ok = true
     tuses = uses[t]
     ui = 0
     while tuses != nil && ui < tuses.size() && ok
-      ub = tuses[ui][0]
-      uix = tuses[ui][1]
+      uloc = tuses[ui]
+      ub = uloc >> 20
+      uix = uloc & 0xFFFFF
       ui += 1
-      if ub != tb || uix <= defs[t][1]
+      if ub != tb || uix <= tix
         ok = false
         next
       last = uix if uix > last
@@ -1369,27 +1475,24 @@ use cfg
     while wi < 3
       args.push(wi < checks.size() ? checks[wi] : "0")
       wi += 1
-    key = tb.to_s() + ":" + last.to_s()
+    key = (tb << 20) + last
     if after[key] == nil
       after[key] = []
     after[key].push(wire_make_call_direct_void(args, "__w_int_temp_release"))
+    after[-(tb + 1)] = true
     inserted += 1
 
   return 0 if inserted == 0
   bi = 0
   while bi < blocks.size()
-    instrs = blocks[bi][:instructions]
-    touched = false
-    ii = 0
-    while ii < instrs.size() && !touched
-      touched = true if after[bi.to_s() + ":" + ii.to_s()] != nil
-      ii += 1
-    if touched
+    if after[-(bi + 1)] == true
+      instrs = blocks[bi][:instructions]
       rebuilt = []
+      bbase = bi << 20
       ii = 0
       while ii < instrs.size()
         rebuilt.push(instrs[ii])
-        extra = after[bi.to_s() + ":" + ii.to_s()]
+        extra = after[bbase + ii]
         if extra != nil
           ei = 0
           while ei < extra.size()
@@ -1468,6 +1571,7 @@ use cfg
   bi = 0
   while bi < blocks.size()
     instrs = blocks[bi][:instructions]
+    bbase = bi << 20
     ii = 0
     while ii < instrs.size()
       inst = instrs[ii]
@@ -1479,7 +1583,7 @@ use cfg
       elsif k == :call_direct_i64
         t = wire_get(inst, :temp)
         if t != nil
-          defs[t] = [bi, ii]
+          defs[t] = bbase + ii
       ii += 1
     bi += 1
   return nil if rets.size() == 0
@@ -1489,7 +1593,7 @@ use cfg
     rv = rets[ri]
     d = defs[rv]
     return nil if d == nil
-    dinst = blocks[d[0]][:instructions][d[1]]
+    dinst = blocks[d >> 20][:instructions][d & 0xFFFFF]
     dname = wire_get(dinst, :name)
     return nil if dname == func[:name]
     if fn_names != nil && !int_temp_arith?(dname) && fn_names[dname] != true
@@ -1500,18 +1604,20 @@ use cfg
   bi = 0
   while bi < blocks.size()
     instrs = blocks[bi][:instructions]
+    bbase = bi << 20
     ii = 0
     while ii < instrs.size()
       inst = instrs[ii]
       refs = loop_release_operands(inst)
       return nil if refs == nil
+      loc = bbase + ii
       ri = 0
       while ri < refs.size()
         r = refs[ri]
         if ret_set[r] == true
           if uses[r] == nil
             uses[r] = []
-          uses[r].push([bi, ii])
+          uses[r].push(loc)
         ri += 1
       ii += 1
     bi += 1
@@ -1523,13 +1629,16 @@ use cfg
     ri += 1
     d = defs[v]
     return nil if d == nil
-    dinst = blocks[d[0]][:instructions][d[1]]
+    db = d >> 20
+    dix = d & 0xFFFFF
+    dinst = blocks[db][:instructions][dix]
     return nil if wire_kind(dinst) != :call_direct_i64
     dname = wire_get(dinst, :name)
     vuses = uses[v]
     ui = 0
     while vuses != nil && ui < vuses.size()
-      uinst = blocks[vuses[ui][0]][:instructions][vuses[ui][1]]
+      uloc = vuses[ui]
+      uinst = blocks[uloc >> 20][:instructions][uloc & 0xFFFFF]
       ui += 1
       uk = wire_kind(uinst)
       next if uk == :ret_i64 || uk == :truthy_inline
@@ -1546,7 +1655,7 @@ use cfg
       while sj < seals.size()
         dup = true if seals[sj][2] == v
         sj += 1
-      seals.push([d[0], d[1], v, a, b]) if !dup
+      seals.push([db, dix, v, a, b]) if !dup
     elsif dname == func[:name]
       return nil
     else
@@ -1560,24 +1669,21 @@ use cfg
   while si < c[:seals].size()
     sl = c[:seals][si]
     si += 1
-    key = sl[0].to_s() + ":" + sl[1].to_s()
+    key = (sl[0] << 20) + sl[1]
     if after[key] == nil
       after[key] = []
     after[key].push(wire_make_call_direct_void([sl[2], sl[3], sl[4]], "__w_int_result_seal"))
+    after[-(sl[0] + 1)] = true
   bi = 0
   while bi < blocks.size()
-    instrs = blocks[bi][:instructions]
-    touched = false
-    ii = 0
-    while ii < instrs.size() && !touched
-      touched = true if after[bi.to_s() + ":" + ii.to_s()] != nil
-      ii += 1
-    if touched
+    if after[-(bi + 1)] == true
+      instrs = blocks[bi][:instructions]
       rebuilt = []
+      bbase = bi << 20
       ii = 0
       while ii < instrs.size()
         rebuilt.push(instrs[ii])
-        extra = after[bi.to_s() + ":" + ii.to_s()]
+        extra = after[bbase + ii]
         if extra != nil
           ei = 0
           while ei < extra.size()
@@ -1686,15 +1792,17 @@ use cfg
   bi = 0
   while bi < blocks.size()
     instrs = blocks[bi][:instructions]
+    bbase = bi << 20
     ii = 0
     while ii < instrs.size()
       inst = instrs[ii]
       k = wire_kind(inst)
       t = wire_get(inst, :temp)
+      loc = bbase + ii
       if t != nil
-        defs[t] = [bi, ii]
+        defs[t] = loc
       if k in (:ret_i64 :ret_i32 :ret_void)
-        rets.push([bi, ii])
+        rets.push(loc)
       access = nil
       if k in (:load_i64 :store_i64)
         sp = wire_get(inst, :ptr)
@@ -1713,7 +1821,7 @@ use cfg
         r = refs[ri]
         bad[r] = true if cand[r] == true && r != access
         uses[r] = [] if uses[r] == nil
-        uses[r].push([bi, ii])
+        uses[r].push(loc)
         ri += 1
       ii += 1
     bi += 1
@@ -1724,7 +1832,7 @@ use cfg
   di = 0
   while di < dk.size()
     d = defs[dk[di]]
-    known_int[dk[di]] = true if wire_kind(blocks[d[0]][:instructions][d[1]]) == :nanbox_int
+    known_int[dk[di]] = true if wire_kind(blocks[d >> 20][:instructions][d & 0xFFFFF]) == :nanbox_int
     di += 1
 
   ctx = {blocks: blocks, defs: defs, uses: uses, cand: cand, wo: wo, known_int: known_int, fresh: fresh, strings: strings, mod: mod}
@@ -1763,7 +1871,7 @@ use cfg
     ki += 1
   return 0 if owned.size() == 0
 
-  # Edits, keyed "block:index": before[] / after[] lists of instructions.
+  # Edits, keyed (block << 20) + index: before[] / after[] lists of instructions.
   before = {}
   after = {}
   sealed = {}
@@ -1775,7 +1883,7 @@ use cfg
     oi += 1
     heap = plan[:kind] == :heap
     # nil at entry: the final release must never read an unset slot
-    owned_slot_edit(before, "0:0", wire_make_store_i64(ptr, "0"))
+    owned_slot_edit(before, 0, wire_make_store_i64(ptr, "0"))
     pm = 0
     while pm < plan[:pre_marks].size()
       owned_slot_edit(before, plan[:pre_marks][pm][0], plan[:pre_marks][pm][1])
@@ -1785,19 +1893,19 @@ use cfg
     while sj < sl.size()
       st = sl[sj]
       sj += 1
-      key = st[0].to_s() + ":" + st[1].to_s()
+      key = (st[0] << 20) + st[1]
       v = st[2]
       seal = plan[:seals][v]
       if seal != nil && sealed[v] != true && defs[v] != nil
         sealed[v] = true
-        dkey = defs[v][0].to_s() + ":" + defs[v][1].to_s()
+        dkey = defs[v]
         owned_slot_edit(after, dkey, wire_make_call_direct_void([v, seal[0], seal[1]], "__w_int_result_seal"))
       # an integer stored in several owned cells: one shared mark per extra
       # cell, right after its definition (dominates every store)
       n = plan[:cells_of][v]
       if n != nil && n > 1 && shared[v] != true && defs[v] != nil
         shared[v] = true
-        dkey = defs[v][0].to_s() + ":" + defs[v][1].to_s()
+        dkey = defs[v]
         mi = 1
         while mi < n
           owned_slot_edit(after, dkey, wire_make_call_direct_void([v, v], "__w_int_alias_seal"))
@@ -1807,7 +1915,7 @@ use cfg
       owned_slot_edit(after, key, owned_slot_release(old, heap))
     ri = 0
     while ri < rets.size()
-      key = rets[ri][0].to_s() + ":" + rets[ri][1].to_s()
+      key = rets[ri]
       ri += 1
       next if plan[:transfers][key] == true
       fin = next_temp(func)
@@ -1821,26 +1929,28 @@ use cfg
 
   bi = 0
   while bi < blocks.size()
-    instrs = blocks[bi][:instructions]
-    rebuilt = []
-    ii = 0
-    while ii < instrs.size()
-      key = bi.to_s() + ":" + ii.to_s()
-      pre = before[key]
-      if pre != nil
-        pj = 0
-        while pj < pre.size()
-          rebuilt.push(pre[pj])
-          pj += 1
-      rebuilt.push(instrs[ii])
-      post = after[key]
-      if post != nil
-        pj = 0
-        while pj < post.size()
-          rebuilt.push(post[pj])
-          pj += 1
-      ii += 1
-    blocks[bi][:instructions] = rebuilt
+    if before[-(bi + 1)] == true || after[-(bi + 1)] == true
+      instrs = blocks[bi][:instructions]
+      rebuilt = []
+      bbase = bi << 20
+      ii = 0
+      while ii < instrs.size()
+        key = bbase + ii
+        pre = before[key]
+        if pre != nil
+          pj = 0
+          while pj < pre.size()
+            rebuilt.push(pre[pj])
+            pj += 1
+        rebuilt.push(instrs[ii])
+        post = after[key]
+        if post != nil
+          pj = 0
+          while pj < post.size()
+            rebuilt.push(post[pj])
+            pj += 1
+        ii += 1
+      blocks[bi][:instructions] = rebuilt
     bi += 1
   if env("TUNGSTEN_SLOT_RELEASE_DEBUG") == "1"
     ignored = ccall("w_eputs", "slot-release " + func[:name].to_s() + " owned " + owned.size().to_s())
@@ -1849,6 +1959,7 @@ use cfg
 -> owned_slot_edit(table, key, inst)
   table[key] = [] if table[key] == nil
   table[key].push(inst)
+  table[-((key >> 20) + 1)] = true
   nil
 
 -> owned_slot_release(value, heap)
@@ -1885,7 +1996,7 @@ use cfg
   si = 0
   while si < sl.size()
     v = sl[si][2]
-    skey = sl[si][0].to_s() + ":" + sl[si][1].to_s()
+    skey = (sl[si][0] << 20) + sl[si][1]
     si += 1
     next if v == "0"
     d = defs[v]
@@ -1893,7 +2004,7 @@ use cfg
       # a parameter: borrowed, see below
       borrowed.push([skey, v])
       next
-    dinst = blocks[d[0]][:instructions][d[1]]
+    dinst = blocks[d >> 20][:instructions][d & 0xFFFFF]
     dk = wire_kind(dinst)
     vkind = nil
     if dk == :nanbox_int
@@ -1903,7 +2014,7 @@ use cfg
       # that cell's plan checks the load's other uses
       vkind = :int
       deps[wire_get(dinst, :ptr)] = true
-      lkey = d[0].to_s() + ":" + d[1].to_s()
+      lkey = d
       marks.push([lkey, wire_make_call_direct_void([v, v], "__w_int_alias_seal")])
       return nil if kind != :nil && kind != vkind
       kind = vkind
@@ -1934,7 +2045,8 @@ use cfg
     n = 0
     ui = 0
     while vuses != nil && ui < vuses.size()
-      uinst = blocks[vuses[ui][0]][:instructions][vuses[ui][1]]
+      uloc = vuses[ui]
+      uinst = blocks[uloc >> 20][:instructions][uloc & 0xFFFFF]
       ui += 1
       if wire_kind(uinst) == :store_i64
         return nil if wire_get(uinst, :value) != v
@@ -1948,13 +2060,13 @@ use cfg
       if kind == :int && wire_kind(uinst) == :call_method_i64
         how = int_method_read?(uinst, v, ctx[:mod], ctx[:strings], defs, blocks)
         if how != nil
-          vkey = vuses[ui - 1][0].to_s() + ":" + vuses[ui - 1][1].to_s()
+          vkey = uloc
           if how != true
             marks.push([vkey, wire_make_call_direct_void([v, how, how], "__w_int_result_seal")])
           if wire_get(uinst, :temp) != nil
             marks.push([vkey, wire_make_call_direct_void([v, wire_get(uinst, :temp)], "__w_int_alias_seal")])
       elsif kind == :int && wire_kind(uinst) == :call_direct_i64 && wire_get(uinst, :temp) != nil && !int_temp_arith?(wire_get(uinst, :name)) && !int_temp_reader?(wire_get(uinst, :name))
-        vkey = vuses[ui - 1][0].to_s() + ":" + vuses[ui - 1][1].to_s()
+        vkey = uloc
         marks.push([vkey, wire_make_call_direct_void([v, wire_get(uinst, :temp)], "__w_int_alias_seal")])
     return nil if n < 1 || (kind == :heap && n != 1)
     cells_of[v] = n
@@ -1973,11 +2085,11 @@ use cfg
     luses = uses[l]
     ui = 0
     while luses != nil && ui < luses.size()
-      ub = luses[ui][0]
-      uix = luses[ui][1]
+      key = luses[ui]
+      ub = key >> 20
+      uix = key & 0xFFFFF
       ui += 1
       uinst = blocks[ub][:instructions][uix]
-      key = ub.to_s() + ":" + uix.to_s()
       uk = wire_kind(uinst)
       next if dead_global_store?(uinst, wo)
       if uk == :ret_i64 && wire_get(uinst, :value) == l
@@ -2260,7 +2372,7 @@ use cfg
         if k == :call_direct_i64
           if table[:dynamic] != true
             cn = wire_get(inst, :name)
-            if cn != nil && (cn.index("define_method") != nil || cn.index("add_method") != nil || cn.index("method_missing") != nil)
+            if cn != nil && cn.size() >= 10 && cn.index("method") != nil && (cn.index("define_method") != nil || cn.index("add_method") != nil || cn.index("method_missing") != nil)
               table[:dynamic] = true
         elsif k == :load_class
           t = wire_get(inst, :temp)

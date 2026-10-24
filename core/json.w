@@ -22,7 +22,7 @@
 #   encode(v)          -> String
 
 + JSON
-  -> .parse(s)
+  -> .parse(s_in)
     # Byte-indexed parse: a borrowed u8[] view of the input replaces the old
     # s.chars array (which allocated one String per codepoint of the whole
     # document). Structural bytes are ASCII (< 0x80) and UTF-8 lead/
@@ -31,77 +31,134 @@
     # sliced out of s (s.slice is byte-indexed, so it stays multibyte-exact).
     # The view is threaded through (not a raw pointer) so it can't be freed
     # underneath the recursion.
+    s = s_in ## String
     view = ccall("w_string_bytes_view", s) ## u8[]
-    n = view.size
-    result = parse_value_b(s, view, n, 0)
-    result[0]
+    n = view.size ## i64
+    pos_box = [0]
+    parse_value_b(s, view, n, 0, pos_box)
 
   -> .encode(value)
-    t = type(value)
-
     if value == nil
       return "null"
-
-    if t == "Boolean" || value == true || value == false
-      if value
-        return "true"
+    if value == true
+      return "true"
+    if value == false
       return "false"
-
-    if t == "Int" || t == "Fixnum"
+    t = type(value)
+    if t == "Int" || t == "Fixnum" || t == "Float"
       return value.to_s
-
-    if t == "Float"
-      return value.to_s
-
     if t == "String"
       return encode_string(value)
-
-    if t == "Array"
-      parts = []
-      value -> parts.push(JSON.encode(item))
-      comma = ","
-      return "\[" + parts.join(comma) + "\]"
-
-    if t == "Hash"
-      parts = []
-      keys = value.keys
-      keys -> parts.push(encode_string(key.to_s) + ":" + JSON.encode(value[key]))
-      comma = ","
-      return "{" + parts.join(comma) + "}"
-
-    # Fallback
+    if t == "Array" || t == "Hash"
+      buf = StringBuffer(64)
+      encode_into(value, buf)
+      return buf.to_s
     encode_string(value.to_s)
 
-  -> .encode_string(s)
-    # Fast path: when no character needs escaping (the common case), wrap the
-    # whole string in quotes and skip the per-character chars-array + append
-    # loop below. The escape set checked here matches that loop exactly —
-    # double-quote, backslash, newline, carriage return, tab — so behavior is
-    # unchanged; only the allocation-heavy path is avoided. includes? is the
-    # SIMD strstr, far cheaper than materializing s.chars.
-    if !s.include?("\"") && !s.include?("\\") && !s.include?("\n") && !s.include?("\r") && !s.include?("\t")
-      return "\"" + s + "\""
-    out = StringBuffer(s.size + 2)
-    out << "\""
-    chars = s.chars
+  -> .encode_into(value, buf_in)
+    buf = buf_in ## StringBuffer
+    if value == nil
+      buf << "null"
+      return nil
+    if value == true
+      buf << "true"
+      return nil
+    if value == false
+      buf << "false"
+      return nil
+    t = type(value)
+    if t == "Int" || t == "Fixnum" || t == "Float"
+      buf << value.to_s
+      return nil
+    if t == "String"
+      encode_string_into(value, buf)
+      return nil
+    if t == "Array"
+      arr = value ## array
+      n = arr.size
+      buf << "\["
+      i = 0
+      while i < n
+        if i > 0
+          buf << ","
+        encode_into(arr[i], buf)
+        i += 1
+      buf << "\]"
+      return nil
+    if t == "Hash"
+      h = value ## hash
+      ks = h.keys
+      vs = h.values
+      n = ks.size
+      buf << "{"
+      i = 0
+      while i < n
+        if i > 0
+          buf << ","
+        k = ks[i]
+        if type(k) == "String"
+          encode_string_into(k, buf)
+        else
+          encode_string_into(k.to_s, buf)
+        buf << ":"
+        encode_into(vs[i], buf)
+        i += 1
+      buf << "}"
+      return nil
+    encode_string_into(value.to_s, buf)
+    nil
+
+  -> .encode_string(s_in)
+    s = s_in ## String
+    view = ccall("w_string_bytes_view", s) ## u8[]
+    n = view.size ## i64
     i = 0
-    while i < chars.size
-      ch = chars[i]
-      if ch == "\""
-        out << "\\\""
-      elsif ch == "\\"
-        out << "\\\\"
-      elsif ch == "\n"
-        out << "\\n"
-      elsif ch == "\r"
-        out << "\\r"
-      elsif ch == "\t"
-        out << "\\t"
-      else
-        out << ch
+    has_escape = false
+    while i < n
+      b = view[i]
+      if b == 34 || b == 92 || b == 10 || b == 13 || b == 9
+        has_escape = true
+        break
       i += 1
-    out << "\""
+    if !has_escape
+      return "\"" + s + "\""
+    out = StringBuffer(n + 8)
+    encode_string_into(s, out)
     out.to_s
+
+  -> .encode_string_into(s_in, buf_in)
+    s = s_in ## String
+    buf = buf_in ## StringBuffer
+    view = ccall("w_string_bytes_view", s) ## u8[]
+    n = view.size ## i64
+    buf << "\""
+    run_start = 0
+    i = 0
+    while i < n
+      b = view[i]
+      if b == 34 || b == 92 || b == 10 || b == 13 || b == 9
+        if i > run_start
+          buf << s.slice(run_start, i - run_start)
+        if b == 34
+          buf << "\\\""
+        elsif b == 92
+          buf << "\\\\"
+        elsif b == 10
+          buf << "\\n"
+        elsif b == 13
+          buf << "\\r"
+        else
+          buf << "\\t"
+        i += 1
+        run_start = i
+      else
+        i += 1
+    if run_start == 0
+      buf << s
+    elsif run_start < n
+      buf << s.slice(run_start, n - run_start)
+    buf << "\""
+    nil
 
   # -- Internal parsing --
 
@@ -109,7 +166,10 @@
   # [ 91, ] 93, : 58, , 44, - 45, . 46, 0..9 48..57, space 32, tab 9, LF 10,
   # CR 13, t 116, f 102, n 110, / 47, escapes r 114.
 
-  -> .skip_ws_b(view, n, pos)
+  -> .skip_ws_b(view_in, n_in, pos_in)
+    view = view_in ## u8[]
+    n = n_in ## i64
+    pos = pos_in ## i64
     while pos < n
       b = view[pos]
       if b != 32 && b != 9 && b != 10 && b != 13
@@ -122,40 +182,45 @@
   # and malformed input raises instead of walking off the end. (Truncated
   # documents used to spin in the object/array loops or return garbage,
   # depending on what happened to follow the string in memory.)
-  -> .parse_value_b(s, view, n, pos)
-    pos = skip_ws_b(view, n, pos)
+  -> .parse_value_b(s_in, view_in, n_in, pos_in, pos_box)
+    s = s_in ## String
+    view = view_in ## u8[]
+    n = n_in ## i64
+    pos = skip_ws_b(view, n, pos_in) ## i64
     if pos >= n
       raise "JSON.parse: unexpected end of input"
     b = view[pos]
 
     if b == 34
-      return parse_string_b(s, view, n, pos)
+      return parse_string_b(s, view, n, pos, pos_box)
     if b == 123
-      return parse_object_b(s, view, n, pos)
+      return parse_object_b(s, view, n, pos, pos_box)
     if b == 91
-      return parse_array_b(s, view, n, pos)
-    # Checked inline rather than through a helper whose result is discarded:
-    # a call kept only for its raise is dead by value, and nothing here needs
-    # to depend on that call surviving. Note the lead byte alone is not
-    # enough — "not json" starts with 'n', so without the full compare it
-    # would parse as `null`.
+      return parse_array_b(s, view, n, pos, pos_box)
     if b == 116
       if pos + 4 > n || s.slice(pos, 4) != "true"
         raise "JSON.parse: invalid literal at byte " + pos.to_s
-      return [true, pos + 4]
+      pos_box[0] = pos + 4
+      return true
     if b == 102
       if pos + 5 > n || s.slice(pos, 5) != "false"
         raise "JSON.parse: invalid literal at byte " + pos.to_s
-      return [false, pos + 5]
+      pos_box[0] = pos + 5
+      return false
     if b == 110
       if pos + 4 > n || s.slice(pos, 4) != "null"
         raise "JSON.parse: invalid literal at byte " + pos.to_s
-      return [nil, pos + 4]
+      pos_box[0] = pos + 4
+      return nil
 
     # Number
-    parse_number_b(s, view, n, pos)
+    parse_number_b(s, view, n, pos, pos_box)
 
-  -> .parse_string_b(s, view, n, pos)
+  -> .parse_string_b(s_in, view_in, n_in, pos_in, pos_box)
+    s = s_in ## String
+    view = view_in ## u8[]
+    n = n_in ## i64
+    pos = pos_in ## i64
     start = pos + 1  # first content byte, past opening "
     # Fast scan for the closing quote; if no backslash escape appears, the
     # value is one byte-range slice of s — no StringBuffer, no per-char work.
@@ -163,7 +228,8 @@
     while e < n
       b = view[e]
       if b == 34
-        return [s.slice(start, e - start), e + 1]
+        pos_box[0] = e + 1
+        return s.slice(start, e - start)
       if b == 92
         e = n  # escape present — fall to the slow builder below
       else
@@ -177,7 +243,8 @@
       if b == 34
         if p > run_start
           out << s.slice(run_start, p - run_start)
-        return [out.to_s, p + 1]
+        pos_box[0] = p + 1
+        return out.to_s
       if b == 92
         if p > run_start
           out << s.slice(run_start, p - run_start)
@@ -207,7 +274,11 @@
 
   # Always consumes at least one digit, so a caller's element loop cannot
   # spin on a byte that is not a number at all.
-  -> .parse_number_b(s, view, n, pos)
+  -> .parse_number_b(s_in, view_in, n_in, pos_in, pos_box)
+    s = s_in ## String
+    view = view_in ## u8[]
+    n = n_in ## i64
+    pos = pos_in ## i64
     start = pos
     if pos < n && view[pos] == 45
       pos += 1
@@ -234,60 +305,74 @@
         pos += 1
       if pos == exp_digit
         raise "JSON.parse: malformed exponent at byte " + start.to_s
+    pos_box[0] = pos
     if is_float
-      return [s.slice(start, pos - start).to_f, pos]
-    [s.slice(start, pos - start).to_i, pos]
+      return s.slice(start, pos - start).to_f
+    s.slice(start, pos - start).to_i
 
-  -> .parse_object_b(s, view, n, pos)
-    pos += 1  # skip {
+  -> .parse_object_b(s_in, view_in, n_in, pos_in, pos_box)
+    s = s_in ## String
+    view = view_in ## u8[]
+    n = n_in ## i64
+    p0 = pos_in ## i64
+    pos = p0 + 1  # skip {
     result = {}
-    pos = skip_ws_b(view, n, pos)
+    pos = skip_ws_b(view, n, pos) ## i64
     if pos >= n
       raise "JSON.parse: unterminated object"
     if view[pos] == 125
-      return [result, pos + 1]
+      pos_box[0] = pos + 1
+      return result
+    pbox = pos_box ## array
     while true
-      pos = skip_ws_b(view, n, pos)
+      pos = skip_ws_b(view, n, pos) ## i64
       if pos >= n || view[pos] != 34
         raise "JSON.parse: expected a string key in object at byte " + pos.to_s
-      key_result = parse_string_b(s, view, n, pos)
-      key = key_result[0]
-      pos = key_result[1]
-      pos = skip_ws_b(view, n, pos)
+      key = parse_string_b(s, view, n, pos, pbox)
+      pos = pbox[0] ## i64
+      pos = skip_ws_b(view, n, pos) ## i64
       if pos >= n || view[pos] != 58
         raise "JSON.parse: expected ':' in object at byte " + pos.to_s
       pos += 1  # skip :
-      val_result = parse_value_b(s, view, n, pos)
-      result[key] = val_result[0]
-      pos = val_result[1]
-      pos = skip_ws_b(view, n, pos)
+      val = parse_value_b(s, view, n, pos, pbox)
+      result[key] = val
+      pos = pbox[0] ## i64
+      pos = skip_ws_b(view, n, pos) ## i64
       if pos >= n
         raise "JSON.parse: unterminated object"
       if view[pos] == 125
-        return [result, pos + 1]
+        pbox[0] = pos + 1
+        return result
       if view[pos] != 44
         raise "JSON.parse: expected ',' or '}' in object at byte " + pos.to_s
       pos += 1  # skip ,
-    [result, pos]
+    result
 
-  -> .parse_array_b(s, view, n, pos)
-    pos += 1  # skip [
+  -> .parse_array_b(s_in, view_in, n_in, pos_in, pos_box)
+    s = s_in ## String
+    view = view_in ## u8[]
+    n = n_in ## i64
+    p0 = pos_in ## i64
+    pos = p0 + 1  # skip [
     result = []
-    pos = skip_ws_b(view, n, pos)
+    pos = skip_ws_b(view, n, pos) ## i64
     if pos >= n
       raise "JSON.parse: unterminated array"
     if view[pos] == 93
-      return [result, pos + 1]
+      pos_box[0] = pos + 1
+      return result
+    pbox = pos_box ## array
     while true
-      val_result = parse_value_b(s, view, n, pos)
-      result.push(val_result[0])
-      pos = val_result[1]
-      pos = skip_ws_b(view, n, pos)
+      val = parse_value_b(s, view, n, pos, pbox)
+      result.push(val)
+      pos = pbox[0] ## i64
+      pos = skip_ws_b(view, n, pos) ## i64
       if pos >= n
         raise "JSON.parse: unterminated array"
       if view[pos] == 93
-        return [result, pos + 1]
+        pbox[0] = pos + 1
+        return result
       if view[pos] != 44
         raise "JSON.parse: expected ',' or ']' in array at byte " + pos.to_s
       pos += 1  # skip ,
-    [result, pos]
+    result

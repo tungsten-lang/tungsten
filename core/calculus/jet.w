@@ -5,38 +5,48 @@
 # differencing.  Elementary functions use formal power-series recurrences.
 
 + TaylorJet
-  -> new(coefficients)
-    if coefficients.class_name != "Array" || coefficients.size == 0
-      raise "TaylorJet needs a nonempty coefficient Array"
-    @coefficients = []
-    coefficients.each -> @coefficients.push(item)
+  -> new(coefficients, copy = true)
+    if copy
+      if type(coefficients) != "Array" || coefficients.size == 0
+        raise "TaylorJet needs a nonempty coefficient Array"
+      @coefficients = coefficients.dup
+    else
+      @coefficients = coefficients
+
+  -> .from_raw(coefficients)
+    TaylorJet.new(coefficients, false)
+
+  -> raw_coefficients
+    @coefficients
 
   -> .constant(value, order)
     Calculus.validate_order(order)
-    coefficients = [value]
-    order.times -> coefficients.push(~0.0)
-    TaylorJet.new(coefficients)
+    coefficients = Array.new(order + 1, ~0.0)
+    coefficients[0] = value
+    TaylorJet.from_raw(coefficients)
 
   -> .variable(value, order)
-    jet = TaylorJet.constant(value, order)
-    if order > 0
-      coefficients = jet.coefficients
-      coefficients[1] = ~1.0
-      jet = TaylorJet.new(coefficients)
-    jet
+    Calculus.validate_order(order)
+    coefficients = Array.new(order + 1, ~0.0)
+    coefficients[0] = value
+    coefficients[1] = ~1.0 if order > 0
+    TaylorJet.from_raw(coefficients)
 
   -> order
-    @coefficients.size - 1
+    c = @coefficients ## Array
+    c.size - 1
 
   -> value
-    @coefficients[0]
+    c = @coefficients ## Array
+    c[0]
 
   -> coefficients
-    Calculus.copy_vector(@coefficients)
+    @coefficients.dup
 
   -> coefficient(index)
-    return ~0.0 if index < 0 || index > self.order
-    @coefficients[index]
+    c = @coefficients ## Array
+    return ~0.0 if index < 0 || index >= c.size
+    c[index]
 
   -> coerce(other)
     if other.class_name == "TaylorJet"
@@ -47,60 +57,110 @@
 
   -> +(other)
     rhs = self.coerce(other)
+    c = @coefficients ## Array
+    rc = rhs.raw_coefficients ## Array
+    len = c.size
     out = []
     i = 0
-    while i <= self.order
-      out.push(@coefficients[i] + rhs.coefficient(i))
+    while i < len
+      out.push(c[i] + rc[i])
       i += 1
-    TaylorJet.new(out)
+    TaylorJet.from_raw(out)
 
   -> -(other)
     rhs = self.coerce(other)
+    c = @coefficients ## Array
+    rc = rhs.raw_coefficients ## Array
+    len = c.size
     out = []
     i = 0
-    while i <= self.order
-      out.push(@coefficients[i] - rhs.coefficient(i))
+    while i < len
+      out.push(c[i] - rc[i])
       i += 1
-    TaylorJet.new(out)
+    TaylorJet.from_raw(out)
 
   -> -@
+    c = @coefficients ## Array
+    len = c.size
     out = []
-    @coefficients.each -> out.push(~0.0 - item)
-    TaylorJet.new(out)
+    i = 0
+    while i < len
+      out.push(~0.0 - c[i])
+      i += 1
+    TaylorJet.from_raw(out)
 
   -> *(other)
     rhs = self.coerce(other)
+    c = @coefficients ## Array
+    rc = rhs.raw_coefficients ## Array
+    ord = c.size - 1
     out = []
-    n = 0
-    while n <= self.order
-      value = ~0.0
-      k = 0
-      while k <= n
-        value += @coefficients[k] * rhs.coefficient(n - k)
-        k += 1
-      out.push(value)
-      n += 1
-    TaylorJet.new(out)
+    if type(c[0]) == "Float" && type(rc[0]) == "Float"
+      n = 0
+      while n <= ord
+        value = ~0.0
+        k = 0
+        while k <= n
+          ck = c[k] ## f64
+          rnk = rc[n - k] ## f64
+          value += ck * rnk
+          k += 1
+        out.push(value)
+        n += 1
+    else
+      n = 0
+      while n <= ord
+        value = ~0.0
+        k = 0
+        while k <= n
+          value += c[k] * rc[n - k]
+          k += 1
+        out.push(value)
+        n += 1
+    TaylorJet.from_raw(out)
 
   -> scale(scalar)
+    c = @coefficients ## Array
+    len = c.size
     out = []
-    @coefficients.each -> out.push(item * scalar)
-    TaylorJet.new(out)
+    i = 0
+    while i < len
+      out.push(c[i] * scalar)
+      i += 1
+    TaylorJet.from_raw(out)
 
   -> /(other)
     rhs = self.coerce(other)
-    raise "TaylorJet division by a zero constant term" if rhs.value == ~0.0
+    c = @coefficients ## Array
+    rc = rhs.raw_coefficients ## Array
+    r0 = rc[0]
+    raise "TaylorJet division by a zero constant term" if r0 == ~0.0
+    ord = c.size - 1
     out = []
-    n = 0
-    while n <= self.order
-      value = @coefficients[n]
-      k = 1
-      while k <= n
-        value -= rhs.coefficient(k) * out[n - k]
-        k += 1
-      out.push(value / rhs.value)
-      n += 1
-    TaylorJet.new(out)
+    if type(c[0]) == "Float" && type(r0) == "Float"
+      r0f = r0 ## f64
+      n = 0
+      while n <= ord
+        value = c[n] ## f64
+        k = 1
+        while k <= n
+          rck = rc[k] ## f64
+          onk = out[n - k] ## f64
+          value -= rck * onk
+          k += 1
+        out.push(value / r0f)
+        n += 1
+    else
+      n = 0
+      while n <= ord
+        value = c[n]
+        k = 1
+        while k <= n
+          value -= rc[k] * out[n - k]
+          k += 1
+        out.push(value / r0)
+        n += 1
+    TaylorJet.from_raw(out)
 
   -> reciprocal
     TaylorJet.constant(~1.0, self.order) / self
@@ -123,26 +183,31 @@
     self ** exponent
 
   -> derivative
+    c = @coefficients ## Array
+    ord = c.size - 1
     out = []
     i = 0
-    while i < self.order
-      out.push(@coefficients[i + 1] * (i + ~1.0))
+    while i < ord
+      out.push(c[i + 1] * (i + ~1.0))
       i += 1
     out.push(~0.0)
-    TaylorJet.new(out)
+    TaylorJet.from_raw(out)
 
   -> antiderivative(constant = ~0.0)
+    c = @coefficients ## Array
+    ord = c.size - 1
     out = [constant]
     i = 1
-    while i <= self.order
-      out.push(@coefficients[i - 1] / (i + ~0.0))
+    while i <= ord
+      out.push(c[i - 1] / (i + ~0.0))
       i += 1
-    TaylorJet.new(out)
+    TaylorJet.from_raw(out)
 
   -> derivative_value(order = 1)
     Calculus.validate_order(order)
-    return ~0.0 if order > self.order
-    value = @coefficients[order]
+    c = @coefficients ## Array
+    return ~0.0 if order >= c.size
+    value = c[order]
     i = 2
     while i <= order
       value *= i + ~0.0
@@ -150,61 +215,105 @@
     value
 
   -> derivatives
+    c = @coefficients ## Array
+    ord = c.size - 1
     out = []
+    fact = ~1.0
     i = 0
-    while i <= self.order
-      out.push(self.derivative_value(i))
+    while i <= ord
+      fact *= i + ~0.0 if i >= 2
+      out.push(c[i] * fact)
       i += 1
     out
 
   # Unique internal names avoid the compiler's raw-f64 instance fast path
   # when one jet elementary function composes another.
   -> jet_exp
-    out = [Math.exp(self.value)]
-    n = 1
-    while n <= self.order
-      value = ~0.0
-      k = 1
-      while k <= n
-        value += @coefficients[k] * (k + ~0.0) * out[n - k]
-        k += 1
-      out.push(value / (n + ~0.0))
-      n += 1
-    TaylorJet.new(out)
+    c = @coefficients ## Array
+    ord = c.size - 1
+    out = [Math.exp(c[0])]
+    if type(c[0]) == "Float"
+      n = 1
+      while n <= ord
+        value = ~0.0
+        k = 1
+        while k <= n
+          ck = c[k] ## f64
+          onk = out[n - k] ## f64
+          value += ck * (k + ~0.0) * onk
+          k += 1
+        out.push(value / (n + ~0.0))
+        n += 1
+    else
+      n = 1
+      while n <= ord
+        value = ~0.0
+        k = 1
+        while k <= n
+          value += c[k] * (k + ~0.0) * out[n - k]
+          k += 1
+        out.push(value / (n + ~0.0))
+        n += 1
+    TaylorJet.from_raw(out)
 
   -> exp
     self.jet_exp
 
   -> jet_log
-    Calculus.require_real_domain(self.value, self.value > ~0.0, "TaylorJet.log")
+    c = @coefficients ## Array
+    ord = c.size - 1
+    v0 = c[0]
+    Calculus.require_real_domain(v0, v0 > ~0.0, "TaylorJet.log")
     quotient = self.derivative / self
-    out = [Math.log(self.value)]
+    qc = quotient.raw_coefficients ## Array
+    out = [Math.log(v0)]
     n = 1
-    while n <= self.order
-      out.push(quotient.coefficient(n - 1) / (n + ~0.0))
+    while n <= ord
+      out.push(qc[n - 1] / (n + ~0.0))
       n += 1
-    TaylorJet.new(out)
+    TaylorJet.from_raw(out)
 
   -> log
     self.jet_log
 
   -> sin_cos
-    sine = [Math.sin(self.value)]
-    cosine = [Math.cos(self.value)]
-    n = 1
-    while n <= self.order
-      sine_value = ~0.0
-      cosine_value = ~0.0
-      k = 1
-      while k <= n
-        factor = @coefficients[k] * (k + ~0.0)
-        sine_value += factor * cosine[n - k]
-        cosine_value -= factor * sine[n - k]
-        k += 1
-      sine.push(sine_value / (n + ~0.0))
-      cosine.push(cosine_value / (n + ~0.0))
-      n += 1
-    [TaylorJet.new(sine), TaylorJet.new(cosine)]
+    c = @coefficients ## Array
+    ord = c.size - 1
+    v0 = c[0]
+    sine = [Math.sin(v0)]
+    cosine = [Math.cos(v0)]
+    if type(v0) == "Float"
+      n = 1
+      while n <= ord
+        sine_value = ~0.0
+        cosine_value = ~0.0
+        k = 1
+        while k <= n
+          ck = c[k] ## f64
+          factor = ck * (k + ~0.0)
+          cnk = cosine[n - k] ## f64
+          snk = sine[n - k] ## f64
+          sine_value += factor * cnk
+          cosine_value -= factor * snk
+          k += 1
+        sine.push(sine_value / (n + ~0.0))
+        cosine.push(cosine_value / (n + ~0.0))
+        n += 1
+    else
+      n = 1
+      while n <= ord
+        sine_value = ~0.0
+        cosine_value = ~0.0
+        k = 1
+        while k <= n
+          factor = c[k] * (k + ~0.0)
+          sine_value += factor * cosine[n - k]
+          cosine_value -= factor * sine[n - k]
+          k += 1
+        sine.push(sine_value / (n + ~0.0))
+        cosine.push(cosine_value / (n + ~0.0))
+        n += 1
+    [TaylorJet.from_raw(sine), TaylorJet.from_raw(cosine)]
 
   -> sin
     self.sin_cos[0]
@@ -217,22 +326,43 @@
     pair[0] / pair[1]
 
   -> sinh_cosh
-    hyperbolic_sine = [Math.sinh(self.value)]
-    hyperbolic_cosine = [Math.cosh(self.value)]
-    n = 1
-    while n <= self.order
-      sine_value = ~0.0
-      cosine_value = ~0.0
-      k = 1
-      while k <= n
-        factor = @coefficients[k] * (k + ~0.0)
-        sine_value += factor * hyperbolic_cosine[n - k]
-        cosine_value += factor * hyperbolic_sine[n - k]
-        k += 1
-      hyperbolic_sine.push(sine_value / (n + ~0.0))
-      hyperbolic_cosine.push(cosine_value / (n + ~0.0))
-      n += 1
-    [TaylorJet.new(hyperbolic_sine), TaylorJet.new(hyperbolic_cosine)]
+    c = @coefficients ## Array
+    ord = c.size - 1
+    v0 = c[0]
+    hyperbolic_sine = [Math.sinh(v0)]
+    hyperbolic_cosine = [Math.cosh(v0)]
+    if type(v0) == "Float"
+      n = 1
+      while n <= ord
+        sine_value = ~0.0
+        cosine_value = ~0.0
+        k = 1
+        while k <= n
+          ck = c[k] ## f64
+          factor = ck * (k + ~0.0)
+          hcnk = hyperbolic_cosine[n - k] ## f64
+          hsnk = hyperbolic_sine[n - k] ## f64
+          sine_value += factor * hcnk
+          cosine_value += factor * hsnk
+          k += 1
+        hyperbolic_sine.push(sine_value / (n + ~0.0))
+        hyperbolic_cosine.push(cosine_value / (n + ~0.0))
+        n += 1
+    else
+      n = 1
+      while n <= ord
+        sine_value = ~0.0
+        cosine_value = ~0.0
+        k = 1
+        while k <= n
+          factor = c[k] * (k + ~0.0)
+          sine_value += factor * hyperbolic_cosine[n - k]
+          cosine_value += factor * hyperbolic_sine[n - k]
+          k += 1
+        hyperbolic_sine.push(sine_value / (n + ~0.0))
+        hyperbolic_cosine.push(cosine_value / (n + ~0.0))
+        n += 1
+    [TaylorJet.from_raw(hyperbolic_sine), TaylorJet.from_raw(hyperbolic_cosine)]
 
   -> sinh
     self.sinh_cosh[0]
